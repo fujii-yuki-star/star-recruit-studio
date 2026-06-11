@@ -5,6 +5,7 @@ export type ScreenId =
   | "home"
   | "wizard"
   | "confirm"
+  | "generating"
   | "draft"
   | "scene-edit"
   | "preview"
@@ -12,6 +13,9 @@ export type ScreenId =
   | "looks"
   | "materials"
   | "settings";
+
+// ゆうこの声（ナレーション）の作成状態
+export type VoiceStatus = "none" | "pending" | "generated" | "failed";
 
 export interface RecentProject {
   id: string;
@@ -31,6 +35,7 @@ export interface DraftRow {
   line: string; // ゆうこのセリフ
   look: string; // 見た目
   materialType: "photo" | "video" | "none";
+  voiceStatus: VoiceStatus;
 }
 
 export interface MaterialItem {
@@ -56,6 +61,12 @@ export interface LookPattern {
   updatedAt: string;
   elements: string[];
   description: string;
+}
+
+// 自動補正・確認の通知（たたき台確認で表示）
+export interface DraftWarning {
+  message: string;
+  severity: "info" | "warning";
 }
 
 // ---- サンプル会社情報 ----
@@ -113,6 +124,7 @@ export const draftRows: DraftRow[] = [
     line: "こんにちは、ゆうこです。今日は株式会社サンプルの魅力を紹介します。",
     look: "オープニング",
     materialType: "photo",
+    voiceStatus: "generated",
   },
   {
     id: "d2",
@@ -123,6 +135,7 @@ export const draftRows: DraftRow[] = [
     line: "明るく相談しやすい雰囲気の職場です。",
     look: "写真紹介",
     materialType: "photo",
+    voiceStatus: "pending",
   },
   {
     id: "d3",
@@ -133,6 +146,7 @@ export const draftRows: DraftRow[] = [
     line: "チームで協力しながら、お客様の課題を解決しています。",
     look: "動画紹介",
     materialType: "video",
+    voiceStatus: "none",
   },
   {
     id: "d4",
@@ -143,6 +157,23 @@ export const draftRows: DraftRow[] = [
     line: "一緒に、よりよい未来をつくっていきましょう。ご応募お待ちしています。",
     look: "締めのメッセージ",
     materialType: "photo",
+    voiceStatus: "failed",
+  },
+];
+
+// ---- 自動補正・確認の通知（たたき台確認で表示するサンプル） ----
+export const sampleWarnings: DraftWarning[] = [
+  {
+    message: "見た目パターンが見つからない場面があったため、標準の見た目に調整しました。",
+    severity: "info",
+  },
+  {
+    message: "表示時間が長い場面を、見やすい長さに調整しました。",
+    severity: "info",
+  },
+  {
+    message: "字幕が少し長い場面が1件あります。短くすると読みやすくなります。",
+    severity: "warning",
   },
 ];
 
