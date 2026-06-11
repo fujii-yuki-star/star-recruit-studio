@@ -1,0 +1,189 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "proj_20260610_001",
+  "projectName": "株式会社サンプル 会社紹介",
+  "purpose": "new_graduate",
+  "createdAt": "2026-06-10T10:00:00+09:00",
+  "updatedAt": "2026-06-10T10:30:00+09:00",
+  "videoSettings": {
+    "aspectRatio": "16:9",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "targetDurationSec": 60,
+    "maxDurationSec": 300
+  },
+  "companyInfo": {
+    "companyName": "株式会社サンプル",
+    "industry": "IT",
+    "businessDescription": "業務システム開発を中心に行う会社です。",
+    "recruitTarget": "新卒採用",
+    "jobType": "エンジニア",
+    "strengths": ["相談しやすい環境", "若手が成長しやすい"],
+    "desiredPerson": "学ぶ姿勢がある方",
+    "recruitUrl": "https://example.com/recruit"
+  },
+  "toneSettings": {
+    "tone": "親しみやすい",
+    "yukoPersonality": "丁寧で明るい",
+    "formality": "standard"
+  },
+  "voiceSettings": {
+    "defaultVoiceId": "voicevox_zundamon",
+    "speed": 1.0,
+    "pitch": 0.0,
+    "intonation": 1.0,
+    "volume": 1.0
+  },
+  "bgmSettings": {
+    "enabled": true,
+    "assetId": "bgm_bright_001",
+    "volume": 0.25,
+    "loop": true,
+    "fadeInSec": 1.5,
+    "fadeOutSec": 2.0
+  },
+  "assets": [
+    {
+      "assetId": "asset_entrance_001",
+      "assetType": "image",
+      "displayName": "会社入口の写真",
+      "filePath": "assets/images/entrance_001.jpg",
+      "thumbnailPath": "thumbnails/asset_entrance_001.jpg",
+      "mimeType": "image/jpeg",
+      "tags": ["entrance", "building"],
+      "description": "会社入口の写真",
+      "aiDescription": "明るい建物のエントランス",
+      "isPublicChecked": true,
+      "metadata": { "width": 1920, "height": 1080, "durationSec": null, "hasAudio": false }
+    },
+    {
+      "assetId": "asset_office_001",
+      "assetType": "image",
+      "displayName": "オフィス写真",
+      "filePath": "assets/images/office_001.jpg",
+      "thumbnailPath": "thumbnails/asset_office_001.jpg",
+      "mimeType": "image/jpeg",
+      "tags": ["office", "workplace"],
+      "description": "若手社員が作業しているオフィス写真",
+      "aiDescription": "明るいオフィスで複数人が作業している写真",
+      "isPublicChecked": true,
+      "metadata": { "width": 1920, "height": 1080, "durationSec": null, "hasAudio": false }
+    },
+    {
+      "assetId": "asset_logo_001",
+      "assetType": "logo",
+      "displayName": "会社ロゴ",
+      "filePath": "assets/images/logo.png",
+      "mimeType": "image/png",
+      "tags": ["logo"],
+      "isPublicChecked": true,
+      "metadata": { "width": 640, "height": 320, "durationSec": null, "hasAudio": false }
+    },
+    {
+      "assetId": "yuko_smile_001",
+      "assetType": "yuko",
+      "displayName": "ゆうこ_笑顔",
+      "filePath": "assets/yuko/yuko_smile.png",
+      "mimeType": "image/png",
+      "tags": ["smile", "opening"],
+      "isPublicChecked": true,
+      "isDefaultYuko": true,
+      "metadata": { "width": 720, "height": 1280, "durationSec": null, "hasAudio": false }
+    },
+    {
+      "assetId": "yuko_guide_001",
+      "assetType": "yuko",
+      "displayName": "ゆうこ_案内",
+      "filePath": "assets/yuko/yuko_guide.png",
+      "mimeType": "image/png",
+      "tags": ["guide", "point"],
+      "isPublicChecked": true,
+      "isDefaultYuko": false,
+      "metadata": { "width": 720, "height": 1280, "durationSec": null, "hasAudio": false }
+    },
+    {
+      "assetId": "bgm_bright_001",
+      "assetType": "bgm",
+      "displayName": "明るいBGM",
+      "filePath": "assets/bgm/bright_001.mp3",
+      "mimeType": "audio/mpeg",
+      "tags": ["bright"],
+      "description": "会社紹介向けの明るいBGM",
+      "isPublicChecked": true,
+      "metadata": { "width": null, "height": null, "durationSec": 120.0, "hasAudio": true }
+    }
+  ],
+  "parts": [
+    {
+      "partId": "part_001",
+      "title": "オープニング",
+      "description": "会社名と雰囲気を伝える導入",
+      "order": 1,
+      "sceneIds": ["scene_001"],
+      "targetDurationSec": 16
+    },
+    {
+      "partId": "part_002",
+      "title": "会社紹介",
+      "description": "オフィスと働く環境",
+      "order": 2,
+      "sceneIds": ["scene_002"],
+      "targetDurationSec": 44
+    }
+  ],
+  "scenes": [
+    {
+      "sceneId": "scene_001",
+      "partId": "part_001",
+      "order": 1,
+      "sceneType": "opening",
+      "templateId": "opening_yuko_right_v1",
+      "durationSec": 8,
+      "assetRefs": { "background": "asset_entrance_001", "logo": "asset_logo_001" },
+      "character": { "enabled": true, "characterId": "yuko", "poseAssetId": "yuko_smile_001" },
+      "texts": {
+        "title": "株式会社サンプルへようこそ",
+        "main": "若手が活躍できる職場です",
+        "subtitle": "今日は会社の魅力を紹介します。"
+      },
+      "narration": {
+        "text": "こんにちは、ゆうこです。今日は株式会社サンプルの魅力を紹介します。",
+        "voiceId": null,
+        "speed": null,
+        "pitch": null,
+        "intonation": null,
+        "voicePath": null,
+        "status": "none"
+      },
+      "transition": { "in": "fade", "out": "fade", "durationSec": 0.5 },
+      "warnings": []
+    },
+    {
+      "sceneId": "scene_002",
+      "partId": "part_002",
+      "order": 2,
+      "sceneType": "photo_intro",
+      "templateId": "photo_left_text_right_yuko_v1",
+      "durationSec": 10,
+      "assetRefs": { "mainVisual": "asset_office_001" },
+      "character": { "enabled": true, "characterId": "yuko", "poseAssetId": "yuko_guide_001" },
+      "texts": {
+        "title": "明るいオフィス",
+        "main": "相談しやすい雰囲気",
+        "subtitle": "風通しの良い職場で働けます。"
+      },
+      "narration": {
+        "text": "私たちのオフィスは、明るく相談しやすい雰囲気です。",
+        "voiceId": null,
+        "speed": null,
+        "pitch": null,
+        "intonation": null,
+        "voicePath": null,
+        "status": "none"
+      },
+      "transition": { "in": "fade", "out": "fade", "durationSec": 0.5 },
+      "warnings": []
+    }
+  ]
+}

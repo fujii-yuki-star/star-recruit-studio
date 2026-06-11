@@ -1,0 +1,18 @@
+# 既定はテキスト自動判定＋LF格納（Win/Mac/Linuxで差分を出さない）
+* text=auto eol=lf
+
+# バイナリ（改行変換しない）
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.icns binary
+*.svg  text
+*.wav  binary
+*.mp3  binary
+*.mp4  binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary

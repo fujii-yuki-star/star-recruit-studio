@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "1.0",
+  "templateId": "opening_yuko_right_v1",
+  "name": "オープニング・ゆうこ右",
+  "description": "冒頭の挨拶。背景に会社外観、会社名を大きく表示し、ゆうこを右下に置く。",
+  "category": "opening",
+  "aspectRatio": "16:9",
+  "canvas": { "width": 1920, "height": 1080 },
+  "aiHint": {
+    "useCase": "冒頭の挨拶・会社名の提示",
+    "recommendedSceneTypes": ["opening"],
+    "maxDurationSec": 12,
+    "maxNarrationLength": 120,
+    "maxSubtitleLength": 60
+  },
+  "defaults": {
+    "durationSec": 8,
+    "transitionIn": "fade",
+    "transitionOut": "fade",
+    "backgroundColor": "#ffffff"
+  },
+  "layers": [
+    { "id": "background", "type": "background", "x": 0, "y": 0, "w": 1920, "h": 1080, "zIndex": 0, "fit": "cover" },
+    { "id": "title", "type": "text", "textKey": "title", "required": true, "x": 160, "y": 360, "w": 1100, "h": 140, "zIndex": 30, "fontSize": 72, "fontWeight": "bold", "color": "#1a1a1a", "maxLines": 2, "autoResize": true },
+    { "id": "main", "type": "text", "textKey": "main", "required": false, "x": 160, "y": 520, "w": 1000, "h": 90, "zIndex": 30, "fontSize": 40, "color": "#333333", "maxLines": 1, "autoResize": true },
+    { "id": "subtitle", "type": "subtitle", "textKey": "subtitle", "x": 240, "y": 920, "w": 1440, "h": 90, "zIndex": 50, "fontSize": 38, "maxLines": 2, "background": { "enabled": true, "color": "#000000", "opacity": 0.55, "radius": 16 } },
+    { "id": "logo", "type": "logo", "required": false, "x": 1640, "y": 60, "w": 220, "h": 120, "zIndex": 60, "fit": "contain" },
+    { "id": "yuko", "type": "character", "required": false, "x": 1450, "y": 600, "w": 360, "h": 420, "zIndex": 40, "fit": "contain", "defaultPoseTag": "smile", "allowHidden": true }
+  ]
+}

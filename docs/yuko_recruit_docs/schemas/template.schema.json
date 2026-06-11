@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yuko-recruit/schemas/template.schema.json",
+  "title": "Template",
+  "description": "見た目パターン（テンプレート）の規範スキーマ。詳細は 04_TEMPLATE_SPEC.md / 11_SCHEMA_REFERENCE.md §5,§7.5。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "templateId", "name", "category", "aspectRatio", "canvas", "layers"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "templateId": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "category": {
+      "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko"]
+    },
+    "aspectRatio": { "enum": ["16:9"] },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 }
+      }
+    },
+    "aiHint": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "AIへ渡す要約。素材選定・尺・文字数の判断材料。",
+      "properties": {
+        "useCase": { "type": "string" },
+        "recommendedSceneTypes": {
+          "type": "array",
+          "items": { "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko"] }
+        },
+        "maxDurationSec": { "type": "number", "exclusiveMinimum": 0 },
+        "maxNarrationLength": { "type": "integer", "exclusiveMinimum": 0 },
+        "maxSubtitleLength": { "type": "integer", "exclusiveMinimum": 0 }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
+        "transitionIn": { "enum": ["none", "fade", "slide", "wipe", "zoom"] },
+        "transitionOut": { "enum": ["none", "fade", "slide", "wipe", "zoom"] },
+        "backgroundColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+      }
+    },
+    "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "minItems": 1 }
+  },
+  "$defs": {
+    "Layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "x", "y", "w", "h"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9_]+$" },
+        "type": { "enum": ["background", "slot", "text", "subtitle", "character", "decor", "shape", "logo"] },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "w": { "type": "number", "exclusiveMinimum": 0 },
+        "h": { "type": "number", "exclusiveMinimum": 0 },
+        "zIndex": { "type": "integer" },
+        "required": { "type": "boolean" },
+        "slotType": { "enum": ["image_or_video", "image", "video"] },
+        "fit": { "enum": ["cover", "contain", "stretch"] },
+        "textKey": { "enum": ["title", "main", "subtitle", "caption", "url"] },
+        "fontSize": { "type": "number", "exclusiveMinimum": 0 },
+        "fontWeight": { "enum": ["normal", "bold"] },
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "maxLines": { "type": "integer", "minimum": 1 },
+        "autoResize": { "type": "boolean" },
+        "defaultPoseTag": { "type": "string" },
+        "allowHidden": { "type": "boolean" },
+        "assetId": { "type": "string" },
+        "shapeType": { "enum": ["rect", "ellipse", "line"] },
+        "fillColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "radius": { "type": "number", "minimum": 0 },
+        "background": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+            "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+            "radius": { "type": "number", "minimum": 0 }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "slot" } } },
+          "then": { "required": ["slotType"] }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["text", "subtitle"] } } },
+          "then": { "required": ["textKey"] }
+        }
+      ]
+    }
+  }
+}

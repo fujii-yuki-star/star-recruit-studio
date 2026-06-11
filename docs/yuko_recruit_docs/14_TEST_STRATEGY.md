@@ -1,0 +1,100 @@
+# 14. 自動テスト戦略
+
+> 本書は**自動テスト**の戦略。人が目視で確認する受け入れ観点は `08_TEST_PLAN.md`（両者は補完関係：08＝人が確認する観点、14＝機械が守る不変条件）。`CLAUDE.md §7` のDefinition of Doneを具体化する。
+> 目的は **AIエージェントが安全に反復できる安全網**を用意すること。正典（`11`/`12`/`schemas`）の規則を実行可能なテストに落とし、仕様と実装の乖離を防ぐ。
+
+---
+
+## 1. 方針
+
+- **ドメインの純粋ロジックを高被覆で自動テスト**する（検証・変換・計算・解決）。
+- **正典の規則＝テストケース**。`11`/`12` に書いた規則は対応するテストを持つ。
+- **決定論性を最優先**：AI・音声・時刻・乱数・FFmpegの非決定性をテストから排除する（§4）。
+- fixtures（`fixtures/`）を実装ターゲット兼期待値として使う。
+
+---
+
+## 2. テスト階層（ピラミッド）
+
+| 層 | 対象 | ツール候補 | 速度 | PR毎 |
+|---|---|---|---|:--:|
+| **Unit**（最重要・厚い） | `domain` 純粋ロジック | Vitest(TS) / `cargo test`(Rust) | 速 | ○ |
+| **Schema/契約** | `schemas/*.schema.json`（fixtures＋異常データ） | ajv（draft 2020-12） | 速 | ○ |
+| **Integration** | Provider/FS/FFmpeg/VOICEVOX 境界 | Vitest＋Mock／実バイナリ | 中 | 一部 |
+| **Golden-file**（描画） | 配置解決→静止PNG→画像差分 | pixelmatch / odiff | 中 | 一部 |
+| **E2E**（薄い・MVP後半） | 通しフロー | Playwright / tauri-driver | 遅 | 任意 |
+
+> スタックは `CLAUDE.md §3`（Tauri＋React＋TS）前提。ツールは候補であり、確定時はADR。
+
+---
+
+## 3. テスト対象カタログ（仕様 → テスト）
+
+正典の規則を、具体的なテストへ対応づける。**この表の各行は最低1つの自動テストを持つ。**
+
+| 対象 | 由来 | 代表テストケース | 種別 |
+|---|---|---|---|
+| AI出力スキーマ適合 | `12 §3` / `ai-video-plan.schema` | 正常fixtureはpass／必須欠落・enum外・範囲外・余分キーはfail | schema |
+| 内部データスキーマ適合 | `11` / `project`・`template.schema` | `project.sample`・テンプレはpass／異常はfail | schema |
+| **AI出力→Scene変換** | `12 §8` | `ai-video-plan.sample` → 期待 `project.sample` に一致（採番・order・partId） | unit |
+| poseTag解決 | `11 §3.5` / `12 §8.3` | `smile`→該当yuko／不一致→既定yuko＋警告／yuko皆無→`enabled=false` | unit |
+| durationのclamp | `11 §4` / `12 §8.2` | `<3`→3／`>`上限→上限／範囲内→不変 | unit |
+| アセット⇄レイヤー束縛 | `11 §5` | `assetRefs`キー↔layer id一致／null＋required→警告／slotType不整合→警告 | unit |
+| 検証 V1–V11 | `11 §8` | 各チェックの正常・異常（templateId/assetId実在、合計尺、シーン数上限 等） | unit |
+| 自動補正 | `11 §9` | templateId不在→同category既定／assetId不在→null＋候補／補正は`warnings`へ記録 | unit |
+| 声・音量の解決順序 | `11 §6` | `scene > project > 定数`／null=継承 を各フィールドで | unit |
+| 音量ミックス | `05 §14` / `11 §4` | 既定（ナレ1.0/BGM0.25/元音声0.20）と上書き値の合成 | unit |
+| テキスト折返し・あふれ | `04 §9` / `05 §10` | maxLines超過→警告／autoResize→縮小／上限超過→`TEXT_OVERFLOW` | unit |
+| **描画パリティ** | `ADR-0001` | テンプレ＋シーン→静止PNG が golden と一致（しきい値内） | golden |
+| セリフ再生成プリセット | `12 §10` | 各プリセット指示がMockProvider経由で反映 | integration |
+| 失敗リカバリ | `12 §9.3` / `15` | AI不正応答→再試行/手動/前回復元の分岐 | unit/integration |
+| 状態遷移 | `15 §2` | 音声 none→pending→generated/failed、書き出し running→completed/failed | unit |
+
+---
+
+## 4. 決定論性（フレーキー防止）
+
+- `AiProvider` / `VoiceProvider` は **Mock** で固定出力（fixtures）。実APIは原則叩かない。
+- **時刻はDI**（`createdAt` 等を注入）。**ID採番は連番関数を注入**（`Date.now`/乱数に依存しない＝`CLAUDE.md §3` の制約とも整合）。
+- **FFmpegのエンコードは非決定的**。よって：
+  - 画像一致は **中間PNG／抽出フレーム**（ffmpegで1フレーム抽出）で比較する。
+  - 最終MP4は「生成成功・尺・解像度・ストリーム構成（映像/音声）」を `ffprobe` で検査する（バイト一致は求めない）。
+
+---
+
+## 5. Golden-file 運用（描画）
+
+- 初回生成 → **人がレビュー** → コミット。差分しきい値（例：相違ピクセル割合 < 0.1%）。
+- フォント差で揺れるため、**同梱フォントを固定**しCIランナーにも導入（`13 §6`）。
+- 失敗時は `expected / actual / diff` 画像を出力して原因を追えるようにする。
+- 対象：各標準テンプレ × 代表シーン（動画なし＝1枚PNG、動画あり＝下/上PNG）。
+
+---
+
+## 6. fixtures 運用
+
+- `docs/yuko_recruit_docs/fixtures` を `test/fixtures` へ取り込む（コピー or 参照）。
+- **F で実証した検証（ajv＋相互参照）を常設テスト化**（`fixtures/README.md` の検証骨子）。
+- **異常系fixtures**を追加する：壊れたAI出力、不在templateId/assetId、空セリフ、長すぎる字幕、合計尺超過、未対応schemaVersion 等（`15` のエラーコードと対応）。
+
+---
+
+## 7. カバレッジ
+
+- `domain`（変換・検証・計算・解決）：**高被覆**（目安 行90%＋／分岐重視）。CIで閾値強制。
+- `infrastructure` / `app`：スモーク中心（薄く）。
+- 数値・enumのハードコード禁止（`CLAUDE.md §6`）に対するlintも併用。
+
+---
+
+## 8. CI
+
+- **PR必須（速い層）**：lint＋型チェック＋Unit＋Schema。
+- **任意/夜間（重い層）**：Golden、FFmpeg/VOICEVOX 結合スモーク、E2E。
+- 秘密情報を使うテストはCIのsecretで管理。実APIキーをリポジトリ・fixturesに置かない（`13 §7`）。
+
+---
+
+## 9. Definition of Done との対応
+
+`CLAUDE.md §7` のDoDを満たすには、変更が触れた**カタログ（§3）該当行のテストが緑**であること。新しい規則を正典へ追加したら、本書のカタログにも行を足し、テストを用意する。

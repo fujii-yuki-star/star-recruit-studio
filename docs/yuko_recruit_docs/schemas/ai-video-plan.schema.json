@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yuko-recruit/schemas/ai-video-plan.schema.json",
+  "title": "AiVideoPlan",
+  "description": "AIが返す動画構成案。内部 Scene とは別物で、検証→補正→変換を経て内部データになる（12_AI_PROMPT_AND_MAPPING.md）。これは構造化出力の強制スキーマとしても用いる。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "videoPlan", "parts"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "videoPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "purpose", "targetDurationSec"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short"] },
+        "targetAudience": { "type": "string" },
+        "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
+        "tone": { "type": "string" }
+      }
+    },
+    "parts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partTitle", "scenes"],
+        "properties": {
+          "partTitle": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string" },
+          "targetDurationSec": { "type": "number", "minimum": 0 },
+          "scenes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/AiScene" }
+          }
+        }
+      }
+    },
+    "reviewNotes": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "AiScene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sceneType", "templateId", "durationSec", "texts", "narrationText"],
+      "properties": {
+        "sceneTitle": { "type": "string" },
+        "sceneType": { "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko"] },
+        "templateId": { "type": "string" },
+        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
+        "assetRefs": {
+          "type": "object",
+          "patternProperties": { "^[a-zA-Z0-9_]+$": { "type": ["string", "null"] } },
+          "additionalProperties": false
+        },
+        "yukoPoseTag": { "type": ["string", "null"] },
+        "texts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": { "type": "string" },
+            "main": { "type": "string" },
+            "subtitle": { "type": "string" },
+            "caption": { "type": "string" },
+            "url": { "type": "string" }
+          }
+        },
+        "narrationText": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}
