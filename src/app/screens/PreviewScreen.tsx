@@ -109,9 +109,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             </button>
             <button
               className="btn btn-primary btn-block btn-lg"
-              onClick={() => onNavigate("export")}
+              onClick={() => onNavigate("precheck")}
             >
-              動画を書き出す
+              公開前チェックへ進む
               <ChevronRightIcon size={18} />
             </button>
           </div>

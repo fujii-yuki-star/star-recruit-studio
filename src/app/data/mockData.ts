@@ -10,9 +10,11 @@ export type ScreenId =
   | "scene-edit"
   | "preview"
   | "export"
+  | "precheck"
   | "looks"
   | "materials"
-  | "settings";
+  | "settings"
+  | "about";
 
 // ゆうこの声（ナレーション）の作成状態
 export type VoiceStatus = "none" | "pending" | "generated" | "failed";
@@ -243,6 +245,26 @@ export const lookPatterns: LookPattern[] = [
     elements: ["背景", "メッセージ文字", "ゆうこの立ち絵", "応募の案内"],
     description: "動画の最後に、応募を呼びかける締めくくりの見た目です。",
   },
+];
+
+// ---- 公開前チェックの結果（サンプル） ----
+export interface PrecheckItem {
+  id: string;
+  label: string;
+  detail: string;
+  severity: "ok" | "warning" | "action";
+  action?: string;
+}
+
+export const precheckItems: PrecheckItem[] = [
+  { id: "c1", label: "誤字脱字", detail: "明らかな誤字は見つかりませんでした。", severity: "ok" },
+  { id: "c2", label: "会社名・採用対象", detail: "入力された内容と一致しています。", severity: "ok" },
+  { id: "c3", label: "誇大表現", detail: "気になる表現は見つかりませんでした。", severity: "ok" },
+  { id: "c4", label: "字幕の長さ", detail: "字幕が少し長い場面が2つあります。読みやすく短くできます。", severity: "action", action: "短くする" },
+  { id: "c5", label: "ゆうこの声", detail: "2つの場面で声がまだ作成されていません。書き出し前に作成してください。", severity: "action", action: "声を作成" },
+  { id: "c6", label: "個人情報の写り込み", detail: "人物が写っている素材があります。公開前にご確認ください。", severity: "warning" },
+  { id: "c7", label: "使っていない素材", detail: "使われていない素材が3つあります。", severity: "warning" },
+  { id: "c8", label: "BGMの音量", detail: "声が聞き取りやすい音量です。", severity: "ok" },
 ];
 
 // 目的の選択肢
