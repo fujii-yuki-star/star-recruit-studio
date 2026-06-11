@@ -1,50 +1,80 @@
 import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import "./styles/theme.css";
+import type { ScreenId } from "./app/data/mockData";
+import { Sidebar } from "./app/components/Sidebar";
+import { HomeScreen } from "./app/screens/HomeScreen";
+import { WizardScreen } from "./app/screens/WizardScreen";
+import { ConfirmScreen } from "./app/screens/ConfirmScreen";
+import { DraftScreen } from "./app/screens/DraftScreen";
+import { SceneEditScreen } from "./app/screens/SceneEditScreen";
+import { PreviewScreen } from "./app/screens/PreviewScreen";
+import { ExportScreen } from "./app/screens/ExportScreen";
+import { LooksScreen } from "./app/screens/LooksScreen";
+import { SettingsScreen } from "./app/screens/SettingsScreen";
+
+const titles: Record<ScreenId, string> = {
+  home: "ホーム",
+  wizard: "新しい動画を作る",
+  confirm: "動画案を作る前の確認",
+  draft: "動画のたたき台を確認",
+  "scene-edit": "場面編集",
+  preview: "仕上がり確認",
+  export: "動画を書き出す",
+  looks: "見た目パターンを管理",
+  settings: "設定",
+};
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [screen, setScreen] = useState<ScreenId>("home");
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  function renderScreen() {
+    switch (screen) {
+      case "home":
+        return <HomeScreen onNavigate={setScreen} />;
+      case "wizard":
+        return <WizardScreen onNavigate={setScreen} />;
+      case "confirm":
+        return <ConfirmScreen onNavigate={setScreen} />;
+      case "draft":
+        return <DraftScreen onNavigate={setScreen} />;
+      case "scene-edit":
+        return <SceneEditScreen onNavigate={setScreen} />;
+      case "preview":
+        return <PreviewScreen onNavigate={setScreen} />;
+      case "export":
+        return <ExportScreen onNavigate={setScreen} />;
+      case "looks":
+        return <LooksScreen />;
+      case "settings":
+        return <SettingsScreen />;
+      default:
+        return <HomeScreen onNavigate={setScreen} />;
+    }
   }
 
+  // 場面編集は独自のヘッダー帯を持つため、共通トップバーは表示しない
+  const hasOwnHeader = screen === "scene-edit";
+
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="app">
+      <Sidebar current={screen} onNavigate={setScreen} />
+      <div className="main">
+        {!hasOwnHeader && (
+          <header className="topbar">
+            <div className="topbar-title">{titles[screen]}</div>
+            <div className="topbar-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setScreen("wizard")}
+              >
+                新しい動画を作る
+              </button>
+            </div>
+          </header>
+        )}
+        {renderScreen()}
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    </div>
   );
 }
 
