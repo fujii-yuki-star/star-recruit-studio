@@ -32,6 +32,7 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
     "draft",
     "scene-edit",
     "preview",
+    "precheck",
     "export",
   ];
 
@@ -75,6 +76,14 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
       </nav>
 
       <div className="sidebar-footer">
+        <button
+          className={`nav-item${current === "about" ? " active" : ""}`}
+          onClick={() => onNavigate("about")}
+          aria-current={current === "about" ? "page" : undefined}
+        >
+          <HelpIcon size={18} className="nav-icon" />
+          このアプリについて
+        </button>
         <button className="nav-item">
           <MailIcon size={18} className="nav-icon" />
           お問い合わせ
