@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { PageHead, Seekbar } from "../components/ui";
+import { useProjectStore } from "../store/projectStore";
+import { ScenePreview } from "../components/ScenePreview";
+import { PageHead } from "../components/ui";
 import {
   PlayIcon,
   StopIcon,
   VolumeIcon,
-  FilmIcon,
   ChevronRightIcon,
+  ArrowLeftIcon,
 } from "../components/icons";
 
 interface PreviewProps {
@@ -15,8 +17,25 @@ interface PreviewProps {
 
 type RangeMode = "scene" | "part" | "all";
 
+function formatDuration(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}分${s}秒` : `${s}秒`;
+}
+
 export function PreviewScreen({ onNavigate }: PreviewProps) {
+  const { status, scenes, templates, generate } = useProjectStore();
   const [range, setRange] = useState<RangeMode>("all");
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    if (status === "idle") void generate();
+  }, [status, generate]);
+
+  const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
+  const current = scenes[safeIdx];
+  const template = current ? templates.find((t) => t.templateId === current.templateId) : undefined;
+  const totalSec = scenes.reduce((sum, s) => sum + s.durationSec, 0);
 
   return (
     <div className="main-scroll">
@@ -25,19 +44,32 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。"
       />
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 320px",
-          gap: "var(--gap-lg)",
-          alignItems: "start",
-        }}
-      >
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
         <div className="card">
-          <div className="preview-stage" style={{ borderRadius: "var(--radius)" }}>
-            <FilmIcon size={48} />
-            <span className="preview-stage-label">仕上がり確認エリア</span>
+          <ScenePreview scene={current} template={template} />
+
+          {/* 場面送り */}
+          <div className="row-between mt">
+            <button
+              className="btn btn-ghost btn-icon"
+              onClick={() => setIdx((i) => Math.max(0, i - 1))}
+              disabled={safeIdx <= 0}
+            >
+              <ArrowLeftIcon size={16} />
+              前の場面
+            </button>
+            <span className="text-sm text-muted">
+              場面 {scenes.length === 0 ? 0 : safeIdx + 1} / {scenes.length}
+            </span>
+            <button
+              className="btn btn-ghost btn-icon"
+              onClick={() => setIdx((i) => Math.min(scenes.length - 1, i + 1))}
+              disabled={safeIdx >= scenes.length - 1}
+            >
+              次の場面
+              <ChevronRightIcon size={16} />
+            </button>
           </div>
 
           <div className="preview-controls">
@@ -47,8 +79,6 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <button className="btn btn-icon btn-secondary" aria-label="停止">
               <StopIcon size={20} />
             </button>
-            <Seekbar value={45} />
-            <span className="text-sm text-muted">0:40 / 1:30</span>
             <button className="btn btn-icon btn-ghost" aria-label="音量">
               <VolumeIcon size={20} />
             </button>
@@ -63,11 +93,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
                 ["part", "このパートだけ"],
                 ["all", "全体"],
               ] as [RangeMode, string][]).map(([id, label]) => (
-                <button
-                  key={id}
-                  className={range === id ? "active" : ""}
-                  onClick={() => setRange(id)}
-                >
+                <button key={id} className={range === id ? "active" : ""} onClick={() => setRange(id)}>
                   {label}
                 </button>
               ))}
@@ -81,12 +107,12 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           <div className="col gap-sm">
             <div className="row-between">
               <span className="text-muted">合計時間</span>
-              <strong>1分30秒</strong>
+              <strong>{formatDuration(totalSec)}</strong>
             </div>
             <hr className="divider" style={{ margin: "4px 0" }} />
             <div className="row-between">
               <span className="text-muted">場面数</span>
-              <strong>12個</strong>
+              <strong>{scenes.length}個</strong>
             </div>
             <hr className="divider" style={{ margin: "4px 0" }} />
             <div className="row-between">
@@ -101,16 +127,10 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           </div>
 
           <div className="col gap-sm mt-lg">
-            <button
-              className="btn btn-secondary btn-block"
-              onClick={() => onNavigate("scene-edit")}
-            >
+            <button className="btn btn-secondary btn-block" onClick={() => onNavigate("scene-edit")}>
               場面を直す
             </button>
-            <button
-              className="btn btn-primary btn-block btn-lg"
-              onClick={() => onNavigate("precheck")}
-            >
+            <button className="btn btn-primary btn-block btn-lg" onClick={() => onNavigate("precheck")}>
               公開前チェックへ進む
               <ChevronRightIcon size={18} />
             </button>
