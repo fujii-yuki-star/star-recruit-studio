@@ -1,0 +1,60 @@
+// docs/yuko_recruit_docs/fixtures/ai-video-plan.sample.json をミラーした型付きサンプル。
+// MockAiProvider が返す。スキーマ正典は schemas/ai-video-plan.schema.json。
+import type { AiVideoPlan } from '../../domain/ai/types';
+
+export const SAMPLE_VIDEO_PLAN: AiVideoPlan = {
+  schemaVersion: '1.0',
+  videoPlan: {
+    title: '株式会社サンプル 会社紹介',
+    purpose: 'new_graduate',
+    targetAudience: '新卒採用',
+    targetDurationSec: 60,
+    tone: '親しみやすい',
+  },
+  parts: [
+    {
+      partTitle: 'オープニング',
+      summary: '会社名と雰囲気を伝える導入',
+      targetDurationSec: 16,
+      scenes: [
+        {
+          sceneTitle: 'はじめの挨拶',
+          sceneType: 'opening',
+          templateId: 'opening_yuko_right_v1',
+          durationSec: 8,
+          assetRefs: { background: 'asset_entrance_001', logo: 'asset_logo_001' },
+          yukoPoseTag: 'smile',
+          texts: {
+            title: '株式会社サンプルへようこそ',
+            main: '若手が活躍できる職場です',
+            subtitle: '今日は会社の魅力を紹介します。',
+          },
+          narrationText: 'こんにちは、ゆうこです。今日は株式会社サンプルの魅力を紹介します。',
+          notes: '冒頭なので明るい印象にする',
+        },
+      ],
+    },
+    {
+      partTitle: '会社紹介',
+      summary: 'オフィスと働く環境',
+      targetDurationSec: 44,
+      scenes: [
+        {
+          sceneTitle: 'オフィス紹介',
+          sceneType: 'photo_intro',
+          templateId: 'photo_left_text_right_yuko_v1',
+          durationSec: 10,
+          assetRefs: { mainVisual: 'asset_office_001' },
+          yukoPoseTag: 'guide',
+          texts: {
+            title: '明るいオフィス',
+            main: '相談しやすい雰囲気',
+            subtitle: '風通しの良い職場で働けます。',
+          },
+          narrationText: '私たちのオフィスは、明るく相談しやすい雰囲気です。',
+        },
+      ],
+    },
+  ],
+  reviewNotes: ['素材に人物が含まれるため公開前に映り込みを確認してください。'],
+};
