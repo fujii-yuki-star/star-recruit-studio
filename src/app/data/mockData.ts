@@ -10,6 +10,7 @@ export type ScreenId =
   | "preview"
   | "export"
   | "looks"
+  | "materials"
   | "settings";
 
 export interface RecentProject {
@@ -36,6 +37,15 @@ export interface MaterialItem {
   id: string;
   name: string;
   type: "photo" | "video" | "audio";
+  description?: string;
+  tags?: string[];
+  checked?: boolean; // 公開チェック済み
+}
+
+export interface YukoMaterial {
+  id: string;
+  name: string;
+  tag: string; // 表情タグ（smile / guide / bow など）
 }
 
 export interface LookPattern {
@@ -121,7 +131,7 @@ export const draftRows: DraftRow[] = [
     scene: "働く様子",
     material: "仕事中の様子",
     line: "チームで協力しながら、お客様の課題を解決しています。",
-    look: "映像＋字幕",
+    look: "動画紹介",
     materialType: "video",
   },
   {
@@ -131,21 +141,28 @@ export const draftRows: DraftRow[] = [
     scene: "メッセージ",
     material: "社員の集合写真",
     line: "一緒に、よりよい未来をつくっていきましょう。ご応募お待ちしています。",
-    look: "エンディング",
+    look: "締めのメッセージ",
     materialType: "photo",
   },
 ];
 
 // ---- 素材一覧 ----
 export const materials: MaterialItem[] = [
-  { id: "m1", name: "会社外観", type: "photo" },
-  { id: "m2", name: "オフィス写真", type: "photo" },
-  { id: "m3", name: "社員の集合写真", type: "photo" },
-  { id: "m4", name: "受付エリア", type: "photo" },
-  { id: "m5", name: "仕事中の様子", type: "video" },
-  { id: "m6", name: "ミーティング風景", type: "video" },
-  { id: "m7", name: "やさしいBGM", type: "audio" },
-  { id: "m8", name: "シャッター効果音", type: "audio" },
+  { id: "m1", name: "会社外観", type: "photo", description: "本社ビルの外観", tags: ["外観", "建物"], checked: true },
+  { id: "m2", name: "オフィス写真", type: "photo", description: "執務エリアの様子", tags: ["オフィス", "社内"], checked: true },
+  { id: "m3", name: "社員の集合写真", type: "photo", description: "チームの集合写真", tags: ["社員", "集合"], checked: false },
+  { id: "m4", name: "受付エリア", type: "photo", description: "エントランスの受付", tags: ["受付"], checked: true },
+  { id: "m5", name: "仕事中の様子", type: "video", description: "作業風景の動画", tags: ["仕事", "作業"], checked: false },
+  { id: "m6", name: "ミーティング風景", type: "video", description: "朝会の様子", tags: ["会議"], checked: false },
+  { id: "m7", name: "やさしいBGM", type: "audio", description: "明るく落ち着いたBGM", tags: ["BGM", "明るい"], checked: true },
+  { id: "m8", name: "シャッター効果音", type: "audio", description: "場面切り替え用", tags: ["効果音"], checked: true },
+];
+
+// ---- ゆうこ素材 ----
+export const yukoMaterials: YukoMaterial[] = [
+  { id: "y1", name: "ゆうこ_笑顔", tag: "smile" },
+  { id: "y2", name: "ゆうこ_案内", tag: "guide" },
+  { id: "y3", name: "ゆうこ_お辞儀", tag: "bow" },
 ];
 
 // ---- 見た目パターン ----

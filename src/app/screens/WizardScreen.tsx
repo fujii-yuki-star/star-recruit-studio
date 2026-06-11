@@ -49,8 +49,8 @@ const yukoAdvice: Record<number, string[]> = {
 };
 
 export function WizardScreen({ onNavigate }: WizardProps) {
-  // 最初はステップ2「会社情報を入力」(index 1) を表示
-  const [step, setStep] = useState(1);
+  // 最初のステップ「動画の目的を選ぶ」(index 0) を表示
+  const [step, setStep] = useState(0);
   const [purpose, setPurpose] = useState("new_graduate");
   const [companyName, setCompanyName] = useState(sampleCompany.companyName);
   const [industry, setIndustry] = useState(sampleCompany.industry);
