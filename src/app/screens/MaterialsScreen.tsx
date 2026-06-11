@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { materials, yukoMaterials } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
+import { EmptyState } from "../components/states";
 import {
   PhotoIcon,
   VideoIcon,
@@ -149,9 +150,10 @@ export function MaterialsScreen() {
             ))}
           </div>
         ) : (
-          <div className="card text-center text-muted" style={{ padding: "var(--gap-xl)" }}>
-            この種類の素材はまだありません。「素材を追加」から登録できます。
-          </div>
+          <EmptyState
+            title="この種類の素材はまだありません"
+            message="「素材を追加」から、写真・動画・BGM・ゆうこの素材を登録できます。"
+          />
         )}
 
         {/* 右: 選択中の素材の情報 */}

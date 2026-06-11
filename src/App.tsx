@@ -5,6 +5,7 @@ import { Sidebar } from "./app/components/Sidebar";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
+import { GeneratingScreen } from "./app/screens/GeneratingScreen";
 import { DraftScreen } from "./app/screens/DraftScreen";
 import { SceneEditScreen } from "./app/screens/SceneEditScreen";
 import { PreviewScreen } from "./app/screens/PreviewScreen";
@@ -17,6 +18,7 @@ const titles: Record<ScreenId, string> = {
   home: "ホーム",
   wizard: "新しい動画を作る",
   confirm: "動画案を作る前の確認",
+  generating: "動画案を作成中",
   draft: "動画のたたき台を確認",
   "scene-edit": "場面編集",
   preview: "仕上がり確認",
@@ -37,6 +39,8 @@ function App() {
         return <WizardScreen onNavigate={setScreen} />;
       case "confirm":
         return <ConfirmScreen onNavigate={setScreen} />;
+      case "generating":
+        return <GeneratingScreen onNavigate={setScreen} />;
       case "draft":
         return <DraftScreen onNavigate={setScreen} />;
       case "scene-edit":
@@ -56,8 +60,8 @@ function App() {
     }
   }
 
-  // 場面編集は独自のヘッダー帯を持つため、共通トップバーは表示しない
-  const hasOwnHeader = screen === "scene-edit";
+  // 場面編集と生成中は独自レイアウトのため、共通トップバーは表示しない
+  const hasOwnHeader = screen === "scene-edit" || screen === "generating";
 
   return (
     <div className="app">

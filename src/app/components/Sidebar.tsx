@@ -28,6 +28,7 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
   const projectScreens: ScreenId[] = [
     "wizard",
     "confirm",
+    "generating",
     "draft",
     "scene-edit",
     "preview",

@@ -1,6 +1,7 @@
 import type { ScreenId } from "../data/mockData";
-import { draftRows } from "../data/mockData";
+import { draftRows, sampleWarnings } from "../data/mockData";
 import { PageHead } from "../components/ui";
+import { WarningBanner, VoiceStatusBadge } from "../components/states";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   CheckIcon,
@@ -34,6 +35,9 @@ export function DraftScreen({ onNavigate }: DraftProps) {
             </span>
           </div>
 
+          {/* 自動補正・確認の通知 */}
+          <WarningBanner warnings={sampleWarnings} />
+
           {/* 台本表 */}
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
             <table className="table">
@@ -45,6 +49,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   <th>使う素材</th>
                   <th style={{ minWidth: 240 }}>ゆうこのセリフ</th>
                   <th>見た目</th>
+                  <th>音声</th>
                   <th style={{ width: 150 }}>操作</th>
                 </tr>
               </thead>
@@ -69,6 +74,9 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                     <td className="text-pretty">{row.line}</td>
                     <td>
                       <span className="badge badge-teal">{row.look}</span>
+                    </td>
+                    <td>
+                      <VoiceStatusBadge status={row.voiceStatus} />
                     </td>
                     <td>
                       <div className="row gap-sm row-wrap">

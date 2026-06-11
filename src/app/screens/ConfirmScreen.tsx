@@ -108,7 +108,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
             </button>
             <button
               className="btn btn-primary grow btn-lg"
-              onClick={() => onNavigate("draft")}
+              onClick={() => onNavigate("generating")}
             >
               <SparkleIcon size={20} />
               送信して動画案を作る
