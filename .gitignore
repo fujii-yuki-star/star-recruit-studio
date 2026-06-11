@@ -30,3 +30,6 @@ dist-ssr
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Spike artifacts (ADR-0001 等の実験成果物)
+.spike/

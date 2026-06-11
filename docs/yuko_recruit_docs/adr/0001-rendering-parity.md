@@ -117,3 +117,29 @@
 4. パフォーマンス：5分・最大80シーンでのPNG化＋FFmpeg所要時間（グラボ無しPC）。
 
 > Phase 0 の完了条件（`02`）に「静止PNG＋動画スロット＋字幕＋音声で数秒のMP4を生成し、同シーンのプレビューと一致する」を追加することを推奨。
+
+---
+
+## スパイク結果（2026-06-11）
+
+`scripts/adr0001-spike.ts`（実行: `npx tsx scripts/adr0001-spike.ts`、出力は `.spike/`）で、方式A2の核を実証した。
+
+**実装した共有コード（本実装）**
+- `src/renderer/layout.ts`：`layoutScene(scene, template)` ＝ レイヤーの矩形・zIndex・内容・スタイルを**決定論的に**解決（preview/export 共有）。
+- `src/renderer/sceneSvg.ts`：`layoutToSvg(layout)` ＝ レイアウトを **SVG文字列**へ。
+- 単体テスト 3件（決定論性＝同入力で同SVG を含む）。`npm test` 全green。
+
+**検証できたこと**
+- **描画中間表現に SVG を採用**：プレビューは WebView でSVGを表示、出力は**同一SVG**をラスタライズ。
+- Mock(ai-video-plan) → 変換 → レイアウト → SVG → **PNG**（`@resvg/resvg-js` ＋ Noto Sans JP）で 2シーン（opening / photo_intro）を 1920×1080 生成。**日本語は正しく描画**（tofuなし。スクショ確認済み。タイトル/本文/字幕帯/半透明パネル/ゆうこ/ロゴの配置も意図どおり）。
+- **パリティの核**：同一SVGを同一ラスタライザで2回描画 → **byte-identical**。すなわち *preview と export が同じSVG＋同じラスタライザを使えば一致は構造的に保証される*。
+
+**FFmpeg**：本環境に未導入のためコマンド確定のみ（`-c:v libopenh264`）。バイナリ導入後（`ADR-0002`）に「静止PNG→MP4」「下PNG＋動画＋上PNG overlay」を実機確認する。
+
+**結論**：方式A2は実現可能。最大リスク（日本語テキストのパリティ）は解消方向。
+
+**残（次の具体化）**
+1. **本番のラスタライズ手段を単一化**：①resvg（SVG→PNG）を preview/export 双方で使う＝ブラウザ差を排除し完全一致（有力）／②WebViewのcanvasで両方。→ どちらかに統一する小ADRを検討。
+2. テキスト折返しを**フォント実測**へ置換（現状は文字数概算。`05 §10`）。
+3. 実画像・動画スロットの FFmpeg overlay 合成を実機確認（ffmpeg 導入後）。
+4. 色空間/ガンマ、長尺でのパフォーマンス（`02` Phase 0 完了条件）。
