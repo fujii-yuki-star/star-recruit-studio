@@ -1,28 +1,34 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
+import { useProjectStore } from "../store/projectStore";
 import { LoadingView, ErrorView } from "../components/states";
 
 interface GeneratingProps {
   onNavigate: (screen: ScreenId) => void;
 }
 
-// 「動画案を作る前の確認」→ ここ（生成中）→「動画のたたき台」 の間に表示する。
-// 実AI接続は後で結線。ここではモックで進捗を進め、完了したら確認ボタンで台本表へ。
+// 「動画案を作る前の確認」→ ここ（生成中）→「動画のたたき台」。
+// マウント時に Mock AI → 検証/変換 を実行し、結果はストアに入る。進捗はUX用のアニメーション。
 export function GeneratingScreen({ onNavigate }: GeneratingProps) {
+  const status = useProjectStore((s) => s.status);
+  const generate = useProjectStore((s) => s.generate);
+  const fail = useProjectStore((s) => s.fail);
+  const reset = useProjectStore((s) => s.reset);
   const [progress, setProgress] = useState(8);
-  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    if (failed) return;
+    void generate();
+  }, [generate]);
+
+  useEffect(() => {
+    if (status === "error") return;
     const tick = setInterval(() => {
       setProgress((p) => Math.min(100, p + 6));
     }, 180);
     return () => clearInterval(tick);
-  }, [failed]);
+  }, [status]);
 
-  const ready = progress >= 100;
-
-  if (failed) {
+  if (status === "error") {
     return (
       <div className="main-scroll">
         <ErrorView
@@ -34,7 +40,8 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
               primary: true,
               onClick: () => {
                 setProgress(8);
-                setFailed(false);
+                reset();
+                void generate();
               },
             },
             { label: "手動で作成する", onClick: () => onNavigate("draft") },
@@ -44,6 +51,8 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
       </div>
     );
   }
+
+  const ready = status === "ready" && progress >= 100;
 
   return (
     <div className="main-scroll">
@@ -65,10 +74,7 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
         </div>
       ) : (
         <div className="text-center mt">
-          <button
-            className="btn btn-ghost text-sm text-faint"
-            onClick={() => setFailed(true)}
-          >
+          <button className="btn btn-ghost text-sm text-faint" onClick={() => fail()}>
             うまくいかない場合の表示（デモ）
           </button>
         </div>
