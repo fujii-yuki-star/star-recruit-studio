@@ -2,6 +2,7 @@ import type { ScreenId } from "../data/mockData";
 import {
   HomeIcon,
   FolderIcon,
+  PhotoIcon,
   LayoutIcon,
   SettingsIcon,
   HelpIcon,
@@ -17,6 +18,7 @@ interface SidebarProps {
 const mainMenu: { id: ScreenId; label: string; icon: typeof HomeIcon }[] = [
   { id: "home", label: "ホーム", icon: HomeIcon },
   { id: "draft", label: "プロジェクト", icon: FolderIcon },
+  { id: "materials", label: "素材", icon: PhotoIcon },
   { id: "looks", label: "見た目パターン", icon: LayoutIcon },
   { id: "settings", label: "設定", icon: SettingsIcon },
 ];

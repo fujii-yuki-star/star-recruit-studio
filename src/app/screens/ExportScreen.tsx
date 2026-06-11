@@ -69,7 +69,6 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             >
               <option value="fullhd">フルHD（1920×1080・きれい）</option>
               <option value="hd">HD（1280×720・軽い）</option>
-              <option value="sns">SNS向け（縦長・短い動画）</option>
             </select>
           </div>
 

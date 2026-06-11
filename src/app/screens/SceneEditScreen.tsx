@@ -235,8 +235,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {l.name}
                   </option>
                 ))}
-                <option value="映像＋字幕">映像＋字幕</option>
-                <option value="エンディング">エンディング</option>
               </select>
             </div>
 
