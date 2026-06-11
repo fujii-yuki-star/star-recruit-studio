@@ -1,0 +1,64 @@
+name: "Bug report"
+description: "不具合報告テンプレート"
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        不具合の再現に必要な情報を揃えるためのテンプレートです。可能な範囲で具体的に記入してください。
+        秘密情報（APIキー等）は記載しないでください。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 何が起きたかを簡潔に。
+      placeholder: 例) 動画案確認画面で「セリフを直す」を押すと反応しない
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待結果
+      placeholder: 例) セリフ編集欄が開く
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の結果
+      placeholder: 例) 反応なし。コンソールにエラー
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 1ステップ1行で。
+      placeholder: |
+        1. アプリを起動
+        2. 動画案確認画面へ
+        3. 「セリフを直す」を押す
+    validations:
+      required: true
+
+  - type: input
+    id: branch
+    attributes:
+      label: 発生ブランチ / コミット
+      placeholder: 例) develop / feat/scene-editor (978b060)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ・スクリーンショット
+      description: あれば添付（秘密情報は除外）。
+    validations:
+      required: false
