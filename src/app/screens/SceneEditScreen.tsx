@@ -31,6 +31,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [look, setLook] = useState(draftRows[0].look);
   const [subtitle, setSubtitle] = useState(draftRows[0].line);
   const [duration, setDuration] = useState("5");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [imageFit, setImageFit] = useState("center");
+  const [clipStart, setClipStart] = useState("0");
+  const [clipEnd, setClipEnd] = useState("5");
+  const [useOriginalAudio, setUseOriginalAudio] = useState(false);
+  const [bgmVolume, setBgmVolume] = useState(25);
+  const [narrationVolume, setNarrationVolume] = useState(100);
+  const [transition, setTransition] = useState("fade");
+  const [showSubtitle, setShowSubtitle] = useState(true);
 
   const filtered = materials.filter((m) => {
     const matchType = filter === "all" || m.type === filter;
@@ -296,6 +305,117 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </span>
               <Switch on={showYuko} onChange={setShowYuko} label="ゆうこを表示する" />
             </div>
+
+            {/* こだわり編集（折りたたみ） */}
+            <button
+              className="btn btn-ghost btn-block mt"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              aria-expanded={showAdvanced}
+            >
+              {showAdvanced ? "こだわり編集を閉じる" : "こだわり編集を開く"}
+            </button>
+            {showAdvanced && (
+              <div
+                className="card-tight"
+                style={{ background: "var(--color-surface-alt)", marginTop: "var(--gap-sm)" }}
+              >
+                <div className="field">
+                  <label className="field-label" htmlFor="imageFit">
+                    画像の表示範囲
+                  </label>
+                  <select
+                    id="imageFit"
+                    className="select"
+                    value={imageFit}
+                    onChange={(e) => setImageFit(e.target.value)}
+                  >
+                    <option value="center">自動（中央に合わせる）</option>
+                    <option value="contain">全体を収める</option>
+                    <option value="cover">範囲を埋める</option>
+                  </select>
+                </div>
+                <div className="row gap-sm">
+                  <div className="field grow">
+                    <label className="field-label" htmlFor="clipStart">
+                      動画の開始（秒）
+                    </label>
+                    <input
+                      id="clipStart"
+                      className="input"
+                      type="number"
+                      value={clipStart}
+                      onChange={(e) => setClipStart(e.target.value)}
+                    />
+                  </div>
+                  <div className="field grow">
+                    <label className="field-label" htmlFor="clipEnd">
+                      動画の終了（秒）
+                    </label>
+                    <input
+                      id="clipEnd"
+                      className="input"
+                      type="number"
+                      value={clipEnd}
+                      onChange={(e) => setClipEnd(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="toggle-row">
+                  <span className="field-label" style={{ margin: 0 }}>
+                    動画内の音声を使う
+                  </span>
+                  <Switch on={useOriginalAudio} onChange={setUseOriginalAudio} label="動画内の音声を使う" />
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="narrationVol">
+                    ゆうこの声の音量
+                  </label>
+                  <input
+                    id="narrationVol"
+                    type="range"
+                    min={0}
+                    max={150}
+                    value={narrationVolume}
+                    onChange={(e) => setNarrationVolume(Number(e.target.value))}
+                    style={{ width: "100%", accentColor: "var(--color-primary)" }}
+                  />
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="bgmVol">
+                    BGMの音量
+                  </label>
+                  <input
+                    id="bgmVol"
+                    type="range"
+                    min={0}
+                    max={150}
+                    value={bgmVolume}
+                    onChange={(e) => setBgmVolume(Number(e.target.value))}
+                    style={{ width: "100%", accentColor: "var(--color-primary)" }}
+                  />
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="transition">
+                    画面の切り替え
+                  </label>
+                  <select
+                    id="transition"
+                    className="select"
+                    value={transition}
+                    onChange={(e) => setTransition(e.target.value)}
+                  >
+                    <option value="none">なし</option>
+                    <option value="fade">フェード</option>
+                  </select>
+                </div>
+                <div className="toggle-row">
+                  <span className="field-label" style={{ margin: 0 }}>
+                    字幕を表示する
+                  </span>
+                  <Switch on={showSubtitle} onChange={setShowSubtitle} label="字幕を表示する" />
+                </div>
+              </div>
+            )}
 
             <button className="btn btn-primary btn-block mt">
               <SaveIcon size={18} />

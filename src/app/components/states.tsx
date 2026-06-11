@@ -127,3 +127,47 @@ export function VoiceStatusBadge({ status }: { status: VoiceStatus }) {
   }
   return <span className="badge badge-gray">{label}</span>;
 }
+
+// エラー表示（原因でなく「次の行動」を提示する）
+export function ErrorView({
+  title,
+  message,
+  actions,
+}: {
+  title: string;
+  message: string;
+  actions: { label: string; onClick: () => void; primary?: boolean }[];
+}) {
+  return (
+    <div className="card text-center" style={{ maxWidth: 520, margin: "var(--gap-xl) auto" }}>
+      <div
+        className="action-card-icon"
+        style={{
+          background: "var(--color-danger-soft)",
+          color: "var(--color-danger)",
+          margin: "0 auto var(--gap)",
+          width: 56,
+          height: 56,
+          fontSize: 28,
+          fontWeight: 700,
+        }}
+        aria-hidden="true"
+      >
+        !
+      </div>
+      <h2 className="section-title">{title}</h2>
+      <p className="page-desc text-pretty">{message}</p>
+      <div className="row gap-sm mt-lg" style={{ justifyContent: "center", flexWrap: "wrap" }}>
+        {actions.map((a) => (
+          <button
+            key={a.label}
+            className={`btn ${a.primary ? "btn-primary" : "btn-secondary"}`}
+            onClick={a.onClick}
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
