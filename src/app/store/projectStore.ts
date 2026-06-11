@@ -21,6 +21,8 @@ interface ProjectState {
   /** デモ/テスト用にエラー状態へ。 */
   fail: () => void;
   reset: () => void;
+  /** 指定シーンを更新する（編集→プレビュー即反映）。 */
+  updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
 }
 
 const provider = new MockAiProvider();
@@ -56,4 +58,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
   },
   fail: () => set({ status: "error" }),
   reset: () => set({ status: "idle", parts: [], scenes: [], warnings: [] }),
+  updateScene: (sceneId, update) =>
+    set((s) => ({
+      scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
+    })),
 }));
