@@ -1,0 +1,68 @@
+# Claude Code による Pull Request レビュー（`@claude` メンション起動式）。
+# 方針:
+#  - 全PR常時自動実行はしない。PR上のコメントで `@claude` とメンションされた時だけ動く（コスト最適化）。
+#  - 既存CI（ci.yml / test-ci.yml / security-ci.yml / secret-scan.yml）とはトリガーが別（issue_comment / pull_request_review_comment）。
+#  - 認証は Claude サブスク(Pro/Max)の OAuth トークン。リポジトリ Secret `CLAUDE_CODE_OAUTH_TOKEN` を参照
+#    （`claude setup-token` で生成。Settings > Secrets and variables > Actions に登録。コードには書かない）。
+# 使い方: PR のコメント欄やコード行コメントで `@claude このPRをレビューして` と書く。
+
+name: Claude Code Review
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+
+concurrency:
+  group: claude-review-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  claude-review:
+    # 三重ガード: (1) 投稿者が OWNER/MEMBER/COLLABORATOR (2) PR上のコメント (3) `@claude` を含む
+    if: |
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR') &&
+      (
+        (github.event_name == 'issue_comment' &&
+         github.event.issue.pull_request != null &&
+         contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' &&
+         contains(github.event.comment.body, '@claude'))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Verify CLAUDE_CODE_OAUTH_TOKEN secret is set
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+            echo "::error title=CLAUDE_CODE_OAUTH_TOKEN is not configured::リポジトリSecret 'CLAUDE_CODE_OAUTH_TOKEN' が未設定です。'claude setup-token'(Pro/Max) で生成し、Settings > Secrets and variables > Actions に登録してください。"
+            exit 1
+          fi
+          echo "CLAUDE_CODE_OAUTH_TOKEN is configured."
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: |
+            --max-turns 20
+            --append-system-prompt "あなたは本リポジトリのPRレビュアーです。必ず日本語でレビューしてください。まず CLAUDE.md と docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md・12_AI_PROMPT_AND_MAPPING.md（正典）を読み、その規範に従ってください。重点観点: ロジックバグ・正典(11/12/schemas)との不整合・通常UIへの技術用語の漏れ・ユーザー向けエラーが『次の行動』を示しているか・セキュリティ(秘密情報の混入/送信)・例外処理や境界値・テスト不足・責務分離(domain/infrastructure/renderer/app)・リグレッションリスク。lintやformatterで自動検出できる事項や軽微な好みは指摘しないでください。各指摘は該当ファイル・行・理由・修正案を簡潔に。指摘が無い観点は短く述べてください。"
