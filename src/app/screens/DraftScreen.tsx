@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import type { ScreenId } from "../data/mockData";
-import { draftRows, sampleWarnings } from "../data/mockData";
+import { useProjectStore } from "../store/projectStore";
+import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
-import { WarningBanner, VoiceStatusBadge } from "../components/states";
+import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   CheckIcon,
@@ -18,6 +20,33 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
+  const { status, scenes, parts, templates, assets, warnings, generate } = useProjectStore();
+
+  // たたき台へ直接来た場合は生成する（本実装では保存済みプロジェクトの読込に置き換え）
+  useEffect(() => {
+    if (status === "idle") void generate();
+  }, [status, generate]);
+
+  const rows = scenes.map((s) => sceneToDraftRow(s, parts, templates, assets));
+  const draftWarnings = warningsToDraftWarnings(warnings);
+
+  if (rows.length === 0) {
+    return (
+      <div className="main-scroll">
+        <PageHead title="動画のたたき台を確認" desc="ゆうこが作った構成を、台本表で確認・修正できます。" />
+        <EmptyState
+          title={status === "generating" ? "動画案を作成中です…" : "まだ動画案がありません"}
+          message="「新しい動画を作る」から、会社情報と素材を入れて動画案を作成しましょう。"
+          action={
+            <button className="btn btn-primary" onClick={() => onNavigate("wizard")}>
+              新しい動画を作る
+            </button>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="main-scroll">
       <div className="content-with-yuko">
@@ -36,7 +65,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
           </div>
 
           {/* 自動補正・確認の通知 */}
-          <WarningBanner warnings={sampleWarnings} />
+          <WarningBanner warnings={draftWarnings} />
 
           {/* 台本表 */}
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -54,7 +83,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                 </tr>
               </thead>
               <tbody>
-                {draftRows.map((row) => (
+                {rows.map((row) => (
                   <tr key={row.id}>
                     <td className="table-num">{row.order}</td>
                     <td>
@@ -80,25 +109,13 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                     </td>
                     <td>
                       <div className="row gap-sm row-wrap">
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="セリフを直す"
-                          onClick={() => onNavigate("scene-edit")}
-                        >
+                        <button className="btn btn-ghost btn-icon" title="セリフを直す" onClick={() => onNavigate("scene-edit")}>
                           セリフ
                         </button>
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="素材を変更"
-                          onClick={() => onNavigate("scene-edit")}
-                        >
+                        <button className="btn btn-ghost btn-icon" title="素材を変更" onClick={() => onNavigate("scene-edit")}>
                           素材
                         </button>
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          title="見た目を変更"
-                          onClick={() => onNavigate("scene-edit")}
-                        >
+                        <button className="btn btn-ghost btn-icon" title="見た目を変更" onClick={() => onNavigate("scene-edit")}>
                           見た目
                         </button>
                       </div>
@@ -127,7 +144,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
           {/* 主操作 */}
           <div className="row-between mt-lg">
-            <button className="btn btn-secondary">
+            <button className="btn btn-secondary" onClick={() => void generate()}>
               <SparkleIcon size={18} />
               作り直す
             </button>
@@ -143,7 +160,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
         <YukoPanel
           messages={[
-            "動画のたたき台ができました！全部で4つの場面で構成しています。",
+            `動画のたたき台ができました！全部で${rows.length}つの場面で構成しています。`,
             "セリフや素材は、表の右の操作ボタンから直せます。",
             "気になるところがなければ「この内容で確認・編集する」に進みましょう。",
           ]}
