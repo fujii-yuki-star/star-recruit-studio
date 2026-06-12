@@ -112,6 +112,7 @@ pub fn run() {
             list_projects,
             ffmpeg::export_video,
             assets::import_asset,
+            assets::import_voice,
             assets::read_asset_data_url,
             voicevox::synthesize_voice
         ])
