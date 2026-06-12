@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import type { PrecheckItem, ScreenId } from "../data/mockData";
-import { precheckItems } from "../data/mockData";
+import { useProjectStore } from "../store/projectStore";
+import { buildPrecheckItems } from "../adapters";
 import { PageHead } from "../components/ui";
 import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
 
@@ -14,7 +16,14 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
-  const count = (s: PrecheckItem["severity"]) => precheckItems.filter((i) => i.severity === s).length;
+  const { status, scenes, assets, templates, generate } = useProjectStore();
+
+  useEffect(() => {
+    if (status === "idle") void generate();
+  }, [status, generate]);
+
+  const items = buildPrecheckItems(scenes, assets, templates);
+  const count = (s: PrecheckItem["severity"]) => items.filter((i) => i.severity === s).length;
 
   return (
     <div className="main-scroll">
@@ -51,7 +60,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
             </tr>
           </thead>
           <tbody>
-            {precheckItems.map((item) => {
+            {items.map((item) => {
               const s = severityStyle[item.severity];
               return (
                 <tr key={item.id}>
@@ -67,10 +76,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                   <td className="text-pretty">{item.detail}</td>
                   <td>
                     {item.action ? (
-                      <button
-                        className="btn btn-ghost btn-icon text-sm"
-                        onClick={() => onNavigate("scene-edit")}
-                      >
+                      <button className="btn btn-ghost btn-icon text-sm" onClick={() => onNavigate("scene-edit")}>
                         {item.action}
                       </button>
                     ) : (
