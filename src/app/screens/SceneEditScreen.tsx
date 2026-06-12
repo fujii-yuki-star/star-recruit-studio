@@ -69,7 +69,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, generate, updateScene, addAsset,
-    generateNarration, generateAllNarrations, isGeneratingNarration,
+    generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById,
   } = useProjectStore();
 
   const [filter, setFilter] = useState<AssetFilter>("all");
@@ -349,14 +349,27 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <span className="text-sm text-muted">
                   音声：{narrationStatusLabel[selected.narration.status] ?? selected.narration.status}
                 </span>
-                <button
-                  className="btn btn-secondary btn-icon text-sm"
-                  onClick={() => void generateNarration(selected.sceneId)}
-                  disabled={selected.narration.status === "pending" || selected.narration.text.trim().length === 0}
-                >
-                  {selected.narration.status === "generated" ? "声を作り直す" : "声を作成"}
-                </button>
+                <div className="row gap-sm">
+                  {narrationAudioById[selected.sceneId] && (
+                    <button
+                      className="btn btn-ghost btn-icon text-sm"
+                      onClick={() =>
+                        void new Audio(narrationAudioById[selected.sceneId]).play().catch(() => {})
+                      }
+                    >
+                      ▶ 再生
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-secondary btn-icon text-sm"
+                    onClick={() => void generateNarration(selected.sceneId)}
+                    disabled={selected.narration.status === "pending" || selected.narration.text.trim().length === 0}
+                  >
+                    {selected.narration.status === "generated" ? "声を作り直す" : "声を作成"}
+                  </button>
+                </div>
               </div>
+              <p className="field-hint">実際の音声には VOICEVOX の起動が必要です（未起動だと作成に失敗します）。</p>
             </div>
 
             <div className="field">

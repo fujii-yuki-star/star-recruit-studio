@@ -18,7 +18,9 @@ import {
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
+import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
+import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -69,7 +71,9 @@ interface ProjectState {
 }
 
 const provider = new MockAiProvider();
-const voiceProvider = new MockVoiceProvider();
+// Tauri ではローカル VOICEVOX に接続、ブラウザ開発では Mock（無音）にフォールバック。
+const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
 
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
