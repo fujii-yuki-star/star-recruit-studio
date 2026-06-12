@@ -4,6 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
 
+mod ffmpeg;
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -93,7 +95,8 @@ pub fn run() {
             greet,
             save_project,
             load_project,
-            list_projects
+            list_projects,
+            ffmpeg::export_video
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
