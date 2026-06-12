@@ -1,6 +1,7 @@
 import { useState } from "react";
 import "./styles/theme.css";
 import type { ScreenId } from "./app/data/mockData";
+import { useProjectStore } from "./app/store/projectStore";
 import { Sidebar } from "./app/components/Sidebar";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
@@ -34,6 +35,11 @@ const titles: Record<ScreenId, string> = {
 
 function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
+  const saveProject = useProjectStore((s) => s.saveProject);
+  const saveStatus = useProjectStore((s) => s.saveStatus);
+
+  const saveLabel =
+    saveStatus === "saving" ? "保存中…" : saveStatus === "saved" ? "保存しました" : "保存";
 
   function renderScreen() {
     switch (screen) {
@@ -79,6 +85,13 @@ function App() {
           <header className="topbar">
             <div className="topbar-title">{titles[screen]}</div>
             <div className="topbar-actions">
+              <button
+                className="btn btn-ghost"
+                onClick={() => void saveProject()}
+                disabled={saveStatus === "saving"}
+              >
+                {saveLabel}
+              </button>
               <button
                 className="btn btn-secondary"
                 onClick={() => setScreen("wizard")}

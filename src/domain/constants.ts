@@ -9,6 +9,7 @@ export const TRANSITION_DEFAULT_SEC = 0.5;
 export const VIDEO_TARGET_MAX_SEC_MVP = 300;
 export const VIDEO_HARD_MAX_SEC = 600;
 export const MAX_SCENES_PER_VIDEO = 80;
+export const DEFAULT_TARGET_DURATION_SEC = 60;
 
 export const FPS = 30;
 export const WIDTH = 1920;

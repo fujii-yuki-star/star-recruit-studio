@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { recentProjects } from "../data/mockData";
+import { useProjectStore } from "../store/projectStore";
+import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   PlusIcon,
@@ -14,7 +16,44 @@ interface HomeProps {
   onNavigate: (screen: ScreenId) => void;
 }
 
+function formatDate(iso: string): string {
+  return iso ? iso.slice(0, 10) : "—";
+}
+
 export function HomeScreen({ onNavigate }: HomeProps) {
+  const listProjects = useProjectStore((s) => s.listProjects);
+  const loadProject = useProjectStore((s) => s.loadProject);
+  const newProject = useProjectStore((s) => s.newProject);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    listProjects()
+      .then((list) => {
+        if (alive) setProjects(list);
+      })
+      .catch(() => {
+        /* 一覧の取得に失敗しても画面は表示する */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [listProjects]);
+
+  function startNew() {
+    newProject();
+    onNavigate("wizard");
+  }
+
+  async function openProject(projectId: string) {
+    try {
+      await loadProject(projectId);
+      onNavigate("draft");
+    } catch {
+      /* 開けない場合は一覧に留まる（将来：エラー表示） */
+    }
+  }
+
   return (
     <div className="main-scroll">
       <div className="content-with-yuko">
@@ -30,10 +69,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 会社情報と写真・動画を入れると、ゆうこが動画のたたき台を作ります。
                 内容を確認・修正してから、動画として保存できます。
               </p>
-              <button
-                className="btn btn-primary btn-lg mt"
-                onClick={() => onNavigate("wizard")}
-              >
+              <button className="btn btn-primary btn-lg mt" onClick={startNew}>
                 <PlusIcon size={20} />
                 新しい動画を作る
               </button>
@@ -49,7 +85,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
 
           {/* クイック操作 */}
           <div className="card-grid cols-3 mb">
-            <button className="action-card" onClick={() => onNavigate("wizard")}>
+            <button className="action-card" onClick={startNew}>
               <div
                 className="action-card-icon"
                 style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}
@@ -100,31 +136,36 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </button>
           </div>
           <div className="col gap-sm">
-            {recentProjects.map((p) => (
-              <button
-                key={p.id}
-                className="list-item"
-                onClick={() => onNavigate("draft")}
-              >
-                <div
-                  className="thumb thumb-photo"
-                  style={{ width: 96, flexShrink: 0 }}
-                  aria-hidden="true"
+            {projects.length === 0 ? (
+              <div className="text-sm text-muted">
+                保存したプロジェクトはまだありません。「新しい動画を作る」から始めましょう。
+              </div>
+            ) : (
+              projects.map((p) => (
+                <button
+                  key={p.projectId}
+                  className="list-item"
+                  onClick={() => void openProject(p.projectId)}
                 >
-                  <FolderIcon size={24} />
-                </div>
-                <div className="grow">
-                  <div className="row gap-sm">
-                    <strong>{p.name}</strong>
-                    <span className="badge badge-gray">{p.purpose}</span>
+                  <div
+                    className="thumb thumb-photo"
+                    style={{ width: 96, flexShrink: 0 }}
+                    aria-hidden="true"
+                  >
+                    <FolderIcon size={24} />
                   </div>
-                  <div className="text-sm text-muted">
-                    更新日 {p.updatedAt}　/　場面 {p.sceneCount}個　/　{p.durationLabel}
+                  <div className="grow">
+                    <div className="row gap-sm">
+                      <strong>{p.projectName || "無題のプロジェクト"}</strong>
+                    </div>
+                    <div className="text-sm text-muted">
+                      更新日 {formatDate(p.updatedAt)}
+                    </div>
                   </div>
-                </div>
-                <ChevronRightIcon size={20} className="text-faint" />
-              </button>
-            ))}
+                  <ChevronRightIcon size={20} className="text-faint" />
+                </button>
+              ))
+            )}
           </div>
         </div>
 

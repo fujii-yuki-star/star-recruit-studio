@@ -1,16 +1,30 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
-// 本実装では project.json の読込/保存・実AIプロバイダに差し替える。今は MockProvider＋サンプルで全フローを通す。
+// 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは当面 MockProvider。
 import { create } from "zustand";
-import type { Asset, Part, Scene, Warning } from "../../domain/project/types";
+import { DEFAULT_TARGET_DURATION_SEC } from "../../domain/constants";
+import type { Asset, CompanyInfo, Part, Scene, Warning } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
+import {
+  assembleProject, createProjectId, defaultVideoSettings, defaultVoiceSettings,
+  parseProjectDoc,
+} from "../../domain/project/persistence";
+import type { ProjectHeader } from "../../domain/project/persistence";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { sampleAssets, sampleTemplates } from "../../infrastructure/sampleData";
+import {
+  listProjectSummaries, loadProjectDoc, saveProjectDoc,
+} from "../../infrastructure/projectFs";
+import type { ProjectSummary } from "../../infrastructure/projectFs";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
+export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 interface ProjectState {
   status: GenerateStatus;
+  saveStatus: SaveStatus;
+  /** Project の見出し情報（projectId/名前/目的/各種設定）。Asset/Part/Scene は別フィールド。 */
+  meta: ProjectHeader;
   parts: Part[];
   scenes: Scene[];
   warnings: Warning[];
@@ -21,6 +35,14 @@ interface ProjectState {
   /** デモ/テスト用にエラー状態へ。 */
   fail: () => void;
   reset: () => void;
+  /** 新規プロジェクト（作業状態を初期化）。 */
+  newProject: () => void;
+  /** 現在の状態を project.json として保存する。 */
+  saveProject: () => Promise<void>;
+  /** 保存済みプロジェクトを読み込んで反映する。 */
+  loadProject: (projectId: string) => Promise<void>;
+  /** 保存済みプロジェクトの要約一覧を返す。 */
+  listProjects: () => Promise<ProjectSummary[]>;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
   /** 素材を更新する（素材管理：説明/タグ/公開チェック等）。 */
@@ -31,8 +53,24 @@ interface ProjectState {
 
 const provider = new MockAiProvider();
 
-export const useProjectStore = create<ProjectState>((set) => ({
+function defaultHeader(): ProjectHeader {
+  const now = new Date().toISOString();
+  return {
+    projectId: "",
+    projectName: "無題のプロジェクト",
+    purpose: "new_graduate",
+    createdAt: now,
+    updatedAt: now,
+    videoSettings: defaultVideoSettings(),
+    companyInfo: { companyName: "株式会社サンプル" },
+    voiceSettings: defaultVoiceSettings(),
+  };
+}
+
+export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
+  saveStatus: "idle",
+  meta: defaultHeader(),
   parts: [],
   scenes: [],
   warnings: [],
@@ -41,11 +79,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
   generate: async () => {
     set({ status: "generating" });
     try {
+      const companyInfo: CompanyInfo = {
+        companyName: "株式会社サンプル",
+        industry: "IT・業務システム開発",
+        jobType: "エンジニア（新卒）",
+      };
+      const purpose = "new_graduate" as const;
       const plan = await provider.generateVideoPlan({
-        companyInfo: { companyName: "株式会社サンプル", industry: "IT・業務システム開発", jobType: "エンジニア（新卒）" },
-        purpose: "new_graduate",
+        companyInfo,
+        purpose,
         targetAudience: "新卒採用",
-        targetDurationSec: 60,
+        targetDurationSec: DEFAULT_TARGET_DURATION_SEC,
         tone: "親しみやすい",
         templates: [],
         assets: sampleAssets,
@@ -55,13 +99,71 @@ export const useProjectStore = create<ProjectState>((set) => ({
         templates: sampleTemplates,
         assets: sampleAssets,
       });
-      set({ status: "ready", parts, scenes, warnings });
+      set((s) => ({
+        status: "ready",
+        parts,
+        scenes,
+        warnings,
+        meta: { ...s.meta, companyInfo, purpose },
+      }));
     } catch {
       set({ status: "error" });
     }
   },
   fail: () => set({ status: "error" }),
-  reset: () => set({ status: "idle", parts: [], scenes: [], warnings: [] }),
+  reset: () => set({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [] }),
+  newProject: () =>
+    set({
+      status: "idle",
+      saveStatus: "idle",
+      meta: defaultHeader(),
+      parts: [],
+      scenes: [],
+      warnings: [],
+      assets: sampleAssets,
+    }),
+  saveProject: async () => {
+    set({ saveStatus: "saving" });
+    try {
+      const s = get();
+      let projectId = s.meta.projectId;
+      if (!projectId) {
+        const existing = await listProjectSummaries();
+        projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+      }
+      const meta: ProjectHeader = { ...s.meta, projectId, updatedAt: new Date().toISOString() };
+      const project = assembleProject(meta, s.assets, s.parts, s.scenes);
+      await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
+      set({ meta, saveStatus: "saved" });
+    } catch {
+      set({ saveStatus: "error" });
+    }
+  },
+  loadProject: async (projectId) => {
+    const text = await loadProjectDoc(projectId);
+    const project = parseProjectDoc(text);
+    set({
+      status: "ready",
+      saveStatus: "idle",
+      meta: {
+        projectId: project.projectId,
+        projectName: project.projectName,
+        purpose: project.purpose,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+        videoSettings: project.videoSettings,
+        companyInfo: project.companyInfo,
+        toneSettings: project.toneSettings,
+        voiceSettings: project.voiceSettings,
+        bgmSettings: project.bgmSettings,
+      },
+      assets: project.assets,
+      parts: project.parts,
+      scenes: project.scenes,
+      warnings: [],
+    });
+  },
+  listProjects: () => listProjectSummaries(),
   updateScene: (sceneId, update) =>
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
