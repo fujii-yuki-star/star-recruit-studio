@@ -161,6 +161,26 @@ fn strip_data_url(s: &str) -> &str {
     s
 }
 
+/// ファイル名から区切り・予約文字を除く（空なら "export"）。
+fn sanitize_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "export".to_string()
+    } else {
+        cleaned
+    }
+}
+
 /// エクスポートの入力（1場面）。フロントは PNG(base64 or data URL) と尺を渡す。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -183,7 +203,7 @@ pub struct ExportReport {
 pub fn export_video(
     app: tauri::AppHandle,
     scenes: Vec<SceneInput>,
-    output_path: String,
+    file_name: String,
 ) -> Result<ExportReport, String> {
     if scenes.is_empty() {
         return Err("書き出す場面がありません。".into());
@@ -212,14 +232,18 @@ pub fn export_video(
         });
     }
 
-    let out = PathBuf::from(&output_path);
-    if let Some(parent) = out.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+    // 保存先は <appData>/exports/<安全なファイル名>.mp4（保存先ピッカーは後続）。
+    let exports = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("exports");
+    fs::create_dir_all(&exports).map_err(|e| e.to_string())?;
+    let out = exports.join(format!("{}.mp4", sanitize_file_name(&file_name)));
     encode_scenes(&ffmpeg, &files, codec, DEFAULT_FPS, &tmp, &out)?;
 
     Ok(ExportReport {
-        output_path,
+        output_path: out.to_string_lossy().into_owned(),
         codec: codec.encoder().to_string(),
         scene_count: scenes.len(),
     })
@@ -259,6 +283,13 @@ mod tests {
     fn strip_data_url_handles_both() {
         assert_eq!(strip_data_url("data:image/png;base64,AAAA"), "AAAA");
         assert_eq!(strip_data_url("AAAA"), "AAAA");
+    }
+
+    #[test]
+    fn sanitize_file_name_strips_separators_and_defaults() {
+        assert_eq!(sanitize_file_name("会社紹介_2026春"), "会社紹介_2026春");
+        assert_eq!(sanitize_file_name("a/b\\c:d*?"), "a_b_c_d__");
+        assert_eq!(sanitize_file_name("   "), "export");
     }
 
     // 実FFmpegが要るE2E結合テスト。FFMPEG_PATH 未設定ならスキップ（CIを失敗させない）。
