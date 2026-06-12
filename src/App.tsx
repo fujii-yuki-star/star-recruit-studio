@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./styles/theme.css";
 import type { ScreenId } from "./app/data/mockData";
 import { useProjectStore } from "./app/store/projectStore";
+import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
@@ -37,6 +38,13 @@ function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
+  const loadProject = useProjectStore((s) => s.loadProject);
+
+  // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
+  useEffect(() => {
+    const last = getLastProjectId();
+    if (last) void loadProject(last).catch(() => {});
+  }, [loadProject]);
 
   const saveLabel =
     saveStatus === "saving" ? "保存中…" : saveStatus === "saved" ? "保存しました" : "保存";

@@ -13,7 +13,7 @@ import type { ProjectHeader } from "../../domain/project/persistence";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { sampleAssets, sampleTemplates } from "../../infrastructure/sampleData";
 import {
-  listProjectSummaries, loadProjectDoc, saveProjectDoc,
+  listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
@@ -141,6 +141,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const meta: ProjectHeader = { ...s.meta, projectId, updatedAt: new Date().toISOString() };
       const project = assembleProject(meta, s.assets, s.parts, s.scenes);
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
+      setLastProjectId(projectId);
       set({ meta, saveStatus: "saved" });
     } catch {
       set({ saveStatus: "error" });
@@ -177,6 +178,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       warnings: [],
       assetSrcById,
     });
+    setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
   updateScene: (sceneId, update) =>

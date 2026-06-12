@@ -72,6 +72,8 @@ export function MaterialsScreen() {
       }
     };
     reader.readAsDataURL(file);
+    // 同じファイルを選び直しても change が発火するよう値をクリアする。
+    e.target.value = "";
   }
 
   return (
@@ -144,6 +146,7 @@ export function MaterialsScreen() {
               <div className="field">
                 <label className="field-label" htmlFor="mat-image">画像を選ぶ</label>
                 <input
+                  key={selected.assetId}
                   id="mat-image"
                   className="input"
                   type="file"
