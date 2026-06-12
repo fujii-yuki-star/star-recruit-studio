@@ -81,6 +81,26 @@ export function createAssetId(existingIds: readonly string[]): string {
   return id;
 }
 
+/**
+ * bgm_{slug}_{NNN} を発行する（§2.1）。slug は表示名/ファイル名を `[a-z0-9_]` に正規化したもの。
+ * slug が空（日本語のみ等）のときは `bgm_{NNN}`。既存IDと衝突しない最小の3桁連番。
+ */
+export function createBgmId(slug: string, existingIds: readonly string[]): string {
+  const cleaned = slug
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const base = cleaned ? `bgm_${cleaned}` : 'bgm';
+  const used = new Set(existingIds);
+  let n = 1;
+  let id = `${base}_${String(n).padStart(3, '0')}`;
+  while (used.has(id)) {
+    n += 1;
+    id = `${base}_${String(n).padStart(3, '0')}`;
+  }
+  return id;
+}
+
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
 export function assembleProject(
   header: ProjectHeader,

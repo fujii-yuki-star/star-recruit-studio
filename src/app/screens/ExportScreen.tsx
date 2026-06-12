@@ -30,7 +30,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [fileName, setFileName] = useState("会社紹介動画_2026春");
   const [size, setSize] = useState("fullhd");
   const [withSubtitle, setWithSubtitle] = useState(true);
-  const [withBgm, setWithBgm] = useState(true);
+  // BGM の入/切は前回の設定（bgmSettings.enabled）を初期値にする。未設定なら入。
+  const [withBgm, setWithBgm] = useState(() => bgmSettings?.enabled ?? true);
 
   const [phase, setPhase] = useState<ExportPhase>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });

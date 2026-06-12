@@ -139,8 +139,20 @@ pub fn mix_bgm_args(
     out: &str,
 ) -> Vec<String> {
     let fade_out_start = (total_sec - fade_out_sec).max(0.0);
+    // afade は d=0 を受け付けない（"Option d value 0 out of range" で失敗）。
+    // フェード秒が 0（既定）のときはそのフィルタを省略する。
+    let afade_in = if fade_in_sec > 0.0 {
+        format!(",afade=t=in:st=0:d={fade_in_sec}")
+    } else {
+        String::new()
+    };
+    let afade_out = if fade_out_sec > 0.0 {
+        format!(",afade=t=out:st={fade_out_start}:d={fade_out_sec}")
+    } else {
+        String::new()
+    };
     let filter = format!(
-        "[1:a]volume={volume},afade=t=in:st=0:d={fade_in_sec},afade=t=out:st={fade_out_start}:d={fade_out_sec}[bg];[0:a][bg]amix=inputs=2:duration=first:normalize=0[a]"
+        "[1:a]volume={volume}{afade_in}{afade_out}[bg];[0:a][bg]amix=inputs=2:duration=first:normalize=0[a]"
     );
     vec![
         "-y".into(),
@@ -569,6 +581,17 @@ mod tests {
     }
 
     #[test]
+    fn mix_bgm_args_omits_afade_when_zero() {
+        // フェード秒=0（既定）のとき afade を出さない（d=0 は FFmpeg が拒否するため）。
+        let a = mix_bgm_args("v.mp4", "bgm.mp3", 0.25, 0.0, 0.0, 10.0, "out.mp4");
+        assert!(!a.iter().any(|s| s.contains("afade")));
+        assert!(a.iter().any(|s| s.contains("volume=0.25")));
+        assert!(a
+            .iter()
+            .any(|s| s.contains("amix=inputs=2:duration=first:normalize=0")));
+    }
+
+    #[test]
     fn strip_data_url_handles_both() {
         assert_eq!(strip_data_url("data:image/png;base64,AAAA"), "AAAA");
         assert_eq!(strip_data_url("AAAA"), "AAAA");
@@ -706,12 +729,13 @@ mod tests {
         )
         .expect("generate bgm");
         let out = tmp.join("final.mp4");
+        // 既定のフェード無し（0.0）で実行し、afade=d=0 で落ちない（バグ#1回帰）ことを確認する。
         let args = mix_bgm_args(
             &video.to_string_lossy(),
             &bgm.to_string_lossy(),
             0.25,
-            0.5,
-            0.5,
+            0.0,
+            0.0,
             2.0,
             &out.to_string_lossy(),
         );

@@ -6,7 +6,7 @@ import type { Asset, CompanyInfo, Part, Scene, Warning } from "../../domain/proj
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import {
-  assembleProject, createAssetId, createProjectId, defaultVideoSettings, defaultVoiceSettings,
+  assembleProject, createAssetId, createBgmId, createProjectId, defaultVideoSettings, defaultVoiceSettings,
   parseProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
@@ -327,13 +327,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
       }
-      // BGM はプロジェクトに1つ。既存があればその assetId を使い回してファイルを差し替える。
-      const existingBgm = get().assets.find((a) => a.assetType === "bgm");
-      const assetId = existingBgm?.assetId ?? createAssetId(get().assets.map((a) => a.assetId));
       const parts = file.name.split(".");
       const rawExt = parts.length > 1 ? parts[parts.length - 1] : "mp3";
       const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "mp3";
       const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : file.name;
+      // BGM はプロジェクトに1つ。既存があればその assetId を使い回してファイルを差し替える。
+      // 新規IDは §2.1 の bgm_{slug}_{NNN}（slug=ファイル名）で採番する。
+      const existingBgm = get().assets.find((a) => a.assetType === "bgm");
+      const assetId =
+        existingBgm?.assetId ?? createBgmId(baseName, get().assets.map((a) => a.assetId));
       const fileName = `${assetId}.${ext}`;
       // 先に取り込み（失敗時はストアを変えない＝ゴースト防止）。Tauri 非検出時は null（非永続）。
       const filePath = await importAssetFile(projectId, fileName, file.dataUrl);

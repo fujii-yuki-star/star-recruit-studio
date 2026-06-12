@@ -13,13 +13,13 @@ import {
   CheckIcon,
 } from "../components/icons";
 
-type Filter = "all" | "image" | "video" | "bgm" | "yuko";
+type Filter = "all" | "image" | "video" | "yuko";
 
+// 音声系（BGM/ナレーション）は素材一覧に出さない（BGMは書き出し画面で管理）ため、音タブも持たない。
 const filters: [Filter, string][] = [
   ["all", "すべて"],
   ["image", "写真"],
   ["video", "動画"],
-  ["bgm", "音"],
   ["yuko", "ゆうこ"],
 ];
 

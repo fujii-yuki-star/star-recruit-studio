@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createProjectId,
+  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createProjectId,
   defaultVideoSettings, defaultVoiceSettings, isSupportedSchemaVersion,
   parseProjectDoc,
 } from './persistence';
@@ -44,6 +44,19 @@ describe('createAssetId', () => {
   });
   it('歯抜けの最小番号を埋める', () => {
     expect(createAssetId(['asset_002', 'asset_003'])).toBe('asset_001');
+  });
+});
+
+describe('createBgmId (§2.1 bgm_{slug}_{NNN})', () => {
+  it('slug をファイル名から正規化して採番する', () => {
+    expect(createBgmId('Bright Theme', [])).toBe('bgm_bright_theme_001');
+  });
+  it('slug が空（日本語のみ・空白）なら bgm_{NNN}', () => {
+    expect(createBgmId('明るいBGM', [])).toBe('bgm_bgm_001');
+    expect(createBgmId('　', [])).toBe('bgm_001');
+  });
+  it('既存と衝突しない最小番号を採る', () => {
+    expect(createBgmId('theme', ['bgm_theme_001'])).toBe('bgm_theme_002');
   });
 });
 
