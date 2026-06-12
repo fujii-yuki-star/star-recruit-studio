@@ -1,13 +1,14 @@
 // VOICEVOX ローカルエンジンで音声合成する VoiceProvider 実装（Tauri コマンド越し）。
 // Rust 側（voicevox.rs）が localhost:50021 に HTTP 接続する。ブラウザ開発では使わず Mock にフォールバック（store で選択）。
 import { invoke } from '@tauri-apps/api/core';
+import { DEFAULT_VOICE_ID } from '../../domain/constants';
 import type { SynthesizeInput, SynthesizedVoice, VoiceProvider } from '../../domain/voice/voiceProvider';
 
 // 本アプリの voiceId → VOICEVOX の speaker(スタイル)番号。
+const DEFAULT_SPEAKER = 3; // ずんだもん（ノーマル）
 const SPEAKER_BY_VOICE_ID: Record<string, number> = {
-  voicevox_zundamon: 3, // ずんだもん（ノーマル）
+  [DEFAULT_VOICE_ID]: DEFAULT_SPEAKER,
 };
-const DEFAULT_SPEAKER = 3;
 
 export class VoicevoxProvider implements VoiceProvider {
   async synthesize(input: SynthesizeInput): Promise<SynthesizedVoice> {

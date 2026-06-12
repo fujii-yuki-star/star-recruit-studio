@@ -41,6 +41,8 @@ interface ProjectState {
   narrationAudioById: Record<string, string>;
   /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
   isGeneratingNarration: boolean;
+  /** ナレーション生成に失敗したときのユーザー向け文言（成功/再試行で消える）。 */
+  narrationError: string | null;
   /** Mock AI → 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
   generate: () => Promise<void>;
   /** デモ/テスト用にエラー状態へ。 */
@@ -101,6 +103,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   assetSrcById: {},
   narrationAudioById: {},
   isGeneratingNarration: false,
+  narrationError: null,
   generate: async () => {
     set({ status: "generating" });
     try {
@@ -148,6 +151,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets: sampleAssets,
       assetSrcById: {},
       narrationAudioById: {},
+      narrationError: null,
     }),
   saveProject: async () => {
     set({ saveStatus: "saving" });
@@ -204,6 +208,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       warnings: [],
       assetSrcById,
       narrationAudioById: {},
+      narrationError: null,
     });
     setLastProjectId(projectId);
   },
@@ -288,6 +293,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
       }));
     setStatus("pending");
+    set({ narrationError: null });
     try {
       const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
       const result = await voiceProvider.synthesize({ text: scene.narration.text, ...v });
@@ -297,8 +303,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
         narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
       }));
-    } catch {
+    } catch (e) {
       setStatus("failed");
+      set({
+        narrationError:
+          typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+      });
     }
   },
   generateAllNarrations: async () => {

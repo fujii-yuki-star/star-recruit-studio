@@ -69,7 +69,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, generate, updateScene, addAsset,
-    generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById,
+    generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
   } = useProjectStore();
 
   const [filter, setFilter] = useState<AssetFilter>("all");
@@ -370,6 +370,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </div>
               </div>
               <p className="field-hint">実際の音声には VOICEVOX の起動が必要です（未起動だと作成に失敗します）。</p>
+              {selected.narration.status === "failed" && narrationError && (
+                <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
+                  <span>{narrationError}</span>
+                </div>
+              )}
             </div>
 
             <div className="field">
