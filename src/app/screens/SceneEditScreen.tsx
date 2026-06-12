@@ -42,6 +42,13 @@ const slotLabel: Record<string, string> = {
   logo: "ロゴ",
 };
 
+const narrationStatusLabel: Record<string, string> = {
+  none: "未作成",
+  pending: "作成中…",
+  generated: "作成済み",
+  failed: "作成に失敗",
+};
+
 // スロットの slotType と素材の assetType の整合で、割り当て可能な素材を絞る（§5）。
 function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
   return assets.filter((a) => {
@@ -60,7 +67,8 @@ function assetThumbClass(type: Asset["assetType"]): string {
 }
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
-  const { status, scenes, templates, assets, generate, updateScene, addAsset } = useProjectStore();
+  const { status, scenes, templates, assets, generate, updateScene, addAsset, generateNarration, generateAllNarrations } =
+    useProjectStore();
 
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
@@ -122,6 +130,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
         <div className="topbar-title">場面編集</div>
         <div className="topbar-actions">
+          <button className="btn btn-ghost" onClick={() => void generateAllNarrations()}>
+            全場面の声を作成
+          </button>
           <button className="btn btn-secondary" onClick={() => onNavigate("draft")}>
             台本表に戻る
           </button>
@@ -322,6 +333,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 value={selected.narration.text}
                 onChange={(e) => patch((s) => ({ ...s, narration: { ...s.narration, text: e.target.value } }))}
               />
+              <div className="row-between" style={{ marginTop: 6 }}>
+                <span className="text-sm text-muted">
+                  音声：{narrationStatusLabel[selected.narration.status] ?? selected.narration.status}
+                </span>
+                <button
+                  className="btn btn-secondary btn-icon text-sm"
+                  onClick={() => void generateNarration(selected.sceneId)}
+                  disabled={selected.narration.status === "pending" || selected.narration.text.trim().length === 0}
+                >
+                  {selected.narration.status === "generated" ? "声を作り直す" : "声を作成"}
+                </button>
+              </div>
             </div>
 
             <div className="field">

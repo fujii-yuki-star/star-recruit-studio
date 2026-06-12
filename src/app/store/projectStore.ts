@@ -17,6 +17,8 @@ import {
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
+import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
+import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -33,6 +35,8 @@ interface ProjectState {
   assets: Asset[];
   /** 素材の表示用src（data URL）。assetId→src。project.json には入れず永続化しない。 */
   assetSrcById: Record<string, string>;
+  /** 生成済みナレーション音声（data URL）。sceneId→src。永続化しない（V-Bでファイル化予定）。 */
+  narrationAudioById: Record<string, string>;
   /** Mock AI → 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
   generate: () => Promise<void>;
   /** デモ/テスト用にエラー状態へ。 */
@@ -56,9 +60,14 @@ interface ProjectState {
   setAssetImage: (assetId: string, file: { name: string; dataUrl: string }) => Promise<void>;
   /** 新しい素材（画像）を登録する。新規IDを採番し、プロジェクトフォルダへ取り込む。 */
   addAsset: (file: { name: string; dataUrl: string }) => Promise<void>;
+  /** 指定場面のナレーション音声を生成する（narration.status を更新）。 */
+  generateNarration: (sceneId: string) => Promise<void>;
+  /** セリフのある全場面のナレーション音声を生成する。 */
+  generateAllNarrations: () => Promise<void>;
 }
 
 const provider = new MockAiProvider();
+const voiceProvider = new MockVoiceProvider();
 
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
@@ -84,6 +93,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   templates: sampleTemplates,
   assets: sampleAssets,
   assetSrcById: {},
+  narrationAudioById: {},
   generate: async () => {
     set({ status: "generating" });
     try {
@@ -130,6 +140,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       warnings: [],
       assets: sampleAssets,
       assetSrcById: {},
+      narrationAudioById: {},
     }),
   saveProject: async () => {
     set({ saveStatus: "saving" });
@@ -185,6 +196,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       scenes: project.scenes,
       warnings: [],
       assetSrcById,
+      narrationAudioById: {},
     });
     setLastProjectId(projectId);
   },
@@ -258,5 +270,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         saveStatus: "error",
       }));
     }
+  },
+  generateNarration: async (sceneId) => {
+    const scene = get().scenes.find((s) => s.sceneId === sceneId);
+    if (!scene || scene.narration.text.trim().length === 0) return;
+    const setStatus = (status: Scene["narration"]["status"]) =>
+      set((st) => ({
+        scenes: st.scenes.map((s) =>
+          s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status } } : s,
+        ),
+      }));
+    setStatus("pending");
+    try {
+      const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
+      const result = await voiceProvider.synthesize({ text: scene.narration.text, ...v });
+      set((st) => ({
+        scenes: st.scenes.map((s) =>
+          s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: "generated" } } : s,
+        ),
+        narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
+      }));
+    } catch {
+      setStatus("failed");
+    }
+  },
+  generateAllNarrations: async () => {
+    const ids = get()
+      .scenes.filter((s) => s.narration.text.trim().length > 0)
+      .map((s) => s.sceneId);
+    await Promise.all(ids.map((id) => get().generateNarration(id)));
   },
 }));
