@@ -14,7 +14,11 @@ export interface ExportSceneData {
   narrationVolume?: number;
 }
 
-/** 場面ごとのナレーション音声と音量（§6解決済み）。音声が無ければ undefined。 */
+/**
+ * 場面ごとのナレーション音声と解決済み音量(§6)を返すコールバック。
+ * narrationVolume は常に返し、audioBase64 が無い（undefined）場面は無音になる。
+ * コールバック自体を渡さない／場面に対して undefined を返した場合は、音声フィールドを付けない。
+ */
 export type NarrationFor = (
   scene: Scene,
 ) => { audioBase64?: string; narrationVolume: number } | undefined;

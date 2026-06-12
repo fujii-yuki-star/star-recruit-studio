@@ -162,6 +162,13 @@ pub fn run(bin: &Path, args: &[String]) -> Result<String, String> {
     }
 }
 
+/// 技術詳細を開発者向けに stderr へ記録し、ユーザーには行動を示す固定文言を返す（§2-3/§2-5）。
+/// `log` クレート未導入のため eprintln! で記録する（tauri dev のコンソールに出る）。
+fn export_failure(detail: impl std::fmt::Display, user_message: impl Into<String>) -> String {
+    eprintln!("[export] {detail}");
+    user_message.into()
+}
+
 struct SceneFile {
     png: PathBuf,
     audio: Option<PathBuf>,
@@ -178,7 +185,12 @@ fn encode_scenes(
     tmp_dir: &Path,
     output: &Path,
 ) -> Result<(), String> {
-    fs::create_dir_all(tmp_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(tmp_dir).map_err(|e| {
+        export_failure(
+            format!("create tmp dir: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?;
     let mut list = String::new();
     for (i, scene) in scenes.iter().enumerate() {
         let clip_name = format!("scene_{i:03}.mp4");
@@ -196,13 +208,31 @@ fn encode_scenes(
             fps,
             codec,
         );
-        run(ffmpeg, &args).map_err(|e| format!("場面{}のエンコードに失敗: {e}", i + 1))?;
+        run(ffmpeg, &args).map_err(|e| {
+            export_failure(
+                format!("scene {} encode: {e}", i + 1),
+                format!(
+                    "場面{}の変換に失敗しました。もう一度お試しください。",
+                    i + 1
+                ),
+            )
+        })?;
         list.push_str(&format!("file '{clip_name}'\n"));
     }
     let list_path = tmp_dir.join("concat.txt");
-    fs::write(&list_path, list).map_err(|e| e.to_string())?;
+    fs::write(&list_path, list).map_err(|e| {
+        export_failure(
+            format!("write concat list: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?;
     let args = concat_args(&list_path.to_string_lossy(), &output.to_string_lossy());
-    run(ffmpeg, &args).map_err(|e| format!("場面の結合に失敗: {e}"))?;
+    run(ffmpeg, &args).map_err(|e| {
+        export_failure(
+            format!("concat: {e}"),
+            "場面の結合に失敗しました。もう一度お試しください。",
+        )
+    })?;
     Ok(())
 }
 
@@ -273,27 +303,59 @@ pub fn export_video(
     let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).map_err(|_| {
         "動画の書き出しツールが見つかりません。設定でツールの場所を指定してください。".to_string()
     })?;
-    let codec = pick_codec(&encoders)
-        .ok_or_else(|| "この動画形式で書き出せる設定が見つかりません。".to_string())?;
+    let codec = pick_codec(&encoders).ok_or_else(|| {
+        "動画の書き出し機能が使えません。設定でツールの場所を確認してください。".to_string()
+    })?;
 
     let tmp = std::env::temp_dir().join("yuko_recruit_export");
     let _ = fs::remove_dir_all(&tmp);
-    fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&tmp).map_err(|e| {
+        export_failure(
+            format!("create tmp dir: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?;
 
     let mut files: Vec<SceneFile> = Vec::with_capacity(scenes.len());
     for (i, s) in scenes.iter().enumerate() {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(strip_data_url(&s.png_base64))
-            .map_err(|e| format!("場面{}の画像を読み取れませんでした: {e}", i + 1))?;
+            .map_err(|e| {
+                export_failure(
+                    format!("scene {} png decode: {e}", i + 1),
+                    format!(
+                        "場面{}の画像を読み取れませんでした。もう一度お試しください。",
+                        i + 1
+                    ),
+                )
+            })?;
         let png = tmp.join(format!("scene_{i:03}.png"));
-        fs::write(&png, bytes).map_err(|e| e.to_string())?;
+        fs::write(&png, bytes).map_err(|e| {
+            export_failure(
+                format!("write scene png: {e}"),
+                "動画の保存中に問題が発生しました。もう一度お試しください。",
+            )
+        })?;
         let audio = match &s.audio_base64 {
             Some(b64) if !b64.is_empty() => {
                 let abytes = base64::engine::general_purpose::STANDARD
                     .decode(strip_data_url(b64))
-                    .map_err(|e| format!("場面{}の音声を読み取れませんでした: {e}", i + 1))?;
+                    .map_err(|e| {
+                        export_failure(
+                            format!("scene {} audio decode: {e}", i + 1),
+                            format!(
+                                "場面{}の音声を読み取れませんでした。もう一度お試しください。",
+                                i + 1
+                            ),
+                        )
+                    })?;
                 let wav = tmp.join(format!("scene_{i:03}.wav"));
-                fs::write(&wav, abytes).map_err(|e| e.to_string())?;
+                fs::write(&wav, abytes).map_err(|e| {
+                    export_failure(
+                        format!("write scene wav: {e}"),
+                        "動画の保存中に問題が発生しました。もう一度お試しください。",
+                    )
+                })?;
                 Some(wav)
             }
             _ => None,
@@ -310,9 +372,19 @@ pub fn export_video(
     let exports = app
         .path()
         .app_data_dir()
-        .map_err(|e| e.to_string())?
+        .map_err(|e| {
+            export_failure(
+                format!("app data dir: {e}"),
+                "動画の保存先を準備できませんでした。もう一度お試しください。",
+            )
+        })?
         .join("exports");
-    fs::create_dir_all(&exports).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&exports).map_err(|e| {
+        export_failure(
+            format!("create exports dir: {e}"),
+            "動画の保存先を準備できませんでした。もう一度お試しください。",
+        )
+    })?;
     let out = exports.join(format!("{}.mp4", sanitize_file_name(&file_name)));
     encode_scenes(&ffmpeg, &files, codec, DEFAULT_FPS, &tmp, &out)?;
 

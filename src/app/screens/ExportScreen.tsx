@@ -67,7 +67,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       setResultPath(report.outputPath);
       setPhase("done");
     } catch (e) {
-      // Tauriコマンドの失敗は文字列で reject される（Errorインスタンスではない）。原因をそのまま表示する。
+      // Tauriコマンドの失敗は文字列で reject される（Errorインスタンスではない）。
+      // Rust側でユーザー向けに整えた文言（技術詳細は stderr へ記録済み）なので、そのまま表示する。
       const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
       setMessage(detail || "動画の保存に失敗しました。もう一度お試しください。");
       setPhase("error");
