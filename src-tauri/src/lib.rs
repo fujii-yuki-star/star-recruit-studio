@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
 
+mod assets;
 mod ffmpeg;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -96,7 +97,9 @@ pub fn run() {
             save_project,
             load_project,
             list_projects,
-            ffmpeg::export_video
+            ffmpeg::export_video,
+            assets::import_asset,
+            assets::read_asset_data_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

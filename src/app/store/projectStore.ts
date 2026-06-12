@@ -16,6 +16,7 @@ import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
+import { importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -51,8 +52,8 @@ interface ProjectState {
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
   removeAsset: (assetId: string) => void;
-  /** 素材の表示用src（data URL）を設定する。プレビュー/出力で使う。 */
-  setAssetSrc: (assetId: string, dataUrl: string) => void;
+  /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
+  setAssetImage: (assetId: string, file: { name: string; dataUrl: string }) => Promise<void>;
 }
 
 const provider = new MockAiProvider();
@@ -148,6 +149,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   loadProject: async (projectId) => {
     const text = await loadProjectDoc(projectId);
     const project = parseProjectDoc(text);
+    // ディスクの素材を data URL に復元（filePath を持つもの。未配置のサンプル等は null でスキップ）。
+    const assetSrcById: Record<string, string> = {};
+    for (const a of project.assets) {
+      if (!a.filePath) continue;
+      const url = await readAssetDataUrl(project.projectId, a.filePath);
+      if (url) assetSrcById[a.assetId] = url;
+    }
     set({
       status: "ready",
       saveStatus: "idle",
@@ -167,7 +175,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       parts: project.parts,
       scenes: project.scenes,
       warnings: [],
-      assetSrcById: {},
+      assetSrcById,
     });
   },
   listProjects: () => listProjectSummaries(),
@@ -179,6 +187,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)) })),
   removeAsset: (assetId) =>
     set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId) })),
-  setAssetSrc: (assetId, dataUrl) =>
-    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl } })),
+  setAssetImage: async (assetId, file) => {
+    // 即時表示（メモリ内 data URL）。
+    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: file.dataUrl } }));
+    // 保存先フォルダの名前空間のため projectId を確保する。
+    let projectId = get().meta.projectId;
+    if (!projectId) {
+      const existing = await listProjectSummaries();
+      projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+      set((s) => ({ meta: { ...s.meta, projectId } }));
+    }
+    const parts = file.name.split(".");
+    const rawExt = parts.length > 1 ? parts[parts.length - 1] : "png";
+    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+    const filePath = await importAssetFile(projectId, `${assetId}.${ext}`, file.dataUrl);
+    if (filePath) {
+      set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)) }));
+    }
+  },
 }));

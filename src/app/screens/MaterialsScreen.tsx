@@ -45,7 +45,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen() {
-  const { assets, updateAsset, removeAsset, assetSrcById, setAssetSrc } = useProjectStore();
+  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -64,9 +64,12 @@ export function MaterialsScreen() {
   function onPickImage(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !selected) return;
+    const assetId = selected.assetId;
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === "string") setAssetSrc(selected.assetId, reader.result);
+      if (typeof reader.result === "string") {
+        void setAssetImage(assetId, { name: file.name, dataUrl: reader.result });
+      }
     };
     reader.readAsDataURL(file);
   }
