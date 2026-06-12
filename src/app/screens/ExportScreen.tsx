@@ -149,7 +149,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   ? "保存中…"
                   : saveStatus === "saved"
                     ? "保存しました"
-                    : "プロジェクトを保存"}
+                    : saveStatus === "error"
+                      ? "保存に失敗"
+                      : "プロジェクトを保存"}
               </button>
               <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy}>
                 <FilmIcon size={20} />
@@ -166,7 +168,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {phase === "idle" && (
             <div className="text-center text-muted" style={{ padding: "var(--gap-lg) 0" }}>
               <FilmIcon size={32} className="text-faint" />
-              <p className="mt text-sm">「保存を開始」を押すと、ここに進行状況が表示されます。</p>
+              <p className="mt text-sm">「動画を出力」を押すと、ここに進行状況が表示されます。</p>
             </div>
           )}
 

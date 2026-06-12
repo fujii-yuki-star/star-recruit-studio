@@ -47,7 +47,13 @@ function App() {
   }, [loadProject]);
 
   const saveLabel =
-    saveStatus === "saving" ? "保存中…" : saveStatus === "saved" ? "保存しました" : "保存";
+    saveStatus === "saving"
+      ? "保存中…"
+      : saveStatus === "saved"
+        ? "保存しました"
+        : saveStatus === "error"
+          ? "保存に失敗"
+          : "保存";
 
   function renderScreen() {
     switch (screen) {

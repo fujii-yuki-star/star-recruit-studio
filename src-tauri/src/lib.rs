@@ -28,6 +28,12 @@ fn projects_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(base.join("projects"))
 }
 
+/// project_id がパス構成要素として安全か（パストラバーサル・区切り防止）。
+/// 採番は proj_YYYYMMDD_NNN（英数字と _ のみ）。assets モジュールからも使う。
+pub(crate) fn is_safe_project_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// project.json を appData/projects/<projectId>/ に保存し、保存先パスを返す。
 #[tauri::command]
 fn save_project(app: tauri::AppHandle, project_json: String) -> Result<String, String> {
@@ -38,6 +44,9 @@ fn save_project(app: tauri::AppHandle, project_json: String) -> Result<String, S
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "projectId がありません".to_string())?;
+    if !is_safe_project_id(project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
     let dir = projects_dir(&app)?.join(project_id);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("project.json");
@@ -48,6 +57,9 @@ fn save_project(app: tauri::AppHandle, project_json: String) -> Result<String, S
 /// appData/projects/<projectId>/project.json を読み、本文を返す。
 #[tauri::command]
 fn load_project(app: tauri::AppHandle, project_id: String) -> Result<String, String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
     let path = projects_dir(&app)?.join(&project_id).join("project.json");
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }

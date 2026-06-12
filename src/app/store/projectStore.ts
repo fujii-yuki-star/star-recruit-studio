@@ -150,12 +150,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   loadProject: async (projectId) => {
     const text = await loadProjectDoc(projectId);
     const project = parseProjectDoc(text);
-    // ディスクの素材を data URL に復元（filePath を持つもの。未配置のサンプル等は null でスキップ）。
+    // ディスクの素材を data URL に復元（filePath を持つもの。未配置のサンプル等は null でスキップ）。並列実行。
+    const loaded = await Promise.all(
+      project.assets
+        .filter((a) => a.filePath)
+        .map(async (a) => {
+          const url = await readAssetDataUrl(project.projectId, a.filePath);
+          return url ? ([a.assetId, url] as const) : null;
+        }),
+    );
     const assetSrcById: Record<string, string> = {};
-    for (const a of project.assets) {
-      if (!a.filePath) continue;
-      const url = await readAssetDataUrl(project.projectId, a.filePath);
-      if (url) assetSrcById[a.assetId] = url;
+    for (const entry of loaded) {
+      if (entry) assetSrcById[entry[0]] = entry[1];
     }
     set({
       status: "ready",
@@ -192,19 +198,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setAssetImage: async (assetId, file) => {
     // 即時表示（メモリ内 data URL）。
     set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: file.dataUrl } }));
-    // 保存先フォルダの名前空間のため projectId を確保する。
-    let projectId = get().meta.projectId;
-    if (!projectId) {
-      const existing = await listProjectSummaries();
-      projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
-      set((s) => ({ meta: { ...s.meta, projectId } }));
-    }
-    const parts = file.name.split(".");
-    const rawExt = parts.length > 1 ? parts[parts.length - 1] : "png";
-    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
-    const filePath = await importAssetFile(projectId, `${assetId}.${ext}`, file.dataUrl);
-    if (filePath) {
-      set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)) }));
+    try {
+      // 保存先フォルダの名前空間のため projectId を確保する。
+      let projectId = get().meta.projectId;
+      if (!projectId) {
+        const existing = await listProjectSummaries();
+        projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        set((s) => ({ meta: { ...s.meta, projectId } }));
+      }
+      const parts = file.name.split(".");
+      const rawExt = parts.length > 1 ? parts[parts.length - 1] : "png";
+      const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+      const filePath = await importAssetFile(projectId, `${assetId}.${ext}`, file.dataUrl);
+      if (filePath) {
+        set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)) }));
+      }
+    } catch {
+      // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
+      set({ saveStatus: "error" });
     }
   },
 }));
