@@ -1,0 +1,91 @@
+# .github/workflows/claude-auto-review.yml
+#
+# Claude Code による Pull Request の「自動」レビュー（PRを開く / レビュー可にする / 更新で起動）。
+#
+# 方針:
+#  - 既存の claude-code-review.yml（`@claude` メンション起動・対話用）とは別物。本ファイルは
+#    pull_request イベントで自動起動し、開いた時点で一次レビューを自動投稿する。
+#  - 認証は Claude サブスク(Pro/Max)の OAuth トークン。リポジトリ Secret `CLAUDE_CODE_OAUTH_TOKEN` を参照
+#    （`claude setup-token` で生成。従量APIキーではなくサブスク同梱枠で動作。コードには書かない）。
+#  - コスト対策: 非ドラフトのみ / concurrency で最新だけ実行（古い実行はキャンセル）/ --max-turns 上限 / timeout。
+#    `synchronize`（push毎の再レビュー）がコストの主ダイヤル。不要なら types から外す。
+#  - セキュリティ: フォークPRには Secret が渡らないため明示的にスキップ（第三者がトークン付きジョブを
+#    起動できないようにする）。pull_request_target は使わない。
+
+name: Claude Auto PR Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+
+# 自動レビューに必要な最小権限（コードは読むだけ、PRへコメントを書く）。
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+# 同一PRでの多重起動を防ぐ。自動レビューは最新の状態だけ見れば良いので古い実行はキャンセル。
+concurrency:
+  group: claude-auto-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-review:
+    # 非ドラフト かつ 同一リポジトリ発のPRのみ（フォークPRには Secret が渡らない＝安全のため明示スキップ）。
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # 暴走防止のハードキャップ（コスト対策）。
+
+    steps:
+      # Secret 未設定を、原因が分かる形で即座に失敗させる（トークンの値はログに出さない）。
+      - name: Verify CLAUDE_CODE_OAUTH_TOKEN secret is set
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+            echo "::error title=CLAUDE_CODE_OAUTH_TOKEN is not configured::リポジトリSecret 'CLAUDE_CODE_OAUTH_TOKEN' が未設定です。Claude Code CLI の 'claude setup-token'（Pro/Max）で生成し、Settings > Secrets and variables > Actions で登録してください。"
+            exit 1
+          fi
+          echo "CLAUDE_CODE_OAUTH_TOKEN is configured."
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude auto PR review
+        uses: anthropics/claude-code-action@v1
+        with:
+          # 認証: Claude サブスク(Pro/Max)の OAuth トークン（Secret 参照。従量APIキーではない）。
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # GitHub 操作用トークン。上の permissions 範囲で使用する。
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # prompt を渡す＝自動実行モード（`@claude` メンション待ちにしない）。レビュー方針は正典準拠。
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            あなたは本リポジトリのPRレビュアーです。必ず日本語でレビューしてください。
+            まず CLAUDE.md と docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md・12_AI_PROMPT_AND_MAPPING.md・schemas/ を読み、その規範に従ってください（正典）。
+            PRブランチは作業ディレクトリにチェックアウト済みです。変更内容は `gh pr diff` で確認してください。
+
+            重点的に確認する観点:
+            - ロジックバグ／既存仕様・正典(11/12/schemas)との不整合
+            - 通常UIへの技術用語の漏れ（JSON/FFmpeg/LLM/Provider/templateId/assetId/レンダリング/バリデーション 等は表示禁止）
+            - ユーザー向けエラーが「原因」ではなく「次の行動」を示しているか
+            - セキュリティ（秘密情報の混入・外部送信、元動画など送ってはいけないデータの送信）
+            - 例外処理・境界値・テスト不足
+            - 責務分離（domain / infrastructure / renderer / app）とリグレッションリスク
+            指摘しないもの: lint や formatter で自動検出できる事項、フォーマットのみの指摘、重大度の低い好みの問題。
+
+            投稿方法（レビュー文を本文メッセージとして返さず、必ずGitHubへ投稿すること）:
+            - 全体所感は `gh pr comment` で1件にまとめる。
+            - 具体的な指摘は `mcp__github_inline_comment__create_inline_comment`（confirmed: true）で該当ファイル・行に付ける。各指摘は理由と修正案を簡潔に。
+            - 指摘が無い観点は「問題なし」と短く述べ、冗長な要約は避ける。
+          # --max-turns はコストの主ダイヤル（下げるほど安価・浅い、上げるほど網羅的）。
+          # 読み取り（Read/Grep/Glob）＋ gh＋インラインコメントのみ許可（書き換えはさせない）。
+          claude_args: |
+            --max-turns 20
+            --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
