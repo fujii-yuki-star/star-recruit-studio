@@ -1,7 +1,7 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは当面 MockProvider。
 import { create } from "zustand";
-import { DEFAULT_TARGET_DURATION_SEC } from "../../domain/constants";
+import { BGM_VOLUME, DEFAULT_TARGET_DURATION_SEC } from "../../domain/constants";
 import type { Asset, CompanyInfo, Part, Scene, Warning } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
@@ -67,6 +67,8 @@ interface ProjectState {
   setAssetImage: (assetId: string, file: { name: string; dataUrl: string }) => Promise<void>;
   /** 新しい素材（画像）を登録する。新規IDを採番し、プロジェクトフォルダへ取り込む。 */
   addAsset: (file: { name: string; dataUrl: string }) => Promise<void>;
+  /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
+  setBgm: (file: { name: string; dataUrl: string }) => Promise<void>;
   /** 指定場面のナレーション音声を生成する（narration.status を更新）。 */
   generateNarration: (sceneId: string) => Promise<void>;
   /** セリフのある全場面のナレーション音声を生成する。 */
@@ -316,6 +318,50 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
         saveStatus: "error",
       }));
+    }
+  },
+  setBgm: async (file) => {
+    try {
+      let projectId = get().meta.projectId;
+      if (!projectId) {
+        const existing = await listProjectSummaries();
+        projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+      }
+      // BGM はプロジェクトに1つ。既存があればその assetId を使い回してファイルを差し替える。
+      const existingBgm = get().assets.find((a) => a.assetType === "bgm");
+      const assetId = existingBgm?.assetId ?? createAssetId(get().assets.map((a) => a.assetId));
+      const parts = file.name.split(".");
+      const rawExt = parts.length > 1 ? parts[parts.length - 1] : "mp3";
+      const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "mp3";
+      const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : file.name;
+      const fileName = `${assetId}.${ext}`;
+      // 先に取り込み（失敗時はストアを変えない＝ゴースト防止）。Tauri 非検出時は null（非永続）。
+      const filePath = await importAssetFile(projectId, fileName, file.dataUrl);
+      const asset: Asset = {
+        assetId,
+        assetType: "bgm",
+        displayName: baseName.trim() || "BGM",
+        filePath: filePath ?? `assets/${fileName}`,
+      };
+      set((s) => ({
+        meta: {
+          ...s.meta,
+          projectId,
+          bgmSettings: {
+            ...s.meta.bgmSettings,
+            enabled: true,
+            assetId,
+            volume: s.meta.bgmSettings?.volume ?? BGM_VOLUME,
+            loop: true,
+          },
+        },
+        assets: existingBgm
+          ? s.assets.map((a) => (a.assetId === assetId ? asset : a))
+          : [...s.assets, asset],
+        assetSrcById: { ...s.assetSrcById, [assetId]: file.dataUrl },
+      }));
+    } catch {
+      set({ saveStatus: "error" });
     }
   },
   generateNarration: async (sceneId) => {

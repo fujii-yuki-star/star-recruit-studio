@@ -126,6 +126,50 @@ pub fn concat_args(list_file: &str, out: &str) -> Vec<String> {
     ]
 }
 
+/// 結合済み動画（ナレーション入り）に BGM を重ねる引数（純粋）。
+/// BGM はループ（-stream_loop）し、音量・フェードを適用、amix で既存音声と合成する。
+/// normalize=0 で各入力の音量を保つ（既定の正規化で音が痩せるのを防ぐ）。duration=first で動画長に合わせる。
+pub fn mix_bgm_args(
+    video: &str,
+    bgm: &str,
+    volume: f64,
+    fade_in_sec: f64,
+    fade_out_sec: f64,
+    total_sec: f64,
+    out: &str,
+) -> Vec<String> {
+    let fade_out_start = (total_sec - fade_out_sec).max(0.0);
+    let filter = format!(
+        "[1:a]volume={volume},afade=t=in:st=0:d={fade_in_sec},afade=t=out:st={fade_out_start}:d={fade_out_sec}[bg];[0:a][bg]amix=inputs=2:duration=first:normalize=0[a]"
+    );
+    vec![
+        "-y".into(),
+        "-i".into(),
+        video.into(),
+        "-stream_loop".into(),
+        "-1".into(),
+        "-i".into(),
+        bgm.into(),
+        "-filter_complex".into(),
+        filter,
+        "-map".into(),
+        "0:v".into(),
+        "-map".into(),
+        "[a]".into(),
+        "-c:v".into(),
+        "copy".into(),
+        "-c:a".into(),
+        "aac".into(),
+        "-ar".into(),
+        "44100".into(),
+        "-ac".into(),
+        "2".into(),
+        "-t".into(),
+        format!("{total_sec}"),
+        out.into(),
+    ]
+}
+
 /// ffmpeg バイナリを解決（環境変数 → appData/bin → localAppData/bin → PATH）。
 pub fn resolve_ffmpeg(app: &tauri::AppHandle) -> PathBuf {
     resolve_bin(app, "FFMPEG_PATH", "ffmpeg")
@@ -280,6 +324,20 @@ pub struct SceneInput {
     narration_volume: Option<f64>,
 }
 
+/// BGM 入力（プロジェクト全体に重ねる）。data URL も可。volume は §6 で解決済み。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BgmInput {
+    audio_base64: String,
+    volume: f64,
+    #[serde(default)]
+    fade_in_sec: f64,
+    #[serde(default)]
+    fade_out_sec: f64,
+    /// 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。
+    file_ext: String,
+}
+
 /// エクスポート結果の要約。
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -295,6 +353,7 @@ pub fn export_video(
     app: tauri::AppHandle,
     scenes: Vec<SceneInput>,
     file_name: String,
+    bgm: Option<BgmInput>,
 ) -> Result<ExportReport, String> {
     if scenes.is_empty() {
         return Err("書き出す場面がありません。".into());
@@ -386,7 +445,49 @@ pub fn export_video(
         )
     })?;
     let out = exports.join(format!("{}.mp4", sanitize_file_name(&file_name)));
-    encode_scenes(&ffmpeg, &files, codec, DEFAULT_FPS, &tmp, &out)?;
+
+    // BGM があれば、場面結合は一時ファイルへ→最後に BGM を重ねて out へ。無ければ直接 out へ。
+    let video_path = if bgm.is_some() {
+        tmp.join("video.mp4")
+    } else {
+        out.clone()
+    };
+    encode_scenes(&ffmpeg, &files, codec, DEFAULT_FPS, &tmp, &video_path)?;
+
+    if let Some(b) = bgm {
+        let bg_bytes = base64::engine::general_purpose::STANDARD
+            .decode(strip_data_url(&b.audio_base64))
+            .map_err(|e| {
+                export_failure(
+                    format!("bgm decode: {e}"),
+                    "BGMを読み取れませんでした。別のファイルでお試しください。",
+                )
+            })?;
+        let ext = sanitize_file_name(&b.file_ext);
+        let bgm_path = tmp.join(format!("bgm.{ext}"));
+        fs::write(&bgm_path, bg_bytes).map_err(|e| {
+            export_failure(
+                format!("write bgm: {e}"),
+                "動画の保存中に問題が発生しました。もう一度お試しください。",
+            )
+        })?;
+        let total: f64 = files.iter().map(|f| f.duration_sec).sum();
+        let args = mix_bgm_args(
+            &video_path.to_string_lossy(),
+            &bgm_path.to_string_lossy(),
+            b.volume,
+            b.fade_in_sec,
+            b.fade_out_sec,
+            total,
+            &out.to_string_lossy(),
+        );
+        run(&ffmpeg, &args).map_err(|e| {
+            export_failure(
+                format!("bgm mix: {e}"),
+                "BGMの合成に失敗しました。もう一度お試しください。",
+            )
+        })?;
+    }
 
     Ok(ExportReport {
         output_path: out.to_string_lossy().into_owned(),
@@ -449,6 +550,22 @@ mod tests {
         let a = concat_args("list.txt", "out.mp4");
         assert!(a.iter().any(|s| s == "concat"));
         assert!(a.windows(2).any(|w| w[0] == "-c" && w[1] == "copy"));
+    }
+
+    #[test]
+    fn mix_bgm_args_applies_loop_volume_fade_and_amix() {
+        let a = mix_bgm_args("v.mp4", "bgm.mp3", 0.25, 1.0, 2.0, 10.0, "out.mp4");
+        // BGM をループ入力にする。
+        assert!(a.windows(2).any(|w| w[0] == "-stream_loop" && w[1] == "-1"));
+        // 音量・フェード（out 開始 = 総尺 10 - フェード 2 = 8）・amix（normalize=0）を適用。
+        assert!(a.iter().any(|s| s.contains("volume=0.25")));
+        assert!(a.iter().any(|s| s.contains("afade=t=in:st=0:d=1")));
+        assert!(a.iter().any(|s| s.contains("afade=t=out:st=8:d=2")));
+        assert!(a
+            .iter()
+            .any(|s| s.contains("amix=inputs=2:duration=first:normalize=0")));
+        // 映像は再エンコードしない。
+        assert!(a.windows(2).any(|w| w[0] == "-c:v" && w[1] == "copy"));
     }
 
     #[test]
@@ -521,6 +638,84 @@ mod tests {
         let codec = pick_codec(&encoders).expect("an h264 encoder");
         let out = tmp.join("final.mp4");
         encode_scenes(&ffmpeg, &scenes, codec, 30, &tmp, &out).expect("encode_scenes");
+        assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
+    }
+
+    // BGM 合成のE2E（amix/afade/stream_loop のフィルタグラフが実FFmpegで通るか）。FFMPEG_PATH 未設定ならスキップ。
+    #[test]
+    fn mix_bgm_produces_output_when_ffmpeg_available() {
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_bgm_unittest");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // 1場面の動画（無音トラック付き）を作る。
+        let png = tmp.join("src.png");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "color=c=green:s=320x180".into(),
+                "-frames:v".into(),
+                "1".into(),
+                png.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("generate png");
+        let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
+        let codec = pick_codec(&encoders).expect("an h264 encoder");
+        let video = tmp.join("video.mp4");
+        encode_scenes(
+            &ffmpeg,
+            &[SceneFile {
+                png,
+                audio: None,
+                narration_volume: 1.0,
+                duration_sec: 2.0,
+            }],
+            codec,
+            30,
+            &tmp,
+            &video,
+        )
+        .expect("encode video");
+
+        // 動画より長い BGM を作り、ループ・フェード・音量つきで合成する。
+        let bgm = tmp.join("bgm.wav");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-t".into(),
+                "3".into(),
+                "-i".into(),
+                "sine=frequency=220:sample_rate=44100".into(),
+                bgm.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("generate bgm");
+        let out = tmp.join("final.mp4");
+        let args = mix_bgm_args(
+            &video.to_string_lossy(),
+            &bgm.to_string_lossy(),
+            0.25,
+            0.5,
+            0.5,
+            2.0,
+            &out.to_string_lossy(),
+        );
+        run(&ffmpeg, &args).expect("bgm mix");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 }
