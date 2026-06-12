@@ -69,6 +69,18 @@ function formatYmd(d: Date): string {
   return `${y}${m}${day}`;
 }
 
+/** asset_NNN を発行する（§2.1）。既存IDと衝突しない最小の3桁連番。 */
+export function createAssetId(existingIds: readonly string[]): string {
+  const used = new Set(existingIds);
+  let n = 1;
+  let id = `asset_${String(n).padStart(3, '0')}`;
+  while (used.has(id)) {
+    n += 1;
+    id = `asset_${String(n).padStart(3, '0')}`;
+  }
+  return id;
+}
+
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
 export function assembleProject(
   header: ProjectHeader,
