@@ -1,6 +1,6 @@
 // VOICEVOX ローカルエンジン（HTTP）連携（infrastructure 境界）。
 // 13 §4：MVP はローカルエンジン接続を VoiceProvider 越しに行う／ADR-0003：ずんだもん＝ナレーター。
-// 既定 http://localhost:50021（環境変数 VOICEVOX_URL で上書き可）。/audio_query → /synthesis で WAV を得る。
+// 既定 http://localhost:50021（設定の接続先 base_url → 環境変数 VOICEVOX_URL の順で上書き）。/audio_query → /synthesis で WAV を得る。
 use base64::Engine as _;
 use std::sync::OnceLock;
 
@@ -22,8 +22,12 @@ pub async fn synthesize_voice(
     speed: f64,
     pitch: f64,
     intonation: f64,
+    base_url: Option<String>,
 ) -> Result<String, String> {
-    let base = voicevox_base();
+    // 設定の接続先を最優先。空なら環境変数→既定にフォールバック。
+    let base = base_url
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(voicevox_base);
     let client = http_client();
     let speaker_str = speaker.to_string();
 
