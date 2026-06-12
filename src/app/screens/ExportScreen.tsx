@@ -1,11 +1,13 @@
 import { useState } from "react";
+import type { ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
 import { buildExportScenes } from "../../renderer/export/buildExportScenes";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
-import { resolveNarrationVolume } from "../../domain/voice/audioMix";
+import type { BgmInput } from "../../infrastructure/ffmpegExport";
+import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 
 interface ExportProps {
   onNavigate: (screen: ScreenId) => void;
@@ -21,11 +23,15 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
+  const assets = useProjectStore((s) => s.assets);
+  const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
+  const setBgm = useProjectStore((s) => s.setBgm);
 
   const [fileName, setFileName] = useState("会社紹介動画_2026春");
   const [size, setSize] = useState("fullhd");
   const [withSubtitle, setWithSubtitle] = useState(true);
-  const [withBgm, setWithBgm] = useState(true);
+  // BGM の入/切は前回の設定（bgmSettings.enabled）を初期値にする。未設定なら入。
+  const [withBgm, setWithBgm] = useState(() => bgmSettings?.enabled ?? true);
 
   const [phase, setPhase] = useState<ExportPhase>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -33,6 +39,22 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [message, setMessage] = useState("");
 
   const busy = phase === "rendering" || phase === "encoding";
+
+  // assetId が未設定(null/undefined)なら一致せず undefined（assetId は非空文字）。
+  const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
+
+  function onPickBgm(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        void setBgm({ name: file.name, dataUrl: reader.result });
+      }
+    };
+    reader.readAsDataURL(file);
+  }
 
   async function startExport() {
     if (!canExport()) {
@@ -63,7 +85,18 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         (done, total) => setProgress({ done, total }),
       );
       setPhase("encoding");
-      const report = await exportVideo(built, fileName.trim() || "export");
+      let bgm: BgmInput | undefined;
+      if (withBgm && bgmSettings?.enabled && bgmAsset && assetSrcById[bgmAsset.assetId]) {
+        const fileExt = (bgmAsset.filePath.split(".").pop() || "mp3").toLowerCase();
+        bgm = {
+          audioBase64: assetSrcById[bgmAsset.assetId],
+          volume: resolveBgmVolume(undefined, bgmSettings),
+          fadeInSec: bgmSettings.fadeInSec ?? 0,
+          fadeOutSec: bgmSettings.fadeOutSec ?? 0,
+          fileExt,
+        };
+      }
+      const report = await exportVideo(built, fileName.trim() || "export", bgm);
       setResultPath(report.outputPath);
       setPhase("done");
     } catch (e) {
@@ -137,9 +170,26 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </span>
             <Switch on={withBgm} onChange={setWithBgm} label="BGMを入れる" />
           </div>
+          {withBgm && (
+            <div className="field" style={{ marginTop: 8 }}>
+              <input id="bgmFile" type="file" accept="audio/*" hidden onChange={onPickBgm} />
+              <div className="row-between">
+                <span className="text-sm text-muted">
+                  {bgmAsset ? `BGM：${bgmAsset.displayName}` : "BGMファイルが未選択です"}
+                </span>
+                <label
+                  htmlFor="bgmFile"
+                  className="btn btn-ghost btn-icon text-sm"
+                  style={{ cursor: "pointer" }}
+                >
+                  {bgmAsset ? "BGMを変更する" : "BGMを選ぶ"}
+                </label>
+              </div>
+            </div>
+          )}
 
           <div className="notice notice-info mt">
-            <span>声を作成済みの場面には、その音声が入ります。BGMの組み込みは準備中です。</span>
+            <span>声を作成済みの場面には、その音声が入ります。BGMを選ぶと動画全体に流れます。</span>
           </div>
 
           <div className="row-between mt-lg">

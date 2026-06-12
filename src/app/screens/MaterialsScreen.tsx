@@ -13,13 +13,13 @@ import {
   CheckIcon,
 } from "../components/icons";
 
-type Filter = "all" | "image" | "video" | "bgm" | "yuko";
+type Filter = "all" | "image" | "video" | "yuko";
 
+// 音声系（BGM/ナレーション）は素材一覧に出さない（BGMは書き出し画面で管理）ため、音タブも持たない。
 const filters: [Filter, string][] = [
   ["all", "すべて"],
   ["image", "写真"],
   ["video", "動画"],
-  ["bgm", "音"],
   ["yuko", "ゆうこ"],
 ];
 
@@ -50,8 +50,10 @@ export function MaterialsScreen() {
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
 
-  const visible = assets.filter((a) => filter === "all" || a.assetType === filter);
-  const selected = assets.find((a) => a.assetId === selectedId) ?? visible[0] ?? assets[0];
+  // 音声系（BGM/ナレーション）は「素材」一覧に出さない（BGMは書き出し画面で管理）。
+  const materials = assets.filter((a) => a.assetType !== "bgm" && a.assetType !== "voice");
+  const visible = materials.filter((a) => filter === "all" || a.assetType === filter);
+  const selected = materials.find((a) => a.assetId === selectedId) ?? visible[0] ?? materials[0];
 
   function addTag() {
     const v = newTag.trim();

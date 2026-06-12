@@ -56,6 +56,12 @@ fn mime_from_path(path: &str) -> &'static str {
         "image/gif"
     } else if lower.ends_with(".wav") {
         "audio/wav"
+    } else if lower.ends_with(".mp3") {
+        "audio/mpeg"
+    } else if lower.ends_with(".m4a") {
+        "audio/mp4"
+    } else if lower.ends_with(".ogg") {
+        "audio/ogg"
     } else {
         "application/octet-stream"
     }
@@ -138,6 +144,7 @@ mod tests {
         assert_eq!(mime_from_path("assets/x.PNG"), "image/png");
         assert_eq!(mime_from_path("assets/x.jpeg"), "image/jpeg");
         assert_eq!(mime_from_path("voices/scene_001.wav"), "audio/wav");
+        assert_eq!(mime_from_path("assets/bgm_001.mp3"), "audio/mpeg");
         assert_eq!(mime_from_path("assets/x.bin"), "application/octet-stream");
     }
 }

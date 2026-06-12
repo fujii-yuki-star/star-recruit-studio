@@ -12,6 +12,16 @@ export interface ExportSceneInput {
   narrationVolume?: number;
 }
 
+/** BGM 入力（動画全体に重ねる）。audioBase64 は data URL も可。volume は §6 で解決済み。 */
+export interface BgmInput {
+  audioBase64: string;
+  volume: number;
+  fadeInSec?: number;
+  fadeOutSec?: number;
+  /** 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。 */
+  fileExt: string;
+}
+
 /** 書き出し結果の要約。codec は使用エンコーダ（例: libx264 / libopenh264）。 */
 export interface ExportReport {
   outputPath: string;
@@ -24,7 +34,11 @@ export function canExport(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-/** 場面PNG群を実MP4へ書き出す（保存先は <appData>/exports/<fileName>.mp4）。Tauri 非検出時は呼ばないこと（canExport で判定）。 */
-export async function exportVideo(scenes: ExportSceneInput[], fileName: string): Promise<ExportReport> {
-  return invoke<ExportReport>('export_video', { scenes, fileName });
+/** 場面PNG群を実MP4へ書き出す（保存先は <appData>/exports/<fileName>.mp4）。bgm 指定時は全体に重ねる。Tauri 非検出時は呼ばないこと（canExport で判定）。 */
+export async function exportVideo(
+  scenes: ExportSceneInput[],
+  fileName: string,
+  bgm?: BgmInput,
+): Promise<ExportReport> {
+  return invoke<ExportReport>('export_video', { scenes, fileName, bgm: bgm ?? null });
 }
