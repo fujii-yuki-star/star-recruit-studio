@@ -6,7 +6,7 @@ import type { Asset, CompanyInfo, Part, Scene, Warning } from "../../domain/proj
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import {
-  assembleProject, createProjectId, defaultVideoSettings, defaultVoiceSettings,
+  assembleProject, createAssetId, createProjectId, defaultVideoSettings, defaultVoiceSettings,
   parseProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
@@ -54,6 +54,8 @@ interface ProjectState {
   removeAsset: (assetId: string) => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: { name: string; dataUrl: string }) => Promise<void>;
+  /** 新しい素材（画像）を登録する。新規IDを採番し、プロジェクトフォルダへ取り込む。 */
+  addAsset: (file: { name: string; dataUrl: string }) => Promise<void>;
 }
 
 const provider = new MockAiProvider();
@@ -215,6 +217,37 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     } catch {
       // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
+      set({ saveStatus: "error" });
+    }
+  },
+  addAsset: async (file) => {
+    const assetId = createAssetId(get().assets.map((a) => a.assetId));
+    const parts = file.name.split(".");
+    const rawExt = parts.length > 1 ? parts[parts.length - 1] : "png";
+    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+    const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : file.name;
+    const fileName = `${assetId}.${ext}`;
+    const asset: Asset = {
+      assetId,
+      assetType: "image",
+      displayName: baseName.trim() || "新しい素材",
+      filePath: `assets/${fileName}`,
+    };
+    // 即時：一覧へ追加＋表示。
+    set((s) => ({
+      assets: [...s.assets, asset],
+      assetSrcById: { ...s.assetSrcById, [assetId]: file.dataUrl },
+    }));
+    // 永続化（プロジェクトフォルダへコピー）。
+    try {
+      let projectId = get().meta.projectId;
+      if (!projectId) {
+        const existing = await listProjectSummaries();
+        projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        set((s) => ({ meta: { ...s.meta, projectId } }));
+      }
+      await importAssetFile(projectId, fileName, file.dataUrl);
+    } catch {
       set({ saveStatus: "error" });
     }
   },

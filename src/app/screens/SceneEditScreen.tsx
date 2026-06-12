@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import { useProjectStore } from "../store/projectStore";
@@ -34,22 +34,12 @@ const sceneTypeLabel: Record<string, string> = {
   no_yuko: "ゆうこなし",
 };
 
-function mainAssetName(scene: Scene, assets: Asset[]): string {
-  for (const key of ["mainVisual", "background"]) {
-    const id = scene.assetRefs[key];
-    if (id) {
-      const found = assets.find((a) => a.assetId === id);
-      if (found) return found.displayName;
-    }
-  }
-  for (const id of Object.values(scene.assetRefs)) {
-    if (id) {
-      const found = assets.find((a) => a.assetId === id);
-      if (found) return found.displayName;
-    }
-  }
-  return "（未設定）";
-}
+// スロット層（背景/メイン/ロゴ）のユーザー向けラベル。
+const slotLabel: Record<string, string> = {
+  background: "背景",
+  slot: "メイン素材",
+  logo: "ロゴ",
+};
 
 function assetThumbClass(type: Asset["assetType"]): string {
   if (type === "video") return "thumb-video";
@@ -58,7 +48,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 }
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
-  const { status, scenes, templates, assets, generate, updateScene } = useProjectStore();
+  const { status, scenes, templates, assets, generate, updateScene, addAsset } = useProjectStore();
 
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
@@ -72,6 +62,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
   const template = selected ? templates.find((t) => t.templateId === selected.templateId) : undefined;
+  // assetRefs を割り当てられるスロット層（背景/メイン/ロゴ）と、割当可能な素材。
+  const slotLayers =
+    template?.layers.filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo") ?? [];
+  const assignableAssets = assets.filter((a) =>
+    ["image", "video", "logo", "qr", "decor"].includes(a.assetType),
+  );
 
   const visibleAssets = assets.filter((a) => {
     const matchType =
@@ -100,6 +96,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   // 選択中シーンを更新するヘルパー
   const patch = (update: (s: Scene) => Scene) => updateScene(selected.sceneId, update);
+
+  function onUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") void addAsset({ name: file.name, dataUrl: reader.result });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -169,10 +176,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               ))}
             </div>
 
-            <button className="btn btn-secondary btn-block mt">
+            <label className="btn btn-secondary btn-block mt" style={{ cursor: "pointer" }}>
               <UploadIcon size={16} />
               素材をアップロード
-            </button>
+              <input type="file" accept="image/*" onChange={onUpload} style={{ display: "none" }} />
+            </label>
           </div>
 
           {/* 中央: 仕上がり確認 + 場面カード */}
@@ -252,13 +260,34 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
             <div className="field">
               <label className="field-label">使用素材</label>
-              <div className="list-item" style={{ cursor: "default", padding: 10 }}>
-                <div className="asset-tile-thumb thumb thumb-photo" style={{ aspectRatio: "auto" }}>
-                  <PhotoIcon size={16} />
-                </div>
-                <span className="text-sm grow">{mainAssetName(selected, assets)}</span>
-                <button className="btn btn-ghost btn-icon text-sm">変更</button>
-              </div>
+              {slotLayers.length === 0 ? (
+                <p className="text-sm text-muted">この見た目パターンに画像のスロットはありません。</p>
+              ) : (
+                slotLayers.map((layer) => (
+                  <div className="field" key={layer.id} style={{ marginBottom: 8 }}>
+                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
+                      {slotLabel[layer.type] ?? layer.id}
+                    </label>
+                    <select
+                      className="select"
+                      value={selected.assetRefs[layer.id] ?? ""}
+                      onChange={(e) =>
+                        patch((s) => ({
+                          ...s,
+                          assetRefs: { ...s.assetRefs, [layer.id]: e.target.value || null },
+                        }))
+                      }
+                    >
+                      <option value="">なし</option>
+                      {assignableAssets.map((a) => (
+                        <option key={a.assetId} value={a.assetId}>
+                          {a.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))
+              )}
             </div>
 
             <div className="field">

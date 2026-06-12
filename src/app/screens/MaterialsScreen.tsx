@@ -45,7 +45,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen() {
-  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage } = useProjectStore();
+  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -76,16 +76,30 @@ export function MaterialsScreen() {
     e.target.value = "";
   }
 
+  function onAddAsset(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        void addAsset({ name: file.name, dataUrl: reader.result });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
   return (
     <div className="main-scroll">
       <PageHead
         title="素材を管理"
         desc="動画に使う写真・動画・音・ゆうこの素材を管理します。説明やタグを付けると、ゆうこが使いどころを判断しやすくなります。"
         actions={
-          <button className="btn btn-primary">
+          <label className="btn btn-primary" style={{ cursor: "pointer" }}>
             <UploadIcon size={18} />
             素材を追加
-          </button>
+            <input type="file" accept="image/*" onChange={onAddAsset} style={{ display: "none" }} />
+          </label>
         }
       />
 

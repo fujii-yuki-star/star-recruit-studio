@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION, assembleProject, createProjectId,
+  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createProjectId,
   defaultVideoSettings, defaultVoiceSettings, isSupportedSchemaVersion,
   parseProjectDoc,
 } from './persistence';
@@ -32,6 +32,18 @@ describe('createProjectId', () => {
   });
   it('採番形式は §2.1 に従う', () => {
     expect(createProjectId(new Date(2026, 0, 3), [])).toMatch(/^proj_\d{8}_\d{3}$/);
+  });
+});
+
+describe('createAssetId', () => {
+  it('既存が無ければ asset_001', () => {
+    expect(createAssetId([])).toBe('asset_001');
+  });
+  it('既存（slug形式含む）と衝突しない最小番号を採る', () => {
+    expect(createAssetId(['asset_001', 'asset_002', 'asset_entrance_001'])).toBe('asset_003');
+  });
+  it('歯抜けの最小番号を埋める', () => {
+    expect(createAssetId(['asset_002', 'asset_003'])).toBe('asset_001');
   });
 });
 
