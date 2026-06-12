@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
+import type { Layer } from "../../domain/template/types";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { Switch } from "../components/ui";
@@ -34,12 +35,23 @@ const sceneTypeLabel: Record<string, string> = {
   no_yuko: "ゆうこなし",
 };
 
-// スロット層（背景/メイン/ロゴ）のユーザー向けラベル。
+// スロットのユーザー向けラベル（レイヤーid別。複数スロットでも区別できるよう id をキーにする）。
 const slotLabel: Record<string, string> = {
   background: "背景",
-  slot: "メイン素材",
+  mainVisual: "メイン素材",
   logo: "ロゴ",
 };
+
+// スロットの slotType と素材の assetType の整合で、割り当て可能な素材を絞る（§5）。
+function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
+  return assets.filter((a) => {
+    if (layer.type === "logo") return a.assetType === "logo" || a.assetType === "image";
+    if (layer.slotType === "image") return a.assetType === "image";
+    if (layer.slotType === "video") return a.assetType === "video";
+    // background / slot(image_or_video) / slotType未指定
+    return a.assetType === "image" || a.assetType === "video";
+  });
+}
 
 function assetThumbClass(type: Asset["assetType"]): string {
   if (type === "video") return "thumb-video";
@@ -65,9 +77,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // assetRefs を割り当てられるスロット層（背景/メイン/ロゴ）と、割当可能な素材。
   const slotLayers =
     template?.layers.filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo") ?? [];
-  const assignableAssets = assets.filter((a) =>
-    ["image", "video", "logo", "qr", "decor"].includes(a.assetType),
-  );
 
   const visibleAssets = assets.filter((a) => {
     const matchType =
@@ -248,7 +257,22 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 id="look"
                 className="select"
                 value={selected.templateId}
-                onChange={(e) => patch((s) => ({ ...s, templateId: e.target.value }))}
+                onChange={(e) => {
+                  const newTemplateId = e.target.value;
+                  const newSlotIds = new Set(
+                    (templates.find((t) => t.templateId === newTemplateId)?.layers ?? [])
+                      .filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo")
+                      .map((l) => l.id),
+                  );
+                  patch((s) => ({
+                    ...s,
+                    templateId: newTemplateId,
+                    // 新テンプレに無いスロットの参照は捨てる（§5：assetRefsのキー ⊆ テンプレのスロットid）。
+                    assetRefs: Object.fromEntries(
+                      Object.entries(s.assetRefs).filter(([k]) => newSlotIds.has(k)),
+                    ),
+                  }));
+                }}
               >
                 {templates.map((t) => (
                   <option key={t.templateId} value={t.templateId}>
@@ -266,7 +290,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 slotLayers.map((layer) => (
                   <div className="field" key={layer.id} style={{ marginBottom: 8 }}>
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-                      {slotLabel[layer.type] ?? layer.id}
+                      {slotLabel[layer.id] ?? layer.id}
                     </label>
                     <select
                       className="select"
@@ -279,7 +303,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       }
                     >
                       <option value="">なし</option>
-                      {assignableAssets.map((a) => (
+                      {assignableFor(layer, assets).map((a) => (
                         <option key={a.assetId} value={a.assetId}>
                           {a.displayName}
                         </option>

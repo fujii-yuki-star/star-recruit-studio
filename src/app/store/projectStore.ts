@@ -229,6 +229,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const fileName = `${assetId}.${ext}`;
     const asset: Asset = {
       assetId,
+      // TODO: mime/拡張子から assetType を判別（動画/ロゴ等）。当面は image 固定（follow-up）。
       assetType: "image",
       displayName: baseName.trim() || "新しい素材",
       filePath: `assets/${fileName}`,
@@ -248,7 +249,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       await importAssetFile(projectId, fileName, file.dataUrl);
     } catch {
-      set({ saveStatus: "error" });
+      // 取り込み失敗：楽観追加した素材をロールバック（filePathあり・実体なしの不整合を防ぐ）。
+      set((s) => ({
+        assets: s.assets.filter((a) => a.assetId !== assetId),
+        assetSrcById: Object.fromEntries(
+          Object.entries(s.assetSrcById).filter(([id]) => id !== assetId),
+        ),
+        saveStatus: "error",
+      }));
     }
   },
 }));
