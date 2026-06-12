@@ -10,6 +10,7 @@
 | [0001](0001-rendering-parity.md) | プレビューと本番出力の一致方式（描画アーキテクチャ） | **Accepted** |
 | [0002](0002-ffmpeg-codec.md) | FFmpegビルドとH.264コーデック方針（OpenH264） | **Accepted** |
 | [0003](0003-narration-voice.md) | ナレーション音声とゆうこの関係（ずんだもん＝ナレーター） | **Accepted** |
+| [0004](0004-rasterization-method.md) | 本番ラスタライズ手段の単一化（WebView CanvasでSVG→PNG） | **Accepted** |
 
 ## 状態の意味
 
