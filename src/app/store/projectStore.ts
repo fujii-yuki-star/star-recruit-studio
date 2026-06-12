@@ -2,7 +2,7 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは当面 MockProvider。
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_TARGET_DURATION_SEC } from "../../domain/constants";
-import type { Asset, CompanyInfo, Part, Scene, Warning } from "../../domain/project/types";
+import type { Asset, CompanyInfo, Narration, Part, Scene, Warning } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import {
@@ -73,6 +73,8 @@ interface ProjectState {
   generateNarration: (sceneId: string) => Promise<void>;
   /** セリフのある全場面のナレーション音声を生成する。 */
   generateAllNarrations: () => Promise<void>;
+  /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
+  synthesizePreview: () => Promise<string>;
 }
 
 const provider = new MockAiProvider();
@@ -406,5 +408,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } finally {
       set({ isGeneratingNarration: false });
     }
+  },
+  synthesizePreview: async () => {
+    const text = "こんにちは。ナレーションの聞こえ方を確認します。";
+    const narration: Narration = { text, status: "none" };
+    const v = resolveNarrationVoice(narration, get().meta.voiceSettings);
+    const result = await voiceProvider.synthesize({ text, ...v });
+    return result.audioDataUrl;
   },
 }));
