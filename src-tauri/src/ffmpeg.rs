@@ -82,7 +82,7 @@ pub fn concat_args(list_file: &str, out: &str) -> Vec<String> {
     ]
 }
 
-/// ffmpeg バイナリを解決（環境変数 → <appData>/bin → PATH）。
+/// ffmpeg バイナリを解決（環境変数 → appData/bin → localAppData/bin → PATH）。
 pub fn resolve_ffmpeg(app: &tauri::AppHandle) -> PathBuf {
     resolve_bin(app, "FFMPEG_PATH", "ffmpeg")
 }
@@ -93,8 +93,11 @@ fn resolve_bin(app: &tauri::AppHandle, env_key: &str, name: &str) -> PathBuf {
             return PathBuf::from(p);
         }
     }
-    if let Ok(base) = app.path().app_data_dir() {
-        let exe = base.join("bin").join(format!("{name}.exe"));
+    // appData / localAppData の bin/ を順に探す（Windowsの Roaming/Local 差や Tauri のデータ位置差に対応）。
+    let file = format!("{name}.exe");
+    let dirs = [app.path().app_data_dir(), app.path().app_local_data_dir()];
+    for base in dirs.into_iter().flatten() {
+        let exe = base.join("bin").join(&file);
         if exe.exists() {
             return exe;
         }
