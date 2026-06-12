@@ -18,7 +18,9 @@ import {
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
+import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
+import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -39,6 +41,8 @@ interface ProjectState {
   narrationAudioById: Record<string, string>;
   /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
   isGeneratingNarration: boolean;
+  /** ナレーション生成に失敗したときのユーザー向け文言（成功/再試行で消える）。 */
+  narrationError: string | null;
   /** Mock AI → 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
   generate: () => Promise<void>;
   /** デモ/テスト用にエラー状態へ。 */
@@ -69,7 +73,9 @@ interface ProjectState {
 }
 
 const provider = new MockAiProvider();
-const voiceProvider = new MockVoiceProvider();
+// Tauri ではローカル VOICEVOX に接続、ブラウザ開発では Mock（無音）にフォールバック。
+const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
 
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
@@ -97,6 +103,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   assetSrcById: {},
   narrationAudioById: {},
   isGeneratingNarration: false,
+  narrationError: null,
   generate: async () => {
     set({ status: "generating" });
     try {
@@ -144,6 +151,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets: sampleAssets,
       assetSrcById: {},
       narrationAudioById: {},
+      narrationError: null,
     }),
   saveProject: async () => {
     set({ saveStatus: "saving" });
@@ -200,6 +208,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       warnings: [],
       assetSrcById,
       narrationAudioById: {},
+      narrationError: null,
     });
     setLastProjectId(projectId);
   },
@@ -284,6 +293,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
       }));
     setStatus("pending");
+    set({ narrationError: null });
     try {
       const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
       const result = await voiceProvider.synthesize({ text: scene.narration.text, ...v });
@@ -293,8 +303,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
         narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
       }));
-    } catch {
+    } catch (e) {
       setStatus("failed");
+      set({
+        narrationError:
+          typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+      });
     }
   },
   generateAllNarrations: async () => {

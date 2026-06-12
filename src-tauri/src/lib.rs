@@ -6,6 +6,7 @@ use tauri::Manager;
 
 mod assets;
 mod ffmpeg;
+mod voicevox;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -111,7 +112,8 @@ pub fn run() {
             list_projects,
             ffmpeg::export_video,
             assets::import_asset,
-            assets::read_asset_data_url
+            assets::read_asset_data_url,
+            voicevox::synthesize_voice
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
