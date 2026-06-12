@@ -5,6 +5,7 @@ import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
 import { buildExportScenes } from "../../renderer/export/buildExportScenes";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
+import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 
 interface ExportProps {
   onNavigate: (screen: ScreenId) => void;
@@ -16,6 +17,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const scenes = useProjectStore((s) => s.scenes);
   const templates = useProjectStore((s) => s.templates);
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
+  const narrationAudioById = useProjectStore((s) => s.narrationAudioById);
+  const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
 
@@ -53,6 +56,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         scenes,
         templateById,
         (id) => (id ? assetSrcById[id] : undefined),
+        (scene) => ({
+          audioBase64: narrationAudioById[scene.sceneId],
+          narrationVolume: resolveNarrationVolume(scene.audioMix, voiceSettings),
+        }),
         (done, total) => setProgress({ done, total }),
       );
       setPhase("encoding");
@@ -131,7 +138,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           </div>
 
           <div className="notice notice-info mt">
-            <span>今回は映像（写真・文字・ゆうこ）を書き出します。声やBGMの組み込みは準備中です。</span>
+            <span>声を作成済みの場面には、その音声が入ります。BGMの組み込みは準備中です。</span>
           </div>
 
           <div className="row-between mt-lg">

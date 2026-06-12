@@ -2,7 +2,7 @@ import { useState } from "react";
 import { PageHead, Switch } from "../components/ui";
 
 const credits = [
-  { name: "VOICEVOX：ずんだもん", role: "ゆうこの声（読み上げ）" },
+  { name: "VOICEVOX：ずんだもん", role: "ナレーター音声（読み上げ）" },
   { name: "FFmpeg (LGPL)", role: "動画の書き出し" },
   { name: "Noto Sans JP", role: "画面・字幕のフォント" },
 ];

@@ -11,6 +11,8 @@ use tauri::Manager;
 
 // 既定FPS（videoSettings.fps の正典は project.json。B2でフロントから受け取る予定）。
 const DEFAULT_FPS: u32 = 30;
+// ナレーション既定音量。正典は TS domain/constants.ts §4（=1.0）。Rust側は同値をミラー（防御的フォールバック）。
+const DEFAULT_NARRATION_VOLUME: f64 = 1.0;
 
 /// 映像コーデック。本番(OpenH264)への無改修切替のための抽象。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,15 +42,19 @@ pub fn pick_codec(encoders_output: &str) -> Option<VideoCodec> {
     }
 }
 
-/// 静止画(PNG)を尺ぶん保持して1シーンのMP4にする引数（純粋）。
-pub fn still_image_args(
+/// 1シーン分の動画（PNG静止画＋音声）にする引数（純粋）。
+/// 音声があればナレーション（volume適用）を、無ければ無音トラックを付け、全クリップを
+/// 「映像＋AAC音声」で統一する（後段 concat の `-c copy` が成立するため）。
+pub fn scene_clip_args(
     png: &str,
+    audio: Option<&str>,
+    narration_volume: f64,
     out: &str,
     duration_sec: f64,
     fps: u32,
     codec: VideoCodec,
 ) -> Vec<String> {
-    vec![
+    let mut args: Vec<String> = vec![
         "-y".into(),
         "-loop".into(),
         "1".into(),
@@ -56,14 +62,52 @@ pub fn still_image_args(
         format!("{duration_sec}"),
         "-i".into(),
         png.into(),
+    ];
+    match audio {
+        Some(a) => args.extend([
+            "-i".into(),
+            a.into(),
+            // ナレーション音量を適用し、尺に満たない分は無音で埋める（apad）。
+            "-filter_complex".into(),
+            format!("[1:a]volume={narration_volume},apad[a]"),
+            "-map".into(),
+            "0:v".into(),
+            "-map".into(),
+            "[a]".into(),
+        ]),
+        None => args.extend([
+            // 音声が無い場面は無音トラックを生成して付ける。
+            "-f".into(),
+            "lavfi".into(),
+            "-t".into(),
+            format!("{duration_sec}"),
+            "-i".into(),
+            "anullsrc=channel_layout=stereo:sample_rate=44100".into(),
+            "-map".into(),
+            "0:v".into(),
+            "-map".into(),
+            "1:a".into(),
+        ]),
+    }
+    args.extend([
         "-r".into(),
         format!("{fps}"),
         "-pix_fmt".into(),
         "yuv420p".into(),
         "-c:v".into(),
         codec.encoder().into(),
+        "-c:a".into(),
+        "aac".into(),
+        "-ar".into(),
+        "44100".into(),
+        "-ac".into(),
+        "2".into(),
+        // 映像・音声とも尺ぴったりに切る。
+        "-t".into(),
+        format!("{duration_sec}"),
         out.into(),
-    ]
+    ]);
+    args
 }
 
 /// concat demuxer でシーンMP4を無劣化結合する引数（純粋）。list_file と同じ階層の相対名を参照する。
@@ -120,6 +164,8 @@ pub fn run(bin: &Path, args: &[String]) -> Result<String, String> {
 
 struct SceneFile {
     png: PathBuf,
+    audio: Option<PathBuf>,
+    narration_volume: f64,
     duration_sec: f64,
 }
 
@@ -137,8 +183,14 @@ fn encode_scenes(
     for (i, scene) in scenes.iter().enumerate() {
         let clip_name = format!("scene_{i:03}.mp4");
         let clip = tmp_dir.join(&clip_name);
-        let args = still_image_args(
+        let audio = scene
+            .audio
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned());
+        let args = scene_clip_args(
             &scene.png.to_string_lossy(),
+            audio.as_deref(),
+            scene.narration_volume,
             &clip.to_string_lossy(),
             scene.duration_sec,
             fps,
@@ -190,6 +242,12 @@ fn sanitize_file_name(name: &str) -> String {
 pub struct SceneInput {
     png_base64: String,
     duration_sec: f64,
+    /// 場面のナレーション音声(WAV)。data URL も可。無い場面は無音トラックになる。
+    #[serde(default)]
+    audio_base64: Option<String>,
+    /// ナレーション音量（§6で解決済み）。未指定なら既定。
+    #[serde(default)]
+    narration_volume: Option<f64>,
 }
 
 /// エクスポート結果の要約。
@@ -229,8 +287,21 @@ pub fn export_video(
             .map_err(|e| format!("場面{}の画像を読み取れませんでした: {e}", i + 1))?;
         let png = tmp.join(format!("scene_{i:03}.png"));
         fs::write(&png, bytes).map_err(|e| e.to_string())?;
+        let audio = match &s.audio_base64 {
+            Some(b64) if !b64.is_empty() => {
+                let abytes = base64::engine::general_purpose::STANDARD
+                    .decode(strip_data_url(b64))
+                    .map_err(|e| format!("場面{}の音声を読み取れませんでした: {e}", i + 1))?;
+                let wav = tmp.join(format!("scene_{i:03}.wav"));
+                fs::write(&wav, abytes).map_err(|e| e.to_string())?;
+                Some(wav)
+            }
+            _ => None,
+        };
         files.push(SceneFile {
             png,
+            audio,
+            narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
             duration_sec: s.duration_sec,
         });
     }
@@ -267,12 +338,38 @@ mod tests {
     }
 
     #[test]
-    fn still_image_args_uses_selected_encoder() {
-        let x = still_image_args("in.png", "out.mp4", 8.0, 30, VideoCodec::X264);
-        assert!(x.iter().any(|a| a == "libx264"));
-        assert!(x.iter().any(|a| a == "yuv420p"));
-        let o = still_image_args("in.png", "out.mp4", 8.0, 30, VideoCodec::OpenH264);
-        assert!(o.iter().any(|a| a == "libopenh264"));
+    fn scene_clip_args_with_audio_applies_volume_and_maps_filtered_track() {
+        let a = scene_clip_args(
+            "in.png",
+            Some("v.wav"),
+            1.0,
+            "out.mp4",
+            8.0,
+            30,
+            VideoCodec::X264,
+        );
+        assert!(a.iter().any(|s| s == "libx264"));
+        assert!(a.iter().any(|s| s == "yuv420p"));
+        assert!(a.iter().any(|s| s == "aac"));
+        assert!(a.iter().any(|s| s.contains("volume=1")));
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a]"));
+    }
+
+    #[test]
+    fn scene_clip_args_without_audio_adds_silence_track() {
+        let o = scene_clip_args(
+            "in.png",
+            None,
+            1.0,
+            "out.mp4",
+            8.0,
+            30,
+            VideoCodec::OpenH264,
+        );
+        assert!(o.iter().any(|s| s == "libopenh264"));
+        assert!(o.iter().any(|s| s.contains("anullsrc")));
+        assert!(o.iter().any(|s| s == "aac"));
+        assert!(o.windows(2).any(|w| w[0] == "-map" && w[1] == "1:a"));
     }
 
     #[test]
@@ -309,6 +406,23 @@ mod tests {
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
+        // 音声つき場面の検証用に短い WAV を1本作る。
+        let voice = tmp.join("voice.wav");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-t".into(),
+                "1".into(),
+                "-i".into(),
+                "sine=frequency=440:sample_rate=44100".into(),
+                voice.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("generate test wav");
+
         let mut scenes = Vec::new();
         for (i, color) in ["red", "blue"].iter().enumerate() {
             let png = tmp.join(format!("src_{i}.png"));
@@ -325,6 +439,9 @@ mod tests {
             run(&ffmpeg, &gen).expect("generate test png");
             scenes.push(SceneFile {
                 png,
+                // 場面0は音声つき、場面1は無音。混在クリップの concat copy を検証する。
+                audio: if i == 0 { Some(voice.clone()) } else { None },
+                narration_volume: 1.0,
                 duration_sec: 1.0,
             });
         }
