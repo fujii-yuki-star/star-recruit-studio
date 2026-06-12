@@ -56,8 +56,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       setResultPath(report.outputPath);
       setPhase("done");
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "動画の保存に失敗しました。もう一度お試しください。");
+      // Tauriコマンドの失敗は文字列で reject される（Errorインスタンスではない）。原因をそのまま表示する。
+      const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+      setMessage(detail || "動画の保存に失敗しました。もう一度お試しください。");
       setPhase("error");
+      console.error("[export] failed:", e);
     }
   }
 
