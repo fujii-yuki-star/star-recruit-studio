@@ -17,6 +17,7 @@ import {
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
+import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
@@ -162,11 +163,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const existing = await listProjectSummaries();
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
       }
+      // ナレーション音声をディスクへ保存し、voicePath を更新（生成済みのみ）。
+      // 生成済みでない場面は古い音声参照を残さない（再生成で上書きされる）。
+      const audioById = s.narrationAudioById;
+      const scenes = await Promise.all(
+        s.scenes.map(async (sc) => {
+          const audio = audioById[sc.sceneId];
+          if (sc.narration.status === "generated" && audio) {
+            const voicePath = await importVoiceFile(projectId, sc.sceneId, audio);
+            return voicePath ? { ...sc, narration: { ...sc.narration, voicePath } } : sc;
+          }
+          return sc.narration.voicePath
+            ? { ...sc, narration: { ...sc.narration, voicePath: null } }
+            : sc;
+        }),
+      );
       const meta: ProjectHeader = { ...s.meta, projectId, updatedAt: new Date().toISOString() };
-      const project = assembleProject(meta, s.assets, s.parts, s.scenes);
+      const project = assembleProject(meta, s.assets, s.parts, scenes);
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
       setLastProjectId(projectId);
-      set({ meta, saveStatus: "saved" });
+      set({ meta, scenes, saveStatus: "saved" });
     } catch {
       set({ saveStatus: "error" });
     }
@@ -186,6 +202,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const assetSrcById: Record<string, string> = {};
     for (const entry of loaded) {
       if (entry) assetSrcById[entry[0]] = entry[1];
+    }
+    // 生成済みナレーション音声を data URL に復元（voicePath を持つもの。未配置は null でスキップ）。並列実行。
+    const voiceLoaded = await Promise.all(
+      project.scenes
+        .filter((sc) => sc.narration.status === "generated" && sc.narration.voicePath)
+        .map(async (sc) => {
+          const url = await readVoiceDataUrl(project.projectId, sc.narration.voicePath!);
+          return url ? ([sc.sceneId, url] as const) : null;
+        }),
+    );
+    const narrationAudioById: Record<string, string> = {};
+    for (const entry of voiceLoaded) {
+      if (entry) narrationAudioById[entry[0]] = entry[1];
     }
     set({
       status: "ready",
@@ -207,7 +236,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       scenes: project.scenes,
       warnings: [],
       assetSrcById,
-      narrationAudioById: {},
+      narrationAudioById,
       narrationError: null,
     });
     setLastProjectId(projectId);

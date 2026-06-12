@@ -1,6 +1,6 @@
-// 素材ファイルの取り込み/読み出し（infrastructure 境界）。
-// プロジェクトフォルダ <appData>/projects/<id>/assets/ に保管し、Asset.filePath はプロジェクト相対（11 §7.2）。
-// 描画は data URL（ADR-0004：canvas汚染回避）なので、読み出しは data URL を返す。
+// プロジェクトのファイル（素材画像・ナレーション音声）の取り込み/読み出し（infrastructure 境界）。
+// プロジェクトフォルダ <appData>/projects/<id>/{assets,voices}/ に保管し、相対パスを project.json に持つ（11 §7.2）。
+// 描画は data URL（ADR-0004：canvas汚染回避）なので、読み出しは data URL を返す（音声も同形式で復元）。
 use base64::Engine as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -54,6 +54,8 @@ fn mime_from_path(path: &str) -> &'static str {
         "image/webp"
     } else if lower.ends_with(".gif") {
         "image/gif"
+    } else if lower.ends_with(".wav") {
+        "audio/wav"
     } else {
         "application/octet-stream"
     }
@@ -77,7 +79,25 @@ pub fn import_asset(
     Ok(format!("assets/{safe}"))
 }
 
-/// プロジェクト相対パスの素材を読み、data URL を返す。
+/// ナレーション音声(WAV; data URL or base64)を <appData>/projects/<id>/voices/<scene_id>.wav に保存し、相対パスを返す。
+#[tauri::command]
+pub fn import_voice(
+    app: tauri::AppHandle,
+    project_id: String,
+    scene_id: String,
+    data_base64: String,
+) -> Result<String, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(strip_data_url(&data_base64))
+        .map_err(|_| "音声を保存できませんでした。もう一度お試しください。".to_string())?;
+    let dir = project_dir(&app, &project_id)?.join("voices");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let safe = format!("{}.wav", sanitize_file_name(&scene_id));
+    fs::write(dir.join(&safe), bytes).map_err(|e| e.to_string())?;
+    Ok(format!("voices/{safe}"))
+}
+
+/// プロジェクト相対パスのファイル（素材・音声）を読み、data URL を返す。
 #[tauri::command]
 pub fn read_asset_data_url(
     app: tauri::AppHandle,
@@ -117,6 +137,7 @@ mod tests {
     fn mime_detection() {
         assert_eq!(mime_from_path("assets/x.PNG"), "image/png");
         assert_eq!(mime_from_path("assets/x.jpeg"), "image/jpeg");
+        assert_eq!(mime_from_path("voices/scene_001.wav"), "audio/wav");
         assert_eq!(mime_from_path("assets/x.bin"), "application/octet-stream");
     }
 }
