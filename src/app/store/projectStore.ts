@@ -23,6 +23,10 @@ interface ProjectState {
   reset: () => void;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
+  /** 素材を更新する（素材管理：説明/タグ/公開チェック等）。 */
+  updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
+  /** 素材を削除する。 */
+  removeAsset: (assetId: string) => void;
 }
 
 const provider = new MockAiProvider();
@@ -62,4 +66,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
     })),
+  updateAsset: (assetId, update) =>
+    set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)) })),
+  removeAsset: (assetId) =>
+    set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId) })),
 }));
