@@ -1,13 +1,16 @@
 /**
- * ADR-0001 描画スパイク。
- * Mock(ai-video-plan) → 変換(内部Scene) → 共有レイアウト → SVG → (resvgでPNG) → (FFmpeg合成コマンド) を通し、
- * 「同一SVG＋同一ラスタライザ＝一致」というパリティ戦略を実証する。
- * 実行: npx tsx scripts/adr0001-spike.ts
- * 出力: .spike/ 配下（gitignore）。
+ * ADR-0001 描画スパイク（出力側＝製品の核を実証）。
+ * Mock(ai-video-plan) → 変換(内部Scene) → 共有レイアウト → SVG → resvgでPNG → FFmpegで実MP4 → 全シーン連結。
+ * 「同一SVG＋同一ラスタライザ＝一致」というパリティ戦略と、SVG→PNG→実MP4の出力経路を実証する。
+ * FFmpegは ffmpeg-static バイナリを使用。コーデックは本番(ADR-0002)がLGPL+OpenH264、
+ * spike用staticビルドはlibx264のみのため自動判定して代替する（どちらもH.264/AVCを生成）。
+ * 実行: npx tsx scripts/adr0001-spike.ts  （または npm run spike:export）
+ * 出力: .spike/ 配下（gitignore）。final.mp4 が最終成果物。
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import ffmpegPath from 'ffmpeg-static';
 import type { Asset } from '../src/domain/project/types';
 import type { Template } from '../src/domain/template/types';
 import { transformVideoPlan } from '../src/domain/ai/transformPlan';
@@ -60,12 +63,23 @@ const assets: Asset[] = [
   { assetId: 'bgm_bright_001', assetType: 'bgm', displayName: '明るいBGM', filePath: 'assets/bgm/bright_001.mp3' },
 ];
 
-function hasFfmpeg(): boolean {
-  try {
-    return spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
-  } catch {
-    return false;
-  }
+function ffmpegBin(): string {
+  if (!ffmpegPath) throw new Error('ffmpeg-static のバイナリを解決できませんでした');
+  return ffmpegPath;
+}
+
+function runFfmpeg(args: string[]): { ok: boolean; stderr: string } {
+  const r = spawnSync(ffmpegBin(), args, { encoding: 'utf8' });
+  return { ok: r.status === 0, stderr: r.stderr ?? '' };
+}
+
+// このビルドで使えるH264エンコーダを選ぶ。本番(ADR-0002)はLGPL+OpenH264想定、
+// spike用staticビルド(ffmpeg-static=gyan.dev GPL)はlibx264のみ → 自動で代替する。
+function detectH264Encoder(): { name: string; note: string } {
+  const out = spawnSync(ffmpegBin(), ['-hide_banner', '-encoders'], { encoding: 'utf8' }).stdout ?? '';
+  if (/\blibopenh264\b/.test(out)) return { name: 'libopenh264', note: 'ADR-0002準拠 LGPL+OpenH264' };
+  if (/\blibx264\b/.test(out)) return { name: 'libx264', note: 'spike代替 GPL/x264・本番はlibopenh264へ差し替え' };
+  throw new Error('利用可能なH264エンコーダが見つかりません');
 }
 
 async function rasterize(svg: string): Promise<Buffer | null> {
@@ -94,7 +108,7 @@ async function main(): Promise<void> {
   const { scenes } = transformVideoPlan(plan, ctx);
   console.log(`Mock→変換: ${scenes.length} シーン`);
 
-  let firstPng: { sceneId: string; durationSec: number } | null = null;
+  const rendered: { sceneId: string; durationSec: number; pngPath: string }[] = [];
 
   for (const scene of scenes) {
     const template = templateById.get(scene.templateId);
@@ -114,30 +128,54 @@ async function main(): Promise<void> {
       if (png2) {
         console.log(`  パリティ（同一SVG＋同一ラスタライザ）: ${png.equals(png2) ? '一致 (byte-identical) ✓' : '不一致 ✗'}`);
       }
-      if (!firstPng) firstPng = { sceneId: scene.sceneId, durationSec: scene.durationSec };
+      rendered.push({ sceneId: scene.sceneId, durationSec: scene.durationSec, pngPath });
     }
   }
 
-  // FFmpeg 合成
-  console.log('\n=== FFmpeg 合成 ===');
-  const ff = hasFfmpeg();
-  if (ff && firstPng) {
-    const png = join(OUT, `${firstPng.sceneId}.png`);
-    const mp4 = join(OUT, `${firstPng.sceneId}.mp4`);
-    const args = ['-y', '-loop', '1', '-t', String(firstPng.durationSec), '-i', png, '-r', '30', '-pix_fmt', 'yuv420p', '-c:v', 'libopenh264', mp4];
-    console.log(`実行: ffmpeg ${args.join(' ')}`);
-    const r = spawnSync('ffmpeg', args, { encoding: 'utf8' });
-    console.log(r.status === 0 ? `  MP4出力: ${mp4} ✓` : `  失敗: ${r.stderr?.slice(-400)}`);
-  } else {
-    console.log('ffmpeg 未導入のためスキップ（バイナリ導入後に下記を実行）:');
-    console.log('  # 動画なしシーン（静止PNGを尺ぶん保持）');
-    console.log('  ffmpeg -y -loop 1 -t <dur> -i <scene>.png -r 30 -pix_fmt yuv420p -c:v libopenh264 <scene>.mp4');
-    console.log('  # 動画ありシーン（下PNG → 動画 → 上PNG を重ねる）');
-    console.log('  ffmpeg -y -loop 1 -t <dur> -i below.png -i clip.mp4 -loop 1 -t <dur> -i above.png \\');
-    console.log('    -filter_complex "[1:v]scale=W:H[v];[0:v][v]overlay=X:Y[t];[t][2:v]overlay=0:0,format=yuv420p[o]" \\');
-    console.log('    -map "[o]" -r 30 -c:v libopenh264 <scene>.mp4');
+  // FFmpeg 合成：各シーンPNG → 実MP4 → 連結して1本に（ADR-0001の出力側＝製品の核を実証）
+  console.log('\n=== FFmpeg 合成（SVG→PNG→実MP4） ===');
+  if (rendered.length === 0) {
+    console.log('ラスタライズ済みシーンが無いため合成をスキップします。');
+    return;
   }
-  console.log('\n完了。SVGをブラウザで開けばプレビュー相当が確認できます。');
+  const enc = detectH264Encoder();
+  console.log(`使用バイナリ: ${ffmpegBin()}`);
+  console.log(`H264エンコーダ: ${enc.name}（${enc.note}）`);
+
+  const clips: string[] = [];
+  for (const r of rendered) {
+    const mp4 = join(OUT, `${r.sceneId}.mp4`);
+    // 静止PNGを尺ぶん保持して動画化。yuv420pは偶数サイズ前提（キャンバス1920x1080）。
+    const args = ['-y', '-loop', '1', '-t', String(r.durationSec), '-i', r.pngPath,
+      '-r', '30', '-pix_fmt', 'yuv420p', '-c:v', enc.name, mp4];
+    const res = runFfmpeg(args);
+    if (res.ok) {
+      console.log(`  [${r.sceneId}] ${r.durationSec}s → ${mp4} ✓`);
+      clips.push(`${r.sceneId}.mp4`);
+    } else {
+      console.log(`  [${r.sceneId}] 失敗: ${res.stderr.slice(-300)}`);
+    }
+  }
+
+  // 連結（concat demuxer）。全クリップ同一パラメータなので -c copy で無劣化結合。
+  if (clips.length > 0) {
+    const listPath = join(OUT, 'concat.txt');
+    writeFileSync(listPath, clips.map((f) => `file '${f}'`).join('\n'), 'utf8');
+    const finalMp4 = join(OUT, 'final.mp4');
+    const res = runFfmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', finalMp4]);
+    if (res.ok) {
+      const kb = (statSync(finalMp4).size / 1024).toFixed(1);
+      console.log(`\n最終MP4: ${finalMp4} (${kb} KB / ${clips.length}シーン連結) ✓`);
+      const probe = spawnSync(ffmpegBin(), ['-hide_banner', '-i', finalMp4], { encoding: 'utf8' }).stderr ?? '';
+      console.log(`  ${probe.match(/Duration: [^,]+/)?.[0] ?? 'Duration: ?'}`);
+      console.log(`  ${probe.match(/Stream #\d+:\d+[^\n]*Video:[^\n]*/)?.[0]?.trim() ?? 'Video stream: ?'}`);
+    } else {
+      console.log(`連結失敗: ${res.stderr.slice(-300)}`);
+    }
+  }
+
+  console.log('\n完了。.spike/final.mp4 が実出力。SVGをブラウザで開けばプレビュー相当を確認できます。');
+  console.log('※動画素材ありシーン（下PNG→動画→上PNG重ね）はサンプル素材導入後に実証予定（overlayフィルタ）。');
 }
 
 main().catch((e) => {
