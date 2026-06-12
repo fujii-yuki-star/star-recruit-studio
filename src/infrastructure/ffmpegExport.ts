@@ -20,7 +20,7 @@ export function canExport(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-/** 場面PNG群を実MP4へ書き出す。Tauri 非検出時は呼ばないこと（canExport で判定）。 */
-export async function exportVideo(scenes: ExportSceneInput[], outputPath: string): Promise<ExportReport> {
-  return invoke<ExportReport>('export_video', { scenes, outputPath });
+/** 場面PNG群を実MP4へ書き出す（保存先は <appData>/exports/<fileName>.mp4）。Tauri 非検出時は呼ばないこと（canExport で判定）。 */
+export async function exportVideo(scenes: ExportSceneInput[], fileName: string): Promise<ExportReport> {
+  return invoke<ExportReport>('export_video', { scenes, fileName });
 }
