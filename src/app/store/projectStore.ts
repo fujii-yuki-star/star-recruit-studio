@@ -25,6 +25,8 @@ import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxPr
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
+/** 声設定の編集可能パラメータのみ（defaultVoiceId は必須なので更新対象から除外）。 */
+export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;
 
 interface ProjectState {
   status: GenerateStatus;
@@ -59,8 +61,8 @@ interface ProjectState {
   listProjects: () => Promise<ProjectSummary[]>;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
-  /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。 */
-  updateVoiceSettings: (patch: Partial<VoiceSettings>) => void;
+  /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
+  updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** 素材を更新する（素材管理：説明/タグ/公開チェック等）。 */
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */

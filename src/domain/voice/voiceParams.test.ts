@@ -31,9 +31,13 @@ describe('valueToSlider（min→0 / def→50 / max→100）', () => {
     expect(valueToSlider(0.0, PITCH_RANGE)).toBe(50);
     expect(valueToSlider(1.0, INTONATION_RANGE)).toBe(50);
   });
-  it('端は0/100', () => {
+  it('端は0/100（3パラメータとも）', () => {
     expect(valueToSlider(0.5, SPEED_RANGE)).toBe(0);
     expect(valueToSlider(2.0, SPEED_RANGE)).toBe(100);
+    expect(valueToSlider(-1.0, PITCH_RANGE)).toBe(0);
+    expect(valueToSlider(1.0, PITCH_RANGE)).toBe(100);
+    expect(valueToSlider(0.0, INTONATION_RANGE)).toBe(0);
+    expect(valueToSlider(2.0, INTONATION_RANGE)).toBe(100);
   });
 });
 
@@ -42,6 +46,7 @@ describe('往復（slider→value→slider）', () => {
     for (const s of [0, 25, 50, 75, 100]) {
       expect(valueToSlider(sliderToValue(s, SPEED_RANGE), SPEED_RANGE)).toBe(s);
       expect(valueToSlider(sliderToValue(s, PITCH_RANGE), PITCH_RANGE)).toBe(s);
+      expect(valueToSlider(sliderToValue(s, INTONATION_RANGE), INTONATION_RANGE)).toBe(s);
     }
   });
 });
