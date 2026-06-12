@@ -1,5 +1,5 @@
 // ナレーション音声の取り込み/読み出し（Tauriコマンド境界）。domain は型のみ、I/Oはここに隔離（CLAUDE.md §4）。
-// 音声(WAV)は <appData>/projects/<id>/voices/<sceneId>.wav に保管し、Narration.voicePath はプロジェクト相対（11 §7.2）。
+// 音声(WAV)は <appData>/projects/<id>/voices/<sceneId>.wav に保管し、Narration.voicePath はプロジェクト相対（11 §7.4）。
 // Tauri 非検出時（ブラウザ開発）は永続化せず null を返す（表示用 data URL はメモリ内で別途保持される）。
 import { invoke } from '@tauri-apps/api/core';
 
