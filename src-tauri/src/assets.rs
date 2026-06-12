@@ -3,7 +3,7 @@
 // 描画は data URL（ADR-0004：canvas汚染回避）なので、読み出しは data URL を返す。
 use base64::Engine as _;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 fn project_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
@@ -37,7 +37,7 @@ fn sanitize_file_name(name: &str) -> String {
             }
         })
         .collect();
-    if cleaned.is_empty() {
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
         "asset".to_string()
     } else {
         cleaned
@@ -84,8 +84,13 @@ pub fn read_asset_data_url(
     project_id: String,
     rel_path: String,
 ) -> Result<String, String> {
-    // パストラバーサル防止（filePath は project.json 由来だが念のため）。
-    if rel_path.contains("..") {
+    // パストラバーサル/絶対パス防止（filePath は project.json 由来だが、悪意ある共有プロジェクト対策）。
+    // PathBuf::join は絶対パスを渡すとベースを置き換えるため、絶対パス（Windows の C:\ 含む）も拒否する。
+    if rel_path.contains("..")
+        || rel_path.starts_with('/')
+        || rel_path.starts_with('\\')
+        || Path::new(&rel_path).is_absolute()
+    {
         return Err("不正なパスです。".to_string());
     }
     let path = project_dir(&app, &project_id)?.join(&rel_path);
@@ -103,6 +108,7 @@ mod tests {
     fn sanitize_and_strip() {
         assert_eq!(sanitize_file_name("a/b:c.png"), "a_b_c.png");
         assert_eq!(sanitize_file_name("   "), "asset");
+        assert_eq!(sanitize_file_name(".."), "asset");
         assert_eq!(strip_data_url("data:image/png;base64,QQ=="), "QQ==");
         assert_eq!(strip_data_url("QQ=="), "QQ==");
     }
