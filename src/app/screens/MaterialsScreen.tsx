@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
 import { useProjectStore } from "../store/projectStore";
 import { PageHead, Switch } from "../components/ui";
@@ -23,20 +23,29 @@ const filters: [Filter, string][] = [
   ["yuko", "ゆうこ"],
 ];
 
-function AssetThumb({ type, size = 20 }: { type: Asset["assetType"]; size?: number }) {
+const VISUAL_TYPES: Asset["assetType"][] = ["image", "logo", "yuko", "qr", "decor"];
+const isVisual = (type: Asset["assetType"]) => VISUAL_TYPES.includes(type);
+
+function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: string; size?: number }) {
   const cls = type === "video" ? "thumb-video" : type === "bgm" ? "thumb-audio" : "thumb-photo";
   return (
-    <div className={`thumb ${cls}`} style={{ aspectRatio: "auto", width: "100%" }}>
-      {type === "video" && <VideoIcon size={size} />}
-      {type === "bgm" && <MusicIcon size={size} />}
-      {type === "yuko" && <span style={{ fontWeight: 700 }}>ゆ</span>}
-      {(type === "image" || type === "logo" || type === "qr" || type === "voice") && <PhotoIcon size={size} />}
+    <div className={`thumb ${cls}`} style={{ aspectRatio: "auto", width: "100%", overflow: "hidden" }}>
+      {src ? (
+        <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      ) : (
+        <>
+          {type === "video" && <VideoIcon size={size} />}
+          {type === "bgm" && <MusicIcon size={size} />}
+          {type === "yuko" && <span style={{ fontWeight: 700 }}>ゆ</span>}
+          {(type === "image" || type === "logo" || type === "qr" || type === "voice") && <PhotoIcon size={size} />}
+        </>
+      )}
     </div>
   );
 }
 
 export function MaterialsScreen() {
-  const { assets, updateAsset, removeAsset } = useProjectStore();
+  const { assets, updateAsset, removeAsset, assetSrcById, setAssetSrc } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -50,6 +59,16 @@ export function MaterialsScreen() {
     const tags = selected.tags ?? [];
     if (!tags.includes(v)) updateAsset(selected.assetId, (a) => ({ ...a, tags: [...(a.tags ?? []), v] }));
     setNewTag("");
+  }
+
+  function onPickImage(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !selected) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") setAssetSrc(selected.assetId, reader.result);
+    };
+    reader.readAsDataURL(file);
   }
 
   return (
@@ -87,7 +106,7 @@ export function MaterialsScreen() {
                 }}
                 onClick={() => setSelectedId(a.assetId)}
               >
-                <AssetThumb type={a.assetType} />
+                <AssetThumb type={a.assetType} src={assetSrcById[a.assetId]} />
                 <span className="action-card-title" style={{ marginTop: 6 }}>
                   {a.displayName}
                 </span>
@@ -115,8 +134,24 @@ export function MaterialsScreen() {
           <div className="card">
             <h2 className="section-title">素材の情報</h2>
             <div style={{ maxWidth: 160, margin: "0 auto var(--gap)" }}>
-              <AssetThumb type={selected.assetType} size={28} />
+              <AssetThumb type={selected.assetType} src={assetSrcById[selected.assetId]} size={28} />
             </div>
+
+            {isVisual(selected.assetType) && (
+              <div className="field">
+                <label className="field-label" htmlFor="mat-image">画像を選ぶ</label>
+                <input
+                  id="mat-image"
+                  className="input"
+                  type="file"
+                  accept="image/*"
+                  onChange={onPickImage}
+                />
+                <p className="text-sm text-muted" style={{ marginTop: 4 }}>
+                  選んだ画像が、仕上がり確認のこの素材の枠に表示されます。
+                </p>
+              </div>
+            )}
 
             <div className="field">
               <label className="field-label" htmlFor="mat-name">名前</label>

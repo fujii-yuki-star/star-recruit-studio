@@ -30,6 +30,8 @@ interface ProjectState {
   warnings: Warning[];
   templates: Template[];
   assets: Asset[];
+  /** 素材の表示用src（data URL）。assetId→src。project.json には入れず永続化しない。 */
+  assetSrcById: Record<string, string>;
   /** Mock AI → 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
   generate: () => Promise<void>;
   /** デモ/テスト用にエラー状態へ。 */
@@ -49,6 +51,8 @@ interface ProjectState {
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
   removeAsset: (assetId: string) => void;
+  /** 素材の表示用src（data URL）を設定する。プレビュー/出力で使う。 */
+  setAssetSrc: (assetId: string, dataUrl: string) => void;
 }
 
 const provider = new MockAiProvider();
@@ -76,6 +80,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   warnings: [],
   templates: sampleTemplates,
   assets: sampleAssets,
+  assetSrcById: {},
   generate: async () => {
     set({ status: "generating" });
     try {
@@ -121,6 +126,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       scenes: [],
       warnings: [],
       assets: sampleAssets,
+      assetSrcById: {},
     }),
   saveProject: async () => {
     set({ saveStatus: "saving" });
@@ -161,6 +167,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       parts: project.parts,
       scenes: project.scenes,
       warnings: [],
+      assetSrcById: {},
     });
   },
   listProjects: () => listProjectSummaries(),
@@ -172,4 +179,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)) })),
   removeAsset: (assetId) =>
     set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId) })),
+  setAssetSrc: (assetId, dataUrl) =>
+    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl } })),
 }));
