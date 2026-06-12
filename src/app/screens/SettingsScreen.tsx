@@ -5,7 +5,7 @@ import { useProjectStore } from "../store/projectStore";
 import {
   getVoicevoxSpeaker, getVoicevoxUrl, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
-import { ZUNDAMON_STYLES } from "../../infrastructure/voiceProviders/voicevoxProvider";
+import { NARRATOR_STYLES } from "../../domain/voice/narratorStyles";
 
 export function SettingsScreen() {
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
@@ -13,7 +13,7 @@ export function SettingsScreen() {
   const [ai, setAi] = useState("standard");
   const [confirmBeforeSend, setConfirmBeforeSend] = useState(true);
   const [voicevoxUrl, setUrl] = useState(() => getVoicevoxUrl());
-  const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? ZUNDAMON_STYLES[0].speaker);
+  const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? NARRATOR_STYLES[0].speaker);
   const [speed, setSpeed] = useState(50);
   const [pitch, setPitch] = useState(50);
   const [intonation, setIntonation] = useState(50);
@@ -33,13 +33,13 @@ export function SettingsScreen() {
     setTestError("");
     try {
       const url = await synthesizePreview();
-      void new Audio(url).play().catch(() => {});
+      // 再生失敗（コーデック/自動再生制限など）も握りつぶさず通知する（§2-5）。
+      await new Audio(url).play();
       setTestState("idle");
     } catch (e) {
+      // VOICEVOX 由来の失敗は Rust が行動明示の文字列で返す。それ以外（再生失敗等）は定型文。
       setTestError(
-        typeof e === "string"
-          ? e
-          : "声の確認に失敗しました。VOICEVOX を起動してから、もう一度お試しください。",
+        typeof e === "string" ? e : "声の確認に失敗しました。もう一度お試しください。",
       );
       setTestState("error");
     }
@@ -137,7 +137,7 @@ export function SettingsScreen() {
               value={speaker}
               onChange={(e) => onChangeSpeaker(Number(e.target.value))}
             >
-              {ZUNDAMON_STYLES.map((s) => (
+              {NARRATOR_STYLES.map((s) => (
                 <option key={s.speaker} value={s.speaker}>
                   {s.label}
                 </option>

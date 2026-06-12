@@ -7,22 +7,11 @@ import { getVoicevoxSpeaker, getVoicevoxUrl } from '../appSettings';
 import type { SynthesizeInput, SynthesizedVoice, VoiceProvider } from '../../domain/voice/voiceProvider';
 
 // 本アプリの voiceId → VOICEVOX の speaker(スタイル)番号。
+// 選べるスタイル一覧（UI向け）は domain/voice/narratorStyles.ts に置く（app→infra 直 import 回避・§4）。
 const DEFAULT_SPEAKER = 3; // ずんだもん（ノーマル）
 const SPEAKER_BY_VOICE_ID: Record<string, number> = {
   [DEFAULT_VOICE_ID]: DEFAULT_SPEAKER,
 };
-
-/**
- * ナレーター（ずんだもん）の選べるスタイルと VOICEVOX の speaker 番号。
- * ADR-0003：ナレーター＝ずんだもんに限定する（「VOICEVOX:ずんだもん」クレジットを保つため、他キャラは選ばせない）。
- */
-export const ZUNDAMON_STYLES: { speaker: number; label: string }[] = [
-  { speaker: 3, label: 'ノーマル' },
-  { speaker: 1, label: 'あまあま' },
-  { speaker: 7, label: 'ツンツン' },
-  { speaker: 5, label: 'セクシー' },
-  { speaker: 22, label: 'ささやき' },
-];
 
 /** 使用する speaker を解決：設定の話者 → voiceId マップ → 既定（純粋・テスト可能）。 */
 export function resolveSpeaker(settingSpeaker: number | null, voiceId: string): number {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ZUNDAMON_STYLES, resolveSpeaker } from './voicevoxProvider';
+import { resolveSpeaker } from './voicevoxProvider';
+import { NARRATOR_STYLES } from '../../domain/voice/narratorStyles';
 
 describe('resolveSpeaker（設定 > voiceIdマップ > 既定）', () => {
   it('設定の話者を最優先する', () => {
@@ -13,9 +14,9 @@ describe('resolveSpeaker（設定 > voiceIdマップ > 既定）', () => {
   });
 });
 
-describe('ZUNDAMON_STYLES', () => {
+describe('NARRATOR_STYLES', () => {
   it('ノーマル(3)を含み、speaker はすべて整数', () => {
-    expect(ZUNDAMON_STYLES.some((s) => s.speaker === 3)).toBe(true);
-    expect(ZUNDAMON_STYLES.every((s) => Number.isInteger(s.speaker))).toBe(true);
+    expect(NARRATOR_STYLES.some((s) => s.speaker === 3)).toBe(true);
+    expect(NARRATOR_STYLES.every((s) => Number.isInteger(s.speaker))).toBe(true);
   });
 });
