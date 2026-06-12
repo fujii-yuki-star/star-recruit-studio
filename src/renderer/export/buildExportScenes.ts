@@ -10,16 +10,28 @@ import { svgToPngDataUrl } from './rasterize';
 export interface ExportSceneData {
   pngBase64: string;
   durationSec: number;
+  audioBase64?: string;
+  narrationVolume?: number;
 }
 
 /**
- * 各場面をプレビューと同一のSVGで実寸PNG化する。テンプレ未解決の場面はスキップ。
+ * 場面ごとのナレーション音声と解決済み音量(§6)を返すコールバック。
+ * narrationVolume は常に返し、audioBase64 が無い（undefined）場面は無音になる。
+ * コールバック自体を渡さない／場面に対して undefined を返した場合は、音声フィールドを付けない。
+ */
+export type NarrationFor = (
+  scene: Scene,
+) => { audioBase64?: string; narrationVolume: number } | undefined;
+
+/**
+ * 各場面をプレビューと同一のSVGで実寸PNG化し、ナレーション音声を添える。テンプレ未解決の場面はスキップ。
  * onProgress(done, total) で進捗を通知する。
  */
 export async function buildExportScenes(
   scenes: Scene[],
   templateById: Map<string, Template>,
   assetSrc: (assetId: string | null) => string | undefined,
+  narrationFor?: NarrationFor,
   onProgress?: (done: number, total: number) => void,
 ): Promise<ExportSceneData[]> {
   const out: ExportSceneData[] = [];
@@ -29,7 +41,13 @@ export async function buildExportScenes(
     if (template) {
       const svg = layoutToSvg(layoutScene(scene, template), { assetSrc });
       const pngBase64 = await svgToPngDataUrl(svg, template.canvas.width, template.canvas.height);
-      out.push({ pngBase64, durationSec: scene.durationSec });
+      const narration = narrationFor?.(scene);
+      out.push({
+        pngBase64,
+        durationSec: scene.durationSec,
+        audioBase64: narration?.audioBase64,
+        narrationVolume: narration?.narrationVolume,
+      });
     }
     onProgress?.(i + 1, scenes.length);
   }

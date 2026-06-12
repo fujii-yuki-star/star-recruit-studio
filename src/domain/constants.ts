@@ -18,6 +18,9 @@ export const HEIGHT = 1080;
 export const NARRATION_VOLUME = 1.0;
 export const BGM_VOLUME = 0.25;
 export const ORIGINAL_AUDIO_VOLUME = 0.2;
+// 音量の値域（§4：0.0〜1.5、1.0=原音）。
+export const VOLUME_MIN = 0.0;
+export const VOLUME_MAX = 1.5;
 
 export const MAX_NARRATION_LEN_DEFAULT = 120;
 export const MAX_SUBTITLE_LEN_DEFAULT = 60;

@@ -6,6 +6,10 @@ import { invoke } from '@tauri-apps/api/core';
 export interface ExportSceneInput {
   pngBase64: string;
   durationSec: number;
+  /** 場面のナレーション音声(WAV)。data URL も可。無い場面は無音トラックになる。 */
+  audioBase64?: string;
+  /** ナレーション音量（§6で解決済みの値）。音声がある場面のみ意味を持つ。 */
+  narrationVolume?: number;
 }
 
 /** 書き出し結果の要約。codec は使用エンコーダ（例: libx264 / libopenh264）。 */
