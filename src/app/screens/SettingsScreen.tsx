@@ -6,17 +6,19 @@ import {
   getVoicevoxSpeaker, getVoicevoxUrl, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
 import { NARRATOR_STYLES } from "../../domain/voice/narratorStyles";
+import {
+  INTONATION_RANGE, PITCH_RANGE, SPEED_RANGE, sliderToValue, valueToSlider,
+} from "../../domain/voice/voiceParams";
 
 export function SettingsScreen() {
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
+  const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
+  const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
 
   const [ai, setAi] = useState("standard");
   const [confirmBeforeSend, setConfirmBeforeSend] = useState(true);
   const [voicevoxUrl, setUrl] = useState(() => getVoicevoxUrl());
   const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? NARRATOR_STYLES[0].speaker);
-  const [speed, setSpeed] = useState(50);
-  const [pitch, setPitch] = useState(50);
-  const [intonation, setIntonation] = useState(50);
   const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
   const [testError, setTestError] = useState("");
 
@@ -154,8 +156,10 @@ export function SettingsScreen() {
               type="range"
               min={0}
               max={100}
-              value={speed}
-              onChange={(e) => setSpeed(Number(e.target.value))}
+              value={valueToSlider(voiceSettings.speed ?? SPEED_RANGE.def, SPEED_RANGE)}
+              onChange={(e) =>
+                updateVoiceSettings({ speed: sliderToValue(Number(e.target.value), SPEED_RANGE) })
+              }
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
             <div className="row-between text-faint text-sm">
@@ -173,8 +177,10 @@ export function SettingsScreen() {
               type="range"
               min={0}
               max={100}
-              value={pitch}
-              onChange={(e) => setPitch(Number(e.target.value))}
+              value={valueToSlider(voiceSettings.pitch ?? PITCH_RANGE.def, PITCH_RANGE)}
+              onChange={(e) =>
+                updateVoiceSettings({ pitch: sliderToValue(Number(e.target.value), PITCH_RANGE) })
+              }
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
             <div className="row-between text-faint text-sm">
@@ -192,8 +198,12 @@ export function SettingsScreen() {
               type="range"
               min={0}
               max={100}
-              value={intonation}
-              onChange={(e) => setIntonation(Number(e.target.value))}
+              value={valueToSlider(voiceSettings.intonation ?? INTONATION_RANGE.def, INTONATION_RANGE)}
+              onChange={(e) =>
+                updateVoiceSettings({
+                  intonation: sliderToValue(Number(e.target.value), INTONATION_RANGE),
+                })
+              }
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
             <div className="row-between text-faint text-sm">
@@ -202,7 +212,9 @@ export function SettingsScreen() {
             </div>
           </div>
 
-          <p className="field-hint">話す速さ・高さ・抑揚の保存は次の更新で対応します。</p>
+          <p className="field-hint">
+            話す速さ・高さ・抑揚はこのプロジェクトのナレーションに使われます（保存すると残ります）。
+          </p>
 
           <button
             className="btn btn-secondary"

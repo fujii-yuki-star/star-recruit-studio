@@ -2,7 +2,7 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは当面 MockProvider。
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_TARGET_DURATION_SEC } from "../../domain/constants";
-import type { Asset, CompanyInfo, Narration, Part, Scene, Warning } from "../../domain/project/types";
+import type { Asset, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import {
@@ -59,6 +59,8 @@ interface ProjectState {
   listProjects: () => Promise<ProjectSummary[]>;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
+  /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。 */
+  updateVoiceSettings: (patch: Partial<VoiceSettings>) => void;
   /** 素材を更新する（素材管理：説明/タグ/公開チェック等）。 */
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
@@ -256,6 +258,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
     })),
+  updateVoiceSettings: (patch) =>
+    set((s) => ({ meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } } })),
   updateAsset: (assetId, update) =>
     set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)) })),
   removeAsset: (assetId) =>
