@@ -9,9 +9,19 @@ export interface ProjectSummary {
 }
 
 const LS_PREFIX = 'project:';
+const LAST_PROJECT_KEY = 'lastProjectId';
 
 function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/** 最後に保存/読込したプロジェクトID（次回起動時の自動復元用）。localStorage は Tauri WebView でも永続する。 */
+export function getLastProjectId(): string | null {
+  return typeof localStorage !== 'undefined' ? localStorage.getItem(LAST_PROJECT_KEY) : null;
+}
+
+export function setLastProjectId(projectId: string): void {
+  if (typeof localStorage !== 'undefined') localStorage.setItem(LAST_PROJECT_KEY, projectId);
 }
 
 /** project.json を保存し、保存先（パス or キー）を返す。 */

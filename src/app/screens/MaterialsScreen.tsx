@@ -45,7 +45,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen() {
-  const { assets, updateAsset, removeAsset, assetSrcById, setAssetSrc } = useProjectStore();
+  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -64,11 +64,16 @@ export function MaterialsScreen() {
   function onPickImage(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !selected) return;
+    const assetId = selected.assetId;
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === "string") setAssetSrc(selected.assetId, reader.result);
+      if (typeof reader.result === "string") {
+        void setAssetImage(assetId, { name: file.name, dataUrl: reader.result });
+      }
     };
     reader.readAsDataURL(file);
+    // 同じファイルを選び直しても change が発火するよう値をクリアする。
+    e.target.value = "";
   }
 
   return (
@@ -139,16 +144,23 @@ export function MaterialsScreen() {
 
             {isVisual(selected.assetType) && (
               <div className="field">
-                <label className="field-label" htmlFor="mat-image">画像を選ぶ</label>
-                <input
-                  id="mat-image"
-                  className="input"
-                  type="file"
-                  accept="image/*"
-                  onChange={onPickImage}
-                />
+                <label className="field-label">画像</label>
+                {/* ネイティブの「ファイル未選択」表示を避け、設定済みかどうかが分かるボタンにする */}
+                <label className="btn btn-secondary" style={{ cursor: "pointer" }}>
+                  <UploadIcon size={16} />
+                  {assetSrcById[selected.assetId] ? "画像を変更する" : "画像を選ぶ"}
+                  <input
+                    key={selected.assetId}
+                    type="file"
+                    accept="image/*"
+                    onChange={onPickImage}
+                    style={{ display: "none" }}
+                  />
+                </label>
                 <p className="text-sm text-muted" style={{ marginTop: 4 }}>
-                  選んだ画像が、仕上がり確認のこの素材の枠に表示されます。
+                  {assetSrcById[selected.assetId]
+                    ? "この素材に画像を設定済みです（仕上がり確認の枠に表示）。差し替えるには「画像を変更する」から選び直してください。"
+                    : "画像を選ぶと、仕上がり確認のこの素材の枠に表示されます。"}
                 </p>
               </div>
             )}

@@ -13,9 +13,10 @@ import type { ProjectHeader } from "../../domain/project/persistence";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { sampleAssets, sampleTemplates } from "../../infrastructure/sampleData";
 import {
-  listProjectSummaries, loadProjectDoc, saveProjectDoc,
+  listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
+import { importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -51,8 +52,8 @@ interface ProjectState {
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
   removeAsset: (assetId: string) => void;
-  /** 素材の表示用src（data URL）を設定する。プレビュー/出力で使う。 */
-  setAssetSrc: (assetId: string, dataUrl: string) => void;
+  /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
+  setAssetImage: (assetId: string, file: { name: string; dataUrl: string }) => Promise<void>;
 }
 
 const provider = new MockAiProvider();
@@ -140,6 +141,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const meta: ProjectHeader = { ...s.meta, projectId, updatedAt: new Date().toISOString() };
       const project = assembleProject(meta, s.assets, s.parts, s.scenes);
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
+      setLastProjectId(projectId);
       set({ meta, saveStatus: "saved" });
     } catch {
       set({ saveStatus: "error" });
@@ -148,6 +150,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   loadProject: async (projectId) => {
     const text = await loadProjectDoc(projectId);
     const project = parseProjectDoc(text);
+    // ディスクの素材を data URL に復元（filePath を持つもの。未配置のサンプル等は null でスキップ）。並列実行。
+    const loaded = await Promise.all(
+      project.assets
+        .filter((a) => a.filePath)
+        .map(async (a) => {
+          const url = await readAssetDataUrl(project.projectId, a.filePath);
+          return url ? ([a.assetId, url] as const) : null;
+        }),
+    );
+    const assetSrcById: Record<string, string> = {};
+    for (const entry of loaded) {
+      if (entry) assetSrcById[entry[0]] = entry[1];
+    }
     set({
       status: "ready",
       saveStatus: "idle",
@@ -167,8 +182,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       parts: project.parts,
       scenes: project.scenes,
       warnings: [],
-      assetSrcById: {},
+      assetSrcById,
     });
+    setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
   updateScene: (sceneId, update) =>
@@ -179,6 +195,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)) })),
   removeAsset: (assetId) =>
     set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId) })),
-  setAssetSrc: (assetId, dataUrl) =>
-    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl } })),
+  setAssetImage: async (assetId, file) => {
+    // 即時表示（メモリ内 data URL）。
+    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: file.dataUrl } }));
+    try {
+      // 保存先フォルダの名前空間のため projectId を確保する。
+      let projectId = get().meta.projectId;
+      if (!projectId) {
+        const existing = await listProjectSummaries();
+        projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        set((s) => ({ meta: { ...s.meta, projectId } }));
+      }
+      const parts = file.name.split(".");
+      const rawExt = parts.length > 1 ? parts[parts.length - 1] : "png";
+      const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+      const filePath = await importAssetFile(projectId, `${assetId}.${ext}`, file.dataUrl);
+      if (filePath) {
+        set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)) }));
+      }
+    } catch {
+      // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
+      set({ saveStatus: "error" });
+    }
+  },
 }));
