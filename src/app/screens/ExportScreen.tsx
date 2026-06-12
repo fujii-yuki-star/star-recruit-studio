@@ -16,6 +16,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const scenes = useProjectStore((s) => s.scenes);
   const templates = useProjectStore((s) => s.templates);
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
+  const saveProject = useProjectStore((s) => s.saveProject);
+  const saveStatus = useProjectStore((s) => s.saveStatus);
 
   const [fileName, setFileName] = useState("会社紹介動画_2026春");
   const [size, setSize] = useState("fullhd");
@@ -44,6 +46,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setProgress({ done: 0, total: scenes.length });
     setPhase("rendering");
     try {
+      // 出力時はプロジェクト（場面・素材）も保存する。
+      await saveProject();
       const templateById = new Map(templates.map((t) => [t.templateId, t] as const));
       const built = await buildExportScenes(
         scenes,
@@ -135,10 +139,23 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               <ArrowLeftIcon size={18} />
               戻る
             </button>
-            <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy}>
-              <FilmIcon size={20} />
-              {busy ? "書き出し中…" : "保存を開始"}
-            </button>
+            <div className="row gap-sm">
+              <button
+                className="btn btn-secondary"
+                onClick={() => void saveProject()}
+                disabled={busy || saveStatus === "saving"}
+              >
+                {saveStatus === "saving"
+                  ? "保存中…"
+                  : saveStatus === "saved"
+                    ? "保存しました"
+                    : "プロジェクトを保存"}
+              </button>
+              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy}>
+                <FilmIcon size={20} />
+                {busy ? "書き出し中…" : "動画を出力"}
+              </button>
+            </div>
           </div>
         </div>
 
