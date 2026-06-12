@@ -37,6 +37,8 @@ interface ProjectState {
   assetSrcById: Record<string, string>;
   /** 生成済みナレーション音声（data URL）。sceneId→src。永続化しない（V-Bでファイル化予定）。 */
   narrationAudioById: Record<string, string>;
+  /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
+  isGeneratingNarration: boolean;
   /** Mock AI → 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
   generate: () => Promise<void>;
   /** デモ/テスト用にエラー状態へ。 */
@@ -94,6 +96,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   assets: sampleAssets,
   assetSrcById: {},
   narrationAudioById: {},
+  isGeneratingNarration: false,
   generate: async () => {
     set({ status: "generating" });
     try {
@@ -295,9 +298,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   generateAllNarrations: async () => {
-    const ids = get()
-      .scenes.filter((s) => s.narration.text.trim().length > 0)
-      .map((s) => s.sceneId);
-    await Promise.all(ids.map((id) => get().generateNarration(id)));
+    if (get().isGeneratingNarration) return;
+    set({ isGeneratingNarration: true });
+    try {
+      // 未生成（none/pending/failed）のみ対象。生成済みは個別の「声を作り直す」で上書きする。
+      const ids = get()
+        .scenes.filter((s) => s.narration.text.trim().length > 0 && s.narration.status !== "generated")
+        .map((s) => s.sceneId);
+      await Promise.all(ids.map((id) => get().generateNarration(id)));
+    } finally {
+      set({ isGeneratingNarration: false });
+    }
   },
 }));

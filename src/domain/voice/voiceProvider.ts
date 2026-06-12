@@ -1,5 +1,6 @@
 // ナレーション音声の抽象（VoiceProvider）。実装は infrastructure に置く（Mock / 将来 VOICEVOX）。
 // CLAUDE.md §4（外部I/Oは抽象化）/ ADR-0003（ずんだもん＝ナレーター・差し替え可能）/ 13 §4。
+import { DEFAULT_VOICE_ID } from '../constants';
 import type { Narration, VoiceSettings } from '../project/types';
 
 export interface SynthesizeInput {
@@ -28,10 +29,13 @@ export interface ResolvedVoice {
   intonation: number;
 }
 
-/** scene.narration の null/未指定フィールドを project.voiceSettings で補完する（11 §6：null=継承）。 */
+/**
+ * scene.narration の null/未指定フィールドを project.voiceSettings で補完する（11 §6：null=継承）。
+ * voiceId は scene → project → システム定数(DEFAULT_VOICE_ID) の3段フォールバック（project側が空でも既定へ）。
+ */
 export function resolveNarrationVoice(narration: Narration, voice: VoiceSettings): ResolvedVoice {
   return {
-    voiceId: narration.voiceId ?? voice.defaultVoiceId,
+    voiceId: narration.voiceId ?? (voice.defaultVoiceId || DEFAULT_VOICE_ID),
     speed: narration.speed ?? voice.speed ?? 1.0,
     pitch: narration.pitch ?? voice.pitch ?? 0.0,
     intonation: narration.intonation ?? voice.intonation ?? 1.0,

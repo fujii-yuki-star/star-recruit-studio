@@ -46,7 +46,7 @@ const narrationStatusLabel: Record<string, string> = {
   none: "未作成",
   pending: "作成中…",
   generated: "作成済み",
-  failed: "作成に失敗",
+  failed: "失敗（もう一度お試しください）",
 };
 
 // スロットの slotType と素材の assetType の整合で、割り当て可能な素材を絞る（§5）。
@@ -67,8 +67,10 @@ function assetThumbClass(type: Asset["assetType"]): string {
 }
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
-  const { status, scenes, templates, assets, generate, updateScene, addAsset, generateNarration, generateAllNarrations } =
-    useProjectStore();
+  const {
+    status, scenes, templates, assets, generate, updateScene, addAsset,
+    generateNarration, generateAllNarrations, isGeneratingNarration,
+  } = useProjectStore();
 
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
@@ -130,8 +132,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
         <div className="topbar-title">場面編集</div>
         <div className="topbar-actions">
-          <button className="btn btn-ghost" onClick={() => void generateAllNarrations()}>
-            全場面の声を作成
+          <button
+            className="btn btn-ghost"
+            onClick={() => void generateAllNarrations()}
+            disabled={isGeneratingNarration}
+          >
+            {isGeneratingNarration ? "作成中…" : "全場面の声を作成"}
           </button>
           <button className="btn btn-secondary" onClick={() => onNavigate("draft")}>
             台本表に戻る
@@ -331,7 +337,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 id="line"
                 className="textarea"
                 value={selected.narration.text}
-                onChange={(e) => patch((s) => ({ ...s, narration: { ...s.narration, text: e.target.value } }))}
+                onChange={(e) =>
+                  patch((s) => ({
+                    ...s,
+                    // セリフ変更で音声は作り直しが必要なので status をリセット（古い音声との不整合防止）。
+                    narration: { ...s.narration, text: e.target.value, status: "none" },
+                  }))
+                }
               />
               <div className="row-between" style={{ marginTop: 6 }}>
                 <span className="text-sm text-muted">

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { resolveNarrationVoice } from './voiceProvider';
+import { DEFAULT_VOICE_ID } from '../constants';
 import type { Narration, VoiceSettings } from '../project/types';
 
 const voice: VoiceSettings = {
-  defaultVoiceId: 'voicevox_zundamon',
+  defaultVoiceId: DEFAULT_VOICE_ID,
   speed: 1.1,
   pitch: 0.2,
   intonation: 1.3,
@@ -14,7 +15,7 @@ const base: Narration = { text: 'こんにちは', status: 'none' };
 describe('resolveNarrationVoice', () => {
   it('未指定(null)は project.voiceSettings を継承する（11 §6）', () => {
     expect(resolveNarrationVoice(base, voice)).toEqual({
-      voiceId: 'voicevox_zundamon',
+      voiceId: DEFAULT_VOICE_ID,
       speed: 1.1,
       pitch: 0.2,
       intonation: 1.3,
@@ -35,5 +36,9 @@ describe('resolveNarrationVoice', () => {
       pitch: 0.0,
       intonation: 1.0,
     });
+  });
+
+  it('project.defaultVoiceId が空ならシステム定数へフォールバック（3段目）', () => {
+    expect(resolveNarrationVoice(base, { defaultVoiceId: '' }).voiceId).toBe(DEFAULT_VOICE_ID);
   });
 });
