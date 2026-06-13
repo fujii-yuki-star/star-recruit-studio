@@ -33,8 +33,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [fileName, setFileName] = useState("会社紹介動画_2026春");
   const [size, setSize] = useState("fullhd");
   const [withSubtitle, setWithSubtitle] = useState(true);
-  // BGM の入/切は前回の設定（bgmSettings.enabled）を初期値にする。未設定なら入。
-  const [withBgm, setWithBgm] = useState(() => bgmSettings?.enabled ?? true);
+  // BGM の入/切は bgmSettings.enabled を単一の真実とする（トグルで更新・保存で永続化）。未設定なら入。
+  const withBgm = bgmSettings?.enabled ?? true;
 
   const [phase, setPhase] = useState<ExportPhase>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -171,7 +171,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <span className="field-label" style={{ margin: 0 }}>
               BGMを入れる
             </span>
-            <Switch on={withBgm} onChange={setWithBgm} label="BGMを入れる" />
+            <Switch on={withBgm} onChange={(v) => updateBgmSettings({ enabled: v })} label="BGMを入れる" />
           </div>
           {withBgm && (
             <div className="field" style={{ marginTop: 8 }}>
@@ -208,6 +208,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             />
             <div className="row-between text-faint text-sm">
               <span>小さい</span>
+              <span>{Math.round((voiceSettings.volume ?? NARRATION_VOLUME) * 100)}%（標準100%）</span>
               <span>大きい</span>
             </div>
           </div>
@@ -228,6 +229,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               />
               <div className="row-between text-faint text-sm">
                 <span>小さい</span>
+                <span>{Math.round((bgmSettings?.volume ?? BGM_VOLUME) * 100)}%（標準25%）</span>
                 <span>大きい</span>
               </div>
             </div>
