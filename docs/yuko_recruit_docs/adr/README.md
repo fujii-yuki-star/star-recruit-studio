@@ -12,6 +12,7 @@
 | [0003](0003-narration-voice.md) | ナレーション音声とゆうこの関係（ずんだもん＝ナレーター） | **Accepted** |
 | [0004](0004-rasterization-method.md) | 本番ラスタライズ手段の単一化（WebView CanvasでSVG→PNG） | **Accepted** |
 | [0005](0005-voicevox-bundling.md) | VOICEVOX エンジンの同梱と自動起動 | **Accepted** |
+| [0006](0006-video-slot-compositing.md) | 動画スロットの合成（動画ありシーンの書き出し） | **Accepted** |
 
 ## 状態の意味
 
