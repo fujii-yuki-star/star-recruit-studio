@@ -22,9 +22,14 @@ export function splitVideoSceneSvg(
   slotId: string,
   assetSrc?: (assetId: string | null) => string | undefined,
 ): VideoSceneSplit | null {
-  const slot = layout.items.find((it) => it.id === slotId);
+  // 動画スロット（image かつ role=slot）のみを境界に使う。誤った id（fill/text 等）では境界を取らず null。
+  const slot = layout.items.find(
+    (it) => it.id === slotId && it.kind === 'image' && it.role === 'slot',
+  );
   if (!slot) return null;
   const slotZ = slot.zIndex;
+  // 下＝zIndex<slot ／ 上＝slot 自身を除く残り全部（zIndex>=slot）。
+  // 「== slot」のアイテムを上に含めることで取りこぼし（描画漏れ）を防ぐ＝網羅的分割（ADR-0006 もこの規則）。
   const belowSvg = layoutToSvg(layout, {
     assetSrc,
     itemFilter: (it) => it.id !== slotId && it.zIndex < slotZ,

@@ -27,7 +27,7 @@ ADR-0001 は方式 **A2ハイブリッド**を採択し、動画ありシーン�
 ### 具体仕様
 
 - **動画シーンの判定**: シーンのスロット層（`layer.type='slot'`）に解決された素材が `assetType='video'`。
-- **下/上PNGの分割**: 静止レイヤーを `zIndex < slot.zIndex` を下PNG、`zIndex > slot.zIndex` を上PNG（透過）に分けてラスタライズ（ADR-0004＝WebView Canvas／検証はresvg）。動画なしシーンは従来どおり1枚PNG。
+- **下/上PNGの分割**: 静止レイヤーを `zIndex < slot.zIndex` を下PNG、**それ以外（slot 自身を除く `zIndex >= slot.zIndex`）を上PNG（透過）**に分けてラスタライズ（ADR-0004＝WebView Canvas／検証はresvg）。`== slot.zIndex` のアイテムは上（前面）に含め、取りこぼし（描画漏れ）を防ぐ＝網羅的分割。動画なしシーンは従来どおり1枚PNG。
 - **スケール/配置（fit）**: `cover`=`scale=...:force_original_aspect_ratio=increase,crop`、`contain`=`decrease`＋`pad`、`stretch`=`scale`そのまま。スロット矩形 `(x,y,w,h)` へ `overlay`。
 - **クリップ尺**: `asset.clip.startSec..endSec`（`01 §5.4`）で `-ss/-t` 切り出し。クリップがシーン尺より短い場合はループ又は最終フレーム保持（実装時に確定）。
 - **音声（§4/§6）**: `narration(NARRATION_VOLUME=1.0) ＋ 元動画音声(originalAudioVolume 既定 0.2、useOriginalAudio=false なら無し)` を `amix`。元音声が無いクリップは無音。BGM(0.25)は全体へ（既存 `mix_bgm_args`）。
