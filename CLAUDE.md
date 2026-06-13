@@ -139,11 +139,11 @@ src/
 - 描画一致方式（論点③）: [`adr/0001`](docs/yuko_recruit_docs/adr/0001-rendering-parity.md) **Accepted** — 方式A2ハイブリッド。`05_RENDERING_SPEC.md` 追従改訂済み。
 - FFmpeg/コーデック: [`adr/0002`](docs/yuko_recruit_docs/adr/0002-ffmpeg-codec.md) **Accepted** — LGPLビルド＋OpenH264（**自前の特許ライセンス不要**）。
 - ナレーション音声: [`adr/0003`](docs/yuko_recruit_docs/adr/0003-narration-voice.md) **Accepted** — VOICEVOX:ずんだもんを**ナレーター**として使用（ゆうこ固有の声とは称さない）＋常時クレジット。
+- VOICEVOX同梱: [`adr/0005`](docs/yuko_recruit_docs/adr/0005-voicevox-bundling.md) **Accepted** — エンジンを**同梱しアプリ起動時に自動起動**（接続先設定は上級者向けフォールバック）。規約確認済み・クレジット表示は維持。実装/配布の詳細は ADR 未解決論点。
 - ゆうこ＝自社保有で権利クリア（`17`）／フォントはOFL系を同梱（游ゴシック等は同梱不可。`13 §6`）。
 
 **未決定（リリース前に確認）**
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。
 - FFmpeg の正確なビルド構成・Cisco OpenH264 バイナリ取得方式（`adr/0002`）。
-- VOICEVOX エンジン同梱可否・接続方式（`13 §4`）。VOICEVOX/ずんだもん規約の通読。
 - APIキー保管の実装（OSキーチェーン、`13 §7`）／最終フォント選定（OFL系）。
 - 正式プロダクト名 / 標準BGM・装飾アセットの入手元とライセンス。
