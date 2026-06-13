@@ -7,6 +7,7 @@ import { useProjectStore } from "../store/projectStore";
 import { buildExportScenes } from "../../renderer/export/buildExportScenes";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
+import { BGM_VOLUME, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN } from "../../domain/constants";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 
 interface ExportProps {
@@ -26,6 +27,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const assets = useProjectStore((s) => s.assets);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const setBgm = useProjectStore((s) => s.setBgm);
+  const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
+  const updateBgmSettings = useProjectStore((s) => s.updateBgmSettings);
 
   const [fileName, setFileName] = useState("会社紹介動画_2026春");
   const [size, setSize] = useState("fullhd");
@@ -184,6 +187,48 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                 >
                   {bgmAsset ? "BGMを変更する" : "BGMを選ぶ"}
                 </label>
+              </div>
+            </div>
+          )}
+
+          <hr className="divider" />
+          <div className="field">
+            <label className="field-label" htmlFor="narrationVolume">
+              ナレーション音量
+            </label>
+            <input
+              id="narrationVolume"
+              type="range"
+              min={VOLUME_MIN}
+              max={VOLUME_MAX}
+              step={0.05}
+              value={voiceSettings.volume ?? NARRATION_VOLUME}
+              onChange={(e) => updateVoiceSettings({ volume: Number(e.target.value) })}
+              style={{ width: "100%", accentColor: "var(--color-primary)" }}
+            />
+            <div className="row-between text-faint text-sm">
+              <span>小さい</span>
+              <span>大きい</span>
+            </div>
+          </div>
+          {withBgm && bgmAsset && (
+            <div className="field">
+              <label className="field-label" htmlFor="bgmVolume">
+                BGM音量
+              </label>
+              <input
+                id="bgmVolume"
+                type="range"
+                min={VOLUME_MIN}
+                max={VOLUME_MAX}
+                step={0.05}
+                value={bgmSettings?.volume ?? BGM_VOLUME}
+                onChange={(e) => updateBgmSettings({ volume: Number(e.target.value) })}
+                style={{ width: "100%", accentColor: "var(--color-primary)" }}
+              />
+              <div className="row-between text-faint text-sm">
+                <span>小さい</span>
+                <span>大きい</span>
               </div>
             </div>
           )}
