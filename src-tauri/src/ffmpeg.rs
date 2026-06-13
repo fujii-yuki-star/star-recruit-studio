@@ -13,6 +13,8 @@ use tauri::Manager;
 const DEFAULT_FPS: u32 = 30;
 // ナレーション既定音量。正典は TS domain/constants.ts §4（=1.0）。Rust側は同値をミラー（防御的フォールバック）。
 const DEFAULT_NARRATION_VOLUME: f64 = 1.0;
+// 元動画音声の既定音量。正典は TS domain/constants.ts §4（=0.2）。
+const DEFAULT_ORIGINAL_AUDIO_VOLUME: f64 = 0.2;
 
 /// 映像コーデック。本番(OpenH264)への無改修切替のための抽象。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,8 +185,6 @@ pub fn mix_bgm_args(
 }
 
 /// 動画スロットの収め方（11 §5 / asset.clip.fit）。
-// ADR-0006 実装フェーズ①: 純粋ビルダー＋テストを先行。export_video への結線は次PRのため、それまで未使用。
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fit {
     Cover,
@@ -193,7 +193,6 @@ pub enum Fit {
 }
 
 /// 動画クリップをスロット(w×h)へ収める scale/crop/pad フィルタ（純粋）。
-#[allow(dead_code)] // 次PRで結線（ADR-0006 実装フェーズ）。
 fn fit_filter(fit: Fit, w: u32, h: u32) -> String {
     match fit {
         // 短辺合わせで埋めて余りを切る。
@@ -211,7 +210,6 @@ fn fit_filter(fit: Fit, w: u32, h: u32) -> String {
 
 /// 動画ありシーンの合成入力（ADR-0006）。下PNG→動画(slot)→上PNG(透過)を overlay し、
 /// 音声は narration(任意) ＋ 元動画音声(任意) を amix（両方無ければ無音）。
-#[allow(dead_code)] // 次PRで export_video から構築（ADR-0006 実装フェーズ）。
 pub struct VideoSceneArgs<'a> {
     /// 動画より下のレイヤー（背景等, zIndex<slot, 不透明・全面）。
     pub below_png: &'a str,
@@ -228,8 +226,9 @@ pub struct VideoSceneArgs<'a> {
     pub slot_h: u32,
     pub fit: Fit,
     /// クリップの切り出し開始秒（asset.clip.startSec）。
-    /// TODO(step2): asset.clip.endSec を加え、-t を min(endSec-startSec, duration_sec) にする（ADR-0006 未解決#4）。
     pub clip_start_sec: f64,
+    /// クリップの切り出し終了秒（asset.clip.endSec）。None or 不正値ならシーン尺いっぱい使う。
+    pub clip_end_sec: Option<f64>,
     /// シーン尺（秒）。
     pub duration_sec: f64,
     pub narration_volume: f64,
@@ -244,7 +243,6 @@ pub struct VideoSceneArgs<'a> {
 
 /// 動画ありシーンを1本のMP4にする引数（純粋・ADR-0006）。
 /// 入力順: 0=below / 1=clip / 2=above /（narration があれば）3=narration。
-#[allow(dead_code)] // 次PRで encode/ export_video から使用（ADR-0006 実装フェーズ）。
 pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     // 映像: 下PNG → クリップ(slotへfit) → 上PNG(透過) を overlay。
     let video_filter = format!(
@@ -270,6 +268,12 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     let filter = format!("{video_filter};{audio_filter}");
 
     let dur = a.duration_sec;
+    // クリップの使用尺: clip_end_sec があれば (end-start) を尺で頭打ち。無ければシーン尺いっぱい。
+    // 尺より短いクリップは overlay の既定 eof_action=repeat で最終フレームが保持される（N-1）。
+    let clip_t = match a.clip_end_sec {
+        Some(end) if end > a.clip_start_sec => (end - a.clip_start_sec).min(dur),
+        _ => dur,
+    };
     let mut args: Vec<String> = vec![
         "-y".into(),
         "-loop".into(),
@@ -281,7 +285,7 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
         "-ss".into(),
         format!("{}", a.clip_start_sec),
         "-t".into(),
-        format!("{dur}"),
+        format!("{clip_t}"),
         "-i".into(),
         a.clip.into(),
         "-loop".into(),
@@ -370,10 +374,41 @@ struct SceneFile {
     duration_sec: f64,
 }
 
-/// 各シーンPNG → MP4 → concat で1本に結合する（純粋ロジックに近い処理本体）。
-fn encode_scenes(
+/// 動画ありシーンの解決済みジョブ（ADR-0006）。下/上PNGは tmp に書き出し済み、clip は絶対パス解決済み。
+struct VideoJob {
+    below: PathBuf,
+    above: PathBuf,
+    clip: PathBuf,
+    narration: Option<PathBuf>,
+    slot: (u32, u32, u32, u32),
+    fit: Fit,
+    clip_start_sec: f64,
+    clip_end_sec: Option<f64>,
+    duration_sec: f64,
+    narration_volume: f64,
+    original_volume: f64,
+    use_original_audio: bool,
+}
+
+/// 1シーン分のジョブ。静止画 or 動画。
+enum SceneJob {
+    Still(SceneFile),
+    Video(VideoJob),
+}
+
+impl SceneJob {
+    fn duration_sec(&self) -> f64 {
+        match self {
+            SceneJob::Still(s) => s.duration_sec,
+            SceneJob::Video(v) => v.duration_sec,
+        }
+    }
+}
+
+/// 各シーン（静止画 or 動画）→ MP4 → concat で1本に結合する。
+fn encode_jobs(
     ffmpeg: &Path,
-    scenes: &[SceneFile],
+    jobs: &[SceneJob],
     codec: VideoCodec,
     fps: u32,
     tmp_dir: &Path,
@@ -386,22 +421,53 @@ fn encode_scenes(
         )
     })?;
     let mut list = String::new();
-    for (i, scene) in scenes.iter().enumerate() {
+    for (i, job) in jobs.iter().enumerate() {
         let clip_name = format!("scene_{i:03}.mp4");
         let clip = tmp_dir.join(&clip_name);
-        let audio = scene
-            .audio
-            .as_ref()
-            .map(|p| p.to_string_lossy().into_owned());
-        let args = scene_clip_args(
-            &scene.png.to_string_lossy(),
-            audio.as_deref(),
-            scene.narration_volume,
-            &clip.to_string_lossy(),
-            scene.duration_sec,
-            fps,
-            codec,
-        );
+        let args = match job {
+            SceneJob::Still(s) => {
+                let audio = s.audio.as_ref().map(|p| p.to_string_lossy().into_owned());
+                scene_clip_args(
+                    &s.png.to_string_lossy(),
+                    audio.as_deref(),
+                    s.narration_volume,
+                    &clip.to_string_lossy(),
+                    s.duration_sec,
+                    fps,
+                    codec,
+                )
+            }
+            SceneJob::Video(v) => {
+                let below = v.below.to_string_lossy().into_owned();
+                let above = v.above.to_string_lossy().into_owned();
+                let clip_path = v.clip.to_string_lossy().into_owned();
+                let out_path = clip.to_string_lossy().into_owned();
+                let narr = v
+                    .narration
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned());
+                video_scene_args(&VideoSceneArgs {
+                    below_png: &below,
+                    clip: &clip_path,
+                    above_png: &above,
+                    narration: narr.as_deref(),
+                    slot_x: v.slot.0,
+                    slot_y: v.slot.1,
+                    slot_w: v.slot.2,
+                    slot_h: v.slot.3,
+                    fit: v.fit,
+                    clip_start_sec: v.clip_start_sec,
+                    clip_end_sec: v.clip_end_sec,
+                    duration_sec: v.duration_sec,
+                    narration_volume: v.narration_volume,
+                    original_volume: v.original_volume,
+                    use_original_audio: v.use_original_audio,
+                    fps,
+                    codec,
+                    out: &out_path,
+                })
+            }
+        };
         run(ffmpeg, &args).map_err(|e| {
             export_failure(
                 format!("scene {} encode: {e}", i + 1),
@@ -460,10 +526,64 @@ fn sanitize_file_name(name: &str) -> String {
     }
 }
 
+/// "cover" | "contain" | "stretch" → Fit（不明は cover）。
+fn parse_fit(s: &str) -> Fit {
+    match s {
+        "contain" => Fit::Contain,
+        "stretch" => Fit::Stretch,
+        _ => Fit::Cover,
+    }
+}
+
+/// プロジェクト相対パスを絶対パスへ解決（パストラバーサル・絶対パスを拒否＝assets.rs と同方針）。
+fn resolve_project_file(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    rel_path: &str,
+) -> Result<PathBuf, String> {
+    if !crate::is_safe_project_id(project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
+    if rel_path.contains("..")
+        || rel_path.starts_with('/')
+        || rel_path.starts_with('\\')
+        || Path::new(rel_path).is_absolute()
+    {
+        return Err("不正なパスです。".to_string());
+    }
+    let base = app.path().app_data_dir().map_err(|e| {
+        export_failure(
+            format!("app data dir: {e}"),
+            "動画の保存先を準備できませんでした。もう一度お試しください。",
+        )
+    })?;
+    Ok(base.join("projects").join(project_id).join(rel_path))
+}
+
+/// base64(or data URL) をデコードして path へ書き出す（汎用・下/上PNG用）。
+fn decode_b64_to_file(b64: &str, path: &Path, ctx: &str) -> Result<(), String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(strip_data_url(b64))
+        .map_err(|e| {
+            export_failure(
+                format!("{ctx} decode: {e}"),
+                "動画の保存中に問題が発生しました。もう一度お試しください。",
+            )
+        })?;
+    fs::write(path, bytes).map_err(|e| {
+        export_failure(
+            format!("{ctx} write: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })
+}
+
 /// エクスポートの入力（1場面）。フロントは PNG(base64 or data URL) と尺を渡す。
+/// 動画ありシーンは `video` を指定（その場合 png_base64 は使わない）。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SceneInput {
+    #[serde(default)]
     png_base64: String,
     duration_sec: f64,
     /// 場面のナレーション音声(WAV)。data URL も可。無い場面は無音トラックになる。
@@ -472,6 +592,34 @@ pub struct SceneInput {
     /// ナレーション音量（§6で解決済み）。未指定なら既定。
     #[serde(default)]
     narration_volume: Option<f64>,
+    /// 動画ありシーン（ADR-0006）。指定時は overlay 合成経路へ。
+    #[serde(default)]
+    video: Option<VideoSceneInput>,
+}
+
+/// 動画ありシーンの入力（ADR-0006・step2b）。下/上PNGは base64、クリップはプロジェクト相対パス。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoSceneInput {
+    below_png_base64: String,
+    above_png_base64: String,
+    /// プロジェクト相対のクリップパス（例: "assets/asset_005.mp4"）。
+    clip_rel_path: String,
+    slot_x: u32,
+    slot_y: u32,
+    slot_w: u32,
+    slot_h: u32,
+    /// "cover" | "contain" | "stretch"。
+    fit: String,
+    #[serde(default)]
+    clip_start_sec: f64,
+    #[serde(default)]
+    clip_end_sec: Option<f64>,
+    /// 元動画音声を使うか（front 側で hasAudio 確認済み＝N-2）。
+    #[serde(default)]
+    use_original_audio: bool,
+    #[serde(default)]
+    original_volume: Option<f64>,
 }
 
 /// BGM 入力（プロジェクト全体に重ねる）。data URL も可。volume は §6 で解決済み。
@@ -504,6 +652,7 @@ pub fn export_video(
     scenes: Vec<SceneInput>,
     file_name: String,
     bgm: Option<BgmInput>,
+    project_id: Option<String>,
 ) -> Result<ExportReport, String> {
     if scenes.is_empty() {
         return Err("書き出す場面がありません。".into());
@@ -525,56 +674,73 @@ pub fn export_video(
         )
     })?;
 
-    let mut files: Vec<SceneFile> = Vec::with_capacity(scenes.len());
+    let mut jobs: Vec<SceneJob> = Vec::with_capacity(scenes.len());
     for (i, s) in scenes.iter().enumerate() {
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(strip_data_url(&s.png_base64))
-            .map_err(|e| {
-                export_failure(
-                    format!("scene {} png decode: {e}", i + 1),
-                    format!(
-                        "場面{}の画像を読み取れませんでした。もう一度お試しください。",
-                        i + 1
-                    ),
-                )
-            })?;
-        let png = tmp.join(format!("scene_{i:03}.png"));
-        fs::write(&png, bytes).map_err(|e| {
-            export_failure(
-                format!("write scene png: {e}"),
-                "動画の保存中に問題が発生しました。もう一度お試しください。",
-            )
-        })?;
-        let audio = match &s.audio_base64 {
+        // ナレーション音声（静止/動画 共通）を先に書き出す。
+        let narration = match &s.audio_base64 {
             Some(b64) if !b64.is_empty() => {
-                let abytes = base64::engine::general_purpose::STANDARD
-                    .decode(strip_data_url(b64))
-                    .map_err(|e| {
-                        export_failure(
-                            format!("scene {} audio decode: {e}", i + 1),
-                            format!(
-                                "場面{}の音声を読み取れませんでした。もう一度お試しください。",
-                                i + 1
-                            ),
-                        )
-                    })?;
                 let wav = tmp.join(format!("scene_{i:03}.wav"));
-                fs::write(&wav, abytes).map_err(|e| {
-                    export_failure(
-                        format!("write scene wav: {e}"),
-                        "動画の保存中に問題が発生しました。もう一度お試しください。",
-                    )
-                })?;
+                decode_b64_to_file(b64, &wav, &format!("scene {} narration", i + 1))?;
                 Some(wav)
             }
             _ => None,
         };
-        files.push(SceneFile {
-            png,
-            audio,
-            narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
-            duration_sec: s.duration_sec,
-        });
+
+        if let Some(v) = &s.video {
+            // 動画ありシーン（ADR-0006）。下/上PNGを書き出し、クリップをプロジェクト相対パスから安全解決。
+            let pid = project_id.as_deref().ok_or_else(|| {
+                export_failure(
+                    "video scene without project_id",
+                    "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                )
+            })?;
+            let below = tmp.join(format!("below_{i:03}.png"));
+            decode_b64_to_file(
+                &v.below_png_base64,
+                &below,
+                &format!("scene {} below png", i + 1),
+            )?;
+            let above = tmp.join(format!("above_{i:03}.png"));
+            decode_b64_to_file(
+                &v.above_png_base64,
+                &above,
+                &format!("scene {} above png", i + 1),
+            )?;
+            let clip = resolve_project_file(&app, pid, &v.clip_rel_path)?;
+            if !clip.exists() {
+                return Err(export_failure(
+                    format!("clip not found: {}", clip.display()),
+                    format!(
+                        "場面{}の動画ファイルが見つかりませんでした。素材を確認してください。",
+                        i + 1
+                    ),
+                ));
+            }
+            jobs.push(SceneJob::Video(VideoJob {
+                below,
+                above,
+                clip,
+                narration,
+                slot: (v.slot_x, v.slot_y, v.slot_w, v.slot_h),
+                fit: parse_fit(&v.fit),
+                clip_start_sec: v.clip_start_sec,
+                clip_end_sec: v.clip_end_sec,
+                duration_sec: s.duration_sec,
+                narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
+                original_volume: v.original_volume.unwrap_or(DEFAULT_ORIGINAL_AUDIO_VOLUME),
+                use_original_audio: v.use_original_audio,
+            }));
+        } else {
+            // 静止画シーン（従来）。
+            let png = tmp.join(format!("scene_{i:03}.png"));
+            decode_b64_to_file(&s.png_base64, &png, &format!("scene {} png", i + 1))?;
+            jobs.push(SceneJob::Still(SceneFile {
+                png,
+                audio: narration,
+                narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
+                duration_sec: s.duration_sec,
+            }));
+        }
     }
 
     // 保存先は <appData>/exports/<安全なファイル名>.mp4（保存先ピッカーは後続）。
@@ -602,7 +768,7 @@ pub fn export_video(
     } else {
         out.clone()
     };
-    encode_scenes(&ffmpeg, &files, codec, DEFAULT_FPS, &tmp, &video_path)?;
+    encode_jobs(&ffmpeg, &jobs, codec, DEFAULT_FPS, &tmp, &video_path)?;
 
     if let Some(b) = bgm {
         let bg_bytes = base64::engine::general_purpose::STANDARD
@@ -621,7 +787,7 @@ pub fn export_video(
                 "動画の保存中に問題が発生しました。もう一度お試しください。",
             )
         })?;
-        let total: f64 = files.iter().map(|f| f.duration_sec).sum();
+        let total: f64 = jobs.iter().map(|j| j.duration_sec()).sum();
         let args = mix_bgm_args(
             &video_path.to_string_lossy(),
             &bgm_path.to_string_lossy(),
@@ -787,18 +953,18 @@ mod tests {
                 png.to_string_lossy().into_owned(),
             ];
             run(&ffmpeg, &gen).expect("generate test png");
-            scenes.push(SceneFile {
+            scenes.push(SceneJob::Still(SceneFile {
                 png,
                 // 場面0は音声つき、場面1は無音。混在クリップの concat copy を検証する。
                 audio: if i == 0 { Some(voice.clone()) } else { None },
                 narration_volume: 1.0,
                 duration_sec: 1.0,
-            });
+            }));
         }
         let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
         let codec = pick_codec(&encoders).expect("an h264 encoder");
         let out = tmp.join("final.mp4");
-        encode_scenes(&ffmpeg, &scenes, codec, 30, &tmp, &out).expect("encode_scenes");
+        encode_jobs(&ffmpeg, &scenes, codec, 30, &tmp, &out).expect("encode_jobs");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 
@@ -835,14 +1001,14 @@ mod tests {
         let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
         let codec = pick_codec(&encoders).expect("an h264 encoder");
         let video = tmp.join("video.mp4");
-        encode_scenes(
+        encode_jobs(
             &ffmpeg,
-            &[SceneFile {
+            &[SceneJob::Still(SceneFile {
                 png,
                 audio: None,
                 narration_volume: 1.0,
                 duration_sec: 2.0,
-            }],
+            })],
             codec,
             30,
             &tmp,
@@ -895,6 +1061,7 @@ mod tests {
             slot_h: 800,
             fit: Fit::Cover,
             clip_start_sec: 0.0,
+            clip_end_sec: None,
             duration_sec: 8.0,
             narration_volume: 1.0,
             original_volume: 0.2,
@@ -919,6 +1086,34 @@ mod tests {
     }
 
     #[test]
+    fn video_scene_args_clip_end_trims_to_segment() {
+        // clip_start=1, clip_end=3, dur=5 → クリップは min(3-1,5)=2 秒に切り出す。
+        let args = video_scene_args(&VideoSceneArgs {
+            below_png: "b.png",
+            clip: "c.mp4",
+            above_png: "a.png",
+            narration: None,
+            slot_x: 0,
+            slot_y: 0,
+            slot_w: 640,
+            slot_h: 360,
+            fit: Fit::Cover,
+            clip_start_sec: 1.0,
+            clip_end_sec: Some(3.0),
+            duration_sec: 5.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: false,
+            fps: 30,
+            codec: VideoCodec::X264,
+            out: "o.mp4",
+        });
+        let pos = args.iter().position(|s| s == "-ss").expect("-ss");
+        assert_eq!(args[pos + 1], "1"); // clip_start
+        assert_eq!(args[pos + 3], "2"); // clip_t = min(end-start, dur)
+    }
+
+    #[test]
     fn video_scene_args_uses_silence_without_audio() {
         let args = video_scene_args(&VideoSceneArgs {
             below_png: "b.png",
@@ -931,6 +1126,7 @@ mod tests {
             slot_h: 360,
             fit: Fit::Contain,
             clip_start_sec: 0.0,
+            clip_end_sec: None,
             duration_sec: 5.0,
             narration_volume: 1.0,
             original_volume: 0.2,
@@ -1075,6 +1271,7 @@ mod tests {
             slot_h: 180,
             fit: Fit::Cover,
             clip_start_sec: 0.0,
+            clip_end_sec: None,
             duration_sec: 2.0,
             narration_volume: 1.0,
             original_volume: 0.2,
@@ -1100,6 +1297,7 @@ mod tests {
             slot_h: 180,
             fit: Fit::Contain,
             clip_start_sec: 0.0,
+            clip_end_sec: None,
             duration_sec: 2.0,
             narration_volume: 1.0,
             original_volume: 0.2,
