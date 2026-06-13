@@ -182,6 +182,139 @@ pub fn mix_bgm_args(
     ]
 }
 
+/// 動画スロットの収め方（11 §5 / asset.clip.fit）。
+// ADR-0006 実装フェーズ①: 純粋ビルダー＋テストを先行。export_video への結線は次PRのため、それまで未使用。
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fit {
+    Cover,
+    Contain,
+    Stretch,
+}
+
+/// 動画クリップをスロット(w×h)へ収める scale/crop/pad フィルタ（純粋）。
+#[allow(dead_code)] // 次PRで結線（ADR-0006 実装フェーズ）。
+fn fit_filter(fit: Fit, w: u32, h: u32) -> String {
+    match fit {
+        // 短辺合わせで埋めて余りを切る。
+        Fit::Cover => {
+            format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1")
+        }
+        // 全体を収め、余白を中央寄せで黒帯。
+        Fit::Contain => format!(
+            "scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+        ),
+        // アスペクト無視で引き伸ばし。
+        Fit::Stretch => format!("scale={w}:{h},setsar=1"),
+    }
+}
+
+/// 動画ありシーンの合成入力（ADR-0006）。下PNG→動画(slot)→上PNG(透過)を overlay し、
+/// 音声は narration(任意) ＋ 元動画音声(任意) を amix（両方無ければ無音）。
+#[allow(dead_code)] // 次PRで export_video から構築（ADR-0006 実装フェーズ）。
+pub struct VideoSceneArgs<'a> {
+    /// 動画より下のレイヤー（背景等, zIndex<slot, 不透明・全面）。
+    pub below_png: &'a str,
+    /// 動画クリップ。
+    pub clip: &'a str,
+    /// 動画より上のレイヤー（文字/ゆうこ等, zIndex>slot, 透過PNG）。
+    pub above_png: &'a str,
+    /// ナレーション音声（無ければ None）。
+    pub narration: Option<&'a str>,
+    /// スロット矩形。
+    pub slot_x: u32,
+    pub slot_y: u32,
+    pub slot_w: u32,
+    pub slot_h: u32,
+    pub fit: Fit,
+    /// クリップの切り出し開始秒（asset.clip.startSec）。
+    pub clip_start_sec: f64,
+    /// シーン尺（秒）。
+    pub duration_sec: f64,
+    pub narration_volume: f64,
+    pub original_volume: f64,
+    /// 元動画音声を使うか（asset.clip.useOriginalAudio）。
+    pub use_original_audio: bool,
+    pub fps: u32,
+    pub codec: VideoCodec,
+    pub out: &'a str,
+}
+
+/// 動画ありシーンを1本のMP4にする引数（純粋・ADR-0006）。
+/// 入力順: 0=below / 1=clip / 2=above /（narration があれば）3=narration。
+#[allow(dead_code)] // 次PRで encode/ export_video から使用（ADR-0006 実装フェーズ）。
+pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
+    // 映像: 下PNG → クリップ(slotへfit) → 上PNG(透過) を overlay。
+    let video_filter = format!(
+        "[1:v]{fit}[clip];[0:v][clip]overlay={x}:{y}[bg1];[bg1][2:v]overlay=0:0[vout]",
+        fit = fit_filter(a.fit, a.slot_w, a.slot_h),
+        x = a.slot_x,
+        y = a.slot_y
+    );
+    // 音声: narration(入力3) と 元音声([1:a]) の有無で分岐。両方無ければ無音(anullsrc)。
+    let nv = a.narration_volume;
+    let ov = a.original_volume;
+    let audio_filter = match (a.narration.is_some(), a.use_original_audio) {
+        (true, true) => format!(
+            "[3:a]volume={nv}[narr];[1:a]volume={ov}[orig];[narr][orig]amix=inputs=2:duration=longest:normalize=0[aout]"
+        ),
+        (true, false) => format!("[3:a]volume={nv}[aout]"),
+        (false, true) => format!("[1:a]volume={ov}[aout]"),
+        (false, false) => "anullsrc=channel_layout=stereo:sample_rate=44100[aout]".to_string(),
+    };
+    let filter = format!("{video_filter};{audio_filter}");
+
+    let dur = a.duration_sec;
+    let mut args: Vec<String> = vec![
+        "-y".into(),
+        "-loop".into(),
+        "1".into(),
+        "-t".into(),
+        format!("{dur}"),
+        "-i".into(),
+        a.below_png.into(),
+        "-ss".into(),
+        format!("{}", a.clip_start_sec),
+        "-t".into(),
+        format!("{dur}"),
+        "-i".into(),
+        a.clip.into(),
+        "-loop".into(),
+        "1".into(),
+        "-t".into(),
+        format!("{dur}"),
+        "-i".into(),
+        a.above_png.into(),
+    ];
+    if let Some(narr) = a.narration {
+        args.extend(["-i".into(), narr.into()]);
+    }
+    args.extend([
+        "-filter_complex".into(),
+        filter,
+        "-map".into(),
+        "[vout]".into(),
+        "-map".into(),
+        "[aout]".into(),
+        "-r".into(),
+        format!("{}", a.fps),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-c:v".into(),
+        a.codec.encoder().into(),
+        "-c:a".into(),
+        "aac".into(),
+        "-ar".into(),
+        "44100".into(),
+        "-ac".into(),
+        "2".into(),
+        "-t".into(),
+        format!("{dur}"),
+        a.out.into(),
+    ]);
+    args
+}
+
 /// ffmpeg バイナリを解決（環境変数 → appData/bin → localAppData/bin → PATH）。
 pub fn resolve_ffmpeg(app: &tauri::AppHandle) -> PathBuf {
     resolve_bin(app, "FFMPEG_PATH", "ffmpeg")
@@ -741,5 +874,192 @@ mod tests {
         );
         run(&ffmpeg, &args).expect("bgm mix");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
+    }
+
+    #[test]
+    fn video_scene_args_overlays_clip_and_mixes_audio() {
+        let narr = "n.wav".to_string();
+        let args = video_scene_args(&VideoSceneArgs {
+            below_png: "below.png",
+            clip: "clip.mp4",
+            above_png: "above.png",
+            narration: Some(&narr),
+            slot_x: 80,
+            slot_y: 140,
+            slot_w: 1040,
+            slot_h: 800,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            duration_sec: 8.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: true,
+            fps: 30,
+            codec: VideoCodec::X264,
+            out: "out.mp4",
+        });
+        let fc = args
+            .iter()
+            .find(|s| s.contains("overlay"))
+            .expect("filter_complex");
+        assert!(fc.contains("force_original_aspect_ratio=increase")); // cover
+        assert!(fc.contains("overlay=80:140")); // スロット配置
+        assert!(fc.contains("[bg1][2:v]overlay=0:0[vout]")); // 上PNGを前面へ
+        assert!(fc.contains("[3:a]volume=1")); // ナレーション
+        assert!(fc.contains("[1:a]volume=0.2")); // 元動画音声
+        assert!(fc.contains("amix=inputs=2"));
+        assert!(args.windows(2).any(|w| w[0] == "-map" && w[1] == "[vout]"));
+        assert!(args.windows(2).any(|w| w[0] == "-map" && w[1] == "[aout]"));
+        assert!(args.iter().any(|s| s == "libx264"));
+    }
+
+    #[test]
+    fn video_scene_args_uses_silence_without_audio() {
+        let args = video_scene_args(&VideoSceneArgs {
+            below_png: "b.png",
+            clip: "c.mp4",
+            above_png: "a.png",
+            narration: None,
+            slot_x: 0,
+            slot_y: 0,
+            slot_w: 640,
+            slot_h: 360,
+            fit: Fit::Contain,
+            clip_start_sec: 0.0,
+            duration_sec: 5.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: false,
+            fps: 30,
+            codec: VideoCodec::OpenH264,
+            out: "o.mp4",
+        });
+        let fc = args
+            .iter()
+            .find(|s| s.contains("overlay"))
+            .expect("filter_complex");
+        assert!(fc.contains("anullsrc")); // 音声無しは無音トラック
+        assert!(!fc.contains("[3:a]")); // ナレーション入力なし
+        assert!(fc.contains("force_original_aspect_ratio=decrease")); // contain
+    }
+
+    // 動画スロット合成のE2E（overlay＋amix のフィルタグラフが実FFmpegで通るか）。FFMPEG_PATH 未設定ならスキップ。
+    #[test]
+    fn video_scene_produces_output_when_ffmpeg_available() {
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_overlay_unittest");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
+        let codec = pick_codec(&encoders).expect("an h264 encoder");
+
+        // 下PNG(不透明) / 上PNG(透過)
+        let below = tmp.join("below.png");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "color=c=navy:s=640x360".into(),
+                "-frames:v".into(),
+                "1".into(),
+                below.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("below png");
+        let above = tmp.join("above.png");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "color=c=black@0.0:s=640x360".into(),
+                "-frames:v".into(),
+                "1".into(),
+                "-pix_fmt".into(),
+                "rgba".into(),
+                above.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("above png");
+        // クリップ（映像＋元音声）
+        let clip = tmp.join("clip.mp4");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "testsrc2=size=320x240:rate=30:duration=3".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "sine=frequency=330:duration=3".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-c:v".into(),
+                codec.encoder().into(),
+                "-c:a".into(),
+                "aac".into(),
+                "-shortest".into(),
+                clip.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("clip");
+        // ナレーション
+        let narr = tmp.join("narr.wav");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-t".into(),
+                "2".into(),
+                "-i".into(),
+                "sine=frequency=660:sample_rate=44100".into(),
+                narr.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("narration");
+
+        let below_s = below.to_string_lossy().into_owned();
+        let above_s = above.to_string_lossy().into_owned();
+        let clip_s = clip.to_string_lossy().into_owned();
+        let narr_s = narr.to_string_lossy().into_owned();
+        let out = tmp.join("scene.mp4");
+        let out_s = out.to_string_lossy().into_owned();
+        let args = video_scene_args(&VideoSceneArgs {
+            below_png: &below_s,
+            clip: &clip_s,
+            above_png: &above_s,
+            narration: Some(&narr_s),
+            slot_x: 40,
+            slot_y: 30,
+            slot_w: 240,
+            slot_h: 180,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            duration_sec: 2.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: true,
+            fps: 30,
+            codec,
+            out: &out_s,
+        });
+        run(&ffmpeg, &args).expect("video_scene overlay");
+        assert!(fs::metadata(&out).expect("scene.mp4 exists").len() > 0);
     }
 }
