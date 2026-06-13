@@ -23,6 +23,7 @@ const H = 1080;
 const FPS = 30;
 const DUR = 4; // 動画シーンの尺(秒)
 // スロット矩形（photo_left_text_right_yuko_v1 の mainVisual 相当）。
+// ※本番実装ではこの値を流用せず、テンプレ定義(layer の x/y/w/h)から取得すること。
 const SLOT = { x: 80, y: 140, w: 1040, h: 800 };
 // 音量（11 §4）。
 const NARRATION_VOLUME = 1.0;
@@ -87,9 +88,11 @@ async function main(): Promise<void> {
   if (!c.ok) { console.log('テスト動画生成 失敗:\n' + c.stderr.slice(-600)); process.exit(1); }
   // ナレーション(sine 660Hz) / BGM(sine 220Hz)
   const narr = join(OUT, 'narration.wav');
-  run(['-y', '-f', 'lavfi', '-t', String(DUR), '-i', 'sine=frequency=660:sample_rate=44100', narr]);
+  const nr = run(['-y', '-f', 'lavfi', '-t', String(DUR), '-i', 'sine=frequency=660:sample_rate=44100', narr]);
+  if (!nr.ok) { console.log('ナレーション生成 失敗:\n' + nr.stderr.slice(-600)); process.exit(1); }
   const bgm = join(OUT, 'bgm.wav');
-  run(['-y', '-f', 'lavfi', '-t', '8', '-i', 'sine=frequency=220:sample_rate=44100', bgm]);
+  const br = run(['-y', '-f', 'lavfi', '-t', '8', '-i', 'sine=frequency=220:sample_rate=44100', bgm]);
+  if (!br.ok) { console.log('BGM生成 失敗:\n' + br.stderr.slice(-600)); process.exit(1); }
   console.log('テスト動画・ナレーション・BGM 生成');
 
   // 動画シーン合成：下PNG → クリップ(cover で slot へ) → 上PNG(透過) overlay、
