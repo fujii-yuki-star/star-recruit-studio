@@ -2,7 +2,7 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは当面 MockProvider。
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_TARGET_DURATION_SEC } from "../../domain/constants";
-import type { Asset, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
+import type { Asset, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import {
@@ -27,6 +27,8 @@ export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 /** 声設定の編集可能パラメータのみ（defaultVoiceId は必須なので更新対象から除外）。 */
 export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;
+/** BGM設定の編集可能フィールドのみ（assetId は取り込み時に確定するので更新対象から除外）。 */
+export type BgmPatch = Partial<Pick<BgmSettings, "volume" | "enabled" | "loop" | "fadeInSec" | "fadeOutSec">>;
 
 interface ProjectState {
   status: GenerateStatus;
@@ -63,6 +65,8 @@ interface ProjectState {
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
+  /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
+  updateBgmSettings: (patch: BgmPatch) => void;
   /** 素材を更新する（素材管理：説明/タグ/公開チェック等）。 */
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
@@ -262,6 +266,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })),
   updateVoiceSettings: (patch) =>
     set((s) => ({ meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } } })),
+  updateBgmSettings: (patch) =>
+    set((s) => ({ meta: { ...s.meta, bgmSettings: { ...s.meta.bgmSettings, ...patch } } })),
   updateAsset: (assetId, update) =>
     set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)) })),
   removeAsset: (assetId) =>
