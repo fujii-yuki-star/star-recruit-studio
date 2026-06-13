@@ -1,6 +1,6 @@
 # ADR-0006: 動画スロットの合成（動画ありシーンの書き出し）
 
-- **状態**: Proposed（2026-06-13・スパイク実証済み。レビュー通過後、develop マージ時に Accepted へ）
+- **状態**: Accepted（2026-06-13・PR #42 レビュー通過・スパイク実証済み）
 - **日付**: 2026-06-13
 - **関連**: [`0001-rendering-parity.md`](0001-rendering-parity.md)（A2ハイブリッド・残③）/ [`0004-rasterization-method.md`](0004-rasterization-method.md) / [`0002-ffmpeg-codec.md`](0002-ffmpeg-codec.md) / `05_RENDERING_SPEC.md §6` / `11 §4,§6` / `schemas/template.schema.json`(layer.slotType) / `01 §5.4`（動画素材の設定）
 
