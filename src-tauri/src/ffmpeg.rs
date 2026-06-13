@@ -228,12 +228,14 @@ pub struct VideoSceneArgs<'a> {
     pub slot_h: u32,
     pub fit: Fit,
     /// クリップの切り出し開始秒（asset.clip.startSec）。
+    /// TODO(step2): asset.clip.endSec を加え、-t を min(endSec-startSec, duration_sec) にする（ADR-0006 未解決#4）。
     pub clip_start_sec: f64,
     /// シーン尺（秒）。
     pub duration_sec: f64,
     pub narration_volume: f64,
     pub original_volume: f64,
     /// 元動画音声を使うか（asset.clip.useOriginalAudio）。
+    /// TODO(step2): true かつ音声なしクリップ(metadata.hasAudio=false)は [1:a] 参照が無効になるため、結線時に事前検証する。
     pub use_original_audio: bool,
     pub fps: u32,
     pub codec: VideoCodec,
@@ -254,12 +256,15 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     // 音声: narration(入力3) と 元音声([1:a]) の有無で分岐。両方無ければ無音(anullsrc)。
     let nv = a.narration_volume;
     let ov = a.original_volume;
+    // apad で尺に満たない音声を無音で埋める（後段 -t {dur} で切る）。scene_clip_args と同じ方針で、
+    // ナレーション/元音声がシーン尺より短くても音声トラックが早期 EOF にならないようにする。
+    // anullsrc は無限長なので apad 不要。
     let audio_filter = match (a.narration.is_some(), a.use_original_audio) {
         (true, true) => format!(
-            "[3:a]volume={nv}[narr];[1:a]volume={ov}[orig];[narr][orig]amix=inputs=2:duration=longest:normalize=0[aout]"
+            "[3:a]volume={nv}[narr];[1:a]volume={ov}[orig];[narr][orig]amix=inputs=2:duration=longest:normalize=0,apad[aout]"
         ),
-        (true, false) => format!("[3:a]volume={nv}[aout]"),
-        (false, true) => format!("[1:a]volume={ov}[aout]"),
+        (true, false) => format!("[3:a]volume={nv},apad[aout]"),
+        (false, true) => format!("[1:a]volume={ov},apad[aout]"),
         (false, false) => "anullsrc=channel_layout=stereo:sample_rate=44100[aout]".to_string(),
     };
     let filter = format!("{video_filter};{audio_filter}");
@@ -943,6 +948,25 @@ mod tests {
         assert!(fc.contains("force_original_aspect_ratio=decrease")); // contain
     }
 
+    #[test]
+    fn fit_filter_cover_scales_and_crops() {
+        let f = fit_filter(Fit::Cover, 320, 180);
+        assert!(f.contains("force_original_aspect_ratio=increase"));
+        assert!(f.contains("crop=320:180"));
+    }
+
+    #[test]
+    fn fit_filter_contain_pads_centered() {
+        let f = fit_filter(Fit::Contain, 320, 180);
+        assert!(f.contains("force_original_aspect_ratio=decrease"));
+        assert!(f.contains("pad=320:180:(ow-iw)/2:(oh-ih)/2"));
+    }
+
+    #[test]
+    fn fit_filter_stretch_scales_only() {
+        assert_eq!(fit_filter(Fit::Stretch, 320, 180), "scale=320:180,setsar=1");
+    }
+
     // 動画スロット合成のE2E（overlay＋amix のフィルタグラフが実FFmpegで通るか）。FFMPEG_PATH 未設定ならスキップ。
     #[test]
     fn video_scene_produces_output_when_ffmpeg_available() {
@@ -1061,5 +1085,30 @@ mod tests {
         });
         run(&ffmpeg, &args).expect("video_scene overlay");
         assert!(fs::metadata(&out).expect("scene.mp4 exists").len() > 0);
+
+        // (narration None, use_original_audio false) ＝ 無音 anullsrc 経路も実FFmpegで検証。
+        let out2 = tmp.join("scene_silent.mp4");
+        let out2_s = out2.to_string_lossy().into_owned();
+        let args2 = video_scene_args(&VideoSceneArgs {
+            below_png: &below_s,
+            clip: &clip_s,
+            above_png: &above_s,
+            narration: None,
+            slot_x: 40,
+            slot_y: 30,
+            slot_w: 240,
+            slot_h: 180,
+            fit: Fit::Contain,
+            clip_start_sec: 0.0,
+            duration_sec: 2.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: false,
+            fps: 30,
+            codec,
+            out: &out2_s,
+        });
+        run(&ffmpeg, &args2).expect("video_scene silent overlay");
+        assert!(fs::metadata(&out2).expect("scene_silent.mp4 exists").len() > 0);
     }
 }
