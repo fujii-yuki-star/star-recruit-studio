@@ -55,6 +55,10 @@ function textToSvg(item: TextItem): string {
 /** SVG生成オプション。assetSrc は assetId→表示用src(data URL)。未解決ならプレースホルダ枠。 */
 export interface LayoutToSvgOptions {
   assetSrc?: (assetId: string | null) => string | undefined;
+  /** true なら背景の全面塗りを描かない（透過PNG用＝動画スロットより上のレイヤー。ADR-0006）。 */
+  transparent?: boolean;
+  /** 描画するアイテムを絞る（動画ありシーンの下/上分割用）。未指定なら全件。 */
+  itemFilter?: (item: LayoutItem) => boolean;
 }
 
 // fit を <image> の preserveAspectRatio へ（cover=slice / contain=meet / stretch=none）。
@@ -93,11 +97,17 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions): string {
 }
 
 export function layoutToSvg(layout: SceneLayout, opts: LayoutToSvgOptions = {}): string {
-  const body = layout.items.map((item) => itemToSvg(item, opts)).join('\n');
-  return [
+  const items = opts.itemFilter ? layout.items.filter(opts.itemFilter) : layout.items;
+  const body = items.map((item) => itemToSvg(item, opts)).join('\n');
+  // transparent 時は背景の全面塗りを出さない（動画が透けて見える上レイヤー用）。
+  const lines = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}">`,
-    `<rect x="0" y="0" width="${layout.width}" height="${layout.height}" fill="${layout.backgroundColor}"/>`,
-    body,
-    `</svg>`,
-  ].join('\n');
+  ];
+  if (!opts.transparent) {
+    lines.push(
+      `<rect x="0" y="0" width="${layout.width}" height="${layout.height}" fill="${layout.backgroundColor}"/>`,
+    );
+  }
+  lines.push(body, `</svg>`);
+  return lines.join('\n');
 }
