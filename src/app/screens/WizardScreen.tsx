@@ -1,7 +1,7 @@
 import { useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sampleCompany, purposeOptions } from "../data/mockData";
-import type { Purpose } from "../../domain/enums";
+import { ASSET_TYPE, type Purpose } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
 import { YukoPanel } from "../components/YukoPanel";
 import {
@@ -72,7 +72,9 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     });
   }
   // 音声系（BGM/ナレーション）は素材一覧に出さない。
-  const materials = assets.filter((a) => a.assetType !== "bgm" && a.assetType !== "voice");
+  const materials = assets.filter(
+    (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
+  );
 
   function onUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -268,7 +270,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     {materials.map((a) => (
                       <div
                         key={a.assetId}
-                        className={`thumb ${a.assetType === "video" ? "thumb-video" : "thumb-photo"}`}
+                        className={`thumb ${a.assetType === ASSET_TYPE.video ? "thumb-video" : "thumb-photo"}`}
                         style={{ overflow: "hidden" }}
                         title={a.displayName}
                       >
@@ -278,7 +280,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                             alt={a.displayName}
                             style={{ width: "100%", height: "100%", objectFit: "cover" }}
                           />
-                        ) : a.assetType === "video" ? (
+                        ) : a.assetType === ASSET_TYPE.video ? (
                           <VideoIcon size={22} />
                         ) : (
                           <PhotoIcon size={22} />

@@ -12,6 +12,18 @@ export const ASSET_TYPES = [
 ] as const;
 export type AssetType = (typeof ASSET_TYPES)[number];
 
+/** AssetType の値を参照するための定数（§2-7：ロジックでの文字列直書きを避ける）。 */
+export const ASSET_TYPE = {
+  image: 'image',
+  video: 'video',
+  bgm: 'bgm',
+  voice: 'voice',
+  yuko: 'yuko',
+  decor: 'decor',
+  logo: 'logo',
+  qr: 'qr',
+} as const satisfies Record<string, AssetType>;
+
 export const PURPOSES = [
   'company_intro', 'new_graduate', 'mid_career',
   'inexperienced_welcome', 'engineer', 'info_session', 'sns_short',

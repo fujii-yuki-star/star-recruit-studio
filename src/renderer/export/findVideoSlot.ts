@@ -2,7 +2,7 @@
 // slot 層に assetType=video の素材が割り当たっていれば、その層IDとクリップ設定を返す。
 // MVP は1シーン1動画スロット（最初に見つかったもの）。複数スロットは ADR-0006 未解決#2。
 import { DEFAULT_FIT } from '../../domain/constants';
-import type { Fit } from '../../domain/enums';
+import { ASSET_TYPE, type Fit } from '../../domain/enums';
 import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
@@ -35,7 +35,7 @@ export function findVideoSlot(
     const assetId = scene.assetRefs[layer.id];
     if (!assetId) continue;
     const asset = assetById(assetId);
-    if (!asset || asset.assetType !== 'video') continue;
+    if (!asset || asset.assetType !== ASSET_TYPE.video) continue;
     const clip = asset.clip;
     return {
       slotLayerId: layer.id,

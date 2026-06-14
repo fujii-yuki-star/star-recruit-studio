@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
+import { ASSET_TYPE } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
 import { PageHead, Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
@@ -23,21 +24,31 @@ const filters: [Filter, string][] = [
   ["yuko", "ゆうこ"],
 ];
 
-const VISUAL_TYPES: Asset["assetType"][] = ["image", "logo", "yuko", "qr", "decor"];
+const VISUAL_TYPES: Asset["assetType"][] = [
+  ASSET_TYPE.image,
+  ASSET_TYPE.logo,
+  ASSET_TYPE.yuko,
+  ASSET_TYPE.qr,
+  ASSET_TYPE.decor,
+];
 const isVisual = (type: Asset["assetType"]) => VISUAL_TYPES.includes(type);
 
 function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: string; size?: number }) {
-  const cls = type === "video" ? "thumb-video" : type === "bgm" ? "thumb-audio" : "thumb-photo";
+  const cls =
+    type === ASSET_TYPE.video ? "thumb-video" : type === ASSET_TYPE.bgm ? "thumb-audio" : "thumb-photo";
   return (
     <div className={`thumb ${cls}`} style={{ aspectRatio: "auto", width: "100%", overflow: "hidden" }}>
       {src ? (
         <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       ) : (
         <>
-          {type === "video" && <VideoIcon size={size} />}
-          {type === "bgm" && <MusicIcon size={size} />}
-          {type === "yuko" && <span style={{ fontWeight: 700 }}>ゆ</span>}
-          {(type === "image" || type === "logo" || type === "qr" || type === "voice") && <PhotoIcon size={size} />}
+          {type === ASSET_TYPE.video && <VideoIcon size={size} />}
+          {type === ASSET_TYPE.bgm && <MusicIcon size={size} />}
+          {type === ASSET_TYPE.yuko && <span style={{ fontWeight: 700 }}>ゆ</span>}
+          {(type === ASSET_TYPE.image ||
+            type === ASSET_TYPE.logo ||
+            type === ASSET_TYPE.qr ||
+            type === ASSET_TYPE.voice) && <PhotoIcon size={size} />}
         </>
       )}
     </div>
@@ -51,7 +62,9 @@ export function MaterialsScreen() {
   const [newTag, setNewTag] = useState("");
 
   // 音声系（BGM/ナレーション）は「素材」一覧に出さない（BGMは書き出し画面で管理）。
-  const materials = assets.filter((a) => a.assetType !== "bgm" && a.assetType !== "voice");
+  const materials = assets.filter(
+    (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
+  );
   const visible = materials.filter((a) => filter === "all" || a.assetType === filter);
   const selected = materials.find((a) => a.assetId === selectedId) ?? visible[0] ?? materials[0];
 
