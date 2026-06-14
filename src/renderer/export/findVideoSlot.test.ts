@@ -61,4 +61,14 @@ describe('findVideoSlot', () => {
     const noClipFit: Asset = { ...videoAsset, clip: { useOriginalAudio: false } };
     expect(findVideoSlot(scene('asset_v'), template, by([noClipFit]))?.fit).toBe('cover'); // layer.fit
   });
+
+  it("slotType='image' のスロットは動画素材でも undefined（11 §3.4）", () => {
+    const imageOnly = {
+      layers: [
+        { id: 'photo', type: 'slot', slotType: 'image', x: 0, y: 0, w: 100, h: 100, fit: 'cover' },
+      ],
+    } as unknown as Template;
+    const sc = { assetRefs: { photo: 'asset_v' } } as unknown as Scene;
+    expect(findVideoSlot(sc, imageOnly, by([videoAsset]))).toBeUndefined();
+  });
 });

@@ -91,6 +91,13 @@ export async function buildExportScenes(
           },
         });
       } else {
+        if (videoSlot && !split) {
+          // slotLayerId がレイアウトに見つからない等で分割失敗 → 静止画として書き出す（原因追跡のため開発ログ）。
+          console.warn(
+            '[buildExportScenes] 動画スロットの分割に失敗したため静止画で書き出します。slotLayerId:',
+            videoSlot.slotLayerId,
+          );
+        }
         // 静止画シーン（従来）。
         const pngBase64 = await svgToPngDataUrl(layoutToSvg(layout, { assetSrc }), width, height);
         out.push({

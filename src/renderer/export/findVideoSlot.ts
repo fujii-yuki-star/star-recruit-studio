@@ -1,6 +1,7 @@
 // シーンの「動画スロット」を見つける純粋ロジック（ADR-0006・step2b-Front）。
 // slot 層に assetType=video の素材が割り当たっていれば、その層IDとクリップ設定を返す。
 // MVP は1シーン1動画スロット（最初に見つかったもの）。複数スロットは ADR-0006 未解決#2。
+import { DEFAULT_FIT } from '../../domain/constants';
 import type { Fit } from '../../domain/enums';
 import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
@@ -29,6 +30,8 @@ export function findVideoSlot(
 ): VideoSlotInfo | undefined {
   for (const layer of template.layers) {
     if (layer.type !== 'slot') continue;
+    // 正典 11 §3.4/§5: slotType='image' のスロットは動画を受け付けない（image_or_video / video のみ）。
+    if (layer.slotType === 'image') continue;
     const assetId = scene.assetRefs[layer.id];
     if (!assetId) continue;
     const asset = assetById(assetId);
@@ -37,7 +40,7 @@ export function findVideoSlot(
     return {
       slotLayerId: layer.id,
       clipRelPath: asset.filePath,
-      fit: clip?.fit ?? layer.fit ?? 'cover',
+      fit: clip?.fit ?? layer.fit ?? DEFAULT_FIT,
       clipStartSec: clip?.startSec ?? 0,
       clipEndSec: clip?.endSec ?? undefined,
       // 音声が実在する場合のみ元音声ON（音声なしクリップで [1:a] を要求しない＝N-2）。
