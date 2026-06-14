@@ -112,6 +112,7 @@ pub fn run() {
             list_projects,
             ffmpeg::export_video,
             ffmpeg::probe_video,
+            ffmpeg::extract_video_thumbnail,
             assets::import_asset,
             assets::import_voice,
             assets::read_asset_data_url,

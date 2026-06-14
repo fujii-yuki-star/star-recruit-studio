@@ -479,6 +479,62 @@ pub fn probe_video(
     Ok(parse_video_meta(&stderr))
 }
 
+/// クリップの相対パスからサムネ(ポスターPNG)の相対パスを作る（純粋）。
+/// 例: "assets/asset_005.mp4" → "assets/asset_005_thumb.png"。
+fn thumbnail_rel_path(rel_path: &str) -> String {
+    let p = Path::new(rel_path);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("clip");
+    match p
+        .parent()
+        .and_then(|d| d.to_str())
+        .filter(|d| !d.is_empty())
+    {
+        Some(dir) => format!("{dir}/{stem}_thumb.png"),
+        None => format!("{stem}_thumb.png"),
+    }
+}
+
+/// 動画の代表フレーム（先頭フレーム）を PNG で書き出し、その相対パスを返す（確認画面/一覧サムネ用）。
+/// 注: Err はフロント（assetFs.extractVideoThumbnail）で catch → null される best-effort 取得＝
+/// ここで返すユーザー向け文言は画面に出ない（サムネが無くてもアイコン表示にフォールバックする）。
+#[tauri::command]
+pub fn extract_video_thumbnail(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+) -> Result<String, String> {
+    let input = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !input.exists() {
+        return Err(export_failure(
+            format!("thumbnail src missing: {}", input.display()),
+            "動画が見つかりませんでした。もう一度取り込んでください。",
+        ));
+    }
+    let rel_out = thumbnail_rel_path(&rel_path);
+    let out = resolve_project_file(&app, &project_id, &rel_out)?;
+    let ffmpeg = resolve_ffmpeg(&app);
+    // 先頭フレームを 1枚、横640pxへ縮小して PNG 出力（プレビュー用ポスター）。
+    let args: Vec<String> = vec![
+        "-y".into(),
+        "-ss".into(),
+        "0".into(),
+        "-i".into(),
+        input.to_string_lossy().into_owned(),
+        "-frames:v".into(),
+        "1".into(),
+        "-vf".into(),
+        "scale=640:-2".into(),
+        out.to_string_lossy().into_owned(),
+    ];
+    run(&ffmpeg, &args).map_err(|e| {
+        export_failure(
+            format!("thumbnail extract: {e}"),
+            "動画のサムネイル作成に失敗しました。",
+        )
+    })?;
+    Ok(rel_out)
+}
+
 struct SceneFile {
     png: PathBuf,
     audio: Option<PathBuf>,
@@ -983,6 +1039,15 @@ mod tests {
         assert!(!m.has_audio);
         assert_eq!(m.width, None);
         assert_eq!(m.height, None);
+    }
+
+    #[test]
+    fn thumbnail_rel_path_swaps_name() {
+        assert_eq!(
+            thumbnail_rel_path("assets/asset_005.mp4"),
+            "assets/asset_005_thumb.png"
+        );
+        assert_eq!(thumbnail_rel_path("clip.mov"), "clip_thumb.png");
     }
 
     #[test]

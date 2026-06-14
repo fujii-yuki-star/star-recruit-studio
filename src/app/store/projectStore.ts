@@ -16,7 +16,7 @@ import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, readAssetDataUrl, probeVideo } from "../../infrastructure/assetFs";
+import { importAssetFile, readAssetDataUrl, probeVideo, extractVideoThumbnail } from "../../infrastructure/assetFs";
 import { detectAssetType, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
@@ -211,13 +211,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const project = parseProjectDoc(text);
     // ディスクの素材を data URL に復元（filePath を持つもの。未配置のサンプル等は null でスキップ）。並列実行。
     const loaded = await Promise.all(
-      project.assets
-        // 動画は表示用 data URL を読み込まない（容量大・サムネはアイコン表示で不要。ADR-0006）。
-        .filter((a) => a.filePath && a.assetType !== "video")
-        .map(async (a) => {
-          const url = await readAssetDataUrl(project.projectId, a.filePath);
-          return url ? ([a.assetId, url] as const) : null;
-        }),
+      project.assets.map(async (a) => {
+        // 動画は本体(大容量)でなく代表フレーム(サムネ)を読み込む。サムネ未生成の動画はスキップ。
+        const path = a.assetType === "video" ? a.thumbnailPath : a.filePath;
+        if (!path) return null;
+        const url = await readAssetDataUrl(project.projectId, path);
+        return url ? ([a.assetId, url] as const) : null;
+      }),
     );
     const assetSrcById: Record<string, string> = {};
     for (const entry of loaded) {
@@ -326,19 +326,37 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set((s) => ({ meta: { ...s.meta, projectId } }));
       }
       const savedPath = await importAssetFile(projectId, fileName, file.dataUrl);
-      // 動画は取り込み後にメタ情報(長さ・音声有無・解像度)を取得して保存（元音声ゲート等に使う）。
-      // メタ取得は素材取り込みの成否と独立させる＝専用 try で握り、失敗してもロールバックしない
-      //（probeVideo は現状 null を返すが、将来 throw に変わっても素材を壊さないよう独立化）。
+      // 動画は取り込み後にメタ情報(長さ・音声有無・解像度)と代表フレーム(サムネ)を取得する。
+      // いずれも素材取り込みの成否とは独立させ（専用 try で握る）、失敗してもロールバックしない
+      //（メタ/サムネ無しでも素材は保持。将来 throw に変わっても素材を壊さない）。
       if (assetType === "video") {
+        const relPath = savedPath ?? `assets/${fileName}`;
         try {
-          const meta = await probeVideo(projectId, savedPath ?? `assets/${fileName}`);
+          const meta = await probeVideo(projectId, relPath);
           if (meta) {
             set((s) => ({
               assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: meta } : a)),
             }));
           }
         } catch {
-          // メタ取得失敗は無視（メタなしでも素材は保持。findVideoSlot が安全側で処理）。
+          // メタ取得失敗は無視（findVideoSlot が安全側で処理）。
+        }
+        try {
+          // 代表フレームを生成し、表示用 src（小さなPNG）として保持する＝確認画面/一覧に動画フレーム表示。
+          const thumbPath = await extractVideoThumbnail(projectId, relPath);
+          if (thumbPath) {
+            const thumbUrl = await readAssetDataUrl(projectId, thumbPath);
+            set((s) => ({
+              assets: s.assets.map((a) =>
+                a.assetId === assetId ? { ...a, thumbnailPath: thumbPath } : a,
+              ),
+              assetSrcById: thumbUrl
+                ? { ...s.assetSrcById, [assetId]: thumbUrl }
+                : s.assetSrcById,
+            }));
+          }
+        } catch {
+          // サムネ生成失敗は無視（アイコン表示にフォールバック）。
         }
       }
     } catch {

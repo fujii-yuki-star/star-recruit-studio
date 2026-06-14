@@ -30,7 +30,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
   const cls = type === "video" ? "thumb-video" : type === "bgm" ? "thumb-audio" : "thumb-photo";
   return (
     <div className={`thumb ${cls}`} style={{ aspectRatio: "auto", width: "100%", overflow: "hidden" }}>
-      {src && type !== "video" ? (
+      {src ? (
         <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       ) : (
         <>

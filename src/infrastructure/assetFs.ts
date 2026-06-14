@@ -36,3 +36,16 @@ export async function probeVideo(projectId: string, relPath: string): Promise<As
     return null;
   }
 }
+
+/** 動画の代表フレームを PNG で書き出し、その相対パスを返す（確認画面/一覧のサムネ用）。失敗時は null。 */
+export async function extractVideoThumbnail(
+  projectId: string,
+  relPath: string,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<string>('extract_video_thumbnail', { projectId, relPath });
+  } catch {
+    return null;
+  }
+}
