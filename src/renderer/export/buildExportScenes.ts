@@ -50,9 +50,11 @@ export type VideoSlotFor = (scene: Scene) => VideoSlotInfo | undefined;
 export interface ExportOptions {
   /** 字幕(subtitle レイヤー)を入れるか。false なら字幕を描かない。既定 true。 */
   withSubtitle?: boolean;
-  /** 出力解像度（未指定ならテンプレキャンバス＝フルHD）。SVG は viewBox 持ちなので縮小して焼ける。 */
-  outputWidth?: number;
-  outputHeight?: number;
+  /**
+   * 出力解像度（未指定ならテンプレキャンバス＝フルHD）。SVG は viewBox 持ちなので縮小して焼ける。
+   * width/height は1組で受ける（片方だけ指定で縦横比が崩れるのを型で防ぐ）。
+   */
+  outputSize?: { width: number; height: number };
 }
 
 /**
@@ -85,8 +87,8 @@ export async function buildExportScenes(
       // 出力解像度（未指定はキャンバス＝フルHD）。全場面を同一サイズで焼く（後段 concat -c copy の前提）。
       const cw = template.canvas.width;
       const ch = template.canvas.height;
-      const width = opts.outputWidth ?? cw;
-      const height = opts.outputHeight ?? ch;
+      const width = opts.outputSize?.width ?? cw;
+      const height = opts.outputSize?.height ?? ch;
       const rx = width / cw;
       const ry = height / ch;
       if (videoSlot && split) {

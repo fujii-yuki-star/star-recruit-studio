@@ -37,7 +37,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // BGM の入/切は bgmSettings.enabled を単一の真実とする（トグルで更新・保存で永続化）。未設定なら入。
   const withBgm = bgmSettings?.enabled ?? true;
   // 出力解像度（フルHD＝キャンバス / HD＝縮小）。書き出し時に PNG をこの解像度で焼く。
-  const outputSize = size === "hd" ? { w: HD_WIDTH, h: HD_HEIGHT } : { w: WIDTH, h: HEIGHT };
+  const outputSize =
+    size === "hd" ? { width: HD_WIDTH, height: HD_HEIGHT } : { width: WIDTH, height: HEIGHT };
 
   const [phase, setPhase] = useState<ExportPhase>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -97,7 +98,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : undefined;
         },
         (done, total) => setProgress({ done, total }),
-        { withSubtitle, outputWidth: outputSize.w, outputHeight: outputSize.h },
+        { withSubtitle, outputSize },
       );
       setPhase("encoding");
       let bgm: BgmInput | undefined;

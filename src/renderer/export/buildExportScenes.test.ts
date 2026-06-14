@@ -156,14 +156,28 @@ describe('buildExportScenes：出力解像度（HDサイズ）', () => {
       () => ({ narrationVolume: 1.0 }),
       videoSlot,
       undefined,
-      { outputWidth: 960, outputHeight: 540 }, // 1920x1080 の半分
+      { outputSize: { width: 960, height: 540 } }, // 1920x1080 の半分
     );
     expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledWith(expect.anything(), 960, 540);
     // スロット(80,140,1040,800) が半分にスケールされる
     expect(out[0].video).toMatchObject({ slotX: 40, slotY: 70, slotW: 520, slotH: 400 });
   });
 
-  it('outputWidth 未指定ならキャンバス寸法（フルHD）で焼く', async () => {
+  it('静止画シーンも outputSize でPNGを縮小する', async () => {
+    vi.mocked(svgToPngDataUrl).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      noAsset,
+      undefined,
+      undefined, // videoSlotFor なし → 静止画シーン
+      undefined,
+      { outputSize: { width: 1280, height: 720 } },
+    );
+    expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledWith(expect.anything(), 1280, 720);
+  });
+
+  it('outputSize 未指定ならキャンバス寸法（フルHD）で焼く', async () => {
     vi.mocked(svgToPngDataUrl).mockClear();
     await buildExportScenes(
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
