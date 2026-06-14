@@ -612,7 +612,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 : saveStatus === "saved"
                   ? "保存しました"
                   : saveStatus === "error"
-                    ? "保存に失敗"
+                    ? "保存に失敗（もう一度押す）"
                     : "ここまで保存"}
             </button>
           </div>

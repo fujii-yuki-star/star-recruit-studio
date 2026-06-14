@@ -316,6 +316,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       parts: parts.map((p) =>
         p.partId === partId ? { ...p, sceneIds: [...p.sceneIds, sceneId] } : p,
       ),
+      // 変更が入ったので保存済み表示をリセット（未保存と分かるように）。
+      saveStatus: "idle",
     });
     return sceneId;
   },
@@ -329,6 +331,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...p,
         sceneIds: p.sceneIds.filter((id) => id !== sceneId),
       })),
+      saveStatus: "idle",
     })),
   updateVoiceSettings: (patch) =>
     set((s) => ({ meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } } })),
