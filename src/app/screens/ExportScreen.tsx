@@ -5,6 +5,7 @@ import { PageHead, Switch } from "../components/ui";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
 import { buildExportScenes } from "../../renderer/export/buildExportScenes";
+import { findVideoSlot } from "../../renderer/export/findVideoSlot";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
 import { BGM_VOLUME, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN } from "../../domain/constants";
@@ -76,6 +77,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     try {
       // 出力時はプロジェクト（場面・素材）も保存する。
       await saveProject();
+      // saveProject 後の projectId（新規時はここで採番済み）。動画クリップのパス解決に使う。
+      const pid = useProjectStore.getState().meta.projectId;
       const templateById = new Map(templates.map((t) => [t.templateId, t] as const));
       const built = await buildExportScenes(
         scenes,
@@ -85,6 +88,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           audioBase64: narrationAudioById[scene.sceneId],
           narrationVolume: resolveNarrationVolume(scene.audioMix, voiceSettings),
         }),
+        (scene) => {
+          const t = templateById.get(scene.templateId);
+          return t
+            ? findVideoSlot(scene, t, (id) => assets.find((a) => a.assetId === id))
+            : undefined;
+        },
         (done, total) => setProgress({ done, total }),
       );
       setPhase("encoding");
@@ -99,7 +108,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           fileExt,
         };
       }
-      const report = await exportVideo(built, fileName.trim() || "export", bgm);
+      const report = await exportVideo(built, fileName.trim() || "export", bgm, pid || undefined);
       setResultPath(report.outputPath);
       setPhase("done");
     } catch (e) {
