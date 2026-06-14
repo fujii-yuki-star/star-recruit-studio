@@ -1,15 +1,15 @@
 import { useState } from "react";
 import type { Asset, AssetRefs, Scene, Texts } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
-import { ASSET_TYPE } from "../../domain/enums";
+import { ASSET_TYPE, type LayerType, type SceneCategory } from "../../domain/enums";
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
 
-// SceneCategory のユーザー向けラベル。
-const categoryLabel: Record<string, string> = {
+// SceneCategory のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
+const categoryLabel: Record<SceneCategory, string> = {
   opening: "オープニング",
   closing: "クロージング",
   photo_intro: "写真紹介",
@@ -21,8 +21,8 @@ const categoryLabel: Record<string, string> = {
   no_yuko: "ゆうこなし",
 };
 
-// レイヤー種別 → 「使用している要素」のユーザー向けラベル。
-const layerLabel: Record<string, string> = {
+// レイヤー種別 → 「使用している要素」のユーザー向けラベル（全値必須）。
+const layerLabel: Record<LayerType, string> = {
   background: "背景",
   slot: "メイン素材",
   text: "文字",
@@ -81,7 +81,7 @@ function usedElements(template: Template): string[] {
   const out: string[] = [];
   for (const layer of template.layers) {
     const label = layerLabel[layer.type];
-    if (label && !out.includes(label)) out.push(label);
+    if (!out.includes(label)) out.push(label);
   }
   return out;
 }
@@ -134,7 +134,7 @@ export function LooksScreen() {
               onClick={() => setSelectedId(t.templateId)}
             >
               <span className="action-card-title">{t.name}</span>
-              <span className="action-card-desc">{categoryLabel[t.category] ?? t.category}</span>
+              <span className="action-card-desc">{categoryLabel[t.category]}</span>
             </button>
           ))}
         </div>
@@ -155,9 +155,7 @@ export function LooksScreen() {
             </div>
             <div className="row-between">
               <span className="text-muted">カテゴリ</span>
-              <span className="badge badge-teal">
-                {categoryLabel[current.category] ?? current.category}
-              </span>
+              <span className="badge badge-teal">{categoryLabel[current.category]}</span>
             </div>
           </div>
 
