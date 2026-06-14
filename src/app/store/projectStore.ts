@@ -17,6 +17,7 @@ import {
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
+import { detectAssetType, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
@@ -211,7 +212,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ディスクの素材を data URL に復元（filePath を持つもの。未配置のサンプル等は null でスキップ）。並列実行。
     const loaded = await Promise.all(
       project.assets
-        .filter((a) => a.filePath)
+        // 動画は表示用 data URL を読み込まない（容量大・サムネはアイコン表示で不要。ADR-0006）。
+        .filter((a) => a.filePath && a.assetType !== "video")
         .map(async (a) => {
           const url = await readAssetDataUrl(project.projectId, a.filePath);
           return url ? ([a.assetId, url] as const) : null;
@@ -297,22 +299,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   addAsset: async (file) => {
     const assetId = createAssetId(get().assets.map((a) => a.assetId));
+    // 拡張子から素材種別を判別（動画/画像）。詳細メタ(長さ・音声有無)・クリップ設定は follow-up。
+    const assetType = detectAssetType(file.name);
     const parts = file.name.split(".");
-    const rawExt = parts.length > 1 ? parts[parts.length - 1] : "png";
-    const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+    const ext = fileExtension(file.name) || (assetType === "video" ? "mp4" : "png");
     const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : file.name;
     const fileName = `${assetId}.${ext}`;
     const asset: Asset = {
       assetId,
-      // TODO: mime/拡張子から assetType を判別（動画/ロゴ等）。当面は image 固定（follow-up）。
-      assetType: "image",
+      assetType,
       displayName: baseName.trim() || "新しい素材",
       filePath: `assets/${fileName}`,
     };
-    // 即時：一覧へ追加＋表示。
+    // 即時：一覧へ追加。動画は表示用 data URL を保持しない（容量が大きく、サムネはアイコン表示で、
+    // 書き出しはスロットを別経路で合成する＝src不要。ADR-0006）。画像は即時表示のため保持。
     set((s) => ({
       assets: [...s.assets, asset],
-      assetSrcById: { ...s.assetSrcById, [assetId]: file.dataUrl },
+      assetSrcById:
+        assetType === "video" ? s.assetSrcById : { ...s.assetSrcById, [assetId]: file.dataUrl },
     }));
     // 永続化（プロジェクトフォルダへコピー）。
     try {

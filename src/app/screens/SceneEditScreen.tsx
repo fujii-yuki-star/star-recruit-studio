@@ -205,7 +205,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <label className="btn btn-secondary btn-block mt" style={{ cursor: "pointer" }}>
               <UploadIcon size={16} />
               素材をアップロード
-              <input type="file" accept="image/*" onChange={onUpload} style={{ display: "none" }} />
+              <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
             </label>
           </div>
 
@@ -304,30 +304,40 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {slotLayers.length === 0 ? (
                 <p className="text-sm text-muted">この見た目パターンに画像のスロットはありません。</p>
               ) : (
-                slotLayers.map((layer) => (
-                  <div className="field" key={layer.id} style={{ marginBottom: 8 }}>
-                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-                      {slotLabel[layer.id] ?? layer.id}
-                    </label>
-                    <select
-                      className="select"
-                      value={selected.assetRefs[layer.id] ?? ""}
-                      onChange={(e) =>
-                        patch((s) => ({
-                          ...s,
-                          assetRefs: { ...s.assetRefs, [layer.id]: e.target.value || null },
-                        }))
-                      }
-                    >
-                      <option value="">なし</option>
-                      {assignableFor(layer, assets).map((a) => (
-                        <option key={a.assetId} value={a.assetId}>
-                          {a.displayName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))
+                slotLayers.map((layer) => {
+                  const assignedId = selected.assetRefs[layer.id];
+                  const assignedIsVideo =
+                    !!assignedId && assets.find((a) => a.assetId === assignedId)?.assetType === "video";
+                  return (
+                    <div className="field" key={layer.id} style={{ marginBottom: 8 }}>
+                      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
+                        {slotLabel[layer.id] ?? layer.id}
+                      </label>
+                      <select
+                        className="select"
+                        value={assignedId ?? ""}
+                        onChange={(e) =>
+                          patch((s) => ({
+                            ...s,
+                            assetRefs: { ...s.assetRefs, [layer.id]: e.target.value || null },
+                          }))
+                        }
+                      >
+                        <option value="">なし</option>
+                        {assignableFor(layer, assets).map((a) => (
+                          <option key={a.assetId} value={a.assetId}>
+                            {a.displayName}
+                          </option>
+                        ))}
+                      </select>
+                      {assignedIsVideo && (
+                        <p className="field-hint">
+                          ▶ 動画素材です。この確認画面では枠が空に見えますが、書き出すと動画が入ります。
+                        </p>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
 

@@ -30,7 +30,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
   const cls = type === "video" ? "thumb-video" : type === "bgm" ? "thumb-audio" : "thumb-photo";
   return (
     <div className={`thumb ${cls}`} style={{ aspectRatio: "auto", width: "100%", overflow: "hidden" }}>
-      {src ? (
+      {src && type !== "video" ? (
         <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       ) : (
         <>
@@ -100,7 +100,7 @@ export function MaterialsScreen() {
           <label className="btn btn-primary" style={{ cursor: "pointer" }}>
             <UploadIcon size={18} />
             素材を追加
-            <input type="file" accept="image/*" onChange={onAddAsset} style={{ display: "none" }} />
+            <input type="file" accept="image/*,video/*" onChange={onAddAsset} style={{ display: "none" }} />
           </label>
         }
       />
