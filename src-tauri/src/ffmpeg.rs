@@ -11,9 +11,9 @@ use tauri::Manager;
 
 // 既定FPS（videoSettings.fps の正典は project.json。B2でフロントから受け取る予定）。
 const DEFAULT_FPS: u32 = 30;
-// ナレーション既定音量。正典は TS domain/constants.ts §4（=1.0）。Rust側は同値をミラー（防御的フォールバック）。
+// ナレーション既定音量。正典は 11_SCHEMA_REFERENCE §4（=1.0、TS domain/constants.ts と同値）。Rust側ミラー。
 const DEFAULT_NARRATION_VOLUME: f64 = 1.0;
-// 元動画音声の既定音量。正典は TS domain/constants.ts §4（=0.2）。
+// 元動画音声の既定音量。正典は 11_SCHEMA_REFERENCE §4（=0.2、TS domain/constants.ts と同値）。
 const DEFAULT_ORIGINAL_AUDIO_VOLUME: f64 = 0.2;
 
 /// 映像コーデック。本番(OpenH264)への無改修切替のための抽象。
@@ -363,15 +363,19 @@ pub fn run(bin: &Path, args: &[String]) -> Result<String, String> {
 
 /// クリップに音声トラックがあるか（`ffmpeg -i` の stderr に "Audio:" が出るか）。
 /// `ffmpeg -i` は出力未指定で終了コード1になるため run() ではなく直接 stderr を見る（成否に関わらず判定）。
-fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> bool {
+fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> Result<bool, String> {
     match Command::new(ffmpeg)
         .arg("-hide_banner")
         .arg("-i")
         .arg(clip)
         .output()
     {
-        Ok(o) => String::from_utf8_lossy(&o.stderr).contains("Audio:"),
-        Err(_) => false,
+        Ok(o) => Ok(String::from_utf8_lossy(&o.stderr).contains("Audio:")),
+        // プロセス起動失敗（I/O・権限等）は「音声なし」と区別して報告する。
+        Err(e) => Err(export_failure(
+            format!("ffmpeg probe failed: {e}"),
+            "動画の確認に失敗しました。もう一度お試しください。",
+        )),
     }
 }
 
@@ -748,7 +752,7 @@ pub fn export_video(
                 ));
             }
             // 元音声を使う指定だがクリップに音声が無いと [1:a] 参照が無効になるため、行動を示して弾く（N-2 の防御）。
-            if v.use_original_audio && !clip_has_audio(&ffmpeg, &clip) {
+            if v.use_original_audio && !clip_has_audio(&ffmpeg, &clip)? {
                 return Err(export_failure(
                     format!("clip has no audio but use_original_audio: {}", clip.display()),
                     format!(
@@ -1350,5 +1354,112 @@ mod tests {
         });
         run(&ffmpeg, &args2).expect("video_scene silent overlay");
         assert!(fs::metadata(&out2).expect("scene_silent.mp4 exists").len() > 0);
+    }
+
+    // encode_jobs の Video アーム連結E2E（SceneJob::Video → video_scene_args → run → concat）。
+    #[test]
+    fn encode_jobs_video_scene_produces_output_when_ffmpeg_available() {
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_encode_jobs_video_unittest");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
+        let codec = pick_codec(&encoders).expect("an h264 encoder");
+
+        let below = tmp.join("below.png");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "color=c=navy:s=640x360".into(),
+                "-frames:v".into(),
+                "1".into(),
+                below.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("below png");
+        let above = tmp.join("above.png");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "color=c=black@0.0:s=640x360".into(),
+                "-frames:v".into(),
+                "1".into(),
+                "-pix_fmt".into(),
+                "rgba".into(),
+                above.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("above png");
+        let clip = tmp.join("clip.mp4");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "testsrc2=size=320x240:rate=30:duration=3".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "sine=frequency=330:duration=3".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-c:v".into(),
+                codec.encoder().into(),
+                "-c:a".into(),
+                "aac".into(),
+                "-shortest".into(),
+                clip.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("clip");
+        let narr = tmp.join("narr.wav");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-t".into(),
+                "2".into(),
+                "-i".into(),
+                "sine=frequency=660:sample_rate=44100".into(),
+                narr.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("narration");
+
+        let out = tmp.join("final.mp4");
+        let jobs = vec![SceneJob::Video(VideoJob {
+            below,
+            above,
+            clip,
+            narration: Some(narr),
+            slot: (40, 30, 240, 180),
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            clip_end_sec: None,
+            duration_sec: 2.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: true,
+        })];
+        encode_jobs(&ffmpeg, &jobs, codec, 30, &tmp, &out).expect("encode_jobs video");
+        assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 }
