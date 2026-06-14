@@ -40,8 +40,8 @@ export interface TextItem extends ItemBase {
   color: string;
   maxLines: number;
   background?: { color: string; opacity: number; radius: number };
-  /** subtitle レイヤー由来か（書き出しの「字幕を入れる」ON/OFFで判定に使う）。 */
-  isSubtitle?: boolean;
+  /** subtitle レイヤー由来か（書き出しの「字幕を入れる」ON/OFFで判定に使う）。layoutScene が常に設定する。 */
+  isSubtitle: boolean;
 }
 
 export type LayoutItem = FillItem | ImageItem | TextItem;

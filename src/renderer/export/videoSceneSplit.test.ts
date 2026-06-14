@@ -12,8 +12,8 @@ function layout(): SceneLayout {
     items: [
       { kind: 'fill', id: 'bg', x: 0, y: 0, w: 1920, h: 1080, zIndex: 0, color: '#123456', opacity: 1, radius: 0 },
       { kind: 'image', id: 'slot', x: 80, y: 140, w: 1040, h: 800, zIndex: 10, assetId: 'asset_v', fit: 'cover', role: 'slot', label: 'メイン' },
-      { kind: 'text', id: 'sameZ', x: 100, y: 200, w: 400, h: 60, zIndex: 10, text: '同じZ', fontSize: 30, fontWeight: 'normal', color: '#222222', maxLines: 1 },
-      { kind: 'text', id: 'title', x: 160, y: 300, w: 1000, h: 120, zIndex: 30, text: 'タイトルです', fontSize: 60, fontWeight: 'bold', color: '#111111', maxLines: 1 },
+      { kind: 'text', id: 'sameZ', x: 100, y: 200, w: 400, h: 60, zIndex: 10, text: '同じZ', fontSize: 30, fontWeight: 'normal', color: '#222222', maxLines: 1, isSubtitle: false },
+      { kind: 'text', id: 'title', x: 160, y: 300, w: 1000, h: 120, zIndex: 30, text: 'タイトルです', fontSize: 60, fontWeight: 'bold', color: '#111111', maxLines: 1, isSubtitle: false },
     ],
   };
 }

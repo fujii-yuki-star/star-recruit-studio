@@ -176,6 +176,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </span>
             <Switch on={withSubtitle} onChange={setWithSubtitle} label="字幕を入れる" />
           </div>
+          <p className="field-hint">書き出した動画に反映されます（仕上がり確認では常に字幕ありで表示します）。</p>
           <hr className="divider" />
           <div className="toggle-row">
             <span className="field-label" style={{ margin: 0 }}>
