@@ -4,6 +4,7 @@ import type { Fit } from '../../domain/enums';
 import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 import { layoutScene } from '../layout';
+import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvg } from './videoSceneSplit';
@@ -45,6 +46,12 @@ export type NarrationFor = (
 /** 場面ごとの動画スロット情報を返すコールバック（undefined＝静止画シーン）。 */
 export type VideoSlotFor = (scene: Scene) => VideoSlotInfo | undefined;
 
+/** 書き出しの横断設定。 */
+export interface ExportOptions {
+  /** 字幕(subtitle レイヤー)を入れるか。false なら字幕を描かない。既定 true。 */
+  withSubtitle?: boolean;
+}
+
 /**
  * 各場面をプレビューと同一のSVGで実寸PNG化し、ナレーション音声を添える。テンプレ未解決の場面はスキップ。
  * 動画スロットがある場面は下/上2枚PNG＋クリップ情報（ADR-0006）。onProgress(done, total) で進捗通知。
@@ -56,7 +63,11 @@ export async function buildExportScenes(
   narrationFor?: NarrationFor,
   videoSlotFor?: VideoSlotFor,
   onProgress?: (done: number, total: number) => void,
+  opts: ExportOptions = {},
 ): Promise<ExportSceneData[]> {
+  // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
+  const itemFilter: ((item: LayoutItem) => boolean) | undefined =
+    opts.withSubtitle === false ? (it) => !(it.kind === 'text' && it.isSubtitle) : undefined;
   const out: ExportSceneData[] = [];
   for (let i = 0; i < scenes.length; i += 1) {
     const scene = scenes[i];
@@ -65,7 +76,9 @@ export async function buildExportScenes(
       const layout = layoutScene(scene, template);
       const narration = narrationFor?.(scene);
       const videoSlot = videoSlotFor?.(scene);
-      const split = videoSlot ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc) : null;
+      const split = videoSlot
+        ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc, itemFilter)
+        : null;
       const { width, height } = template.canvas;
       if (videoSlot && split) {
         // 動画ありシーン：下/上2枚の透過PNG＋クリップ情報（ADR-0006）。
@@ -99,7 +112,11 @@ export async function buildExportScenes(
           );
         }
         // 静止画シーン（従来）。
-        const pngBase64 = await svgToPngDataUrl(layoutToSvg(layout, { assetSrc }), width, height);
+        const pngBase64 = await svgToPngDataUrl(
+          layoutToSvg(layout, { assetSrc, itemFilter }),
+          width,
+          height,
+        );
         out.push({
           pngBase64,
           durationSec: scene.durationSec,

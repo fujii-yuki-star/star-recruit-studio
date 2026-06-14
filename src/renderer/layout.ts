@@ -40,6 +40,8 @@ export interface TextItem extends ItemBase {
   color: string;
   maxLines: number;
   background?: { color: string; opacity: number; radius: number };
+  /** subtitle レイヤー由来か（書き出しの「字幕を入れる」ON/OFFで判定に使う）。layoutScene が常に設定する。 */
+  isSubtitle: boolean;
 }
 
 export type LayoutItem = FillItem | ImageItem | TextItem;
@@ -123,6 +125,7 @@ export function layoutScene(scene: Scene, template: Template): SceneLayout {
           color: layer.color ?? DEFAULT_TEXT_COLOR,
           maxLines: layer.maxLines ?? 2,
           background: bg,
+          isSubtitle: layer.type === 'subtitle',
         });
         break;
       }

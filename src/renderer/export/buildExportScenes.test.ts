@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 // canvas(ADR-0004) は Node テスト環境に無いため描画系をスタブ化し、音声付与の分岐のみを検証する。
 vi.mock('../layout', () => ({ layoutScene: () => ({}) }));
-vi.mock('../sceneSvg', () => ({ layoutToSvg: () => '<svg/>' }));
+vi.mock('../sceneSvg', () => ({ layoutToSvg: vi.fn(() => '<svg/>') }));
 vi.mock('./rasterize', () => ({ svgToPngDataUrl: async () => 'data:image/png;base64,PNG' }));
 vi.mock('./videoSceneSplit', () => ({
   splitVideoSceneSvg: () => ({
@@ -14,6 +14,8 @@ vi.mock('./videoSceneSplit', () => ({
 
 import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
+import type { LayoutItem } from '../layout';
+import { layoutToSvg } from '../sceneSvg';
 import { buildExportScenes } from './buildExportScenes';
 
 // buildExportScenes が参照するのは templateId / durationSec / (narrationFor へ渡す scene) のみ。
@@ -110,5 +112,27 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
     );
     expect(out[0].pngBase64).toBe('data:image/png;base64,PNG');
     expect(out[0].video).toBeUndefined();
+  });
+});
+
+describe('buildExportScenes：字幕トグル（withSubtitle）', () => {
+  const oneScene = [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[];
+
+  it('withSubtitle:false で layoutToSvg に「字幕除外」フィルタを渡す', async () => {
+    vi.mocked(layoutToSvg).mockClear();
+    await buildExportScenes(oneScene, templateById, noAsset, undefined, undefined, undefined, {
+      withSubtitle: false,
+    });
+    const filter = vi.mocked(layoutToSvg).mock.calls[0]?.[1]?.itemFilter;
+    expect(filter).toBeTypeOf('function');
+    expect(filter!({ kind: 'text', isSubtitle: true } as unknown as LayoutItem)).toBe(false);
+    expect(filter!({ kind: 'text', isSubtitle: false } as unknown as LayoutItem)).toBe(true);
+    expect(filter!({ kind: 'image' } as unknown as LayoutItem)).toBe(true);
+  });
+
+  it('withSubtitle 未指定なら itemFilter なし（従来動作を維持）', async () => {
+    vi.mocked(layoutToSvg).mockClear();
+    await buildExportScenes(oneScene, templateById, noAsset);
+    expect(vi.mocked(layoutToSvg).mock.calls[0]?.[1]?.itemFilter).toBeUndefined();
   });
 });
