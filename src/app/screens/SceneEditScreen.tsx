@@ -2,7 +2,7 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
-import type { Fit } from "../../domain/enums";
+import { ASSET_TYPE, type Fit } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME, VOLUME_MAX, VOLUME_MIN } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { useProjectStore } from "../store/projectStore";
@@ -64,17 +64,17 @@ const narrationStatusLabel: Record<string, string> = {
 // スロットの slotType と素材の assetType の整合で、割り当て可能な素材を絞る（§5）。
 function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
   return assets.filter((a) => {
-    if (layer.type === "logo") return a.assetType === "logo" || a.assetType === "image";
-    if (layer.slotType === "image") return a.assetType === "image";
-    if (layer.slotType === "video") return a.assetType === "video";
+    if (layer.type === "logo") return a.assetType === ASSET_TYPE.logo || a.assetType === ASSET_TYPE.image;
+    if (layer.slotType === "image") return a.assetType === ASSET_TYPE.image;
+    if (layer.slotType === "video") return a.assetType === ASSET_TYPE.video;
     // background / slot(image_or_video) / slotType未指定
-    return a.assetType === "image" || a.assetType === "video";
+    return a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video;
   });
 }
 
 function assetThumbClass(type: Asset["assetType"]): string {
-  if (type === "video") return "thumb-video";
-  if (type === "bgm") return "thumb-audio";
+  if (type === ASSET_TYPE.video) return "thumb-video";
+  if (type === ASSET_TYPE.bgm) return "thumb-audio";
   return "thumb-photo";
 }
 
@@ -107,9 +107,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const visibleAssets = assets.filter((a) => {
     const matchType =
       filter === "all" ||
-      (filter === "image" && a.assetType === "image") ||
-      (filter === "video" && a.assetType === "video") ||
-      (filter === "bgm" && a.assetType === "bgm");
+      (filter === "image" && a.assetType === ASSET_TYPE.image) ||
+      (filter === "video" && a.assetType === ASSET_TYPE.video) ||
+      (filter === "bgm" && a.assetType === ASSET_TYPE.bgm);
     return matchType && a.displayName.includes(search);
   });
 
@@ -210,9 +210,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {visibleAssets.map((a) => (
                 <div className="asset-tile" key={a.assetId}>
                   <div className={`asset-tile-thumb thumb ${assetThumbClass(a.assetType)}`} style={{ aspectRatio: "auto" }}>
-                    {a.assetType === "video" ? (
+                    {a.assetType === ASSET_TYPE.video ? (
                       <VideoIcon size={16} />
-                    ) : a.assetType === "bgm" ? (
+                    ) : a.assetType === ASSET_TYPE.bgm ? (
                       <MusicIcon size={16} />
                     ) : (
                       <PhotoIcon size={16} />
@@ -330,7 +330,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   const assignedAsset = assignedId
                     ? assets.find((a) => a.assetId === assignedId)
                     : undefined;
-                  const isVideo = assignedAsset?.assetType === "video";
+                  const isVideo = assignedAsset?.assetType === ASSET_TYPE.video;
                   const clip = assignedAsset?.clip;
                   const dur = assignedAsset?.metadata?.durationSec ?? null;
                   const hasAudio = assignedAsset?.metadata?.hasAudio === true;

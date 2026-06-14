@@ -1,6 +1,6 @@
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
-import type { SceneCategory } from "../domain/enums";
+import { ASSET_TYPE, type SceneCategory } from "../domain/enums";
 import type { Asset, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -47,7 +47,7 @@ export function sceneToDraftRow(
   const template = templates.find((t) => t.templateId === scene.templateId);
   const asset = mainAsset(scene, assets);
   const materialType: DraftRow["materialType"] =
-    asset?.assetType === "video" ? "video" : asset ? "photo" : "none";
+    asset?.assetType === ASSET_TYPE.video ? "video" : asset ? "photo" : "none";
 
   return {
     id: scene.sceneId,

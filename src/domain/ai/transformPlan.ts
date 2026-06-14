@@ -1,7 +1,7 @@
 // AI出力(ai-video-plan) → 内部 Part[] / Scene[] への変換。正典は 12_AI_PROMPT_AND_MAPPING.md §8、
 // 検証/補正ルールは 11_SCHEMA_REFERENCE.md §8,§9、エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。
 // 純粋関数（副作用なし）。Date/乱数に依存せず、ID採番は注入する（14 §4）。
-import { isSceneCategory } from '../enums';
+import { ASSET_TYPE, isSceneCategory } from '../enums';
 import type { SceneCategory, WarningSeverity } from '../enums';
 import {
   DEFAULT_CHARACTER_ID,
@@ -93,7 +93,7 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
   const idFactory = ctx.idFactory ?? createSequentialIdFactory();
   const assetById = new Map(ctx.assets.map((a) => [a.assetId, a] as const));
   const templateById = new Map(ctx.templates.map((t) => [t.templateId, t] as const));
-  const yukoAssets = ctx.assets.filter((a) => a.assetType === 'yuko');
+  const yukoAssets = ctx.assets.filter((a) => a.assetType === ASSET_TYPE.yuko);
 
   const parts: Part[] = [];
   const scenes: Scene[] = [];

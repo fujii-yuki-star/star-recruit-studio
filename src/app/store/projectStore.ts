@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import type { Purpose } from "../../domain/enums";
+import { ASSET_TYPE, type Purpose } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import {
@@ -210,7 +210,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     type LoadedSrc = { assetId: string; url: string; thumbnailPath?: string };
     const loaded = await Promise.all(
       project.assets.map(async (a): Promise<LoadedSrc | null> => {
-        if (a.assetType === "video") {
+        if (a.assetType === ASSET_TYPE.video) {
           // 動画は本体(大容量)でなく代表フレーム(サムネ)を読み込む。
           // 旧プロジェクト（サムネ未生成）の動画は読込時に生成する（本体は読み込まない＝後方互換）。
           let thumbPath = a.thumbnailPath;
@@ -377,7 +377,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 拡張子から素材種別を判別（動画/画像）。詳細メタ(長さ・音声有無)・クリップ設定は follow-up。
     const assetType = detectAssetType(file.name);
     const parts = file.name.split(".");
-    const ext = fileExtension(file.name) || (assetType === "video" ? "mp4" : "png");
+    const ext = fileExtension(file.name) || (assetType === ASSET_TYPE.video ? "mp4" : "png");
     const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : file.name;
     const fileName = `${assetId}.${ext}`;
     const asset: Asset = {
@@ -391,7 +391,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({
       assets: [...s.assets, asset],
       assetSrcById:
-        assetType === "video" ? s.assetSrcById : { ...s.assetSrcById, [assetId]: file.dataUrl },
+        assetType === ASSET_TYPE.video ? s.assetSrcById : { ...s.assetSrcById, [assetId]: file.dataUrl },
       // 素材を追加したら未保存に戻す（「保存しました」表示の取り残し防止）。
       saveStatus: "idle",
     }));
@@ -407,7 +407,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 動画は取り込み後にメタ情報(長さ・音声有無・解像度)と代表フレーム(サムネ)を取得する。
       // いずれも素材取り込みの成否とは独立させ（専用 try で握る）、失敗してもロールバックしない
       //（メタ/サムネ無しでも素材は保持。将来 throw に変わっても素材を壊さない）。
-      if (assetType === "video") {
+      if (assetType === ASSET_TYPE.video) {
         const relPath = savedPath ?? `assets/${fileName}`;
         try {
           const meta = await probeVideo(projectId, relPath);
@@ -465,7 +465,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : file.name;
       // BGM はプロジェクトに1つ。既存があればその assetId を使い回してファイルを差し替える。
       // 新規IDは §2.1 の bgm_{slug}_{NNN}（slug=ファイル名）で採番する。
-      const existingBgm = get().assets.find((a) => a.assetType === "bgm");
+      const existingBgm = get().assets.find((a) => a.assetType === ASSET_TYPE.bgm);
       const assetId =
         existingBgm?.assetId ?? createBgmId(baseName, get().assets.map((a) => a.assetId));
       const fileName = `${assetId}.${ext}`;
@@ -473,7 +473,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const filePath = await importAssetFile(projectId, fileName, file.dataUrl);
       const asset: Asset = {
         assetId,
-        assetType: "bgm",
+        assetType: ASSET_TYPE.bgm,
         displayName: baseName.trim() || "BGM",
         filePath: filePath ?? `assets/${fileName}`,
       };
