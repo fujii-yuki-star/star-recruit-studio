@@ -1,6 +1,7 @@
 // 素材ファイルの取り込み/読み出し（Tauriコマンド境界）。domain は型のみ、I/Oはここに隔離（CLAUDE.md §4）。
 // Tauri 非検出時（ブラウザ開発）は永続化せず null を返す（表示用 data URL はメモリ内で別途保持される）。
 import { invoke } from '@tauri-apps/api/core';
+import type { AssetMetadata } from '../domain/project/types';
 
 function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -21,6 +22,16 @@ export async function readAssetDataUrl(projectId: string, relPath: string): Prom
   if (!isTauri()) return null;
   try {
     return await invoke<string>('read_asset_data_url', { projectId, relPath });
+  } catch {
+    return null;
+  }
+}
+
+/** 動画素材のメタ情報（長さ・音声有無・解像度）を取得する。Tauri 非検出 or 失敗時は null。 */
+export async function probeVideo(projectId: string, relPath: string): Promise<AssetMetadata | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<AssetMetadata>('probe_video', { projectId, relPath });
   } catch {
     return null;
   }

@@ -16,7 +16,7 @@ import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
+import { importAssetFile, readAssetDataUrl, probeVideo } from "../../infrastructure/assetFs";
 import { detectAssetType, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
@@ -325,7 +325,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
         set((s) => ({ meta: { ...s.meta, projectId } }));
       }
-      await importAssetFile(projectId, fileName, file.dataUrl);
+      const savedPath = await importAssetFile(projectId, fileName, file.dataUrl);
+      // 動画は取り込み後にメタ情報(長さ・音声有無・解像度)を取得して保存（元音声ゲート等に使う）。
+      // メタ取得は素材取り込みの成否と独立させる＝専用 try で握り、失敗してもロールバックしない
+      //（probeVideo は現状 null を返すが、将来 throw に変わっても素材を壊さないよう独立化）。
+      if (assetType === "video") {
+        try {
+          const meta = await probeVideo(projectId, savedPath ?? `assets/${fileName}`);
+          if (meta) {
+            set((s) => ({
+              assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: meta } : a)),
+            }));
+          }
+        } catch {
+          // メタ取得失敗は無視（メタなしでも素材は保持。findVideoSlot が安全側で処理）。
+        }
+      }
     } catch {
       // 取り込み失敗：楽観追加した素材をロールバック（filePathあり・実体なしの不整合を防ぐ）。
       set((s) => ({
