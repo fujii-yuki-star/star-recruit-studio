@@ -50,6 +50,9 @@ export type VideoSlotFor = (scene: Scene) => VideoSlotInfo | undefined;
 export interface ExportOptions {
   /** 字幕(subtitle レイヤー)を入れるか。false なら字幕を描かない。既定 true。 */
   withSubtitle?: boolean;
+  /** 出力解像度（未指定ならテンプレキャンバス＝フルHD）。SVG は viewBox 持ちなので縮小して焼ける。 */
+  outputWidth?: number;
+  outputHeight?: number;
 }
 
 /**
@@ -79,7 +82,13 @@ export async function buildExportScenes(
       const split = videoSlot
         ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc, itemFilter)
         : null;
-      const { width, height } = template.canvas;
+      // 出力解像度（未指定はキャンバス＝フルHD）。全場面を同一サイズで焼く（後段 concat -c copy の前提）。
+      const cw = template.canvas.width;
+      const ch = template.canvas.height;
+      const width = opts.outputWidth ?? cw;
+      const height = opts.outputHeight ?? ch;
+      const rx = width / cw;
+      const ry = height / ch;
       if (videoSlot && split) {
         // 動画ありシーン：下/上2枚の透過PNG＋クリップ情報（ADR-0006）。
         const belowPngBase64 = await svgToPngDataUrl(split.belowSvg, width, height);
@@ -92,10 +101,11 @@ export async function buildExportScenes(
             belowPngBase64,
             abovePngBase64,
             clipRelPath: videoSlot.clipRelPath,
-            slotX: split.slot.x,
-            slotY: split.slot.y,
-            slotW: split.slot.w,
-            slotH: split.slot.h,
+            // スロット矩形は出力解像度へスケール（PNGも同解像度で焼くため整合）。
+            slotX: Math.round(split.slot.x * rx),
+            slotY: Math.round(split.slot.y * ry),
+            slotW: Math.round(split.slot.w * rx),
+            slotH: Math.round(split.slot.h * ry),
             fit: videoSlot.fit,
             clipStartSec: videoSlot.clipStartSec,
             clipEndSec: videoSlot.clipEndSec,
