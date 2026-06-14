@@ -361,17 +361,17 @@ pub fn run(bin: &Path, args: &[String]) -> Result<String, String> {
     }
 }
 
-/// クリップに音声トラックがあるか（`ffmpeg -i` の stderr に "Audio:" が出るか）。
-/// `ffmpeg -i` は出力未指定で終了コード1になるため run() ではなく直接 stderr を見る（成否に関わらず判定）。
-fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> Result<bool, String> {
+/// `ffmpeg -i <file>` を実行し stderr を返す（出力未指定で終了コード1だが stderr にメタ情報が出る）。
+/// 音声有無・メタ取得（probe 系）の共通土台。成否に関わらず stderr を見る。
+fn ffmpeg_probe_stderr(ffmpeg: &Path, file: &Path) -> Result<String, String> {
     match Command::new(ffmpeg)
         .arg("-hide_banner")
         .arg("-i")
-        .arg(clip)
+        .arg(file)
         .output()
     {
-        Ok(o) => Ok(String::from_utf8_lossy(&o.stderr).contains("Audio:")),
-        // プロセス起動失敗（I/O・権限等）は「音声なし」と区別して報告する。
+        Ok(o) => Ok(String::from_utf8_lossy(&o.stderr).into_owned()),
+        // プロセス起動失敗（I/O・権限等）は報告する。
         Err(e) => Err(export_failure(
             format!("ffmpeg probe failed: {e}"),
             "動画の確認に失敗しました。もう一度お試しください。",
@@ -379,11 +379,102 @@ fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> Result<bool, String> {
     }
 }
 
+/// クリップに音声トラックがあるか（`ffmpeg -i` の stderr に "Audio:" が出るか）。
+fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> Result<bool, String> {
+    Ok(ffmpeg_probe_stderr(ffmpeg, clip)?.contains("Audio:"))
+}
+
 /// 技術詳細を開発者向けに stderr へ記録し、ユーザーには行動を示す固定文言を返す（§2-3/§2-5）。
 /// `log` クレート未導入のため eprintln! で記録する（tauri dev のコンソールに出る）。
 fn export_failure(detail: impl std::fmt::Display, user_message: impl Into<String>) -> String {
     eprintln!("[export] {detail}");
     user_message.into()
+}
+
+/// 動画メタ情報（probe 結果）。フロントの AssetMetadata（width/height/durationSec/hasAudio）に対応。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoMeta {
+    duration_sec: Option<f64>,
+    has_audio: bool,
+    width: Option<u32>,
+    height: Option<u32>,
+}
+
+/// `ffmpeg -i` の stderr から尺・音声有無・解像度を解析する（純粋・テスト可能）。
+fn parse_video_meta(stderr: &str) -> VideoMeta {
+    let (width, height) = parse_resolution(stderr);
+    VideoMeta {
+        duration_sec: parse_duration_sec(stderr),
+        has_audio: stderr.contains("Audio:"),
+        width,
+        height,
+    }
+}
+
+/// "Duration: HH:MM:SS.ss" を秒へ変換（"N/A"・解析不能は None）。
+fn parse_duration_sec(stderr: &str) -> Option<f64> {
+    let idx = stderr.find("Duration:")?;
+    let dur = stderr[idx + "Duration:".len()..]
+        .trim_start()
+        .split(',')
+        .next()?
+        .trim();
+    if dur.starts_with("N/A") {
+        return None;
+    }
+    let mut parts = dur.split(':');
+    let h: f64 = parts.next()?.trim().parse().ok()?;
+    let m: f64 = parts.next()?.trim().parse().ok()?;
+    let s: f64 = parts.next()?.trim().parse().ok()?;
+    Some(h * 3600.0 + m * 60.0 + s)
+}
+
+/// Video ストリーム行から解像度 "幅x高さ" を抽出する。
+/// コーデックタグ(0x..)やストリーム番号([0x1])を拾わないよう、幅・高さとも 16 以上のみ採用。
+fn parse_resolution(stderr: &str) -> (Option<u32>, Option<u32>) {
+    let Some(line) = stderr.lines().find(|l| l.contains("Video:")) else {
+        return (None, None);
+    };
+    let b = line.as_bytes();
+    for i in 1..b.len().saturating_sub(1) {
+        if b[i] != b'x' || !b[i - 1].is_ascii_digit() || !b[i + 1].is_ascii_digit() {
+            continue;
+        }
+        let mut l = i;
+        while l > 0 && b[l - 1].is_ascii_digit() {
+            l -= 1;
+        }
+        let mut r = i + 1;
+        while r < b.len() && b[r].is_ascii_digit() {
+            r += 1;
+        }
+        if let (Ok(w), Ok(h)) = (line[l..i].parse::<u32>(), line[i + 1..r].parse::<u32>()) {
+            if w >= 16 && h >= 16 {
+                return (Some(w), Some(h));
+            }
+        }
+    }
+    (None, None)
+}
+
+/// 動画素材のメタ情報（長さ・音声有無・解像度）を `ffmpeg -i` で取得する。
+#[tauri::command]
+pub fn probe_video(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_path: String,
+) -> Result<VideoMeta, String> {
+    let file = resolve_project_file(&app, &project_id, &rel_path)?;
+    if !file.exists() {
+        return Err(export_failure(
+            format!("probe target missing: {}", file.display()),
+            "動画が見つかりませんでした。もう一度取り込んでください。",
+        ));
+    }
+    let ffmpeg = resolve_ffmpeg(&app);
+    let stderr = ffmpeg_probe_stderr(&ffmpeg, &file)?;
+    Ok(parse_video_meta(&stderr))
 }
 
 struct SceneFile {
@@ -861,6 +952,36 @@ pub fn export_video(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_video_meta_audio_resolution_duration() {
+        let stderr = "  Duration: 00:00:05.00, start: 0.000000, bitrate: 3186 kb/s\n  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 1280x720 [SAR 1:1 DAR 16:9], 3106 kb/s, 30 fps\n  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono";
+        let m = parse_video_meta(stderr);
+        assert_eq!(m.duration_sec, Some(5.0));
+        assert!(m.has_audio);
+        assert_eq!(m.width, Some(1280));
+        assert_eq!(m.height, Some(720));
+    }
+
+    #[test]
+    fn parse_video_meta_no_audio_minutes() {
+        let stderr =
+            "Duration: 00:01:30.50, bitrate: 1000 kb/s\n Stream #0:0: Video: hevc, yuv420p, 1920x1080, 30 fps";
+        let m = parse_video_meta(stderr);
+        assert_eq!(m.duration_sec, Some(90.5));
+        assert!(!m.has_audio);
+        assert_eq!(m.width, Some(1920));
+        assert_eq!(m.height, Some(1080));
+    }
+
+    #[test]
+    fn parse_video_meta_na_and_missing() {
+        let m = parse_video_meta("Duration: N/A, bitrate: N/A");
+        assert_eq!(m.duration_sec, None);
+        assert!(!m.has_audio);
+        assert_eq!(m.width, None);
+        assert_eq!(m.height, None);
+    }
 
     #[test]
     fn pick_codec_prefers_openh264_then_x264() {
