@@ -20,7 +20,8 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, scenes, parts, templates, assets, warnings, generate } = useProjectStore();
+  const { status, scenes, parts, templates, assets, warnings, generate, addScene, removeScene } =
+    useProjectStore();
 
   // たたき台へ直接来た場合は生成する（本実装では保存済みプロジェクトの読込に置き換え）
   useEffect(() => {
@@ -118,6 +119,15 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                         <button className="btn btn-ghost btn-icon" title="見た目を変更" onClick={() => onNavigate("scene-edit")}>
                           見た目
                         </button>
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          style={{ color: "var(--color-danger)" }}
+                          title="この場面を削除"
+                          aria-label="この場面を削除"
+                          onClick={() => removeScene(row.id)}
+                        >
+                          <TrashIcon size={14} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -126,15 +136,11 @@ export function DraftScreen({ onNavigate }: DraftProps) {
             </table>
           </div>
 
-          {/* 場面の追加・削除 */}
+          {/* 場面の追加（削除は各行の操作から） */}
           <div className="row gap-sm mt">
-            <button className="btn btn-secondary" onClick={() => onNavigate("scene-edit")}>
+            <button className="btn btn-secondary" onClick={() => addScene()}>
               <PlusIcon size={18} />
               場面を追加
-            </button>
-            <button className="btn btn-danger">
-              <TrashIcon size={18} />
-              場面を削除
             </button>
             <button className="btn btn-ghost" onClick={() => onNavigate("preview")}>
               <PlayIcon size={16} />

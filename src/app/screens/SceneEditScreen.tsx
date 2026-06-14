@@ -17,6 +17,7 @@ import {
   UploadIcon,
   PlusIcon,
   SaveIcon,
+  TrashIcon,
   ChevronRightIcon,
 } from "../components/icons";
 
@@ -80,6 +81,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, generate, updateScene, updateAsset, addAsset,
+    addScene, removeScene, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
   } = useProjectStore();
 
@@ -236,7 +238,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <h2 className="field-label" style={{ margin: 0 }}>
                   場面の並び
                 </h2>
-                <button className="btn btn-ghost btn-icon">
+                <button className="btn btn-ghost btn-icon" onClick={() => setSelectedId(addScene())}>
                   <PlusIcon size={16} />
                   場面を追加
                 </button>
@@ -587,9 +589,31 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
             )}
 
-            <button className="btn btn-primary btn-block mt">
+            <button
+              className="btn btn-ghost btn-block mt"
+              style={{ color: "var(--color-danger)" }}
+              onClick={() => {
+                removeScene(selected.sceneId);
+                setSelectedId("");
+              }}
+            >
+              <TrashIcon size={16} />
+              この場面を削除
+            </button>
+
+            <button
+              className="btn btn-primary btn-block mt"
+              onClick={() => void saveProject()}
+              disabled={saveStatus === "saving"}
+            >
               <SaveIcon size={18} />
-              ここまで保存
+              {saveStatus === "saving"
+                ? "保存中…"
+                : saveStatus === "saved"
+                  ? "保存しました"
+                  : saveStatus === "error"
+                    ? "保存に失敗（もう一度押す）"
+                    : "ここまで保存"}
             </button>
           </div>
         </div>
