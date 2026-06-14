@@ -234,7 +234,8 @@ pub struct VideoSceneArgs<'a> {
     pub narration_volume: f64,
     pub original_volume: f64,
     /// 元動画音声を使うか（asset.clip.useOriginalAudio）。
-    /// TODO(step2): true かつ音声なしクリップ(metadata.hasAudio=false)は [1:a] 参照が無効になるため、結線時に事前検証する。
+    /// 音声なしクリップでの true は [1:a] が無効化＝export_video で `clip_has_audio` により事前に弾く
+    /// （front も metadata.hasAudio で確認）。
     pub use_original_audio: bool,
     pub fps: u32,
     pub codec: VideoCodec,
@@ -357,6 +358,20 @@ pub fn run(bin: &Path, args: &[String]) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
         Err(String::from_utf8_lossy(&out.stderr).into_owned())
+    }
+}
+
+/// クリップに音声トラックがあるか（`ffmpeg -i` の stderr に "Audio:" が出るか）。
+/// `ffmpeg -i` は出力未指定で終了コード1になるため run() ではなく直接 stderr を見る（成否に関わらず判定）。
+fn clip_has_audio(ffmpeg: &Path, clip: &Path) -> bool {
+    match Command::new(ffmpeg)
+        .arg("-hide_banner")
+        .arg("-i")
+        .arg(clip)
+        .output()
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stderr).contains("Audio:"),
+        Err(_) => false,
     }
 }
 
@@ -542,14 +557,20 @@ fn resolve_project_file(
     rel_path: &str,
 ) -> Result<PathBuf, String> {
     if !crate::is_safe_project_id(project_id) {
-        return Err("不正なプロジェクトIDです。".to_string());
+        return Err(export_failure(
+            format!("unsafe project_id: {project_id}"),
+            "動画の書き出しに失敗しました。アプリを再起動してもう一度お試しください。",
+        ));
     }
     if rel_path.contains("..")
         || rel_path.starts_with('/')
         || rel_path.starts_with('\\')
         || Path::new(rel_path).is_absolute()
     {
-        return Err("不正なパスです。".to_string());
+        return Err(export_failure(
+            format!("unsafe rel_path: {rel_path}"),
+            "動画の書き出しに失敗しました。素材を確認してもう一度お試しください。",
+        ));
     }
     let base = app.path().app_data_dir().map_err(|e| {
         export_failure(
@@ -716,6 +737,26 @@ pub fn export_video(
                     ),
                 ));
             }
+            // スロットサイズが 0 だと scale=0:0 で FFmpeg が落ちるため事前に弾く。
+            if v.slot_w == 0 || v.slot_h == 0 {
+                return Err(export_failure(
+                    format!("invalid slot size: {}x{}", v.slot_w, v.slot_h),
+                    format!(
+                        "場面{}の動画の表示サイズが不正です。テンプレートを確認してください。",
+                        i + 1
+                    ),
+                ));
+            }
+            // 元音声を使う指定だがクリップに音声が無いと [1:a] 参照が無効になるため、行動を示して弾く（N-2 の防御）。
+            if v.use_original_audio && !clip_has_audio(&ffmpeg, &clip) {
+                return Err(export_failure(
+                    format!("clip has no audio but use_original_audio: {}", clip.display()),
+                    format!(
+                        "場面{}の動画には音声が含まれていません。書き出し設定で元の音声を使わないようにして、もう一度お試しください。",
+                        i + 1
+                    ),
+                ));
+            }
             jobs.push(SceneJob::Video(VideoJob {
                 below,
                 above,
@@ -723,7 +764,8 @@ pub fn export_video(
                 narration,
                 slot: (v.slot_x, v.slot_y, v.slot_w, v.slot_h),
                 fit: parse_fit(&v.fit),
-                clip_start_sec: v.clip_start_sec,
+                clip_start_sec: v.clip_start_sec.max(0.0), // 負値は 0 に丸める
+
                 clip_end_sec: v.clip_end_sec,
                 duration_sec: s.duration_sec,
                 narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
