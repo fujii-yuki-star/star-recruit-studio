@@ -101,6 +101,28 @@ export function createBgmId(slug: string, existingIds: readonly string[]): strin
   return id;
 }
 
+/** scene_NNN / part_NNN を発行する共通ロジック（§2.1）。既存と衝突しない最小の3桁連番。 */
+function nextNumberedId(prefix: string, existingIds: readonly string[]): string {
+  const used = new Set(existingIds);
+  let n = 1;
+  let id = `${prefix}_${String(n).padStart(3, '0')}`;
+  while (used.has(id)) {
+    n += 1;
+    id = `${prefix}_${String(n).padStart(3, '0')}`;
+  }
+  return id;
+}
+
+/** scene_NNN を発行する（§2.1）。 */
+export function createSceneId(existingIds: readonly string[]): string {
+  return nextNumberedId('scene', existingIds);
+}
+
+/** part_NNN を発行する（§2.1）。 */
+export function createPartId(existingIds: readonly string[]): string {
+  return nextNumberedId('part', existingIds);
+}
+
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
 export function assembleProject(
   header: ProjectHeader,

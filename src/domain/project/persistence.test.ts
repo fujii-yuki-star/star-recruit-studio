@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createProjectId,
-  defaultVideoSettings, defaultVoiceSettings, isSupportedSchemaVersion,
-  parseProjectDoc,
+  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createPartId,
+  createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
+  isSupportedSchemaVersion, parseProjectDoc,
 } from './persistence';
 import type { ProjectHeader } from './persistence';
 
@@ -57,6 +57,20 @@ describe('createBgmId (§2.1 bgm_{slug}_{NNN})', () => {
   });
   it('既存と衝突しない最小番号を採る', () => {
     expect(createBgmId('theme', ['bgm_theme_001'])).toBe('bgm_theme_002');
+  });
+});
+
+describe('createSceneId / createPartId (§2.1)', () => {
+  it('既存が無ければ _001', () => {
+    expect(createSceneId([])).toBe('scene_001');
+    expect(createPartId([])).toBe('part_001');
+  });
+  it('既存と衝突しない最小番号を採る', () => {
+    expect(createSceneId(['scene_001', 'scene_002'])).toBe('scene_003');
+    expect(createPartId(['part_001'])).toBe('part_002');
+  });
+  it('歯抜けの最小番号を埋める', () => {
+    expect(createSceneId(['scene_002', 'scene_003'])).toBe('scene_001');
   });
 });
 

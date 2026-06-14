@@ -1,13 +1,13 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは当面 MockProvider。
 import { create } from "zustand";
-import { BGM_VOLUME, DEFAULT_TARGET_DURATION_SEC } from "../../domain/constants";
+import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import {
-  assembleProject, createAssetId, createBgmId, createProjectId, defaultVideoSettings, defaultVoiceSettings,
-  parseProjectDoc,
+  assembleProject, createAssetId, createBgmId, createPartId, createProjectId, createSceneId,
+  defaultVideoSettings, defaultVoiceSettings, parseProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
@@ -64,6 +64,10 @@ interface ProjectState {
   listProjects: () => Promise<ProjectSummary[]>;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
+  /** 末尾パートに新しい空の場面を追加し、その sceneId を返す（既定テンプレ）。テンプレ未読込時は ""。 */
+  addScene: () => string;
+  /** 指定の場面を削除する（パートからも除き、order を 1..N に振り直す）。 */
+  removeScene: (sceneId: string) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
@@ -281,6 +285,50 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   updateScene: (sceneId, update) =>
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
+    })),
+  addScene: () => {
+    const s = get();
+    const tmpl = s.templates[0];
+    if (!tmpl) return ""; // テンプレ未読込（通常は起こらない）なら追加しない
+    const sceneId = createSceneId(s.scenes.map((x) => x.sceneId));
+    // 末尾パート（無ければ新規作成）に追加する。
+    let parts = s.parts;
+    let partId = parts[parts.length - 1]?.partId;
+    if (!partId) {
+      partId = createPartId([]);
+      parts = [{ partId, title: "パート1", order: 1, sceneIds: [] }];
+    }
+    const newScene: Scene = {
+      sceneId,
+      partId,
+      order: s.scenes.length + 1,
+      sceneType: tmpl.category,
+      templateId: tmpl.templateId,
+      durationSec: tmpl.defaults?.durationSec ?? SCENE_DEFAULT_DURATION_SEC,
+      assetRefs: {},
+      character: { enabled: false, characterId: DEFAULT_CHARACTER_ID },
+      texts: {},
+      narration: { text: "", status: "none" },
+      warnings: [],
+    };
+    set({
+      scenes: [...s.scenes, newScene],
+      parts: parts.map((p) =>
+        p.partId === partId ? { ...p, sceneIds: [...p.sceneIds, sceneId] } : p,
+      ),
+    });
+    return sceneId;
+  },
+  removeScene: (sceneId) =>
+    set((s) => ({
+      // 削除して order を 1..N に振り直す（表示順＝配列順を保つ）。
+      scenes: s.scenes
+        .filter((x) => x.sceneId !== sceneId)
+        .map((x, i) => ({ ...x, order: i + 1 })),
+      parts: s.parts.map((p) => ({
+        ...p,
+        sceneIds: p.sceneIds.filter((id) => id !== sceneId),
+      })),
     })),
   updateVoiceSettings: (patch) =>
     set((s) => ({ meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } } })),
