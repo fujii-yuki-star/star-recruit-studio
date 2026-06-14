@@ -302,7 +302,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <div className="field">
               <label className="field-label">使用素材</label>
               {slotLayers.length === 0 ? (
-                <p className="text-sm text-muted">この見た目パターンに画像のスロットはありません。</p>
+                <p className="text-sm text-muted">この見た目パターンに素材を入れる場所はありません。</p>
               ) : (
                 slotLayers.map((layer) => {
                   const assignedId = selected.assetRefs[layer.id];

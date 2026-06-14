@@ -156,8 +156,11 @@ mod tests {
         assert_eq!(mime_from_path("voices/scene_001.wav"), "audio/wav");
         assert_eq!(mime_from_path("assets/bgm_001.mp3"), "audio/mpeg");
         assert_eq!(mime_from_path("assets/clip.MP4"), "video/mp4");
+        assert_eq!(mime_from_path("assets/clip.m4v"), "video/mp4");
         assert_eq!(mime_from_path("assets/clip.mov"), "video/quicktime");
         assert_eq!(mime_from_path("assets/clip.webm"), "video/webm");
+        assert_eq!(mime_from_path("assets/clip.avi"), "video/x-msvideo");
+        assert_eq!(mime_from_path("assets/clip.mkv"), "video/x-matroska");
         assert_eq!(mime_from_path("assets/x.bin"), "application/octet-stream");
     }
 }

@@ -17,6 +17,9 @@ describe('detectAssetType', () => {
     expect(detectAssetType('intro.mp4')).toBe('video');
     expect(detectAssetType('shot.MOV')).toBe('video');
     expect(detectAssetType('clip.webm')).toBe('video');
+    expect(detectAssetType('clip.m4v')).toBe('video');
+    expect(detectAssetType('clip.avi')).toBe('video');
+    expect(detectAssetType('clip.mkv')).toBe('video');
   });
   it('画像・拡張子なし・その他は image', () => {
     expect(detectAssetType('photo.png')).toBe('image');

@@ -285,9 +285,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
         set((s) => ({ meta: { ...s.meta, projectId } }));
       }
-      const parts = file.name.split(".");
-      const rawExt = parts.length > 1 ? parts[parts.length - 1] : "png";
-      const ext = rawExt.toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+      // 拡張子処理は addAsset と同じ fileExtension に集約（§2-7：単一の参照元）。
+      const ext = fileExtension(file.name) || "png";
       const filePath = await importAssetFile(projectId, `${assetId}.${ext}`, file.dataUrl);
       if (filePath) {
         set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)) }));
