@@ -4,6 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../layout', () => ({ layoutScene: () => ({}) }));
 vi.mock('../sceneSvg', () => ({ layoutToSvg: () => '<svg/>' }));
 vi.mock('./rasterize', () => ({ svgToPngDataUrl: async () => 'data:image/png;base64,PNG' }));
+vi.mock('./videoSceneSplit', () => ({
+  splitVideoSceneSvg: () => ({
+    belowSvg: '<below/>',
+    aboveSvg: '<above/>',
+    slot: { x: 80, y: 140, w: 1040, h: 800 },
+  }),
+}));
 
 import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
@@ -60,5 +67,48 @@ describe('buildExportScenes：ナレーション音声の付与', () => {
     expect(out[0].audioBase64).toBeUndefined();
     expect(out[0].narrationVolume).toBeUndefined();
     expect(out).toHaveLength(2);
+  });
+});
+
+describe('buildExportScenes：動画シーン（ADR-0006）', () => {
+  it('動画スロットがある場面は video（下/上PNG＋クリップ情報）を持ち、単一PNGは付かない', async () => {
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      noAsset,
+      () => ({ narrationVolume: 1.0 }),
+      () => ({
+        slotLayerId: 'mainVisual',
+        clipRelPath: 'assets/v.mp4',
+        fit: 'cover',
+        clipStartSec: 0,
+        useOriginalAudio: false,
+      }),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].pngBase64).toBeUndefined(); // 動画シーンは単一PNGなし
+    expect(out[0].narrationVolume).toBe(1.0);
+    expect(out[0].video).toMatchObject({
+      belowPngBase64: 'data:image/png;base64,PNG',
+      abovePngBase64: 'data:image/png;base64,PNG',
+      clipRelPath: 'assets/v.mp4',
+      slotX: 80,
+      slotY: 140,
+      slotW: 1040,
+      slotH: 800,
+      fit: 'cover',
+      clipStartSec: 0,
+      useOriginalAudio: false,
+    });
+  });
+
+  it('videoSlotFor 未指定なら従来どおり単一PNG（video なし）', async () => {
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      noAsset,
+    );
+    expect(out[0].pngBase64).toBe('data:image/png;base64,PNG');
+    expect(out[0].video).toBeUndefined();
   });
 });

@@ -27,3 +27,6 @@ export const MAX_SUBTITLE_LEN_DEFAULT = 60;
 
 export const DEFAULT_VOICE_ID = 'voicevox_zundamon';
 export const DEFAULT_CHARACTER_ID = 'yuko';
+
+// スロットの既定フィット（テンプレ・clip 未指定時）。正典(§4)に既定の明記は無く、cover を既定とする（MVP）。
+export const DEFAULT_FIT = 'cover' as const;
