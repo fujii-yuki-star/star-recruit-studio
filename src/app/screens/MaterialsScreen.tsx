@@ -79,14 +79,7 @@ export function MaterialsScreen() {
   function onPickImage(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !selected) return;
-    const assetId = selected.assetId;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        void setAssetImage(assetId, { name: file.name, dataUrl: reader.result });
-      }
-    };
-    reader.readAsDataURL(file);
+    void setAssetImage(selected.assetId, file);
     // 同じファイルを選び直しても change が発火するよう値をクリアする。
     e.target.value = "";
   }
@@ -94,13 +87,7 @@ export function MaterialsScreen() {
   function onAddAsset(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        void addAsset({ name: file.name, dataUrl: reader.result });
-      }
-    };
-    reader.readAsDataURL(file);
+    void addAsset(file);
     e.target.value = "";
   }
 

@@ -17,7 +17,7 @@ import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, readAssetDataUrl, probeVideo, extractVideoThumbnail } from "../../infrastructure/assetFs";
+import { importAssetFile, importAssetBytes, readAssetDataUrl, probeVideo, extractVideoThumbnail } from "../../infrastructure/assetFs";
 import { detectAssetType, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
@@ -80,9 +80,9 @@ interface ProjectState {
   /** 素材を削除する。 */
   removeAsset: (assetId: string) => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
-  setAssetImage: (assetId: string, file: { name: string; dataUrl: string }) => Promise<void>;
-  /** 新しい素材（画像）を登録する。新規IDを採番し、プロジェクトフォルダへ取り込む。 */
-  addAsset: (file: { name: string; dataUrl: string }) => Promise<void>;
+  setAssetImage: (assetId: string, file: File) => Promise<void>;
+  /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
+  addAsset: (file: File) => Promise<void>;
   /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
   setBgm: (file: { name: string; dataUrl: string }) => Promise<void>;
   /** 指定場面のナレーション音声を生成する（narration.status を更新）。 */
@@ -97,6 +97,16 @@ const provider = new MockAiProvider();
 // Tauri ではローカル VOICEVOX に接続、ブラウザ開発では Mock（無音）にフォールバック。
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
+
+/** File を data URL に読み込む（画像の表示＋書き出し用。ADR-0004：SVGインライン data URL）。 */
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
 
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
@@ -351,8 +361,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   removeAsset: (assetId) =>
     set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId), saveStatus: "idle" })),
   setAssetImage: async (assetId, file) => {
-    // 即時表示（メモリ内 data URL）。
-    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: file.dataUrl } }));
+    // 画像は表示＋書き出し(ADR-0004)で data URL が必要。読み込んで即時表示。
+    const dataUrl = await fileToDataUrl(file);
+    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl } }));
     try {
       // 保存先フォルダの名前空間のため projectId を確保する。
       let projectId = get().meta.projectId;
@@ -363,7 +374,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       // 拡張子処理は addAsset と同じ fileExtension に集約（§2-7：単一の参照元）。
       const ext = fileExtension(file.name) || "png";
-      const filePath = await importAssetFile(projectId, `${assetId}.${ext}`, file.dataUrl);
+      const filePath = await importAssetFile(projectId, `${assetId}.${ext}`, dataUrl);
       if (filePath) {
         set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)) }));
       }
@@ -386,13 +397,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       displayName: baseName.trim() || "新しい素材",
       filePath: `assets/${fileName}`,
     };
-    // 即時：一覧へ追加。動画は表示用 data URL を保持しない（容量が大きく、サムネはアイコン表示で、
-    // 書き出しはスロットを別経路で合成する＝src不要。ADR-0006）。画像は即時表示のため保持。
+    // 画像は表示＋書き出し(ADR-0004)で data URL が要る。動画は表示用srcを持たない
+    //（サムネは別途・書き出しはスロットを別経路で合成＝src不要。ADR-0006）。
+    const dataUrl = assetType === ASSET_TYPE.video ? undefined : await fileToDataUrl(file);
+    // 即時：一覧へ追加（画像は表示も）。素材追加で未保存に戻す（「保存しました」取り残し防止）。
     set((s) => ({
       assets: [...s.assets, asset],
-      assetSrcById:
-        assetType === ASSET_TYPE.video ? s.assetSrcById : { ...s.assetSrcById, [assetId]: file.dataUrl },
-      // 素材を追加したら未保存に戻す（「保存しました」表示の取り残し防止）。
+      assetSrcById: dataUrl ? { ...s.assetSrcById, [assetId]: dataUrl } : s.assetSrcById,
       saveStatus: "idle",
     }));
     // 永続化（プロジェクトフォルダへコピー）。
@@ -403,11 +414,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
         set((s) => ({ meta: { ...s.meta, projectId } }));
       }
-      const savedPath = await importAssetFile(projectId, fileName, file.dataUrl);
-      // 動画は取り込み後にメタ情報(長さ・音声有無・解像度)と代表フレーム(サムネ)を取得する。
-      // いずれも素材取り込みの成否とは独立させ（専用 try で握る）、失敗してもロールバックしない
-      //（メタ/サムネ無しでも素材は保持。将来 throw に変わっても素材を壊さない）。
       if (assetType === ASSET_TYPE.video) {
+        // 動画は base64 を経由せず生バイトで取り込む（大容量でもメモリを食わない。data URL は使い捨てのため）。
+        const savedPath = await importAssetBytes(
+          projectId,
+          fileName,
+          new Uint8Array(await file.arrayBuffer()),
+        );
+        // 取り込み後にメタ情報(長さ・音声有無・解像度)と代表フレーム(サムネ)を取得する。
+        // いずれも取り込みの成否と独立させ（専用 try）、失敗してもロールバックしない。
         const relPath = savedPath ?? `assets/${fileName}`;
         try {
           const meta = await probeVideo(projectId, relPath);
@@ -440,6 +455,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         } catch (e) {
           console.warn("[addAsset] 動画サムネ生成で例外:", e);
         }
+      } else {
+        // 画像は data URL(base64) 経路で取り込む（表示用に既に読み込んだ data URL を流用）。
+        await importAssetFile(projectId, fileName, dataUrl!);
       }
     } catch {
       // 取り込み失敗：楽観追加した素材をロールバック（filePathあり・実体なしの不整合を防ぐ）。

@@ -17,6 +17,19 @@ export async function importAssetFile(
   return invoke<string>('import_asset', { projectId, fileName, dataBase64: dataUrl });
 }
 
+/**
+ * 素材を生バイト（raw IPC body）で取り込む。base64 を経由しないので大きい動画でもメモリを食わない。
+ * Tauri v2: payload に Uint8Array、メタ情報は headers で渡す。Tauri 非検出時は null（非永続）。
+ */
+export async function importAssetBytes(
+  projectId: string,
+  fileName: string,
+  bytes: Uint8Array,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string>('import_asset_bytes', bytes, { headers: { projectId, fileName } });
+}
+
 /** プロジェクト相対パスの素材を data URL で読む。Tauri 非検出 or 失敗（未配置のサンプル等）時は null。 */
 export async function readAssetDataUrl(projectId: string, relPath: string): Promise<string | null> {
   if (!isTauri()) return null;

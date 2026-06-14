@@ -77,7 +77,21 @@ fn mime_from_path(path: &str) -> &'static str {
     }
 }
 
-/// 画像(data URL or base64)を <appData>/projects/<id>/assets/<file_name> に保存し、プロジェクト相対パスを返す。
+/// 素材バイト列を <appData>/projects/<id>/assets/<file_name> に保存し、プロジェクト相対パスを返す。
+fn write_asset(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    file_name: &str,
+    bytes: &[u8],
+) -> Result<String, String> {
+    let dir = project_dir(app, project_id)?.join("assets");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let safe = sanitize_file_name(file_name);
+    fs::write(dir.join(&safe), bytes).map_err(|e| e.to_string())?;
+    Ok(format!("assets/{safe}"))
+}
+
+/// 画像(data URL or base64)を assets/ に保存し相対パスを返す（画像・BGM など data URL 経路用）。
 #[tauri::command]
 pub fn import_asset(
     app: tauri::AppHandle,
@@ -87,12 +101,24 @@ pub fn import_asset(
 ) -> Result<String, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(strip_data_url(&data_base64))
-        .map_err(|e| format!("画像を読み取れませんでした: {e}"))?;
-    let dir = project_dir(&app, &project_id)?.join("assets");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let safe = sanitize_file_name(&file_name);
-    fs::write(dir.join(&safe), bytes).map_err(|e| e.to_string())?;
-    Ok(format!("assets/{safe}"))
+        .map_err(|e| format!("素材を読み取れませんでした: {e}"))?;
+    write_asset(&app, &project_id, &file_name, &bytes)
+}
+
+/// 素材を生バイト(raw IPC body)で受けて assets/ に保存する（大きい動画を base64 化せずメモリ節約）。
+/// body=生バイト、projectId/fileName はヘッダで受け取る。
+#[tauri::command]
+pub fn import_asset_bytes(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("素材を読み取れませんでした。もう一度お試しください。".to_string());
+    };
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok());
+    let project_id = header("projectId").ok_or_else(|| "不正なリクエストです。".to_string())?;
+    let file_name = header("fileName").ok_or_else(|| "不正なリクエストです。".to_string())?;
+    write_asset(&app, project_id, file_name, bytes)
 }
 
 /// ナレーション音声(WAV; data URL or base64)を <appData>/projects/<id>/voices/<scene_id>.wav に保存し、相対パスを返す。

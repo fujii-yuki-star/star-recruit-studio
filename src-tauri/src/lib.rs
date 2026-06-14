@@ -114,6 +114,7 @@ pub fn run() {
             ffmpeg::probe_video,
             ffmpeg::extract_video_thumbnail,
             assets::import_asset,
+            assets::import_asset_bytes,
             assets::import_voice,
             assets::read_asset_data_url,
             voicevox::synthesize_voice
