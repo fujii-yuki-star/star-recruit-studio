@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
+import type { Purpose } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import {
@@ -68,6 +69,8 @@ interface ProjectState {
   addScene: () => string;
   /** 指定の場面を削除する（パートからも除き、order を 1..N に振り直す）。 */
   removeScene: (sceneId: string) => void;
+  /** ウィザードで入力した目的・会社情報を現在のプロジェクト(meta)へ反映する（保存・生成で使う）。 */
+  applyProjectInfo: (input: { purpose: Purpose; companyInfo: CompanyInfo }) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
@@ -125,16 +128,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generate: async () => {
     set({ status: "generating" });
     try {
-      const companyInfo: CompanyInfo = {
-        companyName: "株式会社サンプル",
-        industry: "IT・業務システム開発",
-        jobType: "エンジニア（新卒）",
-      };
-      const purpose = "new_graduate" as const;
+      // 会社情報・目的はウィザードで meta に反映済み（ウィザード未経由なら既定値）。
+      const { companyInfo, purpose } = get().meta;
       const plan = await provider.generateVideoPlan({
         companyInfo,
         purpose,
-        targetAudience: "新卒採用",
+        targetAudience: companyInfo.recruitTarget ?? "",
         targetDurationSec: DEFAULT_TARGET_DURATION_SEC,
         tone: "親しみやすい",
         templates: [],
@@ -145,13 +144,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         templates: sampleTemplates,
         assets: sampleAssets,
       });
-      set((s) => ({
-        status: "ready",
-        parts,
-        scenes,
-        warnings,
-        meta: { ...s.meta, companyInfo, purpose },
-      }));
+      set({ status: "ready", parts, scenes, warnings });
     } catch {
       set({ status: "error" });
     }
@@ -335,6 +328,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       })),
       saveStatus: "idle",
     })),
+  applyProjectInfo: (input) =>
+    set((s) => ({
+      meta: { ...s.meta, purpose: input.purpose, companyInfo: input.companyInfo },
+      saveStatus: "idle",
+    })),
   updateVoiceSettings: (patch) =>
     set((s) => ({
       meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } },
@@ -394,6 +392,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets: [...s.assets, asset],
       assetSrcById:
         assetType === "video" ? s.assetSrcById : { ...s.assetSrcById, [assetId]: file.dataUrl },
+      // 素材を追加したら未保存に戻す（「保存しました」表示の取り残し防止）。
+      saveStatus: "idle",
     }));
     // 永続化（プロジェクトフォルダへコピー）。
     try {

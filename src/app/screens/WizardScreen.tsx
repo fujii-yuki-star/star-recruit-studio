@@ -1,6 +1,7 @@
 import { useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sampleCompany, purposeOptions } from "../data/mockData";
+import type { Purpose } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
 import { YukoPanel } from "../components/YukoPanel";
 import {
@@ -60,7 +61,16 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const [newStrength, setNewStrength] = useState("");
   const [voiceType, setVoiceType] = useState("calm");
 
-  const { assets, assetSrcById, addAsset, saveProject, saveStatus } = useProjectStore();
+  const { assets, assetSrcById, addAsset, saveProject, saveStatus, applyProjectInfo } =
+    useProjectStore();
+
+  // ウィザードで入力した目的・会社情報を現在のプロジェクトへ反映する（保存・生成で使う）。
+  function applyForm() {
+    applyProjectInfo({
+      purpose: purpose as Purpose, // purposeOptions の id は Purpose enum 値
+      companyInfo: { companyName, industry, jobType, strengths },
+    });
+  }
   // 音声系（BGM/ナレーション）は素材一覧に出さない。
   const materials = assets.filter((a) => a.assetType !== "bgm" && a.assetType !== "voice");
 
@@ -84,7 +94,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
 
   function next() {
     if (step < steps.length - 1) setStep(step + 1);
-    else onNavigate("confirm");
+    else {
+      applyForm(); // ウィザードを抜ける＝入力を確定
+      onNavigate("confirm");
+    }
   }
   function back() {
     if (step > 0) setStep(step - 1);
@@ -226,6 +239,14 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 </p>
                 <label
                   className="card-tight text-center"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.currentTarget.querySelector("input")?.click();
+                    }
+                  }}
                   style={{
                     border: "2px dashed var(--color-border-strong)",
                     background: "var(--color-surface-alt)",
@@ -330,7 +351,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 </p>
                 <button
                   className="btn btn-primary btn-lg mt-lg"
-                  onClick={() => onNavigate("confirm")}
+                  onClick={() => {
+                    applyForm();
+                    onNavigate("confirm");
+                  }}
                 >
                   <SparkleIcon size={20} />
                   ゆうこに動画案を作ってもらう
@@ -348,7 +372,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
             <div className="row gap-sm">
               <button
                 className="btn btn-secondary"
-                onClick={() => void saveProject()}
+                onClick={() => {
+                  applyForm(); // 入力中の目的・会社情報も保存に反映
+                  void saveProject();
+                }}
                 disabled={saveStatus === "saving"}
               >
                 <SaveIcon size={18} />
