@@ -22,16 +22,19 @@ interface SwitchProps {
   on: boolean;
   onChange: (v: boolean) => void;
   label?: string;
+  disabled?: boolean;
 }
 
-export function Switch({ on, onChange, label }: SwitchProps) {
+export function Switch({ on, onChange, label, disabled = false }: SwitchProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
       aria-label={label}
+      disabled={disabled}
       className={`switch${on ? " on" : ""}`}
+      style={disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
       onClick={() => onChange(!on)}
     >
       <span className="switch-knob" />
