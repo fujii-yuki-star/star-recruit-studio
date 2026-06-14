@@ -95,6 +95,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : undefined;
         },
         (done, total) => setProgress({ done, total }),
+        { withSubtitle },
       );
       setPhase("encoding");
       let bgm: BgmInput | undefined;
@@ -264,7 +265,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   : saveStatus === "saved"
                     ? "保存しました"
                     : saveStatus === "error"
-                      ? "保存に失敗"
+                      ? "保存に失敗（もう一度押す）"
                       : "プロジェクトを保存"}
               </button>
               <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy}>

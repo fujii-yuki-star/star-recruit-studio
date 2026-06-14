@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
-import type { ImageItem } from './layout';
+import type { ImageItem, TextItem } from './layout';
 import { layoutScene } from './layout';
 import { layoutToSvg } from './sceneSvg';
 
@@ -58,6 +58,14 @@ describe('layoutScene', () => {
     // タイトル文の text アイテム
     const title = layout.items.find((i) => i.kind === 'text' && i.text.includes('ようこそ'));
     expect(title).toBeDefined();
+  });
+
+  it('subtitle レイヤー由来の text は isSubtitle=true、通常の text は false（字幕ON/OFF用）', () => {
+    const texts = layoutScene(scene, openingTemplate).items.filter(
+      (i): i is TextItem => i.kind === 'text',
+    );
+    expect(texts.find((i) => i.text.includes('ようこそ'))?.isSubtitle).toBe(false); // title
+    expect(texts.find((i) => i.text.includes('紹介します'))?.isSubtitle).toBe(true); // subtitle
   });
 
   it('layoutToSvg が 1920x1080 のSVGを生成し日本語テキストを含む', () => {

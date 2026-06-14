@@ -50,6 +50,14 @@ describe('splitVideoSceneSvg（ADR-0006 下/上分割）', () => {
     expect(r?.aboveSvg).not.toContain('メイン');
   });
 
+  it('includeItem で除外したアイテムは下にも上にも描かれない（字幕OFF等）', () => {
+    // title(z30=上) を除外 → 上に出ない。bg(z0=下) を除外 → 下に出ない。
+    const noTitle = splitVideoSceneSvg(layout(), 'slot', undefined, (it) => it.id !== 'title');
+    expect(noTitle?.aboveSvg).not.toContain('タイトルです');
+    const noBg = splitVideoSceneSvg(layout(), 'slot', undefined, (it) => it.id !== 'bg');
+    expect(noBg?.belowSvg).not.toContain('fill="#123456"');
+  });
+
   it('image/role=slot でない id（fill/text）や未知 id は null', () => {
     expect(splitVideoSceneSvg(layout(), 'bg')).toBeNull(); // fill
     expect(splitVideoSceneSvg(layout(), 'title')).toBeNull(); // text
