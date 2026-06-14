@@ -3,7 +3,8 @@
 
 /**
  * クリップの時刻(秒)を [min, max] に収める。
- * @param max 動画の長さ（不明なら null/undefined＝上限なし）
+ * @param max 動画の長さ（不明なら null/undefined＝上限なし）。**絶対上限＝min より優先**する
+ *   （呼び出し側は min ≤ max を渡す前提。UIでは startSec ≤ dur が保証される）。
  * @param min 下限（終了秒は開始秒以上にしたい等で使う。既定 0）
  * NaN・非有限は min を返す。
  */

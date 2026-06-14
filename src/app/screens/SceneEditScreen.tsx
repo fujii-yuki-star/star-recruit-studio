@@ -45,6 +45,14 @@ const slotLabel: Record<string, string> = {
   logo: "ロゴ",
 };
 
+// スロットの表示名。未登録 id は layer.type から日本語化し、layer.id の生表示（技術用語漏れ §2-3）を防ぐ。
+function slotLabelFor(layer: Layer): string {
+  if (slotLabel[layer.id]) return slotLabel[layer.id];
+  if (layer.type === "background") return "背景";
+  if (layer.type === "logo") return "ロゴ";
+  return "素材";
+}
+
 const narrationStatusLabel: Record<string, string> = {
   none: "未作成",
   pending: "作成中…",
@@ -326,7 +334,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   return (
                     <div className="field" key={layer.id} style={{ marginBottom: 8 }}>
                       <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-                        {slotLabel[layer.id] ?? layer.id}
+                        {slotLabelFor(layer)}
                       </label>
                       <select
                         className="select"
@@ -385,9 +393,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                 max={dur ?? undefined}
                                 step={0.1}
                                 value={clip?.startSec ?? 0}
-                                onChange={(e) =>
-                                  patchClip({ startSec: clampClipTime(Number(e.target.value), dur) })
-                                }
+                                onChange={(e) => {
+                                  const start = clampClipTime(Number(e.target.value), dur);
+                                  // 開始が終了を超えたら終了をクリア（=最後まで）して無効状態を防ぐ。
+                                  const p: Partial<NonNullable<Asset["clip"]>> = { startSec: start };
+                                  if (clip?.endSec != null && start > clip.endSec) p.endSec = undefined;
+                                  patchClip(p);
+                                }}
                               />
                               <span className="text-sm text-muted">〜</span>
                               <input
@@ -454,7 +466,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                   {Math.round(
                                     (clip?.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME) * 100,
                                   )}
-                                  %（標準20%）
+                                  %（標準{Math.round(ORIGINAL_AUDIO_VOLUME * 100)}%）
                                 </span>
                                 <span>大きい</span>
                               </div>

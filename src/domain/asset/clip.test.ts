@@ -20,4 +20,7 @@ describe('clampClipTime', () => {
     expect(clampClipTime(Infinity, 10, 4)).toBe(4);
     expect(clampClipTime(NaN, 10, 4)).toBe(4);
   });
+  it('min > max のときは max が優先（絶対上限。呼び出し側は min ≤ max 前提）', () => {
+    expect(clampClipTime(4, 3, 5)).toBe(3);
+  });
 });
