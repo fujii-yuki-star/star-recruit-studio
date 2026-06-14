@@ -84,7 +84,8 @@ export function layoutScene(scene: Scene, template: Template): SceneLayout {
       }
       case 'slot': {
         const assetId = scene.assetRefs[layer.id] ?? null;
-        items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'cover', role: 'slot', label: layer.id });
+        // ラベルは未解決時のプレースホルダ表示に使う。生の layer.id は技術用語漏れ（§2-3）なので日本語に。
+        items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'cover', role: 'slot', label: '素材' });
         break;
       }
       case 'logo': {
