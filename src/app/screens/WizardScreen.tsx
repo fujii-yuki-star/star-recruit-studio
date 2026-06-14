@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sampleCompany, purposeOptions } from "../data/mockData";
+import { useProjectStore } from "../store/projectStore";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   ArrowLeftIcon,
@@ -58,6 +59,21 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const [strengths, setStrengths] = useState<string[]>(sampleCompany.strengths);
   const [newStrength, setNewStrength] = useState("");
   const [voiceType, setVoiceType] = useState("calm");
+
+  const { assets, assetSrcById, addAsset, saveProject, saveStatus } = useProjectStore();
+  // 音声系（BGM/ナレーション）は素材一覧に出さない。
+  const materials = assets.filter((a) => a.assetType !== "bgm" && a.assetType !== "voice");
+
+  function onUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") void addAsset({ name: file.name, dataUrl: reader.result });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
 
   function addStrength() {
     const v = newStrength.trim();
@@ -208,39 +224,52 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 <p className="page-desc mb">
                   会社の写真や動画を追加すると、動画がより魅力的になります。
                 </p>
-                <div
+                <label
                   className="card-tight text-center"
                   style={{
                     border: "2px dashed var(--color-border-strong)",
                     background: "var(--color-surface-alt)",
                     padding: "var(--gap-xl)",
+                    display: "block",
+                    cursor: "pointer",
                   }}
                 >
                   <UploadIcon size={32} className="text-faint" />
-                  <p className="mt text-muted">
-                    ここに写真や動画をドラッグするか、ボタンから選んでください
-                  </p>
-                  <button className="btn btn-primary mt">
+                  <p className="mt text-muted">ここから写真や動画を選んでください</p>
+                  <span className="btn btn-primary mt">
                     <UploadIcon size={18} />
                     写真・動画を選ぶ
-                  </button>
-                </div>
-                <div className="card-grid cols-4 mt">
-                  <div className="thumb thumb-photo">
-                    <PhotoIcon size={22} />
-                    <span style={{ marginTop: 4 }}>会社外観</span>
+                  </span>
+                  <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
+                </label>
+                {materials.length > 0 ? (
+                  <div className="card-grid cols-4 mt">
+                    {materials.map((a) => (
+                      <div
+                        key={a.assetId}
+                        className={`thumb ${a.assetType === "video" ? "thumb-video" : "thumb-photo"}`}
+                        style={{ overflow: "hidden" }}
+                        title={a.displayName}
+                      >
+                        {assetSrcById[a.assetId] ? (
+                          <img
+                            src={assetSrcById[a.assetId]}
+                            alt={a.displayName}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        ) : a.assetType === "video" ? (
+                          <VideoIcon size={22} />
+                        ) : (
+                          <PhotoIcon size={22} />
+                        )}
+                      </div>
+                    ))}
                   </div>
-                  <div className="thumb thumb-photo">
-                    <PhotoIcon size={22} />
-                  </div>
-                  <div className="thumb thumb-video">
-                    <VideoIcon size={22} />
-                    <span style={{ marginTop: 4 }}>仕事の様子</span>
-                  </div>
-                  <div className="thumb">
-                    <PlusIcon size={22} />
-                  </div>
-                </div>
+                ) : (
+                  <p className="field-hint mt">
+                    まだ素材はありません。なくても動画は作れます（あとから追加もできます）。
+                  </p>
+                )}
               </>
             )}
 
@@ -317,9 +346,19 @@ export function WizardScreen({ onNavigate }: WizardProps) {
               戻る
             </button>
             <div className="row gap-sm">
-              <button className="btn btn-secondary">
+              <button
+                className="btn btn-secondary"
+                onClick={() => void saveProject()}
+                disabled={saveStatus === "saving"}
+              >
                 <SaveIcon size={18} />
-                ここまで保存
+                {saveStatus === "saving"
+                  ? "保存中…"
+                  : saveStatus === "saved"
+                    ? "保存しました"
+                    : saveStatus === "error"
+                      ? "保存に失敗（もう一度押す）"
+                      : "ここまで保存"}
               </button>
               {step < steps.length - 1 && (
                 <button className="btn btn-primary" onClick={next}>
