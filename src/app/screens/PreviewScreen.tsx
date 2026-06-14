@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
@@ -17,6 +17,9 @@ interface PreviewProps {
 
 type RangeMode = "scene" | "part" | "all";
 
+// 場面送りの最小秒（表示時間は SceneEdit で 0/負値にも編集され得るため、即時送り/不正値を防ぐ下限）。
+const MIN_PLAY_SEC = 0.3;
+
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -24,18 +27,74 @@ function formatDuration(sec: number): string {
 }
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
-  const { status, scenes, templates, generate } = useProjectStore();
+  const { status, scenes, templates, parts, assets, meta, generate, narrationAudioById } =
+    useProjectStore();
+  const bgmSettings = meta.bgmSettings;
   const [range, setRange] = useState<RangeMode>("all");
   const [idx, setIdx] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  // ミュートは再生エフェクトを再起動させずに参照したいので ref で持つ（同期は useEffect で）。
+  const mutedRef = useRef(muted);
 
   useEffect(() => {
     if (status === "idle") void generate();
   }, [status, generate]);
 
+  // muted を ref に同期（render 中の ref 書込みを避けつつ、再生エフェクトを再起動させない）。
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
+
   const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
   const current = scenes[safeIdx];
   const template = current ? templates.find((t) => t.templateId === current.templateId) : undefined;
   const totalSec = scenes.reduce((sum, s) => sum + s.durationSec, 0);
+
+  // 再生範囲の終端 index（この場面=現在地 / このパート=所属パートの最後 / 全体=最後）。
+  const partOfCurrent = current
+    ? parts.find((p) => p.sceneIds.includes(current.sceneId))
+    : undefined;
+  const inRange = (i: number): boolean => {
+    if (range === "scene") return i === safeIdx;
+    if (range === "all") return true;
+    return partOfCurrent ? partOfCurrent.sceneIds.includes(scenes[i]?.sceneId ?? "") : i === safeIdx;
+  };
+  let endIdx = safeIdx;
+  for (let i = 0; i < scenes.length; i += 1) if (inRange(i)) endIdx = Math.max(endIdx, i);
+  let startIdx = safeIdx;
+  for (let i = 0; i < scenes.length; i += 1)
+    if (inRange(i)) {
+      startIdx = i;
+      break;
+    }
+
+  // 概要の BGM 表示（実データ：未設定/無効なら「なし」）。
+  const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
+  const bgmName = bgmSettings?.enabled && bgmAsset ? bgmAsset.displayName : "なし";
+
+  // 再生中：現在の場面のナレーションを鳴らし、表示時間後に次の場面へ。範囲の終端で停止。
+  useEffect(() => {
+    const sc = scenes[safeIdx];
+    if (!playing || !sc) return;
+    let audio: HTMLAudioElement | undefined;
+    const url = narrationAudioById[sc.sceneId];
+    if (url && !mutedRef.current) {
+      audio = new Audio(url);
+      void audio.play().catch((e) => console.warn("[PreviewScreen] 音声再生に失敗", e));
+    }
+    const timer = window.setTimeout(
+      () => {
+        if (safeIdx < endIdx) setIdx(safeIdx + 1);
+        else setPlaying(false);
+      },
+      Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000,
+    );
+    return () => {
+      window.clearTimeout(timer);
+      audio?.pause();
+    };
+  }, [playing, safeIdx, endIdx, scenes, narrationAudioById]);
 
   return (
     <div className="main-scroll">
@@ -54,7 +113,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <button
               className="btn btn-ghost btn-icon"
               onClick={() => setIdx((i) => Math.max(0, i - 1))}
-              disabled={safeIdx <= 0}
+              disabled={playing || safeIdx <= 0}
             >
               <ArrowLeftIcon size={16} />
               前の場面
@@ -65,7 +124,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <button
               className="btn btn-ghost btn-icon"
               onClick={() => setIdx((i) => Math.min(scenes.length - 1, i + 1))}
-              disabled={safeIdx >= scenes.length - 1}
+              disabled={playing || safeIdx >= scenes.length - 1}
             >
               次の場面
               <ChevronRightIcon size={16} />
@@ -73,13 +132,31 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           </div>
 
           <div className="preview-controls">
-            <button className="btn btn-icon btn-secondary" aria-label="再生">
+            <button
+              className="btn btn-icon btn-secondary"
+              aria-label="再生"
+              onClick={() => {
+                if (safeIdx >= endIdx) setIdx(startIdx); // 範囲の終端にいたら先頭から再生
+                setPlaying(true);
+              }}
+              disabled={playing || scenes.length === 0}
+            >
               <PlayIcon size={20} />
             </button>
-            <button className="btn btn-icon btn-secondary" aria-label="停止">
+            <button
+              className="btn btn-icon btn-secondary"
+              aria-label="停止"
+              onClick={() => setPlaying(false)}
+              disabled={!playing}
+            >
               <StopIcon size={20} />
             </button>
-            <button className="btn btn-icon btn-ghost" aria-label="音量">
+            <button
+              className={`btn btn-icon ${muted ? "btn-secondary" : "btn-ghost"}`}
+              aria-label={muted ? "ミュート中（音を出す）" : "音を消す"}
+              aria-pressed={muted}
+              onClick={() => setMuted((m) => !m)}
+            >
               <VolumeIcon size={20} />
             </button>
           </div>
@@ -93,7 +170,14 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
                 ["part", "このパートだけ"],
                 ["all", "全体"],
               ] as [RangeMode, string][]).map(([id, label]) => (
-                <button key={id} className={range === id ? "active" : ""} onClick={() => setRange(id)}>
+                <button
+                  key={id}
+                  className={range === id ? "active" : ""}
+                  onClick={() => {
+                    setRange(id);
+                    setPlaying(false); // 範囲を変えたら再生を止める
+                  }}
+                >
                   {label}
                 </button>
               ))}
@@ -117,7 +201,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <hr className="divider" style={{ margin: "4px 0" }} />
             <div className="row-between">
               <span className="text-muted">BGM</span>
-              <strong>やさしいBGM</strong>
+              <strong>{bgmName}</strong>
             </div>
             <hr className="divider" style={{ margin: "4px 0" }} />
             <div className="row-between">
