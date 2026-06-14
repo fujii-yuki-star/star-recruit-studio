@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
+import { sampleAssets } from "../../infrastructure/sampleData";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   PlusIcon,
@@ -20,14 +21,23 @@ function formatDate(iso: string): string {
   return iso ? iso.slice(0, 10) : "—";
 }
 
+// サンプル素材以外（ユーザーが取り込んだ素材）を「作業中の内容」とみなす。
+const SAMPLE_ASSET_IDS = new Set(sampleAssets.map((a) => a.assetId));
+
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
   const loadProject = useProjectStore((s) => s.loadProject);
   const newProject = useProjectStore((s) => s.newProject);
   const sceneCount = useProjectStore((s) => s.scenes.length);
+  // サンプル外の素材（ユーザー取り込み）があるか＝場面ゼロでも失うと困る作業内容。
+  const hasCustomAsset = useProjectStore((s) =>
+    s.assets.some((a) => !SAMPLE_ASSET_IDS.has(a.assetId)),
+  );
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   // 新規作成で作業中の内容が失われる前の確認（空プロジェクトの罠＝素材/場面の取りこぼし防止）。
   const [confirmNew, setConfirmNew] = useState(false);
+  // プロジェクトを開けなかったときのユーザー向け表示（§2-5）。
+  const [openError, setOpenError] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -44,8 +54,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   }, [listProjects]);
 
   function startNew() {
-    // 作業中の場面があるときは、いきなり破棄せず確認を出す（実行は通知内の「新しく作る」）。
-    if (sceneCount > 0) {
+    // 作業中の内容（場面 or 取り込んだ素材）があるときは、いきなり破棄せず確認を出す。
+    if (sceneCount > 0 || hasCustomAsset) {
       setConfirmNew(true);
       return;
     }
@@ -59,11 +69,12 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   }
 
   async function openProject(projectId: string) {
+    setOpenError(false);
     try {
       await loadProject(projectId);
       onNavigate("draft");
     } catch {
-      /* 開けない場合は一覧に留まる（将来：エラー表示） */
+      setOpenError(true);
     }
   }
 
@@ -71,10 +82,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     <div className="main-scroll">
       <div className="content-with-yuko">
         <div>
+          {openError && (
+            <div className="notice notice-warn mb" role="alert">
+              <span>プロジェクトを開けませんでした。一覧から別のプロジェクトを選んでください。</span>
+            </div>
+          )}
+
           {confirmNew && (
             <div className="notice notice-warn mb" role="alert">
               <span>
-                今の編集内容を閉じて新しく作りますか？保存していない場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
+                今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
               </span>
               <div className="row gap-sm">
                 <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>

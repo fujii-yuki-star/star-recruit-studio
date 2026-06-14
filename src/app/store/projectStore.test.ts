@@ -59,9 +59,17 @@ describe('projectStore addScene / removeScene', () => {
     expect(useProjectStore.getState().scenes.map((s) => s.order)).toEqual([1, 2]);
   });
 
-  it('updateScene は saveStatus を "idle" に戻す（編集＝未保存）', () => {
-    // beforeEach で saveStatus='saved'
-    useProjectStore.getState().updateScene('scene_001', (s) => ({ ...s, durationSec: 10 }));
-    expect(useProjectStore.getState().saveStatus).toBe('idle');
+  it('編集系アクションは saveStatus を "idle" に戻す（編集＝未保存）', () => {
+    const reset = (fn: () => void) => {
+      useProjectStore.setState({ saveStatus: 'saved' });
+      fn();
+      expect(useProjectStore.getState().saveStatus).toBe('idle');
+    };
+    const s = useProjectStore.getState();
+    reset(() => s.updateScene('scene_001', (sc) => ({ ...sc, durationSec: 10 })));
+    reset(() => s.updateAsset('asset_x', (a) => a)); // 対象なしでも set は走り idle に
+    reset(() => s.removeAsset('asset_x'));
+    reset(() => s.updateVoiceSettings({ speed: 1.1 }));
+    reset(() => s.updateBgmSettings({ volume: 0.3 }));
   });
 });
