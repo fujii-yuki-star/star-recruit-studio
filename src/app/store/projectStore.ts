@@ -210,18 +210,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const text = await loadProjectDoc(projectId);
     const project = parseProjectDoc(text);
     // ディスクの素材を data URL に復元（filePath を持つもの。未配置のサンプル等は null でスキップ）。並列実行。
+    type LoadedSrc = { assetId: string; url: string; thumbnailPath?: string };
     const loaded = await Promise.all(
-      project.assets.map(async (a) => {
-        // 動画は本体(大容量)でなく代表フレーム(サムネ)を読み込む。サムネ未生成の動画はスキップ。
-        const path = a.assetType === "video" ? a.thumbnailPath : a.filePath;
-        if (!path) return null;
-        const url = await readAssetDataUrl(project.projectId, path);
-        return url ? ([a.assetId, url] as const) : null;
+      project.assets.map(async (a): Promise<LoadedSrc | null> => {
+        if (a.assetType === "video") {
+          // 動画は本体(大容量)でなく代表フレーム(サムネ)を読み込む。
+          // 旧プロジェクト（サムネ未生成）の動画は読込時に生成する（本体は読み込まない＝後方互換）。
+          let thumbPath = a.thumbnailPath;
+          if (!thumbPath && a.filePath) {
+            thumbPath = (await extractVideoThumbnail(project.projectId, a.filePath)) ?? undefined;
+          }
+          if (!thumbPath) return null;
+          const url = await readAssetDataUrl(project.projectId, thumbPath);
+          return url ? { assetId: a.assetId, url, thumbnailPath: thumbPath } : null;
+        }
+        if (!a.filePath) return null;
+        const url = await readAssetDataUrl(project.projectId, a.filePath);
+        return url ? { assetId: a.assetId, url } : null;
       }),
     );
     const assetSrcById: Record<string, string> = {};
+    // 読込時に解決した動画サムネのパス（再生成含む）は assets にも反映し、次回保存で永続化する。
+    const videoThumb: Record<string, string> = {};
     for (const entry of loaded) {
-      if (entry) assetSrcById[entry[0]] = entry[1];
+      if (!entry) continue;
+      assetSrcById[entry.assetId] = entry.url;
+      if (entry.thumbnailPath) videoThumb[entry.assetId] = entry.thumbnailPath;
     }
     // 生成済みナレーション音声を data URL に復元（voicePath を持つもの。未配置は null でスキップ）。並列実行。
     const voiceLoaded = await Promise.all(
@@ -251,7 +265,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         voiceSettings: project.voiceSettings,
         bgmSettings: project.bgmSettings,
       },
-      assets: project.assets,
+      assets: project.assets.map((a) =>
+        videoThumb[a.assetId] ? { ...a, thumbnailPath: videoThumb[a.assetId] } : a,
+      ),
       parts: project.parts,
       scenes: project.scenes,
       warnings: [],
@@ -337,9 +353,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             set((s) => ({
               assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: meta } : a)),
             }));
+          } else if (hasTauri) {
+            console.warn("[addAsset] 動画メタの取得に失敗しました（既定値で続行）");
           }
-        } catch {
-          // メタ取得失敗は無視（findVideoSlot が安全側で処理）。
+        } catch (e) {
+          console.warn("[addAsset] 動画メタ取得で例外:", e);
         }
         try {
           // 代表フレームを生成し、表示用 src（小さなPNG）として保持する＝確認画面/一覧に動画フレーム表示。
@@ -354,9 +372,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 ? { ...s.assetSrcById, [assetId]: thumbUrl }
                 : s.assetSrcById,
             }));
+          } else if (hasTauri) {
+            console.warn("[addAsset] 動画サムネの生成に失敗しました（アイコン表示にフォールバック）");
           }
-        } catch {
-          // サムネ生成失敗は無視（アイコン表示にフォールバック）。
+        } catch (e) {
+          console.warn("[addAsset] 動画サムネ生成で例外:", e);
         }
       }
     } catch {

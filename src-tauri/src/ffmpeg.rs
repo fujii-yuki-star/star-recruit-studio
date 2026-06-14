@@ -512,6 +512,15 @@ pub fn extract_video_thumbnail(
     }
     let rel_out = thumbnail_rel_path(&rel_path);
     let out = resolve_project_file(&app, &project_id, &rel_out)?;
+    // 出力先(assets/)は import_asset で作成済みだが、念のため保証する。
+    if let Some(dir) = out.parent() {
+        fs::create_dir_all(dir).map_err(|e| {
+            export_failure(
+                format!("thumbnail dir: {e}"),
+                "動画のサムネイル作成に失敗しました。",
+            )
+        })?;
+    }
     let ffmpeg = resolve_ffmpeg(&app);
     // 先頭フレームを 1枚、横640pxへ縮小して PNG 出力（プレビュー用ポスター）。
     let args: Vec<String> = vec![
