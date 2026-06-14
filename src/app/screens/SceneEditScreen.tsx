@@ -2,6 +2,9 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
+import type { Fit } from "../../domain/enums";
+import { ORIGINAL_AUDIO_VOLUME, VOLUME_MAX, VOLUME_MIN } from "../../domain/constants";
+import { clampClipTime } from "../../domain/asset/clip";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { Switch } from "../components/ui";
@@ -42,6 +45,14 @@ const slotLabel: Record<string, string> = {
   logo: "ロゴ",
 };
 
+// スロットの表示名。未登録 id は layer.type から日本語化し、layer.id の生表示（技術用語漏れ §2-3）を防ぐ。
+function slotLabelFor(layer: Layer): string {
+  if (slotLabel[layer.id]) return slotLabel[layer.id];
+  if (layer.type === "background") return "背景";
+  if (layer.type === "logo") return "ロゴ";
+  return "素材";
+}
+
 const narrationStatusLabel: Record<string, string> = {
   none: "未作成",
   pending: "作成中…",
@@ -68,7 +79,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
-    status, scenes, templates, assets, generate, updateScene, addAsset,
+    status, scenes, templates, assets, generate, updateScene, updateAsset, addAsset,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
   } = useProjectStore();
 
@@ -306,12 +317,24 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               ) : (
                 slotLayers.map((layer) => {
                   const assignedId = selected.assetRefs[layer.id];
-                  const assignedIsVideo =
-                    !!assignedId && assets.find((a) => a.assetId === assignedId)?.assetType === "video";
+                  const assignedAsset = assignedId
+                    ? assets.find((a) => a.assetId === assignedId)
+                    : undefined;
+                  const isVideo = assignedAsset?.assetType === "video";
+                  const clip = assignedAsset?.clip;
+                  const dur = assignedAsset?.metadata?.durationSec ?? null;
+                  const hasAudio = assignedAsset?.metadata?.hasAudio === true;
+                  const useOriginal = hasAudio && (clip?.useOriginalAudio ?? false);
+                  // クリップ設定（asset.clip）を部分更新する。clip は Asset 単位（正典 11/$defs/Clip）。
+                  const patchClip = (p: Partial<NonNullable<Asset["clip"]>>) => {
+                    if (assignedAsset) {
+                      updateAsset(assignedAsset.assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }));
+                    }
+                  };
                   return (
                     <div className="field" key={layer.id} style={{ marginBottom: 8 }}>
                       <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-                        {slotLabel[layer.id] ?? layer.id}
+                        {slotLabelFor(layer)}
                       </label>
                       <select
                         className="select"
@@ -330,10 +353,126 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           </option>
                         ))}
                       </select>
-                      {assignedIsVideo && (
-                        <p className="field-hint">
-                          ▶ 動画素材です。この確認画面では枠が空に見えますが、書き出すと動画が入ります。
-                        </p>
+
+                      {isVideo && assignedAsset && (
+                        <div
+                          className="card-tight"
+                          style={{ background: "var(--color-surface-alt)", marginTop: 6 }}
+                        >
+                          <p className="text-sm text-muted" style={{ margin: "0 0 6px" }}>
+                            ▶ 動画素材です。確認画面では枠が空に見えますが、書き出すと動画が入ります。
+                            {dur != null && `（長さ：約${dur.toFixed(1)}秒）`}
+                          </p>
+
+                          {/* 枠への収め方 */}
+                          <div className="field" style={{ marginBottom: 6 }}>
+                            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
+                              枠への収め方
+                            </label>
+                            <select
+                              className="select"
+                              value={clip?.fit ?? "cover"}
+                              onChange={(e) => patchClip({ fit: e.target.value as Fit })}
+                            >
+                              <option value="cover">枠いっぱいに表示（はみ出しは切り取り）</option>
+                              <option value="contain">全体を表示（余白が入る）</option>
+                              <option value="stretch">枠に合わせて伸縮</option>
+                            </select>
+                          </div>
+
+                          {/* 使う範囲 */}
+                          <div className="field" style={{ marginBottom: 6 }}>
+                            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
+                              使う範囲（秒）
+                            </label>
+                            <div className="row gap-sm" style={{ alignItems: "center" }}>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                max={dur ?? undefined}
+                                step={0.1}
+                                value={clip?.startSec ?? 0}
+                                onChange={(e) => {
+                                  const start = clampClipTime(Number(e.target.value), dur);
+                                  // 開始が終了を超えたら終了をクリア（=最後まで）して無効状態を防ぐ。
+                                  const p: Partial<NonNullable<Asset["clip"]>> = { startSec: start };
+                                  if (clip?.endSec != null && start > clip.endSec) p.endSec = undefined;
+                                  patchClip(p);
+                                }}
+                              />
+                              <span className="text-sm text-muted">〜</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                max={dur ?? undefined}
+                                step={0.1}
+                                placeholder="最後まで"
+                                value={clip?.endSec ?? ""}
+                                onChange={(e) =>
+                                  patchClip({
+                                    endSec:
+                                      e.target.value === ""
+                                        ? undefined
+                                        : clampClipTime(Number(e.target.value), dur, clip?.startSec ?? 0),
+                                  })
+                                }
+                              />
+                            </div>
+                            <p className="field-hint">終了を空にすると最後まで使います。</p>
+                          </div>
+
+                          {/* 元の音声 */}
+                          <div className="toggle-row">
+                            <span className="field-label text-sm" style={{ margin: 0 }}>
+                              元の音声を使う
+                            </span>
+                            <Switch
+                              on={useOriginal}
+                              disabled={!hasAudio}
+                              onChange={(v) => patchClip({ useOriginalAudio: v })}
+                              label="元の音声を使う"
+                            />
+                          </div>
+                          {!hasAudio && (
+                            <p className="field-hint">
+                              {assignedAsset.metadata?.hasAudio === false
+                                ? "この動画には音声がありません。"
+                                : "音声を確認できないため、元の音声は使えません。"}
+                            </p>
+                          )}
+
+                          {/* 元音声の音量 */}
+                          {useOriginal && (
+                            <div className="field" style={{ marginTop: 6 }}>
+                              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
+                                元の音声の大きさ
+                              </label>
+                              <input
+                                type="range"
+                                min={VOLUME_MIN}
+                                max={VOLUME_MAX}
+                                step={0.05}
+                                value={clip?.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME}
+                                onChange={(e) =>
+                                  patchClip({ originalAudioVolume: Number(e.target.value) })
+                                }
+                                style={{ width: "100%", accentColor: "var(--color-primary)" }}
+                              />
+                              <div className="row-between text-faint text-sm">
+                                <span>小さい</span>
+                                <span>
+                                  {Math.round(
+                                    (clip?.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME) * 100,
+                                  )}
+                                  %（標準{Math.round(ORIGINAL_AUDIO_VOLUME * 100)}%）
+                                </span>
+                                <span>大きい</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   );
@@ -442,7 +581,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     <option value="fade">フェード</option>
                   </select>
                 </div>
-                <p className="field-hint">音量や動画の開始・終了などの詳細設定は今後追加予定です。</p>
+                <p className="field-hint">
+                  動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。場面ごとの音量調整は今後追加予定です。
+                </p>
               </div>
             )}
 
