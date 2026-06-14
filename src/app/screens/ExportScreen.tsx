@@ -8,7 +8,7 @@ import { buildExportScenes } from "../../renderer/export/buildExportScenes";
 import { findVideoSlot } from "../../renderer/export/findVideoSlot";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
-import { BGM_VOLUME, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN } from "../../domain/constants";
+import { BGM_VOLUME, HD_HEIGHT, HD_WIDTH, HEIGHT, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, WIDTH } from "../../domain/constants";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 
 interface ExportProps {
@@ -36,6 +36,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [withSubtitle, setWithSubtitle] = useState(true);
   // BGM の入/切は bgmSettings.enabled を単一の真実とする（トグルで更新・保存で永続化）。未設定なら入。
   const withBgm = bgmSettings?.enabled ?? true;
+  // 出力解像度（フルHD＝キャンバス / HD＝縮小）。書き出し時に PNG をこの解像度で焼く。
+  const outputSize =
+    size === "hd" ? { width: HD_WIDTH, height: HD_HEIGHT } : { width: WIDTH, height: HEIGHT };
 
   const [phase, setPhase] = useState<ExportPhase>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -95,7 +98,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : undefined;
         },
         (done, total) => setProgress({ done, total }),
-        { withSubtitle },
+        { withSubtitle, outputSize },
       );
       setPhase("encoding");
       let bgm: BgmInput | undefined;

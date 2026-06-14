@@ -14,6 +14,9 @@ export const DEFAULT_TARGET_DURATION_SEC = 60;
 export const FPS = 30;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
+// 書き出し時の縮小オプション（16:9 を維持。videoSettings の正典値ではなく出力時の選択肢）。
+export const HD_WIDTH = 1280;
+export const HD_HEIGHT = 720;
 
 export const NARRATION_VOLUME = 1.0;
 export const BGM_VOLUME = 0.25;

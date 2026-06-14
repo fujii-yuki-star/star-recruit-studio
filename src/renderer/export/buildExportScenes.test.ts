@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 // canvas(ADR-0004) は Node テスト環境に無いため描画系をスタブ化し、音声付与の分岐のみを検証する。
 vi.mock('../layout', () => ({ layoutScene: () => ({}) }));
 vi.mock('../sceneSvg', () => ({ layoutToSvg: vi.fn(() => '<svg/>') }));
-vi.mock('./rasterize', () => ({ svgToPngDataUrl: async () => 'data:image/png;base64,PNG' }));
+vi.mock('./rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,PNG') }));
 vi.mock('./videoSceneSplit', () => ({
   splitVideoSceneSvg: () => ({
     belowSvg: '<below/>',
@@ -16,6 +16,7 @@ import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
+import { svgToPngDataUrl } from './rasterize';
 import { buildExportScenes } from './buildExportScenes';
 
 // buildExportScenes が参照するのは templateId / durationSec / (narrationFor へ渡す scene) のみ。
@@ -134,5 +135,55 @@ describe('buildExportScenes：字幕トグル（withSubtitle）', () => {
     vi.mocked(layoutToSvg).mockClear();
     await buildExportScenes(oneScene, templateById, noAsset);
     expect(vi.mocked(layoutToSvg).mock.calls[0]?.[1]?.itemFilter).toBeUndefined();
+  });
+});
+
+describe('buildExportScenes：出力解像度（HDサイズ）', () => {
+  const videoSlot = () => ({
+    slotLayerId: 'mainVisual',
+    clipRelPath: 'assets/v.mp4',
+    fit: 'cover' as const,
+    clipStartSec: 0,
+    useOriginalAudio: false,
+  });
+
+  it('outputWidth/Height でPNGを縮小し、動画スロット座標もスケールする', async () => {
+    vi.mocked(svgToPngDataUrl).mockClear();
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      noAsset,
+      () => ({ narrationVolume: 1.0 }),
+      videoSlot,
+      undefined,
+      { outputSize: { width: 960, height: 540 } }, // 1920x1080 の半分
+    );
+    expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledWith(expect.anything(), 960, 540);
+    // スロット(80,140,1040,800) が半分にスケールされる
+    expect(out[0].video).toMatchObject({ slotX: 40, slotY: 70, slotW: 520, slotH: 400 });
+  });
+
+  it('静止画シーンも outputSize でPNGを縮小する', async () => {
+    vi.mocked(svgToPngDataUrl).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      noAsset,
+      undefined,
+      undefined, // videoSlotFor なし → 静止画シーン
+      undefined,
+      { outputSize: { width: 1280, height: 720 } },
+    );
+    expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledWith(expect.anything(), 1280, 720);
+  });
+
+  it('outputSize 未指定ならキャンバス寸法（フルHD）で焼く', async () => {
+    vi.mocked(svgToPngDataUrl).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      noAsset,
+    );
+    expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledWith(expect.anything(), 1920, 1080);
   });
 });
