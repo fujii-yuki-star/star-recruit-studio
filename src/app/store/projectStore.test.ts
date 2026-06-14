@@ -72,4 +72,15 @@ describe('projectStore addScene / removeScene', () => {
     reset(() => s.updateVoiceSettings({ speed: 1.1 }));
     reset(() => s.updateBgmSettings({ volume: 0.3 }));
   });
+
+  it('applyProjectInfo は meta の purpose/companyInfo を更新し saveStatus を idle に', () => {
+    useProjectStore.setState({ saveStatus: 'saved' });
+    useProjectStore
+      .getState()
+      .applyProjectInfo({ purpose: 'engineer', companyInfo: { companyName: 'A社', industry: 'IT' } });
+    const m = useProjectStore.getState().meta;
+    expect(m.purpose).toBe('engineer');
+    expect(m.companyInfo).toEqual({ companyName: 'A社', industry: 'IT' });
+    expect(useProjectStore.getState().saveStatus).toBe('idle');
+  });
 });
