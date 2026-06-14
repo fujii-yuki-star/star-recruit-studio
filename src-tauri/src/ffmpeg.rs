@@ -459,6 +459,8 @@ fn parse_resolution(stderr: &str) -> (Option<u32>, Option<u32>) {
 }
 
 /// 動画素材のメタ情報（長さ・音声有無・解像度）を `ffmpeg -i` で取得する。
+/// 注: Err はフロント（assetFs.probeVideo）で catch → null される best-effort 取得＝
+/// ここで返すユーザー向け文言は画面に出ない（取得できなくても素材は保持される）。技術詳細は eprintln に残る。
 #[tauri::command]
 pub fn probe_video(
     app: tauri::AppHandle,
@@ -981,6 +983,19 @@ mod tests {
         assert!(!m.has_audio);
         assert_eq!(m.width, None);
         assert_eq!(m.height, None);
+    }
+
+    #[test]
+    fn parse_resolution_rejects_codec_tags_and_handles_missing() {
+        // コーデックタグ 0x.. / ストリーム番号 [0x1] を拾わず解像度のみ採用。
+        let line =
+            "  Stream #0:0[0x1]: Video: h264 (avc1 / 0x31637661), yuv420p, 640x360, 100 kb/s";
+        assert_eq!(parse_resolution(line), (Some(640), Some(360)));
+        // Video 行が無ければ (None, None)。
+        assert_eq!(
+            parse_resolution("Duration: 00:00:01.0\n Audio: aac"),
+            (None, None)
+        );
     }
 
     #[test]

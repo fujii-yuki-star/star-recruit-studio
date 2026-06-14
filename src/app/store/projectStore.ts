@@ -327,13 +327,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       const savedPath = await importAssetFile(projectId, fileName, file.dataUrl);
       // 動画は取り込み後にメタ情報(長さ・音声有無・解像度)を取得して保存（元音声ゲート等に使う）。
-      // probeVideo は失敗時 null を返す（throw しない）＝メタなしでも素材は保持しロールバックしない。
+      // メタ取得は素材取り込みの成否と独立させる＝専用 try で握り、失敗してもロールバックしない
+      //（probeVideo は現状 null を返すが、将来 throw に変わっても素材を壊さないよう独立化）。
       if (assetType === "video") {
-        const meta = await probeVideo(projectId, savedPath ?? `assets/${fileName}`);
-        if (meta) {
-          set((s) => ({
-            assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: meta } : a)),
-          }));
+        try {
+          const meta = await probeVideo(projectId, savedPath ?? `assets/${fileName}`);
+          if (meta) {
+            set((s) => ({
+              assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: meta } : a)),
+            }));
+          }
+        } catch {
+          // メタ取得失敗は無視（メタなしでも素材は保持。findVideoSlot が安全側で処理）。
         }
       }
     } catch {
