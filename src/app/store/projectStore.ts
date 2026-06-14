@@ -285,6 +285,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   updateScene: (sceneId, update) =>
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
+      // 編集したら「保存しました」表示を解除（未保存と分かるように）。
+      saveStatus: "idle",
     })),
   addScene: () => {
     const s = get();
@@ -334,13 +336,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       saveStatus: "idle",
     })),
   updateVoiceSettings: (patch) =>
-    set((s) => ({ meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } } })),
+    set((s) => ({
+      meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } },
+      saveStatus: "idle",
+    })),
   updateBgmSettings: (patch) =>
-    set((s) => ({ meta: { ...s.meta, bgmSettings: { ...s.meta.bgmSettings, ...patch } } })),
+    set((s) => ({
+      meta: { ...s.meta, bgmSettings: { ...s.meta.bgmSettings, ...patch } },
+      saveStatus: "idle",
+    })),
   updateAsset: (assetId, update) =>
-    set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)) })),
+    set((s) => ({
+      assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)),
+      saveStatus: "idle",
+    })),
   removeAsset: (assetId) =>
-    set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId) })),
+    set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId), saveStatus: "idle" })),
   setAssetImage: async (assetId, file) => {
     // 即時表示（メモリ内 data URL）。
     set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: file.dataUrl } }));

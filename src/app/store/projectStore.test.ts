@@ -58,4 +58,10 @@ describe('projectStore addScene / removeScene', () => {
     expect(id).toBe('scene_001'); // 最小の空き番号
     expect(useProjectStore.getState().scenes.map((s) => s.order)).toEqual([1, 2]);
   });
+
+  it('updateScene は saveStatus を "idle" に戻す（編集＝未保存）', () => {
+    // beforeEach で saveStatus='saved'
+    useProjectStore.getState().updateScene('scene_001', (s) => ({ ...s, durationSec: 10 }));
+    expect(useProjectStore.getState().saveStatus).toBe('idle');
+  });
 });

@@ -90,10 +90,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [selectedId, setSelectedId] = useState("");
   // こだわり編集（現状はUIのみ・後でドメインへ結線）
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (status === "idle") void generate();
   }, [status, generate]);
+
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
   const template = selected ? templates.find((t) => t.templateId === selected.templateId) : undefined;
@@ -128,6 +131,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   // 選択中シーンを更新するヘルパー
   const patch = (update: (s: Scene) => Scene) => updateScene(selected.sceneId, update);
+  // 場面の選択を切り替える（前の場面の削除確認は解除して持ち越さない）。
+  const selectScene = (id: string) => {
+    setSelectedId(id);
+    setConfirmDelete(false);
+  };
 
   function onUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -238,7 +246,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <h2 className="field-label" style={{ margin: 0 }}>
                   場面の並び
                 </h2>
-                <button className="btn btn-ghost btn-icon" onClick={() => setSelectedId(addScene())}>
+                <button className="btn btn-ghost btn-icon" onClick={() => selectScene(addScene())}>
                   <PlusIcon size={16} />
                   場面を追加
                 </button>
@@ -248,7 +256,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <button
                     key={s.sceneId}
                     className={`scene-card${selected.sceneId === s.sceneId ? " selected" : ""}`}
-                    onClick={() => setSelectedId(s.sceneId)}
+                    onClick={() => selectScene(s.sceneId)}
                   >
                     <div className="scene-card-thumb thumb thumb-photo">
                       <PhotoIcon size={18} />
@@ -589,17 +597,33 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
             )}
 
-            <button
-              className="btn btn-ghost btn-block mt"
-              style={{ color: "var(--color-danger)" }}
-              onClick={() => {
-                removeScene(selected.sceneId);
-                setSelectedId("");
-              }}
-            >
-              <TrashIcon size={16} />
-              この場面を削除
-            </button>
+            {confirmDelete ? (
+              <div className="row gap-sm mt">
+                <button
+                  className="btn btn-danger"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    removeScene(selected.sceneId);
+                    selectScene(""); // 選択リセット＋削除確認も解除
+                  }}
+                >
+                  <TrashIcon size={16} />
+                  削除する
+                </button>
+                <button className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
+                  やめる
+                </button>
+              </div>
+            ) : (
+              <button
+                className="btn btn-ghost btn-block mt"
+                style={{ color: "var(--color-danger)" }}
+                onClick={() => setConfirmDelete(true)}
+              >
+                <TrashIcon size={16} />
+                この場面を削除
+              </button>
+            )}
 
             <button
               className="btn btn-primary btn-block mt"

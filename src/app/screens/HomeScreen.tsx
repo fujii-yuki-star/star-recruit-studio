@@ -24,7 +24,10 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
   const loadProject = useProjectStore((s) => s.loadProject);
   const newProject = useProjectStore((s) => s.newProject);
+  const sceneCount = useProjectStore((s) => s.scenes.length);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  // 新規作成で作業中の内容が失われる前の確認（空プロジェクトの罠＝素材/場面の取りこぼし防止）。
+  const [confirmNew, setConfirmNew] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -41,6 +44,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   }, [listProjects]);
 
   function startNew() {
+    // 作業中の場面があるときは、いきなり破棄せず確認を出す（実行は通知内の「新しく作る」）。
+    if (sceneCount > 0) {
+      setConfirmNew(true);
+      return;
+    }
+    newProject();
+    onNavigate("wizard");
+  }
+
+  function confirmStartNew() {
     newProject();
     onNavigate("wizard");
   }
@@ -58,6 +71,22 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     <div className="main-scroll">
       <div className="content-with-yuko">
         <div>
+          {confirmNew && (
+            <div className="notice notice-warn mb" role="alert">
+              <span>
+                今の編集内容を閉じて新しく作りますか？保存していない場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
+              </span>
+              <div className="row gap-sm">
+                <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
+                  新しく作る
+                </button>
+                <button className="btn btn-ghost btn-icon" onClick={() => setConfirmNew(false)}>
+                  やめる
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ヒーロー: 新しい動画を作る */}
           <div className="hero">
             <div>

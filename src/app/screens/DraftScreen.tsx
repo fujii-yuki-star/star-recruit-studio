@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
@@ -22,6 +22,8 @@ interface DraftProps {
 export function DraftScreen({ onNavigate }: DraftProps) {
   const { status, scenes, parts, templates, assets, warnings, generate, addScene, removeScene } =
     useProjectStore();
+  // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   // たたき台へ直接来た場合は生成する（本実装では保存済みプロジェクトの読込に置き換え）
   useEffect(() => {
@@ -119,15 +121,32 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                         <button className="btn btn-ghost btn-icon" title="見た目を変更" onClick={() => onNavigate("scene-edit")}>
                           見た目
                         </button>
-                        <button
-                          className="btn btn-ghost btn-icon"
-                          style={{ color: "var(--color-danger)" }}
-                          title="この場面を削除"
-                          aria-label="この場面を削除"
-                          onClick={() => removeScene(row.id)}
-                        >
-                          <TrashIcon size={14} />
-                        </button>
+                        {confirmId === row.id ? (
+                          <>
+                            <button
+                              className="btn btn-danger btn-icon"
+                              onClick={() => {
+                                removeScene(row.id);
+                                setConfirmId(null);
+                              }}
+                            >
+                              削除する
+                            </button>
+                            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmId(null)}>
+                              やめる
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="btn btn-ghost btn-icon"
+                            style={{ color: "var(--color-danger)" }}
+                            title="この場面を削除"
+                            aria-label="この場面を削除"
+                            onClick={() => setConfirmId(row.id)}
+                          >
+                            <TrashIcon size={14} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
