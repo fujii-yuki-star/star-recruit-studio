@@ -17,6 +17,9 @@ interface PreviewProps {
 
 type RangeMode = "scene" | "part" | "all";
 
+// 場面送りの最小秒（表示時間は SceneEdit で 0/負値にも編集され得るため、即時送り/不正値を防ぐ下限）。
+const MIN_PLAY_SEC = 0.3;
+
 function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -24,9 +27,9 @@ function formatDuration(sec: number): string {
 }
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
-  const { status, scenes, templates, parts, assets, generate, narrationAudioById } =
+  const { status, scenes, templates, parts, assets, meta, generate, narrationAudioById } =
     useProjectStore();
-  const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
+  const bgmSettings = meta.bgmSettings;
   const [range, setRange] = useState<RangeMode>("all");
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -78,14 +81,14 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     const url = narrationAudioById[sc.sceneId];
     if (url && !mutedRef.current) {
       audio = new Audio(url);
-      void audio.play().catch(() => {});
+      void audio.play().catch((e) => console.warn("[PreviewScreen] 音声再生に失敗", e));
     }
     const timer = window.setTimeout(
       () => {
         if (safeIdx < endIdx) setIdx(safeIdx + 1);
         else setPlaying(false);
       },
-      Math.max(0.3, sc.durationSec) * 1000,
+      Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000,
     );
     return () => {
       window.clearTimeout(timer);
@@ -110,7 +113,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <button
               className="btn btn-ghost btn-icon"
               onClick={() => setIdx((i) => Math.max(0, i - 1))}
-              disabled={safeIdx <= 0}
+              disabled={playing || safeIdx <= 0}
             >
               <ArrowLeftIcon size={16} />
               前の場面
@@ -121,7 +124,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <button
               className="btn btn-ghost btn-icon"
               onClick={() => setIdx((i) => Math.min(scenes.length - 1, i + 1))}
-              disabled={safeIdx >= scenes.length - 1}
+              disabled={playing || safeIdx >= scenes.length - 1}
             >
               次の場面
               <ChevronRightIcon size={16} />
