@@ -1,40 +1,34 @@
 // 「新しい動画を作る」の共通フロー（破棄ガード付き）。ヘッダ(App)とホームで共有し挙動を統一する（CLAUDE.md §4）。
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
-import { sampleAssets } from "../../infrastructure/sampleData";
-
-// サンプル素材以外（ユーザーが取り込んだ素材）を「作業中の内容」とみなす。
-const SAMPLE_ASSET_IDS = new Set(sampleAssets.map((a) => a.assetId));
+import { hasWorkInProgress } from "./newProjectGuard";
 
 /**
  * 新規作成フロー。作業中の内容（場面 or 取り込んだ素材）があるときは、いきなり破棄せず確認を挟む。
  * confirming=true の間は呼び出し側が確認UIを出し、confirm()/cancel() を繋ぐ。確定で newProject→wizard。
  */
 export function useStartNewProject(navigate: (screen: ScreenId) => void) {
-  const newProject = useProjectStore((s) => s.newProject);
-  const sceneCount = useProjectStore((s) => s.scenes.length);
-  const hasCustomAsset = useProjectStore((s) =>
-    s.assets.some((a) => !SAMPLE_ASSET_IDS.has(a.assetId)),
-  );
+  const newProject = useProjectStore((s) => s.newProject); // store 型は () => void（同期）
+  const hasWork = useProjectStore((s) => hasWorkInProgress(s.scenes.length, s.assets));
   const [confirming, setConfirming] = useState(false);
 
-  function start() {
-    if (sceneCount > 0 || hasCustomAsset) {
+  const start = useCallback(() => {
+    if (hasWork) {
       setConfirming(true);
       return;
     }
     newProject();
     navigate("wizard");
-  }
-  function confirm() {
+  }, [hasWork, newProject, navigate]);
+
+  const confirm = useCallback(() => {
     setConfirming(false);
     newProject();
     navigate("wizard");
-  }
-  function cancel() {
-    setConfirming(false);
-  }
+  }, [newProject, navigate]);
+
+  const cancel = useCallback(() => setConfirming(false), []);
 
   return { confirming, start, confirm, cancel };
 }

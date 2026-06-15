@@ -50,6 +50,11 @@ function App() {
     if (last) void loadProject(last).catch(() => {});
   }, [loadProject]);
 
+  // サイドバー等で画面が切り替わったら、出しっぱなしの確認バナーを閉じる。
+  useEffect(() => {
+    cancelNewProject();
+  }, [screen, cancelNewProject]);
+
   const saveLabel =
     saveStatus === "saving"
       ? "保存中…"
@@ -110,16 +115,16 @@ function App() {
               >
                 {saveLabel}
               </button>
-              <button
-                className="btn btn-secondary"
-                onClick={startNewProject}
-              >
-                新しい動画を作る
-              </button>
+              {/* ホームには専用の大きな導線があるため、ヘッダの新規作成は重複回避でホーム以外に表示。 */}
+              {screen !== "home" && (
+                <button className="btn btn-secondary" onClick={startNewProject}>
+                  新しい動画を作る
+                </button>
+              )}
             </div>
           </header>
         )}
-        {!hasOwnHeader && confirmNew && (
+        {!hasOwnHeader && screen !== "home" && confirmNew && (
           <div className="notice notice-warn" role="alert" style={{ margin: "var(--gap)" }}>
             <span>
               今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトはホームの一覧からいつでも開けます）。
