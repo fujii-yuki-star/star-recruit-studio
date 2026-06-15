@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Asset, AssetRefs, Scene, Texts } from "../../domain/project/types";
+import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { ASSET_TYPE, NARRATION_STATUS, type LayerType, type SceneCategory } from "../../domain/enums";
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
@@ -58,6 +58,15 @@ function buildSampleScene(template: Template, assets: Asset[]): Scene {
     else if (layer.textKey === "caption") texts.caption = "キャプションの例";
     else if (layer.textKey === "url") texts.url = "example.com";
   }
+  // FREE テンプレは自由配置のサンプルを見せる（実演用・ADR-0008）。
+  const freeLayout: FreeElement[] | undefined =
+    template.category === "free"
+      ? [
+          { id: "free_001", kind: "shape", x: 120, y: 130, w: 880, h: 820, zIndex: 5, shapeType: "rect", fillColor: "#e6f0ff", opacity: 1, radius: 24 },
+          { id: "free_002", kind: "slot", x: 160, y: 170, w: 800, h: 540, zIndex: 10, assetId: firstImage?.assetId ?? null, fit: "cover" },
+          { id: "free_003", kind: "text", x: 1080, y: 230, w: 720, h: 260, zIndex: 20, text: "自由に置いた見出し", fontSize: 64, color: "#222222", fontWeight: "bold" },
+        ]
+      : undefined;
   return {
     sceneId: "looks-preview",
     partId: "",
@@ -74,6 +83,7 @@ function buildSampleScene(template: Template, assets: Asset[]): Scene {
     texts,
     narration: { text: "", status: NARRATION_STATUS.none },
     warnings: [],
+    freeLayout,
   };
 }
 

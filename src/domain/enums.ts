@@ -19,6 +19,12 @@ export type FontWeight = (typeof FONT_WEIGHTS)[number];
 export const FREE_SHAPE_TYPES = ['rect', 'ellipse'] as const;
 export type FreeShapeType = (typeof FREE_SHAPE_TYPES)[number];
 
+/** FreeShapeType の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
+export const FREE_SHAPE_TYPE = {
+  rect: 'rect',
+  ellipse: 'ellipse',
+} as const satisfies Record<string, FreeShapeType>;
+
 export const ASSET_TYPES = [
   'image', 'video', 'bgm', 'voice', 'yuko', 'decor', 'logo', 'qr',
 ] as const;
