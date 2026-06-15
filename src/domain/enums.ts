@@ -3,9 +3,13 @@
 
 export const SCENE_CATEGORIES = [
   'opening', 'closing', 'photo_intro', 'video_intro',
-  'point_list', 'message', 'full_visual', 'chapter', 'no_yuko',
+  'point_list', 'message', 'full_visual', 'chapter', 'no_yuko', 'free',
 ] as const;
 export type SceneCategory = (typeof SCENE_CATEGORIES)[number];
+
+/** FREE テンプレの自由配置要素の種別（ADR-0008）。layer.type 語彙に合わせる（image は使わず素材は slot）。 */
+export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape'] as const;
+export type FreeElementKind = (typeof FREE_ELEMENT_KINDS)[number];
 
 export const ASSET_TYPES = [
   'image', 'video', 'bgm', 'voice', 'yuko', 'decor', 'logo', 'qr',

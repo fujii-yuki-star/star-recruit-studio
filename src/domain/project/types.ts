@@ -1,6 +1,6 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
-  AssetType, Fit, Formality, NarrationStatus, Purpose,
+  AssetType, Fit, Formality, FreeElementKind, NarrationStatus, Purpose,
   SceneCategory, TextKey, TransitionType, WarningSeverity,
 } from '../enums';
 
@@ -133,6 +133,30 @@ export interface Warning {
   autoFixed?: boolean;
 }
 
+/** FREE テンプレ場面の自由配置要素（ADR-0008）。id は scene 内一意。x/y/w/h は canvas(1920×1080) 基準。 */
+export interface FreeElement {
+  id: string;
+  kind: FreeElementKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  zIndex?: number;
+  /** kind='slot': 素材を直接参照（null=空スロット）。fit は assetId 非 null のとき有効。 */
+  assetId?: string | null;
+  fit?: Fit;
+  /** kind='text'。 */
+  text?: string;
+  fontSize?: number;
+  color?: string;
+  fontWeight?: 'normal' | 'bold';
+  /** kind='shape'（rect/ellipse のみ・ADR-0008）。 */
+  shapeType?: 'rect' | 'ellipse';
+  fillColor?: string;
+  opacity?: number;
+  radius?: number;
+}
+
 export interface Scene {
   sceneId: string;
   partId: string;
@@ -147,6 +171,8 @@ export interface Scene {
   audioMix?: AudioMix;
   transition?: Transition;
   warnings: Warning[];
+  /** FREE テンプレ場面のみ：自由配置要素（ADR-0008）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
+  freeLayout?: FreeElement[];
 }
 
 export interface Project {
