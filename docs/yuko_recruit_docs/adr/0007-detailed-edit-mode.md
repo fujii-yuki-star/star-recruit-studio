@@ -1,6 +1,6 @@
 # ADR-0007: 詳細編集モードと FREE テンプレート（場面の作り込み）
 
-- **状態**: Proposed（2026-06-15・未レビュー。develop マージ＝レビュー通過で Accepted へ）
+- **状態**: Accepted（2026-06-15・PR #63 マージで承認。Phase 3a/3b 実装済み。Phase 4 の確定は [`0008`](0008-free-layout-editor.md)）
 - **日付**: 2026-06-15
 - **関連**: `CLAUDE.md §10`（MVPでやらない＝本格タイムライン編集/キーフレーム/複雑エフェクト/テンプレ作成エディタ）/ `CLAUDE.md §2-4`（テンプレ駆動・座標を毎回触らせない）/ [`0001-rendering-parity.md`](0001-rendering-parity.md)（場面内レイアウトは静止）/ [`0004-rasterization-method.md`](0004-rasterization-method.md)（WebView Canvas で SVG→PNG）/ [`0006-video-slot-compositing.md`](0006-video-slot-compositing.md) / `11 §5`（template）/ `11 §6`（音量解決）/ `11 §7`（scene/audioMix）/ `schemas/{template,project}.schema.json` / `06_UI_SPEC.md`
 
