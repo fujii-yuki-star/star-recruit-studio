@@ -17,7 +17,7 @@ import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, importAssetBytes, readAssetDataUrl, probeVideo, extractVideoThumbnail } from "../../infrastructure/assetFs";
+import { importAssetFile, importAssetBytes, readAssetDataUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
 import { detectAssetType, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
@@ -97,16 +97,6 @@ const provider = new MockAiProvider();
 // Tauri ではローカル VOICEVOX に接続、ブラウザ開発では Mock（無音）にフォールバック。
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
-
-/** File を data URL に読み込む（画像の表示＋書き出し用。ADR-0004：SVGインライン data URL）。 */
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
-    reader.readAsDataURL(file);
-  });
-}
 
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
@@ -362,7 +352,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId), saveStatus: "idle" })),
   setAssetImage: async (assetId, file) => {
     // 画像は表示＋書き出し(ADR-0004)で data URL が必要。読み込んで即時表示。
-    const dataUrl = await fileToDataUrl(file);
+    let dataUrl: string;
+    try {
+      dataUrl = await fileToDataUrl(file);
+    } catch {
+      set({ saveStatus: "error" }); // ファイル読み込み失敗をユーザーへ通知（§2-5）。
+      return;
+    }
     set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl } }));
     try {
       // 保存先フォルダの名前空間のため projectId を確保する。
@@ -399,7 +395,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     };
     // 画像は表示＋書き出し(ADR-0004)で data URL が要る。動画は表示用srcを持たない
     //（サムネは別途・書き出しはスロットを別経路で合成＝src不要。ADR-0006）。
-    const dataUrl = assetType === ASSET_TYPE.video ? undefined : await fileToDataUrl(file);
+    let dataUrl: string | undefined;
+    if (assetType !== ASSET_TYPE.video) {
+      try {
+        dataUrl = await fileToDataUrl(file);
+      } catch {
+        set({ saveStatus: "error" }); // ファイル読み込み失敗をユーザーへ通知（§2-5）。素材は追加しない。
+        return;
+      }
+    }
     // 即時：一覧へ追加（画像は表示も）。素材追加で未保存に戻す（「保存しました」取り残し防止）。
     set((s) => ({
       assets: [...s.assets, asset],
@@ -423,6 +427,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         );
         // 取り込み後にメタ情報(長さ・音声有無・解像度)と代表フレーム(サムネ)を取得する。
         // いずれも取り込みの成否と独立させ（専用 try）、失敗してもロールバックしない。
+        // savedPath は楽観設定した filePath と一致する（assetId.ext は sanitize で不変）。?? は保険。
         const relPath = savedPath ?? `assets/${fileName}`;
         try {
           const meta = await probeVideo(projectId, relPath);

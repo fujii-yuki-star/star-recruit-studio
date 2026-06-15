@@ -85,9 +85,11 @@ fn write_asset(
     bytes: &[u8],
 ) -> Result<String, String> {
     let dir = project_dir(app, project_id)?.join("assets");
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let save_err =
+        || "素材の保存に失敗しました。ディスクの空き容量を確認してください。".to_string();
+    fs::create_dir_all(&dir).map_err(|_| save_err())?;
     let safe = sanitize_file_name(file_name);
-    fs::write(dir.join(&safe), bytes).map_err(|e| e.to_string())?;
+    fs::write(dir.join(&safe), bytes).map_err(|_| save_err())?;
     Ok(format!("assets/{safe}"))
 }
 
