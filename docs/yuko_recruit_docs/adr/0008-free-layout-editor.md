@@ -37,10 +37,10 @@ ADR-0007 で詳細編集モードと「FREE テンプレに自由配置を閉じ
 ]
 ```
 
-- 共通: **`id`（`free_NNN`・必須）**＝選択/ドラッグ/zIndex変更/削除で要素を見失わないための安定キー（配列 index は不可）・`kind`（`slot`/`text`/`shape`）・`x`/`y`/`w`/`h`（canvas 基準・整数・**`w>0` かつ `h>0`＝schema `exclusiveMinimum: 0`**）・`zIndex`。
+- 共通: **`id`（`free_NNN`・必須・scene 内一意＝別 scene と重複可）**＝選択/ドラッグ/zIndex変更/削除で要素を見失わないための安定キー（配列 index は不可）・`kind`（`slot`/`text`/`shape`）・`x`/`y`/`w`/`h`（canvas 基準・整数・**`w>0` かつ `h>0`＝schema `exclusiveMinimum: 0`**）・`zIndex`。
 - `slot`: `assetId`（string|null）・`fit`（cover/contain/stretch）。**素材は assetId で直接参照**（assetRefs は使わない＝ADR-0007 §F）。
 - `text`: `text`（表示文字）・`fontSize`・`color`・`fontWeight`（normal/bold）。MVP はこの範囲（影/縁取りは未対応＝未解決論点）。フォントは同梱 OFL のみ（§13）＝**MVP は単一フォントのため `fontFamily` は持たない**（将来フォント複数化/選択時にマイナー追加）。
-- `shape`: `shapeType`（rect/ellipse）・`fillColor`・`opacity`・`radius`。
+- `shape`: `shapeType`（**rect/ellipse のみ**）・`fillColor`・`opacity`・`radius`。テンプレ Layer の `shapeType` は `line` も持つが、線は矩形(x/y/w/h)ベースの freeLayout とモデルが異なるため **MVP 対象外**（将来別途検討＝未解決論点）。
 - 任意フィールド。通常テンプレ場面は `freeLayout` 未設定（後方互換）。
 
 ### `category: free`（FREE テンプレ）
@@ -48,7 +48,7 @@ ADR-0007 で詳細編集モードと「FREE テンプレに自由配置を閉じ
 - `template.category` enum に **`free`** を追加。**共有 enum（11 §3.2）**のため `scene.sceneType`（`SceneCategory`）にも `free` を追加する。
 - **AI は free を選ばない**（`aiHint.recommendedSceneTypes` に含めない＋ §12 プロンプトで除外）。FREE は**利用者の手動選択専用**。
 - FREE テンプレは**組み込みの1つ**（テンプレ作成エディタではない）。`layers` は最小（背景レイヤー1つ）で、内容は `freeLayout` に乗せる。標準 FREE テンプレが無い環境では FREE を選べない（11 §9 補正）。
-- **Phase 4a の正典反映（同時更新必須）**: `free` は次の3箇所に**同時追加**する — (1) `11 §3.2`（カテゴリ一覧テキスト）・(2) `project.schema.json` の `SceneCategory` enum・(3) `template.schema.json` の `category` enum。一方、`template.schema.json` の `aiHint.recommendedSceneTypes` の items enum には **`free` を追加しない**（AI に選ばせないため）。
+- **Phase 4a の正典反映（同時更新必須）**: `free` は次の3箇所に**同時追加**する — (1) `11 §3.2`（カテゴリ一覧テキスト）・(2) `project.schema.json` の `SceneCategory` enum・(3) `template.schema.json` の `category` enum。一方、`template.schema.json` の `aiHint.recommendedSceneTypes` の items enum には **`free` を追加しない**（AI に選ばせないため）。さらに **(4) `11 §2.1` の ID 採番表に `freeLayout` 要素＝`free_{NNN}`（scene 内一意・3桁ゼロ詰め）を追記**する。
 
 ### 座標系・素材参照
 
@@ -75,7 +75,7 @@ ADR-0007 で詳細編集モードと「FREE テンプレに自由配置を閉じ
 
 Phase 4a で freeLayout 用の検証を追加（既存 V1–V11 に追記）:
 - `slot` 要素の `assetId` が `project.assets` に実在するか（V4 相当）。
-- kind 別必須: `slot`→assetId/fit、`text`→text、`shape`→shapeType。
+- kind 別必須: `slot`→assetId（`null` 可＝空スロット）・**`fit` は assetId が非 null のとき必須**、`text`→text、`shape`→shapeType。
 - `w > 0` かつ `h > 0`（型レベルの必須＝schema `exclusiveMinimum: 0`）。
 - 座標/サイズが canvas（1920×1080）範囲を著しく外れていないか（警告＝行動は止めない。警告文言は §2-5 に従い「次の行動」を示す）。
 - 検証は domain の純粋関数として実装し、§7 に従いユニットテストを必須にする（DoD）。
@@ -93,4 +93,5 @@ Phase 4a で freeLayout 用の検証を追加（既存 V1–V11 に追記）:
 3. **吸着/グリッド・整列ガイド**の有無（4b）。
 4. **取り消し（undo）**の範囲（場面編集全体の課題）。
 5. FREE テンプレの**見た目パターン一覧（Looks）での扱い**（プレビューの出し方・空の器の見せ方）。
-6. ~~`freeLayout` 要素 id の要否~~ → **確定（本ADR・指摘1対応）**: 各要素は `id`（`free_NNN`）を**必須**で持つ（配列 index は使わない＝選択/ドラッグ/並べ替え/削除の安定化）。
+6. ~~`freeLayout` 要素 id の要否~~ → **確定（本ADR・指摘1対応）**: 各要素は `id`（`free_NNN`・scene 内一意）を**必須**で持つ（配列 index は使わない＝選択/ドラッグ/並べ替え/削除の安定化）。
+7. **`shape` の `line`**: テンプレ Layer には有るが freeLayout は MVP で rect/ellipse のみ。線（矩形と別モデル）を将来サポートするか。
