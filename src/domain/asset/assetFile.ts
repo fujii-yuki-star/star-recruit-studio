@@ -5,6 +5,9 @@ import { ASSET_TYPE, type AssetType } from '../enums';
 /** 取り込みを「動画」として扱う拡張子（小文字・ドットなし）。 */
 export const VIDEO_FILE_EXTENSIONS = ['mp4', 'mov', 'm4v', 'webm', 'avi', 'mkv'] as const;
 
+/** 取り込みを「画像」として扱う拡張子（小文字・ドットなし）。表示可能な静止画形式（ダイアログの絞り込み用）。 */
+export const IMAGE_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif'] as const;
+
 /** ファイル名末尾の拡張子を小文字・英数字のみで返す（無ければ ''）。 */
 export function fileExtension(name: string): string {
   const dot = name.lastIndexOf('.');

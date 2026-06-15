@@ -2,6 +2,8 @@ import { useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
 import { ASSET_TYPE } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
+import { isTauri } from "../../infrastructure/assetFs";
+import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { PageHead, Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
 import {
@@ -56,7 +58,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen() {
-  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset } = useProjectStore();
+  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -91,13 +93,28 @@ export function MaterialsScreen() {
     e.target.value = "";
   }
 
+  // Tauri ではネイティブの「開く」ダイアログでパスを取り込む（JSが素材バイトを読まない）。ブラウザは下の input にフォールバック。
+  async function onPickAsset() {
+    const path = await showOpenAssetDialog();
+    if (path) await addAssetByPath(path);
+  }
+
   return (
     <div className="main-scroll">
       <PageHead
         title="素材を管理"
         desc="動画に使う写真・動画・音・ゆうこの素材を管理します。説明やタグを付けると、ゆうこが使いどころを判断しやすくなります。"
         actions={
-          <label className="btn btn-primary" style={{ cursor: "pointer" }}>
+          <label
+            className="btn btn-primary"
+            style={{ cursor: "pointer" }}
+            onClick={(e) => {
+              if (isTauri()) {
+                e.preventDefault();
+                void onPickAsset();
+              }
+            }}
+          >
             <UploadIcon size={18} />
             素材を追加
             <input type="file" accept="image/*,video/*" onChange={onAddAsset} style={{ display: "none" }} />

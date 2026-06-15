@@ -77,6 +77,21 @@ fn mime_from_path(path: &str) -> &'static str {
     }
 }
 
+// 素材の保存失敗時のユーザー向け文言（§2-5：次の行動を示す。1か所に集約）。
+const ASSET_SAVE_ERR: &str = "素材の保存に失敗しました。ディスクの空き容量を確認してください。";
+
+/// assets/ ディレクトリを用意し、(保存先の絶対パス, プロジェクト相対パス) を返す（write/copy 共通）。
+fn asset_dest(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    file_name: &str,
+) -> Result<(PathBuf, String), String> {
+    let dir = project_dir(app, project_id)?.join("assets");
+    fs::create_dir_all(&dir).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+    let safe = sanitize_file_name(file_name);
+    Ok((dir.join(&safe), format!("assets/{safe}")))
+}
+
 /// 素材バイト列を <appData>/projects/<id>/assets/<file_name> に保存し、プロジェクト相対パスを返す。
 fn write_asset(
     app: &tauri::AppHandle,
@@ -84,13 +99,28 @@ fn write_asset(
     file_name: &str,
     bytes: &[u8],
 ) -> Result<String, String> {
-    let dir = project_dir(app, project_id)?.join("assets");
-    let save_err =
-        || "素材の保存に失敗しました。ディスクの空き容量を確認してください。".to_string();
-    fs::create_dir_all(&dir).map_err(|_| save_err())?;
-    let safe = sanitize_file_name(file_name);
-    fs::write(dir.join(&safe), bytes).map_err(|_| save_err())?;
-    Ok(format!("assets/{safe}"))
+    let (dest, rel) = asset_dest(app, project_id, file_name)?;
+    fs::write(&dest, bytes).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+    Ok(rel)
+}
+
+/// 元ファイルのパスから assets/<file_name> へコピーし、プロジェクト相対パスを返す。
+/// バイトを JS に載せずに取り込む経路（ネイティブの「開く」ダイアログで得た絶対パスを受け取る）。
+#[tauri::command]
+pub fn import_asset_path(
+    app: tauri::AppHandle,
+    project_id: String,
+    file_name: String,
+    src_path: String,
+) -> Result<String, String> {
+    let src = PathBuf::from(&src_path);
+    // 元ファイルが実在する通常ファイルか確認（ダイアログ経由なら満たすが防御）。
+    if !src.is_file() {
+        return Err("選んだファイルが見つかりませんでした。もう一度お選びください。".to_string());
+    }
+    let (dest, rel) = asset_dest(&app, &project_id, &file_name)?;
+    fs::copy(&src, &dest).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+    Ok(rel)
 }
 
 /// 画像(data URL or base64)を assets/ に保存し相対パスを返す（画像・BGM など data URL 経路用）。
