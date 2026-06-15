@@ -1400,6 +1400,8 @@ mod tests {
         assert!(fc.contains("[3:a]volume=1")); // ナレーション
         assert!(fc.contains("[1:a]volume=0.2")); // 元動画音声
         assert!(fc.contains("amix=inputs=2"));
+        assert!(!fc.contains("setpts")); // 等速(speed=1.0)なら setpts は不要
+        assert!(!fc.contains("atempo")); // 等速なら atempo は不要
         assert!(args.windows(2).any(|w| w[0] == "-map" && w[1] == "[vout]"));
         assert!(args.windows(2).any(|w| w[0] == "-map" && w[1] == "[aout]"));
         assert!(args.iter().any(|s| s == "libx264"));
@@ -1466,6 +1468,59 @@ mod tests {
         assert!(fc.contains("atempo=2")); // 元音声を2倍速（ピッチ維持）
         let pos = args.iter().position(|s| s == "-ss").expect("-ss");
         assert_eq!(args[pos + 3], "10"); // clip_t = dur*speed
+    }
+
+    #[test]
+    fn video_scene_args_clip_end_with_speed_caps_source_seconds() {
+        // clip_end が主要制限: start=0,end=3,dur=5,speed=2 → clip_t = min(3, dur*speed=10) = 3。
+        let a1 = video_scene_args(&VideoSceneArgs {
+            below_png: "b.png",
+            clip: "c.mp4",
+            above_png: "a.png",
+            narration: None,
+            slot_x: 0,
+            slot_y: 0,
+            slot_w: 640,
+            slot_h: 360,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            clip_end_sec: Some(3.0),
+            duration_sec: 5.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: false,
+            speed: 2.0,
+            fps: 30,
+            codec: VideoCodec::X264,
+            out: "o.mp4",
+        });
+        let p1 = a1.iter().position(|s| s == "-ss").expect("-ss");
+        assert_eq!(a1[p1 + 3], "3");
+
+        // dur*speed が主要制限: end=12,dur=5,speed=2 → clip_t = min(12, 10) = 10。
+        let a2 = video_scene_args(&VideoSceneArgs {
+            below_png: "b.png",
+            clip: "c.mp4",
+            above_png: "a.png",
+            narration: None,
+            slot_x: 0,
+            slot_y: 0,
+            slot_w: 640,
+            slot_h: 360,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            clip_end_sec: Some(12.0),
+            duration_sec: 5.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: false,
+            speed: 2.0,
+            fps: 30,
+            codec: VideoCodec::X264,
+            out: "o.mp4",
+        });
+        let p2 = a2.iter().position(|s| s == "-ss").expect("-ss");
+        assert_eq!(a2[p2 + 3], "10");
     }
 
     #[test]
