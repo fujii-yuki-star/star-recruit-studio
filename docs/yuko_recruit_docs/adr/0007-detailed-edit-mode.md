@@ -70,7 +70,8 @@
   - **【AI 除外・12】** AI には FREE を選ばせない（`aiHint.recommendedSceneTypes` に `free` を含めない＋システムプロンプトで除外）。FREE は**利用者の手動選択専用**。
 - **`scene.freeLayout`（任意）を新設**＝FREE場面のレイアウト上書き。**通常テンプレ場面は未設定**（後方互換：従来どおりテンプレ座標）。
   - 要素の `kind` は**テンプレ `layer.type`（11 §3.4：`slot`/`text`/`shape`/`decor` 等）の語彙に合わせる**。`image` は layer.type に無いため使わず、素材を受ける要素は **`kind:'slot'`**（`assetId`/`fit`）、文字は **`kind:'text'`**（`textKey` or `text`/`fontSize`/`color`）、図形は **`kind:'shape'`**（`shapeType`/`fillColor`）とする＝レンダラーが layer.type への変換テーブルを持たずに済む。
-  - 各要素 `{ kind, x, y, w, h, zIndex, …kind別プロパティ }`。座標系はテンプレ canvas（1920×1080）基準。`null=継承`/未設定の規約は §5 を踏襲。
+  - 各要素 `{ kind, x, y, w, h, zIndex, …kind別プロパティ }`。座標系はテンプレ canvas（1920×1080）基準。`null=継承`/未設定の規約は §2.2 を踏襲。
+  - **素材参照（11 §5 との関係）**：`freeLayout[].kind:'slot'` の素材は **`assetId` で直接参照**し、**assetRefs バインディング（11 §5）は適用しない**（assetRefs は FREEテンプレ内の固定レイヤー〈background 等〉にのみ使う）。レンダラーは「assetRefs 経由（通常テンプレ）」と「`freeLayout[].assetId` 直接参照（FREE）」の **2 経路を分岐**する＝Phase 4 前の追補で確定。
 - **schemaVersion（11 §1）**：`category:free` 追加・`scene.freeLayout`（任意）追加はいずれも**後方互換の追加**＝マイナー（`1.x`）で扱う。Phase 4 の正典反映時に確定。
 
 ### 簡易/詳細モードの関係（UX・要設計）
@@ -89,7 +90,7 @@
   - **Phase 1**：場面ごとナレ音量の UI（`SceneEdit`/詳細の音声セクション）。書き出し既対応＝小PR・即着手可。
   - **Phase 2**：場面の並べ替え・複製・分割（場面リスト操作）。
   - **Phase 3**：詳細編集モードの UI 骨格（簡易/詳細の切替）＋クリップ詳細（再生速度等）。
-  - **Phase 4**：FREEテンプレ＋`scene.freeLayout`＋自由配置エディタ（スキーマ拡張・描画/書き出し結線。最大。**実装前に追補ADR or 本ADR改訂**でスキーマ確定）。
+  - **Phase 4**：FREEテンプレ＋`scene.freeLayout`＋自由配置エディタ（スキーマ拡張・描画/書き出し結線。最大。**実装前に追補ADR or 本ADR改訂**でスキーマ確定）。実装前の追補/改訂では、スキーマ確定とあわせて **11 §8 検証ルールの拡張**（`freeLayout` 要素の `assetId` 実在・kind 別必須フィールド・座標/サイズ範囲チェック等）も確定する。
   - （場面ごとBGM音量：書き出しエンベロープ実装後に Phase 3-4 で。）
 - スキーマ変更（`category: free`・`scene.freeLayout`）は **Phase 4 で正典（11/schemas）に反映**。それまでは本ADRの提案に留める。
 - 書き出し・プレビューは原則無改修（FREE場面は「自由に置かれた静止レイアウト」を同パイプラインで描く）。再生速度・場面ごとBGMのみ FFmpeg 追加。
