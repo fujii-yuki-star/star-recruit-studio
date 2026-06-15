@@ -58,7 +58,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen() {
-  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath } = useProjectStore();
+  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -108,10 +108,22 @@ export function MaterialsScreen() {
           <label
             className="btn btn-primary"
             style={{ cursor: "pointer" }}
+            role="button"
+            tabIndex={0}
             onClick={(e) => {
               if (isTauri()) {
                 e.preventDefault();
                 void onPickAsset();
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                if (isTauri()) {
+                  void onPickAsset();
+                } else {
+                  e.currentTarget.querySelector("input")?.click();
+                }
               }
             }}
           >
@@ -121,6 +133,13 @@ export function MaterialsScreen() {
           </label>
         }
       />
+
+      {importError && (
+        <div className="notice notice-warn row-between mb" role="alert">
+          <span>{importError}</span>
+          <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+        </div>
+      )}
 
       <div className="segment mb" style={{ display: "inline-flex" }}>
         {filters.map(([id, label]) => (

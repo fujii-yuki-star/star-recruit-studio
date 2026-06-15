@@ -82,7 +82,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
-    status, scenes, templates, assets, generate, updateScene, updateAsset, addAsset, addAssetByPath,
+    status, scenes, templates, assets, generate, updateScene, updateAsset, addAsset, addAssetByPath, importError, clearImportError,
     addScene, removeScene, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
   } = useProjectStore();
@@ -230,10 +230,22 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <label
               className="btn btn-secondary btn-block mt"
               style={{ cursor: "pointer" }}
+              role="button"
+              tabIndex={0}
               onClick={(e) => {
                 if (isTauri()) {
                   e.preventDefault();
                   void onPickAsset();
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  if (isTauri()) {
+                    void onPickAsset();
+                  } else {
+                    e.currentTarget.querySelector("input")?.click();
+                  }
                 }
               }}
             >
@@ -241,6 +253,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               素材をアップロード
               <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
             </label>
+
+            {importError && (
+              <div className="notice notice-warn row-between mt" role="alert">
+                <span>{importError}</span>
+                <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+              </div>
+            )}
           </div>
 
           {/* 中央: 仕上がり確認 + 場面カード */}

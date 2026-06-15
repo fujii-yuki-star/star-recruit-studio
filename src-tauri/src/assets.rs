@@ -113,6 +113,10 @@ pub fn import_asset_path(
     file_name: String,
     src_path: String,
 ) -> Result<String, String> {
+    // 相対参照(..)は拒否（read_asset_data_url と同じ defense-in-depth。直接 invoke 対策）。
+    if src_path.contains("..") {
+        return Err("不正なパスです。".to_string());
+    }
     let src = PathBuf::from(&src_path);
     // 元ファイルが実在する通常ファイルか確認（ダイアログ経由なら満たすが防御）。
     if !src.is_file() {

@@ -63,7 +63,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const [newStrength, setNewStrength] = useState("");
   const [voiceType, setVoiceType] = useState("calm");
 
-  const { assets, assetSrcById, addAsset, addAssetByPath, saveProject, saveStatus, applyProjectInfo } =
+  const { assets, assetSrcById, addAsset, addAssetByPath, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
     useProjectStore();
 
   // ウィザードで入力した目的・会社情報を現在のプロジェクトへ反映する（保存・生成で使う）。
@@ -279,6 +279,13 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   </span>
                   <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
                 </label>
+
+                {importError && (
+                  <div className="notice notice-warn row-between mt" role="alert">
+                    <span>{importError}</span>
+                    <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+                  </div>
+                )}
                 {materials.length > 0 ? (
                   <div className="card-grid cols-4 mt">
                     {materials.map((a) => (

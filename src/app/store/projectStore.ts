@@ -35,6 +35,8 @@ export type BgmPatch = Partial<Pick<BgmSettings, "volume" | "enabled" | "loop" |
 interface ProjectState {
   status: GenerateStatus;
   saveStatus: SaveStatus;
+  /** 素材の取り込み失敗のユーザー向け文言（§2-5。プロジェクト保存状態とは別物。再試行/成功で消える）。 */
+  importError: string | null;
   /** Project の見出し情報（projectId/名前/目的/各種設定）。Asset/Part/Scene は別フィールド。 */
   meta: ProjectHeader;
   parts: Part[];
@@ -84,6 +86,7 @@ interface ProjectState {
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
   addAsset: (file: File) => Promise<void>;
   addAssetByPath: (path: string) => Promise<void>;
+  clearImportError: () => void;
   /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
   setBgm: (file: { name: string; dataUrl: string }) => Promise<void>;
   /** 指定場面のナレーション音声を生成する（narration.status を更新）。 */
@@ -148,6 +151,14 @@ function applyEnrichment(
   });
 }
 
+// 取り込み失敗時のユーザー向け文言を取り出す。Tauri コマンドは文字列で reject される
+// （Rust が §2-5 準拠で整えた文言）のでそのまま使い、それ以外は定型文にフォールバックする。
+function importErrorMessage(e: unknown): string {
+  if (typeof e === "string" && e.trim()) return e;
+  if (e instanceof Error && e.message) return e.message;
+  return "素材を取り込めませんでした。もう一度お選びください。";
+}
+
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
   return {
@@ -165,6 +176,7 @@ function defaultHeader(): ProjectHeader {
 export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
   saveStatus: "idle",
+  importError: null,
   meta: defaultHeader(),
   parts: [],
   scenes: [],
@@ -406,10 +418,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       dataUrl = await fileToDataUrl(file);
     } catch {
-      set({ saveStatus: "error" }); // ファイル読み込み失敗をユーザーへ通知（§2-5）。
+      set({ importError: "画像を読み込めませんでした。別の画像をお選びください。" }); // §2-5：次の行動。
       return;
     }
-    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl } }));
+    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl }, importError: null }));
     try {
       // 保存先フォルダの名前空間のため projectId を確保する。
       let projectId = get().meta.projectId;
@@ -424,9 +436,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (filePath) {
         set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)) }));
       }
-    } catch {
+    } catch (e) {
       // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
-      set({ saveStatus: "error" });
+      set({ importError: importErrorMessage(e) });
     }
   },
   addAsset: async (file) => {
@@ -450,7 +462,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       try {
         dataUrl = await fileToDataUrl(file);
       } catch {
-        set({ saveStatus: "error" }); // ファイル読み込み失敗をユーザーへ通知（§2-5）。素材は追加しない。
+        set({ importError: "画像を読み込めませんでした。別の画像をお選びください。" }); // §2-5。素材は追加しない。
         return;
       }
     }
@@ -459,6 +471,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets: [...s.assets, asset],
       assetSrcById: dataUrl ? { ...s.assetSrcById, [assetId]: dataUrl } : s.assetSrcById,
       saveStatus: "idle",
+      importError: null,
     }));
     // 永続化（プロジェクトフォルダへコピー）。
     try {
@@ -484,14 +497,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // 画像は data URL(base64) 経路で取り込む（表示用に既に読み込んだ data URL を流用）。
         await importAssetFile(projectId, fileName, dataUrl!);
       }
-    } catch {
-      // 取り込み失敗：楽観追加した素材をロールバック（filePathあり・実体なしの不整合を防ぐ）。
+    } catch (e) {
+      // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
       set((s) => ({
         assets: s.assets.filter((a) => a.assetId !== assetId),
         assetSrcById: Object.fromEntries(
           Object.entries(s.assetSrcById).filter(([id]) => id !== assetId),
         ),
-        saveStatus: "error",
+        importError: importErrorMessage(e),
       }));
     }
   },
@@ -513,7 +526,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       filePath: `assets/${fileName}`,
     };
     // 即時：一覧へ追加（表示用 src は取り込み後に読み戻す）。素材追加で未保存に戻す。
-    set((s) => ({ assets: [...s.assets, asset], saveStatus: "idle" }));
+    set((s) => ({ assets: [...s.assets, asset], saveStatus: "idle", importError: null }));
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
@@ -533,17 +546,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const url = await readAssetDataUrl(projectId, relPath);
         if (url) set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: url } }));
       }
-    } catch {
-      // 取り込み失敗：楽観追加した素材をロールバック（filePathあり・実体なしの不整合を防ぐ）。
+    } catch (e) {
+      // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
       set((s) => ({
         assets: s.assets.filter((a) => a.assetId !== assetId),
         assetSrcById: Object.fromEntries(
           Object.entries(s.assetSrcById).filter(([id]) => id !== assetId),
         ),
-        saveStatus: "error",
+        importError: importErrorMessage(e),
       }));
     }
   },
+  clearImportError: () => set({ importError: null }),
   setBgm: async (file) => {
     try {
       let projectId = get().meta.projectId;
