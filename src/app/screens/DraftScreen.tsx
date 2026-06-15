@@ -20,7 +20,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, scenes, parts, templates, assets, warnings, generate, addScene, removeScene } =
+  const { status, scenes, parts, templates, assets, warnings, generate, addScene, removeScene, moveScene, duplicateScene } =
     useProjectStore();
   // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -82,11 +82,11 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   <th style={{ minWidth: 240 }}>ゆうこのセリフ</th>
                   <th>見た目</th>
                   <th>音声</th>
-                  <th style={{ width: 150 }}>操作</th>
+                  <th style={{ width: 210 }}>操作</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {rows.map((row, i) => (
                   <tr key={row.id}>
                     <td className="table-num">{row.order}</td>
                     <td>
@@ -112,6 +112,32 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                     </td>
                     <td>
                       <div className="row gap-sm row-wrap">
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          title="上へ移動"
+                          aria-label="上へ移動"
+                          disabled={i === 0}
+                          onClick={() => moveScene(row.id, "up")}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          title="下へ移動"
+                          aria-label="下へ移動"
+                          disabled={i === rows.length - 1}
+                          onClick={() => moveScene(row.id, "down")}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          title="この場面を複製"
+                          aria-label="この場面を複製"
+                          onClick={() => duplicateScene(row.id)}
+                        >
+                          複製
+                        </button>
                         <button className="btn btn-ghost btn-icon" title="セリフを直す" onClick={() => onNavigate("scene-edit")}>
                           セリフ
                         </button>
