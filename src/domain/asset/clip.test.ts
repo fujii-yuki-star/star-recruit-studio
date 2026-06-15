@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { clampClipTime } from './clip';
+import { clampClipTime, clampSpeed } from './clip';
+import { SPEED_DEFAULT, SPEED_MAX, SPEED_MIN } from '../constants';
 
 describe('clampClipTime', () => {
   it('[0, max] に収める', () => {
@@ -22,5 +23,17 @@ describe('clampClipTime', () => {
   });
   it('min > max のときは max が優先（絶対上限。呼び出し側は min ≤ max 前提）', () => {
     expect(clampClipTime(4, 3, 5)).toBe(3);
+  });
+});
+
+describe('clampSpeed', () => {
+  it('[SPEED_MIN, SPEED_MAX] に収める', () => {
+    expect(clampSpeed(1.25)).toBe(1.25);
+    expect(clampSpeed(0.1)).toBe(SPEED_MIN);
+    expect(clampSpeed(5)).toBe(SPEED_MAX);
+  });
+  it('NaN・非有限は SPEED_DEFAULT', () => {
+    expect(clampSpeed(NaN)).toBe(SPEED_DEFAULT);
+    expect(clampSpeed(Infinity)).toBe(SPEED_DEFAULT);
   });
 });

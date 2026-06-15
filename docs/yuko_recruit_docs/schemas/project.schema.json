@@ -125,7 +125,8 @@
         "endSec": { "type": "number", "minimum": 0 },
         "useOriginalAudio": { "type": "boolean" },
         "originalAudioVolume": { "type": "number", "minimum": 0.0, "maximum": 1.5 },
-        "fit": { "enum": ["cover", "contain", "stretch"] }
+        "fit": { "enum": ["cover", "contain", "stretch"] },
+        "speed": { "type": "number", "minimum": 0.5, "maximum": 2.0 }
       }
     },
     "Metadata": {

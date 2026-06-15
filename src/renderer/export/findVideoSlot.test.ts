@@ -41,6 +41,7 @@ describe('findVideoSlot', () => {
       clipEndSec: 8,
       useOriginalAudio: true,
       originalVolume: 0.3,
+      speed: 1,
     });
   });
 

@@ -24,6 +24,7 @@ export interface ExportVideoData {
   clipEndSec?: number;
   useOriginalAudio: boolean;
   originalVolume?: number;
+  speed: number;
 }
 
 /** 書き出し1場面ぶんの入力（infrastructure の ExportSceneInput と構造一致）。 */
@@ -113,6 +114,7 @@ export async function buildExportScenes(
             clipEndSec: videoSlot.clipEndSec,
             useOriginalAudio: videoSlot.useOriginalAudio,
             originalVolume: videoSlot.originalVolume,
+            speed: videoSlot.speed,
           },
         });
       } else {

@@ -211,7 +211,7 @@
 | aiDescription | string | ○ | AI解析結果 |
 | isPublicChecked | boolean | ○ | 既定 false |
 | isDefaultYuko | boolean | ○ | `yuko` のみ。poseTag解決の既定（§12.8） |
-| clip | object | ○ | `video` のみ: startSec / endSec / useOriginalAudio / originalAudioVolume / fit |
+| clip | object | ○ | `video` のみ: startSec / endSec / useOriginalAudio / originalAudioVolume / fit / speed（0.5–2.0・再生速度・既定1.0・尺は不変） |
 | metadata | object | ○ | width / height / durationSec / hasAudio |
 
 ### 7.3 Part

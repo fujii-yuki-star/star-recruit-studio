@@ -3,7 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, NARRATION_STATUS, SLOT_TYPE, type Fit } from "../../domain/enums";
-import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { useProjectStore } from "../store/projectStore";
@@ -480,6 +480,27 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               />
                             </div>
                             <p className="field-hint">終了を空にすると最後まで使います。</p>
+                          </div>
+
+                          {/* 再生速度（A=尺独立：表示時間は変えず、クリップの再生速度だけ変える） */}
+                          <div className="field" style={{ marginBottom: 6 }}>
+                            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
+                              再生速度
+                            </label>
+                            <input
+                              type="range"
+                              min={SPEED_MIN}
+                              max={SPEED_MAX}
+                              step={SPEED_STEP}
+                              value={clip?.speed ?? SPEED_DEFAULT}
+                              onChange={(e) => patchClip({ speed: Number(e.target.value) })}
+                              style={{ width: "100%", accentColor: "var(--color-primary)" }}
+                            />
+                            <div className="row-between text-faint text-sm">
+                              <span>ゆっくり</span>
+                              <span>{clip?.speed ?? SPEED_DEFAULT}倍</span>
+                              <span>はやく</span>
+                            </div>
                           </div>
 
                           {/* 元の音声 */}

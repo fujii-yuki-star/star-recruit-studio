@@ -15,6 +15,10 @@ const DEFAULT_FPS: u32 = 30;
 const DEFAULT_NARRATION_VOLUME: f64 = 1.0;
 // 元動画音声の既定音量。正典は 11_SCHEMA_REFERENCE §4（=0.2、TS domain/constants.ts と同値）。
 const DEFAULT_ORIGINAL_AUDIO_VOLUME: f64 = 0.2;
+// 再生速度の値域（atempo 1段：0.5〜2.0、1.0=等速）。11 §4 / schemas $defs/Clip。
+const SPEED_MIN: f64 = 0.5;
+const SPEED_MAX: f64 = 2.0;
+const DEFAULT_SPEED: f64 = 1.0;
 
 /// 映像コーデック。本番(OpenH264)への無改修切替のための抽象。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,6 +241,8 @@ pub struct VideoSceneArgs<'a> {
     /// 音声なしクリップでの true は [1:a] が無効化＝export_video で `clip_has_audio` により事前に弾く
     /// （front も metadata.hasAudio で確認）。
     pub use_original_audio: bool,
+    /// 再生速度（0.5〜2.0・1.0=等速）。setpts(映像)/atempo(元音声)に反映。尺は不変（A=尺独立）。
+    pub speed: f64,
     pub fps: u32,
     pub codec: VideoCodec,
     pub out: &'a str,
@@ -246,34 +252,51 @@ pub struct VideoSceneArgs<'a> {
 /// 入力順: 0=below / 1=clip / 2=above /（narration があれば）3=narration。
 pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     // 映像: 下PNG → クリップ(slotへfit) → 上PNG(透過) を overlay。
+    // 速度!=1 のときだけ setpts(映像)/atempo(元音声)を挟む（A=尺独立：尺は据え置き、クリップ内の再生速度のみ変える）。
+    let speed = a.speed;
+    let normal_speed = (speed - 1.0).abs() < 1e-6;
+    let clip_v = if normal_speed {
+        fit_filter(a.fit, a.slot_w, a.slot_h)
+    } else {
+        format!(
+            "setpts=PTS/{speed},{}",
+            fit_filter(a.fit, a.slot_w, a.slot_h)
+        )
+    };
     let video_filter = format!(
-        "[1:v]{fit}[clip];[0:v][clip]overlay={x}:{y}[bg1];[bg1][2:v]overlay=0:0[vout]",
-        fit = fit_filter(a.fit, a.slot_w, a.slot_h),
+        "[1:v]{clip_v}[clip];[0:v][clip]overlay={x}:{y}[bg1];[bg1][2:v]overlay=0:0[vout]",
         x = a.slot_x,
         y = a.slot_y
     );
     // 音声: narration(入力3) と 元音声([1:a]) の有無で分岐。両方無ければ無音(anullsrc)。
     let nv = a.narration_volume;
     let ov = a.original_volume;
+    // 元音声フィルタ: volume の後、速度!=1 なら atempo（ピッチ維持で速度変更）。
+    let orig_a = if normal_speed {
+        format!("volume={ov}")
+    } else {
+        format!("volume={ov},atempo={speed}")
+    };
     // apad で尺に満たない音声を無音で埋める（後段 -t {dur} で切る）。scene_clip_args と同じ方針で、
     // ナレーション/元音声がシーン尺より短くても音声トラックが早期 EOF にならないようにする。
     // anullsrc は無限長なので apad 不要。
     let audio_filter = match (a.narration.is_some(), a.use_original_audio) {
         (true, true) => format!(
-            "[3:a]volume={nv}[narr];[1:a]volume={ov}[orig];[narr][orig]amix=inputs=2:duration=longest:normalize=0,apad[aout]"
+            "[3:a]volume={nv}[narr];[1:a]{orig_a}[orig];[narr][orig]amix=inputs=2:duration=longest:normalize=0,apad[aout]"
         ),
         (true, false) => format!("[3:a]volume={nv},apad[aout]"),
-        (false, true) => format!("[1:a]volume={ov},apad[aout]"),
+        (false, true) => format!("[1:a]{orig_a},apad[aout]"),
         (false, false) => "anullsrc=channel_layout=stereo:sample_rate=44100[aout]".to_string(),
     };
     let filter = format!("{video_filter};{audio_filter}");
 
     let dur = a.duration_sec;
-    // クリップの使用尺: clip_end_sec があれば (end-start) を尺で頭打ち。無ければシーン尺いっぱい。
+    // クリップの使用尺(ソース秒): clip_end_sec があれば (end-start) を dur*speed で頭打ち。無ければ dur*speed。
+    // 速度分だけソースを読み、setpts で再生時間が dur に収まる（A=尺独立）。
     // 尺より短いクリップは overlay の既定 eof_action=repeat で最終フレームが保持される（N-1）。
     let clip_t = match a.clip_end_sec {
-        Some(end) if end > a.clip_start_sec => (end - a.clip_start_sec).min(dur),
-        _ => dur,
+        Some(end) if end > a.clip_start_sec => (end - a.clip_start_sec).min(dur * speed),
+        _ => dur * speed,
     };
     let mut args: Vec<String> = vec![
         "-y".into(),
@@ -565,6 +588,7 @@ struct VideoJob {
     narration_volume: f64,
     original_volume: f64,
     use_original_audio: bool,
+    speed: f64,
 }
 
 /// 1シーン分のジョブ。静止画 or 動画。
@@ -639,6 +663,7 @@ fn encode_jobs(
                     narration_volume: v.narration_volume,
                     original_volume: v.original_volume,
                     use_original_audio: v.use_original_audio,
+                    speed: v.speed,
                     fps,
                     codec,
                     out: &out_path,
@@ -803,6 +828,8 @@ pub struct VideoSceneInput {
     use_original_audio: bool,
     #[serde(default)]
     original_volume: Option<f64>,
+    #[serde(default)]
+    speed: Option<f64>,
 }
 
 /// BGM 入力（プロジェクト全体に重ねる）。data URL も可。volume は §6 で解決済み。
@@ -934,6 +961,10 @@ pub fn export_video(
                 narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
                 original_volume: v.original_volume.unwrap_or(DEFAULT_ORIGINAL_AUDIO_VOLUME),
                 use_original_audio: v.use_original_audio,
+                speed: v
+                    .speed
+                    .map(|s| s.clamp(SPEED_MIN, SPEED_MAX))
+                    .unwrap_or(DEFAULT_SPEED),
             }));
         } else {
             // 静止画シーン（従来）。
@@ -1354,6 +1385,7 @@ mod tests {
             narration_volume: 1.0,
             original_volume: 0.2,
             use_original_audio: true,
+            speed: 1.0,
             fps: 30,
             codec: VideoCodec::X264,
             out: "out.mp4",
@@ -1392,6 +1424,7 @@ mod tests {
             narration_volume: 1.0,
             original_volume: 0.2,
             use_original_audio: false,
+            speed: 1.0,
             fps: 30,
             codec: VideoCodec::X264,
             out: "o.mp4",
@@ -1399,6 +1432,40 @@ mod tests {
         let pos = args.iter().position(|s| s == "-ss").expect("-ss");
         assert_eq!(args[pos + 1], "1"); // clip_start
         assert_eq!(args[pos + 3], "2"); // clip_t = min(end-start, dur)
+    }
+
+    #[test]
+    fn video_scene_args_speed_applies_setpts_and_atempo() {
+        // speed=2: 映像は setpts=PTS/2、元音声は atempo=2。クリップ読取尺は dur*speed=10。
+        let args = video_scene_args(&VideoSceneArgs {
+            below_png: "b.png",
+            clip: "c.mp4",
+            above_png: "a.png",
+            narration: None,
+            slot_x: 0,
+            slot_y: 0,
+            slot_w: 640,
+            slot_h: 360,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            clip_end_sec: None,
+            duration_sec: 5.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: true,
+            speed: 2.0,
+            fps: 30,
+            codec: VideoCodec::X264,
+            out: "o.mp4",
+        });
+        let fc = args
+            .iter()
+            .find(|s| s.contains("overlay"))
+            .expect("filter_complex");
+        assert!(fc.contains("setpts=PTS/2")); // 映像を2倍速
+        assert!(fc.contains("atempo=2")); // 元音声を2倍速（ピッチ維持）
+        let pos = args.iter().position(|s| s == "-ss").expect("-ss");
+        assert_eq!(args[pos + 3], "10"); // clip_t = dur*speed
     }
 
     #[test]
@@ -1419,6 +1486,7 @@ mod tests {
             narration_volume: 1.0,
             original_volume: 0.2,
             use_original_audio: false,
+            speed: 1.0,
             fps: 30,
             codec: VideoCodec::OpenH264,
             out: "o.mp4",
@@ -1564,6 +1632,7 @@ mod tests {
             narration_volume: 1.0,
             original_volume: 0.2,
             use_original_audio: true,
+            speed: 1.0,
             fps: 30,
             codec,
             out: &out_s,
@@ -1590,6 +1659,7 @@ mod tests {
             narration_volume: 1.0,
             original_volume: 0.2,
             use_original_audio: false,
+            speed: 1.0,
             fps: 30,
             codec,
             out: &out2_s,
@@ -1700,6 +1770,7 @@ mod tests {
             narration_volume: 1.0,
             original_volume: 0.2,
             use_original_audio: true,
+            speed: 1.0,
         })];
         encode_jobs(&ffmpeg, &jobs, codec, 30, &tmp, &out).expect("encode_jobs video");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);

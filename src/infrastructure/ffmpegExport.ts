@@ -18,6 +18,8 @@ export interface ExportVideoInput {
   clipEndSec?: number;
   useOriginalAudio: boolean;
   originalVolume?: number;
+  /** 再生速度（0.5–2.0・1.0=等速）。Rust 側で setpts/atempo に反映。 */
+  speed: number;
 }
 
 /** 書き出す1場面の入力。静止画は pngBase64、動画ありは video を指定（pngBase64 は未使用）。 */

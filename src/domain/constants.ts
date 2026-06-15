@@ -27,6 +27,12 @@ export const VOLUME_MAX = 1.5;
 // 音量スライダーの刻み（UI）。
 export const VOLUME_STEP = 0.05;
 
+// 動画クリップの再生速度（§4：atempo 1段の範囲 0.5〜2.0、1.0=等速）。尺は不変（ADR-0007 Phase 3b）。
+export const SPEED_MIN = 0.5;
+export const SPEED_MAX = 2.0;
+export const SPEED_DEFAULT = 1.0;
+export const SPEED_STEP = 0.25;
+
 export const MAX_NARRATION_LEN_DEFAULT = 120;
 export const MAX_SUBTITLE_LEN_DEFAULT = 60;
 

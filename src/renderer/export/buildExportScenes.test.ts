@@ -86,6 +86,7 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
         fit: 'cover',
         clipStartSec: 0,
         useOriginalAudio: false,
+        speed: 1,
       }),
     );
     expect(out).toHaveLength(1);
@@ -145,6 +146,7 @@ describe('buildExportScenes：出力解像度（HDサイズ）', () => {
     fit: 'cover' as const,
     clipStartSec: 0,
     useOriginalAudio: false,
+    speed: 1,
   });
 
   it('outputWidth/Height でPNGを縮小し、動画スロット座標もスケールする', async () => {

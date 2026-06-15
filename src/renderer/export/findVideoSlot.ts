@@ -1,7 +1,8 @@
 // シーンの「動画スロット」を見つける純粋ロジック（ADR-0006・step2b-Front）。
 // slot 層に assetType=video の素材が割り当たっていれば、その層IDとクリップ設定を返す。
 // MVP は1シーン1動画スロット（最初に見つかったもの）。複数スロットは ADR-0006 未解決#2。
-import { DEFAULT_FIT } from '../../domain/constants';
+import { DEFAULT_FIT, SPEED_DEFAULT } from '../../domain/constants';
+import { clampSpeed } from '../../domain/asset/clip';
 import { ASSET_TYPE, SLOT_TYPE, type Fit } from '../../domain/enums';
 import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
@@ -17,6 +18,8 @@ export interface VideoSlotInfo {
   /** 元動画音声を使うか。clip 設定 かつ 実際に音声がある(metadata.hasAudio)ときだけ true（N-2）。 */
   useOriginalAudio: boolean;
   originalVolume?: number;
+  /** 再生速度（0.5–2.0・clampSpeed 済み）。1.0=等速。 */
+  speed: number;
 }
 
 /**
@@ -46,6 +49,7 @@ export function findVideoSlot(
       // 音声が実在する場合のみ元音声ON（音声なしクリップで [1:a] を要求しない＝N-2）。
       useOriginalAudio: (clip?.useOriginalAudio ?? false) && (asset.metadata?.hasAudio ?? false),
       originalVolume: clip?.originalAudioVolume,
+      speed: clampSpeed(clip?.speed ?? SPEED_DEFAULT),
     };
   }
   return undefined;
