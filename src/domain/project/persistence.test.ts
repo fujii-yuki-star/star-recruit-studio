@@ -81,6 +81,13 @@ describe('createFreeElementId (§2.1 free_{NNN}・scene 内一意)', () => {
   it('既存と衝突しない最小番号を採る', () => {
     expect(createFreeElementId(['free_001', 'free_002'])).toBe('free_003');
   });
+  it('番号に隙間があれば最小空き番号を返す', () => {
+    expect(createFreeElementId(['free_001', 'free_003'])).toBe('free_002');
+  });
+  it('999 を超えると4桁になる（pattern ^free_[0-9]{3,}$）', () => {
+    const existing = Array.from({ length: 999 }, (_, i) => `free_${String(i + 1).padStart(3, '0')}`);
+    expect(createFreeElementId(existing)).toBe('free_1000');
+  });
 });
 
 describe('assembleProject', () => {

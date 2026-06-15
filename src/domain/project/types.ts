@@ -1,6 +1,6 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
-  AssetType, Fit, Formality, FreeElementKind, NarrationStatus, Purpose,
+  AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Purpose,
   SceneCategory, TextKey, TransitionType, WarningSeverity,
 } from '../enums';
 
@@ -141,6 +141,7 @@ export interface FreeElement {
   y: number;
   w: number;
   h: number;
+  /** 重ね順（整数のみ有効・§2.2 / schema: integer）。 */
   zIndex?: number;
   /** kind='slot': 素材を直接参照（null=空スロット）。fit は assetId 非 null のとき有効。 */
   assetId?: string | null;
@@ -149,9 +150,9 @@ export interface FreeElement {
   text?: string;
   fontSize?: number;
   color?: string;
-  fontWeight?: 'normal' | 'bold';
+  fontWeight?: FontWeight;
   /** kind='shape'（rect/ellipse のみ・ADR-0008）。 */
-  shapeType?: 'rect' | 'ellipse';
+  shapeType?: FreeShapeType;
   fillColor?: string;
   opacity?: number;
   radius?: number;
