@@ -50,6 +50,7 @@
 2. **場面の並べ替え・複製・分割**（構成編集）
    - 並べ替え（order 再採番）、複製（`createSceneId` で採番しコピー）、分割（1場面を2つに）。**場面リストの操作**でありタイムラインではない＝§10 の範囲内。
    - 既存 `addScene`/`removeScene`/`createSceneId` の延長で実装可。
+   - **音声の扱い**：narration 音声は `voices/<sceneId>.wav`（sceneId 単位）。**複製・分割で生まれた新 scene は `narration.voicePath=null` / `status="none"` にリセット**し再生成待ちにする（複数 scene が同一音声を指す不整合を防ぐ。VOICEVOX V-C2 の永続化規約と一致）。
 
 3. **クリップの詳細調整**
    - トリム（開始/終了）・フィット：**既存**（`asset.clip`）。
@@ -63,15 +64,20 @@
 
 ### スキーマ案（実装時に確定。本ADRは方針のみ）
 
-- `template.schema.json`：`category` enum に **`free`** を追加（11 §3 と同期）。FREEテンプレは「自由配置の器」を表す組み込みテンプレ。
-- `project.schema.json`：FREE場面のレイアウト上書き用に **`scene.freeLayout`（任意）** を新設。要素は `{ kind: 'text'|'image'|'shape', x, y, w, h, zIndex, ...（textはtext/fontSize/color、imageはassetId/fit、shapeはshapeType/fillColor）}` の配列。**通常テンプレ場面は使わない**（後方互換：未設定なら従来どおりテンプレ座標）。
-- 値域・座標系はテンプレ canvas（1920×1080）基準。`null=継承`/未設定の規約は §5 を踏襲。
+- **`template.category` に `free` を追加**（11 §3 と同期）。FREEテンプレは「自由配置の器」を表す組み込みテンプレ。
+  - **【共有 enum 整合・11 §3.2】** `scene.sceneType` と `template.category` は**同一の値集合を共有する**。よって `free` を入れるなら、(a) `sceneType`（project.schema の `SceneCategory`）にも `free` を加える（共有 enum へ追加）か、(b) FREEテンプレを既存 sceneType（例 `full_visual`）に紐づけ category だけ free 扱いにするか、を **Phase 4 前に確定**する。
+  - **【補正・11 §9】** `category:free` の標準テンプレが無い環境（旧バージョン等）で置換先が不定にならないよう、FREE を選べるのは「標準 FREE テンプレが存在するとき」に限定し、無ければ警告して選択を促す。
+  - **【AI 除外・12】** AI には FREE を選ばせない（`aiHint.recommendedSceneTypes` に `free` を含めない＋システムプロンプトで除外）。FREE は**利用者の手動選択専用**。
+- **`scene.freeLayout`（任意）を新設**＝FREE場面のレイアウト上書き。**通常テンプレ場面は未設定**（後方互換：従来どおりテンプレ座標）。
+  - 要素の `kind` は**テンプレ `layer.type`（11 §3.4：`slot`/`text`/`shape`/`decor` 等）の語彙に合わせる**。`image` は layer.type に無いため使わず、素材を受ける要素は **`kind:'slot'`**（`assetId`/`fit`）、文字は **`kind:'text'`**（`textKey` or `text`/`fontSize`/`color`）、図形は **`kind:'shape'`**（`shapeType`/`fillColor`）とする＝レンダラーが layer.type への変換テーブルを持たずに済む。
+  - 各要素 `{ kind, x, y, w, h, zIndex, …kind別プロパティ }`。座標系はテンプレ canvas（1920×1080）基準。`null=継承`/未設定の規約は §5 を踏襲。
+- **schemaVersion（11 §1）**：`category:free` 追加・`scene.freeLayout`（任意）追加はいずれも**後方互換の追加**＝マイナー（`1.x`）で扱う。Phase 4 の正典反映時に確定。
 
 ### 簡易/詳細モードの関係（UX・要設計）
 
 - 簡易編集モード＝現行 `SceneEditScreen` 相当（最小操作で仕上げる）。
 - 詳細編集モード＝同じ場面に対し上記4領域を露出。**同一画面のトグルか別画面か**は UI 設計で確定（未解決論点）。
-- **AIなし制作**：空プロジェクトから手動で場面追加→テンプレ（FREE含む）選択→内容配置で、AI生成工程を**任意**にできる。新しい書き出し経路は不要。
+- **AIなし制作（本ADRのスコープ外・別途設計）**：詳細編集＋FREEテンプレ＋手動の場面追加が揃えば原理的には AI なしでも作れる。ただし**ウィザード/AI生成のスキップ**は、必須フィールド（11 §7.1.2 `companyName` は必須）が未入力でも有効な project.json を生成できるか等の検討が要る。現行ロードマップ（02 / 09 §4）はウィザード→AI生成を必須フローとしているため、**この入口動線は本ADRでは扱わず別ADRで設計**する。本ADRは「編集機能」に集中する。
 
 ### §10 として入れないもの（線引き）
 
