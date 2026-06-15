@@ -3,7 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, type Fit } from "../../domain/enums";
-import { ORIGINAL_AUDIO_VOLUME, VOLUME_MAX, VOLUME_MIN } from "../../domain/constants";
+import { NARRATION_VOLUME, ORIGINAL_AUDIO_VOLUME, VOLUME_MAX, VOLUME_MIN } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
@@ -86,6 +86,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     addScene, removeScene, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
   } = useProjectStore();
+  const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
 
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
@@ -133,6 +134,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   // 選択中シーンを更新するヘルパー
   const patch = (update: (s: Scene) => Scene) => updateScene(selected.sceneId, update);
+  // 場面ごとの声の大きさ（null/未設定＝全体設定を継承 §6/§2.2、値＝この場面だけ上書き）。
+  const sceneNarrationVolume = selected.audioMix?.narrationVolume ?? null;
+  const projectNarrationVolume = voiceSettings.volume ?? NARRATION_VOLUME;
   // 場面の選択を切り替える（前の場面の削除確認は解除して持ち越さない）。
   const selectScene = (id: string) => {
     setSelectedId(id);
@@ -568,6 +572,56 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               )}
             </div>
 
+            {/* 場面ごとの声の大きさ（全体設定を継承 or この場面だけ上書き。§6/§2.2） */}
+            <div className="field">
+              <div className="toggle-row">
+                <span className="field-label" style={{ margin: 0 }}>この場面だけ声の大きさを変える</span>
+                <Switch
+                  on={sceneNarrationVolume != null}
+                  onChange={(on) =>
+                    patch((s) => ({
+                      ...s,
+                      audioMix: {
+                        ...s.audioMix,
+                        // オン＝現在の実効値で上書き開始 / オフ＝null で全体設定を継承
+                        narrationVolume: on
+                          ? (s.audioMix?.narrationVolume ?? projectNarrationVolume)
+                          : null,
+                      },
+                    }))
+                  }
+                  label="この場面だけ声の大きさを変える"
+                />
+              </div>
+              {sceneNarrationVolume != null ? (
+                <>
+                  <input
+                    type="range"
+                    min={VOLUME_MIN}
+                    max={VOLUME_MAX}
+                    step={0.05}
+                    value={sceneNarrationVolume}
+                    onChange={(e) =>
+                      patch((s) => ({
+                        ...s,
+                        audioMix: { ...s.audioMix, narrationVolume: Number(e.target.value) },
+                      }))
+                    }
+                    style={{ width: "100%", accentColor: "var(--color-primary)" }}
+                  />
+                  <div className="row-between text-faint text-sm">
+                    <span>小さい</span>
+                    <span>{Math.round(sceneNarrationVolume * 100)}%</span>
+                    <span>大きい</span>
+                  </div>
+                </>
+              ) : (
+                <p className="field-hint">
+                  全体の設定（{Math.round(projectNarrationVolume * 100)}%）を使います。場面ごとに変えたいときだけオンにします。
+                </p>
+              )}
+            </div>
+
             <div className="field">
               <label className="field-label" htmlFor="subtitle">字幕</label>
               <textarea
@@ -624,7 +678,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </select>
                 </div>
                 <p className="field-hint">
-                  動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。場面ごとの音量調整は今後追加予定です。
+                  動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「ゆうこのセリフ」で場面ごとに変えられます。
                 </p>
               </div>
             )}
