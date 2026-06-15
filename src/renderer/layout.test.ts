@@ -123,4 +123,14 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(svg).toContain('タイトル&lt;&amp;&gt;'); // < & > がエスケープ済み
     expect(svg).toContain('data:image/png;base64,AA=='); // slot 画像
   });
+
+  it('通常テンプレ（category!==free）の場面に freeLayout が付いていても描画しない（category ガード）', () => {
+    // 防御: 通常テンプレ（opening）に誤って freeLayout が混入しても無視する。
+    const sceneWithStrayFree: Scene = {
+      ...scene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100, shapeType: 'rect', fillColor: '#000000' }],
+    };
+    const layout = layoutScene(sceneWithStrayFree, openingTemplate); // category === 'opening'
+    expect(layout.items.find((i) => i.id === 'free_001')).toBeUndefined();
+  });
 });
