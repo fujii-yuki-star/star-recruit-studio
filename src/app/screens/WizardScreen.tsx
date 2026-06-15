@@ -3,6 +3,8 @@ import type { ScreenId } from "../data/mockData";
 import { sampleCompany, purposeOptions } from "../data/mockData";
 import { ASSET_TYPE, type Purpose } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
+import { isTauri } from "../../infrastructure/assetFs";
+import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   ArrowLeftIcon,
@@ -61,7 +63,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const [newStrength, setNewStrength] = useState("");
   const [voiceType, setVoiceType] = useState("calm");
 
-  const { assets, assetSrcById, addAsset, saveProject, saveStatus, applyProjectInfo } =
+  const { assets, assetSrcById, addAsset, addAssetByPath, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
     useProjectStore();
 
   // ウィザードで入力した目的・会社情報を現在のプロジェクトへ反映する（保存・生成で使う）。
@@ -81,6 +83,12 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     if (!file) return;
     void addAsset(file);
     e.target.value = "";
+  }
+
+  // Tauri ではネイティブの「開く」ダイアログでパスを取り込む（JSが素材バイトを読まない）。ブラウザは下の input にフォールバック。
+  async function onPickAsset() {
+    const path = await showOpenAssetDialog();
+    if (path) await addAssetByPath(path);
   }
 
   function addStrength() {
@@ -239,10 +247,20 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   className="card-tight text-center"
                   role="button"
                   tabIndex={0}
+                  onClick={(e) => {
+                    if (isTauri()) {
+                      e.preventDefault();
+                      void onPickAsset();
+                    }
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      e.currentTarget.querySelector("input")?.click();
+                      if (isTauri()) {
+                        void onPickAsset();
+                      } else {
+                        e.currentTarget.querySelector("input")?.click();
+                      }
                     }
                   }}
                   style={{
@@ -261,6 +279,13 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   </span>
                   <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
                 </label>
+
+                {importError && (
+                  <div className="notice notice-warn row-between mt" role="alert">
+                    <span>{importError}</span>
+                    <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+                  </div>
+                )}
                 {materials.length > 0 ? (
                   <div className="card-grid cols-4 mt">
                     {materials.map((a) => (

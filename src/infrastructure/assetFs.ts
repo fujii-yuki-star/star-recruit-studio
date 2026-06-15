@@ -3,7 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { AssetMetadata } from '../domain/project/types';
 
-function isTauri(): boolean {
+export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
@@ -38,6 +38,19 @@ export async function importAssetBytes(
 ): Promise<string | null> {
   if (!isTauri()) return null;
   return invoke<string>('import_asset_bytes', bytes, { headers: { projectId, fileName } });
+}
+
+/**
+ * 元ファイルの絶対パス（ネイティブ「開く」ダイアログで取得）を渡し、Rust がプロジェクトへコピーする。
+ * バイトも base64 も JS を経由しない＝大きい動画でもメモリ/IPC を消費しない（真の0コピー）。Tauri 非検出時は null。
+ */
+export async function importAssetByPath(
+  projectId: string,
+  fileName: string,
+  srcPath: string,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string>('import_asset_path', { projectId, fileName, srcPath });
 }
 
 /** プロジェクト相対パスの素材を data URL で読む。Tauri 非検出 or 失敗（未配置のサンプル等）時は null。 */

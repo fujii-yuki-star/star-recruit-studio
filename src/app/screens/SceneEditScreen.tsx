@@ -6,6 +6,8 @@ import { ASSET_TYPE, type Fit } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME, VOLUME_MAX, VOLUME_MIN } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { useProjectStore } from "../store/projectStore";
+import { isTauri } from "../../infrastructure/assetFs";
+import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
@@ -80,7 +82,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
-    status, scenes, templates, assets, generate, updateScene, updateAsset, addAsset,
+    status, scenes, templates, assets, generate, updateScene, updateAsset, addAsset, addAssetByPath, importError, clearImportError,
     addScene, removeScene, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
   } = useProjectStore();
@@ -142,6 +144,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (!file) return;
     void addAsset(file);
     e.target.value = "";
+  }
+
+  // Tauri ではネイティブの「開く」ダイアログでパスを取り込む（JSが素材バイトを読まない）。ブラウザは下の input にフォールバック。
+  async function onPickAsset() {
+    const path = await showOpenAssetDialog();
+    if (path) await addAssetByPath(path);
   }
 
   return (
@@ -219,11 +227,39 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               ))}
             </div>
 
-            <label className="btn btn-secondary btn-block mt" style={{ cursor: "pointer" }}>
+            <label
+              className="btn btn-secondary btn-block mt"
+              style={{ cursor: "pointer" }}
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                if (isTauri()) {
+                  e.preventDefault();
+                  void onPickAsset();
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  if (isTauri()) {
+                    void onPickAsset();
+                  } else {
+                    e.currentTarget.querySelector("input")?.click();
+                  }
+                }
+              }}
+            >
               <UploadIcon size={16} />
               素材をアップロード
               <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
             </label>
+
+            {importError && (
+              <div className="notice notice-warn row-between mt" role="alert">
+                <span>{importError}</span>
+                <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+              </div>
+            )}
           </div>
 
           {/* 中央: 仕上がり確認 + 場面カード */}

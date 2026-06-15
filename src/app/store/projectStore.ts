@@ -2,7 +2,7 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは当面 MockProvider。
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
-import type { Asset, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
+import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, type Purpose } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
@@ -17,7 +17,7 @@ import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, importAssetBytes, readAssetDataUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
+import { importAssetFile, importAssetBytes, importAssetByPath, readAssetDataUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
 import { detectAssetType, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
@@ -35,6 +35,8 @@ export type BgmPatch = Partial<Pick<BgmSettings, "volume" | "enabled" | "loop" |
 interface ProjectState {
   status: GenerateStatus;
   saveStatus: SaveStatus;
+  /** 素材の取り込み失敗のユーザー向け文言（§2-5。プロジェクト保存状態とは別物。再試行/成功で消える）。 */
+  importError: string | null;
   /** Project の見出し情報（projectId/名前/目的/各種設定）。Asset/Part/Scene は別フィールド。 */
   meta: ProjectHeader;
   parts: Part[];
@@ -83,6 +85,8 @@ interface ProjectState {
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
   addAsset: (file: File) => Promise<void>;
+  addAssetByPath: (path: string) => Promise<void>;
+  clearImportError: () => void;
   /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
   setBgm: (file: { name: string; dataUrl: string }) => Promise<void>;
   /** 指定場面のナレーション音声を生成する（narration.status を更新）。 */
@@ -97,6 +101,63 @@ const provider = new MockAiProvider();
 // Tauri ではローカル VOICEVOX に接続、ブラウザ開発では Mock（無音）にフォールバック。
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
+
+// 取り込んだ動画の付加情報（メタ＝長さ/音声有無/解像度、代表フレーム＝サムネ）を取得する純IO。
+// store は更新せず結果のみ返す。各取得は独立に失敗を握り、部分結果で続行する（取り込みの成否とは独立）。
+async function probeAndThumbVideo(
+  projectId: string,
+  relPath: string,
+): Promise<{ metadata?: AssetMetadata; thumbnailPath?: string; thumbUrl?: string }> {
+  const out: { metadata?: AssetMetadata; thumbnailPath?: string; thumbUrl?: string } = {};
+  try {
+    const meta = await probeVideo(projectId, relPath);
+    if (meta) out.metadata = meta;
+    else if (hasTauri) console.warn("[asset] 動画メタの取得に失敗しました（既定値で続行）");
+  } catch (e) {
+    console.warn("[asset] 動画メタ取得で例外:", e);
+  }
+  try {
+    // 代表フレームを生成し、表示用 src（小さなPNG）として読み戻す＝確認画面/一覧に動画フレーム表示。
+    const thumbPath = await extractVideoThumbnail(projectId, relPath);
+    if (thumbPath) {
+      out.thumbnailPath = thumbPath;
+      const url = await readAssetDataUrl(projectId, thumbPath);
+      if (url) out.thumbUrl = url;
+    } else if (hasTauri) {
+      console.warn("[asset] 動画サムネの生成に失敗しました（アイコン表示にフォールバック）");
+    }
+  } catch (e) {
+    console.warn("[asset] 動画サムネ生成で例外:", e);
+  }
+  return out;
+}
+
+// probeAndThumbVideo の結果を該当素材へ反映する set 更新関数を返す（addAsset/addAssetByPath 共通）。
+function applyEnrichment(
+  assetId: string,
+  enrich: { metadata?: AssetMetadata; thumbnailPath?: string; thumbUrl?: string },
+) {
+  return (s: { assets: Asset[]; assetSrcById: Record<string, string> }) => ({
+    assets: s.assets.map((a) => {
+      if (a.assetId !== assetId) return a;
+      const next = { ...a };
+      if (enrich.metadata) next.metadata = enrich.metadata;
+      if (enrich.thumbnailPath) next.thumbnailPath = enrich.thumbnailPath;
+      return next;
+    }),
+    assetSrcById: enrich.thumbUrl
+      ? { ...s.assetSrcById, [assetId]: enrich.thumbUrl }
+      : s.assetSrcById,
+  });
+}
+
+// 取り込み失敗時のユーザー向け文言を取り出す。Tauri コマンドは文字列で reject される
+// （Rust が §2-5 準拠で整えた文言）のでそのまま使い、それ以外は定型文にフォールバックする。
+function importErrorMessage(e: unknown): string {
+  if (typeof e === "string" && e.trim()) return e;
+  if (e instanceof Error && e.message) return e.message;
+  return "素材を取り込めませんでした。もう一度お選びください。";
+}
 
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
@@ -115,6 +176,7 @@ function defaultHeader(): ProjectHeader {
 export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
   saveStatus: "idle",
+  importError: null,
   meta: defaultHeader(),
   parts: [],
   scenes: [],
@@ -356,10 +418,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       dataUrl = await fileToDataUrl(file);
     } catch {
-      set({ saveStatus: "error" }); // ファイル読み込み失敗をユーザーへ通知（§2-5）。
+      set({ importError: "画像を読み込めませんでした。別の画像をお選びください。" }); // §2-5：次の行動。
       return;
     }
-    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl } }));
+    set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl }, importError: null }));
     try {
       // 保存先フォルダの名前空間のため projectId を確保する。
       let projectId = get().meta.projectId;
@@ -374,9 +436,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (filePath) {
         set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)) }));
       }
-    } catch {
+    } catch (e) {
       // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
-      set({ saveStatus: "error" });
+      set({ importError: importErrorMessage(e) });
     }
   },
   addAsset: async (file) => {
@@ -400,7 +462,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       try {
         dataUrl = await fileToDataUrl(file);
       } catch {
-        set({ saveStatus: "error" }); // ファイル読み込み失敗をユーザーへ通知（§2-5）。素材は追加しない。
+        set({ importError: "画像を読み込めませんでした。別の画像をお選びください。" }); // §2-5。素材は追加しない。
         return;
       }
     }
@@ -409,6 +471,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets: [...s.assets, asset],
       assetSrcById: dataUrl ? { ...s.assetSrcById, [assetId]: dataUrl } : s.assetSrcById,
       saveStatus: "idle",
+      importError: null,
     }));
     // 永続化（プロジェクトフォルダへコピー）。
     try {
@@ -425,56 +488,76 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           fileName,
           new Uint8Array(await file.arrayBuffer()),
         );
-        // 取り込み後にメタ情報(長さ・音声有無・解像度)と代表フレーム(サムネ)を取得する。
-        // いずれも取り込みの成否と独立させ（専用 try）、失敗してもロールバックしない。
         // savedPath は楽観設定した filePath と一致する（assetId.ext は sanitize で不変）。?? は保険。
         const relPath = savedPath ?? `assets/${fileName}`;
-        try {
-          const meta = await probeVideo(projectId, relPath);
-          if (meta) {
-            set((s) => ({
-              assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: meta } : a)),
-            }));
-          } else if (hasTauri) {
-            console.warn("[addAsset] 動画メタの取得に失敗しました（既定値で続行）");
-          }
-        } catch (e) {
-          console.warn("[addAsset] 動画メタ取得で例外:", e);
-        }
-        try {
-          // 代表フレームを生成し、表示用 src（小さなPNG）として保持する＝確認画面/一覧に動画フレーム表示。
-          const thumbPath = await extractVideoThumbnail(projectId, relPath);
-          if (thumbPath) {
-            const thumbUrl = await readAssetDataUrl(projectId, thumbPath);
-            set((s) => ({
-              assets: s.assets.map((a) =>
-                a.assetId === assetId ? { ...a, thumbnailPath: thumbPath } : a,
-              ),
-              assetSrcById: thumbUrl
-                ? { ...s.assetSrcById, [assetId]: thumbUrl }
-                : s.assetSrcById,
-            }));
-          } else if (hasTauri) {
-            console.warn("[addAsset] 動画サムネの生成に失敗しました（アイコン表示にフォールバック）");
-          }
-        } catch (e) {
-          console.warn("[addAsset] 動画サムネ生成で例外:", e);
-        }
+        // メタ・サムネは取り込みの成否と独立（失敗してもロールバックしない）。
+        const enrich = await probeAndThumbVideo(projectId, relPath);
+        set(applyEnrichment(assetId, enrich));
       } else {
         // 画像は data URL(base64) 経路で取り込む（表示用に既に読み込んだ data URL を流用）。
         await importAssetFile(projectId, fileName, dataUrl!);
       }
-    } catch {
-      // 取り込み失敗：楽観追加した素材をロールバック（filePathあり・実体なしの不整合を防ぐ）。
+    } catch (e) {
+      // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
       set((s) => ({
         assets: s.assets.filter((a) => a.assetId !== assetId),
         assetSrcById: Object.fromEntries(
           Object.entries(s.assetSrcById).filter(([id]) => id !== assetId),
         ),
-        saveStatus: "error",
+        importError: importErrorMessage(e),
       }));
     }
   },
+  // 真の0コピー取り込み（Tauri）：ネイティブ「開く」で選んだ絶対パスを Rust がコピーする。
+  // JS は素材バイトを一切読まない。画像の表示用 data URL は取り込み後にディスクから読み戻す（ADR-0004）。
+  addAssetByPath: async (path) => {
+    const assetId = createAssetId(get().assets.map((a) => a.assetId));
+    // パス末尾（ファイル名部分。/ と \ の両方に対応）から種別・拡張子・表示名を決める。
+    const namePart = path.split(/[/\\]/).pop() ?? path;
+    const assetType = detectAssetType(namePart);
+    const parts = namePart.split(".");
+    const ext = fileExtension(namePart) || (assetType === ASSET_TYPE.video ? "mp4" : "png");
+    const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : namePart;
+    const fileName = `${assetId}.${ext}`;
+    const asset: Asset = {
+      assetId,
+      assetType,
+      displayName: baseName.trim() || "新しい素材",
+      filePath: `assets/${fileName}`,
+    };
+    // 即時：一覧へ追加（表示用 src は取り込み後に読み戻す）。素材追加で未保存に戻す。
+    set((s) => ({ assets: [...s.assets, asset], saveStatus: "idle", importError: null }));
+    try {
+      let projectId = get().meta.projectId;
+      if (!projectId) {
+        const existing = await listProjectSummaries();
+        projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        set((s) => ({ meta: { ...s.meta, projectId } }));
+      }
+      // 元ファイルを Rust が直接コピー（バイトは JS を経由しない）。
+      const savedPath = await importAssetByPath(projectId, fileName, path);
+      const relPath = savedPath ?? `assets/${fileName}`;
+      if (assetType === ASSET_TYPE.video) {
+        // メタ・サムネは取り込みの成否と独立（失敗してもロールバックしない）。
+        const enrich = await probeAndThumbVideo(projectId, relPath);
+        set(applyEnrichment(assetId, enrich));
+      } else {
+        // 画像は表示＋書き出し(ADR-0004)で data URL が要る。取り込んだ実体から読み戻す。
+        const url = await readAssetDataUrl(projectId, relPath);
+        if (url) set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: url } }));
+      }
+    } catch (e) {
+      // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
+      set((s) => ({
+        assets: s.assets.filter((a) => a.assetId !== assetId),
+        assetSrcById: Object.fromEntries(
+          Object.entries(s.assetSrcById).filter(([id]) => id !== assetId),
+        ),
+        importError: importErrorMessage(e),
+      }));
+    }
+  },
+  clearImportError: () => set({ importError: null }),
   setBgm: async (file) => {
     try {
       let projectId = get().meta.projectId;
