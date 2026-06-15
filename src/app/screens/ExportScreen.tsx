@@ -6,6 +6,7 @@ import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
 import { buildExportScenes } from "../../renderer/export/buildExportScenes";
 import { findVideoSlot } from "../../renderer/export/findVideoSlot";
+import { save } from "@tauri-apps/plugin-dialog";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
 import { BGM_VOLUME, HD_HEIGHT, HD_WIDTH, HEIGHT, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, WIDTH } from "../../domain/constants";
@@ -73,6 +74,21 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       setPhase("error");
       return;
     }
+    // 先に保存先を選んでもらう（キャンセルしたら何もせず元の画面のまま）。
+    let outputPath: string;
+    try {
+      const picked = await save({
+        defaultPath: `${fileName.trim() || "export"}.mp4`,
+        filters: [{ name: "動画", extensions: ["mp4"] }],
+      });
+      if (!picked) return; // キャンセル
+      outputPath = picked;
+    } catch (e) {
+      setMessage("保存先を選べませんでした。もう一度お試しください。");
+      setPhase("error");
+      console.error("[export] save dialog failed:", e);
+      return;
+    }
     setMessage("");
     setResultPath("");
     setProgress({ done: 0, total: scenes.length });
@@ -112,7 +128,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           fileExt,
         };
       }
-      const report = await exportVideo(built, fileName.trim() || "export", bgm, pid || undefined);
+      const report = await exportVideo(built, fileName.trim() || "export", bgm, pid || undefined, outputPath);
       setResultPath(report.outputPath);
       setPhase("done");
     } catch (e) {
@@ -160,7 +176,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
             />
-            <p className="field-hint">保存されるファイル：{fileName || "export"}.mp4</p>
+            <p className="field-hint">「動画を出力」を押すと、保存先を選べます（初期のファイル名：{fileName || "export"}.mp4）。</p>
           </div>
 
           <div className="field">
