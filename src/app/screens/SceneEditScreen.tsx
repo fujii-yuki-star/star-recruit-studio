@@ -325,7 +325,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <Switch on={showAdvanced} onChange={setShowAdvanced} label="詳細編集" />
             </div>
             <p className="field-hint" style={{ marginTop: 0 }}>
-              オンにすると、クリップの細かい調整や画面の切り替えなどを表示します。
+              オンにすると、動画素材の細かい調整や画面の切り替えなどを表示します。
             </p>
 
             <div className="field">
