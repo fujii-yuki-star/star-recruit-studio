@@ -38,6 +38,19 @@ export const sampleTemplates: Template[] = [
       { id: "yuko", type: "character", required: false, x: 1500, y: 640, w: 340, h: 400, zIndex: 40 },
     ],
   },
+  {
+    // FREE テンプレ（自由配置の器・ADR-0008）。内容は scene.freeLayout に乗せる。AIは選ばない（手動専用）。
+    schemaVersion: "1.0",
+    templateId: "free_canvas_v1",
+    name: "自由配置",
+    category: "free",
+    aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 },
+    defaults: { durationSec: 8, backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0, fillColor: "#ffffff" },
+    ],
+  },
 ];
 
 export const sampleAssets: Asset[] = [

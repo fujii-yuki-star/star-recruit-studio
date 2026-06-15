@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
-import type { ImageItem, TextItem } from './layout';
+import type { FillItem, ImageItem, TextItem } from './layout';
 import { layoutScene } from './layout';
 import { layoutToSvg } from './sceneSvg';
 
@@ -80,5 +80,57 @@ describe('layoutScene', () => {
     const a = layoutToSvg(layoutScene(scene, openingTemplate));
     const b = layoutToSvg(layoutScene(scene, openingTemplate));
     expect(a).toBe(b);
+  });
+});
+
+describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
+  const freeTemplate: Template = {
+    schemaVersion: '1.0',
+    templateId: 'free_canvas_v1',
+    name: '自由配置',
+    category: 'free',
+    aspectRatio: '16:9',
+    canvas: { width: 1920, height: 1080 },
+    defaults: { backgroundColor: '#ffffff' },
+    layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+  };
+  const freeScene: Scene = {
+    sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'free',
+    templateId: 'free_canvas_v1', durationSec: 8, assetRefs: {},
+    character: { enabled: false, characterId: 'yuko' }, texts: {},
+    narration: { text: '', status: 'none' }, warnings: [],
+    freeLayout: [
+      { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 400, h: 200, zIndex: 5, shapeType: 'ellipse', fillColor: '#ff0000', opacity: 0.5 },
+      { id: 'free_002', kind: 'slot', x: 200, y: 200, w: 600, h: 400, zIndex: 10, assetId: 'asset_x', fit: 'cover' },
+      { id: 'free_003', kind: 'text', x: 900, y: 150, w: 700, h: 120, zIndex: 20, text: 'タイトル<&>', fontSize: 60, color: '#222222', fontWeight: 'bold' },
+    ],
+  };
+
+  it('freeLayout 要素を背景の上に zIndex 順で重ねる', () => {
+    const layout = layoutScene(freeScene, freeTemplate);
+    expect(layout.items.map((i) => i.zIndex)).toEqual([0, 5, 10, 20]); // bg / shape / slot / text
+    const slot = layout.items.find((i): i is ImageItem => i.kind === 'image' && i.id === 'free_002');
+    expect(slot?.assetId).toBe('asset_x');
+    const shape = layout.items.find((i): i is FillItem => i.kind === 'fill' && i.id === 'free_001');
+    expect(shape?.shapeType).toBe('ellipse');
+  });
+
+  it('shape ellipse は <ellipse>、text はエスケープして描画', () => {
+    const svg = layoutToSvg(layoutScene(freeScene, freeTemplate), {
+      assetSrc: () => 'data:image/png;base64,AA==',
+    });
+    expect(svg).toContain('<ellipse');
+    expect(svg).toContain('タイトル&lt;&amp;&gt;'); // < & > がエスケープ済み
+    expect(svg).toContain('data:image/png;base64,AA=='); // slot 画像
+  });
+
+  it('通常テンプレ（category!==free）の場面に freeLayout が付いていても描画しない（category ガード）', () => {
+    // 防御: 通常テンプレ（opening）に誤って freeLayout が混入しても無視する。
+    const sceneWithStrayFree: Scene = {
+      ...scene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100, shapeType: 'rect', fillColor: '#000000' }],
+    };
+    const layout = layoutScene(sceneWithStrayFree, openingTemplate); // category === 'opening'
+    expect(layout.items.find((i) => i.id === 'free_001')).toBeUndefined();
   });
 });

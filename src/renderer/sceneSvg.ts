@@ -1,6 +1,7 @@
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
 // 注: テキスト折返しは暫定で文字数概算。プレビュー実装ではフォント実測に置換する（05 §10 / ADR-0001 未解決論点）。
+import { FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit } from '../domain/enums';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 
@@ -88,6 +89,9 @@ function imageToSvg(item: ImageItem, src: string | undefined): string {
 function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions): string {
   switch (item.kind) {
     case 'fill':
+      if (item.shapeType === FREE_SHAPE_TYPE.ellipse) {
+        return `<ellipse cx="${item.x + item.w / 2}" cy="${item.y + item.h / 2}" rx="${item.w / 2}" ry="${item.h / 2}" fill="${item.color}" fill-opacity="${item.opacity}"/>`;
+      }
       return `<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" rx="${item.radius}" fill="${item.color}" fill-opacity="${item.opacity}"/>`;
     case 'image':
       return imageToSvg(item, item.assetId ? opts.assetSrc?.(item.assetId) : undefined);

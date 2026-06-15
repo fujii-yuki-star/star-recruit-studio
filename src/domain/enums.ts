@@ -7,6 +7,9 @@ export const SCENE_CATEGORIES = [
 ] as const;
 export type SceneCategory = (typeof SCENE_CATEGORIES)[number];
 
+/** FREE テンプレのカテゴリ値（§6・ロジック比較用。自由配置 freeLayout を持つ場面）。 */
+export const FREE_CATEGORY = 'free' satisfies SceneCategory;
+
 /** FREE テンプレの自由配置要素の種別（ADR-0008）。layer.type 語彙に合わせる（image は使わず素材は slot）。 */
 export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape'] as const;
 export type FreeElementKind = (typeof FREE_ELEMENT_KINDS)[number];
@@ -18,6 +21,12 @@ export type FontWeight = (typeof FONT_WEIGHTS)[number];
 /** FREE 図形要素の種別（ADR-0008・line は MVP 対象外）。 */
 export const FREE_SHAPE_TYPES = ['rect', 'ellipse'] as const;
 export type FreeShapeType = (typeof FREE_SHAPE_TYPES)[number];
+
+/** FreeShapeType の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
+export const FREE_SHAPE_TYPE = {
+  rect: 'rect',
+  ellipse: 'ellipse',
+} as const satisfies Record<string, FreeShapeType>;
 
 export const ASSET_TYPES = [
   'image', 'video', 'bgm', 'voice', 'yuko', 'decor', 'logo', 'qr',
