@@ -6,7 +6,7 @@ import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
 import { buildExportScenes } from "../../renderer/export/buildExportScenes";
 import { findVideoSlot } from "../../renderer/export/findVideoSlot";
-import { save } from "@tauri-apps/plugin-dialog";
+import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
 import { BGM_VOLUME, HD_HEIGHT, HD_WIDTH, HEIGHT, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, WIDTH } from "../../domain/constants";
@@ -77,10 +77,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     // 先に保存先を選んでもらう（キャンセルしたら何もせず元の画面のまま）。
     let outputPath: string;
     try {
-      const picked = await save({
-        defaultPath: `${fileName.trim() || "export"}.mp4`,
-        filters: [{ name: "動画", extensions: ["mp4"] }],
-      });
+      const picked = await showSaveVideoDialog(fileName.trim() || "export");
       if (!picked) return; // キャンセル
       outputPath = picked;
     } catch (e) {

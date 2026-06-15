@@ -960,6 +960,13 @@ pub fn export_video(
             {
                 p.set_extension("mp4");
             }
+            // パストラバーサル防止（ダイアログ経由では起きないが invoke 直呼び対策）。
+            if p.components().any(|c| c.as_os_str() == "..") {
+                return Err(export_failure(
+                    "output_path contains '..': path traversal rejected",
+                    "保存先が不正です。保存先を選び直してください。",
+                ));
+            }
             if let Some(parent) = p.parent() {
                 fs::create_dir_all(parent).map_err(|e| {
                     export_failure(
