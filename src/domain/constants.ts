@@ -24,6 +24,8 @@ export const ORIGINAL_AUDIO_VOLUME = 0.2;
 // 音量の値域（§4：0.0〜1.5、1.0=原音）。
 export const VOLUME_MIN = 0.0;
 export const VOLUME_MAX = 1.5;
+// 音量スライダーの刻み（UI）。
+export const VOLUME_STEP = 0.05;
 
 export const MAX_NARRATION_LEN_DEFAULT = 120;
 export const MAX_SUBTITLE_LEN_DEFAULT = 60;

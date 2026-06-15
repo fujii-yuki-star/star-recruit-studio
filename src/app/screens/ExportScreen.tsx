@@ -9,7 +9,7 @@ import { findVideoSlot } from "../../renderer/export/findVideoSlot";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
-import { BGM_VOLUME, HD_HEIGHT, HD_WIDTH, HEIGHT, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, WIDTH } from "../../domain/constants";
+import { BGM_VOLUME, HD_HEIGHT, HD_WIDTH, HEIGHT, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, WIDTH } from "../../domain/constants";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 
 interface ExportProps {
@@ -228,7 +228,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               type="range"
               min={VOLUME_MIN}
               max={VOLUME_MAX}
-              step={0.05}
+              step={VOLUME_STEP}
               value={voiceSettings.volume ?? NARRATION_VOLUME}
               onChange={(e) => updateVoiceSettings({ volume: Number(e.target.value) })}
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
@@ -249,7 +249,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                 type="range"
                 min={VOLUME_MIN}
                 max={VOLUME_MAX}
-                step={0.05}
+                step={VOLUME_STEP}
                 value={bgmSettings?.volume ?? BGM_VOLUME}
                 onChange={(e) => updateBgmSettings({ volume: Number(e.target.value) })}
                 style={{ width: "100%", accentColor: "var(--color-primary)" }}
