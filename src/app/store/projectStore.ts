@@ -11,7 +11,7 @@ import {
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
-import { duplicateSceneInList, moveSceneInList } from "../../domain/project/sceneOps";
+import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { sampleAssets, sampleTemplates } from "../../infrastructure/sampleData";
 import {
@@ -76,6 +76,8 @@ interface ProjectState {
   moveScene: (sceneId: string, direction: "up" | "down") => void;
   /** 場面を複製して直後に挿入し、新しい sceneId を返す（セリフは引き継ぎ・音声は作り直し）。 */
   duplicateScene: (sceneId: string) => string;
+  /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
+  splitScene: (sceneId: string, splitIndex: number) => string;
   /** ウィザードで入力した目的・会社情報を現在のプロジェクト(meta)へ反映する（保存・生成で使う）。 */
   applyProjectInfo: (input: { purpose: Purpose; companyInfo: CompanyInfo }) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
@@ -401,6 +403,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     set({ ...duplicateSceneInList(s.scenes, s.parts, sceneId, newId), saveStatus: "idle" });
+    return newId;
+  },
+  splitScene: (sceneId, splitIndex) => {
+    const s = get();
+    const newId = createSceneId(s.scenes.map((x) => x.sceneId));
+    set({ ...splitSceneInList(s.scenes, s.parts, sceneId, splitIndex, newId), saveStatus: "idle" });
     return newId;
   },
   applyProjectInfo: (input) =>

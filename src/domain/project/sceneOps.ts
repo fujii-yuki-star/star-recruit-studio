@@ -61,3 +61,64 @@ export function duplicateSceneInList(
   const reordered = reindexOrder(next);
   return { scenes: reordered, parts: rebuildPartSceneIds(parts, reordered) };
 }
+
+/**
+ * 場面のセリフ（narration.text）を splitIndex で前半/後半に分け、1場面を2場面にする（Phase 2b・ADR-0007）。
+ * 新IDは呼び出し側が採番して渡す。見た目・素材・clip 等は両場面に引き継ぐ。
+ * 表示時間は前半/後半の文字数比で按分（合計は不変・各最低1秒）。両場面とも音声は作り直し・warnings はクリア。
+ */
+export function splitSceneInList(
+  scenes: Scene[],
+  parts: Part[],
+  sceneId: string,
+  splitIndex: number,
+  newSceneId: string,
+): { scenes: Scene[]; parts: Part[] } {
+  const idx = scenes.findIndex((s) => s.sceneId === sceneId);
+  if (idx < 0) return { scenes, parts };
+  const src = scenes[idx];
+  const at = resolveSplitIndex(src.narration.text, splitIndex);
+  if (at == null) return { scenes, parts }; // セリフが短すぎて分割できない
+  const firstText = src.narration.text.slice(0, at).trimEnd();
+  const secondText = src.narration.text.slice(at).trimStart();
+  const [d1, d2] = apportionDuration(src.durationSec, firstText.length, secondText.length);
+  const first: Scene = {
+    ...src,
+    durationSec: d1,
+    narration: { ...src.narration, text: firstText, status: NARRATION_STATUS.none, voicePath: null },
+    warnings: [],
+  };
+  const second: Scene = {
+    ...src,
+    sceneId: newSceneId,
+    durationSec: d2,
+    narration: { ...src.narration, text: secondText, status: NARRATION_STATUS.none, voicePath: null },
+    warnings: [],
+  };
+  const next = [...scenes];
+  next.splice(idx, 1, first, second);
+  const reordered = reindexOrder(next);
+  return { scenes: reordered, parts: rebuildPartSceneIds(parts, reordered) };
+}
+
+/** 分割位置を [1, len-1] に収める。端/範囲外は中央に近い文末記号→無ければ中央で分割。len<2 は null（分割不能）。 */
+function resolveSplitIndex(text: string, index: number): number | null {
+  const len = text.length;
+  if (len < 2) return null;
+  if (index >= 1 && index <= len - 1) return index;
+  const mid = Math.floor(len / 2);
+  const boundaries: number[] = [];
+  for (let i = 1; i < len; i++) {
+    if ('。！？!?\n'.includes(text[i - 1])) boundaries.push(i);
+  }
+  if (boundaries.length === 0) return mid;
+  return boundaries.reduce((best, b) => (Math.abs(b - mid) < Math.abs(best - mid) ? b : best));
+}
+
+/** 表示時間を文字数比で按分する（各最低1秒・合計は元のまま。total<2 は等分）。 */
+function apportionDuration(total: number, len1: number, len2: number): [number, number] {
+  if (total < 2 || len1 + len2 === 0) return [total / 2, total / 2];
+  let d1 = Math.round((total * len1) / (len1 + len2));
+  d1 = Math.min(Math.max(d1, 1), total - 1);
+  return [d1, total - d1];
+}

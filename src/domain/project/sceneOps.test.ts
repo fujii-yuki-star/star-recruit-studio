@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Part, Scene } from './types';
 import { NARRATION_STATUS } from '../enums';
-import { duplicateSceneInList, moveSceneInList, rebuildPartSceneIds } from './sceneOps';
+import { duplicateSceneInList, moveSceneInList, rebuildPartSceneIds, splitSceneInList } from './sceneOps';
 
 function scene(id: string, order: number, partId = 'part_001', narration?: Scene['narration']): Scene {
   return {
@@ -99,5 +99,48 @@ describe('rebuildPartSceneIds', () => {
     const r = rebuildPartSceneIds(parts, scenes);
     expect(r[0].sceneIds).toEqual(['scene_001']);
     expect(r[1].sceneIds).toEqual(['scene_002']);
+  });
+});
+
+describe('splitSceneInList', () => {
+  it('カーソル位置でセリフを分け、直後に新場面を挿入する（尺は文字数按分・音声はリセット）', () => {
+    const scenes = [
+      {
+        ...scene('scene_001', 1, 'part_001', {
+          text: 'こんにちは',
+          status: NARRATION_STATUS.generated,
+          voicePath: 'voices/scene_001.wav',
+        }),
+        durationSec: 10,
+      },
+    ];
+    const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
+    const r = splitSceneInList(scenes, parts, 'scene_001', 2, 'scene_002');
+    expect(r.scenes.map((s) => s.sceneId)).toEqual(['scene_001', 'scene_002']);
+    expect(r.scenes.map((s) => s.order)).toEqual([1, 2]);
+    expect(r.scenes[0].narration.text).toBe('こん');
+    expect(r.scenes[1].narration.text).toBe('にちは');
+    expect(r.scenes[0].durationSec).toBe(4); // 10秒を 2:3 で按分
+    expect(r.scenes[1].durationSec).toBe(6);
+    expect(r.scenes[0].narration.status).toBe(NARRATION_STATUS.none);
+    expect(r.scenes[0].narration.voicePath).toBeNull();
+    expect(r.scenes[1].narration.status).toBe(NARRATION_STATUS.none);
+    expect(r.scenes[0].warnings).toEqual([]);
+    expect(r.parts[0].sceneIds).toEqual(['scene_001', 'scene_002']);
+  });
+
+  it('カーソルが端なら中央に最も近い文末記号で分割する', () => {
+    const scenes = [scene('scene_001', 1, 'part_001', { text: 'いちです。にいです。', status: NARRATION_STATUS.none })];
+    const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
+    const r = splitSceneInList(scenes, parts, 'scene_001', 0, 'scene_002');
+    expect(r.scenes[0].narration.text).toBe('いちです。');
+    expect(r.scenes[1].narration.text).toBe('にいです。');
+  });
+
+  it('セリフが短すぎる（1文字以下）と分割しない', () => {
+    const scenes = [scene('scene_001', 1, 'part_001', { text: 'あ', status: NARRATION_STATUS.none })];
+    const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
+    const r = splitSceneInList(scenes, parts, 'scene_001', 1, 'scene_002');
+    expect(r.scenes).toHaveLength(1);
   });
 });
