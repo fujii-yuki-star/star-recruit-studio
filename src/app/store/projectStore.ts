@@ -11,6 +11,7 @@ import {
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
+import { duplicateSceneInList, moveSceneInList } from "../../domain/project/sceneOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { sampleAssets, sampleTemplates } from "../../infrastructure/sampleData";
 import {
@@ -71,6 +72,10 @@ interface ProjectState {
   addScene: () => string;
   /** 指定の場面を削除する（パートからも除き、order を 1..N に振り直す）。 */
   removeScene: (sceneId: string) => void;
+  /** 場面を上/下へ1つ移動する（表示順＝配列順を入れ替え、order と part.sceneIds を整合）。 */
+  moveScene: (sceneId: string, direction: "up" | "down") => void;
+  /** 場面を複製して直後に挿入し、新しい sceneId を返す（セリフは引き継ぎ・音声は作り直し）。 */
+  duplicateScene: (sceneId: string) => string;
   /** ウィザードで入力した目的・会社情報を現在のプロジェクト(meta)へ反映する（保存・生成で使う）。 */
   applyProjectInfo: (input: { purpose: Purpose; companyInfo: CompanyInfo }) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
@@ -390,6 +395,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       })),
       saveStatus: "idle",
     })),
+  moveScene: (sceneId, direction) =>
+    set((s) => ({ ...moveSceneInList(s.scenes, s.parts, sceneId, direction), saveStatus: "idle" })),
+  duplicateScene: (sceneId) => {
+    const s = get();
+    const newId = createSceneId(s.scenes.map((x) => x.sceneId));
+    set({ ...duplicateSceneInList(s.scenes, s.parts, sceneId, newId), saveStatus: "idle" });
+    return newId;
+  },
   applyProjectInfo: (input) =>
     set((s) => ({
       meta: { ...s.meta, purpose: input.purpose, companyInfo: input.companyInfo },
