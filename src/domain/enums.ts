@@ -38,6 +38,13 @@ export type LayerType = (typeof LAYER_TYPES)[number];
 export const SLOT_TYPES = ['image_or_video', 'image', 'video'] as const;
 export type SlotType = (typeof SLOT_TYPES)[number];
 
+/** SlotType の値を参照するための定数（§6/§2-7：ロジックでの文字列直書きを避ける）。 */
+export const SLOT_TYPE = {
+  image_or_video: 'image_or_video',
+  image: 'image',
+  video: 'video',
+} as const satisfies Record<string, SlotType>;
+
 export const FITS = ['cover', 'contain', 'stretch'] as const;
 export type Fit = (typeof FITS)[number];
 

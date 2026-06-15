@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
-import { ASSET_TYPE, type Fit } from "../../domain/enums";
+import { ASSET_TYPE, SLOT_TYPE, type Fit } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -68,8 +68,8 @@ const narrationStatusLabel: Record<string, string> = {
 function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
   return assets.filter((a) => {
     if (layer.type === "logo") return a.assetType === ASSET_TYPE.logo || a.assetType === ASSET_TYPE.image;
-    if (layer.slotType === "image") return a.assetType === ASSET_TYPE.image;
-    if (layer.slotType === "video") return a.assetType === ASSET_TYPE.video;
+    if (layer.slotType === SLOT_TYPE.image) return a.assetType === ASSET_TYPE.image;
+    if (layer.slotType === SLOT_TYPE.video) return a.assetType === ASSET_TYPE.video;
     // background / slot(image_or_video) / slotType未指定
     return a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video;
   });
