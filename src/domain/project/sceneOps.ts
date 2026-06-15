@@ -2,6 +2,7 @@
 // 再生・表示順の「正」＝scenes 配列順（buildExportScenes も scenes 配列を順に処理する）。
 // scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
+import { SCENE_MIN_DURATION_SEC } from '../constants';
 import { NARRATION_STATUS } from '../enums';
 import type { Part, Scene } from './types';
 
@@ -77,6 +78,8 @@ export function splitSceneInList(
   const idx = scenes.findIndex((s) => s.sceneId === sceneId);
   if (idx < 0) return { scenes, parts };
   const src = scenes[idx];
+  // 尺が最小尺の2倍未満だと両場面が最小尺（11 §4）を割るため分割しない。
+  if (src.durationSec < 2 * SCENE_MIN_DURATION_SEC) return { scenes, parts };
   const at = resolveSplitIndex(src.narration.text, splitIndex);
   if (at == null) return { scenes, parts }; // セリフが短すぎて分割できない
   const firstText = src.narration.text.slice(0, at).trimEnd();
@@ -115,10 +118,11 @@ function resolveSplitIndex(text: string, index: number): number | null {
   return boundaries.reduce((best, b) => (Math.abs(b - mid) < Math.abs(best - mid) ? b : best));
 }
 
-/** 表示時間を文字数比で按分する（各最低1秒・合計は元のまま。total<2 は等分）。 */
+/** 表示時間を文字数比で按分する（各最低 SCENE_MIN_DURATION_SEC・合計は元のまま。最小尺の2倍未満は等分）。 */
 function apportionDuration(total: number, len1: number, len2: number): [number, number] {
-  if (total < 2 || len1 + len2 === 0) return [total / 2, total / 2];
+  const min = SCENE_MIN_DURATION_SEC;
+  if (total < 2 * min || len1 + len2 === 0) return [total / 2, total / 2];
   let d1 = Math.round((total * len1) / (len1 + len2));
-  d1 = Math.min(Math.max(d1, 1), total - 1);
+  d1 = Math.min(Math.max(d1, min), total - min);
   return [d1, total - d1];
 }

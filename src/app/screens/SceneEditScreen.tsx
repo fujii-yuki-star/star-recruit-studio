@@ -3,7 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, type Fit } from "../../domain/enums";
-import { ORIGINAL_AUDIO_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { useProjectStore } from "../store/projectStore";
@@ -573,7 +573,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <button
                   className="btn btn-ghost btn-icon text-sm"
                   title="カーソル位置でこの場面を2つに分ける"
-                  disabled={selected.narration.text.trim().length < 2}
+                  disabled={
+                    selected.narration.text.trim().length < 2 ||
+                    selected.durationSec < 2 * SCENE_MIN_DURATION_SEC
+                  }
                   onClick={() => splitScene(selected.sceneId, lineRef.current?.selectionStart ?? 0)}
                 >
                   ここで2つに分ける

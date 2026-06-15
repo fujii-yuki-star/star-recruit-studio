@@ -130,7 +130,9 @@ describe('splitSceneInList', () => {
   });
 
   it('カーソルが端なら中央に最も近い文末記号で分割する', () => {
-    const scenes = [scene('scene_001', 1, 'part_001', { text: 'いちです。にいです。', status: NARRATION_STATUS.none })];
+    const scenes = [
+      { ...scene('scene_001', 1, 'part_001', { text: 'いちです。にいです。', status: NARRATION_STATUS.none }), durationSec: 10 },
+    ];
     const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
     const r = splitSceneInList(scenes, parts, 'scene_001', 0, 'scene_002');
     expect(r.scenes[0].narration.text).toBe('いちです。');
@@ -138,9 +140,20 @@ describe('splitSceneInList', () => {
   });
 
   it('セリフが短すぎる（1文字以下）と分割しない', () => {
-    const scenes = [scene('scene_001', 1, 'part_001', { text: 'あ', status: NARRATION_STATUS.none })];
+    const scenes = [
+      { ...scene('scene_001', 1, 'part_001', { text: 'あ', status: NARRATION_STATUS.none }), durationSec: 10 },
+    ];
     const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
     const r = splitSceneInList(scenes, parts, 'scene_001', 1, 'scene_002');
     expect(r.scenes).toHaveLength(1);
+  });
+
+  it('表示時間が最小尺の2倍未満なら分割しない（各場面が最小尺を割るため）', () => {
+    const scenes = [
+      { ...scene('scene_001', 1, 'part_001', { text: 'いちです。にいです。', status: NARRATION_STATUS.none }), durationSec: 5 },
+    ];
+    const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
+    const r = splitSceneInList(scenes, parts, 'scene_001', 5, 'scene_002');
+    expect(r.scenes).toHaveLength(1); // 5 < 2*SCENE_MIN_DURATION_SEC(3) ＝ 変化なし
   });
 });

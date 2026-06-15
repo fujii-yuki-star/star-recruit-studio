@@ -397,18 +397,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       })),
       saveStatus: "idle",
     })),
-  moveScene: (sceneId, direction) =>
-    set((s) => ({ ...moveSceneInList(s.scenes, s.parts, sceneId, direction), saveStatus: "idle" })),
+  moveScene: (sceneId, direction) => {
+    const s = get();
+    const next = moveSceneInList(s.scenes, s.parts, sceneId, direction);
+    if (next.scenes === s.scenes) return; // 端＝変化なし（未保存にしない）
+    set({ ...next, saveStatus: "idle" });
+  },
   duplicateScene: (sceneId) => {
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
-    set({ ...duplicateSceneInList(s.scenes, s.parts, sceneId, newId), saveStatus: "idle" });
+    const next = duplicateSceneInList(s.scenes, s.parts, sceneId, newId);
+    if (next.scenes === s.scenes) return ""; // 対象なし＝変化なし
+    set({ ...next, saveStatus: "idle" });
     return newId;
   },
   splitScene: (sceneId, splitIndex) => {
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
-    set({ ...splitSceneInList(s.scenes, s.parts, sceneId, splitIndex, newId), saveStatus: "idle" });
+    const next = splitSceneInList(s.scenes, s.parts, sceneId, splitIndex, newId);
+    if (next.scenes === s.scenes) return ""; // 分割不能＝変化なし（未保存にしない）
+    set({ ...next, saveStatus: "idle" });
     return newId;
   },
   applyProjectInfo: (input) =>
