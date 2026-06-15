@@ -169,11 +169,37 @@
         "narration": { "$ref": "#/$defs/Narration" },
         "audioMix": { "$ref": "#/$defs/AudioMix" },
         "transition": { "$ref": "#/$defs/Transition" },
-        "warnings": { "type": "array", "items": { "$ref": "#/$defs/Warning" } }
+        "warnings": { "type": "array", "items": { "$ref": "#/$defs/Warning" } },
+        "freeLayout": { "type": "array", "items": { "$ref": "#/$defs/FreeElement" } }
       }
     },
     "SceneCategory": {
-      "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko"]
+      "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko", "free"]
+    },
+    "FreeElement": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "FREE テンプレ場面の自由配置要素（ADR-0008・11 §7）。id は scene 内一意。",
+      "required": ["id", "kind", "x", "y", "w", "h"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^free_[0-9]{3,}$" },
+        "kind": { "enum": ["slot", "text", "shape"] },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "w": { "type": "number", "exclusiveMinimum": 0 },
+        "h": { "type": "number", "exclusiveMinimum": 0 },
+        "zIndex": { "type": "integer" },
+        "assetId": { "type": ["string", "null"] },
+        "fit": { "enum": ["cover", "contain", "stretch"] },
+        "text": { "type": "string" },
+        "fontSize": { "type": "number", "exclusiveMinimum": 0 },
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "fontWeight": { "enum": ["normal", "bold"] },
+        "shapeType": { "enum": ["rect", "ellipse"] },
+        "fillColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "radius": { "type": "number", "minimum": 0 }
+      }
     },
     "AssetRefs": {
       "type": "object",

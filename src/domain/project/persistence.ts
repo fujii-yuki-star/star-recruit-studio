@@ -123,6 +123,11 @@ export function createPartId(existingIds: readonly string[]): string {
   return nextNumberedId('part', existingIds);
 }
 
+/** free_NNN を発行する（§2.1・FREE 自由配置要素 id・scene 内一意）。 */
+export function createFreeElementId(existingIds: readonly string[]): string {
+  return nextNumberedId('free', existingIds);
+}
+
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
 export function assembleProject(
   header: ProjectHeader,

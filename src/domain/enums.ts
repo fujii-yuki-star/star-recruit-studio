@@ -3,9 +3,21 @@
 
 export const SCENE_CATEGORIES = [
   'opening', 'closing', 'photo_intro', 'video_intro',
-  'point_list', 'message', 'full_visual', 'chapter', 'no_yuko',
+  'point_list', 'message', 'full_visual', 'chapter', 'no_yuko', 'free',
 ] as const;
 export type SceneCategory = (typeof SCENE_CATEGORIES)[number];
+
+/** FREE テンプレの自由配置要素の種別（ADR-0008）。layer.type 語彙に合わせる（image は使わず素材は slot）。 */
+export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape'] as const;
+export type FreeElementKind = (typeof FREE_ELEMENT_KINDS)[number];
+
+/** FREE テキスト要素のフォント太さ（ADR-0008）。 */
+export const FONT_WEIGHTS = ['normal', 'bold'] as const;
+export type FontWeight = (typeof FONT_WEIGHTS)[number];
+
+/** FREE 図形要素の種別（ADR-0008・line は MVP 対象外）。 */
+export const FREE_SHAPE_TYPES = ['rect', 'ellipse'] as const;
+export type FreeShapeType = (typeof FREE_SHAPE_TYPES)[number];
 
 export const ASSET_TYPES = [
   'image', 'video', 'bgm', 'voice', 'yuko', 'decor', 'logo', 'qr',

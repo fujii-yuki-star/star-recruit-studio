@@ -28,6 +28,7 @@
 | project | `proj_{YYYYMMDD}_{NNN}` | `proj_20260610_001` | 作成日＋連番 |
 | part | `part_{NNN}` | `part_001` | プロジェクト内一意・3桁 |
 | scene | `scene_{NNN}` | `scene_001` | プロジェクト内一意・3桁。作成順に採番（表示順は `order` が制御） |
+| freeLayout 要素 | `free_{NNN}` | `free_001` | **scene 内一意**・3桁（ADR-0008・FREE テンプレの自由配置要素） |
 | asset | `asset_{NNN}` または `asset_{slug}_{NNN}` | `asset_office_001` | 一意。`^[a-z0-9_]+$` |
 | yuko asset | `yuko_{tag}_{NNN}` | `yuko_smile_001` | asset の一種（`assetType=yuko`） |
 | bgm asset | `bgm_{slug}_{NNN}` | `bgm_bright_001` | asset の一種（`assetType=bgm`） |
@@ -63,11 +64,12 @@
 
 ### 3.2 sceneCategory（= scene.sceneType ＝ template.category）
 
-`opening` / `closing` / `photo_intro` / `video_intro` / `point_list` / `message` / `full_visual` / `chapter` / `no_yuko`
+`opening` / `closing` / `photo_intro` / `video_intro` / `point_list` / `message` / `full_visual` / `chapter` / `no_yuko` / `free`
 
 - scene.`sceneType` と template.`category` は**同一の値集合**を共有する。
 - 割り当て規則: AIは `sceneType` に対し **`category` が一致する** templateId を選ぶ（不一致/不在は §9 で補正）。
 - `hasYuko` は category ではなくテンプレに `character` レイヤーが存在するかで判定する（`no_yuko` は明示的にゆうこ無しを示す用途）。
+- `free` は **FREE テンプレ（自由配置）専用・利用者の手動選択のみ**（AIは選ばない＝§12／`aiHint.recommendedSceneTypes` に含めない）。場面は `scene.freeLayout`（§7）で要素を持つ（ADR-0008）。
 
 ### 3.3 assetType
 
@@ -235,6 +237,7 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 | audioMix | object | ○ | §6（全フィールド任意・null可） |
 | transition | object | ○ | in/out(enum) / durationSec（既定 `TRANSITION_DEFAULT_SEC`） |
 | warnings | Warning[] | ● | 検証・補正の結果（空配列可） |
+| freeLayout | FreeElement[] | ○ | `sceneType=free` のみ：自由配置要素（ADR-0008・id=`free_NNN`(scene内一意)・kind: slot/text/shape・x/y/w/h は canvas基準で w>0/h>0） |
 
 ### 7.5 Template（要点。詳細は `04` ＋ `schemas/template.schema.json`）
 

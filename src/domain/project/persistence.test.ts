@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createPartId,
+  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
   isSupportedSchemaVersion, parseProjectDoc,
 } from './persistence';
@@ -71,6 +71,22 @@ describe('createSceneId / createPartId (§2.1)', () => {
   });
   it('歯抜けの最小番号を埋める', () => {
     expect(createSceneId(['scene_002', 'scene_003'])).toBe('scene_001');
+  });
+});
+
+describe('createFreeElementId (§2.1 free_{NNN}・scene 内一意)', () => {
+  it('既存が無ければ free_001', () => {
+    expect(createFreeElementId([])).toBe('free_001');
+  });
+  it('既存と衝突しない最小番号を採る', () => {
+    expect(createFreeElementId(['free_001', 'free_002'])).toBe('free_003');
+  });
+  it('番号に隙間があれば最小空き番号を返す', () => {
+    expect(createFreeElementId(['free_001', 'free_003'])).toBe('free_002');
+  });
+  it('999 を超えると4桁になる（pattern ^free_[0-9]{3,}$）', () => {
+    const existing = Array.from({ length: 999 }, (_, i) => `free_${String(i + 1).padStart(3, '0')}`);
+    expect(createFreeElementId(existing)).toBe('free_1000');
   });
 });
 

@@ -19,6 +19,7 @@ const categoryLabel: Record<SceneCategory, string> = {
   full_visual: "全画面",
   chapter: "区切り",
   no_yuko: "ゆうこなし",
+  free: "自由配置",
 };
 
 // レイヤー種別 → 「使用している要素」のユーザー向けラベル（全値必須）。

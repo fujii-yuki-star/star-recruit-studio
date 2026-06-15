@@ -15,6 +15,7 @@ const sceneTypeLabel: Record<SceneCategory, string> = {
   full_visual: "全画面",
   chapter: "区切り",
   no_yuko: "ゆうこなし",
+  free: "自由配置",
 };
 
 /** シーンの主役素材（mainVisual→background→最初の非null）を返す。 */
