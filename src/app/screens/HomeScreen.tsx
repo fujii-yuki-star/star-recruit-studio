@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { sampleAssets } from "../../infrastructure/sampleData";
+import { useStartNewProject } from "../hooks/useStartNewProject";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   PlusIcon,
@@ -21,21 +21,13 @@ function formatDate(iso: string): string {
   return iso ? iso.slice(0, 10) : "—";
 }
 
-// サンプル素材以外（ユーザーが取り込んだ素材）を「作業中の内容」とみなす。
-const SAMPLE_ASSET_IDS = new Set(sampleAssets.map((a) => a.assetId));
-
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
   const loadProject = useProjectStore((s) => s.loadProject);
-  const newProject = useProjectStore((s) => s.newProject);
-  const sceneCount = useProjectStore((s) => s.scenes.length);
-  // サンプル外の素材（ユーザー取り込み）があるか＝場面ゼロでも失うと困る作業内容。
-  const hasCustomAsset = useProjectStore((s) =>
-    s.assets.some((a) => !SAMPLE_ASSET_IDS.has(a.assetId)),
-  );
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  // 新規作成で作業中の内容が失われる前の確認（空プロジェクトの罠＝素材/場面の取りこぼし防止）。
-  const [confirmNew, setConfirmNew] = useState(false);
+  // 「新しい動画を作る」はヘッダと同じ破棄ガード付きフロー（共有フックで挙動統一）。
+  const { confirming: confirmNew, start: startNew, confirm: confirmStartNew, cancel: cancelNew } =
+    useStartNewProject(onNavigate);
   // プロジェクトを開けなかったときのユーザー向け表示（§2-5）。
   const [openError, setOpenError] = useState(false);
 
@@ -52,21 +44,6 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       alive = false;
     };
   }, [listProjects]);
-
-  function startNew() {
-    // 作業中の内容（場面 or 取り込んだ素材）があるときは、いきなり破棄せず確認を出す。
-    if (sceneCount > 0 || hasCustomAsset) {
-      setConfirmNew(true);
-      return;
-    }
-    newProject();
-    onNavigate("wizard");
-  }
-
-  function confirmStartNew() {
-    newProject();
-    onNavigate("wizard");
-  }
 
   async function openProject(projectId: string) {
     setOpenError(false);
@@ -97,7 +74,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
                   新しく作る
                 </button>
-                <button className="btn btn-ghost btn-icon" onClick={() => setConfirmNew(false)}>
+                <button className="btn btn-ghost btn-icon" onClick={cancelNew}>
                   やめる
                 </button>
               </div>

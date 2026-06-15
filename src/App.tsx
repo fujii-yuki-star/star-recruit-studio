@@ -4,6 +4,7 @@ import type { ScreenId } from "./app/data/mockData";
 import { useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
+import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -39,12 +40,20 @@ function App() {
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
   const loadProject = useProjectStore((s) => s.loadProject);
+  // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
+  const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
+    useStartNewProject(setScreen);
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
   useEffect(() => {
     const last = getLastProjectId();
     if (last) void loadProject(last).catch(() => {});
   }, [loadProject]);
+
+  // サイドバー等で画面が切り替わったら、出しっぱなしの確認バナーを閉じる。
+  useEffect(() => {
+    cancelNewProject();
+  }, [screen, cancelNewProject]);
 
   const saveLabel =
     saveStatus === "saving"
@@ -106,14 +115,29 @@ function App() {
               >
                 {saveLabel}
               </button>
-              <button
-                className="btn btn-secondary"
-                onClick={() => setScreen("wizard")}
-              >
-                新しい動画を作る
-              </button>
+              {/* ホームには専用の大きな導線があるため、ヘッダの新規作成は重複回避でホーム以外に表示。 */}
+              {screen !== "home" && (
+                <button className="btn btn-secondary" onClick={startNewProject}>
+                  新しい動画を作る
+                </button>
+              )}
             </div>
           </header>
+        )}
+        {!hasOwnHeader && screen !== "home" && confirmNew && (
+          <div className="notice notice-warn" role="alert" style={{ margin: "var(--gap)" }}>
+            <span>
+              今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトはホームの一覧からいつでも開けます）。
+            </span>
+            <div className="row gap-sm">
+              <button className="btn btn-primary btn-icon" onClick={confirmNewProject}>
+                新しく作る
+              </button>
+              <button className="btn btn-ghost btn-icon" onClick={cancelNewProject}>
+                やめる
+              </button>
+            </div>
+          </div>
         )}
         {renderScreen()}
       </div>
