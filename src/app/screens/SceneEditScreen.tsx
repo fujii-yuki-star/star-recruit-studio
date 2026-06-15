@@ -3,8 +3,9 @@ import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, type Fit } from "../../domain/enums";
-import { NARRATION_VOLUME, ORIGINAL_AUDIO_VOLUME, VOLUME_MAX, VOLUME_MIN } from "../../domain/constants";
+import { ORIGINAL_AUDIO_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
+import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -136,7 +137,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const patch = (update: (s: Scene) => Scene) => updateScene(selected.sceneId, update);
   // 場面ごとの声の大きさ（null/未設定＝全体設定を継承 §6/§2.2、値＝この場面だけ上書き）。
   const sceneNarrationVolume = selected.audioMix?.narrationVolume ?? null;
-  const projectNarrationVolume = voiceSettings.volume ?? NARRATION_VOLUME;
+  // 書き出しと同一ロジックで「全体設定の実効値」を出す（clamp 込み・ドメイン関数を単一の参照元に）。
+  const projectNarrationVolume = resolveNarrationVolume(undefined, voiceSettings);
   // 場面の選択を切り替える（前の場面の削除確認は解除して持ち越さない）。
   const selectScene = (id: string) => {
     setSelectedId(id);
@@ -499,7 +501,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                 type="range"
                                 min={VOLUME_MIN}
                                 max={VOLUME_MAX}
-                                step={0.05}
+                                step={VOLUME_STEP}
                                 value={clip?.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME}
                                 onChange={(e) =>
                                   patchClip({ originalAudioVolume: Number(e.target.value) })
@@ -599,7 +601,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     type="range"
                     min={VOLUME_MIN}
                     max={VOLUME_MAX}
-                    step={0.05}
+                    step={VOLUME_STEP}
                     value={sceneNarrationVolume}
                     onChange={(e) =>
                       patch((s) => ({
