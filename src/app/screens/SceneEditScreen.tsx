@@ -1,9 +1,9 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, type Fit } from "../../domain/enums";
-import { ORIGINAL_AUDIO_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { useProjectStore } from "../store/projectStore";
@@ -84,7 +84,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, generate, updateScene, updateAsset, addAsset, addAssetByPath, importError, clearImportError,
-    addScene, removeScene, saveProject, saveStatus,
+    addScene, removeScene, splitScene, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
   } = useProjectStore();
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
@@ -92,6 +92,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState("");
+  // セリフ入力欄の参照（分割のカーソル位置を読む）。
+  const lineRef = useRef<HTMLTextAreaElement>(null);
   // こだわり編集（現状はUIのみ・後でドメインへ結線）
   const [showAdvanced, setShowAdvanced] = useState(false);
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
@@ -532,6 +534,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <label className="field-label" htmlFor="line">ゆうこのセリフ</label>
               <textarea
                 id="line"
+                ref={lineRef}
                 className="textarea"
                 value={selected.narration.text}
                 onChange={(e) =>
@@ -565,6 +568,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {selected.narration.status === "generated" ? "声を作り直す" : "声を作成"}
                   </button>
                 </div>
+              </div>
+              <div className="row gap-sm" style={{ marginTop: 6 }}>
+                <button
+                  className="btn btn-ghost btn-icon text-sm"
+                  title="カーソル位置でこの場面を2つに分ける"
+                  disabled={
+                    selected.narration.text.trim().length < 2 ||
+                    selected.durationSec < 2 * SCENE_MIN_DURATION_SEC
+                  }
+                  onClick={() => splitScene(selected.sceneId, lineRef.current?.selectionStart ?? 0)}
+                >
+                  ここで2つに分ける
+                </button>
               </div>
               <p className="field-hint">実際の音声には VOICEVOX の起動が必要です（未起動だと作成に失敗します）。</p>
               {selected.narration.status === "failed" && narrationError && (
