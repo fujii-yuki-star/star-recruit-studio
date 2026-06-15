@@ -1,5 +1,6 @@
 // 動画クリップ設定の純粋ロジック（CLAUDE.md §4：domain は副作用なし）。
-// 正典: 11_SCHEMA_REFERENCE §7.1 / schemas $defs/Clip（startSec/endSec ≥ 0、originalAudioVolume 0–1.5）。
+// 正典: 11_SCHEMA_REFERENCE §7.1 / schemas $defs/Clip（startSec/endSec ≥ 0、originalAudioVolume 0–1.5、speed 0.5–2.0）。
+import { SPEED_DEFAULT, SPEED_MAX, SPEED_MIN } from '../constants';
 
 /**
  * クリップの時刻(秒)を [min, max] に収める。
@@ -13,4 +14,10 @@ export function clampClipTime(value: number, max?: number | null, min = 0): numb
   let v = Math.max(min, value);
   if (max != null && v > max) v = max;
   return v;
+}
+
+/** 再生速度を [SPEED_MIN, SPEED_MAX] に収める（§4）。NaN・非有限は SPEED_DEFAULT。 */
+export function clampSpeed(value: number): number {
+  if (!Number.isFinite(value)) return SPEED_DEFAULT;
+  return Math.min(SPEED_MAX, Math.max(SPEED_MIN, value));
 }

@@ -53,6 +53,8 @@ export interface Clip {
   useOriginalAudio?: boolean;
   originalAudioVolume?: number;
   fit?: Fit;
+  /** 再生速度（0.5–2.0・既定1.0）。尺は据え置き、スロット内のクリップ再生速度のみ変える（ADR-0007 Phase 3b）。 */
+  speed?: number;
 }
 
 export interface AssetMetadata {

@@ -41,6 +41,7 @@ describe('findVideoSlot', () => {
       clipEndSec: 8,
       useOriginalAudio: true,
       originalVolume: 0.3,
+      speed: 1,
     });
   });
 
@@ -70,5 +71,10 @@ describe('findVideoSlot', () => {
     } as unknown as Template;
     const sc = { assetRefs: { photo: 'asset_v' } } as unknown as Scene;
     expect(findVideoSlot(sc, imageOnly, by([videoAsset]))).toBeUndefined();
+  });
+
+  it('clip.speed が設定されていれば clampSpeed 適用済みで返す', () => {
+    const withSpeed: Asset = { ...videoAsset, clip: { ...videoAsset.clip, speed: 1.5 } };
+    expect(findVideoSlot(scene('asset_v'), template, by([withSpeed]))?.speed).toBe(1.5);
   });
 });
