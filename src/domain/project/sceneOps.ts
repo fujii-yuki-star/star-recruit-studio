@@ -1,5 +1,8 @@
 // 場面の構成編集（並べ替え・複製）の純粋ロジック（CLAUDE.md §4：副作用なし・テスト容易）。
-// 表示順＝scenes 配列順とし、scene.order（1..N）と part.sceneIds をそれに整合させる。
+// 再生・表示順の「正」＝scenes 配列順（buildExportScenes も scenes 配列を順に処理する）。
+// scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
+// 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
+import { NARRATION_STATUS } from '../enums';
 import type { Part, Scene } from './types';
 
 /** 各パートの sceneIds を、現在の scenes 配列順（パート所属は保持）に合わせて作り直す。 */
@@ -49,7 +52,9 @@ export function duplicateSceneInList(
   const copy: Scene = {
     ...src,
     sceneId: newSceneId,
-    narration: { ...src.narration, status: 'none', voicePath: null },
+    narration: { ...src.narration, status: NARRATION_STATUS.none, voicePath: null },
+    // 複製直後は検証し直す前提で警告をクリアする（古い検証結果を引き継がない）。
+    warnings: [],
   };
   const next = [...scenes];
   next.splice(idx + 1, 0, copy);

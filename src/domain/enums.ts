@@ -50,6 +50,14 @@ export type TransitionType = (typeof TRANSITION_TYPES)[number];
 export const NARRATION_STATUSES = ['none', 'pending', 'generated', 'failed'] as const;
 export type NarrationStatus = (typeof NARRATION_STATUSES)[number];
 
+/** NarrationStatus の値を参照するための定数（§6/§2-7：ロジックでの文字列直書きを避ける）。 */
+export const NARRATION_STATUS = {
+  none: 'none',
+  pending: 'pending',
+  generated: 'generated',
+  failed: 'failed',
+} as const satisfies Record<string, NarrationStatus>;
+
 export const RENDER_STATUSES = ['idle', 'running', 'completed', 'failed'] as const;
 export type RenderStatus = (typeof RENDER_STATUSES)[number];
 
