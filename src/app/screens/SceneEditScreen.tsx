@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
-import { ASSET_TYPE, SLOT_TYPE, type Fit } from "../../domain/enums";
+import { ASSET_TYPE, NARRATION_STATUS, SLOT_TYPE, type Fit } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -541,7 +541,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   patch((s) => ({
                     ...s,
                     // セリフ変更で音声は作り直しが必要なので status をリセット（古い音声との不整合防止）。
-                    narration: { ...s.narration, text: e.target.value, status: "none" },
+                    narration: { ...s.narration, text: e.target.value, status: NARRATION_STATUS.none },
                   }))
                 }
               />
@@ -563,9 +563,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <button
                     className="btn btn-secondary btn-icon text-sm"
                     onClick={() => void generateNarration(selected.sceneId)}
-                    disabled={selected.narration.status === "pending" || selected.narration.text.trim().length === 0}
+                    disabled={selected.narration.status === NARRATION_STATUS.pending || selected.narration.text.trim().length === 0}
                   >
-                    {selected.narration.status === "generated" ? "声を作り直す" : "声を作成"}
+                    {selected.narration.status === NARRATION_STATUS.generated ? "声を作り直す" : "声を作成"}
                   </button>
                 </div>
               </div>
@@ -583,7 +583,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </button>
               </div>
               <p className="field-hint">実際の音声には VOICEVOX の起動が必要です（未起動だと作成に失敗します）。</p>
-              {selected.narration.status === "failed" && narrationError && (
+              {selected.narration.status === NARRATION_STATUS.failed && narrationError && (
                 <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
                   <span>{narrationError}</span>
                 </div>

@@ -1,7 +1,7 @@
 // AI出力(ai-video-plan) → 内部 Part[] / Scene[] への変換。正典は 12_AI_PROMPT_AND_MAPPING.md §8、
 // 検証/補正ルールは 11_SCHEMA_REFERENCE.md §8,§9、エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。
 // 純粋関数（副作用なし）。Date/乱数に依存せず、ID採番は注入する（14 §4）。
-import { ASSET_TYPE, isSceneCategory } from '../enums';
+import { ASSET_TYPE, NARRATION_STATUS, isSceneCategory } from '../enums';
 import type { SceneCategory, WarningSeverity } from '../enums';
 import {
   DEFAULT_CHARACTER_ID,
@@ -183,7 +183,7 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
         pitch: null,
         intonation: null,
         voicePath: null,
-        status: 'none',
+        status: NARRATION_STATUS.none,
       };
 
       // トランジション既定（12 §8.5）

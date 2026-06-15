@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Asset, AssetRefs, Scene, Texts } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
-import { ASSET_TYPE, type LayerType, type SceneCategory } from "../../domain/enums";
+import { ASSET_TYPE, NARRATION_STATUS, type LayerType, type SceneCategory } from "../../domain/enums";
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
@@ -71,7 +71,7 @@ function buildSampleScene(template: Template, assets: Asset[]): Scene {
       poseAssetId: yuko?.assetId ?? null,
     },
     texts,
-    narration: { text: "", status: "none" },
+    narration: { text: "", status: NARRATION_STATUS.none },
     warnings: [],
   };
 }
