@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import { ASSET_TYPE, type Purpose } from "../../domain/enums";
+import { ASSET_TYPE, NARRATION_STATUS, type Purpose } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import {
@@ -248,7 +248,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const scenes = await Promise.all(
         s.scenes.map(async (sc) => {
           // 未生成・失敗の場面は古い voicePath を残さない（再生成で上書きされる）。
-          if (sc.narration.status !== "generated") {
+          if (sc.narration.status !== NARRATION_STATUS.generated) {
             return sc.narration.voicePath
               ? { ...sc, narration: { ...sc.narration, voicePath: null } }
               : sc;
@@ -306,7 +306,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 生成済みナレーション音声を data URL に復元（voicePath を持つもの。未配置は null でスキップ）。並列実行。
     const voiceLoaded = await Promise.all(
       project.scenes
-        .filter((sc) => sc.narration.status === "generated" && sc.narration.voicePath)
+        .filter((sc) => sc.narration.status === NARRATION_STATUS.generated && sc.narration.voicePath)
         .map(async (sc) => {
           const url = await readVoiceDataUrl(project.projectId, sc.narration.voicePath!);
           return url ? ([sc.sceneId, url] as const) : null;
@@ -372,7 +372,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assetRefs: {},
       character: { enabled: false, characterId: DEFAULT_CHARACTER_ID },
       texts: {},
-      narration: { text: "", status: "none" },
+      narration: { text: "", status: NARRATION_STATUS.none },
       warnings: [],
     };
     set({
@@ -642,19 +642,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status } } : s,
         ),
       }));
-    setStatus("pending");
+    setStatus(NARRATION_STATUS.pending);
     set({ narrationError: null });
     try {
       const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
       const result = await voiceProvider.synthesize({ text: scene.narration.text, ...v });
       set((st) => ({
         scenes: st.scenes.map((s) =>
-          s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: "generated" } } : s,
+          s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,
         ),
         narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
       }));
     } catch (e) {
-      setStatus("failed");
+      setStatus(NARRATION_STATUS.failed);
       set({
         narrationError:
           typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
@@ -667,7 +667,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       // 未生成（none/pending/failed）のみ対象。生成済みは個別の「声を作り直す」で上書きする。
       const ids = get()
-        .scenes.filter((s) => s.narration.text.trim().length > 0 && s.narration.status !== "generated")
+        .scenes.filter((s) => s.narration.text.trim().length > 0 && s.narration.status !== NARRATION_STATUS.generated)
         .map((s) => s.sceneId);
       await Promise.all(ids.map((id) => get().generateNarration(id)));
     } finally {
@@ -676,7 +676,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   synthesizePreview: async () => {
     const text = "こんにちは。ナレーションの聞こえ方を確認します。";
-    const narration: Narration = { text, status: "none" };
+    const narration: Narration = { text, status: NARRATION_STATUS.none };
     const v = resolveNarrationVoice(narration, get().meta.voiceSettings);
     const result = await voiceProvider.synthesize({ text, ...v });
     return result.audioDataUrl;

@@ -1,6 +1,6 @@
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
-import { ASSET_TYPE, type SceneCategory } from "../domain/enums";
+import { ASSET_TYPE, NARRATION_STATUS, type SceneCategory } from "../domain/enums";
 import type { Asset, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -75,7 +75,7 @@ export function warningsToDraftWarnings(warnings: Warning[]): DraftWarning[] {
 export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[]): PrecheckItem[] {
   const items: PrecheckItem[] = [];
 
-  const noVoice = scenes.filter((s) => s.narration.status !== "generated").length;
+  const noVoice = scenes.filter((s) => s.narration.status !== NARRATION_STATUS.generated).length;
   items.push(
     noVoice > 0
       ? { id: "voice", label: "ゆうこの声", detail: `${noVoice}つの場面で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成" }
