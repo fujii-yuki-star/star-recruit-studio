@@ -55,7 +55,8 @@ export function canExport(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-/** 場面群を実MP4へ書き出す（保存先は <appData>/exports/<fileName>.mp4）。bgm 指定時は全体に重ねる。
+/** 場面群を実MP4へ書き出す。outputPath を渡すとそこへ保存し、無ければ既定 <appData>/exports/<fileName>.mp4。
+ *  bgm 指定時は全体に重ねる。
  *  動画ありシーン（scene.video）を含む場合は projectId 必須（クリップをプロジェクトフォルダから解決する）。
  *  Tauri 非検出時は呼ばないこと（canExport で判定）。 */
 export async function exportVideo(
@@ -63,11 +64,13 @@ export async function exportVideo(
   fileName: string,
   bgm?: BgmInput,
   projectId?: string,
+  outputPath?: string,
 ): Promise<ExportReport> {
   return invoke<ExportReport>('export_video', {
     scenes,
     fileName,
     bgm: bgm ?? null,
     projectId: projectId ?? null,
+    outputPath: outputPath ?? null,
   });
 }

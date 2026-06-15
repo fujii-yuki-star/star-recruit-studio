@@ -836,6 +836,7 @@ pub fn export_video(
     file_name: String,
     bgm: Option<BgmInput>,
     project_id: Option<String>,
+    output_path: Option<String>,
 ) -> Result<ExportReport, String> {
     if scenes.is_empty() {
         return Err("書き出す場面がありません。".into());
@@ -947,24 +948,55 @@ pub fn export_video(
         }
     }
 
-    // 保存先は <appData>/exports/<安全なファイル名>.mp4（保存先ピッカーは後続）。
-    let exports = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| {
-            export_failure(
-                format!("app data dir: {e}"),
-                "動画の保存先を準備できませんでした。もう一度お試しください。",
-            )
-        })?
-        .join("exports");
-    fs::create_dir_all(&exports).map_err(|e| {
-        export_failure(
-            format!("create exports dir: {e}"),
-            "動画の保存先を準備できませんでした。もう一度お試しください。",
-        )
-    })?;
-    let out = exports.join(format!("{}.mp4", sanitize_file_name(&file_name)));
+    // 保存先：ピッカーで選ばれたパスがあればそこへ。無ければ既定 <appData>/exports/<安全名>.mp4。
+    let out = match output_path.as_deref().filter(|s| !s.is_empty()) {
+        Some(picked) => {
+            let mut p = PathBuf::from(picked);
+            // 拡張子が mp4 でなければ補う（FFmpeg のフォーマット判定のため）。
+            if p.extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("mp4"))
+                != Some(true)
+            {
+                p.set_extension("mp4");
+            }
+            // パストラバーサル防止（ダイアログ経由では起きないが invoke 直呼び対策）。
+            if p.components().any(|c| c.as_os_str() == "..") {
+                return Err(export_failure(
+                    "output_path contains '..': path traversal rejected",
+                    "保存先が不正です。保存先を選び直してください。",
+                ));
+            }
+            if let Some(parent) = p.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    export_failure(
+                        format!("create out dir: {e}"),
+                        "動画の保存先を準備できませんでした。保存先を選び直してください。",
+                    )
+                })?;
+            }
+            p
+        }
+        None => {
+            let exports = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| {
+                    export_failure(
+                        format!("app data dir: {e}"),
+                        "動画の保存先を準備できませんでした。もう一度お試しください。",
+                    )
+                })?
+                .join("exports");
+            fs::create_dir_all(&exports).map_err(|e| {
+                export_failure(
+                    format!("create exports dir: {e}"),
+                    "動画の保存先を準備できませんでした。もう一度お試しください。",
+                )
+            })?;
+            exports.join(format!("{}.mp4", sanitize_file_name(&file_name)))
+        }
+    };
 
     // BGM があれば、場面結合は一時ファイルへ→最後に BGM を重ねて out へ。無ければ直接 out へ。
     let video_path = if bgm.is_some() {

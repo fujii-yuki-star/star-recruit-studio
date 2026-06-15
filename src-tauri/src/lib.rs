@@ -1,5 +1,5 @@
 // Tauri コマンド。project.json の保存/読込はここ（infrastructure 境界）。
-// 保存先は appData/projects/<projectId>/project.json（永続化土台。保存先ピッカーは後続）。
+// 保存先は appData/projects/<projectId>/project.json（永続化土台）。
 use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
@@ -105,6 +105,7 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<ProjectSummary>, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             save_project,
