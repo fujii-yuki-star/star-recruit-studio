@@ -319,6 +319,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="editor-col">
             <h2 className="field-label">選択中の場面を編集</h2>
 
+            {/* 簡易/詳細トグル（ADR-0007 M-A：同一画面・同一データ）。オンで細かい調整を表示。 */}
+            <div className="toggle-row">
+              <span className="field-label" style={{ margin: 0 }}>詳細編集</span>
+              <Switch on={showAdvanced} onChange={setShowAdvanced} label="詳細編集" />
+            </div>
+            <p className="field-hint" style={{ marginTop: 0 }}>
+              オンにすると、動画素材の細かい調整や画面の切り替えなどを表示します。
+            </p>
+
             <div className="field">
               <label className="field-label" htmlFor="title">タイトル</label>
               <input
@@ -404,7 +413,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         ))}
                       </select>
 
-                      {isVideo && assignedAsset && (
+                      {isVideo && assignedAsset && showAdvanced && (
                         <div
                           className="card-tight"
                           style={{ background: "var(--color-surface-alt)", marginTop: 6 }}
@@ -671,14 +680,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               />
             </div>
 
-            {/* こだわり編集（現状はUIのみ） */}
-            <button
-              className="btn btn-ghost btn-block mt"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              aria-expanded={showAdvanced}
-            >
-              {showAdvanced ? "こだわり編集を閉じる" : "こだわり編集を開く"}
-            </button>
+            {/* 画面の切り替えなどの詳細は、上の「詳細編集」トグル（showAdvanced）で表示する。 */}
             {showAdvanced && (
               <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: "var(--gap-sm)" }}>
                 <div className="field">
