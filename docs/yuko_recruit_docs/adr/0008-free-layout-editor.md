@@ -28,18 +28,18 @@ ADR-0007 で詳細編集モードと「FREE テンプレに自由配置を閉じ
 
 ```jsonc
 "freeLayout": [
-  { "kind": "slot",  "x": 80, "y": 140, "w": 760, "h": 600, "zIndex": 10,
+  { "id": "free_001", "kind": "slot",  "x": 80, "y": 140, "w": 760, "h": 600, "zIndex": 10,
     "assetId": "asset_003", "fit": "cover" },              // 画像/動画（assetId 直接参照）
-  { "kind": "text",  "x": 900, "y": 160, "w": 900, "h": 200, "zIndex": 20,
+  { "id": "free_002", "kind": "text",  "x": 900, "y": 160, "w": 900, "h": 200, "zIndex": 20,
     "text": "会社紹介", "fontSize": 64, "color": "#FFFFFF", "fontWeight": "bold" },
-  { "kind": "shape", "x": 880, "y": 140, "w": 940, "h": 240, "zIndex": 15,
+  { "id": "free_003", "kind": "shape", "x": 880, "y": 140, "w": 940, "h": 240, "zIndex": 15,
     "shapeType": "rect", "fillColor": "#000000", "opacity": 0.4, "radius": 12 }
 ]
 ```
 
-- 共通: `kind`（`slot`/`text`/`shape`）・`x`/`y`/`w`/`h`（canvas 基準・整数）・`zIndex`。
+- 共通: **`id`（`free_NNN`・必須）**＝選択/ドラッグ/zIndex変更/削除で要素を見失わないための安定キー（配列 index は不可）・`kind`（`slot`/`text`/`shape`）・`x`/`y`/`w`/`h`（canvas 基準・整数・**`w>0` かつ `h>0`＝schema `exclusiveMinimum: 0`**）・`zIndex`。
 - `slot`: `assetId`（string|null）・`fit`（cover/contain/stretch）。**素材は assetId で直接参照**（assetRefs は使わない＝ADR-0007 §F）。
-- `text`: `text`（表示文字）・`fontSize`・`color`・`fontWeight`（normal/bold）。MVP はこの範囲（影/縁取りは未対応＝未解決論点）。フォントは同梱 OFL のみ（§13）。
+- `text`: `text`（表示文字）・`fontSize`・`color`・`fontWeight`（normal/bold）。MVP はこの範囲（影/縁取りは未対応＝未解決論点）。フォントは同梱 OFL のみ（§13）＝**MVP は単一フォントのため `fontFamily` は持たない**（将来フォント複数化/選択時にマイナー追加）。
 - `shape`: `shapeType`（rect/ellipse）・`fillColor`・`opacity`・`radius`。
 - 任意フィールド。通常テンプレ場面は `freeLayout` 未設定（後方互換）。
 
@@ -48,6 +48,7 @@ ADR-0007 で詳細編集モードと「FREE テンプレに自由配置を閉じ
 - `template.category` enum に **`free`** を追加。**共有 enum（11 §3.2）**のため `scene.sceneType`（`SceneCategory`）にも `free` を追加する。
 - **AI は free を選ばない**（`aiHint.recommendedSceneTypes` に含めない＋ §12 プロンプトで除外）。FREE は**利用者の手動選択専用**。
 - FREE テンプレは**組み込みの1つ**（テンプレ作成エディタではない）。`layers` は最小（背景レイヤー1つ）で、内容は `freeLayout` に乗せる。標準 FREE テンプレが無い環境では FREE を選べない（11 §9 補正）。
+- **Phase 4a の正典反映（同時更新必須）**: `free` は次の3箇所に**同時追加**する — (1) `11 §3.2`（カテゴリ一覧テキスト）・(2) `project.schema.json` の `SceneCategory` enum・(3) `template.schema.json` の `category` enum。一方、`template.schema.json` の `aiHint.recommendedSceneTypes` の items enum には **`free` を追加しない**（AI に選ばせないため）。
 
 ### 座標系・素材参照
 
@@ -56,7 +57,7 @@ ADR-0007 で詳細編集モードと「FREE テンプレに自由配置を閉じ
 
 ### 描画・書き出し（既存パイプライン流用）
 
-- **静止要素（text/shape/画像 slot）**: `layout/sceneSvg` を拡張し、freeLayout 要素を zIndex 順に SVG へ描画→PNG（ADR-0004）。通常テンプレ層（背景）の上に重ねる。
+- **静止要素（text/shape/画像 slot）**: `layout/sceneSvg` を拡張し、freeLayout 要素を zIndex 順に SVG へ描画→PNG（ADR-0004）。通常テンプレ層（背景）の上に重ねる。**`text` はユーザー入力なので、SVG 埋め込み前に HTML エンティティエスケープ（`& < > " '` 等）を必ず適用する**（既存テキスト描画と同方針）。
 - **動画要素（slot に動画 assetId）**: ADR-0006 のオーバーレイ（下PNG→動画→上PNG透過）を**要素の矩形**に適用。`splitVideoSceneSvg` を freeLayout 対応に一般化。**MVP は1場面1動画**（ADR-0006 未解決#2）。
 - 場面尺・音声（ナレ/BGM/元音声）は既存どおり。**新フィルタ不要**（自由配置は静止＝既存の still 経路＋動画は ADR-0006 経路）。
 
@@ -75,7 +76,9 @@ ADR-0007 で詳細編集モードと「FREE テンプレに自由配置を閉じ
 Phase 4a で freeLayout 用の検証を追加（既存 V1–V11 に追記）:
 - `slot` 要素の `assetId` が `project.assets` に実在するか（V4 相当）。
 - kind 別必須: `slot`→assetId/fit、`text`→text、`shape`→shapeType。
-- 座標/サイズが canvas（1920×1080）範囲を著しく外れていないか（警告＝行動は止めない）。
+- `w > 0` かつ `h > 0`（型レベルの必須＝schema `exclusiveMinimum: 0`）。
+- 座標/サイズが canvas（1920×1080）範囲を著しく外れていないか（警告＝行動は止めない。警告文言は §2-5 に従い「次の行動」を示す）。
+- 検証は domain の純粋関数として実装し、§7 に従いユニットテストを必須にする（DoD）。
 
 ## 結果・影響
 
@@ -90,4 +93,4 @@ Phase 4a で freeLayout 用の検証を追加（既存 V1–V11 に追記）:
 3. **吸着/グリッド・整列ガイド**の有無（4b）。
 4. **取り消し（undo）**の範囲（場面編集全体の課題）。
 5. FREE テンプレの**見た目パターン一覧（Looks）での扱い**（プレビューの出し方・空の器の見せ方）。
-6. `freeLayout` 要素 id の要否（並べ替え/選択の安定化に id を持たせるか、配列 index で足りるか）。
+6. ~~`freeLayout` 要素 id の要否~~ → **確定（本ADR・指摘1対応）**: 各要素は `id`（`free_NNN`）を**必須**で持つ（配列 index は使わない＝選択/ドラッグ/並べ替え/削除の安定化）。
