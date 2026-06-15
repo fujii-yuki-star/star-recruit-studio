@@ -140,11 +140,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   function onUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") void addAsset({ name: file.name, dataUrl: reader.result });
-    };
-    reader.readAsDataURL(file);
+    void addAsset(file);
     e.target.value = "";
   }
 

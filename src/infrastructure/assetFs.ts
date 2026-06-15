@@ -7,6 +7,16 @@ function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
+/** File を data URL(base64) に読み込む（画像の表示＋書き出し用＝ADR-0004 の SVGインライン）。失敗時は reject。 */
+export function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
 /** 画像(data URL)をプロジェクトに取り込み、プロジェクト相対 filePath を返す。Tauri 非検出時は null（非永続）。 */
 export async function importAssetFile(
   projectId: string,
@@ -15,6 +25,19 @@ export async function importAssetFile(
 ): Promise<string | null> {
   if (!isTauri()) return null;
   return invoke<string>('import_asset', { projectId, fileName, dataBase64: dataUrl });
+}
+
+/**
+ * 素材を生バイト（raw IPC body）で取り込む。base64 を経由しないので大きい動画でもメモリを食わない。
+ * Tauri v2: payload に Uint8Array、メタ情報は headers で渡す。Tauri 非検出時は null（非永続）。
+ */
+export async function importAssetBytes(
+  projectId: string,
+  fileName: string,
+  bytes: Uint8Array,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string>('import_asset_bytes', bytes, { headers: { projectId, fileName } });
 }
 
 /** プロジェクト相対パスの素材を data URL で読む。Tauri 非検出 or 失敗（未配置のサンプル等）時は null。 */
