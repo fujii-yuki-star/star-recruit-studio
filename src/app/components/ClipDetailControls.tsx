@@ -2,7 +2,7 @@ import type { Asset } from "../../domain/project/types";
 import type { Fit } from "../../domain/enums";
 import { clampClipTime } from "../../domain/asset/clip";
 import {
-  ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
+  DEFAULT_FIT, ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
   VOLUME_MAX, VOLUME_MIN, VOLUME_STEP,
 } from "../../domain/constants";
 import { Switch } from "./ui";
@@ -36,7 +36,7 @@ export function ClipDetailControls({
         </label>
         <select
           className="select"
-          value={clip?.fit ?? "cover"}
+          value={clip?.fit ?? DEFAULT_FIT}
           onChange={(e) => patchClip({ fit: e.target.value as Fit })}
         >
           <option value="cover">枠いっぱいに表示（はみ出しは切り取り）</option>

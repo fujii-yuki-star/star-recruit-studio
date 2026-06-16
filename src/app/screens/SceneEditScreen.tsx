@@ -402,7 +402,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <Switch on={showAdvanced} onChange={setShowAdvanced} label="詳細編集" />
             </div>
             <p className="field-hint" style={{ marginTop: 0 }}>
-              オンにすると、動画素材の細かい調整や画面の切り替えなどを表示します。
+              {isFree
+                ? "オンにすると、画面の切り替えなどを表示します。（自由配置の調整は下の「自由配置」で行えます）"
+                : "オンにすると、動画素材の細かい調整や画面の切り替えなどを表示します。"}
             </p>
 
             {/* FREE 場面は文字を「自由配置」で置くため、効かないタイトル欄は出さない（§2-4）。 */}
@@ -565,6 +567,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               const a = el.assetId ? assets.find((x) => x.assetId === el.assetId) : undefined;
                               if (a?.assetType !== ASSET_TYPE.video) return null;
                               // FREE slot に動画 → 通常スロットと同じクリップ調整（収め方/使う範囲/再生速度/元音声）。
+                              // ここで設定する収め方は clip.fit（書き出しで優先）。静止プレビューは要素の el.fit を参照する
+                              // （findVideoSlot は clip?.fit ?? el.fit ?? DEFAULT_FIT で解決）。FREE は showAdvanced に依らず常時表示（ADR-0008 §UX）。
                               return <ClipDetailControls asset={a} patchClip={(p) => patchAssetClip(a.assetId, p)} />;
                             })()}
                           </div>
