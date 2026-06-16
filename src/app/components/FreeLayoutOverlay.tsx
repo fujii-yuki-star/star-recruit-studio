@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
-import { moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b）。
 // ScenePreview は width:100% / aspect-ratio:16/9 で viewBox 1920×1080 の SVG を充填するため
@@ -34,9 +34,13 @@ interface OverlayProps {
   onSelect: (id: string | null) => void;
   /** ドラッグ/リサイズ中、新しい位置・大きさ（canvas 座標）を返す。 */
   onChange: (id: string, geom: { x: number; y: number; w?: number; h?: number }) => void;
+  /** グリッド吸着サイズ（canvas px・0=吸着なし）。 */
+  gridSize?: number;
 }
 
-export function FreeLayoutOverlay({ freeLayout, canvasW, canvasH, selectedId, onSelect, onChange }: OverlayProps) {
+export function FreeLayoutOverlay({
+  freeLayout, canvasW, canvasH, selectedId, onSelect, onChange, gridSize = 0,
+}: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
 
@@ -66,9 +70,9 @@ export function FreeLayoutOverlay({ freeLayout, canvasW, canvasH, selectedId, on
     const dx = (e.clientX - drag.startClientX) / drag.scale;
     const dy = (e.clientY - drag.startClientY) / drag.scale;
     if (drag.mode === "move") {
-      onChange(drag.id, moveFreeElement(drag.start, dx, dy));
+      onChange(drag.id, moveFreeElement(drag.start, dx, dy, gridSize));
     } else if (drag.corner) {
-      onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy));
+      onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize));
     }
   };
 
@@ -81,7 +85,19 @@ export function FreeLayoutOverlay({ freeLayout, canvasW, canvasH, selectedId, on
   return (
     <div
       ref={ref}
-      style={{ position: "absolute", inset: 0, touchAction: "none" }}
+      style={{
+        position: "absolute",
+        inset: 0,
+        touchAction: "none",
+        // グリッド吸着 ON のとき薄いグリッド線を表示（canvas px → % で線を引く）。
+        ...(gridSize > 0
+          ? {
+              backgroundImage:
+                "linear-gradient(to right, rgba(0,0,0,0.10) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.10) 1px, transparent 1px)",
+              backgroundSize: `${(gridSize / canvasW) * 100}% ${(gridSize / canvasH) * 100}%`,
+            }
+          : {}),
+      }}
       onPointerMove={handleMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}

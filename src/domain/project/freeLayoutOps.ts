@@ -74,6 +74,14 @@ export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeEl
 /** ドラッグ/リサイズで潰れないための最小サイズ（canvas px）。schema は w>0/h>0。 */
 export const FREE_MIN_SIZE = 20;
 
+/** 吸着グリッドの既定サイズ（canvas px）。「グリッドに合わせる」ON のとき使う。 */
+export const FREE_GRID_SIZE = 20;
+
+/** 値をグリッドへ吸着（canvas 座標）。grid<=0 は整数丸めのみ（吸着なし＝従来動作）。 */
+export function snapToGrid(value: number, grid: number): number {
+  return grid > 0 ? Math.round(value / grid) * grid : Math.round(value);
+}
+
 /** リサイズで掴んだ角（対角を固定する）。 */
 export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
 
@@ -88,8 +96,10 @@ interface Geom {
  * 要素をドラッグ移動した後の位置（canvas 座標・整数）。dx/dy はドラッグ開始からの総移動量（canvas 単位）。
  * 画面外も許容（一部はみ出しは演出。検証は validateFreeLayout が警告のみ）。
  */
-export function moveFreeElement(start: Geom, dx: number, dy: number): { x: number; y: number } {
-  return { x: Math.round(start.x + dx), y: Math.round(start.y + dy) };
+export function moveFreeElement(
+  start: Geom, dx: number, dy: number, grid = 0,
+): { x: number; y: number } {
+  return { x: snapToGrid(start.x + dx, grid), y: snapToGrid(start.y + dy, grid) };
 }
 
 /**
@@ -97,7 +107,7 @@ export function moveFreeElement(start: Geom, dx: number, dy: number): { x: numbe
  * dx/dy はドラッグ開始からの総移動量（canvas 単位）。
  */
 export function resizeFreeElement(
-  start: Geom, corner: ResizeCorner, dx: number, dy: number, min: number = FREE_MIN_SIZE,
+  start: Geom, corner: ResizeCorner, dx: number, dy: number, min: number = FREE_MIN_SIZE, grid = 0,
 ): Geom {
   let { x, y, w, h } = start;
   const right = start.x + start.w;
@@ -106,17 +116,18 @@ export function resizeFreeElement(
   const movesEast = corner === 'ne' || corner === 'se';
   const movesNorth = corner === 'nw' || corner === 'ne';
   const movesSouth = corner === 'sw' || corner === 'se';
-  // w/h を先に丸めてから固定辺（対角）を逆算する＝固定辺を整数で厳密に保つ（小数 dx/dy でも 1px ずれない）。
-  // start の x/w・y/h は整数前提（createFreeElement と本関数が常に整数化）。
-  if (movesEast) w = Math.round(Math.max(min, start.w + dx));
+  // 掴んだ辺をグリッドへ吸着（grid=0 は整数丸め＝従来動作）。対角を固定し、最小サイズで止める。
+  // 辺を先に確定（snap）→ 固定辺から w/h を逆算するので、固定辺は整数で厳密に保たれる（小数でも 1px ずれない）。
+  if (movesEast) w = Math.max(min, snapToGrid(right + dx, grid) - x);
   if (movesWest) {
-    w = Math.round(Math.max(min, start.w - dx));
+    w = Math.max(min, right - snapToGrid(start.x + dx, grid));
     x = right - w; // 右辺を固定
   }
-  if (movesSouth) h = Math.round(Math.max(min, start.h + dy));
+  if (movesSouth) h = Math.max(min, snapToGrid(bottom + dy, grid) - y);
   if (movesNorth) {
-    h = Math.round(Math.max(min, start.h - dy));
+    h = Math.max(min, bottom - snapToGrid(start.y + dy, grid));
     y = bottom - h; // 下辺を固定
   }
-  return { x: Math.round(x), y: Math.round(y), w, h };
+  // w/h も明示的に整数化（grid/min が将来非整数でも整数を返す＝renderer に小数を渡さない）。
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
 }

@@ -5,7 +5,7 @@ import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
-import { addFreeElement, removeFreeElement, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeElement, FREE_GRID_SIZE, removeFreeElement, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { useProjectStore } from "../store/projectStore";
@@ -130,6 +130,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 自由配置で選択中の要素（オーバーレイのハンドル表示・編集カードの強調に使う）。
   const [selectedFreeId, setSelectedFreeId] = useState<string | null>(null);
+  // 自由配置：グリッドに合わせる（ドラッグ/リサイズの吸着＋グリッド表示）。表示設定・非永続。
+  const [gridSnap, setGridSnap] = useState(false);
 
   useEffect(() => {
     if (status === "idle") void generate();
@@ -343,6 +345,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     selectedId={selectedFreeId}
                     onSelect={setSelectedFreeId}
                     onChange={(id, g) => patchFreeEl(id, g)}
+                    gridSize={gridSnap ? FREE_GRID_SIZE : 0}
                   />
                 )}
               </div>
@@ -651,6 +654,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.shape)}>
                     <PlusIcon size={14} />図形
                   </button>
+                </div>
+                <div className="toggle-row">
+                  <span className="field-label text-sm" style={{ margin: 0 }}>グリッドに合わせる</span>
+                  <Switch on={gridSnap} onChange={setGridSnap} label="グリッドに合わせる" />
                 </div>
                 {freeLayout.length === 0 ? (
                   <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
