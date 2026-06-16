@@ -68,3 +68,53 @@ export function updateFreeElement(
 export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeElement[] {
   return freeLayout.filter((e) => e.id !== id);
 }
+
+// ── ドラッグ移動・角リサイズのジオメトリ（Phase 4b）。純粋関数＝§7 テスト対象。 ──
+
+/** ドラッグ/リサイズで潰れないための最小サイズ（canvas px）。schema は w>0/h>0。 */
+export const FREE_MIN_SIZE = 20;
+
+/** リサイズで掴んだ角（対角を固定する）。 */
+export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
+
+interface Geom {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * 要素をドラッグ移動した後の位置（canvas 座標・整数）。dx/dy はドラッグ開始からの総移動量（canvas 単位）。
+ * 画面外も許容（一部はみ出しは演出。検証は validateFreeLayout が警告のみ）。
+ */
+export function moveFreeElement(start: Geom, dx: number, dy: number): { x: number; y: number } {
+  return { x: Math.round(start.x + dx), y: Math.round(start.y + dy) };
+}
+
+/**
+ * 角ハンドルでリサイズした後の矩形（canvas 座標・整数）。掴んだ角を動かし対角を固定、最小サイズで止める。
+ * dx/dy はドラッグ開始からの総移動量（canvas 単位）。
+ */
+export function resizeFreeElement(
+  start: Geom, corner: ResizeCorner, dx: number, dy: number, min: number = FREE_MIN_SIZE,
+): Geom {
+  let { x, y, w, h } = start;
+  const right = start.x + start.w;
+  const bottom = start.y + start.h;
+  const movesWest = corner === 'nw' || corner === 'sw';
+  const movesEast = corner === 'ne' || corner === 'se';
+  const movesNorth = corner === 'nw' || corner === 'ne';
+  const movesSouth = corner === 'sw' || corner === 'se';
+  if (movesEast) w = Math.max(min, start.w + dx);
+  if (movesWest) {
+    w = Math.max(min, start.w - dx);
+    x = right - w; // 右辺を固定
+  }
+  if (movesSouth) h = Math.max(min, start.h + dy);
+  if (movesNorth) {
+    h = Math.max(min, start.h - dy);
+    y = bottom - h; // 下辺を固定
+  }
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+}
