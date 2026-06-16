@@ -88,6 +88,27 @@ export type TextKey = (typeof TEXT_KEYS)[number];
 export const TRANSITION_TYPES = ['none', 'fade', 'slide', 'wipe', 'zoom'] as const;
 export type TransitionType = (typeof TRANSITION_TYPES)[number];
 
+/** TransitionType の値を参照するための定数（§6/§2-7：ロジック・既定値での文字列直書きを避ける）。 */
+export const TRANSITION_TYPE = {
+  none: 'none',
+  fade: 'fade',
+  slide: 'slide',
+  wipe: 'wipe',
+  zoom: 'zoom',
+} as const satisfies Record<string, TransitionType>;
+
+/** スライドの方向（ADR-0009・slide のときのみ有効）。 */
+export const TRANSITION_DIRECTIONS = ['left', 'right', 'up', 'down'] as const;
+export type TransitionDirection = (typeof TRANSITION_DIRECTIONS)[number];
+
+/** TransitionDirection の値を参照するための定数（§6）。 */
+export const TRANSITION_DIRECTION = {
+  left: 'left',
+  right: 'right',
+  up: 'up',
+  down: 'down',
+} as const satisfies Record<string, TransitionDirection>;
+
 export const NARRATION_STATUSES = ['none', 'pending', 'generated', 'failed'] as const;
 export type NarrationStatus = (typeof NARRATION_STATUSES)[number];
 

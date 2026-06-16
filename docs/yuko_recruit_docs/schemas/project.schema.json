@@ -260,7 +260,8 @@
       "properties": {
         "in": { "enum": ["none", "fade", "slide", "wipe", "zoom"] },
         "out": { "enum": ["none", "fade", "slide", "wipe", "zoom"] },
-        "durationSec": { "type": "number", "minimum": 0 }
+        "durationSec": { "type": "number", "minimum": 0 },
+        "direction": { "enum": ["left", "right", "up", "down"] }
       }
     },
     "Warning": {

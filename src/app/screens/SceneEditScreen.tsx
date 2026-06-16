@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
-import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType } from "../../domain/enums";
+import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { addFreeElement, removeFreeElement, updateFreeElement } from "../../domain/project/freeLayoutOps";
@@ -179,6 +179,24 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: updateFreeElement(s.freeLayout ?? [], id, p) }));
   const removeFreeEl = (id: string) =>
     patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id) }));
+  // 場面間トランジション（ADR-0009・T1）。境界 A→B は B（この場面）の transition.in が司る。
+  // 先頭場面は切り替え元が無いので設定を出さない。書き出しへの反映は T2。
+  const isFirstScene = scenes[0]?.sceneId === selected.sceneId;
+  const transitionValue =
+    selected.transition?.in === TRANSITION_TYPE.slide
+      ? `slide:${selected.transition.direction ?? TRANSITION_DIRECTION.left}`
+      : selected.transition?.in === TRANSITION_TYPE.fade
+        ? TRANSITION_TYPE.fade
+        : TRANSITION_TYPE.none;
+  const onTransitionChange = (val: string) =>
+    patch((s) => {
+      if (val.startsWith("slide:")) {
+        const direction = val.slice("slide:".length) as TransitionDirection;
+        return { ...s, transition: { ...s.transition, in: TRANSITION_TYPE.slide, out: TRANSITION_TYPE.slide, direction } };
+      }
+      const type = val as TransitionType; // none | fade
+      return { ...s, transition: { ...s.transition, in: type, out: type, direction: undefined } };
+    });
   // 場面ごとの声の大きさ（null/未設定＝全体設定を継承 §6/§2.2、値＝この場面だけ上書き）。
   const sceneNarrationVolume = selected.audioMix?.narrationVolume ?? null;
   // 書き出しと同一ロジックで「全体設定の実効値」を出す（clamp 込み・ドメイン関数を単一の参照元に）。
@@ -920,17 +938,30 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: "var(--gap-sm)" }}>
                 <div className="field">
                   <label className="field-label" htmlFor="transition">画面の切り替え</label>
-                  <select
-                    id="transition"
-                    className="select"
-                    value={selected.transition?.in ?? "fade"}
-                    onChange={(e) =>
-                      patch((s) => ({ ...s, transition: { ...s.transition, in: e.target.value as "none" | "fade", out: e.target.value as "none" | "fade" } }))
-                    }
-                  >
-                    <option value="none">なし</option>
-                    <option value="fade">フェード</option>
-                  </select>
+                  {isFirstScene ? (
+                    <p className="field-hint" style={{ marginTop: 0 }}>
+                      最初の場面のため、前からの切り替えはありません。
+                    </p>
+                  ) : (
+                    <>
+                      <select
+                        id="transition"
+                        className="select"
+                        value={transitionValue}
+                        onChange={(e) => onTransitionChange(e.target.value)}
+                      >
+                        <option value={TRANSITION_TYPE.none}>なし</option>
+                        <option value={TRANSITION_TYPE.fade}>フェード</option>
+                        <option value={`slide:${TRANSITION_DIRECTION.left}`}>スライド（左へ）</option>
+                        <option value={`slide:${TRANSITION_DIRECTION.right}`}>スライド（右へ）</option>
+                        <option value={`slide:${TRANSITION_DIRECTION.up}`}>スライド（上へ）</option>
+                        <option value={`slide:${TRANSITION_DIRECTION.down}`}>スライド（下へ）</option>
+                      </select>
+                      <p className="field-hint">
+                        ※ 画面の切り替えは現在準備中で、書き出しにはまだ反映されません。
+                      </p>
+                    </>
+                  )}
                 </div>
                 <p className="field-hint">
                   動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「ゆうこのセリフ」で場面ごとに変えられます。
