@@ -5,6 +5,9 @@
 import { SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC } from '../constants';
 import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
+// 12§7 の出力例（few-shot）。AI に ai-video-plan の構造（キー名・入れ子）を厳密に真似させるため、
+// 正典 fixture を直接読む（ミラーしない＝検証スキーマと同じ単一参照元。validate:schemas で適合確認済みの有効サンプル）。
+import aiVideoPlanExample from '../../../docs/yuko_recruit_docs/fixtures/ai-video-plan.sample.json';
 
 /**
  * 12§5 の確定システムプロンプト（日本語）。本文は正典 12§5 を転記し、ここを文言の唯一の参照元とする
@@ -109,6 +112,12 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
     '',
     '# 利用可能なゆうこ表情タグ',
     joinList(input.yukoPoseTags, ', '),
+    '',
+    '# 出力フォーマット（厳守）',
+    'トップレベルのキーは schemaVersion・videoPlan・parts（必須）と reviewNotes（任意）のみ。これ以外のキーをトップレベルに足さない。',
+    '説明文・見出し・コードフェンスを付けず、JSON のみを返す。',
+    '次の例と**同じキー名・同じ入れ子構造**で出力し、値だけ今回の会社情報・素材・見た目パターンに合わせて作る：',
+    JSON.stringify(aiVideoPlanExample, null, 2),
   ].join('\n');
 }
 
