@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
-import type { Asset, Scene } from "../../domain/project/types";
+import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
-import { ASSET_TYPE, NARRATION_STATUS, SLOT_TYPE, type Fit } from "../../domain/enums";
+import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
+import { addFreeElement, removeFreeElement, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
@@ -40,7 +41,34 @@ const sceneTypeLabel: Record<string, string> = {
   full_visual: "全画面",
   chapter: "区切り",
   no_yuko: "ゆうこなし",
+  free: "自由配置",
 };
+
+// 自由配置要素のユーザー向けラベル（§2-3：技術語を出さない）。全 kind 必須＝追加時にコンパイル検知。
+const freeKindLabel: Record<FreeElementKind, string> = {
+  slot: "素材",
+  text: "文字",
+  shape: "図形",
+};
+
+// 自由配置の位置・サイズ等の数値入力（キーボードで調整＝a11y。ドラッグ操作は Phase 4b）。
+// 既定 step=1＝座標/サイズ/重なり順は整数 px（非整数を renderer に渡さない）。
+function NumberField({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; onChange: (v: number) => void }) {
+  return (
+    <div className="field" style={{ flex: 1, margin: 0 }}>
+      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{label}</label>
+      <input
+        className="input"
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+    </div>
+  );
+}
 
 // スロットのユーザー向けラベル（レイヤーid別。複数スロットでも区別できるよう id をキーにする）。
 const slotLabel: Record<string, string> = {
@@ -137,6 +165,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   // 選択中シーンを更新するヘルパー
   const patch = (update: (s: Scene) => Scene) => updateScene(selected.sceneId, update);
+  // FREE 場面（自由配置）か。FREE のときだけ自由配置エディタを主編集面として出す（ADR-0008・§2-4）。
+  const isFree = template?.category === FREE_CATEGORY;
+  const freeLayout = selected.freeLayout ?? [];
+  // 自由配置 slot に割り当て可能な素材（画像・動画）。
+  const freeSlotAssets = assets.filter((a) => a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video);
+  const addFreeEl = (kind: FreeElementKind) =>
+    patch((s) => ({ ...s, freeLayout: addFreeElement(s.freeLayout ?? [], kind) }));
+  const patchFreeEl = (id: string, p: Partial<Omit<FreeElement, "id" | "kind">>) =>
+    patch((s) => ({ ...s, freeLayout: updateFreeElement(s.freeLayout ?? [], id, p) }));
+  const removeFreeEl = (id: string) =>
+    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id) }));
   // 場面ごとの声の大きさ（null/未設定＝全体設定を継承 §6/§2.2、値＝この場面だけ上書き）。
   const sceneNarrationVolume = selected.audioMix?.narrationVolume ?? null;
   // 書き出しと同一ロジックで「全体設定の実効値」を出す（clamp 込み・ドメイン関数を単一の参照元に）。
@@ -328,15 +367,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               オンにすると、動画素材の細かい調整や画面の切り替えなどを表示します。
             </p>
 
-            <div className="field">
-              <label className="field-label" htmlFor="title">タイトル</label>
-              <input
-                id="title"
-                className="input"
-                value={selected.texts.title ?? ""}
-                onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, title: e.target.value } }))}
-              />
-            </div>
+            {/* FREE 場面は文字を「自由配置」で置くため、効かないタイトル欄は出さない（§2-4）。 */}
+            {!isFree && (
+              <div className="field">
+                <label className="field-label" htmlFor="title">タイトル</label>
+                <input
+                  id="title"
+                  className="input"
+                  value={selected.texts.title ?? ""}
+                  onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, title: e.target.value } }))}
+                />
+              </div>
+            )}
 
             <div className="field">
               <label className="field-label" htmlFor="look">見た目パターン</label>
@@ -560,6 +602,144 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               )}
             </div>
 
+            {/* FREE 場面：自由配置エディタ（素材/文字/図形を追加・数値で位置/大きさ・重なり順・削除）。Phase 4a-3b。 */}
+            {isFree && (
+              <div className="field">
+                <label className="field-label">自由配置</label>
+                <p className="field-hint" style={{ marginTop: 0 }}>
+                  素材・文字・図形を追加して、位置や大きさを数字で調整できます。
+                </p>
+                <div className="row gap-sm" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.slot)}>
+                    <PlusIcon size={14} />素材
+                  </button>
+                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.text)}>
+                    <PlusIcon size={14} />文字
+                  </button>
+                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.shape)}>
+                    <PlusIcon size={14} />図形
+                  </button>
+                </div>
+                {freeLayout.length === 0 ? (
+                  <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
+                ) : (
+                  <div className="col gap-sm">
+                    {/* 各フィールドの ?? 既定値は型安全のための保険（FreeElement の各フィールドは optional）。
+                        正式な既定は domain の createFreeElement が必ず埋めるため通常は発動しない。 */}
+                    {freeLayout.map((el) => (
+                      <div key={el.id} className="card-tight" style={{ background: "var(--color-surface-alt)" }}>
+                        <div className="row-between" style={{ marginBottom: 4 }}>
+                          <strong className="text-sm">{freeKindLabel[el.kind]}</strong>
+                          <button
+                            className="btn btn-ghost btn-icon text-sm"
+                            style={{ color: "var(--color-danger)" }}
+                            onClick={() => removeFreeEl(el.id)}
+                            aria-label="この配置を削除"
+                          >
+                            <TrashIcon size={14} />
+                          </button>
+                        </div>
+
+                        {el.kind === FREE_ELEMENT_KIND.slot && (
+                          <div className="field" style={{ marginBottom: 6 }}>
+                            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>素材</label>
+                            <select
+                              className="select"
+                              value={el.assetId ?? ""}
+                              onChange={(e) => patchFreeEl(el.id, { assetId: e.target.value || null })}
+                            >
+                              <option value="">なし（空の枠）</option>
+                              {freeSlotAssets.map((a) => (
+                                <option key={a.assetId} value={a.assetId}>{a.displayName}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {el.kind === FREE_ELEMENT_KIND.text && (
+                          <>
+                            <div className="field" style={{ marginBottom: 6 }}>
+                              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>文字</label>
+                              <input
+                                className="input"
+                                value={el.text ?? ""}
+                                onChange={(e) => patchFreeEl(el.id, { text: e.target.value })}
+                              />
+                            </div>
+                            <div className="row gap-sm" style={{ marginBottom: 6 }}>
+                              <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
+                              <div className="field" style={{ margin: 0 }}>
+                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+                                <input type="color" value={el.color ?? "#222222"} onChange={(e) => patchFreeEl(el.id, { color: e.target.value })} />
+                              </div>
+                              <div className="field" style={{ margin: 0 }}>
+                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
+                                <select
+                                  className="select"
+                                  value={el.fontWeight ?? FONT_WEIGHT.normal}
+                                  onChange={(e) => patchFreeEl(el.id, { fontWeight: e.target.value as FontWeight })}
+                                >
+                                  <option value={FONT_WEIGHT.normal}>標準</option>
+                                  <option value={FONT_WEIGHT.bold}>太字</option>
+                                </select>
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        {el.kind === FREE_ELEMENT_KIND.shape && (
+                          <>
+                            <div className="row gap-sm" style={{ marginBottom: 6 }}>
+                              <div className="field" style={{ flex: 1, margin: 0 }}>
+                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
+                                <select
+                                  className="select"
+                                  value={el.shapeType ?? FREE_SHAPE_TYPE.rect}
+                                  onChange={(e) => patchFreeEl(el.id, { shapeType: e.target.value as FreeShapeType })}
+                                >
+                                  <option value={FREE_SHAPE_TYPE.rect}>四角</option>
+                                  <option value={FREE_SHAPE_TYPE.ellipse}>丸</option>
+                                </select>
+                              </div>
+                              <div className="field" style={{ margin: 0 }}>
+                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+                                <input type="color" value={el.fillColor ?? "#cccccc"} onChange={(e) => patchFreeEl(el.id, { fillColor: e.target.value })} />
+                              </div>
+                            </div>
+                            <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+                              <div className="field" style={{ flex: 1, margin: 0 }}>
+                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>透明度</label>
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={1}
+                                  step={0.1}
+                                  value={el.opacity ?? 1}
+                                  onChange={(e) => patchFreeEl(el.id, { opacity: Number(e.target.value) })}
+                                  style={{ width: "100%", accentColor: "var(--color-primary)" }}
+                                />
+                              </div>
+                              <NumberField label="角の丸み" value={el.radius ?? 0} min={0} onChange={(v) => patchFreeEl(el.id, { radius: v })} />
+                            </div>
+                          </>
+                        )}
+
+                        <div className="row gap-sm" style={{ marginBottom: 4 }}>
+                          <NumberField label="横位置" value={el.x} onChange={(v) => patchFreeEl(el.id, { x: v })} />
+                          <NumberField label="縦位置" value={el.y} onChange={(v) => patchFreeEl(el.id, { y: v })} />
+                        </div>
+                        <div className="row gap-sm">
+                          <NumberField label="幅" value={el.w} min={1} onChange={(v) => patchFreeEl(el.id, { w: v })} />
+                          <NumberField label="高さ" value={el.h} min={1} onChange={(v) => patchFreeEl(el.id, { h: v })} />
+                          <NumberField label="重なり順" value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="field">
               <label className="field-label" htmlFor="line">ゆうこのセリフ</label>
               <textarea
@@ -670,16 +850,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               )}
             </div>
 
-            <div className="field">
-              <label className="field-label" htmlFor="subtitle">字幕</label>
-              <textarea
-                id="subtitle"
-                className="textarea"
-                value={selected.texts.subtitle ?? ""}
-                onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))}
-                style={{ minHeight: 60 }}
-              />
-            </div>
+            {/* FREE 場面の字幕も「自由配置」の文字で代替するため出さない（§2-4）。 */}
+            {!isFree && (
+              <div className="field">
+                <label className="field-label" htmlFor="subtitle">字幕</label>
+                <textarea
+                  id="subtitle"
+                  className="textarea"
+                  value={selected.texts.subtitle ?? ""}
+                  onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))}
+                  style={{ minHeight: 60 }}
+                />
+              </div>
+            )}
 
             <div className="field">
               <label className="field-label" htmlFor="duration">表示時間（秒）</label>

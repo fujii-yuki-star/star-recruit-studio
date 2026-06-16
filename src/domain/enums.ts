@@ -25,6 +25,12 @@ export const FREE_ELEMENT_KIND = {
 export const FONT_WEIGHTS = ['normal', 'bold'] as const;
 export type FontWeight = (typeof FONT_WEIGHTS)[number];
 
+/** FontWeight の値を参照するための定数（§6：ロジック・既定値での文字列直書きを避ける）。 */
+export const FONT_WEIGHT = {
+  normal: 'normal',
+  bold: 'bold',
+} as const satisfies Record<string, FontWeight>;
+
 /** FREE 図形要素の種別（ADR-0008・line は MVP 対象外）。 */
 export const FREE_SHAPE_TYPES = ['rect', 'ellipse'] as const;
 export type FreeShapeType = (typeof FREE_SHAPE_TYPES)[number];
