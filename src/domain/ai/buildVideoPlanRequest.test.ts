@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC } from '../constants';
 import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 import {
@@ -16,6 +17,7 @@ const templates: TemplateSummary[] = [
     hasYuko: true,
     maxNarrationLength: 120,
     maxSubtitleLength: 60,
+    maxDurationSec: 12,
   },
 ];
 
@@ -61,6 +63,8 @@ describe('buildVideoPlanMessages', () => {
     expect(system).toContain('構成案');
     expect(system).toContain('templateId は「利用可能な見た目パターン一覧」に存在するIDのみ');
     expect(system).toContain('該当が無ければ null');
+    // 尺の目安は 11§4 の定数を埋め込む（検証側 clamp と黙って矛盾しない＝§2-7）。
+    expect(system).toContain(`durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒`);
   });
 
   it('ユーザーメッセージに会社情報・方針・素材・テンプレ・表情タグが入る', () => {
@@ -72,7 +76,7 @@ describe('buildVideoPlanMessages', () => {
     expect(user).toContain('希望尺(秒): 60');
     expect(user).toContain('templateId=opening_yuko_right_v1 / category=opening / hasYuko=true');
     expect(user).toContain('requiredSlots=slot_main');
-    expect(user).toContain('maxNarration=120 / maxSubtitle=60');
+    expect(user).toContain('maxNarration=120 / maxSubtitle=60 / maxDuration=12');
     expect(user).toContain('assetId=asset_photo_001 / type=image / name=オフィス外観');
     expect(user).toContain('説明=本社ビルの外観 / AI解析=青空の下のガラス張りビル / tags=オフィス, 外観');
     expect(user).toContain('# 利用可能なゆうこ表情タグ');
@@ -122,5 +126,25 @@ describe('buildVideoPlanMessages', () => {
     const user = buildVideoPlanUserMessage(input);
     expect(user).toContain('assetId=asset_photo_001');
     expect(user).toContain('assetId=asset_video_001 / type=video / name=社員インタビュー');
+  });
+
+  it('requiredSlots が空配列なら「なし」＝未提供（未入力）と区別する', () => {
+    const input = fullInput();
+    input.templates = [
+      { templateId: 't_no_slot', category: 'message', hasYuko: false, requiredSlots: [] },
+    ];
+    const user = buildVideoPlanUserMessage(input);
+    expect(user).toContain('requiredSlots=なし');
+    expect(user).not.toContain('requiredSlots=（未入力）');
+  });
+
+  it('テンプレ・素材が空配列でも例外なくセクション見出しは保たれる（上流バリデーションで非空を担保する前提）', () => {
+    const input = fullInput();
+    input.templates = [];
+    input.assets = [];
+    const user = buildVideoPlanUserMessage(input);
+    expect(user).toContain('# 利用可能な見た目パターン（このIDのみ使用可）');
+    expect(user).toContain('# 利用可能な素材（このassetIdのみ使用可）');
+    expect(user).toContain('# 利用可能なゆうこ表情タグ');
   });
 });

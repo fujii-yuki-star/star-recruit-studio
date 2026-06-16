@@ -2,13 +2,15 @@
 // 正典: 12_AI_PROMPT_AND_MAPPING §5（システムプロンプト確定版）/ §6（ユーザーメッセージテンプレート）。
 // MVP はテキストのみ（素材サムネイルは添付しない＝12§4 更新・ADR-0010 P3 へ繰り延べ）。
 // 出力契約（JSON モード／schema 指定）と検証（ajv→transformVideoPlan）は別モジュールが担う。
+import { SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC } from '../constants';
 import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 
 /**
- * 12§5 の確定システムプロンプト（日本語・逐語）。
- * 文言・しきい値（3〜15 秒 等）は正典 12§5 の本文をそのまま転記したもので、ここを唯一の参照元とする
- * （プロンプト本文の散在を防ぐ。clamp 等のロジック側の定数は別途 11§4 を参照する）。
+ * 12§5 の確定システムプロンプト（日本語）。本文は正典 12§5 を転記し、ここを文言の唯一の参照元とする
+ * （プロンプト本文の散在を防ぐ）。ただし**尺の目安（最小〜最大秒）は 11§4 の
+ * SCENE_MIN/MAX_DURATION_SEC を埋め込む**＝AIへの指示と検証側（P1-B の clamp）の閾値が黙って
+ * 矛盾しないようにする（§2-7）。定数値（3/15）は 12§5 本文と一致しており、変えるときは 11§4・12§5 を揃える。
  */
 export const VIDEO_PLAN_SYSTEM_PROMPT = `あなたは採用動画の構成プランナーです。会社情報・利用可能な素材・利用可能な見た目パターン（テンプレート）をもとに、採用動画の構成案を作成します。
 
@@ -22,7 +24,7 @@ export const VIDEO_PLAN_SYSTEM_PROMPT = `あなたは採用動画の構成プラ
 - narrationText は会社マスコット「ゆうこ」が話す、自然で親しみやすい日本語にする。各見た目パターンの maxNarrationLength を超えない。
 - texts.subtitle は字幕用に短くする（各見た目パターンの maxSubtitleLength 以内）。ナレーションの要約でよい。
 - texts.title / texts.main は画面に出す短い語句にする。
-- durationSec は 3〜15 秒を目安にする。見た目パターンに上限があれば従う。
+- durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒を目安にする。見た目パターンに上限（maxDuration）があれば従う。
 - 全シーンの合計尺を targetDurationSec に近づける。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。
 - yukoPoseTag は場面に合う表情タグ（例：smile, guide, bow）を「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
@@ -48,12 +50,22 @@ function orNotProvidedNum(value: number | undefined | null): string {
   return value === undefined || value === null ? NOT_PROVIDED : String(value);
 }
 
+/**
+ * requiredSlots は「空配列＝スロット不要（意図的に無し）」を「未提供」と区別する
+ * （`undefined`→未入力 / `[]`→「なし」）。AI が空配列を「データ欠落」と誤解しないため。
+ */
+function formatRequiredSlots(slots: readonly string[] | undefined): string {
+  if (slots === undefined) return NOT_PROVIDED;
+  if (slots.length === 0) return 'なし';
+  return slots.join(', ');
+}
+
 /** 12§6「利用可能な見た目パターン」1件分の行（templateId のみ使用可をAIに示す）。 */
 function templateBlock(t: TemplateSummary): string {
   return [
     `- templateId=${t.templateId} / category=${t.category} / hasYuko=${t.hasYuko}`,
-    `  useCase=${orNotProvided(t.useCase)} / requiredSlots=${joinList(t.requiredSlots, ', ')}`,
-    `  maxNarration=${orNotProvidedNum(t.maxNarrationLength)} / maxSubtitle=${orNotProvidedNum(t.maxSubtitleLength)}`,
+    `  useCase=${orNotProvided(t.useCase)} / requiredSlots=${formatRequiredSlots(t.requiredSlots)}`,
+    `  maxNarration=${orNotProvidedNum(t.maxNarrationLength)} / maxSubtitle=${orNotProvidedNum(t.maxSubtitleLength)} / maxDuration=${orNotProvidedNum(t.maxDurationSec)}`,
   ].join('\n');
 }
 
