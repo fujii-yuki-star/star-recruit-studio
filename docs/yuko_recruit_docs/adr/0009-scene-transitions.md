@@ -28,7 +28,9 @@
 
 - 既存: `transition: { in?: TransitionType, out?: TransitionType, durationSec?: number }`（`TransitionType` = none/fade/slide/wipe/zoom）。
 - 追加: **`direction?: 'left' | 'right' | 'up' | 'down'`**（`type='slide'` のときのみ有効）。`TransitionType` enum は**維持**（wipe/zoom は MVP 対象外＝指定されても fade にフォールバック）。schema/enum へ後方互換追加（マイナー）。
-- 境界 A→B の演出 = **B.transition.in（＋ direction）**。先頭場面の `in` は MVP では無効（黒からのフェードイン等は将来）。`transition.out` は当面 `in` とミラー（SceneEdit が in/out 同値で設定）で、末尾の exit 演出用に予約（未解決#1）。
+- 境界 A→B の演出 = **B.transition.in（＋ direction）**。
+  - **先頭場面の扱い**: 先頭場面は「切り替え元が無い」ため、SceneEdit では遷移設定を**出さない**（先頭であることが分かるよう「最初の場面です」等のヒントのみ）。データ上 `transition.in` が入っていても先頭は書き出しで無視（黒からのフェードイン等は将来）。
+  - **`direction` は MVP では単一フィールド＝`in` に適用**。`transition.out` は当面 `in` とミラー（SceneEdit が in/out 同値で設定）で末尾 exit 演出用に予約（未解決#1）。将来 out を独立演出にする場合は、in 方向と out 方向が異なり得る（例「左から入って右へ出る」）ため `inDirection`/`outDirection` への分離を検討する。
 - 解決は domain の純粋関数（`resolveTransition(prev, next)` 相当）で、enum 検証・wipe/zoom フォールバック・D の clamp（`0 ≤ D < min(隣接場面尺)`）を行う＝§7 テスト必須。
 
 ### FFmpeg（書き出し）
@@ -36,7 +38,7 @@
 - **全場面が none** → 従来の **concat `-c copy`**（高速・無劣化）を維持（回帰なし）。
 - **1つでも遷移あり** → **xfade パイプライン**：per-scene MP4 を順に xfade で連結。
   - 映像: `xfade=transition=fade|slideleft|slideright|slideup|slidedown:duration=D:offset=O`。`O` = それまでの**実効累積尺**（Σ前場面尺 − Σ既適用 D）。
-  - 音声: `acrossfade=d=D`（無音場面は apad 後にクロスフェード）。
+  - 音声: `acrossfade=d=D`。per-scene MP4 は既に**「映像＋AAC音声」で統一**済み（`ffmpeg.rs`＝無音場面も AAC 無音トラックを持つ。concat copy 成立の前提）なので、両入力とも有効な音声があり acrossfade は成立する（無音の `apad` は per-scene 生成側で担保済み＝filtergraph 側の特別扱い不要）。
   - 再エンコード（OpenH264／libx264・ADR-0002）。`-c copy` は使えない。
 - **offset／実効尺の算定は domain の純粋関数**（テスト）。Rust は filtergraph 文字列の生成＋実行（`xfade_args` 純粋関数＋cargo test）。
 
@@ -48,7 +50,8 @@
 
 ### 段階分割（producer/consumer を各段で成立）
 
-- **T1**: データ（`direction` 追加・schema/enum 追補）＋ 純粋ロジック（`resolveTransition`・実効尺/offset 計算・D clamp・wipe/zoom フォールバック）＋ SceneEdit UI（種別＋方向）。テスト必須。**書き出しは未接続（concat copy のまま＝UI は「書き出しは次段で対応」と明示）**。
+- **T1**: データ（`direction` 追加）＋**正典更新**（`11 §3.4` の `transition(MVP)` 表記で slide を「将来」→MVP へ昇格・`schemas/project.schema.json` の `transition` に `direction` を後方互換追加）＋ 純粋ロジック（`resolveTransition`・実効尺/offset 計算・D clamp・wipe/zoom フォールバック）＋ SceneEdit UI（種別＋方向・先頭場面は遷移UIを出さない）。テスト必須。**書き出しは未接続（concat copy のまま）**。
+  - **dead-UI 防止**: T1 と T2 は**同一マイルストーン内で連続して完了**させる。やむを得ず T1 を単独でリリースする場合は、SceneEdit の遷移設定に「**近日対応予定・現在は書き出しに反映されません**」案内を必ず表示する（プレビュー未反映を説明する「書き出すと切り替わります」とは別物）。
 - **T2**: 書き出し＝xfade パイプライン（Rust filtergraph・audio acrossfade・全 none 時 fallback copy）。`xfade_args` 純粋関数＋cargo test、`tauri dev` で実 MP4 E2E。
 - **T3**: 仕上げ（プレビュー案内の磨き込み・極短場面/先頭末尾の扱い・BGM との整合確認）。
 - schemaVersion は後方互換追加＝マイナー（1.x）。
@@ -58,7 +61,9 @@
 - 全 none のプロジェクト・既存書き出しは**原則無改修**（concat copy 維持＝回帰なし・高速・無劣化）。
 - トランジションあり時のみ再エンコード（時間増・品質は ADR-0002 コーデックで一定）。
 - `domain` にトランジション解決＋尺/offset 計算（純粋・テスト）。`renderer/export` と Rust に xfade 結合を追加。
-- BGM は全体ミックス（場面 MP4 とは別レイヤ）のため、トランジションの影響を受けない想定（要確認＝未解決#6）。
+- **ADR-0001 §MVPの前提**の「シーン間トランジションは none/fade のみ」は本 ADR の採用で **slide を追加**（ADR-0001 側も追記済み）。場面"内"が静止である不変条件は変わらない。
+- **AI は slide を選ばない（決定）**: 遷移の slide/direction は**利用者の手動設定専用**（FREE と同方針）。`ai-video-plan.schema.json` の transition は従来どおり（`direction` 追加なし）、`12 §8.5` の既定（in/out=fade）も維持。AI は none/fade を既定で出し、利用者が後から slide/方向を設定する。
+- **BGM 総尺（未解決#6 の解決方針）**: BGM は xfade 結合**後**の最終 MP4 に amix する（ADR-0006 同様）。基準を **xfade 後の実効総尺（Σ尺−ΣD）**とし、`bgmSettings.fadeOutSec` もこの実効総尺を基点に計算する＝これで基本は解決する見込み（タイミングは T2 で実測確認）。
 
 ## 未解決の論点
 
@@ -67,4 +72,4 @@
 3. **音声クロスフェードの既定**: `acrossfade` か単純カットか。MVP は acrossfade。
 4. **極短場面（D ≥ 場面尺）**: D の clamp と利用者への警告（§2-5「次の行動」）。
 5. **通し再生プレビュー**: 書き出し前に遷移を確認できる簡易再生。別課題。
-6. **BGM との整合**: 全体ミックス前提だが、xfade で総尺が縮む（Σ−ΣD）ため BGM 長さ・フェードの再計算が要るか。
+6. **BGM との整合（解決方針あり・T2 で実測確認）**: BGM は xfade 後の実効総尺（Σ尺−ΣD）に amix し、`fadeOutSec` も実効総尺基点で計算する（「結果・影響」に記載）。実フェード timing は T2 で実測確認。
