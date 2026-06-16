@@ -128,5 +128,6 @@ export function resizeFreeElement(
     h = Math.max(min, bottom - snapToGrid(start.y + dy, grid));
     y = bottom - h; // 下辺を固定
   }
-  return { x: Math.round(x), y: Math.round(y), w, h };
+  // w/h も明示的に整数化（grid/min が将来非整数でも整数を返す＝renderer に小数を渡さない）。
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
 }

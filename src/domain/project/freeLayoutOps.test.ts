@@ -170,4 +170,24 @@ describe('snapToGrid とグリッド吸着（FREE 仕上げ）', () => {
     expect(r2.x).toBe(120);
     expect(r2.x + r2.w).toBe(300); // 右辺はグリッドに依らず固定
   });
+
+  it('resizeFreeElement：grid 吸着後に min を下回っても固定辺は保たれる', () => {
+    // nw で大きく引き込み、吸着後 w/h が min(20) 未満 → 20 でクリップ。右下(100,100)固定。
+    const r = resizeFreeElement({ x: 0, y: 0, w: 100, h: 100 }, 'nw', 90, 90, 20, 20);
+    expect(r.w).toBe(20);
+    expect(r.h).toBe(20);
+    expect(r.x + r.w).toBe(100); // 右辺固定
+    expect(r.y + r.h).toBe(100); // 下辺固定
+  });
+
+  it('resizeFreeElement：ne/sw も grid 吸着しつつ固定辺を保つ', () => {
+    // ne：右辺 100+15=115→120 吸着で w=120、左辺(0)固定。
+    const ne = resizeFreeElement({ x: 0, y: 0, w: 100, h: 100 }, 'ne', 15, 0, 20, 20);
+    expect(ne.w).toBe(120);
+    expect(ne.x).toBe(0);
+    // sw：左辺 100−15=85→80 吸着で右辺(200)固定・x=80。
+    const sw = resizeFreeElement({ x: 100, y: 0, w: 100, h: 100 }, 'sw', -15, 15, 20, 20);
+    expect(sw.x).toBe(80);
+    expect(sw.x + sw.w).toBe(200); // 右辺固定
+  });
 });
