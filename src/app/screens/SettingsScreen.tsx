@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHead, Switch } from "../components/ui";
 import { FolderIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
+import { deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
+import { GEMINI_PROVIDER } from "../../infrastructure/aiProviders/geminiProvider";
 import {
   getVoicevoxSpeaker, getVoicevoxUrl, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
@@ -15,8 +17,11 @@ export function SettingsScreen() {
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
 
-  const [ai, setAi] = useState("standard");
   const [confirmBeforeSend, setConfirmBeforeSend] = useState(true);
+  const [keyInput, setKeyInput] = useState("");
+  const [aiConnected, setAiConnected] = useState(false);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyError, setKeyError] = useState("");
   const [voicevoxUrl, setUrl] = useState(() => getVoicevoxUrl());
   const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? NARRATOR_STYLES[0].speaker);
   const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
@@ -47,6 +52,40 @@ export function SettingsScreen() {
     }
   }
 
+  // 起動時に接続キーの有無を確認（値は取得しない＝有無のみ）。
+  useEffect(() => {
+    void hasApiKey(GEMINI_PROVIDER)
+      .then(setAiConnected)
+      .catch(() => setAiConnected(false));
+  }, []);
+
+  async function onSaveKey() {
+    setKeyBusy(true);
+    setKeyError("");
+    try {
+      await saveApiKey(GEMINI_PROVIDER, keyInput.trim());
+      setKeyInput("");
+      setAiConnected(await hasApiKey(GEMINI_PROVIDER));
+    } catch (e) {
+      setKeyError(typeof e === "string" ? e : "キーを保存できませんでした。もう一度お試しください。");
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
+  async function onClearKey() {
+    setKeyBusy(true);
+    setKeyError("");
+    try {
+      await deleteApiKey(GEMINI_PROVIDER);
+      setAiConnected(await hasApiKey(GEMINI_PROVIDER));
+    } catch (e) {
+      setKeyError(typeof e === "string" ? e : "接続を削除できませんでした。もう一度お試しください。");
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
   return (
     <div className="main-scroll">
       <PageHead
@@ -55,40 +94,73 @@ export function SettingsScreen() {
       />
 
       <div style={{ maxWidth: 760 }} className="col gap-lg">
-        {/* 使用するAI / 接続情報 */}
+        {/* 動画案を作るAI（接続キーの保存・削除） */}
         <div className="card">
-          <h2 className="section-title">使用するAI</h2>
-          <div className="field">
-            <label className="field-label" htmlFor="ai">
-              動画案を作るAI
-            </label>
-            <select
-              id="ai"
-              className="select"
-              value={ai}
-              onChange={(e) => setAi(e.target.value)}
+          <h2 className="section-title">動画案を作るAI</h2>
+          <p className="page-desc text-pretty">
+            動画案づくりに Google の Gemini を使えます。お持ちの接続キーを、この端末の安全な保管領域に保存します（キーは画面には表示しません）。
+          </p>
+
+          <div className="toggle-row">
+            <div>
+              <span className="field-label" style={{ margin: 0 }}>
+                接続の状態
+              </span>
+              <p className="field-hint" style={{ marginTop: 2 }}>
+                {aiConnected
+                  ? "接続済み。動画案づくりに使われます。"
+                  : "未接続のときは、お試し用の動画案でプレビューできます。"}
+              </p>
+            </div>
+            <span className={`badge ${aiConnected ? "badge-teal" : "badge-gray"}`}>
+              {aiConnected ? "接続済み" : "未接続"}
+            </span>
+          </div>
+
+          {aiConnected ? (
+            <button
+              className="btn btn-secondary"
+              onClick={() => void onClearKey()}
+              disabled={keyBusy}
             >
-              <option value="standard">標準のAI（おすすめ）</option>
-              <option value="light">かんたんなAI（速い）</option>
-              <option value="custom">自分で接続するAI</option>
-            </select>
-          </div>
+              接続を削除する
+            </button>
+          ) : (
+            <div className="field">
+              <label className="field-label" htmlFor="aiKey">
+                接続キー（Gemini）
+              </label>
+              <div className="row gap-sm">
+                <input
+                  id="aiKey"
+                  className="input grow"
+                  type="password"
+                  autoComplete="off"
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  placeholder="接続キーを貼り付け"
+                />
+                <button
+                  className="btn btn-primary"
+                  onClick={() => void onSaveKey()}
+                  disabled={!keyInput.trim() || keyBusy}
+                >
+                  保存する
+                </button>
+              </div>
+              <p className="field-hint">
+                キーはこの端末の安全な保管領域に保存し、画面・ファイル・送信内容には残しません。
+              </p>
+            </div>
+          )}
+          {keyError && (
+            <div className="notice notice-warn" role="alert" style={{ marginTop: 8 }}>
+              <span>{keyError}</span>
+            </div>
+          )}
+          <p className="field-hint mt">※ OpenAI への接続は準備中です。</p>
 
-          <div className="field">
-            <label className="field-label" htmlFor="conn">
-              接続情報
-            </label>
-            <input
-              id="conn"
-              className="input"
-              type="password"
-              placeholder="接続情報を入力（必要な場合のみ）"
-            />
-            <p className="field-hint">
-              標準のAIをお使いの場合、ここは入力しなくて大丈夫です。
-            </p>
-          </div>
-
+          <hr className="divider" />
           <div className="toggle-row">
             <div>
               <span className="field-label" style={{ margin: 0 }}>

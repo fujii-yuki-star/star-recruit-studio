@@ -11,6 +11,7 @@ interface GeneratingProps {
 // マウント時に Mock AI → 検証/変換 を実行し、結果はストアに入る。進捗はUX用のアニメーション。
 export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   const status = useProjectStore((s) => s.status);
+  const aiError = useProjectStore((s) => s.aiError);
   const generate = useProjectStore((s) => s.generate);
   const fail = useProjectStore((s) => s.fail);
   const reset = useProjectStore((s) => s.reset);
@@ -33,7 +34,10 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
       <div className="main-scroll">
         <ErrorView
           title="動画案の作成に失敗しました"
-          message="通信状況や設定を確認して、もう一度お試しください。手動で作成を始めることもできます。"
+          message={
+            aiError ??
+            "通信状況や設定を確認して、もう一度お試しください。手動で作成を始めることもできます。"
+          }
           actions={[
             {
               label: "もう一度試す",
