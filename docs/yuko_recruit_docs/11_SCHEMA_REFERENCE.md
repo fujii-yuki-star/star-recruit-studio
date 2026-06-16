@@ -196,7 +196,7 @@
 | scenes | Scene[] | ● | §7.4 |
 
 **7.1.1 videoSettings**: aspectRatio(enum `16:9`) ● / width(=1920) ● / height(=1080) ● / fps(=30) ● / targetDurationSec(≤`VIDEO_TARGET_MAX_SEC_MVP`) ● / maxDurationSec(≤`VIDEO_HARD_MAX_SEC`) ●
-**7.1.2 companyInfo**: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○
+**7.1.2 companyInfo**: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○ / additionalNotes ○（利用者の自由記述。AIへそのまま送る補足）
 
 ### 7.2 Asset
 

@@ -22,6 +22,8 @@ export interface CompanyInfo {
   strengths?: string[];
   desiredPerson?: string;
   recruitUrl?: string;
+  /** 利用者が AI へ自由に伝える補足（そのまま送信。伝えたい雰囲気・避けたい表現など）。 */
+  additionalNotes?: string;
 }
 
 export interface ToneSettings {

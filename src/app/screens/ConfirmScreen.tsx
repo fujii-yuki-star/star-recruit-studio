@@ -68,6 +68,17 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
                   写真{photoCount}枚・動画{videoCount}本ぶんの文字情報
                 </strong>
               </div>
+              {companyInfo.additionalNotes?.trim() && (
+                <>
+                  <hr className="divider" style={{ margin: "4px 0" }} />
+                  <div className="row-between" style={{ alignItems: "flex-start", gap: "var(--gap-md)" }}>
+                    <span className="text-muted">補足（その他）</span>
+                    <strong style={{ textAlign: "right", maxWidth: "70%", whiteSpace: "pre-wrap" }}>
+                      {companyInfo.additionalNotes}
+                    </strong>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
