@@ -106,15 +106,17 @@ export function resizeFreeElement(
   const movesEast = corner === 'ne' || corner === 'se';
   const movesNorth = corner === 'nw' || corner === 'ne';
   const movesSouth = corner === 'sw' || corner === 'se';
-  if (movesEast) w = Math.max(min, start.w + dx);
+  // w/h を先に丸めてから固定辺（対角）を逆算する＝固定辺を整数で厳密に保つ（小数 dx/dy でも 1px ずれない）。
+  // start の x/w・y/h は整数前提（createFreeElement と本関数が常に整数化）。
+  if (movesEast) w = Math.round(Math.max(min, start.w + dx));
   if (movesWest) {
-    w = Math.max(min, start.w - dx);
+    w = Math.round(Math.max(min, start.w - dx));
     x = right - w; // 右辺を固定
   }
-  if (movesSouth) h = Math.max(min, start.h + dy);
+  if (movesSouth) h = Math.round(Math.max(min, start.h + dy));
   if (movesNorth) {
-    h = Math.max(min, start.h - dy);
+    h = Math.round(Math.max(min, start.h - dy));
     y = bottom - h; // 下辺を固定
   }
-  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+  return { x: Math.round(x), y: Math.round(y), w, h };
 }

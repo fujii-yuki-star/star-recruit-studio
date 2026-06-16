@@ -121,4 +121,24 @@ describe('resizeFreeElement', () => {
   it('小数の移動量は丸める', () => {
     expect(resizeFreeElement({ x: 0, y: 0, w: 100, h: 100 }, 'se', 10.6, 10.2)).toEqual({ x: 0, y: 0, w: 111, h: 110 });
   });
+
+  it('sw（左下）は右辺を固定して左へ縮め、下へ伸ばす', () => {
+    const r = resizeFreeElement(start, 'sw', 50, 50);
+    expect(r).toEqual({ x: 150, y: 100, w: 150, h: 250 });
+    expect(r.x + r.w).toBe(300); // 右辺固定
+    expect(r.y).toBe(100); // 上辺固定
+  });
+
+  it('小数 dx/dy でも固定辺（対角）は整数で厳密に保たれる（NW/NE/SW・1px ずれない）', () => {
+    const nw = resizeFreeElement(start, 'nw', 0.6, 0.6);
+    expect(nw.x + nw.w).toBe(300); // 右辺
+    expect(nw.y + nw.h).toBe(300); // 下辺
+    const ne = resizeFreeElement(start, 'ne', 0.6, 0.6);
+    expect(ne.y + ne.h).toBe(300); // 下辺固定
+    const sw = resizeFreeElement(start, 'sw', 0.6, 0.6);
+    expect(sw.x + sw.w).toBe(300); // 右辺固定
+    for (const r of [nw, ne, sw]) {
+      expect([r.x, r.y, r.w, r.h].every(Number.isInteger)).toBe(true);
+    }
+  });
 });

@@ -54,12 +54,15 @@ export function FreeLayoutOverlay({ freeLayout, canvasW, canvasH, selectedId, on
       id: el.id, mode, corner,
       startClientX: e.clientX, startClientY: e.clientY,
       start: { x: el.x, y: el.y, w: el.w, h: el.h },
+      // 表示px→canvas の縮尺。canvas もプレビューも 16:9（レターボックス無し）ゆえ scaleX===scaleY なので
+      // 幅基準（width/canvasW）で算出すれば縦も一致する（canvasH は %配置に使用）。
       scale: width / canvasW,
     });
   };
 
   const handleMove = (e: ReactPointerEvent) => {
     if (!drag) return;
+    e.preventDefault(); // ドラッグ中のテキスト選択等の既定動作を抑制（beginDrag と一貫）
     const dx = (e.clientX - drag.startClientX) / drag.scale;
     const dy = (e.clientY - drag.startClientY) / drag.scale;
     if (drag.mode === "move") {
