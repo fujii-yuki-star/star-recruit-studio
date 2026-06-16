@@ -78,3 +78,56 @@ describe('findVideoSlot', () => {
     expect(findVideoSlot(scene('asset_v'), template, by([withSpeed]))?.speed).toBe(1.5);
   });
 });
+
+const freeTemplate = {
+  category: 'free',
+  layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 }],
+} as unknown as Template;
+const freeScene = (freeLayout: unknown[]): Scene =>
+  ({ assetRefs: {}, freeLayout } as unknown as Scene);
+
+describe('findVideoSlot（FREE 自由配置・ADR-0008 Phase 4c）', () => {
+  it('freeLayout の slot 要素に動画があれば要素IDを slotLayerId に返す', () => {
+    const sc = freeScene([
+      { id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 100, text: 'a' },
+      { id: 'free_002', kind: 'slot', x: 100, y: 100, w: 800, h: 600, assetId: 'asset_v', fit: 'cover' },
+    ]);
+    const r = findVideoSlot(sc, freeTemplate, by([videoAsset]));
+    expect(r?.slotLayerId).toBe('free_002'); // layout の同 id アイテムが矩形を持つ
+    expect(r?.clipRelPath).toBe('assets/asset_v.mp4');
+    expect(r?.fit).toBe('contain'); // clip.fit 優先
+    expect(r?.clipStartSec).toBe(2);
+    expect(r?.speed).toBe(1);
+  });
+
+  it('slot 要素が画像なら undefined', () => {
+    const sc = freeScene([{ id: 'free_001', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: 'asset_i', fit: 'cover' }]);
+    expect(findVideoSlot(sc, freeTemplate, by([imageAsset]))).toBeUndefined();
+  });
+
+  it('slot 要素の assetId が null（空スロット）なら undefined', () => {
+    const sc = freeScene([{ id: 'free_001', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: null }]);
+    expect(findVideoSlot(sc, freeTemplate, by([videoAsset]))).toBeUndefined();
+  });
+
+  it('text/shape のみ・freeLayout 空・未設定はいずれも undefined', () => {
+    expect(findVideoSlot(freeScene([{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'a' }]), freeTemplate, by([videoAsset]))).toBeUndefined();
+    expect(findVideoSlot(freeScene([]), freeTemplate, by([videoAsset]))).toBeUndefined();
+    expect(findVideoSlot({ assetRefs: {} } as unknown as Scene, freeTemplate, by([videoAsset]))).toBeUndefined();
+  });
+
+  it('動画 slot 要素が複数あれば最初の1つ（MVP 1場面1動画）', () => {
+    const sc = freeScene([
+      { id: 'free_001', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: 'asset_v', fit: 'cover' },
+      { id: 'free_002', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: 'asset_v2', fit: 'cover' },
+    ]);
+    const v2: Asset = { ...videoAsset, assetId: 'asset_v2' };
+    expect(findVideoSlot(sc, freeTemplate, by([videoAsset, v2]))?.slotLayerId).toBe('free_001');
+  });
+
+  it('clip.fit 未指定なら el.fit にフォールバック', () => {
+    const noClipFit: Asset = { ...videoAsset, clip: { useOriginalAudio: false } };
+    const sc = freeScene([{ id: 'free_001', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: 'asset_v', fit: 'stretch' }]);
+    expect(findVideoSlot(sc, freeTemplate, by([noClipFit]))?.fit).toBe('stretch'); // el.fit
+  });
+});

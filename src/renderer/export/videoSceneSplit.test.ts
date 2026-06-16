@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { SceneLayout } from '../layout';
+import { layoutScene } from '../layout';
+import type { Scene } from '../../domain/project/types';
+import type { Template } from '../../domain/template/types';
 import { splitVideoSceneSvg } from './videoSceneSplit';
 
 // 背景(z0・色は backgroundColor とは別)・動画スロット(z10)・同z テキスト(z10)・タイトル(z30) の最小レイアウト。
@@ -62,5 +65,33 @@ describe('splitVideoSceneSvg（ADR-0006 下/上分割）', () => {
     expect(splitVideoSceneSvg(layout(), 'bg')).toBeNull(); // fill
     expect(splitVideoSceneSvg(layout(), 'title')).toBeNull(); // text
     expect(splitVideoSceneSvg(layout(), 'nope')).toBeNull(); // 未知
+  });
+});
+
+// Phase 4c：FREE の freeLayout slot 要素を、実 layoutScene → splitVideoSceneSvg で
+// 要素 id のまま分割できる（＝動画は要素矩形に合成・Rust 経路は無改修）ことを通しで確認する。
+describe('splitVideoSceneSvg × FREE freeLayout（Phase 4c）', () => {
+  const freeTemplate: Template = {
+    schemaVersion: '1.0', templateId: 'free_canvas_v1', name: '自由配置', category: 'free',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 }, defaults: { backgroundColor: '#ffffff' },
+    layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+  };
+  const freeScene: Scene = {
+    sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'free', templateId: 'free_canvas_v1',
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+    narration: { text: '', status: 'none' }, warnings: [],
+    freeLayout: [
+      { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 1920, h: 1080, zIndex: 1, shapeType: 'rect', fillColor: '#101010' },
+      { id: 'free_002', kind: 'slot', x: 200, y: 150, w: 900, h: 600, zIndex: 5, assetId: 'asset_v', fit: 'cover' },
+      { id: 'free_003', kind: 'text', x: 100, y: 100, w: 500, h: 80, zIndex: 9, text: '前面テキスト' },
+    ],
+  };
+
+  it('slot 要素 id で分割でき、矩形は要素の x/y/w/h（低z は下・高z は上）', () => {
+    const r = splitVideoSceneSvg(layoutScene(freeScene, freeTemplate), 'free_002');
+    expect(r?.slot).toEqual({ x: 200, y: 150, w: 900, h: 600 });
+    expect(r?.aboveSvg).toContain('前面テキスト'); // z9 > slot z5 → 上（透過）
+    expect(r?.belowSvg).not.toContain('前面テキスト');
+    expect(r?.belowSvg).toContain('fill="#101010"'); // 図形 z1 < slot → 下
   });
 });

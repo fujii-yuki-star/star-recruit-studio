@@ -678,6 +678,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                 <option key={a.assetId} value={a.assetId}>{a.displayName}</option>
                               ))}
                             </select>
+                            {el.assetId &&
+                              assets.find((a) => a.assetId === el.assetId)?.assetType === ASSET_TYPE.video && (
+                                <p className="field-hint" style={{ marginTop: 4 }}>
+                                  ▶ 動画素材です。確認画面では1コマ表示ですが、書き出すと動画が入ります。
+                                </p>
+                              )}
                           </div>
                         )}
 
