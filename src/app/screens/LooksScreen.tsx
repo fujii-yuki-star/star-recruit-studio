@@ -87,8 +87,13 @@ function buildSampleScene(template: Template, assets: Asset[]): Scene {
   };
 }
 
-// テンプレが使う要素（レイヤー種別）を重複なく日本語ラベルで返す。
+// FREE（自由配置）で「置けるもの」のラベル。FREE はテンプレ層でなく freeLayout に内容を持つため、
+// レイヤー種別ではなく配置できる要素（素材/文字/図形）を示す（ADR-0008・#5）。
+const FREE_PLACEABLE_LABELS = ["素材", "文字", "図形"];
+
+// テンプレが使う要素を重複なく日本語ラベルで返す。FREE は「自由に置ける要素」を返す。
 function usedElements(template: Template): string[] {
+  if (template.category === FREE_CATEGORY) return FREE_PLACEABLE_LABELS;
   const out: string[] = [];
   for (const layer of template.layers) {
     const label = layerLabel[layer.type];
@@ -155,7 +160,9 @@ export function LooksScreen() {
           <h2 className="section-title">プレビュー</h2>
           <ScenePreview scene={sampleScene} template={current} />
           <p className="text-sm text-muted mt">
-            選択中の見た目「{current.name}」の見本です（写真・文字は例として表示しています）。
+            {current.category === FREE_CATEGORY
+              ? "「自由配置」は素材・文字・図形を好きな位置に置ける見た目です。これは配置例で、場面編集で自由に動かせます。"
+              : `選択中の見た目「${current.name}」の見本です（写真・文字は例として表示しています）。`}
           </p>
 
           <hr className="divider" />
