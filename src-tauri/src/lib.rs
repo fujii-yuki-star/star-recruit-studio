@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
 
+mod ai;
 mod assets;
 mod ffmpeg;
 mod voicevox;
@@ -119,7 +120,11 @@ pub fn run() {
             assets::import_asset_path,
             assets::import_voice,
             assets::read_asset_data_url,
-            voicevox::synthesize_voice
+            voicevox::synthesize_voice,
+            ai::save_api_key,
+            ai::has_api_key,
+            ai::delete_api_key,
+            ai::ai_generate
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
