@@ -158,6 +158,8 @@ describe('buildVideoPlanMessages', () => {
     // 各シーンは利用可能テンプレに縛る（templateId 必須・sceneType は category 一致）。
     expect(user).toContain('各シーンに templateId を必ず設定する');
     expect(user).toContain('sceneType は、選んだ templateId の category と同じ値にする');
+    // 型を例に揃える（文字列項目を配列/オブジェクトにしない＝targetAudience 等の型ズレ防止）。
+    expect(user).toContain('各フィールドの型は出力例と同じにする');
     // 正典 fixture（ai-video-plan.sample）の構造が出力例として入っている。
     expect(user).toContain('"schemaVersion": "1.0"');
     expect(user).toContain('"videoPlan"');
