@@ -39,12 +39,12 @@
 ### Rust 側（`ai.rs` 新設・reqwest）
 - コマンド: `ai_generate(provider, model, body) -> String`（応答テキスト）／`save_api_key(provider, key)`／`has_api_key(provider) -> bool`／`delete_api_key(provider)`。
 - 鍵は `keyring` クレートでサービス名＝アプリ識別子・アカウント＝provider 名で保存。**鍵はフロントへ返さない**（`has_api_key` で有無のみ）。
-- Gemini/OpenAI の REST を reqwest で叩き、**構成JSON（`ai-video-plan`）を「JSON モード／schema 指定」で要求**（Gemini: `responseMimeType: application/json`、OpenAI: `response_format: json_object`）。
+- Gemini/OpenAI の REST を reqwest で叩き、**構成JSON（`ai-video-plan`）を schema 指定で要求する（12§3 準拠）**：Gemini は `responseMimeType: application/json` ＋ **`responseSchema`**、OpenAI は **`response_format` の JSON Schema 指定**（旧 `json_object` でなく構造強制。strict 時は任意項目を `nullable＋required` か非strict で運用＝12§3）。送信側で schema 強制しても**受信後に ajv で再検証**する（二重防御）。
 
 ### データポリシー（§2-6・最重要）
 - 送るのは **会社情報（`companyInfo`）＋目的＋素材の説明（`displayName`/`tags`/`aiDescription`）＋テンプレ要約＋ゆうこ poseTag**。**素材ファイル・元動画・base64 は送らない**。
 - **MVP はテキストのみ**（代表フレーム画像は送らない）。代表フレーム送信は将来（§2-6 の「代表フレームのみ」に沿って拡張可能・要再確認）。
-- **送信前確認**: 生成実行前に「これらの情報を外部AI（プロバイダ名）に送ります」と**送信内容の要約を提示して確認**を取る（§2-6）。既存の確認/生成導線に確認ステップを差す。
+- **送信前確認**: 生成実行前に「これらの情報を外部AI（プロバイダ名）に送ります」と**送信内容の要約を提示して確認**を取る（§2-6）。既存の確認/生成導線に確認ステップを差す。**素材の説明（`aiDescription`/`tags`）に個人情報（人物撮影素材の説明等）が含まれ得る**ため、確認画面で注意喚起し公開前チェック（`01 §13`）と連携する。
 
 ### 生成フロー（既存検証を流用）
 1. `GenerateVideoPlanInput` →（domain 純粋）プロンプト生成。
@@ -56,6 +56,7 @@
 ### 設定 UI（§2-3）
 - 設定画面に「AI の接続」セクション: **プロバイダ選択**（自動でずんだもん…ではなく「Gemini / OpenAI」だが、表示は技術語を避けつつ製品名は可）＋**APIキー入力**（保存で keyring へ・保存済みは「設定済み」表示で値は出さない）＋接続テスト（任意）。
 - プロバイダ選択は**アプリ全体設定**（鍵は利用者単位）。project.json には鍵もプロバイダ鍵も入れない。
+- **dead-UI 防止（ADR-0009 と同方針）**: P1 ではプロバイダ選択に **OpenAI を出さない（または「準備中」と表示し選択不可）**＝P2 まで機能しない選択肢を有効化しない。OpenAI は P2 で有効化する。
 
 ### 段階分割
 - **P1**: `keyring` 依存追加／`ai.rs`（save/has/delete key・`ai_generate`）／GeminiProvider（プロンプト生成＝domain 純粋＋テスト・Rust 経由呼び出し）／設定UI（鍵入力・保存）／**送信前確認**／検証・フォールバック。鍵が無ければ Mock。
@@ -65,7 +66,8 @@
 
 ### 依存・正典更新
 - **`keyring` クレート追加**（OSキーチェーン）。`13 §7`／§9 チェックリストに反映。reqwest は既存流用。
-- `12` のプロンプト実体・出力契約（JSON モード）に追補が要れば正典として更新。
+- **`12§4` を P1 と合わせて MVP 向けに更新（確定作業）**：MVP は**素材サムネイル画像を添付しない（テキストのみ）**＝サムネイル添付は P3 へ。現行 12§4 は「画像はサムネイル添付・動画は代表フレーム」と規定しているため、MVP の不送信方針と整合させる更新が必須。
+- `12§3` の出力契約（Gemini `responseSchema`／OpenAI JSON Schema 指定）に沿って Provider を実装する（必要なら 12§3 を追補）。
 
 ## 結果・影響
 
@@ -82,3 +84,5 @@
 4. **トークン超過**: 素材/会社情報が大きいときのプロンプト要約戦略。
 5. **接続テスト UI** の要否（鍵保存時に1回叩いて検証するか）。
 6. **`ai/latest_result.json` 退避**（12§9.3）の MVP 採否。
+7. **`AiProvider` の他メソッド**: 12§2 は `rewriteNarration`/`reviewScript`/`classifyAssets` も挙げるが、現行 `aiProvider.ts` の interface は **`generateVideoPlan` のみ**（他は将来追加のコメント）。よって P1 の GeminiProvider は generateVideoPlan のみ実装で **stub 不要**。他メソッドは interface 追加時（P3 以降）に各プロバイダで実装する、という前提で良いか。
+8. **設定 UI の dead-UI 対策**: P1 で OpenAI を非表示にするか「準備中」表示にするか（本ADRは非表示/準備中を採用）。プロバイダ未設定時の生成導線（Mock で続行する旨の案内）も合わせて確定する。
