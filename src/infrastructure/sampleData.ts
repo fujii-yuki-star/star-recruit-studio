@@ -53,6 +53,7 @@ export const sampleTemplates: Template[] = [
   },
 ];
 
+// 「紹介クリップ」は動画素材のデモ（FREE/通常スロットの動画調整・書き出し確認用）。
 export const sampleAssets: Asset[] = [
   { assetId: "asset_entrance_001", assetType: "image", displayName: "会社外観", filePath: "assets/images/entrance_001.jpg", tags: ["外観", "建物"], isPublicChecked: true },
   { assetId: "asset_office_001", assetType: "image", displayName: "オフィス写真", filePath: "assets/images/office_001.jpg", tags: ["オフィス"], isPublicChecked: true },
