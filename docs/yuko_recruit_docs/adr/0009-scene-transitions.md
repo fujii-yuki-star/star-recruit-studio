@@ -1,6 +1,6 @@
 # ADR-0009: 場面間トランジション（フェード／スライド）
 
-- **状態**: Proposed（2026-06-16・未レビュー。develop マージ＝レビュー通過で Accepted へ。実装は本ADR確定後）
+- **状態**: Accepted（2026-06-16・PR #80 で develop マージ＝レビュー通過。T1（データ/UI/純粋ロジック・PR #81）＋T2（xfade 書き出し・PR #82）実装完了。残 T3=仕上げ）
 - **日付**: 2026-06-16
 - **関連**: [`0001-rendering-parity.md`](0001-rendering-parity.md)（場面内は静止・同一描画でパリティ）/ [`0006-video-slot-compositing.md`](0006-video-slot-compositing.md)（動画合成・**未解決#3＝xfade 併用**）/ [`0002-ffmpeg-codec.md`](0002-ffmpeg-codec.md)（コーデック）/ `CLAUDE.md §10`（タイムライン/キーフレーム編集は対象外）/ `§2-4`（テンプレ駆動）/ `11 §3`（`TransitionType` enum）/ `11 §4`（`TRANSITION_DEFAULT_SEC`）/ `schemas/project.schema.json`（`scene.transition`）
 
