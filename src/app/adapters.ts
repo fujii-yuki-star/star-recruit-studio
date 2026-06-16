@@ -1,6 +1,8 @@
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
 import { ASSET_TYPE, NARRATION_STATUS, type SceneCategory } from "../domain/enums";
+import { HEIGHT, WIDTH } from "../domain/constants";
+import { validateFreeLayout } from "../domain/project/freeLayout";
 import type { Asset, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -109,6 +111,8 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   for (const s of scenes) {
     for (const value of Object.values(s.assetRefs)) if (value) used.add(value);
     if (s.character.poseAssetId) used.add(s.character.poseAssetId);
+    // FREE 場面の素材は assetRefs ではなく freeLayout[].assetId 経由で使われる（ADR-0008）。
+    for (const el of s.freeLayout ?? []) if (el.assetId) used.add(el.assetId);
   }
   const unused = assets.filter((a) => !used.has(a.assetId)).length;
   items.push(
@@ -116,6 +120,22 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       ? { id: "unused", label: "使っていない素材", detail: `使われていない素材が${unused}つあります。`, severity: "warning" }
       : { id: "unused", label: "使っていない素材", detail: "すべての素材が使われています。", severity: "ok" },
   );
+
+  // 自由配置（FREE 場面）の確認：要素が画面外・素材未解決・サイズ不正などがないか（ADR-0008 §8）。
+  // FREE 場面が無いプロジェクトでは項目を出さない（通常プロジェクトのノイズを避ける）。
+  const freeScenes = scenes.filter((s) => (s.freeLayout?.length ?? 0) > 0);
+  if (freeScenes.length > 0) {
+    const badCount = freeScenes.filter((s) => {
+      const template = templates.find((t) => t.templateId === s.templateId);
+      const cv = template?.canvas ?? { width: WIDTH, height: HEIGHT };
+      return validateFreeLayout(s.freeLayout ?? [], assets, cv).length > 0;
+    }).length;
+    items.push(
+      badCount > 0
+        ? { id: "freeLayout", label: "自由配置の確認", detail: `自由に配置した場面が${badCount}つ、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning" }
+        : { id: "freeLayout", label: "自由配置の確認", detail: "自由配置の場面は問題ありません。", severity: "ok" },
+    );
+  }
 
   // 誤字脱字・誇大表現・個人情報の写り込みは自動チェック未対応のため、人の目での確認を促す
   items.push({

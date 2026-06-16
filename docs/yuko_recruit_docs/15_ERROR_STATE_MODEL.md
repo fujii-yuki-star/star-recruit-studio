@@ -109,6 +109,9 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `BGM_FILE_BROKEN` | warning | BGMなしで続行を提示 | BGMを読み込めませんでした。BGMなしで続けられます | `08 §10` |
 | `TOTAL_DURATION_EXCEEDED` | warning | — | 動画が長すぎます。場面を減らすか短くしてください | `11 §8 V9` |
 | `TOO_MANY_SCENES` | warning | — | 場面が多すぎます。整理をおすすめします | `11 §8 V10` |
+| `FREE_ELEMENT_OUT_OF_BOUNDS` | warning | — | 画面の外にはみ出した配置があります。画面内に移動できます | `ADR-0008 §8` |
+| `FREE_ELEMENT_INVALID_SIZE` | warning | — | 配置した要素の大きさが正しくありません。幅と高さを設定し直してください | `ADR-0008 §8` |
+| `FREE_TEXT_EMPTY` | info | — | 文字が入っていない配置があります。文字を入力してください | `ADR-0008 §8` |
 | `SCHEMA_VERSION_UNSUPPORTED` | fatal | — | このファイルは対応していないバージョンで作成されています | `11 §1` |
 
 ---

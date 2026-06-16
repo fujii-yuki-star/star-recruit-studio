@@ -14,6 +14,13 @@ export const FREE_CATEGORY = 'free' satisfies SceneCategory;
 export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape'] as const;
 export type FreeElementKind = (typeof FREE_ELEMENT_KINDS)[number];
 
+/** FreeElementKind の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
+export const FREE_ELEMENT_KIND = {
+  slot: 'slot',
+  text: 'text',
+  shape: 'shape',
+} as const satisfies Record<string, FreeElementKind>;
+
 /** FREE テキスト要素のフォント太さ（ADR-0008）。 */
 export const FONT_WEIGHTS = ['normal', 'bold'] as const;
 export type FontWeight = (typeof FONT_WEIGHTS)[number];
