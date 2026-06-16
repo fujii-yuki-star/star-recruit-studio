@@ -4,7 +4,8 @@ import { FolderIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
 import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
 import {
-  getVoicevoxSpeaker, getVoicevoxUrl, setVoicevoxSpeaker, setVoicevoxUrl,
+  DEFAULT_AI_MODEL, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
+  setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
 import { NARRATOR_STYLES } from "../../domain/voice/narratorStyles";
 import {
@@ -20,6 +21,12 @@ export function SettingsScreen() {
   const [aiConnected, setAiConnected] = useState(false);
   const [keyBusy, setKeyBusy] = useState(false);
   const [keyError, setKeyError] = useState("");
+  const [aiModel, setAiModelState] = useState(() => getAiModel());
+
+  function onChangeModel(value: string) {
+    setAiModelState(value);
+    setAiModel(value);
+  }
   const [voicevoxUrl, setUrl] = useState(() => getVoicevoxUrl());
   const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? NARRATOR_STYLES[0].speaker);
   const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
@@ -156,6 +163,23 @@ export function SettingsScreen() {
               <span>{keyError}</span>
             </div>
           )}
+
+          <div className="field" style={{ marginTop: "var(--gap-md)" }}>
+            <label className="field-label" htmlFor="aiModel">
+              モデル
+            </label>
+            <input
+              id="aiModel"
+              className="input"
+              value={aiModel}
+              onChange={(e) => onChangeModel(e.target.value)}
+              placeholder={DEFAULT_AI_MODEL}
+            />
+            <p className="field-hint">
+              通常は変更不要です。無料枠の状況に応じて変更できます（例：gemini-2.5-flash / gemini-2.5-flash-lite）。
+            </p>
+          </div>
+
           <p className="field-hint mt">※ OpenAI への接続は準備中です。</p>
 
           <hr className="divider" />

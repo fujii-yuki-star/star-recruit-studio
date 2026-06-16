@@ -5,16 +5,13 @@ import { buildVideoPlanMessages } from '../../domain/ai/buildVideoPlanRequest';
 import { parseAndValidateVideoPlan } from '../../domain/ai/validateVideoPlan';
 import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
 import type { AiVideoPlan } from '../../domain/ai/types';
+import { DEFAULT_AI_MODEL } from '../appSettings';
 import { GEMINI_PROVIDER, aiGenerate } from '../aiClient';
 
-/**
- * MVP 既定モデル（無料枠想定）。確定はモデル選定＝ADR-0010 未解決#1。
- * 将来は設定画面で選択可にする。Rust 側で文字種検証（英数字・ハイフン・ドット）を通る値であること。
- */
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
-
 export class GeminiProvider implements AiProvider {
-  constructor(private readonly model: string = DEFAULT_GEMINI_MODEL) {}
+  // 既定モデルは appSettings.DEFAULT_AI_MODEL（設定で変更可＝ADR-0010 未解決#1）。
+  // Rust 側で文字種検証（英数字・ハイフン・ドット）を通る値であること。
+  constructor(private readonly model: string = DEFAULT_AI_MODEL) {}
 
   async generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
     const { system, user } = buildVideoPlanMessages(input);

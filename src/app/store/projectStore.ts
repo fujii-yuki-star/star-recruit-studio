@@ -18,6 +18,7 @@ import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../d
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
 import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClient";
+import { getAiModel } from "../../infrastructure/appSettings";
 import { sampleAssets, sampleTemplates } from "../../infrastructure/sampleData";
 import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
@@ -116,7 +117,7 @@ interface ProjectState {
 // 実 AI を試みて失敗したときは Mock に倒さずエラーを伝播する（黙って差し替えない）。
 async function generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
   if (isTauri() && (await hasApiKey(GEMINI_PROVIDER))) {
-    return new GeminiProvider().generateVideoPlan(input);
+    return new GeminiProvider(getAiModel()).generateVideoPlan(input);
   }
   return new MockAiProvider().generateVideoPlan(input);
 }

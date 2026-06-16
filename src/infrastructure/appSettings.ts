@@ -3,6 +3,10 @@
 // Tauri WebView でも localStorage は永続する（projectFs と同様）。
 const VOICEVOX_URL_KEY = 'app.voicevoxUrl';
 const VOICEVOX_SPEAKER_KEY = 'app.voicevoxSpeaker';
+const AI_MODEL_KEY = 'app.aiModel';
+
+/** 動画案生成に使う Gemini モデルID（現行の無料枠で使える既定）。設定で変更可＝ADR-0010 未解決#1。 */
+export const DEFAULT_AI_MODEL = 'gemini-2.5-flash';
 
 function read(key: string): string | null {
   return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
@@ -28,4 +32,13 @@ export function getVoicevoxSpeaker(): number | null {
 }
 export function setVoicevoxSpeaker(speaker: number): void {
   write(VOICEVOX_SPEAKER_KEY, String(speaker));
+}
+
+/** 使用する Gemini モデルID。未設定なら既定（DEFAULT_AI_MODEL）。 */
+export function getAiModel(): string {
+  const v = read(AI_MODEL_KEY);
+  return v && v.trim() ? v.trim() : DEFAULT_AI_MODEL;
+}
+export function setAiModel(model: string): void {
+  write(AI_MODEL_KEY, model.trim());
 }
