@@ -33,6 +33,8 @@ export interface ExportSceneInput {
   narrationVolume?: number;
   /** 動画ありシーン（ADR-0006）。指定時は overlay 合成経路へ。 */
   video?: ExportVideoInput;
+  /** この場面に「入る」トランジション（ADR-0009 T2）。先頭・none では未設定（ハードカット）。 */
+  transition?: { name: string; durationSec: number; offsetSec: number };
 }
 
 /** BGM 入力（動画全体に重ねる）。audioBase64 は data URL も可。volume は §6 で解決済み。 */

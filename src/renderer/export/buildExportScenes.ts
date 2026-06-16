@@ -1,14 +1,28 @@
 // 全場面を「共有レイアウト → SVG → PNG(data URL)」に焼き、書き出し入力を組み立てる（ADR-0001/0004）。
 // 動画ありシーンは下/上2枚の透過PNG＋クリップ情報を渡す（ADR-0006）。FFmpeg呼び出しは infrastructure に分離。
-import type { Fit } from '../../domain/enums';
+import { TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit } from '../../domain/enums';
 import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
+import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
+import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvg } from './videoSceneSplit';
 import type { VideoSlotInfo } from './findVideoSlot';
+
+/** ResolvedTransition を FFmpeg xfade の transition 名へ（none はハードカット＝"none"）。 */
+function xfadeName(r: ResolvedTransition): string {
+  if (r.type === TRANSITION_TYPE.fade) return 'fade';
+  if (r.type === TRANSITION_TYPE.slide) {
+    if (r.direction === TRANSITION_DIRECTION.right) return 'slideright';
+    if (r.direction === TRANSITION_DIRECTION.up) return 'slideup';
+    if (r.direction === TRANSITION_DIRECTION.down) return 'slidedown';
+    return 'slideleft';
+  }
+  return 'none';
+}
 
 /** 動画ありシーンの書き出し入力（infrastructure の ExportVideoInput と構造一致）。 */
 export interface ExportVideoData {
@@ -34,6 +48,8 @@ export interface ExportSceneData {
   audioBase64?: string;
   narrationVolume?: number;
   video?: ExportVideoData;
+  /** この場面に「入る」トランジション（ADR-0009 T2）。先頭場面・none では未設定（ハードカット）。 */
+  transition?: { name: string; durationSec: number; offsetSec: number };
 }
 
 /**
@@ -75,10 +91,13 @@ export async function buildExportScenes(
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
     opts.withSubtitle === false ? (it) => !(it.kind === 'text' && it.isSubtitle) : undefined;
   const out: ExportSceneData[] = [];
+  // out と 1:1 で対応する「書き出し対象になった場面」。トランジションの境界計算（後処理）に使う。
+  const included: Scene[] = [];
   for (let i = 0; i < scenes.length; i += 1) {
     const scene = scenes[i];
     const template = templateById.get(scene.templateId);
     if (template) {
+      included.push(scene);
       const layout = layoutScene(scene, template);
       const narration = narrationFor?.(scene);
       const videoSlot = videoSlotFor?.(scene);
@@ -140,6 +159,23 @@ export async function buildExportScenes(
       }
     }
     onProgress?.(i + 1, scenes.length);
+  }
+
+  // 場面間トランジション（ADR-0009 T2）：書き出し対象の場面で xfade の offset/実効尺を解決し各場面へ付与。
+  // 先頭・none は未設定（Rust 側でハードカット）。durations は焼いた順＝included と一致。
+  const durations = out.map((o) => o.durationSec);
+  const resolved = included.map((s) => resolveTransition(s.transition));
+  const boundaryDs = resolved.map((r, i) =>
+    i === 0 || r.type === TRANSITION_TYPE.none ? 0 : r.durationSec,
+  );
+  const { steps } = transitionTimeline(durations, boundaryDs);
+  for (let i = 1; i < out.length; i += 1) {
+    if (resolved[i].type === TRANSITION_TYPE.none) continue;
+    out[i].transition = {
+      name: xfadeName(resolved[i]),
+      durationSec: steps[i - 1].durationSec,
+      offsetSec: steps[i - 1].offsetSec,
+    };
   }
   return out;
 }
