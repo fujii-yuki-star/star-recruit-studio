@@ -20,6 +20,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "docs/yuko_recruit_docs/schemas/*.json"],
+  "include": ["src", "docs/yuko_recruit_docs/schemas/*.json", "docs/yuko_recruit_docs/fixtures/ai-video-plan.sample.json"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
