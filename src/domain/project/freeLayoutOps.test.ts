@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
-  addFreeElement, createFreeElement, moveFreeElement, removeFreeElement, resizeFreeElement, updateFreeElement,
+  addFreeElement, createFreeElement, moveFreeElement, removeFreeElement, resizeFreeElement,
+  snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
 describe('createFreeElement / addFreeElement', () => {
@@ -140,5 +141,33 @@ describe('resizeFreeElement', () => {
     for (const r of [nw, ne, sw]) {
       expect([r.x, r.y, r.w, r.h].every(Number.isInteger)).toBe(true);
     }
+  });
+});
+
+describe('snapToGrid とグリッド吸着（FREE 仕上げ）', () => {
+  it('snapToGrid：grid>0 は最寄りの倍数、grid<=0 は整数丸めのみ', () => {
+    expect(snapToGrid(23, 20)).toBe(20);
+    expect(snapToGrid(31, 20)).toBe(40);
+    expect(snapToGrid(50, 0)).toBe(50);
+    expect(snapToGrid(50.4, 0)).toBe(50); // grid なしは round
+  });
+
+  it('moveFreeElement：grid 指定で位置をグリッドに吸着', () => {
+    expect(moveFreeElement({ x: 100, y: 100, w: 200, h: 100 }, 27, 3, 20)).toEqual({ x: 120, y: 100 });
+  });
+
+  it('moveFreeElement：grid=0（既定）は従来どおり整数丸め', () => {
+    expect(moveFreeElement({ x: 100, y: 100, w: 200, h: 100 }, 27, 3)).toEqual({ x: 127, y: 103 });
+  });
+
+  it('resizeFreeElement：grid 指定で掴んだ辺を吸着しつつ対角を固定', () => {
+    // se：右辺 100+15=115 を grid20 で 120 に吸着 → w=120。左上(0,0)は固定。
+    const r = resizeFreeElement({ x: 0, y: 0, w: 100, h: 100 }, 'se', 15, 0, 20, 20);
+    expect(r.w).toBe(120);
+    expect(r.x).toBe(0);
+    // nw：左辺 100+15=115 を 120 に吸着 → 右辺(300)固定で w=180、x=120。
+    const r2 = resizeFreeElement({ x: 100, y: 100, w: 200, h: 200 }, 'nw', 15, 0, 20, 20);
+    expect(r2.x).toBe(120);
+    expect(r2.x + r2.w).toBe(300); // 右辺はグリッドに依らず固定
   });
 });
