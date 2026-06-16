@@ -1,7 +1,7 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
   AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Purpose,
-  SceneCategory, TextKey, TransitionType, WarningSeverity,
+  SceneCategory, TextKey, TransitionDirection, TransitionType, WarningSeverity,
 } from '../enums';
 
 export interface VideoSettings {
@@ -123,6 +123,8 @@ export interface Transition {
   in?: TransitionType;
   out?: TransitionType;
   durationSec?: number;
+  /** slide のときの方向（ADR-0009）。MVP では in に適用。未指定は left。 */
+  direction?: TransitionDirection;
 }
 
 export interface Warning {

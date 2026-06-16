@@ -83,7 +83,7 @@
 | `slotType` | `image_or_video` / `image` / `video` |
 | `fit` | `cover` / `contain` / `stretch` |
 | `textKey` | `title` / `main` / `subtitle` / `caption` / `url` |
-| `transition`（MVP） | `none` / `fade` ／（将来）`slide` / `wipe` / `zoom` |
+| `transition`（MVP） | `none` / `fade` / `slide`（方向 `direction`: `left`/`right`/`up`/`down`）／（将来）`wipe` / `zoom`（ADR-0009） |
 
 ### 3.5 状態・その他
 
@@ -235,7 +235,7 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 | texts | object | ● | title / main / subtitle / caption / url（各 string、テンプレ必須キーは必須） |
 | narration | object | ● | text ● / voiceId○ / speed○ / pitch○ / intonation○ / voicePath○ / status(enum) ● |
 | audioMix | object | ○ | §6（全フィールド任意・null可） |
-| transition | object | ○ | in/out(enum) / durationSec（既定 `TRANSITION_DEFAULT_SEC`） |
+| transition | object | ○ | in/out(enum) / durationSec（既定 `TRANSITION_DEFAULT_SEC`）/ direction(enum `left`/`right`/`up`/`down`・slide 用・ADR-0009) |
 | warnings | Warning[] | ● | 検証・補正の結果（空配列可） |
 | freeLayout | FreeElement[] | ○ | `sceneType=free` のみ：自由配置要素（ADR-0008・id=`free_NNN`(scene内一意)・kind: slot/text/shape・x/y/w/h は canvas基準で w>0/h>0） |
 
