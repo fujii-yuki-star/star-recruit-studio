@@ -33,7 +33,8 @@ function toVideoSlotInfo(id: string, asset: Asset, fitFallback: Fit | undefined)
     clipRelPath: asset.filePath,
     fit: clip?.fit ?? fitFallback ?? DEFAULT_FIT,
     clipStartSec: clip?.startSec ?? 0,
-    clipEndSec: clip?.endSec ?? undefined,
+    clipEndSec: clip?.endSec, // endSec?: number（null なし）ゆえ ?? undefined は不要
+
     // 音声が実在する場合のみ元音声ON（音声なしクリップで [1:a] を要求しない＝N-2）。
     useOriginalAudio: (clip?.useOriginalAudio ?? false) && (asset.metadata?.hasAudio ?? false),
     originalVolume: clip?.originalAudioVolume,
