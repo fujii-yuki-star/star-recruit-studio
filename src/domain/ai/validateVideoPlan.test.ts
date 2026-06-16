@@ -47,6 +47,14 @@ describe('validateAiVideoPlan', () => {
     expect(validateAiVideoPlan(plan).valid).toBe(false);
   });
 
+  it('sceneType "free" は AI 出力スキーマに不適合（AI は FREE テンプレを選ばない＝11§3.2）', () => {
+    const plan = clonePlan();
+    const scenes = (plan.parts as Array<Record<string, unknown>>)[0]
+      ?.scenes as Array<Record<string, unknown>>;
+    scenes[0].sceneType = 'free';
+    expect(validateAiVideoPlan(plan).valid).toBe(false);
+  });
+
   it('オブジェクトでない入力は不適合', () => {
     expect(validateAiVideoPlan(null).valid).toBe(false);
     expect(validateAiVideoPlan('文字列').valid).toBe(false);

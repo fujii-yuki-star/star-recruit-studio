@@ -56,7 +56,7 @@ export function stripCodeFence(raw: string): string {
  * 通った plan は transformVideoPlan(V3–V11) へ渡す。
  */
 export function parseAndValidateVideoPlan(raw: string): VideoPlanValidationResult {
-  const text = stripCodeFence(raw ?? '');
+  const text = stripCodeFence(raw);
   if (text.length === 0) {
     return { valid: false, errors: ['応答が空です'] };
   }
