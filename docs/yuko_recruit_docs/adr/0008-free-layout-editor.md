@@ -80,6 +80,8 @@ Phase 4a で freeLayout 用の検証を追加（既存 V1–V11 に追記）:
 - 座標/サイズが canvas（1920×1080）範囲を著しく外れていないか（警告＝行動は止めない。警告文言は §2-5 に従い「次の行動」を示す）。
 - 検証は domain の純粋関数として実装し、§7 に従いユニットテストを必須にする（DoD）。
 
+**実装メモ（Phase 4a-3a で確定）**: 上記のうち kind 別の**構造的「必須」**（`slot` の `fit` が assetId 非 null 時・`shape` の `shapeType`）は **schema（`exclusiveMinimum`/enum・将来 if/then）＋ renderer 既定（fit 未指定＝cover・shapeType 未指定＝rect）で担保**し、domain 検証関数 `validateFreeLayout` は**意味検証**（assetId 実在・text 空・サイズ正値・canvas 著しい逸脱）に限定する。`fit` は §2-3 の技術用語のため UI 警告には出さない。正典の検証番号は `11 §8 V12–V15`、エラーコードは `15 §6`。サイズ不正（V13）時は矩形が確定しないため canvas 逸脱（V14）判定はスキップし二重警告を避ける。
+
 ## 結果・影響
 
 - 通常テンプレ場面・既存の書き出し/プレビューは**原則無改修**（freeLayout 未設定＝従来動作）。

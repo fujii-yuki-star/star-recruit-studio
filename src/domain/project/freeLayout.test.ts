@@ -51,11 +51,12 @@ describe('validateFreeLayout', () => {
     }
   });
 
-  it('w<=0 または h<=0 → FREE_ELEMENT_INVALID_SIZE', () => {
+  it('w<=0 または h<=0 → FREE_ELEMENT_INVALID_SIZE のみ（サイズ不正時は画面外判定をスキップ＝二重警告にしない）', () => {
+    // x=0,w=0 は x+w<=0 で画面外条件にも該当するが、サイズ不正を優先し OUT_OF_BOUNDS は出さない。
     const zeroW: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 0, h: 100, shapeType: 'rect' }];
     const negH: FreeElement[] = [{ id: 'free_002', kind: 'shape', x: 0, y: 0, w: 100, h: -5, shapeType: 'rect' }];
-    expect(codes(zeroW)).toContain('FREE_ELEMENT_INVALID_SIZE');
-    expect(codes(negH)).toContain('FREE_ELEMENT_INVALID_SIZE');
+    expect(codes(zeroW)).toEqual(['FREE_ELEMENT_INVALID_SIZE']);
+    expect(codes(negH)).toEqual(['FREE_ELEMENT_INVALID_SIZE']);
   });
 
   it('canvas から完全に外れている → FREE_ELEMENT_OUT_OF_BOUNDS', () => {

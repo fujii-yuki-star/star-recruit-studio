@@ -33,15 +33,17 @@ export function validateFreeLayout(
     const field = `freeLayout.${el.id}`;
 
     // サイズ（schema でも exclusiveMinimum:0 だが、編集中の一時値・手編集データに対する防御）。
-    if (el.w <= 0 || el.h <= 0) {
+    const invalidSize = el.w <= 0 || el.h <= 0;
+    if (invalidSize) {
       warnings.push(warn('FREE_ELEMENT_INVALID_SIZE', '配置した要素の大きさが正しくありません。幅と高さを設定し直してください', field, 'warning'));
-    }
-
-    // 画面外（矩形が canvas と全く重ならない＝著しく外れている場合のみ警告。一部のはみ出しは演出として許容）。
-    const offCanvas =
-      el.x >= canvas.width || el.y >= canvas.height || el.x + el.w <= 0 || el.y + el.h <= 0;
-    if (offCanvas) {
-      warnings.push(warn('FREE_ELEMENT_OUT_OF_BOUNDS', '画面の外にはみ出した配置があります。画面内に移動できます', field, 'warning'));
+    } else {
+      // 画面外（矩形が canvas と全く重ならない＝著しく外れている場合のみ警告。一部のはみ出しは演出として許容）。
+      // サイズ無効時は矩形が確定せず判定が無意味なのでスキップ（INVALID_SIZE と二重に出さない）。
+      const offCanvas =
+        el.x >= canvas.width || el.y >= canvas.height || el.x + el.w <= 0 || el.y + el.h <= 0;
+      if (offCanvas) {
+        warnings.push(warn('FREE_ELEMENT_OUT_OF_BOUNDS', '画面の外にはみ出した配置があります。画面内に移動できます', field, 'warning'));
+      }
     }
 
     // kind 別の意味検証。

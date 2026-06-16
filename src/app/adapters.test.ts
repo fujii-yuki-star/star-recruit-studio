@@ -41,6 +41,11 @@ describe("buildPrecheckItems（自由配置 / ADR-0008 §8 結線）", () => {
     expect(items.find((i) => i.id === "freeLayout")).toBeUndefined();
   });
 
+  it("freeLayout が空配列でも自由配置の項目を出さない（要素ゼロは対象外）", () => {
+    const items = buildPrecheckItems([freeScene([])], assets, [freeTemplate]);
+    expect(items.find((i) => i.id === "freeLayout")).toBeUndefined();
+  });
+
   it("問題のある freeLayout（画面外）があると自由配置の項目が warning になる", () => {
     const scene = freeScene([
       { id: "free_001", kind: "shape", x: 3000, y: 0, w: 100, h: 100, shapeType: "rect" },
