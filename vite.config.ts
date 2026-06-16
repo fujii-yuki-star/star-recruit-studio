@@ -17,6 +17,9 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    // 開発時はブラウザにモジュール/HTML をキャッシュさせない（プレビューが古いバンドルを掴む stale を防ぐ）。
+    // dev サーバー専用の設定で、本番ビルド（tauri build）には影響しない。
+    headers: { "Cache-Control": "no-store" },
     hmr: host
       ? {
           protocol: "ws",
