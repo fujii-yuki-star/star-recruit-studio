@@ -20,6 +20,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  "include": ["src", "docs/yuko_recruit_docs/schemas/*.json"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
