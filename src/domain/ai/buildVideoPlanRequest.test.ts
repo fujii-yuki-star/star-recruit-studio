@@ -61,7 +61,10 @@ describe('buildVideoPlanMessages', () => {
     expect(system).toBe(VIDEO_PLAN_SYSTEM_PROMPT);
     // 厳守事項の要点が含まれる（出力契約・ID/asset 制約・null 化）。
     expect(system).toContain('構成案');
-    expect(system).toContain('templateId は「利用可能な見た目パターン一覧」に存在するIDのみ');
+    // templateId は必須＋一覧内のみ・sceneType は category 一致（障害の根本原因を §5 で防ぐ）。
+    expect(system).toContain('各シーンに templateId を必ず設定');
+    expect(system).toContain('「利用可能な見た目パターン一覧」に存在するIDのみ');
+    expect(system).toContain('sceneType は、選んだ templateId の category と同じ値にする');
     expect(system).toContain('該当が無ければ null');
     // 尺の目安は 11§4 の定数を埋め込む（検証側 clamp と黙って矛盾しない＝§2-7）。
     expect(system).toContain(`durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒`);
@@ -152,6 +155,11 @@ describe('buildVideoPlanMessages', () => {
     const user = buildVideoPlanUserMessage(fullInput());
     expect(user).toContain('# 出力フォーマット（厳守）');
     expect(user).toContain('schemaVersion・videoPlan・parts（必須）と reviewNotes（任意）');
+    // 各シーンは利用可能テンプレに縛る（templateId 必須・sceneType は category 一致）。
+    expect(user).toContain('各シーンに templateId を必ず設定する');
+    expect(user).toContain('sceneType は、選んだ templateId の category と同じ値にする');
+    // 型を例に揃える（文字列項目を配列/オブジェクトにしない＝targetAudience 等の型ズレ防止）。
+    expect(user).toContain('各フィールドの型は出力例と同じにする');
     // 正典 fixture（ai-video-plan.sample）の構造が出力例として入っている。
     expect(user).toContain('"schemaVersion": "1.0"');
     expect(user).toContain('"videoPlan"');
