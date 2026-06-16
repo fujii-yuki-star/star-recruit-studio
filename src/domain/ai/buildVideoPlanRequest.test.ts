@@ -151,7 +151,7 @@ describe('buildVideoPlanMessages', () => {
   it('出力フォーマット（12§7 例・厳守指示）をユーザーメッセージに含める', () => {
     const user = buildVideoPlanUserMessage(fullInput());
     expect(user).toContain('# 出力フォーマット（厳守）');
-    expect(user).toContain('schemaVersion / videoPlan / parts の3キーのみ');
+    expect(user).toContain('schemaVersion・videoPlan・parts（必須）と reviewNotes（任意）');
     // 正典 fixture（ai-video-plan.sample）の構造が出力例として入っている。
     expect(user).toContain('"schemaVersion": "1.0"');
     expect(user).toContain('"videoPlan"');

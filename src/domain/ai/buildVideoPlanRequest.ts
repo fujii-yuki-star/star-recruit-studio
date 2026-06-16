@@ -114,7 +114,7 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
     joinList(input.yukoPoseTags, ', '),
     '',
     '# 出力フォーマット（厳守）',
-    'トップレベルは schemaVersion / videoPlan / parts の3キーのみ。これ以外のキーをトップレベルに足さない。',
+    'トップレベルのキーは schemaVersion・videoPlan・parts（必須）と reviewNotes（任意）のみ。これ以外のキーをトップレベルに足さない。',
     '説明文・見出し・コードフェンスを付けず、JSON のみを返す。',
     '次の例と**同じキー名・同じ入れ子構造**で出力し、値だけ今回の会社情報・素材・見た目パターンに合わせて作る：',
     JSON.stringify(aiVideoPlanExample, null, 2),
