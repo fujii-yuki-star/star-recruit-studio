@@ -25,9 +25,10 @@ export class GeminiProvider implements AiProvider {
     const raw = await aiGenerate(GEMINI_PROVIDER, this.model, system, user);
     const result = parseAndValidateVideoPlan(raw);
     if (!result.valid) {
-      // 技術的エラーはログのみ（UI には出さない・§2-3）。呼び出し側が「次の行動」を提示する（AI_RESPONSE_INVALID・15§6）。
-      console.warn('[ai] AIの応答が構成スキーマに適合しませんでした:', result.errors);
-      throw new Error('AI_RESPONSE_INVALID');
+      // 技術的エラー（ajv 詳細）はログのみ（UI には出さない・§2-3）。
+      // throw する文言は §2-5 準拠の「次の行動」つき（store が status:"error" 時に表示）。
+      console.warn('[ai] AI_RESPONSE_INVALID: 応答が構成スキーマに適合しませんでした:', result.errors);
+      throw new Error('AIからの提案を読み取れませんでした。もう一度お試しください。');
     }
     return result.plan;
   }

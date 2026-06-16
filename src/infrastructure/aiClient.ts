@@ -17,8 +17,9 @@ export function aiGenerate(
   return invoke<string>('ai_generate', { provider, model, system, user });
 }
 
-/** APIキーを OS 資格情報ストアへ保存する。 */
+/** APIキーを OS 資格情報ストアへ保存する。非Tauri（ブラウザ開発）では何もしない。 */
 export function saveApiKey(provider: string, apiKey: string): Promise<void> {
+  if (!isTauri()) return Promise.resolve();
   return invoke('save_api_key', { provider, apiKey });
 }
 
@@ -28,7 +29,8 @@ export function hasApiKey(provider: string): Promise<boolean> {
   return invoke<boolean>('has_api_key', { provider });
 }
 
-/** 保存済みAPIキーを削除する。 */
+/** 保存済みAPIキーを削除する。非Tauri（ブラウザ開発）では何もしない。 */
 export function deleteApiKey(provider: string): Promise<void> {
+  if (!isTauri()) return Promise.resolve();
   return invoke('delete_api_key', { provider });
 }

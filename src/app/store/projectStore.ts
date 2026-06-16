@@ -58,7 +58,9 @@ interface ProjectState {
   isGeneratingNarration: boolean;
   /** ナレーション生成に失敗したときのユーザー向け文言（成功/再試行で消える）。 */
   narrationError: string | null;
-  /** Mock AI → 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
+  /** AI 構成案の生成に失敗したときのユーザー向け文言（§2-5。再生成/成功で消える）。UI は status==="error" 時にこれを表示する。 */
+  aiError: string | null;
+  /** AI（鍵があれば実プロバイダ／無ければ Mock）→ 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
   generate: () => Promise<void>;
   /** デモ/テスト用にエラー状態へ。 */
   fail: () => void;
@@ -207,8 +209,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   narrationAudioById: {},
   isGeneratingNarration: false,
   narrationError: null,
+  aiError: null,
   generate: async () => {
-    set({ status: "generating" });
+    set({ status: "generating", aiError: null });
     try {
       // 会社情報・目的はウィザードで meta に反映済み（ウィザード未経由なら既定値）。
       const { companyInfo, purpose } = get().meta;
@@ -227,12 +230,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         assets: sampleAssets,
       });
       set({ status: "ready", parts, scenes, warnings });
-    } catch {
-      set({ status: "error" });
+    } catch (e) {
+      // 失敗の文言を保持し、UI が「次の行動」を出せるようにする（§2-5）。
+      // Rust/プロバイダは §2-5 のユーザー向け文言で reject する（鍵未設定→設定へ／不適合→再試行 等）。
+      const aiError =
+        e instanceof Error ? e.message : typeof e === "string" ? e : "生成に失敗しました。もう一度お試しください。";
+      set({ status: "error", aiError });
     }
   },
   fail: () => set({ status: "error" }),
-  reset: () => set({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [] }),
+  reset: () => set({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null }),
   newProject: () =>
     set({
       status: "idle",
@@ -245,6 +252,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assetSrcById: {},
       narrationAudioById: {},
       narrationError: null,
+      aiError: null,
     }),
   saveProject: async () => {
     set({ saveStatus: "saving" });
