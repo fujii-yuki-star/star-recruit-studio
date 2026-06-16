@@ -72,4 +72,9 @@ describe('removeFreeElement', () => {
     const next = removeFreeElement(layout, 'free_001');
     expect(next.map((e) => e.id)).toEqual(['free_002']);
   });
+
+  it('存在しない id は変化なし', () => {
+    const layout: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }];
+    expect(removeFreeElement(layout, 'free_999')).toEqual(layout);
+  });
 });

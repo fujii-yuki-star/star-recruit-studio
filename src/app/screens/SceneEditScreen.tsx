@@ -52,7 +52,8 @@ const freeKindLabel: Record<FreeElementKind, string> = {
 };
 
 // 自由配置の位置・サイズ等の数値入力（キーボードで調整＝a11y。ドラッグ操作は Phase 4b）。
-function NumberField({ label, value, min, onChange }: { label: string; value: number; min?: number; onChange: (v: number) => void }) {
+// 既定 step=1＝座標/サイズ/重なり順は整数 px（非整数を renderer に渡さない）。
+function NumberField({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; onChange: (v: number) => void }) {
   return (
     <div className="field" style={{ flex: 1, margin: 0 }}>
       <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{label}</label>
@@ -60,6 +61,8 @@ function NumberField({ label, value, min, onChange }: { label: string; value: nu
         className="input"
         type="number"
         min={min}
+        max={max}
+        step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
       />
@@ -621,6 +624,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
                 ) : (
                   <div className="col gap-sm">
+                    {/* 各フィールドの ?? 既定値は型安全のための保険（FreeElement の各フィールドは optional）。
+                        正式な既定は domain の createFreeElement が必ず埋めるため通常は発動しない。 */}
                     {freeLayout.map((el) => (
                       <div key={el.id} className="card-tight" style={{ background: "var(--color-surface-alt)" }}>
                         <div className="row-between" style={{ marginBottom: 4 }}>
@@ -683,23 +688,40 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         )}
 
                         {el.kind === FREE_ELEMENT_KIND.shape && (
-                          <div className="row gap-sm" style={{ marginBottom: 6 }}>
-                            <div className="field" style={{ flex: 1, margin: 0 }}>
-                              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
-                              <select
-                                className="select"
-                                value={el.shapeType ?? FREE_SHAPE_TYPE.rect}
-                                onChange={(e) => patchFreeEl(el.id, { shapeType: e.target.value as FreeShapeType })}
-                              >
-                                <option value={FREE_SHAPE_TYPE.rect}>四角</option>
-                                <option value={FREE_SHAPE_TYPE.ellipse}>丸</option>
-                              </select>
+                          <>
+                            <div className="row gap-sm" style={{ marginBottom: 6 }}>
+                              <div className="field" style={{ flex: 1, margin: 0 }}>
+                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
+                                <select
+                                  className="select"
+                                  value={el.shapeType ?? FREE_SHAPE_TYPE.rect}
+                                  onChange={(e) => patchFreeEl(el.id, { shapeType: e.target.value as FreeShapeType })}
+                                >
+                                  <option value={FREE_SHAPE_TYPE.rect}>四角</option>
+                                  <option value={FREE_SHAPE_TYPE.ellipse}>丸</option>
+                                </select>
+                              </div>
+                              <div className="field" style={{ margin: 0 }}>
+                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+                                <input type="color" value={el.fillColor ?? "#cccccc"} onChange={(e) => patchFreeEl(el.id, { fillColor: e.target.value })} />
+                              </div>
                             </div>
-                            <div className="field" style={{ margin: 0 }}>
-                              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-                              <input type="color" value={el.fillColor ?? "#cccccc"} onChange={(e) => patchFreeEl(el.id, { fillColor: e.target.value })} />
+                            <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+                              <div className="field" style={{ flex: 1, margin: 0 }}>
+                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>透明度</label>
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={1}
+                                  step={0.1}
+                                  value={el.opacity ?? 1}
+                                  onChange={(e) => patchFreeEl(el.id, { opacity: Number(e.target.value) })}
+                                  style={{ width: "100%", accentColor: "var(--color-primary)" }}
+                                />
+                              </div>
+                              <NumberField label="角の丸み" value={el.radius ?? 0} min={0} onChange={(v) => patchFreeEl(el.id, { radius: v })} />
                             </div>
-                          </div>
+                          </>
                         )}
 
                         <div className="row gap-sm" style={{ marginBottom: 4 }}>
@@ -709,7 +731,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <div className="row gap-sm">
                           <NumberField label="幅" value={el.w} min={1} onChange={(v) => patchFreeEl(el.id, { w: v })} />
                           <NumberField label="高さ" value={el.h} min={1} onChange={(v) => patchFreeEl(el.id, { h: v })} />
-                          <NumberField label="重なり順" value={el.zIndex ?? 1} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
+                          <NumberField label="重なり順" value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
                         </div>
                       </div>
                     ))}

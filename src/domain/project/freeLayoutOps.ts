@@ -52,7 +52,12 @@ export function addFreeElement(freeLayout: FreeElement[], kind: FreeElementKind)
   return [...freeLayout, createFreeElement(freeLayout, kind)];
 }
 
-/** 指定 id の要素に patch を当てた配列を返す（id が無ければ変化なし）。kind は変更しない。 */
+/**
+ * 指定 id の要素に patch を当てた配列を返す（id が無ければ変化なし）。kind は変更しない。
+ * FreeElement は flat interface（全 kind のフィールドが optional）のため patch 型は kind 横断
+ * フィールドを型で禁じないが、描画（renderer は el.kind 基準）・検証（validateFreeLayout）とも
+ * kind に無関係なフィールドは無視するため実害はない。UI も kind 別フォームで整合する patch のみ送る。
+ */
 export function updateFreeElement(
   freeLayout: FreeElement[], id: string, patch: Partial<Omit<FreeElement, 'id' | 'kind'>>,
 ): FreeElement[] {
