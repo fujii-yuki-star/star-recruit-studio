@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
-import { addFreeElement, createFreeElement, removeFreeElement, updateFreeElement } from './freeLayoutOps';
+import {
+  addFreeElement, createFreeElement, moveFreeElement, removeFreeElement, resizeFreeElement, updateFreeElement,
+} from './freeLayoutOps';
 
 describe('createFreeElement / addFreeElement', () => {
   it('空配列に slot を追加：id=free_001・zIndex=1・kind 既定（assetId=null/fit あり）', () => {
@@ -76,5 +78,67 @@ describe('removeFreeElement', () => {
   it('存在しない id は変化なし', () => {
     const layout: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }];
     expect(removeFreeElement(layout, 'free_999')).toEqual(layout);
+  });
+});
+
+describe('moveFreeElement', () => {
+  it('開始位置に総移動量を加えて整数で返す', () => {
+    expect(moveFreeElement({ x: 100, y: 100, w: 200, h: 200 }, 50, -30)).toEqual({ x: 150, y: 70 });
+  });
+  it('小数の移動量は丸める', () => {
+    expect(moveFreeElement({ x: 0, y: 0, w: 10, h: 10 }, 12.4, 12.6)).toEqual({ x: 12, y: 13 });
+  });
+});
+
+describe('resizeFreeElement', () => {
+  const start = { x: 100, y: 100, w: 200, h: 200 }; // 右下 (300,300)
+
+  it('se（右下）は幅・高さを増やし左上を固定', () => {
+    expect(resizeFreeElement(start, 'se', 50, 80)).toEqual({ x: 100, y: 100, w: 250, h: 280 });
+  });
+
+  it('nw（左上）は対角（右下 300,300）を固定して縮める', () => {
+    const r = resizeFreeElement(start, 'nw', 50, 50);
+    expect(r).toEqual({ x: 150, y: 150, w: 150, h: 150 });
+    expect(r.x + r.w).toBe(300); // 右辺固定
+    expect(r.y + r.h).toBe(300); // 下辺固定
+  });
+
+  it('ne（右上）は右へ広げつつ上辺を動かし下辺を固定', () => {
+    const r = resizeFreeElement(start, 'ne', 40, -60); // 上へ 60 → 高さ +60
+    expect(r).toEqual({ x: 100, y: 40, w: 240, h: 260 });
+    expect(r.y + r.h).toBe(300); // 下辺固定
+  });
+
+  it('最小サイズで止まり、固定辺は保たれる（nw で大きく内側へ）', () => {
+    const r = resizeFreeElement(start, 'nw', 1000, 1000, 20);
+    expect(r.w).toBe(20);
+    expect(r.h).toBe(20);
+    expect(r.x + r.w).toBe(300); // 右辺は固定のまま
+    expect(r.y + r.h).toBe(300); // 下辺は固定のまま
+  });
+
+  it('小数の移動量は丸める', () => {
+    expect(resizeFreeElement({ x: 0, y: 0, w: 100, h: 100 }, 'se', 10.6, 10.2)).toEqual({ x: 0, y: 0, w: 111, h: 110 });
+  });
+
+  it('sw（左下）は右辺を固定して左へ縮め、下へ伸ばす', () => {
+    const r = resizeFreeElement(start, 'sw', 50, 50);
+    expect(r).toEqual({ x: 150, y: 100, w: 150, h: 250 });
+    expect(r.x + r.w).toBe(300); // 右辺固定
+    expect(r.y).toBe(100); // 上辺固定
+  });
+
+  it('小数 dx/dy でも固定辺（対角）は整数で厳密に保たれる（NW/NE/SW・1px ずれない）', () => {
+    const nw = resizeFreeElement(start, 'nw', 0.6, 0.6);
+    expect(nw.x + nw.w).toBe(300); // 右辺
+    expect(nw.y + nw.h).toBe(300); // 下辺
+    const ne = resizeFreeElement(start, 'ne', 0.6, 0.6);
+    expect(ne.y + ne.h).toBe(300); // 下辺固定
+    const sw = resizeFreeElement(start, 'sw', 0.6, 0.6);
+    expect(sw.x + sw.w).toBe(300); // 右辺固定
+    for (const r of [nw, ne, sw]) {
+      expect([r.x, r.y, r.w, r.h].every(Number.isInteger)).toBe(true);
+    }
   });
 });

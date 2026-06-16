@@ -11,6 +11,7 @@ import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
+import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
 import {
@@ -126,6 +127,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // 自由配置で選択中の要素（オーバーレイのハンドル表示・編集カードの強調に使う）。
+  const [selectedFreeId, setSelectedFreeId] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "idle") void generate();
@@ -184,6 +187,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const selectScene = (id: string) => {
     setSelectedId(id);
     setConfirmDelete(false);
+    setSelectedFreeId(null); // 場面が変わったら自由配置の選択は持ち越さない
   };
 
   function onUpload(e: ChangeEvent<HTMLInputElement>) {
@@ -313,7 +317,20 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="col gap" style={{ overflow: "hidden" }}>
             <div className="editor-col grow" style={{ overflow: "auto" }}>
               <h2 className="field-label">仕上がり確認</h2>
-              <ScenePreview scene={selected} template={template} />
+              <div style={{ position: "relative" }}>
+                <ScenePreview scene={selected} template={template} />
+                {/* FREE 場面：プレビュー上でドラッグ移動・角リサイズできる操作レイヤ（Phase 4b）。 */}
+                {isFree && template && (
+                  <FreeLayoutOverlay
+                    freeLayout={freeLayout}
+                    canvasW={template.canvas.width}
+                    canvasH={template.canvas.height}
+                    selectedId={selectedFreeId}
+                    onSelect={setSelectedFreeId}
+                    onChange={(id, g) => patchFreeEl(id, g)}
+                  />
+                )}
+              </div>
               <p className="text-sm text-muted mt">
                 選択中の場面「{sceneTypeLabel[selected.sceneType]}」の仕上がりです。右側を直すとここに反映されます。
               </p>
@@ -607,7 +624,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <div className="field">
                 <label className="field-label">自由配置</label>
                 <p className="field-hint" style={{ marginTop: 0 }}>
-                  素材・文字・図形を追加して、位置や大きさを数字で調整できます。
+                  素材・文字・図形を追加し、プレビュー上でドラッグして動かす・角をつまんで大きさを変える、または数字で調整できます。
                 </p>
                 <div className="row gap-sm" style={{ marginBottom: 8, flexWrap: "wrap" }}>
                   <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.slot)}>
@@ -627,7 +644,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {/* 各フィールドの ?? 既定値は型安全のための保険（FreeElement の各フィールドは optional）。
                         正式な既定は domain の createFreeElement が必ず埋めるため通常は発動しない。 */}
                     {freeLayout.map((el) => (
-                      <div key={el.id} className="card-tight" style={{ background: "var(--color-surface-alt)" }}>
+                      <div
+                        key={el.id}
+                        className="card-tight"
+                        onClick={() => setSelectedFreeId(el.id)}
+                        style={{
+                          background: "var(--color-surface-alt)",
+                          outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined,
+                        }}
+                      >
                         <div className="row-between" style={{ marginBottom: 4 }}>
                           <strong className="text-sm">{freeKindLabel[el.kind]}</strong>
                           <button
