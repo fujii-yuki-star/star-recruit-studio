@@ -176,7 +176,7 @@ export function SettingsScreen() {
               placeholder={DEFAULT_AI_MODEL}
             />
             <p className="field-hint">
-              通常は変更不要です。無料枠の状況に応じて変更できます（例：gemini-2.5-flash / gemini-2.5-flash-lite）。
+              通常は変更不要です（未入力なら {DEFAULT_AI_MODEL} を使います）。無料枠の状況に応じて変更できます（例：gemini-2.5-flash-lite）。
             </p>
           </div>
 
