@@ -8,6 +8,7 @@ export interface TemplateSummary {
   templateId: string;
   category: string;
   useCase?: string;
+  /** テンプレの slot 層 id（required=true のみでなく**利用可能な slot 全体**を AI に知らせ、assetRefs を正しく生成させる）。 */
   requiredSlots?: string[];
   hasYuko: boolean;
   maxNarrationLength?: number;

@@ -1,11 +1,14 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
-// 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは当面 MockProvider。
+// 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Purpose } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
+import { buildTemplateSummaries, buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
+import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
+import type { AiVideoPlan } from "../../domain/ai/types";
 import {
   assembleProject, createAssetId, createBgmId, createPartId, createProjectId, createSceneId,
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc,
@@ -13,6 +16,8 @@ import {
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
+import { GeminiProvider, GEMINI_PROVIDER } from "../../infrastructure/aiProviders/geminiProvider";
+import { hasApiKey, isTauri } from "../../infrastructure/aiClient";
 import { sampleAssets, sampleTemplates } from "../../infrastructure/sampleData";
 import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
@@ -53,7 +58,9 @@ interface ProjectState {
   isGeneratingNarration: boolean;
   /** ナレーション生成に失敗したときのユーザー向け文言（成功/再試行で消える）。 */
   narrationError: string | null;
-  /** Mock AI → 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
+  /** AI 構成案の生成に失敗したときのユーザー向け文言（§2-5。再生成/成功で消える）。UI は status==="error" 時にこれを表示する。 */
+  aiError: string | null;
+  /** AI（鍵があれば実プロバイダ／無ければ Mock）→ 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
   generate: () => Promise<void>;
   /** デモ/テスト用にエラー状態へ。 */
   fail: () => void;
@@ -104,7 +111,15 @@ interface ProjectState {
   synthesizePreview: () => Promise<string>;
 }
 
-const provider = new MockAiProvider();
+// AI 構成案プロバイダの選択：Tauri かつ Gemini キーありなら実 Gemini、なければ Mock
+// （非Tauri／オフライン／鍵未設定のフォールバック＝ADR-0010）。
+// 実 AI を試みて失敗したときは Mock に倒さずエラーを伝播する（黙って差し替えない）。
+async function generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
+  if (isTauri() && (await hasApiKey(GEMINI_PROVIDER))) {
+    return new GeminiProvider().generateVideoPlan(input);
+  }
+  return new MockAiProvider().generateVideoPlan(input);
+}
 // Tauri ではローカル VOICEVOX に接続、ブラウザ開発では Mock（無音）にフォールバック。
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
@@ -194,32 +209,37 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   narrationAudioById: {},
   isGeneratingNarration: false,
   narrationError: null,
+  aiError: null,
   generate: async () => {
-    set({ status: "generating" });
+    set({ status: "generating", aiError: null });
     try {
       // 会社情報・目的はウィザードで meta に反映済み（ウィザード未経由なら既定値）。
       const { companyInfo, purpose } = get().meta;
-      const plan = await provider.generateVideoPlan({
+      const plan = await generateVideoPlan({
         companyInfo,
         purpose,
         targetAudience: companyInfo.recruitTarget ?? "",
         targetDurationSec: DEFAULT_TARGET_DURATION_SEC,
         tone: "親しみやすい",
-        templates: [],
+        templates: buildTemplateSummaries(sampleTemplates),
         assets: sampleAssets,
-        yukoPoseTags: ["smile", "guide"],
+        yukoPoseTags: buildYukoPoseTags(sampleAssets),
       });
       const { parts, scenes, warnings } = transformVideoPlan(plan, {
         templates: sampleTemplates,
         assets: sampleAssets,
       });
       set({ status: "ready", parts, scenes, warnings });
-    } catch {
-      set({ status: "error" });
+    } catch (e) {
+      // 失敗の文言を保持し、UI が「次の行動」を出せるようにする（§2-5）。
+      // Rust/プロバイダは §2-5 のユーザー向け文言で reject する（鍵未設定→設定へ／不適合→再試行 等）。
+      const aiError =
+        e instanceof Error ? e.message : typeof e === "string" ? e : "生成に失敗しました。もう一度お試しください。";
+      set({ status: "error", aiError });
     }
   },
   fail: () => set({ status: "error" }),
-  reset: () => set({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [] }),
+  reset: () => set({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null }),
   newProject: () =>
     set({
       status: "idle",
@@ -232,6 +252,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assetSrcById: {},
       narrationAudioById: {},
       narrationError: null,
+      aiError: null,
     }),
   saveProject: async () => {
     set({ saveStatus: "saving" });
