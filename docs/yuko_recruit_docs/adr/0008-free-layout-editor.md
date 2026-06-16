@@ -1,6 +1,6 @@
 # ADR-0008: FREE テンプレートの自由配置（scene.freeLayout）と配置エディタ
 
-- **状態**: Proposed（2026-06-15・未レビュー。develop マージ＝レビュー通過で Accepted へ。実装は本ADR確定後）
+- **状態**: Accepted（2026-06-16・PR #73 で develop マージ＝レビュー通過。Phase 4a〜4c 実装完了：スキーマ／描画・書き出し／検証／基本エディタ／ドラッグ・リサイズ／動画合成）
 - **日付**: 2026-06-15
 - **関連**: [`0007-detailed-edit-mode.md`](0007-detailed-edit-mode.md)（詳細編集モード・FREE テンプレ方針／Phase 4）/ [`0001-rendering-parity.md`](0001-rendering-parity.md)（場面内は静止・同一描画でパリティ）/ [`0004-rasterization-method.md`](0004-rasterization-method.md)（WebView Canvas で SVG→PNG）/ [`0006-video-slot-compositing.md`](0006-video-slot-compositing.md)（動画スロット合成・複数動画は未解決#2）/ `CLAUDE.md §10`（タイムライン/キーフレームは対象外）/ `§2-4`（テンプレ駆動）/ `11 §3`（enum）/ `11 §5`（assetRefs バインディング）/ `11 §8`（検証ルール）/ `schemas/{project,template}.schema.json`
 
