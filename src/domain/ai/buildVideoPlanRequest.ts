@@ -116,6 +116,8 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
     '# 出力フォーマット（厳守）',
     'トップレベルのキーは schemaVersion・videoPlan・parts（必須）と reviewNotes（任意）のみ。これ以外のキーをトップレベルに足さない。',
     '説明文・見出し・コードフェンスを付けず、JSON のみを返す。',
+    '各シーンに templateId を必ず設定する（省略しない）。templateId は上の「利用可能な見た目パターン」に挙げた templateId のいずれかだけを使う（新しいIDや一覧に無いIDを作らない）。',
+    '各シーンの sceneType は、選んだ templateId の category と同じ値にする（利用可能な見た目パターンに無い sceneType は使わない）。利用可能な見た目だけで表現できる構成にする。',
     '次の例と**同じキー名・同じ入れ子構造**で出力し、値だけ今回の会社情報・素材・見た目パターンに合わせて作る：',
     JSON.stringify(aiVideoPlanExample, null, 2),
   ].join('\n');

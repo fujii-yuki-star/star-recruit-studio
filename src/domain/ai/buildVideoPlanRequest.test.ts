@@ -152,6 +152,9 @@ describe('buildVideoPlanMessages', () => {
     const user = buildVideoPlanUserMessage(fullInput());
     expect(user).toContain('# 出力フォーマット（厳守）');
     expect(user).toContain('schemaVersion・videoPlan・parts（必須）と reviewNotes（任意）');
+    // 各シーンは利用可能テンプレに縛る（templateId 必須・sceneType は category 一致）。
+    expect(user).toContain('各シーンに templateId を必ず設定する');
+    expect(user).toContain('sceneType は、選んだ templateId の category と同じ値にする');
     // 正典 fixture（ai-video-plan.sample）の構造が出力例として入っている。
     expect(user).toContain('"schemaVersion": "1.0"');
     expect(user).toContain('"videoPlan"');
