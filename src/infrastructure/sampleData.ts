@@ -56,6 +56,7 @@ export const sampleTemplates: Template[] = [
 export const sampleAssets: Asset[] = [
   { assetId: "asset_entrance_001", assetType: "image", displayName: "会社外観", filePath: "assets/images/entrance_001.jpg", tags: ["外観", "建物"], isPublicChecked: true },
   { assetId: "asset_office_001", assetType: "image", displayName: "オフィス写真", filePath: "assets/images/office_001.jpg", tags: ["オフィス"], isPublicChecked: true },
+  { assetId: "asset_intro_clip_001", assetType: "video", displayName: "紹介クリップ", filePath: "assets/videos/intro_001.mp4", tags: ["紹介"], isPublicChecked: true, metadata: { durationSec: 12, hasAudio: true } },
   { assetId: "asset_logo_001", assetType: "logo", displayName: "会社ロゴ", filePath: "assets/images/logo.png", tags: ["logo"], isPublicChecked: true },
   { assetId: "yuko_smile_001", assetType: "yuko", displayName: "ゆうこ_笑顔", filePath: "assets/yuko/yuko_smile.png", tags: ["smile", "opening"], isDefaultYuko: true },
   { assetId: "yuko_guide_001", assetType: "yuko", displayName: "ゆうこ_案内", filePath: "assets/yuko/yuko_guide.png", tags: ["guide", "point"] },

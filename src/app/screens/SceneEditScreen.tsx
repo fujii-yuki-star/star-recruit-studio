@@ -2,9 +2,8 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
-import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TransitionDirection, type TransitionType } from "../../domain/enums";
-import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
-import { clampClipTime } from "../../domain/asset/clip";
+import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, FREE_GRID_SIZE, removeFreeElement, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -13,6 +12,7 @@ import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
+import { ClipDetailControls } from "../components/ClipDetailControls";
 import { Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
 import {
@@ -182,6 +182,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: updateFreeElement(s.freeLayout ?? [], id, p) }));
   const removeFreeEl = (id: string) =>
     patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id) }));
+  // 素材(Asset 単位)のクリップ設定を部分更新（FREE slot 動画の調整に使う。通常スロットと同じ Asset.clip）。
+  const patchAssetClip = (assetId: string, p: Partial<NonNullable<Asset["clip"]>>) =>
+    updateAsset(assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }));
   // 場面間トランジション（ADR-0009・T1）。境界 A→B は B（この場面）の transition.in が司る。
   // 先頭場面は切り替え元が無いので設定を出さない。書き出しへの反映は T2。
   const isFirstScene = scenes[0]?.sceneId === selected.sceneId;
@@ -399,7 +402,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <Switch on={showAdvanced} onChange={setShowAdvanced} label="詳細編集" />
             </div>
             <p className="field-hint" style={{ marginTop: 0 }}>
-              オンにすると、動画素材の細かい調整や画面の切り替えなどを表示します。
+              {isFree
+                ? "オンにすると、画面の切り替えなどを表示します。（自由配置の調整は下の「自由配置」で行えます）"
+                : "オンにすると、動画素材の細かい調整や画面の切り替えなどを表示します。"}
             </p>
 
             {/* FREE 場面は文字を「自由配置」で置くため、効かないタイトル欄は出さない（§2-4）。 */}
@@ -457,11 +462,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     ? assets.find((a) => a.assetId === assignedId)
                     : undefined;
                   const isVideo = assignedAsset?.assetType === ASSET_TYPE.video;
-                  const clip = assignedAsset?.clip;
-                  const dur = assignedAsset?.metadata?.durationSec ?? null;
-                  const hasAudio = assignedAsset?.metadata?.hasAudio === true;
-                  const useOriginal = hasAudio && (clip?.useOriginalAudio ?? false);
-                  // クリップ設定（asset.clip）を部分更新する。clip は Asset 単位（正典 11/$defs/Clip）。
+                  // クリップ設定（asset.clip）を部分更新する。clip は Asset 単位（正典 11/$defs/Clip）。詳細UIは ClipDetailControls。
                   const patchClip = (p: Partial<NonNullable<Asset["clip"]>>) => {
                     if (assignedAsset) {
                       updateAsset(assignedAsset.assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }));
@@ -491,145 +492,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       </select>
 
                       {isVideo && assignedAsset && showAdvanced && (
-                        <div
-                          className="card-tight"
-                          style={{ background: "var(--color-surface-alt)", marginTop: 6 }}
-                        >
-                          <p className="text-sm text-muted" style={{ margin: "0 0 6px" }}>
-                            ▶ 動画素材です。確認画面では枠が空に見えますが、書き出すと動画が入ります。
-                            {dur != null && `（長さ：約${dur.toFixed(1)}秒）`}
-                          </p>
-
-                          {/* 枠への収め方 */}
-                          <div className="field" style={{ marginBottom: 6 }}>
-                            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-                              枠への収め方
-                            </label>
-                            <select
-                              className="select"
-                              value={clip?.fit ?? "cover"}
-                              onChange={(e) => patchClip({ fit: e.target.value as Fit })}
-                            >
-                              <option value="cover">枠いっぱいに表示（はみ出しは切り取り）</option>
-                              <option value="contain">全体を表示（余白が入る）</option>
-                              <option value="stretch">枠に合わせて伸縮</option>
-                            </select>
-                          </div>
-
-                          {/* 使う範囲 */}
-                          <div className="field" style={{ marginBottom: 6 }}>
-                            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-                              使う範囲（秒）
-                            </label>
-                            <div className="row gap-sm" style={{ alignItems: "center" }}>
-                              <input
-                                className="input"
-                                type="number"
-                                min={0}
-                                max={dur ?? undefined}
-                                step={0.1}
-                                value={clip?.startSec ?? 0}
-                                onChange={(e) => {
-                                  const start = clampClipTime(Number(e.target.value), dur);
-                                  // 開始が終了を超えたら終了をクリア（=最後まで）して無効状態を防ぐ。
-                                  const p: Partial<NonNullable<Asset["clip"]>> = { startSec: start };
-                                  if (clip?.endSec != null && start > clip.endSec) p.endSec = undefined;
-                                  patchClip(p);
-                                }}
-                              />
-                              <span className="text-sm text-muted">〜</span>
-                              <input
-                                className="input"
-                                type="number"
-                                min={0}
-                                max={dur ?? undefined}
-                                step={0.1}
-                                placeholder="最後まで"
-                                value={clip?.endSec ?? ""}
-                                onChange={(e) =>
-                                  patchClip({
-                                    endSec:
-                                      e.target.value === ""
-                                        ? undefined
-                                        : clampClipTime(Number(e.target.value), dur, clip?.startSec ?? 0),
-                                  })
-                                }
-                              />
-                            </div>
-                            <p className="field-hint">終了を空にすると最後まで使います。</p>
-                          </div>
-
-                          {/* 再生速度（A=尺独立：表示時間は変えず、クリップの再生速度だけ変える） */}
-                          <div className="field" style={{ marginBottom: 6 }}>
-                            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-                              再生速度
-                            </label>
-                            <input
-                              type="range"
-                              min={SPEED_MIN}
-                              max={SPEED_MAX}
-                              step={SPEED_STEP}
-                              value={clip?.speed ?? SPEED_DEFAULT}
-                              onChange={(e) => patchClip({ speed: Number(e.target.value) })}
-                              style={{ width: "100%", accentColor: "var(--color-primary)" }}
-                            />
-                            <div className="row-between text-faint text-sm">
-                              <span>ゆっくり</span>
-                              <span>{clip?.speed ?? SPEED_DEFAULT}倍</span>
-                              <span>はやく</span>
-                            </div>
-                          </div>
-
-                          {/* 元の音声 */}
-                          <div className="toggle-row">
-                            <span className="field-label text-sm" style={{ margin: 0 }}>
-                              元の音声を使う
-                            </span>
-                            <Switch
-                              on={useOriginal}
-                              disabled={!hasAudio}
-                              onChange={(v) => patchClip({ useOriginalAudio: v })}
-                              label="元の音声を使う"
-                            />
-                          </div>
-                          {!hasAudio && (
-                            <p className="field-hint">
-                              {assignedAsset.metadata?.hasAudio === false
-                                ? "この動画には音声がありません。"
-                                : "音声を確認できないため、元の音声は使えません。"}
-                            </p>
-                          )}
-
-                          {/* 元音声の音量 */}
-                          {useOriginal && (
-                            <div className="field" style={{ marginTop: 6 }}>
-                              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-                                元の音声の大きさ
-                              </label>
-                              <input
-                                type="range"
-                                min={VOLUME_MIN}
-                                max={VOLUME_MAX}
-                                step={VOLUME_STEP}
-                                value={clip?.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME}
-                                onChange={(e) =>
-                                  patchClip({ originalAudioVolume: Number(e.target.value) })
-                                }
-                                style={{ width: "100%", accentColor: "var(--color-primary)" }}
-                              />
-                              <div className="row-between text-faint text-sm">
-                                <span>小さい</span>
-                                <span>
-                                  {Math.round(
-                                    (clip?.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME) * 100,
-                                  )}
-                                  %（標準{Math.round(ORIGINAL_AUDIO_VOLUME * 100)}%）
-                                </span>
-                                <span>大きい</span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                        <ClipDetailControls asset={assignedAsset} patchClip={patchClip} />
                       )}
                     </div>
                   );
@@ -700,12 +563,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                 <option key={a.assetId} value={a.assetId}>{a.displayName}</option>
                               ))}
                             </select>
-                            {el.assetId &&
-                              assets.find((a) => a.assetId === el.assetId)?.assetType === ASSET_TYPE.video && (
-                                <p className="field-hint" style={{ marginTop: 4 }}>
-                                  ▶ 動画素材です。確認画面では1コマ表示ですが、書き出すと動画が入ります。
-                                </p>
-                              )}
+                            {(() => {
+                              const a = el.assetId ? assets.find((x) => x.assetId === el.assetId) : undefined;
+                              if (a?.assetType !== ASSET_TYPE.video) return null;
+                              // FREE slot に動画 → 通常スロットと同じクリップ調整（収め方/使う範囲/再生速度/元音声）。
+                              // ここで設定する収め方は clip.fit（書き出しで優先）。静止プレビューは要素の el.fit を参照する
+                              // （findVideoSlot は clip?.fit ?? el.fit ?? DEFAULT_FIT で解決）。FREE は showAdvanced に依らず常時表示（ADR-0008 §UX）。
+                              return <ClipDetailControls asset={a} patchClip={(p) => patchAssetClip(a.assetId, p)} />;
+                            })()}
                           </div>
                         )}
 
