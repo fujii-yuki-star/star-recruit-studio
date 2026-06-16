@@ -11,21 +11,41 @@ const KEYRING_SERVICE: &str = "star-recruit-studio:ai";
 /// 生成温度（低めで決定論寄り＝12§5 注記）。生成パラメータのため 11§4 の尺/enum 定数とは別管理。
 const GEMINI_TEMPERATURE: f64 = 0.2;
 
+/// 外部 AI 呼び出しのタイムアウト（秒）。無応答時に UI を無限待機させない。
+const AI_REQUEST_TIMEOUT_SECS: u64 = 60;
+
 /// 対応プロバイダ（MVP は gemini のみ。openai は P2 で有効化）。
 fn is_supported_provider(provider: &str) -> bool {
     provider == "gemini"
 }
 
+/// モデル名が URL パスへ安全に埋め込めるか（英数字・ハイフン・ドットのみ）。
+/// `/` や `..` を弾き、鍵付きリクエストが別エンドポイントへ届く URL インジェクションを防ぐ。
+fn is_valid_gemini_model(model: &str) -> bool {
+    !model.is_empty()
+        && model
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+}
+
 /// reqwest クライアントは接続プール再利用のため一度だけ生成する（voicevox.rs と同方針）。
+/// 外部 API のため**タイムアウトを設定**し、応答が返らないときに UI が無限待機しないようにする。
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(AI_REQUEST_TIMEOUT_SECS))
+            .build()
+            .expect("HTTP クライアントの初期化に失敗しました")
+    })
 }
 
 /// keyring エントリ（service 固定・account=プロバイダ名）。
 fn key_entry(provider: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, provider)
-        .map_err(|_| "鍵の保管領域にアクセスできませんでした。".to_string())
+    keyring::Entry::new(KEYRING_SERVICE, provider).map_err(|_| {
+        "鍵の保管領域にアクセスできませんでした。アプリを再起動してから、もう一度お試しください。"
+            .to_string()
+    })
 }
 
 /// APIキーを OS 資格情報ストアに保存する（平文ファイルには書かない）。
@@ -123,8 +143,9 @@ pub async fn ai_generate(
     if !is_supported_provider(&provider) {
         return Err("対応していない接続先です。".to_string());
     }
-    if model.trim().is_empty() {
-        return Err("利用するモデルが指定されていません。".to_string());
+    // model は URL パスへ埋め込むため、安全な文字種のみ許可する（インジェクション防止）。
+    if !is_valid_gemini_model(&model) {
+        return Err("利用するモデルが正しくありません。設定を確認してください。".to_string());
     }
     let api_key = key_entry(&provider)?.get_password().map_err(|_| {
         "接続キーが設定されていません。設定画面でキーを登録してください。".to_string()
@@ -202,5 +223,17 @@ mod tests {
         assert!(is_supported_provider("gemini"));
         assert!(!is_supported_provider("openai"));
         assert!(!is_supported_provider("foo"));
+    }
+
+    #[test]
+    fn valid_gemini_model_allows_safe_names_and_rejects_path_chars() {
+        assert!(is_valid_gemini_model("gemini-2.0-flash"));
+        assert!(is_valid_gemini_model("gemini-1.5-pro"));
+        // URL インジェクションになり得る入力を弾く。
+        assert!(!is_valid_gemini_model(""));
+        assert!(!is_valid_gemini_model("../other-api"));
+        assert!(!is_valid_gemini_model("models/x:generateContent"));
+        assert!(!is_valid_gemini_model("gemini flash"));
+        assert!(!is_valid_gemini_model("a/b"));
     }
 }
