@@ -14,7 +14,8 @@
 | [0005](0005-voicevox-bundling.md) | VOICEVOX エンジンの同梱と自動起動 | **Accepted** |
 | [0006](0006-video-slot-compositing.md) | 動画スロットの合成（動画ありシーンの書き出し） | **Accepted** |
 | [0007](0007-detailed-edit-mode.md) | 詳細編集モードと FREE テンプレート（場面の作り込み） | **Accepted** |
-| [0008](0008-free-layout-editor.md) | FREE テンプレートの自由配置（scene.freeLayout）と配置エディタ | **Proposed** |
+| [0008](0008-free-layout-editor.md) | FREE テンプレートの自由配置（scene.freeLayout）と配置エディタ | **Accepted** |
+| [0009](0009-scene-transitions.md) | 場面間トランジション（フェード／スライド） | **Proposed** |
 
 ## 状態の意味
 
