@@ -189,3 +189,36 @@ describe('buildExportScenes：出力解像度（HDサイズ）', () => {
     expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledWith(expect.anything(), 1920, 1080);
   });
 });
+
+describe('buildExportScenes：場面間トランジション（ADR-0009 T2）', () => {
+  it('先頭は transition なし、以降は xfade 名＋offset（実効累積−D）を付与', async () => {
+    const scenes = [
+      { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's2', templateId: 'tpl', durationSec: 10, transition: { in: 'fade', durationSec: 0.5 } },
+      { sceneId: 's3', templateId: 'tpl', durationSec: 6, transition: { in: 'slide', direction: 'up', durationSec: 0.5 } },
+    ] as unknown as Scene[];
+    const out = await buildExportScenes(scenes, templateById, noAsset);
+    expect(out[0].transition).toBeUndefined();
+    expect(out[1].transition).toEqual({ name: 'fade', durationSec: 0.5, offsetSec: 7.5 }); // 8−0.5
+    // 実効累積: 8 → 8+10−0.5=17.5。境界2 offset = 17.5−0.5 = 17。
+    expect(out[2].transition).toEqual({ name: 'slideup', durationSec: 0.5, offsetSec: 17 });
+  });
+
+  it('none/未設定はハードカット（transition を付けない）', async () => {
+    const scenes = [
+      { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's2', templateId: 'tpl', durationSec: 5, transition: { in: 'none' } },
+    ] as unknown as Scene[];
+    const out = await buildExportScenes(scenes, templateById, noAsset);
+    expect(out[1].transition).toBeUndefined();
+  });
+
+  it('wipe/zoom は fade として書き出す（resolveTransition と一致）', async () => {
+    const scenes = [
+      { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's2', templateId: 'tpl', durationSec: 6, transition: { in: 'wipe', durationSec: 0.5 } },
+    ] as unknown as Scene[];
+    const out = await buildExportScenes(scenes, templateById, noAsset);
+    expect(out[1].transition?.name).toBe('fade');
+  });
+});

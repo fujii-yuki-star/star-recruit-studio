@@ -132,6 +132,86 @@ pub fn concat_args(list_file: &str, out: &str) -> Vec<String> {
     ]
 }
 
+/// 場面間の結合方法（1境界ぶん・ADR-0009 T2）。
+/// xfade=Some(FFmpeg の transition 名)のとき重ねて遷移、None のときハードカット（concat）。
+pub struct JoinStep<'a> {
+    /// FFmpeg xfade の transition 名（"fade"/"slideleft"/"slideright"/"slideup"/"slidedown"）。None=ハードカット。
+    pub xfade: Option<&'a str>,
+    /// xfade の長さ（秒・xfade のときのみ）。
+    pub duration_sec: f64,
+    /// 結合結果（左入力）先頭からの xfade 開始位置（秒・xfade のときのみ）。transitionTimeline が算出。
+    pub offset_sec: f64,
+}
+
+/// 場面MP4群を xfade/concat のフィルタチェーンで1本に再エンコード結合する引数（純粋・ADR-0009 T2）。
+/// `steps.len()` は `files.len()-1`（各境界）。映像は xfade/concat、音声は acrossfade/concat を同じ境界規則で連ねる。
+/// 全境界 none のときは呼ばない（その場合は concat_args の無劣化コピーを使う）。files は2本以上を前提。
+pub fn xfade_chain_args(
+    files: &[String],
+    steps: &[JoinStep],
+    out: &str,
+    codec: VideoCodec,
+    fps: u32,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec!["-y".into()];
+    for f in files {
+        args.push("-i".into());
+        args.push(f.clone());
+    }
+    let mut filters: Vec<String> = Vec::new();
+    // 映像チェーン：[0:v] を起点に、各境界で xfade（重ね）or concat（ハードカット）。
+    let mut v_prev = "0:v".to_string();
+    for (i, st) in steps.iter().enumerate() {
+        let cur = i + 1;
+        let v_out = format!("v{cur}");
+        match st.xfade {
+            Some(name) => filters.push(format!(
+                "[{v_prev}][{cur}:v]xfade=transition={name}:duration={d}:offset={o}[{v_out}]",
+                d = st.duration_sec,
+                o = st.offset_sec,
+            )),
+            None => filters.push(format!("[{v_prev}][{cur}:v]concat=n=2:v=1:a=0[{v_out}]")),
+        }
+        v_prev = v_out;
+    }
+    // 音声チェーン：xfade の境界は acrossfade（同じ D で重ねる）、none は concat。
+    let mut a_prev = "0:a".to_string();
+    for (i, st) in steps.iter().enumerate() {
+        let cur = i + 1;
+        let a_out = format!("a{cur}");
+        match st.xfade {
+            Some(_) => filters.push(format!(
+                "[{a_prev}][{cur}:a]acrossfade=d={d}[{a_out}]",
+                d = st.duration_sec,
+            )),
+            None => filters.push(format!("[{a_prev}][{cur}:a]concat=n=2:v=0:a=1[{a_out}]")),
+        }
+        a_prev = a_out;
+    }
+    args.push("-filter_complex".into());
+    args.push(filters.join(";"));
+    args.extend([
+        "-map".into(),
+        format!("[{v_prev}]"),
+        "-map".into(),
+        format!("[{a_prev}]"),
+        "-r".into(),
+        format!("{fps}"),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-c:v".into(),
+        codec.encoder().into(),
+        "-c:a".into(),
+        "aac".into(),
+        "-ar".into(),
+        "44100".into(),
+        "-ac".into(),
+        "2".into(),
+        out.into(),
+    ]);
+    args
+}
+
 /// 結合済み動画（ナレーション入り）に BGM を重ねる引数（純粋）。
 /// BGM はループ（-stream_loop）し、音量・フェードを適用、amix で既存音声と合成する。
 /// normalize=0 で各入力の音量を保つ（既定の正規化で音が痩せるのを防ぐ）。duration=first で動画長に合わせる。
@@ -606,10 +686,27 @@ impl SceneJob {
     }
 }
 
-/// 各シーン（静止画 or 動画）→ MP4 → concat で1本に結合する。
+/// 検証済みの境界結合（export_video が SceneInput.transition から組み立てる・ADR-0009 T2）。
+struct JoinInfo {
+    /// 検証済み xfade 名（None=ハードカット）。
+    xfade: Option<String>,
+    duration_sec: f64,
+    offset_sec: f64,
+}
+
+/// FFmpeg xfade が受け付ける transition 名の許可リスト（MVP）。これ以外/"none" はハードカット扱い。
+const XFADE_NAMES: [&str; 5] = ["fade", "slideleft", "slideright", "slideup", "slidedown"];
+fn validate_xfade_name(name: &str) -> Option<String> {
+    XFADE_NAMES.contains(&name).then(|| name.to_string())
+}
+
+/// 各シーン（静止画 or 動画）→ MP4 にし、トランジション有無で結合方法を選ぶ（ADR-0009 T2）。
+/// 全境界ハードカット（遷移なし）なら concat demuxer の無劣化コピー、1つでも遷移ありなら xfade チェーンで再エンコード。
+/// `joins` は jobs と同じ長さ（joins[0]＝先頭で未使用）。
 fn encode_jobs(
     ffmpeg: &Path,
     jobs: &[SceneJob],
+    joins: &[JoinInfo],
     codec: VideoCodec,
     fps: u32,
     tmp_dir: &Path,
@@ -621,10 +718,9 @@ fn encode_jobs(
             "動画の保存中に問題が発生しました。もう一度お試しください。",
         )
     })?;
-    let mut list = String::new();
+    let mut files: Vec<String> = Vec::with_capacity(jobs.len());
     for (i, job) in jobs.iter().enumerate() {
-        let clip_name = format!("scene_{i:03}.mp4");
-        let clip = tmp_dir.join(&clip_name);
+        let clip = tmp_dir.join(format!("scene_{i:03}.mp4"));
         let args = match job {
             SceneJob::Still(s) => {
                 let audio = s.audio.as_ref().map(|p| p.to_string_lossy().into_owned());
@@ -679,22 +775,47 @@ fn encode_jobs(
                 ),
             )
         })?;
-        list.push_str(&format!("file '{clip_name}'\n"));
+        files.push(clip.to_string_lossy().into_owned());
     }
-    let list_path = tmp_dir.join("concat.txt");
-    fs::write(&list_path, list).map_err(|e| {
-        export_failure(
-            format!("write concat list: {e}"),
-            "動画の保存中に問題が発生しました。もう一度お試しください。",
-        )
-    })?;
-    let args = concat_args(&list_path.to_string_lossy(), &output.to_string_lossy());
-    run(ffmpeg, &args).map_err(|e| {
-        export_failure(
-            format!("concat: {e}"),
-            "場面の結合に失敗しました。もう一度お試しください。",
-        )
-    })?;
+
+    let has_transition = joins.iter().any(|j| j.xfade.is_some());
+    if has_transition && files.len() >= 2 {
+        // 遷移あり：xfade/concat フィルタチェーンで再エンコード結合（ADR-0009 T2）。
+        let steps: Vec<JoinStep> = (1..files.len())
+            .map(|i| JoinStep {
+                xfade: joins[i].xfade.as_deref(),
+                duration_sec: joins[i].duration_sec,
+                offset_sec: joins[i].offset_sec,
+            })
+            .collect();
+        let args = xfade_chain_args(&files, &steps, &output.to_string_lossy(), codec, fps);
+        run(ffmpeg, &args).map_err(|e| {
+            export_failure(
+                format!("xfade join: {e}"),
+                "場面の切り替え合成に失敗しました。もう一度お試しください。",
+            )
+        })?;
+    } else {
+        // 遷移なし：従来どおり concat demuxer の無劣化コピー（高速）。
+        let mut list = String::new();
+        for i in 0..files.len() {
+            list.push_str(&format!("file 'scene_{i:03}.mp4'\n"));
+        }
+        let list_path = tmp_dir.join("concat.txt");
+        fs::write(&list_path, list).map_err(|e| {
+            export_failure(
+                format!("write concat list: {e}"),
+                "動画の保存中に問題が発生しました。もう一度お試しください。",
+            )
+        })?;
+        let args = concat_args(&list_path.to_string_lossy(), &output.to_string_lossy());
+        run(ffmpeg, &args).map_err(|e| {
+            export_failure(
+                format!("concat: {e}"),
+                "場面の結合に失敗しました。もう一度お試しください。",
+            )
+        })?;
+    }
     Ok(())
 }
 
@@ -803,6 +924,21 @@ pub struct SceneInput {
     /// 動画ありシーン（ADR-0006）。指定時は overlay 合成経路へ。
     #[serde(default)]
     video: Option<VideoSceneInput>,
+    /// この場面に「入る」トランジション（ADR-0009 T2）。先頭場面は無視。未指定＝ハードカット。
+    #[serde(default)]
+    transition: Option<TransitionInput>,
+}
+
+/// 場面間トランジション入力（ADR-0009 T2）。front の transitionTimeline が name/offset を解決済み。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitionInput {
+    /// FFmpeg xfade の transition 名（"fade"/"slideleft"/"slideright"/"slideup"/"slidedown"）。"none"/不明はハードカット。
+    name: String,
+    #[serde(default)]
+    duration_sec: f64,
+    #[serde(default)]
+    offset_sec: f64,
 }
 
 /// 動画ありシーンの入力（ADR-0006・step2b）。下/上PNGは base64、クリップはプロジェクト相対パス。
@@ -1029,13 +1165,38 @@ pub fn export_video(
         }
     };
 
+    // 場面間トランジション（ADR-0009 T2）。各場面の「入り」を JoinInfo に解決（joins[0]＝先頭で未使用）。
+    let joins: Vec<JoinInfo> = scenes
+        .iter()
+        .map(|s| match &s.transition {
+            Some(t) => JoinInfo {
+                xfade: validate_xfade_name(&t.name),
+                duration_sec: t.duration_sec,
+                offset_sec: t.offset_sec,
+            },
+            None => JoinInfo {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            },
+        })
+        .collect();
+
     // BGM があれば、場面結合は一時ファイルへ→最後に BGM を重ねて out へ。無ければ直接 out へ。
     let video_path = if bgm.is_some() {
         tmp.join("video.mp4")
     } else {
         out.clone()
     };
-    encode_jobs(&ffmpeg, &jobs, codec, DEFAULT_FPS, &tmp, &video_path)?;
+    encode_jobs(
+        &ffmpeg,
+        &jobs,
+        &joins,
+        codec,
+        DEFAULT_FPS,
+        &tmp,
+        &video_path,
+    )?;
 
     if let Some(b) = bgm {
         let bg_bytes = base64::engine::general_purpose::STANDARD
@@ -1054,7 +1215,12 @@ pub fn export_video(
                 "動画の保存中に問題が発生しました。もう一度お試しください。",
             )
         })?;
-        let total: f64 = jobs.iter().map(|j| j.duration_sec()).sum();
+        // xfade で重なった分だけ実効総尺が縮む（ADR-0009：BGM は実効総尺＝Σ尺−ΣD 基準でフェード計算）。
+        let applied: f64 = joins
+            .iter()
+            .filter_map(|j| j.xfade.as_ref().map(|_| j.duration_sec))
+            .sum();
+        let total: f64 = jobs.iter().map(|j| j.duration_sec()).sum::<f64>() - applied;
         let args = mix_bgm_args(
             &video_path.to_string_lossy(),
             &bgm_path.to_string_lossy(),
@@ -1188,6 +1354,152 @@ mod tests {
     }
 
     #[test]
+    fn xfade_chain_args_two_scenes_fade() {
+        let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
+        let steps = vec![JoinStep {
+            xfade: Some("fade"),
+            duration_sec: 0.5,
+            offset_sec: 7.5,
+        }];
+        let a = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::OpenH264, 30);
+        // 2入力。
+        assert_eq!(a.iter().filter(|s| *s == "-i").count(), 2);
+        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
+        let graph = &a[fc + 1];
+        // 映像 xfade（offset=累積−D=7.5）と音声 acrossfade（同じ D）。
+        assert!(graph.contains("[0:v][1:v]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
+        assert!(graph.contains("[0:a][1:a]acrossfade=d=0.5[a1]"));
+        // 最終ラベルを map。
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v1]"));
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a1]"));
+        // 再エンコード（copy ではない）。
+        assert!(a
+            .windows(2)
+            .any(|w| w[0] == "-c:v" && w[1] == VideoCodec::OpenH264.encoder()));
+        assert!(!a.windows(2).any(|w| w[0] == "-c" && w[1] == "copy"));
+    }
+
+    #[test]
+    fn xfade_chain_args_slide_direction_maps_to_name() {
+        let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
+        let steps = vec![JoinStep {
+            xfade: Some("slideup"),
+            duration_sec: 0.4,
+            offset_sec: 3.6,
+        }];
+        let a = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::X264, 30);
+        assert!(
+            a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1]
+                .contains("xfade=transition=slideup:duration=0.4:offset=3.6")
+        );
+    }
+
+    #[test]
+    fn xfade_chain_args_none_boundary_uses_concat_filter() {
+        let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
+        let steps = vec![JoinStep {
+            xfade: None,
+            duration_sec: 0.0,
+            offset_sec: 0.0,
+        }];
+        let a = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::OpenH264, 30);
+        let graph = &a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1];
+        // ハードカット＝concat フィルタ（映像/音声）。xfade は含まない。
+        assert!(graph.contains("[0:v][1:v]concat=n=2:v=1:a=0[v1]"));
+        assert!(graph.contains("[0:a][1:a]concat=n=2:v=0:a=1[a1]"));
+        assert!(!graph.contains("xfade"));
+    }
+
+    #[test]
+    fn xfade_chain_args_mixed_three_scenes() {
+        let files = vec![
+            "a.mp4".to_string(),
+            "b.mp4".to_string(),
+            "c.mp4".to_string(),
+        ];
+        // 境界1=fade、境界2=none（ハードカット）。
+        let steps = vec![
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 7.5,
+            },
+            JoinStep {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            },
+        ];
+        let a = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::OpenH264, 30);
+        assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3);
+        let graph = &a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1];
+        assert!(graph.contains("[0:v][1:v]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
+        assert!(graph.contains("[v1][2:v]concat=n=2:v=1:a=0[v2]"));
+        assert!(graph.contains("[a1][2:a]concat=n=2:v=0:a=1[a2]"));
+        // 最終ラベルは v2/a2。
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v2]"));
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a2]"));
+    }
+
+    // 実 FFmpeg で xfade チェーンが MP4 を生成できるか（FFMPEG_PATH 未設定ならスキップ）。
+    #[test]
+    fn xfade_chain_args_produces_output_when_ffmpeg_available() {
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_xfade_unittest");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
+        let codec = pick_codec(&encoders).expect("an h264 encoder");
+        // 単純な場面MP4（映像＋AAC無音・各2秒）を2本。
+        let mut files = Vec::new();
+        for (i, color) in ["red", "blue"].iter().enumerate() {
+            let f = tmp.join(format!("s{i}.mp4"));
+            run(
+                &ffmpeg,
+                &[
+                    "-y".into(),
+                    "-f".into(),
+                    "lavfi".into(),
+                    "-i".into(),
+                    format!("color=c={color}:s=320x240:rate=30:duration=2"),
+                    "-f".into(),
+                    "lavfi".into(),
+                    "-i".into(),
+                    "anullsrc=channel_layout=stereo:sample_rate=44100".into(),
+                    "-shortest".into(),
+                    "-pix_fmt".into(),
+                    "yuv420p".into(),
+                    "-c:v".into(),
+                    codec.encoder().into(),
+                    "-c:a".into(),
+                    "aac".into(),
+                    "-t".into(),
+                    "2".into(),
+                    f.to_string_lossy().into_owned(),
+                ],
+            )
+            .expect("scene mp4");
+            files.push(f.to_string_lossy().into_owned());
+        }
+        let out = tmp.join("xf.mp4");
+        // fade D=0.5・offset = 2 − 0.5 = 1.5。
+        let steps = vec![JoinStep {
+            xfade: Some("fade"),
+            duration_sec: 0.5,
+            offset_sec: 1.5,
+        }];
+        let args = xfade_chain_args(&files, &steps, &out.to_string_lossy(), codec, 30);
+        run(&ffmpeg, &args).expect("xfade join");
+        assert!(fs::metadata(&out).expect("xf.mp4 exists").len() > 0);
+    }
+
+    #[test]
     fn mix_bgm_args_applies_loop_volume_fade_and_amix() {
         let a = mix_bgm_args("v.mp4", "bgm.mp3", 0.25, 1.0, 2.0, 10.0, "out.mp4");
         // BGM をループ入力にする。
@@ -1283,7 +1595,15 @@ mod tests {
         let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
         let codec = pick_codec(&encoders).expect("an h264 encoder");
         let out = tmp.join("final.mp4");
-        encode_jobs(&ffmpeg, &scenes, codec, 30, &tmp, &out).expect("encode_jobs");
+        let joins: Vec<JoinInfo> = scenes
+            .iter()
+            .map(|_| JoinInfo {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            })
+            .collect();
+        encode_jobs(&ffmpeg, &scenes, &joins, codec, 30, &tmp, &out).expect("encode_jobs");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 
@@ -1328,6 +1648,11 @@ mod tests {
                 narration_volume: 1.0,
                 duration_sec: 2.0,
             })],
+            &[JoinInfo {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            }],
             codec,
             30,
             &tmp,
@@ -1827,7 +2152,15 @@ mod tests {
             use_original_audio: true,
             speed: 1.0,
         })];
-        encode_jobs(&ffmpeg, &jobs, codec, 30, &tmp, &out).expect("encode_jobs video");
+        let joins: Vec<JoinInfo> = jobs
+            .iter()
+            .map(|_| JoinInfo {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            })
+            .collect();
+        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, &tmp, &out).expect("encode_jobs video");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 }

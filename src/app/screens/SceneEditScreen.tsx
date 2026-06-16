@@ -955,7 +955,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <option value={`slide:${TRANSITION_DIRECTION.down}`}>スライド（下へ）</option>
                       </select>
                       <p className="field-hint">
-                        ※ 画面の切り替えは近日対応予定で、現在は書き出しに反映されません。
+                        ※ プレビューでは確認できませんが、書き出すと切り替わります。
                       </p>
                     </>
                   )}
