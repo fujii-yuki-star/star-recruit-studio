@@ -61,7 +61,10 @@ describe('buildVideoPlanMessages', () => {
     expect(system).toBe(VIDEO_PLAN_SYSTEM_PROMPT);
     // 厳守事項の要点が含まれる（出力契約・ID/asset 制約・null 化）。
     expect(system).toContain('構成案');
-    expect(system).toContain('templateId は「利用可能な見た目パターン一覧」に存在するIDのみ');
+    // templateId は必須＋一覧内のみ・sceneType は category 一致（障害の根本原因を §5 で防ぐ）。
+    expect(system).toContain('各シーンに templateId を必ず設定');
+    expect(system).toContain('「利用可能な見た目パターン一覧」に存在するIDのみ');
+    expect(system).toContain('sceneType は、選んだ templateId の category と同じ値にする');
     expect(system).toContain('該当が無ければ null');
     // 尺の目安は 11§4 の定数を埋め込む（検証側 clamp と黙って矛盾しない＝§2-7）。
     expect(system).toContain(`durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒`);

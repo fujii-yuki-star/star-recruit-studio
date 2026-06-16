@@ -84,9 +84,9 @@ interface AiProvider {
 【厳守事項】
 - あなたは動画や画像を生成しません。動画の「構成案」だけを作成します。
 - 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。
-- templateId は「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
+- 各シーンに templateId を必ず設定し、「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
 - assetRefs の値は「利用可能な素材一覧」に存在する assetId のみ。該当が無ければ null にする。
-- sceneType に対し、category が一致する見た目パターンを選ぶ。
+- sceneType は、選んだ templateId の category と同じ値にする（「利用可能な見た目パターン一覧」に無い sceneType は使わず、利用可能な見た目だけで構成する）。
 - 各シーンは短く区切る（1シーンで1つの内容）。長い動画はパートに分けて整理する。
 - narrationText は会社マスコット「ゆうこ」が話す、自然で親しみやすい日本語にする。各見た目パターンの maxNarrationLength を超えない。
 - texts.subtitle は字幕用に短くする（各見た目パターンの maxSubtitleLength 以内）。ナレーションの要約でよい。

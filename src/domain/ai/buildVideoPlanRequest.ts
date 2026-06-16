@@ -10,19 +10,20 @@ import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 import aiVideoPlanExample from '../../../docs/yuko_recruit_docs/fixtures/ai-video-plan.sample.json';
 
 /**
- * 12§5 の確定システムプロンプト（日本語）。本文は正典 12§5 を転記し、ここを文言の唯一の参照元とする
- * （プロンプト本文の散在を防ぐ）。ただし**尺の目安（最小〜最大秒）は 11§4 の
- * SCENE_MIN/MAX_DURATION_SEC を埋め込む**＝AIへの指示と検証側（P1-B の clamp）の閾値が黙って
- * 矛盾しないようにする（§2-7）。定数値（3/15）は 12§5 本文と一致しており、変えるときは 11§4・12§5 を揃える。
+ * 12§5 の確定システムプロンプト（日本語・厳守事項の参照元）。本文は正典 12§5 と一致させる（変更時は両方を揃える）。
+ * 出力フォーマットの構造指定（トップレベルキー等）と 12§7 の few-shot 例は buildVideoPlanUserMessage 側に置き、
+ * ここの厳守事項を出力直前で補強する（散在ではなく役割分担：本定数=ルール本文／ユーザーメッセージ=構造・例）。
+ * 尺の目安（最小〜最大秒）は 11§4 の SCENE_MIN/MAX_DURATION_SEC を埋め込む＝AIへの指示と検証側（P1-B の clamp）の
+ * 閾値が黙って矛盾しないようにする（§2-7）。定数値（3/15）は 12§5 本文と一致させる。
  */
 export const VIDEO_PLAN_SYSTEM_PROMPT = `あなたは採用動画の構成プランナーです。会社情報・利用可能な素材・利用可能な見た目パターン（テンプレート）をもとに、採用動画の構成案を作成します。
 
 【厳守事項】
 - あなたは動画や画像を生成しません。動画の「構成案」だけを作成します。
 - 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。
-- templateId は「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
+- 各シーンに templateId を必ず設定し、「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
 - assetRefs の値は「利用可能な素材一覧」に存在する assetId のみ。該当が無ければ null にする。
-- sceneType に対し、category が一致する見た目パターンを選ぶ。
+- sceneType は、選んだ templateId の category と同じ値にする（「利用可能な見た目パターン一覧」に無い sceneType は使わず、利用可能な見た目だけで構成する）。
 - 各シーンは短く区切る（1シーンで1つの内容）。長い動画はパートに分けて整理する。
 - narrationText は会社マスコット「ゆうこ」が話す、自然で親しみやすい日本語にする。各見た目パターンの maxNarrationLength を超えない。
 - texts.subtitle は字幕用に短くする（各見た目パターンの maxSubtitleLength 以内）。ナレーションの要約でよい。
