@@ -6,6 +6,7 @@ import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_T
 import { ORIGINAL_AUDIO_VOLUME, SCENE_MIN_DURATION_SEC, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { clampClipTime } from "../../domain/asset/clip";
 import { addFreeElement, removeFreeElement, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
@@ -182,12 +183,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 場面間トランジション（ADR-0009・T1）。境界 A→B は B（この場面）の transition.in が司る。
   // 先頭場面は切り替え元が無いので設定を出さない。書き出しへの反映は T2。
   const isFirstScene = scenes[0]?.sceneId === selected.sceneId;
-  const transitionValue =
-    selected.transition?.in === TRANSITION_TYPE.slide
-      ? `slide:${selected.transition.direction ?? TRANSITION_DIRECTION.left}`
-      : selected.transition?.in === TRANSITION_TYPE.fade
-        ? TRANSITION_TYPE.fade
-        : TRANSITION_TYPE.none;
+  // select 値の導出は domain に集約（wipe/zoom→fade を resolveTransition と一致させる・観点4対応）。
+  const transitionValue = deriveTransitionSelectValue(selected.transition);
   const onTransitionChange = (val: string) =>
     patch((s) => {
       if (val.startsWith("slide:")) {
@@ -958,7 +955,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <option value={`slide:${TRANSITION_DIRECTION.down}`}>スライド（下へ）</option>
                       </select>
                       <p className="field-hint">
-                        ※ 画面の切り替えは現在準備中で、書き出しにはまだ反映されません。
+                        ※ 画面の切り替えは近日対応予定で、現在は書き出しに反映されません。
                       </p>
                     </>
                   )}

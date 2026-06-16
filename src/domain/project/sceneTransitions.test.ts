@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Transition } from './types';
-import { resolveTransition, transitionTimeline } from './sceneTransitions';
+import { deriveTransitionSelectValue, resolveTransition, transitionTimeline } from './sceneTransitions';
 
 describe('resolveTransition', () => {
   it('未設定は none / 既定方向 left / 既定 0.5 秒', () => {
@@ -23,7 +22,22 @@ describe('resolveTransition', () => {
 
   it('durationSec は 0 以上に丸める', () => {
     expect(resolveTransition({ in: 'fade', durationSec: -1 }).durationSec).toBe(0);
-    expect(resolveTransition({ in: 'fade', durationSec: 1.2 } as Transition).durationSec).toBe(1.2);
+    expect(resolveTransition({ in: 'fade', durationSec: 1.2 }).durationSec).toBe(1.2);
+  });
+});
+
+describe('deriveTransitionSelectValue（UI select 値・resolveTransition と一致）', () => {
+  it('none/fade/slide:dir を返し、未設定は none', () => {
+    expect(deriveTransitionSelectValue(undefined)).toBe('none');
+    expect(deriveTransitionSelectValue({ in: 'none' })).toBe('none');
+    expect(deriveTransitionSelectValue({ in: 'fade' })).toBe('fade');
+    expect(deriveTransitionSelectValue({ in: 'slide', direction: 'up' })).toBe('slide:up');
+    expect(deriveTransitionSelectValue({ in: 'slide' })).toBe('slide:left'); // 既定方向
+  });
+
+  it('wipe/zoom は fade として表示（書き出し実効値と一致＝UI と乖離させない）', () => {
+    expect(deriveTransitionSelectValue({ in: 'wipe' })).toBe('fade');
+    expect(deriveTransitionSelectValue({ in: 'zoom' })).toBe('fade');
   });
 });
 

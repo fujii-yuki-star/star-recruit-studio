@@ -36,6 +36,15 @@ export function resolveTransition(transition: Transition | undefined): ResolvedT
   };
 }
 
+/**
+ * SceneEdit の「画面の切り替え」select 値（`none`/`fade`/`slide:<direction>`）を transition から導く。
+ * resolveTransition と同じ実効値に寄せる＝wipe/zoom は fade として表示し、書き出しの実効値と UI を一致させる。
+ */
+export function deriveTransitionSelectValue(transition: Transition | undefined): string {
+  const r = resolveTransition(transition);
+  return r.type === TRANSITION_TYPE.slide ? `slide:${r.direction}` : r.type;
+}
+
 export interface TransitionStep {
   /** それまでの結合結果に対する xfade 開始位置（秒）。 */
   offsetSec: number;
@@ -58,7 +67,10 @@ export function transitionTimeline(
   let acc = sceneDurations[0];
   for (let i = 1; i < sceneDurations.length; i += 1) {
     const want = Math.max(0, boundaryDs[i] ?? 0);
-    const d = Math.min(want, acc, sceneDurations[i]); // 左右どちらの尺も超えない
+    // 左右どちらの尺も超えない。ADR-0009 は strict `<` だが、ここは `≤`（D=尺の極端値を許容）。
+    // FFmpeg xfade は duration が入力尺以上だと未定義動作になりうるため、T2 で strict 化（min−ε 等）するか
+    // 実測で許容を確認してから clamp を締める（境界計算自体は本関数に集約されている）。
+    const d = Math.min(want, acc, sceneDurations[i]);
     steps.push({ offsetSec: acc - d, durationSec: d });
     acc = acc + sceneDurations[i] - d;
   }
