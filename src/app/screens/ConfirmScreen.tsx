@@ -1,13 +1,10 @@
 import { useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { sampleCompany } from "../data/mockData";
+import { purposeOptions } from "../data/mockData";
 import { Switch } from "../components/ui";
-import {
-  SparkleIcon,
-  PhotoIcon,
-  VideoIcon,
-  CheckIcon,
-} from "../components/icons";
+import { useProjectStore } from "../store/projectStore";
+import { ASSET_TYPE } from "../../domain/enums";
+import { SparkleIcon, CheckIcon } from "../components/icons";
 
 interface ConfirmProps {
   onNavigate: (screen: ScreenId) => void;
@@ -15,6 +12,12 @@ interface ConfirmProps {
 
 export function ConfirmScreen({ onNavigate }: ConfirmProps) {
   const [showNextTime, setShowNextTime] = useState(true);
+  const companyInfo = useProjectStore((s) => s.meta.companyInfo);
+  const purpose = useProjectStore((s) => s.meta.purpose);
+  const assets = useProjectStore((s) => s.assets);
+  const photoCount = assets.filter((a) => a.assetType === ASSET_TYPE.image).length;
+  const videoCount = assets.filter((a) => a.assetType === ASSET_TYPE.video).length;
+  const purposeLabel = purposeOptions.find((p) => p.id === purpose)?.label ?? "未設定";
 
   return (
     <div className="main-scroll">
@@ -44,51 +47,44 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
 
           {/* 送信される情報 */}
           <div className="card card-tight mb">
-            <h2 className="field-label">ゆうこに渡す情報</h2>
+            <h2 className="field-label">ゆうこに渡す情報（文字のみ）</h2>
             <div className="col gap-sm mt">
               <div className="row-between">
                 <span className="text-muted">会社情報</span>
                 <strong>
-                  {sampleCompany.companyName}（{sampleCompany.industry}）
+                  {companyInfo.companyName}
+                  {companyInfo.industry ? `（${companyInfo.industry}）` : ""}
                 </strong>
               </div>
               <hr className="divider" style={{ margin: "4px 0" }} />
               <div className="row-between">
                 <span className="text-muted">動画の目的</span>
-                <strong>新卒採用</strong>
+                <strong>{purposeLabel}</strong>
               </div>
               <hr className="divider" style={{ margin: "4px 0" }} />
               <div className="row-between">
-                <span className="text-muted">素材の説明</span>
-                <strong>写真3枚・動画2本</strong>
-              </div>
-            </div>
-
-            <div className="mt">
-              <span className="text-muted text-sm">画像と動画の代表の見え方</span>
-              <div className="card-grid cols-4 mt" style={{ gap: 10 }}>
-                <div className="thumb thumb-photo">
-                  <PhotoIcon size={20} />
-                </div>
-                <div className="thumb thumb-photo">
-                  <PhotoIcon size={20} />
-                </div>
-                <div className="thumb thumb-photo">
-                  <PhotoIcon size={20} />
-                </div>
-                <div className="thumb thumb-video">
-                  <VideoIcon size={20} />
-                </div>
+                <span className="text-muted">素材の説明・タグ</span>
+                <strong>
+                  写真{photoCount}枚・動画{videoCount}本ぶんの文字情報
+                </strong>
               </div>
             </div>
           </div>
 
-          {/* 強調: 元の動画ファイルは送信しません */}
+          {/* 強調: 写真・動画ファイルは送信しない（MVP は文字情報のみ） */}
           <div className="notice notice-strong mb">
             <CheckIcon size={18} />
             <span>
-              元の動画ファイルは送信しません。動画の内容を伝えるための説明と、
-              代表の見え方だけをゆうこに渡します。
+              写真や動画のファイルそのものは送信しません。会社情報と、素材につけた
+              説明・タグなどの<strong>文字情報だけ</strong>をゆうこに渡します。
+            </span>
+          </div>
+
+          {/* 個人情報の注意（§2-6） */}
+          <div className="notice notice-warn mb">
+            <span>
+              人物が写っている素材の説明などには、個人情報が含まれることがあります。
+              送信してよい内容か、もう一度ご確認ください。
             </span>
           </div>
 

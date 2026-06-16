@@ -5,10 +5,7 @@ import { buildVideoPlanMessages } from '../../domain/ai/buildVideoPlanRequest';
 import { parseAndValidateVideoPlan } from '../../domain/ai/validateVideoPlan';
 import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
 import type { AiVideoPlan } from '../../domain/ai/types';
-import { aiGenerate } from '../aiClient';
-
-/** P1 のプロバイダ識別子（Rust 側 is_supported_provider と一致させる）。 */
-export const GEMINI_PROVIDER = 'gemini';
+import { GEMINI_PROVIDER, aiGenerate } from '../aiClient';
 
 /**
  * MVP 既定モデル（無料枠想定）。確定はモデル選定＝ADR-0010 未解決#1。

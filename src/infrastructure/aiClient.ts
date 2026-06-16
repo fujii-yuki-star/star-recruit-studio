@@ -7,6 +7,9 @@ export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
+/** AI プロバイダ識別子（Rust の is_supported_provider と一致させる）。app/provider 双方はここを参照する。 */
+export const GEMINI_PROVIDER = 'gemini';
+
 /** AI に生成を依頼し、応答テキスト（JSON 文字列）を得る。鍵は Rust が keyring から取得（JS は鍵を持たない）。 */
 export function aiGenerate(
   provider: string,
