@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { PageHead, Switch } from "../components/ui";
+import { PageHead } from "../components/ui";
 import { FolderIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
-import { deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
-import { GEMINI_PROVIDER } from "../../infrastructure/aiProviders/geminiProvider";
+import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
 import {
   getVoicevoxSpeaker, getVoicevoxUrl, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
@@ -17,7 +16,6 @@ export function SettingsScreen() {
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
 
-  const [confirmBeforeSend, setConfirmBeforeSend] = useState(true);
   const [keyInput, setKeyInput] = useState("");
   const [aiConnected, setAiConnected] = useState(false);
   const [keyBusy, setKeyBusy] = useState(false);
@@ -161,21 +159,9 @@ export function SettingsScreen() {
           <p className="field-hint mt">※ OpenAI への接続は準備中です。</p>
 
           <hr className="divider" />
-          <div className="toggle-row">
-            <div>
-              <span className="field-label" style={{ margin: 0 }}>
-                送信前の確認
-              </span>
-              <p className="field-hint" style={{ marginTop: 2 }}>
-                動画案を作る前に、渡す情報の確認画面を表示します。
-              </p>
-            </div>
-            <Switch
-              on={confirmBeforeSend}
-              onChange={setConfirmBeforeSend}
-              label="送信前の確認"
-            />
-          </div>
+          <p className="field-hint">
+            動画案を作る前に、外部AIへ渡す情報の確認画面を必ず表示します。
+          </p>
         </div>
 
         {/* ナレーターの声 */}

@@ -16,8 +16,8 @@ import {
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
-import { GeminiProvider, GEMINI_PROVIDER } from "../../infrastructure/aiProviders/geminiProvider";
-import { hasApiKey, isTauri } from "../../infrastructure/aiClient";
+import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
+import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClient";
 import { sampleAssets, sampleTemplates } from "../../infrastructure/sampleData";
 import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
@@ -213,21 +213,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generate: async () => {
     set({ status: "generating", aiError: null });
     try {
-      // 会社情報・目的はウィザードで meta に反映済み（ウィザード未経由なら既定値）。
-      const { companyInfo, purpose } = get().meta;
+      // 会社情報・目的・素材はウィザードで反映済み（未経由なら既定値）。
+      // 送信前確認（ConfirmScreen）の表示と AI へ渡す内容を一致させるため get() の実データを使う（§2-6）。
+      const { meta, assets, templates } = get();
+      const { companyInfo, purpose } = meta;
       const plan = await generateVideoPlan({
         companyInfo,
         purpose,
         targetAudience: companyInfo.recruitTarget ?? "",
         targetDurationSec: DEFAULT_TARGET_DURATION_SEC,
         tone: "親しみやすい",
-        templates: buildTemplateSummaries(sampleTemplates),
-        assets: sampleAssets,
-        yukoPoseTags: buildYukoPoseTags(sampleAssets),
+        templates: buildTemplateSummaries(templates),
+        assets,
+        yukoPoseTags: buildYukoPoseTags(assets),
       });
       const { parts, scenes, warnings } = transformVideoPlan(plan, {
-        templates: sampleTemplates,
-        assets: sampleAssets,
+        templates,
+        assets,
       });
       set({ status: "ready", parts, scenes, warnings });
     } catch (e) {
