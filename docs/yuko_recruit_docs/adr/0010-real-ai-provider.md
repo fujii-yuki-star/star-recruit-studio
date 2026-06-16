@@ -33,13 +33,14 @@
 
 ### プロバイダ
 - `infrastructure/aiProviders/geminiProvider.ts`（MVP）／`openAiProvider.ts`（準備）。いずれも `AiProvider` 実装。
-- これらは `GenerateVideoPlanInput` から **12 のプロンプトを組み立て**（プロンプト生成は `domain` の純粋関数に切り出し＝§7 テスト対象）、**Tauri コマンド `ai_generate`**（provider 種別＋組み立て済みリクエスト本文）を invoke して応答テキストを得る。
+- これらは `GenerateVideoPlanInput` から **12 のプロンプトを組み立て**（プロンプト生成は `domain` の純粋関数に切り出し＝§7 テスト対象）、**Tauri コマンド `ai_generate`**（`provider` ／ `model` ／ `system`・`user` の各テキストを渡す。**プロバイダ固有のリクエスト本文は Rust 側で組み立てる**＝フロントは各 API の形を知らない）を invoke して応答テキストを得る。
 - 既定／フォールバックは `MockAiProvider`（鍵未設定・オフライン・非Tauri 時）。**MVP は「鍵があれば実プロバイダ、無ければ Mock」**で全フロー継続。
 
 ### Rust 側（`ai.rs` 新設・reqwest）
-- コマンド: `ai_generate(provider, model, body) -> String`（応答テキスト）／`save_api_key(provider, key)`／`has_api_key(provider) -> bool`／`delete_api_key(provider)`。
+- コマンド: `ai_generate(provider, model, system, user) -> String`（応答テキスト。**プロバイダ固有のボディは Rust が組み立てる**＝責務分離。実装 PR #90）／`save_api_key(provider, key)`／`has_api_key(provider) -> bool`／`delete_api_key(provider)`。model は URL パスへ埋め込むため英数字・ハイフン・ドットのみ許可（インジェクション防止）。
 - 鍵は `keyring` クレートでサービス名＝アプリ識別子・アカウント＝provider 名で保存。**鍵はフロントへ返さない**（`has_api_key` で有無のみ）。
 - Gemini/OpenAI の REST を reqwest で叩き、**構成JSON（`ai-video-plan`）を schema 指定で要求する（12§3 準拠）**：Gemini は `responseMimeType: application/json` ＋ **`responseSchema`**、OpenAI は **`response_format` の JSON Schema 指定**（旧 `json_object` でなく構造強制。strict 時は任意項目を `nullable＋required` か非strict で運用＝12§3）。送信側で schema 強制しても**受信後に ajv で再検証**する（二重防御）。
+  - **P1 実装方針（PR #90）**: Gemini の `responseSchema` は OpenAPI 3.0 サブセットで `additionalProperties:false`・`const`・`$defs/$ref` 等 `ai-video-plan.schema.json` の語彙を表現できない。よって **MVP では `responseSchema` を省略し、`responseMimeType: application/json`（JSON 強制）＋受信後 ajv 検証の二重防御で代替**する。鍵は **URL でなくヘッダ（`x-goog-api-key`）** で送る。Gemini `responseSchema` / OpenAI strict による送信側 schema 強制は将来拡張（ajv が正の検証であり続ける）。
 
 ### データポリシー（§2-6・最重要）
 - 送るのは **会社情報（`companyInfo`）＋目的＋素材の説明（`displayName`/`tags`/`aiDescription`）＋テンプレ要約＋ゆうこ poseTag**。**素材ファイル・元動画・base64 は送らない**。
