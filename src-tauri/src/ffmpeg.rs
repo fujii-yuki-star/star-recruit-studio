@@ -175,6 +175,9 @@ pub fn xfade_chain_args(
         v_prev = v_out;
     }
     // 音声チェーン：xfade の境界は acrossfade（同じ D で重ねる）、none は concat。
+    // acrossfade はオフセット引数を取らず「入力1の終端を検出して自動でクロスフェード開始」する。
+    // これが映像 xfade の offset=acc−D と整合するのは、各場面 MP4 を scene_clip_args が -t {dur} で
+    // 尺ぴったりに揃えているため（音声＝映像と同尺）。
     let mut a_prev = "0:a".to_string();
     for (i, st) in steps.iter().enumerate() {
         let cur = i + 1;
@@ -778,7 +781,8 @@ fn encode_jobs(
         files.push(clip.to_string_lossy().into_owned());
     }
 
-    let has_transition = joins.iter().any(|j| j.xfade.is_some());
+    // 境界は joins[1..] のみ有効（joins[0]＝先頭場面は遷移元なし。skip(1) で除外＝コメントと一致）。
+    let has_transition = joins.iter().skip(1).any(|j| j.xfade.is_some());
     if has_transition && files.len() >= 2 {
         // 遷移あり：xfade/concat フィルタチェーンで再エンコード結合（ADR-0009 T2）。
         let steps: Vec<JoinStep> = (1..files.len())
@@ -1216,8 +1220,10 @@ pub fn export_video(
             )
         })?;
         // xfade で重なった分だけ実効総尺が縮む（ADR-0009：BGM は実効総尺＝Σ尺−ΣD 基準でフェード計算）。
+        // 境界は joins[1..] のみ（joins[0]＝先頭は遷移元なし）。
         let applied: f64 = joins
             .iter()
+            .skip(1)
             .filter_map(|j| j.xfade.as_ref().map(|_| j.duration_sec))
             .sum();
         let total: f64 = jobs.iter().map(|j| j.duration_sec()).sum::<f64>() - applied;
@@ -1351,6 +1357,20 @@ mod tests {
         let a = concat_args("list.txt", "out.mp4");
         assert!(a.iter().any(|s| s == "concat"));
         assert!(a.windows(2).any(|w| w[0] == "-c" && w[1] == "copy"));
+    }
+
+    #[test]
+    fn validate_xfade_name_allowlist() {
+        // 許可名はそのまま、"none"/未知名はハードカット（None）。
+        assert_eq!(validate_xfade_name("fade").as_deref(), Some("fade"));
+        assert_eq!(validate_xfade_name("slideup").as_deref(), Some("slideup"));
+        assert_eq!(
+            validate_xfade_name("slideleft").as_deref(),
+            Some("slideleft")
+        );
+        assert_eq!(validate_xfade_name("none"), None);
+        assert_eq!(validate_xfade_name(""), None);
+        assert_eq!(validate_xfade_name("wipe"), None); // MVP 外
     }
 
     #[test]
