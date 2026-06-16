@@ -65,12 +65,12 @@ interface AiProvider {
 
 - 会社情報（companyName / industry / businessDescription / jobType / recruitTarget / strengths / desiredPerson / recruitUrl）
 - 動画設定（purpose / targetAudience / targetDurationSec / tone）
-- **利用可能な素材一覧**（assetId / assetType / displayName / description / aiDescription / tags）。画像は**サムネイル画像**を添付（`07 §4` 許可範囲）。動画は代表フレーム。
+- **利用可能な素材一覧**（assetId / assetType / displayName / description / aiDescription / tags）。**MVP はテキストのみ送信**（サムネイル・代表フレームは添付しない）。画像サムネイル添付（長辺 512px・`07 §4` 許可範囲）／動画の代表フレームは、画像対応の実プロバイダ整備後＝**ADR-0010 P3** で追加する（§2-6 の「代表フレームのみ」に沿う）。
 - **利用可能な見た目パターン一覧（要約）**（`11 §7.5` の aiHint をもとに `templateId / category / useCase / requiredSlots / hasYuko / maxNarrationLength / maxSubtitleLength`）
 - **利用可能なゆうこ表情タグ一覧**（yuko asset の tags を集約）
 
 ### トークン/送信量の制御
-- サムネイルは長辺 512px 程度へ縮小して添付。
+- サムネイルは長辺 512px 程度へ縮小して添付（**ADR-0010 P3**。MVP は送信しない）。
 - 素材が多い場合は説明・タグの充実した順に上位 N 件（既定 N=40）を送信し、超過分は送らない旨を `log` する（無言の打ち切りをしない）。
 - テンプレは全 `template.json` ではなく要約のみ送る（`07 §6`）。
 
@@ -132,7 +132,7 @@ interface AiProvider {
 - assetId={{assetId}} / type={{assetType}} / name={{displayName}}
   説明={{description}} / AI解析={{aiDescription}} / tags={{tags}}
 {{/each}}
-（画像素材のサムネイルを画像として添付）
+（画像素材のサムネイル添付は **ADR-0010 P3**。MVP のユーザーメッセージは**テキストのみ**でこの行は出さない）
 
 # 利用可能なゆうこ表情タグ
 {{yukoPoseTags}}
