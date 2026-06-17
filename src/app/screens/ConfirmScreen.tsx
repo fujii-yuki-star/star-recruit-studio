@@ -15,6 +15,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
   const videoKind = useProjectStore((s) => s.meta.videoKind);
   const companyInfo = useProjectStore((s) => s.meta.companyInfo);
   const generalBrief = useProjectStore((s) => s.meta.generalBrief);
+  const toneSettings = useProjectStore((s) => s.meta.toneSettings);
   // 自由記述はトップレベル（両用途共通・ADR-0011）。
   const additionalNotes = useProjectStore((s) => s.meta.additionalNotes);
   const purpose = useProjectStore((s) => s.meta.purpose);
@@ -78,6 +79,18 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
                 <span className="text-muted">動画の目的</span>
                 <strong>{purposeLabel}</strong>
               </div>
+              {isGeneral && (generalBrief?.targetAudience || toneSettings?.tone) && (
+                <>
+                  <hr className="divider" style={{ margin: "4px 0" }} />
+                  <div className="row-between">
+                    <span className="text-muted">対象・トーン</span>
+                    <strong style={{ textAlign: "right", maxWidth: "70%" }}>
+                      {generalBrief?.targetAudience || "（指定なし）"}
+                      {toneSettings?.tone ? `／${toneSettings.tone}` : ""}
+                    </strong>
+                  </div>
+                </>
+              )}
               <hr className="divider" style={{ margin: "4px 0" }} />
               <div className="row-between">
                 <span className="text-muted">素材の説明・タグ</span>

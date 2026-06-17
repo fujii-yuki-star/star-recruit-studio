@@ -2,7 +2,7 @@ import { useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { ASSET_TYPE, VIDEO_KIND, type Purpose, type VideoKind } from "../../domain/enums";
-import { ADDITIONAL_NOTES_MAX_LEN } from "../../domain/constants";
+import { ADDITIONAL_NOTES_MAX_LEN, DEFAULT_TONE, TONE_PRESETS } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -94,7 +94,12 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const [newAgenda, setNewAgenda] = useState("");
   const [keyPoints, setKeyPoints] = useState<string[]>(g0?.keyPoints ?? []);
   const [newKeyPoint, setNewKeyPoint] = useState("");
+  // 対象視聴者（general の generalBrief.targetAudience）・トーン（toneSettings.tone）＝ADR-0011 #12。
+  const [targetAudience, setTargetAudience] = useState(g0?.targetAudience ?? "");
+  const [tone, setTone] = useState(initialMeta.toneSettings?.tone ?? DEFAULT_TONE);
   const [voiceType, setVoiceType] = useState("calm");
+  // フォーム入力の不足を伝えるユーザー向け文言（§2-5・次の行動を示す）。
+  const [formError, setFormError] = useState<string | null>(null);
 
   const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
     useProjectStore();
@@ -108,8 +113,13 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   function applyForm() {
     const common = { videoKind, purpose, additionalNotes };
     if (videoKind === VIDEO_KIND.general) {
-      applyProjectInfo({ ...common, generalBrief: { title, agenda, keyPoints } });
+      applyProjectInfo({
+        ...common,
+        generalBrief: { title, agenda, keyPoints, ...(targetAudience.trim() ? { targetAudience } : {}) },
+        tone,
+      });
     } else {
+      // recruit では tone を渡さない（将来の明示入力まで既存 toneSettings を維持）。対象視聴者は recruitTarget を使う。
       applyProjectInfo({
         ...common,
         companyInfo: { companyName, industry, businessDescription, recruitTarget, jobType, strengths, desiredPerson },
@@ -152,6 +162,12 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   }
 
   function next() {
+    // 一般は発表内容ステップでテーマ未入力のまま進めない（schema は title 必須・§2-5 の「次の行動」を示す）。
+    if (step === 1 && videoKind === VIDEO_KIND.general && !title.trim()) {
+      setFormError("動画のテーマ・タイトルを入力してください。");
+      return;
+    }
+    setFormError(null);
     if (step < steps.length - 1) setStep(step + 1);
     else {
       applyForm(); // ウィザードを抜ける＝入力を確定
@@ -159,6 +175,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     }
   }
   function back() {
+    setFormError(null);
     if (step > 0) setStep(step - 1);
     else onNavigate("home");
   }
@@ -236,6 +253,9 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 <h2 className="section-title">
                   {videoKind === VIDEO_KIND.general ? "発表の内容を入力" : "会社情報を入力"}
                 </h2>
+                {formError && (
+                  <div className="notice notice-warn mb" role="alert">{formError}</div>
+                )}
                 {videoKind === VIDEO_KIND.recruit && (
                   <>
                 <div className="field">
@@ -356,7 +376,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         id="title"
                         className="input"
                         value={title}
-                        onChange={(e) => setTitle(e.target.value)}
+                        onChange={(e) => {
+                          setTitle(e.target.value);
+                          if (formError) setFormError(null);
+                        }}
                         placeholder="例：全社キックオフ2026 / 新製品○○のご紹介"
                       />
                     </div>
@@ -419,6 +442,35 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         </button>
                       </div>
                       <p className="field-hint">動画で必ず伝えたいポイントを、短い言葉で複数入れてください。</p>
+                    </div>
+                    <div className="field">
+                      <label className="field-label" htmlFor="targetAudience">対象視聴者</label>
+                      <input
+                        id="targetAudience"
+                        className="input"
+                        value={targetAudience}
+                        onChange={(e) => setTargetAudience(e.target.value)}
+                        placeholder="例：全社員 / 新入社員 / 取引先"
+                      />
+                      <p className="field-hint">誰に向けた動画かを書くと、ゆうこが言葉づかいを合わせます（任意）。</p>
+                    </div>
+                    <div className="field">
+                      <label className="field-label">トーン（話し方の雰囲気）</label>
+                      <div className="card-grid cols-2">
+                        {TONE_PRESETS.map((t) => (
+                          <button
+                            key={t}
+                            className="action-card"
+                            style={{
+                              borderColor: tone === t ? "var(--color-primary)" : undefined,
+                              background: tone === t ? "var(--color-primary-soft)" : undefined,
+                            }}
+                            onClick={() => setTone(t)}
+                          >
+                            <span className="action-card-title">{t}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </>
                 )}

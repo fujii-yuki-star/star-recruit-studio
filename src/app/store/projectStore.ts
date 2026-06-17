@@ -1,12 +1,12 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
-import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
+import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Purpose, type VideoKind } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
-import { buildTemplateSummaries, buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
+import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from "../../domain/ai/videoPlanInput";
 import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
@@ -93,6 +93,8 @@ interface ProjectState {
     companyInfo?: CompanyInfo;
     generalBrief?: GeneralBrief;
     additionalNotes?: string;
+    /** トーン（toneSettings.tone へ。未指定なら既存維持）。 */
+    tone?: string;
   }) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
@@ -235,11 +237,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         companyInfo,
         generalBrief: meta.generalBrief,
         purpose,
-        // 採用は会社情報の「採用対象」を対象視聴者に使う。一般は対象視聴者の入力欄が未実装＝当面 空のまま
-        // （§6b へ「対象視聴者: （未入力）」で送る）。一般の対象視聴者入力は ADR-0011 未解決#12（後続）。
-        targetAudience: companyInfo?.recruitTarget ?? "",
+        // 対象視聴者: general は generalBrief.targetAudience、recruit は会社情報の「採用対象」（ADR-0011 #12・純粋関数で解決）。
+        targetAudience: resolveTargetAudience(meta),
         targetDurationSec: DEFAULT_TARGET_DURATION_SEC,
-        tone: "親しみやすい",
+        // トーン: ウィザードで選んだ toneSettings.tone（未設定なら既定 DEFAULT_TONE・§2-7 で一本化）。
+        tone: meta.toneSettings?.tone ?? DEFAULT_TONE,
         additionalNotes: meta.additionalNotes,
         templates: buildTemplateSummaries(templates),
         assets,
@@ -475,6 +477,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         companyInfo: input.companyInfo,
         generalBrief: input.generalBrief,
         additionalNotes: input.additionalNotes,
+        // トーンは渡されたときだけ更新（未指定時は既存 toneSettings を維持）。
+        toneSettings:
+          input.tone !== undefined ? { ...s.meta.toneSettings, tone: input.tone } : s.meta.toneSettings,
       },
       saveStatus: "idle",
     })),

@@ -107,11 +107,12 @@ describe('assembleProject', () => {
     expect(p.videoKind).toBe('recruit');
     expect('generalBrief' in p).toBe(false);
     const g = assembleProject(
-      header({ videoKind: 'general', companyInfo: undefined, generalBrief: { title: '四半期報告', keyPoints: ['売上120%'] } }),
+      header({ videoKind: 'general', companyInfo: undefined, generalBrief: { title: '四半期報告', keyPoints: ['売上120%'], targetAudience: '全社員' } }),
       [], [], [],
     );
     expect(g.videoKind).toBe('general');
     expect(g.generalBrief?.title).toBe('四半期報告');
+    expect(g.generalBrief?.targetAudience).toBe('全社員'); // ADR-0011 #12: 対象視聴者
     // general では companyInfo を出力しない（schema if/then/else の not:required を満たす・ADR-0011）。
     expect('companyInfo' in g).toBe(false);
   });

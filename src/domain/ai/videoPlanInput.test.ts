@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Asset } from '../project/types';
 import type { Template } from '../template/types';
-import { buildTemplateSummaries, buildYukoPoseTags } from './videoPlanInput';
+import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from './videoPlanInput';
 
 function template(over: Partial<Template> = {}): Template {
   return {
@@ -71,5 +71,26 @@ describe('buildYukoPoseTags', () => {
 
   it('yuko 素材が無ければ空配列', () => {
     expect(buildYukoPoseTags([asset({ assetId: 'img', assetType: 'image', tags: ['x'] })])).toEqual([]);
+  });
+});
+
+describe('resolveTargetAudience（ADR-0011 #12）', () => {
+  it('general は generalBrief.targetAudience を使う', () => {
+    expect(resolveTargetAudience({ generalBrief: { title: 'x', targetAudience: '全社員' } })).toBe('全社員');
+  });
+  it('recruit は companyInfo.recruitTarget を使う', () => {
+    expect(resolveTargetAudience({ companyInfo: { companyName: 'x', recruitTarget: '新卒' } })).toBe('新卒');
+  });
+  it('general の targetAudience を優先する（recruitTarget があっても）', () => {
+    expect(
+      resolveTargetAudience({
+        generalBrief: { title: 'x', targetAudience: '全社員' },
+        companyInfo: { companyName: 'x', recruitTarget: '新卒' },
+      }),
+    ).toBe('全社員');
+  });
+  it('どちらも未設定・空なら空文字', () => {
+    expect(resolveTargetAudience({})).toBe('');
+    expect(resolveTargetAudience({ generalBrief: { title: 'x' }, companyInfo: { companyName: 'x' } })).toBe('');
   });
 });

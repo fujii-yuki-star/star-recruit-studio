@@ -3,7 +3,7 @@
 // - 利用可能なゆうこ表情タグ（yuko 素材の tags を集約）
 // プロンプト本文の組み立ては buildVideoPlanRequest.ts、検証は validateVideoPlan.ts が担う。
 import { ASSET_TYPE } from '../enums';
-import type { Asset } from '../project/types';
+import type { Asset, CompanyInfo, GeneralBrief } from '../project/types';
 import type { Template } from '../template/types';
 import type { TemplateSummary } from './aiProvider';
 
@@ -33,4 +33,16 @@ export function buildYukoPoseTags(assets: Asset[]): string[] {
     }
   }
   return [...tags];
+}
+
+/**
+ * AI へ渡す対象視聴者を解決する（ADR-0011 #12）。
+ * general は generalBrief.targetAudience、recruit は companyInfo.recruitTarget を使い、どちらも空なら "" を返す。
+ * videoKind では分岐せず「general 専用の入力 → 採用の採用対象」の優先順で拾う（一般/採用で同居しない前提）。
+ */
+export function resolveTargetAudience(meta: {
+  generalBrief?: GeneralBrief;
+  companyInfo?: CompanyInfo;
+}): string {
+  return meta.generalBrief?.targetAudience || meta.companyInfo?.recruitTarget || '';
 }
