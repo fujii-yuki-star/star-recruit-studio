@@ -14,7 +14,7 @@ export function AboutScreen() {
     <div className="main-scroll">
       <PageHead
         title="このアプリについて"
-        desc="Yuko Recruit Studio の情報と、利用しているソフト・素材のクレジットです。"
+        desc="すたりお（stario）の情報と、利用しているソフト・素材のクレジットです。"
       />
 
       <div style={{ maxWidth: 720 }} className="col gap-lg">
@@ -23,7 +23,7 @@ export function AboutScreen() {
           <div className="col gap-sm">
             <div className="row-between">
               <span className="text-muted">名前</span>
-              <strong>Yuko Recruit Studio</strong>
+              <strong>すたりお（stario）</strong>
             </div>
             <hr className="divider" style={{ margin: "4px 0" }} />
             <div className="row-between">

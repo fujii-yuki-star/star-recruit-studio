@@ -84,12 +84,12 @@ export function HomeScreen({ onNavigate }: HomeProps) {
           {/* ヒーロー: 新しい動画を作る */}
           <div className="hero">
             <div>
-              <div className="badge badge-teal mb">採用動画づくり支援</div>
+              <div className="badge badge-teal mb">動画づくり支援</div>
               <h1 className="page-title text-balance">
-                会社の魅力を、動画でやさしく伝えましょう
+                伝えたいことを、動画でやさしく届けましょう
               </h1>
               <p className="page-desc text-pretty">
-                会社情報と写真・動画を入れると、ゆうこが動画のたたき台を作ります。
+                伝えたい内容と写真・動画を入れると、ゆうこが動画のたたき台を作ります。
                 内容を確認・修正してから、動画として保存できます。
               </p>
               <button className="btn btn-primary btn-lg mt" onClick={startNew}>
@@ -194,8 +194,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
 
         <YukoPanel
           messages={[
-            "こんにちは、ゆうこです。今日も採用動画づくりをお手伝いします。",
-            "まずは「新しい動画を作る」から始めてみましょう。会社情報と写真があれば大丈夫です。",
+            "こんにちは、ゆうこです。今日も動画づくりをお手伝いします。",
+            "まずは「新しい動画を作る」から始めてみましょう。伝えたい内容と写真があれば大丈夫です。",
             "前に作ったプロジェクトは、下の一覧からいつでも開けますよ。",
           ]}
         />

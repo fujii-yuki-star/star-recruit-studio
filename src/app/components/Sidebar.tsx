@@ -46,8 +46,8 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
       <div className="sidebar-brand">
         <div className="sidebar-brand-mark">ゆ</div>
         <div className="sidebar-brand-text">
-          <span className="sidebar-brand-title">Yuko Recruit Studio</span>
-          <span className="sidebar-brand-sub">採用動画づくり支援ソフト</span>
+          <span className="sidebar-brand-title">すたりお</span>
+          <span className="sidebar-brand-sub">動画づくり支援ソフト</span>
         </div>
       </div>
 
