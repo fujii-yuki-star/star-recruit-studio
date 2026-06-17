@@ -71,5 +71,32 @@ if (project.bgmSettings?.assetId && !assetIds.has(project.bgmSettings.assetId)) 
 console.log(sem ? 'PASS  semantic  project.sample cross-refs' : 'FAIL  semantic  project.sample cross-refs');
 ok = ok && sem;
 
+// generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
+const generalBase = {
+  schemaVersion: '1.1', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  videoSettings: { aspectRatio: '16:9', width: 1920, height: 1080, fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
+  voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
+};
+const withBrief = (brief) => ({ ...generalBase, generalBrief: { title: '発表', ...brief } });
+const mustAccept = [
+  ['general: 上限内（agenda20件/各100字・targetAudience100字）', withBrief({ agenda: Array.from({ length: 20 }, () => 'あ'.repeat(100)), keyPoints: ['要点'], targetAudience: 'あ'.repeat(100) })],
+];
+const mustReject = [
+  ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
+  ['general: agenda 21件', withBrief({ agenda: Array.from({ length: 21 }, () => 'x') })],
+  ['general: agenda 1項目101字', withBrief({ agenda: ['あ'.repeat(101)] })],
+  ['general: keyPoints 21件', withBrief({ keyPoints: Array.from({ length: 21 }, () => 'x') })],
+  ['general: targetAudience 101字', withBrief({ targetAudience: 'あ'.repeat(101) })],
+];
+for (const [desc, data] of mustAccept) {
+  if (vProject(data)) console.log(`PASS  must-accept  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-accept  ${desc}`); for (const e of vProject.errors ?? []) console.log(`   ${e.instancePath} ${e.message}`); }
+}
+for (const [desc, data] of mustReject) {
+  if (!vProject(data)) console.log(`PASS  must-reject  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
+}
+
 console.log(ok ? '\nALL OK' : '\nHAS FAILURES');
 process.exit(ok ? 0 : 1);

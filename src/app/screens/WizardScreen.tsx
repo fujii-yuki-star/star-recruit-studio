@@ -389,6 +389,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         placeholder="例：全社キックオフ2026 / 新製品○○のご紹介"
                         maxLength={GENERAL_TITLE_MAX_LEN}
                       />
+                      <div className="row-between field-hint">
+                        <span />
+                        <span>{title.length}/{GENERAL_TITLE_MAX_LEN}</span>
+                      </div>
                     </div>
                     <div className="field">
                       <label className="field-label">構成（章立て・話す順番）</label>
@@ -474,7 +478,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         placeholder="例：全社員 / 新入社員 / 取引先"
                         maxLength={GENERAL_TARGET_AUDIENCE_MAX_LEN}
                       />
-                      <p className="field-hint">誰に向けた動画かを書くと、ゆうこが言葉づかいを合わせます（任意）。</p>
+                      <div className="row-between field-hint">
+                        <span>誰に向けた動画かを書くと、ゆうこが言葉づかいを合わせます（任意）。</span>
+                        <span>{targetAudience.length}/{GENERAL_TARGET_AUDIENCE_MAX_LEN}</span>
+                      </div>
                     </div>
                     <div className="field">
                       <label className="field-label">トーン（話し方の雰囲気）</label>
