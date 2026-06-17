@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC } from '../constants';
+import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 import {
   VIDEO_PLAN_SYSTEM_PROMPT,
+  VIDEO_PLAN_SYSTEM_PROMPT_GENERAL,
   buildVideoPlanMessages,
   buildVideoPlanUserMessage,
 } from './buildVideoPlanRequest';
@@ -179,5 +181,100 @@ describe('buildVideoPlanMessages', () => {
     expect(
       buildVideoPlanUserMessage({ ...base, additionalNotes: '   ' }),
     ).not.toContain('# 補足・その他');
+  });
+
+  it('videoKind 省略・recruit は採用システムプロンプト（§5）を使う', () => {
+    expect(buildVideoPlanMessages(fullInput()).system).toBe(VIDEO_PLAN_SYSTEM_PROMPT);
+    expect(buildVideoPlanMessages({ ...fullInput(), videoKind: VIDEO_KIND.recruit }).system).toBe(VIDEO_PLAN_SYSTEM_PROMPT);
+  });
+});
+
+function generalInput(): GenerateVideoPlanInput {
+  return {
+    videoKind: VIDEO_KIND.general,
+    generalBrief: {
+      title: '全社キックオフ2026',
+      agenda: ['今期の方針', '重点プロジェクト', 'Q&A'],
+      keyPoints: ['売上目標120%', '新製品の投入'],
+    },
+    purpose: 'report',
+    targetAudience: '全社員',
+    targetDurationSec: 90,
+    tone: '落ち着いた',
+    additionalNotes: '専門用語はかみ砕いて伝えたい',
+    templates,
+    assets,
+    yukoPoseTags: ['smile', 'guide'],
+  };
+}
+
+describe('buildVideoPlanMessages（一般・社内発表 general・§5b/§6b）', () => {
+  it('videoKind=general は §5b の一般システムプロンプトを返す', () => {
+    const { system } = buildVideoPlanMessages(generalInput());
+    expect(system).toBe(VIDEO_PLAN_SYSTEM_PROMPT_GENERAL);
+    expect(system).toContain('発表・説明動画の構成案');
+    // 共通ルール（templateId 必須・sceneType=category・尺）は採用と同じく堅持。
+    expect(system).toContain('各シーンに templateId を必ず設定');
+    expect(system).toContain('sceneType は、選んだ templateId の category と同じ値にする');
+    expect(system).toContain(`durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒`);
+    // 章立て→parts・要点反映の一般固有指示。
+    expect(system).toContain('「構成（章立て）」をパート（parts）に対応');
+    expect(system).toContain('「伝えたい要点」を各シーンの texts や narrationText に反映');
+    // 一般 purpose の列挙は GENERAL_PURPOSES（定数）から埋め込む（§2-7・ハードコードしない）。
+    expect(system).toContain(GENERAL_PURPOSES.join(' / '));
+    // 採用専用の語（会社情報）は一般プロンプトに出さない。
+    expect(system).not.toContain('会社情報');
+  });
+
+  it('ユーザーメッセージはテーマ・章立て・要点・方針（種別/対象視聴者）を含む（§6b）', () => {
+    const user = buildVideoPlanUserMessage(generalInput());
+    expect(user).toContain('# 動画のテーマ');
+    expect(user).toContain('タイトル/テーマ: 全社キックオフ2026');
+    expect(user).toContain('# 構成（章立て・アジェンダ）');
+    expect(user).toContain('- 今期の方針');
+    expect(user).toContain('- 重点プロジェクト');
+    expect(user).toContain('# 伝えたい要点');
+    expect(user).toContain('- 売上目標120%');
+    expect(user).toContain('種別(purpose): report');
+    expect(user).toContain('対象視聴者: 全社員');
+    // 補足・素材・見た目・表情タグ・出力契約は採用と共通。
+    expect(user).toContain('# 補足・その他（利用者からの自由記述。動画づくりで特に重視する）');
+    expect(user).toContain('専門用語はかみ砕いて伝えたい');
+    expect(user).toContain('# 利用可能な見た目パターン（このIDのみ使用可）');
+    expect(user).toContain('# 利用可能なゆうこ表情タグ');
+    expect(user).toContain('# 出力フォーマット（厳守）');
+    // 出力例の主語は用途で変える（general=テーマ・構成・要点）。
+    expect(user).toContain('値だけ今回のテーマ・構成・要点・素材・見た目パターンに合わせて作る');
+  });
+
+  it('一般メッセージに採用専用セクション（会社情報・募集職種）を出さない', () => {
+    const user = buildVideoPlanUserMessage(generalInput());
+    expect(user).not.toContain('# 会社情報');
+    expect(user).not.toContain('会社名:');
+    expect(user).not.toContain('募集職種');
+    expect(user).not.toContain('採用ページ');
+  });
+
+  it('章立て・要点が空/未設定なら（未入力）1行にする（空見出し＋空欄の矛盾を避ける）', () => {
+    const input: GenerateVideoPlanInput = { ...generalInput(), generalBrief: { title: 'テーマのみ' } };
+    const user = buildVideoPlanUserMessage(input);
+    expect(user).toContain('タイトル/テーマ: テーマのみ');
+    expect(user).toContain('# 構成（章立て・アジェンダ）\n（未入力）');
+    expect(user).toContain('# 伝えたい要点\n（未入力）');
+  });
+
+  it('videoKind=general かつ generalBrief 未設定でも（未入力）で処理できる（実装③前の誤呼び出し耐性）', () => {
+    const input: GenerateVideoPlanInput = {
+      videoKind: VIDEO_KIND.general,
+      purpose: 'general_other',
+      targetDurationSec: 60,
+      templates,
+      assets,
+      yukoPoseTags: [],
+    };
+    const user = buildVideoPlanUserMessage(input);
+    expect(user).toContain('タイトル/テーマ: （未入力）');
+    expect(user).toContain('# 構成（章立て・アジェンダ）\n（未入力）');
+    expect(user).toContain('# 伝えたい要点\n（未入力）');
   });
 });
