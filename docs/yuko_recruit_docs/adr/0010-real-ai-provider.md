@@ -1,6 +1,6 @@
 # ADR-0010: 実 AI プロバイダ（Gemini／OpenAI）と APIキー・外部送信の扱い
 
-- **状態**: Proposed（2026-06-16・未レビュー。develop マージ＝レビュー通過で Accepted へ。実装は本ADR確定後）
+- **状態**: Accepted（2026-06-16 提案。実装 P1–P5 を develop へマージ済＝レビュー通過。実 Gemini 生成の疎通も確認済み）
 - **日付**: 2026-06-16
 - **関連**: `CLAUDE.md §2-2`（AI出力は検証してから内部へ）/ `§2-6`（外部送信は事前確認必須・元動画は送らない・代表フレームのみ）/ `§3`（Provider 抽象化・初期 Mock）/ `§4`（infrastructure に隔離）/ [`12_AI_PROMPT_AND_MAPPING.md`](../12_AI_PROMPT_AND_MAPPING.md)（プロンプト/マッピングの正典）/ `11 §8`（検証 V1–V11）/ [`13_DEPENDENCIES_AND_LICENSING.md`](../13_DEPENDENCIES_AND_LICENSING.md) `§7`（APIキー保管）/ [`15_ERROR_STATE_MODEL.md`](../15_ERROR_STATE_MODEL.md) `§6`（`AI_RESPONSE_INVALID` 等）/ `schemas/ai-video-plan.schema.json`
 
