@@ -2,7 +2,10 @@ import { useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { ASSET_TYPE, VIDEO_KIND, type Purpose, type VideoKind } from "../../domain/enums";
-import { ADDITIONAL_NOTES_MAX_LEN, DEFAULT_TONE, TONE_PRESETS } from "../../domain/constants";
+import {
+  ADDITIONAL_NOTES_MAX_LEN, DEFAULT_TONE, GENERAL_LIST_ITEM_MAX_LEN, GENERAL_LIST_MAX_ITEMS,
+  GENERAL_TARGET_AUDIENCE_MAX_LEN, GENERAL_TITLE_MAX_LEN, TONE_PRESETS,
+} from "../../domain/constants";
 import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
@@ -155,8 +158,8 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     clear();
   }
   function addStrength() { addItem(newStrength, strengths, setStrengths, () => setNewStrength("")); }
-  function addAgenda() { addItem(newAgenda, agenda, setAgenda, () => setNewAgenda("")); }
-  function addKeyPoint() { addItem(newKeyPoint, keyPoints, setKeyPoints, () => setNewKeyPoint("")); }
+  function addAgenda() { if (agenda.length >= GENERAL_LIST_MAX_ITEMS) return; addItem(newAgenda, agenda, setAgenda, () => setNewAgenda("")); }
+  function addKeyPoint() { if (keyPoints.length >= GENERAL_LIST_MAX_ITEMS) return; addItem(newKeyPoint, keyPoints, setKeyPoints, () => setNewKeyPoint("")); }
   // 動画の種類を切り替える。目的の許可enumが変わるので、別種別の目的が残らないよう既定へ寄せる。
   function changeVideoKind(kind: VideoKind) {
     setVideoKind(kind);
@@ -384,6 +387,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                           if (formError) setFormError(null);
                         }}
                         placeholder="例：全社キックオフ2026 / 新製品○○のご紹介"
+                        maxLength={GENERAL_TITLE_MAX_LEN}
                       />
                     </div>
                     <div className="field">
@@ -408,13 +412,20 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                           onChange={(e) => setNewAgenda(e.target.value)}
                           onKeyDown={(e) => e.key === "Enter" && addAgenda()}
                           placeholder="例：今期の方針"
+                          maxLength={GENERAL_LIST_ITEM_MAX_LEN}
                         />
-                        <button className="btn btn-secondary" onClick={addAgenda}>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={addAgenda}
+                          disabled={agenda.length >= GENERAL_LIST_MAX_ITEMS}
+                        >
                           <PlusIcon size={16} />
                           構成を追加
                         </button>
                       </div>
-                      <p className="field-hint">話す順番（章立て）を、上から順に追加してください。</p>
+                      <p className="field-hint">
+                        話す順番（章立て）を、上から順に追加してください（最大{GENERAL_LIST_MAX_ITEMS}件）。
+                      </p>
                     </div>
                     <div className="field">
                       <label className="field-label">伝えたい要点</label>
@@ -438,13 +449,20 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                           onChange={(e) => setNewKeyPoint(e.target.value)}
                           onKeyDown={(e) => e.key === "Enter" && addKeyPoint()}
                           placeholder="例：売上は前年比120%"
+                          maxLength={GENERAL_LIST_ITEM_MAX_LEN}
                         />
-                        <button className="btn btn-secondary" onClick={addKeyPoint}>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={addKeyPoint}
+                          disabled={keyPoints.length >= GENERAL_LIST_MAX_ITEMS}
+                        >
                           <PlusIcon size={16} />
                           要点を追加
                         </button>
                       </div>
-                      <p className="field-hint">動画で必ず伝えたいポイントを、短い言葉で複数入れてください。</p>
+                      <p className="field-hint">
+                        動画で必ず伝えたいポイントを、短い言葉で複数入れてください（最大{GENERAL_LIST_MAX_ITEMS}件）。
+                      </p>
                     </div>
                     <div className="field">
                       <label className="field-label" htmlFor="targetAudience">対象視聴者</label>
@@ -454,6 +472,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         value={targetAudience}
                         onChange={(e) => setTargetAudience(e.target.value)}
                         placeholder="例：全社員 / 新入社員 / 取引先"
+                        maxLength={GENERAL_TARGET_AUDIENCE_MAX_LEN}
                       />
                       <p className="field-hint">誰に向けた動画かを書くと、ゆうこが言葉づかいを合わせます（任意）。</p>
                     </div>

@@ -217,7 +217,7 @@
 
 **7.1.1 videoSettings**: aspectRatio(enum `16:9`) ● / width(=1920) ● / height(=1080) ● / fps(=30) ● / targetDurationSec(≤`VIDEO_TARGET_MAX_SEC_MVP`) ● / maxDurationSec(≤`VIDEO_HARD_MAX_SEC`) ●
 **7.1.2 companyInfo**（`videoKind=recruit` のとき必須）: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○
-**7.1.3 generalBrief**（`videoKind=general` のとき必須）: title ●（テーマ・1字以上） / agenda(string[]) ○（章立て・アジェンダ） / keyPoints(string[]) ○（伝えたい要点） / targetAudience ○（対象視聴者。ADR-0011 #12 で追加＝**任意の追加ゆえ schemaVersion は 1.1 据え置き**）
+**7.1.3 generalBrief**（`videoKind=general` のとき必須）: title ●（テーマ・**1〜100字**） / agenda(string[]) ○（章立て・アジェンダ・**最大20件／各100字**） / keyPoints(string[]) ○（伝えたい要点・**最大20件／各100字**） / targetAudience ○（対象視聴者・**100字**。ADR-0011 #12 で追加）。**要素数・文字数の上限は ADR-0011 #4 で確定（任意項目の追加・上限付与ゆえ schemaVersion は 1.1 据え置き）。**
 
 ### 7.2 Asset
 
