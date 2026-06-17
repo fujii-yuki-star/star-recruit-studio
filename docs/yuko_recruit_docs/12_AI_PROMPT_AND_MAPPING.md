@@ -66,7 +66,7 @@ interface AiProvider {
 - **【recruit のみ】会社情報**（companyName / industry / businessDescription / jobType / recruitTarget / strengths / desiredPerson / recruitUrl）。`strengths` は「アピールしたいこと（強み・伝えたい点）」として送る。
 - **【general のみ】generalBrief**（title＝テーマ / agenda＝章立て・アジェンダ（string[]） / keyPoints＝伝えたい要点（string[]））。
 - **補足・その他**（`additionalNotes`＝利用者の自由記述。**両用途共通**・**そのまま本文として送る**（重視するよう指示）・**schema 上限 1000 字**・空のときはセクションごと省略）。ADR-0011 で project トップレベルへ移動。
-- 動画設定（purpose＝種類別の目的（recruit/general で許可 enum が変わる・`11 §3.1`） / targetAudience / targetDurationSec / tone）【両用途共通】
+- 動画設定（purpose＝種類別の目的（recruit/general で許可 enum が変わる。**一般の値は `11 §3.1`＝正典更新②／PR #100 で定義**） / targetAudience / targetDurationSec / tone）【両用途共通】
 - **利用可能な素材一覧**（assetId / assetType / displayName / description / aiDescription / tags）。**MVP はテキストのみ送信**（サムネイル・代表フレームは添付しない）。画像サムネイル添付（長辺 512px・`07 §4` 許可範囲）／動画の代表フレームは、画像対応の実プロバイダ整備後＝**ADR-0010 P3** で追加する（§2-6 の「代表フレームのみ」に沿う）。
 - **利用可能な見た目パターン一覧（要約）**（`11 §7.5` の aiHint をもとに `templateId / category / useCase / requiredSlots / hasYuko / maxNarrationLength / maxSubtitleLength / maxDurationSec`）。`maxDurationSec` はシステムプロンプトの「見た目パターンに上限があれば従う」を AI が解決するために渡す（無い場合は省略）。
 - **利用可能なゆうこ表情タグ一覧**（yuko asset の tags を集約）
@@ -209,6 +209,7 @@ interface AiProvider {
 - assetId={{assetId}} / type={{assetType}} / name={{displayName}}
   説明={{description}} / AI解析={{aiDescription}} / tags={{tags}}
 {{/each}}
+（画像素材のサムネイル添付は **ADR-0010 P3**。MVP のユーザーメッセージは**テキストのみ**でこの行は出さない）
 
 # 利用可能なゆうこ表情タグ
 {{yukoPoseTags}}

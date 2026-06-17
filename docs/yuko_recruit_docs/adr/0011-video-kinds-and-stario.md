@@ -1,6 +1,6 @@
 # ADR-0011: 動画の用途拡張（採用／一般・社内発表の2系統）と製品名 stario
 
-- **状態**: Proposed
+- **状態**: Accepted（2026-06-17・正典更新①②③＝PR #100/#101 で反映。主決定＝選択肢A。未解決#2–#11 は実装フェーズで順次確定）
 - **日付**: 2026-06-17
 - **関連**: `CLAUDE.md §1`（プロダクト一行）/ `01_*`（製品概要）/ `11 §3`（enum）・`11 §7`（project 構造）/ `12 §4–§6`（AI 入力・プロンプト）/ `schemas/project.schema.json`・`schemas/ai-video-plan.schema.json` / [`0003`](0003-narration-voice.md)（ゆうこ＝ナレーター）/ [`0010`](0010-real-ai-provider.md)（実 AI プロバイダ）
 
