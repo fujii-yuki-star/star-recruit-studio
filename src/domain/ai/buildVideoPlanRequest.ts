@@ -8,7 +8,9 @@ import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 // 12§7 の出力例（few-shot）。AI に ai-video-plan の構造（キー名・入れ子）を厳密に真似させるため、
 // 正典 fixture を直接読む（ミラーしない＝検証スキーマと同じ単一参照元。validate:schemas で適合確認済みの有効サンプル）。
+// videoKind=general は §7b の発表・説明向けサンプルを使う（章立て→parts・要点→texts/narration の手本＝ADR-0011 #7）。
 import aiVideoPlanExample from '../../../docs/yuko_recruit_docs/fixtures/ai-video-plan.sample.json';
+import aiVideoPlanGeneralExample from '../../../docs/yuko_recruit_docs/fixtures/ai-video-plan.general.sample.json';
 
 /**
  * 12§5 の確定システムプロンプト（日本語・厳守事項の参照元）。本文は正典 12§5 と一致させる（変更時は両方を揃える）。
@@ -164,6 +166,8 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
   const assets = input.assets.map(assetBlock).join('\n');
   // 「値だけ今回の◯◯に合わせて作る」の主語は用途で変える（recruit=会社情報 / general=テーマ・構成・要点）。
   const exampleSubject = isGeneral ? 'テーマ・構成・要点' : '会社情報';
+  // few-shot 出力例も用途で切り替える（general は §7b の発表・説明サンプル＝ADR-0011 #7）。
+  const example = isGeneral ? aiVideoPlanGeneralExample : aiVideoPlanExample;
   return [
     ...head,
     '',
@@ -189,7 +193,7 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
     '各シーンの sceneType は、選んだ templateId の category と同じ値にする（利用可能な見た目パターンに無い sceneType は使わない）。利用可能な見た目だけで表現できる構成にする。',
     '各フィールドの型は出力例と同じにする（文字列の項目を配列やオブジェクトにしない。targetAudience・tone・title・narrationText・各 texts などは単一の文字列）。',
     `次の例と**同じキー名・同じ入れ子構造・同じ型**で出力し、値だけ今回の${exampleSubject}・素材・見た目パターンに合わせて作る：`,
-    JSON.stringify(aiVideoPlanExample, null, 2),
+    JSON.stringify(example, null, 2),
   ].join('\n');
 }
 

@@ -171,6 +171,9 @@ describe('buildVideoPlanMessages', () => {
     expect(user).toContain('"schemaVersion": "1.0"');
     expect(user).toContain('"videoPlan"');
     expect(user).toContain('"parts"');
+    // few-shot は採用サンプル（§7）。一般サンプルは混入しない。
+    expect(user).toContain('株式会社サンプル 会社紹介');
+    expect(user).not.toContain('今期のハイライト');
   });
 
   it('additionalNotes が空文字・空白のみなら補足セクションを出さない', () => {
@@ -186,6 +189,12 @@ describe('buildVideoPlanMessages', () => {
   it('videoKind 省略・recruit は採用システムプロンプト（§5）を使う', () => {
     expect(buildVideoPlanMessages(fullInput()).system).toBe(VIDEO_PLAN_SYSTEM_PROMPT);
     expect(buildVideoPlanMessages({ ...fullInput(), videoKind: VIDEO_KIND.recruit }).system).toBe(VIDEO_PLAN_SYSTEM_PROMPT);
+  });
+
+  it('videoKind 省略のユーザーメッセージは採用 few-shot を使う（一般サンプルは混入しない）', () => {
+    const user = buildVideoPlanUserMessage(fullInput()); // videoKind 未指定＝recruit 扱い
+    expect(user).toContain('株式会社サンプル 会社紹介');
+    expect(user).not.toContain('今期のハイライト');
   });
 });
 
@@ -276,5 +285,12 @@ describe('buildVideoPlanMessages（一般・社内発表 general・§5b/§6b）'
     expect(user).toContain('タイトル/テーマ: （未入力）');
     expect(user).toContain('# 構成（章立て・アジェンダ）\n（未入力）');
     expect(user).toContain('# 伝えたい要点\n（未入力）');
+  });
+
+  it('few-shot は一般サンプル（§7b）を使う＝採用サンプルは混入しない（ADR-0011 #7）', () => {
+    const user = buildVideoPlanUserMessage(generalInput());
+    expect(user).toContain('今期のハイライト'); // 一般 few-shot 固有の partTitle
+    expect(user).toContain('"purpose": "report"'); // 出力例の一般 purpose（入力の「種別(purpose): report」とは別表記）
+    expect(user).not.toContain('株式会社サンプル 会社紹介'); // 採用 few-shot は使わない
   });
 });
