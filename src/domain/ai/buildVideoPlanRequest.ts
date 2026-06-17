@@ -105,9 +105,10 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
     `希望尺(秒): ${input.targetDurationSec}`,
     `トーン: ${orNotProvided(input.tone)}`,
     '',
-    '# 補足・その他（利用者からの自由記述。動画づくりで特に重視する）',
-    orNotProvided(c.additionalNotes),
-    '',
+    // 自由記述があるときだけセクションを出す（「特に重視する」見出し＋（未入力）の矛盾を避ける）。
+    ...(c.additionalNotes?.trim()
+      ? ['# 補足・その他（利用者からの自由記述。動画づくりで特に重視する）', c.additionalNotes.trim(), '']
+      : []),
     '# 利用可能な見た目パターン（このIDのみ使用可）',
     templates,
     '',

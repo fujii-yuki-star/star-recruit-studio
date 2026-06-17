@@ -113,8 +113,8 @@ describe('buildVideoPlanMessages', () => {
     expect(user).toContain('業種: （未入力）');
     expect(user).toContain('アピールしたいこと（強み・伝えたい点）: （未入力）');
     expect(user).toContain('ターゲット: （未入力）');
-    // additionalNotes 未設定でも補足セクションは（未入力）で出る。
-    expect(user).toContain('# 補足・その他（利用者からの自由記述。動画づくりで特に重視する）\n（未入力）');
+    // additionalNotes 未設定なら補足セクションは出さない（「特に重視」見出し＋空欄の矛盾を避ける）。
+    expect(user).not.toContain('# 補足・その他');
     expect(user).toContain('トーン: （未入力）');
     // テンプレ任意項目（useCase/requiredSlots/maxNarration）も未入力表記。
     expect(user).toContain('useCase=（未入力） / requiredSlots=（未入力）');
@@ -169,5 +169,15 @@ describe('buildVideoPlanMessages', () => {
     expect(user).toContain('"schemaVersion": "1.0"');
     expect(user).toContain('"videoPlan"');
     expect(user).toContain('"parts"');
+  });
+
+  it('additionalNotes が空文字・空白のみなら補足セクションを出さない', () => {
+    const base = fullInput();
+    expect(
+      buildVideoPlanUserMessage({ ...base, companyInfo: { ...base.companyInfo, additionalNotes: '' } }),
+    ).not.toContain('# 補足・その他');
+    expect(
+      buildVideoPlanUserMessage({ ...base, companyInfo: { ...base.companyInfo, additionalNotes: '   ' } }),
+    ).not.toContain('# 補足・その他');
   });
 });
