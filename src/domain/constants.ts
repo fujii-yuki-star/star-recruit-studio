@@ -38,6 +38,11 @@ export const MAX_SUBTITLE_LEN_DEFAULT = 60;
 // 自由記述「その他」(トップレベル additionalNotes・両用途共通・ADR-0011) の上限。schemas/project.schema.json の maxLength と一致させる。
 export const ADDITIONAL_NOTES_MAX_LEN = 1000;
 
+// 一般動画のトーン候補（toneSettings.tone へ保存する文言・一般ウィザードの選択肢）。ADR-0011 #12。
+export const TONE_PRESETS = ['親しみやすい', '丁寧・落ち着いた', 'フォーマル', '明るい・元気'] as const;
+// 既定トーン（未選択時・generate のフォールバック）。単一参照元（§2-7）＝二重定義を避ける。
+export const DEFAULT_TONE = TONE_PRESETS[0];
+
 export const DEFAULT_VOICE_ID = 'voicevox_zundamon';
 export const DEFAULT_CHARACTER_ID = 'yuko';
 
