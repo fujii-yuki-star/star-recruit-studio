@@ -44,6 +44,7 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
+        {/* ロゴマークはナレーター「ゆうこ」の頭文字＝マスコット表示。製品名（すたりお）とは別物なので据え置く（ADR-0011）。 */}
         <div className="sidebar-brand-mark">ゆ</div>
         <div className="sidebar-brand-text">
           <span className="sidebar-brand-title">すたりお</span>
