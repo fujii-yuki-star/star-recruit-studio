@@ -13,6 +13,8 @@ interface ConfirmProps {
 export function ConfirmScreen({ onNavigate }: ConfirmProps) {
   const [showNextTime, setShowNextTime] = useState(true);
   const companyInfo = useProjectStore((s) => s.meta.companyInfo);
+  // 自由記述はトップレベル（両用途共通・ADR-0011）。
+  const additionalNotes = useProjectStore((s) => s.meta.additionalNotes);
   const purpose = useProjectStore((s) => s.meta.purpose);
   const assets = useProjectStore((s) => s.assets);
   const photoCount = assets.filter((a) => a.assetType === ASSET_TYPE.image).length;
@@ -52,8 +54,8 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
               <div className="row-between">
                 <span className="text-muted">会社情報</span>
                 <strong>
-                  {companyInfo.companyName}
-                  {companyInfo.industry ? `（${companyInfo.industry}）` : ""}
+                  {companyInfo?.companyName}
+                  {companyInfo?.industry ? `（${companyInfo.industry}）` : ""}
                 </strong>
               </div>
               <hr className="divider" style={{ margin: "4px 0" }} />
@@ -68,13 +70,13 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
                   写真{photoCount}枚・動画{videoCount}本ぶんの文字情報
                 </strong>
               </div>
-              {companyInfo.additionalNotes?.trim() && (
+              {additionalNotes?.trim() && (
                 <>
                   <hr className="divider" style={{ margin: "4px 0" }} />
                   <div className="row-between" style={{ alignItems: "flex-start", gap: "var(--gap-md)" }}>
                     <span className="text-muted">補足（その他）</span>
                     <strong style={{ textAlign: "right", maxWidth: "70%", whiteSpace: "pre-wrap" }}>
-                      {companyInfo.additionalNotes}
+                      {additionalNotes}
                     </strong>
                   </div>
                 </>

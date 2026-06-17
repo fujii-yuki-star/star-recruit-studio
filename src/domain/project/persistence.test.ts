@@ -107,11 +107,13 @@ describe('assembleProject', () => {
     expect(p.videoKind).toBe('recruit');
     expect('generalBrief' in p).toBe(false);
     const g = assembleProject(
-      header({ videoKind: 'general', generalBrief: { title: '四半期報告', keyPoints: ['売上120%'] } }),
+      header({ videoKind: 'general', companyInfo: undefined, generalBrief: { title: '四半期報告', keyPoints: ['売上120%'] } }),
       [], [], [],
     );
     expect(g.videoKind).toBe('general');
     expect(g.generalBrief?.title).toBe('四半期報告');
+    // general では companyInfo を出力しない（schema if/then/else の not:required を満たす・ADR-0011）。
+    expect('companyInfo' in g).toBe(false);
   });
 });
 
@@ -127,6 +129,18 @@ describe('parseProjectDoc', () => {
     delete doc.videoKind;
     const back = parseProjectDoc(JSON.stringify(doc));
     expect(back.videoKind).toBe('recruit');
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.0→1.1 へ昇格する
+  });
+  it('旧 companyInfo.additionalNotes をトップレベルへ移送する（ADR-0011 移行）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.0',
+      companyInfo: { companyName: '株式会社サンプル', additionalNotes: '誠実な社風を伝えたい' },
+    } as Record<string, unknown>;
+    delete doc.videoKind;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.additionalNotes).toBe('誠実な社風を伝えたい');
+    expect((back.companyInfo as unknown as Record<string, unknown>).additionalNotes).toBeUndefined();
   });
   it('未対応メジャー(2.0)は拒否', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '2.0' };

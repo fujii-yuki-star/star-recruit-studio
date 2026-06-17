@@ -61,15 +61,16 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const initialMeta = useProjectStore.getState().meta;
   const c0 = initialMeta.companyInfo;
   const [purpose, setPurpose] = useState<string>(initialMeta.purpose);
-  const [companyName, setCompanyName] = useState(c0.companyName ?? "");
-  const [industry, setIndustry] = useState(c0.industry ?? "");
-  const [jobType, setJobType] = useState(c0.jobType ?? "");
-  const [strengths, setStrengths] = useState<string[]>(c0.strengths ?? []);
+  const [companyName, setCompanyName] = useState(c0?.companyName ?? "");
+  const [industry, setIndustry] = useState(c0?.industry ?? "");
+  const [jobType, setJobType] = useState(c0?.jobType ?? "");
+  const [strengths, setStrengths] = useState<string[]>(c0?.strengths ?? []);
   const [newStrength, setNewStrength] = useState("");
-  const [businessDescription, setBusinessDescription] = useState(c0.businessDescription ?? "");
-  const [recruitTarget, setRecruitTarget] = useState(c0.recruitTarget ?? "");
-  const [desiredPerson, setDesiredPerson] = useState(c0.desiredPerson ?? "");
-  const [additionalNotes, setAdditionalNotes] = useState(c0.additionalNotes ?? "");
+  const [businessDescription, setBusinessDescription] = useState(c0?.businessDescription ?? "");
+  const [recruitTarget, setRecruitTarget] = useState(c0?.recruitTarget ?? "");
+  const [desiredPerson, setDesiredPerson] = useState(c0?.desiredPerson ?? "");
+  // 自由記述はトップレベル additionalNotes（両用途共通・ADR-0011。companyInfo からは外す）。
+  const [additionalNotes, setAdditionalNotes] = useState(initialMeta.additionalNotes ?? "");
   const [voiceType, setVoiceType] = useState("calm");
 
   const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
@@ -88,8 +89,8 @@ export function WizardScreen({ onNavigate }: WizardProps) {
         jobType,
         strengths,
         desiredPerson,
-        additionalNotes,
       },
+      additionalNotes,
     });
   }
   // 音声系（BGM/ナレーション）は素材一覧に出さない。

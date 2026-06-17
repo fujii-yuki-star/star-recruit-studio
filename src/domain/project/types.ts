@@ -22,8 +22,6 @@ export interface CompanyInfo {
   strengths?: string[];
   desiredPerson?: string;
   recruitUrl?: string;
-  /** 利用者が AI へ自由に伝える補足（そのまま送信。伝えたい雰囲気・避けたい表現など）。 */
-  additionalNotes?: string;
 }
 
 /** 一般・社内発表動画の入力（ADR-0011・11 §7.1.3。videoKind=general のとき使う）。 */
@@ -200,8 +198,11 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   videoSettings: VideoSettings;
-  companyInfo: CompanyInfo;
+  /** 採用（videoKind=recruit）のとき必須。general では持たない（ADR-0011・schema if/then/else）。 */
+  companyInfo?: CompanyInfo;
   generalBrief?: GeneralBrief;
+  /** 利用者が AI へ自由に伝える補足（両用途共通・そのまま送信。ADR-0011 で companyInfo→トップレベルへ移動）。 */
+  additionalNotes?: string;
   toneSettings?: ToneSettings;
   voiceSettings: VoiceSettings;
   bgmSettings?: BgmSettings;

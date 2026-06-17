@@ -87,7 +87,7 @@ interface ProjectState {
   /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
   splitScene: (sceneId: string, splitIndex: number) => string;
   /** ウィザードで入力した目的・会社情報を現在のプロジェクト(meta)へ反映する（保存・生成で使う）。 */
-  applyProjectInfo: (input: { purpose: Purpose; companyInfo: CompanyInfo }) => void;
+  applyProjectInfo: (input: { purpose: Purpose; companyInfo?: CompanyInfo; additionalNotes?: string }) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
@@ -225,11 +225,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const { meta, assets, templates } = get();
       const { companyInfo, purpose } = meta;
       const plan = await generateVideoPlan({
+        videoKind: meta.videoKind,
         companyInfo,
+        generalBrief: meta.generalBrief,
         purpose,
-        targetAudience: companyInfo.recruitTarget ?? "",
+        targetAudience: companyInfo?.recruitTarget ?? "",
         targetDurationSec: DEFAULT_TARGET_DURATION_SEC,
         tone: "親しみやすい",
+        additionalNotes: meta.additionalNotes,
         templates: buildTemplateSummaries(templates),
         assets,
         yukoPoseTags: buildYukoPoseTags(assets),
@@ -451,7 +454,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   applyProjectInfo: (input) =>
     set((s) => ({
-      meta: { ...s.meta, purpose: input.purpose, companyInfo: input.companyInfo },
+      // additionalNotes はトップレベル（両用途共通・ADR-0011）。companyInfo は recruit のときのみ。
+      meta: { ...s.meta, purpose: input.purpose, companyInfo: input.companyInfo, additionalNotes: input.additionalNotes },
       saveStatus: "idle",
     })),
   updateVoiceSettings: (patch) =>

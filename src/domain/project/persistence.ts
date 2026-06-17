@@ -24,9 +24,12 @@ export interface ProjectHeader {
   createdAt: string;
   updatedAt: string;
   videoSettings: VideoSettings;
-  companyInfo: CompanyInfo;
+  /** 採用（videoKind=recruit）のとき必須。general では持たない（ADR-0011）。 */
+  companyInfo?: CompanyInfo;
   /** 一般・社内発表（videoKind=general）の入力。 */
   generalBrief?: GeneralBrief;
+  /** 利用者の自由記述（両用途共通・AIへそのまま送る補足）。 */
+  additionalNotes?: string;
   toneSettings?: ToneSettings;
   voiceSettings: VoiceSettings;
   bgmSettings?: BgmSettings;
@@ -149,8 +152,9 @@ export function assembleProject(
     createdAt: header.createdAt,
     updatedAt: header.updatedAt,
     videoSettings: header.videoSettings,
-    companyInfo: header.companyInfo,
+    ...(header.companyInfo ? { companyInfo: header.companyInfo } : {}),
     ...(header.generalBrief ? { generalBrief: header.generalBrief } : {}),
+    ...(header.additionalNotes ? { additionalNotes: header.additionalNotes } : {}),
     ...(header.toneSettings ? { toneSettings: header.toneSettings } : {}),
     voiceSettings: header.voiceSettings,
     ...(header.bgmSettings ? { bgmSettings: header.bgmSettings } : {}),
@@ -197,11 +201,20 @@ export function parseProjectDoc(text: string): Project {
   return migrateProject(doc as unknown as Project);
 }
 
-/** 同一メジャー(1.x)はそのまま。将来のメジャー移行時にここで変換する。 */
+/** ADR-0011: 旧データ(1.0)を 1.1 へ移行する（読込時。schemaVersion 更新・videoKind 既定 recruit・additionalNotes をトップレベルへ移送）。 */
 function migrateProject(project: Project): Project {
-  // ADR-0011: videoKind 省略の旧データ(1.0)は recruit として扱う（schemaVersion は保存時に 1.1 へ更新される）。
-  if (!project.videoKind) {
-    return { ...project, videoKind: VIDEO_KIND.recruit };
+  const next: Project = {
+    ...project,
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    videoKind: project.videoKind ?? VIDEO_KIND.recruit,
+  };
+  // 旧 companyInfo.additionalNotes をトップレベル additionalNotes へ移送し、companyInfo からは除去する。
+  const ci = project.companyInfo as Record<string, unknown> | undefined;
+  if (ci && typeof ci.additionalNotes === 'string') {
+    if (next.additionalNotes === undefined) next.additionalNotes = ci.additionalNotes;
+    const rest = { ...ci };
+    delete rest.additionalNotes;
+    next.companyInfo = rest as unknown as CompanyInfo;
   }
-  return project;
+  return next;
 }
