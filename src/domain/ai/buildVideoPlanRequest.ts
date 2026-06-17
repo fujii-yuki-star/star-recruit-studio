@@ -168,6 +168,8 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
     ...head,
     '',
     // 自由記述（additionalNotes＝トップレベル・両用途共通）があるときだけセクションを出す。
+    // 1000 字上限の検証は上流（保存時の schema 検証・入力UI の maxLength=ADDITIONAL_NOTES_MAX_LEN）が担う。
+    // ここは送信用の整形のみ＝純粋関数として責務を上流に委ねる（12§4）。
     ...(input.additionalNotes?.trim()
       ? ['# 補足・その他（利用者からの自由記述。動画づくりで特に重視する）', input.additionalNotes.trim(), '']
       : []),
