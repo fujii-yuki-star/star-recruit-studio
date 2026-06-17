@@ -135,15 +135,32 @@
 - [ ] エンドユーザー動画のクレジット表記運用
 - [ ] 標準BGM・装飾の入手元と権利台帳
 
-### 実装要件（コードに落とす）
-- [ ] アプリ内「クレジット/ライセンス」画面（VOICEVOX:ずんだもん、FFmpeg(LGPL)＋ソース入手、フォント、BGM等）
-- [ ] APIキーのOSキーチェーン保管（平文禁止・ログ禁止・コミット禁止）
-- [ ] FFmpeg/VOICEVOX のバージョン固定と記録、`infrastructure` 越し呼び出し
-- [ ] 書き出し時のクレジット自動付与（任意ON/OFF）
+### 実装要件（コードに落とす） ※実装監査 2026-06-17
+- [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL)／Noto Sans JP を表示）。残: FFmpeg **ソース入手手段の明示**、BGM/装飾を採用時に追記。
+- [x] APIキーのOSキーチェーン保管 ＝ **実装済**（`infrastructure/aiClient` 経由で Rust keyring に保管・平文非保存・本文/ログ非混入＝ADR-0010 P1）。
+- [~] FFmpeg/VOICEVOX/AI の `infrastructure` 越し呼び出し ＝ **実装済**（`ffmpegExport`／`voiceProviders/voicevoxProvider`／`aiProviders`）。残: **バージョン固定と記録**。
+- [ ] 書き出し時のクレジット自動付与（任意ON/OFF）＝ `AboutScreen` にトグル UI のみで**焼き込み未実装・設定も揮発**＝backlog。
 
-### Phase 0 で技術検証
-- [ ] LGPLビルドFFmpegで `overlay`/`xfade`/`amix` が動く（ADR-0001の合成）
-- [ ] VOICEVOXローカルエンジンでWAV生成（`02` Phase 0）
+### Phase 0 で技術検証 ※実装監査 2026-06-17
+- [~] LGPLビルドFFmpegで `overlay`/`xfade`/`amix` ＝ スパイクで **SVG→PNG→実MP4→連結を実証**（ADR-0001 スパイク・`ffmpegExport`）。残: **本番 LGPL＋OpenH264 ビルド**での確認（現状の検証ビルドは GPL/libx264＝spike 専用）。
+- [ ] VOICEVOXローカルエンジンでWAV生成 ＝ **未**（現状 `MockVoiceProvider`・実エンジン疎通は backlog）。
+
+### 次アクション（リリースに向けた切り分け・2026-06-17）
+
+**コードで閉じられる（着手可）**
+- FFmpeg **ソース入手手段**の明示（クレジット/ライセンス画面に入手URL・手順を追記）。
+- FFmpeg/VOICEVOX/AIモデルの **バージョン固定と記録**（`infrastructure` で定数化）。
+- 書き出し時 **クレジット焼き込み**＋設定の永続化（backlog）。
+
+**事業・法務の判断/作業が必要（コードでは閉じない）**
+- VOICEVOX／東北ずん子・ずんだもんプロジェクトの **規約通読**（§5。ナレーター用途・常時クレジットの運用可否）。
+- VOICEVOX **同梱ビルドの選定**（CPU/GPU・サイズ）と配布時の最終法務（`adr/0005`）。
+- FFmpeg の **LGPLビルド構成確定**・Cisco OpenH264 バイナリ取得方式（`adr/0002`）。
+- 標準BGM・装飾の **入手元と権利台帳**（CC0/自社制作）。
+- 最終 **フォント選定**（OFL系・本文/見出し）とライセンス本文の同梱。
+- エンドユーザー動画の **クレジット表記運用**（自動付与 or 手順案内）。
+
+> 大物（**VOICEVOX 実疎通**・**実 FFmpeg 書き出し**）に着手する前に、上記「事業・法務」の該当項目を確定すること（本章の趣旨）。コード側の前提（infrastructure 抽象化・keyring・クレジット画面）は整っている。
 
 ---
 
