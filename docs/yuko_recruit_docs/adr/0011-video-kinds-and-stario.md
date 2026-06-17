@@ -83,7 +83,7 @@
 1. **🔴 `companyInfo` の必須性**: 現行 `schemas/project.schema.json` は `companyInfo` を required、`11 §7.1` も必須（●）。`videoKind=general` では会社採用情報は不要なため、**条件付き必須**にする（`videoKind=recruit` のときのみ必須＝schema の `if/then/else`、または `companyInfo` を任意化して `11 §7.1` の表を更新）。正典更新②で確定（放置すると「general なのに companyName 必須」の矛盾）。
 2. **`purpose` enum の設計（出力・内部の両方）**: ①AI出力 `videoPlan.purpose` と ②内部 `project.purpose`（現状 採用7種・**必須**）の双方で、採用 enum と一般 enum を**統合するか `videoKind` で別管理するか**を確定。`project.purpose` は必須フィールドゆえ設計の核心（一般時に `general_*` を入れるなら enum 拡張、別管理なら `purpose` を `videoKind=recruit` 限定にする等）。`11 §3.1` / `12 §3/§8` ＋ 両 schema で確定。
 3. **`additionalNotes` の帰属先**: 現状 `companyInfo` 配下（`11 §7.1.2`）。両用途共通にするため **project トップレベルへ移すか、`generalBrief` 配下に持つか**を確定（recruit の既存データへの影響＝マイグレーションも考慮）。
-4. **`generalBrief` の詳細**: `agenda`/`keyPoints` の要素数・文字数上限・必須/任意。
+4. **`generalBrief` の詳細**: `agenda`/`keyPoints` の要素数・文字数上限・必須/任意。 → **解決**: title=必須(1〜100字)／agenda・keyPoints=任意(各 最大20件・1項目100字)／targetAudience=任意(100字)。`project.schema.json`(maxLength/maxItems) と `domain/constants`(GENERAL_*_MAX_*) を一致させ、ウィザードでも maxLength と件数上限で担保。任意項目への上限付与ゆえ schemaVersion 1.1 据え置き。
 5. **UI 表示名（§2-3）**: `recruit`/`general` は技術識別子のため通常UIに出さない。`06_UI_SPEC §3` / `16_GLOSSARY` に表示名を登録（例 recruit=「採用動画」・general=「一般動画・社内発表」）。正典更新①で対応。
 6. **`rewriteNarration` プリセット（`12 §10`）**: 現行プリセット（「若手向けに」等）は採用特化。一般用途では**共通化/分岐/一部無効化**を決める（当面は `videoKind=recruit` 限定として明示）。
 7. **一般の few-shot（§7b）**: 一般動画の出力例と `targetDurationSec` の目安。 → **解決**: `fixtures/ai-video-plan.general.sample.json`（発表・説明調・章立て3パート・purpose=report・尺は targetDurationSec に整合＝約60秒）を追加し `12 §7b` に要点を記載。`buildVideoPlanRequest` が `videoKind` で §7／§7b の few-shot を切り替え。`validate:schemas` で適合確認。

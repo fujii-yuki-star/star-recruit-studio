@@ -82,10 +82,10 @@
       "additionalProperties": false,
       "required": ["title"],
       "properties": {
-        "title": { "type": "string", "minLength": 1 },
-        "agenda": { "type": "array", "items": { "type": "string" } },
-        "keyPoints": { "type": "array", "items": { "type": "string" } },
-        "targetAudience": { "type": "string" }
+        "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "agenda": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 100 } },
+        "keyPoints": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 100 } },
+        "targetAudience": { "type": "string", "maxLength": 100 }
       }
     },
     "ToneSettings": {

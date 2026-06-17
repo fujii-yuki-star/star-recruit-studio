@@ -38,6 +38,12 @@ export const MAX_SUBTITLE_LEN_DEFAULT = 60;
 // 自由記述「その他」(トップレベル additionalNotes・両用途共通・ADR-0011) の上限。schemas/project.schema.json の maxLength と一致させる。
 export const ADDITIONAL_NOTES_MAX_LEN = 1000;
 
+// generalBrief（一般・社内発表の入力）の上限（ADR-0011 #4）。schemas/project.schema.json の maxLength/maxItems と一致させる。
+export const GENERAL_TITLE_MAX_LEN = 100;        // テーマ・タイトル
+export const GENERAL_TARGET_AUDIENCE_MAX_LEN = 100; // 対象視聴者
+export const GENERAL_LIST_ITEM_MAX_LEN = 100;    // agenda / keyPoints の1項目
+export const GENERAL_LIST_MAX_ITEMS = 20;        // agenda / keyPoints の要素数上限
+
 // 一般動画のトーン候補（toneSettings.tone へ保存する文言・一般ウィザードの選択肢）。ADR-0011 #12。
 export const TONE_PRESETS = ['親しみやすい', '丁寧・落ち着いた', 'フォーマル', '明るい・元気'] as const;
 // 既定トーン（未選択時・generate のフォールバック）。単一参照元（§2-7）＝二重定義を避ける。
