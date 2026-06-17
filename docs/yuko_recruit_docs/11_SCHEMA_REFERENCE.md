@@ -13,7 +13,8 @@
 | Template | `schemas/template.schema.json` | 見た目パターン定義 | 内部・取込 |
 | AiVideoPlan | `schemas/ai-video-plan.schema.json` | **AI出力**（内部Sceneとは別物） | 受信・一時 |
 
-- 各スキーマは独立した `schemaVersion`（semver文字列）を持つ。初期は全て `"1.0"`。
+- 各スキーマは独立した `schemaVersion`（semver文字列）を持つ。初期は全て `"1.0"`。**project は ADR-0011 で `"1.1"`**（`videoKind`/`generalBrief` の追加・`additionalNotes` を companyInfo→トップレベルへ移動＝後方互換のマイナー）。template / ai-video-plan は `"1.0"` のまま。
+  - 移行: 既存 `"1.0"` の project.json は読込時に `"1.1"` へ更新（`videoKind` 省略＝recruit 既定、`companyInfo.additionalNotes` があればトップレベル `additionalNotes` へ移す）。
 - **互換性方針**: マイナー（`1.x`）＝後方互換の追加のみ。メジャー（`2.0`）＝破壊的変更で、読込時にマイグレーション関数を通す。未知のメジャーは読込拒否しユーザー向けに告知。
 - 読込時、`schemaVersion` 不在 or 未対応なら検証エラー（`§8`）。
 
@@ -48,7 +49,11 @@
 
 ## 3. enum カタログ（正典）
 
-### 3.1 purpose（動画の目的）
+### 3.1 videoKind（動画の種類）＋ purpose（目的）
+
+**videoKind**（`recruit` / `general`。**省略時は `recruit`**＝後方互換。ADR-0011）で用途を分け、`purpose` の許可値も種類で切り替える（`project.schema.json` の `if/then/else`）。
+
+**recruit（採用・会社紹介）の purpose**
 
 | code | UI表示（`06`） | 旧表記（廃止） |
 |---|---|---|
@@ -60,6 +65,16 @@
 | `info_session` | 会社説明会用 | — |
 | `sns_short` | SNS向け短尺 | — |
 
+**general（一般・社内発表）の purpose**
+
+| code | UI表示（`06`） |
+|---|---|
+| `general_announcement` | 社内発表・全社共有 |
+| `report` | 業績・活動報告 |
+| `product_intro` | 製品・サービス紹介 |
+| `general_other` | 汎用・その他 |
+
+> `purpose` は**単一フィールド**で、`videoKind=recruit`（既定）なら採用 enum、`videoKind=general` なら一般 enum のみを許可する（混在不可）。
 > 既存資料の `new_graduate_recruit`（01/03）・`company_intro`（07）は本表の code に統一する。
 
 ### 3.2 sceneCategory（= scene.sceneType ＝ template.category）
@@ -181,13 +196,16 @@
 
 | フィールド | 型 | 必須 | 制約・既定 |
 |---|---|:--:|---|
-| schemaVersion | string | ● | `"1.0"` |
+| schemaVersion | string | ● | `"1.1"`（ADR-0011 で 1.0→1.1。§1） |
+| videoKind | enum | ○ | `recruit`/`general`。省略時 `recruit`＝後方互換（§3.1・ADR-0011） |
 | projectId | string | ● | §2.1 |
 | projectName | string | ● | 1–80字 |
-| purpose | enum | ● | §3.1。ウィザードStep1で選択。AI出力 `videoPlan.purpose` の対応先 |
+| purpose | string(enum) | ● | §3.1。**videoKind で許可値が変わる**（recruit→採用 enum／general→一般 enum）。AI出力 `videoPlan.purpose` の対応先 |
 | createdAt / updatedAt | string(ISO8601) | ● | — |
 | videoSettings | object | ● | §7.1.1 |
-| companyInfo | object | ● | §7.1.2 |
+| companyInfo | object | ※ | §7.1.2。**`videoKind=recruit` のとき必須**（general では持たない・if/then/else） |
+| generalBrief | object | ※ | §7.1.3。**`videoKind=general` のとき必須** |
+| additionalNotes | string | ○ | 利用者の自由記述（AIへそのまま送る補足・**両用途共通**・≤1000字）。ADR-0011 で companyInfo 配下から**トップレベルへ移動** |
 | toneSettings | object | ○ | tone / yukoPersonality / formality(enum) |
 | voiceSettings | object | ● | defaultVoiceId / speed / pitch / intonation / volume |
 | bgmSettings | object | ○ | enabled / assetId / volume / loop / fadeInSec / fadeOutSec |
@@ -195,8 +213,11 @@
 | parts | Part[] | ● | §7.3 |
 | scenes | Scene[] | ● | §7.4 |
 
+> **※ = 条件付き必須＋排他**（`videoKind` による。recruit→companyInfo 必須・generalBrief 禁止／general→generalBrief 必須・companyInfo 禁止＝`project.schema.json` の if/then/else ＋ `not`）。
+
 **7.1.1 videoSettings**: aspectRatio(enum `16:9`) ● / width(=1920) ● / height(=1080) ● / fps(=30) ● / targetDurationSec(≤`VIDEO_TARGET_MAX_SEC_MVP`) ● / maxDurationSec(≤`VIDEO_HARD_MAX_SEC`) ●
-**7.1.2 companyInfo**: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○ / additionalNotes ○（利用者の自由記述。AIへそのまま送る補足）
+**7.1.2 companyInfo**（`videoKind=recruit` のとき必須）: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○
+**7.1.3 generalBrief**（`videoKind=general` のとき必須）: title ●（テーマ・1字以上） / agenda(string[]) ○（章立て・アジェンダ） / keyPoints(string[]) ○（伝えたい要点）
 
 ### 7.2 Asset
 
