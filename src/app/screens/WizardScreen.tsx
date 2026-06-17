@@ -77,7 +77,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const c0 = initialMeta.companyInfo;
   const g0 = initialMeta.generalBrief;
   const [videoKind, setVideoKind] = useState<VideoKind>(initialMeta.videoKind ?? VIDEO_KIND.recruit);
-  const [purpose, setPurpose] = useState<string>(initialMeta.purpose);
+  const [purpose, setPurpose] = useState<Purpose>(initialMeta.purpose);
   const [companyName, setCompanyName] = useState(c0?.companyName ?? "");
   const [industry, setIndustry] = useState(c0?.industry ?? "");
   const [jobType, setJobType] = useState(c0?.jobType ?? "");
@@ -106,7 +106,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // ウィザードの入力を現在のプロジェクトへ反映する（保存・生成で使う）。
   // videoKind で会社情報/発表内容を排他に渡す（applyProjectInfo が渡さない側を消す＝schema 排他を満たす）。
   function applyForm() {
-    const common = { videoKind, purpose: purpose as Purpose, additionalNotes };
+    const common = { videoKind, purpose, additionalNotes };
     if (videoKind === VIDEO_KIND.general) {
       applyProjectInfo({ ...common, generalBrief: { title, agenda, keyPoints } });
     } else {

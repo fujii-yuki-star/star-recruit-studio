@@ -235,6 +235,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         companyInfo,
         generalBrief: meta.generalBrief,
         purpose,
+        // 採用は会社情報の「採用対象」を対象視聴者に使う。一般は対象視聴者の入力欄が未実装＝当面 空のまま
+        // （§6b へ「対象視聴者: （未入力）」で送る）。一般の対象視聴者入力は ADR-0011 未解決#12（後続）。
         targetAudience: companyInfo?.recruitTarget ?? "",
         targetDurationSec: DEFAULT_TARGET_DURATION_SEC,
         tone: "親しみやすい",
@@ -361,11 +363,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       meta: {
         projectId: project.projectId,
         projectName: project.projectName,
+        // ADR-0011: 種別・発表内容・自由記述も復元する（欠落すると保存→再読込で general が recruit に化ける）。
+        videoKind: project.videoKind,
         purpose: project.purpose,
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
         videoSettings: project.videoSettings,
         companyInfo: project.companyInfo,
+        generalBrief: project.generalBrief,
+        additionalNotes: project.additionalNotes,
         toneSettings: project.toneSettings,
         voiceSettings: project.voiceSettings,
         bgmSettings: project.bgmSettings,

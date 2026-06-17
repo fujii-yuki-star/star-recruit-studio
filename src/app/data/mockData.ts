@@ -280,6 +280,7 @@ export const purposeOptions: PurposeOption[] = [
   { id: "company_intro", label: "会社紹介", desc: "会社の雰囲気や事業を広く伝える" },
   { id: "new_graduate", label: "新卒採用", desc: "新卒の学生に向けて魅力を伝える" },
   { id: "mid_career", label: "中途採用", desc: "経験者の方に向けて職場を紹介する" },
+  { id: "inexperienced_welcome", label: "未経験歓迎", desc: "未経験の方も歓迎していることを伝える" },
   { id: "engineer", label: "職種紹介（エンジニアなど）", desc: "特定の職種の仕事内容を伝える" },
   { id: "info_session", label: "説明会で流す", desc: "会社説明会やイベントで上映する" },
   { id: "sns_short", label: "SNS用ショート", desc: "短い時間でテンポよく見せる" },
