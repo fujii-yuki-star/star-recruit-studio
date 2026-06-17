@@ -93,7 +93,7 @@ export function WarningBanner({ warnings }: { warnings: DraftWarning[] }) {
   );
 }
 
-// ゆうこの声（ナレーション）の作成状態バッジ
+// 読み上げの声（ナレーション）の作成状態バッジ
 const voiceStatusLabel: Record<VoiceStatus, string> = {
   none: "声：未作成",
   pending: "声：作成中",

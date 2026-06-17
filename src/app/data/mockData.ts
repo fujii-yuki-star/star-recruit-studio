@@ -17,7 +17,7 @@ export type ScreenId =
   | "settings"
   | "about";
 
-// ゆうこの声（ナレーション）の作成状態
+// 読み上げの声（ナレーション）の作成状態
 export type VoiceStatus = "none" | "pending" | "generated" | "failed";
 
 export interface RecentProject {
@@ -232,8 +232,8 @@ export const lookPatterns: LookPattern[] = [
     category: "動画を見せる場面",
     createdAt: "2026/04/02",
     updatedAt: "2026/05/15",
-    elements: ["動画の表示場所", "字幕", "ゆうこの声"],
-    description: "短い動画を流しながら、字幕とゆうこの声で紹介する見た目です。",
+    elements: ["動画の表示場所", "字幕", "読み上げの声"],
+    description: "短い動画を流しながら、字幕と読み上げの声で紹介する見た目です。",
   },
   {
     id: "l4",
@@ -269,7 +269,7 @@ export const precheckItems: PrecheckItem[] = [
   { id: "c2", label: "会社名・採用対象", detail: "入力された内容と一致しています。", severity: "ok" },
   { id: "c3", label: "誇大表現", detail: "気になる表現は見つかりませんでした。", severity: "ok" },
   { id: "c4", label: "字幕の長さ", detail: "字幕が少し長い場面が2つあります。読みやすく短くできます。", severity: "action", action: "短くする" },
-  { id: "c5", label: "ゆうこの声", detail: "2つの場面で声がまだ作成されていません。書き出し前に作成してください。", severity: "action", action: "声を作成" },
+  { id: "c5", label: "読み上げの声", detail: "2つの場面で声がまだ作成されていません。書き出し前に作成してください。", severity: "action", action: "声を作成" },
   { id: "c6", label: "個人情報の写り込み", detail: "人物が写っている素材があります。公開前にご確認ください。", severity: "warning" },
   { id: "c7", label: "使っていない素材", detail: "使われていない素材が3つあります。", severity: "warning" },
   { id: "c8", label: "BGMの音量", detail: "声が聞き取りやすい音量です。", severity: "ok" },

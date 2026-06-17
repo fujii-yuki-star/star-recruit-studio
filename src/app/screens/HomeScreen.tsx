@@ -143,7 +143,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
               </div>
               <span className="action-card-title">設定</span>
               <span className="action-card-desc">
-                使用するAIやゆうこの声、保存先を設定します。
+                使用するAIや読み上げの声、保存先を設定します。
               </span>
             </button>
           </div>

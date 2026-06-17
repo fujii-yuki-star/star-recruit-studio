@@ -81,8 +81,8 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   const noVoice = scenes.filter((s) => s.narration.status !== NARRATION_STATUS.generated).length;
   items.push(
     noVoice > 0
-      ? { id: "voice", label: "ゆうこの声", detail: `${noVoice}つの場面で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成" }
-      : { id: "voice", label: "ゆうこの声", detail: "すべての場面で声が作成済みです。", severity: "ok" },
+      ? { id: "voice", label: "読み上げの声", detail: `${noVoice}つの場面で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成" }
+      : { id: "voice", label: "読み上げの声", detail: "すべての場面で声が作成済みです。", severity: "ok" },
   );
 
   const longSubtitle = scenes.filter((s) => {
