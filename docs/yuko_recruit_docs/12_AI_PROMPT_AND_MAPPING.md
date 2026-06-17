@@ -63,7 +63,7 @@ interface AiProvider {
 
 `generateVideoPlan` の入力に含めるもの（`07 §4`・送信前確認 `07 §5` を通過した範囲のみ）:
 
-- 会社情報（companyName / industry / businessDescription / jobType / recruitTarget / strengths / desiredPerson / recruitUrl）
+- 会社情報（companyName / industry / businessDescription / jobType / recruitTarget / strengths / desiredPerson / recruitUrl / additionalNotes）。`strengths` は「アピールしたいこと（強み・伝えたい点）」として送る。`additionalNotes` は利用者の自由記述で、**そのまま本文として送る**（重視するよう指示）。トークン浪費を防ぐため **schema 上限 1000 字**（空のときはセクションごと省略）。
 - 動画設定（purpose / targetAudience / targetDurationSec / tone）
 - **利用可能な素材一覧**（assetId / assetType / displayName / description / aiDescription / tags）。**MVP はテキストのみ送信**（サムネイル・代表フレームは添付しない）。画像サムネイル添付（長辺 512px・`07 §4` 許可範囲）／動画の代表フレームは、画像対応の実プロバイダ整備後＝**ADR-0010 P3** で追加する（§2-6 の「代表フレームのみ」に沿う）。
 - **利用可能な見た目パターン一覧（要約）**（`11 §7.5` の aiHint をもとに `templateId / category / useCase / requiredSlots / hasYuko / maxNarrationLength / maxSubtitleLength / maxDurationSec`）。`maxDurationSec` はシステムプロンプトの「見た目パターンに上限があれば従う」を AI が解決するために渡す（無い場合は省略）。
@@ -110,7 +110,7 @@ interface AiProvider {
 業種: {{industry}}
 事業内容: {{businessDescription}}
 募集職種: {{jobType}} / 採用対象: {{recruitTarget}}
-強み: {{strengths}}
+アピールしたいこと（強み・伝えたい点）: {{strengths}}
 求める人物像: {{desiredPerson}}
 採用ページ: {{recruitUrl}}
 
@@ -119,6 +119,9 @@ interface AiProvider {
 ターゲット: {{targetAudience}}
 希望尺(秒): {{targetDurationSec}}
 トーン: {{tone}}
+
+# 補足・その他（利用者からの自由記述。動画づくりで特に重視する）
+{{additionalNotes}}
 
 # 利用可能な見た目パターン（このIDのみ使用可）
 {{#each templates}}
