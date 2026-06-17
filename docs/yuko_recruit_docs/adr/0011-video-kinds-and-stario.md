@@ -86,7 +86,7 @@
 4. **`generalBrief` の詳細**: `agenda`/`keyPoints` の要素数・文字数上限・必須/任意。
 5. **UI 表示名（§2-3）**: `recruit`/`general` は技術識別子のため通常UIに出さない。`06_UI_SPEC §3` / `16_GLOSSARY` に表示名を登録（例 recruit=「採用動画」・general=「一般動画・社内発表」）。正典更新①で対応。
 6. **`rewriteNarration` プリセット（`12 §10`）**: 現行プリセット（「若手向けに」等）は採用特化。一般用途では**共通化/分岐/一部無効化**を決める（当面は `videoKind=recruit` 限定として明示）。
-7. **一般の few-shot（§7b）**: 一般動画の出力例と `targetDurationSec` の目安。
+7. **一般の few-shot（§7b）**: 一般動画の出力例と `targetDurationSec` の目安。 → **解決**: `fixtures/ai-video-plan.general.sample.json`（発表・説明調・章立て3パート・purpose=report・尺90秒目安）を追加し `12 §7b` に要点を記載。`buildVideoPlanRequest` が `videoKind` で §7／§7b の few-shot を切り替え。`validate:schemas` で適合確認。
 8. **発表専用テンプレ**: MVP は既存流用。将来タイトルスライド/箇条書き/章区切り等を新設するか。
 9. **stario 内部識別子**: package/Cargo/リポジトリ名の改称タイミング（破壊的変更の扱い）。
 10. **ゆうこの口調**: 一般・社内発表でトーンを調整するか（フォーマル寄せ等）。

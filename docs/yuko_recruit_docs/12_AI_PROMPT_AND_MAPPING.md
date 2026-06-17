@@ -282,6 +282,19 @@ interface AiProvider {
 }
 ```
 
+### 7b. few-shot（一般・社内発表 general）
+
+`videoKind=general` のときは §7 の代わりに**発表・説明向けの出力例**を few-shot に使う（実体＝`fixtures/ai-video-plan.general.sample.json`・`ai-video-plan.schema.json` 適合・`validate:schemas` 済）。採用例と**同じキー名・入れ子・型**で、内容を発表向けにしたもの。要点：
+
+- **`videoPlan.purpose`** は一般 enum（例 `report`）。`targetAudience` は対象視聴者（例「全社員」）、`tone` は発表向け（例「丁寧・落ち着いた」）。
+- **章立て（agenda）を `parts` に対応**させ、各章を短いシーンに割る（導入／本題／まとめ）。
+- **伝えたい要点を `texts`／`narrationText` に反映**（数値・結論を簡潔に）。会社紹介調の言い回しは避ける。
+- **`templateId`／`sceneType` は利用可能な見た目の範囲**で選ぶ（例 opening / photo_intro）。新規テンプレは作らない。
+- **`targetDurationSec` の目安**：発表・説明は採用より長めになりやすい（例 90 秒前後）。最終的な尺は利用者の希望値に合わせる。
+- 社外秘・個人情報の懸念は `reviewNotes` に一文を入れる。
+
+> few-shot の実体は fixture を**単一参照元**とする（プロンプト組立 `buildVideoPlanRequest` が `videoKind` で §7／§7b の例を切り替えて読み込む）。
+
 ---
 
 ## 8. AI出力 → 内部 Scene 変換マッピング（論点①・最重要）

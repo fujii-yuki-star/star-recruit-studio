@@ -26,6 +26,7 @@ const fx = (p) => join(base, 'fixtures', p);
 const cases = [
   ['project.sample.json', vProject, fx('project.sample.json')],
   ['ai-video-plan.sample.json', vPlan, fx('ai-video-plan.sample.json')],
+  ['ai-video-plan.general.sample.json', vPlan, fx('ai-video-plan.general.sample.json')],
   ['template-pack/opening_yuko_right_v1', vTemplate, fx('template-pack/opening_yuko_right_v1/template.json')],
   ['template-pack/photo_left_text_right_yuko_v1', vTemplate, fx('template-pack/photo_left_text_right_yuko_v1/template.json')],
 ];
