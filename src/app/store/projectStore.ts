@@ -29,6 +29,7 @@ import { detectAssetType, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
+import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 
@@ -95,6 +96,8 @@ interface ProjectState {
     additionalNotes?: string;
     /** トーン（toneSettings.tone へ。未指定なら既存維持）。 */
     tone?: string;
+    /** 読み上げの声の感じ（speed/pitch/intonation を voiceSettings へ。未指定なら既存維持）。 */
+    voice?: VoiceStyleParams;
   }) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
@@ -480,6 +483,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // トーンは渡されたときだけ更新（未指定時は既存 toneSettings を維持）。
         toneSettings:
           input.tone !== undefined ? { ...s.meta.toneSettings, tone: input.tone } : s.meta.toneSettings,
+        // 読み上げの声の感じ（speed/pitch/intonation）を反映。詳細は設定画面で微調整できる（§7.1）。
+        voiceSettings: input.voice ? { ...s.meta.voiceSettings, ...input.voice } : s.meta.voiceSettings,
       },
       saveStatus: "idle",
     })),
