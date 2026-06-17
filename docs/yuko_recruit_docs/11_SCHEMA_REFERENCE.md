@@ -213,7 +213,7 @@
 | parts | Part[] | ● | §7.3 |
 | scenes | Scene[] | ● | §7.4 |
 
-> **※ = 条件付き必須**（`videoKind` による。recruit→companyInfo 必須／general→generalBrief 必須＝`project.schema.json` の if/then/else）。
+> **※ = 条件付き必須＋排他**（`videoKind` による。recruit→companyInfo 必須・generalBrief 禁止／general→generalBrief 必須・companyInfo 禁止＝`project.schema.json` の if/then/else ＋ `not`）。
 
 **7.1.1 videoSettings**: aspectRatio(enum `16:9`) ● / width(=1920) ● / height(=1080) ● / fps(=30) ● / targetDurationSec(≤`VIDEO_TARGET_MAX_SEC_MVP`) ● / maxDurationSec(≤`VIDEO_HARD_MAX_SEC`) ●
 **7.1.2 companyInfo**（`videoKind=recruit` のとき必須）: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○

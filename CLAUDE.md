@@ -146,4 +146,4 @@ src/
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。
 - FFmpeg の正確なビルド構成・Cisco OpenH264 バイナリ取得方式（`adr/0002`）。
 - APIキー保管の実装（OSキーチェーン、`13 §7`）／最終フォント選定（OFL系）。
-- 正式プロダクト名 / 標準BGM・装飾アセットの入手元とライセンス。
+- 標準BGM・装飾アセットの入手元とライセンス。（正式プロダクト名は **すたりお（stario）** に決定済み＝ADR-0011）
