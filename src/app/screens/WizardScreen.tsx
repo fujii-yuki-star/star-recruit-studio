@@ -1,7 +1,8 @@
 import { useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
-import { sampleCompany, purposeOptions } from "../data/mockData";
+import { purposeOptions } from "../data/mockData";
 import { ASSET_TYPE, type Purpose } from "../../domain/enums";
+import { ADDITIONAL_NOTES_MAX_LEN } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -55,16 +56,20 @@ const yukoAdvice: Record<number, string[]> = {
 export function WizardScreen({ onNavigate }: WizardProps) {
   // 最初のステップ「動画の目的を選ぶ」(index 0) を表示
   const [step, setStep] = useState(0);
-  const [purpose, setPurpose] = useState("new_graduate");
-  const [companyName, setCompanyName] = useState(sampleCompany.companyName);
-  const [industry, setIndustry] = useState(sampleCompany.industry);
-  const [jobType, setJobType] = useState(sampleCompany.jobType);
-  const [strengths, setStrengths] = useState<string[]>(sampleCompany.strengths);
+  // ウィザードは現在のプロジェクト(meta)を初期値にする＝「ここまで保存」後に開き直しても消えない
+  // （未入力でも空文字で上書きしてしまう問題を避ける。applyProjectInfo は companyInfo を全置換するため）。
+  const initialMeta = useProjectStore.getState().meta;
+  const c0 = initialMeta.companyInfo;
+  const [purpose, setPurpose] = useState<string>(initialMeta.purpose);
+  const [companyName, setCompanyName] = useState(c0.companyName ?? "");
+  const [industry, setIndustry] = useState(c0.industry ?? "");
+  const [jobType, setJobType] = useState(c0.jobType ?? "");
+  const [strengths, setStrengths] = useState<string[]>(c0.strengths ?? []);
   const [newStrength, setNewStrength] = useState("");
-  const [businessDescription, setBusinessDescription] = useState("");
-  const [recruitTarget, setRecruitTarget] = useState("");
-  const [desiredPerson, setDesiredPerson] = useState("");
-  const [additionalNotes, setAdditionalNotes] = useState("");
+  const [businessDescription, setBusinessDescription] = useState(c0.businessDescription ?? "");
+  const [recruitTarget, setRecruitTarget] = useState(c0.recruitTarget ?? "");
+  const [desiredPerson, setDesiredPerson] = useState(c0.desiredPerson ?? "");
+  const [additionalNotes, setAdditionalNotes] = useState(c0.additionalNotes ?? "");
   const [voiceType, setVoiceType] = useState("calm");
 
   const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
@@ -87,8 +92,6 @@ export function WizardScreen({ onNavigate }: WizardProps) {
       },
     });
   }
-  // 自由記述の上限（schema の additionalNotes maxLength と一致＝§2-7）。
-  const ADDITIONAL_NOTES_MAX = 1000;
   // 音声系（BGM/ナレーション）は素材一覧に出さない。
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
@@ -294,15 +297,15 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     id="additionalNotes"
                     className="textarea"
                     value={additionalNotes}
-                    maxLength={ADDITIONAL_NOTES_MAX}
-                    onChange={(e) => setAdditionalNotes(e.target.value.slice(0, ADDITIONAL_NOTES_MAX))}
+                    maxLength={ADDITIONAL_NOTES_MAX_LEN}
+                    onChange={(e) => setAdditionalNotes(e.target.value)}
                     placeholder="動画で特に伝えたいこと・雰囲気・避けたい表現などを自由に書けます。ここに書いた内容はそのまま動画案づくりに渡ります。"
                     rows={4}
                   />
                   <div className="row-between field-hint">
                     <span>自由に書いた内容を、そのまま動画案づくりに反映します。</span>
                     <span>
-                      {additionalNotes.length}/{ADDITIONAL_NOTES_MAX}
+                      {additionalNotes.length}/{ADDITIONAL_NOTES_MAX_LEN}
                     </span>
                   </div>
                 </div>
