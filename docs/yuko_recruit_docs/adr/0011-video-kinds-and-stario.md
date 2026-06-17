@@ -74,7 +74,7 @@
 - **正典更新（docs-first・本 ADR をアンカーに）**：
   1. `01_*` / `CLAUDE.md §1`（製品スコープ＝2系統＋名称 stario）／ **`06_UI_SPEC §3`・`16_GLOSSARY`（`videoKind` の表示名を登録。例 recruit=「採用動画」・general=「一般動画・社内発表」＝§2-3 で技術語を UI に出さない）**。
   2. `11 §3`（`videoKind` enum・一般 purpose enum・`project.purpose` の設計）＋ `11 §7`（`generalBrief`・**`companyInfo` の条件付き必須化**・`additionalNotes` の帰属）／ `schemas/project.schema.json`（`videoKind`・`generalBrief`・一般 purpose・**`companyInfo` を `videoKind=recruit` のときのみ必須に**）。
-  3. `12`（§5b/§6b・`videoKind` で入力アセンブリ分岐）／ `schemas/ai-video-plan.schema.json`（出力 `videoPlan.purpose` の一般値の扱い）。
+  3. `12`（**§4 入力アセンブリ方針の本文を一般用途向けに更新**＝会社情報経由前提の記述を `videoKind` 分岐へ・§5b/§6b の新設・`videoKind` で入力アセンブリ分岐）／ `schemas/ai-video-plan.schema.json`（出力 `videoPlan.purpose` の一般値の扱い）。
 - **実装（資料確定後）**：`domain`（`videoKind` 型・`generalBrief`・入力アセンブリの分岐を純粋関数化＋テスト）／`infrastructure`（プロバイダのプロンプト切替）／`app`（ウィザード分岐 UI）／stario 改称（docs/UI）。
 - 描画・書き出し・声・`ai-video-plan` 出力契約は**無改修で流用**。
 
@@ -90,4 +90,4 @@
 8. **発表専用テンプレ**: MVP は既存流用。将来タイトルスライド/箇条書き/章区切り等を新設するか。
 9. **stario 内部識別子**: package/Cargo/リポジトリ名の改称タイミング（破壊的変更の扱い）。
 10. **ゆうこの口調**: 一般・社内発表でトーンを調整するか（フォーマル寄せ等）。
-11. **マイグレーション**: 既存 `project.json` への `videoKind` 既定付与（`11.1` の方針）＋ `additionalNotes` 移動時のデータ移行。
+11. **schemaVersion バンプ＋マイグレーション**: 本変更が `11 §1` の互換性方針で **major / minor どちらか**を確定（`videoKind`・`generalBrief` の追加は後方互換＝マイナー寄り。ただし `additionalNotes` を `companyInfo` 外へ移すなら構造変更＝メジャー相当）。`schemas/project.schema.json` の `schemaVersion`（現 `const "1.0"`）の扱い（`"1.1"`/`"2.0"` へのバンプ要否と ajv の const 検証）、既存 `project.json` への `videoKind` 既定付与・`additionalNotes` 移動の**マイグレーション実装方針**を決める（`11.1`）。
