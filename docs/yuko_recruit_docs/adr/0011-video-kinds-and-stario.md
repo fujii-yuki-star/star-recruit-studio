@@ -91,3 +91,4 @@
 9. **stario 内部識別子**: package/Cargo/リポジトリ名の改称タイミング（破壊的変更の扱い）。
 10. **ゆうこの口調**: 一般・社内発表でトーンを調整するか（フォーマル寄せ等）。
 11. **schemaVersion バンプ＋マイグレーション**: 本変更が `11 §1` の互換性方針で **major / minor どちらか**を確定（`videoKind`・`generalBrief` の追加は後方互換＝マイナー寄り。ただし `additionalNotes` を `companyInfo` 外へ移すなら構造変更＝メジャー相当）。`schemas/project.schema.json` の `schemaVersion`（現 `const "1.0"`）の扱い（`"1.1"`/`"2.0"` へのバンプ要否と ajv の const 検証）、既存 `project.json` への `videoKind` 既定付与・`additionalNotes` 移動の**マイグレーション実装方針**を決める（`11.1`）。
+12. **一般の対象視聴者・トーン入力**: 採用は `targetAudience` を `companyInfo.recruitTarget` から導出するが、`videoKind=general` は対応する入力欄が未実装で、`generate()` は当面 `targetAudience=""`（`§6b` へ「対象視聴者: （未入力）」）・`tone` は固定値で送る。一般用の対象視聴者／トーンの入力欄（または項目の持ち方）を後続で確定する（PR #104 レビュー M2）。

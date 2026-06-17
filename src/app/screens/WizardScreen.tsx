@@ -1,7 +1,7 @@
 import { useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
-import { purposeOptions } from "../data/mockData";
-import { ASSET_TYPE, type Purpose } from "../../domain/enums";
+import { generalPurposeOptions, purposeOptions } from "../data/mockData";
+import { ASSET_TYPE, VIDEO_KIND, type Purpose, type VideoKind } from "../../domain/enums";
 import { ADDITIONAL_NOTES_MAX_LEN } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
@@ -22,22 +22,26 @@ interface WizardProps {
   onNavigate: (screen: ScreenId) => void;
 }
 
-const steps = [
-  "動画の目的を選ぶ",
-  "会社情報を入力",
-  "写真・動画を追加",
-  "ゆうこの声を設定",
-  "ゆうこに動画案を作ってもらう",
+// 動画の種類（ADR-0011）。表示名は正典 06§3。目的の選択肢はこの種類で切り替わる。
+const videoKindOptions: { id: VideoKind; label: string; desc: string }[] = [
+  { id: VIDEO_KIND.recruit, label: "採用動画", desc: "会社・仕事の魅力を求職者に伝える" },
+  { id: VIDEO_KIND.general, label: "一般動画・社内発表", desc: "社内発表・報告・製品紹介など" },
 ];
+
+// ステップ見出しは videoKind で2番目だけ変える（採用＝会社情報 / 一般＝発表の内容）。
+function stepsFor(videoKind: VideoKind): string[] {
+  const second = videoKind === VIDEO_KIND.general ? "発表の内容を入力" : "会社情報を入力";
+  return ["動画の種類と目的", second, "写真・動画を追加", "ゆうこの声を設定", "ゆうこに動画案を作ってもらう"];
+}
 
 const yukoAdvice: Record<number, string[]> = {
   0: [
-    "まずは、どんな目的の動画を作るか選びましょう。",
-    "目的に合わせて、わたしが構成のたたき台を考えます。",
+    "まずは、動画の種類と目的を選びましょう。",
+    "種類や目的に合わせて、わたしが構成のたたき台を考えます。",
   ],
   1: [
     "会社情報は、あとからでも直せます。分かるところだけ入れてくださいね。",
-    "「強み」は、求職者に伝えたい魅力を短く書くのがおすすめです。",
+    "「アピールしたいこと」は、求職者に伝えたい魅力を短く書くのがおすすめです。",
   ],
   2: [
     "写真や動画があると、動画がぐっと魅力的になります。",
@@ -53,6 +57,17 @@ const yukoAdvice: Record<number, string[]> = {
   ],
 };
 
+// 一般・社内発表のときの step1 アドバイス（会社情報ではなく発表内容）。
+const generalStep1Advice = [
+  "動画のテーマと、話す順番（構成）を決めましょう。",
+  "伝えたい要点を箇条書きにすると、ゆうこが分かりやすくまとめます。",
+];
+
+function adviceFor(step: number, videoKind: VideoKind): string[] {
+  if (step === 1 && videoKind === VIDEO_KIND.general) return generalStep1Advice;
+  return yukoAdvice[step] ?? [];
+}
+
 export function WizardScreen({ onNavigate }: WizardProps) {
   // 最初のステップ「動画の目的を選ぶ」(index 0) を表示
   const [step, setStep] = useState(0);
@@ -60,7 +75,9 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // （未入力でも空文字で上書きしてしまう問題を避ける。applyProjectInfo は companyInfo を全置換するため）。
   const initialMeta = useProjectStore.getState().meta;
   const c0 = initialMeta.companyInfo;
-  const [purpose, setPurpose] = useState<string>(initialMeta.purpose);
+  const g0 = initialMeta.generalBrief;
+  const [videoKind, setVideoKind] = useState<VideoKind>(initialMeta.videoKind ?? VIDEO_KIND.recruit);
+  const [purpose, setPurpose] = useState<Purpose>(initialMeta.purpose);
   const [companyName, setCompanyName] = useState(c0?.companyName ?? "");
   const [industry, setIndustry] = useState(c0?.industry ?? "");
   const [jobType, setJobType] = useState(c0?.jobType ?? "");
@@ -71,27 +88,33 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const [desiredPerson, setDesiredPerson] = useState(c0?.desiredPerson ?? "");
   // 自由記述はトップレベル additionalNotes（両用途共通・ADR-0011。companyInfo からは外す）。
   const [additionalNotes, setAdditionalNotes] = useState(initialMeta.additionalNotes ?? "");
+  // 一般・社内発表（videoKind=general）の入力＝generalBrief（テーマ／章立て／要点）。
+  const [title, setTitle] = useState(g0?.title ?? "");
+  const [agenda, setAgenda] = useState<string[]>(g0?.agenda ?? []);
+  const [newAgenda, setNewAgenda] = useState("");
+  const [keyPoints, setKeyPoints] = useState<string[]>(g0?.keyPoints ?? []);
+  const [newKeyPoint, setNewKeyPoint] = useState("");
   const [voiceType, setVoiceType] = useState("calm");
 
   const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
     useProjectStore();
 
-  // ウィザードで入力した目的・会社情報を現在のプロジェクトへ反映する（保存・生成で使う）。
-  // applyProjectInfo は companyInfo を全置換するため、ウィザードで扱う項目をすべて渡す。
+  const steps = stepsFor(videoKind);
+  // 目的の選択肢は種類で切り替える（採用7／一般4・混在不可）。
+  const currentPurposeOptions = videoKind === VIDEO_KIND.general ? generalPurposeOptions : purposeOptions;
+
+  // ウィザードの入力を現在のプロジェクトへ反映する（保存・生成で使う）。
+  // videoKind で会社情報/発表内容を排他に渡す（applyProjectInfo が渡さない側を消す＝schema 排他を満たす）。
   function applyForm() {
-    applyProjectInfo({
-      purpose: purpose as Purpose, // purposeOptions の id は Purpose enum 値
-      companyInfo: {
-        companyName,
-        industry,
-        businessDescription,
-        recruitTarget,
-        jobType,
-        strengths,
-        desiredPerson,
-      },
-      additionalNotes,
-    });
+    const common = { videoKind, purpose, additionalNotes };
+    if (videoKind === VIDEO_KIND.general) {
+      applyProjectInfo({ ...common, generalBrief: { title, agenda, keyPoints } });
+    } else {
+      applyProjectInfo({
+        ...common,
+        companyInfo: { companyName, industry, businessDescription, recruitTarget, jobType, strengths, desiredPerson },
+      });
+    }
   }
   // 音声系（BGM/ナレーション）は素材一覧に出さない。
   const materials = assets.filter(
@@ -111,11 +134,21 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     if (path) await addAssetByPath(path);
   }
 
-  function addStrength() {
-    const v = newStrength.trim();
+  // 箇条書き（強み・章立て・要点）共通の追加ロジック。
+  function addItem(raw: string, list: string[], setList: (v: string[]) => void, clear: () => void) {
+    const v = raw.trim();
     if (!v) return;
-    setStrengths([...strengths, v]);
-    setNewStrength("");
+    setList([...list, v]);
+    clear();
+  }
+  function addStrength() { addItem(newStrength, strengths, setStrengths, () => setNewStrength("")); }
+  function addAgenda() { addItem(newAgenda, agenda, setAgenda, () => setNewAgenda("")); }
+  function addKeyPoint() { addItem(newKeyPoint, keyPoints, setKeyPoints, () => setNewKeyPoint("")); }
+  // 動画の種類を切り替える。目的の許可enumが変わるので、別種別の目的が残らないよう既定へ寄せる。
+  function changeVideoKind(kind: VideoKind) {
+    setVideoKind(kind);
+    const opts = kind === VIDEO_KIND.general ? generalPurposeOptions : purposeOptions;
+    if (!opts.some((o) => o.id === purpose)) setPurpose(opts[0].id);
   }
 
   function next() {
@@ -158,8 +191,26 @@ export function WizardScreen({ onNavigate }: WizardProps) {
             {step === 0 && (
               <>
                 <h2 className="section-title">どんな動画を作りますか？</h2>
+                {/* 動画の種類（採用/一般）。選ぶと下の「目的」の選択肢が切り替わる（ADR-0011）。 */}
                 <div className="card-grid cols-2">
-                  {purposeOptions.map((opt) => (
+                  {videoKindOptions.map((opt) => (
+                    <button
+                      key={opt.id}
+                      className="action-card"
+                      style={{
+                        borderColor: videoKind === opt.id ? "var(--color-primary)" : undefined,
+                        background: videoKind === opt.id ? "var(--color-primary-soft)" : undefined,
+                      }}
+                      onClick={() => changeVideoKind(opt.id)}
+                    >
+                      <span className="action-card-title">{opt.label}</span>
+                      <span className="action-card-desc">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                <h3 className="field-label mt-lg">目的</h3>
+                <div className="card-grid cols-2">
+                  {currentPurposeOptions.map((opt) => (
                     <button
                       key={opt.id}
                       className="action-card"
@@ -182,7 +233,11 @@ export function WizardScreen({ onNavigate }: WizardProps) {
             {/* ステップ2: 会社情報 */}
             {step === 1 && (
               <>
-                <h2 className="section-title">会社情報を入力</h2>
+                <h2 className="section-title">
+                  {videoKind === VIDEO_KIND.general ? "発表の内容を入力" : "会社情報を入力"}
+                </h2>
+                {videoKind === VIDEO_KIND.recruit && (
+                  <>
                 <div className="field">
                   <label className="field-label" htmlFor="companyName">
                     会社名
@@ -290,6 +345,84 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     placeholder="例：主体的に学べる人"
                   />
                 </div>
+                  </>
+                )}
+
+                {videoKind === VIDEO_KIND.general && (
+                  <>
+                    <div className="field">
+                      <label className="field-label" htmlFor="title">テーマ・タイトル</label>
+                      <input
+                        id="title"
+                        className="input"
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="例：全社キックオフ2026 / 新製品○○のご紹介"
+                      />
+                    </div>
+                    <div className="field">
+                      <label className="field-label">構成（章立て・話す順番）</label>
+                      <div className="chip-input-row">
+                        {agenda.map((s, i) => (
+                          <span className="chip" key={i}>
+                            {s}
+                            <button
+                              aria-label={`${s}を削除`}
+                              onClick={() => setAgenda(agenda.filter((_, idx) => idx !== i))}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="row gap-sm">
+                        <input
+                          className="input"
+                          value={newAgenda}
+                          onChange={(e) => setNewAgenda(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && addAgenda()}
+                          placeholder="例：今期の方針"
+                        />
+                        <button className="btn btn-secondary" onClick={addAgenda}>
+                          <PlusIcon size={16} />
+                          構成を追加
+                        </button>
+                      </div>
+                      <p className="field-hint">話す順番（章立て）を、上から順に追加してください。</p>
+                    </div>
+                    <div className="field">
+                      <label className="field-label">伝えたい要点</label>
+                      <div className="chip-input-row">
+                        {keyPoints.map((s, i) => (
+                          <span className="chip" key={i}>
+                            {s}
+                            <button
+                              aria-label={`${s}を削除`}
+                              onClick={() => setKeyPoints(keyPoints.filter((_, idx) => idx !== i))}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="row gap-sm">
+                        <input
+                          className="input"
+                          value={newKeyPoint}
+                          onChange={(e) => setNewKeyPoint(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && addKeyPoint()}
+                          placeholder="例：売上は前年比120%"
+                        />
+                        <button className="btn btn-secondary" onClick={addKeyPoint}>
+                          <PlusIcon size={16} />
+                          要点を追加
+                        </button>
+                      </div>
+                      <p className="field-hint">動画で必ず伝えたいポイントを、短い言葉で複数入れてください。</p>
+                    </div>
+                  </>
+                )}
+
                 <div className="field">
                   <label className="field-label" htmlFor="additionalNotes">
                     その他・伝えたいこと（自由記述）
@@ -514,7 +647,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
           </div>
         </div>
 
-        <YukoPanel title="ゆうこからのアドバイス" messages={yukoAdvice[step]} />
+        <YukoPanel title="ゆうこからのアドバイス" messages={adviceFor(step, videoKind)} />
       </div>
     </div>
   );

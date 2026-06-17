@@ -2,8 +2,8 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
-import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import { ASSET_TYPE, NARRATION_STATUS, type Purpose } from "../../domain/enums";
+import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
+import { ASSET_TYPE, NARRATION_STATUS, type Purpose, type VideoKind } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import { buildTemplateSummaries, buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
@@ -87,7 +87,13 @@ interface ProjectState {
   /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
   splitScene: (sceneId: string, splitIndex: number) => string;
   /** ウィザードで入力した目的・会社情報を現在のプロジェクト(meta)へ反映する（保存・生成で使う）。 */
-  applyProjectInfo: (input: { purpose: Purpose; companyInfo?: CompanyInfo; additionalNotes?: string }) => void;
+  applyProjectInfo: (input: {
+    videoKind?: VideoKind;
+    purpose: Purpose;
+    companyInfo?: CompanyInfo;
+    generalBrief?: GeneralBrief;
+    additionalNotes?: string;
+  }) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
@@ -229,6 +235,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         companyInfo,
         generalBrief: meta.generalBrief,
         purpose,
+        // 採用は会社情報の「採用対象」を対象視聴者に使う。一般は対象視聴者の入力欄が未実装＝当面 空のまま
+        // （§6b へ「対象視聴者: （未入力）」で送る）。一般の対象視聴者入力は ADR-0011 未解決#12（後続）。
         targetAudience: companyInfo?.recruitTarget ?? "",
         targetDurationSec: DEFAULT_TARGET_DURATION_SEC,
         tone: "親しみやすい",
@@ -355,11 +363,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       meta: {
         projectId: project.projectId,
         projectName: project.projectName,
+        // ADR-0011: 種別・発表内容・自由記述も復元する（欠落すると保存→再読込で general が recruit に化ける）。
+        videoKind: project.videoKind,
         purpose: project.purpose,
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
         videoSettings: project.videoSettings,
         companyInfo: project.companyInfo,
+        generalBrief: project.generalBrief,
+        additionalNotes: project.additionalNotes,
         toneSettings: project.toneSettings,
         voiceSettings: project.voiceSettings,
         bgmSettings: project.bgmSettings,
@@ -454,8 +466,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   applyProjectInfo: (input) =>
     set((s) => ({
-      // additionalNotes はトップレベル（両用途共通・ADR-0011）。companyInfo は recruit のときのみ。
-      meta: { ...s.meta, purpose: input.purpose, companyInfo: input.companyInfo, additionalNotes: input.additionalNotes },
+      // ADR-0011: videoKind で会社情報/発表内容を排他に持つ。渡されなかった側を undefined にして
+      // 別種別の入力が残らないようにする（保存時の schema 排他 not:required を満たす）。additionalNotes は両用途共通。
+      meta: {
+        ...s.meta,
+        videoKind: input.videoKind ?? s.meta.videoKind,
+        purpose: input.purpose,
+        companyInfo: input.companyInfo,
+        generalBrief: input.generalBrief,
+        additionalNotes: input.additionalNotes,
+      },
       saveStatus: "idle",
     })),
   updateVoiceSettings: (patch) =>
