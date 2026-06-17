@@ -191,7 +191,13 @@ function defaultHeader(): ProjectHeader {
     createdAt: now,
     updatedAt: now,
     videoSettings: defaultVideoSettings(),
-    companyInfo: { companyName: "株式会社サンプル" },
+    // 新規プロジェクトの既定（デモ用の会社情報）。ウィザードはこの meta を初期値に開く（単一の既定ソース）。
+    companyInfo: {
+      companyName: "株式会社サンプル",
+      industry: "IT・業務システム開発",
+      jobType: "エンジニア（新卒）",
+      strengths: ["相談しやすい環境", "若手が成長しやすい"],
+    },
     voiceSettings: defaultVoiceSettings(),
   };
 }
