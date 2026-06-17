@@ -72,18 +72,22 @@
 
 - 既存の採用フロー・データは**後方互換**（`videoKind` 省略＝recruit。回帰なし）。
 - **正典更新（docs-first・本 ADR をアンカーに）**：
-  1. `01_*` / `CLAUDE.md §1` … 製品スコープ（2系統）＋名称 stario。
-  2. `11 §3`（`videoKind` enum・一般 purpose enum）＋ `11 §7`（`generalBrief`）／ `schemas/project.schema.json`（`videoKind`・`generalBrief`・一般 purpose）。
-  3. `12`（§5b/§6b・`videoKind` で入力アセンブリ分岐）／ `schemas/ai-video-plan.schema.json`（purpose の一般値の扱い）。
+  1. `01_*` / `CLAUDE.md §1`（製品スコープ＝2系統＋名称 stario）／ **`06_UI_SPEC §3`・`16_GLOSSARY`（`videoKind` の表示名を登録。例 recruit=「採用動画」・general=「一般動画・社内発表」＝§2-3 で技術語を UI に出さない）**。
+  2. `11 §3`（`videoKind` enum・一般 purpose enum・`project.purpose` の設計）＋ `11 §7`（`generalBrief`・**`companyInfo` の条件付き必須化**・`additionalNotes` の帰属）／ `schemas/project.schema.json`（`videoKind`・`generalBrief`・一般 purpose・**`companyInfo` を `videoKind=recruit` のときのみ必須に**）。
+  3. `12`（§5b/§6b・`videoKind` で入力アセンブリ分岐）／ `schemas/ai-video-plan.schema.json`（出力 `videoPlan.purpose` の一般値の扱い）。
 - **実装（資料確定後）**：`domain`（`videoKind` 型・`generalBrief`・入力アセンブリの分岐を純粋関数化＋テスト）／`infrastructure`（プロバイダのプロンプト切替）／`app`（ウィザード分岐 UI）／stario 改称（docs/UI）。
 - 描画・書き出し・声・`ai-video-plan` 出力契約は**無改修で流用**。
 
 ## 未解決の論点
 
-1. **出力 `purpose` の扱い**: `ai-video-plan` の `videoPlan.purpose` を採用 enum と一般 enum で統合するか、`videoKind` で別管理するか（出力スキーマの enum 設計）。`12 §3/§8` ＋ schema で確定。
-2. **`generalBrief` の詳細**: `agenda`/`keyPoints` の要素数・文字数上限・必須/任意。`additionalNotes`（共通）との役割分担。
-3. **一般の few-shot（§7b）**: 一般動画の出力例と `targetDurationSec` の目安。
-4. **発表専用テンプレ**: MVP は既存流用。将来タイトルスライド/箇条書き/章区切り等を新設するか。
-5. **stario 内部識別子**: package/Cargo/リポジトリ名の改称タイミング（破壊的変更の扱い）。
-6. **ゆうこの口調**: 一般・社内発表でトーンを調整するか（フォーマル寄せ等）。
-7. **マイグレーション**: 既存 `project.json` への `videoKind` 既定付与（`11.1` の方針に従う）。
+1. **🔴 `companyInfo` の必須性**: 現行 `schemas/project.schema.json` は `companyInfo` を required、`11 §7.1` も必須（●）。`videoKind=general` では会社採用情報は不要なため、**条件付き必須**にする（`videoKind=recruit` のときのみ必須＝schema の `if/then/else`、または `companyInfo` を任意化して `11 §7.1` の表を更新）。正典更新②で確定（放置すると「general なのに companyName 必須」の矛盾）。
+2. **`purpose` enum の設計（出力・内部の両方）**: ①AI出力 `videoPlan.purpose` と ②内部 `project.purpose`（現状 採用7種・**必須**）の双方で、採用 enum と一般 enum を**統合するか `videoKind` で別管理するか**を確定。`project.purpose` は必須フィールドゆえ設計の核心（一般時に `general_*` を入れるなら enum 拡張、別管理なら `purpose` を `videoKind=recruit` 限定にする等）。`11 §3.1` / `12 §3/§8` ＋ 両 schema で確定。
+3. **`additionalNotes` の帰属先**: 現状 `companyInfo` 配下（`11 §7.1.2`）。両用途共通にするため **project トップレベルへ移すか、`generalBrief` 配下に持つか**を確定（recruit の既存データへの影響＝マイグレーションも考慮）。
+4. **`generalBrief` の詳細**: `agenda`/`keyPoints` の要素数・文字数上限・必須/任意。
+5. **UI 表示名（§2-3）**: `recruit`/`general` は技術識別子のため通常UIに出さない。`06_UI_SPEC §3` / `16_GLOSSARY` に表示名を登録（例 recruit=「採用動画」・general=「一般動画・社内発表」）。正典更新①で対応。
+6. **`rewriteNarration` プリセット（`12 §10`）**: 現行プリセット（「若手向けに」等）は採用特化。一般用途では**共通化/分岐/一部無効化**を決める（当面は `videoKind=recruit` 限定として明示）。
+7. **一般の few-shot（§7b）**: 一般動画の出力例と `targetDurationSec` の目安。
+8. **発表専用テンプレ**: MVP は既存流用。将来タイトルスライド/箇条書き/章区切り等を新設するか。
+9. **stario 内部識別子**: package/Cargo/リポジトリ名の改称タイミング（破壊的変更の扱い）。
+10. **ゆうこの口調**: 一般・社内発表でトーンを調整するか（フォーマル寄せ等）。
+11. **マイグレーション**: 既存 `project.json` への `videoKind` 既定付与（`11.1` の方針）＋ `additionalNotes` 移動時のデータ移行。
