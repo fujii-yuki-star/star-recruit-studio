@@ -17,7 +17,7 @@
 | [0008](0008-free-layout-editor.md) | FREE テンプレートの自由配置（scene.freeLayout）と配置エディタ | **Accepted** |
 | [0009](0009-scene-transitions.md) | 場面間トランジション（フェード／スライド） | **Accepted** |
 | [0010](0010-real-ai-provider.md) | 実 AI プロバイダ（Gemini／OpenAI）と APIキー・外部送信 | **Proposed** |
-| [0011](0011-video-kinds-and-stario.md) | 動画の用途拡張（採用／一般・社内発表の2系統）と製品名 stario | **Proposed** |
+| [0011](0011-video-kinds-and-stario.md) | 動画の用途拡張（採用／一般・社内発表の2系統）と製品名 stario | **Accepted** |
 
 ## 状態の意味
 
