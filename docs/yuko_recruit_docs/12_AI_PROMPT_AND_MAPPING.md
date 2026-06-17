@@ -39,7 +39,7 @@ interface AiProvider {
 ```
 
 - 戻り値 `AiVideoPlan` は `ai-video-plan.schema.json` に適合（適合しなければ Provider 層で例外）。
-- 初期は **MockProvider** が固定の有効プラン（§7のサンプル）を返し、全フローを通す。実プロバイダは Phase 5 / v0.2。
+- 初期は **MockProvider** が固定の有効プランを返し（recruit=§7 のサンプル／general=発表調サンプル＝§7b に準じる・`videoKind` で切替）、全フローを通す。実プロバイダは Phase 5 / v0.2。
 
 ---
 
@@ -52,7 +52,7 @@ interface AiProvider {
 | OpenAI | `response_format` の JSON Schema 指定 | 厳密(strict)モードは「全プロパティ required＋additionalProperties:false」を要求するため、任意項目は `nullable＋required` へ変換するか非strictで運用 |
 | Claude（Anthropic） | 単一ツールを定義し `input_schema` に本スキーマ、`tool_choice` で当該ツールを強制 | ツール入力＝プラン本体。最新の tool use 仕様を実装時に確認 |
 | Gemini | `responseMimeType: application/json` ＋ `responseSchema` | — |
-| Mock | 固定サンプル（§7）を返す | テスト・オフライン・既定 |
+| Mock | 固定サンプルを返す（recruit=§7／general=§7b に準じる・videoKind で切替） | テスト・オフライン・既定 |
 
 - いずれの場合も**受信後に必ず ajv 等で再検証**する（モデルが逸脱する前提で二重化）。
 - パース失敗・スキーマ不適合時は §9.3 のリカバリへ。
@@ -219,7 +219,7 @@ interface AiProvider {
 
 ## 7. few-shot（入力→出力サンプル）
 
-出力例（`ai-video-plan.schema.json` 適合。MockProvider はこれを返す）:
+出力例（`ai-video-plan.schema.json` 適合。MockProvider は recruit でこれを返す。general は §7b に準じた発表サンプルを返す）:
 
 ```json
 {
