@@ -35,7 +35,7 @@ export const SPEED_STEP = 0.25;
 
 export const MAX_NARRATION_LEN_DEFAULT = 120;
 export const MAX_SUBTITLE_LEN_DEFAULT = 60;
-// 自由記述「その他」(companyInfo.additionalNotes) の上限。schemas/project.schema.json の maxLength と一致させる。
+// 自由記述「その他」(トップレベル additionalNotes・両用途共通・ADR-0011) の上限。schemas/project.schema.json の maxLength と一致させる。
 export const ADDITIONAL_NOTES_MAX_LEN = 1000;
 
 export const DEFAULT_VOICE_ID = 'voicevox_zundamon';

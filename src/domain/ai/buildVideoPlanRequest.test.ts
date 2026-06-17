@@ -44,8 +44,8 @@ function fullInput(): GenerateVideoPlanInput {
       strengths: ['リモート可', '若手活躍'],
       desiredPerson: '主体的に動ける人',
       recruitUrl: 'https://example.com/recruit',
-      additionalNotes: '若手の挑戦を応援する社風を強調したい',
     },
+    additionalNotes: '若手の挑戦を応援する社風を強調したい',
     purpose: 'new_graduate',
     targetAudience: '理系学生',
     targetDurationSec: 60,
@@ -174,10 +174,10 @@ describe('buildVideoPlanMessages', () => {
   it('additionalNotes が空文字・空白のみなら補足セクションを出さない', () => {
     const base = fullInput();
     expect(
-      buildVideoPlanUserMessage({ ...base, companyInfo: { ...base.companyInfo, additionalNotes: '' } }),
+      buildVideoPlanUserMessage({ ...base, additionalNotes: '' }),
     ).not.toContain('# 補足・その他');
     expect(
-      buildVideoPlanUserMessage({ ...base, companyInfo: { ...base.companyInfo, additionalNotes: '   ' } }),
+      buildVideoPlanUserMessage({ ...base, additionalNotes: '   ' }),
     ).not.toContain('# 補足・その他');
   });
 });

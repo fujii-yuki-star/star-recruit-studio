@@ -91,13 +91,13 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
   const assets = input.assets.map(assetBlock).join('\n');
   return [
     '# 会社情報',
-    `会社名: ${orNotProvided(c.companyName)}`,
-    `業種: ${orNotProvided(c.industry)}`,
-    `事業内容: ${orNotProvided(c.businessDescription)}`,
-    `募集職種: ${orNotProvided(c.jobType)} / 採用対象: ${orNotProvided(c.recruitTarget)}`,
-    `アピールしたいこと（強み・伝えたい点）: ${joinList(c.strengths)}`,
-    `求める人物像: ${orNotProvided(c.desiredPerson)}`,
-    `採用ページ: ${orNotProvided(c.recruitUrl)}`,
+    `会社名: ${orNotProvided(c?.companyName)}`,
+    `業種: ${orNotProvided(c?.industry)}`,
+    `事業内容: ${orNotProvided(c?.businessDescription)}`,
+    `募集職種: ${orNotProvided(c?.jobType)} / 採用対象: ${orNotProvided(c?.recruitTarget)}`,
+    `アピールしたいこと（強み・伝えたい点）: ${joinList(c?.strengths)}`,
+    `求める人物像: ${orNotProvided(c?.desiredPerson)}`,
+    `採用ページ: ${orNotProvided(c?.recruitUrl)}`,
     '',
     '# 動画の方針',
     `目的(purpose): ${input.purpose}`,
@@ -105,9 +105,9 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
     `希望尺(秒): ${input.targetDurationSec}`,
     `トーン: ${orNotProvided(input.tone)}`,
     '',
-    // 自由記述があるときだけセクションを出す（「特に重視する」見出し＋（未入力）の矛盾を避ける）。
-    ...(c.additionalNotes?.trim()
-      ? ['# 補足・その他（利用者からの自由記述。動画づくりで特に重視する）', c.additionalNotes.trim(), '']
+    // 自由記述（additionalNotes＝トップレベル・両用途共通）があるときだけセクションを出す。
+    ...(input.additionalNotes?.trim()
+      ? ['# 補足・その他（利用者からの自由記述。動画づくりで特に重視する）', input.additionalNotes.trim(), '']
       : []),
     '# 利用可能な見た目パターン（このIDのみ使用可）',
     templates,

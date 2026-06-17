@@ -4,24 +4,32 @@ import {
   DEFAULT_TARGET_DURATION_SEC, DEFAULT_VOICE_ID, FPS, HEIGHT,
   NARRATION_VOLUME, VIDEO_HARD_MAX_SEC, WIDTH,
 } from '../constants';
-import type { Purpose } from '../enums';
+import { VIDEO_KIND } from '../enums';
+import type { Purpose, VideoKind } from '../enums';
 import type {
-  Asset, BgmSettings, CompanyInfo, Part, Project, Scene,
+  Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
   ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1：初期は "1.0"）。 */
-export const PROJECT_SCHEMA_VERSION = '1.0';
+/** project.json の schemaVersion（正典 §1。ADR-0011 で 1.0→1.1：videoKind/generalBrief 追加・additionalNotes をトップレベルへ）。 */
+export const PROJECT_SCHEMA_VERSION = '1.1';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
   projectId: string;
   projectName: string;
+  /** 動画の種類（ADR-0011）。省略時は recruit。 */
+  videoKind?: VideoKind;
   purpose: Purpose;
   createdAt: string;
   updatedAt: string;
   videoSettings: VideoSettings;
-  companyInfo: CompanyInfo;
+  /** 採用（videoKind=recruit）のとき必須。general では持たない（ADR-0011）。 */
+  companyInfo?: CompanyInfo;
+  /** 一般・社内発表（videoKind=general）の入力。 */
+  generalBrief?: GeneralBrief;
+  /** 利用者の自由記述（両用途共通・AIへそのまま送る補足）。 */
+  additionalNotes?: string;
   toneSettings?: ToneSettings;
   voiceSettings: VoiceSettings;
   bgmSettings?: BgmSettings;
@@ -137,13 +145,16 @@ export function assembleProject(
 ): Project {
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
+    videoKind: header.videoKind ?? VIDEO_KIND.recruit,
     projectId: header.projectId,
     projectName: header.projectName,
     purpose: header.purpose,
     createdAt: header.createdAt,
     updatedAt: header.updatedAt,
     videoSettings: header.videoSettings,
-    companyInfo: header.companyInfo,
+    ...(header.companyInfo ? { companyInfo: header.companyInfo } : {}),
+    ...(header.generalBrief ? { generalBrief: header.generalBrief } : {}),
+    ...(header.additionalNotes ? { additionalNotes: header.additionalNotes } : {}),
     ...(header.toneSettings ? { toneSettings: header.toneSettings } : {}),
     voiceSettings: header.voiceSettings,
     ...(header.bgmSettings ? { bgmSettings: header.bgmSettings } : {}),
@@ -190,7 +201,20 @@ export function parseProjectDoc(text: string): Project {
   return migrateProject(doc as unknown as Project);
 }
 
-/** 同一メジャー(1.x)はそのまま。将来のメジャー移行時にここで変換する。 */
+/** ADR-0011: 旧データ(1.0)を 1.1 へ移行する（読込時。schemaVersion 更新・videoKind 既定 recruit・additionalNotes をトップレベルへ移送）。 */
 function migrateProject(project: Project): Project {
-  return project;
+  const next: Project = {
+    ...project,
+    schemaVersion: PROJECT_SCHEMA_VERSION,
+    videoKind: project.videoKind ?? VIDEO_KIND.recruit,
+  };
+  // 旧 companyInfo.additionalNotes をトップレベル additionalNotes へ移送し、companyInfo からは除去する。
+  const ci = project.companyInfo as Record<string, unknown> | undefined;
+  if (ci && typeof ci.additionalNotes === 'string') {
+    if (next.additionalNotes === undefined) next.additionalNotes = ci.additionalNotes;
+    const rest = { ...ci };
+    delete rest.additionalNotes;
+    next.companyInfo = rest as unknown as CompanyInfo;
+  }
+  return next;
 }

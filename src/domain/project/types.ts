@@ -1,7 +1,7 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
   AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Purpose,
-  SceneCategory, TextKey, TransitionDirection, TransitionType, WarningSeverity,
+  SceneCategory, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
 } from '../enums';
 
 export interface VideoSettings {
@@ -22,8 +22,16 @@ export interface CompanyInfo {
   strengths?: string[];
   desiredPerson?: string;
   recruitUrl?: string;
-  /** 利用者が AI へ自由に伝える補足（そのまま送信。伝えたい雰囲気・避けたい表現など）。 */
-  additionalNotes?: string;
+}
+
+/** 一般・社内発表動画の入力（ADR-0011・11 §7.1.3。videoKind=general のとき使う）。 */
+export interface GeneralBrief {
+  /** テーマ／タイトル（必須）。 */
+  title: string;
+  /** 構成（章立て・アジェンダ）。 */
+  agenda?: string[];
+  /** 伝えたい要点。 */
+  keyPoints?: string[];
 }
 
 export interface ToneSettings {
@@ -182,13 +190,19 @@ export interface Scene {
 
 export interface Project {
   schemaVersion: string;
+  /** 動画の種類（ADR-0011）。省略時は recruit として扱う。 */
+  videoKind?: VideoKind;
   projectId: string;
   projectName: string;
   purpose: Purpose;
   createdAt: string;
   updatedAt: string;
   videoSettings: VideoSettings;
-  companyInfo: CompanyInfo;
+  /** 採用（videoKind=recruit）のとき必須。general では持たない（ADR-0011・schema if/then/else）。 */
+  companyInfo?: CompanyInfo;
+  generalBrief?: GeneralBrief;
+  /** 利用者が AI へ自由に伝える補足（両用途共通・そのまま送信。ADR-0011 で companyInfo→トップレベルへ移動）。 */
+  additionalNotes?: string;
   toneSettings?: ToneSettings;
   voiceSettings: VoiceSettings;
   bgmSettings?: BgmSettings;

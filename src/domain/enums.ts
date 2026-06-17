@@ -58,11 +58,21 @@ export const ASSET_TYPE = {
   qr: 'qr',
 } as const satisfies Record<string, AssetType>;
 
+// 動画の種類（ADR-0011）。recruit=採用・会社紹介／general=一般・社内発表。省略時は recruit。
+export const VIDEO_KINDS = ['recruit', 'general'] as const;
+export type VideoKind = (typeof VIDEO_KINDS)[number];
+export const VIDEO_KIND = { recruit: 'recruit', general: 'general' } as const satisfies Record<string, VideoKind>;
+
+// 採用（recruit）の目的。
 export const PURPOSES = [
   'company_intro', 'new_graduate', 'mid_career',
   'inexperienced_welcome', 'engineer', 'info_session', 'sns_short',
 ] as const;
-export type Purpose = (typeof PURPOSES)[number];
+// 一般・社内発表（general）の目的（ADR-0011・11 §3.1）。
+export const GENERAL_PURPOSES = ['general_announcement', 'report', 'product_intro', 'general_other'] as const;
+// purpose は videoKind で許可値が変わる（recruit→PURPOSES／general→GENERAL_PURPOSES）。
+// 型は両者の和（どちらの集合かは project.schema の if/then/else と検証で強制する）。
+export type Purpose = (typeof PURPOSES)[number] | (typeof GENERAL_PURPOSES)[number];
 
 export const LAYER_TYPES = [
   'background', 'slot', 'text', 'subtitle', 'character', 'decor', 'shape', 'logo',
