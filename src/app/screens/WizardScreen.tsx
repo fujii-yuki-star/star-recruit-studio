@@ -544,7 +544,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
               </>
             )}
 
-            {/* ステップ4: ゆうこの声 */}
+            {/* ステップ4: 読み上げの声 */}
             {step === 3 && (
               <>
                 <h2 className="section-title">読み上げの声を設定</h2>
