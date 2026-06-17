@@ -14,7 +14,7 @@
       "required": ["title", "purpose", "targetDurationSec"],
       "properties": {
         "title": { "type": "string", "minLength": 1 },
-        "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short"] },
+        "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short", "general_announcement", "report", "product_intro", "general_other"] },
         "targetAudience": { "type": "string" },
         "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
         "tone": { "type": "string" }

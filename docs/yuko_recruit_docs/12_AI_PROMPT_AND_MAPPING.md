@@ -61,10 +61,12 @@ interface AiProvider {
 
 ## 4. 入力アセンブリ方針
 
-`generateVideoPlan` の入力に含めるもの（`07 §4`・送信前確認 `07 §5` を通過した範囲のみ）:
+`generateVideoPlan` の入力に含めるもの（`07 §4`・送信前確認 `07 §5` を通過した範囲のみ）。**`videoKind`（recruit / general）で用途固有の情報を切り替え、システムプロンプト（§5／§5b）とユーザーメッセージ（§6／§6b）を分岐する（ADR-0011）**:
 
-- 会社情報（companyName / industry / businessDescription / jobType / recruitTarget / strengths / desiredPerson / recruitUrl / additionalNotes）。`strengths` は「アピールしたいこと（強み・伝えたい点）」として送る。`additionalNotes` は利用者の自由記述で、**そのまま本文として送る**（重視するよう指示）。トークン浪費を防ぐため **schema 上限 1000 字**（空のときはセクションごと省略）。
-- 動画設定（purpose / targetAudience / targetDurationSec / tone）
+- **【recruit のみ】会社情報**（companyName / industry / businessDescription / jobType / recruitTarget / strengths / desiredPerson / recruitUrl）。`strengths` は「アピールしたいこと（強み・伝えたい点）」として送る。
+- **【general のみ】generalBrief**（title＝テーマ / agenda＝章立て・アジェンダ（string[]） / keyPoints＝伝えたい要点（string[]））。
+- **補足・その他**（`additionalNotes`＝利用者の自由記述。**両用途共通**・**そのまま本文として送る**（重視するよう指示）・**schema 上限 1000 字**・空のときはセクションごと省略）。ADR-0011 で project トップレベルへ移動。
+- 動画設定（purpose＝種類別の目的（recruit/general で許可 enum が変わる・`11 §3.1`） / targetAudience / targetDurationSec / tone）【両用途共通】
 - **利用可能な素材一覧**（assetId / assetType / displayName / description / aiDescription / tags）。**MVP はテキストのみ送信**（サムネイル・代表フレームは添付しない）。画像サムネイル添付（長辺 512px・`07 §4` 許可範囲）／動画の代表フレームは、画像対応の実プロバイダ整備後＝**ADR-0010 P3** で追加する（§2-6 の「代表フレームのみ」に沿う）。
 - **利用可能な見た目パターン一覧（要約）**（`11 §7.5` の aiHint をもとに `templateId / category / useCase / requiredSlots / hasYuko / maxNarrationLength / maxSubtitleLength / maxDurationSec`）。`maxDurationSec` はシステムプロンプトの「見た目パターンに上限があれば従う」を AI が解決するために渡す（無い場合は省略）。
 - **利用可能なゆうこ表情タグ一覧**（yuko asset の tags を集約）
@@ -76,7 +78,7 @@ interface AiProvider {
 
 ---
 
-## 5. システムプロンプト（確定版・日本語）
+## 5. システムプロンプト（採用 recruit・確定版・日本語）
 
 ```text
 あなたは採用動画の構成プランナーです。会社情報・利用可能な素材・利用可能な見た目パターン（テンプレート）をもとに、採用動画の構成案を作成します。
@@ -102,7 +104,34 @@ interface AiProvider {
 
 ---
 
-## 6. ユーザーメッセージ テンプレート
+## 5b. システムプロンプト（一般・社内発表 general・確定版・日本語）
+
+> `videoKind=general` のとき §5 の代わりに使う。会社紹介ではなく**発表・説明の構成案**を作る。共通ルール（templateId 必須・sceneType=category・尺・表情タグ・出力契約）は §5 と同じ。
+
+```text
+あなたは社内向け・一般向け動画の構成プランナーです。動画のテーマ・構成（章立て）・伝えたい要点・利用可能な素材・利用可能な見た目パターン（テンプレート）をもとに、発表・説明動画の構成案を作成します。
+
+【厳守事項】
+- あなたは動画や画像を生成しません。動画の「構成案」だけを作成します。
+- 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。
+- 各シーンに templateId を必ず設定し、「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
+- assetRefs の値は「利用可能な素材一覧」に存在する assetId のみ。該当が無ければ null にする。
+- sceneType は、選んだ templateId の category と同じ値にする（一覧に無い sceneType は使わず、利用可能な見た目だけで構成する）。
+- 「構成（章立て）」をパート（parts）に対応させ、各章を短いシーンに分ける（1シーンで1つの内容）。
+- 「伝えたい要点」を各シーンの texts や narrationText に反映し、要点が漏れないようにする。
+- narrationText は会社マスコット「ゆうこ」が話す、対象視聴者に合った自然な日本語にする。各見た目パターンの maxNarrationLength を超えない。
+- texts.subtitle は字幕用に短くする（maxSubtitleLength 以内）。texts.title / texts.main は画面に出す短い語句にする。
+- durationSec は 3〜15 秒を目安にする。見た目パターンに上限があれば従う。全シーンの合計尺を targetDurationSec に近づける。
+- 誇大表現・差別的表現・事実と異なる断定を避ける。社外秘・個人情報が含まれそうな場合は reviewNotes に確認を促す一文を入れる。
+- yukoPoseTag は場面に合う表情タグを「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
+- purpose は一般の種別（general_announcement / report / product_intro / general_other）に沿った内容にする。
+```
+
+> ゆうこの口調は対象視聴者に合わせて調整可（フォーマル寄せ等は ADR-0011 未解決#10）。
+
+---
+
+## 6. ユーザーメッセージ テンプレート（採用 recruit）
 
 ```text
 # 会社情報
@@ -136,6 +165,50 @@ interface AiProvider {
   説明={{description}} / AI解析={{aiDescription}} / tags={{tags}}
 {{/each}}
 （画像素材のサムネイル添付は **ADR-0010 P3**。MVP のユーザーメッセージは**テキストのみ**でこの行は出さない）
+
+# 利用可能なゆうこ表情タグ
+{{yukoPoseTags}}
+```
+
+### 6b. ユーザーメッセージ テンプレート（一般・社内発表 general）
+
+> `videoKind=general` のとき §6 の代わりに使う。会社情報の代わりに generalBrief（テーマ／章立て／要点）を渡す。素材・見た目パターン・表情タグ・補足は §6 と共通。
+
+```text
+# 動画のテーマ
+タイトル/テーマ: {{title}}
+
+# 構成（章立て・アジェンダ）
+{{#each agenda}}
+- {{this}}
+{{/each}}
+
+# 伝えたい要点
+{{#each keyPoints}}
+- {{this}}
+{{/each}}
+
+# 動画の方針
+種別(purpose): {{purpose}}
+対象視聴者: {{targetAudience}}
+希望尺(秒): {{targetDurationSec}}
+トーン: {{tone}}
+
+# 補足・その他（利用者からの自由記述。動画づくりで特に重視する）
+{{additionalNotes}}
+
+# 利用可能な見た目パターン（このIDのみ使用可）
+{{#each templates}}
+- templateId={{templateId}} / category={{category}} / hasYuko={{hasYuko}}
+  useCase={{useCase}} / requiredSlots={{requiredSlots}}
+  maxNarration={{maxNarrationLength}} / maxSubtitle={{maxSubtitleLength}} / maxDuration={{maxDurationSec}}
+{{/each}}
+
+# 利用可能な素材（このassetIdのみ使用可）
+{{#each assets}}
+- assetId={{assetId}} / type={{assetType}} / name={{displayName}}
+  説明={{description}} / AI解析={{aiDescription}} / tags={{tags}}
+{{/each}}
 
 # 利用可能なゆうこ表情タグ
 {{yukoPoseTags}}
