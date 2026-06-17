@@ -31,7 +31,7 @@ const videoKindOptions: { id: VideoKind; label: string; desc: string }[] = [
 // ステップ見出しは videoKind で2番目だけ変える（採用＝会社情報 / 一般＝発表の内容）。
 function stepsFor(videoKind: VideoKind): string[] {
   const second = videoKind === VIDEO_KIND.general ? "発表の内容を入力" : "会社情報を入力";
-  return ["動画の種類と目的", second, "写真・動画を追加", "ゆうこの声を設定", "ゆうこに動画案を作ってもらう"];
+  return ["動画の種類と目的", second, "写真・動画を追加", "読み上げの声を設定", "ゆうこに動画案を作ってもらう"];
 }
 
 const yukoAdvice: Record<number, string[]> = {
@@ -48,7 +48,7 @@ const yukoAdvice: Record<number, string[]> = {
     "なくても大丈夫。あとから追加もできますよ。",
   ],
   3: [
-    "わたしの声の感じを選べます。落ち着いた声、明るい声などがあります。",
+    "読み上げの声の感じを選べます。落ち着いた声、明るい声などがあります。",
     "あとで仕上がりを聞きながら調整もできます。",
   ],
   4: [
@@ -544,12 +544,12 @@ export function WizardScreen({ onNavigate }: WizardProps) {
               </>
             )}
 
-            {/* ステップ4: ゆうこの声 */}
+            {/* ステップ4: 読み上げの声 */}
             {step === 3 && (
               <>
-                <h2 className="section-title">ゆうこの声を設定</h2>
+                <h2 className="section-title">読み上げの声を設定</h2>
                 <p className="page-desc mb">
-                  動画で話す「ゆうこの声」の感じを選べます。
+                  動画で話す「読み上げの声」の感じを選べます。
                 </p>
                 <div className="card-grid cols-3">
                   {[
