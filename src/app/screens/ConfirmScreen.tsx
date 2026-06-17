@@ -1,9 +1,9 @@
 import { useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { purposeOptions } from "../data/mockData";
+import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { Switch } from "../components/ui";
 import { useProjectStore } from "../store/projectStore";
-import { ASSET_TYPE } from "../../domain/enums";
+import { ASSET_TYPE, VIDEO_KIND } from "../../domain/enums";
 import { SparkleIcon, CheckIcon } from "../components/icons";
 
 interface ConfirmProps {
@@ -12,14 +12,19 @@ interface ConfirmProps {
 
 export function ConfirmScreen({ onNavigate }: ConfirmProps) {
   const [showNextTime, setShowNextTime] = useState(true);
+  const videoKind = useProjectStore((s) => s.meta.videoKind);
   const companyInfo = useProjectStore((s) => s.meta.companyInfo);
+  const generalBrief = useProjectStore((s) => s.meta.generalBrief);
   // 自由記述はトップレベル（両用途共通・ADR-0011）。
   const additionalNotes = useProjectStore((s) => s.meta.additionalNotes);
   const purpose = useProjectStore((s) => s.meta.purpose);
   const assets = useProjectStore((s) => s.assets);
   const photoCount = assets.filter((a) => a.assetType === ASSET_TYPE.image).length;
   const videoCount = assets.filter((a) => a.assetType === ASSET_TYPE.video).length;
-  const purposeLabel = purposeOptions.find((p) => p.id === purpose)?.label ?? "未設定";
+  const isGeneral = videoKind === VIDEO_KIND.general;
+  // 目的の表示名は採用/一般どちらの選択肢からも引く（混在しても1件だけ一致する）。
+  const purposeLabel =
+    [...purposeOptions, ...generalPurposeOptions].find((p) => p.id === purpose)?.label ?? "未設定";
 
   return (
     <div className="main-scroll">
@@ -51,13 +56,23 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
           <div className="card card-tight mb">
             <h2 className="field-label">ゆうこに渡す情報（文字のみ）</h2>
             <div className="col gap-sm mt">
-              <div className="row-between">
-                <span className="text-muted">会社情報</span>
-                <strong>
-                  {companyInfo?.companyName}
-                  {companyInfo?.industry ? `（${companyInfo.industry}）` : ""}
-                </strong>
-              </div>
+              {isGeneral ? (
+                <div className="row-between" style={{ alignItems: "flex-start", gap: "var(--gap-md)" }}>
+                  <span className="text-muted">動画のテーマ</span>
+                  <strong style={{ textAlign: "right", maxWidth: "70%" }}>
+                    {generalBrief?.title || "（未入力）"}
+                    {generalBrief?.agenda?.length ? `（構成${generalBrief.agenda.length}項目）` : ""}
+                  </strong>
+                </div>
+              ) : (
+                <div className="row-between">
+                  <span className="text-muted">会社情報</span>
+                  <strong>
+                    {companyInfo?.companyName}
+                    {companyInfo?.industry ? `（${companyInfo.industry}）` : ""}
+                  </strong>
+                </div>
+              )}
               <hr className="divider" style={{ margin: "4px 0" }} />
               <div className="row-between">
                 <span className="text-muted">動画の目的</span>
@@ -88,7 +103,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
           <div className="notice notice-strong mb">
             <CheckIcon size={18} />
             <span>
-              写真や動画のファイルそのものは送信しません。会社情報と、素材につけた
+              写真や動画のファイルそのものは送信しません。入力いただいた内容と、素材につけた
               説明・タグなどの<strong>文字情報だけ</strong>をゆうこに渡します。
             </span>
           </div>

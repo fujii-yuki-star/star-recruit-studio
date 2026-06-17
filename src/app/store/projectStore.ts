@@ -2,8 +2,8 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
-import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import { ASSET_TYPE, NARRATION_STATUS, type Purpose } from "../../domain/enums";
+import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
+import { ASSET_TYPE, NARRATION_STATUS, type Purpose, type VideoKind } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import { buildTemplateSummaries, buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
@@ -87,7 +87,13 @@ interface ProjectState {
   /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
   splitScene: (sceneId: string, splitIndex: number) => string;
   /** ウィザードで入力した目的・会社情報を現在のプロジェクト(meta)へ反映する（保存・生成で使う）。 */
-  applyProjectInfo: (input: { purpose: Purpose; companyInfo?: CompanyInfo; additionalNotes?: string }) => void;
+  applyProjectInfo: (input: {
+    videoKind?: VideoKind;
+    purpose: Purpose;
+    companyInfo?: CompanyInfo;
+    generalBrief?: GeneralBrief;
+    additionalNotes?: string;
+  }) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
@@ -454,8 +460,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   applyProjectInfo: (input) =>
     set((s) => ({
-      // additionalNotes はトップレベル（両用途共通・ADR-0011）。companyInfo は recruit のときのみ。
-      meta: { ...s.meta, purpose: input.purpose, companyInfo: input.companyInfo, additionalNotes: input.additionalNotes },
+      // ADR-0011: videoKind で会社情報/発表内容を排他に持つ。渡されなかった側を undefined にして
+      // 別種別の入力が残らないようにする（保存時の schema 排他 not:required を満たす）。additionalNotes は両用途共通。
+      meta: {
+        ...s.meta,
+        videoKind: input.videoKind ?? s.meta.videoKind,
+        purpose: input.purpose,
+        companyInfo: input.companyInfo,
+        generalBrief: input.generalBrief,
+        additionalNotes: input.additionalNotes,
+      },
       saveStatus: "idle",
     })),
   updateVoiceSettings: (patch) =>
