@@ -190,6 +190,12 @@ describe('buildVideoPlanMessages', () => {
     expect(buildVideoPlanMessages(fullInput()).system).toBe(VIDEO_PLAN_SYSTEM_PROMPT);
     expect(buildVideoPlanMessages({ ...fullInput(), videoKind: VIDEO_KIND.recruit }).system).toBe(VIDEO_PLAN_SYSTEM_PROMPT);
   });
+
+  it('videoKind 省略のユーザーメッセージは採用 few-shot を使う（一般サンプルは混入しない）', () => {
+    const user = buildVideoPlanUserMessage(fullInput()); // videoKind 未指定＝recruit 扱い
+    expect(user).toContain('株式会社サンプル 会社紹介');
+    expect(user).not.toContain('今期のハイライト');
+  });
 });
 
 function generalInput(): GenerateVideoPlanInput {

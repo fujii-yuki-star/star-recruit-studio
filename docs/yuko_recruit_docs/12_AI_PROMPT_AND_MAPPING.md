@@ -290,7 +290,7 @@ interface AiProvider {
 - **章立て（agenda）を `parts` に対応**させ、各章を短いシーンに割る（導入／本題／まとめ）。
 - **伝えたい要点を `texts`／`narrationText` に反映**（数値・結論を簡潔に）。会社紹介調の言い回しは避ける。
 - **`templateId`／`sceneType` は利用可能な見た目の範囲**で選ぶ（例 opening / photo_intro）。新規テンプレは作らない。
-- **`targetDurationSec` の目安**：発表・説明は採用より長めになりやすい（例 90 秒前後）。最終的な尺は利用者の希望値に合わせる。
+- **`targetDurationSec` と尺配分**：全シーンの `durationSec` の合計を `targetDurationSec` に合わせる（このサンプルは約60秒）。各シーンは §5b の目安（3〜15秒）に収め、必要なシーン数に分ける。最終的な尺は利用者の希望値に合わせる。
 - 社外秘・個人情報の懸念は `reviewNotes` に一文を入れる。
 
 > few-shot の実体は fixture を**単一参照元**とする（プロンプト組立 `buildVideoPlanRequest` が `videoKind` で §7／§7b の例を切り替えて読み込む）。

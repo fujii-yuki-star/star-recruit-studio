@@ -4,20 +4,20 @@
     "title": "全社キックオフ2026 ご報告",
     "purpose": "report",
     "targetAudience": "全社員",
-    "targetDurationSec": 90,
+    "targetDurationSec": 60,
     "tone": "丁寧・落ち着いた"
   },
   "parts": [
     {
       "partTitle": "オープニング",
       "summary": "発表のテーマと進め方を伝える導入",
-      "targetDurationSec": 14,
+      "targetDurationSec": 10,
       "scenes": [
         {
           "sceneTitle": "はじめに",
           "sceneType": "opening",
           "templateId": "opening_yuko_right_v1",
-          "durationSec": 8,
+          "durationSec": 10,
           "assetRefs": { "background": "asset_cover_001", "logo": "asset_logo_001" },
           "yukoPoseTag": "guide",
           "texts": {
@@ -33,13 +33,13 @@
     {
       "partTitle": "今期のハイライト",
       "summary": "主要な実績を要点で示す",
-      "targetDurationSec": 40,
+      "targetDurationSec": 26,
       "scenes": [
         {
           "sceneTitle": "売上の振り返り",
           "sceneType": "photo_intro",
           "templateId": "photo_left_text_right_yuko_v1",
-          "durationSec": 12,
+          "durationSec": 13,
           "assetRefs": { "mainVisual": "asset_chart_sales_001" },
           "yukoPoseTag": "guide",
           "texts": {
@@ -53,7 +53,7 @@
           "sceneTitle": "重点プロジェクト",
           "sceneType": "photo_intro",
           "templateId": "photo_left_text_right_yuko_v1",
-          "durationSec": 12,
+          "durationSec": 13,
           "assetRefs": { "mainVisual": "asset_project_001" },
           "yukoPoseTag": "smile",
           "texts": {
@@ -71,18 +71,32 @@
       "targetDurationSec": 24,
       "scenes": [
         {
-          "sceneTitle": "まとめ",
+          "sceneTitle": "来期の方針",
           "sceneType": "photo_intro",
           "templateId": "photo_left_text_right_yuko_v1",
-          "durationSec": 10,
+          "durationSec": 12,
           "assetRefs": { "mainVisual": "asset_vision_001" },
-          "yukoPoseTag": "bow",
+          "yukoPoseTag": "guide",
           "texts": {
             "title": "来期の方針",
             "main": "挑戦を続ける一年に",
-            "subtitle": "引き続きご協力をお願いします。"
+            "subtitle": "重点領域に投資していきます。"
           },
-          "narrationText": "来期も、挑戦を続ける一年にしたいと思います。引き続き、ご協力をよろしくお願いします。"
+          "narrationText": "来期は、挑戦を続ける一年にしたいと思います。重点領域にしっかり投資していきます。"
+        },
+        {
+          "sceneTitle": "結びのお願い",
+          "sceneType": "photo_intro",
+          "templateId": "photo_left_text_right_yuko_v1",
+          "durationSec": 12,
+          "assetRefs": { "mainVisual": "asset_team_001" },
+          "yukoPoseTag": "bow",
+          "texts": {
+            "title": "ご協力のお願い",
+            "main": "チーム一丸で",
+            "subtitle": "引き続きよろしくお願いします。"
+          },
+          "narrationText": "目標の達成に向けて、チーム一丸で進んでいきます。引き続き、ご協力をよろしくお願いします。"
         }
       ]
     }
