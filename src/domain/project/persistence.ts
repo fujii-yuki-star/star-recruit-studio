@@ -4,24 +4,29 @@ import {
   DEFAULT_TARGET_DURATION_SEC, DEFAULT_VOICE_ID, FPS, HEIGHT,
   NARRATION_VOLUME, VIDEO_HARD_MAX_SEC, WIDTH,
 } from '../constants';
-import type { Purpose } from '../enums';
+import { VIDEO_KIND } from '../enums';
+import type { Purpose, VideoKind } from '../enums';
 import type {
-  Asset, BgmSettings, CompanyInfo, Part, Project, Scene,
+  Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
   ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1：初期は "1.0"）。 */
-export const PROJECT_SCHEMA_VERSION = '1.0';
+/** project.json の schemaVersion（正典 §1。ADR-0011 で 1.0→1.1：videoKind/generalBrief 追加・additionalNotes をトップレベルへ）。 */
+export const PROJECT_SCHEMA_VERSION = '1.1';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
   projectId: string;
   projectName: string;
+  /** 動画の種類（ADR-0011）。省略時は recruit。 */
+  videoKind?: VideoKind;
   purpose: Purpose;
   createdAt: string;
   updatedAt: string;
   videoSettings: VideoSettings;
   companyInfo: CompanyInfo;
+  /** 一般・社内発表（videoKind=general）の入力。 */
+  generalBrief?: GeneralBrief;
   toneSettings?: ToneSettings;
   voiceSettings: VoiceSettings;
   bgmSettings?: BgmSettings;
@@ -137,6 +142,7 @@ export function assembleProject(
 ): Project {
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
+    videoKind: header.videoKind ?? VIDEO_KIND.recruit,
     projectId: header.projectId,
     projectName: header.projectName,
     purpose: header.purpose,
@@ -144,6 +150,7 @@ export function assembleProject(
     updatedAt: header.updatedAt,
     videoSettings: header.videoSettings,
     companyInfo: header.companyInfo,
+    ...(header.generalBrief ? { generalBrief: header.generalBrief } : {}),
     ...(header.toneSettings ? { toneSettings: header.toneSettings } : {}),
     voiceSettings: header.voiceSettings,
     ...(header.bgmSettings ? { bgmSettings: header.bgmSettings } : {}),
@@ -192,5 +199,9 @@ export function parseProjectDoc(text: string): Project {
 
 /** 同一メジャー(1.x)はそのまま。将来のメジャー移行時にここで変換する。 */
 function migrateProject(project: Project): Project {
+  // ADR-0011: videoKind 省略の旧データ(1.0)は recruit として扱う（schemaVersion は保存時に 1.1 へ更新される）。
+  if (!project.videoKind) {
+    return { ...project, videoKind: VIDEO_KIND.recruit };
+  }
   return project;
 }

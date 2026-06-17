@@ -102,6 +102,17 @@ describe('assembleProject', () => {
     expect('toneSettings' in p).toBe(false);
     expect('bgmSettings' in p).toBe(false);
   });
+  it('videoKind を付与し（既定 recruit）generalBrief は指定時のみ（ADR-0011）', () => {
+    const p = assembleProject(header(), [], [], []);
+    expect(p.videoKind).toBe('recruit');
+    expect('generalBrief' in p).toBe(false);
+    const g = assembleProject(
+      header({ videoKind: 'general', generalBrief: { title: '四半期報告', keyPoints: ['売上120%'] } }),
+      [], [], [],
+    );
+    expect(g.videoKind).toBe('general');
+    expect(g.generalBrief?.title).toBe('四半期報告');
+  });
 });
 
 describe('parseProjectDoc', () => {
@@ -110,6 +121,12 @@ describe('parseProjectDoc', () => {
     const back = parseProjectDoc(JSON.stringify(p));
     expect(back.projectId).toBe(p.projectId);
     expect(back.scenes).toEqual([]);
+  });
+  it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;
+    delete doc.videoKind;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.videoKind).toBe('recruit');
   });
   it('未対応メジャー(2.0)は拒否', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '2.0' };
