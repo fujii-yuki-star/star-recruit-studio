@@ -61,18 +61,34 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const [jobType, setJobType] = useState(sampleCompany.jobType);
   const [strengths, setStrengths] = useState<string[]>(sampleCompany.strengths);
   const [newStrength, setNewStrength] = useState("");
+  const [businessDescription, setBusinessDescription] = useState("");
+  const [recruitTarget, setRecruitTarget] = useState("");
+  const [desiredPerson, setDesiredPerson] = useState("");
+  const [additionalNotes, setAdditionalNotes] = useState("");
   const [voiceType, setVoiceType] = useState("calm");
 
-  const { assets, assetSrcById, addAsset, addAssetByPath, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
+  const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
     useProjectStore();
 
   // ウィザードで入力した目的・会社情報を現在のプロジェクトへ反映する（保存・生成で使う）。
+  // applyProjectInfo は companyInfo を全置換するため、ウィザードで扱う項目をすべて渡す。
   function applyForm() {
     applyProjectInfo({
       purpose: purpose as Purpose, // purposeOptions の id は Purpose enum 値
-      companyInfo: { companyName, industry, jobType, strengths },
+      companyInfo: {
+        companyName,
+        industry,
+        businessDescription,
+        recruitTarget,
+        jobType,
+        strengths,
+        desiredPerson,
+        additionalNotes,
+      },
     });
   }
+  // 自由記述の上限（schema の additionalNotes maxLength と一致＝§2-7）。
+  const ADDITIONAL_NOTES_MAX = 1000;
   // 音声系（BGM/ナレーション）は素材一覧に出さない。
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
@@ -188,6 +204,19 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   />
                 </div>
                 <div className="field">
+                  <label className="field-label" htmlFor="businessDescription">
+                    事業内容
+                  </label>
+                  <textarea
+                    id="businessDescription"
+                    className="textarea"
+                    value={businessDescription}
+                    onChange={(e) => setBusinessDescription(e.target.value)}
+                    placeholder="例：中小企業向けの業務システムを開発・運用しています"
+                    rows={2}
+                  />
+                </div>
+                <div className="field">
                   <label className="field-label" htmlFor="jobType">
                     募集職種
                   </label>
@@ -200,7 +229,19 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   />
                 </div>
                 <div className="field">
-                  <label className="field-label">強み</label>
+                  <label className="field-label" htmlFor="recruitTarget">
+                    採用対象
+                  </label>
+                  <input
+                    id="recruitTarget"
+                    className="input"
+                    value={recruitTarget}
+                    onChange={(e) => setRecruitTarget(e.target.value)}
+                    placeholder="例：新卒・第二新卒"
+                  />
+                </div>
+                <div className="field">
+                  <label className="field-label">アピールしたいこと（強み・伝えたい点）</label>
                   <div className="chip-input-row">
                     {strengths.map((s, i) => (
                       <span className="chip" key={i}>
@@ -230,8 +271,40 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     </button>
                   </div>
                   <p className="field-hint">
-                    求職者に伝えたい魅力を、短い言葉で入れてください。
+                    求職者に伝えたい魅力・強みを、短い言葉で複数入れてください。
                   </p>
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="desiredPerson">
+                    求める人物像
+                  </label>
+                  <input
+                    id="desiredPerson"
+                    className="input"
+                    value={desiredPerson}
+                    onChange={(e) => setDesiredPerson(e.target.value)}
+                    placeholder="例：主体的に学べる人"
+                  />
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="additionalNotes">
+                    その他・伝えたいこと（自由記述）
+                  </label>
+                  <textarea
+                    id="additionalNotes"
+                    className="textarea"
+                    value={additionalNotes}
+                    maxLength={ADDITIONAL_NOTES_MAX}
+                    onChange={(e) => setAdditionalNotes(e.target.value.slice(0, ADDITIONAL_NOTES_MAX))}
+                    placeholder="動画で特に伝えたいこと・雰囲気・避けたい表現などを自由に書けます。ここに書いた内容はそのまま動画案づくりに渡ります。"
+                    rows={4}
+                  />
+                  <div className="row-between field-hint">
+                    <span>自由に書いた内容を、そのまま動画案づくりに反映します。</span>
+                    <span>
+                      {additionalNotes.length}/{ADDITIONAL_NOTES_MAX}
+                    </span>
+                  </div>
                 </div>
               </>
             )}
@@ -287,25 +360,42 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   </div>
                 )}
                 {materials.length > 0 ? (
-                  <div className="card-grid cols-4 mt">
+                  <div className="col gap-sm mt">
+                    <p className="field-hint">
+                      各素材に説明を付けると、ゆうこが使いどころを判断しやすくなります（任意）。
+                    </p>
                     {materials.map((a) => (
-                      <div
-                        key={a.assetId}
-                        className={`thumb ${a.assetType === ASSET_TYPE.video ? "thumb-video" : "thumb-photo"}`}
-                        style={{ overflow: "hidden" }}
-                        title={a.displayName}
-                      >
-                        {assetSrcById[a.assetId] ? (
-                          <img
-                            src={assetSrcById[a.assetId]}
-                            alt={a.displayName}
-                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      <div key={a.assetId} className="row gap-sm" style={{ alignItems: "flex-start" }}>
+                        <div
+                          className={`thumb ${a.assetType === ASSET_TYPE.video ? "thumb-video" : "thumb-photo"}`}
+                          style={{ width: 56, height: 56, flex: "0 0 auto", overflow: "hidden" }}
+                          title={a.displayName}
+                        >
+                          {assetSrcById[a.assetId] ? (
+                            <img
+                              src={assetSrcById[a.assetId]}
+                              alt={a.displayName}
+                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            />
+                          ) : a.assetType === ASSET_TYPE.video ? (
+                            <VideoIcon size={22} />
+                          ) : (
+                            <PhotoIcon size={22} />
+                          )}
+                        </div>
+                        <div className="grow">
+                          <div className="text-sm" style={{ fontWeight: 600, marginBottom: 4 }}>
+                            {a.displayName}
+                          </div>
+                          <input
+                            className="input"
+                            value={a.description ?? ""}
+                            onChange={(e) =>
+                              updateAsset(a.assetId, (x) => ({ ...x, description: e.target.value }))
+                            }
+                            placeholder="この素材の説明（例：オフィスの様子）"
                           />
-                        ) : a.assetType === ASSET_TYPE.video ? (
-                          <VideoIcon size={22} />
-                        ) : (
-                          <PhotoIcon size={22} />
-                        )}
+                        </div>
                       </div>
                     ))}
                   </div>
