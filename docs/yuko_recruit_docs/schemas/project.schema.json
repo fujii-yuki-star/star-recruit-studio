@@ -84,7 +84,8 @@
       "properties": {
         "title": { "type": "string", "minLength": 1 },
         "agenda": { "type": "array", "items": { "type": "string" } },
-        "keyPoints": { "type": "array", "items": { "type": "string" } }
+        "keyPoints": { "type": "array", "items": { "type": "string" } },
+        "targetAudience": { "type": "string" }
       }
     },
     "ToneSettings": {

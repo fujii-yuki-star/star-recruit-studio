@@ -32,6 +32,8 @@ export interface GeneralBrief {
   agenda?: string[];
   /** 伝えたい要点。 */
   keyPoints?: string[];
+  /** 対象視聴者（ADR-0011 #12）。general の対象。recruit は companyInfo.recruitTarget を使う。 */
+  targetAudience?: string;
 }
 
 export interface ToneSettings {

@@ -68,6 +68,9 @@ function adviceFor(step: number, videoKind: VideoKind): string[] {
   return yukoAdvice[step] ?? [];
 }
 
+// 一般動画のトーン候補（toneSettings.tone へ保存する文言。ADR-0011 #12）。
+const TONE_PRESETS = ["親しみやすい", "丁寧・落ち着いた", "フォーマル", "明るい・元気"];
+
 export function WizardScreen({ onNavigate }: WizardProps) {
   // 最初のステップ「動画の目的を選ぶ」(index 0) を表示
   const [step, setStep] = useState(0);
@@ -94,6 +97,9 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const [newAgenda, setNewAgenda] = useState("");
   const [keyPoints, setKeyPoints] = useState<string[]>(g0?.keyPoints ?? []);
   const [newKeyPoint, setNewKeyPoint] = useState("");
+  // 対象視聴者（general の generalBrief.targetAudience）・トーン（toneSettings.tone）＝ADR-0011 #12。
+  const [targetAudience, setTargetAudience] = useState(g0?.targetAudience ?? "");
+  const [tone, setTone] = useState(initialMeta.toneSettings?.tone ?? TONE_PRESETS[0]);
   const [voiceType, setVoiceType] = useState("calm");
 
   const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
@@ -108,7 +114,11 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   function applyForm() {
     const common = { videoKind, purpose, additionalNotes };
     if (videoKind === VIDEO_KIND.general) {
-      applyProjectInfo({ ...common, generalBrief: { title, agenda, keyPoints } });
+      applyProjectInfo({
+        ...common,
+        generalBrief: { title, agenda, keyPoints, ...(targetAudience.trim() ? { targetAudience } : {}) },
+        tone,
+      });
     } else {
       applyProjectInfo({
         ...common,
@@ -419,6 +429,35 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         </button>
                       </div>
                       <p className="field-hint">動画で必ず伝えたいポイントを、短い言葉で複数入れてください。</p>
+                    </div>
+                    <div className="field">
+                      <label className="field-label" htmlFor="targetAudience">対象視聴者</label>
+                      <input
+                        id="targetAudience"
+                        className="input"
+                        value={targetAudience}
+                        onChange={(e) => setTargetAudience(e.target.value)}
+                        placeholder="例：全社員 / 新入社員 / 取引先"
+                      />
+                      <p className="field-hint">誰に向けた動画かを書くと、ゆうこが言葉づかいを合わせます（任意）。</p>
+                    </div>
+                    <div className="field">
+                      <label className="field-label">トーン（話し方の雰囲気）</label>
+                      <div className="card-grid cols-2">
+                        {TONE_PRESETS.map((t) => (
+                          <button
+                            key={t}
+                            className="action-card"
+                            style={{
+                              borderColor: tone === t ? "var(--color-primary)" : undefined,
+                              background: tone === t ? "var(--color-primary-soft)" : undefined,
+                            }}
+                            onClick={() => setTone(t)}
+                          >
+                            <span className="action-card-title">{t}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </>
                 )}
