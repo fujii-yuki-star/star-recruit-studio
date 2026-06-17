@@ -32,6 +32,9 @@
 | scene | 場面 |
 | part | パート |
 | export | 保存 |
+| videoKind | 動画の種類 |
+| videoKind=recruit | 採用動画 |
+| videoKind=general | 一般動画・社内発表 |
 
 ---
 
