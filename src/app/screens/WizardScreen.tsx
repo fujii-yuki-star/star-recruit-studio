@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { ASSET_TYPE, VIDEO_KIND, type Purpose, type VideoKind } from "../../domain/enums";
 import { ADDITIONAL_NOTES_MAX_LEN, DEFAULT_TONE, TONE_PRESETS } from "../../domain/constants";
+import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -97,7 +98,8 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // 対象視聴者（general の generalBrief.targetAudience）・トーン（toneSettings.tone）＝ADR-0011 #12。
   const [targetAudience, setTargetAudience] = useState(g0?.targetAudience ?? "");
   const [tone, setTone] = useState(initialMeta.toneSettings?.tone ?? DEFAULT_TONE);
-  const [voiceType, setVoiceType] = useState("calm");
+  // 読み上げの声の感じ。現在の voiceSettings から一致プリセットを初期選択（無ければ既定）。
+  const [voiceType, setVoiceType] = useState(() => matchVoiceStyleId(initialMeta.voiceSettings));
   // フォーム入力の不足を伝えるユーザー向け文言（§2-5・次の行動を示す）。
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -111,7 +113,8 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // ウィザードの入力を現在のプロジェクトへ反映する（保存・生成で使う）。
   // videoKind で会社情報/発表内容を排他に渡す（applyProjectInfo が渡さない側を消す＝schema 排他を満たす）。
   function applyForm() {
-    const common = { videoKind, purpose, additionalNotes };
+    // voice（声の感じ→speed/pitch/intonation）は両用途共通（声ステップは recruit/general 共通）。
+    const common = { videoKind, purpose, additionalNotes, voice: voiceStyleParams(voiceType) };
     if (videoKind === VIDEO_KIND.general) {
       applyProjectInfo({
         ...common,
@@ -604,11 +607,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   動画で話す「読み上げの声」の感じを選べます。
                 </p>
                 <div className="card-grid cols-3">
-                  {[
-                    { id: "calm", label: "落ち着いた声", desc: "丁寧で安心感のある話し方" },
-                    { id: "bright", label: "明るい声", desc: "元気で親しみやすい話し方" },
-                    { id: "soft", label: "やわらかい声", desc: "やさしくゆったりした話し方" },
-                  ].map((v) => (
+                  {VOICE_STYLE_PRESETS.map((v) => (
                     <button
                       key={v.id}
                       className="action-card"
