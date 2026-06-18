@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { PageHead, Switch } from "../components/ui";
+import { openExternalUrl } from "../../infrastructure/opener";
 
 // クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
-const credits: { name: string; role: string; license: string; source?: string }[] = [
+const credits: { name: string; role: string; license: string; source?: { label: string; url: string } }[] = [
   {
     name: "VOICEVOX：ずんだもん",
     role: "ナレーター音声（読み上げ）",
@@ -12,7 +13,7 @@ const credits: { name: string; role: string; license: string; source?: string }[
     name: "FFmpeg",
     role: "動画の書き出し",
     license: "LGPL 2.1+",
-    source: "ソース入手先: https://www.ffmpeg.org/download.html",
+    source: { label: "ソース入手先", url: "https://www.ffmpeg.org/download.html" },
   },
   {
     name: "Noto Sans JP",
@@ -53,16 +54,37 @@ export function AboutScreen() {
             本ソフトは以下を利用しています。動画を公開する際は、これらのクレジット表記にご協力ください。
           </p>
           <div className="col gap-sm mt">
-            {credits.map((c) => (
-              <div className="list-item" key={c.name} style={{ cursor: "default" }}>
-                <div className="grow">
-                  <strong>{c.name}</strong>
-                  <div className="text-faint text-sm">{c.role}</div>
-                  <div className="text-faint text-sm">ライセンス: {c.license}</div>
-                  {c.source && <div className="text-faint text-sm">{c.source}</div>}
+            {credits.map((c) => {
+              const src = c.source;
+              return (
+                <div className="list-item" key={c.name} style={{ cursor: "default" }}>
+                  <div className="grow">
+                    <strong>{c.name}</strong>
+                    <div className="text-faint text-sm">{c.role}</div>
+                    <div className="text-faint text-sm">ライセンス: {c.license}</div>
+                    {src && (
+                      <div className="text-sm">
+                        {src.label}:{" "}
+                        <button
+                          onClick={() => void openExternalUrl(src.url).catch(() => {})}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            font: "inherit",
+                            color: "var(--color-primary)",
+                            textDecoration: "underline",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {src.url}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="toggle-row mt">
