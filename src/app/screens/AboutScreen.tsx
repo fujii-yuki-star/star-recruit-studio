@@ -4,7 +4,7 @@ import { openExternalUrl } from "../../infrastructure/opener";
 import { OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED } from "../../domain/export/h264Feature";
 
 // クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
-const credits: { name: string; role: string; license: string; source?: { label: string; url: string }; openh264?: boolean }[] = [
+const credits: { name: string; role: string; license: string; credit?: string; source?: { label: string; url: string }; openh264?: boolean }[] = [
   {
     name: "VOICEVOX：ずんだもん",
     role: "ナレーター音声（読み上げ）",
@@ -24,7 +24,8 @@ const credits: { name: string; role: string; license: string; source?: { label: 
   // OpenH264（H.264 動画保存のフォールバック）。主経路は Media Foundation（OS提供）で Cisco クレジット不要＝ADR-0013。OPENH264_FEATURE_ENABLED が true（フォールバック採用）のときだけ表示。
   {
     name: "OpenH264",
-    role: OPENH264_CREDIT_TEXT,
+    role: "動画の書き出し（予備）",
+    credit: OPENH264_CREDIT_TEXT,
     license: "BSD-2-Clause（ソース）／配布バイナリは Cisco の AVC/H.264 Patent Portfolio License",
     source: { label: "提供元・ソース", url: "https://www.openh264.org/" },
     openh264: true,
@@ -70,6 +71,7 @@ export function AboutScreen() {
                   <div className="grow">
                     <strong>{c.name}</strong>
                     <div className="text-faint text-sm">{c.role}</div>
+                    {c.credit && <div className="text-faint text-sm">{c.credit}</div>}
                     <div className="text-faint text-sm">ライセンス: {c.license}</div>
                     {src && (
                       <div className="text-sm">

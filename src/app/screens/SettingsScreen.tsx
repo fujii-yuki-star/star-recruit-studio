@@ -12,7 +12,8 @@ import {
   INTONATION_RANGE, PITCH_RANGE, SPEED_RANGE, sliderToValue, valueToSlider,
 } from "../../domain/voice/voiceParams";
 import {
-  H264_STATUS_LABEL, OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED, type H264FeatureStatus,
+  H264_INITIAL_STATUS, H264_STATUS_LABEL, OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED,
+  type H264FeatureStatus,
 } from "../../domain/export/h264Feature";
 
 export function SettingsScreen() {
@@ -34,8 +35,8 @@ export function SettingsScreen() {
   const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? NARRATOR_STYLES[0].speaker);
   const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
   const [testError, setTestError] = useState("");
-  // H.264動画保存機能の状態（実検出は取得・検証実装後＝pin 後。今は表示枠用のプレースホルダ）。
-  const h264Status: H264FeatureStatus = "unavailable";
+  // 動画保存の予備機能の状態（実検出は取得・検証実装後＝pin 後。今は表示枠用のプレースホルダ）。
+  const h264Status: H264FeatureStatus = H264_INITIAL_STATUS;
 
   function onChangeUrl(value: string) {
     setUrl(value);
@@ -335,14 +336,20 @@ export function SettingsScreen() {
         {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}
         {OPENH264_FEATURE_ENABLED && (
           <div className="card">
-            <h2 className="section-title">H.264動画保存機能</h2>
+            <h2 className="section-title">動画保存の予備機能</h2>
             <p className="page-desc text-pretty">
-              動画を H.264 形式で保存するための機能です。通常は Windows の標準機能で保存します。以下は予備（フォールバック）の情報です。
+              通常は Windows の標準機能で動画を保存します。以下は予備の保存方法が使えるかどうかの状態です。
             </p>
             <div className="row-between mt">
               <span className="text-muted">状態</span>
               <strong>{H264_STATUS_LABEL[h264Status]}</strong>
             </div>
+            {h264Status === "error" && (
+              <p className="field-hint mt">もう一度お試しのうえ、解決しない場合はアプリを再起動してください。</p>
+            )}
+            {h264Status === "verificationRequired" && (
+              <p className="field-hint mt">ご利用には確認が必要です。アプリを再起動してください。</p>
+            )}
             <p className="field-hint mt">{OPENH264_CREDIT_TEXT}</p>
             <details style={{ marginTop: "var(--gap-sm)" }}>
               <summary className="text-sm text-muted" style={{ cursor: "pointer" }}>詳細情報</summary>

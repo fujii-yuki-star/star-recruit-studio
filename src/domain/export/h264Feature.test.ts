@@ -22,6 +22,8 @@ describe('H264_STATUS_LABEL', () => {
 
 describe('OpenH264 表示の前提', () => {
   it('開発中（libx264 スパイク）は機能フラグが既定 false＝OpenH264 関連 UI は非表示', () => {
+    // 番人テスト: OpenH264 フォールバックを本採用する際は意図的にこのテストを更新すること。
+    // 誰かがサイレントに true 化して未完成の UI／Cisco クレジットが表示されるのを防ぐ。
     expect(OPENH264_FEATURE_ENABLED).toBe(false);
   });
   it('必須クレジット文言は Cisco 指定の固定文', () => {

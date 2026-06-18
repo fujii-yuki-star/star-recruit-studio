@@ -22,6 +22,9 @@ export const H264_STATUS_LABEL: Record<H264FeatureStatus, string> = {
   verificationRequired: '確認が必要',
 };
 
+/** 取得・検証の実装前の初期状態（プレースホルダの単一参照元・§2-7）。 */
+export const H264_INITIAL_STATUS: H264FeatureStatus = 'unavailable';
+
 /**
  * OpenH264（フォールバック）関連表示の機能フラグ。主経路は Media Foundation のため通常は不要で、既定 false（OpenH264 固有 UI／Cisco クレジットを非表示）。
  * OpenH264 フォールバックを動的参照する配布ビルドが受け入れ基準（research §3）を満たし統合した時点で true にする。
