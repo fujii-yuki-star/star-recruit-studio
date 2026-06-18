@@ -42,7 +42,7 @@
 遵守事項：
 1. **LGPLビルド＋動的リンク**で同梱（GPLオプションを使わない）。
 2. 配布物に **FFmpegのソース入手手段** と **LGPLライセンス文** を含める（§の「クレジット/ライセンス画面」）。
-3. H.264 は **OpenH264 採用** か **特許ライセンス取得** のいずれかを選ぶ。MVPの動作検証は手元ビルドで可だが、**配布前に方式を確定**。
+3. H.264 は **Media Foundation（h264_mf）を主経路として採用**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)・実機検証済）。OpenH264 はフォールバック。自前の特許ライセンス取得は行わない（完成 H.264 の MPEG-LA 許諾要否は規格軸の別論点＝§9）。
 4. FFmpeg は `infrastructure/ffmpeg` 越しに呼ぶ（`CLAUDE.md §4`）。バージョンを固定し記録する。
 
 ### 未決定
@@ -147,7 +147,7 @@
 - [ ] 書き出し時のクレジット自動付与（任意ON/OFF）＝ `AboutScreen` にトグル UI のみで**焼き込み未実装・設定も揮発**＝backlog。
 
 ### Phase 0 で技術検証 ※実装監査 2026-06-17
-- [x] LGPLビルドFFmpegで `overlay`/`xfade`/`amix` ＝ スパイクで実証＋**本番想定の LGPL ビルド（BtbN win64-lgpl）＋h264_mf でアプリ実書き出しを実機確認**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)・2026-06-18）。
+- [~] LGPLビルドFFmpegで `overlay`/`xfade`/`amix`＋`h264_mf` ＝ **機能は LGPL ビルド（BtbN win64-lgpl・static）でアプリ実書き出しまで実機確認済**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)・2026-06-18）。残: **配布形態 `lgpl-shared`（動的リンク）での確認**は配布パッケージング時（static は再リンク手段の提供が必要＝ADR-0002／§3-1）。
 - [ ] VOICEVOXローカルエンジンでWAV生成 ＝ **未**（現状 `MockVoiceProvider`・実エンジン疎通は backlog）。
 
 ### 次アクション（リリースに向けた切り分け・2026-06-17）
