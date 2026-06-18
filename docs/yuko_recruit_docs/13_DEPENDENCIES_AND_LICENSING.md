@@ -132,7 +132,7 @@
 - [x] フォント ＝ **OFL系を同梱**（游ゴシック等は同梱不可）。残: 最終選定
 
 ### リリース前に残る確認（法務・公式規約）
-- [~] FFmpeg：**取得方式決定（2026-06-18・ユーザー）**＝OpenH264 は**同梱せず初回 Cisco 取得**／dev は `ffmpeg-static` 継続／配布版は LGPL 必須。候補調査＝[`research/ffmpeg-openh264-windows.md`](research/ffmpeg-openh264-windows.md)（推奨 BtbN `lgpl-shared`）。残: バージョン pin・`-buildconf` 検証・ハッシュ固定。
+- [~] FFmpeg：**取得方式決定（2026-06-18・ユーザー）**＝OpenH264 は**同梱せず初回 Cisco 取得**／dev は `ffmpeg-static` 継続／配布版は LGPL 必須。候補調査＝[`research/ffmpeg-openh264-windows.md`](research/ffmpeg-openh264-windows.md)（**推奨＝OpenH264 を動的参照する自前ビルド**。BtbN は OpenH264 を静的リンクのため不可）。残: バージョン pin・`-buildconf`/DLL依存 検証・ハッシュ固定。
 - [x] VOICEVOX：エンジン**同梱＋自動起動**を決定（`adr/0005`）。**規約・同梱配布の可否はユーザー（事業側）確認済み（2026-06-18）**。残: 同梱ビルド／プロセス管理・バージョン固定。
 - [ ] エンドユーザー動画のクレジット表記運用
 - [ ] 標準BGM・装飾の入手元と権利台帳
