@@ -3,6 +3,7 @@
 - **状態**: Accepted（2026-06-10 承認）
 - **日付**: 2026-06-10
 - **関連**: `13_DEPENDENCIES_AND_LICENSING.md §3` / `ADR-0001` / `05_RENDERING_SPEC.md §4`
+- **更新（2026-06-18）**: 本ADRの **FFmpeg=LGPL＋動的リンク＋ソース提供の方針は維持**。ただし **H.264 エンコーダの選択は [`ADR-0013`](0013-h264-via-media-foundation.md) で更新**＝主経路を **Media Foundation（`h264_mf`）** とし、**OpenH264 はフォールバック**へ降格（実機スパイクで確証）。以降、本文中の「OpenH264 を主とする」記述は ADR-0013 を優先する。
 
 ---
 
