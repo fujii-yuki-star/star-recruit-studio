@@ -1369,8 +1369,19 @@ mod tests {
         assert!(VideoCodec::X264.quality_args().is_empty());
         assert!(VideoCodec::OpenH264.quality_args().is_empty());
         // scene_clip_args は -c:v h264_mf の直後に -b:v 12M を置く。
-        let a = scene_clip_args("f.png", None, 1.0, "out.mp4", 3.0, 30, VideoCodec::MediaFoundation);
-        let i = a.iter().position(|s| s == "h264_mf").expect("encoder present");
+        let a = scene_clip_args(
+            "f.png",
+            None,
+            1.0,
+            "out.mp4",
+            3.0,
+            30,
+            VideoCodec::MediaFoundation,
+        );
+        let i = a
+            .iter()
+            .position(|s| s == "h264_mf")
+            .expect("encoder present");
         assert_eq!(a[i + 1], "-b:v");
         assert_eq!(a[i + 2], "12M");
         // x264 は -b:v を付けない。
