@@ -21,7 +21,7 @@ const credits: { name: string; role: string; license: string; source?: { label: 
     role: "画面・字幕のフォント",
     license: "SIL Open Font License 1.1",
   },
-  // OpenH264（H.264 動画保存）。OPENH264_FEATURE_ENABLED が true のときだけ表示（現状 libx264 のため非表示）。
+  // OpenH264（H.264 動画保存のフォールバック）。主経路は Media Foundation（OS提供）で Cisco クレジット不要＝ADR-0013。OPENH264_FEATURE_ENABLED が true（フォールバック採用）のときだけ表示。
   {
     name: "OpenH264",
     role: OPENH264_CREDIT_TEXT,

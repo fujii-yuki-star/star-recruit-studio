@@ -1,5 +1,6 @@
-// H.264 動画保存機能（OpenH264 ランタイム）の抽象状態・表示文言・機能フラグ（ADR-0002 / research/ffmpeg-openh264-windows.md）。
-// 取得・検証・配置の本実装は OpenH264 のバージョン/URL/ハッシュ/配置先が確定してから（pin 後）。
+// H.264 動画保存機能の抽象状態・表示文言・機能フラグ。
+// 主経路は Media Foundation（h264_mf・OS提供＝ADR-0013）。OpenH264 はフォールバック（ADR-0002 / research/ffmpeg-openh264-windows.md）。
+// 状態型・ラベルはエンコーダ非依存（MF/OpenH264 共通の「可用性」表示）。OpenH264 の取得・検証・配置の本実装は版/URL/ハッシュ確定後（pin 後）。
 // ここには URL・ファイル名・具体バージョン等は持たせない（UI 表示用の汎用状態のみ）。
 
 /**
@@ -22,14 +23,14 @@ export const H264_STATUS_LABEL: Record<H264FeatureStatus, string> = {
 };
 
 /**
- * OpenH264 関連表示の機能フラグ。開発中は libx264 スパイクのため false（既定で OpenH264 関連 UI を非表示）。
- * OpenH264 を動的参照する配布ビルドが受け入れ基準（research §3）を満たし統合した時点で true にする。
+ * OpenH264（フォールバック）関連表示の機能フラグ。主経路は Media Foundation のため通常は不要で、既定 false（OpenH264 固有 UI／Cisco クレジットを非表示）。
+ * OpenH264 フォールバックを動的参照する配布ビルドが受け入れ基準（research §3）を満たし統合した時点で true にする。
  * 型を boolean にし「常に false」と静的に決めつけない（将来の切替を素直に表現）。
  */
 export const OPENH264_FEATURE_ENABLED: boolean = false;
 
 /**
- * OpenH264 使用時に必須表示するクレジット文言（Cisco BINARY_LICENSE 条件・research §5）。
- * (1) H.264 機能の設定箇所 と (2) クレジット/ライセンス画面 の両方で使う。
+ * OpenH264 フォールバックを使う場合に必須表示するクレジット文言（Cisco BINARY_LICENSE 条件・research §5）。
+ * 主経路の Media Foundation（OS提供）では不要。(1) H.264 機能の設定箇所 と (2) クレジット/ライセンス画面 の両方で使う。
  */
 export const OPENH264_CREDIT_TEXT = 'OpenH264 Video Codec provided by Cisco Systems, Inc.';
