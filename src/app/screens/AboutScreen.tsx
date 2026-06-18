@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { PageHead, Switch } from "../components/ui";
 import { openExternalUrl } from "../../infrastructure/opener";
+import { OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED } from "../../domain/export/h264Feature";
 
 // クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
-const credits: { name: string; role: string; license: string; source?: { label: string; url: string } }[] = [
+const credits: { name: string; role: string; license: string; source?: { label: string; url: string }; openh264?: boolean }[] = [
   {
     name: "VOICEVOX：ずんだもん",
     role: "ナレーター音声（読み上げ）",
@@ -19,6 +20,14 @@ const credits: { name: string; role: string; license: string; source?: { label: 
     name: "Noto Sans JP",
     role: "画面・字幕のフォント",
     license: "SIL Open Font License 1.1",
+  },
+  // OpenH264（H.264 動画保存）。OPENH264_FEATURE_ENABLED が true のときだけ表示（現状 libx264 のため非表示）。
+  {
+    name: "OpenH264",
+    role: OPENH264_CREDIT_TEXT,
+    license: "BSD-2-Clause（ソース）／配布バイナリは Cisco の AVC/H.264 Patent Portfolio License",
+    source: { label: "提供元・ソース", url: "https://www.openh264.org/" },
+    openh264: true,
   },
 ];
 
@@ -54,7 +63,7 @@ export function AboutScreen() {
             本ソフトは以下を利用しています。動画を公開する際は、これらのクレジット表記にご協力ください。
           </p>
           <div className="col gap-sm mt">
-            {credits.map((c) => {
+            {credits.filter((c) => OPENH264_FEATURE_ENABLED || !c.openh264).map((c) => {
               const src = c.source;
               return (
                 <div className="list-item" key={c.name} style={{ cursor: "default" }}>

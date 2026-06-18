@@ -11,6 +11,9 @@ import { NARRATOR_STYLES } from "../../domain/voice/narratorStyles";
 import {
   INTONATION_RANGE, PITCH_RANGE, SPEED_RANGE, sliderToValue, valueToSlider,
 } from "../../domain/voice/voiceParams";
+import {
+  H264_STATUS_LABEL, OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED, type H264FeatureStatus,
+} from "../../domain/export/h264Feature";
 
 export function SettingsScreen() {
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
@@ -31,6 +34,8 @@ export function SettingsScreen() {
   const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? NARRATOR_STYLES[0].speaker);
   const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
   const [testError, setTestError] = useState("");
+  // H.264動画保存機能の状態（実検出は取得・検証実装後＝pin 後。今は表示枠用のプレースホルダ）。
+  const h264Status: H264FeatureStatus = "unavailable";
 
   function onChangeUrl(value: string) {
     setUrl(value);
@@ -326,6 +331,31 @@ export function SettingsScreen() {
             </div>
           </div>
         </div>
+
+        {/* H.264動画保存機能（OpenH264 ランタイム）。開発中は libx264 スパイクのため機能フラグで既定非表示。 */}
+        {OPENH264_FEATURE_ENABLED && (
+          <div className="card">
+            <h2 className="section-title">H.264動画保存機能</h2>
+            <p className="page-desc text-pretty">
+              動画を H.264 形式で保存するための機能です。
+            </p>
+            <div className="row-between mt">
+              <span className="text-muted">状態</span>
+              <strong>{H264_STATUS_LABEL[h264Status]}</strong>
+            </div>
+            <p className="field-hint mt">{OPENH264_CREDIT_TEXT}</p>
+            <details style={{ marginTop: "var(--gap-sm)" }}>
+              <summary className="text-sm text-muted" style={{ cursor: "pointer" }}>詳細情報</summary>
+              <div className="col gap-sm mt text-sm">
+                <div className="row-between"><span className="text-muted">コーデック</span><span>OpenH264（H.264）</span></div>
+                <div className="row-between"><span className="text-muted">提供元</span><span>Cisco Systems, Inc.</span></div>
+                <div className="row-between"><span className="text-muted">バージョン</span><span>—</span></div>
+                <div className="row-between"><span className="text-muted">検証結果</span><span>—</span></div>
+                <div className="row-between"><span className="text-muted">配置場所</span><span>—</span></div>
+              </div>
+            </details>
+          </div>
+        )}
       </div>
     </div>
   );
