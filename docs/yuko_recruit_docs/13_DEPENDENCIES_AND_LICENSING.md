@@ -138,7 +138,7 @@
 - [ ] 標準BGM・装飾の入手元と権利台帳
 
 ### 実装要件（コードに落とす） ※実装監査 2026-06-17
-- [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL)／Noto Sans JP を表示）。残: FFmpeg **ソース入手手段の明示**、BGM/装飾を採用時に追記。
+- [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL 2.1+・**ソース入手先URL をクリック可能で表示**＝PR#113)／Noto Sans JP(OFL)）。残: ライセンス**本文**の配布物同梱、BGM/装飾を採用時に追記。
 - [x] APIキーのOSキーチェーン保管 ＝ **実装済**（`infrastructure/aiClient` 経由で Rust keyring に保管・平文非保存・本文/ログ非混入＝ADR-0010 P1）。
 - [~] FFmpeg/VOICEVOX/AI の `infrastructure` 越し呼び出し ＝ **実装済**（`ffmpegExport`／`voiceProviders/voicevoxProvider`／`aiProviders`）。残: **バージョン固定と記録**。
 - [ ] 書き出し時のクレジット自動付与（任意ON/OFF）＝ `AboutScreen` にトグル UI のみで**焼き込み未実装・設定も揮発**＝backlog。
@@ -150,7 +150,7 @@
 ### 次アクション（リリースに向けた切り分け・2026-06-17）
 
 **コードで閉じられる（着手可）**
-- FFmpeg **ソース入手手段**の明示（クレジット/ライセンス画面に入手URL・手順を追記）。
+- ~~FFmpeg **ソース入手手段**の明示~~ ＝ **完了（PR#113＝クレジット/ライセンス画面に入手先URLをクリック可能で表示）**。配布物への LGPL **ライセンス本文**同梱・対象ビルドのソース提供は配布パッケージング/法務側。
 - FFmpeg/VOICEVOX/AIモデルの **バージョン固定と記録**（`infrastructure` で定数化）。
 - 書き出し時 **クレジット焼き込み**＋設定の永続化（backlog）。
 

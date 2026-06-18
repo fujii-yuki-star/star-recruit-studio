@@ -1,10 +1,25 @@
 import { useState } from "react";
 import { PageHead, Switch } from "../components/ui";
+import { openExternalUrl } from "../../infrastructure/opener";
 
-const credits = [
-  { name: "VOICEVOX：ずんだもん", role: "ナレーター音声（読み上げ）" },
-  { name: "FFmpeg (LGPL)", role: "動画の書き出し" },
-  { name: "Noto Sans JP", role: "画面・字幕のフォント" },
+// クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
+const credits: { name: string; role: string; license: string; source?: { label: string; url: string } }[] = [
+  {
+    name: "VOICEVOX：ずんだもん",
+    role: "ナレーター音声（読み上げ）",
+    license: "VOICEVOX 利用規約・東北ずん子／ずんだもんプロジェクト規約（クレジット表示で利用）",
+  },
+  {
+    name: "FFmpeg",
+    role: "動画の書き出し",
+    license: "LGPL 2.1+",
+    source: { label: "ソース入手先", url: "https://www.ffmpeg.org/download.html" },
+  },
+  {
+    name: "Noto Sans JP",
+    role: "画面・字幕のフォント",
+    license: "SIL Open Font License 1.1",
+  },
 ];
 
 export function AboutScreen() {
@@ -39,14 +54,37 @@ export function AboutScreen() {
             本ソフトは以下を利用しています。動画を公開する際は、これらのクレジット表記にご協力ください。
           </p>
           <div className="col gap-sm mt">
-            {credits.map((c) => (
-              <div className="list-item" key={c.name} style={{ cursor: "default" }}>
-                <div className="grow">
-                  <strong>{c.name}</strong>
-                  <div className="text-faint text-sm">{c.role}</div>
+            {credits.map((c) => {
+              const src = c.source;
+              return (
+                <div className="list-item" key={c.name} style={{ cursor: "default" }}>
+                  <div className="grow">
+                    <strong>{c.name}</strong>
+                    <div className="text-faint text-sm">{c.role}</div>
+                    <div className="text-faint text-sm">ライセンス: {c.license}</div>
+                    {src && (
+                      <div className="text-sm">
+                        {src.label}:{" "}
+                        <button
+                          onClick={() => void openExternalUrl(src.url).catch(() => {})}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            font: "inherit",
+                            color: "var(--color-primary)",
+                            textDecoration: "underline",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {src.url}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="toggle-row mt">
