@@ -149,9 +149,9 @@
 - `ffmpeg.rs` に `VideoCodec::quality_args()` を追加。**MediaFoundation のときだけ `-b:v 12M`**（`MF_TARGET_BITRATE`）を付与。x264/OpenH264 は無指定（従来どおり）。
 - 3つのエンコード箇所（`scene_clip_args` / 動画シーン / `xfade` 再エンコード）の `-c:v <encoder>` 直後に挿入。専用テスト追加・`cargo test` 緑。x264/OpenH264 経路は出力不変（quality_args が空）。
 
-### 残課題
-1. **アプリ実コンテンツでの最終確認**：`FFMPEG_PATH` を h264_mf 入り FFmpeg に向け、修正後アプリで自分のプロジェクトを書き出し、品質が実用域かを確認。
-2. **配布用 LGPL ビルドでの h264_mf 実搭載**：今回は検証用 GPL ビルド。配布する LGPL ビルド（`--enable-mediafoundation`／x264・x265・openh264 なし）で `h264_mf` が出ることを別途確認。
-3. **ファイルサイズの最適化**：固定 12M は 1080p で十分だが 10分で約900MB と大きめ。解像度別ビットレート or 品質ベース RC（`rate_control`）の検証は後続課題（`-b:v` は実機確認済みの確実な手段なので暫定採用）。
+### 残課題（2026-06-18 更新）
+1. ~~アプリ実コンテンツでの最終確認~~ → **完了**：MF＋12M でアプリ実書き出しが良好画質と確認（ユーザー Windows・`06181555.mp4`）。
+2. ~~配布用 LGPL ビルドでの h264_mf 実搭載~~ → **完了**：BtbN `win64-lgpl`（static）で `--disable-libx264/x265`＋`h264_mf`（H264 via MediaFoundation）実在を実機確認＝**自前ビルド不要**。同ビルドは openh264(BSD) も静的同梱するが pick_codec が h264_mf 優先で未使用。
+3. **ファイルサイズの最適化**：固定 12M は 1080p で十分だが 10分で約900MB と大きめ。解像度別ビットレート or 品質ベース RC は後続課題（`-b:v` は実機確認済みの確実な手段なので暫定採用）。
 4. **Windows N/KN**：対象端末群に N/KN がある場合の `h264_mf` 可用性（Media Feature Pack）。
-</content>
+5. **配布形態**：LGPL は `win64-lgpl-shared`（動的リンク）＋ソース提供が素直（ADR-0002）。使用バージョンの pin。

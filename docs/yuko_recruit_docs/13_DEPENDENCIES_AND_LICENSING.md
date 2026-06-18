@@ -128,17 +128,17 @@
 > 凡例: `[x]` 実装済/決定済 ・ `[~]` 部分実装（残タスクあり）・ `[ ]` 未実装/未確定。
 
 ### 決定済み（2026-06-10）
-- [x] H.264特許対応 ＝ **OpenH264採用**（自前ライセンス不要、`adr/0002`）。残: 商用配布の最終法務スキム・Ciscoバイナリ取得方式
+- [x] H.264 ＝ **Media Foundation（h264_mf）主経路**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)・実機検証済／自前ビルド不要）。OpenH264 はフォールバック。残: 完成H.264のMPEG-LA許諾要否（無収益で低リスク・社内確認）
 - [x] ずんだもん ＝ **ナレーター用途として整理**（`adr/0003`）。残: VOICEVOX/各キャラ規約の通読・常時クレジット実装
 - [x] ゆうこ素材 ＝ **自社保有で権利クリア**
 - [x] フォント ＝ **OFL系を同梱**（游ゴシック等は同梱不可）。残: 最終選定
 
 ### リリース前に残る確認（法務・公式規約）
-- [~] FFmpeg：**取得方式決定（2026-06-18・ユーザー）**＝OpenH264 は**同梱せず初回 Cisco 取得**／dev は `ffmpeg-static` 継続／配布版は LGPL 必須。候補調査＝[`research/ffmpeg-openh264-windows.md`](research/ffmpeg-openh264-windows.md)（**推奨＝OpenH264 を動的参照する自前ビルド**。BtbN は OpenH264 を静的リンクのため不可）。残: バージョン pin・`-buildconf`/DLL依存 検証・ハッシュ固定。
+- [x] FFmpeg H.264：**Media Foundation（h264_mf）に決定**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)）。**BtbN `win64-lgpl` に h264_mf 実在＋アプリ書き出し成功を実機確認＝自前ビルド不要**（OpenH264 の初回Cisco取得/dlopen自前ビルドは不要に。OpenH264 はフォールバック）。残: 配布は lgpl-shared(動的リンク)＋ソース提供・使用バージョン pin・Windows N。
 - [x] VOICEVOX：エンジン**同梱＋自動起動**を決定（`adr/0005`）。**規約・同梱配布の可否はユーザー（事業側）確認済み（2026-06-18）**。残: 同梱ビルド／プロセス管理・バージョン固定。
 - [ ] エンドユーザー動画のクレジット表記運用
 - [ ] 標準BGM・装飾の入手元と権利台帳
-- [ ] **🔴 OpenH264 ライセンス条件**（[research/ffmpeg-openh264-windows.md](research/ffmpeg-openh264-windows.md) §5）: 必須クレジット「**OpenH264 Video Codec provided by Cisco Systems, Inc.**」の表示／**商用 AVC コンテンツ配信の MPEG-LA 許諾要否**（顧客動画は商用＝法務確認）。
+- [~] **AVC/H.264 ライセンス**：主経路 MF（OS提供）では **Cisco クレジット不要**（OpenH264 を主経路にしないため＝[`adr/0013`](adr/0013-h264-via-media-foundation.md)）。OpenH264 必須クレジット「OpenH264 Video Codec provided by Cisco Systems, Inc.」は**フォールバック採用時のみ**（実装枠は #115 で用意済・既定非表示）。残: **完成 H.264 の MPEG-LA 許諾要否**（顧客動画・規格軸＝方式に依らず／無収益で低リスク・社内確認）。
 
 ### 実装要件（コードに落とす） ※実装監査 2026-06-17
 - [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL 2.1+・**ソース入手先URL をクリック可能で表示**＝PR#113)／Noto Sans JP(OFL)）。残: ライセンス**本文**の配布物同梱、BGM/装飾を採用時に追記。
@@ -147,7 +147,7 @@
 - [ ] 書き出し時のクレジット自動付与（任意ON/OFF）＝ `AboutScreen` にトグル UI のみで**焼き込み未実装・設定も揮発**＝backlog。
 
 ### Phase 0 で技術検証 ※実装監査 2026-06-17
-- [~] LGPLビルドFFmpegで `overlay`/`xfade`/`amix` ＝ スパイクで **SVG→PNG→実MP4→連結を実証**（ADR-0001 スパイク・`ffmpegExport`）。残: **本番 LGPL＋OpenH264 ビルド**での確認（現状の検証ビルドは GPL/libx264＝spike 専用）。
+- [x] LGPLビルドFFmpegで `overlay`/`xfade`/`amix` ＝ スパイクで実証＋**本番想定の LGPL ビルド（BtbN win64-lgpl）＋h264_mf でアプリ実書き出しを実機確認**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)・2026-06-18）。
 - [ ] VOICEVOXローカルエンジンでWAV生成 ＝ **未**（現状 `MockVoiceProvider`・実エンジン疎通は backlog）。
 
 ### 次アクション（リリースに向けた切り分け・2026-06-17）
@@ -160,7 +160,7 @@
 **事業・法務の判断/作業が必要（コードでは閉じない）**
 - VOICEVOX／東北ずん子・ずんだもんプロジェクトの **規約通読**（§5。ナレーター用途・常時クレジットの運用可否）。
 - VOICEVOX **同梱ビルドの選定**（CPU/GPU・サイズ）と配布時の最終法務（`adr/0005`）。
-- FFmpeg の **LGPLビルド構成確定**・Cisco OpenH264 バイナリ取得方式（`adr/0002`）。
+- FFmpeg の **配布パッケージング**：lgpl-shared(動的リンク)＋ソース提供・使用バージョン pin（LGPL構成と h264_mf 実搭載は [`adr/0013`](adr/0013-h264-via-media-foundation.md) で確認済・自前ビルド不要）。
 - 標準BGM・装飾の **入手元と権利台帳**（CC0/自社制作）。
 - 最終 **フォント選定**（OFL系・本文/見出し）とライセンス本文の同梱。
 - エンドユーザー動画の **クレジット表記運用**（自動付与 or 手順案内）。

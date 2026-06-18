@@ -280,5 +280,4 @@
 - gyan.dev FFmpeg builds（構成に mediafoundation、ただし GPLv3 ＋ libx264/x265）。
 - FFmpeg Codecs Documentation（ネイティブ aac エンコーダ、MediaFoundation 節）。
 - 社内：`adr/0002-ffmpeg-codec.md`、`research/ffmpeg-openh264-windows.md`、`13_DEPENDENCIES_AND_LICENSING.md §3,§9`。
-</content>
 </invoke>
