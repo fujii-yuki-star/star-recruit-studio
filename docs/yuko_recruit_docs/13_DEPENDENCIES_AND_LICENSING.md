@@ -132,10 +132,11 @@
 - [x] フォント ＝ **OFL系を同梱**（游ゴシック等は同梱不可）。残: 最終選定
 
 ### リリース前に残る確認（法務・公式規約）
-- [ ] FFmpeg：LGPLビルド構成の確定／ソース提供手段
-- [x] VOICEVOX：エンジン**同梱＋自動起動**を決定（`adr/0005`）。残: 同梱ビルド／プロセス管理／配布時の最終法務・バージョン固定
+- [~] FFmpeg：**取得方式決定（2026-06-18・ユーザー）**＝OpenH264 は**同梱せず初回 Cisco 取得**／dev は `ffmpeg-static` 継続／配布版は LGPL 必須。候補調査＝[`research/ffmpeg-openh264-windows.md`](research/ffmpeg-openh264-windows.md)（推奨 BtbN `lgpl-shared`）。残: バージョン pin・`-buildconf` 検証・ハッシュ固定。
+- [x] VOICEVOX：エンジン**同梱＋自動起動**を決定（`adr/0005`）。**規約・同梱配布の可否はユーザー（事業側）確認済み（2026-06-18）**。残: 同梱ビルド／プロセス管理・バージョン固定。
 - [ ] エンドユーザー動画のクレジット表記運用
 - [ ] 標準BGM・装飾の入手元と権利台帳
+- [ ] **🔴 OpenH264 ライセンス条件**（[research/ffmpeg-openh264-windows.md](research/ffmpeg-openh264-windows.md) §5）: 必須クレジット「**OpenH264 Video Codec provided by Cisco Systems, Inc.**」の表示／**商用 AVC コンテンツ配信の MPEG-LA 許諾要否**（顧客動画は商用＝法務確認）。
 
 ### 実装要件（コードに落とす） ※実装監査 2026-06-17
 - [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL 2.1+・**ソース入手先URL をクリック可能で表示**＝PR#113)／Noto Sans JP(OFL)）。残: ライセンス**本文**の配布物同梱、BGM/装飾を採用時に追記。
