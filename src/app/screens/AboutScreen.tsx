@@ -1,10 +1,24 @@
 import { useState } from "react";
 import { PageHead, Switch } from "../components/ui";
 
-const credits = [
-  { name: "VOICEVOX：ずんだもん", role: "ナレーター音声（読み上げ）" },
-  { name: "FFmpeg (LGPL)", role: "動画の書き出し" },
-  { name: "Noto Sans JP", role: "画面・字幕のフォント" },
+// クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
+const credits: { name: string; role: string; license: string; source?: string }[] = [
+  {
+    name: "VOICEVOX：ずんだもん",
+    role: "ナレーター音声（読み上げ）",
+    license: "VOICEVOX 利用規約・東北ずん子／ずんだもんプロジェクト規約（クレジット表示で利用）",
+  },
+  {
+    name: "FFmpeg",
+    role: "動画の書き出し",
+    license: "LGPL 2.1+",
+    source: "ソース入手先: https://www.ffmpeg.org/download.html",
+  },
+  {
+    name: "Noto Sans JP",
+    role: "画面・字幕のフォント",
+    license: "SIL Open Font License 1.1",
+  },
 ];
 
 export function AboutScreen() {
@@ -44,6 +58,8 @@ export function AboutScreen() {
                 <div className="grow">
                   <strong>{c.name}</strong>
                   <div className="text-faint text-sm">{c.role}</div>
+                  <div className="text-faint text-sm">ライセンス: {c.license}</div>
+                  {c.source && <div className="text-faint text-sm">{c.source}</div>}
                 </div>
               </div>
             ))}
