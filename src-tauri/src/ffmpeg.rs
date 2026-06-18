@@ -1,7 +1,7 @@
 // FFmpeg 呼び出し（infrastructure 境界）。アプリに静的リンクせず、ffmpeg.exe を外部実行ファイル（sidecar）として呼ぶ。
 // バイナリは「環境変数 → 所定フォルダ(<appData>/bin) → PATH」で解決する（ADR-0002 実装方針）。
-// コーデックは libopenh264 があればそれ（本番=LGPL）、無ければ libx264（開発=GPL）を自動選択。
-// → LGPLビルドを所定フォルダに置くだけで OpenH264 出力へ無改修で切り替わる（コマンド生成は不変）。
+// コーデックは h264_mf（Media Foundation＝主経路）→ libopenh264（フォールバック）→ libx264（開発=GPL）を自動選択（ADR-0002/0013）。
+// → LGPL+mediafoundation ビルドを所定フォルダに置くだけで h264_mf 出力へ無改修で切り替わる（コマンド生成は不変）。
 // SVG→PNG は ADR-0004（WebView Canvas）で生成。FFmpegは PNG/動画/音声の合成のみ（ADR-0001）。
 use base64::Engine as _;
 use std::fs;
@@ -20,26 +20,51 @@ const SPEED_MIN: f64 = 0.5;
 const SPEED_MAX: f64 = 2.0;
 const DEFAULT_SPEED: f64 = 1.0;
 
-/// 映像コーデック。本番(OpenH264)への無改修切替のための抽象。
+/// 映像コーデック。主経路は h264_mf（Media Foundation）で、フォールバックとして OpenH264／開発用 libx264 を持つ（ADR-0013）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoCodec {
+    /// Windows Media Foundation の H.264（h264_mf）。OS提供コーデック＝H.264書き出しの主経路（ADR-0013）。
+    /// h264_mf を持つ FFmpeg がある時に選択される（配布版＝LGPL＋mediafoundation 構成）。
+    MediaFoundation,
     OpenH264,
     X264,
 }
+
+/// Media Foundation(h264_mf) の目標ビットレート。
+/// h264_mf は無指定だと既定ビットレートが低く画質が崩れるため明示する。
+/// 12M は 1080p で x264(CRF23) 同等画質を実機確認した値。品質優先・最低 12M（ユーザー決定 2026-06-18）。
+/// TODO(配布前・ADR-0013 残課題): 解像度別ビットレート（720p では 12M は過剰＝標準 ~5–8M）／品質ベース RC の最適化。
+const MF_TARGET_BITRATE: &str = "12M";
 
 impl VideoCodec {
     /// FFmpeg の -c:v に渡すエンコーダ名。
     pub fn encoder(self) -> &'static str {
         match self {
+            VideoCodec::MediaFoundation => "h264_mf",
             VideoCodec::OpenH264 => "libopenh264",
             VideoCodec::X264 => "libx264",
         }
     }
+
+    /// エンコーダ別の画質（レート制御）指定。`-c:v <encoder>` の直後に置く。
+    /// - MediaFoundation: 目標ビットレートを与える（既定が低画質のため）。
+    /// - X264: 無指定で CRF 23 相当の良好な既定になるため何も足さない。
+    /// - OpenH264: 当面据え置き（フォールバック採用時に同様の指定要否を検証）。
+    pub fn quality_args(self) -> Vec<String> {
+        match self {
+            VideoCodec::MediaFoundation => vec!["-b:v".into(), MF_TARGET_BITRATE.into()],
+            VideoCodec::OpenH264 | VideoCodec::X264 => Vec::new(),
+        }
+    }
 }
 
-/// `ffmpeg -encoders` の出力から H.264 エンコーダを選ぶ（OpenH264 優先＝本番想定）。
+/// `ffmpeg -encoders` の出力から H.264 エンコーダを選ぶ。
+/// 優先順位：h264_mf（Media Foundation・OS提供＝主経路, ADR-0013）→ libopenh264（フォールバック）→ libx264（開発用）。
+/// 配布版は LGPL＋mediafoundation で h264_mf。開発用 ffmpeg-static は h264_mf を持たないため開発時は libx264。
 pub fn pick_codec(encoders_output: &str) -> Option<VideoCodec> {
-    if encoders_output.contains("libopenh264") {
+    if encoders_output.contains("h264_mf") {
+        Some(VideoCodec::MediaFoundation)
+    } else if encoders_output.contains("libopenh264") {
         Some(VideoCodec::OpenH264)
     } else if encoders_output.contains("libx264") {
         Some(VideoCodec::X264)
@@ -102,6 +127,10 @@ pub fn scene_clip_args(
         "yuv420p".into(),
         "-c:v".into(),
         codec.encoder().into(),
+    ]);
+    // MF は既定ビットレートが低画質のため目標ビットレートを付与（x264 は無指定で良好）。
+    args.extend(codec.quality_args());
+    args.extend([
         "-c:a".into(),
         "aac".into(),
         "-ar".into(),
@@ -204,6 +233,10 @@ pub fn xfade_chain_args(
         "yuv420p".into(),
         "-c:v".into(),
         codec.encoder().into(),
+    ]);
+    // MF は既定ビットレートが低画質のため目標ビットレートを付与（x264 は無指定で良好）。
+    args.extend(codec.quality_args());
+    args.extend([
         "-c:a".into(),
         "aac".into(),
         "-ar".into(),
@@ -418,6 +451,10 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
         "yuv420p".into(),
         "-c:v".into(),
         a.codec.encoder().into(),
+    ]);
+    // MF は既定ビットレートが低画質のため目標ビットレートを付与。
+    args.extend(a.codec.quality_args());
+    args.extend([
         "-c:a".into(),
         "aac".into(),
         "-ar".into(),
@@ -1012,8 +1049,11 @@ pub fn export_video(
     let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).map_err(|_| {
         "動画の書き出しツールが見つかりません。設定でツールの場所を指定してください。".to_string()
     })?;
+    // ここに来るのは「ffmpeg は見つかったが H.264 エンコーダ（h264_mf/libopenh264/libx264）が無い」ケース。
+    // 原因はツールの場所ではなく環境（例: Windows N で Media Foundation 非搭載、配布ビルドの構成不足）。
+    // ※ Windows N/KN 等の事前検知と具体的な案内文は ADR-0013 残課題（配布実装で確定）。
     let codec = pick_codec(&encoders).ok_or_else(|| {
-        "動画の書き出し機能が使えません。設定でツールの場所を確認してください。".to_string()
+        "この端末では動画の書き出しに対応した機能が見つかりませんでした。お使いの Windows の種類によっては、追加の準備が必要な場合があります。".to_string()
     })?;
 
     let tmp = std::env::temp_dir().join("yuko_recruit_export");
@@ -1308,13 +1348,91 @@ mod tests {
     }
 
     #[test]
-    fn pick_codec_prefers_openh264_then_x264() {
+    fn pick_codec_prefers_mediafoundation_then_openh264_then_x264() {
+        // h264_mf（Media Foundation）が主経路で最優先（libx264 と併存しても MF を選ぶ）。
+        assert_eq!(
+            pick_codec("V..... h264_mf ... V..... libx264"),
+            Some(VideoCodec::MediaFoundation)
+        );
+        // h264_mf が無ければ OpenH264 → libx264 の順（既存挙動）。
         assert_eq!(
             pick_codec("V..... libopenh264 ... V..... libx264"),
             Some(VideoCodec::OpenH264)
         );
         assert_eq!(pick_codec("V..... libx264 only"), Some(VideoCodec::X264));
         assert_eq!(pick_codec("no h264 here"), None);
+    }
+
+    #[test]
+    fn quality_args_sets_bitrate_for_mediafoundation_only() {
+        // MF だけ目標ビットレートを付与（x264/OpenH264 は無指定）。
+        assert_eq!(
+            VideoCodec::MediaFoundation.quality_args(),
+            vec!["-b:v".to_string(), "12M".to_string()]
+        );
+        assert!(VideoCodec::X264.quality_args().is_empty());
+        assert!(VideoCodec::OpenH264.quality_args().is_empty());
+        // scene_clip_args は -c:v h264_mf の直後に -b:v 12M を置く。
+        let a = scene_clip_args(
+            "f.png",
+            None,
+            1.0,
+            "out.mp4",
+            3.0,
+            30,
+            VideoCodec::MediaFoundation,
+        );
+        let i = a
+            .iter()
+            .position(|s| s == "h264_mf")
+            .expect("encoder present");
+        assert_eq!(a[i + 1], "-b:v");
+        assert_eq!(a[i + 2], "12M");
+        // video_scene_args も MF で -c:v h264_mf の直後に -b:v 12M。
+        let v = video_scene_args(&VideoSceneArgs {
+            below_png: "b.png",
+            clip: "c.mp4",
+            above_png: "a.png",
+            narration: None,
+            slot_x: 0,
+            slot_y: 0,
+            slot_w: 640,
+            slot_h: 360,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            clip_end_sec: None,
+            duration_sec: 5.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: false,
+            speed: 1.0,
+            fps: 30,
+            codec: VideoCodec::MediaFoundation,
+            out: "out.mp4",
+        });
+        let vi = v
+            .iter()
+            .position(|s| s == "h264_mf")
+            .expect("encoder present");
+        assert_eq!(v[vi + 1], "-b:v");
+        assert_eq!(v[vi + 2], "12M");
+        // xfade_chain_args も MF で -b:v 12M。
+        let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
+        let steps = vec![JoinStep {
+            xfade: Some("fade"),
+            duration_sec: 0.5,
+            offset_sec: 1.5,
+        }];
+        let xf = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::MediaFoundation, 30);
+        let xi = xf
+            .iter()
+            .position(|s| s == "h264_mf")
+            .expect("encoder present");
+        assert_eq!(xf[xi + 1], "-b:v");
+        assert_eq!(xf[xi + 2], "12M");
+        // x264 は -b:v を付けない。
+        let x = scene_clip_args("f.png", None, 1.0, "out.mp4", 3.0, 30, VideoCodec::X264);
+        assert!(!x.iter().any(|s| s == "-b:v"));
     }
 
     #[test]
