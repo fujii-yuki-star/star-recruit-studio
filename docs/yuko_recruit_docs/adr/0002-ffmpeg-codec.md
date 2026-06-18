@@ -34,7 +34,7 @@
 ## 結果・影響
 
 - OpenH264エンコーダは概ね **Constrained Baseline プロファイル** → 採用動画には十分。libx264より圧縮効率は劣り、ファイルがやや大きくなる。
-- **実装**：Cisco公式バイナリの取得（Ciscoの配布条件に従い同梱、または実行時取得）。FFmpegは `libopenh264` 有効ビルド。`infrastructure/ffmpeg` 越しに呼ぶ。
+- **実装**：Cisco公式バイナリの**初回実行時取得**（**同梱不可**＝`BINARY_LICENSE` の「ダウンロード前に第三者ソフトへ統合・結合しない」条件によりカバレッジ外）。FFmpeg は `libopenh264` 有効＋**openh264 を実行時 `dlopen`/`LoadLibraryA` で読むパッチ**を当てたビルドとする（標準の `--enable-libopenh264` はビルド時リンク＝DLL 無しで起動不可になるため）。`infrastructure/ffmpeg` 越しに呼ぶ。
 - 入力動画のH.264デコードはFFmpeg/OpenH264で対応。
 - アプリ内「クレジット/ライセンス」画面に FFmpeg(LGPL)＋ソース入手手段を明記（`13 §9`）。
 
@@ -51,5 +51,5 @@
 
 ## 未解決の論点
 
-- 商用配布における最終的な法務スキム（OpenH264のバイナリ取得方式の確定含む）。
+- 商用配布における最終的な法務スキム。**バイナリ取得方式は決定（2026-06-18）＝OpenH264 は同梱せず初回 Cisco 取得**（同梱は Cisco バイナリライセンスの「ダウンロード前に第三者ソフトへ統合・結合しない」条件に反するため）。候補・方式の調査＝[`../research/ffmpeg-openh264-windows.md`](../research/ffmpeg-openh264-windows.md)。**未確定**: 使用 FFmpeg ビルド/バージョンの pin、必須クレジット「OpenH264 Video Codec provided by Cisco Systems, Inc.」の表示、**商用 AVC コンテンツの MPEG-LA 許諾要否（法務）**。
 - **AAC音声**も同様の特許背景（ソフトウェアでの実害は小）。完全な特許回避が要件化した場合は **AV1/WebM の任意出力**を将来追加する。
