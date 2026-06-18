@@ -47,15 +47,15 @@
 - 理由: 特許カバレッジは **Cisco が配布したバイナリ**にのみ及ぶ（§1・§5）。FFmpeg に OpenH264 を**静的**に取り込むとカバレッジ外。よって **OpenH264 は静的に組み込まず、FFmpeg は動的参照だけ**にして、実体は Cisco の DLL を実行時に置く（Crigges 方式の現行版）。
 - ビルド構成（MSYS2/MinGW・`media-autobuild_suite` 等で再現可能にスクリプト化）:
   - FFmpeg: `--enable-shared --disable-static` ／ `--enable-libopenh264` ／ **`--enable-gpl`・`--enable-nonfree` を付けない** ／ x264・x265 を入れない。
-  - OpenH264: **静的に取り込まない**。FFmpeg の libopenh264 ラッパが**実行時に DLL を探す**形にし、その DLL は **Cisco 配布の `libopenh264-<ver>-win64.dll`** を取得して配置（FFmpeg が探す名前に合わせる）。
-  - **OpenH264 のバージョンは FFmpeg ビルドが期待する ABI と一致**させる（不一致はロード失敗）。
+  - OpenH264: **静的に取り込まない**。⚠️ **標準の `--enable-libopenh264` は openh264 をビルド時リンク**するため、DLL が無いと FFmpeg 自体が起動しない（=初回取得方式と非両立）。**libavcodec が openh264 を実行時 `LoadLibraryA`/`dlopen` で読むパッチ**（openSUSE/Raven の `ffmpeg-dlopen-openh264` 系の前例あり）を当て、openh264 を**ハード依存にしない**。実体は **Cisco 配布の `libopenh264-<ver>-win64.dll`** を取得・配置（FFmpeg が探す名前に合わせる）。
+  - **OpenH264 のバージョンは FFmpeg／パッチが期待する ABI と一致**させる（不一致はロード失敗）。
 - バージョン目安: FFmpeg 8.1.x ／ OpenH264 2.6.0（pin 時に公式確認・ABI 一致）。
 
 ### 受け入れ基準（候補バイナリで必ず実機検証＝ユーザー設問1–7・Windows 実機で実施）
 1. 成果物のファイル名・取得元・コミット/ビルド日・ハッシュを記録。
 2. `ffmpeg -buildconf` 全文に `--enable-libopenh264` 有・`--enable-gpl`/`--enable-nonfree` 無。
 3. `ffmpeg -encoders` に `libopenh264` が存在。
-4. `avcodec-*.dll` の依存関係に **openh264 DLL** が現れる（＝動的参照の証拠）。
+4. `avcodec-*.dll` のインポートに **openh264 が現れないこと**（dlopen 方式＝実行時 `LoadLibraryA` ロードのため現れないのが正常。逆に現れる＝ビルド時ハード依存で、DLL 無しに FFmpeg が起動しない＝不可）。動的ロードの成立は #5・#6 で確認する。
 5. **OpenH264 DLL を置かない状態では `libopenh264` エンコードが失敗**する（＝静的に埋め込まれていない証拠）。
 6. **Cisco 公式 DLL を置くとロードされ**、エンコードが成功する。
 7. 成果物内の OpenH264 が**静的リンクでなく Cisco 公式 DLL の動的参照**であること。
@@ -68,8 +68,8 @@
 
 1. **入手元・バージョン**: 入手元＝**再現可能な自前ビルド**（BtbN は OpenH264 静的リンクのため不可・§2）。バージョン＝FFmpeg 8.1.x・OpenH264 2.6.0（ABI 一致・pin 時に公式確認）。
 2. **構成検証（LGPL/libopenh264）**: 実バイナリで `ffmpeg -buildconf` を実行し `--enable-libopenh264` の存在を確認（実装: 起動時/CIで自動チェック可）。
-3. **`--enable-libopenh264` の有無**: BtbN lgpl は **要検証**（README 未記載）。自前ビルドなら明示して確実。
-4. **`--enable-gpl`/`nonfree` 不含**: 同じく `-buildconf` で両フラグの**不在**を確認（lgpl 変種は不含の想定だが検証必須）。
+3. **`--enable-libopenh264` の有無**: 自前ビルドで明示＝確実（BtbN は §2 のとおり静的リンクで除外済み）。
+4. **`--enable-gpl`/`nonfree` 不含**: 自前ビルドで両フラグを**付けず**、`-buildconf` で不在を確認。
 5. **対応 Cisco OpenH264 バージョン**: 2.6.0（最新）。FFmpeg ビルドの libopenh264 ABI に合わせて選定（不一致はロード失敗）。
 6. **DLL 名・配置・読込**: Cisco 配布物 `libopenh264-<ver>-win64.dll.bz2` を取得→bz2 展開→`libopenh264.dll` として FFmpeg が探索する場所（実行ファイル同階層 or `PATH`/作業ディレクトリ）に配置。FFmpeg は実行時に動的ロード。
 7. **自前ビルドの要否**: **必要**。既存配布物（BtbN）は OpenH264 を**静的リンク**するため不可（§2）。OpenH264 を**動的参照**する LGPL FFmpeg を再現可能に自前ビルドする（構成フラグ固定・受け入れ基準4–7で検証）。
@@ -93,7 +93,7 @@
 ---
 
 ## 6. 確定が必要な値（pin 時に公式から取得・本書では推測しない）
-- FFmpeg ビルドの**正確なバージョンとダウンロードURL**（BtbN の該当リリース）。
+- 自前ビルドの**正確な FFmpeg ソースバージョン・ビルドスクリプト/dlopen パッチのコミット・再現手順**（§3 のビルド構成に基づく）。
 - そのビルドの **`-buildconf` 実出力**（`--enable-libopenh264` 有・`--enable-gpl`/`nonfree` 無の確認）。
 - **OpenH264 の正確なバージョン・win64 バイナリ URL・公開ハッシュ（SHA）**（ciscobinary / cisco リリース）。
 - FFmpeg ビルドが要求する **OpenH264 ABI バージョン**との整合。

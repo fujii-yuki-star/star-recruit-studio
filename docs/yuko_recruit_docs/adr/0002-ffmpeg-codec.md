@@ -34,7 +34,7 @@
 ## 結果・影響
 
 - OpenH264エンコーダは概ね **Constrained Baseline プロファイル** → 採用動画には十分。libx264より圧縮効率は劣り、ファイルがやや大きくなる。
-- **実装**：Cisco公式バイナリの取得（Ciscoの配布条件に従い同梱、または実行時取得）。FFmpegは `libopenh264` 有効ビルド。`infrastructure/ffmpeg` 越しに呼ぶ。
+- **実装**：Cisco公式バイナリの**初回実行時取得**（**同梱不可**＝`BINARY_LICENSE` の「ダウンロード前に第三者ソフトへ統合・結合しない」条件によりカバレッジ外）。FFmpeg は `libopenh264` 有効＋**openh264 を実行時 `dlopen`/`LoadLibraryA` で読むパッチ**を当てたビルドとする（標準の `--enable-libopenh264` はビルド時リンク＝DLL 無しで起動不可になるため）。`infrastructure/ffmpeg` 越しに呼ぶ。
 - 入力動画のH.264デコードはFFmpeg/OpenH264で対応。
 - アプリ内「クレジット/ライセンス」画面に FFmpeg(LGPL)＋ソース入手手段を明記（`13 §9`）。
 
