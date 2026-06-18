@@ -20,7 +20,7 @@ const SPEED_MIN: f64 = 0.5;
 const SPEED_MAX: f64 = 2.0;
 const DEFAULT_SPEED: f64 = 1.0;
 
-/// 映像コーデック。本番(OpenH264)への無改修切替のための抽象。
+/// 映像コーデック。主経路は h264_mf（Media Foundation）で、フォールバックとして OpenH264／開発用 libx264 を持つ（ADR-0013）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoCodec {
     /// Windows Media Foundation の H.264（h264_mf）。OS提供コーデック＝H.264書き出しの主経路（ADR-0013）。
@@ -33,6 +33,7 @@ pub enum VideoCodec {
 /// Media Foundation(h264_mf) の目標ビットレート。
 /// h264_mf は無指定だと既定ビットレートが低く画質が崩れるため明示する。
 /// 12M は 1080p で x264(CRF23) 同等画質を実機確認した値。品質優先・最低 12M（ユーザー決定 2026-06-18）。
+/// TODO(配布前・ADR-0013 残課題): 解像度別ビットレート（720p では 12M は過剰＝標準 ~5–8M）／品質ベース RC の最適化。
 const MF_TARGET_BITRATE: &str = "12M";
 
 impl VideoCodec {
@@ -1048,8 +1049,11 @@ pub fn export_video(
     let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).map_err(|_| {
         "動画の書き出しツールが見つかりません。設定でツールの場所を指定してください。".to_string()
     })?;
+    // ここに来るのは「ffmpeg は見つかったが H.264 エンコーダ（h264_mf/libopenh264/libx264）が無い」ケース。
+    // 原因はツールの場所ではなく環境（例: Windows N で Media Foundation 非搭載、配布ビルドの構成不足）。
+    // ※ Windows N/KN 等の事前検知と具体的な案内文は ADR-0013 残課題（配布実装で確定）。
     let codec = pick_codec(&encoders).ok_or_else(|| {
-        "動画の書き出し機能が使えません。設定でツールの場所を確認してください。".to_string()
+        "この端末では動画の書き出しに対応した機能が見つかりませんでした。お使いの Windows の種類によっては、追加の準備が必要な場合があります。".to_string()
     })?;
 
     let tmp = std::env::temp_dir().join("yuko_recruit_export");
@@ -1384,6 +1388,48 @@ mod tests {
             .expect("encoder present");
         assert_eq!(a[i + 1], "-b:v");
         assert_eq!(a[i + 2], "12M");
+        // video_scene_args も MF で -c:v h264_mf の直後に -b:v 12M。
+        let v = video_scene_args(&VideoSceneArgs {
+            below_png: "b.png",
+            clip: "c.mp4",
+            above_png: "a.png",
+            narration: None,
+            slot_x: 0,
+            slot_y: 0,
+            slot_w: 640,
+            slot_h: 360,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            clip_end_sec: None,
+            duration_sec: 5.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: false,
+            speed: 1.0,
+            fps: 30,
+            codec: VideoCodec::MediaFoundation,
+            out: "out.mp4",
+        });
+        let vi = v
+            .iter()
+            .position(|s| s == "h264_mf")
+            .expect("encoder present");
+        assert_eq!(v[vi + 1], "-b:v");
+        assert_eq!(v[vi + 2], "12M");
+        // xfade_chain_args も MF で -b:v 12M。
+        let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
+        let steps = vec![JoinStep {
+            xfade: Some("fade"),
+            duration_sec: 0.5,
+            offset_sec: 1.5,
+        }];
+        let xf = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::MediaFoundation, 30);
+        let xi = xf
+            .iter()
+            .position(|s| s == "h264_mf")
+            .expect("encoder present");
+        assert_eq!(xf[xi + 1], "-b:v");
+        assert_eq!(xf[xi + 2], "12M");
         // x264 は -b:v を付けない。
         let x = scene_clip_args("f.png", None, 1.0, "out.mp4", 3.0, 30, VideoCodec::X264);
         assert!(!x.iter().any(|s| s == "-b:v"));
