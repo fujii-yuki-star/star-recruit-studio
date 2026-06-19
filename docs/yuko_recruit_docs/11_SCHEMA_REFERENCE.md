@@ -298,6 +298,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | 問題 | 補正 |
 |---|---|
 | 存在しない `templateId` | 同 `category` の標準テンプレへ置換（無ければ警告し選択を促す） |
+| テンプレの `aspectRatio` がプロジェクトの向きと不一致 | 同 `category`・同 `orientation` のテンプレへ置換（無ければ警告・原状維持／ADR-0012・B4） |
 | 存在しない `assetId` | `null` にし、未使用素材から候補提示（警告） |
 | `durationSec < SCENE_MIN_DURATION_SEC` | `SCENE_MIN_DURATION_SEC`（3秒）へ |
 | `durationSec >` テンプレ上限 | テンプレ `aiHint.maxDurationSec`（無ければ `SCENE_MAX_DURATION_SEC`=15秒）へ |

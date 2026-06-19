@@ -18,6 +18,7 @@ import type { TransformContext } from '../src/domain/ai/transformPlan';
 import { layoutScene } from '../src/renderer/layout';
 import { layoutToSvg } from '../src/renderer/sceneSvg';
 import { MockAiProvider } from '../src/infrastructure/aiProviders/mockAiProvider';
+import { ORIENTATION } from '../src/domain/enums';
 
 const OUT = '.spike';
 const FONT = 'Noto Sans JP';
@@ -104,7 +105,7 @@ async function main(): Promise<void> {
     companyInfo: { companyName: '株式会社サンプル' },
     purpose: 'new_graduate', targetDurationSec: 60, templates: [], assets: [], yukoPoseTags: ['smile', 'guide'],
   });
-  const ctx: TransformContext = { templates, assets };
+  const ctx: TransformContext = { templates, assets, orientation: ORIENTATION.landscape };
   const { scenes } = transformVideoPlan(plan, ctx);
   console.log(`Mock→変換: ${scenes.length} シーン`);
 

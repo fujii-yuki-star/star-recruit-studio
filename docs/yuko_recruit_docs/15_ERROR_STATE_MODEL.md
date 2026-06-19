@@ -94,6 +94,7 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | code | severity | 既定の自動対応 | ユーザー向け文言（例） | 由来 |
 |---|---|---|---|---|
 | `TEMPLATE_NOT_FOUND` | warning | 同category既定へ置換 | この場面の見た目パターンが見つからないため、標準を使います | `11 §9` |
+| `TEMPLATE_ORIENTATION_MISMATCH` | info（補正時）/ warning（補正不可時） | 同category・同orientation へ置換 | 動画の向きに合う見た目に調整しました | `ADR-0012` / `11 §9` |
 | `ASSET_NOT_FOUND` | warning | null＋候補提示 | 使う写真・動画が見つかりません。選び直してください | `05 §17` |
 | `ASSET_FILE_MISSING` | warning | 選び直し導線 | 素材ファイルが見つかりません | `05 §17` |
 | `REQUIRED_SLOT_EMPTY` | warning | — | この場面に必要な写真・動画が未設定です | `11 §8 V6` |
