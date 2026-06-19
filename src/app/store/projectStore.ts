@@ -19,7 +19,8 @@ import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider"
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
 import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
-import { sampleAssets, sampleTemplates } from "../../infrastructure/sampleData";
+import { sampleAssets } from "../../infrastructure/sampleData";
+import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
@@ -107,6 +108,8 @@ interface ProjectState {
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
   removeAsset: (assetId: string) => void;
+  /** 見た目パターンのパックを取り込み、既存に統合する（templateId で重複排除・B2/ADR-0012）。 */
+  addTemplatePack: (templates: Template[]) => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
@@ -221,7 +224,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   parts: [],
   scenes: [],
   warnings: [],
-  templates: sampleTemplates,
+  templates: loadBundledTemplates(),
   assets: sampleAssets,
   assetSrcById: {},
   narrationAudioById: {},
@@ -505,6 +508,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })),
   removeAsset: (assetId) =>
     set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId), saveStatus: "idle" })),
+  addTemplatePack: (incoming) =>
+    set((s) => {
+      // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
+      // テンプレは project.json に保存しない（利用可能な見た目パターン）ので saveStatus は変えない。
+      const byId = new Map(s.templates.map((t) => [t.templateId, t] as const));
+      for (const t of incoming) byId.set(t.templateId, t);
+      return { templates: [...byId.values()] };
+    }),
   setAssetImage: async (assetId, file) => {
     // 画像は表示＋書き出し(ADR-0004)で data URL が必要。読み込んで即時表示。
     let dataUrl: string;

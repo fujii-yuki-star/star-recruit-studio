@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
 import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, type LayerType, type SceneCategory } from "../../domain/enums";
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
+import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
@@ -105,8 +106,28 @@ function usedElements(template: Template): string[] {
 export function LooksScreen() {
   const templates = useProjectStore((s) => s.templates);
   const assets = useProjectStore((s) => s.assets);
+  const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
   const [selectedId, setSelectedId] = useState(templates[0]?.templateId ?? "");
+  const [loadMsg, setLoadMsg] = useState("");
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
+
+  // 用意した見た目パターンのファイルを取り込む（検証は templateFs＝§2-2）。件数のみ提示（§2-3）。
+  async function onLoadPack(e: ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = "";
+    if (files.length === 0) return;
+    const { templates: loaded, rejected } = await parseTemplateFiles(files);
+    const first = loaded[0];
+    if (first) {
+      addTemplatePack(loaded);
+      setSelectedId(first.templateId);
+    }
+    setLoadMsg(
+      first
+        ? `${loaded.length}件の見た目パターンを読み込みました。${rejected.length > 0 ? `（${rejected.length}件は内容が合わず取り込めませんでした）` : ""}`
+        : "読み込める見た目パターンがありませんでした。ファイルの内容をご確認ください。",
+    );
+  }
 
   if (!current) {
     return (
@@ -187,7 +208,24 @@ export function LooksScreen() {
             ))}
           </div>
 
-          <p className="field-hint mt">見た目パターンの追加・編集は今後のバージョンで対応予定です。</p>
+          <hr className="divider" />
+          <input
+            id="tmplPack"
+            type="file"
+            accept=".json,application/json"
+            multiple
+            hidden
+            onChange={(e) => void onLoadPack(e)}
+          />
+          <label htmlFor="tmplPack" className="btn btn-secondary" style={{ cursor: "pointer" }}>
+            見た目パターンを読み込む
+          </label>
+          <p className="field-hint mt">用意した見た目パターンのファイルを追加できます（編集は今後のバージョンで対応予定）。</p>
+          {loadMsg && (
+            <div className="notice notice-info mt" role="status">
+              <span>{loadMsg}</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
