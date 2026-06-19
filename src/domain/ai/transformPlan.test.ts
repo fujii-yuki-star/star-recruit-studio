@@ -184,4 +184,13 @@ describe('transformVideoPlan', () => {
       ),
     ).toBe(false);
   });
+
+  it('縦型projectで縦型の代替が無いカテゴリは補正できず警告のみ（autoFixed=false）', () => {
+    // 写真テンプレは 16:9 のみ（縦型なし）→ 縦型projectでは補正先が無い。
+    const plan = singleScenePlan({ sceneType: 'photo_intro', templateId: 'photo_left_text_right_yuko_v1' });
+    const { scenes } = transformVideoPlan(plan, baseCtx('9:16'));
+    expect(
+      scenes[0].warnings.some((w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH' && w.autoFixed === false),
+    ).toBe(true);
+  });
 });

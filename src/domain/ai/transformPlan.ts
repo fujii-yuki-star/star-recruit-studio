@@ -144,10 +144,10 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
           templateId = alt.templateId;
           template = alt;
         } else if (!template) {
-          w.push(warn('TEMPLATE_NOT_FOUND', 'この場面の見た目パターンが見つかりません', 'templateId', 'warning', false));
+          w.push(warn('TEMPLATE_NOT_FOUND', 'この場面の見た目パターンが見つかりません。見た目パターンを手動で選んでください', 'templateId', 'warning', false));
         } else {
           // 当該カテゴリ・当該向きの代替が無い（その向きが未整備）。原状維持で向き不一致を明示する。
-          w.push(warn('TEMPLATE_ORIENTATION_MISMATCH', '動画の向きに合う見た目が見つかりませんでした', 'templateId', 'warning', false));
+          w.push(warn('TEMPLATE_ORIENTATION_MISMATCH', '動画の向きに合う見た目が見つかりませんでした。見た目パターンを手動で選んでください', 'templateId', 'warning', false));
         }
       }
 
