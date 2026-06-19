@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutToSvg } from './sceneSvg';
+import { charWidthEm, layoutToSvg, wrapText } from './sceneSvg';
 import type { Fit } from '../domain/enums';
 import type { SceneLayout } from './layout';
 
@@ -40,5 +40,46 @@ describe('layoutToSvg：画像スロット', () => {
     const svg = layoutToSvg(imageLayout('cover', null), { assetSrc: () => 'data:image/png;base64,AAAA' });
     expect(svg).not.toContain('<image');
     expect(svg).toContain('（未設定）');
+  });
+});
+
+describe('charWidthEm（文字幅の概算・§7）', () => {
+  it('半角(ASCII/Latin-1)は約0.55em', () => {
+    expect(charWidthEm('A')).toBe(0.55);
+    expect(charWidthEm('1')).toBe(0.55);
+    expect(charWidthEm(' ')).toBe(0.55);
+  });
+  it('全角（日本語など）は約1em', () => {
+    expect(charWidthEm('あ')).toBe(1.0);
+    expect(charWidthEm('新')).toBe(1.0);
+  });
+});
+
+describe('wrapText（折返し・あふれ判定・§7）', () => {
+  it('幅に収まる全角は折り返さない', () => {
+    // fontSize40・maxWidth1000 → 全角25まで。20文字は1行。
+    expect(wrapText('あ'.repeat(20), 1000, 40, 3)).toEqual(['あ'.repeat(20)]);
+  });
+  it('全角は幅を超えると折り返す（10文字/行 @ 400px・fs40）', () => {
+    const lines = wrapText('あ'.repeat(25), 400, 40, 5);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe('あ'.repeat(10));
+    expect(lines[2]).toBe('あ'.repeat(5));
+  });
+  it('半角は全角より多く詰まる（18文字/行 @ 400px・fs40）', () => {
+    const lines = wrapText('A'.repeat(40), 400, 40, 5);
+    expect(lines[0]).toHaveLength(18);
+  });
+  it('全角＋半角の混在を幅で折り返す', () => {
+    const lines = wrapText('あA'.repeat(20), 400, 40, 5);
+    expect(lines.length).toBeGreaterThan(1);
+  });
+  it('maxLines を超える分は末尾を … で切る', () => {
+    const lines = wrapText('あ'.repeat(30), 400, 40, 2);
+    expect(lines).toHaveLength(2);
+    expect(lines[1].endsWith('…')).toBe(true);
+  });
+  it('maxWidth < fontSize はガードしてそのまま返す', () => {
+    expect(wrapText('あいうえお', 10, 40, 3)).toEqual(['あいうえお']);
   });
 });

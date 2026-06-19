@@ -81,7 +81,7 @@ export const sampleTemplates: Template[] = [
     layers: [
       { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0, fillColor: "#f5f5f5" },
       { id: "mainVisual", type: "slot", slotType: "image_or_video", required: true, x: 60, y: 150, w: 960, h: 900, zIndex: 10, fit: "cover" },
-      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 1090, w: 900, h: 100, zIndex: 30, fontSize: 54, fontWeight: "bold" },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 1090, w: 680, h: 100, zIndex: 30, fontSize: 54, fontWeight: "bold" },
       { id: "main", type: "text", textKey: "main", x: 90, y: 1210, w: 700, h: 260, zIndex: 30, fontSize: 34, color: "#333333", maxLines: 5 },
       { id: "yuko", type: "character", required: false, x: 800, y: 1180, w: 220, h: 340, zIndex: 40 },
       { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1560, w: 900, h: 110, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
@@ -116,7 +116,7 @@ export const sampleTemplates: Template[] = [
     layers: [
       { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0, fillColor: "#f0f0f0" },
       { id: "mainVisual", type: "slot", slotType: "video", required: true, x: 60, y: 150, w: 960, h: 960, zIndex: 10, fit: "cover" },
-      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 1160, w: 900, h: 100, zIndex: 30, fontSize: 52, fontWeight: "bold" },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 1160, w: 680, h: 100, zIndex: 30, fontSize: 52, fontWeight: "bold" },
       { id: "yuko", type: "character", required: false, x: 800, y: 1180, w: 220, h: 340, zIndex: 40 },
       { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1600, w: 900, h: 110, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
     ],
@@ -163,7 +163,7 @@ export const sampleTemplates: Template[] = [
     aspectRatio: "9:16",
     canvas: { width: 1080, height: 1920 },
     aiHint: { maxDurationSec: 15, maxNarrationLength: 100, maxSubtitleLength: 60 },
-    defaults: { durationSec: 8, transitionIn: "fade", transitionOut: "fade" },
+    defaults: { durationSec: 8, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#000000" },
     layers: [
       { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0 },
       { id: "mainVisual", type: "slot", slotType: "image_or_video", required: true, x: 0, y: 0, w: 1080, h: 1920, zIndex: 10, fit: "cover" },

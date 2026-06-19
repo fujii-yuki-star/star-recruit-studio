@@ -1,6 +1,6 @@
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
-// 注: テキスト折返しは暫定で文字数概算。プレビュー実装ではフォント実測に置換する（05 §10 / ADR-0001 未解決論点）。
+// 注: テキスト折返しは暫定で文字幅概算（半角≈0.55em・全角≈1em）。フォント実測への置換は将来（05 §10 / ADR-0001 未解決論点）。
 import { FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit } from '../domain/enums';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
@@ -17,12 +17,12 @@ function escapeXml(s: string): string {
 
 // 文字幅の概算（フォント実測の代替・05 §10 / ADR-0001 未解決）。半角(ASCII)は約0.55em、
 // それ以外（日本語など全角）はほぼ1em。全角を 0.58em 一律とみなすと縦型の狭幅で折返し不足＝見切れるため区別する。
-function charWidthEm(ch: string): number {
+export function charWidthEm(ch: string): number {
   return ch.charCodeAt(0) <= 0xff ? 0.55 : 1.0;
 }
 
 // 幅(px)に収まるよう行へ分割する（全角/半角を区別）。maxLines を超える分は末尾を … で切る。
-function wrapText(text: string, maxWidth: number, fontSize: number, maxLines: number): string[] {
+export function wrapText(text: string, maxWidth: number, fontSize: number, maxLines: number): string[] {
   if (maxWidth < fontSize || maxLines < 1) return [text];
   const chars = [...text];
   const lines: string[] = [];
