@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
+import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
 import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
@@ -15,15 +16,39 @@ import {
   VideoIcon,
 } from "../components/icons";
 
+// 向きの表示名（§2-3：技術語を出さない）。
+function orientationLabel(o: Orientation): string {
+  return o === ORIENTATION.portrait ? "縦型（9:16）" : "横型（16:9）";
+}
+
 interface DraftProps {
   onNavigate: (screen: ScreenId) => void;
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, scenes, parts, templates, assets, warnings, generate, addScene, removeScene, moveScene, duplicateScene } =
+  const { status, scenes, parts, templates, assets, warnings, meta, generate, addScene, removeScene, moveScene, duplicateScene, changeOrientation } =
     useProjectStore();
+  const aspectRatio = meta.videoSettings.aspectRatio;
   // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  // 向き変更の結果メッセージ（§2-5：何が起きたか＋次の行動）。
+  const [orientationMsg, setOrientationMsg] = useState<{ warn: boolean; text: string } | null>(null);
+
+  function switchOrientation() {
+    const target = aspectRatio === ORIENTATION.portrait ? ORIENTATION.landscape : ORIENTATION.portrait;
+    const { changed, unsupported } = changeOrientation(target);
+    const label = orientationLabel(target);
+    if (changed === 0 && unsupported === 0) {
+      setOrientationMsg({ warn: false, text: `すでに${label}です。` });
+    } else if (unsupported === 0) {
+      setOrientationMsg({ warn: false, text: `${changed}件の場面を${label}に切り替えました。` });
+    } else {
+      setOrientationMsg({
+        warn: true,
+        text: `${changed}件を${label}に切り替えました。${unsupported}件は${label}に合う見た目が無いため元の向きのままです。別の見た目を選び直してください。`,
+      });
+    }
+  }
 
   // たたき台へ直接来た場合は生成する（本実装では保存済みプロジェクトの読込に置き換え）
   useEffect(() => {
@@ -69,6 +94,19 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
           {/* 自動補正・確認の通知 */}
           <WarningBanner warnings={draftWarnings} />
+
+          {/* 画面の向き（B5-b）。現在の向きと、もう一方への切替導線。 */}
+          <div className="row-between mb">
+            <span className="text-muted">画面の向き：<strong>{orientationLabel(aspectRatio)}</strong></span>
+            <button className="btn btn-ghost" onClick={switchOrientation}>
+              {orientationLabel(aspectRatio === ORIENTATION.portrait ? ORIENTATION.landscape : ORIENTATION.portrait)}に切り替える
+            </button>
+          </div>
+          {orientationMsg && (
+            <div className={`notice ${orientationMsg.warn ? "notice-warn" : "notice-info"} mb`} role="status">
+              {orientationMsg.text}
+            </div>
+          )}
 
           {/* 台本表 */}
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
