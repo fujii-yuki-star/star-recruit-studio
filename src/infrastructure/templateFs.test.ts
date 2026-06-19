@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadBundledTemplates, parseTemplateFiles, parseTemplatePack, templatesForOrientation } from './templateFs';
 import { sampleTemplates } from './sampleData';
+import { SCENE_CATEGORIES } from '../domain/enums';
 
 // 検証用の最小・正当なテンプレ（schema 必須項目のみ）。category/aspectRatio を差し替えて異常系を作る。
 const validLandscape = {
@@ -97,5 +98,22 @@ describe('parseTemplateFiles', () => {
     const { templates, rejected } = await parseTemplateFiles([huge]);
     expect(templates).toHaveLength(0);
     expect(rejected).toHaveLength(1);
+  });
+});
+
+describe('縦型（9:16）同梱テンプレの網羅（B3）', () => {
+  const portrait = () => loadBundledTemplates().filter((t) => t.aspectRatio === '9:16');
+
+  it('全カテゴリ（free 含む）に 9:16 の同梱テンプレがある', () => {
+    const covered = new Set(portrait().map((t) => t.category));
+    for (const cat of SCENE_CATEGORIES) {
+      expect(covered.has(cat)).toBe(true);
+    }
+  });
+
+  it('縦型テンプレのキャンバスは 1080×1920', () => {
+    for (const t of portrait()) {
+      expect(t.canvas).toEqual({ width: 1080, height: 1920 });
+    }
   });
 });

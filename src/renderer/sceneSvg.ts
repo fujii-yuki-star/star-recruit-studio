@@ -15,26 +15,44 @@ function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function wrapText(text: string, maxChars: number, maxLines: number): string[] {
-  if (maxChars < 1) return [text];
+// 文字幅の概算（フォント実測の代替・05 §10 / ADR-0001 未解決）。半角(ASCII)は約0.55em、
+// それ以外（日本語など全角）はほぼ1em。全角を 0.58em 一律とみなすと縦型の狭幅で折返し不足＝見切れるため区別する。
+function charWidthEm(ch: string): number {
+  return ch.charCodeAt(0) <= 0xff ? 0.55 : 1.0;
+}
+
+// 幅(px)に収まるよう行へ分割する（全角/半角を区別）。maxLines を超える分は末尾を … で切る。
+function wrapText(text: string, maxWidth: number, fontSize: number, maxLines: number): string[] {
+  if (maxWidth < fontSize || maxLines < 1) return [text];
+  const chars = [...text];
   const lines: string[] = [];
-  let rest = text;
-  while (rest.length > 0 && lines.length < maxLines) {
-    lines.push(rest.slice(0, maxChars));
-    rest = rest.slice(maxChars);
+  let line = '';
+  let lineW = 0;
+  for (let i = 0; i < chars.length; i += 1) {
+    const w = charWidthEm(chars[i]) * fontSize;
+    if (lineW + w > maxWidth && line.length > 0) {
+      lines.push(line);
+      line = '';
+      lineW = 0;
+      if (lines.length >= maxLines) {
+        // 行数上限に到達。まだ文字が残るなら直前の行末を … にする。
+        if (chars.slice(i).join('').length > 0) {
+          const last = lines[lines.length - 1];
+          lines[lines.length - 1] = `${last.slice(0, Math.max(0, last.length - 1))}…`;
+        }
+        return lines;
+      }
+    }
+    line += chars[i];
+    lineW += w;
   }
-  if (rest.length > 0 && lines.length > 0) {
-    const last = lines[lines.length - 1];
-    lines[lines.length - 1] = `${last.slice(0, Math.max(0, maxChars - 1))}…`;
-  }
+  if (line.length > 0) lines.push(line);
   return lines;
 }
 
 function textToSvg(item: TextItem): string {
   const parts: string[] = [];
-  const approxCharWidth = item.fontSize * 0.58; // 全角想定の概算
-  const maxChars = Math.max(1, Math.floor(item.w / approxCharWidth));
-  const lines = wrapText(item.text, maxChars, item.maxLines);
+  const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines);
   const lineHeight = item.fontSize * 1.3;
 
   if (item.background) {
