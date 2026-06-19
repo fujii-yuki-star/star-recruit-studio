@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.1" },
+    "schemaVersion": { "const": "1.2" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -52,11 +52,9 @@
     "VideoSettings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["aspectRatio", "width", "height", "fps", "targetDurationSec", "maxDurationSec"],
+      "required": ["aspectRatio", "fps", "targetDurationSec", "maxDurationSec"],
       "properties": {
-        "aspectRatio": { "enum": ["16:9"] },
-        "width": { "type": "integer", "const": 1920 },
-        "height": { "type": "integer", "const": 1080 },
+        "aspectRatio": { "enum": ["16:9", "9:16"] },
         "fps": { "type": "integer", "const": 30 },
         "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
         "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 }

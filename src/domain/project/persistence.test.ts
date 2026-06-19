@@ -130,7 +130,7 @@ describe('parseProjectDoc', () => {
     delete doc.videoKind;
     const back = parseProjectDoc(JSON.stringify(doc));
     expect(back.videoKind).toBe('recruit');
-    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.0→1.1 へ昇格する
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.0→現行 schemaVersion へ昇格する
   });
   it('旧 companyInfo.additionalNotes をトップレベルへ移送する（ADR-0011 移行）', () => {
     const doc = {
@@ -142,6 +142,29 @@ describe('parseProjectDoc', () => {
     const back = parseProjectDoc(JSON.stringify(doc));
     expect(back.additionalNotes).toBe('誠実な社風を伝えたい');
     expect((back.companyInfo as unknown as Record<string, unknown>).additionalNotes).toBeUndefined();
+  });
+  it('旧 videoSettings.width/height を 1.2 移行で除去する（ADR-0012）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.1',
+      videoSettings: { aspectRatio: '16:9', width: 1920, height: 1080, fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect('width' in back.videoSettings).toBe(false);
+    expect('height' in back.videoSettings).toBe(false);
+    expect(back.videoSettings.aspectRatio).toBe('16:9');
+  });
+  it('width/height が既に無い 1.1 文書は aspectRatio を保持して 1.2 に昇格する（移行の冪等性）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.1',
+      videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(back.videoSettings.aspectRatio).toBe('9:16');
+    expect('width' in back.videoSettings).toBe(false);
   });
   it('未対応メジャー(2.0)は拒否', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '2.0' };

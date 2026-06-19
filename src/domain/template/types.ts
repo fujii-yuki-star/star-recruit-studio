@@ -1,5 +1,5 @@
 // 見た目パターン（テンプレート）の型。正典は docs/yuko_recruit_docs/schemas/template.schema.json と 04_TEMPLATE_SPEC.md。
-import type { Fit, LayerType, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
+import type { Fit, LayerType, Orientation, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
 
 export interface LayerBackground {
   enabled?: boolean;
@@ -56,7 +56,8 @@ export interface Template {
   name: string;
   description?: string;
   category: SceneCategory;
-  aspectRatio: '16:9';
+  /** 向き（16:9=横型／9:16=縦型・ADR-0012）。project の aspectRatio と一致するテンプレのみ選ぶ（B4 で検証）。 */
+  aspectRatio: Orientation;
   canvas: { width: number; height: number };
   aiHint?: TemplateAiHint;
   defaults?: TemplateDefaults;
