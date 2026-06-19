@@ -24,8 +24,12 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # cargo-audit はソースからのコンパイル install（cargo install）だと crates.io 取得が不安定で
+      # 失敗・segfault することがある（CI実績あり）。プリビルドバイナリを取得して安定化する。
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
 
       - name: Run rust dependency audit
         run: cargo audit --file src-tauri/Cargo.lock
