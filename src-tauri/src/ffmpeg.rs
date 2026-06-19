@@ -805,6 +805,7 @@ fn encode_jobs(
         .first()
         .and_then(|j| match j {
             SceneJob::Still(s) => read_png_size(s.png.as_path()),
+            // 下層 PNG はキャンバス全体（出力解像度）をレンダリングしたもの（ADR-0001 A2）。
             SceneJob::Video(v) => read_png_size(v.below.as_path()),
         })
         .unwrap_or((DEFAULT_OUTPUT_WIDTH, DEFAULT_OUTPUT_HEIGHT));
@@ -1534,6 +1535,7 @@ mod tests {
     fn target_bitrate_clamps_small_and_large() {
         assert_eq!(target_bitrate_bps(320, 180, 30), 3_000_000); // 下限
         assert_eq!(target_bitrate_bps(3840, 2160, 60), 16_000_000); // 上限
+        assert_eq!(target_bitrate_bps(1920, 1080, 0), BITRATE_MIN_BPS); // fps=0 → clamp下限
         assert_eq!(bitrate_arg(5_253_120), "5253k");
     }
 
