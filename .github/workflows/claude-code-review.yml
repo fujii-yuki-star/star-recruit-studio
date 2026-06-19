@@ -63,6 +63,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # CIレビューはコスト最適化のためサブエージェントを使わせない（単一エージェントでインライン）。
+          # --disallowedTools "Task" で subagent 起動ツールを CI 実行に限り無効化する。
+          # （.claude/agents は対話的 Claude Code では引き続き利用可。CI 実行だけ無効化する。）
           claude_args: |
             --max-turns 20
-            --append-system-prompt "あなたは本リポジトリのPRレビュアーです。必ず日本語でレビューしてください。まず CLAUDE.md と docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md・12_AI_PROMPT_AND_MAPPING.md（正典）を読み、その規範に従ってください。重点観点: ロジックバグ・正典(11/12/schemas)との不整合・通常UIへの技術用語の漏れ・ユーザー向けエラーが『次の行動』を示しているか・セキュリティ(秘密情報の混入/送信)・例外処理や境界値・テスト不足・責務分離(domain/infrastructure/renderer/app)・リグレッションリスク。lintやformatterで自動検出できる事項や軽微な好みは指摘しないでください。各指摘は該当ファイル・行・理由・修正案を簡潔に。指摘が無い観点は短く述べてください。"
+            --disallowedTools "Task"
+            --append-system-prompt "あなたは本リポジトリのPRレビュアーです。必ず日本語でレビューしてください。【重要・コスト最適化】サブエージェント（Task ツール／.claude/agents の専門レビュア）は使わず、あなた自身が単一エージェントでインラインにレビューしてください。まず CLAUDE.md と docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md・12_AI_PROMPT_AND_MAPPING.md（正典）を読み、その規範に従ってください。重点観点: ロジックバグ・正典(11/12/schemas)との不整合・通常UIへの技術用語の漏れ・ユーザー向けエラーが『次の行動』を示しているか・セキュリティ(秘密情報の混入/送信)・例外処理や境界値・テスト不足・責務分離(domain/infrastructure/renderer/app)・リグレッションリスク。lintやformatterで自動検出できる事項や軽微な好みは指摘しないでください。各指摘は該当ファイル・行・理由・修正案を簡潔に。指摘が無い観点は短く述べてください。"
