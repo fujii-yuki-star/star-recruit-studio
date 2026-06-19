@@ -196,7 +196,7 @@
 
 | フィールド | 型 | 必須 | 制約・既定 |
 |---|---|:--:|---|
-| schemaVersion | string | ● | `"1.1"`（ADR-0011 で 1.0→1.1。§1） |
+| schemaVersion | string | ● | `"1.2"`（ADR-0011 で 1.0→1.1・ADR-0012 で 1.1→1.2。§1） |
 | videoKind | enum | ○ | `recruit`/`general`。省略時 `recruit`＝後方互換（§3.1・ADR-0011） |
 | projectId | string | ● | §2.1 |
 | projectName | string | ● | 1–80字 |

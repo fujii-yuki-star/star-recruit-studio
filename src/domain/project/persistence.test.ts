@@ -155,6 +155,17 @@ describe('parseProjectDoc', () => {
     expect('height' in back.videoSettings).toBe(false);
     expect(back.videoSettings.aspectRatio).toBe('16:9');
   });
+  it('width/height が既に無い 1.1 文書は aspectRatio を保持して 1.2 に昇格する（移行の冪等性）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.1',
+      videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(back.videoSettings.aspectRatio).toBe('9:16');
+    expect('width' in back.videoSettings).toBe(false);
+  });
   it('未対応メジャー(2.0)は拒否', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '2.0' };
     expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();

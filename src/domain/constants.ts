@@ -22,15 +22,20 @@ export const HD_HEIGHT = 720;
 // 縦型（9:16・ADR-0012）。SoT は videoSettings.aspectRatio で、寸法はここから導出する。
 export const PORTRAIT_WIDTH = 1080;
 export const PORTRAIT_HEIGHT = 1920;
-// 縦型の軽量書き出しサイズ（横型 HD=1280x720 の縦版）。
-export const PORTRAIT_HD_WIDTH = 720;
-export const PORTRAIT_HD_HEIGHT = 1280;
 
-/** 向き → フル出力寸法（aspectRatio を単一の真実とし寸法を導出する＝ADR-0012）。 */
+/** 向き → フル出力寸法（aspectRatio を単一の真実とし寸法を導出する＝ADR-0012）。
+ *  switch + never で網羅性を担保（将来 Orientation に値を追加したらコンパイルエラーで検知）。 */
 export function dimsForOrientation(aspectRatio: Orientation): { width: number; height: number } {
-  return aspectRatio === ORIENTATION.portrait
-    ? { width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT }
-    : { width: WIDTH, height: HEIGHT };
+  switch (aspectRatio) {
+    case ORIENTATION.portrait:
+      return { width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT };
+    case ORIENTATION.landscape:
+      return { width: WIDTH, height: HEIGHT };
+    default: {
+      const _exhaustive: never = aspectRatio;
+      return _exhaustive;
+    }
+  }
 }
 
 export const NARRATION_VOLUME = 1.0;

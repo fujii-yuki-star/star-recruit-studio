@@ -199,7 +199,9 @@ export function parseProjectDoc(text: string): Project {
   return migrateProject(doc as unknown as Project);
 }
 
-/** ADR-0011: 旧データ(1.0)を 1.1 へ移行する（読込時。schemaVersion 更新・videoKind 既定 recruit・additionalNotes をトップレベルへ移送）。 */
+/** 読込時に旧バージョン(1.0/1.1)を現行(1.2)へ移行する。
+ *  1.0→1.1: videoKind 既定 recruit・companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
+ *  1.1→1.2: videoSettings.width/height を除去（aspectRatio を単一の真実に＝ADR-0012）。 */
 function migrateProject(project: Project): Project {
   const next: Project = {
     ...project,
