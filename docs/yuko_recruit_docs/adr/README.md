@@ -18,7 +18,7 @@
 | [0009](0009-scene-transitions.md) | 場面間トランジション（フェード／スライド） | **Accepted** |
 | [0010](0010-real-ai-provider.md) | 実 AI プロバイダ（Gemini／OpenAI）と APIキー・外部送信 | **Accepted** |
 | [0011](0011-video-kinds-and-stario.md) | 動画の用途拡張（採用／一般・社内発表の2系統）と製品名 stario | **Accepted** |
-| [0012](0012-aspect-ratio-and-portrait.md) | 画面比率の拡張と縦型動画（9:16・1080×1920）対応 | **Proposed** |
+| [0012](0012-aspect-ratio-and-portrait.md) | 画面比率の拡張と縦型動画（9:16・1080×1920）対応 | **Accepted** |
 | [0013](0013-h264-via-media-foundation.md) | H.264 書き出しを Media Foundation（h264_mf）主経路に | **Accepted** |
 
 ## 状態の意味

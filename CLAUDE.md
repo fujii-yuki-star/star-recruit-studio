@@ -129,9 +129,9 @@ src/
 
 ## 10. MVPでやらないこと
 
-本格タイムライン編集 / キーフレームアニメ / 3D・Live2D / 複雑エフェクト / テンプレート作成エディタ / 縦・正方形動画 / 全Provider対応 / AIによる映像生成 / 口パクアニメ。（`01 §16.2`・`09 §8`）
+本格タイムライン編集 / キーフレームアニメ / 3D・Live2D / 複雑エフェクト / テンプレート作成エディタ / 正方形（1:1）動画 / 全Provider対応 / AIによる映像生成 / 口パクアニメ。（`01 §16.2`・`09 §8`）
 
-> ※ **縦・正方形動画**は当初 MVP 除外だが、ユーザー要件により**対応を提案中**（[`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) Proposed・#118）。Accepted 時に本項から除外する。
+> ※ **縦型動画（9:16）**は当初 MVP 除外だったが、ユーザー要件により**対応決定**（[`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**・2026-06-19・#118）＝本項の「縦型」除外を解除。**正方形（1:1）は引き続き MVP 外**（schema 枠のみ残す）。
 
 ---
 
@@ -144,7 +144,7 @@ src/
 - ナレーション音声: [`adr/0003`](docs/yuko_recruit_docs/adr/0003-narration-voice.md) **Accepted** — VOICEVOX:ずんだもんを**ナレーター**として使用（ゆうこ固有の声とは称さない）＋常時クレジット。
 - VOICEVOX同梱: [`adr/0005`](docs/yuko_recruit_docs/adr/0005-voicevox-bundling.md) **Accepted** — エンジンを**同梱しアプリ起動時に自動起動**（接続先設定は上級者向けフォールバック）。規約確認済み・クレジット表示は維持。実装/配布の詳細は ADR 未解決論点。
 - ゆうこ＝自社保有で権利クリア（`17`）／フォントはOFL系を同梱（游ゴシック等は同梱不可。`13 §6`）。
-- 縦型動画（9:16・1080×1920）: [`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Proposed** — ユーザー要件で必須化。コーデックとは独立の別トラック（#118）。着手前に未解決4点（9:16のみ/＋1:1・縦型テンプレ範囲・既存16:9マイグレーション・尺上限）を確認。
+- 縦型動画（9:16・1080×1920）: [`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**（2026-06-19）— α版に対応決定。**9:16のみ**（1:1は将来）・縦テンプレは**全9カテゴリ**・既存は**16:9固定移行＋向き変更（16:9⇆9:16）導線**・尺上限は横型踏襲。コーデックとは独立の別トラック（#118）。
 
 **未決定（リリース前に確認）**
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。
