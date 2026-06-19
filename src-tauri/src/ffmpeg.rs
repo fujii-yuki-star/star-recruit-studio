@@ -33,6 +33,7 @@ pub enum VideoCodec {
 /// H.264 目標ビットレートの基準（総画素 × fps ベース＝向き非依存。#121 / ADR-0013）。
 /// BPP は bits/pixel/frame。1080p30 ≈ 12Mbps（x264 CRF23 同等・品質優先のユーザー決定 2026-06-18）を基準に逆算。
 /// 縦型(1080×1920) は横型(1920×1080) と総画素が同じ＝同ビットレートになる。
+/// 本定数群は正典(11.4)に枠を持たない配布実装(Rust)固有値（永続データ/schema には載らない）。
 const BITRATE_BPP: f64 = 0.19;
 const BITRATE_MIN_BPS: u64 = 3_000_000;
 const BITRATE_MAX_BPS: u64 = 16_000_000;
@@ -51,19 +52,24 @@ fn bitrate_arg(bps: u64) -> String {
     format!("{}k", bps / 1000)
 }
 
-/// PNG の幅・高さを IHDR から読む（依存なし）。先頭24バイトのみ読む。失敗時 None。
-fn read_png_size(path: &Path) -> Option<(u32, u32)> {
-    use std::io::Read;
-    let mut f = fs::File::open(path).ok()?;
-    let mut head = [0u8; 24];
-    f.read_exact(&mut head).ok()?;
-    // PNG署名(8) + IHDR長(4) + "IHDR"(4) + width(4 BE) + height(4 BE)。
-    if &head[0..8] != b"\x89PNG\r\n\x1a\n" {
+/// PNG 先頭24バイトから幅・高さを読む純関数。署名と IHDR チャンク名を検証し、不正なら None。
+/// レイアウト: PNG署名(8) + IHDR長(4) + "IHDR"(4) + width(4 BE) + height(4 BE)。
+fn parse_png_size(head: &[u8]) -> Option<(u32, u32)> {
+    if head.len() < 24 || &head[0..8] != b"\x89PNG\r\n\x1a\n" || &head[12..16] != b"IHDR" {
         return None;
     }
     let w = u32::from_be_bytes([head[16], head[17], head[18], head[19]]);
     let h = u32::from_be_bytes([head[20], head[21], head[22], head[23]]);
     (w != 0 && h != 0).then_some((w, h))
+}
+
+/// PNG ファイルの幅・高さを読む（依存なし・先頭24バイトのみ読む）。失敗時 None。
+fn read_png_size(path: &Path) -> Option<(u32, u32)> {
+    use std::io::Read;
+    let mut f = fs::File::open(path).ok()?;
+    let mut head = [0u8; 24];
+    f.read_exact(&mut head).ok()?;
+    parse_png_size(&head)
 }
 
 impl VideoCodec {
@@ -1529,6 +1535,31 @@ mod tests {
         assert_eq!(target_bitrate_bps(320, 180, 30), 3_000_000); // 下限
         assert_eq!(target_bitrate_bps(3840, 2160, 60), 16_000_000); // 上限
         assert_eq!(bitrate_arg(5_253_120), "5253k");
+    }
+
+    fn png_head(w: u32, h: u32) -> Vec<u8> {
+        let mut head = vec![0u8; 24];
+        head[0..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        head[12..16].copy_from_slice(b"IHDR");
+        head[16..20].copy_from_slice(&w.to_be_bytes());
+        head[20..24].copy_from_slice(&h.to_be_bytes());
+        head
+    }
+
+    #[test]
+    fn parse_png_size_reads_valid_ihdr() {
+        assert_eq!(parse_png_size(&png_head(1080, 1920)), Some((1080, 1920)));
+        assert_eq!(parse_png_size(&png_head(1920, 1080)), Some((1920, 1080)));
+    }
+
+    #[test]
+    fn parse_png_size_rejects_bad_input() {
+        assert_eq!(parse_png_size(&[0u8; 24]), None); // 非PNG署名
+        assert_eq!(parse_png_size(b"\x89PNG\r\n\x1a\n"), None); // 24バイト未満
+        let mut not_ihdr = png_head(100, 100);
+        not_ihdr[12..16].copy_from_slice(b"sRGB"); // IHDR 以外のチャンク
+        assert_eq!(parse_png_size(&not_ihdr), None);
+        assert_eq!(parse_png_size(&png_head(0, 0)), None); // ゼロ寸法
     }
 
     #[test]
