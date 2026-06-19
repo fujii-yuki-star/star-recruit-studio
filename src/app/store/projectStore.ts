@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import { ASSET_TYPE, NARRATION_STATUS, type Purpose, type VideoKind } from "../../domain/enums";
+import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type VideoKind } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from "../../domain/ai/videoPlanInput";
@@ -99,6 +99,8 @@ interface ProjectState {
     tone?: string;
     /** 読み上げの声の感じ（speed/pitch/intonation を voiceSettings へ。未指定なら既存維持）。 */
     voice?: VoiceStyleParams;
+    /** 動画の向き（aspectRatio を videoSettings へ。未指定なら既存維持・ADR-0012/B5）。 */
+    aspectRatio?: Orientation;
   }) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
@@ -490,6 +492,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           input.tone !== undefined ? { ...s.meta.toneSettings, tone: input.tone } : s.meta.toneSettings,
         // 読み上げの声の感じ（speed/pitch/intonation）を反映。詳細は設定画面で微調整できる（§7.1）。
         voiceSettings: input.voice ? { ...s.meta.voiceSettings, ...input.voice } : s.meta.voiceSettings,
+        // 動画の向き（縦/横）。未指定なら既存維持（ADR-0012/B5）。
+        videoSettings: input.aspectRatio
+          ? { ...s.meta.videoSettings, aspectRatio: input.aspectRatio }
+          : s.meta.videoSettings,
       },
       saveStatus: "idle",
     })),

@@ -1,7 +1,7 @@
 import { useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
-import { ASSET_TYPE, VIDEO_KIND, type Purpose, type VideoKind } from "../../domain/enums";
+import { ASSET_TYPE, ORIENTATION, VIDEO_KIND, type Orientation, type Purpose, type VideoKind } from "../../domain/enums";
 import {
   ADDITIONAL_NOTES_MAX_LEN, DEFAULT_TONE, GENERAL_LIST_ITEM_MAX_LEN, GENERAL_LIST_MAX_ITEMS,
   GENERAL_TARGET_AUDIENCE_MAX_LEN, GENERAL_TITLE_MAX_LEN, TONE_PRESETS,
@@ -30,6 +30,12 @@ interface WizardProps {
 const videoKindOptions: { id: VideoKind; label: string; desc: string }[] = [
   { id: VIDEO_KIND.recruit, label: "採用動画", desc: "会社・仕事の魅力を求職者に伝える" },
   { id: VIDEO_KIND.general, label: "一般動画・社内発表", desc: "社内発表・報告・製品紹介など" },
+];
+
+// 画面の向き（ADR-0012）。横型＝従来、縦型＝スマホ向け。寸法は videoSettings.aspectRatio から導出（§2-7）。
+const orientationOptions: { id: Orientation; label: string; desc: string }[] = [
+  { id: ORIENTATION.landscape, label: "横型（16:9）", desc: "パソコン・テレビ・YouTube向け" },
+  { id: ORIENTATION.portrait, label: "縦型（9:16）", desc: "スマホ・ショート動画向け" },
 ];
 
 // ステップ見出しは videoKind で2番目だけ変える（採用＝会社情報 / 一般＝発表の内容）。
@@ -82,6 +88,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   const g0 = initialMeta.generalBrief;
   const [videoKind, setVideoKind] = useState<VideoKind>(initialMeta.videoKind ?? VIDEO_KIND.recruit);
   const [purpose, setPurpose] = useState<Purpose>(initialMeta.purpose);
+  const [aspectRatio, setAspectRatio] = useState<Orientation>(initialMeta.videoSettings.aspectRatio);
   const [companyName, setCompanyName] = useState(c0?.companyName ?? "");
   const [industry, setIndustry] = useState(c0?.industry ?? "");
   const [jobType, setJobType] = useState(c0?.jobType ?? "");
@@ -117,7 +124,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // videoKind で会社情報/発表内容を排他に渡す（applyProjectInfo が渡さない側を消す＝schema 排他を満たす）。
   function applyForm() {
     // voice（声の感じ→speed/pitch/intonation）は両用途共通（声ステップは recruit/general 共通）。
-    const common = { videoKind, purpose, additionalNotes, voice: voiceStyleParams(voiceType) };
+    const common = { videoKind, purpose, aspectRatio, additionalNotes, voice: voiceStyleParams(voiceType) };
     if (videoKind === VIDEO_KIND.general) {
       applyProjectInfo({
         ...common,
@@ -244,6 +251,23 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                           purpose === opt.id ? "var(--color-primary-soft)" : undefined,
                       }}
                       onClick={() => setPurpose(opt.id)}
+                    >
+                      <span className="action-card-title">{opt.label}</span>
+                      <span className="action-card-desc">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                <h3 className="field-label mt-lg">画面の向き</h3>
+                <div className="card-grid cols-2">
+                  {orientationOptions.map((opt) => (
+                    <button
+                      key={opt.id}
+                      className="action-card"
+                      style={{
+                        borderColor: aspectRatio === opt.id ? "var(--color-primary)" : undefined,
+                        background: aspectRatio === opt.id ? "var(--color-primary-soft)" : undefined,
+                      }}
+                      onClick={() => setAspectRatio(opt.id)}
                     >
                       <span className="action-card-title">{opt.label}</span>
                       <span className="action-card-desc">{opt.desc}</span>

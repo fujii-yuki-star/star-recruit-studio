@@ -16,9 +16,6 @@ export const DEFAULT_TARGET_DURATION_SEC = 60;
 export const FPS = 30;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
-// 書き出し時の縮小オプション（16:9 を維持。videoSettings の正典値ではなく出力時の選択肢）。
-export const HD_WIDTH = 1280;
-export const HD_HEIGHT = 720;
 // 縦型（9:16・ADR-0012）。SoT は videoSettings.aspectRatio で、寸法はここから導出する。
 export const PORTRAIT_WIDTH = 1080;
 export const PORTRAIT_HEIGHT = 1920;
@@ -36,6 +33,22 @@ export function dimsForOrientation(aspectRatio: Orientation): { width: number; h
       return _exhaustive;
     }
   }
+}
+
+// 書き出しの軽量(HD相当)で揃える短辺(px)。短辺をこの値に等比縮小する（横16:9→1280×720 / 縦9:16→720×1280）。
+// HD 短辺の単一参照元（旧 HD_WIDTH/HD_HEIGHT は exportDimsForOrientation に統合・§2-7）。
+export const HD_SHORT = 720;
+
+/** 書き出しの出力寸法（向き＋画質）。hd=true は短辺を HD_SHORT に等比縮小（向きによらず安全）。
+ *  full は dimsForOrientation 経由なので Orientation の網羅性は型で保証される（1:1 追加時もそこで検知）。 */
+export function exportDimsForOrientation(
+  aspectRatio: Orientation,
+  hd: boolean,
+): { width: number; height: number } {
+  const full = dimsForOrientation(aspectRatio);
+  if (!hd) return full;
+  const scale = HD_SHORT / Math.min(full.width, full.height);
+  return { width: Math.round(full.width * scale), height: Math.round(full.height * scale) };
 }
 
 export const NARRATION_VOLUME = 1.0;
