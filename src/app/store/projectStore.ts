@@ -256,6 +256,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const { parts, scenes, warnings } = transformVideoPlan(plan, {
         templates,
         assets,
+        // プロジェクトの向き（縦/横）に一致するテンプレへ補正する（ADR-0012・B4）。
+        orientation: meta.videoSettings.aspectRatio,
       });
       set({ status: "ready", parts, scenes, warnings });
     } catch (e) {

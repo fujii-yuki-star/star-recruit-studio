@@ -2,7 +2,7 @@
 // 検証/補正ルールは 11_SCHEMA_REFERENCE.md §8,§9、エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。
 // 純粋関数（副作用なし）。Date/乱数に依存せず、ID採番は注入する（14 §4）。
 import { ASSET_TYPE, NARRATION_STATUS, isSceneCategory } from '../enums';
-import type { SceneCategory, WarningSeverity } from '../enums';
+import type { Orientation, SceneCategory, WarningSeverity } from '../enums';
 import {
   DEFAULT_CHARACTER_ID,
   MAX_NARRATION_LEN_DEFAULT,
@@ -24,6 +24,8 @@ import type { AiVideoPlan } from './types';
 export interface TransformContext {
   templates: Template[];
   assets: Asset[];
+  /** プロジェクトの向き（16:9/9:16）。テンプレはこの向きに一致するものへ補正する（ADR-0012・B4）。 */
+  orientation: Orientation;
   /** 省略時は part_001 / scene_001 からの連番。 */
   idFactory?: IdFactory;
 }
@@ -127,14 +129,25 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
         w.push(warn('SCENE_TYPE_FALLBACK', '不明な場面種別を調整しました', 'sceneType', 'info', true));
       }
 
-      if (!template) {
-        const alt = ctx.templates.find((t) => t.category === sceneType);
+      // テンプレ解決＋向き整合（B4・ADR-0012）。見つからない、またはプロジェクトの向きと一致しない場合は、
+      // 同カテゴリ・同じ向きの見た目へ補正する（AI出力は向き非依存＝12§8 / 向きはプロジェクト側の正典）。
+      if (!template || template.aspectRatio !== ctx.orientation) {
+        const alt = ctx.templates.find(
+          (t) => t.category === sceneType && t.aspectRatio === ctx.orientation,
+        );
         if (alt) {
-          w.push(warn('TEMPLATE_NOT_FOUND', 'この場面の見た目パターンが見つからないため、標準を使います', 'templateId', 'warning', true));
+          w.push(
+            template
+              ? warn('TEMPLATE_ORIENTATION_MISMATCH', '動画の向きに合う見た目に調整しました', 'templateId', 'info', true)
+              : warn('TEMPLATE_NOT_FOUND', 'この場面の見た目パターンが見つからないため、標準を使います', 'templateId', 'warning', true),
+          );
           templateId = alt.templateId;
           template = alt;
-        } else {
+        } else if (!template) {
           w.push(warn('TEMPLATE_NOT_FOUND', 'この場面の見た目パターンが見つかりません', 'templateId', 'warning', false));
+        } else {
+          // 当該カテゴリ・当該向きの代替が無い（その向きが未整備）。原状維持で向き不一致を明示する。
+          w.push(warn('TEMPLATE_ORIENTATION_MISMATCH', '動画の向きに合う見た目が見つかりませんでした', 'templateId', 'warning', false));
         }
       }
 

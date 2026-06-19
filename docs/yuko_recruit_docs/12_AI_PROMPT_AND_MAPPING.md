@@ -317,7 +317,7 @@ interface AiProvider {
 | 親part | `partId` | 親 Part の id |
 | —（並び） | `order` | 出現順の連番 |
 | `sceneType` | `sceneType` | enum検証。不正なら template の category から推定 or `photo_intro` |
-| `templateId` | `templateId` | 実在検証（V3）。不在→同 category 標準テンプレへ補正（§9） |
+| `templateId` | `templateId` | 実在検証（V3）。不在→同 category 標準テンプレへ補正（§9）。**プロジェクトの向き(`aspectRatio`)と不一致なら同 category・同向きへ補正**（ADR-0012・B4。AI出力は向き非依存で、向きはプロジェクト側の正典） |
 | `durationSec` | `durationSec` | `clamp(3, テンプレ上限 or 15)`（`11 §4`） |
 | `assetRefs` | `assetRefs` | 各 assetId を実在検証（V4）。不在→`null`＋警告。キーはテンプレ slot/background/logo の id（`11 §5`） |
 | `yukoPoseTag` | `character` | §8.3 で解決 |

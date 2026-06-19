@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Asset } from '../project/types';
 import type { Template } from '../template/types';
 import type { AiScene, AiVideoPlan } from './types';
+import type { Orientation } from '../enums';
 import { createSequentialIdFactory } from './idFactory';
 import { transformVideoPlan } from './transformPlan';
 import type { TransformContext } from './transformPlan';
@@ -44,6 +45,16 @@ const templates: Template[] = [
       { id: 'yuko', type: 'character', required: false, x: 1500, y: 640, w: 340, h: 400 },
     ],
   },
+  {
+    // 同カテゴリ(opening)の縦型。向き整合（B4）の補正先になる。
+    schemaVersion: '1.0',
+    templateId: 'opening_yuko_portrait_v1',
+    name: 'オープニング・縦',
+    category: 'opening',
+    aspectRatio: '9:16',
+    canvas: { width: 1080, height: 1920 },
+    layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1080, h: 1920 }],
+  },
 ];
 
 const assets: Asset[] = [
@@ -55,7 +66,12 @@ const assets: Asset[] = [
   { assetId: 'bgm_bright_001', assetType: 'bgm', displayName: '明るいBGM', filePath: 'assets/bgm/bright_001.mp3' },
 ];
 
-const baseCtx = (): TransformContext => ({ templates, assets, idFactory: createSequentialIdFactory() });
+const baseCtx = (orientation: Orientation = '16:9'): TransformContext => ({
+  templates,
+  assets,
+  orientation,
+  idFactory: createSequentialIdFactory(),
+});
 
 /** 1パート1シーンの最小プランを作るヘルパー（補正系テスト用）。型安全のため各フィールドを明示マージする。 */
 function singleScenePlan(override: Partial<AiScene>): AiVideoPlan {
@@ -142,5 +158,30 @@ describe('transformVideoPlan', () => {
     const { scenes } = transformVideoPlan(plan, baseCtx());
     expect(scenes[0].assetRefs).toEqual({ background: null, logo: 'asset_logo_001' });
     expect(scenes[0].warnings.some((w) => w.code === 'ASSET_NOT_FOUND')).toBe(true);
+  });
+
+  it('縦型プロジェクトでは横型テンプレ指定を同カテゴリの縦型へ補正する（向き整合・B4）', () => {
+    const plan = singleScenePlan({ sceneType: 'opening', templateId: 'opening_yuko_right_v1' });
+    const { scenes } = transformVideoPlan(plan, baseCtx('9:16'));
+    expect(scenes[0].templateId).toBe('opening_yuko_portrait_v1');
+    expect(scenes[0].warnings.some((w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH' && w.autoFixed === true)).toBe(true);
+  });
+
+  it('縦型プロジェクトで未知テンプレIDは縦型の同カテゴリへ補正する', () => {
+    const plan = singleScenePlan({ sceneType: 'opening', templateId: 'nope_v1' });
+    const { scenes } = transformVideoPlan(plan, baseCtx('9:16'));
+    expect(scenes[0].templateId).toBe('opening_yuko_portrait_v1');
+    expect(scenes[0].warnings.some((w) => w.code === 'TEMPLATE_NOT_FOUND' && w.autoFixed === true)).toBe(true);
+  });
+
+  it('向きが一致していればテンプレ補正の警告は出ない', () => {
+    const plan = singleScenePlan({ sceneType: 'opening', templateId: 'opening_yuko_right_v1' });
+    const { scenes } = transformVideoPlan(plan, baseCtx('16:9'));
+    expect(scenes[0].templateId).toBe('opening_yuko_right_v1');
+    expect(
+      scenes[0].warnings.some(
+        (w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH' || w.code === 'TEMPLATE_NOT_FOUND',
+      ),
+    ).toBe(false);
   });
 });
