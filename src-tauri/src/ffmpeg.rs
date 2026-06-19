@@ -30,11 +30,41 @@ pub enum VideoCodec {
     X264,
 }
 
-/// Media Foundation(h264_mf) の目標ビットレート。
-/// h264_mf は無指定だと既定ビットレートが低く画質が崩れるため明示する。
-/// 12M は 1080p で x264(CRF23) 同等画質を実機確認した値。品質優先・最低 12M（ユーザー決定 2026-06-18）。
-/// TODO(配布前・ADR-0013 残課題): 解像度別ビットレート（720p では 12M は過剰＝標準 ~5–8M）／品質ベース RC の最適化。
-const MF_TARGET_BITRATE: &str = "12M";
+/// H.264 目標ビットレートの基準（総画素 × fps ベース＝向き非依存。#121 / ADR-0013）。
+/// BPP は bits/pixel/frame。1080p30 ≈ 12Mbps（x264 CRF23 同等・品質優先のユーザー決定 2026-06-18）を基準に逆算。
+/// 縦型(1080×1920) は横型(1920×1080) と総画素が同じ＝同ビットレートになる。
+const BITRATE_BPP: f64 = 0.19;
+const BITRATE_MIN_BPS: u64 = 3_000_000;
+const BITRATE_MAX_BPS: u64 = 16_000_000;
+/// 出力解像度の probe に失敗したときのフォールバック（従来既定＝16:9 1080p）。
+const DEFAULT_OUTPUT_WIDTH: u32 = 1920;
+const DEFAULT_OUTPUT_HEIGHT: u32 = 1080;
+
+/// 出力の総画素数 × fps から H.264 目標ビットレート(bps)を求める（h264_mf 用・向き非依存）。
+fn target_bitrate_bps(width: u32, height: u32, fps: u32) -> u64 {
+    let raw = BITRATE_BPP * f64::from(width) * f64::from(height) * f64::from(fps);
+    (raw as u64).clamp(BITRATE_MIN_BPS, BITRATE_MAX_BPS)
+}
+
+/// bps を FFmpeg の `-b:v` 引数値（kbps 表記）へ整形する。
+fn bitrate_arg(bps: u64) -> String {
+    format!("{}k", bps / 1000)
+}
+
+/// PNG の幅・高さを IHDR から読む（依存なし）。先頭24バイトのみ読む。失敗時 None。
+fn read_png_size(path: &Path) -> Option<(u32, u32)> {
+    use std::io::Read;
+    let mut f = fs::File::open(path).ok()?;
+    let mut head = [0u8; 24];
+    f.read_exact(&mut head).ok()?;
+    // PNG署名(8) + IHDR長(4) + "IHDR"(4) + width(4 BE) + height(4 BE)。
+    if &head[0..8] != b"\x89PNG\r\n\x1a\n" {
+        return None;
+    }
+    let w = u32::from_be_bytes([head[16], head[17], head[18], head[19]]);
+    let h = u32::from_be_bytes([head[20], head[21], head[22], head[23]]);
+    (w != 0 && h != 0).then_some((w, h))
+}
 
 impl VideoCodec {
     /// FFmpeg の -c:v に渡すエンコーダ名。
@@ -50,9 +80,9 @@ impl VideoCodec {
     /// - MediaFoundation: 目標ビットレートを与える（既定が低画質のため）。
     /// - X264: 無指定で CRF 23 相当の良好な既定になるため何も足さない。
     /// - OpenH264: 当面据え置き（フォールバック採用時に同様の指定要否を検証）。
-    pub fn quality_args(self) -> Vec<String> {
+    pub fn quality_args(self, bitrate: &str) -> Vec<String> {
         match self {
-            VideoCodec::MediaFoundation => vec!["-b:v".into(), MF_TARGET_BITRATE.into()],
+            VideoCodec::MediaFoundation => vec!["-b:v".into(), bitrate.into()],
             VideoCodec::OpenH264 | VideoCodec::X264 => Vec::new(),
         }
     }
@@ -76,6 +106,8 @@ pub fn pick_codec(encoders_output: &str) -> Option<VideoCodec> {
 /// 1シーン分の動画（PNG静止画＋音声）にする引数（純粋）。
 /// 音声があればナレーション（volume適用）を、無ければ無音トラックを付け、全クリップを
 /// 「映像＋AAC音声」で統一する（後段 concat の `-c copy` が成立するため）。
+/// FFmpeg 引数ビルダの純関数（エンコード入力をそのまま受ける）。引数数はこの用途として許容する。
+#[allow(clippy::too_many_arguments)]
 pub fn scene_clip_args(
     png: &str,
     audio: Option<&str>,
@@ -84,6 +116,7 @@ pub fn scene_clip_args(
     duration_sec: f64,
     fps: u32,
     codec: VideoCodec,
+    bitrate: &str,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "-y".into(),
@@ -129,7 +162,7 @@ pub fn scene_clip_args(
         codec.encoder().into(),
     ]);
     // MF は既定ビットレートが低画質のため目標ビットレートを付与（x264 は無指定で良好）。
-    args.extend(codec.quality_args());
+    args.extend(codec.quality_args(bitrate));
     args.extend([
         "-c:a".into(),
         "aac".into(),
@@ -181,6 +214,7 @@ pub fn xfade_chain_args(
     out: &str,
     codec: VideoCodec,
     fps: u32,
+    bitrate: &str,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec!["-y".into()];
     for f in files {
@@ -235,7 +269,7 @@ pub fn xfade_chain_args(
         codec.encoder().into(),
     ]);
     // MF は既定ビットレートが低画質のため目標ビットレートを付与（x264 は無指定で良好）。
-    args.extend(codec.quality_args());
+    args.extend(codec.quality_args(bitrate));
     args.extend([
         "-c:a".into(),
         "aac".into(),
@@ -361,6 +395,8 @@ pub struct VideoSceneArgs<'a> {
     pub speed: f64,
     pub fps: u32,
     pub codec: VideoCodec,
+    /// H.264 目標ビットレート（`-b:v` 値・MF のみ使用）。出力総画素から算出（#121）。
+    pub bitrate: &'a str,
     pub out: &'a str,
 }
 
@@ -453,7 +489,7 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
         a.codec.encoder().into(),
     ]);
     // MF は既定ビットレートが低画質のため目標ビットレートを付与。
-    args.extend(a.codec.quality_args());
+    args.extend(a.codec.quality_args(a.bitrate));
     args.extend([
         "-c:a".into(),
         "aac".into(),
@@ -758,6 +794,16 @@ fn encode_jobs(
             "動画の保存中に問題が発生しました。もう一度お試しください。",
         )
     })?;
+    // 出力解像度（先頭場面のPNG＝実出力サイズ）から H.264 目標ビットレートを1回算出（#121・向き非依存）。
+    let (out_w, out_h) = jobs
+        .first()
+        .and_then(|j| match j {
+            SceneJob::Still(s) => read_png_size(s.png.as_path()),
+            SceneJob::Video(v) => read_png_size(v.below.as_path()),
+        })
+        .unwrap_or((DEFAULT_OUTPUT_WIDTH, DEFAULT_OUTPUT_HEIGHT));
+    let bitrate = bitrate_arg(target_bitrate_bps(out_w, out_h, fps));
+
     let mut files: Vec<String> = Vec::with_capacity(jobs.len());
     for (i, job) in jobs.iter().enumerate() {
         let clip = tmp_dir.join(format!("scene_{i:03}.mp4"));
@@ -772,6 +818,7 @@ fn encode_jobs(
                     s.duration_sec,
                     fps,
                     codec,
+                    &bitrate,
                 )
             }
             SceneJob::Video(v) => {
@@ -802,6 +849,7 @@ fn encode_jobs(
                     speed: v.speed,
                     fps,
                     codec,
+                    bitrate: &bitrate,
                     out: &out_path,
                 })
             }
@@ -829,7 +877,14 @@ fn encode_jobs(
                 offset_sec: joins[i].offset_sec,
             })
             .collect();
-        let args = xfade_chain_args(&files, &steps, &output.to_string_lossy(), codec, fps);
+        let args = xfade_chain_args(
+            &files,
+            &steps,
+            &output.to_string_lossy(),
+            codec,
+            fps,
+            &bitrate,
+        );
         run(ffmpeg, &args).map_err(|e| {
             export_failure(
                 format!("xfade join: {e}"),
@@ -1365,14 +1420,14 @@ mod tests {
 
     #[test]
     fn quality_args_sets_bitrate_for_mediafoundation_only() {
-        // MF だけ目標ビットレートを付与（x264/OpenH264 は無指定）。
+        // MF だけ目標ビットレートを付与（x264/OpenH264 は無指定）。値は呼び出し側が算出して渡す。
         assert_eq!(
-            VideoCodec::MediaFoundation.quality_args(),
-            vec!["-b:v".to_string(), "12M".to_string()]
+            VideoCodec::MediaFoundation.quality_args("12000k"),
+            vec!["-b:v".to_string(), "12000k".to_string()]
         );
-        assert!(VideoCodec::X264.quality_args().is_empty());
-        assert!(VideoCodec::OpenH264.quality_args().is_empty());
-        // scene_clip_args は -c:v h264_mf の直後に -b:v 12M を置く。
+        assert!(VideoCodec::X264.quality_args("12000k").is_empty());
+        assert!(VideoCodec::OpenH264.quality_args("12000k").is_empty());
+        // scene_clip_args は -c:v h264_mf の直後に -b:v <bitrate> を置く。
         let a = scene_clip_args(
             "f.png",
             None,
@@ -1381,14 +1436,15 @@ mod tests {
             3.0,
             30,
             VideoCodec::MediaFoundation,
+            "12000k",
         );
         let i = a
             .iter()
             .position(|s| s == "h264_mf")
             .expect("encoder present");
         assert_eq!(a[i + 1], "-b:v");
-        assert_eq!(a[i + 2], "12M");
-        // video_scene_args も MF で -c:v h264_mf の直後に -b:v 12M。
+        assert_eq!(a[i + 2], "12000k");
+        // video_scene_args も MF で -c:v h264_mf の直後に -b:v <bitrate>。
         let v = video_scene_args(&VideoSceneArgs {
             below_png: "b.png",
             clip: "c.mp4",
@@ -1408,6 +1464,7 @@ mod tests {
             speed: 1.0,
             fps: 30,
             codec: VideoCodec::MediaFoundation,
+            bitrate: "12000k",
             out: "out.mp4",
         });
         let vi = v
@@ -1415,24 +1472,63 @@ mod tests {
             .position(|s| s == "h264_mf")
             .expect("encoder present");
         assert_eq!(v[vi + 1], "-b:v");
-        assert_eq!(v[vi + 2], "12M");
-        // xfade_chain_args も MF で -b:v 12M。
+        assert_eq!(v[vi + 2], "12000k");
+        // xfade_chain_args も MF で -b:v <bitrate>。
         let files = vec!["a.mp4".to_string(), "b.mp4".to_string()];
         let steps = vec![JoinStep {
             xfade: Some("fade"),
             duration_sec: 0.5,
             offset_sec: 1.5,
         }];
-        let xf = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::MediaFoundation, 30);
+        let xf = xfade_chain_args(
+            &files,
+            &steps,
+            "out.mp4",
+            VideoCodec::MediaFoundation,
+            30,
+            "12000k",
+        );
         let xi = xf
             .iter()
             .position(|s| s == "h264_mf")
             .expect("encoder present");
         assert_eq!(xf[xi + 1], "-b:v");
-        assert_eq!(xf[xi + 2], "12M");
-        // x264 は -b:v を付けない。
-        let x = scene_clip_args("f.png", None, 1.0, "out.mp4", 3.0, 30, VideoCodec::X264);
+        assert_eq!(xf[xi + 2], "12000k");
+        // x264 は -b:v を付けない（bitrate を渡しても無視）。
+        let x = scene_clip_args(
+            "f.png",
+            None,
+            1.0,
+            "out.mp4",
+            3.0,
+            30,
+            VideoCodec::X264,
+            "12000k",
+        );
         assert!(!x.iter().any(|s| s == "-b:v"));
+    }
+
+    #[test]
+    fn target_bitrate_is_pixel_based_and_orientation_agnostic() {
+        let land = target_bitrate_bps(1920, 1080, 30);
+        let port = target_bitrate_bps(1080, 1920, 30);
+        assert_eq!(land, port); // 総画素が同じ＝同ビットレート（向き非依存）
+        assert!(
+            (11_000_000..=12_500_000).contains(&land),
+            "1080p30 ≈ 12M, got {land}"
+        );
+        let hd = target_bitrate_bps(1280, 720, 30);
+        assert!(
+            (4_500_000..=6_500_000).contains(&hd),
+            "720p30 ≈ 5–6M, got {hd}"
+        );
+    }
+
+    #[test]
+    fn target_bitrate_clamps_small_and_large() {
+        assert_eq!(target_bitrate_bps(320, 180, 30), 3_000_000); // 下限
+        assert_eq!(target_bitrate_bps(3840, 2160, 60), 16_000_000); // 上限
+        assert_eq!(bitrate_arg(5_253_120), "5253k");
     }
 
     #[test]
@@ -1445,6 +1541,7 @@ mod tests {
             8.0,
             30,
             VideoCodec::X264,
+            "12000k",
         );
         assert!(a.iter().any(|s| s == "libx264"));
         assert!(a.iter().any(|s| s == "yuv420p"));
@@ -1463,6 +1560,7 @@ mod tests {
             8.0,
             30,
             VideoCodec::OpenH264,
+            "12000k",
         );
         assert!(o.iter().any(|s| s == "libopenh264"));
         assert!(o.iter().any(|s| s.contains("anullsrc")));
@@ -1499,7 +1597,14 @@ mod tests {
             duration_sec: 0.5,
             offset_sec: 7.5,
         }];
-        let a = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::OpenH264, 30);
+        let a = xfade_chain_args(
+            &files,
+            &steps,
+            "out.mp4",
+            VideoCodec::OpenH264,
+            30,
+            "12000k",
+        );
         // 2入力。
         assert_eq!(a.iter().filter(|s| *s == "-i").count(), 2);
         let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
@@ -1525,7 +1630,7 @@ mod tests {
             duration_sec: 0.4,
             offset_sec: 3.6,
         }];
-        let a = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::X264, 30);
+        let a = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::X264, 30, "12000k");
         assert!(
             a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1]
                 .contains("xfade=transition=slideup:duration=0.4:offset=3.6")
@@ -1540,7 +1645,14 @@ mod tests {
             duration_sec: 0.0,
             offset_sec: 0.0,
         }];
-        let a = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::OpenH264, 30);
+        let a = xfade_chain_args(
+            &files,
+            &steps,
+            "out.mp4",
+            VideoCodec::OpenH264,
+            30,
+            "12000k",
+        );
         let graph = &a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1];
         // ハードカット＝concat フィルタ（映像/音声）。xfade は含まない。
         assert!(graph.contains("[0:v][1:v]concat=n=2:v=1:a=0[v1]"));
@@ -1568,7 +1680,14 @@ mod tests {
                 offset_sec: 0.0,
             },
         ];
-        let a = xfade_chain_args(&files, &steps, "out.mp4", VideoCodec::OpenH264, 30);
+        let a = xfade_chain_args(
+            &files,
+            &steps,
+            "out.mp4",
+            VideoCodec::OpenH264,
+            30,
+            "12000k",
+        );
         assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3);
         let graph = &a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1];
         assert!(graph.contains("[0:v][1:v]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
@@ -1632,7 +1751,7 @@ mod tests {
             duration_sec: 0.5,
             offset_sec: 1.5,
         }];
-        let args = xfade_chain_args(&files, &steps, &out.to_string_lossy(), codec, 30);
+        let args = xfade_chain_args(&files, &steps, &out.to_string_lossy(), codec, 30, "12000k");
         run(&ffmpeg, &args).expect("xfade join");
         assert!(fs::metadata(&out).expect("xf.mp4 exists").len() > 0);
     }
@@ -1851,6 +1970,7 @@ mod tests {
             speed: 1.0,
             fps: 30,
             codec: VideoCodec::X264,
+            bitrate: "12000k",
             out: "out.mp4",
         });
         let fc = args
@@ -1892,6 +2012,7 @@ mod tests {
             speed: 1.0,
             fps: 30,
             codec: VideoCodec::X264,
+            bitrate: "12000k",
             out: "o.mp4",
         });
         let pos = args.iter().position(|s| s == "-ss").expect("-ss");
@@ -1921,6 +2042,7 @@ mod tests {
             speed: 2.0,
             fps: 30,
             codec: VideoCodec::X264,
+            bitrate: "12000k",
             out: "o.mp4",
         });
         let fc = args
@@ -1955,6 +2077,7 @@ mod tests {
             speed: 2.0,
             fps: 30,
             codec: VideoCodec::X264,
+            bitrate: "12000k",
             out: "o.mp4",
         });
         let p1 = a1.iter().position(|s| s == "-ss").expect("-ss");
@@ -1980,6 +2103,7 @@ mod tests {
             speed: 2.0,
             fps: 30,
             codec: VideoCodec::X264,
+            bitrate: "12000k",
             out: "o.mp4",
         });
         let p2 = a2.iter().position(|s| s == "-ss").expect("-ss");
@@ -2007,6 +2131,7 @@ mod tests {
             speed: 1.0,
             fps: 30,
             codec: VideoCodec::OpenH264,
+            bitrate: "12000k",
             out: "o.mp4",
         });
         let fc = args
@@ -2153,6 +2278,7 @@ mod tests {
             speed: 1.0,
             fps: 30,
             codec,
+            bitrate: "12000k",
             out: &out_s,
         });
         run(&ffmpeg, &args).expect("video_scene overlay");
@@ -2180,6 +2306,7 @@ mod tests {
             speed: 1.0,
             fps: 30,
             codec,
+            bitrate: "12000k",
             out: &out2_s,
         });
         run(&ffmpeg, &args2).expect("video_scene silent overlay");
