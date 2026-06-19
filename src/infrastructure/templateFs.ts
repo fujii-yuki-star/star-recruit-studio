@@ -14,6 +14,10 @@ const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
 const validate = ajv.compile(templateSchema as object);
 
+// 取り込むテンプレファイルの上限サイズ。テンプレ JSON は小さいので、誤って巨大ファイルを選んでも
+// メモリを使い過ぎないよう早期に弾く（大容量素材のメモリ問題＝#48 と同方針）。
+const MAX_TEMPLATE_FILE_BYTES = 1_000_000;
+
 /** 検証を通らなかったテンプレ（取り込まない）。errors は技術詳細＝ログ用で UI には出さない（§2-3）。 */
 export interface RejectedTemplate {
   templateId: string | null;
@@ -83,6 +87,10 @@ export async function parseTemplateFiles(files: File[]): Promise<ParsedTemplateP
   const raw: unknown[] = [];
   const rejected: RejectedTemplate[] = [];
   for (const file of files) {
+    if (file.size > MAX_TEMPLATE_FILE_BYTES) {
+      rejected.push({ templateId: null, errors: [`${file.name}: ファイルが大きすぎます`] });
+      continue;
+    }
     let data: unknown;
     try {
       data = JSON.parse(await file.text());

@@ -109,6 +109,7 @@ export function LooksScreen() {
   const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
   const [selectedId, setSelectedId] = useState(templates[0]?.templateId ?? "");
   const [loadMsg, setLoadMsg] = useState("");
+  const [loadOk, setLoadOk] = useState(true);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
 
   // 用意した見た目パターンのファイルを取り込む（検証は templateFs＝§2-2）。件数のみ提示（§2-3）。
@@ -122,6 +123,7 @@ export function LooksScreen() {
       addTemplatePack(loaded);
       setSelectedId(first.templateId);
     }
+    setLoadOk(!!first);
     setLoadMsg(
       first
         ? `${loaded.length}件の見た目パターンを読み込みました。${rejected.length > 0 ? `（${rejected.length}件は内容が合わず取り込めませんでした）` : ""}`
@@ -135,7 +137,7 @@ export function LooksScreen() {
         <PageHead title="見た目パターンを管理" desc="動画の見た目のパターンを確認できます。" />
         <EmptyState
           title="見た目パターンがありません"
-          message="標準の見た目パターンが読み込まれていません。"
+          message="標準の見た目パターンが読み込まれていません。アプリを再起動してください。改善しない場合は、お手数ですがご連絡ください。"
         />
       </div>
     );
@@ -222,7 +224,7 @@ export function LooksScreen() {
           </label>
           <p className="field-hint mt">用意した見た目パターンのファイルを追加できます（編集は今後のバージョンで対応予定）。</p>
           {loadMsg && (
-            <div className="notice notice-info mt" role="status">
+            <div className={`notice ${loadOk ? "notice-info" : "notice-warn"} mt`} role={loadOk ? "status" : "alert"}>
               <span>{loadMsg}</span>
             </div>
           )}

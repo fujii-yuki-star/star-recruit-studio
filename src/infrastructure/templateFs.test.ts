@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { loadBundledTemplates, parseTemplatePack, templatesForOrientation } from './templateFs';
+import { loadBundledTemplates, parseTemplateFiles, parseTemplatePack, templatesForOrientation } from './templateFs';
+import { sampleTemplates } from './sampleData';
 
 // 検証用の最小・正当なテンプレ（schema 必須項目のみ）。category/aspectRatio を差し替えて異常系を作る。
 const validLandscape = {
@@ -63,8 +64,38 @@ describe('templatesForOrientation', () => {
 
 describe('loadBundledTemplates', () => {
   it('同梱の標準見た目パターンは全件が検証を通る', () => {
-    const ids = loadBundledTemplates().map((t) => t.templateId);
-    expect(ids.length).toBeGreaterThanOrEqual(3);
-    expect(ids).toContain('opening_yuko_right_v1');
+    // ID 直書きに依存せず「同梱の全件が検証を通る」ことを件数一致で確認。
+    expect(loadBundledTemplates()).toHaveLength(sampleTemplates.length);
+  });
+});
+
+describe('parseTemplateFiles', () => {
+  it('空リストは空の結果を返す', async () => {
+    const { templates, rejected } = await parseTemplateFiles([]);
+    expect(templates).toHaveLength(0);
+    expect(rejected).toHaveLength(0);
+  });
+
+  it('JSON として読めないファイルは rejected に集約する（ファイル名つき）', async () => {
+    const bad = new File(['not json'], 'bad.json', { type: 'application/json' });
+    const { templates, rejected } = await parseTemplateFiles([bad]);
+    expect(templates).toHaveLength(0);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.templateId).toBeNull();
+    expect(rejected[0]?.errors.join(' ')).toContain('bad.json');
+  });
+
+  it('配列ファイルと単体ファイルを混在しても集約する', async () => {
+    const arrFile = new File([JSON.stringify([validLandscape, validPortrait])], 'pack.json');
+    const oneFile = new File([JSON.stringify({ ...validLandscape, templateId: 'solo_v1' })], 'one.json');
+    const { templates } = await parseTemplateFiles([arrFile, oneFile]);
+    expect(templates.map((t) => t.templateId).sort()).toEqual(['solo_v1', 'test_land_v1', 'test_port_v1']);
+  });
+
+  it('大きすぎるファイルは取り込まない', async () => {
+    const huge = new File(['x'.repeat(1_000_001)], 'huge.json');
+    const { templates, rejected } = await parseTemplateFiles([huge]);
+    expect(templates).toHaveLength(0);
+    expect(rejected).toHaveLength(1);
   });
 });

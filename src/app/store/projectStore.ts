@@ -512,6 +512,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => {
       // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
       // テンプレは project.json に保存しない（利用可能な見た目パターン）ので saveStatus は変えない。
+      // 取り込んだパックはセッション内で保持し newProject でもリセットしない（永続化/リセットは将来フェーズ＝B2 スコープ外）。
       const byId = new Map(s.templates.map((t) => [t.templateId, t] as const));
       for (const t of incoming) byId.set(t.templateId, t);
       return { templates: [...byId.values()] };
