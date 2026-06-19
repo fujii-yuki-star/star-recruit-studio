@@ -274,7 +274,6 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     </button>
                   ))}
                 </div>
-                <p className="field-hint mt">あとから「向きを変える」で切り替えることもできます。</p>
               </>
             )}
 
