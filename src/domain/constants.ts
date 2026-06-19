@@ -38,6 +38,21 @@ export function dimsForOrientation(aspectRatio: Orientation): { width: number; h
   }
 }
 
+// 書き出しの軽量(HD相当)で縮小する短辺(px)。横16:9→1280×720 / 縦9:16→720×1280。
+export const HD_SHORT = 720;
+
+/** 書き出しの出力寸法（向き＋画質）。hd=true は短辺を HD_SHORT に縮小（アスペクト維持）。 */
+export function exportDimsForOrientation(
+  aspectRatio: Orientation,
+  hd: boolean,
+): { width: number; height: number } {
+  const full = dimsForOrientation(aspectRatio);
+  if (!hd) return full;
+  return aspectRatio === ORIENTATION.portrait
+    ? { width: HD_SHORT, height: Math.round((full.height / full.width) * HD_SHORT) }
+    : { width: Math.round((full.width / full.height) * HD_SHORT), height: HD_SHORT };
+}
+
 export const NARRATION_VOLUME = 1.0;
 export const BGM_VOLUME = 0.25;
 export const ORIGINAL_AUDIO_VOLUME = 0.2;

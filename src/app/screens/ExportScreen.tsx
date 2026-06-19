@@ -9,7 +9,7 @@ import { findVideoSlot } from "../../renderer/export/findVideoSlot";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
-import { BGM_VOLUME, HD_HEIGHT, HD_WIDTH, HEIGHT, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, WIDTH } from "../../domain/constants";
+import { BGM_VOLUME, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 
 interface ExportProps {
@@ -28,6 +28,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const saveStatus = useProjectStore((s) => s.saveStatus);
   const assets = useProjectStore((s) => s.assets);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
+  const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const setBgm = useProjectStore((s) => s.setBgm);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
   const updateBgmSettings = useProjectStore((s) => s.updateBgmSettings);
@@ -37,9 +38,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [withSubtitle, setWithSubtitle] = useState(true);
   // BGM の入/切は bgmSettings.enabled を単一の真実とする（トグルで更新・保存で永続化）。未設定なら入。
   const withBgm = bgmSettings?.enabled ?? true;
-  // 出力解像度（フルHD＝キャンバス / HD＝縮小）。書き出し時に PNG をこの解像度で焼く。
-  const outputSize =
-    size === "hd" ? { width: HD_WIDTH, height: HD_HEIGHT } : { width: WIDTH, height: HEIGHT };
+  // 出力解像度（向き＋画質）。書き出し時に PNG をこの解像度で焼く。向きは videoSettings.aspectRatio から導出（ADR-0012）。
+  const fullDims = exportDimsForOrientation(aspectRatio, false);
+  const hdDims = exportDimsForOrientation(aspectRatio, true);
+  const outputSize = size === "hd" ? hdDims : fullDims;
 
   const [phase, setPhase] = useState<ExportPhase>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -181,8 +183,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               動画サイズ
             </label>
             <select id="size" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
-              <option value="fullhd">フルHD（1920×1080・きれい）</option>
-              <option value="hd">HD（1280×720・軽い）</option>
+              <option value="fullhd">きれい（{fullDims.width}×{fullDims.height}）</option>
+              <option value="hd">軽い（{hdDims.width}×{hdDims.height}）</option>
             </select>
           </div>
 
