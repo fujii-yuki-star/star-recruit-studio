@@ -63,6 +63,11 @@ export const VIDEO_KINDS = ['recruit', 'general'] as const;
 export type VideoKind = (typeof VIDEO_KINDS)[number];
 export const VIDEO_KIND = { recruit: 'recruit', general: 'general' } as const satisfies Record<string, VideoKind>;
 
+// 画面比率（向き・ADR-0012）。16:9=横型／9:16=縦型。1:1 は将来拡張。
+export const ORIENTATIONS = ['16:9', '9:16'] as const;
+export type Orientation = (typeof ORIENTATIONS)[number];
+export const ORIENTATION = { landscape: '16:9', portrait: '9:16' } as const satisfies Record<string, Orientation>;
+
 // 採用（recruit）の目的。
 export const PURPOSES = [
   'company_intro', 'new_graduate', 'mid_career',

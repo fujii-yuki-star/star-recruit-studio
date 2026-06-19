@@ -1,5 +1,7 @@
 // 定数の正典は docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md §4。
 // 文字列・数値リテラルの直書きを避け、ここを単一の参照元にする（CLAUDE.md §2-7 / §6）。
+import { ORIENTATION } from './enums';
+import type { Orientation } from './enums';
 
 export const SCENE_MIN_DURATION_SEC = 3;
 export const SCENE_MAX_DURATION_SEC = 15;
@@ -17,6 +19,19 @@ export const HEIGHT = 1080;
 // 書き出し時の縮小オプション（16:9 を維持。videoSettings の正典値ではなく出力時の選択肢）。
 export const HD_WIDTH = 1280;
 export const HD_HEIGHT = 720;
+// 縦型（9:16・ADR-0012）。SoT は videoSettings.aspectRatio で、寸法はここから導出する。
+export const PORTRAIT_WIDTH = 1080;
+export const PORTRAIT_HEIGHT = 1920;
+// 縦型の軽量書き出しサイズ（横型 HD=1280x720 の縦版）。
+export const PORTRAIT_HD_WIDTH = 720;
+export const PORTRAIT_HD_HEIGHT = 1280;
+
+/** 向き → フル出力寸法（aspectRatio を単一の真実とし寸法を導出する＝ADR-0012）。 */
+export function dimsForOrientation(aspectRatio: Orientation): { width: number; height: number } {
+  return aspectRatio === ORIENTATION.portrait
+    ? { width: PORTRAIT_WIDTH, height: PORTRAIT_HEIGHT }
+    : { width: WIDTH, height: HEIGHT };
+}
 
 export const NARRATION_VOLUME = 1.0;
 export const BGM_VOLUME = 0.25;

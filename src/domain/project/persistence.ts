@@ -1,18 +1,18 @@
 // project.json の組立・読込（純粋ロジック）。正典: schemas/project.schema.json / 11_SCHEMA_REFERENCE.md §1,§7。
 // 副作用なし。ファイルI/Oは infrastructure/projectFs.ts（Tauriコマンド）へ分離する（CLAUDE.md §4）。
 import {
-  DEFAULT_TARGET_DURATION_SEC, DEFAULT_VOICE_ID, FPS, HEIGHT,
-  NARRATION_VOLUME, VIDEO_HARD_MAX_SEC, WIDTH,
+  DEFAULT_TARGET_DURATION_SEC, DEFAULT_VOICE_ID, FPS,
+  NARRATION_VOLUME, VIDEO_HARD_MAX_SEC,
 } from '../constants';
-import { VIDEO_KIND } from '../enums';
+import { ORIENTATION, VIDEO_KIND } from '../enums';
 import type { Purpose, VideoKind } from '../enums';
 import type {
   Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
   ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1。ADR-0011 で 1.0→1.1：videoKind/generalBrief 追加・additionalNotes をトップレベルへ）。 */
-export const PROJECT_SCHEMA_VERSION = '1.1';
+/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。 */
+export const PROJECT_SCHEMA_VERSION = '1.2';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
@@ -35,12 +35,10 @@ export interface ProjectHeader {
   bgmSettings?: BgmSettings;
 }
 
-/** 16:9 / 1920x1080 / 30fps の既定 videoSettings（§7.1.1）。 */
+/** 既定 videoSettings（横型16:9・30fps。寸法は aspectRatio から導出＝ADR-0012）。 */
 export function defaultVideoSettings(): VideoSettings {
   return {
-    aspectRatio: '16:9',
-    width: WIDTH,
-    height: HEIGHT,
+    aspectRatio: ORIENTATION.landscape,
     fps: FPS,
     targetDurationSec: DEFAULT_TARGET_DURATION_SEC,
     maxDurationSec: VIDEO_HARD_MAX_SEC,
@@ -215,6 +213,14 @@ function migrateProject(project: Project): Project {
     const rest = { ...ci };
     delete rest.additionalNotes;
     next.companyInfo = rest as unknown as CompanyInfo;
+  }
+  // 1.1→1.2: videoSettings から width/height を除去（寸法は aspectRatio から導出＝ADR-0012）。
+  const vs = project.videoSettings as unknown as Record<string, unknown> | undefined;
+  if (vs && ('width' in vs || 'height' in vs)) {
+    const cleaned = { ...vs };
+    delete cleaned.width;
+    delete cleaned.height;
+    next.videoSettings = cleaned as unknown as VideoSettings;
   }
   return next;
 }

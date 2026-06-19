@@ -1,13 +1,12 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
-  AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Purpose,
+  AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
   SceneCategory, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
 } from '../enums';
 
 export interface VideoSettings {
-  aspectRatio: '16:9';
-  width: number;
-  height: number;
+  /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
+  aspectRatio: Orientation;
   fps: number;
   targetDurationSec: number;
   maxDurationSec: number;
