@@ -506,11 +506,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   changeOrientation: (target) => {
     const s = get();
     const result = changeScenesOrientation(s.scenes, s.templates, target);
-    set({
-      scenes: result.scenes,
-      meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, aspectRatio: target } },
-      saveStatus: "idle",
-    });
+    // 1件も切り替えられない（既に目標向き or 対応する見た目なし）なら向き・場面とも変えない。
+    // ＝変換先が無いのに向きだけ変えて全場面を不整合にしてしまうのを防ぐ（B5-b レビュー）。
+    if (result.changed > 0) {
+      set({
+        scenes: result.scenes,
+        meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, aspectRatio: target } },
+        saveStatus: "idle",
+      });
+    }
     return { changed: result.changed, unsupported: result.unsupported };
   },
   updateVoiceSettings: (patch) =>

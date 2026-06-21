@@ -25,7 +25,13 @@ const templates: Template[] = [
   tpl('closing_9', 'closing', '9:16'),
 ];
 
-function scene(sceneId: string, sceneType: SceneCategory, templateId: string, assetRefs: Scene['assetRefs'] = {}): Scene {
+function scene(
+  sceneId: string,
+  sceneType: SceneCategory,
+  templateId: string,
+  assetRefs: Scene['assetRefs'] = {},
+  warnings: Scene['warnings'] = [],
+): Scene {
   return {
     sceneId,
     partId: 'part_001',
@@ -37,7 +43,7 @@ function scene(sceneId: string, sceneType: SceneCategory, templateId: string, as
     character: { enabled: false, characterId: 'yuko', poseAssetId: null },
     texts: { title: 'タイトル' },
     narration: { text: 'セリフ', status: 'none', voiceId: null, speed: null, pitch: null, intonation: null, voicePath: null },
-    warnings: [],
+    warnings,
   };
 }
 
@@ -50,13 +56,18 @@ describe('changeScenesOrientation（向き変更・B5-b）', () => {
     expect(r.unsupported).toBe(0);
   });
 
-  it('縦→横で変換先が無いカテゴリは原状維持し unsupported に数える', () => {
+  it('縦→横で変換先が無いカテゴリは原状維持し、向き不一致を scene.warnings に記録する（11.9）', () => {
     const scenes = [scene('scene_001', 'opening', 'opening_9'), scene('scene_002', 'closing', 'closing_9')];
     const r = changeScenesOrientation(scenes, templates, '16:9');
     // opening は 16:9 あり→写像、closing は 16:9 無し→原状維持。
     expect(r.scenes.map((s) => s.templateId)).toEqual(['opening_16', 'closing_9']);
     expect(r.changed).toBe(1);
     expect(r.unsupported).toBe(1);
+    // 写像できた場面は警告なし、できなかった場面は TEMPLATE_ORIENTATION_MISMATCH（autoFixed=false）。
+    expect(r.scenes[0].warnings).toEqual([]);
+    expect(
+      r.scenes[1].warnings.some((w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH' && w.autoFixed === false),
+    ).toBe(true);
   });
 
   it('既に目標向きの場面は変更しない（changed=0・同一参照を保つ）', () => {
@@ -75,5 +86,31 @@ describe('changeScenesOrientation（向き変更・B5-b）', () => {
     expect(r.scenes[0].assetRefs).toEqual(refs);
     expect(r.scenes[0].texts).toEqual({ title: 'タイトル' });
     expect(r.scenes[0].narration.text).toBe('セリフ');
+  });
+
+  it('存在しないテンプレIDの場面も同カテゴリ・目標向きへ写像される', () => {
+    const scenes = [scene('scene_001', 'opening', 'non_existent_template_id')];
+    const r = changeScenesOrientation(scenes, templates, '9:16');
+    expect(r.scenes[0].templateId).toBe('opening_9');
+    expect(r.changed).toBe(1);
+    expect(r.unsupported).toBe(0);
+  });
+
+  it('全場面が変換先なしのときは changed=0・全件 unsupported（向き反映は呼び出し側が判断）', () => {
+    const scenes = [scene('scene_001', 'closing', 'closing_9')];
+    const r = changeScenesOrientation(scenes, templates, '16:9');
+    expect(r.changed).toBe(0);
+    expect(r.unsupported).toBe(1);
+    expect(r.scenes[0].warnings.some((w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH')).toBe(true);
+  });
+
+  it('写像成功時は残っていた向き不一致の警告を取り除く（トグルで重複・残留させない）', () => {
+    const stale: Scene['warnings'] = [
+      { code: 'TEMPLATE_ORIENTATION_MISMATCH', message: 'x', field: 'templateId', severity: 'warning', autoFixed: false },
+    ];
+    const scenes = [scene('scene_001', 'opening', 'opening_16', {}, stale)];
+    const r = changeScenesOrientation(scenes, templates, '9:16');
+    expect(r.scenes[0].templateId).toBe('opening_9');
+    expect(r.scenes[0].warnings.some((w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH')).toBe(false);
   });
 });

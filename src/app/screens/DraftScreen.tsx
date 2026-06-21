@@ -40,6 +40,12 @@ export function DraftScreen({ onNavigate }: DraftProps) {
     const label = orientationLabel(target);
     if (changed === 0 && unsupported === 0) {
       setOrientationMsg({ warn: false, text: `すでに${label}です。` });
+    } else if (changed === 0) {
+      // 対応する見た目が無く1件も切り替えられない（向きは変更していない）。
+      setOrientationMsg({
+        warn: true,
+        text: `${label}に対応する見た目が無いため、切り替えできませんでした。場面の見た目を見直してから、もう一度お試しください。`,
+      });
     } else if (unsupported === 0) {
       setOrientationMsg({ warn: false, text: `${changed}件の場面を${label}に切り替えました。` });
     } else {
