@@ -47,7 +47,7 @@
 | 状態管理 | Zustand（軽量） | 変更可 |
 | 保存 | ローカルJSON（プロジェクトフォルダ） | `11.1` |
 | 動画処理 | **FFmpeg** | LGPL＋Media Foundation(`h264_mf`)＝ADR-0002/0013（実機検証済）。配布形態は§11 |
-| 音声合成 | **VOICEVOX**（既定ずんだもん） | 同梱＝ADR-0005／規約は事業側確認済（根拠記録 #122） |
+| 音声合成 | **VOICEVOX**（既定ずんだもん） | 同梱＝ADR-0005（ENGINE を同梱・規約根拠も記録済＝#122）／ENGINE 同梱実装＝#149 |
 | 外部AI | Provider抽象化（初期 **MockProvider**） | OpenAI/Claude/Gemini/Ollama |
 | 描画一致方式 | **ADR-0001（A2ハイブリッド）** | プレビューと本番出力の一致（§11・論点③） |
 
