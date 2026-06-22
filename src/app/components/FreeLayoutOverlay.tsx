@@ -4,8 +4,8 @@ import type { FreeElement } from "../../domain/project/types";
 import { FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b）。
-// ScenePreview は width:100% / aspect-ratio:16/9 で viewBox 1920×1080 の SVG を充填するため
-// レターボックスが無く、要素の矩形は % 指定でプレビューに正確に重なる。
+// ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
+// レターボックスが無く、要素の矩形は %（canvasW/canvasH 基準）でプレビューに正確に重なる。
 // ドラッグ/リサイズはルートで pointer capture し、マウス座標 px をドラッグ開始時の縮尺で canvas 座標へ換算する。
 
 interface DragState {
@@ -58,7 +58,7 @@ export function FreeLayoutOverlay({
       id: el.id, mode, corner,
       startClientX: e.clientX, startClientY: e.clientY,
       start: { x: el.x, y: el.y, w: el.w, h: el.h },
-      // 表示px→canvas の縮尺。canvas もプレビューも 16:9（レターボックス無し）ゆえ scaleX===scaleY なので
+      // 表示px→canvas の縮尺。プレビューは canvas と同比（向きに追従・レターボックス無し）ゆえ scaleX===scaleY なので
       // 幅基準（width/canvasW）で算出すれば縦も一致する（canvasH は %配置に使用）。
       scale: width / canvasW,
     });
