@@ -571,7 +571,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const ext = fileExtension(file.name) || "png";
       const filePath = await importAssetFile(projectId, `${assetId}.${ext}`, dataUrl);
       if (filePath) {
-        set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)) }));
+        // 取り込み後は表示用 src を asset:// に差し替え、data URL の常駐を解消する（A3-2 レビュー）。
+        const displayUrl = await assetDisplayUrl(projectId, filePath);
+        set((s) => ({
+          assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)),
+          assetSrcById: displayUrl ? { ...s.assetSrcById, [assetId]: displayUrl } : s.assetSrcById,
+        }));
       }
     } catch (e) {
       // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
@@ -637,8 +642,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const enrich = await probeAndThumbVideo(projectId, relPath);
         set(applyEnrichment(assetId, enrich));
       } else {
-        // 画像は data URL(base64) 経路で取り込む（表示用に既に読み込んだ data URL を流用）。
-        await importAssetFile(projectId, fileName, dataUrl!);
+        // 画像は data URL で取り込み、取り込み後は表示用 src を asset:// に差し替える（data URL 常駐を解消・A3-2 レビュー）。
+        const savedPath = await importAssetFile(projectId, fileName, dataUrl!);
+        const displayUrl = savedPath ? await assetDisplayUrl(projectId, savedPath) : null;
+        if (displayUrl) set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: displayUrl } }));
       }
     } catch (e) {
       // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
@@ -741,7 +748,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         assets: existingBgm
           ? s.assets.map((a) => (a.assetId === assetId ? asset : a))
           : [...s.assets, asset],
-        assetSrcById: { ...s.assetSrcById, [assetId]: file.dataUrl },
+        // BGM は視覚表示せず書き出しも on-demand で読むため、assetSrcById には入れない（A3-2 レビュー）。
       }));
     } catch {
       set({ saveStatus: "error" });

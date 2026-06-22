@@ -70,12 +70,21 @@ export async function readAssetDataUrl(projectId: string, relPath: string): Prom
  * URL を組むだけでディスク読込はしない（実体ロードの可否は tauri.conf の assetProtocol.scope と CSP が決める）。
  * 非 Tauri（ブラウザ開発）は asset protocol が無いので null（表示は呼び出し側のフォールバックに委ねる）。
  */
+// appDataDir() は起動中不変なので Promise をキャッシュ（loadProject の素材数分の IPC 往復を避ける・A3-2 レビュー）。
+let appDataDirPromise: Promise<string> | null = null;
+function cachedAppDataDir(): Promise<string> {
+  if (!appDataDirPromise) appDataDirPromise = appDataDir();
+  return appDataDirPromise;
+}
+
 export async function assetDisplayUrl(projectId: string, relPath: string): Promise<string | null> {
   if (!isTauri()) return null;
   try {
-    const abs = await join(await appDataDir(), 'projects', projectId, relPath);
+    const abs = await join(await cachedAppDataDir(), 'projects', projectId, relPath);
     return convertFileSrc(abs);
-  } catch {
+  } catch (e) {
+    // 他の読み出し関数と同様、原因を残す（画像が出ない時の追跡用・§デバッグ）。
+    console.warn('[asset] assetDisplayUrl 失敗:', e);
     return null;
   }
 }
