@@ -661,7 +661,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             )}
 
             <div className="field">
-              <label className="field-label" htmlFor="line">ゆうこのセリフ</label>
+              <label className="field-label" htmlFor="line">セリフ</label>
               <textarea
                 id="line"
                 ref={lineRef}
@@ -838,7 +838,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   )}
                 </div>
                 <p className="field-hint">
-                  動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「ゆうこのセリフ」で場面ごとに変えられます。
+                  動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「セリフ」で場面ごとに変えられます。
                 </p>
               </div>
             )}

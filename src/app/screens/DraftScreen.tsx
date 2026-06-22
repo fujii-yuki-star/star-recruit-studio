@@ -123,7 +123,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   <th>パート</th>
                   <th>場面</th>
                   <th>使う素材</th>
-                  <th style={{ minWidth: 240 }}>ゆうこのセリフ</th>
+                  <th style={{ minWidth: 240 }}>セリフ</th>
                   <th>見た目</th>
                   <th>音声</th>
                   <th style={{ width: 210 }}>操作</th>
