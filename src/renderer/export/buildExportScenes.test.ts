@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 // canvas(ADR-0004) は Node テスト環境に無いため描画系をスタブ化し、音声付与の分岐のみを検証する。
-vi.mock('../layout', () => ({ layoutScene: () => ({}) }));
+vi.mock('../layout', () => ({ layoutScene: vi.fn(() => ({ items: [] })) }));
 vi.mock('../sceneSvg', () => ({ layoutToSvg: vi.fn(() => '<svg/>') }));
 vi.mock('./rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,PNG') }));
 vi.mock('./videoSceneSplit', () => ({
@@ -14,7 +14,8 @@ vi.mock('./videoSceneSplit', () => ({
 
 import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
-import type { LayoutItem } from '../layout';
+import { layoutScene } from '../layout';
+import type { LayoutItem, SceneLayout } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { svgToPngDataUrl } from './rasterize';
 import { buildExportScenes } from './buildExportScenes';
@@ -30,7 +31,7 @@ const scenes = [
 const templateById = new Map<string, Template>([
   ['tpl', { canvas: { width: 1920, height: 1080 } } as Template],
 ]);
-const noAsset = () => undefined;
+const noAsset = async () => undefined;
 
 describe('buildExportScenes：ナレーション音声の付与', () => {
   it('音声ありの場面は audioBase64 / narrationVolume を含む', async () => {
@@ -220,5 +221,28 @@ describe('buildExportScenes：場面間トランジション（ADR-0009 T2）', 
     ] as unknown as Scene[];
     const out = await buildExportScenes(scenes, templateById, noAsset);
     expect(out[1].transition?.name).toBe('fade');
+  });
+});
+
+describe('buildExportScenes：場面で使う画像IDの収集（#143）', () => {
+  it('場面の画像 assetId ぶんだけ resolveAssetSrc を呼ぶ（場面内の重複・null・非画像は除外）', async () => {
+    vi.mocked(layoutScene).mockReturnValueOnce({
+      items: [
+        { kind: 'image', assetId: 'img1' },
+        { kind: 'image', assetId: 'img2' },
+        { kind: 'image', assetId: 'img1' }, // 同一場面での重複 → 1回に集約
+        { kind: 'text', isSubtitle: false }, // 画像以外は対象外
+        { kind: 'image', assetId: null }, // 未割当（null）は対象外
+      ],
+    } as unknown as SceneLayout);
+    const resolve = vi.fn(async () => 'data:image/png;base64,X');
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      resolve,
+    );
+    expect(resolve).toHaveBeenCalledWith('img1');
+    expect(resolve).toHaveBeenCalledWith('img2');
+    expect(resolve).toHaveBeenCalledTimes(2); // 重複排除＋null/非画像除外で2回のみ
   });
 });
