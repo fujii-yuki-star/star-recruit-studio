@@ -31,8 +31,10 @@ export function ScenePreview({ scene, template }: { scene?: Scene; template?: Te
       role="img"
       aria-label="場面の仕上がり"
       style={{
-        width: "100%",
+        // 幅100% と 高さ70vh の両方に収める（縦型でも全体が見える＝スクロール回避）。比率は canvas 由来で維持・中央寄せ。
+        width: `min(100%, 70vh * ${cw} / ${ch})`,
         aspectRatio: `${cw} / ${ch}`,
+        margin: "0 auto",
         borderRadius: "var(--radius)",
         overflow: "hidden",
         background: "#fff",
