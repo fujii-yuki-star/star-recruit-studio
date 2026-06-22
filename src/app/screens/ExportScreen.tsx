@@ -13,38 +13,12 @@ import { BGM_VOLUME, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, expo
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { ASSET_TYPE } from "../../domain/enums";
-import type { Asset, Scene } from "../../domain/project/types";
 
 interface ExportProps {
   onNavigate: (screen: ScreenId) => void;
 }
 
 type ExportPhase = "idle" | "rendering" | "encoding" | "done" | "error" | "unsupported";
-
-// 書き出し用に、各場面で使う画像素材の data URL をディスクから都度読む（表示用 assetSrcById は Tauri で
-// asset:// になり SVG インラインに使えない＝ADR-0004 の canvas 汚染回避を維持。書き出し時だけの一時利用で常駐させない）。
-async function resolveExportImageSrc(
-  projectId: string,
-  scenes: Scene[],
-  assets: Asset[],
-): Promise<Record<string, string>> {
-  const ids = new Set<string>();
-  for (const s of scenes) {
-    for (const v of Object.values(s.assetRefs)) if (v) ids.add(v);
-  }
-  const byId = new Map(assets.map((a) => [a.assetId, a] as const));
-  const out: Record<string, string> = {};
-  await Promise.all(
-    [...ids].map(async (id) => {
-      const a = byId.get(id);
-      // 動画スロットは clipRelPath で別経路（ADR-0006）＝インライン不要。画像のみ data URL 化する。
-      if (!a?.filePath || a.assetType === ASSET_TYPE.video) return;
-      const url = await readAssetDataUrl(projectId, a.filePath);
-      if (url) out[id] = url;
-    }),
-  );
-  return out;
-}
 
 export function ExportScreen({ onNavigate }: ExportProps) {
   const scenes = useProjectStore((s) => s.scenes);
@@ -124,13 +98,20 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       await saveProject();
       // saveProject 後の projectId（新規時はここで採番済み）。動画クリップのパス解決に使う。
       const pid = useProjectStore.getState().meta.projectId;
-      // 表示用 assetSrcById（Tauri は asset://）ではなく、書き出し時にディスクから data URL を解決する（ADR-0004）。
-      const exportSrcById = pid ? await resolveExportImageSrc(pid, scenes, assets) : {};
+      // 表示用 assetSrcById（asset://）ではなく、書き出し時に各場面の画像をディスクから data URL 化する。
+      // buildExportScenes が場面ごとに解決→破棄するので、ここでは id→data URL のリゾルバを渡すだけ（#143・ADR-0004）。
+      const assetById = new Map(assets.map((a) => [a.assetId, a] as const));
+      const resolveExportSrc = async (id: string): Promise<string | undefined> => {
+        const a = assetById.get(id);
+        // 動画スロットは clipRelPath 経路（ADR-0006）＝インライン不要。画像のみ data URL 化。
+        if (!pid || !a?.filePath || a.assetType === ASSET_TYPE.video) return undefined;
+        return (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
+      };
       const templateById = new Map(templates.map((t) => [t.templateId, t] as const));
       const built = await buildExportScenes(
         scenes,
         templateById,
-        (id) => (id ? exportSrcById[id] : undefined),
+        resolveExportSrc,
         (scene) => ({
           audioBase64: narrationAudioById[scene.sceneId],
           narrationVolume: resolveNarrationVolume(scene.audioMix, voiceSettings),

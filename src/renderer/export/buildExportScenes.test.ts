@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 // canvas(ADR-0004) は Node テスト環境に無いため描画系をスタブ化し、音声付与の分岐のみを検証する。
-vi.mock('../layout', () => ({ layoutScene: () => ({}) }));
+vi.mock('../layout', () => ({ layoutScene: () => ({ items: [] }) }));
 vi.mock('../sceneSvg', () => ({ layoutToSvg: vi.fn(() => '<svg/>') }));
 vi.mock('./rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,PNG') }));
 vi.mock('./videoSceneSplit', () => ({
@@ -30,7 +30,7 @@ const scenes = [
 const templateById = new Map<string, Template>([
   ['tpl', { canvas: { width: 1920, height: 1080 } } as Template],
 ]);
-const noAsset = () => undefined;
+const noAsset = async () => undefined;
 
 describe('buildExportScenes：ナレーション音声の付与', () => {
   it('音声ありの場面は audioBase64 / narrationVolume を含む', async () => {

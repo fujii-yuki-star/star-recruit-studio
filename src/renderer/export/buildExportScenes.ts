@@ -81,7 +81,7 @@ export interface ExportOptions {
 export async function buildExportScenes(
   scenes: Scene[],
   templateById: Map<string, Template>,
-  assetSrc: (assetId: string | null) => string | undefined,
+  resolveAssetSrc: (assetId: string) => Promise<string | undefined>,
   narrationFor?: NarrationFor,
   videoSlotFor?: VideoSlotFor,
   onProgress?: (done: number, total: number) => void,
@@ -99,6 +99,21 @@ export async function buildExportScenes(
     if (template) {
       included.push(scene);
       const layout = layoutScene(scene, template);
+      // この場面で使う画像だけをディスクから data URL 化（場面ごとに解決→描画後に破棄＝全画像の一括ロードによる
+      // 瞬間メモリ spike を避ける・#143）。動画スロットは clipRelPath 経路（ADR-0006）なので対象外。
+      const sceneSrc = new Map<string, string>();
+      const usedImageIds = [
+        ...new Set(
+          layout.items.flatMap((it) => (it.kind === "image" && it.assetId ? [it.assetId] : [])),
+        ),
+      ];
+      await Promise.all(
+        usedImageIds.map(async (id) => {
+          const url = await resolveAssetSrc(id);
+          if (url) sceneSrc.set(id, url);
+        }),
+      );
+      const assetSrc = (id: string | null): string | undefined => (id ? sceneSrc.get(id) : undefined);
       const narration = narrationFor?.(scene);
       const videoSlot = videoSlotFor?.(scene);
       const split = videoSlot
