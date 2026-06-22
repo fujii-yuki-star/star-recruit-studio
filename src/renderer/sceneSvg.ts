@@ -78,6 +78,9 @@ export interface LayoutToSvgOptions {
   transparent?: boolean;
   /** 描画するアイテムを絞る（動画ありシーンの下/上分割用）。未指定なら全件。 */
   itemFilter?: (item: LayoutItem) => boolean;
+  /** true なら SVG ルートの width/height を 100% にする（viewBox は保持＝コンテナにフィット・プレビュー用）。
+   *  既定 false：layout 実寸を width/height に出す（resvg/Canvas でのラスタライズ＝書き出し用）。 */
+  responsive?: boolean;
 }
 
 // fit を <image> の preserveAspectRatio へ（cover=slice / contain=meet / stretch=none）。
@@ -122,8 +125,13 @@ export function layoutToSvg(layout: SceneLayout, opts: LayoutToSvgOptions = {}):
   const items = opts.itemFilter ? layout.items.filter(opts.itemFilter) : layout.items;
   const body = items.map((item) => itemToSvg(item, opts)).join('\n');
   // transparent 時は背景の全面塗りを出さない（動画が透けて見える上レイヤー用）。
+  // responsive: ルート寸法を 100% にしてコンテナへフィットさせる（viewBox で座標系を保持）。
+  // 既定は layout 実寸（書き出しのラスタライズは固定px が要るため）。
+  const size = opts.responsive
+    ? 'width="100%" height="100%"'
+    : `width="${layout.width}" height="${layout.height}"`;
   const lines = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${layout.width}" height="${layout.height}" viewBox="0 0 ${layout.width} ${layout.height}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" ${size} viewBox="0 0 ${layout.width} ${layout.height}">`,
   ];
   if (!opts.transparent) {
     lines.push(

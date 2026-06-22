@@ -83,3 +83,15 @@ describe('wrapText（折返し・あふれ判定・§7）', () => {
     expect(wrapText('あいうえお', 10, 40, 3)).toEqual(['あいうえお']);
   });
 });
+
+describe('layoutToSvg：responsive オプション（A3-2・向きプレビュー）', () => {
+  const ns = 'http://www.w3.org/2000/svg';
+  it('既定は SVG ルートに layout 実寸を出す（書き出しのラスタライズ用）', () => {
+    const svg = layoutToSvg(imageLayout());
+    expect(svg).toContain(`<svg xmlns="${ns}" width="1920" height="1080" viewBox="0 0 1920 1080">`);
+  });
+  it('responsive:true は SVG ルートを 100% にし viewBox で座標系を保持（コンテナにフィット）', () => {
+    const svg = layoutToSvg(imageLayout(), { responsive: true });
+    expect(svg).toContain(`<svg xmlns="${ns}" width="100%" height="100%" viewBox="0 0 1920 1080">`);
+  });
+});

@@ -6,7 +6,7 @@ import { useProjectStore } from "../store/projectStore";
 
 // 共有レンダラ（ADR-0001）でシーンをSVG化して表示する仕上がり確認。
 // 出力（書き出し）も同じSVGをラスタライズするため、見た目が一致する。
-// スロットの画像は assetSrcById（data URL）で差し込む。未設定はプレースホルダ枠。
+// スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
 export function ScenePreview({ scene, template }: { scene?: Scene; template?: Template }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
 
@@ -19,11 +19,12 @@ export function ScenePreview({ scene, template }: { scene?: Scene; template?: Te
   }
 
   // 表示サイズはテンプレの canvas（＝向き）に追従させる（16:9→1920×1080 / 9:16→1080×1920・ADR-0012）。
-  // sceneSvg は canvas 実寸を width/height に出すので、その実寸を 100% へ置換し、コンテナ比率も canvas に合わせる。
+  // responsive:true で SVG ルートを 100%（viewBox は canvas 実寸を保持）にし、コンテナ比率も canvas に合わせる。
   const { width: cw, height: ch } = template.canvas;
   const svg = layoutToSvg(layoutScene(scene, template), {
     assetSrc: (id) => (id ? assetSrcById[id] : undefined),
-  }).replace(`width="${cw}" height="${ch}"`, 'width="100%" height="100%"');
+    responsive: true,
+  });
 
   return (
     <div

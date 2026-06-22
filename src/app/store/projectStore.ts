@@ -26,7 +26,7 @@ import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, importAssetBytes, importAssetByPath, readAssetDataUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
+import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
 import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
@@ -164,7 +164,7 @@ async function probeAndThumbVideo(
     const thumbPath = await extractVideoThumbnail(projectId, relPath);
     if (thumbPath) {
       out.thumbnailPath = thumbPath;
-      const url = await readAssetDataUrl(projectId, thumbPath);
+      const url = await assetDisplayUrl(projectId, thumbPath);
       if (url) out.thumbUrl = url;
     } else if (hasTauri) {
       console.warn("[asset] 動画サムネの生成に失敗しました（アイコン表示にフォールバック）");
@@ -332,7 +332,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   loadProject: async (projectId) => {
     const text = await loadProjectDoc(projectId);
     const project = parseProjectDoc(text);
-    // ディスクの素材を data URL に復元（filePath を持つもの。未配置のサンプル等は null でスキップ）。並列実行。
+    // ディスクの素材を表示用 src に解決（Tauri は asset://・ブラウザは null）。filePath を持つもの・未配置のサンプル等は null でスキップ。並列実行（A3-2）。
     type LoadedSrc = { assetId: string; url: string; thumbnailPath?: string };
     const loaded = await Promise.all(
       project.assets.map(async (a): Promise<LoadedSrc | null> => {
@@ -344,11 +344,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             thumbPath = (await extractVideoThumbnail(project.projectId, a.filePath)) ?? undefined;
           }
           if (!thumbPath) return null;
-          const url = await readAssetDataUrl(project.projectId, thumbPath);
+          const url = await assetDisplayUrl(project.projectId, thumbPath);
           return url ? { assetId: a.assetId, url, thumbnailPath: thumbPath } : null;
         }
         if (!a.filePath) return null;
-        const url = await readAssetDataUrl(project.projectId, a.filePath);
+        const url = await assetDisplayUrl(project.projectId, a.filePath);
         return url ? { assetId: a.assetId, url } : null;
       }),
     );
@@ -685,8 +685,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const enrich = await probeAndThumbVideo(projectId, relPath);
         set(applyEnrichment(assetId, enrich));
       } else {
-        // 画像は表示＋書き出し(ADR-0004)で data URL が要る。取り込んだ実体から読み戻す。
-        const url = await readAssetDataUrl(projectId, relPath);
+        // 画像の表示用 src を取り込んだ実体から解決（Tauri は asset://）。書き出しの data URL は書き出し時に別途読む（A3-2/ADR-0004）。
+        const url = await assetDisplayUrl(projectId, relPath);
         if (url) set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: url } }));
       }
     } catch (e) {
