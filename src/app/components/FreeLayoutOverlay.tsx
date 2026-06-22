@@ -58,7 +58,7 @@ export function FreeLayoutOverlay({
       id: el.id, mode, corner,
       startClientX: e.clientX, startClientY: e.clientY,
       start: { x: el.x, y: el.y, w: el.w, h: el.h },
-      // 表示px→canvas の縮尺。canvas もプレビューも 16:9（レターボックス無し）ゆえ scaleX===scaleY なので
+      // 表示px→canvas の縮尺。プレビューは canvas と同比（向きに追従・レターボックス無し）ゆえ scaleX===scaleY なので
       // 幅基準（width/canvasW）で算出すれば縦も一致する（canvasH は %配置に使用）。
       scale: width / canvasW,
     });
