@@ -35,7 +35,7 @@ export interface DraftRow {
   part: string;
   scene: string;
   material: string;
-  line: string; // ゆうこのセリフ
+  line: string; // セリフ
   look: string; // 見た目
   materialType: "photo" | "video" | "none";
   voiceStatus: VoiceStatus;
