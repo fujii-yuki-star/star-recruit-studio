@@ -95,3 +95,38 @@ describe('layoutToSvg：responsive オプション（A3-2・向きプレビュ�
     expect(svg).toContain(`<svg xmlns="${ns}" width="100%" height="100%" viewBox="0 0 1920 1080">`);
   });
 });
+
+describe('layoutToSvg：テキストの XSS エスケープ（dangerouslySetInnerHTML 経路・#144）', () => {
+  it('特殊文字（& < > " \')を実体参照化し、生のタグ/クォートを残さない', () => {
+    const layout: SceneLayout = {
+      width: 1920,
+      height: 1080,
+      backgroundColor: '#ffffff',
+      items: [
+        {
+          kind: 'text',
+          id: 't',
+          x: 100,
+          y: 100,
+          w: 1600,
+          h: 200,
+          zIndex: 10,
+          text: `O'Brien <script> & "x"`,
+          fontSize: 40,
+          fontWeight: 'normal',
+          color: '#000000',
+          maxLines: 3,
+          isSubtitle: false,
+        },
+      ],
+    };
+    const svg = layoutToSvg(layout);
+    expect(svg).toContain('&#39;'); // '
+    expect(svg).toContain('&lt;'); // <
+    expect(svg).toContain('&gt;'); // >
+    expect(svg).toContain('&amp;'); // &
+    expect(svg).toContain('&quot;'); // "
+    expect(svg).not.toContain('<script>'); // 生タグが注入されない
+    expect(svg).not.toContain("O'Brien"); // 生の ' を残さない
+  });
+});
