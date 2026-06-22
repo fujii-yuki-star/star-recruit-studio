@@ -18,10 +18,12 @@ export function ScenePreview({ scene, template }: { scene?: Scene; template?: Te
     );
   }
 
-  // 1920x1080 固定の幅高を、コンテナにフィットさせる
+  // 表示サイズはテンプレの canvas（＝向き）に追従させる（16:9→1920×1080 / 9:16→1080×1920・ADR-0012）。
+  // sceneSvg は canvas 実寸を width/height に出すので、その実寸を 100% へ置換し、コンテナ比率も canvas に合わせる。
+  const { width: cw, height: ch } = template.canvas;
   const svg = layoutToSvg(layoutScene(scene, template), {
     assetSrc: (id) => (id ? assetSrcById[id] : undefined),
-  }).replace('width="1920" height="1080"', 'width="100%" height="100%"');
+  }).replace(`width="${cw}" height="${ch}"`, 'width="100%" height="100%"');
 
   return (
     <div
@@ -29,7 +31,7 @@ export function ScenePreview({ scene, template }: { scene?: Scene; template?: Te
       aria-label="場面の仕上がり"
       style={{
         width: "100%",
-        aspectRatio: "16 / 9",
+        aspectRatio: `${cw} / ${ch}`,
         borderRadius: "var(--radius)",
         overflow: "hidden",
         background: "#fff",
