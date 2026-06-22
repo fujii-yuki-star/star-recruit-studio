@@ -17,7 +17,7 @@ model: sonnet
   | asset | 素材 |
   | render | 動画を書き出す |
   | validation | 内容チェック |
-  | narration | ゆうこのセリフ / 読み上げの声 |
+  | narration | セリフ / 読み上げの声 |
   | provider | 使用するAI |
   | scene | 場面 |
   | part | パート |
