@@ -23,10 +23,12 @@ pub async fn synthesize_voice(
     pitch: f64,
     intonation: f64,
     base_url: Option<String>,
+    engine: tauri::State<'_, crate::voicevox_engine::EngineState>,
 ) -> Result<String, String> {
-    // 設定の接続先を最優先。空なら環境変数→既定にフォールバック。
+    // 接続先: 設定の base_url（上級者）＞ 同梱エンジン（自動起動）＞ 環境変数 ＞ 既定 50021。
     let base = base_url
         .filter(|s| !s.trim().is_empty())
+        .or_else(|| engine.base_url())
         .unwrap_or_else(voicevox_base);
     let client = http_client();
     let speaker_str = speaker.to_string();

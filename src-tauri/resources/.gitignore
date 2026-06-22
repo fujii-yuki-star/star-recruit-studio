@@ -1,0 +1,5 @@
+# 同梱 VOICEVOX ENGINE 一式（大容量・配布ビルド時に配置・#149）はコミットしない。
+# README と本ファイルだけ追跡する。
+*
+!.gitignore
+!README.md

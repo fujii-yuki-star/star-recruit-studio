@@ -8,6 +8,7 @@ mod ai;
 mod assets;
 mod ffmpeg;
 mod voicevox;
+mod voicevox_engine;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -107,6 +108,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(voicevox_engine::EngineState::default())
+        .setup(|app| {
+            // 同梱 VOICEVOX ENGINE を自動起動（同梱が無ければ何もしない＝手動起動/設定の接続先へフォールバック・ADR-0005/#149）。
+            voicevox_engine::start_bundled_engine(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             save_project,
@@ -126,6 +133,14 @@ pub fn run() {
             ai::delete_api_key,
             ai::ai_generate
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // アプリ終了時に同梱 ENGINE を確実に終了（ゾンビ化防止・#149）。
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                app_handle
+                    .state::<voicevox_engine::EngineState>()
+                    .shutdown();
+            }
+        });
 }
