@@ -12,7 +12,8 @@ function escapeXml(s: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // 文字幅の概算（フォント実測の代替・05 §10 / ADR-0001 未解決）。半角(ASCII)は約0.55em、

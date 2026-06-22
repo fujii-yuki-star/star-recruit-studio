@@ -143,6 +143,7 @@
 ### 実装要件（コードに落とす） ※実装監査 2026-06-17
 - [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL 2.1+・**ソース入手先URL をクリック可能で表示**＝PR#113)／Noto Sans JP(OFL)）。残: ライセンス**本文**の配布物同梱、BGM/装飾を採用時に追記。
 - [x] APIキーのOSキーチェーン保管 ＝ **実装済**（`infrastructure/aiClient` 経由で Rust keyring に保管・平文非保存・本文/ログ非混入＝ADR-0010 P1）。
+- [x] 本番 webview の **Content-Security-Policy** ＝ **設定済**（`tauri.conf.json` `app.security.csp`：`script-src 'self'`／`object-src 'none'`／`base-uri 'self'`／`frame-ancestors 'none'` で XSS 緩和。`img/media-src` に `asset: http://asset.localhost blob: data:`、`connect-src` に `ipc: http://ipc.localhost` を必要分だけ許可。dev は `devCsp` で Vite HMR を許容。`style-src` も `'self'`（SVGプレビューは属性スタイルのみ・React は CSSOM 経由・テキストは `escapeXml` が `'` 含め実体参照化）＝#144）。残: **packaged 実機での全画面動作確認**（AI生成・声作成の IPC／DevTools に CSP 違反が出ないこと）。
 - [~] FFmpeg/VOICEVOX/AI の `infrastructure` 越し呼び出し ＝ **実装済**（`ffmpegExport`／`voiceProviders/voicevoxProvider`／`aiProviders`）。残: **バージョン固定と記録**。
 - [ ] 書き出し時のクレジット自動付与（任意ON/OFF）＝ `AboutScreen` にトグル UI のみで**焼き込み未実装・設定も揮発**＝backlog。
 
