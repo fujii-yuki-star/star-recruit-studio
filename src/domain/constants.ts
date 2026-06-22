@@ -68,6 +68,7 @@ export const SPEED_STEP = 0.25;
 
 // 取り込み時にメモリへ展開（data URL/生バイト）してよい素材サイズの上限（#48・A3）。
 // これを超えるファイルは base64/バイトを JS に載せず、ネイティブ「開く」のパス0コピー取り込みへ誘導する（OOM 保険）。
+// schema/データには影響しない実装上の保険のため 11§4 定数カタログには載せない（HD_SHORT 等と同じ扱い）。
 export const MAX_INLINE_ASSET_BYTES = 50 * 1024 * 1024; // 50 MB
 
 export const MAX_NARRATION_LEN_DEFAULT = 120;

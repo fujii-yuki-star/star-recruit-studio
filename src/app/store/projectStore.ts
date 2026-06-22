@@ -547,7 +547,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。
     if (exceedsInlineAssetLimit(file.size)) {
       const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
-      set({ importError: `この画像は大きすぎます（上限${limitMb}MB）。小さい画像をお使いください。` });
+      set({ importError: `この画像は大きすぎます（上限${limitMb}MB）。別の小さい画像を選び直してください。` });
       return;
     }
     // 画像は表示＋書き出し(ADR-0004)で data URL が必要。読み込んで即時表示。
