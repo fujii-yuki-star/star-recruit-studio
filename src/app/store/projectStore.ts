@@ -15,6 +15,7 @@ import {
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
+import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
 import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClient";
@@ -102,6 +103,9 @@ interface ProjectState {
     /** 動画の向き（aspectRatio を videoSettings へ。未指定なら既存維持・ADR-0012/B5）。 */
     aspectRatio?: Orientation;
   }) => void;
+  /** 動画全体の向きを切り替え、各場面のテンプレを同カテゴリ・新向きへ写像する（B5-b・ADR-0012）。
+   *  切替えた件数と、対応する見た目が無く原状維持した件数を返す（UIの結果表示用）。 */
+  changeOrientation: (target: Orientation) => { changed: number; unsupported: number };
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
@@ -499,6 +503,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       },
       saveStatus: "idle",
     })),
+  changeOrientation: (target) => {
+    const s = get();
+    const result = changeScenesOrientation(s.scenes, s.templates, target);
+    // 1件も切り替えられない（既に目標向き or 対応する見た目なし）なら向き・場面とも変えない。
+    // ＝変換先が無いのに向きだけ変えて全場面を不整合にしてしまうのを防ぐ（B5-b レビュー）。
+    if (result.changed > 0) {
+      set({
+        scenes: result.scenes,
+        meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, aspectRatio: target } },
+        saveStatus: "idle",
+      });
+    }
+    return { changed: result.changed, unsupported: result.unsupported };
+  },
   updateVoiceSettings: (patch) =>
     set((s) => ({
       meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } },
