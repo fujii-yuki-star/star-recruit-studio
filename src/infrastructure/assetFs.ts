@@ -1,6 +1,7 @@
 // 素材ファイルの取り込み/読み出し（Tauriコマンド境界）。domain は型のみ、I/Oはここに隔離（CLAUDE.md §4）。
 // Tauri 非検出時（ブラウザ開発）は永続化せず null を返す（表示用 data URL はメモリ内で別途保持される）。
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { appDataDir, join } from '@tauri-apps/api/path';
 import type { AssetMetadata } from '../domain/project/types';
 
 export function isTauri(): boolean {
@@ -59,6 +60,31 @@ export async function readAssetDataUrl(projectId: string, relPath: string): Prom
   try {
     return await invoke<string>('read_asset_data_url', { projectId, relPath });
   } catch {
+    return null;
+  }
+}
+
+/**
+ * プロジェクト相対パスの素材を、表示用の asset:// URL（Tauri asset protocol）へ変換する（A3-2）。
+ * data URL を JS に常駐させず WebView がディスクから直接ストリームする＝大容量素材でもメモリを食わない。
+ * URL を組むだけでディスク読込はしない（実体ロードの可否は tauri.conf の assetProtocol.scope と CSP が決める）。
+ * 非 Tauri（ブラウザ開発）は asset protocol が無いので null（表示は呼び出し側のフォールバックに委ねる）。
+ */
+// appDataDir() は起動中不変なので Promise をキャッシュ（loadProject の素材数分の IPC 往復を避ける・A3-2 レビュー）。
+let appDataDirPromise: Promise<string> | null = null;
+function cachedAppDataDir(): Promise<string> {
+  if (!appDataDirPromise) appDataDirPromise = appDataDir();
+  return appDataDirPromise;
+}
+
+export async function assetDisplayUrl(projectId: string, relPath: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    const abs = await join(await cachedAppDataDir(), 'projects', projectId, relPath);
+    return convertFileSrc(abs);
+  } catch (e) {
+    // 他の読み出し関数と同様、原因を残す（画像が出ない時の追跡用・§デバッグ）。
+    console.warn('[asset] assetDisplayUrl 失敗:', e);
     return null;
   }
 }
