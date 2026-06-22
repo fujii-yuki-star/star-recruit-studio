@@ -1,7 +1,7 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
-import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
+import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type VideoKind } from "../../domain/enums";
 import type { Template } from "../../domain/template/types";
@@ -27,7 +27,7 @@ import {
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, readAssetDataUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
-import { detectAssetType, fileExtension } from "../../domain/asset/assetFile";
+import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
@@ -544,6 +544,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return { templates: [...byId.values()] };
     }),
   setAssetImage: async (assetId, file) => {
+    // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。
+    if (exceedsInlineAssetLimit(file.size)) {
+      const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
+      set({ importError: `この画像は大きすぎます（上限${limitMb}MB）。小さい画像をお使いください。` });
+      return;
+    }
     // 画像は表示＋書き出し(ADR-0004)で data URL が必要。読み込んで即時表示。
     let dataUrl: string;
     try {
@@ -573,6 +579,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   addAsset: async (file) => {
+    // 大容量はメモリへ展開せず、ネイティブ「開く」のパス0コピー取り込み（addAssetByPath）へ誘導する（#48・A3）。
+    if (exceedsInlineAssetLimit(file.size)) {
+      const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
+      set({ importError: `このファイルは大きすぎます（上限${limitMb}MB）。大きいファイルは「写真・動画を選ぶ」から取り込んでください。` });
+      return;
+    }
     const assetId = createAssetId(get().assets.map((a) => a.assetId));
     // 拡張子から素材種別を判別（動画/画像）。詳細メタ(長さ・音声有無)・クリップ設定は follow-up。
     const assetType = detectAssetType(file.name);

@@ -66,6 +66,10 @@ export const SPEED_MAX = 2.0;
 export const SPEED_DEFAULT = 1.0;
 export const SPEED_STEP = 0.25;
 
+// 取り込み時にメモリへ展開（data URL/生バイト）してよい素材サイズの上限（#48・A3）。
+// これを超えるファイルは base64/バイトを JS に載せず、ネイティブ「開く」のパス0コピー取り込みへ誘導する（OOM 保険）。
+export const MAX_INLINE_ASSET_BYTES = 50 * 1024 * 1024; // 50 MB
+
 export const MAX_NARRATION_LEN_DEFAULT = 120;
 export const MAX_SUBTITLE_LEN_DEFAULT = 60;
 // 自由記述「その他」(トップレベル additionalNotes・両用途共通・ADR-0011) の上限。schemas/project.schema.json の maxLength と一致させる。
