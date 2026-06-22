@@ -143,6 +143,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // assetRefs を割り当てられるスロット層（背景/メイン/ロゴ）と、割当可能な素材。
   const slotLayers =
     template?.layers.filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo") ?? [];
+  // ゆうこ（立ち絵）を持つテンプレかどうか。character レイヤーが無いテンプレでは立ち絵UIを出さない（#141）。
+  const hasCharacterLayer = template?.layers.some((l) => l.type === "character") ?? false;
 
   const visibleAssets = assets.filter((a) => {
     const matchType =
@@ -793,14 +795,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               />
             </div>
 
-            <div className="toggle-row">
-              <span className="field-label" style={{ margin: 0 }}>ゆうこを表示する</span>
-              <Switch
-                on={selected.character.enabled}
-                onChange={(v) => patch((s) => ({ ...s, character: { ...s.character, enabled: v } }))}
-                label="ゆうこを表示する"
-              />
-            </div>
+            {/* ゆうこ立ち絵を持つテンプレのみ表示トグルを出す（#141）。ナレーション（セリフ）は全テンプレ共通なので上に残す。 */}
+            {hasCharacterLayer && (
+              <div className="toggle-row">
+                <span className="field-label" style={{ margin: 0 }}>ゆうこを表示する</span>
+                <Switch
+                  on={selected.character.enabled}
+                  onChange={(v) => patch((s) => ({ ...s, character: { ...s.character, enabled: v } }))}
+                  label="ゆうこを表示する"
+                />
+              </div>
+            )}
 
             {/* 画面の切り替えなどの詳細は、上の「詳細編集」トグル（showAdvanced）で表示する。 */}
             {showAdvanced && (
