@@ -109,6 +109,48 @@ pub fn pick_codec(encoders_output: &str) -> Option<VideoCodec> {
     }
 }
 
+/// `ffmpeg -encoders` 出力を「書き出し能力」の UI 向け状態へ写す純関数（#120・ADR-0013）。
+/// - "mediaFoundation": h264_mf（OS提供・主経路）＝標準方式で書き出せる。
+/// - "fallback": h264_mf は無いが OpenH264／libx264 がある＝予備方式で書き出しは可能（標準方式ではない）。
+/// - "unavailable": H.264 エンコーダが皆無＝書き出し不可（例: Windows N/KN でメディア機能パック未導入かつ予備も無い構成）。
+///
+/// ツール（ffmpeg）自体が見つからないケースは呼び出し側で "toolMissing" を返す。
+pub fn h264_capability(encoders_output: &str) -> &'static str {
+    match pick_codec(encoders_output) {
+        Some(VideoCodec::MediaFoundation) => "mediaFoundation",
+        Some(_) => "fallback",
+        None => "unavailable",
+    }
+}
+
+/// 書き出し能力（#120）。capability は h264_capability の値、または "toolMissing"。encoder は診断用。
+/// 注: capability の文字列は TS の `ExportCapability`（src/domain/export/exportCapability.ts）と一致させる
+/// （値を増やすときは TS 型・exportCapability.test.ts・h264_capability_maps_encoders_to_ui_states を併せて更新）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct H264Capability {
+    capability: String,
+    encoder: Option<String>,
+}
+
+/// 書き出し前に H.264 エンコード能力を検知する（#120・ADR-0013）。
+/// `ffmpeg -encoders` を読み、標準方式（h264_mf）/予備/不可 を判定。ffmpeg 不在は "toolMissing"。
+/// UI（公開前チェック）が「次の行動」を事前提示するために使う（書き出し本体は export_video 内で再判定）。
+#[tauri::command]
+pub fn detect_h264_capability(app: tauri::AppHandle) -> H264Capability {
+    let ffmpeg = resolve_ffmpeg(&app);
+    match run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]) {
+        Ok(encoders) => H264Capability {
+            capability: h264_capability(&encoders).into(),
+            encoder: pick_codec(&encoders).map(|c| c.encoder().to_string()),
+        },
+        Err(_) => H264Capability {
+            capability: "toolMissing".into(),
+            encoder: None,
+        },
+    }
+}
+
 /// 1シーン分の動画（PNG静止画＋音声）にする引数（純粋）。
 /// 音声があればナレーション（volume適用）を、無ければ無音トラックを付け、全クリップを
 /// 「映像＋AAC音声」で統一する（後段 concat の `-c copy` が成立するため）。
@@ -1139,9 +1181,10 @@ pub fn export_video(
     })?;
     // ここに来るのは「ffmpeg は見つかったが H.264 エンコーダ（h264_mf/libopenh264/libx264）が無い」ケース。
     // 原因はツールの場所ではなく環境（例: Windows N で Media Foundation 非搭載、配布ビルドの構成不足）。
-    // ※ Windows N/KN 等の事前検知と具体的な案内文は ADR-0013 残課題（配布実装で確定）。
+    // 通常は公開前チェック（detect_h264_capability・#120）で事前ブロックされるが、そこを経ない経路でも
+    // 「次の行動」を示せるよう、文言は TS の EXPORT_CAPABILITY_NOTICE.unavailable と同内容に揃える（§2-5）。
     let codec = pick_codec(&encoders).ok_or_else(|| {
-        "この端末では動画の書き出しに対応した機能が見つかりませんでした。お使いの Windows の種類によっては、追加の準備が必要な場合があります。".to_string()
+        "この端末では動画を書き出せません。お使いの Windows が N／KN 版の場合は「メディア機能パック」を追加してから、もう一度お試しください。解決しない場合はお問い合わせください。".to_string()
     })?;
 
     let tmp = std::env::temp_dir().join("yuko_recruit_export");
@@ -1460,6 +1503,20 @@ mod tests {
             pick_codec(btbn_lgpl_encoders),
             Some(VideoCodec::MediaFoundation)
         );
+    }
+
+    #[test]
+    fn h264_capability_maps_encoders_to_ui_states() {
+        // h264_mf あり＝標準方式（主経路）。
+        assert_eq!(
+            h264_capability(" V..... h264_mf  H264 via MediaFoundation"),
+            "mediaFoundation"
+        );
+        // h264_mf 無し・OpenH264／libx264 あり＝予備方式（書き出しは可能）。
+        assert_eq!(h264_capability(" V..... libopenh264  OpenH264"), "fallback");
+        assert_eq!(h264_capability(" V..... libx264  x264"), "fallback");
+        // H.264 エンコーダ皆無＝書き出し不可。
+        assert_eq!(h264_capability("no h264 encoders here"), "unavailable");
     }
 
     #[test]

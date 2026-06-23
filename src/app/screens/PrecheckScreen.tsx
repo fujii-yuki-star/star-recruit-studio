@@ -1,9 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { PrecheckItem, ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { buildPrecheckItems } from "../adapters";
 import { PageHead } from "../components/ui";
 import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
+import { canExport, detectH264Capability } from "../../infrastructure/ffmpegExport";
+import { EXPORT_CAPABILITY_NOTICE, blocksExport, type ExportCapability } from "../../domain/export/exportCapability";
 
 interface PrecheckProps {
   onNavigate: (screen: ScreenId) => void;
@@ -17,13 +19,40 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   const { status, scenes, assets, templates, generate } = useProjectStore();
+  // 書き出し能力（標準方式 h264_mf の可用性）の事前検知（#120）。Tauri 環境でのみ取得。
+  const [capability, setCapability] = useState<ExportCapability | null>(null);
 
   useEffect(() => {
     if (status === "idle") void generate();
   }, [status, generate]);
 
-  const items = buildPrecheckItems(scenes, assets, templates);
+  useEffect(() => {
+    if (!canExport()) return;
+    let alive = true;
+    detectH264Capability()
+      .then((c) => {
+        if (alive) setCapability(c);
+      })
+      .catch(() => {
+        if (alive) setCapability(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const baseItems = buildPrecheckItems(scenes, assets, templates);
+  // 書き出し能力チェックを先頭に差し込む（取得できた場合のみ・#120）。
+  const capNotice = capability ? EXPORT_CAPABILITY_NOTICE[capability] : null;
+  const items: PrecheckItem[] = capNotice
+    ? [
+        { id: "export-capability", label: capNotice.label, detail: capNotice.detail, severity: capNotice.severity },
+        ...baseItems,
+      ]
+    : baseItems;
   const count = (s: PrecheckItem["severity"]) => items.filter((i) => i.severity === s).length;
+  // 書き出し不可（unavailable/toolMissing）のときだけ事前にブロック。fallback は予備方式で書き出せるので進める。
+  const exportBlocked = capability != null && blocksExport(capability);
 
   return (
     <div className="main-scroll">
@@ -96,10 +125,21 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
           <ArrowLeftIcon size={18} />
           戻って直す
         </button>
-        <button className="btn btn-primary btn-lg" onClick={() => onNavigate("export")}>
-          このまま書き出す
-          <ChevronRightIcon size={18} />
-        </button>
+        <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
+          <button
+            className="btn btn-primary btn-lg"
+            onClick={() => onNavigate("export")}
+            disabled={exportBlocked}
+          >
+            このまま書き出す
+            <ChevronRightIcon size={18} />
+          </button>
+          {exportBlocked && (
+            <span className="text-sm" style={{ color: "var(--color-danger)" }}>
+              この端末では書き出せません。上の「動画の書き出し」の案内をご確認ください。
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
