@@ -20,7 +20,7 @@
     "security": {
       "csp": {
         "default-src": "'self'",
-        "script-src": "'self'",
+        "script-src": "'self' 'unsafe-eval'",
         "style-src": "'self'",
         "img-src": "'self' asset: http://asset.localhost blob: data:",
         "media-src": "'self' asset: http://asset.localhost blob: data:",
@@ -47,6 +47,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": { "resources/voicevox_engine": "voicevox_engine" }
+    "resources": { "resources/voicevox_engine": "voicevox_engine", "resources/ffmpeg": "ffmpeg" }
   }
 }

@@ -510,27 +510,53 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     args
 }
 
-/// ffmpeg バイナリを解決（環境変数 → appData/bin → localAppData/bin → PATH）。
+/// ffmpeg バイナリを解決する。
+/// - **配布版（release）**：同梱 FFmpeg（`resource_dir/ffmpeg/bin/ffmpeg.exe`）を**最優先**＝pin 済み
+///   LGPL+h264_mf 構成を保証する（外部の未 pin FFmpeg を拾わない）。外部 `FFMPEG_PATH` は **`tauri dev`、
+///   または明示診断（`FFMPEG_DIAGNOSTIC=1`）時のみ**尊重する。
+/// - **開発（`tauri dev`）**：`FFMPEG_PATH` 優先（ffmpeg-static で開発）。
+/// - フォールバック：`appData/bin` → `localAppData/bin` → PATH（同梱が無い環境向け）。
 pub fn resolve_ffmpeg(app: &tauri::AppHandle) -> PathBuf {
-    resolve_bin(app, "FFMPEG_PATH", "ffmpeg")
-}
-
-fn resolve_bin(app: &tauri::AppHandle, env_key: &str, name: &str) -> PathBuf {
-    if let Ok(p) = std::env::var(env_key) {
-        if !p.is_empty() {
-            return PathBuf::from(p);
+    // FFMPEG_PATH を尊重するのは「dev か、明示診断（FFMPEG_DIAGNOSTIC=1）」のときだけ。配布版は同梱を
+    // 最優先＝外部の未 pin FFmpeg で上書きさせない（pin 済み LGPL+h264_mf 構成を保証）。
+    // ※ cfg!(dev) は tauri-build が出力する cfg（`cargo:rustc-cfg=dev` ＋ `cargo:rustc-check-cfg=cfg(dev)`
+    //   を登録）で、`tauri dev` セッションのみ true・`tauri build` では false。debug/release プロファイルでは
+    //   なくビルド種別で判定するため、debug packaged build でも配布版扱い（同梱優先）になる。
+    let dev = cfg!(dev);
+    let diagnostic = std::env::var("FFMPEG_DIAGNOSTIC")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if dev || diagnostic {
+        if let Ok(p) = std::env::var("FFMPEG_PATH") {
+            if !p.is_empty() {
+                // 配布版で診断フラグにより外部 FFmpeg を使う場合は、pin 構成外（LGPL+h264_mf 保証外）を警告。
+                if !dev {
+                    eprintln!(
+                        "[ffmpeg] 診断モード: 外部 FFMPEG_PATH を使用します（同梱 pin 構成外＝LGPL+h264_mf は保証されません）: {p}"
+                    );
+                }
+                return PathBuf::from(p);
+            }
         }
     }
-    // appData / localAppData の bin/ を順に探す（Windowsの Roaming/Local 差や Tauri のデータ位置差に対応）。
-    let file = format!("{name}.exe");
-    let dirs = [app.path().app_data_dir(), app.path().app_local_data_dir()];
-    for base in dirs.into_iter().flatten() {
-        let exe = base.join("bin").join(&file);
+    // 同梱 FFmpeg（配布版の本命）。
+    if let Ok(res) = app.path().resource_dir() {
+        let exe = res.join("ffmpeg").join("bin").join("ffmpeg.exe");
         if exe.exists() {
             return exe;
         }
     }
-    PathBuf::from(name)
+    // フォールバック：appData/bin → localAppData/bin → PATH（Windows の Roaming/Local 差にも対応）。
+    for base in [app.path().app_data_dir(), app.path().app_local_data_dir()]
+        .into_iter()
+        .flatten()
+    {
+        let exe = base.join("bin").join("ffmpeg.exe");
+        if exe.exists() {
+            return exe;
+        }
+    }
+    PathBuf::from("ffmpeg")
 }
 
 /// ffmpeg を実行。成功時 stdout、失敗時 stderr を返す。
@@ -1423,6 +1449,17 @@ mod tests {
         );
         assert_eq!(pick_codec("V..... libx264 only"), Some(VideoCodec::X264));
         assert_eq!(pick_codec("no h264 here"), None);
+    }
+
+    #[test]
+    fn pick_codec_prefers_mediafoundation_over_libopenh264_in_btbn_lgpl() {
+        // 配布版 BtbN win64-lgpl-shared（n8.1.2）の実 -encoders 抜粋。libopenh264 と h264_mf が併存し
+        // libx264/libx265 は無い。通常経路では必ず h264_mf を選ぶ（libopenh264 は選ばない＝#119）。
+        let btbn_lgpl_encoders = " V....D libopenh264          OpenH264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)\n V....D h264_mf              H264 via MediaFoundation (codec h264)";
+        assert_eq!(
+            pick_codec(btbn_lgpl_encoders),
+            Some(VideoCodec::MediaFoundation)
+        );
     }
 
     #[test]
