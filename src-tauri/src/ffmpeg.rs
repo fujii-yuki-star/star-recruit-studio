@@ -517,14 +517,24 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
 /// - **開発（`tauri dev`）**：`FFMPEG_PATH` 優先（ffmpeg-static で開発）。
 /// - フォールバック：`appData/bin` → `localAppData/bin` → PATH（同梱が無い環境向け）。
 pub fn resolve_ffmpeg(app: &tauri::AppHandle) -> PathBuf {
-    // dev か明示診断のときだけ FFMPEG_PATH を尊重する（配布版が外部 FFmpeg で上書きされないように）。
-    let allow_env = cfg!(dev)
-        || std::env::var("FFMPEG_DIAGNOSTIC")
-            .map(|v| v == "1")
-            .unwrap_or(false);
-    if allow_env {
+    // FFMPEG_PATH を尊重するのは「dev か、明示診断（FFMPEG_DIAGNOSTIC=1）」のときだけ。配布版は同梱を
+    // 最優先＝外部の未 pin FFmpeg で上書きさせない（pin 済み LGPL+h264_mf 構成を保証）。
+    // ※ cfg!(dev) は tauri-build が出力する cfg（`cargo:rustc-cfg=dev` ＋ `cargo:rustc-check-cfg=cfg(dev)`
+    //   を登録）で、`tauri dev` セッションのみ true・`tauri build` では false。debug/release プロファイルでは
+    //   なくビルド種別で判定するため、debug packaged build でも配布版扱い（同梱優先）になる。
+    let dev = cfg!(dev);
+    let diagnostic = std::env::var("FFMPEG_DIAGNOSTIC")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if dev || diagnostic {
         if let Ok(p) = std::env::var("FFMPEG_PATH") {
             if !p.is_empty() {
+                // 配布版で診断フラグにより外部 FFmpeg を使う場合は、pin 構成外（LGPL+h264_mf 保証外）を警告。
+                if !dev {
+                    eprintln!(
+                        "[ffmpeg] 診断モード: 外部 FFMPEG_PATH を使用します（同梱 pin 構成外＝LGPL+h264_mf は保証されません）: {p}"
+                    );
+                }
                 return PathBuf::from(p);
             }
         }
