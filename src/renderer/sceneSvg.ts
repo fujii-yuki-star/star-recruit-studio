@@ -137,10 +137,12 @@ function creditToSvg(width: number, height: number, text: string): string {
   const boxH = Math.round(fontSize + padY * 2);
   const boxX = width - margin - boxW;
   const boxY = height - margin - boxH;
+  // テキストのベースライン：ピル内で概ね縦中央に来るよう実機調整した係数（Noto Sans JP のキャップ比相当）。
+  const baselineY = boxY + padY + Math.round(fontSize * 0.82);
   return [
     `<g>`,
     `<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${Math.round(fontSize * 0.3)}" fill="#000000" fill-opacity="0.45"/>`,
-    `<text x="${boxX + padX}" y="${boxY + padY + Math.round(fontSize * 0.82)}" font-family="${FONT_FAMILY}" font-size="${fontSize}" fill="#ffffff">${escapeXml(text)}</text>`,
+    `<text x="${boxX + padX}" y="${baselineY}" font-family="${FONT_FAMILY}" font-size="${fontSize}" fill="#ffffff">${escapeXml(text)}</text>`,
     `</g>`,
   ].join('');
 }

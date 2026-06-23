@@ -98,7 +98,7 @@ describe('layoutToSvg：responsive オプション（A3-2・向きプレビュ�
 
 describe('layoutToSvg：常時クレジット（credit・ADR-0003）', () => {
   it('credit 指定でクレジット文字を焼き込む', () => {
-    expect(layoutToSvg(imageLayout(), { credit: 'VOICEVOX：ずんだもん' })).toContain('VOICEVOX：ずんだもん');
+    expect(layoutToSvg(imageLayout(), { credit: 'VOICEVOX:ずんだもん' })).toContain('VOICEVOX:ずんだもん');
   });
   it('credit 未指定なら焼き込まない', () => {
     expect(layoutToSvg(imageLayout())).not.toContain('VOICEVOX：ずんだもん');

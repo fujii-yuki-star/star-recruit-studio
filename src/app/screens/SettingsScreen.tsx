@@ -8,6 +8,7 @@ import {
   setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
 import { NARRATOR_STYLES } from "../../domain/voice/narratorStyles";
+import { NARRATOR_CREDIT } from "../../domain/voice/narratorCredit";
 import {
   INTONATION_RANGE, PITCH_RANGE, SPEED_RANGE, sliderToValue, valueToSlider,
 } from "../../domain/voice/voiceParams";
@@ -198,7 +199,7 @@ export function SettingsScreen() {
         <div className="card">
           <h2 className="section-title">ナレーターの声</h2>
           <p className="page-desc text-pretty">
-            ナレーションには VOICEVOX：ずんだもん を使います。
+            ナレーションには {NARRATOR_CREDIT} を使います。
           </p>
 
           <div className="field">
