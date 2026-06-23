@@ -572,10 +572,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const filePath = await importAssetFile(projectId, `${assetId}.${ext}`, dataUrl);
       if (filePath) {
         // 取り込み後は表示用 src を asset:// に差し替え、data URL の常駐を解消する（A3-2 レビュー）。
+        // 画像差し替えは同名パス（{assetId}.{ext}）へ上書き保存するため asset:// の URL が変わらず、
+        // webview が旧画像をキャッシュして差し替えが反映されない（#140 由来）。変更時刻のクエリを付けて
+        // キャッシュバスターにし、再取得させる（filePath 自体はクエリ無し＝保存データは汚さない）。
         const displayUrl = await assetDisplayUrl(projectId, filePath);
+        const freshUrl = displayUrl ? `${displayUrl}?t=${Date.now()}` : displayUrl;
         set((s) => ({
           assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, filePath } : a)),
-          assetSrcById: displayUrl ? { ...s.assetSrcById, [assetId]: displayUrl } : s.assetSrcById,
+          assetSrcById: freshUrl ? { ...s.assetSrcById, [assetId]: freshUrl } : s.assetSrcById,
         }));
       }
     } catch (e) {
