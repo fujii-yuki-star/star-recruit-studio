@@ -5,7 +5,7 @@
 アプリ起動時に**同梱の VOICEVOX ENGINE を自動起動**するため、配布ビルド前に **CPU 版 ENGINE** をここへ配置する。
 
 ### 配置手順
-1. [VOICEVOX ENGINE releases](https://github.com/VOICEVOX/voicevox_engine/releases/latest) から **CPU 版（Windows）** をダウンロードして展開する。
+1. [VOICEVOX ENGINE releases](https://github.com/VOICEVOX/voicevox_engine/releases) から **CPU 版（Windows）の v0.25.2** をダウンロードして展開する（**同梱バージョンは 0.25.2 に固定**＝ビルド間で揃える。更新時はこの README と `13_DEPENDENCIES_AND_LICENSING.md` §9 も更新）。
    - GPU 版はサイズが大きく NVIDIA 依存のため、配布物では **CPU 版を推奨**（ナレーション合成は短く CPU で十分）。
 2. 展開した一式（`run.exe` ＋ DLL・モデル・辞書）を **`src-tauri/resources/voicevox_engine/`** に置く。
    - 結果として **`src-tauri/resources/voicevox_engine/run.exe`** が存在する形にする。
