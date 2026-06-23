@@ -82,6 +82,9 @@ export interface LayoutToSvgOptions {
   /** true なら SVG ルートの width/height を 100% にする（viewBox は保持＝コンテナにフィット・プレビュー用）。
    *  既定 false：layout 実寸を width/height に出す（resvg/Canvas でのラスタライズ＝書き出し用）。 */
   responsive?: boolean;
+  /** 設定時、最前面に常時クレジット（ADR-0003）を焼き込む。書き出し・プレビュー共通。
+   *  動画ありシーンは上レイヤーのみに付けて二重化を防ぐ（videoSceneSplit）。 */
+  credit?: string;
 }
 
 // fit を <image> の preserveAspectRatio へ（cover=slice / contain=meet / stretch=none）。
@@ -122,6 +125,26 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions): string {
   }
 }
 
+// 常時クレジット（ADR-0003）。背景に依らず読めるよう半透明の暗いピルを敷き、右下に白文字で最前面へ。
+// サイズ/位置は canvas 短辺基準＝viewBox 座標で描くので出力解像度（16:9/9:16）に比例スケールする。
+function creditToSvg(width: number, height: number, text: string): string {
+  const fontSize = Math.round(Math.min(width, height) * 0.022);
+  const margin = Math.round(fontSize * 0.7);
+  const padX = Math.round(fontSize * 0.6);
+  const padY = Math.round(fontSize * 0.35);
+  const textW = [...text].reduce((w, ch) => w + charWidthEm(ch) * fontSize, 0);
+  const boxW = Math.round(textW + padX * 2);
+  const boxH = Math.round(fontSize + padY * 2);
+  const boxX = width - margin - boxW;
+  const boxY = height - margin - boxH;
+  return [
+    `<g>`,
+    `<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${Math.round(fontSize * 0.3)}" fill="#000000" fill-opacity="0.45"/>`,
+    `<text x="${boxX + padX}" y="${boxY + padY + Math.round(fontSize * 0.82)}" font-family="${FONT_FAMILY}" font-size="${fontSize}" fill="#ffffff">${escapeXml(text)}</text>`,
+    `</g>`,
+  ].join('');
+}
+
 export function layoutToSvg(layout: SceneLayout, opts: LayoutToSvgOptions = {}): string {
   const items = opts.itemFilter ? layout.items.filter(opts.itemFilter) : layout.items;
   const body = items.map((item) => itemToSvg(item, opts)).join('\n');
@@ -139,6 +162,9 @@ export function layoutToSvg(layout: SceneLayout, opts: LayoutToSvgOptions = {}):
       `<rect x="0" y="0" width="${layout.width}" height="${layout.height}" fill="${layout.backgroundColor}"/>`,
     );
   }
-  lines.push(body, `</svg>`);
+  lines.push(body);
+  // 常時クレジット（ADR-0003）は最前面＝body の後に置く。
+  if (opts.credit) lines.push(creditToSvg(layout.width, layout.height, opts.credit));
+  lines.push(`</svg>`);
   return lines.join('\n');
 }

@@ -17,6 +17,7 @@ import type { Template } from '../../domain/template/types';
 import { layoutScene } from '../layout';
 import type { LayoutItem, SceneLayout } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
+import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { svgToPngDataUrl } from './rasterize';
 import { buildExportScenes } from './buildExportScenes';
 
@@ -137,6 +138,12 @@ describe('buildExportScenes：字幕トグル（withSubtitle）', () => {
     vi.mocked(layoutToSvg).mockClear();
     await buildExportScenes(oneScene, templateById, noAsset);
     expect(vi.mocked(layoutToSvg).mock.calls[0]?.[1]?.itemFilter).toBeUndefined();
+  });
+
+  it('静止画は layoutToSvg に常時クレジット（NARRATOR_CREDIT）を渡す（ADR-0003）', async () => {
+    vi.mocked(layoutToSvg).mockClear();
+    await buildExportScenes(oneScene, templateById, noAsset);
+    expect(vi.mocked(layoutToSvg).mock.calls[0]?.[1]?.credit).toBe(NARRATOR_CREDIT);
   });
 });
 

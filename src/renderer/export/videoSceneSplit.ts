@@ -3,6 +3,7 @@
 // スロット自身はどちらにも描かない（FFmpeg が動画で埋める＝透明な穴）。
 import type { LayoutItem, Rect, SceneLayout } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
+import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 
 export interface VideoSceneSplit {
   /** 動画より下のレイヤー（背景含む・不透明・全面）。 */
@@ -41,6 +42,8 @@ export function splitVideoSceneSvg(
     assetSrc,
     transparent: true,
     itemFilter: (it) => pass(it) && it.id !== slotId && it.zIndex >= slotZ,
+    // 常時クレジット（ADR-0003）は最前面＝上レイヤーにのみ付ける（下レイヤーには付けない＝二重化防止）。
+    credit: NARRATOR_CREDIT,
   });
   return { belowSvg, aboveSvg, slot: { x: slot.x, y: slot.y, w: slot.w, h: slot.h } };
 }
