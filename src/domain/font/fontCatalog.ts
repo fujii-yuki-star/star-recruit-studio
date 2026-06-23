@@ -3,9 +3,12 @@
 // cssFamily は @font-face（src/styles/fonts.css）の font-family 名と一致させる。
 // 表示名（label）は選択UIで「その字形」で描画する（直感的に分かるように）。
 
+/** 同梱フォントの id。project.schema の videoSettings.fontId enum と一致させる（単一参照元・§6 型注釈）。 */
+export type FontId = 'gen-interface-jp' | 'gen-interface-jp-display' | 'kaitou-yokoku-gothic';
+
 export interface BundledFont {
   /** project.videoSettings.fontId の値（schema enum と一致）。 */
-  id: string;
+  id: FontId;
   /** 選択UIに表示する名前（その字形で描画する）。 */
   label: string;
   /** @font-face の font-family 名（描画で使う）。 */
@@ -22,7 +25,7 @@ export const FONT_CATALOG: readonly BundledFont[] = [
 ];
 
 /** 既定フォント（未指定・不明な fontId のフォールバック先）。 */
-export const DEFAULT_FONT_ID = 'gen-interface-jp';
+export const DEFAULT_FONT_ID: FontId = 'gen-interface-jp';
 
 /** fontId → 描画用 font-family 文字列（同梱フォント＋sans-serif フォールバック）。不明/未指定は既定へ。 */
 export function fontFamilyForId(fontId: string | null | undefined): string {
