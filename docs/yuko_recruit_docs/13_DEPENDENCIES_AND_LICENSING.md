@@ -145,7 +145,7 @@
 - [x] APIキーのOSキーチェーン保管 ＝ **実装済**（`infrastructure/aiClient` 経由で Rust keyring に保管・平文非保存・本文/ログ非混入＝ADR-0010 P1）。
 - [x] 本番 webview の **Content-Security-Policy** ＝ **設定済**（`tauri.conf.json` `app.security.csp`：`script-src 'self'`／`object-src 'none'`／`base-uri 'self'`／`frame-ancestors 'none'` で XSS 緩和。`img/media-src` に `asset: http://asset.localhost blob: data:`、`connect-src` に `ipc: http://ipc.localhost` を必要分だけ許可。dev は `devCsp` で Vite HMR を許容。`style-src` も `'self'`（SVGプレビューは属性スタイルのみ・React は CSSOM 経由・テキストは `escapeXml` が `'` 含め実体参照化）＝#144）。残: **packaged 実機での全画面動作確認**（AI生成・声作成の IPC／DevTools に CSP 違反が出ないこと）。
 - [~] FFmpeg/VOICEVOX/AI の `infrastructure` 越し呼び出し ＝ **実装済**（`ffmpegExport`／`voiceProviders/voicevoxProvider`／`aiProviders`）。**同梱 VOICEVOX ENGINE は v0.25.2（CPU）に固定**（`src-tauri/resources/README.md`・#149）。残: FFmpeg/AI モデルのバージョン記録。
-- [ ] 書き出し時のクレジット自動付与（任意ON/OFF）＝ `AboutScreen` にトグル UI のみで**焼き込み未実装・設定も揮発**＝backlog。
+- [ ] 書き出し時のクレジット自動付与（任意ON/OFF）＝ `AboutScreen` にトグル UI のみで**焼き込み未実装・設定も揮発**＝backlog（#153 で追跡）。
 - [~] エンドユーザーへの規約遵守の義務付け（VOICEVOX キャラ規約・クレジット）＝ **About 画面に明示**（公開・配布時に各提供元の規約／クレジットに従う旨・#149/#122）。残: **拘束力ある利用規約（初回同意フロー等）の仕組みは製品/法務判断**。
 
 ### Phase 0 で技術検証 ※実装監査 2026-06-17
