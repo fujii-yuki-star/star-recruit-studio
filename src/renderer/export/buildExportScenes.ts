@@ -8,6 +8,7 @@ import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
+import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvg } from './videoSceneSplit';
 import type { VideoSlotInfo } from './findVideoSlot';
@@ -163,7 +164,7 @@ export async function buildExportScenes(
         }
         // 静止画シーン（従来）。
         const pngBase64 = await svgToPngDataUrl(
-          layoutToSvg(layout, { assetSrc, itemFilter }),
+          layoutToSvg(layout, { assetSrc, itemFilter, credit: NARRATOR_CREDIT }),
           width,
           height,
         );

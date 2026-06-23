@@ -59,7 +59,7 @@
 - クレジット表記をしない商用利用は、VOICEVOX側で**1キャラ毎に有償契約**（執筆時点で40万円＋税の案内あり）。
 
 ### 推奨
-1. アプリ内に **クレジット/ライセンス画面**を必ず設け、`VOICEVOX:ずんだもん`（および使用キャラ全て）を表示。書き出し設定にも任意でクレジット焼き込みオプションを検討。
+1. アプリ内に **クレジット/ライセンス画面**を必ず設け、`VOICEVOX:ずんだもん`（および使用キャラ全て）を表示。**書き出し動画にもクレジットを常時焼き込み**（#153 実装・OFF なし）。
 2. VOICEVOX エンジンは **同梱し、アプリ起動時に自動起動**する（[`adr/0005`](adr/0005-voicevox-bundling.md) で決定。同梱・再配布条件は確認済み）。実装は `infrastructure/voicevox` 越しの**接続（ローカルエンジン）**で進め、`VoiceProvider` で抽象化（`CLAUDE.md §4`）。接続先設定は別ポート/別PC向けの上級者用フォールバックとして残す。
 3. バージョン・接続先を設定画面に持つ（`06_UI_SPEC.md §14`・`14.2`）。
 
@@ -145,7 +145,7 @@
 - [x] APIキーのOSキーチェーン保管 ＝ **実装済**（`infrastructure/aiClient` 経由で Rust keyring に保管・平文非保存・本文/ログ非混入＝ADR-0010 P1）。
 - [x] 本番 webview の **Content-Security-Policy** ＝ **設定済**（`tauri.conf.json` `app.security.csp`：`script-src 'self' 'unsafe-eval'`／`object-src 'none'`／`base-uri 'self'`／`frame-ancestors 'none'` で XSS 緩和。`img/media-src` に `asset: http://asset.localhost blob: data:`、`connect-src` に `ipc: http://ipc.localhost` を必要分だけ許可。dev は `devCsp` で Vite HMR を許容。`style-src` も `'self'`（SVGは属性スタイル・React は CSSOM・テキストは `escapeXml` で実体参照化）＝#144）。**`'unsafe-eval'` は ajv のスキーマ検証コンパイル（`new Function`）のため追加**（#119 packaged 検証で「無いと起動時 ajv が CSP に阻まれ**白画面**」と判明。※以前の「両方確認」は実は dev＝devCsp で 'unsafe-eval' 許可されていた）。**CSP 上は全スクリプトの eval を許可する緩和**（`eval`/`new Function`/文字列 `setTimeout` 等。ajv 限定ではない点に留意）だが、本アプリで eval を使うのは ajv（**同梱の静的スキーマのみ**・ユーザー/AIデータは非 eval）に限られ、`connect-src` も IPC 限定・Tauri デスクトップのため XSS 実害は限定的。**撤廃は [#156](https://github.com/fujii-yuki-star/star-recruit-studio/issues/156)（ajv standalone 事前コンパイルで 'unsafe-eval' 不要化）で追跡**。packaged で起動・全画面表示を確認済。残: 声作成・書き出しの packaged 最終確認（#119）。
 - [~] FFmpeg/VOICEVOX/AI の `infrastructure` 越し呼び出し ＝ **実装済**（`ffmpegExport`／`voiceProviders/voicevoxProvider`／`aiProviders`）。**同梱 VOICEVOX ENGINE は v0.25.2（CPU）に固定**（`src-tauri/resources/README.md`・#149）。残: FFmpeg/AI モデルのバージョン記録。
-- [ ] 書き出し時のクレジット自動付与（任意ON/OFF）＝ `AboutScreen` にトグル UI のみで**焼き込み未実装・設定も揮発**＝backlog（#153 で追跡）。
+- [x] 書き出し時のクレジット**常時焼き込み**＝**#153 実装済**。`AboutScreen` のトグル（任意ON/OFF）は廃止し「常時表示」明示に変更（ADR-0003「常時」に忠実＝OFF なし）。renderer 共有（`layoutToSvg` の `credit`＝静止画／動画は上レイヤーのみ／プレビューにも表示）で焼き込み、文言は単一 `domain/voice/narratorCredit.ts`。
 - [~] エンドユーザーへの規約遵守の義務付け（VOICEVOX キャラ規約・クレジット）＝ **About 画面に明示**（公開・配布時に各提供元の規約／クレジットに従う旨・#149/#122）。残: **拘束力ある利用規約（初回同意フロー等）の仕組みは製品/法務判断**。
 
 ### Phase 0 で技術検証 ※実装監査 2026-06-17
@@ -158,7 +158,7 @@
 
 **コードで閉じられる（着手可）**
 - FFmpeg/AI モデルの **バージョン記録**（`infrastructure` で定数化。VOICEVOX ENGINE は v0.25.2 に固定済＝§9 実装要件）。
-- 書き出し時 **クレジット焼き込み＋設定の永続化**（#153）。
+- ~~書き出し時 クレジット焼き込み＋設定の永続化（#153）~~ → **#153 実装済**（常時焼き込み・OFF 廃止のためトグル永続化は不要に）。
 - 配布物への **ライセンス本文同梱**（FFmpeg LGPL／Noto Sans JP OFL／VOICEVOX 等の本文を同梱フォルダへ。入手先 URL 表示は `AboutScreen` で実装済）。
 - Windows N/KN の **h264_mf 不在の事前検知＋導線**（#120・検知はコード／代替方針は要決定）。
 
@@ -168,7 +168,7 @@
 - VOICEVOX **同梱ビルドの最終法務**（CPU 版 0.25.2 で確定・配布時の最終確認のみ／`adr/0005`）。
 - 標準BGM・装飾の **入手元と権利台帳**（CC0/自社制作）。
 - 最終 **フォント選定**（OFL系・本文/見出し）。
-- エンドユーザー動画の **クレジット表記運用**（自動付与＝#153 or 手順案内）。
+- エンドユーザー動画の **クレジット表記運用** ＝ **自動付与（常時焼き込み）を #153 で実装済**。
 - **完成 H.264 の MPEG-LA 許諾要否**（規格軸・無収益で低リスク・社内確認）。
 
 > 旧注記（「VOICEVOX 実疎通・実 FFmpeg 書き出しに着手する前に事業/法務を確定」）は、**両方とも実装＋packaged 実機検証が完了したため解消**。コア前提（infrastructure 抽象化・keyring・クレジット画面・CSP・エンジン自動起動）は整っており、残るは上記の配布・法務項目。

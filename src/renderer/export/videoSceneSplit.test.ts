@@ -4,6 +4,7 @@ import { layoutScene } from '../layout';
 import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 import { splitVideoSceneSvg } from './videoSceneSplit';
+import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 
 // 背景(z0・色は backgroundColor とは別)・動画スロット(z10)・同z テキスト(z10)・タイトル(z30) の最小レイアウト。
 // backgroundColor(#abcdef) は layoutToSvg の全面背景 rect のみが使う色＝transparent を厳密に検証できる。
@@ -39,6 +40,12 @@ describe('splitVideoSceneSvg（ADR-0006 下/上分割）', () => {
     expect(r?.aboveSvg).not.toContain('fill="#abcdef"'); // 透過＝全面背景 rect なし
     expect(r?.aboveSvg).not.toContain('fill="#123456"'); // 背景アイテム(z0)は下なので上に無い
     expect(r?.aboveSvg).toContain('タイトルです');
+  });
+
+  it('常時クレジット（ADR-0003）は上レイヤーのみ＝下には付けない（二重化防止）', () => {
+    const r = splitVideoSceneSvg(layout(), 'slot');
+    expect(r?.aboveSvg).toContain(NARRATOR_CREDIT);
+    expect(r?.belowSvg).not.toContain(NARRATOR_CREDIT);
   });
 
   it('スロットと同 zIndex のアイテムは上に含める（取りこぼし防止＝網羅的分割）', () => {

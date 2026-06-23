@@ -96,6 +96,20 @@ describe('layoutToSvg：responsive オプション（A3-2・向きプレビュ�
   });
 });
 
+describe('layoutToSvg：常時クレジット（credit・ADR-0003）', () => {
+  it('credit 指定でクレジット文字を焼き込む', () => {
+    expect(layoutToSvg(imageLayout(), { credit: 'VOICEVOX:ずんだもん' })).toContain('VOICEVOX:ずんだもん');
+  });
+  it('credit 未指定なら焼き込まない', () => {
+    expect(layoutToSvg(imageLayout())).not.toContain('VOICEVOX：ずんだもん');
+  });
+  it('クレジットは body より後＝最前面に置く', () => {
+    // 画像スロットのプレースホルダ枠（メイン画像）より後にクレジットが来る。
+    const svg = layoutToSvg(imageLayout(), { credit: 'CREDIT_X' });
+    expect(svg.indexOf('CREDIT_X')).toBeGreaterThan(svg.indexOf('メイン画像'));
+  });
+});
+
 describe('layoutToSvg：テキストの XSS エスケープ（dangerouslySetInnerHTML 経路・#144）', () => {
   it('特殊文字（& < > " \')を実体参照化し、生のタグ/クォートを残さない', () => {
     const layout: SceneLayout = {

@@ -1,12 +1,12 @@
-import { useState } from "react";
-import { PageHead, Switch } from "../components/ui";
+import { PageHead } from "../components/ui";
 import { openExternalUrl } from "../../infrastructure/opener";
 import { OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED } from "../../domain/export/h264Feature";
+import { NARRATOR_CREDIT } from "../../domain/voice/narratorCredit";
 
 // クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
 const credits: { name: string; role: string; license: string; credit?: string; source?: { label: string; url: string }; openh264?: boolean }[] = [
   {
-    name: "VOICEVOX：ずんだもん",
+    name: NARRATOR_CREDIT,
     role: "ナレーター音声（読み上げ）",
     license: "VOICEVOX 利用規約・東北ずん子／ずんだもんプロジェクト規約（クレジット表示で利用）",
   },
@@ -33,8 +33,6 @@ const credits: { name: string; role: string; license: string; credit?: string; s
 ];
 
 export function AboutScreen() {
-  const [withCredit, setWithCredit] = useState(true);
-
   return (
     <div className="main-scroll">
       <PageHead
@@ -61,7 +59,7 @@ export function AboutScreen() {
         <div className="card">
           <h2 className="section-title">クレジット</h2>
           <p className="page-desc text-pretty">
-            本ソフトは以下を利用しています。作成した動画を公開・配布する際は、各提供元の利用規約に従い、クレジット表記にご協力ください（特に音声「VOICEVOX：ずんだもん」は、各キャラクターの利用規約とクレジット表記が必要です）。
+            本ソフトは以下を利用しています。作成した動画を公開・配布する際は、各提供元の利用規約に従い、クレジット表記にご協力ください（特に音声「{NARRATOR_CREDIT}」は、各キャラクターの利用規約とクレジット表記が必要です）。
           </p>
           <div className="col gap-sm mt">
             {credits.filter((c) => OPENH264_FEATURE_ENABLED || !c.openh264).map((c) => {
@@ -98,17 +96,9 @@ export function AboutScreen() {
             })}
           </div>
 
-          <div className="toggle-row mt">
-            <div>
-              <span className="field-label" style={{ margin: 0 }}>
-                動画にクレジットを入れる
-              </span>
-              <p className="field-hint" style={{ marginTop: 2 }}>
-                書き出す動画に「VOICEVOX：ずんだもん」などのクレジットを表示します。
-              </p>
-            </div>
-            <Switch on={withCredit} onChange={setWithCredit} label="動画にクレジットを入れる" />
-          </div>
+          <p className="field-hint mt">
+            作成・書き出しする動画には、利用規約に基づき「{NARRATOR_CREDIT}」のクレジットが常に表示されます（仕上がり確認のプレビューにも表示されます）。
+          </p>
         </div>
       </div>
     </div>
