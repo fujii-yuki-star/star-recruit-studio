@@ -61,7 +61,7 @@ export function AboutScreen() {
         <div className="card">
           <h2 className="section-title">クレジット</h2>
           <p className="page-desc text-pretty">
-            本ソフトは以下を利用しています。動画を公開する際は、これらのクレジット表記にご協力ください。
+            本ソフトは以下を利用しています。作成した動画を公開・配布する際は、各提供元の利用規約に従い、クレジット表記にご協力ください（特に音声「VOICEVOX：ずんだもん」は、各キャラクターの利用規約とクレジット表記が必要です）。
           </p>
           <div className="col gap-sm mt">
             {credits.filter((c) => OPENH264_FEATURE_ENABLED || !c.openh264).map((c) => {
