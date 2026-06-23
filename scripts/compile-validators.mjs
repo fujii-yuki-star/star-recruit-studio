@@ -34,7 +34,9 @@ const importLines = [];
 const esmBody = rawCode.replace(
   /const (\w+) = require\((["'])(.+?)\2\)(\.default)?;/g,
   (_m, name, _q, path) => {
-    importLines.push(`import ${name} from ${JSON.stringify(`${path}.js`)};`);
+    // 拡張子が無い場合のみ .js を補う（既に .js のとき .js.js になる二重付与を防ぐ＝冪等・ajv 更新耐性）。
+    const resolved = path.endsWith('.js') ? path : `${path}.js`;
+    importLines.push(`import ${name} from ${JSON.stringify(resolved)};`);
     return '';
   },
 );
