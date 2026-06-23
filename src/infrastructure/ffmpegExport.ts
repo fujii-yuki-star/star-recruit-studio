@@ -2,6 +2,7 @@
 // フロントは各場面のPNG（data URL）と尺を渡すだけ。SVG→PNGの生成は ADR-0004（WebView Canvas）でフロントが行う。
 import { invoke } from '@tauri-apps/api/core';
 import type { Fit } from '../domain/enums';
+import type { ExportCapability } from '../domain/export/exportCapability';
 
 /** 動画ありシーンの入力（ADR-0006）。下/上PNGは data URL、クリップはプロジェクト相対パス。 */
 export interface ExportVideoInput {
@@ -77,4 +78,10 @@ export async function exportVideo(
     projectId: projectId ?? null,
     outputPath: outputPath ?? null,
   });
+}
+
+/** 書き出し前に H.264 エンコード能力を検知する（#120）。Tauri 専用＝呼ぶ前に canExport() で判定すること。 */
+export async function detectH264Capability(): Promise<ExportCapability> {
+  const r = await invoke<{ capability: ExportCapability }>('detect_h264_capability');
+  return r.capability;
 }

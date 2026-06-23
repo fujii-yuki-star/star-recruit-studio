@@ -122,6 +122,7 @@ pub fn run() {
             ffmpeg::export_video,
             ffmpeg::probe_video,
             ffmpeg::extract_video_thumbnail,
+            ffmpeg::detect_h264_capability,
             assets::import_asset,
             assets::import_asset_bytes,
             assets::import_asset_path,
