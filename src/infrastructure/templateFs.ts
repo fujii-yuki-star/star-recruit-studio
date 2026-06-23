@@ -2,17 +2,12 @@
 // 正典スキーマ template.schema.json に ajv(draft 2020-12) で適合検証してから Template[] にする
 // （§2-2「検証してから内部データへ」）。検証を通らないものは取り込まない（rejected に分離・ログ用）。
 // 読込元: 同梱標準パック（既定）＋ ユーザーが選んだパックファイル。設定は validateVideoPlan と揃える。
-import Ajv2020 from 'ajv/dist/2020.js';
-import addFormats from 'ajv-formats';
-import templateSchema from '../../docs/yuko_recruit_docs/schemas/template.schema.json';
+// 検証関数は scripts/compile-validators.mjs が template.schema.json から事前コンパイル（#156・実行時 eval なし）。
+// 生成時の設定（draft 2020-12・strict:false・allErrors）は compile-validators.mjs / validate-schemas.mjs と一致。
+import { validateTemplate as validate } from '../domain/validation/generated/validators.js';
 import type { Template } from '../domain/template/types';
 import type { Orientation } from '../domain/enums';
 import { sampleTemplates } from './sampleData';
-
-// validate-schemas.mjs（CIゲート）と同設定にして挙動を揃える（draft 2020-12・strict:false・allErrors）。
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-addFormats(ajv);
-const validate = ajv.compile(templateSchema as object);
 
 // 取り込むテンプレファイルの上限サイズ。テンプレ JSON は小さいので、誤って巨大ファイルを選んでも
 // メモリを使い過ぎないよう早期に弾く（大容量素材のメモリ問題＝#48 と同方針）。
