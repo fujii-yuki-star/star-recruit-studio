@@ -48,6 +48,11 @@ describe('splitVideoSceneSvg（ADR-0006 下/上分割）', () => {
     expect(r?.belowSvg).not.toContain(NARRATOR_CREDIT);
   });
 
+  it('fontFamily を layoutToSvg へ渡す（上レイヤーのテキストに反映・同梱フォント選択）', () => {
+    const r = splitVideoSceneSvg(layout(), 'slot', undefined, undefined, "'TestFont Y', sans-serif");
+    expect(r?.aboveSvg).toContain(`font-family="'TestFont Y', sans-serif"`);
+  });
+
   it('スロットと同 zIndex のアイテムは上に含める（取りこぼし防止＝網羅的分割）', () => {
     const r = splitVideoSceneSvg(layout(), 'slot');
     expect(r?.aboveSvg).toContain('同じZ');
