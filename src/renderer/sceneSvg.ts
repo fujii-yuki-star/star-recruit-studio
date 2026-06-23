@@ -3,9 +3,11 @@
 // 注: テキスト折返しは暫定で文字幅概算（半角≈0.55em・全角≈1em）。フォント実測への置換は将来（05 §10 / ADR-0001 未解決論点）。
 import { FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit } from '../domain/enums';
+import { fontFamilyForId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 
-const FONT_FAMILY = 'Noto Sans JP, sans-serif';
+// 既定の font-family（opts.fontFamily 未指定時のフォールバック＝同梱の既定フォント）。
+const DEFAULT_FONT_FAMILY = fontFamilyForId(undefined);
 
 function escapeXml(s: string): string {
   return s
@@ -51,7 +53,7 @@ export function wrapText(text: string, maxWidth: number, fontSize: number, maxLi
   return lines;
 }
 
-function textToSvg(item: TextItem): string {
+function textToSvg(item: TextItem, fontFamily: string): string {
   const parts: string[] = [];
   const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines);
   const lineHeight = item.fontSize * 1.3;
@@ -66,7 +68,7 @@ function textToSvg(item: TextItem): string {
   const baseY = item.y + item.fontSize;
   lines.forEach((line, i) => {
     parts.push(
-      `<text x="${item.x}" y="${baseY + i * lineHeight}" font-family="${FONT_FAMILY}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}">${escapeXml(line)}</text>`,
+      `<text x="${item.x}" y="${baseY + i * lineHeight}" font-family="${fontFamily}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}">${escapeXml(line)}</text>`,
     );
   });
   return parts.join('\n');
@@ -85,6 +87,8 @@ export interface LayoutToSvgOptions {
   /** 設定時、最前面に常時クレジット（ADR-0003）を焼き込む。書き出し・プレビュー共通。
    *  動画ありシーンは上レイヤーのみに付けて二重化を防ぐ（videoSceneSplit）。 */
   credit?: string;
+  /** 描画に使う font-family（同梱フォント選択）。未指定は既定フォント。fontCatalog.fontFamilyForId の戻り値を渡す。 */
+  fontFamily?: string;
 }
 
 // fit を <image> の preserveAspectRatio へ（cover=slice / contain=meet / stretch=none）。
@@ -94,7 +98,7 @@ function fitToPreserveAspectRatio(fit: Fit): string {
   return 'xMidYMid slice';
 }
 
-function imageToSvg(item: ImageItem, src: string | undefined): string {
+function imageToSvg(item: ImageItem, src: string | undefined, fontFamily: string): string {
   if (item.assetId && src) {
     // <image> は x/y/width/height の矩形にクリップされ、preserveAspectRatio で fit を表現する。
     // プレビューと出力で同一SVGを共有する（ADR-0004：WebView Canvas でラスタライズ）。
@@ -106,12 +110,12 @@ function imageToSvg(item: ImageItem, src: string | undefined): string {
   return [
     `<g>`,
     `<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" fill="${fill}" stroke="#c8c8c8"/>`,
-    `<text x="${item.x + item.w / 2}" y="${item.y + item.h / 2}" font-family="${FONT_FAMILY}" font-size="28" fill="#888888" text-anchor="middle">${escapeXml(caption)}</text>`,
+    `<text x="${item.x + item.w / 2}" y="${item.y + item.h / 2}" font-family="${fontFamily}" font-size="28" fill="#888888" text-anchor="middle">${escapeXml(caption)}</text>`,
     `</g>`,
   ].join('');
 }
 
-function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions): string {
+function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: string): string {
   switch (item.kind) {
     case 'fill':
       if (item.shapeType === FREE_SHAPE_TYPE.ellipse) {
@@ -119,15 +123,15 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions): string {
       }
       return `<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" rx="${item.radius}" fill="${item.color}" fill-opacity="${item.opacity}"/>`;
     case 'image':
-      return imageToSvg(item, item.assetId ? opts.assetSrc?.(item.assetId) : undefined);
+      return imageToSvg(item, item.assetId ? opts.assetSrc?.(item.assetId) : undefined, fontFamily);
     case 'text':
-      return textToSvg(item);
+      return textToSvg(item, fontFamily);
   }
 }
 
 // 常時クレジット（ADR-0003）。背景に依らず読めるよう半透明の暗いピルを敷き、右下に白文字で最前面へ。
 // サイズ/位置は canvas 短辺基準＝viewBox 座標で描くので出力解像度（16:9/9:16）に比例スケールする。
-function creditToSvg(width: number, height: number, text: string): string {
+function creditToSvg(width: number, height: number, text: string, fontFamily: string): string {
   const fontSize = Math.round(Math.min(width, height) * 0.022);
   const margin = Math.round(fontSize * 0.7);
   const padX = Math.round(fontSize * 0.6);
@@ -142,14 +146,15 @@ function creditToSvg(width: number, height: number, text: string): string {
   return [
     `<g>`,
     `<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${Math.round(fontSize * 0.3)}" fill="#000000" fill-opacity="0.45"/>`,
-    `<text x="${boxX + padX}" y="${baselineY}" font-family="${FONT_FAMILY}" font-size="${fontSize}" fill="#ffffff">${escapeXml(text)}</text>`,
+    `<text x="${boxX + padX}" y="${baselineY}" font-family="${fontFamily}" font-size="${fontSize}" fill="#ffffff">${escapeXml(text)}</text>`,
     `</g>`,
   ].join('');
 }
 
 export function layoutToSvg(layout: SceneLayout, opts: LayoutToSvgOptions = {}): string {
+  const fontFamily = opts.fontFamily ?? DEFAULT_FONT_FAMILY;
   const items = opts.itemFilter ? layout.items.filter(opts.itemFilter) : layout.items;
-  const body = items.map((item) => itemToSvg(item, opts)).join('\n');
+  const body = items.map((item) => itemToSvg(item, opts, fontFamily)).join('\n');
   // transparent 時は背景の全面塗りを出さない（動画が透けて見える上レイヤー用）。
   // responsive: ルート寸法を 100% にしてコンテナへフィットさせる（viewBox で座標系を保持）。
   // 既定は layout 実寸（書き出しのラスタライズは固定px が要るため）。
@@ -166,7 +171,7 @@ export function layoutToSvg(layout: SceneLayout, opts: LayoutToSvgOptions = {}):
   }
   lines.push(body);
   // 常時クレジット（ADR-0003）は最前面＝body の後に置く。
-  if (opts.credit) lines.push(creditToSvg(layout.width, layout.height, opts.credit));
+  if (opts.credit) lines.push(creditToSvg(layout.width, layout.height, opts.credit, fontFamily));
   lines.push(`</svg>`);
   return lines.join('\n');
 }

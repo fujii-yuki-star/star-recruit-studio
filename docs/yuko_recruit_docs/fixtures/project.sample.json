@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.2",
+  "schemaVersion": "1.3",
   "projectId": "proj_20260610_001",
   "projectName": "株式会社サンプル 会社紹介",
   "purpose": "new_graduate",
@@ -9,7 +9,8 @@
     "aspectRatio": "16:9",
     "fps": 30,
     "targetDurationSec": 60,
-    "maxDurationSec": 300
+    "maxDurationSec": 300,
+    "fontId": "gen-interface-jp"
   },
   "companyInfo": {
     "companyName": "株式会社サンプル",

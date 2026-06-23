@@ -10,6 +10,8 @@ export interface VideoSettings {
   fps: number;
   targetDurationSec: number;
   maxDurationSec: number;
+  /** 動画全体のフォント（同梱フォントの id＝domain/font/fontCatalog）。未指定は既定フォント（schema 1.3 で追加・任意）。 */
+  fontId?: string;
 }
 
 export interface CompanyInfo {

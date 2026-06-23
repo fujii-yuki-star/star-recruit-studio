@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.2" },
+    "schemaVersion": { "const": "1.3" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -57,7 +57,8 @@
         "aspectRatio": { "enum": ["16:9", "9:16"] },
         "fps": { "type": "integer", "const": 30 },
         "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
-        "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 }
+        "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
+        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
       }
     },
     "CompanyInfo": {
