@@ -131,7 +131,7 @@
 - [x] H.264 ＝ **Media Foundation（h264_mf）主経路**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)・実機検証済／自前ビルド不要）。OpenH264 はフォールバック。残: 完成H.264のMPEG-LA許諾要否（無収益で低リスク・社内確認）
 - [x] ずんだもん ＝ **ナレーター用途として整理**（`adr/0003`）。残: VOICEVOX/各キャラ規約の通読・常時クレジット実装
 - [x] ゆうこ素材 ＝ **自社保有で権利クリア**
-- [x] フォント ＝ **OFL系を同梱**（游ゴシック等は同梱不可）。残: 最終選定
+- [x] フォント ＝ **OFL系を同梱**（游ゴシック等は同梱不可）。**初期3種を同梱＋場面編集でフォント選択**（gen-interface-jp＝既定/本文・gen-interface-jp-display＝見出し・怪盗予告ゴシック＝演出・全 SIL OFL 1.1。`public/fonts/`＋各 OFL.txt 同梱・`videoSettings.fontId`＝schema 1.3）。残: フォント追加は段階的に。
 
 ### リリース前に残る確認（法務・公式規約）
 - [x] FFmpeg H.264：**Media Foundation（h264_mf）に決定**（[`adr/0013`](adr/0013-h264-via-media-foundation.md)）。**BtbN `win64-lgpl` に h264_mf 実在＋アプリ書き出し成功を実機確認＝自前ビルド不要**（OpenH264 の初回Cisco取得/dlopen自前ビルドは不要に。OpenH264 はフォールバック）。残: 配布は lgpl-shared(動的リンク)＋ソース提供・使用バージョン pin。Windows N は #120 で事前検知＋導線を実装済（不在時は予備方式へフォールバック）。
@@ -141,7 +141,7 @@
 - [~] **AVC/H.264 ライセンス**：主経路 MF（OS提供）では **Cisco クレジット不要**（OpenH264 を主経路にしないため＝[`adr/0013`](adr/0013-h264-via-media-foundation.md)）。OpenH264 必須クレジット「OpenH264 Video Codec provided by Cisco Systems, Inc.」は**フォールバック採用時のみ**（実装枠は #115 で用意済・既定非表示）。残: **完成 H.264 の MPEG-LA 許諾要否**（顧客動画・規格軸＝方式に依らず／無収益で低リスク・社内確認）。
 
 ### 実装要件（コードに落とす） ※実装監査 2026-06-17
-- [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL 2.1+・**ソース入手先URL をクリック可能で表示**＝PR#113)／Noto Sans JP(OFL)）。残: ライセンス**本文**の配布物同梱、BGM/装飾を採用時に追記。
+- [x] アプリ内「クレジット/ライセンス」画面 ＝ **実装済**（`AboutScreen`：VOICEVOX:ずんだもん／FFmpeg(LGPL 2.1+・**ソース入手先URL をクリック可能で表示**＝PR#113)／同梱フォント Gen Interface JP・怪盗予告ゴシック(OFL 1.1)）。**フォントの OFL 本文は `public/fonts/` に同梱済**。残: FFmpeg/VOICEVOX 等のライセンス本文の配布物同梱、BGM/装飾を採用時に追記。
 - [x] APIキーのOSキーチェーン保管 ＝ **実装済**（`infrastructure/aiClient` 経由で Rust keyring に保管・平文非保存・本文/ログ非混入＝ADR-0010 P1）。
 - [x] 本番 webview の **Content-Security-Policy** ＝ **設定済**（`tauri.conf.json` `app.security.csp`：`script-src 'self'`／`object-src 'none'`／`base-uri 'self'`／`frame-ancestors 'none'` で XSS 緩和。`img/media-src` に `asset: http://asset.localhost blob: data:`、`connect-src` に `ipc: http://ipc.localhost` を必要分だけ許可。dev は `devCsp` で Vite HMR を許容。`style-src` も `'self'`（SVGは属性スタイル・React は CSSOM・テキストは `escapeXml` で実体参照化）＝#144）。**`'unsafe-eval'` は廃止済**（[#156](https://github.com/fujii-yuki-star/star-recruit-studio/issues/156)）：ajv のスキーマ検証を `scripts/compile-validators.mjs` で**事前コンパイル**（standalone・実行時 `new Function` なし＝dev/build/test の pre フックで生成）にしたため、`script-src 'self'`（eval 不可）のまま起動・全画面表示できる。#119 で白画面回避のため一時的に 'unsafe-eval' を許可していたのを撤廃＝最厳格に復帰。残: packaged で eval 無し起動の最終確認。
 - [~] FFmpeg/VOICEVOX/AI の `infrastructure` 越し呼び出し ＝ **実装済**（`ffmpegExport`／`voiceProviders/voicevoxProvider`／`aiProviders`）。**同梱 VOICEVOX ENGINE は v0.25.2（CPU）に固定**（`src-tauri/resources/README.md`・#149）。残: FFmpeg/AI モデルのバージョン記録。

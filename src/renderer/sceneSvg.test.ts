@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { charWidthEm, layoutToSvg, wrapText } from './sceneSvg';
+import { fontFamilyForId } from '../domain/font/fontCatalog';
 import type { Fit } from '../domain/enums';
 import type { SceneLayout } from './layout';
 
@@ -107,6 +108,16 @@ describe('layoutToSvg：常時クレジット（credit・ADR-0003）', () => {
     // 画像スロットのプレースホルダ枠（メイン画像）より後にクレジットが来る。
     const svg = layoutToSvg(imageLayout(), { credit: 'CREDIT_X' });
     expect(svg.indexOf('CREDIT_X')).toBeGreaterThan(svg.indexOf('メイン画像'));
+  });
+});
+
+describe('layoutToSvg：フォント（fontFamily・同梱フォント選択）', () => {
+  it('fontFamily 指定がテキストの font-family 属性に反映される', () => {
+    const svg = layoutToSvg(imageLayout(), { fontFamily: "'TestFont X', sans-serif" });
+    expect(svg).toContain(`font-family="'TestFont X', sans-serif"`);
+  });
+  it('fontFamily 未指定は既定フォント（fontCatalog 既定）になる', () => {
+    expect(layoutToSvg(imageLayout())).toContain(`font-family="${fontFamilyForId(undefined)}"`);
   });
 });
 

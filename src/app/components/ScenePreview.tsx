@@ -4,11 +4,13 @@ import type { Template } from "../../domain/template/types";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { NARRATOR_CREDIT } from "../../domain/voice/narratorCredit";
+import { fontFamilyForId } from "../../domain/font/fontCatalog";
 import { useProjectStore } from "../store/projectStore";
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
 export function ScenePreview({ scene, template }: { scene?: Scene; template?: Template }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
+  const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const ref = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<{ width: number; height: number } | null>(null);
   // テンプレ向き（canvas）。未設定時は 16:9 を仮置き（プレースホルダ表示用）。
@@ -62,6 +64,8 @@ export function ScenePreview({ scene, template }: { scene?: Scene; template?: Te
     responsive: true,
     // プレビューも書き出しと同じく常時クレジットを表示（ADR-0001 パリティ）。
     credit: NARRATOR_CREDIT,
+    // 動画全体のフォント（videoSettings.fontId）を反映＝書き出しと一致（ADR-0001）。
+    fontFamily: fontFamilyForId(fontId),
   });
 
   return (

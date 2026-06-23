@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import "./styles/theme.css";
+import "./styles/fonts.css";
 import type { ScreenId } from "./app/data/mockData";
 import { useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";

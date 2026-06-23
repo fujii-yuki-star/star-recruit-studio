@@ -166,6 +166,33 @@ describe('parseProjectDoc', () => {
     expect(back.videoSettings.aspectRatio).toBe('9:16');
     expect('width' in back.videoSettings).toBe(false);
   });
+  it('1.2 文書で fontId 未指定なら既定フォントを補完して 1.3 へ昇格する（同梱フォント選択）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.2',
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(back.videoSettings.fontId).toBe('gen-interface-jp'); // DEFAULT_FONT_ID
+  });
+  it('未知の fontId は移行で既定フォントへ補正する', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.2',
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, fontId: 'old-font' },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.videoSettings.fontId).toBe('gen-interface-jp');
+  });
+  it('既知の fontId は移行で上書きしない（冪等）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600, fontId: 'kaitou-yokoku-gothic' },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.videoSettings.fontId).toBe('kaitou-yokoku-gothic');
+  });
   it('未対応メジャー(2.0)は拒否', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '2.0' };
     expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();

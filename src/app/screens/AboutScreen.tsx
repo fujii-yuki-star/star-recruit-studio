@@ -17,9 +17,14 @@ const credits: { name: string; role: string; license: string; credit?: string; s
     source: { label: "FFmpeg ソース入手先", url: "https://ffmpeg.org/releases/" },
   },
   {
-    name: "Noto Sans JP",
-    role: "画面・字幕のフォント",
-    license: "SIL Open Font License 1.1",
+    name: "Gen Interface JP / Gen Interface JP Display",
+    role: "動画の文字（標準・見出し）",
+    license: "SIL Open Font License 1.1（Inter／源ノ角ゴシック由来）",
+  },
+  {
+    name: "怪盗予告ゴシック",
+    role: "動画の文字（演出）",
+    license: "SIL Open Font License 1.1（源ノ角ゴシック由来）",
   },
   // OpenH264（H.264 動画保存のフォールバック）。主経路は Media Foundation（OS提供）で Cisco クレジット不要＝ADR-0013。OPENH264_FEATURE_ENABLED が true（フォールバック採用）のときだけ表示。
   {

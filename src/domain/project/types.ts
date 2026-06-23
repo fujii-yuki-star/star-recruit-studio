@@ -3,6 +3,7 @@ import type {
   AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
   SceneCategory, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
 } from '../enums';
+import type { FontId } from '../font/fontCatalog';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -10,6 +11,8 @@ export interface VideoSettings {
   fps: number;
   targetDurationSec: number;
   maxDurationSec: number;
+  /** 動画全体のフォント（同梱フォントの id＝domain/font/fontCatalog）。未指定は既定フォント（schema 1.3 で追加・任意）。 */
+  fontId?: FontId;
 }
 
 export interface CompanyInfo {
