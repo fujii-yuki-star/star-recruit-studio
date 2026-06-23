@@ -1,0 +1,8 @@
+# 同梱 VOICEVOX ENGINE 一式（大容量・配布ビルド時に配置・#149）はコミットしない。
+# README・本ファイル・voicevox_engine ディレクトリ（中身は voicevox_engine/.gitignore で除外）だけ追跡する。
+# ※ tauri.conf の bundle.resources がこのパスを参照するため、ディレクトリ自体は CI（バイナリ不在）でも
+#    存在する必要がある（tauri-build の build.rs が resource path の存在を検証＝不在だと cargo がエラー）。
+*
+!.gitignore
+!README.md
+!voicevox_engine/
