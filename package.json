@@ -20,6 +20,7 @@
     "check:rust:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
     "check:rust:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "check:rust:test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "check:ffmpeg-dist": "node scripts/check-ffmpeg-dist.mjs",
     "review": "npm run check:frontend && npm run build && npm run check:rust && npm run check:rust:fmt && npm run check:rust:clippy && npm run check:rust:test",
     "hooks:install": "git config --local core.hooksPath .githooks"
   },

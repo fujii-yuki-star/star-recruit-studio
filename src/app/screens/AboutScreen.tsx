@@ -13,8 +13,8 @@ const credits: { name: string; role: string; license: string; credit?: string; s
   {
     name: "FFmpeg",
     role: "動画の書き出し",
-    license: "LGPL 2.1+",
-    source: { label: "ソース入手先", url: "https://www.ffmpeg.org/download.html" },
+    license: "LGPL v3（同梱: n8.1.2 / BtbN win64-lgpl-shared・詳細は FFmpeg_SOURCE.md）",
+    source: { label: "FFmpeg ソース入手先", url: "https://ffmpeg.org/releases/" },
   },
   {
     name: "Noto Sans JP",

@@ -27,3 +27,15 @@
 - ENGINE 一式は大容量のため **コミットしない**（`.gitignore` 済み）。開発者・CI の各ビルド環境で配置する。
 - 規約・ライセンス根拠は ADR-0005「規約・ライセンスの根拠」（#122）。**エンドユーザー向け利用規約にキャラ規約・クレジット遵守の義務付け**が必要。
 - **将来のビルド自動化時**：配置物の `engine_manifest.json` の version と上記の固定版（0.25.2）をスクリプトで照合する検証を追加予定（現状は手動配置・文書のみのため版ズレを自動検出できない）。
+
+---
+
+## FFmpeg（#119 / ADR-0002・0013）
+
+動画書き出しに **FFmpeg（BtbN win64-lgpl-shared）** を同梱する。**pin・SHA-256・buildconf・対応ソース入手方法・配置手順の正本は [`FFmpeg_SOURCE.md`](../../FFmpeg_SOURCE.md)**（LGPL 対応）。
+
+### 要点
+- 配置先：**`src-tauri/resources/ffmpeg/bin/`**（`ffmpeg.exe`＋DLL）＋ `src-tauri/resources/ffmpeg/LICENSE.txt`。大容量のため `.gitignore` 済み（ディレクトリのみ追跡）。
+- 同梱版：`ffmpeg-n8.1.2-win64-lgpl-shared-8.1.zip`（tag `autobuild-2026-06-22-17-28`・SHA-256 は FFmpeg_SOURCE.md）。
+- 配置後 **`npm run check:ffmpeg-dist`** で LGPL+h264_mf 構成を自動検査 → `npm run tauri build` で packaged 実書き出しを確認。
+- 解決：配布版は**同梱を最優先**（`resolve_ffmpeg`）。`FFMPEG_PATH` は `tauri dev`／`FFMPEG_DIAGNOSTIC=1` 時のみ尊重（配布版が外部 FFmpeg で上書きされない）。

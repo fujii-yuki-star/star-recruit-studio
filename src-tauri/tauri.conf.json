@@ -47,6 +47,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": { "resources/voicevox_engine": "voicevox_engine" }
+    "resources": { "resources/voicevox_engine": "voicevox_engine", "resources/ffmpeg": "ffmpeg" }
   }
 }
