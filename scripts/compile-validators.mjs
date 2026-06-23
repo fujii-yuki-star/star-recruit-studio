@@ -1,0 +1,52 @@
+// 正典スキーマを ajv で「事前コンパイル」し、実行時 eval（new Function）無しの検証関数を生成する（#156）。
+// これにより本番 CSP から script-src 'unsafe-eval' を外せる。生成物は gitignore＝dev/build/test/typecheck の
+// pre フックで毎回最新を生成するためドリフトしない（package.json 参照）。
+// 対象は「フロントで実行時検証する」2スキーマのみ（project は CI の validate-schemas.mjs で検証＝対象外）。
+// ai-video-plan/template は "format" 不使用・他ファイル $ref なし＝formats 不要・自己完結で standalone 可能。
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import Ajv2020 from 'ajv/dist/2020.js';
+import standaloneCode from 'ajv/dist/standalone/index.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, '..');
+const loadSchema = (rel) => JSON.parse(readFileSync(join(root, rel), 'utf8'));
+
+const aiVideoPlanSchema = loadSchema('docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json');
+const templateSchema = loadSchema('docs/yuko_recruit_docs/schemas/template.schema.json');
+
+// validateVideoPlan/templateFs と同設定（draft 2020-12・strict:false・allErrors）。
+// code.source/esm で ESM の standalone 検証関数を出力する。formats は両スキーマ未使用のため付けない。
+const ajv = new Ajv2020({ code: { source: true, esm: true }, allErrors: true, strict: false });
+ajv.addSchema(aiVideoPlanSchema);
+ajv.addSchema(templateSchema);
+
+const rawCode = standaloneCode(ajv, {
+  validateAiVideoPlan: aiVideoPlanSchema.$id,
+  validateTemplate: templateSchema.$id,
+});
+
+// ajv standalone は esm:true でも runtime helper を CJS の `require(...)` で出すことがある（例: ucs2length）。
+// Vite/ブラウザは require 不可なので、先頭の ESM import へ巻き上げる。default import は Vite の CJS interop
+// （__esModule 解決＝vite build も vitest も同じ esbuild 変換）で実体（関数）になる。
+const importLines = [];
+const esmBody = rawCode.replace(
+  /const (\w+) = require\((["'])(.+?)\2\)(\.default)?;/g,
+  (_m, name, _q, path) => {
+    // 拡張子が無い場合のみ .js を補う（既に .js のとき .js.js になる二重付与を防ぐ＝冪等・ajv 更新耐性）。
+    const resolved = path.endsWith('.js') ? path : `${path}.js`;
+    importLines.push(`import ${name} from ${JSON.stringify(resolved)};`);
+    return '';
+  },
+);
+
+const outDir = join(root, 'src/domain/validation/generated');
+mkdirSync(outDir, { recursive: true });
+const banner =
+  '// 自動生成（scripts/compile-validators.mjs・#156）。直接編集しない。\n' +
+  '// スキーマ変更時は `npm run validators:build`（dev/build/test/typecheck の前段でも自動生成）。\n' +
+  '/* eslint-disable */\n';
+const code = banner + importLines.join('\n') + (importLines.length ? '\n' : '') + esmBody;
+writeFileSync(join(outDir, 'validators.js'), code);
+console.log(`✓ 生成: src/domain/validation/generated/validators.js（import 巻き上げ ${importLines.length} 件）`);

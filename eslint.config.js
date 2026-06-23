@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   // ビルド成果物・外部・実験物は対象外
-  { ignores: ['dist', 'src-tauri/**', '.spike/**', 'node_modules'] },
+  { ignores: ['dist', 'src-tauri/**', '.spike/**', 'node_modules', 'src/domain/validation/generated/**'] },
 
   // アプリ本体（React + TS）
   {

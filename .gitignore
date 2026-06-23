@@ -33,3 +33,6 @@ dist-ssr
 
 # Spike artifacts (ADR-0001 等の実験成果物)
 .spike/
+
+# 自動生成 ajv バリデータ（#156）。pre フックで毎回生成するため追跡しない（型は validators.d.ts を手書きで追跡）。
+src/domain/validation/generated/validators.js

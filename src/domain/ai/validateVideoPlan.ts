@@ -3,15 +3,11 @@
 // transformVideoPlan(V3–V11) へ渡す（§2-2「検証してから内部データへ」/ 12§9）。
 // 検証エラー（errors）は技術的内容なので**ログ・デバッグ用**。利用者には UI 層が「次の行動」を示す文言
 // （15§6・概念コード AI_RESPONSE_INVALID / §2-5）へ変換して表示する＝domain は UI 文言を持たない（§6）。
-import Ajv2020 from 'ajv/dist/2020.js';
-import addFormats from 'ajv-formats';
-import aiVideoPlanSchema from '../../../docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json';
+// 検証関数は scripts/compile-validators.mjs が ai-video-plan.schema.json から事前コンパイル（#156）。
+// 実行時 eval（new Function）を使わないので、本番 CSP の script-src を 'self'（'unsafe-eval' 無し）に保てる。
+// 生成時の設定（draft 2020-12・strict:false・allErrors）は compile-validators.mjs / validate-schemas.mjs と一致。
+import { validateAiVideoPlan as validate } from '../validation/generated/validators.js';
 import type { AiVideoPlan } from './types';
-
-// validate-schemas.mjs（CIゲート）と同設定（draft 2020-12・strict:false・allErrors）にして挙動を揃える。
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-addFormats(ajv);
-const validate = ajv.compile(aiVideoPlanSchema as object);
 
 export interface VideoPlanValidationOk {
   valid: true;
