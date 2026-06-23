@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "star-recruit-studio",
+  "productName": "すたりお",
   "version": "0.1.0",
   "identifier": "jp.star-system.star-recruit-studio",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "star-recruit-studio",
+        "title": "すたりお",
         "width": 800,
         "height": 600
       }
