@@ -30,8 +30,10 @@ const encoders = run(["-hide_banner", "-encoders"]);
 if (version.includes(PINNED_VERSION)) ok(`バージョンが pin (${PINNED_VERSION}) と一致`);
 else fail(`バージョンが pin (${PINNED_VERSION}) と不一致。FFmpeg_SOURCE.md を確認`);
 
-// 1) h264_mf が存在（主経路・判定は -encoders が正）
-if (/\bh264_mf\b/.test(encoders)) ok("h264_mf（Media Foundation）が存在");
+// 1) h264_mf が存在（主経路・判定は -encoders が正）。pick_codec は h264_mf を最優先するため、
+//    存在＝通常経路で必ず選択される（libopenh264 併存でも h264_mf 優先＝Rust テスト
+//    pick_codec_prefers_mediafoundation_over_libopenh264_in_btbn_lgpl で担保）。
+if (/\bh264_mf\b/.test(encoders)) ok("h264_mf（Media Foundation）が存在＝pick_codec で優先選択される");
 else fail("h264_mf が -encoders に無い（主経路が成立しない）");
 
 // 2) GPL / nonfree を含まない（LGPL 構成）
@@ -53,10 +55,6 @@ if (/--disable-libx264\b/.test(buildconf) && /--enable-shared\b/.test(buildconf)
 } else {
   fail("配布版が想定の LGPL shared 構成でない（dev の ffmpeg-static 混入の疑い）");
 }
-
-// 5) h264_mf が pick_codec の最優先（h264_mf があれば必ず選ばれる＝Rust の pick_codec と一致）
-if (/\bh264_mf\b/.test(encoders)) ok("通常経路で h264_mf が優先選択される（pick_codec 一致）");
-else fail("h264_mf が無く優先選択できない");
 
 // 参考: libopenh264 が含まれる場合は第三者ライセンス記録が必要（FFmpeg_SOURCE.md に記載済み・通常経路では未使用）
 if (/\blibopenh264\b/.test(encoders)) {

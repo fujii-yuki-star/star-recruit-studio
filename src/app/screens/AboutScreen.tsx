@@ -13,7 +13,7 @@ const credits: { name: string; role: string; license: string; credit?: string; s
   {
     name: "FFmpeg",
     role: "動画の書き出し",
-    license: "LGPL v3（同梱: n8.1.2 / BtbN win64-lgpl-shared・詳細は FFmpeg_SOURCE.md）",
+    license: "LGPL v3（ソースは下記の入手先をご参照ください）",
     source: { label: "FFmpeg ソース入手先", url: "https://ffmpeg.org/releases/" },
   },
   {
