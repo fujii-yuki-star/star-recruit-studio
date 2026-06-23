@@ -34,6 +34,7 @@ impl EngineState {
         if let Ok(mut g) = self.child.lock() {
             if let Some(mut child) = g.take() {
                 let _ = child.kill();
+                // Windows の kill()=TerminateProcess は即時終了のため wait() はすぐ返る（終了完了待ちで長くブロックしない）。
                 let _ = child.wait();
             }
         }
@@ -44,6 +45,8 @@ impl EngineState {
 }
 
 /// 空き TCP ポートを1つ確保して返す（`:0` で bind→drop し OS からポート番号を得る）。
+/// 注: drop→spawn の間に別プロセスが同ポートを取りうる TOCTOU はあるが、loopback・数ms・
+/// 起動失敗時はフォールバック（手動起動/設定の接続先）があるため許容する。
 fn pick_free_port() -> Option<u16> {
     let listener = TcpListener::bind("127.0.0.1:0").ok()?;
     let port = listener.local_addr().ok()?.port();

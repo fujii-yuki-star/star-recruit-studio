@@ -39,15 +39,9 @@ pub async fn synthesize_voice(
         .query(&[("text", text.as_str()), ("speaker", speaker_str.as_str())])
         .send()
         .await
-        .map_err(|_| {
-            "VOICEVOX に接続できませんでした。VOICEVOX を起動してから、もう一度お試しください。"
-                .to_string()
-        })?;
+        .map_err(|_| "ゆうこの声の準備ができていません。設定を確認してください。".to_string())?;
     if !query_res.status().is_success() {
-        return Err(
-            "音声の準備に失敗しました。VOICEVOX を起動してから、もう一度お試しください。"
-                .to_string(),
-        );
+        return Err("ゆうこの声の作成に失敗しました。もう一度お試しください。".to_string());
     }
     let mut query: serde_json::Value = query_res
         .json()
@@ -67,15 +61,9 @@ pub async fn synthesize_voice(
         .json(&query)
         .send()
         .await
-        .map_err(|_| {
-            "VOICEVOX に接続できませんでした。VOICEVOX を起動してから、もう一度お試しください。"
-                .to_string()
-        })?;
+        .map_err(|_| "ゆうこの声の準備ができていません。設定を確認してください。".to_string())?;
     if !synth_res.status().is_success() {
-        return Err(
-            "音声の生成に失敗しました。VOICEVOX を起動してから、もう一度お試しください。"
-                .to_string(),
-        );
+        return Err("ゆうこの声の作成に失敗しました。もう一度お試しください。".to_string());
     }
     let bytes = synth_res
         .bytes()
