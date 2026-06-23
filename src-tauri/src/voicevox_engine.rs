@@ -79,6 +79,14 @@ pub fn start_bundled_engine(app: &AppHandle) {
     if let Some(dir) = exe.parent() {
         cmd.current_dir(dir);
     }
+    // Windows: GUI アプリ（windows_subsystem=windows）からコンソールアプリ run.exe を起動すると、
+    // 継承するコンソールが無いため新規コンソール窓が表示される。CREATE_NO_WINDOW で抑止する。
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     match cmd.spawn() {
         Ok(child) => {
             let base_url = format!("http://127.0.0.1:{port}");
