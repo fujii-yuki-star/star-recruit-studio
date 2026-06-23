@@ -124,6 +124,8 @@ pub fn h264_capability(encoders_output: &str) -> &'static str {
 }
 
 /// 書き出し能力（#120）。capability は h264_capability の値、または "toolMissing"。encoder は診断用。
+/// 注: capability の文字列は TS の `ExportCapability`（src/domain/export/exportCapability.ts）と一致させる
+/// （値を増やすときは TS 型・exportCapability.test.ts・h264_capability_maps_encoders_to_ui_states を併せて更新）。
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct H264Capability {
@@ -1179,9 +1181,10 @@ pub fn export_video(
     })?;
     // ここに来るのは「ffmpeg は見つかったが H.264 エンコーダ（h264_mf/libopenh264/libx264）が無い」ケース。
     // 原因はツールの場所ではなく環境（例: Windows N で Media Foundation 非搭載、配布ビルドの構成不足）。
-    // ※ Windows N/KN 等の事前検知と具体的な案内文は ADR-0013 残課題（配布実装で確定）。
+    // 通常は公開前チェック（detect_h264_capability・#120）で事前ブロックされるが、そこを経ない経路でも
+    // 「次の行動」を示せるよう、文言は TS の EXPORT_CAPABILITY_NOTICE.unavailable と同内容に揃える（§2-5）。
     let codec = pick_codec(&encoders).ok_or_else(|| {
-        "この端末では動画の書き出しに対応した機能が見つかりませんでした。お使いの Windows の種類によっては、追加の準備が必要な場合があります。".to_string()
+        "この端末では動画を書き出せません。お使いの Windows が N／KN 版の場合は「メディア機能パック」を追加してから、もう一度お試しください。解決しない場合はお問い合わせください。".to_string()
     })?;
 
     let tmp = std::env::temp_dir().join("yuko_recruit_export");
