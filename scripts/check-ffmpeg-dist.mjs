@@ -21,7 +21,16 @@ if (!existsSync(BIN)) {
   process.exit(1);
 }
 
-const run = (args) => execFileSync(BIN, args, { encoding: "utf8" });
+const run = (args) => {
+  // 実行時エラー（DLL 不足・プラットフォーム不一致等）はスタックトレースで終わらず、原因と次の行動を案内する。
+  try {
+    return execFileSync(BIN, args, { encoding: "utf8" });
+  } catch (e) {
+    console.error(`✗ FFmpeg を実行できませんでした（共有 DLL 不足やプラットフォーム不一致の可能性）: ${e.message}`);
+    console.error("  FFmpeg_SOURCE.md の pin に従い、shared DLL（avcodec/avformat/avutil 等）を bin 一式で同梱しているか確認してください。");
+    process.exit(1);
+  }
+};
 const version = run(["-hide_banner", "-version"]);
 const buildconf = run(["-hide_banner", "-buildconf"]);
 const encoders = run(["-hide_banner", "-encoders"]);
