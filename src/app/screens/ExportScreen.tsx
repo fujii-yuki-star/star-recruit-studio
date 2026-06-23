@@ -198,7 +198,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
             />
-            <p className="field-hint">「動画を出力」を押すと、保存先を選べます（初期のファイル名：{fileName || "export"}.mp4）。</p>
+            <p className="field-hint">「動画を保存」を押すと、保存先を選べます（初期のファイル名：{fileName || "export"}.mp4）。</p>
           </div>
 
           <div className="field">
@@ -312,7 +312,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               </button>
               <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy}>
                 <FilmIcon size={20} />
-                {busy ? "書き出し中…" : "動画を出力"}
+                {busy ? "書き出し中…" : "動画を保存"}
               </button>
             </div>
           </div>
@@ -325,7 +325,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {phase === "idle" && (
             <div className="text-center text-muted" style={{ padding: "var(--gap-lg) 0" }}>
               <FilmIcon size={32} className="text-faint" />
-              <p className="mt text-sm">「動画を出力」を押すと、ここに進行状況が表示されます。</p>
+              <p className="mt text-sm">「動画を保存」を押すと、ここに進行状況が表示されます。</p>
             </div>
           )}
 

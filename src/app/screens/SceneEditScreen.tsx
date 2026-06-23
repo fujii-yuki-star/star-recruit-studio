@@ -721,7 +721,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   ここで2つに分ける
                 </button>
               </div>
-              <p className="field-hint">実際の音声には VOICEVOX の起動が必要です（未起動だと作成に失敗します）。</p>
+              <p className="field-hint">起動直後は読み上げ音声の準備に少し時間がかかることがあります。うまくいかないときは、少し待ってからもう一度お試しください。</p>
               {selected.narration.status === NARRATION_STATUS.failed && narrationError && (
                 <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
                   <span>{narrationError}</span>
