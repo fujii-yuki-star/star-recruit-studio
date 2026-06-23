@@ -106,6 +106,8 @@ interface ProjectState {
   /** 動画全体の向きを切り替え、各場面のテンプレを同カテゴリ・新向きへ写像する（B5-b・ADR-0012）。
    *  切替えた件数と、対応する見た目が無く原状維持した件数を返す（UIの結果表示用）。 */
   changeOrientation: (target: Orientation) => { changed: number; unsupported: number };
+  /** 動画全体のフォントを切り替える（videoSettings.fontId・保存時に永続化）。 */
+  setFontId: (fontId: string) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
@@ -517,6 +519,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     return { changed: result.changed, unsupported: result.unsupported };
   },
+  setFontId: (fontId) =>
+    set((s) => ({
+      meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, fontId } },
+      saveStatus: "idle",
+    })),
   updateVoiceSettings: (patch) =>
     set((s) => ({
       meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } },

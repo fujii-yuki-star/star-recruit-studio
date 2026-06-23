@@ -11,6 +11,7 @@ import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
+import { FontPicker } from "../components/FontPicker";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { Switch } from "../components/ui";
@@ -118,6 +119,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
   } = useProjectStore();
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
+  const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
+  const setFontId = useProjectStore((s) => s.setFontId);
 
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
@@ -451,6 +454,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="field">
+              <label className="field-label">フォント（動画全体）</label>
+              <FontPicker value={fontId} onChange={setFontId} />
+              <p className="field-hint" style={{ marginTop: 4 }}>動画全体の文字に使うフォントです（すべての場面に反映されます）。</p>
             </div>
 
             <div className="field">

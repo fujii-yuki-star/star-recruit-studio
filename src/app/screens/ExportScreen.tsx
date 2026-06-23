@@ -13,6 +13,7 @@ import { BGM_VOLUME, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, expo
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { ASSET_TYPE } from "../../domain/enums";
+import { fontFamilyForId, cssFamilyForId } from "../../domain/font/fontCatalog";
 
 interface ExportProps {
   onNavigate: (screen: ScreenId) => void;
@@ -30,6 +31,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const assets = useProjectStore((s) => s.assets);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
+  const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const setBgm = useProjectStore((s) => s.setBgm);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
   const updateBgmSettings = useProjectStore((s) => s.updateBgmSettings);
@@ -108,6 +110,13 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         return (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
       };
       const templateById = new Map(templates.map((t) => [t.templateId, t] as const));
+      // 書き出し前に選択フォントを確実に読み込む（Canvas ラスタライズはロード済みフォントしか使えない・ADR-0004）。
+      if (typeof document !== "undefined" && document.fonts) {
+        const fam = cssFamilyForId(fontId);
+        try {
+          await Promise.all([document.fonts.load(`400 1em "${fam}"`), document.fonts.load(`700 1em "${fam}"`)]);
+        } catch { /* 読込失敗時は描画側のフォールバックに任せる */ }
+      }
       const built = await buildExportScenes(
         scenes,
         templateById,
@@ -123,7 +132,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : undefined;
         },
         (done, total) => setProgress({ done, total }),
-        { withSubtitle, outputSize },
+        { withSubtitle, outputSize, fontFamily: fontFamilyForId(fontId) },
       );
       setPhase("encoding");
       let bgm: BgmInput | undefined;

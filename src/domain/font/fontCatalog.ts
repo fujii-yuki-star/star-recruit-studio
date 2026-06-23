@@ -32,6 +32,14 @@ export function fontFamilyForId(fontId: string | null | undefined): string {
   return `'${found.cssFamily}', sans-serif`;
 }
 
+/** fontId → @font-face の font-family 名（bare）。document.fonts.load 用。不明/未指定は既定。 */
+export function cssFamilyForId(fontId: string | null | undefined): string {
+  const found =
+    FONT_CATALOG.find((f) => f.id === fontId) ??
+    FONT_CATALOG.find((f) => f.id === DEFAULT_FONT_ID)!;
+  return found.cssFamily;
+}
+
 /** 既知の fontId か（検証・移行のフォールバック判定用）。 */
 export function isKnownFontId(fontId: unknown): boolean {
   return typeof fontId === 'string' && FONT_CATALOG.some((f) => f.id === fontId);
