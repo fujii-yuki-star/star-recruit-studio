@@ -67,7 +67,9 @@ function sanitizeNode(data: unknown, schema: JsonSchema, root: JsonSchema): unkn
     return out;
   }
 
-  // 動的キーマップ（assetRefs 等の patternProperties）：キーは列挙されないため保持（値は単純型なので再帰不要）。
+  // 動的キーマップ（assetRefs 等の patternProperties）：キーは列挙できないため保持（値は単純型なので再帰不要）。
+  // ＝パターン外のキー（スペース・日本語など）の除去はここではしない。混入しても後段の厳格 ajv が
+  //   additionalProperties:false 違反として捕捉する（サニタイズの余計キー吸収は patternProperties 配下には及ばない）。
   if (isPlainObject(data) && isPlainObject(s.patternProperties)) return data;
 
   // 配列：items スキーマ（$ref 可）で各要素を正規化。
