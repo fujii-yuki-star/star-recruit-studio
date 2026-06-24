@@ -67,6 +67,7 @@
 ### ゆうこ・製品名
 - **ゆうこ（マスコット／ナレーター）は両用途で継続使用**（[ADR-0003](0003-narration-voice.md) 準拠）。
 - **製品名＝すたりお（stario）**。まず**資料（正典）＋アプリ表示名**を改称。**内部識別子（package.json/Cargo の name・リポジトリ名）は段階的に後追い**（破壊的変更を避けるため）。
+  - **Tauri `productName` は ASCII の `stario`** を使う（WiX `light.exe` が日本語の MSI ファイル名で `bundle` に失敗するため）。**アプリ内表示（ウィンドウタイトル・About）は「すたりお」**で統一。`identifier`（`jp.star-system.star-recruit-studio`）由来の `app_data_dir` は productName に依存しないためデータパスは無影響。
 
 ## 結果・影響
 
