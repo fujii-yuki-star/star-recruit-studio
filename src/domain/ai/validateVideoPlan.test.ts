@@ -15,7 +15,8 @@ describe('validateAiVideoPlan', () => {
   it('正典サンプル（ai-video-plan.sample 相当）は適合する', () => {
     const result = validateAiVideoPlan(SAMPLE_VIDEO_PLAN);
     expect(result.valid).toBe(true);
-    if (result.valid) expect(result.plan).toBe(SAMPLE_VIDEO_PLAN);
+    // 受信前正規化で正規化コピーが返る（参照は別だが、余計キーの無いサンプルは内容等価）。
+    if (result.valid) expect(result.plan).toEqual(SAMPLE_VIDEO_PLAN);
   });
 
   it('必須欠落（parts 無し）は不適合＋エラー', () => {
@@ -41,10 +42,14 @@ describe('validateAiVideoPlan', () => {
     expect(validateAiVideoPlan(plan).valid).toBe(false);
   });
 
-  it('未知プロパティ（additionalProperties:false）は不適合', () => {
+  it('未知プロパティは受信前正規化で除去され、検証を通る（余計キーで落とさない＝間欠失敗の無害化）', () => {
+    // スキーマ自体の additionalProperties:false は validate-schemas.mjs で担保。ここは検証関数の挙動：
+    // 余計キーは検証前に正規化で除去するので、内部へ渡る plan には残らない（型・値は不変）。
     const plan = clonePlan();
     plan.unexpectedField = true;
-    expect(validateAiVideoPlan(plan).valid).toBe(false);
+    const result = validateAiVideoPlan(plan);
+    expect(result.valid).toBe(true);
+    if (result.valid) expect('unexpectedField' in result.plan).toBe(false);
   });
 
   it('sceneType "free" は AI 出力スキーマに不適合（AI は FREE テンプレを選ばない＝11§3.2）', () => {

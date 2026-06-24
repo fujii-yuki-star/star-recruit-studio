@@ -94,6 +94,23 @@ function singleScenePlan(override: Partial<AiScene>): AiVideoPlan {
 }
 
 describe('transformVideoPlan', () => {
+  it('narrationText が null/省略でも narration.text を空にして変換できる（無音シーン・一回で通す）', () => {
+    const plan: AiVideoPlan = {
+      schemaVersion: '1.0',
+      videoPlan: { title: 't', purpose: 'company_intro', targetDurationSec: 30 },
+      parts: [
+        {
+          partTitle: 'p',
+          scenes: [
+            { sceneType: 'opening', templateId: 'opening_yuko_right_v1', durationSec: 8, texts: { title: 'x' }, narrationText: null },
+          ],
+        },
+      ],
+    };
+    const { scenes } = transformVideoPlan(plan, baseCtx());
+    expect(scenes[0].narration.text).toBe('');
+  });
+
   it('Mockのサンプルプランをfixtureのproject.sample相当のScene群へ変換する', async () => {
     const plan = await new MockAiProvider().generateVideoPlan({
       companyInfo: { companyName: '株式会社サンプル' },

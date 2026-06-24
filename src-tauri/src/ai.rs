@@ -164,7 +164,12 @@ pub async fn ai_generate(
         })?;
 
     if !res.status().is_success() {
-        // ステータス本文に鍵・送信内容は含めない（鍵をログ/本文に載せない）。
+        // 診断用：原因（400/404/429 等とメッセージ）特定のため、ステータスと Gemini のエラー本文を stderr に出す。
+        // 本文＝Gemini のエラー説明で、鍵や送信内容は含まれない（鍵はリクエストヘッダのみ）。UI には出さない（§2-3）。
+        let status = res.status();
+        let body = res.text().await.unwrap_or_default();
+        let head: String = body.chars().take(500).collect();
+        eprintln!("[ai] Gemini API エラー: status={status} body={head}");
         return Err(
             "AI への要求が失敗しました。時間をおいて、もう一度お試しください。".to_string(),
         );

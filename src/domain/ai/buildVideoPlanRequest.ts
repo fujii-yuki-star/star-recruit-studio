@@ -23,9 +23,10 @@ export const VIDEO_PLAN_SYSTEM_PROMPT = `あなたは採用動画の構成プラ
 
 【厳守事項】
 - あなたは動画や画像を生成しません。動画の「構成案」だけを作成します。
-- 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。
+- 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。出力例にあるキーだけを使い、どの階層にも新しいキーを足さないこと。
 - 各シーンに templateId を必ず設定し、「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
 - assetRefs の値は「利用可能な素材一覧」に存在する assetId のみ。該当が無ければ null にする。
+- 値が無い任意項目は null や空配列を入れず、キーごと省略する。narrationText は必須なので各シーンに必ず空でない文字列を入れ、assetRefs は対象スロットが無ければ（キーごと）省略する。
 - sceneType は、選んだ templateId の category と同じ値にする（「利用可能な見た目パターン一覧」に無い sceneType は使わず、利用可能な見た目だけで構成する）。
 - 各シーンは短く区切る（1シーンで1つの内容）。長い動画はパートに分けて整理する。
 - narrationText は会社マスコット「ゆうこ」が話す、自然で親しみやすい日本語にする。各見た目パターンの maxNarrationLength を超えない。
@@ -46,9 +47,10 @@ export const VIDEO_PLAN_SYSTEM_PROMPT_GENERAL = `あなたは社内向け・一�
 
 【厳守事項】
 - あなたは動画や画像を生成しません。動画の「構成案」だけを作成します。
-- 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。
+- 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。出力例にあるキーだけを使い、どの階層にも新しいキーを足さないこと。
 - 各シーンに templateId を必ず設定し、「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
 - assetRefs の値は「利用可能な素材一覧」に存在する assetId のみ。該当が無ければ null にする。
+- 値が無い任意項目は null や空配列を入れず、キーごと省略する。narrationText は必須なので各シーンに必ず空でない文字列を入れ、assetRefs は対象スロットが無ければ（キーごと）省略する。
 - sceneType は、選んだ templateId の category と同じ値にする（一覧に無い sceneType は使わず、利用可能な見た目だけで構成する）。
 - 「構成（章立て）」をパート（parts）に対応させ、各章を短いシーンに分ける（1シーンで1つの内容）。
 - 「伝えたい要点」を各シーンの texts や narrationText に反映し、要点が漏れないようにする。
@@ -188,9 +190,11 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
     '',
     '# 出力フォーマット（厳守）',
     'トップレベルのキーは schemaVersion・videoPlan・parts（必須）と reviewNotes（任意）のみ。これ以外のキーをトップレベルに足さない。',
+    '**どの階層でも、出力例に無いキーを足さない**（説明・メモ・id・順番・コメント等を勝手に追加しない）。各オブジェクト（videoPlan・part・scene・texts など）は出力例にあるキーだけで構成し、任意項目で値が無いものはキーごと省略する。',
     '説明文・見出し・コードフェンスを付けず、JSON のみを返す。',
     '各シーンに templateId を必ず設定する（省略しない）。templateId は上の「利用可能な見た目パターン」に挙げた templateId のいずれかだけを使う（新しいIDや一覧に無いIDを作らない）。',
     '各シーンの sceneType は、選んだ templateId の category と同じ値にする（利用可能な見た目パターンに無い sceneType は使わない）。利用可能な見た目だけで表現できる構成にする。',
+    'enum 項目（videoPlan.purpose・各シーンの sceneType・yukoPoseTag 等）は、上の一覧や出力例に示した値だけを使い、別の語を作らない。yukoPoseTag のように null 可の項目は該当が無ければ null にする。',
     '各フィールドの型は出力例と同じにする（文字列の項目を配列やオブジェクトにしない。targetAudience・tone・title・narrationText・各 texts などは単一の文字列）。',
     `次の例と**同じキー名・同じ入れ子構造・同じ型**で出力し、値だけ今回の${exampleSubject}・素材・見た目パターンに合わせて作る：`,
     JSON.stringify(example, null, 2),

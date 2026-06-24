@@ -10,7 +10,8 @@ export interface AiScene {
   assetRefs?: Record<string, string | null>;
   yukoPoseTag?: string | null;
   texts: Partial<Record<TextKey, string>>;
-  narrationText: string;
+  /** AI が空のとき null/省略しうる（自動リトライせず1回で通すため許容）。変換で空文字に整える＝無音シーン。 */
+  narrationText?: string | null;
   notes?: string;
 }
 

@@ -7,6 +7,7 @@
 // 実行時 eval（new Function）を使わないので、本番 CSP の script-src を 'self'（'unsafe-eval' 無し）に保てる。
 // 生成時の設定（draft 2020-12・strict:false・allErrors）は compile-validators.mjs / validate-schemas.mjs と一致。
 import { validateAiVideoPlan as validate } from '../validation/generated/validators.js';
+import { sanitizeAiVideoPlan } from './sanitizeVideoPlan';
 import type { AiVideoPlan } from './types';
 
 export interface VideoPlanValidationOk {
@@ -30,8 +31,11 @@ function formatAjvErrors(): string[] {
  * 適合すれば AiVideoPlan へ narrowing して返す。不適合は valid:false＋技術エラー。
  */
 export function validateAiVideoPlan(data: unknown): VideoPlanValidationResult {
-  if (validate(data)) {
-    return { valid: true, plan: data as AiVideoPlan };
+  // 受信前サニタイズ：正典スキーマに無いキーを各階層で除去してから厳格検証する（§2-2 の検証は残す）。
+  // LLM が足しがちな余計キーで additionalProperties:false 不適合になる間欠失敗を無害化する（sanitizeVideoPlan）。
+  const normalized = sanitizeAiVideoPlan(data);
+  if (validate(normalized)) {
+    return { valid: true, plan: normalized as AiVideoPlan };
   }
   return { valid: false, errors: formatAjvErrors() };
 }

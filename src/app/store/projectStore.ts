@@ -251,6 +251,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   bgmError: null,
   aiError: null,
   generate: async () => {
+    // 多重起動ガード：開発時の StrictMode 二重 mount や連打で generate が同時に走ると、片方が失敗・片方が成功して
+    // 「成功の前に失敗表示が出る」競合や、並行呼び出しによる API エラーを招く。生成中は1本だけに絞る（isImporting 等と同方針）。
+    if (get().status === "generating") return;
     set({ status: "generating", aiError: null });
     try {
       // 会社情報・目的・素材はウィザードで反映済み（未経由なら既定値）。
