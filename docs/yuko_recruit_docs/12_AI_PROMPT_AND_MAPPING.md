@@ -51,11 +51,12 @@ interface AiProvider {
 |---|---|---|
 | OpenAI | `response_format` の JSON Schema 指定 | 厳密(strict)モードは「全プロパティ required＋additionalProperties:false」を要求するため、任意項目は `nullable＋required` へ変換するか非strictで運用 |
 | Claude（Anthropic） | 単一ツールを定義し `input_schema` に本スキーマ、`tool_choice` で当該ツールを強制 | ツール入力＝プラン本体。最新の tool use 仕様を実装時に確認 |
-| Gemini | `responseMimeType: application/json` ＋ `responseSchema` | — |
+| Gemini | `responseMimeType: application/json`（JSONモード）＋ プロンプトでスキーマ強制 | `responseSchema` は本スキーマの `assetRefs`（patternProperties の動的キーマップ）が Gemini 非対応のため**不採用**。代わりに受信前正規化＋再検証で頑健化（自動リトライはしない＝無料枠配慮・再試行は手動。実装＝`sanitizeVideoPlan` / `geminiProvider`） |
 | Mock | 固定サンプルを返す（recruit=§7／general=§7b に準じる・videoKind で切替） | テスト・オフライン・既定 |
 
 - いずれの場合も**受信後に必ず ajv 等で再検証**する（モデルが逸脱する前提で二重化）。
-- パース失敗・スキーマ不適合時は §9.3 のリカバリへ。
+- **受信前正規化**：再検証の前に、正典スキーマに無いキーを各階層で除去する（LLM が足しがちな余計キーで `additionalProperties:false` 不適合になる間欠失敗を無害化。型・値は変えないので必須欠落・型違い・enum 外は再検証で捕捉＝§2-2 不変）。
+- **自動リトライはしない**：無料枠の API を勝手に再送しない方針。検証不適合なら §9.3 のリカバリ（利用者が「もう一度試す」or 手動作成）へ。受信前正規化で1回でも通りやすくしておく。
 
 ---
 
@@ -85,9 +86,10 @@ interface AiProvider {
 
 【厳守事項】
 - あなたは動画や画像を生成しません。動画の「構成案」だけを作成します。
-- 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。
+- 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。出力例にあるキーだけを使い、どの階層にも新しいキーを足さないこと。
 - 各シーンに templateId を必ず設定し、「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
 - assetRefs の値は「利用可能な素材一覧」に存在する assetId のみ。該当が無ければ null にする。
+- 値が無い任意項目は null や空配列を入れず、キーごと省略する。narrationText は必須なので各シーンに必ず空でない文字列を入れ、assetRefs は対象スロットが無ければ（キーごと）省略する。
 - sceneType は、選んだ templateId の category と同じ値にする（「利用可能な見た目パターン一覧」に無い sceneType は使わず、利用可能な見た目だけで構成する）。
 - 各シーンは短く区切る（1シーンで1つの内容）。長い動画はパートに分けて整理する。
 - narrationText は会社マスコット「ゆうこ」が話す、自然で親しみやすい日本語にする。各見た目パターンの maxNarrationLength を超えない。
@@ -101,6 +103,8 @@ interface AiProvider {
 ```
 
 > モデル・温度などの生成パラメータは実装時に決定（決定論性のため temperature は低め推奨）。
+>
+> ※ `narrationText` は品質のためプロンプトで「必須」と指示するが、**schema 上は null/空を許容**する（§5b も同様）。AI が空で返しても1回で通すための防御で、受信前正規化＋変換で空に整え「無音シーン」として成立させる（§3・§8.4）。
 
 ---
 
@@ -113,9 +117,10 @@ interface AiProvider {
 
 【厳守事項】
 - あなたは動画や画像を生成しません。動画の「構成案」だけを作成します。
-- 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。
+- 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。出力例にあるキーだけを使い、どの階層にも新しいキーを足さないこと。
 - 各シーンに templateId を必ず設定し、「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
 - assetRefs の値は「利用可能な素材一覧」に存在する assetId のみ。該当が無ければ null にする。
+- 値が無い任意項目は null や空配列を入れず、キーごと省略する。narrationText は必須なので各シーンに必ず空でない文字列を入れ、assetRefs は対象スロットが無ければ（キーごと）省略する。
 - sceneType は、選んだ templateId の category と同じ値にする（一覧に無い sceneType は使わず、利用可能な見た目だけで構成する）。
 - 「構成（章立て）」をパート（parts）に対応させ、各章を短いシーンに分ける（1シーンで1つの内容）。
 - 「伝えたい要点」を各シーンの texts や narrationText に反映し、要点が漏れないようにする。
@@ -338,7 +343,7 @@ interface AiProvider {
 
 ```jsonc
 "narration": {
-  "text": <narrationText>,
+  "text": <narrationText ?? "">,  // null/省略時は空文字＝無音シーン（自動リトライせず1回で通すための許容。後から場面編集で追加可）
   "voiceId": null,        // null=project.voiceSettings を継承（11 §6）
   "speed": null, "pitch": null, "intonation": null,
   "voicePath": null,

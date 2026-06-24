@@ -45,7 +45,7 @@
     "AiScene": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sceneType", "templateId", "durationSec", "texts", "narrationText"],
+      "required": ["sceneType", "templateId", "durationSec", "texts"],
       "properties": {
         "sceneTitle": { "type": "string" },
         "sceneType": { "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko"] },
@@ -68,7 +68,7 @@
             "url": { "type": "string" }
           }
         },
-        "narrationText": { "type": "string", "minLength": 1 },
+        "narrationText": { "type": ["string", "null"] },
         "notes": { "type": "string" }
       }
     }

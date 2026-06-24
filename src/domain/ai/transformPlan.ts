@@ -186,11 +186,14 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
 
       // テキスト（長さチェック V8。自動切詰めはしない）
       const texts: Texts = { ...aiScene.texts };
-      checkLengths(texts, aiScene.narrationText, template, w);
+      // narrationText は AI が空のとき null/省略しうる（自動リトライせず1回で通すための許容）。空文字に整え、
+      // 無音シーンとして成立させる（ナレーションは後から場面編集で追加可。§9 補正）。
+      const narrationText = aiScene.narrationText ?? '';
+      checkLengths(texts, narrationText, template, w);
 
       // ナレーション初期化（12 §8.4）
       const narration: Narration = {
-        text: aiScene.narrationText,
+        text: narrationText,
         voiceId: null,
         speed: null,
         pitch: null,
