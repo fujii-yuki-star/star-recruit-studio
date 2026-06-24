@@ -164,6 +164,7 @@
       "order": 2,
       "sceneType": "photo_intro",
       "templateId": "photo_left_text_right_yuko_v1",
+      "fontId": "kaitou-yokoku-gothic",
       "durationSec": 10,
       "assetRefs": { "mainVisual": "asset_office_001" },
       "character": { "enabled": true, "characterId": "yuko", "poseAssetId": "yuko_guide_001" },

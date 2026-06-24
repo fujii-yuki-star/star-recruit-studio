@@ -459,7 +459,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <div className="field">
               <label className="field-label">フォント（動画全体）</label>
               <FontPicker value={fontId} onChange={(id) => id && setFontId(id)} />
-              <p className="field-hint" style={{ marginTop: 4 }}>動画全体の文字に使うフォントです（すべての場面に反映されます）。</p>
+              <p className="field-hint" style={{ marginTop: 4 }}>動画全体の文字に使うフォントです（個別に設定していない場面に反映されます）。</p>
             </div>
 
             <div className="field">

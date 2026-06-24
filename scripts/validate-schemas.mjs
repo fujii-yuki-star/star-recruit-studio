@@ -79,9 +79,20 @@ const generalBase = {
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
 };
 const withBrief = (brief) => ({ ...generalBase, generalBrief: { title: '発表', ...brief } });
+// 場面フォント（scene.fontId・1.5）の境界値：schema が enum＋null を強制するか（catalog ドリフト検知＝fontCatalog.test とは別観点）。
+const sceneBase = {
+  sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening',
+  templateId: 'opening_yuko_right_v1', durationSec: 8, assetRefs: {},
+  character: { enabled: false, characterId: 'yuko' }, texts: {},
+  narration: { text: 'x', status: 'none' }, warnings: [],
+};
+const withScene = (extra) => ({ ...withBrief({}), scenes: [{ ...sceneBase, ...extra }] });
 const mustAccept = [
   ['general: 上限内（agenda20件/各100字・targetAudience100字）', withBrief({ agenda: Array.from({ length: 20 }, () => 'あ'.repeat(100)), keyPoints: ['要点'], targetAudience: 'あ'.repeat(100) })],
   ['videoSettings: 縦型 9:16（width/height なし）', { ...withBrief({}), videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
+  ['scene: fontId=null（継承）を許容', withScene({ fontId: null })],
+  ['scene: fontId 既知（kaitou-yokoku-gothic）を許容', withScene({ fontId: 'kaitou-yokoku-gothic' })],
+  ['scene: fontId 未指定（継承）を許容', withScene({})],
 ];
 const mustReject = [
   ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
@@ -91,6 +102,7 @@ const mustReject = [
   ['general: targetAudience 101字', withBrief({ targetAudience: 'あ'.repeat(101) })],
   ['videoSettings: 旧 width/height 同梱は拒否（1.2 で撤廃）', { ...withBrief({}), videoSettings: { aspectRatio: '16:9', width: 1920, height: 1080, fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
   ['videoSettings: 未知の比率 1:1 は拒否', { ...withBrief({}), videoSettings: { aspectRatio: '1:1', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
+  ['scene: fontId 未知（old-font）は拒否', withScene({ fontId: 'old-font' })],
 ];
 for (const [desc, data] of mustAccept) {
   if (vProject(data)) console.log(`PASS  must-accept  ${desc}`);
