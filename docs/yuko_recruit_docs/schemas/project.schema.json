@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.4" },
+    "schemaVersion": { "const": "1.5" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -187,6 +187,7 @@
         "sceneType": { "$ref": "#/$defs/SceneCategory" },
         "templateId": { "type": "string" },
         "durationSec": { "type": "number", "minimum": 0 },
+        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
         "assetRefs": { "$ref": "#/$defs/AssetRefs" },
         "character": { "$ref": "#/$defs/Character" },
         "texts": { "$ref": "#/$defs/Texts" },

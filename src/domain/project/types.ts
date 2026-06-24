@@ -184,6 +184,8 @@ export interface Scene {
   sceneType: SceneCategory;
   templateId: string;
   durationSec: number;
+  /** この場面のフォント（同梱フォントの id）。null/未指定＝動画全体（videoSettings.fontId）を継承（schema 1.5・null=継承）。 */
+  fontId?: FontId | null;
   assetRefs: AssetRefs;
   character: Character;
   texts: Texts;

@@ -13,8 +13,8 @@ import type {
   ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。 */
-export const PROJECT_SCHEMA_VERSION = '1.4';
+/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。 */
+export const PROJECT_SCHEMA_VERSION = '1.5';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
@@ -202,11 +202,12 @@ export function parseProjectDoc(text: string): Project {
   return migrateProject(doc as unknown as Project);
 }
 
-/** 読込時に旧バージョン(1.0/1.1/1.2/1.3)を現行(1.4)へ移行する。
+/** 読込時に旧バージョン(1.0/1.1/1.2/1.3/1.4)を現行(1.5)へ移行する。
  *  1.0→1.1: videoKind 既定 recruit・companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
  *  1.1→1.2: videoSettings.width/height を除去（aspectRatio を単一の真実に＝ADR-0012）。
  *  1.2→1.3: videoSettings.fontId を補完（同梱フォント選択・未指定は既定フォント）。
- *  1.3→1.4: bgmSettings.bundledBgmId を検証（未知の id は標準BGM未選択へ落とす・追加は任意フィールド）。 */
+ *  1.3→1.4: bgmSettings.bundledBgmId を検証（未知の id は標準BGM未選択へ落とす・追加は任意フィールド）。
+ *  1.4→1.5: 未知の scene.fontId を継承（未指定）へ落とす（場面ごとのフォント・追加は任意フィールド）。 */
 function migrateProject(project: Project): Project {
   const next: Project = {
     ...project,
@@ -240,6 +241,18 @@ function migrateProject(project: Project): Project {
     const cleaned = { ...bgm };
     delete cleaned.bundledBgmId;
     next.bgmSettings = cleaned as unknown as BgmSettings;
+  }
+  // 1.4→1.5: 未知の scene.fontId（旧版・破損）は継承（未指定）へ落とす。null は継承の明示なので保持。
+  if (Array.isArray(next.scenes)) {
+    next.scenes = next.scenes.map((sc) => {
+      const f = (sc as unknown as Record<string, unknown>).fontId;
+      if (f != null && !isKnownFontId(f)) {
+        const cleaned = { ...sc } as unknown as Record<string, unknown>;
+        delete cleaned.fontId;
+        return cleaned as unknown as Scene;
+      }
+      return sc;
+    });
   }
   return next;
 }
