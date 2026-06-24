@@ -135,7 +135,7 @@ interface ProjectState {
   /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
   setBgm: (file: { name: string; dataUrl: string }) => Promise<void>;
   /** 指定場面のナレーション音声を生成する（narration.status を更新）。 */
-  generateNarration: (sceneId: string) => Promise<void>;
+  generateNarration: (sceneId: string, opts?: { fromBulk?: boolean }) => Promise<void>;
   /** セリフのある全場面のナレーション音声を生成する。 */
   generateAllNarrations: () => Promise<void>;
   /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
@@ -794,10 +794,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ bgmError: "BGMを読み込めませんでした。別のファイルでお試しください。" });
     }
   },
-  generateNarration: async (sceneId) => {
+  generateNarration: async (sceneId, opts) => {
     const scene = get().scenes.find((s) => s.sceneId === sceneId);
     if (!scene || scene.narration.text.trim().length === 0) return;
-    if (scene.narration.status === NARRATION_STATUS.pending) return; // 多重起動防止（連打・全場面生成と個別の競合）
+    // 全場面生成中は個別呼び出し（UI/他画面/テストからの直接呼び出し）を弾く。bulk 自身は fromBulk で通す。
+    if (!opts?.fromBulk && get().isGeneratingNarration) return;
+    if (scene.narration.status === NARRATION_STATUS.pending) return; // 多重起動防止（連打・再入）
     const setStatus = (status: Scene["narration"]["status"]) =>
       set((st) => ({
         scenes: st.scenes.map((s) =>
@@ -831,7 +833,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const ids = get()
         .scenes.filter((s) => s.narration.text.trim().length > 0 && s.narration.status !== NARRATION_STATUS.generated)
         .map((s) => s.sceneId);
-      await Promise.all(ids.map((id) => get().generateNarration(id)));
+      await Promise.all(ids.map((id) => get().generateNarration(id, { fromBulk: true })));
     } finally {
       set({ isGeneratingNarration: false });
     }

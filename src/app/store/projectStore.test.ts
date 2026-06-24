@@ -84,3 +84,24 @@ describe('projectStore addScene / removeScene', () => {
     expect(useProjectStore.getState().saveStatus).toBe('idle');
   });
 });
+
+describe('projectStore generateNarration 再入ガード', () => {
+  it('全場面生成中（isGeneratingNarration）は個別呼び出しを弾く（fromBulk 無し）', async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene('scene_001', 1), narration: { text: 'こんにちは', status: 'none' } }],
+      isGeneratingNarration: true,
+    });
+    await useProjectStore.getState().generateNarration('scene_001');
+    // ガードで早期 return＝pending にも遷移しない（合成は走らない）。
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('none');
+  });
+
+  it('既に pending の場面は二重起動しない', async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene('scene_001', 1), narration: { text: 'こんにちは', status: 'pending' } }],
+      isGeneratingNarration: false,
+    });
+    await useProjectStore.getState().generateNarration('scene_001');
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('pending'); // 変化しない
+  });
+});
