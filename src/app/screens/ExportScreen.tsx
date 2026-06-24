@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
@@ -9,12 +8,12 @@ import { findVideoSlot } from "../../renderer/export/findVideoSlot";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
-import { BGM_VOLUME, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
+import { NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { ASSET_TYPE } from "../../domain/enums";
 import { fontFamilyForId, cssFamilyForId } from "../../domain/font/fontCatalog";
-import { bgmById, BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
+import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 
 interface ExportProps {
@@ -34,10 +33,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
-  const setBgm = useProjectStore((s) => s.setBgm);
-  const setBundledBgm = useProjectStore((s) => s.setBundledBgm);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
-  const updateBgmSettings = useProjectStore((s) => s.updateBgmSettings);
 
   const [fileName, setFileName] = useState("会社紹介動画_2026春");
   const [size, setSize] = useState("fullhd");
@@ -60,19 +56,6 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
   // 標準BGM（同梱）が選ばれていれば、それを最優先で使う（assetId より優先）。
   const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
-
-  function onPickBgm(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        void setBgm({ name: file.name, dataUrl: reader.result });
-      }
-    };
-    reader.readAsDataURL(file);
-  }
 
   async function startExport() {
     if (!canExport()) {
@@ -234,56 +217,13 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           <hr className="divider" />
           <div className="toggle-row">
             <span className="field-label" style={{ margin: 0 }}>
-              BGMを入れる
+              BGM
             </span>
-            <Switch
-              on={withBgm}
-              onChange={(v) => {
-                // 初めて入れるとき（未選択）は標準BGMの先頭を既定にする。切るときは選択を保持。
-                if (v && !bgmSettings?.bundledBgmId && !bgmAsset) setBundledBgm(BGM_CATALOG[0].id);
-                else updateBgmSettings({ enabled: v });
-              }}
-              label="BGMを入れる"
-            />
+            <span className="text-sm">
+              {withBgm ? bundledBgm?.label ?? bgmAsset?.displayName ?? "未選択" : "なし"}
+            </span>
           </div>
-          {withBgm && (
-            <div className="field" style={{ marginTop: 8 }}>
-              <input id="bgmFile" type="file" accept="audio/*" hidden onChange={onPickBgm} />
-              <div role="radiogroup" aria-label="BGMを選ぶ" style={{ display: "grid", gap: 8 }}>
-                {BGM_CATALOG.map((b) => (
-                  <label key={b.id} className="row gap-sm" style={{ cursor: "pointer", alignItems: "center" }}>
-                    <input
-                      type="radio"
-                      name="bgmChoice"
-                      checked={bgmSettings?.bundledBgmId === b.id}
-                      onChange={() => setBundledBgm(b.id)}
-                      style={{ accentColor: "var(--color-primary)" }}
-                    />
-                    <span className="text-sm">{b.label}</span>
-                    <span className="text-faint text-sm">— {b.note}</span>
-                  </label>
-                ))}
-                <label className="row gap-sm" style={{ cursor: "pointer", alignItems: "center" }}>
-                  <input
-                    type="radio"
-                    name="bgmChoice"
-                    checked={!!bgmAsset && !bgmSettings?.bundledBgmId}
-                    onChange={() => document.getElementById("bgmFile")?.click()}
-                    style={{ accentColor: "var(--color-primary)" }}
-                  />
-                  <span className="text-sm">自分のBGMを読み込む</span>
-                </label>
-              </div>
-              {bgmAsset && !bgmSettings?.bundledBgmId && (
-                <div className="row-between" style={{ marginTop: 6 }}>
-                  <span className="text-sm text-muted">自分のBGM：{bgmAsset.displayName}</span>
-                  <label htmlFor="bgmFile" className="btn btn-ghost btn-icon text-sm" style={{ cursor: "pointer" }}>
-                    BGMを変更する
-                  </label>
-                </div>
-              )}
-            </div>
-          )}
+          <p className="field-hint">BGM は「仕上がり確認」で選べます。</p>
 
           <hr className="divider" />
           <div className="field">
@@ -306,31 +246,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               <span>大きい</span>
             </div>
           </div>
-          {withBgm && (bundledBgm || bgmAsset) && (
-            <div className="field">
-              <label className="field-label" htmlFor="bgmVolume">
-                BGM音量
-              </label>
-              <input
-                id="bgmVolume"
-                type="range"
-                min={VOLUME_MIN}
-                max={VOLUME_MAX}
-                step={VOLUME_STEP}
-                value={bgmSettings?.volume ?? BGM_VOLUME}
-                onChange={(e) => updateBgmSettings({ volume: Number(e.target.value) })}
-                style={{ width: "100%", accentColor: "var(--color-primary)" }}
-              />
-              <div className="row-between text-faint text-sm">
-                <span>小さい</span>
-                <span>{Math.round((bgmSettings?.volume ?? BGM_VOLUME) * 100)}%（標準25%）</span>
-                <span>大きい</span>
-              </div>
-            </div>
-          )}
-
           <div className="notice notice-info mt">
-            <span>声を作成済みの場面には、その音声が入ります。BGMを選ぶと動画全体に流れます。</span>
+            <span>声を作成済みの場面には、その音声が入ります。BGM は「仕上がり確認」で選べます。</span>
           </div>
 
           <div className="row-between mt-lg">
