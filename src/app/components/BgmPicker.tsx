@@ -61,7 +61,7 @@ export function BgmPicker() {
       {withBgm && (
         <div className="field" style={{ marginTop: 8 }}>
           <input ref={fileRef} type="file" accept="audio/*" hidden onChange={onPickBgm} />
-          <div role="radiogroup" aria-label="BGMを選ぶ" style={{ display: "grid", gap: 8 }}>
+          <div role="radiogroup" aria-label="標準BGMを選ぶ" style={{ display: "grid", gap: 8 }}>
             {BGM_CATALOG.map((b) => (
               <label key={b.id} className="row gap-sm" style={{ cursor: "pointer", alignItems: "center" }}>
                 <input
@@ -75,29 +75,26 @@ export function BgmPicker() {
                 <span className="text-faint text-sm">— {b.note}</span>
               </label>
             ))}
-            <label className="row gap-sm" style={{ cursor: "pointer", alignItems: "center" }}>
-              <input
-                type="radio"
-                name="bgmChoice"
-                checked={!!bgmAsset && !bgmSettings?.bundledBgmId}
-                onChange={() => fileRef.current?.click()}
-                style={{ accentColor: "var(--color-primary)" }}
-              />
-              <span className="text-sm">自分のBGMを読み込む</span>
-            </label>
           </div>
-          {bgmAsset && !bgmSettings?.bundledBgmId && (
-            <div className="row-between" style={{ marginTop: 6 }}>
-              <span className="text-sm text-muted">自分のBGM：{bgmAsset.displayName}</span>
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon text-sm"
-                onClick={() => fileRef.current?.click()}
-              >
-                BGMを変更する
-              </button>
-            </div>
-          )}
+          {/* 標準3曲は単一選択（ラジオ）。自分のBGM は「ファイルを開く操作」なので button にする
+              （ラジオだとキーボード選択→ダイアログのキャンセルで未選択に戻り aria 意味論と不一致になるため）。 */}
+          <div className="row-between" style={{ marginTop: 8, alignItems: "center" }}>
+            {bgmAsset && !bgmSettings?.bundledBgmId ? (
+              <span className="text-sm">
+                自分のBGM：{bgmAsset.displayName}
+                <span className="badge badge-teal" style={{ marginLeft: 6 }}>使用中</span>
+              </span>
+            ) : (
+              <span className="text-sm text-muted">または自分のBGMを使えます</span>
+            )}
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon text-sm"
+              onClick={() => fileRef.current?.click()}
+            >
+              {bgmAsset && !bgmSettings?.bundledBgmId ? "BGMを変更する" : "自分のBGMを読み込む"}
+            </button>
+          </div>
           <div className="field" style={{ marginTop: 10 }}>
             <label className="field-label" htmlFor="bgmVolume">
               BGM音量
