@@ -201,7 +201,11 @@ export function MaterialsScreen() {
               <div className="field">
                 <label className="field-label">画像</label>
                 {/* ネイティブの「ファイル未選択」表示を避け、設定済みかどうかが分かるボタンにする */}
-                <label className="btn btn-secondary" style={{ cursor: "pointer" }}>
+                <label
+                  className="btn btn-secondary"
+                  style={{ cursor: isImporting ? "default" : "pointer", opacity: isImporting ? 0.6 : 1 }}
+                  aria-disabled={isImporting}
+                >
                   <UploadIcon size={16} />
                   {assetSrcById[selected.assetId] ? "画像を変更する" : "画像を選ぶ"}
                   <input
@@ -209,6 +213,7 @@ export function MaterialsScreen() {
                     type="file"
                     accept="image/*"
                     onChange={onPickImage}
+                    disabled={isImporting}
                     style={{ display: "none" }}
                   />
                 </label>

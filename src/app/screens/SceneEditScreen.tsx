@@ -215,6 +215,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedId(id);
     setConfirmDelete(false);
     setSelectedFreeId(null); // 場面が変わったら自由配置の選択は持ち越さない
+    setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
   };
 
   function onUpload(e: ChangeEvent<HTMLInputElement>) {
@@ -715,7 +716,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   )}
                   <button
                     className="btn btn-secondary btn-icon text-sm"
-                    onClick={() => void generateNarration(selected.sceneId)}
+                    onClick={() => { setNarrationPlayError(false); void generateNarration(selected.sceneId); }}
                     disabled={selected.narration.status === NARRATION_STATUS.pending || selected.narration.text.trim().length === 0 || isGeneratingNarration}
                   >
                     {selected.narration.status === NARRATION_STATUS.generated ? "声を作り直す" : "声を作成"}
