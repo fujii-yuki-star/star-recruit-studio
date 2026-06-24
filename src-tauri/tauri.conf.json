@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "すたりお",
+  "productName": "stario",
   "version": "0.1.0",
   "identifier": "jp.star-system.star-recruit-studio",
   "build": {
