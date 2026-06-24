@@ -14,6 +14,8 @@ import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/aud
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { ASSET_TYPE } from "../../domain/enums";
 import { fontFamilyForId, cssFamilyForId } from "../../domain/font/fontCatalog";
+import { bgmById, BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
+import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 
 interface ExportProps {
   onNavigate: (screen: ScreenId) => void;
@@ -33,6 +35,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const setBgm = useProjectStore((s) => s.setBgm);
+  const setBundledBgm = useProjectStore((s) => s.setBundledBgm);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
   const updateBgmSettings = useProjectStore((s) => s.updateBgmSettings);
 
@@ -55,6 +58,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
 
   // assetId が未設定(null/undefined)なら一致せず undefined（assetId は非空文字）。
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
+  // 標準BGM（同梱）が選ばれていれば、それを最優先で使う（assetId より優先）。
+  const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
 
   function onPickBgm(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -136,13 +141,21 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       );
       setPhase("encoding");
       let bgm: BgmInput | undefined;
-      // BGM も表示用 src ではなく、ここでディスクから data URL を読む（asset:// は FFmpeg へ渡せない）。
-      if (withBgm && bgmSettings?.enabled && bgmAsset && pid) {
-        const bgmDataUrl = await readAssetDataUrl(pid, bgmAsset.filePath);
-        if (bgmDataUrl) {
-          const fileExt = (bgmAsset.filePath.split(".").pop() || "mp3").toLowerCase();
+      // BGM も表示用 src ではなく、ここで実体を data URL 化する（asset:// は FFmpeg へ渡せない）。
+      // 標準BGM（同梱）は public/bgm から、自分のBGM はプロジェクトフォルダから読む。bundledBgmId を優先。
+      if (withBgm && bgmSettings?.enabled) {
+        let audioBase64: string | undefined;
+        let fileExt = "mp3";
+        if (bundledBgm) {
+          audioBase64 = await readBundledBgmDataUrl(bundledBgm.id);
+          fileExt = bundledBgm.fileName.split(".").pop()?.toLowerCase() || "mp3";
+        } else if (bgmAsset && pid) {
+          audioBase64 = (await readAssetDataUrl(pid, bgmAsset.filePath)) ?? undefined;
+          fileExt = (bgmAsset.filePath.split(".").pop() || "mp3").toLowerCase();
+        }
+        if (audioBase64) {
           bgm = {
-            audioBase64: bgmDataUrl,
+            audioBase64,
             volume: resolveBgmVolume(undefined, bgmSettings),
             fadeInSec: bgmSettings.fadeInSec ?? 0,
             fadeOutSec: bgmSettings.fadeOutSec ?? 0,
@@ -223,23 +236,52 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <span className="field-label" style={{ margin: 0 }}>
               BGMを入れる
             </span>
-            <Switch on={withBgm} onChange={(v) => updateBgmSettings({ enabled: v })} label="BGMを入れる" />
+            <Switch
+              on={withBgm}
+              onChange={(v) => {
+                // 初めて入れるとき（未選択）は標準BGMの先頭を既定にする。切るときは選択を保持。
+                if (v && !bgmSettings?.bundledBgmId && !bgmAsset) setBundledBgm(BGM_CATALOG[0].id);
+                else updateBgmSettings({ enabled: v });
+              }}
+              label="BGMを入れる"
+            />
           </div>
           {withBgm && (
             <div className="field" style={{ marginTop: 8 }}>
               <input id="bgmFile" type="file" accept="audio/*" hidden onChange={onPickBgm} />
-              <div className="row-between">
-                <span className="text-sm text-muted">
-                  {bgmAsset ? `BGM：${bgmAsset.displayName}` : "BGMファイルが未選択です"}
-                </span>
-                <label
-                  htmlFor="bgmFile"
-                  className="btn btn-ghost btn-icon text-sm"
-                  style={{ cursor: "pointer" }}
-                >
-                  {bgmAsset ? "BGMを変更する" : "BGMを選ぶ"}
+              <div role="radiogroup" aria-label="BGMを選ぶ" style={{ display: "grid", gap: 8 }}>
+                {BGM_CATALOG.map((b) => (
+                  <label key={b.id} className="row gap-sm" style={{ cursor: "pointer", alignItems: "center" }}>
+                    <input
+                      type="radio"
+                      name="bgmChoice"
+                      checked={bgmSettings?.bundledBgmId === b.id}
+                      onChange={() => setBundledBgm(b.id)}
+                      style={{ accentColor: "var(--color-primary)" }}
+                    />
+                    <span className="text-sm">{b.label}</span>
+                    <span className="text-faint text-sm">— {b.note}</span>
+                  </label>
+                ))}
+                <label className="row gap-sm" style={{ cursor: "pointer", alignItems: "center" }}>
+                  <input
+                    type="radio"
+                    name="bgmChoice"
+                    checked={!!bgmAsset && !bgmSettings?.bundledBgmId}
+                    onChange={() => document.getElementById("bgmFile")?.click()}
+                    style={{ accentColor: "var(--color-primary)" }}
+                  />
+                  <span className="text-sm">自分のBGMを読み込む</span>
                 </label>
               </div>
+              {bgmAsset && !bgmSettings?.bundledBgmId && (
+                <div className="row-between" style={{ marginTop: 6 }}>
+                  <span className="text-sm text-muted">自分のBGM：{bgmAsset.displayName}</span>
+                  <label htmlFor="bgmFile" className="btn btn-ghost btn-icon text-sm" style={{ cursor: "pointer" }}>
+                    BGMを変更する
+                  </label>
+                </div>
+              )}
             </div>
           )}
 
@@ -264,7 +306,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               <span>大きい</span>
             </div>
           </div>
-          {withBgm && bgmAsset && (
+          {withBgm && (bundledBgm || bgmAsset) && (
             <div className="field">
               <label className="field-label" htmlFor="bgmVolume">
                 BGM音量

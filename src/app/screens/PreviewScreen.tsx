@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
+import { bgmById } from "../../domain/bgm/bgmCatalog";
 import {
   PlayIcon,
   StopIcon,
@@ -69,9 +70,10 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       break;
     }
 
-  // 概要の BGM 表示（実データ：未設定/無効なら「なし」）。
+  // 概要の BGM 表示（実データ：未設定/無効なら「なし」）。標準BGM（同梱）優先、次に自分のBGM。
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
-  const bgmName = bgmSettings?.enabled && bgmAsset ? bgmAsset.displayName : "なし";
+  const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
+  const bgmName = bgmSettings?.enabled ? bundledBgm?.label ?? bgmAsset?.displayName ?? "なし" : "なし";
 
   // 再生中：現在の場面のナレーションを鳴らし、表示時間後に次の場面へ。範囲の終端で停止。
   useEffect(() => {

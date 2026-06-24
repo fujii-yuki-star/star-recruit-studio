@@ -4,6 +4,7 @@ import type {
   SceneCategory, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
 } from '../enums';
 import type { FontId } from '../font/fontCatalog';
+import type { BundledBgmId } from '../bgm/bgmCatalog';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -55,6 +56,8 @@ export interface VoiceSettings {
 export interface BgmSettings {
   enabled?: boolean;
   assetId?: string | null;
+  /** 標準BGM（同梱）の id（domain/bgm/bgmCatalog）。設定時は assetId より優先。null/未指定＝標準BGM未選択（schema 1.4 で追加・任意）。 */
+  bundledBgmId?: BundledBgmId | null;
   volume?: number;
   loop?: boolean;
   fadeInSec?: number;

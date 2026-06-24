@@ -193,6 +193,34 @@ describe('parseProjectDoc', () => {
     const back = parseProjectDoc(JSON.stringify(doc));
     expect(back.videoSettings.fontId).toBe('kaitou-yokoku-gothic');
   });
+  it('1.3 文書で bundledBgmId 未指定でも 1.4 へ昇格できる（標準BGMは任意・未選択）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.3',
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect('bgmSettings' in back).toBe(false); // 任意フィールドは未指定のまま
+  });
+  it('既知の bundledBgmId（標準BGM）は移行で保持する', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.3',
+      bgmSettings: { enabled: true, bundledBgmId: 'summer-morning' },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.bgmSettings?.bundledBgmId).toBe('summer-morning');
+  });
+  it('未知の bundledBgmId は移行で標準BGM未選択へ落とす（自分のBGM/なしへフォールバック）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.3',
+      bgmSettings: { enabled: true, bundledBgmId: 'old-track', assetId: 'bgm_x_001' },
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.bgmSettings?.bundledBgmId).toBeUndefined();
+    expect(back.bgmSettings?.assetId).toBe('bgm_x_001'); // 自分のBGM は残す
+  });
   it('未対応メジャー(2.0)は拒否', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '2.0' };
     expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();

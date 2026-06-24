@@ -1,0 +1,13 @@
+標準BGM（同梱）クレジット / Bundled BGM credits
+=================================================
+
+すべて CC0（パブリックドメイン）です。帰属（クレジット表記）の義務はありませんが、
+提供元と作者を記録・表示します（権利台帳：docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md §8）。
+
+提供元 / Source : Open Music Academy  https://openmusic.academy/
+ライセンス / License : CC0 1.0 Universal (Public Domain Dedication)
+
+曲 / Tracks
+- summer-morning.mp3    "Summer Morning"                 — Loic Djoufack (CC0)
+- found-new-hope.mp3    "Found New Hope (Pop)"           — Florian Simon (CC0)
+- limousine-cruise.mp3  "Limousine Cruise (Pop - Lounge)" — Florian Simon (CC0)

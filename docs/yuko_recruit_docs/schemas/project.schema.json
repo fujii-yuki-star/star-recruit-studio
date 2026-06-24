@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.3" },
+    "schemaVersion": { "const": "1.4" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -114,6 +114,7 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "assetId": { "type": ["string", "null"] },
+        "bundledBgmId": { "enum": ["summer-morning", "found-new-hope", "limousine-cruise", null] },
         "volume": { "type": "number", "minimum": 0.0, "maximum": 1.5 },
         "loop": { "type": "boolean" },
         "fadeInSec": { "type": "number", "minimum": 0 },
