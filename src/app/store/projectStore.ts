@@ -5,6 +5,7 @@ import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
+import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
 import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from "../../domain/ai/videoPlanInput";
@@ -113,6 +114,8 @@ interface ProjectState {
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
   updateBgmSettings: (patch: BgmPatch) => void;
+  /** 標準BGM（同梱）を選ぶ（bundledBgmId を設定し assetId を解除・BGMを有効化）。 */
+  setBundledBgm: (bundledBgmId: BundledBgmId) => void;
   /** 素材を更新する（素材管理：説明/タグ/公開チェック等）。 */
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
@@ -535,6 +538,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       meta: { ...s.meta, bgmSettings: { ...s.meta.bgmSettings, ...patch } },
       saveStatus: "idle",
     })),
+  setBundledBgm: (bundledBgmId) =>
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        bgmSettings: {
+          ...s.meta.bgmSettings,
+          enabled: true,
+          bundledBgmId,
+          assetId: null,
+          volume: s.meta.bgmSettings?.volume ?? BGM_VOLUME,
+          loop: true,
+        },
+      },
+      saveStatus: "idle",
+    })),
   updateAsset: (assetId, update) =>
     set((s) => ({
       assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)),
@@ -753,6 +771,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             ...s.meta.bgmSettings,
             enabled: true,
             assetId,
+            bundledBgmId: null,
             volume: s.meta.bgmSettings?.volume ?? BGM_VOLUME,
             loop: true,
           },

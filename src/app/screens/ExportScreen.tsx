@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
@@ -9,11 +8,13 @@ import { findVideoSlot } from "../../renderer/export/findVideoSlot";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
-import { BGM_VOLUME, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
+import { NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { ASSET_TYPE } from "../../domain/enums";
 import { fontFamilyForId, cssFamilyForId } from "../../domain/font/fontCatalog";
+import { bgmById } from "../../domain/bgm/bgmCatalog";
+import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 
 interface ExportProps {
   onNavigate: (screen: ScreenId) => void;
@@ -32,9 +33,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
-  const setBgm = useProjectStore((s) => s.setBgm);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
-  const updateBgmSettings = useProjectStore((s) => s.updateBgmSettings);
 
   const [fileName, setFileName] = useState("会社紹介動画_2026春");
   const [size, setSize] = useState("fullhd");
@@ -50,24 +49,15 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [resultPath, setResultPath] = useState("");
   const [message, setMessage] = useState("");
+  // 選択済みBGMが読み込めなかったとき、完了画面で知らせる（§2-5・BGMなしで続行）。
+  const [bgmWarning, setBgmWarning] = useState(false);
 
   const busy = phase === "rendering" || phase === "encoding";
 
   // assetId が未設定(null/undefined)なら一致せず undefined（assetId は非空文字）。
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
-
-  function onPickBgm(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        void setBgm({ name: file.name, dataUrl: reader.result });
-      }
-    };
-    reader.readAsDataURL(file);
-  }
+  // 標準BGM（同梱）が選ばれていれば、それを最優先で使う（assetId より優先）。
+  const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
 
   async function startExport() {
     if (!canExport()) {
@@ -93,6 +83,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     }
     setMessage("");
     setResultPath("");
+    setBgmWarning(false);
     setProgress({ done: 0, total: scenes.length });
     setPhase("rendering");
     try {
@@ -136,18 +127,29 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       );
       setPhase("encoding");
       let bgm: BgmInput | undefined;
-      // BGM も表示用 src ではなく、ここでディスクから data URL を読む（asset:// は FFmpeg へ渡せない）。
-      if (withBgm && bgmSettings?.enabled && bgmAsset && pid) {
-        const bgmDataUrl = await readAssetDataUrl(pid, bgmAsset.filePath);
-        if (bgmDataUrl) {
-          const fileExt = (bgmAsset.filePath.split(".").pop() || "mp3").toLowerCase();
+      // BGM も表示用 src ではなく、ここで実体を data URL 化する（asset:// は FFmpeg へ渡せない）。
+      // 標準BGM（同梱）は public/bgm から、自分のBGM はプロジェクトフォルダから読む。bundledBgmId を優先。
+      if (bgmSettings?.enabled && (bundledBgm || bgmAsset)) {
+        let audioBase64: string | undefined;
+        let fileExt = "mp3";
+        if (bundledBgm) {
+          audioBase64 = await readBundledBgmDataUrl(bundledBgm.id);
+          fileExt = bundledBgm.fileName.split(".").pop()?.toLowerCase() || "mp3";
+        } else if (bgmAsset && pid) {
+          audioBase64 = (await readAssetDataUrl(pid, bgmAsset.filePath)) ?? undefined;
+          fileExt = (bgmAsset.filePath.split(".").pop() || "mp3").toLowerCase();
+        }
+        if (audioBase64) {
           bgm = {
-            audioBase64: bgmDataUrl,
+            audioBase64,
             volume: resolveBgmVolume(undefined, bgmSettings),
             fadeInSec: bgmSettings.fadeInSec ?? 0,
             fadeOutSec: bgmSettings.fadeOutSec ?? 0,
             fileExt,
           };
+        } else {
+          // 選択済みだが読み込めなかった（同梱欠損・読込失敗）。BGMなしで続行し、完了時に知らせる（§2-5）。
+          setBgmWarning(true);
         }
       }
       const report = await exportVideo(built, fileName.trim() || "export", bgm, pid || undefined, outputPath);
@@ -221,27 +223,13 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           <hr className="divider" />
           <div className="toggle-row">
             <span className="field-label" style={{ margin: 0 }}>
-              BGMを入れる
+              BGM
             </span>
-            <Switch on={withBgm} onChange={(v) => updateBgmSettings({ enabled: v })} label="BGMを入れる" />
+            <span className="text-sm">
+              {withBgm ? bundledBgm?.label ?? bgmAsset?.displayName ?? "未選択" : "なし"}
+            </span>
           </div>
-          {withBgm && (
-            <div className="field" style={{ marginTop: 8 }}>
-              <input id="bgmFile" type="file" accept="audio/*" hidden onChange={onPickBgm} />
-              <div className="row-between">
-                <span className="text-sm text-muted">
-                  {bgmAsset ? `BGM：${bgmAsset.displayName}` : "BGMファイルが未選択です"}
-                </span>
-                <label
-                  htmlFor="bgmFile"
-                  className="btn btn-ghost btn-icon text-sm"
-                  style={{ cursor: "pointer" }}
-                >
-                  {bgmAsset ? "BGMを変更する" : "BGMを選ぶ"}
-                </label>
-              </div>
-            </div>
-          )}
+          <p className="field-hint">BGM は「仕上がり確認」で選べます。</p>
 
           <hr className="divider" />
           <div className="field">
@@ -264,31 +252,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               <span>大きい</span>
             </div>
           </div>
-          {withBgm && bgmAsset && (
-            <div className="field">
-              <label className="field-label" htmlFor="bgmVolume">
-                BGM音量
-              </label>
-              <input
-                id="bgmVolume"
-                type="range"
-                min={VOLUME_MIN}
-                max={VOLUME_MAX}
-                step={VOLUME_STEP}
-                value={bgmSettings?.volume ?? BGM_VOLUME}
-                onChange={(e) => updateBgmSettings({ volume: Number(e.target.value) })}
-                style={{ width: "100%", accentColor: "var(--color-primary)" }}
-              />
-              <div className="row-between text-faint text-sm">
-                <span>小さい</span>
-                <span>{Math.round((bgmSettings?.volume ?? BGM_VOLUME) * 100)}%（標準25%）</span>
-                <span>大きい</span>
-              </div>
-            </div>
-          )}
-
           <div className="notice notice-info mt">
-            <span>声を作成済みの場面には、その音声が入ります。BGMを選ぶと動画全体に流れます。</span>
+            <span>声を作成済みの場面には、その音声が入ります。BGM は「仕上がり確認」で選べます。</span>
           </div>
 
           <div className="row-between mt-lg">
@@ -350,6 +315,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               {phase === "done" && resultPath && (
                 <div className="notice notice-info mt">
                   <span>保存先：{resultPath}</span>
+                </div>
+              )}
+              {phase === "done" && bgmWarning && (
+                <div className="notice notice-warn mt">
+                  <span>BGMを読み込めなかったため、BGMなしで保存しました。仕上がり確認でBGMを選び直すと改善する場合があります。</span>
                 </div>
               )}
             </>

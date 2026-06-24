@@ -7,13 +7,14 @@ import {
 import { ORIENTATION, VIDEO_KIND } from '../enums';
 import type { Purpose, VideoKind } from '../enums';
 import { DEFAULT_FONT_ID, isKnownFontId } from '../font/fontCatalog';
+import { isKnownBundledBgmId } from '../bgm/bgmCatalog';
 import type {
   Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
   ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。 */
-export const PROJECT_SCHEMA_VERSION = '1.3';
+/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。 */
+export const PROJECT_SCHEMA_VERSION = '1.4';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
@@ -201,10 +202,11 @@ export function parseProjectDoc(text: string): Project {
   return migrateProject(doc as unknown as Project);
 }
 
-/** 読込時に旧バージョン(1.0/1.1/1.2)を現行(1.3)へ移行する。
+/** 読込時に旧バージョン(1.0/1.1/1.2/1.3)を現行(1.4)へ移行する。
  *  1.0→1.1: videoKind 既定 recruit・companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
  *  1.1→1.2: videoSettings.width/height を除去（aspectRatio を単一の真実に＝ADR-0012）。
- *  1.2→1.3: videoSettings.fontId を補完（同梱フォント選択・未指定は既定フォント）。 */
+ *  1.2→1.3: videoSettings.fontId を補完（同梱フォント選択・未指定は既定フォント）。
+ *  1.3→1.4: bgmSettings.bundledBgmId を検証（未知の id は標準BGM未選択へ落とす・追加は任意フィールド）。 */
 function migrateProject(project: Project): Project {
   const next: Project = {
     ...project,
@@ -231,6 +233,13 @@ function migrateProject(project: Project): Project {
   const vsFont = (next.videoSettings ?? {}) as unknown as Record<string, unknown>;
   if (!isKnownFontId(vsFont.fontId)) {
     next.videoSettings = { ...vsFont, fontId: DEFAULT_FONT_ID } as unknown as VideoSettings;
+  }
+  // 1.3→1.4: 未知の bundledBgmId（旧版・破損）は標準BGM未選択へ落とす（assetId/なしへフォールバック）。
+  const bgm = next.bgmSettings as Record<string, unknown> | undefined;
+  if (bgm && bgm.bundledBgmId != null && !isKnownBundledBgmId(bgm.bundledBgmId)) {
+    const cleaned = { ...bgm };
+    delete cleaned.bundledBgmId;
+    next.bgmSettings = cleaned as unknown as BgmSettings;
   }
   return next;
 }

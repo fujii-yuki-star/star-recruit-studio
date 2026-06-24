@@ -3,6 +3,10 @@ import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
+import { bgmById } from "../../domain/bgm/bgmCatalog";
+import { BgmPicker } from "../components/BgmPicker";
+import { resolveBgmVolume } from "../../domain/voice/audioMix";
+import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
   PlayIcon,
   StopIcon,
@@ -36,14 +40,17 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const [muted, setMuted] = useState(false);
   // ミュートは再生エフェクトを再起動させずに参照したいので ref で持つ（同期は useEffect で）。
   const mutedRef = useRef(muted);
+  // 再生中の BGM 要素（ループ再生・ミュート/音量を即時反映するため保持）。
+  const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (status === "idle") void generate();
   }, [status, generate]);
 
-  // muted を ref に同期（render 中の ref 書込みを避けつつ、再生エフェクトを再起動させない）。
+  // muted を ref に同期（render 中の ref 書込みを避けつつ、再生エフェクトを再起動させない）。BGM へは即時反映。
   useEffect(() => {
     mutedRef.current = muted;
+    if (bgmAudioRef.current) bgmAudioRef.current.muted = muted;
   }, [muted]);
 
   const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
@@ -69,9 +76,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       break;
     }
 
-  // 概要の BGM 表示（実データ：未設定/無効なら「なし」）。
+  // 再生時に流す BGM の解決（標準BGM＝同梱／自分のBGM＝プロジェクト素材）。設定UIは下の BgmPicker。
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
-  const bgmName = bgmSettings?.enabled && bgmAsset ? bgmAsset.displayName : "なし";
+  const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
 
   // 再生中：現在の場面のナレーションを鳴らし、表示時間後に次の場面へ。範囲の終端で停止。
   useEffect(() => {
@@ -95,6 +102,31 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       audio?.pause();
     };
   }, [playing, safeIdx, endIdx, scenes, narrationAudioById]);
+
+  // 再生中：選択した BGM をループで流す（仕上がり確認で雰囲気を確認できる）。場面送りでは止めない。
+  // BGM 要素は ref を単一の真実とし、cleanup は ref を直接停止する（自分のBGMは URL 解決が非同期なので
+  // closure ローカルに依存しない＝再実行が解決の前後どちらで起きても確実に止める）。
+  useEffect(() => {
+    if (!playing || !bgmSettings?.enabled) return;
+    let cancelled = false;
+    void (async () => {
+      let url: string | null = null;
+      if (bundledBgm) url = `/bgm/${bundledBgm.fileName}`;
+      else if (bgmAsset && meta.projectId) url = await assetDisplayUrl(meta.projectId, bgmAsset.filePath);
+      if (cancelled || !url) return;
+      const a = new Audio(url);
+      a.loop = true;
+      a.volume = Math.min(1, resolveBgmVolume(undefined, bgmSettings)); // HTMLAudio の音量は上限 1.0
+      a.muted = mutedRef.current;
+      bgmAudioRef.current = a;
+      void a.play().catch((e) => console.warn("[PreviewScreen] BGM再生に失敗", e));
+    })();
+    return () => {
+      cancelled = true;
+      bgmAudioRef.current?.pause();
+      bgmAudioRef.current = null;
+    };
+  }, [playing, bgmSettings, bundledBgm, bgmAsset, meta.projectId]);
 
   return (
     <div className="main-scroll">
@@ -200,15 +232,17 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             </div>
             <hr className="divider" style={{ margin: "4px 0" }} />
             <div className="row-between">
-              <span className="text-muted">BGM</span>
-              <strong>{bgmName}</strong>
-            </div>
-            <hr className="divider" style={{ margin: "4px 0" }} />
-            <div className="row-between">
               <span className="text-muted">字幕</span>
               <span className="badge badge-teal">あり</span>
             </div>
           </div>
+
+          <hr className="divider" />
+          <h2 className="section-title">BGM（音楽）</h2>
+          <p className="field-hint" style={{ marginTop: 0 }}>
+            動画に流す音楽を選べます。再生ボタンで実際の雰囲気を確認できます。
+          </p>
+          <BgmPicker />
 
           <div className="col gap-sm mt-lg">
             <button className="btn btn-secondary btn-block" onClick={() => onNavigate("scene-edit")}>
