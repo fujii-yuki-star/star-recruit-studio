@@ -51,8 +51,10 @@ describe('createBgmId (§2.1 bgm_{slug}_{NNN})', () => {
   it('slug をファイル名から正規化して採番する', () => {
     expect(createBgmId('Bright Theme', [])).toBe('bgm_bright_theme_001');
   });
-  it('slug が空（日本語のみ・空白）なら bgm_{NNN}', () => {
+  it('日本語＋ASCII 混在は ASCII 部分だけが slug になる（明るいBGM → slug=bgm）', () => {
     expect(createBgmId('明るいBGM', [])).toBe('bgm_bgm_001');
+  });
+  it('slug が空（日本語のみ・空白）なら bgm_{NNN}', () => {
     expect(createBgmId('　', [])).toBe('bgm_001');
   });
   it('既存と衝突しない最小番号を採る', () => {

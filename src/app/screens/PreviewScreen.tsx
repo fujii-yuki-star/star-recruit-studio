@@ -104,9 +104,10 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   }, [playing, safeIdx, endIdx, scenes, narrationAudioById]);
 
   // 再生中：選択した BGM をループで流す（仕上がり確認で雰囲気を確認できる）。場面送りでは止めない。
+  // BGM 要素は ref を単一の真実とし、cleanup は ref を直接停止する（自分のBGMは URL 解決が非同期なので
+  // closure ローカルに依存しない＝再実行が解決の前後どちらで起きても確実に止める）。
   useEffect(() => {
     if (!playing || !bgmSettings?.enabled) return;
-    let audio: HTMLAudioElement | undefined;
     let cancelled = false;
     void (async () => {
       let url: string | null = null;
@@ -117,14 +118,13 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       a.loop = true;
       a.volume = Math.min(1, resolveBgmVolume(undefined, bgmSettings)); // HTMLAudio の音量は上限 1.0
       a.muted = mutedRef.current;
-      audio = a;
       bgmAudioRef.current = a;
       void a.play().catch((e) => console.warn("[PreviewScreen] BGM再生に失敗", e));
     })();
     return () => {
       cancelled = true;
-      audio?.pause();
-      if (bgmAudioRef.current === audio) bgmAudioRef.current = null;
+      bgmAudioRef.current?.pause();
+      bgmAudioRef.current = null;
     };
   }, [playing, bgmSettings, bundledBgm, bgmAsset, meta.projectId]);
 

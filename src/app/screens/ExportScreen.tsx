@@ -49,6 +49,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [resultPath, setResultPath] = useState("");
   const [message, setMessage] = useState("");
+  // 選択済みBGMが読み込めなかったとき、完了画面で知らせる（§2-5・BGMなしで続行）。
+  const [bgmWarning, setBgmWarning] = useState(false);
 
   const busy = phase === "rendering" || phase === "encoding";
 
@@ -81,6 +83,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     }
     setMessage("");
     setResultPath("");
+    setBgmWarning(false);
     setProgress({ done: 0, total: scenes.length });
     setPhase("rendering");
     try {
@@ -126,7 +129,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       let bgm: BgmInput | undefined;
       // BGM も表示用 src ではなく、ここで実体を data URL 化する（asset:// は FFmpeg へ渡せない）。
       // 標準BGM（同梱）は public/bgm から、自分のBGM はプロジェクトフォルダから読む。bundledBgmId を優先。
-      if (withBgm && bgmSettings?.enabled) {
+      if (bgmSettings?.enabled && (bundledBgm || bgmAsset)) {
         let audioBase64: string | undefined;
         let fileExt = "mp3";
         if (bundledBgm) {
@@ -144,6 +147,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             fadeOutSec: bgmSettings.fadeOutSec ?? 0,
             fileExt,
           };
+        } else {
+          // 選択済みだが読み込めなかった（同梱欠損・読込失敗）。BGMなしで続行し、完了時に知らせる（§2-5）。
+          setBgmWarning(true);
         }
       }
       const report = await exportVideo(built, fileName.trim() || "export", bgm, pid || undefined, outputPath);
@@ -309,6 +315,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               {phase === "done" && resultPath && (
                 <div className="notice notice-info mt">
                   <span>保存先：{resultPath}</span>
+                </div>
+              )}
+              {phase === "done" && bgmWarning && (
+                <div className="notice notice-warn mt">
+                  <span>BGMを読み込めなかったため、BGMなしで保存しました。仕上がり確認でBGMを選び直すと改善する場合があります。</span>
                 </div>
               )}
             </>
