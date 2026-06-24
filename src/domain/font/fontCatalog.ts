@@ -47,3 +47,16 @@ export function cssFamilyForId(fontId: string | null | undefined): string {
 export function isKnownFontId(fontId: unknown): boolean {
   return typeof fontId === 'string' && FONT_CATALOG.some((f) => f.id === fontId);
 }
+
+/**
+ * 場面フォントの解決（null=継承）：場面の fontId（既知ならそれ）→ 動画全体の fontId（既知なら）→ 既定。
+ * 未指定/不明は次段へフォールバックする（描画・書き出しで共通利用）。
+ */
+export function resolveFontId(
+  sceneFontId: string | null | undefined,
+  projectFontId: string | null | undefined,
+): FontId {
+  if (isKnownFontId(sceneFontId)) return sceneFontId as FontId;
+  if (isKnownFontId(projectFontId)) return projectFontId as FontId;
+  return DEFAULT_FONT_ID;
+}

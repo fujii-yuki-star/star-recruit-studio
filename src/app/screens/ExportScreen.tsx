@@ -12,7 +12,7 @@ import { NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOri
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { ASSET_TYPE } from "../../domain/enums";
-import { fontFamilyForId, cssFamilyForId } from "../../domain/font/fontCatalog";
+import { fontFamilyForId, resolveFontId, FONT_CATALOG } from "../../domain/font/fontCatalog";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 
@@ -101,11 +101,16 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         return (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
       };
       const templateById = new Map(templates.map((t) => [t.templateId, t] as const));
-      // 書き出し前に選択フォントを確実に読み込む（Canvas ラスタライズはロード済みフォントしか使えない・ADR-0004）。
+      // 書き出し前に同梱フォントを確実に読み込む（場面ごとに別フォントを使い得るため全フォント。
+      // Canvas ラスタライズはロード済みフォントしか使えない・ADR-0004）。
       if (typeof document !== "undefined" && document.fonts) {
-        const fam = cssFamilyForId(fontId);
         try {
-          await Promise.all([document.fonts.load(`400 1em "${fam}"`), document.fonts.load(`700 1em "${fam}"`)]);
+          await Promise.all(
+            FONT_CATALOG.flatMap((f) => [
+              document.fonts.load(`400 1em "${f.cssFamily}"`),
+              document.fonts.load(`700 1em "${f.cssFamily}"`),
+            ]),
+          );
         } catch { /* 読込失敗時は描画側のフォールバックに任せる */ }
       }
       const built = await buildExportScenes(
@@ -123,7 +128,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : undefined;
         },
         (done, total) => setProgress({ done, total }),
-        { withSubtitle, outputSize, fontFamily: fontFamilyForId(fontId) },
+        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)) },
       );
       setPhase("encoding");
       let bgm: BgmInput | undefined;

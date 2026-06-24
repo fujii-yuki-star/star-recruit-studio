@@ -223,6 +223,33 @@ describe('parseProjectDoc', () => {
     expect(back.bgmSettings?.bundledBgmId).toBeUndefined();
     expect(back.bgmSettings?.assetId).toBe('bgm_x_001'); // 自分のBGM は残す
   });
+  it('1.4 文書で scene.fontId 未指定でも 1.5 へ昇格できる（場面フォントは任意・継承）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.4',
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+  });
+  it('既知の scene.fontId は保持・未知は継承(未指定)へ落とす・null は保持（1.4→1.5）', () => {
+    const doc = {
+      ...assembleProject(header(), [], [], []),
+      schemaVersion: '1.4',
+      scenes: [
+        { sceneId: 'scene_001', fontId: 'kaitou-yokoku-gothic' },
+        { sceneId: 'scene_002', fontId: 'old-font' },
+        { sceneId: 'scene_003', fontId: null },
+        { sceneId: 'scene_004' },
+      ],
+    } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    const byId = (id: string) =>
+      (back.scenes as unknown as Array<Record<string, unknown>>).find((s) => s.sceneId === id)!;
+    expect(byId('scene_001').fontId).toBe('kaitou-yokoku-gothic');
+    expect('fontId' in byId('scene_002')).toBe(false); // 未知 → 落とす（継承）
+    expect(byId('scene_003').fontId).toBeNull(); // null=継承 を保持
+    expect('fontId' in byId('scene_004')).toBe(false); // 未指定のまま
+  });
   it('未対応メジャー(2.0)は拒否', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '2.0' };
     expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();

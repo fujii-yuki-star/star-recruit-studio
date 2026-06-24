@@ -73,8 +73,8 @@ export interface ExportOptions {
    * width/height は1組で受ける（片方だけ指定で縦横比が崩れるのを型で防ぐ）。
    */
   outputSize?: { width: number; height: number };
-  /** 描画フォント（同梱フォント選択・fontCatalog.fontFamilyForId の戻り値）。未指定は既定フォント。 */
-  fontFamily?: string;
+  /** 場面ごとの描画フォントを返す（場面→動画全体で解決済み・fontCatalog.fontFamilyForId の戻り値）。未指定は既定フォント。 */
+  fontFamilyFor?: (scene: Scene) => string;
 }
 
 /**
@@ -121,8 +121,9 @@ export async function buildExportScenes(
       const assetSrc = (id: string | null): string | undefined => (id ? sceneSrc.get(id) : undefined);
       const narration = narrationFor?.(scene);
       const videoSlot = videoSlotFor?.(scene);
+      const sceneFontFamily = opts.fontFamilyFor?.(scene); // 場面→動画全体で解決済みの font-family
       const split = videoSlot
-        ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc, itemFilter, opts.fontFamily)
+        ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc, itemFilter, sceneFontFamily)
         : null;
       // 出力解像度（未指定はキャンバス＝フルHD）。全場面を同一サイズで焼く（後段 concat -c copy の前提）。
       const cw = template.canvas.width;
@@ -166,7 +167,7 @@ export async function buildExportScenes(
         }
         // 静止画シーン（従来）。
         const pngBase64 = await svgToPngDataUrl(
-          layoutToSvg(layout, { assetSrc, itemFilter, credit: NARRATOR_CREDIT, fontFamily: opts.fontFamily }),
+          layoutToSvg(layout, { assetSrc, itemFilter, credit: NARRATOR_CREDIT, fontFamily: sceneFontFamily }),
           width,
           height,
         );

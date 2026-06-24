@@ -149,5 +149,5 @@ src/
 **未決定（リリース前に確認）**
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。
 - ~~FFmpeg 配布パッケージング~~ → **実装済**：win64-lgpl-shared（動的リンク）を pin 同梱＋`FFmpeg_SOURCE.md`（ソース提供）＝#119／Windows N 検知＝#120／ビットレート最適化＝#121。α は **MSI 単独配布**（NSIS は ~2GB 同梱で不可）。
-- フォント選定 → **初期3種を選定・同梱（#161・全 SIL OFL 1.1）**：gen-interface-jp（既定/本文）・gen-interface-jp-display（見出し）・怪盗予告ゴシック（演出）＋場面編集で選択。追加は段階的。（※APIキーのOSキーチェーン保管は実装済＝ADR-0010／`13 §7`）
+- フォント選定 → **初期3種を選定・同梱（#161・全 SIL OFL 1.1）**：gen-interface-jp（既定/本文）・gen-interface-jp-display（見出し）・怪盗予告ゴシック（演出）。**動画全体（`videoSettings.fontId`）＋場面ごと（`scene.fontId`・「動画全体に合わせる」で継承＝schema 1.5）**に選択可。追加は段階的。（※APIキーのOSキーチェーン保管は実装済＝ADR-0010／`13 §7`）
 - 標準BGM → **実装済**：CC0 3曲（Open Music Academy）を同梱＋書き出しで選択（`public/bgm/`・`bgmSettings.bundledBgmId`＝schema 1.4・権利台帳 `13 §8.1`・About にクレジット）。装飾アセットは当面なし。（正式名 **すたりお（stario）**＝ADR-0011。**ウィンドウタイトル/About 表示＝「すたりお」**、**`productName`（インストーラ/アプリ名）＝ASCII の `stario`**＝WiX `light.exe` が日本語の MSI ファイル名で失敗するため。`identifier` 由来のデータパスは無影響）
