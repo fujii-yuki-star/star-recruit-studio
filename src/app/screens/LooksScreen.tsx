@@ -180,7 +180,7 @@ export function LooksScreen() {
 
         {/* 右: 選択中の見た目のプレビュー＋情報 */}
         <div className="card">
-          <h2 className="section-title">プレビュー</h2>
+          <h2 className="section-title">見本</h2>
           <ScenePreview scene={sampleScene} template={current} />
           <p className="text-sm text-muted mt">
             {current.category === FREE_CATEGORY

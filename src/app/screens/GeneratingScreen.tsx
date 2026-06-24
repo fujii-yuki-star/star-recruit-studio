@@ -49,7 +49,6 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
               },
             },
             { label: "手動で作成する", onClick: () => onNavigate("draft") },
-            { label: "前回の結果を復元", onClick: () => onNavigate("draft") },
           ]}
         />
       </div>

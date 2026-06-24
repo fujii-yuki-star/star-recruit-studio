@@ -58,7 +58,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen() {
-  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError } = useProjectStore();
+  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -107,10 +107,12 @@ export function MaterialsScreen() {
         actions={
           <label
             className="btn btn-primary"
-            style={{ cursor: "pointer" }}
+            style={{ cursor: isImporting ? "default" : "pointer", opacity: isImporting ? 0.6 : 1 }}
             role="button"
             tabIndex={0}
+            aria-disabled={isImporting}
             onClick={(e) => {
+              if (isImporting) { e.preventDefault(); return; }
               if (isTauri()) {
                 e.preventDefault();
                 void onPickAsset();
@@ -119,6 +121,7 @@ export function MaterialsScreen() {
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
+                if (isImporting) return;
                 if (isTauri()) {
                   void onPickAsset();
                 } else {
@@ -128,8 +131,8 @@ export function MaterialsScreen() {
             }}
           >
             <UploadIcon size={18} />
-            素材を追加
-            <input type="file" accept="image/*,video/*" onChange={onAddAsset} style={{ display: "none" }} />
+            {isImporting ? "取り込み中…" : "素材を追加"}
+            <input type="file" accept="image/*,video/*" onChange={onAddAsset} disabled={isImporting} style={{ display: "none" }} />
           </label>
         }
       />

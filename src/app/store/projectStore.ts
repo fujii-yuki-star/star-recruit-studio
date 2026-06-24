@@ -22,7 +22,6 @@ import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider"
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
 import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
-import { sampleAssets } from "../../infrastructure/sampleData";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
@@ -62,6 +61,8 @@ interface ProjectState {
   narrationAudioById: Record<string, string>;
   /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
   isGeneratingNarration: boolean;
+  /** 素材/BGM の取り込み中フラグ（多重取り込み防止・取り込み中表示）。 */
+  isImporting: boolean;
   /** ナレーション生成に失敗したときのユーザー向け文言（成功/再試行で消える）。 */
   narrationError: string | null;
   /** BGM 取り込みに失敗したときのユーザー向け文言（§2-5。次のBGM操作で消える）。保存状態とは別物。 */
@@ -241,10 +242,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   scenes: [],
   warnings: [],
   templates: loadBundledTemplates(),
-  assets: sampleAssets,
+  assets: [], // 新規は空（見本素材は実画像が無く混乱の元のため・α）。利用者が素材管理/ウィザードで追加する。
   assetSrcById: {},
   narrationAudioById: {},
   isGeneratingNarration: false,
+  isImporting: false,
   narrationError: null,
   bgmError: null,
   aiError: null,
@@ -295,7 +297,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       parts: [],
       scenes: [],
       warnings: [],
-      assets: sampleAssets,
+      assets: [],
       assetSrcById: {},
       narrationAudioById: {},
       narrationError: null,
@@ -576,6 +578,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return { templates: [...byId.values()] };
     }),
   setAssetImage: async (assetId, file) => {
+    if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。
     if (exceedsInlineAssetLimit(file.size)) {
       const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
@@ -591,6 +594,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
     set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl }, importError: null }));
+    set({ isImporting: true });
     try {
       // 保存先フォルダの名前空間のため projectId を確保する。
       let projectId = get().meta.projectId;
@@ -617,9 +621,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (e) {
       // 表示は維持しつつ、保存に失敗したことを通知する（CLAUDE.md §2-5）。
       set({ importError: importErrorMessage(e) });
+    } finally {
+      set({ isImporting: false });
     }
   },
   addAsset: async (file) => {
+    if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開せず、ネイティブ「開く」のパス0コピー取り込み（addAssetByPath）へ誘導する（#48・A3）。
     if (exceedsInlineAssetLimit(file.size)) {
       const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
@@ -658,6 +665,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       importError: null,
     }));
     // 永続化（プロジェクトフォルダへコピー）。
+    set({ isImporting: true });
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
@@ -692,11 +700,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
         importError: importErrorMessage(e),
       }));
+    } finally {
+      set({ isImporting: false });
     }
   },
   // 真の0コピー取り込み（Tauri）：ネイティブ「開く」で選んだ絶対パスを Rust がコピーする。
   // JS は素材バイトを一切読まない。画像の表示用 data URL は取り込み後にディスクから読み戻す（ADR-0004）。
   addAssetByPath: async (path) => {
+    if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     const assetId = createAssetId(get().assets.map((a) => a.assetId));
     // パス末尾（ファイル名部分。/ と \ の両方に対応）から種別・拡張子・表示名を決める。
     const namePart = path.split(/[/\\]/).pop() ?? path;
@@ -713,6 +724,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     };
     // 即時：一覧へ追加（表示用 src は取り込み後に読み戻す）。素材追加で未保存に戻す。
     set((s) => ({ assets: [...s.assets, asset], saveStatus: "idle", importError: null }));
+    set({ isImporting: true });
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
@@ -741,12 +753,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
         importError: importErrorMessage(e),
       }));
+    } finally {
+      set({ isImporting: false });
     }
   },
   clearImportError: () => set({ importError: null }),
   clearBgmError: () => set({ bgmError: null }),
   setBgm: async (file) => {
-    set({ bgmError: null });
+    if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
+    set({ bgmError: null, isImporting: true });
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
@@ -792,6 +807,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch {
       // BGM 取り込み失敗は保存状態を汚さず、専用メッセージで通知（§2-5）。
       set({ bgmError: "BGMを読み込めませんでした。別のファイルでお試しください。" });
+    } finally {
+      set({ isImporting: false });
     }
   },
   generateNarration: async (sceneId, opts) => {
