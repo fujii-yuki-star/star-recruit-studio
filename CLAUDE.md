@@ -140,7 +140,7 @@ src/
 **決定済み（ADR）**
 - 描画一致方式（論点③）: [`adr/0001`](docs/yuko_recruit_docs/adr/0001-rendering-parity.md) **Accepted** — 方式A2ハイブリッド。`05_RENDERING_SPEC.md` 追従改訂済み。
 - FFmpeg/コーデック: [`adr/0002`](docs/yuko_recruit_docs/adr/0002-ffmpeg-codec.md) **Accepted** — FFmpeg は LGPLビルド＋動的リンク＋ソース提供。**H.264 エンコーダの選択は [`adr/0013`](docs/yuko_recruit_docs/adr/0013-h264-via-media-foundation.md) で更新**。
-- H.264 書き出し: [`adr/0013`](docs/yuko_recruit_docs/adr/0013-h264-via-media-foundation.md) **Accepted** — **Media Foundation（`h264_mf`）主経路**（OS提供）。配布用 LGPL ビルド（BtbN win64-lgpl）に h264_mf 実在＋アプリ実書き出しを **Windows 実機で検証済＝自前ビルド不要**。OpenH264 はフォールバック。残: 配布パッケージング（#119）・Windows N（#120）・ビットレート最適化（#121）。
+- H.264 書き出し: [`adr/0013`](docs/yuko_recruit_docs/adr/0013-h264-via-media-foundation.md) **Accepted** — **Media Foundation（`h264_mf`）主経路**（OS提供）。配布用 LGPL ビルド（BtbN win64-lgpl）に h264_mf 実在＋アプリ実書き出しを **Windows 実機で検証済＝自前ビルド不要**。OpenH264 はフォールバック。**配布パッケージング（#119・α は MSI 単独）・Windows N 検知（#120）・ビットレート最適化（#121）はいずれも実装済**。
 - ナレーション音声: [`adr/0003`](docs/yuko_recruit_docs/adr/0003-narration-voice.md) **Accepted** — VOICEVOX:ずんだもんを**ナレーター**として使用（ゆうこ固有の声とは称さない）＋常時クレジット。
 - VOICEVOX同梱: [`adr/0005`](docs/yuko_recruit_docs/adr/0005-voicevox-bundling.md) **Accepted** — エンジンを**同梱しアプリ起動時に自動起動**（接続先設定は上級者向けフォールバック）。規約確認済み・クレジット表示は維持。実装/配布の詳細は ADR 未解決論点。
 - ゆうこ＝自社保有で権利クリア（`17`）／フォントはOFL系を同梱（游ゴシック等は同梱不可。`13 §6`）。
@@ -148,6 +148,6 @@ src/
 
 **未決定（リリース前に確認）**
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。
-- FFmpeg 配布パッケージング（lgpl-shared 動的リンク＋ソース提供・使用バージョン pin・Windows N 対応）。H.264 エンコーダ自体は ADR-0013 で決定・実機検証済（#119/#120/#121）。
-- 最終フォント選定（OFL系・本文/見出し）。（※APIキーのOSキーチェーン保管は実装済＝ADR-0010／`13 §7`）
-- 標準BGM・装飾アセットの入手元とライセンス。（正式プロダクト名は **すたりお（stario）** に決定済み＝ADR-0011）
+- ~~FFmpeg 配布パッケージング~~ → **実装済**：win64-lgpl-shared（動的リンク）を pin 同梱＋`FFmpeg_SOURCE.md`（ソース提供）＝#119／Windows N 検知＝#120／ビットレート最適化＝#121。α は **MSI 単独配布**（NSIS は ~2GB 同梱で不可）。
+- フォント選定 → **初期3種を選定・同梱（#161・全 SIL OFL 1.1）**：gen-interface-jp（既定/本文）・gen-interface-jp-display（見出し）・怪盗予告ゴシック（演出）＋場面編集で選択。追加は段階的。（※APIキーのOSキーチェーン保管は実装済＝ADR-0010／`13 §7`）
+- 標準BGM の入手元とライセンス（α は**同梱方針**・要 BGM 選定＋権利台帳）。装飾アセットは当面なし。（正式プロダクト名 **すたりお（stario）**＝ADR-0011 を `productName`／ウィンドウタイトルに適用済み）
