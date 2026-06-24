@@ -130,8 +130,9 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: strin
 }
 
 // 常時クレジット（ADR-0003）。背景に依らず読めるよう半透明の暗いピルを敷き、右下に白文字で最前面へ。
+// フォントは固定（既定フォント）＝ユーザーのフォント選択の影響を受けない（権利表示なので演出フォントで崩さない）。
 // サイズ/位置は canvas 短辺基準＝viewBox 座標で描くので出力解像度（16:9/9:16）に比例スケールする。
-function creditToSvg(width: number, height: number, text: string, fontFamily: string): string {
+function creditToSvg(width: number, height: number, text: string): string {
   const fontSize = Math.round(Math.min(width, height) * 0.022);
   const margin = Math.round(fontSize * 0.7);
   const padX = Math.round(fontSize * 0.6);
@@ -146,7 +147,7 @@ function creditToSvg(width: number, height: number, text: string, fontFamily: st
   return [
     `<g>`,
     `<rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${Math.round(fontSize * 0.3)}" fill="#000000" fill-opacity="0.45"/>`,
-    `<text x="${boxX + padX}" y="${baselineY}" font-family="${fontFamily}" font-size="${fontSize}" fill="#ffffff">${escapeXml(text)}</text>`,
+    `<text x="${boxX + padX}" y="${baselineY}" font-family="${DEFAULT_FONT_FAMILY}" font-size="${fontSize}" fill="#ffffff">${escapeXml(text)}</text>`,
     `</g>`,
   ].join('');
 }
@@ -171,7 +172,7 @@ export function layoutToSvg(layout: SceneLayout, opts: LayoutToSvgOptions = {}):
   }
   lines.push(body);
   // 常時クレジット（ADR-0003）は最前面＝body の後に置く。
-  if (opts.credit) lines.push(creditToSvg(layout.width, layout.height, opts.credit, fontFamily));
+  if (opts.credit) lines.push(creditToSvg(layout.width, layout.height, opts.credit));
   lines.push(`</svg>`);
   return lines.join('\n');
 }
