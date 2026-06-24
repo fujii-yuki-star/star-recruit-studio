@@ -37,6 +37,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const [range, setRange] = useState<RangeMode>("all");
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
+  // 選択済みBGMが再生できなかったとき通知する（自分のBGMのURL解決/再生失敗・§2-5）。
+  const [bgmPlayWarning, setBgmPlayWarning] = useState(false);
   const [muted, setMuted] = useState(false);
   // ミュートは再生エフェクトを再起動させずに参照したいので ref で持つ（同期は useEffect で）。
   const mutedRef = useRef(muted);
@@ -113,13 +115,17 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       let url: string | null = null;
       if (bundledBgm) url = `/bgm/${bundledBgm.fileName}`;
       else if (bgmAsset && meta.projectId) url = await assetDisplayUrl(meta.projectId, bgmAsset.filePath);
-      if (cancelled || !url) return;
+      if (cancelled) return;
+      if (!url) { setBgmPlayWarning(true); return; } // 選択済みなのに再生元が解決できない（自分のBGM）→ 無音にせず通知
       const a = new Audio(url);
       a.loop = true;
       a.volume = Math.min(1, resolveBgmVolume(undefined, bgmSettings)); // HTMLAudio の音量は上限 1.0
       a.muted = mutedRef.current;
       bgmAudioRef.current = a;
-      void a.play().catch((e) => console.warn("[PreviewScreen] BGM再生に失敗", e));
+      void a.play().catch((e) => {
+        console.warn("[PreviewScreen] BGM再生に失敗", e);
+        if (!cancelled) setBgmPlayWarning(true);
+      });
     })();
     return () => {
       cancelled = true;
@@ -168,6 +174,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
               className="btn btn-icon btn-secondary"
               aria-label="再生"
               onClick={() => {
+                setBgmPlayWarning(false); // 再生のたびに前回の警告をクリア（effect 内同期 setState を避ける）
                 if (safeIdx >= endIdx) setIdx(startIdx); // 範囲の終端にいたら先頭から再生
                 setPlaying(true);
               }}
@@ -192,6 +199,12 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
               <VolumeIcon size={20} />
             </button>
           </div>
+
+          {bgmPlayWarning && (
+            <div className="notice notice-warn mt" role="alert">
+              <span>BGMを再生できませんでした。別のBGMを選ぶか、もう一度お試しください。</span>
+            </div>
+          )}
 
           {/* 確認する範囲を選ぶ */}
           <div className="mt-lg">

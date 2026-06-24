@@ -120,7 +120,7 @@ export function SettingsScreen() {
               <p className="field-hint" style={{ marginTop: 2 }}>
                 {aiConnected
                   ? "接続済み。動画案づくりに使われます。"
-                  : "未接続のときは、お試し用の動画案でプレビューできます。"}
+                  : "未接続のときは、お試し用の動画案で仕上がりを確認できます。"}
               </p>
             </div>
             <span className={`badge ${aiConnected ? "badge-teal" : "badge-gray"}`}>

@@ -135,6 +135,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [selectedFreeId, setSelectedFreeId] = useState<string | null>(null);
   // 自由配置：グリッドに合わせる（ドラッグ/リサイズの吸着＋グリッド表示）。表示設定・非永続。
   const [gridSnap, setGridSnap] = useState(false);
+  // ナレーションの▶再生に失敗したとき通知（§2-5・設定の試聴と扱いを統一）。
+  const [narrationPlayError, setNarrationPlayError] = useState(false);
 
   useEffect(() => {
     if (status === "idle") void generate();
@@ -213,6 +215,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedId(id);
     setConfirmDelete(false);
     setSelectedFreeId(null); // 場面が変わったら自由配置の選択は持ち越さない
+    setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
   };
 
   function onUpload(e: ChangeEvent<HTMLInputElement>) {
@@ -326,7 +329,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               }}
             >
               <UploadIcon size={16} />
-              素材をアップロード
+              素材を追加
               <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
             </label>
 
@@ -693,21 +696,27 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <div className="row-between" style={{ marginTop: 6 }}>
                 <span className="text-sm text-muted">
                   音声：{narrationStatusLabel[selected.narration.status] ?? selected.narration.status}
+                  {narrationPlayError && (
+                    <span style={{ color: "var(--color-danger)" }}> ／ 再生できませんでした。声を作り直してお試しください</span>
+                  )}
                 </span>
                 <div className="row gap-sm">
                   {narrationAudioById[selected.sceneId] && (
                     <button
                       className="btn btn-ghost btn-icon text-sm"
-                      onClick={() =>
-                        void new Audio(narrationAudioById[selected.sceneId]).play().catch(() => {})
-                      }
+                      onClick={() => {
+                        setNarrationPlayError(false);
+                        void new Audio(narrationAudioById[selected.sceneId])
+                          .play()
+                          .catch(() => setNarrationPlayError(true));
+                      }}
                     >
                       ▶ 再生
                     </button>
                   )}
                   <button
                     className="btn btn-secondary btn-icon text-sm"
-                    onClick={() => void generateNarration(selected.sceneId)}
+                    onClick={() => { setNarrationPlayError(false); void generateNarration(selected.sceneId); }}
                     disabled={selected.narration.status === NARRATION_STATUS.pending || selected.narration.text.trim().length === 0 || isGeneratingNarration}
                   >
                     {selected.narration.status === NARRATION_STATUS.generated ? "声を作り直す" : "声を作成"}
@@ -847,7 +856,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <option value={`slide:${TRANSITION_DIRECTION.down}`}>スライド（下へ）</option>
                       </select>
                       <p className="field-hint">
-                        ※ プレビューでは確認できませんが、書き出すと切り替わります。
+                        ※ 仕上がり確認では動きませんが、書き出すと切り替わります。
                       </p>
                     </>
                   )}

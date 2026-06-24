@@ -38,6 +38,7 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
             aiError ??
             "通信状況や設定を確認して、もう一度お試しください。手動で作成を始めることもできます。"
           }
+          // 正典 §9.3③「前回 ai/latest_result.json から復元」は post-α・未実装のため導線を出さない（①再試行/②手動のみ）。
           actions={[
             {
               label: "もう一度試す",
@@ -49,7 +50,6 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
               },
             },
             { label: "手動で作成する", onClick: () => onNavigate("draft") },
-            { label: "前回の結果を復元", onClick: () => onNavigate("draft") },
           ]}
         />
       </div>

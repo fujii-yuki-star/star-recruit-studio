@@ -1,10 +1,10 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { NARRATOR_CREDIT } from "../../domain/voice/narratorCredit";
-import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
+import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
 import { useProjectStore } from "../store/projectStore";
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
@@ -49,6 +49,15 @@ export function ScenePreview({ scene, template }: { scene?: Scene; template?: Te
       window.removeEventListener("resize", measure);
     };
   }, [cw, ch]);
+
+  // 選んだフォント（場面→動画全体で解決）を確実にロードする。未ロードだと一瞬フォールバック表示になるが、
+  // 読み込み後にブラウザが自動で再描画する（書き出しは ExportScreen 側で事前ロード済み・ADR-0004）。
+  useEffect(() => {
+    if (typeof document === "undefined" || !document.fonts) return;
+    const fam = cssFamilyForId(resolveFontId(scene?.fontId, fontId));
+    void document.fonts.load(`400 1em "${fam}"`).catch(() => {});
+    void document.fonts.load(`700 1em "${fam}"`).catch(() => {});
+  }, [scene?.fontId, fontId]);
 
   if (!scene || !template) {
     return (

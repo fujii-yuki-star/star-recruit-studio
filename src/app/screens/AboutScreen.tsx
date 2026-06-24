@@ -110,7 +110,7 @@ export function AboutScreen() {
           </div>
 
           <p className="field-hint mt">
-            作成・書き出しする動画には、利用規約に基づき「{NARRATOR_CREDIT}」のクレジットが常に表示されます（仕上がり確認のプレビューにも表示されます）。
+            作成・書き出しする動画には、利用規約に基づき「{NARRATOR_CREDIT}」のクレジットが常に表示されます（仕上がり確認にも表示されます）。
           </p>
         </div>
       </div>
