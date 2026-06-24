@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
-import { FolderIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
 import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
 import {
@@ -322,16 +321,9 @@ export function SettingsScreen() {
         {/* 保存先 */}
         <div className="card">
           <h2 className="section-title">保存先</h2>
-          <div className="field" style={{ margin: 0 }}>
-            <label className="field-label">保存先フォルダ</label>
-            <div className="row gap-sm">
-              <div className="input row gap-sm" style={{ alignItems: "center" }}>
-                <FolderIcon size={16} className="text-faint" />
-                <span className="text-sm grow">C:\Users\採用担当\動画</span>
-              </div>
-              <button className="btn btn-secondary">変更する</button>
-            </div>
-          </div>
+          <p className="page-desc text-pretty">
+            動画の保存先は、書き出し（「動画を保存」）のときに毎回選べます。
+          </p>
         </div>
 
         {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}

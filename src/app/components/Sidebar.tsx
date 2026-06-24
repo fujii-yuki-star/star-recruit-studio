@@ -67,12 +67,10 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
             </button>
           );
         })}
-        <button
-          className="nav-item"
-          onClick={() => onNavigate("home")}
-        >
+        <button className="nav-item" disabled title="準備中です">
           <HelpIcon size={20} className="nav-icon" />
           ヘルプ
+          <span className="text-faint text-sm" style={{ marginLeft: "auto" }}>準備中</span>
         </button>
       </nav>
 
@@ -85,13 +83,15 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
           <HelpIcon size={18} className="nav-icon" />
           このアプリについて
         </button>
-        <button className="nav-item">
+        <button className="nav-item" disabled title="準備中です">
           <MailIcon size={18} className="nav-icon" />
           お問い合わせ
+          <span className="text-faint text-sm" style={{ marginLeft: "auto" }}>準備中</span>
         </button>
-        <button className="nav-item">
+        <button className="nav-item" disabled title="準備中です">
           <BellIcon size={18} className="nav-icon" />
           お知らせ
+          <span className="text-faint text-sm" style={{ marginLeft: "auto" }}>準備中</span>
         </button>
       </div>
     </aside>
