@@ -64,6 +64,8 @@ interface ProjectState {
   isGeneratingNarration: boolean;
   /** ナレーション生成に失敗したときのユーザー向け文言（成功/再試行で消える）。 */
   narrationError: string | null;
+  /** BGM 取り込みに失敗したときのユーザー向け文言（§2-5。次のBGM操作で消える）。保存状態とは別物。 */
+  bgmError: string | null;
   /** AI 構成案の生成に失敗したときのユーザー向け文言（§2-5。再生成/成功で消える）。UI は status==="error" 時にこれを表示する。 */
   aiError: string | null;
   /** AI（鍵があれば実プロバイダ／無ければ Mock）→ 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
@@ -128,10 +130,12 @@ interface ProjectState {
   addAsset: (file: File) => Promise<void>;
   addAssetByPath: (path: string) => Promise<void>;
   clearImportError: () => void;
+  /** BGM 取り込みエラー文言を消す（通知を閉じる）。 */
+  clearBgmError: () => void;
   /** BGM 音声を取り込み、bgmSettings に設定する（プロジェクトに1つ。既存があれば差し替え）。 */
   setBgm: (file: { name: string; dataUrl: string }) => Promise<void>;
   /** 指定場面のナレーション音声を生成する（narration.status を更新）。 */
-  generateNarration: (sceneId: string) => Promise<void>;
+  generateNarration: (sceneId: string, opts?: { fromBulk?: boolean }) => Promise<void>;
   /** セリフのある全場面のナレーション音声を生成する。 */
   generateAllNarrations: () => Promise<void>;
   /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
@@ -242,6 +246,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   narrationAudioById: {},
   isGeneratingNarration: false,
   narrationError: null,
+  bgmError: null,
   aiError: null,
   generate: async () => {
     set({ status: "generating", aiError: null });
@@ -552,6 +557,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         },
       },
       saveStatus: "idle",
+      bgmError: null,
     })),
   updateAsset: (assetId, update) =>
     set((s) => ({
@@ -738,7 +744,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   clearImportError: () => set({ importError: null }),
+  clearBgmError: () => set({ bgmError: null }),
   setBgm: async (file) => {
+    set({ bgmError: null });
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
@@ -782,12 +790,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // BGM は視覚表示せず書き出しも on-demand で読むため、assetSrcById には入れない（A3-2 レビュー）。
       }));
     } catch {
-      set({ saveStatus: "error" });
+      // BGM 取り込み失敗は保存状態を汚さず、専用メッセージで通知（§2-5）。
+      set({ bgmError: "BGMを読み込めませんでした。別のファイルでお試しください。" });
     }
   },
-  generateNarration: async (sceneId) => {
+  generateNarration: async (sceneId, opts) => {
     const scene = get().scenes.find((s) => s.sceneId === sceneId);
     if (!scene || scene.narration.text.trim().length === 0) return;
+    // 全場面生成中は個別呼び出し（UI/他画面/テストからの直接呼び出し）を弾く。bulk 自身は fromBulk で通す。
+    if (!opts?.fromBulk && get().isGeneratingNarration) return;
+    if (scene.narration.status === NARRATION_STATUS.pending) return; // 多重起動防止（連打・再入）
     const setStatus = (status: Scene["narration"]["status"]) =>
       set((st) => ({
         scenes: st.scenes.map((s) =>
@@ -821,7 +833,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const ids = get()
         .scenes.filter((s) => s.narration.text.trim().length > 0 && s.narration.status !== NARRATION_STATUS.generated)
         .map((s) => s.sceneId);
-      await Promise.all(ids.map((id) => get().generateNarration(id)));
+      await Promise.all(ids.map((id) => get().generateNarration(id, { fromBulk: true })));
     } finally {
       set({ isGeneratingNarration: false });
     }

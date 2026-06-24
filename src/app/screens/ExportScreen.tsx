@@ -33,9 +33,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
+  const projectName = useProjectStore((s) => s.meta.projectName);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
 
-  const [fileName, setFileName] = useState("会社紹介動画_2026春");
+  const [fileName, setFileName] = useState(projectName.trim() || "動画");
   const [size, setSize] = useState("fullhd");
   const [withSubtitle, setWithSubtitle] = useState(true);
   // BGM の入/切は bgmSettings.enabled を単一の真実とする（トグルで更新・保存で永続化）。未設定なら入。

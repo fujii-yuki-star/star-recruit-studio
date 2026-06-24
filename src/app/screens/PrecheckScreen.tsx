@@ -136,7 +136,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
           </button>
           {exportBlocked && (
             <span className="text-sm" style={{ color: "var(--color-danger)" }}>
-              この端末では書き出せません。上の「動画の書き出し」の案内をご確認ください。
+              この端末では動画を保存できません。上の確認結果で問題の項目を解消してから、もう一度お試しください。
             </span>
           )}
         </div>

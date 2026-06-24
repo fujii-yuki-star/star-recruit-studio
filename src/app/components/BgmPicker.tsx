@@ -15,6 +15,8 @@ export function BgmPicker() {
   const setBgm = useProjectStore((s) => s.setBgm);
   const setBundledBgm = useProjectStore((s) => s.setBundledBgm);
   const updateBgmSettings = useProjectStore((s) => s.updateBgmSettings);
+  const bgmError = useProjectStore((s) => s.bgmError);
+  const clearBgmError = useProjectStore((s) => s.clearBgmError);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
@@ -61,6 +63,14 @@ export function BgmPicker() {
       {withBgm && (
         <div className="field" style={{ marginTop: 8 }}>
           <input ref={fileRef} type="file" accept="audio/*" hidden onChange={onPickBgm} />
+          {bgmError && (
+            <div className="notice notice-warn" role="alert" style={{ marginBottom: 8 }}>
+              <span className="grow">{bgmError}</span>
+              <button type="button" className="btn btn-ghost btn-icon text-sm" onClick={clearBgmError}>
+                閉じる
+              </button>
+            </div>
+          )}
           <div role="radiogroup" aria-label="標準BGMを選ぶ" style={{ display: "grid", gap: 8 }}>
             {BGM_CATALOG.map((b) => (
               <label key={b.id} className="row gap-sm" style={{ cursor: "pointer", alignItems: "center" }}>

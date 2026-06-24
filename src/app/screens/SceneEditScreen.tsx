@@ -708,7 +708,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <button
                     className="btn btn-secondary btn-icon text-sm"
                     onClick={() => void generateNarration(selected.sceneId)}
-                    disabled={selected.narration.status === NARRATION_STATUS.pending || selected.narration.text.trim().length === 0}
+                    disabled={selected.narration.status === NARRATION_STATUS.pending || selected.narration.text.trim().length === 0 || isGeneratingNarration}
                   >
                     {selected.narration.status === NARRATION_STATUS.generated ? "声を作り直す" : "声を作成"}
                   </button>

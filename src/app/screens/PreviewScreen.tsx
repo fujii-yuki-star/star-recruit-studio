@@ -230,11 +230,6 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
               <span className="text-muted">場面数</span>
               <strong>{scenes.length}個</strong>
             </div>
-            <hr className="divider" style={{ margin: "4px 0" }} />
-            <div className="row-between">
-              <span className="text-muted">字幕</span>
-              <span className="badge badge-teal">あり</span>
-            </div>
           </div>
 
           <hr className="divider" />

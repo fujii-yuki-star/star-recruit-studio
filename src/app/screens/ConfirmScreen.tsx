@@ -1,7 +1,5 @@
-import { useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
-import { Switch } from "../components/ui";
 import { useProjectStore } from "../store/projectStore";
 import { ASSET_TYPE, VIDEO_KIND } from "../../domain/enums";
 import { SparkleIcon, CheckIcon } from "../components/icons";
@@ -11,7 +9,6 @@ interface ConfirmProps {
 }
 
 export function ConfirmScreen({ onNavigate }: ConfirmProps) {
-  const [showNextTime, setShowNextTime] = useState(true);
   const videoKind = useProjectStore((s) => s.meta.videoKind);
   const companyInfo = useProjectStore((s) => s.meta.companyInfo);
   const generalBrief = useProjectStore((s) => s.meta.generalBrief);
@@ -129,13 +126,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
             </span>
           </div>
 
-          {/* チェック項目 */}
-          <label className="toggle-row" style={{ cursor: "pointer" }}>
-            <span className="text-sm">今後もこの確認を表示する</span>
-            <Switch on={showNextTime} onChange={setShowNextTime} label="今後もこの確認を表示する" />
-          </label>
-
-          {/* ボタン */}
+          {/* ボタン（送信前確認は §2-6 で毎回必須＝「次回から表示しない」は設けない） */}
           <div className="row gap-sm mt-lg">
             <button
               className="btn btn-ghost grow"
