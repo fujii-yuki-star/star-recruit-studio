@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // @ts-expect-error process is a nodejs global
@@ -31,5 +31,14 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+  },
+
+  // Vitest 設定（ADR-0014）。
+  // 既定 environment は node のまま（純粋ロジックの既存テストは従来どおり高速・無依存）。
+  // DOM が要るコンポーネント/対話テスト（*.test.tsx）は、各ファイル先頭の
+  // `// @vitest-environment jsdom` で個別に jsdom へ切り替える（既存 node テストへ波及しない）。
+  test: {
+    environment: "node",
+    setupFiles: ["./src/test/setup.ts"],
   },
 }));
