@@ -97,7 +97,7 @@ interface Scene {
 
 1. **本 ADR**（合意）。
 2. **PR-B モデル＋移行**: `NarrationLine`/`scene.lines`、schema 1.8、`sceneLines()`/`lineFromNarration()` アクセサ、**schema 検証（V2 相当）**。**挙動不変**（全消費側はアクセサ経由＝既存は1行に解決）。純粋ロジックのテスト（採番・移行・アクセサ）。V16–V19 の意味検証は本 PR には含めない。
-3. **PR-C 行ごと音声生成・保存**: `narrationAudioById` を **(sceneId,lineId) キー**へ、`voiceFs` を行ごとパスへ、生成/状態を行ごとへ。`narrationProgress` を行集計へ。**＋V16–V19 の domain 検証（lineId 一意・startSec 範囲/順序・speaker 実在）を導入**（読込時の再採番/clamp）。
+3. **PR-C 行検証＋進捗（純粋ドメイン）**: `validateSceneLines`（V16–V19・`Warning[]`・`15 §6` の `LINE_*`）＋`narrationProgress` を行集計へ。純粋関数＝フルテスト・**挙動不変**（単一 narration は1行に解決）。**続く PR-C2（ストア/IO）**で行ごと音声生成・保存（`narrationAudioById` を **(sceneId,lineId) キー**へ＝`import_voice` は sceneId を不透明な stem 扱いで Rust 変更不要・`voiceFs` 行ごとパス・`resolveLineVoice`・生成/状態を行ごと・Preview/Export の参照キーを行へ）。
 4. **PR-D 描画（追加A＋追加B）**: 時刻→有効行→字幕/文字の切替、行ごと字幕 ON/OFF、場面/書き出しの既定継承。
 5. **PR-E 書き出し（行＝セグメント）**: 多行場面をセグメント列へ一般化（フレーム＋音声＋尺）。`buildExportScenes`/`ffmpegExport` をセグメント単位へ。
 6. **PR-F UI（req7b＋簡易タイミング）**: セリフ列の追加/並べ替え/削除、行ごと話者選択（#177 カタログ）、行ごと字幕 ON/OFF・文言、**行ごと開始秒の簡易調整（場面内・単一トラックのミニタイムライン）**。既存の単一ナレーション編集は「1行」として自然に包含。

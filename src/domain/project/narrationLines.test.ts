@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { lineFromNarration, sceneLines } from './narrationLines';
+import { lineFromNarration, sceneLines, validateSceneLines } from './narrationLines';
 import type { Narration, NarrationLine, Scene } from './types';
 
 const narration: Narration = {
@@ -55,5 +55,50 @@ describe('sceneLines', () => {
     const lines = sceneLines(sceneWith({ lines: [] }));
     expect(lines).toHaveLength(1);
     expect(lines[0].lineId).toBe('line_001');
+  });
+});
+
+describe('validateSceneLines (V16-V19・ADR-0015)', () => {
+  it('lines 無し/空は警告なし（単一 narration は対象外）', () => {
+    expect(validateSceneLines(undefined, 8)).toEqual([]);
+    expect(validateSceneLines([], 8)).toEqual([]);
+  });
+
+  it('V16: lineId 重複を検出（LINE_ID_DUPLICATE）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none },
+      { lineId: 'line_001', text: 'b', status: NARRATION_STATUS.none },
+    ];
+    expect(validateSceneLines(lines, 8).map((w) => w.code)).toContain('LINE_ID_DUPLICATE');
+  });
+
+  it('V19: 未知 speaker のみ検出（既知/未指定は許容）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', speaker: 3, status: NARRATION_STATUS.none }, // 既知（ずんだもん）
+      { lineId: 'line_002', text: 'b', status: NARRATION_STATUS.none }, // 未指定＝継承
+      { lineId: 'line_003', text: 'c', speaker: 99999, status: NARRATION_STATUS.none }, // 未知
+    ];
+    expect(validateSceneLines(lines, 8).map((w) => w.code)).toEqual(['LINE_SPEAKER_UNKNOWN']);
+  });
+
+  it('V17: startSec が場面尺を超えると LINE_START_OUT_OF_RANGE', () => {
+    const lines: NarrationLine[] = [{ lineId: 'line_001', text: 'a', startSec: 10, status: NARRATION_STATUS.none }];
+    expect(validateSceneLines(lines, 8).map((w) => w.code)).toContain('LINE_START_OUT_OF_RANGE');
+  });
+
+  it('V18: startSec が降順だと LINE_ORDER_INVALID', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', startSec: 5, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startSec: 2, status: NARRATION_STATUS.none },
+    ];
+    expect(validateSceneLines(lines, 8).map((w) => w.code)).toContain('LINE_ORDER_INVALID');
+  });
+
+  it('正常な lines（一意・既知speaker・昇順・範囲内）は警告なし', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', speaker: 3, startSec: 0, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', speaker: 2, startSec: 3, status: NARRATION_STATUS.none },
+    ];
+    expect(validateSceneLines(lines, 8)).toEqual([]);
   });
 });
