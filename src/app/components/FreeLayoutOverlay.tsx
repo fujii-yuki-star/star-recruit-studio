@@ -72,7 +72,8 @@ export function FreeLayoutOverlay({
     if (drag.mode === "move") {
       onChange(drag.id, moveFreeElement(drag.start, dx, dy, gridSize));
     } else if (drag.corner) {
-      onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize));
+      // Shift 押下中は縦横比を維持（e.shiftKey は move のたびに評価＝ドラッグ途中の押し直しにも追従）。
+      onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey));
     }
   };
 

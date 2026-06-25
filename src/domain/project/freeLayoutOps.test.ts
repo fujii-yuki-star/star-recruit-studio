@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
-  addFreeElement, createFreeElement, moveFreeElement, removeFreeElement, resizeFreeElement,
+  addFreeElement, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
+  moveFreeElement, removeFreeElement, resizeFreeElement, sendFreeElementToBack,
   snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -82,6 +83,65 @@ describe('removeFreeElement', () => {
   });
 });
 
+describe('duplicateFreeElement', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'text', x: 100, y: 100, w: 200, h: 80, zIndex: 1, text: 'あ', fontSize: 40 },
+    { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 50, h: 50, zIndex: 5, shapeType: 'rect', fillColor: '#000000' },
+  ];
+
+  it('複製：新 id・最前面(zIndex 最大+1)・少しずらす・他フィールドは引き継ぐ', () => {
+    const { freeLayout: next, newId } = duplicateFreeElement(layout, 'free_001');
+    expect(next).toHaveLength(3);
+    expect(newId).toBe('free_003');
+    const copy = next.find((e) => e.id === 'free_003');
+    expect(copy?.kind).toBe('text');
+    expect(copy?.text).toBe('あ');
+    expect(copy?.zIndex).toBe(6); // 既存最大 5 +1
+    expect(copy?.x).toBeGreaterThan(100); // 元から少しずれる
+    expect(copy?.y).toBeGreaterThan(100);
+  });
+
+  it('存在しない id は変化なし・newId=null', () => {
+    const { freeLayout: next, newId } = duplicateFreeElement(layout, 'free_999');
+    expect(next).toBe(layout);
+    expect(newId).toBeNull();
+  });
+});
+
+describe('bringFreeElementToFront / sendFreeElementToBack', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 },
+    { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 2 },
+    { id: 'free_003', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 3 },
+  ];
+
+  it('前面：他要素の最大+1 になる', () => {
+    const next = bringFreeElementToFront(layout, 'free_001');
+    expect(next.find((e) => e.id === 'free_001')?.zIndex).toBe(4); // 最大 3 +1
+  });
+
+  it('背面：他要素の最小−1 になる', () => {
+    const next = sendFreeElementToBack(layout, 'free_003');
+    expect(next.find((e) => e.id === 'free_003')?.zIndex).toBe(0); // 最小 1 −1 = 0
+  });
+
+  it('背面：0 を下回らない（FREE 背景 z=0 の裏へ回り込まない）', () => {
+    const atZero: FreeElement[] = [
+      { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 0 },
+      { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 },
+    ];
+    const next = sendFreeElementToBack(atZero, 'free_002');
+    expect(next.find((e) => e.id === 'free_002')?.zIndex).toBe(0); // 最小 0 −1 → 0 でクリップ
+  });
+
+  it('id 不在・単独要素は変化なし（同一参照）', () => {
+    expect(bringFreeElementToFront(layout, 'free_999')).toBe(layout);
+    const single: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 }];
+    expect(bringFreeElementToFront(single, 'free_001')).toBe(single);
+    expect(sendFreeElementToBack(single, 'free_001')).toBe(single);
+  });
+});
+
 describe('moveFreeElement', () => {
   it('開始位置に総移動量を加えて整数で返す', () => {
     expect(moveFreeElement({ x: 100, y: 100, w: 200, h: 200 }, 50, -30)).toEqual({ x: 150, y: 70 });
@@ -141,6 +201,29 @@ describe('resizeFreeElement', () => {
     for (const r of [nw, ne, sw]) {
       expect([r.x, r.y, r.w, r.h].every(Number.isInteger)).toBe(true);
     }
+  });
+});
+
+describe('resizeFreeElement：縦横比維持（Shift / lockAspect）', () => {
+  const start = { x: 100, y: 100, w: 200, h: 100 }; // 比 2:1・右下 (300,200)
+
+  it('se：横ドラッグでも比を保ち高さも連動（左上固定）', () => {
+    const r = resizeFreeElement(start, 'se', 100, 0, 20, 0, true);
+    expect(r).toEqual({ x: 100, y: 100, w: 300, h: 150 });
+    expect(r.w / r.h).toBeCloseTo(2, 5);
+  });
+
+  it('nw：比を保ち対角（右下 300,200）を固定', () => {
+    const r = resizeFreeElement(start, 'nw', 50, 0, 20, 0, true);
+    expect(r).toEqual({ x: 150, y: 125, w: 150, h: 75 });
+    expect(r.x + r.w).toBe(300); // 右辺固定
+    expect(r.y + r.h).toBe(200); // 下辺固定
+  });
+
+  it('縮小は最小サイズで止まり比も保つ', () => {
+    const r = resizeFreeElement(start, 'se', -500, -500, 20, 0, true);
+    expect(r.h).toBe(20); // 短辺が min で止まる
+    expect(r.w / r.h).toBeCloseTo(2, 5);
   });
 });
 

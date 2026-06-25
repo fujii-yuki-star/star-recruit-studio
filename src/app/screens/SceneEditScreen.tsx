@@ -4,7 +4,7 @@ import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
-import { addFreeElement, FREE_GRID_SIZE, removeFreeElement, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeElement, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, removeFreeElement, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { useProjectStore } from "../store/projectStore";
@@ -187,6 +187,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: updateFreeElement(s.freeLayout ?? [], id, p) }));
   const removeFreeEl = (id: string) =>
     patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id) }));
+  // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
+  const duplicateFreeEl = (id: string) => {
+    const result = duplicateFreeElement(selected.freeLayout ?? [], id);
+    patch((s) => ({ ...s, freeLayout: result.freeLayout }));
+    if (result.newId) setSelectedFreeId(result.newId);
+  };
+  const bringFreeElForward = (id: string) =>
+    patch((s) => ({ ...s, freeLayout: bringFreeElementToFront(s.freeLayout ?? [], id) }));
+  const sendFreeElBackward = (id: string) =>
+    patch((s) => ({ ...s, freeLayout: sendFreeElementToBack(s.freeLayout ?? [], id) }));
   // 素材(Asset 単位)のクリップ設定を部分更新（FREE slot 動画の調整に使う。通常スロットと同じ Asset.clip）。
   const patchAssetClip = (assetId: string, p: Partial<NonNullable<Asset["clip"]>>) =>
     updateAsset(assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }));
@@ -558,14 +568,37 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       >
                         <div className="row-between" style={{ marginBottom: 4 }}>
                           <strong className="text-sm">{freeKindLabel[el.kind]}</strong>
-                          <button
-                            className="btn btn-ghost btn-icon text-sm"
-                            style={{ color: "var(--color-danger)" }}
-                            onClick={() => removeFreeEl(el.id)}
-                            aria-label="この配置を削除"
-                          >
-                            <TrashIcon size={14} />
-                          </button>
+                          <div className="row gap-sm">
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); duplicateFreeEl(el.id); }}
+                              aria-label="この配置を複製"
+                            >
+                              複製
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); bringFreeElForward(el.id); }}
+                              aria-label="前面へ移動"
+                            >
+                              前面
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); sendFreeElBackward(el.id); }}
+                              aria-label="背面へ移動"
+                            >
+                              背面
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-icon text-sm"
+                              style={{ color: "var(--color-danger)" }}
+                              onClick={(e) => { e.stopPropagation(); removeFreeEl(el.id); }}
+                              aria-label="この配置を削除"
+                            >
+                              <TrashIcon size={14} />
+                            </button>
+                          </div>
                         </div>
 
                         {el.kind === FREE_ELEMENT_KIND.slot && (
