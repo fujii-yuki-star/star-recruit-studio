@@ -119,6 +119,29 @@ describe('layoutToSvg：フォント（fontFamily・同梱フォント選択）'
   it('fontFamily 未指定は既定フォント（fontCatalog 既定）になる', () => {
     expect(layoutToSvg(imageLayout())).toContain(`font-family="${fontFamilyForId(undefined)}"`);
   });
+
+  it('TextItem 自身の fontId が場面既定(opts.fontFamily)より優先（要素ごとフォント・#178）', () => {
+    const layout: SceneLayout = {
+      width: 1920, height: 1080, backgroundColor: '#ffffff',
+      items: [
+        { kind: 'text', id: 't1', x: 0, y: 0, w: 800, h: 100, zIndex: 30, text: '見出し', fontSize: 40, fontWeight: 'normal', color: '#000000', maxLines: 1, isSubtitle: false, fontId: 'kaitou-yokoku-gothic' },
+        { kind: 'text', id: 't2', x: 0, y: 200, w: 800, h: 100, zIndex: 31, text: '本文', fontSize: 40, fontWeight: 'normal', color: '#000000', maxLines: 1, isSubtitle: false },
+      ],
+    };
+    const svg = layoutToSvg(layout, { fontFamily: "'Scene Default', sans-serif" });
+    expect(svg).toContain(`font-family="${fontFamilyForId('kaitou-yokoku-gothic')}"`); // t1 は自身の fontId
+    expect(svg).toContain(`font-family="'Scene Default', sans-serif"`); // t2 は場面既定にフォールバック
+  });
+
+  it('fontId=null（継承を明示）は場面既定にフォールバック（#178）', () => {
+    const layout: SceneLayout = {
+      width: 1920, height: 1080, backgroundColor: '#ffffff',
+      items: [
+        { kind: 'text', id: 't', x: 0, y: 0, w: 800, h: 100, zIndex: 30, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#000000', maxLines: 1, isSubtitle: false, fontId: null },
+      ],
+    };
+    expect(layoutToSvg(layout, { fontFamily: "'Scene Default', sans-serif" })).toContain(`font-family="'Scene Default', sans-serif"`);
+  });
 });
 
 describe('layoutToSvg：テキストの XSS エスケープ（dangerouslySetInnerHTML 経路・#144）', () => {

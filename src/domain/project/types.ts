@@ -170,6 +170,8 @@ export interface FreeElement {
   fontSize?: number;
   color?: string;
   fontWeight?: FontWeight;
+  /** kind='text' の同梱フォント id。null/未指定＝場面/動画全体を継承（#178）。 */
+  fontId?: FontId | null;
   /** kind='shape'。rect/ellipse/rounded_rect/triangle/star/arrow/speech_bubble（ADR-0008・#173）。 */
   shapeType?: FreeShapeType;
   fillColor?: string;
@@ -189,6 +191,8 @@ export interface Scene {
   durationSec: number;
   /** この場面のフォント（同梱フォントの id）。null/未指定＝動画全体（videoSettings.fontId）を継承（schema 1.5・null=継承）。 */
   fontId?: FontId | null;
+  /** テキスト種別（textKey）ごとのフォント上書き（#178・schema 1.7）。未設定の種別は scene.fontId→動画全体→既定を継承。 */
+  textFontIds?: Partial<Record<TextKey, FontId>>;
   assetRefs: AssetRefs;
   character: Character;
   texts: Texts;
