@@ -205,12 +205,23 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const freeLayout = selected.freeLayout ?? [];
   // 自由配置 slot に割り当て可能な素材（画像・動画）。
   const freeSlotAssets = assets.filter((a) => a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video);
-  const addFreeEl = (kind: FreeElementKind) =>
-    patch((s) => ({ ...s, freeLayout: addFreeElement(s.freeLayout ?? [], kind) }));
+  // 追加：新要素を末尾に積み、追加直後のその要素を選択状態にする（詳細モードでも即表示・#179）。
+  // duplicateFreeEl と同様に updater 内の最新 s.freeLayout から計算（同期実行で newId は下の前に確定）。
+  const addFreeEl = (kind: FreeElementKind) => {
+    let newId: string | null = null;
+    patch((s) => {
+      const result = addFreeElement(s.freeLayout ?? [], kind);
+      newId = result.newId;
+      return { ...s, freeLayout: result.freeLayout };
+    });
+    if (newId) setSelectedFreeId(newId);
+  };
   const patchFreeEl = (id: string, p: Partial<Omit<FreeElement, "id" | "kind">>) =>
     patch((s) => ({ ...s, freeLayout: updateFreeElement(s.freeLayout ?? [], id, p) }));
-  const removeFreeEl = (id: string) =>
+  const removeFreeEl = (id: string) => {
     patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id) }));
+    setSelectedFreeId((cur) => (cur === id ? null : cur)); // 選択中を消したら選択解除（詳細モードは案内へ）
+  };
   // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
   // updateScene→set は同期実行のため、newId は下の setSelectedFreeId より前に確実に代入される。

@@ -8,8 +8,9 @@ import {
 
 describe('createFreeElement / addFreeElement', () => {
   it('空配列に slot を追加：id=free_001・zIndex=1・kind 既定（assetId=null/fit あり）', () => {
-    const next = addFreeElement([], 'slot');
+    const { freeLayout: next, newId } = addFreeElement([], 'slot');
     expect(next).toHaveLength(1);
+    expect(newId).toBe('free_001'); // 追加直後の選択に使う id
     const el = next[0];
     expect(el.id).toBe('free_001');
     expect(el.kind).toBe('slot');
@@ -35,16 +36,16 @@ describe('createFreeElement / addFreeElement', () => {
 
   it('追加のたびに id が連番・zIndex が最前面+1 になる', () => {
     let layout: FreeElement[] = [];
-    layout = addFreeElement(layout, 'shape'); // free_001 z=1
-    layout = addFreeElement(layout, 'text'); // free_002 z=2
-    layout = addFreeElement(layout, 'slot'); // free_003 z=3
+    layout = addFreeElement(layout, 'shape').freeLayout; // free_001 z=1
+    layout = addFreeElement(layout, 'text').freeLayout; // free_002 z=2
+    layout = addFreeElement(layout, 'slot').freeLayout; // free_003 z=3
     expect(layout.map((e) => e.id)).toEqual(['free_001', 'free_002', 'free_003']);
     expect(layout.map((e) => e.zIndex)).toEqual([1, 2, 3]);
   });
 
   it('既存の最大 zIndex を踏まえて最前面に積む', () => {
     const existing: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 50 }];
-    const next = addFreeElement(existing, 'text');
+    const next = addFreeElement(existing, 'text').freeLayout;
     expect(next[1].zIndex).toBe(51);
   });
 });
