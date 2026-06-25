@@ -2,7 +2,7 @@
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
 // 注: テキスト折返しは暫定で文字幅概算（半角≈0.55em・全角≈1em）。フォント実測への置換は将来（05 §10 / ADR-0001 未解決論点）。
 import type { Fit } from '../domain/enums';
-import { fontFamilyForId } from '../domain/font/fontCatalog';
+import { fontFamilyForId, isKnownFontId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 import { freeShapeSvg } from './freeShapes';
 
@@ -55,6 +55,8 @@ export function wrapText(text: string, maxWidth: number, fontSize: number, maxLi
 
 function textToSvg(item: TextItem, fontFamily: string): string {
   const parts: string[] = [];
+  // 要素自身の fontId（既知）を優先し、未指定/不明は場面既定（fontFamily＝場面→動画全体→既定の解決済み）へ（#178）。
+  const family = isKnownFontId(item.fontId) ? fontFamilyForId(item.fontId) : fontFamily;
   const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines);
   const lineHeight = item.fontSize * 1.3;
 
@@ -68,7 +70,7 @@ function textToSvg(item: TextItem, fontFamily: string): string {
   const baseY = item.y + item.fontSize;
   lines.forEach((line, i) => {
     parts.push(
-      `<text x="${item.x}" y="${baseY + i * lineHeight}" font-family="${fontFamily}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}">${escapeXml(line)}</text>`,
+      `<text x="${item.x}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}">${escapeXml(line)}</text>`,
     );
   });
   return parts.join('\n');

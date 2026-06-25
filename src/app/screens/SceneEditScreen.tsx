@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
-import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, removeFreeElement, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
@@ -13,6 +13,7 @@ import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { FontPicker } from "../components/FontPicker";
+import type { FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { Switch } from "../components/ui";
@@ -187,6 +188,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   // 選択中シーンを更新するヘルパー
   const patch = (update: (s: Scene) => Scene) => updateScene(selected.sceneId, update);
+  // テキスト種別ごとのフォント上書き（#178）。null＝継承（その種別のキーを外す＝動画全体/場面に従う）。
+  const setSceneTextFont = (textKey: TextKey, id: FontId | null) =>
+    patch((s) => {
+      const next = { ...(s.textFontIds ?? {}) };
+      if (id) next[textKey] = id;
+      else delete next[textKey];
+      return { ...s, textFontIds: next };
+    });
   // FREE 場面（自由配置）か。FREE のときだけ自由配置エディタを主編集面として出す（ADR-0008・§2-4）。
   const isFree = template?.category === FREE_CATEGORY;
   const freeLayout = selected.freeLayout ?? [];
@@ -267,6 +276,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <option value={FONT_WEIGHT.bold}>太字</option>
               </select>
             </div>
+          </div>
+          <div className="field" style={{ marginBottom: 6 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
+            <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
           </div>
         </>
       );
@@ -594,6 +607,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   value={selected.texts.title ?? ""}
                   onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, title: e.target.value } }))}
                 />
+                <div className="field" style={{ marginTop: 6 }}>
+                  <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>タイトルのフォント</label>
+                  <FontPicker value={selected.textFontIds?.title} onChange={(id) => setSceneTextFont(TEXT_KEY.title, id)} allowInherit />
+                </div>
               </div>
             )}
 
@@ -921,6 +938,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))}
                   style={{ minHeight: 60 }}
                 />
+                <div className="field" style={{ marginTop: 6 }}>
+                  <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕のフォント</label>
+                  <FontPicker value={selected.textFontIds?.subtitle} onChange={(id) => setSceneTextFont(TEXT_KEY.subtitle, id)} allowInherit />
+                </div>
               </div>
             )}
 

@@ -68,6 +68,13 @@ describe('layoutScene', () => {
     expect(texts.find((i) => i.text.includes('紹介します'))?.isSubtitle).toBe(true); // subtitle
   });
 
+  it('scene.textFontIds[textKey] が該当 text アイテムの fontId に反映される（#178）', () => {
+    const withFonts: Scene = { ...scene, textFontIds: { title: 'kaitou-yokoku-gothic' } };
+    const texts = layoutScene(withFonts, openingTemplate).items.filter((i): i is TextItem => i.kind === 'text');
+    expect(texts.find((i) => i.text.includes('ようこそ'))?.fontId).toBe('kaitou-yokoku-gothic'); // title
+    expect(texts.find((i) => i.text.includes('紹介します'))?.fontId).toBeUndefined(); // subtitle 未設定＝継承
+  });
+
   it('layoutToSvg が 1920x1080 のSVGを生成し日本語テキストを含む', () => {
     const svg = layoutToSvg(layoutScene(scene, openingTemplate));
     expect(svg.startsWith('<svg')).toBe(true);
@@ -161,6 +168,15 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(svg).toContain('<polygon points="'); // star は polygon で描画
     expect(svg).toContain('stroke="#112233"'); // el.strokeColor が FillItem 経由で反映
     expect(svg).toContain('stroke-width="4"');
+  });
+
+  it('FREE text の el.fontId が TextItem.fontId に反映される（#178）', () => {
+    const fontScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 400, h: 100, zIndex: 5, text: 'あ', fontSize: 40, fontId: 'gen-interface-jp-display' }],
+    };
+    const item = layoutScene(fontScene, freeTemplate).items.find((i): i is TextItem => i.kind === 'text');
+    expect(item?.fontId).toBe('gen-interface-jp-display');
   });
 
   it('通常テンプレ（category!==free）の場面に freeLayout が付いていても描画しない（category ガード）', () => {

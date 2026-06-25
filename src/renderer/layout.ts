@@ -48,6 +48,8 @@ export interface TextItem extends ItemBase {
   background?: { color: string; opacity: number; radius: number };
   /** subtitle レイヤー由来か（書き出しの「字幕を入れる」ON/OFFで判定に使う）。layoutScene が常に設定する。 */
   isSubtitle: boolean;
+  /** この要素自身のフォント id（#178）。既知ならこれを使い、未指定/不明は場面既定（描画側 fontFamily）へ。 */
+  fontId?: string | null;
 }
 
 export type LayoutItem = FillItem | ImageItem | TextItem;
@@ -138,6 +140,7 @@ export function layoutScene(scene: Scene, template: Template): SceneLayout {
           maxLines: layer.maxLines ?? 2,
           background: bg,
           isSubtitle: layer.type === 'subtitle',
+          fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
         });
         break;
       }
@@ -159,7 +162,7 @@ export function layoutScene(scene: Scene, template: Template): SceneLayout {
           if (text.length === 0) break;
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const maxLines = Math.max(1, Math.floor(el.h / (fontSize * 1.3)));
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? 'normal', color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false });
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? 'normal', color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId });
           break;
         }
         case 'shape':
