@@ -817,8 +817,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               />
             </div>
 
-            {/* ゆうこの表示有無はテンプレート依存（character レイヤーの有無）。場面ごとの表示トグルは廃止（req5・01§7.3）。 */}
-
             {/* 画面の切り替えなどの詳細は、上の「詳細編集」トグル（showAdvanced）で表示する。 */}
             {showAdvanced && (
               <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: "var(--gap-sm)" }}>
