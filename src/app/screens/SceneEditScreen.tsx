@@ -289,10 +289,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
+            <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</label>
-              <input type="color" value={el.strokeColor ?? "#333333"} onChange={(e) => patchFreeEl(el.id, { strokeColor: e.target.value })} />
+              <input type="color" value={el.strokeColor ?? "#000000"} onChange={(e) => patchFreeEl(el.id, { strokeColor: e.target.value })} />
             </div>
           </div>
         </>

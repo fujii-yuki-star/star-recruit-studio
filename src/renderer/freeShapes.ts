@@ -83,7 +83,7 @@ export function freeShapeSvg(item: FillItem): string {
   const { x, y, w, h } = item;
   switch (item.shapeType) {
     case FREE_SHAPE_TYPE.ellipse:
-      return `<ellipse cx="${x + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" ${common}/>`;
+      return `<ellipse cx="${r(x + w / 2)}" cy="${r(y + h / 2)}" rx="${r(w / 2)}" ry="${r(h / 2)}" ${common}/>`;
     case FREE_SHAPE_TYPE.rounded_rect:
       return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${roundedRectRadius(w, h)}" ${common}/>`;
     case FREE_SHAPE_TYPE.triangle:

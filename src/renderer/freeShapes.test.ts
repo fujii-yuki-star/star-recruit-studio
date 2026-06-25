@@ -30,10 +30,11 @@ describe('freeShapes 頂点/パス（純粋関数）', () => {
     expect(pts).toContain('100,50');
   });
 
-  it('speechBubblePath：M で始まり Z で閉じる', () => {
+  it('speechBubblePath：M で始まり Z で閉じ、しっぽ先端(L 24 100)を含む', () => {
     const d = speechBubblePath(0, 0, 200, 100);
     expect(d.startsWith('M ')).toBe(true);
     expect(d.endsWith('Z')).toBe(true);
+    expect(d).toContain('L 24 100'); // しっぽ先端 x=w*0.12=24・y=h=100（座標ロジックの回帰検知）
   });
 
   it('roundedRectRadius：短辺の 15%（整数）', () => {
@@ -50,6 +51,13 @@ describe('freeShapeSvg（FillItem → SVG・枠線付与）', () => {
 
   it('ellipse は <ellipse>', () => {
     expect(freeShapeSvg(fill({ shapeType: FREE_SHAPE_TYPE.ellipse }))).toContain('<ellipse');
+  });
+
+  it('ellipse も枠線を付与できる（strokeWidth>0）', () => {
+    const svg = freeShapeSvg(fill({ shapeType: FREE_SHAPE_TYPE.ellipse, strokeWidth: 3, strokeColor: '#0000ff' }));
+    expect(svg).toContain('<ellipse');
+    expect(svg).toContain('stroke="#0000ff"');
+    expect(svg).toContain('stroke-width="3"');
   });
 
   it('rounded_rect は rx に角丸半径（旧 radius フィールド非依存）', () => {
