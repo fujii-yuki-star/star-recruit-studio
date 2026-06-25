@@ -145,6 +145,7 @@ src/
 - VOICEVOX同梱: [`adr/0005`](docs/yuko_recruit_docs/adr/0005-voicevox-bundling.md) **Accepted** — エンジンを**同梱しアプリ起動時に自動起動**（接続先設定は上級者向けフォールバック）。規約確認済み・クレジット表示は維持。実装/配布の詳細は ADR 未解決論点。
 - ゆうこ＝自社保有で権利クリア（`17`）／フォントはOFL系を同梱（游ゴシック等は同梱不可。`13 §6`）。
 - 縦型動画（9:16・1080×1920）: [`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**（2026-06-19）— α版に対応決定。**9:16のみ**（1:1は将来）・縦テンプレは**全9カテゴリ**・既存は**16:9固定移行＋向き変更（16:9⇆9:16）導線**・尺上限は横型踏襲。コーデックとは独立の別トラック（#118）。
+- コンポーネント/対話テスト基盤: [`adr/0014`](docs/yuko_recruit_docs/adr/0014-component-test-foundation.md) **Accepted**（2026-06-25）— Vitest に jsdom を追加し `@testing-library/react`＋`jest-dom` を導入。**既定 environment は node 維持**・DOM が要る `*.test.tsx` のみファイル先頭 `// @vitest-environment jsdom` で個別切替（既存 node 純粋ロジックテストへ波及なし）。最小構成（happy-dom ではなく jsdom・user-event は当面見送り）。正典/schemaVersion 影響なし。
 
 **未決定（リリース前に確認）**
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。
