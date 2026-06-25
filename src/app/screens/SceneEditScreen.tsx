@@ -8,6 +8,7 @@ import { addFreeElement, bringFreeElementToFront, duplicateFreeElement, FREE_GRI
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -381,6 +382,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
         <div className="topbar-title">場面編集</div>
         <div className="topbar-actions">
+          {(() => {
+            // セリフ音声の進捗（生成済み/対象）。全部できていて生成中でなければ出さない（#176）。
+            const { done, total } = narrationProgress(scenes);
+            if (total === 0 || (done === total && !isGeneratingNarration)) return null;
+            return (
+              <span className="text-sm text-muted" style={{ marginRight: 4 }}>
+                音声 {done}/{total}{isGeneratingNarration ? "（準備中…）" : ""}
+              </span>
+            );
+          })()}
           <button
             className="btn btn-ghost"
             onClick={() => void generateAllNarrations()}

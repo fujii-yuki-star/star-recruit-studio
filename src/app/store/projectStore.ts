@@ -282,6 +282,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         orientation: meta.videoSettings.aspectRatio,
       });
       set({ status: "ready", parts, scenes, warnings });
+      // 動画案ができたら未生成のセリフ音声をバックグラウンドで自動生成（非ブロッキング・#176）。
+      // 仕上がり確認へ着いた時点で成功分は鳴る。失敗場面は per-scene の「声を作り直す」で作り直せる。
+      void get().generateAllNarrations();
     } catch (e) {
       // 失敗の文言を保持し、UI が「次の行動」を出せるようにする（§2-5）。
       // Rust/プロバイダは §2-5 のユーザー向け文言で reject する（鍵未設定→設定へ／不適合→再試行 等）。
