@@ -49,11 +49,13 @@ interface OverlayProps {
   onDelete: (id: string) => void;
   /** テキストのインライン編集の確定（patch 相当）。 */
   onChangeText: (id: string, text: string) => void;
+  /** 右クリック「編集」：その要素の kind 別エディタを開く（id とビューポート座標を渡す）。 */
+  onRequestEdit: (id: string, x: number, y: number) => void;
 }
 
 export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedId, onSelect, onChange, gridSize = 0,
-  onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText,
+  onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -124,13 +126,11 @@ export function FreeLayoutOverlay({
   };
 
   const menuEl = menu ? freeLayout.find((e) => e.id === menu.id) ?? null : null;
-  // メニュー項目。「編集」はテキストのみ＝インライン編集へ（非テキストで無操作にしない＝§2-5）。
-  // 素材/図形の kind 別エディタは別PRで「編集」に追加予定。
-  const menuItems: { label: string; danger?: boolean; run: (id: string) => void }[] = menuEl
+  // メニュー項目。「編集」は全 kind で kind 別エディタ（onRequestEdit）を開く＝素材選択/文字書式/図形書式。
+  // テキストはダブルクリックでもインライン編集できる（別経路）。複製/前面/背面/削除は #172 のハンドラ。
+  const menuItems: { label: string; danger?: boolean; run: (id: string) => void }[] = menu && menuEl
     ? [
-        ...(menuEl.kind === FREE_ELEMENT_KIND.text
-          ? [{ label: "編集", run: (id: string) => setEditingId(id) }]
-          : []),
+        { label: "編集", run: (id) => onRequestEdit(id, menu.x, menu.y) },
         { label: "複製", run: onDuplicate },
         { label: "前面", run: onBringToFront },
         { label: "背面", run: onSendToBack },

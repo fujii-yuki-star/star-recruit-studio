@@ -133,6 +133,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 自由配置で選択中の要素（オーバーレイのハンドル表示・編集カードの強調に使う）。
   const [selectedFreeId, setSelectedFreeId] = useState<string | null>(null);
+  // 右クリック「編集」で開く kind 別エディタのポップオーバー（対象 id とビューポート座標）。
+  const [editPopover, setEditPopover] = useState<{ id: string; x: number; y: number } | null>(null);
   // 自由配置：グリッドに合わせる（ドラッグ/リサイズの吸着＋グリッド表示）。表示設定・非永続。
   const [gridSnap, setGridSnap] = useState(false);
   // ナレーションの▶再生に失敗したとき通知（§2-5・設定の試聴と扱いを統一）。
@@ -141,6 +143,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   useEffect(() => {
     if (status === "idle") void generate();
   }, [status, generate]);
+
+  // Escape で kind 別エディタのポップオーバーを閉じる。
+  useEffect(() => {
+    if (!editPopover) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setEditPopover(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editPopover]);
 
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
@@ -206,6 +216,88 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 素材(Asset 単位)のクリップ設定を部分更新（FREE slot 動画の調整に使う。通常スロットと同じ Asset.clip）。
   const patchAssetClip = (assetId: string, p: Partial<NonNullable<Asset["clip"]>>) =>
     updateAsset(assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }));
+
+  // FREE 要素の種別ごとの編集コントロール。右パネルのカードと、右クリック「編集」ポップオーバーで共用（DRY）。
+  // 角の丸み（radius）は廃止（#185・図形種類を増やすため不要）。位置/サイズはカードのフッタとドラッグで扱う。
+  const renderFreeKindControls = (el: FreeElement) => {
+    if (el.kind === FREE_ELEMENT_KIND.slot) {
+      const a = el.assetId ? assets.find((x) => x.assetId === el.assetId) : undefined;
+      return (
+        <div className="field" style={{ marginBottom: 6 }}>
+          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>素材</label>
+          <select className="select" value={el.assetId ?? ""} onChange={(e) => patchFreeEl(el.id, { assetId: e.target.value || null })}>
+            <option value="">なし（空の枠）</option>
+            {freeSlotAssets.map((x) => (<option key={x.assetId} value={x.assetId}>{x.displayName}</option>))}
+          </select>
+          {a?.assetType === ASSET_TYPE.video && (
+            <ClipDetailControls asset={a} patchClip={(p) => patchAssetClip(a.assetId, p)} />
+          )}
+        </div>
+      );
+    }
+    if (el.kind === FREE_ELEMENT_KIND.text) {
+      return (
+        <>
+          <div className="field" style={{ marginBottom: 6 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>文字</label>
+            <input className="input" value={el.text ?? ""} onChange={(e) => patchFreeEl(el.id, { text: e.target.value })} />
+          </div>
+          <div className="row gap-sm" style={{ marginBottom: 6 }}>
+            <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              <input type="color" value={el.color ?? "#222222"} onChange={(e) => patchFreeEl(el.id, { color: e.target.value })} />
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
+              <select className="select" value={el.fontWeight ?? FONT_WEIGHT.normal} onChange={(e) => patchFreeEl(el.id, { fontWeight: e.target.value as FontWeight })}>
+                <option value={FONT_WEIGHT.normal}>標準</option>
+                <option value={FONT_WEIGHT.bold}>太字</option>
+              </select>
+            </div>
+          </div>
+        </>
+      );
+    }
+    if (el.kind === FREE_ELEMENT_KIND.shape) {
+      return (
+        <>
+          <div className="row gap-sm" style={{ marginBottom: 6 }}>
+            <div className="field" style={{ flex: 1, margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
+              <select className="select" value={el.shapeType ?? FREE_SHAPE_TYPE.rect} onChange={(e) => patchFreeEl(el.id, { shapeType: e.target.value as FreeShapeType })}>
+                <option value={FREE_SHAPE_TYPE.rect}>四角</option>
+                <option value={FREE_SHAPE_TYPE.ellipse}>丸</option>
+              </select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              <input type="color" value={el.fillColor ?? "#cccccc"} onChange={(e) => patchFreeEl(el.id, { fillColor: e.target.value })} />
+            </div>
+          </div>
+          <div className="field" style={{ marginBottom: 6 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>透明度</label>
+            <input
+              type="range" min={0} max={1} step={0.1} value={el.opacity ?? 1}
+              onChange={(e) => patchFreeEl(el.id, { opacity: Number(e.target.value) })}
+              style={{ width: "100%", accentColor: "var(--color-primary)" }}
+            />
+          </div>
+        </>
+      );
+    }
+    return null;
+  };
+  // 右クリック「編集」：その要素の kind 別エディタをカーソル位置付近に開く（画面端でクランプ）。
+  const openFreeEditPopover = (id: string, x: number, y: number) => {
+    setSelectedFreeId(id);
+    setEditPopover({
+      id,
+      x: Math.max(8, Math.min(x, window.innerWidth - 300)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 320)),
+    });
+  };
+  const editPopoverEl = editPopover ? freeLayout.find((e) => e.id === editPopover.id) ?? null : null;
   // 場面間トランジション（ADR-0009・T1）。境界 A→B は B（この場面）の transition.in が司る。
   // 先頭場面は切り替え元が無いので設定を出さない。書き出しへの反映は T2。
   const isFirstScene = scenes[0]?.sceneId === selected.sceneId;
@@ -229,6 +321,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedId(id);
     setConfirmDelete(false);
     setSelectedFreeId(null); // 場面が変わったら自由配置の選択は持ち越さない
+    setEditPopover(null); // 開いていた kind 別エディタも閉じる（旧場面の要素 id を指したまま残さない）
     setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
   };
 
@@ -376,7 +469,40 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onSendToBack={sendFreeElBackward}
                     onDelete={removeFreeEl}
                     onChangeText={(id, text) => patchFreeEl(id, { text })}
+                    onRequestEdit={openFreeEditPopover}
                   />
+                )}
+                {editPopover && editPopoverEl && (
+                  <>
+                    {/* 外側クリックで閉じる透明バックドロップ。 */}
+                    <div
+                      style={{ position: "fixed", inset: 0, zIndex: 60 }}
+                      onPointerDown={() => setEditPopover(null)}
+                      onContextMenu={(e) => { e.preventDefault(); setEditPopover(null); }}
+                    />
+                    <div
+                      role="dialog"
+                      aria-label={`${freeKindLabel[editPopoverEl.kind]}を編集`}
+                      style={{
+                        position: "fixed", left: editPopover.x, top: editPopover.y, zIndex: 61,
+                        width: 280, maxHeight: "70vh", overflow: "auto",
+                        background: "#fff", color: "#222", border: "1px solid rgba(0,0,0,0.15)",
+                        borderRadius: 10, boxShadow: "0 8px 28px rgba(0,0,0,0.2)", padding: 12,
+                      }}
+                    >
+                      <div className="row-between" style={{ marginBottom: 8 }}>
+                        <strong className="text-sm">{freeKindLabel[editPopoverEl.kind]}を編集</strong>
+                        <button
+                          className="btn btn-ghost text-sm"
+                          onClick={() => setEditPopover(null)}
+                          aria-label="編集を閉じる"
+                        >
+                          閉じる
+                        </button>
+                      </div>
+                      {renderFreeKindControls(editPopoverEl)}
+                    </div>
+                  </>
                 )}
               </div>
               <p className="text-sm text-muted mt">
@@ -612,97 +738,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           </div>
                         </div>
 
-                        {el.kind === FREE_ELEMENT_KIND.slot && (
-                          <div className="field" style={{ marginBottom: 6 }}>
-                            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>素材</label>
-                            <select
-                              className="select"
-                              value={el.assetId ?? ""}
-                              onChange={(e) => patchFreeEl(el.id, { assetId: e.target.value || null })}
-                            >
-                              <option value="">なし（空の枠）</option>
-                              {freeSlotAssets.map((a) => (
-                                <option key={a.assetId} value={a.assetId}>{a.displayName}</option>
-                              ))}
-                            </select>
-                            {(() => {
-                              const a = el.assetId ? assets.find((x) => x.assetId === el.assetId) : undefined;
-                              if (a?.assetType !== ASSET_TYPE.video) return null;
-                              // FREE slot に動画 → 通常スロットと同じクリップ調整（収め方/使う範囲/再生速度/元音声）。
-                              // ここで設定する収め方は clip.fit（書き出しで優先）。静止プレビューは要素の el.fit を参照する
-                              // （findVideoSlot は clip?.fit ?? el.fit ?? DEFAULT_FIT で解決）。FREE は showAdvanced に依らず常時表示（ADR-0008 §UX）。
-                              return <ClipDetailControls asset={a} patchClip={(p) => patchAssetClip(a.assetId, p)} />;
-                            })()}
-                          </div>
-                        )}
-
-                        {el.kind === FREE_ELEMENT_KIND.text && (
-                          <>
-                            <div className="field" style={{ marginBottom: 6 }}>
-                              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>文字</label>
-                              <input
-                                className="input"
-                                value={el.text ?? ""}
-                                onChange={(e) => patchFreeEl(el.id, { text: e.target.value })}
-                              />
-                            </div>
-                            <div className="row gap-sm" style={{ marginBottom: 6 }}>
-                              <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
-                              <div className="field" style={{ margin: 0 }}>
-                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-                                <input type="color" value={el.color ?? "#222222"} onChange={(e) => patchFreeEl(el.id, { color: e.target.value })} />
-                              </div>
-                              <div className="field" style={{ margin: 0 }}>
-                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
-                                <select
-                                  className="select"
-                                  value={el.fontWeight ?? FONT_WEIGHT.normal}
-                                  onChange={(e) => patchFreeEl(el.id, { fontWeight: e.target.value as FontWeight })}
-                                >
-                                  <option value={FONT_WEIGHT.normal}>標準</option>
-                                  <option value={FONT_WEIGHT.bold}>太字</option>
-                                </select>
-                              </div>
-                            </div>
-                          </>
-                        )}
-
-                        {el.kind === FREE_ELEMENT_KIND.shape && (
-                          <>
-                            <div className="row gap-sm" style={{ marginBottom: 6 }}>
-                              <div className="field" style={{ flex: 1, margin: 0 }}>
-                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
-                                <select
-                                  className="select"
-                                  value={el.shapeType ?? FREE_SHAPE_TYPE.rect}
-                                  onChange={(e) => patchFreeEl(el.id, { shapeType: e.target.value as FreeShapeType })}
-                                >
-                                  <option value={FREE_SHAPE_TYPE.rect}>四角</option>
-                                  <option value={FREE_SHAPE_TYPE.ellipse}>丸</option>
-                                </select>
-                              </div>
-                              <div className="field" style={{ margin: 0 }}>
-                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-                                <input type="color" value={el.fillColor ?? "#cccccc"} onChange={(e) => patchFreeEl(el.id, { fillColor: e.target.value })} />
-                              </div>
-                            </div>
-                            <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-                              <div className="field" style={{ flex: 1, margin: 0 }}>
-                                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>透明度</label>
-                                <input
-                                  type="range"
-                                  min={0}
-                                  max={1}
-                                  step={0.1}
-                                  value={el.opacity ?? 1}
-                                  onChange={(e) => patchFreeEl(el.id, { opacity: Number(e.target.value) })}
-                                  style={{ width: "100%", accentColor: "var(--color-primary)" }}
-                                />
-                              </div>
-                              <NumberField label="角の丸み" value={el.radius ?? 0} min={0} onChange={(v) => patchFreeEl(el.id, { radius: v })} />
-                            </div>
-                          </>
-                        )}
+                        {renderFreeKindControls(el)}
 
                         <div className="row gap-sm" style={{ marginBottom: 4 }}>
                           <NumberField label="横位置" value={el.x} onChange={(v) => patchFreeEl(el.id, { x: v })} />
