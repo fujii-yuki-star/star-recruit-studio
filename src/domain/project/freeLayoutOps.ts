@@ -69,6 +69,54 @@ export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeEl
   return freeLayout.filter((e) => e.id !== id);
 }
 
+// ── 複製・重なり順（前面/背面）。純粋関数＝§7 テスト対象。 ──
+
+/** 複製コピーを元から少しずらす量（canvas px・完全に重なって見つけられなくならないように）。 */
+const FREE_DUPLICATE_OFFSET = 20;
+
+/**
+ * 指定 id の要素を複製した配列と、コピーの新 id を返す（id が無ければ変化なし・newId=null）。
+ * コピーは新しい id を採番し、元から少しずらして最前面（既存 zIndex の最大+1）に置く。
+ * UI はこの newId で複製直後の要素を選択状態にできる（他 op と返り値の形が違う理由）。
+ */
+export function duplicateFreeElement(
+  freeLayout: FreeElement[], id: string,
+): { freeLayout: FreeElement[]; newId: string | null } {
+  const source = freeLayout.find((e) => e.id === id);
+  if (!source) return { freeLayout, newId: null };
+  const newId = createFreeElementId(freeLayout.map((e) => e.id));
+  const zIndex = freeLayout.reduce((max, e) => Math.max(max, e.zIndex ?? 0), 0) + 1;
+  const copy: FreeElement = {
+    ...source,
+    id: newId,
+    x: source.x + FREE_DUPLICATE_OFFSET,
+    y: source.y + FREE_DUPLICATE_OFFSET,
+    zIndex,
+  };
+  return { freeLayout: [...freeLayout, copy], newId };
+}
+
+/** zIndex を他要素の最大+1 にして最前面へ（id 不在・単独要素は変化なし）。 */
+export function bringFreeElementToFront(freeLayout: FreeElement[], id: string): FreeElement[] {
+  if (!freeLayout.some((e) => e.id === id)) return freeLayout;
+  const others = freeLayout.filter((e) => e.id !== id);
+  if (others.length === 0) return freeLayout;
+  const maxOther = others.reduce((max, e) => Math.max(max, e.zIndex ?? 0), 0);
+  return freeLayout.map((e) => (e.id === id ? { ...e, zIndex: maxOther + 1 } : e));
+}
+
+/**
+ * zIndex を他要素の最小−1 にして最背面へ（id 不在・単独要素は変化なし）。
+ * 0 を下限とする＝FREE テンプレ背景（zIndex 0）の裏へ回り込んで消えないように。
+ */
+export function sendFreeElementToBack(freeLayout: FreeElement[], id: string): FreeElement[] {
+  if (!freeLayout.some((e) => e.id === id)) return freeLayout;
+  const others = freeLayout.filter((e) => e.id !== id);
+  if (others.length === 0) return freeLayout;
+  const minOther = others.reduce((min, e) => Math.min(min, e.zIndex ?? 0), Number.POSITIVE_INFINITY);
+  return freeLayout.map((e) => (e.id === id ? { ...e, zIndex: Math.max(0, minOther - 1) } : e));
+}
+
 // ── ドラッグ移動・角リサイズのジオメトリ（Phase 4b）。純粋関数＝§7 テスト対象。 ──
 
 /** ドラッグ/リサイズで潰れないための最小サイズ（canvas px）。schema は w>0/h>0。 */
@@ -105,17 +153,35 @@ export function moveFreeElement(
 /**
  * 角ハンドルでリサイズした後の矩形（canvas 座標・整数）。掴んだ角を動かし対角を固定、最小サイズで止める。
  * dx/dy はドラッグ開始からの総移動量（canvas 単位）。
+ * lockAspect=true（Shift 押下）で開始時の縦横比を維持する（比を優先し、グリッド吸着は無視）。
  */
 export function resizeFreeElement(
-  start: Geom, corner: ResizeCorner, dx: number, dy: number, min: number = FREE_MIN_SIZE, grid = 0,
+  start: Geom, corner: ResizeCorner, dx: number, dy: number,
+  min: number = FREE_MIN_SIZE, grid = 0, lockAspect = false,
 ): Geom {
-  let { x, y, w, h } = start;
   const right = start.x + start.w;
   const bottom = start.y + start.h;
   const movesWest = corner === 'nw' || corner === 'sw';
   const movesEast = corner === 'ne' || corner === 'se';
   const movesNorth = corner === 'nw' || corner === 'ne';
   const movesSouth = corner === 'sw' || corner === 'se';
+
+  // Shift＝縦横比維持。動かした量が大きい方の軸を主軸に拡大率を求め、両辺へ等倍適用（対角は固定）。
+  // 最小サイズは両辺で担保。比を優先するためグリッド吸着はしない。
+  if (lockAspect) {
+    const grewW = movesEast ? dx : movesWest ? -dx : 0;
+    const grewH = movesSouth ? dy : movesNorth ? -dy : 0;
+    const scaleByDominant =
+      Math.abs(grewW) >= Math.abs(grewH) ? (start.w + grewW) / start.w : (start.h + grewH) / start.h;
+    const scale = Math.max(scaleByDominant, min / start.w, min / start.h);
+    const w = Math.round(start.w * scale);
+    const h = Math.round(start.h * scale);
+    const x = movesWest ? right - w : start.x; // 西側の角は右辺を固定
+    const y = movesNorth ? bottom - h : start.y; // 北側の角は下辺を固定
+    return { x: Math.round(x), y: Math.round(y), w, h };
+  }
+
+  let { x, y, w, h } = start;
   // 掴んだ辺をグリッドへ吸着（grid=0 は整数丸め＝従来動作）。対角を固定し、最小サイズで止める。
   // 辺を先に確定（snap）→ 固定辺から w/h を逆算するので、固定辺は整数で厳密に保たれる（小数でも 1px ずれない）。
   if (movesEast) w = Math.max(min, snapToGrid(right + dx, grid) - x);
