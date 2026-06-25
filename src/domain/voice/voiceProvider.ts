@@ -1,7 +1,7 @@
 // ナレーション音声の抽象（VoiceProvider）。実装は infrastructure に置く（Mock / 将来 VOICEVOX）。
 // CLAUDE.md §4（外部I/Oは抽象化）/ ADR-0003（ずんだもん＝ナレーター・差し替え可能）/ 13 §4。
 import { DEFAULT_VOICE_ID } from '../constants';
-import type { Narration, VoiceSettings } from '../project/types';
+import type { Narration, NarrationLine, VoiceSettings } from '../project/types';
 
 export interface SynthesizeInput {
   text: string;
@@ -9,6 +9,8 @@ export interface SynthesizeInput {
   speed: number;
   pitch: number;
   intonation: number;
+  /** 掛け合いの行ごと話者（#177 voiceCatalog の speaker）。指定時は app 設定より優先。null/未指定＝voiceId 経路で解決（ADR-0015）。 */
+  speaker?: number | null;
 }
 
 export interface SynthesizedVoice {
@@ -39,5 +41,21 @@ export function resolveNarrationVoice(narration: Narration, voice: VoiceSettings
     speed: narration.speed ?? voice.speed ?? 1.0,
     pitch: narration.pitch ?? voice.pitch ?? 0.0,
     intonation: narration.intonation ?? voice.intonation ?? 1.0,
+  };
+}
+
+/**
+ * 掛け合いの1行の合成入力を解決する（ADR-0015 PR-C2）。base＝resolveNarrationVoice（場面/既定声）。
+ * - speed/pitch は 行→base（場面/既定）を継承。intonation は行に持たず base を継承。
+ * - speaker は行に明示があればそれ（app 設定より優先）、無ければ null＝voiceId 経路（app 設定→既定）で解決。
+ */
+export function resolveLineVoice(line: NarrationLine, base: ResolvedVoice): SynthesizeInput {
+  return {
+    text: line.text,
+    voiceId: base.voiceId,
+    speed: line.speed ?? base.speed,
+    pitch: line.pitch ?? base.pitch,
+    intonation: base.intonation,
+    speaker: line.speaker ?? null,
   };
 }

@@ -30,8 +30,9 @@ import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
 import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
-import { resolveNarrationVoice } from "../../domain/voice/voiceProvider";
+import { resolveLineVoice, resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
+import { lineAudioKey, lineVoiceStem, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
@@ -57,7 +58,7 @@ interface ProjectState {
   assets: Asset[];
   /** 素材の表示用src（data URL）。assetId→src。project.json には入れず永続化しない。 */
   assetSrcById: Record<string, string>;
-  /** 生成済みナレーション音声（data URL）。sceneId→src。表示・書き出し用にメモリ保持し、保存時に voicePath としてディスク永続化する（V-C2）。 */
+  /** 生成済みナレーション音声（data URL）。キーは単一 narration＝sceneId／掛け合い＝lineAudioKey(sceneId,lineId)（ADR-0015 PR-C2）。メモリ保持し保存時に voicePath として永続化する。 */
   narrationAudioById: Record<string, string>;
   /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
   isGeneratingNarration: boolean;
@@ -323,6 +324,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const audioById = s.narrationAudioById;
       const scenes = await Promise.all(
         s.scenes.map(async (sc) => {
+          // 掛け合い（明示 lines）は行ごとに保存・voicePath 更新する（ADR-0015 PR-C2）。
+          if (sc.lines && sc.lines.length > 0) {
+            let next = sc;
+            for (const line of sc.lines) {
+              if (line.status !== NARRATION_STATUS.generated) {
+                if (line.voicePath) next = withLineVoicePath(next, line.lineId, null);
+                continue;
+              }
+              const lineAudio = audioById[lineAudioKey(sc.sceneId, line.lineId)];
+              if (lineAudio) {
+                const vp = await importVoiceFile(projectId, lineVoiceStem(sc.sceneId, line.lineId), lineAudio);
+                if (vp) next = withLineVoicePath(next, line.lineId, vp);
+              }
+              // 生成済みだがメモリに音声なし → 既存 voicePath を保持（何もしない）。
+            }
+            return next;
+          }
           // 未生成・失敗の場面は古い voicePath を残さない（再生成で上書きされる）。
           if (sc.narration.status !== NARRATION_STATUS.generated) {
             return sc.narration.voicePath
@@ -380,16 +398,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (entry.thumbnailPath) videoThumb[entry.assetId] = entry.thumbnailPath;
     }
     // 生成済みナレーション音声を data URL に復元（voicePath を持つもの。未配置は null でスキップ）。並列実行。
+    // 単一 narration（従来・キーは sceneId）。掛け合い（明示 lines）の場面はここでは扱わず下で行ごとに復元する。
     const voiceLoaded = await Promise.all(
       project.scenes
-        .filter((sc) => sc.narration.status === NARRATION_STATUS.generated && sc.narration.voicePath)
+        .filter((sc) => !(sc.lines && sc.lines.length > 0) && sc.narration.status === NARRATION_STATUS.generated && sc.narration.voicePath)
         .map(async (sc) => {
           const url = await readVoiceDataUrl(project.projectId, sc.narration.voicePath!);
           return url ? ([sc.sceneId, url] as const) : null;
         }),
     );
+    // 掛け合い（明示 lines）の行ごと音声（キーは lineAudioKey(sceneId,lineId)・ADR-0015 PR-C2）。
+    const lineVoiceLoaded = await Promise.all(
+      project.scenes
+        .filter((sc): sc is Scene & { lines: NonNullable<Scene["lines"]> } => !!(sc.lines && sc.lines.length > 0))
+        .flatMap((sc) =>
+          sc.lines
+            .filter((l) => l.status === NARRATION_STATUS.generated && l.voicePath)
+            .map(async (l) => {
+              const url = await readVoiceDataUrl(project.projectId, l.voicePath!);
+              return url ? ([lineAudioKey(sc.sceneId, l.lineId), url] as const) : null;
+            }),
+        ),
+    );
     const narrationAudioById: Record<string, string> = {};
-    for (const entry of voiceLoaded) {
+    for (const entry of [...voiceLoaded, ...lineVoiceLoaded]) {
       if (entry) narrationAudioById[entry[0]] = entry[1];
     }
     set({
@@ -819,9 +851,48 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   generateNarration: async (sceneId, opts) => {
     const scene = get().scenes.find((s) => s.sceneId === sceneId);
-    if (!scene || scene.narration.text.trim().length === 0) return;
+    if (!scene) return;
     // 全場面生成中は個別呼び出し（UI/他画面/テストからの直接呼び出し）を弾く。bulk 自身は fromBulk で通す。
     if (!opts?.fromBulk && get().isGeneratingNarration) return;
+
+    // 掛け合い（明示 lines）は行ごとに合成・保存する（ADR-0015 PR-C2）。単一 narration は下の従来経路。
+    if (scene.lines && scene.lines.length > 0) {
+      // fromBulk（全場面生成）では生成済み行を再合成しない（単一 narration と対称）。個別呼び出しは作り直し。
+      const targets = scene.lines.filter(
+        (l) => l.text.trim().length > 0 && (!opts?.fromBulk || l.status !== NARRATION_STATUS.generated),
+      );
+      if (targets.length === 0) return;
+      if (scene.lines.some((l) => l.status === NARRATION_STATUS.pending)) return; // 多重起動防止
+      const setLineStatus = (lineId: string, status: Scene["narration"]["status"]) =>
+        set((st) => ({
+          scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, lineId, status) : s)),
+        }));
+      for (const l of targets) setLineStatus(l.lineId, NARRATION_STATUS.pending);
+      set({ narrationError: null });
+      try {
+        const base = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
+        for (const line of targets) {
+          const result = await voiceProvider.synthesize(resolveLineVoice(line, base));
+          set((st) => ({
+            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
+            narrationAudioById: { ...st.narrationAudioById, [lineAudioKey(sceneId, line.lineId)]: result.audioDataUrl },
+          }));
+        }
+      } catch (e) {
+        // pending の行だけ failed にする（既に generated 済みの行とその音声は保持＝不整合を避ける）。
+        set((st) => ({
+          scenes: st.scenes.map((s) =>
+            s.sceneId === sceneId && s.lines
+              ? { ...s, lines: s.lines.map((l) => (l.status === NARRATION_STATUS.pending ? { ...l, status: NARRATION_STATUS.failed } : l)) }
+              : s,
+          ),
+        }));
+        set({ narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。" });
+      }
+      return;
+    }
+
+    if (scene.narration.text.trim().length === 0) return;
     if (scene.narration.status === NARRATION_STATUS.pending) return; // 多重起動防止（連打・再入）
     const setStatus = (status: Scene["narration"]["status"]) =>
       set((st) => ({
@@ -853,9 +924,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isGeneratingNarration: true });
     try {
       // 未生成（none/pending/failed）のみ対象。生成済みは個別の「声を作り直す」で上書きする。
-      const ids = get()
-        .scenes.filter((s) => s.narration.text.trim().length > 0 && s.narration.status !== NARRATION_STATUS.generated)
-        .map((s) => s.sceneId);
+      // 掛け合い（明示 lines）は本文非空・未生成の行が1つでもあれば対象（ADR-0015 PR-C2）。
+      const needsGen = (s: Scene): boolean =>
+        s.lines && s.lines.length > 0
+          ? s.lines.some((l) => l.text.trim().length > 0 && l.status !== NARRATION_STATUS.generated)
+          : s.narration.text.trim().length > 0 && s.narration.status !== NARRATION_STATUS.generated;
+      const ids = get().scenes.filter(needsGen).map((s) => s.sceneId);
       await Promise.all(ids.map((id) => get().generateNarration(id, { fromBulk: true })));
     } finally {
       set({ isGeneratingNarration: false });

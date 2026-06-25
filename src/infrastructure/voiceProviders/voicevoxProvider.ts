@@ -18,9 +18,17 @@ export function resolveSpeaker(settingSpeaker: number | null, voiceId: string): 
   return settingSpeaker ?? SPEAKER_BY_VOICE_ID[voiceId] ?? DEFAULT_SPEAKER;
 }
 
+/** 合成に使う speaker：行の明示話者（input.speaker）を最優先し、無ければ 設定→voiceId→既定（ADR-0015・純粋）。 */
+export function effectiveSpeaker(
+  input: Pick<SynthesizeInput, 'speaker' | 'voiceId'>,
+  settingSpeaker: number | null,
+): number {
+  return input.speaker ?? resolveSpeaker(settingSpeaker, input.voiceId);
+}
+
 export class VoicevoxProvider implements VoiceProvider {
   async synthesize(input: SynthesizeInput): Promise<SynthesizedVoice> {
-    const speaker = resolveSpeaker(getVoicevoxSpeaker(), input.voiceId);
+    const speaker = effectiveSpeaker(input, getVoicevoxSpeaker());
     const baseUrl = getVoicevoxUrl();
     const audioDataUrl = await invoke<string>('synthesize_voice', {
       text: input.text,

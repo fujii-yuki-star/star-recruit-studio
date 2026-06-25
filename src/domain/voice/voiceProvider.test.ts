@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveNarrationVoice } from './voiceProvider';
+import { resolveLineVoice, resolveNarrationVoice } from './voiceProvider';
 import { DEFAULT_VOICE_ID } from '../constants';
-import type { Narration, VoiceSettings } from '../project/types';
+import { NARRATION_STATUS } from '../enums';
+import type { Narration, NarrationLine, VoiceSettings } from '../project/types';
 
 const voice: VoiceSettings = {
   defaultVoiceId: DEFAULT_VOICE_ID,
@@ -40,5 +41,24 @@ describe('resolveNarrationVoice', () => {
 
   it('project.defaultVoiceId が空ならシステム定数へフォールバック（3段目）', () => {
     expect(resolveNarrationVoice(base, { defaultVoiceId: '' }).voiceId).toBe(DEFAULT_VOICE_ID);
+  });
+});
+
+describe('resolveLineVoice（掛け合いの行・ADR-0015）', () => {
+  const resolved = { voiceId: 'voicevox_zundamon', speed: 1.0, pitch: 0.0, intonation: 1.0 };
+
+  it('行の speaker/speed/pitch を優先し、intonation は常に base を継承', () => {
+    const line: NarrationLine = { lineId: 'line_001', text: 'やあ', speaker: 7, speed: 1.2, status: NARRATION_STATUS.none };
+    expect(resolveLineVoice(line, resolved)).toEqual({
+      text: 'やあ', voiceId: 'voicevox_zundamon', speed: 1.2, pitch: 0.0, intonation: 1.0, speaker: 7,
+    });
+  });
+
+  it('speaker 未指定は null（voiceId 経路で解決）・speed/pitch は base を継承', () => {
+    const line: NarrationLine = { lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none };
+    const r = resolveLineVoice(line, resolved);
+    expect(r.speaker).toBeNull();
+    expect(r.speed).toBe(1.0);
+    expect(r.pitch).toBe(0.0);
   });
 });

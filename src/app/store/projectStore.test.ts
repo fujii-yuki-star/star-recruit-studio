@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProjectStore } from './projectStore';
 import { sampleTemplates } from '../../infrastructure/sampleData';
+import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import type { Scene } from '../../domain/project/types';
 
 function scene(id: string, order: number, partId = 'part_001'): Scene {
@@ -103,5 +104,71 @@ describe('projectStore generateNarration 再入ガード', () => {
     });
     await useProjectStore.getState().generateNarration('scene_001');
     expect(useProjectStore.getState().scenes[0].narration.status).toBe('pending'); // 変化しない
+  });
+});
+
+describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-C2）', () => {
+  it('明示 lines は行ごとに合成し、各行 generated＋行キー(sceneId/lineId)で音声を持つ', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        ...scene('scene_001', 1),
+        lines: [
+          { lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' },
+          { lineId: 'line_002', text: 'どうも', speaker: 2, status: 'none' },
+        ],
+      }],
+      narrationAudioById: {},
+      isGeneratingNarration: false,
+    });
+    await useProjectStore.getState().generateNarration('scene_001');
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].lines?.map((l) => l.status)).toEqual(['generated', 'generated']);
+    expect(st.narrationAudioById['scene_001/line_001']).toBeTruthy();
+    expect(st.narrationAudioById['scene_001/line_002']).toBeTruthy();
+  });
+
+  it('fromBulk は生成済み行を再合成しない（🔴1：生成済みは据え置き・音声を作らない）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        ...scene('scene_001', 1),
+        lines: [
+          { lineId: 'line_001', text: 'やあ', status: 'generated' },
+          { lineId: 'line_002', text: 'どうも', status: 'none' },
+        ],
+      }],
+      narrationAudioById: {},
+      isGeneratingNarration: false,
+    });
+    await useProjectStore.getState().generateNarration('scene_001', { fromBulk: true });
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].lines?.map((l) => l.status)).toEqual(['generated', 'generated']);
+    // 生成済みの line_001 は対象外＝音声は作られない。未生成の line_002 のみ合成される。
+    expect(st.narrationAudioById['scene_001/line_001']).toBeUndefined();
+    expect(st.narrationAudioById['scene_001/line_002']).toBeTruthy();
+  });
+
+  it('途中エラーでも先行 generated 行とその音声は保持し、pending 行だけ failed（🔴2）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        ...scene('scene_001', 1),
+        lines: [
+          { lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' },
+          { lineId: 'line_002', text: 'どうも', speaker: 2, status: 'none' },
+        ],
+      }],
+      narrationAudioById: {},
+      isGeneratingNarration: false,
+    });
+    // 1行目は成功・2行目で失敗させる（mid-sequence エラー）。
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize')
+      .mockResolvedValueOnce({ audioDataUrl: 'data:audio/wav;base64,AAAA', durationSec: 1 })
+      .mockRejectedValueOnce('合成エラー');
+    await useProjectStore.getState().generateNarration('scene_001');
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].lines?.[0].status).toBe('generated'); // 先行成功は保持（🔴2）
+    expect(st.scenes[0].lines?.[1].status).toBe('failed');
+    expect(st.narrationAudioById['scene_001/line_001']).toBeTruthy(); // 音声も保持
+    expect(useProjectStore.getState().narrationError).toBeTruthy();
+    spy.mockRestore();
   });
 });
