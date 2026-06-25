@@ -5,11 +5,11 @@ vi.mock('../layout', () => ({ layoutScene: vi.fn(() => ({ items: [] })) }));
 vi.mock('../sceneSvg', () => ({ layoutToSvg: vi.fn(() => '<svg/>') }));
 vi.mock('./rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,PNG') }));
 vi.mock('./videoSceneSplit', () => ({
-  splitVideoSceneSvg: () => ({
+  splitVideoSceneSvg: vi.fn(() => ({
     belowSvg: '<below/>',
     aboveSvg: '<above/>',
     slot: { x: 80, y: 140, w: 1040, h: 800 },
-  }),
+  })),
 }));
 
 import type { Scene } from '../../domain/project/types';
@@ -19,6 +19,7 @@ import type { LayoutItem, SceneLayout } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { svgToPngDataUrl } from './rasterize';
+import { splitVideoSceneSvg } from './videoSceneSplit';
 import { buildExportScenes } from './buildExportScenes';
 
 // buildExportScenes が参照するのは templateId / durationSec / (narrationFor へ渡す scene) のみ。
@@ -106,6 +107,20 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
       clipStartSec: 0,
       useOriginalAudio: false,
     });
+  });
+
+  it('opts.credit を渡すと splitVideoSceneSvg の credit 引数（6番目）に反映（#177・動画シーン）', async () => {
+    vi.mocked(splitVideoSceneSvg).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      noAsset,
+      undefined,
+      () => ({ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover', clipStartSec: 0, useOriginalAudio: false, speed: 1 }),
+      undefined,
+      { credit: 'VOICEVOX:四国めたん' },
+    );
+    expect(vi.mocked(splitVideoSceneSvg).mock.calls[0]?.[5]).toBe('VOICEVOX:四国めたん');
   });
 
   it('videoSlotFor 未指定なら従来どおり単一PNG（video なし）', async () => {

@@ -5,10 +5,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { DEFAULT_VOICE_ID } from '../../domain/constants';
 import { getVoicevoxSpeaker, getVoicevoxUrl } from '../appSettings';
 import type { SynthesizeInput, SynthesizedVoice, VoiceProvider } from '../../domain/voice/voiceProvider';
+import { DEFAULT_SPEAKER } from '../../domain/voice/voiceCatalog';
 
-// 本アプリの voiceId → VOICEVOX の speaker(スタイル)番号。
-// 選べる話者一覧（UI向け）は domain/voice/voiceCatalog.ts に置く（app→infra 直 import 回避・§4）。
-const DEFAULT_SPEAKER = 3; // ずんだもん（ノーマル）
+// 本アプリの voiceId → VOICEVOX の speaker(スタイル)番号。既定話者は voiceCatalog の単一参照元（§2-7）。
+// 選べる話者一覧（UI向け）も domain/voice/voiceCatalog.ts に置く（infra→domain は §4 で許可・app も domain を参照）。
 const SPEAKER_BY_VOICE_ID: Record<string, number> = {
   [DEFAULT_VOICE_ID]: DEFAULT_SPEAKER,
 };

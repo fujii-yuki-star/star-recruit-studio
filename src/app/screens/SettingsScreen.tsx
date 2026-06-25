@@ -6,7 +6,7 @@ import {
   DEFAULT_AI_MODEL, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
   setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
-import { VOICE_CATALOG, DEFAULT_SPEAKER } from "../../domain/voice/voiceCatalog";
+import { VOICE_CATALOG, DEFAULT_SPEAKER, characterForSpeaker } from "../../domain/voice/voiceCatalog";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import {
   INTONATION_RANGE, PITCH_RANGE, SPEED_RANGE, sliderToValue, valueToSlider,
@@ -32,7 +32,11 @@ export function SettingsScreen() {
     setAiModel(value);
   }
   const [voicevoxUrl, setUrl] = useState(() => getVoicevoxUrl());
-  const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? DEFAULT_SPEAKER);
+  const [speaker, setSpeaker] = useState(() => {
+    // 保存済み speaker がカタログに無い（旧値・破損）なら既定へ（select の選択肢と state の乖離を防ぐ）。
+    const saved = getVoicevoxSpeaker();
+    return saved != null && characterForSpeaker(saved) != null ? saved : DEFAULT_SPEAKER;
+  });
   const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
   const [testError, setTestError] = useState("");
   // 動画保存の予備機能の状態（実検出は取得・検証実装後＝pin 後。今は表示枠用のプレースホルダ）。
