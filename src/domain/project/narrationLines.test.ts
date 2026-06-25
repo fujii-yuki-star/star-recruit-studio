@@ -81,15 +81,25 @@ describe('validateSceneLines (V16-V19・ADR-0015)', () => {
     expect(validateSceneLines(lines, 8).map((w) => w.code)).toEqual(['LINE_SPEAKER_UNKNOWN']);
   });
 
-  it('V17: startSec が場面尺を超えると LINE_START_OUT_OF_RANGE', () => {
-    const lines: NarrationLine[] = [{ lineId: 'line_001', text: 'a', startSec: 10, status: NARRATION_STATUS.none }];
-    expect(validateSceneLines(lines, 8).map((w) => w.code)).toContain('LINE_START_OUT_OF_RANGE');
+  it('V17: startSec が範囲外（負・場面尺超過）の両境界で LINE_START_OUT_OF_RANGE', () => {
+    const over: NarrationLine[] = [{ lineId: 'line_001', text: 'a', startSec: 10, status: NARRATION_STATUS.none }];
+    const neg: NarrationLine[] = [{ lineId: 'line_001', text: 'a', startSec: -1, status: NARRATION_STATUS.none }];
+    expect(validateSceneLines(over, 8).map((w) => w.code)).toContain('LINE_START_OUT_OF_RANGE');
+    expect(validateSceneLines(neg, 8).map((w) => w.code)).toContain('LINE_START_OUT_OF_RANGE');
   });
 
   it('V18: startSec が降順だと LINE_ORDER_INVALID', () => {
     const lines: NarrationLine[] = [
       { lineId: 'line_001', text: 'a', startSec: 5, status: NARRATION_STATUS.none },
       { lineId: 'line_002', text: 'b', startSec: 2, status: NARRATION_STATUS.none },
+    ];
+    expect(validateSceneLines(lines, 8).map((w) => w.code)).toContain('LINE_ORDER_INVALID');
+  });
+
+  it('V18: startSec が等値でも LINE_ORDER_INVALID（時間重複なし）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', startSec: 3, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startSec: 3, status: NARRATION_STATUS.none },
     ];
     expect(validateSceneLines(lines, 8).map((w) => w.code)).toContain('LINE_ORDER_INVALID');
   });

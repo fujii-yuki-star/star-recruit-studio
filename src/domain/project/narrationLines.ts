@@ -57,8 +57,8 @@ export function validateSceneLines(lines: NarrationLine[] | undefined, durationS
       if (line.startSec < 0 || line.startSec > durationSec) {
         warnings.push(warn('LINE_START_OUT_OF_RANGE', 'セリフの開始位置が場面の長さを超えています。範囲内に収めます', field, 'warning'));
       }
-      // V18: 直前に startSec を持つ行より前に始まらない（昇順）。
-      if (line.startSec < prevStart) {
+      // V18: 直前に startSec を持つ行と同時刻以前に始まらない（昇順・時間重複なし＝11 §8 / ADR-0015）。
+      if (line.startSec <= prevStart) {
         warnings.push(warn('LINE_ORDER_INVALID', 'セリフの開始順序が前後しています。時間順に並べ直せます', field, 'warning'));
       }
       prevStart = line.startSec;
