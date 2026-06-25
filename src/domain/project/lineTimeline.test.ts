@@ -26,6 +26,11 @@ describe('resolveLineSubtitle（追加B）', () => {
     const line: NarrationLine = { lineId: 'line_001', text: 'やあ', status: NARRATION_STATUS.none };
     expect(resolveLineSubtitle(line, sceneWith({ subtitleEnabledDefault: false })).enabled).toBe(false);
   });
+
+  it('subtitleText が明示 null のとき text を流用（null=継承）', () => {
+    const line: NarrationLine = { lineId: 'line_001', text: 'やあ', subtitleText: null, status: NARRATION_STATUS.none };
+    expect(resolveLineSubtitle(line, sceneWith({}))).toEqual({ text: 'やあ', enabled: true });
+  });
 });
 
 describe('lineSegments（追加A・自動逐次/明示startSec）', () => {
@@ -75,5 +80,11 @@ describe('activeLineIndexAt（追加A）', () => {
 
   it('空は -1', () => {
     expect(activeLineIndexAt([], 0)).toBe(-1);
+  });
+
+  it('先頭行の開始より前の時刻は先頭行へフォールバック（編集プレビュー＝先頭行表示）', () => {
+    const late: NarrationLine[] = [{ lineId: 'line_001', text: 'a', startSec: 2, status: NARRATION_STATUS.none }];
+    const s = lineSegments(sceneWith({ lines: late }), {});
+    expect(activeLineIndexAt(s, 0)).toBe(0); // t=0 は startSec=2 より前だが先頭行(0)
   });
 });

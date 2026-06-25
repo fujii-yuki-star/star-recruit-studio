@@ -72,7 +72,6 @@ const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 
 const zOf = (layer: Layer): number => layer.zIndex ?? DEFAULT_Z[layer.type];
 
-/** シーンをテンプレに沿って配置解決する。 */
 /** layoutScene のオプション（掛け合いの行字幕の上書き等・ADR-0015 追加A/B）。 */
 export interface LayoutOptions {
   /**
@@ -82,6 +81,7 @@ export interface LayoutOptions {
   subtitleText?: string | null;
 }
 
+/** シーンをテンプレに沿って配置解決する。 */
 export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptions): SceneLayout {
   const backgroundColor = template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR;
   const items: LayoutItem[] = [];

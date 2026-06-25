@@ -14,7 +14,8 @@ export interface LineSubtitle {
 /** 行の字幕を解決（追加B）。subtitleText 未指定は text を流用、enabled は 行→場面既定→true。 */
 export function resolveLineSubtitle(line: NarrationLine, scene: Scene): LineSubtitle {
   return {
-    text: line.subtitleText ?? line.text ?? '',
+    // subtitleText は null/未指定とも text を流用（null=継承・11 §2.2）。text は必須 string。
+    text: line.subtitleText ?? line.text,
     enabled: line.subtitleEnabled ?? scene.subtitleEnabledDefault ?? true,
   };
 }
