@@ -150,6 +150,19 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(svg).toContain('data:image/png;base64,AA=='); // slot 画像
   });
 
+  it('新図形（star）＋枠線が layoutScene→SVG に反映される（#173・stroke 配線確認）', () => {
+    const starScene: Scene = {
+      ...freeScene,
+      freeLayout: [
+        { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 200, h: 200, zIndex: 5, shapeType: 'star', fillColor: '#00ff00', opacity: 1, strokeColor: '#112233', strokeWidth: 4 },
+      ],
+    };
+    const svg = layoutToSvg(layoutScene(starScene, freeTemplate));
+    expect(svg).toContain('<polygon points="'); // star は polygon で描画
+    expect(svg).toContain('stroke="#112233"'); // el.strokeColor が FillItem 経由で反映
+    expect(svg).toContain('stroke-width="4"');
+  });
+
   it('通常テンプレ（category!==free）の場面に freeLayout が付いていても描画しない（category ガード）', () => {
     // 防御: 通常テンプレ（opening）に誤って freeLayout が混入しても無視する。
     const sceneWithStrayFree: Scene = {

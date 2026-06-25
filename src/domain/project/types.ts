@@ -170,11 +170,14 @@ export interface FreeElement {
   fontSize?: number;
   color?: string;
   fontWeight?: FontWeight;
-  /** kind='shape'（rect/ellipse のみ・ADR-0008）。 */
+  /** kind='shape'。rect/ellipse/rounded_rect/triangle/star/arrow/speech_bubble（ADR-0008・#173）。 */
   shapeType?: FreeShapeType;
   fillColor?: string;
   opacity?: number;
   radius?: number;
+  /** 図形の枠線（#173・任意）。strokeWidth>0 のとき描画。 */
+  strokeColor?: string;
+  strokeWidth?: number;
 }
 
 export interface Scene {

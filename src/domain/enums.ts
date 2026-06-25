@@ -31,14 +31,21 @@ export const FONT_WEIGHT = {
   bold: 'bold',
 } as const satisfies Record<string, FontWeight>;
 
-/** FREE 図形要素の種別（ADR-0008・line は MVP 対象外）。 */
-export const FREE_SHAPE_TYPES = ['rect', 'ellipse'] as const;
+/** FREE 図形要素の種別（ADR-0008・line は矩形モデルと相性が悪く MVP 対象外）。 */
+export const FREE_SHAPE_TYPES = [
+  'rect', 'ellipse', 'rounded_rect', 'triangle', 'star', 'arrow', 'speech_bubble',
+] as const;
 export type FreeShapeType = (typeof FREE_SHAPE_TYPES)[number];
 
 /** FreeShapeType の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
 export const FREE_SHAPE_TYPE = {
   rect: 'rect',
   ellipse: 'ellipse',
+  rounded_rect: 'rounded_rect',
+  triangle: 'triangle',
+  star: 'star',
+  arrow: 'arrow',
+  speech_bubble: 'speech_bubble',
 } as const satisfies Record<string, FreeShapeType>;
 
 export const ASSET_TYPES = [

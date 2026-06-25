@@ -23,8 +23,11 @@ export interface FillItem extends ItemBase {
   color: string;
   opacity: number;
   radius: number;
-  /** 'ellipse' のとき楕円で描画（freeLayout shape）。未指定＝rect。 */
+  /** 図形種別（freeLayout shape）。未指定＝rect。rect/ellipse/rounded_rect/triangle/star/arrow/speech_bubble。 */
   shapeType?: FreeShapeType;
+  /** 枠線（#173・任意）。strokeWidth>0 のとき描画。 */
+  strokeColor?: string;
+  strokeWidth?: number;
 }
 
 export interface ImageItem extends ItemBase {
@@ -160,7 +163,7 @@ export function layoutScene(scene: Scene, template: Template): SceneLayout {
           break;
         }
         case 'shape':
-          items.push({ ...base, kind: 'fill', color: el.fillColor ?? '#ffffff', opacity: el.opacity ?? 1, radius: el.radius ?? 0, shapeType: el.shapeType ?? FREE_SHAPE_TYPE.rect });
+          items.push({ ...base, kind: 'fill', color: el.fillColor ?? '#ffffff', opacity: el.opacity ?? 1, radius: el.radius ?? 0, shapeType: el.shapeType ?? FREE_SHAPE_TYPE.rect, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
           break;
       }
     }
