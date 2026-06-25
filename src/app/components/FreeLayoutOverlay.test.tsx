@@ -30,6 +30,7 @@ function renderOverlay(overrides: Partial<ComponentProps<typeof FreeLayoutOverla
     onSendToBack: vi.fn(),
     onDelete: vi.fn(),
     onChangeText: vi.fn(),
+    onRequestEdit: vi.fn(),
   };
   const result = render(
     <FreeLayoutOverlay
@@ -84,11 +85,11 @@ describe("FreeLayoutOverlay: 右クリックの操作メニュー（#174）", ()
     expect(labels).toEqual(["編集", "複製", "前面", "背面", "削除"]);
   });
 
-  it("テキスト以外（図形）の右クリックには「編集」が出ない", () => {
+  it("図形の右クリックにも「編集」が並ぶ（#185：全 kind で kind 別エディタを開く）", () => {
     const { boxes } = renderOverlay();
     fireEvent.contextMenu(boxes[1], { clientX: 100, clientY: 100 });
     const labels = screen.getAllByRole("menuitem").map((b) => b.textContent);
-    expect(labels).toEqual(["複製", "前面", "背面", "削除"]);
+    expect(labels).toEqual(["編集", "複製", "前面", "背面", "削除"]);
   });
 
   it("「複製」を押すと対象 id で onDuplicate が呼ばれ、メニューが閉じる", () => {
@@ -124,12 +125,14 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
     return { ...ctx, textarea };
   }
 
-  it("メニューの「編集」（テキスト）でインライン編集の textarea が現れる", () => {
-    const { boxes } = renderOverlay();
-    fireEvent.contextMenu(boxes[0], { clientX: 100, clientY: 100 });
+  it("メニューの「編集」で onRequestEdit が対象 id と座標で呼ばれメニューが閉じる（#185：kind 別エディタを開く）", () => {
+    const { boxes, onRequestEdit } = renderOverlay();
+    fireEvent.contextMenu(boxes[0], { clientX: 120, clientY: 140 });
     fireEvent.click(screen.getByRole("menuitem", { name: "編集" }));
-    expect(screen.getByRole("textbox")).toBeInTheDocument();
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument(); // 編集に入るとメニューは閉じる
+    expect(onRequestEdit).toHaveBeenCalledWith("free_001", expect.any(Number), expect.any(Number));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument(); // 「編集」を押すとメニューは閉じる
+    // textarea はダブルクリックで開く（編集メニューはポップオーバー＝親側を開くのみ）。
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
   it("テキスト要素のダブルクリックで textarea が現れ、現在の文字が入る", () => {
