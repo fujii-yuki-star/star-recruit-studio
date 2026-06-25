@@ -113,6 +113,10 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `FREE_ELEMENT_OUT_OF_BOUNDS` | warning | — | 画面の外にはみ出した配置があります。画面内に移動できます | `ADR-0008 §8` |
 | `FREE_ELEMENT_INVALID_SIZE` | warning | — | 配置した要素の大きさが正しくありません。幅と高さを設定し直してください | `ADR-0008 §8` |
 | `FREE_TEXT_EMPTY` | info | — | 文字が入っていない配置があります。文字を入力してください | `ADR-0008 §8` |
+| `LINE_ID_DUPLICATE` | warning | 自動で振り直し | セリフの並びに重複があります。自動で振り直します | `ADR-0015 §8 V16` |
+| `LINE_START_OUT_OF_RANGE` | warning | clamp | セリフの開始位置が場面の長さを超えています。範囲内に収めます | `ADR-0015 §8 V17` |
+| `LINE_ORDER_INVALID` | warning | 時間順へ並べ直し | セリフの開始順序が前後しています。時間順に並べ直せます | `ADR-0015 §8 V18` |
+| `LINE_SPEAKER_UNKNOWN` | warning | 既定の声へ | 選べない声が指定されています。標準の声を使います | `ADR-0015 §8 V19` |
 | `SCHEMA_VERSION_UNSUPPORTED` | fatal | — | このファイルは対応していないバージョンで作成されています | `11 §1` |
 
 ---

@@ -28,4 +28,16 @@ describe('narrationProgress', () => {
   it('空配列は 0/0', () => {
     expect(narrationProgress([])).toEqual({ done: 0, total: 0 });
   });
+
+  it('掛け合い：lines は行ごとに集計（本文非空の行のみ・narration は無視）', () => {
+    const s: Scene = {
+      ...scene('s1', 'ignored', 'none'),
+      lines: [
+        { lineId: 'line_001', text: 'やあ', status: 'generated' },
+        { lineId: 'line_002', text: 'どうも', status: 'pending' },
+        { lineId: 'line_003', text: '', status: 'none' }, // 本文空＝対象外
+      ],
+    };
+    expect(narrationProgress([s])).toEqual({ done: 1, total: 2 });
+  });
 });
