@@ -267,7 +267,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
               <select className="select" value={el.shapeType ?? FREE_SHAPE_TYPE.rect} onChange={(e) => patchFreeEl(el.id, { shapeType: e.target.value as FreeShapeType })}>
                 <option value={FREE_SHAPE_TYPE.rect}>四角</option>
+                <option value={FREE_SHAPE_TYPE.rounded_rect}>角丸四角</option>
                 <option value={FREE_SHAPE_TYPE.ellipse}>丸</option>
+                <option value={FREE_SHAPE_TYPE.triangle}>三角</option>
+                <option value={FREE_SHAPE_TYPE.star}>星</option>
+                <option value={FREE_SHAPE_TYPE.arrow}>矢印</option>
+                <option value={FREE_SHAPE_TYPE.speech_bubble}>吹き出し</option>
               </select>
             </div>
             <div className="field" style={{ margin: 0 }}>
@@ -282,6 +287,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               onChange={(e) => patchFreeEl(el.id, { opacity: Number(e.target.value) })}
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
+          </div>
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+            <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</label>
+              <input type="color" value={el.strokeColor ?? "#333333"} onChange={(e) => patchFreeEl(el.id, { strokeColor: e.target.value })} />
+            </div>
           </div>
         </>
       );
