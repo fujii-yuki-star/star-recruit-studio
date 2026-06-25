@@ -6,8 +6,8 @@ import {
   DEFAULT_AI_MODEL, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
   setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
 } from "../../infrastructure/appSettings";
-import { NARRATOR_STYLES } from "../../domain/voice/narratorStyles";
-import { NARRATOR_CREDIT } from "../../domain/voice/narratorCredit";
+import { VOICE_CATALOG, DEFAULT_SPEAKER } from "../../domain/voice/voiceCatalog";
+import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import {
   INTONATION_RANGE, PITCH_RANGE, SPEED_RANGE, sliderToValue, valueToSlider,
 } from "../../domain/voice/voiceParams";
@@ -32,7 +32,7 @@ export function SettingsScreen() {
     setAiModel(value);
   }
   const [voicevoxUrl, setUrl] = useState(() => getVoicevoxUrl());
-  const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? NARRATOR_STYLES[0].speaker);
+  const [speaker, setSpeaker] = useState(() => getVoicevoxSpeaker() ?? DEFAULT_SPEAKER);
   const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
   const [testError, setTestError] = useState("");
   // 動画保存の予備機能の状態（実検出は取得・検証実装後＝pin 後。今は表示枠用のプレースホルダ）。
@@ -198,7 +198,7 @@ export function SettingsScreen() {
         <div className="card">
           <h2 className="section-title">ナレーターの声</h2>
           <p className="page-desc text-pretty">
-            ナレーションには {NARRATOR_CREDIT} を使います。
+            選んだ声のクレジット（{creditForSpeaker(speaker)}）を、動画とプレビューに常に表示します。
           </p>
 
           <div className="field">
@@ -219,7 +219,7 @@ export function SettingsScreen() {
 
           <div className="field">
             <label className="field-label" htmlFor="voiceStyle">
-              声のスタイル
+              声（キャラクター・スタイル）
             </label>
             <select
               id="voiceStyle"
@@ -227,12 +227,19 @@ export function SettingsScreen() {
               value={speaker}
               onChange={(e) => onChangeSpeaker(Number(e.target.value))}
             >
-              {NARRATOR_STYLES.map((s) => (
-                <option key={s.speaker} value={s.speaker}>
-                  {s.label}
-                </option>
+              {VOICE_CATALOG.map((c) => (
+                <optgroup key={c.character} label={c.character}>
+                  {c.styles.map((s) => (
+                    <option key={s.speaker} value={s.speaker}>
+                      {c.character}（{s.label}）
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
+            <p className="field-hint">
+              選んだキャラクターの名前を、動画に常時クレジット表示します。
+            </p>
           </div>
 
           <div className="field">

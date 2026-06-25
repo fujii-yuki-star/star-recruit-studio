@@ -145,6 +145,12 @@ describe('buildExportScenes：字幕トグル（withSubtitle）', () => {
     await buildExportScenes(oneScene, templateById, noAsset);
     expect(vi.mocked(layoutToSvg).mock.calls[0]?.[1]?.credit).toBe(NARRATOR_CREDIT);
   });
+
+  it('opts.credit を渡すと layoutToSvg のクレジットに反映（#177・動的クレジット）', async () => {
+    vi.mocked(layoutToSvg).mockClear();
+    await buildExportScenes(oneScene, templateById, noAsset, undefined, undefined, undefined, { credit: 'VOICEVOX:四国めたん' });
+    expect(vi.mocked(layoutToSvg).mock.calls[0]?.[1]?.credit).toBe('VOICEVOX:四国めたん');
+  });
 });
 
 describe('buildExportScenes：出力解像度（HDサイズ）', () => {

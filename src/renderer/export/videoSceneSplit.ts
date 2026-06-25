@@ -24,6 +24,7 @@ export function splitVideoSceneSvg(
   assetSrc?: (assetId: string | null) => string | undefined,
   includeItem?: (item: LayoutItem) => boolean,
   fontFamily?: string,
+  credit: string = NARRATOR_CREDIT,
 ): VideoSceneSplit | null {
   // 動画スロット（image かつ role=slot）のみを境界に使う。誤った id（fill/text 等）では境界を取らず null。
   const slot = layout.items.find(
@@ -45,7 +46,7 @@ export function splitVideoSceneSvg(
     transparent: true,
     itemFilter: (it) => pass(it) && it.id !== slotId && it.zIndex >= slotZ,
     // 常時クレジット（ADR-0003）は最前面＝上レイヤーにのみ付ける（下レイヤーには付けない＝二重化防止）。
-    credit: NARRATOR_CREDIT,
+    credit,
     fontFamily,
   });
   return { belowSvg, aboveSvg, slot: { x: slot.x, y: slot.y, w: slot.w, h: slot.h } };

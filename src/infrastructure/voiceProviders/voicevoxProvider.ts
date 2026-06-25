@@ -7,7 +7,7 @@ import { getVoicevoxSpeaker, getVoicevoxUrl } from '../appSettings';
 import type { SynthesizeInput, SynthesizedVoice, VoiceProvider } from '../../domain/voice/voiceProvider';
 
 // 本アプリの voiceId → VOICEVOX の speaker(スタイル)番号。
-// 選べるスタイル一覧（UI向け）は domain/voice/narratorStyles.ts に置く（app→infra 直 import 回避・§4）。
+// 選べる話者一覧（UI向け）は domain/voice/voiceCatalog.ts に置く（app→infra 直 import 回避・§4）。
 const DEFAULT_SPEAKER = 3; // ずんだもん（ノーマル）
 const SPEAKER_BY_VOICE_ID: Record<string, number> = {
   [DEFAULT_VOICE_ID]: DEFAULT_SPEAKER,
