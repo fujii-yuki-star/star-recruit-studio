@@ -99,7 +99,9 @@ export function layoutScene(scene: Scene, template: Template): SceneLayout {
         break;
       }
       case 'character': {
-        if (scene.character.enabled && scene.character.poseAssetId) {
+        // ゆうこ表示はテンプレ依存（この case=character レイヤー有）。poseAssetId があれば表示する。
+        // character.enabled（旧・場面ごと表示トグル）は廃止＝描画では参照しない（互換のため値は残す。req5・01§7.3）。
+        if (scene.character.poseAssetId) {
           items.push({ ...base, kind: 'image', assetId: scene.character.poseAssetId, fit: layer.fit ?? 'contain', role: 'character', label: 'ゆうこ' });
         }
         break;
