@@ -102,6 +102,10 @@ describe('createLineId (§2.1 line_{NNN}・scene 内一意・ADR-0015)', () => {
   it('番号に隙間があれば最小空き番号を返す', () => {
     expect(createLineId(['line_001', 'line_003'])).toBe('line_002');
   });
+  it('999 を超えると4桁になる（pattern ^line_[0-9]{3,}$）', () => {
+    const existing = Array.from({ length: 999 }, (_, i) => `line_${String(i + 1).padStart(3, '0')}`);
+    expect(createLineId(existing)).toBe('line_1000');
+  });
 });
 
 describe('assembleProject', () => {

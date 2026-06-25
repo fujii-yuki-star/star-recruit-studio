@@ -129,13 +129,16 @@ export interface Narration {
   status: NarrationStatus;
 }
 
-/** 掛け合い：場面のセリフ列の1行（ADR-0015・#180）。null/未指定 = 場面/動画の既定を継承（11 §6）。 */
+/**
+ * 掛け合い：場面のセリフ列の1行（ADR-0015・#180）。null/未指定 = 場面/動画の既定を継承（11 §6）。
+ * intonation は行に持たない（行ごとに変えない設計）＝project 既定（voiceSettings.intonation）を継承する（ADR-0015）。
+ */
 export interface NarrationLine {
   /** line_NNN（scene 内一意・§2.1）。 */
   lineId: string;
   /** 読み上げ（話す）テキスト。 */
   text: string;
-  /** VOICEVOX speaker（#177 voiceCatalog）。null/未指定＝場面/動画の既定声を継承。 */
+  /** VOICEVOX speaker（#177 voiceCatalog）。整数のみ有効（schema: integer）。null/未指定＝場面/動画の既定声を継承。 */
   speaker?: number | null;
   speed?: number | null;
   pitch?: number | null;

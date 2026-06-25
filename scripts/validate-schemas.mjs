@@ -114,6 +114,7 @@ const mustReject = [
   ['freeLayout: text の fontId 未知は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', fontId: 'old-font' }] })],
   ['lines: lineId が不正(line_1)は拒否', withScene({ lines: [{ lineId: 'line_1', text: 'x', status: 'none' }] })],
   ['lines: speaker 非整数は拒否', withScene({ lines: [{ lineId: 'line_001', text: 'x', speaker: 1.5, status: 'none' }] })],
+  ['lines: speaker 負数は拒否', withScene({ lines: [{ lineId: 'line_001', text: 'x', speaker: -1, status: 'none' }] })],
   ['lines: 未知フィールド(voiceId)は拒否＝行は speaker（additionalProperties:false）', withScene({ lines: [{ lineId: 'line_001', text: 'x', status: 'none', voiceId: 'voicevox_zundamon' }] })],
 ];
 for (const [desc, data] of mustAccept) {

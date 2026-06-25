@@ -6,6 +6,7 @@ import type { Narration, NarrationLine, Scene } from './types';
 /**
  * 単一 narration を1行（line_001）に写す（後方互換・lines 不在時の実効行）。
  * 旧 narration.voiceId（文字列）は speaker（数値）へ逆変換しない（ADR-0015）＝speaker 未指定＝既定声を継承。
+ * narration.intonation は NarrationLine に持たないため写さない（行に固有値を持たせず project 既定 voiceSettings.intonation を継承する設計・ADR-0015）。
  */
 export function lineFromNarration(narration: Narration): NarrationLine {
   return {
