@@ -60,7 +60,7 @@
 
 - `package.json`：devDependencies に 3 つ追加。`vite.config.ts`：`defineConfig` を `vitest/config` 由来にし `test` ブロックを追加。`src/test/setup.ts` を新設。
 - **正典（`schemas/`・`11`・`12`）への影響なし。schemaVersion 変更なし**（データ仕様に触れない純粋なテスト基盤）。
-- **サンプル（`FreeLayoutOverlay.test.tsx`）は実際の対話を検証**：①ポインタによる選択/選択解除とリサイズハンドルの描画、②右クリックの操作メニュー（テキストは「編集/複製/前面/背面/削除」・非テキストは「複製/前面/背面/削除」・「複製」/「削除」で各コールバック発火・Escape で閉じる）、③テキストのインライン編集（「編集」またはダブルクリックで textarea 出現・入力で `onChangeText`・Enter/Esc/blur で終了・Shift+Enter は継続・テキスト以外では出ない）。いずれも #172/#174/#184 で develop に入っている挙動。
+- **サンプル（`FreeLayoutOverlay.test.tsx`）は実際の対話を検証**：①ポインタによる選択/選択解除とリサイズハンドルの描画、②右クリックの操作メニュー（**全 kind で「編集/複製/前面/背面/削除」**・「編集」は `onRequestEdit`＝kind 別エディタを開く〔#185 以降〕・「複製」/「削除」で各コールバック発火・Escape で閉じる）、③テキストのインライン編集（**ダブルクリック**で textarea 出現・入力で `onChangeText`・Enter/Esc/blur で終了・Shift+Enter は継続・テキスト以外では出ない）。いずれも #172/#174/#184/#185 で develop に入っている挙動。
 - `check:frontend`（lint・typecheck・test・schema 検証）は緑を維持（node テストは不変）。
 - [`14_TEST_STRATEGY.md`](../14_TEST_STRATEGY.md) に「コンポーネント/対話テスト」の位置づけを追補する余地（別コミットで反映可）。
 
