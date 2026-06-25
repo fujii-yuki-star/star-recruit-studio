@@ -132,6 +132,16 @@ describe('layoutToSvg：フォント（fontFamily・同梱フォント選択）'
     expect(svg).toContain(`font-family="${fontFamilyForId('kaitou-yokoku-gothic')}"`); // t1 は自身の fontId
     expect(svg).toContain(`font-family="'Scene Default', sans-serif"`); // t2 は場面既定にフォールバック
   });
+
+  it('fontId=null（継承を明示）は場面既定にフォールバック（#178）', () => {
+    const layout: SceneLayout = {
+      width: 1920, height: 1080, backgroundColor: '#ffffff',
+      items: [
+        { kind: 'text', id: 't', x: 0, y: 0, w: 800, h: 100, zIndex: 30, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#000000', maxLines: 1, isSubtitle: false, fontId: null },
+      ],
+    };
+    expect(layoutToSvg(layout, { fontFamily: "'Scene Default', sans-serif" })).toContain(`font-family="'Scene Default', sans-serif"`);
+  });
 });
 
 describe('layoutToSvg：テキストの XSS エスケープ（dangerouslySetInnerHTML 経路・#144）', () => {

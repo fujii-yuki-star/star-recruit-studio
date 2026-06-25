@@ -114,14 +114,14 @@ export const FIT = {
 export const TEXT_KEYS = ['title', 'main', 'subtitle', 'caption', 'url'] as const;
 export type TextKey = (typeof TEXT_KEYS)[number];
 
-/** TextKey の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
+/** TextKey の値を参照するための定数（§6）。Record<TextKey,TextKey> で全 textKey 網羅を型で強制（追加漏れ検知）。 */
 export const TEXT_KEY = {
   title: 'title',
   main: 'main',
   subtitle: 'subtitle',
   caption: 'caption',
   url: 'url',
-} as const satisfies Record<string, TextKey>;
+} as const satisfies Record<TextKey, TextKey>;
 
 export const TRANSITION_TYPES = ['none', 'fade', 'slide', 'wipe', 'zoom'] as const;
 export type TransitionType = (typeof TRANSITION_TYPES)[number];

@@ -194,7 +194,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       const next = { ...(s.textFontIds ?? {}) };
       if (id) next[textKey] = id;
       else delete next[textKey];
-      return { ...s, textFontIds: next };
+      // 全種別を継承に戻したら空オブジェクトを残さず未設定へ（意味のない {} を永続化しない）。
+      return { ...s, textFontIds: Object.keys(next).length ? next : undefined };
     });
   // FREE 場面（自由配置）か。FREE のときだけ自由配置エディタを主編集面として出す（ADR-0008・§2-4）。
   const isFree = template?.category === FREE_CATEGORY;
