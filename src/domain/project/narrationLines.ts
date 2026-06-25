@@ -1,6 +1,7 @@
 // 掛け合い：場面のセリフ列（scene.lines）の一元アクセサ＋意味検証（ADR-0015・#180）。純粋関数（副作用なし）。
 // 全消費側（store/描画/書き出し/プレビュー/台本/precheck）は scene.narration を直接見ず sceneLines を通す。
 // scene.lines があればそれを、無ければ単一 narration を1行に写して返す＝旧データ（lines 不在）も同一に扱える。
+import type { NarrationStatus } from '../enums';
 import { characterForSpeaker } from '../voice/voiceCatalog';
 import type { Narration, NarrationLine, Scene, Warning } from './types';
 
@@ -65,4 +66,32 @@ export function validateSceneLines(lines: NarrationLine[] | undefined, durationS
     }
   }
   return warnings;
+}
+
+// ── 行ごと音声（ストア/保存）の補助（ADR-0015 PR-C2）。純粋関数。 ──
+
+/** 行音声マップ（narrationAudioById）のメモリ内キー。scene×line で一意。 */
+export function lineAudioKey(sceneId: string, lineId: string): string {
+  return `${sceneId}/${lineId}`;
+}
+
+/** 行音声ファイルの保存名 stem（import_voice は sceneId を不透明な stem 扱い＝voices/<stem>.wav）。 */
+export function lineVoiceStem(sceneId: string, lineId: string): string {
+  return `${sceneId}_${lineId}`;
+}
+
+/** 指定行の status を更新した Scene（明示 lines があれば該当行・無ければ単一 narration を更新）。 */
+export function withLineStatus(scene: Scene, lineId: string, status: NarrationStatus): Scene {
+  if (scene.lines && scene.lines.length > 0) {
+    return { ...scene, lines: scene.lines.map((l) => (l.lineId === lineId ? { ...l, status } : l)) };
+  }
+  return { ...scene, narration: { ...scene.narration, status } };
+}
+
+/** 指定行の voicePath を更新した Scene（明示 lines があれば該当行・無ければ単一 narration を更新）。 */
+export function withLineVoicePath(scene: Scene, lineId: string, voicePath: string | null): Scene {
+  if (scene.lines && scene.lines.length > 0) {
+    return { ...scene, lines: scene.lines.map((l) => (l.lineId === lineId ? { ...l, voicePath } : l)) };
+  }
+  return { ...scene, narration: { ...scene.narration, voicePath } };
 }
