@@ -371,6 +371,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onSelect={setSelectedFreeId}
                     onChange={(id, g) => patchFreeEl(id, g)}
                     gridSize={gridSnap ? FREE_GRID_SIZE : 0}
+                    onDuplicate={duplicateFreeEl}
+                    onBringToFront={bringFreeElForward}
+                    onSendToBack={sendFreeElBackward}
+                    onDelete={removeFreeEl}
+                    onChangeText={(id, text) => patchFreeEl(id, { text })}
                   />
                 )}
               </div>
