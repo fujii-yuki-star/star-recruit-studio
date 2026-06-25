@@ -76,19 +76,20 @@ interface Scene {
 - **クレジット（ADR-0003）**: 動画全体で**使用した全 speaker を重複排除**し `creditForSpeaker` で列挙（焼き込み＋About）。req7a（#177）の動的クレジットを流用。
 - **字幕（追加B）**: 行が `subtitleEnabled`（未指定は `scene.subtitleEnabledDefault` →書き出し `withSubtitle`）のとき、`subtitleText ?? line.text` を字幕として描く。`lines` 駆動時は `texts['subtitle']`（静的）より行字幕を優先。
 - **文字の時間変化（追加A）**: 画面の字幕/キャプションは**その時刻に有効な行**の字幕で描く。プレビューの静止フレームは選択中の行（既定は先頭行）を表示。書き出しは行＝セグメントで切り替わる。
-- **尺**: `scene.durationSec` は**場面の権威尺のまま**。行音声長の合計から**推奨尺を提示**し、超過は警告（`§8`／既存の overflow 警告に倣う）。MVP は「合計に合わせる」を基本運用とし、行を場面尺内に収める。
+- **尺**: `scene.durationSec` は**場面の権威尺のまま**。行音声長の合計から**推奨尺を提示**し、超過は警告（`§8`／既存の overflow 警告に倣う）。**書き出し/プレビューは常に `[0, durationSec]` を描き、`durationSec` を超える行（の音声）は場面末で打ち切る（カット）＝自動延長しない**（決定）。MVP は「合計に合わせる」を基本運用とし、行を場面尺内に収める。
 - **タイミング**: 行は `startSec` 昇順・**非重複**（重なりは検証で警告/補正）。`startSec` 未指定は直前行の終わり（自動逐次）。行間の**間（無音）**を許容し、その間は直前フレームを保持。手動は**単一トラックの開始秒のみ**（尺・トラック数は増やさない）。
 
 ### 移行（1.7 → 1.8・後方互換のマイナー）
 
 - `scene.lines`・`NarrationLine`・`scene.subtitleEnabledDefault` を**任意追加**。既存 `narration`/`texts` は不変。**変換不要の版番号付け替え**（1.5→1.6・1.6→1.7 と同型）＝旧データは `lines` 不在＝`sceneLines()` が `narration` を1行に写して動く。
-- 書き込み時、`lines` があるとき `narration` を `lines[0]`（text/status）に **mirror**（旧バージョン/外部リーダ向けの後方可読性）。
-- `schemas/project.schema.json`（`$defs.NarrationLine` 追加・Scene に `lines`）＋ `PROJECT_SCHEMA_VERSION='1.8'` ＋ `migrateProject` ＋ サンプル fixture ＋ `validate-schemas.mjs` の許可/拒否ケース ＋ `11 §1/§7` を同 PR で同期。
+- 書き込み時、`lines` があるとき `narration` を `lines[0]` の **text/status のみ** に mirror する（旧バージョン/外部リーダ向けの後方可読性）。**声パラメータ（voiceId/speed/pitch）は mirror しない**＝行の声は `lines[].speaker`（数値）が単一の真実で、`speaker→voiceId`（数値→文字列）の逆変換は持たない（文字列 voiceId と数値 speaker の不整合を避ける・`resolveNarrationVoice` の voiceId→speaker は順方向のみ）。
+- **採番（§2.1 同期）**: `lineId` は `line_NNN`（scene 内一意・3桁ゼロ詰め＝既存 `part_NNN`/`scene_NNN`/`free_NNN` に倣う）。**`line_NNN` は現在 11 §2.1 の採番カタログに無いため、PR-B で §2.1 に追記**し、`project.schema.json` の `NarrationLine.lineId` に `pattern: "^line_[0-9]{3,}$"` を与える（カタログと schema を同時に追加）。
+- `schemas/project.schema.json`（`$defs.NarrationLine` 追加・Scene に `lines`）＋ `PROJECT_SCHEMA_VERSION='1.8'` ＋ `migrateProject` ＋ サンプル fixture ＋ `validate-schemas.mjs` の許可/拒否ケース ＋ `11 §1/§2.1/§7/§8` を同 PR で同期。
 
 ### AI 出力（ai-video-plan・追加）
 
-- `AiScene` に `narrationLines?: [{ text, speaker?|character?, subtitle?, subtitleEnabled? }]` を**任意追加**（`narrationText`/`texts.subtitle` は残置）。ai-video-plan `schemaVersion` 1.0→1.1（後方互換の追加）。
-- マッピング（`transformPlan`）: `narrationLines` があれば `scene.lines` へ、無ければ従来どおり `narrationText`→`narration`（単一）。`12` のプロンプトに掛け合いの指針を追記（行数・各行長・話者指定の任意）。
+- `AiScene` に `narrationLines?: [{ text, voiceCharacter?, subtitle?, subtitleEnabled? }]` を**任意追加**（`narrationText`/`texts.subtitle` は残置）。`voiceCharacter` は **voiceCatalog のキャラ名（文字列・例「ずんだもん」）**。既存の `AiScene.character`（ゆうこのポーズ解決・12 §8.3）/内部 `Scene.character`（11 §7.4）とは**別概念**ゆえ `character` を避け別名にする（実装者の混同回避）。ai-video-plan `schemaVersion` 1.0→1.1（後方互換の追加）。
+- マッピング（`transformPlan`）: `narrationLines` があれば `scene.lines` へ（`voiceCharacter`→`voiceCatalog` で `speaker` 数値へ解決・未知名は既定声へフォールバック＋警告）、無ければ従来どおり `narrationText`→`narration`（単一）。`12` のプロンプトに掛け合いの指針を追記（行数・各行長・話者名の任意指定）。
 
 ---
 
@@ -111,6 +112,7 @@ interface Scene {
 - **正典同期**: `11`（§6 声の解決を行へ拡張・§7 に NarrationLine・§1 に 1.8）、`12`（掛け合いプロンプト/マッピング）、`schemas/`（project 1.8・ai-video-plan 1.1）、`ADR-0003`（複数話者の使用＝本 ADR が具体化）。
 - **UI 文言（§2-3/§2-5）**: 「セリフ」「声（キャラクター）」等の利用者語のみ。`lineId`/`speaker` 番号等は非表示。
 - **テスト（§7）**: 採番・移行・`sceneLines` 解決・声/音量の継承・字幕の有効行解決・行音声の連結尺、をいずれも純粋関数でテスト。書き出しは golden 方針に追従。
+- **検証（§8 拡張・PR-B/PR-C で 11 §8 に追記）**: 候補 — **V16** `lineId` が scene 内一意 / **V17** `startSec >= 0` かつ `<= scene.durationSec` / **V18** `startSec` 昇順・重複なし / **V19** `speaker` は voiceCatalog に存在（未知は既定へ補正＋警告）。番号は 11 §8 の続きで確定する。
 
 ## 未解決の論点 / 確認ポイント
 
@@ -118,7 +120,7 @@ interface Scene {
 2. **タイミング（合意済み・#180）**: **自動逐次を既定＋簡易手動 `startSec`（場面内・単一トラック）**。複数トラック/キーフレームは非対象。これに伴い **§10 を上記のとおり狭める**（Accepted 時に `CLAUDE.md §10` へ反映）。
 3. **行の声の表現（推奨・要確認）**: 行は**数値 speaker（#177 カタログ）**で表す（文字列 voiceId ではなく）。
 4. **字幕の既定（合意済み・#180）**: 行 `subtitleText` 未指定時は **`line.text` を字幕に流用**。`lines` 駆動時は静的 `texts['subtitle']` を上書き。
-5. **尺の扱い（推奨・要確認）**: `scene.durationSec` を権威尺のままにし、行音声合計の超過は**警告**に留める（自動延長しない）。
+5. **尺の扱い（推奨・要確認）**: `scene.durationSec` を権威尺のままにし、行音声合計の超過は**警告**に留める（自動延長しない・**超過分は場面末でカット**）。
 6. **書き出し単位（推奨・要確認）**: 多行を**行＝セグメント**で焼く（追加A 実現のため）。
 
 > 1/2/4 は合意済み（#180）。3/5/6 を確認のうえ PR-B（モデル＋移行）から着手する。
