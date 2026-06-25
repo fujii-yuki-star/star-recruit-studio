@@ -83,6 +83,32 @@ describe('layoutScene', () => {
   });
 });
 
+describe('layoutScene character ゲート（#171・テンプレ依存・enabled 不参照）', () => {
+  // ゆうこの表示有無はテンプレ（character レイヤーの有無）と poseAssetId で決まる。
+  // 旧・場面ごとの表示トグル（character.enabled）は描画では参照しない（互換のため値は残す・01§7.3）。
+  it('character.enabled が false でも poseAssetId があれば ゆうこを描画する', () => {
+    const sceneEnabledFalse: Scene = {
+      ...scene,
+      character: { enabled: false, characterId: 'yuko', poseAssetId: 'yuko_smile_001' },
+    };
+    const character = layoutScene(sceneEnabledFalse, openingTemplate).items.find(
+      (i): i is ImageItem => i.kind === 'image' && i.role === 'character',
+    );
+    expect(character?.assetId).toBe('yuko_smile_001');
+  });
+
+  it('poseAssetId が無ければ character.enabled が true でも描画しない', () => {
+    const sceneNoPose: Scene = {
+      ...scene,
+      character: { enabled: true, characterId: 'yuko' }, // poseAssetId 無し
+    };
+    const character = layoutScene(sceneNoPose, openingTemplate).items.find(
+      (i): i is ImageItem => i.kind === 'image' && i.role === 'character',
+    );
+    expect(character).toBeUndefined();
+  });
+});
+
 describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
   const freeTemplate: Template = {
     schemaVersion: '1.0',
