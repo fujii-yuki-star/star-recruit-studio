@@ -200,6 +200,8 @@ export function FreeLayoutOverlay({
                 onContextMenu={(e) => e.stopPropagation()} // 編集中はブラウザ標準の右クリックを使う
                 onBlur={() => setEditingId(null)}
                 onKeyDown={(e) => {
+                  // 日本語IMEの変換中（isComposing）は Enter=変換確定 / Esc=変換取消 を IME に委ね、編集を抜けない。
+                  if (e.nativeEvent.isComposing) return;
                   // Enter（Shift 無し）/Esc で確定して抜ける。改行は Shift+Enter。
                   if (e.key === "Escape" || (e.key === "Enter" && !e.shiftKey)) {
                     e.preventDefault();
