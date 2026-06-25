@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createPartId,
+  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createLineId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
   isSupportedSchemaVersion, parseProjectDoc,
 } from './persistence';
@@ -92,6 +92,22 @@ describe('createFreeElementId (§2.1 free_{NNN}・scene 内一意)', () => {
   });
 });
 
+describe('createLineId (§2.1 line_{NNN}・scene 内一意・ADR-0015)', () => {
+  it('既存が無ければ line_001', () => {
+    expect(createLineId([])).toBe('line_001');
+  });
+  it('既存と衝突しない最小番号を採る', () => {
+    expect(createLineId(['line_001', 'line_002'])).toBe('line_003');
+  });
+  it('番号に隙間があれば最小空き番号を返す', () => {
+    expect(createLineId(['line_001', 'line_003'])).toBe('line_002');
+  });
+  it('999 を超えると4桁になる（pattern ^line_[0-9]{3,}$）', () => {
+    const existing = Array.from({ length: 999 }, (_, i) => `line_${String(i + 1).padStart(3, '0')}`);
+    expect(createLineId(existing)).toBe('line_1000');
+  });
+});
+
 describe('assembleProject', () => {
   it('schemaVersion を付与し配列を含める', () => {
     const p = assembleProject(header(), [], [], []);
@@ -126,6 +142,22 @@ describe('parseProjectDoc', () => {
     const back = parseProjectDoc(JSON.stringify(p));
     expect(back.projectId).toBe(p.projectId);
     expect(back.scenes).toEqual([]);
+  });
+  it('掛け合い：scene.lines を持つ project が往復で保持される（1.8・ADR-0015）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'tpl',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' },
+      lines: [
+        { lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' },
+        { lineId: 'line_002', text: 'どうも', speaker: 2, status: 'none' },
+      ],
+      warnings: [],
+    };
+    const doc = { ...assembleProject(header(), [], [], []), scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(back.scenes[0].lines?.map((l) => l.speaker)).toEqual([3, 2]);
   });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;

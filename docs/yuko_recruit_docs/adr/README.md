@@ -21,7 +21,7 @@
 | [0012](0012-aspect-ratio-and-portrait.md) | 画面比率の拡張と縦型動画（9:16・1080×1920）対応 | **Accepted** |
 | [0013](0013-h264-via-media-foundation.md) | H.264 書き出しを Media Foundation（h264_mf）主経路に | **Accepted** |
 | [0014](0014-component-test-foundation.md) | コンポーネント/対話テスト基盤（Vitest + Testing Library + jsdom） | **Accepted** |
-| [0015](0015-dialogue-timeline-model.md) | 掛け合い＝場面のセリフ列（ミニタイムライン）モデル | **Proposed** |
+| [0015](0015-dialogue-timeline-model.md) | 掛け合い＝場面のセリフ列（ミニタイムライン）モデル | **Accepted** |
 
 ## 状態の意味
 

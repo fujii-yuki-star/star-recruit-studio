@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.7" },
+    "schemaVersion": { "const": "1.8" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -206,7 +206,9 @@
         "audioMix": { "$ref": "#/$defs/AudioMix" },
         "transition": { "$ref": "#/$defs/Transition" },
         "warnings": { "type": "array", "items": { "$ref": "#/$defs/Warning" } },
-        "freeLayout": { "type": "array", "items": { "$ref": "#/$defs/FreeElement" } }
+        "freeLayout": { "type": "array", "items": { "$ref": "#/$defs/FreeElement" } },
+        "lines": { "type": "array", "items": { "$ref": "#/$defs/NarrationLine" } },
+        "subtitleEnabledDefault": { "type": "boolean" }
       }
     },
     "SceneCategory": {
@@ -279,6 +281,24 @@
         "speed": { "type": ["number", "null"] },
         "pitch": { "type": ["number", "null"] },
         "intonation": { "type": ["number", "null"] },
+        "voicePath": { "type": ["string", "null"] },
+        "status": { "enum": ["none", "pending", "generated", "failed"] }
+      }
+    },
+    "NarrationLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "掛け合い：場面のセリフ列の1行（ADR-0015・#180）。null/未指定は継承（11_SCHEMA_REFERENCE.md §6）。",
+      "required": ["lineId", "text", "status"],
+      "properties": {
+        "lineId": { "type": "string", "pattern": "^line_[0-9]{3,}$" },
+        "text": { "type": "string" },
+        "speaker": { "type": ["integer", "null"], "minimum": 0 },
+        "speed": { "type": ["number", "null"] },
+        "pitch": { "type": ["number", "null"] },
+        "subtitleText": { "type": ["string", "null"] },
+        "subtitleEnabled": { "type": "boolean" },
+        "startSec": { "type": "number", "minimum": 0 },
         "voicePath": { "type": ["string", "null"] },
         "status": { "enum": ["none", "pending", "generated", "failed"] }
       }

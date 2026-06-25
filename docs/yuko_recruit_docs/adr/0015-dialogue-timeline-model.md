@@ -1,6 +1,6 @@
 # ADR-0015: 掛け合い＝場面のセリフ列（ミニタイムライン）モデル
 
-- **状態**: Proposed（Draft・2026-06-25・#180）— **合意後にサブPRへ分割**して実装する
+- **状態**: Accepted（2026-06-25・#180）— 合意済み（①②④＝#180 ユーザー確認・③⑤⑥ 採用）。サブPRへ分割して実装する
 - **日付**: 2026-06-25
 - **関連**: `11_SCHEMA_REFERENCE.md §6,§7,§1` / `12_AI_PROMPT_AND_MAPPING.md` / [`adr/0003`](0003-narration-voice.md)（複数話者・動的クレジット＝#177）/ [`adr/0009`](0009-scene-transitions.md) / `CLAUDE.md §10`（MVP 非対象＝本格タイムライン編集）
 - **対象 issue**: #180（EPIC）＝ req7b（セリフごと別ボイス）＋追加A（経過秒でテキスト変化）＋追加B（セリフ連動の自動字幕・ON/OFF）
@@ -96,8 +96,8 @@ interface Scene {
 ## 実装計画（サブPR・各 PR で check:frontend 緑＋canon-check）
 
 1. **本 ADR**（合意）。
-2. **PR-B モデル＋移行**: `NarrationLine`/`scene.lines`、schema 1.8、`sceneLines()`/`lineFromNarration()` アクセサ、検証。**挙動不変**（全消費側はアクセサ経由＝既存は1行に解決）。純粋ロジックのテスト（採番・移行・アクセサ）。
-3. **PR-C 行ごと音声生成・保存**: `narrationAudioById` を **(sceneId,lineId) キー**へ、`voiceFs` を行ごとパスへ、生成/状態を行ごとへ。`narrationProgress` を行集計へ。
+2. **PR-B モデル＋移行**: `NarrationLine`/`scene.lines`、schema 1.8、`sceneLines()`/`lineFromNarration()` アクセサ、**schema 検証（V2 相当）**。**挙動不変**（全消費側はアクセサ経由＝既存は1行に解決）。純粋ロジックのテスト（採番・移行・アクセサ）。V16–V19 の意味検証は本 PR には含めない。
+3. **PR-C 行ごと音声生成・保存**: `narrationAudioById` を **(sceneId,lineId) キー**へ、`voiceFs` を行ごとパスへ、生成/状態を行ごとへ。`narrationProgress` を行集計へ。**＋V16–V19 の domain 検証（lineId 一意・startSec 範囲/順序・speaker 実在）を導入**（読込時の再採番/clamp）。
 4. **PR-D 描画（追加A＋追加B）**: 時刻→有効行→字幕/文字の切替、行ごと字幕 ON/OFF、場面/書き出しの既定継承。
 5. **PR-E 書き出し（行＝セグメント）**: 多行場面をセグメント列へ一般化（フレーム＋音声＋尺）。`buildExportScenes`/`ffmpegExport` をセグメント単位へ。
 6. **PR-F UI（req7b＋簡易タイミング）**: セリフ列の追加/並べ替え/削除、行ごと話者選択（#177 カタログ）、行ごと字幕 ON/OFF・文言、**行ごと開始秒の簡易調整（場面内・単一トラックのミニタイムライン）**。既存の単一ナレーション編集は「1行」として自然に包含。

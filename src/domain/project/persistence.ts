@@ -13,8 +13,8 @@ import type {
   ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。 */
-export const PROJECT_SCHEMA_VERSION = '1.7';
+/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。1.5→1.6：FREE 図形種別/枠線（#173）。1.6→1.7：テキストごとのフォント（#178）。1.7→1.8：掛け合い＝scene.lines（NarrationLine[]）＋scene.subtitleEnabledDefault を追加（任意・narration 残置・ADR-0015/#180）。 */
+export const PROJECT_SCHEMA_VERSION = '1.8';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
@@ -137,6 +137,11 @@ export function createFreeElementId(existingIds: readonly string[]): string {
   return nextNumberedId('free', existingIds);
 }
 
+/** line_NNN を発行する（§2.1・セリフ行 id・scene 内一意・ADR-0015）。 */
+export function createLineId(existingIds: readonly string[]): string {
+  return nextNumberedId('line', existingIds);
+}
+
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
 export function assembleProject(
   header: ProjectHeader,
@@ -202,7 +207,7 @@ export function parseProjectDoc(text: string): Project {
   return migrateProject(doc as unknown as Project);
 }
 
-/** 読込時に旧バージョン(1.0〜1.6)を現行(1.7)へ移行する。
+/** 読込時に旧バージョン(1.0〜1.7)を現行(1.8)へ移行する。
  *  1.0→1.1: videoKind 既定 recruit・companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
  *  1.1→1.2: videoSettings.width/height を除去（aspectRatio を単一の真実に＝ADR-0012）。
  *  1.2→1.3: videoSettings.fontId を補完（同梱フォント選択・未指定は既定フォント）。
@@ -210,7 +215,8 @@ export function parseProjectDoc(text: string): Project {
  *  1.4→1.5: 未知の scene.fontId を継承（未指定）へ落とす（場面ごとのフォント・追加は任意フィールド）。
  *  1.5→1.6: FREE 図形の種別追加（rounded_rect/triangle/star/arrow/speech_bubble）＋枠線（strokeColor/strokeWidth）。
  *          いずれも後方互換の任意追加のため、版番号の付け替え以外の変換は不要（#173）。
- *  1.6→1.7: テキストごとのフォント（FreeElement.fontId＋scene.textFontIds）。後方互換の任意追加＝変換不要（#178）。 */
+ *  1.6→1.7: テキストごとのフォント（FreeElement.fontId＋scene.textFontIds）。後方互換の任意追加＝変換不要（#178）。
+ *  1.7→1.8: 掛け合い（scene.lines＝NarrationLine[]＋scene.subtitleEnabledDefault）。後方互換の任意追加＝変換不要（ADR-0015/#180）。 */
 function migrateProject(project: Project): Project {
   const next: Project = {
     ...project,
