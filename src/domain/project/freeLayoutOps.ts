@@ -47,9 +47,15 @@ export function createFreeElement(freeLayout: FreeElement[], kind: FreeElementKi
   }
 }
 
-/** 指定 kind の新規要素を末尾に追加した配列を返す。 */
-export function addFreeElement(freeLayout: FreeElement[], kind: FreeElementKind): FreeElement[] {
-  return [...freeLayout, createFreeElement(freeLayout, kind)];
+/**
+ * 指定 kind の新規要素を末尾に追加した配列と、新要素の id を返す。
+ * UI はこの newId で追加直後の要素を選択状態にできる（duplicateFreeElement と同形・#179）。
+ */
+export function addFreeElement(
+  freeLayout: FreeElement[], kind: FreeElementKind,
+): { freeLayout: FreeElement[]; newId: string } {
+  const el = createFreeElement(freeLayout, kind);
+  return { freeLayout: [...freeLayout, el], newId: el.id };
 }
 
 /**
