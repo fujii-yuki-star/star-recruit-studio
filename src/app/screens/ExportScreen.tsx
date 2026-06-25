@@ -10,7 +10,9 @@ import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
 import { NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
+import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { ASSET_TYPE } from "../../domain/enums";
 import { fontFamilyForId, resolveFontId, FONT_CATALOG } from "../../domain/font/fontCatalog";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
@@ -129,7 +131,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : undefined;
         },
         (done, total) => setProgress({ done, total }),
-        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)) },
+        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)), credit: creditForSpeaker(getVoicevoxSpeaker()) },
       );
       setPhase("encoding");
       let bgm: BgmInput | undefined;

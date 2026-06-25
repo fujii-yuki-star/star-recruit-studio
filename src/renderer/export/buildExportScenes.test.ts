@@ -5,11 +5,11 @@ vi.mock('../layout', () => ({ layoutScene: vi.fn(() => ({ items: [] })) }));
 vi.mock('../sceneSvg', () => ({ layoutToSvg: vi.fn(() => '<svg/>') }));
 vi.mock('./rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,PNG') }));
 vi.mock('./videoSceneSplit', () => ({
-  splitVideoSceneSvg: () => ({
+  splitVideoSceneSvg: vi.fn(() => ({
     belowSvg: '<below/>',
     aboveSvg: '<above/>',
     slot: { x: 80, y: 140, w: 1040, h: 800 },
-  }),
+  })),
 }));
 
 import type { Scene } from '../../domain/project/types';
@@ -19,6 +19,7 @@ import type { LayoutItem, SceneLayout } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { svgToPngDataUrl } from './rasterize';
+import { splitVideoSceneSvg } from './videoSceneSplit';
 import { buildExportScenes } from './buildExportScenes';
 
 // buildExportScenes が参照するのは templateId / durationSec / (narrationFor へ渡す scene) のみ。
@@ -108,6 +109,20 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
     });
   });
 
+  it('opts.credit を渡すと splitVideoSceneSvg の credit 引数（6番目）に反映（#177・動画シーン）', async () => {
+    vi.mocked(splitVideoSceneSvg).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      noAsset,
+      undefined,
+      () => ({ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover', clipStartSec: 0, useOriginalAudio: false, speed: 1 }),
+      undefined,
+      { credit: 'VOICEVOX:四国めたん' },
+    );
+    expect(vi.mocked(splitVideoSceneSvg).mock.calls[0]?.[5]).toBe('VOICEVOX:四国めたん');
+  });
+
   it('videoSlotFor 未指定なら従来どおり単一PNG（video なし）', async () => {
     const out = await buildExportScenes(
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
@@ -144,6 +159,12 @@ describe('buildExportScenes：字幕トグル（withSubtitle）', () => {
     vi.mocked(layoutToSvg).mockClear();
     await buildExportScenes(oneScene, templateById, noAsset);
     expect(vi.mocked(layoutToSvg).mock.calls[0]?.[1]?.credit).toBe(NARRATOR_CREDIT);
+  });
+
+  it('opts.credit を渡すと layoutToSvg のクレジットに反映（#177・動的クレジット）', async () => {
+    vi.mocked(layoutToSvg).mockClear();
+    await buildExportScenes(oneScene, templateById, noAsset, undefined, undefined, undefined, { credit: 'VOICEVOX:四国めたん' });
+    expect(vi.mocked(layoutToSvg).mock.calls[0]?.[1]?.credit).toBe('VOICEVOX:四国めたん');
   });
 });
 

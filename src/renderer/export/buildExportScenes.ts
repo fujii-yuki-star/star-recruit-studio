@@ -75,6 +75,8 @@ export interface ExportOptions {
   outputSize?: { width: number; height: number };
   /** 場面ごとの描画フォントを返す（場面→動画全体で解決済み・fontCatalog.fontFamilyForId の戻り値）。未指定は既定フォント。 */
   fontFamilyFor?: (scene: Scene) => string;
+  /** 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。未指定は既定（NARRATOR_CREDIT＝ずんだもん・#177）。 */
+  credit?: string;
 }
 
 /**
@@ -93,6 +95,8 @@ export async function buildExportScenes(
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
     opts.withSubtitle === false ? (it) => !(it.kind === 'text' && it.isSubtitle) : undefined;
+  // 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。export 全体で一定（#177）。
+  const credit = opts.credit ?? NARRATOR_CREDIT;
   const out: ExportSceneData[] = [];
   // out と 1:1 で対応する「書き出し対象になった場面」。トランジションの境界計算（後処理）に使う。
   const included: Scene[] = [];
@@ -123,7 +127,7 @@ export async function buildExportScenes(
       const videoSlot = videoSlotFor?.(scene);
       const sceneFontFamily = opts.fontFamilyFor?.(scene); // 場面→動画全体で解決済みの font-family
       const split = videoSlot
-        ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc, itemFilter, sceneFontFamily)
+        ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc, itemFilter, sceneFontFamily, credit)
         : null;
       // 出力解像度（未指定はキャンバス＝フルHD）。全場面を同一サイズで焼く（後段 concat -c copy の前提）。
       const cw = template.canvas.width;
@@ -167,7 +171,7 @@ export async function buildExportScenes(
         }
         // 静止画シーン（従来）。
         const pngBase64 = await svgToPngDataUrl(
-          layoutToSvg(layout, { assetSrc, itemFilter, credit: NARRATOR_CREDIT, fontFamily: sceneFontFamily }),
+          layoutToSvg(layout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
           width,
           height,
         );
