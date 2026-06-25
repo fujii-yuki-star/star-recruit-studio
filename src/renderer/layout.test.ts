@@ -68,6 +68,21 @@ describe('layoutScene', () => {
     expect(texts.find((i) => i.text.includes('紹介します'))?.isSubtitle).toBe(true); // subtitle
   });
 
+  it('opts.subtitleText で字幕レイヤーの文言を上書きする（掛け合い・追加A/B）', () => {
+    const texts = layoutScene(scene, openingTemplate, { subtitleText: '行の字幕' }).items.filter(
+      (i): i is TextItem => i.kind === 'text',
+    );
+    expect(texts.find((i) => i.isSubtitle)?.text).toBe('行の字幕'); // 字幕は上書き
+    expect(texts.find((i) => i.text.includes('ようこそ'))).toBeTruthy(); // 通常テキスト（title）は不変
+  });
+
+  it('opts.subtitleText=null で字幕を出さない（行で OFF）', () => {
+    const subs = layoutScene(scene, openingTemplate, { subtitleText: null }).items.filter(
+      (i) => i.kind === 'text' && i.isSubtitle,
+    );
+    expect(subs).toHaveLength(0);
+  });
+
   it('scene.textFontIds[textKey] が該当 text アイテムの fontId に反映される（#178）', () => {
     const withFonts: Scene = { ...scene, textFontIds: { title: 'kaitou-yokoku-gothic' } };
     const texts = layoutScene(withFonts, openingTemplate).items.filter((i): i is TextItem => i.kind === 'text');

@@ -3,6 +3,7 @@ import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
+import { resolveLineSubtitle } from "../../domain/project/lineTimeline";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -68,8 +69,12 @@ export function ScenePreview({ scene, template }: { scene?: Scene; template?: Te
     );
   }
 
+  // 掛け合い（明示 lines）は先頭行の字幕を編集プレビューに反映（追加A/B）。時刻送りの切替はプレビュー再生（別画面・PR-E）。
+  const firstLine = scene.lines && scene.lines.length > 0 ? scene.lines[0] : undefined;
+  const lineSub = firstLine ? resolveLineSubtitle(firstLine, scene) : undefined;
+  const layoutOpts = lineSub ? { subtitleText: lineSub.enabled ? lineSub.text : null } : undefined;
   // responsive:true で SVG ルートを 100%（viewBox は canvas 実寸を保持）にし、外枠の実寸は計測結果に従う。
-  const svg = layoutToSvg(layoutScene(scene, template), {
+  const svg = layoutToSvg(layoutScene(scene, template, layoutOpts), {
     assetSrc: (id) => (id ? assetSrcById[id] : undefined),
     responsive: true,
     // プレビューも書き出しと同じく常時クレジットを表示（ADR-0001 パリティ）。選択話者のキャラを動的に（#177）。
