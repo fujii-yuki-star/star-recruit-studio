@@ -321,6 +321,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedId(id);
     setConfirmDelete(false);
     setSelectedFreeId(null); // 場面が変わったら自由配置の選択は持ち越さない
+    setEditPopover(null); // 開いていた kind 別エディタも閉じる（旧場面の要素 id を指したまま残さない）
     setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
   };
 
@@ -477,6 +478,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     <div
                       style={{ position: "fixed", inset: 0, zIndex: 60 }}
                       onPointerDown={() => setEditPopover(null)}
+                      onContextMenu={(e) => { e.preventDefault(); setEditPopover(null); }}
                     />
                     <div
                       role="dialog"
