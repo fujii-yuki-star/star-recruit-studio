@@ -73,7 +73,16 @@ const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 const zOf = (layer: Layer): number => layer.zIndex ?? DEFAULT_Z[layer.type];
 
 /** シーンをテンプレに沿って配置解決する。 */
-export function layoutScene(scene: Scene, template: Template): SceneLayout {
+/** layoutScene のオプション（掛け合いの行字幕の上書き等・ADR-0015 追加A/B）。 */
+export interface LayoutOptions {
+  /**
+   * subtitle レイヤーの文言を上書きする。string＝その文言を表示／null＝字幕を出さない（行で OFF）／
+   * 未指定＝従来どおり scene.texts['subtitle'] を使う。
+   */
+  subtitleText?: string | null;
+}
+
+export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptions): SceneLayout {
   const backgroundColor = template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR;
   const items: LayoutItem[] = [];
 
@@ -121,7 +130,11 @@ export function layoutScene(scene: Scene, template: Template): SceneLayout {
       }
       case 'text':
       case 'subtitle': {
-        const text = layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
+        // 掛け合い：subtitle レイヤーのみ行の字幕で上書き（追加A/B）。null＝非表示・未指定＝従来。
+        const overrideSub = layer.type === 'subtitle' && opts != null && 'subtitleText' in opts;
+        const text = overrideSub
+          ? opts.subtitleText ?? ''
+          : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
         if (text.length === 0) break;
         const bg = layer.type === 'subtitle' && layer.background?.enabled
           ? {
