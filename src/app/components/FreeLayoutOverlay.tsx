@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
@@ -62,6 +62,14 @@ export function FreeLayoutOverlay({
   // インライン編集中のテキスト要素 id。
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Escape で右クリックメニューを閉じる（role="menu" の期待動作・フォーカス位置に依らず効く）。
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menu]);
+
   // ルートで pointer capture することで、要素/ハンドルの押下後はドラッグがプレビュー外に出ても追従する。
   const beginDrag = (
     e: ReactPointerEvent, el: FreeElement, mode: "move" | "resize", corner?: ResizeCorner,
@@ -116,14 +124,13 @@ export function FreeLayoutOverlay({
   };
 
   const menuEl = menu ? freeLayout.find((e) => e.id === menu.id) ?? null : null;
-  // メニュー項目（「編集」はテキスト→インライン編集、それ以外→選択。他は #172 のハンドラ）。
+  // メニュー項目。「編集」はテキストのみ＝インライン編集へ（非テキストで無操作にしない＝§2-5）。
+  // 素材/図形の kind 別エディタは別PRで「編集」に追加予定。
   const menuItems: { label: string; danger?: boolean; run: (id: string) => void }[] = menuEl
     ? [
-        {
-          label: "編集",
-          run: (id) =>
-            menuEl.kind === FREE_ELEMENT_KIND.text ? setEditingId(id) : onSelect(id),
-        },
+        ...(menuEl.kind === FREE_ELEMENT_KIND.text
+          ? [{ label: "編集", run: (id: string) => setEditingId(id) }]
+          : []),
         { label: "複製", run: onDuplicate },
         { label: "前面", run: onBringToFront },
         { label: "背面", run: onSendToBack },
