@@ -104,6 +104,13 @@ export const SLOT_TYPE = {
 export const FITS = ['cover', 'contain', 'stretch'] as const;
 export type Fit = (typeof FITS)[number];
 
+/** Fit の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
+export const FIT = {
+  cover: 'cover',
+  contain: 'contain',
+  stretch: 'stretch',
+} as const satisfies Record<string, Fit>;
+
 export const TEXT_KEYS = ['title', 'main', 'subtitle', 'caption', 'url'] as const;
 export type TextKey = (typeof TEXT_KEYS)[number];
 

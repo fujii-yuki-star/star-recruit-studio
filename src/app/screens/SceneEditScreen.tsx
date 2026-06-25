@@ -5,6 +5,7 @@ import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, removeFreeElement, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { useProjectStore } from "../store/projectStore";
@@ -213,6 +214,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: bringFreeElementToFront(s.freeLayout ?? [], id) }));
   const sendFreeElBackward = (id: string) =>
     patch((s) => ({ ...s, freeLayout: sendFreeElementToBack(s.freeLayout ?? [], id) }));
+  // 見た目パーツを一括展開し、追加した先頭要素を選択（所在を明示＝利便性・#175）。
+  // updater 内で最新 s.freeLayout から計算（updateScene→set は同期実行で newIds は下の前に確定）。
+  const addFreeComponent = (componentId: string) => {
+    let newIds: string[] = [];
+    patch((s) => {
+      const result = addFreeComponentGroup(s.freeLayout ?? [], componentId);
+      newIds = result.newIds;
+      return { ...s, freeLayout: result.freeLayout };
+    });
+    if (newIds[0]) setSelectedFreeId(newIds[0]);
+  };
   // 素材(Asset 単位)のクリップ設定を部分更新（FREE slot 動画の調整に使う。通常スロットと同じ Asset.clip）。
   const patchAssetClip = (assetId: string, p: Partial<NonNullable<Asset["clip"]>>) =>
     updateAsset(assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }));
@@ -694,6 +706,20 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.shape)}>
                     <PlusIcon size={14} />図形
                   </button>
+                </div>
+                <div className="field" style={{ marginBottom: 8 }}>
+                  <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>見た目パーツ</label>
+                  <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+                    {FREE_COMPONENTS.map((c) => (
+                      <button
+                        key={c.id}
+                        className="btn btn-secondary btn-icon text-sm"
+                        onClick={() => addFreeComponent(c.id)}
+                      >
+                        <PlusIcon size={14} />{c.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="toggle-row">
                   <span className="field-label text-sm" style={{ margin: 0 }}>グリッドに合わせる</span>
