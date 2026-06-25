@@ -216,10 +216,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: sendFreeElementToBack(s.freeLayout ?? [], id) }));
   // 見た目パーツを一括展開し、追加した先頭要素を選択（所在を明示＝利便性・#175）。
   // updater 内で最新 s.freeLayout から計算（updateScene→set は同期実行で newIds は下の前に確定）。
-  const addFreeComponent = (partId: string) => {
+  const addFreeComponent = (componentId: string) => {
     let newIds: string[] = [];
     patch((s) => {
-      const result = addFreeComponentGroup(s.freeLayout ?? [], partId);
+      const result = addFreeComponentGroup(s.freeLayout ?? [], componentId);
       newIds = result.newIds;
       return { ...s, freeLayout: result.freeLayout };
     });

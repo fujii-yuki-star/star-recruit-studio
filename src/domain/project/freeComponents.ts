@@ -54,10 +54,10 @@ export const FREE_COMPONENTS: FreeComponent[] = [
     id: 'before_after',
     label: 'ビフォーアフター',
     elements: [
-      { kind: FREE_ELEMENT_KIND.text, x: 0, y: 0, w: 360, h: 56, text: 'Before', fontSize: 40, color: '#666666', fontWeight: FONT_WEIGHT.bold },
+      { kind: FREE_ELEMENT_KIND.text, x: 0, y: 0, w: 360, h: 56, text: 'ビフォー', fontSize: 40, color: '#666666', fontWeight: FONT_WEIGHT.bold },
       { kind: FREE_ELEMENT_KIND.slot, x: 0, y: 64, w: 360, h: 240, assetId: null, fit: FIT.cover },
       { kind: FREE_ELEMENT_KIND.shape, x: 384, y: 150, w: 112, h: 72, shapeType: FREE_SHAPE_TYPE.arrow, fillColor: '#888888', opacity: 1 },
-      { kind: FREE_ELEMENT_KIND.text, x: 520, y: 0, w: 360, h: 56, text: 'After', fontSize: 40, color: '#666666', fontWeight: FONT_WEIGHT.bold },
+      { kind: FREE_ELEMENT_KIND.text, x: 520, y: 0, w: 360, h: 56, text: 'アフター', fontSize: 40, color: '#666666', fontWeight: FONT_WEIGHT.bold },
       { kind: FREE_ELEMENT_KIND.slot, x: 520, y: 64, w: 360, h: 240, assetId: null, fit: FIT.cover },
     ],
   },
@@ -78,9 +78,9 @@ export const FREE_COMPONENTS: FreeComponent[] = [
  * 各要素は新 id を採番し、基準位置＋相対座標＋ずらし量で配置、zIndex は既存最前面より上にテンプレ順で積む。
  */
 export function addFreeComponentGroup(
-  freeLayout: FreeElement[], partId: string,
+  freeLayout: FreeElement[], componentId: string,
 ): { freeLayout: FreeElement[]; newIds: string[] } {
-  const part = FREE_COMPONENTS.find((c) => c.id === partId);
+  const part = FREE_COMPONENTS.find((c) => c.id === componentId);
   if (!part) return { freeLayout, newIds: [] };
   const baseZ = freeLayout.reduce((max, e) => Math.max(max, e.zIndex ?? 0), 0);
   const stagger = (freeLayout.length % STAGGER_CYCLE) * STAGGER_STEP;
