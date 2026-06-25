@@ -188,10 +188,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const removeFreeEl = (id: string) =>
     patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id) }));
   // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
+  // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
+  // updateScene→set は同期実行のため、newId は下の setSelectedFreeId より前に確実に代入される。
   const duplicateFreeEl = (id: string) => {
-    const result = duplicateFreeElement(selected.freeLayout ?? [], id);
-    patch((s) => ({ ...s, freeLayout: result.freeLayout }));
-    if (result.newId) setSelectedFreeId(result.newId);
+    let newId: string | null = null;
+    patch((s) => {
+      const result = duplicateFreeElement(s.freeLayout ?? [], id);
+      newId = result.newId;
+      return { ...s, freeLayout: result.freeLayout };
+    });
+    if (newId) setSelectedFreeId(newId);
   };
   const bringFreeElForward = (id: string) =>
     patch((s) => ({ ...s, freeLayout: bringFreeElementToFront(s.freeLayout ?? [], id) }));

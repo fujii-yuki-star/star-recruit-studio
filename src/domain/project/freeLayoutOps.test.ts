@@ -225,6 +225,22 @@ describe('resizeFreeElement：縦横比維持（Shift / lockAspect）', () => {
     expect(r.h).toBe(20); // 短辺が min で止まる
     expect(r.w / r.h).toBeCloseTo(2, 5);
   });
+
+  it('ne：比を保ち対角（左下）を固定（movesNorth/East 分岐）', () => {
+    const r = resizeFreeElement(start, 'ne', 100, -50, 20, 0, true);
+    expect(r).toEqual({ x: 100, y: 50, w: 300, h: 150 });
+    expect(r.x).toBe(100); // 左辺固定
+    expect(r.y + r.h).toBe(200); // 下辺固定
+    expect(r.w / r.h).toBeCloseTo(2, 5);
+  });
+
+  it('sw：比を保ち対角（右上）を固定（movesWest/South 分岐）', () => {
+    const r = resizeFreeElement(start, 'sw', -100, 50, 20, 0, true);
+    expect(r).toEqual({ x: 0, y: 100, w: 300, h: 150 });
+    expect(r.x + r.w).toBe(300); // 右辺固定
+    expect(r.y).toBe(100); // 上辺固定
+    expect(r.w / r.h).toBeCloseTo(2, 5);
+  });
 });
 
 describe('snapToGrid とグリッド吸着（FREE 仕上げ）', () => {
