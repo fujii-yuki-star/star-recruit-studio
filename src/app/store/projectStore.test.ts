@@ -105,3 +105,44 @@ describe('projectStore generateNarration 再入ガード', () => {
     expect(useProjectStore.getState().scenes[0].narration.status).toBe('pending'); // 変化しない
   });
 });
+
+describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-C2）', () => {
+  it('明示 lines は行ごとに合成し、各行 generated＋行キー(sceneId/lineId)で音声を持つ', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        ...scene('scene_001', 1),
+        lines: [
+          { lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' },
+          { lineId: 'line_002', text: 'どうも', speaker: 2, status: 'none' },
+        ],
+      }],
+      narrationAudioById: {},
+      isGeneratingNarration: false,
+    });
+    await useProjectStore.getState().generateNarration('scene_001');
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].lines?.map((l) => l.status)).toEqual(['generated', 'generated']);
+    expect(st.narrationAudioById['scene_001/line_001']).toBeTruthy();
+    expect(st.narrationAudioById['scene_001/line_002']).toBeTruthy();
+  });
+
+  it('fromBulk は生成済み行を再合成しない（🔴1：生成済みは据え置き・音声を作らない）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        ...scene('scene_001', 1),
+        lines: [
+          { lineId: 'line_001', text: 'やあ', status: 'generated' },
+          { lineId: 'line_002', text: 'どうも', status: 'none' },
+        ],
+      }],
+      narrationAudioById: {},
+      isGeneratingNarration: false,
+    });
+    await useProjectStore.getState().generateNarration('scene_001', { fromBulk: true });
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].lines?.map((l) => l.status)).toEqual(['generated', 'generated']);
+    // 生成済みの line_001 は対象外＝音声は作られない。未生成の line_002 のみ合成される。
+    expect(st.narrationAudioById['scene_001/line_001']).toBeUndefined();
+    expect(st.narrationAudioById['scene_001/line_002']).toBeTruthy();
+  });
+});

@@ -857,7 +857,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     // 掛け合い（明示 lines）は行ごとに合成・保存する（ADR-0015 PR-C2）。単一 narration は下の従来経路。
     if (scene.lines && scene.lines.length > 0) {
-      const targets = scene.lines.filter((l) => l.text.trim().length > 0);
+      // fromBulk（全場面生成）では生成済み行を再合成しない（単一 narration と対称）。個別呼び出しは作り直し。
+      const targets = scene.lines.filter(
+        (l) => l.text.trim().length > 0 && (!opts?.fromBulk || l.status !== NARRATION_STATUS.generated),
+      );
       if (targets.length === 0) return;
       if (scene.lines.some((l) => l.status === NARRATION_STATUS.pending)) return; // 多重起動防止
       const setLineStatus = (lineId: string, status: Scene["narration"]["status"]) =>
@@ -876,7 +879,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           }));
         }
       } catch (e) {
-        for (const l of targets) setLineStatus(l.lineId, NARRATION_STATUS.failed);
+        // pending の行だけ failed にする（既に generated 済みの行とその音声は保持＝不整合を避ける）。
+        set((st) => ({
+          scenes: st.scenes.map((s) =>
+            s.sceneId === sceneId && s.lines
+              ? { ...s, lines: s.lines.map((l) => (l.status === NARRATION_STATUS.pending ? { ...l, status: NARRATION_STATUS.failed } : l)) }
+              : s,
+          ),
+        }));
         set({ narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。" });
       }
       return;
