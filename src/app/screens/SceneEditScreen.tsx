@@ -140,6 +140,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [editPopover, setEditPopover] = useState<{ id: string; x: number; y: number } | null>(null);
   // 自由配置：グリッドに合わせる（ドラッグ/リサイズの吸着＋グリッド表示）。表示設定・非永続。
   const [gridSnap, setGridSnap] = useState(false);
+  // 自由配置：詳細編集モード（選択した要素だけを編集面に出す＝長いスクロールを避ける・#179）。表示設定・非永続。
+  const [focusSelectedFree, setFocusSelectedFree] = useState(false);
   // ナレーションの▶再生に失敗したとき通知（§2-5・設定の試聴と扱いを統一）。
   const [narrationPlayError, setNarrationPlayError] = useState(false);
 
@@ -753,13 +755,39 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <span className="field-label text-sm" style={{ margin: 0 }}>グリッドに合わせる</span>
                   <Switch on={gridSnap} onChange={setGridSnap} label="グリッドに合わせる" />
                 </div>
+                <div className="toggle-row">
+                  <span className="field-label text-sm" style={{ margin: 0 }}>選択した要素だけ編集</span>
+                  <Switch on={focusSelectedFree} onChange={setFocusSelectedFree} label="選択した要素だけ編集" />
+                </div>
                 {freeLayout.length === 0 ? (
                   <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
                 ) : (
                   <div className="col gap-sm">
+                    {/* 詳細編集モード：選択要素を切り替えるチップ（カード一覧を長くスクロールせず選べる・#179）。 */}
+                    {focusSelectedFree && (
+                      <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+                        {freeLayout.map((el, i) => (
+                          <button
+                            key={el.id}
+                            className="btn btn-ghost text-sm"
+                            style={{ outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined }}
+                            onClick={() => setSelectedFreeId(el.id)}
+                            aria-pressed={el.id === selectedFreeId}
+                          >
+                            {freeKindLabel[el.kind]}{i + 1}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {focusSelectedFree && !freeLayout.some((el) => el.id === selectedFreeId) && (
+                      <p className="text-sm text-muted">編集する要素を、上のボタンかプレビューで選んでください。</p>
+                    )}
                     {/* 各フィールドの ?? 既定値は型安全のための保険（FreeElement の各フィールドは optional）。
                         正式な既定は domain の createFreeElement が必ず埋めるため通常は発動しない。 */}
-                    {freeLayout.map((el) => (
+                    {(focusSelectedFree
+                      ? freeLayout.filter((el) => el.id === selectedFreeId)
+                      : freeLayout
+                    ).map((el) => (
                       <div
                         key={el.id}
                         className="card-tight"
