@@ -133,6 +133,8 @@ src/
 
 > ※ **縦型動画（9:16）**は当初 MVP 除外だったが、ユーザー要件により**対応決定**（[`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**・2026-06-19・#118）＝本項の「縦型」除外を解除。**正方形（1:1）は引き続き MVP 外**（schema 枠のみ残す）。
 
+> ※ **場面内のセリフ簡易タイミング**（`scene.lines` の `startSec` 調整・単一トラック）は、掛け合い（[`adr/0015`](docs/yuko_recruit_docs/adr/0015-dialogue-timeline-model.md) **Accepted**・2026-06-25・#180）により**対応決定**＝本項「本格タイムライン編集」除外を**この範囲に狭める**。**複数トラック・キーフレームアニメ・場面横断タイムラインは引き続き MVP 外。**
+
 ---
 
 ## 11. 主要な設計判断（ADR）と未決定事項

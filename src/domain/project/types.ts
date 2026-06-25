@@ -129,6 +129,27 @@ export interface Narration {
   status: NarrationStatus;
 }
 
+/** 掛け合い：場面のセリフ列の1行（ADR-0015・#180）。null/未指定 = 場面/動画の既定を継承（11 §6）。 */
+export interface NarrationLine {
+  /** line_NNN（scene 内一意・§2.1）。 */
+  lineId: string;
+  /** 読み上げ（話す）テキスト。 */
+  text: string;
+  /** VOICEVOX speaker（#177 voiceCatalog）。null/未指定＝場面/動画の既定声を継承。 */
+  speaker?: number | null;
+  speed?: number | null;
+  pitch?: number | null;
+  /** 画面字幕の文言。未指定＝text を字幕に流用（追加B）。 */
+  subtitleText?: string | null;
+  /** この行の字幕 ON/OFF。未指定＝場面（subtitleEnabledDefault）→書き出し既定を継承。 */
+  subtitleEnabled?: boolean;
+  /** 明示開始秒（任意・簡易手動タイミング）。未指定＝直前行の積み上げ＝自動逐次。 */
+  startSec?: number;
+  /** 生成済み音声の保存先（行ごと）。 */
+  voicePath?: string | null;
+  status: NarrationStatus;
+}
+
 /** 全フィールド任意・null可。null = project 既定を継承（11 §6）。 */
 export interface AudioMix {
   narrationVolume?: number | null;
@@ -197,6 +218,10 @@ export interface Scene {
   character: Character;
   texts: Texts;
   narration: Narration;
+  /** 掛け合い：時間順のセリフ列（ADR-0015・#180）。あれば実効タイムライン＝sceneLines() がこれを返す。未設定＝単一 narration を1行とみなす。 */
+  lines?: NarrationLine[];
+  /** 場面の字幕既定 ON/OFF（行の subtitleEnabled 未指定時に継承・ADR-0015）。 */
+  subtitleEnabledDefault?: boolean;
   audioMix?: AudioMix;
   transition?: Transition;
   warnings: Warning[];
