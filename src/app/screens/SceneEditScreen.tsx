@@ -137,6 +137,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
+  const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
   // 自由配置で選択中の要素（オーバーレイのハンドル表示・編集カードの強調に使う）。
   const [selectedFreeId, setSelectedFreeId] = useState<string | null>(null);
   // 右クリック「編集」で開く kind 別エディタのポップオーバー（対象 id とビューポート座標）。
@@ -377,6 +379,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const selectScene = (id: string) => {
     setSelectedId(id);
     setConfirmDelete(false);
+    setConfirmDialogueOff(false); // 掛け合い解除の確認も場面ごとに持ち越さない
     setSelectedFreeId(null); // 場面が変わったら自由配置の選択は持ち越さない
     setEditPopover(null); // 開いていた kind 別エディタも閉じる（旧場面の要素 id を指したまま残さない）
     setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
@@ -872,14 +875,29 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <Switch
                   on={isDialogue}
                   onChange={(on) => {
-                    // 掛け合いをやめる時に2つ目以降のセリフが消えるので、複数あるときだけ確認する（誤操作防止）。
-                    if (!on && (selected.lines?.length ?? 0) > 1
-                      && !window.confirm("掛け合いをやめると、2つ目以降のセリフは消えます。よろしいですか？")) return;
+                    // 掛け合いをやめる時に2つ目以降のセリフが消えるので、複数あるときはインライン確認を出す（誤操作防止）。
+                    if (!on && (selected.lines?.length ?? 0) > 1) { setConfirmDialogueOff(true); return; }
                     patch(on ? promoteToLines : demoteFromLines);
                   }}
                   label="掛け合い（複数のセリフ）"
                 />
               </div>
+              {confirmDialogueOff && (
+                <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
+                  <span>掛け合いをやめると、2つ目以降のセリフは消えます。</span>
+                  <div className="row gap-sm" style={{ marginTop: 6 }}>
+                    <button
+                      className="btn btn-danger text-sm"
+                      onClick={() => { patch(demoteFromLines); setConfirmDialogueOff(false); }}
+                    >
+                      掛け合いをやめる
+                    </button>
+                    <button className="btn btn-ghost text-sm" onClick={() => setConfirmDialogueOff(false)}>
+                      キャンセル
+                    </button>
+                  </div>
+                </div>
+              )}
               {isDialogue ? (
                 <div className="col gap-sm" style={{ marginTop: 8 }}>
                   {(selected.lines ?? []).map((line, i) => {
