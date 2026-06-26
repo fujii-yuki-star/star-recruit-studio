@@ -1,6 +1,6 @@
 # ADR-0020: 取り消し/やり直し（Undo/Redo）モデル
 
-- **状態**: Proposed（Draft・2026-06-26・α-3 ① #211）
+- **状態**: Accepted（2026-06-26・α-3 ① #211・実装PRで実現）
 - **日付**: 2026-06-26
 - **関連**: [`adr/0016`](0016-detailed-editing-completion-roadmap.md)（詳細編集の完全化・**①の Undo/Redo は着手前にアーキ評価→必要なら独立ADR**＝未解決1）/ [`adr/0007`](0007-detailed-edit-mode.md)（詳細編集2モード）/ [`adr/0008`](0008-free-layout-editor.md)（FREE 自由配置）/ `src/app/store/projectStore.ts`（Zustand 単一ストア）/ `CLAUDE.md §4`（層分離）
 - **対象**: α-3 ①の最後。FREE 詳細編集を中心に、文書編集の取り消し/やり直しを入れる。

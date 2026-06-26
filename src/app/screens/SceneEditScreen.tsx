@@ -124,10 +124,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     status, scenes, templates, assets, generate, updateScene, updateAsset, addAsset, addAssetByPath, importError, clearImportError,
     addScene, removeScene, splitScene, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
+    undo, redo, beginHistoryGroup, endHistoryGroup,
   } = useProjectStore();
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const setFontId = useProjectStore((s) => s.setFontId);
+  // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
+  const canUndo = useProjectStore((s) => s.past.length > 0);
+  const canRedo = useProjectStore((s) => s.future.length > 0);
 
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
@@ -144,7 +148,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 複数選択（#206）。配列が真＝選択集合、末尾が「主」。単一要素編集（カード/詳細モード/ポップオーバー）は主を対象にする。
   const [selectedFreeIds, setSelectedFreeIds] = useState<string[]>([]);
   const selectedFreeId = selectedFreeIds.length > 0 ? selectedFreeIds[selectedFreeIds.length - 1] : null;
-  // 一括削除の確認中フラグ（Undo 未実装のため、複数まとめ削除は1段確認を挟む・#206/#211）。
+  // 一括削除の確認中フラグ（複数まとめ削除は破壊的なので誤操作防止の1段確認を挟む・#206。Undo でも戻せるが確認は維持）。
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   // 選択変更：additive（Shift+クリック）で選択トグル、通常はその要素だけ、null で全解除。選択が変われば一括削除の確認は取り消す。
   const selectFree = (id: string | null, additive = false) => {
@@ -176,6 +180,23 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [editPopover]);
+
+  // 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z＝取り消し・Ctrl/⌘+Shift+Z／Ctrl+Y＝やり直し。
+  // テキスト入力中（input/textarea/contentEditable）は標準の文字 Undo に任せ、ここでは奪わない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key !== "z" && key !== "y") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      e.preventDefault();
+      if (key === "y" || e.shiftKey) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
 
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
@@ -401,6 +422,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <input
               type="range" min={0} max={1} step={0.1} value={el.opacity ?? 1}
               onChange={(e) => patchFreeEl(el.id, { opacity: Number(e.target.value) })}
+              // 注: スライダーは range のため pointerup を取りこぼすと履歴グループが開きっぱなしになりうる。
+              // ドラッグ合成は確実な FREE オーバーレイ（pointer capture 有）に限定し、スライダーは各変更=1ステップとする（ADR-0020 未解決2・後続）。
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
           </div>
@@ -615,6 +638,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onDelete={removeFreeEl}
                     onChangeText={(id, text) => patchFreeEl(id, { text })}
                     onRequestEdit={openFreeEditPopover}
+                    onInteractionStart={beginHistoryGroup}
+                    onInteractionEnd={endHistoryGroup}
                   />
                 )}
                 {editPopover && editPopoverEl && (
@@ -692,7 +717,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
           {/* 右: 選択中の場面を編集 */}
           <div className="editor-col">
-            <h2 className="field-label">選択中の場面を編集</h2>
+            <div className="row-between" style={{ alignItems: "center" }}>
+              <h2 className="field-label" style={{ margin: 0 }}>選択中の場面を編集</h2>
+              {/* 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z・Ctrl+Y でも操作可。 */}
+              <div className="row gap-sm">
+                <button className="btn btn-ghost btn-icon text-sm" onClick={undo} disabled={!canUndo} aria-label="取り消す" title="取り消す（Ctrl+Z）">↶ 取り消す</button>
+                <button className="btn btn-ghost btn-icon text-sm" onClick={redo} disabled={!canRedo} aria-label="やり直す" title="やり直す（Ctrl+Y）">↷ やり直す</button>
+              </div>
+            </div>
 
             {/* 簡易/詳細トグル（ADR-0007 M-A：同一画面・同一データ）。オンで細かい調整を表示。 */}
             <div className="toggle-row">
