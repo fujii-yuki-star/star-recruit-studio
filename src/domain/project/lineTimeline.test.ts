@@ -104,4 +104,20 @@ describe('sceneSegmentSpecs（書き出しセグメント・PR-E）', () => {
       { lineId: 'line_002', subtitleText: null, durationSec: 7, isFirst: false }, // [3,10]・OFF→null
     ]);
   });
+
+  it('0秒セグメント（音声未測定で endSec===startSec）は出さない', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', status: NARRATION_STATUS.none },
+    ];
+    // line_001 の音声長 0 → [0,0] で除外、line_002 が場面（[0,10]）を占める。
+    expect(sceneSegmentSpecs(sceneWith({ lines }), { line_001: 0, line_002: 4 })).toEqual([
+      { lineId: 'line_002', subtitleText: 'b', durationSec: 10, isFirst: true },
+    ]);
+  });
+
+  it('全行が0秒なら場面全体の1セグメントへフォールバック', () => {
+    const lines: NarrationLine[] = [{ lineId: 'line_001', text: 'a', startSec: 10, status: NARRATION_STATUS.none }];
+    expect(sceneSegmentSpecs(sceneWith({ lines }), {})).toEqual([{ durationSec: 10, isFirst: true }]);
+  });
 });
