@@ -43,9 +43,9 @@ export function validateSceneLines(lines: NarrationLine[] | undefined, durationS
   let prevStart = -Infinity;
   for (const line of lines) {
     const field = `lines.${line.lineId}`;
-    // V16: lineId が scene 内一意。
+    // V16: lineId が scene 内一意。UI 採番は一意のため通常は出ない（破損データ向けの案内）。
     if (seen.has(line.lineId)) {
-      warnings.push(warn('LINE_ID_DUPLICATE', 'セリフの並びに重複があります。自動で振り直します', field, 'warning'));
+      warnings.push(warn('LINE_ID_DUPLICATE', 'セリフの並びに重複があります。作り直してください', field, 'warning'));
     }
     seen.add(line.lineId);
     // V19: speaker が voiceCatalog に実在（null/未指定＝継承は可）。
@@ -56,7 +56,7 @@ export function validateSceneLines(lines: NarrationLine[] | undefined, durationS
     if (line.startSec != null) {
       // V17: [0, durationSec] に収まる。
       if (line.startSec < 0 || line.startSec > durationSec) {
-        warnings.push(warn('LINE_START_OUT_OF_RANGE', 'セリフの開始位置が場面の長さを超えています。範囲内に収めます', field, 'warning'));
+        warnings.push(warn('LINE_START_OUT_OF_RANGE', 'セリフの開始位置が場面の長さを超えています。場面の長さ内にしてください', field, 'warning'));
       }
       // V18: 直前に startSec を持つ行と同時刻以前に始まらない（昇順・時間重複なし＝11 §8 / ADR-0015）。
       if (line.startSec <= prevStart) {

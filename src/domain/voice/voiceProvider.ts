@@ -1,6 +1,7 @@
 // ナレーション音声の抽象（VoiceProvider）。実装は infrastructure に置く（Mock / 将来 VOICEVOX）。
 // CLAUDE.md §4（外部I/Oは抽象化）/ ADR-0003（ずんだもん＝ナレーター・差し替え可能）/ 13 §4。
 import { DEFAULT_VOICE_ID } from '../constants';
+import { characterForSpeaker } from './voiceCatalog';
 import type { Narration, NarrationLine, VoiceSettings } from '../project/types';
 
 export interface SynthesizeInput {
@@ -56,6 +57,7 @@ export function resolveLineVoice(line: NarrationLine, base: ResolvedVoice): Synt
     speed: line.speed ?? base.speed,
     pitch: line.pitch ?? base.pitch,
     intonation: base.intonation,
-    speaker: line.speaker ?? null,
+    // voiceCatalog に無い speaker（破損データ等）は null＝既定声へフォールバック（V19「標準の声を使います」を満たす）。
+    speaker: characterForSpeaker(line.speaker) != null ? line.speaker : null,
   };
 }

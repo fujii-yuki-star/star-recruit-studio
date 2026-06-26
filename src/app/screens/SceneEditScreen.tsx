@@ -966,7 +966,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             style={{ width: 90 }}
                             placeholder="自動"
                             value={line.startSec ?? ""}
-                            onChange={(e) => patch((s) => updateLine(s, line.lineId, { startSec: e.target.value === "" ? undefined : Math.max(0, Number(e.target.value)) }))}
+                            // 空欄＝自動（undefined）。値ありは [0, 場面尺] にクランプして保存（範囲外を残さない＝V17 を満たす）。
+                            onChange={(e) => patch((s) => updateLine(s, line.lineId, { startSec: e.target.value === "" ? undefined : Math.min(selected.durationSec, Math.max(0, Number(e.target.value))) }))}
                           />
                           <span className="text-sm text-muted">秒（空欄＝順番に自動）</span>
                         </div>
