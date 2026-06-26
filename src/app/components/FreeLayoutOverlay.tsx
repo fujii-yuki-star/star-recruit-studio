@@ -116,6 +116,7 @@ export function FreeLayoutOverlay({
 
   const handleMove = (e: ReactPointerEvent) => {
     if (!drag) return;
+    if (drag.scale <= 0) return; // 縮尺不正（描画前で clientWidth=0 等）のときは NaN/Infinity を書き込まない（防御）
     e.preventDefault(); // ドラッグ中のテキスト選択等の既定動作を抑制（beginDrag と一貫）
     const dx = (e.clientX - drag.startClientX) / drag.scale;
     const dy = (e.clientY - drag.startClientY) / drag.scale;

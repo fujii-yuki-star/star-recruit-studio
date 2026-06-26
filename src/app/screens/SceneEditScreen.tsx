@@ -143,8 +143,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 複数選択（#206）。配列が真＝選択集合、末尾が「主」。単一要素編集（カード/詳細モード/ポップオーバー）は主を対象にする。
   const [selectedFreeIds, setSelectedFreeIds] = useState<string[]>([]);
   const selectedFreeId = selectedFreeIds.length > 0 ? selectedFreeIds[selectedFreeIds.length - 1] : null;
-  // 選択変更：additive（Shift+クリック）で選択トグル、通常はその要素だけ、null で全解除。
+  // 一括削除の確認中フラグ（Undo 未実装のため、複数まとめ削除は1段確認を挟む・#206/#211）。
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  // 選択変更：additive（Shift+クリック）で選択トグル、通常はその要素だけ、null で全解除。選択が変われば一括削除の確認は取り消す。
   const selectFree = (id: string | null, additive = false) => {
+    setConfirmBulkDelete(false);
     if (id == null) { setSelectedFreeIds([]); return; }
     setSelectedFreeIds((cur) =>
       additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id],
@@ -241,10 +244,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 一括移動：複数選択の全要素の位置を1回の更新でまとめて反映（オーバーレイのドラッグから・#206）。
   const moveFreeMany = (moves: { id: string; x: number; y: number }[]) =>
     patch((s) => ({ ...s, freeLayout: applyFreeElementPositions(s.freeLayout ?? [], moves) }));
-  // 一括削除：選択中の全要素を削除し選択を解除（#206）。
+  // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
   const removeFreeMany = (ids: string[]) => {
     patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids) }));
     setSelectedFreeIds([]);
+    setEditPopover(null);
   };
   // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
@@ -835,17 +839,35 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {/* 複数選択（#206）：2件以上選んだら一括操作バーを出す（Shift＋クリックで増減）。 */}
                     {selectedFreeIds.length >= 2 && (
                       <div className="row-between" style={{ padding: "4px 8px", background: "var(--color-surface-alt)", borderRadius: 6 }}>
-                        <span className="text-sm">{selectedFreeIds.length}件を選択中（Shift＋クリックで増減）</span>
-                        <div className="row gap-sm">
-                          <button className="btn btn-ghost text-sm" onClick={() => setSelectedFreeIds([])}>選択解除</button>
-                          <button
-                            className="btn btn-ghost text-sm"
-                            style={{ color: "var(--color-danger)" }}
-                            onClick={() => removeFreeMany(selectedFreeIds)}
-                          >
-                            選択をまとめて削除
-                          </button>
-                        </div>
+                        {confirmBulkDelete ? (
+                          <>
+                            <span className="text-sm">{selectedFreeIds.length}件をまとめて削除しますか？</span>
+                            <div className="row gap-sm">
+                              <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDelete(false)}>やめる</button>
+                              <button
+                                className="btn btn-ghost text-sm"
+                                style={{ color: "var(--color-danger)" }}
+                                onClick={() => { removeFreeMany(selectedFreeIds); setConfirmBulkDelete(false); }}
+                              >
+                                削除する
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-sm">{selectedFreeIds.length}件を選択中（Shift＋クリックで増減）</span>
+                            <div className="row gap-sm">
+                              <button className="btn btn-ghost text-sm" onClick={() => { setSelectedFreeIds([]); setEditPopover(null); }}>選択解除</button>
+                              <button
+                                className="btn btn-ghost text-sm"
+                                style={{ color: "var(--color-danger)" }}
+                                onClick={() => setConfirmBulkDelete(true)}
+                              >
+                                選択をまとめて削除
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                     {/* 詳細編集モード：選択要素を切り替えるチップ（カード一覧を長くスクロールせず選べる・#179）。 */}
@@ -876,7 +898,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <div
                         key={el.id}
                         className="card-tight"
-                        onClick={(e) => selectFree(el.id, e.shiftKey)}
+                        onClick={(e) => {
+                          // フォーム要素（数値入力の Shift 範囲選択など）では Shift トグルを発火させない（誤って選択が増減しないように）。
+                          const tag = (e.target as HTMLElement).tagName;
+                          const isField = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+                          selectFree(el.id, e.shiftKey && !isField);
+                        }}
                         style={{
                           background: "var(--color-surface-alt)",
                           outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined,
