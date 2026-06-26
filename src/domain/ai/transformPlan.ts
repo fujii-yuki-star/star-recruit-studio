@@ -220,9 +220,12 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
       const narrationText = aiScene.narrationText ?? '';
       checkLengths(texts, narrationText, template, w);
 
-      // ナレーション初期化（12 §8.4）
+      // 掛け合い（#180）：narrationLines があれば scene.lines を作る（無ければ単一 narration のまま）。
+      const lines = mapNarrationLines(aiScene.narrationLines, w);
+      // ナレーション初期化（12 §8.4）。掛け合い時は narration.text を lines[0] に mirror する
+      // （narration.text を直読みする台本/precheck の後方可読性＝ADR-0015。AI が narrationText を省略しても空にしない）。
       const narration: Narration = {
-        text: narrationText,
+        text: lines ? lines[0]?.text ?? '' : narrationText,
         voiceId: null,
         speed: null,
         pitch: null,
@@ -230,8 +233,6 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
         voicePath: null,
         status: NARRATION_STATUS.none,
       };
-      // 掛け合い（#180）：narrationLines があれば scene.lines を作る（無ければ単一 narration のまま）。
-      const lines = mapNarrationLines(aiScene.narrationLines, w);
 
       // トランジション既定（12 §8.5）
       const transition: Transition = {

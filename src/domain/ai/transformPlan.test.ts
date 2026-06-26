@@ -137,6 +137,18 @@ describe('transformVideoPlan', () => {
     expect(scenes[0].narration.text).toBe('ひとり言');
   });
 
+  it('narrationLines のみ（narrationText 省略）でも narration.text を lines[0] に mirror（台本/precheck の後方可読性）', () => {
+    const plan = singleScenePlan({ narrationText: '', narrationLines: [{ text: '一行目' }, { text: '二行目' }] });
+    const { scenes } = transformVideoPlan(plan, baseCtx());
+    expect(scenes[0].lines?.[0].text).toBe('一行目');
+    expect(scenes[0].narration.text).toBe('一行目'); // mirror（空にしない）
+  });
+
+  it('narrationLines が空配列なら scene.lines は付かない（単一 narration へフォールバック）', () => {
+    const { scenes } = transformVideoPlan(singleScenePlan({ narrationLines: [] }), baseCtx());
+    expect(scenes[0].lines).toBeUndefined();
+  });
+
   it('Mockのサンプルプランをfixtureのproject.sample相当のScene群へ変換する', async () => {
     const plan = await new MockAiProvider().generateVideoPlan({
       companyInfo: { companyName: '株式会社サンプル' },
