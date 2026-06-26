@@ -81,25 +81,34 @@ export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeEl
 const FREE_DUPLICATE_OFFSET = 20;
 
 /**
+ * 要素を freeLayout に貼り付ける（新 id を採番し、元から少しずらして最前面に置く）。コピー&ペースト（場面間も可）に使う。
+ * element は任意の FreeElement（別場面からコピーしたものでもよい）。返り値の newId で貼付直後の要素を選択状態にできる。
+ */
+export function pasteFreeElement(
+  freeLayout: FreeElement[], element: FreeElement,
+): { freeLayout: FreeElement[]; newId: string } {
+  const newId = createFreeElementId(freeLayout.map((e) => e.id));
+  const zIndex = freeLayout.reduce((max, e) => Math.max(max, e.zIndex ?? 0), 0) + 1;
+  const copy: FreeElement = {
+    ...element,
+    id: newId,
+    x: element.x + FREE_DUPLICATE_OFFSET,
+    y: element.y + FREE_DUPLICATE_OFFSET,
+    zIndex,
+  };
+  return { freeLayout: [...freeLayout, copy], newId };
+}
+
+/**
  * 指定 id の要素を複製した配列と、コピーの新 id を返す（id が無ければ変化なし・newId=null）。
- * コピーは新しい id を採番し、元から少しずらして最前面（既存 zIndex の最大+1）に置く。
- * UI はこの newId で複製直後の要素を選択状態にできる（他 op と返り値の形が違う理由）。
+ * 同一 freeLayout 内のコピペ＝pasteFreeElement に委譲（新 id 採番・少しずらして最前面）。
  */
 export function duplicateFreeElement(
   freeLayout: FreeElement[], id: string,
 ): { freeLayout: FreeElement[]; newId: string | null } {
   const source = freeLayout.find((e) => e.id === id);
   if (!source) return { freeLayout, newId: null };
-  const newId = createFreeElementId(freeLayout.map((e) => e.id));
-  const zIndex = freeLayout.reduce((max, e) => Math.max(max, e.zIndex ?? 0), 0) + 1;
-  const copy: FreeElement = {
-    ...source,
-    id: newId,
-    x: source.x + FREE_DUPLICATE_OFFSET,
-    y: source.y + FREE_DUPLICATE_OFFSET,
-    zIndex,
-  };
-  return { freeLayout: [...freeLayout, copy], newId };
+  return pasteFreeElement(freeLayout, source);
 }
 
 /** zIndex を他要素の最大+1 にして最前面へ（id 不在・単独要素は変化なし）。 */

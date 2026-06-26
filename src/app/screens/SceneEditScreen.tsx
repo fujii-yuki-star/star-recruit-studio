@@ -4,7 +4,7 @@ import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
-import { addFreeElement, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, removeFreeElement, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeElement, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, pasteFreeElement, removeFreeElement, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -141,6 +141,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
   // 自由配置で選択中の要素（オーバーレイのハンドル表示・編集カードの強調に使う）。
   const [selectedFreeId, setSelectedFreeId] = useState<string | null>(null);
+  // FREE 要素のコピー&ペースト用クリップボード。SceneEditScreen は場面切替で再マウントしないため場面をまたいで貼れる（#207）。
+  const [freeClipboard, setFreeClipboard] = useState<FreeElement | null>(null);
   // 右クリック「編集」で開く kind 別エディタのポップオーバー（対象 id とビューポート座標）。
   const [editPopover, setEditPopover] = useState<{ id: string; x: number; y: number } | null>(null);
   // 自由配置：グリッドに合わせる（ドラッグ/リサイズの吸着＋グリッド表示）。表示設定・非永続。
@@ -234,6 +236,22 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     let newId: string | null = null;
     patch((s) => {
       const result = duplicateFreeElement(s.freeLayout ?? [], id);
+      newId = result.newId;
+      return { ...s, freeLayout: result.freeLayout };
+    });
+    if (newId) setSelectedFreeId(newId);
+  };
+  // コピー：選んだ要素をクリップボードへ（場面をまたいで貼れる・#207）。
+  const copyFreeEl = (id: string) => {
+    const el = (selected.freeLayout ?? []).find((e) => e.id === id);
+    if (el) setFreeClipboard(el);
+  };
+  // 貼り付け：クリップボードの要素を現在の場面へ（新 id 採番＝場面間も可）。貼付直後を選択。
+  const pasteFreeEl = () => {
+    if (!freeClipboard) return;
+    let newId: string | null = null;
+    patch((s) => {
+      const result = pasteFreeElement(s.freeLayout ?? [], freeClipboard);
       newId = result.newId;
       return { ...s, freeLayout: result.freeLayout };
     });
@@ -759,6 +777,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.shape)}>
                     <PlusIcon size={14} />図形
                   </button>
+                  <button
+                    className="btn btn-ghost btn-icon text-sm"
+                    onClick={pasteFreeEl}
+                    disabled={!freeClipboard}
+                    title={freeClipboard
+                      ? `「${freeKindLabel[freeClipboard.kind]}」を貼り付け（別の場面からでも貼れます）`
+                      : "先に配置を「コピー」すると貼り付けられます"}
+                  >
+                    {freeClipboard ? `貼り付け（${freeKindLabel[freeClipboard.kind]}）` : "貼り付け"}
+                  </button>
                 </div>
                 <div className="field" style={{ marginBottom: 8 }}>
                   <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>見た目パーツ</label>
@@ -823,6 +851,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <div className="row-between" style={{ marginBottom: 4 }}>
                           <strong className="text-sm">{freeKindLabel[el.kind]}</strong>
                           <div className="row gap-sm">
+                            <button
+                              className="btn btn-ghost text-sm"
+                              onClick={(e) => { e.stopPropagation(); copyFreeEl(el.id); }}
+                              aria-label="この配置をコピー"
+                            >
+                              コピー
+                            </button>
                             <button
                               className="btn btn-ghost text-sm"
                               onClick={(e) => { e.stopPropagation(); duplicateFreeEl(el.id); }}
