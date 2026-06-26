@@ -870,7 +870,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <div className="col gap-sm">
                     {/* レイヤー一覧（#210）：重ね順（上が手前）で並べ、選択・前面/背面・表示/隠す・ロックを操作。 */}
                     <div className="field" style={{ marginBottom: 4 }}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>レイヤー（上が手前）</label>
+                      <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>重ね順（上が手前）</label>
                       <div className="col" style={{ gap: 2 }}>
                         {[...freeLayout].sort((a, b) => (b.zIndex ?? 1) - (a.zIndex ?? 1)).map((el) => {
                           const isSel = selectedFreeIds.includes(el.id);
@@ -890,8 +890,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                 {freeKindLabel[el.kind]}{hint}{el.locked ? "（ロック）" : ""}
                               </button>
                               <div className="row" style={{ gap: 2 }}>
-                                <button className="btn btn-ghost btn-icon text-sm" title="前面へ" onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
-                                <button className="btn btn-ghost btn-icon text-sm" title="背面へ" onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label="前面へ" onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label="背面へ" onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title={el.hidden ? "表示する" : "隠す"} onClick={() => toggleFreeHidden(el.id)}>{el.hidden ? "表示" : "隠す"}</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title={el.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleFreeLocked(el.id)}>{el.locked ? "解除" : "固定"}</button>
                               </div>
@@ -1003,10 +1003,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         style={{
                           background: "var(--color-surface-alt)",
                           outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined,
+                          opacity: el.hidden ? 0.6 : 1, // 非表示要素は淡色（重ね順パネルと一貫＝プレビューに出ていないと分かる）
                         }}
                       >
                         <div className="row-between" style={{ marginBottom: 4 }}>
-                          <strong className="text-sm">{freeKindLabel[el.kind]}</strong>
+                          <strong className="text-sm">{freeKindLabel[el.kind]}{el.hidden ? "（非表示）" : ""}</strong>
                           <div className="row gap-sm">
                             <button
                               className="btn btn-ghost text-sm"

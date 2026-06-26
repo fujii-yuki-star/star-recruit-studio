@@ -167,15 +167,16 @@ export function sendFreeElementToBack(freeLayout: FreeElement[], id: string): Fr
 export function moveFreeElementZ(
   freeLayout: FreeElement[], id: string, direction: 'up' | 'down',
 ): FreeElement[] {
-  const sorted = [...freeLayout].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+  // zIndex 既定は 1（layout の描画既定・パネルの並び順と一致＝absent z を同じに扱う）。
+  const sorted = [...freeLayout].sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1));
   const i = sorted.findIndex((e) => e.id === id);
   if (i < 0) return freeLayout;
   const j = direction === 'up' ? i + 1 : i - 1;
   if (j < 0 || j >= sorted.length) return freeLayout; // 端＝これ以上動かせない
   const a = sorted[i];
   const b = sorted[j];
-  const za = a.zIndex ?? 0;
-  const zb = b.zIndex ?? 0;
+  const za = a.zIndex ?? 1;
+  const zb = b.zIndex ?? 1;
   if (za !== zb) {
     return freeLayout.map((e) => (e.id === a.id ? { ...e, zIndex: zb } : e.id === b.id ? { ...e, zIndex: za } : e));
   }
