@@ -63,11 +63,15 @@ interface OverlayProps {
   onChangeText: (id: string, text: string) => void;
   /** 右クリック「編集」：その要素の kind 別エディタを開く（id とビューポート座標を渡す）。 */
   onRequestEdit: (id: string, x: number, y: number) => void;
+  /** ドラッグ移動/リサイズの開始/終了。連続編集を Undo の1ステップに合成するための境界（#211）。 */
+  onInteractionStart?: () => void;
+  onInteractionEnd?: () => void;
 }
 
 export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedIds, onSelect, onChange, onMoveMany, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
+  onInteractionStart, onInteractionEnd,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -118,6 +122,7 @@ export function FreeLayoutOverlay({
     const width = ref.current?.clientWidth ?? canvasW;
     // capture は best-effort（環境により失敗しうる）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.(); // 連続移動/リサイズを Undo の1ステップに合成する境界（開始・#211）
     setDrag({
       id: el.id, mode, corner,
       startClientX: e.clientX, startClientY: e.clientY,
@@ -162,6 +167,7 @@ export function FreeLayoutOverlay({
     try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
     setDrag(null);
     setGuides({ x: null, y: null }); // ドラッグ終了でガイド線を消す
+    onInteractionEnd?.(); // 連続移動/リサイズの合成境界（終了・#211）
   };
 
   // 右クリック：対象を選択しカーソル位置にメニューを開く（画面端でクランプ）。

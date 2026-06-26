@@ -17,6 +17,7 @@ import {
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
+import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
@@ -43,6 +44,8 @@ export type SaveStatus = "idle" | "saving" | "saved" | "error";
 export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;
 /** BGM設定の編集可能フィールドのみ（assetId は取り込み時に確定するので更新対象から除外）。 */
 export type BgmPatch = Partial<Pick<BgmSettings, "volume" | "enabled" | "loop" | "fadeInSec" | "fadeOutSec">>;
+/** Undo/Redo が出し入れする文書slice（ADR-0020：assets は含めない＝素材取込のディスクIOは undo 対象外）。 */
+type DocSnapshot = { meta: ProjectHeader; parts: Part[]; scenes: Scene[] };
 
 interface ProjectState {
   status: GenerateStatus;
@@ -142,7 +145,26 @@ interface ProjectState {
   generateAllNarrations: () => Promise<void>;
   /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
   synthesizePreview: () => Promise<string>;
+  // ── Undo/Redo（ADR-0020・#211）。文書slice（meta/parts/scenes）のスナップショット履歴。assets は対象外。 ──
+  /** 過去（undo で戻る先）。末尾が直近の「編集前」。 */
+  past: DocSnapshot[];
+  /** 未来（redo でやり直す先）。 */
+  future: DocSnapshot[];
+  /** 連続操作（ドラッグ等）を1ステップに合成するためのネスト深さ（内部）。 */
+  _historyGroupDepth: number;
+  /** 文書を変える操作の「適用前」に呼び、現在状態を past へ積む（グループ中は積まない・transient 変更では呼ばない）。 */
+  pushHistory: () => void;
+  /** 連続操作の開始/終了（開始で1回だけ「編集前」を記録し、連続中の細かい更新は積まない）。 */
+  beginHistoryGroup: () => void;
+  endHistoryGroup: () => void;
+  /** 取り消し（直前の編集前へ戻す）。 */
+  undo: () => void;
+  /** やり直し（取り消した編集を再適用）。 */
+  redo: () => void;
 }
+
+/** 文書slice（undo 対象）を現在状態から取り出す。 */
+const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.parts, scenes: s.scenes });
 
 // AI 構成案プロバイダの選択：Tauri かつ Gemini キーありなら実 Gemini、なければ Mock
 // （非Tauri／オフライン／鍵未設定のフォールバック＝ADR-0010）。
@@ -238,6 +260,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
   saveStatus: "idle",
   importError: null,
+  past: [],
+  future: [],
+  _historyGroupDepth: 0,
   meta: defaultHeader(),
   parts: [],
   scenes: [],
@@ -309,6 +334,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       narrationAudioById: {},
       narrationError: null,
       aiError: null,
+      past: [], // 別文書＝履歴をクリア（ADR-0020）
+      future: [],
+      _historyGroupDepth: 0,
     }),
   saveProject: async () => {
     set({ saveStatus: "saving" });
@@ -452,16 +480,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assetSrcById,
       narrationAudioById,
       narrationError: null,
+      past: [], // 別文書を開く＝履歴をクリア（ADR-0020）
+      future: [],
+      _historyGroupDepth: 0,
     });
     setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
-  updateScene: (sceneId, update) =>
+  updateScene: (sceneId, update) => {
+    get().pushHistory(); // 適用前を履歴へ（ドラッグ中はグループ化で1ステップに合成・#211）
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
       // 編集したら「保存しました」表示を解除（未保存と分かるように）。
       saveStatus: "idle",
-    })),
+    }));
+  },
   addScene: () => {
     const s = get();
     const tmpl = s.templates[0];
@@ -487,6 +520,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       narration: { text: "", status: NARRATION_STATUS.none },
       warnings: [],
     };
+    get().pushHistory();
     set({
       scenes: [...s.scenes, newScene],
       parts: parts.map((p) =>
@@ -497,7 +531,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
     return sceneId;
   },
-  removeScene: (sceneId) =>
+  removeScene: (sceneId) => {
+    get().pushHistory();
     set((s) => ({
       // 削除して order を 1..N に振り直す（表示順＝配列順を保つ）。
       scenes: s.scenes
@@ -508,11 +543,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         sceneIds: p.sceneIds.filter((id) => id !== sceneId),
       })),
       saveStatus: "idle",
-    })),
+    }));
+  },
   moveScene: (sceneId, direction) => {
     const s = get();
     const next = moveSceneInList(s.scenes, s.parts, sceneId, direction);
     if (next.scenes === s.scenes) return; // 端＝変化なし（未保存にしない）
+    get().pushHistory();
     set({ ...next, saveStatus: "idle" });
   },
   duplicateScene: (sceneId) => {
@@ -520,6 +557,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = duplicateSceneInList(s.scenes, s.parts, sceneId, newId);
     if (next.scenes === s.scenes) return ""; // 対象なし＝変化なし
+    get().pushHistory();
     set({ ...next, saveStatus: "idle" });
     return newId;
   },
@@ -528,10 +566,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = splitSceneInList(s.scenes, s.parts, sceneId, splitIndex, newId);
     if (next.scenes === s.scenes) return ""; // 分割不能＝変化なし（未保存にしない）
+    get().pushHistory();
     set({ ...next, saveStatus: "idle" });
     return newId;
   },
-  applyProjectInfo: (input) =>
+  applyProjectInfo: (input) => {
+    get().pushHistory();
     set((s) => ({
       // ADR-0011: videoKind で会社情報/発表内容を排他に持つ。渡されなかった側を undefined にして
       // 別種別の入力が残らないようにする（保存時の schema 排他 not:required を満たす）。additionalNotes は両用途共通。
@@ -553,13 +593,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           : s.meta.videoSettings,
       },
       saveStatus: "idle",
-    })),
+    }));
+  },
   changeOrientation: (target) => {
     const s = get();
     const result = changeScenesOrientation(s.scenes, s.templates, target);
     // 1件も切り替えられない（既に目標向き or 対応する見た目なし）なら向き・場面とも変えない。
     // ＝変換先が無いのに向きだけ変えて全場面を不整合にしてしまうのを防ぐ（B5-b レビュー）。
     if (result.changed > 0) {
+      get().pushHistory();
       set({
         scenes: result.scenes,
         meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, aspectRatio: target } },
@@ -568,22 +610,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     return { changed: result.changed, unsupported: result.unsupported };
   },
-  setFontId: (fontId) =>
+  setFontId: (fontId) => {
+    get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, fontId } },
       saveStatus: "idle",
-    })),
-  updateVoiceSettings: (patch) =>
+    }));
+  },
+  updateVoiceSettings: (patch) => {
+    get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } },
       saveStatus: "idle",
-    })),
-  updateBgmSettings: (patch) =>
+    }));
+  },
+  updateBgmSettings: (patch) => {
+    get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, bgmSettings: { ...s.meta.bgmSettings, ...patch } },
       saveStatus: "idle",
-    })),
-  setBundledBgm: (bundledBgmId) =>
+    }));
+  },
+  setBundledBgm: (bundledBgmId) => {
+    get().pushHistory();
     set((s) => ({
       meta: {
         ...s.meta,
@@ -598,7 +647,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       },
       saveStatus: "idle",
       bgmError: null,
-    })),
+    }));
+  },
   updateAsset: (assetId, update) =>
     set((s) => ({
       assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)),
@@ -942,4 +992,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const result = await voiceProvider.synthesize({ text, ...v });
     return result.audioDataUrl;
   },
+  // ── Undo/Redo（ADR-0020・#211）。文書を変える action は適用前に pushHistory を呼ぶ。連続操作は begin/endHistoryGroup で1ステップに合成。 ──
+  pushHistory: () => {
+    if (get()._historyGroupDepth > 0) return; // グループ中は begin で記録済みなので積まない（ドラッグ＝1ステップ）
+    set((s) => recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)));
+  },
+  beginHistoryGroup: () => {
+    // 連続操作の開始。深さ0→1 のときだけ「編集前」を1回記録する。
+    if (get()._historyGroupDepth === 0) {
+      set((s) => recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)));
+    }
+    set((s) => ({ _historyGroupDepth: s._historyGroupDepth + 1 }));
+  },
+  endHistoryGroup: () => set((s) => ({ _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) })),
+  undo: () =>
+    set((s) => {
+      const r = undoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
+      if (!r) return {}; // 戻せない
+      return { ...r.restored, past: r.history.past, future: r.history.future, saveStatus: "idle" };
+    }),
+  redo: () =>
+    set((s) => {
+      const r = redoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
+      if (!r) return {}; // やり直せない
+      return { ...r.restored, past: r.history.past, future: r.history.future, saveStatus: "idle" };
+    }),
 }));
