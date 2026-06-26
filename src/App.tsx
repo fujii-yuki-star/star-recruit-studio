@@ -41,15 +41,18 @@ function App() {
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
   const loadProject = useProjectStore((s) => s.loadProject);
+  const loadUserTemplates = useProjectStore((s) => s.loadUserTemplates);
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
     useStartNewProject(setScreen);
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
+  // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。
   useEffect(() => {
     const last = getLastProjectId();
     if (last) void loadProject(last).catch(() => {});
-  }, [loadProject]);
+    void loadUserTemplates().catch(() => {});
+  }, [loadProject, loadUserTemplates]);
 
   // サイドバー等で画面が切り替わったら、出しっぱなしの確認バナーを閉じる。
   useEffect(() => {
