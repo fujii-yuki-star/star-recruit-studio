@@ -75,6 +75,27 @@ export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeEl
   return freeLayout.filter((e) => e.id !== id);
 }
 
+// ── 複数選択の一括操作（移動・削除）。純粋関数＝§7 テスト対象。 ──
+
+/** 複数要素の位置(x,y)をまとめて設定する（複数選択の一括移動）。moves に無い要素は不変・空なら同一参照を返す。 */
+export function applyFreeElementPositions(
+  freeLayout: FreeElement[], moves: { id: string; x: number; y: number }[],
+): FreeElement[] {
+  if (moves.length === 0) return freeLayout;
+  const byId = new Map(moves.map((m) => [m.id, m]));
+  return freeLayout.map((el) => {
+    const m = byId.get(el.id);
+    return m ? { ...el, x: m.x, y: m.y } : el;
+  });
+}
+
+/** 複数 id の要素をまとめて削除する（複数選択の一括削除）。空なら同一参照を返す。 */
+export function removeFreeElements(freeLayout: FreeElement[], ids: string[]): FreeElement[] {
+  if (ids.length === 0) return freeLayout;
+  const set = new Set(ids);
+  return freeLayout.filter((e) => !set.has(e.id));
+}
+
 // ── 複製・重なり順（前面/背面）。純粋関数＝§7 テスト対象。 ──
 
 /** 複製コピーを元から少しずらす量（canvas px・完全に重なって見つけられなくならないように）。 */

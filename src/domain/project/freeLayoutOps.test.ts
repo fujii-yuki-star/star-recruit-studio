@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
-  addFreeElement, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  moveFreeElement, pasteFreeElement, removeFreeElement, resizeFreeElement, sendFreeElementToBack,
+  addFreeElement, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
+  moveFreeElement, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, sendFreeElementToBack,
   snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -129,6 +129,45 @@ describe('pasteFreeElement（コピー&ペースト・場面間も可）', () =>
     const { freeLayout: next, newId } = pasteFreeElement([], copied);
     expect(newId).toBe('free_001');
     expect(next[0]).toMatchObject({ id: 'free_001', shapeType: 'star' });
+  });
+});
+
+describe('applyFreeElementPositions（複数選択の一括移動）', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 50, h: 50, zIndex: 1, shapeType: 'rect', fillColor: '#000' },
+    { id: 'free_002', kind: 'shape', x: 200, y: 200, w: 50, h: 50, zIndex: 2, shapeType: 'rect', fillColor: '#000' },
+    { id: 'free_003', kind: 'text', x: 300, y: 300, w: 50, h: 50, zIndex: 3, text: 'あ', fontSize: 40 },
+  ];
+
+  it('指定した複数要素の位置だけ更新し、他要素・他フィールドは不変', () => {
+    const next = applyFreeElementPositions(layout, [
+      { id: 'free_001', x: 110, y: 120 },
+      { id: 'free_003', x: 330, y: 340 },
+    ]);
+    expect(next.find((e) => e.id === 'free_001')).toMatchObject({ x: 110, y: 120, w: 50 }); // w 等は不変
+    expect(next.find((e) => e.id === 'free_002')).toBe(layout[1]); // 対象外は同一参照
+    expect(next.find((e) => e.id === 'free_003')).toMatchObject({ x: 330, y: 340, text: 'あ' });
+  });
+
+  it('moves が空なら同一参照を返す', () => {
+    expect(applyFreeElementPositions(layout, [])).toBe(layout);
+  });
+});
+
+describe('removeFreeElements（複数選択の一括削除）', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 },
+    { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 2 },
+    { id: 'free_003', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 3 },
+  ];
+
+  it('指定 id をまとめて削除（未知 id は無視）', () => {
+    const next = removeFreeElements(layout, ['free_001', 'free_003', 'free_999']);
+    expect(next.map((e) => e.id)).toEqual(['free_002']);
+  });
+
+  it('ids が空なら同一参照を返す', () => {
+    expect(removeFreeElements(layout, [])).toBe(layout);
   });
 });
 

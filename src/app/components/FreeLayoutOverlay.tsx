@@ -11,12 +11,14 @@ import { FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } 
 // 右クリックで操作メニュー、テキストはダブルクリックでインライン編集できる（#174）。
 
 interface DragState {
-  id: string;
+  id: string; // 主＝リサイズ対象・移動の基準
   mode: "move" | "resize";
   corner?: ResizeCorner;
   startClientX: number;
   startClientY: number;
   start: { x: number; y: number; w: number; h: number };
+  /** move 時：一括移動する全要素の開始位置（複数選択。単一なら主のみ）。 */
+  starts?: { id: string; x: number; y: number }[];
   scale: number; // 表示px / canvas（= overlay幅 / canvas幅）
 }
 
@@ -36,10 +38,14 @@ interface OverlayProps {
   freeLayout: FreeElement[];
   canvasW: number;
   canvasH: number;
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  /** ドラッグ/リサイズ中、新しい位置・大きさ（canvas 座標）を返す。 */
+  /** 選択中の要素 id（複数選択・末尾が主＝リサイズ対象）。 */
+  selectedIds: string[];
+  /** 選択変更。additive=true（Shift+クリック）で選択トグル、false/未指定でその要素だけを選択。null で全解除。 */
+  onSelect: (id: string | null, additive?: boolean) => void;
+  /** リサイズ中、主の新しい位置・大きさ（canvas 座標）を返す。 */
   onChange: (id: string, geom: { x: number; y: number; w?: number; h?: number }) => void;
+  /** 移動中、対象（複数選択なら全選択）の新しい位置をまとめて返す（一括移動・1回の更新）。 */
+  onMoveMany: (moves: { id: string; x: number; y: number }[]) => void;
   /** グリッド吸着サイズ（canvas px・0=吸着なし）。 */
   gridSize?: number;
   /** 右クリックメニューの操作（いずれも対象 id を渡す）。 */
@@ -54,11 +60,13 @@ interface OverlayProps {
 }
 
 export function FreeLayoutOverlay({
-  freeLayout, canvasW, canvasH, selectedId, onSelect, onChange, gridSize = 0,
+  freeLayout, canvasW, canvasH, selectedIds, onSelect, onChange, onMoveMany, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // 主＝最後に選択した要素（リサイズハンドルはこれだけに出す。複数同時リサイズは曖昧なので非対応）。
+  const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   // 右クリックメニュー（対象 id とビューポート座標）。
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。
@@ -81,7 +89,17 @@ export function FreeLayoutOverlay({
     e.stopPropagation(); // 角ハンドルのドラッグが本体の移動を兼ねないように
     setMenu(null);
     setEditingId(null); // ドラッグ開始でインライン編集を抜ける
-    onSelect(el.id);
+    // Shift+クリック（移動操作）＝選択トグル。ドラッグは始めない（複数選択を作る/外すための操作）。
+    if (mode === "move" && e.shiftKey) { onSelect(el.id, true); return; }
+    // 通常クリック：未選択ならその要素だけを選択。選択済みをドラッグなら選択を保つ（複数なら一括移動）。
+    const alreadySelected = selectedIds.includes(el.id);
+    if (!alreadySelected) onSelect(el.id);
+    // 一括移動の対象：選択済み要素のドラッグ＝全選択を動かす／未選択のドラッグ＝その要素だけ（リサイズも単独）。
+    const moveTargets = mode === "move" && alreadySelected ? selectedIds : [el.id];
+    const starts = moveTargets
+      .map((id) => freeLayout.find((m) => m.id === id))
+      .filter((m): m is FreeElement => m != null)
+      .map((m) => ({ id: m.id, x: m.x, y: m.y }));
     const width = ref.current?.clientWidth ?? canvasW;
     // capture は best-effort（環境により失敗しうる）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
@@ -89,6 +107,7 @@ export function FreeLayoutOverlay({
       id: el.id, mode, corner,
       startClientX: e.clientX, startClientY: e.clientY,
       start: { x: el.x, y: el.y, w: el.w, h: el.h },
+      starts,
       // 表示px→canvas の縮尺。プレビューは canvas と同比（向きに追従・レターボックス無し）ゆえ scaleX===scaleY なので
       // 幅基準（width/canvasW）で算出すれば縦も一致する（canvasH は %配置に使用）。
       scale: width / canvasW,
@@ -101,7 +120,12 @@ export function FreeLayoutOverlay({
     const dx = (e.clientX - drag.startClientX) / drag.scale;
     const dy = (e.clientY - drag.startClientY) / drag.scale;
     if (drag.mode === "move") {
-      onChange(drag.id, moveFreeElement(drag.start, dx, dy, gridSize));
+      // 主の位置をグリッド吸着で確定し、その差分を選択中の全要素へ同じだけ適用（群を崩さず一括移動）。
+      const moved = moveFreeElement(drag.start, dx, dy, gridSize);
+      const ddx = moved.x - drag.start.x;
+      const ddy = moved.y - drag.start.y;
+      const starts = drag.starts ?? [{ id: drag.id, x: drag.start.x, y: drag.start.y }];
+      onMoveMany(starts.map((s) => ({ id: s.id, x: s.x + ddx, y: s.y + ddy })));
     } else if (drag.corner) {
       // Shift 押下中は縦横比を維持（e.shiftKey は move のたびに評価＝ドラッグ途中の押し直しにも追従）。
       onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey));
@@ -119,7 +143,8 @@ export function FreeLayoutOverlay({
     e.preventDefault();
     e.stopPropagation();
     setEditingId(null);
-    onSelect(el.id);
+    // 複数選択中の要素を右クリックしたら選択は保つ（メニューは主の単独操作・一括削除はツールバー）。
+    if (!selectedIds.includes(el.id)) onSelect(el.id);
     const x = Math.max(0, Math.min(e.clientX, window.innerWidth - MENU_W));
     const y = Math.max(0, Math.min(e.clientY, window.innerHeight - MENU_H));
     setMenu({ id: el.id, x, y });
@@ -163,7 +188,8 @@ export function FreeLayoutOverlay({
       onContextMenu={(e) => { e.preventDefault(); }}
     >
       {freeLayout.map((el) => {
-        const selected = el.id === selectedId;
+        const selected = selectedIds.includes(el.id); // 選択中（複数可）＝枠を強調
+        const isPrimary = el.id === primaryId; // 主＝リサイズハンドルを出す対象
         const editing = el.id === editingId && el.kind === FREE_ELEMENT_KIND.text;
         return (
           <div
@@ -215,7 +241,7 @@ export function FreeLayoutOverlay({
                 }}
               />
             ) : (
-              selected &&
+              isPrimary &&
               HANDLES.map((hd) => (
                 <div
                   key={hd.corner}

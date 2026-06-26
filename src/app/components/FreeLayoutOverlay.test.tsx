@@ -25,6 +25,7 @@ function renderOverlay(overrides: Partial<ComponentProps<typeof FreeLayoutOverla
   const spies = {
     onSelect: vi.fn(),
     onChange: vi.fn(),
+    onMoveMany: vi.fn(),
     onDuplicate: vi.fn(),
     onBringToFront: vi.fn(),
     onSendToBack: vi.fn(),
@@ -37,7 +38,7 @@ function renderOverlay(overrides: Partial<ComponentProps<typeof FreeLayoutOverla
       freeLayout={makeLayout()}
       canvasW={CANVAS_W}
       canvasH={CANVAS_H}
-      selectedId={null}
+      selectedIds={[]}
       {...spies}
       {...overrides}
     />,
@@ -49,10 +50,10 @@ function renderOverlay(overrides: Partial<ComponentProps<typeof FreeLayoutOverla
 
 describe("FreeLayoutOverlay: 選択とリサイズハンドル", () => {
   it("各要素を 1 ボックスずつ描画し、選択中の要素にだけリサイズハンドル（4つ）が出る", () => {
-    const { root, boxes } = renderOverlay({ selectedId: "free_001" });
+    const { root, boxes } = renderOverlay({ selectedIds: ["free_001"] });
     expect(root).toBeInTheDocument();
     expect(boxes).toHaveLength(2);
-    expect(boxes[0].children).toHaveLength(4); // free_001（選択中）＝4 ハンドル
+    expect(boxes[0].children).toHaveLength(4); // free_001（選択中＝主）＝4 ハンドル
     expect(boxes[1].children).toHaveLength(0); // free_002（非選択）＝ハンドルなし
   });
 
@@ -70,9 +71,38 @@ describe("FreeLayoutOverlay: 選択とリサイズハンドル", () => {
   });
 
   it("何もない所（ルート）を押すと選択が解除される（null）", () => {
-    const { root, onSelect } = renderOverlay({ selectedId: "free_001" });
+    const { root, onSelect } = renderOverlay({ selectedIds: ["free_001"] });
     fireEvent.pointerDown(root, { button: 0, clientX: 5, clientY: 5, pointerId: 1 });
     expect(onSelect).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("FreeLayoutOverlay: 複数選択・一括操作（#206）", () => {
+  it("複数選択時、リサイズハンドルは主（selectedIds 末尾）にだけ出る", () => {
+    const { boxes } = renderOverlay({ selectedIds: ["free_002", "free_001"] });
+    expect(boxes[0].children).toHaveLength(4); // free_001＝末尾＝主＝ハンドルあり
+    expect(boxes[1].children).toHaveLength(0); // free_002＝選択中だが主でない＝ハンドルなし
+  });
+
+  it("Shift＋クリックは選択トグル（additive=true）で呼ばれ、ドラッグ移動は始まらない", () => {
+    const { boxes, onSelect, onMoveMany } = renderOverlay({ selectedIds: ["free_001"] });
+    fireEvent.pointerDown(boxes[1], { button: 0, shiftKey: true, clientX: 50, clientY: 50, pointerId: 1 });
+    expect(onSelect).toHaveBeenCalledWith("free_002", true);
+    fireEvent.pointerMove(boxes[1], { clientX: 90, clientY: 90, pointerId: 1 });
+    expect(onMoveMany).not.toHaveBeenCalled(); // Shift＋クリックは選択操作のみ
+  });
+
+  it("選択済みの要素をドラッグすると、選択中の全要素が同じ差分で一括移動する（onMoveMany）", () => {
+    const { root, boxes, onMoveMany } = renderOverlay({ selectedIds: ["free_001", "free_002"] });
+    // jsdom は実レイアウトを持たず clientWidth=0（→scale=0）になるため、canvas と等倍（scale=1）になるよう明示。
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    // 主（free_001・末尾）を掴んで動かす。free_001 start=(100,100), free_002 start=(0,0)、差分(+30,+40)。
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(boxes[0], { clientX: 30, clientY: 40, pointerId: 1 });
+    expect(onMoveMany).toHaveBeenLastCalledWith([
+      { id: "free_001", x: 130, y: 140 },
+      { id: "free_002", x: 30, y: 40 },
+    ]);
   });
 });
 
