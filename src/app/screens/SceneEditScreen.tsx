@@ -9,7 +9,7 @@ import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/fre
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
-import { lineAudioKey } from "../../domain/project/narrationLines";
+import { lineAudioKey, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { useProjectStore } from "../store/projectStore";
@@ -371,6 +371,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     });
   // 掛け合い（複数のセリフ）モードか。明示 lines があるとき＝ON（ADR-0015・#180）。
   const isDialogue = (selected.lines?.length ?? 0) > 0;
+  // セリフ列の検証（V16-19）。開始秒の範囲/順序・話者の実在などをユーザー向け文言で案内（重複文言は1つに）。
+  const lineWarningMessages = isDialogue
+    ? [...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message))]
+    : [];
   // 場面ごとの声の大きさ（null/未設定＝全体設定を継承 §6/§2.2、値＝この場面だけ上書き）。
   const sceneNarrationVolume = selected.audioMix?.narrationVolume ?? null;
   // 書き出しと同一ロジックで「全体設定の実効値」を出す（clamp 込み・ドメイン関数を単一の参照元に）。
@@ -951,6 +955,22 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           value={line.subtitleText ?? ""}
                           onChange={(e) => patch((s) => updateLine(s, line.lineId, { subtitleText: e.target.value ? e.target.value : null }))}
                         />
+                        <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                          <span className="text-sm text-muted">開始</span>
+                          <input
+                            className="input text-sm"
+                            type="number"
+                            min={0}
+                            max={selected.durationSec}
+                            step={0.1}
+                            style={{ width: 90 }}
+                            placeholder="自動"
+                            value={line.startSec ?? ""}
+                            // 空欄＝自動（undefined）。値ありは [0, 場面尺] にクランプして保存（範囲外を残さない＝V17 を満たす）。
+                            onChange={(e) => patch((s) => updateLine(s, line.lineId, { startSec: e.target.value === "" ? undefined : Math.min(selected.durationSec, Math.max(0, Number(e.target.value))) }))}
+                          />
+                          <span className="text-sm text-muted">秒（空欄＝順番に自動）</span>
+                        </div>
                         <div className="row-between">
                           <span className="text-sm text-muted">音声：{narrationStatusLabel[line.status] ?? line.status}</span>
                           {lineAudio && (
@@ -966,6 +986,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     );
                   })}
                   <button className="btn btn-ghost text-sm" onClick={() => patch(addLine)}>＋ セリフを追加</button>
+                  {lineWarningMessages.length > 0 && (
+                    <div className="notice notice-warn" role="alert">
+                      {lineWarningMessages.map((m) => <div key={m} className="text-sm">{m}</div>)}
+                    </div>
+                  )}
                   <div className="row-between" style={{ marginTop: 4 }}>
                     <span className="text-sm" style={{ color: "var(--color-danger)" }}>
                       {narrationPlayError ? "再生できませんでした。声を作り直してお試しください" : ""}

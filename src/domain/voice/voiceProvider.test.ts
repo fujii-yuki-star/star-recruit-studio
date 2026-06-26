@@ -61,4 +61,9 @@ describe('resolveLineVoice（掛け合いの行・ADR-0015）', () => {
     expect(r.speed).toBe(1.0);
     expect(r.pitch).toBe(0.0);
   });
+
+  it('voiceCatalog に無い speaker は null＝既定声へフォールバック（V19・破損データ対策）', () => {
+    const line: NarrationLine = { lineId: 'line_001', text: 'a', speaker: 99999, status: NARRATION_STATUS.none };
+    expect(resolveLineVoice(line, resolved).speaker).toBeNull();
+  });
 });
