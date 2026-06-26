@@ -79,4 +79,10 @@ describe('distributeFreeElements', () => {
   it('3件未満は空（分布の意味なし）', () => {
     expect(distributeFreeElements(layout, ['a', 'b'], FREE_DISTRIBUTE.horizontal)).toEqual([]);
   });
+
+  it('全要素が同一位置なら step=0 で位置は変わらない（NaN を出さない）', () => {
+    const same: FreeElement[] = [el('a', 0, 0), el('b', 0, 0), el('c', 0, 0)];
+    const moves = distributeFreeElements(same, ['a', 'b', 'c'], FREE_DISTRIBUTE.horizontal);
+    expect(moves.every((m) => m.x === 0 && m.y === 0)).toBe(true);
+  });
 });
