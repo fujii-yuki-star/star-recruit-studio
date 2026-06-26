@@ -10,7 +10,7 @@ export function isUserTemplate(templateId: string): boolean {
 }
 
 /** user_tmpl_NNN の連番部分を数値で返す（ユーザーテンプレでなければ null）。 */
-function seqOf(templateId: string): number | null {
+export function userTemplateSeq(templateId: string): number | null {
   if (!isUserTemplate(templateId)) return null;
   const n = Number(templateId.slice(`${USER_TEMPLATE_PREFIX}_`.length));
   return Number.isInteger(n) && n >= 0 ? n : null;
@@ -24,6 +24,6 @@ function seqOf(templateId: string): number | null {
  * `user_tmpl_NNN`（3桁ゼロ詰め・999超は桁上がり）。
  */
 export function createUserTemplateId(existingIds: readonly string[], minSeq = 0): string {
-  const max = existingIds.reduce((m, id) => Math.max(m, seqOf(id) ?? 0), minSeq);
+  const max = existingIds.reduce((m, id) => Math.max(m, userTemplateSeq(id) ?? 0), minSeq);
   return `${USER_TEMPLATE_PREFIX}_${String(max + 1).padStart(3, '0')}`;
 }

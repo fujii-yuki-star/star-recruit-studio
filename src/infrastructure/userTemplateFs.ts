@@ -3,6 +3,7 @@
 // Tauri 非検出時（ブラウザ開発）は空・no-op＝開発フローを止めない（projectFs と同方針）。
 import { invoke } from '@tauri-apps/api/core';
 import type { Template } from '../domain/template/types';
+import { createUserTemplateId, userTemplateSeq } from '../domain/template/userTemplate';
 import { parseTemplatePack } from './templateFs';
 
 function isTauri(): boolean {
@@ -26,10 +27,28 @@ export function bumpUserTemplateMaxSeq(seq: number): void {
   if (seq > getUserTemplateMaxSeq()) localStorage.setItem(MAX_SEQ_KEY, String(seq));
 }
 
-/** ユーザーテンプレを全件読み、正典スキーマで検証して返す（未検証は取り込まない＝§2-2）。非 Tauri は空。 */
+/**
+ * 新規ユーザーテンプレの id を払い出す（採番＋払い出し済み最大の前進を**まとめて**行う）。
+ * 新規作成時は必ずこれを使う＝採番後の bump 忘れによる no-reuse 破綻を防ぐ（saveUserTemplate は bump しない）。
+ * existingIds には全テンプレ id（同梱＋ユーザー）を渡す＝グローバル一意。
+ */
+export function allocateUserTemplateId(existingIds: readonly string[]): string {
+  const id = createUserTemplateId(existingIds, getUserTemplateMaxSeq());
+  const seq = userTemplateSeq(id);
+  if (seq != null) bumpUserTemplateMaxSeq(seq);
+  return id;
+}
+
+/** ユーザーテンプレを全件読み、正典スキーマで検証して返す（未検証は取り込まない＝§2-2）。非 Tauri・読込失敗は空（throw しない＝loadBundledTemplates と同方針）。 */
 export async function loadUserTemplates(): Promise<Template[]> {
   if (!isTauri()) return [];
-  const jsons = await invoke<string[]>('load_user_templates');
+  let jsons: string[];
+  try {
+    jsons = await invoke<string[]>('load_user_templates');
+  } catch (e) {
+    console.warn('[userTemplateFs] ユーザーテンプレの読み込みに失敗しました（空で続行）:', e);
+    return [];
+  }
   const raw: unknown[] = [];
   for (const j of jsons) {
     try {
@@ -43,7 +62,7 @@ export async function loadUserTemplates(): Promise<Template[]> {
   return templates;
 }
 
-/** ユーザーテンプレを保存する（Tauri のみ。非 Tauri は no-op）。 */
+/** ユーザーテンプレを保存する（Tauri のみ。非 Tauri は no-op）。新規 id の採番/bump は行わない＝新規は allocateUserTemplateId で id を払い出してから保存する。 */
 export async function saveUserTemplate(template: Template): Promise<void> {
   if (!isTauri()) return;
   await invoke('save_user_template', { templateJson: JSON.stringify(template) });

@@ -37,6 +37,12 @@ pub(crate) fn is_safe_project_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// テンプレ ID がパス安全かつ正典形式（^[a-z0-9_]+$・小文字のみ）か。user_tmpl_NNN は適合。
+/// template.schema.json の templateId 形式（小文字）に合わせ、手動持ち込みの大文字 id を弾く（ADR-0017）。
+fn is_safe_template_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
 /// project.json を appData/projects/<projectId>/ に保存し、保存先パスを返す。
 #[tauri::command]
 fn save_project(app: tauri::AppHandle, project_json: String) -> Result<String, String> {
@@ -120,7 +126,7 @@ fn save_user_template(app: tauri::AppHandle, template_json: String) -> Result<St
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "templateId がありません".to_string())?;
-    if !is_safe_project_id(template_id) {
+    if !is_safe_template_id(template_id) {
         return Err("不正なテンプレートIDです。".to_string());
     }
     let dir = user_templates_dir(&app)?;
@@ -144,8 +150,10 @@ fn load_user_templates(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        if let Ok(text) = fs::read_to_string(&path) {
-            out.push(text);
+        match fs::read_to_string(&path) {
+            Ok(text) => out.push(text),
+            // 1ファイルの読込失敗で全体を止めない（権限エラー等は原因究明用にログ）。
+            Err(e) => eprintln!("[user_templates] 読み込みスキップ {:?}: {}", path, e),
         }
     }
     Ok(out)
@@ -154,7 +162,7 @@ fn load_user_templates(app: tauri::AppHandle) -> Result<Vec<String>, String> {
 /// ユーザーテンプレ(appData/user_templates/<templateId>.json)を削除する（無ければ何もしない）。
 #[tauri::command]
 fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<(), String> {
-    if !is_safe_project_id(&template_id) {
+    if !is_safe_template_id(&template_id) {
         return Err("不正なテンプレートIDです。".to_string());
     }
     let path = user_templates_dir(&app)?.join(format!("{}.json", template_id));
