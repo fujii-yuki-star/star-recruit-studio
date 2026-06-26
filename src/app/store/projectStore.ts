@@ -25,7 +25,7 @@ import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClie
 import { getAiModel } from "../../infrastructure/appSettings";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
-import { replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
+import { isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
 import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
@@ -683,6 +683,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ templates: upsertUserTemplate(s.templates, template) }));
   },
   deleteUserTemplate: async (templateId) => {
+    // ユーザーテンプレ以外（同梱/取り込みパック）はこのアクションで消さない（誤渡し時の同梱消去防止）。
+    if (!isUserTemplate(templateId)) return;
     await userTemplateFs.deleteUserTemplate(templateId);
     set((s) => ({ templates: s.templates.filter((t) => t.templateId !== templateId) }));
   },

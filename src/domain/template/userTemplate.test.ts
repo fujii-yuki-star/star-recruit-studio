@@ -54,6 +54,16 @@ describe('replaceUserTemplates', () => {
     // 再実行しても重複しない（冪等）。
     expect(replaceUserTemplates(next, [tmpl('user_tmpl_002')]).map((t) => t.templateId)).toEqual(['opening_v1', 'user_tmpl_002']);
   });
+
+  it('ユーザーテンプレが空なら同梱だけ残る（全削除/初回・user 部分が消える）', () => {
+    const base = [tmpl('opening_v1'), tmpl('photo_v1'), tmpl('user_tmpl_001')];
+    expect(replaceUserTemplates(base, []).map((t) => t.templateId)).toEqual(['opening_v1', 'photo_v1']);
+  });
+
+  it('既存にユーザーテンプレが無い初回読込でも同梱＋user が揃う', () => {
+    const bundledOnly = [tmpl('opening_v1'), tmpl('photo_v1')];
+    expect(replaceUserTemplates(bundledOnly, [tmpl('user_tmpl_001')]).map((t) => t.templateId)).toEqual(['opening_v1', 'photo_v1', 'user_tmpl_001']);
+  });
 });
 
 describe('upsertUserTemplate', () => {
