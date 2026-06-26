@@ -77,9 +77,16 @@ export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeEl
 
 // ── 複数選択の一括操作（移動・削除）。純粋関数＝§7 テスト対象。 ──
 
+/** 一括移動・整列・分布で使う位置更新（要素 id と新しい x,y）。生成側（freeAlign 等）と適用側で共有する型。 */
+export interface FreeElementMove {
+  id: string;
+  x: number;
+  y: number;
+}
+
 /** 複数要素の位置(x,y)をまとめて設定する（複数選択の一括移動）。moves に無い要素は不変・空なら同一参照を返す。 */
 export function applyFreeElementPositions(
-  freeLayout: FreeElement[], moves: { id: string; x: number; y: number }[],
+  freeLayout: FreeElement[], moves: FreeElementMove[],
 ): FreeElement[] {
   if (moves.length === 0) return freeLayout;
   const byId = new Map(moves.map((m) => [m.id, m]));
