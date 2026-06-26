@@ -24,6 +24,8 @@ import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider"
 import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
+import * as userTemplateFs from "../../infrastructure/userTemplateFs";
+import { replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
 import {
   listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
@@ -129,6 +131,12 @@ interface ProjectState {
   removeAsset: (assetId: string) => void;
   /** 見た目パターンのパックを取り込み、既存に統合する（templateId で重複排除・B2/ADR-0012）。 */
   addTemplatePack: (templates: Template[]) => void;
+  /** ユーザー作成テンプレ（グローバル）を読み込み templates にマージする（起動時・ADR-0017）。 */
+  loadUserTemplates: () => Promise<void>;
+  /** ユーザーテンプレを保存し一覧へ反映する（新規 id は allocateUserTemplateId で払い出し済み前提）。 */
+  saveUserTemplate: (template: Template) => Promise<void>;
+  /** ユーザーテンプレを削除し一覧から外す（参照していたプロジェクトは読込時に §9 補正へ委ねる）。 */
+  deleteUserTemplate: (templateId: string) => Promise<void>;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
@@ -665,6 +673,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       for (const t of incoming) byId.set(t.templateId, t);
       return { templates: [...byId.values()] };
     }),
+  loadUserTemplates: async () => {
+    // グローバルのユーザーテンプレを読み、templates の user_tmpl 部分を差し替える（冪等）。非 Tauri は空。
+    const user = await userTemplateFs.loadUserTemplates();
+    set((s) => ({ templates: replaceUserTemplates(s.templates, user) }));
+  },
+  saveUserTemplate: async (template) => {
+    await userTemplateFs.saveUserTemplate(template);
+    set((s) => ({ templates: upsertUserTemplate(s.templates, template) }));
+  },
+  deleteUserTemplate: async (templateId) => {
+    await userTemplateFs.deleteUserTemplate(templateId);
+    set((s) => ({ templates: s.templates.filter((t) => t.templateId !== templateId) }));
+  },
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。

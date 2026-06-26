@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { createUserTemplateId, isUserTemplate, USER_TEMPLATE_PREFIX } from './userTemplate';
+import type { Template } from './types';
+import {
+  createUserTemplateId, isUserTemplate, replaceUserTemplates, upsertUserTemplate, USER_TEMPLATE_PREFIX,
+} from './userTemplate';
+
+const tmpl = (templateId: string): Template => ({
+  schemaVersion: '1.0', templateId, name: templateId, category: 'free', aspectRatio: '16:9',
+  canvas: { width: 1920, height: 1080 }, layers: [{ id: 'bg', type: 'background', x: 0, y: 0, w: 1920, h: 1080 }],
+});
 
 describe('isUserTemplate', () => {
   it('user_tmpl_ 接頭辞のみユーザーテンプレ（同梱の記述的 id は false）', () => {
@@ -35,5 +43,26 @@ describe('createUserTemplateId', () => {
     expect(createUserTemplateId(['user_tmpl_003'], 5)).toBe('user_tmpl_006');
     // 現存 max(007) が minSeq(5) より大きければ現存優先。
     expect(createUserTemplateId(['user_tmpl_007'], 5)).toBe('user_tmpl_008');
+  });
+});
+
+describe('replaceUserTemplates', () => {
+  it('ユーザーテンプレ部分だけ差し替え、同梱は保持（冪等）', () => {
+    const base = [tmpl('opening_v1'), tmpl('user_tmpl_001')];
+    const next = replaceUserTemplates(base, [tmpl('user_tmpl_002'), tmpl('user_tmpl_003')]);
+    expect(next.map((t) => t.templateId)).toEqual(['opening_v1', 'user_tmpl_002', 'user_tmpl_003']);
+    // 再実行しても重複しない（冪等）。
+    expect(replaceUserTemplates(next, [tmpl('user_tmpl_002')]).map((t) => t.templateId)).toEqual(['opening_v1', 'user_tmpl_002']);
+  });
+});
+
+describe('upsertUserTemplate', () => {
+  it('id 一致は置換、無ければ末尾に追加', () => {
+    const base = [tmpl('opening_v1'), tmpl('user_tmpl_001')];
+    const added = upsertUserTemplate(base, tmpl('user_tmpl_002'));
+    expect(added.map((t) => t.templateId)).toEqual(['opening_v1', 'user_tmpl_001', 'user_tmpl_002']);
+    const replaced = upsertUserTemplate(base, { ...tmpl('user_tmpl_001'), name: '更新後' });
+    expect(replaced).toHaveLength(2);
+    expect(replaced.find((t) => t.templateId === 'user_tmpl_001')?.name).toBe('更新後');
   });
 });

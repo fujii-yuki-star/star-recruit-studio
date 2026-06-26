@@ -1,5 +1,6 @@
 // ユーザーが作成したテンプレート（ADR-0017）。同梱テンプレと同じ Template 型で、ID 接頭辞で区別する。
 // グローバル（全プロジェクト再利用）に永続化し、AI 入力からは除外する（誤選択防止＝ADR-0017 不変条件）。
+import type { Template } from './types';
 
 /** ユーザーテンプレの templateId 接頭辞。`user_tmpl_NNN`（11 §2.1 拡張）。 */
 export const USER_TEMPLATE_PREFIX = 'user_tmpl';
@@ -26,4 +27,21 @@ export function userTemplateSeq(templateId: string): number | null {
 export function createUserTemplateId(existingIds: readonly string[], minSeq = 0): string {
   const max = existingIds.reduce((m, id) => Math.max(m, userTemplateSeq(id) ?? 0), minSeq);
   return `${USER_TEMPLATE_PREFIX}_${String(max + 1).padStart(3, '0')}`;
+}
+
+/**
+ * templates のユーザーテンプレ部分を userTemplates で置き換える（同梱・取り込みパックは保持）。
+ * 起動時の読込マージに使う（再実行しても重複しない＝冪等）。
+ */
+export function replaceUserTemplates(templates: Template[], userTemplates: Template[]): Template[] {
+  return [...templates.filter((t) => !isUserTemplate(t.templateId)), ...userTemplates];
+}
+
+/** template を id 一致で置換、無ければ末尾に追加する（保存後の一覧反映に使う）。 */
+export function upsertUserTemplate(templates: Template[], template: Template): Template[] {
+  const i = templates.findIndex((t) => t.templateId === template.templateId);
+  if (i < 0) return [...templates, template];
+  const next = [...templates];
+  next[i] = template;
+  return next;
 }
