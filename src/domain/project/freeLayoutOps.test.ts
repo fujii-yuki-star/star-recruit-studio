@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
   addFreeElement, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  moveFreeElement, removeFreeElement, resizeFreeElement, sendFreeElementToBack,
+  moveFreeElement, pasteFreeElement, removeFreeElement, resizeFreeElement, sendFreeElementToBack,
   snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -106,6 +106,29 @@ describe('duplicateFreeElement', () => {
     const { freeLayout: next, newId } = duplicateFreeElement(layout, 'free_999');
     expect(next).toBe(layout);
     expect(newId).toBeNull();
+  });
+});
+
+describe('pasteFreeElement（コピー&ペースト・場面間も可）', () => {
+  it('別場面の要素を貼り付け：貼付先で新 id を採番・最前面・少しずらす・他フィールド引継ぎ', () => {
+    // コピー元（別場面の要素を想定）。貼付先 freeLayout には free_001 が既存。
+    const copied: FreeElement = { id: 'free_005', kind: 'text', x: 100, y: 100, w: 200, h: 80, zIndex: 9, text: 'コピー', fontSize: 40 };
+    const target: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 50, h: 50, zIndex: 3, shapeType: 'rect', fillColor: '#000000' }];
+    const { freeLayout: next, newId } = pasteFreeElement(target, copied);
+    expect(next).toHaveLength(2);
+    expect(newId).toBe('free_002'); // 貼付先の空き番号（元の free_005 ではない）
+    const pasted = next.find((e) => e.id === 'free_002');
+    expect(pasted).toMatchObject({ kind: 'text', text: 'コピー' });
+    expect(pasted?.zIndex).toBe(4); // 貼付先の最大 3 +1
+    expect(pasted?.x).toBe(120); // 元 100 + ずらし
+    expect(pasted?.y).toBe(120);
+  });
+
+  it('空の貼付先にも貼れる（newId=free_001）', () => {
+    const copied: FreeElement = { id: 'free_009', kind: 'shape', x: 10, y: 10, w: 30, h: 30, zIndex: 2, shapeType: 'star', fillColor: '#ff0000' };
+    const { freeLayout: next, newId } = pasteFreeElement([], copied);
+    expect(newId).toBe('free_001');
+    expect(next[0]).toMatchObject({ id: 'free_001', shapeType: 'star' });
   });
 });
 
