@@ -16,6 +16,8 @@ export interface Rect {
 interface ItemBase extends Rect {
   id: string;
   zIndex: number;
+  /** 回転角（度・中心を軸に時計回り。FREE 要素のみ設定・未指定=回転なし・#208）。 */
+  rotation?: number;
 }
 
 export interface FillItem extends ItemBase {
@@ -164,8 +166,8 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   // 通常テンプレに誤って freeLayout が付いても描画しない（防御。category で判定）。
   if (template.category === FREE_CATEGORY) {
     for (const el of scene.freeLayout ?? []) {
-      // zIndex 未指定は 1（背景=0 より前面に置く）。
-      const base: ItemBase = { id: el.id, x: el.x, y: el.y, w: el.w, h: el.h, zIndex: el.zIndex ?? 1 };
+      // zIndex 未指定は 1（背景=0 より前面に置く）。rotation はそのまま転送（未指定=回転なし）。
+      const base: ItemBase = { id: el.id, x: el.x, y: el.y, w: el.w, h: el.h, zIndex: el.zIndex ?? 1, rotation: el.rotation };
       switch (el.kind) {
         case 'slot':
           items.push({ ...base, kind: 'image', assetId: el.assetId ?? null, fit: el.fit ?? 'cover', role: 'slot', label: '素材' });

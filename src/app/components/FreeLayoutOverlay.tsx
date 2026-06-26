@@ -238,6 +238,8 @@ export function FreeLayoutOverlay({
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
               background: selected ? "rgba(80,130,255,0.08)" : "transparent",
               cursor: editing ? "text" : "move",
+              // 回転（#208）：中心を軸に回す（既定の transform-origin=中心）。出力 SVG の rotate と一致。
+              transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
             }}
           >
             {editing ? (
@@ -265,7 +267,8 @@ export function FreeLayoutOverlay({
                 }}
               />
             ) : (
-              isPrimary &&
+              // 回転中はリサイズハンドルを出さない（回転下の角ドラッグ計算は非対応＝大きさは数値入力で。#208）。
+              isPrimary && !el.rotation &&
               HANDLES.map((hd) => (
                 <div
                   key={hd.corner}
