@@ -1,6 +1,5 @@
 // ユーザーが作成したテンプレート（ADR-0017）。同梱テンプレと同じ Template 型で、ID 接頭辞で区別する。
 // グローバル（全プロジェクト再利用）に永続化し、AI 入力からは除外する（誤選択防止＝ADR-0017 不変条件）。
-import { nextNumberedId } from '../project/persistence';
 
 /** ユーザーテンプレの templateId 接頭辞。`user_tmpl_NNN`（11 §2.1 拡張）。 */
 export const USER_TEMPLATE_PREFIX = 'user_tmpl';
@@ -10,10 +9,21 @@ export function isUserTemplate(templateId: string): boolean {
   return templateId.startsWith(`${USER_TEMPLATE_PREFIX}_`);
 }
 
+/** user_tmpl_NNN の連番部分を数値で返す（ユーザーテンプレでなければ null）。 */
+function seqOf(templateId: string): number | null {
+  if (!isUserTemplate(templateId)) return null;
+  const n = Number(templateId.slice(`${USER_TEMPLATE_PREFIX}_`.length));
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
 /**
  * 新しいユーザーテンプレ id を採番する（既存の全テンプレ id を渡す・グローバル一意）。
- * `user_tmpl_NNN`（3桁ゼロ詰め・999超は桁上がり）。既存番号の空きを埋める（採番規則は §2.1 と同方針）。
+ * **最大連番+1**（空き番号は埋めない）＝scene/part の §2.1 gap-fill とは別方針。
+ * 削除した番号を再利用すると、別プロジェクトの参照（scene.templateId）が後発テンプレに化けるため（ADR-0017）。
+ * ※ 削除をまたいだ厳密な単調増加（払い出し済みの最大保持）は永続層で担保する（EPIC #214 永続化サブPR）。
+ * `user_tmpl_NNN`（3桁ゼロ詰め・999超は桁上がり）。
  */
 export function createUserTemplateId(existingIds: readonly string[]): string {
-  return nextNumberedId(USER_TEMPLATE_PREFIX, existingIds);
+  const max = existingIds.reduce((m, id) => Math.max(m, seqOf(id) ?? 0), 0);
+  return `${USER_TEMPLATE_PREFIX}_${String(max + 1).padStart(3, '0')}`;
 }
