@@ -4,7 +4,7 @@ import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
-import { addFreeElement, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, pasteFreeElement, removeFreeElement, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeElement, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -140,7 +140,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
   const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
   // 自由配置で選択中の要素（オーバーレイのハンドル表示・編集カードの強調に使う）。
-  const [selectedFreeId, setSelectedFreeId] = useState<string | null>(null);
+  // 複数選択（#206）。配列が真＝選択集合、末尾が「主」。単一要素編集（カード/詳細モード/ポップオーバー）は主を対象にする。
+  const [selectedFreeIds, setSelectedFreeIds] = useState<string[]>([]);
+  const selectedFreeId = selectedFreeIds.length > 0 ? selectedFreeIds[selectedFreeIds.length - 1] : null;
+  // 一括削除の確認中フラグ（Undo 未実装のため、複数まとめ削除は1段確認を挟む・#206/#211）。
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  // 選択変更：additive（Shift+クリック）で選択トグル、通常はその要素だけ、null で全解除。選択が変われば一括削除の確認は取り消す。
+  const selectFree = (id: string | null, additive = false) => {
+    setConfirmBulkDelete(false);
+    if (id == null) { setSelectedFreeIds([]); return; }
+    setSelectedFreeIds((cur) =>
+      additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id],
+    );
+  };
   // FREE 要素のコピー&ペースト用クリップボード。SceneEditScreen は場面切替で再マウントしないため場面をまたいで貼れる（#207）。
   const [freeClipboard, setFreeClipboard] = useState<FreeElement | null>(null);
   // 右クリック「編集」で開く kind 別エディタのポップオーバー（対象 id とビューポート座標）。
@@ -221,17 +233,26 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       newId = result.newId;
       return { ...s, freeLayout: result.freeLayout };
     });
-    if (newId) setSelectedFreeId(newId);
+    if (newId) setSelectedFreeIds([newId]);
   };
   const patchFreeEl = (id: string, p: Partial<Omit<FreeElement, "id" | "kind">>) =>
     patch((s) => ({ ...s, freeLayout: updateFreeElement(s.freeLayout ?? [], id, p) }));
   const removeFreeEl = (id: string) => {
     patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id) }));
-    setSelectedFreeId((cur) => (cur === id ? null : cur)); // 選択中を消したら選択解除（詳細モードは案内へ）
+    setSelectedFreeIds((cur) => cur.filter((x) => x !== id)); // 選択中を消したら選択から外す（詳細モードは案内へ）
+  };
+  // 一括移動：複数選択の全要素の位置を1回の更新でまとめて反映（オーバーレイのドラッグから・#206）。
+  const moveFreeMany = (moves: { id: string; x: number; y: number }[]) =>
+    patch((s) => ({ ...s, freeLayout: applyFreeElementPositions(s.freeLayout ?? [], moves) }));
+  // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
+  const removeFreeMany = (ids: string[]) => {
+    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids) }));
+    setSelectedFreeIds([]);
+    setEditPopover(null);
   };
   // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
-  // updateScene→set は同期実行のため、newId は下の setSelectedFreeId より前に確実に代入される。
+  // updateScene→set は同期実行のため、newId は下の setSelectedFreeIds より前に確実に代入される。
   const duplicateFreeEl = (id: string) => {
     let newId: string | null = null;
     patch((s) => {
@@ -239,7 +260,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       newId = result.newId;
       return { ...s, freeLayout: result.freeLayout };
     });
-    if (newId) setSelectedFreeId(newId);
+    if (newId) setSelectedFreeIds([newId]);
   };
   // コピー：選んだ要素をクリップボードへ（場面をまたいで貼れる・#207）。
   const copyFreeEl = (id: string) => {
@@ -255,7 +276,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       newId = result.newId;
       return { ...s, freeLayout: result.freeLayout };
     });
-    if (newId) setSelectedFreeId(newId);
+    if (newId) setSelectedFreeIds([newId]);
   };
   const bringFreeElForward = (id: string) =>
     patch((s) => ({ ...s, freeLayout: bringFreeElementToFront(s.freeLayout ?? [], id) }));
@@ -270,7 +291,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       newIds = result.newIds;
       return { ...s, freeLayout: result.freeLayout };
     });
-    if (newIds[0]) setSelectedFreeId(newIds[0]);
+    if (newIds[0]) setSelectedFreeIds([newIds[0]]);
   };
   // 素材(Asset 単位)のクリップ設定を部分更新（FREE slot 動画の調整に使う。通常スロットと同じ Asset.clip）。
   const patchAssetClip = (assetId: string, p: Partial<NonNullable<Asset["clip"]>>) =>
@@ -365,7 +386,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   // 右クリック「編集」：その要素の kind 別エディタをカーソル位置付近に開く（画面端でクランプ）。
   const openFreeEditPopover = (id: string, x: number, y: number) => {
-    setSelectedFreeId(id);
+    selectFree(id);
     setEditPopover({
       id,
       x: Math.max(8, Math.min(x, window.innerWidth - 300)),
@@ -402,7 +423,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedId(id);
     setConfirmDelete(false);
     setConfirmDialogueOff(false); // 掛け合い解除の確認も場面ごとに持ち越さない
-    setSelectedFreeId(null); // 場面が変わったら自由配置の選択は持ち越さない
+    setSelectedFreeIds([]); // 場面が変わったら自由配置の選択は持ち越さない
     setEditPopover(null); // 開いていた kind 別エディタも閉じる（旧場面の要素 id を指したまま残さない）
     setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
   };
@@ -551,9 +572,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     freeLayout={freeLayout}
                     canvasW={template.canvas.width}
                     canvasH={template.canvas.height}
-                    selectedId={selectedFreeId}
-                    onSelect={setSelectedFreeId}
+                    selectedIds={selectedFreeIds}
+                    onSelect={selectFree}
                     onChange={(id, g) => patchFreeEl(id, g)}
+                    onMoveMany={moveFreeMany}
                     gridSize={gridSnap ? FREE_GRID_SIZE : 0}
                     onDuplicate={duplicateFreeEl}
                     onBringToFront={bringFreeElForward}
@@ -814,6 +836,40 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
                 ) : (
                   <div className="col gap-sm">
+                    {/* 複数選択（#206）：2件以上選んだら一括操作バーを出す（Shift＋クリックで増減）。 */}
+                    {selectedFreeIds.length >= 2 && (
+                      <div className="row-between" style={{ padding: "4px 8px", background: "var(--color-surface-alt)", borderRadius: 6 }}>
+                        {confirmBulkDelete ? (
+                          <>
+                            <span className="text-sm">{selectedFreeIds.length}件をまとめて削除しますか？</span>
+                            <div className="row gap-sm">
+                              <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDelete(false)}>やめる</button>
+                              <button
+                                className="btn btn-ghost text-sm"
+                                style={{ color: "var(--color-danger)" }}
+                                onClick={() => { removeFreeMany(selectedFreeIds); setConfirmBulkDelete(false); }}
+                              >
+                                削除する
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-sm">{selectedFreeIds.length}件を選択中（Shift＋クリックで増減）</span>
+                            <div className="row gap-sm">
+                              <button className="btn btn-ghost text-sm" onClick={() => { setSelectedFreeIds([]); setEditPopover(null); }}>選択解除</button>
+                              <button
+                                className="btn btn-ghost text-sm"
+                                style={{ color: "var(--color-danger)" }}
+                                onClick={() => setConfirmBulkDelete(true)}
+                              >
+                                選択をまとめて削除
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                     {/* 詳細編集モード：選択要素を切り替えるチップ（カード一覧を長くスクロールせず選べる・#179）。 */}
                     {focusSelectedFree && (
                       <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
@@ -822,7 +878,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             key={el.id}
                             className="btn btn-ghost text-sm"
                             style={{ outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined }}
-                            onClick={() => setSelectedFreeId(el.id)}
+                            onClick={() => selectFree(el.id)}
                             aria-pressed={el.id === selectedFreeId}
                           >
                             {freeKindLabel[el.kind]}{i + 1}
@@ -842,7 +898,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <div
                         key={el.id}
                         className="card-tight"
-                        onClick={() => setSelectedFreeId(el.id)}
+                        onClick={(e) => {
+                          // フォーム要素（数値入力の Shift 範囲選択など）では Shift トグルを発火させない（誤って選択が増減しないように）。
+                          const tag = (e.target as HTMLElement).tagName;
+                          const isField = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+                          selectFree(el.id, e.shiftKey && !isField);
+                        }}
                         style={{
                           background: "var(--color-surface-alt)",
                           outline: el.id === selectedFreeId ? "2px solid var(--color-primary)" : undefined,
