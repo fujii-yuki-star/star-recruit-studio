@@ -210,6 +210,10 @@ export interface FreeElement {
   /** 枠線/縁取り（#173・任意）。strokeWidth>0 のとき描画。kind='shape'＝図形の枠線、kind='text'＝文字の縁取り（#209）。 */
   strokeColor?: string;
   strokeWidth?: number;
+  /** 非表示（レイヤー一覧で隠す・#210）。true のとき描画・操作対象から除外（未指定/false＝表示）。 */
+  hidden?: boolean;
+  /** ロック（レイヤー一覧で固定・#210）。true のときプレビュー上での移動/拡縮を禁止（未指定/false＝編集可）。 */
+  locked?: boolean;
 }
 
 export interface Scene {

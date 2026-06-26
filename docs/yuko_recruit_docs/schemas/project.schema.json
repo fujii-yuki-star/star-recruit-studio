@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.10" },
+    "schemaVersion": { "const": "1.11" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -242,7 +242,9 @@
         "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
         "radius": { "type": "number", "minimum": 0 },
         "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "strokeWidth": { "type": "number", "minimum": 0 }
+        "strokeWidth": { "type": "number", "minimum": 0 },
+        "hidden": { "type": "boolean" },
+        "locked": { "type": "boolean" }
       }
     },
     "AssetRefs": {

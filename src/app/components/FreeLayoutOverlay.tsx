@@ -99,6 +99,8 @@ export function FreeLayoutOverlay({
     setEditingId(null); // ドラッグ開始でインライン編集を抜ける
     // Shift+クリック（移動操作）＝選択トグル。ドラッグは始めない（複数選択を作る/外すための操作）。
     if (mode === "move" && e.shiftKey) { onSelect(el.id, true); return; }
+    // ロック中は選択だけ行い、移動/拡縮はしない（レイヤー一覧で解除できる・#210）。
+    if (el.locked) { onSelect(el.id); return; }
     // 通常クリック：未選択ならその要素だけを選択。選択済みをドラッグなら選択を保つ（複数なら一括移動）。
     const alreadySelected = selectedIds.includes(el.id);
     if (!alreadySelected) onSelect(el.id);
@@ -212,9 +214,11 @@ export function FreeLayoutOverlay({
       onContextMenu={(e) => { e.preventDefault(); }}
     >
       {freeLayout.map((el) => {
+        if (el.hidden) return null; // 非表示の要素は箱を出さない（描画も layout 側で除外・レイヤー一覧で再表示・#210）
         const selected = selectedIds.includes(el.id); // 選択中（複数可）＝枠を強調
         const isPrimary = el.id === primaryId; // 主＝リサイズハンドルを出す対象
         const rotated = (el.rotation ?? 0) !== 0; // 回転あり（角度は 0〜360未満＝360°(=0°)は schema で排除済み）
+        const locked = el.locked === true; // ロック中＝移動/拡縮しない・ハンドルも出さない（#210）
         const editing = el.id === editingId && el.kind === FREE_ELEMENT_KIND.text;
         return (
           <div
@@ -238,7 +242,8 @@ export function FreeLayoutOverlay({
               boxSizing: "border-box",
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
               background: selected ? "rgba(80,130,255,0.08)" : "transparent",
-              cursor: editing ? "text" : "move",
+              cursor: locked ? "default" : editing ? "text" : "move", // ロック中はドラッグ不可を示す
+
               // 回転（#208）：中心を軸に回す（既定の transform-origin=中心）。出力 SVG の rotate と一致。
               transform: rotated ? `rotate(${el.rotation}deg)` : undefined,
             }}
@@ -268,8 +273,8 @@ export function FreeLayoutOverlay({
                 }}
               />
             ) : (
-              // 回転中はリサイズハンドルを出さない（回転下の角ドラッグ計算は非対応＝大きさは数値入力で。#208）。
-              isPrimary && !rotated &&
+              // 回転中・ロック中はリサイズハンドルを出さない（回転下の計算は非対応＝数値入力で・ロックは固定。#208/#210）。
+              isPrimary && !rotated && !locked &&
               HANDLES.map((hd) => (
                 <div
                   key={hd.corner}
