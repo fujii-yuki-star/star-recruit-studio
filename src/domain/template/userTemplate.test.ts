@@ -27,4 +27,13 @@ describe('createUserTemplateId', () => {
     expect(id).toBe('user_tmpl_003');
     expect(isUserTemplate(id)).toBe(true);
   });
+
+  it('minSeq（払い出し済みの最大連番）を下回らない＝削除でファイルが消えても番号を戻さない', () => {
+    // 現存は空でも、払い出し済み最大が 5 なら次は 006（削除した 001〜005 を再利用しない）。
+    expect(createUserTemplateId([], 5)).toBe('user_tmpl_006');
+    // 現存 max(003) より minSeq(5) が大きければ minSeq 優先。
+    expect(createUserTemplateId(['user_tmpl_003'], 5)).toBe('user_tmpl_006');
+    // 現存 max(007) が minSeq(5) より大きければ現存優先。
+    expect(createUserTemplateId(['user_tmpl_007'], 5)).toBe('user_tmpl_008');
+  });
 });
