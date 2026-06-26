@@ -3,6 +3,7 @@ import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/p
 import type { Template } from "../../domain/template/types";
 import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, type LayerType, type SceneCategory } from "../../domain/enums";
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
+import { isUserTemplate } from "../../domain/template/userTemplate";
 import { useProjectStore } from "../store/projectStore";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
@@ -107,10 +108,47 @@ export function LooksScreen() {
   const templates = useProjectStore((s) => s.templates);
   const assets = useProjectStore((s) => s.assets);
   const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
+  const duplicateAsUserTemplate = useProjectStore((s) => s.duplicateAsUserTemplate);
+  const deleteUserTemplate = useProjectStore((s) => s.deleteUserTemplate);
+  const saveUserTemplate = useProjectStore((s) => s.saveUserTemplate);
+  const templateError = useProjectStore((s) => s.templateError);
   const [selectedId, setSelectedId] = useState(templates[0]?.templateId ?? "");
   const [loadMsg, setLoadMsg] = useState("");
   const [loadOk, setLoadOk] = useState(true);
+  // マイテンプレ（ユーザーテンプレ）の名前編集・削除確認（#214 ③a）。
+  const [renameValue, setRenameValue] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
+
+  // 選択が変わったら名前入力をその名前に同期し、削除確認を閉じる（描画中リセット＝effect 内 setState を避ける React 推奨パターン）。
+  const [syncedId, setSyncedId] = useState(current?.templateId);
+  if (current && current.templateId !== syncedId) {
+    setSyncedId(current.templateId);
+    setRenameValue(current.name);
+    setConfirmDelete(false);
+  }
+
+  const isUserCurrent = current ? isUserTemplate(current.templateId) : false;
+
+  // この見た目を複製してマイテンプレにする（複製後はそれを選択）。
+  async function onDuplicate() {
+    if (!current) return;
+    const newId = await duplicateAsUserTemplate(current.templateId);
+    if (newId) setSelectedId(newId);
+  }
+  // マイテンプレの名前を変更して保存。
+  async function onRename() {
+    if (!current || !isUserCurrent) return;
+    await saveUserTemplate({ ...current, name: renameValue.trim() });
+  }
+  // マイテンプレを削除し、別の見た目を選択する。
+  async function onDelete() {
+    if (!current || !isUserCurrent) return;
+    const fallback = templates.find((t) => t.templateId !== current.templateId)?.templateId ?? "";
+    await deleteUserTemplate(current.templateId);
+    setConfirmDelete(false);
+    setSelectedId(fallback);
+  }
 
   // 用意した見た目パターンのファイルを取り込む（検証は templateFs＝§2-2）。件数のみ提示（§2-3）。
   async function onLoadPack(e: ChangeEvent<HTMLInputElement>) {
@@ -173,7 +211,7 @@ export function LooksScreen() {
               onClick={() => setSelectedId(t.templateId)}
             >
               <span className="action-card-title">{t.name}</span>
-              <span className="action-card-desc">{categoryLabel[t.category]}</span>
+              <span className="action-card-desc">{categoryLabel[t.category]}{isUserTemplate(t.templateId) ? "・マイテンプレ" : ""}</span>
             </button>
           ))}
         </div>
@@ -211,6 +249,55 @@ export function LooksScreen() {
           </div>
 
           <hr className="divider" />
+          {/* マイテンプレ（ユーザーテンプレ）の作成・編集（#214 ③a・ADR-0017）。レイヤーの配置編集は順次対応。 */}
+          <h3 className="field-label">この見た目を編集</h3>
+          <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`}>
+            {isUserCurrent ? "マイテンプレ" : "標準（編集するには複製します）"}
+          </span>
+          <div className="col gap-sm mt">
+            <button className="btn btn-secondary" onClick={() => void onDuplicate()}>
+              この見た目を複製してマイテンプレにする
+            </button>
+            {isUserCurrent && (
+              <>
+                <div className="field" style={{ margin: 0 }}>
+                  <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
+                  <div className="row gap-sm">
+                    <input className="input" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
+                    <button
+                      className="btn btn-secondary"
+                      disabled={!renameValue.trim() || renameValue === current.name}
+                      onClick={() => void onRename()}
+                    >
+                      名前を変更
+                    </button>
+                  </div>
+                </div>
+                {confirmDelete ? (
+                  <div className="row gap-sm" style={{ alignItems: "center" }}>
+                    <span className="text-sm">このマイテンプレを削除しますか？</span>
+                    <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
+                    <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn-ghost text-sm"
+                    style={{ color: "var(--color-danger)", alignSelf: "flex-start" }}
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    このマイテンプレを削除
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          {templateError && (
+            <div className="notice notice-warn mt" role="alert">
+              <span>{templateError}</span>
+            </div>
+          )}
+
+          <hr className="divider" />
           <input
             id="tmplPack"
             type="file"
@@ -222,7 +309,7 @@ export function LooksScreen() {
           <label htmlFor="tmplPack" className="btn btn-secondary" style={{ cursor: "pointer" }}>
             見た目パターンを読み込む
           </label>
-          <p className="field-hint mt">用意した見た目パターンのファイルを追加できます（編集は今後のバージョンで対応予定）。</p>
+          <p className="field-hint mt">用意した見た目パターンのファイルを追加できます。</p>
           {loadMsg && (
             <div className={`notice ${loadOk ? "notice-info" : "notice-warn"} mt`} role={loadOk ? "status" : "alert"}>
               <span>{loadMsg}</span>
