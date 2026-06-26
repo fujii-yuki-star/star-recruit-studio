@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.8" },
+    "schemaVersion": { "const": "1.9" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -227,6 +227,7 @@
         "w": { "type": "number", "exclusiveMinimum": 0 },
         "h": { "type": "number", "exclusiveMinimum": 0 },
         "zIndex": { "type": "integer" },
+        "rotation": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
         "assetId": { "type": ["string", "null"] },
         "fit": { "enum": ["cover", "contain", "stretch"] },
         "text": { "type": "string" },

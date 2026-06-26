@@ -203,4 +203,20 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     const layout = layoutScene(sceneWithStrayFree, openingTemplate); // category === 'opening'
     expect(layout.items.find((i) => i.id === 'free_001')).toBeUndefined();
   });
+
+  it('FREE 要素の rotation が LayoutItem と SVG の rotate（中心軸）に反映される（#208）', () => {
+    const rotScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 100, y: 100, w: 200, h: 100, zIndex: 5, shapeType: 'rect', fillColor: '#00ff00', rotation: 30 }],
+    };
+    const layout = layoutScene(rotScene, freeTemplate);
+    expect(layout.items.find((i) => i.id === 'free_001')?.rotation).toBe(30);
+    // 中心 (100+100, 100+50)=(200,150) を軸に rotate。
+    expect(layoutToSvg(layout)).toContain('transform="rotate(30 200 150)"');
+  });
+
+  it('rotation 未指定/0 は rotate でくるまない（出力 SVG の差分を最小化）', () => {
+    const svg = layoutToSvg(layoutScene(freeScene, freeTemplate)); // freeScene は rotation なし
+    expect(svg).not.toContain('rotate(');
+  });
 });

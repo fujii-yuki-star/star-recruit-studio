@@ -117,7 +117,7 @@ function imageToSvg(item: ImageItem, src: string | undefined, fontFamily: string
   ].join('');
 }
 
-function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: string): string {
+function renderItemInner(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: string): string {
   switch (item.kind) {
     case 'fill':
       return freeShapeSvg(item);
@@ -126,6 +126,16 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: strin
     case 'text':
       return textToSvg(item, fontFamily);
   }
+}
+
+function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: string): string {
+  const inner = renderItemInner(item, opts, fontFamily);
+  // 回転（#208）：中心(cx,cy)を軸に rotate でくるむ。未指定/0 は包まない（出力 SVG の差分を最小化）。
+  const rot = item.rotation;
+  if (rot == null || rot === 0) return inner;
+  const cx = item.x + item.w / 2;
+  const cy = item.y + item.h / 2;
+  return `<g transform="rotate(${rot} ${cx} ${cy})">${inner}</g>`;
 }
 
 // 常時クレジット（ADR-0003）。背景に依らず読めるよう半透明の暗いピルを敷き、右下に白文字で最前面へ。

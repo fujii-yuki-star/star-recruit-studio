@@ -186,6 +186,8 @@ export interface FreeElement {
   h: number;
   /** 重ね順（整数のみ有効・§2.2 / schema: integer）。 */
   zIndex?: number;
+  /** 回転角（度・0以上360未満・中心を軸に時計回り。未指定/0＝回転なし。360=0 は重複ゆえ schema で除外・#208）。 */
+  rotation?: number;
   /** kind='slot': 素材を直接参照（null=空スロット）。fit は assetId 非 null のとき有効。 */
   assetId?: string | null;
   fit?: Fit;

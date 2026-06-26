@@ -159,6 +159,19 @@ describe('parseProjectDoc', () => {
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     expect(back.scenes[0].lines?.map((l) => l.speaker)).toEqual([3, 2]);
   });
+  it('FREE 回転：rotation を持つ旧版(1.8)が 1.9 へ移行し rotation を保持する（#208）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'free', templateId: 'free_canvas_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' },
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: 45 }],
+      warnings: [],
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.8', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.8→1.9 へ昇格（任意追加＝変換不要）
+    expect(back.scenes[0].freeLayout?.[0].rotation).toBe(45);
+  });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;
     delete doc.videoKind;
