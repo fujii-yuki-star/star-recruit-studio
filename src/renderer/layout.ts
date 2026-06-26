@@ -173,6 +173,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   // 通常テンプレに誤って freeLayout が付いても描画しない（防御。category で判定）。
   if (template.category === FREE_CATEGORY) {
     for (const el of scene.freeLayout ?? []) {
+      if (el.hidden) continue; // 非表示の要素は描画しない（レイヤー一覧で隠す・#210）。
       // zIndex 未指定は 1（背景=0 より前面に置く）。rotation はそのまま転送（未指定=回転なし）。
       const base: ItemBase = { id: el.id, x: el.x, y: el.y, w: el.w, h: el.h, zIndex: el.zIndex ?? 1, rotation: el.rotation };
       switch (el.kind) {

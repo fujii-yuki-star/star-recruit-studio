@@ -182,8 +182,21 @@ describe('parseProjectDoc', () => {
     };
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.9', scenes: [scene] } as Record<string, unknown>;
     const back = parseProjectDoc(JSON.stringify(doc));
-    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.9→1.10 へ昇格
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.9→現行へ昇格
     expect(back.scenes[0].freeLayout?.[0]).toMatchObject({ lineHeight: 1.8, textAlign: 'right' });
+  });
+  it('FREE 非表示/ロック：hidden/locked を持つ旧版(1.10)が移行し保持する（#210）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'free', templateId: 'free_canvas_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' },
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100, hidden: true, locked: true }],
+      warnings: [],
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.10', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.10→1.11 へ昇格
+    expect(back.scenes[0].freeLayout?.[0]).toMatchObject({ hidden: true, locked: true });
   });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;

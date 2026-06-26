@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
   addFreeElement, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  moveFreeElement, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, sendFreeElementToBack,
+  moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, sendFreeElementToBack,
   snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -202,6 +202,38 @@ describe('bringFreeElementToFront / sendFreeElementToBack', () => {
     const single: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 }];
     expect(bringFreeElementToFront(single, 'free_001')).toBe(single);
     expect(sendFreeElementToBack(single, 'free_001')).toBe(single);
+  });
+});
+
+describe('moveFreeElementZ（レイヤー一覧の1段移動・#210）', () => {
+  const layout: FreeElement[] = [
+    { id: 'a', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 },
+    { id: 'b', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 2 },
+    { id: 'c', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 3 },
+  ];
+  const zById = (l: FreeElement[]) => Object.fromEntries(l.map((e) => [e.id, e.zIndex]));
+
+  it('up：1段前面へ＝隣（次に大きい z）と入れ替え', () => {
+    expect(zById(moveFreeElementZ(layout, 'a', 'up'))).toMatchObject({ a: 2, b: 1, c: 3 });
+  });
+
+  it('down：1段背面へ＝隣（次に小さい z）と入れ替え', () => {
+    expect(zById(moveFreeElementZ(layout, 'c', 'down'))).toMatchObject({ a: 1, b: 3, c: 2 });
+  });
+
+  it('端（最前面を up / 最背面を down）は変化なし（同一参照）', () => {
+    expect(moveFreeElementZ(layout, 'c', 'up')).toBe(layout);
+    expect(moveFreeElementZ(layout, 'a', 'down')).toBe(layout);
+    expect(moveFreeElementZ(layout, 'zzz', 'up')).toBe(layout); // 不在
+  });
+
+  it('同 zIndex のときは移動方向へ寄せて前後を確定（up で前面側が大きく）', () => {
+    const tie: FreeElement[] = [
+      { id: 'a', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 5 },
+      { id: 'b', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 5 },
+    ];
+    const m = zById(moveFreeElementZ(tie, 'a', 'up'));
+    expect(Number(m.a)).toBeGreaterThan(Number(m.b));
   });
 });
 

@@ -266,3 +266,28 @@ describe("FreeLayoutOverlay: 回転（#208）", () => {
     expect(box.children).toHaveLength(4); // 回転なし＝リサイズハンドル
   });
 });
+
+describe("FreeLayoutOverlay: 非表示/ロック（#210）", () => {
+  it("hidden の要素は箱を描かない（レイヤー一覧から再表示）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1, hidden: true },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 2 },
+    ];
+    const { root } = renderOverlay({ freeLayout: layout });
+    expect(root.children).toHaveLength(1); // free_001 は描かれず free_002 の1箱のみ
+  });
+
+  it("ロック中の要素はクリックで選択されるが、ドラッグしても移動しない", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 100, zIndex: 1, locked: true },
+    ];
+    const { root, onSelect, onMoveMany } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    const box = root.children[0] as HTMLElement;
+    fireEvent.pointerDown(box, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onSelect).toHaveBeenCalledWith("free_001"); // 選択はされる
+    fireEvent.pointerMove(box, { clientX: 50, clientY: 50, pointerId: 1 });
+    expect(onMoveMany).not.toHaveBeenCalled(); // ロック中は移動しない
+    expect(box.children).toHaveLength(0); // リサイズハンドルも出さない
+  });
+});

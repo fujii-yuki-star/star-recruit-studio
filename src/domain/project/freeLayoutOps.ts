@@ -160,6 +160,29 @@ export function sendFreeElementToBack(freeLayout: FreeElement[], id: string): Fr
   return freeLayout.map((e) => (e.id === id ? { ...e, zIndex: Math.max(0, minOther - 1) } : e));
 }
 
+/**
+ * 重ね順を1段だけ前面('up')/背面('down')へ動かす（レイヤー一覧の↑↓・#210）。
+ * zIndex 昇順で隣の要素と zIndex を入れ替える。端ならそのまま。同 zIndex のときは移動方向へ寄せて前後を確定（背面側は 0 が下限）。
+ */
+export function moveFreeElementZ(
+  freeLayout: FreeElement[], id: string, direction: 'up' | 'down',
+): FreeElement[] {
+  const sorted = [...freeLayout].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+  const i = sorted.findIndex((e) => e.id === id);
+  if (i < 0) return freeLayout;
+  const j = direction === 'up' ? i + 1 : i - 1;
+  if (j < 0 || j >= sorted.length) return freeLayout; // 端＝これ以上動かせない
+  const a = sorted[i];
+  const b = sorted[j];
+  const za = a.zIndex ?? 0;
+  const zb = b.zIndex ?? 0;
+  if (za !== zb) {
+    return freeLayout.map((e) => (e.id === a.id ? { ...e, zIndex: zb } : e.id === b.id ? { ...e, zIndex: za } : e));
+  }
+  const nudged = direction === 'up' ? zb + 1 : Math.max(0, zb - 1);
+  return freeLayout.map((e) => (e.id === a.id ? { ...e, zIndex: nudged } : e));
+}
+
 // ── ドラッグ移動・角リサイズのジオメトリ（Phase 4b）。純粋関数＝§7 テスト対象。 ──
 
 /** ドラッグ/リサイズで潰れないための最小サイズ（canvas px）。schema は w>0/h>0。 */

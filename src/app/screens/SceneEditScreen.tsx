@@ -4,7 +4,7 @@ import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
-import { addFreeElement, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeElement, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
@@ -288,6 +288,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: bringFreeElementToFront(s.freeLayout ?? [], id) }));
   const sendFreeElBackward = (id: string) =>
     patch((s) => ({ ...s, freeLayout: sendFreeElementToBack(s.freeLayout ?? [], id) }));
+  // レイヤー一覧（#210）：重ね順を1段移動・表示/ロックの切替（最新 s から計算）。
+  const moveFreeElZ = (id: string, dir: "up" | "down") =>
+    patch((s) => ({ ...s, freeLayout: moveFreeElementZ(s.freeLayout ?? [], id, dir) }));
+  const toggleFreeHidden = (id: string) =>
+    patch((s) => ({ ...s, freeLayout: (s.freeLayout ?? []).map((e) => (e.id === id ? { ...e, hidden: !e.hidden } : e)) }));
+  const toggleFreeLocked = (id: string) =>
+    patch((s) => ({ ...s, freeLayout: (s.freeLayout ?? []).map((e) => (e.id === id ? { ...e, locked: !e.locked } : e)) }));
   // 見た目パーツを一括展開し、追加した先頭要素を選択（所在を明示＝利便性・#175）。
   // updater 内で最新 s.freeLayout から計算（updateScene→set は同期実行で newIds は下の前に確定）。
   const addFreeComponent = (componentId: string) => {
@@ -861,6 +868,38 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
                 ) : (
                   <div className="col gap-sm">
+                    {/* レイヤー一覧（#210）：重ね順（上が手前）で並べ、選択・前面/背面・表示/隠す・ロックを操作。 */}
+                    <div className="field" style={{ marginBottom: 4 }}>
+                      <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>レイヤー（上が手前）</label>
+                      <div className="col" style={{ gap: 2 }}>
+                        {[...freeLayout].sort((a, b) => (b.zIndex ?? 1) - (a.zIndex ?? 1)).map((el) => {
+                          const isSel = selectedFreeIds.includes(el.id);
+                          const hint = el.kind === FREE_ELEMENT_KIND.text && el.text ? `「${el.text.slice(0, 8)}」` : "";
+                          return (
+                            <div
+                              key={el.id}
+                              className="row-between"
+                              style={{ padding: "2px 6px", borderRadius: 4, background: isSel ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)", opacity: el.hidden ? 0.55 : 1 }}
+                            >
+                              <button
+                                className="btn btn-ghost text-sm"
+                                style={{ flex: 1, textAlign: "left", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                                onClick={(e) => selectFree(el.id, e.shiftKey)}
+                                title="クリックで選択（Shift＋クリックで複数選択）"
+                              >
+                                {freeKindLabel[el.kind]}{hint}{el.locked ? "（ロック）" : ""}
+                              </button>
+                              <div className="row" style={{ gap: 2 }}>
+                                <button className="btn btn-ghost btn-icon text-sm" title="前面へ" onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title="背面へ" onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title={el.hidden ? "表示する" : "隠す"} onClick={() => toggleFreeHidden(el.id)}>{el.hidden ? "表示" : "隠す"}</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title={el.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleFreeLocked(el.id)}>{el.locked ? "解除" : "固定"}</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                     {/* 複数選択（#206）：2件以上選んだら一括操作バーを出す（Shift＋クリックで増減）。 */}
                     {selectedFreeIds.length >= 2 && (
                       <div className="col gap-sm" style={{ padding: "4px 8px", background: "var(--color-surface-alt)", borderRadius: 6 }}>

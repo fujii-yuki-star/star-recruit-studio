@@ -251,4 +251,17 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(svgFor('right')).toContain('text-anchor="end"');
     expect(svgFor('right')).toContain('x="500"'); // 右端＝item.x + item.w = 100+400
   });
+
+  it('hidden の FREE 要素は描画しない（レイヤー一覧で隠す・#210）', () => {
+    const withHidden: Scene = {
+      ...freeScene,
+      freeLayout: [
+        { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100, zIndex: 5, shapeType: 'rect', fillColor: '#000000', hidden: true },
+        { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 100, h: 100, zIndex: 6, shapeType: 'rect', fillColor: '#111111' },
+      ],
+    };
+    const items = layoutScene(withHidden, freeTemplate).items;
+    expect(items.find((i) => i.id === 'free_001')).toBeUndefined(); // 非表示は除外
+    expect(items.find((i) => i.id === 'free_002')).toBeDefined();
+  });
 });
