@@ -100,18 +100,22 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
 
     if (sc.lines && sc.lines.length > 0) {
       // 掛け合い：行音声の長さを測ってタイムラインを作り、各行の開始秒で音声＋フレームを切り替える。
+      const lines = sc.lines;
       const durations: Record<string, number> = {};
-      for (const l of sc.lines) {
+      for (const l of lines) {
         const a = narrationAudioById[lineAudioKey(sc.sceneId, l.lineId)];
         durations[l.lineId] = a ? wavDurationSec(a) : 0;
       }
-      const segs = lineSegments(sc, durations);
+      // 0秒（音声未測定で開始が重なる）行は無視＝書き出し（sceneSegmentSpecs）と同じ扱い（M-1）。
+      const segs = lineSegments(sc, durations).filter((s) => s.endSec > s.startSec);
       const lineTimers: number[] = [];
       const lineAudios: HTMLAudioElement[] = [];
       let currentAudio: HTMLAudioElement | undefined;
       const playLine = (i: number): void => {
         currentAudio?.pause(); // 前の行の音声を止めてから次へ（被り防止）。
-        setActiveLine(i);
+        // segs と sc.lines のズレに依らず lineId で実体の行 index を引く（誤字幕防止・M-2）。
+        const lineIdx = lines.findIndex((l) => l.lineId === segs[i].lineId);
+        setActiveLine(lineIdx >= 0 ? lineIdx : 0);
         const u = narrationAudioById[lineAudioKey(sc.sceneId, segs[i].lineId)];
         if (u && !mutedRef.current) {
           currentAudio = new Audio(u);
@@ -119,9 +123,11 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           void currentAudio.play().catch((e) => console.warn("[PreviewScreen] 音声再生に失敗", e));
         }
       };
-      playLine(0);
-      for (let i = 1; i < segs.length; i += 1) {
-        lineTimers.push(window.setTimeout(() => playLine(i), Math.max(0, segs[i].startSec) * 1000));
+      if (segs.length > 0) {
+        playLine(0);
+        for (let i = 1; i < segs.length; i += 1) {
+          lineTimers.push(window.setTimeout(() => playLine(i), Math.max(0, segs[i].startSec) * 1000));
+        }
       }
       return () => {
         window.clearTimeout(endTimer);
