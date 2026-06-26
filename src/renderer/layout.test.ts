@@ -219,4 +219,27 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     const svg = layoutToSvg(layoutScene(freeScene, freeTemplate)); // freeScene は rotation なし
     expect(svg).not.toContain('rotate(');
   });
+
+  it('FREE text の体裁（行間/揃え/縁取り）が LayoutItem と SVG に反映される（#209）', () => {
+    const styledScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'text', x: 100, y: 100, w: 400, h: 200, zIndex: 5, text: 'あ', fontSize: 40, textAlign: 'center', strokeColor: '#112233', strokeWidth: 3, lineHeight: 2 }],
+    };
+    const item = layoutScene(styledScene, freeTemplate).items.find((i): i is TextItem => i.kind === 'text');
+    expect(item).toMatchObject({ textAlign: 'center', strokeColor: '#112233', strokeWidth: 3, lineHeight: 2 });
+    expect(item?.maxLines).toBe(2); // h200 /(fontSize40 * lineHeight2) = 2（行間が行数計算に効く）
+    const svg = layoutToSvg(layoutScene(styledScene, freeTemplate));
+    expect(svg).toContain('text-anchor="middle"'); // 中央揃え
+    expect(svg).toContain('x="300"'); // 中央 x = 100 + 400/2
+    expect(svg).toContain('stroke="#112233"'); // 縁取り
+    expect(svg).toContain('stroke-width="3"');
+    expect(svg).toContain('paint-order="stroke"'); // 塗りの下に縁取り（可読性）
+  });
+
+  it('FREE text の体裁が未指定なら左揃え・縁取りなし（既定）', () => {
+    const plain: Scene = { ...freeScene, freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 200, h: 80, zIndex: 5, text: 'あ', fontSize: 40 }] };
+    const svg = layoutToSvg(layoutScene(plain, freeTemplate));
+    expect(svg).toContain('text-anchor="start"'); // 左揃え
+    expect(svg).not.toContain('paint-order'); // 縁取りなし
+  });
 });

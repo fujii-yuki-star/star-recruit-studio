@@ -4,6 +4,7 @@
 import type { Fit } from '../domain/enums';
 import { fontFamilyForId, isKnownFontId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
+import { DEFAULT_LINE_HEIGHT } from './layout';
 import { freeShapeSvg } from './freeShapes';
 
 // 既定の font-family（opts.fontFamily 未指定時のフォールバック＝同梱の既定フォント）。
@@ -58,7 +59,7 @@ function textToSvg(item: TextItem, fontFamily: string): string {
   // 要素自身の fontId（既知）を優先し、未指定/不明は場面既定（fontFamily＝場面→動画全体→既定の解決済み）へ（#178）。
   const family = isKnownFontId(item.fontId) ? fontFamilyForId(item.fontId) : fontFamily;
   const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines);
-  const lineHeight = item.fontSize * 1.3;
+  const lineHeight = item.fontSize * (item.lineHeight ?? DEFAULT_LINE_HEIGHT); // 行間（#209）
 
   if (item.background) {
     const bgHeight = lineHeight * lines.length + item.fontSize * 0.6;
@@ -67,10 +68,19 @@ function textToSvg(item: TextItem, fontFamily: string): string {
     );
   }
 
+  // 揃え（#209）：text-anchor と x を決める。未指定=left。背景の矩形は要素幅のまま。
+  const align = item.textAlign ?? 'left';
+  const anchor = align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start';
+  const textX = align === 'center' ? item.x + item.w / 2 : align === 'right' ? item.x + item.w : item.x;
+  // 縁取り（#209）：strokeWidth>0 のとき文字に stroke を敷く。paint-order=stroke で塗りの下に置き可読性を保つ。
+  const stroke = item.strokeColor && item.strokeWidth && item.strokeWidth > 0
+    ? ` stroke="${item.strokeColor}" stroke-width="${item.strokeWidth}" paint-order="stroke"`
+    : '';
+
   const baseY = item.y + item.fontSize;
   lines.forEach((line, i) => {
     parts.push(
-      `<text x="${item.x}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}">${escapeXml(line)}</text>`,
+      `<text x="${textX}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}" text-anchor="${anchor}"${stroke}>${escapeXml(line)}</text>`,
     );
   });
   return parts.join('\n');
