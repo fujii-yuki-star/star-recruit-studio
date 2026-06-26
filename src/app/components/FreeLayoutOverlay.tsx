@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
 import { FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -19,6 +20,8 @@ interface DragState {
   start: { x: number; y: number; w: number; h: number };
   /** move 時：一括移動する全要素の開始位置（複数選択。単一なら主のみ）。 */
   starts?: { id: string; x: number; y: number }[];
+  /** move 時：吸着先＝移動しない他要素の辺・中心（ドラッグ開始時に確定）。 */
+  otherEdges?: SnapEdges[];
   scale: number; // 表示px / canvas（= overlay幅 / canvas幅）
 }
 
@@ -29,6 +32,9 @@ const HANDLES: { corner: ResizeCorner; left: string; top: string; cursor: string
   { corner: "sw", left: "0%", top: "100%", cursor: "nesw-resize" },
   { corner: "se", left: "100%", top: "100%", cursor: "nwse-resize" },
 ];
+
+// 吸着ガイド線の色（選択枠＝primary と区別できるよう、整列ガイドは別アクセント色にする）。
+const SNAP_GUIDE_COLOR = "#ff3d8b";
 
 // 右クリックメニューの推定サイズ（画面端からはみ出さないようクランプするため）。
 const MENU_W = 160;
@@ -71,6 +77,8 @@ export function FreeLayoutOverlay({
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 吸着ガイド（ドラッグ中に他要素の辺/中心へそろったとき表示する縦/横の線・canvas 座標。#205 後半）。
+  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
 
   // Escape で右クリックメニューを閉じる（role="menu" の期待動作・フォーカス位置に依らず効く）。
   useEffect(() => {
@@ -100,6 +108,11 @@ export function FreeLayoutOverlay({
       .map((id) => freeLayout.find((m) => m.id === id))
       .filter((m): m is FreeElement => m != null)
       .map((m) => ({ id: m.id, x: m.x, y: m.y }));
+    // 吸着先＝移動しない他要素の辺・中心。ドラッグ中は他要素が動かないのでここで一度だけ確定する。
+    // 吸着は move のときだけ使う（resize では参照しないので計算もしない）。
+    const otherEdges = mode === "move"
+      ? freeLayout.filter((m) => !moveTargets.includes(m.id)).map((m) => edgesOf(m))
+      : [];
     const width = ref.current?.clientWidth ?? canvasW;
     // capture は best-effort（環境により失敗しうる）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
@@ -108,6 +121,7 @@ export function FreeLayoutOverlay({
       startClientX: e.clientX, startClientY: e.clientY,
       start: { x: el.x, y: el.y, w: el.w, h: el.h },
       starts,
+      otherEdges,
       // 表示px→canvas の縮尺。プレビューは canvas と同比（向きに追従・レターボックス無し）ゆえ scaleX===scaleY なので
       // 幅基準（width/canvasW）で算出すれば縦も一致する（canvasH は %配置に使用）。
       scale: width / canvasW,
@@ -121,12 +135,20 @@ export function FreeLayoutOverlay({
     const dx = (e.clientX - drag.startClientX) / drag.scale;
     const dy = (e.clientY - drag.startClientY) / drag.scale;
     if (drag.mode === "move") {
-      // 主の位置をグリッド吸着で確定し、その差分を選択中の全要素へ同じだけ適用（群を崩さず一括移動）。
+      // 主の位置をグリッド吸着で確定し、さらに他要素の辺/中心へ吸着（要素スナップが近ければ優先）。
       const moved = moveFreeElement(drag.start, dx, dy, gridSize);
-      const ddx = moved.x - drag.start.x;
-      const ddy = moved.y - drag.start.y;
+      const others = drag.otherEdges ?? [];
+      const snap = snapToTargets(
+        { x: moved.x, y: moved.y, w: drag.start.w, h: drag.start.h },
+        others,
+        SNAP_THRESHOLD_PX / drag.scale, // 画面px→canvas px
+      );
+      // その差分を選択中の全要素へ同じだけ適用（群を崩さず一括移動）。
+      const ddx = snap.x - drag.start.x;
+      const ddy = snap.y - drag.start.y;
       const starts = drag.starts ?? [{ id: drag.id, x: drag.start.x, y: drag.start.y }];
       onMoveMany(starts.map((s) => ({ id: s.id, x: s.x + ddx, y: s.y + ddy })));
+      setGuides({ x: snap.guideX, y: snap.guideY });
     } else if (drag.corner) {
       // Shift 押下中は縦横比を維持（e.shiftKey は move のたびに評価＝ドラッグ途中の押し直しにも追従）。
       onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey));
@@ -137,6 +159,7 @@ export function FreeLayoutOverlay({
     if (!drag) return;
     try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
     setDrag(null);
+    setGuides({ x: null, y: null }); // ドラッグ終了でガイド線を消す
   };
 
   // 右クリック：対象を選択しカーソル位置にメニューを開く（画面端でクランプ）。
@@ -265,6 +288,14 @@ export function FreeLayoutOverlay({
           </div>
         );
       })}
+
+      {/* 吸着ガイド（#205 後半）：他要素の辺/中心にそろった位置へ縦/横の線を出す（ドラッグ中のみ）。 */}
+      {guides.x != null && (
+        <div data-testid="snap-guide-x" style={{ position: "absolute", left: `${(guides.x / canvasW) * 100}%`, top: 0, bottom: 0, width: 1, background: SNAP_GUIDE_COLOR, pointerEvents: "none", zIndex: 40 }} />
+      )}
+      {guides.y != null && (
+        <div data-testid="snap-guide-y" style={{ position: "absolute", top: `${(guides.y / canvasH) * 100}%`, left: 0, right: 0, height: 1, background: SNAP_GUIDE_COLOR, pointerEvents: "none", zIndex: 40 }} />
+      )}
 
       {menu && menuEl && (
         <>
