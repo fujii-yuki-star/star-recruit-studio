@@ -1,0 +1,5 @@
+# エンジン実体（run.exe・model・engine_internal 等）はコミットしない（大容量・#149）。
+# この .gitignore だけ追跡してディレクトリを存在させ、tauri.conf の bundle.resources の
+# パス存在検証（tauri-build build.rs）を CI（バイナリ不在）でも通す。
+*
+!.gitignore

@@ -1,8 +1,8 @@
 // AI出力(ai-video-plan) → 内部 Part[] / Scene[] への変換。正典は 12_AI_PROMPT_AND_MAPPING.md §8、
 // 検証/補正ルールは 11_SCHEMA_REFERENCE.md §8,§9、エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。
 // 純粋関数（副作用なし）。Date/乱数に依存せず、ID採番は注入する（14 §4）。
-import { isSceneCategory } from '../enums';
-import type { SceneCategory, WarningSeverity } from '../enums';
+import { ASSET_TYPE, NARRATION_STATUS, isSceneCategory } from '../enums';
+import type { Orientation, SceneCategory, WarningSeverity } from '../enums';
 import {
   DEFAULT_CHARACTER_ID,
   MAX_NARRATION_LEN_DEFAULT,
@@ -14,16 +14,19 @@ import {
   VIDEO_HARD_MAX_SEC,
 } from '../constants';
 import type {
-  Asset, AssetRefs, Character, Narration, Part, Scene, Texts, Transition, Warning,
+  Asset, AssetRefs, Character, Narration, NarrationLine, Part, Scene, Texts, Transition, Warning,
 } from '../project/types';
 import type { Template } from '../template/types';
+import { speakerForCharacter } from '../voice/voiceCatalog';
 import { createSequentialIdFactory } from './idFactory';
 import type { IdFactory } from './idFactory';
-import type { AiVideoPlan } from './types';
+import type { AiNarrationLine, AiVideoPlan } from './types';
 
 export interface TransformContext {
   templates: Template[];
   assets: Asset[];
+  /** プロジェクトの向き（16:9/9:16）。テンプレはこの向きに一致するものへ補正する（ADR-0012・B4）。 */
+  orientation: Orientation;
   /** 省略時は part_001 / scene_001 からの連番。 */
   idFactory?: IdFactory;
 }
@@ -39,6 +42,34 @@ function warn(
   code: string, message: string, field: string, severity: WarningSeverity, autoFixed: boolean,
 ): Warning {
   return { code, message, field, severity, autoFixed };
+}
+
+/**
+ * AI の narrationLines → 内部 scene.lines（掛け合い・#180）。voiceCharacter→speaker（未知は既定声＋警告）、subtitle→字幕。
+ * 空/未指定は undefined を返し、呼び出し側は単一 narration 経路にフォールバックする。lineId は line_NNN（§2.1）。
+ */
+function mapNarrationLines(
+  aiLines: AiNarrationLine[] | undefined, warnings: Warning[],
+): NarrationLine[] | undefined {
+  if (!aiLines || aiLines.length === 0) return undefined;
+  return aiLines.map((al, i) => {
+    const lineId = `line_${String(i + 1).padStart(3, '0')}`;
+    let speaker: number | null = null;
+    if (al.voiceCharacter) {
+      speaker = speakerForCharacter(al.voiceCharacter);
+      if (speaker == null) {
+        warnings.push(warn('LINE_SPEAKER_UNKNOWN', '選べない声が指定されています。標準の声を使います', `lines.${lineId}`, 'warning', true));
+      }
+    }
+    return {
+      lineId,
+      text: al.text,
+      speaker,
+      subtitleText: al.subtitle ?? null,
+      subtitleEnabled: al.subtitleEnabled,
+      status: NARRATION_STATUS.none,
+    };
+  });
 }
 
 function clampDuration(value: number, min: number, max: number): { value: number; clamped: boolean } {
@@ -93,7 +124,7 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
   const idFactory = ctx.idFactory ?? createSequentialIdFactory();
   const assetById = new Map(ctx.assets.map((a) => [a.assetId, a] as const));
   const templateById = new Map(ctx.templates.map((t) => [t.templateId, t] as const));
-  const yukoAssets = ctx.assets.filter((a) => a.assetType === 'yuko');
+  const yukoAssets = ctx.assets.filter((a) => a.assetType === ASSET_TYPE.yuko);
 
   const parts: Part[] = [];
   const scenes: Scene[] = [];
@@ -127,14 +158,25 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
         w.push(warn('SCENE_TYPE_FALLBACK', '不明な場面種別を調整しました', 'sceneType', 'info', true));
       }
 
-      if (!template) {
-        const alt = ctx.templates.find((t) => t.category === sceneType);
+      // テンプレ解決＋向き整合（B4・ADR-0012）。見つからない、またはプロジェクトの向きと一致しない場合は、
+      // 同カテゴリ・同じ向きの見た目へ補正する（AI出力は向き非依存＝12§8 / 向きはプロジェクト側の正典）。
+      if (!template || template.aspectRatio !== ctx.orientation) {
+        const alt = ctx.templates.find(
+          (t) => t.category === sceneType && t.aspectRatio === ctx.orientation,
+        );
         if (alt) {
-          w.push(warn('TEMPLATE_NOT_FOUND', 'この場面の見た目パターンが見つからないため、標準を使います', 'templateId', 'warning', true));
+          w.push(
+            template
+              ? warn('TEMPLATE_ORIENTATION_MISMATCH', '動画の向きに合う見た目に調整しました', 'templateId', 'info', true)
+              : warn('TEMPLATE_NOT_FOUND', 'この場面の見た目パターンが見つからないため、標準を使います', 'templateId', 'warning', true),
+          );
           templateId = alt.templateId;
           template = alt;
+        } else if (!template) {
+          w.push(warn('TEMPLATE_NOT_FOUND', 'この場面の見た目パターンが見つかりません。見た目パターンを手動で選んでください', 'templateId', 'warning', false));
         } else {
-          w.push(warn('TEMPLATE_NOT_FOUND', 'この場面の見た目パターンが見つかりません', 'templateId', 'warning', false));
+          // 当該カテゴリ・当該向きの代替が無い（その向きが未整備）。原状維持で向き不一致を明示する。
+          w.push(warn('TEMPLATE_ORIENTATION_MISMATCH', '動画の向きに合う見た目が見つかりませんでした。見た目パターンを手動で選んでください', 'templateId', 'warning', false));
         }
       }
 
@@ -173,17 +215,23 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
 
       // テキスト（長さチェック V8。自動切詰めはしない）
       const texts: Texts = { ...aiScene.texts };
-      checkLengths(texts, aiScene.narrationText, template, w);
+      // narrationText は AI が空のとき null/省略しうる（自動リトライせず1回で通すための許容）。空文字に整え、
+      // 無音シーンとして成立させる（ナレーションは後から場面編集で追加可。§9 補正）。
+      const narrationText = aiScene.narrationText ?? '';
+      checkLengths(texts, narrationText, template, w);
 
-      // ナレーション初期化（12 §8.4）
+      // 掛け合い（#180）：narrationLines があれば scene.lines を作る（無ければ単一 narration のまま）。
+      const lines = mapNarrationLines(aiScene.narrationLines, w);
+      // ナレーション初期化（12 §8.4）。掛け合い時は narration.text を lines[0] に mirror する
+      // （narration.text を直読みする台本/precheck の後方可読性＝ADR-0015。AI が narrationText を省略しても空にしない）。
       const narration: Narration = {
-        text: aiScene.narrationText,
+        text: lines ? lines[0]?.text ?? '' : narrationText,
         voiceId: null,
         speed: null,
         pitch: null,
         intonation: null,
         voicePath: null,
-        status: 'none',
+        status: NARRATION_STATUS.none,
       };
 
       // トランジション既定（12 §8.5）
@@ -204,6 +252,7 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
         character,
         texts,
         narration,
+        ...(lines ? { lines } : {}),
         transition,
         warnings: w,
       };

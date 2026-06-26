@@ -1,4 +1,4 @@
-# CLAUDE.md — ゆうこ採用ムービーメーカー AI開発ガイド
+# CLAUDE.md — すたりお（stario）AI開発ガイド
 
 > このファイルは Claude Code が自動読込する、本リポジトリの**AI開発の正典（規約）**です。
 > Codex・Cursor 等の他AIツールを使う場合も、**作業開始前に必ずこのファイルを最初に読むこと。**
@@ -22,7 +22,7 @@
 
 ## 1. プロダクト一行
 
-> 採用担当者が会社情報と写真・動画を入力すると、AIが**動画構成JSON**とゆうこのセリフを生成し、ソフトが**テンプレート（見た目パターン）に沿って機械的に**動画を組み立て、プレビューとMP4出力ができるWindows向け採用動画制作支援ソフト。
+> 利用者が情報（採用なら会社情報、一般なら発表テーマ等）と写真・動画を入力すると、AIが**動画構成JSON**とゆうこのセリフを生成し、ソフトが**テンプレート（見た目パターン）に沿って機械的に**動画を組み立て、プレビューとMP4出力ができるWindows向け動画制作支援ソフト「**すたりお（stario）**」。**採用・会社紹介に加え、社内発表など一般動画も作成できる**（用途は `videoKind`＝採用 / 一般・社内発表 で分岐＝ADR-0011）。
 
 ---
 
@@ -46,10 +46,10 @@
 | UI | **React + TypeScript** | strict |
 | 状態管理 | Zustand（軽量） | 変更可 |
 | 保存 | ローカルJSON（プロジェクトフォルダ） | `11.1` |
-| 動画処理 | **FFmpeg** | 同梱可否/ライセンスは**未決定**（§11） |
-| 音声合成 | **VOICEVOX**（既定ずんだもん） | 同梱/規約は**未決定**（§11） |
+| 動画処理 | **FFmpeg** | LGPL＋Media Foundation(`h264_mf`)＝ADR-0002/0013（実機検証済）。配布形態は§11 |
+| 音声合成 | **VOICEVOX**（既定ずんだもん） | 同梱＝ADR-0005（ENGINE を同梱・規約根拠も記録済＝#122）／ENGINE 同梱実装＝#149 |
 | 外部AI | Provider抽象化（初期 **MockProvider**） | OpenAI/Claude/Gemini/Ollama |
-| 描画一致方式 | **未決定（ADR必須）** | プレビューと本番出力の一致（§11・論点③） |
+| 描画一致方式 | **ADR-0001（A2ハイブリッド）** | プレビューと本番出力の一致（§11・論点③） |
 
 > baseline は `09_CODEX_IMPLEMENTATION_PROMPT.md` の構成を**確定**したもの。変更する場合は ADR（§11）を残す。
 
@@ -129,7 +129,11 @@ src/
 
 ## 10. MVPでやらないこと
 
-本格タイムライン編集 / キーフレームアニメ / 3D・Live2D / 複雑エフェクト / テンプレート作成エディタ / 縦・正方形動画 / 全Provider対応 / AIによる映像生成 / 口パクアニメ。（`01 §16.2`・`09 §8`）
+本格タイムライン編集 / キーフレームアニメ / 3D・Live2D / 複雑エフェクト / テンプレート作成エディタ / 正方形（1:1）動画 / 全Provider対応 / AIによる映像生成 / 口パクアニメ。（`01 §16.2`・`09 §8`）
+
+> ※ **縦型動画（9:16）**は当初 MVP 除外だったが、ユーザー要件により**対応決定**（[`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**・2026-06-19・#118）＝本項の「縦型」除外を解除。**正方形（1:1）は引き続き MVP 外**（schema 枠のみ残す）。
+
+> ※ **場面内のセリフ簡易タイミング**（`scene.lines` の `startSec` 調整・単一トラック）は、掛け合い（[`adr/0015`](docs/yuko_recruit_docs/adr/0015-dialogue-timeline-model.md) **Accepted**・2026-06-25・#180）により**対応決定**＝本項「本格タイムライン編集」除外を**この範囲に狭める**。**複数トラック・キーフレームアニメ・場面横断タイムラインは引き続き MVP 外。**
 
 ---
 
@@ -137,13 +141,16 @@ src/
 
 **決定済み（ADR）**
 - 描画一致方式（論点③）: [`adr/0001`](docs/yuko_recruit_docs/adr/0001-rendering-parity.md) **Accepted** — 方式A2ハイブリッド。`05_RENDERING_SPEC.md` 追従改訂済み。
-- FFmpeg/コーデック: [`adr/0002`](docs/yuko_recruit_docs/adr/0002-ffmpeg-codec.md) **Accepted** — LGPLビルド＋OpenH264（**自前の特許ライセンス不要**）。
+- FFmpeg/コーデック: [`adr/0002`](docs/yuko_recruit_docs/adr/0002-ffmpeg-codec.md) **Accepted** — FFmpeg は LGPLビルド＋動的リンク＋ソース提供。**H.264 エンコーダの選択は [`adr/0013`](docs/yuko_recruit_docs/adr/0013-h264-via-media-foundation.md) で更新**。
+- H.264 書き出し: [`adr/0013`](docs/yuko_recruit_docs/adr/0013-h264-via-media-foundation.md) **Accepted** — **Media Foundation（`h264_mf`）主経路**（OS提供）。配布用 LGPL ビルド（BtbN win64-lgpl）に h264_mf 実在＋アプリ実書き出しを **Windows 実機で検証済＝自前ビルド不要**。OpenH264 はフォールバック。**配布パッケージング（#119・α は MSI 単独）・Windows N 検知（#120）・ビットレート最適化（#121）はいずれも実装済**。
 - ナレーション音声: [`adr/0003`](docs/yuko_recruit_docs/adr/0003-narration-voice.md) **Accepted** — VOICEVOX:ずんだもんを**ナレーター**として使用（ゆうこ固有の声とは称さない）＋常時クレジット。
+- VOICEVOX同梱: [`adr/0005`](docs/yuko_recruit_docs/adr/0005-voicevox-bundling.md) **Accepted** — エンジンを**同梱しアプリ起動時に自動起動**（接続先設定は上級者向けフォールバック）。規約確認済み・クレジット表示は維持。実装/配布の詳細は ADR 未解決論点。
 - ゆうこ＝自社保有で権利クリア（`17`）／フォントはOFL系を同梱（游ゴシック等は同梱不可。`13 §6`）。
+- 縦型動画（9:16・1080×1920）: [`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**（2026-06-19）— α版に対応決定。**9:16のみ**（1:1は将来）・縦テンプレは**全9カテゴリ**・既存は**16:9固定移行＋向き変更（16:9⇆9:16）導線**・尺上限は横型踏襲。コーデックとは独立の別トラック（#118）。
+- コンポーネント/対話テスト基盤: [`adr/0014`](docs/yuko_recruit_docs/adr/0014-component-test-foundation.md) **Accepted**（2026-06-25）— Vitest に jsdom を追加し `@testing-library/react`＋`jest-dom` を導入。**既定 environment は node 維持**・DOM が要る `*.test.tsx` のみファイル先頭 `// @vitest-environment jsdom` で個別切替（既存 node 純粋ロジックテストへ波及なし）。最小構成（happy-dom ではなく jsdom・user-event は当面見送り）。正典/schemaVersion 影響なし。
 
 **未決定（リリース前に確認）**
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。
-- FFmpeg の正確なビルド構成・Cisco OpenH264 バイナリ取得方式（`adr/0002`）。
-- VOICEVOX エンジン同梱可否・接続方式（`13 §4`）。VOICEVOX/ずんだもん規約の通読。
-- APIキー保管の実装（OSキーチェーン、`13 §7`）／最終フォント選定（OFL系）。
-- 正式プロダクト名 / 標準BGM・装飾アセットの入手元とライセンス。
+- ~~FFmpeg 配布パッケージング~~ → **実装済**：win64-lgpl-shared（動的リンク）を pin 同梱＋`FFmpeg_SOURCE.md`（ソース提供）＝#119／Windows N 検知＝#120／ビットレート最適化＝#121。α は **MSI 単独配布**（NSIS は ~2GB 同梱で不可）。
+- フォント選定 → **初期3種を選定・同梱（#161・全 SIL OFL 1.1）**：gen-interface-jp（既定/本文）・gen-interface-jp-display（見出し）・怪盗予告ゴシック（演出）。**動画全体（`videoSettings.fontId`）＋場面ごと（`scene.fontId`・「動画全体に合わせる」で継承＝schema 1.5）**に選択可。追加は段階的。（※APIキーのOSキーチェーン保管は実装済＝ADR-0010／`13 §7`）
+- 標準BGM → **実装済**：CC0 3曲（Open Music Academy）を同梱＋書き出しで選択（`public/bgm/`・`bgmSettings.bundledBgmId`＝schema 1.4・権利台帳 `13 §8.1`・About にクレジット）。装飾アセットは当面なし。（正式名 **すたりお（stario）**＝ADR-0011。**ウィンドウタイトル/About 表示＝「すたりお」**、**`productName`（インストーラ/アプリ名）＝ASCII の `stario`**＝WiX `light.exe` が日本語の MSI ファイル名で失敗するため。`identifier` 由来のデータパスは無影響）

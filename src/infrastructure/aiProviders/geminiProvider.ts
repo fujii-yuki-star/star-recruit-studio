@@ -1,0 +1,45 @@
+// Gemini を使う AiProvider 実装（ADR-0010 P1）。
+// 入力アセンブリ（プロンプト）＝domain（buildVideoPlanMessages）／呼び出し＝Rust 経由（aiGenerate・鍵は JS に出ない）／
+// 応答検証＝domain（parseAndValidateVideoPlan）。映像生成はしない（§2-1）。
+import { buildVideoPlanMessages } from '../../domain/ai/buildVideoPlanRequest';
+import { parseAndValidateVideoPlan } from '../../domain/ai/validateVideoPlan';
+import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
+import type { AiVideoPlan } from '../../domain/ai/types';
+import { DEFAULT_AI_MODEL } from '../appSettings';
+import { GEMINI_PROVIDER, aiGenerate } from '../aiClient';
+
+/** ログ用に生応答を安全な長さへ切り詰める（含まれるのは AI の構成案＝鍵や送信元データではない。巨大化を防ぐ）。 */
+function headForLog(raw: string): string {
+  const LIMIT = 2000;
+  return raw.length > LIMIT ? `${raw.slice(0, LIMIT)}…(全${raw.length}字)` : raw;
+}
+
+export class GeminiProvider implements AiProvider {
+  // 既定モデルは appSettings.DEFAULT_AI_MODEL（設定で変更可＝ADR-0010 未解決#1）。
+  // Rust 側で文字種検証（英数字・ハイフン・ドット）を通る値であること。
+  constructor(private readonly model: string = DEFAULT_AI_MODEL) {}
+
+  // 1回の生成につき Gemini 呼び出しは1回だけ＝**自動リトライしない**。理由：無料枠を勝手な再送で消費させない／
+  // 再試行は利用者が「もう一度試す」で明示的に行える（GeneratingScreen）。間欠失敗の主因（任意項目の null/[]）は
+  // 受信前サニタイズ（sanitizeVideoPlan）が API 追加コストなしで吸収するため、1回でも通りやすい。
+  async generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
+    const { system, user } = buildVideoPlanMessages(input);
+    let raw: string;
+    try {
+      raw = await aiGenerate(GEMINI_PROVIDER, this.model, system, user);
+    } catch (e) {
+      // APIエラー（鍵未設定・ネットワーク・レート制限等）。UI に文言だけ出てログが無いと原因が分からないので warn を残す（§2-3）。
+      console.warn('[ai] 生成API呼び出しに失敗:', e instanceof Error ? e.message : e);
+      throw e;
+    }
+    const result = parseAndValidateVideoPlan(raw);
+    if (result.valid) return result.plan;
+    // 検証不適合。自動リトライはしない（無料枠節約）。診断用に生応答＋ajvエラーをログ（UI には出さない・§2-3）。
+    console.warn('[ai] AI_RESPONSE_INVALID: 応答が構成スキーマに適合しませんでした。', {
+      errors: result.errors,
+      応答先頭: headForLog(raw),
+    });
+    // throw 文言は §2-5 準拠の「次の行動」つき（store が status:"error" 時に表示し、利用者が手動で再試行）。
+    throw new Error('AIからの提案を読み取れませんでした。もう一度お試しください。');
+  }
+}

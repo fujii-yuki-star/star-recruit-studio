@@ -3,6 +3,7 @@
 - **状態**: Accepted（2026-06-10 承認）
 - **日付**: 2026-06-10
 - **関連**: `13_DEPENDENCIES_AND_LICENSING.md §3` / `ADR-0001` / `05_RENDERING_SPEC.md §4`
+- **更新（2026-06-18）**: 本ADRの **FFmpeg=LGPL＋動的リンク＋ソース提供の方針は維持**。ただし **H.264 エンコーダの選択は [`ADR-0013`](0013-h264-via-media-foundation.md) で更新**＝主経路を **Media Foundation（`h264_mf`）** とし、**OpenH264 はフォールバック**へ降格（実機スパイクで確証）。以降、本文中の「OpenH264 を主とする」記述は ADR-0013 を優先する。
 
 ---
 
@@ -34,11 +35,22 @@
 ## 結果・影響
 
 - OpenH264エンコーダは概ね **Constrained Baseline プロファイル** → 採用動画には十分。libx264より圧縮効率は劣り、ファイルがやや大きくなる。
-- **実装**：Cisco公式バイナリの取得（Ciscoの配布条件に従い同梱、または実行時取得）。FFmpegは `libopenh264` 有効ビルド。`infrastructure/ffmpeg` 越しに呼ぶ。
+- **実装**：Cisco公式バイナリの**初回実行時取得**（**同梱不可**＝`BINARY_LICENSE` の「ダウンロード前に第三者ソフトへ統合・結合しない」条件によりカバレッジ外）。FFmpeg は `libopenh264` 有効＋**openh264 を実行時 `dlopen`/`LoadLibraryA` で読むパッチ**を当てたビルドとする（標準の `--enable-libopenh264` はビルド時リンク＝DLL 無しで起動不可になるため）。`infrastructure/ffmpeg` 越しに呼ぶ。
 - 入力動画のH.264デコードはFFmpeg/OpenH264で対応。
 - アプリ内「クレジット/ライセンス」画面に FFmpeg(LGPL)＋ソース入手手段を明記（`13 §9`）。
 
+## 実装方針（2026-06-12 追記：呼び出し構成と暫定コーデック）
+
+エクスポート実装（トラックB）にあたり、本番（LGPL+OpenH264）へ無改修で差し替えられる形で着手する。
+
+- **静的リンクしない**：FFmpegはアプリに静的リンクせず、`ffmpeg.exe`／`ffprobe.exe` を**外部実行ファイル（sidecar）として呼ぶ**。バイナリは **環境変数 → 所定フォルダ（`<appData>/bin/`）→ PATH** の順で解決する。
+- **開発・検証段階は GPL構成＋libx264 で可**（社内配布想定・GitHub Public のため）。**本番配布前に LGPL＋OpenH264 へ差し替える**（最終法務判断＝配布前、§13.9）。
+- **コマンド生成はコーデック非依存に抽象化**：`ffmpeg -encoders` を見て **libopenh264 があればそれ、無ければ libx264** を自動選択（`VideoCodec`）。**LGPLビルドを所定フォルダに置くだけで OpenH264 出力へ無改修で切替わる**ことを差し替え機構とする。
+- **ffprobe は任意**：無ければ `ffmpeg -i` の出力解析で尺・コーデックを確認する。
+- **ライセンス表記・同梱判断（OpenH264 Cisco バイナリ取得方式・クレジット表記）は別タスク**として残す（§9 チェックリスト）。
+- **責務**：`infrastructure`（Rust: `src-tauri/src/ffmpeg.rs`）に隔離。SVG→PNG は ADR-0004（WebView Canvas）で生成し、FFmpegは PNG／動画／音声の合成・尺・結合・エンコードのみ（ADR-0001 のFFmpeg責務限定と一致）。
+
 ## 未解決の論点
 
-- 商用配布における最終的な法務スキム（OpenH264のバイナリ取得方式の確定含む）。
+- 商用配布における最終的な法務スキム。**バイナリ取得方式は決定（2026-06-18）＝OpenH264 は同梱せず初回 Cisco 取得**（同梱は Cisco バイナリライセンスの「ダウンロード前に第三者ソフトへ統合・結合しない」条件に反するため）。候補・方式の調査＝[`../research/ffmpeg-openh264-windows.md`](../research/ffmpeg-openh264-windows.md)。**未確定**: 使用 FFmpeg ビルド/バージョンの pin、必須クレジット「OpenH264 Video Codec provided by Cisco Systems, Inc.」の表示、**商用 AVC コンテンツの MPEG-LA 許諾要否（法務）**。
 - **AAC音声**も同様の特許背景（ソフトウェアでの実害は小）。完全な特許回避が要件化した場合は **AV1/WebM の任意出力**を将来追加する。

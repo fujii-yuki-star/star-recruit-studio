@@ -13,21 +13,23 @@
     "createdAt",
     "updatedAt",
     "videoSettings",
-    "companyInfo",
     "voiceSettings",
     "assets",
     "parts",
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.0" },
+    "schemaVersion": { "const": "1.8" },
+    "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short"] },
+    "purpose": { "type": "string" },
     "createdAt": { "type": "string", "format": "date-time" },
     "updatedAt": { "type": "string", "format": "date-time" },
     "videoSettings": { "$ref": "#/$defs/VideoSettings" },
     "companyInfo": { "$ref": "#/$defs/CompanyInfo" },
+    "generalBrief": { "$ref": "#/$defs/GeneralBrief" },
+    "additionalNotes": { "type": "string", "maxLength": 1000 },
     "toneSettings": { "$ref": "#/$defs/ToneSettings" },
     "voiceSettings": { "$ref": "#/$defs/VoiceSettings" },
     "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
@@ -35,18 +37,28 @@
     "parts": { "type": "array", "items": { "$ref": "#/$defs/Part" } },
     "scenes": { "type": "array", "items": { "$ref": "#/$defs/Scene" }, "maxItems": 80 }
   },
+  "if": { "properties": { "videoKind": { "const": "general" } }, "required": ["videoKind"] },
+  "then": {
+    "required": ["generalBrief"],
+    "not": { "required": ["companyInfo"] },
+    "properties": { "purpose": { "enum": ["general_announcement", "report", "product_intro", "general_other"] } }
+  },
+  "else": {
+    "required": ["companyInfo"],
+    "not": { "required": ["generalBrief"] },
+    "properties": { "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short"] } }
+  },
   "$defs": {
     "VideoSettings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["aspectRatio", "width", "height", "fps", "targetDurationSec", "maxDurationSec"],
+      "required": ["aspectRatio", "fps", "targetDurationSec", "maxDurationSec"],
       "properties": {
-        "aspectRatio": { "enum": ["16:9"] },
-        "width": { "type": "integer", "const": 1920 },
-        "height": { "type": "integer", "const": 1080 },
+        "aspectRatio": { "enum": ["16:9", "9:16"] },
         "fps": { "type": "integer", "const": 30 },
         "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
-        "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 }
+        "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
+        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
       }
     },
     "CompanyInfo": {
@@ -62,6 +74,17 @@
         "strengths": { "type": "array", "items": { "type": "string" } },
         "desiredPerson": { "type": "string" },
         "recruitUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "GeneralBrief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "agenda": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 100 } },
+        "keyPoints": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 100 } },
+        "targetAudience": { "type": "string", "maxLength": 100 }
       }
     },
     "ToneSettings": {
@@ -91,6 +114,7 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "assetId": { "type": ["string", "null"] },
+        "bundledBgmId": { "enum": ["summer-morning", "found-new-hope", "limousine-cruise", null] },
         "volume": { "type": "number", "minimum": 0.0, "maximum": 1.5 },
         "loop": { "type": "boolean" },
         "fadeInSec": { "type": "number", "minimum": 0 },
@@ -125,7 +149,8 @@
         "endSec": { "type": "number", "minimum": 0 },
         "useOriginalAudio": { "type": "boolean" },
         "originalAudioVolume": { "type": "number", "minimum": 0.0, "maximum": 1.5 },
-        "fit": { "enum": ["cover", "contain", "stretch"] }
+        "fit": { "enum": ["cover", "contain", "stretch"] },
+        "speed": { "type": "number", "minimum": 0.5, "maximum": 2.0 }
       }
     },
     "Metadata": {
@@ -162,17 +187,60 @@
         "sceneType": { "$ref": "#/$defs/SceneCategory" },
         "templateId": { "type": "string" },
         "durationSec": { "type": "number", "minimum": 0 },
+        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
+        "textFontIds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
+            "main": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
+            "subtitle": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
+            "caption": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
+            "url": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
+          }
+        },
         "assetRefs": { "$ref": "#/$defs/AssetRefs" },
         "character": { "$ref": "#/$defs/Character" },
         "texts": { "$ref": "#/$defs/Texts" },
         "narration": { "$ref": "#/$defs/Narration" },
         "audioMix": { "$ref": "#/$defs/AudioMix" },
         "transition": { "$ref": "#/$defs/Transition" },
-        "warnings": { "type": "array", "items": { "$ref": "#/$defs/Warning" } }
+        "warnings": { "type": "array", "items": { "$ref": "#/$defs/Warning" } },
+        "freeLayout": { "type": "array", "items": { "$ref": "#/$defs/FreeElement" } },
+        "lines": { "type": "array", "items": { "$ref": "#/$defs/NarrationLine" } },
+        "subtitleEnabledDefault": { "type": "boolean" }
       }
     },
     "SceneCategory": {
-      "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko"]
+      "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko", "free"]
+    },
+    "FreeElement": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "FREE テンプレ場面の自由配置要素（ADR-0008・11 §7）。id は scene 内一意。",
+      "required": ["id", "kind", "x", "y", "w", "h"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^free_[0-9]{3,}$" },
+        "kind": { "enum": ["slot", "text", "shape"] },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "w": { "type": "number", "exclusiveMinimum": 0 },
+        "h": { "type": "number", "exclusiveMinimum": 0 },
+        "zIndex": { "type": "integer" },
+        "assetId": { "type": ["string", "null"] },
+        "fit": { "enum": ["cover", "contain", "stretch"] },
+        "text": { "type": "string" },
+        "fontSize": { "type": "number", "exclusiveMinimum": 0 },
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "fontWeight": { "enum": ["normal", "bold"] },
+        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
+        "shapeType": { "enum": ["rect", "ellipse", "rounded_rect", "triangle", "star", "arrow", "speech_bubble"] },
+        "fillColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "radius": { "type": "number", "minimum": 0 },
+        "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "strokeWidth": { "type": "number", "minimum": 0 }
+      }
     },
     "AssetRefs": {
       "type": "object",
@@ -217,6 +285,24 @@
         "status": { "enum": ["none", "pending", "generated", "failed"] }
       }
     },
+    "NarrationLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "掛け合い：場面のセリフ列の1行（ADR-0015・#180）。null/未指定は継承（11_SCHEMA_REFERENCE.md §6）。",
+      "required": ["lineId", "text", "status"],
+      "properties": {
+        "lineId": { "type": "string", "pattern": "^line_[0-9]{3,}$" },
+        "text": { "type": "string" },
+        "speaker": { "type": ["integer", "null"], "minimum": 0 },
+        "speed": { "type": ["number", "null"] },
+        "pitch": { "type": ["number", "null"] },
+        "subtitleText": { "type": ["string", "null"] },
+        "subtitleEnabled": { "type": "boolean" },
+        "startSec": { "type": "number", "minimum": 0 },
+        "voicePath": { "type": ["string", "null"] },
+        "status": { "enum": ["none", "pending", "generated", "failed"] }
+      }
+    },
     "AudioMix": {
       "type": "object",
       "additionalProperties": false,
@@ -233,7 +319,8 @@
       "properties": {
         "in": { "enum": ["none", "fade", "slide", "wipe", "zoom"] },
         "out": { "enum": ["none", "fade", "slide", "wipe", "zoom"] },
-        "durationSec": { "type": "number", "minimum": 0 }
+        "durationSec": { "type": "number", "minimum": 0 },
+        "direction": { "enum": ["left", "right", "up", "down"] }
       }
     },
     "Warning": {

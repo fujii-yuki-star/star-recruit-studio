@@ -1,0 +1,113 @@
+// 素材ファイルの取り込み/読み出し（Tauriコマンド境界）。domain は型のみ、I/Oはここに隔離（CLAUDE.md §4）。
+// Tauri 非検出時（ブラウザ開発）は永続化せず null を返す（表示用 data URL はメモリ内で別途保持される）。
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { appDataDir, join } from '@tauri-apps/api/path';
+import type { AssetMetadata } from '../domain/project/types';
+
+export function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/** File を data URL(base64) に読み込む（画像の表示＋書き出し用＝ADR-0004 の SVGインライン）。失敗時は reject。 */
+export function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** 画像(data URL)をプロジェクトに取り込み、プロジェクト相対 filePath を返す。Tauri 非検出時は null（非永続）。 */
+export async function importAssetFile(
+  projectId: string,
+  fileName: string,
+  dataUrl: string,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string>('import_asset', { projectId, fileName, dataBase64: dataUrl });
+}
+
+/**
+ * 素材を生バイト（raw IPC body）で取り込む。base64 を経由しないので大きい動画でもメモリを食わない。
+ * Tauri v2: payload に Uint8Array、メタ情報は headers で渡す。Tauri 非検出時は null（非永続）。
+ */
+export async function importAssetBytes(
+  projectId: string,
+  fileName: string,
+  bytes: Uint8Array,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string>('import_asset_bytes', bytes, { headers: { projectId, fileName } });
+}
+
+/**
+ * 元ファイルの絶対パス（ネイティブ「開く」ダイアログで取得）を渡し、Rust がプロジェクトへコピーする。
+ * バイトも base64 も JS を経由しない＝大きい動画でもメモリ/IPC を消費しない（真の0コピー）。Tauri 非検出時は null。
+ */
+export async function importAssetByPath(
+  projectId: string,
+  fileName: string,
+  srcPath: string,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  return invoke<string>('import_asset_path', { projectId, fileName, srcPath });
+}
+
+/** プロジェクト相対パスの素材を data URL で読む。Tauri 非検出 or 失敗（未配置のサンプル等）時は null。 */
+export async function readAssetDataUrl(projectId: string, relPath: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<string>('read_asset_data_url', { projectId, relPath });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * プロジェクト相対パスの素材を、表示用の asset:// URL（Tauri asset protocol）へ変換する（A3-2）。
+ * data URL を JS に常駐させず WebView がディスクから直接ストリームする＝大容量素材でもメモリを食わない。
+ * URL を組むだけでディスク読込はしない（実体ロードの可否は tauri.conf の assetProtocol.scope と CSP が決める）。
+ * 非 Tauri（ブラウザ開発）は asset protocol が無いので null（表示は呼び出し側のフォールバックに委ねる）。
+ */
+// appDataDir() は起動中不変なので Promise をキャッシュ（loadProject の素材数分の IPC 往復を避ける・A3-2 レビュー）。
+let appDataDirPromise: Promise<string> | null = null;
+function cachedAppDataDir(): Promise<string> {
+  if (!appDataDirPromise) appDataDirPromise = appDataDir();
+  return appDataDirPromise;
+}
+
+export async function assetDisplayUrl(projectId: string, relPath: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    const abs = await join(await cachedAppDataDir(), 'projects', projectId, relPath);
+    return convertFileSrc(abs);
+  } catch (e) {
+    // 他の読み出し関数と同様、原因を残す（画像が出ない時の追跡用・§デバッグ）。
+    console.warn('[asset] assetDisplayUrl 失敗:', e);
+    return null;
+  }
+}
+
+/** 動画素材のメタ情報（長さ・音声有無・解像度）を取得する。Tauri 非検出 or 失敗時は null。 */
+export async function probeVideo(projectId: string, relPath: string): Promise<AssetMetadata | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<AssetMetadata>('probe_video', { projectId, relPath });
+  } catch {
+    return null;
+  }
+}
+
+/** 動画の代表フレームを PNG で書き出し、その相対パスを返す（確認画面/一覧のサムネ用）。失敗時は null。 */
+export async function extractVideoThumbnail(
+  projectId: string,
+  relPath: string,
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<string>('extract_video_thumbnail', { projectId, relPath });
+  } catch {
+    return null;
+  }
+}

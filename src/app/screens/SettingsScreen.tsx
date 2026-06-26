@@ -1,92 +1,249 @@
-import { useState } from "react";
-import { PageHead, Switch } from "../components/ui";
-import { FolderIcon } from "../components/icons";
+import { useEffect, useState } from "react";
+import { PageHead } from "../components/ui";
+import { useProjectStore } from "../store/projectStore";
+import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
+import {
+  DEFAULT_AI_MODEL, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
+  setAiModel, setVoicevoxSpeaker, setVoicevoxUrl,
+} from "../../infrastructure/appSettings";
+import { VOICE_CATALOG, DEFAULT_SPEAKER, characterForSpeaker } from "../../domain/voice/voiceCatalog";
+import { creditForSpeaker } from "../../domain/voice/narratorCredit";
+import {
+  INTONATION_RANGE, PITCH_RANGE, SPEED_RANGE, sliderToValue, valueToSlider,
+} from "../../domain/voice/voiceParams";
+import {
+  H264_INITIAL_STATUS, H264_STATUS_LABEL, OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED,
+  type H264FeatureStatus,
+} from "../../domain/export/h264Feature";
 
 export function SettingsScreen() {
-  const [ai, setAi] = useState("standard");
-  const [confirmBeforeSend, setConfirmBeforeSend] = useState(true);
-  const [voiceType, setVoiceType] = useState("calm");
-  const [speed, setSpeed] = useState(50);
-  const [pitch, setPitch] = useState(50);
-  const [intonation, setIntonation] = useState(50);
+  const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
+  const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
+  const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
+
+  const [keyInput, setKeyInput] = useState("");
+  const [aiConnected, setAiConnected] = useState(false);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyError, setKeyError] = useState("");
+  const [aiModel, setAiModelState] = useState(() => getAiModel());
+
+  function onChangeModel(value: string) {
+    setAiModelState(value);
+    setAiModel(value);
+  }
+  const [voicevoxUrl, setUrl] = useState(() => getVoicevoxUrl());
+  const [speaker, setSpeaker] = useState(() => {
+    // 保存済み speaker がカタログに無い（旧値・破損）なら既定へ（select の選択肢と state の乖離を防ぐ）。
+    const saved = getVoicevoxSpeaker();
+    return saved != null && characterForSpeaker(saved) != null ? saved : DEFAULT_SPEAKER;
+  });
+  const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
+  const [testError, setTestError] = useState("");
+  // 動画保存の予備機能の状態（実検出は取得・検証実装後＝pin 後。今は表示枠用のプレースホルダ）。
+  const h264Status: H264FeatureStatus = H264_INITIAL_STATUS;
+
+  function onChangeUrl(value: string) {
+    setUrl(value);
+    setVoicevoxUrl(value);
+  }
+  function onChangeSpeaker(value: number) {
+    setSpeaker(value);
+    setVoicevoxSpeaker(value);
+  }
+  async function onTestVoice() {
+    setTestState("loading");
+    setTestError("");
+    try {
+      const url = await synthesizePreview();
+      // 再生失敗（コーデック/自動再生制限など）も握りつぶさず通知する（§2-5）。
+      await new Audio(url).play();
+      setTestState("idle");
+    } catch (e) {
+      // VOICEVOX 由来の失敗は Rust が行動明示の文字列で返す。それ以外（再生失敗等）は定型文。
+      setTestError(
+        typeof e === "string" ? e : "声の確認に失敗しました。もう一度お試しください。",
+      );
+      setTestState("error");
+    }
+  }
+
+  // 起動時に接続キーの有無を確認（値は取得しない＝有無のみ）。
+  useEffect(() => {
+    void hasApiKey(GEMINI_PROVIDER)
+      .then(setAiConnected)
+      .catch(() => setAiConnected(false));
+  }, []);
+
+  async function onSaveKey() {
+    setKeyBusy(true);
+    setKeyError("");
+    try {
+      await saveApiKey(GEMINI_PROVIDER, keyInput.trim());
+      setKeyInput("");
+      setAiConnected(await hasApiKey(GEMINI_PROVIDER));
+    } catch (e) {
+      setKeyError(typeof e === "string" ? e : "キーを保存できませんでした。もう一度お試しください。");
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
+  async function onClearKey() {
+    setKeyBusy(true);
+    setKeyError("");
+    try {
+      await deleteApiKey(GEMINI_PROVIDER);
+      setAiConnected(await hasApiKey(GEMINI_PROVIDER));
+    } catch (e) {
+      setKeyError(typeof e === "string" ? e : "接続を削除できませんでした。もう一度お試しください。");
+    } finally {
+      setKeyBusy(false);
+    }
+  }
 
   return (
     <div className="main-scroll">
       <PageHead
         title="設定"
-        desc="使用するAIやゆうこの声、保存先などを設定できます。"
+        desc="使用するAIやナレーターの声、保存先などを設定できます。"
       />
 
       <div style={{ maxWidth: 760 }} className="col gap-lg">
-        {/* 使用するAI / 接続情報 */}
+        {/* 動画案を作るAI（接続キーの保存・削除） */}
         <div className="card">
-          <h2 className="section-title">使用するAI</h2>
-          <div className="field">
-            <label className="field-label" htmlFor="ai">
-              動画案を作るAI
-            </label>
-            <select
-              id="ai"
-              className="select"
-              value={ai}
-              onChange={(e) => setAi(e.target.value)}
-            >
-              <option value="standard">標準のAI（おすすめ）</option>
-              <option value="light">かんたんなAI（速い）</option>
-              <option value="custom">自分で接続するAI</option>
-            </select>
-          </div>
-
-          <div className="field">
-            <label className="field-label" htmlFor="conn">
-              接続情報
-            </label>
-            <input
-              id="conn"
-              className="input"
-              type="password"
-              placeholder="接続情報を入力（必要な場合のみ）"
-            />
-            <p className="field-hint">
-              標準のAIをお使いの場合、ここは入力しなくて大丈夫です。
-            </p>
-          </div>
+          <h2 className="section-title">動画案を作るAI</h2>
+          <p className="page-desc text-pretty">
+            動画案づくりに Google の Gemini を使えます。お持ちの接続キーを、この端末の安全な保管領域に保存します（キーは画面には表示しません）。
+          </p>
 
           <div className="toggle-row">
             <div>
               <span className="field-label" style={{ margin: 0 }}>
-                送信前の確認
+                接続の状態
               </span>
               <p className="field-hint" style={{ marginTop: 2 }}>
-                動画案を作る前に、渡す情報の確認画面を表示します。
+                {aiConnected
+                  ? "接続済み。動画案づくりに使われます。"
+                  : "未接続のときは、お試し用の動画案で仕上がりを確認できます。"}
               </p>
             </div>
-            <Switch
-              on={confirmBeforeSend}
-              onChange={setConfirmBeforeSend}
-              label="送信前の確認"
-            />
+            <span className={`badge ${aiConnected ? "badge-teal" : "badge-gray"}`}>
+              {aiConnected ? "接続済み" : "未接続"}
+            </span>
           </div>
+
+          {aiConnected ? (
+            <button
+              className="btn btn-secondary"
+              onClick={() => void onClearKey()}
+              disabled={keyBusy}
+            >
+              接続を削除する
+            </button>
+          ) : (
+            <div className="field">
+              <label className="field-label" htmlFor="aiKey">
+                接続キー（Gemini）
+              </label>
+              <div className="row gap-sm">
+                <input
+                  id="aiKey"
+                  className="input grow"
+                  type="password"
+                  autoComplete="off"
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  placeholder="接続キーを貼り付け"
+                />
+                <button
+                  className="btn btn-primary"
+                  onClick={() => void onSaveKey()}
+                  disabled={!keyInput.trim() || keyBusy}
+                >
+                  保存する
+                </button>
+              </div>
+              <p className="field-hint">
+                キーはこの端末の安全な保管領域に保存し、画面・ファイル・送信内容には残しません。
+              </p>
+            </div>
+          )}
+          {keyError && (
+            <div className="notice notice-warn" role="alert" style={{ marginTop: 8 }}>
+              <span>{keyError}</span>
+            </div>
+          )}
+
+          <div className="field" style={{ marginTop: "var(--gap-md)" }}>
+            <label className="field-label" htmlFor="aiModel">
+              モデル
+            </label>
+            <input
+              id="aiModel"
+              className="input"
+              value={aiModel}
+              onChange={(e) => onChangeModel(e.target.value)}
+              placeholder={DEFAULT_AI_MODEL}
+            />
+            <p className="field-hint">
+              通常は変更不要です（未入力なら {DEFAULT_AI_MODEL} を使います）。無料枠の状況に応じて変更できます（例：gemini-2.5-flash-lite）。
+            </p>
+          </div>
+
+          <p className="field-hint mt">※ OpenAI への接続は準備中です。</p>
+
+          <hr className="divider" />
+          <p className="field-hint">
+            動画案を作る前に、外部AIへ渡す情報の確認画面を必ず表示します。
+          </p>
         </div>
 
-        {/* ゆうこの声 */}
+        {/* ナレーターの声 */}
         <div className="card">
-          <h2 className="section-title">ゆうこの声</h2>
+          <h2 className="section-title">ナレーターの声</h2>
+          <p className="page-desc text-pretty">
+            選んだ声のクレジット（{creditForSpeaker(speaker)}）を、動画とプレビューに常に表示します。
+          </p>
 
           <div className="field">
-            <label className="field-label" htmlFor="voiceType">
-              声のタイプ
+            <label className="field-label" htmlFor="voicevoxUrl">
+              音声ソフトの接続先
+            </label>
+            <input
+              id="voicevoxUrl"
+              className="input"
+              value={voicevoxUrl}
+              onChange={(e) => onChangeUrl(e.target.value)}
+              placeholder="http://localhost:50021"
+            />
+            <p className="field-hint">
+              通常は空のままで大丈夫です（標準の接続先を使います）。場所を変えている場合だけ入力してください。
+            </p>
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="voiceStyle">
+              声（キャラクター・スタイル）
             </label>
             <select
-              id="voiceType"
+              id="voiceStyle"
               className="select"
-              value={voiceType}
-              onChange={(e) => setVoiceType(e.target.value)}
+              value={speaker}
+              onChange={(e) => onChangeSpeaker(Number(e.target.value))}
             >
-              <option value="calm">落ち着いた声</option>
-              <option value="bright">明るい声</option>
-              <option value="soft">やわらかい声</option>
+              {VOICE_CATALOG.map((c) => (
+                <optgroup key={c.character} label={c.character}>
+                  {c.styles.map((s) => (
+                    <option key={s.speaker} value={s.speaker}>
+                      {c.character}（{s.label}）
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
+            <p className="field-hint">
+              選んだキャラクターの名前を、動画に常時クレジット表示します。
+            </p>
           </div>
 
           <div className="field">
@@ -98,8 +255,10 @@ export function SettingsScreen() {
               type="range"
               min={0}
               max={100}
-              value={speed}
-              onChange={(e) => setSpeed(Number(e.target.value))}
+              value={valueToSlider(voiceSettings.speed ?? SPEED_RANGE.def, SPEED_RANGE)}
+              onChange={(e) =>
+                updateVoiceSettings({ speed: sliderToValue(Number(e.target.value), SPEED_RANGE) })
+              }
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
             <div className="row-between text-faint text-sm">
@@ -117,8 +276,10 @@ export function SettingsScreen() {
               type="range"
               min={0}
               max={100}
-              value={pitch}
-              onChange={(e) => setPitch(Number(e.target.value))}
+              value={valueToSlider(voiceSettings.pitch ?? PITCH_RANGE.def, PITCH_RANGE)}
+              onChange={(e) =>
+                updateVoiceSettings({ pitch: sliderToValue(Number(e.target.value), PITCH_RANGE) })
+              }
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
             <div className="row-between text-faint text-sm">
@@ -136,8 +297,12 @@ export function SettingsScreen() {
               type="range"
               min={0}
               max={100}
-              value={intonation}
-              onChange={(e) => setIntonation(Number(e.target.value))}
+              value={valueToSlider(voiceSettings.intonation ?? INTONATION_RANGE.def, INTONATION_RANGE)}
+              onChange={(e) =>
+                updateVoiceSettings({
+                  intonation: sliderToValue(Number(e.target.value), INTONATION_RANGE),
+                })
+              }
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
             <div className="row-between text-faint text-sm">
@@ -146,23 +311,62 @@ export function SettingsScreen() {
             </div>
           </div>
 
-          <button className="btn btn-secondary">声を試し聞きする</button>
+          <p className="field-hint">
+            話す速さ・高さ・抑揚はこのプロジェクトのナレーションに使われます（保存すると残ります）。
+          </p>
+
+          <button
+            className="btn btn-secondary"
+            onClick={() => void onTestVoice()}
+            disabled={testState === "loading"}
+          >
+            {testState === "loading" ? "確認中…" : "声を試し聞きする"}
+          </button>
+          {testState === "error" && (
+            <div className="notice notice-warn" role="alert" style={{ marginTop: 8 }}>
+              <span>{testError}</span>
+            </div>
+          )}
         </div>
 
         {/* 保存先 */}
         <div className="card">
           <h2 className="section-title">保存先</h2>
-          <div className="field" style={{ margin: 0 }}>
-            <label className="field-label">保存先フォルダ</label>
-            <div className="row gap-sm">
-              <div className="input row gap-sm" style={{ alignItems: "center" }}>
-                <FolderIcon size={16} className="text-faint" />
-                <span className="text-sm grow">C:\Users\採用担当\動画</span>
-              </div>
-              <button className="btn btn-secondary">変更する</button>
-            </div>
-          </div>
+          <p className="page-desc text-pretty">
+            動画の保存先は、書き出し（「動画を保存」）のときに毎回選べます。
+          </p>
         </div>
+
+        {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}
+        {OPENH264_FEATURE_ENABLED && (
+          <div className="card">
+            <h2 className="section-title">動画保存の予備機能</h2>
+            <p className="page-desc text-pretty">
+              通常は Windows の標準機能で動画を保存します。以下は予備の保存方法が使えるかどうかの状態です。
+            </p>
+            <div className="row-between mt">
+              <span className="text-muted">状態</span>
+              <strong>{H264_STATUS_LABEL[h264Status]}</strong>
+            </div>
+            {h264Status === "error" && (
+              <p className="field-hint mt">もう一度お試しのうえ、解決しない場合はアプリを再起動してください。</p>
+            )}
+            {h264Status === "verificationRequired" && (
+              <p className="field-hint mt">ご利用には確認が必要です。アプリを再起動してください。</p>
+            )}
+            <p className="field-hint mt">{OPENH264_CREDIT_TEXT}</p>
+            <details style={{ marginTop: "var(--gap-sm)" }}>
+              <summary className="text-sm text-muted" style={{ cursor: "pointer" }}>詳細情報</summary>
+              <div className="col gap-sm mt text-sm">
+                <div className="row-between"><span className="text-muted">コーデック</span><span>OpenH264（H.264）</span></div>
+                <div className="row-between"><span className="text-muted">提供元</span><span>Cisco Systems, Inc.</span></div>
+                <div className="row-between"><span className="text-muted">バージョン</span><span>—</span></div>
+                <div className="row-between"><span className="text-muted">検証結果</span><span>—</span></div>
+                <div className="row-between"><span className="text-muted">配置場所</span><span>—</span></div>
+              </div>
+            </details>
+          </div>
+        )}
       </div>
     </div>
   );

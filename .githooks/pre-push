@@ -1,0 +1,8 @@
+#!/bin/sh
+# pre-push フック: push 前に最低限の機械チェックを走らせる（CONTRIBUTING.md）。
+# 有効化: npm run hooks:install （git config --local core.hooksPath .githooks）
+# 重い Rust チェックは CI 側で実施するため、ここでは frontend のみ（高速）。
+set -e
+echo "[pre-push] frontend checks: lint / typecheck / test / validate:schemas"
+npm run check:frontend
+echo "[pre-push] OK"

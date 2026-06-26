@@ -14,7 +14,7 @@
       "required": ["title", "purpose", "targetDurationSec"],
       "properties": {
         "title": { "type": "string", "minLength": 1 },
-        "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short"] },
+        "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short", "general_announcement", "report", "product_intro", "general_other"] },
         "targetAudience": { "type": "string" },
         "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
         "tone": { "type": "string" }
@@ -45,7 +45,7 @@
     "AiScene": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sceneType", "templateId", "durationSec", "texts", "narrationText"],
+      "required": ["sceneType", "templateId", "durationSec", "texts"],
       "properties": {
         "sceneTitle": { "type": "string" },
         "sceneType": { "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko"] },
@@ -68,7 +68,21 @@
             "url": { "type": "string" }
           }
         },
-        "narrationText": { "type": "string", "minLength": 1 },
+        "narrationText": { "type": ["string", "null"] },
+        "narrationLines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text"],
+            "properties": {
+              "text": { "type": "string" },
+              "voiceCharacter": { "type": "string" },
+              "subtitle": { "type": "string" },
+              "subtitleEnabled": { "type": "boolean" }
+            }
+          }
+        },
         "notes": { "type": "string" }
       }
     }

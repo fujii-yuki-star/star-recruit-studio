@@ -94,6 +94,7 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | code | severity | 既定の自動対応 | ユーザー向け文言（例） | 由来 |
 |---|---|---|---|---|
 | `TEMPLATE_NOT_FOUND` | warning | 同category既定へ置換 | この場面の見た目パターンが見つからないため、標準を使います | `11 §9` |
+| `TEMPLATE_ORIENTATION_MISMATCH` | info（補正時）/ warning（補正不可時） | 同category・同orientation へ置換 | 動画の向きに合う見た目に調整しました | `ADR-0012` / `11 §9` |
 | `ASSET_NOT_FOUND` | warning | null＋候補提示 | 使う写真・動画が見つかりません。選び直してください | `05 §17` |
 | `ASSET_FILE_MISSING` | warning | 選び直し導線 | 素材ファイルが見つかりません | `05 §17` |
 | `REQUIRED_SLOT_EMPTY` | warning | — | この場面に必要な写真・動画が未設定です | `11 §8 V6` |
@@ -109,6 +110,13 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `BGM_FILE_BROKEN` | warning | BGMなしで続行を提示 | BGMを読み込めませんでした。BGMなしで続けられます | `08 §10` |
 | `TOTAL_DURATION_EXCEEDED` | warning | — | 動画が長すぎます。場面を減らすか短くしてください | `11 §8 V9` |
 | `TOO_MANY_SCENES` | warning | — | 場面が多すぎます。整理をおすすめします | `11 §8 V10` |
+| `FREE_ELEMENT_OUT_OF_BOUNDS` | warning | — | 画面の外にはみ出した配置があります。画面内に移動できます | `ADR-0008 §8` |
+| `FREE_ELEMENT_INVALID_SIZE` | warning | — | 配置した要素の大きさが正しくありません。幅と高さを設定し直してください | `ADR-0008 §8` |
+| `FREE_TEXT_EMPTY` | info | — | 文字が入っていない配置があります。文字を入力してください | `ADR-0008 §8` |
+| `LINE_ID_DUPLICATE` | warning | 案内のみ（UI採番は一意で通常出ない） | セリフの並びに重複があります。作り直してください | `ADR-0015 §8 V16` |
+| `LINE_START_OUT_OF_RANGE` | warning | 案内（入力は[0,場面尺]へclamp・描画も clamp） | セリフの開始位置が場面の長さを超えています。場面の長さ内にしてください | `ADR-0015 §8 V17` |
+| `LINE_ORDER_INVALID` | warning | 時間順へ並べ直し | セリフの開始順序が前後しています。時間順に並べ直せます | `ADR-0015 §8 V18` |
+| `LINE_SPEAKER_UNKNOWN` | warning | 既定の声へ | 選べない声が指定されています。標準の声を使います | `ADR-0015 §8 V19` |
 | `SCHEMA_VERSION_UNSUPPORTED` | fatal | — | このファイルは対応していないバージョンで作成されています | `11 §1` |
 
 ---

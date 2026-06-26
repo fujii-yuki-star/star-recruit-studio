@@ -1,0 +1,62 @@
+name: "Task request"
+description: "作業依頼・改善提案テンプレート"
+title: "[Task] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        新規タスク・改善提案を、実装しやすい粒度で整理するためのテンプレートです。
+
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景 / 課題
+      placeholder: 例) AI出力→内部Scene変換の警告表示がUIに無く、補正内容が伝わらない
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目的 / 完了したら何が成功か
+      placeholder: 例) 補正件数と対応内容が非技術語でユーザーに表示される
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 対象範囲
+      description: 触る層・フォルダ・機能（domain/infrastructure/renderer/app）。
+      placeholder: 例) src/app/screens/DraftScreen.tsx と src/domain/ai の warnings 表示
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: 非対象（今回やらないこと）
+      placeholder: 例) レンダラの本実装、FFmpeg合成、Tauri command接続
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件（チェック可能な形で）
+      placeholder: |
+        - [ ] 警告が件数＋対応内容で表示される
+        - [ ] npm run review が通る
+        - [ ] 正典(11/12)と矛盾しない
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: 参照資料
+      placeholder: 例) docs/yuko_recruit_docs/12_AI_PROMPT_AND_MAPPING.md §8, 15_ERROR_STATE_MODEL.md
+    validations:
+      required: false

@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "1.0",
+  "videoPlan": {
+    "title": "全社キックオフ2026 ご報告",
+    "purpose": "report",
+    "targetAudience": "全社員",
+    "targetDurationSec": 60,
+    "tone": "丁寧・落ち着いた"
+  },
+  "parts": [
+    {
+      "partTitle": "オープニング",
+      "summary": "発表のテーマと進め方を伝える導入",
+      "targetDurationSec": 10,
+      "scenes": [
+        {
+          "sceneTitle": "はじめに",
+          "sceneType": "opening",
+          "templateId": "opening_yuko_right_v1",
+          "durationSec": 10,
+          "assetRefs": { "background": "asset_cover_001", "logo": "asset_logo_001" },
+          "yukoPoseTag": "guide",
+          "texts": {
+            "title": "全社キックオフ2026",
+            "main": "今期の成果と来期の方針",
+            "subtitle": "本日の内容を順にご説明します。"
+          },
+          "narrationText": "みなさん、こんにちは。今期の成果と来期の方針について、順番にご説明します。",
+          "notes": "発表の導入。落ち着いた印象にする"
+        }
+      ]
+    },
+    {
+      "partTitle": "今期のハイライト",
+      "summary": "主要な実績を要点で示す",
+      "targetDurationSec": 26,
+      "scenes": [
+        {
+          "sceneTitle": "売上の振り返り",
+          "sceneType": "photo_intro",
+          "templateId": "photo_left_text_right_yuko_v1",
+          "durationSec": 13,
+          "assetRefs": { "mainVisual": "asset_chart_sales_001" },
+          "yukoPoseTag": "guide",
+          "texts": {
+            "title": "売上は前年比120%",
+            "main": "主力サービスが牽引",
+            "subtitle": "新規のお客様の増加が大きく寄与しました。"
+          },
+          "narrationText": "今期の売上は前年比120%となりました。主力サービスの成長が全体を牽引しています。"
+        },
+        {
+          "sceneTitle": "重点プロジェクト",
+          "sceneType": "photo_intro",
+          "templateId": "photo_left_text_right_yuko_v1",
+          "durationSec": 13,
+          "assetRefs": { "mainVisual": "asset_project_001" },
+          "yukoPoseTag": "smile",
+          "texts": {
+            "title": "重点プロジェクトが始動",
+            "main": "部門を横断して推進",
+            "subtitle": "次の成長に向けた取り組みです。"
+          },
+          "narrationText": "部門を横断する重点プロジェクトが始動しました。次の成長に向けた、大切な取り組みです。"
+        }
+      ]
+    },
+    {
+      "partTitle": "来期に向けて",
+      "summary": "方針と協力のお願いで締める",
+      "targetDurationSec": 24,
+      "scenes": [
+        {
+          "sceneTitle": "来期の方針",
+          "sceneType": "photo_intro",
+          "templateId": "photo_left_text_right_yuko_v1",
+          "durationSec": 12,
+          "assetRefs": { "mainVisual": "asset_vision_001" },
+          "yukoPoseTag": "guide",
+          "texts": {
+            "title": "来期の方針",
+            "main": "挑戦を続ける一年に",
+            "subtitle": "重点領域に投資していきます。"
+          },
+          "narrationText": "来期は、挑戦を続ける一年にしたいと思います。重点領域にしっかり投資していきます。"
+        },
+        {
+          "sceneTitle": "結びのお願い",
+          "sceneType": "photo_intro",
+          "templateId": "photo_left_text_right_yuko_v1",
+          "durationSec": 12,
+          "assetRefs": { "mainVisual": "asset_team_001" },
+          "yukoPoseTag": "bow",
+          "texts": {
+            "title": "ご協力のお願い",
+            "main": "チーム一丸で",
+            "subtitle": "引き続きよろしくお願いします。"
+          },
+          "narrationText": "目標の達成に向けて、チーム一丸で進んでいきます。引き続き、ご協力をよろしくお願いします。"
+        }
+      ]
+    }
+  ],
+  "reviewNotes": [
+    "業績の数値は確定値かどうかをご確認ください。",
+    "社外秘の情報が含まれていないか、公開前にご確認ください。"
+  ]
+}

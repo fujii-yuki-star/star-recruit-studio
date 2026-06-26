@@ -2,6 +2,7 @@ import type { ScreenId } from "../data/mockData";
 import {
   HomeIcon,
   FolderIcon,
+  PhotoIcon,
   LayoutIcon,
   SettingsIcon,
   HelpIcon,
@@ -17,6 +18,7 @@ interface SidebarProps {
 const mainMenu: { id: ScreenId; label: string; icon: typeof HomeIcon }[] = [
   { id: "home", label: "ホーム", icon: HomeIcon },
   { id: "draft", label: "プロジェクト", icon: FolderIcon },
+  { id: "materials", label: "素材", icon: PhotoIcon },
   { id: "looks", label: "見た目パターン", icon: LayoutIcon },
   { id: "settings", label: "設定", icon: SettingsIcon },
 ];
@@ -26,9 +28,11 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
   const projectScreens: ScreenId[] = [
     "wizard",
     "confirm",
+    "generating",
     "draft",
     "scene-edit",
     "preview",
+    "precheck",
     "export",
   ];
 
@@ -40,10 +44,11 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
+        {/* ロゴマークはナレーター「ゆうこ」の頭文字＝マスコット表示。製品名（すたりお）とは別物なので据え置く（ADR-0011）。 */}
         <div className="sidebar-brand-mark">ゆ</div>
         <div className="sidebar-brand-text">
-          <span className="sidebar-brand-title">Yuko Recruit Studio</span>
-          <span className="sidebar-brand-sub">採用動画づくり支援ソフト</span>
+          <span className="sidebar-brand-title">すたりお</span>
+          <span className="sidebar-brand-sub">動画づくり支援ソフト</span>
         </div>
       </div>
 
@@ -62,23 +67,31 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
             </button>
           );
         })}
-        <button
-          className="nav-item"
-          onClick={() => onNavigate("home")}
-        >
+        <button className="nav-item" disabled title="準備中です">
           <HelpIcon size={20} className="nav-icon" />
           ヘルプ
+          <span className="text-faint text-sm" style={{ marginLeft: "auto" }}>準備中</span>
         </button>
       </nav>
 
       <div className="sidebar-footer">
-        <button className="nav-item">
+        <button
+          className={`nav-item${current === "about" ? " active" : ""}`}
+          onClick={() => onNavigate("about")}
+          aria-current={current === "about" ? "page" : undefined}
+        >
+          <HelpIcon size={18} className="nav-icon" />
+          このアプリについて
+        </button>
+        <button className="nav-item" disabled title="準備中です">
           <MailIcon size={18} className="nav-icon" />
           お問い合わせ
+          <span className="text-faint text-sm" style={{ marginLeft: "auto" }}>準備中</span>
         </button>
-        <button className="nav-item">
+        <button className="nav-item" disabled title="準備中です">
           <BellIcon size={18} className="nav-icon" />
           お知らせ
+          <span className="text-faint text-sm" style={{ marginLeft: "auto" }}>準備中</span>
         </button>
       </div>
     </aside>

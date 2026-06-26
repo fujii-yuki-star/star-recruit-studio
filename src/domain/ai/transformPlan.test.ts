@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Asset } from '../project/types';
 import type { Template } from '../template/types';
 import type { AiScene, AiVideoPlan } from './types';
+import type { Orientation } from '../enums';
 import { createSequentialIdFactory } from './idFactory';
 import { transformVideoPlan } from './transformPlan';
 import type { TransformContext } from './transformPlan';
@@ -44,6 +45,16 @@ const templates: Template[] = [
       { id: 'yuko', type: 'character', required: false, x: 1500, y: 640, w: 340, h: 400 },
     ],
   },
+  {
+    // 同カテゴリ(opening)の縦型。向き整合（B4）の補正先になる。
+    schemaVersion: '1.0',
+    templateId: 'opening_yuko_portrait_v1',
+    name: 'オープニング・縦',
+    category: 'opening',
+    aspectRatio: '9:16',
+    canvas: { width: 1080, height: 1920 },
+    layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1080, h: 1920 }],
+  },
 ];
 
 const assets: Asset[] = [
@@ -55,7 +66,12 @@ const assets: Asset[] = [
   { assetId: 'bgm_bright_001', assetType: 'bgm', displayName: '明るいBGM', filePath: 'assets/bgm/bright_001.mp3' },
 ];
 
-const baseCtx = (): TransformContext => ({ templates, assets, idFactory: createSequentialIdFactory() });
+const baseCtx = (orientation: Orientation = '16:9'): TransformContext => ({
+  templates,
+  assets,
+  orientation,
+  idFactory: createSequentialIdFactory(),
+});
 
 /** 1パート1シーンの最小プランを作るヘルパー（補正系テスト用）。型安全のため各フィールドを明示マージする。 */
 function singleScenePlan(override: Partial<AiScene>): AiVideoPlan {
@@ -65,6 +81,7 @@ function singleScenePlan(override: Partial<AiScene>): AiVideoPlan {
     durationSec: override.durationSec ?? 8,
     texts: override.texts ?? { title: 'x' },
     narrationText: override.narrationText ?? 'こんにちは。',
+    narrationLines: override.narrationLines,
     assetRefs: override.assetRefs,
     yukoPoseTag: override.yukoPoseTag,
     sceneTitle: override.sceneTitle,
@@ -78,6 +95,60 @@ function singleScenePlan(override: Partial<AiScene>): AiVideoPlan {
 }
 
 describe('transformVideoPlan', () => {
+  it('narrationText が null/省略でも narration.text を空にして変換できる（無音シーン・一回で通す）', () => {
+    const plan: AiVideoPlan = {
+      schemaVersion: '1.0',
+      videoPlan: { title: 't', purpose: 'company_intro', targetDurationSec: 30 },
+      parts: [
+        {
+          partTitle: 'p',
+          scenes: [
+            { sceneType: 'opening', templateId: 'opening_yuko_right_v1', durationSec: 8, texts: { title: 'x' }, narrationText: null },
+          ],
+        },
+      ],
+    };
+    const { scenes } = transformVideoPlan(plan, baseCtx());
+    expect(scenes[0].narration.text).toBe('');
+  });
+
+  it('narrationLines を scene.lines に変換（voiceCharacter→speaker・subtitle・未知は既定声＋警告・#180）', () => {
+    const plan = singleScenePlan({
+      narrationLines: [
+        { text: 'やあ', voiceCharacter: 'ずんだもん', subtitle: 'やあ字幕' },
+        { text: 'どうも', voiceCharacter: '四国めたん', subtitleEnabled: false },
+        { text: '誰？', voiceCharacter: '知らない人' },
+      ],
+    });
+    const { scenes, warnings } = transformVideoPlan(plan, baseCtx());
+    expect(scenes[0].lines?.map((l) => [l.lineId, l.text, l.speaker])).toEqual([
+      ['line_001', 'やあ', 3], // ずんだもん→3
+      ['line_002', 'どうも', 2], // 四国めたん→2
+      ['line_003', '誰？', null], // 未知→null（既定声）
+    ]);
+    expect(scenes[0].lines?.[0].subtitleText).toBe('やあ字幕');
+    expect(scenes[0].lines?.[1].subtitleEnabled).toBe(false);
+    expect(warnings.some((w) => w.code === 'LINE_SPEAKER_UNKNOWN')).toBe(true);
+  });
+
+  it('narrationLines が無ければ scene.lines は付かない（単一 narration・後方互換）', () => {
+    const { scenes } = transformVideoPlan(singleScenePlan({ narrationText: 'ひとり言' }), baseCtx());
+    expect(scenes[0].lines).toBeUndefined();
+    expect(scenes[0].narration.text).toBe('ひとり言');
+  });
+
+  it('narrationLines のみ（narrationText 省略）でも narration.text を lines[0] に mirror（台本/precheck の後方可読性）', () => {
+    const plan = singleScenePlan({ narrationText: '', narrationLines: [{ text: '一行目' }, { text: '二行目' }] });
+    const { scenes } = transformVideoPlan(plan, baseCtx());
+    expect(scenes[0].lines?.[0].text).toBe('一行目');
+    expect(scenes[0].narration.text).toBe('一行目'); // mirror（空にしない）
+  });
+
+  it('narrationLines が空配列なら scene.lines は付かない（単一 narration へフォールバック）', () => {
+    const { scenes } = transformVideoPlan(singleScenePlan({ narrationLines: [] }), baseCtx());
+    expect(scenes[0].lines).toBeUndefined();
+  });
+
   it('Mockのサンプルプランをfixtureのproject.sample相当のScene群へ変換する', async () => {
     const plan = await new MockAiProvider().generateVideoPlan({
       companyInfo: { companyName: '株式会社サンプル' },
@@ -142,5 +213,39 @@ describe('transformVideoPlan', () => {
     const { scenes } = transformVideoPlan(plan, baseCtx());
     expect(scenes[0].assetRefs).toEqual({ background: null, logo: 'asset_logo_001' });
     expect(scenes[0].warnings.some((w) => w.code === 'ASSET_NOT_FOUND')).toBe(true);
+  });
+
+  it('縦型プロジェクトでは横型テンプレ指定を同カテゴリの縦型へ補正する（向き整合・B4）', () => {
+    const plan = singleScenePlan({ sceneType: 'opening', templateId: 'opening_yuko_right_v1' });
+    const { scenes } = transformVideoPlan(plan, baseCtx('9:16'));
+    expect(scenes[0].templateId).toBe('opening_yuko_portrait_v1');
+    expect(scenes[0].warnings.some((w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH' && w.autoFixed === true)).toBe(true);
+  });
+
+  it('縦型プロジェクトで未知テンプレIDは縦型の同カテゴリへ補正する', () => {
+    const plan = singleScenePlan({ sceneType: 'opening', templateId: 'nope_v1' });
+    const { scenes } = transformVideoPlan(plan, baseCtx('9:16'));
+    expect(scenes[0].templateId).toBe('opening_yuko_portrait_v1');
+    expect(scenes[0].warnings.some((w) => w.code === 'TEMPLATE_NOT_FOUND' && w.autoFixed === true)).toBe(true);
+  });
+
+  it('向きが一致していればテンプレ補正の警告は出ない', () => {
+    const plan = singleScenePlan({ sceneType: 'opening', templateId: 'opening_yuko_right_v1' });
+    const { scenes } = transformVideoPlan(plan, baseCtx('16:9'));
+    expect(scenes[0].templateId).toBe('opening_yuko_right_v1');
+    expect(
+      scenes[0].warnings.some(
+        (w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH' || w.code === 'TEMPLATE_NOT_FOUND',
+      ),
+    ).toBe(false);
+  });
+
+  it('縦型projectで縦型の代替が無いカテゴリは補正できず警告のみ（autoFixed=false）', () => {
+    // 写真テンプレは 16:9 のみ（縦型なし）→ 縦型projectでは補正先が無い。
+    const plan = singleScenePlan({ sceneType: 'photo_intro', templateId: 'photo_left_text_right_yuko_v1' });
+    const { scenes } = transformVideoPlan(plan, baseCtx('9:16'));
+    expect(
+      scenes[0].warnings.some((w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH' && w.autoFixed === false),
+    ).toBe(true);
   });
 });

@@ -1,0 +1,6 @@
+# 同梱 FFmpeg（BtbN win64-lgpl-shared・大容量の exe＋DLL＋LICENSE）はコミットしない（#119）。
+# この .gitignore だけ追跡してディレクトリを存在させ、tauri.conf の bundle.resources の
+# パス存在検証（tauri-build build.rs）を CI（バイナリ不在）でも通す。
+# 配置するビルド: FFmpeg_SOURCE.md の pin（tag/zip/SHA-256）に従い bin 一式＋LICENSE.txt を置く。
+*
+!.gitignore

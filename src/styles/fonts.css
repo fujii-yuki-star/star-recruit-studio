@@ -1,0 +1,38 @@
+/* 同梱フォントの @font-face（フォント選択機能）。public/fonts/ の .ttf を参照（Vite が dist へ同梱＝packaged でも /fonts/ で解決）。
+   すべて SIL OFL 1.1（13§6）。cssFamily は domain/font/fontCatalog.ts と一致させること。 */
+
+/* Gen Interface JP（標準・本文）— Regular / Bold */
+@font-face {
+  font-family: 'Gen Interface JP';
+  src: url('/fonts/GenInterfaceJP-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Gen Interface JP';
+  src: url('/fonts/GenInterfaceJP-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* Gen Interface JP Display（見出し）— Regular / Bold */
+@font-face {
+  font-family: 'Gen Interface JP Display';
+  src: url('/fonts/GenInterfaceJPDisplay-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Gen Interface JP Display';
+  src: url('/fonts/GenInterfaceJPDisplay-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+
+/* 怪盗予告ゴシック（演出）— Heavy 1ウェイトのみ。全ウェイト要求をこのファイルで賄う（font-weight 範囲指定）。 */
+@font-face {
+  font-family: 'Kaitou Yokoku Gothic';
+  src: url('/fonts/KaitouYokokuGothic.ttf') format('truetype');
+  font-weight: 100 900;
+  font-display: swap;
+}

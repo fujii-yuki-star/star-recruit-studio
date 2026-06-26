@@ -1,0 +1,54 @@
+name: Security CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rustsec-audit:
+    name: RustSec Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # cargo-audit はソースからのコンパイル install（cargo install）だと crates.io 取得が不安定で
+      # 失敗・segfault することがある（CI実績あり）。プリビルドバイナリを取得して安定化する。
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Run rust dependency audit
+        run: cargo audit --file src-tauri/Cargo.lock
+
+  node-audit:
+    name: Node Audit (High)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run node dependency audit
+        run: npm audit --audit-level=high

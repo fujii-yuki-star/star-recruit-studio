@@ -3,20 +3,88 @@
 
 export const SCENE_CATEGORIES = [
   'opening', 'closing', 'photo_intro', 'video_intro',
-  'point_list', 'message', 'full_visual', 'chapter', 'no_yuko',
+  'point_list', 'message', 'full_visual', 'chapter', 'no_yuko', 'free',
 ] as const;
 export type SceneCategory = (typeof SCENE_CATEGORIES)[number];
+
+/** FREE テンプレのカテゴリ値（§6・ロジック比較用。自由配置 freeLayout を持つ場面）。 */
+export const FREE_CATEGORY = 'free' satisfies SceneCategory;
+
+/** FREE テンプレの自由配置要素の種別（ADR-0008）。layer.type 語彙に合わせる（image は使わず素材は slot）。 */
+export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape'] as const;
+export type FreeElementKind = (typeof FREE_ELEMENT_KINDS)[number];
+
+/** FreeElementKind の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
+export const FREE_ELEMENT_KIND = {
+  slot: 'slot',
+  text: 'text',
+  shape: 'shape',
+} as const satisfies Record<string, FreeElementKind>;
+
+/** FREE テキスト要素のフォント太さ（ADR-0008）。 */
+export const FONT_WEIGHTS = ['normal', 'bold'] as const;
+export type FontWeight = (typeof FONT_WEIGHTS)[number];
+
+/** FontWeight の値を参照するための定数（§6：ロジック・既定値での文字列直書きを避ける）。 */
+export const FONT_WEIGHT = {
+  normal: 'normal',
+  bold: 'bold',
+} as const satisfies Record<string, FontWeight>;
+
+/** FREE 図形要素の種別（ADR-0008・line は矩形モデルと相性が悪く MVP 対象外）。 */
+export const FREE_SHAPE_TYPES = [
+  'rect', 'ellipse', 'rounded_rect', 'triangle', 'star', 'arrow', 'speech_bubble',
+] as const;
+export type FreeShapeType = (typeof FREE_SHAPE_TYPES)[number];
+
+/** FreeShapeType の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
+export const FREE_SHAPE_TYPE = {
+  rect: 'rect',
+  ellipse: 'ellipse',
+  rounded_rect: 'rounded_rect',
+  triangle: 'triangle',
+  star: 'star',
+  arrow: 'arrow',
+  speech_bubble: 'speech_bubble',
+} as const satisfies Record<string, FreeShapeType>;
 
 export const ASSET_TYPES = [
   'image', 'video', 'bgm', 'voice', 'yuko', 'decor', 'logo', 'qr',
 ] as const;
 export type AssetType = (typeof ASSET_TYPES)[number];
 
+/** AssetType の値を参照するための定数（§2-7：ロジックでの文字列直書きを避ける）。 */
+export const ASSET_TYPE = {
+  image: 'image',
+  video: 'video',
+  bgm: 'bgm',
+  voice: 'voice',
+  yuko: 'yuko',
+  decor: 'decor',
+  logo: 'logo',
+  qr: 'qr',
+} as const satisfies Record<string, AssetType>;
+
+// 動画の種類（ADR-0011）。recruit=採用・会社紹介／general=一般・社内発表。省略時は recruit。
+export const VIDEO_KINDS = ['recruit', 'general'] as const;
+export type VideoKind = (typeof VIDEO_KINDS)[number];
+export const VIDEO_KIND = { recruit: 'recruit', general: 'general' } as const satisfies Record<string, VideoKind>;
+
+// 画面比率（向き・ADR-0012）。16:9=横型／9:16=縦型。1:1 は将来拡張。
+export const ORIENTATIONS = ['16:9', '9:16'] as const;
+export type Orientation = (typeof ORIENTATIONS)[number];
+export const ORIENTATION = { landscape: '16:9', portrait: '9:16' } as const satisfies Record<string, Orientation>;
+
+// 採用（recruit）の目的。
 export const PURPOSES = [
   'company_intro', 'new_graduate', 'mid_career',
   'inexperienced_welcome', 'engineer', 'info_session', 'sns_short',
 ] as const;
-export type Purpose = (typeof PURPOSES)[number];
+// 一般・社内発表（general）の目的（ADR-0011・11 §3.1）。
+export const GENERAL_PURPOSES = ['general_announcement', 'report', 'product_intro', 'general_other'] as const;
+// purpose は videoKind で許可値が変わる（recruit→PURPOSES／general→GENERAL_PURPOSES）。
+// 型は両者の和（どちらの集合かは project.schema の if/then/else と検証で強制する）。
+export type Purpose = (typeof PURPOSES)[number] | (typeof GENERAL_PURPOSES)[number];
 
 export const LAYER_TYPES = [
   'background', 'slot', 'text', 'subtitle', 'character', 'decor', 'shape', 'logo',
@@ -26,17 +94,69 @@ export type LayerType = (typeof LAYER_TYPES)[number];
 export const SLOT_TYPES = ['image_or_video', 'image', 'video'] as const;
 export type SlotType = (typeof SLOT_TYPES)[number];
 
+/** SlotType の値を参照するための定数（§6/§2-7：ロジックでの文字列直書きを避ける）。 */
+export const SLOT_TYPE = {
+  image_or_video: 'image_or_video',
+  image: 'image',
+  video: 'video',
+} as const satisfies Record<string, SlotType>;
+
 export const FITS = ['cover', 'contain', 'stretch'] as const;
 export type Fit = (typeof FITS)[number];
+
+/** Fit の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
+export const FIT = {
+  cover: 'cover',
+  contain: 'contain',
+  stretch: 'stretch',
+} as const satisfies Record<string, Fit>;
 
 export const TEXT_KEYS = ['title', 'main', 'subtitle', 'caption', 'url'] as const;
 export type TextKey = (typeof TEXT_KEYS)[number];
 
+/** TextKey の値を参照するための定数（§6）。Record<TextKey,TextKey> で全 textKey 網羅を型で強制（追加漏れ検知）。 */
+export const TEXT_KEY = {
+  title: 'title',
+  main: 'main',
+  subtitle: 'subtitle',
+  caption: 'caption',
+  url: 'url',
+} as const satisfies Record<TextKey, TextKey>;
+
 export const TRANSITION_TYPES = ['none', 'fade', 'slide', 'wipe', 'zoom'] as const;
 export type TransitionType = (typeof TRANSITION_TYPES)[number];
 
+/** TransitionType の値を参照するための定数（§6/§2-7：ロジック・既定値での文字列直書きを避ける）。 */
+export const TRANSITION_TYPE = {
+  none: 'none',
+  fade: 'fade',
+  slide: 'slide',
+  wipe: 'wipe',
+  zoom: 'zoom',
+} as const satisfies Record<string, TransitionType>;
+
+/** スライドの方向（ADR-0009・slide のときのみ有効）。 */
+export const TRANSITION_DIRECTIONS = ['left', 'right', 'up', 'down'] as const;
+export type TransitionDirection = (typeof TRANSITION_DIRECTIONS)[number];
+
+/** TransitionDirection の値を参照するための定数（§6）。 */
+export const TRANSITION_DIRECTION = {
+  left: 'left',
+  right: 'right',
+  up: 'up',
+  down: 'down',
+} as const satisfies Record<string, TransitionDirection>;
+
 export const NARRATION_STATUSES = ['none', 'pending', 'generated', 'failed'] as const;
 export type NarrationStatus = (typeof NARRATION_STATUSES)[number];
+
+/** NarrationStatus の値を参照するための定数（§6/§2-7：ロジックでの文字列直書きを避ける）。 */
+export const NARRATION_STATUS = {
+  none: 'none',
+  pending: 'pending',
+  generated: 'generated',
+  failed: 'failed',
+} as const satisfies Record<string, NarrationStatus>;
 
 export const RENDER_STATUSES = ['idle', 'running', 'completed', 'failed'] as const;
 export type RenderStatus = (typeof RENDER_STATUSES)[number];
