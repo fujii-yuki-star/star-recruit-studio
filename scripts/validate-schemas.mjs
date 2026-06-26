@@ -126,5 +126,28 @@ for (const [desc, data] of mustReject) {
   else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
 }
 
+// ai-video-plan の掛け合い（narrationLines・#180）を schema レベルで検証（任意追加・1.0 据え置き）。
+const aiBase = {
+  schemaVersion: '1.0',
+  videoPlan: { title: 't', purpose: 'company_intro', targetDurationSec: 30 },
+  parts: [{ partTitle: 'p', scenes: [{ sceneType: 'opening', templateId: 'tpl', durationSec: 8, texts: { title: 'x' } }] }],
+};
+const withAiScene = (extra) => ({ ...aiBase, parts: [{ partTitle: 'p', scenes: [{ ...aiBase.parts[0].scenes[0], ...extra }] }] });
+const aiAccept = [
+  ['ai: narrationLines（掛け合い・voiceCharacter/subtitle）を許容', withAiScene({ narrationLines: [{ text: 'やあ', voiceCharacter: 'ずんだもん', subtitle: 'やあ' }, { text: 'どうも', subtitleEnabled: false }] })],
+];
+const aiReject = [
+  ['ai: narrationLines の行は text 必須', withAiScene({ narrationLines: [{ voiceCharacter: 'ずんだもん' }] })],
+  ['ai: narrationLines の未知フィールド(speaker)は拒否＝行は voiceCharacter（名前）', withAiScene({ narrationLines: [{ text: 'x', speaker: 3 }] })],
+];
+for (const [desc, data] of aiAccept) {
+  if (vPlan(data)) console.log(`PASS  must-accept  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-accept  ${desc}`); for (const e of vPlan.errors ?? []) console.log(`   ${e.instancePath} ${e.message}`); }
+}
+for (const [desc, data] of aiReject) {
+  if (!vPlan(data)) console.log(`PASS  must-reject  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
+}
+
 console.log(ok ? '\nALL OK' : '\nHAS FAILURES');
 process.exit(ok ? 0 : 1);

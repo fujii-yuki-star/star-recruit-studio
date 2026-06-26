@@ -81,6 +81,7 @@ function singleScenePlan(override: Partial<AiScene>): AiVideoPlan {
     durationSec: override.durationSec ?? 8,
     texts: override.texts ?? { title: 'x' },
     narrationText: override.narrationText ?? 'こんにちは。',
+    narrationLines: override.narrationLines,
     assetRefs: override.assetRefs,
     yukoPoseTag: override.yukoPoseTag,
     sceneTitle: override.sceneTitle,
@@ -109,6 +110,43 @@ describe('transformVideoPlan', () => {
     };
     const { scenes } = transformVideoPlan(plan, baseCtx());
     expect(scenes[0].narration.text).toBe('');
+  });
+
+  it('narrationLines を scene.lines に変換（voiceCharacter→speaker・subtitle・未知は既定声＋警告・#180）', () => {
+    const plan = singleScenePlan({
+      narrationLines: [
+        { text: 'やあ', voiceCharacter: 'ずんだもん', subtitle: 'やあ字幕' },
+        { text: 'どうも', voiceCharacter: '四国めたん', subtitleEnabled: false },
+        { text: '誰？', voiceCharacter: '知らない人' },
+      ],
+    });
+    const { scenes, warnings } = transformVideoPlan(plan, baseCtx());
+    expect(scenes[0].lines?.map((l) => [l.lineId, l.text, l.speaker])).toEqual([
+      ['line_001', 'やあ', 3], // ずんだもん→3
+      ['line_002', 'どうも', 2], // 四国めたん→2
+      ['line_003', '誰？', null], // 未知→null（既定声）
+    ]);
+    expect(scenes[0].lines?.[0].subtitleText).toBe('やあ字幕');
+    expect(scenes[0].lines?.[1].subtitleEnabled).toBe(false);
+    expect(warnings.some((w) => w.code === 'LINE_SPEAKER_UNKNOWN')).toBe(true);
+  });
+
+  it('narrationLines が無ければ scene.lines は付かない（単一 narration・後方互換）', () => {
+    const { scenes } = transformVideoPlan(singleScenePlan({ narrationText: 'ひとり言' }), baseCtx());
+    expect(scenes[0].lines).toBeUndefined();
+    expect(scenes[0].narration.text).toBe('ひとり言');
+  });
+
+  it('narrationLines のみ（narrationText 省略）でも narration.text を lines[0] に mirror（台本/precheck の後方可読性）', () => {
+    const plan = singleScenePlan({ narrationText: '', narrationLines: [{ text: '一行目' }, { text: '二行目' }] });
+    const { scenes } = transformVideoPlan(plan, baseCtx());
+    expect(scenes[0].lines?.[0].text).toBe('一行目');
+    expect(scenes[0].narration.text).toBe('一行目'); // mirror（空にしない）
+  });
+
+  it('narrationLines が空配列なら scene.lines は付かない（単一 narration へフォールバック）', () => {
+    const { scenes } = transformVideoPlan(singleScenePlan({ narrationLines: [] }), baseCtx());
+    expect(scenes[0].lines).toBeUndefined();
   });
 
   it('Mockのサンプルプランをfixtureのproject.sample相当のScene群へ変換する', async () => {

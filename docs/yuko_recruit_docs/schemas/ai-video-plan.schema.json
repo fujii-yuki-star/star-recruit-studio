@@ -69,6 +69,20 @@
           }
         },
         "narrationText": { "type": ["string", "null"] },
+        "narrationLines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text"],
+            "properties": {
+              "text": { "type": "string" },
+              "voiceCharacter": { "type": "string" },
+              "subtitle": { "type": "string" },
+              "subtitleEnabled": { "type": "boolean" }
+            }
+          }
+        },
         "notes": { "type": "string" }
       }
     }

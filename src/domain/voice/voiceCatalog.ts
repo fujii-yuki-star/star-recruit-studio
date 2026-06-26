@@ -71,3 +71,10 @@ export function characterForSpeaker(speaker: number | null | undefined): string 
   }
   return null;
 }
+
+/** キャラクター名 → 既定（先頭スタイル）の speaker 番号（カタログ外/未指定は null）。AI の voiceCharacter 解決に使う（#180）。 */
+export function speakerForCharacter(character: string | null | undefined): number | null {
+  if (character == null) return null;
+  const c = VOICE_CATALOG.find((v) => v.character === character);
+  return c ? c.styles[0].speaker : null;
+}

@@ -89,10 +89,11 @@ interface AiProvider {
 - 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。出力例にあるキーだけを使い、どの階層にも新しいキーを足さないこと。
 - 各シーンに templateId を必ず設定し、「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
 - assetRefs の値は「利用可能な素材一覧」に存在する assetId のみ。該当が無ければ null にする。
-- 値が無い任意項目は null や空配列を入れず、キーごと省略する。narrationText は必須なので各シーンに必ず空でない文字列を入れ、assetRefs は対象スロットが無ければ（キーごと）省略する。
+- 値が無い任意項目は null や空配列を入れず、キーごと省略する。narrationText は原則として各シーンに空でない文字列を入れ（掛け合いで narrationLines を使う場面は省略可）、assetRefs は対象スロットが無ければ（キーごと）省略する。
 - sceneType は、選んだ templateId の category と同じ値にする（「利用可能な見た目パターン一覧」に無い sceneType は使わず、利用可能な見た目だけで構成する）。
 - 各シーンは短く区切る（1シーンで1つの内容）。長い動画はパートに分けて整理する。
 - narrationText は会社マスコット「ゆうこ」が話す、自然で親しみやすい日本語にする。各見た目パターンの maxNarrationLength を超えない。
+- 掛け合い（複数の声で交互に話す）にしたい場面に限り、narrationText の代わりに narrationLines（[{ text, voiceCharacter, subtitle? }] の配列）で行ごとに分けてよい。voiceCharacter は声のキャラ名（例「ずんだもん」「四国めたん」）。その場面の narrationText は省略してよい。掛け合いが不要なら narrationText（単一）にする。
 - texts.subtitle は字幕用に短くする（各見た目パターンの maxSubtitleLength 以内）。ナレーションの要約でよい。
 - texts.title / texts.main は画面に出す短い語句にする。
 - durationSec は 3〜15 秒を目安にする。見た目パターンに上限があれば従う。
@@ -120,11 +121,12 @@ interface AiProvider {
 - 出力は指定スキーマ（ai-video-plan, schemaVersion "1.0"）に厳密準拠したJSONのみ。前後に説明文・見出し・コードフェンスを付けないこと。出力例にあるキーだけを使い、どの階層にも新しいキーを足さないこと。
 - 各シーンに templateId を必ず設定し、「利用可能な見た目パターン一覧」に存在するIDのみ使用する。新しいIDを創作しない。
 - assetRefs の値は「利用可能な素材一覧」に存在する assetId のみ。該当が無ければ null にする。
-- 値が無い任意項目は null や空配列を入れず、キーごと省略する。narrationText は必須なので各シーンに必ず空でない文字列を入れ、assetRefs は対象スロットが無ければ（キーごと）省略する。
+- 値が無い任意項目は null や空配列を入れず、キーごと省略する。narrationText は原則として各シーンに空でない文字列を入れ（掛け合いで narrationLines を使う場面は省略可）、assetRefs は対象スロットが無ければ（キーごと）省略する。
 - sceneType は、選んだ templateId の category と同じ値にする（一覧に無い sceneType は使わず、利用可能な見た目だけで構成する）。
 - 「構成（章立て）」をパート（parts）に対応させ、各章を短いシーンに分ける（1シーンで1つの内容）。
 - 「伝えたい要点」を各シーンの texts や narrationText に反映し、要点が漏れないようにする。
 - narrationText は会社マスコット「ゆうこ」が話す、対象視聴者に合った自然な日本語にする。各見た目パターンの maxNarrationLength を超えない。
+- 掛け合い（複数の声で交互に話す）にしたい場面に限り、narrationText の代わりに narrationLines（[{ text, voiceCharacter, subtitle? }] の配列）で行ごとに分けてよい。voiceCharacter は声のキャラ名（例「ずんだもん」「四国めたん」）。その場面の narrationText は省略してよい。掛け合いが不要なら narrationText（単一）にする。
 - texts.subtitle は字幕用に短くする（maxSubtitleLength 以内）。texts.title / texts.main は画面に出す短い語句にする。
 - durationSec は 3〜15 秒を目安にする。見た目パターンに上限があれば従う。全シーンの合計尺を targetDurationSec に近づける。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。社外秘・個人情報が含まれそうな場合は reviewNotes に確認を促す一文を入れる。
@@ -328,6 +330,7 @@ interface AiProvider {
 | `yukoPoseTag` | `character` | §8.3 で解決 |
 | `texts.*` | `texts.*` | テンプレ必須 textKey が欠けたら警告。長さ>上限→警告（V8、自動切詰めしない） |
 | `narrationText` | `narration.text` | §8.4 で初期化 |
+| `narrationLines[]` | `scene.lines[]`（掛け合い・#180） | あれば行ごとに変換：`lineId=line_NNN`（§2.1）、`text`、`voiceCharacter`→`speaker`（voiceCatalog・未知は既定声＋`LINE_SPEAKER_UNKNOWN` 警告）、`subtitle`→`subtitleText`、`subtitleEnabled`、`status=none`。無ければ単一 `narration` のまま（後方互換）。ADR-0015 |
 | `notes` | （破棄 or `warnings` 参考） | 内部保持は任意 |
 | `reviewNotes` | プロジェクトの公開前チェックへ | UI表示用に保持 |
 

@@ -14,12 +14,13 @@ import {
   VIDEO_HARD_MAX_SEC,
 } from '../constants';
 import type {
-  Asset, AssetRefs, Character, Narration, Part, Scene, Texts, Transition, Warning,
+  Asset, AssetRefs, Character, Narration, NarrationLine, Part, Scene, Texts, Transition, Warning,
 } from '../project/types';
 import type { Template } from '../template/types';
+import { speakerForCharacter } from '../voice/voiceCatalog';
 import { createSequentialIdFactory } from './idFactory';
 import type { IdFactory } from './idFactory';
-import type { AiVideoPlan } from './types';
+import type { AiNarrationLine, AiVideoPlan } from './types';
 
 export interface TransformContext {
   templates: Template[];
@@ -41,6 +42,34 @@ function warn(
   code: string, message: string, field: string, severity: WarningSeverity, autoFixed: boolean,
 ): Warning {
   return { code, message, field, severity, autoFixed };
+}
+
+/**
+ * AI の narrationLines → 内部 scene.lines（掛け合い・#180）。voiceCharacter→speaker（未知は既定声＋警告）、subtitle→字幕。
+ * 空/未指定は undefined を返し、呼び出し側は単一 narration 経路にフォールバックする。lineId は line_NNN（§2.1）。
+ */
+function mapNarrationLines(
+  aiLines: AiNarrationLine[] | undefined, warnings: Warning[],
+): NarrationLine[] | undefined {
+  if (!aiLines || aiLines.length === 0) return undefined;
+  return aiLines.map((al, i) => {
+    const lineId = `line_${String(i + 1).padStart(3, '0')}`;
+    let speaker: number | null = null;
+    if (al.voiceCharacter) {
+      speaker = speakerForCharacter(al.voiceCharacter);
+      if (speaker == null) {
+        warnings.push(warn('LINE_SPEAKER_UNKNOWN', '選べない声が指定されています。標準の声を使います', `lines.${lineId}`, 'warning', true));
+      }
+    }
+    return {
+      lineId,
+      text: al.text,
+      speaker,
+      subtitleText: al.subtitle ?? null,
+      subtitleEnabled: al.subtitleEnabled,
+      status: NARRATION_STATUS.none,
+    };
+  });
 }
 
 function clampDuration(value: number, min: number, max: number): { value: number; clamped: boolean } {
@@ -191,9 +220,12 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
       const narrationText = aiScene.narrationText ?? '';
       checkLengths(texts, narrationText, template, w);
 
-      // ナレーション初期化（12 §8.4）
+      // 掛け合い（#180）：narrationLines があれば scene.lines を作る（無ければ単一 narration のまま）。
+      const lines = mapNarrationLines(aiScene.narrationLines, w);
+      // ナレーション初期化（12 §8.4）。掛け合い時は narration.text を lines[0] に mirror する
+      // （narration.text を直読みする台本/precheck の後方可読性＝ADR-0015。AI が narrationText を省略しても空にしない）。
       const narration: Narration = {
-        text: narrationText,
+        text: lines ? lines[0]?.text ?? '' : narrationText,
         voiceId: null,
         speed: null,
         pitch: null,
@@ -220,6 +252,7 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
         character,
         texts,
         narration,
+        ...(lines ? { lines } : {}),
         transition,
         warnings: w,
       };

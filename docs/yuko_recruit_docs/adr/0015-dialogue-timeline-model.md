@@ -88,7 +88,7 @@ interface Scene {
 
 ### AI 出力（ai-video-plan・追加）
 
-- `AiScene` に `narrationLines?: [{ text, voiceCharacter?, subtitle?, subtitleEnabled? }]` を**任意追加**（`narrationText`/`texts.subtitle` は残置）。`voiceCharacter` は **voiceCatalog のキャラ名（文字列・例「ずんだもん」）**。既存の `AiScene.character`（ゆうこのポーズ解決・12 §8.3）/内部 `Scene.character`（11 §7.4）とは**別概念**ゆえ `character` を避け別名にする（実装者の混同回避）。ai-video-plan `schemaVersion` 1.0→1.1（後方互換の追加）。
+- `AiScene` に `narrationLines?: [{ text, voiceCharacter?, subtitle?, subtitleEnabled? }]` を**任意追加**（`narrationText`/`texts.subtitle` は残置）。`voiceCharacter` は **voiceCatalog のキャラ名（文字列・例「ずんだもん」）**。既存の `AiScene.character`（ゆうこのポーズ解決・12 §8.3）/内部 `Scene.character`（11 §7.4）とは**別概念**ゆえ `character` を避け別名にする（実装者の混同回避）。ai-video-plan `schemaVersion` は **1.0 据え置き**（narrationLines は任意追加・後方互換／AI出力は transient で永続化・migration が無いため版を上げない＝実装時 PR-G で確定。当初計画の 1.1 から変更）。
 - マッピング（`transformPlan`）: `narrationLines` があれば `scene.lines` へ（`voiceCharacter`→`voiceCatalog` で `speaker` 数値へ解決・未知名は既定声へフォールバック＋警告）、無ければ従来どおり `narrationText`→`narration`（単一）。`12` のプロンプトに掛け合いの指針を追記（行数・各行長・話者名の任意指定）。
 
 ---
@@ -109,7 +109,7 @@ interface Scene {
 
 - **後方互換**: 旧 project.json（単一 narration）は無変換で動作（minor 1.8・`§1` 互換方針に適合）。
 - **§10 改訂**: 「本格タイムライン編集（MVP非対象）」を、**場面内・単一トラックのセリフ簡易タイミング（startSec 調整）は対象**へ狭める（複数トラック/キーフレームアニメ/場面横断タイムラインは引き続き非対象）。ADR Accepted 時に `CLAUDE.md §10` を ADR-0012 と同様の注記で更新する。
-- **正典同期**: `11`（§6 声の解決を行へ拡張・§7 に NarrationLine・§1 に 1.8）、`12`（掛け合いプロンプト/マッピング）、`schemas/`（project 1.8・ai-video-plan 1.1）、`ADR-0003`（複数話者の使用＝本 ADR が具体化）。
+- **正典同期**: `11`（§6 声の解決を行へ拡張・§7 に NarrationLine・§1 に 1.8）、`12`（掛け合いプロンプト/マッピング）、`schemas/`（project 1.8・ai-video-plan は narrationLines 任意追加で 1.0 据え置き）、`ADR-0003`（複数話者の使用＝本 ADR が具体化）。
 - **UI 文言（§2-3/§2-5）**: 「セリフ」「声（キャラクター）」等の利用者語のみ。`lineId`/`speaker` 番号等は非表示。
 - **テスト（§7）**: 採番・移行・`sceneLines` 解決・声/音量の継承・字幕の有効行解決・行音声の連結尺、をいずれも純粋関数でテスト。書き出しは golden 方針に追従。
 - **検証（§8 拡張・PR-B/PR-C で 11 §8 に追記）**: 候補 — **V16** `lineId` が scene 内一意 / **V17** `startSec >= 0` かつ `<= scene.durationSec` / **V18** `startSec` 昇順・重複なし / **V19** `speaker` は voiceCatalog に存在（未知は既定へ補正＋警告）。番号は 11 §8 の続きで確定する。
