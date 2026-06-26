@@ -5,6 +5,7 @@ import type { Layer } from "../../domain/template/types";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -250,6 +251,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedFreeIds([]);
     setEditPopover(null);
   };
+  // 整列・等間隔分布（#205）：選択要素の外接矩形を基準に位置を計算し、一括移動で反映。
+  const alignFree = (mode: FreeAlign) =>
+    patch((s) => ({ ...s, freeLayout: applyFreeElementPositions(s.freeLayout ?? [], alignFreeElements(s.freeLayout ?? [], selectedFreeIds, mode)) }));
+  const distributeFree = (axis: FreeDistribute) =>
+    patch((s) => ({ ...s, freeLayout: applyFreeElementPositions(s.freeLayout ?? [], distributeFreeElements(s.freeLayout ?? [], selectedFreeIds, axis)) }));
   // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
   // updateScene→set は同期実行のため、newId は下の setSelectedFreeIds より前に確実に代入される。
@@ -838,35 +844,67 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <div className="col gap-sm">
                     {/* 複数選択（#206）：2件以上選んだら一括操作バーを出す（Shift＋クリックで増減）。 */}
                     {selectedFreeIds.length >= 2 && (
-                      <div className="row-between" style={{ padding: "4px 8px", background: "var(--color-surface-alt)", borderRadius: 6 }}>
-                        {confirmBulkDelete ? (
-                          <>
-                            <span className="text-sm">{selectedFreeIds.length}件をまとめて削除しますか？</span>
-                            <div className="row gap-sm">
-                              <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDelete(false)}>やめる</button>
-                              <button
-                                className="btn btn-ghost text-sm"
-                                style={{ color: "var(--color-danger)" }}
-                                onClick={() => { removeFreeMany(selectedFreeIds); setConfirmBulkDelete(false); }}
-                              >
-                                削除する
-                              </button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-sm">{selectedFreeIds.length}件を選択中（Shift＋クリックで増減）</span>
-                            <div className="row gap-sm">
-                              <button className="btn btn-ghost text-sm" onClick={() => { setSelectedFreeIds([]); setEditPopover(null); }}>選択解除</button>
-                              <button
-                                className="btn btn-ghost text-sm"
-                                style={{ color: "var(--color-danger)" }}
-                                onClick={() => setConfirmBulkDelete(true)}
-                              >
-                                選択をまとめて削除
-                              </button>
-                            </div>
-                          </>
+                      <div className="col gap-sm" style={{ padding: "4px 8px", background: "var(--color-surface-alt)", borderRadius: 6 }}>
+                        <div className="row-between">
+                          {confirmBulkDelete ? (
+                            <>
+                              <span className="text-sm">{selectedFreeIds.length}件をまとめて削除しますか？</span>
+                              <div className="row gap-sm">
+                                <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDelete(false)}>やめる</button>
+                                <button
+                                  className="btn btn-ghost text-sm"
+                                  style={{ color: "var(--color-danger)" }}
+                                  onClick={() => { removeFreeMany(selectedFreeIds); setConfirmBulkDelete(false); }}
+                                >
+                                  削除する
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-sm">{selectedFreeIds.length}件を選択中（Shift＋クリックで増減）</span>
+                              <div className="row gap-sm">
+                                <button className="btn btn-ghost text-sm" onClick={() => { setSelectedFreeIds([]); setEditPopover(null); }}>選択解除</button>
+                                <button
+                                  className="btn btn-ghost text-sm"
+                                  style={{ color: "var(--color-danger)" }}
+                                  onClick={() => setConfirmBulkDelete(true)}
+                                >
+                                  選択をまとめて削除
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        {/* 整列・等間隔分布（#205）。選択した要素の外接矩形を基準にそろえる。等間隔は3件以上で有効。 */}
+                        {!confirmBulkDelete && (
+                          <div className="row gap-sm" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                            <span className="text-sm text-muted">左右:</span>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.left)}>左</button>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.centerX)}>中央</button>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.right)}>右</button>
+                            <span className="text-sm text-muted" style={{ marginLeft: 6 }}>上下:</span>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.top)}>上</button>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.centerY)}>中央</button>
+                            <button className="btn btn-ghost text-sm" onClick={() => alignFree(FREE_ALIGN.bottom)}>下</button>
+                            <span className="text-sm text-muted" style={{ marginLeft: 6 }}>等間隔:</span>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              disabled={selectedFreeIds.length < 3}
+                              title={selectedFreeIds.length < 3 ? "3つ以上選ぶと等間隔に並べられます" : "横に等間隔で並べる"}
+                              onClick={() => distributeFree(FREE_DISTRIBUTE.horizontal)}
+                            >
+                              横
+                            </button>
+                            <button
+                              className="btn btn-ghost text-sm"
+                              disabled={selectedFreeIds.length < 3}
+                              title={selectedFreeIds.length < 3 ? "3つ以上選ぶと等間隔に並べられます" : "縦に等間隔で並べる"}
+                              onClick={() => distributeFree(FREE_DISTRIBUTE.vertical)}
+                            >
+                              縦
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}
