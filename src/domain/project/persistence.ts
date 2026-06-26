@@ -111,7 +111,8 @@ export function createBgmId(slug: string, existingIds: readonly string[]): strin
 }
 
 /** scene_NNN / part_NNN を発行する共通ロジック（§2.1）。既存と衝突しない最小の3桁連番。 */
-function nextNumberedId(prefix: string, existingIds: readonly string[]): string {
+/** `prefix_NNN`（3桁ゼロ詰め・空き番号を埋める・999超は桁上がり）を採番する汎用ヘルパー。各 create*Id とユーザーテンプレで共有。 */
+export function nextNumberedId(prefix: string, existingIds: readonly string[]): string {
   const used = new Set(existingIds);
   let n = 1;
   let id = `${prefix}_${String(n).padStart(3, '0')}`;

@@ -1,6 +1,6 @@
 # ADR-0017: テンプレ作成・編集エディタ（ユーザーテンプレート）
 
-- **状態**: Proposed（Draft・2026-06-27・α-3 ② #213）
+- **状態**: Accepted（2026-06-27・α-3 ② #213・実装は EPIC #214 をサブPRに分割）
 - **日付**: 2026-06-27
 - **関連**: [`adr/0016`](0016-detailed-editing-completion-roadmap.md)（②＝テンプレ作成エディタ・**§10「本格テンプレ作成エディタ」を緩和**・未解決2＝深さ/採番）/ [`adr/0007`](0007-detailed-edit-mode.md)（詳細編集・単一パイプライン M-A）/ [`adr/0008`](0008-free-layout-editor.md)（FREE 自由配置・本ADRが流用する編集UI）/ [`adr/0012`](0012-aspect-ratio-and-portrait.md)（向き）/ `template.schema.json`・`11 §2.1`（ID採番）・`CLAUDE.md §2-4`（テンプレ駆動）・`§10`（MVP外）
 - **対象**: α-3 ②（テンプレ作成・編集エディタ）。本ADRは**設計**（#213）。実装は EPIC #214。
