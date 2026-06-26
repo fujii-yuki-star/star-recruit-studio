@@ -31,8 +31,9 @@ export function wavDurationSec(dataUrl: string): number {
   while (off + 8 <= bytes.length) {
     const id = tag(off);
     const size = view.getUint32(off + 4, true);
-    if (id === 'fmt ') {
+    if (id === 'fmt ' && off + 20 <= bytes.length) {
       // fmt データ: audioFormat(2)/numChannels(2)/sampleRate(4)/byteRate(4)… → byteRate は chunk 先頭+16。
+      // 末尾で fmt が切れた WAV でも getUint32 が範囲外で throw しないよう境界を確認する（不正入力は 0）。
       byteRate = view.getUint32(off + 16, true);
     } else if (id === 'data') {
       dataSize = size;

@@ -126,7 +126,6 @@ export async function buildExportScenes(
         }),
       );
       const assetSrc = (id: string | null): string | undefined => (id ? sceneSrc.get(id) : undefined);
-      const narration = narrationFor?.(scene);
       const videoSlot = videoSlotFor?.(scene);
       const sceneFontFamily = opts.fontFamilyFor?.(scene); // 場面→動画全体で解決済みの font-family
       const split = videoSlot
@@ -140,7 +139,8 @@ export async function buildExportScenes(
       const rx = width / cw;
       const ry = height / ch;
       if (videoSlot && split) {
-        // 動画ありシーン：下/上2枚の透過PNG＋クリップ情報（ADR-0006）。
+        // 動画ありシーン：下/上2枚の透過PNG＋クリップ情報（ADR-0006）。掛け合いは分割せず場面単位の単一音声。
+        const narration = narrationFor?.(scene);
         const belowPngBase64 = await svgToPngDataUrl(split.belowSvg, width, height);
         const abovePngBase64 = await svgToPngDataUrl(split.aboveSvg, width, height);
         out.push({
@@ -177,7 +177,7 @@ export async function buildExportScenes(
         const useSegments = !!(scene.lines && scene.lines.length > 0) && !videoSlot;
         const lineDurations: Record<string, number> = {};
         if (useSegments) {
-          for (const l of scene.lines!) {
+          for (const l of scene.lines ?? []) {
             const a = narrationFor?.(scene, l.lineId)?.audioBase64;
             lineDurations[l.lineId] = a ? wavDurationSec(a) : 0;
           }
