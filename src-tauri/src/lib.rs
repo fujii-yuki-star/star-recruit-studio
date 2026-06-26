@@ -40,7 +40,10 @@ pub(crate) fn is_safe_project_id(id: &str) -> bool {
 /// テンプレ ID がパス安全かつ正典形式（^[a-z0-9_]+$・小文字のみ）か。user_tmpl_NNN は適合。
 /// template.schema.json の templateId 形式（小文字）に合わせ、手動持ち込みの大文字 id を弾く（ADR-0017）。
 fn is_safe_template_id(id: &str) -> bool {
-    !id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 /// project.json を appData/projects/<projectId>/ に保存し、保存先パスを返す。
@@ -116,7 +119,7 @@ fn user_templates_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 /// ユーザーテンプレ(JSON文字列)を appData/user_templates/<templateId>.json に保存し、保存先パスを返す。
-/// templateId はパス安全（英数字と _ のみ＝is_safe_project_id を流用。user_tmpl_NNN は適合）。
+/// templateId は is_safe_template_id（^[a-z0-9_]+$ 小文字）で検証＝パストラバーサル防止＋正典形式。
 #[tauri::command]
 fn save_user_template(app: tauri::AppHandle, template_json: String) -> Result<String, String> {
     let value: serde_json::Value =
