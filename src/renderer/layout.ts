@@ -2,7 +2,7 @@
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
 import { FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
-import type { Fit, FreeShapeType, LayerType } from '../domain/enums';
+import type { Fit, FreeShapeType, LayerType, TextAlign } from '../domain/enums';
 import type { Scene } from '../domain/project/types';
 import type { Layer, Template } from '../domain/template/types';
 
@@ -52,6 +52,11 @@ export interface TextItem extends ItemBase {
   isSubtitle: boolean;
   /** この要素自身のフォント id（#178）。既知ならこれを使い、未指定/不明は場面既定（描画側 fontFamily）へ。 */
   fontId?: string | null;
+  /** 行間（倍率・未指定=1.3）・揃え（未指定=left）・縁取り（FREE text の体裁・#209）。 */
+  lineHeight?: number;
+  textAlign?: TextAlign;
+  strokeColor?: string;
+  strokeWidth?: number;
 }
 
 export type LayoutItem = FillItem | ImageItem | TextItem;
@@ -71,6 +76,8 @@ const DEFAULT_Z: Record<LayerType, number> = {
 const DEFAULT_TEXT_COLOR = '#222222';
 const DEFAULT_FONT_SIZE = 40;
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+/** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
+export const DEFAULT_LINE_HEIGHT = 1.3;
 
 const zOf = (layer: Layer): number => layer.zIndex ?? DEFAULT_Z[layer.type];
 
@@ -176,8 +183,9 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const text = el.text ?? '';
           if (text.length === 0) break;
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
-          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * 1.3)));
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? 'normal', color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId });
+          const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
+          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? 'normal', color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
           break;
         }
         case 'shape':

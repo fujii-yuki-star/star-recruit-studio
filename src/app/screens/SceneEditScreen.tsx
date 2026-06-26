@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
-import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
@@ -345,6 +345,25 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="field" style={{ marginBottom: 6 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
             <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
+          </div>
+          {/* 体裁拡充（#209）：行間（倍率）・揃え・縁取り（縁取りは strokeColor/strokeWidth を text に流用）。 */}
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+            <NumberField label="行間" value={el.lineHeight ?? 1.3} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>揃え</label>
+              <select className="select" value={el.textAlign ?? TEXT_ALIGN.left} onChange={(e) => patchFreeEl(el.id, { textAlign: e.target.value as TextAlign })}>
+                <option value={TEXT_ALIGN.left}>左</option>
+                <option value={TEXT_ALIGN.center}>中央</option>
+                <option value={TEXT_ALIGN.right}>右</option>
+              </select>
+            </div>
+          </div>
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+            <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
+              <input type="color" value={el.strokeColor ?? "#000000"} onChange={(e) => patchFreeEl(el.id, { strokeColor: e.target.value })} />
+            </div>
           </div>
         </>
       );
