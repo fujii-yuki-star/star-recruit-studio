@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { activeLineIndexAt, lineSegments, resolveLineSubtitle } from './lineTimeline';
+import { activeLineIndexAt, lineSegments, resolveLineSubtitle, sceneSegmentSpecs } from './lineTimeline';
 import type { NarrationLine, Scene } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -86,5 +86,22 @@ describe('activeLineIndexAt（追加A）', () => {
     const late: NarrationLine[] = [{ lineId: 'line_001', text: 'a', startSec: 2, status: NARRATION_STATUS.none }];
     const s = lineSegments(sceneWith({ lines: late }), {});
     expect(activeLineIndexAt(s, 0)).toBe(0); // t=0 は startSec=2 より前だが先頭行(0)
+  });
+});
+
+describe('sceneSegmentSpecs（書き出しセグメント・PR-E）', () => {
+  it('単一 narration は1セグメント（字幕上書きなし・場面尺・isFirst）', () => {
+    expect(sceneSegmentSpecs(sceneWith({}), {})).toEqual([{ durationSec: 10, isFirst: true }]);
+  });
+
+  it('掛け合いは行ごと（字幕上書き＋区間尺・先頭のみ isFirst・OFFは null）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'やあ', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'どうも', subtitleEnabled: false, status: NARRATION_STATUS.none },
+    ];
+    expect(sceneSegmentSpecs(sceneWith({ lines }), { line_001: 3, line_002: 4 })).toEqual([
+      { lineId: 'line_001', subtitleText: 'やあ', durationSec: 3, isFirst: true },
+      { lineId: 'line_002', subtitleText: null, durationSec: 7, isFirst: false }, // [3,10]・OFF→null
+    ]);
   });
 });

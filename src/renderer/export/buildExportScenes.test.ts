@@ -74,6 +74,32 @@ describe('buildExportScenes：ナレーション音声の付与', () => {
     expect(out[0].narrationVolume).toBeUndefined();
     expect(out).toHaveLength(2);
   });
+
+  it('掛け合い（明示 lines）は行ごとセグメントへ展開し、行ごと音声・区間尺を付与（PR-E）', async () => {
+    const multi = {
+      sceneId: 's1', templateId: 'tpl', durationSec: 8,
+      lines: [
+        { lineId: 'line_001', text: 'やあ', startSec: 0, status: 'none' },
+        { lineId: 'line_002', text: 'どうも', startSec: 4, status: 'none' },
+      ],
+    } as unknown as Scene;
+    const out = await buildExportScenes([multi], templateById, noAsset, (_s, lineId) => ({
+      audioBase64: lineId ? `AUDIO_${lineId}` : undefined,
+      narrationVolume: 1,
+    }));
+    expect(out).toHaveLength(2); // 1場面 → 2セグメント
+    expect(out.map((o) => o.durationSec)).toEqual([4, 4]); // [0,4],[4,8]
+    expect(out.map((o) => o.audioBase64)).toEqual(['AUDIO_line_001', 'AUDIO_line_002']);
+  });
+
+  it('単一 narration の場面は従来どおり1場面=1セグメント（後方互換）', async () => {
+    const out = await buildExportScenes(scenes, templateById, noAsset, (s) => ({
+      audioBase64: s.sceneId === 's1' ? 'A1' : undefined,
+      narrationVolume: 1,
+    }));
+    expect(out).toHaveLength(2); // s1,s2（sX はテンプレ未解決でスキップ）
+    expect(out[0]).toMatchObject({ durationSec: 8, audioBase64: 'A1' });
+  });
 });
 
 describe('buildExportScenes：動画シーン（ADR-0006）', () => {

@@ -10,6 +10,7 @@ import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
 import { NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { lineAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -120,8 +121,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         scenes,
         templateById,
         resolveExportSrc,
-        (scene) => ({
-          audioBase64: narrationAudioById[scene.sceneId],
+        (scene, lineId) => ({
+          // 掛け合いは行ごとの音声キー（lineAudioKey）、単一 narration は従来の sceneId（ADR-0015 PR-E）。
+          audioBase64: narrationAudioById[lineId ? lineAudioKey(scene.sceneId, lineId) : scene.sceneId],
           narrationVolume: resolveNarrationVolume(scene.audioMix, voiceSettings),
         }),
         (scene) => {
