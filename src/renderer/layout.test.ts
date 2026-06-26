@@ -242,4 +242,13 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(svg).toContain('text-anchor="start"'); // 左揃え
     expect(svg).not.toContain('paint-order'); // 縁取りなし
   });
+
+  it('FREE text の揃えで text-anchor と x が変わる（左=左端 / 右=右端）', () => {
+    const svgFor = (textAlign: 'left' | 'right') =>
+      layoutToSvg(layoutScene({ ...freeScene, freeLayout: [{ id: 'free_001', kind: 'text', x: 100, y: 100, w: 400, h: 80, zIndex: 5, text: 'あ', fontSize: 40, textAlign }] }, freeTemplate));
+    expect(svgFor('left')).toContain('text-anchor="start"');
+    expect(svgFor('left')).toContain('x="100"'); // 左端＝item.x
+    expect(svgFor('right')).toContain('text-anchor="end"');
+    expect(svgFor('right')).toContain('x="500"'); // 右端＝item.x + item.w = 100+400
+  });
 });

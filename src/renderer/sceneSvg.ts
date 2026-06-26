@@ -1,7 +1,7 @@
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
 // 注: テキスト折返しは暫定で文字幅概算（半角≈0.55em・全角≈1em）。フォント実測への置換は将来（05 §10 / ADR-0001 未解決論点）。
-import type { Fit } from '../domain/enums';
+import { TEXT_ALIGN, type Fit } from '../domain/enums';
 import { fontFamilyForId, isKnownFontId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT } from './layout';
@@ -69,9 +69,10 @@ function textToSvg(item: TextItem, fontFamily: string): string {
   }
 
   // 揃え（#209）：text-anchor と x を決める。未指定=left。背景の矩形は要素幅のまま。
-  const align = item.textAlign ?? 'left';
-  const anchor = align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start';
-  const textX = align === 'center' ? item.x + item.w / 2 : align === 'right' ? item.x + item.w : item.x;
+  // ※ 'middle'/'end'/'start' は SVG text-anchor の値（外部API）であり TextAlign enum とは別物。
+  const align = item.textAlign ?? TEXT_ALIGN.left;
+  const anchor = align === TEXT_ALIGN.center ? 'middle' : align === TEXT_ALIGN.right ? 'end' : 'start';
+  const textX = align === TEXT_ALIGN.center ? item.x + item.w / 2 : align === TEXT_ALIGN.right ? item.x + item.w : item.x;
   // 縁取り（#209）：strokeWidth>0 のとき文字に stroke を敷く。paint-order=stroke で塗りの下に置き可読性を保つ。
   const stroke = item.strokeColor && item.strokeWidth && item.strokeWidth > 0
     ? ` stroke="${item.strokeColor}" stroke-width="${item.strokeWidth}" paint-order="stroke"`
