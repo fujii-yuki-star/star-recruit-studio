@@ -53,6 +53,14 @@ describe('buildTemplateSummaries', () => {
     expect(s.useCase).toBeUndefined();
     expect(s.maxDurationSec).toBeUndefined();
   });
+
+  it('ユーザーテンプレ（user_tmpl_）は AI 入力から除外する（ADR-0017 不変条件）', () => {
+    const summaries = buildTemplateSummaries([
+      template({ templateId: 'opening_yuko_right_v1' }),
+      template({ templateId: 'user_tmpl_001' }),
+    ]);
+    expect(summaries.map((s) => s.templateId)).toEqual(['opening_yuko_right_v1']); // user_tmpl_ は出ない
+  });
 });
 
 describe('buildYukoPoseTags', () => {

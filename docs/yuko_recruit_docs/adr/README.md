@@ -23,7 +23,7 @@
 | [0014](0014-component-test-foundation.md) | コンポーネント/対話テスト基盤（Vitest + Testing Library + jsdom） | **Accepted** |
 | [0015](0015-dialogue-timeline-model.md) | 掛け合い＝場面のセリフ列（ミニタイムライン）モデル | **Accepted** |
 | [0016](0016-detailed-editing-completion-roadmap.md) | 詳細編集の完全化（ロードマップ／アンブレラ・α-3〜） | **Proposed** |
-| [0017](0017-template-authoring-editor.md) | テンプレ作成・編集エディタ（ユーザーテンプレート） | **Proposed** |
+| [0017](0017-template-authoring-editor.md) | テンプレ作成・編集エディタ（ユーザーテンプレート） | **Accepted** |
 | [0020](0020-undo-redo-model.md) | 取り消し/やり直し（Undo/Redo）モデル | **Accepted** |
 
 ## 状態の意味

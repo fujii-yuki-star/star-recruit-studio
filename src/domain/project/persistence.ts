@@ -110,7 +110,7 @@ export function createBgmId(slug: string, existingIds: readonly string[]): strin
   return id;
 }
 
-/** scene_NNN / part_NNN を発行する共通ロジック（§2.1）。既存と衝突しない最小の3桁連番。 */
+/** scene_NNN / part_NNN を発行する共通ロジック（§2.1）。既存と衝突しない最小の3桁連番（空き番号を埋める）。 */
 function nextNumberedId(prefix: string, existingIds: readonly string[]): string {
   const used = new Set(existingIds);
   let n = 1;
