@@ -244,3 +244,25 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 });
+
+describe("FreeLayoutOverlay: 回転（#208）", () => {
+  it("回転している主要素は CSS rotate を当て、リサイズハンドルは出さない（大きさは数値入力で）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 100, zIndex: 1, rotation: 30 },
+    ];
+    const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
+    const box = root.children[0] as HTMLElement;
+    expect(box.style.transform).toContain("rotate(30deg)");
+    expect(box.children).toHaveLength(0); // 回転中＝ハンドルなし
+  });
+
+  it("回転 0（未指定）の主要素はハンドル4つを出し、transform を付けない", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 100, zIndex: 1 },
+    ];
+    const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
+    const box = root.children[0] as HTMLElement;
+    expect(box.style.transform).toBe("");
+    expect(box.children).toHaveLength(4); // 回転なし＝リサイズハンドル
+  });
+});

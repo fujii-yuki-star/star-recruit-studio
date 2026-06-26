@@ -214,6 +214,7 @@ export function FreeLayoutOverlay({
       {freeLayout.map((el) => {
         const selected = selectedIds.includes(el.id); // 選択中（複数可）＝枠を強調
         const isPrimary = el.id === primaryId; // 主＝リサイズハンドルを出す対象
+        const rotated = (el.rotation ?? 0) !== 0; // 回転あり（角度は 0〜360未満＝360°(=0°)は schema で排除済み）
         const editing = el.id === editingId && el.kind === FREE_ELEMENT_KIND.text;
         return (
           <div
@@ -239,7 +240,7 @@ export function FreeLayoutOverlay({
               background: selected ? "rgba(80,130,255,0.08)" : "transparent",
               cursor: editing ? "text" : "move",
               // 回転（#208）：中心を軸に回す（既定の transform-origin=中心）。出力 SVG の rotate と一致。
-              transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+              transform: rotated ? `rotate(${el.rotation}deg)` : undefined,
             }}
           >
             {editing ? (
@@ -268,7 +269,7 @@ export function FreeLayoutOverlay({
               />
             ) : (
               // 回転中はリサイズハンドルを出さない（回転下の角ドラッグ計算は非対応＝大きさは数値入力で。#208）。
-              isPrimary && !el.rotation &&
+              isPrimary && !rotated &&
               HANDLES.map((hd) => (
                 <div
                   key={hd.corner}

@@ -999,8 +999,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           <NumberField label="幅" value={el.w} min={1} onChange={(v) => patchFreeEl(el.id, { w: v })} />
                           <NumberField label="高さ" value={el.h} min={1} onChange={(v) => patchFreeEl(el.id, { h: v })} />
                           <NumberField label="重なり順" value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
-                          {/* 角度（回転・度）。0〜360。回転中は角のつまみでの拡大縮小は止まるため、大きさはこの数値で調整する（#208）。 */}
-                          <NumberField label="角度" value={el.rotation ?? 0} min={0} max={360} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
+                          {/* 角度（回転・度）。0〜359（360=0 は重複ゆえ schema で除外）。回転中は角つまみでの拡大縮小が止まるため、大きさはこの数値で調整する（#208）。 */}
+                          <NumberField label="角度" value={el.rotation ?? 0} min={0} max={359} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
                         </div>
                       </div>
                     ))}
