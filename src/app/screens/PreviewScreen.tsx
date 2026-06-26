@@ -6,6 +6,9 @@ import { PageHead } from "../components/ui";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { BgmPicker } from "../components/BgmPicker";
 import { resolveBgmVolume } from "../../domain/voice/audioMix";
+import { lineAudioKey } from "../../domain/project/narrationLines";
+import { lineSegments } from "../../domain/project/lineTimeline";
+import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
   PlayIcon,
@@ -40,6 +43,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // 選択済みBGMが再生できなかったとき通知する（自分のBGMのURL解決/再生失敗・§2-5）。
   const [bgmPlayWarning, setBgmPlayWarning] = useState(false);
   const [muted, setMuted] = useState(false);
+  // 掛け合い再生中の有効行 index（経過秒に応じて字幕/フレームを切り替える・ADR-0015 PR-F2）。停止時は 0（先頭）。
+  const [activeLine, setActiveLine] = useState(0);
   // ミュートは再生エフェクトを再起動させずに参照したいので ref で持つ（同期は useEffect で）。
   const mutedRef = useRef(muted);
   // 再生中の BGM 要素（ループ再生・ミュート/音量を即時反映するため保持）。
@@ -83,24 +88,58 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
 
   // 再生中：現在の場面のナレーションを鳴らし、表示時間後に次の場面へ。範囲の終端で停止。
+  // 掛け合い（明示 lines）は行ごとに音声を順に鳴らし、経過秒で有効行（字幕/フレーム）を切り替える（ADR-0015 PR-F2）。
   useEffect(() => {
     const sc = scenes[safeIdx];
     if (!playing || !sc) return;
+    const advance = (): void => {
+      if (safeIdx < endIdx) setIdx(safeIdx + 1);
+      else setPlaying(false);
+    };
+    const endTimer = window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000);
+
+    if (sc.lines && sc.lines.length > 0) {
+      // 掛け合い：行音声の長さを測ってタイムラインを作り、各行の開始秒で音声＋フレームを切り替える。
+      const durations: Record<string, number> = {};
+      for (const l of sc.lines) {
+        const a = narrationAudioById[lineAudioKey(sc.sceneId, l.lineId)];
+        durations[l.lineId] = a ? wavDurationSec(a) : 0;
+      }
+      const segs = lineSegments(sc, durations);
+      const lineTimers: number[] = [];
+      const lineAudios: HTMLAudioElement[] = [];
+      let currentAudio: HTMLAudioElement | undefined;
+      const playLine = (i: number): void => {
+        currentAudio?.pause(); // 前の行の音声を止めてから次へ（被り防止）。
+        setActiveLine(i);
+        const u = narrationAudioById[lineAudioKey(sc.sceneId, segs[i].lineId)];
+        if (u && !mutedRef.current) {
+          currentAudio = new Audio(u);
+          lineAudios.push(currentAudio);
+          void currentAudio.play().catch((e) => console.warn("[PreviewScreen] 音声再生に失敗", e));
+        }
+      };
+      playLine(0);
+      for (let i = 1; i < segs.length; i += 1) {
+        lineTimers.push(window.setTimeout(() => playLine(i), Math.max(0, segs[i].startSec) * 1000));
+      }
+      return () => {
+        window.clearTimeout(endTimer);
+        lineTimers.forEach((t) => window.clearTimeout(t));
+        lineAudios.forEach((a) => a.pause());
+        setActiveLine(0);
+      };
+    }
+
+    // 単一 narration（従来）。
     let audio: HTMLAudioElement | undefined;
     const url = narrationAudioById[sc.sceneId];
     if (url && !mutedRef.current) {
       audio = new Audio(url);
       void audio.play().catch((e) => console.warn("[PreviewScreen] 音声再生に失敗", e));
     }
-    const timer = window.setTimeout(
-      () => {
-        if (safeIdx < endIdx) setIdx(safeIdx + 1);
-        else setPlaying(false);
-      },
-      Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000,
-    );
     return () => {
-      window.clearTimeout(timer);
+      window.clearTimeout(endTimer);
       audio?.pause();
     };
   }, [playing, safeIdx, endIdx, scenes, narrationAudioById]);
@@ -144,7 +183,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
         <div className="card">
-          <ScenePreview scene={current} template={template} />
+          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} />
 
           {/* 場面送り */}
           <div className="row-between mt">

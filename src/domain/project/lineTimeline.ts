@@ -72,12 +72,17 @@ export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, nu
   if (!scene.lines || scene.lines.length === 0) {
     return [{ durationSec: scene.durationSec, isFirst: true }];
   }
-  return lineSegments(scene, lineDurations).map((s, i) => ({
-    lineId: s.lineId,
-    subtitleText: s.subtitle.enabled ? s.subtitle.text : null,
-    durationSec: Math.max(0, s.endSec - s.startSec),
-    isFirst: i === 0,
-  }));
+  // 0秒（開始がクランプ/音声未測定で endSec===startSec）のセグメントは出さない（書き出し/再生の不正を防ぐ）。
+  const nonEmpty = lineSegments(scene, lineDurations)
+    .filter((s) => s.endSec > s.startSec)
+    .map((s) => ({
+      lineId: s.lineId,
+      subtitleText: s.subtitle.enabled ? s.subtitle.text : null,
+      durationSec: s.endSec - s.startSec,
+    }));
+  // すべて0秒（degenerate）なら場面全体を1セグメントに（場面が書き出しから消えないように）。
+  if (nonEmpty.length === 0) return [{ durationSec: scene.durationSec, isFirst: true }];
+  return nonEmpty.map((s, i) => ({ ...s, isFirst: i === 0 }));
 }
 
 /**

@@ -10,7 +10,7 @@ import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template }: { scene?: Scene; template?: Template }) {
+export function ScenePreview({ scene, template, activeLineIndex }: { scene?: Scene; template?: Template; activeLineIndex?: number }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const ref = useRef<HTMLDivElement>(null);
@@ -69,9 +69,11 @@ export function ScenePreview({ scene, template }: { scene?: Scene; template?: Te
     );
   }
 
-  // 掛け合い（明示 lines）は先頭行の字幕を編集プレビューに反映（追加A/B）。時刻送りの切替はプレビュー再生（別画面・PR-E）。
-  const firstLine = scene.lines && scene.lines.length > 0 ? scene.lines[0] : undefined;
-  const lineSub = firstLine ? resolveLineSubtitle(firstLine, scene) : undefined;
+  // 掛け合い（明示 lines）は有効行の字幕をプレビューに反映（追加A/B）。activeLineIndex＝再生中の有効行・未指定は先頭行。
+  const activeLine = scene.lines && scene.lines.length > 0
+    ? scene.lines[activeLineIndex ?? 0] ?? scene.lines[0]
+    : undefined;
+  const lineSub = activeLine ? resolveLineSubtitle(activeLine, scene) : undefined;
   const layoutOpts = lineSub ? { subtitleText: lineSub.enabled ? lineSub.text : null } : undefined;
   // responsive:true で SVG ルートを 100%（viewBox は canvas 実寸を保持）にし、外枠の実寸は計測結果に従う。
   const svg = layoutToSvg(layoutScene(scene, template, layoutOpts), {
