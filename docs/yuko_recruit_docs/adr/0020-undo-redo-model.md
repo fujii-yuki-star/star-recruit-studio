@@ -15,7 +15,7 @@ ADR-0016 は「Undo/Redo は履歴/Command の設計（domain純粋性・状態�
 
 ### ストアの実態（評価で確認）
 - Zustand 単一ストア。**Immer 不使用**、更新は `set((s) => …)`。
-- **文書（＝undo対象）**：`meta` / `parts` / `scenes` / `assets`（保存される project 部分）。
+- **保存される文書**：`meta` / `parts` / `scenes` / `assets`。このうち **undo 対象は `meta` / `parts` / `scenes`**（`assets` は素材取込のディスクIOゆえ undo 対象外＝決定参照）。
 - **transient（＝undo非対象）**：`status` / `saveStatus` / `*Error` / `isImporting` / `assetSrcById`（表示URL）/ `narrationAudioById`（音声）/ `templates` / `warnings`。
 - FREE編集は `updateScene`（SceneEditScreen の `patch`）に集約。場面操作・テキスト等も同じ `set` 経路。
 
@@ -33,7 +33,7 @@ ADR-0016 は「Undo/Redo は履歴/Command の設計（domain純粋性・状態�
 ## 検討した選択肢
 
 ### 選択肢A: スナップショット方式（文書slice限定）【採用】
-- **概要**：文書（`meta/parts/scenes/assets`）を丸ごと履歴スタック（`past[]`/`future[]`）に積む。undo＝past を pop して復元・現在を future へ。
+- **概要**：文書slice（`meta/parts/scenes`・**`assets` は除外＝下記**）を丸ごと履歴スタック（`past[]`/`future[]`）に積む。undo＝past を pop して復元・現在を future へ。
 - 利点：**実装が単純で堅牢**（逆操作を定義しない）。操作が増えても履歴側は不変。transient を除けば壊れない。
 - 欠点：1件＝文書全体のコピー。ただしプロジェクトJSONは小さく（KB〜）、深さ上限50でも数MB程度＝許容。
 
@@ -50,14 +50,18 @@ ADR-0016 は「Undo/Redo は履歴/Command の設計（domain純粋性・状態�
 
 ## 決定
 
-> **スナップショット方式（選択肢A）で、文書slice（`meta/parts/scenes/assets`）に限定した Undo/Redo を入れる。**
+> **スナップショット方式（選択肢A）で、文書slice（`meta/parts/scenes`・`assets` は除外）に限定した Undo/Redo を入れる。**
 
-- **履歴slice**：`past: DocSnapshot[]` / `future: DocSnapshot[]` と `undo()` / `redo()` / `canUndo` / `canRedo` をストアに追加。`DocSnapshot = Pick<state, 'meta'|'parts'|'scenes'|'assets'>`。**深さ上限（既定50・定数）**を超えたら古い方から捨てる。
+- **履歴slice**：`past: DocSnapshot[]` / `future: DocSnapshot[]` と `undo()` / `redo()` / `canUndo` / `canRedo` をストアに追加。`DocSnapshot = Pick<state, 'meta'|'parts'|'scenes'>`（**`assets` は含めない**＝素材の追加/削除を undo 対象外にするため・下記）。**深さ上限（既定50・定数）**を超えたら古い方から捨てる。
 - **記録のしかた**：文書を変える操作は「適用前の文書」を `past` へ積み、`future` をクリアする。**transient のみの変更（status/error/フラグ/src/音声）は積まない**。
 - **粒度・合成**：
   - 離散操作（追加/削除/整列/重ね順/トグル/数値入力の確定 等）＝1操作=1スナップショット。
   - **連続操作（ドラッグ移動/リサイズ・スライダー）は1ステップに合成**。FREE オーバーレイは drag 開始/終了が明確なので、**開始時に1回チェックポイント（pushHistory）→ 連続中は積まない → 終了**で確定する「コミット境界」方式。境界の制御は薄いAPI（`beginInteraction()`/`endInteraction()` 相当、または `pushHistory()` を操作の入口で呼ぶ）で実装する。
-- **非同期の素材取込/削除は undo 対象外（履歴境界）**：`addAsset`/`addAssetByPath`/`setAssetImage`/`setBgm`/`removeAsset` はディスクIO＋transient src を伴い、一覧から戻してもファイルは残る＝安全に戻せない。これらは**履歴をクリア（または据え置き）し、戻せない**ものとする。UIで「取り込みは取り消せません」を必要時に案内（§2-5）。
+- **素材の取込/削除は undo 対象外（`assets` を snapshot に含めない理由）**：`addAsset`/`addAssetByPath`/`setAssetImage`/`setBgm`/`removeAsset` はディスクIO＋transient src を伴い、一覧から戻してもファイルは残る＝安全に戻せない。そこで **`assets` を `DocSnapshot` に含めず、素材操作は履歴に一切関与させない（push もクリアもしない）**。これにより：
+  - (a) 編集の履歴は素材取込を**またいで保持**される（「素材を足したら Ctrl+Z が効かない」＝レビュー🟡 は起きない）。
+  - (b) undo は assets を戻さない＝`scenes`/`parts` の `assetId` 参照は**切れない**（assets は取込で増えるだけ・undo で消えないので dangling にならない＝レビュー🔴 を解消）。
+  - **素材の追加/削除そのものは取り消せない**点のみ、必要時にUIで一言（§2-5）。素材操作で履歴を消さないので「大量編集→素材追加で全部消える」混乱は起きない。
+- **スコープ（グローバル）**：履歴は**ストアに置きプロジェクト内の画面遷移をまたいで保持**する。**別文書を開く操作（`newProject`/`loadProject`）で履歴をクリア**（`saveProject` ではクリアしない）。場面横断の編集（並べ替え・分割等）も同じ履歴に乗る。
 - **入口**：Ctrl+Z＝undo / Ctrl+Y・Ctrl+Shift+Z＝redo（編集画面で有効・IME変換中やテキスト入力中の既定動作を奪わない）。編集画面に「取り消す/やり直す」ボタン（`canUndo/canRedo` で活性制御）。
 - **保存状態**：undo/redo は `saveStatus: "idle"`（未保存）にする。
 - **正典影響なし**：履歴は永続化しない。schemaVersion 不変。
@@ -72,10 +76,10 @@ ADR-0016 は「Undo/Redo は履歴/Command の設計（domain純粋性・状態�
 - **層分離（§4）**：履歴の純粋部分（スタック操作・スナップショット差し替え）は domain 寄りの純粋関数に切り出し、ストアは薄く繋ぐ。
 - **将来**：メモリが問題化したら Command/Immer へ移行可（履歴slice の内部実装差し替えで外部APIは不変に保つ）。タイムライン/キーフレーム（③④）導入時に履歴の粒度方針を再確認。
 
+> **解決済み（レビュー反映・2026-06-26）**：旧・未解決3（素材取込の扱い）と旧・未解決5（スコープ）は決定へ格上げ＝**`assets` を snapshot に含めず素材操作は履歴に非関与**（🔴 の矛盾解消・🟡 の「履歴消失」回避）／**グローバル履歴（`newProject`/`loadProject` でクリア）**。
+
 ## 未解決の論点
 
 1. **コミット境界の実装**：`pushHistory()` を各操作入口で明示呼びするか、`set` ラッパ＋ドラッグ中フラグで自動化するか（前者は明示的で安全・後者は侵襲小だが取りこぼし注意）。実装PRで確定。
 2. **連続操作の合成範囲**：ドラッグ以外（スライダー・連続キー入力）をどこまで1ステップにまとめるか（同種連続をXms窓で合成する案も）。
-3. **素材取込の扱い**：履歴を完全クリアか、文書snapshotには含めるが「取込前」には戻せない境界にするか。誤操作時のUX（§2-5の文言）。
-4. **深さ上限の値**：既定50で足りるか。メモリ実測で調整。
-5. **スコープ**：当面は文書全体（場面横断も）でよいか、編集画面に閉じるか。
+3. **深さ上限の値**：既定50で足りるか。メモリ実測で調整。
