@@ -103,6 +103,67 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<ProjectSummary>, String> {
     Ok(out)
 }
 
+/// appData/user_templates ディレクトリ（ユーザー作成テンプレ・全プロジェクト共通＝ADR-0017）。作成は呼び出し側。
+fn user_templates_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base.join("user_templates"))
+}
+
+/// ユーザーテンプレ(JSON文字列)を appData/user_templates/<templateId>.json に保存し、保存先パスを返す。
+/// templateId はパス安全（英数字と _ のみ＝is_safe_project_id を流用。user_tmpl_NNN は適合）。
+#[tauri::command]
+fn save_user_template(app: tauri::AppHandle, template_json: String) -> Result<String, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(&template_json).map_err(|e| e.to_string())?;
+    let template_id = value
+        .get("templateId")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "templateId がありません".to_string())?;
+    if !is_safe_project_id(template_id) {
+        return Err("不正なテンプレートIDです。".to_string());
+    }
+    let dir = user_templates_dir(&app)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.json", template_id));
+    fs::write(&path, &template_json).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// appData/user_templates の *.json をすべて読み、本文(JSON文字列)の配列で返す（検証は呼び出し側＝§2-2）。
+#[tauri::command]
+fn load_user_templates(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = user_templates_dir(&app)?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out: Vec<String> = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(text) = fs::read_to_string(&path) {
+            out.push(text);
+        }
+    }
+    Ok(out)
+}
+
+/// ユーザーテンプレ(appData/user_templates/<templateId>.json)を削除する（無ければ何もしない）。
+#[tauri::command]
+fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<(), String> {
+    if !is_safe_project_id(&template_id) {
+        return Err("不正なテンプレートIDです。".to_string());
+    }
+    let path = user_templates_dir(&app)?.join(format!("{}.json", template_id));
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -119,6 +180,9 @@ pub fn run() {
             save_project,
             load_project,
             list_projects,
+            save_user_template,
+            load_user_templates,
+            delete_user_template,
             ffmpeg::export_video,
             ffmpeg::probe_video,
             ffmpeg::extract_video_thumbnail,

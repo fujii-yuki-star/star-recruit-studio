@@ -20,10 +20,10 @@ function seqOf(templateId: string): number | null {
  * 新しいユーザーテンプレ id を採番する（既存の全テンプレ id を渡す・グローバル一意）。
  * **最大連番+1**（空き番号は埋めない）＝scene/part の §2.1 gap-fill とは別方針。
  * 削除した番号を再利用すると、別プロジェクトの参照（scene.templateId）が後発テンプレに化けるため（ADR-0017）。
- * ※ 削除をまたいだ厳密な単調増加（払い出し済みの最大保持）は永続層で担保する（EPIC #214 永続化サブPR）。
+ * `minSeq` ＝払い出し済みの最大連番（永続層が保持＝削除済みファイルが現存 id から消えても番号を戻さない）。
  * `user_tmpl_NNN`（3桁ゼロ詰め・999超は桁上がり）。
  */
-export function createUserTemplateId(existingIds: readonly string[]): string {
-  const max = existingIds.reduce((m, id) => Math.max(m, seqOf(id) ?? 0), 0);
+export function createUserTemplateId(existingIds: readonly string[], minSeq = 0): string {
+  const max = existingIds.reduce((m, id) => Math.max(m, seqOf(id) ?? 0), minSeq);
   return `${USER_TEMPLATE_PREFIX}_${String(max + 1).padStart(3, '0')}`;
 }
