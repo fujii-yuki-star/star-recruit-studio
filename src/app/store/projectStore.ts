@@ -997,13 +997,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (get()._historyGroupDepth > 0) return; // グループ中は begin で記録済みなので積まない（ドラッグ＝1ステップ）
     set((s) => recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)));
   },
-  beginHistoryGroup: () => {
-    // 連続操作の開始。深さ0→1 のときだけ「編集前」を1回記録する。
-    if (get()._historyGroupDepth === 0) {
-      set((s) => recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)));
-    }
-    set((s) => ({ _historyGroupDepth: s._historyGroupDepth + 1 }));
-  },
+  beginHistoryGroup: () =>
+    // 連続操作の開始。深さ0→1 のときだけ「編集前」を1回記録する。記録と深さ更新は1回の set でアトミックに。
+    set((s) => {
+      if (s._historyGroupDepth === 0) {
+        const snap = recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
+        return { ...snap, _historyGroupDepth: 1 };
+      }
+      return { _historyGroupDepth: s._historyGroupDepth + 1 };
+    }),
   endHistoryGroup: () => set((s) => ({ _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) })),
   undo: () =>
     set((s) => {

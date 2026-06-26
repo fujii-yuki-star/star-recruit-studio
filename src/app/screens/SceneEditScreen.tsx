@@ -148,7 +148,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 複数選択（#206）。配列が真＝選択集合、末尾が「主」。単一要素編集（カード/詳細モード/ポップオーバー）は主を対象にする。
   const [selectedFreeIds, setSelectedFreeIds] = useState<string[]>([]);
   const selectedFreeId = selectedFreeIds.length > 0 ? selectedFreeIds[selectedFreeIds.length - 1] : null;
-  // 一括削除の確認中フラグ（Undo 未実装のため、複数まとめ削除は1段確認を挟む・#206/#211）。
+  // 一括削除の確認中フラグ（複数まとめ削除は破壊的なので誤操作防止の1段確認を挟む・#206。Undo でも戻せるが確認は維持）。
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   // 選択変更：additive（Shift+クリック）で選択トグル、通常はその要素だけ、null で全解除。選択が変われば一括削除の確認は取り消す。
   const selectFree = (id: string | null, additive = false) => {

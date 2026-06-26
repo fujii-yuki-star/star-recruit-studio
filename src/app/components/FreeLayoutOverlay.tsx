@@ -75,6 +75,11 @@ export function FreeLayoutOverlay({
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // drag の最新値を ref に保持し、ドラッグ中にアンマウントされたら履歴グループを閉じる（深さリーク防止＝以後 Undo が無音で効かなくなるのを防ぐ・#211）。
+  // ref 更新は effect 内（render 中の ref 書き込みは禁止）。閉じる effect は unmount 時のみ＝通常の endDrag と二重に閉じない。
+  const dragRef = useRef<DragState | null>(null);
+  useEffect(() => { dragRef.current = drag; }, [drag]);
+  useEffect(() => () => { if (dragRef.current) onInteractionEnd?.(); }, [onInteractionEnd]);
   // 主＝最後に選択した要素（リサイズハンドルはこれだけに出す。複数同時リサイズは曖昧なので非対応）。
   const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   // 右クリックメニュー（対象 id とビューポート座標）。
