@@ -781,9 +781,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     className="btn btn-ghost btn-icon text-sm"
                     onClick={pasteFreeEl}
                     disabled={!freeClipboard}
-                    title="コピーした配置を貼り付け（別の場面からでも貼れます）"
+                    title={freeClipboard
+                      ? `「${freeKindLabel[freeClipboard.kind]}」を貼り付け（別の場面からでも貼れます）`
+                      : "先に配置を「コピー」すると貼り付けられます"}
                   >
-                    貼り付け
+                    {freeClipboard ? `貼り付け（${freeKindLabel[freeClipboard.kind]}）` : "貼り付け"}
                   </button>
                 </div>
                 <div className="field" style={{ marginBottom: 8 }}>
