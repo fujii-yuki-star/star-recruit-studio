@@ -5,10 +5,12 @@ import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
+import { sceneSegmentSpecs } from '../../domain/project/lineTimeline';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
+import { wavDurationSec } from '../../domain/voice/wavDuration';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvg } from './videoSceneSplit';
 import type { VideoSlotInfo } from './findVideoSlot';
@@ -54,11 +56,12 @@ export interface ExportSceneData {
 }
 
 /**
- * 場面ごとのナレーション音声と解決済み音量(§6)を返すコールバック。
- * narrationVolume は常に返し、audioBase64 が無い（undefined）場面は無音になる。
+ * 場面（掛け合いのときは lineId 行）ごとのナレーション音声と解決済み音量(§6)を返すコールバック。
+ * narrationVolume は常に返し、audioBase64 が無い（undefined）場面/行は無音になる。lineId 省略＝場面の単一 narration。
  */
 export type NarrationFor = (
   scene: Scene,
+  lineId?: string,
 ) => { audioBase64?: string; narrationVolume: number } | undefined;
 
 /** 場面ごとの動画スロット情報を返すコールバック（undefined＝静止画シーン）。 */
@@ -169,18 +172,40 @@ export async function buildExportScenes(
             videoSlot.slotLayerId,
           );
         }
-        // 静止画シーン（従来）。
-        const pngBase64 = await svgToPngDataUrl(
-          layoutToSvg(layout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
-          width,
-          height,
-        );
-        out.push({
-          pngBase64,
-          durationSec: scene.durationSec,
-          audioBase64: narration?.audioBase64,
-          narrationVolume: narration?.narrationVolume,
-        });
+        // 掛け合い（明示 lines・静止画）は行ごとのセグメントに展開（追加A/B・ADR-0015 PR-E）。
+        // 動画スロットありの場面はセグメント化せず1枚（映像経路は ADR-0006・字幕は scene.texts ベース）。
+        const useSegments = !!(scene.lines && scene.lines.length > 0) && !videoSlot;
+        const lineDurations: Record<string, number> = {};
+        if (useSegments) {
+          for (const l of scene.lines!) {
+            const a = narrationFor?.(scene, l.lineId)?.audioBase64;
+            lineDurations[l.lineId] = a ? wavDurationSec(a) : 0;
+          }
+        }
+        const specs = useSegments
+          ? sceneSegmentSpecs(scene, lineDurations)
+          : [{ durationSec: scene.durationSec, isFirst: true }];
+        for (const spec of specs) {
+          // 字幕上書きのあるセグメント（掛け合い）は行字幕で焼き直し、無ければ共有 layout を再利用。
+          const segLayout =
+            'subtitleText' in spec && spec.subtitleText !== undefined
+              ? layoutScene(scene, template, { subtitleText: spec.subtitleText })
+              : layout;
+          const pngBase64 = await svgToPngDataUrl(
+            layoutToSvg(segLayout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
+            width,
+            height,
+          );
+          const segNarration = narrationFor?.(scene, 'lineId' in spec ? spec.lineId : undefined);
+          out.push({
+            pngBase64,
+            durationSec: spec.durationSec,
+            audioBase64: segNarration?.audioBase64,
+            narrationVolume: segNarration?.narrationVolume,
+          });
+          // included は out と 1:1。先頭セグメントは上の included.push(scene) ＝ 2つ目以降のみ push（場面内はハードカット）。
+          if (!spec.isFirst) included.push({ ...scene, transition: undefined });
+        }
       }
     }
     onProgress?.(i + 1, scenes.length);

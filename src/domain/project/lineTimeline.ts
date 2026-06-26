@@ -53,6 +53,33 @@ export function lineSegments(scene: Scene, lineDurations: Record<string, number>
   });
 }
 
+export interface SceneSegmentSpec {
+  /** 掛け合いのとき行 id（音声参照に使う）。単一 narration では undefined。 */
+  lineId?: string;
+  /** subtitle レイヤーの上書き文言（追加A/B）。string＝表示／null＝非表示／undefined＝従来（scene.texts）。 */
+  subtitleText?: string | null;
+  /** このセグメントの尺（秒）。 */
+  durationSec: number;
+  /** 場面の先頭セグメントか（書き出しのトランジションは先頭のみ）。 */
+  isFirst: boolean;
+}
+
+/**
+ * 場面の書き出しセグメント（追加A・PR-E）。明示 lines は行ごと（字幕上書き＋区間尺）、
+ * 単一 narration は1セグメント（字幕は従来 scene.texts・尺は場面尺）＝後方互換。
+ */
+export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, number> = {}): SceneSegmentSpec[] {
+  if (!scene.lines || scene.lines.length === 0) {
+    return [{ durationSec: scene.durationSec, isFirst: true }];
+  }
+  return lineSegments(scene, lineDurations).map((s, i) => ({
+    lineId: s.lineId,
+    subtitleText: s.subtitle.enabled ? s.subtitle.text : null,
+    durationSec: Math.max(0, s.endSec - s.startSec),
+    isFirst: i === 0,
+  }));
+}
+
 /**
  * 時刻 t（秒）に有効な行セグメントの index。区間は [startSec, endSec)（最終行は endSec を含む）。
  * どの区間にも入らない（t が先頭開始より前など）ときは先頭(0)へフォールバック。空なら -1。
