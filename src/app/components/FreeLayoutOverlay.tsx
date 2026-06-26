@@ -109,9 +109,10 @@ export function FreeLayoutOverlay({
       .filter((m): m is FreeElement => m != null)
       .map((m) => ({ id: m.id, x: m.x, y: m.y }));
     // 吸着先＝移動しない他要素の辺・中心。ドラッグ中は他要素が動かないのでここで一度だけ確定する。
-    const otherEdges = freeLayout
-      .filter((m) => !moveTargets.includes(m.id))
-      .map((m) => edgesOf(m));
+    // 吸着は move のときだけ使う（resize では参照しないので計算もしない）。
+    const otherEdges = mode === "move"
+      ? freeLayout.filter((m) => !moveTargets.includes(m.id)).map((m) => edgesOf(m))
+      : [];
     const width = ref.current?.clientWidth ?? canvasW;
     // capture は best-effort（環境により失敗しうる）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
@@ -290,10 +291,10 @@ export function FreeLayoutOverlay({
 
       {/* 吸着ガイド（#205 後半）：他要素の辺/中心にそろった位置へ縦/横の線を出す（ドラッグ中のみ）。 */}
       {guides.x != null && (
-        <div style={{ position: "absolute", left: `${(guides.x / canvasW) * 100}%`, top: 0, bottom: 0, width: 1, background: SNAP_GUIDE_COLOR, pointerEvents: "none", zIndex: 40 }} />
+        <div data-testid="snap-guide-x" style={{ position: "absolute", left: `${(guides.x / canvasW) * 100}%`, top: 0, bottom: 0, width: 1, background: SNAP_GUIDE_COLOR, pointerEvents: "none", zIndex: 40 }} />
       )}
       {guides.y != null && (
-        <div style={{ position: "absolute", top: `${(guides.y / canvasH) * 100}%`, left: 0, right: 0, height: 1, background: SNAP_GUIDE_COLOR, pointerEvents: "none", zIndex: 40 }} />
+        <div data-testid="snap-guide-y" style={{ position: "absolute", top: `${(guides.y / canvasH) * 100}%`, left: 0, right: 0, height: 1, background: SNAP_GUIDE_COLOR, pointerEvents: "none", zIndex: 40 }} />
       )}
 
       {menu && menuEl && (

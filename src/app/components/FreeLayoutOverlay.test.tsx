@@ -115,15 +115,15 @@ describe("FreeLayoutOverlay: 吸着ガイド（#205 後半）", () => {
     const { root, onMoveMany } = renderOverlay({ freeLayout: layout, selectedIds: ["free_002"] });
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
     const box002 = root.children[1] as HTMLElement;
-    expect(root.children).toHaveLength(2); // ドラッグ前はガイドなし（要素2つ）
+    expect(screen.queryByTestId("snap-guide-x")).not.toBeInTheDocument(); // ドラッグ前はガイドなし
     // free_002(left=0) を +96 動かすと left=96。free_001.left=100 に距離4（threshold 6 以内）→ x=100 に吸着。
     fireEvent.pointerDown(box002, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     fireEvent.pointerMove(box002, { clientX: 96, clientY: 5, pointerId: 1 });
     expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "free_002", x: 100, y: 5 }]); // 左辺に吸着
-    expect(root.children).toHaveLength(3); // 縦ガイド線が1本増える
+    expect(screen.getByTestId("snap-guide-x")).toBeInTheDocument(); // 縦ガイド線が現れる
     // ドラッグ終了でガイドは消える。
     fireEvent.pointerUp(box002, { pointerId: 1 });
-    expect(root.children).toHaveLength(2);
+    expect(screen.queryByTestId("snap-guide-x")).not.toBeInTheDocument();
   });
 
   it("どの辺も threshold 外なら吸着せずガイドも出ない", () => {
@@ -138,7 +138,8 @@ describe("FreeLayoutOverlay: 吸着ガイド（#205 後半）", () => {
     // x=40 → left=40/right=120/centerX=80。free_001 の left100/right300/centerX200 のどれにも 6px 以内で当たらない。
     fireEvent.pointerMove(box002, { clientX: 40, clientY: 40, pointerId: 1 });
     expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "free_002", x: 40, y: 40 }]);
-    expect(root.children).toHaveLength(2); // ガイドなし
+    expect(screen.queryByTestId("snap-guide-x")).not.toBeInTheDocument(); // ガイドなし
+    expect(screen.queryByTestId("snap-guide-y")).not.toBeInTheDocument();
   });
 });
 

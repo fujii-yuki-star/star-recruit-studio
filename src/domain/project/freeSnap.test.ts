@@ -55,4 +55,12 @@ describe('snapToTargets', () => {
     const r = snapToTargets({ x: 104, y: 53, w: 80, h: 40 }, [], 6);
     expect(r).toEqual({ x: 104, y: 53, guideX: null, guideY: null });
   });
+
+  it('同距離のタイブレークは先着（left 優先）＝吸着先がちらつかない', () => {
+    // 左端=100 と右端=500 の2つの吸着先。rect.left=96→100(距離4)・rect.right=504→500(距離4)の同距離。
+    const tie = [edgesOf({ x: 100, y: 0, w: 10, h: 10 }), edgesOf({ x: 480, y: 0, w: 20, h: 10 })];
+    const r = snapToTargets({ x: 96, y: 900, w: 408, h: 40 }, tie, 6);
+    expect(r.x).toBe(100); // left を採用（right なら x=92 になる）
+    expect(r.guideX).toBe(100);
+  });
 });

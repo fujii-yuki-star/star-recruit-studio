@@ -57,7 +57,8 @@ function bestSnap(candidates: Candidate[], targets: number[], threshold: number)
   for (const c of candidates) {
     for (const t of targets) {
       const d = Math.abs(c.from - t);
-      if (d <= bestDist) {
+      // 同距離は先着（candidates 順＝left/top 優先）を残す＝より小さい距離だけ採用（< でちらつき防止）。
+      if (d < bestDist) {
         bestDist = d;
         snapped = c.to(t);
         guide = t;
