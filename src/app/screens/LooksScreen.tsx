@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, type LayerType, type SceneCategory } from "../../domain/enums";
@@ -112,42 +112,55 @@ export function LooksScreen() {
   const deleteUserTemplate = useProjectStore((s) => s.deleteUserTemplate);
   const saveUserTemplate = useProjectStore((s) => s.saveUserTemplate);
   const templateError = useProjectStore((s) => s.templateError);
+  const clearTemplateError = useProjectStore((s) => s.clearTemplateError);
   const [selectedId, setSelectedId] = useState(templates[0]?.templateId ?? "");
   const [loadMsg, setLoadMsg] = useState("");
   const [loadOk, setLoadOk] = useState(true);
-  // マイテンプレ（ユーザーテンプレ）の名前編集・削除確認（#214 ③a）。
+  // マイテンプレ（ユーザーテンプレ）の名前編集・削除確認・操作中（連打防止）（#214 ③a）。
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
 
   // 選択が変わったら名前入力をその名前に同期し、削除確認を閉じる（描画中リセット＝effect 内 setState を避ける React 推奨パターン）。
-  const [syncedId, setSyncedId] = useState(current?.templateId);
+  // syncedId は undefined 始まり＝初回描画でも必ず同期する（初期選択がマイテンプレでも名前欄が埋まる）。
+  const [syncedId, setSyncedId] = useState<string | undefined>(undefined);
   if (current && current.templateId !== syncedId) {
     setSyncedId(current.templateId);
     setRenameValue(current.name);
     setConfirmDelete(false);
   }
+  // 選択を変えたら前の操作のエラーは消す（無関係なエラーを別テンプレのパネルに残さない）。
+  useEffect(() => {
+    clearTemplateError();
+  }, [current?.templateId, clearTemplateError]);
 
   const isUserCurrent = current ? isUserTemplate(current.templateId) : false;
 
-  // この見た目を複製してマイテンプレにする（複製後はそれを選択）。
+  // この見た目を複製してマイテンプレにする（複製後はそれを選択）。連打は busy で防ぐ（採番の余分な前進を避ける）。
   async function onDuplicate() {
-    if (!current) return;
-    const newId = await duplicateAsUserTemplate(current.templateId);
-    if (newId) setSelectedId(newId);
+    if (!current || busy) return;
+    setBusy(true);
+    try {
+      const newId = await duplicateAsUserTemplate(current.templateId);
+      if (newId) setSelectedId(newId);
+    } finally {
+      setBusy(false);
+    }
   }
   // マイテンプレの名前を変更して保存。
   async function onRename() {
     if (!current || !isUserCurrent) return;
     await saveUserTemplate({ ...current, name: renameValue.trim() });
   }
-  // マイテンプレを削除し、別の見た目を選択する。
+  // マイテンプレを削除し、別の見た目を選択する。削除が成功したときだけ選択を移す（失敗時は対象が残るので留まる）。
   async function onDelete() {
     if (!current || !isUserCurrent) return;
-    const fallback = templates.find((t) => t.templateId !== current.templateId)?.templateId ?? "";
-    await deleteUserTemplate(current.templateId);
+    const targetId = current.templateId;
+    const fallback = templates.find((t) => t.templateId !== targetId)?.templateId ?? "";
+    const ok = await deleteUserTemplate(targetId);
     setConfirmDelete(false);
-    setSelectedId(fallback);
+    if (ok) setSelectedId(fallback);
   }
 
   // 用意した見た目パターンのファイルを取り込む（検証は templateFs＝§2-2）。件数のみ提示（§2-3）。
@@ -255,7 +268,7 @@ export function LooksScreen() {
             {isUserCurrent ? "マイテンプレ" : "標準（編集するには複製します）"}
           </span>
           <div className="col gap-sm mt">
-            <button className="btn btn-secondary" onClick={() => void onDuplicate()}>
+            <button className="btn btn-secondary" disabled={busy} onClick={() => void onDuplicate()}>
               この見た目を複製してマイテンプレにする
             </button>
             {isUserCurrent && (

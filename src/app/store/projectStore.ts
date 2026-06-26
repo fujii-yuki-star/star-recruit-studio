@@ -135,8 +135,8 @@ interface ProjectState {
   loadUserTemplates: () => Promise<void>;
   /** ユーザーテンプレを保存し一覧へ反映する（新規 id は allocateUserTemplateId で払い出し済み前提）。 */
   saveUserTemplate: (template: Template) => Promise<void>;
-  /** ユーザーテンプレを削除し一覧から外す（参照していたプロジェクトは読込時に §9 補正へ委ねる）。 */
-  deleteUserTemplate: (templateId: string) => Promise<void>;
+  /** ユーザーテンプレを削除し一覧から外す（成功＝true。参照していたプロジェクトは読込時に §9 補正へ委ねる）。 */
+  deleteUserTemplate: (templateId: string) => Promise<boolean>;
   /** 既存テンプレ（同梱/ユーザー）を複製してマイテンプレ（ユーザーテンプレ）として保存し、新 id を返す。 */
   duplicateAsUserTemplate: (sourceTemplateId: string) => Promise<string>;
   /** テンプレ保存/削除の失敗文言（§2-5。成功/次操作で消える）。保存状態とは別物。 */
@@ -694,12 +694,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   deleteUserTemplate: async (templateId) => {
     // ユーザーテンプレ以外（同梱/取り込みパック）はこのアクションで消さない（誤渡し時の同梱消去防止）。
-    if (!isUserTemplate(templateId)) return;
+    if (!isUserTemplate(templateId)) return false;
     try {
       await userTemplateFs.deleteUserTemplate(templateId);
       set((s) => ({ templates: s.templates.filter((t) => t.templateId !== templateId), templateError: null }));
+      return true;
     } catch {
       set({ templateError: "見た目パターンを削除できませんでした。もう一度お試しください。" });
+      return false;
     }
   },
   duplicateAsUserTemplate: async (sourceTemplateId) => {
