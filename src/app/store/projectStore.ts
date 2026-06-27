@@ -135,8 +135,13 @@ interface ProjectState {
   loadUserTemplates: () => Promise<void>;
   /** ユーザーテンプレを保存し一覧へ反映する（新規 id は allocateUserTemplateId で払い出し済み前提）。 */
   saveUserTemplate: (template: Template) => Promise<void>;
-  /** ユーザーテンプレを削除し一覧から外す（参照していたプロジェクトは読込時に §9 補正へ委ねる）。 */
-  deleteUserTemplate: (templateId: string) => Promise<void>;
+  /** ユーザーテンプレを削除し一覧から外す（成功＝true。参照していたプロジェクトは読込時に §9 補正へ委ねる）。 */
+  deleteUserTemplate: (templateId: string) => Promise<boolean>;
+  /** 既存テンプレ（同梱/ユーザー）を複製してマイテンプレ（ユーザーテンプレ）として保存し、新 id を返す。 */
+  duplicateAsUserTemplate: (sourceTemplateId: string) => Promise<string>;
+  /** テンプレ保存/削除の失敗文言（§2-5。成功/次操作で消える）。保存状態とは別物。 */
+  templateError: string | null;
+  clearTemplateError: () => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
@@ -284,6 +289,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   narrationError: null,
   bgmError: null,
   aiError: null,
+  templateError: null,
   generate: async () => {
     // 多重起動ガード：開発時の StrictMode 二重 mount や連打で generate が同時に走ると、片方が失敗・片方が成功して
     // 「成功の前に失敗表示が出る」競合や、並行呼び出しによる API エラーを招く。生成中は1本だけに絞る（isImporting 等と同方針）。
@@ -679,15 +685,37 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ templates: replaceUserTemplates(s.templates, user) }));
   },
   saveUserTemplate: async (template) => {
-    await userTemplateFs.saveUserTemplate(template);
-    set((s) => ({ templates: upsertUserTemplate(s.templates, template) }));
+    try {
+      await userTemplateFs.saveUserTemplate(template);
+      set((s) => ({ templates: upsertUserTemplate(s.templates, template), templateError: null }));
+    } catch {
+      set({ templateError: "見た目パターンを保存できませんでした。もう一度お試しください。" });
+    }
   },
   deleteUserTemplate: async (templateId) => {
     // ユーザーテンプレ以外（同梱/取り込みパック）はこのアクションで消さない（誤渡し時の同梱消去防止）。
-    if (!isUserTemplate(templateId)) return;
-    await userTemplateFs.deleteUserTemplate(templateId);
-    set((s) => ({ templates: s.templates.filter((t) => t.templateId !== templateId) }));
+    if (!isUserTemplate(templateId)) return false;
+    try {
+      await userTemplateFs.deleteUserTemplate(templateId);
+      set((s) => ({ templates: s.templates.filter((t) => t.templateId !== templateId), templateError: null }));
+      return true;
+    } catch {
+      set({ templateError: "見た目パターンを削除できませんでした。もう一度お試しください。" });
+      return false;
+    }
   },
+  duplicateAsUserTemplate: async (sourceTemplateId) => {
+    const s = get();
+    const source = s.templates.find((t) => t.templateId === sourceTemplateId);
+    if (!source) return "";
+    const newId = userTemplateFs.allocateUserTemplateId(s.templates.map((t) => t.templateId));
+    // 同梱/別ユーザーテンプレを複製し、新 id とコピー名で保存（saveUserTemplate が保存＋一覧反映＋エラー処理）。
+    const copy: Template = { ...source, templateId: newId, name: `${source.name}のコピー` };
+    await get().saveUserTemplate(copy);
+    // 保存に失敗していたら id を返さない（呼び出し側で選択しない）。
+    return get().templates.some((t) => t.templateId === newId) ? newId : "";
+  },
+  clearTemplateError: () => set({ templateError: null }),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。
