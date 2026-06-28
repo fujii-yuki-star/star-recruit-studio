@@ -48,5 +48,9 @@ describe('narratorCredit（#177：動的クレジット）', () => {
     it('継承（null）の行は fallback＝場面/動画のクレジットを含める', () => {
       expect(creditForLines([{ speaker: 3 }, { speaker: null }], fallback)).toBe('VOICEVOX:ずんだもん / VOICEVOX:四国めたん');
     });
+
+    it('空配列は fallback を返す（契約の明示・境界値）', () => {
+      expect(creditForLines([], fallback)).toBe(fallback);
+    });
   });
 });
