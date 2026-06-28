@@ -4,7 +4,7 @@ import type { Template } from "../../domain/template/types";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { resolveLineSubtitle } from "../../domain/project/lineTimeline";
-import { creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
@@ -75,12 +75,14 @@ export function ScenePreview({ scene, template, activeLineIndex }: { scene?: Sce
     : undefined;
   const lineSub = activeLine ? resolveLineSubtitle(activeLine, scene) : undefined;
   const layoutOpts = lineSub ? { subtitleText: lineSub.enabled ? lineSub.text : null } : undefined;
+  // 常時クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。
+  const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
   // responsive:true で SVG ルートを 100%（viewBox は canvas 実寸を保持）にし、外枠の実寸は計測結果に従う。
   const svg = layoutToSvg(layoutScene(scene, template, layoutOpts), {
     assetSrc: (id) => (id ? assetSrcById[id] : undefined),
     responsive: true,
-    // プレビューも書き出しと同じく常時クレジットを表示（ADR-0001 パリティ）。選択話者のキャラを動的に（#177）。
-    credit: creditForSpeaker(getVoicevoxSpeaker()),
+    // プレビューも書き出しと同じく常時クレジットを表示（ADR-0001 パリティ）。
+    credit: activeLine ? creditForLine(activeLine, baseCredit) : baseCredit,
     // 場面フォント（scene.fontId）→ 無ければ動画全体（videoSettings.fontId）。書き出しと一致（ADR-0001）。
     fontFamily: fontFamilyForId(resolveFontId(scene.fontId, fontId)),
   });
