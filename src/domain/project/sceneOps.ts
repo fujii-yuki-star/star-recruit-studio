@@ -4,6 +4,7 @@
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
 import { SCENE_MIN_DURATION_SEC } from '../constants';
 import { NARRATION_STATUS } from '../enums';
+import type { Layer } from '../template/types';
 import type { Part, Scene } from './types';
 
 /** 各パートの sceneIds を、現在の scenes 配列順（パート所属は保持）に合わせて作り直す。 */
@@ -12,6 +13,26 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
     ...p,
     sceneIds: scenes.filter((sc) => sc.partId === p.partId).map((sc) => sc.sceneId),
   }));
+}
+
+/**
+ * 場面の見た目パターン（テンプレ）を切り替えた結果を返す＝参照スコープの補正（issue #236 の清算ポリシー）。
+ * - **assetRefs は清算する**：新テンプレに無いスロット（`background`/`slot`/`logo` レイヤーの id）への参照を捨てる
+ *   （11 §5＝`assetRefs` のキー集合 ⊆ テンプレのスロット id 集合。実在しない素材参照＝ダングリングを残さない）。
+ * - **texts / textFontIds は保持する**：これらは固定の `TextKey` enum がキーでテンプレ非依存ゆえダングリングにならず、
+ *   別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と非対称だが**意図的**（#236＝保持を採用）。
+ *   ※ 将来この非対称を「揃える」目的で texts を清算しないこと（利用者の入力消失になる）。
+ */
+export function switchSceneTemplate(scene: Scene, newTemplateId: string, newTemplateLayers: Layer[]): Scene {
+  const slotIds = new Set(
+    newTemplateLayers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id),
+  );
+  return {
+    ...scene,
+    templateId: newTemplateId,
+    assetRefs: Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k))),
+    // texts / textFontIds は保持（上記ポリシー＝#236）。
+  };
 }
 
 /** order を配列順に 1..N で振り直す。 */

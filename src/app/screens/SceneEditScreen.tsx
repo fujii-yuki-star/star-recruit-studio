@@ -9,6 +9,7 @@ import { addFreeElement, applyFreeElementPositions, bringFreeElementToFront, dup
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
+import { switchSceneTemplate } from "../../domain/project/sceneOps";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { lineAudioKey, validateSceneLines } from "../../domain/project/narrationLines";
@@ -786,19 +787,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 value={selected.templateId}
                 onChange={(e) => {
                   const newTemplateId = e.target.value;
-                  const newSlotIds = new Set(
-                    (templates.find((t) => t.templateId === newTemplateId)?.layers ?? [])
-                      .filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo")
-                      .map((l) => l.id),
-                  );
-                  patch((s) => ({
-                    ...s,
-                    templateId: newTemplateId,
-                    // 新テンプレに無いスロットの参照は捨てる（§5：assetRefsのキー ⊆ テンプレのスロットid）。
-                    assetRefs: Object.fromEntries(
-                      Object.entries(s.assetRefs).filter(([k]) => newSlotIds.has(k)),
-                    ),
-                  }));
+                  // 切替時：assetRefs は新テンプレのスロットへ清算／texts・textFontIds は保持（#236・switchSceneTemplate 参照）。
+                  const newLayers = templates.find((t) => t.templateId === newTemplateId)?.layers ?? [];
+                  patch((s) => switchSceneTemplate(s, newTemplateId, newLayers));
                 }}
               >
                 {templates.map((t) => (
