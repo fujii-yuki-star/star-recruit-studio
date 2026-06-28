@@ -151,6 +151,7 @@ src/
 - 縦型動画（9:16・1080×1920）: [`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**（2026-06-19）— α版に対応決定。**9:16のみ**（1:1は将来）・縦テンプレは**全9カテゴリ**・既存は**16:9固定移行＋向き変更（16:9⇆9:16）導線**・尺上限は横型踏襲。コーデックとは独立の別トラック（#118）。
 - コンポーネント/対話テスト基盤: [`adr/0014`](docs/yuko_recruit_docs/adr/0014-component-test-foundation.md) **Accepted**（2026-06-25）— Vitest に jsdom を追加し `@testing-library/react`＋`jest-dom` を導入。**既定 environment は node 維持**・DOM が要る `*.test.tsx` のみファイル先頭 `// @vitest-environment jsdom` で個別切替（既存 node 純粋ロジックテストへ波及なし）。最小構成（happy-dom ではなく jsdom・user-event は当面見送り）。正典/schemaVersion 影響なし。
 - テンプレ作成エディタ（ユーザーテンプレ）: [`adr/0017`](docs/yuko_recruit_docs/adr/0017-template-authoring-editor.md) **Accepted**（2026-06-27・EPIC #214）— 利用者が見た目パターンを**ゼロから作成/複製編集**できるフルエディタ（§10 緩和＝[`adr/0016`](docs/yuko_recruit_docs/adr/0016-detailed-editing-completion-roadmap.md)）。ユーザーテンプレ＝**普通の Template**（`user_tmpl_NNN`・グローバル永続化・`template.schema` 不変＝`11 §2.1`）。①の編集UXを流用、`decor` 非開放、**AI 入力からは既定で除外**。場面のテキスト欄はテンプレのテキスト層から生成（④b）。
+- 場面横断タイムライン／複数トラック（③・**設計のみ**）: [`adr/0018`](docs/yuko_recruit_docs/adr/0018-cross-scene-timeline-model.md) **Proposed**（2026-06-28・α-3 ③／実装は α-4+）— **2モデル方式**：場面ベースを**正準**（AI 生成・場面編集）に維持しつつ、`compileTimeline(project)` で**時間軸＋トラック**へ機械射影し、書き出しと**専用タイムラインUI（別画面）**が共有。時間軸の自由編集は場面アンカーの任意オーバーレイ層に保存し AI/簡易は無視（推奨）。AI は場面のみ・**単一パイプライン維持**（ADR-0007 M-A）、場面は静止のまま（per-frame は④/`adr/0019`）。`§10`「完全自由タイムライン」を将来段階解除。
 
 **未決定（リリース前に確認）**
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。
