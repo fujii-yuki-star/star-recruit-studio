@@ -25,7 +25,7 @@
 | [0016](0016-detailed-editing-completion-roadmap.md) | 詳細編集の完全化（ロードマップ／アンブレラ・α-3〜） | **Proposed** |
 | [0017](0017-template-authoring-editor.md) | テンプレ作成・編集エディタ（ユーザーテンプレート） | **Accepted** |
 | [0018](0018-cross-scene-timeline-model.md) | 場面横断タイムライン／複数トラックのモデル（③・設計のみ） | **Proposed** |
-| 0019 | キーフレーム／場面内アニメ（④・ADR-0001 を supersede・**未作成**） | *Planned*（α-4 着手時に起票） |
+| [0019](0019-keyframe-animation-model.md) | キーフレーム／場面内アニメ（④・設計のみ・ADR-0001 を supersede） | **Proposed** |
 | [0020](0020-undo-redo-model.md) | 取り消し/やり直し（Undo/Redo）モデル | **Accepted** |
 
 ## 状態の意味
