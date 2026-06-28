@@ -131,7 +131,7 @@ export interface Narration {
 
 /**
  * 掛け合い：場面のセリフ列の1行（ADR-0015・#180）。null/未指定 = 場面/動画の既定を継承（11 §6）。
- * intonation は行に持たない（行ごとに変えない設計）＝project 既定（voiceSettings.intonation）を継承する（ADR-0015）。
+ * speed/pitch/intonation は行ごとに上書き可。null/未指定＝場面/動画の既定を継承（#242・schema 1.12）。
  */
 export interface NarrationLine {
   /** line_NNN（scene 内一意・§2.1）。 */
@@ -142,6 +142,8 @@ export interface NarrationLine {
   speaker?: number | null;
   speed?: number | null;
   pitch?: number | null;
+  /** 抑揚（0.0〜2.0）。null/未指定＝場面/動画の既定を継承（#242・schema 1.12）。 */
+  intonation?: number | null;
   /** 画面字幕の文言。未指定＝text を字幕に流用（追加B）。 */
   subtitleText?: string | null;
   /** この行の字幕 ON/OFF。未指定＝場面（subtitleEnabledDefault）→書き出し既定を継承。 */

@@ -8,7 +8,7 @@ import type { Narration, NarrationLine, Scene, Warning } from './types';
 /**
  * 単一 narration を1行（line_001）に写す（後方互換・lines 不在時の実効行）。
  * 旧 narration.voiceId（文字列）は speaker（数値）へ逆変換しない（ADR-0015）＝speaker 未指定＝既定声を継承。
- * narration.intonation は NarrationLine に持たないため写さない（行に固有値を持たせず project 既定 voiceSettings.intonation を継承する設計・ADR-0015）。
+ * speed/pitch/intonation は写す（#242 で NarrationLine に intonation を追加・null=場面/動画の既定を継承）。
  */
 export function lineFromNarration(narration: Narration): NarrationLine {
   return {
@@ -16,6 +16,7 @@ export function lineFromNarration(narration: Narration): NarrationLine {
     text: narration.text,
     speed: narration.speed ?? null,
     pitch: narration.pitch ?? null,
+    intonation: narration.intonation ?? null,
     voicePath: narration.voicePath ?? null,
     status: narration.status,
   };

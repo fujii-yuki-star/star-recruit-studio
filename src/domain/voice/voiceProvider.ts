@@ -47,7 +47,7 @@ export function resolveNarrationVoice(narration: Narration, voice: VoiceSettings
 
 /**
  * 掛け合いの1行の合成入力を解決する（ADR-0015 PR-C2）。base＝resolveNarrationVoice（場面/既定声）。
- * - speed/pitch は 行→base（場面/既定）を継承。intonation は行に持たず base を継承。
+ * - speed/pitch/intonation は 行→base（場面/既定）を継承（#242 で intonation も行ごとに調整可）。
  * - speaker は行に明示があればそれ（app 設定より優先）、無ければ null＝voiceId 経路（app 設定→既定）で解決。
  */
 export function resolveLineVoice(line: NarrationLine, base: ResolvedVoice): SynthesizeInput {
@@ -56,7 +56,7 @@ export function resolveLineVoice(line: NarrationLine, base: ResolvedVoice): Synt
     voiceId: base.voiceId,
     speed: line.speed ?? base.speed,
     pitch: line.pitch ?? base.pitch,
-    intonation: base.intonation,
+    intonation: line.intonation ?? base.intonation,
     // voiceCatalog に無い speaker（破損データ等）は null＝既定声へフォールバック（V19「標準の声を使います」を満たす）。
     speaker: characterForSpeaker(line.speaker) != null ? line.speaker : null,
   };
