@@ -514,12 +514,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const name = newName.trim();
     if (!name) return; // 空名は変更しない（UI 側でも保存を抑止）
     // 保存済み project.json を読み、名前と更新日時だけ差し替えて書き戻す（他のデータは保持）。
+    const updatedAt = new Date().toISOString();
     const doc = JSON.parse(await loadProjectDoc(projectId)) as Record<string, unknown>;
     doc.projectName = name;
-    doc.updatedAt = new Date().toISOString();
+    doc.updatedAt = updatedAt;
     await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
-    // 開いているプロジェクトを改名したなら、画面表示名（meta）も同期する。
-    if (get().meta.projectId === projectId) set((s) => ({ meta: { ...s.meta, projectName: name } }));
+    // 開いているプロジェクトを改名したなら、画面表示名・更新日時（meta）も同期する。
+    if (get().meta.projectId === projectId) set((s) => ({ meta: { ...s.meta, projectName: name, updatedAt } }));
   },
   updateScene: (sceneId, update) => {
     get().pushHistory(); // 適用前を履歴へ（ドラッグ中はグループ化で1ステップに合成・#211）

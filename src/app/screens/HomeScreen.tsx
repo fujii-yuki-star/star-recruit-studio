@@ -73,13 +73,18 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     setRenameError(false);
     try {
       await renameProject(projectId, name);
-      // 名前・更新日・並び順をまとめて最新化（rename は更新日を進めるため再取得が確実）。
-      setProjects(await listProjects());
-      setRenamingId(null);
     } catch {
       setRenameError(true);
+      return; // リネーム自体が失敗したときだけエラー表示（入力欄は残して再試行可能に）。
     } finally {
       setRenameBusy(false);
+    }
+    // リネーム成功。入力欄を閉じ、一覧を最新化する。一覧の再取得失敗はリネーム完了に影響しないのでサイレント。
+    setRenamingId(null);
+    try {
+      setProjects(await listProjects());
+    } catch {
+      /* 一覧の再取得失敗は無視（リネーム自体は済んでいる＝誤った失敗表示・二重実行を防ぐ） */
     }
   }
 
@@ -239,7 +244,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       aria-label="プロジェクト名"
                       autoFocus
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") void saveRename(p.projectId);
+                        // IME 変換確定の Enter では保存しない（日本語入力中の誤確定を防ぐ）。
+                        if (e.key === "Enter" && !e.nativeEvent.isComposing) void saveRename(p.projectId);
                         if (e.key === "Escape") {
                           setRenamingId(null);
                           setRenameError(false);
