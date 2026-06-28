@@ -11,6 +11,7 @@ const narration: Narration = {
   voiceId: null,
   speed: 1.1,
   pitch: 0.2,
+  intonation: 1.4,
   voicePath: 'voices/scene_001.wav',
   status: NARRATION_STATUS.generated,
 };
@@ -24,9 +25,9 @@ function sceneWith(partial: Partial<Scene>): Scene {
 }
 
 describe('lineFromNarration', () => {
-  it('単一 narration を line_001 の1行に写す（text/status/speed/pitch/voicePath を引継ぎ）', () => {
+  it('単一 narration を line_001 の1行に写す（text/status/speed/pitch/intonation/voicePath を引継ぎ・#242）', () => {
     expect(lineFromNarration(narration)).toMatchObject({
-      lineId: 'line_001', text: 'こんにちは', speed: 1.1, pitch: 0.2,
+      lineId: 'line_001', text: 'こんにちは', speed: 1.1, pitch: 0.2, intonation: 1.4,
       voicePath: 'voices/scene_001.wav', status: NARRATION_STATUS.generated,
     });
   });
