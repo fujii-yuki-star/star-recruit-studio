@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
+import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
@@ -18,6 +19,7 @@ import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { FontPicker } from "../components/FontPicker";
+import { textKeyLabel } from "../uiLabels";
 import type { FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ClipDetailControls } from "../components/ClipDetailControls";
@@ -243,6 +245,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     });
   // FREE 場面（自由配置）か。FREE のときだけ自由配置エディタを主編集面として出す（ADR-0008・§2-4）。
   const isFree = template?.category === FREE_CATEGORY;
+  // 非FREE場面のテキスト入力欄は、選択テンプレのテキスト層が使う textKey から生成する（#214 ④b・全5キー対応）。
+  const sceneTextKeys = template ? usedTextKeys(template.layers) : [];
   const freeLayout = selected.freeLayout ?? [];
   // 自由配置 slot に割り当て可能な素材（画像・動画）。
   const freeSlotAssets = assets.filter((a) => a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video);
@@ -737,22 +741,42 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 : "オンにすると、動画素材の細かい調整や画面の切り替えなどを表示します。"}
             </p>
 
-            {/* FREE 場面は文字を「自由配置」で置くため、効かないタイトル欄は出さない（§2-4）。 */}
-            {!isFree && (
-              <div className="field">
-                <label className="field-label" htmlFor="title">タイトル</label>
-                <input
-                  id="title"
-                  className="input"
-                  value={selected.texts.title ?? ""}
-                  onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, title: e.target.value } }))}
-                />
-                <div className="field" style={{ marginTop: 6 }}>
-                  <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>タイトルのフォント</label>
-                  <FontPicker value={selected.textFontIds?.title} onChange={(id) => setSceneTextFont(TEXT_KEY.title, id)} allowInherit />
-                </div>
-              </div>
+            {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
+            {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
+            {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
+            {!isFree && sceneTextKeys.length === 0 && (
+              <p className="field-hint" style={{ marginTop: 0 }}>このテンプレートは文字を表示しません。</p>
             )}
+            {!isFree &&
+              sceneTextKeys.map((key) => {
+                // 見出し・URL は1行、本文・字幕・キャプションは複数行で編集する。
+                const multiline = key !== TEXT_KEY.title && key !== TEXT_KEY.url;
+                return (
+                  <div className="field" key={key}>
+                    <label className="field-label" htmlFor={`text-${key}`}>{textKeyLabel[key]}</label>
+                    {multiline ? (
+                      <textarea
+                        id={`text-${key}`}
+                        className="textarea"
+                        value={selected.texts[key] ?? ""}
+                        onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: e.target.value } }))}
+                        style={{ minHeight: 60 }}
+                      />
+                    ) : (
+                      <input
+                        id={`text-${key}`}
+                        className="input"
+                        value={selected.texts[key] ?? ""}
+                        onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: e.target.value } }))}
+                      />
+                    )}
+                    <div className="field" style={{ marginTop: 6 }}>
+                      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
+                      <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
+                    </div>
+                  </div>
+                );
+              })}
 
             <div className="field">
               <label className="field-label" htmlFor="look">見た目パターン</label>
@@ -1352,23 +1376,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               )}
             </div>
 
-            {/* FREE 場面の字幕も「自由配置」の文字で代替するため出さない（§2-4）。 */}
-            {!isFree && (
-              <div className="field">
-                <label className="field-label" htmlFor="subtitle">字幕</label>
-                <textarea
-                  id="subtitle"
-                  className="textarea"
-                  value={selected.texts.subtitle ?? ""}
-                  onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))}
-                  style={{ minHeight: 60 }}
-                />
-                <div className="field" style={{ marginTop: 6 }}>
-                  <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕のフォント</label>
-                  <FontPicker value={selected.textFontIds?.subtitle} onChange={(id) => setSceneTextFont(TEXT_KEY.subtitle, id)} allowInherit />
-                </div>
-              </div>
-            )}
 
             <div className="field">
               <label className="field-label" htmlFor="duration">表示時間（秒）</label>

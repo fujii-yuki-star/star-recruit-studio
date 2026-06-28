@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Layer } from './types';
-import { addLayer, createLayerId, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from './layerOps';
+import { addLayer, createLayerId, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys } from './layerOps';
 
 const canvas = { width: 1920, height: 1080 };
 
@@ -68,5 +68,29 @@ describe('removeLayer / updateLayer', () => {
     const next = updateLayer(layers, 'a', { x: 100, y: 200, w: 300 });
     expect(next.find((l) => l.id === 'a')).toMatchObject({ id: 'a', type: 'text', x: 100, y: 200, w: 300, h: 10 });
     expect(next.find((l) => l.id === 'b')).toBe(layers[1]); // 対象外は同一参照
+  });
+});
+
+describe('usedTextKeys', () => {
+  const g = (over: Partial<Layer>): Layer => ({ id: 'x', type: 'text', x: 0, y: 0, w: 10, h: 10, ...over });
+
+  it('text 層は textKey 指定のものだけ・正規順（TEXT_KEYS 順）で返す', () => {
+    const layers: Layer[] = [
+      g({ id: '1', type: 'text', textKey: 'caption' }),
+      g({ id: '2', type: 'text', textKey: 'title' }),
+      g({ id: '3', type: 'text' }), // textKey 無し＝束縛しないので含めない
+      g({ id: '4', type: 'shape' }), // 非テキスト層は無関係
+    ];
+    expect(usedTextKeys(layers)).toEqual(['title', 'caption']);
+  });
+
+  it('subtitle 層は textKey 未指定なら subtitle として数える（layoutScene の既定束縛に一致）', () => {
+    expect(usedTextKeys([g({ id: '1', type: 'subtitle' })])).toEqual(['subtitle']);
+    // subtitle 層に別 textKey を持たせればそちら。重複は1つに集約。
+    expect(usedTextKeys([g({ id: '1', type: 'subtitle', textKey: 'main' }), g({ id: '2', type: 'text', textKey: 'main' })])).toEqual(['main']);
+  });
+
+  it('テキスト層が無ければ空', () => {
+    expect(usedTextKeys([g({ id: '1', type: 'slot' }), g({ id: '2', type: 'background' })])).toEqual([]);
   });
 });
