@@ -90,6 +90,8 @@ interface ProjectState {
   listProjects: () => Promise<ProjectSummary[]>;
   /** 保存済みプロジェクトをディスクから完全に削除する（#212）。 */
   deleteProject: (projectId: string) => Promise<void>;
+  /** 保存済みプロジェクトの名前（projectName）を変更して保存する（#241）。 */
+  renameProject: (projectId: string, newName: string) => Promise<void>;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
   /** 末尾パートに新しい空の場面を追加し、その sceneId を返す（既定テンプレ）。テンプレ未読込時は ""。 */
@@ -507,6 +509,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await deleteProjectDoc(projectId);
     // 削除したのが最後に開いたプロジェクトなら、次回起動の自動復元対象から外す（消えたものを開こうとしない）。
     if (getLastProjectId() === projectId) clearLastProjectId();
+  },
+  renameProject: async (projectId, newName) => {
+    const name = newName.trim();
+    if (!name) return; // 空名は変更しない（UI 側でも保存を抑止）
+    // 保存済み project.json を読み、名前と更新日時だけ差し替えて書き戻す（他のデータは保持）。
+    const doc = JSON.parse(await loadProjectDoc(projectId)) as Record<string, unknown>;
+    doc.projectName = name;
+    doc.updatedAt = new Date().toISOString();
+    await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
+    // 開いているプロジェクトを改名したなら、画面表示名（meta）も同期する。
+    if (get().meta.projectId === projectId) set((s) => ({ meta: { ...s.meta, projectName: name } }));
   },
   updateScene: (sceneId, update) => {
     get().pushHistory(); // 適用前を履歴へ（ドラッグ中はグループ化で1ステップに合成・#211）
