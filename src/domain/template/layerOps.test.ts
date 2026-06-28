@@ -46,6 +46,12 @@ describe('addLayer', () => {
     expect(added.x).toBe(Math.round(1920 / 2 - 480 / 2)); // 720
     expect(added.zIndex).toBe(1);
   });
+
+  it('text/subtitle は textKey 既定（見出し/字幕）を持って追加される（描画で空にならない・他型は未設定）', () => {
+    expect(addLayer([], 'text', canvas)[0].textKey).toBe('title');
+    expect(addLayer([], 'subtitle', canvas)[0].textKey).toBe('subtitle');
+    expect(addLayer([], 'shape', canvas)[0].textKey).toBeUndefined();
+  });
 });
 
 describe('removeLayer / updateLayer', () => {
