@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { creditForSpeaker, NARRATOR_CREDIT } from './narratorCredit';
+import { creditForLine, creditForLines, creditForSpeaker, NARRATOR_CREDIT } from './narratorCredit';
 
 describe('narratorCredit（#177：動的クレジット）', () => {
   it('NARRATOR_CREDIT は既定キャラ（ずんだもん）＝後方互換', () => {
@@ -15,5 +15,42 @@ describe('narratorCredit（#177：動的クレジット）', () => {
     expect(creditForSpeaker(99999)).toBe('VOICEVOX:ずんだもん');
     expect(creditForSpeaker(null)).toBe('VOICEVOX:ずんだもん');
     expect(creditForSpeaker(undefined)).toBe('VOICEVOX:ずんだもん');
+  });
+
+  describe('creditForLine（#243：行ごとの動的クレジット）', () => {
+    const fallback = 'VOICEVOX:四国めたん'; // 場面/動画の話者（継承元）のクレジット
+
+    it('行に有効な話者があればそのキャラ', () => {
+      expect(creditForLine({ speaker: 3 }, fallback)).toBe('VOICEVOX:ずんだもん');
+    });
+
+    it('話者 null/未指定（継承）は fallback＝場面/動画のクレジット', () => {
+      expect(creditForLine({ speaker: null }, fallback)).toBe(fallback);
+      expect(creditForLine({}, fallback)).toBe(fallback);
+    });
+
+    it('不明な話者は既定キャラでなく fallback へ（合成 resolveLineVoice と一致＝実音声に合わせる）', () => {
+      expect(creditForLine({ speaker: 99999 }, fallback)).toBe(fallback);
+    });
+  });
+
+  describe('creditForLines（#243：動画+掛け合いの1フレーム併記）', () => {
+    const fallback = 'VOICEVOX:四国めたん';
+
+    it('使用キャラを重複なく「 / 」で併記する', () => {
+      expect(creditForLines([{ speaker: 3 }, { speaker: 2 }], fallback)).toBe('VOICEVOX:ずんだもん / VOICEVOX:四国めたん');
+    });
+
+    it('同一キャラは1つにまとめる', () => {
+      expect(creditForLines([{ speaker: 3 }, { speaker: 3 }], fallback)).toBe('VOICEVOX:ずんだもん');
+    });
+
+    it('継承（null）の行は fallback＝場面/動画のクレジットを含める', () => {
+      expect(creditForLines([{ speaker: 3 }, { speaker: null }], fallback)).toBe('VOICEVOX:ずんだもん / VOICEVOX:四国めたん');
+    });
+
+    it('空配列は fallback を返す（契約の明示・境界値）', () => {
+      expect(creditForLines([], fallback)).toBe(fallback);
+    });
   });
 });
