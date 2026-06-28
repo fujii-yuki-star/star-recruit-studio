@@ -9,6 +9,7 @@ import { useProjectStore } from "../store/projectStore";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
+import { textKeyLabel } from "../uiLabels";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
 
@@ -39,13 +40,7 @@ const layerLabel: Record<LayerType, string> = {
 };
 
 // 型別コントロールのユーザー向けラベル（#214 ④・§2-3）。全値必須＝enum 追加漏れをコンパイルで検知。
-const textKeyLabel: Record<TextKey, string> = {
-  title: "見出し",
-  main: "本文",
-  subtitle: "字幕",
-  caption: "キャプション",
-  url: "URL",
-};
+// textKeyLabel は場面編集（④b）と共有のため uiLabels に集約（§6）。
 const layerShapeLabel: Record<LayerShapeType, string> = {
   rect: "四角",
   ellipse: "丸",
