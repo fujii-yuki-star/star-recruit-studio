@@ -85,7 +85,7 @@ ADR-0016 ②で「利用者が見た目パターン（テンプレ）を作る�
 ## 未解決の論点（実装EPIC #214 で確定）
 
 1. **編集UIの載せ方**：`FreeLayoutOverlay` を `Layer`/`FreeElement` 双方で使える形に一般化するか、テンプレ用アダプタを噛ませるか。
-2. **型別コントロール**：slot/text/subtitle/character/logo の各レイヤー固有設定（textKey の扱い・slotType・defaultPoseTag 等）をエディタでどこまで開くか。
+2. **型別コントロール**：slot/text/subtitle/character/logo の各レイヤー固有設定（textKey の扱い・slotType・defaultPoseTag 等）をエディタでどこまで開くか。**＋レイヤー id と束縛**：新規追加レイヤーは `layer_NNN`（§5 の慣習 id=`background`/`logo` 等と異なる）。描画・場面編集は `scene.assetRefs[layer.id]` のように **`layer.id` で束縛**するため機能はするが、④で slot/background/logo の内容設定 UI を作る際に id の扱い（慣習 id へ寄せるか `layer_NNN` のままか）を明確化する（PR#232 レビュー指摘）。
 3. **検証**：ユーザーテンプレの最小要件（layers≥1・座標が canvas 内・必須レイヤーの整合）。保存時に schema＋意味検証。
 4. **エディタ入口**：新規画面/ルート（同梱テンプレは読み取り専用＝複製のみ編集で確定）。
 5. **保存先パス**：グローバル置き場の OS 別アプリデータ配置と初期化。

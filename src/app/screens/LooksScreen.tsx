@@ -1,9 +1,10 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
-import type { Template } from "../../domain/template/types";
+import type { Layer, Template } from "../../domain/template/types";
 import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, type LayerType, type SceneCategory } from "../../domain/enums";
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
 import { isUserTemplate } from "../../domain/template/userTemplate";
+import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { useProjectStore } from "../store/projectStore";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
@@ -35,6 +36,32 @@ const layerLabel: Record<LayerType, string> = {
   decor: "装飾",
   shape: "図形",
 };
+
+/** テンプレを編集ドラフト用にコピー（レイヤーも個別コピー＝編集が元（store の current）を壊さない）。 */
+function cloneTemplate(t: Template): Template {
+  return { ...t, layers: t.layers.map((l) => ({ ...l })) };
+}
+
+/** レイヤーの座標/サイズ用の小さな数値入力（整数 px。入力途中の NaN/空は無視、min 指定（幅/高さ）は下限クランプ）。 */
+function numField(label: string, value: number, onChange: (v: number) => void, min?: number) {
+  return (
+    <label className="text-sm" style={{ display: "flex", flexDirection: "column", flex: "1 0 40%" }}>
+      {label}
+      <input
+        className="input"
+        type="number"
+        step={1}
+        min={min}
+        value={value}
+        onChange={(e) => {
+          // type=number は入力途中（"" や "-"）でも発火。NaN を描画/保存へ流さない。幅/高さは min 未満にしない。
+          const v = parseInt(e.target.value, 10);
+          if (!Number.isNaN(v)) onChange(min != null ? Math.max(min, v) : v);
+        }}
+      />
+    </label>
+  );
+}
 
 // テンプレの見た目を確認するためのサンプル場面（実素材が無くても配置＋見本テキストで見せる）。
 function buildSampleScene(template: Template, assets: Asset[]): Scene {
@@ -116,18 +143,21 @@ export function LooksScreen() {
   const [selectedId, setSelectedId] = useState(templates[0]?.templateId ?? "");
   const [loadMsg, setLoadMsg] = useState("");
   const [loadOk, setLoadOk] = useState(true);
-  // マイテンプレ（ユーザーテンプレ）の名前編集・削除確認・操作中（連打防止）（#214 ③a）。
-  const [renameValue, setRenameValue] = useState("");
+  // マイテンプレの編集ドラフト（名前＋レイヤー）・選択レイヤー・追加種別・削除確認・操作中（連打防止）（#214 ③a/③b）。
+  const [draft, setDraft] = useState<Template | null>(null);
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const [addType, setAddType] = useState<LayerType>("text");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
 
-  // 選択が変わったら名前入力をその名前に同期し、削除確認を閉じる（描画中リセット＝effect 内 setState を避ける React 推奨パターン）。
-  // syncedId は undefined 始まり＝初回描画でも必ず同期する（初期選択がマイテンプレでも名前欄が埋まる）。
+  // 選択が変わったら編集ドラフトをその内容に同期（マイテンプレのみ・同梱は null=編集不可）。削除確認は閉じる。
+  // syncedId は undefined 始まり＝初回描画でも必ず同期。描画中リセット＝effect 内 setState を避ける React 推奨パターン。
   const [syncedId, setSyncedId] = useState<string | undefined>(undefined);
   if (current && current.templateId !== syncedId) {
     setSyncedId(current.templateId);
-    setRenameValue(current.name);
+    setDraft(isUserTemplate(current.templateId) ? cloneTemplate(current) : null);
+    setSelectedLayerId(null);
     setConfirmDelete(false);
   }
   // 選択を変えたら前の操作のエラーは消す（無関係なエラーを別テンプレのパネルに残さない）。
@@ -136,6 +166,10 @@ export function LooksScreen() {
   }, [current?.templateId, clearTemplateError]);
 
   const isUserCurrent = current ? isUserTemplate(current.templateId) : false;
+  // プレビューは編集中ドラフトを優先＝レイヤー編集が即プレビューに反映される。
+  const previewTemplate = draft ?? current;
+  const dirty = !!(draft && current && JSON.stringify(draft) !== JSON.stringify(current));
+  const selectedLayer = draft?.layers.find((l) => l.id === selectedLayerId) ?? null;
 
   // この見た目を複製してマイテンプレにする（複製後はそれを選択）。連打は busy で防ぐ（採番の余分な前進を避ける）。
   async function onDuplicate() {
@@ -148,10 +182,35 @@ export function LooksScreen() {
       setBusy(false);
     }
   }
-  // マイテンプレの名前を変更して保存。
-  async function onRename() {
-    if (!current || !isUserCurrent) return;
-    await saveUserTemplate({ ...current, name: renameValue.trim() });
+  // 編集ドラフト（名前・レイヤー）を保存する。連打は busy で防ぐ。
+  async function onSave() {
+    if (!draft || !isUserCurrent || busy) return;
+    // 名前は前後空白を除去し、空なら現在名にフォールバック。保存後はドラフトを正規化値で作り直す＝
+    // 成功時は current と一致して未保存表示が消え、失敗時は current（旧）と差があるので未保存のまま残る。
+    const normalized = { ...draft, name: draft.name.trim() || current.name };
+    setBusy(true);
+    try {
+      await saveUserTemplate(normalized);
+    } finally {
+      setBusy(false);
+    }
+    setDraft(cloneTemplate(normalized));
+  }
+  // ドラフトのレイヤー操作（純粋 layerOps＝§4）。追加したレイヤーは選択状態にする。
+  function onAddLayer() {
+    if (!draft) return;
+    const next = addLayer(draft.layers, addType, draft.canvas);
+    setDraft({ ...draft, layers: next });
+    setSelectedLayerId(next[next.length - 1].id);
+  }
+  function onRemoveLayer(id: string) {
+    if (!draft || draft.layers.length <= 1) return; // 最低1枚は残す（schema layers≥1）
+    setDraft({ ...draft, layers: removeLayer(draft.layers, id) });
+    if (selectedLayerId === id) setSelectedLayerId(null);
+  }
+  function onUpdateLayer(id: string, patch: Partial<Omit<Layer, "id" | "type">>) {
+    if (!draft) return;
+    setDraft({ ...draft, layers: updateLayer(draft.layers, id, patch) });
   }
   // マイテンプレを削除し、別の見た目を選択する。削除が成功したときだけ選択を移す（失敗時は対象が残るので留まる）。
   async function onDelete() {
@@ -194,7 +253,7 @@ export function LooksScreen() {
     );
   }
 
-  const sampleScene = buildSampleScene(current, assets);
+  const sampleScene = buildSampleScene(previewTemplate, assets);
 
   return (
     <div className="main-scroll">
@@ -232,7 +291,7 @@ export function LooksScreen() {
         {/* 右: 選択中の見た目のプレビュー＋情報 */}
         <div className="card">
           <h2 className="section-title">見本</h2>
-          <ScenePreview scene={sampleScene} template={current} />
+          <ScenePreview scene={sampleScene} template={previewTemplate} />
           <p className="text-sm text-muted mt">
             {current.category === FREE_CATEGORY
               ? "「自由配置」は素材・文字・図形を好きな位置に置ける見た目です。これは配置例で、場面編集で自由に動かせます。"
@@ -271,21 +330,68 @@ export function LooksScreen() {
             <button className="btn btn-secondary" disabled={busy} onClick={() => void onDuplicate()}>
               この見た目を複製してマイテンプレにする
             </button>
-            {isUserCurrent && (
+            {isUserCurrent && draft && (
               <>
+                {/* 名前 */}
                 <div className="field" style={{ margin: 0 }}>
                   <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
-                  <div className="row gap-sm">
-                    <input className="input" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} />
-                    <button
-                      className="btn btn-secondary"
-                      disabled={!renameValue.trim() || renameValue === current.name}
-                      onClick={() => void onRename()}
-                    >
-                      名前を変更
-                    </button>
+                  <input className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+                </div>
+
+                {/* レイヤー一覧（重ね順・上が手前）＋追加 */}
+                <div className="field" style={{ margin: 0 }}>
+                  <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>レイヤー（上が手前）</label>
+                  <div className="col" style={{ gap: 2 }}>
+                    {[...draft.layers].sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0)).map((l) => (
+                      <div
+                        key={l.id}
+                        className="row-between"
+                        style={{ padding: "2px 6px", borderRadius: 4, background: l.id === selectedLayerId ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)" }}
+                      >
+                        <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={() => setSelectedLayerId(l.id)}>
+                          {layerLabel[l.type]}
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-icon text-sm"
+                          style={{ color: "var(--color-danger)" }}
+                          disabled={draft.layers.length <= 1}
+                          title={draft.layers.length <= 1 ? "最後の1枚は消せません" : "このレイヤーを削除"}
+                          onClick={() => onRemoveLayer(l.id)}
+                        >
+                          削除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="row gap-sm mt">
+                    <select className="select" value={addType} onChange={(e) => setAddType(e.target.value as LayerType)}>
+                      {TEMPLATE_ADDABLE_LAYER_TYPES.map((t) => (<option key={t} value={t}>{layerLabel[t]}</option>))}
+                    </select>
+                    <button className="btn btn-secondary" onClick={onAddLayer}>レイヤーを追加</button>
                   </div>
                 </div>
+
+                {/* 選択レイヤーの位置・サイズ（数値。ドラッグでの調整は ③c で対応）。 */}
+                {selectedLayer && (
+                  <div className="field" style={{ margin: 0 }}>
+                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>「{layerLabel[selectedLayer.type]}」の位置・サイズ</label>
+                    <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+                      {numField("横位置", selectedLayer.x, (v) => onUpdateLayer(selectedLayer.id, { x: v }))}
+                      {numField("縦位置", selectedLayer.y, (v) => onUpdateLayer(selectedLayer.id, { y: v }))}
+                      {numField("幅", selectedLayer.w, (v) => onUpdateLayer(selectedLayer.id, { w: v }), 1)}
+                      {numField("高さ", selectedLayer.h, (v) => onUpdateLayer(selectedLayer.id, { h: v }), 1)}
+                      {numField("重なり順", selectedLayer.zIndex ?? 0, (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 保存 */}
+                <div className="row gap-sm" style={{ alignItems: "center" }}>
+                  <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void onSave()}>変更を保存</button>
+                  {dirty && <span className="text-sm text-muted">未保存の変更があります</span>}
+                </div>
+
+                {/* 削除 */}
                 {confirmDelete ? (
                   <div className="row gap-sm" style={{ alignItems: "center" }}>
                     <span className="text-sm">このマイテンプレを削除しますか？</span>
