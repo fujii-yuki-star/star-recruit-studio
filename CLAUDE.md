@@ -31,7 +31,7 @@
 1. **AIは動画を生成しない。** AIは動画構成JSON（`ai-video-plan`）を返すだけ。映像合成はソフトが行う。
 2. **AI出力は必ず検証してから内部データへ変換する。** 生検証なしに `project.scenes` へ流し込まない（→ `11.8` / `12.8`）。
 3. **通常UIに技術用語を出さない。** `JSON / FFmpeg / LLM / Provider / templateId / assetId / レンダリング / バリデーション` 等は表示禁止。置換語は `06_UI_SPEC.md §3`。
-4. **テンプレート駆動。** 座標・配置はテンプレートが決める。ユーザーに毎回座標を触らせない。
+4. **テンプレート駆動。** 座標・配置はテンプレートが決める。**通常の場面編集ではユーザーに毎回座標を触らせない**。座標を直接編集するのは **FREE（自由配置）場面**と**テンプレート作成エディタ**（見た目パターンの作成・編集＝ADR-0017）に限定する。
 5. **エラーは「原因」でなく「次の行動」を示す。** 例: `Invalid templateId` ❌ →「見た目パターンが見つからないため標準を使います」⭕。エラー・状態の正典は [`15_ERROR_STATE_MODEL.md`](docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md)。
 6. **外部送信は事前確認必須。** 元動画ファイルは送らない（代表フレームのみ）。送信前確認画面を必ず通す。
 7. **数値・enum・IDはハードコードしない。** 正典（`11.3` enum / `11.4` 定数）を単一の参照元とし、定数モジュール経由で使う。
@@ -129,7 +129,9 @@ src/
 
 ## 10. MVPでやらないこと
 
-本格タイムライン編集 / キーフレームアニメ / 3D・Live2D / 複雑エフェクト / テンプレート作成エディタ / 正方形（1:1）動画 / 全Provider対応 / AIによる映像生成 / 口パクアニメ。（`01 §16.2`・`09 §8`）
+本格タイムライン編集 / キーフレームアニメ / 3D・Live2D / 複雑エフェクト / 正方形（1:1）動画 / 全Provider対応 / AIによる映像生成 / 口パクアニメ。（`01 §16.2`・`09 §8`）
+
+> ※ **テンプレート作成エディタ**は当初 MVP 除外だったが、利用者が見た目パターンを作る要件により**対応決定**（[`adr/0016`](docs/yuko_recruit_docs/adr/0016-detailed-editing-completion-roadmap.md)／[`adr/0017`](docs/yuko_recruit_docs/adr/0017-template-authoring-editor.md) **Accepted**・2026-06-27・EPIC #214）＝本項「テンプレート作成エディタ」除外を解除。**ゼロから作成も可（フル）**・ユーザーテンプレは**普通の Template**としてグローバル永続化し、AI/簡易/詳細・描画は既存経路を共有（`decor` レイヤーのみ非開放・AI 入力からは既定で除外）。
 
 > ※ **縦型動画（9:16）**は当初 MVP 除外だったが、ユーザー要件により**対応決定**（[`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**・2026-06-19・#118）＝本項の「縦型」除外を解除。**正方形（1:1）は引き続き MVP 外**（schema 枠のみ残す）。
 
@@ -148,6 +150,7 @@ src/
 - ゆうこ＝自社保有で権利クリア（`17`）／フォントはOFL系を同梱（游ゴシック等は同梱不可。`13 §6`）。
 - 縦型動画（9:16・1080×1920）: [`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**（2026-06-19）— α版に対応決定。**9:16のみ**（1:1は将来）・縦テンプレは**全9カテゴリ**・既存は**16:9固定移行＋向き変更（16:9⇆9:16）導線**・尺上限は横型踏襲。コーデックとは独立の別トラック（#118）。
 - コンポーネント/対話テスト基盤: [`adr/0014`](docs/yuko_recruit_docs/adr/0014-component-test-foundation.md) **Accepted**（2026-06-25）— Vitest に jsdom を追加し `@testing-library/react`＋`jest-dom` を導入。**既定 environment は node 維持**・DOM が要る `*.test.tsx` のみファイル先頭 `// @vitest-environment jsdom` で個別切替（既存 node 純粋ロジックテストへ波及なし）。最小構成（happy-dom ではなく jsdom・user-event は当面見送り）。正典/schemaVersion 影響なし。
+- テンプレ作成エディタ（ユーザーテンプレ）: [`adr/0017`](docs/yuko_recruit_docs/adr/0017-template-authoring-editor.md) **Accepted**（2026-06-27・EPIC #214）— 利用者が見た目パターンを**ゼロから作成/複製編集**できるフルエディタ（§10 緩和＝[`adr/0016`](docs/yuko_recruit_docs/adr/0016-detailed-editing-completion-roadmap.md)）。ユーザーテンプレ＝**普通の Template**（`user_tmpl_NNN`・グローバル永続化・`template.schema` 不変＝`11 §2.1`）。①の編集UXを流用、`decor` 非開放、**AI 入力からは既定で除外**。場面のテキスト欄はテンプレのテキスト層から生成（④b）。
 
 **未決定（リリース前に確認）**
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。

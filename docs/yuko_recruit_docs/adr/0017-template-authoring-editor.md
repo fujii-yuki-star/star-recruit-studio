@@ -13,7 +13,7 @@ ADR-0016 ②で「利用者が見た目パターン（テンプレ）を作る�
 
 ### 現状（調査）
 - **Template**（`template.schema.json` v1.0）＝ `templateId`(`^[a-z0-9_]+$`) / `name` / `category`(10種) / `aspectRatio`(16:9・9:16) / `canvas` / `aiHint` / `defaults` / `layers`(≥1)。
-- **Layer** ＝ `type`(background/slot/text/subtitle/character/logo/shape/decor) ＋ `x/y/w/h/zIndex` ＋ 型別フィールド（textKey/slotType/fit/defaultPoseTag/fillColor 等）。
+- **Layer** ＝ `type`(background/slot/text/subtitle/character/logo/shape/decor) ＋ `x/y/w/h/zIndex` ＋ 型別フィールド（textKey/slotType/fit/defaultPoseTag/fillColor/`shapeType`＝`rect`/`ellipse`/`line` ほか・11 §3.4）。
 - **保存**：テンプレは**同梱＋セッションのみ**（`loadBundledTemplates`／`addTemplatePack`）で**永続化されていない**。
 - **FREE エディタ**（`scene.freeLayout`＋`FreeLayoutOverlay`）が既に**自由配置の編集UX**（選択/ドラッグ/リサイズ/整列/吸着/重ね順/複数選択/Undo＝α-3 ①）を持つ。
 
@@ -90,3 +90,18 @@ ADR-0016 ②で「利用者が見た目パターン（テンプレ）を作る�
 4. **エディタ入口**：新規画面/ルート（同梱テンプレは読み取り専用＝複製のみ編集で確定）。
 5. **保存先パス**：グローバル置き場の OS 別アプリデータ配置と初期化。
 6. **将来**：ユーザーテンプレの `aiHint` を整備して AI 選択も可能にするか（当面は除外）。
+
+---
+
+## 実装で確定（EPIC #214 完了・2026-06-28）
+
+①〜⑤のサブPRで上記の未解決を確定した：
+
+1. **編集UIの載せ方** → **専用オーバーレイ `TemplateLayerOverlay` ＋ ①の純粋 ops 流用**（`moveFreeElement`/`resizeFreeElement`/`snapToTargets`）。`FreeLayoutOverlay`（FREE 専用）は無改変（③c）。
+2. **型別コントロール／レイヤー id 束縛** → 文字/図形/素材/背景/ロゴ等の内容・見た目をエディタで編集可（④a）。場面編集のテキスト欄は**テンプレのテキスト層の `textKey` から生成**（④b・`usedTextKeys`）。**レイヤー id は `layer_NNN` のまま**（慣習 id へ寄せない）＝描画・場面編集は `layer.id` で束縛。新規テキスト層は既定 `textKey`（text→title／subtitle→subtitle）を付与し追加直後から場面テキストに紐づく。図形種別は `LAYER_SHAPE_TYPE`（rect/ellipse/line・FREE 図形と別系統）。
+3. **検証** → 保存時に `template.schema`＋レイヤー≥1 を担保（最小の意味検証）。
+4. **エディタ入口** → 「見た目パターン」画面にドラフト式エディタを内蔵（同梱は読み取り専用＝複製のみ編集）。
+5. **保存先パス** → OS 別アプリデータ下のユーザーテンプレ置き場（Tauri コマンド `save/load/delete_user_template`・`is_safe_template_id` で `^[a-z0-9_]+$` 検証）。
+6. **将来（aiHint で AI 選択）** → 当面**除外のまま**（`buildTemplateSummaries` で `user_tmpl_` を除外）。
+
+> **正典追補＝EPIC #214 サブPR ⑤で実施**（上記「正典の追補（**②実装PR=#214 で実施**・ADR-0016 未解決5）」の計画を反映）：`CLAUDE.md §2-4`（座標編集は FREE／作成エディタに限定）・`§10`（テンプレ作成エディタ除外解除）・`§11`（ADR-0017 を決定済みに追加）・`11 §2.1`（`user_tmpl_NNN` 採番・最大連番+1）・`11 §3.4`（`layer.shapeType`＝`rect`/`ellipse`/`line`・定数 `LAYER_SHAPE_TYPE`）・`06_UI_SPEC §13`（作成・編集画面）・基本項目（テキスト欄はテンプレ由来で可変）。
