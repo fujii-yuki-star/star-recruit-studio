@@ -27,7 +27,7 @@ import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
 import {
-  listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
+  clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
@@ -88,6 +88,8 @@ interface ProjectState {
   loadProject: (projectId: string) => Promise<void>;
   /** 保存済みプロジェクトの要約一覧を返す。 */
   listProjects: () => Promise<ProjectSummary[]>;
+  /** 保存済みプロジェクトをディスクから完全に削除する（#212）。 */
+  deleteProject: (projectId: string) => Promise<void>;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
   /** 末尾パートに新しい空の場面を追加し、その sceneId を返す（既定テンプレ）。テンプレ未読込時は ""。 */
@@ -501,6 +503,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
+  deleteProject: async (projectId) => {
+    await deleteProjectDoc(projectId);
+    // 削除したのが最後に開いたプロジェクトなら、次回起動の自動復元対象から外す（消えたものを開こうとしない）。
+    if (getLastProjectId() === projectId) clearLastProjectId();
+  },
   updateScene: (sceneId, update) => {
     get().pushHistory(); // 適用前を履歴へ（ドラッグ中はグループ化で1ステップに合成・#211）
     set((s) => ({

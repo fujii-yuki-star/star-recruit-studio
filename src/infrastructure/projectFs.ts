@@ -24,6 +24,20 @@ export function setLastProjectId(projectId: string): void {
   if (typeof localStorage !== 'undefined') localStorage.setItem(LAST_PROJECT_KEY, projectId);
 }
 
+/** 次回起動時の自動復元対象を消す（削除したプロジェクトを開こうとしないため＝#212）。 */
+export function clearLastProjectId(): void {
+  if (typeof localStorage !== 'undefined') localStorage.removeItem(LAST_PROJECT_KEY);
+}
+
+/** プロジェクトをディスクから完全に削除する（フォルダごと・#212）。 */
+export async function deleteProjectDoc(projectId: string): Promise<void> {
+  if (isTauri()) {
+    await invoke('delete_project', { projectId });
+    return;
+  }
+  localStorage.removeItem(LS_PREFIX + projectId);
+}
+
 /** project.json を保存し、保存先（パス or キー）を返す。 */
 export async function saveProjectDoc(projectId: string, projectJson: string): Promise<string> {
   if (isTauri()) return invoke<string>('save_project', { projectJson });
