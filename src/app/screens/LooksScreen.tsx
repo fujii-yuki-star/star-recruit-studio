@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
 import type { Layer, Template } from "../../domain/template/types";
-import { ASSET_TYPE, FITS, FONT_WEIGHTS, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPES, TEXT_KEYS, type Fit, type FontWeight, type LayerType, type SceneCategory, type SlotType, type TextKey } from "../../domain/enums";
+import { ASSET_TYPE, FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, FREE_CATEGORY, FREE_SHAPE_TYPE, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, NARRATION_STATUS, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SceneCategory, type SlotType, type TextKey } from "../../domain/enums";
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
@@ -46,10 +46,14 @@ const textKeyLabel: Record<TextKey, string> = {
   caption: "キャプション",
   url: "URL",
 };
-const layerShapeLabel: Record<NonNullable<Layer["shapeType"]>, string> = {
+const layerShapeLabel: Record<LayerShapeType, string> = {
   rect: "四角",
   ellipse: "丸",
   line: "線",
+};
+const fontWeightLabel: Record<FontWeight, string> = {
+  normal: "標準",
+  bold: "太字",
 };
 const slotTypeLabel: Record<SlotType, string> = {
   image_or_video: "写真・動画",
@@ -244,7 +248,7 @@ export function LooksScreen() {
         <>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>表示するテキスト</label>
-            <select className="select" value={l.textKey ?? (l.type === "subtitle" ? "subtitle" : "title")} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
+            <select className="select" value={l.textKey ?? (l.type === "subtitle" ? TEXT_KEY.subtitle : TEXT_KEY.title)} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
               {TEXT_KEYS.map((k) => (<option key={k} value={k}>{textKeyLabel[k]}</option>))}
             </select>
           </div>
@@ -256,8 +260,8 @@ export function LooksScreen() {
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
-              <select className="select" value={l.fontWeight ?? "normal"} onChange={(e) => onUpdateLayer(l.id, { fontWeight: e.target.value as FontWeight })}>
-                {FONT_WEIGHTS.map((w) => (<option key={w} value={w}>{w === "bold" ? "太字" : "標準"}</option>))}
+              <select className="select" value={l.fontWeight ?? FONT_WEIGHT.normal} onChange={(e) => onUpdateLayer(l.id, { fontWeight: e.target.value as FontWeight })}>
+                {FONT_WEIGHTS.map((w) => (<option key={w} value={w}>{fontWeightLabel[w]}</option>))}
               </select>
             </div>
           </div>
@@ -269,8 +273,8 @@ export function LooksScreen() {
         <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
-            <select className="select" value={l.shapeType ?? "rect"} onChange={(e) => onUpdateLayer(l.id, { shapeType: e.target.value as NonNullable<Layer["shapeType"]> })}>
-              {(["rect", "ellipse", "line"] as const).map((s) => (<option key={s} value={s}>{layerShapeLabel[s]}</option>))}
+            <select className="select" value={l.shapeType ?? LAYER_SHAPE_TYPE.rect} onChange={(e) => onUpdateLayer(l.id, { shapeType: e.target.value as LayerShapeType })}>
+              {LAYER_SHAPE_TYPES.map((s) => (<option key={s} value={s}>{layerShapeLabel[s]}</option>))}
             </select>
           </div>
           <div className="field" style={{ margin: 0 }}>
@@ -285,13 +289,13 @@ export function LooksScreen() {
         <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>入れるもの</label>
-            <select className="select" value={l.slotType ?? "image_or_video"} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
+            <select className="select" value={l.slotType ?? SLOT_TYPE.image_or_video} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
               {SLOT_TYPES.map((s) => (<option key={s} value={s}>{slotTypeLabel[s]}</option>))}
             </select>
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
-            <select className="select" value={l.fit ?? "cover"} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
+            <select className="select" value={l.fit ?? FIT.cover} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
               {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
             </select>
           </div>
@@ -310,7 +314,7 @@ export function LooksScreen() {
       return (
         <div className="field" style={{ margin: 0 }}>
           <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
-          <select className="select" value={l.fit ?? "contain"} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
+          <select className="select" value={l.fit ?? FIT.contain} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
             {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
           </select>
         </div>
