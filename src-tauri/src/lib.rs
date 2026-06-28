@@ -112,6 +112,19 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<ProjectSummary>, String> {
     Ok(out)
 }
 
+/// appData/projects/<projectId>/ を丸ごと削除する（プロジェクトの完全削除＝#212）。存在しなくても成功扱い（冪等）。
+#[tauri::command]
+fn delete_project(app: tauri::AppHandle, project_id: String) -> Result<(), String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
+    let dir = projects_dir(&app)?.join(&project_id);
+    if dir.exists() {
+        fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// appData/user_templates ディレクトリ（ユーザー作成テンプレ・全プロジェクト共通＝ADR-0017）。作成は呼び出し側。
 fn user_templates_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -191,6 +204,7 @@ pub fn run() {
             save_project,
             load_project,
             list_projects,
+            delete_project,
             save_user_template,
             load_user_templates,
             delete_user_template,
