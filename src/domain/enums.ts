@@ -59,6 +59,17 @@ export const FREE_SHAPE_TYPE = {
   speech_bubble: 'speech_bubble',
 } as const satisfies Record<string, FreeShapeType>;
 
+/** テンプレ Layer（type='shape'）の図形種別。FREE 図形（FREE_SHAPE_TYPES）とは別系統＝line を含み rounded_rect 等は持たない。template.schema.json 準拠。 */
+export const LAYER_SHAPE_TYPES = ['rect', 'ellipse', 'line'] as const;
+export type LayerShapeType = (typeof LAYER_SHAPE_TYPES)[number];
+
+/** LayerShapeType の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const LAYER_SHAPE_TYPE = {
+  rect: 'rect',
+  ellipse: 'ellipse',
+  line: 'line',
+} as const satisfies Record<string, LayerShapeType>;
+
 export const ASSET_TYPES = [
   'image', 'video', 'bgm', 'voice', 'yuko', 'decor', 'logo', 'qr',
 ] as const;

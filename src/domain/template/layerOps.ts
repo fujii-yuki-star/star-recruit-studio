@@ -1,5 +1,5 @@
 // テンプレ作成エディタのレイヤー操作（ADR-0017・#214 ③b）。Layer[] の追加/削除/更新の純粋関数（§7 テスト対象）。
-import { LAYER_TYPES, type LayerType } from '../enums';
+import { LAYER_TYPES, TEXT_KEY, type LayerType } from '../enums';
 import type { Layer } from './types';
 
 /** エディタで追加できるレイヤー型（ADR-0017：decor は開放しない＝静的装飾は slot/shape で代替）。 */
@@ -20,6 +20,8 @@ export function createLayerId(layers: Layer[]): string {
 export function addLayer(layers: Layer[], type: LayerType, canvas: { width: number; height: number }): Layer[] {
   const id = createLayerId(layers);
   const zIndex = layers.reduce((m, l) => Math.max(m, l.zIndex ?? 0), 0) + 1;
+  // 文字系は textKey 既定を入れて追加直後から場面テキストに紐づく（text→見出し / subtitle→字幕）。未設定だと描画で空になる。
+  const textKey = type === 'text' ? TEXT_KEY.title : type === 'subtitle' ? TEXT_KEY.subtitle : undefined;
   const layer: Layer =
     type === 'background'
       ? { id, type, x: 0, y: 0, w: canvas.width, h: canvas.height, zIndex }
@@ -31,6 +33,7 @@ export function addLayer(layers: Layer[], type: LayerType, canvas: { width: numb
           y: Math.round(canvas.height / 2 - LAYER_DEFAULT_H / 2),
           w: Math.min(LAYER_DEFAULT_W, canvas.width),
           h: Math.min(LAYER_DEFAULT_H, canvas.height),
+          ...(textKey ? { textKey } : {}),
         };
   return [...layers, layer];
 }

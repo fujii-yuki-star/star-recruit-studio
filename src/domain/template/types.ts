@@ -1,5 +1,5 @@
 // 見た目パターン（テンプレート）の型。正典は docs/yuko_recruit_docs/schemas/template.schema.json と 04_TEMPLATE_SPEC.md。
-import type { Fit, LayerType, Orientation, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
+import type { Fit, LayerShapeType, LayerType, Orientation, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
 
 export interface LayerBackground {
   enabled?: boolean;
@@ -28,7 +28,7 @@ export interface Layer {
   defaultPoseTag?: string;
   allowHidden?: boolean;
   assetId?: string;
-  shapeType?: 'rect' | 'ellipse' | 'line';
+  shapeType?: LayerShapeType;
   fillColor?: string;
   opacity?: number;
   radius?: number;

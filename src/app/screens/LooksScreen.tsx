@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
 import type { Layer, Template } from "../../domain/template/types";
-import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, type LayerType, type SceneCategory } from "../../domain/enums";
+import { ASSET_TYPE, FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, FREE_CATEGORY, FREE_SHAPE_TYPE, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, NARRATION_STATUS, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SceneCategory, type SlotType, type TextKey } from "../../domain/enums";
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
@@ -36,6 +36,34 @@ const layerLabel: Record<LayerType, string> = {
   character: "ゆうこ",
   decor: "装飾",
   shape: "図形",
+};
+
+// 型別コントロールのユーザー向けラベル（#214 ④・§2-3）。全値必須＝enum 追加漏れをコンパイルで検知。
+const textKeyLabel: Record<TextKey, string> = {
+  title: "見出し",
+  main: "本文",
+  subtitle: "字幕",
+  caption: "キャプション",
+  url: "URL",
+};
+const layerShapeLabel: Record<LayerShapeType, string> = {
+  rect: "四角",
+  ellipse: "丸",
+  line: "線",
+};
+const fontWeightLabel: Record<FontWeight, string> = {
+  normal: "標準",
+  bold: "太字",
+};
+const slotTypeLabel: Record<SlotType, string> = {
+  image_or_video: "写真・動画",
+  image: "写真",
+  video: "動画",
+};
+const fitLabel: Record<Fit, string> = {
+  cover: "切り取って合わせる",
+  contain: "全体を収める",
+  stretch: "引き伸ばす",
 };
 
 /** テンプレを編集ドラフト用にコピー（レイヤーも個別コピー＝編集が元（store の current）を壊さない）。 */
@@ -213,6 +241,87 @@ export function LooksScreen() {
     if (!draft) return;
     setDraft({ ...draft, layers: updateLayer(draft.layers, id, patch) });
   }
+  // 選択レイヤーの型別コントロール（#214 ④）。onUpdateLayer でドラフトへ反映＝ライブプレビュー。
+  function renderLayerControls(l: Layer) {
+    if (l.type === "text" || l.type === "subtitle") {
+      return (
+        <>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>表示するテキスト</label>
+            <select className="select" value={l.textKey ?? (l.type === "subtitle" ? TEXT_KEY.subtitle : TEXT_KEY.title)} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
+              {TEXT_KEYS.map((k) => (<option key={k} value={k}>{textKeyLabel[k]}</option>))}
+            </select>
+          </div>
+          <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+            {numField("文字の大きさ", l.fontSize ?? 40, (v) => onUpdateLayer(l.id, { fontSize: v }), 1)}
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              <input className="input" type="color" value={l.color ?? "#222222"} onChange={(e) => onUpdateLayer(l.id, { color: e.target.value })} />
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
+              <select className="select" value={l.fontWeight ?? FONT_WEIGHT.normal} onChange={(e) => onUpdateLayer(l.id, { fontWeight: e.target.value as FontWeight })}>
+                {FONT_WEIGHTS.map((w) => (<option key={w} value={w}>{fontWeightLabel[w]}</option>))}
+              </select>
+            </div>
+          </div>
+        </>
+      );
+    }
+    if (l.type === "shape") {
+      return (
+        <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
+            <select className="select" value={l.shapeType ?? LAYER_SHAPE_TYPE.rect} onChange={(e) => onUpdateLayer(l.id, { shapeType: e.target.value as LayerShapeType })}>
+              {LAYER_SHAPE_TYPES.map((s) => (<option key={s} value={s}>{layerShapeLabel[s]}</option>))}
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+            <input className="input" type="color" value={l.fillColor ?? "#cccccc"} onChange={(e) => onUpdateLayer(l.id, { fillColor: e.target.value })} />
+          </div>
+        </div>
+      );
+    }
+    if (l.type === "slot") {
+      return (
+        <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>入れるもの</label>
+            <select className="select" value={l.slotType ?? SLOT_TYPE.image_or_video} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
+              {SLOT_TYPES.map((s) => (<option key={s} value={s}>{slotTypeLabel[s]}</option>))}
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
+            <select className="select" value={l.fit ?? FIT.cover} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
+              {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
+            </select>
+          </div>
+        </div>
+      );
+    }
+    if (l.type === "background") {
+      return (
+        <div className="field" style={{ margin: 0 }}>
+          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</label>
+          <input className="input" type="color" value={l.fillColor ?? "#ffffff"} onChange={(e) => onUpdateLayer(l.id, { fillColor: e.target.value })} />
+        </div>
+      );
+    }
+    if (l.type === "logo" || l.type === "character") {
+      return (
+        <div className="field" style={{ margin: 0 }}>
+          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
+          <select className="select" value={l.fit ?? FIT.contain} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
+            {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
+          </select>
+        </div>
+      );
+    }
+    return null;
+  }
   // マイテンプレを削除し、別の見た目を選択する。削除が成功したときだけ選択を移す（失敗時は対象が残るので留まる）。
   async function onDelete() {
     if (!current || !isUserCurrent) return;
@@ -386,17 +495,21 @@ export function LooksScreen() {
                   </div>
                 </div>
 
-                {/* 選択レイヤーの位置・サイズ（数値。ドラッグでの調整は ③c で対応）。 */}
+                {/* 選択レイヤーの位置・サイズ（数値。プレビュー上のドラッグ＝③c）＋型別の内容・見た目（④）。 */}
                 {selectedLayer && (
-                  <div className="field" style={{ margin: 0 }}>
-                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>「{layerLabel[selectedLayer.type]}」の位置・サイズ</label>
-                    <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
-                      {numField("横位置", selectedLayer.x, (v) => onUpdateLayer(selectedLayer.id, { x: v }))}
-                      {numField("縦位置", selectedLayer.y, (v) => onUpdateLayer(selectedLayer.id, { y: v }))}
-                      {numField("幅", selectedLayer.w, (v) => onUpdateLayer(selectedLayer.id, { w: v }), 1)}
-                      {numField("高さ", selectedLayer.h, (v) => onUpdateLayer(selectedLayer.id, { h: v }), 1)}
-                      {numField("重なり順", selectedLayer.zIndex ?? 0, (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }))}
+                  <div className="col gap-sm">
+                    <div className="field" style={{ margin: 0 }}>
+                      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>「{layerLabel[selectedLayer.type]}」の位置・サイズ</label>
+                      <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+                        {numField("横位置", selectedLayer.x, (v) => onUpdateLayer(selectedLayer.id, { x: v }))}
+                        {numField("縦位置", selectedLayer.y, (v) => onUpdateLayer(selectedLayer.id, { y: v }))}
+                        {numField("幅", selectedLayer.w, (v) => onUpdateLayer(selectedLayer.id, { w: v }), 1)}
+                        {numField("高さ", selectedLayer.h, (v) => onUpdateLayer(selectedLayer.id, { h: v }), 1)}
+                        {numField("重なり順", selectedLayer.zIndex ?? 0, (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }))}
+                      </div>
                     </div>
+                    {/* 型別コントロール（#214 ④）：文字＝内容/大きさ/色/太さ、図形＝形/色、素材＝種類/収め方 等。 */}
+                    {renderLayerControls(selectedLayer)}
                   </div>
                 )}
 
