@@ -34,9 +34,11 @@
 | asset | `asset_{NNN}` または `asset_{slug}_{NNN}` | `asset_office_001` | 一意。`^[a-z0-9_]+$` |
 | yuko asset | `yuko_{tag}_{NNN}` | `yuko_smile_001` | asset の一種（`assetType=yuko`） |
 | bgm asset | `bgm_{slug}_{NNN}` | `bgm_bright_001` | asset の一種（`assetType=bgm`） |
+| user template | `user_tmpl_{NNN}` | `user_tmpl_001` | **ユーザー作成テンプレの `templateId`**。**グローバル一意**（全プロジェクト横断）・3桁（999超は桁上がり）。`^[a-z0-9_]+$` 適合（`template.schema` 不変）。同梱テンプレは記述的id（`corp_title` 等）で名前空間が別＝接頭辞 `user_tmpl_` で判定（ADR-0017） |
 
 - ID は不変。リネーム時も ID は変えず `displayName` を変える。
 - AI出力JSON が参照する `assetId`/`templateId` は**既存のもののみ**有効（存在検証 §8）。
+- **`user_tmpl_NNN` の採番は scene/part と別方針**：scene/part は空き番号を埋める（gap-fill）が、ユーザーテンプレは**最大連番+1**（削除した番号を再利用しない）。別プロジェクトの `scene.templateId` 参照が後発の別テンプレに化けるのを防ぐため＝払い出し済み最大連番を永続層が保持（ADR-0017）。読込時に万一 ID 衝突があれば後勝ち＋ログ警告。
 
 ### 2.2 単位・型の規約
 
