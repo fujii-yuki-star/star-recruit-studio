@@ -13,7 +13,7 @@ ADR-0016 ②で「利用者が見た目パターン（テンプレ）を作る�
 
 ### 現状（調査）
 - **Template**（`template.schema.json` v1.0）＝ `templateId`(`^[a-z0-9_]+$`) / `name` / `category`(10種) / `aspectRatio`(16:9・9:16) / `canvas` / `aiHint` / `defaults` / `layers`(≥1)。
-- **Layer** ＝ `type`(background/slot/text/subtitle/character/logo/shape/decor) ＋ `x/y/w/h/zIndex` ＋ 型別フィールド（textKey/slotType/fit/defaultPoseTag/fillColor 等）。
+- **Layer** ＝ `type`(background/slot/text/subtitle/character/logo/shape/decor) ＋ `x/y/w/h/zIndex` ＋ 型別フィールド（textKey/slotType/fit/defaultPoseTag/fillColor/`shapeType`＝`rect`/`ellipse`/`line` ほか・11 §3.4）。
 - **保存**：テンプレは**同梱＋セッションのみ**（`loadBundledTemplates`／`addTemplatePack`）で**永続化されていない**。
 - **FREE エディタ**（`scene.freeLayout`＋`FreeLayoutOverlay`）が既に**自由配置の編集UX**（選択/ドラッグ/リサイズ/整列/吸着/重ね順/複数選択/Undo＝α-3 ①）を持つ。
 
@@ -104,4 +104,4 @@ ADR-0016 ②で「利用者が見た目パターン（テンプレ）を作る�
 5. **保存先パス** → OS 別アプリデータ下のユーザーテンプレ置き場（Tauri コマンド `save/load/delete_user_template`・`is_safe_template_id` で `^[a-z0-9_]+$` 検証）。
 6. **将来（aiHint で AI 選択）** → 当面**除外のまま**（`buildTemplateSummaries` で `user_tmpl_` を除外）。
 
-> **正典追補（§63-66）＝⑤で実施**：`CLAUDE.md §2-4`（座標編集は FREE／作成エディタに限定）・`§10`（テンプレ作成エディタ除外解除）・`11 §2.1`（`user_tmpl_NNN` 採番・最大連番+1）・`06_UI_SPEC §13`（作成・編集画面）・基本項目（テキスト欄はテンプレ由来で可変）。
+> **正典追補＝EPIC #214 サブPR ⑤で実施**（上記「正典の追補（**②実装PR=#214 で実施**・ADR-0016 未解決5）」の計画を反映）：`CLAUDE.md §2-4`（座標編集は FREE／作成エディタに限定）・`§10`（テンプレ作成エディタ除外解除）・`§11`（ADR-0017 を決定済みに追加）・`11 §2.1`（`user_tmpl_NNN` 採番・最大連番+1）・`11 §3.4`（`layer.shapeType`＝`rect`/`ellipse`/`line`・定数 `LAYER_SHAPE_TYPE`）・`06_UI_SPEC §13`（作成・編集画面）・基本項目（テキスト欄はテンプレ由来で可変）。
