@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { Part, Scene } from './types';
+import type { Layer } from '../template/types';
 import { NARRATION_STATUS } from '../enums';
-import { duplicateSceneInList, moveSceneInList, rebuildPartSceneIds, splitSceneInList } from './sceneOps';
+import { duplicateSceneInList, moveSceneInList, rebuildPartSceneIds, splitSceneInList, switchSceneTemplate } from './sceneOps';
 
 function scene(id: string, order: number, partId = 'part_001', narration?: Scene['narration']): Scene {
   return {
@@ -155,5 +156,47 @@ describe('splitSceneInList', () => {
     const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
     const r = splitSceneInList(scenes, parts, 'scene_001', 5, 'scene_002');
     expect(r.scenes).toHaveLength(1); // 5 < 2*SCENE_MIN_DURATION_SEC(3) ＝ 変化なし
+  });
+});
+
+describe('switchSceneTemplate（見た目パターン切替の清算ポリシー・#236）', () => {
+  const layer = (id: string, type: Layer['type']): Layer => ({ id, type, x: 0, y: 0, w: 100, h: 100 });
+  // 新テンプレのスロット系（background/slot/logo）＋テキスト層。text 層は assetRefs の対象外。
+  const newLayers: Layer[] = [layer('background', 'background'), layer('mainVisual', 'slot'), layer('logo', 'logo'), layer('title', 'text')];
+
+  const richScene = (): Scene => ({
+    ...scene('scene_001', 1),
+    templateId: 'old_tmpl',
+    assetRefs: { background: 'asset_bg_001', mainVisual: 'asset_v_001', logo: 'asset_logo_001', oldSlot: 'asset_x_001' },
+    texts: { title: 'タイトル', main: '本文' },
+    textFontIds: { main: 'gen-interface-jp', title: 'gen-interface-jp-display' },
+    warnings: [{ code: 'SLOT_REQUIRED_EMPTY', message: '旧テンプレ基準の警告', field: 'assetRefs', severity: 'warning' }],
+  });
+
+  it('assetRefs は新テンプレのスロット id（background/slot/logo）だけ残す＝ダングリング清算（§5）', () => {
+    const r = switchSceneTemplate(richScene(), 'new_tmpl', newLayers);
+    expect(r.assetRefs).toEqual({ background: 'asset_bg_001', mainVisual: 'asset_v_001', logo: 'asset_logo_001' });
+    expect(r.assetRefs.oldSlot).toBeUndefined(); // 新テンプレに無いスロット参照は捨てる
+  });
+
+  it('texts / textFontIds は保持する（#236＝固定TextKeyキー・別パターンへ変えて戻すと入力が復元）', () => {
+    const r = switchSceneTemplate(richScene(), 'new_tmpl', newLayers);
+    // 新テンプレが main を使わなくても texts.main / textFontIds.main は残す。
+    expect(r.texts).toEqual({ title: 'タイトル', main: '本文' });
+    expect(r.textFontIds).toEqual({ main: 'gen-interface-jp', title: 'gen-interface-jp-display' });
+  });
+
+  it('templateId を新しい値に更新する', () => {
+    expect(switchSceneTemplate(richScene(), 'new_tmpl', newLayers).templateId).toBe('new_tmpl');
+  });
+
+  it('warnings はクリアする（旧テンプレ基準の検証結果を引き継がない＝duplicate/split と同ポリシー・再検証前提）', () => {
+    expect(switchSceneTemplate(richScene(), 'new_tmpl', newLayers).warnings).toEqual([]);
+  });
+
+  it('テンプレ未発見（layers 空）でも assetRefs は全清算・texts は保持', () => {
+    const r = switchSceneTemplate(richScene(), 'missing', []);
+    expect(r.assetRefs).toEqual({});
+    expect(r.texts).toEqual({ title: 'タイトル', main: '本文' });
   });
 });
