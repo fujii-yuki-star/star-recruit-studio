@@ -170,6 +170,7 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     assetRefs: { background: 'asset_bg_001', mainVisual: 'asset_v_001', logo: 'asset_logo_001', oldSlot: 'asset_x_001' },
     texts: { title: 'タイトル', main: '本文' },
     textFontIds: { main: 'gen-interface-jp', title: 'gen-interface-jp-display' },
+    warnings: [{ code: 'SLOT_REQUIRED_EMPTY', message: '旧テンプレ基準の警告', field: 'assetRefs', severity: 'warning' }],
   });
 
   it('assetRefs は新テンプレのスロット id（background/slot/logo）だけ残す＝ダングリング清算（§5）', () => {
@@ -187,6 +188,10 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
 
   it('templateId を新しい値に更新する', () => {
     expect(switchSceneTemplate(richScene(), 'new_tmpl', newLayers).templateId).toBe('new_tmpl');
+  });
+
+  it('warnings はクリアする（旧テンプレ基準の検証結果を引き継がない＝duplicate/split と同ポリシー・再検証前提）', () => {
+    expect(switchSceneTemplate(richScene(), 'new_tmpl', newLayers).warnings).toEqual([]);
   });
 
   it('テンプレ未発見（layers 空）でも assetRefs は全清算・texts は保持', () => {

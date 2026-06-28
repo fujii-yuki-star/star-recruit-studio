@@ -22,6 +22,8 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
  * - **texts / textFontIds は保持する**：これらは固定の `TextKey` enum がキーでテンプレ非依存ゆえダングリングにならず、
  *   別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と非対称だが**意図的**（#236＝保持を採用）。
  *   ※ 将来この非対称を「揃える」目的で texts を清算しないこと（利用者の入力消失になる）。
+ * - **warnings はクリアする**：旧テンプレ基準の検証結果（例: 必須スロット未設定）は切替で陳腐化するため引き継がない＝
+ *   再検証前提（`duplicateSceneInList`/`splitSceneInList` と同ポリシー）。残すと存在しないスロットの警告などが誤って残る。
  */
 export function switchSceneTemplate(scene: Scene, newTemplateId: string, newTemplateLayers: Layer[]): Scene {
   const slotIds = new Set(
@@ -31,7 +33,8 @@ export function switchSceneTemplate(scene: Scene, newTemplateId: string, newTemp
     ...scene,
     templateId: newTemplateId,
     assetRefs: Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k))),
-    // texts / textFontIds は保持（上記ポリシー＝#236）。
+    // texts / textFontIds は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。
+    warnings: [],
   };
 }
 
