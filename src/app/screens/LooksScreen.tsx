@@ -8,6 +8,7 @@ import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from
 import { useProjectStore } from "../store/projectStore";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
+import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
 
@@ -291,7 +292,21 @@ export function LooksScreen() {
         {/* 右: 選択中の見た目のプレビュー＋情報 */}
         <div className="card">
           <h2 className="section-title">見本</h2>
-          <ScenePreview scene={sampleScene} template={previewTemplate} />
+          {/* マイテンプレ編集中はプレビューにレイヤー操作オーバーレイを重ねる（ドラッグ/リサイズ/吸着・③c）。 */}
+          <div style={{ position: "relative" }}>
+            <ScenePreview scene={sampleScene} template={previewTemplate} />
+            {draft && (
+              <TemplateLayerOverlay
+                layers={draft.layers}
+                canvasW={draft.canvas.width}
+                canvasH={draft.canvas.height}
+                selectedId={selectedLayerId}
+                onSelect={setSelectedLayerId}
+                onChange={(id, g) => onUpdateLayer(id, g)}
+                label={(l) => layerLabel[l.type]}
+              />
+            )}
+          </div>
           <p className="text-sm text-muted mt">
             {current.category === FREE_CATEGORY
               ? "「自由配置」は素材・文字・図形を好きな位置に置ける見た目です。これは配置例で、場面編集で自由に動かせます。"
