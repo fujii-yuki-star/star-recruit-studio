@@ -42,12 +42,23 @@ function cloneTemplate(t: Template): Template {
   return { ...t, layers: t.layers.map((l) => ({ ...l })) };
 }
 
-/** レイヤーの座標/サイズ用の小さな数値入力（幅/高さは min=1。非整数を描画に渡さない＝整数 px）。 */
+/** レイヤーの座標/サイズ用の小さな数値入力（整数 px。入力途中の NaN/空は無視、min 指定（幅/高さ）は下限クランプ）。 */
 function numField(label: string, value: number, onChange: (v: number) => void, min?: number) {
   return (
     <label className="text-sm" style={{ display: "flex", flexDirection: "column", flex: "1 0 40%" }}>
       {label}
-      <input className="input" type="number" step={1} min={min} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <input
+        className="input"
+        type="number"
+        step={1}
+        min={min}
+        value={value}
+        onChange={(e) => {
+          // type=number は入力途中（"" や "-"）でも発火。NaN を描画/保存へ流さない。幅/高さは min 未満にしない。
+          const v = parseInt(e.target.value, 10);
+          if (!Number.isNaN(v)) onChange(min != null ? Math.max(min, v) : v);
+        }}
+      />
     </label>
   );
 }
@@ -171,10 +182,19 @@ export function LooksScreen() {
       setBusy(false);
     }
   }
-  // 編集ドラフト（名前・レイヤー）を保存する。
+  // 編集ドラフト（名前・レイヤー）を保存する。連打は busy で防ぐ。
   async function onSave() {
-    if (!draft || !isUserCurrent) return;
-    await saveUserTemplate({ ...draft, name: draft.name.trim() || current.name });
+    if (!draft || !isUserCurrent || busy) return;
+    // 名前は前後空白を除去し、空なら現在名にフォールバック。保存後はドラフトを正規化値で作り直す＝
+    // 成功時は current と一致して未保存表示が消え、失敗時は current（旧）と差があるので未保存のまま残る。
+    const normalized = { ...draft, name: draft.name.trim() || current.name };
+    setBusy(true);
+    try {
+      await saveUserTemplate(normalized);
+    } finally {
+      setBusy(false);
+    }
+    setDraft(cloneTemplate(normalized));
   }
   // ドラフトのレイヤー操作（純粋 layerOps＝§4）。追加したレイヤーは選択状態にする。
   function onAddLayer() {
@@ -367,7 +387,7 @@ export function LooksScreen() {
 
                 {/* 保存 */}
                 <div className="row gap-sm" style={{ alignItems: "center" }}>
-                  <button className="btn btn-primary" disabled={!dirty} onClick={() => void onSave()}>変更を保存</button>
+                  <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void onSave()}>変更を保存</button>
                   {dirty && <span className="text-sm text-muted">未保存の変更があります</span>}
                 </div>
 

@@ -19,6 +19,14 @@ describe('createLayerId', () => {
     // 記述的 id（bg 等）は無視して layer_NNN だけ見る。
     expect(createLayerId([{ id: 'bg', type: 'background', x: 0, y: 0, w: 10, h: 10 }])).toBe('layer_001');
   });
+
+  it('空き番号を埋める（layer_001 と layer_003 があれば layer_002）', () => {
+    const layers: Layer[] = [
+      { id: 'layer_001', type: 'text', x: 0, y: 0, w: 10, h: 10 },
+      { id: 'layer_003', type: 'shape', x: 0, y: 0, w: 10, h: 10 },
+    ];
+    expect(createLayerId(layers)).toBe('layer_002');
+  });
 });
 
 describe('addLayer', () => {
