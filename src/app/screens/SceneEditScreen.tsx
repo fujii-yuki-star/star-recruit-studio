@@ -743,6 +743,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
             {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
             {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
+            {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
+            {!isFree && sceneTextKeys.length === 0 && (
+              <p className="field-hint" style={{ marginTop: 0 }}>このテンプレートは文字を表示しません。</p>
+            )}
             {!isFree &&
               sceneTextKeys.map((key) => {
                 // 見出し・URL は1行、本文・字幕・キャプションは複数行で編集する。
