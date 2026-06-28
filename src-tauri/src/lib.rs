@@ -119,10 +119,12 @@ fn delete_project(app: tauri::AppHandle, project_id: String) -> Result<(), Strin
         return Err("不正なプロジェクトIDです。".to_string());
     }
     let dir = projects_dir(&app)?.join(&project_id);
-    if dir.exists() {
-        fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    // 冪等：消そうとした瞬間に既に無くても成功扱い（exists→remove の TOCTOU を避け、エラー種別で振り分ける）。
+    match fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
     }
-    Ok(())
 }
 
 /// appData/user_templates ディレクトリ（ユーザー作成テンプレ・全プロジェクト共通＝ADR-0017）。作成は呼び出し側。

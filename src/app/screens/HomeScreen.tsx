@@ -208,7 +208,10 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       <button
                         className="btn btn-ghost btn-icon"
                         disabled={deleteBusy}
-                        onClick={() => setDeletingId(null)}
+                        onClick={() => {
+                          setDeletingId(null);
+                          setDeleteError(false);
+                        }}
                       >
                         やめる
                       </button>
