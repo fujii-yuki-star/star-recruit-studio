@@ -15,6 +15,7 @@ import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { lineAudioKey, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
+import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -79,6 +80,36 @@ function NumberField({ label, value, min, max, step = 1, onChange }: { label: st
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
       />
+    </div>
+  );
+}
+
+// 掛け合いの行ごとの声パラメータ（話す速さ/声の高さ/抑揚）。設定画面と同じ voiceParams スライダーを流用（#242）。
+// value=null/未指定＝場面/動画の既定を継承（スライダーは既定位置を淡色表示）。動かすと固有値、「全体に合わせる」で継承へ戻す。
+function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, onReset }: { label: string; range: ParamRange; value: number | null | undefined; lowLabel: string; highLabel: string; onChange: (v: number) => void; onReset: () => void }) {
+  const isSet = value != null;
+  return (
+    <div className="field" style={{ margin: "8px 0 0" }}>
+      <div className="row-between" style={{ alignItems: "center" }}>
+        <label className="field-label text-sm" style={{ margin: 0 }}>{label}</label>
+        {isSet ? (
+          <button type="button" className="btn btn-ghost text-sm" style={{ padding: "0 6px", height: 22 }} onClick={onReset}>全体に合わせる</button>
+        ) : (
+          <span className="text-faint text-sm">全体に合わせる</span>
+        )}
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={valueToSlider(value ?? range.def, range)}
+        onChange={(e) => onChange(sliderToValue(Number(e.target.value), range))}
+        style={{ width: "100%", accentColor: isSet ? "var(--color-primary)" : "var(--color-border)" }}
+      />
+      <div className="row-between text-faint text-sm">
+        <span>{lowLabel}</span>
+        <span>{highLabel}</span>
+      </div>
     </div>
   );
 }
@@ -1183,6 +1214,24 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             ))}
                           </select>
                         </div>
+                        <details>
+                          <summary className="text-sm text-muted" style={{ cursor: "pointer", padding: "2px 0" }}>声の調整（速さ・高さ・抑揚）</summary>
+                          <LineVoiceParam
+                            label="話す速さ" range={SPEED_RANGE} value={line.speed} lowLabel="ゆっくり" highLabel="はやい"
+                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { speed: v }))}
+                            onReset={() => patch((s) => updateLine(s, line.lineId, { speed: null }))}
+                          />
+                          <LineVoiceParam
+                            label="声の高さ" range={PITCH_RANGE} value={line.pitch} lowLabel="ひくい" highLabel="たかい"
+                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { pitch: v }))}
+                            onReset={() => patch((s) => updateLine(s, line.lineId, { pitch: null }))}
+                          />
+                          <LineVoiceParam
+                            label="抑揚" range={INTONATION_RANGE} value={line.intonation} lowLabel="おだやか" highLabel="ゆたか"
+                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { intonation: v }))}
+                            onReset={() => patch((s) => updateLine(s, line.lineId, { intonation: null }))}
+                          />
+                        </details>
                         <div className="toggle-row">
                           <span className="text-sm text-muted">字幕を表示する</span>
                           <Switch
