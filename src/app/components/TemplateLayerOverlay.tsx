@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Layer } from "../../domain/template/types";
-import { FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
+import { GEOM_MIN_SIZE } from "../../domain/constants";
 
 // テンプレ作成エディタのレイヤーをプレビュー上でドラッグ/リサイズ/吸着するオーバーレイ（ADR-0017・#214 ③c）。
 // ①の FREE オーバーレイ（FreeElement 専用）は無改変のまま、移動/リサイズ/吸着の「純粋関数」（{x,y,w,h} を受ける）を
@@ -50,6 +51,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedId, onS
     e.stopPropagation();
     onSelect(layer.id);
     const width = ref.current?.clientWidth ?? canvasW;
+    // pointer capture は best-effort（一部ブラウザ/環境で setPointerCapture が例外を投げる）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     setDrag({
       id: layer.id, mode, corner,
@@ -76,8 +78,8 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedId, onS
       onChange(drag.id, { x: snap.x, y: snap.y });
       setGuides({ x: snap.guideX, y: snap.guideY });
     } else if (drag.corner) {
-      // リサイズ＝純粋 resizeFreeElement（Shift で縦横比維持）。
-      onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, 0, e.shiftKey));
+      // リサイズ＝純粋 resizeFreeElement（Shift で縦横比維持）。最小サイズは FREE/Layer 共通の GEOM_MIN_SIZE。
+      onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, GEOM_MIN_SIZE, 0, e.shiftKey));
     }
   };
 

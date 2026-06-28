@@ -59,4 +59,14 @@ describe("TemplateLayerOverlay", () => {
     // title start (200,200) + (30,40) = (230,240)。背景全面への吸着は閾値外で発生しない。
     expect(onChange).toHaveBeenLastCalledWith("title", expect.objectContaining({ x: 230, y: 240 }));
   });
+
+  it("角ハンドルをドラッグすると onChange に新しいサイズが渡る（純粋 resizeFreeElement 流用）", () => {
+    const { root, boxes, onChange } = renderOverlay({ selectedId: "title" });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    const seHandle = boxes[1].querySelectorAll("div")[3]; // [nw,ne,sw,se] の se
+    fireEvent.pointerDown(seHandle, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(seHandle, { clientX: 20, clientY: 10, pointerId: 1 });
+    // se を (+20,+10)：左上 (200,200) 固定で w=400+20=420・h=120+10=130。
+    expect(onChange).toHaveBeenLastCalledWith("title", expect.objectContaining({ x: 200, y: 200, w: 420, h: 130 }));
+  });
 });

@@ -1,7 +1,7 @@
 // FREE テンプレ場面の自由配置（scene.freeLayout）への要素の追加・更新・削除（ADR-0008・Phase 4a-3b）。
 // 純粋関数（副作用なし）。store は updateScene 経由でこれらを呼び、結果の配列で freeLayout を差し替える。
 // ID 採番は createFreeElementId（§2.1・scene 内一意）に委譲する。
-import { DEFAULT_FIT } from '../constants';
+import { DEFAULT_FIT, GEOM_MIN_SIZE } from '../constants';
 import { FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../enums';
 import type { FreeElementKind } from '../enums';
 import { createFreeElementId } from './persistence';
@@ -186,8 +186,8 @@ export function moveFreeElementZ(
 
 // ── ドラッグ移動・角リサイズのジオメトリ（Phase 4b）。純粋関数＝§7 テスト対象。 ──
 
-/** ドラッグ/リサイズで潰れないための最小サイズ（canvas px）。schema は w>0/h>0。 */
-export const FREE_MIN_SIZE = 20;
+/** ドラッグ/リサイズで潰れないための最小サイズ（canvas px・schema は w>0/h>0）。テンプレ Layer と共有する GEOM_MIN_SIZE を参照（§2-7）。 */
+export const FREE_MIN_SIZE = GEOM_MIN_SIZE;
 
 /** 吸着グリッドの既定サイズ（canvas px）。「グリッドに合わせる」ON のとき使う。 */
 export const FREE_GRID_SIZE = 20;
