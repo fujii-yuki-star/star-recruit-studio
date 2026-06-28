@@ -92,3 +92,6 @@ export const DEFAULT_CHARACTER_ID = 'yuko';
 
 // スロットの既定フィット（テンプレ・clip 未指定時）。正典(§4)に既定の明記は無く、cover を既定とする（MVP）。
 export const DEFAULT_FIT = 'cover' as const;
+
+// 矩形（FREE 要素／テンプレ Layer）をドラッグ/リサイズで潰さないための最小サイズ（canvas px）。両者で共有する単一の参照元（§2-7）。
+export const GEOM_MIN_SIZE = 20;
