@@ -60,6 +60,22 @@ describe('layoutScene', () => {
     expect(title).toBeDefined();
   });
 
+  it('background/slot/logo は scene.assetRefs 優先・無ければ layer.assetId（テンプレ既定素材）にフォールバック（ADR-0021）', () => {
+    // テンプレの背景レイヤーに既定素材（layer.assetId）を持たせる。
+    const tmpl: Template = {
+      ...openingTemplate,
+      layers: openingTemplate.layers.map((l) => (l.id === 'background' ? { ...l, assetId: 'tmpl_asset_001' } : l)),
+    };
+    // 場面が背景素材を持たない → テンプレ既定（layer.assetId）にフォールバック。
+    const noBg: Scene = { ...scene, assetRefs: { logo: 'asset_logo_001' } };
+    const bg1 = layoutScene(noBg, tmpl).items.find((i): i is ImageItem => i.kind === 'image' && i.role === 'background');
+    expect(bg1?.assetId).toBe('tmpl_asset_001');
+    // 場面が背景素材を持つ → 場面が優先（テンプレ既定を上書き）。
+    const withBg: Scene = { ...scene, assetRefs: { background: 'asset_entrance_001' } };
+    const bg2 = layoutScene(withBg, tmpl).items.find((i): i is ImageItem => i.kind === 'image' && i.role === 'background');
+    expect(bg2?.assetId).toBe('asset_entrance_001');
+  });
+
   it('subtitle レイヤー由来の text は isSubtitle=true、通常の text は false（字幕ON/OFF用）', () => {
     const texts = layoutScene(scene, openingTemplate).items.filter(
       (i): i is TextItem => i.kind === 'text',

@@ -100,7 +100,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
 
     switch (layer.type) {
       case 'background': {
-        const assetId = scene.assetRefs[layer.id] ?? null;
+        const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
           items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'cover', role: 'background', label: '背景' });
         } else {
@@ -109,13 +109,13 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         break;
       }
       case 'slot': {
-        const assetId = scene.assetRefs[layer.id] ?? null;
+        const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         // ラベルは未解決時のプレースホルダ表示に使う。生の layer.id は技術用語漏れ（§2-3）なので日本語に。
         items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'cover', role: 'slot', label: '素材' });
         break;
       }
       case 'logo': {
-        const assetId = scene.assetRefs[layer.id] ?? null;
+        const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
           items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'contain', role: 'logo', label: 'ロゴ' });
         }
