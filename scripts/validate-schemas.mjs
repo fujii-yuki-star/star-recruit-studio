@@ -50,6 +50,7 @@ const tplBase = load(fx('template-pack/opening_yuko_right_v1/template.json'));
 const withLayer0 = (prop) => ({ ...tplBase, layers: tplBase.layers.map((l, i) => (i === 0 ? { ...l, ...prop } : l)) });
 const tplAccept = [
   ['template: 縁取り(strokeColor/strokeWidth)を許容（#275）', withLayer0({ strokeColor: '#ffffff', strokeWidth: 2 })],
+  ['template: strokeWidth=0（縁取りなし・境界）を許容', withLayer0({ strokeColor: '#ffffff', strokeWidth: 0 })],
 ];
 const tplReject = [
   ['template: strokeColor 非hexは拒否', withLayer0({ strokeColor: 'white' })],
