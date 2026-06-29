@@ -67,7 +67,7 @@ export function AboutScreen() {
             <hr className="divider" style={{ margin: "4px 0" }} />
             <div className="row-between">
               <span className="text-muted">バージョン</span>
-              <span>0.2.0</span>
+              <span>0.3.0</span>
             </div>
           </div>
         </div>
