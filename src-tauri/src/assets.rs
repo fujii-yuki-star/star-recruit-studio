@@ -198,6 +198,79 @@ pub fn read_asset_data_url(
     Ok(format!("data:{mime};base64,{b64}"))
 }
 
+/// テンプレ所有素材の保管ディレクトリ <appData>/user_templates/assets（全プロジェクト共通＝ADR-0021）。
+fn template_assets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base.join("user_templates").join("assets"))
+}
+
+/// テンプレ所有素材(data URL or base64)を <appData>/user_templates/assets/<file_name> に保存する。
+/// file_name は <tmpl_asset_NNN>.<ext>（採番は呼び出し側）。sanitize_file_name でパストラバーサル防止。
+#[tauri::command]
+pub fn import_template_asset(
+    app: tauri::AppHandle,
+    file_name: String,
+    data_base64: String,
+) -> Result<(), String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(strip_data_url(&data_base64))
+        .map_err(|_| "素材を読み取れませんでした。もう一度お試しください。".to_string())?;
+    let dir = template_assets_dir(&app)?;
+    fs::create_dir_all(&dir).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+    fs::write(dir.join(sanitize_file_name(&file_name)), &bytes).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+    Ok(())
+}
+
+/// テンプレ所有素材をすべて読み、(assetId, data URL) の配列で返す（assetId = ファイル名の拡張子なし部分）。
+/// 非存在は空。1ファイルの読込失敗で全体を止めない（ログのみ＝load_user_templates と同方針）。
+#[tauri::command]
+pub fn load_template_assets(app: tauri::AppHandle) -> Result<Vec<(String, String)>, String> {
+    let dir = template_assets_dir(&app)?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out: Vec<(String, String)> = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let stem = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        match fs::read(&path) {
+            Ok(bytes) => {
+                let s = path.to_string_lossy();
+                let mime = mime_from_path(&s);
+                let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+                out.push((stem, format!("data:{mime};base64,{b64}")));
+            }
+            Err(e) => eprintln!("[template_assets] 読み込みスキップ {:?}: {}", path, e),
+        }
+    }
+    Ok(out)
+}
+
+/// テンプレ所有素材(<asset_id>.*)を削除する（拡張子は問わず stem 一致を消す・無ければ何もしない）。
+/// テンプレ削除時の掃除に使う（テンプレ素材は登録テンプレ専用＝ADR-0021）。
+#[tauri::command]
+pub fn delete_template_asset(app: tauri::AppHandle, asset_id: String) -> Result<(), String> {
+    let dir = template_assets_dir(&app)?;
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.file_stem().and_then(|s| s.to_str()) == Some(asset_id.as_str()) {
+            let _ = fs::remove_file(&path);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
