@@ -1,0 +1,340 @@
+import { useState } from "react";
+import type { ScreenId } from "../data/mockData";
+import type { Layer, Template } from "../../domain/template/types";
+import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
+import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
+import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
+import { useProjectStore } from "../store/projectStore";
+import { ScenePreview } from "../components/ScenePreview";
+import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
+import { textKeyLabel } from "../uiLabels";
+import { layerLabel, buildSampleScene } from "./looksShared";
+
+// 型別コントロールのユーザー向けラベル（#214 ④・§2-3）。全値必須＝enum 追加漏れをコンパイルで検知。
+const layerShapeLabel: Record<LayerShapeType, string> = { rect: "四角", ellipse: "丸", line: "線" };
+const fontWeightLabel: Record<FontWeight, string> = { normal: "標準", bold: "太字" };
+const slotTypeLabel: Record<SlotType, string> = { image_or_video: "写真・動画", image: "写真", video: "動画" };
+const fitLabel: Record<Fit, string> = { cover: "切り取って合わせる", contain: "全体を収める", stretch: "引き伸ばす" };
+
+/** テンプレを編集ドラフト用にコピー（レイヤーも個別コピー＝編集が元（store の current）を壊さない）。 */
+function cloneTemplate(t: Template): Template {
+  return { ...t, layers: t.layers.map((l) => ({ ...l })) };
+}
+
+/** レイヤーの座標/サイズ用の小さな数値入力（整数 px。入力途中の NaN/空は無視、min 指定（幅/高さ）は下限クランプ）。 */
+function numField(label: string, value: number, onChange: (v: number) => void, min?: number) {
+  return (
+    <label className="text-sm" style={{ display: "flex", flexDirection: "column", flex: "1 0 40%" }}>
+      {label}
+      <input
+        className="input"
+        type="number"
+        step={1}
+        min={min}
+        value={value}
+        onChange={(e) => {
+          const v = parseInt(e.target.value, 10);
+          if (!Number.isNaN(v)) onChange(min != null ? Math.max(min, v) : v);
+        }}
+      />
+    </label>
+  );
+}
+
+// 見た目パターンの作成・編集の専用画面（ADR-0017 当初設計＝新規画面・#271）。
+// 一覧（LooksScreen）から store の editingTemplateId 経由で対象を受け取り、広い画面で編集する。
+// 編集ロジック（ドラフト・layerOps・オーバーレイ・型別コントロール）は #214 のものを流用（移設）。
+export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
+  const templates = useProjectStore((s) => s.templates);
+  const assets = useProjectStore((s) => s.assets);
+  const editingTemplateId = useProjectStore((s) => s.editingTemplateId);
+  const setEditingTemplateId = useProjectStore((s) => s.setEditingTemplateId);
+  const saveUserTemplate = useProjectStore((s) => s.saveUserTemplate);
+  const deleteUserTemplate = useProjectStore((s) => s.deleteUserTemplate);
+  const templateError = useProjectStore((s) => s.templateError);
+
+  const editing = templates.find((t) => t.templateId === editingTemplateId) ?? null;
+  const yukoPoseTags = buildYukoPoseTags(assets);
+
+  const [draft, setDraft] = useState<Template | null>(() => (editing ? cloneTemplate(editing) : null));
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const [addType, setAddType] = useState<LayerType>("text");
+  const [busy, setBusy] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  function backToList() {
+    setEditingTemplateId(null);
+    onNavigate("looks");
+  }
+
+  // 編集対象が無い（直接遷移／削除直後など）＝一覧へ戻す導線だけ出す。
+  if (!editing || !draft) {
+    return (
+      <div className="main-scroll">
+        <div className="notice notice-warn" role="alert">
+          <span>編集する見た目パターンが選ばれていません。一覧から選んでください。</span>
+          <button className="btn btn-primary btn-icon" onClick={backToList}>一覧へ戻る</button>
+        </div>
+      </div>
+    );
+  }
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(editing);
+  const selectedLayer = draft.layers.find((l) => l.id === selectedLayerId) ?? null;
+  const sampleScene = buildSampleScene(draft, assets);
+
+  function onUpdateLayer(id: string, patch: Partial<Omit<Layer, "id" | "type">>) {
+    setDraft((d) => (d ? { ...d, layers: updateLayer(d.layers, id, patch) } : d));
+  }
+  function onAddLayer() {
+    const next = addLayer(draft!.layers, addType, draft!.canvas);
+    setDraft({ ...draft!, layers: next });
+    setSelectedLayerId(next[next.length - 1].id);
+  }
+  function onRemoveLayer(id: string) {
+    if (draft!.layers.length <= 1) return; // 最低1枚は残す（schema layers≥1）
+    setDraft({ ...draft!, layers: removeLayer(draft!.layers, id) });
+    if (selectedLayerId === id) setSelectedLayerId(null);
+  }
+  async function onSave() {
+    if (busy) return;
+    // 名前は前後空白を除去し、空なら元の名前にフォールバック。
+    const normalized = { ...draft!, name: draft!.name.trim() || editing!.name };
+    setBusy(true);
+    try {
+      await saveUserTemplate(normalized);
+    } finally {
+      setBusy(false);
+    }
+    // 保存成功（失敗文言が無い）なら一覧へ戻る。失敗時は templateError が出るので留まる。
+    if (!useProjectStore.getState().templateError) backToList();
+  }
+  async function onDelete() {
+    const ok = await deleteUserTemplate(editing!.templateId);
+    setConfirmDelete(false);
+    if (ok) backToList(); // 削除成功で一覧へ（参照中プロジェクトは §9 補正）。
+  }
+  function onBack() {
+    if (dirty) setConfirmDiscard(true);
+    else backToList();
+  }
+
+  // 型別コントロール（#214 ④）：文字＝内容/大きさ/色/太さ、図形＝形/色、素材＝種類/収め方、立ち絵＝収め方/ポーズ 等。
+  function renderLayerControls(l: Layer) {
+    if (l.type === "text" || l.type === "subtitle") {
+      return (
+        <>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>表示するテキスト</label>
+            <select className="select" value={l.textKey ?? (l.type === "subtitle" ? TEXT_KEY.subtitle : TEXT_KEY.title)} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
+              {TEXT_KEYS.map((k) => (<option key={k} value={k}>{textKeyLabel[k]}</option>))}
+            </select>
+          </div>
+          <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+            {numField("文字の大きさ", l.fontSize ?? 40, (v) => onUpdateLayer(l.id, { fontSize: v }), 1)}
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              <input className="input" type="color" value={l.color ?? "#222222"} onChange={(e) => onUpdateLayer(l.id, { color: e.target.value })} />
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
+              <select className="select" value={l.fontWeight ?? FONT_WEIGHT.normal} onChange={(e) => onUpdateLayer(l.id, { fontWeight: e.target.value as FontWeight })}>
+                {FONT_WEIGHTS.map((w) => (<option key={w} value={w}>{fontWeightLabel[w]}</option>))}
+              </select>
+            </div>
+          </div>
+        </>
+      );
+    }
+    if (l.type === "shape") {
+      return (
+        <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
+            <select className="select" value={l.shapeType ?? LAYER_SHAPE_TYPE.rect} onChange={(e) => onUpdateLayer(l.id, { shapeType: e.target.value as LayerShapeType })}>
+              {LAYER_SHAPE_TYPES.map((s) => (<option key={s} value={s}>{layerShapeLabel[s]}</option>))}
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+            <input className="input" type="color" value={l.fillColor ?? "#cccccc"} onChange={(e) => onUpdateLayer(l.id, { fillColor: e.target.value })} />
+          </div>
+        </div>
+      );
+    }
+    if (l.type === "slot") {
+      return (
+        <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>入れるもの</label>
+            <select className="select" value={l.slotType ?? SLOT_TYPE.image_or_video} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
+              {SLOT_TYPES.map((s) => (<option key={s} value={s}>{slotTypeLabel[s]}</option>))}
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
+            <select className="select" value={l.fit ?? FIT.cover} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
+              {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
+            </select>
+          </div>
+        </div>
+      );
+    }
+    if (l.type === "background") {
+      return (
+        <div className="field" style={{ margin: 0 }}>
+          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</label>
+          <input className="input" type="color" value={l.fillColor ?? "#ffffff"} onChange={(e) => onUpdateLayer(l.id, { fillColor: e.target.value })} />
+        </div>
+      );
+    }
+    if (l.type === "logo" || l.type === "character") {
+      return (
+        <>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
+            <select className="select" value={l.fit ?? FIT.contain} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
+              {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
+            </select>
+          </div>
+          {l.type === "character" && (
+            <div className="field" style={{ margin: "8px 0 0" }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>ポーズ（既定）</label>
+              <select className="select" value={l.defaultPoseTag ?? ""} onChange={(e) => onUpdateLayer(l.id, { defaultPoseTag: e.target.value || undefined })}>
+                <option value="">指定なし（場面で選ぶ）</option>
+                {yukoPoseTags.map((t) => (<option key={t} value={t}>{t}</option>))}
+              </select>
+              {yukoPoseTags.length === 0 && (
+                <p className="field-hint" style={{ marginTop: 2 }}>選べるポーズは、素材に追加したゆうこ画像から増えます。</p>
+              )}
+            </div>
+          )}
+        </>
+      );
+    }
+    return null;
+  }
+
+  return (
+    <div className="main-scroll">
+      {/* ヘッダ：戻る・タイトル・保存 */}
+      <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
+        <button className="btn btn-ghost btn-icon" onClick={onBack}>← 一覧へ戻る</button>
+        <div className="row gap-sm" style={{ alignItems: "center" }}>
+          {dirty && <span className="text-sm text-muted">未保存の変更があります</span>}
+          <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void onSave()}>
+            {busy ? "保存中…" : "変更を保存"}
+          </button>
+        </div>
+      </div>
+
+      {confirmDiscard && (
+        <div className="notice notice-warn mb" role="alert">
+          <span>編集中の変更を保存せずに一覧へ戻りますか？</span>
+          <div className="row gap-sm">
+            <button className="btn btn-primary btn-icon" onClick={backToList}>戻る（破棄）</button>
+            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDiscard(false)}>編集を続ける</button>
+          </div>
+        </div>
+      )}
+      {templateError && (
+        <div className="notice notice-warn mb" role="alert"><span>{templateError}</span></div>
+      )}
+
+      {/* 本体：左＝キャンバス（広く）／右＝編集パネル */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "var(--gap-lg)", alignItems: "start" }}>
+        {/* 左：プレビュー＋レイヤー操作オーバーレイ（ドラッグ/リサイズ/吸着・③c） */}
+        <div className="card">
+          <h2 className="section-title">プレビュー</h2>
+          <div style={{ position: "relative" }}>
+            <ScenePreview scene={sampleScene} template={draft} />
+            <TemplateLayerOverlay
+              layers={draft.layers}
+              canvasW={draft.canvas.width}
+              canvasH={draft.canvas.height}
+              selectedId={selectedLayerId}
+              onSelect={setSelectedLayerId}
+              onChange={(id, g) => onUpdateLayer(id, g)}
+              label={(l) => layerLabel[l.type]}
+            />
+          </div>
+          <p className="text-sm text-muted mt">プレビュー上で要素をドラッグ・拡大縮小できます（写真・文字は例として表示）。</p>
+        </div>
+
+        {/* 右：編集パネル */}
+        <div className="card col gap-sm">
+          {/* 名前 */}
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
+            <input className="input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          </div>
+
+          {/* レイヤー一覧（重ね順・上が手前）＋追加 */}
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>レイヤー（上が手前）</label>
+            <div className="col" style={{ gap: 2 }}>
+              {[...draft.layers].sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0)).map((l) => (
+                <div
+                  key={l.id}
+                  className="row-between"
+                  style={{ padding: "2px 6px", borderRadius: 4, background: l.id === selectedLayerId ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)" }}
+                >
+                  <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={() => setSelectedLayerId(l.id)}>
+                    {layerLabel[l.type]}
+                  </button>
+                  <button
+                    className="btn btn-ghost btn-icon text-sm"
+                    style={{ color: "var(--color-danger)" }}
+                    disabled={draft.layers.length <= 1}
+                    title={draft.layers.length <= 1 ? "最後の1枚は消せません" : "このレイヤーを削除"}
+                    onClick={() => onRemoveLayer(l.id)}
+                  >
+                    削除
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="row gap-sm mt">
+              <select className="select" value={addType} onChange={(e) => setAddType(e.target.value as LayerType)}>
+                {TEMPLATE_ADDABLE_LAYER_TYPES.map((t) => (<option key={t} value={t}>{layerLabel[t]}</option>))}
+              </select>
+              <button className="btn btn-secondary" onClick={onAddLayer}>レイヤーを追加</button>
+            </div>
+          </div>
+
+          {/* 選択レイヤーの位置・サイズ（数値）＋型別の内容・見た目 */}
+          {selectedLayer && (
+            <div className="col gap-sm">
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>「{layerLabel[selectedLayer.type]}」の位置・サイズ</label>
+                <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+                  {numField("横位置", selectedLayer.x, (v) => onUpdateLayer(selectedLayer.id, { x: v }))}
+                  {numField("縦位置", selectedLayer.y, (v) => onUpdateLayer(selectedLayer.id, { y: v }))}
+                  {numField("幅", selectedLayer.w, (v) => onUpdateLayer(selectedLayer.id, { w: v }), 1)}
+                  {numField("高さ", selectedLayer.h, (v) => onUpdateLayer(selectedLayer.id, { h: v }), 1)}
+                  {numField("重なり順", selectedLayer.zIndex ?? 0, (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }))}
+                </div>
+              </div>
+              {renderLayerControls(selectedLayer)}
+            </div>
+          )}
+
+          {/* 削除 */}
+          <hr className="divider" />
+          {confirmDelete ? (
+            <div className="row gap-sm" style={{ alignItems: "center" }}>
+              <span className="text-sm">このマイテンプレを削除しますか？</span>
+              <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
+              <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
+            </div>
+          ) : (
+            <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} onClick={() => setConfirmDelete(true)}>
+              このマイテンプレを削除
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

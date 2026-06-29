@@ -146,6 +146,9 @@ interface ProjectState {
   /** テンプレ保存/削除の失敗文言（§2-5。成功/次操作で消える）。保存状態とは別物。 */
   templateError: string | null;
   clearTemplateError: () => void;
+  /** 専用の見た目パターン編集画面で編集中のテンプレ id（#271。param 無しの画面遷移で「どれを編集するか」を渡す）。 */
+  editingTemplateId: string | null;
+  setEditingTemplateId: (templateId: string | null) => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
@@ -294,6 +297,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   bgmError: null,
   aiError: null,
   templateError: null,
+  editingTemplateId: null,
   generate: async () => {
     // 多重起動ガード：開発時の StrictMode 二重 mount や連打で generate が同時に走ると、片方が失敗・片方が成功して
     // 「成功の前に失敗表示が出る」競合や、並行呼び出しによる API エラーを招く。生成中は1本だけに絞る（isImporting 等と同方針）。
@@ -737,6 +741,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return get().templates.some((t) => t.templateId === newId) ? newId : "";
   },
   clearTemplateError: () => set({ templateError: null }),
+  setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。

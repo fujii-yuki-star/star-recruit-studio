@@ -16,6 +16,7 @@ import { PreviewScreen } from "./app/screens/PreviewScreen";
 import { PrecheckScreen } from "./app/screens/PrecheckScreen";
 import { ExportScreen } from "./app/screens/ExportScreen";
 import { LooksScreen } from "./app/screens/LooksScreen";
+import { LooksEditScreen } from "./app/screens/LooksEditScreen";
 import { MaterialsScreen } from "./app/screens/MaterialsScreen";
 import { SettingsScreen } from "./app/screens/SettingsScreen";
 import { AboutScreen } from "./app/screens/AboutScreen";
@@ -31,6 +32,7 @@ const titles: Record<ScreenId, string> = {
   precheck: "公開前チェック",
   export: "動画を書き出す",
   looks: "見た目パターンを管理",
+  "looks-edit": "見た目パターンを編集",
   materials: "素材を管理",
   settings: "設定",
   about: "このアプリについて",
@@ -89,7 +91,9 @@ function App() {
       case "export":
         return <ExportScreen onNavigate={setScreen} />;
       case "looks":
-        return <LooksScreen />;
+        return <LooksScreen onNavigate={setScreen} />;
+      case "looks-edit":
+        return <LooksEditScreen onNavigate={setScreen} />;
       case "materials":
         return <MaterialsScreen />;
       case "settings":

@@ -100,7 +100,7 @@ ADR-0016 ②で「利用者が見た目パターン（テンプレ）を作る�
 1. **編集UIの載せ方** → **専用オーバーレイ `TemplateLayerOverlay` ＋ ①の純粋 ops 流用**（`moveFreeElement`/`resizeFreeElement`/`snapToTargets`）。`FreeLayoutOverlay`（FREE 専用）は無改変（③c）。
 2. **型別コントロール／レイヤー id 束縛** → 文字/図形/素材/背景/ロゴ等の内容・見た目をエディタで編集可（④a）。場面編集のテキスト欄は**テンプレのテキスト層の `textKey` から生成**（④b・`usedTextKeys`）。**レイヤー id は `layer_NNN` のまま**（慣習 id へ寄せない）＝描画・場面編集は `layer.id` で束縛。新規テキスト層は既定 `textKey`（text→title／subtitle→subtitle）を付与し追加直後から場面テキストに紐づく。図形種別は `LAYER_SHAPE_TYPE`（rect/ellipse/line・FREE 図形と別系統）。
 3. **検証** → 保存時に `template.schema`＋レイヤー≥1 を担保（最小の意味検証）。
-4. **エディタ入口** → 「見た目パターン」画面にドラフト式エディタを内蔵（同梱は読み取り専用＝複製のみ編集）。
+4. **エディタ入口** → **当初は**「見た目パターン」画面にドラフト式エディタを内蔵（#214）。**#271 で専用の編集画面（`LooksEditScreen`・ScreenId `looks-edit`）へ分離**＝未解決4の「新規画面/ルート」設計に復帰（一覧画面は閲覧・複製/編集への遷移・削除に専念し、編集ロジックは持たない）。同梱は読み取り専用＝複製のみ編集。
 5. **保存先パス** → OS 別アプリデータ下のユーザーテンプレ置き場（Tauri コマンド `save/load/delete_user_template`・`is_safe_template_id` で `^[a-z0-9_]+$` 検証）。
 6. **将来（aiHint で AI 選択）** → 当面**除外のまま**（`buildTemplateSummaries` で `user_tmpl_` を除外）。
 
