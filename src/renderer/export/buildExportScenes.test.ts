@@ -299,4 +299,22 @@ describe('buildExportScenes：場面で使う画像IDの収集（#143）', () =>
     expect(resolve).toHaveBeenCalledWith('img2');
     expect(resolve).toHaveBeenCalledTimes(2); // 重複排除＋null/非画像除外で2回のみ
   });
+
+  it('テンプレ既定素材（tmpl_asset_*）も画像として収集し resolveAssetSrc に渡す（プロジェクト素材と混在可・ADR-0021 書き出し）', async () => {
+    // 描画フォールバック（PR A）で layer.assetId（tmpl_asset_*）が layout 画像に乗る。書き出しでも解決対象に含める。
+    vi.mocked(layoutScene).mockReturnValueOnce({
+      items: [
+        { kind: 'image', assetId: 'asset_001' }, // プロジェクト素材
+        { kind: 'image', assetId: 'tmpl_asset_001' }, // テンプレ既定素材
+      ],
+    } as unknown as SceneLayout);
+    const resolve = vi.fn(async () => 'data:image/png;base64,X');
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      resolve,
+    );
+    expect(resolve).toHaveBeenCalledWith('asset_001');
+    expect(resolve).toHaveBeenCalledWith('tmpl_asset_001'); // テンプレ素材も書き出しの解決対象に渡る
+  });
 });
