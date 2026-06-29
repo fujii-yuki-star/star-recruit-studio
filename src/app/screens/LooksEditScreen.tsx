@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
+import { isUserTemplate } from "../../domain/template/userTemplate";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
@@ -213,14 +214,23 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         </>
       );
     }
+    // 装飾（decor）はテンプレからは内容非開放（ADR-0017）。選択時にパネルが空にならないよう理由を示す（位置・大きさは上の数値で調整可）。
+    if (l.type === "decor") {
+      return (
+        <p className="field-hint" style={{ margin: 0 }}>装飾の見た目はここでは変更できません（位置・大きさは調整できます）。</p>
+      );
+    }
     return null;
   }
 
   return (
     <div className="main-scroll">
-      {/* ヘッダ：戻る・タイトル・保存 */}
+      {/* ヘッダ：戻る・タイトル・保存（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ） */}
       <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
-        <button className="btn btn-ghost btn-icon" onClick={onBack}>← 一覧へ戻る</button>
+        <div className="row gap-sm" style={{ alignItems: "center" }}>
+          <button className="btn btn-ghost btn-icon" onClick={onBack}>← 一覧へ戻る</button>
+          <span className="topbar-title">見た目パターンを編集</span>
+        </div>
         <div className="row gap-sm" style={{ alignItems: "center" }}>
           {dirty && <span className="text-sm text-muted">未保存の変更があります</span>}
           <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void onSave()}>
@@ -320,18 +330,22 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             </div>
           )}
 
-          {/* 削除 */}
-          <hr className="divider" />
-          {confirmDelete ? (
-            <div className="row gap-sm" style={{ alignItems: "center" }}>
-              <span className="text-sm">このマイテンプレを削除しますか？</span>
-              <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
-              <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
-            </div>
-          ) : (
-            <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} onClick={() => setConfirmDelete(true)}>
-              このマイテンプレを削除
-            </button>
+          {/* 削除（マイテンプレのみ。同梱テンプレ ID では store の削除がガードされ静かに失敗するため、ボタン自体を出さない＝§2-5） */}
+          {isUserTemplate(editing.templateId) && (
+            <>
+              <hr className="divider" />
+              {confirmDelete ? (
+                <div className="row gap-sm" style={{ alignItems: "center" }}>
+                  <span className="text-sm">このマイテンプレを削除しますか？</span>
+                  <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
+                  <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
+                </div>
+              ) : (
+                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} onClick={() => setConfirmDelete(true)}>
+                  このマイテンプレを削除
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
