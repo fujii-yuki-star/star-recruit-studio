@@ -192,6 +192,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id],
     );
   };
+  // 範囲選択（マーキー・#274）：交差した要素集合をまとめて選択にする。
+  const selectFreeMany = (ids: string[]) => {
+    setConfirmBulkDelete(false);
+    setSelectedFreeIds(ids);
+  };
   // FREE 要素のコピー&ペースト用クリップボード。SceneEditScreen は場面切替で再マウントしないため場面をまたいで貼れる（#207）。
   const [freeClipboard, setFreeClipboard] = useState<FreeElement | null>(null);
   // 右クリック「編集」で開く kind 別エディタのポップオーバー（対象 id とビューポート座標）。
@@ -665,6 +670,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     canvasH={template.canvas.height}
                     selectedIds={selectedFreeIds}
                     onSelect={selectFree}
+                    onSelectMany={selectFreeMany}
                     onChange={(id, g) => patchFreeEl(id, g)}
                     onMoveMany={moveFreeMany}
                     gridSize={gridSnap ? FREE_GRID_SIZE : 0}

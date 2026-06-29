@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
-import { FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { freeElementsInRect, FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
@@ -48,6 +48,8 @@ interface OverlayProps {
   selectedIds: string[];
   /** 選択変更。additive=true（Shift+クリック）で選択トグル、false/未指定でその要素だけを選択。null で全解除。 */
   onSelect: (id: string | null, additive?: boolean) => void;
+  /** 範囲選択（マーキー）の結果＝選択集合をまとめて置き換える（#274）。 */
+  onSelectMany: (ids: string[]) => void;
   /** リサイズ中、主の新しい位置・大きさ（canvas 座標）を返す。 */
   onChange: (id: string, geom: { x: number; y: number; w?: number; h?: number }) => void;
   /** 移動中、対象（複数選択なら全選択）の新しい位置をまとめて返す（一括移動・1回の更新）。 */
@@ -69,7 +71,7 @@ interface OverlayProps {
 }
 
 export function FreeLayoutOverlay({
-  freeLayout, canvasW, canvasH, selectedIds, onSelect, onChange, onMoveMany, gridSize = 0,
+  freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
 }: OverlayProps) {
@@ -88,6 +90,15 @@ export function FreeLayoutOverlay({
   const [editingId, setEditingId] = useState<string | null>(null);
   // 吸着ガイド（ドラッグ中に他要素の辺/中心へそろったとき表示する縦/横の線・canvas 座標。#205 後半）。
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
+  // 範囲選択（マーキー・#274）の矩形（canvas 座標・null=非アクティブ）。空白ドラッグで矩形を引き交差要素を選択。
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  // ポインタの画面座標→canvas 座標（オーバーレイは fit 箱内＝実寸一致・#273）。描画前(0幅)は原点に潰す。
+  const toCanvas = (clientX: number, clientY: number): { x: number; y: number } => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r || r.width <= 0) return { x: 0, y: 0 };
+    const scale = r.width / canvasW;
+    return { x: (clientX - r.left) / scale, y: (clientY - r.top) / scale };
+  };
 
   // Escape で右クリックメニューを閉じる（role="menu" の期待動作・フォーカス位置に依らず効く）。
   useEffect(() => {
@@ -141,6 +152,15 @@ export function FreeLayoutOverlay({
   };
 
   const handleMove = (e: ReactPointerEvent) => {
+    // 範囲選択（マーキー）中：矩形を広げ、交差する要素を選択集合に反映（#274）。
+    if (marquee) {
+      e.preventDefault();
+      const p = toCanvas(e.clientX, e.clientY);
+      const next = { ...marquee, x1: p.x, y1: p.y };
+      setMarquee(next);
+      onSelectMany(freeElementsInRect(freeLayout, next));
+      return;
+    }
     if (!drag) return;
     if (drag.scale <= 0) return; // 縮尺不正（描画前で clientWidth=0 等）のときは NaN/Infinity を書き込まない（防御）
     e.preventDefault(); // ドラッグ中のテキスト選択等の既定動作を抑制（beginDrag と一貫）
@@ -168,6 +188,12 @@ export function FreeLayoutOverlay({
   };
 
   const endDrag = (e: ReactPointerEvent) => {
+    // 範囲選択（マーキー）の終了：矩形を消す（選択は move 中に確定済み・#274）。
+    if (marquee) {
+      setMarquee(null);
+      try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      return;
+    }
     if (!drag) return;
     try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
     setDrag(null);
@@ -219,8 +245,16 @@ export function FreeLayoutOverlay({
       onPointerMove={handleMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
-      // 何もない所を押したら選択解除＋編集/メニューを閉じる（要素/ハンドルの onPointerDown は stopPropagation 済み）。
-      onPointerDown={(e) => { if (e.target === e.currentTarget) { onSelect(null); setEditingId(null); setMenu(null); } }}
+      // 何もない所を押したら選択解除＋編集/メニューを閉じ、範囲選択（マーキー）を開始（要素/ハンドルの onPointerDown は stopPropagation 済み）。
+      onPointerDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        onSelect(null); setEditingId(null); setMenu(null); // 空白クリック＝選択解除（ドラッグせず離せば解除のまま）
+        if (e.button !== 0) return; // 左ボタンのみマーキー
+        // 範囲選択（マーキー）開始：空白ドラッグで矩形を引き交差要素を選択（#274）。
+        const p = toCanvas(e.clientX, e.clientY);
+        try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+        setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+      }}
       // 空白部分の右クリックはブラウザ既定メニューだけ抑止する。
       onContextMenu={(e) => { e.preventDefault(); }}
     >
@@ -315,6 +349,24 @@ export function FreeLayoutOverlay({
       )}
       {guides.y != null && (
         <div data-testid="snap-guide-y" style={{ position: "absolute", top: `${(guides.y / canvasH) * 100}%`, left: 0, right: 0, height: 1, background: SNAP_GUIDE_COLOR, pointerEvents: "none", zIndex: 40 }} />
+      )}
+
+      {/* 範囲選択（マーキー）の矩形（ドラッグ中のみ・canvas 座標→%）。#274 */}
+      {marquee && (
+        <div
+          data-testid="marquee"
+          style={{
+            position: "absolute",
+            left: `${(Math.min(marquee.x0, marquee.x1) / canvasW) * 100}%`,
+            top: `${(Math.min(marquee.y0, marquee.y1) / canvasH) * 100}%`,
+            width: `${(Math.abs(marquee.x1 - marquee.x0) / canvasW) * 100}%`,
+            height: `${(Math.abs(marquee.y1 - marquee.y0) / canvasH) * 100}%`,
+            border: "1px dashed var(--color-primary)",
+            background: "rgba(80,130,255,0.10)",
+            pointerEvents: "none",
+            zIndex: 35,
+          }}
+        />
       )}
 
       {menu && menuEl && (

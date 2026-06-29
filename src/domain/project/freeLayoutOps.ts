@@ -85,6 +85,23 @@ export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeEl
   return freeLayout.filter((e) => e.id !== id);
 }
 
+/**
+ * 範囲選択（マーキー・#274）：矩形（canvas 座標・2点は順不同）と AABB が交差する要素の id を返す。
+ * 非表示・ロック中の要素は対象外＝一括操作に巻き込まない（非表示は触れない・ロックは固定）。
+ */
+export function freeElementsInRect(
+  freeLayout: FreeElement[], rect: { x0: number; y0: number; x1: number; y1: number },
+): string[] {
+  const left = Math.min(rect.x0, rect.x1);
+  const right = Math.max(rect.x0, rect.x1);
+  const top = Math.min(rect.y0, rect.y1);
+  const bottom = Math.max(rect.y0, rect.y1);
+  return freeLayout
+    .filter((el) => !el.hidden && !el.locked)
+    .filter((el) => el.x < right && el.x + el.w > left && el.y < bottom && el.y + el.h > top)
+    .map((el) => el.id);
+}
+
 // ── 複数選択の一括操作（移動・削除）。純粋関数＝§7 テスト対象。 ──
 
 /** 一括移動・整列・分布で使う位置更新（要素 id と新しい x,y）。生成側（freeAlign 等）と適用側で共有する型。 */

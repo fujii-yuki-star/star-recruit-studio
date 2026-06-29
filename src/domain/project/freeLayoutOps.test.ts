@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
   addFreeElement, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, sendFreeElementToBack,
+  freeElementsInRect, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, sendFreeElementToBack,
   snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -97,6 +97,38 @@ describe('removeFreeElement', () => {
   it('存在しない id は変化なし', () => {
     const layout: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }];
     expect(removeFreeElement(layout, 'free_999')).toEqual(layout);
+  });
+});
+
+describe('freeElementsInRect（範囲選択・マーキー・#274）', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100 },
+    { id: 'free_002', kind: 'text', x: 300, y: 300, w: 100, h: 100, text: 'あ' },
+    { id: 'free_003', kind: 'shape', x: 1000, y: 50, w: 100, h: 100 },
+  ];
+
+  it('矩形と AABB が交差する要素だけ返す（接するだけ/外側は含めない）', () => {
+    // free_001 を囲む矩形（free_002/003 は外）。
+    expect(freeElementsInRect(layout, { x0: -10, y0: -10, x1: 120, y1: 120 })).toEqual(['free_001']);
+    // free_001 と free_002 をまたぐ矩形。
+    expect(freeElementsInRect(layout, { x0: 50, y0: 50, x1: 350, y1: 350 })).toEqual(['free_001', 'free_002']);
+    // どの要素にも触れない矩形＝空。
+    expect(freeElementsInRect(layout, { x0: 500, y0: 500, x1: 600, y1: 600 })).toEqual([]);
+  });
+
+  it('2点は順不同（右下→左上のドラッグでも同じ）', () => {
+    const a = freeElementsInRect(layout, { x0: 50, y0: 50, x1: 350, y1: 350 });
+    const b = freeElementsInRect(layout, { x0: 350, y0: 350, x1: 50, y1: 50 });
+    expect(b).toEqual(a);
+  });
+
+  it('非表示・ロック中の要素は対象外（一括操作に巻き込まない）', () => {
+    const withFlags: FreeElement[] = [
+      { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100, hidden: true },
+      { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 100, h: 100, locked: true },
+      { id: 'free_003', kind: 'shape', x: 0, y: 0, w: 100, h: 100 },
+    ];
+    expect(freeElementsInRect(withFlags, { x0: -10, y0: -10, x1: 110, y1: 110 })).toEqual(['free_003']);
   });
 });
 
