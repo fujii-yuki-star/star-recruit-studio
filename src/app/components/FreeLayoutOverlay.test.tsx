@@ -28,6 +28,7 @@ function renderOverlay(overrides: Partial<ComponentProps<typeof FreeLayoutOverla
     onChange: vi.fn(),
     onMoveMany: vi.fn(),
     onResizeMany: vi.fn(),
+    onRotate: vi.fn(),
     onDuplicate: vi.fn(),
     onBringToFront: vi.fn(),
     onSendToBack: vi.fn(),
@@ -51,12 +52,13 @@ function renderOverlay(overrides: Partial<ComponentProps<typeof FreeLayoutOverla
 }
 
 describe("FreeLayoutOverlay: 選択とリサイズハンドル", () => {
-  it("各要素を 1 ボックスずつ描画し、選択中の要素にだけリサイズハンドル（4つ）が出る", () => {
+  it("選択中の要素にリサイズ(4)＋回転ハンドルが出て、非選択には出ない", () => {
     const { root, boxes } = renderOverlay({ selectedIds: ["free_001"] });
     expect(root).toBeInTheDocument();
     expect(boxes).toHaveLength(2);
-    expect(boxes[0].children).toHaveLength(4); // free_001（選択中＝主）＝4 ハンドル
-    expect(boxes[1].children).toHaveLength(0); // free_002（非選択）＝ハンドルなし
+    expect(boxes[0].children).toHaveLength(6); // 選択中＝リサイズ4＋回転(stem+knob)2
+    expect(screen.getByTestId("rotate-handle")).toBeInTheDocument(); // 回転ハンドルが出る
+    expect(boxes[1].children).toHaveLength(0); // 非選択＝ハンドルなし
   });
 
   it("要素を押すと、その id で選択コールバックが呼ばれる", () => {
@@ -186,6 +188,54 @@ describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
     fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     fireEvent.pointerMove(root, { clientX: 100, clientY: 100, pointerId: 1 });
     expect(onResizeMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 0, y: 0, w: 200, h: 200 }]);
+  });
+});
+
+describe("FreeLayoutOverlay: 回転ハンドル（#279）", () => {
+  const mockRect = (root: HTMLElement) => {
+    root.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+  };
+
+  it("単一選択の回転ハンドルをドラッグすると中心からの角度で onRotate が呼ばれる", () => {
+    const layout: FreeElement[] = [{ id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 200, zIndex: 1 }];
+    const { root, onRotate } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
+    mockRect(root);
+    fireEvent.pointerDown(screen.getByTestId("rotate-handle"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    // center=(200,200)。ポインタを中心の真右(300,200)へ → 90°。
+    fireEvent.pointerMove(root, { clientX: 300, clientY: 200, pointerId: 1 });
+    expect(onRotate).toHaveBeenLastCalledWith("free_001", 90);
+  });
+
+  it("Shift ドラッグは15°きざみに吸着する", () => {
+    const layout: FreeElement[] = [{ id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 200, h: 200, zIndex: 1 }];
+    const { root, onRotate } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
+    mockRect(root);
+    fireEvent.pointerDown(screen.getByTestId("rotate-handle"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(root, { clientX: 200, clientY: 130, shiftKey: true, pointerId: 1 });
+    const last = onRotate.mock.calls[onRotate.mock.calls.length - 1];
+    expect(last[0]).toBe("free_001");
+    expect((last[1] as number) % 15).toBe(0); // 15°きざみ
+  });
+
+  it("複数選択中は回転ハンドルを出さない（回転は単一要素のみ）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 200, y: 200, w: 100, h: 100, zIndex: 2 },
+    ];
+    renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"] });
+    expect(screen.queryByTestId("rotate-handle")).toBeNull();
+  });
+
+  it("回転ドラッグは onInteractionStart/End を呼ぶ（Undo の1ステップ境界・#211）", () => {
+    const layout: FreeElement[] = [{ id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 200, zIndex: 1 }];
+    const onInteractionStart = vi.fn();
+    const onInteractionEnd = vi.fn();
+    const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"], onInteractionStart, onInteractionEnd });
+    fireEvent.pointerDown(screen.getByTestId("rotate-handle"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onInteractionStart).toHaveBeenCalledTimes(1);
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    expect(onInteractionEnd).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -329,24 +379,26 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
 });
 
 describe("FreeLayoutOverlay: 回転（#208）", () => {
-  it("回転している主要素は CSS rotate を当て、リサイズハンドルは出さない（大きさは数値入力で）", () => {
+  it("回転している主要素は CSS rotate を当て、リサイズハンドルは出さず回転ハンドルだけ出す（大きさは数値入力・#208/#279）", () => {
     const layout: FreeElement[] = [
       { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 100, zIndex: 1, rotation: 30 },
     ];
     const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
     const box = root.children[0] as HTMLElement;
     expect(box.style.transform).toContain("rotate(30deg)");
-    expect(box.children).toHaveLength(0); // 回転中＝ハンドルなし
+    expect(screen.getByTestId("rotate-handle")).toBeInTheDocument(); // 回転中も回転ハンドルは出す（調整可・#279）
+    expect(box.children).toHaveLength(2); // リサイズハンドルなし＝回転ハンドル(stem+knob)のみ
   });
 
-  it("回転 0（未指定）の主要素はハンドル4つを出し、transform を付けない", () => {
+  it("回転 0（未指定）の主要素はリサイズ4＋回転ハンドルを出し、transform を付けない（#208/#279）", () => {
     const layout: FreeElement[] = [
       { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 100, zIndex: 1 },
     ];
     const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
     const box = root.children[0] as HTMLElement;
     expect(box.style.transform).toBe("");
-    expect(box.children).toHaveLength(4); // 回転なし＝リサイズハンドル
+    expect(screen.getByTestId("rotate-handle")).toBeInTheDocument();
+    expect(box.children).toHaveLength(6); // リサイズ4＋回転(stem+knob)2
   });
 });
 

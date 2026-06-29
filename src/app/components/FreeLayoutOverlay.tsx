@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
-import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
@@ -13,7 +13,7 @@ import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../..
 
 interface DragState {
   id: string; // 主＝リサイズ対象・移動の基準
-  mode: "move" | "resize" | "group-resize";
+  mode: "move" | "resize" | "group-resize" | "rotate";
   corner?: ResizeCorner;
   /** group-resize 時：開始時の選択要素（bbox 内の相対位置・大きさを保ってスケールする・#274）。start＝開始時の bbox。 */
   groupStarts?: FreeElement[];
@@ -58,6 +58,8 @@ interface OverlayProps {
   onMoveMany: (moves: { id: string; x: number; y: number }[]) => void;
   /** 複数同時リサイズ（#274）：選択集合の新しい位置・大きさをまとめて返す（1回の更新）。 */
   onResizeMany: (updates: FreeElementGeom[]) => void;
+  /** 回転ハンドルのドラッグ中、要素の新しい角度（度・0≤r<360）を返す（#279）。 */
+  onRotate: (id: string, rotation: number) => void;
   /** グリッド吸着サイズ（canvas px・0=吸着なし）。 */
   gridSize?: number;
   /** 右クリックメニューの操作（いずれも対象 id を渡す）。 */
@@ -75,7 +77,7 @@ interface OverlayProps {
 }
 
 export function FreeLayoutOverlay({
-  freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, gridSize = 0,
+  freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
 }: OverlayProps) {
@@ -180,6 +182,23 @@ export function FreeLayoutOverlay({
     });
   };
 
+  // 回転ハンドル押下（#279）：要素中心からポインタへの角度で rotation を更新する。
+  const beginRotate = (e: ReactPointerEvent, el: FreeElement) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation(); // ルートのマーキー開始を兼ねない
+    setMenu(null);
+    setEditingId(null);
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.(); // 連続回転を Undo の1ステップに合成（#211）
+    setDrag({
+      id: el.id, mode: "rotate",
+      startClientX: e.clientX, startClientY: e.clientY,
+      start: { x: el.x, y: el.y, w: el.w, h: el.h },
+      scale: (ref.current?.clientWidth ?? canvasW) / canvasW,
+    });
+  };
+
   const handleMove = (e: ReactPointerEvent) => {
     // 範囲選択（マーキー）中：矩形を広げ、交差する要素を選択集合に反映（#274）。
     if (marquee) {
@@ -191,6 +210,14 @@ export function FreeLayoutOverlay({
       return;
     }
     if (!drag) return;
+    // 回転は drag.scale（移動/リサイズ用）ではなく中心とポインタの角度で決まるので、scale 防御の前に処理する（#279）。
+    if (drag.mode === "rotate") {
+      e.preventDefault();
+      const center = { x: drag.start.x + drag.start.w / 2, y: drag.start.y + drag.start.h / 2 };
+      const deg = rotationFromPointer(center, toCanvas(e.clientX, e.clientY));
+      onRotate(drag.id, e.shiftKey ? snapAngle(deg, 15) : deg);
+      return;
+    }
     if (drag.scale <= 0) return; // 縮尺不正（描画前で clientWidth=0 等）のときは NaN/Infinity を書き込まない（防御）
     e.preventDefault(); // ドラッグ中のテキスト選択等の既定動作を抑制（beginDrag と一貫）
     const dx = (e.clientX - drag.startClientX) / drag.scale;
@@ -351,27 +378,44 @@ export function FreeLayoutOverlay({
                 }}
               />
             ) : (
-              // 回転中・ロック中はリサイズハンドルを出さない（回転下の計算は非対応＝数値入力で・ロックは固定。#208/#210）。
-              // 複数選択中は個別ハンドルを出さず、グループ bbox のハンドルで一括拡縮する（#274）。
-              isPrimary && !rotated && !locked && !isGroupResize &&
-              HANDLES.map((hd) => (
-                <div
-                  key={hd.corner}
-                  onPointerDown={(e) => beginDrag(e, el, "resize", hd.corner)}
-                  style={{
-                    position: "absolute",
-                    left: hd.left,
-                    top: hd.top,
-                    width: 12,
-                    height: 12,
-                    transform: "translate(-50%, -50%)",
-                    background: "#fff",
-                    border: "2px solid var(--color-primary)",
-                    borderRadius: 2,
-                    cursor: hd.cursor,
-                  }}
-                />
-              ))
+              <>
+                {/* リサイズハンドル：回転中・ロック中・複数選択中は出さない（#208/#210/#274）。 */}
+                {isPrimary && !rotated && !locked && !isGroupResize &&
+                  HANDLES.map((hd) => (
+                    <div
+                      key={hd.corner}
+                      onPointerDown={(e) => beginDrag(e, el, "resize", hd.corner)}
+                      style={{
+                        position: "absolute",
+                        left: hd.left,
+                        top: hd.top,
+                        width: 12,
+                        height: 12,
+                        transform: "translate(-50%, -50%)",
+                        background: "#fff",
+                        border: "2px solid var(--color-primary)",
+                        borderRadius: 2,
+                        cursor: hd.cursor,
+                      }}
+                    />
+                  ))}
+                {/* 回転ハンドル（#279）：単一選択・非ロックで表示（回転中も操作できるよう !rotated は付けない）。複数選択中は非表示。 */}
+                {isPrimary && !locked && !isGroupResize && (
+                  <>
+                    <div style={{ position: "absolute", left: "50%", top: -22, width: 1, height: 22, background: "var(--color-primary)", transform: "translateX(-50%)", pointerEvents: "none" }} />
+                    <div
+                      data-testid="rotate-handle"
+                      onPointerDown={(e) => beginRotate(e, el)}
+                      title="ドラッグで回転（Shift で15°ずつ）"
+                      style={{
+                        position: "absolute", left: "50%", top: -22, width: 12, height: 12,
+                        transform: "translate(-50%, -50%)", background: "#fff",
+                        border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab",
+                      }}
+                    />
+                  </>
+                )}
+              </>
             )}
           </div>
         );
