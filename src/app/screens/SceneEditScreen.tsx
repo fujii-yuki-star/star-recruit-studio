@@ -194,21 +194,29 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
   const [leftCollapsed, setLeftCollapsed] = useState(loadLeftCollapsed);
   const [rightWidth, setRightWidth] = useState(loadRightWidth);
-  const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
+  const resizeRef = useRef<{ startX: number; startW: number; latest: number } | null>(null);
   useEffect(() => { try { localStorage.setItem(LS_LEFT_COLLAPSED, leftCollapsed ? "1" : "0"); } catch { /* noop */ } }, [leftCollapsed]);
-  useEffect(() => { try { localStorage.setItem(LS_RIGHT_WIDTH, String(rightWidth)); } catch { /* noop */ } }, [rightWidth]);
+  // 右幅はドラッグ終了時にだけ保存する（毎フレーム書き込みを避けるため effect 依存にはしない・下の onResizeEnd）。
   // 右パネルの境界をドラッグして幅を変える（左へドラッグ＝広がる）。pointer capture で枠外まで追従。
   const onResizeDown = (e: ReactPointerEvent) => {
     e.preventDefault();
-    resizeRef.current = { startX: e.clientX, startW: rightWidth };
+    resizeRef.current = { startX: e.clientX, startW: rightWidth, latest: rightWidth };
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
   };
   const onResizeMove = (e: ReactPointerEvent) => {
     if (!resizeRef.current) return;
     const delta = resizeRef.current.startX - e.clientX;
-    setRightWidth(Math.min(RIGHT_MAX_WIDTH, Math.max(RIGHT_MIN_WIDTH, resizeRef.current.startW + delta)));
+    const w = Math.min(RIGHT_MAX_WIDTH, Math.max(RIGHT_MIN_WIDTH, resizeRef.current.startW + delta));
+    resizeRef.current.latest = w; // 最新値を ref に保持（保存は終了時・closure の遅延に依存しない）
+    setRightWidth(w);
   };
-  const onResizeEnd = () => { resizeRef.current = null; };
+  const onResizeEnd = () => {
+    const w = resizeRef.current?.latest;
+    resizeRef.current = null;
+    if (w == null) return; // ドラッグしていない/キャンセルでは保存しない
+    // 幅は終了時にだけ保存（ドラッグ中の毎フレーム localStorage 書き込み＝メインスレッド I/O を避ける・PR#285レビュー）。
+    try { localStorage.setItem(LS_RIGHT_WIDTH, String(w)); } catch { /* noop */ }
+  };
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。

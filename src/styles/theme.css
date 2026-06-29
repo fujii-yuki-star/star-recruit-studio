@@ -963,7 +963,7 @@ button {
 /* 編集レイアウト(場面編集) */
 .editor-grid {
   display: grid;
-  grid-template-columns: 240px 1fr 300px;
+  /* 列は SceneEditScreen がインラインで指定（左折りたたみ 240/44px・中央 1fr・右リサイズ 260〜560px・#276）。 */
   gap: var(--gap);
   height: 100%;
 }
