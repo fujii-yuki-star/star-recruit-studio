@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
@@ -44,6 +44,23 @@ interface SceneEditProps {
 }
 
 type AssetFilter = "all" | "image" | "video" | "bgm";
+
+// 場面編集パネルのレイアウト設定（#276）。左パネルは折りたたみ、右パネルは横幅をドラッグで調整（localStorage に保存）。
+const RIGHT_MIN_WIDTH = 260;
+const RIGHT_MAX_WIDTH = 560;
+const LEFT_WIDTH = 240;
+const LEFT_COLLAPSED_WIDTH = 44;
+const LS_RIGHT_WIDTH = "sceneEdit.rightWidth";
+const LS_LEFT_COLLAPSED = "sceneEdit.leftCollapsed";
+function loadRightWidth(): number {
+  try {
+    const v = Number(localStorage.getItem(LS_RIGHT_WIDTH));
+    return v >= RIGHT_MIN_WIDTH && v <= RIGHT_MAX_WIDTH ? v : 300;
+  } catch { return 300; }
+}
+function loadLeftCollapsed(): boolean {
+  try { return localStorage.getItem(LS_LEFT_COLLAPSED) === "1"; } catch { return false; }
+}
 
 const sceneTypeLabel: Record<string, string> = {
   opening: "オープニング",
@@ -174,6 +191,32 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const lineRef = useRef<HTMLTextAreaElement>(null);
   // こだわり編集（詳細編集）の開閉。整列/スナップ・複数選択・コピペ・数値入力・テキスト体裁・レイヤー一覧・Undo は結線済み（α-3 ①・#205-211）。
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
+  const [leftCollapsed, setLeftCollapsed] = useState(loadLeftCollapsed);
+  const [rightWidth, setRightWidth] = useState(loadRightWidth);
+  const resizeRef = useRef<{ startX: number; startW: number; latest: number } | null>(null);
+  useEffect(() => { try { localStorage.setItem(LS_LEFT_COLLAPSED, leftCollapsed ? "1" : "0"); } catch { /* noop */ } }, [leftCollapsed]);
+  // 右幅はドラッグ終了時にだけ保存する（毎フレーム書き込みを避けるため effect 依存にはしない・下の onResizeEnd）。
+  // 右パネルの境界をドラッグして幅を変える（左へドラッグ＝広がる）。pointer capture で枠外まで追従。
+  const onResizeDown = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    resizeRef.current = { startX: e.clientX, startW: rightWidth, latest: rightWidth };
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
+  };
+  const onResizeMove = (e: ReactPointerEvent) => {
+    if (!resizeRef.current) return;
+    const delta = resizeRef.current.startX - e.clientX;
+    const w = Math.min(RIGHT_MAX_WIDTH, Math.max(RIGHT_MIN_WIDTH, resizeRef.current.startW + delta));
+    resizeRef.current.latest = w; // 最新値を ref に保持（保存は終了時・closure の遅延に依存しない）
+    setRightWidth(w);
+  };
+  const onResizeEnd = () => {
+    const w = resizeRef.current?.latest;
+    resizeRef.current = null;
+    if (w == null) return; // ドラッグしていない/キャンセルでは保存しない
+    // 幅は終了時にだけ保存（ドラッグ中の毎フレーム localStorage 書き込み＝メインスレッド I/O を避ける・PR#285レビュー）。
+    try { localStorage.setItem(LS_RIGHT_WIDTH, String(w)); } catch { /* noop */ }
+  };
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
@@ -572,10 +615,39 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       </div>
 
       <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden" }}>
-        <div className="editor-grid">
+        <div
+          className="editor-grid"
+          style={{ position: "relative", gridTemplateColumns: `${leftCollapsed ? LEFT_COLLAPSED_WIDTH : LEFT_WIDTH}px 1fr ${rightWidth}px` }}
+        >
+          {/* 右パネルの幅をドラッグで変える境界ハンドル（#276・絶対配置でグリッド項目にはならない）。 */}
+          <div
+            onPointerDown={onResizeDown}
+            onPointerMove={onResizeMove}
+            onPointerUp={onResizeEnd}
+            onPointerCancel={onResizeEnd}
+            title="ドラッグで編集欄の幅を変える"
+            style={{
+              position: "absolute", top: 0, bottom: 0,
+              right: `calc(${rightWidth}px + (var(--gap) / 2) - 3px)`,
+              width: 6, cursor: "col-resize", background: "var(--color-border-strong)",
+              borderRadius: 3, opacity: 0.5, zIndex: 5, touchAction: "none",
+            }}
+          />
           {/* 左: 素材一覧 */}
           <div className="editor-col">
-            <h2 className="field-label">素材一覧</h2>
+            {/* 左パネルの折りたたみ（#276）：見出し＋トグル。畳むと本体は display:none（列幅も縮む）。 */}
+            <div className="row-between" style={{ alignItems: "center", marginBottom: leftCollapsed ? 0 : "var(--gap-sm)" }}>
+              {!leftCollapsed && <h2 className="field-label" style={{ margin: 0 }}>素材一覧</h2>}
+              <button
+                className="btn btn-ghost btn-icon text-sm"
+                title={leftCollapsed ? "素材一覧をひらく" : "素材一覧をとじる"}
+                aria-label={leftCollapsed ? "素材一覧をひらく" : "素材一覧をとじる"}
+                onClick={() => setLeftCollapsed((v) => !v)}
+              >
+                {leftCollapsed ? "▶" : "◀"}
+              </button>
+            </div>
+            <div style={{ display: leftCollapsed ? "none" : "contents" }}>
             <div
               className="row gap-sm"
               style={{
@@ -657,6 +729,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
               </div>
             )}
+            </div>
           </div>
 
           {/* 中央: 仕上がり確認 + 場面カード */}
