@@ -24,7 +24,7 @@ function cloneTemplate(t: Template): Template {
 }
 
 /** レイヤーの座標/サイズ用の小さな数値入力（整数 px。入力途中の NaN/空は無視、min 指定（幅/高さ）は下限クランプ）。 */
-function numField(label: string, value: number, onChange: (v: number) => void, min?: number) {
+function numField(label: string, value: number, onChange: (v: number) => void, min?: number, max?: number) {
   return (
     <label className="text-sm" style={{ display: "flex", flexDirection: "column", flex: "1 0 40%" }}>
       {label}
@@ -33,10 +33,15 @@ function numField(label: string, value: number, onChange: (v: number) => void, m
         type="number"
         step={1}
         min={min}
+        max={max}
         value={value}
         onChange={(e) => {
           const v = parseInt(e.target.value, 10);
-          if (!Number.isNaN(v)) onChange(min != null ? Math.max(min, v) : v);
+          if (Number.isNaN(v)) return;
+          let clamped = v;
+          if (min != null) clamped = Math.max(min, clamped);
+          if (max != null) clamped = Math.min(max, clamped);
+          onChange(clamped);
         }}
       />
     </label>
@@ -159,7 +164,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
                     <input className="input" type="color" value={l.background?.color ?? "#000000"} onChange={(e) => onUpdateLayer(l.id, { background: { ...l.background, color: e.target.value } })} />
                   </div>
-                  {numField("濃さ(%)", Math.round((l.background?.opacity ?? 0.55) * 100), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: Math.min(100, Math.max(0, v)) / 100 } }), 0)}
+                  {numField("濃さ(%)", Math.round((l.background?.opacity ?? 0.55) * 100), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: v / 100 } }), 0, 100)}
                 </div>
               )}
             </div>
