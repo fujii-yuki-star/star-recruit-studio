@@ -89,3 +89,14 @@
 2. `tmpl_asset` の URL 解決を**起動時一括**にするか遅延にするか（テンプレ数×素材数の規模次第）。
 3. 場面編集UIで「テンプレ既定が入っている」ことの見せ方（差し替え／既定に戻す導線）。
 4. 取込（他者テンプレ）で素材ファイル欠落時の扱い（プレースホルダ＋警告）。
+
+---
+
+## 実装で確定（PR B＝storage 基盤・2026-06-29）
+
+実装に入って下記を確定（未解決1・2を解消）。
+
+- **マニフェスト不要（schema 追加なし）**：テンプレ所有素材＝**レイヤーの `assetId`（`tmpl_asset_NNN`）の集合**。保存ファイル名 `<assetId>.<ext>` が id を内包するため、ディレクトリ走査で id→URL を解決でき、取込/書き出し/掃除も**レイヤー参照から導出**できる。よって `template.schema` への `assets` 追加は**やめ**、休眠 `Layer.assetId`（既存）の活性化のみ＝**版・schema 変更なし**（ADR-0017「1テンプレ=1ファイル」の緩和は「素材ファイルが別途付く」点のみ／JSON 自体は不変）。
+- **URL 解決は data URL**（asset:// ではなく）：`assetProtocol.scope` は現状 `$APPDATA/projects/**` のみで、テンプレ素材ディレクトリ（`$APPDATA/user_templates/assets`）を scope に足すと **asset:// の scope/キャッシュ周りが実機でしか検証できない**（[[tauri-packaged-gotchas]]）。テンプレ素材は**少数・起動時一括ロード**ゆえ data URL のメモリ影響は小さく、確実性を優先。
+- **保存先**：`appData/user_templates/assets/<tmpl_asset_NNN>.<ext>`（Tauri: `import_template_asset` / `load_template_assets` / `delete_template_asset`）。`templateAssetFs`（infra）が wrap（非 Tauri は no-op）。
+- **ストア合流（`templateAssetSrcById`）＋ ScenePreview の解決合流・テンプレ削除時の素材掃除は PR C**（編集UIと同時に配線し実機で検証）。**書き出しの解決は PR D**。
