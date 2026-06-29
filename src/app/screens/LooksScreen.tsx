@@ -106,6 +106,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
       const newId = await createBlankUserTemplate(name, newCategory, newOrientation);
       if (newId) {
         setCreating(false);
+        setNewName("新しい見た目"); // 次回フォームに前回名を残さない（同名テンプレの量産を防ぐ）。向き/種類は保持。
         setSelectedId(newId);
         setEditingTemplateId(newId);
         onNavigate("looks-edit");
@@ -197,11 +198,17 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               <button className="btn btn-primary" disabled={busy} onClick={() => void onCreateBlank()}>作成して編集する</button>
               <button className="btn btn-ghost" onClick={() => setCreating(false)}>やめる</button>
             </div>
+            {/* 作成失敗時はフォーム内にエラーを出す（押しても何も起きないように見えるのを防ぐ・§2-5）。 */}
+            {templateError && (
+              <div className="notice notice-warn" role="alert">
+                <span>{templateError}</span>
+              </div>
+            )}
             <p className="field-hint">空のキャンバス（背景のみ）から始まります。文字・素材などは次の編集画面で足せます。向き・種類は後から変えられないため、ここで選んでください。</p>
           </div>
         </div>
       ) : (
-        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} onClick={() => setCreating(true)}>
+        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} onClick={() => { clearTemplateError(); setCreating(true); }}>
           ＋ ゼロから新しい見た目を作る
         </button>
       )}
