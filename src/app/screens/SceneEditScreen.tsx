@@ -287,7 +287,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const addFreeEl = (kind: FreeElementKind) => {
     let newId: string | null = null;
     patch((s) => {
-      const result = addFreeElement(s.freeLayout ?? [], kind);
+      const result = addFreeElement(s.freeLayout ?? [], kind, template?.canvas.width, template?.canvas.height);
       newId = result.newId;
       return { ...s, freeLayout: result.freeLayout };
     });
@@ -656,8 +656,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <div className="editor-col grow" style={{ overflow: "auto" }}>
               <h2 className="field-label">仕上がり確認</h2>
               <div style={{ position: "relative" }}>
-                <ScenePreview scene={selected} template={template} />
-                {/* FREE 場面：プレビュー上でドラッグ移動・角リサイズできる操作レイヤ（Phase 4b）。 */}
+                <ScenePreview scene={selected} template={template}>
+                {/* FREE 場面：プレビュー（fit箱）の子に重ねる＝縦型でも実寸一致でドラッグ移動・角リサイズが追従（#273・Phase 4b）。 */}
                 {isFree && template && (
                   <FreeLayoutOverlay
                     freeLayout={freeLayout}
@@ -678,6 +678,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onInteractionEnd={endHistoryGroup}
                   />
                 )}
+                </ScenePreview>
                 {editPopover && editPopoverEl && (
                   <>
                     {/* 外側クリックで閉じる透明バックドロップ。 */}

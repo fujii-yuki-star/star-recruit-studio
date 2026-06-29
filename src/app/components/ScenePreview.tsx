@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { layoutScene } from "../../renderer/layout";
@@ -10,7 +11,7 @@ import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex }: { scene?: Scene; template?: Template; activeLineIndex?: number }) {
+export function ScenePreview({ scene, template, activeLineIndex, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const ref = useRef<HTMLDivElement>(null);
@@ -89,22 +90,33 @@ export function ScenePreview({ scene, template, activeLineIndex }: { scene?: Sce
 
   return (
     <div ref={ref} style={{ width: "100%", display: "flex", justifyContent: "center" }}>
+      {/* fit 箱（プレビューの実寸＝canvas と同比）。操作オーバーレイ（children）はこの箱の子にして実寸と一致させる（#273）。 */}
       <div
-        role="img"
-        aria-label="場面の仕上がり"
         style={{
+          position: "relative",
           width: fit ? fit.width : "100%",
           height: fit?.height,
           flexShrink: 0,
           aspectRatio: `${cw} / ${ch}`,
-          borderRadius: "var(--radius)",
-          overflow: "hidden",
-          background: "#fff",
-          border: "1px solid var(--color-border)",
-          boxShadow: "var(--shadow-sm)",
         }}
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
+      >
+        <div
+          role="img"
+          aria-label="場面の仕上がり"
+          style={{
+            width: "100%",
+            height: "100%",
+            borderRadius: "var(--radius)",
+            overflow: "hidden",
+            background: "#fff",
+            border: "1px solid var(--color-border)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+        {/* 操作オーバーレイ（FREE/テンプレ編集）。fit 箱の子＝縦型でもプレビュー実寸と一致し、ドラッグ追従・配置が正確（#273）。 */}
+        {children}
+      </div>
     </div>
   );
 }

@@ -20,23 +20,32 @@ const DEFAULT_SHAPE_H = 400;
 const DEFAULT_TEXT = 'テキスト';
 const DEFAULT_TEXT_COLOR = '#222222';
 const DEFAULT_SHAPE_COLOR = '#cccccc';
+// 上の既定値は横型 canvas（1920×1080）で見やすいよう調整した基準。実 canvas に合わせて比例縮尺し、
+// 縦型（1080×1920）でも要素が画面幅いっぱいで中央に寄って見える等の違和感を防ぐ（#273）。横型では係数1＝従来どおり。
+const REF_CANVAS_W = 1920;
+const REF_CANVAS_H = 1080;
 
-/** 新しい要素を1つ生成する（id は scene 内一意・zIndex は既存の最前面+1 で最前面に置く）。 */
-export function createFreeElement(freeLayout: FreeElement[], kind: FreeElementKind): FreeElement {
+/** 新しい要素を1つ生成する（id は scene 内一意・zIndex は既存の最前面+1 で最前面に置く）。canvas 比で既定の位置/大きさをスケール（#273）。 */
+export function createFreeElement(
+  freeLayout: FreeElement[], kind: FreeElementKind, canvasW: number = REF_CANVAS_W, canvasH: number = REF_CANVAS_H,
+): FreeElement {
   const id = createFreeElementId(freeLayout.map((e) => e.id));
   const zIndex = freeLayout.reduce((max, e) => Math.max(max, e.zIndex ?? 0), 0) + 1;
-  const base = { id, x: DEFAULT_X, y: DEFAULT_Y, zIndex };
+  // x/幅は canvasW、y/高さは canvasH を基準にスケール（横型 1920×1080 は係数1）。整数 px に丸める。
+  const sx = (v: number): number => Math.round((v * canvasW) / REF_CANVAS_W);
+  const sy = (v: number): number => Math.round((v * canvasH) / REF_CANVAS_H);
+  const base = { id, x: sx(DEFAULT_X), y: sy(DEFAULT_Y), zIndex };
   switch (kind) {
     case FREE_ELEMENT_KIND.slot:
-      return { ...base, kind, w: DEFAULT_SLOT_W, h: DEFAULT_SLOT_H, assetId: null, fit: DEFAULT_FIT };
+      return { ...base, kind, w: sx(DEFAULT_SLOT_W), h: sy(DEFAULT_SLOT_H), assetId: null, fit: DEFAULT_FIT };
     case FREE_ELEMENT_KIND.text:
       return {
-        ...base, kind, w: DEFAULT_TEXT_W, h: DEFAULT_TEXT_H,
+        ...base, kind, w: sx(DEFAULT_TEXT_W), h: sy(DEFAULT_TEXT_H),
         text: DEFAULT_TEXT, fontSize: DEFAULT_TEXT_FONT_SIZE, color: DEFAULT_TEXT_COLOR, fontWeight: FONT_WEIGHT.normal,
       };
     case FREE_ELEMENT_KIND.shape:
       return {
-        ...base, kind, w: DEFAULT_SHAPE_W, h: DEFAULT_SHAPE_H,
+        ...base, kind, w: sx(DEFAULT_SHAPE_W), h: sy(DEFAULT_SHAPE_H),
         shapeType: FREE_SHAPE_TYPE.rect, fillColor: DEFAULT_SHAPE_COLOR, opacity: 1, radius: 0,
       };
     default: {
@@ -52,9 +61,9 @@ export function createFreeElement(freeLayout: FreeElement[], kind: FreeElementKi
  * UI はこの newId で追加直後の要素を選択状態にできる（duplicateFreeElement と同形・#179）。
  */
 export function addFreeElement(
-  freeLayout: FreeElement[], kind: FreeElementKind,
+  freeLayout: FreeElement[], kind: FreeElementKind, canvasW: number = REF_CANVAS_W, canvasH: number = REF_CANVAS_H,
 ): { freeLayout: FreeElement[]; newId: string } {
-  const el = createFreeElement(freeLayout, kind);
+  const el = createFreeElement(freeLayout, kind, canvasW, canvasH);
   return { freeLayout: [...freeLayout, el], newId: el.id };
 }
 
