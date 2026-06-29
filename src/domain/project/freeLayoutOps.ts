@@ -111,6 +111,15 @@ export interface FreeElementMove {
   y: number;
 }
 
+/** 複数同時リサイズ（#274）で使う位置・大きさ更新（要素 id と新しい x,y,w,h）。 */
+export interface FreeElementGeom {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** 複数要素の位置(x,y)をまとめて設定する（複数選択の一括移動）。moves に無い要素は不変・空なら同一参照を返す。 */
 export function applyFreeElementPositions(
   freeLayout: FreeElement[], moves: FreeElementMove[],
@@ -120,6 +129,49 @@ export function applyFreeElementPositions(
   return freeLayout.map((el) => {
     const m = byId.get(el.id);
     return m ? { ...el, x: m.x, y: m.y } : el;
+  });
+}
+
+/** 複数要素を囲む最小の矩形（バウンディングボックス）。空なら null（複数同時リサイズ・#274）。 */
+export function groupBBox(elements: FreeElement[]): Geom | null {
+  if (elements.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const el of elements) {
+    minX = Math.min(minX, el.x);
+    minY = Math.min(minY, el.y);
+    maxX = Math.max(maxX, el.x + el.w);
+    maxY = Math.max(maxY, el.y + el.h);
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/**
+ * 複数同時リサイズ（#274）：グループ bbox を oldBBox→newBBox に変えたとき、各要素の bbox 内の相対位置・
+ * 大きさを保ったままスケールする。各要素は FREE_MIN_SIZE 以上にクランプ。oldBBox が 0 幅/高なら等倍。
+ */
+export function resizeGroup(
+  elements: FreeElement[], oldBBox: Geom, newBBox: Geom,
+): FreeElementGeom[] {
+  const sx = oldBBox.w > 0 ? newBBox.w / oldBBox.w : 1;
+  const sy = oldBBox.h > 0 ? newBBox.h / oldBBox.h : 1;
+  return elements.map((el) => ({
+    id: el.id,
+    x: Math.round(newBBox.x + (el.x - oldBBox.x) * sx),
+    y: Math.round(newBBox.y + (el.y - oldBBox.y) * sy),
+    w: Math.max(FREE_MIN_SIZE, Math.round(el.w * sx)),
+    h: Math.max(FREE_MIN_SIZE, Math.round(el.h * sy)),
+  }));
+}
+
+/** 複数要素の位置・大きさ(x,y,w,h)をまとめて設定する（複数同時リサイズの適用）。updates に無い要素は不変・空なら同一参照。 */
+export function applyFreeElementGeoms(
+  freeLayout: FreeElement[], updates: FreeElementGeom[],
+): FreeElement[] {
+  if (updates.length === 0) return freeLayout;
+  const byId = new Map(updates.map((u) => [u.id, u]));
+  return freeLayout.map((el) => {
+    const u = byId.get(el.id);
+    return u ? { ...el, x: u.x, y: u.y, w: u.w, h: u.h } : el;
   });
 }
 
@@ -227,7 +279,7 @@ export function snapToGrid(value: number, grid: number): number {
 /** リサイズで掴んだ角（対角を固定する）。 */
 export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se';
 
-interface Geom {
+export interface Geom {
   x: number;
   y: number;
   w: number;

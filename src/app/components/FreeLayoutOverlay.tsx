@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
-import { freeElementsInRect, FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
@@ -13,8 +13,10 @@ import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../..
 
 interface DragState {
   id: string; // 主＝リサイズ対象・移動の基準
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "group-resize";
   corner?: ResizeCorner;
+  /** group-resize 時：開始時の選択要素（bbox 内の相対位置・大きさを保ってスケールする・#274）。start＝開始時の bbox。 */
+  groupStarts?: FreeElement[];
   startClientX: number;
   startClientY: number;
   start: { x: number; y: number; w: number; h: number };
@@ -54,6 +56,8 @@ interface OverlayProps {
   onChange: (id: string, geom: { x: number; y: number; w?: number; h?: number }) => void;
   /** 移動中、対象（複数選択なら全選択）の新しい位置をまとめて返す（一括移動・1回の更新）。 */
   onMoveMany: (moves: { id: string; x: number; y: number }[]) => void;
+  /** 複数同時リサイズ（#274）：選択集合の新しい位置・大きさをまとめて返す（1回の更新）。 */
+  onResizeMany: (updates: FreeElementGeom[]) => void;
   /** グリッド吸着サイズ（canvas px・0=吸着なし）。 */
   gridSize?: number;
   /** 右クリックメニューの操作（いずれも対象 id を渡す）。 */
@@ -71,7 +75,7 @@ interface OverlayProps {
 }
 
 export function FreeLayoutOverlay({
-  freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, gridSize = 0,
+  freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
 }: OverlayProps) {
@@ -84,6 +88,12 @@ export function FreeLayoutOverlay({
   useEffect(() => () => { if (dragRef.current) onInteractionEnd?.(); }, [onInteractionEnd]);
   // 主＝最後に選択した要素（リサイズハンドルはこれだけに出す。複数同時リサイズは曖昧なので非対応）。
   const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
+  // 複数同時リサイズ（#274）：選択中の非ロック・非表示・非回転要素のグループ bbox を出し、その角ハンドルで一括拡縮する。
+  // 回転要素を除くのは、bbox を論理座標(x/y/w/h)の AABB で計算するため＝回転後の表示領域とズレて意図しない拡縮になるのを防ぐ
+  // （単一要素のリサイズハンドルも !rotated で非表示にしているのと整合。回転要素は数値入力で調整・#208）。
+  const groupEls = freeLayout.filter((el) => selectedIds.includes(el.id) && !el.locked && !el.hidden && (el.rotation ?? 0) === 0);
+  const isGroupResize = selectedIds.length > 1 && groupEls.length > 0;
+  const groupBox = isGroupResize ? groupBBox(groupEls) : null;
   // 右クリックメニュー（対象 id とビューポート座標）。
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。
@@ -151,6 +161,25 @@ export function FreeLayoutOverlay({
     });
   };
 
+  // 複数同時リサイズ（#274）のグループ角ハンドル押下：bbox を基準に選択要素をまとめてスケールする。
+  const beginGroupResize = (e: ReactPointerEvent, corner: ResizeCorner) => {
+    if (e.button !== 0 || !groupBox) return;
+    e.preventDefault();
+    e.stopPropagation(); // ルートのマーキー開始を兼ねない
+    setMenu(null);
+    setEditingId(null);
+    const width = ref.current?.clientWidth ?? canvasW;
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.(); // 連続リサイズを Undo の1ステップに合成（#211）
+    setDrag({
+      id: "__group__", mode: "group-resize", corner,
+      startClientX: e.clientX, startClientY: e.clientY,
+      start: groupBox, // 開始時の bbox（resizeFreeElement で新 bbox を求める基準）
+      groupStarts: groupEls.map((el) => ({ ...el })),
+      scale: width / canvasW,
+    });
+  };
+
   const handleMove = (e: ReactPointerEvent) => {
     // 範囲選択（マーキー）中：矩形を広げ、交差する要素を選択集合に反映（#274）。
     if (marquee) {
@@ -181,6 +210,10 @@ export function FreeLayoutOverlay({
       const starts = drag.starts ?? [{ id: drag.id, x: drag.start.x, y: drag.start.y }];
       onMoveMany(starts.map((s) => ({ id: s.id, x: s.x + ddx, y: s.y + ddy })));
       setGuides({ x: snap.guideX, y: snap.guideY });
+    } else if (drag.mode === "group-resize" && drag.corner && drag.groupStarts) {
+      // グループ bbox を resizeFreeElement で新サイズにし、各要素を相対位置・大きさを保ってスケール（#274）。
+      const newBox = resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey);
+      onResizeMany(resizeGroup(drag.groupStarts, drag.start, newBox));
     } else if (drag.corner) {
       // Shift 押下中は縦横比を維持（e.shiftKey は move のたびに評価＝ドラッグ途中の押し直しにも追従）。
       onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey));
@@ -319,7 +352,8 @@ export function FreeLayoutOverlay({
               />
             ) : (
               // 回転中・ロック中はリサイズハンドルを出さない（回転下の計算は非対応＝数値入力で・ロックは固定。#208/#210）。
-              isPrimary && !rotated && !locked &&
+              // 複数選択中は個別ハンドルを出さず、グループ bbox のハンドルで一括拡縮する（#274）。
+              isPrimary && !rotated && !locked && !isGroupResize &&
               HANDLES.map((hd) => (
                 <div
                   key={hd.corner}
@@ -367,6 +401,38 @@ export function FreeLayoutOverlay({
             zIndex: 35,
           }}
         />
+      )}
+
+      {/* 複数同時リサイズ（#274）：選択集合のグループ bbox と角ハンドル（個別ハンドルの代わりに一括拡縮）。 */}
+      {groupBox && (
+        <div
+          data-testid="group-bbox"
+          style={{
+            position: "absolute",
+            left: `${(groupBox.x / canvasW) * 100}%`,
+            top: `${(groupBox.y / canvasH) * 100}%`,
+            width: `${(groupBox.w / canvasW) * 100}%`,
+            height: `${(groupBox.h / canvasH) * 100}%`,
+            border: "1px solid var(--color-primary)",
+            boxSizing: "border-box",
+            pointerEvents: "none",
+            zIndex: 36,
+          }}
+        >
+          {HANDLES.map((hd) => (
+            <div
+              key={hd.corner}
+              data-testid={`group-handle-${hd.corner}`}
+              onPointerDown={(e) => beginGroupResize(e, hd.corner)}
+              style={{
+                position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12,
+                transform: "translate(-50%, -50%)", background: "#fff",
+                border: "2px solid var(--color-primary)", borderRadius: 2, cursor: hd.cursor,
+                pointerEvents: "auto",
+              }}
+            />
+          ))}
+        </div>
       )}
 
       {menu && menuEl && (

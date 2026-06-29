@@ -27,6 +27,7 @@ function renderOverlay(overrides: Partial<ComponentProps<typeof FreeLayoutOverla
     onSelectMany: vi.fn(),
     onChange: vi.fn(),
     onMoveMany: vi.fn(),
+    onResizeMany: vi.fn(),
     onDuplicate: vi.fn(),
     onBringToFront: vi.fn(),
     onSendToBack: vi.fn(),
@@ -79,10 +80,13 @@ describe("FreeLayoutOverlay: 選択とリサイズハンドル", () => {
 });
 
 describe("FreeLayoutOverlay: 複数選択・一括操作（#206）", () => {
-  it("複数選択時、リサイズハンドルは主（selectedIds 末尾）にだけ出る", () => {
+  it("複数選択中はグループ bbox の角ハンドルを出し、個別要素にはハンドルを出さない（#274）", () => {
     const { boxes } = renderOverlay({ selectedIds: ["free_002", "free_001"] });
-    expect(boxes[0].children).toHaveLength(4); // free_001＝末尾＝主＝ハンドルあり
-    expect(boxes[1].children).toHaveLength(0); // free_002＝選択中だが主でない＝ハンドルなし
+    expect(boxes[0].children).toHaveLength(0); // 個別ハンドルは出さない（グループに集約）
+    expect(boxes[1].children).toHaveLength(0);
+    const bbox = screen.getByTestId("group-bbox");
+    expect(bbox).toBeInTheDocument();
+    expect(bbox.children).toHaveLength(4); // グループ bbox に4つの角ハンドル
   });
 
   it("Shift＋クリックは選択トグル（additive=true）で呼ばれ、ドラッグ移動は始まらない", () => {
@@ -135,6 +139,53 @@ describe("FreeLayoutOverlay: 範囲選択（マーキー・#274）", () => {
     expect(onSelect).toHaveBeenCalledWith(null);
     expect(onSelectMany).not.toHaveBeenCalled(); // 動かしていない＝集合選択なし
     expect(screen.queryByTestId("marquee")).not.toBeInTheDocument();
+  });
+});
+
+describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
+  it("グループの角ハンドルをドラッグすると選択要素がまとめてスケールされる（onResizeMany）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 100, h: 100, zIndex: 2 },
+    ];
+    const { root, onResizeMany } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"] });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    // bbox=(0,0,200,200)。se 角を +200,+200 → bbox 2倍(0,0,400,400)。各要素も相対位置を保って2倍。
+    const se = screen.getByTestId("group-handle-se");
+    fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(root, { clientX: 200, clientY: 200, pointerId: 1 });
+    expect(onResizeMany).toHaveBeenLastCalledWith([
+      { id: "free_001", x: 0, y: 0, w: 200, h: 200 },
+      { id: "free_002", x: 200, y: 200, w: 200, h: 200 },
+    ]);
+  });
+
+  it("ロック中の要素はグループ拡縮の対象に含めない", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 100, h: 100, zIndex: 2, locked: true },
+    ];
+    const { root, onResizeMany } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"] });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    // 非ロックは free_001 のみ＝bbox=(0,0,100,100)。se +100,+100 で2倍。free_002(locked) は含まれない。
+    const se = screen.getByTestId("group-handle-se");
+    fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(root, { clientX: 100, clientY: 100, pointerId: 1 });
+    expect(onResizeMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 0, y: 0, w: 200, h: 200 }]);
+  });
+
+  it("回転中の要素はグループ拡縮の対象に含めない（bbox の AABB とズレるため）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 100, h: 100, zIndex: 2, rotation: 30 },
+    ];
+    const { root, onResizeMany } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"] });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    // 非回転は free_001 のみ＝bbox=(0,0,100,100)。se +100,+100 で2倍。free_002(rotation) は含まれない。
+    const se = screen.getByTestId("group-handle-se");
+    fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(root, { clientX: 100, clientY: 100, pointerId: 1 });
+    expect(onResizeMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 0, y: 0, w: 200, h: 200 }]);
   });
 });
 
