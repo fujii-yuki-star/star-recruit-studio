@@ -13,6 +13,7 @@ export type ScreenId =
   | "export"
   | "precheck"
   | "looks"
+  | "looks-edit"
   | "materials"
   | "settings"
   | "about";
