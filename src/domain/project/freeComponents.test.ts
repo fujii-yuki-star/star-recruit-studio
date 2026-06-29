@@ -53,4 +53,18 @@ describe('addFreeComponentGroup', () => {
     expect(freeLayout).toBe(layout);
     expect(newIds).toEqual([]);
   });
+
+  it('縦型は等倍縮小し基点を比例配置（widget の縦横比を保つ・#281）', () => {
+    const land = addFreeComponentGroup([], 'speech_balloon'); // 横型（既定＝従来どおり）
+    const port = addFreeComponentGroup([], 'speech_balloon', 1080, 1920); // 縦型
+    const ls = land.freeLayout[0], ps = port.freeLayout[0]; // 吹き出し shape
+    expect(ps.w).toBeLessThan(ls.w); // 縦型は幅が縮む（画面に対し過大にならない）
+    expect(ps.x).toBeLessThan(ls.x); // 横位置は縮む
+    expect(ps.y).toBeGreaterThan(ls.y); // 縦位置は下へ（縦の比で proportional）
+    expect(ps.w / ps.h).toBeCloseTo(ls.w / ls.h, 2); // 縦横比を保つ（等倍＝歪まない）
+    // パーツ内テキストも等倍（吹き出しとの位置関係・fontSize を保つ）。
+    const lt = land.freeLayout[1], pt = port.freeLayout[1];
+    expect(pt.fontSize ?? 0).toBeLessThan(lt.fontSize ?? 0);
+    expect((pt.w ?? 0) / (lt.w ?? 1)).toBeCloseTo((ps.w ?? 0) / (ls.w ?? 1), 2); // text と shape が同じ倍率
+  });
 });

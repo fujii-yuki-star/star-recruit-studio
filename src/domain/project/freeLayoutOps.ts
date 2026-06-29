@@ -22,8 +22,8 @@ const DEFAULT_TEXT_COLOR = '#222222';
 const DEFAULT_SHAPE_COLOR = '#cccccc';
 // 上の既定値は横型 canvas（1920×1080）で見やすいよう調整した基準。実 canvas に合わせて比例縮尺し、
 // 縦型（1080×1920）でも要素が画面幅いっぱいで中央に寄って見える等の違和感を防ぐ（#273）。横型では係数1＝従来どおり。
-const REF_CANVAS_W = 1920;
-const REF_CANVAS_H = 1080;
+export const REF_CANVAS_W = 1920;
+export const REF_CANVAS_H = 1080;
 
 /** 新しい要素を1つ生成する（id は scene 内一意・zIndex は既存の最前面+1 で最前面に置く）。canvas 比で既定の位置/大きさをスケール（#273）。 */
 export function createFreeElement(
