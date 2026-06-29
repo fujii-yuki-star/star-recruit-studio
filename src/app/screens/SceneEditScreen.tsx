@@ -1351,7 +1351,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           onChange={(e) => patch((s) => updateLine(s, line.lineId, { subtitleText: e.target.value ? e.target.value : null }))}
                         />
                         <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                          <span className="text-sm text-muted">開始</span>
+                          <span className="text-sm text-muted">開始（場面の頭から）</span>
                           <input
                             className="input text-sm"
                             type="number"
@@ -1360,11 +1360,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             step={0.1}
                             style={{ width: 90 }}
                             placeholder="自動"
+                            title="このセリフが始まるタイミング（場面の頭からの秒数）。空欄にすると前のセリフの後に自動で続きます。"
                             value={line.startSec ?? ""}
                             // 空欄＝自動（undefined）。値ありは [0, 場面尺] にクランプして保存（範囲外を残さない＝V17 を満たす）。
                             onChange={(e) => patch((s) => updateLine(s, line.lineId, { startSec: e.target.value === "" ? undefined : Math.min(selected.durationSec, Math.max(0, Number(e.target.value))) }))}
                           />
-                          <span className="text-sm text-muted">秒（空欄＝順番に自動）</span>
+                          <span className="text-sm text-muted">秒（空欄＝前のセリフの後に自動）</span>
                         </div>
                         <div className="row-between">
                           <span className="text-sm text-muted">音声：{narrationStatusLabel[line.status] ?? line.status}</span>
