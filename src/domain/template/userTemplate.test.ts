@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Template } from './types';
 import {
-  createUserTemplateId, isUserTemplate, replaceUserTemplates, upsertUserTemplate, USER_TEMPLATE_PREFIX,
+  buildBlankTemplate, createUserTemplateId, isUserTemplate, replaceUserTemplates, upsertUserTemplate, USER_TEMPLATE_PREFIX,
 } from './userTemplate';
+import { validateTemplate } from '../validation/generated/validators.js';
 
 const tmpl = (templateId: string): Template => ({
   schemaVersion: '1.0', templateId, name: templateId, category: 'free', aspectRatio: '16:9',
@@ -74,5 +75,28 @@ describe('upsertUserTemplate', () => {
     const replaced = upsertUserTemplate(base, { ...tmpl('user_tmpl_001'), name: '更新後' });
     expect(replaced).toHaveLength(2);
     expect(replaced.find((t) => t.templateId === 'user_tmpl_001')?.name).toBe('更新後');
+  });
+});
+
+describe('buildBlankTemplate', () => {
+  it('横型(16:9)は 1920×1080・背景1枚（全面）・指定メタを持ち schema 有効', () => {
+    const t = buildBlankTemplate('user_tmpl_001', '新しい見た目', 'opening', '16:9');
+    expect(t).toMatchObject({ templateId: 'user_tmpl_001', name: '新しい見た目', category: 'opening', aspectRatio: '16:9', schemaVersion: '1.0' });
+    expect(t.canvas).toEqual({ width: 1920, height: 1080 });
+    expect(t.layers).toHaveLength(1);
+    expect(t.layers[0]).toMatchObject({ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 });
+    expect(validateTemplate(t)).toBe(true); // 保存→読込（loadUserTemplates）の ajv ゲートを通る＝消えない
+  });
+
+  it('縦型(9:16)は 1080×1920・背景も縦キャンバス全面', () => {
+    const t = buildBlankTemplate('user_tmpl_002', 'タテ', 'free', '9:16');
+    expect(t.canvas).toEqual({ width: 1080, height: 1920 });
+    expect(t.layers[0]).toMatchObject({ w: 1080, h: 1920 });
+    expect(validateTemplate(t)).toBe(true);
+  });
+
+  it('採番した id を渡せばユーザーテンプレ判定を満たす', () => {
+    const id = createUserTemplateId(['user_tmpl_004']);
+    expect(isUserTemplate(buildBlankTemplate(id, 'x', 'message', '16:9').templateId)).toBe(true);
   });
 });

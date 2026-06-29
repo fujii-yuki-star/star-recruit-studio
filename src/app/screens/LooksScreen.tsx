@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
-import { FREE_CATEGORY, type SceneCategory } from "../../domain/enums";
+import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { useProjectStore } from "../store/projectStore";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
@@ -22,6 +22,12 @@ const categoryLabel: Record<SceneCategory, string> = {
   chapter: "区切り",
   no_yuko: "ゆうこなし",
   free: "自由配置",
+};
+
+// 向き（Orientation）のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
+const orientationLabel: Record<Orientation, string> = {
+  "16:9": "横型（16:9）",
+  "9:16": "縦型（9:16）",
 };
 
 // FREE（自由配置）で「置けるもの」のラベル。FREE はテンプレ層でなく freeLayout に内容を持つため、
@@ -46,6 +52,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   const assets = useProjectStore((s) => s.assets);
   const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
   const duplicateAsUserTemplate = useProjectStore((s) => s.duplicateAsUserTemplate);
+  const createBlankUserTemplate = useProjectStore((s) => s.createBlankUserTemplate);
   const deleteUserTemplate = useProjectStore((s) => s.deleteUserTemplate);
   const setEditingTemplateId = useProjectStore((s) => s.setEditingTemplateId);
   const templateError = useProjectStore((s) => s.templateError);
@@ -55,6 +62,11 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   const [loadOk, setLoadOk] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  // ゼロから新規作成フォーム（ADR-0017「ゼロから作成」の導線＝複製に頼らず一から作る）。向き/カテゴリは編集画面で変えられないため作成時に決める。
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("新しい見た目");
+  const [newOrientation, setNewOrientation] = useState<Orientation>(ORIENTATION.landscape);
+  const [newCategory, setNewCategory] = useState<SceneCategory>(SCENE_CATEGORIES[0]);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
 
   // 選択が変わったら削除確認は閉じる（別テンプレへ確認状態を持ち越さない）。描画中リセット＝effect 内 setState を避ける React 推奨パターン。
@@ -77,6 +89,23 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
     try {
       const newId = await duplicateAsUserTemplate(current.templateId);
       if (newId) {
+        setSelectedId(newId);
+        setEditingTemplateId(newId);
+        onNavigate("looks-edit");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+  // ゼロから新規作成し、そのまま編集画面へ。名前は空白なら既定にフォールバック。連打は busy で防ぐ。
+  async function onCreateBlank() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const name = newName.trim() || "新しい見た目";
+      const newId = await createBlankUserTemplate(name, newCategory, newOrientation);
+      if (newId) {
+        setCreating(false);
         setSelectedId(newId);
         setEditingTemplateId(newId);
         onNavigate("looks-edit");
@@ -140,6 +169,42 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         title="見た目パターンを管理"
         desc="動画の見た目のパターンを確認できます。各場面に当てる見た目は「場面編集」で選べます。"
       />
+
+      {/* ゼロから新規作成（ADR-0017）：複製だけでなく一から作れる導線。向き・種類は編集画面で変えられないため作成時に決める。 */}
+      {creating ? (
+        <div className="card" style={{ marginBottom: "var(--gap-lg)" }}>
+          <h2 className="section-title">ゼロから新しい見た目を作る</h2>
+          <div className="col gap-sm">
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
+              <input className="input" value={newName} maxLength={40} onChange={(e) => setNewName(e.target.value)} />
+            </div>
+            <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>向き</label>
+                <select className="select" value={newOrientation} onChange={(e) => setNewOrientation(e.target.value as Orientation)}>
+                  {ORIENTATIONS.map((o) => (<option key={o} value={o}>{orientationLabel[o]}</option>))}
+                </select>
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>種類</label>
+                <select className="select" value={newCategory} onChange={(e) => setNewCategory(e.target.value as SceneCategory)}>
+                  {SCENE_CATEGORIES.map((c) => (<option key={c} value={c}>{categoryLabel[c]}</option>))}
+                </select>
+              </div>
+            </div>
+            <div className="row gap-sm">
+              <button className="btn btn-primary" disabled={busy} onClick={() => void onCreateBlank()}>作成して編集する</button>
+              <button className="btn btn-ghost" onClick={() => setCreating(false)}>やめる</button>
+            </div>
+            <p className="field-hint">空のキャンバス（背景のみ）から始まります。文字・素材などは次の編集画面で足せます。向き・種類は後から変えられないため、ここで選んでください。</p>
+          </div>
+        </div>
+      ) : (
+        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} onClick={() => setCreating(true)}>
+          ＋ ゼロから新しい見た目を作る
+        </button>
+      )}
 
       <div
         style={{
