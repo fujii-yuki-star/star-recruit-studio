@@ -946,7 +946,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
             <CollapsibleSection title="使用素材">
             <div className="field">
-              <label className="field-label">使用素材</label>
               {slotLayers.length === 0 ? (
                 <p className="text-sm text-muted">この見た目パターンに素材を入れる場所はありません。</p>
               ) : (
@@ -999,7 +998,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {isFree && (
               <CollapsibleSection title="自由配置">
               <div className="field">
-                <label className="field-label">自由配置</label>
                 <p className="field-hint" style={{ marginTop: 0 }}>
                   素材・文字・図形を追加し、プレビュー上でドラッグして動かす・角をつまんで大きさを変える、または数字で調整できます。
                 </p>
@@ -1493,7 +1491,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </CollapsibleSection>
 
             {/* 場面ごとの声の大きさ（全体設定を継承 or この場面だけ上書き。§6/§2.2） */}
-            <CollapsibleSection title="この場面だけ声の大きさ" defaultOpen={false}>
+            {/* 既定は畳む。ただし「この場面で上書き設定済み」なら開く＝設定を見失わない（PR#286レビュー）。
+                key を場面 id にして場面切替ごとに評価し直す（SceneEditScreen は場面切替で再マウントしないため）。 */}
+            <CollapsibleSection key={selected.sceneId} title="この場面だけ声の大きさ" defaultOpen={sceneNarrationVolume != null}>
             <div className="field">
               <div className="toggle-row">
                 <span className="field-label" style={{ margin: 0 }}>この場面だけ声の大きさを変える</span>
