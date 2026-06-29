@@ -172,7 +172,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [selectedId, setSelectedId] = useState("");
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
-  // こだわり編集（現状はUIのみ・後でドメインへ結線）
+  // こだわり編集（詳細編集）の開閉。整列/スナップ・複数選択・コピペ・数値入力・テキスト体裁・レイヤー一覧・Undo は結線済み（α-3 ①・#205-211）。
   const [showAdvanced, setShowAdvanced] = useState(false);
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1344,6 +1344,25 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </button>
                 </div>
               </div>
+              <details>
+                <summary className="text-sm text-muted" style={{ cursor: "pointer", padding: "2px 0" }}>声の調整（速さ・高さ・抑揚）</summary>
+                {/* この場面のナレーションの声を場面ごとに上書き。null=動画全体（設定画面）を継承。変更で status をリセット＝作り直し（#249）。 */}
+                <LineVoiceParam
+                  label="話す速さ" range={SPEED_RANGE} value={selected.narration.speed} lowLabel="ゆっくり" highLabel="はやい"
+                  onChange={(v) => patch((s) => ({ ...s, narration: { ...s.narration, speed: v, status: NARRATION_STATUS.none } }))}
+                  onReset={() => patch((s) => ({ ...s, narration: { ...s.narration, speed: null, status: NARRATION_STATUS.none } }))}
+                />
+                <LineVoiceParam
+                  label="声の高さ" range={PITCH_RANGE} value={selected.narration.pitch} lowLabel="ひくい" highLabel="たかい"
+                  onChange={(v) => patch((s) => ({ ...s, narration: { ...s.narration, pitch: v, status: NARRATION_STATUS.none } }))}
+                  onReset={() => patch((s) => ({ ...s, narration: { ...s.narration, pitch: null, status: NARRATION_STATUS.none } }))}
+                />
+                <LineVoiceParam
+                  label="抑揚" range={INTONATION_RANGE} value={selected.narration.intonation} lowLabel="おだやか" highLabel="ゆたか"
+                  onChange={(v) => patch((s) => ({ ...s, narration: { ...s.narration, intonation: v, status: NARRATION_STATUS.none } }))}
+                  onReset={() => patch((s) => ({ ...s, narration: { ...s.narration, intonation: null, status: NARRATION_STATUS.none } }))}
+                />
+              </details>
               <div className="row gap-sm" style={{ marginTop: 6 }}>
                 <button
                   className="btn btn-ghost btn-icon text-sm"
