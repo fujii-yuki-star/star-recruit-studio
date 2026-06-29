@@ -217,7 +217,8 @@ pub fn import_template_asset(
         .map_err(|_| "素材を読み取れませんでした。もう一度お試しください。".to_string())?;
     let dir = template_assets_dir(&app)?;
     fs::create_dir_all(&dir).map_err(|_| ASSET_SAVE_ERR.to_string())?;
-    fs::write(dir.join(sanitize_file_name(&file_name)), &bytes).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+    fs::write(dir.join(sanitize_file_name(&file_name)), &bytes)
+        .map_err(|_| ASSET_SAVE_ERR.to_string())?;
     Ok(())
 }
 
@@ -231,8 +232,14 @@ pub fn load_template_assets(app: tauri::AppHandle) -> Result<Vec<(String, String
     }
     let mut out: Vec<(String, String)> = Vec::new();
     for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
+        // 1エントリの列挙失敗で全体を止めない（既読分は返す・ログのみ＝下のファイル読込スキップと同方針）。
+        let path = match entry {
+            Ok(e) => e.path(),
+            Err(e) => {
+                eprintln!("[template_assets] エントリ読み込みスキップ: {}", e);
+                continue;
+            }
+        };
         if !path.is_file() {
             continue;
         }
@@ -257,6 +264,10 @@ pub fn load_template_assets(app: tauri::AppHandle) -> Result<Vec<(String, String
 /// テンプレ削除時の掃除に使う（テンプレ素材は登録テンプレ専用＝ADR-0021）。
 #[tauri::command]
 pub fn delete_template_asset(app: tauri::AppHandle, asset_id: String) -> Result<(), String> {
+    // defense-in-depth：テンプレ所有素材以外の id を弾く（呼び出しミスで他種ファイルを stem 一致で消さない）。
+    if !asset_id.starts_with("tmpl_asset_") {
+        return Err("不正な素材IDです。".to_string());
+    }
     let dir = template_assets_dir(&app)?;
     if !dir.exists() {
         return Ok(());

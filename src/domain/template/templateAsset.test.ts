@@ -29,6 +29,16 @@ describe('createTemplateAssetId', () => {
   });
 });
 
+describe('templateAssetSeq', () => {
+  it('連番部分を数値で返す・テンプレ素材でない/非数値/末尾空は null', () => {
+    expect(templateAssetSeq('tmpl_asset_001')).toBe(1);
+    expect(templateAssetSeq('tmpl_asset_999')).toBe(999);
+    expect(templateAssetSeq('asset_001')).toBeNull(); // プロジェクト素材は null
+    expect(templateAssetSeq('tmpl_asset_abc')).toBeNull(); // 非数値は null
+    expect(templateAssetSeq('tmpl_asset_')).toBeNull(); // 末尾空（Number('')=0 を弾く）
+  });
+});
+
 describe('templateAssetIdsOf', () => {
   const layer = (id: string, assetId?: string): Layer => ({ id, type: 'background', x: 0, y: 0, w: 10, h: 10, ...(assetId ? { assetId } : {}) });
 

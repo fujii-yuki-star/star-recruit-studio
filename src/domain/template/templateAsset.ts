@@ -13,8 +13,10 @@ export function isTemplateAsset(assetId: string): boolean {
 /** `tmpl_asset_NNN` の連番部分を数値で返す（テンプレ素材でなければ null）。 */
 export function templateAssetSeq(assetId: string): number | null {
   if (!isTemplateAsset(assetId)) return null;
-  const n = Number(assetId.slice(`${TEMPLATE_ASSET_PREFIX}_`.length));
-  return Number.isInteger(n) && n >= 0 ? n : null;
+  const rest = assetId.slice(`${TEMPLATE_ASSET_PREFIX}_`.length);
+  const n = Number(rest);
+  // 末尾が空（`tmpl_asset_`）は Number('')=0 になるため弾く（連番なし＝不正）。非数値も null。
+  return rest !== '' && Number.isInteger(n) && n >= 0 ? n : null;
 }
 
 /**
