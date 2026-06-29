@@ -56,7 +56,7 @@ describe("FreeLayoutOverlay: 選択とリサイズハンドル", () => {
     const { root, boxes } = renderOverlay({ selectedIds: ["free_001"] });
     expect(root).toBeInTheDocument();
     expect(boxes).toHaveLength(2);
-    expect(boxes[0].children.length).toBeGreaterThanOrEqual(4); // 選択中＝リサイズ4＋回転ハンドル
+    expect(boxes[0].children).toHaveLength(6); // 選択中＝リサイズ4＋回転(stem+knob)2
     expect(screen.getByTestId("rotate-handle")).toBeInTheDocument(); // 回転ハンドルが出る
     expect(boxes[1].children).toHaveLength(0); // 非選択＝ハンドルなし
   });
@@ -225,6 +225,17 @@ describe("FreeLayoutOverlay: 回転ハンドル（#279）", () => {
     ];
     renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"] });
     expect(screen.queryByTestId("rotate-handle")).toBeNull();
+  });
+
+  it("回転ドラッグは onInteractionStart/End を呼ぶ（Undo の1ステップ境界・#211）", () => {
+    const layout: FreeElement[] = [{ id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 200, zIndex: 1 }];
+    const onInteractionStart = vi.fn();
+    const onInteractionEnd = vi.fn();
+    const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"], onInteractionStart, onInteractionEnd });
+    fireEvent.pointerDown(screen.getByTestId("rotate-handle"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onInteractionStart).toHaveBeenCalledTimes(1);
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    expect(onInteractionEnd).toHaveBeenCalledTimes(1);
   });
 });
 
