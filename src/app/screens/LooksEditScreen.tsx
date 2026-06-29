@@ -257,8 +257,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         {/* 左：プレビュー＋レイヤー操作オーバーレイ（ドラッグ/リサイズ/吸着・③c） */}
         <div className="card">
           <h2 className="section-title">プレビュー</h2>
-          <div style={{ position: "relative" }}>
-            <ScenePreview scene={sampleScene} template={draft} />
+          <ScenePreview scene={sampleScene} template={draft}>
             <TemplateLayerOverlay
               layers={draft.layers}
               canvasW={draft.canvas.width}
@@ -268,7 +267,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               onChange={(id, g) => onUpdateLayer(id, g)}
               label={(l) => layerLabel[l.type]}
             />
-          </div>
+          </ScenePreview>
           <p className="text-sm text-muted mt">プレビュー上で要素をドラッグ・拡大縮小できます（写真・文字は例として表示）。</p>
         </div>
 

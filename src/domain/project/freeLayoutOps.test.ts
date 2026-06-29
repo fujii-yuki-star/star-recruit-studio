@@ -34,6 +34,22 @@ describe('createFreeElement / addFreeElement', () => {
     expect(shape.fillColor).toBeTruthy();
   });
 
+  it('canvas 比で既定の位置・大きさをスケール（横型は不変・縦型は幅が画面に対し過大にならない・#273）', () => {
+    const ref = createFreeElement([], 'text'); // 引数なし＝横型基準（1920×1080）
+    const land = createFreeElement([], 'text', 1920, 1080);
+    expect(land.w).toBe(ref.w); // 横型 1920×1080 は係数1＝従来どおり
+    expect(land.x).toBe(ref.x);
+
+    const port = createFreeElement([], 'text', 1080, 1920);
+    expect(port.w).toBeLessThan(land.w); // 縦型は幅が縮む（画面いっぱいで中央寄りに見える違和感を防ぐ）
+    expect(port.fontSize).toBeLessThan(land.fontSize ?? 0); // fontSize も幅基準でスケール（文字と枠の比率を一定に）
+    // 画面幅に対する占有率は横型と同程度（比例スケール）。
+    expect(port.w / 1080).toBeCloseTo(land.w / 1920, 2);
+    expect(port.x / 1080).toBeCloseTo(land.x / 1920, 2);
+    expect((port.fontSize ?? 0) / 1080).toBeCloseTo((land.fontSize ?? 0) / 1920, 2);
+    expect(port.y).toBeGreaterThan(land.y); // 縦方向は canvasH 基準＝縦型では下に伸びる
+  });
+
   it('追加のたびに id が連番・zIndex が最前面+1 になる', () => {
     let layout: FreeElement[] = [];
     layout = addFreeElement(layout, 'shape').freeLayout; // free_001 z=1
