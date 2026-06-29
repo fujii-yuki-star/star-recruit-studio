@@ -216,6 +216,8 @@ template_pack_name/
     "opacity": 0.55,
     "radius": 16
   },
+  "strokeColor": "#ffffff",
+  "strokeWidth": 2,
   "zIndex": 50
 }
 ```

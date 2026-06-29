@@ -151,6 +151,16 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               </select>
             </div>
           </div>
+          {/* 縁取り（#275）：太さ>0 で文字（字幕含む）に縁取りを敷く。描画は既存（FREE の #209）と同じ仕組み。 */}
+          <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+            {numField("縁取りの太さ", l.strokeWidth ?? 0, (v) => onUpdateLayer(l.id, { strokeWidth: v, ...(v > 0 && l.strokeColor == null ? { strokeColor: "#ffffff" } : {}) }), 0, 20)}
+            {(l.strokeWidth ?? 0) > 0 && (
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
+                <input className="input" type="color" value={l.strokeColor ?? "#ffffff"} onChange={(e) => onUpdateLayer(l.id, { strokeColor: e.target.value })} />
+              </div>
+            )}
+          </div>
           {/* 字幕は背景帯（黒固定で実用性が低い＝#275）。付ける/色/濃さを編集できるよう開放（描画は既存の layer.background を使用）。 */}
           {l.type === "subtitle" && (
             <div className="col gap-sm" style={{ marginTop: 4 }}>

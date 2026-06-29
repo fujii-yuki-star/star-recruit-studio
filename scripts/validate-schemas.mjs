@@ -45,6 +45,25 @@ for (const [name, validate, path] of cases) {
   }
 }
 
+// テンプレ Layer の縁取り（strokeColor/strokeWidth・#275・任意・後方互換のマイナーで 1.0 据え置き）
+const tplBase = load(fx('template-pack/opening_yuko_right_v1/template.json'));
+const withLayer0 = (prop) => ({ ...tplBase, layers: tplBase.layers.map((l, i) => (i === 0 ? { ...l, ...prop } : l)) });
+const tplAccept = [
+  ['template: 縁取り(strokeColor/strokeWidth)を許容（#275）', withLayer0({ strokeColor: '#ffffff', strokeWidth: 2 })],
+];
+const tplReject = [
+  ['template: strokeColor 非hexは拒否', withLayer0({ strokeColor: 'white' })],
+  ['template: strokeWidth 負は拒否', withLayer0({ strokeWidth: -1 })],
+];
+for (const [desc, data] of tplAccept) {
+  if (vTemplate(data)) console.log(`PASS  must-accept  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-accept  ${desc}`); for (const e of vTemplate.errors ?? []) console.log(`   ${e.instancePath} ${e.message}`); }
+}
+for (const [desc, data] of tplReject) {
+  if (!vTemplate(data)) console.log(`PASS  must-reject  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
+}
+
 // 相互参照（schema では表せない横断条件）
 const project = load(fx('project.sample.json'));
 const assetIds = new Set(project.assets.map((a) => a.assetId));

@@ -33,6 +33,9 @@ export interface Layer {
   opacity?: number;
   radius?: number;
   background?: LayerBackground;
+  /** 文字/字幕の縁取り（#275・任意）。strokeWidth>0 のとき描画（FREE の #209 と同じ仕組みを流用）。 */
+  strokeColor?: string;
+  strokeWidth?: number;
 }
 
 export interface TemplateAiHint {

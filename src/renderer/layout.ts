@@ -163,6 +163,9 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           background: bg,
           isSubtitle: layer.type === 'subtitle',
           fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
+          // 縁取り（#275）。LayoutItem/SVG は既存（FREE の #209）と同じ仕組みで描画。
+          strokeColor: layer.strokeColor,
+          strokeWidth: layer.strokeWidth,
         });
         break;
       }
