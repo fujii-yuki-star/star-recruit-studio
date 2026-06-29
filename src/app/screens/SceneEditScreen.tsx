@@ -655,8 +655,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="col gap" style={{ overflow: "hidden" }}>
             <div className="editor-col grow" style={{ overflow: "auto" }}>
               <h2 className="field-label">仕上がり確認</h2>
-              <div style={{ position: "relative" }}>
-                <ScenePreview scene={selected} template={template}>
+              {/* オーバーレイは ScenePreview の fit 箱内に重なる（#273）。editPopover は position:fixed のため外側 relative は不要。 */}
+              <ScenePreview scene={selected} template={template}>
                 {/* FREE 場面：プレビュー（fit箱）の子に重ねる＝縦型でも実寸一致でドラッグ移動・角リサイズが追従（#273・Phase 4b）。 */}
                 {isFree && template && (
                   <FreeLayoutOverlay
@@ -678,7 +678,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onInteractionEnd={endHistoryGroup}
                   />
                 )}
-                </ScenePreview>
+              </ScenePreview>
                 {editPopover && editPopoverEl && (
                   <>
                     {/* 外側クリックで閉じる透明バックドロップ。 */}
@@ -711,7 +711,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     </div>
                   </>
                 )}
-              </div>
               <p className="text-sm text-muted mt">
                 選択中の場面「{sceneTypeLabel[selected.sceneType]}」の仕上がりです。右側を直すとここに反映されます。
               </p>

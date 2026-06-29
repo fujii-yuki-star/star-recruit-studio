@@ -40,8 +40,9 @@ export function createFreeElement(
       return { ...base, kind, w: sx(DEFAULT_SLOT_W), h: sy(DEFAULT_SLOT_H), assetId: null, fit: DEFAULT_FIT };
     case FREE_ELEMENT_KIND.text:
       return {
+        // fontSize も幅(sx)基準でスケール＝文字と枠の比率を縦横で一定に保つ（縦型で初期文字が大きすぎない・PR#280レビュー）。
         ...base, kind, w: sx(DEFAULT_TEXT_W), h: sy(DEFAULT_TEXT_H),
-        text: DEFAULT_TEXT, fontSize: DEFAULT_TEXT_FONT_SIZE, color: DEFAULT_TEXT_COLOR, fontWeight: FONT_WEIGHT.normal,
+        text: DEFAULT_TEXT, fontSize: sx(DEFAULT_TEXT_FONT_SIZE), color: DEFAULT_TEXT_COLOR, fontWeight: FONT_WEIGHT.normal,
       };
     case FREE_ELEMENT_KIND.shape:
       return {

@@ -42,9 +42,11 @@ describe('createFreeElement / addFreeElement', () => {
 
     const port = createFreeElement([], 'text', 1080, 1920);
     expect(port.w).toBeLessThan(land.w); // 縦型は幅が縮む（画面いっぱいで中央寄りに見える違和感を防ぐ）
+    expect(port.fontSize).toBeLessThan(land.fontSize ?? 0); // fontSize も幅基準でスケール（文字と枠の比率を一定に）
     // 画面幅に対する占有率は横型と同程度（比例スケール）。
     expect(port.w / 1080).toBeCloseTo(land.w / 1920, 2);
     expect(port.x / 1080).toBeCloseTo(land.x / 1920, 2);
+    expect((port.fontSize ?? 0) / 1080).toBeCloseTo((land.fontSize ?? 0) / 1920, 2);
     expect(port.y).toBeGreaterThan(land.y); // 縦方向は canvasH 基準＝縦型では下に伸びる
   });
 
