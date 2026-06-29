@@ -26,6 +26,8 @@ import { getAiModel } from "../../infrastructure/appSettings";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
+import { templateAssetIdsOf } from "../../domain/template/templateAsset";
+import { deleteTemplateAsset, importTemplateAsset, loadTemplateAssetUrls } from "../../infrastructure/templateAssetFs";
 import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
@@ -63,6 +65,8 @@ interface ProjectState {
   assets: Asset[];
   /** 素材の表示用src（data URL）。assetId→src。project.json には入れず永続化しない。 */
   assetSrcById: Record<string, string>;
+  /** テンプレ所有素材の表示用src（data URL）。tmpl_asset_NNN→src（ADR-0021・グローバル・プロジェクト非依存）。起動時に一括ロード。 */
+  templateAssetSrcById: Record<string, string>;
   /** 生成済みナレーション音声（data URL）。キーは単一 narration＝sceneId／掛け合い＝lineAudioKey(sceneId,lineId)（ADR-0015 PR-C2）。メモリ保持し保存時に voicePath として永続化する。 */
   narrationAudioById: Record<string, string>;
   /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
@@ -145,6 +149,8 @@ interface ProjectState {
   duplicateAsUserTemplate: (sourceTemplateId: string) => Promise<string>;
   /** ゼロからマイテンプレを新規作成して保存し、新 id を返す（失敗時は ""）。向き/カテゴリ/名前を指定（ADR-0017）。 */
   createBlankUserTemplate: (name: string, category: SceneCategory, orientation: Orientation) => Promise<string>;
+  /** テンプレ既定素材を取り込み、採番した tmpl_asset id を返す（失敗・非 Tauri は null）。表示用 src も登録する（ADR-0021）。 */
+  registerTemplateAsset: (file: File) => Promise<string | null>;
   /** テンプレ保存/削除の失敗文言（§2-5。成功/次操作で消える）。保存状態とは別物。 */
   templateError: string | null;
   clearTemplateError: () => void;
@@ -292,6 +298,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   templates: loadBundledTemplates(),
   assets: [], // 新規は空（見本素材は実画像が無く混乱の元のため・α）。利用者が素材管理/ウィザードで追加する。
   assetSrcById: {},
+  templateAssetSrcById: {},
   narrationAudioById: {},
   isGeneratingNarration: false,
   isImporting: false,
@@ -708,8 +715,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }),
   loadUserTemplates: async () => {
     // グローバルのユーザーテンプレを読み、templates の user_tmpl 部分を差し替える（冪等）。非 Tauri は空。
-    const user = await userTemplateFs.loadUserTemplates();
-    set((s) => ({ templates: replaceUserTemplates(s.templates, user) }));
+    // 同時にテンプレ所有素材の表示用 URL も一括ロード（プロジェクト非依存・起動時＝ADR-0021 PR C）。
+    const [user, templateAssetSrcById] = await Promise.all([
+      userTemplateFs.loadUserTemplates(),
+      loadTemplateAssetUrls(),
+    ]);
+    set((s) => ({ templates: replaceUserTemplates(s.templates, user), templateAssetSrcById }));
   },
   saveUserTemplate: async (template) => {
     try {
@@ -722,9 +733,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   deleteUserTemplate: async (templateId) => {
     // ユーザーテンプレ以外（同梱/取り込みパック）はこのアクションで消さない（誤渡し時の同梱消去防止）。
     if (!isUserTemplate(templateId)) return false;
+    // 削除前に所有素材 id を控える（テンプレ素材は登録テンプレ専用ゆえ、テンプレと一緒に掃除する＝ADR-0021）。
+    const owned = templateAssetIdsOf(get().templates.find((t) => t.templateId === templateId)?.layers ?? []);
     try {
       await userTemplateFs.deleteUserTemplate(templateId);
-      set((s) => ({ templates: s.templates.filter((t) => t.templateId !== templateId), templateError: null }));
+      for (const assetId of owned) await deleteTemplateAsset(assetId);
+      set((s) => ({
+        templates: s.templates.filter((t) => t.templateId !== templateId),
+        templateAssetSrcById: Object.fromEntries(
+          Object.entries(s.templateAssetSrcById).filter(([id]) => !owned.includes(id)),
+        ),
+        templateError: null,
+      }));
       return true;
     } catch {
       set({ templateError: "見た目パターンを削除できませんでした。もう一度お試しください。" });
@@ -749,6 +769,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const blank = buildBlankTemplate(newId, name, category, orientation);
     await get().saveUserTemplate(blank);
     return get().templates.some((t) => t.templateId === newId) ? newId : "";
+  },
+  registerTemplateAsset: async (file) => {
+    // 取り込み→グローバル保存（Tauri）→ 表示用 src を合流。採番は現存テンプレ素材 id を基に最大連番+1。
+    const result = await importTemplateAsset(file, Object.keys(get().templateAssetSrcById));
+    if (!result) return null;
+    set((s) => ({ templateAssetSrcById: { ...s.templateAssetSrcById, [result.assetId]: result.url } }));
+    return result.assetId;
   },
   clearTemplateError: () => set({ templateError: null }),
   setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),

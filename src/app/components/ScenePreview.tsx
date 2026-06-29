@@ -13,6 +13,8 @@ import { useProjectStore } from "../store/projectStore";
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
 export function ScenePreview({ scene, template, activeLineIndex, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
+  // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
+  const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const ref = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<{ width: number; height: number } | null>(null);
@@ -80,7 +82,7 @@ export function ScenePreview({ scene, template, activeLineIndex, children }: { s
   const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
   // responsive:true で SVG ルートを 100%（viewBox は canvas 実寸を保持）にし、外枠の実寸は計測結果に従う。
   const svg = layoutToSvg(layoutScene(scene, template, layoutOpts), {
-    assetSrc: (id) => (id ? assetSrcById[id] : undefined),
+    assetSrc: (id) => (id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined),
     responsive: true,
     // プレビューも書き出しと同じく常時クレジットを表示（ADR-0001 パリティ）。
     credit: activeLine ? creditForLine(activeLine, baseCredit) : baseCredit,
