@@ -67,4 +67,22 @@ describe('addFreeComponentGroup', () => {
     expect(pt.fontSize ?? 0).toBeLessThan(lt.fontSize ?? 0);
     expect((pt.w ?? 0) / (lt.w ?? 1)).toBeCloseTo((ps.w ?? 0) / (ls.w ?? 1), 2); // text と shape が同じ倍率
   });
+
+  it('縦型：slot を含むパーツ（before_after）も等倍縮小し canvas 内に収まる（#281）', () => {
+    const land = addFreeComponentGroup([], 'before_after');
+    const port = addFreeComponentGroup([], 'before_after', 1080, 1920);
+    const landSlots = land.freeLayout.filter((e) => e.kind === 'slot');
+    const portSlots = port.freeLayout.filter((e) => e.kind === 'slot');
+    expect(landSlots).toHaveLength(2);
+    expect(portSlots).toHaveLength(2);
+    portSlots.forEach((s, i) => {
+      expect(s.w).toBeLessThan(landSlots[i].w); // 縦型は縮む
+      expect(s.w / s.h).toBeCloseTo(landSlots[i].w / landSlots[i].h, 2); // 縦横比保持（360:240）
+    });
+    // すべての要素が canvas(1080×1920) 内に収まる（横型基準の座標で外へはみ出さない）。
+    port.freeLayout.forEach((e) => {
+      expect(e.x + e.w).toBeLessThanOrEqual(1080);
+      expect(e.y + e.h).toBeLessThanOrEqual(1920);
+    });
+  });
 });
