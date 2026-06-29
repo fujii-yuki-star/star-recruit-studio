@@ -24,6 +24,7 @@ function makeLayout(): FreeElement[] {
 function renderOverlay(overrides: Partial<ComponentProps<typeof FreeLayoutOverlay>> = {}) {
   const spies = {
     onSelect: vi.fn(),
+    onSelectMany: vi.fn(),
     onChange: vi.fn(),
     onMoveMany: vi.fn(),
     onDuplicate: vi.fn(),
@@ -103,6 +104,37 @@ describe("FreeLayoutOverlay: 複数選択・一括操作（#206）", () => {
       { id: "free_001", x: 130, y: 140 },
       { id: "free_002", x: 30, y: 40 },
     ]);
+  });
+});
+
+describe("FreeLayoutOverlay: 範囲選択（マーキー・#274）", () => {
+  // jsdom はレイアウトを持たないため getBoundingClientRect を実寸でモック（scale=1＝canvas と等倍）。
+  const mockRect = (root: HTMLElement) => {
+    root.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+  };
+
+  it("空白をドラッグすると矩形が出て、交差した要素が onSelectMany でまとめて選択される", () => {
+    const { root, onSelect, onSelectMany } = renderOverlay({ selectedIds: [] });
+    mockRect(root);
+    fireEvent.pointerDown(root, { button: 0, clientX: 50, clientY: 50, pointerId: 1 });
+    expect(onSelect).toHaveBeenCalledWith(null); // 空白押下で一旦解除
+    expect(screen.getByTestId("marquee")).toBeInTheDocument(); // 矩形が出る
+    fireEvent.pointerMove(root, { clientX: 350, clientY: 350, pointerId: 1 });
+    // free_001(100,100,400,120) と free_002(0,0,200,200) が矩形(50..350)に交差。
+    expect(onSelectMany).toHaveBeenLastCalledWith(["free_001", "free_002"]);
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    expect(screen.queryByTestId("marquee")).not.toBeInTheDocument(); // 終了で矩形が消える
+  });
+
+  it("空白クリック（ドラッグなし）は選択解除のままで集合選択は呼ばれない", () => {
+    const { root, onSelect, onSelectMany } = renderOverlay({ selectedIds: ["free_001"] });
+    mockRect(root);
+    fireEvent.pointerDown(root, { button: 0, clientX: 50, clientY: 50, pointerId: 1 });
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    expect(onSelect).toHaveBeenCalledWith(null);
+    expect(onSelectMany).not.toHaveBeenCalled(); // 動かしていない＝集合選択なし
+    expect(screen.queryByTestId("marquee")).not.toBeInTheDocument();
   });
 });
 
