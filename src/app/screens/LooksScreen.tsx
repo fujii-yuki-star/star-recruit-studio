@@ -5,6 +5,7 @@ import { ASSET_TYPE, FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, FREE_CATEGORY, FREE_S
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
+import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { useProjectStore } from "../store/projectStore";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
@@ -158,6 +159,8 @@ function usedElements(template: Template): string[] {
 export function LooksScreen() {
   const templates = useProjectStore((s) => s.templates);
   const assets = useProjectStore((s) => s.assets);
+  // 立ち絵レイヤーの「ポーズ（既定）」候補＝ゆうこ素材の表情タグ（AI と同じ一覧・#250）。enum 直書きを避ける（§2-7）。
+  const yukoPoseTags = buildYukoPoseTags(assets);
   const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
   const duplicateAsUserTemplate = useProjectStore((s) => s.duplicateAsUserTemplate);
   const deleteUserTemplate = useProjectStore((s) => s.deleteUserTemplate);
@@ -307,12 +310,27 @@ export function LooksScreen() {
     }
     if (l.type === "logo" || l.type === "character") {
       return (
-        <div className="field" style={{ margin: 0 }}>
-          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
-          <select className="select" value={l.fit ?? FIT.contain} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
-            {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
-          </select>
-        </div>
+        <>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
+            <select className="select" value={l.fit ?? FIT.contain} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
+              {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
+            </select>
+          </div>
+          {l.type === "character" && (
+            <div className="field" style={{ margin: "8px 0 0" }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>ポーズ（既定）</label>
+              {/* 既定ポーズ＝defaultPoseTag。空＝指定なし（場面ごとに選ぶ）。候補はゆうこ素材の表情タグ。 */}
+              <select className="select" value={l.defaultPoseTag ?? ""} onChange={(e) => onUpdateLayer(l.id, { defaultPoseTag: e.target.value || undefined })}>
+                <option value="">指定なし（場面で選ぶ）</option>
+                {yukoPoseTags.map((t) => (<option key={t} value={t}>{t}</option>))}
+              </select>
+              {yukoPoseTags.length === 0 && (
+                <p className="field-hint" style={{ marginTop: 2 }}>選べるポーズは、素材に追加したゆうこ画像から増えます。</p>
+              )}
+            </div>
+          )}
+        </>
       );
     }
     return null;
