@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
-  addFreeElement, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  freeElementsInRect, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, sendFreeElementToBack,
+  addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
+  freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, sendFreeElementToBack,
   snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -129,6 +129,41 @@ describe('freeElementsInRect（範囲選択・マーキー・#274）', () => {
       { id: 'free_003', kind: 'shape', x: 0, y: 0, w: 100, h: 100 },
     ];
     expect(freeElementsInRect(withFlags, { x0: -10, y0: -10, x1: 110, y1: 110 })).toEqual(['free_003']);
+  });
+});
+
+describe('groupBBox / resizeGroup / applyFreeElementGeoms（複数同時リサイズ・#274）', () => {
+  const els: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 100, h: 100 },
+    { id: 'free_002', kind: 'shape', x: 300, y: 200, w: 100, h: 100 },
+  ];
+
+  it('groupBBox は全要素を囲む最小矩形（空は null）', () => {
+    expect(groupBBox([])).toBeNull();
+    expect(groupBBox(els)).toEqual({ x: 100, y: 100, w: 300, h: 200 }); // (100,100)..(400,300)
+  });
+
+  it('resizeGroup：bbox を2倍にすると各要素の相対位置・大きさが保たれて2倍になる', () => {
+    const old = { x: 100, y: 100, w: 300, h: 200 };
+    const next = { x: 100, y: 100, w: 600, h: 400 }; // 左上固定で幅高さ2倍
+    expect(resizeGroup(els, old, next)).toEqual([
+      { id: 'free_001', x: 100, y: 100, w: 200, h: 200 },
+      { id: 'free_002', x: 500, y: 300, w: 200, h: 200 },
+    ]);
+  });
+
+  it('resizeGroup：極端な縮小でも各要素は FREE_MIN_SIZE 以上にクランプ（消えない）', () => {
+    const tiny: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100 }];
+    const out = resizeGroup(tiny, { x: 0, y: 0, w: 1000, h: 1000 }, { x: 0, y: 0, w: 1, h: 1 });
+    expect(out[0].w).toBe(FREE_MIN_SIZE);
+    expect(out[0].h).toBe(FREE_MIN_SIZE);
+  });
+
+  it('applyFreeElementGeoms：指定 id の x,y,w,h を反映し未指定は不変・空は同一参照', () => {
+    const out = applyFreeElementGeoms(els, [{ id: 'free_002', x: 0, y: 0, w: 50, h: 50 }]);
+    expect(out[0]).toEqual(els[0]); // free_001 不変
+    expect(out[1]).toMatchObject({ id: 'free_002', x: 0, y: 0, w: 50, h: 50 });
+    expect(applyFreeElementGeoms(els, [])).toBe(els);
   });
 });
 

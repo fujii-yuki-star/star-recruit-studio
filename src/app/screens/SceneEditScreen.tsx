@@ -5,7 +5,7 @@ import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
-import { addFreeElement, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
@@ -307,6 +307,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 一括移動：複数選択の全要素の位置を1回の更新でまとめて反映（オーバーレイのドラッグから・#206）。
   const moveFreeMany = (moves: { id: string; x: number; y: number }[]) =>
     patch((s) => ({ ...s, freeLayout: applyFreeElementPositions(s.freeLayout ?? [], moves) }));
+  // 複数同時リサイズ（#274）：グループ拡縮の結果（id ごとの x,y,w,h）をまとめて適用。
+  const resizeFreeMany = (updates: FreeElementGeom[]) =>
+    patch((s) => ({ ...s, freeLayout: applyFreeElementGeoms(s.freeLayout ?? [], updates) }));
   // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
   const removeFreeMany = (ids: string[]) => {
     patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids) }));
@@ -672,6 +675,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onSelect={selectFree}
                     onSelectMany={selectFreeMany}
                     onChange={(id, g) => patchFreeEl(id, g)}
+                    onResizeMany={resizeFreeMany}
                     onMoveMany={moveFreeMany}
                     gridSize={gridSnap ? FREE_GRID_SIZE : 0}
                     onDuplicate={duplicateFreeEl}
