@@ -88,8 +88,10 @@ export function FreeLayoutOverlay({
   useEffect(() => () => { if (dragRef.current) onInteractionEnd?.(); }, [onInteractionEnd]);
   // 主＝最後に選択した要素（リサイズハンドルはこれだけに出す。複数同時リサイズは曖昧なので非対応）。
   const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
-  // 複数同時リサイズ（#274）：選択中の非ロック・非表示要素のグループ bbox を出し、その角ハンドルで一括拡縮する。
-  const groupEls = freeLayout.filter((el) => selectedIds.includes(el.id) && !el.locked && !el.hidden);
+  // 複数同時リサイズ（#274）：選択中の非ロック・非表示・非回転要素のグループ bbox を出し、その角ハンドルで一括拡縮する。
+  // 回転要素を除くのは、bbox を論理座標(x/y/w/h)の AABB で計算するため＝回転後の表示領域とズレて意図しない拡縮になるのを防ぐ
+  // （単一要素のリサイズハンドルも !rotated で非表示にしているのと整合。回転要素は数値入力で調整・#208）。
+  const groupEls = freeLayout.filter((el) => selectedIds.includes(el.id) && !el.locked && !el.hidden && (el.rotation ?? 0) === 0);
   const isGroupResize = selectedIds.length > 1 && groupEls.length > 0;
   const groupBox = isGroupResize ? groupBBox(groupEls) : null;
   // 右クリックメニュー（対象 id とビューポート座標）。
@@ -420,6 +422,7 @@ export function FreeLayoutOverlay({
           {HANDLES.map((hd) => (
             <div
               key={hd.corner}
+              data-testid={`group-handle-${hd.corner}`}
               onPointerDown={(e) => beginGroupResize(e, hd.corner)}
               style={{
                 position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12,

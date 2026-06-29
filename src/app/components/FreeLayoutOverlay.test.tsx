@@ -151,7 +151,7 @@ describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
     const { root, onResizeMany } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"] });
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
     // bbox=(0,0,200,200)。se 角を +200,+200 → bbox 2倍(0,0,400,400)。各要素も相対位置を保って2倍。
-    const se = screen.getByTestId("group-bbox").children[3] as HTMLElement; // HANDLES: nw,ne,sw,se
+    const se = screen.getByTestId("group-handle-se");
     fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     fireEvent.pointerMove(root, { clientX: 200, clientY: 200, pointerId: 1 });
     expect(onResizeMany).toHaveBeenLastCalledWith([
@@ -168,7 +168,21 @@ describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
     const { root, onResizeMany } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"] });
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
     // 非ロックは free_001 のみ＝bbox=(0,0,100,100)。se +100,+100 で2倍。free_002(locked) は含まれない。
-    const se = screen.getByTestId("group-bbox").children[3] as HTMLElement;
+    const se = screen.getByTestId("group-handle-se");
+    fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(root, { clientX: 100, clientY: 100, pointerId: 1 });
+    expect(onResizeMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 0, y: 0, w: 200, h: 200 }]);
+  });
+
+  it("回転中の要素はグループ拡縮の対象に含めない（bbox の AABB とズレるため）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 100, h: 100, zIndex: 2, rotation: 30 },
+    ];
+    const { root, onResizeMany } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"] });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    // 非回転は free_001 のみ＝bbox=(0,0,100,100)。se +100,+100 で2倍。free_002(rotation) は含まれない。
+    const se = screen.getByTestId("group-handle-se");
     fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     fireEvent.pointerMove(root, { clientX: 100, clientY: 100, pointerId: 1 });
     expect(onResizeMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 0, y: 0, w: 200, h: 200 }]);
