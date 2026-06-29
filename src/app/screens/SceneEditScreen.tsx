@@ -676,6 +676,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onSelectMany={selectFreeMany}
                     onChange={(id, g) => patchFreeEl(id, g)}
                     onResizeMany={resizeFreeMany}
+                    onRotate={(id, rotation) => patchFreeEl(id, { rotation })}
                     onMoveMany={moveFreeMany}
                     gridSize={gridSnap ? FREE_GRID_SIZE : 0}
                     onDuplicate={duplicateFreeEl}

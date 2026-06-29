@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
   addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, sendFreeElementToBack,
-  snapToGrid, updateFreeElement,
+  freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, rotationFromPointer, sendFreeElementToBack,
+  snapAngle, snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
 describe('createFreeElement / addFreeElement', () => {
@@ -164,6 +164,31 @@ describe('groupBBox / resizeGroup / applyFreeElementGeoms（複数同時リサ�
     expect(out[0]).toEqual(els[0]); // free_001 不変
     expect(out[1]).toMatchObject({ id: 'free_002', x: 0, y: 0, w: 50, h: 50 });
     expect(applyFreeElementGeoms(els, [])).toBe(els);
+  });
+});
+
+describe('rotationFromPointer / snapAngle（回転ハンドル・#279）', () => {
+  const c = { x: 0, y: 0 };
+
+  it('要素中心からの角度：上=0°・右=90°・下=180°・左=270°（時計回り）', () => {
+    expect(rotationFromPointer(c, { x: 0, y: -100 })).toBe(0); // 上（12時）
+    expect(rotationFromPointer(c, { x: 100, y: 0 })).toBe(90); // 右
+    expect(rotationFromPointer(c, { x: 0, y: 100 })).toBe(180); // 下
+    expect(rotationFromPointer(c, { x: -100, y: 0 })).toBe(270); // 左
+  });
+
+  it('0≤r<360 に正規化（360 は出さない）', () => {
+    const r = rotationFromPointer(c, { x: -1, y: -1000 });
+    expect(r).toBeGreaterThanOrEqual(0);
+    expect(r).toBeLessThan(360);
+  });
+
+  it('snapAngle：15°きざみに吸着し 0≤r<360 に正規化', () => {
+    expect(snapAngle(37, 15)).toBe(30);
+    expect(snapAngle(38, 15)).toBe(45);
+    expect(snapAngle(358, 15)).toBe(0); // 360→0
+    expect(snapAngle(100, 0)).toBe(100); // step<=0 は正規化のみ
+    expect(snapAngle(-30, 0)).toBe(330);
   });
 });
 
