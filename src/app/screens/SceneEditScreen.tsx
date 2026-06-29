@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
@@ -60,6 +60,18 @@ function loadRightWidth(): number {
 }
 function loadLeftCollapsed(): boolean {
   try { return localStorage.getItem(LS_LEFT_COLLAPSED) === "1"; } catch { return false; }
+}
+
+// 場面編集の右欄の節を開閉できるアコーディオン（#276）。details/summary ベース。
+// 内部 state を持つので親（SceneEditScreen）の再描画でも開閉が保たれる（モジュール定義＝再マウントしない）。
+function CollapsibleSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <details className="accordion" open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary className="accordion-summary">{title}</summary>
+      <div className="accordion-body">{children}</div>
+    </details>
+  );
 }
 
 const sceneTypeLabel: Record<string, string> = {
@@ -860,11 +872,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
             {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
             {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
-            {!isFree && sceneTextKeys.length === 0 && (
-              <p className="field-hint" style={{ marginTop: 0 }}>このテンプレートは文字を表示しません。</p>
-            )}
-            {!isFree &&
-              sceneTextKeys.map((key) => {
+            {!isFree && (
+              <CollapsibleSection title="文字">
+              {sceneTextKeys.length === 0 && (
+                <p className="field-hint" style={{ marginTop: 0 }}>このテンプレートは文字を表示しません。</p>
+              )}
+              {sceneTextKeys.map((key) => {
                 // 見出し・URL は1行、本文・字幕・キャプションは複数行で編集する。
                 const multiline = key !== TEXT_KEY.title && key !== TEXT_KEY.url;
                 return (
@@ -893,7 +906,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </div>
                 );
               })}
+              </CollapsibleSection>
+            )}
 
+            <CollapsibleSection title="見た目・フォント">
             <div className="field">
               <label className="field-label" htmlFor="look">見た目パターン</label>
               <select
@@ -926,7 +942,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <FontPicker value={selected.fontId} onChange={(id) => patch((s) => ({ ...s, fontId: id }))} allowInherit />
               <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ別のフォントにできます（「動画全体に合わせる」で全体の設定を使います）。</p>
             </div>
+            </CollapsibleSection>
 
+            <CollapsibleSection title="使用素材">
             <div className="field">
               <label className="field-label">使用素材</label>
               {slotLayers.length === 0 ? (
@@ -975,9 +993,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 })
               )}
             </div>
+            </CollapsibleSection>
 
             {/* FREE 場面：自由配置エディタ（素材/文字/図形を追加・数値で位置/大きさ・重なり順・削除）。Phase 4a-3b。 */}
             {isFree && (
+              <CollapsibleSection title="自由配置">
               <div className="field">
                 <label className="field-label">自由配置</label>
                 <p className="field-hint" style={{ marginTop: 0 }}>
@@ -1228,8 +1248,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </div>
                 )}
               </div>
+              </CollapsibleSection>
             )}
 
+            <CollapsibleSection title="掛け合い・セリフ">
             <div className="field">
               <div className="toggle-row">
                 <span className="field-label" style={{ margin: 0 }}>掛け合い（複数のセリフ）</span>
@@ -1468,8 +1490,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               )}
               </>)}
             </div>
+            </CollapsibleSection>
 
             {/* 場面ごとの声の大きさ（全体設定を継承 or この場面だけ上書き。§6/§2.2） */}
+            <CollapsibleSection title="この場面だけ声の大きさ" defaultOpen={false}>
             <div className="field">
               <div className="toggle-row">
                 <span className="field-label" style={{ margin: 0 }}>この場面だけ声の大きさを変える</span>
@@ -1518,8 +1542,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </p>
               )}
             </div>
+            </CollapsibleSection>
 
 
+            <CollapsibleSection title="表示時間">
             <div className="field">
               <label className="field-label" htmlFor="duration">表示時間（秒）</label>
               <input
@@ -1530,6 +1556,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 onChange={(e) => patch((s) => ({ ...s, durationSec: Number(e.target.value) }))}
               />
             </div>
+            </CollapsibleSection>
 
             {/* 画面の切り替えなどの詳細は、上の「詳細編集」トグル（showAdvanced）で表示する。 */}
             {showAdvanced && (
