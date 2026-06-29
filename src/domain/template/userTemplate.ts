@@ -1,6 +1,8 @@
 // ユーザーが作成したテンプレート（ADR-0017）。同梱テンプレと同じ Template 型で、ID 接頭辞で区別する。
 // グローバル（全プロジェクト再利用）に永続化し、AI 入力からは除外する（誤選択防止＝ADR-0017 不変条件）。
-import type { Template } from './types';
+import type { Layer, Template } from './types';
+import type { Orientation, SceneCategory } from '../enums';
+import { dimsForOrientation } from '../constants';
 
 /** ユーザーテンプレの templateId 接頭辞。`user_tmpl_NNN`（11 §2.1 拡張）。 */
 export const USER_TEMPLATE_PREFIX = 'user_tmpl';
@@ -44,4 +46,29 @@ export function upsertUserTemplate(templates: Template[], template: Template): T
   const next = [...templates];
   next[i] = template;
   return next;
+}
+
+/**
+ * ゼロから作成するユーザーテンプレの初期 Template（ADR-0017「ゼロから作成（フル）」の導線・複製に頼らず一から作る）。
+ * 最小構成＝**背景レイヤー1枚**（schema は layers≥1 必須・id は慣習の `background` で `scene.assetRefs['background']` に束縛）。
+ * 向き→canvas は `dimsForOrientation`。以後のレイヤー追加・名前変更・素材設定は LooksEditScreen で行う。
+ * id 採番（`user_tmpl_NNN`）は呼び出し側（`allocateUserTemplateId`）で行い、ここには採番済み id を渡す。
+ */
+export function buildBlankTemplate(
+  templateId: string,
+  name: string,
+  category: SceneCategory,
+  orientation: Orientation,
+): Template {
+  const canvas = dimsForOrientation(orientation);
+  const background: Layer = { id: 'background', type: 'background', x: 0, y: 0, w: canvas.width, h: canvas.height, zIndex: 0 };
+  return {
+    schemaVersion: '1.0', // template schema 版（sampleData と同じ・11 §1）。
+    templateId,
+    name,
+    category,
+    aspectRatio: orientation,
+    canvas,
+    layers: [background],
+  };
 }

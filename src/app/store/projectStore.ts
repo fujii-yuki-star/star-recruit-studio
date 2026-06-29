@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type VideoKind } from "../../domain/enums";
+import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import type { Template } from "../../domain/template/types";
@@ -25,7 +25,7 @@ import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClie
 import { getAiModel } from "../../infrastructure/appSettings";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
-import { isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
+import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
 import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
@@ -143,6 +143,8 @@ interface ProjectState {
   deleteUserTemplate: (templateId: string) => Promise<boolean>;
   /** 既存テンプレ（同梱/ユーザー）を複製してマイテンプレ（ユーザーテンプレ）として保存し、新 id を返す。 */
   duplicateAsUserTemplate: (sourceTemplateId: string) => Promise<string>;
+  /** ゼロからマイテンプレを新規作成して保存し、新 id を返す（失敗時は ""）。向き/カテゴリ/名前を指定（ADR-0017）。 */
+  createBlankUserTemplate: (name: string, category: SceneCategory, orientation: Orientation) => Promise<string>;
   /** テンプレ保存/削除の失敗文言（§2-5。成功/次操作で消える）。保存状態とは別物。 */
   templateError: string | null;
   clearTemplateError: () => void;
@@ -738,6 +740,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const copy: Template = { ...source, templateId: newId, name: `${source.name}のコピー` };
     await get().saveUserTemplate(copy);
     // 保存に失敗していたら id を返さない（呼び出し側で選択しない）。
+    return get().templates.some((t) => t.templateId === newId) ? newId : "";
+  },
+  createBlankUserTemplate: async (name, category, orientation) => {
+    const s = get();
+    const newId = userTemplateFs.allocateUserTemplateId(s.templates.map((t) => t.templateId));
+    // ゼロから（背景1枚の最小構成）作って保存（saveUserTemplate が保存＋一覧反映＋エラー処理）。複製と同じ後処理。
+    const blank = buildBlankTemplate(newId, name, category, orientation);
+    await get().saveUserTemplate(blank);
     return get().templates.some((t) => t.templateId === newId) ? newId : "";
   },
   clearTemplateError: () => set({ templateError: null }),
