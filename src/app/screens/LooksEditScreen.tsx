@@ -5,6 +5,8 @@ import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYP
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
+import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
+import { MAX_INLINE_ASSET_BYTES } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
@@ -71,7 +73,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const [busy, setBusy] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [assetError, setAssetError] = useState("");
+  const [assetError, setAssetError] = useState<{ layerId: string; msg: string } | null>(null);
 
   function backToList() {
     setEditingTemplateId(null);
@@ -134,12 +136,18 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || busy) return;
+    // プロジェクト素材と同じ上限で弾く（data URL を表示用 src に常駐させるためメモリ逼迫を防ぐ・PR#295 レビュー🔴1）。
+    if (exceedsInlineAssetLimit(file.size)) {
+      const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
+      setAssetError({ layerId, msg: `この画像は大きすぎます（上限${limitMb}MB）。別の小さい画像を選び直してください。` });
+      return;
+    }
     setBusy(true);
-    setAssetError("");
+    setAssetError(null);
     try {
       const assetId = await registerTemplateAsset(file);
       if (assetId) onUpdateLayer(layerId, { assetId });
-      else setAssetError("素材を登録できませんでした。もう一度お試しください。");
+      else setAssetError({ layerId, msg: "素材を登録できませんでした。もう一度お試しください。" });
     } finally {
       setBusy(false);
     }
@@ -161,13 +169,13 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           </div>
         ) : (
           <>
-            <input id={`tmplAsset_${l.id}`} type="file" accept="image/*" hidden onChange={(e) => void onPickDefaultAsset(l.id, e)} />
-            <label htmlFor={`tmplAsset_${l.id}`} className="btn btn-secondary text-sm" style={{ cursor: "pointer", alignSelf: "flex-start" }}>素材を選ぶ</label>
+            <input id={`tmplAsset_${l.id}`} type="file" accept="image/*" hidden disabled={busy} onChange={(e) => void onPickDefaultAsset(l.id, e)} />
+            <label htmlFor={`tmplAsset_${l.id}`} className="btn btn-secondary text-sm" style={{ cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1, alignSelf: "flex-start" }}>素材を選ぶ</label>
             <p className="field-hint" style={{ marginTop: 2 }}>このテンプレを使うと、場面に素材が無いときこの画像が入ります。</p>
           </>
         )}
-        {assetError && (
-          <div className="notice notice-warn mt" role="alert"><span>{assetError}</span></div>
+        {assetError?.layerId === l.id && (
+          <div className="notice notice-warn mt" role="alert"><span>{assetError.msg}</span></div>
         )}
       </div>
     );

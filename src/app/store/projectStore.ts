@@ -737,6 +737,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const owned = templateAssetIdsOf(get().templates.find((t) => t.templateId === templateId)?.layers ?? []);
     try {
       await userTemplateFs.deleteUserTemplate(templateId);
+      // 各素材ファイルの削除失敗は templateAssetFs 内で握る（非致命）。失敗時はファイルが残るが、参照していたテンプレは消えるため未参照＝孤立（disk のみ・許容。安全な一括掃除は将来＝読込失敗時の誤削除を避けるため自動掃除はしない）。
       for (const assetId of owned) await deleteTemplateAsset(assetId);
       set((s) => ({
         templates: s.templates.filter((t) => t.templateId !== templateId),
