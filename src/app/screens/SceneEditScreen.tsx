@@ -420,7 +420,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const addFreeComponent = (componentId: string) => {
     let newIds: string[] = [];
     patch((s) => {
-      const result = addFreeComponentGroup(s.freeLayout ?? [], componentId);
+      const result = addFreeComponentGroup(s.freeLayout ?? [], componentId, template?.canvas.width, template?.canvas.height);
       newIds = result.newIds;
       return { ...s, freeLayout: result.freeLayout };
     });
