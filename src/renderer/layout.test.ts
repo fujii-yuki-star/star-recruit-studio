@@ -90,6 +90,29 @@ describe('layoutScene', () => {
     expect(texts.find((i) => i.text.includes('紹介します'))?.fontId).toBeUndefined(); // subtitle 未設定＝継承
   });
 
+  it('template の text/subtitle の strokeColor/strokeWidth が TextItem と SVG に反映される（#275）', () => {
+    const strokeTemplate: Template = {
+      ...openingTemplate,
+      layers: openingTemplate.layers.map((l) => (l.id === 'title' ? { ...l, strokeColor: '#ff0000', strokeWidth: 3 } : l)),
+    };
+    const item = layoutScene(scene, strokeTemplate).items.find((i): i is TextItem => i.kind === 'text' && i.text.includes('ようこそ'));
+    expect(item).toMatchObject({ strokeColor: '#ff0000', strokeWidth: 3 });
+    const svg = layoutToSvg(layoutScene(scene, strokeTemplate));
+    expect(svg).toContain('stroke="#ff0000"');
+    expect(svg).toContain('stroke-width="3"');
+    expect(svg).toContain('paint-order="stroke"'); // 塗りの下に縁取り（可読性）
+  });
+
+  it('template の縁取り：strokeWidth>0 で色未指定なら白を既定にする（外部テンプレ対策・#275）', () => {
+    const widthOnly: Template = {
+      ...openingTemplate,
+      layers: openingTemplate.layers.map((l) => (l.id === 'title' ? { ...l, strokeWidth: 2 } : l)),
+    };
+    const item = layoutScene(scene, widthOnly).items.find((i): i is TextItem => i.kind === 'text' && i.text.includes('ようこそ'));
+    expect(item?.strokeColor).toBe('#ffffff'); // 色未指定→白で縁取りが消えない
+    expect(item?.strokeWidth).toBe(2);
+  });
+
   it('layoutToSvg が 1920x1080 のSVGを生成し日本語テキストを含む', () => {
     const svg = layoutToSvg(layoutScene(scene, openingTemplate));
     expect(svg.startsWith('<svg')).toBe(true);

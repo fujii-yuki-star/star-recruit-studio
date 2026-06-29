@@ -89,7 +89,9 @@
             "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
             "radius": { "type": "number", "minimum": 0 }
           }
-        }
+        },
+        "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "strokeWidth": { "type": "number", "minimum": 0 }
       },
       "allOf": [
         {

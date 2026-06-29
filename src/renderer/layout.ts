@@ -163,6 +163,10 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           background: bg,
           isSubtitle: layer.type === 'subtitle',
           fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
+          // 縁取り（#275）。LayoutItem/SVG は既存（FREE の #209）と同じ仕組みで描画。
+          // 太さ>0 で色未指定なら白を既定（外部テンプレ等で色だけ無いと縁取りが silent に消えるのを防ぐ・PR#289レビュー）。
+          strokeColor: (layer.strokeWidth ?? 0) > 0 ? (layer.strokeColor ?? '#ffffff') : layer.strokeColor,
+          strokeWidth: layer.strokeWidth,
         });
         break;
       }
