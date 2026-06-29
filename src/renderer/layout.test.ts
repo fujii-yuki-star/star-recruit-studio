@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
-import type { FillItem, ImageItem, TextItem } from './layout';
+import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
 import { layoutScene } from './layout';
 import { layoutToSvg } from './sceneSvg';
 
@@ -61,19 +61,31 @@ describe('layoutScene', () => {
   });
 
   it('background/slot/logo は scene.assetRefs 優先・無ければ layer.assetId（テンプレ既定素材）にフォールバック（ADR-0021）', () => {
-    // テンプレの背景レイヤーに既定素材（layer.assetId）を持たせる。
+    // 背景/ロゴに既定素材を持たせ、slot レイヤーも足して既定素材を持たせる（openingTemplate に slot は無いため）。
     const tmpl: Template = {
       ...openingTemplate,
-      layers: openingTemplate.layers.map((l) => (l.id === 'background' ? { ...l, assetId: 'tmpl_asset_001' } : l)),
+      layers: [
+        ...openingTemplate.layers.map((l) =>
+          l.id === 'background' ? { ...l, assetId: 'tmpl_bg' } : l.id === 'logo' ? { ...l, assetId: 'tmpl_logo' } : l,
+        ),
+        { id: 'main', type: 'slot', x: 100, y: 100, w: 800, h: 600, zIndex: 15, assetId: 'tmpl_slot' },
+      ],
     };
-    // 場面が背景素材を持たない → テンプレ既定（layer.assetId）にフォールバック。
-    const noBg: Scene = { ...scene, assetRefs: { logo: 'asset_logo_001' } };
-    const bg1 = layoutScene(noBg, tmpl).items.find((i): i is ImageItem => i.kind === 'image' && i.role === 'background');
-    expect(bg1?.assetId).toBe('tmpl_asset_001');
-    // 場面が背景素材を持つ → 場面が優先（テンプレ既定を上書き）。
-    const withBg: Scene = { ...scene, assetRefs: { background: 'asset_entrance_001' } };
-    const bg2 = layoutScene(withBg, tmpl).items.find((i): i is ImageItem => i.kind === 'image' && i.role === 'background');
-    expect(bg2?.assetId).toBe('asset_entrance_001');
+    const img = (items: LayoutItem[], role: string) =>
+      items.find((i): i is ImageItem => i.kind === 'image' && i.role === role)?.assetId;
+    // 場面が素材を持たない（{}）→ background/slot/logo の3つともテンプレ既定（layer.assetId）にフォールバック。
+    const noRefs = layoutScene({ ...scene, assetRefs: {} }, tmpl).items;
+    expect(img(noRefs, 'background')).toBe('tmpl_bg');
+    expect(img(noRefs, 'slot')).toBe('tmpl_slot');
+    expect(img(noRefs, 'logo')).toBe('tmpl_logo');
+    // 場面が素材を持つ → 3つとも場面が優先（テンプレ既定を上書き）。
+    const withRefs = layoutScene({ ...scene, assetRefs: { background: 'asset_entrance_001', main: 'asset_x', logo: 'asset_logo_001' } }, tmpl).items;
+    expect(img(withRefs, 'background')).toBe('asset_entrance_001');
+    expect(img(withRefs, 'slot')).toBe('asset_x');
+    expect(img(withRefs, 'logo')).toBe('asset_logo_001');
+    // 明示的 null も テンプレ既定へ委譲（?? は null/未指定の両方をフォールバック・ADR-0021。11 §5 の「null=非表示」を更新）。
+    const nullRef = layoutScene({ ...scene, assetRefs: { background: null } }, tmpl).items;
+    expect(img(nullRef, 'background')).toBe('tmpl_bg');
   });
 
   it('subtitle レイヤー由来の text は isSubtitle=true、通常の text は false（字幕ON/OFF用）', () => {

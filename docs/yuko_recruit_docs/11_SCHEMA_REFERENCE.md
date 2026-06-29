@@ -154,7 +154,7 @@
 
 **規則**
 - `assetRefs` のキー集合 ⊆ テンプレ内の `background`/`slot`/`logo` レイヤーの `id` 集合。
-- 値が `null`/未指定: レイヤー `required=false` → 非表示。`required=true` → 検証警告（§8）。
+- 値が `null`/未指定: テンプレ既定素材（`layer.assetId`）があればそれを表示（ADR-0021・場面素材が優先・無ければテンプレ既定へ委譲）。無ければ レイヤー `required=false` → 非表示、`required=true` → 検証警告（§8）。
 - `slotType` と素材の `assetType` が不整合（例: `image` スロットに `video`）→ 補正/警告（§9）。
 - 旧 `01_REQUIREMENTS.md` 例の `type:"asset" + assetRole` 表記は本契約（typed layer + id一致）に置き換える。
 - **見た目パターン切替時の清算（issue #236・`switchSceneTemplate`）**：場面の `templateId` を変えたら、`assetRefs` は**新テンプレのスロット id へ清算**する（上記キー集合の不変条件を保つ＝ダングリング防止）。一方 **`texts` / `textFontIds` は清算せず保持**する＝これらは固定の `TextKey` enum（§3.4）がキーで**テンプレ非依存ゆえダングリングにならず**、別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と**非対称だが意図的**（保持を採用）。
