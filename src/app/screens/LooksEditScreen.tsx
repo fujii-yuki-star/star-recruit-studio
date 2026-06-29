@@ -8,6 +8,7 @@ import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
+import { Switch } from "../components/ui";
 import { textKeyLabel } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
 
@@ -23,7 +24,7 @@ function cloneTemplate(t: Template): Template {
 }
 
 /** レイヤーの座標/サイズ用の小さな数値入力（整数 px。入力途中の NaN/空は無視、min 指定（幅/高さ）は下限クランプ）。 */
-function numField(label: string, value: number, onChange: (v: number) => void, min?: number) {
+function numField(label: string, value: number, onChange: (v: number) => void, min?: number, max?: number) {
   return (
     <label className="text-sm" style={{ display: "flex", flexDirection: "column", flex: "1 0 40%" }}>
       {label}
@@ -32,10 +33,15 @@ function numField(label: string, value: number, onChange: (v: number) => void, m
         type="number"
         step={1}
         min={min}
+        max={max}
         value={value}
         onChange={(e) => {
           const v = parseInt(e.target.value, 10);
-          if (!Number.isNaN(v)) onChange(min != null ? Math.max(min, v) : v);
+          if (Number.isNaN(v)) return;
+          let clamped = v;
+          if (min != null) clamped = Math.max(min, clamped);
+          if (max != null) clamped = Math.min(max, clamped);
+          onChange(clamped);
         }}
       />
     </label>
@@ -145,6 +151,24 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               </select>
             </div>
           </div>
+          {/* 字幕は背景帯（黒固定で実用性が低い＝#275）。付ける/色/濃さを編集できるよう開放（描画は既存の layer.background を使用）。 */}
+          {l.type === "subtitle" && (
+            <div className="col gap-sm" style={{ marginTop: 4 }}>
+              <div className="toggle-row">
+                <label className="field-label text-sm" style={{ margin: 0 }}>字幕の背景帯を付ける</label>
+                <Switch on={l.background?.enabled ?? false} onChange={(on) => onUpdateLayer(l.id, { background: { ...l.background, enabled: on } })} label="字幕の背景帯を付ける" />
+              </div>
+              {l.background?.enabled && (
+                <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <div className="field" style={{ margin: 0 }}>
+                    <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
+                    <input className="input" type="color" value={l.background?.color ?? "#000000"} onChange={(e) => onUpdateLayer(l.id, { background: { ...l.background, color: e.target.value } })} />
+                  </div>
+                  {numField("濃さ(%)", Math.round((l.background?.opacity ?? 0.55) * 100), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: v / 100 } }), 0, 100)}
+                </div>
+              )}
+            </div>
+          )}
         </>
       );
     }
