@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
+import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
+import { MAX_INLINE_ASSET_BYTES } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
@@ -59,6 +61,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const saveUserTemplate = useProjectStore((s) => s.saveUserTemplate);
   const deleteUserTemplate = useProjectStore((s) => s.deleteUserTemplate);
   const templateError = useProjectStore((s) => s.templateError);
+  const registerTemplateAsset = useProjectStore((s) => s.registerTemplateAsset);
+  const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
 
   const editing = templates.find((t) => t.templateId === editingTemplateId) ?? null;
   const yukoPoseTags = buildYukoPoseTags(assets);
@@ -69,6 +73,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const [busy, setBusy] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [assetError, setAssetError] = useState<{ layerId: string; msg: string } | null>(null);
 
   function backToList() {
     setEditingTemplateId(null);
@@ -125,6 +130,55 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   function onBack() {
     if (dirty) setConfirmDiscard(true);
     else backToList();
+  }
+  // テンプレ既定素材の取り込み（ADR-0021）：選んだ画像をグローバル保存し、layer.assetId に束縛する。
+  async function onPickDefaultAsset(layerId: string, e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || busy) return;
+    // プロジェクト素材と同じ上限で弾く（data URL を表示用 src に常駐させるためメモリ逼迫を防ぐ・PR#295 レビュー🔴1）。
+    if (exceedsInlineAssetLimit(file.size)) {
+      const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
+      setAssetError({ layerId, msg: `この画像は大きすぎます（上限${limitMb}MB）。別の小さい画像を選び直してください。` });
+      return;
+    }
+    setBusy(true);
+    setAssetError(null);
+    try {
+      const assetId = await registerTemplateAsset(file);
+      if (assetId) onUpdateLayer(layerId, { assetId });
+      else setAssetError({ layerId, msg: "素材を登録できませんでした。もう一度お試しください。" });
+    } finally {
+      setBusy(false);
+    }
+  }
+  // 既定素材の登録/プレビュー/解除（background/slot/logo で共用）。場面に素材が無いとき使われる既定（ADR-0021）。
+  function renderDefaultAssetControl(l: Layer) {
+    const url = l.assetId ? templateAssetSrcById[l.assetId] : undefined;
+    return (
+      <div className="field" style={{ margin: "8px 0 0" }}>
+        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>既定の素材（写真）</label>
+        {l.assetId ? (
+          <div className="row gap-sm" style={{ alignItems: "center" }}>
+            {url ? (
+              <img src={url} alt="" style={{ width: 64, height: 40, objectFit: "cover", borderRadius: 4, border: "1px solid var(--color-border)" }} />
+            ) : (
+              <span className="text-sm text-muted">設定済み</span>
+            )}
+            <button className="btn btn-ghost text-sm" onClick={() => onUpdateLayer(l.id, { assetId: undefined })}>外す</button>
+          </div>
+        ) : (
+          <>
+            <input id={`tmplAsset_${l.id}`} type="file" accept="image/*" hidden disabled={busy} onChange={(e) => void onPickDefaultAsset(l.id, e)} />
+            <label htmlFor={`tmplAsset_${l.id}`} className="btn btn-secondary text-sm" style={{ cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1, alignSelf: "flex-start" }}>素材を選ぶ</label>
+            <p className="field-hint" style={{ marginTop: 2 }}>このテンプレを使うと、場面に素材が無いときこの画像が入ります。</p>
+          </>
+        )}
+        {assetError?.layerId === l.id && (
+          <div className="notice notice-warn mt" role="alert"><span>{assetError.msg}</span></div>
+        )}
+      </div>
+    );
   }
 
   // 型別コントロール（#214 ④）：文字＝内容/大きさ/色/太さ、図形＝形/色、素材＝種類/収め方、立ち絵＝収め方/ポーズ 等。
@@ -200,28 +254,34 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     }
     if (l.type === "slot") {
       return (
-        <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
-          <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>入れるもの</label>
-            <select className="select" value={l.slotType ?? SLOT_TYPE.image_or_video} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
-              {SLOT_TYPES.map((s) => (<option key={s} value={s}>{slotTypeLabel[s]}</option>))}
-            </select>
+        <>
+          <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>入れるもの</label>
+              <select className="select" value={l.slotType ?? SLOT_TYPE.image_or_video} onChange={(e) => onUpdateLayer(l.id, { slotType: e.target.value as SlotType })}>
+                {SLOT_TYPES.map((s) => (<option key={s} value={s}>{slotTypeLabel[s]}</option>))}
+              </select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
+              <select className="select" value={l.fit ?? FIT.cover} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
+                {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
+              </select>
+            </div>
           </div>
-          <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
-            <select className="select" value={l.fit ?? FIT.cover} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
-              {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
-            </select>
-          </div>
-        </div>
+          {renderDefaultAssetControl(l)}
+        </>
       );
     }
     if (l.type === "background") {
       return (
-        <div className="field" style={{ margin: 0 }}>
-          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</label>
-          <input className="input" type="color" value={l.fillColor ?? "#ffffff"} onChange={(e) => onUpdateLayer(l.id, { fillColor: e.target.value })} />
-        </div>
+        <>
+          {renderDefaultAssetControl(l)}
+          <div className="field" style={{ margin: "8px 0 0" }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</label>
+            <input className="input" type="color" value={l.fillColor ?? "#ffffff"} onChange={(e) => onUpdateLayer(l.id, { fillColor: e.target.value })} />
+          </div>
+        </>
       );
     }
     if (l.type === "logo" || l.type === "character") {
@@ -233,6 +293,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
             </select>
           </div>
+          {l.type === "logo" && renderDefaultAssetControl(l)}
           {l.type === "character" && (
             <div className="field" style={{ margin: "8px 0 0" }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>ポーズ（既定）</label>

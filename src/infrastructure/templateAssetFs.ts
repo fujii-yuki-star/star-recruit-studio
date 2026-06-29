@@ -31,14 +31,18 @@ function readAsDataUrl(file: File): Promise<string> {
  * テンプレ所有素材を取り込み、採番した `tmpl_asset_NNN` id を返す（非 Tauri・失敗は null）。
  * existingIds には現存するテンプレ素材 id を渡す（グローバル一意の採番）。
  */
-export async function importTemplateAsset(file: File, existingIds: readonly string[]): Promise<string | null> {
+export async function importTemplateAsset(
+  file: File,
+  existingIds: readonly string[],
+): Promise<{ assetId: string; url: string } | null> {
   if (!isTauri()) return null;
   const assetId = createTemplateAssetId(existingIds);
   const fileName = `${assetId}.${fileExt(file.name, file.type)}`;
-  const dataBase64 = await readAsDataUrl(file);
+  // 取り込み時に読んだ data URL は、そのまま表示用 URL（assetSrcById 合流）にも使える＝再読込不要。
+  const dataUrl = await readAsDataUrl(file);
   try {
-    await invoke('import_template_asset', { fileName, dataBase64 });
-    return assetId;
+    await invoke('import_template_asset', { fileName, dataBase64: dataUrl });
+    return { assetId, url: dataUrl };
   } catch (e) {
     console.warn('[templateAssetFs] テンプレ素材の保存に失敗しました:', e);
     return null;
