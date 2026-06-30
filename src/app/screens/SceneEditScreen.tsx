@@ -7,7 +7,7 @@ import { ASSET_TYPE, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SH
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
-import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
@@ -437,9 +437,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, groups: updateGroupTransform(s.groups ?? [], groupId, p) }));
   // グループの非表示/ロック切替（#305-2）。hidden は描画抑止（isHiddenByGroup）、locked は枠操作を抑止。
   const toggleGroupHidden = (groupId: string) =>
-    patch((s) => ({ ...s, groups: updateGroupMeta(s.groups ?? [], groupId, { hidden: !(s.groups ?? []).find((g) => g.id === groupId)?.hidden }) }));
+    patch((s) => ({ ...s, groups: toggleGroupFlag(s.groups ?? [], groupId, "hidden") }));
   const toggleGroupLocked = (groupId: string) =>
-    patch((s) => ({ ...s, groups: updateGroupMeta(s.groups ?? [], groupId, { locked: !(s.groups ?? []).find((g) => g.id === groupId)?.locked }) }));
+    patch((s) => ({ ...s, groups: toggleGroupFlag(s.groups ?? [], groupId, "locked") }));
   // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
   // updateScene→set は同期実行のため、newId は下の setSelectedFreeIds より前に確実に代入される。

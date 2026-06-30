@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  IDENTITY_TRANSFORM, createGroupFromSelection, groupElementIds, removeMembersFromGroups, topGroupOfMember,
-  ungroupGroup, updateGroupMeta, updateGroupTransform,
+  IDENTITY_TRANSFORM, createGroupFromSelection, groupElementIds, removeMembersFromGroups, toggleGroupFlag,
+  topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform,
 } from './groupOps';
 import type { Group } from '../group/types';
 import type { FreeElement } from './types';
@@ -30,6 +30,21 @@ describe('updateGroupTransform / updateGroupMeta', () => {
   it('hidden/locked を更新する', () => {
     const groups = updateGroupMeta([grp('group_001', ['a'])], 'group_001', { hidden: true, locked: true });
     expect(groups[0]).toMatchObject({ hidden: true, locked: true });
+  });
+});
+
+describe('toggleGroupFlag', () => {
+  it('hidden を反転する（undefined→true→false）', () => {
+    let groups = [grp('group_001', ['a'])];
+    groups = toggleGroupFlag(groups, 'group_001', 'hidden');
+    expect(groups[0].hidden).toBe(true);
+    groups = toggleGroupFlag(groups, 'group_001', 'hidden');
+    expect(groups[0].hidden).toBe(false);
+  });
+  it('locked を反転し、対象外グループは不変', () => {
+    const groups = toggleGroupFlag([grp('group_001', ['a']), grp('group_002', ['b'])], 'group_001', 'locked');
+    expect(groups[0].locked).toBe(true);
+    expect(groups[1].locked).toBeUndefined();
   });
 });
 

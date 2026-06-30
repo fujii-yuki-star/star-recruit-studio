@@ -34,6 +34,12 @@ export function updateGroupMeta(
   return groups.map((g) => (g.id === groupId ? { ...g, ...patch } : g));
 }
 
+/** グループの hidden/locked を反転する（UI トグル用）。現在値の否定を updateGroupMeta に委譲。 */
+export function toggleGroupFlag(groups: Group[], groupId: string, flag: 'hidden' | 'locked'): Group[] {
+  const cur = groups.find((g) => g.id === groupId);
+  return updateGroupMeta(groups, groupId, { [flag]: !cur?.[flag] });
+}
+
 /** メンバー id を含む最上位グループ（ネストの親まで辿る）。クリックで「グループごと選択」するため。循環ガード付き。 */
 export function topGroupOfMember(groups: Group[], memberId: string): Group | null {
   const parentOf = new Map<string, string>();

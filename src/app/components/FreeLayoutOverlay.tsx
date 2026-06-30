@@ -60,7 +60,9 @@ const GROUP_MIN_SCALE = 0.1;
 
 // 選択中グループの「向き付き枠」（ADR-0022・#305-2）。メンバー（要素）の素の外接矩形（=ローカル bbox）に
 // グループ transform を適用：中心＝アンカー＋平行移動／サイズ＝ローカル×scale／回転＝rotation。
-// ※ flat 前提（メンバー＝要素 id）。メンバー個別回転は枠 bbox に含めない（選択指標ゆえ許容・将来精緻化）。
+// ※ flat 前提（メンバー＝要素 id）。素の e.x/w で AABB を取るため**メンバー個別回転は枠 bbox に含めない**。
+//   composeGroupGeometry は rotatedRectAABB でメンバー回転込みの anchor を使うので、回転要素を含むグループでは
+//   この中心が実描画中心から僅かにずれ、拡縮（中心固定）の基準もずれる。将来 rotatedRectAABB に揃える（#312 レビュー）。
 function orientedGroupFrame(
   group: Group, freeLayout: FreeElement[],
 ): { cx: number; cy: number; w: number; h: number; rotation: number } | null {
