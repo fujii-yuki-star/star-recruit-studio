@@ -115,6 +115,11 @@ describe("FreeLayoutOverlay: 複数選択・一括操作（#206）", () => {
 
 describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
   const grp = { id: "group_001", members: ["free_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+  // jsdom はレイアウトを持たないため getBoundingClientRect を実寸でモック（toCanvas が scale=1＝canvas 等倍）。
+  const mockRect = (root: HTMLElement) => {
+    root.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+  };
 
   it("グループのメンバーを押すとグループ選択コールバックが呼ばれる（onSelectGroup・個別選択は呼ばない）", () => {
     const onSelectGroup = vi.fn();
@@ -142,6 +147,38 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     fireEvent.pointerDown(frame, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     fireEvent.pointerMove(frame, { clientX: 30, clientY: 40, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 });
+  });
+
+  it("グループ枠の角ハンドルをドラッグすると transform.scale が更新される（中心固定の一様拡縮・#305-2）", () => {
+    const onGroupTransform = vi.fn();
+    const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    mockRect(root);
+    const se = screen.getByTestId("group-scale-se");
+    // free_001=(100,100,400,120) → 枠中心(300,160)。開始(500,160)=距離200、移動先(700,160)=距離400 ⇒ scale 2。
+    fireEvent.pointerDown(se, { button: 0, clientX: 500, clientY: 160, pointerId: 1 });
+    fireEvent.pointerMove(se, { clientX: 700, clientY: 160, pointerId: 1 });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { scale: 2 });
+  });
+
+  it("グループ枠の回転ハンドルをドラッグすると transform.rotation が更新される（#305-2）", () => {
+    const onGroupTransform = vi.fn();
+    const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    mockRect(root);
+    const knob = screen.getByTestId("group-rotate-handle");
+    // 枠中心(300,160) の右(500,160)＝3時方向＝90°（上=0°時計回り）。
+    fireEvent.pointerDown(knob, { button: 0, clientX: 300, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(knob, { clientX: 500, clientY: 160, pointerId: 1 });
+    const calls = onGroupTransform.mock.calls;
+    const last = calls[calls.length - 1];
+    expect(last[0]).toBe("group_001");
+    expect(last[1].rotation).toBeCloseTo(90, 1);
+  });
+
+  it("ロック中のグループは枠ハンドル（拡縮・回転）を出さない", () => {
+    renderOverlay({ groups: [{ ...grp, locked: true }], activeGroupId: "group_001" });
+    expect(screen.getByTestId("group-frame")).toBeInTheDocument(); // 枠は出る
+    expect(screen.queryByTestId("group-scale-se")).toBeNull(); // 拡縮ハンドルなし
+    expect(screen.queryByTestId("group-rotate-handle")).toBeNull(); // 回転ハンドルなし
   });
 });
 

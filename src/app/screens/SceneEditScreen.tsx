@@ -7,7 +7,7 @@ import { ASSET_TYPE, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SH
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
-import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
@@ -373,6 +373,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const sceneTextKeys = template ? usedTextKeys(template.layers) : [];
   const freeLayout = selected.freeLayout ?? [];
   const sceneGroups = selected.groups ?? [];
+  const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
   // 自由配置 slot に割り当て可能な素材（画像・動画）。
   const freeSlotAssets = assets.filter((a) => a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video);
   // 追加：新要素を末尾に積み、追加直後のその要素を選択状態にする（詳細モードでも即表示・#179）。
@@ -434,6 +435,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // グループの transform 更新（移動・#305-1。拡縮/回転は #305-2）。
   const transformGroup = (groupId: string, p: Partial<GroupTransform>) =>
     patch((s) => ({ ...s, groups: updateGroupTransform(s.groups ?? [], groupId, p) }));
+  // グループの非表示/ロック切替（#305-2）。hidden は描画抑止（isHiddenByGroup）、locked は枠操作を抑止。
+  const toggleGroupHidden = (groupId: string) =>
+    patch((s) => ({ ...s, groups: updateGroupMeta(s.groups ?? [], groupId, { hidden: !(s.groups ?? []).find((g) => g.id === groupId)?.hidden }) }));
+  const toggleGroupLocked = (groupId: string) =>
+    patch((s) => ({ ...s, groups: updateGroupMeta(s.groups ?? [], groupId, { locked: !(s.groups ?? []).find((g) => g.id === groupId)?.locked }) }));
   // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
   // updateScene→set は同期実行のため、newId は下の setSelectedFreeIds より前に確実に代入される。
@@ -1170,8 +1176,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。 */}
                     {effectiveActiveGroupId && (
                       <div className="row-between" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
-                        <span className="text-sm">グループを選択中（まとめて移動できます）</span>
-                        <button className="btn btn-ghost text-sm" onClick={ungroupActive}>グループを解除</button>
+                        <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
+                        <div className="row" style={{ gap: 4 }}>
+                          <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
+                          <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
+                          <button className="btn btn-ghost text-sm" onClick={ungroupActive}>解除</button>
+                        </div>
                       </div>
                     )}
                     {/* 複数選択（#206）：2件以上選んだら一括操作バーを出す（Shift＋クリックで増減）。 */}
