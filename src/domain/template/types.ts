@@ -1,5 +1,6 @@
 // 見た目パターン（テンプレート）の型。正典は docs/yuko_recruit_docs/schemas/template.schema.json と 04_TEMPLATE_SPEC.md。
 import type { Fit, LayerShapeType, LayerType, Orientation, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
+import type { Group } from '../group/types';
 
 export interface LayerBackground {
   enabled?: boolean;
@@ -65,4 +66,6 @@ export interface Template {
   aiHint?: TemplateAiHint;
   defaults?: TemplateDefaults;
   layers: Layer[];
+  /** 要素のグループ化（ADR-0022）。メンバー＝layer id（ネストで group id も可）。未設定＝グループ無し。 */
+  groups?: Group[];
 }

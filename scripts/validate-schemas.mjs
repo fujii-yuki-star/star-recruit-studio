@@ -93,7 +93,7 @@ ok = ok && sem;
 
 // generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
 const generalBase = {
-  schemaVersion: '1.13', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  schemaVersion: '1.14', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
   videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
@@ -121,6 +121,7 @@ const mustAccept = [
   ['freeLayout: hidden/locked を許容（1.11・#210）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 50, hidden: true, locked: true }] })],
   ['scene: lines（掛け合い・行ごと speaker/字幕/開始秒）を許容（1.8・ADR-0015）', withScene({ lines: [{ lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'どうも', speaker: 2, subtitleEnabled: true, startSec: 2, status: 'none' }], subtitleEnabledDefault: true })],
   ['scene: slotFits（場面ごとの収め方上書き）を許容（1.13・④）', withScene({ slotFits: { background: 'contain', mainVisual: 'stretch' } })],
+  ['scene: groups（要素のグループ化・ネスト）を許容（1.14・ADR-0022）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }], groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 10, y: -5, rotation: 15, scale: 1.5 }, name: 'まとまり', hidden: false, locked: false }, { id: 'group_002', members: ['group_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }] })],
 ];
 const mustReject = [
   ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
@@ -147,6 +148,10 @@ const mustReject = [
   ['lines: speaker 非整数は拒否', withScene({ lines: [{ lineId: 'line_001', text: 'x', speaker: 1.5, status: 'none' }] })],
   ['lines: speaker 負数は拒否', withScene({ lines: [{ lineId: 'line_001', text: 'x', speaker: -1, status: 'none' }] })],
   ['lines: 未知フィールド(voiceId)は拒否＝行は speaker（additionalProperties:false）', withScene({ lines: [{ lineId: 'line_001', text: 'x', status: 'none', voiceId: 'voicevox_zundamon' }] })],
+  ['groups: id が group_ 形式でないと拒否（g1）', withScene({ groups: [{ id: 'g1', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }] })],
+  ['groups: transform.scale 0 以下は拒否（exclusiveMinimum）', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 0 } }] })],
+  ['groups: transform に必須欠落(scale)は拒否', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0 } }] })],
+  ['groups: 未知フィールド(color)は拒否（additionalProperties:false）', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, color: '#fff' }] })],
 ];
 for (const [desc, data] of mustAccept) {
   if (vProject(data)) console.log(`PASS  must-accept  ${desc}`);

@@ -5,6 +5,7 @@ import type {
 } from '../enums';
 import type { FontId } from '../font/fontCatalog';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
+import type { Group } from '../group/types';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -244,6 +245,8 @@ export interface Scene {
   slotFits?: Record<string, Fit>;
   /** FREE テンプレ場面のみ：自由配置要素（ADR-0008）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
   freeLayout?: FreeElement[];
+  /** 要素のグループ化（ADR-0022）。メンバー＝freeLayout 要素 id（ネストで group id も可）。未設定＝グループ無し。 */
+  groups?: Group[];
 }
 
 export interface Project {
