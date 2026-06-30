@@ -1,11 +1,11 @@
 import type { Asset } from "../../domain/project/types";
-import type { Fit } from "../../domain/enums";
 import { clampClipTime } from "../../domain/asset/clip";
 import {
   DEFAULT_FIT, ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
   VOLUME_MAX, VOLUME_MIN, VOLUME_STEP,
 } from "../../domain/constants";
 import { Switch } from "./ui";
+import { FitSelect } from "./FitSelect";
 
 type ClipPatch = Partial<NonNullable<Asset["clip"]>>;
 
@@ -34,15 +34,7 @@ export function ClipDetailControls({
         <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
           枠への収め方
         </label>
-        <select
-          className="select"
-          value={clip?.fit ?? DEFAULT_FIT}
-          onChange={(e) => patchClip({ fit: e.target.value as Fit })}
-        >
-          <option value="cover">枠いっぱいに表示（はみ出しは切り取り）</option>
-          <option value="contain">全体を表示（余白が入る）</option>
-          <option value="stretch">枠に合わせて伸縮</option>
-        </select>
+        <FitSelect value={clip?.fit ?? DEFAULT_FIT} onChange={(fit) => patchClip({ fit })} />
       </div>
 
       {/* 使う範囲 */}

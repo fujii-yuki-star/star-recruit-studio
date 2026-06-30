@@ -240,6 +240,8 @@ export interface Scene {
   audioMix?: AudioMix;
   transition?: Transition;
   warnings: Warning[];
+  /** 場面ごと・スロット別の画像の収め方（④）。キー＝テンプレのスロット/背景/ロゴの layer.id。未指定＝テンプレ層の fit を使用。 */
+  slotFits?: Record<string, Fit>;
   /** FREE テンプレ場面のみ：自由配置要素（ADR-0008）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
   freeLayout?: FreeElement[];
 }

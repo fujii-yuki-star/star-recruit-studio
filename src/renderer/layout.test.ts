@@ -88,6 +88,13 @@ describe('layoutScene', () => {
     expect(img(nullRef, 'background')).toBe('tmpl_bg');
   });
 
+  it('scene.slotFits[layerId] がテンプレ層の fit を上書きする（④・場面ごとの収め方）', () => {
+    const bgFit = (sc: Scene) =>
+      layoutScene(sc, openingTemplate).items.find((i): i is ImageItem => i.kind === 'image' && i.role === 'background')?.fit;
+    expect(bgFit({ ...scene, slotFits: { background: 'stretch' } })).toBe('stretch'); // テンプレ既定を上書き
+    expect(bgFit(scene)).not.toBe('stretch'); // slotFits 無し＝テンプレ層の既定（上書きが効いている証拠）
+  });
+
   it('subtitle レイヤー由来の text は isSubtitle=true、通常の text は false（字幕ON/OFF用）', () => {
     const texts = layoutScene(scene, openingTemplate).items.filter(
       (i): i is TextItem => i.kind === 'text',
