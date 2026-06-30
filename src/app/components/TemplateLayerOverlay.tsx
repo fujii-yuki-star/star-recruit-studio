@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Layer } from "../../domain/template/types";
-import { freeElementsInRect, moveFreeElement, resizeFreeElement, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GEOM_MIN_SIZE } from "../../domain/constants";
 
@@ -10,8 +10,10 @@ import { GEOM_MIN_SIZE } from "../../domain/constants";
 // 複数選択（Shift+クリック・マーキー）→ 一括移動。リサイズは主（末尾選択）のみ。グループ化は ④[#307] で本選択を土台に載せる。
 interface DragState {
   id: string; // 主＝リサイズ対象・移動の基準
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "rotate";
   corner?: ResizeCorner;
+  /** resize 時：開始時の回転角（度）。回転考慮リサイズの基準を開始時点に固定（#279）。 */
+  rotation?: number;
   startClientX: number;
   startClientY: number;
   start: { x: number; y: number; w: number; h: number };
@@ -30,6 +32,14 @@ const HANDLES: { corner: ResizeCorner; left: string; top: string; cursor: string
 ];
 const SNAP_GUIDE_COLOR = "#ff3d8b";
 
+// 回転を考慮したリサイズカーソル（FREE #279 と同じ）：対角軸角度（nwse=45°/nesw=135°）＋回転を 45°単位で 4種へ丸める。
+const RESIZE_CURSORS = ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"];
+function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
+  const base = corner === "nw" || corner === "se" ? 45 : 135;
+  const a = (((base + rotationDeg) % 180) + 180) % 180;
+  return RESIZE_CURSORS[Math.round(a / 45) % 4];
+}
+
 interface Props {
   layers: Layer[];
   canvasW: number;
@@ -44,11 +54,13 @@ interface Props {
   onChange: (id: string, geom: { x: number; y: number; w?: number; h?: number }) => void;
   /** 一括移動：複数選択の全レイヤーの新しい位置をまとめて返す（1回の更新）。 */
   onMoveMany: (moves: FreeElementMove[]) => void;
+  /** 回転ハンドルのドラッグ中、レイヤーの新しい角度（度・0≤r<360）を返す（#279 同様）。 */
+  onRotate: (id: string, rotation: number) => void;
   /** レイヤーのユーザー向けラベル（種別名）。 */
   label: (layer: Layer) => string;
 }
 
-export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, label }: Props) {
+export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onRotate, label }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
@@ -84,12 +96,29 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     setDrag({
       id: layer.id, mode, corner,
+      rotation: layer.rotation, // 回転考慮リサイズの基準（開始時点に固定・#279）
       startClientX: e.clientX, startClientY: e.clientY,
       start: { x: layer.x, y: layer.y, w: layer.w, h: layer.h },
       starts,
       // 吸着先＝移動しない他レイヤー（move のみ）。
       otherEdges: mode === "move" ? layers.filter((l) => !moveTargets.includes(l.id)).map((l) => edgesOf(l)) : [],
       scale: width / canvasW,
+    });
+  };
+
+  // 回転ハンドル押下（#279 同様）：レイヤー中心からポインタへの角度で rotation を更新する。
+  const beginRotate = (e: ReactPointerEvent, layer: Layer) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!selectedIds.includes(layer.id)) onSelect(layer.id);
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    setDrag({
+      id: layer.id, mode: "rotate",
+      startClientX: e.clientX, startClientY: e.clientY,
+      start: { x: layer.x, y: layer.y, w: layer.w, h: layer.h },
+      starts: [], otherEdges: [],
+      scale: (ref.current?.clientWidth ?? canvasW) / canvasW,
     });
   };
 
@@ -103,7 +132,16 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       onSelectMany(freeElementsInRect(layers, next));
       return;
     }
-    if (!drag || drag.scale <= 0) return;
+    if (!drag) return;
+    // 回転は drag.scale ではなく中心とポインタの角度で決まるので、scale 防御の前に処理する（#279）。
+    if (drag.mode === "rotate") {
+      e.preventDefault();
+      const center = { x: drag.start.x + drag.start.w / 2, y: drag.start.y + drag.start.h / 2 };
+      const deg = rotationFromPointer(center, toCanvas(e.clientX, e.clientY));
+      onRotate(drag.id, e.shiftKey ? snapAngle(deg, 15) : deg);
+      return;
+    }
+    if (drag.scale <= 0) return;
     e.preventDefault();
     const dx = (e.clientX - drag.startClientX) / drag.scale;
     const dy = (e.clientY - drag.startClientY) / drag.scale;
@@ -122,8 +160,14 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       onMoveMany(startsList.map((s) => ({ id: s.id, x: s.x + ddx, y: s.y + ddy })));
       setGuides({ x: snap.guideX, y: snap.guideY });
     } else if (drag.corner) {
-      // リサイズ＝純粋 resizeFreeElement（Shift で縦横比維持）。主のみ。最小は FREE/Layer 共通 GEOM_MIN_SIZE。
-      onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, GEOM_MIN_SIZE, 0, e.shiftKey));
+      // リサイズ＝純粋 ops（Shift で縦横比維持）。主のみ。回転ありは対角を canvas 固定する回転考慮版（#279）。基準角は開始時に固定。
+      const rot = drag.rotation ?? 0;
+      onChange(
+        drag.id,
+        rot === 0
+          ? resizeFreeElement(drag.start, drag.corner, dx, dy, GEOM_MIN_SIZE, 0, e.shiftKey)
+          : resizeRotatedFreeElement(drag.start, drag.corner, dx, dy, rot, GEOM_MIN_SIZE, 0, e.shiftKey),
+      );
     }
   };
 
@@ -159,6 +203,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       {[...layers].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)).map((l) => {
         const selected = selectedIds.includes(l.id);
         const isPrimary = l.id === primaryId;
+        const rotated = (l.rotation ?? 0) !== 0; // 回転あり＝中心軸で回す（出力 SVG の rotate と一致）
         return (
           <div
             key={l.id}
@@ -173,6 +218,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
               background: selected ? "rgba(80,130,255,0.08)" : "transparent",
               cursor: "move",
+              transform: rotated ? `rotate(${l.rotation}deg)` : undefined,
             }}
           >
             <span style={{ position: "absolute", top: 0, left: 0, fontSize: 11, background: "rgba(0,0,0,0.55)", color: "#fff", padding: "0 4px", borderRadius: 2, pointerEvents: "none", whiteSpace: "nowrap" }}>
@@ -183,9 +229,21 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
                 <div
                   key={hd.corner}
                   onPointerDown={(e) => beginDrag(e, l, "resize", hd.corner)}
-                  style={{ position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: 2, cursor: hd.cursor }}
+                  style={{ position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: 2, cursor: rotated ? resizeCursor(hd.corner, l.rotation ?? 0) : hd.cursor }}
                 />
               ))}
+            {/* 回転ハンドル（#279 同様）：単一の主に出す。回転中も操作できるよう rotated 条件は付けない。 */}
+            {isPrimary && (
+              <>
+                <div style={{ position: "absolute", left: "50%", top: -22, width: 1, height: 22, background: "var(--color-primary)", transform: "translateX(-50%)", pointerEvents: "none" }} />
+                <div
+                  data-testid="tmpl-rotate-handle"
+                  onPointerDown={(e) => beginRotate(e, l)}
+                  title="ドラッグで回転（Shift で15°ずつ）"
+                  style={{ position: "absolute", left: "50%", top: -22, width: 12, height: 12, transform: "translate(-50%, -50%)", background: "#fff", border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab" }}
+                />
+              </>
+            )}
           </div>
         );
       })}

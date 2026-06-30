@@ -21,6 +21,7 @@ function renderOverlay(over: Partial<ComponentProps<typeof TemplateLayerOverlay>
   const onSelectMany = vi.fn();
   const onChange = vi.fn();
   const onMoveMany = vi.fn();
+  const onRotate = vi.fn();
   const result = render(
     <TemplateLayerOverlay
       layers={makeLayers()}
@@ -31,21 +32,22 @@ function renderOverlay(over: Partial<ComponentProps<typeof TemplateLayerOverlay>
       onSelectMany={onSelectMany}
       onChange={onChange}
       onMoveMany={onMoveMany}
+      onRotate={onRotate}
       label={(l) => l.type}
       {...over}
     />,
   );
   const root = result.container.firstElementChild as HTMLElement;
   const boxes = Array.from(root.children) as HTMLElement[]; // zIndex 昇順: [0]=background, [1]=title
-  return { onSelect, onSelectMany, onChange, onMoveMany, root, boxes, ...result };
+  return { onSelect, onSelectMany, onChange, onMoveMany, onRotate, root, boxes, ...result };
 }
 
 describe("TemplateLayerOverlay", () => {
-  it("各レイヤーを1ボックスずつ描画し、選択中のレイヤーにだけリサイズハンドル（4つ）が出る", () => {
+  it("選択中のレイヤーにだけハンドルが出る（リサイズ4＋回転ハンドル2）", () => {
     const { boxes } = renderOverlay({ selectedIds: ["title"] });
     expect(boxes).toHaveLength(2);
     expect(boxes[0].querySelectorAll("div")).toHaveLength(0); // background（非選択）＝ハンドルなし
-    expect(boxes[1].querySelectorAll("div")).toHaveLength(4); // title（選択中）＝角ハンドル4
+    expect(boxes[1].querySelectorAll("div")).toHaveLength(6); // title（選択中）＝リサイズ4＋回転(stem+knob)2
   });
 
   it("レイヤーを押すと、その id で選択コールバックが呼ばれる", () => {
@@ -90,5 +92,18 @@ describe("TemplateLayerOverlay", () => {
     fireEvent.pointerDown(root, { button: 0, clientX: 100, clientY: 100, pointerId: 1 }); // 空白＝root 自身
     fireEvent.pointerMove(root, { clientX: 700, clientY: 400, pointerId: 1 }); // (100,100)-(700,400) に title が交差
     expect(onSelectMany).toHaveBeenLastCalledWith(["background", "title"]);
+  });
+
+  it("回転ハンドルをドラッグすると onRotate に角度が渡る（#279 同様）", () => {
+    const { root, boxes, onRotate } = renderOverlay({ selectedIds: ["title"] });
+    root.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    const knob = boxes[1].querySelector('[data-testid="tmpl-rotate-handle"]') as HTMLElement;
+    // title (200,200,400,120) 中心=(400,260)。右(600,260)＝3時方向＝90°。
+    fireEvent.pointerDown(knob, { button: 0, clientX: 400, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(knob, { clientX: 600, clientY: 260, pointerId: 1 });
+    const calls = onRotate.mock.calls;
+    expect(calls[calls.length - 1][0]).toBe("title");
+    expect(calls[calls.length - 1][1]).toBeCloseTo(90, 1);
   });
 });

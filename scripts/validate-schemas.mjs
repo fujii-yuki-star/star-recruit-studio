@@ -51,10 +51,14 @@ const withLayer0 = (prop) => ({ ...tplBase, layers: tplBase.layers.map((l, i) =>
 const tplAccept = [
   ['template: 縁取り(strokeColor/strokeWidth)を許容（#275）', withLayer0({ strokeColor: '#ffffff', strokeWidth: 2 })],
   ['template: strokeWidth=0（縁取りなし・境界）を許容', withLayer0({ strokeColor: '#ffffff', strokeWidth: 0 })],
+  ['template: layer rotation を許容（#307）', withLayer0({ rotation: 30 })],
 ];
 const tplReject = [
   ['template: strokeColor 非hexは拒否', withLayer0({ strokeColor: 'white' })],
   ['template: strokeWidth 負は拒否', withLayer0({ strokeWidth: -1 })],
+  ['template: rotation 範囲外(400)は拒否', withLayer0({ rotation: 400 })],
+  ['template: rotation 負(-1)は拒否', withLayer0({ rotation: -1 })],
+  ['template: rotation 360（=0と重複）は除外（exclusiveMaximum）', withLayer0({ rotation: 360 })],
 ];
 for (const [desc, data] of tplAccept) {
   if (vTemplate(data)) console.log(`PASS  must-accept  ${desc}`);

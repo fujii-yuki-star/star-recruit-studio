@@ -17,6 +17,8 @@ export interface Layer {
   w: number;
   h: number;
   zIndex?: number;
+  /** 回転角（度・0以上360未満・中心軸・時計回り。未指定=回転なし。FreeElement と同仕様）。 */
+  rotation?: number;
   required?: boolean;
   slotType?: SlotType;
   fit?: Fit;
