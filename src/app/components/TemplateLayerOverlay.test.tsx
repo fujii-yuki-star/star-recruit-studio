@@ -137,4 +137,41 @@ describe("TemplateLayerOverlay", () => {
     const { boxes } = renderOverlay({ groups: [hiddenGrp] });
     expect(boxes).toHaveLength(1); // title は hidden グループ所属＝非描画。background のみ残る
   });
+
+  const mockRect = (root: HTMLElement) => {
+    root.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+  };
+
+  it("グループ枠の角ハンドルで transform.scale が更新される（中心固定の一様拡縮・#307）", () => {
+    const onGroupTransform = vi.fn();
+    const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    mockRect(root);
+    const se = root.querySelector('[data-testid="tmpl-group-scale-se"]') as HTMLElement;
+    // title(200,200,400,120) → 枠中心(400,260)。開始(600,260)=距離200、移動先(800,260)=距離400 ⇒ scale 2。
+    fireEvent.pointerDown(se, { button: 0, clientX: 600, clientY: 260, pointerId: 1 });
+    fireEvent.pointerMove(se, { clientX: 800, clientY: 260, pointerId: 1 });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { scale: 2 });
+  });
+
+  it("グループ枠の回転ハンドルで transform.rotation が更新される（#307）", () => {
+    const onGroupTransform = vi.fn();
+    const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    mockRect(root);
+    const knob = root.querySelector('[data-testid="tmpl-group-rotate-handle"]') as HTMLElement;
+    // 枠中心(400,260) の右(600,260)＝3時方向＝90°。
+    fireEvent.pointerDown(knob, { button: 0, clientX: 400, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(knob, { clientX: 600, clientY: 260, pointerId: 1 });
+    const calls = onGroupTransform.mock.calls;
+    expect(calls[calls.length - 1][0]).toBe("group_001");
+    expect(calls[calls.length - 1][1].rotation).toBeCloseTo(90, 1);
+  });
+
+  it("ロック中のグループは枠ハンドル（拡縮・回転）を出さない（#307）", () => {
+    const lockedGrp = { ...grp, locked: true };
+    const { root } = renderOverlay({ groups: [lockedGrp], activeGroupId: "group_001" });
+    expect(root.querySelector('[data-testid="tmpl-group-frame"]')).not.toBeNull(); // 枠は出る
+    expect(root.querySelector('[data-testid="tmpl-group-scale-se"]')).toBeNull();
+    expect(root.querySelector('[data-testid="tmpl-group-rotate-handle"]')).toBeNull();
+  });
 });
