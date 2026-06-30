@@ -1,5 +1,5 @@
-// 要素のグループ化（ADR-0022）の編集 ops（FREE＝scene.groups + freeLayout 対象）。純粋関数（副作用なし）。
-// store は updateScene 経由でこれらを呼び、結果で scene.groups / freeLayout を差し替える。
+// 要素のグループ化（ADR-0022）の編集 ops（FREE 要素 / テンプレ Layer 共用＝<T> で汎用化）。純粋関数（副作用なし）。
+// 呼び出し側（store/エディタ）が結果で groups と要素配列（FREE=scene.freeLayout / テンプレ=template.layers）を差し替える。
 // グループ操作は「グループ自身の transform を更新」する（メンバー座標は保持）。ungroup 時のみ transform をメンバーへ焼き込む。
 import { composeGroupGeometry } from '../group/compose';
 import type { Group, GroupTransform } from '../group/types';
