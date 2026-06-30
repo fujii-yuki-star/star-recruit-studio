@@ -149,7 +149,8 @@ const mustReject = [
   ['lines: speaker 負数は拒否', withScene({ lines: [{ lineId: 'line_001', text: 'x', speaker: -1, status: 'none' }] })],
   ['lines: 未知フィールド(voiceId)は拒否＝行は speaker（additionalProperties:false）', withScene({ lines: [{ lineId: 'line_001', text: 'x', status: 'none', voiceId: 'voicevox_zundamon' }] })],
   ['groups: id が group_ 形式でないと拒否（g1）', withScene({ groups: [{ id: 'g1', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }] })],
-  ['groups: transform.scale 0 以下は拒否（exclusiveMinimum）', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 0 } }] })],
+  ['groups: transform.scale 0 は拒否（exclusiveMinimum）', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 0 } }] })],
+  ['groups: transform.scale 負は拒否', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: -1 } }] })],
   ['groups: transform に必須欠落(scale)は拒否', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0 } }] })],
   ['groups: 未知フィールド(color)は拒否（additionalProperties:false）', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, color: '#fff' }] })],
 ];

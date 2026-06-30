@@ -313,6 +313,24 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(layout.items.find((i) => i.id === 'free_001')).toBeUndefined();
   });
 
+  it('template.groups の平行移動がテンプレ層の LayoutItem に前合成される（ADR-0022・パリティ）', () => {
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['background'], transform: { x: 50, y: -20, rotation: 0, scale: 1 } }],
+    };
+    const item = layoutScene(scene, grouped).items.find((i) => i.id === 'background');
+    expect(item?.x).toBeCloseTo(50); // 0 + 50
+    expect(item?.y).toBeCloseTo(-20); // 0 - 20
+  });
+
+  it('hidden グループのテンプレ層は描画されない（ADR-0022）', () => {
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['background'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
+    };
+    expect(layoutScene(scene, grouped).items.find((i) => i.id === 'background')).toBeUndefined();
+  });
+
   it('rotation 未指定/0 は rotate でくるまない（出力 SVG の差分を最小化）', () => {
     const svg = layoutToSvg(layoutScene(freeScene, freeTemplate)); // freeScene は rotation なし
     expect(svg).not.toContain('rotate(');
