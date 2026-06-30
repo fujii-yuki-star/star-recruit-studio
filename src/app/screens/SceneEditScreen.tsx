@@ -3,7 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
@@ -299,6 +299,22 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // assetRefs を割り当てられるスロット層（背景/メイン/ロゴ）と、割当可能な素材。
   const slotLayers =
     template?.layers.filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo") ?? [];
+  // 同じラベル（例「素材」）が複数あるスロットは連番で区別する（使用素材UIの区別性・実機FB）。
+  const slotLabels = (() => {
+    const total = new Map<string, number>();
+    for (const l of slotLayers) {
+      const key = slotLabelFor(l);
+      total.set(key, (total.get(key) ?? 0) + 1);
+    }
+    const seen = new Map<string, number>();
+    return slotLayers.map((l) => {
+      const base = slotLabelFor(l);
+      if ((total.get(base) ?? 0) <= 1) return base;
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
+      return `${base}${n}`;
+    });
+  })();
 
   const visibleAssets = assets.filter((a) => {
     const matchType =
@@ -443,9 +459,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <option value="">なし（空の枠）</option>
             {freeSlotAssets.map((x) => (<option key={x.assetId} value={x.assetId}>{x.displayName}</option>))}
           </select>
-          {a?.assetType === ASSET_TYPE.video && (
+          {a?.assetType === ASSET_TYPE.video ? (
             <ClipDetailControls asset={a} patchClip={(p) => patchAssetClip(a.assetId, p)} />
-          )}
+          ) : a ? (
+            <div className="field" style={{ marginTop: 6, marginBottom: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
+              {/* FREE 要素の収め方は要素ごと（継承概念なし）＝常に値を持たせる。inheritLabel 未指定の FitSelect は
+                  undefined を返さないが、型上の undefined は既定 cover で明示的に受ける。 */}
+              <FitSelect
+                value={el.fit ?? FIT.cover}
+                onChange={(fit) => patchFreeEl(el.id, { fit: fit ?? FIT.cover })}
+              />
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -950,7 +976,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {slotLayers.length === 0 ? (
                 <p className="text-sm text-muted">この見た目パターンに素材を入れる場所はありません。</p>
               ) : (
-                slotLayers.map((layer) => {
+                slotLayers.map((layer, i) => {
                   const assignedId = selected.assetRefs[layer.id];
                   const assignedAsset = assignedId
                     ? assets.find((a) => a.assetId === assignedId)
@@ -963,10 +989,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     }
                   };
                   return (
-                    <div className="field" key={layer.id} style={{ marginBottom: 8 }}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-                        {slotLabelFor(layer)}
-                      </label>
+                    <div key={layer.id} style={{ marginBottom: 10, padding: "8px 10px", border: "1px solid var(--color-border)", borderRadius: "var(--radius)" }}>
+                      <label className="field-label text-sm" style={{ margin: "0 0 4px", fontWeight: 600 }}>{slotLabels[i]}</label>
                       <select
                         className="select"
                         value={assignedId ?? ""}
