@@ -89,14 +89,16 @@ export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeEl
  * 範囲選択（マーキー・#274）：矩形（canvas 座標・2点は順不同）と AABB が交差する要素の id を返す。
  * 非表示・ロック中の要素は対象外＝一括操作に巻き込まない（非表示は触れない・ロックは固定）。
  */
+// 構造型で受ける＝FreeElement だけでなくテンプレの Layer（hidden/locked 無し）にも流用（ADR-0017・#306）。
 export function freeElementsInRect(
-  freeLayout: FreeElement[], rect: { x0: number; y0: number; x1: number; y1: number },
+  items: ReadonlyArray<{ id: string; x: number; y: number; w: number; h: number; hidden?: boolean; locked?: boolean }>,
+  rect: { x0: number; y0: number; x1: number; y1: number },
 ): string[] {
   const left = Math.min(rect.x0, rect.x1);
   const right = Math.max(rect.x0, rect.x1);
   const top = Math.min(rect.y0, rect.y1);
   const bottom = Math.max(rect.y0, rect.y1);
-  return freeLayout
+  return items
     .filter((el) => !el.hidden && !el.locked)
     .filter((el) => el.x < right && el.x + el.w > left && el.y < bottom && el.y + el.h > top)
     .map((el) => el.id);
