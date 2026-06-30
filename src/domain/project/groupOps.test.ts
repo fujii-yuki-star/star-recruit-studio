@@ -135,4 +135,10 @@ describe('reorderGroupZ', () => {
     const layout = withZ({ free_001: 1 });
     expect(reorderGroupZ(layout, ['free_999'], 'front')).toBe(layout);
   });
+  it('全要素がメンバー（非メンバー0件）→ 相対順を保って 1..n に振り直す', () => {
+    const layout = withZ({ free_001: 3, free_002: 1 });
+    const out = reorderGroupZ(layout, ['free_001', 'free_002'], 'back');
+    expect(zOf(out, 'free_002')).toBe(1); // 元 z1 が下
+    expect(zOf(out, 'free_001')).toBe(2); // 元 z3 が上（相対順保持）
+  });
 });
