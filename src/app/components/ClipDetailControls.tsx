@@ -34,7 +34,7 @@ export function ClipDetailControls({
         <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
           枠への収め方
         </label>
-        <FitSelect value={clip?.fit ?? DEFAULT_FIT} onChange={(fit) => patchClip({ fit })} />
+        <FitSelect value={clip?.fit ?? DEFAULT_FIT} onChange={(fit) => { if (fit) patchClip({ fit }); }} />
       </div>
 
       {/* 使う範囲 */}

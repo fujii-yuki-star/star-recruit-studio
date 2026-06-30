@@ -4,7 +4,7 @@ import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
-import { DEFAULT_FIT, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
@@ -992,8 +992,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <div className="field" style={{ marginTop: 6 }}>
                           <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
                           <FitSelect
-                            value={selected.slotFits?.[layer.id] ?? layer.fit ?? DEFAULT_FIT}
-                            onChange={(fit) => patch((s) => ({ ...s, slotFits: { ...s.slotFits, [layer.id]: fit } }))}
+                            inheritLabel="テンプレの既定に合わせる"
+                            value={selected.slotFits?.[layer.id]}
+                            onChange={(fit) =>
+                              patch((s) => {
+                                const next = { ...s.slotFits };
+                                if (fit) next[layer.id] = fit;
+                                else delete next[layer.id];
+                                return { ...s, slotFits: Object.keys(next).length ? next : undefined };
+                              })
+                            }
                           />
                         </div>
                       )}

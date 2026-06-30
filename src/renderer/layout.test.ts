@@ -88,11 +88,19 @@ describe('layoutScene', () => {
     expect(img(nullRef, 'background')).toBe('tmpl_bg');
   });
 
-  it('scene.slotFits[layerId] がテンプレ層の fit を上書きする（④・場面ごとの収め方）', () => {
-    const bgFit = (sc: Scene) =>
-      layoutScene(sc, openingTemplate).items.find((i): i is ImageItem => i.kind === 'image' && i.role === 'background')?.fit;
-    expect(bgFit({ ...scene, slotFits: { background: 'stretch' } })).toBe('stretch'); // テンプレ既定を上書き
-    expect(bgFit(scene)).not.toBe('stretch'); // slotFits 無し＝テンプレ層の既定（上書きが効いている証拠）
+  it('scene.slotFits は background/slot/logo すべてでテンプレ層の fit を上書きする（④）', () => {
+    // openingTemplate に slot を足す（背景/slot の既定=cover、logo の既定=contain を各々上書き）。
+    const tmpl: Template = {
+      ...openingTemplate,
+      layers: [...openingTemplate.layers, { id: 'main', type: 'slot', x: 0, y: 0, w: 100, h: 100, zIndex: 15 }],
+    };
+    const withMain: Scene = { ...scene, assetRefs: { ...scene.assetRefs, main: 'asset_x' } };
+    const fitOf = (role: string, sc: Scene) =>
+      layoutScene(sc, tmpl).items.find((i): i is ImageItem => i.kind === 'image' && i.role === role)?.fit;
+    for (const [role, key] of [['background', 'background'], ['slot', 'main'], ['logo', 'logo']] as const) {
+      expect(fitOf(role, { ...withMain, slotFits: { [key]: 'stretch' } })).toBe('stretch'); // 上書き
+      expect(fitOf(role, withMain)).not.toBe('stretch'); // 既定（上書きが効いている証拠）
+    }
   });
 
   it('subtitle レイヤー由来の text は isSubtitle=true、通常の text は false（字幕ON/OFF用）', () => {
