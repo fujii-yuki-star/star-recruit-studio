@@ -15,6 +15,7 @@ import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { ASSET_TYPE } from "../../domain/enums";
+import { isTemplateAsset } from "../../domain/template/templateAsset";
 import { fontFamilyForId, resolveFontId, FONT_CATALOG } from "../../domain/font/fontCatalog";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
@@ -33,6 +34,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
   const assets = useProjectStore((s) => s.assets);
+  const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
@@ -99,6 +101,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // buildExportScenes が場面ごとに解決→破棄するので、ここでは id→data URL のリゾルバを渡すだけ（#143・ADR-0004）。
       const assetById = new Map(assets.map((a) => [a.assetId, a] as const));
       const resolveExportSrc = async (id: string): Promise<string | undefined> => {
+        // テンプレ既定素材（tmpl_asset_*）は既に data URL（templateAssetSrcById）＝そのまま返す（ADR-0021・書き出しも data URL でプレビューと一致）。
+        if (isTemplateAsset(id)) return templateAssetSrcById[id];
         const a = assetById.get(id);
         // 動画スロットは clipRelPath 経路（ADR-0006）＝インライン不要。画像のみ data URL 化。
         if (!pid || !a?.filePath || a.assetType === ASSET_TYPE.video) return undefined;
