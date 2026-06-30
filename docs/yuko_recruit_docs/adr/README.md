@@ -27,6 +27,8 @@
 | [0018](0018-cross-scene-timeline-model.md) | 場面横断タイムライン／複数トラックのモデル（③・設計のみ） | **Proposed** |
 | [0019](0019-keyframe-animation-model.md) | キーフレーム／場面内アニメ（④・設計のみ・ADR-0001 を supersede） | **Proposed** |
 | [0020](0020-undo-redo-model.md) | 取り消し/やり直し（Undo/Redo）モデル | **Accepted** |
+| [0021](0021-template-owned-assets.md) | テンプレ既定素材（template-owned default assets・場面素材優先のフォールバック） | **Accepted** |
+| [0022](0022-element-grouping.md) | 要素のグループ化（groups＋独自transform・FREE/テンプレ両エディタ） | **Accepted** |
 
 ## 状態の意味
 
