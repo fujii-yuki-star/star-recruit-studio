@@ -102,7 +102,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       case 'background': {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
-          items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'cover', role: 'background', label: '背景' });
+          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'cover', role: 'background', label: '背景' });
         } else {
           items.push({ ...base, kind: 'fill', color: layer.fillColor ?? backgroundColor, opacity: layer.opacity ?? 1, radius: layer.radius ?? 0 });
         }
@@ -111,13 +111,13 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       case 'slot': {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         // ラベルは未解決時のプレースホルダ表示に使う。生の layer.id は技術用語漏れ（§2-3）なので日本語に。
-        items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'cover', role: 'slot', label: '素材' });
+        items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'cover', role: 'slot', label: '素材' });
         break;
       }
       case 'logo': {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
-          items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'contain', role: 'logo', label: 'ロゴ' });
+          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'contain', role: 'logo', label: 'ロゴ' });
         }
         break;
       }

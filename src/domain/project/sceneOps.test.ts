@@ -168,6 +168,7 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     ...scene('scene_001', 1),
     templateId: 'old_tmpl',
     assetRefs: { background: 'asset_bg_001', mainVisual: 'asset_v_001', logo: 'asset_logo_001', oldSlot: 'asset_x_001' },
+    slotFits: { mainVisual: 'contain', oldSlot: 'stretch' },
     texts: { title: 'タイトル', main: '本文' },
     textFontIds: { main: 'gen-interface-jp', title: 'gen-interface-jp-display' },
     warnings: [{ code: 'SLOT_REQUIRED_EMPTY', message: '旧テンプレ基準の警告', field: 'assetRefs', severity: 'warning' }],
@@ -177,6 +178,12 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     const r = switchSceneTemplate(richScene(), 'new_tmpl', newLayers);
     expect(r.assetRefs).toEqual({ background: 'asset_bg_001', mainVisual: 'asset_v_001', logo: 'asset_logo_001' });
     expect(r.assetRefs.oldSlot).toBeUndefined(); // 新テンプレに無いスロット参照は捨てる
+  });
+
+  it('slotFits も新テンプレのスロット id だけ残す＝ダングリング清算（assetRefs と同ポリシー・🟡①）', () => {
+    const r = switchSceneTemplate(richScene(), 'new_tmpl', newLayers);
+    expect(r.slotFits).toEqual({ mainVisual: 'contain' }); // 残るのは新テンプレにある mainVisual のみ
+    expect(r.slotFits?.oldSlot).toBeUndefined(); // 新テンプレに無いスロットの収め方は捨てる
   });
 
   it('texts / textFontIds は保持する（#236＝固定TextKeyキー・別パターンへ変えて戻すと入力が復元）', () => {

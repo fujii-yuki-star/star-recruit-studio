@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.12" },
+    "schemaVersion": { "const": "1.13" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -208,7 +208,11 @@
         "warnings": { "type": "array", "items": { "$ref": "#/$defs/Warning" } },
         "freeLayout": { "type": "array", "items": { "$ref": "#/$defs/FreeElement" } },
         "lines": { "type": "array", "items": { "$ref": "#/$defs/NarrationLine" } },
-        "subtitleEnabledDefault": { "type": "boolean" }
+        "subtitleEnabledDefault": { "type": "boolean" },
+        "slotFits": {
+          "type": "object",
+          "additionalProperties": { "enum": ["cover", "contain", "stretch"] }
+        }
       }
     },
     "SceneCategory": {

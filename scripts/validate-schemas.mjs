@@ -93,7 +93,7 @@ ok = ok && sem;
 
 // generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
 const generalBase = {
-  schemaVersion: '1.12', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  schemaVersion: '1.13', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
   videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
@@ -120,6 +120,7 @@ const mustAccept = [
   ['freeLayout: text 体裁 lineHeight/textAlign/縁取り を許容（1.10・#209）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', lineHeight: 1.6, textAlign: 'center', strokeColor: '#000000', strokeWidth: 2 }] })],
   ['freeLayout: hidden/locked を許容（1.11・#210）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 50, hidden: true, locked: true }] })],
   ['scene: lines（掛け合い・行ごと speaker/字幕/開始秒）を許容（1.8・ADR-0015）', withScene({ lines: [{ lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'どうも', speaker: 2, subtitleEnabled: true, startSec: 2, status: 'none' }], subtitleEnabledDefault: true })],
+  ['scene: slotFits（場面ごとの収め方上書き）を許容（1.13・④）', withScene({ slotFits: { background: 'contain', mainVisual: 'stretch' } })],
 ];
 const mustReject = [
   ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
@@ -130,6 +131,7 @@ const mustReject = [
   ['videoSettings: 旧 width/height 同梱は拒否（1.2 で撤廃）', { ...withBrief({}), videoSettings: { aspectRatio: '16:9', width: 1920, height: 1080, fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
   ['videoSettings: 未知の比率 1:1 は拒否', { ...withBrief({}), videoSettings: { aspectRatio: '1:1', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
   ['scene: fontId 未知（old-font）は拒否', withScene({ fontId: 'old-font' })],
+  ['scene: slotFits の不正な収め方(zoom)は拒否', withScene({ slotFits: { background: 'zoom' } })],
   ['freeLayout: 未知の図形(hexagon)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, shapeType: 'hexagon' }] })],
   ['freeLayout: strokeColor 非hexは拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, strokeColor: 'red' }] })],
   ['freeLayout: strokeWidth 負は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, strokeWidth: -1 }] })],

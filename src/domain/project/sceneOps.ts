@@ -17,8 +17,8 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
 
 /**
  * 場面の見た目パターン（テンプレ）を切り替えた結果を返す＝参照スコープの補正（issue #236 の清算ポリシー）。
- * - **assetRefs は清算する**：新テンプレに無いスロット（`background`/`slot`/`logo` レイヤーの id）への参照を捨てる
- *   （11 §5＝`assetRefs` のキー集合 ⊆ テンプレのスロット id 集合。実在しない素材参照＝ダングリングを残さない）。
+ * - **assetRefs / slotFits は清算する**：新テンプレに無いスロット（`background`/`slot`/`logo` レイヤーの id）への
+ *   参照/収め方を捨てる（11 §5＝キー集合 ⊆ テンプレのスロット id 集合。実在しないスロットへのダングリングを残さない）。
  * - **texts / textFontIds は保持する**：これらは固定の `TextKey` enum がキーでテンプレ非依存ゆえダングリングにならず、
  *   別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と非対称だが**意図的**（#236＝保持を採用）。
  *   ※ 将来この非対称を「揃える」目的で texts を清算しないこと（利用者の入力消失になる）。
@@ -29,10 +29,15 @@ export function switchSceneTemplate(scene: Scene, newTemplateId: string, newTemp
   const slotIds = new Set(
     newTemplateLayers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id),
   );
+  // slotFits も新テンプレのスロット id 集合で清算（assetRefs と同ポリシー＝11 §5・キー ⊆ スロット id）。空なら未設定に。
+  const keptFits = scene.slotFits
+    ? Object.fromEntries(Object.entries(scene.slotFits).filter(([k]) => slotIds.has(k)))
+    : undefined;
   return {
     ...scene,
     templateId: newTemplateId,
     assetRefs: Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k))),
+    slotFits: keptFits && Object.keys(keptFits).length ? keptFits : undefined,
     // texts / textFontIds は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。
     warnings: [],
   };

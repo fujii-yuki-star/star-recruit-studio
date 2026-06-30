@@ -25,6 +25,7 @@ import { textKeyLabel } from "../uiLabels";
 import type { FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ClipDetailControls } from "../components/ClipDetailControls";
+import { FitSelect } from "../components/FitSelect";
 import { Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
 import {
@@ -986,6 +987,23 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
                       {isVideo && assignedAsset && showAdvanced && (
                         <ClipDetailControls asset={assignedAsset} patchClip={patchClip} />
+                      )}
+                      {!isVideo && assignedAsset && showAdvanced && (
+                        <div className="field" style={{ marginTop: 6 }}>
+                          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
+                          <FitSelect
+                            inheritLabel="テンプレの既定に合わせる"
+                            value={selected.slotFits?.[layer.id]}
+                            onChange={(fit) =>
+                              patch((s) => {
+                                const next = { ...s.slotFits };
+                                if (fit) next[layer.id] = fit;
+                                else delete next[layer.id];
+                                return { ...s, slotFits: Object.keys(next).length ? next : undefined };
+                              })
+                            }
+                          />
+                        </div>
                       )}
                     </div>
                   );
