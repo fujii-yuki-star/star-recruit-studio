@@ -1183,11 +1183,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <div className="row-between" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
                         <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
                         <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-                          <button className="btn btn-ghost text-sm" title="グループを最前面へ" onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
-                          <button className="btn btn-ghost text-sm" title="グループを最背面へ" onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
+                          <button className="btn btn-ghost text-sm" title="グループを最前面へ" disabled={!!activeGroup?.locked} onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
+                          <button className="btn btn-ghost text-sm" title="グループを最背面へ" disabled={!!activeGroup?.locked} onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
                           <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
                           <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
-                          <button className="btn btn-ghost text-sm" onClick={ungroupActive}>解除</button>
+                          <button className="btn btn-ghost text-sm" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
                         </div>
                       </div>
                     )}
