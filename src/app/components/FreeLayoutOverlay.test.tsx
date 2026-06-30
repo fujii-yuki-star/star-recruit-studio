@@ -113,6 +113,38 @@ describe("FreeLayoutOverlay: 複数選択・一括操作（#206）", () => {
   });
 });
 
+describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
+  const grp = { id: "group_001", members: ["free_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+
+  it("グループのメンバーを押すとグループ選択コールバックが呼ばれる（onSelectGroup・個別選択は呼ばない）", () => {
+    const onSelectGroup = vi.fn();
+    const { boxes, onSelect } = renderOverlay({ groups: [grp], onSelectGroup });
+    fireEvent.pointerDown(boxes[0], { button: 0, pointerId: 1 }); // free_001＝グループ所属
+    expect(onSelectGroup).toHaveBeenCalledWith("group_001");
+    expect(onSelect).not.toHaveBeenCalledWith("free_001");
+  });
+
+  it("グループ選択中はグループ枠（group-frame）が出る", () => {
+    renderOverlay({ groups: [grp], activeGroupId: "group_001" });
+    expect(screen.getByTestId("group-frame")).toBeInTheDocument();
+  });
+
+  it("グループのメンバーには個別リサイズハンドルを出さない（グループ単位で編集）", () => {
+    const { boxes } = renderOverlay({ groups: [grp], activeGroupId: "group_001", selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // grouped＝primary でもハンドルなし
+  });
+
+  it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform）", () => {
+    const onGroupTransform = vi.fn();
+    const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
+    const frame = screen.getByTestId("group-frame");
+    fireEvent.pointerDown(frame, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(frame, { clientX: 30, clientY: 40, pointerId: 1 });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 });
+  });
+});
+
 describe("FreeLayoutOverlay: 範囲選択（マーキー・#274）", () => {
   // jsdom はレイアウトを持たないため getBoundingClientRect を実寸でモック（scale=1＝canvas と等倍）。
   const mockRect = (root: HTMLElement) => {
