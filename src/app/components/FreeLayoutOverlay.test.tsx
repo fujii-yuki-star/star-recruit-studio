@@ -379,15 +379,25 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
 });
 
 describe("FreeLayoutOverlay: 回転（#208）", () => {
-  it("回転している主要素は CSS rotate を当て、リサイズハンドルは出さず回転ハンドルだけ出す（大きさは数値入力・#208/#279）", () => {
+  it("回転している主要素も CSS rotate を当てつつリサイズ4＋回転ハンドルを出す（回転考慮リサイズ・#279後継）", () => {
     const layout: FreeElement[] = [
       { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 100, zIndex: 1, rotation: 30 },
     ];
     const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
     const box = root.children[0] as HTMLElement;
     expect(box.style.transform).toContain("rotate(30deg)");
-    expect(screen.getByTestId("rotate-handle")).toBeInTheDocument(); // 回転中も回転ハンドルは出す（調整可・#279）
-    expect(box.children).toHaveLength(2); // リサイズハンドルなし＝回転ハンドル(stem+knob)のみ
+    expect(screen.getByTestId("rotate-handle")).toBeInTheDocument();
+    expect(box.children).toHaveLength(6); // リサイズ4＋回転(stem+knob)2＝回転要素もリサイズできる（#279後継）
+  });
+
+  it("回転要素のリサイズカーソルは画面の実方向に合わせる（90°で nw は nesw-resize・#279後継）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 100, zIndex: 1, rotation: 90 },
+    ];
+    const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001"] });
+    const box = root.children[0] as HTMLElement;
+    // 子の先頭4つがリサイズハンドル（nw,ne,sw,se 順）。nw は 90°回転で nwse→nesw に変わる。
+    expect((box.children[0] as HTMLElement).style.cursor).toBe("nesw-resize");
   });
 
   it("回転 0（未指定）の主要素はリサイズ4＋回転ハンドルを出し、transform を付けない（#208/#279）", () => {

@@ -360,3 +360,31 @@ export function resizeFreeElement(
   // w/h も明示的に整数化（grid/min が将来非整数でも整数を返す＝renderer に小数を渡さない）。
   return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
 }
+
+/**
+ * 回転した要素の角リサイズ（#279 後継）。掴んだ角を動かし、**対角を canvas 上で固定**する（回転考慮）。
+ * canvas のドラッグ量(dx/dy)を要素ローカル（未回転）系へ rotate(-θ) で写し、w/h は resizeFreeElement の
+ * ロジック（min/grid/lockAspect）を流用。位置は対角固定になるよう中心を rotate(θ) で補正して逆算する。
+ * rotationDeg=0 は resizeFreeElement と一致（θ=0 で恒等）。回転中心は要素中心（CSS/SVG の rotate と同じ）。
+ */
+export function resizeRotatedFreeElement(
+  start: Geom, corner: ResizeCorner, dx: number, dy: number, rotationDeg: number,
+  min: number = FREE_MIN_SIZE, grid = 0, lockAspect = false,
+): Geom {
+  const rad = (rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  // canvas → ローカル（未回転）系：rotate(-θ)·(dx,dy)。
+  const ldx = dx * cos + dy * sin;
+  const ldy = -dx * sin + dy * cos;
+  // w/h はローカル系で従来ロジックを流用（位置は使わない）。
+  const { w, h } = resizeFreeElement(start, corner, ldx, ldy, min, grid, lockAspect);
+  // 固定する対角 A の符号（掴んだ角の逆）。A を canvas 上で動かさないよう中心を rotate(θ) で補正する。
+  const signAx = corner === 'ne' || corner === 'se' ? -1 : 1;
+  const signAy = corner === 'sw' || corner === 'se' ? -1 : 1;
+  const offX = (signAx * (start.w - w)) / 2;
+  const offY = (signAy * (start.h - h)) / 2;
+  const cx = start.x + start.w / 2 + (offX * cos - offY * sin);
+  const cy = start.y + start.h / 2 + (offX * sin + offY * cos);
+  return { x: Math.round(cx - w / 2), y: Math.round(cy - h / 2), w, h };
+}
