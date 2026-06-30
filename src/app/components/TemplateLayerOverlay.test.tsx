@@ -18,27 +18,31 @@ function makeLayers(): Layer[] {
 
 function renderOverlay(over: Partial<ComponentProps<typeof TemplateLayerOverlay>> = {}) {
   const onSelect = vi.fn();
+  const onSelectMany = vi.fn();
   const onChange = vi.fn();
+  const onMoveMany = vi.fn();
   const result = render(
     <TemplateLayerOverlay
       layers={makeLayers()}
       canvasW={CANVAS_W}
       canvasH={CANVAS_H}
-      selectedId={null}
+      selectedIds={[]}
       onSelect={onSelect}
+      onSelectMany={onSelectMany}
       onChange={onChange}
+      onMoveMany={onMoveMany}
       label={(l) => l.type}
       {...over}
     />,
   );
   const root = result.container.firstElementChild as HTMLElement;
   const boxes = Array.from(root.children) as HTMLElement[]; // zIndex 昇順: [0]=background, [1]=title
-  return { onSelect, onChange, root, boxes, ...result };
+  return { onSelect, onSelectMany, onChange, onMoveMany, root, boxes, ...result };
 }
 
 describe("TemplateLayerOverlay", () => {
   it("各レイヤーを1ボックスずつ描画し、選択中のレイヤーにだけリサイズハンドル（4つ）が出る", () => {
-    const { boxes } = renderOverlay({ selectedId: "title" });
+    const { boxes } = renderOverlay({ selectedIds: ["title"] });
     expect(boxes).toHaveLength(2);
     expect(boxes[0].querySelectorAll("div")).toHaveLength(0); // background（非選択）＝ハンドルなし
     expect(boxes[1].querySelectorAll("div")).toHaveLength(4); // title（選択中）＝角ハンドル4
@@ -50,23 +54,41 @@ describe("TemplateLayerOverlay", () => {
     expect(onSelect).toHaveBeenCalledWith("title");
   });
 
-  it("選択中レイヤーをドラッグすると onChange に新しい位置が渡る（純粋 moveFreeElement 流用）", () => {
-    const { root, boxes, onChange } = renderOverlay({ selectedId: "title" });
+  it("選択中レイヤーをドラッグすると onMoveMany に新しい位置が渡る（一括移動・#306）", () => {
+    const { root, boxes, onMoveMany } = renderOverlay({ selectedIds: ["title"] });
     // jsdom は実レイアウトを持たず clientWidth=0（→scale=0）になるため明示して scale=1 に。
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
     fireEvent.pointerDown(boxes[1], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     fireEvent.pointerMove(boxes[1], { clientX: 30, clientY: 40, pointerId: 1 });
     // title start (200,200) + (30,40) = (230,240)。背景全面への吸着は閾値外で発生しない。
-    expect(onChange).toHaveBeenLastCalledWith("title", expect.objectContaining({ x: 230, y: 240 }));
+    expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "title", x: 230, y: 240 }]);
   });
 
   it("角ハンドルをドラッグすると onChange に新しいサイズが渡る（純粋 resizeFreeElement 流用）", () => {
-    const { root, boxes, onChange } = renderOverlay({ selectedId: "title" });
+    const { root, boxes, onChange } = renderOverlay({ selectedIds: ["title"] });
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
     const seHandle = boxes[1].querySelectorAll("div")[3]; // [nw,ne,sw,se] の se
     fireEvent.pointerDown(seHandle, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     fireEvent.pointerMove(seHandle, { clientX: 20, clientY: 10, pointerId: 1 });
     // se を (+20,+10)：左上 (200,200) 固定で w=400+20=420・h=120+10=130。
     expect(onChange).toHaveBeenLastCalledWith("title", expect.objectContaining({ x: 200, y: 200, w: 420, h: 130 }));
+  });
+
+  it("Shift+クリックで選択トグル（additive・ドラッグは始めない・#306）", () => {
+    const { boxes, onSelect, onMoveMany } = renderOverlay({ selectedIds: ["title"] });
+    fireEvent.pointerDown(boxes[0], { button: 0, shiftKey: true, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onSelect).toHaveBeenCalledWith("background", true); // additive＝トグル
+    fireEvent.pointerMove(boxes[0], { clientX: 30, clientY: 40, pointerId: 1 });
+    expect(onMoveMany).not.toHaveBeenCalled(); // Shift＋クリックは選択のみ
+  });
+
+  it("空白をドラッグ（マーキー）で交差レイヤーが onSelectMany に渡る（#306）", () => {
+    const { root, onSelectMany } = renderOverlay();
+    // jsdom はレイアウトを持たないため getBoundingClientRect を実寸でモック（canvas 等倍）。
+    root.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    fireEvent.pointerDown(root, { button: 0, clientX: 100, clientY: 100, pointerId: 1 }); // 空白＝root 自身
+    fireEvent.pointerMove(root, { clientX: 700, clientY: 400, pointerId: 1 }); // (100,100)-(700,400) に title が交差
+    expect(onSelectMany).toHaveBeenLastCalledWith(["background", "title"]);
   });
 });

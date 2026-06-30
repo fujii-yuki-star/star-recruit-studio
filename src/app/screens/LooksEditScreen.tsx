@@ -10,6 +10,7 @@ import { MAX_INLINE_ASSET_BYTES } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
+import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
 import { Switch } from "../components/ui";
 import { textKeyLabel } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
@@ -68,7 +69,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const yukoPoseTags = buildYukoPoseTags(assets);
 
   const [draft, setDraft] = useState<Template | null>(() => (editing ? cloneTemplate(editing) : null));
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
+  // 主＝末尾選択（種別別エディタ・削除はこれを基準）。複数選択は一括移動／④[#307] グループ化の土台。
+  const selectedLayerId = selectedLayerIds.length > 0 ? selectedLayerIds[selectedLayerIds.length - 1] : null;
   const [addType, setAddType] = useState<LayerType>("text");
   const [busy, setBusy] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -102,12 +105,27 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   function onAddLayer() {
     const next = addLayer(draft!.layers, addType, draft!.canvas);
     setDraft({ ...draft!, layers: next });
-    setSelectedLayerId(next[next.length - 1].id);
+    setSelectedLayerIds([next[next.length - 1].id]);
   }
   function onRemoveLayer(id: string) {
     if (draft!.layers.length <= 1) return; // 最低1枚は残す（schema layers≥1）
     setDraft({ ...draft!, layers: removeLayer(draft!.layers, id) });
-    if (selectedLayerId === id) setSelectedLayerId(null);
+    setSelectedLayerIds((cur) => cur.filter((x) => x !== id));
+  }
+  // 複数選択（#306）：Shift+クリックでトグル・マーキーで集合置換・一括移動。
+  function selectLayer(id: string | null, additive?: boolean) {
+    if (id == null) { setSelectedLayerIds([]); return; }
+    setSelectedLayerIds((cur) => (additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id]));
+  }
+  function selectLayerMany(ids: string[]) {
+    setSelectedLayerIds(ids);
+  }
+  function onMoveLayers(moves: FreeElementMove[]) {
+    setDraft((d) => {
+      if (!d) return d;
+      const byId = new Map(moves.map((m) => [m.id, m] as const));
+      return { ...d, layers: d.layers.map((l) => { const m = byId.get(l.id); return m ? { ...l, x: m.x, y: m.y } : l; }) };
+    });
   }
   async function onSave() {
     if (busy) return;
@@ -357,9 +375,11 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               layers={draft.layers}
               canvasW={draft.canvas.width}
               canvasH={draft.canvas.height}
-              selectedId={selectedLayerId}
-              onSelect={setSelectedLayerId}
+              selectedIds={selectedLayerIds}
+              onSelect={selectLayer}
+              onSelectMany={selectLayerMany}
               onChange={(id, g) => onUpdateLayer(id, g)}
+              onMoveMany={onMoveLayers}
               label={(l) => layerLabel[l.type]}
             />
           </ScenePreview>
@@ -382,9 +402,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 <div
                   key={l.id}
                   className="row-between"
-                  style={{ padding: "2px 6px", borderRadius: 4, background: l.id === selectedLayerId ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)" }}
+                  style={{ padding: "2px 6px", borderRadius: 4, background: selectedLayerIds.includes(l.id) ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)" }}
                 >
-                  <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={() => setSelectedLayerId(l.id)}>
+                  <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={(e) => selectLayer(l.id, e.shiftKey)}>
                     {layerLabel[l.type]}
                   </button>
                   <button
