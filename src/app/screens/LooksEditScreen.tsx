@@ -136,6 +136,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const tplGroups = draft.groups ?? [];
   const activeGroupStillExists = activeGroupId != null && tplGroups.some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
+  // グループ化できる件数（既に別グループのものは除外）。ボタンの活性判定に使う（サイレント no-op を防ぐ）。
+  const groupableCount = selectedLayerIds.filter((id) => topGroupOfMember(tplGroups, id) == null).length;
   function selectGroup(groupId: string | null) {
     setSelectedLayerIds([]);
     setActiveGroupId(groupId);
@@ -428,7 +430,12 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           {(selectedLayerIds.length >= 2 || effectiveActiveGroupId) && (
             <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>
               {selectedLayerIds.length >= 2 && (
-                <button className="btn btn-ghost text-sm" onClick={groupSelected}>選択をグループ化</button>
+                <button
+                  className="btn btn-ghost text-sm"
+                  disabled={groupableCount < 2}
+                  title={groupableCount < 2 ? "選択中の要素はすでにグループに含まれています" : undefined}
+                  onClick={groupSelected}
+                >選択をグループ化</button>
               )}
               {effectiveActiveGroupId && (
                 <>

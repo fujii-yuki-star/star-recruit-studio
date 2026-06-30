@@ -131,4 +131,10 @@ describe("TemplateLayerOverlay", () => {
     fireEvent.pointerMove(frame, { clientX: 30, clientY: 40, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 });
   });
+
+  it("hidden グループのメンバーは描画されない（#307）", () => {
+    const hiddenGrp = { id: "group_001", members: ["title"], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true };
+    const { boxes } = renderOverlay({ groups: [hiddenGrp] });
+    expect(boxes).toHaveLength(1); // title は hidden グループ所属＝非描画。background のみ残る
+  });
 });
