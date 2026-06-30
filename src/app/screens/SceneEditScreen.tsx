@@ -302,7 +302,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 同じラベル（例「素材」）が複数あるスロットは連番で区別する（使用素材UIの区別性・実機FB）。
   const slotLabels = (() => {
     const total = new Map<string, number>();
-    for (const l of slotLayers) total.set(slotLabelFor(l), (total.get(slotLabelFor(l)) ?? 0) + 1);
+    for (const l of slotLayers) {
+      const key = slotLabelFor(l);
+      total.set(key, (total.get(key) ?? 0) + 1);
+    }
     const seen = new Map<string, number>();
     return slotLayers.map((l) => {
       const base = slotLabelFor(l);
@@ -461,7 +464,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           ) : a ? (
             <div className="field" style={{ marginTop: 6, marginBottom: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
-              <FitSelect value={el.fit ?? FIT.cover} onChange={(fit) => fit && patchFreeEl(el.id, { fit })} />
+              {/* FREE 要素の収め方は要素ごと（継承概念なし）＝常に値を持たせる。inheritLabel 未指定の FitSelect は
+                  undefined を返さないが、型上の undefined は既定 cover で明示的に受ける。 */}
+              <FitSelect
+                value={el.fit ?? FIT.cover}
+                onChange={(fit) => patchFreeEl(el.id, { fit: fit ?? FIT.cover })}
+              />
             </div>
           ) : null}
         </div>
