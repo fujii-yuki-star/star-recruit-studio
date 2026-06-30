@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
   addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, rotationFromPointer, sendFreeElementToBack,
+  freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
   snapAngle, snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -443,6 +443,47 @@ describe('resizeFreeElement：縦横比維持（Shift / lockAspect）', () => {
     expect(r.x + r.w).toBe(300); // 右辺固定
     expect(r.y).toBe(100); // 上辺固定
     expect(r.w / r.h).toBeCloseTo(2, 5);
+  });
+});
+
+describe('resizeRotatedFreeElement（回転要素の角リサイズ・#279後継）', () => {
+  const start = { x: 100, y: 100, w: 200, h: 100 };
+  // 角の canvas 位置 = 中心 + rotate(θ)·(符号·w/2, 符号·h/2)（CSS/SVG rotate と同じ向き）。
+  const cornerCanvas = (g: { x: number; y: number; w: number; h: number }, rotDeg: number, sx: number, sy: number) => {
+    const r = (rotDeg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+    const cx = g.x + g.w / 2, cy = g.y + g.h / 2, lx = (sx * g.w) / 2, ly = (sy * g.h) / 2;
+    return { x: cx + (lx * c - ly * s), y: cy + (lx * s + ly * c) };
+  };
+
+  it('rotation=0 は resizeFreeElement と一致（恒等）', () => {
+    for (const corner of ['nw', 'ne', 'sw', 'se'] as const) {
+      expect(resizeRotatedFreeElement(start, corner, 30, 20, 0)).toEqual(resizeFreeElement(start, corner, 30, 20));
+    }
+  });
+
+  it('回転していても掴んだ角の対角は canvas 上で動かない（se→対角 nw を固定）', () => {
+    const rot = 35;
+    const r = resizeRotatedFreeElement(start, 'se', 40, 25, rot);
+    const before = cornerCanvas(start, rot, -1, -1); // nw
+    const after = cornerCanvas(r, rot, -1, -1);
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1.5); // 丸め誤差のみ
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
+    expect(r.w).not.toBe(start.w); // リサイズは効いている
+  });
+
+  it('nw を掴むと対角（se）が canvas 上で動かない', () => {
+    const rot = 100;
+    const r = resizeRotatedFreeElement(start, 'nw', -30, 20, rot);
+    const before = cornerCanvas(start, rot, 1, 1); // se
+    const after = cornerCanvas(r, rot, 1, 1);
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
+  });
+
+  it('最小サイズで止まる（縮め過ぎても min 以上）', () => {
+    const r = resizeRotatedFreeElement(start, 'se', -999, -999, 90, 24);
+    expect(r.w).toBeGreaterThanOrEqual(24);
+    expect(r.h).toBeGreaterThanOrEqual(24);
   });
 });
 

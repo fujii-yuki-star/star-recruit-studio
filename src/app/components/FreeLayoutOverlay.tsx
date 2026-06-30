@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
-import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
@@ -92,7 +92,7 @@ export function FreeLayoutOverlay({
   const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   // 複数同時リサイズ（#274）：選択中の非ロック・非表示・非回転要素のグループ bbox を出し、その角ハンドルで一括拡縮する。
   // 回転要素を除くのは、bbox を論理座標(x/y/w/h)の AABB で計算するため＝回転後の表示領域とズレて意図しない拡縮になるのを防ぐ
-  // （単一要素のリサイズハンドルも !rotated で非表示にしているのと整合。回転要素は数値入力で調整・#208）。
+  // （**単一**要素のリサイズは回転対応済み＝resizeRotatedFreeElement。複数同時の回転対応のみ別問題ゆえ未対応・#279後継）。
   const groupEls = freeLayout.filter((el) => selectedIds.includes(el.id) && !el.locked && !el.hidden && (el.rotation ?? 0) === 0);
   const isGroupResize = selectedIds.length > 1 && groupEls.length > 0;
   const groupBox = isGroupResize ? groupBBox(groupEls) : null;
@@ -243,7 +243,14 @@ export function FreeLayoutOverlay({
       onResizeMany(resizeGroup(drag.groupStarts, drag.start, newBox));
     } else if (drag.corner) {
       // Shift 押下中は縦横比を維持（e.shiftKey は move のたびに評価＝ドラッグ途中の押し直しにも追従）。
-      onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey));
+      // 回転要素は対角を canvas 上で固定する回転考慮リサイズ（#279 後継）。回転なしは従来どおり。
+      const rot = freeLayout.find((el) => el.id === drag.id)?.rotation ?? 0;
+      onChange(
+        drag.id,
+        rot === 0
+          ? resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey)
+          : resizeRotatedFreeElement(drag.start, drag.corner, dx, dy, rot, FREE_MIN_SIZE, gridSize, e.shiftKey),
+      );
     }
   };
 
@@ -379,8 +386,8 @@ export function FreeLayoutOverlay({
               />
             ) : (
               <>
-                {/* リサイズハンドル：回転中・ロック中・複数選択中は出さない（#208/#210/#274）。 */}
-                {isPrimary && !rotated && !locked && !isGroupResize &&
+                {/* リサイズハンドル：ロック中・複数選択中は出さない。回転要素も対応（対角を canvas 固定＝resizeRotatedFreeElement・#279後継）。 */}
+                {isPrimary && !locked && !isGroupResize &&
                   HANDLES.map((hd) => (
                     <div
                       key={hd.corner}
