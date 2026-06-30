@@ -90,6 +90,7 @@
         "w": { "type": "number", "exclusiveMinimum": 0 },
         "h": { "type": "number", "exclusiveMinimum": 0 },
         "zIndex": { "type": "integer" },
+        "rotation": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
         "required": { "type": "boolean" },
         "slotType": { "enum": ["image_or_video", "image", "video"] },
         "fit": { "enum": ["cover", "contain", "stretch"] },

@@ -380,6 +380,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               onSelectMany={selectLayerMany}
               onChange={(id, g) => onUpdateLayer(id, g)}
               onMoveMany={onMoveLayers}
+              onRotate={(id, rotation) => onUpdateLayer(id, { rotation })}
               label={(l) => layerLabel[l.type]}
             />
           </ScenePreview>
