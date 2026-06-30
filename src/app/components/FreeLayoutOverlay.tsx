@@ -4,6 +4,9 @@ import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
 import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
+import { composeGroupGeometry, type Geom } from "../../domain/group/compose";
+import type { Group, GroupTransform } from "../../domain/group/types";
+import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -13,7 +16,10 @@ import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../..
 
 interface DragState {
   id: string; // 主＝リサイズ対象・移動の基準
-  mode: "move" | "resize" | "group-resize" | "rotate";
+  mode: "move" | "resize" | "group-resize" | "rotate" | "group-move";
+  /** group-move 時：対象グループ id と開始時の transform（ドラッグ中の累積を開始基準に固定）。 */
+  groupId?: string;
+  startTransform?: GroupTransform;
   corner?: ResizeCorner;
   /** resize 時：開始時の回転角（度）。回転考慮リサイズの基準を開始時点に固定（ドラッグ中に rotation が変わっても一貫・hot path の find も避ける）。 */
   rotation?: number;
@@ -44,6 +50,17 @@ function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
   const base = corner === "nw" || corner === "se" ? 45 : 135; // nwse=45°, nesw=135°
   const a = (((base + rotationDeg) % 180) + 180) % 180;
   return RESIZE_CURSORS[Math.round(a / 45) % 4];
+}
+
+// 合成済み geom 群の外接矩形（グループ枠用・#305-1 は移動のみゆえ AABB で足りる）。
+function bboxOfComposed(ids: string[], composed: Map<string, Geom>): { x: number; y: number; w: number; h: number } | null {
+  const gs = ids.map((id) => composed.get(id)).filter((g): g is Geom => g != null);
+  if (gs.length === 0) return null;
+  const minX = Math.min(...gs.map((g) => g.x));
+  const minY = Math.min(...gs.map((g) => g.y));
+  const maxX = Math.max(...gs.map((g) => g.x + g.w));
+  const maxY = Math.max(...gs.map((g) => g.y + g.h));
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
 // 吸着ガイド線の色（選択枠＝primary と区別できるよう、整列ガイドは別アクセント色にする）。
@@ -85,12 +102,21 @@ interface OverlayProps {
   /** ドラッグ移動/リサイズの開始/終了。連続編集を Undo の1ステップに合成するための境界（#211）。 */
   onInteractionStart?: () => void;
   onInteractionEnd?: () => void;
+  /** 永続グループ（ADR-0022）。未指定＝[]。表示はグループ transform を合成した位置になる。 */
+  groups?: Group[];
+  /** 選択中のグループ id（FREE のグループ編集対象）。未指定/null＝グループ非選択。 */
+  activeGroupId?: string | null;
+  /** メンバー要素クリックでグループを選択（null で解除）。 */
+  onSelectGroup?: (groupId: string | null) => void;
+  /** グループの transform を更新（移動/拡縮/回転＝中心まわり）。 */
+  onGroupTransform?: (groupId: string, patch: Partial<GroupTransform>) => void;
 }
 
 export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
+  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -107,6 +133,14 @@ export function FreeLayoutOverlay({
   const groupEls = freeLayout.filter((el) => selectedIds.includes(el.id) && !el.locked && !el.hidden && (el.rotation ?? 0) === 0);
   const isGroupResize = selectedIds.length > 1 && groupEls.length > 0;
   const groupBox = isGroupResize ? groupBBox(groupEls) : null;
+  // 永続グループ（ADR-0022）：表示はグループ transform を合成した位置にする（preview/export と一致）。
+  const composed = composeGroupGeometry(freeLayout, groups);
+  // 各要素の所属グループ（最上位）。メンバークリックで「グループごと選択」する。
+  const topGroupByEl = new Map<string, Group>();
+  if (groups.length > 0) for (const el of freeLayout) { const tg = topGroupOfMember(groups, el.id); if (tg) topGroupByEl.set(el.id, tg); }
+  // 選択中グループ＝編集対象。枠はメンバー合成位置の外接矩形（#305-1 は移動のみ）。
+  const activeGroup = activeGroupId ? groups.find((g) => g.id === activeGroupId) ?? null : null;
+  const activeGroupBox = activeGroup ? bboxOfComposed(groupElementIds(groups, activeGroup.id), composed) : null;
   // 右クリックメニュー（対象 id とビューポート座標）。
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。
@@ -211,6 +245,27 @@ export function FreeLayoutOverlay({
     });
   };
 
+  // グループのメンバー押下（ADR-0022・#305-1）：グループを選択し、グループ移動（transform.x/y）を開始する。
+  const beginGroupDrag = (e: ReactPointerEvent, group: Group) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu(null);
+    setEditingId(null);
+    onSelectGroup?.(group.id); // メンバー個別ではなくグループ単位で選択
+    if (group.locked) return; // ロック中は選択のみ
+    const width = ref.current?.clientWidth ?? canvasW;
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.();
+    setDrag({
+      id: "__group__", mode: "group-move", groupId: group.id,
+      startTransform: { ...group.transform },
+      startClientX: e.clientX, startClientY: e.clientY,
+      start: { x: 0, y: 0, w: 0, h: 0 }, // group-move では未使用
+      scale: width / canvasW,
+    });
+  };
+
   const handleMove = (e: ReactPointerEvent) => {
     // 範囲選択（マーキー）中：矩形を広げ、交差する要素を選択集合に反映（#274）。
     if (marquee) {
@@ -249,6 +304,12 @@ export function FreeLayoutOverlay({
       const starts = drag.starts ?? [{ id: drag.id, x: drag.start.x, y: drag.start.y }];
       onMoveMany(starts.map((s) => ({ id: s.id, x: s.x + ddx, y: s.y + ddy })));
       setGuides({ x: snap.guideX, y: snap.guideY });
+    } else if (drag.mode === "group-move" && drag.groupId && drag.startTransform) {
+      // グループ移動：開始 transform に画面ドラッグ量を足して transform.x/y を更新（合成で全メンバーが動く）。
+      onGroupTransform?.(drag.groupId, {
+        x: Math.round(drag.startTransform.x + dx),
+        y: Math.round(drag.startTransform.y + dy),
+      });
     } else if (drag.mode === "group-resize" && drag.corner && drag.groupStarts) {
       // グループ bbox を resizeFreeElement で新サイズにし、各要素を相対位置・大きさを保ってスケール（#274）。
       const newBox = resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey);
@@ -339,15 +400,19 @@ export function FreeLayoutOverlay({
     >
       {freeLayout.map((el) => {
         if (el.hidden) return null; // 非表示の要素は箱を出さない（描画も layout 側で除外・レイヤー一覧で再表示・#210）
-        const selected = selectedIds.includes(el.id); // 選択中（複数可）＝枠を強調
-        const isPrimary = el.id === primaryId; // 主＝リサイズハンドルを出す対象
-        const rotated = (el.rotation ?? 0) !== 0; // 回転あり（角度は 0〜360未満＝360°(=0°)は schema で排除済み）
+        const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation }; // グループ合成後の位置
+        const elGroup = topGroupByEl.get(el.id) ?? null; // 所属グループ（最上位）／未所属は null
+        const grouped = elGroup != null;
+        const inActiveGroup = grouped && elGroup.id === activeGroupId; // 選択中グループのメンバー
+        const selected = inActiveGroup || (!grouped && selectedIds.includes(el.id)); // 枠を強調
+        const isPrimary = el.id === primaryId; // 主＝リサイズハンドルを出す対象（グループ未所属のみ）
+        const rotated = (cg.rotation ?? 0) !== 0; // 回転あり（合成後・中心軸）
         const locked = el.locked === true; // ロック中＝移動/拡縮しない・ハンドルも出さない（#210）
         const editing = el.id === editingId && el.kind === FREE_ELEMENT_KIND.text;
         return (
           <div
             key={el.id}
-            onPointerDown={(e) => beginDrag(e, el, "move")}
+            onPointerDown={(e) => (elGroup ? beginGroupDrag(e, elGroup) : beginDrag(e, el, "move"))}
             onContextMenu={(e) => openMenu(e, el)}
             onDoubleClick={(e) => {
               if (el.kind !== FREE_ELEMENT_KIND.text) return;
@@ -359,17 +424,17 @@ export function FreeLayoutOverlay({
             }}
             style={{
               position: "absolute",
-              left: `${(el.x / canvasW) * 100}%`,
-              top: `${(el.y / canvasH) * 100}%`,
-              width: `${(el.w / canvasW) * 100}%`,
-              height: `${(el.h / canvasH) * 100}%`,
+              left: `${(cg.x / canvasW) * 100}%`,
+              top: `${(cg.y / canvasH) * 100}%`,
+              width: `${(cg.w / canvasW) * 100}%`,
+              height: `${(cg.h / canvasH) * 100}%`,
               boxSizing: "border-box",
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
               background: selected ? "rgba(80,130,255,0.08)" : "transparent",
               cursor: locked ? "default" : editing ? "text" : "move", // ロック中はドラッグ不可を示す
 
-              // 回転（#208）：中心を軸に回す（既定の transform-origin=中心）。出力 SVG の rotate と一致。
-              transform: rotated ? `rotate(${el.rotation}deg)` : undefined,
+              // 回転（#208）：中心を軸に回す（既定の transform-origin=中心）。出力 SVG の rotate と一致。合成後の角度を使う。
+              transform: rotated ? `rotate(${cg.rotation}deg)` : undefined,
             }}
           >
             {editing ? (
@@ -399,7 +464,7 @@ export function FreeLayoutOverlay({
             ) : (
               <>
                 {/* リサイズハンドル：ロック中・複数選択中は出さない。回転要素も対応（対角を canvas 固定＝resizeRotatedFreeElement・#279後継）。 */}
-                {isPrimary && !locked && !isGroupResize &&
+                {isPrimary && !locked && !isGroupResize && !grouped &&
                   HANDLES.map((hd) => (
                     <div
                       key={hd.corner}
@@ -419,7 +484,7 @@ export function FreeLayoutOverlay({
                     />
                   ))}
                 {/* 回転ハンドル（#279）：単一選択・非ロックで表示（回転中も操作できるよう !rotated は付けない）。複数選択中は非表示。 */}
-                {isPrimary && !locked && !isGroupResize && (
+                {isPrimary && !locked && !isGroupResize && !grouped && (
                   <>
                     <div style={{ position: "absolute", left: "50%", top: -22, width: 1, height: 22, background: "var(--color-primary)", transform: "translateX(-50%)", pointerEvents: "none" }} />
                     <div
@@ -462,6 +527,26 @@ export function FreeLayoutOverlay({
             background: "rgba(80,130,255,0.10)",
             pointerEvents: "none",
             zIndex: 35,
+          }}
+        />
+      )}
+
+      {/* 選択中グループの枠（ADR-0022・#305-1）：メンバー合成位置の外接矩形。枠をドラッグでグループを移動（transform.x/y）。 */}
+      {activeGroupBox && activeGroup && (
+        <div
+          data-testid="group-frame"
+          onPointerDown={(e) => beginGroupDrag(e, activeGroup)}
+          style={{
+            position: "absolute",
+            left: `${(activeGroupBox.x / canvasW) * 100}%`,
+            top: `${(activeGroupBox.y / canvasH) * 100}%`,
+            width: `${(activeGroupBox.w / canvasW) * 100}%`,
+            height: `${(activeGroupBox.h / canvasH) * 100}%`,
+            border: "2px solid var(--color-primary)",
+            background: "rgba(80,130,255,0.06)",
+            boxSizing: "border-box",
+            cursor: activeGroup.locked ? "default" : "move",
+            zIndex: 34,
           }}
         />
       )}
