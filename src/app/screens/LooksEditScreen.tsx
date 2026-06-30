@@ -11,7 +11,7 @@ import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
-import { createGroupFromSelection, groupElementIds, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
 import { Switch } from "../components/ui";
 import { textKeyLabel } from "../uiLabels";
@@ -136,6 +136,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const tplGroups = draft.groups ?? [];
   const activeGroupStillExists = activeGroupId != null && tplGroups.some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
+  const activeGroup = tplGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
   // グループ化できる件数（既に別グループのものは除外）。ボタンの活性判定に使う（サイレント no-op を防ぐ）。
   const groupableCount = selectedLayerIds.filter((id) => topGroupOfMember(tplGroups, id) == null).length;
   function selectGroup(groupId: string | null) {
@@ -163,6 +164,19 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   }
   function transformGroup(groupId: string, patch: Partial<GroupTransform>) {
     setDraft((d) => (d ? { ...d, groups: updateGroupTransform(d.groups ?? [], groupId, patch) } : d));
+  }
+  // グループの非表示/ロック切替・重ね順（#307 part2b）。
+  function toggleGroupHidden(groupId: string) {
+    setDraft((d) => (d ? { ...d, groups: toggleGroupFlag(d.groups ?? [], groupId, "hidden") } : d));
+  }
+  function toggleGroupLocked(groupId: string) {
+    setDraft((d) => (d ? { ...d, groups: toggleGroupFlag(d.groups ?? [], groupId, "locked") } : d));
+  }
+  function bringGroupFront(groupId: string) {
+    setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "front") } : d));
+  }
+  function sendGroupBack(groupId: string) {
+    setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "back") } : d));
   }
   async function onSave() {
     if (busy) return;
@@ -439,8 +453,12 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               )}
               {effectiveActiveGroupId && (
                 <>
-                  <span className="text-sm">グループを選択中（まとめて移動できます）</span>
-                  <button className="btn btn-ghost text-sm" onClick={ungroupActive}>グループを解除</button>
+                  <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（移動・拡縮・回転）"}</span>
+                  <button className="btn btn-ghost text-sm" title="グループを最前面へ" onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
+                  <button className="btn btn-ghost text-sm" title="グループを最背面へ" onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
+                  <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
+                  <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
+                  <button className="btn btn-ghost text-sm" onClick={ungroupActive}>解除</button>
                 </>
               )}
             </div>
