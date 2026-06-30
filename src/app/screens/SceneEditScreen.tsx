@@ -7,7 +7,7 @@ import { ASSET_TYPE, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SH
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
-import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
@@ -440,6 +440,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, groups: toggleGroupFlag(s.groups ?? [], groupId, "hidden") }));
   const toggleGroupLocked = (groupId: string) =>
     patch((s) => ({ ...s, groups: toggleGroupFlag(s.groups ?? [], groupId, "locked") }));
+  // グループの重ね順（#305）：メンバー全体を最前面/最背面へ（相対順は保つ）。
+  const bringGroupFront = (groupId: string) =>
+    patch((s) => ({ ...s, freeLayout: reorderGroupZ(s.freeLayout ?? [], groupElementIds(s.groups ?? [], groupId), "front") }));
+  const sendGroupBack = (groupId: string) =>
+    patch((s) => ({ ...s, freeLayout: reorderGroupZ(s.freeLayout ?? [], groupElementIds(s.groups ?? [], groupId), "back") }));
   // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
   // updateScene→set は同期実行のため、newId は下の setSelectedFreeIds より前に確実に代入される。
@@ -1177,7 +1182,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {effectiveActiveGroupId && (
                       <div className="row-between" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
                         <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
-                        <div className="row" style={{ gap: 4 }}>
+                        <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+                          <button className="btn btn-ghost text-sm" title="グループを最前面へ" onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
+                          <button className="btn btn-ghost text-sm" title="グループを最背面へ" onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
                           <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
                           <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
                           <button className="btn btn-ghost text-sm" onClick={ungroupActive}>解除</button>

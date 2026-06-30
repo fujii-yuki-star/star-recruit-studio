@@ -99,3 +99,20 @@ export function removeMembersFromGroups(groups: Group[], removedIds: string[]): 
     .map((g) => ({ ...g, members: g.members.filter((m) => !removed.has(m)) }))
     .filter((g) => g.members.length > 0);
 }
+
+/**
+ * グループのメンバー全体を最前面('front')/最背面('back')へ動かす（重ね順・ADR-0022）。
+ * 非メンバー・メンバーそれぞれの相対順は保ち、全要素の zIndex を 1..n に振り直す（FREE 背景 zIndex 0 の上に乗せる）。
+ */
+export function reorderGroupZ(
+  freeLayout: FreeElement[], memberIds: string[], position: 'front' | 'back',
+): FreeElement[] {
+  const members = new Set(memberIds);
+  const byZ = (a: FreeElement, b: FreeElement): number => (a.zIndex ?? 1) - (b.zIndex ?? 1);
+  const mem = freeLayout.filter((e) => members.has(e.id)).sort(byZ);
+  if (mem.length === 0) return freeLayout;
+  const oth = freeLayout.filter((e) => !members.has(e.id)).sort(byZ);
+  const order = position === 'front' ? [...oth, ...mem] : [...mem, ...oth];
+  const zById = new Map(order.map((e, i) => [e.id, i + 1] as const));
+  return freeLayout.map((e) => ({ ...e, zIndex: zById.get(e.id) ?? (e.zIndex ?? 1) }));
+}

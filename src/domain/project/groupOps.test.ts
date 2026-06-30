@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  IDENTITY_TRANSFORM, createGroupFromSelection, groupElementIds, removeMembersFromGroups, toggleGroupFlag,
+  IDENTITY_TRANSFORM, createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag,
   topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform,
 } from './groupOps';
 import type { Group } from '../group/types';
@@ -109,5 +109,36 @@ describe('removeMembersFromGroups', () => {
   it('削除対象が空なら元配列をそのまま返す', () => {
     const groups = [grp('group_001', ['free_001'])];
     expect(removeMembersFromGroups(groups, [])).toBe(groups);
+  });
+});
+
+describe('reorderGroupZ', () => {
+  const withZ = (zs: Record<string, number>): FreeElement[] =>
+    Object.entries(zs).map(([id, z]) => ({ ...shape(id, 0, 0), zIndex: z }));
+  const zOf = (out: FreeElement[], id: string): number | undefined => out.find((e) => e.id === id)?.zIndex;
+
+  it('front：メンバーを非メンバーより上へ（相対順は保つ・1..n に振り直し）', () => {
+    const layout = withZ({ free_001: 1, free_002: 2, free_003: 3 }); // 001/003=メンバ, 002=非
+    const out = reorderGroupZ(layout, ['free_001', 'free_003'], 'front');
+    expect(zOf(out, 'free_002')).toBe(1); // 非メンバが最下
+    expect(zOf(out, 'free_001')).toBe(2); // メンバ（001<003 の相対順を保持）
+    expect(zOf(out, 'free_003')).toBe(3);
+  });
+  it('back：メンバーを非メンバーより下へ（1以上＝背景の上）', () => {
+    const layout = withZ({ free_001: 1, free_002: 2, free_003: 3 });
+    const out = reorderGroupZ(layout, ['free_001', 'free_003'], 'back');
+    expect(zOf(out, 'free_001')).toBe(1); // メンバ最下（≥1）
+    expect(zOf(out, 'free_003')).toBe(2);
+    expect(zOf(out, 'free_002')).toBe(3); // 非メンバが上
+  });
+  it('メンバーが居なければ元の配列を返す', () => {
+    const layout = withZ({ free_001: 1 });
+    expect(reorderGroupZ(layout, ['free_999'], 'front')).toBe(layout);
+  });
+  it('全要素がメンバー（非メンバー0件）→ 相対順を保って 1..n に振り直す', () => {
+    const layout = withZ({ free_001: 3, free_002: 1 });
+    const out = reorderGroupZ(layout, ['free_001', 'free_002'], 'back');
+    expect(zOf(out, 'free_002')).toBe(1); // 元 z1 が下
+    expect(zOf(out, 'free_001')).toBe(2); // 元 z3 が上（相対順保持）
   });
 });
