@@ -77,8 +77,19 @@ export function ungroupGroup(
     if (!memberIds.has(el.id)) return el;
     const g = composed.get(el.id);
     if (!g) return el;
+    // 合成後の回転（要素＋グループ回転の合算）をそのまま採用。0（=回転なし）のときは undefined にして明示する。
+    // ※ el.rotation を残すと、合算が 360→0 に正規化される場合（例 要素30°＋グループ330°）に焼き込み前後で表示がズレる。
     const rot = normalizeDeg(g.rotation ?? 0);
-    return { ...el, x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), rotation: rot === 0 ? el.rotation : rot };
+    return { ...el, x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), rotation: rot === 0 ? undefined : rot };
   });
   return { groups: groups.filter((g) => g.id !== groupId), freeLayout: freeLayoutBaked };
+}
+
+/** 要素削除に伴い、groups から該当 id を除去し、空になったグループを落とす（orphan 参照の防止・flat 前提＝#305-1）。 */
+export function removeMembersFromGroups(groups: Group[], removedIds: string[]): Group[] {
+  if (groups.length === 0 || removedIds.length === 0) return groups;
+  const removed = new Set(removedIds);
+  return groups
+    .map((g) => ({ ...g, members: g.members.filter((m) => !removed.has(m)) }))
+    .filter((g) => g.members.length > 0);
 }

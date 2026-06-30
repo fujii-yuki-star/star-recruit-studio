@@ -7,7 +7,7 @@ import { ASSET_TYPE, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SH
 import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
-import { createGroupFromSelection, groupElementIds, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
@@ -308,6 +308,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
   const template = selected ? templates.find((t) => t.templateId === selected.templateId) : undefined;
+  // アクティブグループが消えたら（メンバー削除で空に・場面切替）描画上は非選択扱い＝stale な state を描画に出さない（effect 不要・#311 レビュー）。
+  const activeGroupStillExists = activeGroupId != null && (selected?.groups ?? []).some((g) => g.id === activeGroupId);
+  const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
   // assetRefs を割り当てられるスロット層（背景/メイン/ロゴ）と、割当可能な素材。
   const slotLayers =
     template?.layers.filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo") ?? [];
@@ -386,7 +389,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const patchFreeEl = (id: string, p: Partial<Omit<FreeElement, "id" | "kind">>) =>
     patch((s) => ({ ...s, freeLayout: updateFreeElement(s.freeLayout ?? [], id, p) }));
   const removeFreeEl = (id: string) => {
-    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id) }));
+    // freeLayout から消すと同時に groups からも除去し、空グループは落とす（orphan 参照防止・#311 レビュー）。
+    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]) }));
     setSelectedFreeIds((cur) => cur.filter((x) => x !== id)); // 選択中を消したら選択から外す（詳細モードは案内へ）
   };
   // 一括移動：複数選択の全要素の位置を1回の更新でまとめて反映（オーバーレイのドラッグから・#206）。
@@ -397,7 +401,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: applyFreeElementGeoms(s.freeLayout ?? [], updates) }));
   // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
   const removeFreeMany = (ids: string[]) => {
-    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids) }));
+    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids) }));
     setSelectedFreeIds([]);
     setEditPopover(null);
   };
@@ -408,8 +412,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: applyFreeElementPositions(s.freeLayout ?? [], distributeFreeElements(s.freeLayout ?? [], selectedFreeIds, axis)) }));
   // グループ化（ADR-0022・#305）：選択中の要素を1つのグループに束ね、それをアクティブにする。
   const groupSelected = () => {
-    if (selectedFreeIds.length < 2) return;
-    const { groups, groupId } = createGroupFromSelection(sceneGroups, selectedFreeIds);
+    // 既に別グループに属す要素は除外（1要素が複数グループに入る不整合を防ぐ）。
+    const eligible = selectedFreeIds.filter((id) => topGroupOfMember(sceneGroups, id) == null);
+    if (eligible.length < 2) return;
+    const { groups, groupId } = createGroupFromSelection(sceneGroups, eligible);
     patch((s) => ({ ...s, groups }));
     setSelectedFreeIds([]);
     setActiveGroupId(groupId);
@@ -835,7 +841,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onInteractionStart={beginHistoryGroup}
                     onInteractionEnd={endHistoryGroup}
                     groups={sceneGroups}
-                    activeGroupId={activeGroupId}
+                    activeGroupId={effectiveActiveGroupId}
                     onSelectGroup={selectGroup}
                     onGroupTransform={transformGroup}
                   />
@@ -1162,7 +1168,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       </div>
                     </div>
                     {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。 */}
-                    {activeGroupId && (
+                    {effectiveActiveGroupId && (
                       <div className="row-between" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
                         <span className="text-sm">グループを選択中（まとめて移動できます）</span>
                         <button className="btn btn-ghost text-sm" onClick={ungroupActive}>グループを解除</button>

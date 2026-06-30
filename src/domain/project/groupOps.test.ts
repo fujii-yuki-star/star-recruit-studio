@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  IDENTITY_TRANSFORM, createGroupFromSelection, groupElementIds, topGroupOfMember, ungroupGroup,
-  updateGroupMeta, updateGroupTransform,
+  IDENTITY_TRANSFORM, createGroupFromSelection, groupElementIds, removeMembersFromGroups, topGroupOfMember,
+  ungroupGroup, updateGroupMeta, updateGroupTransform,
 } from './groupOps';
 import type { Group } from '../group/types';
 import type { FreeElement } from './types';
@@ -68,5 +68,31 @@ describe('ungroupGroup', () => {
     const freeLayout = [shape('free_001', 0, 0)];
     const out = ungroupGroup([], freeLayout, 'group_999');
     expect(out.freeLayout).toBe(freeLayout);
+  });
+  it('回転の焼き込み：合算が 360→0 に正規化される場合は rotation なし（要素30°＋グループ330°）', () => {
+    const freeLayout = [{ ...shape('free_001', 100, 100), rotation: 30 }];
+    const groups = [grp('group_001', ['free_001'], { rotation: 330 })];
+    const out = ungroupGroup(groups, freeLayout, 'group_001');
+    expect(out.freeLayout[0].rotation).toBeUndefined(); // 30+330=360 → 0 → 回転なし（el.rotation は残さない）
+    expect(out.freeLayout[0]).toMatchObject({ x: 100, y: 100 }); // 単一メンバーは中心不動
+  });
+  it('回転の焼き込み：合算が非0なら rotation に反映（要素30°＋グループ40°=70°）', () => {
+    const freeLayout = [{ ...shape('free_001', 100, 100), rotation: 30 }];
+    const groups = [grp('group_001', ['free_001'], { rotation: 40 })];
+    const out = ungroupGroup(groups, freeLayout, 'group_001');
+    expect(out.freeLayout[0].rotation).toBeCloseTo(70);
+  });
+});
+
+describe('removeMembersFromGroups', () => {
+  it('削除 id を members から除去し、空になったグループは落とす（orphan 防止）', () => {
+    const groups = [grp('group_001', ['free_001', 'free_002']), grp('group_002', ['free_003'])];
+    const out = removeMembersFromGroups(groups, ['free_002', 'free_003']);
+    expect(out).toHaveLength(1); // group_002 は空になり消える
+    expect(out[0]).toMatchObject({ id: 'group_001', members: ['free_001'] });
+  });
+  it('削除対象が空なら元配列をそのまま返す', () => {
+    const groups = [grp('group_001', ['free_001'])];
+    expect(removeMembersFromGroups(groups, [])).toBe(groups);
   });
 });
