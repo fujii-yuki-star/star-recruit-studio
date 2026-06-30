@@ -15,8 +15,8 @@ interface DragState {
   startClientX: number;
   startClientY: number;
   start: { x: number; y: number; w: number; h: number };
-  /** move 時：一括移動する全レイヤーの開始位置（複数選択。単一なら主のみ）。 */
-  starts?: { id: string; x: number; y: number }[];
+  /** move 時：一括移動する全レイヤーの開始位置（複数選択。単一なら主のみ）。beginDrag で常に設定。 */
+  starts: { id: string; x: number; y: number }[];
   /** move 時の吸着先＝移動しない他レイヤーの辺・中心（開始時に確定）。 */
   otherEdges: SnapEdges[];
   scale: number; // 表示px / canvas
@@ -117,8 +117,9 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       );
       const ddx = snap.x - drag.start.x;
       const ddy = snap.y - drag.start.y;
-      const starts = drag.starts ?? [{ id: drag.id, x: drag.start.x, y: drag.start.y }];
-      onMoveMany(starts.map((s) => ({ id: s.id, x: s.x + ddx, y: s.y + ddy })));
+      // starts は beginDrag で常に設定（型も必須）。万一 layers に無い id 混入で空配列になっても主だけは動かす。
+      const startsList = drag.starts.length > 0 ? drag.starts : [{ id: drag.id, x: drag.start.x, y: drag.start.y }];
+      onMoveMany(startsList.map((s) => ({ id: s.id, x: s.x + ddx, y: s.y + ddy })));
       setGuides({ x: snap.guideX, y: snap.guideY });
     } else if (drag.corner) {
       // リサイズ＝純粋 resizeFreeElement（Shift で縦横比維持）。主のみ。最小は FREE/Layer 共通 GEOM_MIN_SIZE。
