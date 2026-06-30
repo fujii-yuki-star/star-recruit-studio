@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.13" },
+    "schemaVersion": { "const": "1.14" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -212,7 +212,33 @@
         "slotFits": {
           "type": "object",
           "additionalProperties": { "enum": ["cover", "contain", "stretch"] }
-        }
+        },
+        "groups": { "type": "array", "items": { "$ref": "#/$defs/Group" } }
+      }
+    },
+    "Group": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "要素のグループ化（ADR-0022・11 §2）。members は要素 id、ネストで group id も可。",
+      "required": ["id", "members", "transform"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^group_[0-9]{3,}$" },
+        "members": { "type": "array", "items": { "type": "string" } },
+        "transform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "rotation", "scale"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "rotation": { "type": "number" },
+            "scale": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "name": { "type": "string" },
+        "zIndex": { "type": "integer" },
+        "hidden": { "type": "boolean" },
+        "locked": { "type": "boolean" }
       }
     },
     "SceneCategory": {

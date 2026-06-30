@@ -5,6 +5,7 @@ import { FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, LayerType, TextAlign } from '../domain/enums';
 import type { Scene } from '../domain/project/types';
 import type { Layer, Template } from '../domain/template/types';
+import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 
 export interface Rect {
   x: number;
@@ -95,8 +96,15 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   const backgroundColor = template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR;
   const items: LayoutItem[] = [];
 
+  // グループ transform を前合成（ADR-0022）。グループ無しは passthrough＝出力差分なし。
+  const layerGeom = composeGroupGeometry(template.layers, template.groups ?? []);
+  const templateGroups = template.groups ?? [];
+
   for (const layer of template.layers) {
-    const base: ItemBase = { id: layer.id, x: layer.x, y: layer.y, w: layer.w, h: layer.h, zIndex: zOf(layer) };
+    if (isHiddenByGroup(layer.id, templateGroups)) continue; // hidden グループのメンバーは描画しない
+    const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h };
+    const base: ItemBase = { id: layer.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: zOf(layer) };
+    if (cg.rotation) base.rotation = cg.rotation; // 0/未指定は付けない＝グループ未所属は従来どおり
 
     switch (layer.type) {
       case 'background': {
@@ -176,10 +184,14 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   // FREE テンプレ場面のみ：scene.freeLayout の要素を LayoutItem として重ねる（ADR-0008）。テンプレ層の上に zIndex 順。
   // 通常テンプレに誤って freeLayout が付いても描画しない（防御。category で判定）。
   if (template.category === FREE_CATEGORY) {
+    const sceneGroups = scene.groups ?? [];
+    const elGeom = composeGroupGeometry(scene.freeLayout ?? [], sceneGroups);
     for (const el of scene.freeLayout ?? []) {
       if (el.hidden) continue; // 非表示の要素は描画しない（レイヤー一覧で隠す・#210）。
-      // zIndex 未指定は 1（背景=0 より前面に置く）。rotation はそのまま転送（未指定=回転なし）。
-      const base: ItemBase = { id: el.id, x: el.x, y: el.y, w: el.w, h: el.h, zIndex: el.zIndex ?? 1, rotation: el.rotation };
+      if (isHiddenByGroup(el.id, sceneGroups)) continue; // hidden グループのメンバーも描画しない（ADR-0022）。
+      // zIndex 未指定は 1（背景=0 より前面に置く）。rotation はグループ合成後の値（未所属＝el.rotation）。
+      const cg = elGeom.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation };
+      const base: ItemBase = { id: el.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: el.zIndex ?? 1, rotation: cg.rotation };
       switch (el.kind) {
         case 'slot':
           items.push({ ...base, kind: 'image', assetId: el.assetId ?? null, fit: el.fit ?? 'cover', role: 'slot', label: '素材' });

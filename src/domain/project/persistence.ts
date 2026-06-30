@@ -13,8 +13,8 @@ import type {
   ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。1.5→1.6：FREE 図形種別/枠線（#173）。1.6→1.7：テキストごとのフォント（#178）。1.7→1.8：掛け合い＝scene.lines（NarrationLine[]）＋scene.subtitleEnabledDefault を追加（任意・narration 残置・ADR-0015/#180）。1.8→1.9：FREE 要素の回転 FreeElement.rotation（度・任意・未指定=回転なし・#208）。1.9→1.10：FREE text の体裁 lineHeight（行間）/textAlign（揃え）を追加（任意・縁取りは既存 strokeColor/strokeWidth を text にも適用・#209）。1.10→1.11：FREE 要素の hidden（非表示）/locked（ロック）を追加（任意・レイヤー一覧・#210）。1.11→1.12：掛け合いの行ごとの抑揚 NarrationLine.intonation を追加（任意・null=場面/動画の既定を継承・#242）。1.12→1.13：scene.slotFits（場面ごと・スロット別の画像の収め方）を追加（任意・未指定=テンプレ層の fit を使用・④）。 */
-export const PROJECT_SCHEMA_VERSION = '1.13';
+/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。1.5→1.6：FREE 図形種別/枠線（#173）。1.6→1.7：テキストごとのフォント（#178）。1.7→1.8：掛け合い＝scene.lines（NarrationLine[]）＋scene.subtitleEnabledDefault を追加（任意・narration 残置・ADR-0015/#180）。1.8→1.9：FREE 要素の回転 FreeElement.rotation（度・任意・未指定=回転なし・#208）。1.9→1.10：FREE text の体裁 lineHeight（行間）/textAlign（揃え）を追加（任意・縁取りは既存 strokeColor/strokeWidth を text にも適用・#209）。1.10→1.11：FREE 要素の hidden（非表示）/locked（ロック）を追加（任意・レイヤー一覧・#210）。1.11→1.12：掛け合いの行ごとの抑揚 NarrationLine.intonation を追加（任意・null=場面/動画の既定を継承・#242）。1.12→1.13：scene.slotFits（場面ごと・スロット別の画像の収め方）を追加（任意・未指定=テンプレ層の fit を使用・④）。1.13→1.14：scene.groups（要素のグループ化・ADR-0022）を追加（任意・未指定=グループ無し）。 */
+export const PROJECT_SCHEMA_VERSION = '1.14';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
@@ -142,6 +142,11 @@ export function createLineId(existingIds: readonly string[]): string {
   return nextNumberedId('line', existingIds);
 }
 
+/** group_NNN を発行する（§2.1・グループ id・scene/template 内一意・ADR-0022）。 */
+export function createGroupId(existingIds: readonly string[]): string {
+  return nextNumberedId('group', existingIds);
+}
+
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
 export function assembleProject(
   header: ProjectHeader,
@@ -207,7 +212,7 @@ export function parseProjectDoc(text: string): Project {
   return migrateProject(doc as unknown as Project);
 }
 
-/** 読込時に旧バージョン(1.0〜1.12)を現行(1.13)へ移行する。
+/** 読込時に旧バージョン(1.0〜1.13)を現行(1.14)へ移行する。
  *  1.0→1.1: videoKind 既定 recruit・companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
  *  1.1→1.2: videoSettings.width/height を除去（aspectRatio を単一の真実に＝ADR-0012）。
  *  1.2→1.3: videoSettings.fontId を補完（同梱フォント選択・未指定は既定フォント）。
@@ -221,7 +226,8 @@ export function parseProjectDoc(text: string): Project {
  *  1.9→1.10: FREE text の体裁（lineHeight＝行間・textAlign＝揃え）。後方互換の任意追加＝変換不要（未指定は既定＝行間1.3/左揃え・#209）。
  *  1.10→1.11: FREE 要素の hidden（非表示）/locked（ロック）。後方互換の任意追加＝変換不要（未指定＝表示・編集可・#210）。
  *  1.11→1.12: 掛け合いの行ごとの抑揚（NarrationLine.intonation）。後方互換の任意追加＝変換不要（未指定＝場面/動画の既定を継承・#242）。
- *  1.12→1.13: 場面ごと・スロット別の画像の収め方（scene.slotFits）。後方互換の任意追加＝変換不要（未指定＝テンプレ層の fit を使用・④）。 */
+ *  1.12→1.13: 場面ごと・スロット別の画像の収め方（scene.slotFits）。後方互換の任意追加＝変換不要（未指定＝テンプレ層の fit を使用・④）。
+ *  1.13→1.14: 要素のグループ化（scene.groups）。後方互換の任意追加＝変換不要（未指定＝グループ無し・ADR-0022）。 */
 function migrateProject(project: Project): Project {
   const next: Project = {
     ...project,

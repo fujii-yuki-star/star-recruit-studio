@@ -281,6 +281,56 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(layoutToSvg(layout)).toContain('transform="rotate(30 200 150)"');
   });
 
+  it('scene.groups の平行移動が FREE 要素の LayoutItem に前合成される（ADR-0022・パリティ）', () => {
+    const groupedScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 100, y: 100, w: 40, h: 20, zIndex: 5, shapeType: 'rect', fillColor: '#00ff00' }],
+      groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 50, y: -20, rotation: 0, scale: 1 } }],
+    };
+    const item = layoutScene(groupedScene, freeTemplate).items.find((i) => i.id === 'free_001');
+    expect(item?.x).toBeCloseTo(150); // 100 + 50
+    expect(item?.y).toBeCloseTo(80); // 100 - 20
+  });
+
+  it('グループ回転が要素の rotation＋中心へ合成され SVG rotate に出る（ADR-0022・パリティ）', () => {
+    const rotGroupScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 100, y: 100, w: 40, h: 20, zIndex: 5, shapeType: 'rect', fillColor: '#00ff00' }],
+      groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 90, scale: 1 } }],
+    };
+    const layout = layoutScene(rotGroupScene, freeTemplate);
+    expect(layout.items.find((i) => i.id === 'free_001')?.rotation).toBeCloseTo(90); // 単一メンバー＝中心(120,110)固定で rotation のみ +90
+    expect(layoutToSvg(layout)).toContain('transform="rotate(90 120 110)"');
+  });
+
+  it('hidden グループのメンバーは描画されない（ADR-0022）', () => {
+    const hiddenScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', fillColor: '#000000' }],
+      groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
+    };
+    const layout = layoutScene(hiddenScene, freeTemplate);
+    expect(layout.items.find((i) => i.id === 'free_001')).toBeUndefined();
+  });
+
+  it('template.groups の平行移動がテンプレ層の LayoutItem に前合成される（ADR-0022・パリティ）', () => {
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['background'], transform: { x: 50, y: -20, rotation: 0, scale: 1 } }],
+    };
+    const item = layoutScene(scene, grouped).items.find((i) => i.id === 'background');
+    expect(item?.x).toBeCloseTo(50); // 0 + 50
+    expect(item?.y).toBeCloseTo(-20); // 0 - 20
+  });
+
+  it('hidden グループのテンプレ層は描画されない（ADR-0022）', () => {
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['background'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
+    };
+    expect(layoutScene(scene, grouped).items.find((i) => i.id === 'background')).toBeUndefined();
+  });
+
   it('rotation 未指定/0 は rotate でくるまない（出力 SVG の差分を最小化）', () => {
     const svg = layoutToSvg(layoutScene(freeScene, freeTemplate)); // freeScene は rotation なし
     expect(svg).not.toContain('rotate(');
