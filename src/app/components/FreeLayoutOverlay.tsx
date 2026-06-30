@@ -4,6 +4,7 @@ import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
 import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
+import { GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { topGroupOfMember } from "../../domain/project/groupOps";
@@ -55,8 +56,6 @@ function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
   return RESIZE_CURSORS[Math.round(a / 45) % 4];
 }
 
-// グループ最小スケール（縮小しすぎ＝0/負を防ぐ。schema は scale>0）。
-const GROUP_MIN_SCALE = 0.1;
 
 // 選択中グループの「向き付き枠」（ADR-0022・#305-2）。メンバー（要素）の素の外接矩形（=ローカル bbox）に
 // グループ transform を適用：中心＝アンカー＋平行移動／サイズ＝ローカル×scale／回転＝rotation。

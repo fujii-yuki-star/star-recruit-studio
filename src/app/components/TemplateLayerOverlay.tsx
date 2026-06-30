@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Layer } from "../../domain/template/types";
 import { freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
-import { GEOM_MIN_SIZE } from "../../domain/constants";
+import { GEOM_MIN_SIZE, GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry, isHiddenByGroup } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { topGroupOfMember } from "../../domain/project/groupOps";
@@ -47,9 +47,6 @@ function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
   const a = (((base + rotationDeg) % 180) + 180) % 180;
   return RESIZE_CURSORS[Math.round(a / 45) % 4];
 }
-
-// グループ最小スケール（縮小しすぎ＝0/負を防ぐ。schema は scale>0）。
-const GROUP_MIN_SCALE = 0.1;
 
 // 選択中グループの「向き付き枠」（ADR-0022・#307）。メンバー（Layer）の素の外接矩形に group transform を適用。
 // flat 前提。メンバー個別回転は枠 bbox に含めない（FREE と同方針・将来精緻化）。
