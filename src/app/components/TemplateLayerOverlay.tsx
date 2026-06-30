@@ -4,16 +4,22 @@ import type { Layer } from "../../domain/template/types";
 import { freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GEOM_MIN_SIZE } from "../../domain/constants";
+import { composeGroupGeometry, isHiddenByGroup } from "../../domain/group/compose";
+import type { Group, GroupTransform } from "../../domain/group/types";
+import { topGroupOfMember } from "../../domain/project/groupOps";
 
 // テンプレ作成エディタのレイヤーをプレビュー上でドラッグ/リサイズ/吸着＋複数選択するオーバーレイ（ADR-0017・#306）。
 // ①の FREE オーバーレイの純粋 ops（{x,y,w,h} を受ける move/resize/snap、id 集合を返す freeElementsInRect）を Layer 編集へ流用する。
 // 複数選択（Shift+クリック・マーキー）→ 一括移動。リサイズは主（末尾選択）のみ。グループ化は ④[#307] で本選択を土台に載せる。
 interface DragState {
   id: string; // 主＝リサイズ対象・移動の基準
-  mode: "move" | "resize" | "rotate";
+  mode: "move" | "resize" | "rotate" | "group-move";
   corner?: ResizeCorner;
   /** resize 時：開始時の回転角（度）。回転考慮リサイズの基準を開始時点に固定（#279）。 */
   rotation?: number;
+  /** group-move 時：対象グループ id と開始時の transform（#307）。 */
+  groupId?: string;
+  startTransform?: GroupTransform;
   startClientX: number;
   startClientY: number;
   start: { x: number; y: number; w: number; h: number };
@@ -40,6 +46,23 @@ function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
   return RESIZE_CURSORS[Math.round(a / 45) % 4];
 }
 
+// 選択中グループの「向き付き枠」（ADR-0022・#307）。メンバー（Layer）の素の外接矩形に group transform を適用。
+// flat 前提。メンバー個別回転は枠 bbox に含めない（FREE と同方針・将来精緻化）。
+function orientedGroupFrame(
+  group: Group, layers: Layer[],
+): { cx: number; cy: number; w: number; h: number; rotation: number } | null {
+  const rects = group.members.map((id) => layers.find((l) => l.id === id)).filter((l): l is Layer => l != null);
+  if (rects.length === 0) return null;
+  const minX = Math.min(...rects.map((l) => l.x));
+  const minY = Math.min(...rects.map((l) => l.y));
+  const maxX = Math.max(...rects.map((l) => l.x + l.w));
+  const maxY = Math.max(...rects.map((l) => l.y + l.h));
+  const lw = maxX - minX;
+  const lh = maxY - minY;
+  const t = group.transform;
+  return { cx: minX + lw / 2 + t.x, cy: minY + lh / 2 + t.y, w: lw * t.scale, h: lh * t.scale, rotation: t.rotation };
+}
+
 interface Props {
   layers: Layer[];
   canvasW: number;
@@ -56,11 +79,19 @@ interface Props {
   onMoveMany: (moves: FreeElementMove[]) => void;
   /** 回転ハンドルのドラッグ中、レイヤーの新しい角度（度・0≤r<360）を返す（#279 同様）。 */
   onRotate: (id: string, rotation: number) => void;
+  /** 永続グループ（ADR-0022）。表示はグループ transform を合成した位置になる。未指定＝[]。 */
+  groups?: Group[];
+  /** 選択中のグループ id（グループ編集対象）。 */
+  activeGroupId?: string | null;
+  /** メンバークリックでグループを選択（null で解除）。 */
+  onSelectGroup?: (groupId: string | null) => void;
+  /** グループの transform を更新（移動など・中心まわり）。 */
+  onGroupTransform?: (groupId: string, patch: Partial<GroupTransform>) => void;
   /** レイヤーのユーザー向けラベル（種別名）。 */
   label: (layer: Layer) => string;
 }
 
-export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onRotate, label }: Props) {
+export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onRotate, groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, label }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
@@ -68,6 +99,12 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   // 主＝最後に選択したレイヤー（リサイズハンドルはこれだけに出す）。
   const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
+  // 永続グループ（ADR-0022・#307）：表示はグループ transform を合成した位置にする（preview/export と一致）。
+  const composed = composeGroupGeometry(layers, groups);
+  const topGroupByEl = new Map<string, Group>();
+  if (groups.length > 0) for (const l of layers) { const tg = topGroupOfMember(groups, l.id); if (tg) topGroupByEl.set(l.id, tg); }
+  const activeGroup = activeGroupId ? groups.find((g) => g.id === activeGroupId) ?? null : null;
+  const activeGroupFrame = activeGroup ? orientedGroupFrame(activeGroup, layers) : null;
 
   // ポインタの画面座標→canvas 座標（オーバーレイは fit 箱内＝実寸一致）。描画前(0幅)は原点に潰す。
   const toCanvas = (clientX: number, clientY: number): { x: number; y: number } => {
@@ -122,6 +159,25 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     });
   };
 
+  // グループのメンバー押下（#307）：グループを選択し、グループ移動（transform.x/y）を開始する。
+  const beginGroupDrag = (e: ReactPointerEvent, group: Group) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onSelectGroup?.(group.id); // メンバー個別ではなくグループ単位で選択
+    if (group.locked) return; // ロック中は選択のみ
+    const width = ref.current?.clientWidth ?? canvasW;
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    setDrag({
+      id: "__group__", mode: "group-move", groupId: group.id,
+      startTransform: { ...group.transform },
+      startClientX: e.clientX, startClientY: e.clientY,
+      start: { x: 0, y: 0, w: 0, h: 0 }, // group-move では未使用
+      starts: [], otherEdges: [],
+      scale: width / canvasW,
+    });
+  };
+
   const handleMove = (e: ReactPointerEvent) => {
     // 範囲選択（マーキー）中：矩形を広げ、交差するレイヤーを選択集合に反映。
     if (marquee) {
@@ -159,6 +215,12 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       const startsList = drag.starts.length > 0 ? drag.starts : [{ id: drag.id, x: drag.start.x, y: drag.start.y }];
       onMoveMany(startsList.map((s) => ({ id: s.id, x: s.x + ddx, y: s.y + ddy })));
       setGuides({ x: snap.guideX, y: snap.guideY });
+    } else if (drag.mode === "group-move" && drag.groupId && drag.startTransform) {
+      // グループ移動：開始 transform に画面ドラッグ量を足して transform.x/y を更新（合成で全メンバーが動く）。
+      onGroupTransform?.(drag.groupId, {
+        x: Math.round(drag.startTransform.x + dx),
+        y: Math.round(drag.startTransform.y + dy),
+      });
     } else if (drag.corner) {
       // リサイズ＝純粋 ops（Shift で縦横比維持）。主のみ。回転ありは対角を canvas 固定する回転考慮版（#279）。基準角は開始時に固定。
       const rot = drag.rotation ?? 0;
@@ -201,30 +263,35 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       }}
     >
       {[...layers].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)).map((l) => {
-        const selected = selectedIds.includes(l.id);
-        const isPrimary = l.id === primaryId;
-        const rotated = (l.rotation ?? 0) !== 0; // 回転あり＝中心軸で回す（出力 SVG の rotate と一致）
+        if (isHiddenByGroup(l.id, groups)) return null; // hidden グループのメンバーは描画しない（#307）
+        const cg = composed.get(l.id) ?? { x: l.x, y: l.y, w: l.w, h: l.h, rotation: l.rotation }; // グループ合成後の位置
+        const lGroup = topGroupByEl.get(l.id) ?? null; // 所属グループ（最上位）／未所属は null
+        const grouped = lGroup != null;
+        const inActiveGroup = grouped && lGroup.id === activeGroupId; // 選択中グループのメンバー
+        const selected = inActiveGroup || (!grouped && selectedIds.includes(l.id));
+        const isPrimary = l.id === primaryId; // ハンドルはグループ未所属のみ
+        const rotated = (cg.rotation ?? 0) !== 0; // 回転あり（合成後・中心軸）
         return (
           <div
             key={l.id}
-            onPointerDown={(e) => beginDrag(e, l, "move")}
+            onPointerDown={(e) => (lGroup ? beginGroupDrag(e, lGroup) : beginDrag(e, l, "move"))}
             style={{
               position: "absolute",
-              left: `${(l.x / canvasW) * 100}%`,
-              top: `${(l.y / canvasH) * 100}%`,
-              width: `${(l.w / canvasW) * 100}%`,
-              height: `${(l.h / canvasH) * 100}%`,
+              left: `${(cg.x / canvasW) * 100}%`,
+              top: `${(cg.y / canvasH) * 100}%`,
+              width: `${(cg.w / canvasW) * 100}%`,
+              height: `${(cg.h / canvasH) * 100}%`,
               boxSizing: "border-box",
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
               background: selected ? "rgba(80,130,255,0.08)" : "transparent",
               cursor: "move",
-              transform: rotated ? `rotate(${l.rotation}deg)` : undefined,
+              transform: rotated ? `rotate(${cg.rotation}deg)` : undefined,
             }}
           >
             <span style={{ position: "absolute", top: 0, left: 0, fontSize: 11, background: "rgba(0,0,0,0.55)", color: "#fff", padding: "0 4px", borderRadius: 2, pointerEvents: "none", whiteSpace: "nowrap" }}>
               {label(l)}
             </span>
-            {isPrimary &&
+            {isPrimary && !grouped &&
               HANDLES.map((hd) => (
                 <div
                   key={hd.corner}
@@ -233,7 +300,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
                 />
               ))}
             {/* 回転ハンドル（#279 同様）：単一の主に出す。回転中も操作できるよう rotated 条件は付けない。 */}
-            {isPrimary && (
+            {isPrimary && !grouped && (
               <>
                 <div style={{ position: "absolute", left: "50%", top: -22, width: 1, height: 22, background: "var(--color-primary)", transform: "translateX(-50%)", pointerEvents: "none" }} />
                 <div
@@ -247,6 +314,27 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
           </div>
         );
       })}
+
+      {/* 選択中グループの枠（ADR-0022・#307）：枠をドラッグでグループ移動（transform.x/y）。拡縮/回転は part2b。 */}
+      {activeGroupFrame && activeGroup && (
+        <div
+          data-testid="tmpl-group-frame"
+          onPointerDown={(e) => beginGroupDrag(e, activeGroup)}
+          style={{
+            position: "absolute",
+            left: `${((activeGroupFrame.cx - activeGroupFrame.w / 2) / canvasW) * 100}%`,
+            top: `${((activeGroupFrame.cy - activeGroupFrame.h / 2) / canvasH) * 100}%`,
+            width: `${(activeGroupFrame.w / canvasW) * 100}%`,
+            height: `${(activeGroupFrame.h / canvasH) * 100}%`,
+            border: "2px solid var(--color-primary)",
+            background: "rgba(80,130,255,0.06)",
+            boxSizing: "border-box",
+            cursor: activeGroup.locked ? "default" : "move",
+            transform: activeGroupFrame.rotation ? `rotate(${activeGroupFrame.rotation}deg)` : undefined,
+            zIndex: 34,
+          }}
+        />
+      )}
 
       {/* 範囲選択（マーキー）の矩形（ドラッグ中のみ・canvas 座標→%）。 */}
       {marquee && (

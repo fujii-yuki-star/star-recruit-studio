@@ -106,4 +106,35 @@ describe("TemplateLayerOverlay", () => {
     expect(calls[calls.length - 1][0]).toBe("title");
     expect(calls[calls.length - 1][1]).toBeCloseTo(90, 1);
   });
+
+  const grp = { id: "group_001", members: ["title"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+
+  it("グループのメンバーを押すとグループ選択が呼ばれる（onSelectGroup・#307）", () => {
+    const onSelectGroup = vi.fn();
+    const { boxes, onSelect } = renderOverlay({ groups: [grp], onSelectGroup });
+    fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 }); // title（グループ所属）
+    expect(onSelectGroup).toHaveBeenCalledWith("group_001");
+    expect(onSelect).not.toHaveBeenCalledWith("title");
+  });
+
+  it("グループ選択中はグループ枠（tmpl-group-frame）が出る（#307）", () => {
+    const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
+    expect(root.querySelector('[data-testid="tmpl-group-frame"]')).not.toBeNull();
+  });
+
+  it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform・#307）", () => {
+    const onGroupTransform = vi.fn();
+    const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
+    const frame = root.querySelector('[data-testid="tmpl-group-frame"]') as HTMLElement;
+    fireEvent.pointerDown(frame, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(frame, { clientX: 30, clientY: 40, pointerId: 1 });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 });
+  });
+
+  it("hidden グループのメンバーは描画されない（#307）", () => {
+    const hiddenGrp = { id: "group_001", members: ["title"], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true };
+    const { boxes } = renderOverlay({ groups: [hiddenGrp] });
+    expect(boxes).toHaveLength(1); // title は hidden グループ所属＝非描画。background のみ残る
+  });
 });

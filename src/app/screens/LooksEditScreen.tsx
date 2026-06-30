@@ -11,6 +11,8 @@ import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
+import { createGroupFromSelection, groupElementIds, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
+import type { GroupTransform } from "../../domain/group/types";
 import { Switch } from "../components/ui";
 import { textKeyLabel } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
@@ -70,6 +72,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
   const [draft, setDraft] = useState<Template | null>(() => (editing ? cloneTemplate(editing) : null));
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   // 主＝末尾選択（種別別エディタ・削除はこれを基準）。複数選択は一括移動／④[#307] グループ化の土台。
   const selectedLayerId = selectedLayerIds.length > 0 ? selectedLayerIds[selectedLayerIds.length - 1] : null;
   const [addType, setAddType] = useState<LayerType>("text");
@@ -114,10 +117,12 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   }
   // 複数選択（#306）：Shift+クリックでトグル・マーキーで集合置換・一括移動。
   function selectLayer(id: string | null, additive?: boolean) {
+    setActiveGroupId(null); // レイヤー選択はグループ選択を解除（排他）
     if (id == null) { setSelectedLayerIds([]); return; }
     setSelectedLayerIds((cur) => (additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id]));
   }
   function selectLayerMany(ids: string[]) {
+    setActiveGroupId(null);
     setSelectedLayerIds(ids);
   }
   function onMoveLayers(moves: FreeElementMove[]) {
@@ -126,6 +131,38 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       const byId = new Map(moves.map((m) => [m.id, m] as const));
       return { ...d, layers: d.layers.map((l) => { const m = byId.get(l.id); return m ? { ...l, x: m.x, y: m.y } : l; }) };
     });
+  }
+  // グループ（ADR-0022・#307）。tplGroups は draft 由来（早期 return 後＝非 null）。stale な activeGroup は描画に出さない。
+  const tplGroups = draft.groups ?? [];
+  const activeGroupStillExists = activeGroupId != null && tplGroups.some((g) => g.id === activeGroupId);
+  const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
+  // グループ化できる件数（既に別グループのものは除外）。ボタンの活性判定に使う（サイレント no-op を防ぐ）。
+  const groupableCount = selectedLayerIds.filter((id) => topGroupOfMember(tplGroups, id) == null).length;
+  function selectGroup(groupId: string | null) {
+    setSelectedLayerIds([]);
+    setActiveGroupId(groupId);
+  }
+  function groupSelected() {
+    const eligible = selectedLayerIds.filter((id) => topGroupOfMember(tplGroups, id) == null); // 既所属は除外
+    if (eligible.length < 2) return;
+    const { groups, groupId } = createGroupFromSelection(tplGroups, eligible);
+    setDraft((d) => (d ? { ...d, groups } : d));
+    setSelectedLayerIds([]);
+    setActiveGroupId(groupId);
+  }
+  function ungroupActive() {
+    if (!effectiveActiveGroupId) return;
+    const memberIds = groupElementIds(tplGroups, effectiveActiveGroupId);
+    setDraft((d) => {
+      if (!d) return d;
+      const r = ungroupGroup(d.groups ?? [], d.layers, effectiveActiveGroupId);
+      return { ...d, groups: r.groups, layers: r.elements };
+    });
+    setActiveGroupId(null);
+    setSelectedLayerIds(memberIds);
+  }
+  function transformGroup(groupId: string, patch: Partial<GroupTransform>) {
+    setDraft((d) => (d ? { ...d, groups: updateGroupTransform(d.groups ?? [], groupId, patch) } : d));
   }
   async function onSave() {
     if (busy) return;
@@ -381,10 +418,33 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               onChange={(id, g) => onUpdateLayer(id, g)}
               onMoveMany={onMoveLayers}
               onRotate={(id, rotation) => onUpdateLayer(id, { rotation })}
+              groups={tplGroups}
+              activeGroupId={effectiveActiveGroupId}
+              onSelectGroup={selectGroup}
+              onGroupTransform={transformGroup}
               label={(l) => layerLabel[l.type]}
             />
           </ScenePreview>
-          <p className="text-sm text-muted mt">プレビュー上で要素をドラッグ・拡大縮小できます（写真・文字は例として表示）。</p>
+          <p className="text-sm text-muted mt">プレビュー上で要素をドラッグ・拡大縮小・回転できます（写真・文字は例として表示）。</p>
+          {/* グループ（ADR-0022・#307）：2つ以上選択でグループ化／選択中グループは解除。拡縮・回転・非表示等は part2b。 */}
+          {(selectedLayerIds.length >= 2 || effectiveActiveGroupId) && (
+            <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>
+              {selectedLayerIds.length >= 2 && (
+                <button
+                  className="btn btn-ghost text-sm"
+                  disabled={groupableCount < 2}
+                  title={groupableCount < 2 ? "選択中の要素はすでにグループに含まれています" : undefined}
+                  onClick={groupSelected}
+                >選択をグループ化</button>
+              )}
+              {effectiveActiveGroupId && (
+                <>
+                  <span className="text-sm">グループを選択中（まとめて移動できます）</span>
+                  <button className="btn btn-ghost text-sm" onClick={ungroupActive}>グループを解除</button>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 右：編集パネル */}
