@@ -480,6 +480,24 @@ describe('resizeRotatedFreeElement（回転要素の角リサイズ・#279後継
     expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
   });
 
+  it('ne を掴むと対角（sw）が canvas 上で動かない', () => {
+    const rot = 60;
+    const r = resizeRotatedFreeElement(start, 'ne', 30, -20, rot);
+    const before = cornerCanvas(start, rot, -1, 1); // sw
+    const after = cornerCanvas(r, rot, -1, 1);
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
+  });
+
+  it('sw を掴むと対角（ne）が canvas 上で動かない', () => {
+    const rot = 200;
+    const r = resizeRotatedFreeElement(start, 'sw', -25, 30, rot);
+    const before = cornerCanvas(start, rot, 1, -1); // ne
+    const after = cornerCanvas(r, rot, 1, -1);
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
+  });
+
   it('最小サイズで止まる（縮め過ぎても min 以上）', () => {
     const r = resizeRotatedFreeElement(start, 'se', -999, -999, 90, 24);
     expect(r.w).toBeGreaterThanOrEqual(24);
