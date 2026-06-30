@@ -427,7 +427,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const memberIds = groupElementIds(sceneGroups, activeGroupId);
     patch((s) => {
       const r = ungroupGroup(s.groups ?? [], s.freeLayout ?? [], activeGroupId);
-      return { ...s, groups: r.groups, freeLayout: r.freeLayout };
+      return { ...s, groups: r.groups, freeLayout: r.elements };
     });
     setActiveGroupId(null);
     setSelectedFreeIds(memberIds);

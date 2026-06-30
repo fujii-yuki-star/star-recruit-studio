@@ -76,26 +76,26 @@ describe('ungroupGroup', () => {
     const groups = [grp('group_001', ['free_001'], { x: 50, y: -20 })];
     const out = ungroupGroup(groups, freeLayout, 'group_001');
     expect(out.groups).toEqual([]); // グループ除去
-    expect(out.freeLayout[0]).toMatchObject({ id: 'free_001', x: 150, y: 80, w: 40, h: 20 }); // 100+50, 100-20
-    expect(out.freeLayout[1]).toMatchObject({ id: 'free_002', x: 0, y: 0 }); // 非メンバーは不変
+    expect(out.elements[0]).toMatchObject({ id: 'free_001', x: 150, y: 80, w: 40, h: 20 }); // 100+50, 100-20
+    expect(out.elements[1]).toMatchObject({ id: 'free_002', x: 0, y: 0 }); // 非メンバーは不変
   });
   it('存在しないグループは何もしない', () => {
     const freeLayout = [shape('free_001', 0, 0)];
     const out = ungroupGroup([], freeLayout, 'group_999');
-    expect(out.freeLayout).toBe(freeLayout);
+    expect(out.elements).toBe(freeLayout);
   });
   it('回転の焼き込み：合算が 360→0 に正規化される場合は rotation なし（要素30°＋グループ330°）', () => {
     const freeLayout = [{ ...shape('free_001', 100, 100), rotation: 30 }];
     const groups = [grp('group_001', ['free_001'], { rotation: 330 })];
     const out = ungroupGroup(groups, freeLayout, 'group_001');
-    expect(out.freeLayout[0].rotation).toBeUndefined(); // 30+330=360 → 0 → 回転なし（el.rotation は残さない）
-    expect(out.freeLayout[0]).toMatchObject({ x: 100, y: 100 }); // 単一メンバーは中心不動
+    expect(out.elements[0].rotation).toBeUndefined(); // 30+330=360 → 0 → 回転なし（el.rotation は残さない）
+    expect(out.elements[0]).toMatchObject({ x: 100, y: 100 }); // 単一メンバーは中心不動
   });
   it('回転の焼き込み：合算が非0なら rotation に反映（要素30°＋グループ40°=70°）', () => {
     const freeLayout = [{ ...shape('free_001', 100, 100), rotation: 30 }];
     const groups = [grp('group_001', ['free_001'], { rotation: 40 })];
     const out = ungroupGroup(groups, freeLayout, 'group_001');
-    expect(out.freeLayout[0].rotation).toBeCloseTo(70);
+    expect(out.elements[0].rotation).toBeCloseTo(70);
   });
 });
 
@@ -140,5 +140,23 @@ describe('reorderGroupZ', () => {
     const out = reorderGroupZ(layout, ['free_001', 'free_002'], 'back');
     expect(zOf(out, 'free_002')).toBe(1); // 元 z1 が下
     expect(zOf(out, 'free_001')).toBe(2); // 元 z3 が上（相対順保持）
+  });
+});
+
+describe('汎用化：テンプレ Layer 風オブジェクト（rotation なし）でも動く（#307）', () => {
+  const lyr = (id: string, x: number, y: number, zIndex = 1) => ({ id, x, y, w: 40, h: 20, zIndex });
+  it('ungroupGroup：位置を焼き込み、回転は付かない（undefined）', () => {
+    const layers = [lyr('background', 0, 0), lyr('title', 100, 100)];
+    const groups = [grp('group_001', ['title'], { x: 50 })];
+    const out = ungroupGroup(groups, layers, 'group_001');
+    const title = out.elements.find((l) => l.id === 'title') as { x: number; y: number; rotation?: number };
+    expect(title).toMatchObject({ x: 150, y: 100 });
+    expect(title.rotation).toBeUndefined(); // Layer は回転を持たない（群回転も非対応）
+  });
+  it('reorderGroupZ：重ね順を振り直す', () => {
+    const layers = [lyr('background', 0, 0, 1), lyr('title', 0, 0, 2)];
+    const out = reorderGroupZ(layers, ['background'], 'front');
+    expect(out.find((l) => l.id === 'title')?.zIndex).toBe(1); // 非メンバ下
+    expect(out.find((l) => l.id === 'background')?.zIndex).toBe(2); // メンバ上
   });
 });

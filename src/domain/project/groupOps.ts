@@ -4,7 +4,6 @@
 import { composeGroupGeometry } from '../group/compose';
 import type { Group, GroupTransform } from '../group/types';
 import { createGroupId } from './persistence';
-import type { FreeElement } from './types';
 
 /** identity 変形（新規グループの初期値）。 */
 export const IDENTITY_TRANSFORM: GroupTransform = { x: 0, y: 0, rotation: 0, scale: 1 };
@@ -71,24 +70,27 @@ export function groupElementIds(groups: Group[], groupId: string): string[] {
   return out;
 }
 
-/** グループを解除し、transform をメンバー要素へ焼き込む（ADR-0022・flat 前提＝#305-1）。 */
-export function ungroupGroup(
-  groups: Group[], freeLayout: FreeElement[], groupId: string,
-): { groups: Group[]; freeLayout: FreeElement[] } {
+/**
+ * グループを解除し、transform をメンバー（FREE 要素 / テンプレ Layer）へ焼き込む（ADR-0022・flat 前提）。
+ * T で汎用化＝FREE と テンプレで共用。返り値の要素キーは `elements`。
+ */
+export function ungroupGroup<T extends { id: string; x: number; y: number; w: number; h: number; rotation?: number }>(
+  groups: Group[], elements: T[], groupId: string,
+): { groups: Group[]; elements: T[] } {
   const group = groups.find((g) => g.id === groupId);
-  if (!group) return { groups, freeLayout };
+  if (!group) return { groups, elements };
   const memberIds = new Set(groupElementIds(groups, groupId));
-  const composed = composeGroupGeometry(freeLayout, [group]); // このグループだけ適用して焼き込む
-  const freeLayoutBaked = freeLayout.map((el) => {
+  const composed = composeGroupGeometry(elements, [group]); // このグループだけ適用して焼き込む
+  const elementsBaked = elements.map((el) => {
     if (!memberIds.has(el.id)) return el;
     const g = composed.get(el.id);
     if (!g) return el;
-    // 合成後の回転（要素＋グループ回転の合算）をそのまま採用。0（=回転なし）のときは undefined にして明示する。
-    // ※ el.rotation を残すと、合算が 360→0 に正規化される場合（例 要素30°＋グループ330°）に焼き込み前後で表示がズレる。
+    // 合成後の回転（要素＋グループ回転の合算）。0（=回転なし）は undefined にして明示（el.rotation を残すと 360→0 正規化でズレる）。
+    // ※ テンプレ Layer は rotation を持たず群回転も非対応ゆえ常に 0→undefined（JSON では省略される）。
     const rot = normalizeDeg(g.rotation ?? 0);
     return { ...el, x: Math.round(g.x), y: Math.round(g.y), w: Math.round(g.w), h: Math.round(g.h), rotation: rot === 0 ? undefined : rot };
   });
-  return { groups: groups.filter((g) => g.id !== groupId), freeLayout: freeLayoutBaked };
+  return { groups: groups.filter((g) => g.id !== groupId), elements: elementsBaked };
 }
 
 /** 要素削除に伴い、groups から該当 id を除去し、空になったグループを落とす（orphan 参照の防止・flat 前提＝#305-1）。 */
@@ -104,15 +106,15 @@ export function removeMembersFromGroups(groups: Group[], removedIds: string[]): 
  * グループのメンバー全体を最前面('front')/最背面('back')へ動かす（重ね順・ADR-0022）。
  * 非メンバー・メンバーそれぞれの相対順は保ち、全要素の zIndex を 1..n に振り直す（FREE 背景 zIndex 0 の上に乗せる）。
  */
-export function reorderGroupZ(
-  freeLayout: FreeElement[], memberIds: string[], position: 'front' | 'back',
-): FreeElement[] {
+export function reorderGroupZ<T extends { id: string; zIndex?: number }>(
+  elements: T[], memberIds: string[], position: 'front' | 'back',
+): T[] {
   const members = new Set(memberIds);
-  const byZ = (a: FreeElement, b: FreeElement): number => (a.zIndex ?? 1) - (b.zIndex ?? 1);
-  const mem = freeLayout.filter((e) => members.has(e.id)).sort(byZ);
-  if (mem.length === 0) return freeLayout;
-  const oth = freeLayout.filter((e) => !members.has(e.id)).sort(byZ);
+  const byZ = (a: T, b: T): number => (a.zIndex ?? 1) - (b.zIndex ?? 1);
+  const mem = elements.filter((e) => members.has(e.id)).sort(byZ);
+  if (mem.length === 0) return elements;
+  const oth = elements.filter((e) => !members.has(e.id)).sort(byZ);
   const order = position === 'front' ? [...oth, ...mem] : [...mem, ...oth];
   const zById = new Map(order.map((e, i) => [e.id, i + 1] as const));
-  return freeLayout.map((e) => ({ ...e, zIndex: zById.get(e.id) ?? (e.zIndex ?? 1) }));
+  return elements.map((e) => ({ ...e, zIndex: zById.get(e.id) ?? (e.zIndex ?? 1) }));
 }
