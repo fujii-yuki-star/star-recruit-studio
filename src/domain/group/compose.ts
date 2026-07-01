@@ -130,7 +130,7 @@ export function composeGroupGeometry(
     const g = groupById.get(nodeId);
     if (!g) {
       // members に存在しない id（要素でもグループでもない）は空矩形＝サイレント無視（堅牢性優先）。
-      // 不正メンバー参照の検証（V_group）は⑤[#308] で §8 検証ルールに追補予定（ADR-0022 未解決）。
+      // 不正メンバー参照の検証（V_group）は #308 で 11 §8（V20）に追補済（不在は描画で無視＋削除経路で除去）。
       const el = elemById.get(nodeId);
       return el ? rotatedRectAABB({ x: el.x, y: el.y, w: el.w, h: el.h }, el.rotation ?? 0) : EMPTY_RECT;
     }

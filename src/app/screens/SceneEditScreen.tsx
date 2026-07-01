@@ -424,6 +424,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // グループ解除：アクティブグループを解除し transform をメンバーへ焼き込む。解除後は元メンバーを選択。
   const ungroupActive = () => {
     if (!activeGroupId) return;
+    if (activeGroup?.locked) return; // ロック中は解除も抑止（UI disabled に加えた多重防御・#319 レビュー）
     const memberIds = groupElementIds(sceneGroups, activeGroupId);
     patch((s) => {
       const r = ungroupGroup(s.groups ?? [], s.freeLayout ?? [], activeGroupId);
@@ -441,10 +442,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const toggleGroupLocked = (groupId: string) =>
     patch((s) => ({ ...s, groups: toggleGroupFlag(s.groups ?? [], groupId, "locked") }));
   // グループの重ね順（#305）：メンバー全体を最前面/最背面へ（相対順は保つ）。
-  const bringGroupFront = (groupId: string) =>
+  const bringGroupFront = (groupId: string) => {
+    if (sceneGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は重ね順も抑止（多重防御・#319 レビュー）
     patch((s) => ({ ...s, freeLayout: reorderGroupZ(s.freeLayout ?? [], groupElementIds(s.groups ?? [], groupId), "front") }));
-  const sendGroupBack = (groupId: string) =>
+  };
+  const sendGroupBack = (groupId: string) => {
+    if (sceneGroups.find((g) => g.id === groupId)?.locked) return;
     patch((s) => ({ ...s, freeLayout: reorderGroupZ(s.freeLayout ?? [], groupElementIds(s.groups ?? [], groupId), "back") }));
+  };
   // 複製：コピーを最前面に追加し、複製直後のコピーを選択状態にする（newId）。
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
   // updateScene→set は同期実行のため、newId は下の setSelectedFreeIds より前に確実に代入される。
@@ -1183,11 +1188,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <div className="row-between" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
                         <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
                         <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-                          <button className="btn btn-ghost text-sm" title="グループを最前面へ" onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
-                          <button className="btn btn-ghost text-sm" title="グループを最背面へ" onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
+                          <button className="btn btn-ghost text-sm" title="グループを最前面へ" disabled={!!activeGroup?.locked} onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
+                          <button className="btn btn-ghost text-sm" title="グループを最背面へ" disabled={!!activeGroup?.locked} onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
                           <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
                           <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
-                          <button className="btn btn-ghost text-sm" onClick={ungroupActive}>解除</button>
+                          <button className="btn btn-ghost text-sm" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
                         </div>
                       </div>
                     )}
