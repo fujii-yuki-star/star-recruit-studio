@@ -70,8 +70,9 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
       },
     });
     render(<TimelineEditScreen onNavigate={() => {}} />);
-    // タイムライン上の overlay クリップをクリックして選択 → 編集パネル。
-    fireEvent.click(screen.getByText("x"));
+    // タイムライン上の overlay クリップを pointerdown で選択 → 編集パネル。
+    fireEvent.pointerDown(screen.getByText("x"), { clientX: 10, pointerId: 1 });
+    fireEvent.pointerUp(screen.getByText("x"), { clientX: 10, pointerId: 1 });
     const select = screen.getByTestId("overlay-clip-editor").querySelector("select") as HTMLSelectElement;
     // 絶対時間へ切替 → 実効10秒（8+2）を保持して startSec=10 になる（無警告ジャンプしない）。
     fireEvent.change(select, { target: { value: "" } });

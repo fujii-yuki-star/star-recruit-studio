@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TRANSITION_TYPE } from "../../domain/enums";
 import type { TransitionType } from "../../domain/enums";
 import type { Timeline, TimelineClip, TimelineTrackKind } from "../../domain/project/compileTimeline";
@@ -12,6 +12,8 @@ interface TimelineViewProps {
   selectedClipId?: string;
   /** overlay クリップの選択（空領域クリックで null）。editable のとき有効。 */
   onSelectClip?: (id: string | null) => void;
+  /** overlay クリップをドラッグ移動したときの確定（deltaSec＝ドラッグ量の秒。呼び出し側で startSec に加算する）。 */
+  onClipMove?: (id: string, deltaSec: number) => void;
 }
 
 // レーン表示の並びとラベル（§2-3：技術用語を避けた言い換え）。video＝場面の映像。
@@ -50,9 +52,38 @@ function clipTitle(clip: TimelineClip): string {
   return `${clip.label}（${clockLabel(clip.startSec)}〜${clockLabel(clip.endSec)}）`;
 }
 
-export function TimelineView({ timeline, editable, selectedClipId, onSelectClip }: TimelineViewProps) {
+export function TimelineView({ timeline, editable, selectedClipId, onSelectClip, onClipMove }: TimelineViewProps) {
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const pxPerSec = ZOOM_LEVELS[zoomIndex];
+
+  // overlay クリップのドラッグ移動（1D・水平＝時間）。確定は drop 時に onClipMove(deltaSec)。プレビューは offsetPx で表示。
+  // 確定用に開始位置（startX）を ref に持ち（タイミング非依存）、pointerup の clientX から直接 delta を出す。
+  // preview 用に offsetPx を state で持つ（描画に反映）。
+  const [drag, setDrag] = useState<{ id: string; offsetPx: number } | null>(null);
+  const dragMetaRef = useRef<{ id: string; startX: number } | null>(null);
+  const dragging = drag !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: PointerEvent) => {
+      const m = dragMetaRef.current;
+      if (m) setDrag({ id: m.id, offsetPx: e.clientX - m.startX });
+    };
+    const onUp = (e: PointerEvent) => {
+      const m = dragMetaRef.current;
+      if (m) {
+        const offsetPx = e.clientX - m.startX;
+        if (offsetPx !== 0) onClipMove?.(m.id, offsetPx / pxPerSec);
+      }
+      dragMetaRef.current = null;
+      setDrag(null);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dragging, pxPerSec, onClipMove]);
 
   if (timeline.scenes.length === 0) {
     return (
@@ -130,16 +161,29 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip 
                     />
                   ))}
                 {timeline.tracks[lane.kind].map((clip) => {
-                  // overlay 由来クリップだけ編集モードで選択可能。判別は domain の origin（UI は id 形式を知らない・§2-7）。
+                  // overlay 由来クリップだけ編集モードで選択・ドラッグ可能。判別は domain の origin（UI は id 形式を知らない・§2-7）。
                   const selectable = !!editable && clip.origin === "overlay";
                   const selected = selectable && clip.id === selectedClipId;
+                  const isDragging = drag?.id === clip.id;
+                  // ドラッグ中はプレビューとして offset を足す（確定は drop 時＝onClipMove）。左端は 0 でクランプ。
+                  const left = Math.max(0, clip.startSec * pxPerSec + (isDragging ? drag.offsetPx : 0));
                   return (
                     <div
                       key={clip.id}
-                      className={`timeline-clip timeline-clip--${lane.kind}${selected ? " timeline-clip--selected" : ""}${selectable ? " timeline-clip--editable" : ""}`}
-                      style={{ left: clip.startSec * pxPerSec, width: Math.max(2, (clip.endSec - clip.startSec) * pxPerSec) }}
+                      className={`timeline-clip timeline-clip--${lane.kind}${selected ? " timeline-clip--selected" : ""}${selectable ? " timeline-clip--editable" : ""}${isDragging ? " timeline-clip--dragging" : ""}`}
+                      style={{ left, width: Math.max(2, (clip.endSec - clip.startSec) * pxPerSec) }}
                       title={clipTitle(clip)}
-                      onClick={selectable ? (e) => { e.stopPropagation(); onSelectClip?.(clip.id); } : undefined}
+                      onClick={selectable ? (e) => e.stopPropagation() : undefined}
+                      onPointerDown={
+                        selectable
+                          ? (e) => {
+                              e.stopPropagation();
+                              onSelectClip?.(clip.id);
+                              dragMetaRef.current = { id: clip.id, startX: e.clientX };
+                              setDrag({ id: clip.id, offsetPx: 0 });
+                            }
+                          : undefined
+                      }
                     >
                       {clip.label}
                     </div>

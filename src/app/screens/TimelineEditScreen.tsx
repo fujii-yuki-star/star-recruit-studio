@@ -39,6 +39,11 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
       startSec: Math.max(0, effective - sceneGlobalStart(newAnchor)),
     });
   };
+  // タイムライン上のドラッグ移動の確定：deltaSec を startSec に加算（アンカーは不変・0でクランプ）。1ドロップ=1操作。
+  const moveClip = (id: string, deltaSec: number): void => {
+    const clip = overlayClips.find((c) => c.id === id);
+    if (clip) updateOverlayClip(id, { startSec: Math.max(0, clip.startSec + deltaSec) });
+  };
 
   const addTelop = () => {
     // 既定で最初の場面を基準に置く（先頭に出る）。文言/位置は下のパネルで調整。
@@ -69,6 +74,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
           editable
           selectedClipId={selectedClipId ?? undefined}
           onSelectClip={setSelectedClipId}
+          onClipMove={moveClip}
         />
       </div>
 
