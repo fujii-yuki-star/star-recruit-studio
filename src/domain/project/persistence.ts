@@ -183,6 +183,27 @@ export function assembleProject(
   };
 }
 
+/** 読込済み Project から保存用ヘッダ（ProjectHeader）を取り出す＝assembleProject の逆。
+ *  Project にヘッダ系フィールドを足したら必ずここにも足す（store の loadProject が meta を手組みして取りこぼすのを防ぐ・#324）。 */
+export function projectHeaderFromProject(project: Project): ProjectHeader {
+  return {
+    projectId: project.projectId,
+    projectName: project.projectName,
+    videoKind: project.videoKind,
+    purpose: project.purpose,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    videoSettings: project.videoSettings,
+    companyInfo: project.companyInfo,
+    generalBrief: project.generalBrief,
+    additionalNotes: project.additionalNotes,
+    toneSettings: project.toneSettings,
+    voiceSettings: project.voiceSettings,
+    bgmSettings: project.bgmSettings,
+    timelineOverlay: project.timelineOverlay,
+  };
+}
+
 /** 1.x は対応。未対応メジャー（2.0 等）は読込拒否（§1）。 */
 export function isSupportedSchemaVersion(version: string): boolean {
   return version.startsWith('1.');

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createOverlayClipId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
-  isSupportedSchemaVersion, parseProjectDoc,
+  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject,
 } from './persistence';
 import type { ProjectHeader } from './persistence';
 
@@ -155,6 +155,19 @@ describe('assembleProject', () => {
     expect(g.generalBrief?.targetAudience).toBe('全社員'); // ADR-0011 #12: 対象視聴者
     // general では companyInfo を出力しない（schema if/then/else の not:required を満たす・ADR-0011）。
     expect('companyInfo' in g).toBe(false);
+  });
+});
+
+describe('projectHeaderFromProject（assembleProject の逆・#324）', () => {
+  it('任意フィールド（timelineOverlay・toneSettings）を取りこぼさず round-trip する', () => {
+    const overlay: ProjectHeader['timelineOverlay'] = { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', startSec: 1, durationSec: 2, text: 'x' }] };
+    const p = assembleProject(header({ toneSettings: { tone: 'やわらか' }, timelineOverlay: overlay }), [], [], []);
+    const back = projectHeaderFromProject(p);
+    // 読込時に store が meta を組む経路の縮図：overlay 等のヘッダ系フィールドが消えない。
+    expect(back.timelineOverlay).toEqual(overlay);
+    expect(back.toneSettings).toEqual({ tone: 'やわらか' });
+    // ヘッダ→Project→ヘッダ→Project が一致（フィールド取りこぼしの検出）。
+    expect(assembleProject(back, [], [], [])).toEqual(p);
   });
 });
 
