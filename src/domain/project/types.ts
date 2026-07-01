@@ -249,6 +249,25 @@ export interface Scene {
   groups?: Group[];
 }
 
+/** 時間軸に足すクリップ（ADR-0018・まずはテロップ）。anchorSceneId 有＝場面相対（startSec=場面開始からの相対秒）／無＝絶対時間（startSec=グローバル秒）。 */
+export interface OverlayClip {
+  /** ovclip_NNN（project 内一意・§2.1）。 */
+  id: string;
+  /** 出すレーン（現状 telop のみ・将来 audio/bgm へ拡張）。 */
+  track: 'telop';
+  /** アンカー場面 id（AI 再生成時の照合キー）。未指定＝絶対時間クリップ。 */
+  anchorSceneId?: string;
+  startSec: number;
+  durationSec: number;
+  /** テロップの文言。 */
+  text?: string;
+}
+
+/** 場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。AI/簡易編集は無視する。 */
+export interface TimelineOverlay {
+  clips?: OverlayClip[];
+}
+
 export interface Project {
   schemaVersion: string;
   /** 動画の種類（ADR-0011）。省略時は recruit として扱う。 */
@@ -270,4 +289,6 @@ export interface Project {
   assets: Asset[];
   parts: Part[];
   scenes: Scene[];
+  /** 場面横断タイムラインの上位編集（ADR-0018・任意・schema 1.15）。未設定＝場面射影のみ。AI/簡易は無視。 */
+  timelineOverlay?: TimelineOverlay;
 }

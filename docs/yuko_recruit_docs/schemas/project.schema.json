@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.14" },
+    "schemaVersion": { "const": "1.15" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -35,7 +35,8 @@
     "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
     "assets": { "type": "array", "items": { "$ref": "#/$defs/Asset" } },
     "parts": { "type": "array", "items": { "$ref": "#/$defs/Part" } },
-    "scenes": { "type": "array", "items": { "$ref": "#/$defs/Scene" }, "maxItems": 80 }
+    "scenes": { "type": "array", "items": { "$ref": "#/$defs/Scene" }, "maxItems": 80 },
+    "timelineOverlay": { "$ref": "#/$defs/TimelineOverlay" }
   },
   "if": { "properties": { "videoKind": { "const": "general" } }, "required": ["videoKind"] },
   "then": {
@@ -119,6 +120,28 @@
         "loop": { "type": "boolean" },
         "fadeInSec": { "type": "number", "minimum": 0 },
         "fadeOutSec": { "type": "number", "minimum": 0 }
+      }
+    },
+    "TimelineOverlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。AI/簡易編集は無視する。",
+      "properties": {
+        "clips": { "type": "array", "items": { "$ref": "#/$defs/OverlayClip" } }
+      }
+    },
+    "OverlayClip": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "時間軸に足すクリップ（まずはテロップ）。anchorSceneId があれば場面相対（startSec=場面開始からの相対秒）、無ければ絶対時間（startSec=グローバル秒）。",
+      "required": ["id", "track", "startSec", "durationSec"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ovclip_[0-9]{3,}$" },
+        "track": { "enum": ["telop"] },
+        "anchorSceneId": { "type": "string", "pattern": "^scene_[0-9]{3}$" },
+        "startSec": { "type": "number", "minimum": 0 },
+        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
+        "text": { "type": "string" }
       }
     },
     "Asset": {

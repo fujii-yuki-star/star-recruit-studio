@@ -29,8 +29,8 @@ function scene(p: {
   } as unknown as Scene;
 }
 
-function project(scenes: Scene[], bgm?: unknown): Project {
-  return { scenes, bgmSettings: bgm } as unknown as Project;
+function project(scenes: Scene[], bgm?: unknown, overlay?: unknown): Project {
+  return { scenes, bgmSettings: bgm, timelineOverlay: overlay } as unknown as Project;
 }
 
 describe('compileTimeline：基本', () => {
@@ -183,6 +183,40 @@ describe('compileTimeline：BGM トラック', () => {
       project([scene({ sceneId: 's1', durationSec: 8 })], { enabled: false, bundledBgmId: 'summer-morning' }),
     );
     expect(tl.tracks.bgm).toEqual([]);
+  });
+});
+
+describe('compileTimeline：timelineOverlay の合成（ADR-0018）', () => {
+  it('場面アンカーのテロップクリップは場面のグローバル開始＋相対秒に置かれる', () => {
+    const scenes = [
+      scene({ sceneId: 's1', durationSec: 8 }),
+      scene({ sceneId: 's2', durationSec: 6, transition: { in: TRANSITION_TYPE.fade, durationSec: 2 } }),
+    ];
+    const overlay = { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 's2', startSec: 1, durationSec: 2, text: '補足' }] };
+    const tl = compileTimeline(project(scenes, undefined, overlay));
+    // s2 は 6 から。相対1 → グローバル7、[7,9]。
+    expect(tl.tracks.telop.find((c) => c.id === 'ovclip_001')).toEqual({
+      id: 'ovclip_001', sceneId: 's2', startSec: 7, endSec: 9, label: '補足',
+    });
+  });
+
+  it('anchorSceneId 無しのクリップは絶対時間で置かれる', () => {
+    const overlay = { clips: [{ id: 'ovclip_002', track: 'telop', startSec: 3, durationSec: 2, text: '絶対' }] };
+    const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 10 })], undefined, overlay));
+    expect(tl.tracks.telop.find((c) => c.id === 'ovclip_002')).toEqual({
+      id: 'ovclip_002', sceneId: undefined, startSec: 3, endSec: 5, label: '絶対',
+    });
+  });
+
+  it('存在しない場面アンカーのクリップは無視する（V_overlay）', () => {
+    const overlay = { clips: [{ id: 'ovclip_003', track: 'telop', anchorSceneId: 'sX', startSec: 1, durationSec: 2, text: '孤立' }] };
+    const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 8 })], undefined, overlay));
+    expect(tl.tracks.telop.some((c) => c.id === 'ovclip_003')).toBe(false);
+  });
+
+  it('overlay 未設定なら合成なし（従来どおり）', () => {
+    const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 8 })]));
+    expect(tl.tracks.telop.every((c) => c.id.startsWith('s1/'))).toBe(true);
   });
 });
 

@@ -90,6 +90,7 @@ function bgmClips(project: Project, totalSec: number): TimelineClip[] {
  * - 再生順＝project.scenes 配列順（sceneOps）。遷移の重なりは transitionTimeline で解決（ADR-0009）。
  * - tracks.video＝場面ごと1クリップ。tracks.audio/telop＝行ごと（sceneLines→lineSegments・0秒区間は除外）。
  *   動画スロットのある掛け合いは書き出しに合わせ単一クリップへ collapse（isVideoSlotScene）。tracks.bgm＝全体1本（有効時）。
+ * - project.timelineOverlay のクリップを合成（ADR-0018）：track のレーンへ追加。anchorSceneId 有＝場面相対／無＝絶対時間。
  */
 export function compileTimeline(project: Project, opts: CompileTimelineOptions = {}): Timeline {
   const scenes = opts.includeScene ? project.scenes.filter(opts.includeScene) : project.scenes;
@@ -154,6 +155,26 @@ export function compileTimeline(project: Project, opts: CompileTimelineOptions =
       if (seg.subtitle.enabled) {
         telop.push({ id: `${s.sceneId}/${seg.lineId}`, sceneId: s.sceneId, lineId: seg.lineId, startSec, endSec, label: seg.subtitle.text });
       }
+    }
+  }
+
+  // timelineOverlay のクリップを合成（ADR-0018）。anchorSceneId 有＝場面相対（場面のグローバル開始＋startSec）、無＝絶対時間。
+  // AI/簡易編集は overlay を作らない（場面正準は不変）。存在しない/除外された場面アンカーは描画で無視（V_overlay）。
+  const globalStartById = new Map(scenes.map((s, i) => [s.sceneId, starts[i]]));
+  for (const clip of project.timelineOverlay?.clips ?? []) {
+    let base: number;
+    if (clip.anchorSceneId != null) {
+      const anchor = globalStartById.get(clip.anchorSceneId);
+      if (anchor === undefined) continue;
+      base = anchor;
+    } else {
+      base = 0;
+    }
+    const startSec = base + clip.startSec;
+    const endSec = startSec + clip.durationSec;
+    if (endSec <= startSec) continue; // 0秒は出さない（ゼロ幅クリップ防止）
+    if (clip.track === 'telop') {
+      telop.push({ id: clip.id, sceneId: clip.anchorSceneId, startSec, endSec, label: clip.text ?? '' });
     }
   }
 
