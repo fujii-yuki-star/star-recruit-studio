@@ -5,6 +5,8 @@ import { assembleProject } from "../../domain/project/persistence";
 import { compileTimeline } from "../../domain/project/compileTimeline";
 import type { OverlayClip } from "../../domain/project/types";
 import { TimelineView } from "../components/TimelineView";
+import type { ClipDragMode } from "../components/TimelineView";
+import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { PageHead } from "../components/ui";
 import { ArrowLeftIcon } from "../components/icons";
 
@@ -39,13 +41,23 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
       startSec: Math.max(0, effective - sceneGlobalStart(newAnchor)),
     });
   };
-  // タイムライン上のドラッグ移動の確定：deltaSec を startSec に加算（アンカーは不変・0でクランプ）。1ドロップ=1操作。
-  const moveClip = (id: string, deltaSec: number): void => {
+  // タイムライン上のドラッグ確定（1ドロップ=1操作）。move=移動（startSec）／trim-end=右端（durationSec）／
+  // trim-start=左端（右端 end を固定して startSec と durationSec）。いずれもクランプ後に実効差分が無ければ更新しない（no-op な履歴を作らない）。
+  const editClip = (id: string, mode: ClipDragMode, deltaSec: number): void => {
     const clip = overlayClips.find((c) => c.id === id);
     if (!clip) return;
-    const nextStartSec = Math.max(0, clip.startSec + deltaSec);
-    // クランプ後に実効差分が無い（例：先頭0秒をさらに左へ）ときは更新しない＝no-op な Undo 履歴を作らない。
-    if (nextStartSec !== clip.startSec) updateOverlayClip(id, { startSec: nextStartSec });
+    if (mode === "move") {
+      const startSec = Math.max(0, clip.startSec + deltaSec);
+      if (startSec !== clip.startSec) updateOverlayClip(id, { startSec });
+    } else if (mode === "trim-end") {
+      const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, clip.durationSec + deltaSec);
+      if (durationSec !== clip.durationSec) updateOverlayClip(id, { durationSec });
+    } else {
+      // trim-start：右端(end)を固定して左端を動かす。startSec∈[0, end−最小長]、durationSec=end−startSec。
+      const end = clip.startSec + clip.durationSec;
+      const startSec = Math.min(Math.max(0, clip.startSec + deltaSec), end - TIMELINE_MIN_CLIP_SEC);
+      if (startSec !== clip.startSec) updateOverlayClip(id, { startSec, durationSec: end - startSec });
+    }
   };
 
   const addTelop = () => {
@@ -77,7 +89,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
           editable
           selectedClipId={selectedClipId ?? undefined}
           onSelectClip={setSelectedClipId}
-          onClipMove={moveClip}
+          onClipDrag={editClip}
         />
       </div>
 

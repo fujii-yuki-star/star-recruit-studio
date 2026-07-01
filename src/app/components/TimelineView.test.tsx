@@ -72,27 +72,39 @@ describe("TimelineView", () => {
     expect(screen.getByText("追加テロップ").className).toContain("timeline-clip--selected");
   });
 
-  it("編集モードで overlay クリップをドラッグすると onClipMove(id, deltaSec) が確定する", () => {
+  it("編集モードで overlay クリップ本体をドラッグすると onClipDrag(id, 'move', deltaSec) が確定する", () => {
     const tl = sampleTimeline();
     tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 1, endSec: 4, label: "追加テロップ", origin: "overlay" });
-    const onMove = vi.fn();
-    render(<TimelineView timeline={tl} editable onClipMove={onMove} />);
+    const onDrag = vi.fn();
+    render(<TimelineView timeline={tl} editable onClipDrag={onDrag} />);
     const clip = screen.getByText("追加テロップ");
-    // 既定ズーム pxPerSec=36。+72px ドラッグ → +2秒。（window リスナへは要素からバブルで到達）
+    // 既定ズーム pxPerSec=36。本体を +72px ドラッグ → move で +2秒。（window リスナへは要素からバブルで到達）
     fireEvent.pointerDown(clip, { clientX: 100, pointerId: 1 });
     fireEvent.pointerMove(clip, { clientX: 172, pointerId: 1 });
     fireEvent.pointerUp(clip, { clientX: 172, pointerId: 1 });
-    expect(onMove).toHaveBeenCalledWith("ovclip_001", 2);
+    expect(onDrag).toHaveBeenCalledWith("ovclip_001", "move", 2);
   });
 
-  it("移動0で離した場合は onClipMove を呼ばない（無駄な履歴を作らない）", () => {
+  it("右端ハンドルのドラッグで onClipDrag(id, 'trim-end', deltaSec) が確定する", () => {
     const tl = sampleTimeline();
     tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 1, endSec: 4, label: "追加テロップ", origin: "overlay" });
-    const onMove = vi.fn();
-    render(<TimelineView timeline={tl} editable onClipMove={onMove} />);
+    const onDrag = vi.fn();
+    const { container } = render(<TimelineView timeline={tl} editable onClipDrag={onDrag} />);
+    const handle = container.querySelector(".timeline-clip-handle--right") as HTMLElement;
+    fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 136, pointerId: 1 }); // +36px = +1秒
+    fireEvent.pointerUp(handle, { clientX: 136, pointerId: 1 });
+    expect(onDrag).toHaveBeenCalledWith("ovclip_001", "trim-end", 1);
+  });
+
+  it("移動0で離した場合は onClipDrag を呼ばない（無駄な履歴を作らない）", () => {
+    const tl = sampleTimeline();
+    tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 1, endSec: 4, label: "追加テロップ", origin: "overlay" });
+    const onDrag = vi.fn();
+    render(<TimelineView timeline={tl} editable onClipDrag={onDrag} />);
     const clip = screen.getByText("追加テロップ");
     fireEvent.pointerDown(clip, { clientX: 100, pointerId: 1 });
     fireEvent.pointerUp(clip, { clientX: 100, pointerId: 1 });
-    expect(onMove).not.toHaveBeenCalled();
+    expect(onDrag).not.toHaveBeenCalled();
   });
 });

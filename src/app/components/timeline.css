@@ -129,6 +129,25 @@
   opacity: 0.9;
   z-index: 4;
 }
+/* トリミングハンドル（左右端）。選択中は掴みやすいよう縁を強調。 */
+.timeline-clip-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+  z-index: 2;
+}
+.timeline-clip-handle--left {
+  left: 0;
+}
+.timeline-clip-handle--right {
+  right: 0;
+}
+.timeline-clip--selected .timeline-clip-handle {
+  background: var(--color-primary);
+  opacity: 0.4;
+}
 .timeline-clip--selected {
   outline: 2px solid var(--color-primary);
   outline-offset: 1px;
