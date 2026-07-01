@@ -98,3 +98,6 @@ export const GEOM_MIN_SIZE = 20;
 
 // グループ拡縮の最小倍率（schema: scale>0 を UI でも担保）。FREE/テンプレのグループ枠で共有（ADR-0022・§2-7）。
 export const GROUP_MIN_SCALE = 0.1;
+
+// タイムライン overlay クリップの最小長（秒）。トリミングで潰さないための下限（schema: durationSec>0 を UI でも担保・ADR-0018・§2-7）。
+export const TIMELINE_MIN_CLIP_SEC = 0.5;

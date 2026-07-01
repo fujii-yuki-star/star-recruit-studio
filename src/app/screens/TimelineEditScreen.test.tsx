@@ -114,4 +114,64 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     expect(startSec()).toBe(0);
     expect(useProjectStore.getState().past.length).toBe(pastLen);
   });
+
+  it("右端トリミングで durationSec を伸ばし、左端トリミングは右端固定・最小長でクランプする", () => {
+    useProjectStore.setState({
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002"] }],
+      scenes: [scene("scene_001", 1), scene("scene_002", 2)],
+      meta: {
+        ...useProjectStore.getState().meta,
+        timelineOverlay: { clips: [{ id: "ovclip_001", track: "telop", startSec: 2, durationSec: 3, text: "x" }] },
+      },
+      past: [],
+      future: [],
+      _historyGroupDepth: 0,
+    });
+    const { container } = render(<TimelineEditScreen onNavigate={() => {}} />);
+    const clip = () => useProjectStore.getState().meta.timelineOverlay?.clips?.[0];
+    const rightHandle = () => container.querySelector(".timeline-clip-handle--right") as HTMLElement;
+    const leftHandle = () => container.querySelector(".timeline-clip-handle--left") as HTMLElement;
+    // 右端 +36px＝+1秒 → durationSec 3→4（end 2→6）。
+    fireEvent.pointerDown(rightHandle(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(rightHandle(), { clientX: 136, pointerId: 1 });
+    fireEvent.pointerUp(rightHandle(), { clientX: 136, pointerId: 1 });
+    expect(clip()).toMatchObject({ startSec: 2, durationSec: 4 });
+    // 左端 +36px＝+1秒 → 右端(6)固定で startSec 2→3・durationSec 4→3。
+    fireEvent.pointerDown(leftHandle(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(leftHandle(), { clientX: 136, pointerId: 1 });
+    fireEvent.pointerUp(leftHandle(), { clientX: 136, pointerId: 1 });
+    expect(clip()).toMatchObject({ startSec: 3, durationSec: 3 });
+    // 右端を大きく縮める（-360px＝-10秒）→ 最小長 0.5 でクランプ。
+    fireEvent.pointerDown(rightHandle(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(rightHandle(), { clientX: -260, pointerId: 1 });
+    fireEvent.pointerUp(rightHandle(), { clientX: -260, pointerId: 1 });
+    expect(clip()?.durationSec).toBe(0.5);
+  });
+
+  it("左端トリミングは 0秒側と最小長側でクランプする", () => {
+    useProjectStore.setState({
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002"] }],
+      scenes: [scene("scene_001", 1), scene("scene_002", 2)],
+      meta: {
+        ...useProjectStore.getState().meta,
+        timelineOverlay: { clips: [{ id: "ovclip_001", track: "telop", startSec: 2, durationSec: 3, text: "x" }] },
+      },
+      past: [],
+      future: [],
+      _historyGroupDepth: 0,
+    });
+    const { container } = render(<TimelineEditScreen onNavigate={() => {}} />);
+    const clip = () => useProjectStore.getState().meta.timelineOverlay?.clips?.[0];
+    const leftHandle = () => container.querySelector(".timeline-clip-handle--left") as HTMLElement;
+    // 左へ大きく（-360px＝-10秒）→ 右端 end=5 固定で startSec を 0 にクランプ（durationSec 5）。
+    fireEvent.pointerDown(leftHandle(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(leftHandle(), { clientX: -260, pointerId: 1 });
+    fireEvent.pointerUp(leftHandle(), { clientX: -260, pointerId: 1 });
+    expect(clip()).toMatchObject({ startSec: 0, durationSec: 5 });
+    // 右へ大きく（+360px＝+10秒）→ startSec を end−最小長 = 5−0.5 = 4.5 にクランプ（durationSec 0.5）。
+    fireEvent.pointerDown(leftHandle(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(leftHandle(), { clientX: 460, pointerId: 1 });
+    fireEvent.pointerUp(leftHandle(), { clientX: 460, pointerId: 1 });
+    expect(clip()).toMatchObject({ startSec: 4.5, durationSec: 0.5 });
+  });
 });
