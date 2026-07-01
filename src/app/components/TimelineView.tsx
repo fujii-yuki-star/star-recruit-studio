@@ -3,6 +3,7 @@ import { TRANSITION_TYPE } from "../../domain/enums";
 import type { TransitionType } from "../../domain/enums";
 import type { Timeline, TimelineClip, TimelineTrackKind } from "../../domain/project/compileTimeline";
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
+import { snapTimeSec } from "../../domain/project/timelineSnap";
 import "./timeline.css";
 
 /** overlay クリップのドラッグ種別。move＝本体移動、trim-start／trim-end＝左右端のトリミング。 */
@@ -30,6 +31,7 @@ const LANES: { kind: TimelineTrackKind; label: string; sub: string }[] = [
 
 const ZOOM_LEVELS = [16, 24, 36, 54, 80, 120] as const;
 const DEFAULT_ZOOM_INDEX = 2; // 36 px/秒
+const SNAP_THRESHOLD_PX = 8; // ドラッグ/トリミングの吸着しきい値（px）。px→秒は pxPerSec で換算。
 
 /** 遷移種別を画面用の言い換えへ（§2-3。FFmpeg 名や enum 値は出さない）。 */
 function transitionLabel(type: TransitionType): string {
@@ -56,6 +58,40 @@ function clipTitle(clip: TimelineClip): string {
   return `${clip.label}（${clockLabel(clip.startSec)}〜${clockLabel(clip.endSec)}）`;
 }
 
+const OVERLAY_TRACK_KINDS: TimelineTrackKind[] = ["video", "telop", "audio", "bgm"];
+
+/** ドラッグ中の吸着先（グローバル秒）：0・各場面の開始/終了・自分以外の overlay クリップの端。 */
+function snapTargetsFor(timeline: Timeline, excludeId: string): number[] {
+  const set = new Set<number>([0]);
+  for (const s of timeline.scenes) {
+    set.add(s.startSec);
+    set.add(s.endSec);
+  }
+  for (const kind of OVERLAY_TRACK_KINDS) {
+    for (const c of timeline.tracks[kind]) {
+      if (c.origin === "overlay" && c.id !== excludeId) {
+        set.add(c.startSec);
+        set.add(c.endSec);
+      }
+    }
+  }
+  return [...set];
+}
+
+function findClip(timeline: Timeline, id: string): TimelineClip | undefined {
+  for (const kind of OVERLAY_TRACK_KINDS) {
+    const c = timeline.tracks[kind].find((x) => x.id === id);
+    if (c) return c;
+  }
+  return undefined;
+}
+
+/** 生の deltaSec を、吸着させるエッジ（move/trim-start=start、trim-end=end）で snap した deltaSec へ変換する。 */
+function snappedDelta(clip: TimelineClip, mode: ClipDragMode, rawDeltaSec: number, targets: number[], thresholdSec: number): number {
+  const baseEdge = mode === "trim-end" ? clip.endSec : clip.startSec;
+  return snapTimeSec(baseEdge + rawDeltaSec, targets, thresholdSec) - baseEdge;
+}
+
 export function TimelineView({ timeline, editable, selectedClipId, onSelectClip, onClipDrag }: TimelineViewProps) {
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const pxPerSec = ZOOM_LEVELS[zoomIndex];
@@ -64,6 +100,11 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
   // 確定用に開始位置(startX)と mode を ref に持ち（タイミング非依存）、pointerup の clientX から直接 delta を出す。preview は offsetPx。
   const [drag, setDrag] = useState<{ id: string; mode: ClipDragMode; offsetPx: number } | null>(null);
   const dragMetaRef = useRef<{ id: string; startX: number; mode: ClipDragMode } | null>(null);
+  // 最新の timeline を ref で参照（onUp の吸着計算に使う）。deps に timeline を入れず、effect の再登録を避ける（配列長も一定に保つ）。
+  const timelineRef = useRef(timeline);
+  useEffect(() => {
+    timelineRef.current = timeline;
+  }, [timeline]);
   const dragging = drag !== null;
   useEffect(() => {
     if (!dragging) return;
@@ -74,8 +115,16 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
     const onUp = (e: PointerEvent) => {
       const m = dragMetaRef.current;
       if (m) {
-        const offsetPx = e.clientX - m.startX;
-        if (offsetPx !== 0) onClipDrag?.(m.id, m.mode, offsetPx / pxPerSec);
+        const rawDeltaSec = (e.clientX - m.startX) / pxPerSec;
+        if (rawDeltaSec !== 0) {
+          // 吸着させてから確定（プレビューと同じ計算・場面境界/他クリップ端/0秒へ）。
+          const tl = timelineRef.current;
+          const clip = findClip(tl, m.id);
+          const delta = clip
+            ? snappedDelta(clip, m.mode, rawDeltaSec, snapTargetsFor(tl, m.id), SNAP_THRESHOLD_PX / pxPerSec)
+            : rawDeltaSec;
+          onClipDrag?.(m.id, m.mode, delta);
+        }
       }
       dragMetaRef.current = null;
       setDrag(null);
@@ -182,7 +231,8 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
                   let left = baseLeft;
                   let width = baseWidth;
                   if (isDragging) {
-                    const off = drag.offsetPx;
+                    // 吸着後の offset（px）でプレビュー＝確定（onClipDrag へ渡す値）と一致させる。
+                    const off = snappedDelta(clip, drag.mode, drag.offsetPx / pxPerSec, snapTargetsFor(timeline, clip.id), SNAP_THRESHOLD_PX / pxPerSec) * pxPerSec;
                     const end = baseLeft + baseWidth; // 右端(px)
                     const minPx = TIMELINE_MIN_CLIP_SEC * pxPerSec;
                     if (drag.mode === "move") {
