@@ -298,6 +298,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           <BgmPicker />
 
           <div className="col gap-sm mt-lg">
+            <button className="btn btn-ghost btn-block" onClick={() => onNavigate("timeline")}>
+              タイムラインで見る
+            </button>
             <button className="btn btn-secondary btn-block" onClick={() => onNavigate("scene-edit")}>
               場面を直す
             </button>

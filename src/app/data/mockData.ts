@@ -10,6 +10,7 @@ export type ScreenId =
   | "draft"
   | "scene-edit"
   | "preview"
+  | "timeline"
   | "export"
   | "precheck"
   | "looks"
