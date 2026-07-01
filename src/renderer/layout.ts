@@ -2,9 +2,10 @@
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
 import { FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
-import type { Fit, FreeShapeType, LayerType } from '../domain/enums';
+import type { Fit, FreeShapeType, LayerType, TextAlign } from '../domain/enums';
 import type { Scene } from '../domain/project/types';
 import type { Layer, Template } from '../domain/template/types';
+import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 
 export interface Rect {
   x: number;
@@ -16,6 +17,8 @@ export interface Rect {
 interface ItemBase extends Rect {
   id: string;
   zIndex: number;
+  /** 回転角（度・中心を軸に時計回り。FREE 要素のみ設定・未指定=回転なし・#208）。 */
+  rotation?: number;
 }
 
 export interface FillItem extends ItemBase {
@@ -50,6 +53,11 @@ export interface TextItem extends ItemBase {
   isSubtitle: boolean;
   /** この要素自身のフォント id（#178）。既知ならこれを使い、未指定/不明は場面既定（描画側 fontFamily）へ。 */
   fontId?: string | null;
+  /** 行間（倍率・未指定=1.3）・揃え（未指定=left）・縁取り（FREE text の体裁・#209）。 */
+  lineHeight?: number;
+  textAlign?: TextAlign;
+  strokeColor?: string;
+  strokeWidth?: number;
 }
 
 export type LayoutItem = FillItem | ImageItem | TextItem;
@@ -69,6 +77,8 @@ const DEFAULT_Z: Record<LayerType, number> = {
 const DEFAULT_TEXT_COLOR = '#222222';
 const DEFAULT_FONT_SIZE = 40;
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+/** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
+export const DEFAULT_LINE_HEIGHT = 1.3;
 
 const zOf = (layer: Layer): number => layer.zIndex ?? DEFAULT_Z[layer.type];
 
@@ -86,29 +96,36 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   const backgroundColor = template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR;
   const items: LayoutItem[] = [];
 
+  // グループ transform を前合成（ADR-0022）。グループ無しは passthrough＝出力差分なし。
+  const layerGeom = composeGroupGeometry(template.layers, template.groups ?? []);
+  const templateGroups = template.groups ?? [];
+
   for (const layer of template.layers) {
-    const base: ItemBase = { id: layer.id, x: layer.x, y: layer.y, w: layer.w, h: layer.h, zIndex: zOf(layer) };
+    if (isHiddenByGroup(layer.id, templateGroups)) continue; // hidden グループのメンバーは描画しない
+    const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h };
+    const base: ItemBase = { id: layer.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: zOf(layer) };
+    if (cg.rotation) base.rotation = cg.rotation; // 0/未指定は付けない＝グループ未所属は従来どおり
 
     switch (layer.type) {
       case 'background': {
-        const assetId = scene.assetRefs[layer.id] ?? null;
+        const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
-          items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'cover', role: 'background', label: '背景' });
+          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'cover', role: 'background', label: '背景' });
         } else {
           items.push({ ...base, kind: 'fill', color: layer.fillColor ?? backgroundColor, opacity: layer.opacity ?? 1, radius: layer.radius ?? 0 });
         }
         break;
       }
       case 'slot': {
-        const assetId = scene.assetRefs[layer.id] ?? null;
+        const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         // ラベルは未解決時のプレースホルダ表示に使う。生の layer.id は技術用語漏れ（§2-3）なので日本語に。
-        items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'cover', role: 'slot', label: '素材' });
+        items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'cover', role: 'slot', label: '素材' });
         break;
       }
       case 'logo': {
-        const assetId = scene.assetRefs[layer.id] ?? null;
+        const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
-          items.push({ ...base, kind: 'image', assetId, fit: layer.fit ?? 'contain', role: 'logo', label: 'ロゴ' });
+          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'contain', role: 'logo', label: 'ロゴ' });
         }
         break;
       }
@@ -154,6 +171,10 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           background: bg,
           isSubtitle: layer.type === 'subtitle',
           fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
+          // 縁取り（#275）。LayoutItem/SVG は既存（FREE の #209）と同じ仕組みで描画。
+          // 太さ>0 で色未指定なら白を既定（外部テンプレ等で色だけ無いと縁取りが silent に消えるのを防ぐ・PR#289レビュー）。
+          strokeColor: (layer.strokeWidth ?? 0) > 0 ? (layer.strokeColor ?? '#ffffff') : layer.strokeColor,
+          strokeWidth: layer.strokeWidth,
         });
         break;
       }
@@ -163,9 +184,14 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   // FREE テンプレ場面のみ：scene.freeLayout の要素を LayoutItem として重ねる（ADR-0008）。テンプレ層の上に zIndex 順。
   // 通常テンプレに誤って freeLayout が付いても描画しない（防御。category で判定）。
   if (template.category === FREE_CATEGORY) {
+    const sceneGroups = scene.groups ?? [];
+    const elGeom = composeGroupGeometry(scene.freeLayout ?? [], sceneGroups);
     for (const el of scene.freeLayout ?? []) {
-      // zIndex 未指定は 1（背景=0 より前面に置く）。
-      const base: ItemBase = { id: el.id, x: el.x, y: el.y, w: el.w, h: el.h, zIndex: el.zIndex ?? 1 };
+      if (el.hidden) continue; // 非表示の要素は描画しない（レイヤー一覧で隠す・#210）。
+      if (isHiddenByGroup(el.id, sceneGroups)) continue; // hidden グループのメンバーも描画しない（ADR-0022）。
+      // zIndex 未指定は 1（背景=0 より前面に置く）。rotation はグループ合成後の値（未所属＝el.rotation）。
+      const cg = elGeom.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation };
+      const base: ItemBase = { id: el.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: el.zIndex ?? 1, rotation: cg.rotation };
       switch (el.kind) {
         case 'slot':
           items.push({ ...base, kind: 'image', assetId: el.assetId ?? null, fit: el.fit ?? 'cover', role: 'slot', label: '素材' });
@@ -174,8 +200,9 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const text = el.text ?? '';
           if (text.length === 0) break;
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
-          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * 1.3)));
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? 'normal', color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId });
+          const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
+          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? 'normal', color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
           break;
         }
         case 'shape':

@@ -37,6 +37,15 @@ pub(crate) fn is_safe_project_id(id: &str) -> bool {
     !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// テンプレ ID がパス安全かつ正典形式（^[a-z0-9_]+$・小文字のみ）か。user_tmpl_NNN は適合。
+/// template.schema.json の templateId 形式（小文字）に合わせ、手動持ち込みの大文字 id を弾く（ADR-0017）。
+fn is_safe_template_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
 /// project.json を appData/projects/<projectId>/ に保存し、保存先パスを返す。
 #[tauri::command]
 fn save_project(app: tauri::AppHandle, project_json: String) -> Result<String, String> {
@@ -103,6 +112,84 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<ProjectSummary>, String> {
     Ok(out)
 }
 
+/// appData/projects/<projectId>/ を丸ごと削除する（プロジェクトの完全削除＝#212）。存在しなくても成功扱い（冪等）。
+#[tauri::command]
+fn delete_project(app: tauri::AppHandle, project_id: String) -> Result<(), String> {
+    if !is_safe_project_id(&project_id) {
+        return Err("不正なプロジェクトIDです。".to_string());
+    }
+    let dir = projects_dir(&app)?.join(&project_id);
+    // 冪等：消そうとした瞬間に既に無くても成功扱い（exists→remove の TOCTOU を避け、エラー種別で振り分ける）。
+    match fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// appData/user_templates ディレクトリ（ユーザー作成テンプレ・全プロジェクト共通＝ADR-0017）。作成は呼び出し側。
+fn user_templates_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(base.join("user_templates"))
+}
+
+/// ユーザーテンプレ(JSON文字列)を appData/user_templates/<templateId>.json に保存し、保存先パスを返す。
+/// templateId は is_safe_template_id（^[a-z0-9_]+$ 小文字）で検証＝パストラバーサル防止＋正典形式。
+#[tauri::command]
+fn save_user_template(app: tauri::AppHandle, template_json: String) -> Result<String, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(&template_json).map_err(|e| e.to_string())?;
+    let template_id = value
+        .get("templateId")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "templateId がありません".to_string())?;
+    if !is_safe_template_id(template_id) {
+        return Err("不正なテンプレートIDです。".to_string());
+    }
+    let dir = user_templates_dir(&app)?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.json", template_id));
+    fs::write(&path, &template_json).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// appData/user_templates の *.json をすべて読み、本文(JSON文字列)の配列で返す（検証は呼び出し側＝§2-2）。
+#[tauri::command]
+fn load_user_templates(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = user_templates_dir(&app)?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out: Vec<String> = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        match fs::read_to_string(&path) {
+            Ok(text) => out.push(text),
+            // 1ファイルの読込失敗で全体を止めない（権限エラー等は原因究明用にログ）。
+            Err(e) => eprintln!("[user_templates] 読み込みスキップ {:?}: {}", path, e),
+        }
+    }
+    Ok(out)
+}
+
+/// ユーザーテンプレ(appData/user_templates/<templateId>.json)を削除する（無ければ何もしない）。
+#[tauri::command]
+fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<(), String> {
+    if !is_safe_template_id(&template_id) {
+        return Err("不正なテンプレートIDです。".to_string());
+    }
+    let path = user_templates_dir(&app)?.join(format!("{}.json", template_id));
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -119,6 +206,10 @@ pub fn run() {
             save_project,
             load_project,
             list_projects,
+            delete_project,
+            save_user_template,
+            load_user_templates,
+            delete_user_template,
             ffmpeg::export_video,
             ffmpeg::probe_video,
             ffmpeg::extract_video_thumbnail,
@@ -128,6 +219,9 @@ pub fn run() {
             assets::import_asset_path,
             assets::import_voice,
             assets::read_asset_data_url,
+            assets::import_template_asset,
+            assets::load_template_assets,
+            assets::delete_template_asset,
             voicevox::synthesize_voice,
             ai::save_api_key,
             ai::has_api_key,

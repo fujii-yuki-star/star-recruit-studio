@@ -1,13 +1,14 @@
-import { useState, type ChangeEvent } from "react";
-import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
+import { useEffect, useState, type ChangeEvent } from "react";
+import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
-import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, type LayerType, type SceneCategory } from "../../domain/enums";
-import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
+import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
+import { isUserTemplate } from "../../domain/template/userTemplate";
 import { useProjectStore } from "../store/projectStore";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
+import { layerLabel, buildSampleScene } from "./looksShared";
 
 // SceneCategory のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
 const categoryLabel: Record<SceneCategory, string> = {
@@ -23,70 +24,11 @@ const categoryLabel: Record<SceneCategory, string> = {
   free: "自由配置",
 };
 
-// レイヤー種別 → 「使用している要素」のユーザー向けラベル（全値必須）。
-const layerLabel: Record<LayerType, string> = {
-  background: "背景",
-  slot: "メイン素材",
-  text: "文字",
-  subtitle: "字幕",
-  logo: "ロゴ",
-  character: "ゆうこ",
-  decor: "装飾",
-  shape: "図形",
+// 向き（Orientation）のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
+const orientationLabel: Record<Orientation, string> = {
+  "16:9": "横型（16:9）",
+  "9:16": "縦型（9:16）",
 };
-
-// テンプレの見た目を確認するためのサンプル場面（実素材が無くても配置＋見本テキストで見せる）。
-function buildSampleScene(template: Template, assets: Asset[]): Scene {
-  const firstImage = assets.find((a) => a.assetType === ASSET_TYPE.image);
-  const logo = assets.find((a) => a.assetType === ASSET_TYPE.logo);
-  const yuko = assets.find((a) => a.assetType === ASSET_TYPE.yuko);
-  const assetRefs: AssetRefs = {};
-  let hasCharacter = false;
-  for (const layer of template.layers) {
-    if (layer.type === "background" || layer.type === "slot") {
-      assetRefs[layer.id] = firstImage?.assetId ?? null;
-    } else if (layer.type === "logo") {
-      assetRefs[layer.id] = logo?.assetId ?? null;
-    } else if (layer.type === "character") {
-      hasCharacter = true;
-    }
-  }
-  const texts: Texts = {};
-  for (const layer of template.layers) {
-    if (layer.textKey === "title") texts.title = "見出しの例";
-    else if (layer.textKey === "subtitle") texts.subtitle = "字幕の例文がここに入ります";
-    else if (layer.textKey === "main") texts.main = "本文の例";
-    else if (layer.textKey === "caption") texts.caption = "キャプションの例";
-    else if (layer.textKey === "url") texts.url = "example.com";
-  }
-  // FREE テンプレは自由配置のサンプルを見せる（実演用・ADR-0008）。
-  const freeLayout: FreeElement[] | undefined =
-    template.category === FREE_CATEGORY
-      ? [
-          { id: "free_001", kind: "shape", x: 120, y: 130, w: 880, h: 820, zIndex: 5, shapeType: FREE_SHAPE_TYPE.rect, fillColor: "#e6f0ff", opacity: 1, radius: 24 },
-          { id: "free_002", kind: "slot", x: 160, y: 170, w: 800, h: 540, zIndex: 10, assetId: firstImage?.assetId ?? null, fit: "cover" },
-          { id: "free_003", kind: "text", x: 1080, y: 230, w: 720, h: 260, zIndex: 20, text: "自由に置いた見出し", fontSize: 64, color: "#222222", fontWeight: "bold" },
-        ]
-      : undefined;
-  return {
-    sceneId: "looks-preview",
-    partId: "",
-    order: 1,
-    sceneType: template.category,
-    templateId: template.templateId,
-    durationSec: template.defaults?.durationSec ?? 8,
-    assetRefs,
-    character: {
-      enabled: hasCharacter,
-      characterId: DEFAULT_CHARACTER_ID,
-      poseAssetId: yuko?.assetId ?? null,
-    },
-    texts,
-    narration: { text: "", status: NARRATION_STATUS.none },
-    warnings: [],
-    freeLayout,
-  };
-}
 
 // FREE（自由配置）で「置けるもの」のラベル。FREE はテンプレ層でなく freeLayout に内容を持つため、
 // レイヤー種別ではなく配置できる要素（素材/文字/図形）を示す（ADR-0008・#5）。
@@ -103,14 +45,91 @@ function usedElements(template: Template): string[] {
   return out;
 }
 
-export function LooksScreen() {
+// 見た目パターンの一覧/管理（#271 で編集は専用画面 LooksEditScreen へ分離）。
+// ここは「見る・選ぶ・複製/編集へ進む・削除・取り込み」に専念し、編集ロジックは持たない。
+export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
   const templates = useProjectStore((s) => s.templates);
   const assets = useProjectStore((s) => s.assets);
   const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
+  const duplicateAsUserTemplate = useProjectStore((s) => s.duplicateAsUserTemplate);
+  const createBlankUserTemplate = useProjectStore((s) => s.createBlankUserTemplate);
+  const deleteUserTemplate = useProjectStore((s) => s.deleteUserTemplate);
+  const setEditingTemplateId = useProjectStore((s) => s.setEditingTemplateId);
+  const templateError = useProjectStore((s) => s.templateError);
+  const clearTemplateError = useProjectStore((s) => s.clearTemplateError);
   const [selectedId, setSelectedId] = useState(templates[0]?.templateId ?? "");
   const [loadMsg, setLoadMsg] = useState("");
   const [loadOk, setLoadOk] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // ゼロから新規作成フォーム（ADR-0017「ゼロから作成」の導線＝複製に頼らず一から作る）。向き/カテゴリは編集画面で変えられないため作成時に決める。
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("新しい見た目");
+  const [newOrientation, setNewOrientation] = useState<Orientation>(ORIENTATION.landscape);
+  const [newCategory, setNewCategory] = useState<SceneCategory>(SCENE_CATEGORIES[0]);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
+
+  // 選択が変わったら削除確認は閉じる（別テンプレへ確認状態を持ち越さない）。描画中リセット＝effect 内 setState を避ける React 推奨パターン。
+  const [syncedId, setSyncedId] = useState<string | undefined>(undefined);
+  if (current && current.templateId !== syncedId) {
+    setSyncedId(current.templateId);
+    setConfirmDelete(false);
+  }
+  // 選択を変えたら前の操作のエラーは消す（無関係なエラーを別テンプレのパネルに残さない）。
+  useEffect(() => {
+    clearTemplateError();
+  }, [current?.templateId, clearTemplateError]);
+
+  const isUserCurrent = current ? isUserTemplate(current.templateId) : false;
+
+  // この見た目を複製してマイテンプレにし、そのまま編集画面へ。連打は busy で防ぐ（採番の余分な前進を避ける）。
+  async function onDuplicate() {
+    if (!current || busy) return;
+    setBusy(true);
+    try {
+      const newId = await duplicateAsUserTemplate(current.templateId);
+      if (newId) {
+        setSelectedId(newId);
+        setEditingTemplateId(newId);
+        onNavigate("looks-edit");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+  // ゼロから新規作成し、そのまま編集画面へ。名前は空白なら既定にフォールバック。連打は busy で防ぐ。
+  async function onCreateBlank() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const name = newName.trim() || "新しい見た目";
+      const newId = await createBlankUserTemplate(name, newCategory, newOrientation);
+      if (newId) {
+        setCreating(false);
+        setNewName("新しい見た目"); // 次回フォームに前回名を残さない（同名テンプレの量産を防ぐ）。向き/種類は保持。
+        setSelectedId(newId);
+        setEditingTemplateId(newId);
+        onNavigate("looks-edit");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+  // このマイテンプレを編集画面で開く。
+  function onEdit() {
+    if (!current || !isUserCurrent) return;
+    setEditingTemplateId(current.templateId);
+    onNavigate("looks-edit");
+  }
+  // マイテンプレを削除し、別の見た目を選択する。削除が成功したときだけ選択を移す（失敗時は対象が残るので留まる）。
+  async function onDelete() {
+    if (!current || !isUserCurrent) return;
+    const targetId = current.templateId;
+    const fallback = templates.find((t) => t.templateId !== targetId)?.templateId ?? "";
+    const ok = await deleteUserTemplate(targetId);
+    setConfirmDelete(false);
+    if (ok) setSelectedId(fallback);
+  }
 
   // 用意した見た目パターンのファイルを取り込む（検証は templateFs＝§2-2）。件数のみ提示（§2-3）。
   async function onLoadPack(e: ChangeEvent<HTMLInputElement>) {
@@ -152,6 +171,48 @@ export function LooksScreen() {
         desc="動画の見た目のパターンを確認できます。各場面に当てる見た目は「場面編集」で選べます。"
       />
 
+      {/* ゼロから新規作成（ADR-0017）：複製だけでなく一から作れる導線。向き・種類は編集画面で変えられないため作成時に決める。 */}
+      {creating ? (
+        <div className="card" style={{ marginBottom: "var(--gap-lg)" }}>
+          <h2 className="section-title">ゼロから新しい見た目を作る</h2>
+          <div className="col gap-sm">
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
+              <input className="input" value={newName} maxLength={40} onChange={(e) => setNewName(e.target.value)} />
+            </div>
+            <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>向き</label>
+                <select className="select" value={newOrientation} onChange={(e) => setNewOrientation(e.target.value as Orientation)}>
+                  {ORIENTATIONS.map((o) => (<option key={o} value={o}>{orientationLabel[o]}</option>))}
+                </select>
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>種類</label>
+                <select className="select" value={newCategory} onChange={(e) => setNewCategory(e.target.value as SceneCategory)}>
+                  {SCENE_CATEGORIES.map((c) => (<option key={c} value={c}>{categoryLabel[c]}</option>))}
+                </select>
+              </div>
+            </div>
+            <div className="row gap-sm">
+              <button className="btn btn-primary" disabled={busy} onClick={() => void onCreateBlank()}>作成して編集する</button>
+              <button className="btn btn-ghost" onClick={() => setCreating(false)}>やめる</button>
+            </div>
+            {/* 作成失敗時はフォーム内にエラーを出す（押しても何も起きないように見えるのを防ぐ・§2-5）。 */}
+            {templateError && (
+              <div className="notice notice-warn" role="alert">
+                <span>{templateError}</span>
+              </div>
+            )}
+            <p className="field-hint">空のキャンバス（背景のみ）から始まります。文字・素材などは次の編集画面で足せます。向き・種類は後から変えられないため、ここで選んでください。</p>
+          </div>
+        </div>
+      ) : (
+        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} onClick={() => { clearTemplateError(); setCreating(true); }}>
+          ＋ ゼロから新しい見た目を作る
+        </button>
+      )}
+
       <div
         style={{
           display: "grid",
@@ -173,7 +234,7 @@ export function LooksScreen() {
               onClick={() => setSelectedId(t.templateId)}
             >
               <span className="action-card-title">{t.name}</span>
-              <span className="action-card-desc">{categoryLabel[t.category]}</span>
+              <span className="action-card-desc">{categoryLabel[t.category]}{isUserTemplate(t.templateId) ? "・マイテンプレ" : ""}</span>
             </button>
           ))}
         </div>
@@ -211,6 +272,43 @@ export function LooksScreen() {
           </div>
 
           <hr className="divider" />
+          {/* マイテンプレ（ユーザーテンプレ）の作成・編集（ADR-0017）。編集は専用画面へ遷移（#271）。 */}
+          <h3 className="field-label">この見た目を編集</h3>
+          <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`}>
+            {isUserCurrent ? "マイテンプレ" : "標準（編集するには複製します）"}
+          </span>
+          <div className="col gap-sm mt">
+            {isUserCurrent && (
+              <button className="btn btn-primary" onClick={onEdit}>この見た目を編集する</button>
+            )}
+            <button className="btn btn-secondary" disabled={busy} onClick={() => void onDuplicate()}>
+              この見た目を複製して編集する
+            </button>
+
+            {/* 削除（マイテンプレのみ） */}
+            {isUserCurrent && (confirmDelete ? (
+              <div className="row gap-sm" style={{ alignItems: "center" }}>
+                <span className="text-sm">このマイテンプレを削除しますか？</span>
+                <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
+                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
+              </div>
+            ) : (
+              <button
+                className="btn btn-ghost text-sm"
+                style={{ color: "var(--color-danger)", alignSelf: "flex-start" }}
+                onClick={() => setConfirmDelete(true)}
+              >
+                このマイテンプレを削除
+              </button>
+            ))}
+          </div>
+          {templateError && (
+            <div className="notice notice-warn mt" role="alert">
+              <span>{templateError}</span>
+            </div>
+          )}
+
+          <hr className="divider" />
           <input
             id="tmplPack"
             type="file"
@@ -222,7 +320,7 @@ export function LooksScreen() {
           <label htmlFor="tmplPack" className="btn btn-secondary" style={{ cursor: "pointer" }}>
             見た目パターンを読み込む
           </label>
-          <p className="field-hint mt">用意した見た目パターンのファイルを追加できます（編集は今後のバージョンで対応予定）。</p>
+          <p className="field-hint mt">用意した見た目パターンのファイルを追加できます。</p>
           {loadMsg && (
             <div className={`notice ${loadOk ? "notice-info" : "notice-warn"} mt`} role={loadOk ? "status" : "alert"}>
               <span>{loadMsg}</span>

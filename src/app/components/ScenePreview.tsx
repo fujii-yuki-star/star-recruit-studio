@@ -1,17 +1,20 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { resolveLineSubtitle } from "../../domain/project/lineTimeline";
-import { creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex }: { scene?: Scene; template?: Template; activeLineIndex?: number }) {
+export function ScenePreview({ scene, template, activeLineIndex, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
+  // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
+  const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const ref = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<{ width: number; height: number } | null>(null);
@@ -75,34 +78,47 @@ export function ScenePreview({ scene, template, activeLineIndex }: { scene?: Sce
     : undefined;
   const lineSub = activeLine ? resolveLineSubtitle(activeLine, scene) : undefined;
   const layoutOpts = lineSub ? { subtitleText: lineSub.enabled ? lineSub.text : null } : undefined;
+  // 常時クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。
+  const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
   // responsive:true で SVG ルートを 100%（viewBox は canvas 実寸を保持）にし、外枠の実寸は計測結果に従う。
   const svg = layoutToSvg(layoutScene(scene, template, layoutOpts), {
-    assetSrc: (id) => (id ? assetSrcById[id] : undefined),
+    assetSrc: (id) => (id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined),
     responsive: true,
-    // プレビューも書き出しと同じく常時クレジットを表示（ADR-0001 パリティ）。選択話者のキャラを動的に（#177）。
-    credit: creditForSpeaker(getVoicevoxSpeaker()),
+    // プレビューも書き出しと同じく常時クレジットを表示（ADR-0001 パリティ）。
+    credit: activeLine ? creditForLine(activeLine, baseCredit) : baseCredit,
     // 場面フォント（scene.fontId）→ 無ければ動画全体（videoSettings.fontId）。書き出しと一致（ADR-0001）。
     fontFamily: fontFamilyForId(resolveFontId(scene.fontId, fontId)),
   });
 
   return (
     <div ref={ref} style={{ width: "100%", display: "flex", justifyContent: "center" }}>
+      {/* fit 箱（プレビューの実寸＝canvas と同比）。操作オーバーレイ（children）はこの箱の子にして実寸と一致させる（#273）。 */}
       <div
-        role="img"
-        aria-label="場面の仕上がり"
         style={{
+          position: "relative",
           width: fit ? fit.width : "100%",
           height: fit?.height,
           flexShrink: 0,
           aspectRatio: `${cw} / ${ch}`,
-          borderRadius: "var(--radius)",
-          overflow: "hidden",
-          background: "#fff",
-          border: "1px solid var(--color-border)",
-          boxShadow: "var(--shadow-sm)",
         }}
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
+      >
+        <div
+          role="img"
+          aria-label="場面の仕上がり"
+          style={{
+            width: "100%",
+            height: "100%",
+            borderRadius: "var(--radius)",
+            overflow: "hidden",
+            background: "#fff",
+            border: "1px solid var(--color-border)",
+            boxShadow: "var(--shadow-sm)",
+          }}
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+        {/* 操作オーバーレイ（FREE/テンプレ編集）。fit 箱の子＝縦型でもプレビュー実寸と一致し、ドラッグ追従・配置が正確（#273）。 */}
+        {children}
+      </div>
     </div>
   );
 }

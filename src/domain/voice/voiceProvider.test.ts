@@ -47,19 +47,20 @@ describe('resolveNarrationVoice', () => {
 describe('resolveLineVoice（掛け合いの行・ADR-0015）', () => {
   const resolved = { voiceId: 'voicevox_zundamon', speed: 1.0, pitch: 0.0, intonation: 1.0 };
 
-  it('行の speaker/speed/pitch を優先し、intonation は常に base を継承', () => {
-    const line: NarrationLine = { lineId: 'line_001', text: 'やあ', speaker: 7, speed: 1.2, status: NARRATION_STATUS.none };
+  it('行の speaker/speed/pitch/intonation を優先する（#242 で intonation も行ごと）', () => {
+    const line: NarrationLine = { lineId: 'line_001', text: 'やあ', speaker: 7, speed: 1.2, intonation: 1.4, status: NARRATION_STATUS.none };
     expect(resolveLineVoice(line, resolved)).toEqual({
-      text: 'やあ', voiceId: 'voicevox_zundamon', speed: 1.2, pitch: 0.0, intonation: 1.0, speaker: 7,
+      text: 'やあ', voiceId: 'voicevox_zundamon', speed: 1.2, pitch: 0.0, intonation: 1.4, speaker: 7,
     });
   });
 
-  it('speaker 未指定は null（voiceId 経路で解決）・speed/pitch は base を継承', () => {
+  it('speaker 未指定は null（voiceId 経路で解決）・speed/pitch/intonation は base を継承', () => {
     const line: NarrationLine = { lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none };
     const r = resolveLineVoice(line, resolved);
     expect(r.speaker).toBeNull();
     expect(r.speed).toBe(1.0);
     expect(r.pitch).toBe(0.0);
+    expect(r.intonation).toBe(1.0);
   });
 
   it('voiceCatalog に無い speaker は null＝既定声へフォールバック（V19・破損データ対策）', () => {

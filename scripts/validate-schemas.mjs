@@ -45,6 +45,30 @@ for (const [name, validate, path] of cases) {
   }
 }
 
+// テンプレ Layer の縁取り（strokeColor/strokeWidth・#275・任意・後方互換のマイナーで 1.0 据え置き）
+const tplBase = load(fx('template-pack/opening_yuko_right_v1/template.json'));
+const withLayer0 = (prop) => ({ ...tplBase, layers: tplBase.layers.map((l, i) => (i === 0 ? { ...l, ...prop } : l)) });
+const tplAccept = [
+  ['template: 縁取り(strokeColor/strokeWidth)を許容（#275）', withLayer0({ strokeColor: '#ffffff', strokeWidth: 2 })],
+  ['template: strokeWidth=0（縁取りなし・境界）を許容', withLayer0({ strokeColor: '#ffffff', strokeWidth: 0 })],
+  ['template: layer rotation を許容（#307）', withLayer0({ rotation: 30 })],
+];
+const tplReject = [
+  ['template: strokeColor 非hexは拒否', withLayer0({ strokeColor: 'white' })],
+  ['template: strokeWidth 負は拒否', withLayer0({ strokeWidth: -1 })],
+  ['template: rotation 範囲外(400)は拒否', withLayer0({ rotation: 400 })],
+  ['template: rotation 負(-1)は拒否', withLayer0({ rotation: -1 })],
+  ['template: rotation 360（=0と重複）は除外（exclusiveMaximum）', withLayer0({ rotation: 360 })],
+];
+for (const [desc, data] of tplAccept) {
+  if (vTemplate(data)) console.log(`PASS  must-accept  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-accept  ${desc}`); for (const e of vTemplate.errors ?? []) console.log(`   ${e.instancePath} ${e.message}`); }
+}
+for (const [desc, data] of tplReject) {
+  if (!vTemplate(data)) console.log(`PASS  must-reject  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
+}
+
 // 相互参照（schema では表せない横断条件）
 const project = load(fx('project.sample.json'));
 const assetIds = new Set(project.assets.map((a) => a.assetId));
@@ -73,7 +97,7 @@ ok = ok && sem;
 
 // generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
 const generalBase = {
-  schemaVersion: '1.8', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  schemaVersion: '1.14', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
   videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
@@ -96,7 +120,12 @@ const mustAccept = [
   ['freeLayout: 新図形(star)＋枠線(stroke)を許容', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, shapeType: 'star', fillColor: '#ff0000', opacity: 1, strokeColor: '#112233', strokeWidth: 3 }] })],
   ['scene: textFontIds（title フォント上書き）を許容', withScene({ textFontIds: { title: 'kaitou-yokoku-gothic' } })],
   ['freeLayout: text の fontId を許容', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', fontId: 'gen-interface-jp-display' }] })],
+  ['freeLayout: rotation（回転・度）を許容（1.9・#208）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: 30 }] })],
+  ['freeLayout: text 体裁 lineHeight/textAlign/縁取り を許容（1.10・#209）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', lineHeight: 1.6, textAlign: 'center', strokeColor: '#000000', strokeWidth: 2 }] })],
+  ['freeLayout: hidden/locked を許容（1.11・#210）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 50, hidden: true, locked: true }] })],
   ['scene: lines（掛け合い・行ごと speaker/字幕/開始秒）を許容（1.8・ADR-0015）', withScene({ lines: [{ lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'どうも', speaker: 2, subtitleEnabled: true, startSec: 2, status: 'none' }], subtitleEnabledDefault: true })],
+  ['scene: slotFits（場面ごとの収め方上書き）を許容（1.13・④）', withScene({ slotFits: { background: 'contain', mainVisual: 'stretch' } })],
+  ['scene: groups（要素のグループ化・ネスト）を許容（1.14・ADR-0022）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }], groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 10, y: -5, rotation: 15, scale: 1.5 }, name: 'まとまり', hidden: false, locked: false }, { id: 'group_002', members: ['group_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }] })],
 ];
 const mustReject = [
   ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
@@ -107,15 +136,27 @@ const mustReject = [
   ['videoSettings: 旧 width/height 同梱は拒否（1.2 で撤廃）', { ...withBrief({}), videoSettings: { aspectRatio: '16:9', width: 1920, height: 1080, fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
   ['videoSettings: 未知の比率 1:1 は拒否', { ...withBrief({}), videoSettings: { aspectRatio: '1:1', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
   ['scene: fontId 未知（old-font）は拒否', withScene({ fontId: 'old-font' })],
+  ['scene: slotFits の不正な収め方(zoom)は拒否', withScene({ slotFits: { background: 'zoom' } })],
   ['freeLayout: 未知の図形(hexagon)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, shapeType: 'hexagon' }] })],
   ['freeLayout: strokeColor 非hexは拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, strokeColor: 'red' }] })],
   ['freeLayout: strokeWidth 負は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, strokeWidth: -1 }] })],
+  ['freeLayout: rotation 範囲外(400)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: 400 }] })],
+  ['freeLayout: rotation 負(-1)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: -1 }] })],
+  ['freeLayout: rotation 360（=0と重複）は除外（exclusiveMaximum）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: 360 }] })],
+  ['freeLayout: textAlign 未知(middle)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', textAlign: 'middle' }] })],
+  ['freeLayout: lineHeight 範囲外(5)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', lineHeight: 5 }] })],
+  ['freeLayout: hidden 非boolean は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 50, hidden: 'yes' }] })],
   ['scene: textFontIds 未知フォントは拒否', withScene({ textFontIds: { title: 'old-font' } })],
   ['freeLayout: text の fontId 未知は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', fontId: 'old-font' }] })],
   ['lines: lineId が不正(line_1)は拒否', withScene({ lines: [{ lineId: 'line_1', text: 'x', status: 'none' }] })],
   ['lines: speaker 非整数は拒否', withScene({ lines: [{ lineId: 'line_001', text: 'x', speaker: 1.5, status: 'none' }] })],
   ['lines: speaker 負数は拒否', withScene({ lines: [{ lineId: 'line_001', text: 'x', speaker: -1, status: 'none' }] })],
   ['lines: 未知フィールド(voiceId)は拒否＝行は speaker（additionalProperties:false）', withScene({ lines: [{ lineId: 'line_001', text: 'x', status: 'none', voiceId: 'voicevox_zundamon' }] })],
+  ['groups: id が group_ 形式でないと拒否（g1）', withScene({ groups: [{ id: 'g1', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }] })],
+  ['groups: transform.scale 0 は拒否（exclusiveMinimum）', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 0 } }] })],
+  ['groups: transform.scale 負は拒否', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: -1 } }] })],
+  ['groups: transform に必須欠落(scale)は拒否', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0 } }] })],
+  ['groups: 未知フィールド(color)は拒否（additionalProperties:false）', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, color: '#fff' }] })],
 ];
 for (const [desc, data] of mustAccept) {
   if (vProject(data)) console.log(`PASS  must-accept  ${desc}`);

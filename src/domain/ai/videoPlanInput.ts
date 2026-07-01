@@ -5,14 +5,16 @@
 import { ASSET_TYPE } from '../enums';
 import type { Asset, CompanyInfo, GeneralBrief } from '../project/types';
 import type { Template } from '../template/types';
+import { isUserTemplate } from '../template/userTemplate';
 import type { TemplateSummary } from './aiProvider';
 
 /**
  * Template[] を AI へ渡す要約へ変換する（12§4）。
  * requiredSlots は slot 層の id、hasYuko は character 層の有無、上限類は aiHint から取る。
+ * ユーザーテンプレ（user_tmpl_）は AI へ渡さない＝AI の誤選択を防ぐ（ADR-0017 不変条件）。手動選択（簡易/詳細）には別途出す。
  */
 export function buildTemplateSummaries(templates: Template[]): TemplateSummary[] {
-  return templates.map((t) => ({
+  return templates.filter((t) => !isUserTemplate(t.templateId)).map((t) => ({
     templateId: t.templateId,
     category: t.category,
     useCase: t.aiHint?.useCase,

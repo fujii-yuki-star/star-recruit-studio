@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
-import { FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
+import { GROUP_MIN_SCALE } from "../../domain/constants";
+import { composeGroupGeometry } from "../../domain/group/compose";
+import type { Group, GroupTransform } from "../../domain/group/types";
+import { topGroupOfMember } from "../../domain/project/groupOps";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -11,12 +16,26 @@ import { FREE_MIN_SIZE, moveFreeElement, resizeFreeElement, type ResizeCorner } 
 // 右クリックで操作メニュー、テキストはダブルクリックでインライン編集できる（#174）。
 
 interface DragState {
-  id: string;
-  mode: "move" | "resize";
+  id: string; // 主＝リサイズ対象・移動の基準
+  mode: "move" | "resize" | "group-resize" | "rotate" | "group-move" | "group-scale" | "group-rotate";
+  /** group-move/scale/rotate 時：対象グループ id と開始時の transform（ドラッグ中の累積を開始基準に固定）。 */
+  groupId?: string;
+  startTransform?: GroupTransform;
+  /** group-scale/rotate 時：グループ枠の中心（canvas 座標）。scale 時は開始距離も保持。 */
+  groupCenter?: { x: number; y: number };
+  startDist?: number;
   corner?: ResizeCorner;
+  /** resize 時：開始時の回転角（度）。回転考慮リサイズの基準を開始時点に固定（ドラッグ中に rotation が変わっても一貫・hot path の find も避ける）。 */
+  rotation?: number;
+  /** group-resize 時：開始時の選択要素（bbox 内の相対位置・大きさを保ってスケールする・#274）。start＝開始時の bbox。 */
+  groupStarts?: FreeElement[];
   startClientX: number;
   startClientY: number;
   start: { x: number; y: number; w: number; h: number };
+  /** move 時：一括移動する全要素の開始位置（複数選択。単一なら主のみ）。 */
+  starts?: { id: string; x: number; y: number }[];
+  /** move 時：吸着先＝移動しない他要素の辺・中心（ドラッグ開始時に確定）。 */
+  otherEdges?: SnapEdges[];
   scale: number; // 表示px / canvas（= overlay幅 / canvas幅）
 }
 
@@ -28,6 +47,41 @@ const HANDLES: { corner: ResizeCorner; left: string; top: string; cursor: string
   { corner: "se", left: "100%", top: "100%", cursor: "nwse-resize" },
 ];
 
+// 回転を考慮したリサイズカーソル：要素ローカルの対角軸角度（nwse=45°/nesw=135°）に回転を足し、
+// 45°単位で 4種（ew/nwse/ns/nesw）へ丸めて画面の実方向に合わせる（#279後継。回転時にカーソルが逆向きになるのを防ぐ）。
+const RESIZE_CURSORS = ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"];
+function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
+  const base = corner === "nw" || corner === "se" ? 45 : 135; // nwse=45°, nesw=135°
+  const a = (((base + rotationDeg) % 180) + 180) % 180;
+  return RESIZE_CURSORS[Math.round(a / 45) % 4];
+}
+
+
+// 選択中グループの「向き付き枠」（ADR-0022・#305-2）。メンバー（要素）の素の外接矩形（=ローカル bbox）に
+// グループ transform を適用：中心＝アンカー＋平行移動／サイズ＝ローカル×scale／回転＝rotation。
+// ※ flat 前提（メンバー＝要素 id）。素の e.x/w で AABB を取るため**メンバー個別回転は枠 bbox に含めない**。
+//   composeGroupGeometry は rotatedRectAABB でメンバー回転込みの anchor を使うので、回転要素を含むグループでは
+//   この中心が実描画中心から僅かにずれ、拡縮（中心固定）の基準もずれる。将来 rotatedRectAABB に揃える（#312 レビュー）。
+function orientedGroupFrame(
+  group: Group, freeLayout: FreeElement[],
+): { cx: number; cy: number; w: number; h: number; rotation: number } | null {
+  const rects = group.members
+    .map((id) => freeLayout.find((e) => e.id === id))
+    .filter((e): e is FreeElement => e != null);
+  if (rects.length === 0) return null;
+  const minX = Math.min(...rects.map((e) => e.x));
+  const minY = Math.min(...rects.map((e) => e.y));
+  const maxX = Math.max(...rects.map((e) => e.x + e.w));
+  const maxY = Math.max(...rects.map((e) => e.y + e.h));
+  const lw = maxX - minX;
+  const lh = maxY - minY;
+  const t = group.transform;
+  return { cx: minX + lw / 2 + t.x, cy: minY + lh / 2 + t.y, w: lw * t.scale, h: lh * t.scale, rotation: t.rotation };
+}
+
+// 吸着ガイド線の色（選択枠＝primary と区別できるよう、整列ガイドは別アクセント色にする）。
+const SNAP_GUIDE_COLOR = "#ff3d8b";
+
 // 右クリックメニューの推定サイズ（画面端からはみ出さないようクランプするため）。
 const MENU_W = 160;
 const MENU_H = 220;
@@ -36,10 +90,20 @@ interface OverlayProps {
   freeLayout: FreeElement[];
   canvasW: number;
   canvasH: number;
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  /** ドラッグ/リサイズ中、新しい位置・大きさ（canvas 座標）を返す。 */
+  /** 選択中の要素 id（複数選択・末尾が主＝リサイズ対象）。 */
+  selectedIds: string[];
+  /** 選択変更。additive=true（Shift+クリック）で選択トグル、false/未指定でその要素だけを選択。null で全解除。 */
+  onSelect: (id: string | null, additive?: boolean) => void;
+  /** 範囲選択（マーキー）の結果＝選択集合をまとめて置き換える（#274）。 */
+  onSelectMany: (ids: string[]) => void;
+  /** リサイズ中、主の新しい位置・大きさ（canvas 座標）を返す。 */
   onChange: (id: string, geom: { x: number; y: number; w?: number; h?: number }) => void;
+  /** 移動中、対象（複数選択なら全選択）の新しい位置をまとめて返す（一括移動・1回の更新）。 */
+  onMoveMany: (moves: { id: string; x: number; y: number }[]) => void;
+  /** 複数同時リサイズ（#274）：選択集合の新しい位置・大きさをまとめて返す（1回の更新）。 */
+  onResizeMany: (updates: FreeElementGeom[]) => void;
+  /** 回転ハンドルのドラッグ中、要素の新しい角度（度・0≤r<360）を返す（#279）。 */
+  onRotate: (id: string, rotation: number) => void;
   /** グリッド吸着サイズ（canvas px・0=吸着なし）。 */
   gridSize?: number;
   /** 右クリックメニューの操作（いずれも対象 id を渡す）。 */
@@ -51,18 +115,63 @@ interface OverlayProps {
   onChangeText: (id: string, text: string) => void;
   /** 右クリック「編集」：その要素の kind 別エディタを開く（id とビューポート座標を渡す）。 */
   onRequestEdit: (id: string, x: number, y: number) => void;
+  /** ドラッグ移動/リサイズの開始/終了。連続編集を Undo の1ステップに合成するための境界（#211）。 */
+  onInteractionStart?: () => void;
+  onInteractionEnd?: () => void;
+  /** 永続グループ（ADR-0022）。未指定＝[]。表示はグループ transform を合成した位置になる。 */
+  groups?: Group[];
+  /** 選択中のグループ id（FREE のグループ編集対象）。未指定/null＝グループ非選択。 */
+  activeGroupId?: string | null;
+  /** メンバー要素クリックでグループを選択（null で解除）。 */
+  onSelectGroup?: (groupId: string | null) => void;
+  /** グループの transform を更新（移動/拡縮/回転＝中心まわり）。 */
+  onGroupTransform?: (groupId: string, patch: Partial<GroupTransform>) => void;
 }
 
 export function FreeLayoutOverlay({
-  freeLayout, canvasW, canvasH, selectedId, onSelect, onChange, gridSize = 0,
+  freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
+  onInteractionStart, onInteractionEnd,
+  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // drag の最新値を ref に保持し、ドラッグ中にアンマウントされたら履歴グループを閉じる（深さリーク防止＝以後 Undo が無音で効かなくなるのを防ぐ・#211）。
+  // ref 更新は effect 内（render 中の ref 書き込みは禁止）。閉じる effect は unmount 時のみ＝通常の endDrag と二重に閉じない。
+  const dragRef = useRef<DragState | null>(null);
+  useEffect(() => { dragRef.current = drag; }, [drag]);
+  useEffect(() => () => { if (dragRef.current) onInteractionEnd?.(); }, [onInteractionEnd]);
+  // 主＝最後に選択した要素（リサイズハンドルはこれだけに出す。複数同時リサイズは曖昧なので非対応）。
+  const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
+  // 複数同時リサイズ（#274）：選択中の非ロック・非表示・非回転要素のグループ bbox を出し、その角ハンドルで一括拡縮する。
+  // 回転要素を除くのは、bbox を論理座標(x/y/w/h)の AABB で計算するため＝回転後の表示領域とズレて意図しない拡縮になるのを防ぐ
+  // （**単一**要素のリサイズは回転対応済み＝resizeRotatedFreeElement。複数同時の回転対応のみ別問題ゆえ未対応・#279後継）。
+  const groupEls = freeLayout.filter((el) => selectedIds.includes(el.id) && !el.locked && !el.hidden && (el.rotation ?? 0) === 0);
+  const isGroupResize = selectedIds.length > 1 && groupEls.length > 0;
+  const groupBox = isGroupResize ? groupBBox(groupEls) : null;
+  // 永続グループ（ADR-0022）：表示はグループ transform を合成した位置にする（preview/export と一致）。
+  const composed = composeGroupGeometry(freeLayout, groups);
+  // 各要素の所属グループ（最上位）。メンバークリックで「グループごと選択」する。
+  const topGroupByEl = new Map<string, Group>();
+  if (groups.length > 0) for (const el of freeLayout) { const tg = topGroupOfMember(groups, el.id); if (tg) topGroupByEl.set(el.id, tg); }
+  // 選択中グループ＝編集対象。枠はメンバー合成位置の外接矩形（#305-1 は移動のみ）。
+  const activeGroup = activeGroupId ? groups.find((g) => g.id === activeGroupId) ?? null : null;
+  const activeGroupFrame = activeGroup ? orientedGroupFrame(activeGroup, freeLayout) : null;
   // 右クリックメニュー（対象 id とビューポート座標）。
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 吸着ガイド（ドラッグ中に他要素の辺/中心へそろったとき表示する縦/横の線・canvas 座標。#205 後半）。
+  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
+  // 範囲選択（マーキー・#274）の矩形（canvas 座標・null=非アクティブ）。空白ドラッグで矩形を引き交差要素を選択。
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  // ポインタの画面座標→canvas 座標（オーバーレイは fit 箱内＝実寸一致・#273）。描画前(0幅)は原点に潰す。
+  const toCanvas = (clientX: number, clientY: number): { x: number; y: number } => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r || r.width <= 0) return { x: 0, y: 0 };
+    const scale = r.width / canvasW;
+    return { x: (clientX - r.left) / scale, y: (clientY - r.top) / scale };
+  };
 
   // Escape で右クリックメニューを閉じる（role="menu" の期待動作・フォーカス位置に依らず効く）。
   useEffect(() => {
@@ -81,37 +190,221 @@ export function FreeLayoutOverlay({
     e.stopPropagation(); // 角ハンドルのドラッグが本体の移動を兼ねないように
     setMenu(null);
     setEditingId(null); // ドラッグ開始でインライン編集を抜ける
-    onSelect(el.id);
+    // Shift+クリック（移動操作）＝選択トグル。ドラッグは始めない（複数選択を作る/外すための操作）。
+    if (mode === "move" && e.shiftKey) { onSelect(el.id, true); return; }
+    // ロック中は選択だけ行い、移動/拡縮はしない（レイヤー一覧で解除できる・#210）。
+    if (el.locked) { onSelect(el.id); return; }
+    // 通常クリック：未選択ならその要素だけを選択。選択済みをドラッグなら選択を保つ（複数なら一括移動）。
+    const alreadySelected = selectedIds.includes(el.id);
+    if (!alreadySelected) onSelect(el.id);
+    // 一括移動の対象：選択済み要素のドラッグ＝全選択を動かす／未選択のドラッグ＝その要素だけ（リサイズも単独）。
+    const moveTargets = mode === "move" && alreadySelected ? selectedIds : [el.id];
+    const starts = moveTargets
+      .map((id) => freeLayout.find((m) => m.id === id))
+      .filter((m): m is FreeElement => m != null)
+      .map((m) => ({ id: m.id, x: m.x, y: m.y }));
+    // 吸着先＝移動しない他要素の辺・中心。ドラッグ中は他要素が動かないのでここで一度だけ確定する。
+    // 吸着は move のときだけ使う（resize では参照しないので計算もしない）。
+    const otherEdges = mode === "move"
+      ? freeLayout.filter((m) => !moveTargets.includes(m.id)).map((m) => edgesOf(m))
+      : [];
     const width = ref.current?.clientWidth ?? canvasW;
     // capture は best-effort（環境により失敗しうる）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.(); // 連続移動/リサイズを Undo の1ステップに合成する境界（開始・#211）
     setDrag({
       id: el.id, mode, corner,
+      rotation: el.rotation, // 回転考慮リサイズの基準（開始時点に固定）。move では未使用。
       startClientX: e.clientX, startClientY: e.clientY,
       start: { x: el.x, y: el.y, w: el.w, h: el.h },
+      starts,
+      otherEdges,
       // 表示px→canvas の縮尺。プレビューは canvas と同比（向きに追従・レターボックス無し）ゆえ scaleX===scaleY なので
       // 幅基準（width/canvasW）で算出すれば縦も一致する（canvasH は %配置に使用）。
       scale: width / canvasW,
     });
   };
 
+  // 複数同時リサイズ（#274）のグループ角ハンドル押下：bbox を基準に選択要素をまとめてスケールする。
+  const beginGroupResize = (e: ReactPointerEvent, corner: ResizeCorner) => {
+    if (e.button !== 0 || !groupBox) return;
+    e.preventDefault();
+    e.stopPropagation(); // ルートのマーキー開始を兼ねない
+    setMenu(null);
+    setEditingId(null);
+    const width = ref.current?.clientWidth ?? canvasW;
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.(); // 連続リサイズを Undo の1ステップに合成（#211）
+    setDrag({
+      id: "__group__", mode: "group-resize", corner,
+      startClientX: e.clientX, startClientY: e.clientY,
+      start: groupBox, // 開始時の bbox（resizeFreeElement で新 bbox を求める基準）
+      groupStarts: groupEls.map((el) => ({ ...el })),
+      scale: width / canvasW,
+    });
+  };
+
+  // 回転ハンドル押下（#279）：要素中心からポインタへの角度で rotation を更新する。
+  const beginRotate = (e: ReactPointerEvent, el: FreeElement) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation(); // ルートのマーキー開始を兼ねない
+    setMenu(null);
+    setEditingId(null);
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.(); // 連続回転を Undo の1ステップに合成（#211）
+    setDrag({
+      id: el.id, mode: "rotate",
+      startClientX: e.clientX, startClientY: e.clientY,
+      start: { x: el.x, y: el.y, w: el.w, h: el.h },
+      scale: (ref.current?.clientWidth ?? canvasW) / canvasW,
+    });
+  };
+
+  // グループのメンバー押下（ADR-0022・#305-1）：グループを選択し、グループ移動（transform.x/y）を開始する。
+  const beginGroupDrag = (e: ReactPointerEvent, group: Group) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu(null);
+    setEditingId(null);
+    onSelectGroup?.(group.id); // メンバー個別ではなくグループ単位で選択
+    if (group.locked) return; // ロック中は選択のみ
+    const width = ref.current?.clientWidth ?? canvasW;
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.();
+    setDrag({
+      id: "__group__", mode: "group-move", groupId: group.id,
+      startTransform: { ...group.transform },
+      startClientX: e.clientX, startClientY: e.clientY,
+      start: { x: 0, y: 0, w: 0, h: 0 }, // group-move では未使用
+      scale: width / canvasW,
+    });
+  };
+
+  // グループ枠の角ハンドル押下（ADR-0022・#305-2）：中心からの距離比で transform.scale を更新（中心固定の一様拡縮）。
+  // ※ 名前は既存 #274 の一時グループリサイズ（beginGroupResize）と区別するため beginGroupScale。
+  const beginGroupScale = (e: ReactPointerEvent, group: Group, frame: { cx: number; cy: number }) => {
+    if (e.button !== 0 || group.locked) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu(null);
+    setEditingId(null);
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.();
+    const p = toCanvas(e.clientX, e.clientY);
+    const dist = Math.hypot(p.x - frame.cx, p.y - frame.cy) || 1; // 0 除算防止
+    setDrag({
+      id: "__group__", mode: "group-scale", groupId: group.id,
+      startTransform: { ...group.transform }, groupCenter: { x: frame.cx, y: frame.cy }, startDist: dist,
+      startClientX: e.clientX, startClientY: e.clientY, start: { x: 0, y: 0, w: 0, h: 0 },
+      scale: (ref.current?.clientWidth ?? canvasW) / canvasW,
+    });
+  };
+
+  // グループ枠の回転ハンドル押下（ADR-0022・#305-2）：中心→ポインタ角で transform.rotation を更新（Shift で15°）。
+  const beginGroupRotate = (e: ReactPointerEvent, group: Group, frame: { cx: number; cy: number }) => {
+    if (e.button !== 0 || group.locked) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu(null);
+    setEditingId(null);
+    try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    onInteractionStart?.();
+    setDrag({
+      id: "__group__", mode: "group-rotate", groupId: group.id, groupCenter: { x: frame.cx, y: frame.cy },
+      startClientX: e.clientX, startClientY: e.clientY, start: { x: 0, y: 0, w: 0, h: 0 },
+      scale: (ref.current?.clientWidth ?? canvasW) / canvasW,
+    });
+  };
+
   const handleMove = (e: ReactPointerEvent) => {
+    // 範囲選択（マーキー）中：矩形を広げ、交差する要素を選択集合に反映（#274）。
+    if (marquee) {
+      e.preventDefault();
+      const p = toCanvas(e.clientX, e.clientY);
+      const next = { ...marquee, x1: p.x, y1: p.y };
+      setMarquee(next);
+      onSelectMany(freeElementsInRect(freeLayout, next));
+      return;
+    }
     if (!drag) return;
+    // 回転は drag.scale（移動/リサイズ用）ではなく中心とポインタの角度で決まるので、scale 防御の前に処理する（#279）。
+    if (drag.mode === "rotate") {
+      e.preventDefault();
+      const center = { x: drag.start.x + drag.start.w / 2, y: drag.start.y + drag.start.h / 2 };
+      const deg = rotationFromPointer(center, toCanvas(e.clientX, e.clientY));
+      onRotate(drag.id, e.shiftKey ? snapAngle(deg, 15) : deg);
+      return;
+    }
+    if (drag.mode === "group-rotate" && drag.groupId && drag.groupCenter) {
+      e.preventDefault();
+      const deg = rotationFromPointer(drag.groupCenter, toCanvas(e.clientX, e.clientY));
+      onGroupTransform?.(drag.groupId, { rotation: e.shiftKey ? snapAngle(deg, 15) : deg });
+      return;
+    }
+    if (drag.mode === "group-scale" && drag.groupId && drag.groupCenter && drag.startTransform && drag.startDist) {
+      e.preventDefault();
+      const p = toCanvas(e.clientX, e.clientY);
+      const dist = Math.hypot(p.x - drag.groupCenter.x, p.y - drag.groupCenter.y);
+      const scale = Math.max(GROUP_MIN_SCALE, (drag.startTransform.scale * dist) / drag.startDist);
+      onGroupTransform?.(drag.groupId, { scale });
+      return;
+    }
+    if (drag.scale <= 0) return; // 縮尺不正（描画前で clientWidth=0 等）のときは NaN/Infinity を書き込まない（防御）
     e.preventDefault(); // ドラッグ中のテキスト選択等の既定動作を抑制（beginDrag と一貫）
     const dx = (e.clientX - drag.startClientX) / drag.scale;
     const dy = (e.clientY - drag.startClientY) / drag.scale;
     if (drag.mode === "move") {
-      onChange(drag.id, moveFreeElement(drag.start, dx, dy, gridSize));
+      // 主の位置をグリッド吸着で確定し、さらに他要素の辺/中心へ吸着（要素スナップが近ければ優先）。
+      const moved = moveFreeElement(drag.start, dx, dy, gridSize);
+      const others = drag.otherEdges ?? [];
+      const snap = snapToTargets(
+        { x: moved.x, y: moved.y, w: drag.start.w, h: drag.start.h },
+        others,
+        SNAP_THRESHOLD_PX / drag.scale, // 画面px→canvas px
+      );
+      // その差分を選択中の全要素へ同じだけ適用（群を崩さず一括移動）。
+      const ddx = snap.x - drag.start.x;
+      const ddy = snap.y - drag.start.y;
+      const starts = drag.starts ?? [{ id: drag.id, x: drag.start.x, y: drag.start.y }];
+      onMoveMany(starts.map((s) => ({ id: s.id, x: s.x + ddx, y: s.y + ddy })));
+      setGuides({ x: snap.guideX, y: snap.guideY });
+    } else if (drag.mode === "group-move" && drag.groupId && drag.startTransform) {
+      // グループ移動：開始 transform に画面ドラッグ量を足して transform.x/y を更新（合成で全メンバーが動く）。
+      onGroupTransform?.(drag.groupId, {
+        x: Math.round(drag.startTransform.x + dx),
+        y: Math.round(drag.startTransform.y + dy),
+      });
+    } else if (drag.mode === "group-resize" && drag.corner && drag.groupStarts) {
+      // グループ bbox を resizeFreeElement で新サイズにし、各要素を相対位置・大きさを保ってスケール（#274）。
+      const newBox = resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey);
+      onResizeMany(resizeGroup(drag.groupStarts, drag.start, newBox));
     } else if (drag.corner) {
       // Shift 押下中は縦横比を維持（e.shiftKey は move のたびに評価＝ドラッグ途中の押し直しにも追従）。
-      onChange(drag.id, resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey));
+      // 回転要素は対角を canvas 上で固定する回転考慮リサイズ（#279 後継）。回転なしは従来どおり。基準角は開始時に固定。
+      const rot = drag.rotation ?? 0;
+      onChange(
+        drag.id,
+        rot === 0
+          ? resizeFreeElement(drag.start, drag.corner, dx, dy, FREE_MIN_SIZE, gridSize, e.shiftKey)
+          : resizeRotatedFreeElement(drag.start, drag.corner, dx, dy, rot, FREE_MIN_SIZE, gridSize, e.shiftKey),
+      );
     }
   };
 
   const endDrag = (e: ReactPointerEvent) => {
+    // 範囲選択（マーキー）の終了：矩形を消す（選択は move 中に確定済み・#274）。
+    if (marquee) {
+      setMarquee(null);
+      try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      return;
+    }
     if (!drag) return;
     try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
     setDrag(null);
+    setGuides({ x: null, y: null }); // ドラッグ終了でガイド線を消す
+    onInteractionEnd?.(); // 連続移動/リサイズの合成境界（終了・#211）
   };
 
   // 右クリック：対象を選択しカーソル位置にメニューを開く（画面端でクランプ）。
@@ -119,7 +412,8 @@ export function FreeLayoutOverlay({
     e.preventDefault();
     e.stopPropagation();
     setEditingId(null);
-    onSelect(el.id);
+    // 複数選択中の要素を右クリックしたら選択は保つ（メニューは主の単独操作・一括削除はツールバー）。
+    if (!selectedIds.includes(el.id)) onSelect(el.id);
     const x = Math.max(0, Math.min(e.clientX, window.innerWidth - MENU_W));
     const y = Math.max(0, Math.min(e.clientY, window.innerHeight - MENU_H));
     setMenu({ id: el.id, x, y });
@@ -157,18 +451,34 @@ export function FreeLayoutOverlay({
       onPointerMove={handleMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
-      // 何もない所を押したら選択解除＋編集/メニューを閉じる（要素/ハンドルの onPointerDown は stopPropagation 済み）。
-      onPointerDown={(e) => { if (e.target === e.currentTarget) { onSelect(null); setEditingId(null); setMenu(null); } }}
+      // 何もない所を押したら選択解除＋編集/メニューを閉じ、範囲選択（マーキー）を開始（要素/ハンドルの onPointerDown は stopPropagation 済み）。
+      onPointerDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        onSelect(null); setEditingId(null); setMenu(null); // 空白クリック＝選択解除（ドラッグせず離せば解除のまま）
+        if (e.button !== 0) return; // 左ボタンのみマーキー
+        // 範囲選択（マーキー）開始：空白ドラッグで矩形を引き交差要素を選択（#274）。
+        const p = toCanvas(e.clientX, e.clientY);
+        try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+        setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+      }}
       // 空白部分の右クリックはブラウザ既定メニューだけ抑止する。
       onContextMenu={(e) => { e.preventDefault(); }}
     >
       {freeLayout.map((el) => {
-        const selected = el.id === selectedId;
+        if (el.hidden) return null; // 非表示の要素は箱を出さない（描画も layout 側で除外・レイヤー一覧で再表示・#210）
+        const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation }; // グループ合成後の位置
+        const elGroup = topGroupByEl.get(el.id) ?? null; // 所属グループ（最上位）／未所属は null
+        const grouped = elGroup != null;
+        const inActiveGroup = grouped && elGroup.id === activeGroupId; // 選択中グループのメンバー
+        const selected = inActiveGroup || (!grouped && selectedIds.includes(el.id)); // 枠を強調
+        const isPrimary = el.id === primaryId; // 主＝リサイズハンドルを出す対象（グループ未所属のみ）
+        const rotated = (cg.rotation ?? 0) !== 0; // 回転あり（合成後・中心軸）
+        const locked = el.locked === true; // ロック中＝移動/拡縮しない・ハンドルも出さない（#210）
         const editing = el.id === editingId && el.kind === FREE_ELEMENT_KIND.text;
         return (
           <div
             key={el.id}
-            onPointerDown={(e) => beginDrag(e, el, "move")}
+            onPointerDown={(e) => (elGroup ? beginGroupDrag(e, elGroup) : beginDrag(e, el, "move"))}
             onContextMenu={(e) => openMenu(e, el)}
             onDoubleClick={(e) => {
               if (el.kind !== FREE_ELEMENT_KIND.text) return;
@@ -180,14 +490,17 @@ export function FreeLayoutOverlay({
             }}
             style={{
               position: "absolute",
-              left: `${(el.x / canvasW) * 100}%`,
-              top: `${(el.y / canvasH) * 100}%`,
-              width: `${(el.w / canvasW) * 100}%`,
-              height: `${(el.h / canvasH) * 100}%`,
+              left: `${(cg.x / canvasW) * 100}%`,
+              top: `${(cg.y / canvasH) * 100}%`,
+              width: `${(cg.w / canvasW) * 100}%`,
+              height: `${(cg.h / canvasH) * 100}%`,
               boxSizing: "border-box",
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
               background: selected ? "rgba(80,130,255,0.08)" : "transparent",
-              cursor: editing ? "text" : "move",
+              cursor: locked ? "default" : editing ? "text" : "move", // ロック中はドラッグ不可を示す
+
+              // 回転（#208）：中心を軸に回す（既定の transform-origin=中心）。出力 SVG の rotate と一致。合成後の角度を使う。
+              transform: rotated ? `rotate(${cg.rotation}deg)` : undefined,
             }}
           >
             {editing ? (
@@ -215,29 +528,158 @@ export function FreeLayoutOverlay({
                 }}
               />
             ) : (
-              selected &&
-              HANDLES.map((hd) => (
-                <div
-                  key={hd.corner}
-                  onPointerDown={(e) => beginDrag(e, el, "resize", hd.corner)}
-                  style={{
-                    position: "absolute",
-                    left: hd.left,
-                    top: hd.top,
-                    width: 12,
-                    height: 12,
-                    transform: "translate(-50%, -50%)",
-                    background: "#fff",
-                    border: "2px solid var(--color-primary)",
-                    borderRadius: 2,
-                    cursor: hd.cursor,
-                  }}
-                />
-              ))
+              <>
+                {/* リサイズハンドル：ロック中・複数選択中は出さない。回転要素も対応（対角を canvas 固定＝resizeRotatedFreeElement・#279後継）。 */}
+                {isPrimary && !locked && !isGroupResize && !grouped &&
+                  HANDLES.map((hd) => (
+                    <div
+                      key={hd.corner}
+                      onPointerDown={(e) => beginDrag(e, el, "resize", hd.corner)}
+                      style={{
+                        position: "absolute",
+                        left: hd.left,
+                        top: hd.top,
+                        width: 12,
+                        height: 12,
+                        transform: "translate(-50%, -50%)",
+                        background: "#fff",
+                        border: "2px solid var(--color-primary)",
+                        borderRadius: 2,
+                        cursor: rotated ? resizeCursor(hd.corner, el.rotation ?? 0) : hd.cursor,
+                      }}
+                    />
+                  ))}
+                {/* 回転ハンドル（#279）：単一選択・非ロックで表示（回転中も操作できるよう !rotated は付けない）。複数選択中は非表示。 */}
+                {isPrimary && !locked && !isGroupResize && !grouped && (
+                  <>
+                    <div style={{ position: "absolute", left: "50%", top: -22, width: 1, height: 22, background: "var(--color-primary)", transform: "translateX(-50%)", pointerEvents: "none" }} />
+                    <div
+                      data-testid="rotate-handle"
+                      onPointerDown={(e) => beginRotate(e, el)}
+                      title="ドラッグで回転（Shift で15°ずつ）"
+                      style={{
+                        position: "absolute", left: "50%", top: -22, width: 12, height: 12,
+                        transform: "translate(-50%, -50%)", background: "#fff",
+                        border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab",
+                      }}
+                    />
+                  </>
+                )}
+              </>
             )}
           </div>
         );
       })}
+
+      {/* 吸着ガイド（#205 後半）：他要素の辺/中心にそろった位置へ縦/横の線を出す（ドラッグ中のみ）。 */}
+      {guides.x != null && (
+        <div data-testid="snap-guide-x" style={{ position: "absolute", left: `${(guides.x / canvasW) * 100}%`, top: 0, bottom: 0, width: 1, background: SNAP_GUIDE_COLOR, pointerEvents: "none", zIndex: 40 }} />
+      )}
+      {guides.y != null && (
+        <div data-testid="snap-guide-y" style={{ position: "absolute", top: `${(guides.y / canvasH) * 100}%`, left: 0, right: 0, height: 1, background: SNAP_GUIDE_COLOR, pointerEvents: "none", zIndex: 40 }} />
+      )}
+
+      {/* 範囲選択（マーキー）の矩形（ドラッグ中のみ・canvas 座標→%）。#274 */}
+      {marquee && (
+        <div
+          data-testid="marquee"
+          style={{
+            position: "absolute",
+            left: `${(Math.min(marquee.x0, marquee.x1) / canvasW) * 100}%`,
+            top: `${(Math.min(marquee.y0, marquee.y1) / canvasH) * 100}%`,
+            width: `${(Math.abs(marquee.x1 - marquee.x0) / canvasW) * 100}%`,
+            height: `${(Math.abs(marquee.y1 - marquee.y0) / canvasH) * 100}%`,
+            border: "1px dashed var(--color-primary)",
+            background: "rgba(80,130,255,0.10)",
+            pointerEvents: "none",
+            zIndex: 35,
+          }}
+        />
+      )}
+
+      {/* 選択中グループの向き付き枠（ADR-0022・#305-2）：ドラッグで移動、角で拡縮、上ハンドルで回転（transform を更新）。 */}
+      {activeGroupFrame && activeGroup && (
+        <div
+          data-testid="group-frame"
+          onPointerDown={(e) => beginGroupDrag(e, activeGroup)}
+          style={{
+            position: "absolute",
+            left: `${((activeGroupFrame.cx - activeGroupFrame.w / 2) / canvasW) * 100}%`,
+            top: `${((activeGroupFrame.cy - activeGroupFrame.h / 2) / canvasH) * 100}%`,
+            width: `${(activeGroupFrame.w / canvasW) * 100}%`,
+            height: `${(activeGroupFrame.h / canvasH) * 100}%`,
+            border: "2px solid var(--color-primary)",
+            background: "rgba(80,130,255,0.06)",
+            boxSizing: "border-box",
+            cursor: activeGroup.locked ? "default" : "move",
+            transform: activeGroupFrame.rotation ? `rotate(${activeGroupFrame.rotation}deg)` : undefined,
+            zIndex: 34,
+          }}
+        >
+          {!activeGroup.locked && (
+            <>
+              {/* 角＝中心固定の一様拡縮（transform.scale）。 */}
+              {HANDLES.map((hd) => (
+                <div
+                  key={hd.corner}
+                  data-testid={`group-scale-${hd.corner}`}
+                  onPointerDown={(e) => beginGroupScale(e, activeGroup, activeGroupFrame)}
+                  style={{
+                    position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12,
+                    transform: "translate(-50%, -50%)", background: "#fff",
+                    border: "2px solid var(--color-primary)", borderRadius: 2,
+                    cursor: resizeCursor(hd.corner, activeGroupFrame.rotation),
+                  }}
+                />
+              ))}
+              {/* 上＝回転（transform.rotation）。 */}
+              <div style={{ position: "absolute", left: "50%", top: -22, width: 1, height: 22, background: "var(--color-primary)", transform: "translateX(-50%)", pointerEvents: "none" }} />
+              <div
+                data-testid="group-rotate-handle"
+                onPointerDown={(e) => beginGroupRotate(e, activeGroup, activeGroupFrame)}
+                title="ドラッグでグループを回転（Shift で15°ずつ）"
+                style={{
+                  position: "absolute", left: "50%", top: -22, width: 12, height: 12,
+                  transform: "translate(-50%, -50%)", background: "#fff",
+                  border: "2px solid var(--color-primary)", borderRadius: "50%", cursor: "grab",
+                }}
+              />
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 複数同時リサイズ（#274）：選択集合のグループ bbox と角ハンドル（個別ハンドルの代わりに一括拡縮）。 */}
+      {groupBox && (
+        <div
+          data-testid="group-bbox"
+          style={{
+            position: "absolute",
+            left: `${(groupBox.x / canvasW) * 100}%`,
+            top: `${(groupBox.y / canvasH) * 100}%`,
+            width: `${(groupBox.w / canvasW) * 100}%`,
+            height: `${(groupBox.h / canvasH) * 100}%`,
+            border: "1px solid var(--color-primary)",
+            boxSizing: "border-box",
+            pointerEvents: "none",
+            zIndex: 36,
+          }}
+        >
+          {HANDLES.map((hd) => (
+            <div
+              key={hd.corner}
+              data-testid={`group-handle-${hd.corner}`}
+              onPointerDown={(e) => beginGroupResize(e, hd.corner)}
+              style={{
+                position: "absolute", left: hd.left, top: hd.top, width: 12, height: 12,
+                transform: "translate(-50%, -50%)", background: "#fff",
+                border: "2px solid var(--color-primary)", borderRadius: 2, cursor: hd.cursor,
+                pointerEvents: "auto",
+              }}
+            />
+          ))}
+        </div>
+      )}
 
       {menu && menuEl && (
         <>

@@ -3,6 +3,7 @@
 // テキスト編集できる（新スキーマ不要。slot/text/shape の既存フィールドのみ使用）。
 import { FIT, FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../enums';
 import { createFreeElementId } from './persistence';
+import { REF_CANVAS_W, REF_CANVAS_H } from './freeLayoutOps';
 import type { FreeElement } from './types';
 
 /** パーツの要素テンプレ。id は展開時に採番するため持たない。x/y はパーツ内の相対座標。 */
@@ -78,12 +79,17 @@ export const FREE_COMPONENTS: FreeComponent[] = [
  * 各要素は新 id を採番し、基準位置＋相対座標＋ずらし量で配置、zIndex は既存最前面より上にテンプレ順で積む。
  */
 export function addFreeComponentGroup(
-  freeLayout: FreeElement[], componentId: string,
+  freeLayout: FreeElement[], componentId: string, canvasW: number = REF_CANVAS_W, canvasH: number = REF_CANVAS_H,
 ): { freeLayout: FreeElement[]; newIds: string[] } {
   const part = FREE_COMPONENTS.find((c) => c.id === componentId);
   if (!part) return { freeLayout, newIds: [] };
   const baseZ = freeLayout.reduce((max, e) => Math.max(max, e.zIndex ?? 0), 0);
   const stagger = (freeLayout.length % STAGGER_CYCLE) * STAGGER_STEP;
+  // canvas に合わせる（#281）：パーツ内は等倍（widget の縦横比とレイアウトを保つ＝非等倍だと吹き出し等が歪む）＝canvasW 基準。
+  // 基点は縦/横それぞれの比で proportional に置く（縦型でも同じ相対位置）。横型(1920×1080)は係数1＝従来どおり。
+  const groupScale = canvasW / REF_CANVAS_W;
+  const anchorX = Math.round((ANCHOR_X * canvasW) / REF_CANVAS_W);
+  const anchorY = Math.round((ANCHOR_Y * canvasH) / REF_CANVAS_H);
   const next = [...freeLayout];
   const newIds: string[] = [];
   part.elements.forEach((tmpl, i) => {
@@ -91,8 +97,11 @@ export function addFreeComponentGroup(
     next.push({
       ...tmpl,
       id,
-      x: ANCHOR_X + tmpl.x + stagger,
-      y: ANCHOR_Y + tmpl.y + stagger,
+      x: Math.round(anchorX + (tmpl.x + stagger) * groupScale),
+      y: Math.round(anchorY + (tmpl.y + stagger) * groupScale),
+      w: Math.round(tmpl.w * groupScale),
+      h: Math.round(tmpl.h * groupScale),
+      ...(tmpl.fontSize != null ? { fontSize: Math.round(tmpl.fontSize * groupScale) } : {}),
       zIndex: baseZ + 1 + i,
     });
     newIds.push(id);

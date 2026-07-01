@@ -3,6 +3,7 @@ import { useProjectStore } from './projectStore';
 import { sampleTemplates } from '../../infrastructure/sampleData';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import type { Scene } from '../../domain/project/types';
+import type { Template } from '../../domain/template/types';
 
 function scene(id: string, order: number, partId = 'part_001'): Scene {
   return {
@@ -170,5 +171,32 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
     expect(st.narrationAudioById['scene_001/line_001']).toBeTruthy(); // 音声も保持
     expect(useProjectStore.getState().narrationError).toBeTruthy();
     spy.mockRestore();
+  });
+});
+
+describe('projectStore テンプレ既定素材（ADR-0021）', () => {
+  const userTmpl = (templateId: string, assetId?: string): Template => ({
+    schemaVersion: '1.0', templateId, name: templateId, category: 'opening', aspectRatio: '16:9',
+    canvas: { width: 1920, height: 1080 },
+    layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, ...(assetId ? { assetId } : {}) }],
+  });
+
+  it('deleteUserTemplate はテンプレ削除時に所有素材の表示用src も掃除する（無関係な素材は残す）', async () => {
+    useProjectStore.setState({
+      templates: [...sampleTemplates, userTmpl('user_tmpl_001', 'tmpl_asset_001')],
+      templateAssetSrcById: { tmpl_asset_001: 'data:image/png;base64,AAA', tmpl_asset_002: 'data:image/png;base64,BBB' },
+    });
+    const ok = await useProjectStore.getState().deleteUserTemplate('user_tmpl_001');
+    const st = useProjectStore.getState();
+    expect(ok).toBe(true);
+    expect(st.templates.some((t) => t.templateId === 'user_tmpl_001')).toBe(false);
+    expect(st.templateAssetSrcById).toEqual({ tmpl_asset_002: 'data:image/png;base64,BBB' }); // 所有のみ掃除
+  });
+
+  it('registerTemplateAsset は非 Tauri で null（表示用src も変えない）', async () => {
+    useProjectStore.setState({ templateAssetSrcById: {} });
+    const id = await useProjectStore.getState().registerTemplateAsset({} as File);
+    expect(id).toBeNull();
+    expect(useProjectStore.getState().templateAssetSrcById).toEqual({});
   });
 });

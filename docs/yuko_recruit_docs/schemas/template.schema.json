@@ -49,9 +49,35 @@
         "backgroundColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
       }
     },
-    "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "minItems": 1 }
+    "layers": { "type": "array", "items": { "$ref": "#/$defs/Layer" }, "minItems": 1 },
+    "groups": { "type": "array", "items": { "$ref": "#/$defs/Group" } }
   },
   "$defs": {
+    "Group": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "要素のグループ化（ADR-0022・11 §2）。members は layer id、ネストで group id も可。",
+      "required": ["id", "members", "transform"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^group_[0-9]{3,}$" },
+        "members": { "type": "array", "items": { "type": "string" } },
+        "transform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "rotation", "scale"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "rotation": { "type": "number" },
+            "scale": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "name": { "type": "string" },
+        "zIndex": { "type": "integer" },
+        "hidden": { "type": "boolean" },
+        "locked": { "type": "boolean" }
+      }
+    },
     "Layer": {
       "type": "object",
       "additionalProperties": false,
@@ -64,6 +90,7 @@
         "w": { "type": "number", "exclusiveMinimum": 0 },
         "h": { "type": "number", "exclusiveMinimum": 0 },
         "zIndex": { "type": "integer" },
+        "rotation": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
         "required": { "type": "boolean" },
         "slotType": { "enum": ["image_or_video", "image", "video"] },
         "fit": { "enum": ["cover", "contain", "stretch"] },
@@ -89,7 +116,9 @@
             "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
             "radius": { "type": "number", "minimum": 0 }
           }
-        }
+        },
+        "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "strokeWidth": { "type": "number", "minimum": 0 }
       },
       "allOf": [
         {

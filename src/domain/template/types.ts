@@ -1,5 +1,6 @@
 // 見た目パターン（テンプレート）の型。正典は docs/yuko_recruit_docs/schemas/template.schema.json と 04_TEMPLATE_SPEC.md。
-import type { Fit, LayerType, Orientation, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
+import type { Fit, LayerShapeType, LayerType, Orientation, SceneCategory, SlotType, TextKey, TransitionType } from '../enums';
+import type { Group } from '../group/types';
 
 export interface LayerBackground {
   enabled?: boolean;
@@ -16,6 +17,8 @@ export interface Layer {
   w: number;
   h: number;
   zIndex?: number;
+  /** 回転角（度・0以上360未満・中心軸・時計回り。未指定=回転なし。FreeElement と同仕様）。 */
+  rotation?: number;
   required?: boolean;
   slotType?: SlotType;
   fit?: Fit;
@@ -28,11 +31,14 @@ export interface Layer {
   defaultPoseTag?: string;
   allowHidden?: boolean;
   assetId?: string;
-  shapeType?: 'rect' | 'ellipse' | 'line';
+  shapeType?: LayerShapeType;
   fillColor?: string;
   opacity?: number;
   radius?: number;
   background?: LayerBackground;
+  /** 文字/字幕の縁取り（#275・任意）。strokeWidth>0 のとき描画（FREE の #209 と同じ仕組みを流用）。 */
+  strokeColor?: string;
+  strokeWidth?: number;
 }
 
 export interface TemplateAiHint {
@@ -62,4 +68,6 @@ export interface Template {
   aiHint?: TemplateAiHint;
   defaults?: TemplateDefaults;
   layers: Layer[];
+  /** 要素のグループ化（ADR-0022）。メンバー＝layer id（ネストで group id も可）。未設定＝グループ無し。 */
+  groups?: Group[];
 }

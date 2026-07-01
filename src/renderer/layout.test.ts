@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
-import type { FillItem, ImageItem, TextItem } from './layout';
+import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
 import { layoutScene } from './layout';
 import { layoutToSvg } from './sceneSvg';
 
@@ -60,6 +60,49 @@ describe('layoutScene', () => {
     expect(title).toBeDefined();
   });
 
+  it('background/slot/logo は scene.assetRefs 優先・無ければ layer.assetId（テンプレ既定素材）にフォールバック（ADR-0021）', () => {
+    // 背景/ロゴに既定素材を持たせ、slot レイヤーも足して既定素材を持たせる（openingTemplate に slot は無いため）。
+    const tmpl: Template = {
+      ...openingTemplate,
+      layers: [
+        ...openingTemplate.layers.map((l) =>
+          l.id === 'background' ? { ...l, assetId: 'tmpl_bg' } : l.id === 'logo' ? { ...l, assetId: 'tmpl_logo' } : l,
+        ),
+        { id: 'main', type: 'slot', x: 100, y: 100, w: 800, h: 600, zIndex: 15, assetId: 'tmpl_slot' },
+      ],
+    };
+    const img = (items: LayoutItem[], role: string) =>
+      items.find((i): i is ImageItem => i.kind === 'image' && i.role === role)?.assetId;
+    // 場面が素材を持たない（{}）→ background/slot/logo の3つともテンプレ既定（layer.assetId）にフォールバック。
+    const noRefs = layoutScene({ ...scene, assetRefs: {} }, tmpl).items;
+    expect(img(noRefs, 'background')).toBe('tmpl_bg');
+    expect(img(noRefs, 'slot')).toBe('tmpl_slot');
+    expect(img(noRefs, 'logo')).toBe('tmpl_logo');
+    // 場面が素材を持つ → 3つとも場面が優先（テンプレ既定を上書き）。
+    const withRefs = layoutScene({ ...scene, assetRefs: { background: 'asset_entrance_001', main: 'asset_x', logo: 'asset_logo_001' } }, tmpl).items;
+    expect(img(withRefs, 'background')).toBe('asset_entrance_001');
+    expect(img(withRefs, 'slot')).toBe('asset_x');
+    expect(img(withRefs, 'logo')).toBe('asset_logo_001');
+    // 明示的 null も テンプレ既定へ委譲（?? は null/未指定の両方をフォールバック・ADR-0021。11 §5 の「null=非表示」を更新）。
+    const nullRef = layoutScene({ ...scene, assetRefs: { background: null } }, tmpl).items;
+    expect(img(nullRef, 'background')).toBe('tmpl_bg');
+  });
+
+  it('scene.slotFits は background/slot/logo すべてでテンプレ層の fit を上書きする（④）', () => {
+    // openingTemplate に slot を足す（背景/slot の既定=cover、logo の既定=contain を各々上書き）。
+    const tmpl: Template = {
+      ...openingTemplate,
+      layers: [...openingTemplate.layers, { id: 'main', type: 'slot', x: 0, y: 0, w: 100, h: 100, zIndex: 15 }],
+    };
+    const withMain: Scene = { ...scene, assetRefs: { ...scene.assetRefs, main: 'asset_x' } };
+    const fitOf = (role: string, sc: Scene) =>
+      layoutScene(sc, tmpl).items.find((i): i is ImageItem => i.kind === 'image' && i.role === role)?.fit;
+    for (const [role, key] of [['background', 'background'], ['slot', 'main'], ['logo', 'logo']] as const) {
+      expect(fitOf(role, { ...withMain, slotFits: { [key]: 'stretch' } })).toBe('stretch'); // 上書き
+      expect(fitOf(role, withMain)).not.toBe('stretch'); // 既定（上書きが効いている証拠）
+    }
+  });
+
   it('subtitle レイヤー由来の text は isSubtitle=true、通常の text は false（字幕ON/OFF用）', () => {
     const texts = layoutScene(scene, openingTemplate).items.filter(
       (i): i is TextItem => i.kind === 'text',
@@ -88,6 +131,29 @@ describe('layoutScene', () => {
     const texts = layoutScene(withFonts, openingTemplate).items.filter((i): i is TextItem => i.kind === 'text');
     expect(texts.find((i) => i.text.includes('ようこそ'))?.fontId).toBe('kaitou-yokoku-gothic'); // title
     expect(texts.find((i) => i.text.includes('紹介します'))?.fontId).toBeUndefined(); // subtitle 未設定＝継承
+  });
+
+  it('template の text/subtitle の strokeColor/strokeWidth が TextItem と SVG に反映される（#275）', () => {
+    const strokeTemplate: Template = {
+      ...openingTemplate,
+      layers: openingTemplate.layers.map((l) => (l.id === 'title' ? { ...l, strokeColor: '#ff0000', strokeWidth: 3 } : l)),
+    };
+    const item = layoutScene(scene, strokeTemplate).items.find((i): i is TextItem => i.kind === 'text' && i.text.includes('ようこそ'));
+    expect(item).toMatchObject({ strokeColor: '#ff0000', strokeWidth: 3 });
+    const svg = layoutToSvg(layoutScene(scene, strokeTemplate));
+    expect(svg).toContain('stroke="#ff0000"');
+    expect(svg).toContain('stroke-width="3"');
+    expect(svg).toContain('paint-order="stroke"'); // 塗りの下に縁取り（可読性）
+  });
+
+  it('template の縁取り：strokeWidth>0 で色未指定なら白を既定にする（外部テンプレ対策・#275）', () => {
+    const widthOnly: Template = {
+      ...openingTemplate,
+      layers: openingTemplate.layers.map((l) => (l.id === 'title' ? { ...l, strokeWidth: 2 } : l)),
+    };
+    const item = layoutScene(scene, widthOnly).items.find((i): i is TextItem => i.kind === 'text' && i.text.includes('ようこそ'));
+    expect(item?.strokeColor).toBe('#ffffff'); // 色未指定→白で縁取りが消えない
+    expect(item?.strokeWidth).toBe(2);
   });
 
   it('layoutToSvg が 1920x1080 のSVGを生成し日本語テキストを含む', () => {
@@ -202,5 +268,116 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     };
     const layout = layoutScene(sceneWithStrayFree, openingTemplate); // category === 'opening'
     expect(layout.items.find((i) => i.id === 'free_001')).toBeUndefined();
+  });
+
+  it('FREE 要素の rotation が LayoutItem と SVG の rotate（中心軸）に反映される（#208）', () => {
+    const rotScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 100, y: 100, w: 200, h: 100, zIndex: 5, shapeType: 'rect', fillColor: '#00ff00', rotation: 30 }],
+    };
+    const layout = layoutScene(rotScene, freeTemplate);
+    expect(layout.items.find((i) => i.id === 'free_001')?.rotation).toBe(30);
+    // 中心 (100+100, 100+50)=(200,150) を軸に rotate。
+    expect(layoutToSvg(layout)).toContain('transform="rotate(30 200 150)"');
+  });
+
+  it('scene.groups の平行移動が FREE 要素の LayoutItem に前合成される（ADR-0022・パリティ）', () => {
+    const groupedScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 100, y: 100, w: 40, h: 20, zIndex: 5, shapeType: 'rect', fillColor: '#00ff00' }],
+      groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 50, y: -20, rotation: 0, scale: 1 } }],
+    };
+    const item = layoutScene(groupedScene, freeTemplate).items.find((i) => i.id === 'free_001');
+    expect(item?.x).toBeCloseTo(150); // 100 + 50
+    expect(item?.y).toBeCloseTo(80); // 100 - 20
+  });
+
+  it('グループ回転が要素の rotation＋中心へ合成され SVG rotate に出る（ADR-0022・パリティ）', () => {
+    const rotGroupScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 100, y: 100, w: 40, h: 20, zIndex: 5, shapeType: 'rect', fillColor: '#00ff00' }],
+      groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 90, scale: 1 } }],
+    };
+    const layout = layoutScene(rotGroupScene, freeTemplate);
+    expect(layout.items.find((i) => i.id === 'free_001')?.rotation).toBeCloseTo(90); // 単一メンバー＝中心(120,110)固定で rotation のみ +90
+    expect(layoutToSvg(layout)).toContain('transform="rotate(90 120 110)"');
+  });
+
+  it('hidden グループのメンバーは描画されない（ADR-0022）', () => {
+    const hiddenScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, shapeType: 'rect', fillColor: '#000000' }],
+      groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
+    };
+    const layout = layoutScene(hiddenScene, freeTemplate);
+    expect(layout.items.find((i) => i.id === 'free_001')).toBeUndefined();
+  });
+
+  it('template.groups の平行移動がテンプレ層の LayoutItem に前合成される（ADR-0022・パリティ）', () => {
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['background'], transform: { x: 50, y: -20, rotation: 0, scale: 1 } }],
+    };
+    const item = layoutScene(scene, grouped).items.find((i) => i.id === 'background');
+    expect(item?.x).toBeCloseTo(50); // 0 + 50
+    expect(item?.y).toBeCloseTo(-20); // 0 - 20
+  });
+
+  it('hidden グループのテンプレ層は描画されない（ADR-0022）', () => {
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['background'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
+    };
+    expect(layoutScene(scene, grouped).items.find((i) => i.id === 'background')).toBeUndefined();
+  });
+
+  it('rotation 未指定/0 は rotate でくるまない（出力 SVG の差分を最小化）', () => {
+    const svg = layoutToSvg(layoutScene(freeScene, freeTemplate)); // freeScene は rotation なし
+    expect(svg).not.toContain('rotate(');
+  });
+
+  it('FREE text の体裁（行間/揃え/縁取り）が LayoutItem と SVG に反映される（#209）', () => {
+    const styledScene: Scene = {
+      ...freeScene,
+      freeLayout: [{ id: 'free_001', kind: 'text', x: 100, y: 100, w: 400, h: 200, zIndex: 5, text: 'あ', fontSize: 40, textAlign: 'center', strokeColor: '#112233', strokeWidth: 3, lineHeight: 2 }],
+    };
+    const item = layoutScene(styledScene, freeTemplate).items.find((i): i is TextItem => i.kind === 'text');
+    expect(item).toMatchObject({ textAlign: 'center', strokeColor: '#112233', strokeWidth: 3, lineHeight: 2 });
+    expect(item?.maxLines).toBe(2); // h200 /(fontSize40 * lineHeight2) = 2（行間が行数計算に効く）
+    const svg = layoutToSvg(layoutScene(styledScene, freeTemplate));
+    expect(svg).toContain('text-anchor="middle"'); // 中央揃え
+    expect(svg).toContain('x="300"'); // 中央 x = 100 + 400/2
+    expect(svg).toContain('stroke="#112233"'); // 縁取り
+    expect(svg).toContain('stroke-width="3"');
+    expect(svg).toContain('paint-order="stroke"'); // 塗りの下に縁取り（可読性）
+  });
+
+  it('FREE text の体裁が未指定なら左揃え・縁取りなし（既定）', () => {
+    const plain: Scene = { ...freeScene, freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 200, h: 80, zIndex: 5, text: 'あ', fontSize: 40 }] };
+    const svg = layoutToSvg(layoutScene(plain, freeTemplate));
+    expect(svg).toContain('text-anchor="start"'); // 左揃え
+    expect(svg).not.toContain('paint-order'); // 縁取りなし
+  });
+
+  it('FREE text の揃えで text-anchor と x が変わる（左=左端 / 右=右端）', () => {
+    const svgFor = (textAlign: 'left' | 'right') =>
+      layoutToSvg(layoutScene({ ...freeScene, freeLayout: [{ id: 'free_001', kind: 'text', x: 100, y: 100, w: 400, h: 80, zIndex: 5, text: 'あ', fontSize: 40, textAlign }] }, freeTemplate));
+    expect(svgFor('left')).toContain('text-anchor="start"');
+    expect(svgFor('left')).toContain('x="100"'); // 左端＝item.x
+    expect(svgFor('right')).toContain('text-anchor="end"');
+    expect(svgFor('right')).toContain('x="500"'); // 右端＝item.x + item.w = 100+400
+  });
+
+  it('hidden の FREE 要素は描画しない（レイヤー一覧で隠す・#210）', () => {
+    const withHidden: Scene = {
+      ...freeScene,
+      freeLayout: [
+        { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100, zIndex: 5, shapeType: 'rect', fillColor: '#000000', hidden: true },
+        { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 100, h: 100, zIndex: 6, shapeType: 'rect', fillColor: '#111111' },
+      ],
+    };
+    const items = layoutScene(withHidden, freeTemplate).items;
+    expect(items.find((i) => i.id === 'free_001')).toBeUndefined(); // 非表示は除外
+    expect(items.find((i) => i.id === 'free_002')).toBeDefined();
   });
 });

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
-  addFreeElement, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  moveFreeElement, removeFreeElement, resizeFreeElement, sendFreeElementToBack,
-  snapToGrid, updateFreeElement,
+  addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
+  freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
+  snapAngle, snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
 describe('createFreeElement / addFreeElement', () => {
@@ -32,6 +32,22 @@ describe('createFreeElement / addFreeElement', () => {
     expect(shape.kind).toBe('shape');
     expect(shape.shapeType).toBe('rect');
     expect(shape.fillColor).toBeTruthy();
+  });
+
+  it('canvas 比で既定の位置・大きさをスケール（横型は不変・縦型は幅が画面に対し過大にならない・#273）', () => {
+    const ref = createFreeElement([], 'text'); // 引数なし＝横型基準（1920×1080）
+    const land = createFreeElement([], 'text', 1920, 1080);
+    expect(land.w).toBe(ref.w); // 横型 1920×1080 は係数1＝従来どおり
+    expect(land.x).toBe(ref.x);
+
+    const port = createFreeElement([], 'text', 1080, 1920);
+    expect(port.w).toBeLessThan(land.w); // 縦型は幅が縮む（画面いっぱいで中央寄りに見える違和感を防ぐ）
+    expect(port.fontSize).toBeLessThan(land.fontSize ?? 0); // fontSize も幅基準でスケール（文字と枠の比率を一定に）
+    // 画面幅に対する占有率は横型と同程度（比例スケール）。
+    expect(port.w / 1080).toBeCloseTo(land.w / 1920, 2);
+    expect(port.x / 1080).toBeCloseTo(land.x / 1920, 2);
+    expect((port.fontSize ?? 0) / 1080).toBeCloseTo((land.fontSize ?? 0) / 1920, 2);
+    expect(port.y).toBeGreaterThan(land.y); // 縦方向は canvasH 基準＝縦型では下に伸びる
   });
 
   it('追加のたびに id が連番・zIndex が最前面+1 になる', () => {
@@ -84,6 +100,98 @@ describe('removeFreeElement', () => {
   });
 });
 
+describe('freeElementsInRect（範囲選択・マーキー・#274）', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100 },
+    { id: 'free_002', kind: 'text', x: 300, y: 300, w: 100, h: 100, text: 'あ' },
+    { id: 'free_003', kind: 'shape', x: 1000, y: 50, w: 100, h: 100 },
+  ];
+
+  it('矩形と AABB が交差する要素だけ返す（接するだけ/外側は含めない）', () => {
+    // free_001 を囲む矩形（free_002/003 は外）。
+    expect(freeElementsInRect(layout, { x0: -10, y0: -10, x1: 120, y1: 120 })).toEqual(['free_001']);
+    // free_001 と free_002 をまたぐ矩形。
+    expect(freeElementsInRect(layout, { x0: 50, y0: 50, x1: 350, y1: 350 })).toEqual(['free_001', 'free_002']);
+    // どの要素にも触れない矩形＝空。
+    expect(freeElementsInRect(layout, { x0: 500, y0: 500, x1: 600, y1: 600 })).toEqual([]);
+  });
+
+  it('2点は順不同（右下→左上のドラッグでも同じ）', () => {
+    const a = freeElementsInRect(layout, { x0: 50, y0: 50, x1: 350, y1: 350 });
+    const b = freeElementsInRect(layout, { x0: 350, y0: 350, x1: 50, y1: 50 });
+    expect(b).toEqual(a);
+  });
+
+  it('非表示・ロック中の要素は対象外（一括操作に巻き込まない）', () => {
+    const withFlags: FreeElement[] = [
+      { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100, hidden: true },
+      { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 100, h: 100, locked: true },
+      { id: 'free_003', kind: 'shape', x: 0, y: 0, w: 100, h: 100 },
+    ];
+    expect(freeElementsInRect(withFlags, { x0: -10, y0: -10, x1: 110, y1: 110 })).toEqual(['free_003']);
+  });
+});
+
+describe('groupBBox / resizeGroup / applyFreeElementGeoms（複数同時リサイズ・#274）', () => {
+  const els: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 100, h: 100 },
+    { id: 'free_002', kind: 'shape', x: 300, y: 200, w: 100, h: 100 },
+  ];
+
+  it('groupBBox は全要素を囲む最小矩形（空は null）', () => {
+    expect(groupBBox([])).toBeNull();
+    expect(groupBBox(els)).toEqual({ x: 100, y: 100, w: 300, h: 200 }); // (100,100)..(400,300)
+  });
+
+  it('resizeGroup：bbox を2倍にすると各要素の相対位置・大きさが保たれて2倍になる', () => {
+    const old = { x: 100, y: 100, w: 300, h: 200 };
+    const next = { x: 100, y: 100, w: 600, h: 400 }; // 左上固定で幅高さ2倍
+    expect(resizeGroup(els, old, next)).toEqual([
+      { id: 'free_001', x: 100, y: 100, w: 200, h: 200 },
+      { id: 'free_002', x: 500, y: 300, w: 200, h: 200 },
+    ]);
+  });
+
+  it('resizeGroup：極端な縮小でも各要素は FREE_MIN_SIZE 以上にクランプ（消えない）', () => {
+    const tiny: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 100 }];
+    const out = resizeGroup(tiny, { x: 0, y: 0, w: 1000, h: 1000 }, { x: 0, y: 0, w: 1, h: 1 });
+    expect(out[0].w).toBe(FREE_MIN_SIZE);
+    expect(out[0].h).toBe(FREE_MIN_SIZE);
+  });
+
+  it('applyFreeElementGeoms：指定 id の x,y,w,h を反映し未指定は不変・空は同一参照', () => {
+    const out = applyFreeElementGeoms(els, [{ id: 'free_002', x: 0, y: 0, w: 50, h: 50 }]);
+    expect(out[0]).toEqual(els[0]); // free_001 不変
+    expect(out[1]).toMatchObject({ id: 'free_002', x: 0, y: 0, w: 50, h: 50 });
+    expect(applyFreeElementGeoms(els, [])).toBe(els);
+  });
+});
+
+describe('rotationFromPointer / snapAngle（回転ハンドル・#279）', () => {
+  const c = { x: 0, y: 0 };
+
+  it('要素中心からの角度：上=0°・右=90°・下=180°・左=270°（時計回り）', () => {
+    expect(rotationFromPointer(c, { x: 0, y: -100 })).toBe(0); // 上（12時）
+    expect(rotationFromPointer(c, { x: 100, y: 0 })).toBe(90); // 右
+    expect(rotationFromPointer(c, { x: 0, y: 100 })).toBe(180); // 下
+    expect(rotationFromPointer(c, { x: -100, y: 0 })).toBe(270); // 左
+  });
+
+  it('0≤r<360 に正規化（360 は出さない）', () => {
+    const r = rotationFromPointer(c, { x: -1, y: -1000 });
+    expect(r).toBeGreaterThanOrEqual(0);
+    expect(r).toBeLessThan(360);
+  });
+
+  it('snapAngle：15°きざみに吸着し 0≤r<360 に正規化', () => {
+    expect(snapAngle(37, 15)).toBe(30);
+    expect(snapAngle(38, 15)).toBe(45);
+    expect(snapAngle(358, 15)).toBe(0); // 360→0
+    expect(snapAngle(100, 0)).toBe(100); // step<=0 は正規化のみ
+    expect(snapAngle(-30, 0)).toBe(330);
+  });
+});
+
 describe('duplicateFreeElement', () => {
   const layout: FreeElement[] = [
     { id: 'free_001', kind: 'text', x: 100, y: 100, w: 200, h: 80, zIndex: 1, text: 'あ', fontSize: 40 },
@@ -106,6 +214,68 @@ describe('duplicateFreeElement', () => {
     const { freeLayout: next, newId } = duplicateFreeElement(layout, 'free_999');
     expect(next).toBe(layout);
     expect(newId).toBeNull();
+  });
+});
+
+describe('pasteFreeElement（コピー&ペースト・場面間も可）', () => {
+  it('別場面の要素を貼り付け：貼付先で新 id を採番・最前面・少しずらす・他フィールド引継ぎ', () => {
+    // コピー元（別場面の要素を想定）。貼付先 freeLayout には free_001 が既存。
+    const copied: FreeElement = { id: 'free_005', kind: 'text', x: 100, y: 100, w: 200, h: 80, zIndex: 9, text: 'コピー', fontSize: 40 };
+    const target: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 50, h: 50, zIndex: 3, shapeType: 'rect', fillColor: '#000000' }];
+    const { freeLayout: next, newId } = pasteFreeElement(target, copied);
+    expect(next).toHaveLength(2);
+    expect(newId).toBe('free_002'); // 貼付先の空き番号（元の free_005 ではない）
+    const pasted = next.find((e) => e.id === 'free_002');
+    expect(pasted).toMatchObject({ kind: 'text', text: 'コピー' });
+    expect(pasted?.zIndex).toBe(4); // 貼付先の最大 3 +1
+    expect(pasted?.x).toBe(120); // 元 100 + ずらし
+    expect(pasted?.y).toBe(120);
+  });
+
+  it('空の貼付先にも貼れる（newId=free_001）', () => {
+    const copied: FreeElement = { id: 'free_009', kind: 'shape', x: 10, y: 10, w: 30, h: 30, zIndex: 2, shapeType: 'star', fillColor: '#ff0000' };
+    const { freeLayout: next, newId } = pasteFreeElement([], copied);
+    expect(newId).toBe('free_001');
+    expect(next[0]).toMatchObject({ id: 'free_001', shapeType: 'star' });
+  });
+});
+
+describe('applyFreeElementPositions（複数選択の一括移動）', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 50, h: 50, zIndex: 1, shapeType: 'rect', fillColor: '#000' },
+    { id: 'free_002', kind: 'shape', x: 200, y: 200, w: 50, h: 50, zIndex: 2, shapeType: 'rect', fillColor: '#000' },
+    { id: 'free_003', kind: 'text', x: 300, y: 300, w: 50, h: 50, zIndex: 3, text: 'あ', fontSize: 40 },
+  ];
+
+  it('指定した複数要素の位置だけ更新し、他要素・他フィールドは不変', () => {
+    const next = applyFreeElementPositions(layout, [
+      { id: 'free_001', x: 110, y: 120 },
+      { id: 'free_003', x: 330, y: 340 },
+    ]);
+    expect(next.find((e) => e.id === 'free_001')).toMatchObject({ x: 110, y: 120, w: 50 }); // w 等は不変
+    expect(next.find((e) => e.id === 'free_002')).toBe(layout[1]); // 対象外は同一参照
+    expect(next.find((e) => e.id === 'free_003')).toMatchObject({ x: 330, y: 340, text: 'あ' });
+  });
+
+  it('moves が空なら同一参照を返す', () => {
+    expect(applyFreeElementPositions(layout, [])).toBe(layout);
+  });
+});
+
+describe('removeFreeElements（複数選択の一括削除）', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 },
+    { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 2 },
+    { id: 'free_003', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 3 },
+  ];
+
+  it('指定 id をまとめて削除（未知 id は無視）', () => {
+    const next = removeFreeElements(layout, ['free_001', 'free_003', 'free_999']);
+    expect(next.map((e) => e.id)).toEqual(['free_002']);
+  });
+
+  it('ids が空なら同一参照を返す', () => {
+    expect(removeFreeElements(layout, [])).toBe(layout);
   });
 });
 
@@ -140,6 +310,38 @@ describe('bringFreeElementToFront / sendFreeElementToBack', () => {
     const single: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 }];
     expect(bringFreeElementToFront(single, 'free_001')).toBe(single);
     expect(sendFreeElementToBack(single, 'free_001')).toBe(single);
+  });
+});
+
+describe('moveFreeElementZ（レイヤー一覧の1段移動・#210）', () => {
+  const layout: FreeElement[] = [
+    { id: 'a', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 },
+    { id: 'b', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 2 },
+    { id: 'c', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 3 },
+  ];
+  const zById = (l: FreeElement[]) => Object.fromEntries(l.map((e) => [e.id, e.zIndex]));
+
+  it('up：1段前面へ＝隣（次に大きい z）と入れ替え', () => {
+    expect(zById(moveFreeElementZ(layout, 'a', 'up'))).toMatchObject({ a: 2, b: 1, c: 3 });
+  });
+
+  it('down：1段背面へ＝隣（次に小さい z）と入れ替え', () => {
+    expect(zById(moveFreeElementZ(layout, 'c', 'down'))).toMatchObject({ a: 1, b: 3, c: 2 });
+  });
+
+  it('端（最前面を up / 最背面を down）は変化なし（同一参照）', () => {
+    expect(moveFreeElementZ(layout, 'c', 'up')).toBe(layout);
+    expect(moveFreeElementZ(layout, 'a', 'down')).toBe(layout);
+    expect(moveFreeElementZ(layout, 'zzz', 'up')).toBe(layout); // 不在
+  });
+
+  it('同 zIndex のときは移動方向へ寄せて前後を確定（up で前面側が大きく）', () => {
+    const tie: FreeElement[] = [
+      { id: 'a', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 5 },
+      { id: 'b', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 5 },
+    ];
+    const m = zById(moveFreeElementZ(tie, 'a', 'up'));
+    expect(Number(m.a)).toBeGreaterThan(Number(m.b));
   });
 });
 
@@ -241,6 +443,65 @@ describe('resizeFreeElement：縦横比維持（Shift / lockAspect）', () => {
     expect(r.x + r.w).toBe(300); // 右辺固定
     expect(r.y).toBe(100); // 上辺固定
     expect(r.w / r.h).toBeCloseTo(2, 5);
+  });
+});
+
+describe('resizeRotatedFreeElement（回転要素の角リサイズ・#279後継）', () => {
+  const start = { x: 100, y: 100, w: 200, h: 100 };
+  // 角の canvas 位置 = 中心 + rotate(θ)·(符号·w/2, 符号·h/2)（CSS/SVG rotate と同じ向き）。
+  const cornerCanvas = (g: { x: number; y: number; w: number; h: number }, rotDeg: number, sx: number, sy: number) => {
+    const r = (rotDeg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r);
+    const cx = g.x + g.w / 2, cy = g.y + g.h / 2, lx = (sx * g.w) / 2, ly = (sy * g.h) / 2;
+    return { x: cx + (lx * c - ly * s), y: cy + (lx * s + ly * c) };
+  };
+
+  it('rotation=0 は resizeFreeElement と一致（恒等）', () => {
+    for (const corner of ['nw', 'ne', 'sw', 'se'] as const) {
+      expect(resizeRotatedFreeElement(start, corner, 30, 20, 0)).toEqual(resizeFreeElement(start, corner, 30, 20));
+    }
+  });
+
+  it('回転していても掴んだ角の対角は canvas 上で動かない（se→対角 nw を固定）', () => {
+    const rot = 35;
+    const r = resizeRotatedFreeElement(start, 'se', 40, 25, rot);
+    const before = cornerCanvas(start, rot, -1, -1); // nw
+    const after = cornerCanvas(r, rot, -1, -1);
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1.5); // 丸め誤差のみ
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
+    expect(r.w).not.toBe(start.w); // リサイズは効いている
+  });
+
+  it('nw を掴むと対角（se）が canvas 上で動かない', () => {
+    const rot = 100;
+    const r = resizeRotatedFreeElement(start, 'nw', -30, 20, rot);
+    const before = cornerCanvas(start, rot, 1, 1); // se
+    const after = cornerCanvas(r, rot, 1, 1);
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
+  });
+
+  it('ne を掴むと対角（sw）が canvas 上で動かない', () => {
+    const rot = 60;
+    const r = resizeRotatedFreeElement(start, 'ne', 30, -20, rot);
+    const before = cornerCanvas(start, rot, -1, 1); // sw
+    const after = cornerCanvas(r, rot, -1, 1);
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
+  });
+
+  it('sw を掴むと対角（ne）が canvas 上で動かない', () => {
+    const rot = 200;
+    const r = resizeRotatedFreeElement(start, 'sw', -25, 30, rot);
+    const before = cornerCanvas(start, rot, 1, -1); // ne
+    const after = cornerCanvas(r, rot, 1, -1);
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
+  });
+
+  it('最小サイズで止まる（縮め過ぎても min 以上）', () => {
+    const r = resizeRotatedFreeElement(start, 'se', -999, -999, 90, 24);
+    expect(r.w).toBeGreaterThanOrEqual(24);
+    expect(r.h).toBeGreaterThanOrEqual(24);
   });
 });
 

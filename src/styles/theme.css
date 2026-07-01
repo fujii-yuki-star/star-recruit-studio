@@ -963,7 +963,7 @@ button {
 /* 編集レイアウト(場面編集) */
 .editor-grid {
   display: grid;
-  grid-template-columns: 240px 1fr 300px;
+  /* 列は SceneEditScreen がインラインで指定（左折りたたみ 240/44px・中央 1fr・右リサイズ 260〜560px・#276）。 */
   gap: var(--gap);
   height: 100%;
 }
@@ -974,6 +974,34 @@ button {
   padding: var(--gap);
   overflow-y: auto;
 }
+
+/* 場面編集の右欄アコーディオン（#276）。節ごとに開閉してスクロール量を抑える。 */
+.accordion {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--gap-sm);
+}
+.accordion-summary {
+  cursor: pointer;
+  padding: var(--gap-sm);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-text);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  user-select: none;
+}
+.accordion-summary::-webkit-details-marker { display: none; }
+.accordion-summary::before {
+  content: "\25B8"; /* ▸ */
+  font-size: 11px;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+.accordion[open] > .accordion-summary::before { transform: rotate(90deg); }
+.accordion-body { padding: 0 var(--gap-sm) var(--gap-sm); }
 
 .asset-tile {
   display: flex;

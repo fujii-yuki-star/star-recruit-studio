@@ -16,6 +16,7 @@ import { PreviewScreen } from "./app/screens/PreviewScreen";
 import { PrecheckScreen } from "./app/screens/PrecheckScreen";
 import { ExportScreen } from "./app/screens/ExportScreen";
 import { LooksScreen } from "./app/screens/LooksScreen";
+import { LooksEditScreen } from "./app/screens/LooksEditScreen";
 import { MaterialsScreen } from "./app/screens/MaterialsScreen";
 import { SettingsScreen } from "./app/screens/SettingsScreen";
 import { AboutScreen } from "./app/screens/AboutScreen";
@@ -31,6 +32,7 @@ const titles: Record<ScreenId, string> = {
   precheck: "公開前チェック",
   export: "動画を書き出す",
   looks: "見た目パターンを管理",
+  "looks-edit": "見た目パターンを編集",
   materials: "素材を管理",
   settings: "設定",
   about: "このアプリについて",
@@ -41,15 +43,18 @@ function App() {
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
   const loadProject = useProjectStore((s) => s.loadProject);
+  const loadUserTemplates = useProjectStore((s) => s.loadUserTemplates);
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
     useStartNewProject(setScreen);
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
+  // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。
   useEffect(() => {
     const last = getLastProjectId();
     if (last) void loadProject(last).catch(() => {});
-  }, [loadProject]);
+    void loadUserTemplates().catch(() => {});
+  }, [loadProject, loadUserTemplates]);
 
   // サイドバー等で画面が切り替わったら、出しっぱなしの確認バナーを閉じる。
   useEffect(() => {
@@ -86,7 +91,9 @@ function App() {
       case "export":
         return <ExportScreen onNavigate={setScreen} />;
       case "looks":
-        return <LooksScreen />;
+        return <LooksScreen onNavigate={setScreen} />;
+      case "looks-edit":
+        return <LooksEditScreen onNavigate={setScreen} />;
       case "materials":
         return <MaterialsScreen />;
       case "settings":
@@ -98,8 +105,8 @@ function App() {
     }
   }
 
-  // 場面編集と生成中は独自レイアウトのため、共通トップバーは表示しない
-  const hasOwnHeader = screen === "scene-edit" || screen === "generating";
+  // 場面編集・生成中・見た目パターン編集は独自ヘッダのため、共通トップバー（プロジェクト保存等）は表示しない
+  const hasOwnHeader = screen === "scene-edit" || screen === "generating" || screen === "looks-edit";
 
   return (
     <div className="app">

@@ -24,14 +24,14 @@ describe('promoteToLines / demoteFromLines', () => {
     expect(promoteToLines(sceneWith({ lines }))).toMatchObject({ lines });
   });
 
-  it('降格：lines[0] を narration に戻し lines を消す（text/status/voicePath/speed/pitch 引継ぎ・2行目以降は破棄）', () => {
+  it('降格：lines[0] を narration に戻し lines を消す（text/status/voicePath/speed/pitch/intonation 引継ぎ・2行目以降は破棄）', () => {
     const lines: NarrationLine[] = [
-      { lineId: 'line_001', text: 'やあ', speed: 1.2, pitch: 0.1, status: NARRATION_STATUS.generated, voicePath: 'v.wav' },
+      { lineId: 'line_001', text: 'やあ', speed: 1.2, pitch: 0.1, intonation: 1.5, status: NARRATION_STATUS.generated, voicePath: 'v.wav' },
       { lineId: 'line_002', text: 'どうも', status: NARRATION_STATUS.none },
     ];
     const r = demoteFromLines(sceneWith({ lines }));
     expect(r.lines).toBeUndefined();
-    expect(r.narration).toMatchObject({ text: 'やあ', status: NARRATION_STATUS.generated, voicePath: 'v.wav', speed: 1.2, pitch: 0.1 });
+    expect(r.narration).toMatchObject({ text: 'やあ', status: NARRATION_STATUS.generated, voicePath: 'v.wav', speed: 1.2, pitch: 0.1, intonation: 1.5 });
   });
 });
 
@@ -77,6 +77,10 @@ describe('updateLine', () => {
 
   it('speaker 変更でも status をリセット', () => {
     expect(updateLine(sceneWith({ lines }), 'line_001', { speaker: 2 }).lines?.[0].status).toBe(NARRATION_STATUS.none);
+  });
+
+  it('抑揚（intonation）変更でも status をリセット（声の作り直し・#242）', () => {
+    expect(updateLine(sceneWith({ lines }), 'line_001', { intonation: 1.4 }).lines?.[0].status).toBe(NARRATION_STATUS.none);
   });
 
   it('字幕（subtitleEnabled）変更では status を保つ（音声に無関係）', () => {

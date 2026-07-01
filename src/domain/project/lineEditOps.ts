@@ -25,6 +25,7 @@ export function demoteFromLines(scene: Scene): Scene {
       voicePath: first.voicePath ?? null,
       speed: first.speed ?? null,
       pitch: first.pitch ?? null,
+      intonation: first.intonation ?? null,
     },
     lines: undefined,
   };
@@ -46,13 +47,14 @@ export function removeLine(scene: Scene, lineId: string): Scene {
   return { ...scene, lines: remaining };
 }
 
-/** 声に影響する編集（text/speaker/speed/pitch）か。これらの変更は音声の作り直しが必要。 */
+/** 声に影響する編集（text/speaker/speed/pitch/intonation）か。これらの変更は音声の作り直しが必要。 */
 function affectsVoice(patch: Partial<NarrationLine>, line: NarrationLine): boolean {
   return (
     (patch.text !== undefined && patch.text !== line.text) ||
     (patch.speaker !== undefined && patch.speaker !== line.speaker) ||
     (patch.speed !== undefined && patch.speed !== line.speed) ||
-    (patch.pitch !== undefined && patch.pitch !== line.pitch)
+    (patch.pitch !== undefined && patch.pitch !== line.pitch) ||
+    (patch.intonation !== undefined && patch.intonation !== line.intonation)
   );
 }
 

@@ -1,10 +1,11 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
   AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
-  SceneCategory, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
+  SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
 } from '../enums';
 import type { FontId } from '../font/fontCatalog';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
+import type { Group } from '../group/types';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -131,7 +132,7 @@ export interface Narration {
 
 /**
  * 掛け合い：場面のセリフ列の1行（ADR-0015・#180）。null/未指定 = 場面/動画の既定を継承（11 §6）。
- * intonation は行に持たない（行ごとに変えない設計）＝project 既定（voiceSettings.intonation）を継承する（ADR-0015）。
+ * speed/pitch/intonation は行ごとに上書き可。null/未指定＝場面/動画の既定を継承（#242・schema 1.12）。
  */
 export interface NarrationLine {
   /** line_NNN（scene 内一意・§2.1）。 */
@@ -142,6 +143,8 @@ export interface NarrationLine {
   speaker?: number | null;
   speed?: number | null;
   pitch?: number | null;
+  /** 抑揚（0.0〜2.0）。null/未指定＝場面/動画の既定を継承（#242・schema 1.12）。 */
+  intonation?: number | null;
   /** 画面字幕の文言。未指定＝text を字幕に流用（追加B）。 */
   subtitleText?: string | null;
   /** この行の字幕 ON/OFF。未指定＝場面（subtitleEnabledDefault）→書き出し既定を継承。 */
@@ -186,6 +189,8 @@ export interface FreeElement {
   h: number;
   /** 重ね順（整数のみ有効・§2.2 / schema: integer）。 */
   zIndex?: number;
+  /** 回転角（度・0以上360未満・中心を軸に時計回り。未指定/0＝回転なし。360=0 は重複ゆえ schema で除外・#208）。 */
+  rotation?: number;
   /** kind='slot': 素材を直接参照（null=空スロット）。fit は assetId 非 null のとき有効。 */
   assetId?: string | null;
   fit?: Fit;
@@ -196,14 +201,22 @@ export interface FreeElement {
   fontWeight?: FontWeight;
   /** kind='text' の同梱フォント id。null/未指定＝場面/動画全体を継承（#178）。 */
   fontId?: FontId | null;
+  /** kind='text' の行間（倍率・0.5〜3.0。未指定＝1.3。#209）。 */
+  lineHeight?: number;
+  /** kind='text' の揃え（left/center/right。未指定＝left。#209）。 */
+  textAlign?: TextAlign;
   /** kind='shape'。rect/ellipse/rounded_rect/triangle/star/arrow/speech_bubble（ADR-0008・#173）。 */
   shapeType?: FreeShapeType;
   fillColor?: string;
   opacity?: number;
   radius?: number;
-  /** 図形の枠線（#173・任意）。strokeWidth>0 のとき描画。 */
+  /** 枠線/縁取り（#173・任意）。strokeWidth>0 のとき描画。kind='shape'＝図形の枠線、kind='text'＝文字の縁取り（#209）。 */
   strokeColor?: string;
   strokeWidth?: number;
+  /** 非表示（レイヤー一覧で隠す・#210）。true のとき描画・操作対象から除外（未指定/false＝表示）。 */
+  hidden?: boolean;
+  /** ロック（レイヤー一覧で固定・#210）。true のときプレビュー上での移動/拡縮を禁止（未指定/false＝編集可）。 */
+  locked?: boolean;
 }
 
 export interface Scene {
@@ -228,8 +241,12 @@ export interface Scene {
   audioMix?: AudioMix;
   transition?: Transition;
   warnings: Warning[];
+  /** 場面ごと・スロット別の画像の収め方（④）。キー＝テンプレのスロット/背景/ロゴの layer.id。未指定＝テンプレ層の fit を使用。 */
+  slotFits?: Record<string, Fit>;
   /** FREE テンプレ場面のみ：自由配置要素（ADR-0008）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
   freeLayout?: FreeElement[];
+  /** 要素のグループ化（ADR-0022）。メンバー＝freeLayout 要素 id（ネストで group id も可）。未設定＝グループ無し。 */
+  groups?: Group[];
 }
 
 export interface Project {

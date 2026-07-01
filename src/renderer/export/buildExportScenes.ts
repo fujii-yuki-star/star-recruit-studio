@@ -9,7 +9,7 @@ import { sceneSegmentSpecs } from '../../domain/project/lineTimeline';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
-import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
+import { creditForLine, creditForLines, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvg } from './videoSceneSplit';
@@ -128,8 +128,11 @@ export async function buildExportScenes(
       const assetSrc = (id: string | null): string | undefined => (id ? sceneSrc.get(id) : undefined);
       const videoSlot = videoSlotFor?.(scene);
       const sceneFontFamily = opts.fontFamilyFor?.(scene); // 場面→動画全体で解決済みの font-family
+      // 動画スロットありの掛け合いは1フレーム（行ごとに分割できない）ので、使用話者を併記してクレジットを網羅する（#243・規約適合）。
+      const sceneCredit =
+        videoSlot && scene.lines && scene.lines.length > 0 ? creditForLines(scene.lines, credit) : credit;
       const split = videoSlot
-        ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc, itemFilter, sceneFontFamily, credit)
+        ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc, itemFilter, sceneFontFamily, sceneCredit)
         : null;
       // 出力解像度（未指定はキャンバス＝フルHD）。全場面を同一サイズで焼く（後段 concat -c copy の前提）。
       const cw = template.canvas.width;
@@ -186,17 +189,21 @@ export async function buildExportScenes(
           ? sceneSegmentSpecs(scene, lineDurations)
           : [{ durationSec: scene.durationSec, isFirst: true }];
         for (const spec of specs) {
+          const segLineId = 'lineId' in spec ? spec.lineId : undefined;
+          // クレジットは話者連動：行に話者があればそのキャラ、無ければ既定（場面/動画の話者＝credit）（#243・規約適合）。
+          const segLine = segLineId ? scene.lines?.find((l) => l.lineId === segLineId) : undefined;
+          const segCredit = segLine ? creditForLine(segLine, credit) : credit;
           // 字幕上書きのあるセグメント（掛け合い）は行字幕で焼き直し、無ければ共有 layout を再利用。
           const segLayout =
             'subtitleText' in spec && spec.subtitleText !== undefined
               ? layoutScene(scene, template, { subtitleText: spec.subtitleText })
               : layout;
           const pngBase64 = await svgToPngDataUrl(
-            layoutToSvg(segLayout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
+            layoutToSvg(segLayout, { assetSrc, itemFilter, credit: segCredit, fontFamily: sceneFontFamily }),
             width,
             height,
           );
-          const segNarration = narrationFor?.(scene, 'lineId' in spec ? spec.lineId : undefined);
+          const segNarration = narrationFor?.(scene, segLineId);
           out.push({
             pngBase64,
             durationSec: spec.durationSec,

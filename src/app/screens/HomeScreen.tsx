@@ -11,6 +11,8 @@ import {
   FilmIcon,
   ChevronRightIcon,
   FolderIcon,
+  TrashIcon,
+  PencilIcon,
 } from "../components/icons";
 
 interface HomeProps {
@@ -24,12 +26,67 @@ function formatDate(iso: string): string {
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
   const loadProject = useProjectStore((s) => s.loadProject);
+  const deleteProject = useProjectStore((s) => s.deleteProject);
+  const renameProject = useProjectStore((s) => s.renameProject);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   // 「新しい動画を作る」はヘッダと同じ破棄ガード付きフロー（共有フックで挙動統一）。
   const { confirming: confirmNew, start: startNew, confirm: confirmStartNew, cancel: cancelNew } =
     useStartNewProject(onNavigate);
   // プロジェクトを開けなかったときのユーザー向け表示（§2-5）。
   const [openError, setOpenError] = useState(false);
+  // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState(false);
+
+  async function removeProject(projectId: string) {
+    if (deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(false);
+    try {
+      await deleteProject(projectId);
+      setProjects((prev) => prev.filter((p) => p.projectId !== projectId));
+      setDeletingId(null);
+    } catch {
+      setDeleteError(true);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  // 名前変更：編集中のプロジェクトID・入力値・操作中・失敗表示。
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState(false);
+
+  function startRename(p: ProjectSummary) {
+    setRenamingId(p.projectId);
+    setRenameValue(p.projectName || "");
+    setRenameError(false);
+  }
+
+  async function saveRename(projectId: string) {
+    const name = renameValue.trim();
+    if (!name || renameBusy) return;
+    setRenameBusy(true);
+    setRenameError(false);
+    try {
+      await renameProject(projectId, name);
+    } catch {
+      setRenameError(true);
+      return; // リネーム自体が失敗したときだけエラー表示（入力欄は残して再試行可能に）。
+    } finally {
+      setRenameBusy(false);
+    }
+    // リネーム成功。入力欄を閉じ、一覧を最新化する。一覧の再取得失敗はリネーム完了に影響しないのでサイレント。
+    setRenamingId(null);
+    try {
+      setProjects(await listProjects());
+    } catch {
+      /* 一覧の再取得失敗は無視（リネーム自体は済んでいる＝誤った失敗表示・二重実行を防ぐ） */
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -62,6 +119,18 @@ export function HomeScreen({ onNavigate }: HomeProps) {
           {openError && (
             <div className="notice notice-warn mb" role="alert">
               <span>プロジェクトを開けませんでした。一覧から別のプロジェクトを選んでください。</span>
+            </div>
+          )}
+
+          {deleteError && (
+            <div className="notice notice-warn mb" role="alert">
+              <span>プロジェクトを削除できませんでした。もう一度お試しください。</span>
+            </div>
+          )}
+
+          {renameError && (
+            <div className="notice notice-warn mb" role="alert">
+              <span>名前を変更できませんでした。もう一度お試しください。</span>
             </div>
           )}
 
@@ -164,30 +233,114 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 保存したプロジェクトはまだありません。「新しい動画を作る」から始めましょう。
               </div>
             ) : (
-              projects.map((p) => (
-                <button
-                  key={p.projectId}
-                  className="list-item"
-                  onClick={() => void openProject(p.projectId)}
-                >
-                  <div
-                    className="thumb thumb-photo"
-                    style={{ width: 96, flexShrink: 0 }}
-                    aria-hidden="true"
-                  >
-                    <FolderIcon size={24} />
+              projects.map((p) =>
+                renamingId === p.projectId ? (
+                  <div key={p.projectId} className="list-item">
+                    <input
+                      className="input grow"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      placeholder="プロジェクト名"
+                      aria-label="プロジェクト名"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        // IME 変換確定の Enter では保存しない（日本語入力中の誤確定を防ぐ）。
+                        if (e.key === "Enter" && !e.nativeEvent.isComposing) void saveRename(p.projectId);
+                        if (e.key === "Escape") {
+                          setRenamingId(null);
+                          setRenameError(false);
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn btn-primary btn-icon"
+                      disabled={renameBusy || !renameValue.trim()}
+                      onClick={() => void saveRename(p.projectId)}
+                    >
+                      {renameBusy ? "保存中…" : "保存"}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      disabled={renameBusy}
+                      onClick={() => {
+                        setRenamingId(null);
+                        setRenameError(false);
+                      }}
+                    >
+                      やめる
+                    </button>
                   </div>
-                  <div className="grow">
+                ) : deletingId === p.projectId ? (
+                  <div key={p.projectId} className="notice notice-warn" role="alert">
+                    <span>
+                      「{p.projectName || "無題のプロジェクト"}」を削除しますか？保存した場面・素材・音声ごと消え、元に戻せません。
+                    </span>
                     <div className="row gap-sm">
-                      <strong>{p.projectName || "無題のプロジェクト"}</strong>
-                    </div>
-                    <div className="text-sm text-muted">
-                      更新日 {formatDate(p.updatedAt)}
+                      <button
+                        className="btn btn-primary btn-icon"
+                        disabled={deleteBusy}
+                        onClick={() => void removeProject(p.projectId)}
+                      >
+                        {deleteBusy ? "削除中…" : "削除する"}
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-icon"
+                        disabled={deleteBusy}
+                        onClick={() => {
+                          setDeletingId(null);
+                          setDeleteError(false);
+                        }}
+                      >
+                        やめる
+                      </button>
                     </div>
                   </div>
-                  <ChevronRightIcon size={20} className="text-faint" />
-                </button>
-              ))
+                ) : (
+                  <div key={p.projectId} className="list-item">
+                    <button
+                      className="row gap-sm grow"
+                      onClick={() => void openProject(p.projectId)}
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
+                    >
+                      <div
+                        className="thumb thumb-photo"
+                        style={{ width: 96, flexShrink: 0 }}
+                        aria-hidden="true"
+                      >
+                        <FolderIcon size={24} />
+                      </div>
+                      <div className="grow">
+                        <div className="row gap-sm">
+                          <strong>{p.projectName || "無題のプロジェクト"}</strong>
+                        </div>
+                        <div className="text-sm text-muted">
+                          更新日 {formatDate(p.updatedAt)}
+                        </div>
+                      </div>
+                      <ChevronRightIcon size={20} className="text-faint" />
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      onClick={() => startRename(p)}
+                      aria-label={`「${p.projectName || "無題のプロジェクト"}」の名前を変更`}
+                      title="名前を変更"
+                    >
+                      <PencilIcon size={18} />
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-icon"
+                      onClick={() => {
+                        setDeletingId(p.projectId);
+                        setDeleteError(false);
+                      }}
+                      aria-label={`「${p.projectName || "無題のプロジェクト"}」を削除`}
+                      title="削除"
+                    >
+                      <TrashIcon size={18} />
+                    </button>
+                  </div>
+                ),
+              )
             )}
           </div>
         </div>

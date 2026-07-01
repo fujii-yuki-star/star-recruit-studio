@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type VideoKind } from "../../domain/enums";
+import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import type { Template } from "../../domain/template/types";
@@ -17,14 +17,19 @@ import {
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
+import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
 import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
+import * as userTemplateFs from "../../infrastructure/userTemplateFs";
+import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
+import { templateAssetIdsOf } from "../../domain/template/templateAsset";
+import { deleteTemplateAsset, importTemplateAsset, loadTemplateAssetUrls } from "../../infrastructure/templateAssetFs";
 import {
-  listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
+  clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
@@ -43,6 +48,8 @@ export type SaveStatus = "idle" | "saving" | "saved" | "error";
 export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;
 /** BGM設定の編集可能フィールドのみ（assetId は取り込み時に確定するので更新対象から除外）。 */
 export type BgmPatch = Partial<Pick<BgmSettings, "volume" | "enabled" | "loop" | "fadeInSec" | "fadeOutSec">>;
+/** Undo/Redo が出し入れする文書slice（ADR-0020：assets は含めない＝素材取込のディスクIOは undo 対象外）。 */
+type DocSnapshot = { meta: ProjectHeader; parts: Part[]; scenes: Scene[] };
 
 interface ProjectState {
   status: GenerateStatus;
@@ -58,6 +65,8 @@ interface ProjectState {
   assets: Asset[];
   /** 素材の表示用src（data URL）。assetId→src。project.json には入れず永続化しない。 */
   assetSrcById: Record<string, string>;
+  /** テンプレ所有素材の表示用src（data URL）。tmpl_asset_NNN→src（ADR-0021・グローバル・プロジェクト非依存）。起動時に一括ロード。 */
+  templateAssetSrcById: Record<string, string>;
   /** 生成済みナレーション音声（data URL）。キーは単一 narration＝sceneId／掛け合い＝lineAudioKey(sceneId,lineId)（ADR-0015 PR-C2）。メモリ保持し保存時に voicePath として永続化する。 */
   narrationAudioById: Record<string, string>;
   /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
@@ -83,6 +92,10 @@ interface ProjectState {
   loadProject: (projectId: string) => Promise<void>;
   /** 保存済みプロジェクトの要約一覧を返す。 */
   listProjects: () => Promise<ProjectSummary[]>;
+  /** 保存済みプロジェクトをディスクから完全に削除する（#212）。 */
+  deleteProject: (projectId: string) => Promise<void>;
+  /** 保存済みプロジェクトの名前（projectName）を変更して保存する（#241）。 */
+  renameProject: (projectId: string, newName: string) => Promise<void>;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
   /** 末尾パートに新しい空の場面を追加し、その sceneId を返す（既定テンプレ）。テンプレ未読込時は ""。 */
@@ -126,6 +139,24 @@ interface ProjectState {
   removeAsset: (assetId: string) => void;
   /** 見た目パターンのパックを取り込み、既存に統合する（templateId で重複排除・B2/ADR-0012）。 */
   addTemplatePack: (templates: Template[]) => void;
+  /** ユーザー作成テンプレ（グローバル）を読み込み templates にマージする（起動時・ADR-0017）。 */
+  loadUserTemplates: () => Promise<void>;
+  /** ユーザーテンプレを保存し一覧へ反映する（新規 id は allocateUserTemplateId で払い出し済み前提）。 */
+  saveUserTemplate: (template: Template) => Promise<void>;
+  /** ユーザーテンプレを削除し一覧から外す（成功＝true。参照していたプロジェクトは読込時に §9 補正へ委ねる）。 */
+  deleteUserTemplate: (templateId: string) => Promise<boolean>;
+  /** 既存テンプレ（同梱/ユーザー）を複製してマイテンプレ（ユーザーテンプレ）として保存し、新 id を返す。 */
+  duplicateAsUserTemplate: (sourceTemplateId: string) => Promise<string>;
+  /** ゼロからマイテンプレを新規作成して保存し、新 id を返す（失敗時は ""）。向き/カテゴリ/名前を指定（ADR-0017）。 */
+  createBlankUserTemplate: (name: string, category: SceneCategory, orientation: Orientation) => Promise<string>;
+  /** テンプレ既定素材を取り込み、採番した tmpl_asset id を返す（失敗・非 Tauri は null）。表示用 src も登録する（ADR-0021）。 */
+  registerTemplateAsset: (file: File) => Promise<string | null>;
+  /** テンプレ保存/削除の失敗文言（§2-5。成功/次操作で消える）。保存状態とは別物。 */
+  templateError: string | null;
+  clearTemplateError: () => void;
+  /** 専用の見た目パターン編集画面で編集中のテンプレ id（#271。param 無しの画面遷移で「どれを編集するか」を渡す）。 */
+  editingTemplateId: string | null;
+  setEditingTemplateId: (templateId: string | null) => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
@@ -142,7 +173,26 @@ interface ProjectState {
   generateAllNarrations: () => Promise<void>;
   /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
   synthesizePreview: () => Promise<string>;
+  // ── Undo/Redo（ADR-0020・#211）。文書slice（meta/parts/scenes）のスナップショット履歴。assets は対象外。 ──
+  /** 過去（undo で戻る先）。末尾が直近の「編集前」。 */
+  past: DocSnapshot[];
+  /** 未来（redo でやり直す先）。 */
+  future: DocSnapshot[];
+  /** 連続操作（ドラッグ等）を1ステップに合成するためのネスト深さ（内部）。 */
+  _historyGroupDepth: number;
+  /** 文書を変える操作の「適用前」に呼び、現在状態を past へ積む（グループ中は積まない・transient 変更では呼ばない）。 */
+  pushHistory: () => void;
+  /** 連続操作の開始/終了（開始で1回だけ「編集前」を記録し、連続中の細かい更新は積まない）。 */
+  beginHistoryGroup: () => void;
+  endHistoryGroup: () => void;
+  /** 取り消し（直前の編集前へ戻す）。 */
+  undo: () => void;
+  /** やり直し（取り消した編集を再適用）。 */
+  redo: () => void;
 }
+
+/** 文書slice（undo 対象）を現在状態から取り出す。 */
+const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.parts, scenes: s.scenes });
 
 // AI 構成案プロバイダの選択：Tauri かつ Gemini キーありなら実 Gemini、なければ Mock
 // （非Tauri／オフライン／鍵未設定のフォールバック＝ADR-0010）。
@@ -238,6 +288,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
   saveStatus: "idle",
   importError: null,
+  past: [],
+  future: [],
+  _historyGroupDepth: 0,
   meta: defaultHeader(),
   parts: [],
   scenes: [],
@@ -245,12 +298,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   templates: loadBundledTemplates(),
   assets: [], // 新規は空（見本素材は実画像が無く混乱の元のため・α）。利用者が素材管理/ウィザードで追加する。
   assetSrcById: {},
+  templateAssetSrcById: {},
   narrationAudioById: {},
   isGeneratingNarration: false,
   isImporting: false,
   narrationError: null,
   bgmError: null,
   aiError: null,
+  templateError: null,
+  editingTemplateId: null,
   generate: async () => {
     // 多重起動ガード：開発時の StrictMode 二重 mount や連打で generate が同時に走ると、片方が失敗・片方が成功して
     // 「成功の前に失敗表示が出る」競合や、並行呼び出しによる API エラーを招く。生成中は1本だけに絞る（isImporting 等と同方針）。
@@ -309,6 +365,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       narrationAudioById: {},
       narrationError: null,
       aiError: null,
+      past: [], // 別文書＝履歴をクリア（ADR-0020）
+      future: [],
+      _historyGroupDepth: 0,
     }),
   saveProject: async () => {
     set({ saveStatus: "saving" });
@@ -452,16 +511,38 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assetSrcById,
       narrationAudioById,
       narrationError: null,
+      past: [], // 別文書を開く＝履歴をクリア（ADR-0020）
+      future: [],
+      _historyGroupDepth: 0,
     });
     setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
-  updateScene: (sceneId, update) =>
+  deleteProject: async (projectId) => {
+    await deleteProjectDoc(projectId);
+    // 削除したのが最後に開いたプロジェクトなら、次回起動の自動復元対象から外す（消えたものを開こうとしない）。
+    if (getLastProjectId() === projectId) clearLastProjectId();
+  },
+  renameProject: async (projectId, newName) => {
+    const name = newName.trim();
+    if (!name) return; // 空名は変更しない（UI 側でも保存を抑止）
+    // 保存済み project.json を読み、名前と更新日時だけ差し替えて書き戻す（他のデータは保持）。
+    const updatedAt = new Date().toISOString();
+    const doc = JSON.parse(await loadProjectDoc(projectId)) as Record<string, unknown>;
+    doc.projectName = name;
+    doc.updatedAt = updatedAt;
+    await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
+    // 開いているプロジェクトを改名したなら、画面表示名・更新日時（meta）も同期する。
+    if (get().meta.projectId === projectId) set((s) => ({ meta: { ...s.meta, projectName: name, updatedAt } }));
+  },
+  updateScene: (sceneId, update) => {
+    get().pushHistory(); // 適用前を履歴へ（ドラッグ中はグループ化で1ステップに合成・#211）
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
       // 編集したら「保存しました」表示を解除（未保存と分かるように）。
       saveStatus: "idle",
-    })),
+    }));
+  },
   addScene: () => {
     const s = get();
     const tmpl = s.templates[0];
@@ -487,6 +568,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       narration: { text: "", status: NARRATION_STATUS.none },
       warnings: [],
     };
+    get().pushHistory();
     set({
       scenes: [...s.scenes, newScene],
       parts: parts.map((p) =>
@@ -497,7 +579,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
     return sceneId;
   },
-  removeScene: (sceneId) =>
+  removeScene: (sceneId) => {
+    get().pushHistory();
     set((s) => ({
       // 削除して order を 1..N に振り直す（表示順＝配列順を保つ）。
       scenes: s.scenes
@@ -508,11 +591,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         sceneIds: p.sceneIds.filter((id) => id !== sceneId),
       })),
       saveStatus: "idle",
-    })),
+    }));
+  },
   moveScene: (sceneId, direction) => {
     const s = get();
     const next = moveSceneInList(s.scenes, s.parts, sceneId, direction);
     if (next.scenes === s.scenes) return; // 端＝変化なし（未保存にしない）
+    get().pushHistory();
     set({ ...next, saveStatus: "idle" });
   },
   duplicateScene: (sceneId) => {
@@ -520,6 +605,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = duplicateSceneInList(s.scenes, s.parts, sceneId, newId);
     if (next.scenes === s.scenes) return ""; // 対象なし＝変化なし
+    get().pushHistory();
     set({ ...next, saveStatus: "idle" });
     return newId;
   },
@@ -528,10 +614,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = splitSceneInList(s.scenes, s.parts, sceneId, splitIndex, newId);
     if (next.scenes === s.scenes) return ""; // 分割不能＝変化なし（未保存にしない）
+    get().pushHistory();
     set({ ...next, saveStatus: "idle" });
     return newId;
   },
-  applyProjectInfo: (input) =>
+  applyProjectInfo: (input) => {
+    get().pushHistory();
     set((s) => ({
       // ADR-0011: videoKind で会社情報/発表内容を排他に持つ。渡されなかった側を undefined にして
       // 別種別の入力が残らないようにする（保存時の schema 排他 not:required を満たす）。additionalNotes は両用途共通。
@@ -553,13 +641,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           : s.meta.videoSettings,
       },
       saveStatus: "idle",
-    })),
+    }));
+  },
   changeOrientation: (target) => {
     const s = get();
     const result = changeScenesOrientation(s.scenes, s.templates, target);
     // 1件も切り替えられない（既に目標向き or 対応する見た目なし）なら向き・場面とも変えない。
     // ＝変換先が無いのに向きだけ変えて全場面を不整合にしてしまうのを防ぐ（B5-b レビュー）。
     if (result.changed > 0) {
+      get().pushHistory();
       set({
         scenes: result.scenes,
         meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, aspectRatio: target } },
@@ -568,22 +658,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     return { changed: result.changed, unsupported: result.unsupported };
   },
-  setFontId: (fontId) =>
+  setFontId: (fontId) => {
+    get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, fontId } },
       saveStatus: "idle",
-    })),
-  updateVoiceSettings: (patch) =>
+    }));
+  },
+  updateVoiceSettings: (patch) => {
+    get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } },
       saveStatus: "idle",
-    })),
-  updateBgmSettings: (patch) =>
+    }));
+  },
+  updateBgmSettings: (patch) => {
+    get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, bgmSettings: { ...s.meta.bgmSettings, ...patch } },
       saveStatus: "idle",
-    })),
-  setBundledBgm: (bundledBgmId) =>
+    }));
+  },
+  setBundledBgm: (bundledBgmId) => {
+    get().pushHistory();
     set((s) => ({
       meta: {
         ...s.meta,
@@ -598,7 +695,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       },
       saveStatus: "idle",
       bgmError: null,
-    })),
+    }));
+  },
   updateAsset: (assetId, update) =>
     set((s) => ({
       assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)),
@@ -615,6 +713,73 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       for (const t of incoming) byId.set(t.templateId, t);
       return { templates: [...byId.values()] };
     }),
+  loadUserTemplates: async () => {
+    // グローバルのユーザーテンプレを読み、templates の user_tmpl 部分を差し替える（冪等）。非 Tauri は空。
+    // 同時にテンプレ所有素材の表示用 URL も一括ロード（プロジェクト非依存・起動時＝ADR-0021 PR C）。
+    const [user, templateAssetSrcById] = await Promise.all([
+      userTemplateFs.loadUserTemplates(),
+      loadTemplateAssetUrls(),
+    ]);
+    set((s) => ({ templates: replaceUserTemplates(s.templates, user), templateAssetSrcById }));
+  },
+  saveUserTemplate: async (template) => {
+    try {
+      await userTemplateFs.saveUserTemplate(template);
+      set((s) => ({ templates: upsertUserTemplate(s.templates, template), templateError: null }));
+    } catch {
+      set({ templateError: "見た目パターンを保存できませんでした。もう一度お試しください。" });
+    }
+  },
+  deleteUserTemplate: async (templateId) => {
+    // ユーザーテンプレ以外（同梱/取り込みパック）はこのアクションで消さない（誤渡し時の同梱消去防止）。
+    if (!isUserTemplate(templateId)) return false;
+    // 削除前に所有素材 id を控える（テンプレ素材は登録テンプレ専用ゆえ、テンプレと一緒に掃除する＝ADR-0021）。
+    const owned = templateAssetIdsOf(get().templates.find((t) => t.templateId === templateId)?.layers ?? []);
+    try {
+      await userTemplateFs.deleteUserTemplate(templateId);
+      // 各素材ファイルの削除失敗は templateAssetFs 内で握る（非致命）。失敗時はファイルが残るが、参照していたテンプレは消えるため未参照＝孤立（disk のみ・許容。安全な一括掃除は将来＝読込失敗時の誤削除を避けるため自動掃除はしない）。
+      for (const assetId of owned) await deleteTemplateAsset(assetId);
+      set((s) => ({
+        templates: s.templates.filter((t) => t.templateId !== templateId),
+        templateAssetSrcById: Object.fromEntries(
+          Object.entries(s.templateAssetSrcById).filter(([id]) => !owned.includes(id)),
+        ),
+        templateError: null,
+      }));
+      return true;
+    } catch {
+      set({ templateError: "見た目パターンを削除できませんでした。もう一度お試しください。" });
+      return false;
+    }
+  },
+  duplicateAsUserTemplate: async (sourceTemplateId) => {
+    const s = get();
+    const source = s.templates.find((t) => t.templateId === sourceTemplateId);
+    if (!source) return "";
+    const newId = userTemplateFs.allocateUserTemplateId(s.templates.map((t) => t.templateId));
+    // 同梱/別ユーザーテンプレを複製し、新 id とコピー名で保存（saveUserTemplate が保存＋一覧反映＋エラー処理）。
+    const copy: Template = { ...source, templateId: newId, name: `${source.name}のコピー` };
+    await get().saveUserTemplate(copy);
+    // 保存に失敗していたら id を返さない（呼び出し側で選択しない）。
+    return get().templates.some((t) => t.templateId === newId) ? newId : "";
+  },
+  createBlankUserTemplate: async (name, category, orientation) => {
+    const s = get();
+    const newId = userTemplateFs.allocateUserTemplateId(s.templates.map((t) => t.templateId));
+    // ゼロから（背景1枚の最小構成）作って保存（saveUserTemplate が保存＋一覧反映＋エラー処理）。複製と同じ後処理。
+    const blank = buildBlankTemplate(newId, name, category, orientation);
+    await get().saveUserTemplate(blank);
+    return get().templates.some((t) => t.templateId === newId) ? newId : "";
+  },
+  registerTemplateAsset: async (file) => {
+    // 取り込み→グローバル保存（Tauri）→ 表示用 src を合流。採番は現存テンプレ素材 id を基に最大連番+1。
+    const result = await importTemplateAsset(file, Object.keys(get().templateAssetSrcById));
+    if (!result) return null;
+    set((s) => ({ templateAssetSrcById: { ...s.templateAssetSrcById, [result.assetId]: result.url } }));
+    return result.assetId;
+  },
+  clearTemplateError: () => set({ templateError: null }),
+  setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。
@@ -942,4 +1107,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const result = await voiceProvider.synthesize({ text, ...v });
     return result.audioDataUrl;
   },
+  // ── Undo/Redo（ADR-0020・#211）。文書を変える action は適用前に pushHistory を呼ぶ。連続操作は begin/endHistoryGroup で1ステップに合成。 ──
+  pushHistory: () => {
+    if (get()._historyGroupDepth > 0) return; // グループ中は begin で記録済みなので積まない（ドラッグ＝1ステップ）
+    set((s) => recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)));
+  },
+  beginHistoryGroup: () =>
+    // 連続操作の開始。深さ0→1 のときだけ「編集前」を1回記録する。記録と深さ更新は1回の set でアトミックに。
+    set((s) => {
+      if (s._historyGroupDepth === 0) {
+        const snap = recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
+        return { ...snap, _historyGroupDepth: 1 };
+      }
+      return { _historyGroupDepth: s._historyGroupDepth + 1 };
+    }),
+  endHistoryGroup: () => set((s) => ({ _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) })),
+  undo: () =>
+    set((s) => {
+      const r = undoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
+      if (!r) return {}; // 戻せない
+      return { ...r.restored, past: r.history.past, future: r.history.future, saveStatus: "idle" };
+    }),
+  redo: () =>
+    set((s) => {
+      const r = redoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
+      if (!r) return {}; // やり直せない
+      return { ...r.restored, past: r.history.past, future: r.history.future, saveStatus: "idle" };
+    }),
 }));

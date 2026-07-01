@@ -14,3 +14,23 @@ export const NARRATOR_CREDIT = `${CREDIT_PREFIX}${DEFAULT_CHARACTER}`;
 export function creditForSpeaker(speaker: number | null | undefined): string {
   return `${CREDIT_PREFIX}${characterForSpeaker(speaker) ?? DEFAULT_CHARACTER}`;
 }
+
+/**
+ * 掛け合いの1行のクレジット文言（#243）。行に**有効な**話者があればそのキャラ、無ければ（未指定/継承/不明）
+ * 場面/動画の話者のクレジット（fallbackCredit）を使う＝実際に合成される声（resolveLineVoice）とクレジットを一致させる。
+ */
+export function creditForLine(line: { speaker?: number | null }, fallbackCredit: string): string {
+  return line.speaker != null && characterForSpeaker(line.speaker) != null
+    ? creditForSpeaker(line.speaker)
+    : fallbackCredit;
+}
+
+/**
+ * 複数行の使用話者をまとめたクレジット文言（#243）。掛け合いを1フレームで焼くとき（動画スロットあり等で
+ * 行ごとに分割できない場合）に使用キャラを全て併記して網羅する。重複は除き「 / 」で連結。
+ */
+export function creditForLines(lines: { speaker?: number | null }[], fallbackCredit: string): string {
+  const set = new Set<string>();
+  for (const l of lines) set.add(creditForLine(l, fallbackCredit));
+  return set.size > 0 ? Array.from(set).join(' / ') : fallbackCredit;
+}

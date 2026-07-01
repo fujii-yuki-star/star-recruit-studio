@@ -1,9 +1,10 @@
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
 // 注: テキスト折返しは暫定で文字幅概算（半角≈0.55em・全角≈1em）。フォント実測への置換は将来（05 §10 / ADR-0001 未解決論点）。
-import type { Fit } from '../domain/enums';
+import { TEXT_ALIGN, type Fit } from '../domain/enums';
 import { fontFamilyForId, isKnownFontId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
+import { DEFAULT_LINE_HEIGHT } from './layout';
 import { freeShapeSvg } from './freeShapes';
 
 // 既定の font-family（opts.fontFamily 未指定時のフォールバック＝同梱の既定フォント）。
@@ -58,7 +59,7 @@ function textToSvg(item: TextItem, fontFamily: string): string {
   // 要素自身の fontId（既知）を優先し、未指定/不明は場面既定（fontFamily＝場面→動画全体→既定の解決済み）へ（#178）。
   const family = isKnownFontId(item.fontId) ? fontFamilyForId(item.fontId) : fontFamily;
   const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines);
-  const lineHeight = item.fontSize * 1.3;
+  const lineHeight = item.fontSize * (item.lineHeight ?? DEFAULT_LINE_HEIGHT); // 行間（#209）
 
   if (item.background) {
     const bgHeight = lineHeight * lines.length + item.fontSize * 0.6;
@@ -67,10 +68,20 @@ function textToSvg(item: TextItem, fontFamily: string): string {
     );
   }
 
+  // 揃え（#209）：text-anchor と x を決める。未指定=left。背景の矩形は要素幅のまま。
+  // ※ 'middle'/'end'/'start' は SVG text-anchor の値（外部API）であり TextAlign enum とは別物。
+  const align = item.textAlign ?? TEXT_ALIGN.left;
+  const anchor = align === TEXT_ALIGN.center ? 'middle' : align === TEXT_ALIGN.right ? 'end' : 'start';
+  const textX = align === TEXT_ALIGN.center ? item.x + item.w / 2 : align === TEXT_ALIGN.right ? item.x + item.w : item.x;
+  // 縁取り（#209）：strokeWidth>0 のとき文字に stroke を敷く。paint-order=stroke で塗りの下に置き可読性を保つ。
+  const stroke = item.strokeColor && item.strokeWidth && item.strokeWidth > 0
+    ? ` stroke="${item.strokeColor}" stroke-width="${item.strokeWidth}" paint-order="stroke"`
+    : '';
+
   const baseY = item.y + item.fontSize;
   lines.forEach((line, i) => {
     parts.push(
-      `<text x="${item.x}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}">${escapeXml(line)}</text>`,
+      `<text x="${textX}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}" text-anchor="${anchor}"${stroke}>${escapeXml(line)}</text>`,
     );
   });
   return parts.join('\n');
@@ -117,7 +128,7 @@ function imageToSvg(item: ImageItem, src: string | undefined, fontFamily: string
   ].join('');
 }
 
-function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: string): string {
+function renderItemInner(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: string): string {
   switch (item.kind) {
     case 'fill':
       return freeShapeSvg(item);
@@ -126,6 +137,16 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: strin
     case 'text':
       return textToSvg(item, fontFamily);
   }
+}
+
+function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: string): string {
+  const inner = renderItemInner(item, opts, fontFamily);
+  // 回転（#208）：中心(cx,cy)を軸に rotate でくるむ。未指定/0 は包まない（出力 SVG の差分を最小化）。
+  const rot = item.rotation;
+  if (rot == null || rot === 0) return inner;
+  const cx = item.x + item.w / 2;
+  const cy = item.y + item.h / 2;
+  return `<g transform="rotate(${rot} ${cx} ${cy})">${inner}</g>`;
 }
 
 // 常時クレジット（ADR-0003）。背景に依らず読めるよう半透明の暗いピルを敷き、右下に白文字で最前面へ。

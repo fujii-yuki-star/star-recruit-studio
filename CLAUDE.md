@@ -31,7 +31,7 @@
 1. **AIは動画を生成しない。** AIは動画構成JSON（`ai-video-plan`）を返すだけ。映像合成はソフトが行う。
 2. **AI出力は必ず検証してから内部データへ変換する。** 生検証なしに `project.scenes` へ流し込まない（→ `11.8` / `12.8`）。
 3. **通常UIに技術用語を出さない。** `JSON / FFmpeg / LLM / Provider / templateId / assetId / レンダリング / バリデーション` 等は表示禁止。置換語は `06_UI_SPEC.md §3`。
-4. **テンプレート駆動。** 座標・配置はテンプレートが決める。ユーザーに毎回座標を触らせない。
+4. **テンプレート駆動。** 座標・配置はテンプレートが決める。**通常の場面編集ではユーザーに毎回座標を触らせない**。座標を直接編集するのは **FREE（自由配置）場面**と**テンプレート作成エディタ**（見た目パターンの作成・編集＝ADR-0017）に限定する。
 5. **エラーは「原因」でなく「次の行動」を示す。** 例: `Invalid templateId` ❌ →「見た目パターンが見つからないため標準を使います」⭕。エラー・状態の正典は [`15_ERROR_STATE_MODEL.md`](docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md)。
 6. **外部送信は事前確認必須。** 元動画ファイルは送らない（代表フレームのみ）。送信前確認画面を必ず通す。
 7. **数値・enum・IDはハードコードしない。** 正典（`11.3` enum / `11.4` 定数）を単一の参照元とし、定数モジュール経由で使う。
@@ -129,7 +129,9 @@ src/
 
 ## 10. MVPでやらないこと
 
-本格タイムライン編集 / キーフレームアニメ / 3D・Live2D / 複雑エフェクト / テンプレート作成エディタ / 正方形（1:1）動画 / 全Provider対応 / AIによる映像生成 / 口パクアニメ。（`01 §16.2`・`09 §8`）
+本格タイムライン編集 / キーフレームアニメ / 3D・Live2D / 複雑エフェクト / 正方形（1:1）動画 / 全Provider対応 / AIによる映像生成 / 口パクアニメ。（`01 §16.2`・`09 §8`）
+
+> ※ **テンプレート作成エディタ**は当初 MVP 除外だったが、利用者が見た目パターンを作る要件により**対応決定**（[`adr/0016`](docs/yuko_recruit_docs/adr/0016-detailed-editing-completion-roadmap.md)／[`adr/0017`](docs/yuko_recruit_docs/adr/0017-template-authoring-editor.md) **Accepted**・2026-06-27・EPIC #214）＝本項「テンプレート作成エディタ」除外を解除。**ゼロから作成も可（フル）**・ユーザーテンプレは**普通の Template**としてグローバル永続化し、AI/簡易/詳細・描画は既存経路を共有（`decor` レイヤーのみ非開放・AI 入力からは既定で除外）。
 
 > ※ **縦型動画（9:16）**は当初 MVP 除外だったが、ユーザー要件により**対応決定**（[`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**・2026-06-19・#118）＝本項の「縦型」除外を解除。**正方形（1:1）は引き続き MVP 外**（schema 枠のみ残す）。
 
@@ -148,6 +150,11 @@ src/
 - ゆうこ＝自社保有で権利クリア（`17`）／フォントはOFL系を同梱（游ゴシック等は同梱不可。`13 §6`）。
 - 縦型動画（9:16・1080×1920）: [`adr/0012`](docs/yuko_recruit_docs/adr/0012-aspect-ratio-and-portrait.md) **Accepted**（2026-06-19）— α版に対応決定。**9:16のみ**（1:1は将来）・縦テンプレは**全9カテゴリ**・既存は**16:9固定移行＋向き変更（16:9⇆9:16）導線**・尺上限は横型踏襲。コーデックとは独立の別トラック（#118）。
 - コンポーネント/対話テスト基盤: [`adr/0014`](docs/yuko_recruit_docs/adr/0014-component-test-foundation.md) **Accepted**（2026-06-25）— Vitest に jsdom を追加し `@testing-library/react`＋`jest-dom` を導入。**既定 environment は node 維持**・DOM が要る `*.test.tsx` のみファイル先頭 `// @vitest-environment jsdom` で個別切替（既存 node 純粋ロジックテストへ波及なし）。最小構成（happy-dom ではなく jsdom・user-event は当面見送り）。正典/schemaVersion 影響なし。
+- テンプレ作成エディタ（ユーザーテンプレ）: [`adr/0017`](docs/yuko_recruit_docs/adr/0017-template-authoring-editor.md) **Accepted**（2026-06-27・EPIC #214）— 利用者が見た目パターンを**ゼロから作成/複製編集**できるフルエディタ（§10 緩和＝[`adr/0016`](docs/yuko_recruit_docs/adr/0016-detailed-editing-completion-roadmap.md)）。ユーザーテンプレ＝**普通の Template**（`user_tmpl_NNN`・グローバル永続化・`template.schema` 不変＝`11 §2.1`）。①の編集UXを流用、`decor` 非開放、**AI 入力からは既定で除外**。場面のテキスト欄はテンプレのテキスト層から生成（④b）。
+- 場面横断タイムライン／複数トラック（③・**設計のみ**）: [`adr/0018`](docs/yuko_recruit_docs/adr/0018-cross-scene-timeline-model.md) **Proposed**（2026-06-28・α-3 ③／実装は α-4+）— **2モデル方式**：場面ベースを**正準**（AI 生成・場面編集）に維持しつつ、`compileTimeline(project)` で**時間軸＋トラック**へ機械射影し、書き出しと**専用タイムラインUI（別画面）**が共有。時間軸の自由編集は場面アンカーの任意オーバーレイ層に保存し AI/簡易は無視（推奨）。AI は場面のみ・**単一パイプライン維持**（ADR-0007 M-A）、場面は静止のまま（per-frame は④/`adr/0019`）。`§10`「完全自由タイムライン」を将来段階解除。
+- キーフレーム／場面内アニメ（④・**設計のみ**）: [`adr/0019`](docs/yuko_recruit_docs/adr/0019-keyframe-animation-model.md) **Proposed**（2026-06-28・α-3 ④／実装は α-4+）— **ADR-0001 の選択肢C（毎フレーム Web 描画）を発火**＝`layoutScene(scene, template, t)` でキーフレーム補間したレイアウトをフレームごとに SVG→PNG。**パリティをフレーム単位で構造保証**（preview/export 同一）。キーフレームは ADR-0018 オーバーレイに格納（AI/場面正準は不変）。**アニメ無し場面は静止1枚を維持**（後方互換）。承認＋実装時に **`adr/0001` を supersede**（「場面内静止」制約のみ置換）。`§10`「キーフレーム」を将来段階解除（口パク・3Dは対象外）。
+- テンプレ既定素材（template-owned default assets）: [`adr/0021`](docs/yuko_recruit_docs/adr/0021-template-owned-assets.md) **Accepted**（2026-06-29・α-3 追加・実装は EPIC サブPR A〜D）— テンプレが**既定素材（背景等）を持てる**。素材ファイルは**グローバル保存**（`user_templates/assets`・id=`tmpl_asset_NNN`）、`Layer.assetId`＋テンプレ `assets` マニフェストで参照。描画は **`scene.assetRefs[layer.id] ?? layer.assetId`**（場面素材が優先・テンプレ既定はフォールバック）。見本は持ち主写真の自動流し込みをやめる（①）。**ADR-0017 の「`template.schema` 不変／1テンプレ=1ファイル」を一部改める**（schema は任意追加で版据え置き＝`11 §1`／素材を持つテンプレは単一JSON共有不可＝bundle は将来）。
+- 要素のグループ化（groups＋独自transform）: [`adr/0022`](docs/yuko_recruit_docs/adr/0022-element-grouping.md) **Accepted**（2026-06-30・α-3 追加・**v0.3.0 含む**・実装は EPIC サブPRに分割）— 要素（図形/素材/文字/レイヤー）を**グループ**（`group_NNN`・自前 transform を持つ独立オブジェクト）に束ね、まとめて移動/拡縮/回転/非表示/ロック/重ね順。**FREE＋テンプレ両エディタ**（テンプレは複数選択を新設）。描画は**共有 layout でグループ transform を前合成**して `LayoutItem` に落とす＝**プレビュー＝書き出しのパリティ維持**（ADR-0001）。`scene.groups`/`template.groups` 任意追加（project 版上げ・template 据え置き）。AI 出力にグループは無い（単一パイプライン・ADR-0007）。α-4 キーフレーム（ADR-0019）の animation 対象にも。
 
 **未決定（リリース前に確認）**
 > 全体整理は [`13_DEPENDENCIES_AND_LICENSING.md`](docs/yuko_recruit_docs/13_DEPENDENCIES_AND_LICENSING.md) §9 チェックリスト。
