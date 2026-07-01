@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { TRANSITION_TYPE } from "../../domain/enums";
 import type { TransitionType } from "../../domain/enums";
 import type { Timeline, TimelineClip, TimelineTrackKind } from "../../domain/project/compileTimeline";
+import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import "./timeline.css";
 
 /** overlay クリップのドラッグ種別。move＝本体移動、trim-start／trim-end＝左右端のトリミング。 */
@@ -177,14 +178,22 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
                   const isDragging = drag?.id === clip.id;
                   const baseLeft = clip.startSec * pxPerSec;
                   const baseWidth = (clip.endSec - clip.startSec) * pxPerSec;
-                  // ドラッグ中のプレビュー（確定は drop）：move=左位置、trim-end=幅、trim-start=左位置＋幅（右端固定）。
+                  // ドラッグ中のプレビューは確定（editClip）と同じクランプ式で座標を出す（drop 時のスナップバックを防ぐ）。
                   let left = baseLeft;
                   let width = baseWidth;
                   if (isDragging) {
                     const off = drag.offsetPx;
-                    if (drag.mode === "move") left = baseLeft + off;
-                    else if (drag.mode === "trim-end") width = baseWidth + off;
-                    else { left = baseLeft + off; width = baseWidth - off; }
+                    const end = baseLeft + baseWidth; // 右端(px)
+                    const minPx = TIMELINE_MIN_CLIP_SEC * pxPerSec;
+                    if (drag.mode === "move") {
+                      left = Math.max(0, baseLeft + off);
+                    } else if (drag.mode === "trim-end") {
+                      width = Math.max(minPx, baseWidth + off);
+                    } else {
+                      // trim-start：右端(end)を固定し、左端を [0, end−最小長] にクランプ。width は end から逆算。
+                      left = Math.min(Math.max(0, baseLeft + off), end - minPx);
+                      width = end - left;
+                    }
                   }
                   return (
                     <div

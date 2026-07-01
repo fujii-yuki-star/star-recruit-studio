@@ -97,6 +97,20 @@ describe("TimelineView", () => {
     expect(onDrag).toHaveBeenCalledWith("ovclip_001", "trim-end", 1);
   });
 
+  it("左端トリミングのプレビューは右端を固定する（0秒クランプ時に膨張しない）", () => {
+    const tl = sampleTimeline();
+    // startSec 0・長さ3秒（右端 px = 108 at pxPerSec 36）の overlay クリップ。
+    tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 0, endSec: 3, label: "先頭テロップ", origin: "overlay" });
+    const { container } = render(<TimelineView timeline={tl} editable onClipDrag={vi.fn()} />);
+    const leftHandle = container.querySelector(".timeline-clip-handle--left") as HTMLElement;
+    fireEvent.pointerDown(leftHandle, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(leftHandle, { clientX: 50, pointerId: 1 }); // -50px（先頭より左＝0でクランプ）
+    // 右端固定：left=0・width=右端(108)。膨張しない（旧実装は width 158px になっていた）。
+    const clipEl = screen.getByText("先頭テロップ");
+    expect(clipEl.style.left).toBe("0px");
+    expect(clipEl.style.width).toBe("108px");
+  });
+
   it("移動0で離した場合は onClipDrag を呼ばない（無駄な履歴を作らない）", () => {
     const tl = sampleTimeline();
     tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 1, endSec: 4, label: "追加テロップ", origin: "overlay" });

@@ -136,10 +136,10 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
                 <input
                   className="input"
                   type="number"
-                  min={0.1}
+                  min={TIMELINE_MIN_CLIP_SEC}
                   step={0.5}
                   value={selectedClip.durationSec}
-                  onChange={(e) => updateOverlayClip(selectedClip.id, { durationSec: Math.max(0.1, Number(e.target.value) || 0.1) })}
+                  onChange={(e) => updateOverlayClip(selectedClip.id, { durationSec: Math.max(TIMELINE_MIN_CLIP_SEC, Number(e.target.value) || TIMELINE_MIN_CLIP_SEC) })}
                 />
               </div>
             </div>
