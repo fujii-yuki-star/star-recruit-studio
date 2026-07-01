@@ -86,10 +86,36 @@ function findClip(timeline: Timeline, id: string): TimelineClip | undefined {
   return undefined;
 }
 
-/** 生の deltaSec を、吸着させるエッジ（move/trim-start=start、trim-end=end）で snap した deltaSec へ変換する。 */
-function snappedDelta(clip: TimelineClip, mode: ClipDragMode, rawDeltaSec: number, targets: number[], thresholdSec: number): number {
+/** ドラッグ対象クリップのアンカー場面のグローバル開始秒（絶対時間クリップは0）。到達可能範囲の下限に使う。 */
+function anchorGlobalStartOf(timeline: Timeline, clip: TimelineClip): number {
+  return clip.sceneId ? timeline.scenes.find((s) => s.sceneId === clip.sceneId)?.startSec ?? 0 : 0;
+}
+
+/**
+ * 生の deltaSec を、吸着＋到達可能範囲へのクランプ込みの deltaSec へ変換する（editClip と一致＝プレビュー/確定のズレ防止）。
+ * 到達可能範囲：move/trim-start の開始は [アンカー開始, …]（trim-start は上限 end−最小長）、trim-end の終了は [開始+最小長, …]。
+ * アンカー相対の startSec を editClip が max(0,…) でクランプするのに合わせ、吸着先のグローバル秒もアンカー開始を下限にする。
+ */
+function snappedDelta(
+  clip: TimelineClip,
+  mode: ClipDragMode,
+  rawDeltaSec: number,
+  targets: number[],
+  thresholdSec: number,
+  anchorGlobalStart: number,
+  minClipSec: number,
+): number {
   const baseEdge = mode === "trim-end" ? clip.endSec : clip.startSec;
-  return snapTimeSec(baseEdge + rawDeltaSec, targets, thresholdSec) - baseEdge;
+  const snapped = snapTimeSec(baseEdge + rawDeltaSec, targets, thresholdSec);
+  let clamped: number;
+  if (mode === "trim-end") {
+    clamped = Math.max(clip.startSec + minClipSec, snapped);
+  } else if (mode === "trim-start") {
+    clamped = Math.min(Math.max(anchorGlobalStart, snapped), clip.endSec - minClipSec);
+  } else {
+    clamped = Math.max(anchorGlobalStart, snapped);
+  }
+  return clamped - baseEdge;
 }
 
 export function TimelineView({ timeline, editable, selectedClipId, onSelectClip, onClipDrag }: TimelineViewProps) {
@@ -121,7 +147,7 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
           const tl = timelineRef.current;
           const clip = findClip(tl, m.id);
           const delta = clip
-            ? snappedDelta(clip, m.mode, rawDeltaSec, snapTargetsFor(tl, m.id), SNAP_THRESHOLD_PX / pxPerSec)
+            ? snappedDelta(clip, m.mode, rawDeltaSec, snapTargetsFor(tl, m.id), SNAP_THRESHOLD_PX / pxPerSec, anchorGlobalStartOf(tl, clip), TIMELINE_MIN_CLIP_SEC)
             : rawDeltaSec;
           onClipDrag?.(m.id, m.mode, delta);
         }
@@ -232,7 +258,9 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
                   let width = baseWidth;
                   if (isDragging) {
                     // 吸着後の offset（px）でプレビュー＝確定（onClipDrag へ渡す値）と一致させる。
-                    const off = snappedDelta(clip, drag.mode, drag.offsetPx / pxPerSec, snapTargetsFor(timeline, clip.id), SNAP_THRESHOLD_PX / pxPerSec) * pxPerSec;
+                    const off =
+                      snappedDelta(clip, drag.mode, drag.offsetPx / pxPerSec, snapTargetsFor(timeline, clip.id), SNAP_THRESHOLD_PX / pxPerSec, anchorGlobalStartOf(timeline, clip), TIMELINE_MIN_CLIP_SEC) *
+                      pxPerSec;
                     const end = baseLeft + baseWidth; // 右端(px)
                     const minPx = TIMELINE_MIN_CLIP_SEC * pxPerSec;
                     if (drag.mode === "move") {
