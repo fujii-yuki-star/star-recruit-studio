@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createPartId,
+  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createOverlayClipId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
-  isSupportedSchemaVersion, parseProjectDoc,
+  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject,
 } from './persistence';
 import type { ProjectHeader } from './persistence';
 
@@ -101,6 +101,19 @@ describe('createGroupId (§2.1 group_{NNN}・scene/template 内一意・ADR-0022
   });
 });
 
+describe('createOverlayClipId (§2.1 ovclip_{NNN}・project 内一意・ADR-0018)', () => {
+  it('既存が無ければ ovclip_001', () => {
+    expect(createOverlayClipId([])).toBe('ovclip_001');
+  });
+  it('既存と衝突しない最小番号を採る（歯抜けを埋める）', () => {
+    expect(createOverlayClipId(['ovclip_001', 'ovclip_003'])).toBe('ovclip_002');
+  });
+  it('999 を超えると4桁になる（pattern ^ovclip_[0-9]{3,}$）', () => {
+    const existing = Array.from({ length: 999 }, (_, i) => `ovclip_${String(i + 1).padStart(3, '0')}`);
+    expect(createOverlayClipId(existing)).toBe('ovclip_1000');
+  });
+});
+
 describe('createLineId (§2.1 line_{NNN}・scene 内一意・ADR-0015)', () => {
   it('既存が無ければ line_001', () => {
     expect(createLineId([])).toBe('line_001');
@@ -142,6 +155,19 @@ describe('assembleProject', () => {
     expect(g.generalBrief?.targetAudience).toBe('全社員'); // ADR-0011 #12: 対象視聴者
     // general では companyInfo を出力しない（schema if/then/else の not:required を満たす・ADR-0011）。
     expect('companyInfo' in g).toBe(false);
+  });
+});
+
+describe('projectHeaderFromProject（assembleProject の逆・#324）', () => {
+  it('任意フィールド（timelineOverlay・toneSettings）を取りこぼさず round-trip する', () => {
+    const overlay: ProjectHeader['timelineOverlay'] = { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', startSec: 1, durationSec: 2, text: 'x' }] };
+    const p = assembleProject(header({ toneSettings: { tone: 'やわらか' }, timelineOverlay: overlay }), [], [], []);
+    const back = projectHeaderFromProject(p);
+    // 読込時に store が meta を組む経路の縮図：overlay 等のヘッダ系フィールドが消えない。
+    expect(back.timelineOverlay).toEqual(overlay);
+    expect(back.toneSettings).toEqual({ tone: 'やわらか' });
+    // ヘッダ→Project→ヘッダ→Project が一致（フィールド取りこぼしの検出）。
+    expect(assembleProject(back, [], [], [])).toEqual(p);
   });
 });
 
@@ -220,6 +246,13 @@ describe('parseProjectDoc', () => {
     const back = parseProjectDoc(JSON.stringify(doc));
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.13→1.14 へ昇格
     expect(back.scenes[0].groups?.[0]).toMatchObject({ id: 'group_001', members: ['free_001'] });
+  });
+  it('タイムライン層：timelineOverlay を持つ旧版(1.14)が移行し保持する（ADR-0018）', () => {
+    const overlay = { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', startSec: 1, durationSec: 2, text: '補足' }] };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.14', timelineOverlay: overlay } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.14→1.15 へ昇格（任意追加＝変換不要）
+    expect(back.timelineOverlay).toEqual(overlay);
   });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;

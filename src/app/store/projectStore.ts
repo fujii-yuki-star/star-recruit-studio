@@ -13,7 +13,7 @@ import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
   assembleProject, createAssetId, createBgmId, createPartId, createProjectId, createSceneId,
-  defaultVideoSettings, defaultVoiceSettings, parseProjectDoc,
+  defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
@@ -486,22 +486,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       status: "ready",
       saveStatus: "idle",
-      meta: {
-        projectId: project.projectId,
-        projectName: project.projectName,
-        // ADR-0011: 種別・発表内容・自由記述も復元する（欠落すると保存→再読込で general が recruit に化ける）。
-        videoKind: project.videoKind,
-        purpose: project.purpose,
-        createdAt: project.createdAt,
-        updatedAt: project.updatedAt,
-        videoSettings: project.videoSettings,
-        companyInfo: project.companyInfo,
-        generalBrief: project.generalBrief,
-        additionalNotes: project.additionalNotes,
-        toneSettings: project.toneSettings,
-        voiceSettings: project.voiceSettings,
-        bgmSettings: project.bgmSettings,
-      },
+      // 保存用ヘッダは projectHeaderFromProject に一元化（Project のヘッダ系フィールドの取りこぼしを防ぐ・#324）。
+      // ADR-0011 の種別/発表内容/自由記述、ADR-0018 の timelineOverlay もここでまとめて復元される。
+      meta: projectHeaderFromProject(project),
       assets: project.assets.map((a) =>
         videoThumb[a.assetId] ? { ...a, thumbnailPath: videoThumb[a.assetId] } : a,
       ),
