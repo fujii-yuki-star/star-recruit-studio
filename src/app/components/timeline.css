@@ -1,0 +1,145 @@
+/* 読み取り専用タイムライン（ADR-0018 ③(2)）。compileTimeline の結果を時間軸で可視化する。
+   配色・寸法はテーマ変数（theme.css）に合わせる。クリップの左位置/幅だけ動的（インライン style）。 */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.timeline-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+}
+
+.timeline-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+
+.timeline-inner {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+}
+
+/* 各行（ルーラー＋レーン）：左に固定ラベル、右に時間軸トラック。 */
+.timeline-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.timeline-row-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+  width: 84px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 8px;
+  background: var(--color-surface-alt);
+  border-right: 1px solid var(--color-border-strong);
+  font-size: 12px;
+  color: var(--color-text);
+}
+.timeline-row-label .sub {
+  font-size: 10px;
+  color: var(--color-text-faint);
+}
+
+.timeline-track {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+/* 時間ルーラー */
+.timeline-ruler {
+  height: 22px;
+  border-bottom: 1px solid var(--color-border);
+}
+.timeline-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid var(--color-border);
+  padding-left: 3px;
+  font-size: 10px;
+  line-height: 22px;
+  color: var(--color-text-faint);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* レーン */
+.timeline-lane {
+  height: 40px;
+  border-bottom: 1px solid var(--color-border);
+}
+.timeline-lane:last-child {
+  border-bottom: none;
+}
+
+/* クリップ */
+.timeline-clip {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  min-width: 2px;
+  box-sizing: border-box;
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 30px;
+  color: var(--color-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.timeline-clip--video {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+.timeline-clip--telop {
+  background: var(--color-yellow);
+  border-color: var(--color-yellow-strong);
+}
+.timeline-clip--audio {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+.timeline-clip--bgm {
+  background: var(--color-surface-alt);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-muted);
+}
+
+/* 遷移（xfade の重なり）マーカー：場面レーンの境界に重ねる。 */
+.timeline-transition {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  z-index: 1;
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(74, 163, 223, 0.28),
+    rgba(74, 163, 223, 0.28) 4px,
+    rgba(74, 163, 223, 0.10) 4px,
+    rgba(74, 163, 223, 0.10) 8px
+  );
+  border: 1px solid var(--color-accent);
+  pointer-events: none;
+}
+
+.timeline-empty {
+  padding: var(--gap-lg);
+  text-align: center;
+  color: var(--color-text-muted);
+}

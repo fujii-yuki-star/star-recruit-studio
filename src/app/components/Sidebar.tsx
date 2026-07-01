@@ -32,6 +32,7 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
     "draft",
     "scene-edit",
     "preview",
+    "timeline",
     "precheck",
     "export",
   ];
