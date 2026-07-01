@@ -119,6 +119,15 @@
   border-color: var(--color-border-strong);
   color: var(--color-text-muted);
 }
+.timeline-clip--editable {
+  cursor: pointer;
+}
+.timeline-clip--selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+  box-shadow: var(--shadow-sm);
+  z-index: 3;
+}
 
 /* 遷移（xfade の重なり）マーカー：場面レーンの境界に重ねる。 */
 .timeline-transition {

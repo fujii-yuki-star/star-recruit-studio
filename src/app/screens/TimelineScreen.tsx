@@ -37,6 +37,9 @@ export function TimelineScreen({ onNavigate }: TimelineScreenProps) {
           <ArrowLeftIcon size={16} />
           仕上がり確認へ戻る
         </button>
+        <button className="btn btn-primary" onClick={() => onNavigate("timeline-edit")}>
+          タイムラインを編集
+        </button>
         <button className="btn btn-secondary" onClick={() => onNavigate("scene-edit")}>
           場面を直す
         </button>
