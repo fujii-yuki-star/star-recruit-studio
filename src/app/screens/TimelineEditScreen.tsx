@@ -42,7 +42,10 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   // タイムライン上のドラッグ移動の確定：deltaSec を startSec に加算（アンカーは不変・0でクランプ）。1ドロップ=1操作。
   const moveClip = (id: string, deltaSec: number): void => {
     const clip = overlayClips.find((c) => c.id === id);
-    if (clip) updateOverlayClip(id, { startSec: Math.max(0, clip.startSec + deltaSec) });
+    if (!clip) return;
+    const nextStartSec = Math.max(0, clip.startSec + deltaSec);
+    // クランプ後に実効差分が無い（例：先頭0秒をさらに左へ）ときは更新しない＝no-op な Undo 履歴を作らない。
+    if (nextStartSec !== clip.startSec) updateOverlayClip(id, { startSec: nextStartSec });
   };
 
   const addTelop = () => {
