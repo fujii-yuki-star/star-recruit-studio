@@ -6,6 +6,12 @@ import "./timeline.css";
 
 interface TimelineViewProps {
   timeline: Timeline;
+  /** 編集モード（overlay クリップを選択可能に）。TimelineEditScreen から渡す。読み取りは未指定。 */
+  editable?: boolean;
+  /** 選択中の overlay クリップ id（ハイライト）。 */
+  selectedClipId?: string;
+  /** overlay クリップの選択（空領域クリックで null）。editable のとき有効。 */
+  onSelectClip?: (id: string | null) => void;
 }
 
 // レーン表示の並びとラベル（§2-3：技術用語を避けた言い換え）。video＝場面の映像。
@@ -44,7 +50,7 @@ function clipTitle(clip: TimelineClip): string {
   return `${clip.label}（${clockLabel(clip.startSec)}〜${clockLabel(clip.endSec)}）`;
 }
 
-export function TimelineView({ timeline }: TimelineViewProps) {
+export function TimelineView({ timeline, editable, selectedClipId, onSelectClip }: TimelineViewProps) {
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const pxPerSec = ZOOM_LEVELS[zoomIndex];
 
@@ -89,7 +95,7 @@ export function TimelineView({ timeline }: TimelineViewProps) {
         </button>
       </div>
 
-      <div className="timeline-scroll">
+      <div className="timeline-scroll" onClick={editable ? () => onSelectClip?.(null) : undefined}>
         <div className="timeline-inner">
           {/* 時間ルーラー */}
           <div className="timeline-row">
@@ -123,16 +129,22 @@ export function TimelineView({ timeline }: TimelineViewProps) {
                       title={`${transitionLabel(tr.type)}（${tr.durationSec}秒）`}
                     />
                   ))}
-                {timeline.tracks[lane.kind].map((clip) => (
-                  <div
-                    key={clip.id}
-                    className={`timeline-clip timeline-clip--${lane.kind}`}
-                    style={{ left: clip.startSec * pxPerSec, width: Math.max(2, (clip.endSec - clip.startSec) * pxPerSec) }}
-                    title={clipTitle(clip)}
-                  >
-                    {clip.label}
-                  </div>
-                ))}
+                {timeline.tracks[lane.kind].map((clip) => {
+                  // overlay 由来クリップだけ編集モードで選択可能。判別は domain の origin（UI は id 形式を知らない・§2-7）。
+                  const selectable = !!editable && clip.origin === "overlay";
+                  const selected = selectable && clip.id === selectedClipId;
+                  return (
+                    <div
+                      key={clip.id}
+                      className={`timeline-clip timeline-clip--${lane.kind}${selected ? " timeline-clip--selected" : ""}${selectable ? " timeline-clip--editable" : ""}`}
+                      style={{ left: clip.startSec * pxPerSec, width: Math.max(2, (clip.endSec - clip.startSec) * pxPerSec) }}
+                      title={clipTitle(clip)}
+                      onClick={selectable ? (e) => { e.stopPropagation(); onSelectClip?.(clip.id); } : undefined}
+                    >
+                      {clip.label}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}

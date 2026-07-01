@@ -196,7 +196,7 @@ describe('compileTimeline：timelineOverlay の合成（ADR-0018）', () => {
     const tl = compileTimeline(project(scenes, undefined, overlay));
     // s2 は 6 から。相対1 → グローバル7、[7,9]。
     expect(tl.tracks.telop.find((c) => c.id === 'ovclip_001')).toEqual({
-      id: 'ovclip_001', sceneId: 's2', startSec: 7, endSec: 9, label: '補足',
+      id: 'ovclip_001', sceneId: 's2', startSec: 7, endSec: 9, label: '補足', origin: 'overlay',
     });
   });
 
@@ -204,7 +204,7 @@ describe('compileTimeline：timelineOverlay の合成（ADR-0018）', () => {
     const overlay = { clips: [{ id: 'ovclip_002', track: 'telop', startSec: 3, durationSec: 2, text: '絶対' }] };
     const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 10 })], undefined, overlay));
     expect(tl.tracks.telop.find((c) => c.id === 'ovclip_002')).toEqual({
-      id: 'ovclip_002', sceneId: undefined, startSec: 3, endSec: 5, label: '絶対',
+      id: 'ovclip_002', sceneId: undefined, startSec: 3, endSec: 5, label: '絶対', origin: 'overlay',
     });
   });
 

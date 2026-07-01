@@ -14,6 +14,7 @@ import { DraftScreen } from "./app/screens/DraftScreen";
 import { SceneEditScreen } from "./app/screens/SceneEditScreen";
 import { PreviewScreen } from "./app/screens/PreviewScreen";
 import { TimelineScreen } from "./app/screens/TimelineScreen";
+import { TimelineEditScreen } from "./app/screens/TimelineEditScreen";
 import { PrecheckScreen } from "./app/screens/PrecheckScreen";
 import { ExportScreen } from "./app/screens/ExportScreen";
 import { LooksScreen } from "./app/screens/LooksScreen";
@@ -31,6 +32,7 @@ const titles: Record<ScreenId, string> = {
   "scene-edit": "場面編集",
   preview: "仕上がり確認",
   timeline: "タイムライン",
+  "timeline-edit": "タイムラインを編集",
   precheck: "公開前チェック",
   export: "動画を書き出す",
   looks: "見た目パターンを管理",
@@ -90,6 +92,8 @@ function App() {
         return <PreviewScreen onNavigate={setScreen} />;
       case "timeline":
         return <TimelineScreen onNavigate={setScreen} />;
+      case "timeline-edit":
+        return <TimelineEditScreen onNavigate={setScreen} />;
       case "precheck":
         return <PrecheckScreen onNavigate={setScreen} />;
       case "export":

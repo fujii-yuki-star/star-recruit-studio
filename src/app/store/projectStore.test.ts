@@ -174,6 +174,39 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
   });
 });
 
+describe('projectStore overlay クリップ（ADR-0018・③(4)）', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      meta: { ...useProjectStore.getState().meta, timelineOverlay: undefined },
+      past: [], future: [], _historyGroupDepth: 0, saveStatus: 'saved',
+    });
+  });
+  it('addOverlayClip は telop クリップを追加し id を返す（既定 track/尺・未保存に戻る）', () => {
+    const id = useProjectStore.getState().addOverlayClip({ anchorSceneId: 'scene_001', text: 'やあ' });
+    const clips = useProjectStore.getState().meta.timelineOverlay?.clips ?? [];
+    expect(id).toBe('ovclip_001');
+    expect(clips).toHaveLength(1);
+    expect(clips[0]).toMatchObject({ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', text: 'やあ', startSec: 0, durationSec: 3 });
+    expect(useProjectStore.getState().saveStatus).toBe('idle');
+  });
+  it('updateOverlayClip は該当クリップを部分更新する', () => {
+    const id = useProjectStore.getState().addOverlayClip({ text: 'a' });
+    useProjectStore.getState().updateOverlayClip(id, { startSec: 4, text: 'b' });
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips?.[0]).toMatchObject({ id, startSec: 4, text: 'b' });
+  });
+  it('removeOverlayClip はクリップを削除する', () => {
+    const id = useProjectStore.getState().addOverlayClip({});
+    useProjectStore.getState().removeOverlayClip(id);
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toEqual([]);
+  });
+  it('overlay 編集は Undo で戻る（meta スナップショット・ADR-0020）', () => {
+    const id = useProjectStore.getState().addOverlayClip({ text: 'x' });
+    useProjectStore.getState().updateOverlayClip(id, { text: 'y' });
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips?.[0].text).toBe('x');
+  });
+});
+
 describe('projectStore テンプレ既定素材（ADR-0021）', () => {
   const userTmpl = (templateId: string, assetId?: string): Template => ({
     schemaVersion: '1.0', templateId, name: templateId, category: 'opening', aspectRatio: '16:9',

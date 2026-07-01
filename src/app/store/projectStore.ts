@@ -2,7 +2,7 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
-import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
+import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
@@ -12,7 +12,7 @@ import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from
 import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
-  assembleProject, createAssetId, createBgmId, createPartId, createProjectId, createSceneId,
+  assembleProject, createAssetId, createBgmId, createOverlayClipId, createPartId, createProjectId, createSceneId,
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
@@ -104,6 +104,12 @@ interface ProjectState {
   removeScene: (sceneId: string) => void;
   /** 場面を上/下へ1つ移動する（表示順＝配列順を入れ替え、order と part.sceneIds を整合）。 */
   moveScene: (sceneId: string, direction: "up" | "down") => void;
+  /** タイムライン上位編集：テロップ overlay クリップを追加し、その id を返す（ADR-0018・③(4)）。 */
+  addOverlayClip: (clip: Partial<Omit<OverlayClip, "id">>) => string;
+  /** overlay クリップを部分更新（移動＝startSec/anchorSceneId、文言＝text 等）。Undo は meta スナップショットで自動。 */
+  updateOverlayClip: (id: string, patch: Partial<Omit<OverlayClip, "id">>) => void;
+  /** overlay クリップを削除する。 */
+  removeOverlayClip: (id: string) => void;
   /** 場面を複製して直後に挿入し、新しい sceneId を返す（セリフは引き継ぎ・音声は作り直し）。 */
   duplicateScene: (sceneId: string) => string;
   /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
@@ -527,6 +533,44 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
       // 編集したら「保存しました」表示を解除（未保存と分かるように）。
+      saveStatus: "idle",
+    }));
+  },
+  addOverlayClip: (clip) => {
+    const clips = get().meta.timelineOverlay?.clips ?? [];
+    const id = createOverlayClipId(clips.map((c) => c.id));
+    // 既定＝telop・開始0秒・長さ3秒。呼び出し側でアンカー場面/開始秒/文言を上書きする。
+    const newClip: OverlayClip = { id, track: "telop", startSec: 0, durationSec: 3, ...clip };
+    get().pushHistory();
+    set((s) => ({
+      meta: { ...s.meta, timelineOverlay: { ...s.meta.timelineOverlay, clips: [...(s.meta.timelineOverlay?.clips ?? []), newClip] } },
+      saveStatus: "idle",
+    }));
+    return id;
+  },
+  updateOverlayClip: (id, patch) => {
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        timelineOverlay: {
+          ...s.meta.timelineOverlay,
+          clips: (s.meta.timelineOverlay?.clips ?? []).map((c) => (c.id === id ? { ...c, ...patch } : c)),
+        },
+      },
+      saveStatus: "idle",
+    }));
+  },
+  removeOverlayClip: (id) => {
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        timelineOverlay: {
+          ...s.meta.timelineOverlay,
+          clips: (s.meta.timelineOverlay?.clips ?? []).filter((c) => c.id !== id),
+        },
+      },
       saveStatus: "idle",
     }));
   },

@@ -33,6 +33,7 @@ export function Sidebar({ current, onNavigate }: SidebarProps) {
     "scene-edit",
     "preview",
     "timeline",
+    "timeline-edit",
     "precheck",
     "export",
   ];

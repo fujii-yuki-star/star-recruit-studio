@@ -29,6 +29,8 @@ export interface TimelineClip {
   endSec: number;
   /** 表示ラベル（§2-3 の言い換え前の素の文言。UI 側で技術用語を出さないよう整える）。 */
   label: string;
+  /** timelineOverlay 由来＝タイムライン編集の対象クリップ。場面射影クリップは未設定（UI は id 形式を知らずにこれで判別）。 */
+  origin?: "overlay";
 }
 
 /** 場面ストリップ用の場面スパン（グローバル時間軸）。 */
@@ -174,7 +176,7 @@ export function compileTimeline(project: Project, opts: CompileTimelineOptions =
     const endSec = startSec + clip.durationSec;
     if (endSec <= startSec) continue; // 0秒は出さない（ゼロ幅クリップ防止）
     if (clip.track === 'telop') {
-      telop.push({ id: clip.id, sceneId: clip.anchorSceneId, startSec, endSec, label: clip.text ?? '' });
+      telop.push({ id: clip.id, sceneId: clip.anchorSceneId, startSec, endSec, label: clip.text ?? '', origin: 'overlay' });
     }
   }
 
