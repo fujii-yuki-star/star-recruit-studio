@@ -154,6 +154,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   }
   function ungroupActive() {
     if (!effectiveActiveGroupId) return;
+    if (activeGroup?.locked) return; // ロック中は解除も抑止（UI disabled に加えた多重防御・#319 レビュー）
     const memberIds = groupElementIds(tplGroups, effectiveActiveGroupId);
     setDraft((d) => {
       if (!d) return d;
@@ -174,9 +175,11 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setDraft((d) => (d ? { ...d, groups: toggleGroupFlag(d.groups ?? [], groupId, "locked") } : d));
   }
   function bringGroupFront(groupId: string) {
+    if (tplGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は重ね順も抑止（多重防御・#319 レビュー）
     setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "front") } : d));
   }
   function sendGroupBack(groupId: string) {
+    if (tplGroups.find((g) => g.id === groupId)?.locked) return;
     setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "back") } : d));
   }
   async function onSave() {
