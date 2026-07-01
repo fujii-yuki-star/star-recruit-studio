@@ -127,6 +127,35 @@ describe('compileTimeline：掛け合い（行トラック）', () => {
     expect(s2audio).toEqual([{ id: 's2/l1', sceneId: 's2', lineId: 'l1', startSec: 6, endSec: 12, label: 'A' }]);
   });
 
+  it('動画スロットのある掛け合いは行分割せず単一クリップ（書き出しに一致）', () => {
+    const s = scene({
+      sceneId: 's1',
+      durationSec: 10,
+      lines: [
+        { lineId: 'l1', text: 'やあ', startSec: 0, status: 'idle' },
+        { lineId: 'l2', text: 'どうも', startSec: 4, status: 'idle' },
+      ],
+    });
+    const tl = compileTimeline(project([s]), { isVideoSlotScene: () => true });
+    expect(tl.tracks.audio).toEqual([{ id: 's1/audio', sceneId: 's1', startSec: 0, endSec: 10, label: 'やあ どうも' }]);
+    expect(tl.tracks.telop).toEqual([{ id: 's1/telop', sceneId: 's1', startSec: 0, endSec: 10, label: 'やあ どうも' }]);
+  });
+
+  it('startSec も音声長も無い複数行は 0秒区間を出さない（末尾行のみ場面尺で残る）', () => {
+    const s = scene({
+      sceneId: 's1',
+      durationSec: 6,
+      lines: [
+        { lineId: 'l1', text: 'A', status: 'idle' },
+        { lineId: 'l2', text: 'B', status: 'idle' },
+      ],
+    });
+    const tl = compileTimeline(project([s]));
+    // l1 は [0,0]（0秒）で除外、l2 が [0,6] で残る（sceneSegmentSpecs と同じ挙動＝ゼロ幅クリップを描かせない）。
+    expect(tl.tracks.audio).toEqual([{ id: 's1/l2', sceneId: 's1', lineId: 'l2', startSec: 0, endSec: 6, label: 'B' }]);
+    expect(tl.tracks.telop).toEqual([{ id: 's1/l2', sceneId: 's1', lineId: 'l2', startSec: 0, endSec: 6, label: 'B' }]);
+  });
+
   it('字幕 OFF（subtitleEnabledDefault=false）はテロップに出ないが音声は残る', () => {
     const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 5, subtitleEnabledDefault: false })]));
     expect(tl.tracks.telop).toEqual([]);

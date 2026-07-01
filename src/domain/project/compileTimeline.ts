@@ -2,14 +2,15 @@
 // 正準は場面（project.scenes 配列順＝再生順・sceneOps）。本関数は読み取り専用の射影で、専用タイムライン編集UI（別画面・
 // α-4 ③(2)）と、将来の書き出し配線が共有する土台。副作用なし。AI/簡易編集は本射影を無視する（ADR-0007 M-A）。
 //
-// 忠実性：totalSec と場面境界は buildExportScenes と一致する（各場面の掛け合いセグメントは場面尺内に収まるため、
-//   場面粒度の合計＝セグメント粒度の合計）。ただし遷移尺の上限 clamp は、書き出しが「直前場面の最終セグメント尺」で
-//   締めるのに対し本関数は「直前場面の尺」で締める（掛け合い場面が遷移の直前側かつ最終行が短い稀ケースでのみ僅差）。
+// 忠実性：totalSec と場面境界は buildExportScenes と一致する（掛け合いセグメントは場面尺内に収まるため、場面粒度の
+//   合計＝セグメント粒度の合計）。遷移尺の上限 clamp のみ、書き出しは per-segment 尺（遷移を持つ後場面の「最初の
+//   セグメント」）で締めるのに対し本関数は per-scene 尺（後場面の「場面尺」）で締める＝掛け合い（非動画スロット）が
+//   遷移を持ちかつ最初の行区間が短い稀ケースでのみ本関数の重なりが長めに出る（左側の累積 acc は両者同一）。
 //   読み取り可視化には影響せず、書き出しの実適用は従来どおり buildExportScenes（本関数は ③(1) 時点では書き出しへ配線しない）。
 import { TRANSITION_TYPE } from '../enums';
 import type { TransitionDirection, TransitionType } from '../enums';
 import { resolveTransition, transitionTimeline } from './sceneTransitions';
-import { lineSegments } from './lineTimeline';
+import { lineSegments, resolveLineSubtitle } from './lineTimeline';
 import { sceneLines } from './narrationLines';
 import type { Project, Scene } from './types';
 
@@ -61,6 +62,11 @@ export interface Timeline {
 export interface CompileTimelineOptions {
   /** 場面→行ごとの音声長（秒・lineId→秒）。掛け合いの区間尺に使う。未指定＝明示 startSec か自動逐次(0)。 */
   lineDurationsFor?: (scene: Scene) => Record<string, number>;
+  /**
+   * 動画スロットを持つ場面か。buildExportScenes(:180 `useSegments = hasLines && !videoSlot`) と同じく、
+   * 動画スロットのある掛け合いは行分割せず単一クリップにする。未指定＝全掛け合いを行分割（動画スロットの有無は不問）。
+   */
+  isVideoSlotScene?: (scene: Scene) => boolean;
   /** 射影対象の場面か（未指定＝全場面）。将来の書き出し配線でテンプレ未解決の除外に使える。 */
   includeScene?: (scene: Scene) => boolean;
   /** 場面の表示名（未指定＝「場面 N」）。 */
@@ -82,7 +88,8 @@ function bgmClips(project: Project, totalSec: number): TimelineClip[] {
 /**
  * 場面ベース project を時間軸＋トラックへ射影する（ADR-0018）。純粋関数。
  * - 再生順＝project.scenes 配列順（sceneOps）。遷移の重なりは transitionTimeline で解決（ADR-0009）。
- * - tracks.video＝場面ごと1クリップ。tracks.audio/telop＝行ごと（sceneLines→lineSegments）。tracks.bgm＝全体1本（有効時）。
+ * - tracks.video＝場面ごと1クリップ。tracks.audio/telop＝行ごと（sceneLines→lineSegments・0秒区間は除外）。
+ *   動画スロットのある掛け合いは書き出しに合わせ単一クリップへ collapse（isVideoSlotScene）。tracks.bgm＝全体1本（有効時）。
  */
 export function compileTimeline(project: Project, opts: CompileTimelineOptions = {}): Timeline {
   const scenes = opts.includeScene ? project.scenes.filter(opts.includeScene) : project.scenes;
@@ -118,11 +125,26 @@ export function compileTimeline(project: Project, opts: CompileTimelineOptions =
   for (let i = 0; i < scenes.length; i += 1) {
     const s = scenes[i];
     const base = starts[i];
+    const hasLines = !!(s.lines && s.lines.length > 0);
+    // 動画スロットのある掛け合いは書き出し(buildExportScenes:180 の `!videoSlot` ゲート)が行分割しない＝射影も単一クリップへ。
+    // 音声は1本（場面尺）、字幕は scene.texts ベース（未取得ゆえ行テキストを素ラベルに用いる近似）。
+    if (hasLines && (opts.isVideoSlotScene?.(s) ?? false)) {
+      const lines = sceneLines(s);
+      const label = lines.map((l) => l.text).join(' ');
+      const endSec = base + s.durationSec;
+      audio.push({ id: `${s.sceneId}/audio`, sceneId: s.sceneId, startSec: base, endSec, label });
+      if (lines.some((l) => resolveLineSubtitle(l, s).enabled)) {
+        telop.push({ id: `${s.sceneId}/telop`, sceneId: s.sceneId, startSec: base, endSec, label });
+      }
+      continue;
+    }
     const lines = sceneLines(s);
     // lineSegments は sceneLines を map するので lines と segs は同順・同数（zip 可能）。
     const segs = lineSegments(s, opts.lineDurationsFor?.(s) ?? {});
     for (let j = 0; j < segs.length; j += 1) {
       const seg = segs[j];
+      // 0秒区間（自動逐次で音声長未指定・クランプ等で endSec===startSec）は出さない＝sceneSegmentSpecs と同じ扱い（ゼロ幅クリップ防止）。
+      if (seg.endSec <= seg.startSec) continue;
       const startSec = base + seg.startSec;
       const endSec = base + seg.endSec;
       // 音声（ナレーション）：行の区間。掛け合いは行ごと、単一 narration は1本（場面尺）。ラベル＝話すテキスト。
