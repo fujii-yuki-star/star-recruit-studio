@@ -130,8 +130,8 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip 
                     />
                   ))}
                 {timeline.tracks[lane.kind].map((clip) => {
-                  // overlay 由来クリップ（ovclip_）だけ編集モードで選択可能。場面射影クリップ（sceneId/lineId）は対象外。
-                  const selectable = !!editable && clip.id.startsWith("ovclip_");
+                  // overlay 由来クリップだけ編集モードで選択可能。判別は domain の origin（UI は id 形式を知らない・§2-7）。
+                  const selectable = !!editable && clip.origin === "overlay";
                   const selected = selectable && clip.id === selectedClipId;
                   return (
                     <div

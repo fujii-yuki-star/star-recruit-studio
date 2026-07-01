@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from "../../domain/enums";
 import type { Timeline } from "../../domain/project/compileTimeline";
 import { TimelineView } from "./TimelineView";
@@ -53,5 +53,21 @@ describe("TimelineView", () => {
     render(<TimelineView timeline={empty} />);
     expect(screen.getByTestId("timeline-empty")).toBeInTheDocument();
     expect(screen.queryByTestId("timeline-view")).not.toBeInTheDocument();
+  });
+
+  it("編集モードでは overlay 由来クリップだけ選択でき、選択がハイライトされる", () => {
+    const tl = sampleTimeline();
+    tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 1, endSec: 4, label: "追加テロップ", origin: "overlay" });
+    const onSelect = vi.fn();
+    const { rerender } = render(<TimelineView timeline={tl} editable onSelectClip={onSelect} />);
+    // overlay 由来クリップはクリックで選択。
+    fireEvent.click(screen.getByText("追加テロップ"));
+    expect(onSelect).toHaveBeenLastCalledWith("ovclip_001");
+    // 場面射影クリップ（origin 無し）は選択せず、空領域扱いで選択解除（null）。
+    fireEvent.click(screen.getByText("字幕テキスト"));
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+    // 選択中はハイライト class が付く。
+    rerender(<TimelineView timeline={tl} editable selectedClipId="ovclip_001" onSelectClip={onSelect} />);
+    expect(screen.getByText("追加テロップ").className).toContain("timeline-clip--selected");
   });
 });

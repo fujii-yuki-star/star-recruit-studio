@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { assembleProject } from "../../domain/project/persistence";
 import { compileTimeline } from "../../domain/project/compileTimeline";
+import type { OverlayClip } from "../../domain/project/types";
 import { TimelineView } from "../components/TimelineView";
 import { PageHead } from "../components/ui";
 import { ArrowLeftIcon } from "../components/icons";
@@ -26,6 +27,18 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   );
   const overlayClips = meta.timelineOverlay?.clips ?? [];
   const selectedClip = overlayClips.find((c) => c.id === selectedClipId) ?? null;
+
+  // 場面のグローバル開始秒（射影から引く）。アンカー切替時の startSec 再計算に使う。
+  const sceneGlobalStart = (sceneId?: string): number =>
+    sceneId ? timeline.scenes.find((s) => s.sceneId === sceneId)?.startSec ?? 0 : 0;
+  // 「時間の合わせ方」切替：startSec の意味（相対⇔絶対）が変わるので、実効グローバル秒を保って再計算する（無警告ジャンプ防止）。
+  const changeAnchor = (clip: OverlayClip, newAnchor?: string): void => {
+    const effective = sceneGlobalStart(clip.anchorSceneId) + clip.startSec;
+    updateOverlayClip(clip.id, {
+      anchorSceneId: newAnchor,
+      startSec: Math.max(0, effective - sceneGlobalStart(newAnchor)),
+    });
+  };
 
   const addTelop = () => {
     // 既定で最初の場面を基準に置く（先頭に出る）。文言/位置は下のパネルで調整。
@@ -77,7 +90,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
               <select
                 className="select"
                 value={selectedClip.anchorSceneId ?? ""}
-                onChange={(e) => updateOverlayClip(selectedClip.id, { anchorSceneId: e.target.value || undefined })}
+                onChange={(e) => changeAnchor(selectedClip, e.target.value || undefined)}
               >
                 <option value="">動画全体で位置を決める</option>
                 {scenes.map((s, i) => (
