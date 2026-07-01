@@ -70,13 +70,48 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
       },
     });
     render(<TimelineEditScreen onNavigate={() => {}} />);
-    // タイムライン上の overlay クリップをクリックして選択 → 編集パネル。
-    fireEvent.click(screen.getByText("x"));
+    // タイムライン上の overlay クリップを pointerdown で選択 → 編集パネル。
+    fireEvent.pointerDown(screen.getByText("x"), { clientX: 10, pointerId: 1 });
+    fireEvent.pointerUp(screen.getByText("x"), { clientX: 10, pointerId: 1 });
     const select = screen.getByTestId("overlay-clip-editor").querySelector("select") as HTMLSelectElement;
     // 絶対時間へ切替 → 実効10秒（8+2）を保持して startSec=10 になる（無警告ジャンプしない）。
     fireEvent.change(select, { target: { value: "" } });
     const clip = useProjectStore.getState().meta.timelineOverlay?.clips?.[0];
     expect(clip?.anchorSceneId).toBeUndefined();
     expect(clip?.startSec).toBe(10);
+  });
+
+  it("ドラッグ移動で startSec を更新し、左端クランプで実効差分が無いときは履歴を積まない", () => {
+    useProjectStore.setState({
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002"] }],
+      scenes: [scene("scene_001", 1), scene("scene_002", 2)],
+      meta: {
+        ...useProjectStore.getState().meta,
+        timelineOverlay: { clips: [{ id: "ovclip_001", track: "telop", startSec: 1, durationSec: 3, text: "x" }] },
+      },
+      past: [],
+      future: [],
+      _historyGroupDepth: 0,
+    });
+    render(<TimelineEditScreen onNavigate={() => {}} />);
+    const clip = () => screen.getByText("x");
+    const startSec = () => useProjectStore.getState().meta.timelineOverlay?.clips?.[0].startSec;
+    // 右へ +72px（既定ズーム pxPerSec=36）＝+2秒 → startSec 1→3。
+    fireEvent.pointerDown(clip(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(clip(), { clientX: 172, pointerId: 1 });
+    fireEvent.pointerUp(clip(), { clientX: 172, pointerId: 1 });
+    expect(startSec()).toBe(3);
+    // 左へ大きく（-360px＝-10秒）→ 3-10 をクランプ → 0。
+    fireEvent.pointerDown(clip(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(clip(), { clientX: -260, pointerId: 1 });
+    fireEvent.pointerUp(clip(), { clientX: -260, pointerId: 1 });
+    expect(startSec()).toBe(0);
+    const pastLen = useProjectStore.getState().past.length;
+    // すでに0なのでさらに左へドラッグしてもクランプ結果は不変 → 履歴が増えない（no-op スキップ）。
+    fireEvent.pointerDown(clip(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(clip(), { clientX: -260, pointerId: 1 });
+    fireEvent.pointerUp(clip(), { clientX: -260, pointerId: 1 });
+    expect(startSec()).toBe(0);
+    expect(useProjectStore.getState().past.length).toBe(pastLen);
   });
 });

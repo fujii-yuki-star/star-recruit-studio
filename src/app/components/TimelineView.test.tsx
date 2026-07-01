@@ -60,8 +60,9 @@ describe("TimelineView", () => {
     tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 1, endSec: 4, label: "追加テロップ", origin: "overlay" });
     const onSelect = vi.fn();
     const { rerender } = render(<TimelineView timeline={tl} editable onSelectClip={onSelect} />);
-    // overlay 由来クリップはクリックで選択。
-    fireEvent.click(screen.getByText("追加テロップ"));
+    // overlay 由来クリップは pointerdown で選択（ドラッグ開始も兼ねる）。
+    fireEvent.pointerDown(screen.getByText("追加テロップ"), { clientX: 10, pointerId: 1 });
+    fireEvent.pointerUp(screen.getByText("追加テロップ"), { clientX: 10, pointerId: 1 });
     expect(onSelect).toHaveBeenLastCalledWith("ovclip_001");
     // 場面射影クリップ（origin 無し）は選択せず、空領域扱いで選択解除（null）。
     fireEvent.click(screen.getByText("字幕テキスト"));
@@ -69,5 +70,29 @@ describe("TimelineView", () => {
     // 選択中はハイライト class が付く。
     rerender(<TimelineView timeline={tl} editable selectedClipId="ovclip_001" onSelectClip={onSelect} />);
     expect(screen.getByText("追加テロップ").className).toContain("timeline-clip--selected");
+  });
+
+  it("編集モードで overlay クリップをドラッグすると onClipMove(id, deltaSec) が確定する", () => {
+    const tl = sampleTimeline();
+    tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 1, endSec: 4, label: "追加テロップ", origin: "overlay" });
+    const onMove = vi.fn();
+    render(<TimelineView timeline={tl} editable onClipMove={onMove} />);
+    const clip = screen.getByText("追加テロップ");
+    // 既定ズーム pxPerSec=36。+72px ドラッグ → +2秒。（window リスナへは要素からバブルで到達）
+    fireEvent.pointerDown(clip, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(clip, { clientX: 172, pointerId: 1 });
+    fireEvent.pointerUp(clip, { clientX: 172, pointerId: 1 });
+    expect(onMove).toHaveBeenCalledWith("ovclip_001", 2);
+  });
+
+  it("移動0で離した場合は onClipMove を呼ばない（無駄な履歴を作らない）", () => {
+    const tl = sampleTimeline();
+    tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 1, endSec: 4, label: "追加テロップ", origin: "overlay" });
+    const onMove = vi.fn();
+    render(<TimelineView timeline={tl} editable onClipMove={onMove} />);
+    const clip = screen.getByText("追加テロップ");
+    fireEvent.pointerDown(clip, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerUp(clip, { clientX: 100, pointerId: 1 });
+    expect(onMove).not.toHaveBeenCalled();
   });
 });

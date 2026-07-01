@@ -120,7 +120,14 @@
   color: var(--color-text-muted);
 }
 .timeline-clip--editable {
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.timeline-clip--dragging {
+  cursor: grabbing;
+  opacity: 0.9;
+  z-index: 4;
 }
 .timeline-clip--selected {
   outline: 2px solid var(--color-primary);
