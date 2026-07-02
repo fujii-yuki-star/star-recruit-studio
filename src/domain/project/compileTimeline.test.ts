@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import { transitionTimeline, resolveTransition } from './sceneTransitions';
-import { activeTelopTextAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from './compileTimeline';
+import { activeTelopsAt, assignTelopRows, compileTimeline, resolveSceneBgm, sceneLocalTelops } from './compileTimeline';
 import type { Project, Scene } from './types';
 
 // compileTimeline が読むのは sceneId/durationSec/transition/lines/narration/subtitleEnabledDefault のみ。
@@ -273,18 +273,29 @@ describe('場面ごとBGM（ADR-0018 ③(7)）', () => {
   });
 });
 
-describe('sceneLocalTelops / activeTelopTextAt（テロップ実描画・ADR-0018）', () => {
+describe('sceneLocalTelops / activeTelopsAt / assignTelopRows（テロップ実描画・並行テロップ・ADR-0018 ③(8)）', () => {
   const scenes = [
     scene({ sceneId: 's1', durationSec: 8 }),
     scene({ sceneId: 's2', durationSec: 6 }),
   ];
-  it('場面と重なる overlay テロップを場面ローカル秒へ切り出す（場面またぎは自分の部分だけ）', () => {
+  it('場面と重なる overlay テロップを場面ローカル秒＋段へ切り出す（場面またぎは自分の部分だけ・単独は段0）', () => {
     const overlay = { clips: [
       { id: 'ovclip_001', track: 'telop', startSec: 6, durationSec: 4, text: 'またぎ' }, // グローバル 6〜10（s1:6-8 / s2:8-10）
     ] };
     const tl = compileTimeline(project(scenes, undefined, overlay));
-    expect(sceneLocalTelops(tl, 's1')).toEqual([{ startSec: 6, endSec: 8, text: 'またぎ' }]);
-    expect(sceneLocalTelops(tl, 's2')).toEqual([{ startSec: 0, endSec: 2, text: 'またぎ' }]);
+    expect(sceneLocalTelops(tl, 's1')).toEqual([{ startSec: 6, endSec: 8, text: 'またぎ', row: 0 }]);
+    expect(sceneLocalTelops(tl, 's2')).toEqual([{ startSec: 0, endSec: 2, text: 'またぎ', row: 0 }]);
+  });
+  it('時間が重なる複数テロップは段違いで返す（並行テロップ・③(8)）', () => {
+    const overlay = { clips: [
+      { id: 'ovclip_001', track: 'telop', startSec: 0, durationSec: 5, text: 'A' },
+      { id: 'ovclip_002', track: 'telop', startSec: 2, durationSec: 3, text: 'B' }, // A(0-5) と重なる → 段1
+    ] };
+    const tl = compileTimeline(project(scenes, undefined, overlay));
+    expect(sceneLocalTelops(tl, 's1')).toEqual([
+      { startSec: 0, endSec: 5, text: 'A', row: 0 },
+      { startSec: 2, endSec: 5, text: 'B', row: 1 },
+    ]);
   });
   it('場面射影クリップ（行の字幕）や空文言・非重なりは対象外', () => {
     const overlay = { clips: [{ id: 'ovclip_001', track: 'telop', startSec: 0, durationSec: 2, text: '' }] };
@@ -293,15 +304,25 @@ describe('sceneLocalTelops / activeTelopTextAt（テロップ実描画・ADR-001
     expect(sceneLocalTelops(tl, 's1')).toEqual([]);
     expect(sceneLocalTelops(tl, 'sX')).toEqual([]); // 不明場面は空
   });
-  it('activeTelopTextAt は [start, end) で判定し、重なりは開始が遅い方を出す', () => {
+  it('assignTelopRows: 重なるクリップは異なる段・重ならなければ段を再利用', () => {
+    const rows = assignTelopRows([
+      { id: 'c1', startSec: 0, endSec: 5 },
+      { id: 'c2', startSec: 2, endSec: 4 }, // c1 と重なる → 段1
+      { id: 'c3', startSec: 5, endSec: 8 }, // c1 と接する（重ならない）→ 段0 再利用
+    ]);
+    expect(rows.get('c1')).toBe(0);
+    expect(rows.get('c2')).toBe(1);
+    expect(rows.get('c3')).toBe(0);
+  });
+  it('activeTelopsAt は [start, end) で有効な全テロップ（段付き）を並行表示', () => {
     const ivs = [
-      { startSec: 0, endSec: 5, text: 'A' },
-      { startSec: 2, endSec: 4, text: 'B' },
+      { startSec: 0, endSec: 5, text: 'A', row: 0 },
+      { startSec: 2, endSec: 4, text: 'B', row: 1 },
     ];
-    expect(activeTelopTextAt(ivs, 0)).toBe('A');
-    expect(activeTelopTextAt(ivs, 2)).toBe('B'); // 遅く始まった B が前
-    expect(activeTelopTextAt(ivs, 4)).toBe('A'); // B 終了で A に戻る
-    expect(activeTelopTextAt(ivs, 5)).toBeNull(); // end は含まない
+    expect(activeTelopsAt(ivs, 0)).toEqual([{ text: 'A', row: 0 }]);
+    expect(activeTelopsAt(ivs, 2)).toEqual([{ text: 'A', row: 0 }, { text: 'B', row: 1 }]); // 並行
+    expect(activeTelopsAt(ivs, 4)).toEqual([{ text: 'A', row: 0 }]); // B 終了で A のみ
+    expect(activeTelopsAt(ivs, 5)).toEqual([]); // end は含まない
   });
 });
 

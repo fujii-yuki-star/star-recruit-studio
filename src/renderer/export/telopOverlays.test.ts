@@ -32,8 +32,22 @@ describe('buildTelopOverlays（配線・ADR-0018）', () => {
     const [layout, opts] = vi.mocked(layoutToSvg).mock.calls[0];
     expect(layout.width).toBe(1920);
     expect(opts).toMatchObject({ transparent: true, fontFamily: 'F' });
-    // item に動画全体フォントが明示される（場面フォント非依存＝パリティ・🔴対応）。
-    expect(layout.items[0]).toMatchObject({ id: 'overlay_telop', text: '補足', fontId: 'gen-interface-jp' });
+    // item に動画全体フォントが明示される（場面フォント非依存＝パリティ・🔴対応）。単独クリップは段0。
+    expect(layout.items[0]).toMatchObject({ id: 'overlay_telop_0', text: '補足', fontId: 'gen-interface-jp' });
+  });
+
+  it('時間が重なる複数テロップは段違いの帯（y がずれる）で焼く（並行テロップ・③(8)）', async () => {
+    vi.mocked(layoutToSvg).mockClear();
+    const overlay = { clips: [
+      { id: 'ovclip_001', track: 'telop', startSec: 0, durationSec: 5, text: 'A' },
+      { id: 'ovclip_002', track: 'telop', startSec: 2, durationSec: 3, text: 'B' }, // A と重なる → 段1
+    ] };
+    await buildTelopOverlays(project(overlay), {});
+    const items = vi.mocked(layoutToSvg).mock.calls.map((c) => c[0].items[0] as { id: string; y: number; text: string });
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ id: 'overlay_telop_0', text: 'A' });
+    expect(items[1]).toMatchObject({ id: 'overlay_telop_1', text: 'B' });
+    expect(items[1].y).toBeGreaterThan(items[0].y); // 段1 は下へずれる
   });
 
   it('overlay が無ければ空配列', async () => {
