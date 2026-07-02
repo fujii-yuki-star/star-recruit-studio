@@ -908,6 +908,10 @@ fn validate_xfade_name(name: &str) -> Option<String> {
 /// 各シーン（静止画 or 動画）→ MP4 にし、トランジション有無で結合方法を選ぶ（ADR-0009 T2）。
 /// 全境界ハードカット（遷移なし）なら concat demuxer の無劣化コピー、1つでも遷移ありなら xfade チェーンで再エンコード。
 /// `joins` は jobs と同じ長さ（joins[0]＝先頭で未使用）。
+// bitrate は export_video で1回算出し、場面/xfade/テロップ overlay の3経路で同一値を共有するため引数で受ける（#121）。
+// 内部オーケストレータで、引数は infra ハンドル（ffmpeg/tmp/output）＋エンコード設定の混在＝自然な構造体化が難しいため、
+// 意図した8引数として clippy::too_many_arguments を抑制する。
+#[allow(clippy::too_many_arguments)]
 fn encode_jobs(
     ffmpeg: &Path,
     jobs: &[SceneJob],
