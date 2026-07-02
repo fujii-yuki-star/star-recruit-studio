@@ -4,7 +4,9 @@ import { PageHead, Switch } from "../components/ui";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { useProjectStore } from "../store/projectStore";
 import { buildExportScenes } from "../../renderer/export/buildExportScenes";
+import { buildTelopOverlays } from "../../renderer/export/telopOverlays";
 import { findVideoSlot } from "../../renderer/export/findVideoSlot";
+import { assembleProject } from "../../domain/project/persistence";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
 import type { BgmInput } from "../../infrastructure/ffmpegExport";
@@ -139,6 +141,13 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         (done, total) => setProgress({ done, total }),
         { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)), credit: creditForSpeaker(getVoicevoxSpeaker()) },
       );
+      // タイムラインのテロップ（ADR-0018 テロップ実描画）。帯PNG＋グローバル区間へ焼き、Rust が結合後に overlay 合成。
+      // テロップは場面横断のため動画全体フォントで焼く。
+      const st = useProjectStore.getState();
+      const telops = await buildTelopOverlays(assembleProject(st.meta, st.assets, st.parts, st.scenes), {
+        outputSize,
+        fontFamily: fontFamilyForId(fontId),
+      });
       setPhase("encoding");
       let bgm: BgmInput | undefined;
       // BGM も表示用 src ではなく、ここで実体を data URL 化する（asset:// は FFmpeg へ渡せない）。
@@ -166,7 +175,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           setBgmWarning(true);
         }
       }
-      const report = await exportVideo(built, fileName.trim() || "export", bgm, pid || undefined, outputPath);
+      const report = await exportVideo(built, fileName.trim() || "export", bgm, pid || undefined, outputPath, telops);
       setResultPath(report.outputPath);
       setPhase("done");
     } catch (e) {

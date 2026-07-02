@@ -89,6 +89,44 @@ export interface LayoutOptions {
    * 未指定＝従来どおり scene.texts['subtitle'] を使う。
    */
   subtitleText?: string | null;
+  /**
+   * タイムラインのテロップ（timelineOverlay・ADR-0018）をこのフレームに描く。string＝表示／null/未指定＝なし。
+   * プレビューはこのオプションで、書き出しは overlayTelopItem を単独の帯PNGに焼いて overlay 合成する＝同一ジオメトリでパリティ。
+   */
+  telopText?: string | null;
+}
+
+// タイムラインのテロップ帯の既定ジオメトリ（キャンバス比・ADR-0018 テロップ実描画）。
+// 位置は画面上部の帯＝下部の字幕（subtitle）と衝突しない。単一の参照元（§2-7）。
+const OVERLAY_TELOP_X_RATIO = 0.08;
+const OVERLAY_TELOP_Y_RATIO = 0.06;
+const OVERLAY_TELOP_W_RATIO = 0.84;
+const OVERLAY_TELOP_H_RATIO = 0.14;
+const OVERLAY_TELOP_FONT_RATIO = 0.045;
+// 常に最前面（テンプレ/FREE の zIndex より大きく・クレジットピルは layoutToSvg が items の後に描くため影響なし）。
+const OVERLAY_TELOP_Z = 9500;
+
+/** タイムラインのテロップ帯の LayoutItem（プレビューと書き出し帯PNGが共有＝パリティの単一参照元）。 */
+export function overlayTelopItem(width: number, height: number, text: string): TextItem {
+  return {
+    id: 'overlay_telop',
+    kind: 'text',
+    x: Math.round(width * OVERLAY_TELOP_X_RATIO),
+    y: Math.round(height * OVERLAY_TELOP_Y_RATIO),
+    w: Math.round(width * OVERLAY_TELOP_W_RATIO),
+    h: Math.round(height * OVERLAY_TELOP_H_RATIO),
+    zIndex: OVERLAY_TELOP_Z,
+    text,
+    fontSize: Math.round(height * OVERLAY_TELOP_FONT_RATIO),
+    fontWeight: 'bold',
+    color: '#ffffff',
+    maxLines: 2,
+    textAlign: 'center',
+    // 縁取りで背景を問わず可読に（帯背景は敷かない＝映像を隠しすぎない）。
+    strokeColor: '#000000',
+    strokeWidth: 3,
+    isSubtitle: false,
+  };
 }
 
 /** シーンをテンプレに沿って配置解決する。 */
@@ -210,6 +248,11 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           break;
       }
     }
+  }
+
+  // タイムラインのテロップ（ADR-0018）。プレビュー経路のみ（書き出しは帯PNGを overlay 合成＝同一 item を共有）。
+  if (opts?.telopText) {
+    items.push(overlayTelopItem(template.canvas.width, template.canvas.height, opts.telopText));
   }
 
   items.sort((a, b) => a.zIndex - b.zIndex);

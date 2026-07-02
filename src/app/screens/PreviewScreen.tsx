@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
@@ -8,6 +8,8 @@ import { BgmPicker } from "../components/BgmPicker";
 import { resolveBgmVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { lineSegments } from "../../domain/project/lineTimeline";
+import { activeTelopTextAt, compileTimeline, sceneLocalTelops } from "../../domain/project/compileTimeline";
+import { assembleProject } from "../../domain/project/persistence";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
@@ -62,6 +64,30 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
 
   const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
   const current = scenes[safeIdx];
+  // タイムラインのテロップ（ADR-0018 テロップ実描画）。現在場面のローカル区間へ切り出し、再生位置で表示を切り替える。
+  const timeline = useMemo(
+    () => compileTimeline(assembleProject(meta, assets, parts, scenes)),
+    [meta, assets, parts, scenes],
+  );
+  const currentTelops = useMemo(
+    () => (current ? sceneLocalTelops(timeline, current.sceneId) : []),
+    [timeline, current],
+  );
+  // 再生中のテロップは区間境界のタイマーで切替（t=0 も 0ms タイマー経由＝effect 内の同期 setState を避ける）。
+  // 停止中は場面頭(t=0)の表示を描画時に導出する。区間は書き出しの enable='between' と同一（パリティ）。
+  const [playbackTelop, setPlaybackTelop] = useState<string | null>(null);
+  useEffect(() => {
+    if (!playing) return;
+    const bounds = [...new Set([0, ...currentTelops.flatMap((iv) => [iv.startSec, iv.endSec])])];
+    const timers = bounds
+      .filter((b) => b >= 0)
+      .map((b) => window.setTimeout(() => setPlaybackTelop(activeTelopTextAt(currentTelops, b)), b * 1000));
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      setPlaybackTelop(null); // 場面送り/停止で前場面の表示を持ち越さない
+    };
+  }, [playing, safeIdx, currentTelops]);
+  const activeTelop = playing ? playbackTelop : activeTelopTextAt(currentTelops, 0);
   const template = current ? templates.find((t) => t.templateId === current.templateId) : undefined;
   const totalSec = scenes.reduce((sum, s) => sum + s.durationSec, 0);
 
@@ -189,7 +215,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
         <div className="card">
-          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} />
+          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} telopText={activeTelop} />
 
           {/* 場面送り */}
           <div className="row-between mt">

@@ -202,3 +202,41 @@ export function compileTimeline(project: Project, opts: CompileTimelineOptions =
     transitions,
   };
 }
+
+/** 場面ローカル秒のテロップ区間（プレビューの表示切替に使う）。 */
+export interface SceneTelopInterval {
+  /** 場面開始からの相対秒（[0, 場面尺] にクリップ済み）。 */
+  startSec: number;
+  endSec: number;
+  text: string;
+}
+
+/**
+ * overlay テロップ（tracks.telop の origin='overlay'）のうち指定場面と重なる区間を、場面ローカル秒へ切り出す（ADR-0018）。
+ * 場面またぎのクリップは各場面が自分と重なる部分だけを持つ。文言が空のクリップは出さない。
+ */
+export function sceneLocalTelops(timeline: Timeline, sceneId: string): SceneTelopInterval[] {
+  const span = timeline.scenes.find((s) => s.sceneId === sceneId);
+  if (!span) return [];
+  const out: SceneTelopInterval[] = [];
+  for (const c of timeline.tracks.telop) {
+    if (c.origin !== 'overlay' || !c.label) continue;
+    const start = Math.max(c.startSec, span.startSec);
+    const end = Math.min(c.endSec, span.endSec);
+    if (end <= start) continue;
+    out.push({ startSec: start - span.startSec, endSec: end - span.startSec, text: c.label });
+  }
+  return out;
+}
+
+/**
+ * 場面ローカル秒 t に表示するテロップ文言（無ければ null）。区間は [startSec, endSec)。
+ * 同時に複数が重なるときは開始が遅いもの（同時は後の要素）＝「最後に出したものが前」。
+ */
+export function activeTelopTextAt(intervals: readonly SceneTelopInterval[], t: number): string | null {
+  let best: SceneTelopInterval | null = null;
+  for (const iv of intervals) {
+    if (t >= iv.startSec && t < iv.endSec && (best === null || iv.startSec >= best.startSec)) best = iv;
+  }
+  return best?.text ?? null;
+}
