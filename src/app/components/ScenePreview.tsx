@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { Scene } from "../../domain/project/types";
+import type { ElementAnimation, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
@@ -11,7 +11,7 @@ import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex, telops, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; telops?: { text: string; row: number }[]; children?: ReactNode }) {
+export function ScenePreview({ scene, template, activeLineIndex, telops, timeSec, animations, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; telops?: { text: string; row: number }[]; timeSec?: number; animations?: ElementAnimation[]; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
@@ -79,11 +79,14 @@ export function ScenePreview({ scene, template, activeLineIndex, telops, childre
   const lineSub = activeLine ? resolveLineSubtitle(activeLine, scene) : undefined;
   // タイムラインのテロップ（ADR-0018・並行テロップ③(8)）＝再生位置の overlay テロップを段違いで重ねる（書き出しと同一 item＝パリティ）。
   const hasTelops = !!(telops && telops.length > 0);
-  const layoutOpts = lineSub || hasTelops
+  // キーフレームアニメ（④・ADR-0019）＝再生位置 timeSec で補間して描く（書き出しと同一 layoutScene(t)＝パリティ）。
+  const hasAnim = !!(animations && animations.length > 0);
+  const layoutOpts = lineSub || hasTelops || hasAnim
     ? {
         ...(lineSub ? { subtitleText: lineSub.enabled ? lineSub.text : null } : {}),
         // テロップは動画全体フォント（場面フォントに左右されない＝書き出しと一致・ADR-0001）。
         ...(hasTelops ? { telops, telopFontId: resolveFontId(null, fontId) } : {}),
+        ...(hasAnim ? { timeSec: timeSec ?? 0, animations } : {}),
       }
     : undefined;
   // 常時クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。

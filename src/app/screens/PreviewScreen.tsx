@@ -10,6 +10,7 @@ import { lineAudioKey } from "../../domain/project/narrationLines";
 import { lineSegments } from "../../domain/project/lineTimeline";
 import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
 import { assembleProject } from "../../domain/project/persistence";
+import { FPS } from "../../domain/constants";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
@@ -89,6 +90,31 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     };
   }, [playing, safeIdx, currentTelops]);
   const activeTelops = playing ? playbackTelops : activeTelopsAt(currentTelops, 0);
+
+  // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay 由来・AI/場面正準は不変）。
+  const sceneAnimations = useMemo(
+    () => (current ? (meta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === current.sceneId) : []),
+    [meta.timelineOverlay, current],
+  );
+  // 再生中はこの場面のアニメを再生位置 timeSec で駆動（RAF＝場面頭からの経過秒を尺でクランプ）。停止中は t=0（場面頭）。
+  const [sceneTimeSec, setSceneTimeSec] = useState(0);
+  useEffect(() => {
+    if (!playing || sceneAnimations.length === 0) return;
+    // 実効表示尺は場面送りと同じく MIN_PLAY_SEC でクランプ（アニメの再生窓を実際の表示時間に合わせる）。
+    const dur = Math.max(MIN_PLAY_SEC, current?.durationSec ?? 0);
+    const start = performance.now();
+    let raf = 0;
+    const tick = () => {
+      const elapsed = (performance.now() - start) / 1000;
+      // 正本プレビュー（仕上がり確認）は書き出しと同じ 30fps 量子化でフレーム t を描く＝export と一致（ADR-0019 決定②の per-frame パリティ）。
+      setSceneTimeSec(Math.min(Math.floor(elapsed * FPS) / FPS, dur));
+      if (elapsed < dur) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, safeIdx, sceneAnimations, current?.durationSec]);
+  const animTimeSec = playing ? sceneTimeSec : 0; // 停止中は場面頭。派生＝effect 内の同期 setState を避ける。
+
   const template = current ? templates.find((t) => t.templateId === current.templateId) : undefined;
   const totalSec = scenes.reduce((sum, s) => sum + s.durationSec, 0);
 
@@ -222,7 +248,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
         <div className="card">
-          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} telops={activeTelops} />
+          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} telops={activeTelops} timeSec={animTimeSec} animations={sceneAnimations} />
 
           {/* 場面送り */}
           <div className="row-between mt">
