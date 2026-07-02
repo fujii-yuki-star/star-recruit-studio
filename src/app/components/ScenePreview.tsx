@@ -79,7 +79,11 @@ export function ScenePreview({ scene, template, activeLineIndex, telopText, chil
   const lineSub = activeLine ? resolveLineSubtitle(activeLine, scene) : undefined;
   // タイムラインのテロップ（ADR-0018）＝再生位置の overlay テロップを重ねる（書き出しの overlay 合成と同一 item＝パリティ）。
   const layoutOpts = lineSub || telopText
-    ? { ...(lineSub ? { subtitleText: lineSub.enabled ? lineSub.text : null } : {}), ...(telopText ? { telopText } : {}) }
+    ? {
+        ...(lineSub ? { subtitleText: lineSub.enabled ? lineSub.text : null } : {}),
+        // テロップは動画全体フォント（場面フォントに左右されない＝書き出しと一致・ADR-0001）。
+        ...(telopText ? { telopText, telopFontId: resolveFontId(null, fontId) } : {}),
+      }
     : undefined;
   // 常時クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。
   const baseCredit = creditForSpeaker(getVoicevoxSpeaker());

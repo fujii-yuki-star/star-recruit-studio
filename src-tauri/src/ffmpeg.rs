@@ -1544,10 +1544,24 @@ mod tests {
     #[test]
     fn overlay_telops_args_builds_enable_chain() {
         let telops = [
-            TelopOverlay { png: "t0.png", start_sec: 1.5, end_sec: 3.0 },
-            TelopOverlay { png: "t1.png", start_sec: 8.0, end_sec: 11.0 },
+            TelopOverlay {
+                png: "t0.png",
+                start_sec: 1.5,
+                end_sec: 3.0,
+            },
+            TelopOverlay {
+                png: "t1.png",
+                start_sec: 8.0,
+                end_sec: 11.0,
+            },
         ];
-        let a = overlay_telops_args("in.mp4", &telops, VideoCodec::MediaFoundation, "12000k", "out.mp4");
+        let a = overlay_telops_args(
+            "in.mp4",
+            &telops,
+            VideoCodec::MediaFoundation,
+            "12000k",
+            "out.mp4",
+        );
         let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
         assert_eq!(
             a[fc + 1],
@@ -1558,7 +1572,9 @@ mod tests {
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "0:a"));
         assert!(a.windows(2).any(|w| w[0] == "-c:a" && w[1] == "copy"));
         assert!(a.windows(2).any(|w| w[0] == "-b:v" && w[1] == "12000k"));
-        assert!(a.windows(2).any(|w| w[0] == "-pix_fmt" && w[1] == "yuv420p"));
+        assert!(a
+            .windows(2)
+            .any(|w| w[0] == "-pix_fmt" && w[1] == "yuv420p"));
         // 入力は 動画1本＋テロップPNG2枚。
         assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3);
     }
@@ -2124,7 +2140,8 @@ mod tests {
                 offset_sec: 0.0,
             })
             .collect();
-        encode_jobs(&ffmpeg, &scenes, &joins, codec, 30, "12000k", &tmp, &out).expect("encode_jobs");
+        encode_jobs(&ffmpeg, &scenes, &joins, codec, 30, "12000k", &tmp, &out)
+            .expect("encode_jobs");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 
@@ -2690,7 +2707,8 @@ mod tests {
                 offset_sec: 0.0,
             })
             .collect();
-        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out).expect("encode_jobs video");
+        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out)
+            .expect("encode_jobs video");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 }

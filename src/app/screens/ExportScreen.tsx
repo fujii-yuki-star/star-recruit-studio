@@ -147,6 +147,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       const telops = await buildTelopOverlays(assembleProject(st.meta, st.assets, st.parts, st.scenes), {
         outputSize,
         fontFamily: fontFamilyForId(fontId),
+        fontId: resolveFontId(null, fontId),
       });
       setPhase("encoding");
       let bgm: BgmInput | undefined;

@@ -51,6 +51,14 @@ describe('layoutScene：タイムラインのテロップ（ADR-0018 テロッ�
     expect(telop.y).toBe(Math.round(1080 * 0.06));
     expect(telop.fontSize).toBe(Math.round(1080 * 0.045));
   });
+  it('telopFontId（動画全体フォント）が item.fontId に載る＝場面フォントに左右されない（パリティ）', () => {
+    const layout = layoutScene(scene, openingTemplate, { telopText: 'x', telopFontId: 'kaitou-yokoku-gothic' });
+    const telop = layout.items.find((i) => i.id === 'overlay_telop') as TextItem;
+    expect(telop.fontId).toBe('kaitou-yokoku-gothic');
+    // 未指定は null（描画側 fontFamily へフォールバック）。
+    const l2 = layoutScene(scene, openingTemplate, { telopText: 'x' });
+    expect((l2.items.find((i) => i.id === 'overlay_telop') as TextItem).fontId).toBeNull();
+  });
   it('未指定/null では telop item を足さない（従来どおり）', () => {
     expect(layoutScene(scene, openingTemplate).items.some((i) => i.id === 'overlay_telop')).toBe(false);
     expect(layoutScene(scene, openingTemplate, { telopText: null }).items.some((i) => i.id === 'overlay_telop')).toBe(false);

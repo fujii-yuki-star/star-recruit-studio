@@ -15,6 +15,8 @@ export interface BuildTelopOverlaysOptions {
   outputSize?: { width: number; height: number };
   /** 動画全体のフォント（テロップは場面横断のため動画全体フォントで焼く）。 */
   fontFamily?: string;
+  /** 動画全体のフォント id（item に明示＝プレビューの item.fontId 優先と同一経路・ADR-0001）。 */
+  fontId?: string | null;
 }
 
 /** overlay テロップを帯PNG（透過・出力解像度）＋グローバル表示区間の配列へ焼く。無ければ空配列。 */
@@ -34,7 +36,7 @@ export async function buildTelopOverlays(
       width: canvas.width,
       height: canvas.height,
       backgroundColor: '#000000',
-      items: [overlayTelopItem(canvas.width, canvas.height, c.label)],
+      items: [overlayTelopItem(canvas.width, canvas.height, c.label, opts.fontId)],
     };
     const svg = layoutToSvg(layout, { transparent: true, fontFamily: opts.fontFamily });
     out.push({ pngBase64: await svgToPngDataUrl(svg, width, height), startSec: c.startSec, endSec: c.endSec });

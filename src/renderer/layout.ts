@@ -94,6 +94,8 @@ export interface LayoutOptions {
    * プレビューはこのオプションで、書き出しは overlayTelopItem を単独の帯PNGに焼いて overlay 合成する＝同一ジオメトリでパリティ。
    */
   telopText?: string | null;
+  /** テロップのフォント id（**動画全体フォントを解決済みで渡す**）。テロップは場面横断のため場面フォント（scene.fontId）に左右されない（ADR-0001）。 */
+  telopFontId?: string | null;
 }
 
 // タイムラインのテロップ帯の既定ジオメトリ（キャンバス比・ADR-0018 テロップ実描画）。
@@ -107,7 +109,7 @@ const OVERLAY_TELOP_FONT_RATIO = 0.045;
 const OVERLAY_TELOP_Z = 9500;
 
 /** タイムラインのテロップ帯の LayoutItem（プレビューと書き出し帯PNGが共有＝パリティの単一参照元）。 */
-export function overlayTelopItem(width: number, height: number, text: string): TextItem {
+export function overlayTelopItem(width: number, height: number, text: string, fontId?: string | null): TextItem {
   return {
     id: 'overlay_telop',
     kind: 'text',
@@ -126,6 +128,8 @@ export function overlayTelopItem(width: number, height: number, text: string): T
     strokeColor: '#000000',
     strokeWidth: 3,
     isSubtitle: false,
+    // 動画全体フォントを item に明示（textToSvg は item.fontId 優先＝描画側 fontFamily（場面フォント）に左右されない・ADR-0001）。
+    fontId: fontId ?? null,
   };
 }
 
@@ -252,7 +256,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
 
   // タイムラインのテロップ（ADR-0018）。プレビュー経路のみ（書き出しは帯PNGを overlay 合成＝同一 item を共有）。
   if (opts?.telopText) {
-    items.push(overlayTelopItem(template.canvas.width, template.canvas.height, opts.telopText));
+    items.push(overlayTelopItem(template.canvas.width, template.canvas.height, opts.telopText, opts.telopFontId));
   }
 
   items.sort((a, b) => a.zIndex - b.zIndex);
