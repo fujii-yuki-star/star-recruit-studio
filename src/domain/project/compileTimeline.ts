@@ -129,7 +129,8 @@ function bgmRunClips(scenes: Scene[], starts: number[], ends: number[], projectB
  * 場面ベース project を時間軸＋トラックへ射影する（ADR-0018）。純粋関数。
  * - 再生順＝project.scenes 配列順（sceneOps）。遷移の重なりは transitionTimeline で解決（ADR-0009）。
  * - tracks.video＝場面ごと1クリップ。tracks.audio/telop＝行ごと（sceneLines→lineSegments・0秒区間は除外）。
- *   動画スロットのある掛け合いは書き出しに合わせ単一クリップへ collapse（isVideoSlotScene）。tracks.bgm＝全体1本（有効時）。
+ *   動画スロットのある掛け合いは書き出しに合わせ単一クリップへ collapse（isVideoSlotScene）。
+ *   tracks.bgm＝実効BGM（場面 ?? プロジェクト）が同じソースの連続場面ごとに1区間（曲が変わる/無音の場面で区間が分かれる・全場面継承は[0,総尺]の1区間＝③(7)）。
  * - project.timelineOverlay のクリップを合成（ADR-0018）：track のレーンへ追加。anchorSceneId 有＝場面相対／無＝絶対時間。
  */
 export function compileTimeline(project: Project, opts: CompileTimelineOptions = {}): Timeline {
