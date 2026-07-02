@@ -29,7 +29,8 @@
 | [0020](0020-undo-redo-model.md) | 取り消し/やり直し（Undo/Redo）モデル | **Accepted** |
 | [0021](0021-template-owned-assets.md) | テンプレ既定素材（template-owned default assets・場面素材優先のフォールバック） | **Accepted** |
 | [0022](0022-element-grouping.md) | 要素のグループ化（groups＋独自transform・FREE/テンプレ両エディタ） | **Accepted** |
-| [0023](0023-integrated-timeline-editing.md) | 統合タイムライン編集（再生ヘッド＋同期プレビュー・グローバル時間の再生エンジン・α-5 主軸） | **Proposed** |
+| [0023](0023-integrated-timeline-editing.md) | 統合タイムライン編集（再生ヘッド＋同期プレビュー・上位仕上げ編集面・α-5 主軸） | **Proposed** |
+| [0024](0024-non-destructive-editing-model.md) | 非破壊編集モデル（Asset＝源泉／使用単位＝非破壊の範囲参照・解析キャッシュ・VoiceClip 方向） | **Proposed** |
 
 ## 状態の意味
 
