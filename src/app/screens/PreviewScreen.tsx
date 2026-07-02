@@ -10,6 +10,7 @@ import { lineAudioKey } from "../../domain/project/narrationLines";
 import { lineSegments } from "../../domain/project/lineTimeline";
 import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
 import { assembleProject } from "../../domain/project/persistence";
+import { FPS } from "../../domain/constants";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
@@ -99,12 +100,14 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const [sceneTimeSec, setSceneTimeSec] = useState(0);
   useEffect(() => {
     if (!playing || sceneAnimations.length === 0) return;
-    const dur = current?.durationSec ?? 0;
+    // 実効表示尺は場面送りと同じく MIN_PLAY_SEC でクランプ（アニメの再生窓を実際の表示時間に合わせる）。
+    const dur = Math.max(MIN_PLAY_SEC, current?.durationSec ?? 0);
     const start = performance.now();
     let raf = 0;
     const tick = () => {
       const elapsed = (performance.now() - start) / 1000;
-      setSceneTimeSec(Math.min(elapsed, dur));
+      // 正本プレビュー（仕上がり確認）は書き出しと同じ 30fps 量子化でフレーム t を描く＝export と一致（ADR-0019 決定②の per-frame パリティ）。
+      setSceneTimeSec(Math.min(Math.floor(elapsed * FPS) / FPS, dur));
       if (elapsed < dur) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
