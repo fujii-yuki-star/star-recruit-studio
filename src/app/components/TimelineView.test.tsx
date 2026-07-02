@@ -121,4 +121,57 @@ describe("TimelineView", () => {
     fireEvent.pointerUp(clip, { clientX: 100, pointerId: 1 });
     expect(onDrag).not.toHaveBeenCalled();
   });
+
+  it("開始エッジが場面境界の吸着圏内なら吸着して確定する（onClipDrag は吸着後の deltaSec）", () => {
+    const tl = sampleTimeline(); // 場面境界に 6（s2 開始）がある
+    tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 5, endSec: 8, label: "追加テロップ", origin: "overlay" });
+    const onDrag = vi.fn();
+    render(<TimelineView timeline={tl} editable onClipDrag={onDrag} />);
+    const clip = screen.getByText("追加テロップ");
+    // +30px（=0.833秒）→ 開始 5.833 は境界6の吸着圏内（しきい値 8px÷36=0.22秒）→ 6へ吸着（delta = 6−5 = 1）。
+    fireEvent.pointerDown(clip, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(clip, { clientX: 130, pointerId: 1 });
+    fireEvent.pointerUp(clip, { clientX: 130, pointerId: 1 });
+    expect(onDrag).toHaveBeenCalledWith("ovclip_001", "move", 1);
+  });
+
+  it("どの吸着先からも遠いドラッグは吸着しない（生の deltaSec）", () => {
+    const tl = sampleTimeline();
+    tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 5, endSec: 8, label: "追加テロップ", origin: "overlay" });
+    const onDrag = vi.fn();
+    render(<TimelineView timeline={tl} editable onClipDrag={onDrag} />);
+    const clip = screen.getByText("追加テロップ");
+    // +72px（=2秒）→ 開始 7.0（境界6/8のどちらからも1秒＝しきい値外）→ 吸着なし（delta 2）。
+    fireEvent.pointerDown(clip, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(clip, { clientX: 172, pointerId: 1 });
+    fireEvent.pointerUp(clip, { clientX: 172, pointerId: 1 });
+    expect(onDrag).toHaveBeenCalledWith("ovclip_001", "move", 2);
+  });
+
+  it("非先頭場面アンカーのクリップは、左へ大きく引いてもアンカー開始秒を下限にクランプして確定（editClip と一致）", () => {
+    const tl = sampleTimeline(); // s2 のグローバル開始は 6
+    // s2（開始6）にアンカー・グローバル 6.5秒（相対0.5）のクリップ。
+    tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s2", startSec: 6.5, endSec: 9.5, label: "追加テロップ", origin: "overlay" });
+    const onDrag = vi.fn();
+    render(<TimelineView timeline={tl} editable onClipDrag={onDrag} />);
+    const clip = screen.getByText("追加テロップ");
+    // 左へ -300px（-8.33秒）→ グローバルでは 6.5-8.33<0 だが、アンカー開始6 でクランプ → delta = 6 - 6.5 = -0.5。
+    fireEvent.pointerDown(clip, { clientX: 400, pointerId: 1 });
+    fireEvent.pointerMove(clip, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerUp(clip, { clientX: 100, pointerId: 1 });
+    expect(onDrag).toHaveBeenCalledWith("ovclip_001", "move", -0.5);
+  });
+
+  it("右端トリミングも境界へ吸着する（trim-end）", () => {
+    const tl = sampleTimeline(); // 境界に 8（s1 終了）がある
+    tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 5, endSec: 7.5, label: "追加テロップ", origin: "overlay" });
+    const onDrag = vi.fn();
+    const { container } = render(<TimelineView timeline={tl} editable onClipDrag={onDrag} />);
+    const handle = container.querySelector(".timeline-clip-handle--right") as HTMLElement;
+    // 右端 +16px（≈0.444秒）→ 終了 7.944 は境界8の圏内 → 8へ吸着 → delta = 8 - 7.5 = 0.5。
+    fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 116, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 116, pointerId: 1 });
+    expect(onDrag).toHaveBeenCalledWith("ovclip_001", "trim-end", 0.5);
+  });
 });
