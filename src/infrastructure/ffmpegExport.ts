@@ -23,10 +23,14 @@ export interface ExportVideoInput {
   speed: number;
 }
 
-/** 書き出す1場面の入力。静止画は pngBase64、動画ありは video を指定（pngBase64 は未使用）。 */
+/** 書き出す1場面の入力。静止画は pngBase64、動画ありは video、アニメ場面は framesBase64 を指定。 */
 export interface ExportSceneInput {
-  /** 静止画シーンのPNG（data URL 可）。動画ありシーンでは空でよい。 */
+  /** 静止画シーンのPNG（data URL 可）。動画あり/アニメ場面では空でよい。 */
   pngBase64?: string;
+  /** アニメ場面のフレーム列（④・ADR-0019・data URL 可）。指定時は fps とともに image2 で1動画に焼く（pngBase64 は未使用）。 */
+  framesBase64?: string[];
+  /** framesBase64 のフレームレート（既定 30）。 */
+  fps?: number;
   durationSec: number;
   /** 場面のナレーション音声(WAV)。data URL も可。無い場面は無音トラックになる。 */
   audioBase64?: string;
