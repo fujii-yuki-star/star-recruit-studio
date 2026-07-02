@@ -31,14 +31,17 @@ jobs:
         with:
           tool: cargo-audit
 
-      # RUSTSEC-2026-0194（quick-xml 0.39.4・start タグの重複属性検査が二次ランタイム＝DoS）を一時的に ignore する。
+      # quick-xml 0.39.4 の一連の脆弱性（いずれも 2026-06-29 公開・高 7.5・解決は同一の >=0.41.0）を一時的に ignore する。
+      #   - RUSTSEC-2026-0194：start タグの重複属性検査が二次ランタイム（DoS）。
+      #   - RUSTSEC-2026-0195：NsReader の名前空間宣言が無制限確保でメモリ枯渇（DoS）。
       # 理由：推移的依存 quick-xml ← plist 1.9.0（quick-xml "^0.39.2" 固定・最新）← tauri-utils ← tauri 2.11.2 で、
-      #       plist / tauri に quick-xml >=0.41 を引く版が未リリース＝現時点で依存更新による解消が不能。
+      #       plist / tauri に quick-xml >=0.41 を引く版が未リリース＝依存更新では解消不能（semver 非互換のため [patch] 強制も不可）。
       # 影響：plist は Apple .plist（バンドル/設定メタデータ）の解析に使われ、本アプリは実行時にユーザー由来の
-      #       XML/plist を解析しない（Windows 配布・ADR-0013）ため、二次ランタイム DoS の実害は実質なし。
-      # 解除条件：tauri もしくは plist が quick-xml >=0.41 を引く版を出したら、依存を更新して本 --ignore を外す。
+      #       XML/plist を解析しない（Windows 配布・ADR-0013）ため、いずれの DoS も実害は実質なし。
+      # 解除条件：tauri もしくは plist が quick-xml >=0.41 を引く版を出したら、依存を更新して本 --ignore 群を外す。
+      #       同 quick-xml 由来の新規 advisory が出た場合は上流修正までここへ追記する（crate 単位の無視は cargo audit に無い）。
       - name: Run rust dependency audit
-        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0194
+        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
 
   node-audit:
     name: Node Audit (High)
