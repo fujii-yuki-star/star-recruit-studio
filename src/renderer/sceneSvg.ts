@@ -143,10 +143,19 @@ function itemToSvg(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily: strin
   const inner = renderItemInner(item, opts, fontFamily);
   // 回転（#208）：中心(cx,cy)を軸に rotate でくるむ。未指定/0 は包まない（出力 SVG の差分を最小化）。
   const rot = item.rotation;
-  if (rot == null || rot === 0) return inner;
+  // 要素の不透明度（④・ADR-0019 アニメ）：image/text は要素全体を <g opacity> で敷く。
+  // fill は figure 側（freeShapeSvg）が opacity を描くのでここでは包まない（二重適用を避ける）。
+  const elemOpacity =
+    (item.kind === 'image' || item.kind === 'text') && item.opacity != null && item.opacity < 1
+      ? item.opacity
+      : undefined;
+  const rotated = rot != null && rot !== 0;
+  if (!rotated && elemOpacity == null) return inner;
   const cx = item.x + item.w / 2;
   const cy = item.y + item.h / 2;
-  return `<g transform="rotate(${rot} ${cx} ${cy})">${inner}</g>`;
+  const transform = rotated ? ` transform="rotate(${rot} ${cx} ${cy})"` : '';
+  const opacityAttr = elemOpacity != null ? ` opacity="${elemOpacity}"` : '';
+  return `<g${transform}${opacityAttr}>${inner}</g>`;
 }
 
 // 常時クレジット（ADR-0003）。背景に依らず読めるよう半透明の暗いピルを敷き、右下に白文字で最前面へ。

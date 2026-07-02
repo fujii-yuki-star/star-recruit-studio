@@ -40,6 +40,8 @@ export interface ImageItem extends ItemBase {
   fit: Fit;
   role: 'background' | 'slot' | 'character' | 'logo';
   label: string;
+  /** 要素の不透明度（0..1・アニメの opacity 適用先・④ ADR-0019）。未指定＝1（不透明）。 */
+  opacity?: number;
 }
 
 export interface TextItem extends ItemBase {
@@ -59,6 +61,8 @@ export interface TextItem extends ItemBase {
   textAlign?: TextAlign;
   strokeColor?: string;
   strokeWidth?: number;
+  /** 要素の不透明度（0..1・アニメの opacity 適用先・④ ADR-0019）。未指定＝1（不透明）。 */
+  opacity?: number;
 }
 
 export type LayoutItem = FillItem | ImageItem | TextItem;
@@ -265,8 +269,9 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   }
 
   // キーフレームアニメ（④・ADR-0019）：timeSec 指定時、この場面の対象要素へ補間した transform を絶対上書きで適用する。
-  // 対象＝FREE 要素（item.id === targetId）に x/y（絶対）/scale（w・h に係数・左上基準）/rotation（絶対）＋塗り要素の opacity。
-  // static（timeSec 未指定/アニメ無し）は素通し＝後方互換。グループ対象・text/image の opacity は後続段（(2)/(1b)）。
+  // 対象＝FREE 要素（item.id === targetId）に x/y（絶対）/scale（w・h に係数・左上基準）/rotation（絶対）/opacity（全種別）。
+  // opacity は fill=図形の塗り・image/text=要素全体（sceneSvg が <g opacity> で敷く）に適用。static（timeSec 未指定/
+  // アニメ無し）は素通し＝後方互換。グループ対象は後続段（(2)/(3)）。
   if (opts?.timeSec != null && opts.animations && opts.animations.length > 0) {
     const byTarget = new Map<string, ElementAnimation>();
     for (const a of opts.animations) {
@@ -283,7 +288,8 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         item.w *= tr.scale;
         item.h *= tr.scale;
       }
-      if (tr.opacity != null && item.kind === 'fill') item.opacity = tr.opacity;
+      // opacity は全種別へ（fill=塗り不透明度／image・text=要素の不透明度＝sceneSvg の <g opacity>）。
+      if (tr.opacity != null) item.opacity = tr.opacity;
     }
   }
 

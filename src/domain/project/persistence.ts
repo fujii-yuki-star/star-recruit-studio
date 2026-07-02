@@ -154,6 +154,11 @@ export function createOverlayClipId(existingIds: readonly string[]): string {
   return nextNumberedId('ovclip', existingIds);
 }
 
+/** anim_NNN を発行する（§2.1・要素アニメーション id・project 内一意・ADR-0019 ④）。 */
+export function createAnimationId(existingIds: readonly string[]): string {
+  return nextNumberedId('anim', existingIds);
+}
+
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
 export function assembleProject(
   header: ProjectHeader,

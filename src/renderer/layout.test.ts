@@ -109,6 +109,18 @@ describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => 
     const el = layoutScene(textScene, freeTemplate, { timeSec: 1, animations: [textAnim] }).items.find((i) => i.id === 'free_002') as TextItem;
     expect(el).toMatchObject({ kind: 'text', x: 50, rotation: 30 });
   });
+  it('text 要素に opacity（フェードイン）を適用する（(1c) 要素不透明度）', () => {
+    const textScene = { ...freeScene, freeLayout: [{ id: 'free_002', kind: 'text', x: 10, y: 20, w: 200, h: 60, text: 'あ' }] } as unknown as Scene;
+    const fade = { id: 'anim_003', sceneId: freeScene.sceneId, targetId: 'free_002', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, opacity: 1 }] };
+    const el = layoutScene(textScene, freeTemplate, { timeSec: 1, animations: [fade] }).items.find((i) => i.id === 'free_002') as TextItem;
+    expect(el.opacity).toBe(0.5); // t=1 の線形 0→1
+  });
+  it('slot（画像）要素にも opacity を適用する（(1c) 要素不透明度）', () => {
+    const slotScene = { ...freeScene, freeLayout: [{ id: 'free_003', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001' }] } as unknown as Scene;
+    const fade = { id: 'anim_004', sceneId: freeScene.sceneId, targetId: 'free_003', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, opacity: 1 }] };
+    const el = layoutScene(slotScene, freeTemplate, { timeSec: 1, animations: [fade] }).items.find((i) => i.id === 'free_003') as ImageItem;
+    expect(el.opacity).toBe(0.5);
+  });
 });
 
 describe('layoutScene', () => {
