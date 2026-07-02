@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.15" },
+    "schemaVersion": { "const": "1.16" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -211,6 +211,7 @@
         "templateId": { "type": "string" },
         "durationSec": { "type": "number", "minimum": 0 },
         "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
+        "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
         "textFontIds": {
           "type": "object",
           "additionalProperties": false,

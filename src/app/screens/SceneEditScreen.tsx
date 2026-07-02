@@ -4,7 +4,9 @@ import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
-import { SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { BGM_VOLUME, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
+import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
@@ -195,6 +197,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const setFontId = useProjectStore((s) => s.setFontId);
+  const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
   // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
@@ -1029,6 +1032,47 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <label className="field-label">この場面のフォント</label>
               <FontPicker value={selected.fontId} onChange={(id) => patch((s) => ({ ...s, fontId: id }))} allowInherit />
               <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ別のフォントにできます（「動画全体に合わせる」で全体の設定を使います）。</p>
+            </div>
+
+            <div className="field">
+              <label className="field-label">この場面のBGM</label>
+              <select
+                className="select"
+                value={
+                  selected.bgmSettings === undefined
+                    ? ""
+                    : selected.bgmSettings.enabled === false
+                      ? "__off__"
+                      : selected.bgmSettings.bundledBgmId ?? ""
+                }
+                onChange={(e) => {
+                  const v = e.target.value;
+                  patch((s) => ({
+                    ...s,
+                    // 継承＝undefined（動画全体を使う）／無音＝enabled:false／曲＝この場面専用のBGM（音量・フェードは全体から引き継ぐ）。
+                    bgmSettings:
+                      v === ""
+                        ? undefined
+                        : v === "__off__"
+                          ? { enabled: false }
+                          : {
+                              enabled: true,
+                              bundledBgmId: v as BundledBgmId,
+                              volume: projectBgm?.volume ?? BGM_VOLUME,
+                              loop: projectBgm?.loop ?? true,
+                              fadeInSec: projectBgm?.fadeInSec,
+                              fadeOutSec: projectBgm?.fadeOutSec,
+                            },
+                  }));
+                }}
+              >
+                <option value="">動画全体に合わせる</option>
+                <option value="__off__">この場面は無音</option>
+                {BGM_CATALOG.map((b) => (
+                  <option key={b.id} value={b.id}>{b.label}</option>
+                ))}
+              </select>
+              <p className="field-hint" style={{ marginTop: 4 }}>この場面だけ違うBGMや無音にできます（「動画全体に合わせる」で全体の設定を使います）。連続する同じ曲は途切れません。</p>
             </div>
             </CollapsibleSection>
 

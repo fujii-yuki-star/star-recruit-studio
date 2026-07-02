@@ -12,7 +12,8 @@ import type { TransitionDirection, TransitionType } from '../enums';
 import { resolveTransition, transitionTimeline } from './sceneTransitions';
 import { lineSegments, resolveLineSubtitle } from './lineTimeline';
 import { sceneLines } from './narrationLines';
-import type { Project, Scene } from './types';
+import { bgmById } from '../bgm/bgmCatalog';
+import type { BgmSettings, Project, Scene } from './types';
 
 /** タイムラインのトラック種別（ADR-0018：映像／テロップ／音声／BGM）。 */
 export type TimelineTrackKind = 'video' | 'telop' | 'audio' | 'bgm';
@@ -80,18 +81,56 @@ function emptyTimeline(): Timeline {
 }
 
 /** BGM を全体1本のクリップとして出すか（有効かつ音源が選ばれているとき）。 */
-function bgmClips(project: Project, totalSec: number): TimelineClip[] {
-  const b = project.bgmSettings;
-  const hasSource = b?.bundledBgmId != null || (b?.assetId != null && b.assetId !== '');
-  if (!b?.enabled || !hasSource || totalSec <= 0) return [];
-  return [{ id: 'bgm', startSec: 0, endSec: totalSec, label: 'BGM' }];
+/** 場面の実効BGM設定（場面ごと ?? プロジェクト既定＝null=継承・§11.6・ADR-0018 ③(7)）。 */
+export function resolveSceneBgm(scene: Scene, projectBgm: BgmSettings | undefined): BgmSettings | undefined {
+  return scene.bgmSettings ?? projectBgm;
+}
+
+/** 実効BGMの識別キー（同一＝連続する場面を1区間にまとめる）。鳴らない（無効/ソース無し）は null。 */
+function bgmSourceKey(bgm: BgmSettings | undefined): string | null {
+  if (!bgm?.enabled) return null;
+  if (bgm.bundledBgmId != null) return `bundled:${bgm.bundledBgmId}`;
+  if (bgm.assetId != null && bgm.assetId !== '') return `asset:${bgm.assetId}`;
+  return null;
+}
+
+/** BGM区間のラベル（同梱曲は日本語名・自分のBGMは総称）。 */
+function bgmRunLabel(bgm: BgmSettings | undefined): string {
+  return bgm?.bundledBgmId != null ? bgmById(bgm.bundledBgmId)?.label ?? 'BGM' : 'BGM';
+}
+
+/**
+ * BGMトラック（ADR-0018 ③(7)・場面ごとBGM）。実効BGM（場面 ?? プロジェクト）が同じソースの連続場面を1区間にまとめる。
+ * 全場面がプロジェクト既定を継承する従来ケースは1区間＝[0, 総尺]（後方互換）。鳴らない場面は区間を割らずスキップ。
+ */
+function bgmRunClips(scenes: Scene[], starts: number[], ends: number[], projectBgm: BgmSettings | undefined): TimelineClip[] {
+  const clips: TimelineClip[] = [];
+  let i = 0;
+  let run = 0;
+  while (i < scenes.length) {
+    const bgm = resolveSceneBgm(scenes[i], projectBgm);
+    const key = bgmSourceKey(bgm);
+    if (key === null) {
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < scenes.length && bgmSourceKey(resolveSceneBgm(scenes[j + 1], projectBgm)) === key) j += 1;
+    if (ends[j] > starts[i]) {
+      clips.push({ id: `bgm_${run}`, startSec: starts[i], endSec: ends[j], label: bgmRunLabel(bgm) });
+      run += 1;
+    }
+    i = j + 1;
+  }
+  return clips;
 }
 
 /**
  * 場面ベース project を時間軸＋トラックへ射影する（ADR-0018）。純粋関数。
  * - 再生順＝project.scenes 配列順（sceneOps）。遷移の重なりは transitionTimeline で解決（ADR-0009）。
  * - tracks.video＝場面ごと1クリップ。tracks.audio/telop＝行ごと（sceneLines→lineSegments・0秒区間は除外）。
- *   動画スロットのある掛け合いは書き出しに合わせ単一クリップへ collapse（isVideoSlotScene）。tracks.bgm＝全体1本（有効時）。
+ *   動画スロットのある掛け合いは書き出しに合わせ単一クリップへ collapse（isVideoSlotScene）。
+ *   tracks.bgm＝実効BGM（場面 ?? プロジェクト）が同じソースの連続場面ごとに1区間（曲が変わる/無音の場面で区間が分かれる・全場面継承は[0,総尺]の1区間＝③(7)）。
  * - project.timelineOverlay のクリップを合成（ADR-0018）：track のレーンへ追加。anchorSceneId 有＝場面相対／無＝絶対時間。
  */
 export function compileTimeline(project: Project, opts: CompileTimelineOptions = {}): Timeline {
@@ -198,7 +237,7 @@ export function compileTimeline(project: Project, opts: CompileTimelineOptions =
   return {
     totalSec: effectiveTotalSec,
     scenes: sceneSpans,
-    tracks: { video, telop, audio, bgm: bgmClips(project, effectiveTotalSec) },
+    tracks: { video, telop, audio, bgm: bgmRunClips(scenes, starts, ends, project.bgmSettings) },
     transitions,
   };
 }

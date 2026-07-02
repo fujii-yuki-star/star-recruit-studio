@@ -8,7 +8,7 @@ import { BgmPicker } from "../components/BgmPicker";
 import { resolveBgmVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { lineSegments } from "../../domain/project/lineTimeline";
-import { activeTelopTextAt, compileTimeline, sceneLocalTelops } from "../../domain/project/compileTimeline";
+import { activeTelopTextAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
 import { assembleProject } from "../../domain/project/persistence";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
@@ -109,9 +109,14 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       break;
     }
 
-  // 再生時に流す BGM の解決（標準BGM＝同梱／自分のBGM＝プロジェクト素材）。設定UIは下の BgmPicker。
-  const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
-  const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
+  // 再生時に流す BGM の解決＝現在場面の実効BGM（場面ごと ?? プロジェクト＝null=継承・ADR-0018 ③(7)）。
+  // 同じソースが続く場面では再起動しない（連続する同じ曲は途切れない）＝下の effect の deps を bundledBgm/bgmAsset にする。
+  const currentBgm = current ? resolveSceneBgm(current, bgmSettings) : bgmSettings;
+  const bgmAsset = assets.find((a) => a.assetId === currentBgm?.assetId);
+  const bundledBgm = bgmById(currentBgm?.bundledBgmId);
+  // effect の deps に使うプリミティブ（オブジェクト参照でなく値で比較＝同じ源では再起動しない）。
+  const bgmEnabled = !!currentBgm?.enabled;
+  const bgmVolume = resolveBgmVolume(undefined, currentBgm);
 
   // 再生中：現在の場面のナレーションを鳴らし、表示時間後に次の場面へ。範囲の終端で停止。
   // 掛け合い（明示 lines）は行ごとに音声を順に鳴らし、経過秒で有効行（字幕/フレーム）を切り替える（ADR-0015 PR-F2）。
@@ -180,7 +185,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // BGM 要素は ref を単一の真実とし、cleanup は ref を直接停止する（自分のBGMは URL 解決が非同期なので
   // closure ローカルに依存しない＝再実行が解決の前後どちらで起きても確実に止める）。
   useEffect(() => {
-    if (!playing || !bgmSettings?.enabled) return;
+    if (!playing || !bgmEnabled) return;
     let cancelled = false;
     void (async () => {
       let url: string | null = null;
@@ -190,7 +195,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       if (!url) { setBgmPlayWarning(true); return; } // 選択済みなのに再生元が解決できない（自分のBGM）→ 無音にせず通知
       const a = new Audio(url);
       a.loop = true;
-      a.volume = Math.min(1, resolveBgmVolume(undefined, bgmSettings)); // HTMLAudio の音量は上限 1.0
+      a.volume = Math.min(1, bgmVolume); // HTMLAudio の音量は上限 1.0
       a.muted = mutedRef.current;
       bgmAudioRef.current = a;
       void a.play().catch((e) => {
@@ -203,7 +208,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       bgmAudioRef.current?.pause();
       bgmAudioRef.current = null;
     };
-  }, [playing, bgmSettings, bundledBgm, bgmAsset, meta.projectId]);
+    // deps は源（bundledBgm/bgmAsset）と有効/音量のプリミティブ＝同じ曲が続く場面送りでは再起動せず鳴らし続ける。曲が変わる場面で切替。
+  }, [playing, bgmEnabled, bgmVolume, bundledBgm, bgmAsset, meta.projectId]);
 
   return (
     <div className="main-scroll">
