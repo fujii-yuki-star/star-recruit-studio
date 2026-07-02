@@ -330,44 +330,76 @@ pub fn xfade_chain_args(
     args
 }
 
-/// 結合済み動画（ナレーション入り）に BGM を重ねる引数（純粋）。
-/// BGM はループ（-stream_loop）し、音量・フェードを適用、amix で既存音声と合成する。
-/// normalize=0 で各入力の音量を保つ（既定の正規化で音が痩せるのを防ぐ）。duration=first で動画長に合わせる。
-pub fn mix_bgm_args(
+/// 場面ごとBGMの1クリップの配置（front の planBgmMix が算出）。ファイル・音量・置き場所(delay)・使う長さ(play)・前後フェード。
+pub struct BgmRunPlaced<'a> {
+    pub file: &'a str,
+    pub volume: f64,
+    pub delay_sec: f64,
+    pub play_sec: f64,
+    pub fade_in_sec: f64,
+    pub fade_out_sec: f64,
+}
+
+/// 結合済み動画（ナレーション入り）へ、場面ごとBGMの各クリップをループ→切り出し→音量→フェード→adelay して amix する引数（純粋・ADR-0018 ③(7)）。
+/// クリップは planBgmMix が配置済み（曲が変わる境界は前後を重ねた delay/play＋フェードで amix ブレンド＝クロスフェード）。
+/// 既存音声 [0:a] は保持し normalize=0 で各入力の音量を保つ。duration=first＋-t total で動画長に合わせる。runs は1本以上（呼ぶ前に判定）。
+pub fn mix_bgm_runs_args(
     video: &str,
-    bgm: &str,
-    volume: f64,
-    fade_in_sec: f64,
-    fade_out_sec: f64,
+    runs: &[BgmRunPlaced],
     total_sec: f64,
     out: &str,
 ) -> Vec<String> {
-    let fade_out_start = (total_sec - fade_out_sec).max(0.0);
-    // afade は d=0 を受け付けない（"Option d value 0 out of range" で失敗）。
-    // フェード秒が 0（既定）のときはそのフィルタを省略する。
-    let afade_in = if fade_in_sec > 0.0 {
-        format!(",afade=t=in:st=0:d={fade_in_sec}")
-    } else {
-        String::new()
-    };
-    let afade_out = if fade_out_sec > 0.0 {
-        format!(",afade=t=out:st={fade_out_start}:d={fade_out_sec}")
-    } else {
-        String::new()
-    };
-    let filter = format!(
-        "[1:a]volume={volume}{afade_in}{afade_out}[bg];[0:a][bg]amix=inputs=2:duration=first:normalize=0[a]"
-    );
-    vec![
-        "-y".into(),
-        "-i".into(),
-        video.into(),
-        "-stream_loop".into(),
-        "-1".into(),
-        "-i".into(),
-        bgm.into(),
-        "-filter_complex".into(),
-        filter,
+    let mut args: Vec<String> = vec!["-y".into(), "-i".into(), video.into()];
+    for r in runs {
+        // 各BGMソースはループ（尺に満たない曲を繰り返す）。
+        args.push("-stream_loop".into());
+        args.push("-1".into());
+        args.push("-i".into());
+        args.push(r.file.into());
+    }
+    let mut filters: Vec<String> = Vec::new();
+    // amix の入力ラベル：先頭は既存音声、続いて各BGMクリップ。
+    let mut labels: Vec<String> = vec!["[0:a]".into()];
+    for (i, r) in runs.iter().enumerate() {
+        let src = i + 1; // 入力番号（0 は video）
+        let label = format!("bg{i}");
+        // afade は d=0 を受け付けないため 0 のときは省略。st は asetpts でリセット後の 0 基準。
+        let fi = if r.fade_in_sec > 0.0 {
+            format!(",afade=t=in:st=0:d={}", r.fade_in_sec)
+        } else {
+            String::new()
+        };
+        let fo = if r.fade_out_sec > 0.0 {
+            format!(
+                ",afade=t=out:st={}:d={}",
+                (r.play_sec - r.fade_out_sec).max(0.0),
+                r.fade_out_sec
+            )
+        } else {
+            String::new()
+        };
+        // adelay でグローバル位置へ（0 のときは省略）。
+        let delay_ms = (r.delay_sec * 1000.0).round() as i64;
+        let d = if delay_ms > 0 {
+            format!(",adelay={delay_ms}|{delay_ms}")
+        } else {
+            String::new()
+        };
+        filters.push(format!(
+            "[{src}:a]atrim=0:{play},asetpts=N/SR/TB,volume={vol}{fi}{fo}{d}[{label}]",
+            play = r.play_sec,
+            vol = r.volume
+        ));
+        labels.push(format!("[{label}]"));
+    }
+    let n = labels.len();
+    filters.push(format!(
+        "{}amix=inputs={n}:duration=first:normalize=0[a]",
+        labels.join("")
+    ));
+    args.push("-filter_complex".into());
+    args.push(filters.join(";"));
+    args.extend([
         "-map".into(),
         "0:v".into(),
         "-map".into(),
@@ -383,7 +415,8 @@ pub fn mix_bgm_args(
         "-t".into(),
         format!("{total_sec}"),
         out.into(),
-    ]
+    ]);
+    args
 }
 
 /// テロップ帯の overlay 入力（純粋引数用・ADR-0018）。png は一時PNGパス、区間はグローバル秒（front の compileTimeline と一致）。
@@ -1188,18 +1221,23 @@ pub struct VideoSceneInput {
     speed: Option<f64>,
 }
 
-/// BGM 入力（プロジェクト全体に重ねる）。data URL も可。volume は §6 で解決済み。
+/// 場面ごとBGMの1クリップ入力（ADR-0018 ③(7)・front の planBgmMix が配置＋フェードを算出）。data URL も可・volume は §6 で解決済み。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BgmInput {
+pub struct BgmRunInput {
     audio_base64: String,
+    /// 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。
+    file_ext: String,
     volume: f64,
+    /// グローバル配置開始（秒）＝adelay。
+    #[serde(default)]
+    delay_sec: f64,
+    /// ループ素材から使う長さ（秒）＝atrim。
+    play_sec: f64,
     #[serde(default)]
     fade_in_sec: f64,
     #[serde(default)]
     fade_out_sec: f64,
-    /// 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。
-    file_ext: String,
 }
 
 /// タイムラインのテロップ帯入力（ADR-0018）。透過PNG（base64/data URL）＋グローバル表示区間（compileTimeline の秒と一致）。
@@ -1228,7 +1266,7 @@ pub fn export_video(
     app: tauri::AppHandle,
     scenes: Vec<SceneInput>,
     file_name: String,
-    bgm: Option<BgmInput>,
+    bgm_runs: Option<Vec<BgmRunInput>>,
     project_id: Option<String>,
     output_path: Option<String>,
     telops: Option<Vec<TelopInput>>,
@@ -1430,11 +1468,12 @@ pub fn export_video(
         .unwrap_or((DEFAULT_OUTPUT_WIDTH, DEFAULT_OUTPUT_HEIGHT));
     let bitrate = bitrate_arg(target_bitrate_bps(out_w, out_h, DEFAULT_FPS));
 
-    // パス構成：場面結合 →（テロップ overlay 合成・ADR-0018）→（BGM 合成）→ out。中間成果物は tmp に置く。
+    // パス構成：場面結合 →（テロップ overlay 合成・ADR-0018）→（場面ごとBGM 合成・ADR-0018 ③(7)）→ out。中間成果物は tmp。
     let has_telops = telops.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
+    let has_bgm = bgm_runs.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
     let joined_path = if has_telops {
         tmp.join("joined.mp4")
-    } else if bgm.is_some() {
+    } else if has_bgm {
         tmp.join("video.mp4")
     } else {
         out.clone()
@@ -1453,7 +1492,7 @@ pub fn export_video(
     // タイムラインのテロップ帯を結合後の動画へ overlay（区間はグローバル秒＝xfade 重なり込みの実効時間軸）。
     let video_path = if has_telops {
         let list = telops.unwrap_or_default();
-        let target = if bgm.is_some() {
+        let target = if has_bgm {
             tmp.join("video.mp4")
         } else {
             out.clone()
@@ -1491,37 +1530,51 @@ pub fn export_video(
         joined_path
     };
 
-    if let Some(b) = bgm {
-        let bg_bytes = base64::engine::general_purpose::STANDARD
-            .decode(strip_data_url(&b.audio_base64))
-            .map_err(|e| {
-                export_failure(
-                    format!("bgm decode: {e}"),
-                    "BGMを読み取れませんでした。別のファイルでお試しください。",
-                )
-            })?;
-        let ext = sanitize_file_name(&b.file_ext);
-        let bgm_path = tmp.join(format!("bgm.{ext}"));
-        fs::write(&bgm_path, bg_bytes).map_err(|e| {
-            export_failure(
-                format!("write bgm: {e}"),
-                "動画の保存中に問題が発生しました。もう一度お試しください。",
-            )
-        })?;
-        // xfade で重なった分だけ実効総尺が縮む（ADR-0009：BGM は実効総尺＝Σ尺−ΣD 基準でフェード計算）。
-        // 境界は joins[1..] のみ（joins[0]＝先頭は遷移元なし）。
+    // 場面ごとBGM（ADR-0018 ③(7)）：各クリップを一時ファイルへ書き出し、planBgmMix の配置で結合後の動画へ amix。
+    if has_bgm {
+        let list = bgm_runs.unwrap_or_default();
+        // xfade で重なった分だけ実効総尺が縮む（ADR-0009）。-t にこの値を使う。境界は joins[1..] のみ。
         let applied: f64 = joins
             .iter()
             .skip(1)
             .filter_map(|j| j.xfade.as_ref().map(|_| j.duration_sec))
             .sum();
         let total: f64 = jobs.iter().map(|j| j.duration_sec()).sum::<f64>() - applied;
-        let args = mix_bgm_args(
+        let mut files: Vec<String> = Vec::with_capacity(list.len());
+        for (i, r) in list.iter().enumerate() {
+            let bg_bytes = base64::engine::general_purpose::STANDARD
+                .decode(strip_data_url(&r.audio_base64))
+                .map_err(|e| {
+                    export_failure(
+                        format!("bgm decode: {e}"),
+                        "BGMを読み取れませんでした。別のファイルでお試しください。",
+                    )
+                })?;
+            let ext = sanitize_file_name(&r.file_ext);
+            let bgm_path = tmp.join(format!("bgm_{i:03}.{ext}"));
+            fs::write(&bgm_path, bg_bytes).map_err(|e| {
+                export_failure(
+                    format!("write bgm: {e}"),
+                    "動画の保存中に問題が発生しました。もう一度お試しください。",
+                )
+            })?;
+            files.push(bgm_path.to_string_lossy().into_owned());
+        }
+        let placed: Vec<BgmRunPlaced> = list
+            .iter()
+            .zip(files.iter())
+            .map(|(r, f)| BgmRunPlaced {
+                file: f.as_str(),
+                volume: r.volume,
+                delay_sec: r.delay_sec,
+                play_sec: r.play_sec,
+                fade_in_sec: r.fade_in_sec,
+                fade_out_sec: r.fade_out_sec,
+            })
+            .collect();
+        let args = mix_bgm_runs_args(
             &video_path.to_string_lossy(),
-            &bgm_path.to_string_lossy(),
-            b.volume,
-            b.fade_in_sec,
-            b.fade_out_sec,
+            &placed,
             total,
             &out.to_string_lossy(),
         );
@@ -2041,27 +2094,71 @@ mod tests {
     }
 
     #[test]
-    fn mix_bgm_args_applies_loop_volume_fade_and_amix() {
-        let a = mix_bgm_args("v.mp4", "bgm.mp3", 0.25, 1.0, 2.0, 10.0, "out.mp4");
-        // BGM をループ入力にする。
+    fn mix_bgm_runs_args_single_run_loops_volume_fade_amix() {
+        // 単一区間（全場面が継承する従来ケース相当）：ループ・音量・フェード（out 開始 = play 10 − 2 = 8）・amix(inputs=2)。
+        let runs = [BgmRunPlaced {
+            file: "bgm.mp3",
+            volume: 0.25,
+            delay_sec: 0.0,
+            play_sec: 10.0,
+            fade_in_sec: 1.0,
+            fade_out_sec: 2.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
         assert!(a.windows(2).any(|w| w[0] == "-stream_loop" && w[1] == "-1"));
-        // 音量・フェード（out 開始 = 総尺 10 - フェード 2 = 8）・amix（normalize=0）を適用。
-        assert!(a.iter().any(|s| s.contains("volume=0.25")));
-        assert!(a.iter().any(|s| s.contains("afade=t=in:st=0:d=1")));
-        assert!(a.iter().any(|s| s.contains("afade=t=out:st=8:d=2")));
-        assert!(a
-            .iter()
-            .any(|s| s.contains("amix=inputs=2:duration=first:normalize=0")));
-        // 映像は再エンコードしない。
-        assert!(a.windows(2).any(|w| w[0] == "-c:v" && w[1] == "copy"));
+        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
+        assert_eq!(
+            a[fc + 1],
+            "[1:a]atrim=0:10,asetpts=N/SR/TB,volume=0.25,afade=t=in:st=0:d=1,afade=t=out:st=8:d=2[bg0];[0:a][bg0]amix=inputs=2:duration=first:normalize=0[a]"
+        );
+        assert!(a.windows(2).any(|w| w[0] == "-c:v" && w[1] == "copy")); // 映像は再エンコードしない
     }
 
     #[test]
-    fn mix_bgm_args_omits_afade_when_zero() {
-        // フェード秒=0（既定）のとき afade を出さない（d=0 は FFmpeg が拒否するため）。
-        let a = mix_bgm_args("v.mp4", "bgm.mp3", 0.25, 0.0, 0.0, 10.0, "out.mp4");
+    fn mix_bgm_runs_args_crossfade_places_two_runs_with_adelay() {
+        // 曲が変わる2区間：2本目は adelay で配置。入力は video+2曲、amix inputs=3。
+        let runs = [
+            BgmRunPlaced {
+                file: "a.mp3",
+                volume: 0.25,
+                delay_sec: 0.0,
+                play_sec: 8.5,
+                fade_in_sec: 1.5,
+                fade_out_sec: 1.0,
+            },
+            BgmRunPlaced {
+                file: "b.mp3",
+                volume: 0.3,
+                delay_sec: 7.5,
+                play_sec: 6.5,
+                fade_in_sec: 1.0,
+                fade_out_sec: 2.0,
+            },
+        ];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 14.0, "out.mp4");
+        assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3); // video + 2曲
+        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
+        let f = &a[fc + 1];
+        // 先頭曲は delay 0 ゆえ adelay なし。2本目は adelay=7500。amix は video+2曲。
+        assert!(f.contains("[1:a]atrim=0:8.5,asetpts=N/SR/TB,volume=0.25,afade=t=in:st=0:d=1.5,afade=t=out:st=7.5:d=1[bg0]"));
+        assert!(f.contains("[2:a]atrim=0:6.5,asetpts=N/SR/TB,volume=0.3,afade=t=in:st=0:d=1,afade=t=out:st=4.5:d=2,adelay=7500|7500[bg1]"));
+        assert!(f.contains("[0:a][bg0][bg1]amix=inputs=3:duration=first:normalize=0[a]"));
+    }
+
+    #[test]
+    fn mix_bgm_runs_args_omits_afade_and_adelay_when_zero() {
+        // フェード秒=0（既定）は afade を、delay=0 は adelay を出さない（いずれも FFmpeg が 0 を拒否/不要）。
+        let runs = [BgmRunPlaced {
+            file: "bgm.mp3",
+            volume: 0.25,
+            delay_sec: 0.0,
+            play_sec: 10.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
         assert!(!a.iter().any(|s| s.contains("afade")));
-        assert!(a.iter().any(|s| s.contains("volume=0.25")));
+        assert!(!a.iter().any(|s| s.contains("adelay")));
         assert!(a
             .iter()
             .any(|s| s.contains("amix=inputs=2:duration=first:normalize=0")));
@@ -2220,16 +2317,17 @@ mod tests {
         )
         .expect("generate bgm");
         let out = tmp.join("final.mp4");
-        // 既定のフェード無し（0.0）で実行し、afade=d=0 で落ちない（バグ#1回帰）ことを確認する。
-        let args = mix_bgm_args(
-            &video.to_string_lossy(),
-            &bgm.to_string_lossy(),
-            0.25,
-            0.0,
-            0.0,
-            2.0,
-            &out.to_string_lossy(),
-        );
+        // 既定のフェード無し（0.0）で実行し、afade=d=0/adelay=0 を省いて落ちない（バグ#1回帰）ことを確認する。
+        let bgm_str = bgm.to_string_lossy();
+        let runs = [BgmRunPlaced {
+            file: &bgm_str,
+            volume: 0.25,
+            delay_sec: 0.0,
+            play_sec: 2.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+        }];
+        let args = mix_bgm_runs_args(&video.to_string_lossy(), &runs, 2.0, &out.to_string_lossy());
         run(&ffmpeg, &args).expect("bgm mix");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }

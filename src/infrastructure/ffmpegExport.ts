@@ -38,14 +38,18 @@ export interface ExportSceneInput {
   transition?: { name: string; durationSec: number; offsetSec: number };
 }
 
-/** BGM 入力（動画全体に重ねる）。audioBase64 は data URL も可。volume は §6 で解決済み。 */
-export interface BgmInput {
+/** 場面ごとBGMの1クリップ入力（ADR-0018 ③(7)）。planBgmMix が配置(delaySec)・使う長さ(playSec)・前後フェードを算出済み。data URL 可・volume は §6 解決済み。 */
+export interface BgmRunInput {
   audioBase64: string;
-  volume: number;
-  fadeInSec?: number;
-  fadeOutSec?: number;
   /** 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。 */
   fileExt: string;
+  volume: number;
+  /** グローバル配置開始（秒）＝adelay。 */
+  delaySec: number;
+  /** ループ素材から使う長さ（秒）＝atrim。 */
+  playSec: number;
+  fadeInSec: number;
+  fadeOutSec: number;
 }
 
 /** タイムラインのテロップ帯（ADR-0018）。透過PNG（出力解像度）を結合後の動画へ enable='between(t,S,E)' で重ねる。 */
@@ -69,13 +73,13 @@ export function canExport(): boolean {
 }
 
 /** 場面群を実MP4へ書き出す。outputPath を渡すとそこへ保存し、無ければ既定 <appData>/exports/<fileName>.mp4。
- *  bgm 指定時は全体に重ねる。
+ *  bgmRuns 指定時は場面ごとBGM（区間ごとに配置＋クロスフェード・ADR-0018 ③(7)）を重ねる。
  *  動画ありシーン（scene.video）を含む場合は projectId 必須（クリップをプロジェクトフォルダから解決する）。
  *  Tauri 非検出時は呼ばないこと（canExport で判定）。 */
 export async function exportVideo(
   scenes: ExportSceneInput[],
   fileName: string,
-  bgm?: BgmInput,
+  bgmRuns?: BgmRunInput[],
   projectId?: string,
   outputPath?: string,
   telops?: TelopOverlayInput[],
@@ -83,7 +87,7 @@ export async function exportVideo(
   return invoke<ExportReport>('export_video', {
     scenes,
     fileName,
-    bgm: bgm ?? null,
+    bgmRuns: bgmRuns && bgmRuns.length > 0 ? bgmRuns : null,
     projectId: projectId ?? null,
     outputPath: outputPath ?? null,
     telops: telops && telops.length > 0 ? telops : null,
