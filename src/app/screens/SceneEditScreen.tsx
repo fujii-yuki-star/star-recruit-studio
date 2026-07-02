@@ -3,7 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type Easing, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { BGM_VOLUME, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
@@ -12,7 +12,7 @@ import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE,
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
-import { fadeInKeyframes, fadeInDurationOf, FADE_IN_DEFAULT_SEC, FADE_IN_MIN_SEC, FADE_IN_MAX_SEC } from "../../domain/project/animationPresets";
+import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { switchSceneTemplate } from "../../domain/project/sceneOps";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -403,7 +403,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (!anim) { patchFreeEl(el.id, { opacity }); return; }
     beginHistoryGroup();
     patchFreeEl(el.id, { opacity });
-    updateAnimation(anim.id, fadeInKeyframes(opacity, fadeInDurationOf(anim.keyframes)));
+    // 動きの種類（フェード/スライド/ポップ/回転）は変えず、終点の濃さだけ合わせる。
+    updateAnimation(anim.id, withEndOpacity(anim.keyframes, opacity));
     endHistoryGroup();
   };
   const removeFreeEl = (id: string) => {
@@ -648,39 +649,56 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     }
     return null;
   };
-  // FREE 要素の「動き」＝簡易アニメのプリセット（④・ADR-0019 (1c)）。現在はフェードイン（ふわっと表示）1種。
-  // 全 kind 共通で右パネルのカードに出す。詳細なキーフレーム編集は将来タイムライン（上位仕上げ面・ADR-0023）へ。
+  // FREE 要素の「動き」＝簡易アニメのプリセット（④・ADR-0019 (1c)/(2)）。登場のしかた（ふわっと/すべって/ぽん/くるっと）。
+  // 全 kind 共通で右パネルのカードに出す。詳細な手動キーフレーム編集は将来タイムライン（上位仕上げ面・ADR-0023）へ。
+  const ANIM_KIND_LABEL: Record<PresetKind, string> = { fade: "ふわっと", slide: "すべって", pop: "ぽんっと", spin: "くるっと" };
+  const ANIM_DIR_LABEL: Record<SlideDirection, string> = { left: "左から", right: "右から", up: "上から", down: "下から" };
   const renderFreeAnimationControls = (el: FreeElement) => {
-    const anim = (timelineOverlay?.animations ?? []).find(
-      (a) => a.sceneId === selected.sceneId && a.targetId === el.id,
-    );
-    const endOpacity = el.opacity ?? 1; // 図形は本来の不透明度まで、文字/画像は 1（不透明）まで戻す
+    const anim = (timelineOverlay?.animations ?? []).find((a) => a.sceneId === selected.sceneId && a.targetId === el.id);
+    const desc = anim ? describeAnimation(anim.keyframes, el) : null;
+    const kind = desc?.kind ?? null;
+    const durationSec = desc?.durationSec ?? PRESET_DEFAULT_SEC;
+    const easing = desc?.easing ?? EASING.easeInOut;
+    const direction = desc?.direction ?? "left";
+    // 種類・秒・感じ・向きのどれかを変えたら、その要素の今の位置/大きさから作り直す（種類変更は add/update/remove）。
+    const apply = (over: { kind?: PresetKind | "none"; durationSec?: number; easing?: Easing; direction?: SlideDirection }) => {
+      const k = over.kind ?? kind ?? "none";
+      if (k === "none") { if (anim) removeAnimation(anim.id); return; }
+      const kfs = presetKeyframes(k, el, {
+        durationSec: over.durationSec ?? durationSec,
+        easing: over.easing ?? easing,
+        direction: over.direction ?? direction,
+      });
+      if (anim) updateAnimation(anim.id, kfs); else addAnimation(selected.sceneId, el.id, kfs);
+    };
     return (
       <div className="field" style={{ marginBottom: 6 }}>
-        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動き</label>
-        {anim ? (
-          <div className="row gap-sm" style={{ alignItems: "flex-end" }}>
-            <NumberField
-              label="ふわっと表示（かける秒）"
-              value={fadeInDurationOf(anim.keyframes)}
-              min={FADE_IN_MIN_SEC}
-              max={FADE_IN_MAX_SEC}
-              step={0.1}
-              onChange={(v) => updateAnimation(anim.id, fadeInKeyframes(endOpacity, v))}
-            />
-            <button className="btn btn-ghost text-sm" onClick={() => removeAnimation(anim.id)}>
-              動きをやめる
-            </button>
-          </div>
-        ) : (
-          <div className="row gap-sm" style={{ alignItems: "center" }}>
-            <button
-              className="btn btn-secondary text-sm"
-              onClick={() => addAnimation(selected.sceneId, el.id, fadeInKeyframes(endOpacity, FADE_IN_DEFAULT_SEC))}
-            >
-              ふわっと表示する
-            </button>
-            <span className="text-sm text-muted">だんだん現れる動きをつけます</span>
+        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動き（登場のしかた）</label>
+        <select className="select" value={kind ?? "none"} onChange={(e) => apply({ kind: e.target.value as PresetKind | "none" })}>
+          <option value="none">なし</option>
+          {PRESET_KINDS.map((k) => (<option key={k} value={k}>{ANIM_KIND_LABEL[k]}</option>))}
+        </select>
+        {anim && kind && (
+          <div className="col gap-sm" style={{ marginTop: 6 }}>
+            <div className="row gap-sm" style={{ alignItems: "flex-end" }}>
+              <NumberField label="かける時間（秒）" value={durationSec} min={PRESET_MIN_SEC} max={PRESET_MAX_SEC} step={0.1} onChange={(v) => apply({ durationSec: v })} />
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動きの感じ</label>
+                <select className="select" value={easing} onChange={(e) => apply({ easing: e.target.value as Easing })}>
+                  <option value={EASING.easeInOut}>なめらか</option>
+                  <option value={EASING.linear}>一定</option>
+                </select>
+              </div>
+              {kind === "slide" && (
+                <div className="field" style={{ margin: 0 }}>
+                  <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>どこから</label>
+                  <select className="select" value={direction} onChange={(e) => apply({ direction: e.target.value as SlideDirection })}>
+                    {SLIDE_DIRECTIONS.map((d) => (<option key={d} value={d}>{ANIM_DIR_LABEL[d]}</option>))}
+                  </select>
+                </div>
+              )}
+            </div>
+            <button className="btn btn-ghost text-sm" style={{ alignSelf: "flex-start" }} onClick={() => removeAnimation(anim.id)}>動きをやめる</button>
           </div>
         )}
       </div>
