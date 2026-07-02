@@ -42,6 +42,16 @@ export const TEXT_ALIGN = {
   right: 'right',
 } as const satisfies Record<string, TextAlign>;
 
+/** キーフレームのイージング（④・ADR-0019）。 */
+export const EASINGS = ['linear', 'ease-in-out'] as const;
+export type Easing = (typeof EASINGS)[number];
+
+/** Easing の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const EASING = {
+  linear: 'linear',
+  easeInOut: 'ease-in-out',
+} as const satisfies Record<string, Easing>;
+
 /** FREE 図形要素の種別（ADR-0008・line は矩形モデルと相性が悪く MVP 対象外）。 */
 export const FREE_SHAPE_TYPES = [
   'rect', 'ellipse', 'rounded_rect', 'triangle', 'star', 'arrow', 'speech_bubble',

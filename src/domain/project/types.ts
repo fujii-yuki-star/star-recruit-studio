@@ -1,6 +1,6 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
-  AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
+  AssetType, Easing, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
   SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
 } from '../enums';
 import type { FontId } from '../font/fontCatalog';
@@ -265,9 +265,39 @@ export interface OverlayClip {
   text?: string;
 }
 
+/** 1キーフレーム（場面ローカル秒 timeSec の要素プロパティ・④・ADR-0019）。設定したプロパティのみ補間対象。値は絶対上書き。 */
+export interface Keyframe {
+  /** 場面開始からの相対秒。 */
+  timeSec: number;
+  x?: number;
+  y?: number;
+  /** 拡大縮小の倍率（基準 w/h に対する係数）。 */
+  scale?: number;
+  /** 不透明度 0.0〜1.0。 */
+  opacity?: number;
+  /** 回転角（度）。 */
+  rotation?: number;
+  /** 前KFからこのKFへ入るイージング（先頭KFでは無視）。未指定＝linear。 */
+  easing?: Easing;
+}
+
+/** 要素アニメーション（④・ADR-0019）。場面内の1要素（FREE 要素／グループ id）を時間で補間する。timelineOverlay に格納＝AI/場面正準は不変。 */
+export interface ElementAnimation {
+  /** anim_NNN（project 内一意・§2.1）。 */
+  id: string;
+  /** アンカー場面 id（scene_NNN）。 */
+  sceneId: string;
+  /** 対象の要素 id（scene.freeLayout の要素 id、またはグループ id）。 */
+  targetId: string;
+  /** timeSec 昇順のキーフレーム列。 */
+  keyframes: Keyframe[];
+}
+
 /** 場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。AI/簡易編集は無視する。 */
 export interface TimelineOverlay {
   clips?: OverlayClip[];
+  /** 要素アニメーション（④・ADR-0019・任意）。未指定＝アニメ無し（静止）。 */
+  animations?: ElementAnimation[];
 }
 
 export interface Project {
