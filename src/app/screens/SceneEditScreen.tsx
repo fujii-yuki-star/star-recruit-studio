@@ -649,12 +649,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     }
     return null;
   };
-  // FREE 要素の「動き」＝簡易アニメのプリセット（④・ADR-0019 (1c)/(2)）。登場のしかた（ふわっと/すべって/ぽん/くるっと）。
-  // 全 kind 共通で右パネルのカードに出す。詳細な手動キーフレーム編集は将来タイムライン（上位仕上げ面・ADR-0023）へ。
+  // 「動き」＝簡易アニメのプリセット（④・ADR-0019 (1c)/(2)/(3)）。登場のしかた（ふわっと/すべって/ぽん/くるっと）。
+  // FREE 要素とグループの両方に付けられる（target＝要素id or group_NNN）。詳細な手動KF編集は将来タイムライン（ADR-0023）へ。
   const ANIM_KIND_LABEL: Record<PresetKind, string> = { fade: "ふわっと", slide: "すべって", pop: "ぽんっと", spin: "くるっと" };
   const ANIM_DIR_LABEL: Record<SlideDirection, string> = { left: "左から", right: "右から", up: "上から", down: "下から" };
-  const renderFreeAnimationControls = (el: FreeElement) => {
-    const anim = (timelineOverlay?.animations ?? []).find((a) => a.sceneId === selected.sceneId && a.targetId === el.id);
+  // endOpacity＝要素なら本来の不透明度（el.opacity ?? 1）／グループなら 1。
+  const renderAnimationControls = (targetId: string, endOpacity: number) => {
+    const anim = (timelineOverlay?.animations ?? []).find((a) => a.sceneId === selected.sceneId && a.targetId === targetId);
     const desc = anim ? describeAnimation(anim.keyframes) : null;
     const kind = desc?.kind ?? null;
     const durationSec = desc?.durationSec ?? PRESET_DEFAULT_SEC;
@@ -664,12 +665,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const apply = (over: { kind?: PresetKind | "none"; durationSec?: number; easing?: Easing; direction?: SlideDirection }) => {
       const k = over.kind ?? kind ?? "none";
       if (k === "none") { if (anim) removeAnimation(anim.id); return; }
-      const kfs = presetKeyframes(k, el, {
+      const kfs = presetKeyframes(k, {
         durationSec: over.durationSec ?? durationSec,
         easing: over.easing ?? easing,
         direction: over.direction ?? direction,
+        endOpacity,
       });
-      if (anim) updateAnimation(anim.id, kfs); else addAnimation(selected.sceneId, el.id, kfs);
+      if (anim) updateAnimation(anim.id, kfs); else addAnimation(selected.sceneId, targetId, kfs);
     };
     return (
       <div className="field" style={{ marginBottom: 6 }}>
@@ -1306,17 +1308,27 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         })}
                       </div>
                     </div>
-                    {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。 */}
+                    {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。動き（④(3)）はグループ全体に付く。 */}
                     {effectiveActiveGroupId && (
-                      <div className="row-between" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
-                        <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
-                        <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-                          <button className="btn btn-ghost text-sm" title="グループを最前面へ" disabled={!!activeGroup?.locked} onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
-                          <button className="btn btn-ghost text-sm" title="グループを最背面へ" disabled={!!activeGroup?.locked} onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
-                          <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
-                          <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
-                          <button className="btn btn-ghost text-sm" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
+                      <div className="col gap-sm" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
+                        <div className="row-between">
+                          <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
+                          <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+                            <button className="btn btn-ghost text-sm" title="グループを最前面へ" disabled={!!activeGroup?.locked} onClick={() => bringGroupFront(effectiveActiveGroupId)}>前面</button>
+                            <button className="btn btn-ghost text-sm" title="グループを最背面へ" disabled={!!activeGroup?.locked} onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
+                            <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
+                            <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
+                            <button className="btn btn-ghost text-sm" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
+                          </div>
                         </div>
+                        {/* グループ全体に登場の動きをつける（④(3)・ADR-0019）。メンバーをまとめて動かす。
+                            ロック中は「まとめて移動・拡縮・回転」の抑止と揃えて操作不可（fieldset で中の入力を一括無効化）。 */}
+                        <fieldset
+                          disabled={!!activeGroup?.locked}
+                          style={{ border: "none", padding: 0, margin: 0, minInlineSize: "auto", opacity: activeGroup?.locked ? 0.5 : 1 }}
+                        >
+                          {renderAnimationControls(effectiveActiveGroupId, 1)}
+                        </fieldset>
                       </div>
                     )}
                     {/* 複数選択（#206）：2件以上選んだら一括操作バーを出す（Shift＋クリックで増減）。 */}
@@ -1487,7 +1499,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           <NumberField label="角度" value={el.rotation ?? 0} min={0} max={359} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
                         </div>
 
-                        {renderFreeAnimationControls(el)}
+                        {renderAnimationControls(el.id, el.opacity ?? 1)}
                       </div>
                     ))}
                   </div>

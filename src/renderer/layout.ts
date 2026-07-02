@@ -7,6 +7,8 @@ import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { Layer, Template } from '../domain/template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
+import type { InterpolatedTransform } from '../domain/project/keyframes';
+import { groupElementIds } from '../domain/project/groupOps';
 
 export interface Rect {
   x: number;
@@ -237,14 +239,39 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     }
   }
 
+  // グループアニメ（④(3)・ADR-0019）：グループ(group_NNN)を対象にした animation を、合成前に静的 transform へ重ねる
+  // （位置=加算／拡縮=乗算／回転=加算・グループ中心は不変）。opacity はメンバー要素へ乗算で後段適用。FREE 場面のみ。
+  const sceneGroups = template.category === FREE_CATEGORY ? scene.groups ?? [] : [];
+  const groupAnim = new Map<string, InterpolatedTransform>();
+  if (opts?.timeSec != null && opts.animations && sceneGroups.length > 0) {
+    const groupIds = new Set(sceneGroups.map((g) => g.id));
+    for (const a of opts.animations) {
+      if (a.sceneId === scene.sceneId && groupIds.has(a.targetId)) {
+        groupAnim.set(a.targetId, interpolateKeyframes(a.keyframes, opts.timeSec));
+      }
+    }
+  }
+  const effectiveGroups = groupAnim.size === 0
+    ? sceneGroups
+    : sceneGroups.map((g) => {
+        const tr = groupAnim.get(g.id);
+        return tr
+          ? { ...g, transform: {
+              x: g.transform.x + (tr.x ?? 0),
+              y: g.transform.y + (tr.y ?? 0),
+              scale: g.transform.scale * (tr.scale ?? 1),
+              rotation: g.transform.rotation + (tr.rotation ?? 0),
+            } }
+          : g;
+      });
+
   // FREE テンプレ場面のみ：scene.freeLayout の要素を LayoutItem として重ねる（ADR-0008）。テンプレ層の上に zIndex 順。
   // 通常テンプレに誤って freeLayout が付いても描画しない（防御。category で判定）。
   if (template.category === FREE_CATEGORY) {
-    const sceneGroups = scene.groups ?? [];
-    const elGeom = composeGroupGeometry(scene.freeLayout ?? [], sceneGroups);
+    const elGeom = composeGroupGeometry(scene.freeLayout ?? [], effectiveGroups);
     for (const el of scene.freeLayout ?? []) {
       if (el.hidden) continue; // 非表示の要素は描画しない（レイヤー一覧で隠す・#210）。
-      if (isHiddenByGroup(el.id, sceneGroups)) continue; // hidden グループのメンバーも描画しない（ADR-0022）。
+      if (isHiddenByGroup(el.id, effectiveGroups)) continue; // hidden グループのメンバーも描画しない（ADR-0022）。
       // zIndex 未指定は 1（背景=0 より前面に置く）。rotation はグループ合成後の値（未所属＝el.rotation）。
       const cg = elGeom.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation };
       const base: ItemBase = { id: el.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: el.zIndex ?? 1, rotation: cg.rotation };
@@ -272,14 +299,14 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   // 変換は要素の「本来の状態」を基準とする相対値（CSS transform 相当）＝**後から位置/大きさ/角度を編集しても追従**する
   //  （絶対焼き込みだと編集後に古い値へ固定される・レビュー対応）。x/y=本来位置からのオフセット／scale=係数（中心維持）／
   //  rotation=本来角度からのオフセット。opacity は絶対（0..1・fill=塗り／image・text=要素全体＝sceneSvg の <g opacity>）。
-  // static（timeSec 未指定/アニメ無し）は素通し＝後方互換。グループ対象は後続段（(3)）。
+  // static（timeSec 未指定/アニメ無し）は素通し＝後方互換。グループ対象は下（geometry は effectiveGroups で合成済・opacity のみ後段）。
   if (opts?.timeSec != null && opts.animations && opts.animations.length > 0) {
     const byTarget = new Map<string, ElementAnimation>();
     for (const a of opts.animations) {
       if (a.sceneId === scene.sceneId) byTarget.set(a.targetId, a);
     }
     for (const item of items) {
-      const anim = byTarget.get(item.id);
+      const anim = byTarget.get(item.id); // グループ対象（group_NNN）はここでは一致しない＝要素だけ処理
       if (!anim) continue;
       const tr = interpolateKeyframes(anim.keyframes, opts.timeSec);
       // scale（中心維持）→ x/y オフセット → rotation オフセット の順で本来値に重ねる。
@@ -296,6 +323,15 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       if (tr.rotation != null) item.rotation = (item.rotation ?? 0) + tr.rotation;
       // opacity は全種別へ（fill=塗り不透明度／image・text=要素の不透明度＝sceneSvg の <g opacity>）。
       if (tr.opacity != null) item.opacity = tr.opacity;
+    }
+  }
+  // グループの opacity（④(3)）：メンバー要素（推移的）へ乗算で適用（geometry は effectiveGroups で合成済）。
+  // 要素自身のアニメ opacity とも乗算で重なる（グループのフェード×要素のフェード）。
+  for (const [gid, tr] of groupAnim) {
+    if (tr.opacity == null) continue;
+    const members = new Set(groupElementIds(sceneGroups, gid));
+    for (const item of items) {
+      if (members.has(item.id)) item.opacity = (item.opacity ?? 1) * tr.opacity;
     }
   }
 

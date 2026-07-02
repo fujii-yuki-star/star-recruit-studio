@@ -3,7 +3,7 @@
 // プリセットは「登場の動き」を2キーフレームで表す。描画（x/y/scale/rotation/opacity 補間）は layoutScene(t) 側（(1a)）。
 import { EASING } from '../enums';
 import type { Easing } from '../enums';
-import type { FreeElement, Keyframe } from './types';
+import type { Keyframe } from './types';
 
 /** プリセットの所要秒（既定/下限/上限）。場面尺に依らず操作できる簡易範囲。 */
 export const PRESET_DEFAULT_SEC = 0.6;
@@ -35,8 +35,8 @@ export function fadeInKeyframes(endOpacity: number, durationSec: number, easing:
 }
 
 /** スライドイン（すべって・本来位置からのオフセット→0＋フェード）。x/y は相対＝要素を後から動かしても追従（layout 側で加算）。 */
-export function slideInKeyframes(el: FreeElement, direction: SlideDirection, durationSec: number, easing: Easing = EASING.easeInOut): Keyframe[] {
-  const end = clampOpacity(el.opacity ?? 1);
+export function slideInKeyframes(direction: SlideDirection, durationSec: number, easing: Easing = EASING.easeInOut, endOpacity = 1): Keyframe[] {
+  const end = clampOpacity(endOpacity);
   const horizontal = direction === 'left' || direction === 'right';
   const offset = direction === 'left' || direction === 'up' ? -SLIDE_DISTANCE : SLIDE_DISTANCE;
   const start: Keyframe = { timeSec: 0, opacity: 0, ...(horizontal ? { x: offset } : { y: offset }) };
@@ -45,39 +45,37 @@ export function slideInKeyframes(el: FreeElement, direction: SlideDirection, dur
 }
 
 /** ポップ（ぽんっと・小さく→等倍＋フェード）。scale は係数で layout が中心維持＝x/y の焼き込み不要（位置編集に追従）。 */
-export function popInKeyframes(el: FreeElement, durationSec: number, easing: Easing = EASING.easeInOut): Keyframe[] {
-  const end = clampOpacity(el.opacity ?? 1);
+export function popInKeyframes(durationSec: number, easing: Easing = EASING.easeInOut, endOpacity = 1): Keyframe[] {
   return [
     { timeSec: 0, scale: POP_START_SCALE, opacity: 0 },
-    { timeSec: clampDur(durationSec), scale: 1, opacity: end, easing },
+    { timeSec: clampDur(durationSec), scale: 1, opacity: clampOpacity(endOpacity), easing },
   ];
 }
 
 /** 回転で登場（くるっと・本来角度からのオフセット→0＋フェード）。rotation は相対＝要素の角度を変えても追従。 */
-export function spinInKeyframes(el: FreeElement, durationSec: number, easing: Easing = EASING.easeInOut): Keyframe[] {
-  const end = clampOpacity(el.opacity ?? 1);
+export function spinInKeyframes(durationSec: number, easing: Easing = EASING.easeInOut, endOpacity = 1): Keyframe[] {
   return [
     { timeSec: 0, rotation: SPIN_START_DEG, opacity: 0 },
-    { timeSec: clampDur(durationSec), rotation: 0, opacity: end, easing },
+    { timeSec: clampDur(durationSec), rotation: 0, opacity: clampOpacity(endOpacity), easing },
   ];
 }
 
-/** 種類・向き・秒・イージングからキーフレーム列を作る（オーサリングUIの単一入口）。 */
+/** 種類・向き・秒・イージング・終点不透明度からキーフレーム列を作る（オーサリングUIの単一入口）。
+ *  endOpacity＝要素なら本来の不透明度（el.opacity ?? 1）／グループなら 1（グループ自体に不透明度は無い）。 */
 export function presetKeyframes(
   kind: PresetKind,
-  el: FreeElement,
-  opts: { durationSec: number; easing: Easing; direction?: SlideDirection },
+  opts: { durationSec: number; easing: Easing; direction?: SlideDirection; endOpacity?: number },
 ): Keyframe[] {
-  const { durationSec, easing, direction } = opts;
+  const { durationSec, easing, direction, endOpacity = 1 } = opts;
   switch (kind) {
     case 'fade':
-      return fadeInKeyframes(el.opacity ?? 1, durationSec, easing);
+      return fadeInKeyframes(endOpacity, durationSec, easing);
     case 'slide':
-      return slideInKeyframes(el, direction ?? 'left', durationSec, easing);
+      return slideInKeyframes(direction ?? 'left', durationSec, easing, endOpacity);
     case 'pop':
-      return popInKeyframes(el, durationSec, easing);
+      return popInKeyframes(durationSec, easing, endOpacity);
     case 'spin':
-      return spinInKeyframes(el, durationSec, easing);
+      return spinInKeyframes(durationSec, easing, endOpacity);
   }
 }
 

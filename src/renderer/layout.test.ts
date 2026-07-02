@@ -129,6 +129,34 @@ describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => 
     const el = layoutScene(slotScene, freeTemplate, { timeSec: 1, animations: [fade] }).items.find((i) => i.id === 'free_003') as ImageItem;
     expect(el.opacity).toBe(0.5);
   });
+
+  // ④(3) グループ対象アニメ：合成前の group.transform に重なり、メンバー全員が動く。
+  const groupScene = {
+    ...freeScene,
+    freeLayout: [
+      { id: 'free_001', kind: 'shape', x: 10, y: 20, w: 100, h: 50, fillColor: '#ff0000', opacity: 1 },
+      { id: 'free_002', kind: 'shape', x: 200, y: 20, w: 100, h: 50, fillColor: '#00ff00', opacity: 1 },
+    ],
+    groups: [{ id: 'group_001', members: ['free_001', 'free_002'], transform: { x: 0, y: 0, scale: 1, rotation: 0 } }],
+  } as unknown as Scene;
+  it('グループ slide はメンバー全員を同じオフセットで動かす（合成前 transform に加算）', () => {
+    const gAnim = { id: 'anim_g1', sceneId: freeScene.sceneId, targetId: 'group_001', keyframes: [{ timeSec: 0, x: -100 }, { timeSec: 2, x: 0 }] };
+    const items = layoutScene(groupScene, freeTemplate, { timeSec: 0, animations: [gAnim] }).items;
+    expect((items.find((i) => i.id === 'free_001') as FillItem).x).toBe(-90); // 10 − 100
+    expect((items.find((i) => i.id === 'free_002') as FillItem).x).toBe(100); // 200 − 100
+  });
+  it('グループ pop はメンバー全員を縮める（transform.scale に乗算）', () => {
+    const gAnim = { id: 'anim_g2', sceneId: freeScene.sceneId, targetId: 'group_001', keyframes: [{ timeSec: 0, scale: 0.5 }, { timeSec: 2, scale: 1 }] };
+    const items = layoutScene(groupScene, freeTemplate, { timeSec: 0, animations: [gAnim] }).items;
+    expect((items.find((i) => i.id === 'free_001') as FillItem).w).toBe(50); // 100 × 0.5
+    expect((items.find((i) => i.id === 'free_002') as FillItem).w).toBe(50);
+  });
+  it('グループ fade はメンバー全員の opacity を乗算で下げる', () => {
+    const gAnim = { id: 'anim_g3', sceneId: freeScene.sceneId, targetId: 'group_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, opacity: 1 }] };
+    const items = layoutScene(groupScene, freeTemplate, { timeSec: 1, animations: [gAnim] }).items;
+    expect((items.find((i) => i.id === 'free_001') as FillItem).opacity).toBe(0.5); // 1 × 0.5
+    expect((items.find((i) => i.id === 'free_002') as FillItem).opacity).toBe(0.5);
+  });
 });
 
 describe('layoutScene', () => {
