@@ -59,7 +59,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [resultPath, setResultPath] = useState("");
   const [message, setMessage] = useState("");
   // 選択済みBGMが読み込めなかったとき、完了画面で知らせる（§2-5・BGMなしで続行）。
-  const [bgmWarning, setBgmWarning] = useState(false);
+  const [bgmWarning, setBgmWarning] = useState<"" | "partial" | "all">("");
 
   const busy = phase === "rendering" || phase === "encoding";
 
@@ -92,7 +92,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     }
     setMessage("");
     setResultPath("");
-    setBgmWarning(false);
+    setBgmWarning("");
     setProgress({ done: 0, total: scenes.length });
     setPhase("rendering");
     try {
@@ -156,6 +156,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // 表示用 src ではなく実体を data URL 化する（asset:// は FFmpeg へ渡せない）。同梱は public/bgm、自分のBGM はプロジェクトから。
       const mixClips = planBgmMix(resolveBgmExportRuns(proj), BGM_CROSSFADE_SEC);
       const bgmRuns: BgmRunInput[] = [];
+      let bgmLoadFailed = false; // 1区間でも読込失敗したか（一部失敗と全失敗を完了時に出し分ける）。
       for (const clip of mixClips) {
         let audioBase64: string | undefined;
         let fileExt = "mp3";
@@ -173,9 +174,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           bgmRuns.push({ audioBase64, fileExt, volume: clip.volume, delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
         } else {
           // 選択済みだが読み込めなかった（同梱欠損・読込失敗）。その区間は無音で続行し、完了時に知らせる（§2-5）。
-          setBgmWarning(true);
+          bgmLoadFailed = true;
         }
       }
+      // 一部の区間だけ失敗（他は鳴る）と、全区間失敗（＝BGMなし）を区別して案内する（§2-5）。
+      if (bgmLoadFailed) setBgmWarning(bgmRuns.length > 0 ? "partial" : "all");
       const report = await exportVideo(built, fileName.trim() || "export", bgmRuns, pid || undefined, outputPath, telops);
       setResultPath(report.outputPath);
       setPhase("done");
@@ -343,7 +346,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               )}
               {phase === "done" && bgmWarning && (
                 <div className="notice notice-warn mt">
-                  <span>BGMを読み込めなかったため、BGMなしで保存しました。仕上がり確認でBGMを選び直すと改善する場合があります。</span>
+                  <span>
+                    {bgmWarning === "partial"
+                      ? "一部の場面のBGMを読み込めなかったため、その場面は音楽なしで保存しました。仕上がり確認でBGMを選び直すと改善する場合があります。"
+                      : "BGMを読み込めなかったため、BGMなしで保存しました。仕上がり確認でBGMを選び直すと改善する場合があります。"}
+                  </span>
                 </div>
               )}
             </>
