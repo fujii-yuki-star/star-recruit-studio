@@ -33,4 +33,8 @@ describe('interpolateKeyframes（④・ADR-0019）', () => {
     expect(interpolateKeyframes([], 1)).toEqual({});
     expect(interpolateKeyframes([{ timeSec: 0, x: 5 }], 0)).toEqual({ x: 5 }); // opacity 等は付かない
   });
+  it('timeSec が昇順でなくても正しく補間する（防御ソート）', () => {
+    const kfs: Keyframe[] = [{ timeSec: 2, x: 100 }, { timeSec: 0, x: 0 }]; // 逆順入力
+    expect(interpolateKeyframes(kfs, 1)).toEqual({ x: 50 });
+  });
 });

@@ -1,6 +1,6 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
-  AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
+  AssetType, Easing, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
   SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
 } from '../enums';
 import type { FontId } from '../font/fontCatalog';
@@ -264,9 +264,6 @@ export interface OverlayClip {
   /** テロップの文言。 */
   text?: string;
 }
-
-/** キーフレームのイージング（④・ADR-0019）。区間 [前KF, 当KF] の進み方。 */
-export type Easing = 'linear' | 'ease-in-out';
 
 /** 1キーフレーム（場面ローカル秒 timeSec の要素プロパティ・④・ADR-0019）。設定したプロパティのみ補間対象。値は絶対上書き。 */
 export interface Keyframe {

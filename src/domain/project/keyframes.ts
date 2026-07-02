@@ -1,7 +1,9 @@
 // キーフレーム補間（④・ADR-0019）。純粋・決定論（§7 テスト対象）。preview/export が同一関数を共有＝フレーム単位パリティ。
 // 各プロパティは独立に補間する（キーフレームは変えたいプロパティだけ持てる）。区間 [前KF, 当KF] のイージングは「当KF.easing」。
 // 区間外は端でクランプ（最初のKF前＝最初の値／最後のKF後＝最後の値）。値は絶対上書き。
-import type { Easing, Keyframe } from './types';
+import { EASING } from '../enums';
+import type { Easing } from '../enums';
+import type { Keyframe } from './types';
 
 /** timeSec の補間結果（設定されたプロパティのみ）。 */
 export interface InterpolatedTransform {
@@ -17,7 +19,7 @@ type AnimProp = (typeof PROPS)[number];
 
 /** イージング（進捗 0..1 → 0..1）。ease-in-out は緩急のある補間。 */
 function applyEasing(t: number, easing: Easing | undefined): number {
-  if (easing === 'ease-in-out') return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+  if (easing === EASING.easeInOut) return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
   return t; // linear
 }
 
@@ -29,7 +31,8 @@ export function interpolateKeyframes(keyframes: readonly Keyframe[], timeSec: nu
   const out: InterpolatedTransform = {};
   if (keyframes.length === 0) return out;
   for (const prop of PROPS) {
-    const kfs = keyframes.filter((k) => k[prop] != null);
+    // 該当プロパティを持つKFを timeSec 昇順に（手編集/将来オーサリングで順序が崩れても補間が狂わないよう防御的にソート）。
+    const kfs = keyframes.filter((k) => k[prop] != null).sort((a, b) => a.timeSec - b.timeSec);
     if (kfs.length === 0) continue;
     if (timeSec <= kfs[0].timeSec) {
       out[prop] = kfs[0][prop];

@@ -103,6 +103,12 @@ describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => 
     const el = layoutScene(freeScene, freeTemplate, { timeSec: 1, animations: [other] }).items.find((i) => i.id === 'free_001') as FillItem;
     expect(el).toMatchObject({ x: 10, y: 20, opacity: 1 });
   });
+  it('text 要素にも transform（x/y/rotation）を適用する（fill 以外の経路）', () => {
+    const textScene = { ...freeScene, freeLayout: [{ id: 'free_002', kind: 'text', x: 10, y: 20, w: 200, h: 60, text: 'あ' }] } as unknown as Scene;
+    const textAnim = { id: 'anim_002', sceneId: freeScene.sceneId, targetId: 'free_002', keyframes: [{ timeSec: 0, x: 0, rotation: 0 }, { timeSec: 2, x: 100, rotation: 60 }] };
+    const el = layoutScene(textScene, freeTemplate, { timeSec: 1, animations: [textAnim] }).items.find((i) => i.id === 'free_002') as TextItem;
+    expect(el).toMatchObject({ kind: 'text', x: 50, rotation: 30 });
+  });
 });
 
 describe('layoutScene', () => {
