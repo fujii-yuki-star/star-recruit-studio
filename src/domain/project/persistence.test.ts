@@ -251,8 +251,20 @@ describe('parseProjectDoc', () => {
     const overlay = { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', startSec: 1, durationSec: 2, text: '補足' }] };
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.14', timelineOverlay: overlay } as Record<string, unknown>;
     const back = parseProjectDoc(JSON.stringify(doc));
-    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.14→1.15 へ昇格（任意追加＝変換不要）
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.14→現行へ昇格（任意追加＝変換不要）
     expect(back.timelineOverlay).toEqual(overlay);
+  });
+  it('場面ごとBGM：scene.bgmSettings を持つ旧版(1.15)が移行し保持する（ADR-0018 ③(7)）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'intro', templateId: 'tpl_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' }, warnings: [],
+      bgmSettings: { enabled: true, bundledBgmId: 'found-new-hope', volume: 0.3, loop: true },
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.15', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.15→現行へ昇格（任意追加＝変換不要）
+    expect(back.scenes[0].bgmSettings).toEqual({ enabled: true, bundledBgmId: 'found-new-hope', volume: 0.3, loop: true });
   });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;

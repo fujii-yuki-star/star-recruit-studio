@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import { transitionTimeline, resolveTransition } from './sceneTransitions';
-import { activeTelopTextAt, compileTimeline, sceneLocalTelops } from './compileTimeline';
+import { activeTelopTextAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from './compileTimeline';
 import type { Project, Scene } from './types';
 
 // compileTimeline が読むのは sceneId/durationSec/transition/lines/narration/subtitleEnabledDefault のみ。
@@ -14,6 +14,7 @@ function scene(p: {
   lines?: unknown;
   narration?: { text: string; status?: string };
   subtitleEnabledDefault?: boolean;
+  bgmSettings?: unknown;
 }): Scene {
   return {
     partId: 'part_001',
@@ -164,11 +165,11 @@ describe('compileTimeline：掛け合い（行トラック）', () => {
 });
 
 describe('compileTimeline：BGM トラック', () => {
-  it('有効＋標準BGM選択で全体1本のクリップ', () => {
+  it('有効＋標準BGM選択で全体1本のクリップ（全場面継承＝1区間・ラベルは曲名）', () => {
     const tl = compileTimeline(
       project([scene({ sceneId: 's1', durationSec: 8 })], { enabled: true, bundledBgmId: 'summer-morning' }),
     );
-    expect(tl.tracks.bgm).toEqual([{ id: 'bgm', startSec: 0, endSec: 8, label: 'BGM' }]);
+    expect(tl.tracks.bgm).toEqual([{ id: 'bgm_0', startSec: 0, endSec: 8, label: '爽やかな朝' }]);
   });
 
   it('有効でも音源未選択なら BGM クリップは出さない', () => {
@@ -217,6 +218,58 @@ describe('compileTimeline：timelineOverlay の合成（ADR-0018）', () => {
   it('overlay 未設定なら合成なし（従来どおり）', () => {
     const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 8 })]));
     expect(tl.tracks.telop.every((c) => c.id.startsWith('s1/'))).toBe(true);
+  });
+});
+
+describe('場面ごとBGM（ADR-0018 ③(7)）', () => {
+  const proj = { enabled: true, bundledBgmId: 'summer-morning', volume: 0.25 };
+  it('resolveSceneBgm：場面ごと ?? プロジェクト（null=継承）', () => {
+    expect(resolveSceneBgm(scene({ sceneId: 's1', durationSec: 8 }), proj as never)).toBe(proj);
+    const own = { enabled: true, bundledBgmId: 'found-new-hope' };
+    expect(resolveSceneBgm(scene({ sceneId: 's1', durationSec: 8, bgmSettings: own }), proj as never)).toBe(own);
+  });
+  it('全場面が継承＝1区間 [0, 総尺]（後方互換）・ラベルは同梱曲名', () => {
+    const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 8 }), scene({ sceneId: 's2', durationSec: 6 })], proj));
+    expect(tl.tracks.bgm).toEqual([{ id: 'bgm_0', startSec: 0, endSec: 14, label: '爽やかな朝' }]);
+  });
+  it('場面が別の曲に上書き＝区間が分かれる（連続する同じ曲はまとまる）', () => {
+    const tl = compileTimeline(
+      project(
+        [
+          scene({ sceneId: 's1', durationSec: 8 }),
+          scene({ sceneId: 's2', durationSec: 6, bgmSettings: { enabled: true, bundledBgmId: 'found-new-hope', volume: 0.25 } }),
+          scene({ sceneId: 's3', durationSec: 5 }),
+        ],
+        proj,
+      ),
+    );
+    expect(tl.tracks.bgm).toEqual([
+      { id: 'bgm_0', startSec: 0, endSec: 8, label: '爽やかな朝' },
+      { id: 'bgm_1', startSec: 8, endSec: 14, label: '前向きなポップ' },
+      { id: 'bgm_2', startSec: 14, endSec: 19, label: '爽やかな朝' },
+    ]);
+  });
+  it('enabled:false の場面は無音＝区間を割ってスキップ', () => {
+    const tl = compileTimeline(
+      project(
+        [
+          scene({ sceneId: 's1', durationSec: 8 }),
+          scene({ sceneId: 's2', durationSec: 6, bgmSettings: { enabled: false } }),
+          scene({ sceneId: 's3', durationSec: 5 }),
+        ],
+        proj,
+      ),
+    );
+    expect(tl.tracks.bgm).toEqual([
+      { id: 'bgm_0', startSec: 0, endSec: 8, label: '爽やかな朝' },
+      { id: 'bgm_1', startSec: 14, endSec: 19, label: '爽やかな朝' },
+    ]);
+  });
+  it('BGM なし（プロジェクト・場面とも）＝空トラック', () => {
+    expect(compileTimeline(project([scene({ sceneId: 's1', durationSec: 8 })])).tracks.bgm).toEqual([]);
+    // プロジェクトは有効だが場面が全部無音＝空。
+    const allOff = compileTimeline(project([scene({ sceneId: 's1', durationSec: 8, bgmSettings: { enabled: false } })], proj));
+    expect(allOff.tracks.bgm).toEqual([]);
   });
 });
 

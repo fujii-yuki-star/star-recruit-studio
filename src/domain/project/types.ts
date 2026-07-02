@@ -230,6 +230,8 @@ export interface Scene {
   fontId?: FontId | null;
   /** テキスト種別（textKey）ごとのフォント上書き（#178・schema 1.7）。未設定の種別は scene.fontId→動画全体→既定を継承。 */
   textFontIds?: Partial<Record<TextKey, FontId>>;
+  /** この場面のBGM。未指定＝プロジェクト既定（bgmSettings）を継承（schema 1.16・null=継承・ADR-0018 ③(7)）。enabled:false でこの場面は無音。 */
+  bgmSettings?: BgmSettings;
   assetRefs: AssetRefs;
   character: Character;
   texts: Texts;

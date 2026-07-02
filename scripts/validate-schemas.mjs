@@ -97,7 +97,7 @@ ok = ok && sem;
 
 // generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
 const generalBase = {
-  schemaVersion: '1.15', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  schemaVersion: '1.16', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
   videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
@@ -127,6 +127,8 @@ const mustAccept = [
   ['scene: slotFits（場面ごとの収め方上書き）を許容（1.13・④）', withScene({ slotFits: { background: 'contain', mainVisual: 'stretch' } })],
   ['scene: groups（要素のグループ化・ネスト）を許容（1.14・ADR-0022）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }], groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 10, y: -5, rotation: 15, scale: 1.5 }, name: 'まとまり', hidden: false, locked: false }, { id: 'group_002', members: ['group_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }] })],
   ['timelineOverlay: 場面アンカー＋絶対のテロップクリップを許容（1.15・ADR-0018）', { ...withBrief({}), timelineOverlay: { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', startSec: 1, durationSec: 2, text: '補足' }, { id: 'ovclip_002', track: 'telop', startSec: 3, durationSec: 1.5 }] } }],
+  ['scene: bgmSettings（場面ごとBGM・曲の上書き）を許容（1.16・ADR-0018 ③(7)）', withScene({ bgmSettings: { enabled: true, bundledBgmId: 'found-new-hope', volume: 0.3, loop: true } })],
+  ['scene: bgmSettings（無音＝enabled:false のみ）を許容（1.16・ADR-0018 ③(7)）', withScene({ bgmSettings: { enabled: false } })],
 ];
 const mustReject = [
   ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
@@ -144,6 +146,7 @@ const mustReject = [
   ['freeLayout: rotation 範囲外(400)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: 400 }] })],
   ['freeLayout: rotation 負(-1)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: -1 }] })],
   ['timelineOverlay: 未対応トラック(bgm)は拒否（1.15・ADR-0018）', { ...withBrief({}), timelineOverlay: { clips: [{ id: 'ovclip_001', track: 'bgm', startSec: 0, durationSec: 1 }] } }],
+  ['scene: bgmSettings 未知の bundledBgmId は拒否（1.16・ADR-0018 ③(7)）', withScene({ bgmSettings: { enabled: true, bundledBgmId: 'nope' } })],
   ['timelineOverlay: durationSec 0 は拒否', { ...withBrief({}), timelineOverlay: { clips: [{ id: 'ovclip_001', track: 'telop', startSec: 0, durationSec: 0 }] } }],
   ['timelineOverlay: id 形式不正(clip_001)は拒否', { ...withBrief({}), timelineOverlay: { clips: [{ id: 'clip_001', track: 'telop', startSec: 0, durationSec: 1 }] } }],
   ['freeLayout: rotation 360（=0と重複）は除外（exclusiveMaximum）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: 360 }] })],
