@@ -8,7 +8,7 @@ import { BgmPicker } from "../components/BgmPicker";
 import { resolveBgmVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { lineSegments } from "../../domain/project/lineTimeline";
-import { activeTelopTextAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
+import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
 import { assembleProject } from "../../domain/project/persistence";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
@@ -75,19 +75,20 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   );
   // 再生中のテロップは区間境界のタイマーで切替（t=0 も 0ms タイマー経由＝effect 内の同期 setState を避ける）。
   // 停止中は場面頭(t=0)の表示を描画時に導出する。区間は書き出しの enable='between' と同一（パリティ）。
-  const [playbackTelop, setPlaybackTelop] = useState<string | null>(null);
+  // 並行テロップ（③(8)）＝時刻ごとに有効な全テロップ（段付き）を表示する。
+  const [playbackTelops, setPlaybackTelops] = useState<{ text: string; row: number }[]>([]);
   useEffect(() => {
     if (!playing) return;
     const bounds = [...new Set([0, ...currentTelops.flatMap((iv) => [iv.startSec, iv.endSec])])];
     const timers = bounds
       .filter((b) => b >= 0)
-      .map((b) => window.setTimeout(() => setPlaybackTelop(activeTelopTextAt(currentTelops, b)), b * 1000));
+      .map((b) => window.setTimeout(() => setPlaybackTelops(activeTelopsAt(currentTelops, b)), b * 1000));
     return () => {
       timers.forEach((t) => window.clearTimeout(t));
-      setPlaybackTelop(null); // 場面送り/停止で前場面の表示を持ち越さない
+      setPlaybackTelops([]); // 場面送り/停止で前場面の表示を持ち越さない
     };
   }, [playing, safeIdx, currentTelops]);
-  const activeTelop = playing ? playbackTelop : activeTelopTextAt(currentTelops, 0);
+  const activeTelops = playing ? playbackTelops : activeTelopsAt(currentTelops, 0);
   const template = current ? templates.find((t) => t.templateId === current.templateId) : undefined;
   const totalSec = scenes.reduce((sum, s) => sum + s.durationSec, 0);
 
@@ -221,7 +222,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
         <div className="card">
-          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} telopText={activeTelop} />
+          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} telops={activeTelops} />
 
           {/* 場面送り */}
           <div className="row-between mt">

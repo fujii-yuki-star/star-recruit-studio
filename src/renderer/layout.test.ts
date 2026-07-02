@@ -37,31 +37,37 @@ const scene: Scene = {
   warnings: [],
 };
 
-describe('layoutScene：タイムラインのテロップ（ADR-0018 テロップ実描画）', () => {
-  it('opts.telopText で最前面の帯テキストが足される（プレビュー経路・書き出し帯PNGと同一 item）', () => {
-    const layout = layoutScene(scene, openingTemplate, { telopText: 'ここがポイント' });
-    const telop = layout.items.find((i) => i.id === 'overlay_telop') as TextItem;
-    expect(telop).toBeTruthy();
-    expect(telop.kind).toBe('text');
-    expect(telop.text).toBe('ここがポイント');
-    expect(telop.isSubtitle).toBe(false); // 「字幕を入れる」OFF でも消えない（独立要素）
-    // 最前面（他のどの item よりも zIndex が大きい）＝ items 末尾。
-    expect(layout.items[layout.items.length - 1].id).toBe('overlay_telop');
-    // 上部の帯（キャンバス比・単一参照元のジオメトリ）。
-    expect(telop.y).toBe(Math.round(1080 * 0.06));
-    expect(telop.fontSize).toBe(Math.round(1080 * 0.045));
+describe('layoutScene：タイムラインのテロップ（ADR-0018 テロップ実描画・並行テロップ③(8)）', () => {
+  const telopItems = (layout: { items: LayoutItem[] }): TextItem[] =>
+    layout.items.filter((i) => i.id.startsWith('overlay_telop')) as TextItem[];
+  it('opts.telops で段付きの帯テキストが足される（プレビュー経路・書き出し帯PNGと同一 item）', () => {
+    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'ここがポイント', row: 0 }] });
+    const t = telopItems(layout);
+    expect(t).toHaveLength(1);
+    expect(t[0].id).toBe('overlay_telop_0');
+    expect(t[0].text).toBe('ここがポイント');
+    expect(t[0].isSubtitle).toBe(false); // 「字幕を入れる」OFF でも消えない（独立要素）
+    expect(layout.items[layout.items.length - 1].id).toBe('overlay_telop_0'); // 最前面＝末尾
+    expect(t[0].y).toBe(Math.round(1080 * 0.06));
+    expect(t[0].fontSize).toBe(Math.round(1080 * 0.045));
+  });
+  it('並行テロップ：段ごとに y が帯高さ分だけ下へずれる（③(8)）', () => {
+    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'A', row: 0 }, { text: 'B', row: 1 }] });
+    const t = telopItems(layout);
+    expect(t.map((i) => i.id)).toEqual(['overlay_telop_0', 'overlay_telop_1']);
+    expect(t[0].y).toBe(Math.round(1080 * 0.06));
+    expect(t[1].y).toBe(Math.round(1080 * (0.06 + 0.14))); // 段1 は帯高さ(0.14)分下
   });
   it('telopFontId（動画全体フォント）が item.fontId に載る＝場面フォントに左右されない（パリティ）', () => {
-    const layout = layoutScene(scene, openingTemplate, { telopText: 'x', telopFontId: 'kaitou-yokoku-gothic' });
-    const telop = layout.items.find((i) => i.id === 'overlay_telop') as TextItem;
-    expect(telop.fontId).toBe('kaitou-yokoku-gothic');
+    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'x', row: 0 }], telopFontId: 'kaitou-yokoku-gothic' });
+    expect(telopItems(layout)[0].fontId).toBe('kaitou-yokoku-gothic');
     // 未指定は null（描画側 fontFamily へフォールバック）。
-    const l2 = layoutScene(scene, openingTemplate, { telopText: 'x' });
-    expect((l2.items.find((i) => i.id === 'overlay_telop') as TextItem).fontId).toBeNull();
+    const l2 = layoutScene(scene, openingTemplate, { telops: [{ text: 'x', row: 0 }] });
+    expect(telopItems(l2)[0].fontId).toBeNull();
   });
-  it('未指定/null では telop item を足さない（従来どおり）', () => {
-    expect(layoutScene(scene, openingTemplate).items.some((i) => i.id === 'overlay_telop')).toBe(false);
-    expect(layoutScene(scene, openingTemplate, { telopText: null }).items.some((i) => i.id === 'overlay_telop')).toBe(false);
+  it('未指定/空では telop item を足さない（従来どおり）', () => {
+    expect(telopItems(layoutScene(scene, openingTemplate))).toHaveLength(0);
+    expect(telopItems(layoutScene(scene, openingTemplate, { telops: [] }))).toHaveLength(0);
   });
 });
 

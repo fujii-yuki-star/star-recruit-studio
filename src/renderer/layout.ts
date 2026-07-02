@@ -90,10 +90,10 @@ export interface LayoutOptions {
    */
   subtitleText?: string | null;
   /**
-   * タイムラインのテロップ（timelineOverlay・ADR-0018）をこのフレームに描く。string＝表示／null/未指定＝なし。
-   * プレビューはこのオプションで、書き出しは overlayTelopItem を単独の帯PNGに焼いて overlay 合成する＝同一ジオメトリでパリティ。
+   * タイムラインのテロップ（timelineOverlay・ADR-0018）をこのフレームに描く（並行テロップ＝③(8)）。各要素は文言＋段(row)。
+   * 未指定/空＝なし。プレビューはこのオプション、書き出しは overlayTelopItem を段ごとの帯PNGに焼いて overlay 合成＝同一ジオメトリでパリティ。
    */
-  telopText?: string | null;
+  telops?: { text: string; row: number }[];
   /** テロップのフォント id（**動画全体フォントを解決済みで渡す**）。テロップは場面横断のため場面フォント（scene.fontId）に左右されない（ADR-0001）。 */
   telopFontId?: string | null;
 }
@@ -105,16 +105,18 @@ const OVERLAY_TELOP_Y_RATIO = 0.06;
 const OVERLAY_TELOP_W_RATIO = 0.84;
 const OVERLAY_TELOP_H_RATIO = 0.14;
 const OVERLAY_TELOP_FONT_RATIO = 0.045;
+// 段（row）ごとの縦の送り（並行テロップ・③(8)）。帯の高さ分ずつ下へ積む（重ならない）。
+const OVERLAY_TELOP_ROW_STRIDE_RATIO = OVERLAY_TELOP_H_RATIO;
 // 常に最前面（テンプレ/FREE の zIndex より大きく・クレジットピルは layoutToSvg が items の後に描くため影響なし）。
 const OVERLAY_TELOP_Z = 9500;
 
-/** タイムラインのテロップ帯の LayoutItem（プレビューと書き出し帯PNGが共有＝パリティの単一参照元）。 */
-export function overlayTelopItem(width: number, height: number, text: string, fontId?: string | null): TextItem {
+/** タイムラインのテロップ帯の LayoutItem（プレビューと書き出し帯PNGが共有＝パリティの単一参照元）。row＝段（0=最上段・下へ積む）。 */
+export function overlayTelopItem(width: number, height: number, text: string, fontId?: string | null, row = 0): TextItem {
   return {
-    id: 'overlay_telop',
+    id: `overlay_telop_${row}`,
     kind: 'text',
     x: Math.round(width * OVERLAY_TELOP_X_RATIO),
-    y: Math.round(height * OVERLAY_TELOP_Y_RATIO),
+    y: Math.round(height * (OVERLAY_TELOP_Y_RATIO + row * OVERLAY_TELOP_ROW_STRIDE_RATIO)),
     w: Math.round(width * OVERLAY_TELOP_W_RATIO),
     h: Math.round(height * OVERLAY_TELOP_H_RATIO),
     zIndex: OVERLAY_TELOP_Z,
@@ -254,9 +256,11 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     }
   }
 
-  // タイムラインのテロップ（ADR-0018）。プレビュー経路のみ（書き出しは帯PNGを overlay 合成＝同一 item を共有）。
-  if (opts?.telopText) {
-    items.push(overlayTelopItem(template.canvas.width, template.canvas.height, opts.telopText, opts.telopFontId));
+  // タイムラインのテロップ（ADR-0018・並行テロップ③(8)）。プレビュー経路のみ（書き出しは段ごとの帯PNGを overlay 合成＝同一 item を共有）。
+  if (opts?.telops) {
+    for (const t of opts.telops) {
+      items.push(overlayTelopItem(template.canvas.width, template.canvas.height, t.text, opts.telopFontId, t.row));
+    }
   }
 
   items.sort((a, b) => a.zIndex - b.zIndex);

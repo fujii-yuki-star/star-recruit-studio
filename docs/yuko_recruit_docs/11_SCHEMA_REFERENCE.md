@@ -230,7 +230,8 @@
 **7.1.2 companyInfo**（`videoKind=recruit` のとき必須）: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○
 **7.1.3 generalBrief**（`videoKind=general` のとき必須）: title ●（テーマ・**1〜100字**） / agenda(string[]) ○（章立て・アジェンダ・**最大20件／各100字**） / keyPoints(string[]) ○（伝えたい要点・**最大20件／各100字**） / targetAudience ○（対象視聴者・**100字**。ADR-0011 #12 で追加）。**要素数・文字数の上限は ADR-0011 #4 で確定（任意項目の追加・上限付与ゆえ schemaVersion は 1.1 据え置き）。**
 **7.1.4 timelineOverlay**（ADR-0018・2モデル方式・任意・schema 1.15）: clips(`OverlayClip[]`) ○。**OverlayClip**: id(`ovclip_NNN`・project 内一意) ● / track(enum＝現状 `telop` のみ・将来 audio/bgm) ● / anchorSceneId(`scene_NNN`・任意＝**有れば場面相対**〔startSec=場面開始からの相対秒〕／**無ければ絶対時間**〔startSec=グローバル秒〕) / startSec(≥0) ● / durationSec(>0) ● / text(テロップ文言) ○。`compileTimeline` が「アンカー場面のグローバル開始＋startSec」（絶対は 0 基準）で該当トラックへ合成し、**不明/除外アンカーは描画で無視**（V_overlay・§8）。**AI 出力・場面正準は不変**（AI/簡易は overlay を生成/編集しない）。audio/bgm トラック・キーフレーム格納（④）は後続。
-**テロップの実描画**：画面**上部の帯**（キャンバス比の既定ジオメトリ＝`renderer/layout.ts` の `overlayTelopItem` が単一参照元。白字・黒縁取り・中央揃え・**動画全体フォント**）。プレビューは `layoutScene` の `telopText` オプションで同一 item を描き、書き出しは同一 item を**透過帯PNG**に焼いて**結合後の動画へ `overlay`（`enable='between(t,S,E)'`・グローバル秒）で合成**＝プレビュー＝書き出しのパリティ（ADR-0001/0004）。場面またぎ・遷移中・動画スロット場面でも時刻どおりに表示される。
+**テロップの実描画**：画面**上部の帯**（キャンバス比の既定ジオメトリ＝`renderer/layout.ts` の `overlayTelopItem` が単一参照元。白字・黒縁取り・中央揃え・**動画全体フォント**）。プレビューは `layoutScene` の `telops` オプションで同一 item を描き、書き出しは同一 item を**透過帯PNG**に焼いて**結合後の動画へ `overlay`（`enable='between(t,S,E)'`・グローバル秒）で合成**＝プレビュー＝書き出しのパリティ（ADR-0001/0004）。場面またぎ・遷移中・動画スロット場面でも時刻どおりに表示される。
+**並行テロップ（③(8)）**：時間が重なるテロップは**段（row）**に自動割当して縦に積む（`assignTelopRows`＝貪欲な区間分割・最小段数）。段はプレビューと書き出しで一貫（同一 run 定義）＝重なっても潰れず全て読める。段は overlay データから導出＝**schema 変更なし**（保存しない）。
 
 ### 7.2 Asset
 

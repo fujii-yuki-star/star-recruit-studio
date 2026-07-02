@@ -255,40 +255,62 @@ export function compileTimeline(project: Project, opts: CompileTimelineOptions =
   };
 }
 
-/** 場面ローカル秒のテロップ区間（プレビューの表示切替に使う）。 */
+/** 場面ローカル秒のテロップ区間（プレビューの表示切替に使う）。row＝段（0=最上段・③(8) 平行テロップ）。 */
 export interface SceneTelopInterval {
   /** 場面開始からの相対秒（[0, 場面尺] にクリップ済み）。 */
   startSec: number;
   endSec: number;
   text: string;
+  /** 段（0=最上段）。時間が重なるテロップは異なる段に積む（並行表示・③(8)）。 */
+  row: number;
 }
 
 /**
- * overlay テロップ（tracks.telop の origin='overlay'）のうち指定場面と重なる区間を、場面ローカル秒へ切り出す（ADR-0018）。
- * 場面またぎのクリップは各場面が自分と重なる部分だけを持つ。文言が空のクリップは出さない。
+ * overlay テロップに段（row）を割り当てる（③(8) 平行テロップ）。時間が重なるクリップは異なる段に、重ならなければ段を再利用する
+ * （貪欲な区間分割＝最小段数）。開始秒→終了秒→id で決定的に並べるので、プレビューと書き出しで同じ段になる（パリティ）。
+ */
+export function assignTelopRows(clips: readonly { id: string; startSec: number; endSec: number }[]): Map<string, number> {
+  const rows = new Map<string, number>();
+  const sorted = [...clips].sort(
+    (a, b) => a.startSec - b.startSec || a.endSec - b.endSec || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  const rowEnds: number[] = []; // 各段の「最後に置いたクリップの終了秒」
+  for (const c of sorted) {
+    // 終了が c の開始以下＝重ならない段を再利用（先頭から探す）。無ければ新しい段。
+    let placed = rowEnds.findIndex((end) => end <= c.startSec);
+    if (placed === -1) {
+      placed = rowEnds.length;
+      rowEnds.push(c.endSec);
+    } else {
+      rowEnds[placed] = c.endSec;
+    }
+    rows.set(c.id, placed);
+  }
+  return rows;
+}
+
+/**
+ * overlay テロップ（tracks.telop の origin='overlay'）のうち指定場面と重なる区間を、場面ローカル秒＋段へ切り出す（ADR-0018・③(8)）。
+ * 場面またぎのクリップは各場面が自分と重なる部分だけを持つ。文言が空のクリップは出さない。段は全体（全 overlay テロップ）で一貫割当。
  */
 export function sceneLocalTelops(timeline: Timeline, sceneId: string): SceneTelopInterval[] {
   const span = timeline.scenes.find((s) => s.sceneId === sceneId);
   if (!span) return [];
+  const overlayClips = timeline.tracks.telop.filter((c) => c.origin === 'overlay' && c.label);
+  const rows = assignTelopRows(overlayClips); // 段は全体で割り当て（プレビュー＝書き出しのパリティ）
   const out: SceneTelopInterval[] = [];
-  for (const c of timeline.tracks.telop) {
-    if (c.origin !== 'overlay' || !c.label) continue;
+  for (const c of overlayClips) {
     const start = Math.max(c.startSec, span.startSec);
     const end = Math.min(c.endSec, span.endSec);
     if (end <= start) continue;
-    out.push({ startSec: start - span.startSec, endSec: end - span.startSec, text: c.label });
+    out.push({ startSec: start - span.startSec, endSec: end - span.startSec, text: c.label, row: rows.get(c.id) ?? 0 });
   }
   return out;
 }
 
 /**
- * 場面ローカル秒 t に表示するテロップ文言（無ければ null）。区間は [startSec, endSec)。
- * 同時に複数が重なるときは開始が遅いもの（同時は後の要素）＝「最後に出したものが前」。
+ * 場面ローカル秒 t に表示する全テロップ（段付き）。区間は [startSec, endSec)。並行して複数を段違いで表示する（③(8)）。
  */
-export function activeTelopTextAt(intervals: readonly SceneTelopInterval[], t: number): string | null {
-  let best: SceneTelopInterval | null = null;
-  for (const iv of intervals) {
-    if (t >= iv.startSec && t < iv.endSec && (best === null || iv.startSec >= best.startSec)) best = iv;
-  }
-  return best?.text ?? null;
+export function activeTelopsAt(intervals: readonly SceneTelopInterval[], t: number): { text: string; row: number }[] {
+  return intervals.filter((iv) => t >= iv.startSec && t < iv.endSec).map((iv) => ({ text: iv.text, row: iv.row }));
 }
