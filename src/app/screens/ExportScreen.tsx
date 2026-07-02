@@ -42,6 +42,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const projectName = useProjectStore((s) => s.meta.projectName);
+  // キーフレームアニメ（④・ADR-0019）：場面ごとの要素アニメーション（timelineOverlay.animations）を書き出しへ渡す。
+  const timelineOverlay = useProjectStore((s) => s.meta.timelineOverlay);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
 
   const [fileName, setFileName] = useState(projectName.trim() || "動画");
@@ -141,6 +143,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         },
         (done, total) => setProgress({ done, total }),
         { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)), credit: creditForSpeaker(getVoicevoxSpeaker()) },
+        // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay・sceneId 一致）。アニメ場面はフレーム列に焼かれる。
+        (scene) => (timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
       );
       // タイムラインのテロップ（ADR-0018 テロップ実描画）。帯PNG＋グローバル区間へ焼き、Rust が結合後に overlay 合成。
       // テロップは場面横断のため動画全体フォントで焼く。

@@ -1,9 +1,9 @@
 # ADR-0001: プレビューと本番出力の一致方式（描画アーキテクチャ）
 
-- **状態**: Accepted（2026-06-10 承認）
+- **状態**: Accepted（2026-06-10 承認）／**一部 Superseded**（2026-07-02・[`adr/0019`](0019-keyframe-animation-model.md) ④ per-frame 実装が preview＋export に land）
 - **日付**: 2026-06-10
 - **関連**: `05_RENDERING_SPEC.md` / レビュー論点③（最大の技術リスク） / `CLAUDE.md §11`
-- **将来**: 場面内アニメは [`adr/0019`](0019-keyframe-animation-model.md)（Proposed・④）が**選択肢C（毎フレーム描画・下記 §選択肢C）を発火**し、本ADRの「**場面内静止**」前提を将来 supersede 予定（A2ハイブリッド・パリティ原則・共有ロジックは存続。アニメ無し場面は静止1枚のまま）。
+- **一部 Superseded**: 場面内アニメは [`adr/0019`](0019-keyframe-animation-model.md)（Accepted・④）が**選択肢C（毎フレーム描画・下記 §選択肢C）を発火**し、本ADRの「**場面内静止・単一フレーム**」前提を**アニメのある場面についてのみ置換**（`layoutScene(scene, template, {timeSec, animations})` でフレーム t を補間→SVG→PNG のフレーム列→image2 で1動画セグメント＝preview/export 同一）。**A2ハイブリッド・パリティ原則・共有 `layoutScene`/`layoutToSvg`/単一ラスタライザ（ADR-0004）・アニメ無し場面の静止1枚は存続**（後方互換）。実装＝④(1a) 補間基盤／(1b-preview) プレビュー毎フレーム／(1b-export) `frames_scene_args`＋image2 書き出し。
 
 ---
 

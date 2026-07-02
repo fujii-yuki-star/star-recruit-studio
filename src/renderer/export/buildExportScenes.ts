@@ -1,11 +1,13 @@
 // 全場面を「共有レイアウト → SVG → PNG(data URL)」に焼き、書き出し入力を組み立てる（ADR-0001/0004）。
 // 動画ありシーンは下/上2枚の透過PNG＋クリップ情報を渡す（ADR-0006）。FFmpeg呼び出しは infrastructure に分離。
 import { TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit } from '../../domain/enums';
-import type { Scene } from '../../domain/project/types';
+import { FPS } from '../../domain/constants';
+import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs } from '../../domain/project/lineTimeline';
+import { sceneAnimationActive } from '../../domain/project/sceneAnimation';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
@@ -47,6 +49,10 @@ export interface ExportVideoData {
 /** 書き出し1場面ぶんの入力（infrastructure の ExportSceneInput と構造一致）。 */
 export interface ExportSceneData {
   pngBase64?: string;
+  /** アニメ場面のフレーム列（④・ADR-0019 per-frame）。指定時は fps とともに Rust が image2 で1動画に焼く（pngBase64 は未使用）。 */
+  framesBase64?: string[];
+  /** framesBase64 のフレームレート（既定 30）。 */
+  fps?: number;
   durationSec: number;
   audioBase64?: string;
   narrationVolume?: number;
@@ -66,6 +72,9 @@ export type NarrationFor = (
 
 /** 場面ごとの動画スロット情報を返すコールバック（undefined＝静止画シーン）。 */
 export type VideoSlotFor = (scene: Scene) => VideoSlotInfo | undefined;
+
+/** 場面ごとの要素アニメーション（timelineOverlay.animations の sceneId 一致分）を返すコールバック（④・ADR-0019）。 */
+export type AnimationsFor = (scene: Scene) => ElementAnimation[];
 
 /** 書き出しの横断設定。 */
 export interface ExportOptions {
@@ -94,6 +103,7 @@ export async function buildExportScenes(
   videoSlotFor?: VideoSlotFor,
   onProgress?: (done: number, total: number) => void,
   opts: ExportOptions = {},
+  animationsFor?: AnimationsFor,
 ): Promise<ExportSceneData[]> {
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
@@ -178,6 +188,36 @@ export async function buildExportScenes(
         // 掛け合い（明示 lines・静止画）は行ごとのセグメントに展開（追加A/B・ADR-0015 PR-E）。
         // 動画スロットありの場面はセグメント化せず1枚（映像経路は ADR-0006・字幕は scene.texts ベース）。
         const useSegments = !!(scene.lines && scene.lines.length > 0) && !videoSlot;
+        // アニメ場面（④・ADR-0019 per-frame）：animations があり、掛け合い/動画スロットを伴わない場面はフレーム列に焼く。
+        // 適用可否は preview（ScenePreview 経由）と共有の sceneAnimationActive で判定＝両者一致（ADR-0001 パリティ）。
+        // 掛け合い/動画スロット併用のアニメは後続段（字幕の行分割・映像合成との両立が要るため）＝ここでは従来の静止/セグメント経路。
+        const sceneAnims = animationsFor?.(scene) ?? [];
+        if (sceneAnimationActive(scene, sceneAnims, !!videoSlot)) {
+          const fps = FPS;
+          const frameCount = Math.max(1, Math.round(scene.durationSec * fps));
+          const framesBase64: string[] = [];
+          for (let f = 0; f < frameCount; f += 1) {
+            // フレーム t の描画＝プレビューと同一 layoutScene(t)（パリティ）。字幕は非セグメントゆえ静止（scene.texts）。
+            const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
+            framesBase64.push(
+              await svgToPngDataUrl(
+                layoutToSvg(frameLayout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
+                width,
+                height,
+              ),
+            );
+          }
+          const narration = narrationFor?.(scene);
+          out.push({
+            framesBase64,
+            fps,
+            durationSec: scene.durationSec,
+            audioBase64: narration?.audioBase64,
+            narrationVolume: narration?.narrationVolume,
+          });
+          onProgress?.(i + 1, scenes.length);
+          continue;
+        }
         const lineDurations: Record<string, number> = {};
         if (useSegments) {
           for (const l of scene.lines ?? []) {

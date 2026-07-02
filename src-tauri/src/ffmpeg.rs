@@ -151,30 +151,19 @@ pub fn detect_h264_capability(app: tauri::AppHandle) -> H264Capability {
     }
 }
 
-/// 1シーン分の動画（PNG静止画＋音声）にする引数（純粋）。
-/// 音声があればナレーション（volume適用）を、無ければ無音トラックを付け、全クリップを
-/// 「映像＋AAC音声」で統一する（後段 concat の `-c copy` が成立するため）。
-/// FFmpeg 引数ビルダの純関数（エンコード入力をそのまま受ける）。引数数はこの用途として許容する。
+/// 場面MP4の共通末尾（音声＝ナレーション or 無音・出力エンコード・尺クランプ）を args へ足す（純粋）。
+/// scene_clip_args / frames_scene_args が共有。呼び出し側で映像入力（input 0）を積んでから呼ぶこと。
 #[allow(clippy::too_many_arguments)]
-pub fn scene_clip_args(
-    png: &str,
+fn append_scene_av_tail(
+    args: &mut Vec<String>,
     audio: Option<&str>,
     narration_volume: f64,
-    out: &str,
     duration_sec: f64,
     fps: u32,
     codec: VideoCodec,
     bitrate: &str,
-) -> Vec<String> {
-    let mut args: Vec<String> = vec![
-        "-y".into(),
-        "-loop".into(),
-        "1".into(),
-        "-t".into(),
-        format!("{duration_sec}"),
-        "-i".into(),
-        png.into(),
-    ];
+    out: &str,
+) {
     match audio {
         Some(a) => args.extend([
             "-i".into(),
@@ -223,6 +212,79 @@ pub fn scene_clip_args(
         format!("{duration_sec}"),
         out.into(),
     ]);
+}
+
+/// 1シーン分の動画（PNG静止画＋音声）にする引数（純粋）。
+/// 音声があればナレーション（volume適用）を、無ければ無音トラックを付け、全クリップを
+/// 「映像＋AAC音声」で統一する（後段 concat の `-c copy` が成立するため）。
+/// FFmpeg 引数ビルダの純関数（エンコード入力をそのまま受ける）。引数数はこの用途として許容する。
+#[allow(clippy::too_many_arguments)]
+pub fn scene_clip_args(
+    png: &str,
+    audio: Option<&str>,
+    narration_volume: f64,
+    out: &str,
+    duration_sec: f64,
+    fps: u32,
+    codec: VideoCodec,
+    bitrate: &str,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "-y".into(),
+        "-loop".into(),
+        "1".into(),
+        "-t".into(),
+        format!("{duration_sec}"),
+        "-i".into(),
+        png.into(),
+    ];
+    append_scene_av_tail(
+        &mut args,
+        audio,
+        narration_volume,
+        duration_sec,
+        fps,
+        codec,
+        bitrate,
+        out,
+    );
+    args
+}
+
+/// アニメ場面のフレーム列（④・ADR-0019 per-frame）を1動画セグメントに焼く引数（純粋）。
+/// `frames_pattern`＝`frame_%05d.png` 等の image2 入力パターン、`fps`＝入力フレームレート。
+/// 音声・コーデック・ビットレート・尺クランプは scene_clip_args と同一（append_scene_av_tail 共有）。
+/// 1場面=1動画セグメント（音声トラック1本）を維持し、後段 concat の `-c copy` に載る。
+#[allow(clippy::too_many_arguments)]
+pub fn frames_scene_args(
+    frames_pattern: &str,
+    audio: Option<&str>,
+    narration_volume: f64,
+    out: &str,
+    duration_sec: f64,
+    fps: u32,
+    codec: VideoCodec,
+    bitrate: &str,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "-y".into(),
+        "-framerate".into(),
+        format!("{fps}"),
+        "-start_number".into(),
+        "0".into(),
+        "-i".into(),
+        frames_pattern.into(),
+    ];
+    append_scene_av_tail(
+        &mut args,
+        audio,
+        narration_volume,
+        duration_sec,
+        fps,
+        codec,
+        bitrate,
+        out,
+    );
     args
 }
 
@@ -909,10 +971,22 @@ struct VideoJob {
     speed: f64,
 }
 
-/// 1シーン分のジョブ。静止画 or 動画。
+/// アニメ場面のフレーム列ジョブ（④・ADR-0019 per-frame）。frames_dir に frame_00000.png... を書き出し済み。
+struct FramesJob {
+    frames_dir: PathBuf,
+    /// ビットレート算出の解像度取得用（先頭フレーム）。
+    first_frame: PathBuf,
+    audio: Option<PathBuf>,
+    narration_volume: f64,
+    duration_sec: f64,
+    fps: u32,
+}
+
+/// 1シーン分のジョブ。静止画 or 動画 or アニメ（フレーム列）。
 enum SceneJob {
     Still(SceneFile),
     Video(VideoJob),
+    Frames(FramesJob),
 }
 
 impl SceneJob {
@@ -920,6 +994,7 @@ impl SceneJob {
         match self {
             SceneJob::Still(s) => s.duration_sec,
             SceneJob::Video(v) => v.duration_sec,
+            SceneJob::Frames(f) => f.duration_sec,
         }
     }
 }
@@ -1009,6 +1084,21 @@ fn encode_jobs(
                     bitrate,
                     out: &out_path,
                 })
+            }
+            SceneJob::Frames(f) => {
+                let audio = f.audio.as_ref().map(|p| p.to_string_lossy().into_owned());
+                // image2 入力パターン（frame_00000.png ...）。decode 時に同名で書き出し済み。
+                let pattern = f.frames_dir.join("frame_%05d.png");
+                frames_scene_args(
+                    &pattern.to_string_lossy(),
+                    audio.as_deref(),
+                    f.narration_volume,
+                    &clip.to_string_lossy(),
+                    f.duration_sec,
+                    f.fps,
+                    codec,
+                    bitrate,
+                )
             }
         };
         run(ffmpeg, &args).map_err(|e| {
@@ -1167,6 +1257,12 @@ fn decode_b64_to_file(b64: &str, path: &Path, ctx: &str) -> Result<(), String> {
 pub struct SceneInput {
     #[serde(default)]
     png_base64: String,
+    /// アニメ場面のフレーム列（④・ADR-0019・data URL 可）。指定時は image2 で1動画に焼く（png_base64 は未使用）。
+    #[serde(default)]
+    frames_base64: Option<Vec<String>>,
+    /// frames_base64 のフレームレート（未指定なら描画fpsを使う）。
+    #[serde(default)]
+    fps: Option<u32>,
     duration_sec: f64,
     /// 場面のナレーション音声(WAV)。data URL も可。無い場面は無音トラックになる。
     #[serde(default)]
@@ -1376,6 +1472,36 @@ pub fn export_video(
                     .map(|s| s.clamp(SPEED_MIN, SPEED_MAX))
                     .unwrap_or(DEFAULT_SPEED),
             }));
+        } else if let Some(frames) = s.frames_base64.as_ref().filter(|f| !f.is_empty()) {
+            // アニメ場面（④・ADR-0019 per-frame）。フレーム列を frame_00000.png... として書き出し、
+            // image2 で1動画セグメントに焼く（1場面=1セグメント＝音声トラック1本を維持）。
+            let frames_dir = tmp.join(format!("scene_{i:03}_frames"));
+            fs::create_dir_all(&frames_dir).map_err(|e| {
+                export_failure(
+                    format!("create frames dir: {e}"),
+                    "動画の保存中に問題が発生しました。もう一度お試しください。",
+                )
+            })?;
+            let mut first_frame = PathBuf::new();
+            for (f, frame_b64) in frames.iter().enumerate() {
+                let frame_path = frames_dir.join(format!("frame_{f:05}.png"));
+                decode_b64_to_file(
+                    frame_b64,
+                    &frame_path,
+                    &format!("scene {} frame {}", i + 1, f),
+                )?;
+                if f == 0 {
+                    first_frame = frame_path;
+                }
+            }
+            jobs.push(SceneJob::Frames(FramesJob {
+                frames_dir,
+                first_frame,
+                audio: narration,
+                narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
+                duration_sec: s.duration_sec,
+                fps: s.fps.unwrap_or(DEFAULT_FPS),
+            }));
         } else {
             // 静止画シーン（従来）。
             let png = tmp.join(format!("scene_{i:03}.png"));
@@ -1464,6 +1590,8 @@ pub fn export_video(
             SceneJob::Still(s) => read_png_size(s.png.as_path()),
             // 下層 PNG はキャンバス全体（出力解像度）をレンダリングしたもの（ADR-0001 A2）。
             SceneJob::Video(v) => read_png_size(v.below.as_path()),
+            // アニメ場面の先頭フレーム（キャンバス全体＝出力解像度・ADR-0019）。
+            SceneJob::Frames(f) => read_png_size(f.first_frame.as_path()),
         })
         .unwrap_or((DEFAULT_OUTPUT_WIDTH, DEFAULT_OUTPUT_HEIGHT));
     let bitrate = bitrate_arg(target_bitrate_bps(out_w, out_h, DEFAULT_FPS));
@@ -1902,6 +2030,54 @@ mod tests {
         assert!(o.iter().any(|s| s == "libopenh264"));
         assert!(o.iter().any(|s| s.contains("anullsrc")));
         assert!(o.iter().any(|s| s == "aac"));
+        assert!(o.windows(2).any(|w| w[0] == "-map" && w[1] == "1:a"));
+    }
+
+    #[test]
+    fn frames_scene_args_uses_image2_input_and_shares_av_tail() {
+        // アニメ場面（④）：image2（-framerate + start_number + %05d パターン）で入力し、
+        // 音声・コーデック・尺クランプは scene_clip_args と同一（append_scene_av_tail 共有）。
+        let a = frames_scene_args(
+            "frames/frame_%05d.png",
+            Some("v.wav"),
+            0.8,
+            "out.mp4",
+            4.0,
+            30,
+            VideoCodec::X264,
+            "12000k",
+        );
+        // image2 入力パターン（-loop は使わない）。
+        assert!(a.windows(2).any(|w| w[0] == "-framerate" && w[1] == "30"));
+        assert!(a.windows(2).any(|w| w[0] == "-start_number" && w[1] == "0"));
+        assert!(a
+            .windows(2)
+            .any(|w| w[0] == "-i" && w[1] == "frames/frame_%05d.png"));
+        assert!(!a.iter().any(|s| s == "-loop"));
+        // 共有末尾（音声 volume・エンコード・尺クランプ）。
+        assert!(a.iter().any(|s| s == "libx264"));
+        assert!(a.iter().any(|s| s == "yuv420p"));
+        assert!(a.iter().any(|s| s == "aac"));
+        assert!(a.iter().any(|s| s.contains("volume=0.8")));
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a]"));
+        // 出力は尺ぴったりに切る（-t 4）。
+        assert!(a.windows(2).any(|w| w[0] == "-t" && w[1] == "4"));
+    }
+
+    #[test]
+    fn frames_scene_args_without_audio_adds_silence_track() {
+        let o = frames_scene_args(
+            "frames/frame_%05d.png",
+            None,
+            1.0,
+            "out.mp4",
+            4.0,
+            30,
+            VideoCodec::OpenH264,
+            "12000k",
+        );
+        assert!(o.iter().any(|s| s == "libopenh264"));
+        assert!(o.iter().any(|s| s.contains("anullsrc")));
         assert!(o.windows(2).any(|w| w[0] == "-map" && w[1] == "1:a"));
     }
 
