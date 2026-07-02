@@ -1321,8 +1321,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             <button className="btn btn-ghost text-sm" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
                           </div>
                         </div>
-                        {/* グループ全体に登場の動きをつける（④(3)・ADR-0019）。メンバーをまとめて動かす。 */}
-                        {renderAnimationControls(effectiveActiveGroupId, 1)}
+                        {/* グループ全体に登場の動きをつける（④(3)・ADR-0019）。メンバーをまとめて動かす。
+                            ロック中は「まとめて移動・拡縮・回転」の抑止と揃えて操作不可（fieldset で中の入力を一括無効化）。 */}
+                        <fieldset
+                          disabled={!!activeGroup?.locked}
+                          style={{ border: "none", padding: 0, margin: 0, minInlineSize: "auto", opacity: activeGroup?.locked ? 0.5 : 1 }}
+                        >
+                          {renderAnimationControls(effectiveActiveGroupId, 1)}
+                        </fieldset>
                       </div>
                     )}
                     {/* 複数選択（#206）：2件以上選んだら一括操作バーを出す（Shift＋クリックで増減）。 */}
