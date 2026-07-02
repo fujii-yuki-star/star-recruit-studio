@@ -3,9 +3,10 @@
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
 import { FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, LayerType, TextAlign } from '../domain/enums';
-import type { Scene } from '../domain/project/types';
+import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { Layer, Template } from '../domain/template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
+import { interpolateKeyframes } from '../domain/project/keyframes';
 
 export interface Rect {
   x: number;
@@ -96,6 +97,13 @@ export interface LayoutOptions {
   telops?: { text: string; row: number }[];
   /** テロップのフォント id（**動画全体フォントを解決済みで渡す**）。テロップは場面横断のため場面フォント（scene.fontId）に左右されない（ADR-0001）。 */
   telopFontId?: string | null;
+  /**
+   * キーフレームアニメの再生位置（場面ローカル秒・④・ADR-0019）。指定時、この場面の animations を補間して対象要素へ適用する。
+   * 未指定＝静止（後方互換）。preview/export は同一の timeSec/animations で呼び、フレーム単位パリティを保つ。
+   */
+  timeSec?: number;
+  /** この場面の要素アニメーション（timelineOverlay.animations のうち sceneId 一致分）。timeSec と併せて渡す。 */
+  animations?: ElementAnimation[];
 }
 
 // タイムラインのテロップ帯の既定ジオメトリ（キャンバス比・ADR-0018 テロップ実描画）。
@@ -253,6 +261,29 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           items.push({ ...base, kind: 'fill', color: el.fillColor ?? '#ffffff', opacity: el.opacity ?? 1, radius: el.radius ?? 0, shapeType: el.shapeType ?? FREE_SHAPE_TYPE.rect, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
           break;
       }
+    }
+  }
+
+  // キーフレームアニメ（④・ADR-0019）：timeSec 指定時、この場面の対象要素へ補間した transform を絶対上書きで適用する。
+  // 対象＝FREE 要素（item.id === targetId）に x/y（絶対）/scale（w・h に係数・左上基準）/rotation（絶対）＋塗り要素の opacity。
+  // static（timeSec 未指定/アニメ無し）は素通し＝後方互換。グループ対象・text/image の opacity は後続段（(2)/(1b)）。
+  if (opts?.timeSec != null && opts.animations && opts.animations.length > 0) {
+    const byTarget = new Map<string, ElementAnimation>();
+    for (const a of opts.animations) {
+      if (a.sceneId === scene.sceneId) byTarget.set(a.targetId, a);
+    }
+    for (const item of items) {
+      const anim = byTarget.get(item.id);
+      if (!anim) continue;
+      const tr = interpolateKeyframes(anim.keyframes, opts.timeSec);
+      if (tr.x != null) item.x = tr.x;
+      if (tr.y != null) item.y = tr.y;
+      if (tr.rotation != null) item.rotation = tr.rotation;
+      if (tr.scale != null) {
+        item.w *= tr.scale;
+        item.h *= tr.scale;
+      }
+      if (tr.opacity != null && item.kind === 'fill') item.opacity = tr.opacity;
     }
   }
 

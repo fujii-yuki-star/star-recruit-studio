@@ -71,6 +71,40 @@ describe('layoutScene：タイムラインのテロップ（ADR-0018 テロッ�
   });
 });
 
+describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => {
+  const freeTemplate: Template = {
+    schemaVersion: '1.0', templateId: 'free_v1', name: 'FREE', category: 'free',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 }, layers: [],
+  };
+  const freeScene = {
+    ...scene, sceneType: 'free', templateId: 'free_v1',
+    freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 20, w: 100, h: 50, fillColor: '#ff0000', opacity: 1 }],
+  } as unknown as Scene;
+  const anim = {
+    id: 'anim_001', sceneId: freeScene.sceneId, targetId: 'free_001',
+    keyframes: [
+      { timeSec: 0, x: 0, y: 0, scale: 1, opacity: 0, rotation: 0 },
+      { timeSec: 2, x: 200, y: 100, scale: 2, opacity: 1, rotation: 90 },
+    ],
+  };
+  it('timeSec 指定で対象 FREE 要素へ補間 transform を適用（x/y/scale/rotation/opacity）', () => {
+    const layout = layoutScene(freeScene, freeTemplate, { timeSec: 1, animations: [anim] });
+    const el = layout.items.find((i) => i.id === 'free_001') as FillItem;
+    // t=1（中間・線形）：x 0→200=100・y 0→100=50・scale 1→2=1.5（w 100→150/h 50→75）・rotation 0→90=45・opacity 0→1=0.5。
+    expect(el).toMatchObject({ x: 100, y: 50, w: 150, h: 75, rotation: 45, opacity: 0.5 });
+  });
+  it('timeSec 未指定は静止（後方互換・基準値のまま）', () => {
+    const el = layoutScene(freeScene, freeTemplate, { animations: [anim] }).items.find((i) => i.id === 'free_001') as FillItem;
+    expect(el).toMatchObject({ x: 10, y: 20, w: 100, h: 50, opacity: 1 });
+    expect(el.rotation).toBeUndefined();
+  });
+  it('別場面のアニメ（sceneId 不一致）は適用しない', () => {
+    const other = { ...anim, sceneId: 'scene_999' };
+    const el = layoutScene(freeScene, freeTemplate, { timeSec: 1, animations: [other] }).items.find((i) => i.id === 'free_001') as FillItem;
+    expect(el).toMatchObject({ x: 10, y: 20, opacity: 1 });
+  });
+});
+
 describe('layoutScene', () => {
   it('テンプレ＋シーンを配置解決し zIndex 昇順で返す', () => {
     const layout = layoutScene(scene, openingTemplate);

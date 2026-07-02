@@ -266,6 +266,13 @@ describe('parseProjectDoc', () => {
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.15→現行へ昇格（任意追加＝変換不要）
     expect(back.scenes[0].bgmSettings).toEqual({ enabled: true, bundledBgmId: 'found-new-hope', volume: 0.3, loop: true });
   });
+  it('キーフレーム：timelineOverlay.animations を持つ旧版(1.16)が移行し保持する（ADR-0019 ④）', () => {
+    const animations = [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, opacity: 1, easing: 'ease-in-out' }] }];
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.16', timelineOverlay: { animations } } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.16→現行へ昇格（任意追加＝変換不要）
+    expect(back.timelineOverlay?.animations).toEqual(animations);
+  });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;
     delete doc.videoKind;

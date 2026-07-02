@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.16" },
+    "schemaVersion": { "const": "1.17" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -127,7 +127,35 @@
       "additionalProperties": false,
       "description": "場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。AI/簡易編集は無視する。",
       "properties": {
-        "clips": { "type": "array", "items": { "$ref": "#/$defs/OverlayClip" } }
+        "clips": { "type": "array", "items": { "$ref": "#/$defs/OverlayClip" } },
+        "animations": { "type": "array", "items": { "$ref": "#/$defs/ElementAnimation" } }
+      }
+    },
+    "ElementAnimation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "要素アニメーション（④・ADR-0019）。場面内の1要素（FREE 要素/グループ id）を時間で補間。timelineOverlay に格納＝AI/場面正準は不変。",
+      "required": ["id", "sceneId", "targetId", "keyframes"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^anim_[0-9]{3,}$" },
+        "sceneId": { "type": "string", "pattern": "^scene_[0-9]{3}$" },
+        "targetId": { "type": "string" },
+        "keyframes": { "type": "array", "items": { "$ref": "#/$defs/Keyframe" } }
+      }
+    },
+    "Keyframe": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "1キーフレーム（場面ローカル秒 timeSec の要素プロパティ・④）。設定したプロパティのみ補間・値は絶対上書き。",
+      "required": ["timeSec"],
+      "properties": {
+        "timeSec": { "type": "number", "minimum": 0 },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "scale": { "type": "number", "exclusiveMinimum": 0 },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rotation": { "type": "number" },
+        "easing": { "enum": ["linear", "ease-in-out"] }
       }
     },
     "OverlayClip": {
