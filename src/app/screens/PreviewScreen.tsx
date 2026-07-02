@@ -9,6 +9,8 @@ import { resolveBgmVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { lineSegments } from "../../domain/project/lineTimeline";
 import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
+import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
+import { findVideoSlot } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
 import { FPS } from "../../domain/constants";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
@@ -96,10 +98,20 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     () => (current ? (meta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === current.sceneId) : []),
     [meta.timelineOverlay, current],
   );
+  const template = current ? templates.find((t) => t.templateId === current.templateId) : undefined;
+  // 動画スロット有無（アニメ適用可否の判定に使う＝書き出しと同一条件でパリティ・ADR-0019）。
+  const hasVideoSlot = useMemo(
+    () => !!(current && template && findVideoSlot(current, template, (id) => assets.find((a) => a.assetId === id))),
+    [current, template, assets],
+  );
+  // このアニメを実際に描くか＝書き出し（buildExportScenes）と共有の sceneAnimationActive で判定。
+  // 掛け合い/動画スロット併用場面は書き出しが静止扱いのため、プレビューも静止にしてパリティを保つ（ADR-0001）。
+  const animActive = !!current && sceneAnimationActive(current, sceneAnimations, hasVideoSlot);
+  const previewAnimations = animActive ? sceneAnimations : [];
   // 再生中はこの場面のアニメを再生位置 timeSec で駆動（RAF＝場面頭からの経過秒を尺でクランプ）。停止中は t=0（場面頭）。
   const [sceneTimeSec, setSceneTimeSec] = useState(0);
   useEffect(() => {
-    if (!playing || sceneAnimations.length === 0) return;
+    if (!playing || !animActive) return;
     // 実効表示尺は場面送りと同じく MIN_PLAY_SEC でクランプ（アニメの再生窓を実際の表示時間に合わせる）。
     const dur = Math.max(MIN_PLAY_SEC, current?.durationSec ?? 0);
     const start = performance.now();
@@ -112,10 +124,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, safeIdx, sceneAnimations, current?.durationSec]);
+  }, [playing, safeIdx, animActive, current?.durationSec]);
   const animTimeSec = playing ? sceneTimeSec : 0; // 停止中は場面頭。派生＝effect 内の同期 setState を避ける。
 
-  const template = current ? templates.find((t) => t.templateId === current.templateId) : undefined;
   const totalSec = scenes.reduce((sum, s) => sum + s.durationSec, 0);
 
   // 再生範囲の終端 index（この場面=現在地 / このパート=所属パートの最後 / 全体=最後）。
@@ -248,7 +259,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
         <div className="card">
-          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} telops={activeTelops} timeSec={animTimeSec} animations={sceneAnimations} />
+          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} telops={activeTelops} timeSec={animTimeSec} animations={previewAnimations} />
 
           {/* 場面送り */}
           <div className="row-between mt">

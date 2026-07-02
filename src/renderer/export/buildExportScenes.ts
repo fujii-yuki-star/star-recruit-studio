@@ -7,6 +7,7 @@ import type { Template } from '../../domain/template/types';
 import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs } from '../../domain/project/lineTimeline';
+import { sceneAnimationActive } from '../../domain/project/sceneAnimation';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
@@ -188,9 +189,10 @@ export async function buildExportScenes(
         // 動画スロットありの場面はセグメント化せず1枚（映像経路は ADR-0006・字幕は scene.texts ベース）。
         const useSegments = !!(scene.lines && scene.lines.length > 0) && !videoSlot;
         // アニメ場面（④・ADR-0019 per-frame）：animations があり、掛け合い/動画スロットを伴わない場面はフレーム列に焼く。
+        // 適用可否は preview（ScenePreview 経由）と共有の sceneAnimationActive で判定＝両者一致（ADR-0001 パリティ）。
         // 掛け合い/動画スロット併用のアニメは後続段（字幕の行分割・映像合成との両立が要るため）＝ここでは従来の静止/セグメント経路。
         const sceneAnims = animationsFor?.(scene) ?? [];
-        if (sceneAnims.length > 0 && !useSegments && !videoSlot) {
+        if (sceneAnimationActive(scene, sceneAnims, !!videoSlot)) {
           const fps = FPS;
           const frameCount = Math.max(1, Math.round(scene.durationSec * fps));
           const framesBase64: string[] = [];

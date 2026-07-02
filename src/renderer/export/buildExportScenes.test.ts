@@ -12,8 +12,9 @@ vi.mock('./videoSceneSplit', () => ({
   })),
 }));
 
-import type { Scene } from '../../domain/project/types';
+import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
+import { FPS } from '../../domain/constants';
 import { layoutScene } from '../layout';
 import type { LayoutItem, SceneLayout } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
@@ -99,6 +100,74 @@ describe('buildExportScenes：ナレーション音声の付与', () => {
     }));
     expect(out).toHaveLength(2); // s1,s2（sX はテンプレ未解決でスキップ）
     expect(out[0]).toMatchObject({ durationSec: 8, audioBase64: 'A1' });
+  });
+});
+
+describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-frame）', () => {
+  const anim = (sceneId: string): ElementAnimation =>
+    ({ id: 'anim_001', sceneId, targetId: 'el1', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] } as unknown as ElementAnimation);
+  const animScene = [{ sceneId: 's1', templateId: 'tpl', durationSec: 2 }] as unknown as Scene[];
+
+  it('アニメのある場面（掛け合い/動画スロットなし）はフレーム列＋fpsを持ち、単一PNGは付かない', async () => {
+    const out = await buildExportScenes(
+      animScene, templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      undefined, undefined, {},
+      (s) => [anim(s.sceneId)],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].pngBase64).toBeUndefined(); // アニメ場面は単一PNGなし
+    expect(out[0].fps).toBe(FPS);
+    expect(out[0].framesBase64).toHaveLength(Math.round(2 * FPS)); // durationSec * fps
+    expect(out[0].framesBase64?.[0]).toBe('data:image/png;base64,PNG');
+    expect(out[0].narrationVolume).toBe(1);
+  });
+
+  it('掛け合い（lines）併用のアニメはフレーム列にせず行セグメント（書き出し優先＝プレビューと一致）', async () => {
+    const multi = [{
+      sceneId: 's1', templateId: 'tpl', durationSec: 8,
+      lines: [
+        { lineId: 'line_001', text: 'a', startSec: 0, status: 'none' },
+        { lineId: 'line_002', text: 'b', startSec: 4, status: 'none' },
+      ],
+    }] as unknown as Scene[];
+    const out = await buildExportScenes(
+      multi, templateById, noAsset,
+      (_s, lineId) => ({ audioBase64: lineId ? `A_${lineId}` : undefined, narrationVolume: 1 }),
+      undefined, undefined, {},
+      (s) => [anim(s.sceneId)],
+    );
+    expect(out).toHaveLength(2); // 行セグメント（フレーム列にならない）
+    expect(out.every((o) => o.framesBase64 === undefined)).toBe(true);
+  });
+
+  it('動画スロット併用のアニメはフレーム列にせず video 経路（下/上PNG）', async () => {
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => ({ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover', clipStartSec: 0, useOriginalAudio: false, speed: 1 }),
+      undefined, {},
+      (s) => [anim(s.sceneId)],
+    );
+    expect(out[0].framesBase64).toBeUndefined();
+    expect(out[0].video).toBeDefined();
+  });
+
+  it('animationsFor が空配列を返す場面は従来どおり単一PNG（後方互換）', async () => {
+    const out = await buildExportScenes(
+      animScene, templateById, noAsset,
+      undefined, undefined, undefined, {},
+      () => [],
+    );
+    expect(out[0].framesBase64).toBeUndefined();
+    expect(out[0].pngBase64).toBe('data:image/png;base64,PNG');
+  });
+
+  it('animationsFor 未指定なら従来どおり単一PNG（後方互換）', async () => {
+    const out = await buildExportScenes(animScene, templateById, noAsset);
+    expect(out[0].framesBase64).toBeUndefined();
+    expect(out[0].pngBase64).toBe('data:image/png;base64,PNG');
   });
 });
 
