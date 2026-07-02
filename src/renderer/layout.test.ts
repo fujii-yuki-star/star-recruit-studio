@@ -87,11 +87,19 @@ describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => 
       { timeSec: 2, x: 200, y: 100, scale: 2, opacity: 1, rotation: 90 },
     ],
   };
-  it('timeSec 指定で対象 FREE 要素へ補間 transform を適用（x/y/scale/rotation/opacity）', () => {
+  it('timeSec 指定で対象 FREE 要素へ相対 transform を適用（scale 中心維持・x/y/rotation はオフセット）', () => {
     const layout = layoutScene(freeScene, freeTemplate, { timeSec: 1, animations: [anim] });
     const el = layout.items.find((i) => i.id === 'free_001') as FillItem;
-    // t=1（中間・線形）：x 0→200=100・y 0→100=50・scale 1→2=1.5（w 100→150/h 50→75）・rotation 0→90=45・opacity 0→1=0.5。
-    expect(el).toMatchObject({ x: 100, y: 50, w: 150, h: 75, rotation: 45, opacity: 0.5 });
+    // t=1（中間・線形）：scale 1→2=1.5（w100→150/h50→75・中心維持で x−25/y−12.5）→ x オフセット+100/y+50／rotation 0+45／opacity 0.5。
+    // x = 10 −25 +100 = 85・y = 20 −12.5 +50 = 57.5。
+    expect(el).toMatchObject({ x: 85, y: 57.5, w: 150, h: 75, rotation: 45, opacity: 0.5 });
+  });
+  it('相対オフセットは要素の本来位置に追従する（後から動かしても再生が新位置基準・レビュー対応）', () => {
+    // スライド相当（x オフセット −400 → 0）。要素の本来 x が違えば終点も本来 x に一致する（旧位置に固定されない）。
+    const slide = { id: 'anim_005', sceneId: freeScene.sceneId, targetId: 'free_001', keyframes: [{ timeSec: 0, x: -400 }, { timeSec: 2, x: 0 }] };
+    const moved = { ...freeScene, freeLayout: [{ id: 'free_001', kind: 'shape', x: 500, y: 20, w: 100, h: 50, fillColor: '#ff0000', opacity: 1 }] } as unknown as Scene;
+    const el = layoutScene(moved, freeTemplate, { timeSec: 2, animations: [slide] }).items.find((i) => i.id === 'free_001') as FillItem;
+    expect(el.x).toBe(500); // el.x(500) + オフセット0
   });
   it('timeSec 未指定は静止（後方互換・基準値のまま）', () => {
     const el = layoutScene(freeScene, freeTemplate, { animations: [anim] }).items.find((i) => i.id === 'free_001') as FillItem;
@@ -103,11 +111,11 @@ describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => 
     const el = layoutScene(freeScene, freeTemplate, { timeSec: 1, animations: [other] }).items.find((i) => i.id === 'free_001') as FillItem;
     expect(el).toMatchObject({ x: 10, y: 20, opacity: 1 });
   });
-  it('text 要素にも transform（x/y/rotation）を適用する（fill 以外の経路）', () => {
+  it('text 要素にも相対 transform（x/rotation オフセット）を適用する（fill 以外の経路）', () => {
     const textScene = { ...freeScene, freeLayout: [{ id: 'free_002', kind: 'text', x: 10, y: 20, w: 200, h: 60, text: 'あ' }] } as unknown as Scene;
     const textAnim = { id: 'anim_002', sceneId: freeScene.sceneId, targetId: 'free_002', keyframes: [{ timeSec: 0, x: 0, rotation: 0 }, { timeSec: 2, x: 100, rotation: 60 }] };
     const el = layoutScene(textScene, freeTemplate, { timeSec: 1, animations: [textAnim] }).items.find((i) => i.id === 'free_002') as TextItem;
-    expect(el).toMatchObject({ kind: 'text', x: 50, rotation: 30 });
+    expect(el).toMatchObject({ kind: 'text', x: 60, rotation: 30 }); // x 10+50・rotation 0+30
   });
   it('text 要素に opacity（フェードイン）を適用する（(1c) 要素不透明度）', () => {
     const textScene = { ...freeScene, freeLayout: [{ id: 'free_002', kind: 'text', x: 10, y: 20, w: 200, h: 60, text: 'あ' }] } as unknown as Scene;

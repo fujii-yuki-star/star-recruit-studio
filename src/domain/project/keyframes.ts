@@ -1,6 +1,8 @@
 // キーフレーム補間（④・ADR-0019）。純粋・決定論（§7 テスト対象）。preview/export が同一関数を共有＝フレーム単位パリティ。
 // 各プロパティは独立に補間する（キーフレームは変えたいプロパティだけ持てる）。区間 [前KF, 当KF] のイージングは「当KF.easing」。
-// 区間外は端でクランプ（最初のKF前＝最初の値／最後のKF後＝最後の値）。値は絶対上書き。
+// 区間外は端でクランプ（最初のKF前＝最初の値／最後のKF後＝最後の値）。
+// 補間するのは値そのもの。x/y/scale/rotation を「本来値からの相対」として要素に重ねるか（既定）、絶対で使うかは
+// 適用側（layoutScene）が決める（④ の適用は相対＝CSS transform 相当・opacity のみ絶対）。
 import { EASING } from '../enums';
 import type { Easing } from '../enums';
 import type { Keyframe } from './types';

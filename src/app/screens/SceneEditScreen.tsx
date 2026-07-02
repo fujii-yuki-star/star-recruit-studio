@@ -655,12 +655,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const ANIM_DIR_LABEL: Record<SlideDirection, string> = { left: "左から", right: "右から", up: "上から", down: "下から" };
   const renderFreeAnimationControls = (el: FreeElement) => {
     const anim = (timelineOverlay?.animations ?? []).find((a) => a.sceneId === selected.sceneId && a.targetId === el.id);
-    const desc = anim ? describeAnimation(anim.keyframes, el) : null;
+    const desc = anim ? describeAnimation(anim.keyframes) : null;
     const kind = desc?.kind ?? null;
     const durationSec = desc?.durationSec ?? PRESET_DEFAULT_SEC;
     const easing = desc?.easing ?? EASING.easeInOut;
     const direction = desc?.direction ?? "left";
-    // 種類・秒・感じ・向きのどれかを変えたら、その要素の今の位置/大きさから作り直す（種類変更は add/update/remove）。
+    // 種類・秒・感じ・向きのどれかを変えたら作り直す（x/y/rotation は相対＝位置編集には layout 側が自動追従）。
     const apply = (over: { kind?: PresetKind | "none"; durationSec?: number; easing?: Easing; direction?: SlideDirection }) => {
       const k = over.kind ?? kind ?? "none";
       if (k === "none") { if (anim) removeAnimation(anim.id); return; }

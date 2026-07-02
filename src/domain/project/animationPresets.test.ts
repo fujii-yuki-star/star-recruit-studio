@@ -26,57 +26,56 @@ describe('fadeInKeyframes（④・ADR-0019 フェードイン）', () => {
   });
 });
 
-describe('slideInKeyframes（すべって）', () => {
-  it('左からは開始 x が本来位置−距離、終点は本来位置＋フェード', () => {
+describe('slideInKeyframes（すべって・相対オフセット）', () => {
+  it('左からは開始 x=−距離・終点 x=0（本来位置からのオフセット＝要素位置に依らない）＋フェード', () => {
     const kfs = slideInKeyframes(el(), 'left', 0.6);
-    expect(kfs[0]).toMatchObject({ x: 100 - SLIDE_DISTANCE, y: 50, opacity: 0 });
-    expect(kfs[1]).toMatchObject({ x: 100, y: 50, opacity: 1, easing: EASING.easeInOut });
+    expect(kfs[0]).toMatchObject({ x: -SLIDE_DISTANCE, opacity: 0 });
+    expect(kfs[1]).toMatchObject({ x: 0, opacity: 1, easing: EASING.easeInOut });
+    expect(kfs[0].y).toBeUndefined(); // 横スライドは y を持たない
   });
-  it('上下は y を動かす（下からは開始 y が本来＋距離）', () => {
-    expect(slideInKeyframes(el(), 'up', 0.6)[0].y).toBe(50 - SLIDE_DISTANCE);
-    expect(slideInKeyframes(el(), 'down', 0.6)[0].y).toBe(50 + SLIDE_DISTANCE);
+  it('右からは開始 x=＋距離', () => {
+    expect(slideInKeyframes(el(), 'right', 0.6)[0].x).toBe(SLIDE_DISTANCE);
+  });
+  it('上下は y オフセット（下からは＋距離）', () => {
+    expect(slideInKeyframes(el(), 'up', 0.6)[0].y).toBe(-SLIDE_DISTANCE);
+    expect(slideInKeyframes(el(), 'down', 0.6)[0].y).toBe(SLIDE_DISTANCE);
   });
 });
 
-describe('popInKeyframes（ぽん）', () => {
-  it('小さく→等倍・中心維持のため左上を補正', () => {
+describe('popInKeyframes（ぽん・係数のみ）', () => {
+  it('小さく→等倍・x/y は焼き込まない（layout が中心維持）＋フェード', () => {
     const kfs = popInKeyframes(el(), 0.6);
     expect(kfs[0]).toMatchObject({ scale: POP_START_SCALE, opacity: 0 });
-    expect(kfs[0].x).toBeCloseTo(100 + (200 * (1 - POP_START_SCALE)) / 2);
-    expect(kfs[1]).toMatchObject({ scale: 1, x: 100, y: 50, opacity: 1 });
+    expect(kfs[0].x).toBeUndefined();
+    expect(kfs[1]).toMatchObject({ scale: 1, opacity: 1 });
   });
 });
 
-describe('spinInKeyframes（くるっと）', () => {
-  it('初期角度（本来＋SPIN_START）から本来角度へ＋フェード', () => {
+describe('spinInKeyframes（くるっと・相対角度）', () => {
+  it('本来角度からのオフセット（SPIN_START→0）＋フェード＝要素角度に依らない', () => {
     const kfs = spinInKeyframes(el({ rotation: 30 }), 0.6);
-    expect(kfs[0]).toMatchObject({ rotation: 30 + SPIN_START_DEG, opacity: 0 });
-    expect(kfs[1]).toMatchObject({ rotation: 30, opacity: 1 });
+    expect(kfs[0]).toMatchObject({ rotation: SPIN_START_DEG, opacity: 0 });
+    expect(kfs[1]).toMatchObject({ rotation: 0, opacity: 1 });
   });
 });
 
 describe('presetKeyframes（単一入口）／describeAnimation（導出）', () => {
-  const kinds = [
-    { kind: 'fade' as const, prop: 'opacity' },
-    { kind: 'slide' as const, prop: 'x' },
-    { kind: 'pop' as const, prop: 'scale' },
-    { kind: 'spin' as const, prop: 'rotation' },
-  ];
-  it('種類ごとに主プロパティを含み、describeAnimation で種類を復元できる（往復）', () => {
-    for (const { kind } of kinds) {
+  const kinds = ['fade', 'slide', 'pop', 'spin'] as const;
+  it('種類ごとに主プロパティを含み、describeAnimation で種類/秒/イージングを復元（往復）', () => {
+    for (const kind of kinds) {
       const kfs = presetKeyframes(kind, el({ opacity: 1 }), { durationSec: 0.8, easing: EASING.linear, direction: 'right' });
-      const d = describeAnimation(kfs, el({ opacity: 1 }));
+      const d = describeAnimation(kfs);
       expect(d.kind).toBe(kind);
       expect(d.durationSec).toBe(0.8);
       expect(d.easing).toBe(EASING.linear);
     }
   });
-  it('スライドの向きを開始位置から復元する', () => {
-    const kfs = presetKeyframes('slide', el(), { durationSec: 0.6, easing: EASING.easeInOut, direction: 'down' });
-    expect(describeAnimation(kfs, el()).direction).toBe('down');
+  it('スライドの向きをオフセット符号から復元する（要素位置に依らない）', () => {
+    expect(describeAnimation(presetKeyframes('slide', el(), { durationSec: 0.6, easing: EASING.easeInOut, direction: 'down' })).direction).toBe('down');
+    expect(describeAnimation(presetKeyframes('slide', el(), { durationSec: 0.6, easing: EASING.easeInOut, direction: 'right' })).direction).toBe('right');
   });
   it('空は kind=null', () => {
-    expect(describeAnimation([], el()).kind).toBeNull();
+    expect(describeAnimation([]).kind).toBeNull();
   });
 });
 
@@ -85,11 +84,11 @@ describe('presetDurationSec / withEndOpacity', () => {
     expect(presetDurationSec(slideInKeyframes(el(), 'left', 1.2))).toBe(1.2);
     expect(presetDurationSec([])).toBe(PRESET_DEFAULT_SEC);
   });
-  it('withEndOpacity は終点の不透明度だけ差し替え、種類（x/scale 等）は保つ', () => {
-    const kfs = slideInKeyframes(el(), 'left', 0.6); // 終点に opacity と x を持つ
+  it('withEndOpacity は終点の不透明度だけ差し替え、種類（x 等）は保つ', () => {
+    const kfs = slideInKeyframes(el(), 'left', 0.6); // 終点に opacity と x=0 を持つ
     const next = withEndOpacity(kfs, 0.4);
     expect(next[1].opacity).toBe(0.4);
-    expect(next[1].x).toBe(kfs[1].x); // 位置（種類）は不変
+    expect(next[1].x).toBe(0); // オフセット（種類）は不変
     expect(next[0].opacity).toBe(0); // 開始は 0 のまま
   });
 });

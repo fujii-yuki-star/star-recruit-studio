@@ -34,33 +34,31 @@ export function fadeInKeyframes(endOpacity: number, durationSec: number, easing:
   ];
 }
 
-/** スライドイン（すべって・指定方向のオフセットから本来位置へ＋フェード）。 */
+/** スライドイン（すべって・本来位置からのオフセット→0＋フェード）。x/y は相対＝要素を後から動かしても追従（layout 側で加算）。 */
 export function slideInKeyframes(el: FreeElement, direction: SlideDirection, durationSec: number, easing: Easing = EASING.easeInOut): Keyframe[] {
   const end = clampOpacity(el.opacity ?? 1);
-  const startX = direction === 'left' ? el.x - SLIDE_DISTANCE : direction === 'right' ? el.x + SLIDE_DISTANCE : el.x;
-  const startY = direction === 'up' ? el.y - SLIDE_DISTANCE : direction === 'down' ? el.y + SLIDE_DISTANCE : el.y;
-  return [
-    { timeSec: 0, x: startX, y: startY, opacity: 0 },
-    { timeSec: clampDur(durationSec), x: el.x, y: el.y, opacity: end, easing },
-  ];
+  const horizontal = direction === 'left' || direction === 'right';
+  const offset = direction === 'left' || direction === 'up' ? -SLIDE_DISTANCE : SLIDE_DISTANCE;
+  const start: Keyframe = { timeSec: 0, opacity: 0, ...(horizontal ? { x: offset } : { y: offset }) };
+  const endKf: Keyframe = { timeSec: clampDur(durationSec), opacity: end, easing, ...(horizontal ? { x: 0 } : { y: 0 }) };
+  return [start, endKf];
 }
 
-/** ポップ（ぽんっと・小さく→等倍＋フェード）。中心を保つよう左上を補正（layout の scale は左上基準のため）。 */
+/** ポップ（ぽんっと・小さく→等倍＋フェード）。scale は係数で layout が中心維持＝x/y の焼き込み不要（位置編集に追従）。 */
 export function popInKeyframes(el: FreeElement, durationSec: number, easing: Easing = EASING.easeInOut): Keyframe[] {
   const end = clampOpacity(el.opacity ?? 1);
-  const s0 = POP_START_SCALE;
   return [
-    { timeSec: 0, scale: s0, x: el.x + (el.w * (1 - s0)) / 2, y: el.y + (el.h * (1 - s0)) / 2, opacity: 0 },
-    { timeSec: clampDur(durationSec), scale: 1, x: el.x, y: el.y, opacity: end, easing },
+    { timeSec: 0, scale: POP_START_SCALE, opacity: 0 },
+    { timeSec: clampDur(durationSec), scale: 1, opacity: end, easing },
   ];
 }
 
-/** 回転で登場（くるっと・初期角度から本来角度へ＋フェード）。 */
+/** 回転で登場（くるっと・本来角度からのオフセット→0＋フェード）。rotation は相対＝要素の角度を変えても追従。 */
 export function spinInKeyframes(el: FreeElement, durationSec: number, easing: Easing = EASING.easeInOut): Keyframe[] {
   const end = clampOpacity(el.opacity ?? 1);
   return [
-    { timeSec: 0, rotation: (el.rotation ?? 0) + SPIN_START_DEG, opacity: 0 },
-    { timeSec: clampDur(durationSec), rotation: el.rotation ?? 0, opacity: end, easing },
+    { timeSec: 0, rotation: SPIN_START_DEG, opacity: 0 },
+    { timeSec: clampDur(durationSec), rotation: 0, opacity: end, easing },
   ];
 }
 
@@ -98,11 +96,10 @@ export function withEndOpacity(keyframes: readonly Keyframe[], endOpacity: numbe
 /**
  * キーフレーム列から、オーサリングUIが必要とする「種類・所要秒・イージング・向き」を導出する（永続化しない）。
  * 種類は主となる補間プロパティで判定：scale→pop / rotation→spin / x|y→slide / それ以外(opacity のみ)→fade。
- * プリセット由来のアニメを前提（UIの現在値表示・再構築に使う）。判定不能は null。
+ * 向きは開始KFのオフセット符号（相対値）で判定＝要素を後から動かしても不変。プリセット由来のアニメを前提。判定不能は null。
  */
 export function describeAnimation(
   keyframes: readonly Keyframe[],
-  el: FreeElement,
 ): { kind: PresetKind | null; durationSec: number; easing: Easing; direction: SlideDirection } {
   const durationSec = presetDurationSec(keyframes);
   const last = keyframes[keyframes.length - 1];
@@ -114,12 +111,12 @@ export function describeAnimation(
   else if (has('rotation')) kind = 'spin';
   else if (has('x') || has('y')) kind = 'slide';
   else if (has('opacity')) kind = 'fade';
-  // スライドの向きは開始KFの位置と要素の本来位置の差で判定（x 優先→y）。
+  // スライドの向きは開始KFのオフセット符号で判定（x 優先→y）。相対値なので要素位置に依らず一定。
   const first = keyframes[0];
   let direction: SlideDirection = 'left';
   if (first) {
-    if (first.x != null && first.x !== el.x) direction = first.x < el.x ? 'left' : 'right';
-    else if (first.y != null && first.y !== el.y) direction = first.y < el.y ? 'up' : 'down';
+    if (first.x != null && first.x !== 0) direction = first.x < 0 ? 'left' : 'right';
+    else if (first.y != null && first.y !== 0) direction = first.y < 0 ? 'up' : 'down';
   }
   return { kind, durationSec, easing, direction };
 }
