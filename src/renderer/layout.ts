@@ -268,10 +268,11 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     }
   }
 
-  // キーフレームアニメ（④・ADR-0019）：timeSec 指定時、この場面の対象要素へ補間した transform を絶対上書きで適用する。
-  // 対象＝FREE 要素（item.id === targetId）に x/y（絶対）/scale（w・h に係数・左上基準）/rotation（絶対）/opacity（全種別）。
-  // opacity は fill=図形の塗り・image/text=要素全体（sceneSvg が <g opacity> で敷く）に適用。static（timeSec 未指定/
-  // アニメ無し）は素通し＝後方互換。グループ対象は後続段（(2)/(3)）。
+  // キーフレームアニメ（④・ADR-0019）：timeSec 指定時、この場面の対象要素へ補間した transform を適用する。
+  // 変換は要素の「本来の状態」を基準とする相対値（CSS transform 相当）＝**後から位置/大きさ/角度を編集しても追従**する
+  //  （絶対焼き込みだと編集後に古い値へ固定される・レビュー対応）。x/y=本来位置からのオフセット／scale=係数（中心維持）／
+  //  rotation=本来角度からのオフセット。opacity は絶対（0..1・fill=塗り／image・text=要素全体＝sceneSvg の <g opacity>）。
+  // static（timeSec 未指定/アニメ無し）は素通し＝後方互換。グループ対象は後続段（(3)）。
   if (opts?.timeSec != null && opts.animations && opts.animations.length > 0) {
     const byTarget = new Map<string, ElementAnimation>();
     for (const a of opts.animations) {
@@ -281,13 +282,18 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       const anim = byTarget.get(item.id);
       if (!anim) continue;
       const tr = interpolateKeyframes(anim.keyframes, opts.timeSec);
-      if (tr.x != null) item.x = tr.x;
-      if (tr.y != null) item.y = tr.y;
-      if (tr.rotation != null) item.rotation = tr.rotation;
+      // scale（中心維持）→ x/y オフセット → rotation オフセット の順で本来値に重ねる。
       if (tr.scale != null) {
+        const ow = item.w;
+        const oh = item.h;
         item.w *= tr.scale;
         item.h *= tr.scale;
+        item.x -= (item.w - ow) / 2;
+        item.y -= (item.h - oh) / 2;
       }
+      if (tr.x != null) item.x += tr.x;
+      if (tr.y != null) item.y += tr.y;
+      if (tr.rotation != null) item.rotation = (item.rotation ?? 0) + tr.rotation;
       // opacity は全種別へ（fill=塗り不透明度／image・text=要素の不透明度＝sceneSvg の <g opacity>）。
       if (tr.opacity != null) item.opacity = tr.opacity;
     }
