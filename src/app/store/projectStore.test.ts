@@ -207,6 +207,48 @@ describe('projectStore overlay クリップ（ADR-0018・③(4)）', () => {
   });
 });
 
+describe('projectStore 要素アニメーション（④・ADR-0019 (1c)）', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      meta: { ...useProjectStore.getState().meta, timelineOverlay: undefined },
+      past: [], future: [], _historyGroupDepth: 0, saveStatus: 'saved',
+    });
+  });
+  const fadeKfs = [{ timeSec: 0, opacity: 0 }, { timeSec: 0.6, opacity: 1 }];
+  it('addAnimation は anim を追加し id を返す（sceneId/targetId/keyframes・未保存に戻る）', () => {
+    const id = useProjectStore.getState().addAnimation('scene_001', 'free_001', fadeKfs);
+    const anims = useProjectStore.getState().meta.timelineOverlay?.animations ?? [];
+    expect(id).toBe('anim_001');
+    expect(anims).toHaveLength(1);
+    expect(anims[0]).toMatchObject({ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: fadeKfs });
+    expect(useProjectStore.getState().saveStatus).toBe('idle');
+  });
+  it('updateAnimation はキーフレームを差し替える（所要秒変更）', () => {
+    const id = useProjectStore.getState().addAnimation('scene_001', 'free_001', fadeKfs);
+    const next = [{ timeSec: 0, opacity: 0 }, { timeSec: 1.5, opacity: 1 }];
+    useProjectStore.getState().updateAnimation(id, next);
+    expect(useProjectStore.getState().meta.timelineOverlay?.animations?.[0].keyframes).toEqual(next);
+  });
+  it('removeAnimation は該当アニメを削除する（動きをやめる）', () => {
+    const id = useProjectStore.getState().addAnimation('scene_001', 'free_001', fadeKfs);
+    useProjectStore.getState().removeAnimation(id);
+    expect(useProjectStore.getState().meta.timelineOverlay?.animations).toEqual([]);
+  });
+  it('アニメ編集は Undo で戻る（meta スナップショット・ADR-0020）', () => {
+    const id = useProjectStore.getState().addAnimation('scene_001', 'free_001', fadeKfs);
+    useProjectStore.getState().removeAnimation(id);
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().meta.timelineOverlay?.animations).toHaveLength(1);
+  });
+  it('clips と animations は同じ timelineOverlay に共存できる', () => {
+    useProjectStore.getState().addOverlayClip({ text: 'telop' });
+    useProjectStore.getState().addAnimation('scene_001', 'free_001', fadeKfs);
+    const ov = useProjectStore.getState().meta.timelineOverlay;
+    expect(ov?.clips).toHaveLength(1);
+    expect(ov?.animations).toHaveLength(1);
+  });
+});
+
 describe('projectStore テンプレ既定素材（ADR-0021）', () => {
   const userTmpl = (templateId: string, assetId?: string): Template => ({
     schemaVersion: '1.0', templateId, name: templateId, category: 'opening', aspectRatio: '16:9',

@@ -12,6 +12,7 @@ import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE,
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
+import { fadeInKeyframes, fadeInDurationOf, FADE_IN_DEFAULT_SEC, FADE_IN_MIN_SEC, FADE_IN_MAX_SEC } from "../../domain/project/animationPresets";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { switchSceneTemplate } from "../../domain/project/sceneOps";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -193,7 +194,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     addScene, removeScene, splitScene, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
+    addAnimation, updateAnimation, removeAnimation,
   } = useProjectStore();
+  // 要素アニメーション（④・ADR-0019）：この場面の FREE 要素に付いた簡易アニメ（timelineOverlay.animations）。
+  const timelineOverlay = useProjectStore((s) => s.meta.timelineOverlay);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const setFontId = useProjectStore((s) => s.setFontId);
@@ -624,6 +628,44 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       );
     }
     return null;
+  };
+  // FREE 要素の「動き」＝簡易アニメのプリセット（④・ADR-0019 (1c)）。現在はフェードイン（ふわっと表示）1種。
+  // 全 kind 共通で右パネルのカードに出す。詳細なキーフレーム編集は将来タイムライン（上位仕上げ面・ADR-0023）へ。
+  const renderFreeAnimationControls = (el: FreeElement) => {
+    const anim = (timelineOverlay?.animations ?? []).find(
+      (a) => a.sceneId === selected.sceneId && a.targetId === el.id,
+    );
+    const endOpacity = el.opacity ?? 1; // 図形は本来の不透明度まで、文字/画像は 1（不透明）まで戻す
+    return (
+      <div className="field" style={{ marginBottom: 6 }}>
+        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動き</label>
+        {anim ? (
+          <div className="row gap-sm" style={{ alignItems: "flex-end" }}>
+            <NumberField
+              label="ふわっと表示（かける秒）"
+              value={fadeInDurationOf(anim.keyframes)}
+              min={FADE_IN_MIN_SEC}
+              max={FADE_IN_MAX_SEC}
+              step={0.1}
+              onChange={(v) => updateAnimation(anim.id, fadeInKeyframes(endOpacity, v))}
+            />
+            <button className="btn btn-ghost text-sm" onClick={() => removeAnimation(anim.id)}>
+              動きをやめる
+            </button>
+          </div>
+        ) : (
+          <div className="row gap-sm" style={{ alignItems: "center" }}>
+            <button
+              className="btn btn-secondary text-sm"
+              onClick={() => addAnimation(selected.sceneId, el.id, fadeInKeyframes(endOpacity, FADE_IN_DEFAULT_SEC))}
+            >
+              ふわっと表示する
+            </button>
+            <span className="text-sm text-muted">だんだん現れる動きをつけます</span>
+          </div>
+        )}
+      </div>
+    );
   };
   // 右クリック「編集」：その要素の kind 別エディタをカーソル位置付近に開く（画面端でクランプ）。
   const openFreeEditPopover = (id: string, x: number, y: number) => {
@@ -1407,6 +1449,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           {/* 角度（回転・度）。0〜359（360=0 は重複ゆえ schema で除外）。回転中は角つまみでの拡大縮小が止まるため、大きさはこの数値で調整する（#208）。 */}
                           <NumberField label="角度" value={el.rotation ?? 0} min={0} max={359} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
                         </div>
+
+                        {renderFreeAnimationControls(el)}
                       </div>
                     ))}
                   </div>

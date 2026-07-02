@@ -2,7 +2,7 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
-import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
+import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
@@ -12,7 +12,7 @@ import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from
 import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
-  assembleProject, createAssetId, createBgmId, createOverlayClipId, createPartId, createProjectId, createSceneId,
+  assembleProject, createAnimationId, createAssetId, createBgmId, createOverlayClipId, createPartId, createProjectId, createSceneId,
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
@@ -110,6 +110,12 @@ interface ProjectState {
   updateOverlayClip: (id: string, patch: Partial<Omit<OverlayClip, "id">>) => void;
   /** overlay クリップを削除する。 */
   removeOverlayClip: (id: string) => void;
+  /** 要素アニメーション（キーフレーム）を追加し、その id を返す（④・ADR-0019・timelineOverlay.animations）。 */
+  addAnimation: (sceneId: string, targetId: string, keyframes: Keyframe[]) => string;
+  /** 要素アニメーションのキーフレームを差し替える（フェードインの所要秒変更など）。Undo は meta スナップショットで自動。 */
+  updateAnimation: (animId: string, keyframes: Keyframe[]) => void;
+  /** 要素アニメーションを削除する（「動きをやめる」）。 */
+  removeAnimation: (animId: string) => void;
   /** 場面を複製して直後に挿入し、新しい sceneId を返す（セリフは引き継ぎ・音声は作り直し）。 */
   duplicateScene: (sceneId: string) => string;
   /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
@@ -569,6 +575,43 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         timelineOverlay: {
           ...s.meta.timelineOverlay,
           clips: (s.meta.timelineOverlay?.clips ?? []).filter((c) => c.id !== id),
+        },
+      },
+      saveStatus: "idle",
+    }));
+  },
+  addAnimation: (sceneId, targetId, keyframes) => {
+    const anims = get().meta.timelineOverlay?.animations ?? [];
+    const id = createAnimationId(anims.map((a) => a.id));
+    const newAnim: ElementAnimation = { id, sceneId, targetId, keyframes };
+    get().pushHistory();
+    set((s) => ({
+      meta: { ...s.meta, timelineOverlay: { ...s.meta.timelineOverlay, animations: [...(s.meta.timelineOverlay?.animations ?? []), newAnim] } },
+      saveStatus: "idle",
+    }));
+    return id;
+  },
+  updateAnimation: (animId, keyframes) => {
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        timelineOverlay: {
+          ...s.meta.timelineOverlay,
+          animations: (s.meta.timelineOverlay?.animations ?? []).map((a) => (a.id === animId ? { ...a, keyframes } : a)),
+        },
+      },
+      saveStatus: "idle",
+    }));
+  },
+  removeAnimation: (animId) => {
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        timelineOverlay: {
+          ...s.meta.timelineOverlay,
+          animations: (s.meta.timelineOverlay?.animations ?? []).filter((a) => a.id !== animId),
         },
       },
       saveStatus: "idle",

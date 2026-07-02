@@ -44,6 +44,43 @@ describe('layoutToSvg：画像スロット', () => {
   });
 });
 
+describe('layoutToSvg：要素の不透明度（④・ADR-0019 アニメ opacity）', () => {
+  const src = () => 'data:image/png;base64,AAAA';
+
+  it('image 要素は opacity<1 で <g opacity> に包む', () => {
+    const layout: SceneLayout = { width: 1920, height: 1080, backgroundColor: '#fff', items: [
+      { kind: 'image', id: 'slot', x: 0, y: 0, w: 100, h: 100, zIndex: 10, assetId: 'a1', fit: 'cover', role: 'slot', label: 'm', opacity: 0.3 },
+    ] };
+    const svg = layoutToSvg(layout, { assetSrc: src });
+    expect(svg).toContain('<g opacity="0.3">');
+    expect(svg).toContain('<image');
+  });
+
+  it('text 要素も opacity<1 で <g opacity> に包む', () => {
+    const layout: SceneLayout = { width: 1920, height: 1080, backgroundColor: '#fff', items: [
+      { kind: 'text', id: 't1', x: 0, y: 0, w: 200, h: 60, zIndex: 30, text: 'あ', fontSize: 40, fontWeight: 'normal', color: '#000', maxLines: 1, isSubtitle: false, opacity: 0.5 },
+    ] };
+    const svg = layoutToSvg(layout);
+    expect(svg).toContain('opacity="0.5"');
+  });
+
+  it('opacity 未指定/1 は包まない（後方互換・出力差分を最小化）', () => {
+    const layout: SceneLayout = { width: 1920, height: 1080, backgroundColor: '#fff', items: [
+      { kind: 'image', id: 'slot', x: 0, y: 0, w: 100, h: 100, zIndex: 10, assetId: 'a1', fit: 'cover', role: 'slot', label: 'm' },
+    ] };
+    const svg = layoutToSvg(layout, { assetSrc: src });
+    expect(svg).not.toContain('<g opacity');
+  });
+
+  it('回転と opacity は同一の <g> にまとめる（transform と opacity 併記）', () => {
+    const layout: SceneLayout = { width: 1920, height: 1080, backgroundColor: '#fff', items: [
+      { kind: 'image', id: 'slot', x: 0, y: 0, w: 100, h: 100, zIndex: 10, assetId: 'a1', fit: 'cover', role: 'slot', label: 'm', rotation: 30, opacity: 0.4 },
+    ] };
+    const svg = layoutToSvg(layout, { assetSrc: src });
+    expect(svg).toContain('transform="rotate(30 50 50)" opacity="0.4"');
+  });
+});
+
 describe('charWidthEm（文字幅の概算・§7）', () => {
   it('半角(ASCII/Latin-1)は約0.55em', () => {
     expect(charWidthEm('A')).toBe(0.55);
