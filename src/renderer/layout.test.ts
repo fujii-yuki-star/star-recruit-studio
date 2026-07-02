@@ -37,6 +37,34 @@ const scene: Scene = {
   warnings: [],
 };
 
+describe('layoutScene：タイムラインのテロップ（ADR-0018 テロップ実描画）', () => {
+  it('opts.telopText で最前面の帯テキストが足される（プレビュー経路・書き出し帯PNGと同一 item）', () => {
+    const layout = layoutScene(scene, openingTemplate, { telopText: 'ここがポイント' });
+    const telop = layout.items.find((i) => i.id === 'overlay_telop') as TextItem;
+    expect(telop).toBeTruthy();
+    expect(telop.kind).toBe('text');
+    expect(telop.text).toBe('ここがポイント');
+    expect(telop.isSubtitle).toBe(false); // 「字幕を入れる」OFF でも消えない（独立要素）
+    // 最前面（他のどの item よりも zIndex が大きい）＝ items 末尾。
+    expect(layout.items[layout.items.length - 1].id).toBe('overlay_telop');
+    // 上部の帯（キャンバス比・単一参照元のジオメトリ）。
+    expect(telop.y).toBe(Math.round(1080 * 0.06));
+    expect(telop.fontSize).toBe(Math.round(1080 * 0.045));
+  });
+  it('telopFontId（動画全体フォント）が item.fontId に載る＝場面フォントに左右されない（パリティ）', () => {
+    const layout = layoutScene(scene, openingTemplate, { telopText: 'x', telopFontId: 'kaitou-yokoku-gothic' });
+    const telop = layout.items.find((i) => i.id === 'overlay_telop') as TextItem;
+    expect(telop.fontId).toBe('kaitou-yokoku-gothic');
+    // 未指定は null（描画側 fontFamily へフォールバック）。
+    const l2 = layoutScene(scene, openingTemplate, { telopText: 'x' });
+    expect((l2.items.find((i) => i.id === 'overlay_telop') as TextItem).fontId).toBeNull();
+  });
+  it('未指定/null では telop item を足さない（従来どおり）', () => {
+    expect(layoutScene(scene, openingTemplate).items.some((i) => i.id === 'overlay_telop')).toBe(false);
+    expect(layoutScene(scene, openingTemplate, { telopText: null }).items.some((i) => i.id === 'overlay_telop')).toBe(false);
+  });
+});
+
 describe('layoutScene', () => {
   it('テンプレ＋シーンを配置解決し zIndex 昇順で返す', () => {
     const layout = layoutScene(scene, openingTemplate);

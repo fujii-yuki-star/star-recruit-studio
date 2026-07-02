@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import { transitionTimeline, resolveTransition } from './sceneTransitions';
-import { compileTimeline } from './compileTimeline';
+import { activeTelopTextAt, compileTimeline, sceneLocalTelops } from './compileTimeline';
 import type { Project, Scene } from './types';
 
 // compileTimeline が読むのは sceneId/durationSec/transition/lines/narration/subtitleEnabledDefault のみ。
@@ -217,6 +217,38 @@ describe('compileTimeline：timelineOverlay の合成（ADR-0018）', () => {
   it('overlay 未設定なら合成なし（従来どおり）', () => {
     const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 8 })]));
     expect(tl.tracks.telop.every((c) => c.id.startsWith('s1/'))).toBe(true);
+  });
+});
+
+describe('sceneLocalTelops / activeTelopTextAt（テロップ実描画・ADR-0018）', () => {
+  const scenes = [
+    scene({ sceneId: 's1', durationSec: 8 }),
+    scene({ sceneId: 's2', durationSec: 6 }),
+  ];
+  it('場面と重なる overlay テロップを場面ローカル秒へ切り出す（場面またぎは自分の部分だけ）', () => {
+    const overlay = { clips: [
+      { id: 'ovclip_001', track: 'telop', startSec: 6, durationSec: 4, text: 'またぎ' }, // グローバル 6〜10（s1:6-8 / s2:8-10）
+    ] };
+    const tl = compileTimeline(project(scenes, undefined, overlay));
+    expect(sceneLocalTelops(tl, 's1')).toEqual([{ startSec: 6, endSec: 8, text: 'またぎ' }]);
+    expect(sceneLocalTelops(tl, 's2')).toEqual([{ startSec: 0, endSec: 2, text: 'またぎ' }]);
+  });
+  it('場面射影クリップ（行の字幕）や空文言・非重なりは対象外', () => {
+    const overlay = { clips: [{ id: 'ovclip_001', track: 'telop', startSec: 0, durationSec: 2, text: '' }] };
+    const tl = compileTimeline(project(scenes, undefined, overlay));
+    // 行射影（origin なし）はテロップレーンにあっても対象外＝overlay 由来のみ。
+    expect(sceneLocalTelops(tl, 's1')).toEqual([]);
+    expect(sceneLocalTelops(tl, 'sX')).toEqual([]); // 不明場面は空
+  });
+  it('activeTelopTextAt は [start, end) で判定し、重なりは開始が遅い方を出す', () => {
+    const ivs = [
+      { startSec: 0, endSec: 5, text: 'A' },
+      { startSec: 2, endSec: 4, text: 'B' },
+    ];
+    expect(activeTelopTextAt(ivs, 0)).toBe('A');
+    expect(activeTelopTextAt(ivs, 2)).toBe('B'); // 遅く始まった B が前
+    expect(activeTelopTextAt(ivs, 4)).toBe('A'); // B 終了で A に戻る
+    expect(activeTelopTextAt(ivs, 5)).toBeNull(); // end は含まない
   });
 });
 

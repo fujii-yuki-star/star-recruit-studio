@@ -386,6 +386,61 @@ pub fn mix_bgm_args(
     ]
 }
 
+/// テロップ帯の overlay 入力（純粋引数用・ADR-0018）。png は一時PNGパス、区間はグローバル秒（front の compileTimeline と一致）。
+pub struct TelopOverlay<'a> {
+    pub png: &'a str,
+    pub start_sec: f64,
+    pub end_sec: f64,
+}
+
+/// 結合済み動画へテロップ帯PNG群を時刻指定で重ねる引数（純粋・ADR-0018 テロップ実描画）。
+/// 各PNGは透過・出力解像度と同サイズ（front が場面PNGと同じ SVG→PNG で焼く＝ADR-0004 パリティ）。
+/// 静止PNGは overlay の eof_action=repeat で唯一フレームが持続し、enable='between(t,S,E)' が表示区間を制御する
+/// （t は主入力＝結合済み動画のタイムスタンプ）。映像は再エンコード（コーデック/ビットレートは場面と同一）・音声は無変更コピー。
+/// BGM 合成の前に1回だけ実行する（再エンコード世代を最小に。xfade チェーンへの合流は将来最適化）。
+pub fn overlay_telops_args(
+    video: &str,
+    telops: &[TelopOverlay],
+    codec: VideoCodec,
+    bitrate: &str,
+    out: &str,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec!["-y".into(), "-i".into(), video.into()];
+    for t in telops {
+        args.push("-i".into());
+        args.push(t.png.into());
+    }
+    let mut filters: Vec<String> = Vec::new();
+    let mut prev = "0:v".to_string();
+    for (i, t) in telops.iter().enumerate() {
+        let label = format!("v{}", i + 1);
+        filters.push(format!(
+            "[{prev}][{idx}:v]overlay=0:0:eof_action=repeat:enable='between(t,{s},{e})'[{label}]",
+            idx = i + 1,
+            s = t.start_sec,
+            e = t.end_sec
+        ));
+        prev = label;
+    }
+    args.push("-filter_complex".into());
+    args.push(filters.join(";"));
+    args.push("-map".into());
+    args.push(format!("[{prev}]"));
+    args.push("-map".into());
+    args.push("0:a".into());
+    args.push("-c:v".into());
+    args.push(codec.encoder().into());
+    args.extend(codec.quality_args(bitrate));
+    args.extend([
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-c:a".into(),
+        "copy".into(),
+        out.into(),
+    ]);
+    args
+}
+
 /// 動画スロットの収め方（11 §5 / asset.clip.fit）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fit {
@@ -853,12 +908,17 @@ fn validate_xfade_name(name: &str) -> Option<String> {
 /// 各シーン（静止画 or 動画）→ MP4 にし、トランジション有無で結合方法を選ぶ（ADR-0009 T2）。
 /// 全境界ハードカット（遷移なし）なら concat demuxer の無劣化コピー、1つでも遷移ありなら xfade チェーンで再エンコード。
 /// `joins` は jobs と同じ長さ（joins[0]＝先頭で未使用）。
+// bitrate は export_video で1回算出し、場面/xfade/テロップ overlay の3経路で同一値を共有するため引数で受ける（#121）。
+// 内部オーケストレータで、引数は infra ハンドル（ffmpeg/tmp/output）＋エンコード設定の混在＝自然な構造体化が難しいため、
+// 意図した8引数として clippy::too_many_arguments を抑制する。
+#[allow(clippy::too_many_arguments)]
 fn encode_jobs(
     ffmpeg: &Path,
     jobs: &[SceneJob],
     joins: &[JoinInfo],
     codec: VideoCodec,
     fps: u32,
+    bitrate: &str,
     tmp_dir: &Path,
     output: &Path,
 ) -> Result<(), String> {
@@ -868,17 +928,6 @@ fn encode_jobs(
             "動画の保存中に問題が発生しました。もう一度お試しください。",
         )
     })?;
-    // 出力解像度（先頭場面のPNG＝実出力サイズ）から H.264 目標ビットレートを1回算出（#121・向き非依存）。
-    let (out_w, out_h) = jobs
-        .first()
-        .and_then(|j| match j {
-            SceneJob::Still(s) => read_png_size(s.png.as_path()),
-            // 下層 PNG はキャンバス全体（出力解像度）をレンダリングしたもの（ADR-0001 A2）。
-            SceneJob::Video(v) => read_png_size(v.below.as_path()),
-        })
-        .unwrap_or((DEFAULT_OUTPUT_WIDTH, DEFAULT_OUTPUT_HEIGHT));
-    let bitrate = bitrate_arg(target_bitrate_bps(out_w, out_h, fps));
-
     let mut files: Vec<String> = Vec::with_capacity(jobs.len());
     for (i, job) in jobs.iter().enumerate() {
         let clip = tmp_dir.join(format!("scene_{i:03}.mp4"));
@@ -893,7 +942,7 @@ fn encode_jobs(
                     s.duration_sec,
                     fps,
                     codec,
-                    &bitrate,
+                    bitrate,
                 )
             }
             SceneJob::Video(v) => {
@@ -924,7 +973,7 @@ fn encode_jobs(
                     speed: v.speed,
                     fps,
                     codec,
-                    bitrate: &bitrate,
+                    bitrate,
                     out: &out_path,
                 })
             }
@@ -958,7 +1007,7 @@ fn encode_jobs(
             &output.to_string_lossy(),
             codec,
             fps,
-            &bitrate,
+            bitrate,
         );
         run(ffmpeg, &args).map_err(|e| {
             export_failure(
@@ -1153,6 +1202,17 @@ pub struct BgmInput {
     file_ext: String,
 }
 
+/// タイムラインのテロップ帯入力（ADR-0018）。透過PNG（base64/data URL）＋グローバル表示区間（compileTimeline の秒と一致）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelopInput {
+    png_base64: String,
+    #[serde(default)]
+    start_sec: f64,
+    #[serde(default)]
+    end_sec: f64,
+}
+
 /// エクスポート結果の要約。
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1171,6 +1231,7 @@ pub fn export_video(
     bgm: Option<BgmInput>,
     project_id: Option<String>,
     output_path: Option<String>,
+    telops: Option<Vec<TelopInput>>,
 ) -> Result<ExportReport, String> {
     if scenes.is_empty() {
         return Err("書き出す場面がありません。".into());
@@ -1357,8 +1418,23 @@ pub fn export_video(
         })
         .collect();
 
-    // BGM があれば、場面結合は一時ファイルへ→最後に BGM を重ねて out へ。無ければ直接 out へ。
-    let video_path = if bgm.is_some() {
+    // 出力解像度（先頭場面のPNG＝実出力サイズ）から H.264 目標ビットレートを1回算出（#121・向き非依存）。
+    // 場面エンコード・xfade 結合・テロップ overlay（再エンコード）で同じ値を共有する。
+    let (out_w, out_h) = jobs
+        .first()
+        .and_then(|j| match j {
+            SceneJob::Still(s) => read_png_size(s.png.as_path()),
+            // 下層 PNG はキャンバス全体（出力解像度）をレンダリングしたもの（ADR-0001 A2）。
+            SceneJob::Video(v) => read_png_size(v.below.as_path()),
+        })
+        .unwrap_or((DEFAULT_OUTPUT_WIDTH, DEFAULT_OUTPUT_HEIGHT));
+    let bitrate = bitrate_arg(target_bitrate_bps(out_w, out_h, DEFAULT_FPS));
+
+    // パス構成：場面結合 →（テロップ overlay 合成・ADR-0018）→（BGM 合成）→ out。中間成果物は tmp に置く。
+    let has_telops = telops.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
+    let joined_path = if has_telops {
+        tmp.join("joined.mp4")
+    } else if bgm.is_some() {
         tmp.join("video.mp4")
     } else {
         out.clone()
@@ -1369,9 +1445,51 @@ pub fn export_video(
         &joins,
         codec,
         DEFAULT_FPS,
+        &bitrate,
         &tmp,
-        &video_path,
+        &joined_path,
     )?;
+
+    // タイムラインのテロップ帯を結合後の動画へ overlay（区間はグローバル秒＝xfade 重なり込みの実効時間軸）。
+    let video_path = if has_telops {
+        let list = telops.unwrap_or_default();
+        let target = if bgm.is_some() {
+            tmp.join("video.mp4")
+        } else {
+            out.clone()
+        };
+        let mut png_paths: Vec<String> = Vec::with_capacity(list.len());
+        for (i, t) in list.iter().enumerate() {
+            let p = tmp.join(format!("telop_{i:03}.png"));
+            decode_b64_to_file(&t.png_base64, &p, &format!("telop {}", i + 1))?;
+            png_paths.push(p.to_string_lossy().into_owned());
+        }
+        let overlays: Vec<TelopOverlay> = list
+            .iter()
+            .zip(png_paths.iter())
+            .map(|(t, p)| TelopOverlay {
+                png: p,
+                start_sec: t.start_sec,
+                end_sec: t.end_sec,
+            })
+            .collect();
+        let args = overlay_telops_args(
+            &joined_path.to_string_lossy(),
+            &overlays,
+            codec,
+            &bitrate,
+            &target.to_string_lossy(),
+        );
+        run(&ffmpeg, &args).map_err(|e| {
+            export_failure(
+                format!("telop overlay: {e}"),
+                "テロップの合成に失敗しました。もう一度お試しください。",
+            )
+        })?;
+        target
+    } else {
+        joined_path
+    };
 
     if let Some(b) = bgm {
         let bg_bytes = base64::engine::general_purpose::STANDARD
@@ -1425,6 +1543,45 @@ pub fn export_video(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // テロップ overlay（ADR-0018）：enable='between' 区間付きの overlay チェーンを組み、音声は無変更コピー。
+    #[test]
+    fn overlay_telops_args_builds_enable_chain() {
+        let telops = [
+            TelopOverlay {
+                png: "t0.png",
+                start_sec: 1.5,
+                end_sec: 3.0,
+            },
+            TelopOverlay {
+                png: "t1.png",
+                start_sec: 8.0,
+                end_sec: 11.0,
+            },
+        ];
+        let a = overlay_telops_args(
+            "in.mp4",
+            &telops,
+            VideoCodec::MediaFoundation,
+            "12000k",
+            "out.mp4",
+        );
+        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
+        assert_eq!(
+            a[fc + 1],
+            "[0:v][1:v]overlay=0:0:eof_action=repeat:enable='between(t,1.5,3)'[v1];[v1][2:v]overlay=0:0:eof_action=repeat:enable='between(t,8,11)'[v2]"
+        );
+        // 最終映像ラベルを map、音声は元動画から無変更コピー。MF は -b:v（品質）を伴う。yuv420p で互換維持。
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v2]"));
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "0:a"));
+        assert!(a.windows(2).any(|w| w[0] == "-c:a" && w[1] == "copy"));
+        assert!(a.windows(2).any(|w| w[0] == "-b:v" && w[1] == "12000k"));
+        assert!(a
+            .windows(2)
+            .any(|w| w[0] == "-pix_fmt" && w[1] == "yuv420p"));
+        // 入力は 動画1本＋テロップPNG2枚。
+        assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3);
+    }
 
     #[test]
     fn parse_video_meta_audio_resolution_duration() {
@@ -1987,7 +2144,8 @@ mod tests {
                 offset_sec: 0.0,
             })
             .collect();
-        encode_jobs(&ffmpeg, &scenes, &joins, codec, 30, &tmp, &out).expect("encode_jobs");
+        encode_jobs(&ffmpeg, &scenes, &joins, codec, 30, "12000k", &tmp, &out)
+            .expect("encode_jobs");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 
@@ -2039,6 +2197,7 @@ mod tests {
             }],
             codec,
             30,
+            "12000k",
             &tmp,
             &video,
         )
@@ -2552,7 +2711,8 @@ mod tests {
                 offset_sec: 0.0,
             })
             .collect();
-        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, &tmp, &out).expect("encode_jobs video");
+        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out)
+            .expect("encode_jobs video");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 }

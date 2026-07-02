@@ -48,6 +48,14 @@ export interface BgmInput {
   fileExt: string;
 }
 
+/** タイムラインのテロップ帯（ADR-0018）。透過PNG（出力解像度）を結合後の動画へ enable='between(t,S,E)' で重ねる。 */
+export interface TelopOverlayInput {
+  pngBase64: string;
+  /** 表示区間（グローバル秒＝xfade 重なり込みの実効時間軸・compileTimeline と一致）。 */
+  startSec: number;
+  endSec: number;
+}
+
 /** 書き出し結果の要約。codec は使用エンコーダ（例: libx264 / libopenh264）。 */
 export interface ExportReport {
   outputPath: string;
@@ -70,6 +78,7 @@ export async function exportVideo(
   bgm?: BgmInput,
   projectId?: string,
   outputPath?: string,
+  telops?: TelopOverlayInput[],
 ): Promise<ExportReport> {
   return invoke<ExportReport>('export_video', {
     scenes,
@@ -77,6 +86,7 @@ export async function exportVideo(
     bgm: bgm ?? null,
     projectId: projectId ?? null,
     outputPath: outputPath ?? null,
+    telops: telops && telops.length > 0 ? telops : null,
   });
 }
 
