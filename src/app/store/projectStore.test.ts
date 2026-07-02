@@ -249,6 +249,40 @@ describe('projectStore 要素アニメーション（④・ADR-0019 (1c)）', ()
   });
 });
 
+describe('projectStore アニメの場面複製/分割引き継ぎ・孤児掃除（④・ADR-0019 レビュー対応）', () => {
+  const fadeKfs = [{ timeSec: 0, opacity: 0 }, { timeSec: 0.6, opacity: 1 }];
+  beforeEach(() => {
+    useProjectStore.setState({
+      templates: sampleTemplates,
+      parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
+      scenes: [{ ...scene('scene_001', 1), durationSec: 8, narration: { text: 'あいうえお。かきくけこ。', status: 'none' } } as Scene],
+      meta: {
+        ...useProjectStore.getState().meta,
+        timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: fadeKfs }] },
+      },
+      past: [], future: [], _historyGroupDepth: 0, saveStatus: 'saved',
+    });
+  });
+  it('duplicateScene は元場面のアニメを新場面へ複製（新id・sceneId 差し替え・targetId 保持）', () => {
+    const newId = useProjectStore.getState().duplicateScene('scene_001');
+    const anims = useProjectStore.getState().meta.timelineOverlay?.animations ?? [];
+    expect(anims).toHaveLength(2);
+    expect(anims.find((a) => a.sceneId === newId)).toMatchObject({ id: 'anim_002', targetId: 'free_001' });
+  });
+  it('splitScene は後半場面（新id）へもアニメを引き継ぐ', () => {
+    const newId = useProjectStore.getState().splitScene('scene_001', 6);
+    expect(newId).not.toBe(''); // 分割成立
+    const anims = useProjectStore.getState().meta.timelineOverlay?.animations ?? [];
+    expect(anims.some((a) => a.sceneId === newId && a.targetId === 'free_001')).toBe(true);
+  });
+  it('removeAnimationsForElements は該当要素のアニメを掃除（対象なしは no-op）', () => {
+    useProjectStore.getState().removeAnimationsForElements('scene_001', ['free_999']);
+    expect(useProjectStore.getState().meta.timelineOverlay?.animations).toHaveLength(1); // 対象なし＝不変
+    useProjectStore.getState().removeAnimationsForElements('scene_001', ['free_001']);
+    expect(useProjectStore.getState().meta.timelineOverlay?.animations).toEqual([]);
+  });
+});
+
 describe('projectStore テンプレ既定素材（ADR-0021）', () => {
   const userTmpl = (templateId: string, assetId?: string): Template => ({
     schemaVersion: '1.0', templateId, name: templateId, category: 'opening', aspectRatio: '16:9',

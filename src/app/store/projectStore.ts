@@ -17,6 +17,7 @@ import {
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
+import { duplicateSceneAnimations, removeAnimationsForTargets } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
@@ -116,6 +117,8 @@ interface ProjectState {
   updateAnimation: (animId: string, keyframes: Keyframe[]) => void;
   /** 要素アニメーションを削除する（「動きをやめる」）。 */
   removeAnimation: (animId: string) => void;
+  /** 指定場面の指定要素(targetIds)に紐づくアニメを取り除く（要素削除時の孤児掃除・④）。対象なしなら何もしない。 */
+  removeAnimationsForElements: (sceneId: string, targetIds: string[]) => void;
   /** 場面を複製して直後に挿入し、新しい sceneId を返す（セリフは引き継ぎ・音声は作り直し）。 */
   duplicateScene: (sceneId: string) => string;
   /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
@@ -205,6 +208,15 @@ interface ProjectState {
 
 /** 文書slice（undo 対象）を現在状態から取り出す。 */
 const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.parts, scenes: s.scenes });
+
+/** 場面複製/分割で、元場面の要素アニメ（④・ADR-0019）を新場面へ引き継いだ meta を返す（無ければ meta そのまま）。 */
+function metaWithDuplicatedAnimations(meta: ProjectHeader, srcSceneId: string, newSceneId: string): ProjectHeader {
+  const anims = meta.timelineOverlay?.animations;
+  if (!anims || anims.length === 0) return meta;
+  const copies = duplicateSceneAnimations(anims, srcSceneId, newSceneId, createAnimationId);
+  if (copies.length === 0) return meta;
+  return { ...meta, timelineOverlay: { ...meta.timelineOverlay, animations: [...anims, ...copies] } };
+}
 
 // AI 構成案プロバイダの選択：Tauri かつ Gemini キーありなら実 Gemini、なければ Mock
 // （非Tauri／オフライン／鍵未設定のフォールバック＝ADR-0010）。
@@ -680,7 +692,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const next = duplicateSceneInList(s.scenes, s.parts, sceneId, newId);
     if (next.scenes === s.scenes) return ""; // 対象なし＝変化なし
     get().pushHistory();
-    set({ ...next, saveStatus: "idle" });
+    // 複製元の要素アニメ（④・ADR-0019）も新場面へ引き継ぐ（複製で freeLayout の要素id は不変＝targetId そのまま）。
+    set({ ...next, meta: metaWithDuplicatedAnimations(s.meta, sceneId, newId), saveStatus: "idle" });
     return newId;
   },
   splitScene: (sceneId, splitIndex) => {
@@ -689,8 +702,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const next = splitSceneInList(s.scenes, s.parts, sceneId, splitIndex, newId);
     if (next.scenes === s.scenes) return ""; // 分割不能＝変化なし（未保存にしない）
     get().pushHistory();
-    set({ ...next, saveStatus: "idle" });
+    // 分割後の後半場面（newId）は前半と同じ freeLayout を持つ＝元場面のアニメを後半にも引き継ぐ（④・ADR-0019）。
+    set({ ...next, meta: metaWithDuplicatedAnimations(s.meta, sceneId, newId), saveStatus: "idle" });
     return newId;
+  },
+  removeAnimationsForElements: (sceneId, targetIds) => {
+    const anims = get().meta.timelineOverlay?.animations;
+    if (!anims || anims.length === 0) return;
+    const rest = removeAnimationsForTargets(anims, sceneId, targetIds);
+    if (rest.length === anims.length) return; // 対象なし＝変化なし（未保存/履歴にしない）
+    get().pushHistory();
+    set((s) => ({
+      meta: { ...s.meta, timelineOverlay: { ...s.meta.timelineOverlay, animations: rest } },
+      saveStatus: "idle",
+    }));
   },
   applyProjectInfo: (input) => {
     get().pushHistory();

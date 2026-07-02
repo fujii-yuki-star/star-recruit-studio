@@ -194,7 +194,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     addScene, removeScene, splitScene, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
-    addAnimation, updateAnimation, removeAnimation,
+    addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements,
   } = useProjectStore();
   // 要素アニメーション（④・ADR-0019）：この場面の FREE 要素に付いた簡易アニメ（timelineOverlay.animations）。
   const timelineOverlay = useProjectStore((s) => s.meta.timelineOverlay);
@@ -396,9 +396,24 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   const patchFreeEl = (id: string, p: Partial<Omit<FreeElement, "id" | "kind">>) =>
     patch((s) => ({ ...s, freeLayout: updateFreeElement(s.freeLayout ?? [], id, p) }));
+  // 図形の「透明度」変更（④・ADR-0019 (1c)）：既存のフェードイン（動き）があれば終端の濃さも合わせて更新し、
+  // 「編集中に見えている濃さ＝再生/書き出しの到達点」をそろえる（レビュー対応）。scene＋meta を履歴グループで1手に。
+  const setFreeElementOpacity = (el: FreeElement, opacity: number) => {
+    const anim = (timelineOverlay?.animations ?? []).find((a) => a.sceneId === selected.sceneId && a.targetId === el.id);
+    if (!anim) { patchFreeEl(el.id, { opacity }); return; }
+    beginHistoryGroup();
+    patchFreeEl(el.id, { opacity });
+    updateAnimation(anim.id, fadeInKeyframes(opacity, fadeInDurationOf(anim.keyframes)));
+    endHistoryGroup();
+  };
   const removeFreeEl = (id: string) => {
     // freeLayout から消すと同時に groups からも除去し、空グループは落とす（orphan 参照防止・#311 レビュー）。
+    // 要素アニメ（④）も孤児にならないよう掃除する。scene（freeLayout/groups）＋meta（animations）の2更新を
+    // 履歴グループで1手にまとめる（Undo は1回で両方戻る）。
+    beginHistoryGroup();
     patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]) }));
+    removeAnimationsForElements(selected.sceneId, [id]);
+    endHistoryGroup();
     setSelectedFreeIds((cur) => cur.filter((x) => x !== id)); // 選択中を消したら選択から外す（詳細モードは案内へ）
   };
   // 一括移動：複数選択の全要素の位置を1回の更新でまとめて反映（オーバーレイのドラッグから・#206）。
@@ -409,7 +424,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: applyFreeElementGeoms(s.freeLayout ?? [], updates) }));
   // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
   const removeFreeMany = (ids: string[]) => {
+    // 一括削除でも要素アニメ（④）を孤児にしないよう掃除する（scene＋meta を履歴グループで1手に）。
+    beginHistoryGroup();
     patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids) }));
+    removeAnimationsForElements(selected.sceneId, ids);
+    endHistoryGroup();
     setSelectedFreeIds([]);
     setEditPopover(null);
   };
@@ -611,7 +630,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>透明度</label>
             <input
               type="range" min={0} max={1} step={0.1} value={el.opacity ?? 1}
-              onChange={(e) => patchFreeEl(el.id, { opacity: Number(e.target.value) })}
+              onChange={(e) => setFreeElementOpacity(el, Number(e.target.value))}
               // 注: スライダーは range のため pointerup を取りこぼすと履歴グループが開きっぱなしになりうる。
               // ドラッグ合成は確実な FREE オーバーレイ（pointer capture 有）に限定し、スライダーは各変更=1ステップとする（ADR-0020 未解決2・後続）。
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
