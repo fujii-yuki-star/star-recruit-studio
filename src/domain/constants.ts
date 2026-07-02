@@ -54,6 +54,8 @@ export function exportDimsForOrientation(
 export const NARRATION_VOLUME = 1.0;
 export const BGM_VOLUME = 0.25;
 export const ORIGINAL_AUDIO_VOLUME = 0.2;
+// 場面ごとBGMで曲が変わる境界のクロスフェード長（秒・ADR-0018 ③(7)）。前後を half ずつ重ねる。単一の参照元（§2-7）。
+export const BGM_CROSSFADE_SEC = 1.0;
 // 音量の値域（§4：0.0〜1.5、1.0=原音）。
 export const VOLUME_MIN = 0.0;
 export const VOLUME_MAX = 1.5;

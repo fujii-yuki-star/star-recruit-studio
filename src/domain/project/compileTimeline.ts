@@ -99,14 +99,21 @@ function bgmRunLabel(bgm: BgmSettings | undefined): string {
   return bgm?.bundledBgmId != null ? bgmById(bgm.bundledBgmId)?.label ?? 'BGM' : 'BGM';
 }
 
+/** BGM区間（実効BGM＋グローバル [startSec, endSec]）。タイムライン表示と書き出しミックスで共有（ADR-0018 ③(7)）。 */
+export interface BgmRun {
+  /** この区間の実効BGM（enabled かつソース有り＝bgmSourceKey が非 null のもの）。 */
+  bgm: BgmSettings;
+  startSec: number;
+  endSec: number;
+}
+
 /**
- * BGMトラック（ADR-0018 ③(7)・場面ごとBGM）。実効BGM（場面 ?? プロジェクト）が同じソースの連続場面を1区間にまとめる。
- * 全場面がプロジェクト既定を継承する従来ケースは1区間＝[0, 総尺]（後方互換）。鳴らない場面は区間を割らずスキップ。
+ * 実効BGM（場面 ?? プロジェクト）が同じソースの連続場面を1区間にまとめる（ADR-0018 ③(7)）。
+ * 全場面がプロジェクト既定を継承する従来ケースは1区間＝[0, 総尺]（後方互換）。鳴らない場面はスキップ・ゼロ幅は除外。
  */
-function bgmRunClips(scenes: Scene[], starts: number[], ends: number[], projectBgm: BgmSettings | undefined): TimelineClip[] {
-  const clips: TimelineClip[] = [];
+export function groupBgmRuns(scenes: Scene[], starts: number[], ends: number[], projectBgm: BgmSettings | undefined): BgmRun[] {
+  const runs: BgmRun[] = [];
   let i = 0;
-  let run = 0;
   while (i < scenes.length) {
     const bgm = resolveSceneBgm(scenes[i], projectBgm);
     const key = bgmSourceKey(bgm);
@@ -116,13 +123,19 @@ function bgmRunClips(scenes: Scene[], starts: number[], ends: number[], projectB
     }
     let j = i;
     while (j + 1 < scenes.length && bgmSourceKey(resolveSceneBgm(scenes[j + 1], projectBgm)) === key) j += 1;
-    if (ends[j] > starts[i]) {
-      clips.push({ id: `bgm_${run}`, startSec: starts[i], endSec: ends[j], label: bgmRunLabel(bgm) });
-      run += 1;
-    }
+    if (ends[j] > starts[i]) runs.push({ bgm: bgm as BgmSettings, startSec: starts[i], endSec: ends[j] });
     i = j + 1;
   }
-  return clips;
+  return runs;
+}
+
+function bgmRunClips(scenes: Scene[], starts: number[], ends: number[], projectBgm: BgmSettings | undefined): TimelineClip[] {
+  return groupBgmRuns(scenes, starts, ends, projectBgm).map((r, i) => ({
+    id: `bgm_${i}`,
+    startSec: r.startSec,
+    endSec: r.endSec,
+    label: bgmRunLabel(r.bgm),
+  }));
 }
 
 /**

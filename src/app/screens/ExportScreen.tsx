@@ -7,11 +7,12 @@ import { buildExportScenes } from "../../renderer/export/buildExportScenes";
 import { buildTelopOverlays } from "../../renderer/export/telopOverlays";
 import { findVideoSlot } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
+import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
-import type { BgmInput } from "../../infrastructure/ffmpegExport";
-import { NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
-import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
+import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
+import { BGM_CROSSFADE_SEC, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
+import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
@@ -144,39 +145,38 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // タイムラインのテロップ（ADR-0018 テロップ実描画）。帯PNG＋グローバル区間へ焼き、Rust が結合後に overlay 合成。
       // テロップは場面横断のため動画全体フォントで焼く。
       const st = useProjectStore.getState();
-      const telops = await buildTelopOverlays(assembleProject(st.meta, st.assets, st.parts, st.scenes), {
+      const proj = assembleProject(st.meta, st.assets, st.parts, st.scenes);
+      const telops = await buildTelopOverlays(proj, {
         outputSize,
         fontFamily: fontFamilyForId(fontId),
         fontId: resolveFontId(null, fontId),
       });
       setPhase("encoding");
-      let bgm: BgmInput | undefined;
-      // BGM も表示用 src ではなく、ここで実体を data URL 化する（asset:// は FFmpeg へ渡せない）。
-      // 標準BGM（同梱）は public/bgm から、自分のBGM はプロジェクトフォルダから読む。bundledBgmId を優先。
-      if (bgmSettings?.enabled && (bundledBgm || bgmAsset)) {
+      // 場面ごとBGM（ADR-0018 ③(7)）：区間を解決→配置＋クロスフェード計画→各区間のソースを data URL 化して Rust へ。
+      // 表示用 src ではなく実体を data URL 化する（asset:// は FFmpeg へ渡せない）。同梱は public/bgm、自分のBGM はプロジェクトから。
+      const mixClips = planBgmMix(resolveBgmExportRuns(proj), BGM_CROSSFADE_SEC);
+      const bgmRuns: BgmRunInput[] = [];
+      for (const clip of mixClips) {
         let audioBase64: string | undefined;
         let fileExt = "mp3";
-        if (bundledBgm) {
-          audioBase64 = await readBundledBgmDataUrl(bundledBgm.id);
-          fileExt = bundledBgm.fileName.split(".").pop()?.toLowerCase() || "mp3";
-        } else if (bgmAsset && pid) {
-          audioBase64 = (await readAssetDataUrl(pid, bgmAsset.filePath)) ?? undefined;
-          fileExt = (bgmAsset.filePath.split(".").pop() || "mp3").toLowerCase();
+        if (clip.bundledBgmId) {
+          audioBase64 = await readBundledBgmDataUrl(clip.bundledBgmId);
+          fileExt = bgmById(clip.bundledBgmId)?.fileName.split(".").pop()?.toLowerCase() || "mp3";
+        } else if (clip.assetId && pid) {
+          const a = st.assets.find((x) => x.assetId === clip.assetId);
+          if (a) {
+            audioBase64 = (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
+            fileExt = (a.filePath.split(".").pop() || "mp3").toLowerCase();
+          }
         }
         if (audioBase64) {
-          bgm = {
-            audioBase64,
-            volume: resolveBgmVolume(undefined, bgmSettings),
-            fadeInSec: bgmSettings.fadeInSec ?? 0,
-            fadeOutSec: bgmSettings.fadeOutSec ?? 0,
-            fileExt,
-          };
+          bgmRuns.push({ audioBase64, fileExt, volume: clip.volume, delaySec: clip.delaySec, playSec: clip.playSec, fadeInSec: clip.fadeInSec, fadeOutSec: clip.fadeOutSec });
         } else {
-          // 選択済みだが読み込めなかった（同梱欠損・読込失敗）。BGMなしで続行し、完了時に知らせる（§2-5）。
+          // 選択済みだが読み込めなかった（同梱欠損・読込失敗）。その区間は無音で続行し、完了時に知らせる（§2-5）。
           setBgmWarning(true);
         }
       }
-      const report = await exportVideo(built, fileName.trim() || "export", bgm, pid || undefined, outputPath, telops);
+      const report = await exportVideo(built, fileName.trim() || "export", bgmRuns, pid || undefined, outputPath, telops);
       setResultPath(report.outputPath);
       setPhase("done");
     } catch (e) {
