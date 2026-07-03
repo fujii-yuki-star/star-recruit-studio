@@ -7,7 +7,7 @@ import type { Template } from '../../domain/template/types';
 import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs } from '../../domain/project/lineTimeline';
-import { sceneAnimationActive } from '../../domain/project/sceneAnimation';
+import { animationsEndSec, sceneAnimationActive } from '../../domain/project/sceneAnimation';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
@@ -287,7 +287,14 @@ export async function buildExportScenes(
           if (animate) {
             // アニメ区間：この区間 [startSec, +durationSec] を毎フレーム描画（掛け合いは行ごと・単一は1区間）。
             const fps = FPS;
-            const frameCount = Math.max(1, Math.round(spec.durationSec * fps));
+            // 高速化（#376）：アニメは最終キーフレーム(animEnd)以降レイアウトが一定＝以降のフレームは
+            // 全て同一（静止）。よって「変化する終端＝min(区間末, animEnd)」までだけ焼き、残りは Rust 側の
+            // tpad=stop_mode=clone が最終フレームを尺まで保持する。長い場面や掛け合い（アニメが頭だけの行）で
+            // per-frame ラスタライズを激減させる。+1 は最終フレームを settled 状態ちょうどに載せるため。
+            const animEndSec = animationsEndSec(sceneAnims); // 場面ローカル秒
+            const segEnd = spec.startSec + spec.durationSec;
+            const renderDurSec = Math.max(0, Math.min(segEnd, animEndSec) - spec.startSec);
+            const frameCount = Math.max(1, Math.round(renderDurSec * fps) + 1);
             // ステージング可能なら各フレームを逐次ディスクへ（数百フレームの base64 を配列/IPC に溜めない・#書き出しRangeError）。
             const framesDir = stageAnimationFrame ? `scene_frames_${i}_${segIndex}` : undefined;
             const framesBase64: string[] = [];

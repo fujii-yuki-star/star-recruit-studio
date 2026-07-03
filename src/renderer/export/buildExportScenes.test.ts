@@ -118,8 +118,11 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(out).toHaveLength(1);
     expect(out[0].pngBase64).toBeUndefined(); // アニメ場面は単一PNGなし
     expect(out[0].fps).toBe(FPS);
-    expect(out[0].framesBase64).toHaveLength(Math.round(2 * FPS)); // durationSec * fps
+    // #376：アニメは animEnd=1 秒で終わる（keyframes [0,1]）→ [0,1] だけ焼く（+1 で settled 到達）。
+    // 場面尺は2秒だが残り [1,2] は Rust の tpad が最終フレームを保持するので焼かない。
+    expect(out[0].framesBase64).toHaveLength(Math.round(1 * FPS) + 1);
     expect(out[0].framesBase64?.[0]).toBe('data:image/png;base64,PNG');
+    expect(out[0].durationSec).toBe(2); // 尺は場面のまま（保持はエンコード側）
     expect(out[0].narrationVolume).toBe(1);
   });
 
@@ -135,7 +138,7 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(out[0].framesBase64).toBeUndefined(); // 巨大な base64 配列を IPC に載せない
     expect(out[0].framesDir).toBe('scene_frames_0_0'); // 場面 index_区間 index 由来の相対名
     expect(out[0].fps).toBe(FPS);
-    expect(staged).toHaveLength(Math.round(2 * FPS)); // 全フレームを逐次ディスクへ
+    expect(staged).toHaveLength(Math.round(1 * FPS) + 1); // #376：変化区間[0,1]だけ逐次ディスクへ
     expect(staged[0]).toEqual({ dir: 'scene_frames_0_0', index: 0, url: 'data:image/png;base64,PNG' });
   });
 
@@ -183,7 +186,24 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     // 区間0(line_001,[0,4]) は 0 起点、区間1(line_002,[4,8]) は 4 起点でフレームを焼く。
     expect(timeSecs).toContain(0); // 1行目の先頭フレーム
     expect(timeSecs).toContain(4); // 2行目の先頭フレーム＝startSec オフセットが効いている（offset 0 のデグレなら 4 は現れない）
-    expect(Math.max(...timeSecs)).toBeGreaterThan(4); // 2行目が場面頭(0)から再生し直していない証拠
+    // #376：アニメは animEnd=1 で終わるため区間1[4,8]は全て静止＝settled 1枚を startSec(=4) で焼くだけ。
+    // よって最大 timeSec は 4（区間0の頭[0,1]と区間1の settled=4）。offset 0 のデグレなら 4 が出ず max<4 になる。
+    expect(Math.max(...timeSecs)).toBe(4);
+  });
+
+  it('アニメが頭だけの長い場面は「変化する区間」だけ焼く＝フレーム数を激減（#376高速化）', async () => {
+    // animEnd=1（keyframes [0,1]）・durationSec=10 → 従来 300 枚 → 最適化後 31 枚（[0,1]＋settled）。
+    // 残り [1,10] は Rust の tpad=stop_mode=clone が最終フレームを保持するので焼かない。
+    const longScene = [{ sceneId: 's1', templateId: 'tpl', durationSec: 10 }] as unknown as Scene[];
+    const out = await buildExportScenes(
+      longScene, templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      undefined, undefined, {},
+      (s) => [anim(s.sceneId)],
+    );
+    expect(out[0].framesBase64).toHaveLength(Math.round(1 * FPS) + 1); // 31 枚（≪ 従来 300 枚）
+    expect(out[0].durationSec).toBe(10); // 尺は場面のまま（保持はエンコード側 tpad）
+    expect(out[0].fps).toBe(FPS);
   });
 
   it('動画スロット併用のアニメはフレーム列にせず video 経路（下/上PNG）', async () => {
