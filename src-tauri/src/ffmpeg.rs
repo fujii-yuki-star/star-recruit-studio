@@ -1254,7 +1254,13 @@ fn decode_b64_to_file(b64: &str, path: &Path, ctx: &str) -> Result<(), String> {
 /// 巨大な base64 を1回の IPC（JSON.stringify）に載せると文字列上限を超えて失敗するため、フレームは
 /// 1枚ずつ小さく stage_export_frame で書き出し、export_video には frames_dir（相対名）だけ渡す（#書き出しRangeError）。
 fn export_frames_stage_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // 生の OS エラーを UI に出さない（§2-5）。他の書き出しエラーと同様 export_failure で定型文言へ。
+    let base = app.path().app_data_dir().map_err(|e| {
+        export_failure(
+            format!("app data dir: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?;
     Ok(base.join("exports").join(".frames_stage"))
 }
 
@@ -1296,7 +1302,11 @@ pub fn clear_export_frames_stage(app: tauri::AppHandle) -> Result<(), String> {
     match fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
+        // ロック等で消せないときも生 OS エラーを UI に出さない（§2-5）。定型文言で「次の行動」を示す。
+        Err(e) => Err(export_failure(
+            format!("clear frames stage: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )),
     }
 }
 
@@ -1804,6 +1814,19 @@ pub fn export_video(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // フレームステージングのディレクトリ名はパストラバーサル防止で英数字と _ のみ許可（#書き出しRangeError）。
+    #[test]
+    fn stage_name_allows_word_chars_rejects_separators_and_traversal() {
+        assert!(is_safe_stage_name("scene_frames_2"));
+        assert!(is_safe_stage_name("frame00"));
+        assert!(!is_safe_stage_name("")); // 空は不可
+        assert!(!is_safe_stage_name("..")); // 親参照
+        assert!(!is_safe_stage_name("a/b")); // スラッシュ
+        assert!(!is_safe_stage_name("a\\b")); // バックスラッシュ
+        assert!(!is_safe_stage_name("a b")); // 空白
+        assert!(!is_safe_stage_name("a.b")); // ドット
+    }
 
     // テロップ overlay（ADR-0018）：enable='between' 区間付きの overlay チェーンを組み、音声は無変更コピー。
     #[test]
