@@ -143,10 +143,10 @@ export function FreeLayoutOverlay({
   useEffect(() => () => { if (dragRef.current) onInteractionEnd?.(); }, [onInteractionEnd]);
   // 主＝最後に選択した要素（リサイズハンドルはこれだけに出す。複数同時リサイズは曖昧なので非対応）。
   const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
-  // 複数同時リサイズ（#274）：選択中の非ロック・非表示・非回転要素のグループ bbox を出し、その角ハンドルで一括拡縮する。
-  // 回転要素を除くのは、bbox を論理座標(x/y/w/h)の AABB で計算するため＝回転後の表示領域とズレて意図しない拡縮になるのを防ぐ
-  // （**単一**要素のリサイズは回転対応済み＝resizeRotatedFreeElement。複数同時の回転対応のみ別問題ゆえ未対応・#279後継）。
-  const groupEls = freeLayout.filter((el) => selectedIds.includes(el.id) && !el.locked && !el.hidden && (el.rotation ?? 0) === 0);
+  // 複数同時リサイズ（#274）：選択中の非ロック・非表示要素のグループ bbox を出し、その角ハンドルで一括拡縮する。
+  // グループ枠は各要素の**見た目（回転後）の AABB** で囲むため（groupBBox→elementVisualBBox）、回転要素も含められる（#300(a)）。
+  // 各要素は中心を枠に合わせてスケールし w/h を掛ける（回転は保持）。非等比では回転要素にせん断近似が入るが自然な範囲（#300）。
+  const groupEls = freeLayout.filter((el) => selectedIds.includes(el.id) && !el.locked && !el.hidden);
   const isGroupResize = selectedIds.length > 1 && groupEls.length > 0;
   const groupBox = isGroupResize ? groupBBox(groupEls) : null;
   // 永続グループ（ADR-0022）：表示はグループ transform を合成した位置にする（preview/export と一致）。
