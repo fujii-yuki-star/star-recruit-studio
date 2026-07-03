@@ -165,8 +165,6 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       if (safeIdx < endIdx) setIdx(safeIdx + 1);
       else setPlaying(false);
     };
-    const endTimer = window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000);
-
     if (sc.lines && sc.lines.length > 0) {
       // 掛け合い：行音声の長さを測ってタイムラインを作り、各行の開始秒で音声＋フレームを切り替える。
       const lines = sc.lines;
@@ -192,31 +190,47 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         const lineIdx = lines.findIndex((l) => l.lineId === segs[i].lineId);
         setActiveLine(lineIdx >= 0 ? lineIdx : 0);
         const scheduleNext = (): void => {
-          if (cancelled || i + 1 >= segs.length) return;
-          const windowSec = Math.max(0, segs[i + 1].startSec - segs[i].startSec);
-          lineTimers.push(window.setTimeout(() => playLine(i + 1), windowSec * 1000));
+          if (cancelled) return;
+          if (i + 1 < segs.length) {
+            const windowSec = Math.max(0, segs[i + 1].startSec - segs[i].startSec);
+            lineTimers.push(window.setTimeout(() => playLine(i + 1), windowSec * 1000));
+          } else {
+            // 最終行：この行の窓（場面末まで）ぶん後に場面送り（advance）。場面送りも実再生起点にそろえ、
+            // 行が増えて遅延が積み上がっても最終行の末尾が場面遷移で切れないようにする（#370 レビュー対応）。
+            const lastWindowSec = Math.max(MIN_PLAY_SEC, segs[i].endSec - segs[i].startSec);
+            lineTimers.push(window.setTimeout(advance, lastWindowSec * 1000));
+          }
         };
         const u = narrationAudioById[lineAudioKey(sc.sceneId, segs[i].lineId)];
         if (u && !mutedRef.current) {
           currentAudio = new Audio(u);
           lineAudios.push(currentAudio);
-          // play() の解決＝再生開始。そこから窓を測って次行へ。失敗時も次行へ進める。
-          void currentAudio.play().then(scheduleNext).catch(() => scheduleNext());
+          // play() の解決＝再生開始。そこから窓を測って次へ。resolve/reject いずれでも一度だけ進む
+          // （reject 側は再生失敗ログも残す＝今後のデバッグ用・#370 レビュー対応）。
+          void currentAudio.play().then(scheduleNext, (e) => {
+            console.warn("[PreviewScreen] 音声再生に失敗", e);
+            scheduleNext();
+          });
         } else {
           scheduleNext(); // 無音（ミュート/音声なし）は窓ぶん待ってから次へ。
         }
       };
-      if (segs.length > 0) playLine(0);
+      if (segs.length > 0) {
+        playLine(0);
+      } else {
+        // 有効な行が無い（全フィルタ＝音声未生成など）は場面尺で送る（従来のフォールバック）。
+        lineTimers.push(window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000));
+      }
       return () => {
         cancelled = true;
-        window.clearTimeout(endTimer);
         lineTimers.forEach((t) => window.clearTimeout(t));
         lineAudios.forEach((a) => a.pause());
         setActiveLine(0);
       };
     }
 
-    // 単一 narration（従来）。
+    // 単一 narration（従来）。場面尺の固定タイマーで次の場面へ。
+    const endTimer = window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000);
     let audio: HTMLAudioElement | undefined;
     const url = narrationAudioById[sc.sceneId];
     if (url && !mutedRef.current) {
