@@ -27,7 +27,7 @@ import { getAiModel } from "../../infrastructure/appSettings";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
-import { templateAssetIdsOf } from "../../domain/template/templateAsset";
+import { orphanTemplateAssetIds, templateAssetIdsOf } from "../../domain/template/templateAsset";
 import { deleteTemplateAsset, importTemplateAsset, loadTemplateAssetUrls } from "../../infrastructure/templateAssetFs";
 import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
@@ -844,7 +844,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       userTemplateFs.loadUserTemplates(),
       loadTemplateAssetUrls(),
     ]);
-    set((s) => ({ templates: replaceUserTemplates(s.templates, user), templateAssetSrcById }));
+    set((s) => ({ templates: replaceUserTemplates(s.templates, user.templates), templateAssetSrcById }));
+    // 孤立したテンプレ素材ファイルを安全条件下で掃除（#299）。下書き破棄やテンプレ削除時の削除失敗で残ったファイルが対象。
+    // user.complete が false（読込失敗・破損・検証却下）なら何もしない＝「空を全削除」の誤削除を防ぐ（ADR-0021 の注意）。
+    const orphans = orphanTemplateAssetIds(get().templates, Object.keys(templateAssetSrcById), user.complete);
+    if (orphans.length > 0) {
+      for (const assetId of orphans) await deleteTemplateAsset(assetId); // 失敗は templateAssetFs 内で握る（非致命）
+      set((s) => ({
+        templateAssetSrcById: Object.fromEntries(
+          Object.entries(s.templateAssetSrcById).filter(([id]) => !orphans.includes(id)),
+        ),
+      }));
+    }
   },
   saveUserTemplate: async (template) => {
     try {
@@ -861,7 +872,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const owned = templateAssetIdsOf(get().templates.find((t) => t.templateId === templateId)?.layers ?? []);
     try {
       await userTemplateFs.deleteUserTemplate(templateId);
-      // 各素材ファイルの削除失敗は templateAssetFs 内で握る（非致命）。失敗時はファイルが残るが、参照していたテンプレは消えるため未参照＝孤立（disk のみ・許容。安全な一括掃除は将来＝読込失敗時の誤削除を避けるため自動掃除はしない）。
+      // 各素材ファイルの削除失敗は templateAssetFs 内で握る（非致命）。失敗時はファイルが残るが、参照していたテンプレは消えるため未参照＝孤立（disk のみ・許容）。残った孤立は次回起動の読込時に安全条件下で掃除される（#299・loadUserTemplates）。
       for (const assetId of owned) await deleteTemplateAsset(assetId);
       set((s) => ({
         templates: s.templates.filter((t) => t.templateId !== templateId),

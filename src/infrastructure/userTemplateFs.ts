@@ -39,27 +39,51 @@ export function allocateUserTemplateId(existingIds: readonly string[]): string {
   return id;
 }
 
-/** ユーザーテンプレを全件読み、正典スキーマで検証して返す（未検証は取り込まない＝§2-2）。非 Tauri・読込失敗は空（throw しない＝loadBundledTemplates と同方針）。 */
-export async function loadUserTemplates(): Promise<Template[]> {
-  if (!isTauri()) return [];
-  let jsons: string[];
-  try {
-    jsons = await invoke<string[]>('load_user_templates');
-  } catch (e) {
-    console.warn('[userTemplateFs] ユーザーテンプレの読み込みに失敗しました（空で続行）:', e);
-    return [];
-  }
+/** load_user_templates の生結果（Rust `UserTemplatesLoad` と対応）。skipped=Rust が読めずに飛ばした *.json 数。 */
+interface UserTemplatesLoad {
+  jsons: string[];
+  skipped: number;
+}
+
+/**
+ * 読み込んだ生本文を検証して `templates` と `complete` を決める純粋関数（invoke 非依存＝単体テスト可）。
+ * `complete`＝在庫が完全に信頼できるか。**孤立素材の掃除(#299)の安全条件**になるため、少しでも欠け得る要因
+ * （Rust のスキップ・JSON 破損・検証却下）があれば false に倒す＝部分的な在庫で誤って素材を消さない。
+ * とくに Rust の `load_user_templates` は `read_to_string` 失敗を握って**スキップ**し得る（invoke 自体は成功）。
+ * その件数(`skipped`)を含めないと「一時的な読込失敗」を「ファイルが無い」と誤認して complete=true にしてしまう。
+ */
+export function resolveUserTemplatesLoad(loaded: UserTemplatesLoad): { templates: Template[]; complete: boolean } {
+  let parseOk = true;
   const raw: unknown[] = [];
-  for (const j of jsons) {
+  for (const j of loaded.jsons) {
     try {
       raw.push(JSON.parse(j));
     } catch {
+      parseOk = false; // 壊れたファイルがある＝参照集合が不完全になり得る（掃除しない）
       console.warn('[userTemplateFs] 壊れたユーザーテンプレファイルを読み飛ばしました');
     }
   }
   const { templates, rejected } = parseTemplatePack(raw);
   if (rejected.length > 0) console.warn('[userTemplateFs] 検証を通らないユーザーテンプレ:', rejected);
-  return templates;
+  const complete = loaded.skipped === 0 && parseOk && rejected.length === 0;
+  return { templates, complete };
+}
+
+/**
+ * ユーザーテンプレを全件読み、正典スキーマで検証して返す（未検証は取り込まない＝§2-2）。
+ * 非 Tauri・読込失敗は空（throw しない＝loadBundledTemplates と同方針）。
+ * `complete` は孤立素材の掃除(#299)の安全条件（判定は resolveUserTemplatesLoad）。
+ */
+export async function loadUserTemplates(): Promise<{ templates: Template[]; complete: boolean }> {
+  if (!isTauri()) return { templates: [], complete: false };
+  let loaded: UserTemplatesLoad;
+  try {
+    loaded = await invoke<UserTemplatesLoad>('load_user_templates');
+  } catch (e) {
+    console.warn('[userTemplateFs] ユーザーテンプレの読み込みに失敗しました（空で続行）:', e);
+    return { templates: [], complete: false }; // 読込失敗＝在庫不明。掃除しない。
+  }
+  return resolveUserTemplatesLoad(loaded);
 }
 
 /** ユーザーテンプレを保存する（Tauri のみ。非 Tauri は no-op）。新規 id の採番/bump は行わない＝新規は allocateUserTemplateId で id を払い出してから保存する。 */
