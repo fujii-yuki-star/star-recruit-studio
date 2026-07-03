@@ -105,7 +105,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     [current, template, assets],
   );
   // このアニメを実際に描くか＝書き出し（buildExportScenes）と共有の sceneAnimationActive で判定。
-  // 掛け合い/動画スロット併用場面は書き出しが静止扱いのため、プレビューも静止にしてパリティを保つ（ADR-0001）。
+  // 掛け合いは行セグメントごとにアニメを焼く（③）。動画スロット併用場面のみ書き出しが静止扱いのため、
+  // プレビューも静止にしてパリティを保つ（ADR-0001）。
   const animActive = !!current && sceneAnimationActive(current, sceneAnimations, hasVideoSlot);
   const previewAnimations = animActive ? sceneAnimations : [];
   // 再生中はこの場面のアニメを再生位置 timeSec で駆動（RAF＝場面頭からの経過秒を尺でクランプ）。停止中は t=0（場面頭）。

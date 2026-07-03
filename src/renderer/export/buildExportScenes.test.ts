@@ -161,6 +161,31 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(out[1].audioBase64).toBe('A_line_002');
   });
 
+  it('掛け合い×アニメは各行区間の開始秒(startSec)を timeSec 起点にフレームを焼く（2行目がアニメ頭から再生し直さない・③レビュー）', async () => {
+    const multi = [{
+      sceneId: 's1', templateId: 'tpl', durationSec: 8,
+      lines: [
+        { lineId: 'line_001', text: 'a', startSec: 0, status: 'none' },
+        { lineId: 'line_002', text: 'b', startSec: 4, status: 'none' },
+      ],
+    }] as unknown as Scene[];
+    vi.mocked(layoutScene).mockClear();
+    await buildExportScenes(
+      multi, templateById, noAsset,
+      (_s, lineId) => ({ audioBase64: lineId ? `A_${lineId}` : undefined, narrationVolume: 1 }),
+      undefined, undefined, {},
+      (s) => [anim(s.sceneId)],
+    );
+    // フレーム描画呼び出しの timeSec（layoutScene(scene, template, opts) の第3引数）を集める。
+    const timeSecs = vi.mocked(layoutScene).mock.calls
+      .map((c) => c[2]?.timeSec)
+      .filter((t): t is number => typeof t === 'number');
+    // 区間0(line_001,[0,4]) は 0 起点、区間1(line_002,[4,8]) は 4 起点でフレームを焼く。
+    expect(timeSecs).toContain(0); // 1行目の先頭フレーム
+    expect(timeSecs).toContain(4); // 2行目の先頭フレーム＝startSec オフセットが効いている（offset 0 のデグレなら 4 は現れない）
+    expect(Math.max(...timeSecs)).toBeGreaterThan(4); // 2行目が場面頭(0)から再生し直していない証拠
+  });
+
   it('動画スロット併用のアニメはフレーム列にせず video 経路（下/上PNG）', async () => {
     const out = await buildExportScenes(
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
