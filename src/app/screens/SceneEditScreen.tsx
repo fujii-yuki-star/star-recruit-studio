@@ -22,6 +22,7 @@ import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateL
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { useProjectStore } from "../store/projectStore";
+import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
@@ -295,22 +296,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [editPopover]);
 
-  // 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z＝取り消し・Ctrl/⌘+Shift+Z／Ctrl+Y＝やり直し。
-  // テキスト入力中（input/textarea/contentEditable）は標準の文字 Undo に任せ、ここでは奪わない。
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const key = e.key.toLowerCase();
-      if (key !== "z" && key !== "y") return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      e.preventDefault();
-      if (key === "y" || e.shiftKey) redo();
-      else undo();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
+  // 取り消し/やり直し（#211・ADR-0020）のキーボード入口はタイムライン編集と共有のフックへ集約（挙動を揃える・#255 レビュー対応）。
+  useUndoRedoShortcuts();
 
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];

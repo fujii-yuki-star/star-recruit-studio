@@ -76,6 +76,18 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
   });
 
+  it("Ctrl+Z / Ctrl+Y のキーボードでも取り消し・やり直しできる（#255 レビュー対応・場面編集と共有）", () => {
+    render(<TimelineEditScreen onNavigate={() => {}} />);
+    fireEvent.click(screen.getByText("＋ テロップを追加"));
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+    // Ctrl+Z＝取り消し（追加が戻る）。
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips ?? []).toHaveLength(0);
+    // Ctrl+Y＝やり直し（追加が復活）。
+    fireEvent.keyDown(window, { key: "y", ctrlKey: true });
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+  });
+
   it("「時間の合わせ方」を絶対時間へ切り替えても実効グローバル秒を保つ（無警告ジャンプ防止）", () => {
     // 場面2つ：scene_001(0-8s)・scene_002(8-16s)。clip を場面2アンカー・相対2秒＝実効10秒で置く。
     useProjectStore.setState({
