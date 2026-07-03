@@ -34,7 +34,7 @@ describe('narratorCredit（#177：動的クレジット）', () => {
     });
   });
 
-  describe('creditForLines（#243：動画+掛け合いの1フレーム併記）', () => {
+  describe('creditForLines（#243：使用話者の併記＝集約表示向け。動画×掛け合いの書き出しは行ごと表示へ移行済み）', () => {
     const fallback = 'VOICEVOX:四国めたん';
 
     it('使用キャラを重複なく「 / 」で併記する', () => {

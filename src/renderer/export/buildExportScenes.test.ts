@@ -274,6 +274,98 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
   });
 });
 
+describe('buildExportScenes：掛け合い×動画スロット（行区間つき上PNG＋行ナレーション配置）', () => {
+  const videoSlot = () => ({
+    slotLayerId: 'mainVisual',
+    clipRelPath: 'assets/v.mp4',
+    fit: 'cover' as const,
+    clipStartSec: 0,
+    useOriginalAudio: false,
+    speed: 1,
+  });
+  const dialogueScene = (lines: unknown[]) =>
+    [{ sceneId: 's1', templateId: 'tpl', durationSec: 8, lines }] as unknown as Scene[];
+
+  it('1場面のまま aboveSegments（行区間窓）と narrationSegments（開始秒配置）を持つ（abovePngBase64 は使わない）', async () => {
+    const out = await buildExportScenes(
+      dialogueScene([
+        { lineId: 'line_001', text: 'a', startSec: 0, status: 'none' },
+        { lineId: 'line_002', text: 'b', startSec: 4, status: 'none' },
+      ]),
+      templateById, noAsset,
+      (_s, lineId) => ({ audioBase64: lineId ? `A_${lineId}` : undefined, narrationVolume: 0.9 }),
+      videoSlot,
+    );
+    expect(out).toHaveLength(1); // 動画は分割しない（クリップ連続・1エンコード）
+    expect(out[0].video?.abovePngBase64).toBeUndefined();
+    expect(out[0].video?.aboveSegments).toEqual([
+      { pngBase64: 'data:image/png;base64,PNG', startSec: 0, endSec: 4 },
+      { pngBase64: 'data:image/png;base64,PNG', startSec: 4, endSec: 8 },
+    ]);
+    // 行ナレーションは各行の開始秒（adelay）に配置。場面単位の audioBase64 は使わない。
+    expect(out[0].video?.narrationSegments).toEqual([
+      { audioBase64: 'A_line_001', delaySec: 0 },
+      { audioBase64: 'A_line_002', delaySec: 4 },
+    ]);
+    expect(out[0].audioBase64).toBeUndefined();
+    expect(out[0].narrationVolume).toBe(0.9);
+    expect(out[0].durationSec).toBe(8); // 尺は場面のまま
+  });
+
+  it('先頭行が途中開始でも表示窓は0秒から（プレビューの先頭行フォールバックと一致）・音声は行開始秒のまま', async () => {
+    const out = await buildExportScenes(
+      dialogueScene([
+        { lineId: 'line_001', text: 'a', startSec: 2, status: 'none' },
+        { lineId: 'line_002', text: 'b', startSec: 5, status: 'none' },
+      ]),
+      templateById, noAsset,
+      (_s, lineId) => ({ audioBase64: lineId ? `A_${lineId}` : undefined, narrationVolume: 1 }),
+      videoSlot,
+    );
+    const segs = out[0].video?.aboveSegments;
+    expect(segs?.[0]).toMatchObject({ startSec: 0, endSec: 5 }); // 窓は頭の空白ぶん前倒し
+    expect(segs?.[1]).toMatchObject({ startSec: 5, endSec: 8 });
+    expect(out[0].video?.narrationSegments?.[0]).toEqual({ audioBase64: 'A_line_001', delaySec: 2 }); // 音声は行開始
+  });
+
+  it('行ごとにクレジット（splitVideoSceneSvg の第6引数）を渡して上PNGを焼く（#243 の併記を置き換え）', async () => {
+    vi.mocked(splitVideoSceneSvg).mockClear();
+    await buildExportScenes(
+      dialogueScene([
+        { lineId: 'line_001', text: 'a', startSec: 0, status: 'none' },
+        { lineId: 'line_002', text: 'b', startSec: 4, status: 'none' },
+      ]),
+      templateById, noAsset,
+      (_s, lineId) => ({ audioBase64: lineId ? `A_${lineId}` : undefined, narrationVolume: 1 }),
+      videoSlot,
+      undefined,
+      { credit: 'VOICEVOX:ずんだもん' },
+    );
+    // 基準1回＋行セグメント2回。話者未指定の行は既定クレジット（話者連動は creditForLine の責務）。
+    const calls = vi.mocked(splitVideoSceneSvg).mock.calls;
+    expect(calls).toHaveLength(3);
+    expect(calls[1]?.[5]).toBe('VOICEVOX:ずんだもん');
+    expect(calls[2]?.[5]).toBe('VOICEVOX:ずんだもん');
+  });
+
+  it('音声未生成の行は narrationSegments に載せない（無音行・表示窓のみ）', async () => {
+    const out = await buildExportScenes(
+      dialogueScene([
+        { lineId: 'line_001', text: 'a', startSec: 0, status: 'none' },
+        { lineId: 'line_002', text: 'b', startSec: 4, status: 'none' },
+      ]),
+      templateById, noAsset,
+      (_s, lineId) => ({
+        audioBase64: lineId === 'line_001' ? 'A_line_001' : undefined,
+        narrationVolume: 1,
+      }),
+      videoSlot,
+    );
+    expect(out[0].video?.aboveSegments).toHaveLength(2); // 表示窓は両行ぶん
+    expect(out[0].video?.narrationSegments).toEqual([{ audioBase64: 'A_line_001', delaySec: 0 }]);
+  });
+});
+
 describe('buildExportScenes：字幕トグル（withSubtitle）', () => {
   const oneScene = [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[];
 

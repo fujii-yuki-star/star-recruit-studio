@@ -26,8 +26,9 @@ export function creditForLine(line: { speaker?: number | null }, fallbackCredit:
 }
 
 /**
- * 複数行の使用話者をまとめたクレジット文言（#243）。掛け合いを1フレームで焼くとき（動画スロットあり等で
- * 行ごとに分割できない場合）に使用キャラを全て併記して網羅する。重複は除き「 / 」で連結。
+ * 複数行の使用話者をまとめたクレジット文言（#243）。使用キャラを重複なく「 / 」で併記して網羅する。
+ * ※動画×掛け合いの書き出しは行区間ごとの表示（creditForLine）に置き換え済み＝1フレーム併記の用途は撤去。
+ *   集約が要る表示（ADR-0025 のクレジット列挙/コピー導線）向けに残す。
  */
 export function creditForLines(lines: { speaker?: number | null }[], fallbackCredit: string): string {
   const set = new Set<string>();

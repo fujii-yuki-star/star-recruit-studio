@@ -7,7 +7,12 @@ import type { ExportCapability } from '../domain/export/exportCapability';
 /** 動画ありシーンの入力（ADR-0006）。下/上PNGは data URL、クリップはプロジェクト相対パス。 */
 export interface ExportVideoInput {
   belowPngBase64: string;
-  abovePngBase64: string;
+  /** 全尺の上PNG（従来の1枚）。aboveSegments 指定時は省略。 */
+  abovePngBase64?: string;
+  /** 掛け合い×動画：行区間つき上PNG（字幕/クレジット差し替え・表示窓 [startSec, endSec)）。 */
+  aboveSegments?: { pngBase64: string; startSec: number; endSec: number }[];
+  /** 掛け合い×動画：行ごとのナレーション（delaySec 秒に配置）。無ければ場面単位の audioBase64（従来）。 */
+  narrationSegments?: { audioBase64: string; delaySec: number }[];
   /** プロジェクト相対のクリップパス（例: "assets/asset_v.mp4"）。Rust がファイルとして読む。 */
   clipRelPath: string;
   slotX: number;
