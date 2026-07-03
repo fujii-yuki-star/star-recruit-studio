@@ -1,6 +1,6 @@
 // テンプレ所有素材（ADR-0021）。テンプレが既定で持つ背景等の画像を、グローバル（user_templates/assets）に
 // 保存し layer.assetId から参照する。id 接頭辞 tmpl_asset_ でプロジェクト素材（asset_*）と区別する。
-import type { Layer } from './types';
+import type { Layer, Template } from './types';
 
 /** テンプレ所有素材の assetId 接頭辞。`tmpl_asset_NNN`（3桁ゼロ詰め・グローバル一意）。 */
 export const TEMPLATE_ASSET_PREFIX = 'tmpl_asset';
@@ -39,4 +39,30 @@ export function templateAssetIdsOf(layers: readonly Layer[]): string[] {
     if (l.assetId && isTemplateAsset(l.assetId) && !out.includes(l.assetId)) out.push(l.assetId);
   }
   return out;
+}
+
+/**
+ * 掃除してよい孤立テンプレ素材 id（#299）＝ disk に実在するが、どのテンプレも参照しないファイル。
+ * 破棄した下書き（ファイルは即保存）やテンプレ削除時の削除失敗で生じる（影響は disk 容量のみ）。
+ *
+ * **安全条件**：`loadComplete=false`（読込失敗・検証却下・不確実）のときは、孤立に見えても**必ず空**を返す。
+ * これは「テンプレ読込が失敗して空が返った瞬間に全テンプレ素材が未参照に見えて全削除＝データ消失」を防ぐため
+ * （ADR-0021 の注意）。参照集合が信頼できるとき（全テンプレが健全に揃ったとき）だけ差集合を掃除対象にする。
+ *
+ * @param templates 読込済みの全テンプレ（同梱＋ユーザー）。tmpl_asset を参照するのは実質ユーザーテンプレ。
+ * @param diskAssetIds user_templates/assets に実在するファイルの id（＝拡張子なしのファイル名）。
+ * @param loadComplete 全テンプレを確実に・漏れなく読めたか（true のときだけ掃除する）。
+ */
+export function orphanTemplateAssetIds(
+  templates: readonly Template[],
+  diskAssetIds: readonly string[],
+  loadComplete: boolean,
+): string[] {
+  if (!loadComplete) return []; // 不確実なら何もしない（誤削除防止）
+  const referenced = new Set<string>();
+  for (const t of templates) {
+    for (const id of templateAssetIdsOf(t.layers)) referenced.add(id);
+  }
+  // 対象は tmpl_asset_* のみ（万一の他種ファイルは触らない）かつ未参照のものだけ。
+  return diskAssetIds.filter((id) => isTemplateAsset(id) && !referenced.has(id));
 }

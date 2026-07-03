@@ -100,3 +100,4 @@
 - **URL 解決は data URL**（asset:// ではなく）：`assetProtocol.scope` は現状 `$APPDATA/projects/**` のみで、テンプレ素材ディレクトリ（`$APPDATA/user_templates/assets`）を scope に足すと **asset:// の scope/キャッシュ周りが実機でしか検証できない**（[[tauri-packaged-gotchas]]）。テンプレ素材は**少数・起動時一括ロード**ゆえ data URL のメモリ影響は小さく、確実性を優先。
 - **保存先**：`appData/user_templates/assets/<tmpl_asset_NNN>.<ext>`（Tauri: `import_template_asset` / `load_template_assets` / `delete_template_asset`）。`templateAssetFs`（infra）が wrap（非 Tauri は no-op）。
 - **ストア合流（`templateAssetSrcById`）＋ ScenePreview の解決合流・テンプレ削除時の素材掃除は PR C**（編集UIと同時に配線し実機で検証）。**書き出しの解決は PR D**。
+- **孤立素材の掃除（#299・α-4）**：下書き破棄（素材ファイルは選択時に即保存）やテンプレ削除時の削除失敗で残る孤立ファイル（`tmpl_asset_*`）は、次回起動の `loadUserTemplates` に相乗りして**安全条件下でのみ**掃除する（純粋関数 `orphanTemplateAssetIds`）。安全条件＝読込が確実に成功し**全テンプレが健全に揃った**とき（`loadUserTemplates` が `{templates, complete}` を返し `complete=true`）だけ、全テンプレの `layer.assetId` 参照集合に**無い** disk 上ファイルを削除。**読込失敗/破損/検証却下時は何もしない**＝「空が返った瞬間に全削除＝データ消失」を防ぐ。影響は disk 容量のみ。

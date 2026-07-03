@@ -39,27 +39,36 @@ export function allocateUserTemplateId(existingIds: readonly string[]): string {
   return id;
 }
 
-/** ユーザーテンプレを全件読み、正典スキーマで検証して返す（未検証は取り込まない＝§2-2）。非 Tauri・読込失敗は空（throw しない＝loadBundledTemplates と同方針）。 */
-export async function loadUserTemplates(): Promise<Template[]> {
-  if (!isTauri()) return [];
+/**
+ * ユーザーテンプレを全件読み、正典スキーマで検証して返す（未検証は取り込まない＝§2-2）。
+ * 非 Tauri・読込失敗は空（throw しない＝loadBundledTemplates と同方針）。
+ * `complete`＝在庫が信頼できるか（読込成功かつ全ファイルが健全に解析・検証を通過）。
+ * 孤立素材の掃除(#299)は complete のときだけ許す＝「失敗で空→全削除」を防ぐため空/失敗/一部却下を区別する。
+ */
+export async function loadUserTemplates(): Promise<{ templates: Template[]; complete: boolean }> {
+  if (!isTauri()) return { templates: [], complete: false };
   let jsons: string[];
   try {
     jsons = await invoke<string[]>('load_user_templates');
   } catch (e) {
     console.warn('[userTemplateFs] ユーザーテンプレの読み込みに失敗しました（空で続行）:', e);
-    return [];
+    return { templates: [], complete: false }; // 読込失敗＝在庫不明。掃除しない。
   }
+  let parseOk = true;
   const raw: unknown[] = [];
   for (const j of jsons) {
     try {
       raw.push(JSON.parse(j));
     } catch {
+      parseOk = false; // 壊れたファイルがある＝参照集合が不完全になり得る（掃除しない）
       console.warn('[userTemplateFs] 壊れたユーザーテンプレファイルを読み飛ばしました');
     }
   }
   const { templates, rejected } = parseTemplatePack(raw);
   if (rejected.length > 0) console.warn('[userTemplateFs] 検証を通らないユーザーテンプレ:', rejected);
-  return templates;
+  // 全ファイルが健全に読め、検証も全通過したときだけ在庫を信頼できる（却下があれば参照集合が欠ける恐れ）。
+  const complete = parseOk && rejected.length === 0;
+  return { templates, complete };
 }
 
 /** ユーザーテンプレを保存する（Tauri のみ。非 Tauri は no-op）。新規 id の採番/bump は行わない＝新規は allocateUserTemplateId で id を払い出してから保存する。 */
