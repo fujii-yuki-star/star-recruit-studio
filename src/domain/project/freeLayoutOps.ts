@@ -134,15 +134,39 @@ export function applyFreeElementPositions(
   });
 }
 
-/** 複数要素を囲む最小の矩形（バウンディングボックス）。空なら null（複数同時リサイズ・#274）。 */
+/**
+ * 要素の見た目（回転後）の AABB（canvas 座標）。rotation 未指定/0 は素の x/y/w/h に一致。
+ * 中心まわり回転の閉形式（vw=w·|cosθ|+h·|sinθ|／vh=w·|sinθ|+h·|cosθ|）。回転は中心を不変に保つ。
+ * 複数同時リサイズのグループ枠(#300(a))が回転要素も囲めるようにするための基準。
+ */
+export function elementVisualBBox(
+  el: { x: number; y: number; w: number; h: number; rotation?: number },
+): Geom {
+  const rot = el.rotation ?? 0;
+  if (rot === 0) return { x: el.x, y: el.y, w: el.w, h: el.h };
+  const rad = (rot * Math.PI) / 180;
+  const c = Math.abs(Math.cos(rad));
+  const s = Math.abs(Math.sin(rad));
+  const vw = el.w * c + el.h * s;
+  const vh = el.w * s + el.h * c;
+  const cx = el.x + el.w / 2;
+  const cy = el.y + el.h / 2;
+  return { x: cx - vw / 2, y: cy - vh / 2, w: vw, h: vh };
+}
+
+/**
+ * 複数要素を囲む最小の矩形（バウンディングボックス）。空なら null（複数同時リサイズ・#274）。
+ * 各要素は**見た目（回転後）の AABB**（elementVisualBBox）で囲む＝回転要素も枠に収まる（#300(a)）。回転なしは素の矩形。
+ */
 export function groupBBox(elements: FreeElement[]): Geom | null {
   if (elements.length === 0) return null;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const el of elements) {
-    minX = Math.min(minX, el.x);
-    minY = Math.min(minY, el.y);
-    maxX = Math.max(maxX, el.x + el.w);
-    maxY = Math.max(maxY, el.y + el.h);
+    const b = elementVisualBBox(el);
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.w);
+    maxY = Math.max(maxY, b.y + b.h);
   }
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
@@ -364,10 +388,13 @@ export function resizeFreeElement(
 }
 
 /**
- * 回転した要素の角リサイズ（#279 後継）。掴んだ角を動かし、**対角を canvas 上で固定**する（回転考慮）。
- * canvas のドラッグ量(dx/dy)を要素ローカル（未回転）系へ rotate(-θ) で写し、w/h は resizeFreeElement の
- * ロジック（min/grid/lockAspect）を流用。位置は対角固定になるよう中心を rotate(θ) で補正して逆算する。
- * rotationDeg=0 は resizeFreeElement と一致（θ=0 で恒等）。回転中心は要素中心（CSS/SVG の rotate と同じ）。
+ * 回転した要素の角リサイズ（#279 後継・#300(b) でグリッド対応）。掴んだ角を動かし、**対角を canvas 上で固定**する。
+ * 回転中心は要素中心（CSS/SVG の rotate と同じ）。rotationDeg=0 は resizeFreeElement と一致（θ=0 で恒等）。
+ *
+ * - **縦横比維持（lockAspect）**：比を優先しグリッドは無視するため、ローカル（未回転）系で resizeFreeElement を
+ *   流用し、対角固定になるよう中心を rotate(θ) で補正して逆算する（従来どおり）。
+ * - **通常**：掴んだ角の canvas 位置をグリッドへ吸着（grid>0＝canvas グリッド／grid=0＝整数丸め）し、固定した対角から
+ *   w/h を逆算する。これで**回転後の見た目の角**が canvas グリッドに乗る（ローカル系 snap では乗らなかった＝#300(b)）。
  */
 export function resizeRotatedFreeElement(
   start: Geom, corner: ResizeCorner, dx: number, dy: number, rotationDeg: number,
@@ -376,17 +403,39 @@ export function resizeRotatedFreeElement(
   const rad = (rotationDeg * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
-  // canvas → ローカル（未回転）系：rotate(-θ)·(dx,dy)。
-  const ldx = dx * cos + dy * sin;
-  const ldy = -dx * sin + dy * cos;
-  // w/h はローカル系で従来ロジックを流用（位置は使わない）。
-  const { w, h } = resizeFreeElement(start, corner, ldx, ldy, min, grid, lockAspect);
-  // 固定する対角 A の符号（掴んだ角の逆）。A を canvas 上で動かさないよう中心を rotate(θ) で補正する。
-  const signAx = corner === 'ne' || corner === 'se' ? -1 : 1;
-  const signAy = corner === 'sw' || corner === 'se' ? -1 : 1;
-  const offX = (signAx * (start.w - w)) / 2;
-  const offY = (signAy * (start.h - h)) / 2;
-  const cx = start.x + start.w / 2 + (offX * cos - offY * sin);
-  const cy = start.y + start.h / 2 + (offX * sin + offY * cos);
-  return { x: Math.round(cx - w / 2), y: Math.round(cy - h / 2), w, h };
+  const cx0 = start.x + start.w / 2;
+  const cy0 = start.y + start.h / 2;
+  // ローカル（中心基準）→ canvas のオフセット変換：rotate(θ)。
+  const toCanvas = (lx: number, ly: number): { x: number; y: number } => ({ x: lx * cos - ly * sin, y: lx * sin + ly * cos });
+
+  if (lockAspect) {
+    // canvas → ローカル：rotate(-θ)。w/h は従来ロジック（比維持・grid 無視）を流用。
+    const ldx = dx * cos + dy * sin;
+    const ldy = -dx * sin + dy * cos;
+    const { w, h } = resizeFreeElement(start, corner, ldx, ldy, min, grid, true);
+    // 固定する対角 A（掴んだ角の逆）を canvas 上で動かさないよう中心を rotate(θ) で補正。
+    const signAx = corner === 'ne' || corner === 'se' ? -1 : 1;
+    const signAy = corner === 'sw' || corner === 'se' ? -1 : 1;
+    const off = toCanvas((signAx * (start.w - w)) / 2, (signAy * (start.h - h)) / 2);
+    return { x: Math.round(cx0 + off.x - w / 2), y: Math.round(cy0 + off.y - h / 2), w, h };
+  }
+
+  // 掴んだ角の符号（東=+1/西=-1、南=+1/北=-1）。対角 A はこの逆符号。
+  const ex = corner === 'ne' || corner === 'se' ? 1 : -1;
+  const ey = corner === 'sw' || corner === 'se' ? 1 : -1;
+  const a = toCanvas((-ex * start.w) / 2, (-ey * start.h) / 2); // 固定する対角（中心からのオフセット）
+  const b0 = toCanvas((ex * start.w) / 2, (ey * start.h) / 2); // 掴んだ角（開始）
+  const ax = cx0 + a.x;
+  const ay = cy0 + a.y;
+  // 掴んだ角を canvas 上でドラッグ→グリッド吸着。
+  const bx = snapToGrid(cx0 + b0.x + dx, grid);
+  const by = snapToGrid(cy0 + b0.y + dy, grid);
+  // 対角 A→B をローカルへ戻すと (ex·w, ey·h)。絶対値が w/h（最小サイズでクランプ）。
+  const ddx = bx - ax;
+  const ddy = by - ay;
+  const w = Math.max(min, Math.round(Math.abs(ddx * cos + ddy * sin)));
+  const h = Math.max(min, Math.round(Math.abs(-ddx * sin + ddy * cos)));
+  // A を固定して中心を出す（clamp で w/h が変わっても対角 A は動かさない）。
+  const c = toCanvas((ex * w) / 2, (ey * h) / 2);
+  return { x: Math.round(ax + c.x - w / 2), y: Math.round(ay + c.y - h / 2), w, h };
 }

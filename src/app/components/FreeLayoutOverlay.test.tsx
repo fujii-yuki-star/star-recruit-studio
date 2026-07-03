@@ -245,18 +245,25 @@ describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
     expect(onResizeMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 0, y: 0, w: 200, h: 200 }]);
   });
 
-  it("回転中の要素はグループ拡縮の対象に含めない（bbox の AABB とズレるため）", () => {
+  it("回転中の要素もグループ拡縮の対象に含める（見た目 AABB で囲む・#300(a)）", () => {
     const layout: FreeElement[] = [
       { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
       { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 100, h: 100, zIndex: 2, rotation: 30 },
     ];
     const { root, onResizeMany } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"] });
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
-    // 非回転は free_001 のみ＝bbox=(0,0,100,100)。se +100,+100 で2倍。free_002(rotation) は含まれない。
+    // 以前は回転要素を除外していたが、枠を見た目（回転後）AABB で取るため両方を一括拡縮に含める（#300(a)）。
     const se = screen.getByTestId("group-handle-se");
     fireEvent.pointerDown(se, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     fireEvent.pointerMove(root, { clientX: 100, clientY: 100, pointerId: 1 });
-    expect(onResizeMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 0, y: 0, w: 200, h: 200 }]);
+    // 幾何の厳密値は freeLayoutOps のユニットで検証。ここでは回転要素(free_002)が含まれる配線を確認する。
+    expect(onResizeMany).toHaveBeenLastCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "free_001" }),
+        expect.objectContaining({ id: "free_002" }),
+      ]),
+    );
+    expect(onResizeMany.mock.lastCall?.[0]).toHaveLength(2);
   });
 });
 

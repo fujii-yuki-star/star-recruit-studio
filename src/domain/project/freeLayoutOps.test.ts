@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
   addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
+  elementVisualBBox, freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
   snapAngle, snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -132,6 +132,29 @@ describe('freeElementsInRect（範囲選択・マーキー・#274）', () => {
   });
 });
 
+describe('elementVisualBBox（回転後の見た目 AABB・#300）', () => {
+  it('rotation 未指定/0 は素の矩形と一致', () => {
+    expect(elementVisualBBox({ x: 10, y: 20, w: 100, h: 40 })).toEqual({ x: 10, y: 20, w: 100, h: 40 });
+    expect(elementVisualBBox({ x: 10, y: 20, w: 100, h: 40, rotation: 0 })).toEqual({ x: 10, y: 20, w: 100, h: 40 });
+  });
+
+  it('90°回転は幅高さが入れ替わり、中心は不変', () => {
+    const b = elementVisualBBox({ x: 100, y: 100, w: 200, h: 100, rotation: 90 });
+    expect(b.w).toBeCloseTo(100);
+    expect(b.h).toBeCloseTo(200);
+    expect(b.x + b.w / 2).toBeCloseTo(200); // 中心 x は不変
+    expect(b.y + b.h / 2).toBeCloseTo(150); // 中心 y は不変
+  });
+
+  it('45°回転は AABB が広がる（正方形なら √2 倍・中心不変）', () => {
+    const b = elementVisualBBox({ x: 0, y: 0, w: 100, h: 100, rotation: 45 });
+    expect(b.w).toBeCloseTo(100 * Math.SQRT2);
+    expect(b.h).toBeCloseTo(100 * Math.SQRT2);
+    expect(b.x + b.w / 2).toBeCloseTo(50);
+    expect(b.y + b.h / 2).toBeCloseTo(50);
+  });
+});
+
 describe('groupBBox / resizeGroup / applyFreeElementGeoms（複数同時リサイズ・#274）', () => {
   const els: FreeElement[] = [
     { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 100, h: 100 },
@@ -141,6 +164,16 @@ describe('groupBBox / resizeGroup / applyFreeElementGeoms（複数同時リサ�
   it('groupBBox は全要素を囲む最小矩形（空は null）', () => {
     expect(groupBBox([])).toBeNull();
     expect(groupBBox(els)).toEqual({ x: 100, y: 100, w: 300, h: 200 }); // (100,100)..(400,300)
+  });
+
+  it('groupBBox は回転要素を見た目（回転後 AABB）で囲む（#300(a)）', () => {
+    // 200×100 を 90°回転すると見た目は 100×200。中心 (200,150) を保つ→ (150,50)..(250,250)。
+    const rotated: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 100, y: 100, w: 200, h: 100, rotation: 90 }];
+    const b = groupBBox(rotated)!;
+    expect(b.x).toBeCloseTo(150);
+    expect(b.y).toBeCloseTo(50);
+    expect(b.w).toBeCloseTo(100);
+    expect(b.h).toBeCloseTo(200);
   });
 
   it('resizeGroup：bbox を2倍にすると各要素の相対位置・大きさが保たれて2倍になる', () => {
@@ -502,6 +535,20 @@ describe('resizeRotatedFreeElement（回転要素の角リサイズ・#279後継
     const r = resizeRotatedFreeElement(start, 'se', -999, -999, 90, 24);
     expect(r.w).toBeGreaterThanOrEqual(24);
     expect(r.h).toBeGreaterThanOrEqual(24);
+  });
+
+  it('グリッド ON：回転要素でも掴んだ角が canvas グリッドに乗る（#300(b)）', () => {
+    const grid = 20;
+    const r = resizeRotatedFreeElement(start, 'se', 37, 23, 90, FREE_MIN_SIZE, grid);
+    const c = cornerCanvas(r, 90, 1, 1); // 結果の se 角（canvas 位置）
+    // ローカル系 snap では乗らなかった「回転後の見た目の角」が canvas グリッドの倍数に乗る。
+    expect(Math.round(c.x) % grid).toBe(0);
+    expect(Math.round(c.y) % grid).toBe(0);
+    // 対角（nw）は canvas 上で動かない（吸着しても対角固定は保つ）。
+    const before = cornerCanvas(start, 90, -1, -1);
+    const after = cornerCanvas(r, 90, -1, -1);
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
   });
 });
 
