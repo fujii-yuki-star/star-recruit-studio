@@ -154,14 +154,29 @@ fn save_user_template(app: tauri::AppHandle, template_json: String) -> Result<St
     Ok(path.to_string_lossy().into_owned())
 }
 
-/// appData/user_templates の *.json をすべて読み、本文(JSON文字列)の配列で返す（検証は呼び出し側＝§2-2）。
+/// load_user_templates の結果。jsons=読めた本文／skipped=読めずに飛ばした *.json 数。
+/// skipped を返すのは、孤立テンプレ素材の掃除(#299)が「全テンプレが漏れなく揃った」ことを安全条件にするため。
+/// read_to_string 失敗を握ってスキップすると、JS 側からは「元々ファイルが無かった」のと区別できず、
+/// そのテンプレが所有する素材を孤立と誤判定して消しかねない。skipped>0 を complete=false に落として防ぐ。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UserTemplatesLoad {
+    jsons: Vec<String>,
+    skipped: usize,
+}
+
+/// appData/user_templates の *.json をすべて読み、本文(JSON文字列)＋スキップ数を返す（検証は呼び出し側＝§2-2）。
 #[tauri::command]
-fn load_user_templates(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+fn load_user_templates(app: tauri::AppHandle) -> Result<UserTemplatesLoad, String> {
     let dir = user_templates_dir(&app)?;
     if !dir.exists() {
-        return Ok(Vec::new());
+        return Ok(UserTemplatesLoad {
+            jsons: Vec::new(),
+            skipped: 0,
+        });
     }
     let mut out: Vec<String> = Vec::new();
+    let mut skipped: usize = 0;
     for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
@@ -171,10 +186,17 @@ fn load_user_templates(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         match fs::read_to_string(&path) {
             Ok(text) => out.push(text),
             // 1ファイルの読込失敗で全体を止めない（権限エラー等は原因究明用にログ）。
-            Err(e) => eprintln!("[user_templates] 読み込みスキップ {:?}: {}", path, e),
+            // ただし件数は返す＝在庫が不完全なことを呼び出し側に伝え、掃除(#299)の安全条件に使う。
+            Err(e) => {
+                skipped += 1;
+                eprintln!("[user_templates] 読み込みスキップ {:?}: {}", path, e);
+            }
         }
     }
-    Ok(out)
+    Ok(UserTemplatesLoad {
+        jsons: out,
+        skipped,
+    })
 }
 
 /// ユーザーテンプレ(appData/user_templates/<templateId>.json)を削除する（無ければ何もしない）。
