@@ -214,8 +214,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [selectedId, setSelectedId] = useState("");
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
-  // こだわり編集（詳細編集）の開閉。整列/スナップ・複数選択・コピペ・数値入力・テキスト体裁・レイヤー一覧・Undo は結線済み（α-3 ①・#205-211）。
-  const [showAdvanced, setShowAdvanced] = useState(false);
   // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
   const [leftCollapsed, setLeftCollapsed] = useState(loadLeftCollapsed);
   const [rightWidth, setRightWidth] = useState(loadRightWidth);
@@ -1023,16 +1021,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
             </div>
 
-            {/* 簡易/詳細トグル（ADR-0007 M-A：同一画面・同一データ）。オンで細かい調整を表示。 */}
-            <div className="toggle-row">
-              <span className="field-label" style={{ margin: 0 }}>詳細編集</span>
-              <Switch on={showAdvanced} onChange={setShowAdvanced} label="詳細編集" />
-            </div>
-            <p className="field-hint" style={{ marginTop: 0 }}>
-              {isFree
-                ? "オンにすると、画面の切り替えなどを表示します。（自由配置の調整は下の「自由配置」で行えます）"
-                : "オンにすると、動画素材の細かい調整や画面の切り替えなどを表示します。"}
-            </p>
 
             {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
             {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
@@ -1188,10 +1176,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         ))}
                       </select>
 
-                      {isVideo && assignedAsset && showAdvanced && (
+                      {isVideo && assignedAsset && (
                         <ClipDetailControls asset={assignedAsset} patchClip={patchClip} />
                       )}
-                      {!isVideo && assignedAsset && showAdvanced && (
+                      {!isVideo && assignedAsset && (
                         <div className="field" style={{ marginTop: 6 }}>
                           <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
                           <FitSelect
@@ -1811,9 +1799,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             </CollapsibleSection>
 
-            {/* 画面の切り替えなどの詳細は、上の「詳細編集」トグル（showAdvanced）で表示する。 */}
-            {showAdvanced && (
-              <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: "var(--gap-sm)" }}>
+            {/* 画面の切り替え（トランジション）は常時表示（「詳細編集」トグル撤廃・#278）。 */}
+            <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: "var(--gap-sm)" }}>
                 <div className="field">
                   <label className="field-label" htmlFor="transition">画面の切り替え</label>
                   {isFirstScene ? (
@@ -1845,7 +1832,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「セリフ」で場面ごとに変えられます。
                 </p>
               </div>
-            )}
 
             {confirmDelete ? (
               <div className="row gap-sm mt">
