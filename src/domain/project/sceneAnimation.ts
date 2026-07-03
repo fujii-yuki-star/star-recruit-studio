@@ -22,3 +22,20 @@ export function sceneAnimationActive(
   if (hasVideoSlot) return false; // 動画スロットは映像合成優先（掛け合いは行セグメント×フレームで対応・③）
   return true;
 }
+
+/**
+ * 与えたアニメーション群の「最後のキーフレーム時刻」（場面ローカル秒）。アニメが無い/空なら 0。
+ * ADR-0019 の補間はこの時刻以降レイアウトが一定（最終キーフレーム値でクランプ）になるため、
+ * 書き出しは [0, animEnd] だけを per-frame 描画し、以降は最終フレームを保持すればよい（#376 の高速化）。
+ * keyframes は timeSec 昇順が正だが、順不同でも安全なよう max を取る。
+ */
+export function animationsEndSec(animations: ElementAnimation[] | undefined): number {
+  if (!animations || animations.length === 0) return 0;
+  let end = 0;
+  for (const a of animations) {
+    for (const k of a.keyframes) {
+      if (k.timeSec > end) end = k.timeSec;
+    }
+  }
+  return end;
+}

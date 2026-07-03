@@ -163,32 +163,45 @@ fn append_scene_av_tail(
     codec: VideoCodec,
     bitrate: &str,
     out: &str,
+    // 映像に噛ませる simple フィルタ（None=映像は 0:v 直結＝従来）。frames 経路が tpad(最終フレーム保持)を渡す（#376）。
+    video_filter: Option<&str>,
 ) {
+    // 映像出力ラベルと（必要なら）映像フィルタ節。video_filter があれば [0:v]{vf}[v] を filter_complex に足し [v] を map。
+    let vmap = if video_filter.is_some() { "[v]" } else { "0:v" };
+    let vfg = video_filter.map(|vf| format!("[0:v]{vf}[v]"));
     match audio {
-        Some(a) => args.extend([
-            "-i".into(),
-            a.into(),
-            // ナレーション音量を適用し、尺に満たない分は無音で埋める（apad）。
-            "-filter_complex".into(),
-            format!("[1:a]volume={narration_volume},apad[a]"),
-            "-map".into(),
-            "0:v".into(),
-            "-map".into(),
-            "[a]".into(),
-        ]),
-        None => args.extend([
+        Some(a) => {
+            // ナレーション音量を適用し、尺に満たない分は無音で埋める（apad）。映像フィルタがあれば同じ filter_complex に連結。
+            let fc = match &vfg {
+                Some(v) => format!("{v};[1:a]volume={narration_volume},apad[a]"),
+                None => format!("[1:a]volume={narration_volume},apad[a]"),
+            };
+            args.extend([
+                "-i".into(),
+                a.into(),
+                "-filter_complex".into(),
+                fc,
+                "-map".into(),
+                vmap.into(),
+                "-map".into(),
+                "[a]".into(),
+            ]);
+        }
+        None => {
             // 音声が無い場面は無音トラックを生成して付ける。
-            "-f".into(),
-            "lavfi".into(),
-            "-t".into(),
-            format!("{duration_sec}"),
-            "-i".into(),
-            "anullsrc=channel_layout=stereo:sample_rate=44100".into(),
-            "-map".into(),
-            "0:v".into(),
-            "-map".into(),
-            "1:a".into(),
-        ]),
+            args.extend([
+                "-f".into(),
+                "lavfi".into(),
+                "-t".into(),
+                format!("{duration_sec}"),
+                "-i".into(),
+                "anullsrc=channel_layout=stereo:sample_rate=44100".into(),
+            ]);
+            if let Some(v) = &vfg {
+                args.extend(["-filter_complex".into(), v.clone()]);
+            }
+            args.extend(["-map".into(), vmap.into(), "-map".into(), "1:a".into()]);
+        }
     }
     args.extend([
         "-r".into(),
@@ -247,6 +260,7 @@ pub fn scene_clip_args(
         codec,
         bitrate,
         out,
+        None, // 静止1枚は -loop で尺を満たす＝映像フィルタ不要（従来どおり 0:v 直結）
     );
     args
 }
@@ -275,6 +289,9 @@ pub fn frames_scene_args(
         "-i".into(),
         frames_pattern.into(),
     ];
+    // フレーム列はアニメの「変化する区間」だけ（#376）。最終フレームを尺まで複製保持して尺を満たす
+    // （stop_duration を尺いっぱいに取り、末尾 -t {duration} でぴったり切る＝アンダーフロー無し）。
+    let vf = format!("tpad=stop_mode=clone:stop_duration={duration_sec}");
     append_scene_av_tail(
         &mut args,
         audio,
@@ -284,6 +301,7 @@ pub fn frames_scene_args(
         codec,
         bitrate,
         out,
+        Some(&vf),
     );
     args
 }
@@ -2423,11 +2441,19 @@ mod tests {
             .windows(2)
             .any(|w| w[0] == "-i" && w[1] == "frames/frame_%05d.png"));
         assert!(!a.iter().any(|s| s == "-loop"));
+        // #376：フレームは「変化する区間」だけ焼き、最終フレームを tpad で尺まで保持。
+        // 映像は filter_complex 経由（[0:v]tpad...[v]）＝map は [v]、音声フィルタと同一 filter_complex に連結。
+        let fc = a
+            .iter()
+            .find(|s| s.contains("tpad"))
+            .expect("video filter_complex with tpad");
+        assert!(fc.contains("[0:v]tpad=stop_mode=clone:stop_duration=4"));
+        assert!(fc.contains("[1:a]volume=0.8,apad[a]")); // 音声節も同じ filter_complex に
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v]"));
         // 共有末尾（音声 volume・エンコード・尺クランプ）。
         assert!(a.iter().any(|s| s == "libx264"));
         assert!(a.iter().any(|s| s == "yuv420p"));
         assert!(a.iter().any(|s| s == "aac"));
-        assert!(a.iter().any(|s| s.contains("volume=0.8")));
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a]"));
         // 出力は尺ぴったりに切る（-t 4）。
         assert!(a.windows(2).any(|w| w[0] == "-t" && w[1] == "4"));
@@ -2448,6 +2474,93 @@ mod tests {
         assert!(o.iter().any(|s| s == "libopenh264"));
         assert!(o.iter().any(|s| s.contains("anullsrc")));
         assert!(o.windows(2).any(|w| w[0] == "-map" && w[1] == "1:a"));
+        // 無音経路でも映像は tpad で最終フレームを尺まで保持し [v] を map（#376）。
+        assert!(o
+            .iter()
+            .any(|s| s.contains("[0:v]tpad=stop_mode=clone:stop_duration=4[v]")));
+        assert!(o.windows(2).any(|w| w[0] == "-map" && w[1] == "[v]"));
+    }
+
+    // #376：少数フレーム＋tpad で「尺いっぱいまで最終フレームを保持」できるか実FFmpegで検証。
+    // FFMPEG_PATH 未設定ならスキップ。
+    #[test]
+    fn frames_scene_args_tpad_holds_last_frame_to_full_duration() {
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_frames_tpad_unittest");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
+        let codec = pick_codec(&encoders).expect("an h264 encoder");
+        // フレームは5枚だけ（≈0.167秒ぶん）。tpad が無ければ出力は ~0.167s にしかならない。
+        for f in 0..5 {
+            let p = tmp.join(format!("frame_{f:05}.png"));
+            run(
+                &ffmpeg,
+                &[
+                    "-y".into(),
+                    "-f".into(),
+                    "lavfi".into(),
+                    "-i".into(),
+                    "color=c=teal:s=160x120".into(),
+                    "-frames:v".into(),
+                    "1".into(),
+                    p.to_string_lossy().into_owned(),
+                ],
+            )
+            .expect("frame png");
+        }
+        let pattern = tmp.join("frame_%05d.png");
+        let out = tmp.join("held.mp4");
+        // 尺 2.0 秒を要求。フレームは5枚だけ＝tpad で最終フレームを 2 秒まで複製保持する。
+        let args = frames_scene_args(
+            &pattern.to_string_lossy(),
+            None,
+            1.0,
+            &out.to_string_lossy(),
+            2.0,
+            30,
+            codec,
+            "12000k",
+        );
+        run(&ffmpeg, &args).expect("frames tpad encode");
+        // 検証は「映像ストリームのフレーム数」で行う。コンテナ尺は無音トラック(-t 2)が支配してしまい
+        // tpad の有無を区別できない（映像が0.17秒でも音声2秒で Duration=2 になる）。
+        let ffprobe = ffmpeg.with_file_name(if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        });
+        if !ffprobe.exists() {
+            return; // ffprobe 同梱が無い環境ではスキップ（本番は bin に同梱）。
+        }
+        let probe = run(
+            &ffprobe,
+            &[
+                "-v".into(),
+                "error".into(),
+                "-count_frames".into(),
+                "-select_streams".into(),
+                "v:0".into(),
+                "-show_entries".into(),
+                "stream=nb_read_frames".into(),
+                "-of".into(),
+                "csv=p=0".into(),
+                out.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("ffprobe frames");
+        let frames: u32 = probe.trim().parse().expect("frame count");
+        // 2.0s × 30fps ≈ 60 フレーム（tpad 保持）。tpad 無しなら入力5フレームのみ＝この閾値で明確に区別。
+        assert!(
+            frames >= 55,
+            "expected ~60 video frames (tpad hold), got {frames}"
+        );
     }
 
     #[test]
