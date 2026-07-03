@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "validate:schemas": "node scripts/validate-schemas.mjs",
     "validators:build": "node scripts/compile-validators.mjs",
-    "predev": "npm run validators:build",
+    "predev": "npm run validators:build && npm run check:voicevox-copy",
     "prebuild": "npm run validators:build",
     "pretest": "npm run validators:build",
     "spike:export": "tsx scripts/adr0001-spike.ts",
@@ -25,6 +25,7 @@
     "check:rust:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "check:rust:test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "check:ffmpeg-dist": "node scripts/check-ffmpeg-dist.mjs",
+    "check:voicevox-copy": "node scripts/check-voicevox-copy.mjs",
     "review": "npm run check:frontend && npm run build && npm run check:rust && npm run check:rust:fmt && npm run check:rust:clippy && npm run check:rust:test",
     "hooks:install": "git config --local core.hooksPath .githooks"
   },
