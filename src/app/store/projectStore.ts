@@ -87,8 +87,10 @@ interface ProjectState {
   reset: () => void;
   /** 新規プロジェクト（作業状態を初期化）。 */
   newProject: () => void;
-  /** 現在の状態を project.json として保存する。 */
+  /** 現在の状態を project.json として保存する。進行中の保存があればその完了を待つ（多重起動防止＋await で保存完了を保証・#256）。 */
   saveProject: () => Promise<void>;
+  /** 実際の保存処理（内部・saveProject 経由でのみ呼ぶ）。 */
+  _doSave: () => Promise<void>;
   /** 保存済みプロジェクトを読み込んで反映する。 */
   loadProject: (projectId: string) => Promise<void>;
   /** 保存済みプロジェクトの要約一覧を返す。 */
@@ -208,6 +210,10 @@ interface ProjectState {
 
 /** 文書slice（undo 対象）を現在状態から取り出す。 */
 const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.parts, scenes: s.scenes });
+
+// 進行中の保存 Promise（#256 レビュー🔴）。多重起動は防ぎつつ、**`await saveProject()` が「保存の完了」を保証**する
+// （早期 return だと書き出し前の保存が no-op になり projectId 未確定→画像欠落の恐れ）。進行中があれば同じ Promise を待つ。
+let saveInFlight: Promise<void> | null = null;
 
 /** 場面複製/分割で、元場面の要素アニメ（④・ADR-0019）を新場面へ引き継いだ meta を返す（無ければ meta そのまま）。 */
 function metaWithDuplicatedAnimations(meta: ProjectHeader, srcSceneId: string, newSceneId: string): ProjectHeader {
@@ -393,8 +399,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       future: [],
       _historyGroupDepth: 0,
     }),
+  // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
+  // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。
   saveProject: async () => {
-    if (get().saveStatus === "saving") return; // 保存中の多重起動を防ぐ（自動保存×手動保存の競合ガード・#256）
+    if (saveInFlight) return saveInFlight;
+    saveInFlight = get()._doSave();
+    try {
+      await saveInFlight;
+    } finally {
+      saveInFlight = null;
+    }
+  },
+  // 実際の保存処理（saveProject 経由でのみ呼ぶ）。saveStatus を saving→saved/error に更新。
+  _doSave: async () => {
     set({ saveStatus: "saving" });
     try {
       const s = get();

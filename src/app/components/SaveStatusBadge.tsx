@@ -13,9 +13,10 @@ export function SaveStatusBadge() {
     return <span className="text-sm text-muted">保存中…</span>;
   }
   if (saveStatus === "error") {
+    // 実際の保存ボタンは「保存に失敗（もう一度押す）」表示。バッジの案内も同じ行動へ揃える（存在しない「保存」ラベルを指さない・§2-5）。
     return (
       <span className="text-sm" role="alert" style={{ color: "var(--color-danger)" }}>
-        保存できませんでした（「保存」を押してください）
+        保存できませんでした（もう一度お試しください）
       </span>
     );
   }
