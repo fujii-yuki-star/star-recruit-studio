@@ -23,10 +23,15 @@ export function ProjectNameField() {
       placeholder="無題のプロジェクト"
       aria-label="動画の名前"
       title="動画の名前（ここで変えられます）"
+      maxLength={80} // schema の projectName 上限（1–80字）に合わせる（貼り付け等での超過を UI で予防）
       onFocus={() => setDraft(projectName)}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
-      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      onKeyDown={(e) => {
+        // 日本語IMEの変換確定 Enter では確定（blur）しない（HomeScreen/FreeLayoutOverlay と同じガード・レビュー対応）。
+        if (e.nativeEvent.isComposing) return;
+        if (e.key === "Enter") e.currentTarget.blur();
+      }}
       style={{ fontWeight: 600, maxWidth: 320, minWidth: 120 }}
     />
   );

@@ -32,6 +32,18 @@ describe("ProjectNameField（#252 編集中の改名）", () => {
     expect(input.value).toBe("無題のプロジェクト"); // 表示も元へ戻る
   });
 
+  it("IME変換確定の Enter（composition中）では確定しない（部分確定バグの防止・レビュー対応）", () => {
+    render(<ProjectNameField />);
+    const input = screen.getByLabelText("動画の名前") as HTMLInputElement;
+    input.focus();
+    fireEvent.change(input, { target: { value: "さいよう" } }); // 変換途中
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true }); // 変換確定の Enter＝確定しない
+    expect(useProjectStore.getState().meta.projectName).toBe("無題のプロジェクト");
+    // 変換が終わってからの通常 Enter で確定できる。
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(useProjectStore.getState().meta.projectName).toBe("さいよう");
+  });
+
   it("Enter で確定（blur 経由）＝改名は Undo で戻る（1改名=1履歴）", () => {
     render(<ProjectNameField />);
     const input = screen.getByLabelText("動画の名前") as HTMLInputElement;
