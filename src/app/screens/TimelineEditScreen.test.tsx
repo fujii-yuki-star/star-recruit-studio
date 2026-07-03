@@ -59,6 +59,35 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     expect(screen.queryByTestId("overlay-clip-editor")).not.toBeInTheDocument();
   });
 
+  it("Undo/Redo でテロップ overlay の追加/削除が戻る（#255・履歴は meta スナップショット）", () => {
+    render(<TimelineEditScreen onNavigate={() => {}} />);
+    // 追加前は取り消せない。
+    expect(screen.getByText("↶ 取り消す")).toBeDisabled();
+    // 追加 → 1本・取り消し可。
+    fireEvent.click(screen.getByText("＋ テロップを追加"));
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+    expect(screen.getByText("↶ 取り消す")).not.toBeDisabled();
+    // 取り消す → 追加が戻る（0本）。やり直しが可能に。
+    fireEvent.click(screen.getByText("↶ 取り消す"));
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips ?? []).toHaveLength(0);
+    expect(screen.getByText("↷ やり直す")).not.toBeDisabled();
+    // やり直す → 追加が復活（1本）。
+    fireEvent.click(screen.getByText("↷ やり直す"));
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+  });
+
+  it("Ctrl+Z / Ctrl+Y のキーボードでも取り消し・やり直しできる（#255 レビュー対応・場面編集と共有）", () => {
+    render(<TimelineEditScreen onNavigate={() => {}} />);
+    fireEvent.click(screen.getByText("＋ テロップを追加"));
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+    // Ctrl+Z＝取り消し（追加が戻る）。
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips ?? []).toHaveLength(0);
+    // Ctrl+Y＝やり直し（追加が復活）。
+    fireEvent.keyDown(window, { key: "y", ctrlKey: true });
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+  });
+
   it("「時間の合わせ方」を絶対時間へ切り替えても実効グローバル秒を保つ（無警告ジャンプ防止）", () => {
     // 場面2つ：scene_001(0-8s)・scene_002(8-16s)。clip を場面2アンカー・相対2秒＝実効10秒で置く。
     useProjectStore.setState({

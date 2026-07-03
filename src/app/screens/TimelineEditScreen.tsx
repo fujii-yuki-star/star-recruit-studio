@@ -9,6 +9,7 @@ import type { ClipDragMode } from "../components/TimelineView";
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { PageHead } from "../components/ui";
 import { ArrowLeftIcon } from "../components/icons";
+import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 
 interface TimelineEditScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -20,7 +21,12 @@ interface TimelineEditScreenProps {
  * タイムライン上のドラッグ移動は ③(4b) で追加予定（本PRは選択＋数値/文言編集まで）。
  */
 export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
-  const { scenes, parts, assets, meta, addOverlayClip, updateOverlayClip, removeOverlayClip } = useProjectStore();
+  const { scenes, parts, assets, meta, addOverlayClip, updateOverlayClip, removeOverlayClip, undo, redo } = useProjectStore();
+  // Undo/Redo（#255・ADR-0020）：overlay 編集も履歴対象（docSnapshot が meta.timelineOverlay を含む＝自動）。
+  const canUndo = useProjectStore((s) => s.past.length > 0);
+  const canRedo = useProjectStore((s) => s.future.length > 0);
+  // キーボード入口（Ctrl/⌘+Z＝取り消し・Ctrl/⌘+Shift+Z／Ctrl+Y＝やり直し）を場面編集と共有＝挙動を揃える（レビュー対応）。
+  useUndoRedoShortcuts();
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
 
   const timeline = useMemo(
@@ -73,7 +79,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
         desc="テロップ（字幕）を足して、時間軸の位置や文言を調整できます。編集した内容は上の「保存」で保存されます。"
       />
 
-      <div className="row gap-sm" style={{ margin: "0 0 var(--gap)" }}>
+      <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
         <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("timeline")}>
           <ArrowLeftIcon size={16} />
           タイムラインへ戻る
@@ -81,6 +87,11 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
         <button className="btn btn-primary" onClick={addTelop} disabled={scenes.length === 0}>
           ＋ テロップを追加
         </button>
+        {/* Undo/Redo（#255）。overlay の追加/移動/トリミング/文言も戻せる（履歴は meta スナップショット・場面編集と共通）。 */}
+        <div className="row gap-sm" style={{ marginLeft: "auto" }}>
+          <button className="btn btn-ghost btn-icon text-sm" onClick={undo} disabled={!canUndo} aria-label="取り消す" title="取り消す（Ctrl+Z）">↶ 取り消す</button>
+          <button className="btn btn-ghost btn-icon text-sm" onClick={redo} disabled={!canRedo} aria-label="やり直す" title="やり直す（Ctrl+Y）">↷ やり直す</button>
+        </div>
       </div>
 
       <div className="card">
