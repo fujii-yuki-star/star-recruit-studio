@@ -1393,8 +1393,28 @@ fn is_safe_stage_name(name: &str) -> bool {
 
 /// アニメ場面のフレームを1枚だけステージングへ書き出す（巨大IPC回避・逐次保存）。
 /// dir_name は場面ごとの相対名（英数字と _）、frame_index は 0 起点の連番。data_base64 は data URL 可。
+/// 書き出し中に数百回呼ばれ、各回が PNG デコード＋ディスク書き込み（ブロッキング）のため、
+/// メインスレッドではなくブロッキング専用スレッドで実行して描画フェーズの UI 固まりを防ぐ（#375）。
 #[tauri::command]
-pub fn stage_export_frame(
+pub async fn stage_export_frame(
+    app: tauri::AppHandle,
+    dir_name: String,
+    frame_index: u32,
+    data_base64: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        stage_export_frame_impl(app, dir_name, frame_index, data_base64)
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("stage frame task join: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?
+}
+
+fn stage_export_frame_impl(
     app: tauri::AppHandle,
     dir_name: String,
     frame_index: u32,
@@ -1418,8 +1438,20 @@ pub fn stage_export_frame(
 }
 
 /// フレームのステージングを空にする（書き出しの前後で呼ぶ＝古いフレームを残さない）。非存在は成功扱い。
+/// 数百PNGのディレクトリ削除（ブロッキングI/O）をメインスレッドで走らせないよう専用スレッドへ退避（#375）。
 #[tauri::command]
-pub fn clear_export_frames_stage(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn clear_export_frames_stage(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || clear_export_frames_stage_impl(app))
+        .await
+        .map_err(|e| {
+            export_failure(
+                format!("clear frames task join: {e}"),
+                "動画の保存中に問題が発生しました。もう一度お試しください。",
+            )
+        })?
+}
+
+fn clear_export_frames_stage_impl(app: tauri::AppHandle) -> Result<(), String> {
     let dir = export_frames_stage_dir(&app)?;
     match fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
@@ -1572,8 +1604,42 @@ pub struct ExportReport {
 }
 
 /// 場面PNG群を受け取り、実MP4を output_path に書き出す（H.264/MP4）。
+/// 数分に及ぶ FFmpeg パイプライン（場面エンコード→xfade結合→テロップ→BGM）は同期・ブロッキングのため、
+/// 同期コマンドのままだとメインスレッド（UI イベントループ）を塞ぎ、ウィンドウが「応答なし」になる（#375）。
+/// async コマンド＋spawn_blocking でブロッキング専用スレッドへ退避し、UI を生かす。
 #[tauri::command]
-pub fn export_video(
+pub async fn export_video(
+    app: tauri::AppHandle,
+    scenes: Vec<SceneInput>,
+    file_name: String,
+    bgm_runs: Option<Vec<BgmRunInput>>,
+    project_id: Option<String>,
+    output_path: Option<String>,
+    telops: Option<Vec<TelopInput>>,
+) -> Result<ExportReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        export_video_impl(
+            app,
+            scenes,
+            file_name,
+            bgm_runs,
+            project_id,
+            output_path,
+            telops,
+        )
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("export task join: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?
+}
+
+/// 書き出し本体（ブロッキング）。`export_video` が spawn_blocking 上で呼ぶ（#375）。
+#[allow(clippy::too_many_arguments)]
+fn export_video_impl(
     app: tauri::AppHandle,
     scenes: Vec<SceneInput>,
     file_name: String,
