@@ -58,6 +58,8 @@ export interface SceneSegmentSpec {
   lineId?: string;
   /** subtitle レイヤーの上書き文言（追加A/B）。string＝表示／null＝非表示／undefined＝従来（scene.texts）。 */
   subtitleText?: string | null;
+  /** 場面内の開始秒。アニメ場面のフレーム描画で layoutScene(t) の t 起点に使う（③・掛け合い×アニメ）。 */
+  startSec: number;
   /** このセグメントの尺（秒）。 */
   durationSec: number;
   /** 場面の先頭セグメントか（書き出しのトランジションは先頭のみ）。 */
@@ -70,7 +72,7 @@ export interface SceneSegmentSpec {
  */
 export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, number> = {}): SceneSegmentSpec[] {
   if (!scene.lines || scene.lines.length === 0) {
-    return [{ durationSec: scene.durationSec, isFirst: true }];
+    return [{ startSec: 0, durationSec: scene.durationSec, isFirst: true }];
   }
   // 0秒（開始がクランプ/音声未測定で endSec===startSec）のセグメントは出さない（書き出し/再生の不正を防ぐ）。
   const nonEmpty = lineSegments(scene, lineDurations)
@@ -78,10 +80,11 @@ export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, nu
     .map((s) => ({
       lineId: s.lineId,
       subtitleText: s.subtitle.enabled ? s.subtitle.text : null,
+      startSec: s.startSec,
       durationSec: s.endSec - s.startSec,
     }));
   // すべて0秒（degenerate）なら場面全体を1セグメントに（場面が書き出しから消えないように）。
-  if (nonEmpty.length === 0) return [{ durationSec: scene.durationSec, isFirst: true }];
+  if (nonEmpty.length === 0) return [{ startSec: 0, durationSec: scene.durationSec, isFirst: true }];
   return nonEmpty.map((s, i) => ({ ...s, isFirst: i === 0 }));
 }
 

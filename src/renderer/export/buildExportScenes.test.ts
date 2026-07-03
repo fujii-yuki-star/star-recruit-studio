@@ -133,13 +133,13 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
       async (framesDir, frameIndex, dataUrl) => { staged.push({ dir: framesDir, index: frameIndex, url: dataUrl }); },
     );
     expect(out[0].framesBase64).toBeUndefined(); // 巨大な base64 配列を IPC に載せない
-    expect(out[0].framesDir).toBe('scene_frames_0'); // 場面 index 由来の相対名
+    expect(out[0].framesDir).toBe('scene_frames_0_0'); // 場面 index_区間 index 由来の相対名
     expect(out[0].fps).toBe(FPS);
     expect(staged).toHaveLength(Math.round(2 * FPS)); // 全フレームを逐次ディスクへ
-    expect(staged[0]).toEqual({ dir: 'scene_frames_0', index: 0, url: 'data:image/png;base64,PNG' });
+    expect(staged[0]).toEqual({ dir: 'scene_frames_0_0', index: 0, url: 'data:image/png;base64,PNG' });
   });
 
-  it('掛け合い（lines）併用のアニメはフレーム列にせず行セグメント（書き出し優先＝プレビューと一致）', async () => {
+  it('掛け合い（lines）併用のアニメは行セグメントごとにフレーム列を焼く（③・書き出し=プレビュー）', async () => {
     const multi = [{
       sceneId: 's1', templateId: 'tpl', durationSec: 8,
       lines: [
@@ -153,8 +153,12 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
       undefined, undefined, {},
       (s) => [anim(s.sceneId)],
     );
-    expect(out).toHaveLength(2); // 行セグメント（フレーム列にならない）
-    expect(out.every((o) => o.framesBase64 === undefined)).toBe(true);
+    expect(out).toHaveLength(2); // 行ごとのセグメント
+    // 各セグメントがフレーム列（アニメ）＋行ごとの音声を持つ（静止PNGにはならない）。
+    expect(out.every((o) => (o.framesBase64?.length ?? 0) > 0)).toBe(true);
+    expect(out.every((o) => o.pngBase64 === undefined)).toBe(true);
+    expect(out[0].audioBase64).toBe('A_line_001');
+    expect(out[1].audioBase64).toBe('A_line_002');
   });
 
   it('動画スロット併用のアニメはフレーム列にせず video 経路（下/上PNG）', async () => {
