@@ -1250,6 +1250,66 @@ fn decode_b64_to_file(b64: &str, path: &Path, ctx: &str) -> Result<(), String> {
     })
 }
 
+/// アニメ場面のフレームを逐次ディスクへ書き出すステージング先 <appData>/exports/.frames_stage。
+/// 巨大な base64 を1回の IPC（JSON.stringify）に載せると文字列上限を超えて失敗するため、フレームは
+/// 1枚ずつ小さく stage_export_frame で書き出し、export_video には frames_dir（相対名）だけ渡す（#書き出しRangeError）。
+fn export_frames_stage_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    // 生の OS エラーを UI に出さない（§2-5）。他の書き出しエラーと同様 export_failure で定型文言へ。
+    let base = app.path().app_data_dir().map_err(|e| {
+        export_failure(
+            format!("app data dir: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?;
+    Ok(base.join("exports").join(".frames_stage"))
+}
+
+/// ステージ用ディレクトリ名の検証（英数字と _ のみ＝パストラバーサル防止。フロントは `scene_frames_<n>` を渡す）。
+fn is_safe_stage_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// アニメ場面のフレームを1枚だけステージングへ書き出す（巨大IPC回避・逐次保存）。
+/// dir_name は場面ごとの相対名（英数字と _）、frame_index は 0 起点の連番。data_base64 は data URL 可。
+#[tauri::command]
+pub fn stage_export_frame(
+    app: tauri::AppHandle,
+    dir_name: String,
+    frame_index: u32,
+    data_base64: String,
+) -> Result<(), String> {
+    if !is_safe_stage_name(&dir_name) {
+        return Err(export_failure(
+            format!("invalid stage dir: {dir_name}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        ));
+    }
+    let dir = export_frames_stage_dir(&app)?.join(&dir_name);
+    fs::create_dir_all(&dir).map_err(|e| {
+        export_failure(
+            format!("create stage dir: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?;
+    let path = dir.join(format!("frame_{frame_index:05}.png"));
+    decode_b64_to_file(&data_base64, &path, "staged frame")
+}
+
+/// フレームのステージングを空にする（書き出しの前後で呼ぶ＝古いフレームを残さない）。非存在は成功扱い。
+#[tauri::command]
+pub fn clear_export_frames_stage(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = export_frames_stage_dir(&app)?;
+    match fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        // ロック等で消せないときも生 OS エラーを UI に出さない（§2-5）。定型文言で「次の行動」を示す。
+        Err(e) => Err(export_failure(
+            format!("clear frames stage: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )),
+    }
+}
+
 /// エクスポートの入力（1場面）。フロントは PNG(base64 or data URL) と尺を渡す。
 /// 動画ありシーンは `video` を指定（その場合 png_base64 は使わない）。
 #[derive(serde::Deserialize)]
@@ -1258,8 +1318,13 @@ pub struct SceneInput {
     #[serde(default)]
     png_base64: String,
     /// アニメ場面のフレーム列（④・ADR-0019・data URL 可）。指定時は image2 で1動画に焼く（png_base64 は未使用）。
+    /// 巨大場面（数百フレーム）は IPC の JSON 文字列上限を超えるため、frames_dir（ステージング済み）を優先する。
     #[serde(default)]
     frames_base64: Option<Vec<String>>,
+    /// ステージング済みフレームの相対ディレクトリ名（stage_export_frame で <stage>/<name>/frame_NNNNN.png を書き込み済み）。
+    /// 指定時は frames_base64 より優先＝巨大な base64 を IPC に載せずに済む（#書き出しRangeError）。
+    #[serde(default)]
+    frames_dir: Option<String>,
     /// frames_base64 のフレームレート（未指定なら描画fpsを使う）。
     #[serde(default)]
     fps: Option<u32>,
@@ -1471,6 +1536,31 @@ pub fn export_video(
                     .speed
                     .map(|s| s.clamp(SPEED_MIN, SPEED_MAX))
                     .unwrap_or(DEFAULT_SPEED),
+            }));
+        } else if let Some(dir_name) = s.frames_dir.as_ref().filter(|d| !d.is_empty()) {
+            // アニメ場面（④）：ステージング済みフレームを使う（巨大 base64 を IPC に載せない・#書き出しRangeError）。
+            // stage_export_frame が <stage>/<dir_name>/frame_NNNNN.png を書き込み済み。
+            if !is_safe_stage_name(dir_name) {
+                return Err(export_failure(
+                    format!("invalid frames_dir: {dir_name}"),
+                    "動画の保存中に問題が発生しました。もう一度お試しください。",
+                ));
+            }
+            let frames_dir = export_frames_stage_dir(&app)?.join(dir_name);
+            let first_frame = frames_dir.join("frame_00000.png");
+            if !first_frame.exists() {
+                return Err(export_failure(
+                    format!("staged frames missing: {}", frames_dir.display()),
+                    "動画の保存中に問題が発生しました。もう一度お試しください。",
+                ));
+            }
+            jobs.push(SceneJob::Frames(FramesJob {
+                frames_dir,
+                first_frame,
+                audio: narration,
+                narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
+                duration_sec: s.duration_sec,
+                fps: s.fps.unwrap_or(DEFAULT_FPS),
             }));
         } else if let Some(frames) = s.frames_base64.as_ref().filter(|f| !f.is_empty()) {
             // アニメ場面（④・ADR-0019 per-frame）。フレーム列を frame_00000.png... として書き出し、
@@ -1724,6 +1814,19 @@ pub fn export_video(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // フレームステージングのディレクトリ名はパストラバーサル防止で英数字と _ のみ許可（#書き出しRangeError）。
+    #[test]
+    fn stage_name_allows_word_chars_rejects_separators_and_traversal() {
+        assert!(is_safe_stage_name("scene_frames_2"));
+        assert!(is_safe_stage_name("frame00"));
+        assert!(!is_safe_stage_name("")); // 空は不可
+        assert!(!is_safe_stage_name("..")); // 親参照
+        assert!(!is_safe_stage_name("a/b")); // スラッシュ
+        assert!(!is_safe_stage_name("a\\b")); // バックスラッシュ
+        assert!(!is_safe_stage_name("a b")); // 空白
+        assert!(!is_safe_stage_name("a.b")); // ドット
+    }
 
     // テロップ overlay（ADR-0018）：enable='between' 区間付きの overlay チェーンを組み、音声は無変更コピー。
     #[test]

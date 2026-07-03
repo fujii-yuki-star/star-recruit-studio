@@ -51,6 +51,8 @@ export interface ExportSceneData {
   pngBase64?: string;
   /** アニメ場面のフレーム列（④・ADR-0019 per-frame）。指定時は fps とともに Rust が image2 で1動画に焼く（pngBase64 は未使用）。 */
   framesBase64?: string[];
+  /** ステージング済みフレームの相対ディレクトリ名（stageFrame 使用時）。framesBase64 の代わりに渡す＝巨大IPC回避。 */
+  framesDir?: string;
   /** framesBase64 のフレームレート（既定 30）。 */
   fps?: number;
   durationSec: number;
@@ -75,6 +77,13 @@ export type VideoSlotFor = (scene: Scene) => VideoSlotInfo | undefined;
 
 /** 場面ごとの要素アニメーション（timelineOverlay.animations の sceneId 一致分）を返すコールバック（④・ADR-0019）。 */
 export type AnimationsFor = (scene: Scene) => ElementAnimation[];
+
+/**
+ * アニメ場面のフレームを1枚ずつディスクへ書き出すコールバック（巨大IPC回避＝#書き出しRangeError）。
+ * 指定時は framesBase64 を溜めず framesDir 参照だけ返す（数百フレームの base64 を1回の invoke に載せない）。
+ * 省略時（テスト等）は従来どおり framesBase64 に集約する。
+ */
+export type StageAnimationFrame = (framesDir: string, frameIndex: number, dataUrl: string) => Promise<void>;
 
 /** 書き出しの横断設定。 */
 export interface ExportOptions {
@@ -104,6 +113,7 @@ export async function buildExportScenes(
   onProgress?: (done: number, total: number) => void,
   opts: ExportOptions = {},
   animationsFor?: AnimationsFor,
+  stageAnimationFrame?: StageAnimationFrame,
 ): Promise<ExportSceneData[]> {
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
@@ -195,21 +205,24 @@ export async function buildExportScenes(
         if (sceneAnimationActive(scene, sceneAnims, !!videoSlot)) {
           const fps = FPS;
           const frameCount = Math.max(1, Math.round(scene.durationSec * fps));
+          // ステージング可能なら各フレームを逐次ディスクへ（数百フレームの base64 を配列/IPC に溜めない・#書き出しRangeError）。
+          const framesDir = stageAnimationFrame ? `scene_frames_${i}` : undefined;
           const framesBase64: string[] = [];
           for (let f = 0; f < frameCount; f += 1) {
             // フレーム t の描画＝プレビューと同一 layoutScene(t)（パリティ）。字幕は非セグメントゆえ静止（scene.texts）。
             const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
-            framesBase64.push(
-              await svgToPngDataUrl(
-                layoutToSvg(frameLayout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
-                width,
-                height,
-              ),
+            const dataUrl = await svgToPngDataUrl(
+              layoutToSvg(frameLayout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
+              width,
+              height,
             );
+            if (framesDir && stageAnimationFrame) await stageAnimationFrame(framesDir, f, dataUrl);
+            else framesBase64.push(dataUrl);
           }
           const narration = narrationFor?.(scene);
           out.push({
-            framesBase64,
+            // framesDir（ステージング）優先。無ければ従来どおり framesBase64 を載せる。
+            ...(framesDir ? { framesDir } : { framesBase64 }),
             fps,
             durationSec: scene.durationSec,
             audioBase64: narration?.audioBase64,

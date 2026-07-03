@@ -233,6 +233,8 @@ pub fn run() {
             load_user_templates,
             delete_user_template,
             ffmpeg::export_video,
+            ffmpeg::stage_export_frame,
+            ffmpeg::clear_export_frames_stage,
             ffmpeg::probe_video,
             ffmpeg::extract_video_thumbnail,
             ffmpeg::detect_h264_capability,

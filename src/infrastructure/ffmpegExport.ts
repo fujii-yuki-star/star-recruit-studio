@@ -29,6 +29,8 @@ export interface ExportSceneInput {
   pngBase64?: string;
   /** アニメ場面のフレーム列（④・ADR-0019・data URL 可）。指定時は fps とともに image2 で1動画に焼く（pngBase64 は未使用）。 */
   framesBase64?: string[];
+  /** ステージング済みフレームの相対ディレクトリ名（stageExportFrame で書き出し済み）。framesBase64 より優先＝巨大IPC回避。 */
+  framesDir?: string;
   /** framesBase64 のフレームレート（既定 30）。 */
   fps?: number;
   durationSec: number;
@@ -96,6 +98,20 @@ export async function exportVideo(
     outputPath: outputPath ?? null,
     telops: telops && telops.length > 0 ? telops : null,
   });
+}
+
+/**
+ * アニメ場面のフレームを1枚ステージングへ書き出す（巨大な base64 を1回の IPC に載せると JSON.stringify が
+ * 文字列上限を超えて失敗するため、フレームは逐次に小さく保存し export_video には framesDir だけ渡す）。
+ * dirName は場面ごとの相対名（英数字と _・例 `scene_frames_2`）。Tauri 専用＝canExport() で判定してから呼ぶ。
+ */
+export async function stageExportFrame(dirName: string, frameIndex: number, dataBase64: string): Promise<void> {
+  await invoke('stage_export_frame', { dirName, frameIndex, dataBase64 });
+}
+
+/** フレームのステージングを空にする（書き出しの前後で呼ぶ）。非存在は成功扱い（Rust 側）。 */
+export async function clearExportFramesStage(): Promise<void> {
+  await invoke('clear_export_frames_stage');
 }
 
 /** 書き出し前に H.264 エンコード能力を検知する（#120）。Tauri 専用＝呼ぶ前に canExport() で判定すること。 */

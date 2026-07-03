@@ -123,6 +123,22 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(out[0].narrationVolume).toBe(1);
   });
 
+  it('stageAnimationFrame 指定時はフレームを逐次ステージングし framesDir を返す（framesBase64 は載せない・#書き出しRangeError）', async () => {
+    const staged: Array<{ dir: string; index: number; url: string }> = [];
+    const out = await buildExportScenes(
+      animScene, templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      undefined, undefined, {},
+      (s) => [anim(s.sceneId)],
+      async (framesDir, frameIndex, dataUrl) => { staged.push({ dir: framesDir, index: frameIndex, url: dataUrl }); },
+    );
+    expect(out[0].framesBase64).toBeUndefined(); // 巨大な base64 配列を IPC に載せない
+    expect(out[0].framesDir).toBe('scene_frames_0'); // 場面 index 由来の相対名
+    expect(out[0].fps).toBe(FPS);
+    expect(staged).toHaveLength(Math.round(2 * FPS)); // 全フレームを逐次ディスクへ
+    expect(staged[0]).toEqual({ dir: 'scene_frames_0', index: 0, url: 'data:image/png;base64,PNG' });
+  });
+
   it('掛け合い（lines）併用のアニメはフレーム列にせず行セグメント（書き出し優先＝プレビューと一致）', async () => {
     const multi = [{
       sceneId: 's1', templateId: 'tpl', durationSec: 8,

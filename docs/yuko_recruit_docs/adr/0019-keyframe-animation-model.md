@@ -69,6 +69,7 @@ ADR-0016 の **④ キーフレーム／場面内アニメ**を設計する。�
 - **コード（α-4）**：`layoutScene` に時間引数（または `layoutSceneAtTime`）＝補間の純粋関数（§7 テスト）／`renderer/export` がアニメ場面を**フレーム列**に展開（fps×尺）→ FFmpeg 連結（既存 concat/xfade を流用）／`renderer/preview` は同一補間で再生。**キーフレームのスキーマは ADR-0018 の `timelineOverlay` に内包**（④独自の新トップレベルは作らない）。
 - **正典追補（実装着手時）**：`§10` の「キーフレーム」を**段階解除**（ADR-0012/0015/0018 と同型の注記）。`05_RENDERING_SPEC.md` に**per-frame 経路とフレーム単位パリティ**を追補。`11` にキーフレーム表現（オーバーレイ内）と補間契約を追記。`ADR-0001` の状態を Superseded（部分）へ。
 - **パフォーマンス**：尺×fps（例 15s×30fps＝450フレーム/場面）。緩和＝**選択的per-frame**（アニメ場面のみ）／プレビューの**間引き fps・キャッシュ・スクラブ時オンデマンド**／長尺×多数アニメ場面の上限ガイド。`02` Phase 0 と同様に**小さく実証**してから本実装。
+- **書き出しのフレーム配送＝ステージング**（実装知見）：アニメ場面のフレーム列（数百枚の PNG base64）を**1回の IPC（`invoke('export_video', {scenes})`）にまとめると `JSON.stringify` の文字列上限（V8 ≈512MB）を超えて `RangeError: Invalid string length` で失敗**する。よってフレームは **`stage_export_frame` で1枚ずつディスク（`<appData>/exports/.frames_stage/<dir>/frame_NNNNN.png`）へ逐次書き出し**、`export_video` には **`framesDir` 参照だけ**渡す（`framesBase64` を IPC に載せない）。メモリのフレーム蓄積も回避。書き出し前後で `clear_export_frames_stage`。
 - **AI（`12`）**：**変更なし**（AI はアニメを生成しない）。
 - **段階出荷**（利用者合意 2026-07-02・入口＝(1)）：
   - **(1) per-frame 基盤＋1アニメで end-to-end 実証**：`layoutScene(scene, template, t?)` の補間（t なし＝静止で後方互換）＋書き出しが**アニメ場面だけフレーム列**に展開（静止場面は1枚維持）＋プレビュー＝export の同一補間。最小アニメ＝**FREE 要素の不透明度フェードイン**1種でパリティを実証。**(1c) オーサリング【実装済】**＝場面編集の「ふわっと表示」プリセットで FREE 要素（図形/文字/画像）にフェードインを付け外し（`fadeInKeyframes`・`addAnimation`/`updateAnimation`/`removeAnimation`）。**opacity を text/image にも適用**（従来は fill のみ＝`sceneSvg` が `<g opacity>` で要素全体を敷く）＝図形以外の写真・文字もふわっと表示できる。
