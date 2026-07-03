@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { creditForLine, creditForLines, creditForSpeaker, usedVoiceCredits, NARRATOR_CREDIT } from './narratorCredit';
+import { creditForLine, creditForSpeaker, usedVoiceCredits, NARRATOR_CREDIT } from './narratorCredit';
 
 describe('narratorCredit（#177：動的クレジット）', () => {
   it('NARRATOR_CREDIT は既定キャラ（ずんだもん）＝後方互換', () => {
@@ -31,26 +31,6 @@ describe('narratorCredit（#177：動的クレジット）', () => {
 
     it('不明な話者は既定キャラでなく fallback へ（合成 resolveLineVoice と一致＝実音声に合わせる）', () => {
       expect(creditForLine({ speaker: 99999 }, fallback)).toBe(fallback);
-    });
-  });
-
-  describe('creditForLines（#243：使用話者の併記＝集約表示向け。動画×掛け合いの書き出しは行ごと表示へ移行済み）', () => {
-    const fallback = 'VOICEVOX:四国めたん';
-
-    it('使用キャラを重複なく「 / 」で併記する', () => {
-      expect(creditForLines([{ speaker: 3 }, { speaker: 2 }], fallback)).toBe('VOICEVOX:ずんだもん / VOICEVOX:四国めたん');
-    });
-
-    it('同一キャラは1つにまとめる', () => {
-      expect(creditForLines([{ speaker: 3 }, { speaker: 3 }], fallback)).toBe('VOICEVOX:ずんだもん');
-    });
-
-    it('継承（null）の行は fallback＝場面/動画のクレジットを含める', () => {
-      expect(creditForLines([{ speaker: 3 }, { speaker: null }], fallback)).toBe('VOICEVOX:ずんだもん / VOICEVOX:四国めたん');
-    });
-
-    it('空配列は fallback を返す（契約の明示・境界値）', () => {
-      expect(creditForLines([], fallback)).toBe(fallback);
     });
   });
 
