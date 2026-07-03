@@ -165,8 +165,6 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       if (safeIdx < endIdx) setIdx(safeIdx + 1);
       else setPlaying(false);
     };
-    const endTimer = window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000);
-
     if (sc.lines && sc.lines.length > 0) {
       // 掛け合い：行音声の長さを測ってタイムラインを作り、各行の開始秒で音声＋フレームを切り替える。
       const lines = sc.lines;
@@ -180,33 +178,59 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       const lineTimers: number[] = [];
       const lineAudios: HTMLAudioElement[] = [];
       let currentAudio: HTMLAudioElement | undefined;
+      let cancelled = false; // クリーンアップ後に遅延スケジュールが走らないようにする。
+      // 行を順に再生する“連鎖”。次の行への送りは「この行の窓（次の開始−この開始）」ぶん後だが、
+      // その計測を**この行が実際に鳴り始めてから**にする＝再生開始の遅延で末尾が切れない（#掛け合い・①）。
+      // 固定タイマー（場面頭からの絶対秒）だと、音声が遅れて鳴り始めたぶん前の行を早く止めて途切れていた。
+      // 編集画面の全文再生・書き出しの行連結（各行を丸ごと連結）とパリティが取れる。
       const playLine = (i: number): void => {
+        if (cancelled || i >= segs.length) return;
         currentAudio?.pause(); // 前の行の音声を止めてから次へ（被り防止）。
         // segs と sc.lines のズレに依らず lineId で実体の行 index を引く（誤字幕防止・M-2）。
         const lineIdx = lines.findIndex((l) => l.lineId === segs[i].lineId);
         setActiveLine(lineIdx >= 0 ? lineIdx : 0);
+        const scheduleNext = (): void => {
+          if (cancelled) return;
+          if (i + 1 < segs.length) {
+            const windowSec = Math.max(0, segs[i + 1].startSec - segs[i].startSec);
+            lineTimers.push(window.setTimeout(() => playLine(i + 1), windowSec * 1000));
+          } else {
+            // 最終行：この行の窓（場面末まで）ぶん後に場面送り（advance）。場面送りも実再生起点にそろえ、
+            // 行が増えて遅延が積み上がっても最終行の末尾が場面遷移で切れないようにする（#370 レビュー対応）。
+            const lastWindowSec = Math.max(MIN_PLAY_SEC, segs[i].endSec - segs[i].startSec);
+            lineTimers.push(window.setTimeout(advance, lastWindowSec * 1000));
+          }
+        };
         const u = narrationAudioById[lineAudioKey(sc.sceneId, segs[i].lineId)];
         if (u && !mutedRef.current) {
           currentAudio = new Audio(u);
           lineAudios.push(currentAudio);
-          void currentAudio.play().catch((e) => console.warn("[PreviewScreen] 音声再生に失敗", e));
+          // play() の解決＝再生開始。そこから窓を測って次へ。resolve/reject いずれでも一度だけ進む
+          // （reject 側は再生失敗ログも残す＝今後のデバッグ用・#370 レビュー対応）。
+          void currentAudio.play().then(scheduleNext, (e) => {
+            console.warn("[PreviewScreen] 音声再生に失敗", e);
+            scheduleNext();
+          });
+        } else {
+          scheduleNext(); // 無音（ミュート/音声なし）は窓ぶん待ってから次へ。
         }
       };
       if (segs.length > 0) {
         playLine(0);
-        for (let i = 1; i < segs.length; i += 1) {
-          lineTimers.push(window.setTimeout(() => playLine(i), Math.max(0, segs[i].startSec) * 1000));
-        }
+      } else {
+        // 有効な行が無い（全フィルタ＝音声未生成など）は場面尺で送る（従来のフォールバック）。
+        lineTimers.push(window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000));
       }
       return () => {
-        window.clearTimeout(endTimer);
+        cancelled = true;
         lineTimers.forEach((t) => window.clearTimeout(t));
         lineAudios.forEach((a) => a.pause());
         setActiveLine(0);
       };
     }
 
-    // 単一 narration（従来）。
+    // 単一 narration（従来）。場面尺の固定タイマーで次の場面へ。
+    const endTimer = window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000);
     let audio: HTMLAudioElement | undefined;
     const url = narrationAudioById[sc.sceneId];
     if (url && !mutedRef.current) {
