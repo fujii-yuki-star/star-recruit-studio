@@ -118,9 +118,9 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(out).toHaveLength(1);
     expect(out[0].pngBase64).toBeUndefined(); // アニメ場面は単一PNGなし
     expect(out[0].fps).toBe(FPS);
-    // #376：アニメは animEnd=1 秒で終わる（keyframes [0,1]）→ [0,1] だけ焼く（+1 で settled 到達）。
+    // #376：アニメは animEnd=1 秒で終わる（keyframes [0,1]）→ [0,1] だけ焼く（ceil+1 で settled 到達）。
     // 場面尺は2秒だが残り [1,2] は Rust の tpad が最終フレームを保持するので焼かない。
-    expect(out[0].framesBase64).toHaveLength(Math.round(1 * FPS) + 1);
+    expect(out[0].framesBase64).toHaveLength(Math.ceil(1 * FPS) + 1);
     expect(out[0].framesBase64?.[0]).toBe('data:image/png;base64,PNG');
     expect(out[0].durationSec).toBe(2); // 尺は場面のまま（保持はエンコード側）
     expect(out[0].narrationVolume).toBe(1);
@@ -138,7 +138,7 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(out[0].framesBase64).toBeUndefined(); // 巨大な base64 配列を IPC に載せない
     expect(out[0].framesDir).toBe('scene_frames_0_0'); // 場面 index_区間 index 由来の相対名
     expect(out[0].fps).toBe(FPS);
-    expect(staged).toHaveLength(Math.round(1 * FPS) + 1); // #376：変化区間[0,1]だけ逐次ディスクへ
+    expect(staged).toHaveLength(Math.ceil(1 * FPS) + 1); // #376：変化区間[0,1]だけ逐次ディスクへ
     expect(staged[0]).toEqual({ dir: 'scene_frames_0_0', index: 0, url: 'data:image/png;base64,PNG' });
   });
 
@@ -201,9 +201,31 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
       undefined, undefined, {},
       (s) => [anim(s.sceneId)],
     );
-    expect(out[0].framesBase64).toHaveLength(Math.round(1 * FPS) + 1); // 31 枚（≪ 従来 300 枚）
+    expect(out[0].framesBase64).toHaveLength(Math.ceil(1 * FPS) + 1); // 31 枚（≪ 従来 300 枚）
     expect(out[0].durationSec).toBe(10); // 尺は場面のまま（保持はエンコード側 tpad）
     expect(out[0].fps).toBe(FPS);
+  });
+
+  it('animEnd がフレーム格子に乗らなくても最終フレームが settled(animEnd 以上)に到達（#376レビュー・切り上げ）', async () => {
+    // animEnd=0.816（0.816*30=24.48）。round だと最終フレーム=24/30=0.8<0.816 で未収束のまま tpad 保持され
+    // パリティが崩れる。ceil なら 25/30=0.833>=0.816＝settled 到達（interpolateKeyframes のクランプ条件を満たす）。
+    const animOffGrid = (sceneId: string): ElementAnimation =>
+      ({ id: 'a', sceneId, targetId: 'el1', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 0.816, opacity: 1 }] } as unknown as ElementAnimation);
+    const scene = [{ sceneId: 's1', templateId: 'tpl', durationSec: 5 }] as unknown as Scene[];
+    vi.mocked(layoutScene).mockClear();
+    const out = await buildExportScenes(
+      scene, templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      undefined, undefined, {},
+      (s) => [animOffGrid(s.sceneId)],
+    );
+    const timeSecs = vi.mocked(layoutScene).mock.calls
+      .map((c) => c[2]?.timeSec)
+      .filter((t): t is number => typeof t === 'number');
+    // 最終描画フレームは animEnd(0.816) 以上（settled）＝tpad 保持フレームがプレビュー静止と一致（round なら 0.8<0.816 で落ちる）。
+    expect(Math.max(...timeSecs)).toBeGreaterThanOrEqual(0.816);
+    // フレーム数は ceil(0.816*30)+1 = 26。
+    expect(out[0].framesBase64).toHaveLength(Math.ceil(0.816 * FPS) + 1);
   });
 
   it('動画スロット併用のアニメはフレーム列にせず video 経路（下/上PNG）', async () => {

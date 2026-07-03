@@ -290,11 +290,15 @@ export async function buildExportScenes(
             // 高速化（#376）：アニメは最終キーフレーム(animEnd)以降レイアウトが一定＝以降のフレームは
             // 全て同一（静止）。よって「変化する終端＝min(区間末, animEnd)」までだけ焼き、残りは Rust 側の
             // tpad=stop_mode=clone が最終フレームを尺まで保持する。長い場面や掛け合い（アニメが頭だけの行）で
-            // per-frame ラスタライズを激減させる。+1 は最終フレームを settled 状態ちょうどに載せるため。
+            // per-frame ラスタライズを激減させる。
+            // ceil＋1：最終フレームの時刻は startSec + (frameCount-1)/fps。ceil により必ず
+            // ≥ min(区間末, animEnd) となり、interpolateKeyframes のクランプ条件（timeSec ≥ 最終KF）を満たす＝
+            // 保持されるフレームが必ず settled（＝プレビューの静止と一致・パリティ）。round だと格子に乗らない
+            // animEnd（例 0.816s→24.48）で切り捨てて未収束フレームを保持してしまう（#376 レビュー）。
             const animEndSec = animationsEndSec(sceneAnims); // 場面ローカル秒
             const segEnd = spec.startSec + spec.durationSec;
             const renderDurSec = Math.max(0, Math.min(segEnd, animEndSec) - spec.startSec);
-            const frameCount = Math.max(1, Math.round(renderDurSec * fps) + 1);
+            const frameCount = Math.max(1, Math.ceil(renderDurSec * fps) + 1);
             // ステージング可能なら各フレームを逐次ディスクへ（数百フレームの base64 を配列/IPC に溜めない・#書き出しRangeError）。
             const framesDir = stageAnimationFrame ? `scene_frames_${i}_${segIndex}` : undefined;
             const framesBase64: string[] = [];
