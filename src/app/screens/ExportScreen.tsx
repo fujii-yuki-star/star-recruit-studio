@@ -9,7 +9,7 @@ import { findVideoSlot } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
-import { canExport, exportVideo } from "../../infrastructure/ffmpegExport";
+import { canExport, clearExportFramesStage, exportVideo, stageExportFrame } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -113,6 +113,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         if (!pid || !a?.filePath || a.assetType === ASSET_TYPE.video) return undefined;
         return (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
       };
+      // アニメ場面のフレームはステージング（逐次ディスク書き出し）に載せる＝巨大な base64 を1回の IPC に
+      // まとめず、JSON.stringify の文字列上限超過（RangeError）を避ける（#書き出しRangeError）。前回の残りを掃除。
+      await clearExportFramesStage();
       const templateById = new Map(templates.map((t) => [t.templateId, t] as const));
       // 書き出し前に同梱フォントを確実に読み込む（場面ごとに別フォントを使い得るため全フォント。
       // Canvas ラスタライズはロード済みフォントしか使えない・ADR-0004）。
@@ -145,6 +148,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)), credit: creditForSpeaker(getVoicevoxSpeaker()) },
         // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay・sceneId 一致）。アニメ場面はフレーム列に焼かれる。
         (scene) => (timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
+        // アニメ場面のフレームを1枚ずつステージングへ（framesBase64 を IPC に載せない・巨大場面の RangeError 回避）。
+        (framesDir, frameIndex, dataUrl) => stageExportFrame(framesDir, frameIndex, dataUrl),
       );
       // タイムラインのテロップ（ADR-0018 テロップ実描画）。帯PNG＋グローバル区間へ焼き、Rust が結合後に overlay 合成。
       // テロップは場面横断のため動画全体フォントで焼く。
@@ -193,6 +198,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       setMessage(detail || "動画の保存に失敗しました。もう一度お試しください。");
       setPhase("error");
       console.error("[export] failed:", e);
+    } finally {
+      // ステージングしたアニメフレームを掃除（成功/失敗いずれも）＝次回書き出しに残さない（#書き出しRangeError）。
+      await clearExportFramesStage().catch(() => {});
     }
   }
 
