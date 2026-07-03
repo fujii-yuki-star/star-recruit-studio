@@ -1,8 +1,9 @@
 import { PageHead } from "../components/ui";
 import { openExternalUrl } from "../../infrastructure/opener";
 import { OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED } from "../../domain/export/h264Feature";
-import { creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { usedVoiceCredits } from "../../domain/voice/narratorCredit";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
+import { useProjectStore } from "../store/projectStore";
 import { BGM_CATALOG, BGM_SOURCE, BGM_SOURCE_URL, BGM_LICENSE } from "../../domain/bgm/bgmCatalog";
 
 // クレジット/ライセンス表示（13§9）。FFmpeg は LGPL の義務としてソース入手先も明示する。
@@ -47,8 +48,10 @@ const credits: { name: string; role: string; license: string; credit?: string; s
 ];
 
 export function AboutScreen() {
-  // 常時クレジットは選んだ話者のキャラに連動（#177）。
-  const narratorCredit = creditForSpeaker(getVoicevoxSpeaker());
+  // この動画で実際に使っている声を全て列挙（#251）。掛け合いの行ごと話者＋単一 narration の既定話者を重複なく。
+  // プロジェクト未読込（場面なし）のときは選択話者のみになる（usedVoiceCredits の既定）。
+  const scenes = useProjectStore((s) => s.scenes);
+  const usedCredits = usedVoiceCredits(scenes, getVoicevoxSpeaker());
   return (
     <div className="main-scroll">
       <PageHead
@@ -75,8 +78,17 @@ export function AboutScreen() {
         <div className="card">
           <h2 className="section-title">クレジット</h2>
           <p className="page-desc text-pretty">
-            本ソフトは以下を利用しています。作成した動画を公開・配布する際は、各提供元の利用規約に従い、クレジット表記にご協力ください（特に音声「{narratorCredit}」は、各キャラクターの利用規約とクレジット表記が必要です）。
+            本ソフトは以下を利用しています。作成した動画を公開・配布する際は、各提供元の利用規約に従い、クレジット表記にご協力ください（特に音声は、各キャラクターの利用規約とクレジット表記が必要です）。
           </p>
+          {/* この動画で使っている声を全て列挙（#251）。掛け合いで複数キャラを使う場合の網羅性を上げる。 */}
+          <div className="mt">
+            <span className="text-sm text-muted">この動画で使っている声</span>
+            <ul style={{ margin: "4px 0 0", paddingLeft: "1.2em" }}>
+              {usedCredits.map((c) => (
+                <li key={c} className="text-sm">{c}</li>
+              ))}
+            </ul>
+          </div>
           <div className="col gap-sm mt">
             {credits.filter((c) => OPENH264_FEATURE_ENABLED || !c.openh264).map((c) => {
               const src = c.source;
@@ -113,7 +125,7 @@ export function AboutScreen() {
           </div>
 
           <p className="field-hint mt">
-            作成・書き出しする動画には、利用規約に基づき「{narratorCredit}」のクレジットが常に表示されます（仕上がり確認にも表示されます）。
+            作成・書き出しする動画には、利用規約に基づき使用した声（{usedCredits.join(" / ")}）のクレジットが表示されます（仕上がり確認にも表示されます）。
           </p>
         </div>
       </div>
