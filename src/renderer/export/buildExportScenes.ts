@@ -198,39 +198,12 @@ export async function buildExportScenes(
         // 掛け合い（明示 lines・静止画）は行ごとのセグメントに展開（追加A/B・ADR-0015 PR-E）。
         // 動画スロットありの場面はセグメント化せず1枚（映像経路は ADR-0006・字幕は scene.texts ベース）。
         const useSegments = !!(scene.lines && scene.lines.length > 0) && !videoSlot;
-        // アニメ場面（④・ADR-0019 per-frame）：animations があり、掛け合い/動画スロットを伴わない場面はフレーム列に焼く。
-        // 適用可否は preview（ScenePreview 経由）と共有の sceneAnimationActive で判定＝両者一致（ADR-0001 パリティ）。
-        // 掛け合い/動画スロット併用のアニメは後続段（字幕の行分割・映像合成との両立が要るため）＝ここでは従来の静止/セグメント経路。
+        // アニメ場面（④・ADR-0019 per-frame）：animations があり動画スロットを伴わない場面はフレーム列に焼く。
+        // 掛け合いは**行セグメントごと**に、単一 narration は1区間として毎フレーム描画する（③）。適用可否は
+        // preview（ScenePreview 経由）と共有の sceneAnimationActive で判定＝両者一致（ADR-0001 パリティ）。
+        // 動画スロット併用のアニメは引き続き後続段（映像合成との両立が要る）＝静止/セグメント経路。
         const sceneAnims = animationsFor?.(scene) ?? [];
-        if (sceneAnimationActive(scene, sceneAnims, !!videoSlot)) {
-          const fps = FPS;
-          const frameCount = Math.max(1, Math.round(scene.durationSec * fps));
-          // ステージング可能なら各フレームを逐次ディスクへ（数百フレームの base64 を配列/IPC に溜めない・#書き出しRangeError）。
-          const framesDir = stageAnimationFrame ? `scene_frames_${i}` : undefined;
-          const framesBase64: string[] = [];
-          for (let f = 0; f < frameCount; f += 1) {
-            // フレーム t の描画＝プレビューと同一 layoutScene(t)（パリティ）。字幕は非セグメントゆえ静止（scene.texts）。
-            const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
-            const dataUrl = await svgToPngDataUrl(
-              layoutToSvg(frameLayout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
-              width,
-              height,
-            );
-            if (framesDir && stageAnimationFrame) await stageAnimationFrame(framesDir, f, dataUrl);
-            else framesBase64.push(dataUrl);
-          }
-          const narration = narrationFor?.(scene);
-          out.push({
-            // framesDir（ステージング）優先。無ければ従来どおり framesBase64 を載せる。
-            ...(framesDir ? { framesDir } : { framesBase64 }),
-            fps,
-            durationSec: scene.durationSec,
-            audioBase64: narration?.audioBase64,
-            narrationVolume: narration?.narrationVolume,
-          });
-          onProgress?.(i + 1, scenes.length);
-          continue;
-        }
+        const animate = sceneAnimationActive(scene, sceneAnims, !!videoSlot);
         const lineDurations: Record<string, number> = {};
         if (useSegments) {
           for (const l of scene.lines ?? []) {
@@ -240,31 +213,67 @@ export async function buildExportScenes(
         }
         const specs = useSegments
           ? sceneSegmentSpecs(scene, lineDurations)
-          : [{ durationSec: scene.durationSec, isFirst: true }];
+          : [{ startSec: 0, durationSec: scene.durationSec, isFirst: true }];
+        let segIndex = 0;
         for (const spec of specs) {
           const segLineId = 'lineId' in spec ? spec.lineId : undefined;
           // クレジットは話者連動：行に話者があればそのキャラ、無ければ既定（場面/動画の話者＝credit）（#243・規約適合）。
           const segLine = segLineId ? scene.lines?.find((l) => l.lineId === segLineId) : undefined;
           const segCredit = segLine ? creditForLine(segLine, credit) : credit;
-          // 字幕上書きのあるセグメント（掛け合い）は行字幕で焼き直し、無ければ共有 layout を再利用。
-          const segLayout =
-            'subtitleText' in spec && spec.subtitleText !== undefined
-              ? layoutScene(scene, template, { subtitleText: spec.subtitleText })
-              : layout;
-          const pngBase64 = await svgToPngDataUrl(
-            layoutToSvg(segLayout, { assetSrc, itemFilter, credit: segCredit, fontFamily: sceneFontFamily }),
-            width,
-            height,
-          );
+          // 字幕上書き（掛け合い）：string=表示／null=非表示／undefined=従来（scene.texts）。
+          const segSubtitle = 'subtitleText' in spec ? spec.subtitleText : undefined;
           const segNarration = narrationFor?.(scene, segLineId);
-          out.push({
-            pngBase64,
-            durationSec: spec.durationSec,
-            audioBase64: segNarration?.audioBase64,
-            narrationVolume: segNarration?.narrationVolume,
-          });
+          if (animate) {
+            // アニメ区間：この区間 [startSec, +durationSec] を毎フレーム描画（掛け合いは行ごと・単一は1区間）。
+            const fps = FPS;
+            const frameCount = Math.max(1, Math.round(spec.durationSec * fps));
+            // ステージング可能なら各フレームを逐次ディスクへ（数百フレームの base64 を配列/IPC に溜めない・#書き出しRangeError）。
+            const framesDir = stageAnimationFrame ? `scene_frames_${i}_${segIndex}` : undefined;
+            const framesBase64: string[] = [];
+            for (let f = 0; f < frameCount; f += 1) {
+              // 場面内の絶対時刻でアニメを補間（プレビューと同一 layoutScene(t)＝パリティ）。行字幕も同フレームに焼き込む。
+              const frameLayout = layoutScene(scene, template, {
+                timeSec: spec.startSec + f / fps,
+                animations: sceneAnims,
+                ...(segSubtitle !== undefined ? { subtitleText: segSubtitle } : {}),
+              });
+              const dataUrl = await svgToPngDataUrl(
+                layoutToSvg(frameLayout, { assetSrc, itemFilter, credit: segCredit, fontFamily: sceneFontFamily }),
+                width,
+                height,
+              );
+              if (framesDir && stageAnimationFrame) await stageAnimationFrame(framesDir, f, dataUrl);
+              else framesBase64.push(dataUrl);
+            }
+            out.push({
+              // framesDir（ステージング）優先。無ければ従来どおり framesBase64 を載せる。
+              ...(framesDir ? { framesDir } : { framesBase64 }),
+              fps,
+              durationSec: spec.durationSec,
+              audioBase64: segNarration?.audioBase64,
+              narrationVolume: segNarration?.narrationVolume,
+            });
+          } else {
+            // 静止区間（従来）：字幕上書きがあれば行字幕で焼き直し、無ければ共有 layout を再利用。
+            const segLayout =
+              segSubtitle !== undefined
+                ? layoutScene(scene, template, { subtitleText: segSubtitle })
+                : layout;
+            const pngBase64 = await svgToPngDataUrl(
+              layoutToSvg(segLayout, { assetSrc, itemFilter, credit: segCredit, fontFamily: sceneFontFamily }),
+              width,
+              height,
+            );
+            out.push({
+              pngBase64,
+              durationSec: spec.durationSec,
+              audioBase64: segNarration?.audioBase64,
+              narrationVolume: segNarration?.narrationVolume,
+            });
+          }
           // included は out と 1:1。先頭セグメントは上の included.push(scene) ＝ 2つ目以降のみ push（場面内はハードカット）。
           if (!spec.isFirst) included.push({ ...scene, transition: undefined });
+          segIndex += 1;
         }
       }
     }

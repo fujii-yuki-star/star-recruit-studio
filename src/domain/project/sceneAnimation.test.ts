@@ -15,12 +15,15 @@ describe('sceneAnimationActive（④・ADR-0019 アニメ適用可否・preview/
     expect(sceneAnimationActive(base, undefined, false)).toBe(false);
   });
 
-  it('掛け合い（lines あり）→ false（書き出しは行セグメント優先＝パリティ）', () => {
+  it('掛け合い（lines あり）でもアニメあり → true（行セグメント×フレームで対応・③）', () => {
     const withLines = { ...base, lines: [{ lineId: 'line_001', text: 'a' }] } as unknown as Scene;
-    expect(sceneAnimationActive(withLines, [anim], false)).toBe(false);
+    expect(sceneAnimationActive(withLines, [anim], false)).toBe(true);
   });
 
   it('動画スロットあり → false（書き出しは映像合成優先＝パリティ）', () => {
     expect(sceneAnimationActive(base, [anim], true)).toBe(false);
+    // 掛け合い＋動画スロットも動画スロット優先で false（映像合成との両立は後続段）。
+    const withLines = { ...base, lines: [{ lineId: 'line_001', text: 'a' }] } as unknown as Scene;
+    expect(sceneAnimationActive(withLines, [anim], true)).toBe(false);
   });
 });
