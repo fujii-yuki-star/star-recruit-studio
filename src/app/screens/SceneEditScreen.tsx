@@ -23,6 +23,7 @@ import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { useProjectStore } from "../store/projectStore";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { ProjectNameField } from "../components/ProjectNameField";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
@@ -758,7 +759,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
-        <div className="topbar-title">場面編集</div>
+        {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
+        <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <ProjectNameField />
+          <span className="text-sm text-muted" style={{ flexShrink: 0 }}>場面編集</span>
+        </div>
         <div className="topbar-actions">
           {showNarrProgress && (
             <span className="text-sm text-muted" style={{ marginRight: 4 }}>

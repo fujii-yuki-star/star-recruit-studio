@@ -1,0 +1,33 @@
+// 編集中のプロジェクト名を表示・変更する入力（#252）。ヘッダに置き、戻らずにその場で改名できる。
+// 確定は blur/Enter（1改名=1履歴＝store.setProjectName）。空・未変更は破棄して元の名前に戻す。技術用語なし（§2-3）。
+import { useState } from "react";
+import { useProjectStore } from "../store/projectStore";
+
+export function ProjectNameField() {
+  const projectName = useProjectStore((s) => s.meta.projectName);
+  const setProjectName = useProjectStore((s) => s.setProjectName);
+  const [draft, setDraft] = useState<string | null>(null); // null＝非編集（store の名前を表示）
+
+  const commit = () => {
+    if (draft != null) {
+      const name = draft.trim();
+      if (name && name !== projectName) setProjectName(name); // 空・未変更は保存しない
+    }
+    setDraft(null);
+  };
+
+  return (
+    <input
+      className="input"
+      value={draft ?? projectName}
+      placeholder="無題のプロジェクト"
+      aria-label="動画の名前"
+      title="動画の名前（ここで変えられます）"
+      onFocus={() => setDraft(projectName)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      style={{ fontWeight: 600, maxWidth: 320, minWidth: 120 }}
+    />
+  );
+}
