@@ -1021,7 +1021,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
             </div>
 
-
             {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
             {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
             {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
@@ -1801,37 +1800,37 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
             {/* 画面の切り替え（トランジション）は常時表示（「詳細編集」トグル撤廃・#278）。 */}
             <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: "var(--gap-sm)" }}>
-                <div className="field">
-                  <label className="field-label" htmlFor="transition">画面の切り替え</label>
-                  {isFirstScene ? (
-                    <p className="field-hint" style={{ marginTop: 0 }}>
-                      最初の場面のため、前からの切り替えはありません。
+              <div className="field">
+                <label className="field-label" htmlFor="transition">画面の切り替え</label>
+                {isFirstScene ? (
+                  <p className="field-hint" style={{ marginTop: 0 }}>
+                    最初の場面のため、前からの切り替えはありません。
+                  </p>
+                ) : (
+                  <>
+                    <select
+                      id="transition"
+                      className="select"
+                      value={transitionValue}
+                      onChange={(e) => onTransitionChange(e.target.value)}
+                    >
+                      <option value={TRANSITION_TYPE.none}>なし</option>
+                      <option value={TRANSITION_TYPE.fade}>フェード</option>
+                      <option value={`slide:${TRANSITION_DIRECTION.left}`}>スライド（左へ）</option>
+                      <option value={`slide:${TRANSITION_DIRECTION.right}`}>スライド（右へ）</option>
+                      <option value={`slide:${TRANSITION_DIRECTION.up}`}>スライド（上へ）</option>
+                      <option value={`slide:${TRANSITION_DIRECTION.down}`}>スライド（下へ）</option>
+                    </select>
+                    <p className="field-hint">
+                      ※ 仕上がり確認では動きませんが、書き出すと切り替わります。
                     </p>
-                  ) : (
-                    <>
-                      <select
-                        id="transition"
-                        className="select"
-                        value={transitionValue}
-                        onChange={(e) => onTransitionChange(e.target.value)}
-                      >
-                        <option value={TRANSITION_TYPE.none}>なし</option>
-                        <option value={TRANSITION_TYPE.fade}>フェード</option>
-                        <option value={`slide:${TRANSITION_DIRECTION.left}`}>スライド（左へ）</option>
-                        <option value={`slide:${TRANSITION_DIRECTION.right}`}>スライド（右へ）</option>
-                        <option value={`slide:${TRANSITION_DIRECTION.up}`}>スライド（上へ）</option>
-                        <option value={`slide:${TRANSITION_DIRECTION.down}`}>スライド（下へ）</option>
-                      </select>
-                      <p className="field-hint">
-                        ※ 仕上がり確認では動きませんが、書き出すと切り替わります。
-                      </p>
-                    </>
-                  )}
-                </div>
-                <p className="field-hint">
-                  動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「セリフ」で場面ごとに変えられます。
-                </p>
+                  </>
+                )}
               </div>
+              <p className="field-hint">
+                動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「セリフ」で場面ごとに変えられます。
+              </p>
+            </div>
 
             {confirmDelete ? (
               <div className="row gap-sm mt">
