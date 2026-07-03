@@ -99,6 +99,8 @@ interface ProjectState {
   deleteProject: (projectId: string) => Promise<void>;
   /** 保存済みプロジェクトの名前（projectName）を変更して保存する（#241）。 */
   renameProject: (projectId: string, newName: string) => Promise<void>;
+  /** 編集中プロジェクトの名前を変更する（#252・メモリの meta.projectName を更新＝保存/自動保存で永続化）。 */
+  setProjectName: (name: string) => void;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
   /** 末尾パートに新しい空の場面を追加し、その sceneId を返す（既定テンプレ）。テンプレ未読込時は ""。 */
@@ -781,6 +783,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, fontId } },
       saveStatus: "idle",
     }));
+  },
+  setProjectName: (name) => {
+    // 編集中の名前変更＝メモリの meta を更新（保存/自動保存で永続化）。UI 側は blur/Enter で確定＝1改名=1履歴。
+    get().pushHistory();
+    set((s) => ({ meta: { ...s.meta, projectName: name }, saveStatus: "idle" }));
   },
   updateVoiceSettings: (patch) => {
     get().pushHistory();
