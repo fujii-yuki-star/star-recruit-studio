@@ -5,7 +5,9 @@ import type { ScreenId } from "./app/data/mockData";
 import { useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
+import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
+import { useAutoSave } from "./app/hooks/useAutoSave";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -51,6 +53,8 @@ function App() {
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
     useStartNewProject(setScreen);
+  // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
+  useAutoSave();
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
   // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。
@@ -124,6 +128,7 @@ function App() {
           <header className="topbar">
             <div className="topbar-title">{titles[screen]}</div>
             <div className="topbar-actions">
+              <SaveStatusBadge />
               <button
                 className="btn btn-ghost"
                 onClick={() => void saveProject()}
