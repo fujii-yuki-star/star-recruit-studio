@@ -332,18 +332,27 @@ pub fn xfade_chain_args(
         args.push(f.clone());
     }
     let mut filters: Vec<String> = Vec::new();
-    // 映像チェーン：[0:v] を起点に、各境界で xfade（重ね）or concat（ハードカット）。
-    let mut v_prev = "0:v".to_string();
+    // 全入力のタイムベースを AVTB(1/1000000) に正規化してからチェーンへ。
+    // concat フィルタは出力タイムベースを 1/1000000 に強制する一方、生の場面 MP4 は 1/15360。
+    // xfade は2入力のタイムベース一致を要求するため、「concat（ハードカット）の直後に xfade」が
+    // 来る境界で「timebase do not match」(-22) になり結合が全体失敗する。
+    // settb/asettb は実時刻(PTS)を保ったまま tb ラベルだけ統一するので、どの遷移順序でも一致する。
+    for k in 0..files.len() {
+        filters.push(format!("[{k}:v]settb=AVTB[nv{k}]"));
+        filters.push(format!("[{k}:a]asettb=AVTB[na{k}]"));
+    }
+    // 映像チェーン：[nv0] を起点に、各境界で xfade（重ね）or concat（ハードカット）。
+    let mut v_prev = "nv0".to_string();
     for (i, st) in steps.iter().enumerate() {
         let cur = i + 1;
         let v_out = format!("v{cur}");
         match st.xfade {
             Some(name) => filters.push(format!(
-                "[{v_prev}][{cur}:v]xfade=transition={name}:duration={d}:offset={o}[{v_out}]",
+                "[{v_prev}][nv{cur}]xfade=transition={name}:duration={d}:offset={o}[{v_out}]",
                 d = st.duration_sec,
                 o = st.offset_sec,
             )),
-            None => filters.push(format!("[{v_prev}][{cur}:v]concat=n=2:v=1:a=0[{v_out}]")),
+            None => filters.push(format!("[{v_prev}][nv{cur}]concat=n=2:v=1:a=0[{v_out}]")),
         }
         v_prev = v_out;
     }
@@ -351,16 +360,16 @@ pub fn xfade_chain_args(
     // acrossfade はオフセット引数を取らず「入力1の終端を検出して自動でクロスフェード開始」する。
     // これが映像 xfade の offset=acc−D と整合するのは、各場面 MP4 を scene_clip_args が -t {dur} で
     // 尺ぴったりに揃えているため（音声＝映像と同尺）。
-    let mut a_prev = "0:a".to_string();
+    let mut a_prev = "na0".to_string();
     for (i, st) in steps.iter().enumerate() {
         let cur = i + 1;
         let a_out = format!("a{cur}");
         match st.xfade {
             Some(_) => filters.push(format!(
-                "[{a_prev}][{cur}:a]acrossfade=d={d}[{a_out}]",
+                "[{a_prev}][na{cur}]acrossfade=d={d}[{a_out}]",
                 d = st.duration_sec,
             )),
-            None => filters.push(format!("[{a_prev}][{cur}:a]concat=n=2:v=0:a=1[{a_out}]")),
+            None => filters.push(format!("[{a_prev}][na{cur}]concat=n=2:v=0:a=1[{a_out}]")),
         }
         a_prev = a_out;
     }
@@ -2225,9 +2234,13 @@ mod tests {
         assert_eq!(a.iter().filter(|s| *s == "-i").count(), 2);
         let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
         let graph = &a[fc + 1];
-        // 映像 xfade（offset=累積−D=7.5）と音声 acrossfade（同じ D）。
-        assert!(graph.contains("[0:v][1:v]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
-        assert!(graph.contains("[0:a][1:a]acrossfade=d=0.5[a1]"));
+        // 全入力を settb=AVTB/asettb=AVTB で正規化（concat→xfade 境界の timebase 不一致対策）。
+        assert!(graph.contains("[0:v]settb=AVTB[nv0]"));
+        assert!(graph.contains("[1:v]settb=AVTB[nv1]"));
+        assert!(graph.contains("[0:a]asettb=AVTB[na0]"));
+        // 映像 xfade（offset=累積−D=7.5）と音声 acrossfade（同じ D）。入力は正規化済みラベル。
+        assert!(graph.contains("[nv0][nv1]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
+        assert!(graph.contains("[na0][na1]acrossfade=d=0.5[a1]"));
         // 最終ラベルを map。
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v1]"));
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a1]"));
@@ -2270,9 +2283,9 @@ mod tests {
             "12000k",
         );
         let graph = &a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1];
-        // ハードカット＝concat フィルタ（映像/音声）。xfade は含まない。
-        assert!(graph.contains("[0:v][1:v]concat=n=2:v=1:a=0[v1]"));
-        assert!(graph.contains("[0:a][1:a]concat=n=2:v=0:a=1[a1]"));
+        // ハードカット＝concat フィルタ（映像/音声）。入力は正規化済みラベル。xfade は含まない。
+        assert!(graph.contains("[nv0][nv1]concat=n=2:v=1:a=0[v1]"));
+        assert!(graph.contains("[na0][na1]concat=n=2:v=0:a=1[a1]"));
         assert!(!graph.contains("xfade"));
     }
 
@@ -2306,12 +2319,55 @@ mod tests {
         );
         assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3);
         let graph = &a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1];
-        assert!(graph.contains("[0:v][1:v]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
-        assert!(graph.contains("[v1][2:v]concat=n=2:v=1:a=0[v2]"));
-        assert!(graph.contains("[a1][2:a]concat=n=2:v=0:a=1[a2]"));
+        assert!(graph.contains("[nv0][nv1]xfade=transition=fade:duration=0.5:offset=7.5[v1]"));
+        assert!(graph.contains("[v1][nv2]concat=n=2:v=1:a=0[v2]"));
+        assert!(graph.contains("[a1][na2]concat=n=2:v=0:a=1[a2]"));
         // 最終ラベルは v2/a2。
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v2]"));
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[a2]"));
+    }
+
+    #[test]
+    fn xfade_chain_args_cut_then_fade_normalizes_timebase() {
+        // 「ハードカット(concat)→クロスフェード(xfade)」の並び（実運用で顕在化した回帰の最小再現）。
+        // concat 出力は tb=1/1000000、生場面は 1/15360。正規化しないと後続 xfade が
+        // "timebase do not match" (-22) で失敗する。settb/asettb=AVTB で全入力を揃えて回避する。
+        let files = vec![
+            "a.mp4".to_string(),
+            "b.mp4".to_string(),
+            "c.mp4".to_string(),
+        ];
+        // 境界1=none（ハードカット）、境界2=fade。
+        let steps = vec![
+            JoinStep {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            },
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 4.5,
+            },
+        ];
+        let a = xfade_chain_args(
+            &files,
+            &steps,
+            "out.mp4",
+            VideoCodec::OpenH264,
+            30,
+            "12000k",
+        );
+        let graph = &a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1];
+        // 全入力が settb/asettb=AVTB で正規化されている。
+        for k in 0..3 {
+            assert!(graph.contains(&format!("[{k}:v]settb=AVTB[nv{k}]")));
+            assert!(graph.contains(&format!("[{k}:a]asettb=AVTB[na{k}]")));
+        }
+        // 境界1=concat（正規化入力）→ v1、境界2=xfade は「concat 出力 v1」と「正規化入力 nv2」を取る。
+        // これで xfade の2入力タイムベースが一致（両者 AVTB）＝-22 を回避する要。
+        assert!(graph.contains("[nv0][nv1]concat=n=2:v=1:a=0[v1]"));
+        assert!(graph.contains("[v1][nv2]xfade=transition=fade:duration=0.5:offset=4.5[v2]"));
     }
 
     // 実 FFmpeg で xfade チェーンが MP4 を生成できるか（FFMPEG_PATH 未設定ならスキップ）。
@@ -2329,9 +2385,10 @@ mod tests {
         fs::create_dir_all(&tmp).unwrap();
         let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
         let codec = pick_codec(&encoders).expect("an h264 encoder");
-        // 単純な場面MP4（映像＋AAC無音・各2秒）を2本。
+        // 単純な場面MP4（映像＋AAC無音・各2秒）を3本。
+        // 3本 [none, fade]＝「ハードカット(concat)→クロスフェード(xfade)」で実運用の回帰を再現する。
         let mut files = Vec::new();
-        for (i, color) in ["red", "blue"].iter().enumerate() {
+        for (i, color) in ["red", "green", "blue"].iter().enumerate() {
             let f = tmp.join(format!("s{i}.mp4"));
             run(
                 &ffmpeg,
@@ -2361,12 +2418,21 @@ mod tests {
             files.push(f.to_string_lossy().into_owned());
         }
         let out = tmp.join("xf.mp4");
-        // fade D=0.5・offset = 2 − 0.5 = 1.5。
-        let steps = vec![JoinStep {
-            xfade: Some("fade"),
-            duration_sec: 0.5,
-            offset_sec: 1.5,
-        }];
+        // 境界1=none（ハードカット・concat 出力 tb=1/1000000）、境界2=fade。
+        // 正規化が無いと後続 xfade で「timebase do not match」(-22) になる並び。
+        // fade offset = concat 済み前2本(4s) − D(0.5) = 3.5。
+        let steps = vec![
+            JoinStep {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+            },
+            JoinStep {
+                xfade: Some("fade"),
+                duration_sec: 0.5,
+                offset_sec: 3.5,
+            },
+        ];
         let args = xfade_chain_args(&files, &steps, &out.to_string_lossy(), codec, 30, "12000k");
         run(&ffmpeg, &args).expect("xfade join");
         assert!(fs::metadata(&out).expect("xf.mp4 exists").len() > 0);
