@@ -25,6 +25,7 @@ import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
+import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
 import { textKeyLabel } from "../uiLabels";
 import type { FontId } from "../../domain/font/fontCatalog";
@@ -1882,8 +1883,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </button>
             )}
 
+            <div className="mt" style={{ textAlign: "center" }}>
+              <SaveStatusBadge />
+            </div>
             <button
-              className="btn btn-primary btn-block mt"
+              className="btn btn-primary btn-block"
               onClick={() => void saveProject()}
               disabled={saveStatus === "saving"}
             >

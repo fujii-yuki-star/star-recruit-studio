@@ -394,6 +394,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupDepth: 0,
     }),
   saveProject: async () => {
+    if (get().saveStatus === "saving") return; // 保存中の多重起動を防ぐ（自動保存×手動保存の競合ガード・#256）
     set({ saveStatus: "saving" });
     try {
       const s = get();
@@ -509,7 +510,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     set({
       status: "ready",
-      saveStatus: "idle",
+      saveStatus: "saved", // 読み込み直後はディスクと一致＝保存済み扱い（未保存検知の基準・#256）
       // 保存用ヘッダは projectHeaderFromProject に一元化（Project のヘッダ系フィールドの取りこぼしを防ぐ・#324）。
       // ADR-0011 の種別/発表内容/自由記述、ADR-0018 の timelineOverlay もここでまとめて復元される。
       meta: projectHeaderFromProject(project),
