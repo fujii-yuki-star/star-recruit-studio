@@ -34,3 +34,26 @@ export function creditForLines(lines: { speaker?: number | null }[], fallbackCre
   for (const l of lines) set.add(creditForLine(l, fallbackCredit));
   return set.size > 0 ? Array.from(set).join(' / ') : fallbackCredit;
 }
+
+/**
+ * プロジェクトで実際に使う VOICEVOX クレジットを重複なく集める（#251 About の全列挙・ADR-0025 クレジット集約で共有）。
+ * 掛け合いの場面は行ごとの話者、単一 narration の場面は既定話者（defaultSpeaker）を採用する（実際に合成される声と一致）。
+ * 場面が無い/空でも既定話者のクレジットは1件返す（About 後方互換・プロジェクト未読込時＝選択話者のみ）。
+ * @param defaultSpeaker アプリ設定の選択話者（getVoicevoxSpeaker）。
+ */
+export function usedVoiceCredits(
+  scenes: ReadonlyArray<{ lines?: { speaker?: number | null }[] | null }>,
+  defaultSpeaker: number | null | undefined,
+): string[] {
+  const base = creditForSpeaker(defaultSpeaker);
+  const set = new Set<string>();
+  for (const sc of scenes) {
+    if (sc.lines && sc.lines.length > 0) {
+      for (const l of sc.lines) set.add(creditForLine(l, base));
+    } else {
+      set.add(base); // 単一 narration の場面は既定話者
+    }
+  }
+  if (set.size === 0) set.add(base);
+  return Array.from(set);
+}
