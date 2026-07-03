@@ -430,11 +430,13 @@ export function resizeRotatedFreeElement(
   // 掴んだ角を canvas 上でドラッグ→グリッド吸着。
   const bx = snapToGrid(cx0 + b0.x + dx, grid);
   const by = snapToGrid(cy0 + b0.y + dy, grid);
-  // 対角 A→B をローカルへ戻すと (ex·w, ey·h)。絶対値が w/h（最小サイズでクランプ）。
+  // 対角 A→B をローカルへ戻すと (ex·w, ey·h)。掴んだ角の向き(ex/ey)で**符号付きのまま** min クランプする
+  // ＝対角を超えて振り切っても min に張り付く（abs を先に取ると符号反転で再拡大＝跳ね返る＝#300 レビュー）。
+  // 通常ドラッグ（縮む方向に振り切らない）では ex·(…)≧0 で abs と一致＝挙動は不変。resizeFreeElement と同じ片側クランプ。
   const ddx = bx - ax;
   const ddy = by - ay;
-  const w = Math.max(min, Math.round(Math.abs(ddx * cos + ddy * sin)));
-  const h = Math.max(min, Math.round(Math.abs(-ddx * sin + ddy * cos)));
+  const w = Math.max(min, Math.round(ex * (ddx * cos + ddy * sin)));
+  const h = Math.max(min, Math.round(ey * (-ddx * sin + ddy * cos)));
   // A を固定して中心を出す（clamp で w/h が変わっても対角 A は動かさない）。
   const c = toCanvas((ex * w) / 2, (ey * h) / 2);
   return { x: Math.round(ax + c.x - w / 2), y: Math.round(ay + c.y - h / 2), w, h };

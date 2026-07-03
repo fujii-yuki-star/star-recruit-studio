@@ -531,10 +531,17 @@ describe('resizeRotatedFreeElement（回転要素の角リサイズ・#279後継
     expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1.5);
   });
 
-  it('最小サイズで止まる（縮め過ぎても min 以上）', () => {
+  it('最小サイズで止まり、固定角を超えて振り切っても反転膨張しない（#300 レビュー）', () => {
+    // 縮め過ぎ＝min 以上。
     const r = resizeRotatedFreeElement(start, 'se', -999, -999, 90, 24);
     expect(r.w).toBeGreaterThanOrEqual(24);
     expect(r.h).toBeGreaterThanOrEqual(24);
+    // 対角(nw)を両軸で超えて振り切っても w も h も min に張り付く（以前は abs 先取りで符号反転→再拡大していた）。
+    const over = resizeRotatedFreeElement(start, 'se', 300, -400, 90, 24);
+    expect(over.w).toBe(24);
+    expect(over.h).toBe(24);
+    // 片軸だけ振り切り（レビュー再現：dx=0, dy=-500）でも掴んだ軸は min に張り付く（以前は |200-500|=300 に膨張）。
+    expect(resizeRotatedFreeElement(start, 'se', 0, -500, 90, 24).w).toBe(24);
   });
 
   it('グリッド ON：回転要素でも掴んだ角が canvas グリッドに乗る（#300(b)）', () => {
