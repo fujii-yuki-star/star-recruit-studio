@@ -31,6 +31,7 @@
 | [0022](0022-element-grouping.md) | 要素のグループ化（groups＋独自transform・FREE/テンプレ両エディタ） | **Accepted** |
 | [0023](0023-integrated-timeline-editing.md) | 統合タイムライン編集（再生ヘッド＋同期プレビュー・上位仕上げ編集面・α-5 主軸） | **Proposed** |
 | [0024](0024-non-destructive-editing-model.md) | 非破壊編集モデル（Asset＝源泉／使用単位＝非破壊の範囲参照・解析キャッシュ・VoiceClip 方向） | **Proposed** |
+| [0025](0025-credit-display-modes.md) | クレジット表示方式（常時/最初/最後/両方/非表示・既定=最初と最後・About 必須維持・α-6） | **Accepted**（0003 を一部 supersede） |
 
 ## 状態の意味
 
