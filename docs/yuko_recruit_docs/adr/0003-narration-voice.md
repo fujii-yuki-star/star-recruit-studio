@@ -1,8 +1,8 @@
 # ADR-0003: ナレーション音声とゆうこの関係
 
-- **状態**: Accepted（2026-06-10 承認・2026-06-25 #177 で複数話者の選択可へ更新＝下記「更新」）
+- **状態**: Accepted（2026-06-10 承認・2026-06-25 #177 で複数話者の選択可へ更新＝下記「更新」）／**「常時表示・OFF なし」は [`adr/0025`](0025-credit-display-modes.md) で一部 Superseded**（2026-07-03・表示方式を選べる＋非表示可へ。**About 画面のクレジット必須は不変**）。
 - **日付**: 2026-06-10
-- **関連**: `13_DEPENDENCIES_AND_LICENSING.md §4,§5` / `17_YUKO_CHARACTER_SPEC.md` / `01 §8.3`
+- **関連**: `13_DEPENDENCIES_AND_LICENSING.md §4,§5` / `17_YUKO_CHARACTER_SPEC.md` / `01 §8.3` / [`adr/0025`](0025-credit-display-modes.md)（クレジット表示方式）
 
 ---
 
