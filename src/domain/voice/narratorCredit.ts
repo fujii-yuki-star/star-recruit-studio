@@ -26,16 +26,6 @@ export function creditForLine(line: { speaker?: number | null }, fallbackCredit:
 }
 
 /**
- * 複数行の使用話者をまとめたクレジット文言（#243）。掛け合いを1フレームで焼くとき（動画スロットあり等で
- * 行ごとに分割できない場合）に使用キャラを全て併記して網羅する。重複は除き「 / 」で連結。
- */
-export function creditForLines(lines: { speaker?: number | null }[], fallbackCredit: string): string {
-  const set = new Set<string>();
-  for (const l of lines) set.add(creditForLine(l, fallbackCredit));
-  return set.size > 0 ? Array.from(set).join(' / ') : fallbackCredit;
-}
-
-/**
  * プロジェクトで実際に使う VOICEVOX クレジットを重複なく集める（#251 About の全列挙・ADR-0025 クレジット集約で共有）。
  * 掛け合いの場面は行ごとの話者、単一 narration の場面は既定話者（defaultSpeaker）を採用する（実際に合成される声と一致）。
  * 場面が無い/空でも既定話者のクレジットは1件返す（About 後方互換・プロジェクト未読込時＝選択話者のみ）。
