@@ -2557,7 +2557,10 @@ mod tests {
         .expect("ffprobe frames");
         let frames: u32 = probe.trim().parse().expect("frame count");
         // 2.0s × 30fps ≈ 60 フレーム（tpad 保持）。tpad 無しなら入力5フレームのみ＝この閾値で明確に区別。
-        assert!(frames >= 55, "expected ~60 video frames (tpad hold), got {frames}");
+        assert!(
+            frames >= 55,
+            "expected ~60 video frames (tpad hold), got {frames}"
+        );
     }
 
     #[test]
