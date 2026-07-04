@@ -309,3 +309,14 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
     expect(useProjectStore.getState().templateAssetSrcById).toEqual({});
   });
 });
+
+describe('projectStore editingSceneId（#400・場面編集の遷移ペイロード）', () => {
+  it('setEditingSceneId で場面 id を保持し、null でクリアできる（既定は null）', () => {
+    useProjectStore.setState({ editingSceneId: null });
+    expect(useProjectStore.getState().editingSceneId).toBeNull(); // 既定＝先頭場面フォールバック
+    useProjectStore.getState().setEditingSceneId('scene_007');
+    expect(useProjectStore.getState().editingSceneId).toBe('scene_007'); // 遷移元が指定した場面
+    useProjectStore.getState().setEditingSceneId(null);
+    expect(useProjectStore.getState().editingSceneId).toBeNull();
+  });
+});

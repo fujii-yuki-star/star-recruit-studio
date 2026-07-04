@@ -211,7 +211,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  // 遷移元（たたき台の行・仕上がり確認等）が指定した場面で開く（#400・onNavigate はペイロードを運べないため store 経由）。
+  // 初期化子は初回マウント時のみ評価＝画面遷移で必ず再マウントするので毎回最新の editingSceneId を拾う。null/不在は先頭場面へフォールバック。
+  const editingSceneId = useProjectStore((s) => s.editingSceneId);
+  const [selectedId, setSelectedId] = useState(() => editingSceneId ?? "");
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
   // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
