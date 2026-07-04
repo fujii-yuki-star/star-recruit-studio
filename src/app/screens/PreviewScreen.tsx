@@ -39,7 +39,8 @@ function formatDuration(sec: number): string {
 }
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
-  const { status, scenes, templates, parts, assets, meta, generate, narrationAudioById, setEditingSceneId } =
+  // narrationAudioById は再生 effect が getState でスナップショット読みするため購読しない（#382・参照変化で再描画/再起動しない）。
+  const { status, scenes, templates, parts, assets, meta, generate, setEditingSceneId } =
     useProjectStore();
   const bgmSettings = meta.bgmSettings;
   const [range, setRange] = useState<RangeMode>("all");
@@ -80,17 +81,27 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // 停止中は場面頭(t=0)の表示を描画時に導出する。区間は書き出しの enable='between' と同一（パリティ）。
   // 並行テロップ（③(8)）＝時刻ごとに有効な全テロップ（段付き）を表示する。
   const [playbackTelops, setPlaybackTelops] = useState<{ text: string; row: number }[]>([]);
+  // テロップ切替タイマーも「開始時点のスナップショット」で組む（#382）。currentTelops は scenes 参照変化で
+  // 別オブジェクトに作り直されるため、内容が同じでも参照差で再起動→タイマーが再生位置基準でずれていた。
+  // 最新値は ref で読み（render 中の代入は禁止＝同期は effect で）、deps は内容シグネチャ（telopSig）にする。
+  const currentTelopsRef = useRef(currentTelops);
+  const telopSig = useMemo(() => JSON.stringify(currentTelops), [currentTelops]);
+  useEffect(() => {
+    currentTelopsRef.current = currentTelops;
+  }, [currentTelops]);
   useEffect(() => {
     if (!playing) return;
-    const bounds = [...new Set([0, ...currentTelops.flatMap((iv) => [iv.startSec, iv.endSec])])];
+    const telops = currentTelopsRef.current;
+    const bounds = [...new Set([0, ...telops.flatMap((iv) => [iv.startSec, iv.endSec])])];
     const timers = bounds
       .filter((b) => b >= 0)
-      .map((b) => window.setTimeout(() => setPlaybackTelops(activeTelopsAt(currentTelops, b)), b * 1000));
+      .map((b) => window.setTimeout(() => setPlaybackTelops(activeTelopsAt(telops, b)), b * 1000));
     return () => {
       timers.forEach((t) => window.clearTimeout(t));
       setPlaybackTelops([]); // 場面送り/停止で前場面の表示を持ち越さない
     };
-  }, [playing, safeIdx, currentTelops]);
+    // safeIdx（場面送り）と telopSig（テロップ内容の変化）でのみ再構成＝scenes の参照変化では再起動しない。
+  }, [playing, safeIdx, telopSig]);
   const activeTelops = playing ? playbackTelops : activeTelopsAt(currentTelops, 0);
 
   // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay 由来・AI/場面正準は不変）。
@@ -160,7 +171,11 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // 再生中：現在の場面のナレーションを鳴らし、表示時間後に次の場面へ。範囲の終端で停止。
   // 掛け合い（明示 lines）は行ごとに音声を順に鳴らし、経過秒で有効行（字幕/フレーム）を切り替える（ADR-0015 PR-F2）。
   useEffect(() => {
-    const sc = scenes[safeIdx];
+    // 再生開始時点のスナップショット（#382）＝store の現在値を getState で読む（subscribe しない）。
+    // 以降この再生セッションはこの値で進み、途中で scenes/narrationAudioById の参照が変わっても
+    // effect は再起動しない（自動保存・声のBG生成で場面を頭からやり直さない）。
+    const { scenes: scenesSnap, narrationAudioById } = useProjectStore.getState();
+    const sc = scenesSnap[safeIdx];
     if (!playing || !sc) return;
     const advance = (): void => {
       if (safeIdx < endIdx) setIdx(safeIdx + 1);
@@ -242,7 +257,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       window.clearTimeout(endTimer);
       audio?.pause();
     };
-  }, [playing, safeIdx, endIdx, scenes, narrationAudioById]);
+    // deps はプリミティブのみ（#382）：scenes/narrationAudioById は上の getState でスナップショット読みするため
+    // deps に含めない＝自動保存・声のBG生成での参照変化で再生を頭からやり直さない。endIdx は値が変わったときだけ再構成（範囲変更）。
+  }, [playing, safeIdx, endIdx]);
 
   // 再生中：選択した BGM をループで流す（仕上がり確認で雰囲気を確認できる）。場面送りでは止めない。
   // BGM 要素は ref を単一の真実とし、cleanup は ref を直接停止する（自分のBGMは URL 解決が非同期なので
