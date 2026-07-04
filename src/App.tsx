@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import "./styles/theme.css";
 import "./styles/fonts.css";
 import type { ScreenId } from "./app/data/mockData";
-import { useProjectStore } from "./app/store/projectStore";
+import { isExportBusy, useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
@@ -48,6 +48,8 @@ function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
+  // 書き出し中はヘッダの新規作成を無効化（切替で進行中の書き出しデータが壊れるのを防ぐ・#379）。
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const loadProject = useProjectStore((s) => s.loadProject);
   const loadUserTemplates = useProjectStore((s) => s.loadUserTemplates);
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
@@ -138,7 +140,12 @@ function App() {
               </button>
               {/* ホームには専用の大きな導線があるため、ヘッダの新規作成は重複回避でホーム以外に表示。 */}
               {screen !== "home" && (
-                <button className="btn btn-secondary" onClick={startNewProject}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={startNewProject}
+                  disabled={isExporting}
+                  title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}
+                >
                   新しい動画を作る
                 </button>
               )}

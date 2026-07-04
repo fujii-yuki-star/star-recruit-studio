@@ -7,6 +7,7 @@ use base64::Engine as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
 
 // 既定FPS（videoSettings.fps の正典は project.json。B2でフロントから受け取る予定）。
@@ -1401,7 +1402,12 @@ fn export_frames_stage_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
             "動画の保存中に問題が発生しました。もう一度お試しください。",
         )
     })?;
-    Ok(base.join("exports").join(".frames_stage"))
+    // プロセス単位に分ける（#379）：アプリ二重起動や dev/packaged 同時起動でステージを共有して相互破壊しないよう
+    // pid で隔離。stage_export_frame も export_video も同一プロセスの pid を使うので値は一致し、clear は自分の分だけ消す。
+    Ok(base
+        .join("exports")
+        .join(".frames_stage")
+        .join(format!("proc_{}", std::process::id())))
 }
 
 /// ステージ用ディレクトリ名の検証（英数字と _ のみ＝パストラバーサル防止。フロントは `scene_frames_<n>` を渡す）。
@@ -1622,6 +1628,17 @@ pub struct ExportReport {
 }
 
 /// 場面PNG群を受け取り、実MP4を output_path に書き出す（H.264/MP4）。
+/// 書き出しが同時に2本走らないための実行中フラグ（#379）。フロントの busy 制御に加えた保険＝
+/// 二重 invoke（画面遷移で進捗表示が消え再度押す等）や競合を Rust 側でも弾き、共有作業ディレクトリの
+/// 相互破壊を防ぐ。RAII で必ず解除する（早期 return・エラー・パニックでも Drop で false へ戻る）。
+static EXPORT_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+struct ExportInFlightGuard;
+impl Drop for ExportInFlightGuard {
+    fn drop(&mut self) {
+        EXPORT_IN_FLIGHT.store(false, Ordering::SeqCst);
+    }
+}
+
 /// 数分に及ぶ FFmpeg パイプライン（場面エンコード→xfade結合→テロップ→BGM）は同期・ブロッキングのため、
 /// 同期コマンドのままだとメインスレッド（UI イベントループ）を塞ぎ、ウィンドウが「応答なし」になる（#375）。
 /// async コマンド＋spawn_blocking でブロッキング専用スレッドへ退避し、UI を生かす。
@@ -1666,6 +1683,19 @@ fn export_video_impl(
     output_path: Option<String>,
     telops: Option<Vec<TelopInput>>,
 ) -> Result<ExportReport, String> {
+    // すでに別の書き出しが走っていれば弾く（二重実行での作業ディレクトリ相互破壊を防ぐ・#379）。
+    // 取得できたら以降の全経路で RAII ガードが解除を保証する。
+    if EXPORT_IN_FLIGHT
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err(export_failure(
+            "export already in flight",
+            "すでに書き出し中です。完了までお待ちください。",
+        ));
+    }
+    let _in_flight = ExportInFlightGuard;
+
     if scenes.is_empty() {
         return Err("書き出す場面がありません。".into());
     }
@@ -1681,7 +1711,9 @@ fn export_video_impl(
         "この端末では動画を書き出せません。お使いの Windows が N／KN 版の場合は「メディア機能パック」を追加してから、もう一度お試しください。解決しない場合はお問い合わせください。".to_string()
     })?;
 
-    let tmp = std::env::temp_dir().join("yuko_recruit_export");
+    // プロセス単位の作業ディレクトリ（#379）：固定名だと二重起動時に相手の中間ファイル（scene_NNN.mp4 等）を
+    // remove_dir_all で消し合い、無エラーで別内容が混ざった MP4 になり得た。pid で隔離し自分の前回残骸だけ掃除する。
+    let tmp = std::env::temp_dir().join(format!("yuko_recruit_export_{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).map_err(|e| {
         export_failure(
