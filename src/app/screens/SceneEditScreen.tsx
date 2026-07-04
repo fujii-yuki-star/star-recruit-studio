@@ -212,9 +212,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
   // 遷移元（たたき台の行・仕上がり確認等）が指定した場面で開く（#400・onNavigate はペイロードを運べないため store 経由）。
-  // 初期化子は初回マウント時のみ評価＝画面遷移で必ず再マウントするので毎回最新の editingSceneId を拾う。null/不在は先頭場面へフォールバック。
-  const editingSceneId = useProjectStore((s) => s.editingSceneId);
-  const [selectedId, setSelectedId] = useState(() => editingSceneId ?? "");
+  // 「一度きりのペイロード」：初期化子で読み（render 中＝下の破棄 effect より前に評価されるので必ず値を捕捉）、
+  // マウント直後に破棄する。破棄しないと、この後 editingSceneId を set しない別導線（たたき台の主要CTA・
+  // タイムライン/公開前チェックの「場面を直す」）で残留値が誤採用される（#400 レビュー）。null/不在は先頭場面へ。
+  // subscribe せず getState で読む＝破棄時の再描画を避ける（selectedId は state 保持されるので消えない）。
+  const [selectedId, setSelectedId] = useState(() => useProjectStore.getState().editingSceneId ?? "");
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
   // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
@@ -301,6 +303,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   // 取り消し/やり直し（#211・ADR-0020）のキーボード入口はタイムライン編集と共有のフックへ集約（挙動を揃える・#255 レビュー対応）。
   useUndoRedoShortcuts();
+
+  // 場面編集を開く「一度きりのペイロード」editingSceneId を消費後に破棄する（#400 レビュー）。
+  // 初期化子（上）が捕捉した後にマウント直後で null へ戻す＝editingTemplateId が backToList で戻すのと同じ規律。
+  // これで editingSceneId を set しない他導線は「未指定＝先頭場面」の決定的挙動に戻る。getState 経由で依存なし・1回のみ。
+  useEffect(() => {
+    useProjectStore.getState().setEditingSceneId(null);
+  }, []);
 
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];

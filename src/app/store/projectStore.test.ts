@@ -319,4 +319,15 @@ describe('projectStore editingSceneId（#400・場面編集の遷移ペイロー
     useProjectStore.getState().setEditingSceneId(null);
     expect(useProjectStore.getState().editingSceneId).toBeNull();
   });
+
+  it('一度きりのペイロード：消費（読み取り→破棄）後は残留せず、次の未指定遷移で先頭場面に落ちる（#400 レビュー）', () => {
+    // 遷移元が場面7を指定
+    useProjectStore.getState().setEditingSceneId('scene_007');
+    // SceneEditScreen マウント相当：初期化子で読み、直後に破棄する（consume-once）
+    const consumed = useProjectStore.getState().editingSceneId;
+    useProjectStore.getState().setEditingSceneId(null);
+    expect(consumed).toBe('scene_007'); // 捕捉できている
+    // 破棄後、editingSceneId を set しない別導線（主要CTA・タイムライン等）で再度開く相当
+    expect(useProjectStore.getState().editingSceneId).toBeNull(); // 残留しない＝初期化子は "" → 先頭場面へ
+  });
 });
