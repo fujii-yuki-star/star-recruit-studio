@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
@@ -69,6 +69,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
   const editing = templates.find((t) => t.templateId === editingTemplateId) ?? null;
   const yukoPoseTags = buildYukoPoseTags(assets);
+  // レイヤーごとの既定素材 file input（レイヤー単位で複数あるため id 単一の useRef でなく id→要素のマップ・#412）。
+  const defaultAssetInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const [draft, setDraft] = useState<Template | null>(() => (editing ? cloneTemplate(editing) : null));
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
@@ -242,8 +244,25 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           </div>
         ) : (
           <>
-            <input id={`tmplAsset_${l.id}`} type="file" accept="image/*" hidden disabled={busy} onChange={(e) => void onPickDefaultAsset(l.id, e)} />
-            <label htmlFor={`tmplAsset_${l.id}`} className="btn btn-secondary text-sm" style={{ cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1, alignSelf: "flex-start" }}>素材を選ぶ</label>
+            {/* label htmlFor でなく button＝Tab フォーカス・:disabled の共通見た目が効く（#412）。
+                レイヤーごとに input があるため ref マップ（id→要素）で click（他2画面の useRef と同じ ref 経由に統一）。 */}
+            <input
+              ref={(el) => { defaultAssetInputs.current[l.id] = el; }}
+              type="file"
+              accept="image/*"
+              hidden
+              disabled={busy}
+              onChange={(e) => void onPickDefaultAsset(l.id, e)}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary text-sm"
+              style={{ alignSelf: "flex-start" }}
+              disabled={busy}
+              onClick={() => defaultAssetInputs.current[l.id]?.click()}
+            >
+              素材を選ぶ
+            </button>
             <p className="field-hint" style={{ marginTop: 2 }}>このテンプレを使うと、場面に素材が無いときこの画像が入ります。</p>
           </>
         )}

@@ -227,6 +227,8 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     <button
                       key={opt.id}
                       className="action-card"
+                      // 選択中は色だけでなく aria-pressed でも伝える（キーボード/読み上げ・#412）
+                      aria-pressed={videoKind === opt.id}
                       style={{
                         borderColor: videoKind === opt.id ? "var(--color-primary)" : undefined,
                         background: videoKind === opt.id ? "var(--color-primary-soft)" : undefined,
@@ -244,6 +246,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     <button
                       key={opt.id}
                       className="action-card"
+                      aria-pressed={purpose === opt.id}
                       style={{
                         borderColor:
                           purpose === opt.id ? "var(--color-primary)" : undefined,
@@ -263,6 +266,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     <button
                       key={opt.id}
                       className="action-card"
+                      aria-pressed={aspectRatio === opt.id}
                       style={{
                         borderColor: aspectRatio === opt.id ? "var(--color-primary)" : undefined,
                         background: aspectRatio === opt.id ? "var(--color-primary-soft)" : undefined,
@@ -514,6 +518,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                           <button
                             key={t}
                             className="action-card"
+                            aria-pressed={tone === t}
                             style={{
                               borderColor: tone === t ? "var(--color-primary)" : undefined,
                               background: tone === t ? "var(--color-primary-soft)" : undefined,
@@ -661,6 +666,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     <button
                       key={v.id}
                       className="action-card"
+                      aria-pressed={voiceType === v.id}
                       style={{
                         borderColor:
                           voiceType === v.id ? "var(--color-primary)" : undefined,
