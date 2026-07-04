@@ -26,8 +26,10 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, scenes, parts, templates, assets, warnings, meta, generate, addScene, removeScene, moveScene, duplicateScene, changeOrientation } =
+  const { status, scenes, parts, templates, assets, warnings, meta, generate, addScene, removeScene, moveScene, duplicateScene, changeOrientation, setEditingSceneId } =
     useProjectStore();
+  // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
+  const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
   const aspectRatio = meta.videoSettings.aspectRatio;
   // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -182,13 +184,13 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                         >
                           複製
                         </button>
-                        <button className="btn btn-ghost btn-icon" title="セリフを直す" onClick={() => onNavigate("scene-edit")}>
+                        <button className="btn btn-ghost btn-icon" title="セリフを直す" onClick={() => editScene(row.id)}>
                           セリフ
                         </button>
-                        <button className="btn btn-ghost btn-icon" title="素材を変更" onClick={() => onNavigate("scene-edit")}>
+                        <button className="btn btn-ghost btn-icon" title="素材を変更" onClick={() => editScene(row.id)}>
                           素材
                         </button>
-                        <button className="btn btn-ghost btn-icon" title="見た目を変更" onClick={() => onNavigate("scene-edit")}>
+                        <button className="btn btn-ghost btn-icon" title="見た目を変更" onClick={() => editScene(row.id)}>
                           見た目
                         </button>
                         {confirmId === row.id ? (

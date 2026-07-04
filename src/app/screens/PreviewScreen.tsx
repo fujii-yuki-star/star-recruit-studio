@@ -39,7 +39,7 @@ function formatDuration(sec: number): string {
 }
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
-  const { status, scenes, templates, parts, assets, meta, generate, narrationAudioById } =
+  const { status, scenes, templates, parts, assets, meta, generate, narrationAudioById, setEditingSceneId } =
     useProjectStore();
   const bgmSettings = meta.bgmSettings;
   const [range, setRange] = useState<RangeMode>("all");
@@ -396,7 +396,14 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <button className="btn btn-ghost btn-block" onClick={() => onNavigate("timeline")}>
               タイムラインで見る
             </button>
-            <button className="btn btn-secondary btn-block" onClick={() => onNavigate("scene-edit")}>
+            <button
+              className="btn btn-secondary btn-block"
+              onClick={() => {
+                // いま表示中の場面を指定して場面編集を開く（#400）。
+                if (current) setEditingSceneId(current.sceneId);
+                onNavigate("scene-edit");
+              }}
+            >
               場面を直す
             </button>
             <button className="btn btn-primary btn-block btn-lg" onClick={() => onNavigate("precheck")}>
