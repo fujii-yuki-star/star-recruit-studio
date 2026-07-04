@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { isExportBusy, useProjectStore } from './projectStore';
 import * as fsMod from '../../infrastructure/projectFs';
+import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import type { Scene } from '../../domain/project/types';
@@ -370,10 +371,34 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     spy.mockRestore();
   });
 
-  it('newProject/loadProject は完了時に exportRun を idle へ戻す（前の結果を持ち越さない）', () => {
+  it('newProject は完了時に exportRun を idle へ戻す（前の結果を持ち越さない）', () => {
     useProjectStore.getState().setExportRun({ phase: 'done', resultPath: 'C:/out.mp4' });
     useProjectStore.getState().newProject(); // idle 中なので実行される
     expect(useProjectStore.getState().exportRun.phase).toBe('idle');
     expect(useProjectStore.getState().exportRun.resultPath).toBe('');
+  });
+
+  it('書き出し中は loadProject が no-op（loadProjectDoc に到達しない）／idle では読み込み成功＋exportRun リセット', async () => {
+    // アプリ自身の直列化で正当な最小プロジェクト JSON を用意（parseProjectDoc/migrate を確実に通す）。
+    const validDoc = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
+    const loadSpy = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(validDoc);
+    const setLastSpy = vi.spyOn(fsMod, 'setLastProjectId').mockImplementation(() => {});
+
+    // 書き出し中：早期 return で loadProjectDoc に到達しない＝切り替えをブロック。
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    await useProjectStore.getState().loadProject('proj_any');
+    expect(loadSpy).not.toHaveBeenCalled();
+
+    // idle（done は非busy）：読み込み成功し、前の結果を持ち越さず exportRun が idle にリセットされる。
+    useProjectStore.setState({
+      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '' },
+    });
+    await useProjectStore.getState().loadProject('proj_any');
+    expect(loadSpy).toHaveBeenCalledWith('proj_any');
+    expect(useProjectStore.getState().exportRun.phase).toBe('idle');
+    expect(useProjectStore.getState().exportRun.resultPath).toBe('');
+
+    loadSpy.mockRestore();
+    setLastSpy.mockRestore();
   });
 });

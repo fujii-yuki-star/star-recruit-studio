@@ -1627,7 +1627,6 @@ pub struct ExportReport {
     scene_count: usize,
 }
 
-/// 場面PNG群を受け取り、実MP4を output_path に書き出す（H.264/MP4）。
 /// 書き出しが同時に2本走らないための実行中フラグ（#379）。フロントの busy 制御に加えた保険＝
 /// 二重 invoke（画面遷移で進捗表示が消え再度押す等）や競合を Rust 側でも弾き、共有作業ディレクトリの
 /// 相互破壊を防ぐ。RAII で必ず解除する（早期 return・エラー・パニックでも Drop で false へ戻る）。
@@ -1639,6 +1638,7 @@ impl Drop for ExportInFlightGuard {
     }
 }
 
+/// 場面PNG群を受け取り、実MP4を output_path に書き出す（H.264/MP4）。
 /// 数分に及ぶ FFmpeg パイプライン（場面エンコード→xfade結合→テロップ→BGM）は同期・ブロッキングのため、
 /// 同期コマンドのままだとメインスレッド（UI イベントループ）を塞ぎ、ウィンドウが「応答なし」になる（#375）。
 /// async コマンド＋spawn_blocking でブロッキング専用スレッドへ退避し、UI を生かす。
