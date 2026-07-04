@@ -2,7 +2,8 @@ import { useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
+import type { ExportPhase } from "../store/projectStore";
 import { buildExportScenes } from "../../renderer/export/buildExportScenes";
 import { buildTelopOverlays } from "../../renderer/export/telopOverlays";
 import { findVideoSlot } from "../../renderer/export/findVideoSlot";
@@ -26,8 +27,6 @@ import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 interface ExportProps {
   onNavigate: (screen: ScreenId) => void;
 }
-
-type ExportPhase = "idle" | "rendering" | "encoding" | "done" | "error" | "unsupported";
 
 export function ExportScreen({ onNavigate }: ExportProps) {
   const scenes = useProjectStore((s) => s.scenes);
@@ -56,14 +55,19 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const hdDims = exportDimsForOrientation(aspectRatio, true);
   const outputSize = size === "hd" ? hdDims : fullDims;
 
-  const [phase, setPhase] = useState<ExportPhase>("idle");
-  const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const [resultPath, setResultPath] = useState("");
-  const [message, setMessage] = useState("");
+  // 書き出しの進行状態は store に持つ（#379）。他画面へ遷移して戻っても進捗が見え、書き出し中の
+  // 再実行・プロジェクト破壊操作を全画面でブロックできる。ローカル setter は store 更新へ委譲（本体は不変）。
+  const exportRun = useProjectStore((s) => s.exportRun);
+  const setExportRun = useProjectStore((s) => s.setExportRun);
+  const { phase, progress, resultPath, message, bgmWarning } = exportRun;
+  const setPhase = (phase: ExportPhase) => setExportRun({ phase });
+  const setProgress = (progress: { done: number; total: number }) => setExportRun({ progress });
+  const setResultPath = (resultPath: string) => setExportRun({ resultPath });
+  const setMessage = (message: string) => setExportRun({ message });
   // 選択済みBGMが読み込めなかったとき、完了画面で知らせる（§2-5・BGMなしで続行）。
-  const [bgmWarning, setBgmWarning] = useState<"" | "partial" | "all">("");
+  const setBgmWarning = (bgmWarning: "" | "partial" | "all") => setExportRun({ bgmWarning });
 
-  const busy = phase === "rendering" || phase === "encoding";
+  const busy = isExportBusy(phase);
 
   // assetId が未設定(null/undefined)なら一致せず undefined（assetId は非空文字）。
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
@@ -71,6 +75,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
 
   async function startExport() {
+    // 二重書き出しの入口ガード（#379）：ボタンは busy 中 disabled だが、他画面から戻って進捗表示が
+    // 消えて見える等での再トリガを store の実状態で弾く（Rust 側にも実行中ガードあり＝多層防御）。
+    if (busy) return;
     if (!canExport()) {
       setPhase("unsupported");
       return;

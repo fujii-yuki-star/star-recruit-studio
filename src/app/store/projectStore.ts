@@ -45,6 +45,27 @@ import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxPr
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
+/** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
+export type ExportPhase = "idle" | "rendering" | "encoding" | "done" | "error" | "unsupported";
+/** 書き出しの進行状態（#379）。画面横断で参照＝進捗の可視化・書き出し中の再実行/破壊操作ブロックに使う。 */
+export interface ExportRunState {
+  phase: ExportPhase;
+  progress: { done: number; total: number };
+  resultPath: string;
+  message: string;
+  bgmWarning: "" | "partial" | "all";
+}
+/** 書き出し中（rendering/encoding）か。再実行・プロジェクト切替/削除のブロック判定で共有（#379）。 */
+export function isExportBusy(phase: ExportPhase): boolean {
+  return phase === "rendering" || phase === "encoding";
+}
+const IDLE_EXPORT_RUN: ExportRunState = {
+  phase: "idle",
+  progress: { done: 0, total: 0 },
+  resultPath: "",
+  message: "",
+  bgmWarning: "",
+};
 /** 声設定の編集可能パラメータのみ（defaultVoiceId は必須なので更新対象から除外）。 */
 export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;
 /** BGM設定の編集可能フィールドのみ（assetId は取り込み時に確定するので更新対象から除外）。 */
@@ -180,6 +201,10 @@ interface ProjectState {
    *  たたき台の行ボタン・仕上がり確認「場面を直す」等が set→遷移し、SceneEditScreen が初期選択に使う。null=先頭場面。 */
   editingSceneId: string | null;
   setEditingSceneId: (sceneId: string | null) => void;
+  /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
+  exportRun: ExportRunState;
+  /** 書き出し状態を部分更新する（ExportScreen の setPhase/setProgress 等の単一入口）。 */
+  setExportRun: (patch: Partial<ExportRunState>) => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
@@ -344,6 +369,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   templateError: null,
   editingTemplateId: null,
   editingSceneId: null,
+  exportRun: IDLE_EXPORT_RUN,
   generate: async () => {
     // 多重起動ガード：開発時の StrictMode 二重 mount や連打で generate が同時に走ると、片方が失敗・片方が成功して
     // 「成功の前に失敗表示が出る」競合や、並行呼び出しによる API エラーを招く。生成中は1本だけに絞る（isImporting 等と同方針）。
@@ -389,7 +415,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   fail: () => set({ status: "error" }),
   reset: () => set({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null }),
-  newProject: () =>
+  newProject: () => {
+    // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
+    if (isExportBusy(get().exportRun.phase)) return;
     set({
       status: "idle",
       saveStatus: "idle",
@@ -405,7 +433,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       past: [], // 別文書＝履歴をクリア（ADR-0020）
       future: [],
       _historyGroupDepth: 0,
-    }),
+      exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
+    });
+  },
   // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
   // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。
   saveProject: async () => {
@@ -475,6 +505,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   loadProject: async (projectId) => {
+    // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
+    if (isExportBusy(get().exportRun.phase)) return;
     const text = await loadProjectDoc(projectId);
     const project = parseProjectDoc(text);
     // ディスクの素材を表示用 src に解決（Tauri は asset://・ブラウザは null）。filePath を持つもの・未配置のサンプル等は null でスキップ。並列実行（A3-2）。
@@ -550,11 +582,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       past: [], // 別文書を開く＝履歴をクリア（ADR-0020）
       future: [],
       _historyGroupDepth: 0,
+      exportRun: IDLE_EXPORT_RUN, // 別文書＝前の書き出し結果を持ち越さない
     });
     setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
   deleteProject: async (projectId) => {
+    // 書き出し中に当該（開いている）プロジェクトを消すと、素材ファイルが読取り中に消えて
+    // 写真の抜けた MP4 が正常完了してしまう（#379）。開いていない別プロジェクトの削除は安全なので許可。
+    if (isExportBusy(get().exportRun.phase) && get().meta.projectId === projectId) return;
     await deleteProjectDoc(projectId);
     // 削除したのが最後に開いたプロジェクトなら、次回起動の自動復元対象から外す（消えたものを開こうとしない）。
     if (getLastProjectId() === projectId) clearLastProjectId();
@@ -921,6 +957,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   clearTemplateError: () => set({ templateError: null }),
   setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),
   setEditingSceneId: (sceneId) => set({ editingSceneId: sceneId }),
+  setExportRun: (patch) => set((s) => ({ exportRun: { ...s.exportRun, ...patch } })),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。

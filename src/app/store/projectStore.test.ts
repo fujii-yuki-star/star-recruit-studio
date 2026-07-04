@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useProjectStore } from './projectStore';
+import { isExportBusy, useProjectStore } from './projectStore';
+import * as fsMod from '../../infrastructure/projectFs';
+import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import type { Scene } from '../../domain/project/types';
@@ -329,5 +331,74 @@ describe('projectStore editingSceneId（#400・場面編集の遷移ペイロー
     expect(consumed).toBe('scene_007'); // 捕捉できている
     // 破棄後、editingSceneId を set しない別導線（主要CTA・タイムライン等）で再度開く相当
     expect(useProjectStore.getState().editingSceneId).toBeNull(); // 残留しない＝初期化子は "" → 先頭場面へ
+  });
+});
+
+describe('projectStore 書き出し中の破壊操作ガード（#379）', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      meta: { ...useProjectStore.getState().meta, projectId: 'proj_open' },
+      scenes: [scene('scene_001', 1)],
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '' },
+    });
+  });
+
+  it('isExportBusy は rendering/encoding のみ真', () => {
+    expect(isExportBusy('idle')).toBe(false);
+    expect(isExportBusy('rendering')).toBe(true);
+    expect(isExportBusy('encoding')).toBe(true);
+    expect(isExportBusy('done')).toBe(false);
+    expect(isExportBusy('error')).toBe(false);
+  });
+
+  it('書き出し中は newProject が no-op（場面を破壊しない）／idle では実行される', () => {
+    useProjectStore.getState().setExportRun({ phase: 'encoding' });
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().scenes).toHaveLength(1); // 破壊されない
+    // idle に戻せば通常どおり新規化（場面クリア）
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().scenes).toHaveLength(0);
+  });
+
+  it('書き出し中は「開いているプロジェクト」の削除を弾く／別プロジェクトの削除は許可', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    const spy = vi.spyOn(fsMod, 'deleteProjectDoc').mockResolvedValue();
+    await useProjectStore.getState().deleteProject('proj_open'); // 開いている＝書き出し対象
+    expect(spy).not.toHaveBeenCalled(); // ディスク削除まで到達しない
+    await useProjectStore.getState().deleteProject('proj_other'); // 別プロジェクトは安全＝許可
+    expect(spy).toHaveBeenCalledWith('proj_other');
+    spy.mockRestore();
+  });
+
+  it('newProject は完了時に exportRun を idle へ戻す（前の結果を持ち越さない）', () => {
+    useProjectStore.getState().setExportRun({ phase: 'done', resultPath: 'C:/out.mp4' });
+    useProjectStore.getState().newProject(); // idle 中なので実行される
+    expect(useProjectStore.getState().exportRun.phase).toBe('idle');
+    expect(useProjectStore.getState().exportRun.resultPath).toBe('');
+  });
+
+  it('書き出し中は loadProject が no-op（loadProjectDoc に到達しない）／idle では読み込み成功＋exportRun リセット', async () => {
+    // アプリ自身の直列化で正当な最小プロジェクト JSON を用意（parseProjectDoc/migrate を確実に通す）。
+    const validDoc = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
+    const loadSpy = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(validDoc);
+    const setLastSpy = vi.spyOn(fsMod, 'setLastProjectId').mockImplementation(() => {});
+
+    // 書き出し中：早期 return で loadProjectDoc に到達しない＝切り替えをブロック。
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    await useProjectStore.getState().loadProject('proj_any');
+    expect(loadSpy).not.toHaveBeenCalled();
+
+    // idle（done は非busy）：読み込み成功し、前の結果を持ち越さず exportRun が idle にリセットされる。
+    useProjectStore.setState({
+      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '' },
+    });
+    await useProjectStore.getState().loadProject('proj_any');
+    expect(loadSpy).toHaveBeenCalledWith('proj_any');
+    expect(useProjectStore.getState().exportRun.phase).toBe('idle');
+    expect(useProjectStore.getState().exportRun.resultPath).toBe('');
+
+    loadSpy.mockRestore();
+    setLastSpy.mockRestore();
   });
 });

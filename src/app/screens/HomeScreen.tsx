@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { YukoPanel } from "../components/YukoPanel";
@@ -27,6 +27,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
   const loadProject = useProjectStore((s) => s.loadProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
+  // 書き出し中はプロジェクトの切替/削除/新規をブロック（#379）。store 側も no-op で守るが、UI でも無効化して
+  // 「削除→一覧から消える（実体は残る）」等の不整合と誤操作を防ぐ。
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const renameProject = useProjectStore((s) => s.renameProject);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   // 「新しい動画を作る」はヘッダと同じ破棄ガード付きフロー（共有フックで挙動統一）。
@@ -40,7 +43,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   const [deleteError, setDeleteError] = useState(false);
 
   async function removeProject(projectId: string) {
-    if (deleteBusy) return;
+    if (deleteBusy || isExporting) return; // 書き出し中は削除しない（no-op 後に一覧だけ消える不整合を防ぐ・#379）
     setDeleteBusy(true);
     setDeleteError(false);
     try {
@@ -103,6 +106,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   }, [listProjects]);
 
   async function openProject(projectId: string) {
+    if (isExporting) return; // 書き出し中は切替をブロック（loadProject は no-op・遷移もしない・#379）
     setOpenError(false);
     try {
       await loadProject(projectId);
@@ -134,6 +138,14 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </div>
           )}
 
+          {isExporting && (
+            <div className="notice notice-info mb" role="status">
+              <span>
+                動画の書き出し中です。終わるまで、新しい動画づくり・プロジェクトの切り替え・削除はできません（完了までお待ちください）。
+              </span>
+            </div>
+          )}
+
           {confirmNew && (
             <div className="notice notice-warn mb" role="alert">
               <span>
@@ -161,7 +173,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 伝えたい内容と写真・動画を入れると、ゆうこが動画のたたき台を作ります。
                 内容を確認・修正してから、動画として保存できます。
               </p>
-              <button className="btn btn-primary btn-lg mt" onClick={startNew}>
+              <button className="btn btn-primary btn-lg mt" onClick={startNew} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}>
                 <PlusIcon size={20} />
                 新しい動画を作る
               </button>
@@ -177,7 +189,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
 
           {/* クイック操作 */}
           <div className="card-grid cols-3 mb">
-            <button className="action-card" onClick={startNew}>
+            <button className="action-card" onClick={startNew} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}>
               <div
                 className="action-card-icon"
                 style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}
@@ -300,7 +312,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     <button
                       className="row gap-sm grow"
                       onClick={() => void openProject(p.projectId)}
-                      style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
+                      disabled={isExporting}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: isExporting ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
                       <div
                         className="thumb thumb-photo"
@@ -329,12 +343,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     </button>
                     <button
                       className="btn btn-ghost btn-icon"
+                      disabled={isExporting}
                       onClick={() => {
                         setDeletingId(p.projectId);
                         setDeleteError(false);
                       }}
                       aria-label={`「${p.projectName || "無題のプロジェクト"}」を削除`}
-                      title="削除"
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : "削除"}
                     >
                       <TrashIcon size={18} />
                     </button>
