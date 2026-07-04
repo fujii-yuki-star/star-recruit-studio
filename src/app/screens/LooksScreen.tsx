@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
@@ -67,6 +67,8 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   const [newName, setNewName] = useState("新しい見た目");
   const [newOrientation, setNewOrientation] = useState<Orientation>(ORIENTATION.landscape);
   const [newCategory, setNewCategory] = useState<SceneCategory>(SCENE_CATEGORIES[0]);
+  // 読み込みの file input（label htmlFor でなく button+ref.click()＝キーボードで押せる・BgmPicker と同方式・#412）
+  const packInputRef = useRef<HTMLInputElement>(null);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
 
   // 選択が変わったら削除確認は閉じる（別テンプレへ確認状態を持ち越さない）。描画中リセット＝effect 内 setState を避ける React 推奨パターン。
@@ -310,16 +312,16 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
 
           <hr className="divider" />
           <input
-            id="tmplPack"
+            ref={packInputRef}
             type="file"
             accept=".json,application/json"
             multiple
             hidden
             onChange={(e) => void onLoadPack(e)}
           />
-          <label htmlFor="tmplPack" className="btn btn-secondary" style={{ cursor: "pointer" }}>
+          <button type="button" className="btn btn-secondary" onClick={() => packInputRef.current?.click()}>
             見た目パターンを読み込む
-          </label>
+          </button>
           <p className="field-hint mt">用意した見た目パターンのファイルを追加できます。</p>
           {loadMsg && (
             <div className={`notice ${loadOk ? "notice-info" : "notice-warn"} mt`} role={loadOk ? "status" : "alert"}>

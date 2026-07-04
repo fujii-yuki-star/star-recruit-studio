@@ -298,6 +298,24 @@ button {
   white-space: nowrap;
 }
 
+/* 押せないボタンは全画面共通で「押せない見た目」に（#412）。
+   従来は :disabled の共通スタイルが無く、保存中/端に達した↑↓/準備中などが通常色+pointer のままだった。 */
+.btn:disabled,
+.nav-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* キーボード操作のフォーカス可視化（input/.textarea/.select の :focus リングと対・#412）。
+   マウスクリックでは出ない（:focus-visible）＝見た目のノイズを増やさない。 */
+.btn:focus-visible,
+.nav-item:focus-visible,
+.segment button:focus-visible,
+.switch:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .btn-primary {
   background: var(--color-primary);
   color: #fff;

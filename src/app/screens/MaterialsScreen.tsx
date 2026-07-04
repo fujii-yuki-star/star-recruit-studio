@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
 import { ASSET_TYPE } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
@@ -62,6 +62,8 @@ export function MaterialsScreen() {
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
+  // 画像差し替えの file input（label ラップでなく button+ref.click()＝キーボードで押せる・BgmPicker と同方式・#412）
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // 音声系（BGM/ナレーション）は「素材」一覧に出さない（BGMは書き出し画面で管理）。
   const materials = assets.filter(
@@ -200,23 +202,26 @@ export function MaterialsScreen() {
             {isVisual(selected.assetType) && (
               <div className="field">
                 <label className="field-label">画像</label>
-                {/* ネイティブの「ファイル未選択」表示を避け、設定済みかどうかが分かるボタンにする */}
-                <label
+                {/* ネイティブの「ファイル未選択」表示を避けたボタン。label ラップでなく button+ref.click()
+                    ＝Tab フォーカス・:disabled 見た目が効く（BgmPicker と同方式・#412） */}
+                <input
+                  ref={imageInputRef}
+                  key={selected.assetId}
+                  type="file"
+                  accept="image/*"
+                  onChange={onPickImage}
+                  disabled={isImporting}
+                  hidden
+                />
+                <button
+                  type="button"
                   className="btn btn-secondary"
-                  style={{ cursor: isImporting ? "default" : "pointer", opacity: isImporting ? 0.6 : 1 }}
-                  aria-disabled={isImporting}
+                  disabled={isImporting}
+                  onClick={() => imageInputRef.current?.click()}
                 >
                   <UploadIcon size={16} />
                   {assetSrcById[selected.assetId] ? "画像を変更する" : "画像を選ぶ"}
-                  <input
-                    key={selected.assetId}
-                    type="file"
-                    accept="image/*"
-                    onChange={onPickImage}
-                    disabled={isImporting}
-                    style={{ display: "none" }}
-                  />
-                </label>
+                </button>
                 <p className="text-sm text-muted" style={{ marginTop: 4 }}>
                   {assetSrcById[selected.assetId]
                     ? "この素材に画像を設定済みです（仕上がり確認の枠に表示）。差し替えるには「画像を変更する」から選び直してください。"

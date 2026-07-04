@@ -243,7 +243,16 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         ) : (
           <>
             <input id={`tmplAsset_${l.id}`} type="file" accept="image/*" hidden disabled={busy} onChange={(e) => void onPickDefaultAsset(l.id, e)} />
-            <label htmlFor={`tmplAsset_${l.id}`} className="btn btn-secondary text-sm" style={{ cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1, alignSelf: "flex-start" }}>素材を選ぶ</label>
+            {/* label htmlFor でなく button＝Tab フォーカス・:disabled の共通見た目が効く（#412）。レイヤーごとの map 内のため id 経由で click */}
+            <button
+              type="button"
+              className="btn btn-secondary text-sm"
+              style={{ alignSelf: "flex-start" }}
+              disabled={busy}
+              onClick={() => document.getElementById(`tmplAsset_${l.id}`)?.click()}
+            >
+              素材を選ぶ
+            </button>
             <p className="field-hint" style={{ marginTop: 2 }}>このテンプレを使うと、場面に素材が無いときこの画像が入ります。</p>
           </>
         )}
