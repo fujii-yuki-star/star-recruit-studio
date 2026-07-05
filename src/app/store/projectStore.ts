@@ -22,7 +22,7 @@ import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
-import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClient";
+import { willSendExternally } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
@@ -103,6 +103,12 @@ interface ProjectState {
   aiError: string | null;
   /** AI（鍵があれば実プロバイダ／無ければ Mock）→ 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
   generate: () => Promise<void>;
+  /**
+   * 画面に直接landしたときの自動たたき台生成（#384・§2-6）。status=idle かつ**外部送信にならない（Mock）**ときだけ生成する。
+   * 実プロバイダ（Gemini キーあり）では、送信前確認（ConfirmScreen）を通らない自動送信を避けて何もしない
+   * ＝画面は空状態のまま（利用者はウィザード→確認画面の同意フローへ）。Mock は従来どおり利便性のため生成する。
+   */
+  autoGenerateIfSafe: () => Promise<void>;
   /** デモ/テスト用にエラー状態へ。 */
   fail: () => void;
   reset: () => void;
@@ -255,11 +261,11 @@ function metaWithDuplicatedAnimations(meta: ProjectHeader, srcSceneId: string, n
   return { ...meta, timelineOverlay: { ...meta.timelineOverlay, animations: [...anims, ...copies] } };
 }
 
-// AI 構成案プロバイダの選択：Tauri かつ Gemini キーありなら実 Gemini、なければ Mock
-// （非Tauri／オフライン／鍵未設定のフォールバック＝ADR-0010）。
+// AI 構成案プロバイダの選択：外部送信になる構成（Tauri かつ Gemini キーあり）なら実 Gemini、なければ Mock
+// （非Tauri／オフライン／鍵未設定のフォールバック＝ADR-0010）。判定は willSendExternally に一元化（§2-6/§2-7）。
 // 実 AI を試みて失敗したときは Mock に倒さずエラーを伝播する（黙って差し替えない）。
 async function generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
-  if (isTauri() && (await hasApiKey(GEMINI_PROVIDER))) {
+  if (await willSendExternally()) {
     return new GeminiProvider(getAiModel()).generateVideoPlan(input);
   }
   return new MockAiProvider().generateVideoPlan(input);
@@ -370,6 +376,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   editingTemplateId: null,
   editingSceneId: null,
   exportRun: IDLE_EXPORT_RUN,
+  autoGenerateIfSafe: async () => {
+    // 画面に直接landしたときだけの自動生成（#384・§2-6）。既に生成済み/生成中なら何もしない。
+    if (get().status !== "idle") return;
+    // 外部送信になる構成（実 Gemini）では、送信前確認（ConfirmScreen）を通らない自動送信をしない。
+    // Mock（送信なし）のときだけ従来どおり自動生成する。判定は generate と同じ willSendExternally（§2-7）。
+    if (await willSendExternally()) return;
+    await get().generate();
+  },
   generate: async () => {
     // 多重起動ガード：開発時の StrictMode 二重 mount や連打で generate が同時に走ると、片方が失敗・片方が成功して
     // 「成功の前に失敗表示が出る」競合や、並行呼び出しによる API エラーを招く。生成中は1本だけに絞る（isImporting 等と同方針）。
