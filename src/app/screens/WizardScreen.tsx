@@ -180,6 +180,11 @@ export function WizardScreen({ onNavigate }: WizardProps) {
       setFormError("動画のテーマ・タイトルを入力してください。");
       return;
     }
+    // 採用は会社情報ステップで会社名未入力のまま進めない（schema は companyName 必須・minLength 1・#414・§2-5）。
+    if (step === 1 && videoKind === VIDEO_KIND.recruit && !companyName.trim()) {
+      setFormError("会社名を入力してください。");
+      return;
+    }
     setFormError(null);
     if (step < steps.length - 1) setStep(step + 1);
     else {

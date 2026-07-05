@@ -340,12 +340,11 @@ function defaultHeader(): ProjectHeader {
     createdAt: now,
     updatedAt: now,
     videoSettings: defaultVideoSettings(),
-    // 新規プロジェクトの既定（デモ用の会社情報）。ウィザードはこの meta を初期値に開く（単一の既定ソース）。
+    // 新規プロジェクトの会社情報は空で開く（#414・§2-6）。デモ値を既定にすると、未入力のまま進んだとき
+    // 「株式会社サンプル」の動画案ができ、実 AI キー設定時は無自覚のまま外部送信されてしまう。
+    // ウィザードは各欄の placeholder（例：株式会社サンプル）で入力を案内し、会社名は next() で必須にする。
     companyInfo: {
-      companyName: "株式会社サンプル",
-      industry: "IT・業務システム開発",
-      jobType: "エンジニア（新卒）",
-      strengths: ["相談しやすい環境", "若手が成長しやすい"],
+      companyName: "",
     },
     voiceSettings: defaultVoiceSettings(),
   };

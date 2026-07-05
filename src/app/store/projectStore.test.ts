@@ -399,6 +399,15 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     expect(useProjectStore.getState().exportRun.resultPath).toBe('');
   });
 
+  it('newProject の会社情報は空＝デモ会社を既定にしない（#414・§2-6）', () => {
+    useProjectStore.getState().setExportRun({ phase: 'idle' }); // ガードを外す
+    useProjectStore.getState().newProject();
+    const ci = useProjectStore.getState().meta.companyInfo;
+    expect(ci?.companyName).toBe(''); // 「株式会社サンプル」等を入れない
+    expect(ci?.industry ?? '').toBe('');
+    expect(ci?.strengths ?? []).toEqual([]);
+  });
+
   it('書き出し中は loadProject が no-op（loadProjectDoc に到達しない）／idle では読み込み成功＋exportRun リセット', async () => {
     // アプリ自身の直列化で正当な最小プロジェクト JSON を用意（parseProjectDoc/migrate を確実に通す）。
     const validDoc = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
