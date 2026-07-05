@@ -33,6 +33,8 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   const aspectRatio = meta.videoSettings.aspectRatio;
   // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  // 「作り直す」は手直し内容を丸ごと破棄して再生成する（Undo 不可＝generate は履歴を積まない）ので確認を挟む（#383）。
+  const [confirmRegen, setConfirmRegen] = useState(false);
   // 向き変更の結果メッセージ（§2-5：何が起きたか＋次の行動）。
   const [orientationMsg, setOrientationMsg] = useState<{ warn: boolean; text: string } | null>(null);
 
@@ -239,11 +241,38 @@ export function DraftScreen({ onNavigate }: DraftProps) {
             </button>
           </div>
 
+          {confirmRegen && (
+            <div className="notice notice-warn mt-lg" role="alert">
+              <span>
+                今の手直し内容（セリフの修正・場面の追加や削除など）は消えて、動画案を新しく作り直します。よろしいですか？
+              </span>
+              <div className="row gap-sm">
+                <button
+                  className="btn btn-primary btn-icon"
+                  onClick={() => {
+                    setConfirmRegen(false);
+                    void generate();
+                  }}
+                >
+                  <SparkleIcon size={16} />
+                  作り直す
+                </button>
+                <button className="btn btn-ghost btn-icon" onClick={() => setConfirmRegen(false)}>
+                  やめる
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* 主操作 */}
           <div className="row-between mt-lg">
-            <button className="btn btn-secondary" onClick={() => void generate()}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setConfirmRegen(true)}
+              disabled={status === "generating"}
+            >
               <SparkleIcon size={18} />
-              作り直す
+              {status === "generating" ? "作成中…" : "作り直す"}
             </button>
             <button
               className="btn btn-primary btn-lg"
