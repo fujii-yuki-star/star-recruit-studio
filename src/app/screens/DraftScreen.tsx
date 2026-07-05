@@ -26,7 +26,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, scenes, parts, templates, assets, warnings, meta, generate, addScene, removeScene, moveScene, duplicateScene, changeOrientation, setEditingSceneId } =
+  const { status, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, duplicateScene, changeOrientation, setEditingSceneId } =
     useProjectStore();
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
   const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
@@ -62,8 +62,8 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
   // たたき台へ直接来た場合は生成する（本実装では保存済みプロジェクトの読込に置き換え）
   useEffect(() => {
-    if (status === "idle") void generate();
-  }, [status, generate]);
+    void autoGenerateIfSafe(); // 自動生成は Mock（外部送信なし）のときだけ（#384・§2-6）。実プロバイダは空状態のまま。
+  }, [status, autoGenerateIfSafe]);
 
   const rows = scenes.map((s) => sceneToDraftRow(s, parts, templates, assets));
   const draftWarnings = warningsToDraftWarnings(warnings);

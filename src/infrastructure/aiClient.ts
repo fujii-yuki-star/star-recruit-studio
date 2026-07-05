@@ -32,6 +32,16 @@ export function hasApiKey(provider: string): Promise<boolean> {
   return invoke<boolean>('has_api_key', { provider });
 }
 
+/**
+ * この端末の構成でAI生成が「外部送信」になるか（実 Gemini＝端末外へ送信あり／Mock＝送信なし）。
+ * §2-6（外部送信は事前確認必須）のガードと、プロバイダ選択（store の generateVideoPlan）が共有する単一の判定。
+ * Tauri かつ鍵ありのときだけ true。非Tauri・鍵未設定は Mock 経路＝送信なし。
+ */
+export function willSendExternally(provider: string = GEMINI_PROVIDER): Promise<boolean> {
+  if (!isTauri()) return Promise.resolve(false);
+  return hasApiKey(provider);
+}
+
 /** 保存済みAPIキーを削除する。非Tauri（ブラウザ開発）では何もしない。 */
 export function deleteApiKey(provider: string): Promise<void> {
   if (!isTauri()) return Promise.resolve();

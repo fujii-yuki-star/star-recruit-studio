@@ -40,7 +40,7 @@ function formatDuration(sec: number): string {
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
   // narrationAudioById は再生 effect が getState でスナップショット読みするため購読しない（#382・参照変化で再描画/再起動しない）。
-  const { status, scenes, templates, parts, assets, meta, generate, setEditingSceneId } =
+  const { status, scenes, templates, parts, assets, meta, autoGenerateIfSafe, setEditingSceneId } =
     useProjectStore();
   const bgmSettings = meta.bgmSettings;
   const [range, setRange] = useState<RangeMode>("all");
@@ -56,9 +56,10 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // 再生中の BGM 要素（ループ再生・ミュート/音量を即時反映するため保持）。
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // 直接landしたときの自動生成は「外部送信にならない（Mock）とき」だけ（#384・§2-6）。実プロバイダは空状態のまま。
   useEffect(() => {
-    if (status === "idle") void generate();
-  }, [status, generate]);
+    void autoGenerateIfSafe();
+  }, [status, autoGenerateIfSafe]);
 
   // muted を ref に同期（render 中の ref 書込みを避けつつ、再生エフェクトを再起動させない）。BGM へは即時反映。
   useEffect(() => {

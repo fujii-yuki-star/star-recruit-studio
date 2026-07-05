@@ -193,7 +193,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
-    status, scenes, templates, assets, generate, updateScene, updateAsset, addAsset, addAssetByPath, importError, clearImportError,
+    status, scenes, templates, assets, autoGenerateIfSafe, updateScene, updateAsset, addAsset, addAssetByPath, importError, clearImportError,
     addScene, removeScene, splitScene, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
@@ -290,8 +290,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [narrationPlayError, setNarrationPlayError] = useState(false);
 
   useEffect(() => {
-    if (status === "idle") void generate();
-  }, [status, generate]);
+    void autoGenerateIfSafe(); // 自動生成は Mock（外部送信なし）のときだけ（#384・§2-6）。
+  }, [status, autoGenerateIfSafe]);
 
   // Escape で kind 別エディタのポップオーバーを閉じる。
   useEffect(() => {

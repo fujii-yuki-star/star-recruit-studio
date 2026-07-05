@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isExportBusy, useProjectStore } from './projectStore';
 import * as fsMod from '../../infrastructure/projectFs';
+import * as aiClient from '../../infrastructure/aiClient';
 import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
@@ -420,5 +421,50 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
 
     loadSpy.mockRestore();
     setLastSpy.mockRestore();
+  });
+});
+
+describe('projectStore autoGenerateIfSafe（#384・§2-6：自動生成が送信前確認を迂回しない）', () => {
+  const realGenerate = useProjectStore.getState().generate;
+  afterEach(() => {
+    useProjectStore.setState({ generate: realGenerate }); // 上書きした generate を戻す
+  });
+
+  it('外部送信になる構成（実プロバイダ）では自動生成しない＝送信前確認を迂回しない', async () => {
+    const genSpy = vi.fn(async () => {});
+    useProjectStore.setState({ status: 'idle', generate: genSpy });
+    const willSpy = vi.spyOn(aiClient, 'willSendExternally').mockResolvedValue(true);
+    await useProjectStore.getState().autoGenerateIfSafe();
+    expect(genSpy).not.toHaveBeenCalled(); // 端末外へ送らない
+    willSpy.mockRestore();
+  });
+
+  it('外部送信にならない（Mock）かつ idle なら自動生成する（直接landの利便性は維持）', async () => {
+    const genSpy = vi.fn(async () => {});
+    useProjectStore.setState({ status: 'idle', generate: genSpy });
+    const willSpy = vi.spyOn(aiClient, 'willSendExternally').mockResolvedValue(false);
+    await useProjectStore.getState().autoGenerateIfSafe();
+    expect(genSpy).toHaveBeenCalledTimes(1);
+    willSpy.mockRestore();
+  });
+
+  it('既に生成済み/生成中（status !== idle）なら Mock でも自動生成しない', async () => {
+    const genSpy = vi.fn(async () => {});
+    useProjectStore.setState({ status: 'ready', generate: genSpy });
+    const willSpy = vi.spyOn(aiClient, 'willSendExternally').mockResolvedValue(false);
+    await useProjectStore.getState().autoGenerateIfSafe();
+    expect(genSpy).not.toHaveBeenCalled();
+    willSpy.mockRestore();
+  });
+
+  it('外部送信判定が失敗（鍵ストアにアクセス不能等）したら fail-closed で自動生成しない＋reject しない（#384 レビュー）', async () => {
+    const genSpy = vi.fn(async () => {});
+    useProjectStore.setState({ status: 'idle', generate: genSpy });
+    const willSpy = vi.spyOn(aiClient, 'willSendExternally').mockRejectedValue(new Error('keyring fail'));
+    // unhandled rejection にせず正常終了する（void 呼び出しでも安全）。
+    await expect(useProjectStore.getState().autoGenerateIfSafe()).resolves.toBeUndefined();
+    // 判定不能→送らない（§2-6 厳守）。素通りして generate() を呼ばない＝再判定成功時の自動送信も起きない。
+    expect(genSpy).not.toHaveBeenCalled();
+    willSpy.mockRestore();
   });
 });
