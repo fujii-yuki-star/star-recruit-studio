@@ -381,7 +381,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (get().status !== "idle") return;
     // 外部送信になる構成（実 Gemini）では、送信前確認（ConfirmScreen）を通らない自動送信をしない。
     // Mock（送信なし）のときだけ従来どおり自動生成する。判定は generate と同じ willSendExternally（§2-7）。
-    if (await willSendExternally()) return;
+    // 判定自体が失敗（鍵ストアにアクセス不能等で reject）したときは fail-closed で「送らない」側に倒す
+    // ＝§2-6（外部送信は事前確認必須）を厳守。ここで generate() へ素通りさせると、再判定が成功した場合に
+    // 確認画面を通さず自動送信してしまうため素通りしない。unhandled rejection にしないよう try/catch で握る。
+    // 画面は空状態のまま（→ウィザードの導線）。エラー文言（§2-5）は能動的に生成を要求したとき＝generate() の catch が示す。
+    let external = true; // 判定不能時の既定＝送信しない側（fail-closed）
+    try {
+      external = await willSendExternally();
+    } catch {
+      // 判定不能（鍵ストアにアクセス不能等）＝external は初期値 true のまま＝送らない（fail-closed）。
+    }
+    if (external) return;
     await get().generate();
   },
   generate: async () => {

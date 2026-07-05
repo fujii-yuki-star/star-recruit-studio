@@ -456,4 +456,15 @@ describe('projectStore autoGenerateIfSafe（#384・§2-6：自動生成が送信
     expect(genSpy).not.toHaveBeenCalled();
     willSpy.mockRestore();
   });
+
+  it('外部送信判定が失敗（鍵ストアにアクセス不能等）したら fail-closed で自動生成しない＋reject しない（#384 レビュー）', async () => {
+    const genSpy = vi.fn(async () => {});
+    useProjectStore.setState({ status: 'idle', generate: genSpy });
+    const willSpy = vi.spyOn(aiClient, 'willSendExternally').mockRejectedValue(new Error('keyring fail'));
+    // unhandled rejection にせず正常終了する（void 呼び出しでも安全）。
+    await expect(useProjectStore.getState().autoGenerateIfSafe()).resolves.toBeUndefined();
+    // 判定不能→送らない（§2-6 厳守）。素通りして generate() を呼ばない＝再判定成功時の自動送信も起きない。
+    expect(genSpy).not.toHaveBeenCalled();
+    willSpy.mockRestore();
+  });
 });
