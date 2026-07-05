@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
 import { ASSET_TYPE } from "../../domain/enums";
+import { scenesUsingAsset } from "../../domain/project/assetUsage";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -58,10 +59,13 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen() {
-  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting } = useProjectStore();
+  const { assets, scenes, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
+  // 素材削除は取り消せない（assets は Undo 対象外＝ADR-0020）ので、他の削除と同様にインライン確認を挟む（#383）。
+  // id で持つ＝別の素材を選び直したら確認は自動的に解除される。
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   // 画像差し替えの file input（label ラップでなく button+ref.click()＝キーボードで押せる・BgmPicker と同方式・#412）
   const imageInputRef = useRef<HTMLInputElement>(null);
 
@@ -71,6 +75,8 @@ export function MaterialsScreen() {
   );
   const visible = materials.filter((a) => filter === "all" || a.assetType === filter);
   const selected = materials.find((a) => a.assetId === selectedId) ?? visible[0] ?? materials[0];
+  // 削除確認で「使っている場面数」を出す（空欄になる影響を事前に伝える・#383）。
+  const usedSceneCount = selected ? scenesUsingAsset(scenes, selected.assetId).length : 0;
 
   function addTag() {
     const v = newTag.trim();
@@ -292,10 +298,36 @@ export function MaterialsScreen() {
               />
             </div>
 
-            <button className="btn btn-danger btn-block mt" onClick={() => removeAsset(selected.assetId)}>
-              <TrashIcon size={16} />
-              この素材を削除
-            </button>
+            {confirmDeleteId === selected.assetId ? (
+              <div className="notice notice-warn mt" role="alert">
+                <span>
+                  「{selected.displayName || "この素材"}」を削除しますか？元に戻せません。
+                  {usedSceneCount > 0
+                    ? `使っている${usedSceneCount}つの場面は、この素材が空欄になります。`
+                    : "この素材はどの場面でも使われていません。"}
+                </span>
+                <div className="row gap-sm">
+                  <button
+                    className="btn btn-danger btn-icon"
+                    onClick={() => {
+                      removeAsset(selected.assetId);
+                      setConfirmDeleteId(null);
+                    }}
+                  >
+                    <TrashIcon size={16} />
+                    削除する
+                  </button>
+                  <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDeleteId(null)}>
+                    やめる
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button className="btn btn-danger btn-block mt" onClick={() => setConfirmDeleteId(selected.assetId)}>
+                <TrashIcon size={16} />
+                この素材を削除
+              </button>
+            )}
           </div>
         )}
       </div>

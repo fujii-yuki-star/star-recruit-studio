@@ -594,6 +594,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await deleteProjectDoc(projectId);
     // 削除したのが最後に開いたプロジェクトなら、次回起動の自動復元対象から外す（消えたものを開こうとしない）。
     if (getLastProjectId() === projectId) clearLastProjectId();
+    // 開いているプロジェクトを消したら編集状態も新規化する（#383）。そのままだと自動保存（useAutoSave）が
+    // 同じ projectId を書き戻し、「元に戻せません」の説明に反して一覧へ復活してしまう。書き出し中は上でブロック済み。
+    if (get().meta.projectId === projectId) get().newProject();
   },
   renameProject: async (projectId, newName) => {
     const name = newName.trim();

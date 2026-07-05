@@ -371,6 +371,26 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     spy.mockRestore();
   });
 
+  it('開いているプロジェクトを削除したら編集状態を新規化する（自動保存での復活防止・#383）', async () => {
+    const delSpy = vi.spyOn(fsMod, 'deleteProjectDoc').mockResolvedValue();
+    // proj_open を開いている状態（beforeEach で projectId=proj_open・場面1つ）
+    expect(useProjectStore.getState().meta.projectId).toBe('proj_open');
+    await useProjectStore.getState().deleteProject('proj_open');
+    expect(delSpy).toHaveBeenCalledWith('proj_open');
+    // 開いていた文書は新規化される＝以後の自動保存が同じ id を書き戻さない。
+    expect(useProjectStore.getState().meta.projectId).toBe('');
+    expect(useProjectStore.getState().scenes).toHaveLength(0);
+    delSpy.mockRestore();
+  });
+
+  it('開いていない別プロジェクトの削除では編集状態を触らない（#383）', async () => {
+    const delSpy = vi.spyOn(fsMod, 'deleteProjectDoc').mockResolvedValue();
+    await useProjectStore.getState().deleteProject('proj_other'); // 開いているのは proj_open
+    expect(useProjectStore.getState().meta.projectId).toBe('proj_open'); // 変わらない
+    expect(useProjectStore.getState().scenes).toHaveLength(1); // 場面も残る
+    delSpy.mockRestore();
+  });
+
   it('newProject は完了時に exportRun を idle へ戻す（前の結果を持ち越さない）', () => {
     useProjectStore.getState().setExportRun({ phase: 'done', resultPath: 'C:/out.mp4' });
     useProjectStore.getState().newProject(); // idle 中なので実行される
