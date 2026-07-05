@@ -305,7 +305,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     id="companyName"
                     className="input"
                     value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
+                    onChange={(e) => {
+                      setCompanyName(e.target.value);
+                      if (formError) setFormError(null); // 入力し始めたら必須エラーを消す（title 欄と同じ挙動・#414 レビュー）
+                    }}
                     placeholder="例：株式会社サンプル"
                   />
                 </div>
