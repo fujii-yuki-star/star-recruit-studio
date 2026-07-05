@@ -131,13 +131,17 @@ function App() {
             <div className="topbar-title">{titles[screen]}</div>
             <div className="topbar-actions">
               <SaveStatusBadge />
-              <button
-                className="btn btn-ghost"
-                onClick={() => void saveProject()}
-                disabled={saveStatus === "saving"}
-              >
-                {saveLabel}
-              </button>
+              {/* ウィザードはヘッダ保存を出さない（#401）。ヘッダ保存は applyForm を呼ばず入力を取りこぼす「保存トラップ」
+                  になるため、ウィザード自身の「ここまで保存」（applyForm＋saveProject）に一本化する。 */}
+              {screen !== "wizard" && (
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => void saveProject()}
+                  disabled={saveStatus === "saving"}
+                >
+                  {saveLabel}
+                </button>
+              )}
               {/* ホームには専用の大きな導線があるため、ヘッダの新規作成は重複回避でホーム以外に表示。 */}
               {screen !== "home" && (
                 <button

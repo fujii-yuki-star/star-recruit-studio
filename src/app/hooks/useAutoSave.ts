@@ -13,6 +13,7 @@ export function useAutoSave(): void {
   const saveStatus = useProjectStore((s) => s.saveStatus);
   const sceneCount = useProjectStore((s) => s.scenes.length);
   const assets = useProjectStore((s) => s.assets);
+  const meta = useProjectStore((s) => s.meta); // ウィザード入力（会社名/テーマ）も自動保存の対象に含める（#401）
   const editSeq = useProjectStore((s) => s.past.length); // 編集ごとに増える＝操作の合図（デバウンス再開に使う）
   const historyDepth = useProjectStore((s) => s._historyGroupDepth); // >0＝連続操作（ドラッグ等）の最中
   const saveProject = useProjectStore((s) => s.saveProject);
@@ -21,10 +22,10 @@ export function useAutoSave(): void {
     // idle（＝直近の編集で未保存）かつ内容があるときだけ自動保存。error は自動再試行しない・saving は多重起動しない。
     // 連続操作（ドラッグ＝履歴グループ）の最中は保留し、endHistoryGroup で depth が 0 に戻ってからデバウンス開始する
     // （グループ中は pushHistory が no-op で editSeq が動かず、長いドラッグの途中で保存が挟まるのを防ぐ・#256 レビュー🟡）。
-    if (saveStatus !== "idle" || historyDepth > 0 || !hasWorkInProgress(sceneCount, assets)) return;
+    if (saveStatus !== "idle" || historyDepth > 0 || !hasWorkInProgress(sceneCount, assets, meta)) return;
     const timer = window.setTimeout(() => {
       void saveProject();
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [saveStatus, editSeq, historyDepth, sceneCount, assets, saveProject]);
+  }, [saveStatus, editSeq, historyDepth, sceneCount, assets, meta, saveProject]);
 }

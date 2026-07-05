@@ -207,6 +207,10 @@ interface ProjectState {
    *  たたき台の行ボタン・仕上がり確認「場面を直す」等が set→遷移し、SceneEditScreen が初期選択に使う。null=先頭場面。 */
   editingSceneId: string | null;
   setEditingSceneId: (sceneId: string | null) => void;
+  /** ウィザードの現在ステップ（#401）。画面遷移/離脱でローカル state が消えても復元できるよう store に保持する。
+   *  サイドバー離脱→復帰・confirm「キャンセル」→ウィザードで、step0 に戻らず直前のステップを開く。新規/読込で 0。 */
+  wizardStep: number;
+  setWizardStep: (step: number) => void;
   /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
   exportRun: ExportRunState;
   /** 書き出し状態を部分更新する（ExportScreen の setPhase/setProgress 等の単一入口）。 */
@@ -374,6 +378,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   templateError: null,
   editingTemplateId: null,
   editingSceneId: null,
+  wizardStep: 0,
   exportRun: IDLE_EXPORT_RUN,
   autoGenerateIfSafe: async () => {
     // 画面に直接landしたときだけの自動生成（#384・§2-6）。既に生成済み/生成中なら何もしない。
@@ -456,6 +461,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       past: [], // 別文書＝履歴をクリア（ADR-0020）
       future: [],
       _historyGroupDepth: 0,
+      wizardStep: 0, // 新規＝ウィザードは先頭ステップから（#401）
       exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
     });
   },
@@ -605,6 +611,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       past: [], // 別文書を開く＝履歴をクリア（ADR-0020）
       future: [],
       _historyGroupDepth: 0,
+      wizardStep: 0, // 別文書＝ウィザードのステップも初期化（#401）
       exportRun: IDLE_EXPORT_RUN, // 別文書＝前の書き出し結果を持ち越さない
     });
     setLastProjectId(projectId);
@@ -983,6 +990,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   clearTemplateError: () => set({ templateError: null }),
   setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),
   setEditingSceneId: (sceneId) => set({ editingSceneId: sceneId }),
+  setWizardStep: (step) => set({ wizardStep: step }),
   setExportRun: (patch) => set((s) => ({ exportRun: { ...s.exportRun, ...patch } })),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ

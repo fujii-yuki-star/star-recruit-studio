@@ -408,6 +408,14 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     expect(ci?.strengths ?? []).toEqual([]);
   });
 
+  it('wizardStep は setWizardStep で保持し、newProject で 0 に戻る（#401）', () => {
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().setWizardStep(3);
+    expect(useProjectStore.getState().wizardStep).toBe(3); // 離脱/復帰でステップを復元するため保持
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().wizardStep).toBe(0); // 新規＝先頭ステップから
+  });
+
   it('書き出し中は loadProject が no-op（loadProjectDoc に到達しない）／idle では読み込み成功＋exportRun リセット', async () => {
     // アプリ自身の直列化で正当な最小プロジェクト JSON を用意（parseProjectDoc/migrate を確実に通す）。
     const validDoc = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
