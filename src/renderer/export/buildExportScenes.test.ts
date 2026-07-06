@@ -93,6 +93,24 @@ describe('buildExportScenes：ナレーション音声の付与', () => {
     expect(out.map((o) => o.audioBase64)).toEqual(['AUDIO_line_001', 'AUDIO_line_002']);
   });
 
+  it('掛け合い（静止画）で先頭行が途中開始なら先頭に「間」区間（音声なし・場面尺を保つ）が入る（#386・A案）', async () => {
+    const gapScene = {
+      sceneId: 's1', templateId: 'tpl', durationSec: 10,
+      lines: [
+        { lineId: 'line_001', text: 'やあ', startSec: 2, status: 'none' },
+        { lineId: 'line_002', text: 'どうも', startSec: 6, status: 'none' },
+      ],
+    } as unknown as Scene;
+    const out = await buildExportScenes([gapScene], templateById, noAsset, (_s, lineId) => ({
+      audioBase64: lineId ? `AUDIO_${lineId}` : undefined,
+      narrationVolume: 1,
+    }));
+    expect(out).toHaveLength(3); // 間 + 2行
+    expect(out.map((o) => o.durationSec)).toEqual([2, 4, 4]); // [0,2)間, [2,6), [6,10]
+    expect(out.map((o) => o.audioBase64)).toEqual([undefined, 'AUDIO_line_001', 'AUDIO_line_002']); // 間は音声なし
+    expect(out.reduce((s, o) => s + o.durationSec, 0)).toBe(10); // 合計＝場面尺（間を尊重＝短縮しない）
+  });
+
   it('単一 narration の場面は従来どおり1場面=1セグメント（後方互換）', async () => {
     const out = await buildExportScenes(scenes, templateById, noAsset, (s) => ({
       audioBase64: s.sceneId === 's1' ? 'A1' : undefined,
@@ -354,7 +372,7 @@ describe('buildExportScenes：掛け合い×動画スロット（行区間つき
     expect(out[0].durationSec).toBe(8); // 尺は場面のまま
   });
 
-  it('先頭行が途中開始でも表示窓は0秒から（プレビューの先頭行フォールバックと一致）・音声は行開始秒のまま', async () => {
+  it('先頭行が途中開始なら先頭に「間」の表示窓（字幕なし）が入り、先頭行は startSec から表示（#386・A案＝間を尊重）', async () => {
     const out = await buildExportScenes(
       dialogueScene([
         { lineId: 'line_001', text: 'a', startSec: 2, status: 'none' },
@@ -365,10 +383,16 @@ describe('buildExportScenes：掛け合い×動画スロット（行区間つき
       videoSlot,
     );
     const segs = out[0].video?.aboveSegments;
-    expect(segs?.[0]).toMatchObject({ startSec: 0, endSec: 5 }); // 窓は頭の空白ぶん前倒し
-    expect(segs?.[1]).toMatchObject({ startSec: 5, endSec: 8 });
-    // 音声は行開始秒（2）に配置＋窓は次行開始まで＝5-2=3秒で切り詰め（#385）。
-    expect(out[0].video?.narrationSegments?.[0]).toEqual({ audioBase64: 'A_line_001', delaySec: 2, windowSec: 3 });
+    // 頭空白 [0,2) は字幕なしの「間」区間。先頭行は 2 秒から（旧：先頭を 0 に伸ばして先頭字幕を頭出し、を廃止）。
+    expect(segs).toHaveLength(3);
+    expect(segs?.[0]).toMatchObject({ startSec: 0, endSec: 2 }); // 間（字幕なし）
+    expect(segs?.[1]).toMatchObject({ startSec: 2, endSec: 5 }); // 先頭行
+    expect(segs?.[2]).toMatchObject({ startSec: 5, endSec: 8 }); // 2行目
+    // 音声は行開始秒（2/5）に配置＋窓で切り詰め（#385）。間には音声を載せない（先頭は line_001 の delaySec=2）。
+    expect(out[0].video?.narrationSegments).toEqual([
+      { audioBase64: 'A_line_001', delaySec: 2, windowSec: 3 }, // [2,5)
+      { audioBase64: 'A_line_002', delaySec: 5, windowSec: 3 }, // [5,8)
+    ]);
   });
 
   it('行ごとにクレジット（splitVideoSceneSvg の第6引数）を渡して上PNGを焼く（#243 の併記を置き換え）', async () => {
@@ -524,6 +548,26 @@ describe('buildExportScenes：場面間トランジション（ADR-0009 T2）', 
     ] as unknown as Scene[];
     const out = await buildExportScenes(scenes, templateById, noAsset);
     expect(out[1].transition?.name).toBe('fade');
+  });
+
+  it('掛け合いの短い「間」＋入場遷移：現状は遷移尺が間の長さに clamp される（#386 の副作用・#430 で per-scene 化予定）', async () => {
+    const scenes = [
+      { sceneId: 's1', templateId: 'tpl', durationSec: 5 },
+      {
+        sceneId: 's2', templateId: 'tpl', durationSec: 10,
+        transition: { in: 'fade', durationSec: 1 }, // 希望1s
+        lines: [
+          { lineId: 'line_001', text: 'a', startSec: 0.5, status: 'none' }, // 間0.5s
+          { lineId: 'line_002', text: 'b', startSec: 4, status: 'none' },
+        ],
+      },
+    ] as unknown as Scene[];
+    const out = await buildExportScenes(scenes, templateById, noAsset);
+    // s2 は 間[0,0.5)/line0[0.5,4)/line1[4,10) の3セグメント。out[1]=間（場面の先頭）が入場遷移を持つ。
+    expect(out.map((o) => o.durationSec)).toEqual([5, 0.5, 3.5, 6]);
+    // 現状：希望1s が「間」の尺0.5s に clamp（d=min(1, acc=5, 0.5)=0.5・offset=5−0.5）。
+    // #430（per-scene xfade）で間を跨いで先頭行に重ね、設定尺1s を保つ予定（利用者判断 2026-07-06・切り替え尺を優先）。
+    expect(out[1].transition).toEqual({ name: 'fade', durationSec: 0.5, offsetSec: 4.5 });
   });
 });
 

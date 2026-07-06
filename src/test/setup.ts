@@ -19,6 +19,17 @@ if (typeof window !== "undefined" && typeof window.PointerEvent === "undefined")
   window.PointerEvent = PointerEventPolyfill as unknown as typeof PointerEvent;
 }
 
+// jsdom は ResizeObserver を実装しない。実寸計測（プレビュー等）を含むコンポーネントを描画できるよう
+// 何もしない最小実装で補う（実ブラウザ/happy-dom では既存を尊重）。
+if (typeof window !== "undefined" && typeof window.ResizeObserver === "undefined") {
+  class ResizeObserverPolyfill {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  window.ResizeObserver = ResizeObserverPolyfill as unknown as typeof ResizeObserver;
+}
+
 // 各テスト後に描画ツリーを破棄（テスト間の DOM リークを防ぐ）。
 // node 環境（document なし）では RTL を読み込まない＝既存テストへ無影響。
 afterEach(async () => {
