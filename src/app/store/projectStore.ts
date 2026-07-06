@@ -109,6 +109,11 @@ interface ProjectState {
    * ＝画面は空状態のまま（利用者はウィザード→確認画面の同意フローへ）。Mock は従来どおり利便性のため生成する。
    */
   autoGenerateIfSafe: () => Promise<void>;
+  /** 生成の世代番号（#402・内部）。generate 開始で進め、cancelGeneration でも進める。
+   *  in-flight の generate は自分の世代が現行と一致するときだけ結果を反映する（キャンセル/後発生成で置換されたら破棄）。 */
+  _generationSeq: number;
+  /** 生成中のキャンセル（#402）。世代を進めて in-flight の結果適用を無効化し、既存の場面があれば ready・無ければ idle へ戻す。 */
+  cancelGeneration: () => void;
   /** デモ/テスト用にエラー状態へ。 */
   fail: () => void;
   reset: () => void;
@@ -379,6 +384,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   editingTemplateId: null,
   editingSceneId: null,
   wizardStep: 0,
+  _generationSeq: 0,
   exportRun: IDLE_EXPORT_RUN,
   autoGenerateIfSafe: async () => {
     // 画面に直接landしたときだけの自動生成（#384・§2-6）。既に生成済み/生成中なら何もしない。
@@ -402,7 +408,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 多重起動ガード：開発時の StrictMode 二重 mount や連打で generate が同時に走ると、片方が失敗・片方が成功して
     // 「成功の前に失敗表示が出る」競合や、並行呼び出しによる API エラーを招く。生成中は1本だけに絞る（isImporting 等と同方針）。
     if (get().status === "generating") return;
-    set({ status: "generating", aiError: null });
+    // 世代トークン（#402）：この生成の世代を記録し、結果を反映する前に「まだ現行か」を確認する。
+    // キャンセル/後発の生成で世代が進んでいたら結果を破棄する（裏で完走しても場面を置き換えない）。
+    const seq = get()._generationSeq + 1;
+    set({ status: "generating", aiError: null, _generationSeq: seq });
     try {
       // 会社情報・目的・素材はウィザードで反映済み（未経由なら既定値）。
       // 送信前確認（ConfirmScreen）の表示と AI へ渡す内容を一致させるため get() の実データを使う（§2-6）。
@@ -423,17 +432,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         assets,
         yukoPoseTags: buildYukoPoseTags(assets),
       });
+      if (get()._generationSeq !== seq) return; // キャンセル/後発生成で置換された＝結果を破棄（#402）
       const { parts, scenes, warnings } = transformVideoPlan(plan, {
         templates,
         assets,
         // プロジェクトの向き（縦/横）に一致するテンプレへ補正する（ADR-0012・B4）。
         orientation: meta.videoSettings.aspectRatio,
       });
+      if (get()._generationSeq !== seq) return; // 変換中にキャンセルされ得るので反映直前にも再確認（#402）
       set({ status: "ready", parts, scenes, warnings });
       // 動画案ができたら未生成のセリフ音声をバックグラウンドで自動生成（非ブロッキング・#176）。
       // 仕上がり確認へ着いた時点で成功分は鳴る。失敗場面は per-scene の「声を作り直す」で作り直せる。
       void get().generateAllNarrations();
     } catch (e) {
+      if (get()._generationSeq !== seq) return; // キャンセル済みなら失敗表示も出さない（#402）
       // 失敗の文言を保持し、UI が「次の行動」を出せるようにする（§2-5）。
       // Rust/プロバイダは §2-5 のユーザー向け文言で reject する（鍵未設定→設定へ／不適合→再試行 等）。
       const aiError =
@@ -441,12 +453,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ status: "error", aiError });
     }
   },
+  cancelGeneration: () => {
+    // in-flight の generate の結果適用を無効化し（世代を進める）、既存の下書きがあれば残す（ready）・
+    // 無ければ未生成（idle）へ戻す。GeneratingScreen の「キャンセル」から呼ぶ（#402）。
+    set((s) => ({
+      _generationSeq: s._generationSeq + 1,
+      status: s.scenes.length > 0 ? "ready" : "idle",
+    }));
+  },
   fail: () => set({ status: "error" }),
-  reset: () => set({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null }),
+  // reset/newProject/loadProject も世代を進めて in-flight の generate を無効化する（#402 レビュー）。
+  // キャンセル以外の経路（キャンセルせず離脱→ホームで新規/切替）でも、裏で走る旧生成が新しい状態を上書きしないように。
+  reset: () =>
+    set((s) => ({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null, _generationSeq: s._generationSeq + 1 })),
   newProject: () => {
     // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
     if (isExportBusy(get().exportRun.phase)) return;
-    set({
+    set((s) => ({
       status: "idle",
       saveStatus: "idle",
       meta: defaultHeader(),
@@ -463,7 +486,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupDepth: 0,
       wizardStep: 0, // 新規＝ウィザードは先頭ステップから（#401）
       exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
-    });
+      _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
+    }));
   },
   // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
   // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。
@@ -593,7 +617,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     for (const entry of [...voiceLoaded, ...lineVoiceLoaded]) {
       if (entry) narrationAudioById[entry[0]] = entry[1];
     }
-    set({
+    set((s) => ({
       status: "ready",
       saveStatus: "saved", // 読み込み直後はディスクと一致＝保存済み扱い（未保存検知の基準・#256）
       // 保存用ヘッダは projectHeaderFromProject に一元化（Project のヘッダ系フィールドの取りこぼしを防ぐ・#324）。
@@ -613,7 +637,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupDepth: 0,
       wizardStep: 0, // 別文書＝ウィザードのステップも初期化（#401）
       exportRun: IDLE_EXPORT_RUN, // 別文書＝前の書き出し結果を持ち越さない
-    });
+      _generationSeq: s._generationSeq + 1, // 別文書へ切替＝in-flight の旧生成を無効化（#402 レビュー）
+    }));
     setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
