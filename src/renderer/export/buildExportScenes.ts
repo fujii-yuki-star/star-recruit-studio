@@ -346,7 +346,8 @@ export async function buildExportScenes(
         // アニメ場面（④・ADR-0019 per-frame）：animations があり動画スロットを伴わない場面はフレーム列に焼く。
         // 掛け合いは**行セグメントごと**に、単一 narration は1区間として毎フレーム描画する（③）。適用可否は
         // preview（ScenePreview 経由）と共有の sceneAnimationActive で判定＝両者一致（ADR-0001 パリティ）。
-        // 動画スロット併用のアニメは引き続き後続段（映像合成との両立が要る）＝静止/セグメント経路。
+        // 動画スロット×アニメ（非掛け合い）は上の video 経路で下/中/上の静止層を per-frame 化して対応済み（#435）。
+        // ここへ来るのは非動画か分割失敗のフォールバックのみ。掛け合い×動画／動画スロット本体のアニメは未対応（#442）。
         const sceneAnims = animationsFor?.(scene) ?? [];
         const animate = sceneAnimationActive(scene, sceneAnims, videoSlots.length > 0);
         const lineDurations: Record<string, number> = {};

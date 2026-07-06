@@ -621,9 +621,10 @@ pub struct VideoLayerArg<'a> {
     pub speed: f64,
 }
 
-/// 動画×アニメ（#435・非掛け合い）：最上層（前景=above）を per-frame の画像列で描く指定。
-/// Some のとき静止 aboves の代わりに image2 シーケンスを1本、最前面へ overlay する
-/// （eof_action=repeat で最終フレームを尺まで保持＝#376/frames_scene_args と同方針。背景/動画間は静止のまま）。
+/// 動画×アニメ（#435・非掛け合い）：静止層（下=below／動画間=mid／最上=above）を per-frame の画像列で描く指定。
+/// VideoSceneArgs の below_frames / mid_frames / above_frames で共有し、指定時は対応する静止PNGの代わりに
+/// image2 シーケンスを overlay する（below は tpad=stop_mode=clone、mid/above は eof_action=repeat で最終
+/// フレームを尺まで保持＝#376/frames_scene_args と同方針。動画スロット本体の位置/拡縮アニメは対象外＝基準位置固定・#442）。
 pub struct AboveFramesArg<'a> {
     /// image2 パターン（例 "<dir>/frame_%05d.png"）。
     pub pattern: &'a str,
