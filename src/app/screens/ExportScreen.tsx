@@ -6,7 +6,7 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import type { ExportPhase } from "../store/projectStore";
 import { buildExportScenes } from "../../renderer/export/buildExportScenes";
 import { buildTelopOverlays } from "../../renderer/export/telopOverlays";
-import { findVideoSlot } from "../../renderer/export/findVideoSlot";
+import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
@@ -148,8 +148,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         (scene) => {
           const t = templateById.get(scene.templateId);
           return t
-            ? findVideoSlot(scene, t, (id) => assets.find((a) => a.assetId === id))
-            : undefined;
+            ? findVideoSlots(scene, t, (id) => assets.find((a) => a.assetId === id))
+            : [];
         },
         (done, total) => setProgress({ done, total }),
         { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)), credit: creditForSpeaker(getVoicevoxSpeaker()) },

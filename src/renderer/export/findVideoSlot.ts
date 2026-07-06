@@ -10,7 +10,7 @@ import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
 export interface VideoSlotInfo {
-  /** 動画スロット層の id（下/上分割の境界・splitVideoSceneSvg に渡す）。 */
+  /** 動画スロット層の id（層の分割境界・splitVideoSceneSvg(Multi) に渡す）。 */
   slotLayerId: string;
   /** クリップのプロジェクト相対パス（asset.filePath）。Rust がファイルとして読む。 */
   clipRelPath: string;
@@ -43,24 +43,26 @@ function toVideoSlotInfo(id: string, asset: Asset, fitFallback: Fit | undefined)
 }
 
 /**
- * シーンの動画スロットを返す（無ければ undefined）。
+ * シーンの動画スロットを**すべて**返す（無ければ空配列・#431 複数動画スロット）。
  * FREE 場面は freeLayout の slot 要素（assetId 直接参照）、通常テンプレは slot 層＋assetRefs を見る。
+ * 返す順は layout 定義順（freeLayout 配列順／template.layers 順）＝zIndex 順序付けは描画側（splitVideoSceneSvgMulti）で行う。
  * @param assetById assetId → Asset 解決
  */
-export function findVideoSlot(
+export function findVideoSlots(
   scene: Scene,
   template: Template,
   assetById: (id: string) => Asset | undefined,
-): VideoSlotInfo | undefined {
+): VideoSlotInfo[] {
+  const out: VideoSlotInfo[] = [];
   // FREE 場面：freeLayout の slot 要素から動画を探す（要素 id を slotLayerId に＝矩形は layout が同 id で持つ）。
   if (template.category === FREE_CATEGORY) {
     for (const el of scene.freeLayout ?? []) {
       if (el.kind !== FREE_ELEMENT_KIND.slot || !el.assetId) continue;
       const asset = assetById(el.assetId);
       if (!asset || asset.assetType !== ASSET_TYPE.video) continue;
-      return toVideoSlotInfo(el.id, asset, el.fit);
+      out.push(toVideoSlotInfo(el.id, asset, el.fit));
     }
-    return undefined; // FREE は freeLayout のみ（通常の slot 層は持たない）
+    return out; // FREE は freeLayout のみ（通常の slot 層は持たない）
   }
   // 通常テンプレ：slot 層 + assetRefs。
   for (const layer of template.layers) {
@@ -71,7 +73,19 @@ export function findVideoSlot(
     if (!assetId) continue;
     const asset = assetById(assetId);
     if (!asset || asset.assetType !== ASSET_TYPE.video) continue;
-    return toVideoSlotInfo(layer.id, asset, layer.fit);
+    out.push(toVideoSlotInfo(layer.id, asset, layer.fit));
   }
-  return undefined;
+  return out;
+}
+
+/**
+ * シーンの動画スロットを1つ返す（先頭・無ければ undefined）。動画の有無判定（プレビューのアニメゲート等）に使う。
+ * 合成は findVideoSlots（複数・#431）を使う。
+ */
+export function findVideoSlot(
+  scene: Scene,
+  template: Template,
+  assetById: (id: string) => Asset | undefined,
+): VideoSlotInfo | undefined {
+  return findVideoSlots(scene, template, assetById)[0];
 }

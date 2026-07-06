@@ -26,6 +26,22 @@ export interface ExportVideoInput {
   originalVolume?: number;
   /** 再生速度（0.5–2.0・1.0=等速）。Rust 側で setpts/atempo に反映。 */
   speed: number;
+  /** 連続する動画レイヤーの間の静止層PNG（透過・base64・枚数＝動画本数−1・#431）。1動画では空/省略。 */
+  midLayers?: string[];
+  /** 2本目以降の動画レイヤー（zIndex 昇順・先頭動画の上・#431）。1動画では空/省略。先頭動画は上のフィールド。 */
+  videoLayers?: {
+    clipRelPath: string;
+    slotX: number;
+    slotY: number;
+    slotW: number;
+    slotH: number;
+    fit: Fit;
+    clipStartSec: number;
+    clipEndSec?: number;
+    useOriginalAudio: boolean;
+    originalVolume?: number;
+    speed: number;
+  }[];
 }
 
 /** 書き出す1場面の入力。静止画は pngBase64、動画ありは video、アニメ場面は framesBase64 を指定。 */
