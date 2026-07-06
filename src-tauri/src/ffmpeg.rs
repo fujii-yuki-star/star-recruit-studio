@@ -597,9 +597,12 @@ pub struct AbovePngArg<'a> {
 }
 
 /// ナレーション1本ぶんの配置指定。delay_sec 秒の位置に adelay 配置（0＝先頭＝従来の単一ナレーション）。
+/// window_sec=Some のとき、その行の窓（次の行の開始まで＝表示尺）で atrim 切り詰め＝前の行が次の行に
+/// 重なって鳴らない（掛け合い×動画・#385）。None=切り詰めない（単一ナレーション等・従来どおり）。
 pub struct NarrationArg<'a> {
     pub wav: &'a str,
     pub delay_sec: f64,
+    pub window_sec: Option<f64>,
 }
 
 /// 動画ありシーンの合成入力（ADR-0006）。下PNG→動画(slot)→上PNG(透過・1枚以上)を overlay し、
@@ -697,13 +700,20 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     };
     // ナレーション入力の先頭 index（0=below, 1=clip, 2..=aboves の直後）。
     let narr_base = 2 + a.aboves.len();
-    // 1本ぶんの前処理: volume → 必要なら adelay（行の開始秒へ配置・全チャンネル）。
-    let narr_chain = |idx: usize, delay_sec: f64| -> String {
+    // 1本ぶんの前処理: [窓で atrim 切り詰め →] volume → 必要なら adelay（行の開始秒へ配置・全チャンネル）。
+    // window_sec=Some の掛け合い×動画では、行の音声を窓（次の行の開始まで）で切る＝前の行が次の行に
+    // 重なって鳴らない（プレビューは次行開始で pause・静止画掛け合いはセグメント -t でカット＝#385）。
+    // atrim 後は asetpts=N/SR/TB で PTS を 0 起点へ戻してから adelay で配置する（mix_bgm と同方針）。
+    let narr_chain = |idx: usize, delay_sec: f64, window_sec: Option<f64>| -> String {
         let ms = (delay_sec * 1000.0).round() as i64;
+        let trim = match window_sec {
+            Some(w) => format!("atrim=0:{w},asetpts=N/SR/TB,"),
+            None => String::new(),
+        };
         if ms > 0 {
-            format!("[{idx}:a]volume={nv},adelay={ms}:all=1")
+            format!("[{idx}:a]{trim}volume={nv},adelay={ms}:all=1")
         } else {
-            format!("[{idx}:a]volume={nv}")
+            format!("[{idx}:a]{trim}volume={nv}")
         }
     };
     // apad で尺に満たない音声を無音で埋める（後段 -t {dur} で切る）。scene_clip_args と同じ方針で、
@@ -716,17 +726,24 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
             "anullsrc=channel_layout=stereo:sample_rate=44100[aout]".to_string()
         }
     } else if a.narrations.len() == 1 && !a.use_original_audio {
-        // 単一ナレーションのみ: amix 不要（delay 0 なら従来と同一のフィルタ文字列）。
+        // 単一ナレーションのみ: amix 不要（delay 0・window None なら従来と同一のフィルタ文字列）。
         format!(
             "{},apad[aout]",
-            narr_chain(narr_base, a.narrations[0].delay_sec)
+            narr_chain(
+                narr_base,
+                a.narrations[0].delay_sec,
+                a.narrations[0].window_sec
+            )
         )
     } else {
         // 複数ナレーション（掛け合い） or 元音声併用: 各ナレーションをラベル化して amix。
         let mut parts: Vec<String> = Vec::new();
         let mut labels = String::new();
         for (k, na) in a.narrations.iter().enumerate() {
-            parts.push(format!("{}[n{k}]", narr_chain(narr_base + k, na.delay_sec)));
+            parts.push(format!(
+                "{}[n{k}]",
+                narr_chain(narr_base + k, na.delay_sec, na.window_sec)
+            ));
             labels.push_str(&format!("[n{k}]"));
         }
         let mut inputs = a.narrations.len();
@@ -1072,9 +1089,11 @@ struct TimedAbove {
 }
 
 /// ナレーション1本の解決済みジョブ入力。delay_sec 秒に配置（0=先頭＝従来）。
+/// window_sec=Some のとき行の窓で atrim 切り詰め（掛け合い×動画・#385）。None=切り詰めない。
 struct TimedNarration {
     wav: PathBuf,
     delay_sec: f64,
+    window_sec: Option<f64>,
 }
 
 /// 動画ありシーンの解決済みジョブ（ADR-0006）。下/上PNGは tmp に書き出し済み、clip は絶対パス解決済み。
@@ -1191,16 +1210,23 @@ fn encode_jobs(
                     .iter()
                     .map(|(p, w)| AbovePngArg { png: p, window: *w })
                     .collect();
-                let narrs_s: Vec<(String, f64)> = v
+                let narrs_s: Vec<(String, f64, Option<f64>)> = v
                     .narrations
                     .iter()
-                    .map(|n| (n.wav.to_string_lossy().into_owned(), n.delay_sec))
+                    .map(|n| {
+                        (
+                            n.wav.to_string_lossy().into_owned(),
+                            n.delay_sec,
+                            n.window_sec,
+                        )
+                    })
                     .collect();
                 let narrations: Vec<NarrationArg> = narrs_s
                     .iter()
-                    .map(|(w, d)| NarrationArg {
+                    .map(|(w, d, win)| NarrationArg {
                         wav: w,
                         delay_sec: *d,
+                        window_sec: *win,
                     })
                     .collect();
                 video_scene_args(&VideoSceneArgs {
@@ -1579,13 +1605,17 @@ pub struct AboveSegmentInput {
     end_sec: f64,
 }
 
-/// 掛け合い×動画：行ナレーション入力（delay_sec 秒に配置）。
+/// 掛け合い×動画：行ナレーション入力（delay_sec 秒に配置・window_sec の窓で切り詰め＝#385）。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NarrationSegmentInput {
     audio_base64: String,
     #[serde(default)]
     delay_sec: f64,
+    /// 行の窓（次の行の開始まで＝表示尺）。この長さで atrim 切り詰め＝前の行が次の行に重ならない（#385）。
+    /// 省略時 None=切り詰めない（後方互換）。
+    #[serde(default)]
+    window_sec: Option<f64>,
 }
 
 /// 場面ごとBGMの1クリップ入力（ADR-0018 ③(7)・front の planBgmMix が配置＋フェードを算出）。data URL も可・volume は §6 で解決済み。
@@ -1793,12 +1823,15 @@ fn export_video_impl(
                     narrations.push(TimedNarration {
                         wav: p,
                         delay_sec: seg.delay_sec.max(0.0), // 負値は 0 に丸める
+                        // 窓は正のときだけ切り詰める（0/負は退化＝切らずに全尺再生＝無音化を避ける）。
+                        window_sec: seg.window_sec.filter(|&w| w > 0.0),
                     });
                 }
             } else if let Some(n) = narration {
                 narrations.push(TimedNarration {
                     wav: n,
                     delay_sec: 0.0,
+                    window_sec: None, // 場面単位の単一ナレーションは切り詰めない（従来どおり）
                 });
             }
             let clip = resolve_project_file(&app, pid, &v.clip_rel_path)?;
@@ -3092,6 +3125,7 @@ mod tests {
             narrations: &[NarrationArg {
                 wav: &narr,
                 delay_sec: 0.0,
+                window_sec: None,
             }],
             slot_x: 80,
             slot_y: 140,
@@ -3315,10 +3349,12 @@ mod tests {
                 NarrationArg {
                     wav: "l0.wav",
                     delay_sec: 0.0,
+                    window_sec: Some(4.0),
                 },
                 NarrationArg {
                     wav: "l1.wav",
                     delay_sec: 4.0,
+                    window_sec: Some(4.0),
                 },
             ],
             slot_x: 80,
@@ -3349,9 +3385,10 @@ mod tests {
         assert!(
             fc.contains("[bg2][3:v]overlay=0:0:eof_action=repeat:enable='gte(t,4)*lt(t,8)'[vout]")
         );
-        // 行ナレーション：2本目は adelay=4000ms で配置し、amix で1トラックへ。
-        assert!(fc.contains("[4:a]volume=1[n0]"));
-        assert!(fc.contains("[5:a]volume=1,adelay=4000:all=1[n1]"));
+        // 行ナレーション：各行を窓（4秒）で atrim 切り詰め＝前の行が次の行に重ならない（#385）。
+        // 2本目は adelay=4000ms で配置し、amix で1トラックへ。
+        assert!(fc.contains("[4:a]atrim=0:4,asetpts=N/SR/TB,volume=1[n0]"));
+        assert!(fc.contains("[5:a]atrim=0:4,asetpts=N/SR/TB,volume=1,adelay=4000:all=1[n1]"));
         assert!(fc.contains("[n0][n1]amix=inputs=2:duration=longest:normalize=0,apad[aout]"));
         // 行区間つき上PNG は単一フレーム入力（-loop は below の1回だけ）。
         assert_eq!(args.iter().filter(|s| *s == "-loop").count(), 1);
@@ -3379,10 +3416,12 @@ mod tests {
                 NarrationArg {
                     wav: "l0.wav",
                     delay_sec: 0.0,
+                    window_sec: Some(2.0),
                 },
                 NarrationArg {
                     wav: "l1.wav",
                     delay_sec: 2.0,
+                    window_sec: Some(3.0),
                 },
             ],
             slot_x: 0,
@@ -3406,8 +3445,9 @@ mod tests {
             .iter()
             .find(|s| s.contains("overlay"))
             .expect("filter_complex");
-        assert!(fc.contains("[4:a]volume=0.8[n0]"));
-        assert!(fc.contains("[5:a]volume=0.8,adelay=2000:all=1[n1]"));
+        // 各行を窓（2秒/3秒）で atrim 切り詰め（#385）。元音声は切り詰めず amix=inputs=3。
+        assert!(fc.contains("[4:a]atrim=0:2,asetpts=N/SR/TB,volume=0.8[n0]"));
+        assert!(fc.contains("[5:a]atrim=0:3,asetpts=N/SR/TB,volume=0.8,adelay=2000:all=1[n1]"));
         assert!(fc.contains("[1:a]volume=0.2[orig]"));
         assert!(fc.contains("[n0][n1][orig]amix=inputs=3:duration=longest:normalize=0,apad[aout]"));
     }
@@ -3425,6 +3465,7 @@ mod tests {
             narrations: &[NarrationArg {
                 wav: "n.wav",
                 delay_sec: 0.0,
+                window_sec: None,
             }],
             slot_x: 0,
             slot_y: 0,
@@ -3447,12 +3488,13 @@ mod tests {
             .iter()
             .find(|s| s.contains("overlay"))
             .expect("filter_complex");
-        // 映像・音声とも従来文字列（enable/adelay/amix を含まない）。
+        // 映像・音声とも従来文字列（enable/adelay/amix/atrim を含まない＝window None は切り詰めない）。
         assert!(fc.contains("[bg1][2:v]overlay=0:0[vout]"));
         assert!(fc.contains("[3:a]volume=1,apad[aout]"));
         assert!(!fc.contains("enable="));
         assert!(!fc.contains("adelay"));
         assert!(!fc.contains("amix"));
+        assert!(!fc.contains("atrim")); // 単一ナレーションは窓なし＝切り詰めない（#385・後方互換）
     }
 
     #[test]
@@ -3581,6 +3623,7 @@ mod tests {
             narrations: &[NarrationArg {
                 wav: &narr_s,
                 delay_sec: 0.0,
+                window_sec: None,
             }],
             slot_x: 40,
             slot_y: 30,
@@ -3653,10 +3696,12 @@ mod tests {
                 NarrationArg {
                     wav: &narr_s,
                     delay_sec: 0.0,
+                    window_sec: Some(1.0),
                 },
                 NarrationArg {
                     wav: &narr_s,
                     delay_sec: 1.0,
+                    window_sec: Some(1.0),
                 },
             ],
             slot_x: 40,
@@ -3784,6 +3829,7 @@ mod tests {
             narrations: vec![TimedNarration {
                 wav: narr,
                 delay_sec: 0.0,
+                window_sec: None,
             }],
             slot: (40, 30, 240, 180),
             fit: Fit::Cover,

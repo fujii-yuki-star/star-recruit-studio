@@ -36,8 +36,8 @@ export interface ExportVideoData {
   abovePngBase64?: string;
   /** 掛け合い×動画：行区間つき上PNG（字幕/クレジット差し替え・表示窓 [startSec, endSec)）。 */
   aboveSegments?: { pngBase64: string; startSec: number; endSec: number }[];
-  /** 掛け合い×動画：行ごとのナレーション（delaySec 秒に配置）。 */
-  narrationSegments?: { audioBase64: string; delaySec: number }[];
+  /** 掛け合い×動画：行ごとのナレーション（delaySec 秒に配置・windowSec の窓で切り詰め＝#385）。 */
+  narrationSegments?: { audioBase64: string; delaySec: number; windowSec: number }[];
   clipRelPath: string;
   slotX: number;
   slotY: number;
@@ -193,7 +193,7 @@ export async function buildExportScenes(
           }
           const specs = sceneSegmentSpecs(scene, lineDurations);
           const aboveSegments: { pngBase64: string; startSec: number; endSec: number }[] = [];
-          const narrationSegments: { audioBase64: string; delaySec: number }[] = [];
+          const narrationSegments: { audioBase64: string; delaySec: number; windowSec: number }[] = [];
           let narrationVolume: number | undefined;
           for (let k = 0; k < specs.length; k += 1) {
             const spec = specs[k];
@@ -222,7 +222,13 @@ export async function buildExportScenes(
             });
             const segNarration = spec.lineId ? narrationFor?.(scene, spec.lineId) : undefined;
             if (segNarration?.audioBase64) {
-              narrationSegments.push({ audioBase64: segNarration.audioBase64, delaySec: spec.startSec });
+              // windowSec=行の窓（次の行の開始まで＝表示尺）で音声を切る＝前の行が次の行に重ならない（#385・
+              // プレビューは次行開始で pause／静止画掛け合いはセグメント -t でカット＝パリティ）。
+              narrationSegments.push({
+                audioBase64: segNarration.audioBase64,
+                delaySec: spec.startSec,
+                windowSec: spec.durationSec,
+              });
               narrationVolume = segNarration.narrationVolume;
             }
           }

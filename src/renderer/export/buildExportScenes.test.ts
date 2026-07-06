@@ -344,10 +344,10 @@ describe('buildExportScenes：掛け合い×動画スロット（行区間つき
       { pngBase64: 'data:image/png;base64,PNG', startSec: 0, endSec: 4 },
       { pngBase64: 'data:image/png;base64,PNG', startSec: 4, endSec: 8 },
     ]);
-    // 行ナレーションは各行の開始秒（adelay）に配置。場面単位の audioBase64 は使わない。
+    // 行ナレーションは各行の開始秒（adelay）に配置＋窓（次行開始まで＝#385）で切り詰め。場面単位の audioBase64 は使わない。
     expect(out[0].video?.narrationSegments).toEqual([
-      { audioBase64: 'A_line_001', delaySec: 0 },
-      { audioBase64: 'A_line_002', delaySec: 4 },
+      { audioBase64: 'A_line_001', delaySec: 0, windowSec: 4 }, // [0,4)
+      { audioBase64: 'A_line_002', delaySec: 4, windowSec: 4 }, // [4,8)
     ]);
     expect(out[0].audioBase64).toBeUndefined();
     expect(out[0].narrationVolume).toBe(0.9);
@@ -367,7 +367,8 @@ describe('buildExportScenes：掛け合い×動画スロット（行区間つき
     const segs = out[0].video?.aboveSegments;
     expect(segs?.[0]).toMatchObject({ startSec: 0, endSec: 5 }); // 窓は頭の空白ぶん前倒し
     expect(segs?.[1]).toMatchObject({ startSec: 5, endSec: 8 });
-    expect(out[0].video?.narrationSegments?.[0]).toEqual({ audioBase64: 'A_line_001', delaySec: 2 }); // 音声は行開始
+    // 音声は行開始秒（2）に配置＋窓は次行開始まで＝5-2=3秒で切り詰め（#385）。
+    expect(out[0].video?.narrationSegments?.[0]).toEqual({ audioBase64: 'A_line_001', delaySec: 2, windowSec: 3 });
   });
 
   it('行ごとにクレジット（splitVideoSceneSvg の第6引数）を渡して上PNGを焼く（#243 の併記を置き換え）', async () => {
@@ -404,7 +405,7 @@ describe('buildExportScenes：掛け合い×動画スロット（行区間つき
       videoSlot,
     );
     expect(out[0].video?.aboveSegments).toHaveLength(2); // 表示窓は両行ぶん
-    expect(out[0].video?.narrationSegments).toEqual([{ audioBase64: 'A_line_001', delaySec: 0 }]);
+    expect(out[0].video?.narrationSegments).toEqual([{ audioBase64: 'A_line_001', delaySec: 0, windowSec: 4 }]);
   });
 });
 
