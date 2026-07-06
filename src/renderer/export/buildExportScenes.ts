@@ -89,9 +89,9 @@ export interface ExportSceneData {
   durationSec: number;
   audioBase64?: string;
   narrationVolume?: number;
-  /** 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声。指定時 Rust が audioBase64（ナレーション）と
-   *  amix する（動画がアニメ区間 [0,durSec] から再生される場合の元音声・useOriginalAudio 時のみ）。 */
-  clipAudio?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number };
+  /** 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声（**複数動画スロット対応＝各スロット1本**）。
+   *  非空のとき Rust が audioBase64（ナレーション）と全本を amix する（アニメ区間から再生される元音声・useOriginalAudio のスロットぶん）。 */
+  clipAudios?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number }[];
   video?: ExportVideoData;
   /** この場面に「入る」トランジション（ADR-0009 T2）。先頭場面・none では未設定（ハードカット）。 */
   transition?: { name: string; durationSec: number; offsetSec: number };
@@ -378,24 +378,25 @@ export async function buildExportScenes(
                 ),
               );
             }
-            // 窓の元音声（#442・既定=動画は先頭から再生）：実フレーム時のみ、最初に元音声ONのスロットの [clipStart,+W*speed)
-            // を Rust が amix（複数音声スロットは v1 で先頭のみ・settled は Video 経路で全スロット amix）。サムネ代替時は窓で動画は
-            // 鳴らない（settled から＝従来）。
-            const audioSlot = useRealFrames ? videoSlots.find((v) => v.useOriginalAudio) : undefined;
-            // 元音声もトリミングを尊重：窓で鳴らす尺は min(W, 残り再生秒) に抑える（切った後ろを鳴らさない）。
-            const availAudio =
-              audioSlot && audioSlot.clipEndSec != null
-                ? Math.max(0, (audioSlot.clipEndSec - audioSlot.clipStartSec) / audioSlot.speed)
-                : W;
-            const winClipAudio = audioSlot
-              ? {
-                  clipRelPath: audioSlot.clipRelPath,
-                  clipStartSec: audioSlot.clipStartSec,
-                  durSec: Math.min(W, availAudio),
-                  speed: audioSlot.speed,
-                  volume: audioSlot.originalVolume,
-                }
-              : undefined;
+            // 窓の元音声（#442・既定=動画は先頭から再生）：実フレーム時のみ、**元音声ONの全スロット**の [clipStart,+W*speed)
+            // を Rust が amix（settled は Video 経路で全スロット amix＝アニメ区間も同じ挙動・#431 整合・#442 P2）。
+            // 各スロットのトリミングを尊重＝窓で鳴らす尺は min(W, 残り再生秒) に抑える（切った後ろを鳴らさない）。サムネ代替時は窓で
+            // 動画は鳴らない（settled から＝従来）。
+            const winClipAudios = useRealFrames
+              ? videoSlots
+                  .filter((v) => v.useOriginalAudio)
+                  .map((v) => {
+                    const availAudio =
+                      v.clipEndSec != null ? Math.max(0, (v.clipEndSec - v.clipStartSec) / v.speed) : W;
+                    return {
+                      clipRelPath: v.clipRelPath,
+                      clipStartSec: v.clipStartSec,
+                      durSec: Math.min(W, availAudio),
+                      speed: v.speed,
+                      volume: v.originalVolume,
+                    };
+                  })
+              : [];
             out.push({
               durationSec: hasSettled ? W : scene.durationSec,
               framesDir: winDir,
@@ -403,7 +404,7 @@ export async function buildExportScenes(
               // settled があるときは窓ぶん [0,W] に切る。無ければ（アニメが全尺）ナレーションは丸ごと。
               audioBase64: hasSettled && narrAudio ? sliceWav(narrAudio, 0, W) : narrAudio,
               narrationVolume: narration?.narrationVolume,
-              ...(winClipAudio ? { clipAudio: winClipAudio } : {}),
+              ...(winClipAudios.length > 0 ? { clipAudios: winClipAudios } : {}),
             });
             // (2) settled：実動画を最終位置で流す。below/mid/above は settled レイアウト（timeSec=animEnd で全アニメが収束）で焼く。
             if (hasSettled) {

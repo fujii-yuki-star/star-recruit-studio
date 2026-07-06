@@ -524,6 +524,10 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
   const slotLayout = { items: [{ id: 'mainVisual', kind: 'image', role: 'slot', assetId: 'asset_v1', x: 0, y: 0, w: 100, h: 100, zIndex: 1 }] } as unknown as SceneLayout;
   afterEach(() => {
     vi.mocked(layoutScene).mockReturnValue({ items: [] } as unknown as SceneLayout);
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValue({
+      belowSvg: '<below/>', midSvgs: [], aboveSvg: '<above/>',
+      slots: [{ layerId: 'mainVisual', rect: { x: 80, y: 140, w: 1040, h: 800 } }],
+    });
   });
 
   it('実フレーム合成：各スロットのクリップフレームを抽出→毎フレーム読み、settled は窓の続き（+W*speed）から', async () => {
@@ -546,13 +550,14 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
     expect(clipCalls[0]).toMatchObject({ dir: 'clip_vbody_0_0', clipRelPath: 'assets/v.mp4', clipStartSec: 2, durSec: 1, speed: 1 });
     // 各出力フレームで実フレームを読む（frameCount=ceil(1*fps)+1）。
     expect(reads).toBe(Math.ceil(1 * FPS) + 1);
-    // 窓 Frames は元音声 amix 用の clipAudio（useOriginalAudio・durSec=W）。
-    expect(out[0].clipAudio).toMatchObject({ clipRelPath: 'assets/v.mp4', clipStartSec: 2, durSec: 1, speed: 1, volume: 0.4 });
+    // 窓 Frames は元音声 amix 用の clipAudios（useOriginalAudio・durSec=W）。
+    expect(out[0].clipAudios).toHaveLength(1);
+    expect(out[0].clipAudios?.[0]).toMatchObject({ clipRelPath: 'assets/v.mp4', clipStartSec: 2, durSec: 1, speed: 1, volume: 0.4 });
     // settled は窓の続き＝clipStart(2)+W(1)*speed(1)=3 から（連続再生）。
     expect(out[1].video?.clipStartSec).toBe(3);
   });
 
-  it('元音声OFFなら窓の clipAudio は付かず、settled は clipStart のまま（実フレームでも音声は流さない）', async () => {
+  it('元音声OFFなら窓の clipAudios は付かず、settled は clipStart のまま（実フレームでも音声は流さない）', async () => {
     vi.mocked(layoutScene).mockReturnValue(slotLayout);
     const out = await buildExportScenes(
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
@@ -565,9 +570,41 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
       async () => 31,
       async () => 'data:image/png;base64,VF',
     );
-    expect(out[0].clipAudio).toBeUndefined();
+    expect(out[0].clipAudios).toBeUndefined();
     // 元音声OFFでも映像は実フレームで動きながら再生＝settled は窓の続き（+W*speed）から。
     expect(out[1].video?.clipStartSec).toBe(3);
+  });
+
+  it('複数動画スロットの元音声はアニメ区間も全本 amix（先頭のみにしない・#442 P2）', async () => {
+    // 2スロットともレイアウト item を持たせる（実フレーム抽出＝assetId 解決が要る）。
+    vi.mocked(layoutScene).mockReturnValue({
+      items: [
+        { id: 'slotA', kind: 'image', role: 'slot', assetId: 'asset_a', x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+        { id: 'slotB', kind: 'image', role: 'slot', assetId: 'asset_b', x: 0, y: 0, w: 100, h: 100, zIndex: 2 },
+      ],
+    } as unknown as SceneLayout);
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValue({
+      belowSvg: '<below/>', midSvgs: ['<mid/>'], aboveSvg: '<above/>',
+      slots: [{ layerId: 'slotA', rect: { x: 0, y: 0, w: 100, h: 100 } }, { layerId: 'slotB', rect: { x: 0, y: 0, w: 100, h: 100 } }],
+    });
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => [
+        { slotLayerId: 'slotA', clipRelPath: 'assets/a.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: true, originalVolume: 0.5, speed: 1 },
+        { slotLayerId: 'slotB', clipRelPath: 'assets/b.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: true, originalVolume: 0.3, speed: 1 },
+      ],
+      undefined, {},
+      // アニメ対象は実在するスロット（slotA）＝slotIsAnimated=true。
+      (s) => [({ id: 'a', sceneId: s.sceneId, targetId: 'slotA', keyframes: [{ timeSec: 0, x: -100 }, { timeSec: 1, x: 0 }] } as unknown as ElementAnimation)],
+      async () => {},
+      async () => 31,
+      async () => 'data:image/png;base64,VF',
+    );
+    // 窓の元音声は元音声ON全スロット＝2本（先頭だけにしない）。
+    expect(out[0].clipAudios).toHaveLength(2);
+    expect(out[0].clipAudios?.map((c) => c.clipRelPath)).toEqual(['assets/a.mp4', 'assets/b.mp4']);
   });
 
   it('トリミング（clipEndSec）を尊重：窓の抽出/音声は残り再生秒に抑え、settled は終点手前でクランプ（切った後ろを読まない・#442 P1）', async () => {
@@ -588,7 +625,7 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
     // 抽出尺＝min(W=1, 残り0.4)=0.4（終点を超えて切った後ろを抽出しない）。
     expect(clipCalls[0].durSec).toBeCloseTo(0.4, 6);
     // 窓の元音声も min(W, 残り)=0.4 に抑える。
-    expect(out[0].clipAudio?.durSec).toBeCloseTo(0.4, 6);
+    expect(out[0].clipAudios?.[0]?.durSec).toBeCloseTo(0.4, 6);
     // settled 開始は「終点(1.4)の1フレーム手前」にクランプ＝clipStart+W*speed(=2) へ進めない（最終フレーム保持）。
     expect(out[1].video?.clipStartSec).toBeCloseTo(1.4 - 1 / FPS, 6);
     // clipEndSec は settled にも渡る（Rust 側で終点まで＝eof_action=repeat 保持）。

@@ -2051,10 +2051,10 @@ pub struct SceneInput {
     /// 動画ありシーン（ADR-0006）。指定時は overlay 合成経路へ。
     #[serde(default)]
     video: Option<VideoSceneInput>,
-    /// 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声。指定時は frames_dir 経路で
-    /// ナレーションと amix する（動画がアニメ区間から再生される場合の元音声・useOriginalAudio 時のみ front が付与）。
+    /// 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声（**複数動画スロット対応＝各スロット1本**）。
+    /// 非空のとき frames_dir 経路でナレーションと全本を amix する（アニメ区間から再生される元音声・useOriginalAudio のスロットぶん）。
     #[serde(default)]
-    clip_audio: Option<ClipAudioInput>,
+    clip_audios: Vec<ClipAudioInput>,
     /// この場面に「入る」トランジション（ADR-0009 T2）。先頭場面は無視。未指定＝ハードカット。
     #[serde(default)]
     transition: Option<TransitionInput>,
@@ -2280,71 +2280,63 @@ pub async fn export_video(
     })?
 }
 
-/// 窓 Frames（#442）の音声を用意する：ナレーション（narration・§6音量）とクリップ元音声
-/// （clip_audio・区間 [start,+dur*speed)・atempo で速度反映・volume）を amix して 1 本の WAV にする。
-/// 片方だけならそれを整えて返す（narration のみは元の narration をそのまま／clip のみは volume 焼き込み）。
+/// 窓 Frames（#442）の音声を用意する：ナレーション（narration・§6音量）と**複数**クリップ元音声
+/// （各 clip・区間 [start,+dur*speed)・atempo で速度反映・volume）を amix して 1 本の WAV にする。
+/// 複数動画スロットのアニメ区間でも settled（Video 経路の全スロット amix）と同じく全元音声が鳴る（#431 整合・#442 P2）。
 /// 音量は WAV に焼き込むので、呼び出し側は job の narration_volume に 1.0 を渡す（append_scene_av_tail の二重適用回避）。
+/// clips は少なくとも1本（呼び出しは clip_audios 非空時のみ）。
 fn build_window_audio(
     ffmpeg: &Path,
     tmp: &Path,
     idx: usize,
-    clip: &Path,
-    clip_audio: &ClipAudioInput,
+    clips: &[(PathBuf, &ClipAudioInput)],
     narration: Option<&Path>,
     narration_volume: f64,
 ) -> Result<PathBuf, String> {
-    let speed = clip_audio.speed.unwrap_or(DEFAULT_SPEED).clamp(0.5, 2.0);
-    let vol = clip_audio.volume.unwrap_or(DEFAULT_ORIGINAL_AUDIO_VOLUME);
-    let src_dur = clip_audio.dur_sec.max(0.0) * speed; // ソース秒（再生秒 W × speed）
-    let start = clip_audio.clip_start_sec.max(0.0);
     let out = tmp.join(format!("winaudio_{idx:03}.wav"));
-    // atempo は speed==1 なら不要。
-    let atempo = if (speed - 1.0).abs() < 1e-6 {
-        String::new()
-    } else {
-        format!("atempo={speed},")
-    };
-    let args: Vec<String> = match narration {
-        Some(narr) => {
-            // narration（volume=narration_volume）＋ clip（区間・atempo・volume）を amix。音量は両方 WAV に焼く。
-            let fc = format!(
-                "[0:a]volume={narration_volume}[a0];[1:a]{atempo}volume={vol}[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0[a]"
-            );
-            vec![
-                "-y".into(),
-                "-i".into(),
-                narr.to_string_lossy().into_owned(),
-                "-ss".into(),
-                format!("{start}"),
-                "-t".into(),
-                format!("{src_dur}"),
-                "-i".into(),
-                clip.to_string_lossy().into_owned(),
-                "-filter_complex".into(),
-                fc,
-                "-map".into(),
-                "[a]".into(),
-                out.to_string_lossy().into_owned(),
-            ]
-        }
-        None => {
-            // クリップ元音声のみ（volume・atempo を焼き込む）。
-            let af = format!("{atempo}volume={vol}");
-            vec![
-                "-y".into(),
-                "-ss".into(),
-                format!("{start}"),
-                "-t".into(),
-                format!("{src_dur}"),
-                "-i".into(),
-                clip.to_string_lossy().into_owned(),
-                "-vn".into(),
-                "-af".into(),
-                af,
-                out.to_string_lossy().into_owned(),
-            ]
-        }
-    };
+    let mut args: Vec<String> = vec!["-y".into()];
+    let mut fc = String::new();
+    let mut labels = String::new();
+    let mut input_idx = 0usize;
+    // ナレーション入力（先頭・音量を焼く）。
+    if let Some(narr) = narration {
+        args.extend(["-i".into(), narr.to_string_lossy().into_owned()]);
+        fc.push_str(&format!("[{input_idx}:a]volume={narration_volume}[a0];"));
+        labels.push_str("[a0]");
+        input_idx += 1;
+    }
+    // 各クリップ元音声（-ss/-t で区間切り出し・atempo で速度反映・volume を焼く）。
+    for (k, (clip, ca)) in clips.iter().enumerate() {
+        let speed = ca.speed.unwrap_or(DEFAULT_SPEED).clamp(0.5, 2.0);
+        let vol = ca.volume.unwrap_or(DEFAULT_ORIGINAL_AUDIO_VOLUME);
+        let src_dur = ca.dur_sec.max(0.0) * speed; // ソース秒（再生秒 W × speed）
+        let start = ca.clip_start_sec.max(0.0);
+        args.extend([
+            "-ss".into(),
+            format!("{start}"),
+            "-t".into(),
+            format!("{src_dur}"),
+            "-i".into(),
+            clip.to_string_lossy().into_owned(),
+        ]);
+        let atempo = if (speed - 1.0).abs() < 1e-6 {
+            String::new()
+        } else {
+            format!("atempo={speed},")
+        };
+        fc.push_str(&format!("[{input_idx}:a]{atempo}volume={vol}[c{k}];"));
+        labels.push_str(&format!("[c{k}]"));
+        input_idx += 1;
+    }
+    // narration + クリップ本数を amix（1本でも通す＝ラベル整形のみで passthrough）。
+    let filter = format!("{fc}{labels}amix=inputs={input_idx}:duration=longest:normalize=0[a]");
+    args.extend([
+        "-filter_complex".into(),
+        filter,
+        "-map".into(),
+        "[a]".into(),
+        out.to_string_lossy().into_owned(),
+    ]);
     run(ffmpeg, &args).map_err(|e| {
         export_failure(
             format!("window audio: {e}"),
@@ -2677,16 +2669,18 @@ fn export_video_impl(
                     "動画の保存中に問題が発生しました。もう一度お試しください。",
                 ));
             }
-            // 窓 Frames（#442）：クリップ元音声があればナレーションと amix（音量は WAV へ焼き込む＝job の
-            // narration_volume は 1.0）。無ければ従来どおりナレーションのみ。
-            let (audio, narr_vol) = match &s.clip_audio {
-                Some(ca) => {
-                    let pid = project_id.as_deref().ok_or_else(|| {
-                        export_failure(
-                            "clip audio without project_id",
-                            "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
-                        )
-                    })?;
+            // 窓 Frames（#442）：クリップ元音声（複数動画スロット対応）があればナレーションと全本 amix
+            // （音量は WAV へ焼き込む＝job の narration_volume は 1.0）。無ければ従来どおりナレーションのみ。
+            let (audio, narr_vol) = if !s.clip_audios.is_empty() {
+                let pid = project_id.as_deref().ok_or_else(|| {
+                    export_failure(
+                        "clip audio without project_id",
+                        "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                    )
+                })?;
+                let mut clips: Vec<(PathBuf, &ClipAudioInput)> =
+                    Vec::with_capacity(s.clip_audios.len());
+                for ca in &s.clip_audios {
                     let clip = resolve_project_file(&app, pid, &ca.clip_rel_path)?;
                     if !clip.exists() {
                         return Err(export_failure(
@@ -2694,15 +2688,16 @@ fn export_video_impl(
                             "動画が見つかりませんでした。もう一度取り込んでください。",
                         ));
                     }
-                    let nv = s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME);
-                    let mixed =
-                        build_window_audio(&ffmpeg, &tmp, i, &clip, ca, narration.as_deref(), nv)?;
-                    (Some(mixed), 1.0)
+                    clips.push((clip, ca));
                 }
-                None => (
+                let nv = s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME);
+                let mixed = build_window_audio(&ffmpeg, &tmp, i, &clips, narration.as_deref(), nv)?;
+                (Some(mixed), 1.0)
+            } else {
+                (
                     narration,
                     s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
-                ),
+                )
             };
             jobs.push(SceneJob::Frames(FramesJob {
                 frames_dir,
@@ -5602,16 +5597,18 @@ mod tests {
             speed: Some(1.0),
             volume: Some(0.4),
         };
-        // ナレーション＋クリップ音声を mix。
-        let mixed = build_window_audio(&ffmpeg, &tmp, 0, &clip, &ca, Some(narr.as_path()), 1.0)
-            .expect("mix narration+clip");
+        // ナレーション＋**2本**のクリップ音声を amix（#442 P2・複数動画スロット）。
+        let clips2 = vec![(clip.clone(), &ca), (clip.clone(), &ca)];
+        let mixed = build_window_audio(&ffmpeg, &tmp, 0, &clips2, Some(narr.as_path()), 1.0)
+            .expect("mix narration+2 clips");
         assert!(
             fs::metadata(&mixed).expect("mixed wav exists").len() > 1000,
             "amix 出力の WAV が生成されていない"
         );
-        // クリップ音声のみ（narration なし）も整えて返す。
+        // クリップ音声のみ（narration なし・1本）も整えて返す（amix inputs=1 の passthrough）。
+        let clips1 = vec![(clip.clone(), &ca)];
         let clip_only =
-            build_window_audio(&ffmpeg, &tmp, 1, &clip, &ca, None, 1.0).expect("clip-only audio");
+            build_window_audio(&ffmpeg, &tmp, 1, &clips1, None, 1.0).expect("clip-only audio");
         assert!(
             fs::metadata(&clip_only)
                 .expect("clip-only wav exists")
