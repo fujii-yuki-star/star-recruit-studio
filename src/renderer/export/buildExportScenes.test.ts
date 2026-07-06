@@ -5,10 +5,11 @@ vi.mock('../layout', () => ({ layoutScene: vi.fn(() => ({ items: [] })) }));
 vi.mock('../sceneSvg', () => ({ layoutToSvg: vi.fn(() => '<svg/>') }));
 vi.mock('./rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,PNG') }));
 vi.mock('./videoSceneSplit', () => ({
-  splitVideoSceneSvg: vi.fn(() => ({
+  splitVideoSceneSvgMulti: vi.fn(() => ({
     belowSvg: '<below/>',
+    midSvgs: [],
     aboveSvg: '<above/>',
-    slot: { x: 80, y: 140, w: 1040, h: 800 },
+    slots: [{ layerId: 'mainVisual', rect: { x: 80, y: 140, w: 1040, h: 800 } }],
   })),
 }));
 
@@ -20,7 +21,7 @@ import type { LayoutItem, SceneLayout } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { svgToPngDataUrl } from './rasterize';
-import { splitVideoSceneSvg } from './videoSceneSplit';
+import { splitVideoSceneSvgMulti } from './videoSceneSplit';
 import { buildExportScenes } from './buildExportScenes';
 
 // buildExportScenes が参照するのは templateId / durationSec / (narrationFor へ渡す scene) のみ。
@@ -251,7 +252,7 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
       templateById, noAsset,
       () => ({ narrationVolume: 1 }),
-      () => ({ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover', clipStartSec: 0, useOriginalAudio: false, speed: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
       undefined, {},
       (s) => [anim(s.sceneId)],
     );
@@ -283,14 +284,14 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
       templateById,
       noAsset,
       () => ({ narrationVolume: 1.0 }),
-      () => ({
+      () => [{
         slotLayerId: 'mainVisual',
         clipRelPath: 'assets/v.mp4',
-        fit: 'cover',
+        fit: 'cover' as const,
         clipStartSec: 0,
         useOriginalAudio: false,
         speed: 1,
-      }),
+      }],
     );
     expect(out).toHaveLength(1);
     expect(out[0].pngBase64).toBeUndefined(); // 動画シーンは単一PNGなし
@@ -309,18 +310,18 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
     });
   });
 
-  it('opts.credit を渡すと splitVideoSceneSvg の credit 引数（6番目）に反映（#177・動画シーン）', async () => {
-    vi.mocked(splitVideoSceneSvg).mockClear();
+  it('opts.credit を渡すと splitVideoSceneSvgMulti の credit 引数（6番目）に反映（#177・動画シーン）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
     await buildExportScenes(
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
       templateById,
       noAsset,
       undefined,
-      () => ({ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover', clipStartSec: 0, useOriginalAudio: false, speed: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
       undefined,
       { credit: 'VOICEVOX:四国めたん' },
     );
-    expect(vi.mocked(splitVideoSceneSvg).mock.calls[0]?.[5]).toBe('VOICEVOX:四国めたん');
+    expect(vi.mocked(splitVideoSceneSvgMulti).mock.calls[0]?.[5]).toBe('VOICEVOX:四国めたん');
   });
 
   it('videoSlotFor 未指定なら従来どおり単一PNG（video なし）', async () => {
@@ -332,17 +333,53 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
     expect(out[0].pngBase64).toBe('data:image/png;base64,PNG');
     expect(out[0].video).toBeUndefined();
   });
+
+  it('複数動画スロットは先頭を従来フィールド、2本目以降を videoLayers、間を midLayers に持つ（#431）', async () => {
+    // 分割は 2 スロット（slotA=最下, slotB）＋中間静止層1枚を返すよう上書き。
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValueOnce({
+      belowSvg: '<below/>',
+      midSvgs: ['<mid/>'],
+      aboveSvg: '<above/>',
+      slots: [
+        { layerId: 'slotA', rect: { x: 0, y: 0, w: 100, h: 100 } },
+        { layerId: 'slotB', rect: { x: 200, y: 100, w: 400, h: 300 } },
+      ],
+    });
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById,
+      noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => [
+        { slotLayerId: 'slotA', clipRelPath: 'assets/a.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 },
+        { slotLayerId: 'slotB', clipRelPath: 'assets/b.mp4', fit: 'contain' as const, clipStartSec: 0, useOriginalAudio: true, originalVolume: 0.3, speed: 1 },
+      ],
+    );
+    const v = out[0].video!;
+    // 先頭（zIndex 最下）= slotA が従来フィールド。
+    expect(v.clipRelPath).toBe('assets/a.mp4');
+    expect(v).toMatchObject({ slotX: 0, slotY: 0, slotW: 100, slotH: 100, fit: 'cover' });
+    // 中間静止層1枚（PNG化）。
+    expect(v.midLayers).toEqual(['data:image/png;base64,PNG']);
+    // 2本目 = slotB は videoLayers[0]（矩形＋クリップ設定）。
+    expect(v.videoLayers).toHaveLength(1);
+    expect(v.videoLayers?.[0]).toMatchObject({
+      clipRelPath: 'assets/b.mp4',
+      slotX: 200, slotY: 100, slotW: 400, slotH: 300,
+      fit: 'contain', useOriginalAudio: true, originalVolume: 0.3,
+    });
+  });
 });
 
 describe('buildExportScenes：掛け合い×動画スロット（行区間つき上PNG＋行ナレーション配置）', () => {
-  const videoSlot = () => ({
+  const videoSlot = () => [{
     slotLayerId: 'mainVisual',
     clipRelPath: 'assets/v.mp4',
     fit: 'cover' as const,
     clipStartSec: 0,
     useOriginalAudio: false,
     speed: 1,
-  });
+  }];
   const dialogueScene = (lines: unknown[]) =>
     [{ sceneId: 's1', templateId: 'tpl', durationSec: 8, lines }] as unknown as Scene[];
 
@@ -395,8 +432,8 @@ describe('buildExportScenes：掛け合い×動画スロット（行区間つき
     ]);
   });
 
-  it('行ごとにクレジット（splitVideoSceneSvg の第6引数）を渡して上PNGを焼く（#243 の併記を置き換え）', async () => {
-    vi.mocked(splitVideoSceneSvg).mockClear();
+  it('行ごとにクレジット（splitVideoSceneSvgMulti の第6引数）を渡して上PNGを焼く（#243 の併記を置き換え）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
     await buildExportScenes(
       dialogueScene([
         { lineId: 'line_001', text: 'a', startSec: 0, status: 'none' },
@@ -409,7 +446,7 @@ describe('buildExportScenes：掛け合い×動画スロット（行区間つき
       { credit: 'VOICEVOX:ずんだもん' },
     );
     // 基準1回＋行セグメント2回。話者未指定の行は既定クレジット（話者連動は creditForLine の責務）。
-    const calls = vi.mocked(splitVideoSceneSvg).mock.calls;
+    const calls = vi.mocked(splitVideoSceneSvgMulti).mock.calls;
     expect(calls).toHaveLength(3);
     expect(calls[1]?.[5]).toBe('VOICEVOX:ずんだもん');
     expect(calls[2]?.[5]).toBe('VOICEVOX:ずんだもん');
@@ -468,14 +505,14 @@ describe('buildExportScenes：字幕トグル（withSubtitle）', () => {
 });
 
 describe('buildExportScenes：出力解像度（HDサイズ）', () => {
-  const videoSlot = () => ({
+  const videoSlot = () => [{
     slotLayerId: 'mainVisual',
     clipRelPath: 'assets/v.mp4',
     fit: 'cover' as const,
     clipStartSec: 0,
     useOriginalAudio: false,
     speed: 1,
-  });
+  }];
 
   it('outputWidth/Height でPNGを縮小し、動画スロット座標もスケールする', async () => {
     vi.mocked(svgToPngDataUrl).mockClear();

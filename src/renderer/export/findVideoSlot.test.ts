@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
-import { findVideoSlot } from './findVideoSlot';
+import { findVideoSlot, findVideoSlots } from './findVideoSlot';
 
 const template = {
   layers: [
@@ -129,5 +129,37 @@ describe('findVideoSlot（FREE 自由配置・ADR-0008 Phase 4c）', () => {
     const noClipFit: Asset = { ...videoAsset, clip: { useOriginalAudio: false } };
     const sc = freeScene([{ id: 'free_001', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: 'asset_v', fit: 'stretch' }]);
     expect(findVideoSlot(sc, freeTemplate, by([noClipFit]))?.fit).toBe('stretch'); // el.fit
+  });
+});
+
+describe('findVideoSlots（#431 複数動画スロット）', () => {
+  it('通常テンプレ：動画 slot 層をすべて返す（画像 slot は除外）', () => {
+    const t = {
+      layers: [
+        { id: 'bg', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+        { id: 'vA', type: 'slot', slotType: 'video', x: 0, y: 0, w: 900, h: 500, fit: 'cover' },
+        { id: 'photo', type: 'slot', slotType: 'image', x: 0, y: 0, w: 100, h: 100, fit: 'cover' }, // 画像 slot は除外
+        { id: 'vB', type: 'slot', slotType: 'image_or_video', x: 960, y: 100, w: 900, h: 500, fit: 'contain' },
+      ],
+    } as unknown as Template;
+    const v2: Asset = { ...videoAsset, assetId: 'asset_v2', filePath: 'assets/asset_v2.mp4' };
+    const sc = { assetRefs: { vA: 'asset_v', photo: 'asset_i', vB: 'asset_v2' } } as unknown as Scene;
+    const r = findVideoSlots(sc, t, by([videoAsset, v2, imageAsset]));
+    expect(r.map((s) => s.slotLayerId)).toEqual(['vA', 'vB']); // photo(画像 slot) は含まれない
+    expect(r.map((s) => s.clipRelPath)).toEqual(['assets/asset_v.mp4', 'assets/asset_v2.mp4']);
+  });
+
+  it('FREE：動画 slot 要素をすべて返す（findVideoSlot は先頭のみ）', () => {
+    const sc = freeScene([
+      { id: 'free_001', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: 'asset_v', fit: 'cover' },
+      { id: 'free_002', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: 'asset_v2', fit: 'cover' },
+    ]);
+    const v2: Asset = { ...videoAsset, assetId: 'asset_v2' };
+    expect(findVideoSlots(sc, freeTemplate, by([videoAsset, v2])).map((s) => s.slotLayerId)).toEqual(['free_001', 'free_002']);
+    expect(findVideoSlot(sc, freeTemplate, by([videoAsset, v2]))?.slotLayerId).toBe('free_001'); // 先頭のみ
+  });
+
+  it('動画スロットが無ければ空配列', () => {
+    expect(findVideoSlots(scene(null), template, by([videoAsset]))).toEqual([]);
   });
 });

@@ -14,7 +14,7 @@ import { layoutToSvg } from '../sceneSvg';
 import { creditForLine, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
 import { svgToPngDataUrl } from './rasterize';
-import { splitVideoSceneSvg } from './videoSceneSplit';
+import { splitVideoSceneSvgMulti } from './videoSceneSplit';
 import type { VideoSlotInfo } from './findVideoSlot';
 
 /** ResolvedTransition を FFmpeg xfade の transition 名へ（none はハードカット＝"none"）。 */
@@ -49,6 +49,22 @@ export interface ExportVideoData {
   useOriginalAudio: boolean;
   originalVolume?: number;
   speed: number;
+  /** 連続する動画レイヤーの間の静止層PNG（透過・base64・枚数＝動画本数−1・#431）。1動画では空/省略。 */
+  midLayers?: string[];
+  /** 2本目以降の動画レイヤー（zIndex 昇順・先頭動画の上・#431）。1動画では空/省略。先頭動画は上のフィールド。 */
+  videoLayers?: {
+    clipRelPath: string;
+    slotX: number;
+    slotY: number;
+    slotW: number;
+    slotH: number;
+    fit: Fit;
+    clipStartSec: number;
+    clipEndSec?: number;
+    useOriginalAudio: boolean;
+    originalVolume?: number;
+    speed: number;
+  }[];
 }
 
 /** 書き出し1場面ぶんの入力（infrastructure の ExportSceneInput と構造一致）。 */
@@ -84,7 +100,8 @@ export type NarrationFor = (
 ) => { audioBase64?: string; narrationVolume: number } | undefined;
 
 /** 場面ごとの動画スロット情報を返すコールバック（undefined＝静止画シーン）。 */
-export type VideoSlotFor = (scene: Scene) => VideoSlotInfo | undefined;
+/** 場面の動画スロットを**すべて**返すコールバック（空配列＝静止画シーン・#431 複数動画）。 */
+export type VideoSlotsFor = (scene: Scene) => VideoSlotInfo[];
 
 /** 場面ごとの要素アニメーション（timelineOverlay.animations の sceneId 一致分）を返すコールバック（④・ADR-0019）。 */
 export type AnimationsFor = (scene: Scene) => ElementAnimation[];
@@ -120,7 +137,7 @@ export async function buildExportScenes(
   templateById: Map<string, Template>,
   resolveAssetSrc: (assetId: string) => Promise<string | undefined>,
   narrationFor?: NarrationFor,
-  videoSlotFor?: VideoSlotFor,
+  videoSlotsFor?: VideoSlotsFor,
   onProgress?: (done: number, total: number) => void,
   opts: ExportOptions = {},
   animationsFor?: AnimationsFor,
@@ -157,11 +174,13 @@ export async function buildExportScenes(
         }),
       );
       const assetSrc = (id: string | null): string | undefined => (id ? sceneSrc.get(id) : undefined);
-      const videoSlot = videoSlotFor?.(scene);
+      const videoSlots = videoSlotsFor?.(scene) ?? [];
       const sceneFontFamily = opts.fontFamilyFor?.(scene); // 場面→動画全体で解決済みの font-family
-      const split = videoSlot
-        ? splitVideoSceneSvg(layout, videoSlot.slotLayerId, assetSrc, itemFilter, sceneFontFamily, credit)
-        : null;
+      const slotIds = videoSlots.map((v) => v.slotLayerId);
+      const splitM =
+        videoSlots.length > 0
+          ? splitVideoSceneSvgMulti(layout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit)
+          : null;
       // 出力解像度（未指定はキャンバス＝フルHD）。全場面を同一サイズで焼く（後段 concat -c copy の前提）。
       const cw = template.canvas.width;
       const ch = template.canvas.height;
@@ -169,29 +188,38 @@ export async function buildExportScenes(
       const height = opts.outputSize?.height ?? ch;
       const rx = width / cw;
       const ry = height / ch;
-      if (videoSlot && split) {
-        // スロット矩形は出力解像度へスケール（PNGも同解像度で焼くため整合）。
-        const slotRect = {
-          slotX: Math.round(split.slot.x * rx),
-          slotY: Math.round(split.slot.y * ry),
-          slotW: Math.round(split.slot.w * rx),
-          slotH: Math.round(split.slot.h * ry),
-        };
-        const clipInfo = {
-          clipRelPath: videoSlot.clipRelPath,
-          fit: videoSlot.fit,
-          clipStartSec: videoSlot.clipStartSec,
-          clipEndSec: videoSlot.clipEndSec,
-          useOriginalAudio: videoSlot.useOriginalAudio,
-          originalVolume: videoSlot.originalVolume,
-          speed: videoSlot.speed,
-        };
+      if (videoSlots.length > 0 && splitM) {
+        // 各動画レイヤーの矩形（出力解像度へスケール）＋クリップ設定を zIndex 順（下→上）に組む（#431）。
+        const slotById = new Map(videoSlots.map((v) => [v.slotLayerId, v] as const));
+        const layers = splitM.slots.map((s) => {
+          const info = slotById.get(s.layerId)!; // slots は videoSlots の id から解決＝必ず存在
+          return {
+            slotX: Math.round(s.rect.x * rx),
+            slotY: Math.round(s.rect.y * ry),
+            slotW: Math.round(s.rect.w * rx),
+            slotH: Math.round(s.rect.h * ry),
+            clipRelPath: info.clipRelPath,
+            fit: info.fit,
+            clipStartSec: info.clipStartSec,
+            clipEndSec: info.clipEndSec,
+            useOriginalAudio: info.useOriginalAudio,
+            originalVolume: info.originalVolume,
+            speed: info.speed,
+          };
+        });
+        const primary = layers[0]; // 先頭（最下）動画＝従来フィールド（1動画は従来と同一）
+        const videoLayers = layers.slice(1); // 2本目以降（#431）
+        const belowPngBase64 = await svgToPngDataUrl(splitM.belowSvg, width, height);
+        // 動画間の静止層PNG（透過・枚数＝動画本数−1）。1動画では空。
+        const midLayers = await Promise.all(
+          splitM.midSvgs.map((svg) => svgToPngDataUrl(svg, width, height)),
+        );
         const lines = scene.lines ?? [];
         let pushed = false;
         if (lines.length > 0) {
-          // 掛け合い×動画：クリップは連続1本のまま、上PNG（字幕/クレジット）を行区間で差し替え、
+          // 掛け合い×動画：クリップは連続1本のまま、最上層PNG（字幕/クレジット）を行区間で差し替え、
           // 行ナレーションを開始秒（adelay）に配置する＝プレビューの行進行と一致（ADR-0001 パリティ）。
-          // （従来は1枚静止＋話者併記クレジット（#243）＝行の字幕/音声が書き出しに載らなかった）
+          // 下/中間層と動画レイヤーは行に依らず一定（字幕は最上層のみ＝#431 でも同じ）。
           const lineDurations: Record<string, number> = {};
           for (const l of lines) {
             const a = narrationFor?.(scene, l.lineId)?.audioBase64;
@@ -210,9 +238,9 @@ export async function buildExportScenes(
               spec.subtitleText !== undefined
                 ? layoutScene(scene, template, { subtitleText: spec.subtitleText })
                 : layout;
-            const segSplit = splitVideoSceneSvg(
+            const segSplit = splitVideoSceneSvgMulti(
               segLayout,
-              videoSlot.slotLayerId,
+              slotIds,
               assetSrc,
               itemFilter,
               sceneFontFamily,
@@ -222,15 +250,13 @@ export async function buildExportScenes(
             aboveSegments.push({
               pngBase64: await svgToPngDataUrl(segSplit.aboveSvg, width, height),
               // 各区間の表示窓＝そのまま [startSec, startSec+durationSec)。先頭行の開始前の「間」は
-              // sceneSegmentSpecs が字幕なしの isGap 区間 [0, 先頭start) として先頭に出す（#386・A案＝間を尊重）
-              // ＝以前の「先頭を 0 に伸ばして先頭行字幕を頭出し」は廃止（間は字幕なし＝正準 compileTimeline と一致）。
+              // sceneSegmentSpecs が字幕なしの isGap 区間 [0, 先頭start) として先頭に出す（#386・A案＝間を尊重）。
               startSec: spec.startSec,
               endSec: spec.startSec + spec.durationSec,
             });
             const segNarration = spec.lineId ? narrationFor?.(scene, spec.lineId) : undefined;
             if (segNarration?.audioBase64) {
-              // windowSec=行の窓（次の行の開始まで＝表示尺）で音声を切る＝前の行が次の行に重ならない（#385・
-              // プレビューは次行開始で pause／静止画掛け合いはセグメント -t でカット＝パリティ）。
+              // windowSec=行の窓（次の行の開始まで＝表示尺）で音声を切る＝前の行が次の行に重ならない（#385）。
               narrationSegments.push({
                 audioBase64: segNarration.audioBase64,
                 delaySec: spec.startSec,
@@ -240,44 +266,42 @@ export async function buildExportScenes(
             }
           }
           if (aboveSegments.length > 0) {
-            const belowPngBase64 = await svgToPngDataUrl(split.belowSvg, width, height);
             out.push({
               durationSec: scene.durationSec,
               narrationVolume,
-              video: { belowPngBase64, aboveSegments, narrationSegments, ...slotRect, ...clipInfo },
+              video: { belowPngBase64, midLayers, videoLayers, aboveSegments, narrationSegments, ...primary },
             });
             pushed = true;
           }
         }
         if (!pushed) {
-          // 動画ありシーン（単一 narration）：下/上2枚の透過PNG＋クリップ情報（ADR-0006）。
+          // 動画ありシーン（単一 narration）：静止層PNG＋クリップ情報（ADR-0006／#431 複数動画）。
           const narration = narrationFor?.(scene);
-          const belowPngBase64 = await svgToPngDataUrl(split.belowSvg, width, height);
-          const abovePngBase64 = await svgToPngDataUrl(split.aboveSvg, width, height);
+          const abovePngBase64 = await svgToPngDataUrl(splitM.aboveSvg, width, height);
           out.push({
             durationSec: scene.durationSec,
             audioBase64: narration?.audioBase64,
             narrationVolume: narration?.narrationVolume,
-            video: { belowPngBase64, abovePngBase64, ...slotRect, ...clipInfo },
+            video: { belowPngBase64, midLayers, videoLayers, abovePngBase64, ...primary },
           });
         }
       } else {
-        if (videoSlot && !split) {
+        if (videoSlots.length > 0 && !splitM) {
           // slotLayerId がレイアウトに見つからない等で分割失敗 → 静止画として書き出す（原因追跡のため開発ログ）。
           console.warn(
-            '[buildExportScenes] 動画スロットの分割に失敗したため静止画で書き出します。slotLayerId:',
-            videoSlot.slotLayerId,
+            '[buildExportScenes] 動画スロットの分割に失敗したため静止画で書き出します。slotLayerIds:',
+            slotIds,
           );
         }
         // 掛け合い（明示 lines・静止画）は行ごとのセグメントに展開（追加A/B・ADR-0015 PR-E）。
-        // 動画スロットありの掛け合いは上の video 経路（1セグメントのまま上PNG差し替え＋adelay）で処理済み。
-        const useSegments = !!(scene.lines && scene.lines.length > 0) && !videoSlot;
+        // 動画スロットありの掛け合いは上の video 経路（1セグメントのまま最上層PNG差し替え＋adelay）で処理済み。
+        const useSegments = !!(scene.lines && scene.lines.length > 0) && videoSlots.length === 0;
         // アニメ場面（④・ADR-0019 per-frame）：animations があり動画スロットを伴わない場面はフレーム列に焼く。
         // 掛け合いは**行セグメントごと**に、単一 narration は1区間として毎フレーム描画する（③）。適用可否は
         // preview（ScenePreview 経由）と共有の sceneAnimationActive で判定＝両者一致（ADR-0001 パリティ）。
         // 動画スロット併用のアニメは引き続き後続段（映像合成との両立が要る）＝静止/セグメント経路。
         const sceneAnims = animationsFor?.(scene) ?? [];
-        const animate = sceneAnimationActive(scene, sceneAnims, !!videoSlot);
+        const animate = sceneAnimationActive(scene, sceneAnims, videoSlots.length > 0);
         const lineDurations: Record<string, number> = {};
         if (useSegments) {
           for (const l of scene.lines ?? []) {
