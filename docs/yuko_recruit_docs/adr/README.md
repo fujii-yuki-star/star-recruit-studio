@@ -32,6 +32,7 @@
 | [0023](0023-integrated-timeline-editing.md) | 統合タイムライン編集（再生ヘッド＋同期プレビュー・上位仕上げ編集面・α-5 主軸） | **Proposed** |
 | [0024](0024-non-destructive-editing-model.md) | 非破壊編集モデル（Asset＝源泉／使用単位＝非破壊の範囲参照・解析キャッシュ・VoiceClip 方向） | **Proposed** |
 | [0025](0025-credit-display-modes.md) | クレジット表示方式（常時/最初/最後/両方/非表示・既定=最初と最後・About 必須維持・α-6） | **Accepted**（0003 を一部 supersede） |
+| [0026](0026-alpha4-behavior-consistency.md) | α-4 挙動一致の原則（設定どおり・経路間統一・プレビュー=書き出し。間×遷移=切替尺優先／複数動画スロット／動画実再生／collapse撤去／分割失敗の表面化／動画×アニメ解除） | **Accepted**（0006 の2枚固定を一部改め・0019 の動画スロット除外を解除方向） |
 
 ## 状態の意味
 
