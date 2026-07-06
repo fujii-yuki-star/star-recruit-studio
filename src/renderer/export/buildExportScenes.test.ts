@@ -569,6 +569,31 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
     // 元音声OFFでも映像は実フレームで動きながら再生＝settled は窓の続き（+W*speed）から。
     expect(out[1].video?.clipStartSec).toBe(3);
   });
+
+  it('トリミング（clipEndSec）を尊重：窓の抽出/音声は残り再生秒に抑え、settled は終点手前でクランプ（切った後ろを読まない・#442 P1）', async () => {
+    vi.mocked(layoutScene).mockReturnValue(slotLayout);
+    const clipCalls: Array<Record<string, unknown>> = [];
+    // clipStart=1・clipEnd=1.4（残り再生秒=0.4/speed1=0.4）・W=1（アニメ長）。窓は1秒だが動画は0.4秒で終点。
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 1, clipEndSec: 1.4, useOriginalAudio: true, originalVolume: 0.5, speed: 1 }],
+      undefined, {},
+      (s) => [slotAnim(s.sceneId, 1)],
+      async () => {},
+      async (_dir, _clipRelPath, clipStartSec, durSec, speed) => { clipCalls.push({ durSec, speed, clipStartSec }); return 13; },
+      async () => 'data:image/png;base64,VF',
+    );
+    // 抽出尺＝min(W=1, 残り0.4)=0.4（終点を超えて切った後ろを抽出しない）。
+    expect(clipCalls[0].durSec).toBeCloseTo(0.4, 6);
+    // 窓の元音声も min(W, 残り)=0.4 に抑える。
+    expect(out[0].clipAudio?.durSec).toBeCloseTo(0.4, 6);
+    // settled 開始は「終点(1.4)の1フレーム手前」にクランプ＝clipStart+W*speed(=2) へ進めない（最終フレーム保持）。
+    expect(out[1].video?.clipStartSec).toBeCloseTo(1.4 - 1 / FPS, 6);
+    // clipEndSec は settled にも渡る（Rust 側で終点まで＝eof_action=repeat 保持）。
+    expect(out[1].video?.clipEndSec).toBe(1.4);
+  });
 });
 
 describe('buildExportScenes：掛け合い×動画スロット（行区間つき上PNG＋行ナレーション配置）', () => {

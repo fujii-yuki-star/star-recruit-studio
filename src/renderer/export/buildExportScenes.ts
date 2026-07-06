@@ -349,7 +349,11 @@ export async function buildExportScenes(
                 const assetId = slotAssetIdByLayer.get(vs.slotLayerId);
                 if (!assetId) continue; // 動画 id が引けないスロットはサムネ描画へフォールバック
                 const dir = `clip_vbody_${i}_${s}`;
-                const count = await stageClipFrames!(dir, vs.clipRelPath, vs.clipStartSec, W, vs.speed, fps, width);
+                // トリミング（clipEndSec）を尊重：抽出は「クリップに残る再生秒」＝(clipEnd-clipStart)/speed までに抑える
+                // （窓が終点を超える分は readExportFrame の min(f,count-1) が最終フレームを保持＝切った後ろを読まない）。
+                const availW =
+                  vs.clipEndSec != null ? Math.max(0, (vs.clipEndSec - vs.clipStartSec) / vs.speed) : W;
+                const count = await stageClipFrames!(dir, vs.clipRelPath, vs.clipStartSec, Math.min(W, availW), vs.speed, fps, width);
                 clipFrameByAsset.set(assetId, { dir, count });
               }
             }
@@ -378,11 +382,16 @@ export async function buildExportScenes(
             // を Rust が amix（複数音声スロットは v1 で先頭のみ・settled は Video 経路で全スロット amix）。サムネ代替時は窓で動画は
             // 鳴らない（settled から＝従来）。
             const audioSlot = useRealFrames ? videoSlots.find((v) => v.useOriginalAudio) : undefined;
+            // 元音声もトリミングを尊重：窓で鳴らす尺は min(W, 残り再生秒) に抑える（切った後ろを鳴らさない）。
+            const availAudio =
+              audioSlot && audioSlot.clipEndSec != null
+                ? Math.max(0, (audioSlot.clipEndSec - audioSlot.clipStartSec) / audioSlot.speed)
+                : W;
             const winClipAudio = audioSlot
               ? {
                   clipRelPath: audioSlot.clipRelPath,
                   clipStartSec: audioSlot.clipStartSec,
-                  durSec: W,
+                  durSec: Math.min(W, availAudio),
                   speed: audioSlot.speed,
                   volume: audioSlot.originalVolume,
                 }
@@ -412,7 +421,15 @@ export async function buildExportScenes(
                   fit: info.fit,
                   // 実フレーム時は窓で [clipStart,+W*speed) を再生済み＝settled はその続きから（連続再生）。
                   // サムネ代替時は窓で動画は静止＝settled は clipStart から（従来）。
-                  clipStartSec: info.clipStartSec + (useRealFrames ? W * info.speed : 0),
+                  // トリミング（clipEndSec）を尊重：窓で終点まで消費したら settled 開始を「終点の1フレーム手前」に
+                  // クランプ＝最終フレームを eof_action=repeat で保持（切った後ろへ進めない・#442 レビュー P1）。
+                  clipStartSec:
+                    info.clipEndSec != null
+                      ? Math.min(
+                          info.clipStartSec + (useRealFrames ? W * info.speed : 0),
+                          Math.max(info.clipStartSec, info.clipEndSec - info.speed / fps),
+                        )
+                      : info.clipStartSec + (useRealFrames ? W * info.speed : 0),
                   clipEndSec: info.clipEndSec,
                   useOriginalAudio: info.useOriginalAudio,
                   originalVolume: info.originalVolume,
