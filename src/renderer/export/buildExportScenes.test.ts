@@ -400,6 +400,127 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
   });
 });
 
+describe('buildExportScenes：動画スロット本体アニメ（#442・窓Frames＋settled Video の2段）', () => {
+  // スロット層（mock の 'mainVisual'）を対象にするアニメ＝slotIsAnimated=true。
+  const slotAnim = (sceneId: string, endSec = 1): ElementAnimation =>
+    ({ id: 'a', sceneId, targetId: 'mainVisual', keyframes: [{ timeSec: 0, x: -200 }, { timeSec: endSec, x: 0 }] } as unknown as ElementAnimation);
+  const videoSlot = () => [{
+    slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const,
+    clipStartSec: 0, useOriginalAudio: false, speed: 1,
+  }];
+  // 1秒 mono PCM16 の合成 WAV（ナレーション分割の配線確認用）。
+  const makeWav = (sampleRate: number, frames: number): string => {
+    const dataSize = frames * 2;
+    const bytes = new Uint8Array(44 + dataSize);
+    const view = new DataView(bytes.buffer);
+    const tag = (off: number, s: string) => { for (let i = 0; i < 4; i += 1) bytes[off + i] = s.charCodeAt(i); };
+    tag(0, 'RIFF'); view.setUint32(4, 36 + dataSize, true); tag(8, 'WAVE');
+    tag(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+    tag(36, 'data'); view.setUint32(40, dataSize, true);
+    for (let i = 0; i < frames; i += 1) view.setUint16(44 + i * 2, i & 0xffff, true);
+    let bin = ''; for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]);
+    return `data:audio/wav;base64,${btoa(bin)}`;
+  };
+
+  it('スロット本体がアニメ対象なら窓(Frames)＋settled(Video) の2セグメントに分ける', async () => {
+    const staged: Array<{ dir: string; index: number }> = [];
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      videoSlot, undefined, {},
+      (s) => [slotAnim(s.sceneId, 1)], // animEnd=1 < 尺8 → 窓[0,1]＋settled[1,8]
+      async (dir, index) => { staged.push({ dir, index }); },
+    );
+    expect(out).toHaveLength(2);
+    // (1) 窓：スロットもサムネで焼く Frames セグメント（video 無し・framesDir・尺=W=1・場面先頭）。
+    expect(out[0].video).toBeUndefined();
+    expect(out[0].framesDir).toBe('scene_vbody_0');
+    expect(out[0].fps).toBe(FPS);
+    expect(out[0].durationSec).toBe(1);
+    expect(out[0].sceneStart).toBe(true);
+    // (2) settled：実動画を最終位置で流す Video セグメント（尺=7・場面の後続）。
+    expect(out[1].framesDir).toBeUndefined();
+    expect(out[1].video).toMatchObject({
+      belowPngBase64: 'data:image/png;base64,PNG',
+      abovePngBase64: 'data:image/png;base64,PNG',
+      clipRelPath: 'assets/v.mp4',
+      slotX: 80, slotY: 140, slotW: 1040, slotH: 800,
+    });
+    expect(out[1].durationSec).toBe(7);
+    expect(out[1].sceneStart).toBe(false);
+    // 窓フレーム＝ceil(1*fps)+1、すべて scene_vbody_0 に。
+    expect(staged.filter((s) => s.dir === 'scene_vbody_0').length).toBe(Math.ceil(1 * FPS) + 1);
+  });
+
+  it('アニメが全尺（animEnd>=尺）なら窓のみ＝settled（実動画）は出さない', async () => {
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 2 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      videoSlot, undefined, {},
+      (s) => [slotAnim(s.sceneId, 3)], // animEnd=3 >= 尺2 → 窓=全尺
+      async () => {},
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].framesDir).toBe('scene_vbody_0');
+    expect(out[0].durationSec).toBe(2);
+    expect(out[0].video).toBeUndefined();
+  });
+
+  it('グループ経由でスロットがアニメ対象でも2段に分ける', async () => {
+    const scene = [{
+      sceneId: 's1', templateId: 'tpl', durationSec: 6,
+      groups: [{ id: 'group_1', members: ['mainVisual', 'text_1'] }],
+    }] as unknown as Scene[];
+    const groupAnim = ({ id: 'a', sceneId: 's1', targetId: 'group_1', keyframes: [{ timeSec: 0, y: -100 }, { timeSec: 0.5, y: 0 }] } as unknown as ElementAnimation);
+    const out = await buildExportScenes(
+      scene, templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      videoSlot, undefined, {},
+      () => [groupAnim],
+      async () => {},
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].framesDir).toBe('scene_vbody_0');
+    expect(out[1].video).toBeDefined();
+  });
+
+  it('スロット以外だけを動かすアニメは2段にしない（#435 の per-frame 静止層経路のまま）', async () => {
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      videoSlot, undefined, {},
+      (s) => [({ id: 'a', sceneId: s.sceneId, targetId: 'text_1', keyframes: [{ timeSec: 0, x: -50 }, { timeSec: 1, x: 0 }] } as unknown as ElementAnimation)],
+      async () => {},
+    );
+    // 動画は固定＝#435 の per-frame 静止層（belowFramesDir）で1セグメントのまま。
+    expect(out).toHaveLength(1);
+    expect(out[0].video?.belowFramesDir).toBe('scene_vbelow_0');
+    expect(out[0].framesDir).toBeUndefined();
+  });
+
+  it('ナレーションは窓[0,W]と settled[W,尺]にサンプル分割されて両区間に載る', async () => {
+    const wav = makeWav(8000, 8000); // 1.0 秒
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ audioBase64: wav, narrationVolume: 1 }),
+      videoSlot, undefined, {},
+      (s) => [slotAnim(s.sceneId, 0.5)], // 窓[0,0.5]＋settled[0.5,8]
+      async () => {},
+    );
+    expect(out).toHaveLength(2);
+    // 両区間とも音声を持ち、互いに異なる（＝別区間に切られている）＝連続再生。
+    expect(out[0].audioBase64).toBeDefined();
+    expect(out[1].audioBase64).toBeDefined();
+    expect(out[0].audioBase64).not.toBe(out[1].audioBase64);
+    expect(out[0].audioBase64).not.toBe(wav); // 窓は [0,0.5] に切られている
+  });
+});
+
 describe('buildExportScenes：掛け合い×動画スロット（行区間つき上PNG＋行ナレーション配置）', () => {
   const videoSlot = () => [{
     slotLayerId: 'mainVisual',

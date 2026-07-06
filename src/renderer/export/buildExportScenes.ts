@@ -7,12 +7,13 @@ import type { Template } from '../../domain/template/types';
 import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs } from '../../domain/project/lineTimeline';
-import { animationsEndSec, sceneAnimationActive } from '../../domain/project/sceneAnimation';
+import { animationsEndSec, sceneAnimationActive, slotIsAnimated } from '../../domain/project/sceneAnimation';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { creditForLine, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
+import { sliceWav } from '../../domain/voice/wavSlice';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvgMulti } from './videoSceneSplit';
 import type { VideoSlotInfo } from './findVideoSlot';
@@ -288,11 +289,84 @@ export async function buildExportScenes(
           const narration = narrationFor?.(scene);
           const sceneAnims = animationsFor?.(scene) ?? [];
           // 動画×アニメ（#435）：下/中/上の静止層すべてを per-frame でステージングして動画へ overlay する
-          // ＝背景/動画間/グループ要素もプレビューと一致して動く（#435 P1）。動画スロット自身の位置アニメのみ
-          // 未対応（動画は基準位置固定）。適用可否は preview（ScenePreview）と共有の sceneAnimationActive
+          // ＝背景/動画間/グループ要素もプレビューと一致して動く（#435 P1）。動画スロット自身の位置アニメは
+          // #442（下記 slotAnim 分岐）で対応。適用可否は preview（ScenePreview）と共有の sceneAnimationActive
           // （掛け合い×動画は false＝静止）。ステージング不可（テスト等）は静止 above にフォールバック。
           const animateVideo = sceneAnimationActive(scene, sceneAnims, true);
-          if (animateVideo && stageAnimationFrame) {
+          // #442：動画スロット本体（矩形）がアニメ対象か。true のとき overlay 固定座標では位置/拡縮/回転/不透明度が
+          // 乖離するため、「アニメ区間はスロットもサムネで場面全体を焼く（Frames）＋settled 区間で実動画」に分割する。
+          const animEnd = animationsEndSec(sceneAnims);
+          const slotAnim = animateVideo && animEnd > 0 && slotIsAnimated(sceneAnims, slotIds, scene.groups);
+          if (slotAnim && stageAnimationFrame) {
+            // #442（ADR-0019 追補・ADR-0026）：動画スロット本体アニメ。overlay は固定座標しか持てないため、
+            // (1) アニメ区間 [0,W] はスロットもサムネで場面全体を毎フレーム焼き（プレビュー＝ScenePreview の
+            //     layoutToSvg と同一＝位置/拡縮/回転/不透明度が完全パリティ）、
+            // (2) settled 区間 [W,尺] は実動画を最終位置（settled レイアウト）で流す、の2セグメントに分ける。
+            // ナレーションは W でサンプル分割（sliceWav）し両区間へ連続再生させる（Rust 変更不要＝既存 Frames/Video 経路）。
+            const fps = FPS;
+            const W = Math.min(scene.durationSec, animEnd); // アニメ区間（窓）の尺
+            const hasSettled = W < scene.durationSec; // settled（実動画）区間があるか
+            const narrAudio = narration?.audioBase64;
+            // (1) 窓：スロットも含めた場面全体をサムネで per-frame（穴にしない）＝通常のアニメ場面と同一描画。
+            const frameCount = Math.max(1, Math.ceil(W * fps) + 1);
+            const winDir = `scene_vbody_${i}`;
+            for (let f = 0; f < frameCount; f += 1) {
+              const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
+              await stageAnimationFrame(
+                winDir,
+                f,
+                await svgToPngDataUrl(
+                  layoutToSvg(frameLayout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
+                  width,
+                  height,
+                ),
+              );
+            }
+            out.push({
+              durationSec: hasSettled ? W : scene.durationSec,
+              framesDir: winDir,
+              fps,
+              // settled があるときは窓ぶん [0,W] に切る。無ければ（アニメが全尺）ナレーションは丸ごと。
+              audioBase64: hasSettled && narrAudio ? sliceWav(narrAudio, 0, W) : narrAudio,
+              narrationVolume: narration?.narrationVolume,
+            });
+            // (2) settled：実動画を最終位置で流す。below/mid/above は settled レイアウト（timeSec=animEnd で全アニメが収束）で焼く。
+            if (hasSettled) {
+              const settledLayout = layoutScene(scene, template, { timeSec: animEnd, animations: sceneAnims });
+              const sSplit =
+                splitVideoSceneSvgMulti(settledLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit) ?? splitM;
+              const sLayers = sSplit.slots.map((s) => {
+                const info = slotById.get(s.layerId)!;
+                return {
+                  slotX: Math.round(s.rect.x * rx),
+                  slotY: Math.round(s.rect.y * ry),
+                  slotW: Math.round(s.rect.w * rx),
+                  slotH: Math.round(s.rect.h * ry),
+                  clipRelPath: info.clipRelPath,
+                  fit: info.fit,
+                  clipStartSec: info.clipStartSec,
+                  clipEndSec: info.clipEndSec,
+                  useOriginalAudio: info.useOriginalAudio,
+                  originalVolume: info.originalVolume,
+                  speed: info.speed,
+                };
+              });
+              const sPrimary = sLayers[0];
+              const sVideoLayers = sLayers.slice(1);
+              const sBelow = await svgToPngDataUrl(sSplit.belowSvg, width, height);
+              const sMid = await Promise.all(sSplit.midSvgs.map((svg) => svgToPngDataUrl(svg, width, height)));
+              const sAbove = await svgToPngDataUrl(sSplit.aboveSvg, width, height);
+              out.push({
+                durationSec: scene.durationSec - W,
+                // settled のナレーション＝[W,尺]（空区間なら undefined＝無音＝窓で鳴り終えた）。
+                audioBase64: narrAudio ? sliceWav(narrAudio, W) : undefined,
+                narrationVolume: narration?.narrationVolume,
+                video: { belowPngBase64: sBelow, midLayers: sMid, videoLayers: sVideoLayers, abovePngBase64: sAbove, ...sPrimary },
+              });
+              // included を out と 1:1 に保つ（settled は同一場面の後続＝sceneId 一致でグループ化・遷移は先頭が持つ）。
+              included.push({ ...scene, transition: undefined });
+            }
+          } else if (animateVideo && stageAnimationFrame) {
             const fps = FPS;
             // 変化する区間 [0, min(尺, animEnd)] だけ焼き、残りは Rust の tpad/eof_action=repeat が最終フレームを保持（#376同方針）。
             const renderDurSec = Math.max(0, Math.min(scene.durationSec, animationsEndSec(sceneAnims)));

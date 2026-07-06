@@ -116,8 +116,15 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         // テンプレ既定素材（tmpl_asset_*）は既に data URL（templateAssetSrcById）＝そのまま返す（ADR-0021・書き出しも data URL でプレビューと一致）。
         if (isTemplateAsset(id)) return templateAssetSrcById[id];
         const a = assetById.get(id);
-        // 動画スロットは clipRelPath 経路（ADR-0006）＝インライン不要。画像のみ data URL 化。
-        if (!pid || !a?.filePath || a.assetType === ASSET_TYPE.video) return undefined;
+        if (!pid || !a) return undefined;
+        // 動画本体（大容量）は clipRelPath 経路で合成（ADR-0006）＝インライン不要。ただし動画スロット本体アニメの
+        // 窓フレーム（#442）はプレビュー同様スロットを代表フレーム（サムネ）で焼くため、thumbnailPath を data URL で返す
+        //（通常の下/上分割ではスロットは穴として除外されるため描かれない＝既存経路に影響なし）。
+        if (a.assetType === ASSET_TYPE.video) {
+          return a.thumbnailPath ? ((await readAssetDataUrl(pid, a.thumbnailPath)) ?? undefined) : undefined;
+        }
+        // 画像のみ本体を data URL 化。
+        if (!a.filePath) return undefined;
         return (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
       };
       // アニメ場面のフレームはステージング（逐次ディスク書き出し）に載せる＝巨大な base64 を1回の IPC に

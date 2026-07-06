@@ -624,7 +624,9 @@ pub struct VideoLayerArg<'a> {
 /// 動画×アニメ（#435・非掛け合い）：静止層（下=below／動画間=mid／最上=above）を per-frame の画像列で描く指定。
 /// VideoSceneArgs の below_frames / mid_frames / above_frames で共有し、指定時は対応する静止PNGの代わりに
 /// image2 シーケンスを overlay する（below は tpad=stop_mode=clone、mid/above は eof_action=repeat で最終
-/// フレームを尺まで保持＝#376/frames_scene_args と同方針。動画スロット本体の位置/拡縮アニメは対象外＝基準位置固定・#442）。
+/// フレームを尺まで保持＝#376/frames_scene_args と同方針）。この経路は**動画スロット本体が動かない**場合用＝動画は
+/// 基準位置で固定 overlay。スロット本体がアニメ対象のときは buildExportScenes が窓 Frames＋settled Video の2段に
+/// 分割して位置/拡縮/回転/不透明度も一致させる（#442・Rust 側は既存 Frames/Video 経路のまま）。
 pub struct AboveFramesArg<'a> {
     /// image2 パターン（例 "<dir>/frame_%05d.png"）。
     pub pattern: &'a str,
@@ -5041,5 +5043,161 @@ mod tests {
         encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out)
             .expect("encode_jobs video");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
+    }
+
+    #[test]
+    fn encode_jobs_frames_then_video_scene_group_concats_when_ffmpeg_available() {
+        // #442：動画スロット本体アニメの1場面は「窓(Frames セグメント)＋settled(Video セグメント)」の2ジョブに
+        // 分かれ、同一場面として -c copy 連結される。Frames-MP4 と Video-MP4 が同一エンコード設定
+        //（append_scene_av_tail 共有）で concat 互換であることを実FFmpegで検証する（連結が非互換なら concat が
+        // 失敗し encode_jobs が Err→panic）。
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_encode_jobs_frames_video_group");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
+        let codec = pick_codec(&encoders).expect("an h264 encoder");
+
+        // 窓セグメント＝フレーム列（frame_00000.png ...）。0.5s×30fps を image2 で生成。
+        let frames_dir = tmp.join("winframes");
+        fs::create_dir_all(&frames_dir).unwrap();
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "color=c=teal:s=640x360:rate=30:duration=0.5".into(),
+                "-start_number".into(),
+                "0".into(),
+                frames_dir
+                    .join("frame_%05d.png")
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+        )
+        .expect("window frames");
+        let first_frame = frames_dir.join("frame_00000.png");
+        assert!(first_frame.exists(), "window frames not generated");
+
+        // settled セグメント＝Video（実クリップ・最終位置）。既存 Video E2E と同じ素材の作り方。
+        let below = tmp.join("below.png");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "color=c=navy:s=640x360".into(),
+                "-frames:v".into(),
+                "1".into(),
+                below.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("below png");
+        let above = tmp.join("above.png");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "color=c=black@0.0:s=640x360".into(),
+                "-frames:v".into(),
+                "1".into(),
+                "-pix_fmt".into(),
+                "rgba".into(),
+                above.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("above png");
+        let clip = tmp.join("clip.mp4");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "testsrc2=size=320x240:rate=30:duration=3".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-c:v".into(),
+                codec.encoder().into(),
+                clip.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("clip");
+
+        // jobs=[Frames(窓・0.5s), Video(settled・1.5s)]。joins=[start=true, start=false]＝同一場面（遷移なし＝全体 concat）。
+        let jobs = vec![
+            SceneJob::Frames(FramesJob {
+                frames_dir: frames_dir.clone(),
+                first_frame,
+                audio: None,
+                narration_volume: 1.0,
+                duration_sec: 0.5,
+                fps: 30,
+            }),
+            SceneJob::Video(Box::new(VideoJob {
+                below,
+                aboves: vec![TimedAbove {
+                    png: above,
+                    window: None,
+                }],
+                clip,
+                narrations: vec![],
+                extra_videos: vec![],
+                mid_pngs: vec![],
+                below_frames: None,
+                mid_frames: vec![],
+                above_frames: None,
+                slot: (40, 30, 240, 180),
+                fit: Fit::Cover,
+                clip_start_sec: 0.0,
+                clip_end_sec: None,
+                duration_sec: 1.5,
+                narration_volume: 1.0,
+                original_volume: 0.2,
+                use_original_audio: false,
+                speed: 1.0,
+            })),
+        ];
+        let joins = vec![
+            JoinInfo {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+                scene_start: true,
+            },
+            JoinInfo {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+                scene_start: false,
+            },
+        ];
+        let out = tmp.join("final.mp4");
+        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out)
+            .expect("encode_jobs frames+video group concat");
+        // 連結成功＝両セグメントが -c copy 互換（非互換なら concat が失敗し上で panic）。両セグメント MP4 も生成済み。
+        assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
+        assert!(
+            tmp.join("scene_000.mp4").exists(),
+            "窓(Frames)セグメントが生成されていない"
+        );
+        assert!(
+            tmp.join("scene_001.mp4").exists(),
+            "settled(Video)セグメントが生成されていない"
+        );
     }
 }
