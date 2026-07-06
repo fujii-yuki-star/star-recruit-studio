@@ -128,7 +128,7 @@ describe('compileTimeline：掛け合い（行トラック）', () => {
     expect(s2audio).toEqual([{ id: 's2/l1', sceneId: 's2', lineId: 'l1', startSec: 6, endSec: 12, label: 'A' }]);
   });
 
-  it('動画スロットのある掛け合いは行分割せず単一クリップ（書き出しに一致）', () => {
+  it('掛け合いは動画スロットの有無に依らず行ごとに射影する（#433・旧 collapse 撤去＝#385/#386 の4経路統一）', () => {
     const s = scene({
       sceneId: 's1',
       durationSec: 10,
@@ -137,9 +137,16 @@ describe('compileTimeline：掛け合い（行トラック）', () => {
         { lineId: 'l2', text: 'どうも', startSec: 4, status: 'idle' },
       ],
     });
-    const tl = compileTimeline(project([s]), { isVideoSlotScene: () => true });
-    expect(tl.tracks.audio).toEqual([{ id: 's1/audio', sceneId: 's1', startSec: 0, endSec: 10, label: 'やあ どうも' }]);
-    expect(tl.tracks.telop).toEqual([{ id: 's1/telop', sceneId: 's1', startSec: 0, endSec: 10, label: 'やあ どうも' }]);
+    // isVideoSlotScene オプションは撤去済み。動画スロット掛け合いも通常の掛け合いと同じく行ごと（l1[0,4)/l2[4,10]）。
+    const tl = compileTimeline(project([s]));
+    expect(tl.tracks.audio).toEqual([
+      { id: 's1/l1', sceneId: 's1', lineId: 'l1', startSec: 0, endSec: 4, label: 'やあ' },
+      { id: 's1/l2', sceneId: 's1', lineId: 'l2', startSec: 4, endSec: 10, label: 'どうも' },
+    ]);
+    expect(tl.tracks.telop).toEqual([
+      { id: 's1/l1', sceneId: 's1', lineId: 'l1', startSec: 0, endSec: 4, label: 'やあ' },
+      { id: 's1/l2', sceneId: 's1', lineId: 'l2', startSec: 4, endSec: 10, label: 'どうも' },
+    ]);
   });
 
   it('startSec も音声長も無い複数行は 0秒区間を出さない（末尾行のみ場面尺で残る）', () => {
