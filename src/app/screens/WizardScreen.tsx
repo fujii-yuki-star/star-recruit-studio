@@ -123,16 +123,6 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   useEffect(() => {
     setWizardStep(step);
   }, [step, setWizardStep]);
-  // 離脱（サイドバー移動・戻る等でアンマウント）時に、入力があれば store へ確定する（#401）。
-  // render 中の ref 代入は不可なので effect で最新の確定処理を ref に同期し、アンマウント cleanup で1回呼ぶ。
-  // 空フォーム（会社名/テーマ未入力）では何もしない＝無駄な dirty/履歴を作らない。
-  const persistRef = useRef<() => void>(() => {});
-  useEffect(() => {
-    persistRef.current = () => {
-      if (companyName.trim() || title.trim()) applyForm();
-    };
-  });
-  useEffect(() => () => persistRef.current(), []);
   // 目的の選択肢は種類で切り替える（採用7／一般4・混在不可）。
   const currentPurposeOptions = videoKind === VIDEO_KIND.general ? generalPurposeOptions : purposeOptions;
 
@@ -155,6 +145,27 @@ export function WizardScreen({ onNavigate }: WizardProps) {
       });
     }
   }
+
+  // 「最後に確定(commit)したフォーム内容」のスナップショット（#401 レビュー：完了時の二重 applyForm を防ぐ）。
+  // 初期値＝マウント時のフォーム（=store 由来）。編集が無ければアンマウント確定を skip し、pushHistory の二重積みを防ぐ。
+  const formSnapshot = (): string =>
+    JSON.stringify([videoKind, purpose, aspectRatio, companyName, industry, jobType, strengths,
+      businessDescription, recruitTarget, desiredPerson, additionalNotes, title, agenda, keyPoints, targetAudience, tone, voiceType]);
+  const committedRef = useRef(formSnapshot());
+  // 明示の確定ポイント（次へ／ここまで保存／完了）はこれを使う＝確定後スナップショットを更新して再確定を防ぐ。
+  function commitForm() {
+    applyForm();
+    committedRef.current = formSnapshot();
+  }
+  // 離脱（サイドバー移動・戻る等でアンマウント）時、入力があり かつ 最後の確定以降に編集があるときだけ store へ確定（#401）。
+  // render 中の ref 代入は不可なので effect で最新の確定処理を ref に同期し、アンマウント cleanup で1回呼ぶ。
+  const persistRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    persistRef.current = () => {
+      if ((companyName.trim() || title.trim()) && formSnapshot() !== committedRef.current) applyForm();
+    };
+  });
+  useEffect(() => () => persistRef.current(), []);
   // 音声系（BGM/ナレーション）は素材一覧に出さない。
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
@@ -203,10 +214,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     }
     setFormError(null);
     if (step < steps.length - 1) {
-      applyForm(); // 前進のたびに入力を store へ確定（離脱でロストしない・未保存表示/自動保存/破棄ガードの射程に入る・#401）
+      commitForm(); // 前進のたびに入力を store へ確定（離脱でロストしない・未保存表示/自動保存/破棄ガードの射程に入る・#401）
       setStep(step + 1);
     } else {
-      applyForm(); // ウィザードを抜ける＝入力を確定
+      commitForm(); // ウィザードを抜ける＝入力を確定（確定済みマークでアンマウント二重確定を防ぐ）
       onNavigate("confirm");
     }
   }
@@ -735,7 +746,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 <button
                   className="btn btn-primary btn-lg mt-lg"
                   onClick={() => {
-                    applyForm();
+                    commitForm(); // 確定してから確認画面へ（アンマウント二重確定を防ぐ・#401 レビュー）
                     onNavigate("confirm");
                   }}
                 >
@@ -756,7 +767,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
               <button
                 className="btn btn-secondary"
                 onClick={() => {
-                  applyForm(); // 入力中の目的・会社情報も保存に反映
+                  commitForm(); // 入力中の目的・会社情報も保存に反映（確定済みマークでアンマウント二重確定を防ぐ）
                   void saveProject();
                 }}
                 disabled={saveStatus === "saving"}

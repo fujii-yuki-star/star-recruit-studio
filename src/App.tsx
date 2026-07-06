@@ -142,8 +142,9 @@ function App() {
                   {saveLabel}
                 </button>
               )}
-              {/* ホームには専用の大きな導線があるため、ヘッダの新規作成は重複回避でホーム以外に表示。 */}
-              {screen !== "home" && (
+              {/* ホームには専用の大きな導線があるため重複回避でホーム以外に表示。ウィザードは新規作成フロー中なので出さない
+                  （未コミットの入力欄を無確認で破棄しうる／同一画面遷移で local state が残る不整合を避ける・#401 レビュー）。 */}
+              {screen !== "home" && screen !== "wizard" && (
                 <button
                   className="btn btn-secondary"
                   onClick={startNewProject}
