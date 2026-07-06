@@ -247,7 +247,8 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(out[0].framesBase64).toHaveLength(Math.ceil(0.816 * FPS) + 1);
   });
 
-  it('動画スロット併用のアニメはフレーム列にせず video 経路（下/上PNG）', async () => {
+  it('動画スロット併用のアニメ（非掛け合い）は下/中/上の静止層を per-frame ステージングして video 経路で焼く（#435 P1）', async () => {
+    const staged: Array<{ dir: string; index: number }> = [];
     const out = await buildExportScenes(
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
       templateById, noAsset,
@@ -255,9 +256,37 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
       () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
       undefined, {},
       (s) => [anim(s.sceneId)],
+      async (dir, index) => { staged.push({ dir, index }); }, // stageAnimationFrame を渡す
     );
+    // 場面自体はフレーム列にしない（video 経路）。下/上層を per-frame でステージング（mock は単一動画＝中間層なし）。
     expect(out[0].framesBase64).toBeUndefined();
-    expect(out[0].video).toBeDefined();
+    expect(out[0].video?.belowFramesDir).toBe('scene_vbelow_0');
+    expect(out[0].video?.aboveFramesDir).toBe('scene_vabove_0');
+    expect(out[0].video?.midFramesDirs).toEqual([]); // 単一動画＝中間層なし
+    expect(out[0].video?.aboveFramesFps).toBe(FPS);
+    expect(out[0].video?.belowPngBase64).toBeUndefined(); // per-frame は静止層PNGを送らない
+    expect(out[0].video?.abovePngBase64).toBeUndefined();
+    // 各フレームで below+above をステージング（mid 0枚）＝(ceil(1*fps)+1)×2。
+    const frames = Math.ceil(1 * FPS) + 1;
+    expect(staged.length).toBe(frames * 2);
+    expect(staged.filter((s) => s.dir === 'scene_vbelow_0').length).toBe(frames);
+    expect(staged.filter((s) => s.dir === 'scene_vabove_0').length).toBe(frames);
+  });
+
+  it('動画スロット併用のアニメでもステージング不可なら静止層にフォールバック（#435）', async () => {
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      undefined, {},
+      (s) => [anim(s.sceneId)],
+      // stageAnimationFrame なし
+    );
+    expect(out[0].video?.belowFramesDir).toBeUndefined();
+    expect(out[0].video?.aboveFramesDir).toBeUndefined();
+    expect(out[0].video?.belowPngBase64).toBe('data:image/png;base64,PNG'); // 静止 below
+    expect(out[0].video?.abovePngBase64).toBe('data:image/png;base64,PNG'); // 静止 above
   });
 
   it('animationsFor が空配列を返す場面は従来どおり単一PNG（後方互換）', async () => {
