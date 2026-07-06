@@ -296,6 +296,10 @@ export async function buildExportScenes(
               // 場面内絶対時刻でアニメ補間（プレビューと同一 layoutScene(t)＝パリティ）。最上層のみ切り出して焼く。
               const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
               const fSplit = splitVideoSceneSvgMulti(frameLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit);
+              if (!fSplit) {
+                // 通常来ない（基準 layout で分割成功済み・アニメは要素プロパティのみ変える）。静かに静止へ落とさず追跡ログ（#434 の精神）。
+                console.warn('[buildExportScenes] 動画×アニメの最上層分割に失敗したフレームがあります（静止最上層で代替）。frame:', f);
+              }
               const aboveUrl = await svgToPngDataUrl((fSplit ?? splitM).aboveSvg, width, height);
               await stageAnimationFrame(framesDir, f, aboveUrl);
             }

@@ -631,6 +631,35 @@ pub struct AboveFramesArg<'a> {
     pub fps: u32,
 }
 
+/// 動画シーンの「最上層(above)」入力の種別（#435）。above_frames_dir（動画×アニメ）を最優先し、無ければ
+/// 掛け合いの above_segments、無ければ単一 above_png。すべて空はエラー（None）。純粋＝decode 前に検証でき、
+/// per-frame(above_frames) と静止 aboves を**相互排他**にして順序バグ（frames 指定なのに aboves 必須で失敗）を防ぐ。
+#[derive(Debug, PartialEq, Eq)]
+enum AboveSource {
+    /// 動画×アニメ：最上層を per-frame（above_frames_dir）で焼く＝静止 aboves は組まない。
+    Frames,
+    /// 掛け合い：行区間つき上PNG（above_segments）。
+    Segments,
+    /// 単一 narration：全尺1枚（above_png_base64）。
+    SinglePng,
+}
+
+fn resolve_above_source(
+    has_frames_dir: bool,
+    has_segments: bool,
+    has_above_png: bool,
+) -> Option<AboveSource> {
+    if has_frames_dir {
+        Some(AboveSource::Frames)
+    } else if has_segments {
+        Some(AboveSource::Segments)
+    } else if has_above_png {
+        Some(AboveSource::SinglePng)
+    } else {
+        None
+    }
+}
+
 /// 動画ありシーンの合成入力（ADR-0006／#431 で複数動画スロット対応）。
 /// 下PNG → 動画レイヤー（zIndex 昇順・各 slot へ fit）→ その間の静止層(mid_pngs) → 上PNG(透過・1枚以上) を
 /// zIndex 順に overlay し、音声は narrations(0本以上) ＋ 各動画の元音声(任意) を amix（すべて無ければ無音）。
@@ -2065,37 +2094,50 @@ fn export_video_impl(
                 &below,
                 &format!("scene {} below png", i + 1),
             )?;
-            // 上PNG：行区間つき（掛け合い×動画）なら全部、無ければ従来の全尺1枚。
+            // 最上層(above)の入力種別を先に判定（#435）：above_frames_dir（動画×アニメ）を最優先し、
+            // per-frame と静止 aboves を相互排他にする（frames 指定なのに aboves 必須で落ちる順序バグ防止）。
+            let has_frames_dir = v.above_frames_dir.as_deref().is_some_and(|d| !d.is_empty());
+            let above_src = resolve_above_source(
+                has_frames_dir,
+                !v.above_segments.is_empty(),
+                !v.above_png_base64.is_empty(),
+            )
+            .ok_or_else(|| {
+                export_failure(
+                    format!("scene {} video without above png", i + 1),
+                    "動画の保存中に問題が発生しました。もう一度お試しください。",
+                )
+            })?;
+            // 静止 aboves は Segments/SinglePng のときだけ組む。Frames のときは空（above_frames を後段で解決）。
             let mut aboves: Vec<TimedAbove> = Vec::new();
-            if !v.above_segments.is_empty() {
-                for (k, seg) in v.above_segments.iter().enumerate() {
-                    let p = tmp.join(format!("above_{i:03}_{k:02}.png"));
+            match above_src {
+                AboveSource::Segments => {
+                    for (k, seg) in v.above_segments.iter().enumerate() {
+                        let p = tmp.join(format!("above_{i:03}_{k:02}.png"));
+                        decode_b64_to_file(
+                            &seg.png_base64,
+                            &p,
+                            &format!("scene {} above png {}", i + 1, k + 1),
+                        )?;
+                        aboves.push(TimedAbove {
+                            png: p,
+                            window: Some((seg.start_sec, seg.end_sec)),
+                        });
+                    }
+                }
+                AboveSource::SinglePng => {
+                    let p = tmp.join(format!("above_{i:03}.png"));
                     decode_b64_to_file(
-                        &seg.png_base64,
+                        &v.above_png_base64,
                         &p,
-                        &format!("scene {} above png {}", i + 1, k + 1),
+                        &format!("scene {} above png", i + 1),
                     )?;
                     aboves.push(TimedAbove {
                         png: p,
-                        window: Some((seg.start_sec, seg.end_sec)),
+                        window: None,
                     });
                 }
-            } else if !v.above_png_base64.is_empty() {
-                let p = tmp.join(format!("above_{i:03}.png"));
-                decode_b64_to_file(
-                    &v.above_png_base64,
-                    &p,
-                    &format!("scene {} above png", i + 1),
-                )?;
-                aboves.push(TimedAbove {
-                    png: p,
-                    window: None,
-                });
-            } else {
-                return Err(export_failure(
-                    format!("scene {} video without above png", i + 1),
-                    "動画の保存中に問題が発生しました。もう一度お試しください。",
-                ));
+                AboveSource::Frames => {} // 静止 aboves なし＝above_frames を使う（#435）
             }
             // ナレーション：行ごと（掛け合い×動画・開始秒に配置）を優先、無ければ場面単位（従来）。
             let mut narrations: Vec<TimedNarration> = Vec::new();
@@ -4119,6 +4161,32 @@ mod tests {
         assert_eq!(args.iter().filter(|s| *s == "-loop").count(), 1); // below のみ loop
                                                                       // narration は above image2（1本）の後＝入力 index 3。
         assert!(fc.contains("[3:a]volume=1,apad[aout]"));
+    }
+
+    #[test]
+    fn resolve_above_source_prioritizes_frames_then_segments_then_png() {
+        // #435 の decode 順序バグ回帰防止：above_frames_dir があれば静止 above が空でも Frames（エラーにしない）。
+        assert_eq!(
+            resolve_above_source(true, false, false),
+            Some(AboveSource::Frames)
+        );
+        assert_eq!(
+            resolve_above_source(true, true, true),
+            Some(AboveSource::Frames) // frames を最優先（静止 aboves と相互排他）
+        );
+        assert_eq!(
+            resolve_above_source(false, true, false),
+            Some(AboveSource::Segments)
+        );
+        assert_eq!(
+            resolve_above_source(false, false, true),
+            Some(AboveSource::SinglePng)
+        );
+        assert_eq!(
+            resolve_above_source(false, true, true),
+            Some(AboveSource::Segments) // segments を single png より優先（従来）
+        );
+        assert_eq!(resolve_above_source(false, false, false), None); // すべて空＝エラー
     }
 
     #[test]
