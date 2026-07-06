@@ -1148,6 +1148,26 @@ struct JoinInfo {
     xfade: Option<String>,
     duration_sec: f64,
     offset_sec: f64,
+    /// 論理的な「場面」の先頭セグメントか（#430）。scene_ranges が場面境界の判定に使う。
+    scene_start: bool,
+}
+
+/// セグメント単位の joins（scene_start）から、論理的な場面ごとのセグメント範囲 [start, end) を返す（#430・ADR-0026）。
+/// 掛け合いは1場面が複数セグメント（間/行）に展開されるため、これで「同一場面の連結」と「場面クリップ単位の xfade」
+/// を分ける。先頭セグメントは常に場面の開始とみなす（joins[0].scene_start に依らない＝防御）。純粋関数。
+fn scene_ranges(joins: &[JoinInfo]) -> Vec<(usize, usize)> {
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut start = 0usize;
+    for (i, j) in joins.iter().enumerate().skip(1) {
+        if j.scene_start {
+            ranges.push((start, i));
+            start = i;
+        }
+    }
+    if !joins.is_empty() {
+        ranges.push((start, joins.len()));
+    }
+    ranges
 }
 
 /// FFmpeg xfade が受け付ける transition 名の許可リスト（MVP）。これ以外/"none" はハードカット扱い。
@@ -1283,17 +1303,55 @@ fn encode_jobs(
     // 境界は joins[1..] のみ有効（joins[0]＝先頭場面は遷移元なし。skip(1) で除外＝コメントと一致）。
     let has_transition = joins.iter().skip(1).any(|j| j.xfade.is_some());
     if has_transition && files.len() >= 2 {
-        // 遷移あり：xfade/concat フィルタチェーンで再エンコード結合（ADR-0009 T2）。
-        let steps: Vec<JoinStep> = (1..files.len())
-            .map(|i| JoinStep {
-                xfade: joins[i].xfade.as_deref(),
-                duration_sec: joins[i].duration_sec,
-                offset_sec: joins[i].offset_sec,
-            })
-            .collect();
+        // 遷移あり：まず**論理的な場面**単位へ束ねる（#430・ADR-0026）。掛け合いは1場面が複数セグメント
+        // （間/行）に展開されるので、同一場面のセグメントを先に -c copy 連結して per-scene クリップにし、その
+        // per-scene クリップ間で xfade する。これで入場 xfade が「間」の短さでなく場面尺で clamp され、間を跨いで
+        // 先頭行に重なる（front の transitionTimeline も per-scene で offset/尺を解決済み）。単一セグメント場面は連結不要。
+        let ranges = scene_ranges(joins);
+        let mut scene_files: Vec<String> = Vec::with_capacity(ranges.len());
+        let mut scene_steps: Vec<JoinStep> = Vec::new();
+        for (g, &(start, end)) in ranges.iter().enumerate() {
+            let scene_clip = if end - start == 1 {
+                files[start].clone() // 単一セグメント＝そのまま（連結不要）
+            } else {
+                // 複数セグメント（掛け合い）＝場面内はハードカット連結（-c copy・無劣化）。concat demuxer は
+                // list と同階層の相対名を参照する（segment は tmp_dir/scene_NNN.mp4）。
+                let mut list = String::new();
+                for k in start..end {
+                    list.push_str(&format!("file 'scene_{k:03}.mp4'\n"));
+                }
+                let list_path = tmp_dir.join(format!("scene_group_{g:03}.txt"));
+                fs::write(&list_path, list).map_err(|e| {
+                    export_failure(
+                        format!("write scene group list: {e}"),
+                        "動画の保存中に問題が発生しました。もう一度お試しください。",
+                    )
+                })?;
+                let group_out = tmp_dir.join(format!("scene_group_{g:03}.mp4"));
+                let cargs = concat_args(&list_path.to_string_lossy(), &group_out.to_string_lossy());
+                run(ffmpeg, &cargs).map_err(|e| {
+                    export_failure(
+                        format!("scene group concat: {e}"),
+                        "場面の結合に失敗しました。もう一度お試しください。",
+                    )
+                })?;
+                group_out.to_string_lossy().into_owned()
+            };
+            scene_files.push(scene_clip);
+            // 場面 g の入場遷移＝その場面の先頭セグメントの join（g=0 は先頭で未使用）。
+            if g >= 1 {
+                let j = &joins[start];
+                scene_steps.push(JoinStep {
+                    xfade: j.xfade.as_deref(),
+                    duration_sec: j.duration_sec,
+                    offset_sec: j.offset_sec,
+                });
+            }
+        }
+        // per-scene クリップ間で xfade/concat（ADR-0009 T2）。関数は無改修＝入力が場面クリップに変わっただけ。
         let args = xfade_chain_args(
-            &files,
-            &steps,
+            &scene_files,
+            &scene_steps,
             &output.to_string_lossy(),
             codec,
             fps,
@@ -1545,6 +1603,10 @@ pub struct SceneInput {
     /// この場面に「入る」トランジション（ADR-0009 T2）。先頭場面は無視。未指定＝ハードカット。
     #[serde(default)]
     transition: Option<TransitionInput>,
+    /// 論理的な「場面」の先頭セグメントか（#430）。掛け合いの間/行など同一場面の後続セグメントは false。
+    /// true の境界で場面が変わる＝同一場面のセグメントを先に連結してから場面クリップ単位で xfade する。
+    #[serde(default)]
+    scene_start: bool,
 }
 
 /// 場面間トランジション入力（ADR-0009 T2）。front の transitionTimeline が name/offset を解決済み。
@@ -2001,20 +2063,21 @@ fn export_video_impl(
         }
     };
 
-    // 場面間トランジション（ADR-0009 T2）。各場面の「入り」を JoinInfo に解決（joins[0]＝先頭で未使用）。
+    // 場面間トランジション（ADR-0009 T2）。各セグメントの「入り」を JoinInfo に解決（joins[0]＝先頭で未使用）。
+    // scene_start は front が付与（#430・掛け合いの間/行は false）。scene_ranges が場面束ねに使う。
     let joins: Vec<JoinInfo> = scenes
         .iter()
-        .map(|s| match &s.transition {
-            Some(t) => JoinInfo {
-                xfade: validate_xfade_name(&t.name),
-                duration_sec: t.duration_sec,
-                offset_sec: t.offset_sec,
-            },
-            None => JoinInfo {
-                xfade: None,
-                duration_sec: 0.0,
-                offset_sec: 0.0,
-            },
+        .map(|s| {
+            let (xfade, duration_sec, offset_sec) = match &s.transition {
+                Some(t) => (validate_xfade_name(&t.name), t.duration_sec, t.offset_sec),
+                None => (None, 0.0, 0.0),
+            };
+            JoinInfo {
+                xfade,
+                duration_sec,
+                offset_sec,
+                scene_start: s.scene_start,
+            }
         })
         .collect();
 
@@ -2636,6 +2699,25 @@ mod tests {
     }
 
     #[test]
+    fn scene_ranges_groups_segments_by_scene_start() {
+        // #430：scene_start で論理的な場面へ束ねる。掛け合いは1場面が複数セグメント（間/行）に展開される。
+        let j = |scene_start: bool| JoinInfo {
+            xfade: None,
+            duration_sec: 0.0,
+            offset_sec: 0.0,
+            scene_start,
+        };
+        // 場面0＝[0,3)（先頭+間+行など3セグメント）／場面1＝[3,4)（単一）／場面2＝[4,6)。
+        let joins = vec![j(true), j(false), j(false), j(true), j(true), j(false)];
+        assert_eq!(scene_ranges(&joins), vec![(0, 3), (3, 4), (4, 6)]);
+        // 先頭は scene_start に依らず場面開始（防御）。
+        assert_eq!(scene_ranges(&[j(false), j(false)]), vec![(0, 2)]);
+        // 空・単一。
+        assert_eq!(scene_ranges(&[]), Vec::<(usize, usize)>::new());
+        assert_eq!(scene_ranges(&[j(true)]), vec![(0, 1)]);
+    }
+
+    #[test]
     fn validate_xfade_name_allowlist() {
         // 許可名はそのまま、"none"/未知名はハードカット（None）。
         assert_eq!(validate_xfade_name("fade").as_deref(), Some("fade"));
@@ -3019,11 +3101,86 @@ mod tests {
                 xfade: None,
                 duration_sec: 0.0,
                 offset_sec: 0.0,
+                scene_start: true,
             })
             .collect();
         encode_jobs(&ffmpeg, &scenes, &joins, codec, 30, "12000k", &tmp, &out)
             .expect("encode_jobs");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
+    }
+
+    // #430 のE2E：掛け合い場面（複数セグメント）＋入場遷移。場面A=2セグメント（間/行相当）を先に連結し、
+    // 場面B（入場 fade）と per-scene xfade する経路が実FFmpegで通ることを検証。FFMPEG_PATH 未設定ならスキップ。
+    #[test]
+    fn encode_jobs_groups_multi_segment_scene_before_xfade() {
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_export_unittest_scene_group");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        let mut jobs = Vec::new();
+        for (i, color) in ["red", "green", "blue"].iter().enumerate() {
+            let png = tmp.join(format!("src_{i}.png"));
+            run(
+                &ffmpeg,
+                &[
+                    "-y".into(),
+                    "-f".into(),
+                    "lavfi".into(),
+                    "-i".into(),
+                    format!("color=c={color}:s=320x180"),
+                    "-frames:v".into(),
+                    "1".into(),
+                    png.to_string_lossy().into_owned(),
+                ],
+            )
+            .expect("generate png");
+            jobs.push(SceneJob::Still(SceneFile {
+                png,
+                audio: None,
+                narration_volume: 1.0,
+                duration_sec: 1.0,
+            }));
+        }
+        // scene_start=[T,F,T]：seg0/seg1 が場面A（連結して2s）、seg2 が場面B。場面B の入場に fade。
+        // 場面A 尺=2s ゆえ per-scene offset = 2 − 0.5 = 1.5（front の transitionTimeline 相当）。
+        let joins = vec![
+            JoinInfo {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+                scene_start: true,
+            },
+            JoinInfo {
+                xfade: None,
+                duration_sec: 0.0,
+                offset_sec: 0.0,
+                scene_start: false,
+            },
+            JoinInfo {
+                xfade: Some("fade".into()),
+                duration_sec: 0.5,
+                offset_sec: 1.5,
+                scene_start: true,
+            },
+        ];
+        let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
+        let codec = pick_codec(&encoders).expect("an h264 encoder");
+        let out = tmp.join("final.mp4");
+        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out)
+            .expect("encode_jobs scene group");
+        assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
+        // 場面A の内部セグメントが連結クリップ（scene_group_000.mp4）に束ねられた。
+        assert!(
+            tmp.join("scene_group_000.mp4").exists(),
+            "場面Aの連結クリップが作られていない"
+        );
     }
 
     // BGM 合成のE2E（amix/afade/stream_loop のフィルタグラフが実FFmpegで通るか）。FFMPEG_PATH 未設定ならスキップ。
@@ -3071,6 +3228,7 @@ mod tests {
                 xfade: None,
                 duration_sec: 0.0,
                 offset_sec: 0.0,
+                scene_start: true,
             }],
             codec,
             30,
@@ -3847,6 +4005,7 @@ mod tests {
                 xfade: None,
                 duration_sec: 0.0,
                 offset_sec: 0.0,
+                scene_start: true,
             })
             .collect();
         encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out)

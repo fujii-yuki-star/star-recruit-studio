@@ -550,7 +550,7 @@ describe('buildExportScenes：場面間トランジション（ADR-0009 T2）', 
     expect(out[1].transition?.name).toBe('fade');
   });
 
-  it('掛け合いの短い「間」＋入場遷移：現状は遷移尺が間の長さに clamp される（#386 の副作用・#430 で per-scene 化予定）', async () => {
+  it('掛け合いの短い「間」＋入場遷移：遷移尺は間で縮めず場面尺で clamp（#430・per-scene＝切り替え尺優先）', async () => {
     const scenes = [
       { sceneId: 's1', templateId: 'tpl', durationSec: 5 },
       {
@@ -563,11 +563,15 @@ describe('buildExportScenes：場面間トランジション（ADR-0009 T2）', 
       },
     ] as unknown as Scene[];
     const out = await buildExportScenes(scenes, templateById, noAsset);
-    // s2 は 間[0,0.5)/line0[0.5,4)/line1[4,10) の3セグメント。out[1]=間（場面の先頭）が入場遷移を持つ。
+    // s2 は 間[0,0.5)/line0[0.5,4)/line1[4,10) の3セグメント。sceneStart は各場面の先頭だけ true。
     expect(out.map((o) => o.durationSec)).toEqual([5, 0.5, 3.5, 6]);
-    // 現状：希望1s が「間」の尺0.5s に clamp（d=min(1, acc=5, 0.5)=0.5・offset=5−0.5）。
-    // #430（per-scene xfade）で間を跨いで先頭行に重ね、設定尺1s を保つ予定（利用者判断 2026-07-06・切り替え尺を優先）。
-    expect(out[1].transition).toEqual({ name: 'fade', durationSec: 0.5, offsetSec: 4.5 });
+    expect(out.map((o) => o.sceneStart)).toEqual([true, true, false, false]); // s1 先頭／s2 先頭(間)＋行×2
+    // #430：per-scene で解決＝希望1s は「間」で縮めず場面尺(10s)で clamp（d=min(1, acc=5, 10)=1・offset=5−1=4）。
+    // 入場遷移は out[1]（場面の先頭＝間）に載り、Rust が場面内を連結してから間を跨いで先頭行に重ねる。
+    expect(out[1].transition).toEqual({ name: 'fade', durationSec: 1, offsetSec: 4 });
+    // 場面内の後続セグメント（行）には遷移を付けない（ハードカット）。
+    expect(out[2].transition).toBeUndefined();
+    expect(out[3].transition).toBeUndefined();
   });
 });
 

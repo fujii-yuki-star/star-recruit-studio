@@ -47,6 +47,9 @@ export interface ExportSceneInput {
   video?: ExportVideoInput;
   /** この場面に「入る」トランジション（ADR-0009 T2）。先頭・none では未設定（ハードカット）。 */
   transition?: { name: string; durationSec: number; offsetSec: number };
+  /** 論理的な「場面」の先頭セグメントか（#430）。同一場面の後続セグメント（掛け合いの間/行）は false／未指定。
+   *  Rust は同じ場面のセグメントを連結してから場面クリップ単位で xfade する（入場遷移を間の短さで縮めない）。 */
+  sceneStart?: boolean;
 }
 
 /** 場面ごとBGMの1クリップ入力（ADR-0018 ③(7)）。planBgmMix が配置(delaySec)・使う長さ(playSec)・前後フェードを算出済み。data URL 可・volume は §6 解決済み。 */

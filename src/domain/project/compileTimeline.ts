@@ -7,10 +7,9 @@
 //   base+seg.startSec（＝先頭 startSec）に置き、書き出し（静止画/動画）も #386・A案で頭空白を isGap 区間として
 //   場面尺どおりに保つため、頭空白があっても両者は秒単位で一致する（旧：静止画/プレビューだけ間を捨てて短縮＝ズレ）。
 //   なお本関数の telop/audio の先頭行クリップは firstStart 始まり＝A案「間は字幕なし」と同義（間には字幕を出さない）。
-//   残る差は遷移尺の上限 clamp：書き出し(buildExportScenes)は per-segment 尺で締めるため、頭空白のある掛け合い場面に
-//   入場遷移を付けると、その場面の**最初のセグメント＝間**の尺で xfade が clamp される（間<希望尺のとき遷移が間の長さに
-//   縮む＝実際の書き出し挙動が変わる）。一方本関数は per-scene 尺（場面尺）で締める。両者を per-scene に揃え、入場遷移を
-//   間の長さで縮めない（間を跨いで先頭行に重ねる）対応は #430（per-scene xfade へ再構成・利用者判断 2026-07-06）＝#386 の残件。
+//   遷移尺の上限 clamp も #430（per-scene xfade）で両者 per-scene に揃った：書き出し(buildExportScenes)は同一場面の
+//   セグメント（間/行）を連結してから場面クリップ単位で clamp / xfade し、本関数も per-scene 尺（場面尺）で締める。
+//   よって頭空白のある掛け合い場面に入場遷移を付けても、遷移が「間」の短さで縮まず設定尺どおり（両者一致）。
 import { TRANSITION_TYPE } from '../enums';
 import type { TransitionDirection, TransitionType } from '../enums';
 import { resolveTransition, transitionTimeline } from './sceneTransitions';
