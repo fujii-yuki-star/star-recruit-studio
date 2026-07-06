@@ -66,6 +66,12 @@ export interface ExportSceneData {
   video?: ExportVideoData;
   /** この場面に「入る」トランジション（ADR-0009 T2）。先頭場面・none では未設定（ハードカット）。 */
   transition?: { name: string; durationSec: number; offsetSec: number };
+  /**
+   * 論理的な「場面」の先頭セグメントか（#430・ADR-0026）。掛け合いの間/行など同一場面の後続セグメントは false。
+   * Rust は同じ場面のセグメントを先に -c copy 連結し、**場面クリップ単位**で xfade する＝入場遷移を「間」や
+   * 行の短さで縮めない（transition の duration/offset も front が per-scene で解決済み）。
+   */
+  sceneStart?: boolean;
 }
 
 /**
@@ -361,20 +367,36 @@ export async function buildExportScenes(
     onProgress?.(i + 1, scenes.length);
   }
 
-  // 場面間トランジション（ADR-0009 T2）：書き出し対象の場面で xfade の offset/実効尺を解決し各場面へ付与。
-  // 先頭・none は未設定（Rust 側でハードカット）。durations は焼いた順＝included と一致。
-  const durations = out.map((o) => o.durationSec);
-  const resolved = included.map((s) => resolveTransition(s.transition));
-  const boundaryDs = resolved.map((r, i) =>
-    i === 0 || r.type === TRANSITION_TYPE.none ? 0 : r.durationSec,
+  // 場面間トランジション（ADR-0009 T2）を**論理的な場面クリップ単位**で解決する（#430・ADR-0026）。
+  // 掛け合いは1場面が複数セグメント（間/行）に展開されるため、per-segment で clamp すると入場遷移が
+  // 先頭の「間」の短さに縮む。ここでは場面（included の sceneId が変わる位置＝境界）ごとに尺を合算し、
+  // transitionTimeline を per-scene で回す。Rust は sceneStart で同一場面のセグメントを連結してから
+  // 場面クリップ間で xfade する（間を跨いで先頭行に重なる＝設定した切り替え尺を尊重）。
+  // 各場面の先頭 out index と、境界フラグ（sceneStart）を求める。
+  const sceneFirst: number[] = [];
+  for (let i = 0; i < out.length; i += 1) {
+    const isStart = i === 0 || included[i].sceneId !== included[i - 1].sceneId;
+    out[i].sceneStart = isStart;
+    if (isStart) sceneFirst.push(i);
+  }
+  // 場面ごとの尺（内部セグメントの合計）と、入場遷移（先頭セグメントの included が持つ）。
+  const sceneDurations = sceneFirst.map((first, k) => {
+    const end = k + 1 < sceneFirst.length ? sceneFirst[k + 1] : out.length;
+    let d = 0;
+    for (let j = first; j < end; j += 1) d += out[j].durationSec;
+    return d;
+  });
+  const sceneResolved = sceneFirst.map((first) => resolveTransition(included[first].transition));
+  const sceneBoundaryDs = sceneResolved.map((r, k) =>
+    k === 0 || r.type === TRANSITION_TYPE.none ? 0 : r.durationSec,
   );
-  const { steps } = transitionTimeline(durations, boundaryDs);
-  for (let i = 1; i < out.length; i += 1) {
-    if (resolved[i].type === TRANSITION_TYPE.none) continue;
-    out[i].transition = {
-      name: xfadeName(resolved[i]),
-      durationSec: steps[i - 1].durationSec,
-      offsetSec: steps[i - 1].offsetSec,
+  const { steps } = transitionTimeline(sceneDurations, sceneBoundaryDs);
+  for (let k = 1; k < sceneFirst.length; k += 1) {
+    if (sceneResolved[k].type === TRANSITION_TYPE.none) continue;
+    out[sceneFirst[k]].transition = {
+      name: xfadeName(sceneResolved[k]),
+      durationSec: steps[k - 1].durationSec,
+      offsetSec: steps[k - 1].offsetSec,
     };
   }
   return out;
