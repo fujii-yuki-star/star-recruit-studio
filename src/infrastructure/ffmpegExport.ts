@@ -11,6 +11,10 @@ export interface ExportVideoInput {
   abovePngBase64?: string;
   /** 掛け合い×動画：行区間つき上PNG（字幕/クレジット差し替え・表示窓 [startSec, endSec)）。 */
   aboveSegments?: { pngBase64: string; startSec: number; endSec: number }[];
+  /** 動画×アニメ（#435・非掛け合い）：最上層を per-frame で焼くステージング済みフレームdir名。指定時は abovePngBase64 の代わり。 */
+  aboveFramesDir?: string;
+  /** aboveFramesDir のフレームレート（既定 30）。 */
+  aboveFramesFps?: number;
   /** 掛け合い×動画：行ごとのナレーション（delaySec 秒に配置・windowSec の窓で切り詰め＝#385）。無ければ場面単位の audioBase64（従来）。 */
   narrationSegments?: { audioBase64: string; delaySec: number; windowSec: number }[];
   /** プロジェクト相対のクリップパス（例: "assets/asset_v.mp4"）。Rust がファイルとして読む。 */

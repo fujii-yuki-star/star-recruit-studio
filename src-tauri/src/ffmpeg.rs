@@ -621,6 +621,16 @@ pub struct VideoLayerArg<'a> {
     pub speed: f64,
 }
 
+/// 動画×アニメ（#435・非掛け合い）：最上層（前景=above）を per-frame の画像列で描く指定。
+/// Some のとき静止 aboves の代わりに image2 シーケンスを1本、最前面へ overlay する
+/// （eof_action=repeat で最終フレームを尺まで保持＝#376/frames_scene_args と同方針。背景/動画間は静止のまま）。
+pub struct AboveFramesArg<'a> {
+    /// image2 パターン（例 "<dir>/frame_%05d.png"）。
+    pub pattern: &'a str,
+    /// フレームレート。
+    pub fps: u32,
+}
+
 /// 動画ありシーンの合成入力（ADR-0006／#431 で複数動画スロット対応）。
 /// 下PNG → 動画レイヤー（zIndex 昇順・各 slot へ fit）→ その間の静止層(mid_pngs) → 上PNG(透過・1枚以上) を
 /// zIndex 順に overlay し、音声は narrations(0本以上) ＋ 各動画の元音声(任意) を amix（すべて無ければ無音）。
@@ -638,7 +648,10 @@ pub struct VideoSceneArgs<'a> {
     pub mid_pngs: &'a [&'a str],
     /// 動画より上のレイヤー（文字/ゆうこ等, zIndex>slot, 透過PNG）。通常1枚（window=None）、
     /// 掛け合いは行区間ごとに複数枚。空は防御（bg1 を直接出力）＝export_video が事前に弾く。
+    /// above_frames=Some のとき（動画×アニメ）は使わない。
     pub aboves: &'a [AbovePngArg<'a>],
+    /// 動画×アニメ（#435・非掛け合い）：最上層を per-frame 画像列で焼く。Some のとき aboves の代わりに使う。
+    pub above_frames: Option<AboveFramesArg<'a>>,
     /// ナレーション音声（0本以上）。単一場面ナレーションは [{wav, delay_sec:0}]。
     pub narrations: &'a [NarrationArg<'a>],
     /// スロット矩形。
@@ -729,25 +742,31 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
         vparts.push(format!("[{}:v]{cv}[clip{k}]", 1 + k));
     }
     // overlay 順（下→上）: below → clip0@slot0 → mid0 → clip1@slot1 → … → clip{n-1} → aboves。
-    // 1 overlay 操作＝(入力ラベル, x, y, 行区間 enable[start,end))。mid 入力 index=1+n+m、above=1+n+mid_count+j。
-    type OverlayOp = (String, u32, u32, Option<(f64, f64)>);
+    // 1 overlay 操作＝(入力ラベル, x, y, 行区間 enable[start,end), eof_action=repeat か)。mid=1+n+m、above=1+n+mid_count(+j)。
+    type OverlayOp = (String, u32, u32, Option<(f64, f64)>, bool);
     let mid_base = 1 + n;
     let above_base = 1 + n + mid_count;
     let mut ops: Vec<OverlayOp> = Vec::new();
     for (k, l) in layers.iter().enumerate() {
-        ops.push((format!("clip{k}"), l.x, l.y, None));
+        ops.push((format!("clip{k}"), l.x, l.y, None, false));
         if k + 1 < n {
             // 動画 k と k+1 の間の静止層（透過）。
-            ops.push((format!("{}:v", mid_base + k), 0, 0, None));
+            ops.push((format!("{}:v", mid_base + k), 0, 0, None, false));
         }
     }
-    for (j, ab) in a.aboves.iter().enumerate() {
-        ops.push((format!("{}:v", above_base + j), 0, 0, ab.window));
+    // 最上層(above)：動画×アニメ（above_frames=Some・#435）は image2 シーケンス1本を最前面に overlay し、
+    // eof_action=repeat で最終フレームを尺まで保持（前景アニメ・#376 同方針）。それ以外は静止 aboves（掛け合いは行区間 enable）。
+    if a.above_frames.is_some() {
+        ops.push((format!("{above_base}:v"), 0, 0, None, true));
+    } else {
+        for (j, ab) in a.aboves.iter().enumerate() {
+            ops.push((format!("{}:v", above_base + j), 0, 0, ab.window, false));
+        }
     }
     // 連鎖 emit。prev は below([0:v])起点。最後の overlay を [vout] に、途中は [bg{i}]。
     // 行区間つき above は単一フレームを eof_action=repeat で持続させ [start,end) だけ描く（半開区間＝#385/テロップ方式）。
     let mut prev = "0:v".to_string();
-    for (i, (in_l, x, y, win)) in ops.iter().enumerate() {
+    for (i, (in_l, x, y, win, eof_rep)) in ops.iter().enumerate() {
         let out = if i + 1 == ops.len() {
             "vout".to_string()
         } else {
@@ -755,6 +774,7 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
         };
         let en = match win {
             Some((s, e)) => format!(":eof_action=repeat:enable='gte(t,{s})*lt(t,{e})'"),
+            None if *eof_rep => ":eof_action=repeat".to_string(),
             None => String::new(),
         };
         vparts.push(format!("[{prev}][{in_l}]overlay={x}:{y}{en}[{out}]"));
@@ -763,8 +783,13 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
     let video_filter = vparts.join(";");
     // 音声: narrations（0本以上・delay 配置）＋ 各動画レイヤーの元音声(use_orig)。すべて無ければ無音(anullsrc)。
     let nv = a.narration_volume;
-    // ナレーション入力の先頭 index（below=0, clip×n, mid×mid_count, above×A の直後）。
-    let narr_base = 1 + n + mid_count + a.aboves.len();
+    // ナレーション入力の先頭 index（below=0, clip×n, mid×mid_count, above の直後）。above_frames は image2 を1本占める。
+    let above_count = if a.above_frames.is_some() {
+        1
+    } else {
+        a.aboves.len()
+    };
+    let narr_base = 1 + n + mid_count + above_count;
     // 1本ぶんの前処理: [窓で atrim 切り詰め →] volume → 必要なら adelay（行の開始秒へ配置・全チャンネル）＝#385。
     // atrim 後は asetpts=N/SR/TB で PTS を 0 起点へ戻してから adelay で配置する（mix_bgm と同方針）。
     let narr_chain = |idx: usize, delay_sec: f64, window_sec: Option<f64>| -> String {
@@ -871,19 +896,31 @@ pub fn video_scene_args(a: &VideoSceneArgs) -> Vec<String> {
             (*mid).into(),
         ]);
     }
-    for ab in a.aboves {
-        match ab.window {
-            // 全尺の1枚（従来）: 尺ぶんループ。
-            None => args.extend([
-                "-loop".into(),
-                "1".into(),
-                "-t".into(),
-                format!("{dur}"),
-                "-i".into(),
-                ab.png.into(),
-            ]),
-            // 行区間つき: 単一フレームのまま入力（overlay 側の eof_action=repeat で持続）。
-            Some(_) => args.extend(["-i".into(), ab.png.into()]),
+    if let Some(af) = &a.above_frames {
+        // 動画×アニメ（#435）：最上層を image2 シーケンスで入力（前景アニメ・overlay 側 eof_action=repeat で保持）。
+        args.extend([
+            "-framerate".into(),
+            format!("{}", af.fps),
+            "-start_number".into(),
+            "0".into(),
+            "-i".into(),
+            af.pattern.into(),
+        ]);
+    } else {
+        for ab in a.aboves {
+            match ab.window {
+                // 全尺の1枚（従来）: 尺ぶんループ。
+                None => args.extend([
+                    "-loop".into(),
+                    "1".into(),
+                    "-t".into(),
+                    format!("{dur}"),
+                    "-i".into(),
+                    ab.png.into(),
+                ]),
+                // 行区間つき: 単一フレームのまま入力（overlay 側の eof_action=repeat で持続）。
+                Some(_) => args.extend(["-i".into(), ab.png.into()]),
+            }
         }
     }
     for na in a.narrations {
@@ -1205,6 +1242,8 @@ struct VideoJob {
     extra_videos: Vec<VideoLayerJob>,
     /// 動画レイヤー間の静止層PNG（透過・枚数＝動画本数−1・#431）。空＝1動画。
     mid_pngs: Vec<PathBuf>,
+    /// 動画×アニメ（#435・非掛け合い）：最上層を per-frame で焼くときの (フレームdir, fps)。None＝静止 aboves。
+    above_frames: Option<(PathBuf, u32)>,
 }
 
 /// 追加動画レイヤー1本の解決済みジョブ（#431）。clip は絶対パス、slot/クリップ設定を持つ。
@@ -1385,12 +1424,24 @@ fn encode_jobs(
                     .map(|p| p.to_string_lossy().into_owned())
                     .collect();
                 let mid_pngs: Vec<&str> = mid_s.iter().map(|s| s.as_str()).collect();
+                // 動画×アニメ（#435）：最上層の image2 パターン（<dir>/frame_%05d.png）。
+                let above_pat = v
+                    .above_frames
+                    .as_ref()
+                    .map(|(dir, _)| dir.join("frame_%05d.png").to_string_lossy().into_owned());
+                let above_frames = v.above_frames.as_ref().and_then(|(_, fps)| {
+                    above_pat.as_ref().map(|pat| AboveFramesArg {
+                        pattern: pat,
+                        fps: *fps,
+                    })
+                });
                 video_scene_args(&VideoSceneArgs {
                     below_png: &below,
                     clip: &clip_path,
                     extra_videos: &extra_videos,
                     mid_pngs: &mid_pngs,
                     aboves: &aboves,
+                    above_frames,
                     narrations: &narrations,
                     slot_x: v.slot.0,
                     slot_y: v.slot.1,
@@ -1798,6 +1849,13 @@ pub struct VideoSceneInput {
     /// 連続する動画レイヤーの間に挟む静止層PNG（透過・base64・枚数＝動画本数−1・#431）。空＝1動画。
     #[serde(default)]
     mid_layers: Vec<String>,
+    /// 動画×アニメ（#435・非掛け合い）：最上層を per-frame で焼くステージング済みフレームdir名（英数字/_）。
+    /// stage_export_frame が <stage>/<dir>/frame_NNNNN.png を書き込み済み。None＝静止 above（従来/掛け合い）。
+    #[serde(default)]
+    above_frames_dir: Option<String>,
+    /// above_frames_dir のフレームレート（未指定は 30）。
+    #[serde(default)]
+    above_frames_fps: Option<u32>,
 }
 
 /// 追加動画レイヤー1本の入力（#431）。先頭動画（VideoSceneInput 本体）と同じクリップ設定を持つ。
@@ -2157,6 +2215,26 @@ fn export_video_impl(
                 decode_b64_to_file(b64, &p, &format!("scene {} mid png {}", i + 1, m + 1))?;
                 mid_pngs.push(p);
             }
+            // 動画×アニメ（#435）：最上層のステージング済みフレームdir を解決（<stage>/<dir>）。先頭フレーム必須。
+            let above_frames = match v.above_frames_dir.as_ref().filter(|d| !d.is_empty()) {
+                Some(dir_name) => {
+                    if !is_safe_stage_name(dir_name) {
+                        return Err(export_failure(
+                            format!("invalid above_frames_dir: {dir_name}"),
+                            "動画の保存中に問題が発生しました。もう一度お試しください。",
+                        ));
+                    }
+                    let fdir = export_frames_stage_dir(&app)?.join(dir_name);
+                    if !fdir.join("frame_00000.png").exists() {
+                        return Err(export_failure(
+                            format!("staged above frames missing: {}", fdir.display()),
+                            "動画の保存中に問題が発生しました。もう一度お試しください。",
+                        ));
+                    }
+                    Some((fdir, v.above_frames_fps.unwrap_or(30)))
+                }
+                None => None,
+            };
             jobs.push(SceneJob::Video(VideoJob {
                 below,
                 aboves,
@@ -2164,6 +2242,7 @@ fn export_video_impl(
                 narrations,
                 extra_videos,
                 mid_pngs,
+                above_frames,
                 slot: (v.slot_x, v.slot_y, v.slot_w, v.slot_h),
                 fit: parse_fit(&v.fit),
                 clip_start_sec: v.clip_start_sec.max(0.0), // 負値は 0 に丸める
@@ -2634,6 +2713,7 @@ mod tests {
             clip: "c.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "a.png",
                 window: None,
@@ -3513,6 +3593,7 @@ mod tests {
             clip: "clip.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "above.png",
                 window: None,
@@ -3564,6 +3645,7 @@ mod tests {
             clip: "c.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "a.png",
                 window: None,
@@ -3599,6 +3681,7 @@ mod tests {
             clip: "c.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "a.png",
                 window: None,
@@ -3639,6 +3722,7 @@ mod tests {
             clip: "c.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "a.png",
                 window: None,
@@ -3670,6 +3754,7 @@ mod tests {
             clip: "c.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "a.png",
                 window: None,
@@ -3703,6 +3788,7 @@ mod tests {
             clip: "c.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "a.png",
                 window: None,
@@ -3742,6 +3828,7 @@ mod tests {
             clip: "c.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[
                 AbovePngArg {
                     png: "a0.png",
@@ -3811,6 +3898,7 @@ mod tests {
             clip: "c.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[
                 AbovePngArg {
                     png: "a0.png",
@@ -3884,6 +3972,7 @@ mod tests {
             clip: "clip1.mp4",
             extra_videos: &extra,
             mid_pngs: &mid,
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "above.png",
                 window: None,
@@ -3948,6 +4037,7 @@ mod tests {
             clip: "c1.mp4",
             extra_videos: &extra,
             mid_pngs: &mid,
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "a.png",
                 window: None,
@@ -3980,6 +4070,58 @@ mod tests {
     }
 
     #[test]
+    fn video_scene_args_above_frames_uses_image2_sequence() {
+        // #435：動画×アニメ（非掛け合い）は最上層を image2 シーケンスで overlay（eof_action=repeat で最終フレーム保持）。
+        let args = video_scene_args(&VideoSceneArgs {
+            below_png: "below.png",
+            clip: "clip.mp4",
+            extra_videos: &[],
+            mid_pngs: &[],
+            aboves: &[], // above_frames=Some のとき aboves は使わない
+            above_frames: Some(AboveFramesArg {
+                pattern: "abv/frame_%05d.png",
+                fps: 30,
+            }),
+            narrations: &[NarrationArg {
+                wav: "n.wav",
+                delay_sec: 0.0,
+                window_sec: None,
+            }],
+            slot_x: 80,
+            slot_y: 140,
+            slot_w: 1040,
+            slot_h: 800,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            clip_end_sec: None,
+            duration_sec: 8.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: false,
+            speed: 1.0,
+            fps: 30,
+            codec: VideoCodec::X264,
+            bitrate: "12000k",
+            out: "out.mp4",
+        });
+        let fc = args
+            .iter()
+            .find(|s| s.contains("overlay"))
+            .expect("filter_complex");
+        // below(0)→clip0(1)→above image2(2)。最上 overlay は eof_action=repeat（enable 無し＝前景アニメを尺まで保持）。
+        assert!(fc.contains("[0:v][clip0]overlay=80:140[bg1]"));
+        assert!(fc.contains("[bg1][2:v]overlay=0:0:eof_action=repeat[vout]"));
+        // image2 入力（-framerate 30 -i abv/frame_%05d.png）。静止 -loop は below のみ（above はループしない）。
+        assert!(args
+            .windows(2)
+            .any(|w| w[0] == "-framerate" && w[1] == "30"));
+        assert!(args.iter().any(|s| s == "abv/frame_%05d.png"));
+        assert_eq!(args.iter().filter(|s| *s == "-loop").count(), 1); // below のみ loop
+                                                                      // narration は above image2（1本）の後＝入力 index 3。
+        assert!(fc.contains("[3:a]volume=1,apad[aout]"));
+    }
+
+    #[test]
     fn video_scene_args_single_narration_keeps_legacy_filter() {
         // 単一ナレーション（delay 0）は従来と同一のフィルタ文字列（後方互換＝既存場面の出力不変）。
         let args = video_scene_args(&VideoSceneArgs {
@@ -3987,6 +4129,7 @@ mod tests {
             clip: "c.mp4",
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: "a.png",
                 window: None,
@@ -4147,6 +4290,7 @@ mod tests {
             clip: &clip_s,
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: &above_s,
                 window: None,
@@ -4184,6 +4328,7 @@ mod tests {
             clip: &clip_s,
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: &above_s,
                 window: None,
@@ -4217,6 +4362,7 @@ mod tests {
             clip: &clip_s,
             extra_videos: &[],
             mid_pngs: &[],
+            above_frames: None,
             aboves: &[
                 AbovePngArg {
                     png: &above_s,
@@ -4302,6 +4448,7 @@ mod tests {
                 speed: 1.0,
             }],
             mid_pngs: &[&mid_s],
+            above_frames: None,
             aboves: &[AbovePngArg {
                 png: &above_s,
                 window: None,
@@ -4330,6 +4477,65 @@ mod tests {
         });
         run(&ffmpeg, &args4).expect("video_scene multi-video overlay");
         assert!(fs::metadata(&out4).expect("scene_multi.mp4 exists").len() > 0);
+
+        // #435：動画×アニメ（最上層を image2 シーケンスで overlay）も実FFmpegで検証。透過フレーム3枚を焼いて渡す。
+        let afdir = tmp.join("above_frames");
+        fs::create_dir_all(&afdir).unwrap();
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "color=c=white@0.0:s=640x360".into(),
+                "-frames:v".into(),
+                "3".into(),
+                "-start_number".into(),
+                "0".into(),
+                "-pix_fmt".into(),
+                "rgba".into(),
+                afdir.join("frame_%05d.png").to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("above frames");
+        let afpat = afdir.join("frame_%05d.png").to_string_lossy().into_owned();
+        let out5 = tmp.join("scene_anim.mp4");
+        let out5_s = out5.to_string_lossy().into_owned();
+        let args5 = video_scene_args(&VideoSceneArgs {
+            below_png: &below_s,
+            clip: &clip_s,
+            extra_videos: &[],
+            mid_pngs: &[],
+            aboves: &[],
+            above_frames: Some(AboveFramesArg {
+                pattern: &afpat,
+                fps: 30,
+            }),
+            narrations: &[NarrationArg {
+                wav: &narr_s,
+                delay_sec: 0.0,
+                window_sec: None,
+            }],
+            slot_x: 40,
+            slot_y: 30,
+            slot_w: 240,
+            slot_h: 180,
+            fit: Fit::Cover,
+            clip_start_sec: 0.0,
+            clip_end_sec: None,
+            duration_sec: 2.0,
+            narration_volume: 1.0,
+            original_volume: 0.2,
+            use_original_audio: false,
+            speed: 1.0,
+            fps: 30,
+            codec,
+            bitrate: "12000k",
+            out: &out5_s,
+        });
+        run(&ffmpeg, &args5).expect("video_scene above-frames overlay");
+        assert!(fs::metadata(&out5).expect("scene_anim.mp4 exists").len() > 0);
     }
 
     // encode_jobs の Video アーム連結E2E（SceneJob::Video → video_scene_args → run → concat）。
@@ -4435,6 +4641,7 @@ mod tests {
             }],
             extra_videos: vec![],
             mid_pngs: vec![],
+            above_frames: None,
             slot: (40, 30, 240, 180),
             fit: Fit::Cover,
             clip_start_sec: 0.0,

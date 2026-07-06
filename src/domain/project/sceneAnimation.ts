@@ -4,22 +4,23 @@
 import type { ElementAnimation, Scene } from './types';
 
 /**
- * 場面にキーフレームアニメ（毎フレーム描画）を適用するか。
- * 適用条件＝アニメがある かつ 動画スロット（下/上合成）を伴わない。
- * **掛け合い（行セグメント分割）も対応**＝各行の区間ごとに毎フレーム描画する（③・buildExportScenes が
- * 行セグメント×フレーム列で焼く。preview は行字幕＋アニメを同一 layoutScene(t) で描く）。
- * 動画スロット併用のアニメは引き続き後続段（映像合成との両立が要る）＝静止扱い。
+ * 場面にキーフレームアニメ（毎フレーム描画）を適用するか。適用条件＝アニメがある。
+ * **非掛け合いは動画スロットの有無に依らず適用**＝動画スロット場面は前景（最上層＝above）を per-frame の
+ * 画像列にして動画へ overlay する（#435・ADR-0019 の動画スロット除外を解除。背景/動画間の要素のアニメは v1 では
+ * 静止＝現実のアニメは前景ゆえ通常問題なし）。**掛け合い（行セグメント分割）は非動画のみ**＝各行区間ごとに毎フレーム
+ * 描画（③）。動画スロット×掛け合いのアニメは行区間×フレームの二重で複雑なため v1 未対応（静止・後続）。
  * preview と export がこの関数を共有することで両者の適用条件が構造的に一致する（ADR-0001 パリティ）。
- * @param _scene 場面（現状は判定に未使用＝掛け合いも対応したため。呼び出し側の可読性と将来拡張のため残す）
- * @param hasVideoSlot この場面に動画スロットがあるか（findVideoSlot の解決結果・呼び出し側が算出）
+ * @param scene 場面（掛け合い判定に使う）
+ * @param hasVideoSlot この場面に動画スロットがあるか（findVideoSlots の解決結果・呼び出し側が算出）
  */
 export function sceneAnimationActive(
-  _scene: Scene,
+  scene: Scene,
   animations: ElementAnimation[] | undefined,
   hasVideoSlot: boolean,
 ): boolean {
   if (!animations || animations.length === 0) return false;
-  if (hasVideoSlot) return false; // 動画スロットは映像合成優先（掛け合いは行セグメント×フレームで対応・③）
+  // 動画スロット×掛け合いのアニメは v1 未対応（行区間×フレームの二重合成＝後続）＝静止。
+  if (hasVideoSlot && !!(scene.lines && scene.lines.length > 0)) return false;
   return true;
 }
 

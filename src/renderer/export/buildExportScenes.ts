@@ -32,10 +32,14 @@ function xfadeName(r: ResolvedTransition): string {
 /** 動画ありシーンの書き出し入力（infrastructure の ExportVideoInput と構造一致）。 */
 export interface ExportVideoData {
   belowPngBase64: string;
-  /** 全尺の上PNG（従来の1枚）。aboveSegments 指定時は省略。 */
+  /** 全尺の上PNG（従来の1枚）。aboveSegments / aboveFramesDir 指定時は省略。 */
   abovePngBase64?: string;
   /** 掛け合い×動画：行区間つき上PNG（字幕/クレジット差し替え・表示窓 [startSec, endSec)）。 */
   aboveSegments?: { pngBase64: string; startSec: number; endSec: number }[];
+  /** 動画×アニメ（#435・非掛け合い）：最上層を per-frame で焼くステージング済みフレームdir名。指定時は abovePngBase64 の代わり。 */
+  aboveFramesDir?: string;
+  /** aboveFramesDir のフレームレート（既定 30）。 */
+  aboveFramesFps?: number;
   /** 掛け合い×動画：行ごとのナレーション（delaySec 秒に配置・windowSec の窓で切り詰め＝#385）。 */
   narrationSegments?: { audioBase64: string; delaySec: number; windowSec: number }[];
   clipRelPath: string;
@@ -275,15 +279,41 @@ export async function buildExportScenes(
           }
         }
         if (!pushed) {
-          // 動画ありシーン（単一 narration）：静止層PNG＋クリップ情報（ADR-0006／#431 複数動画）。
+          // 動画ありシーン（単一 narration・非掛け合い）：静止層PNG＋クリップ情報（ADR-0006／#431 複数動画）。
           const narration = narrationFor?.(scene);
-          const abovePngBase64 = await svgToPngDataUrl(splitM.aboveSvg, width, height);
-          out.push({
-            durationSec: scene.durationSec,
-            audioBase64: narration?.audioBase64,
-            narrationVolume: narration?.narrationVolume,
-            video: { belowPngBase64, midLayers, videoLayers, abovePngBase64, ...primary },
-          });
+          const sceneAnims = animationsFor?.(scene) ?? [];
+          // 動画×アニメ（#435）：最上層(above=前景)を per-frame でステージングして動画へ overlay する。
+          // 適用可否は preview（ScenePreview）と共有の sceneAnimationActive（掛け合い×動画は false＝静止）。
+          // ステージング不可（テスト等）は静止 above にフォールバック。
+          const animateVideo = sceneAnimationActive(scene, sceneAnims, true);
+          if (animateVideo && stageAnimationFrame) {
+            const fps = FPS;
+            // 変化する区間 [0, min(尺, animEnd)] だけ焼き、残りは Rust の eof_action=repeat が最終フレームを保持（#376同方針）。
+            const renderDurSec = Math.max(0, Math.min(scene.durationSec, animationsEndSec(sceneAnims)));
+            const frameCount = Math.max(1, Math.ceil(renderDurSec * fps) + 1);
+            const framesDir = `scene_vabove_${i}`;
+            for (let f = 0; f < frameCount; f += 1) {
+              // 場面内絶対時刻でアニメ補間（プレビューと同一 layoutScene(t)＝パリティ）。最上層のみ切り出して焼く。
+              const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
+              const fSplit = splitVideoSceneSvgMulti(frameLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit);
+              const aboveUrl = await svgToPngDataUrl((fSplit ?? splitM).aboveSvg, width, height);
+              await stageAnimationFrame(framesDir, f, aboveUrl);
+            }
+            out.push({
+              durationSec: scene.durationSec,
+              audioBase64: narration?.audioBase64,
+              narrationVolume: narration?.narrationVolume,
+              video: { belowPngBase64, midLayers, videoLayers, aboveFramesDir: framesDir, aboveFramesFps: fps, ...primary },
+            });
+          } else {
+            const abovePngBase64 = await svgToPngDataUrl(splitM.aboveSvg, width, height);
+            out.push({
+              durationSec: scene.durationSec,
+              audioBase64: narration?.audioBase64,
+              narrationVolume: narration?.narrationVolume,
+              video: { belowPngBase64, midLayers, videoLayers, abovePngBase64, ...primary },
+            });
+          }
         }
       } else {
         if (videoSlots.length > 0 && !splitM) {
