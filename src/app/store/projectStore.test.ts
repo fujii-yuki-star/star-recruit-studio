@@ -5,6 +5,7 @@ import * as aiClient from '../../infrastructure/aiClient';
 import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
+import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider';
 import type { Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
@@ -483,5 +484,52 @@ describe('projectStore autoGenerateIfSafe（#384・§2-6：自動生成が送信
     // 判定不能→送らない（§2-6 厳守）。素通りして generate() を呼ばない＝再判定成功時の自動送信も起きない。
     expect(genSpy).not.toHaveBeenCalled();
     willSpy.mockRestore();
+  });
+});
+
+describe('projectStore 生成のキャンセル（#402）', () => {
+  beforeEach(() => {
+    useProjectStore.setState({ templates: sampleTemplates });
+  });
+
+  it('cancelGeneration は世代を進め、下書きがあれば ready・無ければ idle に戻す', () => {
+    useProjectStore.setState({ scenes: [scene('scene_001', 1)], status: 'generating', _generationSeq: 5 });
+    useProjectStore.getState().cancelGeneration();
+    expect(useProjectStore.getState()._generationSeq).toBe(6); // 世代を進めて in-flight を無効化
+    expect(useProjectStore.getState().status).toBe('ready'); // 既存の下書きは残す
+    useProjectStore.setState({ scenes: [], status: 'generating' });
+    useProjectStore.getState().cancelGeneration();
+    expect(useProjectStore.getState().status).toBe('idle'); // 下書きなし＝未生成へ
+  });
+
+  it('生成中にキャンセルすると、裏で完走しても場面を置き換えない（#402）', async () => {
+    const existing = [scene('scene_001', 1)];
+    useProjectStore.setState({ scenes: existing, parts: [], status: 'idle', _generationSeq: 0 });
+    // generateVideoPlan（= MockAiProvider）を制御可能な保留 Promise にして、完了タイミングを操る。
+    let resolvePlan: (v: unknown) => void = () => {};
+    const planPromise = new Promise((r) => { resolvePlan = r; });
+    const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan').mockReturnValue(planPromise as never);
+
+    const genP = useProjectStore.getState().generate(); // 開始（planPromise 待ちで止まる）
+    expect(useProjectStore.getState().status).toBe('generating');
+
+    useProjectStore.getState().cancelGeneration(); // ユーザーがキャンセル（世代が進む）
+    resolvePlan({}); // 裏で生成が完走
+    await genP;
+
+    expect(useProjectStore.getState().scenes).toBe(existing); // 既存の下書きのまま＝置き換わらない
+    expect(useProjectStore.getState().status).toBe('ready'); // cancel が設定した状態を維持（error にもならない）
+    spy.mockRestore();
+  });
+
+  it('キャンセル後に再度 generate すると正常に反映される（世代が現行なら破棄しない）', async () => {
+    useProjectStore.setState({ scenes: [], parts: [], status: 'idle', _generationSeq: 0 });
+    const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan');
+    // 1回目：キャンセルで破棄
+    useProjectStore.getState().cancelGeneration(); // seq を進めておく（前回のキャンセル相当）
+    await useProjectStore.getState().generate(); // Mock は即解決＝現行世代で反映される
+    expect(useProjectStore.getState().status).toBe('ready'); // 正常に生成される
+    expect(useProjectStore.getState().scenes.length).toBeGreaterThan(0);
+    spy.mockRestore();
   });
 });

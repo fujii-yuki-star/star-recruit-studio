@@ -13,6 +13,7 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   const status = useProjectStore((s) => s.status);
   const aiError = useProjectStore((s) => s.aiError);
   const generate = useProjectStore((s) => s.generate);
+  const cancelGeneration = useProjectStore((s) => s.cancelGeneration);
   const fail = useProjectStore((s) => s.fail);
   const reset = useProjectStore((s) => s.reset);
   const [progress, setProgress] = useState(8);
@@ -68,7 +69,14 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
             : "会社情報と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。"
         }
         progress={progress}
-        onCancel={ready ? undefined : () => onNavigate("confirm")}
+        onCancel={
+          ready
+            ? undefined
+            : () => {
+                cancelGeneration(); // 生成を本当に中止＝裏で完走しても場面を置き換えない（#402）
+                onNavigate("confirm");
+              }
+        }
       />
       {ready ? (
         <div className="text-center">
