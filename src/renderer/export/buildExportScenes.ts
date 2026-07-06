@@ -215,9 +215,10 @@ export async function buildExportScenes(
             if (!segSplit) continue; // 基準 layout で分割成功済みのため通常来ない（防御）
             aboveSegments.push({
               pngBase64: await svgToPngDataUrl(segSplit.aboveSvg, width, height),
-              // 先頭行の開始前（頭の空白）はプレビューが先頭行へフォールバック表示する（activeLineIndexAt）
-              // ＝先頭区間の表示窓は 0 秒から。音声は行の開始秒（delaySec）のまま。
-              startSec: k === 0 ? 0 : spec.startSec,
+              // 各区間の表示窓＝そのまま [startSec, startSec+durationSec)。先頭行の開始前の「間」は
+              // sceneSegmentSpecs が字幕なしの isGap 区間 [0, 先頭start) として先頭に出す（#386・A案＝間を尊重）
+              // ＝以前の「先頭を 0 に伸ばして先頭行字幕を頭出し」は廃止（間は字幕なし＝正準 compileTimeline と一致）。
+              startSec: spec.startSec,
               endSec: spec.startSec + spec.durationSec,
             });
             const segNarration = spec.lineId ? narrationFor?.(scene, spec.lineId) : undefined;
@@ -289,7 +290,9 @@ export async function buildExportScenes(
           const segCredit = segLine ? creditForLine(segLine, credit) : credit;
           // 字幕上書き（掛け合い）：string=表示／null=非表示／undefined=従来（scene.texts）。
           const segSubtitle = 'subtitleText' in spec ? spec.subtitleText : undefined;
-          const segNarration = narrationFor?.(scene, segLineId);
+          // 「間」（頭空白＝isGap）は音声なし（#386・A案）。単一 narration（lineId キー無し）は場面音声を継続。
+          const isGap = 'isGap' in spec && spec.isGap === true;
+          const segNarration = isGap ? undefined : narrationFor?.(scene, segLineId);
           if (animate) {
             // アニメ区間：この区間 [startSec, +durationSec] を毎フレーム描画（掛け合いは行ごと・単一は1区間）。
             const fps = FPS;

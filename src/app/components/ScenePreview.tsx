@@ -73,17 +73,23 @@ export function ScenePreview({ scene, template, activeLineIndex, telops, timeSec
   }
 
   // 掛け合い（明示 lines）は有効行の字幕をプレビューに反映（追加A/B）。activeLineIndex＝再生中の有効行・未指定は先頭行。
-  const activeLine = scene.lines && scene.lines.length > 0
-    ? scene.lines[activeLineIndex ?? 0] ?? scene.lines[0]
+  // activeLineIndex<0 は「間」（頭空白＝先頭行 startSec まで）＝有効行なし＝字幕なしで映像だけ（#386・A案＝間は字幕なし）。
+  const hasLines = !!(scene.lines && scene.lines.length > 0);
+  const inGap = hasLines && typeof activeLineIndex === "number" && activeLineIndex < 0;
+  const activeLine = hasLines && !inGap
+    ? scene.lines![activeLineIndex ?? 0] ?? scene.lines![0]
     : undefined;
   const lineSub = activeLine ? resolveLineSubtitle(activeLine, scene) : undefined;
+  // 掛け合いで字幕を上書きするか（行の字幕、または「間」の非表示 null）。
+  const applyLineSub = inGap || !!lineSub;
   // タイムラインのテロップ（ADR-0018・並行テロップ③(8)）＝再生位置の overlay テロップを段違いで重ねる（書き出しと同一 item＝パリティ）。
   const hasTelops = !!(telops && telops.length > 0);
   // キーフレームアニメ（④・ADR-0019）＝再生位置 timeSec で補間して描く（書き出しと同一 layoutScene(t)＝パリティ）。
   const hasAnim = !!(animations && animations.length > 0);
-  const layoutOpts = lineSub || hasTelops || hasAnim
+  const layoutOpts = applyLineSub || hasTelops || hasAnim
     ? {
-        ...(lineSub ? { subtitleText: lineSub.enabled ? lineSub.text : null } : {}),
+        // 間（inGap）は字幕なし＝null。行があれば enabled で text/null。
+        ...(applyLineSub ? { subtitleText: inGap ? null : lineSub && lineSub.enabled ? lineSub.text : null } : {}),
         // テロップは動画全体フォント（場面フォントに左右されない＝書き出しと一致・ADR-0001）。
         ...(hasTelops ? { telops, telopFontId: resolveFontId(null, fontId) } : {}),
         ...(hasAnim ? { timeSec: timeSec ?? 0, animations } : {}),
