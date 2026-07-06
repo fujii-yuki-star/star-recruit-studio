@@ -1913,6 +1913,8 @@ pub struct TransitionInput {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoSceneInput {
+    /// 下PNG（不透明・全面）。below_frames_dir（動画×アニメ・#435 P1）指定時は省略されるため default 許容。
+    #[serde(default)]
     below_png_base64: String,
     /// 全尺の上PNG（従来の1枚）。above_segments 指定時は未使用（空可）。
     #[serde(default)]
@@ -2276,13 +2278,19 @@ fn export_video_impl(
                     ),
                 ));
             }
-            // 追加動画レイヤー（#431）：中間静止層の枚数は「追加動画の本数」と一致する必要がある
-            // （総動画数 n=1+追加、中間層 = n−1 = 追加本数）。front が対で組むが防御でも検証する。
-            if v.mid_layers.len() != v.video_layers.len() {
+            // 追加動画レイヤー（#431）：中間層の枚数は「追加動画の本数」と一致する必要がある
+            // （総動画数 n=1+追加、中間層 = n−1 = 追加本数）。動画×アニメ（#435 P1）は静止 mid_layers ではなく
+            // per-frame の mid_frames_dirs を送るため、どちらか非空の方を実効枚数として検証する。
+            let mid_input_count = if v.mid_frames_dirs.is_empty() {
+                v.mid_layers.len()
+            } else {
+                v.mid_frames_dirs.len()
+            };
+            if mid_input_count != v.video_layers.len() {
                 return Err(export_failure(
                     format!(
-                        "mid_layers ({}) != video_layers ({})",
-                        v.mid_layers.len(),
+                        "mid layers ({}) != video_layers ({})",
+                        mid_input_count,
                         v.video_layers.len()
                     ),
                     "動画の保存中に問題が発生しました。もう一度お試しください。",
@@ -4377,6 +4385,39 @@ mod tests {
         assert!(args.iter().any(|s| s == "bel/frame_%05d.png"));
         assert!(args.iter().any(|s| s == "mid0/frame_%05d.png"));
         assert!(args.iter().any(|s| s == "abv/frame_%05d.png"));
+    }
+
+    #[test]
+    fn video_scene_input_deserializes_animated_frontend_shape() {
+        // #435 P1 回帰防止：per-frame 経路は belowPngBase64/midLayers を送らず belowFramesDir/midFramesDirs を送る。
+        // Rust が frontend 形の JSON を弾かず decode でき（serde default）、中間層の実効枚数が videoLayers と一致すること。
+        let json = r#"{
+            "belowFramesDir": "scene_vbelow_0",
+            "midFramesDirs": ["scene_vmid_0_0"],
+            "aboveFramesDir": "scene_vabove_0",
+            "aboveFramesFps": 30,
+            "clipRelPath": "assets/v.mp4",
+            "slotX": 0, "slotY": 0, "slotW": 100, "slotH": 100,
+            "fit": "cover",
+            "videoLayers": [
+                { "clipRelPath": "assets/v2.mp4", "slotX": 200, "slotY": 100, "slotW": 400, "slotH": 300, "fit": "contain" }
+            ]
+        }"#;
+        let v: VideoSceneInput =
+            serde_json::from_str(json).expect("frontend-shaped animated video input should decode");
+        // belowPngBase64/midLayers/abovePngBase64 は省略＝空（#[serde(default)]）。
+        assert!(v.below_png_base64.is_empty());
+        assert!(v.mid_layers.is_empty());
+        assert_eq!(v.below_frames_dir.as_deref(), Some("scene_vbelow_0"));
+        assert_eq!(v.above_frames_dir.as_deref(), Some("scene_vabove_0"));
+        assert_eq!(v.mid_frames_dirs, vec!["scene_vmid_0_0".to_string()]);
+        // 中間層の実効枚数（per-frame は mid_frames_dirs）＝videoLayers と一致（P1 の枚数チェックが通る）。
+        let mid_input_count = if v.mid_frames_dirs.is_empty() {
+            v.mid_layers.len()
+        } else {
+            v.mid_frames_dirs.len()
+        };
+        assert_eq!(mid_input_count, v.video_layers.len());
     }
 
     #[test]
