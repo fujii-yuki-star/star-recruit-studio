@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // canvas(ADR-0004) は Node テスト環境に無いため描画系をスタブ化し、音声付与の分岐のみを検証する。
 vi.mock('../layout', () => ({ layoutScene: vi.fn(() => ({ items: [] })) }));
@@ -518,6 +518,56 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
     expect(out[1].audioBase64).toBeDefined();
     expect(out[0].audioBase64).not.toBe(out[1].audioBase64);
     expect(out[0].audioBase64).not.toBe(wav); // 窓は [0,0.5] に切られている
+  });
+
+  // 実フレーム経路は base layout にスロット item が要る（assetId→抽出フレーム対応）。テスト後は既定 mock へ戻す。
+  const slotLayout = { items: [{ id: 'mainVisual', kind: 'image', role: 'slot', assetId: 'asset_v1', x: 0, y: 0, w: 100, h: 100, zIndex: 1 }] } as unknown as SceneLayout;
+  afterEach(() => {
+    vi.mocked(layoutScene).mockReturnValue({ items: [] } as unknown as SceneLayout);
+  });
+
+  it('実フレーム合成：各スロットのクリップフレームを抽出→毎フレーム読み、settled は窓の続き（+W*speed）から', async () => {
+    vi.mocked(layoutScene).mockReturnValue(slotLayout);
+    const clipCalls: Array<Record<string, unknown>> = [];
+    let reads = 0;
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 2, useOriginalAudio: true, originalVolume: 0.4, speed: 1 }],
+      undefined, {},
+      (s) => [slotAnim(s.sceneId, 1)], // W=1
+      async () => {},
+      async (dir, clipRelPath, clipStartSec, durSec, speed) => { clipCalls.push({ dir, clipRelPath, clipStartSec, durSec, speed }); return 31; },
+      async () => { reads += 1; return 'data:image/png;base64,VF'; },
+    );
+    // 抽出はスロットごとに1回（dir=clip_vbody_0_0・W=1・clipStart=2・speed=1）。
+    expect(clipCalls).toHaveLength(1);
+    expect(clipCalls[0]).toMatchObject({ dir: 'clip_vbody_0_0', clipRelPath: 'assets/v.mp4', clipStartSec: 2, durSec: 1, speed: 1 });
+    // 各出力フレームで実フレームを読む（frameCount=ceil(1*fps)+1）。
+    expect(reads).toBe(Math.ceil(1 * FPS) + 1);
+    // 窓 Frames は元音声 amix 用の clipAudio（useOriginalAudio・durSec=W）。
+    expect(out[0].clipAudio).toMatchObject({ clipRelPath: 'assets/v.mp4', clipStartSec: 2, durSec: 1, speed: 1, volume: 0.4 });
+    // settled は窓の続き＝clipStart(2)+W(1)*speed(1)=3 から（連続再生）。
+    expect(out[1].video?.clipStartSec).toBe(3);
+  });
+
+  it('元音声OFFなら窓の clipAudio は付かず、settled は clipStart のまま（実フレームでも音声は流さない）', async () => {
+    vi.mocked(layoutScene).mockReturnValue(slotLayout);
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 2, useOriginalAudio: false, speed: 1 }],
+      undefined, {},
+      (s) => [slotAnim(s.sceneId, 1)],
+      async () => {},
+      async () => 31,
+      async () => 'data:image/png;base64,VF',
+    );
+    expect(out[0].clipAudio).toBeUndefined();
+    // 元音声OFFでも映像は実フレームで動きながら再生＝settled は窓の続き（+W*speed）から。
+    expect(out[1].video?.clipStartSec).toBe(3);
   });
 });
 

@@ -235,6 +235,8 @@ pub fn run() {
             ffmpeg::export_video,
             ffmpeg::stage_export_frame,
             ffmpeg::clear_export_frames_stage,
+            ffmpeg::stage_clip_frames,
+            ffmpeg::read_export_frame,
             ffmpeg::probe_video,
             ffmpeg::extract_video_thumbnail,
             ffmpeg::detect_h264_capability,

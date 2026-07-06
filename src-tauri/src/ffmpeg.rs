@@ -1863,6 +1863,166 @@ fn clear_export_frames_stage_impl(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+/// クリップの区間フレームを出力fpsでステージング（#442・動画スロット本体アニメ）。
+/// 動画スロットがアニメする場面は、アニメ区間だけ「動画の実フレームをスロット矩形へ描いて場面全体を per-frame 合成」
+/// する。その素材として、クリップの [clip_start_sec, +dur_sec)（再生秒）を **出力 f＝clip-time clip_start_sec+(f/fps)*speed**
+/// になるよう `setpts=PTS/speed,fps` でサンプルして `<stage>/<dir>/frame_%05d.png` へ書き出す。width で横幅を制限（縦は比率維持）。
+/// 返り値＝実書き出しフレーム数（尺がクリップ末尾を超えると要求 N 未満になりうる＝フロントは min(f,count-1) で末尾クランプ）。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn stage_clip_frames(
+    app: tauri::AppHandle,
+    project_id: String,
+    clip_rel_path: String,
+    clip_start_sec: f64,
+    dur_sec: f64,
+    speed: f64,
+    fps: u32,
+    width: u32,
+    dir_name: String,
+) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        stage_clip_frames_impl(
+            app,
+            project_id,
+            clip_rel_path,
+            clip_start_sec,
+            dur_sec,
+            speed,
+            fps,
+            width,
+            dir_name,
+        )
+    })
+    .await
+    .map_err(|e| {
+        export_failure(
+            format!("stage clip frames join: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stage_clip_frames_impl(
+    app: tauri::AppHandle,
+    project_id: String,
+    clip_rel_path: String,
+    clip_start_sec: f64,
+    dur_sec: f64,
+    speed: f64,
+    fps: u32,
+    width: u32,
+    dir_name: String,
+) -> Result<usize, String> {
+    if !is_safe_stage_name(&dir_name) {
+        return Err(export_failure(
+            format!("invalid stage dir: {dir_name}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        ));
+    }
+    let input = resolve_project_file(&app, &project_id, &clip_rel_path)?;
+    if !input.exists() {
+        return Err(export_failure(
+            format!("clip frames src missing: {}", input.display()),
+            "動画が見つかりませんでした。もう一度取り込んでください。",
+        ));
+    }
+    let dir = export_frames_stage_dir(&app)?.join(&dir_name);
+    fs::create_dir_all(&dir).map_err(|e| {
+        export_failure(
+            format!("clip frames dir: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?;
+    let fps = fps.max(1);
+    let speed = if speed.is_finite() && speed > 0.0 {
+        speed
+    } else {
+        1.0
+    };
+    let width = width.max(2);
+    // 出力フレーム数 N＝ceil(dur*fps)+1（末尾フレームを含める＝フロントの frameCount と一致）。
+    let n = (dur_sec.max(0.0) * fps as f64).ceil() as usize + 1;
+    let start = clip_start_sec.max(0.0);
+    let ffmpeg = resolve_ffmpeg(&app);
+    // 出力 f＝clip-time start+(f/fps)*speed：setpts=PTS/speed で速度反映→fps で等間隔サンプル→横幅制限。
+    let vf = format!("setpts=PTS/{speed},fps={fps},scale='min({width},iw)':-2");
+    let args: Vec<String> = vec![
+        "-y".into(),
+        "-ss".into(),
+        format!("{start}"),
+        "-i".into(),
+        input.to_string_lossy().into_owned(),
+        "-vf".into(),
+        vf,
+        "-frames:v".into(),
+        format!("{n}"),
+        "-start_number".into(),
+        "0".into(),
+        dir.join("frame_%05d.png").to_string_lossy().into_owned(),
+    ];
+    run(&ffmpeg, &args).map_err(|e| {
+        export_failure(
+            format!("clip frames extract: {e}"),
+            "動画の変換に失敗しました。もう一度お試しください。",
+        )
+    })?;
+    // 実書き出し枚数を数える（クリップ末尾で N 未満になりうる）。最低1枚は保証（先頭が無ければエラー）。
+    let count = (0..n)
+        .take_while(|f| dir.join(format!("frame_{f:05}.png")).exists())
+        .count();
+    if count == 0 {
+        return Err(export_failure(
+            format!("clip frames produced none: {}", dir.display()),
+            "動画の変換に失敗しました。もう一度お試しください。",
+        ));
+    }
+    Ok(count)
+}
+
+/// ステージ済みフレーム（stage_clip_frames が書き出したクリップフレーム）を base64 data URL で読む（#442）。
+/// ブラウザがこのフレームをスロット画像として layoutToSvg に差し込み、場面全体を per-frame 合成する。
+#[tauri::command]
+pub async fn read_export_frame(
+    app: tauri::AppHandle,
+    dir_name: String,
+    frame_index: u32,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || read_export_frame_impl(app, dir_name, frame_index))
+        .await
+        .map_err(|e| {
+            export_failure(
+                format!("read export frame join: {e}"),
+                "動画の保存中に問題が発生しました。もう一度お試しください。",
+            )
+        })?
+}
+
+fn read_export_frame_impl(
+    app: tauri::AppHandle,
+    dir_name: String,
+    frame_index: u32,
+) -> Result<String, String> {
+    if !is_safe_stage_name(&dir_name) {
+        return Err(export_failure(
+            format!("invalid stage dir: {dir_name}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        ));
+    }
+    let path = export_frames_stage_dir(&app)?
+        .join(&dir_name)
+        .join(format!("frame_{frame_index:05}.png"));
+    let bytes = fs::read(&path).map_err(|e| {
+        export_failure(
+            format!("read staged frame: {e}"),
+            "動画の保存中に問題が発生しました。もう一度お試しください。",
+        )
+    })?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:image/png;base64,{b64}"))
+}
+
 /// エクスポートの入力（1場面）。フロントは PNG(base64 or data URL) と尺を渡す。
 /// 動画ありシーンは `video` を指定（その場合 png_base64 は使わない）。
 #[derive(serde::Deserialize)]
@@ -1891,6 +2051,10 @@ pub struct SceneInput {
     /// 動画ありシーン（ADR-0006）。指定時は overlay 合成経路へ。
     #[serde(default)]
     video: Option<VideoSceneInput>,
+    /// 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声。指定時は frames_dir 経路で
+    /// ナレーションと amix する（動画がアニメ区間から再生される場合の元音声・useOriginalAudio 時のみ front が付与）。
+    #[serde(default)]
+    clip_audio: Option<ClipAudioInput>,
     /// この場面に「入る」トランジション（ADR-0009 T2）。先頭場面は無視。未指定＝ハードカット。
     #[serde(default)]
     transition: Option<TransitionInput>,
@@ -1910,6 +2074,23 @@ pub struct TransitionInput {
     duration_sec: f64,
     #[serde(default)]
     offset_sec: f64,
+}
+
+/// 窓 Frames セグメント（#442）のクリップ元音声入力。区間 [clip_start_sec, +dur_sec*speed) を取り出し
+/// atempo で速度反映・volume を適用して、ナレーションと amix する（settled 区間の元音声は Video 経路が担う）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipAudioInput {
+    clip_rel_path: String,
+    #[serde(default)]
+    clip_start_sec: f64,
+    /// 窓の尺 W（再生秒）。ソース秒は dur_sec*speed。
+    #[serde(default)]
+    dur_sec: f64,
+    #[serde(default)]
+    speed: Option<f64>,
+    #[serde(default)]
+    volume: Option<f64>,
 }
 
 /// 動画ありシーンの入力（ADR-0006・step2b）。下/上PNGは base64、クリップはプロジェクト相対パス。
@@ -2097,6 +2278,80 @@ pub async fn export_video(
             "動画の保存中に問題が発生しました。もう一度お試しください。",
         )
     })?
+}
+
+/// 窓 Frames（#442）の音声を用意する：ナレーション（narration・§6音量）とクリップ元音声
+/// （clip_audio・区間 [start,+dur*speed)・atempo で速度反映・volume）を amix して 1 本の WAV にする。
+/// 片方だけならそれを整えて返す（narration のみは元の narration をそのまま／clip のみは volume 焼き込み）。
+/// 音量は WAV に焼き込むので、呼び出し側は job の narration_volume に 1.0 を渡す（append_scene_av_tail の二重適用回避）。
+fn build_window_audio(
+    ffmpeg: &Path,
+    tmp: &Path,
+    idx: usize,
+    clip: &Path,
+    clip_audio: &ClipAudioInput,
+    narration: Option<&Path>,
+    narration_volume: f64,
+) -> Result<PathBuf, String> {
+    let speed = clip_audio.speed.unwrap_or(DEFAULT_SPEED).clamp(0.5, 2.0);
+    let vol = clip_audio.volume.unwrap_or(DEFAULT_ORIGINAL_AUDIO_VOLUME);
+    let src_dur = clip_audio.dur_sec.max(0.0) * speed; // ソース秒（再生秒 W × speed）
+    let start = clip_audio.clip_start_sec.max(0.0);
+    let out = tmp.join(format!("winaudio_{idx:03}.wav"));
+    // atempo は speed==1 なら不要。
+    let atempo = if (speed - 1.0).abs() < 1e-6 {
+        String::new()
+    } else {
+        format!("atempo={speed},")
+    };
+    let args: Vec<String> = match narration {
+        Some(narr) => {
+            // narration（volume=narration_volume）＋ clip（区間・atempo・volume）を amix。音量は両方 WAV に焼く。
+            let fc = format!(
+                "[0:a]volume={narration_volume}[a0];[1:a]{atempo}volume={vol}[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0[a]"
+            );
+            vec![
+                "-y".into(),
+                "-i".into(),
+                narr.to_string_lossy().into_owned(),
+                "-ss".into(),
+                format!("{start}"),
+                "-t".into(),
+                format!("{src_dur}"),
+                "-i".into(),
+                clip.to_string_lossy().into_owned(),
+                "-filter_complex".into(),
+                fc,
+                "-map".into(),
+                "[a]".into(),
+                out.to_string_lossy().into_owned(),
+            ]
+        }
+        None => {
+            // クリップ元音声のみ（volume・atempo を焼き込む）。
+            let af = format!("{atempo}volume={vol}");
+            vec![
+                "-y".into(),
+                "-ss".into(),
+                format!("{start}"),
+                "-t".into(),
+                format!("{src_dur}"),
+                "-i".into(),
+                clip.to_string_lossy().into_owned(),
+                "-vn".into(),
+                "-af".into(),
+                af,
+                out.to_string_lossy().into_owned(),
+            ]
+        }
+    };
+    run(ffmpeg, &args).map_err(|e| {
+        export_failure(
+            format!("window audio: {e}"),
+            "動画の変換に失敗しました。もう一度お試しください。",
+        )
+    })?;
+    Ok(out)
 }
 
 /// 書き出し本体（ブロッキング）。`export_video` が spawn_blocking 上で呼ぶ（#375）。
@@ -2422,11 +2677,38 @@ fn export_video_impl(
                     "動画の保存中に問題が発生しました。もう一度お試しください。",
                 ));
             }
+            // 窓 Frames（#442）：クリップ元音声があればナレーションと amix（音量は WAV へ焼き込む＝job の
+            // narration_volume は 1.0）。無ければ従来どおりナレーションのみ。
+            let (audio, narr_vol) = match &s.clip_audio {
+                Some(ca) => {
+                    let pid = project_id.as_deref().ok_or_else(|| {
+                        export_failure(
+                            "clip audio without project_id",
+                            "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                        )
+                    })?;
+                    let clip = resolve_project_file(&app, pid, &ca.clip_rel_path)?;
+                    if !clip.exists() {
+                        return Err(export_failure(
+                            format!("clip audio src missing: {}", clip.display()),
+                            "動画が見つかりませんでした。もう一度取り込んでください。",
+                        ));
+                    }
+                    let nv = s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME);
+                    let mixed =
+                        build_window_audio(&ffmpeg, &tmp, i, &clip, ca, narration.as_deref(), nv)?;
+                    (Some(mixed), 1.0)
+                }
+                None => (
+                    narration,
+                    s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
+                ),
+            };
             jobs.push(SceneJob::Frames(FramesJob {
                 frames_dir,
                 first_frame,
-                audio: narration,
-                narration_volume: s.narration_volume.unwrap_or(DEFAULT_NARRATION_VOLUME),
+                audio,
+                narration_volume: narr_vol,
                 duration_sec: s.duration_sec,
                 fps: s.fps.unwrap_or(DEFAULT_FPS),
             }));
@@ -5198,6 +5480,143 @@ mod tests {
         assert!(
             tmp.join("scene_001.mp4").exists(),
             "settled(Video)セグメントが生成されていない"
+        );
+    }
+
+    #[test]
+    fn stage_clip_frames_extracts_expected_frame_count_when_ffmpeg_available() {
+        // #442：クリップ区間フレーム抽出（stage_clip_frames_impl と同じフィルタ）で出力fpsの枚数が得られる。
+        // 出力 f＝clip-time start+(f/fps)*speed（setpts=PTS/speed,fps）。速度=1・W=1s・fps=30 → 31枚。
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_stage_clip_frames_unittest");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let clip = tmp.join("clip.mp4");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "testsrc2=size=320x240:rate=30:duration=3".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                clip.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("clip");
+        // stage_clip_frames_impl と同一のフィルタ／枚数（W=1・fps=30・speed=1・width=640）。
+        let (fps, speed, width, dur): (u32, f64, u32, f64) = (30, 1.0, 640, 1.0);
+        let n = (dur * fps as f64).ceil() as usize + 1;
+        let dir = tmp.join("frames");
+        fs::create_dir_all(&dir).unwrap();
+        let vf = format!("setpts=PTS/{speed},fps={fps},scale='min({width},iw)':-2");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-ss".into(),
+                "0".into(),
+                "-i".into(),
+                clip.to_string_lossy().into_owned(),
+                "-vf".into(),
+                vf,
+                "-frames:v".into(),
+                format!("{n}"),
+                "-start_number".into(),
+                "0".into(),
+                dir.join("frame_%05d.png").to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("extract clip frames");
+        let count = (0..n)
+            .take_while(|f| dir.join(format!("frame_{f:05}.png")).exists())
+            .count();
+        assert_eq!(count, 31, "W=1s×30fps＋1 で 31 枚のはず（実際 {count}）");
+        assert!(dir.join("frame_00000.png").exists());
+    }
+
+    #[test]
+    fn build_window_audio_mixes_narration_and_clip_when_ffmpeg_available() {
+        // #442：窓 Frames の音声＝ナレーション＋クリップ元音声を amix して 1 本の WAV にする。
+        let Ok(ffmpeg_path) = std::env::var("FFMPEG_PATH") else {
+            return;
+        };
+        let ffmpeg = PathBuf::from(&ffmpeg_path);
+        if !ffmpeg.exists() {
+            return;
+        }
+        let tmp = std::env::temp_dir().join("yuko_window_audio_unittest");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        // 音声つきクリップ（testsrc2 映像＋sine 音声）。
+        let clip = tmp.join("clip.mp4");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "testsrc2=size=160x120:rate=30:duration=3".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-i".into(),
+                "sine=frequency=440:duration=3".into(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-c:a".into(),
+                "aac".into(),
+                "-shortest".into(),
+                clip.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("clip with audio");
+        // ナレーション WAV（1秒）。
+        let narr = tmp.join("narr.wav");
+        run(
+            &ffmpeg,
+            &[
+                "-y".into(),
+                "-f".into(),
+                "lavfi".into(),
+                "-t".into(),
+                "1".into(),
+                "-i".into(),
+                "sine=frequency=660:sample_rate=44100".into(),
+                narr.to_string_lossy().into_owned(),
+            ],
+        )
+        .expect("narration");
+        let ca = ClipAudioInput {
+            clip_rel_path: String::new(), // build_window_audio は clip: &Path を使う（rel は未使用）
+            clip_start_sec: 0.5,
+            dur_sec: 1.0,
+            speed: Some(1.0),
+            volume: Some(0.4),
+        };
+        // ナレーション＋クリップ音声を mix。
+        let mixed = build_window_audio(&ffmpeg, &tmp, 0, &clip, &ca, Some(narr.as_path()), 1.0)
+            .expect("mix narration+clip");
+        assert!(
+            fs::metadata(&mixed).expect("mixed wav exists").len() > 1000,
+            "amix 出力の WAV が生成されていない"
+        );
+        // クリップ音声のみ（narration なし）も整えて返す。
+        let clip_only =
+            build_window_audio(&ffmpeg, &tmp, 1, &clip, &ca, None, 1.0).expect("clip-only audio");
+        assert!(
+            fs::metadata(&clip_only)
+                .expect("clip-only wav exists")
+                .len()
+                > 1000
         );
     }
 }

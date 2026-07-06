@@ -89,6 +89,9 @@ export interface ExportSceneData {
   durationSec: number;
   audioBase64?: string;
   narrationVolume?: number;
+  /** 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声。指定時 Rust が audioBase64（ナレーション）と
+   *  amix する（動画がアニメ区間 [0,durSec] から再生される場合の元音声・useOriginalAudio 時のみ）。 */
+  clipAudio?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number };
   video?: ExportVideoData;
   /** この場面に「入る」トランジション（ADR-0009 T2）。先頭場面・none では未設定（ハードカット）。 */
   transition?: { name: string; durationSec: number; offsetSec: number };
@@ -123,6 +126,24 @@ export type AnimationsFor = (scene: Scene) => ElementAnimation[];
  */
 export type StageAnimationFrame = (framesDir: string, frameIndex: number, dataUrl: string) => Promise<void>;
 
+/**
+ * 動画スロット本体アニメ（#442）：クリップの区間フレームを出力fpsでステージングし、書き出せた枚数を返すコールバック。
+ * アニメ区間だけ「動画の実フレームをスロット矩形へ描いて場面全体を per-frame 合成」する素材にする（動画が動きながら再生）。
+ * 省略時（テスト/非Tauri）は実フレーム合成を諦め、代表フレーム（サムネ）で焼くフォールバックになる。
+ */
+export type StageClipFrames = (
+  dirName: string,
+  clipRelPath: string,
+  clipStartSec: number,
+  durSec: number,
+  speed: number,
+  fps: number,
+  width: number,
+) => Promise<number>;
+
+/** ステージ済みフレーム（stageClipFrames が書き出したクリップフレーム）を data URL で読むコールバック（#442）。 */
+export type ReadExportFrame = (dirName: string, frameIndex: number) => Promise<string>;
+
 /** 書き出しの横断設定。 */
 export interface ExportOptions {
   /** 字幕(subtitle レイヤー)を入れるか。false なら字幕を描かない。既定 true。 */
@@ -152,6 +173,8 @@ export async function buildExportScenes(
   opts: ExportOptions = {},
   animationsFor?: AnimationsFor,
   stageAnimationFrame?: StageAnimationFrame,
+  stageClipFrames?: StageClipFrames,
+  readExportFrame?: ReadExportFrame,
 ): Promise<ExportSceneData[]> {
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
@@ -299,29 +322,71 @@ export async function buildExportScenes(
           const slotAnim = animateVideo && animEnd > 0 && slotIsAnimated(sceneAnims, slotIds, scene.groups);
           if (slotAnim && stageAnimationFrame) {
             // #442（ADR-0019 追補・ADR-0026）：動画スロット本体アニメ。overlay は固定座標しか持てないため、
-            // (1) アニメ区間 [0,W] はスロットもサムネで場面全体を毎フレーム焼き（プレビュー＝ScenePreview の
-            //     layoutToSvg と同一＝位置/拡縮/回転/不透明度が完全パリティ）、
-            // (2) settled 区間 [W,尺] は実動画を最終位置（settled レイアウト）で流す、の2セグメントに分ける。
-            // ナレーションは W でサンプル分割（sliceWav）し両区間へ連続再生させる（Rust 変更不要＝既存 Frames/Video 経路）。
+            // (1) アニメ区間 [0,W] は**動画の実フレーム**をスロット矩形へ描いて場面全体を毎フレーム合成
+            //     （プレビュー＝ScenePreview と同一の layoutScene(t)＝位置/拡縮/回転/不透明度が完全パリティ・
+            //      動画は「動きながら再生」＝既定は先頭から再生。開始タイミングの自由化は後続）、
+            // (2) settled 区間 [W,尺] は実動画を最終位置（settled レイアウト）で流し、クリップは窓の続き（+W*speed）から。
+            // の2セグメントに分ける。ナレーションは W でサンプル分割（sliceWav）＋窓の元音声は Rust が amix（clipAudio）。
             const fps = FPS;
             const W = Math.min(scene.durationSec, animEnd); // アニメ区間（窓）の尺
             const hasSettled = W < scene.durationSec; // settled（実動画）区間があるか
             const narrAudio = narration?.audioBase64;
-            // (1) 窓：スロットも含めた場面全体をサムネで per-frame（穴にしない）＝通常のアニメ場面と同一描画。
             const frameCount = Math.max(1, Math.ceil(W * fps) + 1);
             const winDir = `scene_vbody_${i}`;
+            // 各動画スロット層 id → 動画 assetId（layoutToSvg の assetSrc はこの assetId で呼ばれる）。
+            const slotAssetIdByLayer = new Map(
+              layout.items.flatMap((it) =>
+                it.kind === 'image' && it.role === 'slot' && it.assetId ? [[it.id, it.assetId] as const] : [],
+              ),
+            );
+            // アニメ区間は動画の実フレームで焼く（stageClipFrames/readExportFrame があるとき）。無ければサムネで代替（テスト/非Tauri）。
+            const useRealFrames = !!(stageClipFrames && readExportFrame);
+            // 動画 assetId → 抽出フレーム dir と枚数（全スロットの動画をアニメ区間で再生させる＝動きながら再生）。
+            const clipFrameByAsset = new Map<string, { dir: string; count: number }>();
+            if (useRealFrames) {
+              for (let s = 0; s < videoSlots.length; s += 1) {
+                const vs = videoSlots[s];
+                const assetId = slotAssetIdByLayer.get(vs.slotLayerId);
+                if (!assetId) continue; // 動画 id が引けないスロットはサムネ描画へフォールバック
+                const dir = `clip_vbody_${i}_${s}`;
+                const count = await stageClipFrames!(dir, vs.clipRelPath, vs.clipStartSec, W, vs.speed, fps, width);
+                clipFrameByAsset.set(assetId, { dir, count });
+              }
+            }
             for (let f = 0; f < frameCount; f += 1) {
               const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
+              // アニメ区間のスロット画像＝この時刻の実フレーム（無ければ assetSrc＝サムネ）。プレビューと同じ layoutToSvg で描く。
+              let frameAssetSrc = assetSrc;
+              if (clipFrameByAsset.size > 0) {
+                const urls = new Map<string, string>();
+                for (const [assetId, cf] of clipFrameByAsset) {
+                  urls.set(assetId, await readExportFrame!(cf.dir, Math.min(f, cf.count - 1)));
+                }
+                frameAssetSrc = (id) => (id && urls.has(id) ? urls.get(id) : assetSrc(id));
+              }
               await stageAnimationFrame(
                 winDir,
                 f,
                 await svgToPngDataUrl(
-                  layoutToSvg(frameLayout, { assetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
+                  layoutToSvg(frameLayout, { assetSrc: frameAssetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
                   width,
                   height,
                 ),
               );
             }
+            // 窓の元音声（#442・既定=動画は先頭から再生）：実フレーム時のみ、最初に元音声ONのスロットの [clipStart,+W*speed)
+            // を Rust が amix（複数音声スロットは v1 で先頭のみ・settled は Video 経路で全スロット amix）。サムネ代替時は窓で動画は
+            // 鳴らない（settled から＝従来）。
+            const audioSlot = useRealFrames ? videoSlots.find((v) => v.useOriginalAudio) : undefined;
+            const winClipAudio = audioSlot
+              ? {
+                  clipRelPath: audioSlot.clipRelPath,
+                  clipStartSec: audioSlot.clipStartSec,
+                  durSec: W,
+                  speed: audioSlot.speed,
+                  volume: audioSlot.originalVolume,
+                }
+              : undefined;
             out.push({
               durationSec: hasSettled ? W : scene.durationSec,
               framesDir: winDir,
@@ -329,6 +394,7 @@ export async function buildExportScenes(
               // settled があるときは窓ぶん [0,W] に切る。無ければ（アニメが全尺）ナレーションは丸ごと。
               audioBase64: hasSettled && narrAudio ? sliceWav(narrAudio, 0, W) : narrAudio,
               narrationVolume: narration?.narrationVolume,
+              ...(winClipAudio ? { clipAudio: winClipAudio } : {}),
             });
             // (2) settled：実動画を最終位置で流す。below/mid/above は settled レイアウト（timeSec=animEnd で全アニメが収束）で焼く。
             if (hasSettled) {
@@ -344,7 +410,9 @@ export async function buildExportScenes(
                   slotH: Math.round(s.rect.h * ry),
                   clipRelPath: info.clipRelPath,
                   fit: info.fit,
-                  clipStartSec: info.clipStartSec,
+                  // 実フレーム時は窓で [clipStart,+W*speed) を再生済み＝settled はその続きから（連続再生）。
+                  // サムネ代替時は窓で動画は静止＝settled は clipStart から（従来）。
+                  clipStartSec: info.clipStartSec + (useRealFrames ? W * info.speed : 0),
                   clipEndSec: info.clipEndSec,
                   useOriginalAudio: info.useOriginalAudio,
                   originalVolume: info.originalVolume,
