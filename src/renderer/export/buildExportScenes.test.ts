@@ -247,7 +247,7 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(out[0].framesBase64).toHaveLength(Math.ceil(0.816 * FPS) + 1);
   });
 
-  it('動画スロット併用のアニメ（非掛け合い）は最上層を per-frame ステージングして video 経路で焼く（#435）', async () => {
+  it('動画スロット併用のアニメ（非掛け合い）は下/中/上の静止層を per-frame ステージングして video 経路で焼く（#435 P1）', async () => {
     const staged: Array<{ dir: string; index: number }> = [];
     const out = await buildExportScenes(
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
@@ -258,17 +258,22 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
       (s) => [anim(s.sceneId)],
       async (dir, index) => { staged.push({ dir, index }); }, // stageAnimationFrame を渡す
     );
-    // 場面自体はフレーム列にしない（video 経路）。最上層だけ per-frame でステージング。
+    // 場面自体はフレーム列にしない（video 経路）。下/上層を per-frame でステージング（mock は単一動画＝中間層なし）。
     expect(out[0].framesBase64).toBeUndefined();
+    expect(out[0].video?.belowFramesDir).toBe('scene_vbelow_0');
     expect(out[0].video?.aboveFramesDir).toBe('scene_vabove_0');
+    expect(out[0].video?.midFramesDirs).toEqual([]); // 単一動画＝中間層なし
     expect(out[0].video?.aboveFramesFps).toBe(FPS);
-    expect(out[0].video?.abovePngBase64).toBeUndefined(); // per-frame のとき静止上PNGは付けない
-    // 最上層フレームがステージングされた（animEnd=1 → ceil(1*fps)+1 枚を scene_vabove_0 へ）。
-    expect(staged.length).toBe(Math.ceil(1 * FPS) + 1);
-    expect(staged.every((s) => s.dir === 'scene_vabove_0')).toBe(true);
+    expect(out[0].video?.belowPngBase64).toBeUndefined(); // per-frame は静止層PNGを送らない
+    expect(out[0].video?.abovePngBase64).toBeUndefined();
+    // 各フレームで below+above をステージング（mid 0枚）＝(ceil(1*fps)+1)×2。
+    const frames = Math.ceil(1 * FPS) + 1;
+    expect(staged.length).toBe(frames * 2);
+    expect(staged.filter((s) => s.dir === 'scene_vbelow_0').length).toBe(frames);
+    expect(staged.filter((s) => s.dir === 'scene_vabove_0').length).toBe(frames);
   });
 
-  it('動画スロット併用のアニメでもステージング不可なら静止 above にフォールバック（#435）', async () => {
+  it('動画スロット併用のアニメでもステージング不可なら静止層にフォールバック（#435）', async () => {
     const out = await buildExportScenes(
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
       templateById, noAsset,
@@ -278,7 +283,9 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
       (s) => [anim(s.sceneId)],
       // stageAnimationFrame なし
     );
+    expect(out[0].video?.belowFramesDir).toBeUndefined();
     expect(out[0].video?.aboveFramesDir).toBeUndefined();
+    expect(out[0].video?.belowPngBase64).toBe('data:image/png;base64,PNG'); // 静止 below
     expect(out[0].video?.abovePngBase64).toBe('data:image/png;base64,PNG'); // 静止 above
   });
 

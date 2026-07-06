@@ -6,14 +6,19 @@ import type { ExportCapability } from '../domain/export/exportCapability';
 
 /** 動画ありシーンの入力（ADR-0006）。下/上PNGは data URL、クリップはプロジェクト相対パス。 */
 export interface ExportVideoInput {
-  belowPngBase64: string;
+  /** 下層PNG（不透明・全面）。belowFramesDir（動画×アニメ・#435 P1）指定時は省略。 */
+  belowPngBase64?: string;
   /** 全尺の上PNG（従来の1枚）。aboveSegments 指定時は省略。 */
   abovePngBase64?: string;
   /** 掛け合い×動画：行区間つき上PNG（字幕/クレジット差し替え・表示窓 [startSec, endSec)）。 */
   aboveSegments?: { pngBase64: string; startSec: number; endSec: number }[];
-  /** 動画×アニメ（#435・非掛け合い）：最上層を per-frame で焼くステージング済みフレームdir名。指定時は abovePngBase64 の代わり。 */
+  /** 動画×アニメ（#435）：最上層を per-frame で焼くステージング済みフレームdir名。指定時は abovePngBase64 の代わり。 */
   aboveFramesDir?: string;
-  /** aboveFramesDir のフレームレート（既定 30）。 */
+  /** 動画×アニメ（#435 P1）：下層を per-frame で焼くフレームdir名。指定時は belowPngBase64 の代わり。 */
+  belowFramesDir?: string;
+  /** 動画×アニメ（#435 P1）：中間層を per-frame で焼くフレームdir名（枚数＝動画本数−1）。指定時は midLayers の代わり。 */
+  midFramesDirs?: string[];
+  /** per-frame（below/mid/above）フレームレート（既定 30）。 */
   aboveFramesFps?: number;
   /** 掛け合い×動画：行ごとのナレーション（delaySec 秒に配置・windowSec の窓で切り詰め＝#385）。無ければ場面単位の audioBase64（従来）。 */
   narrationSegments?: { audioBase64: string; delaySec: number; windowSec: number }[];
