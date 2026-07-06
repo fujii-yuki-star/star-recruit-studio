@@ -462,11 +462,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   fail: () => set({ status: "error" }),
-  reset: () => set({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null }),
+  // reset/newProject/loadProject も世代を進めて in-flight の generate を無効化する（#402 レビュー）。
+  // キャンセル以外の経路（キャンセルせず離脱→ホームで新規/切替）でも、裏で走る旧生成が新しい状態を上書きしないように。
+  reset: () =>
+    set((s) => ({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null, _generationSeq: s._generationSeq + 1 })),
   newProject: () => {
     // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
     if (isExportBusy(get().exportRun.phase)) return;
-    set({
+    set((s) => ({
       status: "idle",
       saveStatus: "idle",
       meta: defaultHeader(),
@@ -483,7 +486,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupDepth: 0,
       wizardStep: 0, // 新規＝ウィザードは先頭ステップから（#401）
       exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
-    });
+      _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
+    }));
   },
   // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
   // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。
@@ -613,7 +617,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     for (const entry of [...voiceLoaded, ...lineVoiceLoaded]) {
       if (entry) narrationAudioById[entry[0]] = entry[1];
     }
-    set({
+    set((s) => ({
       status: "ready",
       saveStatus: "saved", // 読み込み直後はディスクと一致＝保存済み扱い（未保存検知の基準・#256）
       // 保存用ヘッダは projectHeaderFromProject に一元化（Project のヘッダ系フィールドの取りこぼしを防ぐ・#324）。
@@ -633,7 +637,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupDepth: 0,
       wizardStep: 0, // 別文書＝ウィザードのステップも初期化（#401）
       exportRun: IDLE_EXPORT_RUN, // 別文書＝前の書き出し結果を持ち越さない
-    });
+      _generationSeq: s._generationSeq + 1, // 別文書へ切替＝in-flight の旧生成を無効化（#402 レビュー）
+    }));
     setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),

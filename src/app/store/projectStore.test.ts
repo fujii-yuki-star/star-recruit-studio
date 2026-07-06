@@ -532,4 +532,24 @@ describe('projectStore 生成のキャンセル（#402）', () => {
     expect(useProjectStore.getState().scenes.length).toBeGreaterThan(0);
     spy.mockRestore();
   });
+
+  it('キャンセルせず newProject しても、裏で完走した旧生成が新しい状態を上書きしない（#402 レビュー）', async () => {
+    useProjectStore.setState({ scenes: [scene('scene_001', 1)], parts: [], status: 'idle', _generationSeq: 0, exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '' } });
+    let resolvePlan: (v: unknown) => void = () => {};
+    const planPromise = new Promise((r) => { resolvePlan = r; });
+    const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan').mockReturnValue(planPromise as never);
+
+    const genP = useProjectStore.getState().generate(); // 生成開始（保留）
+    expect(useProjectStore.getState().status).toBe('generating');
+    // キャンセルを押さずにホーム経由で新規作成（newProject も世代を進める）
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().scenes).toHaveLength(0); // 新規＝空
+
+    resolvePlan({}); // 旧生成が裏で完走
+    await genP;
+    // 新規プロジェクトの空状態が旧生成結果で上書きされない。
+    expect(useProjectStore.getState().scenes).toHaveLength(0);
+    expect(useProjectStore.getState().status).toBe('idle'); // newProject の状態のまま（ready にならない）
+    spy.mockRestore();
+  });
 });
