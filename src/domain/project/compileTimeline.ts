@@ -10,7 +10,7 @@
 import { TRANSITION_TYPE } from '../enums';
 import type { TransitionDirection, TransitionType } from '../enums';
 import { resolveTransition, transitionTimeline } from './sceneTransitions';
-import { lineSegments, resolveLineSubtitle } from './lineTimeline';
+import { lineSegments } from './lineTimeline';
 import { sceneLines } from './narrationLines';
 import { bgmById } from '../bgm/bgmCatalog';
 import type { BgmSettings, Project, Scene } from './types';
@@ -65,11 +65,6 @@ export interface Timeline {
 export interface CompileTimelineOptions {
   /** 場面→行ごとの音声長（秒・lineId→秒）。掛け合いの区間尺に使う。未指定＝明示 startSec か自動逐次(0)。 */
   lineDurationsFor?: (scene: Scene) => Record<string, number>;
-  /**
-   * 動画スロットを持つ場面か。buildExportScenes(:180 `useSegments = hasLines && !videoSlot`) と同じく、
-   * 動画スロットのある掛け合いは行分割せず単一クリップにする。未指定＝全掛け合いを行分割（動画スロットの有無は不問）。
-   */
-  isVideoSlotScene?: (scene: Scene) => boolean;
   /** 射影対象の場面か（未指定＝全場面）。将来の書き出し配線でテンプレ未解決の除外に使える。 */
   includeScene?: (scene: Scene) => boolean;
   /** 場面の表示名（未指定＝「場面 N」）。 */
@@ -142,7 +137,7 @@ function bgmRunClips(scenes: Scene[], starts: number[], ends: number[], projectB
  * 場面ベース project を時間軸＋トラックへ射影する（ADR-0018）。純粋関数。
  * - 再生順＝project.scenes 配列順（sceneOps）。遷移の重なりは transitionTimeline で解決（ADR-0009）。
  * - tracks.video＝場面ごと1クリップ。tracks.audio/telop＝行ごと（sceneLines→lineSegments・0秒区間は除外）。
- *   動画スロットのある掛け合いは書き出しに合わせ単一クリップへ collapse（isVideoSlotScene）。
+ *   掛け合いは動画スロットの有無に依らず行ごとに射影（#385/#386 で書き出しも行構造へ統一＝#433 で旧 collapse 撤去）。
  *   tracks.bgm＝実効BGM（場面 ?? プロジェクト）が同じソースの連続場面ごとに1区間（曲が変わる/無音の場面で区間が分かれる・全場面継承は[0,総尺]の1区間＝③(7)）。
  * - project.timelineOverlay のクリップを合成（ADR-0018）：track のレーンへ追加。anchorSceneId 有＝場面相対／無＝絶対時間。
  */
@@ -180,19 +175,8 @@ export function compileTimeline(project: Project, opts: CompileTimelineOptions =
   for (let i = 0; i < scenes.length; i += 1) {
     const s = scenes[i];
     const base = starts[i];
-    const hasLines = !!(s.lines && s.lines.length > 0);
-    // 動画スロットのある掛け合いは書き出し(buildExportScenes:180 の `!videoSlot` ゲート)が行分割しない＝射影も単一クリップへ。
-    // 音声は1本（場面尺）、字幕は scene.texts ベース（未取得ゆえ行テキストを素ラベルに用いる近似）。
-    if (hasLines && (opts.isVideoSlotScene?.(s) ?? false)) {
-      const lines = sceneLines(s);
-      const label = lines.map((l) => l.text).join(' ');
-      const endSec = base + s.durationSec;
-      audio.push({ id: `${s.sceneId}/audio`, sceneId: s.sceneId, startSec: base, endSec, label });
-      if (lines.some((l) => resolveLineSubtitle(l, s).enabled)) {
-        telop.push({ id: `${s.sceneId}/telop`, sceneId: s.sceneId, startSec: base, endSec, label });
-      }
-      continue;
-    }
+    // 掛け合いは動画スロットの有無に依らず行ごとに射影する（#385/#386 で書き出しも4経路統一＝
+    // 動画スロット掛け合いも行構造を持つため。旧「単一クリップへ collapse（isVideoSlotScene）」分岐は撤去＝#433）。
     const lines = sceneLines(s);
     // lineSegments は sceneLines を map するので lines と segs は同順・同数（zip 可能）。
     const segs = lineSegments(s, opts.lineDurationsFor?.(s) ?? {});
