@@ -11,7 +11,7 @@ import { hasUnsavedChanges } from "./newProjectGuard";
  */
 export function useStartNewProject(navigate: (screen: ScreenId) => void) {
   const newProject = useProjectStore((s) => s.newProject); // store 型は () => void（同期）
-  const hasWork = useProjectStore((s) => hasUnsavedChanges(s.saveStatus, s.scenes.length, s.assets));
+  const hasWork = useProjectStore((s) => hasUnsavedChanges(s.saveStatus, s.scenes.length, s.assets, s.meta));
   const [confirming, setConfirming] = useState(false);
 
   const start = useCallback(() => {

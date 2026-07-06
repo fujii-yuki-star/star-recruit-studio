@@ -131,15 +131,20 @@ function App() {
             <div className="topbar-title">{titles[screen]}</div>
             <div className="topbar-actions">
               <SaveStatusBadge />
-              <button
-                className="btn btn-ghost"
-                onClick={() => void saveProject()}
-                disabled={saveStatus === "saving"}
-              >
-                {saveLabel}
-              </button>
-              {/* ホームには専用の大きな導線があるため、ヘッダの新規作成は重複回避でホーム以外に表示。 */}
-              {screen !== "home" && (
+              {/* ウィザードはヘッダ保存を出さない（#401）。ヘッダ保存は applyForm を呼ばず入力を取りこぼす「保存トラップ」
+                  になるため、ウィザード自身の「ここまで保存」（applyForm＋saveProject）に一本化する。 */}
+              {screen !== "wizard" && (
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => void saveProject()}
+                  disabled={saveStatus === "saving"}
+                >
+                  {saveLabel}
+                </button>
+              )}
+              {/* ホームには専用の大きな導線があるため重複回避でホーム以外に表示。ウィザードは新規作成フロー中なので出さない
+                  （未コミットの入力欄を無確認で破棄しうる／同一画面遷移で local state が残る不整合を避ける・#401 レビュー）。 */}
+              {screen !== "home" && screen !== "wizard" && (
                 <button
                   className="btn btn-secondary"
                   onClick={startNewProject}

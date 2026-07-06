@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { ASSET_TYPE, ORIENTATION, VIDEO_KIND, type Orientation, type Purpose, type VideoKind } from "../../domain/enums";
@@ -79,8 +79,9 @@ function adviceFor(step: number, videoKind: VideoKind): string[] {
 }
 
 export function WizardScreen({ onNavigate }: WizardProps) {
-  // 最初のステップ「動画の目的を選ぶ」(index 0) を表示
-  const [step, setStep] = useState(0);
+  // ステップは store に保持した値から開く（#401）：サイドバー離脱→復帰や confirm「キャンセル」で
+  // step0 に戻らず直前のステップを再開する（新規/読込では 0）。
+  const [step, setStep] = useState(() => useProjectStore.getState().wizardStep);
   // ウィザードは現在のプロジェクト(meta)を初期値にする＝「ここまで保存」後に開き直しても消えない
   // （未入力でも空文字で上書きしてしまう問題を避ける。applyProjectInfo は companyInfo を全置換するため）。
   const initialMeta = useProjectStore.getState().meta;
@@ -113,10 +114,15 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // フォーム入力の不足を伝えるユーザー向け文言（§2-5・次の行動を示す）。
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, saveProject, saveStatus, applyProjectInfo, importError, clearImportError } =
+  const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, saveProject, saveStatus, applyProjectInfo, setWizardStep, importError, clearImportError } =
     useProjectStore();
 
   const steps = stepsFor(videoKind);
+
+  // 現在ステップを store に同期（離脱で消えないように・#401）。初回は store と同値ゆえ no-op。
+  useEffect(() => {
+    setWizardStep(step);
+  }, [step, setWizardStep]);
   // 目的の選択肢は種類で切り替える（採用7／一般4・混在不可）。
   const currentPurposeOptions = videoKind === VIDEO_KIND.general ? generalPurposeOptions : purposeOptions;
 
@@ -139,6 +145,27 @@ export function WizardScreen({ onNavigate }: WizardProps) {
       });
     }
   }
+
+  // 「最後に確定(commit)したフォーム内容」のスナップショット（#401 レビュー：完了時の二重 applyForm を防ぐ）。
+  // 初期値＝マウント時のフォーム（=store 由来）。編集が無ければアンマウント確定を skip し、pushHistory の二重積みを防ぐ。
+  const formSnapshot = (): string =>
+    JSON.stringify([videoKind, purpose, aspectRatio, companyName, industry, jobType, strengths,
+      businessDescription, recruitTarget, desiredPerson, additionalNotes, title, agenda, keyPoints, targetAudience, tone, voiceType]);
+  const committedRef = useRef(formSnapshot());
+  // 明示の確定ポイント（次へ／ここまで保存／完了）はこれを使う＝確定後スナップショットを更新して再確定を防ぐ。
+  function commitForm() {
+    applyForm();
+    committedRef.current = formSnapshot();
+  }
+  // 離脱（サイドバー移動・戻る等でアンマウント）時、入力があり かつ 最後の確定以降に編集があるときだけ store へ確定（#401）。
+  // render 中の ref 代入は不可なので effect で最新の確定処理を ref に同期し、アンマウント cleanup で1回呼ぶ。
+  const persistRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    persistRef.current = () => {
+      if ((companyName.trim() || title.trim()) && formSnapshot() !== committedRef.current) applyForm();
+    };
+  });
+  useEffect(() => () => persistRef.current(), []);
   // 音声系（BGM/ナレーション）は素材一覧に出さない。
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
@@ -186,9 +213,11 @@ export function WizardScreen({ onNavigate }: WizardProps) {
       return;
     }
     setFormError(null);
-    if (step < steps.length - 1) setStep(step + 1);
-    else {
-      applyForm(); // ウィザードを抜ける＝入力を確定
+    if (step < steps.length - 1) {
+      commitForm(); // 前進のたびに入力を store へ確定（離脱でロストしない・未保存表示/自動保存/破棄ガードの射程に入る・#401）
+      setStep(step + 1);
+    } else {
+      commitForm(); // ウィザードを抜ける＝入力を確定（確定済みマークでアンマウント二重確定を防ぐ）
       onNavigate("confirm");
     }
   }
@@ -717,7 +746,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 <button
                   className="btn btn-primary btn-lg mt-lg"
                   onClick={() => {
-                    applyForm();
+                    commitForm(); // 確定してから確認画面へ（アンマウント二重確定を防ぐ・#401 レビュー）
                     onNavigate("confirm");
                   }}
                 >
@@ -738,7 +767,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
               <button
                 className="btn btn-secondary"
                 onClick={() => {
-                  applyForm(); // 入力中の目的・会社情報も保存に反映
+                  commitForm(); // 入力中の目的・会社情報も保存に反映（確定済みマークでアンマウント二重確定を防ぐ）
                   void saveProject();
                 }}
                 disabled={saveStatus === "saving"}

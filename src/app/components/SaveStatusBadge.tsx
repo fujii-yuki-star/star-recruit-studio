@@ -8,6 +8,7 @@ export function SaveStatusBadge() {
   const saveStatus = useProjectStore((s) => s.saveStatus);
   const sceneCount = useProjectStore((s) => s.scenes.length);
   const assets = useProjectStore((s) => s.assets);
+  const meta = useProjectStore((s) => s.meta); // ウィザード入力も「未保存の変更」に含める（#401）
 
   if (saveStatus === "saving") {
     return <span className="text-sm text-muted">保存中…</span>;
@@ -20,7 +21,7 @@ export function SaveStatusBadge() {
       </span>
     );
   }
-  if (hasUnsavedChanges(saveStatus, sceneCount, assets)) {
+  if (hasUnsavedChanges(saveStatus, sceneCount, assets, meta)) {
     return <span className="text-sm" style={{ color: "#8a6d1a" }}>● 未保存の変更があります</span>;
   }
   return null;
