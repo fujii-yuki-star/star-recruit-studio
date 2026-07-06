@@ -54,7 +54,7 @@ export function lineSegments(scene: Scene, lineDurations: Record<string, number>
 }
 
 export interface SceneSegmentSpec {
-  /** 掛け合いのとき行 id（音声参照に使う）。単一 narration では undefined。 */
+  /** 掛け合いのとき行 id（音声参照に使う）。単一 narration・頭空白（間）では undefined。 */
   lineId?: string;
   /** subtitle レイヤーの上書き文言（追加A/B）。string＝表示／null＝非表示／undefined＝従来（scene.texts）。 */
   subtitleText?: string | null;
@@ -64,11 +64,18 @@ export interface SceneSegmentSpec {
   durationSec: number;
   /** 場面の先頭セグメントか（書き出しのトランジションは先頭のみ）。 */
   isFirst: boolean;
+  /**
+   * 掛け合いの先頭「間」（頭空白＝先頭行 startSec までの無言区間）か（#386・A案＝間を尊重）。
+   * true のとき字幕なし（subtitleText=null）・音声なし（narration を載せない）で映像だけ流す。
+   * これで静止画/動画/プレビュー/正準(compileTimeline)の4者が同じ区間列（＝場面尺）で駆動される。
+   */
+  isGap?: boolean;
 }
 
 /**
  * 場面の書き出しセグメント（追加A・PR-E）。明示 lines は行ごと（字幕上書き＋区間尺）、
  * 単一 narration は1セグメント（字幕は従来 scene.texts・尺は場面尺）＝後方互換。
+ * 先頭行が startSec>0 なら先頭に「間」区間（isGap）を足し、場面尺を保つ（#386・A案＝間を尊重）。
  */
 export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, number> = {}): SceneSegmentSpec[] {
   if (!scene.lines || scene.lines.length === 0) {
@@ -85,7 +92,14 @@ export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, nu
     }));
   // すべて0秒（degenerate）なら場面全体を1セグメントに（場面が書き出しから消えないように）。
   if (nonEmpty.length === 0) return [{ startSec: 0, durationSec: scene.durationSec, isFirst: true }];
-  return nonEmpty.map((s, i) => ({ ...s, isFirst: i === 0 }));
+  // 先頭行の開始が 0 より後なら「間（頭空白）」区間 [0, 先頭start) を先頭に足す（#386・A案）。
+  // 間は字幕なし・音声なし。これで区間尺の合計＝場面尺（＝正準/動画経路）になり、静止画/プレビューが場面を短縮しない。
+  const headGap = nonEmpty[0].startSec;
+  const segs: Array<Omit<SceneSegmentSpec, "isFirst">> =
+    headGap > 0
+      ? [{ subtitleText: null, startSec: 0, durationSec: headGap, isGap: true }, ...nonEmpty]
+      : nonEmpty;
+  return segs.map((s, i) => ({ ...s, isFirst: i === 0 }));
 }
 
 /**

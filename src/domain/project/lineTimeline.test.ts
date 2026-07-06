@@ -120,4 +120,29 @@ describe('sceneSegmentSpecs（書き出しセグメント・PR-E）', () => {
     const lines: NarrationLine[] = [{ lineId: 'line_001', text: 'a', startSec: 10, status: NARRATION_STATUS.none }];
     expect(sceneSegmentSpecs(sceneWith({ lines }), {})).toEqual([{ startSec: 0, durationSec: 10, isFirst: true }]);
   });
+
+  it('先頭行が途中開始なら先頭に「間」区間（字幕なし・音声なし・isGap）を足し、合計＝場面尺（#386・A案）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'やあ', startSec: 2, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'どうも', startSec: 6, status: NARRATION_STATUS.none },
+    ];
+    const specs = sceneSegmentSpecs(sceneWith({ lines }), {});
+    expect(specs).toEqual([
+      { subtitleText: null, startSec: 0, durationSec: 2, isGap: true, isFirst: true }, // 間 [0,2)・字幕なし・lineId なし
+      { lineId: 'line_001', subtitleText: 'やあ', startSec: 2, durationSec: 4, isFirst: false }, // [2,6)
+      { lineId: 'line_002', subtitleText: 'どうも', startSec: 6, durationSec: 4, isFirst: false }, // [6,10]
+    ]);
+    // 合計＝場面尺（間を尊重＝静止画/プレビューでも場面が短縮しない）。
+    expect(specs.reduce((s, p) => s + p.durationSec, 0)).toBe(10);
+  });
+
+  it('先頭行が0秒開始なら「間」区間は付かない（従来どおり・#386）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', startSec: 0, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startSec: 4, status: NARRATION_STATUS.none },
+    ];
+    const specs = sceneSegmentSpecs(sceneWith({ lines }), {});
+    expect(specs.some((s) => 'isGap' in s)).toBe(false);
+    expect(specs[0]).toMatchObject({ lineId: 'line_001', startSec: 0, isFirst: true });
+  });
 });

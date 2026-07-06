@@ -233,7 +233,16 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         }
       };
       if (segs.length > 0) {
-        playLine(0);
+        // 先頭行の「間」（頭空白＝先頭行 startSec までの無言区間）を尊重する（#386・A案）。
+        // 間は字幕なし（activeLine=-1）で映像＋BGMだけ流し、firstStart 経過後に先頭行の音声＋字幕を始める
+        // ＝静止画/動画/正準(compileTimeline)と同じ場面尺・見え方（パリティ）。間が無い（0秒）なら即開始。
+        const headGap = Math.max(0, segs[0].startSec);
+        if (headGap > 0) {
+          setActiveLine(-1); // 間：有効行なし＝字幕を出さない
+          lineTimers.push(window.setTimeout(() => playLine(0), headGap * 1000));
+        } else {
+          playLine(0);
+        }
       } else {
         // 有効な行が無い（全フィルタ＝音声未生成など）は場面尺で送る（従来のフォールバック）。
         lineTimers.push(window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000));
