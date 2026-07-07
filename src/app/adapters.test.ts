@@ -70,3 +70,25 @@ describe("buildPrecheckItems（自由配置 / ADR-0008 §8 結線）", () => {
     expect(unused?.severity).toBe("ok"); // asset_001 は freeLayout で使用済み
   });
 });
+
+describe("buildPrecheckItems（動画の配置 / #434・ADR-0026）", () => {
+  const videoAsset: Asset = { assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "assets/v.mp4" };
+
+  it("動画スロットを非表示にした場面（配置できない）は『動画の配置』が要対応で場面つき", () => {
+    // 非表示スロット＝findVideoSlots は返すが layoutScene に出ず＝分割失敗＝黙って静止画化してはいけない状態。
+    const scene = freeScene([
+      { id: "slot_1", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_v", fit: "cover", hidden: true },
+    ] as unknown as Scene["freeLayout"]);
+    const item = buildPrecheckItems([scene], [...assets, videoAsset], [freeTemplate]).find((i) => i.id === "videoPlacement");
+    expect(item?.severity).toBe("action");
+    expect(item?.detail).toContain("場面1");
+  });
+
+  it("配置できる動画スロットなら『動画の配置』項目は出さない（ノイズ回避）", () => {
+    const scene = freeScene([
+      { id: "slot_1", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_v", fit: "cover" },
+    ]);
+    const item = buildPrecheckItems([scene], [...assets, videoAsset], [freeTemplate]).find((i) => i.id === "videoPlacement");
+    expect(item).toBeUndefined();
+  });
+});

@@ -353,6 +353,20 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
     expect(vi.mocked(splitVideoSceneSvgMulti).mock.calls[0]?.[5]).toBe('VOICEVOX:四国めたん');
   });
 
+  it('動画スロットがあるのに分割できない場面は静かに静止画化せず停止（§2-5 エラー・#434）', async () => {
+    // 分割失敗（穴を切り出せない＝内部不整合やスロット/グループ非表示）を模す。黙って静止画化せず場面つきで停止。
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValueOnce(null);
+    await expect(
+      buildExportScenes(
+        [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+        templateById,
+        noAsset,
+        () => ({ narrationVolume: 1 }),
+        () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      ),
+    ).rejects.toThrow(/場面1の動画を配置できませんでした/);
+  });
+
   it('videoSlotFor 未指定なら従来どおり単一PNG（video なし）', async () => {
     const out = await buildExportScenes(
       [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
