@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
+import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
@@ -26,7 +27,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, duplicateScene, changeOrientation, setEditingSceneId } =
+  const { status, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo } =
     useProjectStore();
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
   const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
@@ -251,7 +252,15 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   className="btn btn-primary btn-icon"
                   onClick={() => {
                     setConfirmRegen(false);
-                    void generate();
+                    // 実プロバイダ（外部送信）なら送信前確認（ConfirmScreen）を必ず通す。Mock はそのまま作り直す（§2-6・#423）。
+                    void (async () => {
+                      if (await willSendExternally()) {
+                        setConfirmReturnTo("draft"); // ConfirmScreen の「キャンセル」でここ（たたき台）へ戻す
+                        onNavigate("confirm");
+                      } else {
+                        void generate();
+                      }
+                    })();
                   }}
                 >
                   <SparkleIcon size={16} />

@@ -24,6 +24,7 @@ import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider"
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
+import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
@@ -219,6 +220,10 @@ interface ProjectState {
    *  サイドバー離脱→復帰・confirm「キャンセル」→ウィザードで、step0 に戻らず直前のステップを開く。新規/読込で 0。 */
   wizardStep: number;
   setWizardStep: (step: number) => void;
+  /** 送信前確認（ConfirmScreen）から「キャンセル」で戻る画面（#423・§2-6）。ウィザード起点は既定（null＝"wizard"）、
+   *  たたき台の「作り直す」起点は "draft"。ConfirmScreen がマウント時に読み取り消費する（editingSceneId と同方式の一度きりペイロード）。 */
+  confirmReturnTo: ScreenId | null;
+  setConfirmReturnTo: (screen: ScreenId | null) => void;
   /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
   exportRun: ExportRunState;
   /** 書き出し状態を部分更新する（ExportScreen の setPhase/setProgress 等の単一入口）。 */
@@ -387,6 +392,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   editingTemplateId: null,
   editingSceneId: null,
   wizardStep: 0,
+  confirmReturnTo: null,
   _generationSeq: 0,
   exportRun: IDLE_EXPORT_RUN,
   autoGenerateIfSafe: async () => {
@@ -1019,6 +1025,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),
   setEditingSceneId: (sceneId) => set({ editingSceneId: sceneId }),
   setWizardStep: (step) => set({ wizardStep: step }),
+  setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
   setExportRun: (patch) => set((s) => ({ exportRun: { ...s.exportRun, ...patch } })),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ

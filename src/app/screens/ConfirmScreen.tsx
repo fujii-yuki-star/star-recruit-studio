@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
@@ -9,6 +10,12 @@ interface ConfirmProps {
 }
 
 export function ConfirmScreen({ onNavigate }: ConfirmProps) {
+  // 「キャンセル」の戻り先を確定（#423）。既定はウィザード、たたき台の「作り直す」起点は "draft"。
+  // マウント時に一度きりのペイロード（confirmReturnTo）を読み取り、消費して持ち越さない（editingSceneId と同方式）。
+  const [returnTo] = useState<ScreenId>(() => useProjectStore.getState().confirmReturnTo ?? "wizard");
+  useEffect(() => {
+    useProjectStore.getState().setConfirmReturnTo(null);
+  }, []);
   const videoKind = useProjectStore((s) => s.meta.videoKind);
   const companyInfo = useProjectStore((s) => s.meta.companyInfo);
   const generalBrief = useProjectStore((s) => s.meta.generalBrief);
@@ -130,7 +137,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
           <div className="row gap-sm mt-lg">
             <button
               className="btn btn-ghost grow"
-              onClick={() => onNavigate("wizard")}
+              onClick={() => onNavigate(returnTo)}
             >
               キャンセル
             </button>
