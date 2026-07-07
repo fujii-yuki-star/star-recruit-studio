@@ -263,7 +263,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             >
               素材を選ぶ
             </button>
-            <p className="field-hint" style={{ marginTop: 2 }}>このテンプレを使うと、場面に素材が無いときこの画像が入ります。</p>
+            <p className="field-hint" style={{ marginTop: 2 }}>この見た目パターンを使うと、場面に素材が無いときこの画像が入ります。</p>
           </>
         )}
         {assetError?.layerId === l.id && (
@@ -498,7 +498,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
           {/* レイヤー一覧（重ね順・上が手前）＋追加 */}
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>レイヤー（上が手前）</label>
+            <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>重ね順（上が手前）</label>
             <div className="col" style={{ gap: 2 }}>
               {[...draft.layers].sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0)).map((l) => (
                 <div
@@ -513,7 +513,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                     className="btn btn-ghost btn-icon text-sm"
                     style={{ color: "var(--color-danger)" }}
                     disabled={draft.layers.length <= 1}
-                    title={draft.layers.length <= 1 ? "最後の1枚は消せません" : "このレイヤーを削除"}
+                    title={draft.layers.length <= 1 ? "最後の1つは消せません" : "この要素を削除"}
                     onClick={() => onRemoveLayer(l.id)}
                   >
                     削除
@@ -525,7 +525,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               <select className="select" value={addType} onChange={(e) => setAddType(e.target.value as LayerType)}>
                 {TEMPLATE_ADDABLE_LAYER_TYPES.map((t) => (<option key={t} value={t}>{layerLabel[t]}</option>))}
               </select>
-              <button className="btn btn-secondary" onClick={onAddLayer}>レイヤーを追加</button>
+              <button className="btn btn-secondary" onClick={onAddLayer}>要素を追加</button>
             </div>
           </div>
 
@@ -552,13 +552,13 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               <hr className="divider" />
               {confirmDelete ? (
                 <div className="row gap-sm" style={{ alignItems: "center" }}>
-                  <span className="text-sm">このマイテンプレを削除しますか？</span>
+                  <span className="text-sm">この見た目パターンを削除しますか？</span>
                   <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
                   <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
                 </div>
               ) : (
                 <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} onClick={() => setConfirmDelete(true)}>
-                  このマイテンプレを削除
+                  この見た目パターンを削除
                 </button>
               )}
             </>

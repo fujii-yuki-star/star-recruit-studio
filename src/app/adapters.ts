@@ -61,7 +61,7 @@ export function sceneToDraftRow(
     scene: sceneTypeLabel[scene.sceneType],
     material: asset?.displayName ?? "（未設定）",
     line: scene.narration.text,
-    look: template?.name ?? scene.templateId,
+    look: template?.name ?? "見た目が見つかりません",
     materialType,
     // NarrationStatus と VoiceStatus は同一の値集合
     voiceStatus: scene.narration.status,
@@ -112,7 +112,7 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   const line = offending((s) => sceneLines(s).some((l) => l.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120)));
   items.push(
     line.nums.length > 0
-      ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。`, severity: "warning" }
+      ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。短くすると聞き取りやすくなります。`, severity: "warning" }
       : { id: "line", label: "セリフの長さ", detail: "セリフの長さは適切です。", severity: "ok" },
   );
 
@@ -126,7 +126,7 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   const unused = assets.filter((a) => !used.has(a.assetId)).length;
   items.push(
     unused > 0
-      ? { id: "unused", label: "使っていない素材", detail: `使われていない素材が${unused}つあります。`, severity: "warning" }
+      ? { id: "unused", label: "使っていない素材", detail: `使われていない素材が${unused}つあります。動画には入らないので、そのままでも問題ありません。`, severity: "warning" }
       : { id: "unused", label: "使っていない素材", detail: "すべての素材が使われています。", severity: "ok" },
   );
 

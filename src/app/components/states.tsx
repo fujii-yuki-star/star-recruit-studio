@@ -98,7 +98,7 @@ const voiceStatusLabel: Record<VoiceStatus, string> = {
   none: "声：未作成",
   pending: "声：作成中",
   generated: "声：作成済み",
-  failed: "声：失敗",
+  failed: "声：作り直せます",
 };
 
 export function VoiceStatusBadge({ status }: { status: VoiceStatus }) {

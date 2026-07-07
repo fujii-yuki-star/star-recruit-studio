@@ -174,6 +174,11 @@ const narrationStatusLabel: Record<string, string> = {
   failed: "失敗（もう一度お試しください）",
 };
 
+/** 音声状態の表示文言。未知値（将来値・壊れた保存データ・移行漏れ）は生の英語 enum を出さず「不明」に落とす（§2-3・#387）。 */
+function narrationStatusText(status: string): string {
+  return narrationStatusLabel[status] ?? "不明";
+}
+
 // スロットの slotType と素材の assetType の整合で、割り当て可能な素材を絞る（§5）。
 function assignableFor(layer: Layer, assets: Asset[]): Asset[] {
   return assets.filter((a) => {
@@ -1039,7 +1044,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {!isFree && (
               <CollapsibleSection title="文字">
               {sceneTextKeys.length === 0 && (
-                <p className="field-hint" style={{ marginTop: 0 }}>このテンプレートは文字を表示しません。</p>
+                <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
               )}
               {sceneTextKeys.map((key) => {
                 // 見出し・URL は1行、本文・字幕・キャプションは複数行で編集する。
@@ -1194,7 +1199,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <div className="field" style={{ marginTop: 6 }}>
                           <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
                           <FitSelect
-                            inheritLabel="テンプレの既定に合わせる"
+                            inheritLabel="見た目の既定に合わせる"
                             value={selected.slotFits?.[layer.id]}
                             onChange={(fit) =>
                               patch((s) => {
@@ -1619,7 +1624,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           <span className="text-sm text-muted">秒（空欄＝前のセリフの後に自動）</span>
                         </div>
                         <div className="row-between">
-                          <span className="text-sm text-muted">音声：{narrationStatusLabel[line.status] ?? line.status}</span>
+                          <span className="text-sm text-muted">音声：{narrationStatusText(line.status)}</span>
                           {lineAudio && (
                             <button
                               className="btn btn-ghost btn-icon text-sm"
@@ -1672,7 +1677,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               />
               <div className="row-between" style={{ marginTop: 6 }}>
                 <span className="text-sm text-muted">
-                  音声：{narrationStatusLabel[selected.narration.status] ?? selected.narration.status}
+                  音声：{narrationStatusText(selected.narration.status)}
                   {narrationPlayError && (
                     <span style={{ color: "var(--color-danger)" }}> ／ 再生できませんでした。声を作り直してお試しください</span>
                   )}
