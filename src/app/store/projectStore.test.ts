@@ -341,7 +341,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     useProjectStore.setState({
       meta: { ...useProjectStore.getState().meta, projectId: 'proj_open' },
       scenes: [scene('scene_001', 1)],
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '' },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
     });
   });
 
@@ -430,7 +430,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
 
     // idle（done は非busy）：読み込み成功し、前の結果を持ち越さず exportRun が idle にリセットされる。
     useProjectStore.setState({
-      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '' },
+      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '', cancelling: false },
     });
     await useProjectStore.getState().loadProject('proj_any');
     expect(loadSpy).toHaveBeenCalledWith('proj_any');
@@ -534,7 +534,7 @@ describe('projectStore 生成のキャンセル（#402）', () => {
   });
 
   it('キャンセルせず newProject しても、裏で完走した旧生成が新しい状態を上書きしない（#402 レビュー）', async () => {
-    useProjectStore.setState({ scenes: [scene('scene_001', 1)], parts: [], status: 'idle', _generationSeq: 0, exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '' } });
+    useProjectStore.setState({ scenes: [scene('scene_001', 1)], parts: [], status: 'idle', _generationSeq: 0, exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false } });
     let resolvePlan: (v: unknown) => void = () => {};
     const planPromise = new Promise((r) => { resolvePlan = r; });
     const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan').mockReturnValue(planPromise as never);

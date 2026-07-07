@@ -22,7 +22,7 @@ import { layoutToSvg } from '../sceneSvg';
 import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvgMulti } from './videoSceneSplit';
-import { buildExportScenes } from './buildExportScenes';
+import { buildExportScenes, ExportCancelledError } from './buildExportScenes';
 
 // buildExportScenes が参照するのは templateId / durationSec / (narrationFor へ渡す scene) のみ。
 const scenes = [
@@ -926,5 +926,30 @@ describe('buildExportScenes：場面で使う画像IDの収集（#143）', () =>
     );
     expect(resolve).toHaveBeenCalledWith('asset_001');
     expect(resolve).toHaveBeenCalledWith('tmpl_asset_001'); // テンプレ素材も書き出しの解決対象に渡る
+  });
+});
+
+describe('buildExportScenes：中止（#380）', () => {
+  it('shouldCancel が true なら ExportCancelledError で中断し、以降の場面を描かない', async () => {
+    vi.mocked(svgToPngDataUrl).mockClear();
+    await expect(
+      buildExportScenes(scenes, templateById, noAsset, undefined, undefined, undefined, {
+        shouldCancel: () => true,
+      }),
+    ).rejects.toBeInstanceOf(ExportCancelledError);
+    // 先頭場面の描画前（場面境界の bail）で抜けるため、ラスタライズは1回も走らない。
+    expect(svgToPngDataUrl).not.toHaveBeenCalled();
+  });
+
+  it('shouldCancel が false のままなら通常どおり全場面を処理する（中止判定は非破壊）', async () => {
+    const out = await buildExportScenes(scenes, templateById, noAsset, undefined, undefined, undefined, {
+      shouldCancel: () => false,
+    });
+    expect(out).toHaveLength(2); // テンプレ未解決の sX を除く s1/s2
+  });
+
+  it('shouldCancel を渡さなければ従来どおり（中止判定なし）', async () => {
+    const out = await buildExportScenes(scenes, templateById, noAsset);
+    expect(out).toHaveLength(2);
   });
 });

@@ -46,7 +46,7 @@ import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxPr
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 /** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
-export type ExportPhase = "idle" | "rendering" | "encoding" | "done" | "error" | "unsupported";
+export type ExportPhase = "idle" | "rendering" | "encoding" | "done" | "error" | "unsupported" | "cancelled";
 /** 書き出しの進行状態（#379）。画面横断で参照＝進捗の可視化・書き出し中の再実行/破壊操作ブロックに使う。 */
 export interface ExportRunState {
   phase: ExportPhase;
@@ -54,6 +54,8 @@ export interface ExportRunState {
   resultPath: string;
   message: string;
   bgmWarning: "" | "partial" | "all";
+  // ユーザーが中止を要求したか（#380）。画面横断で保持し、書き出しの各段が「中止しました」で終えられるようにする。
+  cancelling: boolean;
 }
 /** 書き出し中（rendering/encoding）か。再実行・プロジェクト切替/削除のブロック判定で共有（#379）。 */
 export function isExportBusy(phase: ExportPhase): boolean {
@@ -65,6 +67,7 @@ const IDLE_EXPORT_RUN: ExportRunState = {
   resultPath: "",
   message: "",
   bgmWarning: "",
+  cancelling: false,
 };
 /** 声設定の編集可能パラメータのみ（defaultVoiceId は必須なので更新対象から除外）。 */
 export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;

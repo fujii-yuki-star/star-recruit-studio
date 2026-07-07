@@ -5,9 +5,11 @@
 // SVG→PNG は ADR-0004（WebView Canvas）で生成。FFmpegは PNG/動画/音声の合成のみ（ADR-0001）。
 use base64::Engine as _;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::Manager;
 
 // 既定FPS（videoSettings.fps の正典は project.json。B2でフロントから受け取る予定）。
@@ -1096,6 +1098,127 @@ pub fn run(bin: &Path, args: &[String]) -> Result<String, String> {
     }
 }
 
+// ── 書き出しのキャンセル／アプリ終了時 kill（#380）。 ──
+// 走行中の ffmpeg 子プロセスを別スレッド（キャンセルコマンド・アプリ終了ハンドラ）から終了できるよう、
+// 現在の Child を単一スロットに保持する。EXPORT_IN_FLIGHT で書き出しは同時1本に限られ、書き出し内の
+// run_export 呼び出しも逐次のため、この単一スロットで取りこぼしなく追跡できる（probe/サムネ等の run は非対象）。
+static EXPORT_CHILD: Mutex<Option<Child>> = Mutex::new(None);
+// キャンセル要求フラグ。spawn〜スロット登録の隙間に来た要求や、次の run_export 開始も取りこぼさないための保険。
+static EXPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
+// キャンセル時に run_export が返す内部マーカー（呼び出し側の map_err で握られ、ユーザーには出ない・ログ識別用）。
+const EXPORT_CANCELLED_MARK: &str = "export cancelled by user";
+
+/// EXPORT_CHILD のロック取得（毒された場合も内部値を取り出して継続＝終了処理を止めない）。
+fn lock_export_child() -> std::sync::MutexGuard<'static, Option<Child>> {
+    EXPORT_CHILD.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// 走行中の書き出し ffmpeg を終了する（ユーザーのキャンセル／アプリ終了の双方から呼ぶ・#380）。
+/// フラグを立ててから Child を kill＋reap する。まだ spawn 前ならフラグだけ残し、run_export 側が拾う。
+pub fn cancel_running_export() {
+    EXPORT_CANCELLED.store(true, Ordering::SeqCst);
+    if let Some(mut child) = lock_export_child().take() {
+        let _ = child.kill();
+        let _ = child.wait(); // reap（ゾンビ化防止）
+    }
+}
+
+/// 書き出し開始時にキャンセル状態を初期化する（前回のキャンセル要求・残 Child を持ち越さない）。
+/// 1回の書き出し（準備＝stage_clip_frames と 本体＝export_video）が始まる**前**に呼び、以降を1つの
+/// キャンセル対象スコープにする（フロントが busy 表示前に begin_export で呼ぶ・二重書き出しは UI/EXPORT_IN_FLIGHT で排他）。
+fn reset_export_cancel() {
+    EXPORT_CANCELLED.store(false, Ordering::SeqCst);
+    if let Some(mut child) = lock_export_child().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+/// 書き出し開始をフロントが宣言するコマンド（#380）。この時点から準備（クリップ抽出）も本体も同一の
+/// キャンセルスコープに入る＝前回の中止要求を持ち越さず、以降の run_export をまとめて中止できる。
+#[tauri::command]
+pub fn begin_export() {
+    reset_export_cancel();
+}
+
+/// ユーザー操作の「中止」から呼ぶコマンド（#380）。走行中の書き出し ffmpeg を終了する。
+/// 「中止しました」の表示は呼び出し側（フロント）が把握しているため、ここは副作用のみ（戻り値なし）。
+#[tauri::command]
+pub fn cancel_export() {
+    cancel_running_export();
+}
+
+/// 書き出し専用の ffmpeg 実行（#380）。`run` と同じく成功時 stdout・失敗時 stderr を返すが、
+/// 走行中 Child を EXPORT_CHILD に登録し、キャンセル／アプリ終了から kill できるようにする。
+/// stdout/stderr は別スレッドで排出する（ffmpeg は stderr 出力が多く、未排出だとパイプ詰まりで停止し得る）。
+fn run_export(bin: &Path, args: &[String]) -> Result<String, String> {
+    // 既にキャンセル要求済みなら新規 spawn せず即中止（前段の場面で中止された連鎖を止める）。
+    if EXPORT_CANCELLED.load(Ordering::SeqCst) {
+        return Err(EXPORT_CANCELLED_MARK.to_string());
+    }
+    let mut child = Command::new(bin)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    // 出力は別スレッドで排出（パイプ詰まり回避）。ハンドルは take し、Child は kill 可能なまま保持する。
+    let mut out_pipe = child.stdout.take();
+    let mut err_pipe = child.stderr.take();
+    let out_h = std::thread::spawn(move || {
+        let mut s = String::new();
+        if let Some(p) = out_pipe.as_mut() {
+            let _ = p.read_to_string(&mut s);
+        }
+        s
+    });
+    let err_h = std::thread::spawn(move || {
+        let mut s = String::new();
+        if let Some(p) = err_pipe.as_mut() {
+            let _ = p.read_to_string(&mut s);
+        }
+        s
+    });
+    *lock_export_child() = Some(child);
+
+    // try_wait をポーリングして完了を待つ。キャンセルされたらスロットが空になり（or フラグで自 kill）抜ける。
+    let status = loop {
+        if EXPORT_CANCELLED.load(Ordering::SeqCst) {
+            if let Some(mut child) = lock_export_child().take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            break None;
+        }
+        let mut slot = lock_export_child();
+        match slot.as_mut() {
+            None => break None, // キャンセルコマンドが take + kill 済み
+            Some(child) => match child.try_wait() {
+                Ok(Some(st)) => {
+                    *slot = None;
+                    break Some(st);
+                }
+                Ok(None) => {
+                    drop(slot);
+                    std::thread::sleep(std::time::Duration::from_millis(40));
+                }
+                Err(_) => {
+                    *slot = None;
+                    break None;
+                }
+            },
+        }
+    };
+
+    let stdout = out_h.join().unwrap_or_default();
+    let stderr = err_h.join().unwrap_or_default();
+    match status {
+        Some(st) if st.success() => Ok(stdout),
+        Some(_) => Err(stderr),
+        None => Err(EXPORT_CANCELLED_MARK.to_string()),
+    }
+}
+
 /// `ffmpeg -i <file>` を実行し stderr を返す（出力未指定で終了コード1だが stderr にメタ情報が出る）。
 /// 音声有無・メタ取得（probe 系）の共通土台。成否に関わらず stderr を見る。
 fn ffmpeg_probe_stderr(ffmpeg: &Path, file: &Path) -> Result<String, String> {
@@ -1579,7 +1702,7 @@ fn encode_jobs(
                 )
             }
         };
-        run(ffmpeg, &args).map_err(|e| {
+        run_export(ffmpeg, &args).map_err(|e| {
             export_failure(
                 format!("scene {} encode: {e}", i + 1),
                 format!(
@@ -1620,7 +1743,7 @@ fn encode_jobs(
                 })?;
                 let group_out = tmp_dir.join(format!("scene_group_{g:03}.mp4"));
                 let cargs = concat_args(&list_path.to_string_lossy(), &group_out.to_string_lossy());
-                run(ffmpeg, &cargs).map_err(|e| {
+                run_export(ffmpeg, &cargs).map_err(|e| {
                     export_failure(
                         format!("scene group concat: {e}"),
                         "場面の結合に失敗しました。もう一度お試しください。",
@@ -1648,7 +1771,7 @@ fn encode_jobs(
             fps,
             bitrate,
         );
-        run(ffmpeg, &args).map_err(|e| {
+        run_export(ffmpeg, &args).map_err(|e| {
             export_failure(
                 format!("xfade join: {e}"),
                 "場面の切り替え合成に失敗しました。もう一度お試しください。",
@@ -1668,7 +1791,7 @@ fn encode_jobs(
             )
         })?;
         let args = concat_args(&list_path.to_string_lossy(), &output.to_string_lossy());
-        run(ffmpeg, &args).map_err(|e| {
+        run_export(ffmpeg, &args).map_err(|e| {
             export_failure(
                 format!("concat: {e}"),
                 "場面の結合に失敗しました。もう一度お試しください。",
@@ -1962,7 +2085,7 @@ fn stage_clip_frames_impl(
         "0".into(),
         dir.join("frame_%05d.png").to_string_lossy().into_owned(),
     ];
-    run(&ffmpeg, &args).map_err(|e| {
+    run_export(&ffmpeg, &args).map_err(|e| {
         export_failure(
             format!("clip frames extract: {e}"),
             "動画の変換に失敗しました。もう一度お試しください。",
@@ -2337,7 +2460,7 @@ fn build_window_audio(
         "[a]".into(),
         out.to_string_lossy().into_owned(),
     ]);
-    run(ffmpeg, &args).map_err(|e| {
+    run_export(ffmpeg, &args).map_err(|e| {
         export_failure(
             format!("window audio: {e}"),
             "動画の変換に失敗しました。もう一度お試しください。",
@@ -2369,6 +2492,8 @@ fn export_video_impl(
         ));
     }
     let _in_flight = ExportInFlightGuard;
+    // キャンセルスコープの初期化は begin_export（準備＝クリップ抽出の前）で済ませる（#380）。ここでリセットすると
+    // 準備中に押された中止を取りこぼす（本体開始で flag が消える）ため、ここでは初期化しない。
 
     if scenes.is_empty() {
         return Err("書き出す場面がありません。".into());
@@ -2883,7 +3008,7 @@ fn export_video_impl(
             &bitrate,
             &target.to_string_lossy(),
         );
-        run(&ffmpeg, &args).map_err(|e| {
+        run_export(&ffmpeg, &args).map_err(|e| {
             export_failure(
                 format!("telop overlay: {e}"),
                 "テロップの合成に失敗しました。もう一度お試しください。",
@@ -2942,7 +3067,7 @@ fn export_video_impl(
             total,
             &out.to_string_lossy(),
         );
-        run(&ffmpeg, &args).map_err(|e| {
+        run_export(&ffmpeg, &args).map_err(|e| {
             export_failure(
                 format!("bgm mix: {e}"),
                 "BGMの合成に失敗しました。もう一度お試しください。",
