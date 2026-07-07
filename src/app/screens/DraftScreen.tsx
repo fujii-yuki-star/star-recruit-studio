@@ -253,8 +253,16 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   onClick={() => {
                     setConfirmRegen(false);
                     // 実プロバイダ（外部送信）なら送信前確認（ConfirmScreen）を必ず通す。Mock はそのまま作り直す（§2-6・#423）。
+                    // 判定自体が失敗（鍵ストア/invoke 不能で reject）したときは fail-closed で「送信し得る側」に倒し、確認画面へ送る
+                    // ＝autoGenerateIfSafe と同じ挙動。無反応（破棄確認は閉じたのに何も起きない）にせず §2-6 を厳守する（#423 P2）。
                     void (async () => {
-                      if (await willSendExternally()) {
+                      let external = true; // 判定不能時の既定＝確認画面を通す側（fail-closed）
+                      try {
+                        external = await willSendExternally();
+                      } catch {
+                        // 判定不能＝external は true のまま＝ConfirmScreen へ（送信前確認を必ず通す）
+                      }
+                      if (external) {
                         setConfirmReturnTo("draft"); // ConfirmScreen の「キャンセル」でここ（たたき台）へ戻す
                         onNavigate("confirm");
                       } else {
