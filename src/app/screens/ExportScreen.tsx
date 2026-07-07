@@ -31,19 +31,15 @@ interface ExportProps {
 
 export function ExportScreen({ onNavigate }: ExportProps) {
   const scenes = useProjectStore((s) => s.scenes);
-  const templates = useProjectStore((s) => s.templates);
-  const narrationAudioById = useProjectStore((s) => s.narrationAudioById);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
   const assets = useProjectStore((s) => s.assets);
-  const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
-  const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const projectName = useProjectStore((s) => s.meta.projectName);
-  // キーフレームアニメ（④・ADR-0019）：場面ごとの要素アニメーション（timelineOverlay.animations）を書き出しへ渡す。
-  const timelineOverlay = useProjectStore((s) => s.meta.timelineOverlay);
+  // 書き出しの入力（場面・素材・見た目・音声・フォント・アニメ）は startExport 冒頭で store から1回スナップショットする（#381）。
+  // ＝書き出し中の編集で映像/テロップ/BGM が食い違わない。ここで個別購読しないことで、それらの変更での不要な再描画も避ける。
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
 
   const [fileName, setFileName] = useState(projectName.trim() || "動画");
@@ -112,16 +108,25 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setProgress({ done: 0, total: scenes.length });
     setPhase("rendering");
     try {
+      // 開始時点の完全スナップショット（#381）：映像・テロップ・BGM をすべてこの1つの内容から供給し、書き出し中の編集（#377）で
+      // 「映像は旧・テロップ/BGMは新」の不整合MP4になるのを防ぐ。saveProject の前＝従来 closure と同一瞬間に確定し、projectId のみ保存後の採番値を使う。
+      const snap = useProjectStore.getState();
+      const snapScenes = snap.scenes;
+      const snapAssets = snap.assets;
+      const snapTemplates = snap.templates;
+      const snapNarration = snap.narrationAudioById;
+      const snapMeta = snap.meta;
+      const snapFontId = snapMeta.videoSettings.fontId;
       // 出力時はプロジェクト（場面・素材）も保存する。
       await saveProject();
       // saveProject 後の projectId（新規時はここで採番済み）。動画クリップのパス解決に使う。
       const pid = useProjectStore.getState().meta.projectId;
       // 表示用 assetSrcById（asset://）ではなく、書き出し時に各場面の画像をディスクから data URL 化する。
       // buildExportScenes が場面ごとに解決→破棄するので、ここでは id→data URL のリゾルバを渡すだけ（#143・ADR-0004）。
-      const assetById = new Map(assets.map((a) => [a.assetId, a] as const));
+      const assetById = new Map(snapAssets.map((a) => [a.assetId, a] as const));
       const resolveExportSrc = async (id: string): Promise<string | undefined> => {
         // テンプレ既定素材（tmpl_asset_*）は既に data URL（templateAssetSrcById）＝そのまま返す（ADR-0021・書き出しも data URL でプレビューと一致）。
-        if (isTemplateAsset(id)) return templateAssetSrcById[id];
+        if (isTemplateAsset(id)) return snap.templateAssetSrcById[id];
         const a = assetById.get(id);
         if (!pid || !a) return undefined;
         // 動画本体（大容量）は clipRelPath 経路で合成（ADR-0006）＝インライン不要。ただし動画スロット本体アニメの
@@ -137,7 +142,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // アニメ場面のフレームはステージング（逐次ディスク書き出し）に載せる＝巨大な base64 を1回の IPC に
       // まとめず、JSON.stringify の文字列上限超過（RangeError）を避ける（#書き出しRangeError）。前回の残りを掃除。
       await clearExportFramesStage();
-      const templateById = new Map(templates.map((t) => [t.templateId, t] as const));
+      const templateById = new Map(snapTemplates.map((t) => [t.templateId, t] as const));
       // 書き出し前に同梱フォントを確実に読み込む（場面ごとに別フォントを使い得るため全フォント。
       // Canvas ラスタライズはロード済みフォントしか使えない・ADR-0004）。
       if (typeof document !== "undefined" && document.fonts) {
@@ -151,24 +156,24 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         } catch { /* 読込失敗時は描画側のフォールバックに任せる */ }
       }
       const built = await buildExportScenes(
-        scenes,
+        snapScenes,
         templateById,
         resolveExportSrc,
         (scene, lineId) => ({
           // 掛け合いは行ごとの音声キー（lineAudioKey）、単一 narration は従来の sceneId（ADR-0015 PR-E）。
-          audioBase64: narrationAudioById[lineId ? lineAudioKey(scene.sceneId, lineId) : scene.sceneId],
-          narrationVolume: resolveNarrationVolume(scene.audioMix, voiceSettings),
+          audioBase64: snapNarration[lineId ? lineAudioKey(scene.sceneId, lineId) : scene.sceneId],
+          narrationVolume: resolveNarrationVolume(scene.audioMix, snapMeta.voiceSettings),
         }),
         (scene) => {
           const t = templateById.get(scene.templateId);
           return t
-            ? findVideoSlots(scene, t, (id) => assets.find((a) => a.assetId === id))
+            ? findVideoSlots(scene, t, (id) => snapAssets.find((a) => a.assetId === id))
             : [];
         },
         (done, total) => setProgress({ done, total }),
-        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)), credit: creditForSpeaker(getVoicevoxSpeaker()), shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
+        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, snapFontId)), credit: creditForSpeaker(getVoicevoxSpeaker()), shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
         // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay・sceneId 一致）。アニメ場面はフレーム列に焼かれる。
-        (scene) => (timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
+        (scene) => (snapMeta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
         // アニメ場面のフレームを1枚ずつステージングへ（framesBase64 を IPC に載せない・巨大場面の RangeError 回避）。
         (framesDir, frameIndex, dataUrl) => stageExportFrame(framesDir, frameIndex, dataUrl),
         // 動画スロット本体アニメ（#442）：クリップの区間フレームを抽出（pid でプロジェクト解決）。窓は実フレームで焼く＝動きながら再生。
@@ -180,12 +185,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       );
       // タイムラインのテロップ（ADR-0018 テロップ実描画）。帯PNG＋グローバル区間へ焼き、Rust が結合後に overlay 合成。
       // テロップは場面横断のため動画全体フォントで焼く。
-      const st = useProjectStore.getState();
-      const proj = assembleProject(st.meta, st.assets, st.parts, st.scenes);
+      // テロップ/BGM も映像と同じ開始時点スナップショットから供給する（#381）。projectId は保存で採番された値を使う。
+      const proj = assembleProject({ ...snapMeta, projectId: pid }, snapAssets, snap.parts, snapScenes);
       const telops = await buildTelopOverlays(proj, {
         outputSize,
-        fontFamily: fontFamilyForId(fontId),
-        fontId: resolveFontId(null, fontId),
+        fontFamily: fontFamilyForId(snapFontId),
+        fontId: resolveFontId(null, snapFontId),
       });
       setPhase("encoding");
       // 場面ごとBGM（ADR-0018 ③(7)）：区間を解決→配置＋クロスフェード計画→各区間のソースを data URL 化して Rust へ。
@@ -201,7 +206,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           audioBase64 = await readBundledBgmDataUrl(clip.bundledBgmId);
           fileExt = bgmById(clip.bundledBgmId)?.fileName.split(".").pop()?.toLowerCase() || "mp3";
         } else if (clip.assetId && pid) {
-          const a = st.assets.find((x) => x.assetId === clip.assetId);
+          const a = snapAssets.find((x) => x.assetId === clip.assetId);
           if (a) {
             audioBase64 = (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
             fileExt = (a.filePath.split(".").pop() || "mp3").toLowerCase();
