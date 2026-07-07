@@ -10,7 +10,7 @@ import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
-import { canExport, clearExportFramesStage, exportVideo, stageExportFrame } from "../../infrastructure/ffmpegExport";
+import { canExport, clearExportFramesStage, exportVideo, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -116,8 +116,15 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         // テンプレ既定素材（tmpl_asset_*）は既に data URL（templateAssetSrcById）＝そのまま返す（ADR-0021・書き出しも data URL でプレビューと一致）。
         if (isTemplateAsset(id)) return templateAssetSrcById[id];
         const a = assetById.get(id);
-        // 動画スロットは clipRelPath 経路（ADR-0006）＝インライン不要。画像のみ data URL 化。
-        if (!pid || !a?.filePath || a.assetType === ASSET_TYPE.video) return undefined;
+        if (!pid || !a) return undefined;
+        // 動画本体（大容量）は clipRelPath 経路で合成（ADR-0006）＝インライン不要。ただし動画スロット本体アニメの
+        // 窓フレーム（#442）はプレビュー同様スロットを代表フレーム（サムネ）で焼くため、thumbnailPath を data URL で返す
+        //（通常の下/上分割ではスロットは穴として除外されるため描かれない＝既存経路に影響なし）。
+        if (a.assetType === ASSET_TYPE.video) {
+          return a.thumbnailPath ? ((await readAssetDataUrl(pid, a.thumbnailPath)) ?? undefined) : undefined;
+        }
+        // 画像のみ本体を data URL 化。
+        if (!a.filePath) return undefined;
         return (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
       };
       // アニメ場面のフレームはステージング（逐次ディスク書き出し）に載せる＝巨大な base64 を1回の IPC に
@@ -157,6 +164,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         (scene) => (timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
         // アニメ場面のフレームを1枚ずつステージングへ（framesBase64 を IPC に載せない・巨大場面の RangeError 回避）。
         (framesDir, frameIndex, dataUrl) => stageExportFrame(framesDir, frameIndex, dataUrl),
+        // 動画スロット本体アニメ（#442）：クリップの区間フレームを抽出（pid でプロジェクト解決）。窓は実フレームで焼く＝動きながら再生。
+        pid
+          ? (dirName, clipRelPath, clipStartSec, durSec, speed, fpsArg, widthArg) =>
+              stageClipFrames(pid, clipRelPath, clipStartSec, durSec, speed, fpsArg, widthArg, dirName)
+          : undefined,
+        (dirName, frameIndex) => readExportFrame(dirName, frameIndex),
       );
       // タイムラインのテロップ（ADR-0018 テロップ実描画）。帯PNG＋グローバル区間へ焼き、Rust が結合後に overlay 合成。
       // テロップは場面横断のため動画全体フォントで焼く。

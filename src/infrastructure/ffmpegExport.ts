@@ -68,6 +68,8 @@ export interface ExportSceneInput {
   audioBase64?: string;
   /** ナレーション音量（§6で解決済みの値）。音声がある場面のみ意味を持つ。 */
   narrationVolume?: number;
+  /** 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声（複数動画スロット対応）。非空のとき Rust が audioBase64 と全本を amix する。 */
+  clipAudios?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number }[];
   /** 動画ありシーン（ADR-0006）。指定時は overlay 合成経路へ。 */
   video?: ExportVideoInput;
   /** この場面に「入る」トランジション（ADR-0009 T2）。先頭・none では未設定（ハードカット）。 */
@@ -145,6 +147,37 @@ export async function stageExportFrame(dirName: string, frameIndex: number, data
 /** フレームのステージングを空にする（書き出しの前後で呼ぶ）。非存在は成功扱い（Rust 側）。 */
 export async function clearExportFramesStage(): Promise<void> {
   await invoke('clear_export_frames_stage');
+}
+
+/**
+ * 動画スロット本体アニメ（#442）：クリップの区間 [clipStartSec, +durSec] を出力fpsでフレーム抽出しステージング、書き出せた枚数を返す。
+ * 出力 f＝clip-time clipStartSec+(f/fps)*speed（動画がアニメ区間から動きながら再生される素材）。Tauri 専用＝canExport() で判定してから呼ぶ。
+ */
+export async function stageClipFrames(
+  projectId: string,
+  clipRelPath: string,
+  clipStartSec: number,
+  durSec: number,
+  speed: number,
+  fps: number,
+  width: number,
+  dirName: string,
+): Promise<number> {
+  return invoke<number>('stage_clip_frames', {
+    projectId,
+    clipRelPath,
+    clipStartSec,
+    durSec,
+    speed,
+    fps,
+    width,
+    dirName,
+  });
+}
+
+/** ステージ済みフレーム（stageClipFrames が書き出したクリップフレーム）を data URL で読む（#442）。Tauri 専用。 */
+export async function readExportFrame(dirName: string, frameIndex: number): Promise<string> {
+  return invoke<string>('read_export_frame', { dirName, frameIndex });
 }
 
 /** 書き出し前に H.264 エンコード能力を検知する（#120）。Tauri 専用＝呼ぶ前に canExport() で判定すること。 */

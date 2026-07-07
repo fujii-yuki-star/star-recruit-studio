@@ -7,12 +7,13 @@ import type { Template } from '../../domain/template/types';
 import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs } from '../../domain/project/lineTimeline';
-import { animationsEndSec, sceneAnimationActive } from '../../domain/project/sceneAnimation';
+import { animationsEndSec, sceneAnimationActive, slotIsAnimated } from '../../domain/project/sceneAnimation';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { creditForLine, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
+import { sliceWav } from '../../domain/voice/wavSlice';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvgMulti } from './videoSceneSplit';
 import type { VideoSlotInfo } from './findVideoSlot';
@@ -88,6 +89,9 @@ export interface ExportSceneData {
   durationSec: number;
   audioBase64?: string;
   narrationVolume?: number;
+  /** 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声（**複数動画スロット対応＝各スロット1本**）。
+   *  非空のとき Rust が audioBase64（ナレーション）と全本を amix する（アニメ区間から再生される元音声・useOriginalAudio のスロットぶん）。 */
+  clipAudios?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number }[];
   video?: ExportVideoData;
   /** この場面に「入る」トランジション（ADR-0009 T2）。先頭場面・none では未設定（ハードカット）。 */
   transition?: { name: string; durationSec: number; offsetSec: number };
@@ -122,6 +126,24 @@ export type AnimationsFor = (scene: Scene) => ElementAnimation[];
  */
 export type StageAnimationFrame = (framesDir: string, frameIndex: number, dataUrl: string) => Promise<void>;
 
+/**
+ * 動画スロット本体アニメ（#442）：クリップの区間フレームを出力fpsでステージングし、書き出せた枚数を返すコールバック。
+ * アニメ区間だけ「動画の実フレームをスロット矩形へ描いて場面全体を per-frame 合成」する素材にする（動画が動きながら再生）。
+ * 省略時（テスト/非Tauri）は実フレーム合成を諦め、代表フレーム（サムネ）で焼くフォールバックになる。
+ */
+export type StageClipFrames = (
+  dirName: string,
+  clipRelPath: string,
+  clipStartSec: number,
+  durSec: number,
+  speed: number,
+  fps: number,
+  width: number,
+) => Promise<number>;
+
+/** ステージ済みフレーム（stageClipFrames が書き出したクリップフレーム）を data URL で読むコールバック（#442）。 */
+export type ReadExportFrame = (dirName: string, frameIndex: number) => Promise<string>;
+
 /** 書き出しの横断設定。 */
 export interface ExportOptions {
   /** 字幕(subtitle レイヤー)を入れるか。false なら字幕を描かない。既定 true。 */
@@ -151,6 +173,8 @@ export async function buildExportScenes(
   opts: ExportOptions = {},
   animationsFor?: AnimationsFor,
   stageAnimationFrame?: StageAnimationFrame,
+  stageClipFrames?: StageClipFrames,
+  readExportFrame?: ReadExportFrame,
 ): Promise<ExportSceneData[]> {
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
@@ -288,11 +312,147 @@ export async function buildExportScenes(
           const narration = narrationFor?.(scene);
           const sceneAnims = animationsFor?.(scene) ?? [];
           // 動画×アニメ（#435）：下/中/上の静止層すべてを per-frame でステージングして動画へ overlay する
-          // ＝背景/動画間/グループ要素もプレビューと一致して動く（#435 P1）。動画スロット自身の位置アニメのみ
-          // 未対応（動画は基準位置固定）。適用可否は preview（ScenePreview）と共有の sceneAnimationActive
+          // ＝背景/動画間/グループ要素もプレビューと一致して動く（#435 P1）。動画スロット自身の位置アニメは
+          // #442（下記 slotAnim 分岐）で対応。適用可否は preview（ScenePreview）と共有の sceneAnimationActive
           // （掛け合い×動画は false＝静止）。ステージング不可（テスト等）は静止 above にフォールバック。
           const animateVideo = sceneAnimationActive(scene, sceneAnims, true);
-          if (animateVideo && stageAnimationFrame) {
+          // #442：動画スロット本体（矩形）がアニメ対象か。true のとき overlay 固定座標では位置/拡縮/回転/不透明度が
+          // 乖離するため、「アニメ区間はスロットもサムネで場面全体を焼く（Frames）＋settled 区間で実動画」に分割する。
+          const animEnd = animationsEndSec(sceneAnims);
+          const slotAnim = animateVideo && animEnd > 0 && slotIsAnimated(sceneAnims, slotIds, scene.groups);
+          if (slotAnim && stageAnimationFrame) {
+            // #442（ADR-0019 追補・ADR-0026）：動画スロット本体アニメ。overlay は固定座標しか持てないため、
+            // (1) アニメ区間 [0,W] は**動画の実フレーム**をスロット矩形へ描いて場面全体を毎フレーム合成
+            //     （プレビュー＝ScenePreview と同一の layoutScene(t)＝位置/拡縮/回転/不透明度が完全パリティ・
+            //      動画は「動きながら再生」＝既定は先頭から再生。開始タイミングの自由化は後続）、
+            // (2) settled 区間 [W,尺] は実動画を最終位置（settled レイアウト）で流し、クリップは窓の続き（+W*speed）から。
+            // の2セグメントに分ける。ナレーションは W でサンプル分割（sliceWav）＋窓の元音声は Rust が amix（clipAudio）。
+            const fps = FPS;
+            const W = Math.min(scene.durationSec, animEnd); // アニメ区間（窓）の尺
+            const hasSettled = W < scene.durationSec; // settled（実動画）区間があるか
+            const narrAudio = narration?.audioBase64;
+            const frameCount = Math.max(1, Math.ceil(W * fps) + 1);
+            const winDir = `scene_vbody_${i}`;
+            // 各動画スロット層 id → 動画 assetId（layoutToSvg の assetSrc はこの assetId で呼ばれる）。
+            const slotAssetIdByLayer = new Map(
+              layout.items.flatMap((it) =>
+                it.kind === 'image' && it.role === 'slot' && it.assetId ? [[it.id, it.assetId] as const] : [],
+              ),
+            );
+            // アニメ区間は動画の実フレームで焼く（stageClipFrames/readExportFrame があるとき）。無ければサムネで代替（テスト/非Tauri）。
+            const useRealFrames = !!(stageClipFrames && readExportFrame);
+            // 動画 assetId → 抽出フレーム dir と枚数（全スロットの動画をアニメ区間で再生させる＝動きながら再生）。
+            const clipFrameByAsset = new Map<string, { dir: string; count: number }>();
+            if (useRealFrames) {
+              for (let s = 0; s < videoSlots.length; s += 1) {
+                const vs = videoSlots[s];
+                const assetId = slotAssetIdByLayer.get(vs.slotLayerId);
+                if (!assetId) continue; // 動画 id が引けないスロットはサムネ描画へフォールバック
+                const dir = `clip_vbody_${i}_${s}`;
+                // トリミング（clipEndSec）を尊重：抽出は「クリップに残る再生秒」＝(clipEnd-clipStart)/speed までに抑える
+                // （窓が終点を超える分は readExportFrame の min(f,count-1) が最終フレームを保持＝切った後ろを読まない）。
+                const availW =
+                  vs.clipEndSec != null ? Math.max(0, (vs.clipEndSec - vs.clipStartSec) / vs.speed) : W;
+                const count = await stageClipFrames!(dir, vs.clipRelPath, vs.clipStartSec, Math.min(W, availW), vs.speed, fps, width);
+                clipFrameByAsset.set(assetId, { dir, count });
+              }
+            }
+            for (let f = 0; f < frameCount; f += 1) {
+              const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
+              // アニメ区間のスロット画像＝この時刻の実フレーム（無ければ assetSrc＝サムネ）。プレビューと同じ layoutToSvg で描く。
+              let frameAssetSrc = assetSrc;
+              if (clipFrameByAsset.size > 0) {
+                const urls = new Map<string, string>();
+                for (const [assetId, cf] of clipFrameByAsset) {
+                  urls.set(assetId, await readExportFrame!(cf.dir, Math.min(f, cf.count - 1)));
+                }
+                frameAssetSrc = (id) => (id && urls.has(id) ? urls.get(id) : assetSrc(id));
+              }
+              await stageAnimationFrame(
+                winDir,
+                f,
+                await svgToPngDataUrl(
+                  layoutToSvg(frameLayout, { assetSrc: frameAssetSrc, itemFilter, credit, fontFamily: sceneFontFamily }),
+                  width,
+                  height,
+                ),
+              );
+            }
+            // 窓の元音声（#442・既定=動画は先頭から再生）：実フレーム時のみ、**元音声ONの全スロット**の [clipStart,+W*speed)
+            // を Rust が amix（settled は Video 経路で全スロット amix＝アニメ区間も同じ挙動・#431 整合・#442 P2）。
+            // 各スロットのトリミングを尊重＝窓で鳴らす尺は min(W, 残り再生秒) に抑える（切った後ろを鳴らさない）。サムネ代替時は窓で
+            // 動画は鳴らない（settled から＝従来）。
+            const winClipAudios = useRealFrames
+              ? videoSlots
+                  .filter((v) => v.useOriginalAudio)
+                  .map((v) => {
+                    const availAudio =
+                      v.clipEndSec != null ? Math.max(0, (v.clipEndSec - v.clipStartSec) / v.speed) : W;
+                    return {
+                      clipRelPath: v.clipRelPath,
+                      clipStartSec: v.clipStartSec,
+                      durSec: Math.min(W, availAudio),
+                      speed: v.speed,
+                      volume: v.originalVolume,
+                    };
+                  })
+              : [];
+            out.push({
+              durationSec: hasSettled ? W : scene.durationSec,
+              framesDir: winDir,
+              fps,
+              // settled があるときは窓ぶん [0,W] に切る。無ければ（アニメが全尺）ナレーションは丸ごと。
+              audioBase64: hasSettled && narrAudio ? sliceWav(narrAudio, 0, W) : narrAudio,
+              narrationVolume: narration?.narrationVolume,
+              ...(winClipAudios.length > 0 ? { clipAudios: winClipAudios } : {}),
+            });
+            // (2) settled：実動画を最終位置で流す。below/mid/above は settled レイアウト（timeSec=animEnd で全アニメが収束）で焼く。
+            if (hasSettled) {
+              const settledLayout = layoutScene(scene, template, { timeSec: animEnd, animations: sceneAnims });
+              const sSplit =
+                splitVideoSceneSvgMulti(settledLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit) ?? splitM;
+              const sLayers = sSplit.slots.map((s) => {
+                const info = slotById.get(s.layerId)!;
+                return {
+                  slotX: Math.round(s.rect.x * rx),
+                  slotY: Math.round(s.rect.y * ry),
+                  slotW: Math.round(s.rect.w * rx),
+                  slotH: Math.round(s.rect.h * ry),
+                  clipRelPath: info.clipRelPath,
+                  fit: info.fit,
+                  // 実フレーム時は窓で [clipStart,+W*speed) を再生済み＝settled はその続きから（連続再生）。
+                  // サムネ代替時は窓で動画は静止＝settled は clipStart から（従来）。
+                  // トリミング（clipEndSec）を尊重：窓で終点まで消費したら settled 開始を「終点の1フレーム手前」に
+                  // クランプ＝最終フレームを eof_action=repeat で保持（切った後ろへ進めない・#442 レビュー P1）。
+                  clipStartSec:
+                    info.clipEndSec != null
+                      ? Math.min(
+                          info.clipStartSec + (useRealFrames ? W * info.speed : 0),
+                          Math.max(info.clipStartSec, info.clipEndSec - info.speed / fps),
+                        )
+                      : info.clipStartSec + (useRealFrames ? W * info.speed : 0),
+                  clipEndSec: info.clipEndSec,
+                  useOriginalAudio: info.useOriginalAudio,
+                  originalVolume: info.originalVolume,
+                  speed: info.speed,
+                };
+              });
+              const sPrimary = sLayers[0];
+              const sVideoLayers = sLayers.slice(1);
+              const sBelow = await svgToPngDataUrl(sSplit.belowSvg, width, height);
+              const sMid = await Promise.all(sSplit.midSvgs.map((svg) => svgToPngDataUrl(svg, width, height)));
+              const sAbove = await svgToPngDataUrl(sSplit.aboveSvg, width, height);
+              out.push({
+                durationSec: scene.durationSec - W,
+                // settled のナレーション＝[W,尺]（空区間なら undefined＝無音＝窓で鳴り終えた）。
+                audioBase64: narrAudio ? sliceWav(narrAudio, W) : undefined,
+                narrationVolume: narration?.narrationVolume,
+                video: { belowPngBase64: sBelow, midLayers: sMid, videoLayers: sVideoLayers, abovePngBase64: sAbove, ...sPrimary },
+              });
+              // included を out と 1:1 に保つ（settled は同一場面の後続＝sceneId 一致でグループ化・遷移は先頭が持つ）。
+              included.push({ ...scene, transition: undefined });
+            }
+          } else if (animateVideo && stageAnimationFrame) {
             const fps = FPS;
             // 変化する区間 [0, min(尺, animEnd)] だけ焼き、残りは Rust の tpad/eof_action=repeat が最終フレームを保持（#376同方針）。
             const renderDurSec = Math.max(0, Math.min(scene.durationSec, animationsEndSec(sceneAnims)));
