@@ -8,6 +8,7 @@ import { ORIENTATION, VIDEO_KIND } from '../enums';
 import type { Purpose, VideoKind } from '../enums';
 import { DEFAULT_FONT_ID, isKnownFontId } from '../font/fontCatalog';
 import { isKnownBundledBgmId } from '../bgm/bgmCatalog';
+import { validateProject } from '../validation/generated/validators.js';
 import type {
   Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
   TimelineOverlay, ToneSettings, VideoSettings, VoiceSettings,
@@ -243,7 +244,38 @@ export function parseProjectDoc(text: string): Project {
       throw new ProjectLoadError('プロジェクトの必須情報が欠けています。別のプロジェクトを選んでください。');
     }
   }
-  return migrateProject(doc as unknown as Project);
+  const migrated = migrateProject(doc as unknown as Project);
+  // 移行後（現行版）を正典スキーマで検証する（11 §8 V2・#416）。旧版は migrate 済みなので現行スキーマで判定できる（後方互換）。
+  // 読込拒否は「型不正・必須欠落」（構造破損）に限定する（受け入れ条件）。minLength/enum/範囲などの内容制約違反は
+  // 作りかけプロジェクト（新規は companyName 空・#411 の 80字超/尺0秒 等）が正常に出すため拒否しない＝弾かない。
+  // どの違反もログには残す（§2-3＝UI には出さない・技術詳細はログのみ／保存側は当面すべて警告）。
+  const check = validateProjectDoc(migrated);
+  if (!check.valid) {
+    console.warn('[project] 読込スキーマ検証に失敗:', check.errors);
+    if (check.structural) {
+      throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。');
+    }
+  }
+  return migrated;
+}
+
+/** 構造破損（型不正・必須欠落）とみなす ajv キーワード。これらのみ読込拒否の対象（#416・受け入れ条件）。 */
+const STRUCTURAL_VALIDATION_KEYWORDS = new Set(['type', 'required']);
+
+/** ajv の検証エラーを読みやすい1行配列へ整形（ログ・デバッグ用。UI には出さない＝§2-3/§2-5）。 */
+function formatProjectErrors(): string[] {
+  return (validateProject.errors ?? []).map((e) => `${e.instancePath || '(root)'} ${e.message ?? ''}`.trim());
+}
+
+/**
+ * project を正典スキーマ（型・必須・enum・範囲）で検証する（11 §8 V2・#416）。適合で valid:true。
+ * 不適合は valid:false＋技術エラー（ログ用）＋ structural（型不正/必須欠落を含むか＝読込拒否の対象か）。
+ * 読込は structural のときだけ拒否、保存側は当面すべて警告ログに使う（段階的に強制）。
+ */
+export function validateProjectDoc(data: unknown): { valid: boolean; errors: string[]; structural: boolean } {
+  if (validateProject(data)) return { valid: true, errors: [], structural: false };
+  const structural = (validateProject.errors ?? []).some((e) => STRUCTURAL_VALIDATION_KEYWORDS.has(e.keyword));
+  return { valid: false, errors: formatProjectErrors(), structural };
 }
 
 /** 読込時に旧バージョン(1.0〜1.16)を現行(1.17)へ移行する。

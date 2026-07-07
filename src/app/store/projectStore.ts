@@ -13,7 +13,7 @@ import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
   assembleProject, createAnimationId, createAssetId, createBgmId, createOverlayClipId, createPartId, createProjectId, createSceneId,
-  defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject,
+  defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
@@ -559,6 +559,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       );
       const meta: ProjectHeader = { ...s.meta, projectId, updatedAt: new Date().toISOString() };
       const project = assembleProject(meta, s.assets, s.parts, scenes);
+      // 保存前検証（#416）：当面は警告ログのみ（アプリが正典に反するデータを作っていないか監視・入力防御は #411）。
+      const pv = validateProjectDoc(project);
+      if (!pv.valid) console.warn("[project] 保存内容がスキーマに未適合（要修正・#416）:", pv.errors);
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
       setLastProjectId(projectId);
       set({ meta, scenes, saveStatus: "saved" });
@@ -670,6 +673,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const doc = JSON.parse(await loadProjectDoc(projectId)) as Record<string, unknown>;
     doc.projectName = name;
     doc.updatedAt = updatedAt;
+    // 保存前検証（#416）：改名は projectName の maxLength(80) を超え得る（#411）。当面は警告ログのみ。
+    const rv = validateProjectDoc(doc);
+    if (!rv.valid) console.warn("[project] 改名後の保存内容がスキーマに未適合（要修正・#416）:", rv.errors);
     await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
     // 開いているプロジェクトを改名したなら、画面表示名・更新日時（meta）も同期する。
     if (get().meta.projectId === projectId) set((s) => ({ meta: { ...s.meta, projectName: name, updatedAt } }));
