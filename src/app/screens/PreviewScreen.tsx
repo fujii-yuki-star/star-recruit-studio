@@ -12,6 +12,7 @@ import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } fr
 import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import type { VideoSlotPlayback } from "../components/ScenePreview";
+import { buildVideoPlaybackSlots } from "./previewVideoSlots";
 import { assembleProject } from "../../domain/project/persistence";
 import { FPS } from "../../domain/constants";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
@@ -119,7 +120,10 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   );
   const hasVideoSlot = videoSlots.length > 0;
   // 再生用のクリップURL（asset://＝本体。サムネではない）を解決（#432）。非Tauri は null＝実映像なしでサムネのまま。
-  const [clipUrlByLayer, setClipUrlByLayer] = useState<Record<string, string>>({});
+  // 解決結果は **URL と relPath を対で**保持し、照合は現在スロットの clipRelPath 一致時のみ（#432 P2）。
+  // ＝場面送りで clipSig が変わり新URL解決が終わるまでの間、同じ slotLayerId（例 mainVisual）に前場面の旧URLがヒットして
+  //  一瞬前の動画を流す事故を防ぐ（relPath 不一致なら旧URLを使わない＝新解決までサムネのまま）。
+  const [clipUrlByLayer, setClipUrlByLayer] = useState<Record<string, { url: string; relPath: string }>>({});
   const clipSig = useMemo(
     () => JSON.stringify(videoSlots.map((s) => [s.slotLayerId, s.clipRelPath])),
     [videoSlots],
@@ -133,31 +137,19 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         return;
       }
       const entries = await Promise.all(
-        videoSlots.map(async (s) => [s.slotLayerId, await assetDisplayUrl(pid, s.clipRelPath)] as const),
+        videoSlots.map(async (s) => [s.slotLayerId, s.clipRelPath, await assetDisplayUrl(pid, s.clipRelPath)] as const),
       );
       if (cancelled) return;
-      const map: Record<string, string> = {};
-      for (const [id, url] of entries) if (url) map[id] = url;
-      setClipUrlByLayer(map);
+      const map: Record<string, { url: string; relPath: string }> = {};
+      for (const [id, relPath, url] of entries) if (url) map[id] = { url, relPath };
+      setClipUrlByLayer(map); // 全置換＝当場面のスロットぶんだけ残す（前場面の残骸を消す）
     })();
     return () => { cancelled = true; };
     // clipSig（スロットとクリップパスの実質変化）で解決＝場面送り/素材差し替えでのみ再解決。
   }, [clipSig, meta.projectId]);
-  // ScenePreview へ渡す実映像再生情報（URL 解決済みのスロットのみ）。
+  // ScenePreview へ渡す実映像再生情報（URL 解決済み **かつ 現在の clipRelPath と一致** するスロットのみ・#432 P2）。
   const videoPlaybackSlots: VideoSlotPlayback[] = useMemo(
-    () =>
-      videoSlots
-        .filter((s) => clipUrlByLayer[s.slotLayerId])
-        .map((s) => ({
-          slotLayerId: s.slotLayerId,
-          clipUrl: clipUrlByLayer[s.slotLayerId],
-          clipStartSec: s.clipStartSec,
-          clipEndSec: s.clipEndSec,
-          speed: s.speed,
-          fit: s.fit,
-          useOriginalAudio: s.useOriginalAudio,
-          originalVolume: s.originalVolume,
-        })),
+    () => buildVideoPlaybackSlots(videoSlots, clipUrlByLayer),
     [videoSlots, clipUrlByLayer],
   );
   // このアニメを実際に描くか＝書き出し（buildExportScenes）と共有の sceneAnimationActive で判定。

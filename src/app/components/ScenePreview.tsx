@@ -50,6 +50,8 @@ function SlotVideo({
   volume: number;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
+  // >1.0 増幅用の Web Audio グラフ（volume>1 のときだけ張る）。null＝素の video.volume で足りる（≤1.0）。
+  const audioRef = useRef<{ ctx: AudioContext; gain: GainNode } | null>(null);
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
@@ -79,19 +81,49 @@ function SlotVideo({
       safePause();
     };
   }, [src, clipStartSec, clipEndSec, speed]);
-  // ミュート/音量の即時反映（再生を止めずに）。
+  // 元音声が 100% 超（最大 150%）のときは video.volume の上限(1.0)を超えられないため、Web Audio の GainNode で増幅して
+  // 書き出し（FFmpeg volume=1.5）と一致させる（#432 P2）。AudioContext が無い環境（jsdom/古ブラウザ）は video.volume に
+  // 1.0 クランプでフォールバック（≤1.0 は元から一致）。増幅の要否は場面内で不変（スロットの originalVolume）。
+  const needsAmp = volume > 1;
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || !needsAmp || audioRef.current) return;
+    const AC =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return; // フォールバック（video.volume クランプ）
+    try {
+      const ctx = new AC();
+      const source = ctx.createMediaElementSource(v);
+      const gain = ctx.createGain();
+      source.connect(gain).connect(ctx.destination);
+      audioRef.current = { ctx, gain };
+      v.volume = 1; // 素の音量は最大＝最終音量は gain で作る
+    } catch { /* 生成失敗は video.volume フォールバック */ }
+    return () => {
+      void audioRef.current?.ctx.close().catch(() => {});
+      audioRef.current = null;
+    };
+  }, [needsAmp]);
+  // ミュート/音量の即時反映（再生を止めずに）。graph があれば gain、無ければ video.volume（1.0クランプ）。
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    v.muted = muted || volume <= 0;
-    v.volume = Math.min(1, Math.max(0, volume));
-  }, [muted, volume]);
+    const wa = audioRef.current;
+    if (wa) {
+      wa.gain.gain.value = muted ? 0 : Math.max(0, volume);
+      v.muted = false; // 音量は graph に一本化（要素側は素通し）
+      void wa.ctx.resume().catch(() => {});
+    } else {
+      v.muted = muted || volume <= 0;
+      v.volume = Math.min(1, Math.max(0, volume));
+    }
+  }, [muted, volume, needsAmp]);
   return (
     <video
       ref={ref}
       src={src}
       playsInline
-      muted={muted || volume <= 0}
       style={{
         position: "absolute",
         left: rectPct.left,

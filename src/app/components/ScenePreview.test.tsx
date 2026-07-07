@@ -100,4 +100,32 @@ describe("ScenePreview 実映像再生（#432）", () => {
     );
     expect(container.querySelector("video")?.muted).toBe(true);
   });
+
+  it("元音声>100%（例150%）は Web Audio の GainNode で増幅＝書き出しと一致（#432 P2）", () => {
+    // jsdom は AudioContext を持たないためモックを差す。gain.value に volume(1.5) が入ることを確認。
+    let capturedGain: { gain: { value: number } } | null = null;
+    class MockAudioContext {
+      destination = {};
+      createGain() {
+        capturedGain = { gain: { value: 0 }, connect: (n: unknown) => n } as unknown as { gain: { value: number } };
+        return capturedGain;
+      }
+      createMediaElementSource() { return { connect: (n: unknown) => n }; }
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+    }
+    const win = window as unknown as { AudioContext?: unknown };
+    const prev = win.AudioContext;
+    win.AudioContext = MockAudioContext as unknown as typeof AudioContext;
+    try {
+      render(
+        <ScenePreview scene={videoScene} template={freeTemplate} videoPlayback={{ playing: true, muted: false, slots: [slot({ useOriginalAudio: true, originalVolume: 1.5 })] }} />,
+      );
+      // 増幅は video.volume(上限1.0)でなく gain(1.5) で作る＝書き出しの volume=1.5 と一致。
+      expect(capturedGain).not.toBeNull();
+      expect(capturedGain!.gain.value).toBe(1.5);
+    } finally {
+      win.AudioContext = prev;
+    }
+  });
 });
