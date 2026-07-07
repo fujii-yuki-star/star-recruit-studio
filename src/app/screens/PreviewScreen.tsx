@@ -5,7 +5,7 @@ import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { BgmPicker } from "../components/BgmPicker";
-import { resolveBgmVolume } from "../../domain/voice/audioMix";
+import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { lineSegments } from "../../domain/project/lineTimeline";
 import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
@@ -57,16 +57,19 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const mutedRef = useRef(muted);
   // 再生中の BGM 要素（ループ再生・ミュート/音量を即時反映するため保持）。
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
+  // 再生中のナレーション要素（ミュートを即時反映するため保持・#388）。掛け合いは常に「今鳴っている行」を指す。
+  const narrationAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // 直接landしたときの自動生成は「外部送信にならない（Mock）とき」だけ（#384・§2-6）。実プロバイダは空状態のまま。
   useEffect(() => {
     void autoGenerateIfSafe();
   }, [status, autoGenerateIfSafe]);
 
-  // muted を ref に同期（render 中の ref 書込みを避けつつ、再生エフェクトを再起動させない）。BGM へは即時反映。
+  // muted を ref に同期（render 中の ref 書込みを避けつつ、再生エフェクトを再起動させない）。BGM/ナレーションへ即時反映（#388）。
   useEffect(() => {
     mutedRef.current = muted;
     if (bgmAudioRef.current) bgmAudioRef.current.muted = muted;
+    if (narrationAudioRef.current) narrationAudioRef.current.muted = muted;
   }, [muted]);
 
   const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
@@ -211,9 +214,12 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     // 再生開始時点のスナップショット（#382）＝store の現在値を getState で読む（subscribe しない）。
     // 以降この再生セッションはこの値で進み、途中で scenes/narrationAudioById の参照が変わっても
     // effect は再起動しない（自動保存・声のBG生成で場面を頭からやり直さない）。
-    const { scenes: scenesSnap, narrationAudioById } = useProjectStore.getState();
+    const { scenes: scenesSnap, narrationAudioById, meta: metaSnap } = useProjectStore.getState();
     const sc = scenesSnap[safeIdx];
     if (!playing || !sc) return;
+    // ナレーション音量を書き出しと同じ解決で適用（§6・#388）。HTMLAudio の音量上限は 1.0 なので下げ方向のパリティ
+    //（30%等は一致）。1.0 超のブースト一致は Web Audio が要るため範囲外＝書き出しのみ増幅（BGM と同じ既知の上限）。
+    const narrationVolume = Math.min(1, resolveNarrationVolume(sc.audioMix, metaSnap.voiceSettings));
     const advance = (): void => {
       if (safeIdx < endIdx) setIdx(safeIdx + 1);
       else setPlaying(false);
@@ -255,8 +261,12 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           }
         };
         const u = narrationAudioById[lineAudioKey(sc.sceneId, segs[i].lineId)];
-        if (u && !mutedRef.current) {
+        if (u) {
+          // 常に生成し muted/volume で制御＝ミュートの即時反映（#388）と書き出しと同じ音量にする。
           currentAudio = new Audio(u);
+          currentAudio.volume = narrationVolume;
+          currentAudio.muted = mutedRef.current;
+          narrationAudioRef.current = currentAudio;
           lineAudios.push(currentAudio);
           // play() の解決＝再生開始。そこから窓を測って次へ。resolve/reject いずれでも一度だけ進む
           // （reject 側は再生失敗ログも残す＝今後のデバッグ用・#370 レビュー対応）。
@@ -287,6 +297,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         cancelled = true;
         lineTimers.forEach((t) => window.clearTimeout(t));
         lineAudios.forEach((a) => a.pause());
+        narrationAudioRef.current = null;
         setActiveLine(0);
       };
     }
@@ -295,13 +306,18 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     const endTimer = window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000);
     let audio: HTMLAudioElement | undefined;
     const url = narrationAudioById[sc.sceneId];
-    if (url && !mutedRef.current) {
+    if (url) {
+      // 常に生成し muted/volume で制御＝ミュートの即時反映（#388）と書き出しと同じ音量にする。
       audio = new Audio(url);
+      audio.volume = narrationVolume;
+      audio.muted = mutedRef.current;
+      narrationAudioRef.current = audio;
       void audio.play().catch((e) => console.warn("[PreviewScreen] 音声再生に失敗", e));
     }
     return () => {
       window.clearTimeout(endTimer);
       audio?.pause();
+      narrationAudioRef.current = null;
     };
     // deps はプリミティブのみ（#382）：scenes/narrationAudioById は上の getState でスナップショット読みするため
     // deps に含めない＝自動保存・声のBG生成での参照変化で再生を頭からやり直さない。endIdx は値が変わったときだけ再構成（範囲変更）。

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
 import { useProjectStore } from "../store/projectStore";
+import { useAudioPreview } from "../hooks/useAudioPreview";
 import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
 import {
   DEFAULT_AI_MODEL, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
@@ -39,6 +40,8 @@ export function SettingsScreen() {
   });
   const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
   const [testError, setTestError] = useState("");
+  // 試し聞きの再生制御（#388）：画面遷移で停止・連打で重ならない・再生中は「停止」表示。
+  const audioPreview = useAudioPreview();
   // 動画保存の予備機能の状態（実検出は取得・検証実装後＝pin 後。今は表示枠用のプレースホルダ）。
   const h264Status: H264FeatureStatus = H264_INITIAL_STATUS;
 
@@ -51,12 +54,20 @@ export function SettingsScreen() {
     setVoicevoxSpeaker(value);
   }
   async function onTestVoice() {
+    // 再生中にもう一度押したら停止（投げっぱなしにしない・#388）。
+    if (audioPreview.playingKey === "settings") {
+      audioPreview.stop();
+      return;
+    }
     setTestState("loading");
     setTestError("");
     try {
       const url = await synthesizePreview();
-      // 再生失敗（コーデック/自動再生制限など）も握りつぶさず通知する（§2-5）。
-      await new Audio(url).play();
+      // 再生失敗（コーデック/自動再生制限など）も握りつぶさず通知する（§2-5）。停止制御は audioPreview に委ねる。
+      audioPreview.play("settings", url, () => {
+        setTestError("声の確認に失敗しました。もう一度お試しください。");
+        setTestState("error");
+      });
       setTestState("idle");
     } catch (e) {
       // VOICEVOX 由来の失敗は Rust が行動明示の文字列で返す。それ以外（再生失敗等）は定型文。
@@ -320,7 +331,11 @@ export function SettingsScreen() {
             onClick={() => void onTestVoice()}
             disabled={testState === "loading"}
           >
-            {testState === "loading" ? "確認中…" : "声を試し聞きする"}
+            {audioPreview.playingKey === "settings"
+              ? "■ 停止"
+              : testState === "loading"
+                ? "確認中…"
+                : "声を試し聞きする"}
           </button>
           {testState === "error" && (
             <div className="notice notice-warn" role="alert" style={{ marginTop: 8 }}>
