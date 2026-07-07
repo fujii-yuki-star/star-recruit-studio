@@ -95,10 +95,12 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       : { id: "subtitle", label: "字幕の長さ", detail: "字幕の長さは読みやすい範囲です。", severity: "ok" },
   );
 
-  const longLineScenes = scenes.filter((s) => s.narration.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120));
+  // セリフの長さ／自由配置は warning のみで action ボタンが無い＝場面へ飛ばないため sceneId は付けない
+  // （使われない値を仮に持たせない・CLAUDE.md「将来要件のために設計しない」）。action 化する際に付与する。
+  const longLine = scenes.filter((s) => s.narration.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120)).length;
   items.push(
-    longLineScenes.length > 0
-      ? { id: "line", label: "セリフの長さ", detail: `セリフが長い場面が${longLineScenes.length}つあります。`, severity: "warning", sceneId: longLineScenes[0].sceneId }
+    longLine > 0
+      ? { id: "line", label: "セリフの長さ", detail: `セリフが長い場面が${longLine}つあります。`, severity: "warning" }
       : { id: "line", label: "セリフの長さ", detail: "セリフの長さは適切です。", severity: "ok" },
   );
 
@@ -120,13 +122,14 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   // FREE 場面が無いプロジェクトでは項目を出さない（通常プロジェクトのノイズを避ける）。
   const freeScenes = scenes.filter((s) => (s.freeLayout?.length ?? 0) > 0);
   if (freeScenes.length > 0) {
-    const badScenes = freeScenes.filter((s) => {
+    // freeLayout も warning のみ（action ボタン無し）＝sceneId は付けない（上の line と同方針）。
+    const badCount = freeScenes.filter((s) => {
       const cv = templateOf(s)?.canvas ?? { width: WIDTH, height: HEIGHT };
       return validateFreeLayout(s.freeLayout ?? [], assets, cv).length > 0;
-    });
+    }).length;
     items.push(
-      badScenes.length > 0
-        ? { id: "freeLayout", label: "自由配置の確認", detail: `自由に配置した場面が${badScenes.length}つ、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning", sceneId: badScenes[0].sceneId }
+      badCount > 0
+        ? { id: "freeLayout", label: "自由配置の確認", detail: `自由に配置した場面が${badCount}つ、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning" }
         : { id: "freeLayout", label: "自由配置の確認", detail: "自由配置の場面は問題ありません。", severity: "ok" },
     );
   }

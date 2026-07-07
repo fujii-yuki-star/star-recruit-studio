@@ -105,6 +105,14 @@ describe("buildPrecheckItems（#400・項目 action が該当場面へ飛ぶ sce
     expect(voice?.sceneId).toBe("b"); // 2つ目が最初の該当
   });
 
+  it("字幕が長い項目は最初の該当場面 id を持つ（action で飛べる項目）", () => {
+    const a = scn("a", { texts: { subtitle: "短い字幕" } });
+    const b = scn("b", { texts: { subtitle: "あ".repeat(61) } }); // > 既定60字
+    const sub = buildPrecheckItems([a, b], assets, [freeTemplate]).find((i) => i.id === "subtitle");
+    expect(sub?.severity).toBe("action");
+    expect(sub?.sceneId).toBe("b");
+  });
+
   it("問題が無い（ok）項目は sceneId を持たない", () => {
     const a = scn("a", { narration: { text: "", status: "generated" } });
     const voice = buildPrecheckItems([a], assets, [freeTemplate]).find((i) => i.id === "voice");
