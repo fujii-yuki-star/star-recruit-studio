@@ -244,7 +244,14 @@ export function parseProjectDoc(text: string): Project {
       throw new ProjectLoadError('プロジェクトの必須情報が欠けています。別のプロジェクトを選んでください。');
     }
   }
-  const migrated = migrateProject(doc as unknown as Project);
+  let migrated: Project;
+  try {
+    migrated = migrateProject(doc as unknown as Project);
+  } catch (e) {
+    // 移行中の想定外エラー（防御しきれない型不正）も §2-5 文言で拒否する＝生 TypeError を UI へ出さない（#416 P1）。
+    console.warn('[project] 移行中に想定外のエラー:', e);
+    throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。');
+  }
   // 移行後（現行版）を正典スキーマで検証する（11 §8 V2・#416）。旧版は migrate 済みなので現行スキーマで判定できる（後方互換）。
   // 読込拒否は「型不正・必須欠落」（構造破損）に限定する（受け入れ条件）。minLength/enum/範囲などの内容制約違反は
   // 作りかけプロジェクト（新規は companyName 空・#411 の 80字超/尺0秒 等）が正常に出すため拒否しない＝弾かない。
@@ -297,6 +304,11 @@ export function validateProjectDoc(data: unknown): { valid: boolean; errors: str
  *  1.14→1.15: 場面横断タイムラインの上位編集（timelineOverlay）。後方互換の任意追加＝変換不要（未指定＝場面射影のみ・ADR-0018）。
  *  1.15→1.16: 場面ごとのBGM（scene.bgmSettings）。後方互換の任意追加＝変換不要（未指定＝プロジェクト既定を継承・ADR-0018 ③(7)）。
  *  1.16→1.17: 要素アニメーション（timelineOverlay.animations＝キーフレーム）。後方互換の任意追加＝変換不要（未指定＝アニメ無し・静止・ADR-0019 ④）。 */
+/** プレーンオブジェクト（配列・null 以外）か。移行を型不正な値で落とさず、壊れた値はそのまま validateProjectDoc に拾わせる（#416 P1）。 */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 function migrateProject(project: Project): Project {
   const next: Project = {
     ...project,
@@ -304,39 +316,42 @@ function migrateProject(project: Project): Project {
     videoKind: project.videoKind ?? VIDEO_KIND.recruit,
   };
   // 旧 companyInfo.additionalNotes をトップレベル additionalNotes へ移送し、companyInfo からは除去する。
-  const ci = project.companyInfo as Record<string, unknown> | undefined;
-  if (ci && typeof ci.additionalNotes === 'string') {
+  const ci: unknown = project.companyInfo;
+  if (isRecord(ci) && typeof ci.additionalNotes === 'string') {
     if (next.additionalNotes === undefined) next.additionalNotes = ci.additionalNotes;
     const rest = { ...ci };
     delete rest.additionalNotes;
     next.companyInfo = rest as unknown as CompanyInfo;
   }
   // 1.1→1.2: videoSettings から width/height を除去（寸法は aspectRatio から導出＝ADR-0012）。
-  const vs = project.videoSettings as unknown as Record<string, unknown> | undefined;
-  if (vs && ('width' in vs || 'height' in vs)) {
+  const vs: unknown = project.videoSettings;
+  if (isRecord(vs) && ('width' in vs || 'height' in vs)) {
     const cleaned = { ...vs };
     delete cleaned.width;
     delete cleaned.height;
     next.videoSettings = cleaned as unknown as VideoSettings;
   }
-  // 1.2→1.3: videoSettings.fontId を補完（未指定/不明は既定フォント＝同梱フォント選択の追加）。
-  const vsFont = (next.videoSettings ?? {}) as unknown as Record<string, unknown>;
-  if (!isKnownFontId(vsFont.fontId)) {
+  // 1.2→1.3: videoSettings.fontId を補完（未指定/不明は既定フォント＝同梱フォント選択の追加）。videoSettings が
+  // オブジェクトのときだけ触る（壊れた値は検証で拒否＝ここで作り込まない・#416 P1）。
+  const vsFont: unknown = next.videoSettings;
+  if (isRecord(vsFont) && !isKnownFontId(vsFont.fontId)) {
     next.videoSettings = { ...vsFont, fontId: DEFAULT_FONT_ID } as unknown as VideoSettings;
   }
   // 1.3→1.4: 未知の bundledBgmId（旧版・破損）は標準BGM未選択へ落とす（assetId/なしへフォールバック）。
-  const bgm = next.bgmSettings as Record<string, unknown> | undefined;
-  if (bgm && bgm.bundledBgmId != null && !isKnownBundledBgmId(bgm.bundledBgmId)) {
+  const bgm: unknown = next.bgmSettings;
+  if (isRecord(bgm) && bgm.bundledBgmId != null && !isKnownBundledBgmId(bgm.bundledBgmId)) {
     const cleaned = { ...bgm };
     delete cleaned.bundledBgmId;
     next.bgmSettings = cleaned as unknown as BgmSettings;
   }
   // 1.4→1.5: 未知の scene.fontId（旧版・破損）は継承（未指定）へ落とす。null は継承の明示なので保持。
+  // 場面がオブジェクトでない（null 等の壊れた要素）ときはそのまま通し、検証で型不正として拒否させる（#416 P1）。
   if (Array.isArray(next.scenes)) {
     next.scenes = next.scenes.map((sc) => {
-      const f = (sc as unknown as Record<string, unknown>).fontId;
+      if (!isRecord(sc)) return sc;
+      const f = sc.fontId;
       if (f != null && !isKnownFontId(f)) {
-        const cleaned = { ...sc } as unknown as Record<string, unknown>;
+        const cleaned = { ...sc };
         delete cleaned.fontId;
         return cleaned as unknown as Scene;
       }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createOverlayClipId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
-  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject,
+  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject, ProjectLoadError,
 } from './persistence';
 import type { ProjectHeader } from './persistence';
 import type { Part, Scene } from './types';
@@ -423,22 +423,40 @@ describe('parseProjectDoc', () => {
 
   // 読込時スキーマ検証（#416・11 §8 V2）。構造破損（型不正・必須欠落）は拒否、内容制約違反は読み込む（作りかけを弾かない）。
   describe('読込時スキーマ検証（#416）', () => {
+    // 拒否は「ProjectLoadError かつ §2-5 文言」まで固定する（生 TypeError を UI に出さない・#416 P1/P2）。
+    const expectLoadReject = (doc: unknown): void => {
+      let err: unknown;
+      try {
+        parseProjectDoc(JSON.stringify(doc));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(ProjectLoadError);
+      expect((err as Error).message).toContain('別のプロジェクトを選んでください');
+    };
+
     it('場面の型不正（durationSec が文字列）は読込拒否', () => {
-      const doc = { ...assembleProject(header(), [], [], [validScene({ durationSec: 'abc' }) as unknown as Scene]) };
-      expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();
+      expectLoadReject({ ...assembleProject(header(), [], [], [validScene({ durationSec: 'abc' }) as unknown as Scene]) });
     });
     it('場面の必須欠落（partId 無し）は読込拒否', () => {
       const scene = validScene();
       delete scene.partId;
-      const doc = { ...assembleProject(header(), [], [], [scene as unknown as Scene]) };
-      expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();
+      expectLoadReject({ ...assembleProject(header(), [], [], [scene as unknown as Scene]) });
     });
     it('videoSettings の必須欠落（fps 無し）は読込拒否', () => {
       const doc = { ...assembleProject(header(), [], [], []) } as Record<string, unknown>;
       const vs = { ...(doc.videoSettings as Record<string, unknown>) };
       delete vs.fps;
       doc.videoSettings = vs;
-      expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();
+      expectLoadReject(doc);
+    });
+    it('videoSettings が非オブジェクト（"bad"）でも生 TypeError にせず読込拒否（#416 P1）', () => {
+      const doc = { ...assembleProject(header(), [], [], []), videoSettings: 'bad' } as Record<string, unknown>;
+      expectLoadReject(doc);
+    });
+    it('scenes に null 要素があっても生 TypeError にせず読込拒否（#416 P1）', () => {
+      const doc = { ...assembleProject(header(), [], [], []), scenes: [null] } as Record<string, unknown>;
+      expectLoadReject(doc);
     });
     it('内容制約違反（companyName 空＝作りかけの新規）は拒否せず読み込む', () => {
       const doc = { ...assembleProject(header({ companyInfo: { companyName: '' } }), [], [], []) };
