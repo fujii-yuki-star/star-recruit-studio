@@ -23,6 +23,7 @@ import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { useProjectStore } from "../store/projectStore";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { useAudioPreview } from "../hooks/useAudioPreview";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -293,6 +294,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [focusSelectedFree, setFocusSelectedFree] = useState(false);
   // ナレーションの▶再生に失敗したとき通知（§2-5・設定の試聴と扱いを統一）。
   const [narrationPlayError, setNarrationPlayError] = useState(false);
+  // 試し聞きの再生制御（#388）：投げっぱなしにせず、画面遷移で停止・連打で重ならない・再生中は「停止」表示。
+  const audioPreview = useAudioPreview();
 
   useEffect(() => {
     void autoGenerateIfSafe(); // 自動生成は Mock（外部送信なし）のときだけ（#384・§2-6）。
@@ -1628,9 +1631,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           {lineAudio && (
                             <button
                               className="btn btn-ghost btn-icon text-sm"
-                              onClick={() => { setNarrationPlayError(false); void new Audio(lineAudio).play().catch(() => setNarrationPlayError(true)); }}
+                              onClick={() => { setNarrationPlayError(false); audioPreview.play(`line:${line.lineId}`, lineAudio, () => setNarrationPlayError(true)); }}
                             >
-                              ▶ 再生
+                              {audioPreview.playingKey === `line:${line.lineId}` ? "■ 停止" : "▶ 再生"}
                             </button>
                           )}
                         </div>
@@ -1688,12 +1691,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       className="btn btn-ghost btn-icon text-sm"
                       onClick={() => {
                         setNarrationPlayError(false);
-                        void new Audio(narrationAudioById[selected.sceneId])
-                          .play()
-                          .catch(() => setNarrationPlayError(true));
+                        audioPreview.play("scene", narrationAudioById[selected.sceneId], () => setNarrationPlayError(true));
                       }}
                     >
-                      ▶ 再生
+                      {audioPreview.playingKey === "scene" ? "■ 停止" : "▶ 再生"}
                     </button>
                   )}
                   <button

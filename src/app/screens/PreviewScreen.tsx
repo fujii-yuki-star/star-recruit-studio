@@ -5,7 +5,8 @@ import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { BgmPicker } from "../components/BgmPicker";
-import { resolveBgmVolume } from "../../domain/voice/audioMix";
+import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { lineSegments } from "../../domain/project/lineTimeline";
 import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
@@ -50,24 +51,37 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const [playing, setPlaying] = useState(false);
   // 選択済みBGMが再生できなかったとき通知する（自分のBGMのURL解決/再生失敗・§2-5）。
   const [bgmPlayWarning, setBgmPlayWarning] = useState(false);
+  // ナレーション音声を再生できなかったとき通知する（BGM と同様に裏で失敗させない・§2-5・#452 P2）。
+  const [narrationPlayWarning, setNarrationPlayWarning] = useState(false);
   const [muted, setMuted] = useState(false);
   // 掛け合い再生中の有効行 index（経過秒に応じて字幕/フレームを切り替える・ADR-0015 PR-F2）。停止時は 0（先頭）。
   const [activeLine, setActiveLine] = useState(0);
   // ミュートは再生エフェクトを再起動させずに参照したいので ref で持つ（同期は useEffect で）。
   const mutedRef = useRef(muted);
-  // 再生中の BGM 要素（ループ再生・ミュート/音量を即時反映するため保持）。
+  // 再生中の BGM 要素（ループ再生・停止のため保持）。
   const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
+  // 再生中のナレーション要素（停止のため保持・#388）。掛け合いは常に「今鳴っている行」を指す。
+  const narrationAudioRef = useRef<HTMLAudioElement | null>(null);
+  // 100%超（最大150%）の音量を書き出しと一致させる Web Audio 用の共有 AudioContext と、各再生の音量/ミュート制御（#452 P1）。
+  const audioCtxRef: AudioCtxRef = useRef<AudioContext | null>(null);
+  const narrationCtlRef = useRef<VolumeControl | null>(null);
+  const bgmCtlRef = useRef<VolumeControl | null>(null);
 
   // 直接landしたときの自動生成は「外部送信にならない（Mock）とき」だけ（#384・§2-6）。実プロバイダは空状態のまま。
   useEffect(() => {
     void autoGenerateIfSafe();
   }, [status, autoGenerateIfSafe]);
 
-  // muted を ref に同期（render 中の ref 書込みを避けつつ、再生エフェクトを再起動させない）。BGM へは即時反映。
+  // muted を ref に同期（render 中の ref 書込みを避けつつ、再生エフェクトを再起動させない）。BGM/ナレーションへ即時反映（#388）。
+  // 音量制御（≤1.0=要素 .muted／>1.0=GainNode）に一本化＝100%超でもミュートが効く（#452 P1）。
   useEffect(() => {
     mutedRef.current = muted;
-    if (bgmAudioRef.current) bgmAudioRef.current.muted = muted;
+    bgmCtlRef.current?.setMuted(muted);
+    narrationCtlRef.current?.setMuted(muted);
   }, [muted]);
+
+  // unmount で共有 AudioContext を閉じる（#452 P1）。
+  useEffect(() => () => closeAudioContext(audioCtxRef), []);
 
   const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
   const current = scenes[safeIdx];
@@ -211,9 +225,12 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     // 再生開始時点のスナップショット（#382）＝store の現在値を getState で読む（subscribe しない）。
     // 以降この再生セッションはこの値で進み、途中で scenes/narrationAudioById の参照が変わっても
     // effect は再起動しない（自動保存・声のBG生成で場面を頭からやり直さない）。
-    const { scenes: scenesSnap, narrationAudioById } = useProjectStore.getState();
+    const { scenes: scenesSnap, narrationAudioById, meta: metaSnap } = useProjectStore.getState();
     const sc = scenesSnap[safeIdx];
     if (!playing || !sc) return;
+    // ナレーション音量を書き出しと同じ解決で適用（§6・#388/#452）。0〜1.5 の全域を attachVolume が反映する
+    //（≤1.0=要素 .volume／>1.0=Web Audio GainNode で増幅）＝書き出し（FFmpeg volume=…）と一致（ADR-0026）。
+    const narrationVolume = resolveNarrationVolume(sc.audioMix, metaSnap.voiceSettings);
     const advance = (): void => {
       if (safeIdx < endIdx) setIdx(safeIdx + 1);
       else setPlaying(false);
@@ -255,13 +272,16 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           }
         };
         const u = narrationAudioById[lineAudioKey(sc.sceneId, segs[i].lineId)];
-        if (u && !mutedRef.current) {
+        if (u) {
+          // 常に生成し attachVolume（≤1.0=.volume／>1.0=GainNode）で音量/ミュートを制御＝書き出しと一致＋即時ミュート（#452 P1）。
           currentAudio = new Audio(u);
+          narrationAudioRef.current = currentAudio;
+          narrationCtlRef.current = attachVolume(audioCtxRef, currentAudio, narrationVolume, mutedRef.current);
           lineAudios.push(currentAudio);
-          // play() の解決＝再生開始。そこから窓を測って次へ。resolve/reject いずれでも一度だけ進む
-          // （reject 側は再生失敗ログも残す＝今後のデバッグ用・#370 レビュー対応）。
+          // play() の解決＝再生開始。そこから窓を測って次へ。resolve/reject いずれでも一度だけ進む。
           void currentAudio.play().then(scheduleNext, (e) => {
             console.warn("[PreviewScreen] 音声再生に失敗", e);
+            setNarrationPlayWarning(true); // 裏で失敗させず利用者に通知（§2-5・#452 P2）
             scheduleNext();
           });
         } else {
@@ -287,6 +307,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         cancelled = true;
         lineTimers.forEach((t) => window.clearTimeout(t));
         lineAudios.forEach((a) => a.pause());
+        narrationAudioRef.current = null;
+        narrationCtlRef.current = null;
         setActiveLine(0);
       };
     }
@@ -295,13 +317,21 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     const endTimer = window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000);
     let audio: HTMLAudioElement | undefined;
     const url = narrationAudioById[sc.sceneId];
-    if (url && !mutedRef.current) {
+    if (url) {
+      // 常に生成し attachVolume（≤1.0=.volume／>1.0=GainNode）で音量/ミュートを制御＝書き出しと一致＋即時ミュート（#452 P1）。
       audio = new Audio(url);
-      void audio.play().catch((e) => console.warn("[PreviewScreen] 音声再生に失敗", e));
+      narrationAudioRef.current = audio;
+      narrationCtlRef.current = attachVolume(audioCtxRef, audio, narrationVolume, mutedRef.current);
+      void audio.play().catch((e) => {
+        console.warn("[PreviewScreen] 音声再生に失敗", e);
+        setNarrationPlayWarning(true); // 裏で失敗させず利用者に通知（§2-5・#452 P2）
+      });
     }
     return () => {
       window.clearTimeout(endTimer);
       audio?.pause();
+      narrationAudioRef.current = null;
+      narrationCtlRef.current = null;
     };
     // deps はプリミティブのみ（#382）：scenes/narrationAudioById は上の getState でスナップショット読みするため
     // deps に含めない＝自動保存・声のBG生成での参照変化で再生を頭からやり直さない。endIdx は値が変わったときだけ再構成（範囲変更）。
@@ -321,9 +351,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       if (!url) { setBgmPlayWarning(true); return; } // 選択済みなのに再生元が解決できない（自分のBGM）→ 無音にせず通知
       const a = new Audio(url);
       a.loop = true;
-      a.volume = Math.min(1, bgmVolume); // HTMLAudio の音量は上限 1.0
-      a.muted = mutedRef.current;
       bgmAudioRef.current = a;
+      // 100%超（最大150%）も書き出しと一致させる（≤1.0=.volume／>1.0=GainNode・#452 P1）。
+      bgmCtlRef.current = attachVolume(audioCtxRef, a, bgmVolume, mutedRef.current);
       void a.play().catch((e) => {
         console.warn("[PreviewScreen] BGM再生に失敗", e);
         if (!cancelled) setBgmPlayWarning(true);
@@ -333,6 +363,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       cancelled = true;
       bgmAudioRef.current?.pause();
       bgmAudioRef.current = null;
+      bgmCtlRef.current = null;
     };
     // deps は源（bundledBgm/bgmAsset）と有効/音量のプリミティブ＝同じ曲が続く場面送りでは再起動せず鳴らし続ける。曲が変わる場面で切替。
   }, [playing, bgmEnabled, bgmVolume, bundledBgm, bgmAsset, meta.projectId]);
@@ -386,6 +417,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
               aria-label="再生"
               onClick={() => {
                 setBgmPlayWarning(false); // 再生のたびに前回の警告をクリア（effect 内同期 setState を避ける）
+                setNarrationPlayWarning(false); // ナレーション再生失敗の警告も同様にクリア（#452 P2）
                 if (safeIdx >= endIdx) setIdx(startIdx); // 範囲の終端にいたら先頭から再生
                 setPlaying(true);
               }}
@@ -414,6 +446,11 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           {bgmPlayWarning && (
             <div className="notice notice-warn mt" role="alert">
               <span>BGMを再生できませんでした。別のBGMを選ぶか、もう一度お試しください。</span>
+            </div>
+          )}
+          {narrationPlayWarning && (
+            <div className="notice notice-warn mt" role="alert">
+              <span>声を再生できませんでした。声を作り直すか、もう一度お試しください。</span>
             </div>
           )}
 
