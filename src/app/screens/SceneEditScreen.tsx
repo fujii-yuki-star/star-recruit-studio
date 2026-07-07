@@ -15,6 +15,7 @@ import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/fre
 import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { switchSceneTemplate } from "../../domain/project/sceneOps";
+import { pickableTemplatesForScene } from "../../domain/template/templateSelection";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { lineAudioKey, validateSceneLines } from "../../domain/project/narrationLines";
@@ -210,6 +211,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const setFontId = useProjectStore((s) => s.setFontId);
+  // プロジェクトの向き（ADR-0012）。見た目ピッカーを場面カテゴリ＋この向きに絞る（#415）。
+  const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
   // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
@@ -322,6 +325,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
   const template = selected ? templates.find((t) => t.templateId === selected.templateId) : undefined;
+  // 見た目ピッカーの選択肢：同じ場面カテゴリ＋同じ向きに絞る（ADR-0012・#415・純粋関数 pickableTemplatesForScene）。
+  const pickableTemplates = selected
+    ? pickableTemplatesForScene(templates, selected.sceneType, aspectRatio, template)
+    : [];
   // アクティブグループが消えたら（メンバー削除で空に・場面切替）描画上は非選択扱い＝stale な state を描画に出さない（effect 不要・#311 レビュー）。
   const activeGroupStillExists = activeGroupId != null && (selected?.groups ?? []).some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
@@ -1095,12 +1102,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   patch((s) => switchSceneTemplate(s, newTemplateId, newLayers));
                 }}
               >
-                {templates.map((t) => (
+                {pickableTemplates.map((t) => (
                   <option key={t.templateId} value={t.templateId}>
                     {t.name}
                   </option>
                 ))}
               </select>
+              {pickableTemplates.length <= 1 && (
+                <p className="field-hint" style={{ marginTop: 4 }}>
+                  この向き・場面に合う見た目パターンは、今はこれだけです。
+                </p>
+              )}
             </div>
 
             <div className="field">
