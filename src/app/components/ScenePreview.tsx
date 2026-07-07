@@ -100,12 +100,19 @@ function SlotVideo({
       audioRef.current = { ctx, gain };
       v.volume = 1; // 素の音量は最大＝最終音量は gain で作る
     } catch { /* 生成失敗は video.volume フォールバック */ }
-    return () => {
+    // 一度張ったグラフは **unmount まで畳まない**（下の cleanup effect で閉じる）。createMediaElementSource で
+    // 奪った要素の音声出力は仕様上 video.volume へ戻せないため、needsAmp が false に落ちても graph を維持し
+    // gain で音量を作り続ける（畳むと無音のまま復帰しない・レビュー P3・将来 ADR-0023 の同時表示対策）。
+  }, [needsAmp]);
+  // 要素の破棄（unmount）時にだけ AudioContext を閉じる。
+  useEffect(
+    () => () => {
       void audioRef.current?.ctx.close().catch(() => {});
       audioRef.current = null;
-    };
-  }, [needsAmp]);
-  // ミュート/音量の即時反映（再生を止めずに）。graph があれば gain、無ければ video.volume（1.0クランプ）。
+    },
+    [],
+  );
+  // ミュート/音量の即時反映（再生を止めずに）。graph があれば gain（全音量を担当）、無ければ video.volume（1.0クランプ）。
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
