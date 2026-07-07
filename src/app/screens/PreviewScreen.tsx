@@ -10,7 +10,9 @@ import { lineAudioKey } from "../../domain/project/narrationLines";
 import { lineSegments } from "../../domain/project/lineTimeline";
 import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
 import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
-import { findVideoSlot } from "../../renderer/export/findVideoSlot";
+import { findVideoSlots } from "../../renderer/export/findVideoSlot";
+import type { VideoSlotPlayback } from "../components/ScenePreview";
+import { buildVideoPlaybackSlots } from "./previewVideoSlots";
 import { assembleProject } from "../../domain/project/persistence";
 import { FPS } from "../../domain/constants";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
@@ -111,10 +113,44 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     [meta.timelineOverlay, current],
   );
   const template = current ? templates.find((t) => t.templateId === current.templateId) : undefined;
-  // 動画スロット有無（アニメ適用可否の判定に使う＝書き出しと同一条件でパリティ・ADR-0019）。
-  const hasVideoSlot = useMemo(
-    () => !!(current && template && findVideoSlot(current, template, (id) => assets.find((a) => a.assetId === id))),
+  // 現在場面の動画スロット（アニメ適用可否＝書き出しと同一条件・ADR-0019／再生中の実映像描画＝#432 に使う）。
+  const videoSlots = useMemo(
+    () => (current && template ? findVideoSlots(current, template, (id) => assets.find((a) => a.assetId === id)) : []),
     [current, template, assets],
+  );
+  const hasVideoSlot = videoSlots.length > 0;
+  // 再生用のクリップURL（asset://＝本体。サムネではない）を解決（#432）。非Tauri は null＝実映像なしでサムネのまま。
+  // 解決結果は **URL と relPath を対で**保持し、照合は現在スロットの clipRelPath 一致時のみ（#432 P2）。
+  // ＝場面送りで clipSig が変わり新URL解決が終わるまでの間、同じ slotLayerId（例 mainVisual）に前場面の旧URLがヒットして
+  //  一瞬前の動画を流す事故を防ぐ（relPath 不一致なら旧URLを使わない＝新解決までサムネのまま）。
+  const [clipUrlByLayer, setClipUrlByLayer] = useState<Record<string, { url: string; relPath: string }>>({});
+  const clipSig = useMemo(
+    () => JSON.stringify(videoSlots.map((s) => [s.slotLayerId, s.clipRelPath])),
+    [videoSlots],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const pid = meta.projectId;
+      if (!pid || videoSlots.length === 0) {
+        if (!cancelled) setClipUrlByLayer({});
+        return;
+      }
+      const entries = await Promise.all(
+        videoSlots.map(async (s) => [s.slotLayerId, s.clipRelPath, await assetDisplayUrl(pid, s.clipRelPath)] as const),
+      );
+      if (cancelled) return;
+      const map: Record<string, { url: string; relPath: string }> = {};
+      for (const [id, relPath, url] of entries) if (url) map[id] = { url, relPath };
+      setClipUrlByLayer(map); // 全置換＝当場面のスロットぶんだけ残す（前場面の残骸を消す）
+    })();
+    return () => { cancelled = true; };
+    // clipSig（スロットとクリップパスの実質変化）で解決＝場面送り/素材差し替えでのみ再解決。
+  }, [clipSig, meta.projectId]);
+  // ScenePreview へ渡す実映像再生情報（URL 解決済み **かつ 現在の clipRelPath と一致** するスロットのみ・#432 P2）。
+  const videoPlaybackSlots: VideoSlotPlayback[] = useMemo(
+    () => buildVideoPlaybackSlots(videoSlots, clipUrlByLayer),
+    [videoSlots, clipUrlByLayer],
   );
   // このアニメを実際に描くか＝書き出し（buildExportScenes）と共有の sceneAnimationActive で判定。
   // 掛け合いは行セグメントごとにアニメを焼く（③）。動画スロット併用場面のみ書き出しが静止扱いのため、
@@ -311,7 +347,15 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
         <div className="card">
-          <ScenePreview scene={current} template={template} activeLineIndex={activeLine} telops={activeTelops} timeSec={animTimeSec} animations={previewAnimations} />
+          <ScenePreview
+            scene={current}
+            template={template}
+            activeLineIndex={activeLine}
+            telops={activeTelops}
+            timeSec={animTimeSec}
+            animations={previewAnimations}
+            videoPlayback={{ playing, muted, slots: videoPlaybackSlots }}
+          />
 
           {/* 場面送り */}
           <div className="row-between mt">
