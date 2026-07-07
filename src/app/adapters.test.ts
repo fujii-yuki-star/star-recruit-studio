@@ -92,3 +92,30 @@ describe("buildPrecheckItems（動画の配置 / #434・ADR-0026）", () => {
     expect(item).toBeUndefined();
   });
 });
+
+describe("buildPrecheckItems（#400・項目 action が該当場面へ飛ぶ sceneId）", () => {
+  const videoAsset: Asset = { assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "assets/v.mp4" };
+  const scn = (id: string, over: Partial<Scene> = {}): Scene => ({ ...freeScene([]), sceneId: id, ...over });
+
+  it("声が無い項目は最初の該当場面 id を持つ（場面1固定でない）", () => {
+    const a = scn("a", { narration: { text: "", status: "generated" } });
+    const b = scn("b", { narration: { text: "", status: "none" } });
+    const voice = buildPrecheckItems([a, b], assets, [freeTemplate]).find((i) => i.id === "voice");
+    expect(voice?.severity).toBe("action");
+    expect(voice?.sceneId).toBe("b"); // 2つ目が最初の該当
+  });
+
+  it("問題が無い（ok）項目は sceneId を持たない", () => {
+    const a = scn("a", { narration: { text: "", status: "generated" } });
+    const voice = buildPrecheckItems([a], assets, [freeTemplate]).find((i) => i.id === "voice");
+    expect(voice?.severity).toBe("ok");
+    expect(voice?.sceneId).toBeUndefined();
+  });
+
+  it("動画の配置は最初の配置不能場面 id を持つ", () => {
+    const ok = freeScene([{ id: "slot_1", kind: "slot", x: 0, y: 0, w: 100, h: 100, assetId: "asset_v", fit: "cover" }]);
+    const bad = { ...freeScene([{ id: "slot_1", kind: "slot", x: 0, y: 0, w: 100, h: 100, assetId: "asset_v", fit: "cover", hidden: true } as unknown as NonNullable<Scene["freeLayout"]>[number]]), sceneId: "bad" } as Scene;
+    const item = buildPrecheckItems([{ ...ok, sceneId: "ok1" } as Scene, bad], [...assets, videoAsset], [freeTemplate]).find((i) => i.id === "videoPlacement");
+    expect(item?.sceneId).toBe("bad");
+  });
+});

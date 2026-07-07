@@ -78,33 +78,27 @@ export function warningsToDraftWarnings(warnings: Warning[]): DraftWarning[] {
 /** 公開前チェックの結果を、実際のシーン/素材から算出する（一部は自動チェック未対応の定型）。 */
 export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[]): PrecheckItem[] {
   const items: PrecheckItem[] = [];
+  const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
+  // 場面に紐づく項目は「最初の該当場面」を sceneId に持たせ、action で該当場面へ飛べるようにする（#400・editingSceneId）。
 
-  const noVoice = scenes.filter((s) => s.narration.status !== NARRATION_STATUS.generated).length;
+  const noVoiceScenes = scenes.filter((s) => s.narration.status !== NARRATION_STATUS.generated);
   items.push(
-    noVoice > 0
-      ? { id: "voice", label: "読み上げの声", detail: `${noVoice}つの場面で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成" }
+    noVoiceScenes.length > 0
+      ? { id: "voice", label: "読み上げの声", detail: `${noVoiceScenes.length}つの場面で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成", sceneId: noVoiceScenes[0].sceneId }
       : { id: "voice", label: "読み上げの声", detail: "すべての場面で声が作成済みです。", severity: "ok" },
   );
 
-  const longSubtitle = scenes.filter((s) => {
-    const template = templates.find((t) => t.templateId === s.templateId);
-    const max = template?.aiHint?.maxSubtitleLength ?? 60;
-    return (s.texts.subtitle?.length ?? 0) > max;
-  }).length;
+  const longSubtitleScenes = scenes.filter((s) => (s.texts.subtitle?.length ?? 0) > (templateOf(s)?.aiHint?.maxSubtitleLength ?? 60));
   items.push(
-    longSubtitle > 0
-      ? { id: "subtitle", label: "字幕の長さ", detail: `字幕が長い場面が${longSubtitle}つあります。短くすると読みやすくなります。`, severity: "action", action: "短くする" }
+    longSubtitleScenes.length > 0
+      ? { id: "subtitle", label: "字幕の長さ", detail: `字幕が長い場面が${longSubtitleScenes.length}つあります。短くすると読みやすくなります。`, severity: "action", action: "短くする", sceneId: longSubtitleScenes[0].sceneId }
       : { id: "subtitle", label: "字幕の長さ", detail: "字幕の長さは読みやすい範囲です。", severity: "ok" },
   );
 
-  const longLine = scenes.filter((s) => {
-    const template = templates.find((t) => t.templateId === s.templateId);
-    const max = template?.aiHint?.maxNarrationLength ?? 120;
-    return s.narration.text.length > max;
-  }).length;
+  const longLineScenes = scenes.filter((s) => s.narration.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120));
   items.push(
-    longLine > 0
-      ? { id: "line", label: "セリフの長さ", detail: `セリフが長い場面が${longLine}つあります。`, severity: "warning" }
+    longLineScenes.length > 0
+      ? { id: "line", label: "セリフの長さ", detail: `セリフが長い場面が${longLineScenes.length}つあります。`, severity: "warning", sceneId: longLineScenes[0].sceneId }
       : { id: "line", label: "セリフの長さ", detail: "セリフの長さは適切です。", severity: "ok" },
   );
 
@@ -126,14 +120,13 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   // FREE 場面が無いプロジェクトでは項目を出さない（通常プロジェクトのノイズを避ける）。
   const freeScenes = scenes.filter((s) => (s.freeLayout?.length ?? 0) > 0);
   if (freeScenes.length > 0) {
-    const badCount = freeScenes.filter((s) => {
-      const template = templates.find((t) => t.templateId === s.templateId);
-      const cv = template?.canvas ?? { width: WIDTH, height: HEIGHT };
+    const badScenes = freeScenes.filter((s) => {
+      const cv = templateOf(s)?.canvas ?? { width: WIDTH, height: HEIGHT };
       return validateFreeLayout(s.freeLayout ?? [], assets, cv).length > 0;
-    }).length;
+    });
     items.push(
-      badCount > 0
-        ? { id: "freeLayout", label: "自由配置の確認", detail: `自由に配置した場面が${badCount}つ、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning" }
+      badScenes.length > 0
+        ? { id: "freeLayout", label: "自由配置の確認", detail: `自由に配置した場面が${badScenes.length}つ、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning", sceneId: badScenes[0].sceneId }
         : { id: "freeLayout", label: "自由配置の確認", detail: "自由配置の場面は問題ありません。", severity: "ok" },
     );
   }
@@ -150,6 +143,8 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       detail: `場面${unplaceable.join("・")}で動画を配置できません。場面編集で動画を置き直してから書き出してください。`,
       severity: "action",
       action: "直す",
+      // 最初の該当場面（unplaceable は 1始まりの位置）へ飛ぶ。
+      sceneId: scenes[unplaceable[0] - 1]?.sceneId,
     });
   }
 
