@@ -135,6 +135,17 @@ export async function exportVideo(
   });
 }
 
+/** 書き出し開始を宣言する（#380）。準備（クリップ抽出）と本体を同一のキャンセルスコープに入れ、前回の中止要求を持ち越さない。
+ *  busy 表示（中止ボタン）が出る前に呼ぶこと。失敗は握りつぶす（Tauri 非検出時は何もしない）。 */
+export async function beginExport(): Promise<void> {
+  if (!canExport()) return;
+  try {
+    await invoke('begin_export');
+  } catch {
+    /* 初期化の失敗は無視（実害時は run_export 側の判定で保守的に停止する） */
+  }
+}
+
 /** 実行中の書き出しを中止する（走行中の ffmpeg を終了・#380）。副作用のみ（表示は呼び出し側が「中止」を把握）。
  *  失敗しても中止操作は続行できるよう握りつぶす（Tauri 非検出時は何もしない）。 */
 export async function cancelExport(): Promise<void> {

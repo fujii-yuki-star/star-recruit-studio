@@ -114,7 +114,7 @@
 | enum | 値 |
 |---|---|
 | `narration.status`（音声生成） | `none` / `pending` / `generated` / `failed` |
-| `renderStatus` | `idle` / `running` / `completed` / `failed` |
+| `renderStatus` | `idle` / `running` / `completed` / `failed` / `cancelled`（ユーザー中止・#380） |
 | `formality` | `casual` / `standard` / `formal` |
 | `voiceId` | `voicevox_zundamon`（既定）ほか。形式 `^[a-z0-9_]+$` |
 | `poseTag` | 自由文字列タグ（例 `smile` / `guide` / `bow` / `surprise` / `think` / `cheer`）。enum固定しない |

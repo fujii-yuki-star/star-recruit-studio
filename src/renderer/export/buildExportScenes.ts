@@ -157,6 +157,19 @@ export interface ExportOptions {
   fontFamilyFor?: (scene: Scene) => string;
   /** 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。未指定は既定（NARRATOR_CREDIT＝ずんだもん・#177）。 */
   credit?: string;
+  /**
+   * 中止要求の確認（#380）。true を返すと、場面境界・フレームループ・クリップ抽出の各所で ExportCancelledError を投げ、
+   * 長い準備処理でも押した中止が体感すぐ効くようにする（走行中の ffmpeg は別途 cancel_export が kill）。未指定＝中止判定なし。
+   */
+  shouldCancel?: () => boolean;
+}
+
+/** 書き出しの中止（#380）で投げる番兵。呼び出し側は中止として扱い、エラー表示しない。 */
+export class ExportCancelledError extends Error {
+  constructor() {
+    super('export cancelled by user');
+    this.name = 'ExportCancelledError';
+  }
 }
 
 /**
@@ -182,9 +195,14 @@ export async function buildExportScenes(
   // 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。export 全体で一定（#177）。
   const credit = opts.credit ?? NARRATOR_CREDIT;
   const out: ExportSceneData[] = [];
+  // 中止要求を各所で確認し、要求時は ExportCancelledError で抜ける（#380・長い準備でも押した中止がすぐ効く）。
+  const bail = (): void => {
+    if (opts.shouldCancel?.()) throw new ExportCancelledError();
+  };
   // out と 1:1 で対応する「書き出し対象になった場面」。トランジションの境界計算（後処理）に使う。
   const included: Scene[] = [];
   for (let i = 0; i < scenes.length; i += 1) {
+    bail(); // 場面境界（次の場面の重い描画に入る前）
     const scene = scenes[i];
     const template = templateById.get(scene.templateId);
     if (template) {
@@ -345,6 +363,7 @@ export async function buildExportScenes(
             const clipFrameByAsset = new Map<string, { dir: string; count: number }>();
             if (useRealFrames) {
               for (let s = 0; s < videoSlots.length; s += 1) {
+                bail(); // クリップ抽出の各スロット前（走行中の抽出 ffmpeg は cancel_export が kill）
                 const vs = videoSlots[s];
                 const assetId = slotAssetIdByLayer.get(vs.slotLayerId);
                 if (!assetId) continue; // 動画 id が引けないスロットはサムネ描画へフォールバック
@@ -358,6 +377,7 @@ export async function buildExportScenes(
               }
             }
             for (let f = 0; f < frameCount; f += 1) {
+              bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
               const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
               // アニメ区間のスロット画像＝この時刻の実フレーム（無ければ assetSrc＝サムネ）。プレビューと同じ layoutToSvg で描く。
               let frameAssetSrc = assetSrc;
@@ -461,6 +481,7 @@ export async function buildExportScenes(
             const aboveDir = `scene_vabove_${i}`;
             const midDirs = splitM.midSvgs.map((_, m) => `scene_vmid_${i}_${m}`);
             for (let f = 0; f < frameCount; f += 1) {
+              bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
               // 場面内絶対時刻でアニメ補間（プレビューと同一 layoutScene(t)＝パリティ）。下/中/上層に切り出して焼く。
               const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
               const fSplit = splitVideoSceneSvgMulti(frameLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit);
@@ -552,6 +573,7 @@ export async function buildExportScenes(
             const framesDir = stageAnimationFrame ? `scene_frames_${i}_${segIndex}` : undefined;
             const framesBase64: string[] = [];
             for (let f = 0; f < frameCount; f += 1) {
+              bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
               // 場面内の絶対時刻でアニメを補間（プレビューと同一 layoutScene(t)＝パリティ）。行字幕も同フレームに焼き込む。
               const frameLayout = layoutScene(scene, template, {
                 timeSec: spec.startSec + f / fps,

@@ -4,13 +4,13 @@ import { PageHead, Switch } from "../components/ui";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import type { ExportPhase } from "../store/projectStore";
-import { buildExportScenes } from "../../renderer/export/buildExportScenes";
+import { buildExportScenes, ExportCancelledError } from "../../renderer/export/buildExportScenes";
 import { buildTelopOverlays } from "../../renderer/export/telopOverlays";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
-import { canExport, cancelExport, clearExportFramesStage, exportVideo, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
+import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -107,6 +107,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setBgmWarning("");
     setOpenError(""); // 前回の「開けなかった/再生できなかった」表示を持ち越さない（新しい書き出しの成功に残らないように・#404 P2）
     setExportRun({ cancelling: false }); // 前回の中止要求を持ち越さない（#380）
+    // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
+    await beginExport();
     setProgress({ done: 0, total: scenes.length });
     setPhase("rendering");
     try {
@@ -164,7 +166,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : [];
         },
         (done, total) => setProgress({ done, total }),
-        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)), credit: creditForSpeaker(getVoicevoxSpeaker()) },
+        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, fontId)), credit: creditForSpeaker(getVoicevoxSpeaker()), shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
         // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay・sceneId 一致）。アニメ場面はフレーム列に焼かれる。
         (scene) => (timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
         // アニメ場面のフレームを1枚ずつステージングへ（framesBase64 を IPC に載せない・巨大場面の RangeError 回避）。
@@ -192,6 +194,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       const bgmRuns: BgmRunInput[] = [];
       let bgmLoadFailed = false; // 1区間でも読込失敗したか（一部失敗と全失敗を完了時に出し分ける）。
       for (const clip of mixClips) {
+        if (useProjectStore.getState().exportRun.cancelling) throw new ExportCancelledError(); // BGM準備中の中止も即反映（#380）
         let audioBase64: string | undefined;
         let fileExt = "mp3";
         if (clip.bundledBgmId) {
@@ -223,7 +226,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       setPhase("done");
     } catch (e) {
       // ユーザーが中止した場合は、エラーではなく「中止しました」で終える（走行中 ffmpeg は kill 済み・§2-5・#380）。
-      if (useProjectStore.getState().exportRun.cancelling) {
+      // 準備ループが投げる ExportCancelledError も同様に中止扱い（cancelling が読めない稀な競合への保険）。
+      if (useProjectStore.getState().exportRun.cancelling || e instanceof ExportCancelledError) {
         setPhase("cancelled");
       } else {
         // Tauriコマンドの失敗は文字列で reject される（Errorインスタンスではない）。

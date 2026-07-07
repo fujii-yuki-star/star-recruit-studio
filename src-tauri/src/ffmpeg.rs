@@ -1124,13 +1124,21 @@ pub fn cancel_running_export() {
 }
 
 /// 書き出し開始時にキャンセル状態を初期化する（前回のキャンセル要求・残 Child を持ち越さない）。
-/// EXPORT_IN_FLIGHT 取得後（＝この書き出しが唯一の走者）にのみ呼ぶこと。
+/// 1回の書き出し（準備＝stage_clip_frames と 本体＝export_video）が始まる**前**に呼び、以降を1つの
+/// キャンセル対象スコープにする（フロントが busy 表示前に begin_export で呼ぶ・二重書き出しは UI/EXPORT_IN_FLIGHT で排他）。
 fn reset_export_cancel() {
     EXPORT_CANCELLED.store(false, Ordering::SeqCst);
     if let Some(mut child) = lock_export_child().take() {
         let _ = child.kill();
         let _ = child.wait();
     }
+}
+
+/// 書き出し開始をフロントが宣言するコマンド（#380）。この時点から準備（クリップ抽出）も本体も同一の
+/// キャンセルスコープに入る＝前回の中止要求を持ち越さず、以降の run_export をまとめて中止できる。
+#[tauri::command]
+pub fn begin_export() {
+    reset_export_cancel();
 }
 
 /// ユーザー操作の「中止」から呼ぶコマンド（#380）。走行中の書き出し ffmpeg を終了する。
@@ -2077,7 +2085,7 @@ fn stage_clip_frames_impl(
         "0".into(),
         dir.join("frame_%05d.png").to_string_lossy().into_owned(),
     ];
-    run(&ffmpeg, &args).map_err(|e| {
+    run_export(&ffmpeg, &args).map_err(|e| {
         export_failure(
             format!("clip frames extract: {e}"),
             "動画の変換に失敗しました。もう一度お試しください。",
@@ -2484,8 +2492,8 @@ fn export_video_impl(
         ));
     }
     let _in_flight = ExportInFlightGuard;
-    // 前回のキャンセル要求・残 Child を持ち越さない（この書き出しが唯一の走者になった直後に初期化・#380）。
-    reset_export_cancel();
+    // キャンセルスコープの初期化は begin_export（準備＝クリップ抽出の前）で済ませる（#380）。ここでリセットすると
+    // 準備中に押された中止を取りこぼす（本体開始で flag が消える）ため、ここでは初期化しない。
 
     if scenes.is_empty() {
         return Err("書き出す場面がありません。".into());
