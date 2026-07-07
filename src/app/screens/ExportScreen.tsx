@@ -17,6 +17,7 @@ import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
+import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { ASSET_TYPE } from "../../domain/enums";
 import { isTemplateAsset } from "../../domain/template/templateAsset";
@@ -48,6 +49,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const [fileName, setFileName] = useState(projectName.trim() || "動画");
   const [size, setSize] = useState("fullhd");
   const [withSubtitle, setWithSubtitle] = useState(true);
+  // 完了後の導線に失敗したとき、押した操作に応じた文言を出す（§2-5・#404）。""＝正常／"reveal"＝保存先を開く失敗／"open"＝再生失敗。
+  const [openError, setOpenError] = useState<"" | "reveal" | "open">("");
   // BGM の入/切は bgmSettings.enabled を単一の真実とする（トグルで更新・保存で永続化）。未設定なら入。
   const withBgm = bgmSettings?.enabled ?? true;
   // 出力解像度（向き＋画質）。書き出し時に PNG をこの解像度で焼く。向きは videoSettings.aspectRatio から導出（ADR-0012）。
@@ -102,6 +105,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setMessage("");
     setResultPath("");
     setBgmWarning("");
+    setOpenError(""); // 前回の「開けなかった/再生できなかった」表示を持ち越さない（新しい書き出しの成功に残らないように・#404 P2）
     setProgress({ done: 0, total: scenes.length });
     setPhase("rendering");
     try {
@@ -372,9 +376,38 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                 </div>
               )}
               {phase === "done" && resultPath && (
-                <div className="notice notice-info mt">
-                  <span>保存先：{resultPath}</span>
-                </div>
+                <>
+                  <div className="notice notice-info mt">
+                    <span>保存先：{resultPath}</span>
+                  </div>
+                  {/* 完了後の導線（06_UI_SPEC §12 完了時・#404）：長いパスを自力で辿らずワンクリックで開ける。 */}
+                  <div className="row gap-sm mt" style={{ justifyContent: "center", flexWrap: "wrap" }}>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => { setOpenError(""); void revealSavedFile(resultPath).catch(() => setOpenError("reveal")); }}
+                    >
+                      保存した場所を開く
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => { setOpenError(""); void openSavedFile(resultPath).catch(() => setOpenError("open")); }}
+                    >
+                      動画を再生
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => onNavigate("home")}>
+                      ホームへ戻る
+                    </button>
+                  </div>
+                  {openError && (
+                    <div className="notice notice-warn mt" role="alert">
+                      <span>
+                        {openError === "open"
+                          ? `動画を再生できませんでした。ファイルが移動・削除されていないか、再生できるアプリがあるかご確認ください（保存先：${resultPath}）。`
+                          : `保存した場所を開けませんでした。ファイルが移動・削除されていないかご確認ください（保存先：${resultPath}）。`}
+                      </span>
+                    </div>
+                  )}
+                </>
               )}
               {phase === "done" && bgmWarning && (
                 <div className="notice notice-warn mt">
