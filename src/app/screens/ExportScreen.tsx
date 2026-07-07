@@ -105,6 +105,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setMessage("");
     setResultPath("");
     setBgmWarning("");
+    setOpenError(false); // 前回の「保存先を開けなかった」表示を持ち越さない（新しい書き出しの成功に残らないように・#404 P2）
     setProgress({ done: 0, total: scenes.length });
     setPhase("rendering");
     try {
