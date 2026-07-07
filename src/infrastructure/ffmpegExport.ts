@@ -135,6 +135,17 @@ export async function exportVideo(
   });
 }
 
+/** 実行中の書き出しを中止する（走行中の ffmpeg を終了・#380）。副作用のみ（表示は呼び出し側が「中止」を把握）。
+ *  失敗しても中止操作は続行できるよう握りつぶす（Tauri 非検出時は何もしない）。 */
+export async function cancelExport(): Promise<void> {
+  if (!canExport()) return;
+  try {
+    await invoke('cancel_export');
+  } catch {
+    /* 中止コマンド自体の失敗は無視（次段の中止判定・kill 済み分で実質停止する） */
+  }
+}
+
 /**
  * アニメ場面のフレームを1枚ステージングへ書き出す（巨大な base64 を1回の IPC に載せると JSON.stringify が
  * 文字列上限を超えて失敗するため、フレームは逐次に小さく保存し export_video には framesDir だけ渡す）。

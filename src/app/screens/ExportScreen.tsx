@@ -10,7 +10,7 @@ import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
-import { canExport, clearExportFramesStage, exportVideo, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
+import { canExport, cancelExport, clearExportFramesStage, exportVideo, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -62,7 +62,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // 再実行・プロジェクト破壊操作を全画面でブロックできる。ローカル setter は store 更新へ委譲（本体は不変）。
   const exportRun = useProjectStore((s) => s.exportRun);
   const setExportRun = useProjectStore((s) => s.setExportRun);
-  const { phase, progress, resultPath, message, bgmWarning } = exportRun;
+  const { phase, progress, resultPath, message, bgmWarning, cancelling } = exportRun;
   const setPhase = (phase: ExportPhase) => setExportRun({ phase });
   const setProgress = (progress: { done: number; total: number }) => setExportRun({ progress });
   const setResultPath = (resultPath: string) => setExportRun({ resultPath });
@@ -106,6 +106,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setResultPath("");
     setBgmWarning("");
     setOpenError(""); // 前回の「開けなかった/再生できなかった」表示を持ち越さない（新しい書き出しの成功に残らないように・#404 P2）
+    setExportRun({ cancelling: false }); // 前回の中止要求を持ち越さない（#380）
     setProgress({ done: 0, total: scenes.length });
     setPhase("rendering");
     try {
@@ -212,17 +213,28 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       }
       // 一部の区間だけ失敗（他は鳴る）と、全区間失敗（＝BGMなし）を区別して案内する（§2-5）。
       if (bgmLoadFailed) setBgmWarning(bgmRuns.length > 0 ? "partial" : "all");
+      // 準備（レンダリング）中に中止された場合は、エンコードを始めずに終える（#380）。
+      if (useProjectStore.getState().exportRun.cancelling) {
+        setPhase("cancelled");
+        return;
+      }
       const report = await exportVideo(built, fileName.trim() || "export", bgmRuns, pid || undefined, outputPath, telops);
       setResultPath(report.outputPath);
       setPhase("done");
     } catch (e) {
-      // Tauriコマンドの失敗は文字列で reject される（Errorインスタンスではない）。
-      // Rust側でユーザー向けに整えた文言（技術詳細は stderr へ記録済み）なので、そのまま表示する。
-      const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
-      setMessage(detail || "動画の保存に失敗しました。もう一度お試しください。");
-      setPhase("error");
-      console.error("[export] failed:", e);
+      // ユーザーが中止した場合は、エラーではなく「中止しました」で終える（走行中 ffmpeg は kill 済み・§2-5・#380）。
+      if (useProjectStore.getState().exportRun.cancelling) {
+        setPhase("cancelled");
+      } else {
+        // Tauriコマンドの失敗は文字列で reject される（Errorインスタンスではない）。
+        // Rust側でユーザー向けに整えた文言（技術詳細は stderr へ記録済み）なので、そのまま表示する。
+        const detail = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+        setMessage(detail || "動画の保存に失敗しました。もう一度お試しください。");
+        setPhase("error");
+        console.error("[export] failed:", e);
+      }
     } finally {
+      setExportRun({ cancelling: false }); // 中止フラグは1回の書き出しで完結（次回に持ち越さない・#380）
       // ステージングしたアニメフレームを掃除（成功/失敗いずれも）＝次回書き出しに残さない（#書き出しRangeError）。
       await clearExportFramesStage().catch(() => {});
     }
@@ -375,6 +387,18 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   場面 {progress.done} / {progress.total} を処理中
                 </div>
               )}
+              {/* 書き出しの中止（#380）：走行中の変換を止めて、すぐやり直せる。 */}
+              {busy && (
+                <div className="row mt" style={{ justifyContent: "center" }}>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => { setExportRun({ cancelling: true }); void cancelExport(); }}
+                    disabled={cancelling}
+                  >
+                    {cancelling ? "中止しています…" : "書き出しを中止"}
+                  </button>
+                </div>
+              )}
               {phase === "done" && resultPath && (
                 <>
                   <div className="notice notice-info mt">
@@ -424,6 +448,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {phase === "error" && (
             <div className="notice notice-warn" role="alert">
               <span>{message}</span>
+            </div>
+          )}
+
+          {phase === "cancelled" && (
+            <div className="notice notice-info" role="status">
+              <span>書き出しを中止しました。もう一度「動画を保存」を押すと、やり直せます。</span>
             </div>
           )}
 

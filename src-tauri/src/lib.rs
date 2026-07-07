@@ -233,6 +233,7 @@ pub fn run() {
             load_user_templates,
             delete_user_template,
             ffmpeg::export_video,
+            ffmpeg::cancel_export,
             ffmpeg::stage_export_frame,
             ffmpeg::clear_export_frames_stage,
             ffmpeg::stage_clip_frames,
@@ -262,6 +263,8 @@ pub fn run() {
                 app_handle
                     .state::<voicevox_engine::EngineState>()
                     .shutdown();
+                // 書き出し中に閉じても ffmpeg.exe を残さない（orphan 化防止・#380）。
+                ffmpeg::cancel_running_export();
             }
         });
 }
