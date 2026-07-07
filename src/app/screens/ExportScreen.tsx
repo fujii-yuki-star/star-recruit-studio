@@ -117,6 +117,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       const snapNarration = snap.narrationAudioById;
       const snapMeta = snap.meta;
       const snapFontId = snapMeta.videoSettings.fontId;
+      // 焼き込むクレジットのナレーター（appSettings・#381 P2）も開始時点で確定＝書き出し中に設定でナレーターを変えても、
+      // 映像/テロップ/BGM と食い違わない（store 外の設定なので snap と別に取る）。
+      const snapVoicevoxSpeaker = getVoicevoxSpeaker();
       // 出力時はプロジェクト（場面・素材）も保存する。
       await saveProject();
       // saveProject 後の projectId（新規時はここで採番済み）。動画クリップのパス解決に使う。
@@ -171,7 +174,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             : [];
         },
         (done, total) => setProgress({ done, total }),
-        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, snapFontId)), credit: creditForSpeaker(getVoicevoxSpeaker()), shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
+        { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, snapFontId)), credit: creditForSpeaker(snapVoicevoxSpeaker), shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
         // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay・sceneId 一致）。アニメ場面はフレーム列に焼かれる。
         (scene) => (snapMeta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
         // アニメ場面のフレームを1枚ずつステージングへ（framesBase64 を IPC に載せない・巨大場面の RangeError 回避）。
