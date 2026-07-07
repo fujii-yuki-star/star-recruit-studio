@@ -3,6 +3,7 @@
 import { ASSET_TYPE, NARRATION_STATUS, type SceneCategory } from "../domain/enums";
 import { HEIGHT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
+import { unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import type { Asset, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -135,6 +136,21 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
         ? { id: "freeLayout", label: "自由配置の確認", detail: `自由に配置した場面が${badCount}つ、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning" }
         : { id: "freeLayout", label: "自由配置の確認", detail: "自由配置の場面は問題ありません。", severity: "ok" },
     );
+  }
+
+  // 動画の配置（#434・ADR-0026）：動画スロットがあるのにレイアウトへ配置できない場面（分割失敗＝内部不整合や
+  // スロット/グループの非表示など）を**場面つきで**警告する。これを見逃すと書き出しが停止する（黙って静止画化しない）。
+  // 問題がある場面が無ければ項目自体を出さない（通常プロジェクトのノイズを避ける・freeLayout チェックと同方針）。
+  const templateById = new Map(templates.map((t) => [t.templateId, t] as const));
+  const unplaceable = unplaceableVideoSceneNumbers(scenes, templateById, (id) => assets.find((a) => a.assetId === id));
+  if (unplaceable.length > 0) {
+    items.push({
+      id: "videoPlacement",
+      label: "動画の配置",
+      detail: `場面${unplaceable.join("・")}で動画を配置できません。場面編集で動画を置き直してから書き出してください。`,
+      severity: "action",
+      action: "直す",
+    });
   }
 
   // 誤字脱字・誇大表現・個人情報の写り込みは自動チェック未対応のため、人の目での確認を促す
