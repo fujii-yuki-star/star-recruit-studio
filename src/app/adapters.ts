@@ -79,28 +79,35 @@ export function warningsToDraftWarnings(warnings: Warning[]): DraftWarning[] {
 export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[]): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
-  // 場面に紐づく項目は「最初の該当場面」を sceneId に持たせ、action で該当場面へ飛べるようにする（#400・editingSceneId）。
+  // 場面に紐づく項目は「どの場面か」を番号で列挙し（#403・どの場面が問題か示す）、action がある項目は最初の該当場面へ
+  // 飛べるよう sceneId を持たせる（#400）。番号は scenes の位置（1始まり）＝利用者が見る場面番号。多いと先頭8件＋「ほか N 件」。
+  const fmtScenes = (nums: number[]): string =>
+    nums.length <= 8 ? `場面${nums.join("・")}` : `場面${nums.slice(0, 8).join("・")} ほか${nums.length - 8}件`;
+  const offending = (pred: (s: Scene) => boolean): { nums: number[]; firstId?: string } => {
+    const hits: { id: string; n: number }[] = [];
+    scenes.forEach((s, i) => { if (pred(s)) hits.push({ id: s.sceneId, n: i + 1 }); });
+    return { nums: hits.map((h) => h.n), firstId: hits[0]?.id };
+  };
 
-  const noVoiceScenes = scenes.filter((s) => s.narration.status !== NARRATION_STATUS.generated);
+  const voice = offending((s) => s.narration.status !== NARRATION_STATUS.generated);
   items.push(
-    noVoiceScenes.length > 0
-      ? { id: "voice", label: "読み上げの声", detail: `${noVoiceScenes.length}つの場面で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成", sceneId: noVoiceScenes[0].sceneId }
+    voice.nums.length > 0
+      ? { id: "voice", label: "読み上げの声", detail: `${fmtScenes(voice.nums)}で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成", sceneId: voice.firstId }
       : { id: "voice", label: "読み上げの声", detail: "すべての場面で声が作成済みです。", severity: "ok" },
   );
 
-  const longSubtitleScenes = scenes.filter((s) => (s.texts.subtitle?.length ?? 0) > (templateOf(s)?.aiHint?.maxSubtitleLength ?? 60));
+  const subtitle = offending((s) => (s.texts.subtitle?.length ?? 0) > (templateOf(s)?.aiHint?.maxSubtitleLength ?? 60));
   items.push(
-    longSubtitleScenes.length > 0
-      ? { id: "subtitle", label: "字幕の長さ", detail: `字幕が長い場面が${longSubtitleScenes.length}つあります。短くすると読みやすくなります。`, severity: "action", action: "短くする", sceneId: longSubtitleScenes[0].sceneId }
+    subtitle.nums.length > 0
+      ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: "短くする", sceneId: subtitle.firstId }
       : { id: "subtitle", label: "字幕の長さ", detail: "字幕の長さは読みやすい範囲です。", severity: "ok" },
   );
 
-  // セリフの長さ／自由配置は warning のみで action ボタンが無い＝場面へ飛ばないため sceneId は付けない
-  // （使われない値を仮に持たせない・CLAUDE.md「将来要件のために設計しない」）。action 化する際に付与する。
-  const longLine = scenes.filter((s) => s.narration.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120)).length;
+  // セリフの長さ／自由配置は warning のみで action ボタンが無いため sceneId は持たせない（場面番号は内容に列挙する）。
+  const line = offending((s) => s.narration.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120));
   items.push(
-    longLine > 0
-      ? { id: "line", label: "セリフの長さ", detail: `セリフが長い場面が${longLine}つあります。`, severity: "warning" }
+    line.nums.length > 0
+      ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。`, severity: "warning" }
       : { id: "line", label: "セリフの長さ", detail: "セリフの長さは適切です。", severity: "ok" },
   );
 
@@ -122,14 +129,14 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   // FREE 場面が無いプロジェクトでは項目を出さない（通常プロジェクトのノイズを避ける）。
   const freeScenes = scenes.filter((s) => (s.freeLayout?.length ?? 0) > 0);
   if (freeScenes.length > 0) {
-    // freeLayout も warning のみ（action ボタン無し）＝sceneId は付けない（上の line と同方針）。
-    const badCount = freeScenes.filter((s) => {
+    const badFree = offending((s) => {
+      if ((s.freeLayout?.length ?? 0) === 0) return false;
       const cv = templateOf(s)?.canvas ?? { width: WIDTH, height: HEIGHT };
       return validateFreeLayout(s.freeLayout ?? [], assets, cv).length > 0;
-    }).length;
+    });
     items.push(
-      badCount > 0
-        ? { id: "freeLayout", label: "自由配置の確認", detail: `自由に配置した場面が${badCount}つ、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning" }
+      badFree.nums.length > 0
+        ? { id: "freeLayout", label: "自由配置の確認", detail: `${fmtScenes(badFree.nums)}が、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning" }
         : { id: "freeLayout", label: "自由配置の確認", detail: "自由配置の場面は問題ありません。", severity: "ok" },
     );
   }
@@ -143,7 +150,7 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
     items.push({
       id: "videoPlacement",
       label: "動画の配置",
-      detail: `場面${unplaceable.join("・")}で動画を配置できません。場面編集で動画を置き直してから書き出してください。`,
+      detail: `${fmtScenes(unplaceable)}で動画を配置できません。場面編集で動画を置き直してから書き出してください。`,
       severity: "action",
       action: "直す",
       // 最初の該当場面（unplaceable は 1始まりの位置）へ飛ぶ。

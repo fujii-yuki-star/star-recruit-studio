@@ -113,6 +113,20 @@ describe("buildPrecheckItems（#400・項目 action が該当場面へ飛ぶ sce
     expect(sub?.sceneId).toBe("b");
   });
 
+  it("内容に該当場面の番号を列挙する（どの場面か示す・#403）", () => {
+    const a = scn("a", { narration: { text: "x", status: "generated" } });
+    const b = scn("b", { narration: { text: "x", status: "none" } });
+    const c = scn("c", { narration: { text: "x", status: "none" } });
+    const voice = buildPrecheckItems([a, b, c], assets, [freeTemplate]).find((i) => i.id === "voice");
+    expect(voice?.detail).toContain("場面2・3"); // 2つ目・3つ目
+  });
+
+  it("該当場面が多いときは先頭8件＋「ほかN件」に丸める", () => {
+    const scenes = Array.from({ length: 10 }, (_, i) => scn(`s${i}`, { narration: { text: "x", status: "none" } }));
+    const voice = buildPrecheckItems(scenes, assets, [freeTemplate]).find((i) => i.id === "voice");
+    expect(voice?.detail).toContain("ほか2件"); // 10件 → 先頭8＋ほか2
+  });
+
   it("問題が無い（ok）項目は sceneId を持たない", () => {
     const a = scn("a", { narration: { text: "", status: "generated" } });
     const voice = buildPrecheckItems([a], assets, [freeTemplate]).find((i) => i.id === "voice");
