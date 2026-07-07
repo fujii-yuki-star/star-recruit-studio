@@ -236,7 +236,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               onClick={() => setSelectedId(t.templateId)}
             >
               <span className="action-card-title">{t.name}</span>
-              <span className="action-card-desc">{categoryLabel[t.category]}{isUserTemplate(t.templateId) ? "・マイテンプレ" : ""}</span>
+              <span className="action-card-desc">{categoryLabel[t.category]}{isUserTemplate(t.templateId) ? "・自分の見た目" : ""}</span>
             </button>
           ))}
         </div>
@@ -277,7 +277,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           {/* マイテンプレ（ユーザーテンプレ）の作成・編集（ADR-0017）。編集は専用画面へ遷移（#271）。 */}
           <h3 className="field-label">この見た目を編集</h3>
           <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`}>
-            {isUserCurrent ? "マイテンプレ" : "標準（編集するには複製します）"}
+            {isUserCurrent ? "自分の見た目" : "標準（編集するには複製します）"}
           </span>
           <div className="col gap-sm mt">
             {isUserCurrent && (
@@ -290,7 +290,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             {/* 削除（マイテンプレのみ） */}
             {isUserCurrent && (confirmDelete ? (
               <div className="row gap-sm" style={{ alignItems: "center" }}>
-                <span className="text-sm">このマイテンプレを削除しますか？</span>
+                <span className="text-sm">この見た目パターンを削除しますか？</span>
                 <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
                 <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
               </div>
@@ -300,7 +300,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
                 style={{ color: "var(--color-danger)", alignSelf: "flex-start" }}
                 onClick={() => setConfirmDelete(true)}
               >
-                このマイテンプレを削除
+                この見た目パターンを削除
               </button>
             ))}
           </div>

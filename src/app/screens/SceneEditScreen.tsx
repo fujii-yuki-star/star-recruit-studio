@@ -1039,7 +1039,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {!isFree && (
               <CollapsibleSection title="文字">
               {sceneTextKeys.length === 0 && (
-                <p className="field-hint" style={{ marginTop: 0 }}>このテンプレートは文字を表示しません。</p>
+                <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
               )}
               {sceneTextKeys.map((key) => {
                 // 見出し・URL は1行、本文・字幕・キャプションは複数行で編集する。
@@ -1194,7 +1194,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <div className="field" style={{ marginTop: 6 }}>
                           <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
                           <FitSelect
-                            inheritLabel="テンプレの既定に合わせる"
+                            inheritLabel="見た目の既定に合わせる"
                             value={selected.slotFits?.[layer.id]}
                             onChange={(fit) =>
                               patch((s) => {
