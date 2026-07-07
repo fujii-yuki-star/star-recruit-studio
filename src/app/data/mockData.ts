@@ -265,6 +265,8 @@ export interface PrecheckItem {
   detail: string;
   severity: "ok" | "warning" | "action";
   action?: string;
+  /** action を押したときに開く対象場面（#400・editingSceneId 経由）。場面に紐づく項目のみ。未設定＝先頭場面。 */
+  sceneId?: string;
 }
 
 export const precheckItems: PrecheckItem[] = [

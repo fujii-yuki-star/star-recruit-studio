@@ -18,7 +18,7 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
-  const { status, scenes, assets, templates, autoGenerateIfSafe } = useProjectStore();
+  const { status, scenes, assets, templates, autoGenerateIfSafe, setEditingSceneId } = useProjectStore();
   // 書き出し能力（標準方式 h264_mf の可用性）の事前検知（#120）。Tauri 環境でのみ取得。
   const [capability, setCapability] = useState<ExportCapability | null>(null);
 
@@ -106,7 +106,14 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                   <td className="text-pretty">{item.detail}</td>
                   <td>
                     {item.action ? (
-                      <button className="btn btn-ghost btn-icon text-sm" onClick={() => onNavigate("scene-edit")}>
+                      <button
+                        className="btn btn-ghost btn-icon text-sm"
+                        onClick={() => {
+                          // 該当場面を指定してから場面編集へ（#400）。場面に紐づかない項目は先頭場面へ（従来）。
+                          if (item.sceneId) setEditingSceneId(item.sceneId);
+                          onNavigate("scene-edit");
+                        }}
+                      >
                         {item.action}
                       </button>
                     ) : (
