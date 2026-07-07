@@ -61,7 +61,7 @@ export function sceneToDraftRow(
     scene: sceneTypeLabel[scene.sceneType],
     material: asset?.displayName ?? "（未設定）",
     line: scene.narration.text,
-    look: template?.name ?? scene.templateId,
+    look: template?.name ?? "見た目が見つかりません",
     materialType,
     // NarrationStatus と VoiceStatus は同一の値集合
     voiceStatus: scene.narration.status,

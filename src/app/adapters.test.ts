@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Asset, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
-import { buildPrecheckItems } from "./adapters";
+import { buildPrecheckItems, sceneToDraftRow } from "./adapters";
 
 const freeTemplate: Template = {
   schemaVersion: "1.0",
@@ -165,5 +165,17 @@ describe("buildPrecheckItems（#400・項目 action が該当場面へ飛ぶ sce
     const bad = { ...freeScene([{ id: "slot_1", kind: "slot", x: 0, y: 0, w: 100, h: 100, assetId: "asset_v", fit: "cover", hidden: true } as unknown as NonNullable<Scene["freeLayout"]>[number]]), sceneId: "bad" } as Scene;
     const item = buildPrecheckItems([{ ...ok, sceneId: "ok1" } as Scene, bad], [...assets, videoAsset], [freeTemplate]).find((i) => i.id === "videoPlacement");
     expect(item?.sceneId).toBe("bad");
+  });
+});
+
+describe("sceneToDraftRow（見た目バッジの §2-3 フォールバック・#387）", () => {
+  it("見た目パターンが見つかればその名前を出す", () => {
+    expect(sceneToDraftRow(freeScene(undefined), [], [freeTemplate], []).look).toBe("自由配置");
+  });
+
+  it("見つからない場合は内部ID（tmpl_*）を出さず日本語定型に落とす", () => {
+    const row = sceneToDraftRow(freeScene(undefined), [], [], []); // templates 空＝解決不能
+    expect(row.look).toBe("見た目が見つかりません");
+    expect(row.look).not.toContain("free_canvas_v1"); // 内部IDが UI に漏れない（§2-3）
   });
 });
