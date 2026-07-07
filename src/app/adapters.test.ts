@@ -98,8 +98,9 @@ describe("buildPrecheckItems（#400・項目 action が該当場面へ飛ぶ sce
   const scn = (id: string, over: Partial<Scene> = {}): Scene => ({ ...freeScene([]), sceneId: id, ...over });
 
   it("声が無い項目は最初の該当場面 id を持つ（場面1固定でない）", () => {
-    const a = scn("a", { narration: { text: "", status: "generated" } });
-    const b = scn("b", { narration: { text: "", status: "none" } });
+    // 本文がある未生成場面のみ対象（sceneNeedsVoice＝本文空は「声不要」）。
+    const a = scn("a", { narration: { text: "セリフ", status: "generated" } });
+    const b = scn("b", { narration: { text: "セリフ", status: "none" } });
     const voice = buildPrecheckItems([a, b], assets, [freeTemplate]).find((i) => i.id === "voice");
     expect(voice?.severity).toBe("action");
     expect(voice?.sceneId).toBe("b"); // 2つ目が最初の該当
@@ -111,6 +112,45 @@ describe("buildPrecheckItems（#400・項目 action が該当場面へ飛ぶ sce
     const sub = buildPrecheckItems([a, b], assets, [freeTemplate]).find((i) => i.id === "subtitle");
     expect(sub?.severity).toBe("action");
     expect(sub?.sceneId).toBe("b");
+  });
+
+  it("掛け合い場面：全行生成済みなら声チェックは ok（narration.status を見ない・#403 P1）", () => {
+    const dlg = scn("d", {
+      narration: { text: "", status: "none" }, // narration.status は none のまま（掛け合いは更新されない）
+      lines: [
+        { lineId: "line_001", text: "やあ", status: "generated" },
+        { lineId: "line_002", text: "こんにちは", status: "generated" },
+      ],
+    } as Partial<Scene>);
+    const voice = buildPrecheckItems([dlg], assets, [freeTemplate]).find((i) => i.id === "voice");
+    expect(voice?.severity).toBe("ok"); // 全行生成済み＝声OK（従来は narration.status=none で要対応のまま残った）
+  });
+
+  it("掛け合い場面：未生成行があれば声チェックは要対応で該当場面", () => {
+    const dlg = scn("d", {
+      narration: { text: "", status: "none" },
+      lines: [
+        { lineId: "line_001", text: "やあ", status: "generated" },
+        { lineId: "line_002", text: "まだ", status: "none" },
+      ],
+    } as Partial<Scene>);
+    const voice = buildPrecheckItems([dlg], assets, [freeTemplate]).find((i) => i.id === "voice");
+    expect(voice?.severity).toBe("action");
+    expect(voice?.sceneId).toBe("d");
+  });
+
+  it("内容に該当場面の番号を列挙する（どの場面か示す・#403）", () => {
+    const a = scn("a", { narration: { text: "x", status: "generated" } });
+    const b = scn("b", { narration: { text: "x", status: "none" } });
+    const c = scn("c", { narration: { text: "x", status: "none" } });
+    const voice = buildPrecheckItems([a, b, c], assets, [freeTemplate]).find((i) => i.id === "voice");
+    expect(voice?.detail).toContain("場面2・3"); // 2つ目・3つ目
+  });
+
+  it("該当場面が多いときは先頭8件＋「ほかN件」に丸める", () => {
+    const scenes = Array.from({ length: 10 }, (_, i) => scn(`s${i}`, { narration: { text: "x", status: "none" } }));
+    const voice = buildPrecheckItems(scenes, assets, [freeTemplate]).find((i) => i.id === "voice");
+    expect(voice?.detail).toContain("ほか2件"); // 10件 → 先頭8＋ほか2
   });
 
   it("問題が無い（ok）項目は sceneId を持たない", () => {

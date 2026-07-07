@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
 import {
-  lineAudioKey, lineFromNarration, lineVoiceStem, sceneLines,
+  lineAudioKey, lineFromNarration, lineVoiceStem, sceneLines, sceneNeedsVoice,
   validateSceneLines, withLineStatus, withLineVoicePath,
 } from './narrationLines';
 import type { Narration, NarrationLine, Scene } from './types';
@@ -59,6 +59,36 @@ describe('sceneLines', () => {
     const lines = sceneLines(sceneWith({ lines: [] }));
     expect(lines).toHaveLength(1);
     expect(lines[0].lineId).toBe('line_001');
+  });
+});
+
+describe('sceneNeedsVoice（#403 P1・掛け合い/単一を統一した実効判定）', () => {
+  const mkLine = (over: Partial<NarrationLine>): NarrationLine =>
+    ({ lineId: 'line_001', text: 'やあ', status: NARRATION_STATUS.none, ...over });
+
+  it('単一 narration：本文あり・未生成 → true', () => {
+    expect(sceneNeedsVoice(sceneWith({ narration: { ...narration, text: 'x', status: NARRATION_STATUS.none } }))).toBe(true);
+  });
+  it('単一 narration：生成済み → false', () => {
+    expect(sceneNeedsVoice(sceneWith({ narration: { ...narration, text: 'x', status: NARRATION_STATUS.generated } }))).toBe(false);
+  });
+  it('本文が空（空白のみ）なら未生成でも false（読む物が無い）', () => {
+    expect(sceneNeedsVoice(sceneWith({ narration: { ...narration, text: '  ', status: NARRATION_STATUS.none } }))).toBe(false);
+  });
+  it('掛け合い：全行 generated → false（narration.status=none でも見ない・#403 P1）', () => {
+    const scene = sceneWith({
+      narration: { ...narration, status: NARRATION_STATUS.none },
+      lines: [mkLine({ lineId: 'line_001', status: NARRATION_STATUS.generated }), mkLine({ lineId: 'line_002', status: NARRATION_STATUS.generated })],
+    });
+    expect(sceneNeedsVoice(scene)).toBe(false);
+  });
+  it('掛け合い：本文ありの未生成行が1つでもあれば true', () => {
+    const scene = sceneWith({ lines: [mkLine({ lineId: 'line_001', status: NARRATION_STATUS.generated }), mkLine({ lineId: 'line_002', status: NARRATION_STATUS.none })] });
+    expect(sceneNeedsVoice(scene)).toBe(true);
+  });
+  it('掛け合い：未生成でも本文が空の行は対象外', () => {
+    const scene = sceneWith({ lines: [mkLine({ lineId: 'line_001', status: NARRATION_STATUS.generated }), mkLine({ lineId: 'line_002', text: '', status: NARRATION_STATUS.none })] });
+    expect(sceneNeedsVoice(scene)).toBe(false);
   });
 });
 

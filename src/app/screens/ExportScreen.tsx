@@ -316,9 +316,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           </div>
 
           <div className="row-between mt-lg">
-            <button className="btn btn-ghost" onClick={() => onNavigate("preview")} disabled={busy}>
+            <button className="btn btn-ghost" onClick={() => onNavigate("precheck")} disabled={busy}>
               <ArrowLeftIcon size={18} />
-              戻る
+              公開前チェックへ戻る
             </button>
             <div className="row gap-sm">
               <button

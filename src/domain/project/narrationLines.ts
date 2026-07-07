@@ -1,7 +1,7 @@
 // 掛け合い：場面のセリフ列（scene.lines）の一元アクセサ＋意味検証（ADR-0015・#180）。純粋関数（副作用なし）。
 // 全消費側（store/描画/書き出し/プレビュー/台本/precheck）は scene.narration を直接見ず sceneLines を通す。
 // scene.lines があればそれを、無ければ単一 narration を1行に写して返す＝旧データ（lines 不在）も同一に扱える。
-import type { NarrationStatus } from '../enums';
+import { NARRATION_STATUS, type NarrationStatus } from '../enums';
 import { characterForSpeaker } from '../voice/voiceCatalog';
 import type { Narration, NarrationLine, Scene, Warning } from './types';
 
@@ -25,6 +25,16 @@ export function lineFromNarration(narration: Narration): NarrationLine {
 /** 場面の実効セリフ列。scene.lines があればそれ、無ければ単一 narration を1行とみなす（ADR-0015）。 */
 export function sceneLines(scene: Scene): NarrationLine[] {
   return scene.lines && scene.lines.length > 0 ? scene.lines : [lineFromNarration(scene.narration)];
+}
+
+/**
+ * この場面に「まだ声が作られていない実効行」があるか（掛け合い・単一 narration 共通・ADR-0015）。
+ * 本文（trim 非空）のある行が1つでも未生成（status!==generated）なら true。本文が無い行は対象外（読む物が無い）。
+ * `generateAllNarrations`（一括生成の対象判定）と precheck の「読み上げの声」チェックがこの単一判定を共有する
+ * ＝掛け合いでも「声を作成」→precheck が同じ実効状態を見る（#403・同概念同挙動）。scene.narration.status は直接見ない。
+ */
+export function sceneNeedsVoice(scene: Scene): boolean {
+  return sceneLines(scene).some((l) => l.text.trim().length > 0 && l.status !== NARRATION_STATUS.generated);
 }
 
 function warn(code: string, message: string, field: string, severity: Warning['severity']): Warning {
