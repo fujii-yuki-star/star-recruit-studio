@@ -38,7 +38,7 @@ import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../d
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
-import { lineAudioKey, lineVoiceStem, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
+import { lineAudioKey, lineVoiceStem, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
@@ -1326,12 +1326,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isGeneratingNarration: true });
     try {
       // 未生成（none/pending/failed）のみ対象。生成済みは個別の「声を作り直す」で上書きする。
-      // 掛け合い（明示 lines）は本文非空・未生成の行が1つでもあれば対象（ADR-0015 PR-C2）。
-      const needsGen = (s: Scene): boolean =>
-        s.lines && s.lines.length > 0
-          ? s.lines.some((l) => l.text.trim().length > 0 && l.status !== NARRATION_STATUS.generated)
-          : s.narration.text.trim().length > 0 && s.narration.status !== NARRATION_STATUS.generated;
-      const ids = get().scenes.filter(needsGen).map((s) => s.sceneId);
+      // 掛け合い・単一 narration 共通の実効判定（sceneNeedsVoice）を precheck と共有＝同概念同挙動（#403）。
+      const ids = get().scenes.filter(sceneNeedsVoice).map((s) => s.sceneId);
       await Promise.all(ids.map((id) => get().generateNarration(id, { fromBulk: true })));
     } finally {
       set({ isGeneratingNarration: false });

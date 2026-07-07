@@ -1,8 +1,9 @@
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
-import { ASSET_TYPE, NARRATION_STATUS, type SceneCategory } from "../domain/enums";
+import { ASSET_TYPE, type SceneCategory } from "../domain/enums";
 import { HEIGHT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
+import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import type { Asset, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
@@ -89,7 +90,9 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
     return { nums: hits.map((h) => h.n), firstId: hits[0]?.id };
   };
 
-  const voice = offending((s) => s.narration.status !== NARRATION_STATUS.generated);
+  // 掛け合い・単一 narration を統一して見る（sceneNeedsVoice＝実効行の未生成・#403 P1）。scene.narration.status は直接見ない
+  // ＝掛け合いは全行生成済みでも narration.status が更新されないため「要対応」に残り、「声を作成」が no-op に見えるバグを防ぐ。
+  const voice = offending(sceneNeedsVoice);
   items.push(
     voice.nums.length > 0
       ? { id: "voice", label: "読み上げの声", detail: `${fmtScenes(voice.nums)}で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成", sceneId: voice.firstId }
@@ -104,7 +107,9 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   );
 
   // セリフの長さ／自由配置は warning のみで action ボタンが無いため sceneId は持たせない（場面番号は内容に列挙する）。
-  const line = offending((s) => s.narration.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120));
+  // 掛け合いは本文が lines[].text 側にあるため、実効行（sceneLines）で各行の長さを見る（scene.narration.text 直参照は
+  // 掛け合いで空＝未検出になる・ADR-0015）。単一 narration は sceneLines が1行に写すので従来と同一。
+  const line = offending((s) => sceneLines(s).some((l) => l.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120)));
   items.push(
     line.nums.length > 0
       ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。`, severity: "warning" }
