@@ -60,8 +60,8 @@ export interface VideoSceneSplitMulti {
   midSvgs: string[];
   /** 最上の静止層（透過・字幕/クレジット）。zIndex >= 末尾スロット。 */
   aboveSvg: string;
-  /** 動画スロット（zIndex 昇順＝下→上）。矩形と層 id。 */
-  slots: { layerId: string; rect: Rect }[];
+  /** 動画スロット（zIndex 昇順＝下→上）。矩形と層 id（回転/不透明度はプレビュー実映像の video 要素へ反映・#432）。 */
+  slots: { layerId: string; rect: Rect; rotation?: number; opacity?: number }[];
 }
 
 /**
@@ -76,6 +76,8 @@ export function splitVideoSceneSvgMulti(
   includeItem?: (item: LayoutItem) => boolean,
   fontFamily?: string,
   credit: string = NARRATOR_CREDIT,
+  // responsive: SVG ルートを 100% にしてコンテナへフィット（プレビューの実映像3層描画用・#432）。書き出しは既定 false（固定寸法でラスタライズ）。
+  responsive: boolean = false,
 ): VideoSceneSplitMulti | null {
   const found = slotIds.map((id) =>
     layout.items.find((it) => it.id === id && it.kind === 'image' && it.role === 'slot'),
@@ -91,6 +93,7 @@ export function splitVideoSceneSvgMulti(
     assetSrc,
     itemFilter: (it) => notSlot(it) && it.zIndex < zs[0],
     fontFamily,
+    responsive,
   });
   // static_k（1..N-1）: zs[k-1] <= z < zs[k]（動画 k-1 と k の間・透過）。「== スロット zIndex」は上側の帯へ。
   const midSvgs: string[] = [];
@@ -101,6 +104,7 @@ export function splitVideoSceneSvgMulti(
         transparent: true,
         itemFilter: (it) => notSlot(it) && it.zIndex >= zs[k - 1] && it.zIndex < zs[k],
         fontFamily,
+        responsive,
       }),
     );
   }
@@ -111,11 +115,17 @@ export function splitVideoSceneSvgMulti(
     itemFilter: (it) => notSlot(it) && it.zIndex >= zs[zs.length - 1],
     credit,
     fontFamily,
+    responsive,
   });
   return {
     belowSvg,
     midSvgs,
     aboveSvg,
-    slots: slots.map((s) => ({ layerId: s.id, rect: { x: s.x, y: s.y, w: s.w, h: s.h } })),
+    slots: slots.map((s) => ({
+      layerId: s.id,
+      rect: { x: s.x, y: s.y, w: s.w, h: s.h },
+      rotation: s.rotation,
+      opacity: s.kind === 'image' ? s.opacity : undefined,
+    })),
   };
 }

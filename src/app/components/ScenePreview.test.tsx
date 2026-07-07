@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { ScenePreview } from "./ScenePreview";
+import type { VideoSlotPlayback } from "./ScenePreview";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 
@@ -41,5 +42,62 @@ describe("ScenePreview 掛け合いの「間」（#386・A案＝間は字幕な�
   it("間（activeLineIndex<0）は行の字幕を描かない（間は字幕なし・A案）", () => {
     const { container } = render(<ScenePreview scene={scene} template={template} activeLineIndex={-1} />);
     expect(container.textContent).not.toContain("ゆうこの字幕テスト");
+  });
+});
+
+// #432・仕上がり確認で動画スロットを実映像で再生：再生中のみ video 要素を出す（停止中はサムネSVGのまま）。
+describe("ScenePreview 実映像再生（#432）", () => {
+  // FREE テンプレの slot 要素＝layoutScene が role='slot' の image item（id=要素id）を作る。
+  const freeTemplate = {
+    schemaVersion: "1.0", templateId: "tpl_free", name: "free", category: "free",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 }, layers: [],
+  } as unknown as Template;
+  const videoScene = {
+    sceneId: "sv", templateId: "tpl_free", sceneType: "opening", durationSec: 8, texts: {},
+    freeLayout: [{ id: "slot_1", kind: "slot", assetId: "asset_v", x: 100, y: 100, w: 800, h: 600, fit: "cover", zIndex: 1 }],
+  } as unknown as Scene;
+  const slot = (over: Partial<VideoSlotPlayback> = {}): VideoSlotPlayback => ({
+    slotLayerId: "slot_1", clipUrl: "blob:clip", clipStartSec: 0, speed: 1, fit: "cover",
+    useOriginalAudio: true, originalVolume: 0.4, ...over,
+  });
+
+  it("再生中＋URL解決済みは video 要素を出す（クリップURL・スロット矩形へ配置）", () => {
+    const { container } = render(
+      <ScenePreview scene={videoScene} template={freeTemplate} videoPlayback={{ playing: true, muted: false, slots: [slot()] }} />,
+    );
+    const video = container.querySelector("video");
+    expect(video).not.toBeNull();
+    expect(video?.getAttribute("src")).toBe("blob:clip");
+    // スロット矩形（x100/w800 of 1920）へ % 配置。
+    expect(video?.style.left).toBe(`${(100 / 1920) * 100}%`);
+    expect(video?.style.width).toBe(`${(800 / 1920) * 100}%`);
+  });
+
+  it("停止中は video 要素を出さない（従来のサムネSVGのまま）", () => {
+    const { container } = render(
+      <ScenePreview scene={videoScene} template={freeTemplate} videoPlayback={{ playing: false, muted: false, slots: [slot()] }} />,
+    );
+    expect(container.querySelector("video")).toBeNull();
+  });
+
+  it("URL未解決（clipUrl空）は実映像にせずサムネのまま", () => {
+    const { container } = render(
+      <ScenePreview scene={videoScene} template={freeTemplate} videoPlayback={{ playing: true, muted: false, slots: [slot({ clipUrl: "" })] }} />,
+    );
+    expect(container.querySelector("video")).toBeNull();
+  });
+
+  it("ミュート中は video もミュート", () => {
+    const { container } = render(
+      <ScenePreview scene={videoScene} template={freeTemplate} videoPlayback={{ playing: true, muted: true, slots: [slot()] }} />,
+    );
+    expect(container.querySelector("video")?.muted).toBe(true);
+  });
+
+  it("元音声OFFのスロットは video をミュート（元音声を鳴らさない）", () => {
+    const { container } = render(
+      <ScenePreview scene={videoScene} template={freeTemplate} videoPlayback={{ playing: true, muted: false, slots: [slot({ useOriginalAudio: false })] }} />,
+    );
+    expect(container.querySelector("video")?.muted).toBe(true);
   });
 });
