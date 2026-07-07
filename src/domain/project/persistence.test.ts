@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createOverlayClipId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
-  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject,
+  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject, ProjectLoadError,
 } from './persistence';
 import type { ProjectHeader } from './persistence';
+import type { Part, Scene } from './types';
 
 function header(overrides: Partial<ProjectHeader> = {}): ProjectHeader {
   return {
@@ -16,6 +17,17 @@ function header(overrides: Partial<ProjectHeader> = {}): ProjectHeader {
     videoSettings: defaultVideoSettings(),
     companyInfo: { companyName: '株式会社サンプル' },
     voiceSettings: defaultVoiceSettings(),
+    ...overrides,
+  };
+}
+
+// 正典スキーマ（Scene の必須：sceneId/partId/order/sceneType/templateId/durationSec/assetRefs/character/texts/narration/warnings）を
+// 満たす最小 Scene。移行テストで場面を差し替える際に、読込時検証（#416）を通る構造にする（旧版フィールドは overrides で足す）。
+function validScene(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'tpl_x',
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+    narration: { text: '', voiceId: null, status: 'none' }, warnings: [],
     ...overrides,
   };
 }
@@ -382,10 +394,10 @@ describe('parseProjectDoc', () => {
       ...assembleProject(header(), [], [], []),
       schemaVersion: '1.4',
       scenes: [
-        { sceneId: 'scene_001', fontId: 'kaitou-yokoku-gothic' },
-        { sceneId: 'scene_002', fontId: 'old-font' },
-        { sceneId: 'scene_003', fontId: null },
-        { sceneId: 'scene_004' },
+        validScene({ sceneId: 'scene_001', fontId: 'kaitou-yokoku-gothic' }),
+        validScene({ sceneId: 'scene_002', fontId: 'old-font' }),
+        validScene({ sceneId: 'scene_003', fontId: null }),
+        validScene({ sceneId: 'scene_004' }),
       ],
     } as Record<string, unknown>;
     const back = parseProjectDoc(JSON.stringify(doc));
@@ -407,6 +419,57 @@ describe('parseProjectDoc', () => {
     const doc = { ...assembleProject(header(), [], [], []) } as Record<string, unknown>;
     delete doc.scenes;
     expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();
+  });
+
+  // 読込時スキーマ検証（#416・11 §8 V2）。構造破損（型不正・必須欠落）は拒否、内容制約違反は読み込む（作りかけを弾かない）。
+  describe('読込時スキーマ検証（#416）', () => {
+    // 拒否は「ProjectLoadError かつ §2-5 文言」まで固定する（生 TypeError を UI に出さない・#416 P1/P2）。
+    const expectLoadReject = (doc: unknown): void => {
+      let err: unknown;
+      try {
+        parseProjectDoc(JSON.stringify(doc));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(ProjectLoadError);
+      expect((err as Error).message).toContain('別のプロジェクトを選んでください');
+    };
+
+    it('場面の型不正（durationSec が文字列）は読込拒否', () => {
+      expectLoadReject({ ...assembleProject(header(), [], [], [validScene({ durationSec: 'abc' }) as unknown as Scene]) });
+    });
+    it('場面の必須欠落（partId 無し）は読込拒否', () => {
+      const scene = validScene();
+      delete scene.partId;
+      expectLoadReject({ ...assembleProject(header(), [], [], [scene as unknown as Scene]) });
+    });
+    it('videoSettings の必須欠落（fps 無し）は読込拒否', () => {
+      const doc = { ...assembleProject(header(), [], [], []) } as Record<string, unknown>;
+      const vs = { ...(doc.videoSettings as Record<string, unknown>) };
+      delete vs.fps;
+      doc.videoSettings = vs;
+      expectLoadReject(doc);
+    });
+    it('videoSettings が非オブジェクト（"bad"）でも生 TypeError にせず読込拒否（#416 P1）', () => {
+      const doc = { ...assembleProject(header(), [], [], []), videoSettings: 'bad' } as Record<string, unknown>;
+      expectLoadReject(doc);
+    });
+    it('scenes に null 要素があっても生 TypeError にせず読込拒否（#416 P1）', () => {
+      const doc = { ...assembleProject(header(), [], [], []), scenes: [null] } as Record<string, unknown>;
+      expectLoadReject(doc);
+    });
+    it('内容制約違反（companyName 空＝作りかけの新規）は拒否せず読み込む', () => {
+      const doc = { ...assembleProject(header({ companyInfo: { companyName: '' } }), [], [], []) };
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
+    it('内容制約違反（projectName 80字超＝#411 の入力防御対象）は拒否せず読み込む', () => {
+      const doc = { ...assembleProject(header({ projectName: 'あ'.repeat(120) }), [], [], []) };
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
+    it('正常な完全プロジェクトは読み込める（回帰なし）', () => {
+      const doc = { ...assembleProject(header(), [], [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] } as unknown as Part], [validScene() as unknown as Scene]) };
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
   });
 });
 

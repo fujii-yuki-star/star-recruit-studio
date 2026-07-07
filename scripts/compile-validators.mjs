@@ -1,8 +1,10 @@
 // 正典スキーマを ajv で「事前コンパイル」し、実行時 eval（new Function）無しの検証関数を生成する（#156）。
 // これにより本番 CSP から script-src 'unsafe-eval' を外せる。生成物は gitignore＝dev/build/test/typecheck の
 // pre フックで毎回最新を生成するためドリフトしない（package.json 参照）。
-// 対象は「フロントで実行時検証する」2スキーマのみ（project は CI の validate-schemas.mjs で検証＝対象外）。
-// ai-video-plan/template は "format" 不使用・他ファイル $ref なし＝formats 不要・自己完結で standalone 可能。
+// 対象は「フロントで実行時検証する」3スキーマ（ai-video-plan / template / project・#416 で project を追加）。
+// ai-video-plan/template は "format" 不使用・他ファイル $ref なし。project は date-time format を使うが、
+// strict:false で未登録 format は no-op（無視）＝ajv-formats 無しでも standalone 自己完結（type:string は効く・#416）。
+// いずれも他ファイル $ref なし（$defs は自己内包）。
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,16 +17,20 @@ const loadSchema = (rel) => JSON.parse(readFileSync(join(root, rel), 'utf8'));
 
 const aiVideoPlanSchema = loadSchema('docs/yuko_recruit_docs/schemas/ai-video-plan.schema.json');
 const templateSchema = loadSchema('docs/yuko_recruit_docs/schemas/template.schema.json');
+const projectSchema = loadSchema('docs/yuko_recruit_docs/schemas/project.schema.json');
 
 // validateVideoPlan/templateFs と同設定（draft 2020-12・strict:false・allErrors）。
-// code.source/esm で ESM の standalone 検証関数を出力する。formats は両スキーマ未使用のため付けない。
+// code.source/esm で ESM の standalone 検証関数を出力する。project の date-time format は strict:false で無視される
+// （読込時の網＝型/必須/enum/範囲を検証・#416。date-time の書式一致は CI の validate-schemas.mjs で担保）。
 const ajv = new Ajv2020({ code: { source: true, esm: true }, allErrors: true, strict: false });
 ajv.addSchema(aiVideoPlanSchema);
 ajv.addSchema(templateSchema);
+ajv.addSchema(projectSchema);
 
 const rawCode = standaloneCode(ajv, {
   validateAiVideoPlan: aiVideoPlanSchema.$id,
   validateTemplate: templateSchema.$id,
+  validateProject: projectSchema.$id,
 });
 
 // ajv standalone は esm:true でも runtime helper を CJS の `require(...)` で出すことがある（例: ucs2length）。
