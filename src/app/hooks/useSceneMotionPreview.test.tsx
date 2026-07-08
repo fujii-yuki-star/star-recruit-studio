@@ -52,6 +52,11 @@ describe("useSceneMotionPreview（場面編集の動き再生・#408 Part 1）",
     expect(result.current.animActive).toBe(false);
   });
 
+  it("テンプレ未解決（template 未定）の場面は animActive=false（押せるのに無反応なボタンを出さない・#408 レビュー）", () => {
+    const { result } = renderHook(() => useSceneMotionPreview(scene(), undefined, assets, [anim()]));
+    expect(result.current.animActive).toBe(false);
+  });
+
   it("動きがある場面は animActive=true。停止中は静止＝timeSec 0・animations 空（編集時に要素を隠さない）", () => {
     const { result } = renderHook(() => useSceneMotionPreview(scene(), template, assets, [anim()]));
     expect(result.current.animActive).toBe(true);
@@ -91,5 +96,18 @@ describe("useSceneMotionPreview（場面編集の動き再生・#408 Part 1）",
     rerender({ s: scene({ sceneId: "scene_002" }), a: [anim({ id: "anim_002", sceneId: "scene_002" })] });
     expect(result.current.playing).toBe(false);
     expect(result.current.timeSec).toBe(0);
+  });
+
+  it("再生中にアニメが適用外になったら停止する（ボタンが消えても止まり・オーバーレイが戻る・#408 レビュー）", () => {
+    const s = scene();
+    const { result, rerender } = renderHook(
+      ({ a }: { a: ElementAnimation[] }) => useSceneMotionPreview(s, template, assets, a),
+      { initialProps: { a: [anim()] } },
+    );
+    act(() => result.current.play());
+    expect(result.current.playing).toBe(true);
+    rerender({ a: [] }); // 再生中に「動き」を外す＝適用外に落とす
+    expect(result.current.playing).toBe(false);
+    expect(result.current.previewAnimations).toEqual([]);
   });
 });

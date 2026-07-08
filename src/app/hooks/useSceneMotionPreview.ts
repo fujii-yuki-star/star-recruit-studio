@@ -52,14 +52,22 @@ export function useSceneMotionPreview(
         : false,
     [scene, template, assets],
   );
-  const animActive = !!scene && sceneAnimationActive(scene, sceneAnimations, hasVideoSlot);
+  // template 未解決（見た目パターンが見つからない）場面は ScenePreview が「表示する場面がありません」になり、
+  // 再生しても何も起きない（§2-5「押せるのに無反応」）。よって template が無ければアニメがあっても再生対象にしない。
+  const animActive = !!scene && !!template && sceneAnimationActive(scene, sceneAnimations, hasVideoSlot);
 
   const [playing, setPlaying] = useState(false);
   const [timeSec, setTimeSec] = useState(0);
-  // 別の場面へ切り替えたら再生を止めて頭出しする（描画中に state を正す React 推奨パターン＝effect 内 setState を避ける・LooksScreen と同型）。
+  // 描画中に state を正す React 推奨パターン（effect 内 setState を避ける・LooksScreen と同型）。
   const [syncId, setSyncId] = useState(sceneId);
   if (syncId !== sceneId) {
+    // 別の場面へ切り替えたら再生を止めて頭出しする。
     setSyncId(sceneId);
+    setPlaying(false);
+    setTimeSec(0);
+  } else if (playing && !animActive) {
+    // 再生中にアニメが適用外になった（「動き」を外した／動画×掛け合いで不可になった／テンプレ未解決になった 等）ら停止する。
+    // 放置すると playing=true のまま：再生ボタンは消えて止められず、FREE 編集オーバーレイも隠れたままになる（#408 レビュー・ADR-0026 ④）。
     setPlaying(false);
     setTimeSec(0);
   }
