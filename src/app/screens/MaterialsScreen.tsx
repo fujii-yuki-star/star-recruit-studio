@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
+import type { ScreenId } from "../data/mockData";
 import { ASSET_TYPE } from "../../domain/enums";
 import { scenesUsingAsset } from "../../domain/project/assetUsage";
 import { useProjectStore } from "../store/projectStore";
@@ -7,6 +8,8 @@ import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { PageHead, Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
+import { ClipDetailControls } from "../components/ClipDetailControls";
+import { UsedScenesRow } from "../components/UsedScenesRow";
 import {
   PhotoIcon,
   VideoIcon,
@@ -58,8 +61,8 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
   );
 }
 
-export function MaterialsScreen() {
-  const { assets, scenes, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting } = useProjectStore();
+export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
+  const { assets, scenes, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -77,8 +80,11 @@ export function MaterialsScreen() {
   );
   const visible = materials.filter((a) => filter === "all" || a.assetType === filter);
   const selected = materials.find((a) => a.assetId === selectedId) ?? visible[0] ?? materials[0];
-  // 削除確認で「使っている場面数」を出す（空欄になる影響を事前に伝える・#383）。
-  const usedSceneCount = selected ? scenesUsingAsset(scenes, selected.assetId).length : 0;
+  // この素材を使っている場面（逆引き・#406）。削除確認の件数（#383）と「使用場面」バッジで共有する。
+  const usedScenes = selected ? scenesUsingAsset(scenes, selected.assetId) : [];
+  const usedSceneCount = usedScenes.length;
+  // 使用場面バッジを押したら、その場面の編集を開く（editingSceneId 機構＝#400・DraftScreen と同方式）。
+  const jumpToScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
 
   function addTag() {
     const v = newTag.trim();
@@ -207,6 +213,14 @@ export function MaterialsScreen() {
               <AssetThumb type={selected.assetType} src={assetSrcById[selected.assetId]} size={28} />
             </div>
 
+            {/* 動画クリップの調整（使う範囲・速度・元音声）。設定は Asset 単位（正典 11/$defs/Clip）で場面編集と共用（#406）。 */}
+            {selected.assetType === ASSET_TYPE.video && (
+              <ClipDetailControls
+                asset={selected}
+                patchClip={(p) => updateAsset(selected.assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }))}
+              />
+            )}
+
             {isVisual(selected.assetType) && (
               <div className="field">
                 <label className="field-label">画像</label>
@@ -304,6 +318,13 @@ export function MaterialsScreen() {
                 onChange={(v) => updateAsset(selected.assetId, (a) => ({ ...a, isPublicChecked: v }))}
                 label="公開チェック済み"
               />
+            </div>
+
+            {/* 使用場面の逆引き（#406）：この素材を使っている場面へ1クリックで飛べる。削除の前に影響範囲も分かる。 */}
+            <hr className="divider" />
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field-label">使用場面</label>
+              <UsedScenesRow scenes={usedScenes} onJump={jumpToScene} emptyText="まだどの場面でも使われていません。" />
             </div>
 
             {confirmDeleteId === selected.assetId ? (
