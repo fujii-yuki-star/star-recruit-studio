@@ -226,6 +226,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // タイムライン/公開前チェックの「場面を直す」）で残留値が誤採用される（#400 レビュー）。null/不在は先頭場面へ。
   // subscribe せず getState で読む＝破棄時の再描画を避ける（selectedId は state 保持されるので消えない）。
   const [selectedId, setSelectedId] = useState(() => useProjectStore.getState().editingSceneId ?? "");
+  // 表示時間は編集中だけローカルドラフト（どの場面のか＝sceneId 付き）で持ち、store には blur で clamp 済みの有効値だけ commit する。
+  // ＝入力途中の範囲外値（1/2/16 等）が自動保存（useAutoSave）や書き出し前保存で保存されるのを防ぐ（#411 P1）。
+  // sceneId を持つことで、場面を切り替えたら（sceneId 不一致で）自動的にドラフトが無効化される（effect 不要・別場面の値を見せない）。
+  const [durationDraft, setDurationDraft] = useState<{ sceneId: string; value: string } | null>(null);
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
   // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
@@ -1845,20 +1849,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 min={SCENE_MIN_DURATION_SEC}
                 max={SCENE_MAX_DURATION_SEC}
                 step={1}
-                value={selected.durationSec}
-                onChange={(e) => {
-                  if (e.target.value === "") return; // 空は無視（前の値を保持＝0を保存しない・#411）
-                  const v = Number(e.target.value);
-                  if (Number.isNaN(v)) return;
-                  // 0/負は即下限へ（0秒尺を保存させない）。正の値は入力途中として許し、範囲は blur で整える。
-                  patch((s) => ({ ...s, durationSec: v <= 0 ? SCENE_MIN_DURATION_SEC : v }));
-                }}
-                onBlur={(e) => {
-                  const v = Number(e.target.value);
-                  const clamped = Number.isNaN(v)
-                    ? SCENE_MIN_DURATION_SEC
-                    : Math.min(SCENE_MAX_DURATION_SEC, Math.max(SCENE_MIN_DURATION_SEC, v));
+                value={durationDraft?.sceneId === selected.sceneId ? durationDraft.value : selected.durationSec}
+                onFocus={() => setDurationDraft({ sceneId: selected.sceneId, value: String(selected.durationSec) })}
+                onChange={(e) => setDurationDraft({ sceneId: selected.sceneId, value: e.target.value })} // 途中値は store に入れない＝範囲外値を自動保存しない（#411 P1）
+                onBlur={() => {
+                  // 確定時のみ [SCENE_MIN, SCENE_MAX] にクランプして commit。空/不正は元の値を保持（変更しない）。
+                  const raw = durationDraft?.sceneId === selected.sceneId ? durationDraft.value : "";
+                  const v = Number(raw);
+                  const clamped =
+                    raw.trim() === "" || Number.isNaN(v)
+                      ? selected.durationSec
+                      : Math.min(SCENE_MAX_DURATION_SEC, Math.max(SCENE_MIN_DURATION_SEC, v));
                   if (clamped !== selected.durationSec) patch((s) => ({ ...s, durationSec: clamped }));
+                  setDurationDraft(null);
                 }}
               />
             </div>

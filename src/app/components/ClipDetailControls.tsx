@@ -26,7 +26,7 @@ export function ClipDetailControls({
   return (
     <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: 6 }}>
       <p className="text-sm text-muted" style={{ margin: "0 0 6px" }}>
-        ▶ 動画素材です。確認画面では枠が空に見えますが、書き出すと動画が入ります。
+        ▶ 動画素材です。仕上がり確認では、再生すると動画が流れます（停止中は表示されません）。書き出しにも動画が入ります。
         {dur != null && `（長さ：約${formatDuration(dur)}）`}
       </p>
 
