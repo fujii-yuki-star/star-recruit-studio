@@ -26,6 +26,7 @@ import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlide
 import { useProjectStore } from "../store/projectStore";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useAudioPreview } from "../hooks/useAudioPreview";
+import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -49,6 +50,8 @@ import {
   SaveIcon,
   TrashIcon,
   ChevronRightIcon,
+  PlayIcon,
+  StopIcon,
 } from "../components/icons";
 
 interface SceneEditProps {
@@ -330,6 +333,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
   const template = selected ? templates.find((t) => t.templateId === selected.templateId) : undefined;
+  // 「動き」（簡易アニメ・ADR-0019）をこの場で再生確認する（#408 Part 1・仕上がり確認への往復をなくす）。
+  // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
+  const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
   // 見た目ピッカーの選択肢：同じ場面カテゴリ＋同じ向きに絞る（ADR-0012・#415）。不一致の現行テンプレ（旧データ等）は
   // 有効な選択肢（options）と分け、mismatchedCurrent として選択不可で表示＝整合済みに見せない（#415 P2）。
   const { options: pickableOptions, mismatchedCurrent } = selected
@@ -941,11 +947,25 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           {/* 中央: 仕上がり確認 + 場面カード */}
           <div className="col gap" style={{ overflow: "hidden" }}>
             <div className="editor-col grow" style={{ overflow: "auto" }}>
-              <h2 className="field-label">仕上がり確認</h2>
+              <div className="row-between" style={{ alignItems: "center" }}>
+                <h2 className="field-label" style={{ margin: 0 }}>仕上がり確認</h2>
+                {/* この場面に「動き」があるときだけ再生ボタンを出す（無ければ何も再生できないので出さない・#408 Part 1）。 */}
+                {motionPreview.animActive && (
+                  <button
+                    className="btn btn-ghost text-sm btn-icon"
+                    onClick={() => (motionPreview.playing ? motionPreview.stop() : motionPreview.play())}
+                  >
+                    {motionPreview.playing ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                    {motionPreview.playing ? "停止" : "動きを再生"}
+                  </button>
+                )}
+              </div>
               {/* オーバーレイは ScenePreview の fit 箱内に重なる（#273）。editPopover は position:fixed のため外側 relative は不要。 */}
-              <ScenePreview scene={selected} template={template}>
+              {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
+              <ScenePreview scene={selected} template={template} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
                 {/* FREE 場面：プレビュー（fit箱）の子に重ねる＝縦型でも実寸一致でドラッグ移動・角リサイズが追従（#273・Phase 4b）。 */}
-                {isFree && template && (
+                {/* 再生中は編集用オーバーレイ（選択枠・ハンドル）を隠す＝動く要素と設計位置のハンドルがズレて見えるのを避ける。 */}
+                {isFree && template && !motionPreview.playing && (
                   <FreeLayoutOverlay
                     freeLayout={freeLayout}
                     canvasW={template.canvas.width}
