@@ -7,6 +7,7 @@ import {
 } from "../../domain/constants";
 import { Switch } from "./ui";
 import { FitSelect } from "./FitSelect";
+import { NumberField } from "./NumberField";
 
 type ClipPatch = Partial<NonNullable<Asset["clip"]>>;
 
@@ -46,16 +47,15 @@ export function ClipDetailControls({
         <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
           使う範囲（秒）
         </label>
+        {/* 開始/終了は共有 NumberField（#459・blur 確定・空/NaN は元値へ／終了は空でクリア＝最後まで）。 */}
         <div className="row gap-sm" style={{ alignItems: "center" }}>
-          <input
-            className="input"
-            type="number"
+          <NumberField
+            value={clip?.startSec ?? 0}
             min={0}
             max={dur ?? undefined}
             step={0.1}
-            value={clip?.startSec ?? 0}
-            onChange={(e) => {
-              const start = clampClipTime(Number(e.target.value), dur);
+            onChange={(v) => {
+              const start = clampClipTime(v, dur);
               // 開始が終了を超えたら終了をクリア（=最後まで）して無効状態を防ぐ。
               const p: ClipPatch = { startSec: start };
               if (clip?.endSec != null && start > clip.endSec) p.endSec = undefined;
@@ -63,22 +63,14 @@ export function ClipDetailControls({
             }}
           />
           <span className="text-sm text-muted">〜</span>
-          <input
-            className="input"
-            type="number"
+          <NumberField
+            value={clip?.endSec}
             min={0}
             max={dur ?? undefined}
             step={0.1}
             placeholder="最後まで"
-            value={clip?.endSec ?? ""}
-            onChange={(e) =>
-              patchClip({
-                endSec:
-                  e.target.value === ""
-                    ? undefined
-                    : clampClipTime(Number(e.target.value), dur, clip?.startSec ?? 0),
-              })
-            }
+            onChange={(v) => patchClip({ endSec: clampClipTime(v, dur, clip?.startSec ?? 0) })}
+            onClear={() => patchClip({ endSec: undefined })}
           />
         </div>
         <p className="field-hint">終了を空にすると最後まで使います。</p>
