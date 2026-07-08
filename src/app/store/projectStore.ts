@@ -437,7 +437,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // トーン: ウィザードで選んだ toneSettings.tone（未設定なら既定 DEFAULT_TONE・§2-7 で一本化）。
         tone: meta.toneSettings?.tone ?? DEFAULT_TONE,
         additionalNotes: meta.additionalNotes,
-        templates: buildTemplateSummaries(templates),
+        templates: buildTemplateSummaries(templates, meta.videoSettings.aspectRatio),
         assets,
         yukoPoseTags: buildYukoPoseTags(assets),
       });
