@@ -600,7 +600,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         <>
           <div className="field" style={{ marginBottom: 6 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>文字</label>
-            <input className="input" value={el.text ?? ""} onChange={(e) => patchFreeEl(el.id, { text: e.target.value })} />
+            <input className="input" value={el.text ?? ""} {...textGroup} onChange={(e) => patchFreeEl(el.id, { text: e.target.value })} />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6 }}>
             <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
@@ -1764,6 +1764,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 ref={lineRef}
                 className="textarea"
                 value={selected.narration.text}
+                {...textGroup}
                 onChange={(e) =>
                   patch((s) => ({
                     ...s,
