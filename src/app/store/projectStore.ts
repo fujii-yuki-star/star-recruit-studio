@@ -265,9 +265,9 @@ interface ProjectState {
   _historyGroupDepth: number;
   /** グループ中でまだ snapshot 未記録か（内部）。最初の実変更で記録＝未変更 focus/pointerdown では履歴を消費しない（#389）。 */
   _historyGroupPending: boolean;
-  /** 文書を変える操作の「適用前」に呼び、現在状態を past へ積む（グループ中は積まない・transient 変更では呼ばない）。 */
+  /** 文書を変える操作の「適用前」に呼び、現在状態を past へ積む（グループ中は最初の実変更の1回だけ積む・transient 変更では呼ばない）。 */
   pushHistory: () => void;
-  /** 連続操作の開始/終了（開始で1回だけ「編集前」を記録し、連続中の細かい更新は積まない）。 */
+  /** 連続操作の開始/終了。開始では記録せず（遅延）、グループ中の最初の pushHistory＝最初の実変更で1回だけ「編集前」を記録する。 */
   beginHistoryGroup: () => void;
   endHistoryGroup: () => void;
   /** 取り消し（直前の編集前へ戻す）。 */

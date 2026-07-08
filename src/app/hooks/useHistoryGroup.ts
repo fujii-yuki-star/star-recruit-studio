@@ -1,7 +1,10 @@
 // 連続編集を1つの Undo 履歴にまとめるためのハンドラ束（#389）。
 // テキスト欄の1キーストロークやスライダーの1tick ごとに pushHistory していると、履歴上限（50）を食い潰し
-// Undo が1文字ずつしか戻らない。beginHistoryGroup/endHistoryGroup で囲むと、グループ中の pushHistory は
-// no-op になり「フォーカス中の入力」「1回のドラッグ」が1履歴に合成される（ADR-0020・FREE ドラッグと同機構）。
+// Undo が1文字ずつしか戻らない。beginHistoryGroup/endHistoryGroup で囲むと、グループ中は**最初の実変更で1回だけ**
+// 記録し以降の pushHistory は no-op になるため、「フォーカス中の入力」「1回のドラッグ」が1履歴に合成される
+// （未変更 focus/pointerdown では記録しない＝遅延記録）。ADR-0020・FREE ドラッグと同機構。
+// 注意：履歴 slice は meta/parts/scenes のみ（assets は対象外・ADR-0020）。asset を更新する調整（例: クリップ設定）は
+// そもそも Undo 対象外なので、このフックを付けても効かない＝付けないこと。
 import { useProjectStore } from "../store/projectStore";
 
 export function useHistoryGroup(): {
