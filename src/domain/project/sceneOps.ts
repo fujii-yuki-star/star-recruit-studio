@@ -139,8 +139,11 @@ export function splitSceneInList(
 /**
  * 掛け合い場面（scene.lines）を行境界で2つに分ける（#405）。lines[0, lineIndex) を前・[lineIndex, 末] を後の場面へ。
  * 後の場面は新 sceneId になり行の音声キー（lineAudioKey）が変わるため、後半の各行の音声状態/パス/開始秒をリセット
- *（作り直し前提・自動逐次に戻す＝splitSceneInList と同ポリシー）。掛け合いでない/1行/範囲外/尺が最小尺の2倍未満は分割しない（変化なし）。
- * 表示時間は各側の総文字数比で按分（各最低 SCENE_MIN_DURATION_SEC・合計は元のまま）。
+ *（作り直し前提・自動逐次に戻す＝splitSceneInList と同ポリシー）。前半は sceneId 不変ゆえ音声（キー）は保つが、
+ * 場面尺が d1 に縮むと手動 startSec が新しい尺を超え得る（例: 10秒場面で startSec:6 の行が前半 d1<6 で範囲外→
+ * lineTimeline でクランプされ0秒区間として落ち「作成済みなのに出ない」不整合＝ADR-0026 ④）ため、**両場面とも
+ * startSec は自動逐次に戻す**（保存された startSec が新しい durationSec を超えて残らないことを保証）。
+ * 掛け合いでない/1行/範囲外/尺が最小尺の2倍未満は分割しない（変化なし）。表示時間は各側の総文字数比で按分（各最低 SCENE_MIN_DURATION_SEC・合計は元のまま）。
  */
 export function splitSceneLinesInList(
   scenes: Scene[],
@@ -156,7 +159,9 @@ export function splitSceneLinesInList(
   if (!lines || lines.length < 2) return { scenes, parts }; // 掛け合いでない/1行＝分割不能
   if (lineIndex < 1 || lineIndex > lines.length - 1) return { scenes, parts }; // 各側1行以上
   if (src.durationSec < 2 * SCENE_MIN_DURATION_SEC) return { scenes, parts }; // 両場面が最小尺（11 §4）を割る
-  const firstLines = lines.slice(0, lineIndex);
+  // 前半は音声（sceneId 不変ゆえキー lineAudioKey も不変）を保つが、尺が縮み手動 startSec が範囲外になり得るため
+  // startSec は自動逐次へ戻す（後半と対称・上記 JSDoc の不整合を分割時に潰す）。lineId/text/speaker/subtitle 等は保持。
+  const firstLines = lines.slice(0, lineIndex).map((l) => ({ ...l, startSec: undefined }));
   const secondLines = lines
     .slice(lineIndex)
     .map((l) => ({ ...l, status: NARRATION_STATUS.none, voicePath: null, startSec: undefined }));

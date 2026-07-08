@@ -219,6 +219,35 @@ describe('splitSceneLinesInList（掛け合いの行境界分割・#405）', () 
   it('尺が最小尺の2倍未満なら分割しない', () => {
     expect(splitSceneLinesInList([dialogueScene({ durationSec: 5 })], p1(), 'scene_001', 1, 'scene_002').scenes).toHaveLength(1);
   });
+
+  it('手動 startSec つき掛け合いを分割しても、前半/後半とも範囲外 startSec が残らない（#405 P1）', () => {
+    // 10秒場面で line_002 は 6秒開始。line_002 までを前半に分けると前半尺が 6秒未満になり得て、
+    // 元は正常だった startSec:6 が新しい尺を超える（→ lineTimeline でクランプされ0秒区間として落ちる）。
+    const src = dialogueScene({
+      lines: [
+        { lineId: 'line_001', text: 'あ', speaker: 3, startSec: 0, status: NARRATION_STATUS.generated, voicePath: 'v/a.wav' },
+        { lineId: 'line_002', text: 'い', speaker: 2, startSec: 6, status: NARRATION_STATUS.generated, voicePath: 'v/b.wav' },
+        { lineId: 'line_003', text: 'うえおかきくけこ', speaker: 3, startSec: 8, status: NARRATION_STATUS.generated, voicePath: 'v/c.wav' },
+      ],
+    });
+    const r = splitSceneLinesInList([src], p1(), 'scene_001', 2, 'scene_002');
+    const [first, second] = r.scenes;
+    expect(first.lines?.map((l) => l.lineId)).toEqual(['line_001', 'line_002']); // 前半
+    expect(second.lines?.map((l) => l.lineId)).toEqual(['line_003']); // 後半
+    // 前半は startSec を自動逐次へ戻す（音声＝status/voicePath は sceneId 不変ゆえ保持）。
+    expect(first.lines?.map((l) => l.startSec)).toEqual([undefined, undefined]);
+    expect(first.lines?.map((l) => l.status)).toEqual([NARRATION_STATUS.generated, NARRATION_STATUS.generated]);
+    expect(first.lines?.map((l) => l.voicePath)).toEqual(['v/a.wav', 'v/b.wav']);
+    // 後半は音声も作り直し＋startSec も自動逐次。
+    expect(second.lines?.map((l) => l.startSec)).toEqual([undefined]);
+    expect(second.lines?.every((l) => l.status === NARRATION_STATUS.none && l.voicePath === null)).toBe(true);
+    // 不変条件：どの行の startSec も、その場面の durationSec を超えて残っていない。
+    for (const s of r.scenes) {
+      for (const l of s.lines ?? []) {
+        expect(l.startSec === undefined || l.startSec < s.durationSec).toBe(true);
+      }
+    }
+  });
 });
 
 describe('switchSceneTemplate（見た目パターン切替の清算ポリシー・#236）', () => {
