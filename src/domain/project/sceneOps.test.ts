@@ -84,6 +84,28 @@ describe('duplicateSceneInList', () => {
     expect(r.parts[0].sceneIds).toEqual(['scene_001', 'scene_003', 'scene_002']);
   });
 
+  it('掛け合い場面の複製では行音声も作り直しになる（新 sceneId で音声キーが変わるため・#405 P1）', () => {
+    const src: Scene = {
+      ...scene('scene_001', 1),
+      lines: [
+        { lineId: 'line_001', text: 'やあ', speaker: 3, startSec: 0, status: NARRATION_STATUS.generated, voicePath: 'v/a.wav' },
+        { lineId: 'line_002', text: 'どうも', speaker: 2, startSec: 2, status: NARRATION_STATUS.generated, voicePath: 'v/b.wav' },
+      ],
+    };
+    const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
+    const r = duplicateSceneInList([src], parts, 'scene_001', 'scene_003');
+    const dup = r.scenes[1];
+    expect(dup.lines?.map((l) => l.status)).toEqual([NARRATION_STATUS.none, NARRATION_STATUS.none]); // 作り直し
+    expect(dup.lines?.every((l) => l.voicePath === null)).toBe(true);
+    // 複製として text/speaker/startSec/lineId は保持。
+    expect(dup.lines?.map((l) => l.text)).toEqual(['やあ', 'どうも']);
+    expect(dup.lines?.map((l) => l.speaker)).toEqual([3, 2]);
+    expect(dup.lines?.map((l) => l.startSec)).toEqual([0, 2]);
+    expect(dup.lines?.map((l) => l.lineId)).toEqual(['line_001', 'line_002']);
+    // 元場面は保持。
+    expect(r.scenes[0].lines?.every((l) => l.status === NARRATION_STATUS.generated)).toBe(true);
+  });
+
   it('存在しない sceneId は変化なし', () => {
     const r = duplicateSceneInList(threeScenes(), onePart(), 'scene_999', 'scene_004');
     expect(r.scenes).toHaveLength(3);

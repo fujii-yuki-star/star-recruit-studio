@@ -66,9 +66,10 @@ export function moveSceneInList(
 
 /**
  * 場面を複製し、元の直後に挿入した結果を返す（新IDは呼び出し側が採番して渡す）。
- * 複製された場面は音声を作り直す：voices/<sceneId>.wav は sceneId 単位なので
- * voicePath=null / status='none' にリセットする（ADR-0007・複数場面が同一音声を指す不整合を防ぐ）。
- * セリフ文言・素材割当・クリップ設定などはそのまま引き継ぐ。
+ * 複製された場面は音声を作り直す：単一 narration は voices/<sceneId>.wav が sceneId 単位、掛け合いの行音声は
+ * lineAudioKey(sceneId, lineId) がキー（ADR-0015）で、いずれも新 sceneId では実体が無い。よって narration と scene.lines の
+ * 両方について voicePath=null / status='none' にリセットする（「作成済みに見えるのに音声が無い/旧音声を指す」不整合を防ぐ）。
+ * 行の lineId/text/speaker/startSec は複製としてそのまま保持（尺・素材割当・クリップ設定なども引き継ぐ）。
  */
 export function duplicateSceneInList(
   scenes: Scene[],
@@ -83,6 +84,8 @@ export function duplicateSceneInList(
     ...src,
     sceneId: newSceneId,
     narration: { ...src.narration, status: NARRATION_STATUS.none, voicePath: null },
+    // 掛け合い（行ごと音声）も新 sceneId で音声キーが変わるため各行を作り直しにする（lineId/text/speaker/startSec は保持）。
+    ...(src.lines ? { lines: src.lines.map((l) => ({ ...l, status: NARRATION_STATUS.none, voicePath: null })) } : {}),
     // 複製直後は検証し直す前提で警告をクリアする（古い検証結果を引き継がない）。
     warnings: [],
   };
