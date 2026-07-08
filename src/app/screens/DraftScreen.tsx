@@ -28,7 +28,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo } =
+  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo } =
     useProjectStore();
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
   const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
@@ -109,16 +109,22 @@ export function DraftScreen({ onNavigate }: DraftProps) {
         <div>
           <PageHead
             title="動画のたたき台を確認"
-            desc="ゆうこが作った構成です。台本表を見ながら、自由に修正してください。"
+            desc={
+              draftFromAi
+                ? "ゆうこが作った構成です。台本表を見ながら、自由に修正してください。"
+                : "台本表を見ながら、場面を自由に足したり並べ替えたり直したりできます。"
+            }
           />
 
-          {/* 注意書き */}
-          <div className="notice notice-warn mb">
-            <SparkleIcon size={18} />
-            <span>
-              このたたき台はゆうこ（AI）が作成したものです。必要に応じて自由に修正してください。
-            </span>
-          </div>
+          {/* AI 生成直後だけ「ゆうこ(AI)が作成した」旨を出す（白紙/手動/読込済みでは出さない＝表示と実挙動の一致・#467/ADR-0026）。 */}
+          {draftFromAi && (
+            <div className="notice notice-warn mb">
+              <SparkleIcon size={18} />
+              <span>
+                このたたき台はゆうこ（AI）が作成したものです。必要に応じて自由に修正してください。
+              </span>
+            </div>
+          )}
 
           {/* 自動補正・確認の通知 */}
           <WarningBanner warnings={draftWarnings} />

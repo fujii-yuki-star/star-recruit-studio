@@ -493,9 +493,10 @@ describe('projectStore newBlankProject（白紙から作る・#393）', () => {
     useProjectStore.setState({ generate: realGenerate });
   });
 
-  it('空プロジェクトにし、status を ready にする（idle にしない）', () => {
+  it('空プロジェクトにし、status を ready にする（idle にしない・draftFromAi=false）', () => {
     useProjectStore.setState({
       status: 'idle',
+      draftFromAi: true, // 直前が AI 生成でも白紙化で false に落ちること
       scenes: [{ sceneId: 'scene_001' } as never],
       parts: [{ partId: 'part_001', title: 'P', order: 1, sceneIds: ['scene_001'] } as never],
     });
@@ -504,6 +505,7 @@ describe('projectStore newBlankProject（白紙から作る・#393）', () => {
     expect(st.scenes).toEqual([]);
     expect(st.parts).toEqual([]);
     expect(st.status).toBe('ready'); // idle にしない＝マウント時の自動生成を発火させない
+    expect(st.draftFromAi).toBe(false); // 白紙は AI 由来でない（#467）
   });
 
   it('白紙化の後は autoGenerateIfSafe が生成しない（Mock でも status!==idle）＝AI 送信を誘発しない（§2-6）', async () => {
@@ -514,6 +516,25 @@ describe('projectStore newBlankProject（白紙から作る・#393）', () => {
     await useProjectStore.getState().autoGenerateIfSafe();
     expect(genSpy).not.toHaveBeenCalled();
     willSpy.mockRestore();
+  });
+});
+
+describe('projectStore startManualEdit（生成失敗からの手動作成リカバリ・#393 P1）', () => {
+  it('status を error→ready にし aiError を消す。入力済みメタ/素材は残す（draftFromAi=false）', () => {
+    useProjectStore.setState({
+      status: 'error',
+      aiError: '生成に失敗しました',
+      draftFromAi: true,
+      meta: { ...useProjectStore.getState().meta, companyInfo: { name: '入力済みの会社' } as never },
+      assets: [{ assetId: 'asset_001' } as never],
+    });
+    useProjectStore.getState().startManualEdit();
+    const st = useProjectStore.getState();
+    expect(st.status).toBe('ready'); // error のままにしない＝たたき台が「場面を追加」導線を出す
+    expect(st.aiError).toBeNull();
+    expect(st.draftFromAi).toBe(false); // 手動作成＝AI 由来でない（#467）
+    expect(st.meta.companyInfo).toEqual({ name: '入力済みの会社' }); // 入力は残す
+    expect(st.assets).toHaveLength(1); // 取り込んだ素材は残す
   });
 });
 

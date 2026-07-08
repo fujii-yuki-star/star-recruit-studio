@@ -79,6 +79,9 @@ type DocSnapshot = { meta: ProjectHeader; parts: Part[]; scenes: Scene[] };
 
 interface ProjectState {
   status: GenerateStatus;
+  /** 現在のたたき台が「AI 生成直後」か（#467）。generate 成功でのみ true。白紙/手動/読込済みは false。
+   *  たたき台の「ゆうこ(AI)が作成した」文言はこれが true のときだけ出す＝表示と実挙動を一致させる（ADR-0026）。 */
+  draftFromAi: boolean;
   saveStatus: SaveStatus;
   /** 素材の取り込み失敗のユーザー向け文言（§2-5。プロジェクト保存状態とは別物。再試行/成功で消える）。 */
   importError: string | null;
@@ -125,6 +128,9 @@ interface ProjectState {
   newProject: () => void;
   /** 白紙から作る（ウィザード/AI を通らない・#393）。空プロジェクトにし status を "ready" にして自動生成（§2-6）を発火させない。 */
   newBlankProject: () => void;
+  /** 生成失敗/中断から手動作成へ入る（#393 P1・12 §9.3／15）。入力済みの会社情報・素材は残し、status を "ready"・
+   *  aiError をクリアして手動で組む状態にする（AI 生成はしない＝draftFromAi=false）。 */
+  startManualEdit: () => void;
   /** 現在の状態を project.json として保存する。進行中の保存があればその完了を待つ（多重起動防止＋await で保存完了を保証・#256）。 */
   saveProject: () => Promise<void>;
   /** 実際の保存処理（内部・saveProject 経由でのみ呼ぶ）。 */
@@ -375,6 +381,7 @@ function defaultHeader(): ProjectHeader {
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
+  draftFromAi: false,
   saveStatus: "idle",
   importError: null,
   past: [],
@@ -455,7 +462,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         orientation: meta.videoSettings.aspectRatio,
       });
       if (get()._generationSeq !== seq) return; // 変換中にキャンセルされ得るので反映直前にも再確認（#402）
-      set({ status: "ready", parts, scenes, warnings });
+      set({ status: "ready", parts, scenes, warnings, draftFromAi: true }); // AI 生成直後＝たたき台のAI作成文言を出す（#467）
       // 動画案ができたら未生成のセリフ音声をバックグラウンドで自動生成（非ブロッキング・#176）。
       // 仕上がり確認へ着いた時点で成功分は鳴る。失敗場面は per-scene の「声を作り直す」で作り直せる。
       void get().generateAllNarrations();
@@ -480,12 +487,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // reset/newProject/loadProject も世代を進めて in-flight の generate を無効化する（#402 レビュー）。
   // キャンセル以外の経路（キャンセルせず離脱→ホームで新規/切替）でも、裏で走る旧生成が新しい状態を上書きしないように。
   reset: () =>
-    set((s) => ({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null, _generationSeq: s._generationSeq + 1 })),
+    set((s) => ({ status: "idle", draftFromAi: false, saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null, _generationSeq: s._generationSeq + 1 })),
   newProject: () => {
     // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
     if (isExportBusy(get().exportRun.phase)) return;
     set((s) => ({
       status: "idle",
+      draftFromAi: false,
       saveStatus: "idle",
       meta: defaultHeader(),
       parts: [],
@@ -511,6 +519,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) return;
     get().newProject();
     set({ status: "ready" });
+  },
+  startManualEdit: () => {
+    // 生成失敗/中断からの手動作成リカバリ（#393 P1・12 §9.3／15＝失敗時の手動作成は正規リカバリ）。
+    // 入力済みの会社情報・素材・（あれば）場面は残したまま、status を "ready"・aiError をクリアして手動で組む状態にする。
+    // status を error のままにしないことで、たたき台が「場面を追加」導線を出す（白紙導線と同じ手動状態＝draftFromAi=false）。
+    set({ status: "ready", aiError: null, draftFromAi: false });
   },
   // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
   // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。
@@ -645,6 +659,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     set((s) => ({
       status: "ready",
+      draftFromAi: false, // 読込済みプロジェクトは「生成直後」ではない＝AI作成文言は出さない（#467）
       saveStatus: "saved", // 読み込み直後はディスクと一致＝保存済み扱い（未保存検知の基準・#256）
       // 保存用ヘッダは projectHeaderFromProject に一元化（Project のヘッダ系フィールドの取りこぼしを防ぐ・#324）。
       // ADR-0011 の種別/発表内容/自由記述、ADR-0018 の timelineOverlay もここでまとめて復元される。
