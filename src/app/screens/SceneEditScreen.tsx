@@ -330,6 +330,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const { options: pickableOptions, mismatchedCurrent } = selected
     ? pickableTemplatesForScene(templates, selected.sceneType, aspectRatio, template)
     : { options: [], mismatchedCurrent: undefined };
+  // 参照先テンプレが存在しない（グローバル削除等で見つからない）現行＝未解決。mismatchedCurrent（Template あり）とは別に扱う（#415 レビュー）。
+  const unresolvedCurrent = !!selected && !template;
   // アクティブグループが消えたら（メンバー削除で空に・場面切替）描画上は非選択扱い＝stale な state を描画に出さない（effect 不要・#311 レビュー）。
   const activeGroupStillExists = activeGroupId != null && (selected?.groups ?? []).some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
@@ -1109,15 +1111,21 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {mismatchedCurrent.name}（今の動画に合いません）
                   </option>
                 )}
+                {/* 現行が見つからない（未解決）ときも選択不可の目印を出し、選択値が消えて空 select にならないようにする（#415 レビュー）。 */}
+                {unresolvedCurrent && selected && (
+                  <option value={selected.templateId} disabled>
+                    （今の見た目が見つかりません）
+                  </option>
+                )}
                 {pickableOptions.map((t) => (
                   <option key={t.templateId} value={t.templateId}>
                     {t.name}
                   </option>
                 ))}
               </select>
-              {mismatchedCurrent ? (
+              {mismatchedCurrent || unresolvedCurrent ? (
                 <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger)" }}>
-                  今の見た目は動画の向き・場面に合っていません。
+                  {unresolvedCurrent ? "今の見た目が見つかりません。" : "今の見た目は動画の向き・場面に合っていません。"}
                   {pickableOptions.length > 0 ? "下から選び直してください。" : "この向き・場面に合う見た目パターンがまだありません。"}
                 </p>
               ) : pickableOptions.length <= 1 ? (
