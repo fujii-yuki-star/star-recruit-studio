@@ -16,29 +16,34 @@ const openingLand2 = tpl({ templateId: 'opening_land2', category: 'opening', asp
 const all = [openingLand, photoLand, openingPort, openingLand2];
 
 describe('pickableTemplatesForScene（ADR-0012・#415）', () => {
-  it('同じ場面カテゴリ＋同じ向きだけ返す（別カテゴリ・別向きは除外）', () => {
+  it('options は同じ場面カテゴリ＋同じ向きだけ（別カテゴリ・別向きは除外）・整合なら mismatchedCurrent 無し', () => {
     const r = pickableTemplatesForScene(all, 'opening', '16:9', openingLand);
-    expect(r.map((t) => t.templateId)).toEqual(['opening_land', 'opening_land2']); // photo/縦は出ない
+    expect(r.options.map((t) => t.templateId)).toEqual(['opening_land', 'opening_land2']); // photo/縦は出ない
+    expect(r.mismatchedCurrent).toBeUndefined();
   });
 
-  it('向きが違えば同カテゴリでも除外（縦型プロジェクトは縦テンプレのみ）', () => {
+  it('向きが違えば同カテゴリでも options から除外（縦型プロジェクトは縦テンプレのみ）', () => {
     const r = pickableTemplatesForScene(all, 'opening', '9:16', openingPort);
-    expect(r.map((t) => t.templateId)).toEqual(['opening_port']);
+    expect(r.options.map((t) => t.templateId)).toEqual(['opening_port']);
+    expect(r.mismatchedCurrent).toBeUndefined();
   });
 
-  it('現在のテンプレが絞り込みに入らなくても必ず含める（不一致でも選択値を見せる）', () => {
+  it('不一致 current は options に混ぜず mismatchedCurrent として分ける（整合済みに見せない・#415 P2）', () => {
     // 横型プロジェクトの opening 場面に、旧データで縦テンプレ(openingPort)が当たっている状態。
     const r = pickableTemplatesForScene(all, 'opening', '16:9', openingPort);
-    expect(r.map((t) => t.templateId)).toEqual(['opening_port', 'opening_land', 'opening_land2']); // 先頭に現行
+    expect(r.options.map((t) => t.templateId)).toEqual(['opening_land', 'opening_land2']); // 有効な選択肢は一致分だけ
+    expect(r.mismatchedCurrent?.templateId).toBe('opening_port'); // 不一致 current は別枠
   });
 
-  it('現在のテンプレが既に一致集合にあれば重複させない', () => {
+  it('現在のテンプレが既に一致集合にあれば mismatchedCurrent は無し（重複させない）', () => {
     const r = pickableTemplatesForScene(all, 'opening', '16:9', openingLand2);
-    expect(r.map((t) => t.templateId)).toEqual(['opening_land', 'opening_land2']);
+    expect(r.options.map((t) => t.templateId)).toEqual(['opening_land', 'opening_land2']);
+    expect(r.mismatchedCurrent).toBeUndefined();
   });
 
-  it('current 無し（未解決）は一致集合のみ', () => {
+  it('current 無し（未解決）は options のみ・mismatchedCurrent 無し', () => {
     const r = pickableTemplatesForScene(all, 'photo_intro', '16:9', undefined);
-    expect(r.map((t) => t.templateId)).toEqual(['photo_land']);
+    expect(r.options.map((t) => t.templateId)).toEqual(['photo_land']);
+    expect(r.mismatchedCurrent).toBeUndefined();
   });
 });

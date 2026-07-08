@@ -69,6 +69,14 @@ describe('buildTemplateSummaries', () => {
     ], '9:16');
     expect(summaries.map((s) => s.templateId)).toEqual(['opening_yuko_portrait_v1']); // 横型は渡さない
   });
+
+  it('FREE（自由配置）は AI 入力から除外する（AI は選ばない・11 §3.1／ADR-0008・#415 P1）', () => {
+    const summaries = buildTemplateSummaries([
+      template({ templateId: 'opening_yuko_right_v1', category: 'opening', aspectRatio: '16:9' }),
+      template({ templateId: 'free_canvas_v1', category: 'free', aspectRatio: '16:9' }),
+    ], '16:9');
+    expect(summaries.map((s) => s.templateId)).toEqual(['opening_yuko_right_v1']); // free は出ない
+  });
 });
 
 describe('buildYukoPoseTags', () => {

@@ -2,7 +2,7 @@
 // - Template[] → AI へ渡すテンプレ要約（11§7.5 aiHint＋層構成）
 // - 利用可能なゆうこ表情タグ（yuko 素材の tags を集約）
 // プロンプト本文の組み立ては buildVideoPlanRequest.ts、検証は validateVideoPlan.ts が担う。
-import { ASSET_TYPE, type Orientation } from '../enums';
+import { ASSET_TYPE, FREE_CATEGORY, type Orientation } from '../enums';
 import type { Asset, CompanyInfo, GeneralBrief } from '../project/types';
 import type { Template } from '../template/types';
 import { isUserTemplate } from '../template/userTemplate';
@@ -14,10 +14,13 @@ import type { TemplateSummary } from './aiProvider';
  * ユーザーテンプレ（user_tmpl_）は AI へ渡さない＝AI の誤選択を防ぐ（ADR-0017 不変条件）。手動選択（簡易/詳細）には別途出す。
  * プロジェクトの向き（orientation）に一致するテンプレのみ渡す＝AI が向き不一致の見た目を選べない（ADR-0012・#415）。
  * 向きは正典としてプロジェクト側にあり AI 出力は向き非依存（12§8）。当該向きにテンプレが少ない場合は AI の選択肢も減る
- *（例: 横型は現状3カテゴリ）＝テンプレ在庫の課題であり、ここでの絞り込み自体は正しい（在庫拡充は別途）。
+ *（例: 横型は現状3カテゴリ）＝テンプレ在庫の課題であり、ここでの絞り込み自体は正しい（在庫拡充は #456）。
+ * FREE（自由配置）は利用者の手動選択のみ＝AI は選ばない（ai-video-plan の sceneType enum に free は無い・11 §3.1／ADR-0008）。
  */
 export function buildTemplateSummaries(templates: Template[], orientation: Orientation): TemplateSummary[] {
-  return templates.filter((t) => !isUserTemplate(t.templateId) && t.aspectRatio === orientation).map((t) => ({
+  return templates
+    .filter((t) => !isUserTemplate(t.templateId) && t.aspectRatio === orientation && t.category !== FREE_CATEGORY)
+    .map((t) => ({
     templateId: t.templateId,
     category: t.category,
     useCase: t.aiHint?.useCase,

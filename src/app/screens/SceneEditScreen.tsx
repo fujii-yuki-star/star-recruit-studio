@@ -325,10 +325,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
   const template = selected ? templates.find((t) => t.templateId === selected.templateId) : undefined;
-  // 見た目ピッカーの選択肢：同じ場面カテゴリ＋同じ向きに絞る（ADR-0012・#415・純粋関数 pickableTemplatesForScene）。
-  const pickableTemplates = selected
+  // 見た目ピッカーの選択肢：同じ場面カテゴリ＋同じ向きに絞る（ADR-0012・#415）。不一致の現行テンプレ（旧データ等）は
+  // 有効な選択肢（options）と分け、mismatchedCurrent として選択不可で表示＝整合済みに見せない（#415 P2）。
+  const { options: pickableOptions, mismatchedCurrent } = selected
     ? pickableTemplatesForScene(templates, selected.sceneType, aspectRatio, template)
-    : [];
+    : { options: [], mismatchedCurrent: undefined };
   // アクティブグループが消えたら（メンバー削除で空に・場面切替）描画上は非選択扱い＝stale な state を描画に出さない（effect 不要・#311 レビュー）。
   const activeGroupStillExists = activeGroupId != null && (selected?.groups ?? []).some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
@@ -1102,17 +1103,28 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   patch((s) => switchSceneTemplate(s, newTemplateId, newLayers));
                 }}
               >
-                {pickableTemplates.map((t) => (
+                {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}
+                {mismatchedCurrent && (
+                  <option value={mismatchedCurrent.templateId} disabled>
+                    {mismatchedCurrent.name}（今の動画に合いません）
+                  </option>
+                )}
+                {pickableOptions.map((t) => (
                   <option key={t.templateId} value={t.templateId}>
                     {t.name}
                   </option>
                 ))}
               </select>
-              {pickableTemplates.length <= 1 && (
+              {mismatchedCurrent ? (
+                <p className="field-hint" style={{ marginTop: 4, color: "var(--color-danger)" }}>
+                  今の見た目は動画の向き・場面に合っていません。
+                  {pickableOptions.length > 0 ? "下から選び直してください。" : "この向き・場面に合う見た目パターンがまだありません。"}
+                </p>
+              ) : pickableOptions.length <= 1 ? (
                 <p className="field-hint" style={{ marginTop: 4 }}>
                   この向き・場面に合う見た目パターンは、今はこれだけです。
                 </p>
-              )}
+              ) : null}
             </div>
 
             <div className="field">
