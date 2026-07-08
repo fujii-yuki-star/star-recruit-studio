@@ -3,11 +3,13 @@ import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
+import { scenesUsingTemplate } from "../../domain/project/templateUsage";
 import { useProjectStore } from "../store/projectStore";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
+import { UsedScenesRow } from "../components/UsedScenesRow";
 import { layerLabel, buildSampleScene } from "./looksShared";
 
 // SceneCategory のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
@@ -50,6 +52,8 @@ function usedElements(template: Template): string[] {
 export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
   const templates = useProjectStore((s) => s.templates);
   const assets = useProjectStore((s) => s.assets);
+  const scenes = useProjectStore((s) => s.scenes);
+  const setEditingSceneId = useProjectStore((s) => s.setEditingSceneId);
   const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
   const duplicateAsUserTemplate = useProjectStore((s) => s.duplicateAsUserTemplate);
   const createBlankUserTemplate = useProjectStore((s) => s.createBlankUserTemplate);
@@ -165,6 +169,10 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   }
 
   const sampleScene = buildSampleScene(current, assets);
+  // この見た目を使っている場面（逆引き・#406）。標準/マイテンプレを問わず scene.templateId で判定する。
+  const usedScenes = scenesUsingTemplate(scenes, current.templateId);
+  // 使用場面バッジを押したら、その場面の編集を開く（editingSceneId 機構＝#400・素材画面と同方式）。
+  const jumpToScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
 
   return (
     <div className="main-scroll">
@@ -272,6 +280,11 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               </span>
             ))}
           </div>
+
+          {/* 使用場面の逆引き（#406）：この見た目を当てている場面へ1クリックで飛べる。 */}
+          <hr className="divider" />
+          <h3 className="field-label">使用場面</h3>
+          <UsedScenesRow scenes={usedScenes} onJump={jumpToScene} emptyText="まだどの場面でも使われていません。" />
 
           <hr className="divider" />
           {/* マイテンプレ（ユーザーテンプレ）の作成・編集（ADR-0017）。編集は専用画面へ遷移（#271）。 */}

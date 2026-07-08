@@ -109,7 +109,7 @@ function App() {
       case "looks-edit":
         return <LooksEditScreen onNavigate={setScreen} />;
       case "materials":
-        return <MaterialsScreen />;
+        return <MaterialsScreen onNavigate={setScreen} />;
       case "settings":
         return <SettingsScreen />;
       case "about":
