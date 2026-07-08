@@ -7,6 +7,7 @@ import {
 } from "../../domain/constants";
 import { Switch } from "./ui";
 import { FitSelect } from "./FitSelect";
+import { useHistoryGroup } from "../hooks/useHistoryGroup";
 
 type ClipPatch = Partial<NonNullable<Asset["clip"]>>;
 
@@ -23,6 +24,7 @@ export function ClipDetailControls({
   const dur = asset.metadata?.durationSec ?? null;
   const hasAudio = asset.metadata?.hasAudio === true;
   const useOriginal = hasAudio && (clip?.useOriginalAudio ?? false);
+  const { dragGroup } = useHistoryGroup(); // 速度/音量スライダーのドラッグを1履歴に（#389）
   return (
     <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: 6 }}>
       <p className="text-sm text-muted" style={{ margin: "0 0 6px" }}>
@@ -92,6 +94,7 @@ export function ClipDetailControls({
           max={SPEED_MAX}
           step={SPEED_STEP}
           value={clip?.speed ?? SPEED_DEFAULT}
+          {...dragGroup}
           onChange={(e) => patchClip({ speed: Number(e.target.value) })}
           style={{ width: "100%", accentColor: "var(--color-primary)" }}
         />
@@ -134,6 +137,7 @@ export function ClipDetailControls({
             max={VOLUME_MAX}
             step={VOLUME_STEP}
             value={clip?.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME}
+            {...dragGroup}
             onChange={(e) => patchClip({ originalAudioVolume: Number(e.target.value) })}
             style={{ width: "100%", accentColor: "var(--color-primary)" }}
           />

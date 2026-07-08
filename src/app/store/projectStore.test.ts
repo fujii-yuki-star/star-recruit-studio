@@ -623,3 +623,27 @@ describe('projectStore プロジェクト名の入力防御（80字上限・#411
     expect(useProjectStore.getState().meta.projectName).toBe('短いプロジェクト名');
   });
 });
+
+describe('projectStore 履歴グループ（#389・連続編集を1履歴にまとめる）', () => {
+  beforeEach(() => {
+    useProjectStore.setState({ past: [], future: [], _historyGroupDepth: 0 });
+  });
+
+  it('begin→複数 pushHistory→end で履歴は1件だけ増える（グループ中の pushHistory は no-op）', () => {
+    const st = useProjectStore.getState();
+    st.beginHistoryGroup();
+    st.pushHistory();
+    st.pushHistory();
+    st.pushHistory();
+    st.endHistoryGroup();
+    // 3回でなく1回だけ（beginHistoryGroup で1回記録・以降 no-op）＝1キーストローク毎に積まない。
+    expect(useProjectStore.getState().past).toHaveLength(1);
+    expect(useProjectStore.getState()._historyGroupDepth).toBe(0); // グループは閉じている
+  });
+
+  it('グループ外の pushHistory は都度積まれる（従来どおり・グループ化しない編集は1操作=1履歴）', () => {
+    useProjectStore.getState().pushHistory();
+    useProjectStore.getState().pushHistory();
+    expect(useProjectStore.getState().past).toHaveLength(2);
+  });
+});
