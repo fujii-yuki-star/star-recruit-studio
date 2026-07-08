@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
+import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import type { ExportPhase } from "../store/projectStore";
 import { buildExportScenes, ExportCancelledError } from "../../renderer/export/buildExportScenes";
@@ -12,7 +13,7 @@ import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
-import { BGM_CROSSFADE_SEC, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, exportDimsForOrientation } from "../../domain/constants";
+import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
@@ -316,31 +317,22 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               {withBgm ? bundledBgm?.label ?? bgmAsset?.displayName ?? "未選択" : "なし"}
             </span>
           </div>
-          <p className="field-hint">BGM は「仕上がり確認」で選べます。</p>
+          {/* BGM の選択は仕上がり確認（聞きながら選べる）。ここからは表示のみだが、その場で選びに行けるよう導線を置く（#407）。 */}
+          <div className="row-between" style={{ alignItems: "center", gap: "var(--gap-sm)" }}>
+            <p className="field-hint" style={{ margin: 0 }}>BGM は「仕上がり確認」で、聞きながら選べます。</p>
+            <button className="btn btn-secondary text-sm" onClick={() => onNavigate("preview")} disabled={busy}>
+              仕上がり確認で選ぶ
+            </button>
+          </div>
 
           <hr className="divider" />
-          <div className="field">
-            <label className="field-label" htmlFor="narrationVolume">
-              ナレーション音量
-            </label>
-            <input
-              id="narrationVolume"
-              type="range"
-              min={VOLUME_MIN}
-              max={VOLUME_MAX}
-              step={VOLUME_STEP}
-              value={voiceSettings.volume ?? NARRATION_VOLUME}
-              onChange={(e) => updateVoiceSettings({ volume: Number(e.target.value) })}
-              style={{ width: "100%", accentColor: "var(--color-primary)" }}
-            />
-            <div className="row-between text-faint text-sm">
-              <span>小さい</span>
-              <span>{Math.round((voiceSettings.volume ?? NARRATION_VOLUME) * 100)}%（標準100%）</span>
-              <span>大きい</span>
-            </div>
-          </div>
+          {/* ナレーション音量は仕上がり確認と共用の部品（#407・DRY）。仕上がり確認では聞きながら調整できる。 */}
+          <NarrationVolumeControl
+            volume={voiceSettings.volume}
+            onChange={(v) => updateVoiceSettings({ volume: v })}
+          />
           <div className="notice notice-info mt">
-            <span>声を作成済みの場面には、その音声が入ります。BGM は「仕上がり確認」で選べます。</span>
+            <span>声を作成済みの場面には、その音声が入ります。</span>
           </div>
 
           <div className="row-between mt-lg">
