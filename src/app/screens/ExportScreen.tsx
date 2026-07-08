@@ -332,7 +332,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             onChange={(v) => updateVoiceSettings({ volume: v })}
           />
           <div className="notice notice-info mt">
-            <span>声を作成済みの場面には、その音声が入ります。BGM は「仕上がり確認」で選べます。</span>
+            <span>声を作成済みの場面には、その音声が入ります。</span>
           </div>
 
           <div className="row-between mt-lg">

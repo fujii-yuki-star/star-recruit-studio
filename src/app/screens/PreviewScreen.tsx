@@ -492,15 +492,16 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           <hr className="divider" />
           <h2 className="section-title">音</h2>
           <p className="field-hint" style={{ marginTop: 0 }}>
-            BGM とナレーションの音量を、再生して聞きながら調整できます。
+            音楽と読み上げの声の大きさを整えて、バランスを確かめられます。
           </p>
           <BgmPicker />
-          {/* ナレーション音量をここに併置（#407）＝聞きながら BGM とのバランスを調整できる。反映は次の場面/再生から。 */}
+          {/* ナレーション音量をここに併置（#407）＝BGM とのバランスを調整できる。ナレーションの反映は次の場面/再生からで、
+              BGM のその場反映とは即時性が異なるため、hint に「次の場面から反映」を明記する（過度に即時性を約束しない・ADR-0026 ④）。 */}
           <div style={{ marginTop: "var(--gap)" }}>
             <NarrationVolumeControl
               volume={meta.voiceSettings.volume}
               onChange={(v) => updateVoiceSettings({ volume: v })}
-              hint="読み上げの声の大きさです。再生して、BGM とのバランスを確かめられます。"
+              hint="読み上げの声の大きさです。変更は次の場面から反映されます（BGM はその場で変わります）。"
             />
           </div>
 
