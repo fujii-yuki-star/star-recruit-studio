@@ -15,6 +15,7 @@ import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/fre
 import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { switchSceneTemplate } from "../../domain/project/sceneOps";
+import { clampSceneDuration } from "../../domain/project/sceneDuration";
 import { pickableTemplatesForScene } from "../../domain/template/templateSelection";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
@@ -1853,13 +1854,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 onFocus={() => setDurationDraft({ sceneId: selected.sceneId, value: String(selected.durationSec) })}
                 onChange={(e) => setDurationDraft({ sceneId: selected.sceneId, value: e.target.value })} // 途中値は store に入れない＝範囲外値を自動保存しない（#411 P1）
                 onBlur={() => {
-                  // 確定時のみ [SCENE_MIN, SCENE_MAX] にクランプして commit。空/不正は元の値を保持（変更しない）。
+                  // 確定時のみ範囲クランプ（clampSceneDuration＝§7 テスト済み純粋関数）して commit。空/不正は元の値を保持（変更しない）。
                   const raw = durationDraft?.sceneId === selected.sceneId ? durationDraft.value : "";
-                  const v = Number(raw);
-                  const clamped =
-                    raw.trim() === "" || Number.isNaN(v)
-                      ? selected.durationSec
-                      : Math.min(SCENE_MAX_DURATION_SEC, Math.max(SCENE_MIN_DURATION_SEC, v));
+                  const clamped = raw.trim() === "" || Number.isNaN(Number(raw)) ? selected.durationSec : clampSceneDuration(Number(raw));
                   if (clamped !== selected.durationSec) patch((s) => ({ ...s, durationSec: clamped }));
                   setDurationDraft(null);
                 }}
