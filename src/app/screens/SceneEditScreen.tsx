@@ -202,7 +202,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, autoGenerateIfSafe, updateScene, updateAsset, addAsset, addAssetByPath, importError, clearImportError,
-    addScene, removeScene, splitScene, saveProject, saveStatus,
+    addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
     addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements,
@@ -1588,6 +1588,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             <button className="btn btn-ghost btn-icon text-sm" title="上へ" disabled={i === 0} onClick={() => patch((s) => moveLine(s, line.lineId, -1))}>↑</button>
                             <button className="btn btn-ghost btn-icon text-sm" title="下へ" disabled={i === lastIdx} onClick={() => patch((s) => moveLine(s, line.lineId, 1))}>↓</button>
                             <button className="btn btn-ghost btn-icon text-sm" title="このセリフを削除" onClick={() => patch((s) => removeLine(s, line.lineId))}>削除</button>
+                            {/* 掛け合いでも分割できる（この行から後ろを別の場面へ・#405）。先頭行や短い場面（両側が最小尺を割る）では不可。 */}
+                            <button
+                              className="btn btn-ghost btn-icon text-sm"
+                              title="この行から後ろを別の場面に分ける"
+                              disabled={i === 0 || selected.durationSec < 2 * SCENE_MIN_DURATION_SEC}
+                              onClick={() => splitSceneAtLine(selected.sceneId, i)}
+                            >
+                              分ける
+                            </button>
                           </div>
                         </div>
                         <textarea
@@ -1897,6 +1906,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 動画の収め方・使う範囲・元の音声は、上の「使用素材」で動画を選ぶと設定できます。声の大きさは「セリフ」で場面ごとに変えられます。
               </p>
             </div>
+
+            {/* 場面編集から離れずに複製できる（台本表への往復・選択リセットを避ける・#405）。複製直後のコピーを選択する。 */}
+            <button
+              className="btn btn-ghost btn-block mt"
+              onClick={() => { const id = duplicateScene(selected.sceneId); if (id) selectScene(id); }}
+              title="この場面をもう1枚コピーします"
+            >
+              <PlusIcon size={16} />
+              この場面を複製
+            </button>
 
             {confirmDelete ? (
               <div className="row gap-sm mt">

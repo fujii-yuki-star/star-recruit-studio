@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Part, Scene } from './types';
 import type { Layer } from '../template/types';
 import { NARRATION_STATUS } from '../enums';
-import { duplicateSceneInList, moveSceneInList, rebuildPartSceneIds, splitSceneInList, switchSceneTemplate } from './sceneOps';
+import { duplicateSceneInList, moveSceneInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
 
 function scene(id: string, order: number, partId = 'part_001', narration?: Scene['narration']): Scene {
   return {
@@ -84,6 +84,28 @@ describe('duplicateSceneInList', () => {
     expect(r.parts[0].sceneIds).toEqual(['scene_001', 'scene_003', 'scene_002']);
   });
 
+  it('掛け合い場面の複製では行音声も作り直しになる（新 sceneId で音声キーが変わるため・#405 P1）', () => {
+    const src: Scene = {
+      ...scene('scene_001', 1),
+      lines: [
+        { lineId: 'line_001', text: 'やあ', speaker: 3, startSec: 0, status: NARRATION_STATUS.generated, voicePath: 'v/a.wav' },
+        { lineId: 'line_002', text: 'どうも', speaker: 2, startSec: 2, status: NARRATION_STATUS.generated, voicePath: 'v/b.wav' },
+      ],
+    };
+    const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
+    const r = duplicateSceneInList([src], parts, 'scene_001', 'scene_003');
+    const dup = r.scenes[1];
+    expect(dup.lines?.map((l) => l.status)).toEqual([NARRATION_STATUS.none, NARRATION_STATUS.none]); // 作り直し
+    expect(dup.lines?.every((l) => l.voicePath === null)).toBe(true);
+    // 複製として text/speaker/startSec/lineId は保持。
+    expect(dup.lines?.map((l) => l.text)).toEqual(['やあ', 'どうも']);
+    expect(dup.lines?.map((l) => l.speaker)).toEqual([3, 2]);
+    expect(dup.lines?.map((l) => l.startSec)).toEqual([0, 2]);
+    expect(dup.lines?.map((l) => l.lineId)).toEqual(['line_001', 'line_002']);
+    // 元場面は保持。
+    expect(r.scenes[0].lines?.every((l) => l.status === NARRATION_STATUS.generated)).toBe(true);
+  });
+
   it('存在しない sceneId は変化なし', () => {
     const r = duplicateSceneInList(threeScenes(), onePart(), 'scene_999', 'scene_004');
     expect(r.scenes).toHaveLength(3);
@@ -156,6 +178,75 @@ describe('splitSceneInList', () => {
     const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
     const r = splitSceneInList(scenes, parts, 'scene_001', 5, 'scene_002');
     expect(r.scenes).toHaveLength(1); // 5 < 2*SCENE_MIN_DURATION_SEC(3) ＝ 変化なし
+  });
+});
+
+describe('splitSceneLinesInList（掛け合いの行境界分割・#405）', () => {
+  const dialogueScene = (over?: Partial<Scene>): Scene => ({
+    ...scene('scene_001', 1),
+    durationSec: 10,
+    lines: [
+      { lineId: 'line_001', text: 'やあ', speaker: 3, status: NARRATION_STATUS.generated, voicePath: 'v/a.wav' },
+      { lineId: 'line_002', text: 'どうも', speaker: 2, status: NARRATION_STATUS.generated, voicePath: 'v/b.wav' },
+      { lineId: 'line_003', text: 'こんにちは', speaker: 3, status: NARRATION_STATUS.generated, voicePath: 'v/c.wav' },
+    ],
+    ...over,
+  });
+  const p1 = (): Part[] => [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
+
+  it('lineIndex で前後に分け、後半は新場面＝音声/開始秒をリセット（前半は保持）', () => {
+    const r = splitSceneLinesInList([dialogueScene()], p1(), 'scene_001', 1, 'scene_002');
+    expect(r.scenes.map((s) => s.sceneId)).toEqual(['scene_001', 'scene_002']);
+    expect(r.scenes[0].lines?.map((l) => l.lineId)).toEqual(['line_001']); // 前半
+    expect(r.scenes[1].lines?.map((l) => l.lineId)).toEqual(['line_002', 'line_003']); // 後半
+    expect(r.scenes[0].lines?.[0].status).toBe(NARRATION_STATUS.generated); // 前半は sceneId 不変＝音声保持
+    expect(r.scenes[1].lines?.every((l) => l.status === NARRATION_STATUS.none)).toBe(true); // 後半は作り直し
+    expect(r.scenes[1].lines?.every((l) => l.voicePath === null)).toBe(true);
+    expect(r.scenes[0].durationSec + r.scenes[1].durationSec).toBe(10); // 合計は元のまま（文字数按分）
+    expect(r.parts[0].sceneIds).toEqual(['scene_001', 'scene_002']);
+  });
+
+  it('先頭（lineIndex 0）では分割しない（前半が空になる）', () => {
+    expect(splitSceneLinesInList([dialogueScene()], p1(), 'scene_001', 0, 'scene_002').scenes).toHaveLength(1);
+  });
+
+  it('掛け合いでない（lines 無し・1行）は分割しない', () => {
+    expect(splitSceneLinesInList([{ ...scene('scene_001', 1), durationSec: 10 }], p1(), 'scene_001', 1, 'scene_002').scenes).toHaveLength(1);
+    const oneLine = [dialogueScene({ lines: [{ lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none }] })];
+    expect(splitSceneLinesInList(oneLine, p1(), 'scene_001', 1, 'scene_002').scenes).toHaveLength(1);
+  });
+
+  it('尺が最小尺の2倍未満なら分割しない', () => {
+    expect(splitSceneLinesInList([dialogueScene({ durationSec: 5 })], p1(), 'scene_001', 1, 'scene_002').scenes).toHaveLength(1);
+  });
+
+  it('手動 startSec つき掛け合いを分割しても、前半/後半とも範囲外 startSec が残らない（#405 P1）', () => {
+    // 10秒場面で line_002 は 6秒開始。line_002 までを前半に分けると前半尺が 6秒未満になり得て、
+    // 元は正常だった startSec:6 が新しい尺を超える（→ lineTimeline でクランプされ0秒区間として落ちる）。
+    const src = dialogueScene({
+      lines: [
+        { lineId: 'line_001', text: 'あ', speaker: 3, startSec: 0, status: NARRATION_STATUS.generated, voicePath: 'v/a.wav' },
+        { lineId: 'line_002', text: 'い', speaker: 2, startSec: 6, status: NARRATION_STATUS.generated, voicePath: 'v/b.wav' },
+        { lineId: 'line_003', text: 'うえおかきくけこ', speaker: 3, startSec: 8, status: NARRATION_STATUS.generated, voicePath: 'v/c.wav' },
+      ],
+    });
+    const r = splitSceneLinesInList([src], p1(), 'scene_001', 2, 'scene_002');
+    const [first, second] = r.scenes;
+    expect(first.lines?.map((l) => l.lineId)).toEqual(['line_001', 'line_002']); // 前半
+    expect(second.lines?.map((l) => l.lineId)).toEqual(['line_003']); // 後半
+    // 前半は startSec を自動逐次へ戻す（音声＝status/voicePath は sceneId 不変ゆえ保持）。
+    expect(first.lines?.map((l) => l.startSec)).toEqual([undefined, undefined]);
+    expect(first.lines?.map((l) => l.status)).toEqual([NARRATION_STATUS.generated, NARRATION_STATUS.generated]);
+    expect(first.lines?.map((l) => l.voicePath)).toEqual(['v/a.wav', 'v/b.wav']);
+    // 後半は音声も作り直し＋startSec も自動逐次。
+    expect(second.lines?.map((l) => l.startSec)).toEqual([undefined]);
+    expect(second.lines?.every((l) => l.status === NARRATION_STATUS.none && l.voicePath === null)).toBe(true);
+    // 不変条件：どの行の startSec も、その場面の durationSec を超えて残っていない。
+    for (const s of r.scenes) {
+      for (const l of s.lines ?? []) {
+        expect(l.startSec === undefined || l.startSec < s.durationSec).toBe(true);
+      }
+    }
   });
 });
 

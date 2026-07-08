@@ -66,9 +66,10 @@ export function moveSceneInList(
 
 /**
  * 場面を複製し、元の直後に挿入した結果を返す（新IDは呼び出し側が採番して渡す）。
- * 複製された場面は音声を作り直す：voices/<sceneId>.wav は sceneId 単位なので
- * voicePath=null / status='none' にリセットする（ADR-0007・複数場面が同一音声を指す不整合を防ぐ）。
- * セリフ文言・素材割当・クリップ設定などはそのまま引き継ぐ。
+ * 複製された場面は音声を作り直す：単一 narration は voices/<sceneId>.wav が sceneId 単位、掛け合いの行音声は
+ * lineAudioKey(sceneId, lineId) がキー（ADR-0015）で、いずれも新 sceneId では実体が無い。よって narration と scene.lines の
+ * 両方について voicePath=null / status='none' にリセットする（「作成済みに見えるのに音声が無い/旧音声を指す」不整合を防ぐ）。
+ * 行の lineId/text/speaker/startSec は複製としてそのまま保持（尺・素材割当・クリップ設定なども引き継ぐ）。
  */
 export function duplicateSceneInList(
   scenes: Scene[],
@@ -83,6 +84,8 @@ export function duplicateSceneInList(
     ...src,
     sceneId: newSceneId,
     narration: { ...src.narration, status: NARRATION_STATUS.none, voicePath: null },
+    // 掛け合い（行ごと音声）も新 sceneId で音声キーが変わるため各行を作り直しにする（lineId/text/speaker/startSec は保持）。
+    ...(src.lines ? { lines: src.lines.map((l) => ({ ...l, status: NARRATION_STATUS.none, voicePath: null })) } : {}),
     // 複製直後は検証し直す前提で警告をクリアする（古い検証結果を引き継がない）。
     warnings: [],
   };
@@ -127,6 +130,46 @@ export function splitSceneInList(
     narration: { ...src.narration, text: secondText, status: NARRATION_STATUS.none, voicePath: null },
     warnings: [],
   };
+  const next = [...scenes];
+  next.splice(idx, 1, first, second);
+  const reordered = reindexOrder(next);
+  return { scenes: reordered, parts: rebuildPartSceneIds(parts, reordered) };
+}
+
+/**
+ * 掛け合い場面（scene.lines）を行境界で2つに分ける（#405）。lines[0, lineIndex) を前・[lineIndex, 末] を後の場面へ。
+ * 後の場面は新 sceneId になり行の音声キー（lineAudioKey）が変わるため、後半の各行の音声状態/パス/開始秒をリセット
+ *（作り直し前提・自動逐次に戻す＝splitSceneInList と同ポリシー）。前半は sceneId 不変ゆえ音声（キー）は保つが、
+ * 場面尺が d1 に縮むと手動 startSec が新しい尺を超え得る（例: 10秒場面で startSec:6 の行が前半 d1<6 で範囲外→
+ * lineTimeline でクランプされ0秒区間として落ち「作成済みなのに出ない」不整合＝ADR-0026 ④）ため、**両場面とも
+ * startSec は自動逐次に戻す**（保存された startSec が新しい durationSec を超えて残らないことを保証）。
+ * 掛け合いでない/1行/範囲外/尺が最小尺の2倍未満は分割しない（変化なし）。表示時間は各側の総文字数比で按分（各最低 SCENE_MIN_DURATION_SEC・合計は元のまま）。
+ */
+export function splitSceneLinesInList(
+  scenes: Scene[],
+  parts: Part[],
+  sceneId: string,
+  lineIndex: number,
+  newSceneId: string,
+): { scenes: Scene[]; parts: Part[] } {
+  const idx = scenes.findIndex((s) => s.sceneId === sceneId);
+  if (idx < 0) return { scenes, parts };
+  const src = scenes[idx];
+  const lines = src.lines;
+  if (!lines || lines.length < 2) return { scenes, parts }; // 掛け合いでない/1行＝分割不能
+  if (lineIndex < 1 || lineIndex > lines.length - 1) return { scenes, parts }; // 各側1行以上
+  if (src.durationSec < 2 * SCENE_MIN_DURATION_SEC) return { scenes, parts }; // 両場面が最小尺（11 §4）を割る
+  // 前半は音声（sceneId 不変ゆえキー lineAudioKey も不変）を保つが、尺が縮み手動 startSec が範囲外になり得るため
+  // startSec は自動逐次へ戻す（後半と対称・上記 JSDoc の不整合を分割時に潰す）。lineId/text/speaker/subtitle 等は保持。
+  const firstLines = lines.slice(0, lineIndex).map((l) => ({ ...l, startSec: undefined }));
+  const secondLines = lines
+    .slice(lineIndex)
+    .map((l) => ({ ...l, status: NARRATION_STATUS.none, voicePath: null, startSec: undefined }));
+  const len1 = firstLines.reduce((n, l) => n + l.text.length, 0);
+  const len2 = secondLines.reduce((n, l) => n + l.text.length, 0);
+  const [d1, d2] = apportionDuration(src.durationSec, len1, len2);
+  const first: Scene = { ...src, durationSec: d1, lines: firstLines, warnings: [] };
+  const second: Scene = { ...src, sceneId: newSceneId, durationSec: d2, lines: secondLines, warnings: [] };
   const next = [...scenes];
   next.splice(idx, 1, first, second);
   const reordered = reindexOrder(next);
