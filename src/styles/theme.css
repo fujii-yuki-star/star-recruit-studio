@@ -518,6 +518,13 @@ button {
   background: var(--color-surface-alt);
   color: var(--color-text-muted);
 }
+/* バッジを「押せるボタン」として使う場合は UA 既定のボタン枠/フォントをリセットする（.chip button / .segment button と同慣習）。
+   背景・文字色は .badge-* が持つので書かない（button.badge は詳細度が高く、background を書くと .badge-* の塗りを上書きしてしまう）。#406 */
+button.badge {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
 
 /* ===== 注意書き ===== */
 .notice {

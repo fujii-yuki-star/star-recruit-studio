@@ -22,7 +22,6 @@ export function UsedScenesRow({
           key={s.sceneId}
           type="button"
           className="badge badge-teal"
-          style={{ cursor: "pointer" }}
           onClick={() => onJump(s.sceneId)}
           title={`場面${s.order}の編集を開く`}
         >
