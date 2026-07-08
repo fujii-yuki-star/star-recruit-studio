@@ -236,16 +236,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </button>
           </div>
 
-          {/* 最近のプロジェクト */}
-          <div className="row-between mb">
-            <h2 className="section-title" style={{ margin: 0 }}>
-              最近のプロジェクト
-            </h2>
-            <button className="btn btn-ghost" onClick={() => onNavigate("draft")}>
-              すべて見る
-              <ChevronRightIcon size={16} />
-            </button>
-          </div>
+          {/* 最近のプロジェクト（この画面自体が一覧なので「すべて見る」導線は置かない・#399 レビュー）。 */}
+          <h2 className="section-title mb">最近のプロジェクト</h2>
           <div className="col gap-sm">
             {projects.length === 0 ? (
               <div className="text-sm text-muted">

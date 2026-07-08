@@ -26,7 +26,7 @@ import { SettingsScreen } from "./app/screens/SettingsScreen";
 import { AboutScreen } from "./app/screens/AboutScreen";
 
 const titles: Record<ScreenId, string> = {
-  home: "ホーム",
+  home: "プロジェクト", // サイドバー先頭「プロジェクト」＝一覧（現ホーム統合・#399 B案）。名前と画面を一致させる。
   wizard: "新しい動画を作る",
   confirm: "動画案を作る前の確認",
   generating: "動画案を作成中",
@@ -52,6 +52,9 @@ function App() {
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const loadProject = useProjectStore((s) => s.loadProject);
   const loadUserTemplates = useProjectStore((s) => s.loadUserTemplates);
+  // サイドバー「今の動画（名前）」用（#399 B案・#252 合流）：動画を開いている間だけ出し、名前を表示する。
+  const hasProjectContent = useProjectStore((s) => s.status !== "idle" || s.scenes.length > 0);
+  const projectName = useProjectStore((s) => s.meta.projectName);
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
     useStartNewProject(setScreen);
@@ -124,7 +127,7 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar current={screen} onNavigate={setScreen} />
+      <Sidebar current={screen} onNavigate={setScreen} projectName={projectName} hasProjectContent={hasProjectContent} />
       <div className="main">
         {!hasOwnHeader && (
           <header className="topbar">
@@ -160,7 +163,7 @@ function App() {
         {!hasOwnHeader && screen !== "home" && confirmNew && (
           <div className="notice notice-warn" role="alert" style={{ margin: "var(--gap)" }}>
             <span>
-              今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトはホームの一覧からいつでも開けます）。
+              今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトはプロジェクト一覧からいつでも開けます）。
             </span>
             <div className="row gap-sm">
               <button className="btn btn-primary btn-icon" onClick={confirmNewProject}>
