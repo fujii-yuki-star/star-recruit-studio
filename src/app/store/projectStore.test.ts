@@ -487,6 +487,36 @@ describe('projectStore autoGenerateIfSafe（#384・§2-6：自動生成が送信
   });
 });
 
+describe('projectStore newBlankProject（白紙から作る・#393）', () => {
+  const realGenerate = useProjectStore.getState().generate;
+  afterEach(() => {
+    useProjectStore.setState({ generate: realGenerate });
+  });
+
+  it('空プロジェクトにし、status を ready にする（idle にしない）', () => {
+    useProjectStore.setState({
+      status: 'idle',
+      scenes: [{ sceneId: 'scene_001' } as never],
+      parts: [{ partId: 'part_001', title: 'P', order: 1, sceneIds: ['scene_001'] } as never],
+    });
+    useProjectStore.getState().newBlankProject();
+    const st = useProjectStore.getState();
+    expect(st.scenes).toEqual([]);
+    expect(st.parts).toEqual([]);
+    expect(st.status).toBe('ready'); // idle にしない＝マウント時の自動生成を発火させない
+  });
+
+  it('白紙化の後は autoGenerateIfSafe が生成しない（Mock でも status!==idle）＝AI 送信を誘発しない（§2-6）', async () => {
+    useProjectStore.getState().newBlankProject();
+    const genSpy = vi.fn(async () => {});
+    useProjectStore.setState({ generate: genSpy });
+    const willSpy = vi.spyOn(aiClient, 'willSendExternally').mockResolvedValue(false); // Mock（送信なし）でも
+    await useProjectStore.getState().autoGenerateIfSafe();
+    expect(genSpy).not.toHaveBeenCalled();
+    willSpy.mockRestore();
+  });
+});
+
 describe('projectStore 生成のキャンセル（#402）', () => {
   beforeEach(() => {
     useProjectStore.setState({ templates: sampleTemplates });

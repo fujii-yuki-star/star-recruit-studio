@@ -73,16 +73,30 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   const draftWarnings = warningsToDraftWarnings(warnings);
 
   if (rows.length === 0) {
+    // 場面ゼロだがプロジェクトはある（白紙開始／全削除＝status "ready"）＝手動で場面を足す導線を出す（#393）。
+    // status "idle"（まだ何も無い）はウィザードへ誘導。生成中は「作成中」表示。
+    const started = status === "ready";
     return (
       <div className="main-scroll">
-        <PageHead title="動画のたたき台を確認" desc="ゆうこが作った構成を、台本表で確認・修正できます。" />
+        <PageHead title="動画のたたき台を確認" desc="台本表で場面を確認・修正できます。" />
         <EmptyState
-          title={status === "generating" ? "動画案を作成中です…" : "まだ動画案がありません"}
-          message="「新しい動画を作る」から、会社情報と素材を入れて動画案を作成しましょう。"
+          title={status === "generating" ? "動画案を作成中です…" : started ? "場面を追加して作り始めましょう" : "まだ動画案がありません"}
+          message={
+            started
+              ? "「場面を追加」で最初の場面を作り、セリフ・素材・見た目を設定していきましょう。"
+              : "「新しい動画を作る」から、会社情報と素材を入れて動画案を作成しましょう。"
+          }
           action={
-            <button className="btn btn-primary" onClick={() => onNavigate("wizard")}>
-              新しい動画を作る
-            </button>
+            started ? (
+              <button className="btn btn-primary" onClick={() => addScene()}>
+                <PlusIcon size={18} />
+                場面を追加
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={() => onNavigate("wizard")}>
+                新しい動画を作る
+              </button>
+            )
           }
         />
       </div>

@@ -123,6 +123,8 @@ interface ProjectState {
   reset: () => void;
   /** 新規プロジェクト（作業状態を初期化）。 */
   newProject: () => void;
+  /** 白紙から作る（ウィザード/AI を通らない・#393）。空プロジェクトにし status を "ready" にして自動生成（§2-6）を発火させない。 */
+  newBlankProject: () => void;
   /** 現在の状態を project.json として保存する。進行中の保存があればその完了を待つ（多重起動防止＋await で保存完了を保証・#256）。 */
   saveProject: () => Promise<void>;
   /** 実際の保存処理（内部・saveProject 経由でのみ呼ぶ）。 */
@@ -501,6 +503,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
       _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
     }));
+  },
+  newBlankProject: () => {
+    // 白紙から作る（#393）＝ウィザード/AI を通らず手動で場面を組む。共通リセット（newProject）を流用し、
+    // status を "idle" のままにしない（"ready" にする）ことで、各画面マウント時の autoGenerateIfSafe（§2-6）が
+    // 発火しない＝白紙開始がそのまま AI 送信を誘発しない。書き出し中ガードは newProject 側と二重で持つ（早期 return）。
+    if (isExportBusy(get().exportRun.phase)) return;
+    get().newProject();
+    set({ status: "ready" });
   },
   // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
   // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。

@@ -34,7 +34,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   const renameProject = useProjectStore((s) => s.renameProject);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   // 「新しい動画を作る」はヘッダと同じ破棄ガード付きフロー（共有フックで挙動統一）。
-  const { confirming: confirmNew, start: startNew, confirm: confirmStartNew, cancel: cancelNew } =
+  const { confirming: confirmNew, start: startNew, startBlank, confirm: confirmStartNew, cancel: cancelNew } =
     useStartNewProject(onNavigate);
   // プロジェクトを開けなかったときのユーザー向け表示（§2-5）。
   const [openError, setOpenError] = useState(false);
@@ -174,10 +174,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 伝えたい内容と写真・動画を入れると、ゆうこが動画のたたき台を作ります。
                 内容を確認・修正してから、動画として保存できます。
               </p>
-              <button className="btn btn-primary btn-lg mt" onClick={startNew} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}>
-                <PlusIcon size={20} />
-                新しい動画を作る
-              </button>
+              <div className="row gap-sm mt" style={{ flexWrap: "wrap" }}>
+                <button className="btn btn-primary btn-lg" onClick={startNew} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}>
+                  <PlusIcon size={20} />
+                  新しい動画を作る
+                </button>
+                {/* 白紙から作る（#393）＝ウィザード/AI を通らず、空のたたき台から自分で場面を組み立てる。 */}
+                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : "AI を使わず、自分で場面を組み立てます"}>
+                  白紙から作る
+                </button>
+              </div>
             </div>
             <div
               className="thumb thumb-video"
