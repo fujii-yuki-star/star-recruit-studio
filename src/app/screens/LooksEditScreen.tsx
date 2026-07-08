@@ -14,6 +14,8 @@ import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
 import { Switch } from "../components/ui";
+import { NumberField } from "../components/NumberField";
+import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { textKeyLabel } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
 
@@ -28,29 +30,10 @@ function cloneTemplate(t: Template): Template {
   return { ...t, layers: t.layers.map((l) => ({ ...l })) };
 }
 
-/** レイヤーの座標/サイズ用の小さな数値入力（整数 px。入力途中の NaN/空は無視、min 指定（幅/高さ）は下限クランプ）。 */
+// レイヤーの座標/サイズ/濃さ用の数値入力は共有 NumberField（#459）＝入力途中の NaN/空は無視、blur で min/max クランプ。
+// flex: "1 0 40%" で従来どおり2列で折り返す。呼び出しを短くするための薄いラッパ。
 function numField(label: string, value: number, onChange: (v: number) => void, min?: number, max?: number) {
-  return (
-    <label className="text-sm" style={{ display: "flex", flexDirection: "column", flex: "1 0 40%" }}>
-      {label}
-      <input
-        className="input"
-        type="number"
-        step={1}
-        min={min}
-        max={max}
-        value={value}
-        onChange={(e) => {
-          const v = parseInt(e.target.value, 10);
-          if (Number.isNaN(v)) return;
-          let clamped = v;
-          if (min != null) clamped = Math.max(min, clamped);
-          if (max != null) clamped = Math.min(max, clamped);
-          onChange(clamped);
-        }}
-      />
-    </label>
-  );
+  return <NumberField label={label} value={value} onChange={onChange} min={min} max={max} style={{ flex: "1 0 40%" }} />;
 }
 
 // 見た目パターンの作成・編集の専用画面（ADR-0017 当初設計＝新規画面・#271）。
@@ -320,7 +303,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
                     <input className="input" type="color" value={l.background?.color ?? "#000000"} onChange={(e) => onUpdateLayer(l.id, { background: { ...l.background, color: e.target.value } })} />
                   </div>
-                  {numField("濃さ(%)", Math.round((l.background?.opacity ?? 0.55) * 100), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: v / 100 } }), 0, 100)}
+                  {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? 0.55), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
                 </div>
               )}
             </div>

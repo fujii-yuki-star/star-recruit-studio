@@ -40,6 +40,8 @@ import type { FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
+import { NumberField } from "../components/NumberField";
+import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
 import {
@@ -113,23 +115,6 @@ const freeKindLabel: Record<FreeElementKind, string> = {
 
 // 自由配置の位置・サイズ等の数値入力（キーボードで調整＝a11y。ドラッグ操作は Phase 4b）。
 // 既定 step=1＝座標/サイズ/重なり順は整数 px（非整数を renderer に渡さない）。
-function NumberField({ label, value, min, max, step = 1, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; onChange: (v: number) => void }) {
-  return (
-    <div className="field" style={{ flex: 1, margin: 0 }}>
-      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{label}</label>
-      <input
-        className="input"
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-    </div>
-  );
-}
-
 // 掛け合いの行ごとの声パラメータ（話す速さ/声の高さ/抑揚）。設定画面と同じ voiceParams スライダーを流用（#242）。
 // value=null/未指定＝場面/動画の既定を継承（スライダーは既定位置を淡色表示）。動かすと固有値、「全体に合わせる」で継承へ戻す。
 function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, onReset }: { label: string; range: ParamRange; value: number | null | undefined; lowLabel: string; highLabel: string; onChange: (v: number) => void; onReset: () => void }) {
@@ -664,15 +649,20 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>透明度</label>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>濃さ</label>
+            {/* 内部は 0〜1・UI は「濃さ(%)」0〜100 に統一（#459 item5・変換は domain/format/opacity に集約）。
+                dragGroup＝1ドラッグ1履歴（#389）。pointerup の取りこぼしは useHistoryGroup が window で拾って必ず閉じる。 */}
             <input
-              type="range" min={0} max={1} step={0.1} value={el.opacity ?? 1}
+              type="range" min={0} max={100} step={1} value={opacityToPercent(el.opacity ?? 1)}
               {...dragGroup}
-              onChange={(e) => setFreeElementOpacity(el, Number(e.target.value))}
-              // dragGroup＝1回のドラッグを1履歴に（#389）。pointerup の取りこぼしは useHistoryGroup が window で拾って
-              // 必ずグループを閉じるため、要素上の pointerup 頼みだった旧課題（開きっぱなし）は解消済み。
+              onChange={(e) => setFreeElementOpacity(el, percentToOpacity(Number(e.target.value)))}
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
+            <div className="row-between text-faint text-sm">
+              <span>薄い</span>
+              <span>{opacityToPercent(el.opacity ?? 1)}%</span>
+              <span>濃い</span>
+            </div>
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
