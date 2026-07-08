@@ -1,5 +1,6 @@
 import type { Asset } from "../../domain/project/types";
 import { clampClipTime } from "../../domain/asset/clip";
+import { formatDuration } from "../../domain/format/duration";
 import {
   DEFAULT_FIT, ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
   VOLUME_MAX, VOLUME_MIN, VOLUME_STEP,
@@ -25,8 +26,8 @@ export function ClipDetailControls({
   return (
     <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: 6 }}>
       <p className="text-sm text-muted" style={{ margin: "0 0 6px" }}>
-        ▶ 動画素材です。確認画面では枠が空に見えますが、書き出すと動画が入ります。
-        {dur != null && `（長さ：約${dur.toFixed(1)}秒）`}
+        ▶ 動画素材です。仕上がり確認では、再生すると動画が流れます（停止中は表示されません）。書き出しにも動画が入ります。
+        {dur != null && `（長さ：約${formatDuration(dur)}）`}
       </p>
 
       {/* 枠への収め方 */}

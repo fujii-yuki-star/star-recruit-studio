@@ -4,7 +4,7 @@ import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type Easing, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
-import { BGM_VOLUME, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
@@ -15,6 +15,7 @@ import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/fre
 import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { switchSceneTemplate } from "../../domain/project/sceneOps";
+import { clampSceneDuration } from "../../domain/project/sceneDuration";
 import { pickableTemplatesForScene } from "../../domain/template/templateSelection";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
@@ -226,6 +227,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // タイムライン/公開前チェックの「場面を直す」）で残留値が誤採用される（#400 レビュー）。null/不在は先頭場面へ。
   // subscribe せず getState で読む＝破棄時の再描画を避ける（selectedId は state 保持されるので消えない）。
   const [selectedId, setSelectedId] = useState(() => useProjectStore.getState().editingSceneId ?? "");
+  // 表示時間は編集中だけローカルドラフト（どの場面のか＝sceneId 付き）で持ち、store には blur で clamp 済みの有効値だけ commit する。
+  // ＝入力途中の範囲外値（1/2/16 等）が自動保存（useAutoSave）や書き出し前保存で保存されるのを防ぐ（#411 P1）。
+  // sceneId を持つことで、場面を切り替えたら（sceneId 不一致で）自動的にドラフトが無効化される（effect 不要・別場面の値を見せない）。
+  const [durationDraft, setDurationDraft] = useState<{ sceneId: string; value: string } | null>(null);
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
   // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
@@ -1842,8 +1847,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 id="duration"
                 className="input"
                 type="number"
-                value={selected.durationSec}
-                onChange={(e) => patch((s) => ({ ...s, durationSec: Number(e.target.value) }))}
+                min={SCENE_MIN_DURATION_SEC}
+                max={SCENE_MAX_DURATION_SEC}
+                step={1}
+                value={durationDraft?.sceneId === selected.sceneId ? durationDraft.value : selected.durationSec}
+                onFocus={() => setDurationDraft({ sceneId: selected.sceneId, value: String(selected.durationSec) })}
+                onChange={(e) => setDurationDraft({ sceneId: selected.sceneId, value: e.target.value })} // 途中値は store に入れない＝範囲外値を自動保存しない（#411 P1）
+                onBlur={() => {
+                  // 確定時のみ範囲クランプ（clampSceneDuration＝§7 テスト済み純粋関数）して commit。空/不正は元の値を保持（変更しない）。
+                  const raw = durationDraft?.sceneId === selected.sceneId ? durationDraft.value : "";
+                  const clamped = raw.trim() === "" || Number.isNaN(Number(raw)) ? selected.durationSec : clampSceneDuration(Number(raw));
+                  if (clamped !== selected.durationSec) patch((s) => ({ ...s, durationSec: clamped }));
+                  setDurationDraft(null);
+                }}
               />
             </div>
             </CollapsibleSection>

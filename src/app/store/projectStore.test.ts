@@ -553,3 +553,20 @@ describe('projectStore 生成のキャンセル（#402）', () => {
     spy.mockRestore();
   });
 });
+
+describe('projectStore プロジェクト名の入力防御（80字上限・#411／#416 と対）', () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().newProject();
+  });
+
+  it('setProjectName は 80字超を切り詰めて保持する（schema の projectName maxLength と一致＝不正な保存を作らない）', () => {
+    useProjectStore.getState().setProjectName('あ'.repeat(120));
+    expect(useProjectStore.getState().meta.projectName).toHaveLength(80);
+  });
+
+  it('80字以内はそのまま保持する', () => {
+    useProjectStore.getState().setProjectName('短いプロジェクト名');
+    expect(useProjectStore.getState().meta.projectName).toBe('短いプロジェクト名');
+  });
+});

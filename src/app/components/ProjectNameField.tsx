@@ -2,6 +2,7 @@
 // 確定は blur/Enter（1改名=1履歴＝store.setProjectName）。空・未変更は破棄して元の名前に戻す。技術用語なし（§2-3）。
 import { useState } from "react";
 import { useProjectStore } from "../store/projectStore";
+import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 
 export function ProjectNameField() {
   const projectName = useProjectStore((s) => s.meta.projectName);
@@ -23,7 +24,7 @@ export function ProjectNameField() {
       placeholder="無題のプロジェクト"
       aria-label="動画の名前"
       title="動画の名前（ここで変えられます）"
-      maxLength={80} // schema の projectName 上限（1–80字）に合わせる（貼り付け等での超過を UI で予防）
+      maxLength={PROJECT_NAME_MAX_LENGTH} // schema の projectName 上限（1–80字）に合わせる（貼り付け等での超過を UI で予防・#411）
       onFocus={() => setDraft(projectName)}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}

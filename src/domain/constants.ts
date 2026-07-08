@@ -6,6 +6,9 @@ import type { Orientation } from './enums';
 export const SCENE_MIN_DURATION_SEC = 3;
 export const SCENE_MAX_DURATION_SEC = 15;
 export const SCENE_DEFAULT_DURATION_SEC = 8;
+// プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる
+//（§5・全入力口で共有する上限＝入力防御 #411／検証ネット #416 の prevention 側）。
+export const PROJECT_NAME_MAX_LENGTH = 80;
 export const TRANSITION_DEFAULT_SEC = 0.5;
 
 export const VIDEO_TARGET_MAX_SEC_MVP = 300;

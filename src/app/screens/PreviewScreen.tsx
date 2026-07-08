@@ -4,6 +4,7 @@ import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
+import { formatDuration } from "../../domain/format/duration";
 import { BgmPicker } from "../components/BgmPicker";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
@@ -34,12 +35,6 @@ type RangeMode = "scene" | "part" | "all";
 
 // 場面送りの最小秒（表示時間は SceneEdit で 0/負値にも編集され得るため、即時送り/不正値を防ぐ下限）。
 const MIN_PLAY_SEC = 0.3;
-
-function formatDuration(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m > 0 ? `${m}分${s}秒` : `${s}秒`;
-}
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
   // narrationAudioById は再生 effect が getState でスナップショット読みするため購読しない（#382・参照変化で再描画/再起動しない）。

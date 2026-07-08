@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { YukoPanel } from "../components/YukoPanel";
@@ -252,6 +253,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       className="input grow"
                       value={renameValue}
                       onChange={(e) => setRenameValue(e.target.value)}
+                      maxLength={PROJECT_NAME_MAX_LENGTH}
                       placeholder="プロジェクト名"
                       aria-label="プロジェクト名"
                       autoFocus

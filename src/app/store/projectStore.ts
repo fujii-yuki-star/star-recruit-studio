@@ -1,7 +1,7 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
-import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
+import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, PROJECT_NAME_MAX_LENGTH, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
@@ -666,7 +666,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (get().meta.projectId === projectId) get().newProject();
   },
   renameProject: async (projectId, newName) => {
-    const name = newName.trim();
+    // 上限で切り詰めて保存＝schema の projectName maxLength(80) 超を保存させない（入力防御 #411・#416 と対）。
+    const name = newName.trim().slice(0, PROJECT_NAME_MAX_LENGTH);
     if (!name) return; // 空名は変更しない（UI 側でも保存を抑止）
     // 保存済み project.json を読み、名前と更新日時だけ差し替えて書き戻す（他のデータは保持）。
     const updatedAt = new Date().toISOString();
@@ -900,8 +901,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   setProjectName: (name) => {
     // 編集中の名前変更＝メモリの meta を更新（保存/自動保存で永続化）。UI 側は blur/Enter で確定＝1改名=1履歴。
+    // 上限で切り詰め＝schema の projectName maxLength(80) 超をメモリにも入れない（貼り付け等の保険・#411）。
     get().pushHistory();
-    set((s) => ({ meta: { ...s.meta, projectName: name }, saveStatus: "idle" }));
+    set((s) => ({ meta: { ...s.meta, projectName: name.slice(0, PROJECT_NAME_MAX_LENGTH) }, saveStatus: "idle" }));
   },
   updateVoiceSettings: (patch) => {
     get().pushHistory();
