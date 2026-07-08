@@ -65,6 +65,29 @@ export function moveSceneInList(
 }
 
 /**
+ * 場面を結果配列の toIndex へ移動した結果を返す（ドラッグ&ドロップの任意位置移動・#398）。
+ * toIndex は「移動後の配列でのその場面の index」＝ドロップ先の要素の位置。上下どちらの向きでも直感的に落ち着く
+ *（下向き＝ドロップ先の位置へ、上向き＝ドロップ先を押し下げる）。範囲外は端にクランプ。移動後は order を 1..N で振り直し、
+ * part.sceneIds もパート所属を保ったまま再構築する（moveSceneInList と同じ整合）。対象なし/位置不変は同一参照を返す（未保存/履歴にしない）。
+ */
+export function moveSceneToIndexInList(
+  scenes: Scene[],
+  parts: Part[],
+  sceneId: string,
+  toIndex: number,
+): { scenes: Scene[]; parts: Part[] } {
+  const from = scenes.findIndex((s) => s.sceneId === sceneId);
+  if (from < 0) return { scenes, parts };
+  const to = Math.max(0, Math.min(toIndex, scenes.length - 1));
+  if (from === to) return { scenes, parts };
+  const next = [...scenes];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  const reordered = reindexOrder(next);
+  return { scenes: reordered, parts: rebuildPartSceneIds(parts, reordered) };
+}
+
+/**
  * 場面を複製し、元の直後に挿入した結果を返す（新IDは呼び出し側が採番して渡す）。
  * 複製された場面は音声を作り直す：単一 narration は voices/<sceneId>.wav が sceneId 単位、掛け合いの行音声は
  * lineAudioKey(sceneId, lineId) がキー（ADR-0015）で、いずれも新 sceneId では実体が無い。よって narration と scene.lines の
