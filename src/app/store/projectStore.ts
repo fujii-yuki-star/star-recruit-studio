@@ -263,6 +263,8 @@ interface ProjectState {
   future: DocSnapshot[];
   /** 連続操作（ドラッグ等）を1ステップに合成するためのネスト深さ（内部）。 */
   _historyGroupDepth: number;
+  /** グループ中でまだ snapshot 未記録か（内部）。最初の実変更で記録＝未変更 focus/pointerdown では履歴を消費しない（#389）。 */
+  _historyGroupPending: boolean;
   /** 文書を変える操作の「適用前」に呼び、現在状態を past へ積む（グループ中は積まない・transient 変更では呼ばない）。 */
   pushHistory: () => void;
   /** 連続操作の開始/終了（開始で1回だけ「編集前」を記録し、連続中の細かい更新は積まない）。 */
@@ -387,6 +389,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   past: [],
   future: [],
   _historyGroupDepth: 0,
+  _historyGroupPending: false,
   meta: defaultHeader(),
   parts: [],
   scenes: [],
@@ -507,6 +510,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       past: [], // 別文書＝履歴をクリア（ADR-0020）
       future: [],
       _historyGroupDepth: 0,
+      _historyGroupPending: false,
       wizardStep: 0, // 新規＝ウィザードは先頭ステップから（#401）
       exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
       _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
@@ -678,6 +682,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       past: [], // 別文書を開く＝履歴をクリア（ADR-0020）
       future: [],
       _historyGroupDepth: 0,
+      _historyGroupPending: false,
       wizardStep: 0, // 別文書＝ウィザードのステップも初期化（#401）
       exportRun: IDLE_EXPORT_RUN, // 別文書＝前の書き出し結果を持ち越さない
       _generationSeq: s._generationSeq + 1, // 別文書へ切替＝in-flight の旧生成を無効化（#402 レビュー）
@@ -1407,19 +1412,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return result.audioDataUrl;
   },
   // ── Undo/Redo（ADR-0020・#211）。文書を変える action は適用前に pushHistory を呼ぶ。連続操作は begin/endHistoryGroup で1ステップに合成。 ──
-  pushHistory: () => {
-    if (get()._historyGroupDepth > 0) return; // グループ中は begin で記録済みなので積まない（ドラッグ＝1ステップ）
-    set((s) => recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)));
-  },
-  beginHistoryGroup: () =>
-    // 連続操作の開始。深さ0→1 のときだけ「編集前」を1回記録する。記録と深さ更新は1回の set でアトミックに。
+  // グループは**遅延記録**：begin では snapshot を取らず、グループ中の**最初の pushHistory（＝最初の実変更）**で
+  // 「編集前」を1回だけ記録する。これで focus/pointerdown しただけ（未変更）では履歴を消費しない（#389 レビュー）。
+  pushHistory: () =>
     set((s) => {
-      if (s._historyGroupDepth === 0) {
-        const snap = recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
-        return { ...snap, _historyGroupDepth: 1 };
+      if (s._historyGroupDepth > 0) {
+        if (!s._historyGroupPending) return {}; // グループ中・記録済み＝積まない（1文字/1tick 毎に積まない）
+        // グループ中の最初の変更：ここで初めて「編集前」を記録する（begin だけでは積まない）。
+        return { ...recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)), _historyGroupPending: false };
       }
-      return { _historyGroupDepth: s._historyGroupDepth + 1 };
+      return recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)); // グループ外＝従来どおり1操作=1履歴
     }),
+  beginHistoryGroup: () =>
+    // 連続操作の開始。深さ0→1 で「保留」にするだけ（snapshot は最初の pushHistory まで遅延＝未変更 focus で積まない）。
+    set((s) => (s._historyGroupDepth === 0 ? { _historyGroupDepth: 1, _historyGroupPending: true } : { _historyGroupDepth: s._historyGroupDepth + 1 })),
   endHistoryGroup: () => set((s) => ({ _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) })),
   undo: () =>
     set((s) => {

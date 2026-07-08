@@ -224,7 +224,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
   // 場面カード列のドラッグ&ドロップ並び替え（#398）。カード自身を持ち手＋落下先にする（クリックで選択・ドラッグで並び替え）。
   const sceneDnd = useDragReorder(moveSceneToIndex);
-  // 連続編集を1履歴にまとめる（#389）：テキスト欄は focus/blur、スライダーは pointerdown/up でグループ化。
+  // 連続編集を1履歴にまとめる（#389）：テキスト欄は focus/blur、スライダーは pointerdown 開始＋window で終了（取りこぼし防止）。
   const { textGroup, dragGroup } = useHistoryGroup();
   // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
@@ -669,8 +669,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               type="range" min={0} max={1} step={0.1} value={el.opacity ?? 1}
               {...dragGroup}
               onChange={(e) => setFreeElementOpacity(el, Number(e.target.value))}
-              // 注: スライダーは range のため pointerup を取りこぼすと履歴グループが開きっぱなしになりうる。
-              // ドラッグ合成は確実な FREE オーバーレイ（pointer capture 有）に限定し、スライダーは各変更=1ステップとする（ADR-0020 未解決2・後続）。
+              // dragGroup＝1回のドラッグを1履歴に（#389）。pointerup の取りこぼしは useHistoryGroup が window で拾って
+              // 必ずグループを閉じるため、要素上の pointerup 頼みだった旧課題（開きっぱなし）は解消済み。
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
           </div>

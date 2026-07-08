@@ -626,19 +626,28 @@ describe('projectStore プロジェクト名の入力防御（80字上限・#411
 
 describe('projectStore 履歴グループ（#389・連続編集を1履歴にまとめる）', () => {
   beforeEach(() => {
-    useProjectStore.setState({ past: [], future: [], _historyGroupDepth: 0 });
+    useProjectStore.setState({ past: [], future: [], _historyGroupDepth: 0, _historyGroupPending: false });
   });
 
-  it('begin→複数 pushHistory→end で履歴は1件だけ増える（グループ中の pushHistory は no-op）', () => {
+  it('begin→複数 pushHistory→end で履歴は1件だけ増える（最初の変更で記録・以降 no-op）', () => {
     const st = useProjectStore.getState();
     st.beginHistoryGroup();
     st.pushHistory();
     st.pushHistory();
     st.pushHistory();
     st.endHistoryGroup();
-    // 3回でなく1回だけ（beginHistoryGroup で1回記録・以降 no-op）＝1キーストローク毎に積まない。
+    // 3回でなく1回だけ（最初の pushHistory で記録・以降 no-op）＝1キーストローク毎に積まない。
     expect(useProjectStore.getState().past).toHaveLength(1);
     expect(useProjectStore.getState()._historyGroupDepth).toBe(0); // グループは閉じている
+  });
+
+  it('begin→（変更なし）→end では履歴を消費しない（未変更 focus/pointerdown で積まない・#389 レビュー）', () => {
+    const st = useProjectStore.getState();
+    st.beginHistoryGroup();
+    st.endHistoryGroup();
+    // pushHistory が一度も呼ばれない＝snapshot は遅延記録なので past は増えない（Undo が「何もしない」を生まない）。
+    expect(useProjectStore.getState().past).toHaveLength(0);
+    expect(useProjectStore.getState()._historyGroupDepth).toBe(0);
   });
 
   it('グループ外の pushHistory は都度積まれる（従来どおり・グループ化しない編集は1操作=1履歴）', () => {

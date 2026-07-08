@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
 import { useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
+import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
 import {
   DEFAULT_AI_MODEL, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
@@ -21,6 +22,8 @@ export function SettingsScreen() {
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
+  // 声パラメータ（速さ/高さ/抑揚）スライダーのドラッグを1履歴に（#389・場面編集側と同じ挙動に揃える）。
+  const { dragGroup } = useHistoryGroup();
 
   const [keyInput, setKeyInput] = useState("");
   const [aiConnected, setAiConnected] = useState(false);
@@ -267,6 +270,7 @@ export function SettingsScreen() {
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.speed ?? SPEED_RANGE.def, SPEED_RANGE)}
+              {...dragGroup}
               onChange={(e) =>
                 updateVoiceSettings({ speed: sliderToValue(Number(e.target.value), SPEED_RANGE) })
               }
@@ -288,6 +292,7 @@ export function SettingsScreen() {
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.pitch ?? PITCH_RANGE.def, PITCH_RANGE)}
+              {...dragGroup}
               onChange={(e) =>
                 updateVoiceSettings({ pitch: sliderToValue(Number(e.target.value), PITCH_RANGE) })
               }
@@ -309,6 +314,7 @@ export function SettingsScreen() {
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.intonation ?? INTONATION_RANGE.def, INTONATION_RANGE)}
+              {...dragGroup}
               onChange={(e) =>
                 updateVoiceSettings({
                   intonation: sliderToValue(Number(e.target.value), INTONATION_RANGE),
