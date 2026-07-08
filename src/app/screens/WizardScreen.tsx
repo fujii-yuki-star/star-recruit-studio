@@ -412,7 +412,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                       className="input"
                       value={newStrength}
                       onChange={(e) => setNewStrength(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && addStrength()}
+                      onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === "Enter") addStrength(); }}
                       placeholder="例：相談しやすい環境"
                     />
                     <button className="btn btn-secondary" onClick={addStrength}>
@@ -479,7 +479,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                           className="input"
                           value={newAgenda}
                           onChange={(e) => setNewAgenda(e.target.value)}
-                          onKeyDown={(e) => e.key === "Enter" && addAgenda()}
+                          onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === "Enter") addAgenda(); }}
                           placeholder="例：今期の方針"
                           maxLength={GENERAL_LIST_ITEM_MAX_LEN}
                         />
@@ -516,7 +516,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                           className="input"
                           value={newKeyPoint}
                           onChange={(e) => setNewKeyPoint(e.target.value)}
-                          onKeyDown={(e) => e.key === "Enter" && addKeyPoint()}
+                          onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === "Enter") addKeyPoint(); }}
                           placeholder="例：売上は前年比120%"
                           maxLength={GENERAL_LIST_ITEM_MAX_LEN}
                         />

@@ -4,7 +4,7 @@ import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type Easing, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
-import { BGM_VOLUME, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
@@ -1842,8 +1842,24 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 id="duration"
                 className="input"
                 type="number"
+                min={SCENE_MIN_DURATION_SEC}
+                max={SCENE_MAX_DURATION_SEC}
+                step={1}
                 value={selected.durationSec}
-                onChange={(e) => patch((s) => ({ ...s, durationSec: Number(e.target.value) }))}
+                onChange={(e) => {
+                  if (e.target.value === "") return; // 空は無視（前の値を保持＝0を保存しない・#411）
+                  const v = Number(e.target.value);
+                  if (Number.isNaN(v)) return;
+                  // 0/負は即下限へ（0秒尺を保存させない）。正の値は入力途中として許し、範囲は blur で整える。
+                  patch((s) => ({ ...s, durationSec: v <= 0 ? SCENE_MIN_DURATION_SEC : v }));
+                }}
+                onBlur={(e) => {
+                  const v = Number(e.target.value);
+                  const clamped = Number.isNaN(v)
+                    ? SCENE_MIN_DURATION_SEC
+                    : Math.min(SCENE_MAX_DURATION_SEC, Math.max(SCENE_MIN_DURATION_SEC, v));
+                  if (clamped !== selected.durationSec) patch((s) => ({ ...s, durationSec: clamped }));
+                }}
               />
             </div>
             </CollapsibleSection>

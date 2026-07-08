@@ -63,6 +63,8 @@ export function MaterialsScreen() {
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
+  // 素材名は編集中だけドラフトで持ち、確定は blur。空/未変更は破棄して元の名前へ戻す＝素材名を空にできないようにする（#411 item7・ProjectNameField と同型）。
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
   // 素材削除は取り消せない（assets は Undo 対象外＝ADR-0020）ので、他の削除と同様にインライン確認を挟む（#383）。
   // id で持つ＝別の素材を選び直したら確認は自動的に解除される。
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -241,8 +243,14 @@ export function MaterialsScreen() {
               <input
                 id="mat-name"
                 className="input"
-                value={selected.displayName}
-                onChange={(e) => updateAsset(selected.assetId, (a) => ({ ...a, displayName: e.target.value }))}
+                value={nameDraft ?? selected.displayName}
+                onFocus={() => setNameDraft(selected.displayName)}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => {
+                  const name = (nameDraft ?? "").trim();
+                  if (name && name !== selected.displayName) updateAsset(selected.assetId, (a) => ({ ...a, displayName: name }));
+                  setNameDraft(null); // 空・未変更は破棄＝元の名前に戻す（素材名を空にできない・#411）
+                }}
               />
             </div>
 
@@ -280,7 +288,7 @@ export function MaterialsScreen() {
                   value={newTag}
                   placeholder="タグを追加"
                   onChange={(e) => setNewTag(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addTag()}
+                  onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === "Enter") addTag(); }}
                 />
                 <button className="btn btn-secondary" onClick={addTag}>
                   <PlusIcon size={16} />
