@@ -133,6 +133,41 @@ export function splitSceneInList(
   return { scenes: reordered, parts: rebuildPartSceneIds(parts, reordered) };
 }
 
+/**
+ * 掛け合い場面（scene.lines）を行境界で2つに分ける（#405）。lines[0, lineIndex) を前・[lineIndex, 末] を後の場面へ。
+ * 後の場面は新 sceneId になり行の音声キー（lineAudioKey）が変わるため、後半の各行の音声状態/パス/開始秒をリセット
+ *（作り直し前提・自動逐次に戻す＝splitSceneInList と同ポリシー）。掛け合いでない/1行/範囲外/尺が最小尺の2倍未満は分割しない（変化なし）。
+ * 表示時間は各側の総文字数比で按分（各最低 SCENE_MIN_DURATION_SEC・合計は元のまま）。
+ */
+export function splitSceneLinesInList(
+  scenes: Scene[],
+  parts: Part[],
+  sceneId: string,
+  lineIndex: number,
+  newSceneId: string,
+): { scenes: Scene[]; parts: Part[] } {
+  const idx = scenes.findIndex((s) => s.sceneId === sceneId);
+  if (idx < 0) return { scenes, parts };
+  const src = scenes[idx];
+  const lines = src.lines;
+  if (!lines || lines.length < 2) return { scenes, parts }; // 掛け合いでない/1行＝分割不能
+  if (lineIndex < 1 || lineIndex > lines.length - 1) return { scenes, parts }; // 各側1行以上
+  if (src.durationSec < 2 * SCENE_MIN_DURATION_SEC) return { scenes, parts }; // 両場面が最小尺（11 §4）を割る
+  const firstLines = lines.slice(0, lineIndex);
+  const secondLines = lines
+    .slice(lineIndex)
+    .map((l) => ({ ...l, status: NARRATION_STATUS.none, voicePath: null, startSec: undefined }));
+  const len1 = firstLines.reduce((n, l) => n + l.text.length, 0);
+  const len2 = secondLines.reduce((n, l) => n + l.text.length, 0);
+  const [d1, d2] = apportionDuration(src.durationSec, len1, len2);
+  const first: Scene = { ...src, durationSec: d1, lines: firstLines, warnings: [] };
+  const second: Scene = { ...src, sceneId: newSceneId, durationSec: d2, lines: secondLines, warnings: [] };
+  const next = [...scenes];
+  next.splice(idx, 1, first, second);
+  const reordered = reindexOrder(next);
+  return { scenes: reordered, parts: rebuildPartSceneIds(parts, reordered) };
+}
+
 /** 分割位置を [1, len-1] に収める。端/範囲外は中央に近い文末記号→無ければ中央で分割。len<2 は null（分割不能）。 */
 function resolveSplitIndex(text: string, index: number): number | null {
   const len = text.length;

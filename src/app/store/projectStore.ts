@@ -16,7 +16,7 @@ import {
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
-import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
+import { duplicateSceneInList, moveSceneInList, splitSceneInList, splitSceneLinesInList } from "../../domain/project/sceneOps";
 import { duplicateSceneAnimations, removeAnimationsForTargets } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
@@ -163,6 +163,8 @@ interface ProjectState {
   duplicateScene: (sceneId: string) => string;
   /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
   splitScene: (sceneId: string, splitIndex: number) => string;
+  /** 掛け合い場面（scene.lines）を lineIndex（この行から後ろ）で2場面に分ける。新しい sceneId を返す（#405）。 */
+  splitSceneAtLine: (sceneId: string, lineIndex: number) => string;
   /** ウィザードで入力した目的・会社情報を現在のプロジェクト(meta)へ反映する（保存・生成で使う）。 */
   applyProjectInfo: (input: {
     videoKind?: VideoKind;
@@ -838,6 +840,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (next.scenes === s.scenes) return ""; // 分割不能＝変化なし（未保存にしない）
     get().pushHistory();
     // 分割後の後半場面（newId）は前半と同じ freeLayout を持つ＝元場面のアニメを後半にも引き継ぐ（④・ADR-0019）。
+    set({ ...next, meta: metaWithDuplicatedAnimations(s.meta, sceneId, newId), saveStatus: "idle" });
+    return newId;
+  },
+  splitSceneAtLine: (sceneId, lineIndex) => {
+    const s = get();
+    const newId = createSceneId(s.scenes.map((x) => x.sceneId));
+    const next = splitSceneLinesInList(s.scenes, s.parts, sceneId, lineIndex, newId);
+    if (next.scenes === s.scenes) return ""; // 分割不能（掛け合いでない/1行/尺不足）＝変化なし（未保存にしない）
+    get().pushHistory();
+    // 後半場面（newId）は前半と同じ freeLayout を持つ＝元場面のアニメを後半にも引き継ぐ（splitScene と同じ・④）。
     set({ ...next, meta: metaWithDuplicatedAnimations(s.meta, sceneId, newId), saveStatus: "idle" });
     return newId;
   },
