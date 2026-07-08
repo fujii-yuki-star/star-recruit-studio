@@ -10,6 +10,7 @@ import { PageHead, Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { UsedScenesRow } from "../components/UsedScenesRow";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import {
   PhotoIcon,
   VideoIcon,
@@ -328,29 +329,22 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             </div>
 
             {confirmDeleteId === selected.assetId ? (
-              <div className="notice notice-warn mt" role="alert">
-                <span>
-                  「{selected.displayName || "この素材"}」を削除しますか？元に戻せません。
-                  {usedSceneCount > 0
-                    ? `使っている${usedSceneCount}つの場面は、この素材が空欄になります。`
-                    : "この素材はどの場面でも使われていません。"}
-                </span>
-                <div className="row gap-sm">
-                  <button
-                    className="btn btn-danger btn-icon"
-                    onClick={() => {
-                      removeAsset(selected.assetId);
-                      setConfirmDeleteId(null);
-                    }}
-                  >
-                    <TrashIcon size={16} />
-                    削除する
-                  </button>
-                  <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDeleteId(null)}>
-                    やめる
-                  </button>
-                </div>
-              </div>
+              <DeleteConfirm
+                className="mt"
+                message={
+                  <>
+                    「{selected.displayName || "この素材"}」を削除しますか？元に戻せません。
+                    {usedSceneCount > 0
+                      ? `使っている${usedSceneCount}つの場面は、この素材が空欄になります。`
+                      : "この素材はどの場面でも使われていません。"}
+                  </>
+                }
+                onCancel={() => setConfirmDeleteId(null)}
+                onConfirm={() => {
+                  removeAsset(selected.assetId);
+                  setConfirmDeleteId(null);
+                }}
+              />
             ) : (
               <button className="btn btn-danger btn-block mt" onClick={() => setConfirmDeleteId(selected.assetId)}>
                 <TrashIcon size={16} />
