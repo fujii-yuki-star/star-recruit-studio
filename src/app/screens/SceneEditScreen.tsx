@@ -206,7 +206,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, autoGenerateIfSafe, updateScene, updateAsset, addAsset, addAssetByPath, importError, clearImportError,
-    addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveSceneToIndex, saveProject, saveStatus,
+    addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
     addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements,
@@ -1046,33 +1046,39 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
               <div className="scene-strip">
                 {scenes.map((s, i) => (
-                  <button
-                    key={s.sceneId}
-                    className={`scene-card${selected.sceneId === s.sceneId ? " selected" : ""}`}
-                    onClick={() => selectScene(s.sceneId)}
-                    {...sceneDnd.handleProps(s.sceneId)}
-                    {...sceneDnd.dropProps(i)}
-                    title="ドラッグで並び替え・クリックで選択"
-                    style={{
-                      opacity: sceneDnd.draggingId === s.sceneId ? 0.4 : undefined,
-                      outline:
-                        sceneDnd.overIndex === i && sceneDnd.draggingId && sceneDnd.draggingId !== s.sceneId
-                          ? "2px solid var(--color-primary)"
-                          : undefined,
-                    }}
-                  >
-                    <div className="scene-card-thumb thumb thumb-photo">
-                      <PhotoIcon size={18} />
+                  <div key={s.sceneId} style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
+                    <button
+                      className={`scene-card${selected.sceneId === s.sceneId ? " selected" : ""}`}
+                      onClick={() => selectScene(s.sceneId)}
+                      {...sceneDnd.handleProps(s.sceneId)}
+                      {...sceneDnd.dropProps(i)}
+                      title="ドラッグで並び替え・クリックで選択"
+                      style={{
+                        opacity: sceneDnd.draggingId === s.sceneId ? 0.4 : undefined,
+                        outline:
+                          sceneDnd.overIndex === i && sceneDnd.draggingId && sceneDnd.draggingId !== s.sceneId
+                            ? "2px solid var(--color-primary)"
+                            : undefined,
+                      }}
+                    >
+                      <div className="scene-card-thumb thumb thumb-photo">
+                        <PhotoIcon size={18} />
+                      </div>
+                      <div className="text-sm">
+                        <strong>
+                          {s.order}. {sceneTypeLabel[s.sceneType]}
+                        </strong>
+                      </div>
+                      <div className="text-faint" style={{ fontSize: 11 }}>
+                        {templates.find((t) => t.templateId === s.templateId)?.name ?? ""}
+                      </div>
+                    </button>
+                    {/* ドラッグが使いにくい場合の代替＝前へ/後ろへ（moveLine/moveFreeElZ と同じ↑/↓の流儀・キーボード可）。#398 レビュー */}
+                    <div className="row gap-sm" style={{ justifyContent: "center", marginTop: 4 }}>
+                      <button className="btn btn-ghost btn-icon text-sm" title="前へ" aria-label={`場面${s.order}を前へ移動`} disabled={i === 0} onClick={() => moveScene(s.sceneId, "up")}>←</button>
+                      <button className="btn btn-ghost btn-icon text-sm" title="後ろへ" aria-label={`場面${s.order}を後ろへ移動`} disabled={i === scenes.length - 1} onClick={() => moveScene(s.sceneId, "down")}>→</button>
                     </div>
-                    <div className="text-sm">
-                      <strong>
-                        {s.order}. {sceneTypeLabel[s.sceneType]}
-                      </strong>
-                    </div>
-                    <div className="text-faint" style={{ fontSize: 11 }}>
-                      {templates.find((t) => t.templateId === s.templateId)?.name ?? ""}
-                    </div>
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>

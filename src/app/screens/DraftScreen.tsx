@@ -152,10 +152,11 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                   >
                     <td className="table-num">
                       <span className="row gap-sm" style={{ alignItems: "center" }}>
+                        {/* ドラッグの持ち手（装飾＝aria-hidden）。ネイティブ DnD はキー操作不可のため、アクセシブルな並び替えは
+                            右の ↑/↓ ボタンが担う（見せかけのボタンにしない・#398 レビュー）。 */}
                         <span
                           {...dnd.handleProps(row.id)}
-                          role="button"
-                          aria-label="ドラッグして並び替え"
+                          aria-hidden="true"
                           title="ドラッグして並び替え"
                           style={{ cursor: "grab", userSelect: "none", color: "var(--color-text-muted)", lineHeight: 1 }}
                         >
