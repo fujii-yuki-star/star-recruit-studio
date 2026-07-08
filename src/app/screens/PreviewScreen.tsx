@@ -6,6 +6,7 @@ import { PageHead } from "../components/ui";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { formatDuration } from "../../domain/format/duration";
 import { BgmPicker } from "../components/BgmPicker";
+import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
 import { lineAudioKey } from "../../domain/project/narrationLines";
@@ -38,7 +39,7 @@ const MIN_PLAY_SEC = 0.3;
 
 export function PreviewScreen({ onNavigate }: PreviewProps) {
   // narrationAudioById は再生 effect が getState でスナップショット読みするため購読しない（#382・参照変化で再描画/再起動しない）。
-  const { status, scenes, templates, parts, assets, meta, autoGenerateIfSafe, setEditingSceneId } =
+  const { status, scenes, templates, parts, assets, meta, autoGenerateIfSafe, setEditingSceneId, updateVoiceSettings } =
     useProjectStore();
   const bgmSettings = meta.bgmSettings;
   const [range, setRange] = useState<RangeMode>("all");
@@ -489,11 +490,19 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           </div>
 
           <hr className="divider" />
-          <h2 className="section-title">BGM（音楽）</h2>
+          <h2 className="section-title">音</h2>
           <p className="field-hint" style={{ marginTop: 0 }}>
-            動画に流す音楽を選べます。再生ボタンで実際の雰囲気を確認できます。
+            BGM とナレーションの音量を、再生して聞きながら調整できます。
           </p>
           <BgmPicker />
+          {/* ナレーション音量をここに併置（#407）＝聞きながら BGM とのバランスを調整できる。反映は次の場面/再生から。 */}
+          <div style={{ marginTop: "var(--gap)" }}>
+            <NarrationVolumeControl
+              volume={meta.voiceSettings.volume}
+              onChange={(v) => updateVoiceSettings({ volume: v })}
+              hint="読み上げの声の大きさです。再生して、BGM とのバランスを確かめられます。"
+            />
+          </div>
 
           <div className="col gap-sm mt-lg">
             <button className="btn btn-ghost btn-block" onClick={() => onNavigate("timeline")}>
