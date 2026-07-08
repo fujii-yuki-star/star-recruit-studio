@@ -28,6 +28,7 @@ import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useDragReorder } from "../hooks/useDragReorder";
+import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -133,6 +134,7 @@ function NumberField({ label, value, min, max, step = 1, onChange }: { label: st
 // value=null/未指定＝場面/動画の既定を継承（スライダーは既定位置を淡色表示）。動かすと固有値、「全体に合わせる」で継承へ戻す。
 function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, onReset }: { label: string; range: ParamRange; value: number | null | undefined; lowLabel: string; highLabel: string; onChange: (v: number) => void; onReset: () => void }) {
   const isSet = value != null;
+  const { dragGroup } = useHistoryGroup(); // ドラッグ中の連続変更を1履歴に（#389）
   return (
     <div className="field" style={{ margin: "8px 0 0" }}>
       <div className="row-between" style={{ alignItems: "center" }}>
@@ -148,6 +150,7 @@ function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, on
         min={0}
         max={100}
         value={valueToSlider(value ?? range.def, range)}
+        {...dragGroup}
         onChange={(e) => onChange(sliderToValue(Number(e.target.value), range))}
         style={{ width: "100%", accentColor: isSet ? "var(--color-primary)" : "var(--color-border)" }}
       />
@@ -221,6 +224,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
   // 場面カード列のドラッグ&ドロップ並び替え（#398）。カード自身を持ち手＋落下先にする（クリックで選択・ドラッグで並び替え）。
   const sceneDnd = useDragReorder(moveSceneToIndex);
+  // 連続編集を1履歴にまとめる（#389）：テキスト欄は focus/blur、スライダーは pointerdown 開始＋window で終了（取りこぼし防止）。
+  const { textGroup, dragGroup } = useHistoryGroup();
   // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
@@ -595,7 +600,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         <>
           <div className="field" style={{ marginBottom: 6 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>文字</label>
-            <input className="input" value={el.text ?? ""} onChange={(e) => patchFreeEl(el.id, { text: e.target.value })} />
+            <input className="input" value={el.text ?? ""} {...textGroup} onChange={(e) => patchFreeEl(el.id, { text: e.target.value })} />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6 }}>
             <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
@@ -662,9 +667,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>透明度</label>
             <input
               type="range" min={0} max={1} step={0.1} value={el.opacity ?? 1}
+              {...dragGroup}
               onChange={(e) => setFreeElementOpacity(el, Number(e.target.value))}
-              // 注: スライダーは range のため pointerup を取りこぼすと履歴グループが開きっぱなしになりうる。
-              // ドラッグ合成は確実な FREE オーバーレイ（pointer capture 有）に限定し、スライダーは各変更=1ステップとする（ADR-0020 未解決2・後続）。
+              // dragGroup＝1回のドラッグを1履歴に（#389）。pointerup の取りこぼしは useHistoryGroup が window で拾って
+              // 必ずグループを閉じるため、要素上の pointerup 頼みだった旧課題（開きっぱなし）は解消済み。
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
           </div>
@@ -1114,6 +1120,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         id={`text-${key}`}
                         className="textarea"
                         value={selected.texts[key] ?? ""}
+                        {...textGroup}
                         onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: e.target.value } }))}
                         style={{ minHeight: 60 }}
                       />
@@ -1122,6 +1129,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         id={`text-${key}`}
                         className="input"
                         value={selected.texts[key] ?? ""}
+                        {...textGroup}
                         onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, [key]: e.target.value } }))}
                       />
                     )}
@@ -1643,6 +1651,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           rows={2}
                           placeholder="セリフを入力"
                           value={line.text}
+                          {...textGroup}
                           onChange={(e) => patch((s) => updateLine(s, line.lineId, { text: e.target.value }))}
                         />
                         <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
@@ -1755,6 +1764,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 ref={lineRef}
                 className="textarea"
                 value={selected.narration.text}
+                {...textGroup}
                 onChange={(e) =>
                   patch((s) => ({
                     ...s,
@@ -1865,6 +1875,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     max={VOLUME_MAX}
                     step={VOLUME_STEP}
                     value={sceneNarrationVolume}
+                    {...dragGroup}
                     onChange={(e) =>
                       patch((s) => ({
                         ...s,

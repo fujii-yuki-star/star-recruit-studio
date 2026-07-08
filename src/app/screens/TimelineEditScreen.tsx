@@ -10,6 +10,7 @@ import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { PageHead } from "../components/ui";
 import { ArrowLeftIcon } from "../components/icons";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { useHistoryGroup } from "../hooks/useHistoryGroup";
 
 interface TimelineEditScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -27,6 +28,8 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   const canRedo = useProjectStore((s) => s.future.length > 0);
   // キーボード入口（Ctrl/⌘+Z＝取り消し・Ctrl/⌘+Shift+Z／Ctrl+Y＝やり直し）を場面編集と共有＝挙動を揃える（レビュー対応）。
   useUndoRedoShortcuts();
+  // テロップ文言/数値の連続編集を1履歴にまとめる（#389）。
+  const { textGroup } = useHistoryGroup();
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
 
   const timeline = useMemo(
@@ -114,6 +117,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
                 className="input"
                 value={selectedClip.text ?? ""}
                 placeholder="画面に出す文字"
+                {...textGroup}
                 onChange={(e) => updateOverlayClip(selectedClip.id, { text: e.target.value })}
               />
             </div>
@@ -139,6 +143,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
                   min={0}
                   step={0.5}
                   value={selectedClip.startSec}
+                  {...textGroup}
                   onChange={(e) => updateOverlayClip(selectedClip.id, { startSec: Math.max(0, Number(e.target.value) || 0) })}
                 />
               </div>
@@ -150,6 +155,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
                   min={TIMELINE_MIN_CLIP_SEC}
                   step={0.5}
                   value={selectedClip.durationSec}
+                  {...textGroup}
                   onChange={(e) => updateOverlayClip(selectedClip.id, { durationSec: Math.max(TIMELINE_MIN_CLIP_SEC, Number(e.target.value) || TIMELINE_MIN_CLIP_SEC) })}
                 />
               </div>

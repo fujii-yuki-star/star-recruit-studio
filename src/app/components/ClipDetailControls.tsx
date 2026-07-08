@@ -23,6 +23,9 @@ export function ClipDetailControls({
   const dur = asset.metadata?.durationSec ?? null;
   const hasAudio = asset.metadata?.hasAudio === true;
   const useOriginal = hasAudio && (clip?.useOriginalAudio ?? false);
+  // 注: クリップ設定は Asset（asset.clip）を更新する。ADR-0020 の Undo 履歴 slice は meta/parts/scenes のみで
+  // assets は対象外のため、これらの調整は現状 Undo 対象外＝#389 の履歴グループは付けない（付けても無意味）。
+  // クリップ調整を Undo 可能にするのは履歴 slice/保存先の見直しが要るため別 Issue（#472）で扱う。
   return (
     <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: 6 }}>
       <p className="text-sm text-muted" style={{ margin: "0 0 6px" }}>

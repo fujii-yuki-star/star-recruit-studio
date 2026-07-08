@@ -2,6 +2,7 @@ import type { ChangeEvent } from "react";
 import { useEffect, useRef } from "react";
 import { Switch } from "./ui";
 import { useProjectStore } from "../store/projectStore";
+import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import { BGM_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 
@@ -18,6 +19,8 @@ export function BgmPicker() {
   const bgmError = useProjectStore((s) => s.bgmError);
   const clearBgmError = useProjectStore((s) => s.clearBgmError);
   const fileRef = useRef<HTMLInputElement>(null);
+  // BGM音量ドラッグ中の連続変更を1履歴にまとめる（#389）。
+  const { dragGroup } = useHistoryGroup();
 
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
   const withBgm = bgmSettings?.enabled ?? true;
@@ -116,6 +119,7 @@ export function BgmPicker() {
               max={VOLUME_MAX}
               step={VOLUME_STEP}
               value={bgmSettings?.volume ?? BGM_VOLUME}
+              {...dragGroup}
               onChange={(e) => updateBgmSettings({ volume: Number(e.target.value) })}
               style={{ width: "100%", accentColor: "var(--color-primary)" }}
             />
