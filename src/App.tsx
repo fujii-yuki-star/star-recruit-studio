@@ -163,7 +163,7 @@ function App() {
         {!hasOwnHeader && screen !== "home" && confirmNew && (
           <div className="notice notice-warn" role="alert" style={{ margin: "var(--gap)" }}>
             <span>
-              今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトはホームの一覧からいつでも開けます）。
+              今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトはプロジェクト一覧からいつでも開けます）。
             </span>
             <div className="row gap-sm">
               <button className="btn btn-primary btn-icon" onClick={confirmNewProject}>

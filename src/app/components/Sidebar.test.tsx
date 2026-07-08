@@ -52,4 +52,9 @@ describe("Sidebar（IA再構成・#399 B案）", () => {
     expect(screen.getByText("プロジェクト").closest("button")!.className).toContain("active");
     expect(currentVideoButton()!.className).not.toContain("active");
   });
+
+  it("見た目パターン編集中（looks-edit）でも「見た目パターン」が active＝現在地が消えない", () => {
+    setup({ current: "looks-edit" });
+    expect(screen.getByText("見た目パターン").closest("button")!.className).toContain("active");
+  });
 });

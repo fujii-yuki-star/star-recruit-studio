@@ -43,7 +43,9 @@ const mainMenu: { id: ScreenId; label: string; icon: typeof FolderIcon }[] = [
 
 export function Sidebar({ current, onNavigate, projectName, hasProjectContent }: SidebarProps) {
   // 「プロジェクト」（一覧）は一覧画面でのみ active。工程画面は「今の動画」を active にする。
-  const isActive = (id: ScreenId): boolean => current === id;
+  // 「見た目パターン」は一覧(looks)＋編集(looks-edit)を束ねて active にする（工程画面群と同じ考え方・#399 レビュー）。
+  const isActive = (id: ScreenId): boolean =>
+    id === "looks" ? current === "looks" || current === "looks-edit" : current === id;
   const currentIsProject = projectScreens.includes(current);
   // 動画を開いている、または今まさに工程画面にいるときだけ「今の動画」を出す（未オープン時は出さない＝一覧へ誘導）。
   const showCurrentProject = hasProjectContent || currentIsProject;
