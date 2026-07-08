@@ -50,7 +50,8 @@ export function NumberField({
     const t = draft.trim();
     if (t === "") {
       // 空で確定：クリア可能な欄はクリア、そうでなければ何もしない（＝元値へ戻る）。
-      onClear?.();
+      // すでに空（value=null/undefined）なら onClear を呼ばない＝未変更 blur で no-op のクリア/履歴を出さない（#389 思想・#459 レビュー）。
+      if (!isEmpty) onClear?.();
     } else {
       const n = Number(t);
       if (!Number.isNaN(n)) {

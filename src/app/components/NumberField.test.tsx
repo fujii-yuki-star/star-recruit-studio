@@ -69,4 +69,15 @@ describe("NumberField（数値入力の共通挙動・#459 item4）", () => {
     const input = screen.getByRole("spinbutton") as HTMLInputElement;
     expect(input.value).toBe("");
   });
+
+  it("すでに空（value=null）の欄を触って外すだけでは onClear を呼ばない（no-op クリア/履歴を出さない・#459 レビュー）", () => {
+    const onChange = vi.fn();
+    const onClear = vi.fn();
+    render(<NumberField label="終了" value={null} onChange={onChange} onClear={onClear} placeholder="最後まで" />);
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.blur(input); // 空のまま外す
+    expect(onClear).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });
