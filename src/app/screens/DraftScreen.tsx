@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
+import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
@@ -27,10 +28,12 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo } =
+  const { status, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo } =
     useProjectStore();
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
   const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
+  // 場面のドラッグ&ドロップ並び替え（#398）。持ち手（順番セルのグリップ）を掴んで任意の行へ落とす。↑/↓ も併存（下記・キーボード用）。
+  const dnd = useDragReorder(moveSceneToIndex);
   const aspectRatio = meta.videoSettings.aspectRatio;
   // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -136,8 +139,31 @@ export function DraftScreen({ onNavigate }: DraftProps) {
               </thead>
               <tbody>
                 {rows.map((row, i) => (
-                  <tr key={row.id}>
-                    <td className="table-num">{row.order}</td>
+                  <tr
+                    key={row.id}
+                    {...dnd.dropProps(i)}
+                    style={{
+                      opacity: dnd.draggingId === row.id ? 0.4 : undefined,
+                      background:
+                        dnd.overIndex === i && dnd.draggingId && dnd.draggingId !== row.id
+                          ? "var(--color-primary-soft)"
+                          : undefined,
+                    }}
+                  >
+                    <td className="table-num">
+                      <span className="row gap-sm" style={{ alignItems: "center" }}>
+                        <span
+                          {...dnd.handleProps(row.id)}
+                          role="button"
+                          aria-label="ドラッグして並び替え"
+                          title="ドラッグして並び替え"
+                          style={{ cursor: "grab", userSelect: "none", color: "var(--color-text-muted)", lineHeight: 1 }}
+                        >
+                          ⠿
+                        </span>
+                        {row.order}
+                      </span>
+                    </td>
                     <td>
                       <strong>{row.part}</strong>
                     </td>

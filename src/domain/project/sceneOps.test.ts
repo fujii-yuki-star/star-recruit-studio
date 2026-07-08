@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Part, Scene } from './types';
 import type { Layer } from '../template/types';
 import { NARRATION_STATUS } from '../enums';
-import { duplicateSceneInList, moveSceneInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
+import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
 
 function scene(id: string, order: number, partId = 'part_001', narration?: Scene['narration']): Scene {
   return {
@@ -62,6 +62,62 @@ describe('moveSceneInList', () => {
     expect(r.scenes[1].partId).toBe('part_001'); // 所属（partId）は維持される
     expect(r.parts[0].sceneIds).toEqual(['scene_001']); // 各パートは所属ベースで再構築
     expect(r.parts[1].sceneIds).toEqual(['scene_002']);
+  });
+});
+
+describe('moveSceneToIndexInList（ドラッグ&ドロップの任意位置移動・#398）', () => {
+  it('下へ移動（from<to）＝結果配列の toIndex に落ち着く', () => {
+    const r = moveSceneToIndexInList(threeScenes(), onePart(), 'scene_001', 2);
+    expect(r.scenes.map((s) => s.sceneId)).toEqual(['scene_002', 'scene_003', 'scene_001']);
+    expect(r.scenes.map((s) => s.order)).toEqual([1, 2, 3]); // order は 1..N で振り直し
+    expect(r.parts[0].sceneIds).toEqual(['scene_002', 'scene_003', 'scene_001']); // part.sceneIds も整合
+  });
+
+  it('上へ移動（from>to）＝ドロップ先を押し下げて先頭へ', () => {
+    const r = moveSceneToIndexInList(threeScenes(), onePart(), 'scene_003', 0);
+    expect(r.scenes.map((s) => s.sceneId)).toEqual(['scene_003', 'scene_001', 'scene_002']);
+    expect(r.scenes.map((s) => s.order)).toEqual([1, 2, 3]);
+  });
+
+  it('中間へ移動', () => {
+    const r = moveSceneToIndexInList(threeScenes(), onePart(), 'scene_003', 1);
+    expect(r.scenes.map((s) => s.sceneId)).toEqual(['scene_001', 'scene_003', 'scene_002']);
+  });
+
+  it('同じ位置は変化なし（同一参照＝未保存/履歴にしない）', () => {
+    const scenes = threeScenes();
+    const parts = onePart();
+    const r = moveSceneToIndexInList(scenes, parts, 'scene_002', 1);
+    expect(r.scenes).toBe(scenes);
+    expect(r.parts).toBe(parts);
+  });
+
+  it('範囲外の toIndex は端にクランプ', () => {
+    expect(moveSceneToIndexInList(threeScenes(), onePart(), 'scene_001', 99).scenes.map((s) => s.sceneId)).toEqual([
+      'scene_002', 'scene_003', 'scene_001',
+    ]);
+    expect(moveSceneToIndexInList(threeScenes(), onePart(), 'scene_003', -5).scenes.map((s) => s.sceneId)).toEqual([
+      'scene_003', 'scene_001', 'scene_002',
+    ]);
+  });
+
+  it('存在しない sceneId は変化なし（同一参照）', () => {
+    const scenes = threeScenes();
+    const r = moveSceneToIndexInList(scenes, onePart(), 'scene_999', 0);
+    expect(r.scenes).toBe(scenes);
+  });
+
+  it('複数パートでも partId は維持し sceneIds を所属ベースで再構築する', () => {
+    const parts: Part[] = [
+      { partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001', 'scene_002'] },
+      { partId: 'part_002', title: 'P2', order: 2, sceneIds: ['scene_003'] },
+    ];
+    const scenes = [scene('scene_001', 1, 'part_001'), scene('scene_002', 2, 'part_001'), scene('scene_003', 3, 'part_002')];
+    const r = moveSceneToIndexInList(scenes, parts, 'scene_003', 0);
+    expect(r.scenes.map((s) => s.sceneId)).toEqual(['scene_003', 'scene_001', 'scene_002']);
+    expect(r.scenes.find((s) => s.sceneId === 'scene_003')?.partId).toBe('part_002'); // 所属は不変
+    expect(r.parts[0].sceneIds).toEqual(['scene_001', 'scene_002']); // 所属ベースで再構築（順序は配列順）
+    expect(r.parts[1].sceneIds).toEqual(['scene_003']);
   });
 });
 

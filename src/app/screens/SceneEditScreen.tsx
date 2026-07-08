@@ -27,6 +27,7 @@ import { useProjectStore } from "../store/projectStore";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
+import { useDragReorder } from "../hooks/useDragReorder";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
@@ -205,7 +206,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, autoGenerateIfSafe, updateScene, updateAsset, addAsset, addAssetByPath, importError, clearImportError,
-    addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, saveProject, saveStatus,
+    addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveSceneToIndex, saveProject, saveStatus,
     generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
     addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements,
@@ -218,6 +219,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // プロジェクトの向き（ADR-0012）。見た目ピッカーを場面カテゴリ＋この向きに絞る（#415）。
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
+  // 場面カード列のドラッグ&ドロップ並び替え（#398）。カード自身を持ち手＋落下先にする（クリックで選択・ドラッグで並び替え）。
+  const sceneDnd = useDragReorder(moveSceneToIndex);
   // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
@@ -1042,11 +1045,21 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </button>
               </div>
               <div className="scene-strip">
-                {scenes.map((s) => (
+                {scenes.map((s, i) => (
                   <button
                     key={s.sceneId}
                     className={`scene-card${selected.sceneId === s.sceneId ? " selected" : ""}`}
                     onClick={() => selectScene(s.sceneId)}
+                    {...sceneDnd.handleProps(s.sceneId)}
+                    {...sceneDnd.dropProps(i)}
+                    title="ドラッグで並び替え・クリックで選択"
+                    style={{
+                      opacity: sceneDnd.draggingId === s.sceneId ? 0.4 : undefined,
+                      outline:
+                        sceneDnd.overIndex === i && sceneDnd.draggingId && sceneDnd.draggingId !== s.sceneId
+                          ? "2px solid var(--color-primary)"
+                          : undefined,
+                    }}
                   >
                     <div className="scene-card-thumb thumb thumb-photo">
                       <PhotoIcon size={18} />

@@ -16,7 +16,7 @@ import {
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
-import { duplicateSceneInList, moveSceneInList, splitSceneInList, splitSceneLinesInList } from "../../domain/project/sceneOps";
+import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSceneInList, splitSceneLinesInList } from "../../domain/project/sceneOps";
 import { duplicateSceneAnimations, removeAnimationsForTargets } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
@@ -145,6 +145,8 @@ interface ProjectState {
   removeScene: (sceneId: string) => void;
   /** 場面を上/下へ1つ移動する（表示順＝配列順を入れ替え、order と part.sceneIds を整合）。 */
   moveScene: (sceneId: string, direction: "up" | "down") => void;
+  /** 場面を任意の位置（移動後の配列index）へ動かす（ドラッグ&ドロップ・#398）。1操作=1履歴。 */
+  moveSceneToIndex: (sceneId: string, toIndex: number) => void;
   /** タイムライン上位編集：テロップ overlay クリップを追加し、その id を返す（ADR-0018・③(4)）。 */
   addOverlayClip: (clip: Partial<Omit<OverlayClip, "id">>) => string;
   /** overlay クリップを部分更新（移動＝startSec/anchorSceneId、文言＝text 等）。Undo は meta スナップショットで自動。 */
@@ -820,6 +822,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const s = get();
     const next = moveSceneInList(s.scenes, s.parts, sceneId, direction);
     if (next.scenes === s.scenes) return; // 端＝変化なし（未保存にしない）
+    get().pushHistory();
+    set({ ...next, saveStatus: "idle" });
+  },
+  moveSceneToIndex: (sceneId, toIndex) => {
+    const s = get();
+    const next = moveSceneToIndexInList(s.scenes, s.parts, sceneId, toIndex);
+    if (next.scenes === s.scenes) return; // 位置不変/対象なし＝変化なし（未保存/履歴にしない）
     get().pushHistory();
     set({ ...next, saveStatus: "idle" });
   },
