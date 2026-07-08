@@ -16,6 +16,7 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   const cancelGeneration = useProjectStore((s) => s.cancelGeneration);
   const fail = useProjectStore((s) => s.fail);
   const reset = useProjectStore((s) => s.reset);
+  const startManualEdit = useProjectStore((s) => s.startManualEdit);
   const [progress, setProgress] = useState(8);
 
   useEffect(() => {
@@ -50,7 +51,8 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
                 void generate();
               },
             },
-            { label: "手動で作成する", onClick: () => onNavigate("draft") },
+            // 手動作成リカバリ（#393 P1）：status を error のままにせず ready にし、入力済みメタ/素材を残して draft へ。
+            { label: "手動で作成する", onClick: () => { startManualEdit(); onNavigate("draft"); } },
           ]}
         />
       </div>

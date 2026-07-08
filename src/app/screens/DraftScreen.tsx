@@ -28,7 +28,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo } =
+  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo } =
     useProjectStore();
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
   const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
@@ -73,16 +73,30 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   const draftWarnings = warningsToDraftWarnings(warnings);
 
   if (rows.length === 0) {
+    // 場面ゼロだがプロジェクトはある（白紙開始／全削除＝status "ready"）＝手動で場面を足す導線を出す（#393）。
+    // status "idle"（まだ何も無い）はウィザードへ誘導。生成中は「作成中」表示。
+    const started = status === "ready";
     return (
       <div className="main-scroll">
-        <PageHead title="動画のたたき台を確認" desc="ゆうこが作った構成を、台本表で確認・修正できます。" />
+        <PageHead title="動画のたたき台を確認" desc="台本表で場面を確認・修正できます。" />
         <EmptyState
-          title={status === "generating" ? "動画案を作成中です…" : "まだ動画案がありません"}
-          message="「新しい動画を作る」から、会社情報と素材を入れて動画案を作成しましょう。"
+          title={status === "generating" ? "動画案を作成中です…" : started ? "場面を追加して作り始めましょう" : "まだ動画案がありません"}
+          message={
+            started
+              ? "「場面を追加」で最初の場面を作り、セリフ・素材・見た目を設定していきましょう。"
+              : "「新しい動画を作る」から、会社情報と素材を入れて動画案を作成しましょう。"
+          }
           action={
-            <button className="btn btn-primary" onClick={() => onNavigate("wizard")}>
-              新しい動画を作る
-            </button>
+            started ? (
+              <button className="btn btn-primary" onClick={() => addScene()}>
+                <PlusIcon size={18} />
+                場面を追加
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={() => onNavigate("wizard")}>
+                新しい動画を作る
+              </button>
+            )
           }
         />
       </div>
@@ -95,16 +109,22 @@ export function DraftScreen({ onNavigate }: DraftProps) {
         <div>
           <PageHead
             title="動画のたたき台を確認"
-            desc="ゆうこが作った構成です。台本表を見ながら、自由に修正してください。"
+            desc={
+              draftFromAi
+                ? "ゆうこが作った構成です。台本表を見ながら、自由に修正してください。"
+                : "台本表を見ながら、場面を自由に足したり並べ替えたり直したりできます。"
+            }
           />
 
-          {/* 注意書き */}
-          <div className="notice notice-warn mb">
-            <SparkleIcon size={18} />
-            <span>
-              このたたき台はゆうこ（AI）が作成したものです。必要に応じて自由に修正してください。
-            </span>
-          </div>
+          {/* AI 生成直後だけ「ゆうこ(AI)が作成した」旨を出す（白紙/手動/読込済みでは出さない＝表示と実挙動の一致・#467/ADR-0026）。 */}
+          {draftFromAi && (
+            <div className="notice notice-warn mb">
+              <SparkleIcon size={18} />
+              <span>
+                このたたき台はゆうこ（AI）が作成したものです。必要に応じて自由に修正してください。
+              </span>
+            </div>
+          )}
 
           {/* 自動補正・確認の通知 */}
           <WarningBanner warnings={draftWarnings} />
