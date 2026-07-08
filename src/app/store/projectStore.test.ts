@@ -528,6 +528,7 @@ describe('projectStore startManualEdit（生成失敗からの手動作成リカ
       meta: { ...useProjectStore.getState().meta, companyInfo: { name: '入力済みの会社' } as never },
       assets: [{ assetId: 'asset_001' } as never],
     });
+    const seqBefore = useProjectStore.getState()._generationSeq;
     useProjectStore.getState().startManualEdit();
     const st = useProjectStore.getState();
     expect(st.status).toBe('ready'); // error のままにしない＝たたき台が「場面を追加」導線を出す
@@ -535,6 +536,7 @@ describe('projectStore startManualEdit（生成失敗からの手動作成リカ
     expect(st.draftFromAi).toBe(false); // 手動作成＝AI 由来でない（#467）
     expect(st.meta.companyInfo).toEqual({ name: '入力済みの会社' }); // 入力は残す
     expect(st.assets).toHaveLength(1); // 取り込んだ素材は残す
+    expect(st._generationSeq).toBe(seqBefore + 1); // in-flight 生成を無効化＝後から AI 案に上書きされない（P2）
   });
 });
 

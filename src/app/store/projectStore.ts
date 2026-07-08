@@ -524,7 +524,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 生成失敗/中断からの手動作成リカバリ（#393 P1・12 §9.3／15＝失敗時の手動作成は正規リカバリ）。
     // 入力済みの会社情報・素材・（あれば）場面は残したまま、status を "ready"・aiError をクリアして手動で組む状態にする。
     // status を error のままにしないことで、たたき台が「場面を追加」導線を出す（白紙導線と同じ手動状態＝draftFromAi=false）。
-    set({ status: "ready", aiError: null, draftFromAi: false });
+    // _generationSeq を進めて in-flight の generate を無効化する（デモ/失敗表示から手動へ移った場合など、後から生成が
+    // 成功して手動作成を上書きしないように・#402 と同方針・PR#468 P2）。
+    set((s) => ({ status: "ready", aiError: null, draftFromAi: false, _generationSeq: s._generationSeq + 1 }));
   },
   // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
   // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。
