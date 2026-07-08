@@ -5,6 +5,7 @@ import { assembleProject } from "../../domain/project/persistence";
 import { compileTimeline } from "../../domain/project/compileTimeline";
 import type { OverlayClip } from "../../domain/project/types";
 import { TimelineView } from "../components/TimelineView";
+import { NumberField } from "../components/NumberField";
 import type { ClipDragMode } from "../components/TimelineView";
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { PageHead } from "../components/ui";
@@ -134,31 +135,12 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
                 ))}
               </select>
             </div>
+            {/* 開始/長さは共有 NumberField（#459・blur 確定・空/NaN は元値へ・min クランプ）。commit が1回なので #389 の history グループは不要。 */}
             <div className="row gap-sm">
-              <div className="col" style={{ flex: 1 }}>
-                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>開始（秒）</label>
-                <input
-                  className="input"
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={selectedClip.startSec}
-                  {...textGroup}
-                  onChange={(e) => updateOverlayClip(selectedClip.id, { startSec: Math.max(0, Number(e.target.value) || 0) })}
-                />
-              </div>
-              <div className="col" style={{ flex: 1 }}>
-                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>長さ（秒）</label>
-                <input
-                  className="input"
-                  type="number"
-                  min={TIMELINE_MIN_CLIP_SEC}
-                  step={0.5}
-                  value={selectedClip.durationSec}
-                  {...textGroup}
-                  onChange={(e) => updateOverlayClip(selectedClip.id, { durationSec: Math.max(TIMELINE_MIN_CLIP_SEC, Number(e.target.value) || TIMELINE_MIN_CLIP_SEC) })}
-                />
-              </div>
+              <NumberField label="開始（秒）" value={selectedClip.startSec} min={0} step={0.5}
+                onChange={(v) => updateOverlayClip(selectedClip.id, { startSec: v })} />
+              <NumberField label="長さ（秒）" value={selectedClip.durationSec} min={TIMELINE_MIN_CLIP_SEC} step={0.5}
+                onChange={(v) => updateOverlayClip(selectedClip.id, { durationSec: v })} />
             </div>
             <div>
               <button

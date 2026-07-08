@@ -51,4 +51,22 @@ describe("NumberField（数値入力の共通挙動・#459 item4）", () => {
     fireEvent.blur(input);
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("onClear ありなら空欄確定でクリア（onClear を呼び・onChange は呼ばない）＝終了「最後まで」/開始「自動」用", () => {
+    const onChange = vi.fn();
+    const onClear = vi.fn();
+    render(<NumberField label="終了" value={5} onChange={onChange} onClear={onClear} />);
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+    expect(onClear).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("value=null/undefined は空欄表示（クリア状態）", () => {
+    render(<NumberField label="終了" value={null} onChange={vi.fn()} placeholder="最後まで" />);
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    expect(input.value).toBe("");
+  });
 });
