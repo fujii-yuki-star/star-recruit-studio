@@ -423,7 +423,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                       動画を再生
                     </button>
                     <button className="btn btn-ghost" onClick={() => onNavigate("home")}>
-                      ホームへ戻る
+                      プロジェクト一覧へ戻る
                     </button>
                   </div>
                   {openError && (
