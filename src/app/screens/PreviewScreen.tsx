@@ -286,8 +286,12 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           lineAudios.push(currentAudio);
           // play() の解決＝再生開始。そこから窓を測って次へ。resolve/reject いずれでも一度だけ進む。
           void currentAudio.play().then(scheduleNext, (e) => {
-            console.warn("[PreviewScreen] 音声再生に失敗", e);
-            setNarrationPlayWarning(true); // 裏で失敗させず利用者に通知（§2-5・#452 P2）
+            // 停止・場面送り・行切替で中断された AbortError は正常系＝偽の失敗通知/ログ汚染にしない
+            // （単一ナレーション/BGM と同挙動・#392 レビュー）。進行は既存の scheduleNext（cancelled guard）に委ねる。
+            if (!(e instanceof DOMException && e.name === "AbortError")) {
+              console.warn("[PreviewScreen] 音声再生に失敗", e);
+              setNarrationPlayWarning(true); // 裏で失敗させず利用者に通知（§2-5・#452 P2）
+            }
             scheduleNext();
           });
         } else {
