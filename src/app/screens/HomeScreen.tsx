@@ -5,6 +5,7 @@ import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { YukoPanel } from "../components/YukoPanel";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import {
   PlusIcon,
   LayoutIcon,
@@ -283,30 +284,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     </button>
                   </div>
                 ) : deletingId === p.projectId ? (
-                  <div key={p.projectId} className="notice notice-warn" role="alert">
-                    <span>
-                      「{p.projectName || "無題のプロジェクト"}」を削除しますか？保存した場面・素材・音声ごと消え、元に戻せません。
-                    </span>
-                    <div className="row gap-sm">
-                      <button
-                        className="btn btn-primary btn-icon"
-                        disabled={deleteBusy}
-                        onClick={() => void removeProject(p.projectId)}
-                      >
-                        {deleteBusy ? "削除中…" : "削除する"}
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-icon"
-                        disabled={deleteBusy}
-                        onClick={() => {
-                          setDeletingId(null);
-                          setDeleteError(false);
-                        }}
-                      >
-                        やめる
-                      </button>
-                    </div>
-                  </div>
+                  <DeleteConfirm
+                    key={p.projectId}
+                    busy={deleteBusy}
+                    message={`「${p.projectName || "無題のプロジェクト"}」を削除しますか？保存した場面・素材・音声ごと消え、元に戻せません。`}
+                    onCancel={() => {
+                      setDeletingId(null);
+                      setDeleteError(false);
+                    }}
+                    onConfirm={() => void removeProject(p.projectId)}
+                  />
                 ) : (
                   <div key={p.projectId} className="list-item">
                     <button

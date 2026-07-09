@@ -10,6 +10,7 @@ import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
 import { UsedScenesRow } from "../components/UsedScenesRow";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import { layerLabel, buildSampleScene } from "./looksShared";
 
 // SceneCategory のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
@@ -302,11 +303,11 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
 
             {/* 削除（マイテンプレのみ） */}
             {isUserCurrent && (confirmDelete ? (
-              <div className="row gap-sm" style={{ alignItems: "center" }}>
-                <span className="text-sm">この見た目パターンを削除しますか？</span>
-                <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
-                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
-              </div>
+              <DeleteConfirm
+                message="この見た目パターンを削除しますか？元に戻せません。"
+                onCancel={() => setConfirmDelete(false)}
+                onConfirm={() => void onDelete()}
+              />
             ) : (
               <button
                 className="btn btn-ghost text-sm"

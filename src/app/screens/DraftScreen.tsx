@@ -244,7 +244,11 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                           見た目
                         </button>
                         {confirmId === row.id ? (
+                          // 表の行内は notice ブロックが入らないためインライン。順序/色は統一（やめる左・削除する=danger右＝#410）。
                           <>
+                            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmId(null)}>
+                              やめる
+                            </button>
                             <button
                               className="btn btn-danger btn-icon"
                               onClick={() => {
@@ -253,9 +257,6 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                               }}
                             >
                               削除する
-                            </button>
-                            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmId(null)}>
-                              やめる
                             </button>
                           </>
                         ) : (

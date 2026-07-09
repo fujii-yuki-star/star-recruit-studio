@@ -15,6 +15,7 @@ import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reo
 import type { GroupTransform } from "../../domain/group/types";
 import { Switch } from "../components/ui";
 import { NumberField } from "../components/NumberField";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { textKeyLabel } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
@@ -534,11 +535,11 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             <>
               <hr className="divider" />
               {confirmDelete ? (
-                <div className="row gap-sm" style={{ alignItems: "center" }}>
-                  <span className="text-sm">この見た目パターンを削除しますか？</span>
-                  <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
-                  <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
-                </div>
+                <DeleteConfirm
+                  message="この見た目パターンを削除しますか？元に戻せません。"
+                  onCancel={() => setConfirmDelete(false)}
+                  onConfirm={() => void onDelete()}
+                />
               ) : (
                 <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} onClick={() => setConfirmDelete(true)}>
                   この見た目パターンを削除

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import { useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
@@ -29,6 +30,8 @@ export function SettingsScreen() {
   const [aiConnected, setAiConnected] = useState(false);
   const [keyBusy, setKeyBusy] = useState(false);
   const [keyError, setKeyError] = useState("");
+  // 接続キーの削除も共通の確認へ（#410）。キーは復元できないため確認必須（即時削除だった）。
+  const [confirmClearKey, setConfirmClearKey] = useState(false);
   const [aiModel, setAiModelState] = useState(() => getAiModel());
 
   function onChangeModel(value: string) {
@@ -112,6 +115,7 @@ export function SettingsScreen() {
       setKeyError(typeof e === "string" ? e : "接続を削除できませんでした。もう一度お試しください。");
     } finally {
       setKeyBusy(false);
+      setConfirmClearKey(false);
     }
   }
 
@@ -147,13 +151,22 @@ export function SettingsScreen() {
           </div>
 
           {aiConnected ? (
-            <button
-              className="btn btn-secondary"
-              onClick={() => void onClearKey()}
-              disabled={keyBusy}
-            >
-              接続を削除する
-            </button>
+            confirmClearKey ? (
+              <DeleteConfirm
+                busy={keyBusy}
+                message="接続キーを削除しますか？もう一度使うには、キーを貼り付け直す必要があります。"
+                onCancel={() => setConfirmClearKey(false)}
+                onConfirm={() => void onClearKey()}
+              />
+            ) : (
+              <button
+                className="btn btn-secondary"
+                onClick={() => setConfirmClearKey(true)}
+                disabled={keyBusy}
+              >
+                接続を削除する
+              </button>
+            )
           ) : (
             <div className="field">
               <label className="field-label" htmlFor="aiKey">

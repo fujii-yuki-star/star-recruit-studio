@@ -6,6 +6,7 @@ import { compileTimeline } from "../../domain/project/compileTimeline";
 import type { OverlayClip } from "../../domain/project/types";
 import { TimelineView } from "../components/TimelineView";
 import { NumberField } from "../components/NumberField";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import type { ClipDragMode } from "../components/TimelineView";
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { PageHead } from "../components/ui";
@@ -32,6 +33,8 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   // テロップ文言/数値の連続編集を1履歴にまとめる（#389）。
   const { textGroup } = useHistoryGroup();
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  // 削除は共通の確認へ寄せる（#410・やめる左/削除する danger右）。選ぶテロップが変わると自動で解除される（id 比較）。
+  const [confirmDeleteClipId, setConfirmDeleteClipId] = useState<string | null>(null);
 
   const timeline = useMemo(
     () => compileTimeline(assembleProject(meta, assets, parts, scenes)),
@@ -142,17 +145,26 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
               <NumberField label="長さ（秒）" value={selectedClip.durationSec} min={TIMELINE_MIN_CLIP_SEC} step={0.5}
                 onChange={(v) => updateOverlayClip(selectedClip.id, { durationSec: v })} />
             </div>
-            <div>
-              <button
-                className="btn btn-danger btn-icon"
-                onClick={() => {
+            {confirmDeleteClipId === selectedClip.id ? (
+              <DeleteConfirm
+                message="このテロップを削除しますか？"
+                onCancel={() => setConfirmDeleteClipId(null)}
+                onConfirm={() => {
                   removeOverlayClip(selectedClip.id);
                   setSelectedClipId(null);
+                  setConfirmDeleteClipId(null);
                 }}
-              >
-                このテロップを削除
-              </button>
-            </div>
+              />
+            ) : (
+              <div>
+                <button
+                  className="btn btn-danger btn-icon"
+                  onClick={() => setConfirmDeleteClipId(selectedClip.id)}
+                >
+                  このテロップを削除
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-muted" style={{ margin: 0 }}>
