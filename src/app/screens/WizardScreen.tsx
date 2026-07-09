@@ -11,6 +11,7 @@ import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { YukoPanel } from "../components/YukoPanel";
+import { saveButtonLabel } from "../components/saveButtonLabel";
 import {
   ArrowLeftIcon,
   SaveIcon,
@@ -773,13 +774,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                 disabled={saveStatus === "saving"}
               >
                 <SaveIcon size={18} />
-                {saveStatus === "saving"
-                  ? "保存中…"
-                  : saveStatus === "saved"
-                    ? "保存しました"
-                    : saveStatus === "error"
-                      ? "保存に失敗（もう一度押す）"
-                      : "ここまで保存"}
+                {saveButtonLabel(saveStatus)}
               </button>
               {step < steps.length - 1 && (
                 <button className="btn btn-primary" onClick={next}>

@@ -34,7 +34,6 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const scenes = useProjectStore((s) => s.scenes);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const saveProject = useProjectStore((s) => s.saveProject);
-  const saveStatus = useProjectStore((s) => s.saveStatus);
   const assets = useProjectStore((s) => s.assets);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
@@ -340,20 +339,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               <ArrowLeftIcon size={18} />
               公開前チェックへ戻る
             </button>
+            {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。
+                「動画を保存」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
             <div className="row gap-sm">
-              <button
-                className="btn btn-secondary"
-                onClick={() => void saveProject()}
-                disabled={busy || saveStatus === "saving"}
-              >
-                {saveStatus === "saving"
-                  ? "保存中…"
-                  : saveStatus === "saved"
-                    ? "保存しました"
-                    : saveStatus === "error"
-                      ? "保存に失敗（もう一度押す）"
-                      : "プロジェクトを保存"}
-              </button>
               <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy}>
                 <FilmIcon size={20} />
                 {busy ? "書き出し中…" : "動画を保存"}

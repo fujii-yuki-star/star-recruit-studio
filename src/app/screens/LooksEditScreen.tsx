@@ -405,7 +405,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         <div className="row gap-sm" style={{ alignItems: "center" }}>
           {dirty && <span className="text-sm text-muted">未保存の変更があります</span>}
           <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void onSave()}>
-            {busy ? "保存中…" : "変更を保存"}
+            {busy ? "保存中…" : "保存"}
           </button>
         </div>
       </div>
