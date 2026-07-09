@@ -237,7 +237,9 @@ interface ProjectState {
   confirmReturnTo: ScreenId | null;
   setConfirmReturnTo: (screen: ScreenId | null) => void;
   /** 仕上がり確認（PreviewScreen）の「戻る」で戻る画面（#410 sub3）。多入口（たたき台/場面編集/書き出し）
-   *  のため、開いた側が「来た画面」を記録し、Preview の戻るがそこへ戻す（confirmReturnTo と同方式）。 */
+   *  のため、開いた側が「来た画面」を記録する。confirmReturnTo と違い読み取り後も消費せず永続させる＝Preview→
+   *  タイムライン→「仕上がり確認へ戻る」で Preview に再入場しても直前の入口ラベルを保つため（消費すると退行）。
+   *  ※「編集中の場面」自体は editingSceneId（一度きり）で別に受け渡す（場面編集→仕上がり確認→戻るで同じ場面へ）。 */
   previewReturnTo: ScreenId | null;
   setPreviewReturnTo: (screen: ScreenId | null) => void;
   /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
