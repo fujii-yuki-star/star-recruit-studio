@@ -55,6 +55,24 @@ describe('templateUsage', () => {
       expect(substituteDeletedTemplateInScenes(scenes, 'user_tmpl_001', templates, '16:9')).toBe(scenes);
     });
 
+    it('置換時にテンプレ依存の assetRefs / slotFits / warnings を正準経路で清算する（switchSceneTemplate・11§5・#236）', () => {
+      const scene = base({
+        sceneId: 's1', sceneType: 'opening', templateId: 'user_tmpl_001',
+        assetRefs: { oldSlot: 'asset_x' }, // 削除テンプレ固有のスロット参照（新テンプレに無い）
+        slotFits: { oldSlot: 'cover' },
+        warnings: [{ code: 'X', message: 'm', field: 'templateId', level: 'warning', autoFixed: false }],
+      } as unknown as Partial<Scene>);
+      const alt = tpl({
+        templateId: 'std_opening_16', category: 'opening', aspectRatio: '16:9',
+        layers: [{ id: 'newSlot', type: 'slot', x: 0, y: 0, w: 10, h: 10 }],
+      } as unknown as Partial<Template>);
+      const next = substituteDeletedTemplateInScenes([scene], 'user_tmpl_001', [alt], '16:9');
+      expect(next[0].templateId).toBe('std_opening_16');
+      expect(next[0].assetRefs).toEqual({}); // 旧スロット参照は清算（新テンプレのスロット id 集合に無い）
+      expect(next[0].slotFits).toBeUndefined();
+      expect(next[0].warnings).toEqual([]); // 旧テンプレ基準の検証結果はクリア（再検証前提）
+    });
+
     it('置換先候補から削除テンプレ自身は除く（自身しか無ければ代替なし＝原状維持）', () => {
       const scenes = [base({ sceneId: 's1', sceneType: 'free', templateId: 'user_tmpl_001' })];
       const withDeleted = [tpl({ templateId: 'user_tmpl_001', category: 'free', aspectRatio: '16:9' })];

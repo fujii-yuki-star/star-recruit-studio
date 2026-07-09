@@ -2,6 +2,7 @@
 // 場面は scene.templateId でテンプレを参照する。素材の assetUsage と対で置き、逆引き導線（使用場面バッジ）で共有する。
 import type { Scene } from './types';
 import type { Template } from '../template/types';
+import { switchSceneTemplate } from './sceneOps';
 
 /** この見た目（テンプレ）を使っている場面の配列（順序は scenes のまま）。逆引き（#406）に使う。 */
 export function scenesUsingTemplate(scenes: Scene[], templateId: string): Scene[] {
@@ -29,7 +30,9 @@ export function substituteDeletedTemplateInScenes(
     );
     if (!alt) return sc; // 代替が無ければ原状維持（§9 補正が読込/描画時に対応）。
     changed = true;
-    return { ...sc, templateId: alt.templateId };
+    // templateId 差し替えだけでなく、テンプレ依存の assetRefs/slotFits/warnings も正準経路で清算する
+    // （手動のテンプレ切替と同じ＝11 §5・#236。別の孤立参照＝存在しないスロットへの残骸を残さない・#458 レビュー）。
+    return switchSceneTemplate(sc, alt.templateId, alt.layers);
   });
   return changed ? next : scenes;
 }
