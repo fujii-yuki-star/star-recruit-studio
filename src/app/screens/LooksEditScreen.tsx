@@ -16,6 +16,7 @@ import type { GroupTransform } from "../../domain/group/types";
 import { Switch } from "../components/ui";
 import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
+import { UnsavedMark } from "../components/SaveStatusBadge";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { textKeyLabel } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
@@ -403,7 +404,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           <span className="topbar-title">見た目パターンを編集</span>
         </div>
         <div className="row gap-sm" style={{ alignItems: "center" }}>
-          {dirty && <span className="text-sm text-muted">未保存の変更があります</span>}
+          {dirty && <UnsavedMark />}
           <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void onSave()}>
             {busy ? "保存中…" : "保存"}
           </button>
