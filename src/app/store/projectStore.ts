@@ -70,6 +70,15 @@ const IDLE_EXPORT_RUN: ExportRunState = {
   bgmWarning: "",
   cancelling: false,
 };
+/** 書き出し画面の入力（ファイル名・画質・字幕）。仕上がり確認（BGM選び）への往復で ExportScreen が
+ *  再マウントされても入力を失わないよう画面横断で保持する（#410 sub3 レビュー・exportRun と同じ transient state）。
+ *  fileName=null は「プロジェクト名から既定」。永続 JSON ではないので schema 影響なし。 */
+export interface ExportFormState {
+  fileName: string | null;
+  size: string;
+  withSubtitle: boolean;
+}
+const IDLE_EXPORT_FORM: ExportFormState = { fileName: null, size: "fullhd", withSubtitle: true };
 /** 声設定の編集可能パラメータのみ（defaultVoiceId は必須なので更新対象から除外）。 */
 export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;
 /** BGM設定の編集可能フィールドのみ（assetId は取り込み時に確定するので更新対象から除外）。 */
@@ -236,10 +245,19 @@ interface ProjectState {
    *  たたき台の「作り直す」起点は "draft"。ConfirmScreen がマウント時に読み取り消費する（editingSceneId と同方式の一度きりペイロード）。 */
   confirmReturnTo: ScreenId | null;
   setConfirmReturnTo: (screen: ScreenId | null) => void;
+  /** 仕上がり確認（PreviewScreen）の「戻る」で戻る画面（#410 sub3）。多入口（たたき台/場面編集/書き出し）
+   *  のため、開いた側が「来た画面」を記録する。confirmReturnTo と違い読み取り後も消費せず永続させる＝Preview→
+   *  タイムライン→「仕上がり確認へ戻る」で Preview に再入場しても直前の入口ラベルを保つため（消費すると退行）。
+   *  ※「編集中の場面」自体は editingSceneId（一度きり）で別に受け渡す（場面編集→仕上がり確認→戻るで同じ場面へ）。 */
+  previewReturnTo: ScreenId | null;
+  setPreviewReturnTo: (screen: ScreenId | null) => void;
   /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
   exportRun: ExportRunState;
   /** 書き出し状態を部分更新する（ExportScreen の setPhase/setProgress 等の単一入口）。 */
   setExportRun: (patch: Partial<ExportRunState>) => void;
+  /** 書き出し画面の入力（ファイル名・画質・字幕）。仕上がり確認への往復で失わないよう画面横断で保持（#410 sub3）。 */
+  exportForm: ExportFormState;
+  setExportForm: (patch: Partial<ExportFormState>) => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
@@ -409,8 +427,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   editingSceneId: null,
   wizardStep: 0,
   confirmReturnTo: null,
+  previewReturnTo: null,
   _generationSeq: 0,
   exportRun: IDLE_EXPORT_RUN,
+  exportForm: IDLE_EXPORT_FORM,
   autoGenerateIfSafe: async () => {
     // 画面に直接landしたときだけの自動生成（#384・§2-6）。既に生成済み/生成中なら何もしない。
     if (get().status !== "idle") return;
@@ -513,6 +533,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupPending: false,
       wizardStep: 0, // 新規＝ウィザードは先頭ステップから（#401）
       exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
+      exportForm: IDLE_EXPORT_FORM, // 新規＝前の書き出し入力（ファイル名等）も持ち越さない
       _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
     }));
   },
@@ -685,6 +706,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupPending: false,
       wizardStep: 0, // 別文書＝ウィザードのステップも初期化（#401）
       exportRun: IDLE_EXPORT_RUN, // 別文書＝前の書き出し結果を持ち越さない
+      exportForm: IDLE_EXPORT_FORM, // 別文書＝前の書き出し入力も持ち越さない
       _generationSeq: s._generationSeq + 1, // 別文書へ切替＝in-flight の旧生成を無効化（#402 レビュー）
     }));
     setLastProjectId(projectId);
@@ -1087,7 +1109,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setEditingSceneId: (sceneId) => set({ editingSceneId: sceneId }),
   setWizardStep: (step) => set({ wizardStep: step }),
   setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
+  setPreviewReturnTo: (screen) => set({ previewReturnTo: screen }),
   setExportRun: (patch) => set((s) => ({ exportRun: { ...s.exportRun, ...patch } })),
+  setExportForm: (patch) => set((s) => ({ exportForm: { ...s.exportForm, ...patch } })),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。

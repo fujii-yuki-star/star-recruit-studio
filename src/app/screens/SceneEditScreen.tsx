@@ -58,6 +58,7 @@ import {
   ChevronRightIcon,
   PlayIcon,
   StopIcon,
+  ArrowLeftIcon,
 } from "../components/icons";
 
 interface SceneEditProps {
@@ -206,6 +207,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const setFontId = useProjectStore((s) => s.setFontId);
+  const setPreviewReturnTo = useProjectStore((s) => s.setPreviewReturnTo);
+  const setEditingSceneId = useProjectStore((s) => s.setEditingSceneId);
   // プロジェクトの向き（ADR-0012）。見た目ピッカーを場面カテゴリ＋この向きに絞る（#415）。
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
@@ -820,10 +823,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           >
             {isGeneratingNarration ? "作成中…" : "全場面の声を作成"}
           </button>
-          <button className="btn btn-secondary" onClick={() => onNavigate("draft")}>
-            台本表に戻る
+          <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("draft")}>
+            <ArrowLeftIcon size={16} />
+            台本表へ戻る
           </button>
-          <button className="btn btn-primary" onClick={() => onNavigate("preview")}>
+          {/* 仕上がり確認から「場面編集へ戻る」で“いま編集中の場面”に戻れるよう、現在の場面を editingSceneId に
+              預けてから遷移する（#410 sub3 レビュー）。これが無いと再マウントで先頭場面に戻り作業位置を失う。 */}
+          <button className="btn btn-primary" onClick={() => { setEditingSceneId(selected?.sceneId ?? null); setPreviewReturnTo("scene-edit"); onNavigate("preview"); }}>
             仕上がり確認へ
             <ChevronRightIcon size={18} />
           </button>

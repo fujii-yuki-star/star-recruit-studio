@@ -37,11 +37,20 @@ type RangeMode = "scene" | "part" | "all";
 // 場面送りの最小秒（表示時間は SceneEdit で 0/負値にも編集され得るため、即時送り/不正値を防ぐ下限）。
 const MIN_PLAY_SEC = 0.3;
 
+// 仕上がり確認の「戻る」ラベル（来た画面ごと・#410 sub3）。入口はこの3つ。
+const PREVIEW_BACK_LABEL: Partial<Record<ScreenId, string>> = {
+  draft: "たたき台へ戻る",
+  "scene-edit": "場面編集へ戻る",
+  export: "書き出しへ戻る",
+};
+
 export function PreviewScreen({ onNavigate }: PreviewProps) {
   // narrationAudioById は再生 effect が getState でスナップショット読みするため購読しない（#382・参照変化で再描画/再起動しない）。
-  const { status, scenes, templates, parts, assets, meta, autoGenerateIfSafe, setEditingSceneId, updateVoiceSettings } =
+  const { status, scenes, templates, parts, assets, meta, autoGenerateIfSafe, setEditingSceneId, updateVoiceSettings, previewReturnTo } =
     useProjectStore();
   const bgmSettings = meta.bgmSettings;
+  // 「戻る」先＝来た画面（#410 sub3）。既知の入口（たたき台/場面編集/書き出し）以外や未設定はたたき台へ。
+  const previewBackTo: ScreenId = previewReturnTo && PREVIEW_BACK_LABEL[previewReturnTo] ? previewReturnTo : "draft";
   const [range, setRange] = useState<RangeMode>("all");
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -370,6 +379,14 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         title="仕上がり確認"
         desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。"
       />
+
+      {/* 多入口（たたき台/場面編集/書き出し）のため、開いた側が記録した「来た画面」へ戻る（#410 sub3・タイムライン編集と同じ上左パターン）。 */}
+      <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
+        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate(previewBackTo)}>
+          <ArrowLeftIcon size={16} />
+          {PREVIEW_BACK_LABEL[previewBackTo]}
+        </button>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
