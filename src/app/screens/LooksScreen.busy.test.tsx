@@ -38,6 +38,8 @@ describe("LooksScreen busy 表示（#410 sub4 レビュー）", () => {
     fireEvent.click(screen.getByText("作成して編集する"));
     const btn = screen.getByText("作成中…").closest("button") as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+    // 作成中は「やめる」も無効＝フォームを閉じて裏で作成完了→遷移する逃げ道を塞ぐ（#410 sub4 レビュー P2）。
+    expect((screen.getByText("やめる").closest("button") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("削除中は「削除中…」＋確認ボタン無効（DeleteConfirm に busy 配線）", () => {
@@ -48,5 +50,7 @@ describe("LooksScreen busy 表示（#410 sub4 レビュー）", () => {
     fireEvent.click(screen.getByText("削除する"));
     const btn = screen.getByText("削除中…").closest("button") as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+    // 削除中はテンプレ選択カードも無効＝別テンプレを選んで確認UIを消し、削除だけ裏で進める逃げ道を塞ぐ（#410 sub4 レビュー P2）。
+    expect((document.querySelector(".action-card") as HTMLButtonElement).disabled).toBe(true);
   });
 });

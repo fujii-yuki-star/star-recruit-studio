@@ -25,5 +25,7 @@ describe("LooksEditScreen 削除の busy 表示（#410 sub4 レビュー）", ()
     fireEvent.click(screen.getByText("削除する"));
     const btn = screen.getByText("削除中…").closest("button") as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+    // 削除中は「一覧へ戻る」も無効＝戻って裏で削除だけ進める逃げ道を塞ぐ（#410 sub4 レビュー P2）。
+    expect((screen.getByText("一覧へ戻る").closest("button") as HTMLButtonElement).disabled).toBe(true);
   });
 });
