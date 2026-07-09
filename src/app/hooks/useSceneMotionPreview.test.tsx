@@ -98,6 +98,33 @@ describe("useSceneMotionPreview（場面編集の動き再生・#408 Part 1）",
     expect(result.current.timeSec).toBe(0);
   });
 
+  // 動画スロットの有無を公開する（#469：掛け合い×動画で「動き」不可を画面が案内するための判定材料）。
+  const videoTemplate = {
+    templateId: "user_tmpl_001", category: "photo_intro", canvas: { width: 1920, height: 1080 },
+    layers: [{ id: "mainVisual", type: "slot", slotType: "image_or_video", x: 0, y: 0, w: 1920, h: 1080 }],
+  } as unknown as Template;
+  const videoAsset = { assetId: "asset_v", assetType: "video", displayName: "v", filePath: "assets/asset_v.mp4" } as unknown as Asset;
+  const videoScene = (over: Partial<Scene> = {}) =>
+    scene({ sceneType: "photo_intro", freeLayout: undefined, assetRefs: { mainVisual: "asset_v" }, ...over });
+
+  it("動画スロットなしは hasVideoSlot=false", () => {
+    const { result } = renderHook(() => useSceneMotionPreview(scene(), template, assets, [anim()]));
+    expect(result.current.hasVideoSlot).toBe(false);
+  });
+
+  it("動画スロットのみ（掛け合いなし）は hasVideoSlot=true・animActive=true（動きは効く・#435）", () => {
+    const { result } = renderHook(() => useSceneMotionPreview(videoScene(), videoTemplate, [videoAsset], [anim()]));
+    expect(result.current.hasVideoSlot).toBe(true);
+    expect(result.current.animActive).toBe(true);
+  });
+
+  it("動画スロット×掛け合いは hasVideoSlot=true でも animActive=false（動きは v1 未対応＝#469 の案内条件）", () => {
+    const s = videoScene({ lines: [{ lineId: "line_001", text: "a" }] } as Partial<Scene>);
+    const { result } = renderHook(() => useSceneMotionPreview(s, videoTemplate, [videoAsset], [anim()]));
+    expect(result.current.hasVideoSlot).toBe(true);
+    expect(result.current.animActive).toBe(false);
+  });
+
   it("再生中にアニメが適用外になったら停止する（ボタンが消えても止まり・オーバーレイが戻る・#408 レビュー）", () => {
     const s = scene();
     const { result, rerender } = renderHook(

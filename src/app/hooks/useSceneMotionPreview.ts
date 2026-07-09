@@ -15,6 +15,8 @@ const MOTION_PREVIEW_MIN_SEC = 0.3;
 export interface SceneMotionPreview {
   /** この場面に再生できる「動き」があるか（＝再生ボタンを出す条件）。 */
   animActive: boolean;
+  /** この場面に動画スロットがあるか。掛け合い併用時の「動き」不可案内（#469）に使う。 */
+  hasVideoSlot: boolean;
   /** 再生中か。 */
   playing: boolean;
   /** ScenePreview に渡す再生位置（停止中は 0）。 */
@@ -90,6 +92,7 @@ export function useSceneMotionPreview(
 
   return {
     animActive,
+    hasVideoSlot, // 掛け合い×動画スロットの「動き」不可（#469）を UI 側で案内するために公開（sceneAnimationActive の gate と同じ判定材料）。
     playing,
     timeSec: playing ? timeSec : 0, // 停止中は場面頭（派生＝effect 内の同期 setState を避ける）。
     previewAnimations: playing && animActive ? sceneAnimations : [],
