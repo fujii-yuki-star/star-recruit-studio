@@ -42,6 +42,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // プロジェクトを開いている最中の id（#392）。連打・別プロジェクト並走で loadProject が後勝ちするのを防ぐ。
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState(false);
 
   async function removeProject(projectId: string) {
@@ -109,12 +111,15 @@ export function HomeScreen({ onNavigate }: HomeProps) {
 
   async function openProject(projectId: string) {
     if (isExporting) return; // 書き出し中は切替をブロック（loadProject は no-op・遷移もしない・#379）
+    if (openingId) return; // 既に別プロジェクトを開いている最中は無視（連打・並走で後勝ちを防ぐ・#392）
     setOpenError(false);
+    setOpeningId(projectId);
     try {
       await loadProject(projectId);
-      onNavigate("draft");
+      onNavigate("draft"); // 成功で draft へ遷移＝HomeScreen アンマウント（openingId は解除不要）。
     } catch {
       setOpenError(true);
+      setOpeningId(null); // 失敗時のみ解除して再度開けるように。
     }
   }
 
@@ -300,9 +305,9 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     <button
                       className="row gap-sm grow"
                       onClick={() => void openProject(p.projectId)}
-                      disabled={isExporting}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}
-                      style={{ background: "transparent", border: "none", padding: 0, cursor: isExporting ? "not-allowed" : "pointer", textAlign: "left" }}
+                      disabled={isExporting || openingId !== null}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : undefined}
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
                       <div
                         className="thumb thumb-photo"
@@ -316,7 +321,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                           <strong>{p.projectName || "無題のプロジェクト"}</strong>
                         </div>
                         <div className="text-sm text-muted">
-                          更新日 {formatDate(p.updatedAt)}
+                          {openingId === p.projectId ? "開いています…" : `更新日 ${formatDate(p.updatedAt)}`}
                         </div>
                       </div>
                       <ChevronRightIcon size={20} className="text-faint" />

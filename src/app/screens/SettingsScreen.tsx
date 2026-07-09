@@ -123,7 +123,7 @@ export function SettingsScreen() {
     <div className="main-scroll">
       <PageHead
         title="設定"
-        desc="使用するAIやナレーターの声、保存先などを設定できます。"
+        desc="使用するAIやナレーターの声などを設定できます。"
       />
 
       <div style={{ maxWidth: 760 }} className="col gap-lg">
@@ -361,14 +361,6 @@ export function SettingsScreen() {
               <span>{testError}</span>
             </div>
           )}
-        </div>
-
-        {/* 保存先 */}
-        <div className="card">
-          <h2 className="section-title">保存先</h2>
-          <p className="page-desc text-pretty">
-            動画の保存先は、書き出し（「動画を保存」）のときに毎回選べます。
-          </p>
         </div>
 
         {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}

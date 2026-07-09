@@ -202,7 +202,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         ) : (
           <EmptyState
             title="この種類の素材はまだありません"
-            message="「素材を追加」から、写真・動画・BGM・ゆうこの素材を登録できます。"
+            message="「素材を追加」から、写真・動画・ゆうこの素材を登録できます。BGMは仕上がり確認で選べます。"
           />
         )}
 

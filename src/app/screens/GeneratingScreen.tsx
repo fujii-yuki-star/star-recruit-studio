@@ -25,8 +25,9 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
 
   useEffect(() => {
     if (status === "error") return;
+    // ready になるまでは 90% で頭打ち＝生成完了前に 100% へ達して「100%なのに終わらない」表示になるのを防ぐ（#392）。
     const tick = setInterval(() => {
-      setProgress((p) => Math.min(100, p + 6));
+      setProgress((p) => Math.min(status === "ready" ? 100 : 90, p + 6));
     }, 180);
     return () => clearInterval(tick);
   }, [status]);
@@ -87,11 +88,14 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
           </button>
         </div>
       ) : (
-        <div className="text-center mt">
-          <button className="btn btn-ghost text-sm text-faint" onClick={() => fail()}>
-            うまくいかない場合の表示（デモ）
-          </button>
-        </div>
+        // 「デモ（失敗表示）」ボタンは開発時のみ表示＝本番UIに出さない（#392）。
+        import.meta.env.DEV && (
+          <div className="text-center mt">
+            <button className="btn btn-ghost text-sm text-faint" onClick={() => fail()}>
+              うまくいかない場合の表示（デモ）
+            </button>
+          </div>
+        )
       )}
     </div>
   );
