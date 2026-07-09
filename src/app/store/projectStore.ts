@@ -70,6 +70,15 @@ const IDLE_EXPORT_RUN: ExportRunState = {
   bgmWarning: "",
   cancelling: false,
 };
+/** 書き出し画面の入力（ファイル名・画質・字幕）。仕上がり確認（BGM選び）への往復で ExportScreen が
+ *  再マウントされても入力を失わないよう画面横断で保持する（#410 sub3 レビュー・exportRun と同じ transient state）。
+ *  fileName=null は「プロジェクト名から既定」。永続 JSON ではないので schema 影響なし。 */
+export interface ExportFormState {
+  fileName: string | null;
+  size: string;
+  withSubtitle: boolean;
+}
+const IDLE_EXPORT_FORM: ExportFormState = { fileName: null, size: "fullhd", withSubtitle: true };
 /** 声設定の編集可能パラメータのみ（defaultVoiceId は必須なので更新対象から除外）。 */
 export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;
 /** BGM設定の編集可能フィールドのみ（assetId は取り込み時に確定するので更新対象から除外）。 */
@@ -246,6 +255,9 @@ interface ProjectState {
   exportRun: ExportRunState;
   /** 書き出し状態を部分更新する（ExportScreen の setPhase/setProgress 等の単一入口）。 */
   setExportRun: (patch: Partial<ExportRunState>) => void;
+  /** 書き出し画面の入力（ファイル名・画質・字幕）。仕上がり確認への往復で失わないよう画面横断で保持（#410 sub3）。 */
+  exportForm: ExportFormState;
+  setExportForm: (patch: Partial<ExportFormState>) => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
@@ -418,6 +430,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   previewReturnTo: null,
   _generationSeq: 0,
   exportRun: IDLE_EXPORT_RUN,
+  exportForm: IDLE_EXPORT_FORM,
   autoGenerateIfSafe: async () => {
     // 画面に直接landしたときだけの自動生成（#384・§2-6）。既に生成済み/生成中なら何もしない。
     if (get().status !== "idle") return;
@@ -520,6 +533,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupPending: false,
       wizardStep: 0, // 新規＝ウィザードは先頭ステップから（#401）
       exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
+      exportForm: IDLE_EXPORT_FORM, // 新規＝前の書き出し入力（ファイル名等）も持ち越さない
       _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
     }));
   },
@@ -692,6 +706,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _historyGroupPending: false,
       wizardStep: 0, // 別文書＝ウィザードのステップも初期化（#401）
       exportRun: IDLE_EXPORT_RUN, // 別文書＝前の書き出し結果を持ち越さない
+      exportForm: IDLE_EXPORT_FORM, // 別文書＝前の書き出し入力も持ち越さない
       _generationSeq: s._generationSeq + 1, // 別文書へ切替＝in-flight の旧生成を無効化（#402 レビュー）
     }));
     setLastProjectId(projectId);
@@ -1096,6 +1111,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
   setPreviewReturnTo: (screen) => set({ previewReturnTo: screen }),
   setExportRun: (patch) => set((s) => ({ exportRun: { ...s.exportRun, ...patch } })),
+  setExportForm: (patch) => set((s) => ({ exportForm: { ...s.exportForm, ...patch } })),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。

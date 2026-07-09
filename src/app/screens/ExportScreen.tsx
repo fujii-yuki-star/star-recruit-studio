@@ -43,9 +43,13 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // ＝書き出し中の編集で映像/テロップ/BGM が食い違わない。ここで個別購読しないことで、それらの変更での不要な再描画も避ける。
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
 
-  const [fileName, setFileName] = useState(projectName.trim() || "動画");
-  const [size, setSize] = useState("fullhd");
-  const [withSubtitle, setWithSubtitle] = useState(true);
+  // 書き出し入力は store で保持（#410 sub3 レビュー）＝仕上がり確認（BGM選び）への往復で再マウントされても失わない。
+  // fileName 未設定（null）はプロジェクト名から既定を出す（名前変更に追従。編集すると固定される）。
+  const exportForm = useProjectStore((s) => s.exportForm);
+  const setExportForm = useProjectStore((s) => s.setExportForm);
+  const fileName = exportForm.fileName ?? (projectName.trim() || "動画");
+  const size = exportForm.size;
+  const withSubtitle = exportForm.withSubtitle;
   // 完了後の導線に失敗したとき、押した操作に応じた文言を出す（§2-5・#404）。""＝正常／"reveal"＝保存先を開く失敗／"open"＝再生失敗。
   const [openError, setOpenError] = useState<"" | "reveal" | "open">("");
   // BGM の入/切は bgmSettings.enabled を単一の真実とする（トグルで更新・保存で永続化）。未設定なら入。
@@ -286,7 +290,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               id="fileName"
               className="input"
               value={fileName}
-              onChange={(e) => setFileName(e.target.value)}
+              onChange={(e) => setExportForm({ fileName: e.target.value })}
             />
             <p className="field-hint">「動画を保存」を押すと、保存先を選べます（初期のファイル名：{fileName || "export"}.mp4）。</p>
           </div>
@@ -295,7 +299,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <label className="field-label" htmlFor="size">
               動画サイズ
             </label>
-            <select id="size" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
+            <select id="size" className="select" value={size} onChange={(e) => setExportForm({ size: e.target.value })}>
               <option value="fullhd">きれい（{fullDims.width}×{fullDims.height}）</option>
               <option value="hd">軽い（{hdDims.width}×{hdDims.height}）</option>
             </select>
@@ -305,7 +309,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <span className="field-label" style={{ margin: 0 }}>
               字幕を入れる
             </span>
-            <Switch on={withSubtitle} onChange={setWithSubtitle} label="字幕を入れる" />
+            <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" />
           </div>
           <p className="field-hint">書き出した動画に反映されます（仕上がり確認では常に字幕ありで表示します）。</p>
           <hr className="divider" />
@@ -411,7 +415,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                     >
                       動画を再生
                     </button>
-                    <button className="btn btn-ghost" onClick={() => onNavigate("home")}>
+                    <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("home")}>
+                      <ArrowLeftIcon size={16} />
                       プロジェクト一覧へ戻る
                     </button>
                   </div>
