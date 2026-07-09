@@ -34,6 +34,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const scenes = useProjectStore((s) => s.scenes);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const saveProject = useProjectStore((s) => s.saveProject);
+  const setPreviewReturnTo = useProjectStore((s) => s.setPreviewReturnTo);
   const assets = useProjectStore((s) => s.assets);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
@@ -319,7 +320,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           {/* BGM の選択は仕上がり確認（聞きながら選べる）。ここからは表示のみだが、その場で選びに行けるよう導線を置く（#407）。 */}
           <div className="row-between" style={{ alignItems: "center", gap: "var(--gap-sm)" }}>
             <p className="field-hint" style={{ margin: 0 }}>BGM は「仕上がり確認」で、聞きながら選べます。</p>
-            <button className="btn btn-secondary text-sm" onClick={() => onNavigate("preview")} disabled={busy}>
+            <button className="btn btn-secondary text-sm" onClick={() => { setPreviewReturnTo("export"); onNavigate("preview"); }} disabled={busy}>
               仕上がり確認で選ぶ
             </button>
           </div>
@@ -335,8 +336,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           </div>
 
           <div className="row-between mt-lg">
-            <button className="btn btn-ghost" onClick={() => onNavigate("precheck")} disabled={busy}>
-              <ArrowLeftIcon size={18} />
+            <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("precheck")} disabled={busy}>
+              <ArrowLeftIcon size={16} />
               公開前チェックへ戻る
             </button>
             {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。

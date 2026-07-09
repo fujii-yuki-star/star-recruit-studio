@@ -165,9 +165,9 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
 
       {/* 操作 */}
       <div className="row-between mt-lg">
-        <button className="btn btn-ghost" onClick={() => onNavigate("scene-edit")}>
-          <ArrowLeftIcon size={18} />
-          戻って直す
+        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("scene-edit")}>
+          <ArrowLeftIcon size={16} />
+          場面編集へ戻る
         </button>
         <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
           <button

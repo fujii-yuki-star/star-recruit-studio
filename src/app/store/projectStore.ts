@@ -236,6 +236,10 @@ interface ProjectState {
    *  たたき台の「作り直す」起点は "draft"。ConfirmScreen がマウント時に読み取り消費する（editingSceneId と同方式の一度きりペイロード）。 */
   confirmReturnTo: ScreenId | null;
   setConfirmReturnTo: (screen: ScreenId | null) => void;
+  /** 仕上がり確認（PreviewScreen）の「戻る」で戻る画面（#410 sub3）。多入口（たたき台/場面編集/書き出し）
+   *  のため、開いた側が「来た画面」を記録し、Preview の戻るがそこへ戻す（confirmReturnTo と同方式）。 */
+  previewReturnTo: ScreenId | null;
+  setPreviewReturnTo: (screen: ScreenId | null) => void;
   /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
   exportRun: ExportRunState;
   /** 書き出し状態を部分更新する（ExportScreen の setPhase/setProgress 等の単一入口）。 */
@@ -409,6 +413,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   editingSceneId: null,
   wizardStep: 0,
   confirmReturnTo: null,
+  previewReturnTo: null,
   _generationSeq: 0,
   exportRun: IDLE_EXPORT_RUN,
   autoGenerateIfSafe: async () => {
@@ -1087,6 +1092,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setEditingSceneId: (sceneId) => set({ editingSceneId: sceneId }),
   setWizardStep: (step) => set({ wizardStep: step }),
   setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
+  setPreviewReturnTo: (screen) => set({ previewReturnTo: screen }),
   setExportRun: (patch) => set((s) => ({ exportRun: { ...s.exportRun, ...patch } })),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ

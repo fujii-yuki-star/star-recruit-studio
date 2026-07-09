@@ -58,6 +58,7 @@ import {
   ChevronRightIcon,
   PlayIcon,
   StopIcon,
+  ArrowLeftIcon,
 } from "../components/icons";
 
 interface SceneEditProps {
@@ -206,6 +207,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const setFontId = useProjectStore((s) => s.setFontId);
+  const setPreviewReturnTo = useProjectStore((s) => s.setPreviewReturnTo);
   // プロジェクトの向き（ADR-0012）。見た目ピッカーを場面カテゴリ＋この向きに絞る（#415）。
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
@@ -820,10 +822,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           >
             {isGeneratingNarration ? "作成中…" : "全場面の声を作成"}
           </button>
-          <button className="btn btn-secondary" onClick={() => onNavigate("draft")}>
-            台本表に戻る
+          <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("draft")}>
+            <ArrowLeftIcon size={16} />
+            台本表へ戻る
           </button>
-          <button className="btn btn-primary" onClick={() => onNavigate("preview")}>
+          <button className="btn btn-primary" onClick={() => { setPreviewReturnTo("scene-edit"); onNavigate("preview"); }}>
             仕上がり確認へ
             <ChevronRightIcon size={18} />
           </button>

@@ -28,7 +28,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo } =
+  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo } =
     useProjectStore();
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
   const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
@@ -284,7 +284,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
               <PlusIcon size={18} />
               場面を追加
             </button>
-            <button className="btn btn-ghost" onClick={() => onNavigate("preview")}>
+            <button className="btn btn-ghost" onClick={() => { setPreviewReturnTo("draft"); onNavigate("preview"); }}>
               <PlayIcon size={16} />
               途中まで仕上がり確認
             </button>
