@@ -23,7 +23,7 @@ import {
 
 type Filter = "all" | "image" | "video" | "yuko";
 
-// 音声系（BGM/ナレーション）は素材一覧に出さない（BGMは書き出し画面で管理）ため、音タブも持たない。
+// 音声系（BGM/ナレーション）は素材一覧に出さない（BGMは仕上がり確認で選ぶ）ため、音タブも持たない。
 const filters: [Filter, string][] = [
   ["all", "すべて"],
   ["image", "写真"],
@@ -75,7 +75,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // 画像差し替えの file input（label ラップでなく button+ref.click()＝キーボードで押せる・BgmPicker と同方式・#412）
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  // 音声系（BGM/ナレーション）は「素材」一覧に出さない（BGMは書き出し画面で管理）。
+  // 音声系（BGM/ナレーション）は「素材」一覧に出さない（BGMは仕上がり確認で選ぶ）。
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
   );
