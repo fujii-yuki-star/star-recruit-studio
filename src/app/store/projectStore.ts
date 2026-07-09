@@ -220,7 +220,8 @@ interface ProjectState {
   loadUserTemplates: () => Promise<void>;
   /** ユーザーテンプレを保存し一覧へ反映する（新規 id は allocateUserTemplateId で払い出し済み前提）。 */
   saveUserTemplate: (template: Template) => Promise<void>;
-  /** ユーザーテンプレを削除し一覧から外す（成功＝true。参照していたプロジェクトは読込時に §9 補正へ委ねる）。 */
+  /** ユーザーテンプレを削除し一覧から外す（成功＝true）。開いているプロジェクトの参照場面は即時に標準へ置換し
+   *  （#458・substituteDeletedTemplateInScenes）、他プロジェクト（disk）の参照は次回の読込/表示時の §9 補正に委ねる。 */
   deleteUserTemplate: (templateId: string) => Promise<boolean>;
   /** 既存テンプレ（同梱/ユーザー）を複製してマイテンプレ（ユーザーテンプレ）として保存し、新 id を返す。 */
   duplicateAsUserTemplate: (sourceTemplateId: string) => Promise<string>;
