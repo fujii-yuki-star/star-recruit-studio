@@ -295,7 +295,11 @@ export function DraftScreen({ onNavigate }: DraftProps) {
               <span>
                 今の手直し内容（セリフの修正・場面の追加や削除など）は消えて、動画案を新しく作り直します。よろしいですか？
               </span>
+              {/* 確認は「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
               <div className="row gap-sm">
+                <button className="btn btn-ghost btn-icon" onClick={() => setConfirmRegen(false)}>
+                  やめる
+                </button>
                 <button
                   className="btn btn-primary btn-icon"
                   onClick={() => {
@@ -321,9 +325,6 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                 >
                   <SparkleIcon size={16} />
                   作り直す
-                </button>
-                <button className="btn btn-ghost btn-icon" onClick={() => setConfirmRegen(false)}>
-                  やめる
                 </button>
               </div>
             </div>

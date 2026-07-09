@@ -153,12 +153,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
               <span>
                 今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
               </span>
+              {/* 確認ダイアログは「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
               <div className="row gap-sm">
-                <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
-                  新しく作る
-                </button>
                 <button className="btn btn-ghost btn-icon" onClick={cancelNew}>
                   やめる
+                </button>
+                <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
+                  新しく作る
                 </button>
               </div>
             </div>

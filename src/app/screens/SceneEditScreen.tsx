@@ -1602,15 +1602,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {confirmDialogueOff && (
                 <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
                   <span>掛け合いをやめると、2つ目以降のセリフは消えます。</span>
+                  {/* 確認は「やめる（左・ghost）／実行（右・danger）」で統一（#410 sub2）。キャンセル語も「やめる」へ。 */}
                   <div className="row gap-sm" style={{ marginTop: 6 }}>
+                    <button className="btn btn-ghost text-sm" onClick={() => setConfirmDialogueOff(false)}>
+                      やめる
+                    </button>
                     <button
                       className="btn btn-danger text-sm"
                       onClick={() => { patch(demoteFromLines); setConfirmDialogueOff(false); }}
                     >
                       掛け合いをやめる
-                    </button>
-                    <button className="btn btn-ghost text-sm" onClick={() => setConfirmDialogueOff(false)}>
-                      キャンセル
                     </button>
                   </div>
                 </div>
