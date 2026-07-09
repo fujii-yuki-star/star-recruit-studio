@@ -54,4 +54,13 @@ describe("ExportScreen 書き出し入力の保持（#410 sub3 レビュー）",
     expect((second.container.querySelector("#size") as HTMLSelectElement).value).toBe("hd");
     expect((second.getByRole("switch") as HTMLButtonElement).getAttribute("aria-checked")).toBe("false");
   });
+
+  it("書き出し中（busy）は設定フォーム（ファイル名/画質/字幕/音量）を無効化する（今回の書き出しに反映されない誤認を防ぐ・#392）", () => {
+    useProjectStore.getState().setExportRun({ phase: "rendering" }); // isExportBusy → true
+    const { container, getByRole } = render(<ExportScreen onNavigate={vi.fn()} />);
+    expect((container.querySelector("#fileName") as HTMLInputElement).disabled).toBe(true);
+    expect((container.querySelector("#size") as HTMLSelectElement).disabled).toBe(true);
+    expect((getByRole("switch") as HTMLButtonElement).disabled).toBe(true);
+    expect((container.querySelector("#narrationVolume") as HTMLInputElement).disabled).toBe(true);
+  });
 });

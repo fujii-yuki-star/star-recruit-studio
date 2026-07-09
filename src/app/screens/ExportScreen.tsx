@@ -290,6 +290,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               id="fileName"
               className="input"
               value={fileName}
+              disabled={busy}
               onChange={(e) => setExportForm({ fileName: e.target.value })}
             />
             <p className="field-hint">「動画を保存」を押すと、保存先を選べます（初期のファイル名：{fileName || "export"}.mp4）。</p>
@@ -299,7 +300,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <label className="field-label" htmlFor="size">
               動画サイズ
             </label>
-            <select id="size" className="select" value={size} onChange={(e) => setExportForm({ size: e.target.value })}>
+            <select id="size" className="select" value={size} disabled={busy} onChange={(e) => setExportForm({ size: e.target.value })}>
               <option value="fullhd">きれい（{fullDims.width}×{fullDims.height}）</option>
               <option value="hd">軽い（{hdDims.width}×{hdDims.height}）</option>
             </select>
@@ -309,7 +310,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             <span className="field-label" style={{ margin: 0 }}>
               字幕を入れる
             </span>
-            <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" />
+            <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" disabled={busy} />
           </div>
           <p className="field-hint">書き出した動画に反映されます（仕上がり確認では常に字幕ありで表示します）。</p>
           <hr className="divider" />
@@ -334,6 +335,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           <NarrationVolumeControl
             volume={voiceSettings.volume}
             onChange={(v) => updateVoiceSettings({ volume: v })}
+            disabled={busy}
           />
           <div className="notice notice-info mt">
             <span>声を作成済みの場面には、その音声が入ります。</span>

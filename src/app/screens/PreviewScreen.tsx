@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
+import { EmptyState } from "../components/states";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { formatDuration } from "../../domain/format/duration";
 import { BgmPicker } from "../components/BgmPicker";
@@ -328,6 +329,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       narrationAudioRef.current = audio;
       narrationCtlRef.current = attachVolume(audioCtxRef, audio, narrationVolume, mutedRef.current);
       void audio.play().catch((e) => {
+        // 停止・場面送りで再生が中断された AbortError は正常系＝偽の失敗通知/ログ汚染にしない（#392）。
+        if (e instanceof DOMException && e.name === "AbortError") return;
         console.warn("[PreviewScreen] 音声再生に失敗", e);
         setNarrationPlayWarning(true); // 裏で失敗させず利用者に通知（§2-5・#452 P2）
       });
@@ -360,6 +363,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       // 100%超（最大150%）も書き出しと一致させる（≤1.0=.volume／>1.0=GainNode・#452 P1）。
       bgmCtlRef.current = attachVolume(audioCtxRef, a, bgmVolume, mutedRef.current);
       void a.play().catch((e) => {
+        // 停止・曲切替で中断された AbortError は正常系＝偽の失敗通知/ログ汚染にしない（#392）。
+        if (e instanceof DOMException && e.name === "AbortError") return;
         console.warn("[PreviewScreen] BGM再生に失敗", e);
         if (!cancelled) setBgmPlayWarning(true);
       });
@@ -372,6 +377,26 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     };
     // deps は源（bundledBgm/bgmAsset）と有効/音量のプリミティブ＝同じ曲が続く場面送りでは再起動せず鳴らし続ける。曲が変わる場面で切替。
   }, [playing, bgmEnabled, bgmVolume, bundledBgm, bgmAsset, meta.projectId]);
+
+  // 場面ゼロ（たたき台を作る前に入った等）は、壊れて見える空プレビューではなく作成導線を出す（#392）。
+  if (scenes.length === 0) {
+    return (
+      <div className="main-scroll">
+        <PageHead title="仕上がり確認" desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。" />
+        <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
+          <button className="btn btn-ghost btn-icon" onClick={() => onNavigate(previewBackTo)}>
+            <ArrowLeftIcon size={16} />
+            {PREVIEW_BACK_LABEL[previewBackTo]}
+          </button>
+        </div>
+        <EmptyState
+          title="まだ場面がありません"
+          message="先に動画のたたき台を作ると、ここで仕上がりを確認できます。"
+          action={<button className="btn btn-primary" onClick={() => onNavigate("wizard")}>新しい動画を作る</button>}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="main-scroll">
