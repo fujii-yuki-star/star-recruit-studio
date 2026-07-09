@@ -7,10 +7,13 @@ export function UsedScenesRow({
   scenes,
   onJump,
   emptyText,
+  disabled = false,
 }: {
   scenes: readonly { sceneId: string; order: number }[];
   onJump: (sceneId: string) => void;
   emptyText: string;
+  /** 他の操作の実行中など、場面ジャンプ（画面遷移）を止めたいとき（#410 sub4 レビュー）。既定は有効。 */
+  disabled?: boolean;
 }) {
   if (scenes.length === 0) {
     return <p className="text-sm text-muted" style={{ margin: 0 }}>{emptyText}</p>;
@@ -22,6 +25,7 @@ export function UsedScenesRow({
           key={s.sceneId}
           type="button"
           className="badge badge-teal"
+          disabled={disabled}
           onClick={() => onJump(s.sceneId)}
           title={`場面${s.order}の編集を開く`}
         >

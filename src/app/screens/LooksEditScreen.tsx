@@ -64,7 +64,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // 主＝末尾選択（種別別エディタ・削除はこれを基準）。複数選択は一括移動／④[#307] グループ化の土台。
   const selectedLayerId = selectedLayerIds.length > 0 ? selectedLayerIds[selectedLayerIds.length - 1] : null;
   const [addType, setAddType] = useState<LayerType>("text");
-  const [busy, setBusy] = useState(false);
+  // 実行中の操作（#410 sub4 レビュー）。押した操作だけラベルを「保存中…／削除中…」にし、
+  // どれか実行中は保存/削除/素材を disabled にして連打・多重実行を防ぐ。
+  const [busyAction, setBusyAction] = useState<"save" | "delete" | "asset" | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [assetError, setAssetError] = useState<{ layerId: string; msg: string } | null>(null);
@@ -171,22 +173,28 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "back") } : d));
   }
   async function onSave() {
-    if (busy) return;
+    if (busyAction) return;
     // 名前は前後空白を除去し、空なら元の名前にフォールバック。
     const normalized = { ...draft!, name: draft!.name.trim() || editing!.name };
-    setBusy(true);
+    setBusyAction("save");
     try {
       await saveUserTemplate(normalized);
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
     // 保存成功（失敗文言が無い）なら一覧へ戻る。失敗時は templateError が出るので留まる。
     if (!useProjectStore.getState().templateError) backToList();
   }
   async function onDelete() {
-    const ok = await deleteUserTemplate(editing!.templateId);
-    setConfirmDelete(false);
-    if (ok) backToList(); // 削除成功で一覧へ（参照中プロジェクトは §9 補正）。
+    if (busyAction) return;
+    setBusyAction("delete");
+    try {
+      const ok = await deleteUserTemplate(editing!.templateId);
+      setConfirmDelete(false);
+      if (ok) backToList(); // 削除成功で一覧へ（参照中プロジェクトは §9 補正）。
+    } finally {
+      setBusyAction(null);
+    }
   }
   function onBack() {
     if (dirty) setConfirmDiscard(true);
@@ -196,21 +204,21 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   async function onPickDefaultAsset(layerId: string, e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file || busy) return;
+    if (!file || busyAction) return;
     // プロジェクト素材と同じ上限で弾く（data URL を表示用 src に常駐させるためメモリ逼迫を防ぐ・PR#295 レビュー🔴1）。
     if (exceedsInlineAssetLimit(file.size)) {
       const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
       setAssetError({ layerId, msg: `この画像は大きすぎます（上限${limitMb}MB）。別の小さい画像を選び直してください。` });
       return;
     }
-    setBusy(true);
+    setBusyAction("asset");
     setAssetError(null);
     try {
       const assetId = await registerTemplateAsset(file);
       if (assetId) onUpdateLayer(layerId, { assetId });
       else setAssetError({ layerId, msg: "素材を登録できませんでした。もう一度お試しください。" });
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
   // 既定素材の登録/プレビュー/解除（background/slot/logo で共用）。場面に素材が無いとき使われる既定（ADR-0021）。
@@ -237,14 +245,14 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               type="file"
               accept="image/*"
               hidden
-              disabled={busy}
+              disabled={busyAction !== null}
               onChange={(e) => void onPickDefaultAsset(l.id, e)}
             />
             <button
               type="button"
               className="btn btn-secondary text-sm"
               style={{ alignSelf: "flex-start" }}
-              disabled={busy}
+              disabled={busyAction !== null}
               onClick={() => defaultAssetInputs.current[l.id]?.click()}
             >
               素材を選ぶ
@@ -401,13 +409,13 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       {/* ヘッダ：戻る・タイトル・保存（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ） */}
       <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
         <div className="row gap-sm" style={{ alignItems: "center" }}>
-          <button className="btn btn-ghost btn-icon" onClick={onBack}><ArrowLeftIcon size={16} />一覧へ戻る</button>
+          <button className="btn btn-ghost btn-icon" disabled={busyAction !== null} onClick={onBack}><ArrowLeftIcon size={16} />一覧へ戻る</button>
           <span className="topbar-title">見た目パターンを編集</span>
         </div>
         <div className="row gap-sm" style={{ alignItems: "center" }}>
           {dirty && <UnsavedMark />}
-          <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void onSave()}>
-            {busy ? "保存中…" : "保存"}
+          <button className="btn btn-primary" disabled={!dirty || busyAction !== null} onClick={() => void onSave()}>
+            {busyAction === "save" ? "保存中…" : "保存"}
           </button>
         </div>
       </div>
@@ -539,6 +547,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               <hr className="divider" />
               {confirmDelete ? (
                 <DeleteConfirm
+                  busy={busyAction === "delete"}
                   message="この見た目パターンを削除しますか？元に戻せません。"
                   onCancel={() => setConfirmDelete(false)}
                   onConfirm={() => void onDelete()}
