@@ -6,6 +6,7 @@ import { isExportBusy, useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
+import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
 import { HomeScreen } from "./app/screens/HomeScreen";
@@ -74,14 +75,7 @@ function App() {
     cancelNewProject();
   }, [screen, cancelNewProject]);
 
-  const saveLabel =
-    saveStatus === "saving"
-      ? "保存中…"
-      : saveStatus === "saved"
-        ? "保存しました"
-        : saveStatus === "error"
-          ? "保存に失敗（もう一度押す）"
-          : "保存";
+  const saveLabel = saveButtonLabel(saveStatus);
 
   function renderScreen() {
     switch (screen) {

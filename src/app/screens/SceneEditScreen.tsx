@@ -42,6 +42,7 @@ import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
+import { saveButtonLabel } from "../components/saveButtonLabel";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
@@ -2005,13 +2006,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               disabled={saveStatus === "saving"}
             >
               <SaveIcon size={18} />
-              {saveStatus === "saving"
-                ? "保存中…"
-                : saveStatus === "saved"
-                  ? "保存しました"
-                  : saveStatus === "error"
-                    ? "保存に失敗（もう一度押す）"
-                    : "ここまで保存"}
+              {saveButtonLabel(saveStatus)}
             </button>
           </div>
         </div>
