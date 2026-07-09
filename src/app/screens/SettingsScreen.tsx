@@ -187,7 +187,7 @@ export function SettingsScreen() {
                   onClick={() => void onSaveKey()}
                   disabled={!keyInput.trim() || keyBusy}
                 >
-                  保存する
+                  {keyBusy ? "保存中…" : "保存する"}
                 </button>
               </div>
               <p className="field-hint">
