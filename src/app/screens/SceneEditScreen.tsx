@@ -336,6 +336,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 「動き」（簡易アニメ・ADR-0019）をこの場で再生確認する（#408 Part 1・仕上がり確認への往復をなくす）。
   // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
   const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
+  // 掛け合い（scene.lines）×動画スロット併用の場面は「動き」（④）が v1 未対応で静止になる（sceneAnimation.ts の gate）。
+  // 「設定だけできて無効」を避けるため（#469・ADR-0026④）、この組み合わせでは動きUIを設定不可＋理由提示にする。
+  const animBlockedByDialogueVideo = motionPreview.hasVideoSlot && !!(selected?.lines && selected.lines.length > 0);
   // 見た目ピッカーの選択肢：同じ場面カテゴリ＋同じ向きに絞る（ADR-0012・#415）。不一致の現行テンプレ（旧データ等）は
   // 有効な選択肢（options）と分け、mismatchedCurrent として選択不可で表示＝整合済みに見せない（#415 P2）。
   const { options: pickableOptions, mismatchedCurrent } = selected
@@ -689,6 +692,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const ANIM_DIR_LABEL: Record<SlideDirection, string> = { left: "左から", right: "右から", up: "上から", down: "下から" };
   // endOpacity＝要素なら本来の不透明度（el.opacity ?? 1）／グループなら 1。
   const renderAnimationControls = (targetId: string, endOpacity: number) => {
+    // 掛け合い×動画スロットは「動き」が効かない（v1 未対応・#469）。設定させず理由を示す（ADR-0026④・§2-5）。
+    if (animBlockedByDialogueVideo) {
+      return (
+        <div className="field" style={{ marginBottom: 6 }}>
+          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動き（登場のしかた）</label>
+          <p className="field-hint" style={{ margin: 0 }}>
+            掛け合いと動画を組み合わせた場面では、まだ動きをつけられません。掛け合いか動画のどちらかにすると動かせます。
+          </p>
+        </div>
+      );
+    }
     const anim = (timelineOverlay?.animations ?? []).find((a) => a.sceneId === selected.sceneId && a.targetId === targetId);
     const desc = anim ? describeAnimation(anim.keyframes) : null;
     const kind = desc?.kind ?? null;
