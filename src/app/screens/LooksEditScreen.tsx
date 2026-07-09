@@ -413,9 +413,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       {confirmDiscard && (
         <div className="notice notice-warn mb" role="alert">
           <span>編集中の変更を保存せずに一覧へ戻りますか？</span>
+          {/* 確認は「やめる（左）／実行（右）」で統一（#410 sub2）。キャンセル語は「やめる」に揃える。 */}
           <div className="row gap-sm">
+            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDiscard(false)}>やめる</button>
             <button className="btn btn-primary btn-icon" onClick={backToList}>戻る（破棄）</button>
-            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDiscard(false)}>編集を続ける</button>
           </div>
         </div>
       )}
