@@ -7,10 +7,13 @@ export function NarrationVolumeControl({
   volume,
   onChange,
   hint,
+  disabled = false,
 }: {
   volume: number | null | undefined;
   onChange: (v: number) => void;
   hint?: string;
+  /** 書き出し中など操作を止めたいとき（#392）。既定は有効（仕上がり確認では常に操作可）。 */
+  disabled?: boolean;
 }) {
   const v = volume ?? NARRATION_VOLUME;
   // ドラッグ中の連続変更を1履歴にまとめる（#389）。
@@ -27,9 +30,10 @@ export function NarrationVolumeControl({
         max={VOLUME_MAX}
         step={VOLUME_STEP}
         value={v}
+        disabled={disabled}
         {...dragGroup}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={{ width: "100%", accentColor: "var(--color-primary)" }}
+        style={{ width: "100%", accentColor: "var(--color-primary)", ...(disabled ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
       />
       <div className="row-between text-faint text-sm">
         <span>小さい</span>
