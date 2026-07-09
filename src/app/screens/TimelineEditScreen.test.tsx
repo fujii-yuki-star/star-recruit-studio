@@ -53,8 +53,11 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     fireEvent.change(textInput, { target: { value: "ここがポイント" } });
     expect(useProjectStore.getState().meta.timelineOverlay?.clips?.[0].text).toBe("ここがポイント");
 
-    // 削除 → クリップが消え、編集パネルも消える。
+    // 削除 → 確認が出る（#410・即時削除を確認化）。確認前は消えない。
     fireEvent.click(screen.getByText("このテロップを削除"));
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+    // 「削除する」でクリップが消え、編集パネルも消える。
+    fireEvent.click(screen.getByText("削除する"));
     expect(useProjectStore.getState().meta.timelineOverlay?.clips).toEqual([]);
     expect(screen.queryByTestId("overlay-clip-editor")).not.toBeInTheDocument();
   });

@@ -41,6 +41,7 @@ import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
@@ -265,6 +266,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const selectedFreeId = selectedFreeIds.length > 0 ? selectedFreeIds[selectedFreeIds.length - 1] : null;
   // 一括削除の確認中フラグ（複数まとめ削除は破壊的なので誤操作防止の1段確認を挟む・#206。Undo でも戻せるが確認は維持）。
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  // セリフ行の削除も確認してから（#410・即時削除だった）。確認中の行 id（行が変わると自動解除）。
+  const [confirmDeleteLineId, setConfirmDeleteLineId] = useState<string | null>(null);
   // 選択中のグループ id（ADR-0022・#305）。要素選択とは排他＝片方を選ぶともう片方は解除する。
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   // 選択変更：additive（Shift+クリック）で選択トグル、通常はその要素だけ、null で全解除。選択が変われば一括削除の確認は取り消す。
@@ -772,6 +775,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedId(id);
     setConfirmDelete(false);
     setConfirmDialogueOff(false); // 掛け合い解除の確認も場面ごとに持ち越さない
+    setConfirmDeleteLineId(null); // セリフ行の削除確認も持ち越さない
     setSelectedFreeIds([]); // 場面が変わったら自由配置の選択は持ち越さない
     setEditPopover(null); // 開いていた kind 別エディタも閉じる（旧場面の要素 id を指したまま残さない）
     setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
@@ -1415,8 +1419,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               <div className="row gap-sm">
                                 <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDelete(false)}>やめる</button>
                                 <button
-                                  className="btn btn-ghost text-sm"
-                                  style={{ color: "var(--color-danger)" }}
+                                  className="btn btn-danger text-sm"
                                   onClick={() => { removeFreeMany(selectedFreeIds); setConfirmBulkDelete(false); }}
                                 >
                                   削除する
@@ -1621,20 +1624,34 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <div key={line.lineId} className="card-tight col gap-sm">
                         <div className="row-between">
                           <span className="text-sm" style={{ fontWeight: 600 }}>セリフ {i + 1}</span>
-                          <div className="row gap-sm">
-                            <button className="btn btn-ghost btn-icon text-sm" title="上へ" disabled={i === 0} onClick={() => patch((s) => moveLine(s, line.lineId, -1))}>↑</button>
-                            <button className="btn btn-ghost btn-icon text-sm" title="下へ" disabled={i === lastIdx} onClick={() => patch((s) => moveLine(s, line.lineId, 1))}>↓</button>
-                            <button className="btn btn-ghost btn-icon text-sm" title="このセリフを削除" onClick={() => patch((s) => removeLine(s, line.lineId))}>削除</button>
-                            {/* 掛け合いでも分割できる（この行から後ろを別の場面へ・#405）。先頭行や短い場面（両側が最小尺を割る）では不可。 */}
-                            <button
-                              className="btn btn-ghost btn-icon text-sm"
-                              title="この行から後ろを別の場面に分ける"
-                              disabled={i === 0 || selected.durationSec < 2 * SCENE_MIN_DURATION_SEC}
-                              onClick={() => splitSceneAtLine(selected.sceneId, i)}
-                            >
-                              分ける
-                            </button>
-                          </div>
+                          {/* 削除は確認してから（#410・即時削除だった）。行内が狭く notice が入らないため Draft 同様のインライン確認＝やめる左/削除する danger右で順序・色は揃える。 */}
+                          {confirmDeleteLineId === line.lineId ? (
+                            <div className="row gap-sm">
+                              <span className="text-sm text-muted" style={{ alignSelf: "center" }}>削除しますか？</span>
+                              <button className="btn btn-ghost btn-icon text-sm" onClick={() => setConfirmDeleteLineId(null)}>やめる</button>
+                              <button
+                                className="btn btn-danger btn-icon text-sm"
+                                onClick={() => { patch((s) => removeLine(s, line.lineId)); setConfirmDeleteLineId(null); }}
+                              >
+                                削除する
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="row gap-sm">
+                              <button className="btn btn-ghost btn-icon text-sm" title="上へ" disabled={i === 0} onClick={() => patch((s) => moveLine(s, line.lineId, -1))}>↑</button>
+                              <button className="btn btn-ghost btn-icon text-sm" title="下へ" disabled={i === lastIdx} onClick={() => patch((s) => moveLine(s, line.lineId, 1))}>↓</button>
+                              <button className="btn btn-ghost btn-icon text-sm" title="このセリフを削除" onClick={() => setConfirmDeleteLineId(line.lineId)}>削除</button>
+                              {/* 掛け合いでも分割できる（この行から後ろを別の場面へ・#405）。先頭行や短い場面（両側が最小尺を割る）では不可。 */}
+                              <button
+                                className="btn btn-ghost btn-icon text-sm"
+                                title="この行から後ろを別の場面に分ける"
+                                disabled={i === 0 || selected.durationSec < 2 * SCENE_MIN_DURATION_SEC}
+                                onClick={() => splitSceneAtLine(selected.sceneId, i)}
+                              >
+                                分ける
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <textarea
                           className="textarea"
@@ -1958,22 +1975,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </button>
 
             {confirmDelete ? (
-              <div className="row gap-sm mt">
-                <button
-                  className="btn btn-danger"
-                  style={{ flex: 1 }}
-                  onClick={() => {
-                    removeScene(selected.sceneId);
-                    selectScene(""); // 選択リセット＋削除確認も解除
-                  }}
-                >
-                  <TrashIcon size={16} />
-                  削除する
-                </button>
-                <button className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>
-                  やめる
-                </button>
-              </div>
+              <DeleteConfirm
+                className="mt"
+                message="この場面を削除しますか？"
+                onCancel={() => setConfirmDelete(false)}
+                onConfirm={() => {
+                  removeScene(selected.sceneId);
+                  selectScene(""); // 選択リセット＋削除確認も解除
+                }}
+              />
             ) : (
               <button
                 className="btn btn-ghost btn-block mt"
