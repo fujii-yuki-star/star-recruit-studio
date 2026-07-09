@@ -17,6 +17,7 @@ import {
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSceneInList, splitSceneLinesInList } from "../../domain/project/sceneOps";
+import { substituteDeletedTemplateInScenes } from "../../domain/project/templateUsage";
 import { duplicateSceneAnimations, removeAnimationsForTargets } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
@@ -219,7 +220,8 @@ interface ProjectState {
   loadUserTemplates: () => Promise<void>;
   /** ユーザーテンプレを保存し一覧へ反映する（新規 id は allocateUserTemplateId で払い出し済み前提）。 */
   saveUserTemplate: (template: Template) => Promise<void>;
-  /** ユーザーテンプレを削除し一覧から外す（成功＝true。参照していたプロジェクトは読込時に §9 補正へ委ねる）。 */
+  /** ユーザーテンプレを削除し一覧から外す（成功＝true）。開いているプロジェクトの参照場面は即時に標準へ置換し
+   *  （#458・substituteDeletedTemplateInScenes）、他プロジェクト（disk）の参照は次回の読込/表示時の §9 補正に委ねる。 */
   deleteUserTemplate: (templateId: string) => Promise<boolean>;
   /** 既存テンプレ（同梱/ユーザー）を複製してマイテンプレ（ユーザーテンプレ）として保存し、新 id を返す。 */
   duplicateAsUserTemplate: (sourceTemplateId: string) => Promise<string>;
@@ -1065,13 +1067,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await userTemplateFs.deleteUserTemplate(templateId);
       // 各素材ファイルの削除失敗は templateAssetFs 内で握る（非致命）。失敗時はファイルが残るが、参照していたテンプレは消えるため未参照＝孤立（disk のみ・許容）。残った孤立は次回起動の読込時に安全条件下で掃除される（#299・loadUserTemplates）。
       for (const assetId of owned) await deleteTemplateAsset(assetId);
-      set((s) => ({
-        templates: s.templates.filter((t) => t.templateId !== templateId),
-        templateAssetSrcById: Object.fromEntries(
-          Object.entries(s.templateAssetSrcById).filter(([id]) => !owned.includes(id)),
-        ),
-        templateError: null,
-      }));
+      set((s) => {
+        const remainingTemplates = s.templates.filter((t) => t.templateId !== templateId);
+        // 開いているプロジェクトで、この見た目を使っていた場面を標準へ置換＝孤立参照（存在しない templateId）を
+        // 残さない（#458・§9「参照中のプロジェクトは標準へ自動置換」）。代替が無い場面は原状維持（§9 補正が描画時に対応）。
+        const nextScenes = substituteDeletedTemplateInScenes(
+          s.scenes, templateId, remainingTemplates, s.meta.videoSettings.aspectRatio,
+        );
+        return {
+          templates: remainingTemplates,
+          scenes: nextScenes,
+          templateAssetSrcById: Object.fromEntries(
+            Object.entries(s.templateAssetSrcById).filter(([id]) => !owned.includes(id)),
+          ),
+          templateError: null,
+          // 場面を置換したら未保存に（保存で永続化）。変化なし（同一参照）なら現状維持。
+          ...(nextScenes !== s.scenes ? { saveStatus: "idle" as const } : {}),
+        };
+      });
       return true;
     } catch {
       set({ templateError: "見た目パターンを削除できませんでした。もう一度お試しください。" });

@@ -306,6 +306,30 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
     expect(st.templateAssetSrcById).toEqual({ tmpl_asset_002: 'data:image/png;base64,BBB' }); // 所有のみ掃除
   });
 
+  it('deleteUserTemplate は参照中の場面を標準（同カテゴリ・同じ向き）へ置換し孤立参照を残さない（#458・§9）', async () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'user_tmpl_001',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' }, warnings: [],
+    } as unknown as Scene;
+    const meta = useProjectStore.getState().meta;
+    useProjectStore.setState({
+      templates: [...sampleTemplates, userTmpl('user_tmpl_001')], // カテゴリ opening・16:9
+      scenes: [scene],
+      meta: { ...meta, videoSettings: { ...meta.videoSettings, aspectRatio: '16:9' } },
+      saveStatus: 'saved',
+    });
+    const ok = await useProjectStore.getState().deleteUserTemplate('user_tmpl_001');
+    const st = useProjectStore.getState();
+    expect(ok).toBe(true);
+    const newId = st.scenes[0].templateId;
+    expect(newId).not.toBe('user_tmpl_001'); // 孤立参照を残さない
+    const alt = st.templates.find((t) => t.templateId === newId);
+    expect(alt?.category).toBe('opening'); // 同カテゴリ
+    expect(alt?.aspectRatio).toBe('16:9'); // 同じ向き
+    expect(st.saveStatus).toBe('idle'); // 置換＝未保存（保存で永続化）
+  });
+
   it('registerTemplateAsset は非 Tauri で null（表示用src も変えない）', async () => {
     useProjectStore.setState({ templateAssetSrcById: {} });
     const id = await useProjectStore.getState().registerTemplateAsset({} as File);
