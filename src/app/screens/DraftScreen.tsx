@@ -9,6 +9,7 @@ import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
 import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
+import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   CheckIcon,
@@ -110,9 +111,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                 場面を追加
               </button>
             ) : (
-              <button className="btn btn-primary" onClick={() => onNavigate("wizard")}>
-                新しい動画を作る
-              </button>
+              <StartNewVideoButton onNavigate={onNavigate} />
             )
           }
         />

@@ -47,6 +47,7 @@ import { saveButtonLabel } from "../components/saveButtonLabel";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
+import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import {
   SearchIcon,
   PhotoIcon,
@@ -369,11 +370,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         <EmptyState
           title={status === "generating" ? "動画案を作成中です…" : "編集する場面がありません"}
           message="「新しい動画を作る」から動画案を作成してください。"
-          action={
-            <button className="btn btn-primary" onClick={() => onNavigate("wizard")}>
-              新しい動画を作る
-            </button>
-          }
+          action={<StartNewVideoButton onNavigate={onNavigate} />}
         />
       </div>
     );

@@ -4,6 +4,7 @@ import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
+import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { formatDuration } from "../../domain/format/duration";
 import { BgmPicker } from "../components/BgmPicker";
@@ -436,7 +437,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         <EmptyState
           title="まだ場面がありません"
           message="先に動画のたたき台を作ると、ここで仕上がりを確認できます。"
-          action={<button className="btn btn-primary" onClick={() => onNavigate("wizard")}>新しい動画を作る</button>}
+          action={<StartNewVideoButton onNavigate={onNavigate} />}
         />
       </div>
     );
