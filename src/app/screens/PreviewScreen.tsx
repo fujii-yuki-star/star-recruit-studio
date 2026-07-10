@@ -25,6 +25,7 @@ import {
   PlayIcon,
   StopIcon,
   VolumeIcon,
+  VolumeMuteIcon,
   ChevronRightIcon,
   ArrowLeftIcon,
 } from "../components/icons";
@@ -513,7 +514,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
               aria-pressed={muted}
               onClick={() => setMuted((m) => !m)}
             >
-              <VolumeIcon size={20} />
+              {muted ? <VolumeMuteIcon size={20} /> : <VolumeIcon size={20} />}
             </button>
           </div>
 

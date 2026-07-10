@@ -40,7 +40,7 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
               className="action-card-icon"
               style={{
                 background: "var(--color-yellow)",
-                color: "#8a6d1a",
+                color: "var(--color-warn)",
                 margin: "0 auto var(--gap-sm)",
                 width: 56,
                 height: 56,

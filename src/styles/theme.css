@@ -18,6 +18,7 @@
 
   --color-yellow: #fbf3cf;      /* 淡い黄色 (ゆうこ/注目) */
   --color-yellow-strong: #f6e7a3;
+  --color-warn: #8a6d1a;        /* 注意文字（黄色帯の上の濃い文字）。警告文言の色の単一参照元 (#413) */
 
   --color-text: #20323c;        /* 文字 (濃いめのスレート) */
   --color-text-muted: #5d7480;  /* 補助文字 */
@@ -512,7 +513,7 @@ button {
 }
 .badge-yellow {
   background: var(--color-yellow);
-  color: #8a6d1a;
+  color: var(--color-warn);
 }
 .badge-gray {
   background: var(--color-surface-alt);
@@ -543,7 +544,7 @@ button.badge {
 }
 .notice-warn {
   background: var(--color-yellow);
-  color: #8a6d1a;
+  color: var(--color-warn);
 }
 .notice-strong {
   background: var(--color-primary-soft);
@@ -669,7 +670,7 @@ button.badge {
 }
 .thumb-audio {
   background: linear-gradient(135deg, #fbf3cf, #f4e7a8);
-  color: #8a6d1a;
+  color: var(--color-warn);
   aspect-ratio: auto;
   padding: 14px;
 }

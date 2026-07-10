@@ -13,7 +13,7 @@ interface PrecheckProps {
 
 const severityStyle: Record<PrecheckItem["severity"], { label: string; color: string; bg: string }> = {
   ok: { label: "問題なし", color: "var(--color-success)", bg: "var(--color-primary-soft)" },
-  warning: { label: "注意", color: "#8a6d1a", bg: "var(--color-yellow)" },
+  warning: { label: "注意", color: "var(--color-warn)", bg: "var(--color-yellow)" },
   action: { label: "要対応", color: "var(--color-danger)", bg: "var(--color-danger-soft)" },
 };
 
@@ -87,7 +87,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
           <div className="text-muted text-sm">要対応</div>
         </div>
         <div className="card text-center">
-          <div className="page-title" style={{ color: "#8a6d1a" }}>{count("warning")}</div>
+          <div className="page-title" style={{ color: "var(--color-warn)" }}>{count("warning")}</div>
           <div className="text-muted text-sm">注意</div>
         </div>
         <div className="card text-center">
