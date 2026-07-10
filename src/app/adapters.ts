@@ -9,7 +9,9 @@ import type { Asset, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
 
-const sceneTypeLabel: Record<SceneCategory, string> = {
+// 場面種別のユーザー向けラベル（§2-3）。型付き（SceneCategory 網羅）＝場面種別追加時にコンパイル検知。
+// 表示語の単一参照元＝場面編集など他画面もこれを使う（#413・二重定義の解消）。
+export const sceneTypeLabel: Record<SceneCategory, string> = {
   opening: "オープニング",
   closing: "クロージング",
   photo_intro: "写真紹介",
