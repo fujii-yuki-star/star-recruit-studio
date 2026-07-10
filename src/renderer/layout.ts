@@ -207,9 +207,16 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       case 'subtitle': {
         // 掛け合い：subtitle レイヤーのみ行の字幕で上書き（追加A/B）。null＝非表示・未指定＝従来。
         const overrideSub = layer.type === 'subtitle' && opts != null && 'subtitleText' in opts;
+        // 単一ナレーション等の静的字幕（override 無し）は場面の字幕トグル subtitleEnabledDefault=false で出さない（#413）。
+        // preview/export とも layoutScene 経由なのでここが単一の参照元。掛け合いは opts.subtitleText 側で行ごとに
+        // 解決済み（resolveLineSubtitle が subtitleEnabledDefault を継承）＝override 経路は触らない。
+        const staticSubtitleOff =
+          layer.type === 'subtitle' && !overrideSub && scene.subtitleEnabledDefault === false;
         const text = overrideSub
           ? opts.subtitleText ?? ''
-          : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
+          : staticSubtitleOff
+            ? ''
+            : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
         if (text.length === 0) break;
         const bg = layer.type === 'subtitle' && layer.background?.enabled
           ? {

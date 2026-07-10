@@ -1648,6 +1648,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </div>
                 </div>
               )}
+              {/* 場面ごとの字幕ON/OFF（scene.subtitleEnabledDefault・#413）。単一ナレーションはこれが直接の制御、
+                  掛け合いは既定（各セリフの「字幕を表示する」で個別に上書き可＝line.subtitleEnabled ?? これ ?? true）。 */}
+              <div className="toggle-row" style={{ marginTop: 8 }}>
+                <span className="field-label" style={{ margin: 0 }}>この場面の字幕を表示する</span>
+                <Switch
+                  on={selected.subtitleEnabledDefault ?? true}
+                  onChange={(on) => patch((s) => ({ ...s, subtitleEnabledDefault: on }))}
+                  label="この場面の字幕を表示する"
+                />
+              </div>
+              {isDialogue && (
+                <p className="field-hint" style={{ marginTop: 0 }}>各セリフの「字幕を表示する」で個別に上書きできます。</p>
+              )}
               {isDialogue ? (
                 <div className="col gap-sm" style={{ marginTop: 8 }}>
                   {(selected.lines ?? []).map((line, i) => {
