@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
+import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
@@ -1088,6 +1089,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <div className="text-faint" style={{ fontSize: 11 }}>
                         {templates.find((t) => t.templateId === s.templateId)?.name ?? ""}
                       </div>
+                      {/* セリフ先頭を出して全カード同一アイコンでも中身で見分けられるようにする（#413）。1行省略＋全文は title。 */}
+                      {sceneFirstLine(s) && (
+                        <div
+                          className="text-sm"
+                          style={{ marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 150 }}
+                          title={sceneFirstLine(s)}
+                        >
+                          「{sceneFirstLine(s)}」
+                        </div>
+                      )}
                     </button>
                     {/* ドラッグが使いにくい場合の代替＝前へ/後ろへ（moveLine/moveFreeElZ と同じ↑/↓の流儀・キーボード可）。#398 レビュー */}
                     <div className="row gap-sm" style={{ justifyContent: "center", marginTop: 4 }}>
