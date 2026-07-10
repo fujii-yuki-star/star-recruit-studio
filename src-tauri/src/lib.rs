@@ -221,6 +221,8 @@ pub fn run() {
         .setup(|app| {
             // 同梱 VOICEVOX ENGINE を自動起動（同梱が無ければ何もしない＝手動起動/設定の接続先へフォールバック・ADR-0005/#149）。
             voicevox_engine::start_bundled_engine(app.handle());
+            // 前回クラッシュ/強制終了で残った書き出しの一時/ステージディレクトリを掃除（#420・非同期・失敗は無視）。
+            ffmpeg::cleanup_stale_export_dirs(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
