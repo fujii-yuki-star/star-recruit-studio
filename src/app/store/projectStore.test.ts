@@ -387,6 +387,22 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     expect(useProjectStore.getState().scenes).toHaveLength(0);
   });
 
+  it('書き出し中は undo が no-op＝進行中の書き出しが変わった scenes を読むのを防ぐ（#379/#413・全画面ショートカット化の追随）', () => {
+    useProjectStore.setState({ past: [], future: [] }); // 履歴をクリアしてから1手だけ積む
+    useProjectStore.getState().removeScene('scene_001'); // idle なので実行＝past に1手
+    expect(useProjectStore.getState().scenes).toHaveLength(0);
+    expect(useProjectStore.getState().past.length).toBe(1); // 戻せる状態
+    // 書き出し中：undo を弾く（場面が復活しない＝進行中書き出しの scenes を変えない）。
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().scenes).toHaveLength(0); // no-op
+    expect(useProjectStore.getState().past.length).toBe(1); // 履歴も消費しない
+    // idle に戻せば通常どおり undo で復活（ガードが idle を妨げない）。
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().scenes).toHaveLength(1);
+  });
+
   it('書き出し中は「開いているプロジェクト」の削除を弾く／別プロジェクトの削除は許可', async () => {
     useProjectStore.getState().setExportRun({ phase: 'rendering' });
     const spy = vi.spyOn(fsMod, 'deleteProjectDoc').mockResolvedValue();
