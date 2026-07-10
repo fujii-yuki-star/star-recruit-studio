@@ -2,6 +2,7 @@ import { useRef, useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
 import type { ScreenId } from "../data/mockData";
 import { ASSET_TYPE } from "../../domain/enums";
+import { pickPanelAsset } from "./materialsSelection";
 import { scenesUsingAsset } from "../../domain/project/assetUsage";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
@@ -80,7 +81,8 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
   );
   const visible = materials.filter((a) => filter === "all" || a.assetType === filter);
-  const selected = materials.find((a) => a.assetId === selectedId) ?? visible[0] ?? materials[0];
+  // 右パネルは「表示中（フィルタ後）」の中からだけ選ぶ＝フィルタ0件のとき別フィルタの素材を出さない（#413）。
+  const selected = pickPanelAsset(visible, selectedId);
   // この素材を使っている場面（逆引き・#406）。削除確認の件数（#383）と「使用場面」バッジで共有する。
   const usedScenes = selected ? scenesUsingAsset(scenes, selected.assetId) : [];
   const usedSceneCount = usedScenes.length;

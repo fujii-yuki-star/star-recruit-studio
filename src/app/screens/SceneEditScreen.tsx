@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
+import { sceneTypeLabel } from "../adapters";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
@@ -95,19 +96,6 @@ function CollapsibleSection({ title, defaultOpen = true, children }: { title: st
     </details>
   );
 }
-
-const sceneTypeLabel: Record<string, string> = {
-  opening: "オープニング",
-  closing: "クロージング",
-  photo_intro: "写真紹介",
-  video_intro: "動画紹介",
-  point_list: "ポイント紹介",
-  message: "メッセージ",
-  full_visual: "全画面",
-  chapter: "区切り",
-  no_yuko: "ゆうこなし",
-  free: "自由配置",
-};
 
 // 自由配置要素のユーザー向けラベル（§2-3：技術語を出さない）。全 kind 必須＝追加時にコンパイル検知。
 const freeKindLabel: Record<FreeElementKind, string> = {

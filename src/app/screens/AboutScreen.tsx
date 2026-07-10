@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
 import { openExternalUrl } from "../../infrastructure/opener";
+import { getAppVersion } from "../../infrastructure/appInfo";
 import { OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED } from "../../domain/export/h264Feature";
 import { usedVoiceCredits } from "../../domain/voice/narratorCredit";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -52,6 +54,11 @@ export function AboutScreen() {
   // プロジェクト未読込（場面なし）のときは選択話者のみになる（usedVoiceCredits の既定）。
   const scenes = useProjectStore((s) => s.scenes);
   const usedCredits = usedVoiceCredits(scenes, getVoicevoxSpeaker());
+  // バージョンはアプリ本体（tauri.conf.json）を単一の参照元にする＝About のためだけの二重管理をなくす（#413）。
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    void getAppVersion().then(setVersion); // 非Tauri/失敗時は空文字を返す（フォールバックは infrastructure/appInfo に集約・§4）
+  }, []);
   return (
     <div className="main-scroll">
       <PageHead
@@ -70,7 +77,7 @@ export function AboutScreen() {
             <hr className="divider" style={{ margin: "4px 0" }} />
             <div className="row-between">
               <span className="text-muted">バージョン</span>
-              <span>0.4.0</span>
+              <span>{version}</span>
             </div>
           </div>
         </div>
