@@ -163,6 +163,38 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(calls.some(([d, t, f]) => d === 1 && t === 1 && f === undefined)).toBe(true);
   });
 
+  it('掛け合い×アニメ（複数セグメント）でも進捗（done+frameFraction）は後退しない＝バーが巻き戻らない（#391 レビュー P1）', async () => {
+    // 場面全体にかかるアニメ（keyframes [0,4]）＋2行（startSec 0/2・尺4）＝どちらの区間も複数フレームを焼く。
+    // 掛け合いは per-frame ループが「間/行」セグメントごとに回るため、frameFraction を区間内比 (f+1)/frameCount で
+    // 出すと区間1の先頭で 1.0→~0 に戻り、(done+frameFraction)/total が 80%→1% に後退していた（#391 レビュー P1）。
+    // 修正（segIndex を足して場面全体で単調化）後は後退しないことを、進捗バーの本質的な不変条件＝単調非減少で検証する。
+    const spanAnim = (sceneId: string): ElementAnimation =>
+      ({ id: 'anim_001', sceneId, targetId: 'el1', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 4, opacity: 1 }] } as unknown as ElementAnimation);
+    const dialogueAnimScene = [{
+      sceneId: 's1', templateId: 'tpl', durationSec: 4,
+      lines: [
+        { lineId: 'line_001', text: 'a', startSec: 0, status: 'none' },
+        { lineId: 'line_002', text: 'b', startSec: 2, status: 'none' },
+      ],
+    }] as unknown as Scene[];
+    const bars: number[] = [];
+    await buildExportScenes(
+      dialogueAnimScene, templateById, noAsset,
+      (_s, lineId) => ({ audioBase64: lineId ? `A_${lineId}` : undefined, narrationVolume: 1 }),
+      undefined,
+      // ExportScreen と同じ式でバー値を復元（done は完了場面数・frameFraction は処理中場面内の比）。
+      (done, total, frameFraction) => bars.push((done + (frameFraction ?? 0)) / total),
+      {},
+      (s) => [spanAnim(s.sceneId)],
+    );
+    // 2区間×複数フレーム＋場面完了で3回以上通知される。
+    expect(bars.length).toBeGreaterThan(2);
+    // 進捗バーの不変条件は「値域」ではなく「後退しない（単調非減少）」＝区間境界で 1.0→0 に戻らないこと。
+    expect(bars.every((b, idx) => idx === 0 || b >= bars[idx - 1] - 1e-9)).toBe(true);
+    // 区間内の途中フレームでも動いている（0<b<1 が存在＝バーが凍らない）。
+    expect(bars.some((b) => b > 0 && b < 1)).toBe(true);
+  });
+
   it('stageAnimationFrame 指定時はフレームを逐次ステージングし framesDir を返す（framesBase64 は載せない・#書き出しRangeError）', async () => {
     const staged: Array<{ dir: string; index: number; url: string }> = [];
     const out = await buildExportScenes(

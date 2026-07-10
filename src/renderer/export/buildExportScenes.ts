@@ -579,7 +579,10 @@ export async function buildExportScenes(
             for (let f = 0; f < frameCount; f += 1) {
               bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
               // フレーム進捗を間引いて通知＝アニメ場面でもバーが動く（#391・フリーズ誤認を防ぐ）。i=処理中の場面（0基点）。
-              if (f % 4 === 0 || f === frameCount - 1) onProgress?.(i, scenes.length, (f + 1) / frameCount);
+              // 掛け合いはこのループが「間/行」セグメントごとに回る（#391 レビュー P1）。frameFraction を区間内比 (f+1)/frameCount
+              // で出すと次セグメントで 1.0→0 に戻り、進捗バーが後退して見える。segIndex を足して場面全体で単調にする。
+              if (f % 4 === 0 || f === frameCount - 1)
+                onProgress?.(i, scenes.length, (segIndex + (f + 1) / frameCount) / specs.length);
               // 場面内の絶対時刻でアニメを補間（プレビューと同一 layoutScene(t)＝パリティ）。行字幕も同フレームに焼き込む。
               const frameLayout = layoutScene(scene, template, {
                 timeSec: spec.startSec + f / fps,

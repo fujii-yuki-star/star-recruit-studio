@@ -380,17 +380,24 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                 </div>
               </div>
               <div className="progress mb">
-                <div className="progress-fill" style={{ width: `${percent}%` }} />
+                {/* エンコード段は進捗値が無い＝不定バー（左右に流れる）で「動いている」ことだけ伝える。それ以外は幅で表す（#391）。 */}
+                {phase === "encoding" ? (
+                  <div className="progress-fill progress-fill--indeterminate" />
+                ) : (
+                  <div className="progress-fill" style={{ width: `${percent}%` }} />
+                )}
               </div>
               {phase === "rendering" && (
                 <div className="text-center text-sm text-muted">
-                  場面 {progress.done} / {progress.total} を処理中
+                  {/* done は「完了した場面数」。処理中は +1 した1始まりで読ませる（バーが動くのにカウンタが0のまま、を防ぐ・#391 レビュー）。 */}
+                  場面 {Math.min(progress.done + 1, progress.total)} / {progress.total} を処理中
                 </div>
               )}
-              {/* エンコード段は Rust 側の進捗イベントがまだ無く 90% で止まって見えるので、待ち時間の目安を添える（#391）。 */}
+              {/* エンコード段は Rust 側の進捗イベントがまだ無い。90% 固定＋静止バーは「止まった」ように見えるので、
+                  バーを不定表示（下の progress-fill--indeterminate）にして「進んでいる」ことを伝える（#391 レビュー）。 */}
               {phase === "encoding" && (
                 <div className="text-center text-sm text-muted">
-                  最後の仕上げ中です。少し時間がかかることがあります。
+                  最後の仕上げ中です。そのままお待ちください。
                 </div>
               )}
               {/* 書き出しの中止（#380）：走行中の変換を止めて、すぐやり直せる。 */}

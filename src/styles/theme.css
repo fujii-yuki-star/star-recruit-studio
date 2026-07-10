@@ -745,6 +745,29 @@ button.badge {
   transition: width 0.3s;
 }
 
+/* 進捗値が無い段（動画のまとめ中＝encoding）で使う不定バー。一定幅の帯が左右に流れて「動いている」ことを伝える。 */
+.progress-fill--indeterminate {
+  width: 40%;
+  transition: none;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes progress-indeterminate {
+  0% {
+    margin-left: -40%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+/* アニメを控える設定の利用者には、流れる帯の代わりに満杯近くの静止バーを見せる（規約：prefers-reduced-motion 尊重）。 */
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill--indeterminate {
+    width: 90%;
+    margin-left: 0;
+    animation: none;
+  }
+}
+
 /* ステップ表示 */
 .stepper {
   display: flex;
