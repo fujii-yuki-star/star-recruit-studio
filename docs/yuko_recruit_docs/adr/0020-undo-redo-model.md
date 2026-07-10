@@ -62,7 +62,7 @@ ADR-0016 は「Undo/Redo は履歴/Command の設計（domain純粋性・状態�
   - (b) undo は assets を戻さない＝`scenes`/`parts` の `assetId` 参照は**切れない**（assets は取込で増えるだけ・undo で消えないので dangling にならない＝レビュー🔴 を解消）。
   - **素材の追加/削除そのものは取り消せない**点のみ、必要時にUIで一言（§2-5）。素材操作で履歴を消さないので「大量編集→素材追加で全部消える」混乱は起きない。
 - **スコープ（グローバル）**：履歴は**ストアに置きプロジェクト内の画面遷移をまたいで保持**する。**別文書を開く操作（`newProject`/`loadProject`）で履歴をクリア**（`saveProject` ではクリアしない）。場面横断の編集（並べ替え・分割等）も同じ履歴に乗る。
-- **入口**：Ctrl+Z＝undo / Ctrl+Y・Ctrl+Shift+Z＝redo（編集画面で有効・IME変換中やテキスト入力中の既定動作を奪わない）。編集画面に「取り消す/やり直す」ボタン（`canUndo/canRedo` で活性制御）。
+- **入口**：Ctrl+Z＝undo / Ctrl+Y・Ctrl+Shift+Z＝redo（**App で全画面登録**＝たたき台や素材管理など編集画面以外でも効く・#413。IME変換中やテキスト入力中の既定動作は奪わない）。「取り消す/やり直す」ボタンは**たたき台・場面編集・タイムライン編集**に置く（`canUndo/canRedo` で活性制御）。**書き出し中は undo/redo とも no-op**＝進行中の書き出しが不整合な `scenes/parts/meta` を読むのを防ぐ（`newProject`/`loadProject` と同じ #379 ガード）。
 - **保存状態**：undo/redo は `saveStatus: "idle"`（未保存）にする。
 - **正典影響なし**：履歴は永続化しない。schemaVersion 不変。
 
