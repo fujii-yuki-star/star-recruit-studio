@@ -81,3 +81,49 @@ describe("attachVolume（プレビュー音量パリティ・#452 P1）", () => 
     expect(gain.gain.value).toBe(1.5);
   });
 });
+
+describe("setVolume（再生中の即時反映・#465/#392）", () => {
+  it("要素経路（≤1.0）は setVolume を即時反映し 0〜1.0 にクランプ（同経路内は頭出ししない）", () => {
+    const m = fakeMedia();
+    const ctl = attachVolume({ current: null }, m, 0.3, false);
+    ctl.setVolume(0.8);
+    expect(m.volume).toBeCloseTo(0.8); // ≤1.0 内の変更はその場で反映
+    ctl.setVolume(1.5);
+    expect(m.volume).toBe(1); // 要素は 1.0 クランプ（増幅は境界跨ぎ＝呼び出し側が張り直す）
+    ctl.setVolume(-0.2);
+    expect(m.volume).toBe(0); // 下限クランプ
+  });
+
+  it("GainNode 経路（>1.0）は setVolume を gain に即時反映（増幅も 100%側への減衰も）", () => {
+    const { ctx, gain } = mockAudioContext();
+    (window as any).AudioContext = function () { return ctx; };
+    const ctl = attachVolume({ current: null }, fakeMedia(), 1.5, false);
+    ctl.setVolume(1.2);
+    expect(gain.gain.value).toBe(1.2); // 書き出しと同じ増幅係数を即時反映
+    ctl.setVolume(0.5);
+    expect(gain.gain.value).toBe(0.5); // 減衰側も素通しで反映
+    ctl.setVolume(-1);
+    expect(gain.gain.value).toBe(0); // 下限クランプ
+  });
+
+  it("GainNode 経路：muted 中の setVolume は gain=0 を保ち、unmute で最新音量に復帰", () => {
+    const { ctx, gain } = mockAudioContext();
+    (window as any).AudioContext = function () { return ctx; };
+    const ctl = attachVolume({ current: null }, fakeMedia(), 1.5, false);
+    ctl.setMuted(true);
+    expect(gain.gain.value).toBe(0);
+    ctl.setVolume(1.2); // ミュート中は保持のみ（鳴らさない）
+    expect(gain.gain.value).toBe(0);
+    ctl.setMuted(false);
+    expect(gain.gain.value).toBe(1.2); // 復帰時は最新音量
+  });
+
+  it("要素経路：muted 中の setVolume は .volume を更新しても .muted は解けない", () => {
+    const m = fakeMedia();
+    const ctl = attachVolume({ current: null }, m, 0.3, false);
+    ctl.setMuted(true);
+    ctl.setVolume(0.7);
+    expect(m.volume).toBeCloseTo(0.7);
+    expect(m.muted).toBe(true); // 音量変更でミュートは解けない
+  });
+});

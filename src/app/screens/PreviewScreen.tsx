@@ -72,6 +72,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const audioCtxRef: AudioCtxRef = useRef<AudioContext | null>(null);
   const narrationCtlRef = useRef<VolumeControl | null>(null);
   const bgmCtlRef = useRef<VolumeControl | null>(null);
+  // BGM 音量の最新値（100%境界の張り直し用 deps を bgmVolume>1 の真偽にするため、attach が読む実値は ref で持つ・#392/#465）。
+  const bgmVolumeRef = useRef(1);
 
   // 直接landしたときの自動生成は「外部送信にならない（Mock）とき」だけ（#384・§2-6）。実プロバイダは空状態のまま。
   useEffect(() => {
@@ -224,6 +226,23 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // effect の deps に使うプリミティブ（オブジェクト参照でなく値で比較＝同じ源では再起動しない）。
   const bgmEnabled = !!currentBgm?.enabled;
   const bgmVolume = resolveBgmVolume(undefined, currentBgm);
+  // 再生中に音量スライダーを動かしたときの現在値（subscribe 済み meta 由来）。setVolume の即時反映＋100%境界跨ぎの
+  // 張り直し判定に使う（#465/#392・Option 2）。current 未定義（0場面）でも resolveNarrationVolume が既定へ倒す。
+  const liveNarrationVolume = resolveNarrationVolume(current?.audioMix, meta.voiceSettings);
+  // 100% 境界（要素 .volume ↔ GainNode 経路）を跨いだかの真偽。再生 effect の deps に入れて経路を張り直す
+  // （複雑式を deps 配列に直接置かない＝exhaustive-deps 対応）。
+  const narrationAmplified = liveNarrationVolume > 1;
+  const bgmAmplified = bgmVolume > 1;
+  // 音量を再生中の音声へ即時反映する（張り直さない＝掛け合いも頭出ししない・#465/#392）。100% 境界を跨ぐ変更は
+  // 経路（要素 .volume ↔ GainNode）を切り替える必要があるため、下の再生 effect が bgmVolume>1 / liveNarrationVolume>1
+  // の真偽の変化で張り直す（Option 2「境界で鳴り直す」）。境界を跨がない変更はこの setVolume だけで即時。
+  useEffect(() => {
+    narrationCtlRef.current?.setVolume(liveNarrationVolume);
+  }, [liveNarrationVolume]);
+  useEffect(() => {
+    bgmVolumeRef.current = bgmVolume;
+    bgmCtlRef.current?.setVolume(bgmVolume);
+  }, [bgmVolume]);
 
   // 再生中：現在の場面のナレーションを鳴らし、表示時間後に次の場面へ。範囲の終端で停止。
   // 掛け合い（明示 lines）は行ごとに音声を順に鳴らし、経過秒で有効行（字幕/フレーム）を切り替える（ADR-0015 PR-F2）。
@@ -231,12 +250,16 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     // 再生開始時点のスナップショット（#382）＝store の現在値を getState で読む（subscribe しない）。
     // 以降この再生セッションはこの値で進み、途中で scenes/narrationAudioById の参照が変わっても
     // effect は再起動しない（自動保存・声のBG生成で場面を頭からやり直さない）。
-    const { scenes: scenesSnap, narrationAudioById, meta: metaSnap } = useProjectStore.getState();
+    // scenes/narrationAudioById はセッション開始時のスナップショット（#382）。音量（voiceSettings）だけは
+    // readNarrationVolume で毎アタッチ時に最新値を読む＝再生中の変更を反映しつつ effect は再起動させない（#465/#392）。
+    const { scenes: scenesSnap, narrationAudioById } = useProjectStore.getState();
     const sc = scenesSnap[safeIdx];
     if (!playing || !sc) return;
     // ナレーション音量を書き出しと同じ解決で適用（§6・#388/#452）。0〜1.5 の全域を attachVolume が反映する
     //（≤1.0=要素 .volume／>1.0=Web Audio GainNode で増幅）＝書き出し（FFmpeg volume=…）と一致（ADR-0026）。
-    const narrationVolume = resolveNarrationVolume(sc.audioMix, metaSnap.voiceSettings);
+    // 音量は各音声のアタッチ時に最新値を読む（getState＝effect は再起動しない＝#382 の非張り直し設計を保つ／
+    // 再生中の音量変更は下の setVolume 即時反映＋100%境界跨ぎの張り直しで反映・#465/#392）。掛け合いの後続行にも効く。
+    const readNarrationVolume = () => resolveNarrationVolume(sc.audioMix, useProjectStore.getState().meta.voiceSettings);
     const advance = (): void => {
       if (safeIdx < endIdx) setIdx(safeIdx + 1);
       else setPlaying(false);
@@ -282,7 +305,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           // 常に生成し attachVolume（≤1.0=.volume／>1.0=GainNode）で音量/ミュートを制御＝書き出しと一致＋即時ミュート（#452 P1）。
           currentAudio = new Audio(u);
           narrationAudioRef.current = currentAudio;
-          narrationCtlRef.current = attachVolume(audioCtxRef, currentAudio, narrationVolume, mutedRef.current);
+          narrationCtlRef.current = attachVolume(audioCtxRef, currentAudio, readNarrationVolume(), mutedRef.current);
           lineAudios.push(currentAudio);
           // play() の解決＝再生開始。そこから窓を測って次へ。resolve/reject いずれでも一度だけ進む。
           void currentAudio.play().then(scheduleNext, (e) => {
@@ -331,7 +354,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       // 常に生成し attachVolume（≤1.0=.volume／>1.0=GainNode）で音量/ミュートを制御＝書き出しと一致＋即時ミュート（#452 P1）。
       audio = new Audio(url);
       narrationAudioRef.current = audio;
-      narrationCtlRef.current = attachVolume(audioCtxRef, audio, narrationVolume, mutedRef.current);
+      narrationCtlRef.current = attachVolume(audioCtxRef, audio, readNarrationVolume(), mutedRef.current);
       void audio.play().catch((e) => {
         // 停止・場面送りで再生が中断された AbortError は正常系＝偽の失敗通知/ログ汚染にしない（#392）。
         if (e instanceof DOMException && e.name === "AbortError") return;
@@ -347,7 +370,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     };
     // deps はプリミティブのみ（#382）：scenes/narrationAudioById は上の getState でスナップショット読みするため
     // deps に含めない＝自動保存・声のBG生成での参照変化で再生を頭からやり直さない。endIdx は値が変わったときだけ再構成（範囲変更）。
-  }, [playing, safeIdx, endIdx]);
+    // liveNarrationVolume>1 の真偽が変わったとき（100%境界の跨ぎ）だけ張り直す＝経路（要素↔GainNode）を切替（Option 2）。
+    // 境界を跨がない音量変更では再起動しない（上の setVolume で即時反映＝掛け合いも頭出ししない・#382 を保つ）。
+  }, [playing, safeIdx, endIdx, narrationAmplified]);
 
   // 再生中：選択した BGM をループで流す（仕上がり確認で雰囲気を確認できる）。場面送りでは止めない。
   // BGM 要素は ref を単一の真実とし、cleanup は ref を直接停止する（自分のBGMは URL 解決が非同期なので
@@ -365,7 +390,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       a.loop = true;
       bgmAudioRef.current = a;
       // 100%超（最大150%）も書き出しと一致させる（≤1.0=.volume／>1.0=GainNode・#452 P1）。
-      bgmCtlRef.current = attachVolume(audioCtxRef, a, bgmVolume, mutedRef.current);
+      bgmCtlRef.current = attachVolume(audioCtxRef, a, bgmVolumeRef.current, mutedRef.current);
       void a.play().catch((e) => {
         // 停止・曲切替で中断された AbortError は正常系＝偽の失敗通知/ログ汚染にしない（#392）。
         if (e instanceof DOMException && e.name === "AbortError") return;
@@ -379,8 +404,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       bgmAudioRef.current = null;
       bgmCtlRef.current = null;
     };
-    // deps は源（bundledBgm/bgmAsset）と有効/音量のプリミティブ＝同じ曲が続く場面送りでは再起動せず鳴らし続ける。曲が変わる場面で切替。
-  }, [playing, bgmEnabled, bgmVolume, bundledBgm, bgmAsset, meta.projectId]);
+    // deps は源（bundledBgm/bgmAsset）と有効/音量境界のプリミティブ＝同じ曲が続く場面送りでは再起動せず鳴らし続ける。
+    // 音量は bgmVolume>1 の真偽（100%境界の跨ぎ）でだけ張り直す＝境界を跨がない変更は上の setVolume で即時（曲を頭出ししない・#392）。
+  }, [playing, bgmEnabled, bgmAmplified, bundledBgm, bgmAsset, meta.projectId]);
 
   // 場面ゼロ（たたき台を作る前に入った等）は、壊れて見える空プレビューではなく作成導線を出す（#392）。
   if (scenes.length === 0) {
@@ -547,7 +573,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <NarrationVolumeControl
               volume={meta.voiceSettings.volume}
               onChange={(v) => updateVoiceSettings({ volume: v })}
-              hint="読み上げの声の大きさです。変更は次の場面から反映されます（BGM はその場で変わります）。"
+              hint="読み上げの声の大きさです。再生しながらでもその場で変わります。"
             />
           </div>
 
