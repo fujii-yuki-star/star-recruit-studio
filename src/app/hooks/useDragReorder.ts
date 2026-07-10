@@ -62,6 +62,15 @@ export function useDragReorder(onReorder: (fromId: string, toIndex: number) => v
       onPointerDown: (e) => {
         if (e.button != null && e.button > 0) return; // 主ボタン以外（右クリック等）は無視
         e.preventDefault(); // ドラッグ中のテキスト選択・既定操作を抑止
+        // タッチは pointerdown した要素へ暗黙のポインタキャプチャが掛かり、落下先の pointermove が届かなくなる。
+        // キャプチャを解放して、マウスと同様「今ポインタが乗っている要素」へ pointermove を届かせる（#398 レビュー・タッチ対応）。
+        // マウスは暗黙キャプチャが無く hasPointerCapture=false＝no-op。未対応環境（jsdom 等）は try/catch で無視。
+        try {
+          const el = e.currentTarget as Element;
+          if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+        } catch {
+          /* 未対応/未キャプチャは無視 */
+        }
         draggingIdRef.current = id;
         overIndexRef.current = null;
         setDraggingId(id);
