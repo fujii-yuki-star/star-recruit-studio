@@ -71,6 +71,28 @@ describe('layoutScene：タイムラインのテロップ（ADR-0018 テロッ�
   });
 });
 
+describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413/#495 レビュー）', () => {
+  const subtitleItems = (layout: { items: LayoutItem[] }): TextItem[] =>
+    layout.items.filter((i): i is TextItem => i.kind === 'text' && i.isSubtitle);
+
+  it('既定（未設定/true）は静的字幕（texts.subtitle）を出す', () => {
+    expect(subtitleItems(layoutScene(scene, openingTemplate))).toHaveLength(1);
+    expect(subtitleItems(layoutScene({ ...scene, subtitleEnabledDefault: true }, openingTemplate))).toHaveLength(1);
+  });
+
+  it('subtitleEnabledDefault=false は静的字幕（単一ナレーション）を出さない＝トグルが preview/export に効く', () => {
+    expect(subtitleItems(layoutScene({ ...scene, subtitleEnabledDefault: false }, openingTemplate))).toHaveLength(0);
+  });
+
+  it('掛け合いの行字幕（subtitleText 上書き）は scene 既定 false でも出る＝行が優先（override 経路は不変）', () => {
+    const subs = subtitleItems(
+      layoutScene({ ...scene, subtitleEnabledDefault: false }, openingTemplate, { subtitleText: '行の字幕' }),
+    );
+    expect(subs).toHaveLength(1);
+    expect(subs[0].text).toBe('行の字幕');
+  });
+});
+
 describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => {
   const freeTemplate: Template = {
     schemaVersion: '1.0', templateId: 'free_v1', name: 'FREE', category: 'free',
