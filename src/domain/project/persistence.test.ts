@@ -285,6 +285,18 @@ describe('parseProjectDoc', () => {
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.16→現行へ昇格（任意追加＝変換不要）
     expect(back.timelineOverlay?.animations).toEqual(animations);
   });
+  it('動画スロット再生開始：scene.slotVideoStart を持つ旧版(1.17)が移行し保持する（ADR-0027・#444）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'intro', templateId: 'tpl_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' }, warnings: [],
+      slotVideoStart: { mainVisual: { mode: 'afterAnim' }, sub: { mode: 'delay', delaySec: 0.6 } },
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.17', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.17→1.18 へ昇格（任意追加＝変換不要・欠落=withAnim）
+    expect(back.scenes[0].slotVideoStart).toEqual({ mainVisual: { mode: 'afterAnim' }, sub: { mode: 'delay', delaySec: 0.6 } });
+  });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;
     delete doc.videoKind;

@@ -170,6 +170,7 @@ const mustReject = [
   ['groups: 未知フィールド(color)は拒否（additionalProperties:false）', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, color: '#fff' }] })],
   ['scene: slotVideoStart 未知モード(afterDelay)は拒否（1.18・ADR-0027）', withScene({ slotVideoStart: { mainVisual: { mode: 'afterDelay' } } })],
   ['scene: slotVideoStart mode 欠落は拒否（required）', withScene({ slotVideoStart: { mainVisual: { delaySec: 1 } } })],
+  ['scene: slotVideoStart mode=delay で delaySec 欠落は拒否（if/then＝「途中から」が「同時」に化けない）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay' } } })],
   ['scene: slotVideoStart delaySec 負は拒否', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: -1 } } })],
   ['scene: slotVideoStart 未知フィールド(startSec)は拒否（additionalProperties:false）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: 1, startSec: 2 } } })],
 ];

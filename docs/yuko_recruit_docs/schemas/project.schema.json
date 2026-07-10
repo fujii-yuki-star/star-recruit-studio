@@ -274,7 +274,9 @@
             "properties": {
               "mode": { "enum": ["withAnim", "afterAnim", "delay"] },
               "delaySec": { "type": "number", "minimum": 0 }
-            }
+            },
+            "if": { "properties": { "mode": { "const": "delay" } }, "required": ["mode"] },
+            "then": { "required": ["delaySec"] }
           }
         },
         "groups": { "type": "array", "items": { "$ref": "#/$defs/Group" } }
