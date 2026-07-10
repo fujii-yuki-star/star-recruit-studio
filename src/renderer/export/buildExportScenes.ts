@@ -182,7 +182,7 @@ export async function buildExportScenes(
   resolveAssetSrc: (assetId: string) => Promise<string | undefined>,
   narrationFor?: NarrationFor,
   videoSlotsFor?: VideoSlotsFor,
-  onProgress?: (done: number, total: number) => void,
+  onProgress?: (done: number, total: number, frameFraction?: number) => void,
   opts: ExportOptions = {},
   animationsFor?: AnimationsFor,
   stageAnimationFrame?: StageAnimationFrame,
@@ -378,6 +378,8 @@ export async function buildExportScenes(
             }
             for (let f = 0; f < frameCount; f += 1) {
               bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
+              // フレーム進捗を間引いて通知＝アニメ場面でもバーが動く（#391・フリーズ誤認を防ぐ）。i=処理中の場面（0基点）。
+              if (f % 4 === 0 || f === frameCount - 1) onProgress?.(i, scenes.length, (f + 1) / frameCount);
               const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
               // アニメ区間のスロット画像＝この時刻の実フレーム（無ければ assetSrc＝サムネ）。プレビューと同じ layoutToSvg で描く。
               let frameAssetSrc = assetSrc;
@@ -482,6 +484,8 @@ export async function buildExportScenes(
             const midDirs = splitM.midSvgs.map((_, m) => `scene_vmid_${i}_${m}`);
             for (let f = 0; f < frameCount; f += 1) {
               bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
+              // フレーム進捗を間引いて通知＝アニメ場面でもバーが動く（#391・フリーズ誤認を防ぐ）。i=処理中の場面（0基点）。
+              if (f % 4 === 0 || f === frameCount - 1) onProgress?.(i, scenes.length, (f + 1) / frameCount);
               // 場面内絶対時刻でアニメ補間（プレビューと同一 layoutScene(t)＝パリティ）。下/中/上層に切り出して焼く。
               const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
               const fSplit = splitVideoSceneSvgMulti(frameLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit);
@@ -574,6 +578,11 @@ export async function buildExportScenes(
             const framesBase64: string[] = [];
             for (let f = 0; f < frameCount; f += 1) {
               bail(); // フレーム単位（数百フレームの per-frame でも中止を拾う）
+              // フレーム進捗を間引いて通知＝アニメ場面でもバーが動く（#391・フリーズ誤認を防ぐ）。i=処理中の場面（0基点）。
+              // 掛け合いはこのループが「間/行」セグメントごとに回る（#391 レビュー P1）。frameFraction を区間内比 (f+1)/frameCount
+              // で出すと次セグメントで 1.0→0 に戻り、進捗バーが後退して見える。segIndex を足して場面全体で単調にする。
+              if (f % 4 === 0 || f === frameCount - 1)
+                onProgress?.(i, scenes.length, (segIndex + (f + 1) / frameCount) / specs.length);
               // 場面内の絶対時刻でアニメを補間（プレビューと同一 layoutScene(t)＝パリティ）。行字幕も同フレームに焼き込む。
               const frameLayout = layoutScene(scene, template, {
                 timeSec: spec.startSec + f / fps,
