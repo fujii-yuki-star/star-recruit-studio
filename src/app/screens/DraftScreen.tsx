@@ -218,7 +218,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                           {...dnd.handleProps(row.id)}
                           aria-hidden="true"
                           title="ドラッグして並び替え"
-                          style={{ cursor: "grab", userSelect: "none", color: "var(--color-text-muted)", lineHeight: 1 }}
+                          style={{ cursor: "grab", touchAction: "none", userSelect: "none", color: "var(--color-text-muted)", lineHeight: 1 }}
                         >
                           ⠿
                         </span>
