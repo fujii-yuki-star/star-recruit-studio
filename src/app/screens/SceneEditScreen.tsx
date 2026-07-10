@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
+import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
@@ -1085,8 +1086,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           {s.order}. {sceneTypeLabel[s.sceneType]}
                         </strong>
                       </div>
-                      <div className="text-faint" style={{ fontSize: 11 }}>
+                      <div className="text-faint" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {templates.find((t) => t.templateId === s.templateId)?.name ?? ""}
+                      </div>
+                      {/* セリフ先頭を出して全カード同一アイコンでも中身で見分けられるようにする（#413）。カード幅は固定（theme.css）で
+                          1行省略（全文は title）。セリフが無い場面も空の1行を確保し、カード高さ＝下の ←/→ の位置を揃える（#413 レビュー）。 */}
+                      <div
+                        className="text-sm"
+                        style={{ marginTop: 2, minHeight: "1.25em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        title={sceneFirstLine(s) || undefined}
+                      >
+                        {sceneFirstLine(s) ? `「${sceneFirstLine(s)}」` : " "}
                       </div>
                     </button>
                     {/* ドラッグが使いにくい場合の代替＝前へ/後ろへ（moveLine/moveFreeElZ と同じ↑/↓の流儀・キーボード可）。#398 レビュー */}
