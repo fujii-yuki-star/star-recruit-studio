@@ -51,6 +51,8 @@ describe("DraftScreen 全場面の声を作成＋完了通知（#413）", () => 
     render(<DraftScreen onNavigate={onNavigate} />);
     fireEvent.click(screen.getByRole("button", { name: "全場面の声を作成" }));
     await screen.findByText(/全場面の声ができました/);
+    // 全部できたら一括作成ボタン自体は消える（やることが無いので出しっぱなしにしない）。
+    expect(screen.queryByRole("button", { name: "全場面の声を作成" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /仕上がり確認へ/ }));
     expect(onNavigate).toHaveBeenCalledWith("preview");
     expect(useProjectStore.getState().previewReturnTo).toBe("draft");
