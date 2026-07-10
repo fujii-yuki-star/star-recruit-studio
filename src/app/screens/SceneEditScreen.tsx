@@ -1127,7 +1127,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {!isFree && (
               <CollapsibleSection title="文字">
               {sceneTextKeys.length === 0 && (
-                <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
+                <div>
+                  <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
+                  {/* 行き止まりにしない：文字を重ねる次の行動（テロップ＝タイムライン編集）を案内する（§2-5・#413）。 */}
+                  <p className="field-hint" style={{ marginTop: 4 }}>
+                    文字を重ねたいときは、タイムライン編集で「テロップ」を足せます。
+                  </p>
+                  <button className="btn btn-ghost text-sm" style={{ marginTop: 4 }} onClick={() => onNavigate("timeline-edit")}>
+                    タイムライン編集を開く
+                  </button>
+                </div>
               )}
               {sceneTextKeys.map((key) => {
                 // 見出し・URL は1行、本文・字幕・キャプションは複数行で編集する。

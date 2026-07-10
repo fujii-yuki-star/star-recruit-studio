@@ -188,6 +188,10 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         title="見た目パターンを管理"
         desc="動画の見た目のパターンを確認できます。各場面に当てる見た目は「場面編集」で選べます。"
       />
+      {/* 説明だけで行き止まりにしない：実際に見た目を割り当てる「場面編集」への導線を添える（§2-5・#413）。 */}
+      <button className="btn btn-ghost text-sm" style={{ marginBottom: "var(--gap)" }} onClick={() => onNavigate("scene-edit")}>
+        場面編集を開く
+      </button>
 
       {/* ゼロから新規作成（ADR-0017）：複製だけでなく一から作れる導線。向き・種類は編集画面で変えられないため作成時に決める。 */}
       {creating ? (
