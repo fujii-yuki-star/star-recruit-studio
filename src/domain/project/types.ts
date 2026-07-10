@@ -1,7 +1,7 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
   AssetType, Easing, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
-  SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
+  SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, VideoStartMode, WarningSeverity,
 } from '../enums';
 import type { FontId } from '../font/fontCatalog';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
@@ -73,6 +73,16 @@ export interface Clip {
   fit?: Fit;
   /** 再生速度（0.5–2.0・既定1.0）。尺は据え置き、スロット内のクリップ再生速度のみ変える（ADR-0007 Phase 3b）。 */
   speed?: number;
+}
+
+/**
+ * 動画スロット本体アニメの再生開始タイミング（ADR-0027・#444）。モードで保存＝アニメ長が変わっても意味不変。
+ * delaySec は mode='delay' のときだけ有効（0〜アニメ長・描画時に [0, animEnd] へクランプ）。
+ * 効くのは「スロット本体がアニメ対象」の場面のみ（slotIsAnimated）。アニメが無いスロットには持たせない。
+ */
+export interface VideoStartSpec {
+  mode: VideoStartMode;
+  delaySec?: number;
 }
 
 export interface AssetMetadata {
@@ -245,6 +255,8 @@ export interface Scene {
   warnings: Warning[];
   /** 場面ごと・スロット別の画像の収め方（④）。キー＝テンプレのスロット/背景/ロゴの layer.id。未指定＝テンプレ層の fit を使用。 */
   slotFits?: Record<string, Fit>;
+  /** 動画スロット本体アニメの再生開始タイミング（ADR-0027・#444）。キー＝スロットの layer.id。未指定＝withAnim（アニメと同時）。スロット本体がアニメ対象の場面でのみ効く。 */
+  slotVideoStart?: Record<string, VideoStartSpec>;
   /** FREE テンプレ場面のみ：自由配置要素（ADR-0008）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
   freeLayout?: FreeElement[];
   /** 要素のグループ化（ADR-0022）。メンバー＝freeLayout 要素 id（ネストで group id も可）。未設定＝グループ無し。 */

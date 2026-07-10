@@ -97,7 +97,7 @@ ok = ok && sem;
 
 // generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
 const generalBase = {
-  schemaVersion: '1.17', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  schemaVersion: '1.18', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
   videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
@@ -130,6 +130,7 @@ const mustAccept = [
   ['scene: bgmSettings（場面ごとBGM・曲の上書き）を許容（1.16・ADR-0018 ③(7)）', withScene({ bgmSettings: { enabled: true, bundledBgmId: 'found-new-hope', volume: 0.3, loop: true } })],
   ['scene: bgmSettings（無音＝enabled:false のみ）を許容（1.16・ADR-0018 ③(7)）', withScene({ bgmSettings: { enabled: false } })],
   ['timelineOverlay: animations（キーフレーム）を許容（1.17・ADR-0019 ④）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, x: 100, y: 50, scale: 1.5, opacity: 1, rotation: 90, easing: 'ease-in-out' }] }] } }],
+  ['scene: slotVideoStart（動画スロット再生開始・3モード）を許容（1.18・ADR-0027）', withScene({ slotVideoStart: { mainVisual: { mode: 'withAnim' }, sub: { mode: 'afterAnim' }, bg: { mode: 'delay', delaySec: 0.6 } } })],
 ];
 const mustReject = [
   ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
@@ -167,6 +168,11 @@ const mustReject = [
   ['groups: transform.scale 負は拒否', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: -1 } }] })],
   ['groups: transform に必須欠落(scale)は拒否', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0 } }] })],
   ['groups: 未知フィールド(color)は拒否（additionalProperties:false）', withScene({ groups: [{ id: 'group_001', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, color: '#fff' }] })],
+  ['scene: slotVideoStart 未知モード(afterDelay)は拒否（1.18・ADR-0027）', withScene({ slotVideoStart: { mainVisual: { mode: 'afterDelay' } } })],
+  ['scene: slotVideoStart mode 欠落は拒否（required）', withScene({ slotVideoStart: { mainVisual: { delaySec: 1 } } })],
+  ['scene: slotVideoStart mode=delay で delaySec 欠落は拒否（if/then＝「途中から」が「同時」に化けない）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay' } } })],
+  ['scene: slotVideoStart delaySec 負は拒否', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: -1 } } })],
+  ['scene: slotVideoStart 未知フィールド(startSec)は拒否（additionalProperties:false）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: 1, startSec: 2 } } })],
 ];
 for (const [desc, data] of mustAccept) {
   if (vProject(data)) console.log(`PASS  must-accept  ${desc}`);

@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.17" },
+    "schemaVersion": { "const": "1.18" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -264,6 +264,20 @@
         "slotFits": {
           "type": "object",
           "additionalProperties": { "enum": ["cover", "contain", "stretch"] }
+        },
+        "slotVideoStart": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mode"],
+            "properties": {
+              "mode": { "enum": ["withAnim", "afterAnim", "delay"] },
+              "delaySec": { "type": "number", "minimum": 0 }
+            },
+            "if": { "properties": { "mode": { "const": "delay" } }, "required": ["mode"] },
+            "then": { "required": ["delaySec"] }
+          }
         },
         "groups": { "type": "array", "items": { "$ref": "#/$defs/Group" } }
       }
