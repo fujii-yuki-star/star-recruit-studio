@@ -4,6 +4,8 @@ import { useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
+import { narrationProgress } from "../../domain/voice/narrationProgress";
+import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
 import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
@@ -28,7 +30,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo } =
+  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, generateAllNarrations, isGeneratingNarration } =
     useProjectStore();
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
   const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
@@ -41,6 +43,8 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   const [confirmRegen, setConfirmRegen] = useState(false);
   // 向き変更の結果メッセージ（§2-5：何が起きたか＋次の行動）。
   const [orientationMsg, setOrientationMsg] = useState<{ warn: boolean; text: string } | null>(null);
+  // 「全場面の声を作成」の完了メッセージ。remaining＝作成後もまだ声が要る場面数（0＝全部できた／>0＝一部失敗）。null=非表示。
+  const [voiceResult, setVoiceResult] = useState<{ remaining: number } | null>(null);
 
   function switchOrientation() {
     const target = aspectRatio === ORIENTATION.portrait ? ORIENTATION.landscape : ORIENTATION.portrait;
@@ -63,6 +67,16 @@ export function DraftScreen({ onNavigate }: DraftProps) {
       });
     }
   }
+
+  // セリフ音声の生成進捗（行単位）。「全場面の声を作成」ボタンの表示条件・進捗表示に使う。
+  const { done: narrDone, total: narrTotal } = narrationProgress(scenes);
+  // 全場面の声を作成（既存 action を呼ぶだけ＝場面編集の一括作成と同じ）。完了後に「まだ声が要る場面」を数えて通知する。
+  const runBulkVoice = async () => {
+    setVoiceResult(null);
+    await generateAllNarrations();
+    const remaining = useProjectStore.getState().scenes.filter(sceneNeedsVoice).length;
+    setVoiceResult({ remaining });
+  };
 
   // たたき台へ直接来た場合は生成する（本実装では保存済みプロジェクトの読込に置き換え）
   useEffect(() => {
@@ -141,6 +155,32 @@ export function DraftScreen({ onNavigate }: DraftProps) {
               {orientationMsg.text}
             </div>
           )}
+
+          {/* 全場面の声をまとめて作成（音声バッジは見せているので作る手段もここに置く・#413）。すべて作成済みなら隠す。 */}
+          {narrTotal > 0 && !(narrDone === narrTotal && !isGeneratingNarration) && (
+            <div className="row-between mb">
+              <span className="text-muted">声 <strong>{narrDone}/{narrTotal}</strong>{isGeneratingNarration ? "（作成中…）" : ""}</span>
+              <button className="btn btn-primary" onClick={() => void runBulkVoice()} disabled={isGeneratingNarration}>
+                {isGeneratingNarration ? "作成中…" : "全場面の声を作成"}
+              </button>
+            </div>
+          )}
+          {/* 一括作成の完了通知（現在は進捗が消えるだけ＝#413）。全部できたら仕上がり確認へ誘導、一部失敗は次の行動を案内。 */}
+          {voiceResult && !isGeneratingNarration &&
+            (voiceResult.remaining === 0 ? (
+              <div className="notice notice-info mb" role="status">
+                <CheckIcon size={18} />
+                <span className="grow">全場面の声ができました。</span>
+                <button className="btn btn-ghost" onClick={() => { setPreviewReturnTo("draft"); onNavigate("preview"); }}>
+                  <PlayIcon size={16} />
+                  仕上がり確認へ
+                </button>
+              </div>
+            ) : (
+              <div className="notice notice-warn mb" role="status">
+                <span className="grow">声を作成しました。{voiceResult.remaining}件の場面はうまく作れませんでした。各場面の「声を作り直す」でもう一度お試しください。</span>
+              </div>
+            ))}
 
           {/* 台本表 */}
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
