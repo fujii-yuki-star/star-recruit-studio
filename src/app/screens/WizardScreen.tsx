@@ -731,7 +731,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   className="action-card-icon"
                   style={{
                     background: "var(--color-yellow)",
-                    color: "#8a6d1a",
+                    color: "var(--color-warn)",
                     margin: "0 auto var(--gap)",
                     width: 64,
                     height: 64,

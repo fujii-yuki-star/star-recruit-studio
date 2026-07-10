@@ -7,7 +7,7 @@ import { hasUnsavedChanges } from "../hooks/newProjectGuard";
 // 未保存インジケータの単一実装（#410 sub6）。プロジェクト保存（SaveStatusBadge）とテンプレ編集
 // （LooksEditScreen＝テンプレ下書きの dirty）で状態の出どころは違うが、見た目・文言はこれ1つに揃える。
 export function UnsavedMark() {
-  return <span className="text-sm" style={{ color: "#8a6d1a" }}>● 未保存の変更があります</span>;
+  return <span className="text-sm" style={{ color: "var(--color-warn)" }}>● 未保存の変更があります</span>;
 }
 
 export function SaveStatusBadge() {

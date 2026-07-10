@@ -232,7 +232,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             <button className="action-card" onClick={() => onNavigate("settings")}>
               <div
                 className="action-card-icon"
-                style={{ background: "var(--color-yellow)", color: "#8a6d1a" }}
+                style={{ background: "var(--color-yellow)", color: "var(--color-warn)" }}
               >
                 <SettingsIcon size={24} />
               </div>
