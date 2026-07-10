@@ -69,7 +69,7 @@ export interface ExportSceneInput {
   /** ナレーション音量（§6で解決済みの値）。音声がある場面のみ意味を持つ。 */
   narrationVolume?: number;
   /** 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声（複数動画スロット対応）。非空のとき Rust が audioBase64 と全本を amix する。 */
-  clipAudios?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number }[];
+  clipAudios?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number; delaySec?: number }[];
   /** 動画ありシーン（ADR-0006）。指定時は overlay 合成経路へ。 */
   video?: ExportVideoInput;
   /** この場面に「入る」トランジション（ADR-0009 T2）。先頭・none では未設定（ハードカット）。 */

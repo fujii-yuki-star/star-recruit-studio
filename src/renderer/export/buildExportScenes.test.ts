@@ -695,6 +695,61 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
     // clipEndSec は settled にも渡る（Rust 側で終点まで＝eof_action=repeat 保持）。
     expect(out[1].video?.clipEndSec).toBe(1.4);
   });
+
+  it('開始遅延（delay）：窓は[0,d]を代表フレームで静止し[d,W]を再生・元音声はdから・settledは窓の続き(W−d)から（#444・ADR-0027）', async () => {
+    vi.mocked(layoutScene).mockReturnValue(slotLayout);
+    const clipCalls: Array<Record<string, unknown>> = [];
+    const readIdx: number[] = [];
+    const scene = [{
+      sceneId: 's1', templateId: 'tpl', durationSec: 8,
+      slotVideoStart: { mainVisual: { mode: 'delay', delaySec: 0.5 } }, // d=0.5・W=1
+    }] as unknown as Scene[];
+    const out = await buildExportScenes(
+      scene, templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 2, useOriginalAudio: true, originalVolume: 0.5, speed: 1 }],
+      undefined, {},
+      (s) => [slotAnim(s.sceneId, 1)], // W=1
+      async () => {},
+      async (_dir, _clip, _cs, durSec) => { clipCalls.push({ durSec }); return Math.max(1, Math.ceil(durSec * FPS) + 1); },
+      async (_dir, index) => { readIdx.push(index); return 'data:image/png;base64,VF'; },
+    );
+    const delayFrames = Math.round(0.5 * FPS); // 15
+    // 抽出は再生ぶん（W−d=0.5）だけ（[0,d]の静止は抽出しない）。
+    expect(clipCalls[0].durSec).toBeCloseTo(0.5, 6);
+    // 窓フレームは [0,d) が index0（clipStart 静止）→ 以降 f−delayFrames で再生。
+    expect(readIdx.slice(0, delayFrames).every((x) => x === 0)).toBe(true);
+    expect(Math.max(...readIdx)).toBeGreaterThan(0); // 再生区間で進む
+    // 窓の元音声は d から鳴らし（delaySec=0.5）尺は残り 0.5（Rust adelay）。
+    expect(out[0].clipAudios?.[0]).toMatchObject({ clipStartSec: 2, durSec: 0.5, delaySec: 0.5, volume: 0.5 });
+    // settled は窓の続き＝clipStart(2)+(W−d)(0.5)*speed(1)=2.5 から（連続再生）。
+    expect(out[1].video?.clipStartSec).toBeCloseTo(2.5, 6);
+  });
+
+  it('開始遅延（afterAnim）：窓は全区間 static（動画は待つ）・元音声は鳴らさず・settled は clipStart から（#444）', async () => {
+    vi.mocked(layoutScene).mockReturnValue(slotLayout);
+    const readIdx: number[] = [];
+    const scene = [{
+      sceneId: 's1', templateId: 'tpl', durationSec: 8,
+      slotVideoStart: { mainVisual: { mode: 'afterAnim' } }, // d=W=1
+    }] as unknown as Scene[];
+    const out = await buildExportScenes(
+      scene, templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 2, useOriginalAudio: true, originalVolume: 0.5, speed: 1 }],
+      undefined, {},
+      (s) => [slotAnim(s.sceneId, 1)], // W=1・settled あり（尺8）
+      async () => {},
+      async (_dir, _clip, _cs, durSec) => Math.max(1, Math.ceil(durSec * FPS) + 1),
+      async (_dir, index) => { readIdx.push(index); return 'data:image/png;base64,VF'; },
+    );
+    // afterAnim（d=W）＝窓は全フレーム代表フレーム（index 0）で静止（動画は待つ）。
+    expect(readIdx.every((x) => x === 0)).toBe(true);
+    // 鳴る区間が無い（W−d=0）ので窓の元音声は付かない。
+    expect(out[0].clipAudios).toBeUndefined();
+    // settled は clipStart から（窓で 0 秒しか進めていない）。
+    expect(out[1].video?.clipStartSec).toBe(2);
+  });
 });
 
 describe('buildExportScenes：掛け合い×動画スロット（行区間つき上PNG＋行ナレーション配置）', () => {

@@ -2295,6 +2295,9 @@ pub struct ClipAudioInput {
     speed: Option<f64>,
     #[serde(default)]
     volume: Option<f64>,
+    /// 窓内での再生開始遅延（scene-time 秒・#444/ADR-0027）。0＝窓先頭から（従来）。adelay で配置する。
+    #[serde(default)]
+    delay_sec: f64,
 }
 
 /// 動画ありシーンの入力（ADR-0006・step2b）。下/上PNGは base64、クリップはプロジェクト相対パス。
@@ -2528,7 +2531,16 @@ fn build_window_audio(
         } else {
             format!("atempo={speed},")
         };
-        fc.push_str(&format!("[{input_idx}:a]{atempo}volume={vol}[c{k}];"));
+        // 窓内での再生開始遅延（#444/ADR-0027）：0 のときは省略（従来＝窓先頭から）。全チャンネルへ adelay（narr_chain と同方針）。
+        let delay_ms = (ca.delay_sec.max(0.0) * 1000.0).round() as i64;
+        let adelay = if delay_ms > 0 {
+            format!(",adelay={delay_ms}:all=1")
+        } else {
+            String::new()
+        };
+        fc.push_str(&format!(
+            "[{input_idx}:a]{atempo}volume={vol}{adelay}[c{k}];"
+        ));
         labels.push_str(&format!("[c{k}]"));
         input_idx += 1;
     }
