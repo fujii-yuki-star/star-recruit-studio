@@ -62,6 +62,9 @@ export const BGM_CROSSFADE_SEC = 1.0;
 // 音量の値域（§4：0.0〜1.5、1.0=原音）。
 export const VOLUME_MIN = 0.0;
 export const VOLUME_MAX = 1.5;
+// 原音量（100%・等倍）。プレビュー再生で「これ以下は HTMLMediaElement.volume で厳密／超過は Web Audio GainNode で増幅」
+// を分ける境界であり、要素の .volume 物理上限でもある（単一の参照元＝§2-7・直書き禁止）。
+export const UNITY_VOLUME = 1.0;
 // 音量スライダーの刻み（UI）。
 export const VOLUME_STEP = 0.05;
 
