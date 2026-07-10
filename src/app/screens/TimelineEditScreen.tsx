@@ -11,7 +11,6 @@ import type { ClipDragMode } from "../components/TimelineView";
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { PageHead } from "../components/ui";
 import { ArrowLeftIcon } from "../components/icons";
-import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 
 interface TimelineEditScreenProps {
@@ -28,8 +27,6 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   // Undo/Redo（#255・ADR-0020）：overlay 編集も履歴対象（docSnapshot が meta.timelineOverlay を含む＝自動）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
-  // キーボード入口（Ctrl/⌘+Z＝取り消し・Ctrl/⌘+Shift+Z／Ctrl+Y＝やり直し）を場面編集と共有＝挙動を揃える（レビュー対応）。
-  useUndoRedoShortcuts();
   // テロップ文言/数値の連続編集を1履歴にまとめる（#389）。
   const { textGroup } = useHistoryGroup();
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);

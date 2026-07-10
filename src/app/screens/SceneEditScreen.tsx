@@ -25,7 +25,6 @@ import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateL
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { useProjectStore } from "../store/projectStore";
-import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useDragReorder } from "../hooks/useDragReorder";
@@ -307,9 +306,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [editPopover]);
-
-  // 取り消し/やり直し（#211・ADR-0020）のキーボード入口はタイムライン編集と共有のフックへ集約（挙動を揃える・#255 レビュー対応）。
-  useUndoRedoShortcuts();
 
   // 場面編集を開く「一度きりのペイロード」editingSceneId を消費後に破棄する（#400 レビュー）。
   // 初期化子（上）が捕捉した後にマウント直後で null へ戻す＝editingTemplateId が backToList で戻すのと同じ規律。

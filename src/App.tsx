@@ -9,6 +9,7 @@ import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
 import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
+import { useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -61,6 +62,9 @@ function App() {
     useStartNewProject(setScreen);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
+  // Undo/Redo のキーボード（Ctrl/⌘+Z・Y）を全画面で有効化（#413）。以前は場面編集/タイムライン編集だけで、
+  // たたき台の削除/移動が Ctrl+Z で戻せなかった。App 一箇所に集約＝画面ごとの二重登録（二重 Undo）も防ぐ。
+  useUndoRedoShortcuts();
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
   // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。
