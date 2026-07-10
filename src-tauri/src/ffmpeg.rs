@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 use tauri::Manager;
 
 // 既定FPS（videoSettings.fps の正典は project.json。B2でフロントから受け取る予定）。
@@ -1986,6 +1987,86 @@ fn clear_export_frames_stage_impl(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+// 起動時に掃除する書き出し一時ディレクトリの「古さ」しきい値（#420）。
+// pid 隔離（#379）以降、クラッシュ/強制終了した pid のディレクトリを消す主体がいなくなり、
+// `.frames_stage/proc_*` と `%TEMP%/yuko_recruit_export_*` がプロセスを跨いで蓄積し得る。
+// 年齢ベースで「十分に古いものだけ」消す＝走行中の別インスタンス（mtime が新しい）は触らず #379 の相互破壊防止を保つ。
+// 24h は、あり得る最長の書き出し（描画＋エンコード）よりも十分に長く取り、進行中の書き出しを決して巻き込まないための安全余裕。
+// pid 生存確認（Option A）は依存追加（sysinfo/OpenProcess）が要るため α では採らない（本しきい値で十分安全側）。
+// 注意（将来しきい値を短縮する場合）：古さ判定はトップレベル dir 自身の mtime のみで、配下サブディレクトリの更新は見ない。
+// proc_<pid> の mtime は子（scene_frames_N）の追加時にしか更新されないため、単一シーンへ長時間書き込み続ける進行中の
+// 書き出しではトップレベル mtime が停滞し得る（#420 レビュー）。24h ではそのケースも書き出し時間を大きく超え実害なし。
+const STALE_EXPORT_DIR_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// name（ディレクトリ名）が prefix で始まる書き出し作業ディレクトリで、最終更新から max_age を超えていれば掃除対象。
+/// 純粋関数（I/O なし）＝テスト対象（§7）。now/modified は呼び出し側が渡す。
+/// mtime が未来（時計ずれ・別インスタンスが今まさに書き込み中など）のときは触らない＝安全側で false。
+fn is_stale_export_dir(
+    name: &str,
+    prefix: &str,
+    modified: SystemTime,
+    now: SystemTime,
+    max_age: Duration,
+) -> bool {
+    if !name.starts_with(prefix) {
+        return false;
+    }
+    match now.duration_since(modified) {
+        Ok(age) => age > max_age,
+        Err(_) => false,
+    }
+}
+
+/// parent 直下で prefix にマッチする「十分に古い」ディレクトリだけを削除する（走行中のものは新しいので残す）。
+/// parent が無ければ何もしない。削除失敗（ロック中＝走行中の可能性）は無視して次回に回す（起動を妨げない）。
+fn remove_stale_export_dirs(parent: &Path, prefix: &str, max_age: Duration) {
+    let now = SystemTime::now();
+    let entries = match fs::read_dir(parent) {
+        Ok(e) => e,
+        Err(_) => return, // まだ一度も書き出していない等＝掃除不要
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = match entry.file_name().into_string() {
+            Ok(n) => n,
+            Err(_) => continue, // 非UTF-8名は自分の作った proc_/yuko_recruit_export_ ではない
+        };
+        // トップレベル dir 自身の mtime のみで古さを判定（配下の更新は見ない・前提は STALE_EXPORT_DIR_MAX_AGE のコメント参照）。
+        let modified = entry.metadata().and_then(|m| m.modified()).ok();
+        if let Some(modified) = modified {
+            if is_stale_export_dir(&name, prefix, modified, now, max_age) {
+                let _ = fs::remove_dir_all(&path);
+            }
+        }
+    }
+}
+
+/// 起動時に、前回クラッシュ/強制終了で残った書き出しの一時/ステージディレクトリを掃除する（#420）。
+/// 起動を妨げないようブロッキング専用スレッドで実行し、失敗はログのみ（§2-5：UI へ生エラーを出さない）。
+pub fn cleanup_stale_export_dirs(app: &tauri::AppHandle) {
+    // ステージ先の親 `<appData>/exports/.frames_stage`（proc_* が並ぶ）。取得失敗時は掃除をスキップ。
+    let stage_parent = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|b| b.join("exports").join(".frames_stage"));
+    // 作業ディレクトリの親 `%TEMP%`（yuko_recruit_export_* が並ぶ）。
+    let temp_parent = std::env::temp_dir();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(parent) = stage_parent {
+            remove_stale_export_dirs(&parent, "proc_", STALE_EXPORT_DIR_MAX_AGE);
+        }
+        remove_stale_export_dirs(
+            &temp_parent,
+            "yuko_recruit_export_",
+            STALE_EXPORT_DIR_MAX_AGE,
+        );
+    });
+}
+
 /// クリップの区間フレームを出力fpsでステージング（#442・動画スロット本体アニメ）。
 /// 動画スロットがアニメする場面は、アニメ区間だけ「動画の実フレームをスロット矩形へ描いて場面全体を per-frame 合成」
 /// する。その素材として、クリップの [clip_start_sec, +dur_sec)（再生秒）を **出力 f＝clip-time clip_start_sec+(f/fps)*speed**
@@ -3097,6 +3178,45 @@ mod tests {
         assert!(!is_safe_stage_name("a\\b")); // バックスラッシュ
         assert!(!is_safe_stage_name("a b")); // 空白
         assert!(!is_safe_stage_name("a.b")); // ドット
+    }
+
+    // 起動時の一時ディレクトリ掃除（#420）：prefix 一致かつ十分に古いものだけを対象にする（走行中＝新しいものは残す）。
+    #[test]
+    fn stale_export_dir_only_targets_old_matching_prefixes() {
+        let max_age = Duration::from_secs(24 * 60 * 60);
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100 * 24 * 60 * 60); // 任意の現在時刻
+        let old = now - Duration::from_secs(25 * 60 * 60); // 25h 前＝しきい値超え
+        let fresh = now - Duration::from_secs(60); // 1分前＝走行中相当
+                                                   // prefix 一致＋古い＝掃除対象
+        assert!(is_stale_export_dir("proc_1234", "proc_", old, now, max_age));
+        assert!(is_stale_export_dir(
+            "yuko_recruit_export_9",
+            "yuko_recruit_export_",
+            old,
+            now,
+            max_age
+        ));
+        // prefix 一致でも新しい＝対象外（別インスタンスの書き出し中を消さない＝#379 の相互破壊防止）
+        assert!(!is_stale_export_dir(
+            "proc_1234",
+            "proc_",
+            fresh,
+            now,
+            max_age
+        ));
+        // prefix 不一致＝対象外（無関係なディレクトリを消さない）
+        assert!(!is_stale_export_dir(
+            "something_else",
+            "proc_",
+            old,
+            now,
+            max_age
+        ));
+        // mtime が未来（時計ずれ）＝安全側で対象外
+        let future = now + Duration::from_secs(60 * 60);
+        assert!(!is_stale_export_dir(
+            "proc_1", "proc_", future, now, max_age
+        ));
     }
 
     // テロップ overlay（ADR-0018）：enable='between' 区間付きの overlay チェーンを組み、音声は無変更コピー。
