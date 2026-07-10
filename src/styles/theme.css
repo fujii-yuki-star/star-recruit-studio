@@ -964,7 +964,9 @@ button.badge {
   border-radius: var(--radius);
   background: var(--color-surface);
   padding: 12px;
-  min-width: 160px;
+  /* 幅固定＝カードごとに内容依存で幅が変わらない（セリフ先頭は 1 行省略で収める・#413 レビュー）。 */
+  width: 168px;
+  box-sizing: border-box;
   cursor: pointer;
   transition: border-color 0.12s;
   flex-shrink: 0;
