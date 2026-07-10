@@ -1993,6 +1993,9 @@ fn clear_export_frames_stage_impl(app: tauri::AppHandle) -> Result<(), String> {
 // 年齢ベースで「十分に古いものだけ」消す＝走行中の別インスタンス（mtime が新しい）は触らず #379 の相互破壊防止を保つ。
 // 24h は、あり得る最長の書き出し（描画＋エンコード）よりも十分に長く取り、進行中の書き出しを決して巻き込まないための安全余裕。
 // pid 生存確認（Option A）は依存追加（sysinfo/OpenProcess）が要るため α では採らない（本しきい値で十分安全側）。
+// 注意（将来しきい値を短縮する場合）：古さ判定はトップレベル dir 自身の mtime のみで、配下サブディレクトリの更新は見ない。
+// proc_<pid> の mtime は子（scene_frames_N）の追加時にしか更新されないため、単一シーンへ長時間書き込み続ける進行中の
+// 書き出しではトップレベル mtime が停滞し得る（#420 レビュー）。24h ではそのケースも書き出し時間を大きく超え実害なし。
 const STALE_EXPORT_DIR_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// name（ディレクトリ名）が prefix で始まる書き出し作業ディレクトリで、最終更新から max_age を超えていれば掃除対象。
@@ -2031,6 +2034,7 @@ fn remove_stale_export_dirs(parent: &Path, prefix: &str, max_age: Duration) {
             Ok(n) => n,
             Err(_) => continue, // 非UTF-8名は自分の作った proc_/yuko_recruit_export_ ではない
         };
+        // トップレベル dir 自身の mtime のみで古さを判定（配下の更新は見ない・前提は STALE_EXPORT_DIR_MAX_AGE のコメント参照）。
         let modified = entry.metadata().and_then(|m| m.modified()).ok();
         if let Some(modified) = modified {
             if is_stale_export_dir(&name, prefix, modified, now, max_age) {
