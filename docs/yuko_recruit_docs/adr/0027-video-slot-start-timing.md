@@ -1,6 +1,6 @@
 # ADR-0027: 動画スロット本体アニメの再生開始タイミング（同時／途中／アニメ後）
 
-- **状態**: Proposed（設計。承認後に実装＝schema 1.18＋書き出し＋UI）
+- **状態**: Accepted（2026-07-10 利用者承認。実装は段階＝schema 1.18〔本PR〕→書き出し→UI）
 - **日付**: 2026-07-10
 - **関連**: #444 / [`0026`](0026-alpha4-behavior-consistency.md)（決定6・動画×アニメ除外の解除＝#442／判断軸①②③④）/ [`0019`](0019-keyframe-animation-model.md)（per-frame・アニメモデル）/ [`0001`](0001-rendering-parity.md)（プレビュー=書き出しパリティ・共有純粋関数）/ [`0018`](0018-cross-scene-timeline-model.md)（`timelineOverlay.animations`）/ [`0024`](0024-non-destructive-editing-model.md)（将来 `scene.slotClips`）/ #469（掛け合い×動画のアニメ抑止）/ `CLAUDE.md §2-3`（技術用語）/ `§2-5`（次の行動）/ `§2-7`（定数の単一参照）/ `§9-2`（enum は ADR で正典化）/ `11 §7.1`（Scene schema）/ `schemas/project.schema.json`（1.17→1.18）
 
