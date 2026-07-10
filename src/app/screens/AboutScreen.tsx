@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { getVersion } from "@tauri-apps/api/app";
 import { PageHead } from "../components/ui";
 import { openExternalUrl } from "../../infrastructure/opener";
+import { getAppVersion } from "../../infrastructure/appInfo";
 import { OPENH264_CREDIT_TEXT, OPENH264_FEATURE_ENABLED } from "../../domain/export/h264Feature";
 import { usedVoiceCredits } from "../../domain/voice/narratorCredit";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -57,7 +57,7 @@ export function AboutScreen() {
   // バージョンはアプリ本体（tauri.conf.json）を単一の参照元にする＝About のためだけの二重管理をなくす（#413）。
   const [version, setVersion] = useState("");
   useEffect(() => {
-    void getVersion().then(setVersion).catch(() => {}); // 取得失敗時は空表示（About は必須維持だがバージョン欄は補助）
+    void getAppVersion().then(setVersion); // 非Tauri/失敗時は空文字を返す（フォールバックは infrastructure/appInfo に集約・§4）
   }, []);
   return (
     <div className="main-scroll">
