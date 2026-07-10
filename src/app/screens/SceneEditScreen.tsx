@@ -1059,9 +1059,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     <button
                       className={`scene-card${selected.sceneId === s.sceneId ? " selected" : ""}`}
                       onClick={() => selectScene(s.sceneId)}
-                      {...sceneDnd.handleProps(s.sceneId)}
                       {...sceneDnd.dropProps(i)}
-                      title="ドラッグで並び替え・クリックで選択"
+                      title="クリックで選択"
                       style={{
                         opacity: sceneDnd.draggingId === s.sceneId ? 0.4 : undefined,
                         outline:
@@ -1070,6 +1069,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             : undefined,
                       }}
                     >
+                      {/* ドラッグの持ち手（⠿）。Pointer Events で並び替え（#398 再対応＝button 直掛けだと DnD が発火しなかった）。
+                          キーボードでの並び替えは下の ←/→ が担う＝持ち手は aria-hidden の見た目。 */}
+                      <div style={{ textAlign: "center", lineHeight: 1, marginBottom: 4 }}>
+                        <span
+                          {...sceneDnd.handleProps(s.sceneId)}
+                          aria-hidden="true"
+                          title="つまんで並び替え"
+                          style={{ cursor: "grab", touchAction: "none", userSelect: "none", color: "var(--color-text-faint)" }}
+                        >
+                          ⠿
+                        </span>
+                      </div>
                       <div className="scene-card-thumb thumb thumb-photo">
                         <PhotoIcon size={18} />
                       </div>
