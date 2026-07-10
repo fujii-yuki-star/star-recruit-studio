@@ -145,6 +145,24 @@ describe('buildExportScenes：キーフレームアニメ（④・ADR-0019 per-f
     expect(out[0].narrationVolume).toBe(1);
   });
 
+  it('アニメ場面はフレーム進捗（frameFraction）を通知＝進捗バーが凍らない（#391）', async () => {
+    const calls: Array<[number, number, number | undefined]> = [];
+    await buildExportScenes(
+      animScene, templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      undefined,
+      (done, total, frameFraction) => calls.push([done, total, frameFraction]),
+      {},
+      (s) => [anim(s.sceneId)],
+    );
+    // per-frame 中に「処理中の場面0・フレーム途中（0<frac<=1）」を通知＝アニメ場面でもバーが動く。
+    const frameCalls = calls.filter(([d, , f]) => d === 0 && typeof f === 'number');
+    expect(frameCalls.length).toBeGreaterThan(0);
+    expect(frameCalls.every(([, , f]) => (f as number) > 0 && (f as number) <= 1)).toBe(true);
+    // 場面完了の通知（done=1・frameFraction 無し）は従来どおり残る。
+    expect(calls.some(([d, t, f]) => d === 1 && t === 1 && f === undefined)).toBe(true);
+  });
+
   it('stageAnimationFrame 指定時はフレームを逐次ステージングし framesDir を返す（framesBase64 は載せない・#書き出しRangeError）', async () => {
     const staged: Array<{ dir: string; index: number; url: string }> = [];
     const out = await buildExportScenes(

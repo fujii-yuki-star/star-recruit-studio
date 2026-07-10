@@ -65,7 +65,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const setExportRun = useProjectStore((s) => s.setExportRun);
   const { phase, progress, resultPath, message, bgmWarning, cancelling } = exportRun;
   const setPhase = (phase: ExportPhase) => setExportRun({ phase });
-  const setProgress = (progress: { done: number; total: number }) => setExportRun({ progress });
+  const setProgress = (progress: { done: number; total: number; frameFraction?: number }) => setExportRun({ progress });
   const setResultPath = (resultPath: string) => setExportRun({ resultPath });
   const setMessage = (message: string) => setExportRun({ message });
   // 選択済みBGMが読み込めなかったとき、完了画面で知らせる（§2-5・BGMなしで続行）。
@@ -178,7 +178,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             ? findVideoSlots(scene, t, (id) => snapAssets.find((a) => a.assetId === id))
             : [];
         },
-        (done, total) => setProgress({ done, total }),
+        (done, total, frameFraction) => setProgress({ done, total, frameFraction }),
         { withSubtitle, outputSize, fontFamilyFor: (scene) => fontFamilyForId(resolveFontId(scene.fontId, snapFontId)), credit: creditForSpeaker(snapVoicevoxSpeaker), shouldCancel: () => useProjectStore.getState().exportRun.cancelling },
         // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay・sceneId 一致）。アニメ場面はフレーム列に焼かれる。
         (scene) => (snapMeta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === scene.sceneId),
@@ -263,7 +263,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       : phase === "encoding"
         ? 90
         : phase === "rendering" && progress.total > 0
-          ? Math.round((progress.done / progress.total) * 80)
+          ? // 場面数ベース＋処理中の場面のフレーム進捗（frameFraction）で 0〜80% を滑らかに（#391）。
+            Math.round(((progress.done + (progress.frameFraction ?? 0)) / progress.total) * 80)
           : 0;
 
   return (
@@ -384,6 +385,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
               {phase === "rendering" && (
                 <div className="text-center text-sm text-muted">
                   場面 {progress.done} / {progress.total} を処理中
+                </div>
+              )}
+              {/* エンコード段は Rust 側の進捗イベントがまだ無く 90% で止まって見えるので、待ち時間の目安を添える（#391）。 */}
+              {phase === "encoding" && (
+                <div className="text-center text-sm text-muted">
+                  最後の仕上げ中です。少し時間がかかることがあります。
                 </div>
               )}
               {/* 書き出しの中止（#380）：走行中の変換を止めて、すぐやり直せる。 */}

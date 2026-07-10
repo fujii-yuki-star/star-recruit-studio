@@ -52,7 +52,9 @@ export type ExportPhase = "idle" | "rendering" | "encoding" | "done" | "error" |
 /** 書き出しの進行状態（#379）。画面横断で参照＝進捗の可視化・書き出し中の再実行/破壊操作ブロックに使う。 */
 export interface ExportRunState {
   phase: ExportPhase;
-  progress: { done: number; total: number };
+  // frameFraction＝処理中の場面内の進み具合（0〜1・任意）。アニメ場面は数百フレームを焼く間 done が動かず
+  // バーが凍って見える（フリーズ誤認→二重書き出しの引き金）ため、フレーム進捗で滑らかに進める（#391）。
+  progress: { done: number; total: number; frameFraction?: number };
   resultPath: string;
   message: string;
   bgmWarning: "" | "partial" | "all";
