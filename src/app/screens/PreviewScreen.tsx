@@ -75,6 +75,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const bgmCtlRef = useRef<VolumeControl | null>(null);
   // BGM 音量の最新値（100%境界の張り直し用 deps を bgmVolume>1 の真偽にするため、attach が読む実値は ref で持つ・#392/#465）。
   const bgmVolumeRef = useRef(1);
+  // 場面ジャンプ（下の番号ストリップ）で「今の場面」ボタンを可視域へスクロールするための ref（#413）。
+  const activeJumpRef = useRef<HTMLButtonElement | null>(null);
 
   // 直接landしたときの自動生成は「外部送信にならない（Mock）とき」だけ（#384・§2-6）。実プロバイダは空状態のまま。
   useEffect(() => {
@@ -94,6 +96,11 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
 
   const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
   const current = scenes[safeIdx];
+  // 現在の場面が変わったら、場面ジャンプの番号ストリップで今の場面を可視域へ寄せる（再生の進行にも追従・#413）。
+  useEffect(() => {
+    // scrollIntoView は一部環境（jsdom）に無いため任意呼び出し。
+    activeJumpRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [safeIdx]);
   // タイムラインのテロップ（ADR-0018 テロップ実描画）。現在場面のローカル区間へ切り出し、再生位置で表示を切り替える。
   const timeline = useMemo(
     () => compileTimeline(assembleProject(meta, assets, parts, scenes)),
@@ -485,6 +492,28 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
               <ChevronRightIcon size={16} />
             </button>
           </div>
+
+          {/* 場面ジャンプ（#413）＝番号を押すとその場面へ跳ぶ。20場面で「次の場面」を連打しなくてよい。
+              再生中は他の送り（前へ/次へ）と同様に無効（停止してから跳ぶ）。今の場面を強調＋可視域へスクロール。 */}
+          {scenes.length > 1 && (
+            <div className="row" style={{ gap: 4, overflowX: "auto", marginTop: 8, paddingBottom: 4 }}>
+              {scenes.map((s, i) => (
+                <button
+                  key={s.sceneId}
+                  ref={i === safeIdx ? activeJumpRef : undefined}
+                  className={`btn btn-icon text-sm ${i === safeIdx ? "btn-secondary" : "btn-ghost"}`}
+                  onClick={() => setIdx(i)}
+                  disabled={playing}
+                  aria-label={`場面${i + 1}へ移動`}
+                  aria-current={i === safeIdx ? "true" : undefined}
+                  title={`場面 ${i + 1}`}
+                  style={{ flexShrink: 0, minWidth: 34 }}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="preview-controls">
             <button
