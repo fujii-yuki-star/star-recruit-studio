@@ -34,6 +34,7 @@
 | [0025](0025-credit-display-modes.md) | クレジット表示方式（常時/最初/最後/両方/非表示・既定=最初と最後・About 必須維持・α-6） | **Accepted**（0003 を一部 supersede） |
 | [0026](0026-alpha4-behavior-consistency.md) | α-4 挙動一致の原則（設定どおり・経路間統一・プレビュー=書き出し。間×遷移=切替尺優先／複数動画スロット／動画実再生／collapse撤去／分割失敗の表面化／動画×アニメ解除） | **Accepted**（0006 の2枚固定を一部改め・0019 の動画スロット除外を解除方向） |
 | [0027](0027-video-slot-start-timing.md) | 動画スロット本体アニメの再生開始タイミング（同時／途中／アニメ後・`scene.slotVideoStart` モード明示・schema 1.18・#442 後続） | **Accepted**（実装は段階） |
+| [0028](0028-per-use-clip-and-undo.md) | 動画クリップ調整を per-use 上書き（`scene.slotClips`）にして Undo 可能に（ADR-0024 決定1 の確定・#472） | **Proposed** |
 
 ## 状態の意味
 
