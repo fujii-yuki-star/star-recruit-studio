@@ -163,3 +163,45 @@ describe('findVideoSlots（#431 複数動画スロット）', () => {
     expect(findVideoSlots(scene(null), template, by([videoAsset]))).toEqual([]);
   });
 });
+
+describe('findVideoSlot（per-use クリップ上書き・scene.slotClips・ADR-0028・#472）', () => {
+  const withClips = (clips: Record<string, unknown>): Scene =>
+    ({ assetRefs: { mainVisual: 'asset_v' }, slotClips: clips } as unknown as Scene);
+
+  it('slotClips で speed を per-use 上書き（asset.clip 既定=1 を場面で2に）・未上書きは asset.clip 継承', () => {
+    const r = findVideoSlot(withClips({ mainVisual: { speed: 2 } }), template, by([videoAsset]));
+    expect(r?.speed).toBe(2); // per-use 上書き
+    expect(r?.clipStartSec).toBe(2); // 未上書き＝asset.clip 継承
+    expect(r?.clipEndSec).toBe(8);
+    expect(r?.originalVolume).toBe(0.3);
+  });
+
+  it('部分上書き（範囲だけ）＝残りは asset.clip 継承', () => {
+    const r = findVideoSlot(withClips({ mainVisual: { startSec: 3, endSec: 6 } }), template, by([videoAsset]));
+    expect(r?.clipStartSec).toBe(3);
+    expect(r?.clipEndSec).toBe(6);
+    expect(r?.useOriginalAudio).toBe(true); // asset.clip 継承
+    expect(r?.speed).toBe(1);
+  });
+
+  it('反転レンジ（endSec を startSec 未満に上書き）は空クリップにせず終端なし（resolveSlotClip 正規化・#472 P2）', () => {
+    // asset.clip startSec=2、場面で endSec=1 → 反転。終端を落として [2,実尺] に。
+    const r = findVideoSlot(withClips({ mainVisual: { endSec: 1 } }), template, by([videoAsset]));
+    expect(r?.clipStartSec).toBe(2);
+    expect(r?.clipEndSec).toBeUndefined();
+  });
+
+  it('別スロット（他 layerId）の slotClips はこのスロットに影響しない', () => {
+    const r = findVideoSlot(withClips({ otherSlot: { speed: 2 } }), template, by([videoAsset]));
+    expect(r?.speed).toBe(1); // mainVisual は未上書き＝asset.clip 既定
+  });
+
+  it('FREE：freeLayout slot 要素も slotClips[要素id] で per-use 上書き', () => {
+    const sc = {
+      assetRefs: {},
+      freeLayout: [{ id: 'free_002', kind: 'slot', x: 0, y: 0, w: 800, h: 600, assetId: 'asset_v', fit: 'cover' }],
+      slotClips: { free_002: { speed: 0.5 } },
+    } as unknown as Scene;
+    expect(findVideoSlot(sc, freeTemplate, by([videoAsset]))?.speed).toBe(0.5);
+  });
+});
