@@ -8,7 +8,7 @@ import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { resolveLineSubtitle } from "../../domain/project/lineTimeline";
-import { animationsEndSec } from "../../domain/project/sceneAnimation";
+import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { resolveVideoStartDelaySec } from "../../domain/project/videoStartTiming";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
@@ -290,7 +290,10 @@ export function ScenePreview({ scene, template, activeLineIndex, telops, timeSec
       const clip = playbackSlots.find((p) => p.slotLayerId === sInfo.layerId);
       if (clip) {
         const vol = clip.useOriginalAudio ? (clip.originalVolume ?? ORIGINAL_AUDIO_VOLUME) : 0;
-        const startDelaySec = resolveVideoStartDelaySec(scene.slotVideoStart?.[sInfo.layerId], sceneWindowSec);
+        // #444：このスロット自身がアニメ対象のときだけ開始遅延を効かせる（非対象は d=0＝先頭から・書き出し/precheck と同一門番）。
+        const startDelaySec = slotIsAnimated(animations ?? [], [sInfo.layerId], scene.groups)
+          ? resolveVideoStartDelaySec(scene.slotVideoStart?.[sInfo.layerId], sceneWindowSec)
+          : 0;
         layers.push(
           <SlotVideo
             key={`${scene.sceneId}:${sInfo.layerId}`}
