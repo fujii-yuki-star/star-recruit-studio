@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { ScenePreview } from "./ScenePreview";
 import type { VideoSlotPlayback } from "./ScenePreview";
-import type { Scene } from "../../domain/project/types";
+import type { ElementAnimation, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 
 // #386・A案＝掛け合いの先頭「間」は字幕なし。プレビュー（ScenePreview）が activeLineIndex<0（間）で
@@ -126,6 +126,57 @@ describe("ScenePreview 実映像再生（#432）", () => {
       expect(capturedGain!.gain.value).toBe(1.5);
     } finally {
       win.AudioContext = prev;
+    }
+  });
+});
+
+// #444/ADR-0027：動画スロットの再生開始タイミング。d>0 は代表フレームで待ってから再生（hold-then-play）。
+// jsdom は loadedmetadata を自動発火しないので手動 dispatch で start() を走らせ、play/pause を spy で観測する。
+describe("ScenePreview 再生開始タイミング（#444・delay は d 秒待つ）", () => {
+  const freeTemplate = {
+    schemaVersion: "1.0", templateId: "tpl_free", name: "free", category: "free",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 }, layers: [],
+  } as unknown as Template;
+  const baseScene = {
+    sceneId: "sv", templateId: "tpl_free", sceneType: "opening", durationSec: 8, texts: {},
+    freeLayout: [{ id: "slot_1", kind: "slot", assetId: "asset_v", x: 100, y: 100, w: 800, h: 600, fit: "cover", zIndex: 1 }],
+  } as unknown as Scene;
+  const slot: VideoSlotPlayback = { slotLayerId: "slot_1", clipUrl: "blob:clip", clipStartSec: 0, speed: 1, fit: "cover", useOriginalAudio: false };
+  // slot_1 を動かすアニメ（animEnd=2）＝窓 W=min(尺8,2)=2。
+  const anims = [{ id: "a", sceneId: "sv", targetId: "slot_1", keyframes: [{ timeSec: 0, x: -100 }, { timeSec: 2, x: 0 }] }] as unknown as ElementAnimation[];
+
+  const renderAndStart = (scene: Scene): HTMLVideoElement => {
+    const { container } = render(
+      <ScenePreview scene={scene} template={freeTemplate} animations={anims} timeSec={0}
+        videoPlayback={{ playing: true, muted: false, slots: [slot] }} />,
+    );
+    const video = container.querySelector("video")!;
+    video.dispatchEvent(new Event("loadedmetadata")); // start() を走らせる
+    return video;
+  };
+
+  it("delay（途中から）：d 秒は再生せず待ち、経過後に再生する", () => {
+    vi.useFakeTimers();
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    try {
+      renderAndStart({ ...baseScene, slotVideoStart: { slot_1: { mode: "delay", delaySec: 1 } } } as unknown as Scene);
+      expect(pause).toHaveBeenCalled(); // 代表フレームで静止
+      expect(play).not.toHaveBeenCalled(); // まだ再生しない
+      vi.advanceTimersByTime(1000); // d=1s 経過
+      expect(play).toHaveBeenCalled(); // 再生開始
+    } finally {
+      play.mockRestore(); pause.mockRestore(); vi.useRealTimers();
+    }
+  });
+
+  it("遅延なし（withAnim/未設定）は即再生（従来）", () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    try {
+      renderAndStart(baseScene); // slotVideoStart 無し＝withAnim＝d=0
+      expect(play).toHaveBeenCalled();
+    } finally {
+      play.mockRestore();
     }
   });
 });

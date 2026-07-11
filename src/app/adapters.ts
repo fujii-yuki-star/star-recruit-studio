@@ -4,8 +4,8 @@ import { ASSET_TYPE, type SceneCategory } from "../domain/enums";
 import { HEIGHT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
-import { unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
-import type { Asset, Part, Scene, Warning } from "../domain/project/types";
+import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
+import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
 
@@ -79,7 +79,7 @@ export function warningsToDraftWarnings(warnings: Warning[]): DraftWarning[] {
 }
 
 /** 公開前チェックの結果を、実際のシーン/素材から算出する（一部は自動チェック未対応の定型）。 */
-export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[]): PrecheckItem[] {
+export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[], overlayAnimations?: ElementAnimation[]): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
   // 場面に紐づく項目は「どの場面か」を番号で列挙し（#403・どの場面が問題か示す）、action がある項目は最初の該当場面へ
@@ -162,6 +162,26 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       action: "直す",
       // 最初の該当場面（unplaceable は 1始まりの位置）へ飛ぶ。
       sceneId: scenes[unplaceable[0] - 1]?.sceneId,
+    });
+  }
+
+  // 動画の再生タイミング（#444・ADR-0027 D3）：再生開始が「アニメの後（afterAnim）」なのにアニメが場面尺いっぱい
+  // （settled 区間が無い）で、動画が一度も再生されない場面を**場面つきで**警告。UI は afterAnim を非表示にするが、
+  // afterAnim を選んだ後にアニメを場面尺まで伸ばすと到達し得る。書き出しは同一判定で停止（黙って静止画にしない・§2-5）。
+  const afterAnimNoPlay = afterAnimNoSettledSceneNumbers(
+    scenes,
+    templateById,
+    (id) => assets.find((a) => a.assetId === id),
+    (s) => (overlayAnimations ?? []).filter((a) => a.sceneId === s.sceneId),
+  );
+  if (afterAnimNoPlay.length > 0) {
+    items.push({
+      id: "videoStartAfterAnim",
+      label: "動画の再生タイミング",
+      detail: `${fmtScenes(afterAnimNoPlay)}は、アニメが場面の最後まで続くため「アニメの後」だと動画が再生されません。アニメを短くするか、「途中から」か「アニメと同時」に変えてください。`,
+      severity: "action",
+      action: "直す",
+      sceneId: scenes[afterAnimNoPlay[0] - 1]?.sceneId,
     });
   }
 

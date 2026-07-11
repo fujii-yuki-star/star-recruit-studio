@@ -8,6 +8,8 @@ import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { resolveLineSubtitle } from "../../domain/project/lineTimeline";
+import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
+import { resolveVideoStartDelaySec } from "../../domain/project/videoStartTiming";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId, resolveFontId, cssFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -36,7 +38,7 @@ function fitToObjectFit(fit: Fit): "cover" | "contain" | "fill" {
  * 位置/拡縮/回転/不透明度は書き出し（#442）と同じ layoutScene(t) 由来＝ADR-0001 パリティ。
  */
 function SlotVideo({
-  src, rectPct, rotation, opacity, fit, clipStartSec, clipEndSec, speed, muted, volume,
+  src, rectPct, rotation, opacity, fit, clipStartSec, clipEndSec, speed, startDelaySec, muted, volume,
 }: {
   src: string;
   rectPct: { left: string; top: string; width: string; height: string };
@@ -46,6 +48,8 @@ function SlotVideo({
   clipStartSec: number;
   clipEndSec?: number;
   speed: number;
+  /** 再生開始の遅延秒（#444/ADR-0027）。0=先頭から（従来）。>0 は [0,d] を代表フレームで静止して待つ。 */
+  startDelaySec: number;
   muted: boolean;
   volume: number;
 }) {
@@ -55,14 +59,26 @@ function SlotVideo({
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    const start = (): void => {
-      try { v.currentTime = clipStartSec; } catch { /* seek 不可なら loadedmetadata で再設定 */ }
-      v.playbackRate = speed;
-      // 自動再生不可（ポリシー）や非実装（jsdom）でも throw させない＝静止画で見える（下SVGの穴）＝§2-5。
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+    // 自動再生不可（ポリシー）や非実装（jsdom）でも throw させない＝静止画で見える（下SVGの穴）＝§2-5。
+    const playNow = (): void => {
       try {
         const p = v.play();
         if (p && typeof p.catch === "function") p.catch(() => {});
       } catch { /* noop */ }
+    };
+    const start = (): void => {
+      if (releaseTimer) clearTimeout(releaseTimer); // 再入で二重予約しない
+      try { v.currentTime = clipStartSec; } catch { /* seek 不可なら loadedmetadata で再設定 */ }
+      v.playbackRate = speed;
+      // #444/ADR-0027：開始遅延 d>0 は代表フレーム（clipStart）で待ち、scene-time d で play()。playbackRate=speed のまま
+      // なので以降 currentTime=clipStart+(t−d)*speed=clipTimeAtSceneTime（書き出しと一致＝ADR-0001・per-frame seek 不要）。
+      if (startDelaySec > 0) {
+        try { v.pause(); } catch { /* noop */ }
+        releaseTimer = setTimeout(playNow, startDelaySec * 1000);
+      } else {
+        playNow();
+      }
     };
     const safePause = (): void => { try { v.pause(); } catch { /* 非実装(jsdom)/停止不可でも無害 */ } };
     const onTime = (): void => {
@@ -76,11 +92,12 @@ function SlotVideo({
     v.addEventListener("timeupdate", onTime);
     if (v.readyState >= 1) start(); // 既にメタデータ済みなら即開始
     return () => {
+      if (releaseTimer) clearTimeout(releaseTimer);
       v.removeEventListener("loadedmetadata", start);
       v.removeEventListener("timeupdate", onTime);
       safePause();
     };
-  }, [src, clipStartSec, clipEndSec, speed]);
+  }, [src, clipStartSec, clipEndSec, speed, startDelaySec]);
   // 元音声が 100% 超（最大 150%）のときは video.volume の上限(1.0)を超えられないため、Web Audio の GainNode で増幅して
   // 書き出し（FFmpeg volume=1.5）と一致させる（#432 P2）。AudioContext が無い環境（jsdom/古ブラウザ）は video.volume に
   // 1.0 クランプでフォールバック（≤1.0 は元から一致）。増幅の要否は場面内で不変（スロットの originalVolume）。
@@ -262,6 +279,9 @@ export function ScenePreview({ scene, template, activeLineIndex, telops, timeSec
   };
 
   // 3層描画の中身（下SVG →〔スロットvideo→中間SVG〕* → 上SVG）を zIndex 昇順に重ねる。
+  // #444/ADR-0027：動画スロットの再生開始遅延 d を書き出しと同じ resolve で求める（窓 W=min(尺, animEnd)）。
+  // playbackRate=speed のまま d 秒後に play() すると currentTime=clipStart+(t−d)*speed＝clipTimeAtSceneTime（export と一致）。
+  const sceneWindowSec = Math.min(scene.durationSec, animationsEndSec(animations ?? []));
   const buildVideoLayers = (s: NonNullable<typeof split>): ReactNode[] => {
     const layers: ReactNode[] = [
       <div key="below" style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: s.belowSvg }} />,
@@ -270,10 +290,15 @@ export function ScenePreview({ scene, template, activeLineIndex, telops, timeSec
       const clip = playbackSlots.find((p) => p.slotLayerId === sInfo.layerId);
       if (clip) {
         const vol = clip.useOriginalAudio ? (clip.originalVolume ?? ORIGINAL_AUDIO_VOLUME) : 0;
+        // #444：このスロット自身がアニメ対象のときだけ開始遅延を効かせる（非対象は d=0＝先頭から・書き出し/precheck と同一門番）。
+        const startDelaySec = slotIsAnimated(animations ?? [], [sInfo.layerId], scene.groups)
+          ? resolveVideoStartDelaySec(scene.slotVideoStart?.[sInfo.layerId], sceneWindowSec)
+          : 0;
         layers.push(
           <SlotVideo
             key={`${scene.sceneId}:${sInfo.layerId}`}
             src={clip.clipUrl}
+            startDelaySec={startDelaySec}
             rectPct={{
               left: `${(sInfo.rect.x / cw) * 100}%`,
               top: `${(sInfo.rect.y / ch) * 100}%`,

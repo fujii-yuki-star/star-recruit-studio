@@ -1,6 +1,6 @@
 // 全場面を「共有レイアウト → SVG → PNG(data URL)」に焼き、書き出し入力を組み立てる（ADR-0001/0004）。
 // 動画ありシーンは下/上2枚の透過PNG＋クリップ情報を渡す（ADR-0006）。FFmpeg呼び出しは infrastructure に分離。
-import { TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit } from '../../domain/enums';
+import { TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Fit } from '../../domain/enums';
 import { FPS } from '../../domain/constants';
 import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
@@ -349,6 +349,28 @@ export async function buildExportScenes(
             const fps = FPS;
             const W = Math.min(scene.durationSec, animEnd); // アニメ区間（窓）の尺
             const hasSettled = W < scene.durationSec; // settled（実動画）区間があるか
+            // #444/ADR-0027：slotVideoStart[slot] が効くのは「そのスロット自身がアニメ対象」のときだけ（types.ts §7.1 の不変条件）。
+            // 場面に別のアニメ対象スロットがあっても、非対象スロットは d=0（先頭から）＝precheck/UI/プレビューと同一の門番で揃える
+            // （非対象スロットに afterAnim が残っても黙って静止させない・#444 レビュー P2/P3）。
+            const effectiveStartDelay = (slotLayerId: string): number =>
+              slotIsAnimated(sceneAnims, [slotLayerId], scene.groups)
+                ? resolveVideoStartDelaySec(scene.slotVideoStart?.[slotLayerId], W)
+                : 0;
+            // #444/ADR-0027 D3：settled 区間が無い（アニメが場面尺いっぱい）のに、**アニメ対象スロット**が「アニメの後（afterAnim）」だと
+            // 窓が全フレーム静止＋settled 無し＝動画が一度も再生されない。黙って静止画にせず§2-5 で停止（#434 と同流儀・precheck の
+            // videoSlotAfterAnimNeverPlays と**同一条件**＝slotIsAnimated ゲートを含める・#444 レビュー P2）。
+            if (
+              !hasSettled &&
+              videoSlots.some(
+                (vs) =>
+                  slotIsAnimated(sceneAnims, [vs.slotLayerId], scene.groups) &&
+                  scene.slotVideoStart?.[vs.slotLayerId]?.mode === VIDEO_START_MODE.afterAnim,
+              )
+            ) {
+              throw new Error(
+                `場面${i + 1}の動画は、アニメが最後まで続くため「アニメの後」だと再生されません。アニメを短くするか、「途中から」か「アニメと同時」に変えてから、もう一度お試しください。`,
+              );
+            }
             const narrAudio = narration?.audioBase64;
             const frameCount = Math.max(1, Math.ceil(W * fps) + 1);
             const winDir = `scene_vbody_${i}`;
@@ -369,8 +391,8 @@ export async function buildExportScenes(
                 const assetId = slotAssetIdByLayer.get(vs.slotLayerId);
                 if (!assetId) continue; // 動画 id が引けないスロットはサムネ描画へフォールバック
                 const dir = `clip_vbody_${i}_${s}`;
-                // #444：このスロットの再生開始遅延 d（窓内 [0,d] は代表フレームで静止・[d,W] で再生）。preview と共有の resolve。
-                const dSec = resolveVideoStartDelaySec(scene.slotVideoStart?.[vs.slotLayerId], W);
+                // #444：このスロットの再生開始遅延 d（窓内 [0,d] は代表フレームで静止・[d,W] で再生）。アニメ対象スロットのみ効く。
+                const dSec = effectiveStartDelay(vs.slotLayerId);
                 const delayFrames = Math.round(dSec * fps);
                 const playW = Math.max(0, W - dSec); // 実際にクリップを再生する窓尺（遅延ぶん短い）
                 // トリミング（clipEndSec）を尊重：抽出は「クリップに残る再生秒」＝(clipEnd-clipStart)/speed までに抑える
@@ -416,8 +438,8 @@ export async function buildExportScenes(
               ? videoSlots
                   .filter((v) => v.useOriginalAudio)
                   .map((v) => {
-                    // #444：このスロットの開始遅延 d。窓内は scene-time d から鳴らし、尺は残り (W−d) に抑える。
-                    const dSec = resolveVideoStartDelaySec(scene.slotVideoStart?.[v.slotLayerId], W);
+                    // #444：このスロットの開始遅延 d（アニメ対象のみ効く）。窓内は scene-time d から鳴らし、尺は残り (W−d) に抑える。
+                    const dSec = effectiveStartDelay(v.slotLayerId);
                     const playW = Math.max(0, W - dSec);
                     const availAudio =
                       v.clipEndSec != null ? Math.max(0, (v.clipEndSec - v.clipStartSec) / v.speed) : playW;
@@ -448,8 +470,8 @@ export async function buildExportScenes(
                 splitVideoSceneSvgMulti(settledLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit) ?? splitM;
               const sLayers = sSplit.slots.map((s) => {
                 const info = slotById.get(s.layerId)!;
-                // #444：窓で実際に再生した尺は W−d（[0,d] は静止で消費しない）。settled はその続きから。
-                const playedW = Math.max(0, W - resolveVideoStartDelaySec(scene.slotVideoStart?.[s.layerId], W));
+                // #444：窓で実際に再生した尺は W−d（[0,d] は静止で消費しない・アニメ対象のみ効く）。settled はその続きから。
+                const playedW = Math.max(0, W - effectiveStartDelay(s.layerId));
                 return {
                   slotX: Math.round(s.rect.x * rx),
                   slotY: Math.round(s.rect.y * ry),

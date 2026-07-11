@@ -671,6 +671,38 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
     expect(out[0].clipAudios?.map((c) => c.clipRelPath)).toEqual(['assets/a.mp4', 'assets/b.mp4']);
   });
 
+  it('非アニメスロットの afterAnim は無視（d=0＝先頭から）で書き出しは止めない＝precheck と同一門番（#444 レビュー P2）', async () => {
+    // slotA=アニメ対象・slotB=非アニメ。settled 無し（animEnd=3>=尺2）＋slotVideoStart={slotB: afterAnim}。
+    // 旧実装は「afterAnim を持つスロットがあれば throw」で slotB でも停止＝precheck（slotIsAnimated ゲート）と不一致だった。
+    vi.mocked(layoutScene).mockReturnValue({
+      items: [
+        { id: 'slotA', kind: 'image', role: 'slot', assetId: 'asset_a', x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+        { id: 'slotB', kind: 'image', role: 'slot', assetId: 'asset_b', x: 0, y: 0, w: 100, h: 100, zIndex: 2 },
+      ],
+    } as unknown as SceneLayout);
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValue({
+      belowSvg: '<below/>', midSvgs: ['<mid/>'], aboveSvg: '<above/>',
+      slots: [{ layerId: 'slotA', rect: { x: 0, y: 0, w: 100, h: 100 } }, { layerId: 'slotB', rect: { x: 0, y: 0, w: 100, h: 100 } }],
+    });
+    const out = await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 2, slotVideoStart: { slotB: { mode: 'afterAnim' } } }] as unknown as Scene[],
+      templateById, noAsset,
+      () => ({ narrationVolume: 1 }),
+      () => [
+        { slotLayerId: 'slotA', clipRelPath: 'assets/a.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: true, originalVolume: 0.5, speed: 1 },
+        { slotLayerId: 'slotB', clipRelPath: 'assets/b.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: true, originalVolume: 0.3, speed: 1 },
+      ],
+      undefined, {},
+      (s) => [({ id: 'a', sceneId: s.sceneId, targetId: 'slotA', keyframes: [{ timeSec: 0, x: -100 }, { timeSec: 3, x: 0 }] } as unknown as ElementAnimation)],
+      async () => {},
+      async () => 31,
+      async () => 'data:image/png;base64,VF',
+    );
+    // throw せず出力。slotB は非アニメ＝afterAnim を無視して d=0（先頭から・delaySec 0）＝黙って静止しない。
+    const bAudio = out[0].clipAudios?.find((c) => c.clipRelPath === 'assets/b.mp4');
+    expect(bAudio?.delaySec).toBe(0);
+  });
+
   it('トリミング（clipEndSec）を尊重：窓の抽出/音声は残り再生秒に抑え、settled は終点手前でクランプ（切った後ろを読まない・#442 P1）', async () => {
     vi.mocked(layoutScene).mockReturnValue(slotLayout);
     const clipCalls: Array<Record<string, unknown>> = [];
@@ -749,6 +781,19 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
     expect(out[0].clipAudios).toBeUndefined();
     // settled は clipStart から（窓で 0 秒しか進めていない）。
     expect(out[1].video?.clipStartSec).toBe(2);
+  });
+
+  it('afterAnim × settled 無し（アニメが場面尺いっぱい）は §2-5 エラーで停止＝黙って静止画にしない（#444/ADR-0027 D3）', async () => {
+    await expect(
+      buildExportScenes(
+        [{ sceneId: 's1', templateId: 'tpl', durationSec: 2, slotVideoStart: { mainVisual: { mode: 'afterAnim' } } }] as unknown as Scene[],
+        templateById, noAsset,
+        () => ({ narrationVolume: 1 }),
+        videoSlot, undefined, {},
+        (s) => [slotAnim(s.sceneId, 3)], // animEnd=3 >= 尺2 → settled 無し＝afterAnim だと動画が一度も再生されない
+        async () => {},
+      ),
+    ).rejects.toThrow(/再生されません/);
   });
 });
 
