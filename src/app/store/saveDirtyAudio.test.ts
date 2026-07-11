@@ -277,6 +277,61 @@ describe("非同期の競合で作業を失わない（#390 レビュー P1）",
     expect(st.scenes[0].narration.status).toBe("none"); // 「作り直しが必要」のまま
     expect(st.scenes[0].narration.text).toBe("さようなら");
   });
+
+  it("単一：合成中に全体の話し方（速さ）を変えても pending で固まらず、作り直しできる", async () => {
+    const base = useProjectStore.getState();
+    useProjectStore.setState({
+      scenes: [{ ...scene("scene_001"), narration: { text: "A", status: "none" } }],
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+      meta: { ...base.meta, projectId: "proj_test", voiceSettings: { ...base.meta.voiceSettings, speed: 1.0 } },
+    });
+    let releaseSynth: (v: { audioDataUrl: string; durationSec: number }) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockReturnValue(
+      new Promise((res) => { releaseSynth = res; }),
+    );
+    const genPromise = useProjectStore.getState().generateNarration("scene_001");
+    await flush();
+    // 全体設定の速さを変更＝場面 status はリセットされない（ここが pending 固着の原因だった）。
+    useProjectStore.getState().updateVoiceSettings({ speed: 1.5 });
+    releaseSynth({ audioDataUrl: "staleAudio", durationSec: 1 });
+    await genPromise;
+    expect(useProjectStore.getState().narrationAudioById.scene_001).toBeUndefined(); // 旧速さの音声は使わない
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe("none"); // pending で固まらない＝再試行できる
+    // 実際に作り直せる（多重起動ガードに弾かれない）。
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockResolvedValue({ audioDataUrl: "newAudio", durationSec: 1 });
+    await useProjectStore.getState().generateNarration("scene_001");
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe("generated");
+    expect(useProjectStore.getState().narrationAudioById.scene_001).toBe("newAudio");
+  });
+
+  it("後発の生成が終わった後に先発の完了が届いても、新しい結果を消さない（キー単位の世代番号で保護）", async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene("scene_001"), narration: { text: "A", status: "none" } }],
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+    });
+    let r1: (v: { audioDataUrl: string; durationSec: number }) => void = () => {};
+    let r2: (v: { audioDataUrl: string; durationSec: number }) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize")
+      .mockImplementationOnce(() => new Promise((res) => { r1 = res; }))
+      .mockImplementationOnce(() => new Promise((res) => { r2 = res; }));
+    const g1 = useProjectStore.getState().generateNarration("scene_001"); // 先発（input A）
+    await flush();
+    // 本文編集で status を none に戻し、2回目の生成（input B）を開始。
+    useProjectStore.getState().updateScene("scene_001", (s) => ({ ...s, narration: { ...s.narration, text: "B", status: "none" } }));
+    const g2 = useProjectStore.getState().generateNarration("scene_001"); // 後発（input B）
+    await flush();
+    r2({ audioDataUrl: "audioB", durationSec: 1 }); // 後発を先に完了
+    await g2;
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe("generated");
+    expect(useProjectStore.getState().narrationAudioById.scene_001).toBe("audioB");
+    r1({ audioDataUrl: "audioA", durationSec: 1 }); // 先発が遅れて完了
+    await g1;
+    // token 不一致で先発の完了は何もしない＝後発の結果を none に戻したり audioA で上書きしたりしない。
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe("generated");
+    expect(useProjectStore.getState().narrationAudioById.scene_001).toBe("audioB");
+  });
 });
 
 // 掛け合い（scene.lines）経路は単一 narration と同型だが別実装。同じ P1 修正が入っているので競合も同様に検証する（#390 レビュー🟡）。
@@ -367,5 +422,28 @@ describe("掛け合い（行ごと）でも非同期の競合で作業を失わ�
     expect(st.narrationAudioById["scene_001/line_001"]).toBeUndefined(); // 旧本文の音声を新本文に紐付けない
     expect(st.scenes[0].lines?.[0].status).toBe("none"); // 作り直しが必要のまま
     expect(st.scenes[0].lines?.[0].text).toBe("べつのせりふ");
+  });
+
+  it("合成中に全体の話し方（速さ）を変えても行が pending で固まらず none に戻る", async () => {
+    const base = useProjectStore.getState();
+    useProjectStore.setState({
+      scenes: [dialogueScene("scene_001", ["none"])],
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+      isGeneratingNarration: false,
+      meta: { ...base.meta, projectId: "proj_test", voiceSettings: { ...base.meta.voiceSettings, speed: 1.0 } },
+    });
+    let releaseSynth: (v: { audioDataUrl: string; durationSec: number }) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockReturnValue(
+      new Promise((res) => { releaseSynth = res; }),
+    );
+    const genPromise = useProjectStore.getState().generateNarration("scene_001");
+    await flush();
+    useProjectStore.getState().updateVoiceSettings({ speed: 1.5 }); // 行 status はリセットされない
+    releaseSynth({ audioDataUrl: "staleAudio", durationSec: 1 });
+    await genPromise;
+    const st = useProjectStore.getState();
+    expect(st.narrationAudioById["scene_001/line_001"]).toBeUndefined();
+    expect(st.scenes[0].lines?.[0].status).toBe("none"); // pending で固まらない＝再試行できる
   });
 });

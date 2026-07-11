@@ -310,6 +310,19 @@ const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.
 // （早期 return だと書き出し前の保存が no-op になり projectId 未確定→画像欠落の恐れ）。進行中があれば同じ Promise を待つ。
 let saveInFlight: Promise<void> | null = null;
 
+// 音声合成リクエストの世代（音声キー＝sceneId／lineAudioKey ごと）。synthesize は非同期で await 中に後発の生成が来得るため、
+// 完了時に「この結果がまだ最新の要求か」を token で判定する。後発が来ていれば（token 不一致）先発の完了は状態へ一切触れない
+// ＝新しい pending や新しい結果を消さない。不一致（合成中に入力変更）で pending を none へ戻す処理が、後発の要求を壊さないための保護（#390 レビュー P1）。
+const synthReqSeq = new Map<string, number>();
+function nextSynthSeq(key: string): number {
+  const n = (synthReqSeq.get(key) ?? 0) + 1;
+  synthReqSeq.set(key, n);
+  return n;
+}
+function isLatestSynth(key: string, token: number): boolean {
+  return synthReqSeq.get(key) === token;
+}
+
 /** 場面複製/分割で、元場面の要素アニメ（④・ADR-0019）を新場面へ引き継いだ meta を返す（無ければ meta そのまま）。 */
 function metaWithDuplicatedAnimations(meta: ProjectHeader, srcSceneId: string, newSceneId: string): ProjectHeader {
   const anims = meta.timelineOverlay?.animations;
@@ -1484,18 +1497,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ narrationError: null });
       try {
         const base = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
+        const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
         for (const line of targets) {
           const input = resolveLineVoice(line, base);
+          const key = lineAudioKey(sceneId, line.lineId);
+          const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
           const result = await voiceProvider.synthesize(input);
           set((st) => {
+            // 後発の生成が同じ行に来た／別プロジェクトへ切替＝この完了は状態へ触れない（新しい pending・結果を消さない・#390 レビュー P1）。
+            if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
             // 合成の await 中に対象の場面/行が消えた（削除・掛け合い解除）なら結果を捨てる＝削除の即時剪定を打ち消さない（#390 レビュー P1）。
             const sc = st.scenes.find((x) => x.sceneId === sceneId);
             const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
             if (!sc || !cur) return {};
-            // 合成中に本文・話し方を編集していたら（いまの入力 ≠ 合成した入力）旧結果を捨てる＝新しい本文に古い声を紐付けない（#390 レビュー P1）。
+            // 合成中に本文・話し方（全体設定含む）を編集していたら旧結果は使わない。pending のままだと再試行不能なので
+            // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
             const curInput = resolveLineVoice(cur, resolveNarrationVoice(sc.narration, st.meta.voiceSettings));
-            if (!sameSynthInput(input, curInput)) return {};
-            const key = lineAudioKey(sceneId, line.lineId);
+            if (!sameSynthInput(input, curInput)) {
+              return {
+                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.none) : s)),
+                saveStatus: "idle",
+              };
+            }
             return {
               scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
               narrationAudioById: { ...st.narrationAudioById, [key]: result.audioDataUrl },
@@ -1532,14 +1555,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
       const input = { text: scene.narration.text, ...v };
+      const key = sceneId;
+      const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
+      const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
       const result = await voiceProvider.synthesize(input);
       set((st) => {
+        // 後発の生成が来た／別プロジェクトへ切替＝この完了は状態へ触れない（新しい pending・結果を消さない・#390 レビュー P1）。
+        if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
         // await 中に場面が消えた／掛け合いへ切替（lines 化）していたら結果を捨てる（#390 レビュー P1）。
         const sc = st.scenes.find((x) => x.sceneId === sceneId);
         if (!sc || (sc.lines && sc.lines.length > 0)) return {};
-        // 合成中に本文・話し方を編集していたら旧結果を捨てる＝新しい本文に古い声を紐付けない（#390 レビュー P1）。
+        // 合成中に本文・話し方（全体設定含む）を編集していたら旧結果は使わない。pending のままだと再試行不能なので
+        // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
         const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
-        if (!sameSynthInput(input, curInput)) return {};
+        if (!sameSynthInput(input, curInput)) {
+          return {
+            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),
+            saveStatus: "idle",
+          };
+        }
         return {
           scenes: st.scenes.map((s) =>
             s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,
