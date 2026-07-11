@@ -1,16 +1,16 @@
-import type { Asset, Clip } from "../../domain/project/types";
+import type { Asset, Clip, SlotClipOverride } from "../../domain/project/types";
 import { clampClipTime } from "../../domain/asset/clip";
 import { formatDuration } from "../../domain/format/duration";
 import {
-  DEFAULT_FIT, ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
+  ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
   VOLUME_MAX, VOLUME_MIN, VOLUME_STEP,
 } from "../../domain/constants";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { Switch } from "./ui";
-import { FitSelect } from "./FitSelect";
 import { NumberField } from "./NumberField";
 
-type ClipPatch = Partial<Clip>;
+// このカードが編集するのは範囲/速度/元音声のみ（fit は含めない＝per-use fit は呼び出し側の FitSelect が slotFits/el.fit へ・#472 P1）。
+type ClipPatch = Partial<SlotClipOverride>;
 
 // 動画クリップの調整カード（収め方・使う範囲・再生速度・元音声・元音声の音量）。
 // 表示する実効クリップ（clip）と編集先の振り分け（patchClip）は呼び出し側が渡す（ADR-0028・#472）：
@@ -48,14 +48,8 @@ export function ClipDetailControls({
           ここでの変更は元に戻せません（この素材を使う<strong>すべての場面の既定</strong>が変わります）。場面ごとに変えるときは、その場面の編集で調整してください。
         </p>
       )}
-
-      {/* 枠への収め方 */}
-      <div className="field" style={{ marginBottom: 6 }}>
-        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-          枠への収め方
-        </label>
-        <FitSelect value={clip?.fit ?? DEFAULT_FIT} onChange={(fit) => { if (fit) patchClip({ fit }); }} />
-      </div>
+      {/* 「枠への収め方（fit）」はこのカードでは扱わない：fit は per-use（場面=scene.slotFits／FREE=el.fit・layoutScene が読む）で
+          画像スロットと同じ FitSelect（呼び出し側）に集約する（#472 P1）。asset.clip.fit は静止レイアウトが読めず割れるため使わない。 */}
 
       {/* 使う範囲 */}
       <div className="field" style={{ marginBottom: 6 }}>

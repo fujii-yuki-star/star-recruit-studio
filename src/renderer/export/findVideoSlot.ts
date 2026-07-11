@@ -27,13 +27,15 @@ export interface VideoSlotInfo {
 // 動画 Asset と layout アイテム id から VideoSlotInfo を組み立てる（通常スロット/FREE 共通）。
 // クリップ設定（範囲・速度・元音声）は per-use 上書き（scene.slotClips[id]）を asset.clip に重ねた実効値（ADR-0028・#472）。
 // この解決を **VideoSlotInfo 組み立て時に一括**するのが要（ADR-0028 D4）＝#500 の窓/遅延計算は解決後の speed/start/end を使う。
-// fitFallback は通常=layer.fit / FREE=el.fit（fit は per-use=slotFits が別途担うため slotClips には無い）。
-function toVideoSlotInfo(id: string, asset: Asset, fitFallback: Fit | undefined, override: SlotClipOverride | undefined): VideoSlotInfo {
+// **fit は per-use（fitOverride）?? fitFallback**（通常=layer.fit / FREE=el.fit）＝layoutScene（静止）と同一ソース＝
+// 再生中動画と静止レイアウトの収め方が一致（#472 レビュー P1）。`asset.clip.fit` は fit ソースに使わない（layoutScene が
+// asset を持たず読めない＝静止/再生が割れるため。画像スロットと同じ slotFits/el.fit/layer.fit の3層で per-use）。
+function toVideoSlotInfo(id: string, asset: Asset, fitFallback: Fit | undefined, override: SlotClipOverride | undefined, fitOverride: Fit | undefined): VideoSlotInfo {
   const clip = resolveSlotClip(override, asset.clip);
   return {
     slotLayerId: id,
     clipRelPath: asset.filePath,
-    fit: clip?.fit ?? fitFallback ?? DEFAULT_FIT,
+    fit: fitOverride ?? fitFallback ?? DEFAULT_FIT,
     clipStartSec: clip?.startSec ?? 0,
     clipEndSec: clip?.endSec, // endSec?: number（null なし）ゆえ ?? undefined は不要
 
@@ -62,7 +64,7 @@ export function findVideoSlots(
       if (el.kind !== FREE_ELEMENT_KIND.slot || !el.assetId) continue;
       const asset = assetById(el.assetId);
       if (!asset || asset.assetType !== ASSET_TYPE.video) continue;
-      out.push(toVideoSlotInfo(el.id, asset, el.fit, scene.slotClips?.[el.id]));
+      out.push(toVideoSlotInfo(el.id, asset, el.fit, scene.slotClips?.[el.id], scene.slotFits?.[el.id]));
     }
     return out; // FREE は freeLayout のみ（通常の slot 層は持たない）
   }
@@ -75,7 +77,7 @@ export function findVideoSlots(
     if (!assetId) continue;
     const asset = assetById(assetId);
     if (!asset || asset.assetType !== ASSET_TYPE.video) continue;
-    out.push(toVideoSlotInfo(layer.id, asset, layer.fit, scene.slotClips?.[layer.id]));
+    out.push(toVideoSlotInfo(layer.id, asset, layer.fit, scene.slotClips?.[layer.id], scene.slotFits?.[layer.id]));
   }
   return out;
 }
