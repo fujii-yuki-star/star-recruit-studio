@@ -1,46 +1,55 @@
-import type { Asset } from "../../domain/project/types";
+import type { Asset, Clip, SlotClipOverride } from "../../domain/project/types";
 import { clampClipTime } from "../../domain/asset/clip";
 import { formatDuration } from "../../domain/format/duration";
 import {
-  DEFAULT_FIT, ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
+  ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
   VOLUME_MAX, VOLUME_MIN, VOLUME_STEP,
 } from "../../domain/constants";
+import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { Switch } from "./ui";
-import { FitSelect } from "./FitSelect";
 import { NumberField } from "./NumberField";
 
-type ClipPatch = Partial<NonNullable<Asset["clip"]>>;
+// このカードが編集するのは範囲/速度/元音声のみ（fit は含めない＝per-use fit は呼び出し側の FitSelect が slotFits/el.fit へ・#472 P1）。
+type ClipPatch = Partial<SlotClipOverride>;
 
 // 動画クリップの調整カード（収め方・使う範囲・再生速度・元音声・元音声の音量）。
-// クリップ設定は Asset 単位（正典 11/$defs/Clip）。通常スロットと FREE スロットで共用する。
+// 表示する実効クリップ（clip）と編集先の振り分け（patchClip）は呼び出し側が渡す（ADR-0028・#472）：
+//   場面編集＝clip は resolveSlotClip(scene.slotClips, asset.clip) の実効値・patchClip は範囲/速度/音声を scene.slotClips へ
+//     （scenes 更新＝ADR-0020 履歴で Undo 可）／fit は #472 対象外ゆえ asset.clip のまま。
+//   素材画面＝clip は asset.clip・patchClip は全て asset.clip（素材の既定＝Undo 対象外）。
 export function ClipDetailControls({
   asset,
+  clip,
   patchClip,
+  scope = "material",
 }: {
   asset: Asset;
+  /** 表示する実効クリップ（場面=resolveSlotClip 結果／素材=asset.clip）。未上書きは継承値がプレースホルダとして出る（#472）。 */
+  clip: Clip | undefined;
   patchClip: (p: ClipPatch) => void;
+  /** 編集の性質。'material'（既定）は §2-5 で「元に戻せません（全場面の既定が変わる）」を出す。'scene' は per-use＝Undo 可。 */
+  scope?: "scene" | "material";
 }) {
-  const clip = asset.clip;
   const dur = asset.metadata?.durationSec ?? null;
   const hasAudio = asset.metadata?.hasAudio === true;
   const useOriginal = hasAudio && (clip?.useOriginalAudio ?? false);
-  // 注: クリップ設定は Asset（asset.clip）を更新する。ADR-0020 の Undo 履歴 slice は meta/parts/scenes のみで
-  // assets は対象外のため、これらの調整は現状 Undo 対象外＝#389 の履歴グループは付けない（付けても無意味）。
-  // クリップ調整を Undo 可能にするのは履歴 slice/保存先の見直しが要るため別 Issue（#472）で扱う。
+  // ドラッグ中の連続変更（速度/音量スライダー）を1履歴に合成（#389・場面側は Undo 可＝ADR-0028 D5）。素材側は asset を
+  // 履歴に積まないので dragGroup は実質 no-op（無害）。
+  const { dragGroup } = useHistoryGroup();
   return (
     <div className="card-tight" style={{ background: "var(--color-surface-alt)", marginTop: 6 }}>
       <p className="text-sm text-muted" style={{ margin: "0 0 6px" }}>
         ▶ 動画素材です。仕上がり確認では、再生すると動画が流れます（停止中は表示されません）。書き出しにも動画が入ります。
         {dur != null && `（長さ：約${formatDuration(dur)}）`}
       </p>
-
-      {/* 枠への収め方 */}
-      <div className="field" style={{ marginBottom: 6 }}>
-        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>
-          枠への収め方
-        </label>
-        <FitSelect value={clip?.fit ?? DEFAULT_FIT} onChange={(fit) => { if (fit) patchClip({ fit }); }} />
-      </div>
+      {scope === "material" && (
+        // 素材の既定を編集＝全場面に効く・取り消せない（ADR-0028 D3・§2-5）。場面編集側（scope='scene'）は per-use＝Undo 可。
+        <p className="field-hint" style={{ margin: "0 0 6px" }}>
+          ここでの変更は元に戻せません（この素材を使う<strong>すべての場面の既定</strong>が変わります）。場面ごとに変えるときは、その場面の編集で調整してください。
+        </p>
+      )}
+      {/* 「枠への収め方（fit）」はこのカードでは扱わない：fit は per-use（場面=scene.slotFits／FREE=el.fit・layoutScene が読む）で
+          画像スロットと同じ FitSelect（呼び出し側）に集約する（#472 P1）。asset.clip.fit は静止レイアウトが読めず割れるため使わない。 */}
 
       {/* 使う範囲 */}
       <div className="field" style={{ marginBottom: 6 }}>
@@ -88,6 +97,7 @@ export function ClipDetailControls({
           step={SPEED_STEP}
           value={clip?.speed ?? SPEED_DEFAULT}
           onChange={(e) => patchClip({ speed: Number(e.target.value) })}
+          {...dragGroup}
           style={{ width: "100%", accentColor: "var(--color-primary)" }}
         />
         <div className="row-between text-faint text-sm">
@@ -130,6 +140,7 @@ export function ClipDetailControls({
             step={VOLUME_STEP}
             value={clip?.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME}
             onChange={(e) => patchClip({ originalAudioVolume: Number(e.target.value) })}
+            {...dragGroup}
             style={{ width: "100%", accentColor: "var(--color-primary)" }}
           />
           <div className="row-between text-faint text-sm">

@@ -216,10 +216,13 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               <AssetThumb type={selected.assetType} src={assetSrcById[selected.assetId]} size={28} />
             </div>
 
-            {/* 動画クリップの調整（使う範囲・速度・元音声）。設定は Asset 単位（正典 11/$defs/Clip）で場面編集と共用（#406）。 */}
+            {/* 動画クリップの「素材の既定」を編集（使う範囲・速度・元音声）。ここは asset.clip＝全場面の既定・Undo 対象外（ADR-0028 D3）。
+                場面ごとの調整は場面編集の per-use（scene.slotClips）で（そちらは Undo 可）。 */}
             {selected.assetType === ASSET_TYPE.video && (
               <ClipDetailControls
                 asset={selected}
+                clip={selected.clip}
+                scope="material"
                 patchClip={(p) => updateAsset(selected.assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }))}
               />
             )}

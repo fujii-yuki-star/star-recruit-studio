@@ -36,7 +36,7 @@ describe('findVideoSlot', () => {
     expect(r).toEqual({
       slotLayerId: 'mainVisual',
       clipRelPath: 'assets/asset_v.mp4',
-      fit: 'contain', // clip.fit 優先
+      fit: 'cover', // slotFits 無し→layer.fit（asset.clip.fit は fit ソースに使わない・layoutScene と一致・#472 P1）
       clipStartSec: 2,
       clipEndSec: 8,
       useOriginalAudio: true,
@@ -58,9 +58,14 @@ describe('findVideoSlot', () => {
     expect(findVideoSlot(scene('asset_v'), template, by([noAudio]))?.useOriginalAudio).toBe(false);
   });
 
-  it('clip.fit 未指定なら layer.fit にフォールバック', () => {
+  it('slotFits 無しなら layer.fit（fit は slotFits ?? layer.fit＝layoutScene と同一・asset.clip.fit は不使用・#472 P1）', () => {
     const noClipFit: Asset = { ...videoAsset, clip: { useOriginalAudio: false } };
     expect(findVideoSlot(scene('asset_v'), template, by([noClipFit]))?.fit).toBe('cover'); // layer.fit
+  });
+
+  it('scene.slotFits で fit を per-use 上書き（layoutScene と同じ slotFits ?? layer.fit・#472 P1）', () => {
+    const sc = { assetRefs: { mainVisual: 'asset_v' }, slotFits: { mainVisual: 'contain' } } as unknown as Scene;
+    expect(findVideoSlot(sc, template, by([videoAsset]))?.fit).toBe('contain'); // slotFits 優先
   });
 
   it("slotType='image' のスロットは動画素材でも undefined（11 §3.4）", () => {
@@ -95,7 +100,7 @@ describe('findVideoSlot（FREE 自由配置・ADR-0008 Phase 4c）', () => {
     const r = findVideoSlot(sc, freeTemplate, by([videoAsset]));
     expect(r?.slotLayerId).toBe('free_002'); // layout の同 id アイテムが矩形を持つ
     expect(r?.clipRelPath).toBe('assets/asset_v.mp4');
-    expect(r?.fit).toBe('contain'); // clip.fit 優先
+    expect(r?.fit).toBe('cover'); // el.fit（FREE の per-use fit・layoutScene と一致・asset.clip.fit は不使用・#472 P1）
     expect(r?.clipStartSec).toBe(2);
     expect(r?.speed).toBe(1);
   });
