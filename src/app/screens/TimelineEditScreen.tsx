@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { assembleProject } from "../../domain/project/persistence";
 import { compileTimeline } from "../../domain/project/compileTimeline";
+import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import type { OverlayClip } from "../../domain/project/types";
 import { TimelineView } from "../components/TimelineView";
 import { NumberField } from "../components/NumberField";
@@ -23,7 +24,7 @@ interface TimelineEditScreenProps {
  * タイムライン上のドラッグ移動は ③(4b) で追加予定（本PRは選択＋数値/文言編集まで）。
  */
 export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
-  const { scenes, parts, assets, meta, addOverlayClip, updateOverlayClip, removeOverlayClip, undo, redo } = useProjectStore();
+  const { scenes, parts, assets, meta, narrationAudioById, addOverlayClip, updateOverlayClip, removeOverlayClip, undo, redo } = useProjectStore();
   // Undo/Redo（#255・ADR-0020）：overlay 編集も履歴対象（docSnapshot が meta.timelineOverlay を含む＝自動）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
@@ -34,8 +35,11 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   const [confirmDeleteClipId, setConfirmDeleteClipId] = useState<string | null>(null);
 
   const timeline = useMemo(
-    () => compileTimeline(assembleProject(meta, assets, parts, scenes)),
-    [meta, assets, parts, scenes],
+    () =>
+      compileTimeline(assembleProject(meta, assets, parts, scenes), {
+        lineDurationsFor: (scene) => lineDurationsFromAudio(scene, narrationAudioById),
+      }),
+    [meta, assets, parts, scenes, narrationAudioById],
   );
   const overlayClips = meta.timelineOverlay?.clips ?? [];
   const selectedClip = overlayClips.find((c) => c.id === selectedClipId) ?? null;

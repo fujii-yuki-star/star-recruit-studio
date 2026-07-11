@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { assembleProject } from "../../domain/project/persistence";
 import { compileTimeline } from "../../domain/project/compileTimeline";
+import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import { TimelineView } from "../components/TimelineView";
 import { PageHead } from "../components/ui";
 import { ArrowLeftIcon } from "../components/icons";
@@ -16,11 +17,14 @@ interface TimelineScreenProps {
  * 編集はまだ無し（オーバーレイ編集は ③(3) 以降）。データは store の分解状態から assembleProject で組み立てて渡す。
  */
 export function TimelineScreen({ onNavigate }: TimelineScreenProps) {
-  const { scenes, parts, assets, meta } = useProjectStore();
-  // 場面ベース project → 時間軸射影。動画スロットの有無・行音声長は読み取り可視化では既定のまま（③(1) の説明どおり）。
+  const { scenes, parts, assets, meta, narrationAudioById } = useProjectStore();
+  // 場面ベース project → 時間軸射影。掛け合いの行区間は実音声長で表示する（未指定だと最終行だけ全幅・#392）。
   const timeline = useMemo(
-    () => compileTimeline(assembleProject(meta, assets, parts, scenes)),
-    [meta, assets, parts, scenes],
+    () =>
+      compileTimeline(assembleProject(meta, assets, parts, scenes), {
+        lineDurationsFor: (scene) => lineDurationsFromAudio(scene, narrationAudioById),
+      }),
+    [meta, assets, parts, scenes, narrationAudioById],
   );
 
   return (

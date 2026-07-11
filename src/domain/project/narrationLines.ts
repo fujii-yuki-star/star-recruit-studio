@@ -3,6 +3,7 @@
 // scene.lines があればそれを、無ければ単一 narration を1行に写して返す＝旧データ（lines 不在）も同一に扱える。
 import { NARRATION_STATUS, type NarrationStatus } from '../enums';
 import { characterForSpeaker } from '../voice/voiceCatalog';
+import { wavDurationSec } from '../voice/wavDuration';
 import type { Narration, NarrationLine, Scene, Warning } from './types';
 
 /**
@@ -106,6 +107,23 @@ export function liveNarrationAudioKeys(scenes: Scene[]): Set<string> {
     }
   }
   return keys;
+}
+
+/**
+ * 掛け合いの各行の音声長（lineId→秒）を、メモリ上の音声（narrationAudioById）から求める（#392・タイムライン表示）。
+ * compileTimeline の lineDurationsFor に渡すと、自動逐次（startSec 未指定）の掛け合いが各行の実音声長で区間表示される
+ * （未指定だと cursor が進まず最終行だけ全幅になる）。単一 narration（明示 lines 無し）は実効1行＝常に全幅ゆえ空でよい。
+ * 音声未生成の行は含めない（0＝自動逐次のまま）。WAV ヘッダ解析（wavDurationSec）は同期。
+ */
+export function lineDurationsFromAudio(scene: Scene, audioById: Record<string, string>): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (scene.lines && scene.lines.length > 0) {
+    for (const line of scene.lines) {
+      const audio = audioById[lineAudioKey(scene.sceneId, line.lineId)];
+      if (audio) out[line.lineId] = wavDurationSec(audio);
+    }
+  }
+  return out;
 }
 
 /** 指定行の status を更新した Scene（明示 lines があれば該当行・無ければ単一 narration を更新）。 */
