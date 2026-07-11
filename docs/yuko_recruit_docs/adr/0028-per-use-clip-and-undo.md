@@ -1,6 +1,6 @@
 # ADR-0028: 動画クリップ調整を「場面×スロットの per-use 上書き（scene.slotClips）」にして Undo 可能にする
 
-- **状態**: Proposed（設計。承認後に実装＝schema バンプ＋描画/UI 切替＋Undo 配線）
+- **状態**: Accepted（2026-07-11 利用者承認。per-use の挙動変化は「一旦この方針で決定・指摘が上がれば再検討」）
 - **日付**: 2026-07-11
 - **関連**: #472 / [`0024`](0024-non-destructive-editing-model.md)（非破壊編集モデル・決定1＝`scene.slotClips` の per-use 上書きを採用済／本ADRはその**フィールド構成と継承規則を確定**＝ADR-0024 未解決#1）/ [`0020`](0020-undo-redo-model.md)（Undo 履歴 slice＝`meta/parts/scenes`・`assets` は除外）/ [`0007`](0007-detailed-edit-mode.md)（クリップ調整 Phase 3b）/ `CLAUDE.md §5`（null=継承・`11 §6`）/ `§2-7`（正典の単一参照）/ `11 §7.1`（Scene schema）/ `schemas/project.schema.json`
 
@@ -30,7 +30,7 @@
 | (B) `assets`（または `asset.clip` 差分）を Undo 履歴 slice に含める | 却下。ADR-0020 が assets を除外した理由（disk IO・素材取込を跨ぐ履歴保持・dangling 回避）に反する。`asset.clip` だけ部分 snapshot する変種も履歴モデルに例外を持ち込み複雑。 |
 | (C) クリップ設定専用の別 Undo スタック | 却下。ADR-0020 の**単一スナップショット履歴**を壊す（2系統の履歴・Ctrl+Z の一貫性喪失）。 |
 
-## 決定（Proposed）
+## 決定
 
 ### D1. schema：`scene.slotClips`
 
