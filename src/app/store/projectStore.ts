@@ -609,7 +609,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 再書き出しせず既存 voicePath を保持する。dirty でも voicePath 未設定なら念のため書く（取りこぼし防止）。
       const audioById = s.narrationAudioById;
       const dirty = s._dirtyAudioKeys;
-      const written = new Set<string>(); // 今回ディスクへ書けたキー（保存後に dirty から落とす）。
+      // 今回ディスクへ書けたキー→{voicePath, 書き出した音声}。保存完了時に live state へ voicePath をマージし dirty を落とすが、
+      // 保存中に同キーが再生成されていたら（live 音声 ≠ 書き出した音声）マージも dirty クリアもしない（新しい音声を失わない・#390 レビュー）。
+      const writtenPath = new Map<string, string>();
+      const writtenAudio = new Map<string, string>();
       const scenes = await Promise.all(
         s.scenes.map(async (sc) => {
           // 掛け合い（明示 lines）は行ごとに保存・voicePath 更新する（ADR-0015 PR-C2）。
@@ -627,7 +630,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 const vp = await importVoiceFile(projectId, lineVoiceStem(sc.sceneId, line.lineId), lineAudio);
                 if (vp) {
                   next = withLineVoicePath(next, line.lineId, vp);
-                  written.add(key);
+                  writtenPath.set(key, vp);
+                  writtenAudio.set(key, lineAudio);
                 }
               }
               // 生成済みだがメモリに音声なし／未変更 → 既存 voicePath を保持（何もしない）。
@@ -645,7 +649,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           if (audio && (dirty.has(sc.sceneId) || !sc.narration.voicePath)) {
             const voicePath = await importVoiceFile(projectId, sc.sceneId, audio);
             if (voicePath) {
-              written.add(sc.sceneId);
+              writtenPath.set(sc.sceneId, voicePath);
+              writtenAudio.set(sc.sceneId, audio);
               return { ...sc, narration: { ...sc.narration, voicePath } };
             }
             return sc;
@@ -654,25 +659,62 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           return sc;
         }),
       );
-      const meta: ProjectHeader = { ...s.meta, projectId, updatedAt: new Date().toISOString() };
+      // ディスクへ書く project は「保存開始時のスナップショット（scenes）」で組む＝一貫した時点の内容。
+      const updatedAt = new Date().toISOString();
+      const meta: ProjectHeader = { ...s.meta, projectId, updatedAt };
       const project = assembleProject(meta, s.assets, s.parts, scenes);
       // 保存前検証（#416）：当面は警告ログのみ（アプリが正典に反するデータを作っていないか監視・入力防御は #411）。
       const pv = validateProjectDoc(project);
       if (!pv.valid) console.warn("[project] 保存内容がスキーマに未適合（要修正・#416）:", pv.errors);
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
       setLastProjectId(projectId);
-      // 孤児になった音声キャッシュ（削除/掛け合い⇄単一の切替で参照が消えたキー）をメモリから落とす（#390）。
-      // 判定はスナップショット（保存対象の scenes）基準。保存中に新規生成されたキー（live state のみ）は消さない
-      // ＝clobber を避けるため live state（st）に対して「スナップショットで孤児と確定したキー」だけを剪定する。
-      const liveKeys = liveNarrationAudioKeys(scenes);
-      const orphaned = Object.keys(audioById).filter((k) => !liveKeys.has(k));
+      // 保存完了時は「スナップショットを丸ごと戻す」のではなく、書けた voicePath だけを **live state** へマージする。
+      // これで保存中の削除・編集・同一キー再生成を巻き戻さない（#390 レビュー・P1）：
+      //  - 書けた voicePath は、対象の場面/行がまだ存在し、かつ音声が書き出し時と同じ（＝保存中に再生成されていない）ときだけ反映。
+      //  - dirty は「書けて」かつ「未変更」のキーだけ落とす（再生成された分は dirty のまま＝次回保存で書く）。
+      //  - 孤児（現存しない場面/行のキー）はメモリから剪定。saveStatus は sentinel（下記）で判定。
       set((st) => {
-        const nextAudio = { ...st.narrationAudioById };
-        for (const k of orphaned) delete nextAudio[k];
-        const nextDirty = new Set(st._dirtyAudioKeys);
-        for (const k of written) nextDirty.delete(k); // 書けた＝もう dirty ではない
-        for (const k of orphaned) nextDirty.delete(k); // 参照が消えた＝書き出す必要もない
-        return { meta, scenes, saveStatus: "saved", narrationAudioById: nextAudio, _dirtyAudioKeys: nextDirty };
+        const applyWritten = (sc: Scene): Scene => {
+          if (sc.lines && sc.lines.length > 0) {
+            let changed = false;
+            const lines = sc.lines.map((l) => {
+              if (l.status !== NARRATION_STATUS.generated) return l;
+              const key = lineAudioKey(sc.sceneId, l.lineId);
+              if (writtenPath.has(key) && st.narrationAudioById[key] === writtenAudio.get(key)) {
+                changed = true;
+                return { ...l, voicePath: writtenPath.get(key)! };
+              }
+              return l;
+            });
+            return changed ? { ...sc, lines } : sc;
+          }
+          if (sc.narration.status !== NARRATION_STATUS.generated) return sc;
+          const key = sc.sceneId;
+          if (writtenPath.has(key) && st.narrationAudioById[key] === writtenAudio.get(key)) {
+            return { ...sc, narration: { ...sc.narration, voicePath: writtenPath.get(key)! } };
+          }
+          return sc;
+        };
+        const nextScenes = st.scenes.map(applyWritten);
+        const liveKeys = liveNarrationAudioKeys(nextScenes);
+        const nextAudio = pickKeys(st.narrationAudioById, liveKeys); // 孤児（現存しないキー）を落とす
+        const nextDirty = new Set<string>();
+        for (const k of st._dirtyAudioKeys) {
+          if (!liveKeys.has(k)) continue; // 孤児＝書き出す必要なし
+          if (writtenPath.has(k) && st.narrationAudioById[k] === writtenAudio.get(k)) continue; // 書けて未変更＝もう dirty でない
+          nextDirty.add(k); // 未書き出し／保存中に再生成された分は dirty のまま
+        }
+        // sentinel：_doSave 冒頭で saveStatus="saving"。保存中に編集/削除/生成が入れば必ず "idle" になる（それらが idle をセット）。
+        // まだ "saving" のまま＝保存中に変更なし → "saved"。変わっていれば（idle 等）そのまま＝自動保存が再度走る（作業を失わない）。
+        const saveStatus = st.saveStatus === "saving" ? "saved" : st.saveStatus;
+        // projectId（新規採番）と updatedAt は stamp しつつ、保存中の meta 編集（改名等）は live を優先して残す。
+        return {
+          meta: { ...st.meta, projectId, updatedAt },
+          scenes: nextScenes,
+          saveStatus,
+          narrationAudioById: nextAudio,
+          _dirtyAudioKeys: nextDirty,
+        };
       });
     } catch {
       set({ saveStatus: "error" });
@@ -1449,11 +1491,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const base = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
         for (const line of targets) {
           const result = await voiceProvider.synthesize(resolveLineVoice(line, base));
-          set((st) => ({
-            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
-            narrationAudioById: { ...st.narrationAudioById, [lineAudioKey(sceneId, line.lineId)]: result.audioDataUrl },
-            _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(lineAudioKey(sceneId, line.lineId)), // 新規生成＝次回保存で書き出す（#390）
-          }));
+          set((st) => {
+            // 合成の await 中に対象の場面/行が消えた（削除・掛け合い解除）なら結果を捨てる＝削除の即時剪定を打ち消さない（#390 レビュー P1）。
+            const sc = st.scenes.find((x) => x.sceneId === sceneId);
+            if (!sc || !sc.lines || !sc.lines.some((l) => l.lineId === line.lineId)) return {};
+            const key = lineAudioKey(sceneId, line.lineId);
+            return {
+              scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
+              narrationAudioById: { ...st.narrationAudioById, [key]: result.audioDataUrl },
+              _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(key), // 新規生成＝次回保存で書き出す（#390）
+              saveStatus: "idle", // 音声は履歴外＝生成だけでも未保存にして自動保存の対象にする（#390 レビュー P1）
+            };
+          });
         }
       } catch (e) {
         // pending の行だけ failed にする（既に generated 済みの行とその音声は保持＝不整合を避ける）。
@@ -1482,13 +1531,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
       const result = await voiceProvider.synthesize({ text: scene.narration.text, ...v });
-      set((st) => ({
-        scenes: st.scenes.map((s) =>
-          s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,
-        ),
-        narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
-        _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(sceneId), // 新規生成＝次回保存で書き出す（#390）
-      }));
+      set((st) => {
+        // await 中に場面が消えた／掛け合いへ切替（lines 化）していたら結果を捨てる（#390 レビュー P1）。
+        const sc = st.scenes.find((x) => x.sceneId === sceneId);
+        if (!sc || (sc.lines && sc.lines.length > 0)) return {};
+        return {
+          scenes: st.scenes.map((s) =>
+            s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,
+          ),
+          narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
+          _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(sceneId), // 新規生成＝次回保存で書き出す（#390）
+          saveStatus: "idle", // 音声は履歴外＝生成だけでも未保存にして自動保存の対象にする（#390 レビュー P1）
+        };
+      });
     } catch (e) {
       setStatus(NARRATION_STATUS.failed);
       set({
