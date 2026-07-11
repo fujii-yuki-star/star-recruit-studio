@@ -8,6 +8,7 @@ import { resolveTransition, transitionTimeline } from '../../domain/project/scen
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs } from '../../domain/project/lineTimeline';
 import { animationsEndSec, sceneAnimationActive, slotIsAnimated } from '../../domain/project/sceneAnimation';
+import { resolveVideoStartDelaySec } from '../../domain/project/videoStartTiming';
 import { layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
@@ -91,7 +92,7 @@ export interface ExportSceneData {
   narrationVolume?: number;
   /** 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声（**複数動画スロット対応＝各スロット1本**）。
    *  非空のとき Rust が audioBase64（ナレーション）と全本を amix する（アニメ区間から再生される元音声・useOriginalAudio のスロットぶん）。 */
-  clipAudios?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number }[];
+  clipAudios?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number; delaySec?: number }[];
   video?: ExportVideoData;
   /** この場面に「入る」トランジション（ADR-0009 T2）。先頭場面・none では未設定（ハードカット）。 */
   transition?: { name: string; durationSec: number; offsetSec: number };
@@ -359,8 +360,8 @@ export async function buildExportScenes(
             );
             // アニメ区間は動画の実フレームで焼く（stageClipFrames/readExportFrame があるとき）。無ければサムネで代替（テスト/非Tauri）。
             const useRealFrames = !!(stageClipFrames && readExportFrame);
-            // 動画 assetId → 抽出フレーム dir と枚数（全スロットの動画をアニメ区間で再生させる＝動きながら再生）。
-            const clipFrameByAsset = new Map<string, { dir: string; count: number }>();
+            // 動画 assetId → 抽出フレーム dir と枚数、開始遅延フレーム数（全スロットの動画をアニメ区間で再生させる＝動きながら再生）。
+            const clipFrameByAsset = new Map<string, { dir: string; count: number; delayFrames: number }>();
             if (useRealFrames) {
               for (let s = 0; s < videoSlots.length; s += 1) {
                 bail(); // クリップ抽出の各スロット前（走行中の抽出 ffmpeg は cancel_export が kill）
@@ -368,12 +369,16 @@ export async function buildExportScenes(
                 const assetId = slotAssetIdByLayer.get(vs.slotLayerId);
                 if (!assetId) continue; // 動画 id が引けないスロットはサムネ描画へフォールバック
                 const dir = `clip_vbody_${i}_${s}`;
+                // #444：このスロットの再生開始遅延 d（窓内 [0,d] は代表フレームで静止・[d,W] で再生）。preview と共有の resolve。
+                const dSec = resolveVideoStartDelaySec(scene.slotVideoStart?.[vs.slotLayerId], W);
+                const delayFrames = Math.round(dSec * fps);
+                const playW = Math.max(0, W - dSec); // 実際にクリップを再生する窓尺（遅延ぶん短い）
                 // トリミング（clipEndSec）を尊重：抽出は「クリップに残る再生秒」＝(clipEnd-clipStart)/speed までに抑える
                 // （窓が終点を超える分は readExportFrame の min(f,count-1) が最終フレームを保持＝切った後ろを読まない）。
                 const availW =
-                  vs.clipEndSec != null ? Math.max(0, (vs.clipEndSec - vs.clipStartSec) / vs.speed) : W;
-                const count = await stageClipFrames!(dir, vs.clipRelPath, vs.clipStartSec, Math.min(W, availW), vs.speed, fps, width);
-                clipFrameByAsset.set(assetId, { dir, count });
+                  vs.clipEndSec != null ? Math.max(0, (vs.clipEndSec - vs.clipStartSec) / vs.speed) : playW;
+                const count = await stageClipFrames!(dir, vs.clipRelPath, vs.clipStartSec, Math.min(playW, availW), vs.speed, fps, width);
+                clipFrameByAsset.set(assetId, { dir, count, delayFrames });
               }
             }
             for (let f = 0; f < frameCount; f += 1) {
@@ -386,7 +391,10 @@ export async function buildExportScenes(
               if (clipFrameByAsset.size > 0) {
                 const urls = new Map<string, string>();
                 for (const [assetId, cf] of clipFrameByAsset) {
-                  urls.set(assetId, await readExportFrame!(cf.dir, Math.min(f, cf.count - 1)));
+                  // #444：[0,d) は代表フレーム（clipStart=index0）で静止、[d,W] は f−delayFrames を再生
+                  // （＝clipTimeAtSceneTime の fps 格子への量子化。preview は同じ d でシーク＝パリティ）。
+                  const idx = Math.min(Math.max(0, f - cf.delayFrames), cf.count - 1);
+                  urls.set(assetId, await readExportFrame!(cf.dir, idx));
                 }
                 frameAssetSrc = (id) => (id && urls.has(id) ? urls.get(id) : assetSrc(id));
               }
@@ -408,16 +416,21 @@ export async function buildExportScenes(
               ? videoSlots
                   .filter((v) => v.useOriginalAudio)
                   .map((v) => {
+                    // #444：このスロットの開始遅延 d。窓内は scene-time d から鳴らし、尺は残り (W−d) に抑える。
+                    const dSec = resolveVideoStartDelaySec(scene.slotVideoStart?.[v.slotLayerId], W);
+                    const playW = Math.max(0, W - dSec);
                     const availAudio =
-                      v.clipEndSec != null ? Math.max(0, (v.clipEndSec - v.clipStartSec) / v.speed) : W;
+                      v.clipEndSec != null ? Math.max(0, (v.clipEndSec - v.clipStartSec) / v.speed) : playW;
                     return {
                       clipRelPath: v.clipRelPath,
                       clipStartSec: v.clipStartSec,
-                      durSec: Math.min(W, availAudio),
+                      durSec: Math.min(playW, availAudio),
+                      delaySec: dSec, // Rust build_window_audio が adelay で窓内 d 秒へ配置（schema 不変・IPC 拡張）
                       speed: v.speed,
                       volume: v.originalVolume,
                     };
                   })
+                  .filter((a) => a.durSec > 0) // d=W（アニメの後）等で鳴る区間が無いものは送らない
               : [];
             out.push({
               durationSec: hasSettled ? W : scene.durationSec,
@@ -435,6 +448,8 @@ export async function buildExportScenes(
                 splitVideoSceneSvgMulti(settledLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit) ?? splitM;
               const sLayers = sSplit.slots.map((s) => {
                 const info = slotById.get(s.layerId)!;
+                // #444：窓で実際に再生した尺は W−d（[0,d] は静止で消費しない）。settled はその続きから。
+                const playedW = Math.max(0, W - resolveVideoStartDelaySec(scene.slotVideoStart?.[s.layerId], W));
                 return {
                   slotX: Math.round(s.rect.x * rx),
                   slotY: Math.round(s.rect.y * ry),
@@ -442,17 +457,17 @@ export async function buildExportScenes(
                   slotH: Math.round(s.rect.h * ry),
                   clipRelPath: info.clipRelPath,
                   fit: info.fit,
-                  // 実フレーム時は窓で [clipStart,+W*speed) を再生済み＝settled はその続きから（連続再生）。
+                  // 実フレーム時は窓で [clipStart,+(W−d)*speed) を再生済み＝settled はその続きから（連続再生・#444）。
                   // サムネ代替時は窓で動画は静止＝settled は clipStart から（従来）。
                   // トリミング（clipEndSec）を尊重：窓で終点まで消費したら settled 開始を「終点の1フレーム手前」に
                   // クランプ＝最終フレームを eof_action=repeat で保持（切った後ろへ進めない・#442 レビュー P1）。
                   clipStartSec:
                     info.clipEndSec != null
                       ? Math.min(
-                          info.clipStartSec + (useRealFrames ? W * info.speed : 0),
+                          info.clipStartSec + (useRealFrames ? playedW * info.speed : 0),
                           Math.max(info.clipStartSec, info.clipEndSec - info.speed / fps),
                         )
-                      : info.clipStartSec + (useRealFrames ? W * info.speed : 0),
+                      : info.clipStartSec + (useRealFrames ? playedW * info.speed : 0),
                   clipEndSec: info.clipEndSec,
                   useOriginalAudio: info.useOriginalAudio,
                   originalVolume: info.originalVolume,
