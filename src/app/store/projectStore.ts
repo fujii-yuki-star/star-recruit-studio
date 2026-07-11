@@ -1495,49 +1495,62 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }));
       for (const l of targets) setLineStatus(l.lineId, NARRATION_STATUS.pending);
       set({ narrationError: null });
-      try {
+      {
         const base = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
         const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
+        // 行ごとに try/catch。1行の失敗が他行を巻き込まず、成功/失敗どちらの完了も token/genSeq で保護する（#390 レビュー P1）。
         for (const line of targets) {
           const input = resolveLineVoice(line, base);
           const key = lineAudioKey(sceneId, line.lineId);
           const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
-          const result = await voiceProvider.synthesize(input);
-          set((st) => {
-            // 後発の生成が同じ行に来た／別プロジェクトへ切替＝この完了は状態へ触れない（新しい pending・結果を消さない・#390 レビュー P1）。
-            if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
-            // 合成の await 中に対象の場面/行が消えた（削除・掛け合い解除）なら結果を捨てる＝削除の即時剪定を打ち消さない（#390 レビュー P1）。
-            const sc = st.scenes.find((x) => x.sceneId === sceneId);
-            const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
-            if (!sc || !cur) return {};
-            // 合成中に本文・話し方（全体設定含む）を編集していたら旧結果は使わない。pending のままだと再試行不能なので
-            // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
-            const curInput = resolveLineVoice(cur, resolveNarrationVoice(sc.narration, st.meta.voiceSettings));
-            if (!sameSynthInput(input, curInput)) {
+          try {
+            const result = await voiceProvider.synthesize(input);
+            set((st) => {
+              // 後発の生成が同じ行に来た／別プロジェクトへ切替＝この完了は状態へ触れない（新しい pending・結果を消さない・#390 レビュー P1）。
+              if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+              // 合成の await 中に対象の場面/行が消えた（削除・掛け合い解除）なら結果を捨てる＝削除の即時剪定を打ち消さない（#390 レビュー P1）。
+              const sc = st.scenes.find((x) => x.sceneId === sceneId);
+              const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
+              if (!sc || !cur) return {};
+              // 合成中に本文・話し方（全体設定含む）を編集していたら旧結果は使わない。pending のままだと再試行不能なので
+              // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
+              const curInput = resolveLineVoice(cur, resolveNarrationVoice(sc.narration, st.meta.voiceSettings));
+              if (!sameSynthInput(input, curInput)) {
+                return {
+                  scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.none) : s)),
+                  saveStatus: "idle",
+                };
+              }
               return {
-                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.none) : s)),
-                saveStatus: "idle",
+                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
+                narrationAudioById: { ...st.narrationAudioById, [key]: result.audioDataUrl },
+                _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(key), // 新規生成＝次回保存で書き出す（#390）
+                saveStatus: "idle", // 音声は履歴外＝生成だけでも未保存にして自動保存の対象にする（#390 レビュー P1）
               };
-            }
-            return {
-              scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
-              narrationAudioById: { ...st.narrationAudioById, [key]: result.audioDataUrl },
-              _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(key), // 新規生成＝次回保存で書き出す（#390）
-              saveStatus: "idle", // 音声は履歴外＝生成だけでも未保存にして自動保存の対象にする（#390 レビュー P1）
-            };
-          });
+            });
+          } catch (e) {
+            set((st) => {
+              // 失敗も成功と同じく保護：後発/別文書ならこの失敗は無視（新しい pending・成功結果を failed で潰さない・#390 レビュー P1）。
+              if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+              const sc = st.scenes.find((x) => x.sceneId === sceneId);
+              const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
+              if (!sc || !cur) return {};
+              // 合成中に入力が変わっていたら、この失敗は古い入力のもの＝失敗表示せず none（作り直し可）に戻す（全体設定変更の pending 固着も解消）。
+              const curInput = resolveLineVoice(cur, resolveNarrationVoice(sc.narration, st.meta.voiceSettings));
+              if (!sameSynthInput(input, curInput)) {
+                return {
+                  scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.none) : s)),
+                  saveStatus: "idle",
+                };
+              }
+              return {
+                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.failed) : s)),
+                narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+                saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（sentinel が保存中の変化を取りこぼさない・#390 レビュー）
+              };
+            });
+          }
         }
-      } catch (e) {
-        // pending の行だけ failed にする（既に generated 済みの行とその音声は保持＝不整合を避ける）。
-        set((st) => ({
-          scenes: st.scenes.map((s) =>
-            s.sceneId === sceneId && s.lines
-              ? { ...s, lines: s.lines.map((l) => (l.status === NARRATION_STATUS.pending ? { ...l, status: NARRATION_STATUS.failed } : l)) }
-              : s,
-          ),
-          saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（保存中に生成が終わった変化を sentinel が取りこぼさない・#390 レビュー）
-        }));
-        set({ narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。" });
       }
       return;
     }
@@ -1552,12 +1565,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }));
     setStatus(NARRATION_STATUS.pending);
     set({ narrationError: null });
+    const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
+    const input = { text: scene.narration.text, ...v };
+    const key = sceneId;
+    const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
+    const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
     try {
-      const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
-      const input = { text: scene.narration.text, ...v };
-      const key = sceneId;
-      const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
-      const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
       const result = await voiceProvider.synthesize(input);
       set((st) => {
         // 後発の生成が来た／別プロジェクトへ切替＝この完了は状態へ触れない（新しい pending・結果を消さない・#390 レビュー P1）。
@@ -1584,11 +1597,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         };
       });
     } catch (e) {
-      setStatus(NARRATION_STATUS.failed);
-      set({
-        narrationError:
-          typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
-        saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（#390 レビュー）
+      set((st) => {
+        // 失敗も成功と同じく保護：後発/別文書ならこの失敗は無視（新しい pending・成功結果を failed で潰さない・#390 レビュー P1）。
+        if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+        const sc = st.scenes.find((x) => x.sceneId === sceneId);
+        if (!sc || (sc.lines && sc.lines.length > 0)) return {};
+        // 合成中に入力が変わっていたら、この失敗は古い入力のもの＝失敗表示せず none（作り直し可）に戻す（全体設定変更の pending 固着も解消）。
+        const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
+        if (!sameSynthInput(input, curInput)) {
+          return {
+            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),
+            saveStatus: "idle",
+          };
+        }
+        return {
+          scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.failed } } : s)),
+          narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+          saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（#390 レビュー）
+        };
       });
     }
   },

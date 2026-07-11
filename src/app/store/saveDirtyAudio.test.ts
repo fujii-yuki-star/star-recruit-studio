@@ -332,6 +332,47 @@ describe("非同期の競合で作業を失わない（#390 レビュー P1）",
     expect(useProjectStore.getState().scenes[0].narration.status).toBe("generated");
     expect(useProjectStore.getState().narrationAudioById.scene_001).toBe("audioB");
   });
+
+  it("単一：後発が成功した後に先発が失敗しても failed で上書きしない（失敗経路の token 保護）", async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene("scene_001"), narration: { text: "A", status: "none" } }],
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+    });
+    let rejectG1: (e: unknown) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize")
+      .mockImplementationOnce(() => new Promise((_res, rej) => { rejectG1 = rej; })) // 先発：後で失敗
+      .mockResolvedValueOnce({ audioDataUrl: "audioB", durationSec: 1 }); // 後発：成功
+    const g1 = useProjectStore.getState().generateNarration("scene_001");
+    await flush();
+    useProjectStore.getState().updateScene("scene_001", (s) => ({ ...s, narration: { ...s.narration, text: "B", status: "none" } }));
+    await useProjectStore.getState().generateNarration("scene_001"); // 後発（成功）
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe("generated");
+    rejectG1("合成エラー"); // 先発が遅れて失敗
+    await g1;
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].narration.status).toBe("generated"); // failed で潰さない
+    expect(st.narrationAudioById.scene_001).toBe("audioB");
+    expect(st.narrationError).toBeNull(); // 古い失敗のエラーを出さない
+  });
+
+  it("単一：合成中に本文を編集した後に失敗しても、failed 表示せず none のまま（再試行可）", async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene("scene_001"), narration: { text: "A", status: "none" } }],
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+    });
+    let rejectSynth: (e: unknown) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockImplementationOnce(() => new Promise((_r, rej) => { rejectSynth = rej; }));
+    const g = useProjectStore.getState().generateNarration("scene_001");
+    await flush();
+    useProjectStore.getState().updateScene("scene_001", (s) => ({ ...s, narration: { ...s.narration, text: "B", status: "none" } }));
+    rejectSynth("合成エラー");
+    await g;
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].narration.status).toBe("none"); // 入力が変わった＝古い失敗で failed にしない
+    expect(st.narrationError).toBeNull(); // 古い入力のエラーは出さない
+  });
 });
 
 // 掛け合い（scene.lines）経路は単一 narration と同型だが別実装。同じ P1 修正が入っているので競合も同様に検証する（#390 レビュー🟡）。
@@ -445,5 +486,49 @@ describe("掛け合い（行ごと）でも非同期の競合で作業を失わ�
     const st = useProjectStore.getState();
     expect(st.narrationAudioById["scene_001/line_001"]).toBeUndefined();
     expect(st.scenes[0].lines?.[0].status).toBe("none"); // pending で固まらない＝再試行できる
+  });
+
+  it("別プロジェクトへ切替後に旧合成が失敗しても、現在の文書を failed にしない（失敗経路の _generationSeq 保護）", async () => {
+    useProjectStore.setState({
+      scenes: [dialogueScene("scene_001", ["none"])],
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+      isGeneratingNarration: false,
+      _generationSeq: 5,
+    });
+    let rejectSynth: (e: unknown) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockImplementationOnce(() => new Promise((_r, rej) => { rejectSynth = rej; }));
+    const g = useProjectStore.getState().generateNarration("scene_001");
+    await flush();
+    // 別プロジェクトへ切替＝_generationSeq が進み、同じ sceneId の別文書（生成済み）になったと想定。
+    useProjectStore.setState({
+      _generationSeq: 6,
+      scenes: [{ ...dialogueScene("scene_001", ["generated"]) }],
+      narrationAudioById: { "scene_001/line_001": "otherProjAudio" },
+    });
+    rejectSynth("合成エラー");
+    await g;
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].lines?.[0].status).toBe("generated"); // 新文書を failed にしない
+    expect(st.narrationError).toBeNull();
+  });
+
+  it("合成中に行の本文を編集した後に失敗しても、failed 表示せず none のまま（再試行可）", async () => {
+    useProjectStore.setState({
+      scenes: [dialogueScene("scene_001", ["none"])],
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+      isGeneratingNarration: false,
+    });
+    let rejectSynth: (e: unknown) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockImplementationOnce(() => new Promise((_r, rej) => { rejectSynth = rej; }));
+    const g = useProjectStore.getState().generateNarration("scene_001");
+    await flush();
+    useProjectStore.getState().updateScene("scene_001", (s) => updateLine(s, "line_001", { text: "べつのせりふ" }));
+    rejectSynth("合成エラー");
+    await g;
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].lines?.[0].status).toBe("none"); // 入力が変わった＝古い失敗で failed にしない
+    expect(st.narrationError).toBeNull();
   });
 });
