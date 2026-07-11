@@ -38,7 +38,7 @@ import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
 import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
-import { resolveLineVoice, resolveNarrationVoice } from "../../domain/voice/voiceProvider";
+import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { lineAudioKey, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
@@ -1485,11 +1485,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       try {
         const base = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
         for (const line of targets) {
-          const result = await voiceProvider.synthesize(resolveLineVoice(line, base));
+          const input = resolveLineVoice(line, base);
+          const result = await voiceProvider.synthesize(input);
           set((st) => {
             // 合成の await 中に対象の場面/行が消えた（削除・掛け合い解除）なら結果を捨てる＝削除の即時剪定を打ち消さない（#390 レビュー P1）。
             const sc = st.scenes.find((x) => x.sceneId === sceneId);
-            if (!sc || !sc.lines || !sc.lines.some((l) => l.lineId === line.lineId)) return {};
+            const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
+            if (!sc || !cur) return {};
+            // 合成中に本文・話し方を編集していたら（いまの入力 ≠ 合成した入力）旧結果を捨てる＝新しい本文に古い声を紐付けない（#390 レビュー P1）。
+            const curInput = resolveLineVoice(cur, resolveNarrationVoice(sc.narration, st.meta.voiceSettings));
+            if (!sameSynthInput(input, curInput)) return {};
             const key = lineAudioKey(sceneId, line.lineId);
             return {
               scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
@@ -1526,11 +1531,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ narrationError: null });
     try {
       const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
-      const result = await voiceProvider.synthesize({ text: scene.narration.text, ...v });
+      const input = { text: scene.narration.text, ...v };
+      const result = await voiceProvider.synthesize(input);
       set((st) => {
         // await 中に場面が消えた／掛け合いへ切替（lines 化）していたら結果を捨てる（#390 レビュー P1）。
         const sc = st.scenes.find((x) => x.sceneId === sceneId);
         if (!sc || (sc.lines && sc.lines.length > 0)) return {};
+        // 合成中に本文・話し方を編集していたら旧結果を捨てる＝新しい本文に古い声を紐付けない（#390 レビュー P1）。
+        const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
+        if (!sameSynthInput(input, curInput)) return {};
         return {
           scenes: st.scenes.map((s) =>
             s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,

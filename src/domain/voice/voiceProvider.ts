@@ -61,3 +61,18 @@ export function resolveLineVoice(line: NarrationLine, base: ResolvedVoice): Synt
     speaker: characterForSpeaker(line.speaker) != null ? line.speaker : null,
   };
 }
+
+/**
+ * 合成入力が同一か（本文/声/速さ/ピッチ/抑揚/話者）。合成は非同期で、await 中に本文や話し方を編集できるため、
+ * 完了時に「合成した入力＝いまの入力」を確かめて、一致するときだけ結果を採用する（旧結果を新しい本文に紐付けない・#390 レビュー）。
+ */
+export function sameSynthInput(a: SynthesizeInput, b: SynthesizeInput): boolean {
+  return (
+    a.text === b.text &&
+    a.voiceId === b.voiceId &&
+    a.speed === b.speed &&
+    a.pitch === b.pitch &&
+    a.intonation === b.intonation &&
+    (a.speaker ?? null) === (b.speaker ?? null)
+  );
+}

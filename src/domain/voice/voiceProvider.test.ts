@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveLineVoice, resolveNarrationVoice } from './voiceProvider';
+import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from './voiceProvider';
+import type { SynthesizeInput } from './voiceProvider';
 import { DEFAULT_VOICE_ID } from '../constants';
 import { NARRATION_STATUS } from '../enums';
 import type { Narration, NarrationLine, VoiceSettings } from '../project/types';
@@ -66,5 +67,26 @@ describe('resolveLineVoice（掛け合いの行・ADR-0015）', () => {
   it('voiceCatalog に無い speaker は null＝既定声へフォールバック（V19・破損データ対策）', () => {
     const line: NarrationLine = { lineId: 'line_001', text: 'a', speaker: 99999, status: NARRATION_STATUS.none };
     expect(resolveLineVoice(line, resolved).speaker).toBeNull();
+  });
+});
+
+describe('sameSynthInput（合成中の入力変更検知・#390 レビュー）', () => {
+  const inp: SynthesizeInput = { text: 'こんにちは', voiceId: 'v', speed: 1.0, pitch: 0.0, intonation: 1.0, speaker: 3 };
+
+  it('全フィールド一致で true', () => {
+    expect(sameSynthInput(inp, { ...inp })).toBe(true);
+  });
+
+  it('speaker の undefined と null は同値扱い（既定声）', () => {
+    expect(sameSynthInput({ ...inp, speaker: null }, { ...inp, speaker: undefined })).toBe(true);
+  });
+
+  it('本文・話者・速さ・ピッチ・抑揚のいずれかが違えば false', () => {
+    expect(sameSynthInput(inp, { ...inp, text: 'ちがう' })).toBe(false);
+    expect(sameSynthInput(inp, { ...inp, speaker: 7 })).toBe(false);
+    expect(sameSynthInput(inp, { ...inp, speed: 1.2 })).toBe(false);
+    expect(sameSynthInput(inp, { ...inp, pitch: 0.1 })).toBe(false);
+    expect(sameSynthInput(inp, { ...inp, intonation: 1.4 })).toBe(false);
+    expect(sameSynthInput(inp, { ...inp, voiceId: 'w' })).toBe(false);
   });
 });

@@ -22,6 +22,7 @@ vi.mock("../../infrastructure/projectFs", () => ({
 
 import { useProjectStore } from "./projectStore";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
+import { updateLine } from "../../domain/project/lineEditOps";
 import type { Scene } from "../../domain/project/types";
 
 const scene = (id: string, order = 1): Scene => ({
@@ -254,6 +255,28 @@ describe("非同期の競合で作業を失わない（#390 レビュー P1）",
     expect(st.saveStatus).toBe("idle"); // 生成だけでも未保存＝自動保存が走る
     expect(st._dirtyAudioKeys.has("scene_001")).toBe(true);
   });
+
+  it("単一：合成中に本文を編集すると、旧本文で作った音声結果は反映しない", async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene("scene_001"), narration: { text: "こんにちは", status: "none" } }],
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+    });
+    let releaseSynth: (v: { audioDataUrl: string; durationSec: number }) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockReturnValue(
+      new Promise((res) => { releaseSynth = res; }),
+    );
+    const genPromise = useProjectStore.getState().generateNarration("scene_001");
+    await flush(); // pending・synthesize 手前で停止
+    // 合成中に本文を編集（作り直しが必要＝status も none に戻す）。
+    useProjectStore.getState().updateScene("scene_001", (s) => ({ ...s, narration: { ...s.narration, text: "さようなら", status: "none" } }));
+    releaseSynth({ audioDataUrl: "staleAudio", durationSec: 1 });
+    await genPromise;
+    const st = useProjectStore.getState();
+    expect(st.narrationAudioById.scene_001).toBeUndefined(); // 旧本文の音声を新本文に紐付けない
+    expect(st.scenes[0].narration.status).toBe("none"); // 「作り直しが必要」のまま
+    expect(st.scenes[0].narration.text).toBe("さようなら");
+  });
 });
 
 // 掛け合い（scene.lines）経路は単一 narration と同型だが別実装。同じ P1 修正が入っているので競合も同様に検証する（#390 レビュー🟡）。
@@ -321,5 +344,28 @@ describe("掛け合い（行ごと）でも非同期の競合で作業を失わ�
     const st = useProjectStore.getState();
     expect(st.saveStatus).toBe("idle");
     expect(st._dirtyAudioKeys.has("scene_001/line_001")).toBe(true);
+  });
+
+  it("合成中に行の本文を編集すると、旧本文で作った音声結果は反映しない", async () => {
+    useProjectStore.setState({
+      scenes: [dialogueScene("scene_001", ["none"])], // line_001＝text 'せりふ1'・none
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+      isGeneratingNarration: false,
+    });
+    let releaseSynth: (v: { audioDataUrl: string; durationSec: number }) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockReturnValue(
+      new Promise((res) => { releaseSynth = res; }),
+    );
+    const genPromise = useProjectStore.getState().generateNarration("scene_001");
+    await flush(); // 行 pending・synthesize 手前で停止
+    // 合成中に line_001 の本文を編集（updateLine が status を none に戻す）。
+    useProjectStore.getState().updateScene("scene_001", (s) => updateLine(s, "line_001", { text: "べつのせりふ" }));
+    releaseSynth({ audioDataUrl: "staleAudio", durationSec: 1 });
+    await genPromise;
+    const st = useProjectStore.getState();
+    expect(st.narrationAudioById["scene_001/line_001"]).toBeUndefined(); // 旧本文の音声を新本文に紐付けない
+    expect(st.scenes[0].lines?.[0].status).toBe("none"); // 作り直しが必要のまま
+    expect(st.scenes[0].lines?.[0].text).toBe("べつのせりふ");
   });
 });
