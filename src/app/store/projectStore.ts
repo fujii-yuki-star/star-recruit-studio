@@ -398,15 +398,6 @@ function pickKeys<T>(record: Record<string, T>, keep: Set<string>): Record<strin
   return next;
 }
 
-/** set と keep の積集合を新しい Set で返す（dirty セットの剪定・#390）。 */
-function intersectSet(set: Set<string>, keep: Set<string>): Set<string> {
-  const next = new Set<string>();
-  for (const k of set) {
-    if (keep.has(k)) next.add(k);
-  }
-  return next;
-}
-
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
   return {
@@ -696,16 +687,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           return sc;
         };
         const nextScenes = st.scenes.map(applyWritten);
-        const liveKeys = liveNarrationAudioKeys(nextScenes);
-        const nextAudio = pickKeys(st.narrationAudioById, liveKeys); // 孤児（現存しないキー）を落とす
+        const liveKeys = liveNarrationAudioKeys(nextScenes); // 現在の場面が参照するキー（書き出し対象の判定に使う）
+        // 剪定は「現在＋Undo/Redo 履歴で到達可能な場面」の和集合で行う（#390 レビュー🔴）。削除は Undo 可・Undo は
+        // 音声キャッシュを戻さないため、履歴に残る場面のキーを消すと取り消し後に音声が失われる。履歴から落ちた（＝もう
+        // Undo でも戻せない）キーだけ解放する。past/future の DocSnapshot も走査。
+        const reachable = new Set(liveKeys);
+        for (const snap of [...st.past, ...st.future]) {
+          for (const k of liveNarrationAudioKeys(snap.scenes)) reachable.add(k);
+        }
+        const nextAudio = pickKeys(st.narrationAudioById, reachable); // 到達不能な孤児だけ落とす
         const nextDirty = new Set<string>();
         for (const k of st._dirtyAudioKeys) {
-          if (!liveKeys.has(k)) continue; // 孤児＝書き出す必要なし
-          if (writtenPath.has(k) && st.narrationAudioById[k] === writtenAudio.get(k)) continue; // 書けて未変更＝もう dirty でない
-          nextDirty.add(k); // 未書き出し／保存中に再生成された分は dirty のまま
+          if (!reachable.has(k)) continue; // 到達不能＝もう書き出す必要なし
+          if (liveKeys.has(k) && writtenPath.has(k) && st.narrationAudioById[k] === writtenAudio.get(k)) continue; // 書けて未変更＝もう dirty でない
+          nextDirty.add(k); // 未書き出し／保存中に再生成／Undo 履歴のみで到達（復活時に !voicePath で書き直す）＝dirty のまま
         }
-        // sentinel：_doSave 冒頭で saveStatus="saving"。保存中に編集/削除/生成が入れば必ず "idle" になる（それらが idle をセット）。
-        // まだ "saving" のまま＝保存中に変更なし → "saved"。変わっていれば（idle 等）そのまま＝自動保存が再度走る（作業を失わない）。
+        // sentinel：_doSave 冒頭で saveStatus="saving"。保存中に編集・削除・生成の**完了**（成功/失敗いずれも idle をセット）が
+        // 入れば "idle" に変わる。まだ "saving" のまま＝保存中に確定変更なし → "saved"。変わっていれば（idle 等）そのまま＝
+        // 自動保存が再度走る（作業を失わない）。※in-flight の pending は idle を立てないが、その生成は完了時に idle をセットする
+        // ので、保存がちょうど pending 中に終わっても次サイクルで拾える。
         const saveStatus = st.saveStatus === "saving" ? "saved" : st.saveStatus;
         // projectId（新規採番）と updatedAt は stamp しつつ、保存中の meta 編集（改名等）は live を優先して残す。
         return {
@@ -957,26 +957,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   removeScene: (sceneId) => {
     get().pushHistory();
-    set((s) => {
+    set((s) => ({
       // 削除して order を 1..N に振り直す（表示順＝配列順を保つ）。
-      const scenes = s.scenes
+      scenes: s.scenes
         .filter((x) => x.sceneId !== sceneId)
-        .map((x, i) => ({ ...x, order: i + 1 }));
-      // 消えた場面の音声キャッシュ（narrationAudioById／dirty）を即メモリから落とす（#390）。残る場面の生存キーだけ保持。
-      const liveKeys = liveNarrationAudioKeys(scenes);
-      const narrationAudioById = pickKeys(s.narrationAudioById, liveKeys);
-      const _dirtyAudioKeys = intersectSet(s._dirtyAudioKeys, liveKeys);
-      return {
-        scenes,
-        parts: s.parts.map((p) => ({
-          ...p,
-          sceneIds: p.sceneIds.filter((id) => id !== sceneId),
-        })),
-        narrationAudioById,
-        _dirtyAudioKeys,
-        saveStatus: "idle",
-      };
-    });
+        .map((x, i) => ({ ...x, order: i + 1 })),
+      parts: s.parts.map((p) => ({
+        ...p,
+        sceneIds: p.sceneIds.filter((id) => id !== sceneId),
+      })),
+      // 音声キャッシュ（narrationAudioById／dirty）はここで剪定しない：削除は Undo 可（履歴に残る）で、Undo は
+      // 音声キャッシュを復元しない（DocSnapshot=meta/parts/scenes・ADR-0020）。ここで消すと「生成→削除→取り消し」で
+      // 復元場面の音声が失われる（保存前は voicePath も無く復旧不能＝#390 レビュー🔴）。剪定は _doSave が「現在＋Undo/Redo
+      // 履歴で到達可能な場面」を除いて行う（履歴から落ちて初めて解放＝到達不能なら Undo でも戻せず安全）。
+      saveStatus: "idle",
+    }));
   },
   moveScene: (sceneId, direction) => {
     const s = get();
@@ -1512,6 +1507,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               ? { ...s, lines: s.lines.map((l) => (l.status === NARRATION_STATUS.pending ? { ...l, status: NARRATION_STATUS.failed } : l)) }
               : s,
           ),
+          saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（保存中に生成が終わった変化を sentinel が取りこぼさない・#390 レビュー）
         }));
         set({ narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。" });
       }
@@ -1549,6 +1545,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({
         narrationError:
           typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+        saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（#390 レビュー）
       });
     }
   },

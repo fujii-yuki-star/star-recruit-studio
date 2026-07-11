@@ -164,6 +164,12 @@ describe('行ごと音声の補助（PR-C2）', () => {
     expect(keys.has('scene_001')).toBe(false);
   });
 
+  it('liveNarrationAudioKeys：lines が空配列の場面は単一扱い（sceneId キー）', () => {
+    // sceneLines と同じく lines.length===0 は単一 narration とみなす（sceneId キー）。
+    const keys = liveNarrationAudioKeys([{ ...sceneWith({}), sceneId: 'scene_003', lines: [] }]);
+    expect([...keys]).toEqual(['scene_003']);
+  });
+
   it('withLineStatus：明示 lines は該当行・無ければ単一 narration を更新', () => {
     const multi = sceneWith({
       lines: [

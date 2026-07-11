@@ -47,6 +47,8 @@ beforeEach(() => {
     meta: { ...useProjectStore.getState().meta, projectId: "proj_test" },
     saveStatus: "idle",
     isGeneratingNarration: false,
+    past: [], // Undo 履歴を毎テストでクリア（履歴到達性の剪定判定を汚さない）
+    future: [],
   });
 });
 
@@ -113,19 +115,41 @@ describe("保存の効率化：新規生成分だけ書き出す（#390）", () 
   });
 });
 
-describe("メモリの効率化：削除で即キャッシュを落とす（#390）", () => {
-  it("removeScene：消した場面の音声キャッシュ・dirty を残さない", () => {
+describe("メモリの効率化：Undo で戻せる間は保持し、履歴から落ちたら解放（#390 レビュー🔴）", () => {
+  it("removeScene→undo：削除した場面の音声キャッシュが戻る（作業を失わない）", () => {
     useProjectStore.setState({
       parts: [{ partId: "part_001", title: "p", order: 1, sceneIds: ["scene_001", "scene_002"] }],
-      scenes: [scene("scene_001", 1), scene("scene_002", 2)],
-      narrationAudioById: { scene_001: "d1", scene_002: "d2" },
+      scenes: [scene("scene_001", 1), { ...scene("scene_002", 2), narration: { text: "B", status: "generated" } }],
+      narrationAudioById: { scene_002: "b1" }, // 生成済み・未保存（voicePath なし）
       _dirtyAudioKeys: new Set(["scene_002"]),
+      past: [],
+      future: [],
     });
     useProjectStore.getState().removeScene("scene_002");
+    // 削除しても音声キャッシュは即消さない（Undo は音声を戻さないため・データ消失を防ぐ）。
+    expect(useProjectStore.getState().narrationAudioById.scene_002).toBe("b1");
+    useProjectStore.getState().undo();
     const st = useProjectStore.getState();
-    expect(st.narrationAudioById.scene_002).toBeUndefined();
-    expect(st.narrationAudioById.scene_001).toBe("d1");
-    expect(st._dirtyAudioKeys.has("scene_002")).toBe(false);
+    expect(st.scenes.map((s) => s.sceneId)).toContain("scene_002"); // 場面が戻る
+    expect(st.narrationAudioById.scene_002).toBe("b1"); // 音声も残っている＝生成済みのまま再生・保存できる
+  });
+
+  it("保存時：現在にも Undo/Redo 履歴にも無い場面のキャッシュだけ剪定（履歴にある間は保持）", async () => {
+    const base = useProjectStore.getState();
+    // scene_002 は現在の scenes には無いが past（Undo で戻せる）には在る。
+    const snap = { meta: base.meta, parts: base.parts, scenes: [{ ...scene("scene_002", 1), narration: { text: "B", status: "generated" as const } }] };
+    useProjectStore.setState({
+      scenes: [{ ...scene("scene_001", 1), narration: { text: "A", status: "generated" } }],
+      narrationAudioById: { scene_001: "a1", scene_002: "b1" },
+      _dirtyAudioKeys: new Set(),
+      past: [snap],
+      future: [],
+      saveStatus: "idle",
+    });
+    await useProjectStore.getState().saveProject();
+    const st = useProjectStore.getState();
+    expect(st.narrationAudioById.scene_002).toBe("b1"); // Undo 履歴で到達可能＝保持
+    expect(st.narrationAudioById.scene_001).toBeTruthy();
   });
 
   it("removeAsset：消した素材の表示用 src を残さない", () => {
@@ -166,8 +190,9 @@ describe("非同期の競合で作業を失わない（#390 レビュー P1）",
     releaseSave();
     await savePromise;
     const st = useProjectStore.getState();
-    expect(st.scenes.map((s) => s.sceneId)).toEqual(["scene_001"]); // 復活しない
-    expect(st.narrationAudioById.scene_002).toBeUndefined(); // キャッシュも残らない
+    expect(st.scenes.map((s) => s.sceneId)).toEqual(["scene_001"]); // 復活しない（スナップショットで戻さない）
+    // scene_002 の音声は残る：removeScene で past に入り Undo で戻せる＝履歴到達性があるうちは剪定しない（#390 レビュー🔴）。
+    expect(st.narrationAudioById.scene_002).toBe("b1");
     expect(st.saveStatus).toBe("idle"); // 保存中に変更あり＝自動保存が再度走るよう idle のまま（sentinel）
   });
 
@@ -228,5 +253,73 @@ describe("非同期の競合で作業を失わない（#390 レビュー P1）",
     const st = useProjectStore.getState();
     expect(st.saveStatus).toBe("idle"); // 生成だけでも未保存＝自動保存が走る
     expect(st._dirtyAudioKeys.has("scene_001")).toBe(true);
+  });
+});
+
+// 掛け合い（scene.lines）経路は単一 narration と同型だが別実装。同じ P1 修正が入っているので競合も同様に検証する（#390 レビュー🟡）。
+describe("掛け合い（行ごと）でも非同期の競合で作業を失わない（#390 レビュー）", () => {
+  const dialogueScene = (id: string, statuses: Array<"none" | "generated">): Scene => ({
+    ...scene(id),
+    lines: statuses.map((status, i) => ({
+      lineId: `line_00${i + 1}`,
+      text: `せりふ${i + 1}`,
+      status,
+      voicePath: status === "generated" ? `voices/${id}_line_00${i + 1}.wav` : null,
+    })),
+  });
+
+  it("合成中に対象の場面を削除すると、遅れて届く行の合成結果でキャッシュを作らない", async () => {
+    useProjectStore.setState({
+      scenes: [dialogueScene("scene_001", ["none", "none"])],
+      narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
+      isGeneratingNarration: false,
+    });
+    let releaseSynth: (v: { audioDataUrl: string; durationSec: number }) => void = () => {};
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockReturnValue(
+      new Promise((res) => { releaseSynth = res; }),
+    );
+    const genPromise = useProjectStore.getState().generateNarration("scene_001");
+    await flush(); // 各行 pending・1行目の synthesize 手前で停止
+    useProjectStore.getState().removeScene("scene_001"); // 合成中に場面削除
+    releaseSynth({ audioDataUrl: "vX", durationSec: 1 });
+    await genPromise;
+    const st = useProjectStore.getState();
+    expect(st.narrationAudioById["scene_001/line_001"]).toBeUndefined();
+    expect(st.narrationAudioById["scene_001/line_002"]).toBeUndefined();
+    expect(st._dirtyAudioKeys.size).toBe(0);
+  });
+
+  it("保存中に同じ行を作り直すと、新しい音声は dirty のまま（古い書き込みで消えない）", async () => {
+    useProjectStore.setState({
+      scenes: [dialogueScene("scene_001", ["generated"])],
+      narrationAudioById: { "scene_001/line_001": "v1" },
+      _dirtyAudioKeys: new Set(["scene_001/line_001"]),
+      saveStatus: "idle",
+    });
+    let releaseSave: () => void = () => {};
+    h.saveProjectDoc.mockImplementationOnce(() => new Promise<void>((res) => { releaseSave = res; }));
+    const savePromise = useProjectStore.getState().saveProject();
+    await flush(); // line_001 の v1 を書き出し済み、saveProjectDoc 手前で停止
+    vi.spyOn(MockVoiceProvider.prototype, "synthesize").mockResolvedValue({ audioDataUrl: "v2", durationSec: 1 });
+    await useProjectStore.getState().generateNarration("scene_001"); // 保存中に作り直し
+    releaseSave();
+    await savePromise;
+    const st = useProjectStore.getState();
+    expect(st.narrationAudioById["scene_001/line_001"]).toBe("v2");
+    expect(st._dirtyAudioKeys.has("scene_001/line_001")).toBe(true);
+  });
+
+  it("保存済みで行を作り直すだけでも未保存（idle）になる", async () => {
+    useProjectStore.setState({
+      scenes: [dialogueScene("scene_001", ["generated"])],
+      narrationAudioById: { "scene_001/line_001": "v1" },
+      _dirtyAudioKeys: new Set(),
+      saveStatus: "saved",
+    });
+    await useProjectStore.getState().generateNarration("scene_001");
+    const st = useProjectStore.getState();
+    expect(st.saveStatus).toBe("idle");
+    expect(st._dirtyAudioKeys.has("scene_001/line_001")).toBe(true);
   });
 });
