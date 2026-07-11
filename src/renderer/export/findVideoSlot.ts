@@ -4,9 +4,9 @@
 // いずれも返す slotLayerId は layout アイテムの id＝splitVideoSceneSvg が矩形/分割を id で解決する（Rust は無改修）。
 // MVP は1シーン1動画（最初に見つかったもの）。複数は ADR-0006 未解決#2。
 import { DEFAULT_FIT, SPEED_DEFAULT } from '../../domain/constants';
-import { clampSpeed } from '../../domain/asset/clip';
+import { clampSpeed, resolveSlotClip } from '../../domain/asset/clip';
 import { ASSET_TYPE, FREE_CATEGORY, FREE_ELEMENT_KIND, SLOT_TYPE, type Fit } from '../../domain/enums';
-import type { Asset, Scene } from '../../domain/project/types';
+import type { Asset, Scene, SlotClipOverride } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
 export interface VideoSlotInfo {
@@ -25,9 +25,11 @@ export interface VideoSlotInfo {
 }
 
 // 動画 Asset と layout アイテム id から VideoSlotInfo を組み立てる（通常スロット/FREE 共通）。
-// クリップ設定（範囲・速度・元音声）は Asset 単位（asset.clip）。fitFallback は通常=layer.fit / FREE=el.fit。
-function toVideoSlotInfo(id: string, asset: Asset, fitFallback: Fit | undefined): VideoSlotInfo {
-  const clip = asset.clip;
+// クリップ設定（範囲・速度・元音声）は per-use 上書き（scene.slotClips[id]）を asset.clip に重ねた実効値（ADR-0028・#472）。
+// この解決を **VideoSlotInfo 組み立て時に一括**するのが要（ADR-0028 D4）＝#500 の窓/遅延計算は解決後の speed/start/end を使う。
+// fitFallback は通常=layer.fit / FREE=el.fit（fit は per-use=slotFits が別途担うため slotClips には無い）。
+function toVideoSlotInfo(id: string, asset: Asset, fitFallback: Fit | undefined, override: SlotClipOverride | undefined): VideoSlotInfo {
+  const clip = resolveSlotClip(override, asset.clip);
   return {
     slotLayerId: id,
     clipRelPath: asset.filePath,
@@ -60,7 +62,7 @@ export function findVideoSlots(
       if (el.kind !== FREE_ELEMENT_KIND.slot || !el.assetId) continue;
       const asset = assetById(el.assetId);
       if (!asset || asset.assetType !== ASSET_TYPE.video) continue;
-      out.push(toVideoSlotInfo(el.id, asset, el.fit));
+      out.push(toVideoSlotInfo(el.id, asset, el.fit, scene.slotClips?.[el.id]));
     }
     return out; // FREE は freeLayout のみ（通常の slot 層は持たない）
   }
@@ -73,7 +75,7 @@ export function findVideoSlots(
     if (!assetId) continue;
     const asset = assetById(assetId);
     if (!asset || asset.assetType !== ASSET_TYPE.video) continue;
-    out.push(toVideoSlotInfo(layer.id, asset, layer.fit));
+    out.push(toVideoSlotInfo(layer.id, asset, layer.fit, scene.slotClips?.[layer.id]));
   }
   return out;
 }
