@@ -131,6 +131,9 @@ const mustAccept = [
   ['scene: bgmSettings（無音＝enabled:false のみ）を許容（1.16・ADR-0018 ③(7)）', withScene({ bgmSettings: { enabled: false } })],
   ['timelineOverlay: animations（キーフレーム）を許容（1.17・ADR-0019 ④）', { ...withBrief({}), timelineOverlay: { animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, x: 100, y: 50, scale: 1.5, opacity: 1, rotation: 90, easing: 'ease-in-out' }] }] } }],
   ['scene: slotVideoStart（動画スロット再生開始・3モード）を許容（1.18・ADR-0027）', withScene({ slotVideoStart: { mainVisual: { mode: 'withAnim' }, sub: { mode: 'afterAnim' }, bg: { mode: 'delay', delaySec: 0.6 } } })],
+  // 注：slotClips は startSec/endSec を各 minimum:0 でしか縛れない。**意味的な異常（反転レンジ endSec≤startSec・0尺）は
+  // JSON Schema の cross-field では弾けない**（base Clip $def も同じ）＝schema が通る＝安全ではない。per-use の部分上書きが
+  // 継承値を跨いで作る反転は resolveSlotClip が終端なしへ正規化し、UI がスライダーをクランプして担保する（#472 レビュー P2/P3）。
   ['scene: slotClips（クリップ per-use 上書き・範囲/速度/元音声）を許容（1.19・ADR-0028）', withScene({ slotClips: { mainVisual: { startSec: 1, endSec: 5, speed: 1.5, useOriginalAudio: true, originalAudioVolume: 0.4 }, sub: { speed: 0.5 } } })],
 ];
 const mustReject = [

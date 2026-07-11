@@ -61,4 +61,14 @@ describe('resolveSlotClip（per-use 上書き＋asset.clip 継承・ADR-0028・#
   it('override=0/false は有効な上書き（?? が拾う・falsy でも継承に落ちない）', () => {
     expect(resolveSlotClip({ startSec: 0, useOriginalAudio: false }, base)).toMatchObject({ startSec: 0, useOriginalAudio: false });
   });
+  it('反転レンジ（部分上書きで endSec ≤ startSec）は空クリップにせず終端なしへ正規化（#472 レビュー P2）', () => {
+    // asset.clip=[10,30]、場面で endSec=3 だけ上書き → 解決 {10,3} は反転＝空クリップ。終端を落として [10,実尺] に。
+    expect(resolveSlotClip({ endSec: 3 }, { startSec: 10, endSec: 30 })).toMatchObject({ startSec: 10, endSec: undefined });
+    // startSec を base.endSec より後ろへ上書きした反転も同様に終端なしへ。
+    expect(resolveSlotClip({ startSec: 10 }, { startSec: 0, endSec: 5 })).toMatchObject({ startSec: 10, endSec: undefined });
+    // endSec == startSec（0尺）も終端なしへ（空クリップ回避）。
+    expect(resolveSlotClip({ endSec: 10 }, { startSec: 10, endSec: 30 })).toMatchObject({ endSec: undefined });
+    // 正常な範囲（startSec < endSec）はそのまま保持。
+    expect(resolveSlotClip({ endSec: 20 }, { startSec: 10, endSec: 30 })).toMatchObject({ startSec: 10, endSec: 20 });
+  });
 });
