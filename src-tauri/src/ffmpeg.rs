@@ -5853,6 +5853,7 @@ mod tests {
             dur_sec: 1.0,
             speed: Some(1.0),
             volume: Some(0.4),
+            delay_sec: 0.0, // #444：既定0＝窓先頭から（adelay なし＝従来挙動）
         };
         // ナレーション＋**2本**のクリップ音声を amix（#442 P2・複数動画スロット）。
         let clips2 = vec![(clip.clone(), &ca), (clip.clone(), &ca)];
