@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.18" },
+    "schemaVersion": { "const": "1.19" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -264,6 +264,20 @@
         "slotFits": {
           "type": "object",
           "additionalProperties": { "enum": ["cover", "contain", "stretch"] }
+        },
+        "slotClips": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "startSec": { "type": "number", "minimum": 0 },
+              "endSec": { "type": "number", "minimum": 0 },
+              "useOriginalAudio": { "type": "boolean" },
+              "originalAudioVolume": { "type": "number", "minimum": 0, "maximum": 1.5 },
+              "speed": { "type": "number", "minimum": 0.5, "maximum": 2.0 }
+            }
+          }
         },
         "slotVideoStart": {
           "type": "object",

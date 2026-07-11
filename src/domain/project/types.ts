@@ -85,6 +85,20 @@ export interface VideoStartSpec {
   delaySec?: number;
 }
 
+/**
+ * 動画クリップ調整の per-use 上書き（場面×スロット・ADR-0028・#472）。`Clip` の per-use 上書き可能な部分集合。
+ * 未設定フィールドは `asset.clip` の既定を継承（null=継承・11 §6）。`fit` は含めない（既に scene.slotFits で per-use）。
+ * scenes に載るので ADR-0020 の履歴で自動 Undo。
+ */
+export interface SlotClipOverride {
+  startSec?: number;
+  endSec?: number;
+  useOriginalAudio?: boolean;
+  originalAudioVolume?: number;
+  /** 再生速度（0.5–2.0・既定1.0）。 */
+  speed?: number;
+}
+
 export interface AssetMetadata {
   width?: number | null;
   height?: number | null;
@@ -255,6 +269,8 @@ export interface Scene {
   warnings: Warning[];
   /** 場面ごと・スロット別の画像の収め方（④）。キー＝テンプレのスロット/背景/ロゴの layer.id。未指定＝テンプレ層の fit を使用。 */
   slotFits?: Record<string, Fit>;
+  /** 場面ごと・スロット別の動画クリップ調整の per-use 上書き（ADR-0028・#472）。キー＝スロットの layer.id。未指定/未上書きフィールドは asset.clip を継承。scenes に載るので Undo 可。 */
+  slotClips?: Record<string, SlotClipOverride>;
   /** 動画スロット本体アニメの再生開始タイミング（ADR-0027・#444）。キー＝スロットの layer.id。未指定＝withAnim（アニメと同時）。スロット本体がアニメ対象の場面でのみ効く。 */
   slotVideoStart?: Record<string, VideoStartSpec>;
   /** FREE テンプレ場面のみ：自由配置要素（ADR-0008）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
