@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as Rea
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
 import { sceneFirstLine } from "./sceneCardPreview";
-import type { Asset, FreeElement, Scene, VideoStartSpec } from "../../domain/project/types";
+import type { Asset, Clip, FreeElement, Scene, SlotClipOverride, VideoStartSpec } from "../../domain/project/types";
+import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
@@ -542,9 +543,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     });
     if (newIds[0]) setSelectedFreeIds([newIds[0]]);
   };
-  // 素材(Asset 単位)のクリップ設定を部分更新（FREE slot 動画の調整に使う。通常スロットと同じ Asset.clip）。
+  // 素材(Asset 単位)のクリップ設定を部分更新（fit の既定・素材の既定。Undo 対象外＝assets は履歴 slice 外）。
   const patchAssetClip = (assetId: string, p: Partial<NonNullable<Asset["clip"]>>) =>
     updateAsset(assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }));
+  // #472/ADR-0028：場面側のクリップ調整（範囲/速度/元音声）は per-use（scene.slotClips[layerId]）へ＝scenes 更新ゆえ Undo 可。
+  const patchSlotClip = (layerId: string, p: Partial<SlotClipOverride>) =>
+    patch((s) => ({ ...s, slotClips: { ...s.slotClips, [layerId]: { ...s.slotClips?.[layerId], ...p } } }));
+  // ClipDetailControls（場面側）の patchClip を編集先へ振り分け：範囲/速度/元音声→slotClips（Undo 可）／fit は #472 対象外ゆえ asset.clip の既定へ。
+  const sceneClipPatch = (layerId: string, assetId: string) => (p: Partial<Clip>) => {
+    const { fit, ...rest } = p;
+    if (fit !== undefined) patchAssetClip(assetId, { fit });
+    if (Object.keys(rest).length > 0) patchSlotClip(layerId, rest);
+  };
 
   // FREE 要素の種別ごとの編集コントロール。右パネルのカードと、右クリック「編集」ポップオーバーで共用（DRY）。
   // 角の丸み（radius）は廃止（#185・図形種類を増やすため不要）。位置/サイズはカードのフッタとドラッグで扱う。
@@ -559,7 +569,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {freeSlotAssets.map((x) => (<option key={x.assetId} value={x.assetId}>{x.displayName}</option>))}
           </select>
           {a?.assetType === ASSET_TYPE.video ? (
-            <ClipDetailControls asset={a} patchClip={(p) => patchAssetClip(a.assetId, p)} />
+            <ClipDetailControls asset={a} clip={resolveSlotClip(selected.slotClips?.[el.id], a.clip)} patchClip={sceneClipPatch(el.id, a.assetId)} scope="scene" />
           ) : a ? (
             <div className="field" style={{ marginTop: 6, marginBottom: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
@@ -1353,12 +1363,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     ? assets.find((a) => a.assetId === assignedId)
                     : undefined;
                   const isVideo = assignedAsset?.assetType === ASSET_TYPE.video;
-                  // クリップ設定（asset.clip）を部分更新する。clip は Asset 単位（正典 11/$defs/Clip）。詳細UIは ClipDetailControls。
-                  const patchClip = (p: Partial<NonNullable<Asset["clip"]>>) => {
-                    if (assignedAsset) {
-                      updateAsset(assignedAsset.assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }));
-                    }
-                  };
+                  // 動画スロットのクリップ調整は場面側 per-use（scene.slotClips[layer.id]・Undo 可）へ。編集先の振り分けは sceneClipPatch。
                   return (
                     <div key={layer.id} style={{ marginBottom: 10, padding: "8px 10px", border: "1px solid var(--color-border)", borderRadius: "var(--radius)" }}>
                       <label className="field-label text-sm" style={{ margin: "0 0 4px", fontWeight: 600 }}>{slotLabels[i]}</label>
@@ -1381,7 +1386,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       </select>
 
                       {isVideo && assignedAsset && (
-                        <ClipDetailControls asset={assignedAsset} patchClip={patchClip} />
+                        <ClipDetailControls asset={assignedAsset} clip={resolveSlotClip(selected.slotClips?.[layer.id], assignedAsset.clip)} patchClip={sceneClipPatch(layer.id, assignedAsset.assetId)} scope="scene" />
                       )}
                       {!isVideo && assignedAsset && (
                         <div className="field" style={{ marginTop: 6 }}>
