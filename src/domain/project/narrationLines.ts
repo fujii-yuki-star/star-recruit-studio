@@ -91,6 +91,23 @@ export function lineVoiceStem(sceneId: string, lineId: string): string {
   return `${sceneId}_${lineId}`;
 }
 
+/**
+ * 生存しているナレーション音声キー（narrationAudioById のキー）の集合（#390・メモリ効率）。
+ * 掛け合い場面は行ごと（lineAudioKey）、単一 narration 場面は sceneId。掛け合い⇄単一の切替や場面/行の削除で
+ * 孤児になった音声キャッシュ（narrationAudioById／dirty セット）を剪定するのに使う（保存時・削除時）。
+ */
+export function liveNarrationAudioKeys(scenes: Scene[]): Set<string> {
+  const keys = new Set<string>();
+  for (const sc of scenes) {
+    if (sc.lines && sc.lines.length > 0) {
+      for (const l of sc.lines) keys.add(lineAudioKey(sc.sceneId, l.lineId));
+    } else {
+      keys.add(sc.sceneId);
+    }
+  }
+  return keys;
+}
+
 /** 指定行の status を更新した Scene（明示 lines があれば該当行・無ければ単一 narration を更新）。 */
 export function withLineStatus(scene: Scene, lineId: string, status: NarrationStatus): Scene {
   if (scene.lines && scene.lines.length > 0) {

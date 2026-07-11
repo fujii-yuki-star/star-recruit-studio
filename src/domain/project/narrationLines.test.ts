@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
 import {
-  lineAudioKey, lineFromNarration, lineVoiceStem, sceneLines, sceneNeedsVoice,
+  lineAudioKey, lineFromNarration, lineVoiceStem, liveNarrationAudioKeys, sceneLines, sceneNeedsVoice,
   validateSceneLines, withLineStatus, withLineVoicePath,
 } from './narrationLines';
 import type { Narration, NarrationLine, Scene } from './types';
@@ -151,6 +151,23 @@ describe('行ごと音声の補助（PR-C2）', () => {
   it('lineAudioKey / lineVoiceStem', () => {
     expect(lineAudioKey('scene_001', 'line_002')).toBe('scene_001/line_002');
     expect(lineVoiceStem('scene_001', 'line_002')).toBe('scene_001_line_002');
+  });
+
+  it('liveNarrationAudioKeys：掛け合いは行キー・単一は sceneId・切替/削除で孤児を剪定できる（#390）', () => {
+    const scenes = [
+      sceneWith({ sceneId: 'scene_001', lines: [{ lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none }, { lineId: 'line_002', text: 'b', status: NARRATION_STATUS.none }] }),
+      { ...sceneWith({}), sceneId: 'scene_002' }, // 単一 narration（lines 無し）
+    ];
+    const keys = liveNarrationAudioKeys(scenes);
+    // 掛け合いは行キー、単一は sceneId。sceneId=scene_001 の単一キーは含まない（＝掛け合い化で孤児になった sceneId 音声は剪定対象）。
+    expect([...keys].sort()).toEqual(['scene_001/line_001', 'scene_001/line_002', 'scene_002']);
+    expect(keys.has('scene_001')).toBe(false);
+  });
+
+  it('liveNarrationAudioKeys：lines が空配列の場面は単一扱い（sceneId キー）', () => {
+    // sceneLines と同じく lines.length===0 は単一 narration とみなす（sceneId キー）。
+    const keys = liveNarrationAudioKeys([{ ...sceneWith({}), sceneId: 'scene_003', lines: [] }]);
+    expect([...keys]).toEqual(['scene_003']);
   });
 
   it('withLineStatus：明示 lines は該当行・無ければ単一 narration を更新', () => {

@@ -38,9 +38,9 @@ import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
 import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
-import { resolveLineVoice, resolveNarrationVoice } from "../../domain/voice/voiceProvider";
+import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
-import { lineAudioKey, lineVoiceStem, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
+import { lineAudioKey, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
@@ -110,6 +110,11 @@ interface ProjectState {
   templateAssetSrcById: Record<string, string>;
   /** 生成済みナレーション音声（data URL）。キーは単一 narration＝sceneId／掛け合い＝lineAudioKey(sceneId,lineId)（ADR-0015 PR-C2）。メモリ保持し保存時に voicePath として永続化する。 */
   narrationAudioById: Record<string, string>;
+  /**
+   * 前回保存以降に新規生成された音声キー（narrationAudioById のキー部分集合・#390）。保存時はこの集合だけ WAV 書き出しし、
+   * 未変更（＝既に voicePath を持つ）音声の再書き出しを避ける（保存の高速化）。project.json には入れず永続化しない。
+   */
+  _dirtyAudioKeys: Set<string>;
   /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
   isGeneratingNarration: boolean;
   /** 素材/BGM の取り込み中フラグ（多重取り込み防止・取り込み中表示）。 */
@@ -305,6 +310,19 @@ const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.
 // （早期 return だと書き出し前の保存が no-op になり projectId 未確定→画像欠落の恐れ）。進行中があれば同じ Promise を待つ。
 let saveInFlight: Promise<void> | null = null;
 
+// 音声合成リクエストの世代（音声キー＝sceneId／lineAudioKey ごと）。synthesize は非同期で await 中に後発の生成が来得るため、
+// 完了時に「この結果がまだ最新の要求か」を token で判定する。後発が来ていれば（token 不一致）先発の完了は状態へ一切触れない
+// ＝新しい pending や新しい結果を消さない。不一致（合成中に入力変更）で pending を none へ戻す処理が、後発の要求を壊さないための保護（#390 レビュー P1）。
+const synthReqSeq = new Map<string, number>();
+function nextSynthSeq(key: string): number {
+  const n = (synthReqSeq.get(key) ?? 0) + 1;
+  synthReqSeq.set(key, n);
+  return n;
+}
+function isLatestSynth(key: string, token: number): boolean {
+  return synthReqSeq.get(key) === token;
+}
+
 /** 場面複製/分割で、元場面の要素アニメ（④・ADR-0019）を新場面へ引き継いだ meta を返す（無ければ meta そのまま）。 */
 function metaWithDuplicatedAnimations(meta: ProjectHeader, srcSceneId: string, newSceneId: string): ProjectHeader {
   const anims = meta.timelineOverlay?.animations;
@@ -384,6 +402,15 @@ function importErrorMessage(e: unknown): string {
   return "素材を取り込めませんでした。もう一度お選びください。";
 }
 
+/** record から keep に含まれるキーだけ残した新しい record を返す（音声/素材キャッシュの剪定・#390）。 */
+function pickKeys<T>(record: Record<string, T>, keep: Set<string>): Record<string, T> {
+  const next: Record<string, T> = {};
+  for (const k of Object.keys(record)) {
+    if (keep.has(k)) next[k] = record[k];
+  }
+  return next;
+}
+
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
   return {
@@ -421,6 +448,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   assetSrcById: {},
   templateAssetSrcById: {},
   narrationAudioById: {},
+  _dirtyAudioKeys: new Set(),
   isGeneratingNarration: false,
   isImporting: false,
   narrationError: null,
@@ -529,6 +557,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets: [],
       assetSrcById: {},
       narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
       narrationError: null,
       aiError: null,
       past: [], // 別文書＝履歴をクリア（ADR-0020）
@@ -580,7 +609,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       // ナレーション音声をディスクへ保存し、voicePath を更新（生成済みのみ）。
       // 生成済みでない場面は古い音声参照を残さない（再生成で上書きされる）。
+      // 効率化（#390）：新規生成された音声（_dirtyAudioKeys）だけ WAV を書き出す。未変更の音声（既に voicePath 済み）は
+      // 再書き出しせず既存 voicePath を保持する。dirty でも voicePath 未設定なら念のため書く（取りこぼし防止）。
       const audioById = s.narrationAudioById;
+      const dirty = s._dirtyAudioKeys;
+      // 今回ディスクへ書けたキー→{voicePath, 書き出した音声}。保存完了時に live state へ voicePath をマージし dirty を落とすが、
+      // 保存中に同キーが再生成されていたら（live 音声 ≠ 書き出した音声）マージも dirty クリアもしない（新しい音声を失わない・#390 レビュー）。
+      const writtenPath = new Map<string, string>();
+      const writtenAudio = new Map<string, string>();
       const scenes = await Promise.all(
         s.scenes.map(async (sc) => {
           // 掛け合い（明示 lines）は行ごとに保存・voicePath 更新する（ADR-0015 PR-C2）。
@@ -591,12 +627,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 if (line.voicePath) next = withLineVoicePath(next, line.lineId, null);
                 continue;
               }
-              const lineAudio = audioById[lineAudioKey(sc.sceneId, line.lineId)];
-              if (lineAudio) {
+              const key = lineAudioKey(sc.sceneId, line.lineId);
+              const lineAudio = audioById[key];
+              // 未変更（非 dirty で voicePath 済み）は再書き出しせず据え置き（#390）。
+              if (lineAudio && (dirty.has(key) || !line.voicePath)) {
                 const vp = await importVoiceFile(projectId, lineVoiceStem(sc.sceneId, line.lineId), lineAudio);
-                if (vp) next = withLineVoicePath(next, line.lineId, vp);
+                if (vp) {
+                  next = withLineVoicePath(next, line.lineId, vp);
+                  writtenPath.set(key, vp);
+                  writtenAudio.set(key, lineAudio);
+                }
               }
-              // 生成済みだがメモリに音声なし → 既存 voicePath を保持（何もしない）。
+              // 生成済みだがメモリに音声なし／未変更 → 既存 voicePath を保持（何もしない）。
             }
             return next;
           }
@@ -606,24 +648,87 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               ? { ...sc, narration: { ...sc.narration, voicePath: null } }
               : sc;
           }
-          // 生成済み：メモリに音声があればディスク保存して voicePath を更新。
+          // 生成済み：メモリに音声があり、かつ変更あり（dirty）／voicePath 未設定ならディスク保存して voicePath を更新。
           const audio = audioById[sc.sceneId];
-          if (audio) {
+          if (audio && (dirty.has(sc.sceneId) || !sc.narration.voicePath)) {
             const voicePath = await importVoiceFile(projectId, sc.sceneId, audio);
-            return voicePath ? { ...sc, narration: { ...sc.narration, voicePath } } : sc;
+            if (voicePath) {
+              writtenPath.set(sc.sceneId, voicePath);
+              writtenAudio.set(sc.sceneId, audio);
+              return { ...sc, narration: { ...sc.narration, voicePath } };
+            }
+            return sc;
           }
-          // 生成済みだがメモリに音声なし（復元失敗・非Tauri等）→ 既存 voicePath を保持する。
+          // 生成済みだがメモリに音声なし（復元失敗・非Tauri等）／未変更 → 既存 voicePath を保持する。
           return sc;
         }),
       );
-      const meta: ProjectHeader = { ...s.meta, projectId, updatedAt: new Date().toISOString() };
+      // ディスクへ書く project は「保存開始時のスナップショット（scenes）」で組む＝一貫した時点の内容。
+      const updatedAt = new Date().toISOString();
+      const meta: ProjectHeader = { ...s.meta, projectId, updatedAt };
       const project = assembleProject(meta, s.assets, s.parts, scenes);
       // 保存前検証（#416）：当面は警告ログのみ（アプリが正典に反するデータを作っていないか監視・入力防御は #411）。
       const pv = validateProjectDoc(project);
       if (!pv.valid) console.warn("[project] 保存内容がスキーマに未適合（要修正・#416）:", pv.errors);
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
       setLastProjectId(projectId);
-      set({ meta, scenes, saveStatus: "saved" });
+      // 保存完了時は「スナップショットを丸ごと戻す」のではなく、書けた voicePath だけを **live state** へマージする。
+      // これで保存中の削除・編集・同一キー再生成を巻き戻さない（#390 レビュー・P1）：
+      //  - 書けた voicePath は、対象の場面/行がまだ存在し、かつ音声が書き出し時と同じ（＝保存中に再生成されていない）ときだけ反映。
+      //  - dirty は「書けて」かつ「未変更」のキーだけ落とす（再生成された分は dirty のまま＝次回保存で書く）。
+      //  - 孤児（現存しない場面/行のキー）はメモリから剪定。saveStatus は sentinel（下記）で判定。
+      set((st) => {
+        const applyWritten = (sc: Scene): Scene => {
+          if (sc.lines && sc.lines.length > 0) {
+            let changed = false;
+            const lines = sc.lines.map((l) => {
+              if (l.status !== NARRATION_STATUS.generated) return l;
+              const key = lineAudioKey(sc.sceneId, l.lineId);
+              if (writtenPath.has(key) && st.narrationAudioById[key] === writtenAudio.get(key)) {
+                changed = true;
+                return { ...l, voicePath: writtenPath.get(key)! };
+              }
+              return l;
+            });
+            return changed ? { ...sc, lines } : sc;
+          }
+          if (sc.narration.status !== NARRATION_STATUS.generated) return sc;
+          const key = sc.sceneId;
+          if (writtenPath.has(key) && st.narrationAudioById[key] === writtenAudio.get(key)) {
+            return { ...sc, narration: { ...sc.narration, voicePath: writtenPath.get(key)! } };
+          }
+          return sc;
+        };
+        const nextScenes = st.scenes.map(applyWritten);
+        const liveKeys = liveNarrationAudioKeys(nextScenes); // 現在の場面が参照するキー（書き出し対象の判定に使う）
+        // 剪定は「現在＋Undo/Redo 履歴で到達可能な場面」の和集合で行う（#390 レビュー🔴）。削除は Undo 可・Undo は
+        // 音声キャッシュを戻さないため、履歴に残る場面のキーを消すと取り消し後に音声が失われる。履歴から落ちた（＝もう
+        // Undo でも戻せない）キーだけ解放する。past/future の DocSnapshot も走査。
+        const reachable = new Set(liveKeys);
+        for (const snap of [...st.past, ...st.future]) {
+          for (const k of liveNarrationAudioKeys(snap.scenes)) reachable.add(k);
+        }
+        const nextAudio = pickKeys(st.narrationAudioById, reachable); // 到達不能な孤児だけ落とす
+        const nextDirty = new Set<string>();
+        for (const k of st._dirtyAudioKeys) {
+          if (!reachable.has(k)) continue; // 到達不能＝もう書き出す必要なし
+          if (liveKeys.has(k) && writtenPath.has(k) && st.narrationAudioById[k] === writtenAudio.get(k)) continue; // 書けて未変更＝もう dirty でない
+          nextDirty.add(k); // 未書き出し／保存中に再生成／Undo 履歴のみで到達（復活時に !voicePath で書き直す）＝dirty のまま
+        }
+        // sentinel：_doSave 冒頭で saveStatus="saving"。保存中に編集・削除・生成の**完了**（成功/失敗いずれも idle をセット）が
+        // 入れば "idle" に変わる。まだ "saving" のまま＝保存中に確定変更なし → "saved"。変わっていれば（idle 等）そのまま＝
+        // 自動保存が再度走る（作業を失わない）。※in-flight の pending は idle を立てないが、その生成は完了時に idle をセットする
+        // ので、保存がちょうど pending 中に終わっても次サイクルで拾える。
+        const saveStatus = st.saveStatus === "saving" ? "saved" : st.saveStatus;
+        // projectId（新規採番）と updatedAt は stamp しつつ、保存中の meta 編集（改名等）は live を優先して残す。
+        return {
+          meta: { ...st.meta, projectId, updatedAt },
+          scenes: nextScenes,
+          saveStatus,
+          narrationAudioById: nextAudio,
+          _dirtyAudioKeys: nextDirty,
+        };
+      });
     } catch {
       set({ saveStatus: "error" });
     }
@@ -703,6 +808,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       warnings: [],
       assetSrcById,
       narrationAudioById,
+      _dirtyAudioKeys: new Set(), // 読込直後は全音声が voicePath 済み＝再書き出し不要（#390）
       narrationError: null,
       past: [], // 別文書を開く＝履歴をクリア（ADR-0020）
       future: [],
@@ -873,6 +979,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...p,
         sceneIds: p.sceneIds.filter((id) => id !== sceneId),
       })),
+      // 音声キャッシュ（narrationAudioById／dirty）はここで剪定しない：削除は Undo 可（履歴に残る）で、Undo は
+      // 音声キャッシュを復元しない（DocSnapshot=meta/parts/scenes・ADR-0020）。ここで消すと「生成→削除→取り消し」で
+      // 復元場面の音声が失われる（保存前は voicePath も無く復旧不能＝#390 レビュー🔴）。剪定は _doSave が「現在＋Undo/Redo
+      // 履歴で到達可能な場面」を除いて行う（履歴から落ちて初めて解放＝到達不能なら Undo でも戻せず安全）。
       saveStatus: "idle",
     }));
   },
@@ -1022,7 +1132,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       saveStatus: "idle",
     })),
   removeAsset: (assetId) =>
-    set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId), saveStatus: "idle" })),
+    set((s) => {
+      // 表示用 src（data URL）も即メモリから落とす（消した素材の src を残さない・#390）。
+      const { [assetId]: _removed, ...assetSrcById } = s.assetSrcById;
+      return { assets: s.assets.filter((a) => a.assetId !== assetId), assetSrcById, saveStatus: "idle" };
+    }),
   addTemplatePack: (incoming) =>
     set((s) => {
       // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
@@ -1381,25 +1495,62 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }));
       for (const l of targets) setLineStatus(l.lineId, NARRATION_STATUS.pending);
       set({ narrationError: null });
-      try {
+      {
         const base = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
+        const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
+        // 行ごとに try/catch。1行の失敗が他行を巻き込まず、成功/失敗どちらの完了も token/genSeq で保護する（#390 レビュー P1）。
         for (const line of targets) {
-          const result = await voiceProvider.synthesize(resolveLineVoice(line, base));
-          set((st) => ({
-            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
-            narrationAudioById: { ...st.narrationAudioById, [lineAudioKey(sceneId, line.lineId)]: result.audioDataUrl },
-          }));
+          const input = resolveLineVoice(line, base);
+          const key = lineAudioKey(sceneId, line.lineId);
+          const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
+          try {
+            const result = await voiceProvider.synthesize(input);
+            set((st) => {
+              // 後発の生成が同じ行に来た／別プロジェクトへ切替＝この完了は状態へ触れない（新しい pending・結果を消さない・#390 レビュー P1）。
+              if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+              // 合成の await 中に対象の場面/行が消えた（削除・掛け合い解除）なら結果を捨てる＝削除の即時剪定を打ち消さない（#390 レビュー P1）。
+              const sc = st.scenes.find((x) => x.sceneId === sceneId);
+              const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
+              if (!sc || !cur) return {};
+              // 合成中に本文・話し方（全体設定含む）を編集していたら旧結果は使わない。pending のままだと再試行不能なので
+              // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
+              const curInput = resolveLineVoice(cur, resolveNarrationVoice(sc.narration, st.meta.voiceSettings));
+              if (!sameSynthInput(input, curInput)) {
+                return {
+                  scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.none) : s)),
+                  saveStatus: "idle",
+                };
+              }
+              return {
+                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
+                narrationAudioById: { ...st.narrationAudioById, [key]: result.audioDataUrl },
+                _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(key), // 新規生成＝次回保存で書き出す（#390）
+                saveStatus: "idle", // 音声は履歴外＝生成だけでも未保存にして自動保存の対象にする（#390 レビュー P1）
+              };
+            });
+          } catch (e) {
+            set((st) => {
+              // 失敗も成功と同じく保護：後発/別文書ならこの失敗は無視（新しい pending・成功結果を failed で潰さない・#390 レビュー P1）。
+              if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+              const sc = st.scenes.find((x) => x.sceneId === sceneId);
+              const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
+              if (!sc || !cur) return {};
+              // 合成中に入力が変わっていたら、この失敗は古い入力のもの＝失敗表示せず none（作り直し可）に戻す（全体設定変更の pending 固着も解消）。
+              const curInput = resolveLineVoice(cur, resolveNarrationVoice(sc.narration, st.meta.voiceSettings));
+              if (!sameSynthInput(input, curInput)) {
+                return {
+                  scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.none) : s)),
+                  saveStatus: "idle",
+                };
+              }
+              return {
+                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.failed) : s)),
+                narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+                saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（sentinel が保存中の変化を取りこぼさない・#390 レビュー）
+              };
+            });
+          }
         }
-      } catch (e) {
-        // pending の行だけ failed にする（既に generated 済みの行とその音声は保持＝不整合を避ける）。
-        set((st) => ({
-          scenes: st.scenes.map((s) =>
-            s.sceneId === sceneId && s.lines
-              ? { ...s, lines: s.lines.map((l) => (l.status === NARRATION_STATUS.pending ? { ...l, status: NARRATION_STATUS.failed } : l)) }
-              : s,
-          ),
-        }));
-        set({ narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。" });
       }
       return;
     }
@@ -1414,20 +1565,56 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }));
     setStatus(NARRATION_STATUS.pending);
     set({ narrationError: null });
+    const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
+    const input = { text: scene.narration.text, ...v };
+    const key = sceneId;
+    const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
+    const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
     try {
-      const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
-      const result = await voiceProvider.synthesize({ text: scene.narration.text, ...v });
-      set((st) => ({
-        scenes: st.scenes.map((s) =>
-          s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,
-        ),
-        narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
-      }));
+      const result = await voiceProvider.synthesize(input);
+      set((st) => {
+        // 後発の生成が来た／別プロジェクトへ切替＝この完了は状態へ触れない（新しい pending・結果を消さない・#390 レビュー P1）。
+        if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+        // await 中に場面が消えた／掛け合いへ切替（lines 化）していたら結果を捨てる（#390 レビュー P1）。
+        const sc = st.scenes.find((x) => x.sceneId === sceneId);
+        if (!sc || (sc.lines && sc.lines.length > 0)) return {};
+        // 合成中に本文・話し方（全体設定含む）を編集していたら旧結果は使わない。pending のままだと再試行不能なので
+        // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
+        const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
+        if (!sameSynthInput(input, curInput)) {
+          return {
+            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),
+            saveStatus: "idle",
+          };
+        }
+        return {
+          scenes: st.scenes.map((s) =>
+            s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,
+          ),
+          narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
+          _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(sceneId), // 新規生成＝次回保存で書き出す（#390）
+          saveStatus: "idle", // 音声は履歴外＝生成だけでも未保存にして自動保存の対象にする（#390 レビュー P1）
+        };
+      });
     } catch (e) {
-      setStatus(NARRATION_STATUS.failed);
-      set({
-        narrationError:
-          typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+      set((st) => {
+        // 失敗も成功と同じく保護：後発/別文書ならこの失敗は無視（新しい pending・成功結果を failed で潰さない・#390 レビュー P1）。
+        if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+        const sc = st.scenes.find((x) => x.sceneId === sceneId);
+        if (!sc || (sc.lines && sc.lines.length > 0)) return {};
+        // 合成中に入力が変わっていたら、この失敗は古い入力のもの＝失敗表示せず none（作り直し可）に戻す（全体設定変更の pending 固着も解消）。
+        const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
+        if (!sameSynthInput(input, curInput)) {
+          return {
+            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),
+            saveStatus: "idle",
+          };
+        }
+        return {
+          scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.failed } } : s)),
+          narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+          saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（#390 レビュー）
+        };
       });
     }
   },
