@@ -38,7 +38,7 @@
 
 - `SlotClipOverride = { startSec?, endSec?, speed?, useOriginalAudio?, originalAudioVolume? }`（`Clip` の**per-use 上書き可能な部分集合**）。
 - **`fit` は含めない**：収め方は既に `scene.slotFits`（1.13）で per-use かつ Undo 可能ゆえ、本 ADR の対象外（二重管理を避ける）。#472 が戻せない範囲＝range/speed/元音声のみを `slotClips` が担う。
-- `project.schema` を**マイナーバンプ**（additive・**移行不要**＝欠落は `asset.clip` を継承）。
+- `project.schema` を **1.18→1.19（マイナーバンプ）**（additive・**移行不要**＝欠落は `asset.clip` を継承）。
 
 ### D2. 継承規則（null=継承・`11 §6` 流儀）
 
@@ -47,19 +47,31 @@
 ### D3. 役割分担（どこで何を編集するか）
 
 - **場面編集（SceneEditScreen）の `ClipDetailControls`**：`scene.slotClips[layerId]` を編集＝**その場面だけの per-use 上書き**。scenes 更新ゆえ**Undo 対象**。連続操作（スライダー drag）は `useHistoryGroup` の drag 境界で1手に合成（#389 で外した履歴グループを、意味を持つ形で復活）。
-- **素材画面（MaterialsScreen）の `ClipDetailControls`**：`asset.clip`（**素材の既定**）を編集＝全使用箇所の既定。素材プロパティゆえ従来どおり**Undo 対象外**（取込/削除と同じ・§2-5 で一言）。
+  - **初期表示は継承値のプレースホルダ（決定・実装必須）**：slotClips が空でも `ClipDetailControls` は**継承値（`asset.clip`＝素材の既定）をプレースホルダ表示**し、値を触った時点で slotClips へ確定する。既定値（範囲=全体・速度=1.0）を表示すると「素材で調整した内容が場面で消えた」誤認を生む（実際は継承で効いている）ため出さない（slotVideoStart の delaySec 既定表示 #500 と同配慮）。
+- **素材画面（MaterialsScreen）の `ClipDetailControls`**：`asset.clip`（**素材の既定**）を編集＝全使用箇所の既定。素材プロパティゆえ従来どおり**Undo 対象外**（取込/削除と同じ）。**同一部品で Undo 挙動が分岐する**ため、素材画面側に §2-5 で「**ここでの変更は元に戻せません（この素材を使う全場面の既定が変わります）**」を明示する（決定・実装必須＝「Ctrl+Z が効いたり効かなかったり」の誤認を防ぐ）。
 
 ### D4. 描画/書き出し
 
-`findVideoSlots`（`toVideoSlotInfo`）が `asset.clip` から `VideoSlotInfo` を組む箇所に、**`scene.slotClips[layerId]` を重ねる**（per-use 優先）。1か所の解決追加で preview（#432）/書き出し（buildExportScenes）/precheck が同一値を見る（パリティ不変）。
+`findVideoSlots`（`toVideoSlotInfo`）が `asset.clip` から `VideoSlotInfo` を組む箇所に、**`scene.slotClips[layerId]` を重ねる**（per-use 優先＝`resolveSlotClip`）。1か所の解決追加で preview（#432）/書き出し（buildExportScenes）/precheck が同一値を見る（パリティ不変）。
+
+**解決順序（重要）**：per-use 解決は **`VideoSlotInfo` 組み立て時に一括**し、#500（ADR-0027）の窓/settled/遅延計算（`clipTimeAtSceneTime(t,{d,c,s})`・`resolveVideoStartDelaySec`・settled 開始 `clipStart+(W−d)·speed`）は**解決後の `speed`/`clipStart`/`clipEnd` のみ参照**する。`speed`/`startSec`/`endSec` は slotClips で per-use 上書きされるため、旧値（素材既定）で窓を計算すると「場面で速度を変えたのに開始タイミングの窓が旧速度」＝設定不効／プレビュー≠書き出しになる。実装は「slotClips 解決 → VideoSlotInfo → 以降の全計算はその VideoSlotInfo を入力」の一方向に保つ。
 
 ### D5. Undo
 
 新規の Undo 機構は不要＝`slotClips` が `scenes` 上にあるので**ADR-0020 の履歴で自動的に Undo/Redo**される。`ClipDetailControls`（場面側）の drag に履歴グループを再付与するだけ。
 
+### D6. per-use マップの共通ライフサイクル（3マップ）
+
+scene の per-use 上書きは **`slotFits`（1.13）／`slotVideoStart`（1.18・#500）／`slotClips`（1.19・本ADR）の3マップ**（いずれもキー＝スロット `layer.id`）に増える。**キーとライフサイクルは3マップ共通規則**とする：
+
+- **スロットが消滅したら3マップとも当該キーを掃除**（FREE スロット要素の削除・スロット非割当・素材差し替えでスロットでなくなる 等）。
+- **場面複製時は3マップとも複製**する。
+
+#500 で `slotVideoStart` のエントリ生存条件（`slotIsAnimated` ゲート・アニメ解除時の破棄）が UI/プレビュー/書き出し/precheck の4経路で揃わず破綻した轍を踏まないため、掃除/複製は**3マップ共通のヘルパ1か所**で行う（実装PRで確定）。将来 per-use マップを増やすときも同ヘルパに足す。
+
 ## 結果・影響
 
-- **正典/schema**：`schemas/project.schema.json` に `slotClips`（`SlotClipOverride` 定義・`additionalProperties:false`・`startSec/endSec/speed/useOriginalAudio/originalAudioVolume`）を追加、`schemaVersion` マイナーバンプ、`persistence.ts` の `PROJECT_SCHEMA_VERSION` と版履歴、`11 §7.1` の Scene 表を更新。domain `Scene` 型に追加。**マイグレーション不要**（欠落＝`asset.clip` 継承＝現行）。
+- **正典/schema**：`schemas/project.schema.json` に `slotClips`（`SlotClipOverride` 定義・`additionalProperties:false`・`startSec/endSec/speed/useOriginalAudio/originalAudioVolume`）を追加、`schemaVersion` **1.18→1.19（マイナーバンプ）**、`persistence.ts` の `PROJECT_SCHEMA_VERSION` と版履歴、`11 §7.1` の Scene 表を更新。domain `Scene` 型に追加。**マイグレーション不要**（欠落＝`asset.clip` 継承＝現行）。
 - **domain**：per-use 解決の純粋関数（例 `resolveSlotClip(scene, layerId, asset)`＝`slotClips ?? asset.clip ?? 既定`）を新設し、`findVideoSlots`/`ClipDetailControls`/表示が共有（§2-7 単一参照）。
 - **UI**：`ClipDetailControls` を「編集先」で分岐（場面側＝slotClips・素材側＝asset.clip）。場面側 drag に履歴グループ復活（#389 の巻き戻し）。§2-3 技術用語なし・文言は「この場面での使い方」等。
 - **描画/書き出し**：`findVideoSlots` の per-use 解決追加のみ。preview=export 不変。
@@ -68,7 +80,8 @@
 
 ## 未解決の論点
 
-- **既存 `asset.clip` からの初期表示**：場面側で初めて開いたとき slotClips が空なら asset.clip の値をプレースホルダ表示（編集で slotClips へ確定）。「素材の既定に合わせる／この場面だけ変える」の導線文言（実装で確定・§2-3）。
-- **`fit` の扱い**：現状 `slotFits` と `slotClips` が別マップ（per-use 2系統）。将来 `slotClips` に一本化するかは別途（本 ADR は additive を優先し slotFits 据え置き）。
+（初期表示のプレースホルダ＝D3・素材画面の §2-5 明示＝D3・3マップのライフサイクル＝D6・解決順序＝D4 は**決定側に格上げ済み**＝#472 レビュー反映。以下は実装で細部を詰める点。）
+
+- **`fit` の扱い**：現状 `slotFits` と `slotClips` が別マップ（per-use は3マップ）。将来 `slotClips` に一本化するかは別途（本 ADR は additive を優先し slotFits 据え置き・D6 の共通ライフサイクルで足並みは揃える）。
 - **crop/reframe 等の拡張**（ADR-0024 の将来枠）：`SlotClipOverride` にフィールド追加で後付け（schema マイナーバンプ）。
-- **素材画面での既定変更の周知**：既定を変えると（上書きの無い）全場面に波及する点の §2-5 文言（実装で確定）。
+- **導線文言の具体化**（§2-3）：「素材の既定に合わせる／この場面だけ変える」等の場面側UI文言は実装で確定。
