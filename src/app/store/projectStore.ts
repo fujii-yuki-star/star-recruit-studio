@@ -40,7 +40,7 @@ import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../d
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
-import { lineAudioKey, lineVoiceStem, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
+import { lineAudioKey, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
@@ -110,6 +110,11 @@ interface ProjectState {
   templateAssetSrcById: Record<string, string>;
   /** 生成済みナレーション音声（data URL）。キーは単一 narration＝sceneId／掛け合い＝lineAudioKey(sceneId,lineId)（ADR-0015 PR-C2）。メモリ保持し保存時に voicePath として永続化する。 */
   narrationAudioById: Record<string, string>;
+  /**
+   * 前回保存以降に新規生成された音声キー（narrationAudioById のキー部分集合・#390）。保存時はこの集合だけ WAV 書き出しし、
+   * 未変更（＝既に voicePath を持つ）音声の再書き出しを避ける（保存の高速化）。project.json には入れず永続化しない。
+   */
+  _dirtyAudioKeys: Set<string>;
   /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
   isGeneratingNarration: boolean;
   /** 素材/BGM の取り込み中フラグ（多重取り込み防止・取り込み中表示）。 */
@@ -384,6 +389,24 @@ function importErrorMessage(e: unknown): string {
   return "素材を取り込めませんでした。もう一度お選びください。";
 }
 
+/** record から keep に含まれるキーだけ残した新しい record を返す（音声/素材キャッシュの剪定・#390）。 */
+function pickKeys<T>(record: Record<string, T>, keep: Set<string>): Record<string, T> {
+  const next: Record<string, T> = {};
+  for (const k of Object.keys(record)) {
+    if (keep.has(k)) next[k] = record[k];
+  }
+  return next;
+}
+
+/** set と keep の積集合を新しい Set で返す（dirty セットの剪定・#390）。 */
+function intersectSet(set: Set<string>, keep: Set<string>): Set<string> {
+  const next = new Set<string>();
+  for (const k of set) {
+    if (keep.has(k)) next.add(k);
+  }
+  return next;
+}
+
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
   return {
@@ -421,6 +444,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   assetSrcById: {},
   templateAssetSrcById: {},
   narrationAudioById: {},
+  _dirtyAudioKeys: new Set(),
   isGeneratingNarration: false,
   isImporting: false,
   narrationError: null,
@@ -529,6 +553,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets: [],
       assetSrcById: {},
       narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
       narrationError: null,
       aiError: null,
       past: [], // 別文書＝履歴をクリア（ADR-0020）
@@ -580,7 +605,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       // ナレーション音声をディスクへ保存し、voicePath を更新（生成済みのみ）。
       // 生成済みでない場面は古い音声参照を残さない（再生成で上書きされる）。
+      // 効率化（#390）：新規生成された音声（_dirtyAudioKeys）だけ WAV を書き出す。未変更の音声（既に voicePath 済み）は
+      // 再書き出しせず既存 voicePath を保持する。dirty でも voicePath 未設定なら念のため書く（取りこぼし防止）。
       const audioById = s.narrationAudioById;
+      const dirty = s._dirtyAudioKeys;
+      const written = new Set<string>(); // 今回ディスクへ書けたキー（保存後に dirty から落とす）。
       const scenes = await Promise.all(
         s.scenes.map(async (sc) => {
           // 掛け合い（明示 lines）は行ごとに保存・voicePath 更新する（ADR-0015 PR-C2）。
@@ -591,12 +620,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 if (line.voicePath) next = withLineVoicePath(next, line.lineId, null);
                 continue;
               }
-              const lineAudio = audioById[lineAudioKey(sc.sceneId, line.lineId)];
-              if (lineAudio) {
+              const key = lineAudioKey(sc.sceneId, line.lineId);
+              const lineAudio = audioById[key];
+              // 未変更（非 dirty で voicePath 済み）は再書き出しせず据え置き（#390）。
+              if (lineAudio && (dirty.has(key) || !line.voicePath)) {
                 const vp = await importVoiceFile(projectId, lineVoiceStem(sc.sceneId, line.lineId), lineAudio);
-                if (vp) next = withLineVoicePath(next, line.lineId, vp);
+                if (vp) {
+                  next = withLineVoicePath(next, line.lineId, vp);
+                  written.add(key);
+                }
               }
-              // 生成済みだがメモリに音声なし → 既存 voicePath を保持（何もしない）。
+              // 生成済みだがメモリに音声なし／未変更 → 既存 voicePath を保持（何もしない）。
             }
             return next;
           }
@@ -606,13 +640,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               ? { ...sc, narration: { ...sc.narration, voicePath: null } }
               : sc;
           }
-          // 生成済み：メモリに音声があればディスク保存して voicePath を更新。
+          // 生成済み：メモリに音声があり、かつ変更あり（dirty）／voicePath 未設定ならディスク保存して voicePath を更新。
           const audio = audioById[sc.sceneId];
-          if (audio) {
+          if (audio && (dirty.has(sc.sceneId) || !sc.narration.voicePath)) {
             const voicePath = await importVoiceFile(projectId, sc.sceneId, audio);
-            return voicePath ? { ...sc, narration: { ...sc.narration, voicePath } } : sc;
+            if (voicePath) {
+              written.add(sc.sceneId);
+              return { ...sc, narration: { ...sc.narration, voicePath } };
+            }
+            return sc;
           }
-          // 生成済みだがメモリに音声なし（復元失敗・非Tauri等）→ 既存 voicePath を保持する。
+          // 生成済みだがメモリに音声なし（復元失敗・非Tauri等）／未変更 → 既存 voicePath を保持する。
           return sc;
         }),
       );
@@ -623,7 +661,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!pv.valid) console.warn("[project] 保存内容がスキーマに未適合（要修正・#416）:", pv.errors);
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
       setLastProjectId(projectId);
-      set({ meta, scenes, saveStatus: "saved" });
+      // 孤児になった音声キャッシュ（削除/掛け合い⇄単一の切替で参照が消えたキー）をメモリから落とす（#390）。
+      // 判定はスナップショット（保存対象の scenes）基準。保存中に新規生成されたキー（live state のみ）は消さない
+      // ＝clobber を避けるため live state（st）に対して「スナップショットで孤児と確定したキー」だけを剪定する。
+      const liveKeys = liveNarrationAudioKeys(scenes);
+      const orphaned = Object.keys(audioById).filter((k) => !liveKeys.has(k));
+      set((st) => {
+        const nextAudio = { ...st.narrationAudioById };
+        for (const k of orphaned) delete nextAudio[k];
+        const nextDirty = new Set(st._dirtyAudioKeys);
+        for (const k of written) nextDirty.delete(k); // 書けた＝もう dirty ではない
+        for (const k of orphaned) nextDirty.delete(k); // 参照が消えた＝書き出す必要もない
+        return { meta, scenes, saveStatus: "saved", narrationAudioById: nextAudio, _dirtyAudioKeys: nextDirty };
+      });
     } catch {
       set({ saveStatus: "error" });
     }
@@ -703,6 +753,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       warnings: [],
       assetSrcById,
       narrationAudioById,
+      _dirtyAudioKeys: new Set(), // 読込直後は全音声が voicePath 済み＝再書き出し不要（#390）
       narrationError: null,
       past: [], // 別文書を開く＝履歴をクリア（ADR-0020）
       future: [],
@@ -864,17 +915,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   removeScene: (sceneId) => {
     get().pushHistory();
-    set((s) => ({
+    set((s) => {
       // 削除して order を 1..N に振り直す（表示順＝配列順を保つ）。
-      scenes: s.scenes
+      const scenes = s.scenes
         .filter((x) => x.sceneId !== sceneId)
-        .map((x, i) => ({ ...x, order: i + 1 })),
-      parts: s.parts.map((p) => ({
-        ...p,
-        sceneIds: p.sceneIds.filter((id) => id !== sceneId),
-      })),
-      saveStatus: "idle",
-    }));
+        .map((x, i) => ({ ...x, order: i + 1 }));
+      // 消えた場面の音声キャッシュ（narrationAudioById／dirty）を即メモリから落とす（#390）。残る場面の生存キーだけ保持。
+      const liveKeys = liveNarrationAudioKeys(scenes);
+      const narrationAudioById = pickKeys(s.narrationAudioById, liveKeys);
+      const _dirtyAudioKeys = intersectSet(s._dirtyAudioKeys, liveKeys);
+      return {
+        scenes,
+        parts: s.parts.map((p) => ({
+          ...p,
+          sceneIds: p.sceneIds.filter((id) => id !== sceneId),
+        })),
+        narrationAudioById,
+        _dirtyAudioKeys,
+        saveStatus: "idle",
+      };
+    });
   },
   moveScene: (sceneId, direction) => {
     const s = get();
@@ -1022,7 +1082,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       saveStatus: "idle",
     })),
   removeAsset: (assetId) =>
-    set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId), saveStatus: "idle" })),
+    set((s) => {
+      // 表示用 src（data URL）も即メモリから落とす（消した素材の src を残さない・#390）。
+      const { [assetId]: _removed, ...assetSrcById } = s.assetSrcById;
+      return { assets: s.assets.filter((a) => a.assetId !== assetId), assetSrcById, saveStatus: "idle" };
+    }),
   addTemplatePack: (incoming) =>
     set((s) => {
       // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
@@ -1388,6 +1452,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           set((st) => ({
             scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
             narrationAudioById: { ...st.narrationAudioById, [lineAudioKey(sceneId, line.lineId)]: result.audioDataUrl },
+            _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(lineAudioKey(sceneId, line.lineId)), // 新規生成＝次回保存で書き出す（#390）
           }));
         }
       } catch (e) {
@@ -1422,6 +1487,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,
         ),
         narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
+        _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(sceneId), // 新規生成＝次回保存で書き出す（#390）
       }));
     } catch (e) {
       setStatus(NARRATION_STATUS.failed);
