@@ -1,6 +1,6 @@
 // 全場面を「共有レイアウト → SVG → PNG(data URL)」に焼き、書き出し入力を組み立てる（ADR-0001/0004）。
 // 動画ありシーンは下/上2枚の透過PNG＋クリップ情報を渡す（ADR-0006）。FFmpeg呼び出しは infrastructure に分離。
-import { TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit } from '../../domain/enums';
+import { TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Fit } from '../../domain/enums';
 import { FPS } from '../../domain/constants';
 import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
@@ -349,6 +349,14 @@ export async function buildExportScenes(
             const fps = FPS;
             const W = Math.min(scene.durationSec, animEnd); // アニメ区間（窓）の尺
             const hasSettled = W < scene.durationSec; // settled（実動画）区間があるか
+            // #444/ADR-0027 D3：settled 区間が無い（アニメが場面尺いっぱい）のに「アニメの後（afterAnim）」だと、
+            // 窓が全フレーム静止＋settled 無し＝動画が一度も再生されない。黙って静止画にせず§2-5 で停止（#434 と同流儀・
+            // precheck と同一判定）。UI は afterAnim を非表示にするが、afterAnim 保存後にアニメを伸ばすと到達し得る。
+            if (!hasSettled && videoSlots.some((vs) => scene.slotVideoStart?.[vs.slotLayerId]?.mode === VIDEO_START_MODE.afterAnim)) {
+              throw new Error(
+                `場面${i + 1}の動画は、アニメが最後まで続くため「アニメの後」だと再生されません。アニメを短くするか、「途中から」か「アニメと同時」に変えてから、もう一度お試しください。`,
+              );
+            }
             const narrAudio = narration?.audioBase64;
             const frameCount = Math.max(1, Math.ceil(W * fps) + 1);
             const winDir = `scene_vbody_${i}`;

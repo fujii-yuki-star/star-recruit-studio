@@ -750,6 +750,19 @@ describe('buildExportScenes：動画スロット本体アニメ（#442・窓Fram
     // settled は clipStart から（窓で 0 秒しか進めていない）。
     expect(out[1].video?.clipStartSec).toBe(2);
   });
+
+  it('afterAnim × settled 無し（アニメが場面尺いっぱい）は §2-5 エラーで停止＝黙って静止画にしない（#444/ADR-0027 D3）', async () => {
+    await expect(
+      buildExportScenes(
+        [{ sceneId: 's1', templateId: 'tpl', durationSec: 2, slotVideoStart: { mainVisual: { mode: 'afterAnim' } } }] as unknown as Scene[],
+        templateById, noAsset,
+        () => ({ narrationVolume: 1 }),
+        videoSlot, undefined, {},
+        (s) => [slotAnim(s.sceneId, 3)], // animEnd=3 >= 尺2 → settled 無し＝afterAnim だと動画が一度も再生されない
+        async () => {},
+      ),
+    ).rejects.toThrow(/再生されません/);
+  });
 });
 
 describe('buildExportScenes：掛け合い×動画スロット（行区間つき上PNG＋行ナレーション配置）', () => {

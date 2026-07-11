@@ -2,10 +2,12 @@ import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as Rea
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
 import { sceneFirstLine } from "./sceneCardPreview";
-import type { Asset, FreeElement, Scene } from "../../domain/project/types";
+import type { Asset, FreeElement, Scene, VideoStartSpec } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, type Easing, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
+import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
@@ -694,7 +696,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     // 種類・秒・感じ・向きのどれかを変えたら作り直す（x/y/rotation は相対＝位置編集には layout 側が自動追従）。
     const apply = (over: { kind?: PresetKind | "none"; durationSec?: number; easing?: Easing; direction?: SlideDirection }) => {
       const k = over.kind ?? kind ?? "none";
-      if (k === "none") { if (anim) removeAnimation(anim.id); return; }
+      if (k === "none") {
+        if (anim) removeAnimation(anim.id);
+        // #444/ADR-0027 D4：アニメを外したら、そのスロットの再生開始タイミングも落とす（隠れ状態を残さない・#469 流儀）。
+        patch((s) => {
+          if (!s.slotVideoStart?.[targetId]) return s;
+          const m = { ...s.slotVideoStart };
+          delete m[targetId];
+          return { ...s, slotVideoStart: Object.keys(m).length ? m : undefined };
+        });
+        return;
+      }
       const kfs = presetKeyframes(k, {
         durationSec: over.durationSec ?? durationSec,
         easing: over.easing ?? easing,
@@ -730,8 +742,71 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </div>
               )}
             </div>
-            <button className="btn btn-ghost text-sm" style={{ alignSelf: "flex-start" }} onClick={() => removeAnimation(anim.id)}>動きをやめる</button>
+            <button className="btn btn-ghost text-sm" style={{ alignSelf: "flex-start" }} onClick={() => apply({ kind: "none" })}>動きをやめる</button>
           </div>
+        )}
+      </div>
+    );
+  };
+  // #444/ADR-0027：動画スロットの再生開始タイミング（アニメと同時／アニメの後／途中から）。アニメ対象の動画スロットにのみ出す。
+  const sceneVideoAnims = (timelineOverlay?.animations ?? []).filter((a) => a.sceneId === selected.sceneId);
+  const videoSlotIdSet = new Set(
+    template ? findVideoSlots(selected, template, (id) => assets.find((a) => a.assetId === id)).map((v) => v.slotLayerId) : [],
+  );
+  const sceneAnimEndSec = animationsEndSec(sceneVideoAnims);
+  const renderVideoStartControls = (slotLayerId: string): ReactNode => {
+    if (!videoSlotIdSet.has(slotLayerId)) return null; // 動画スロットのみ
+    if (!slotIsAnimated(sceneVideoAnims, [slotLayerId], selected.groups)) return null; // アニメ対象のみ（無ければ出さない・#469 流儀）
+    const W = Math.min(selected.durationSec, sceneAnimEndSec); // 窓尺（スライダー上限＝実効クランプ上限）
+    const spec = selected.slotVideoStart?.[slotLayerId];
+    const mode = spec?.mode ?? VIDEO_START_MODE.withAnim;
+    const hasSettled = sceneAnimEndSec < selected.durationSec; // afterAnim は settled が残る場面のみ選べる
+    const setSpec = (next: VideoStartSpec | undefined) =>
+      patch((s) => {
+        const m = { ...s.slotVideoStart };
+        if (next) m[slotLayerId] = next;
+        else delete m[slotLayerId];
+        return { ...s, slotVideoStart: Object.keys(m).length ? m : undefined };
+      });
+    // delay の秒（保存値 or 既定＝窓の中ほど）を [0,W] にクランプ＝保存値と実効値を一致（11 §7.1）。
+    const delaySec = Math.min(Math.max(0, spec?.delaySec ?? Math.round((W / 2) * 10) / 10), W);
+    const showAfterAnim = hasSettled || mode === VIDEO_START_MODE.afterAnim; // 保存済み afterAnim は select を壊さないため残す
+    return (
+      <div className="field" style={{ marginBottom: 6 }}>
+        <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動画の再生開始</label>
+        <select
+          className="select"
+          value={mode}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === VIDEO_START_MODE.withAnim) setSpec(undefined); // 既定＝エントリを持たない
+            else if (v === VIDEO_START_MODE.afterAnim) setSpec({ mode: VIDEO_START_MODE.afterAnim });
+            else setSpec({ mode: VIDEO_START_MODE.delay, delaySec });
+          }}
+        >
+          <option value={VIDEO_START_MODE.withAnim}>アニメと同時</option>
+          {showAfterAnim && <option value={VIDEO_START_MODE.afterAnim}>アニメの後</option>}
+          <option value={VIDEO_START_MODE.delay}>途中から</option>
+        </select>
+        {mode === VIDEO_START_MODE.delay && (
+          <div className="row gap-sm" style={{ alignItems: "center", marginTop: 6 }}>
+            <input
+              type="range"
+              min={0}
+              max={W}
+              step={0.1}
+              value={delaySec}
+              onChange={(e) => setSpec({ mode: VIDEO_START_MODE.delay, delaySec: Number(e.target.value) })}
+              style={{ flex: 1 }}
+              aria-label="再生を始めるまでの秒数"
+            />
+            <span className="text-sm text-muted" style={{ minWidth: 52, textAlign: "right" }}>{delaySec.toFixed(1)}秒後</span>
+          </div>
+        )}
+        {mode === VIDEO_START_MODE.afterAnim && !hasSettled && (
+          <p className="field-hint" style={{ margin: "4px 0 0", color: "var(--color-danger)" }}>
+            アニメが場面の最後まで続くため、このままでは動画が再生されません。アニメを短くするか、「途中から」か「アニメと同時」に変えてください。
+          </p>
         )}
       </div>
     );
@@ -1609,6 +1684,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         </div>
 
                         {renderAnimationControls(el.id, el.opacity ?? 1)}
+                        {renderVideoStartControls(el.id)}
                       </div>
                     ))}
                   </div>

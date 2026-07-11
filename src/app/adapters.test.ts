@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Asset, Scene } from "../domain/project/types";
+import type { Asset, ElementAnimation, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import { buildPrecheckItems, sceneToDraftRow } from "./adapters";
 
@@ -89,6 +89,27 @@ describe("buildPrecheckItems（動画の配置 / #434・ADR-0026）", () => {
       { id: "slot_1", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_v", fit: "cover" },
     ]);
     const item = buildPrecheckItems([scene], [...assets, videoAsset], [freeTemplate]).find((i) => i.id === "videoPlacement");
+    expect(item).toBeUndefined();
+  });
+});
+
+describe("buildPrecheckItems（動画の再生タイミング / #444・ADR-0027 D3）", () => {
+  const videoAsset: Asset = { assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "assets/v.mp4" };
+  const slotEl = [{ id: "slot_1", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_v", fit: "cover" }] as unknown as Scene["freeLayout"];
+  // slot_1 を animEnd 秒まで動かすアニメ（freeScene の durationSec=8）。
+  const anim = (endSec: number): ElementAnimation[] =>
+    [{ id: "a", sceneId: "scene_001", targetId: "slot_1", keyframes: [{ timeSec: 0, x: -100 }, { timeSec: endSec, x: 0 }] }] as unknown as ElementAnimation[];
+  const afterAnimScene = { ...freeScene(slotEl), slotVideoStart: { slot_1: { mode: "afterAnim" } } } as unknown as Scene;
+
+  it("afterAnim × アニメが場面尺いっぱい（settled 無し）は『動画の再生タイミング』が要対応で場面つき", () => {
+    // animEnd=8 >= 尺8 → settled 無し＝afterAnim だと動画が一度も再生されない。
+    const item = buildPrecheckItems([afterAnimScene], [...assets, videoAsset], [freeTemplate], anim(8)).find((i) => i.id === "videoStartAfterAnim");
+    expect(item?.severity).toBe("action");
+    expect(item?.detail).toContain("場面1");
+  });
+
+  it("settled が残る（animEnd<尺）なら『動画の再生タイミング』項目は出さない（ノイズ回避）", () => {
+    const item = buildPrecheckItems([afterAnimScene], [...assets, videoAsset], [freeTemplate], anim(2)).find((i) => i.id === "videoStartAfterAnim");
     expect(item).toBeUndefined();
   });
 });
