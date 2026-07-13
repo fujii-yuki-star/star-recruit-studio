@@ -11,7 +11,9 @@ export type SceneCategory = (typeof SCENE_CATEGORIES)[number];
 export const FREE_CATEGORY = 'free' satisfies SceneCategory;
 
 /** FREE テンプレの自由配置要素の種別（ADR-0008）。layer.type 語彙に合わせる（image は使わず素材は slot）。 */
-export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape'] as const;
+// subtitle＝自由配置の「字幕」要素（場面の読み上げ字幕を表示・掛け合いは行連動）。text と違い自前の文言は持たず、
+// scene.texts['subtitle']／掛け合いの行字幕を表示する（描画は layout の subtitle レイヤーと同じ解決＝§2-7 の isSubtitle）。
+export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape', 'subtitle'] as const;
 export type FreeElementKind = (typeof FREE_ELEMENT_KINDS)[number];
 
 /** FreeElementKind の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
@@ -19,6 +21,7 @@ export const FREE_ELEMENT_KIND = {
   slot: 'slot',
   text: 'text',
   shape: 'shape',
+  subtitle: 'subtitle',
 } as const satisfies Record<string, FreeElementKind>;
 
 /** FREE テキスト要素のフォント太さ（ADR-0008）。 */

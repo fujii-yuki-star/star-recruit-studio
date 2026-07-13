@@ -33,9 +33,14 @@ ADR-0007 で詳細編集モードと「FREE テンプレに自由配置を閉じ
   { "id": "free_002", "kind": "text",  "x": 900, "y": 160, "w": 900, "h": 200, "zIndex": 20,
     "text": "会社紹介", "fontSize": 64, "color": "#FFFFFF", "fontWeight": "bold" },
   { "id": "free_003", "kind": "shape", "x": 880, "y": 140, "w": 940, "h": 240, "zIndex": 15,
-    "shapeType": "rect", "fillColor": "#000000", "opacity": 0.4, "radius": 12 }
+    "shapeType": "rect", "fillColor": "#000000", "opacity": 0.4, "radius": 12 },
+  { "id": "free_004", "kind": "subtitle", "x": 240, "y": 900, "w": 1440, "h": 120, "zIndex": 50,
+    "fontSize": 52, "color": "#FFFFFF", "fontWeight": "bold", "textAlign": "center",
+    "strokeColor": "#000000", "strokeWidth": 6 }                // 読み上げ字幕（自前 text は持たない）
 ]
 ```
+
+> **追補（2026-07-13・schema 1.20・0.4.0 動作確認）**：FREE でも読み上げ字幕を出せるよう `kind: "subtitle"` を追加。**自前の文言は持たず**、描画時に通常テンプレの `subtitle` レイヤーと同じ解決で**場面の読み上げ字幕**（`texts.subtitle`／掛け合いは行連動の `subtitleText` 上書き）を表示する（`isSubtitle=true`＝「字幕を入れる」ON/OFF・行OFF も同じく効く・preview=export は同一 `layoutScene` 経路）。**場面に1つまで**（通常テンプレの字幕層と同じく単一）。体裁（位置/大きさ/フォント/色/揃え/縁取り）は他の FREE 要素と同様に自由編集。enum 追加のみ（無変換移行）。
 
 - 共通: **`id`（`free_NNN`・必須・scene 内一意＝別 scene と重複可）**＝選択/ドラッグ/zIndex変更/削除で要素を見失わないための安定キー（配列 index は不可）・`kind`（`slot`/`text`/`shape`）・`x`/`y`/`w`/`h`（canvas 基準・整数・**`w>0` かつ `h>0`＝schema `exclusiveMinimum: 0`**）・`zIndex`。
 - `slot`: `assetId`（string|null）・`fit`（cover/contain/stretch）。**素材は assetId で直接参照**（assetRefs は使わない＝ADR-0007 §F）。

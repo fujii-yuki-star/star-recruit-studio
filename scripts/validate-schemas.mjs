@@ -97,7 +97,7 @@ ok = ok && sem;
 
 // generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
 const generalBase = {
-  schemaVersion: '1.19', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  schemaVersion: '1.20', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
   videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
@@ -123,6 +123,7 @@ const mustAccept = [
   ['freeLayout: rotation（回転・度）を許容（1.9・#208）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: 30 }] })],
   ['freeLayout: text 体裁 lineHeight/textAlign/縁取り を許容（1.10・#209）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', lineHeight: 1.6, textAlign: 'center', strokeColor: '#000000', strokeWidth: 2 }] })],
   ['freeLayout: hidden/locked を許容（1.11・#210）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 50, hidden: true, locked: true }] })],
+  ['freeLayout: subtitle（自由配置の字幕要素）を許容（1.20・ADR-0008 追補）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 240, y: 900, w: 1440, h: 120, fontSize: 52, color: '#ffffff', fontWeight: 'bold', textAlign: 'center', strokeColor: '#000000', strokeWidth: 6 }] })],
   ['scene: lines（掛け合い・行ごと speaker/字幕/開始秒）を許容（1.8・ADR-0015）', withScene({ lines: [{ lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'どうも', speaker: 2, subtitleEnabled: true, startSec: 2, status: 'none' }], subtitleEnabledDefault: true })],
   ['scene: slotFits（場面ごとの収め方上書き）を許容（1.13・④）', withScene({ slotFits: { background: 'contain', mainVisual: 'stretch' } })],
   ['scene: groups（要素のグループ化・ネスト）を許容（1.14・ADR-0022）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }], groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 10, y: -5, rotation: 15, scale: 1.5 }, name: 'まとまり', hidden: false, locked: false }, { id: 'group_002', members: ['group_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }] })],

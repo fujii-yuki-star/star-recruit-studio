@@ -152,6 +152,24 @@ describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => 
     expect(el.opacity).toBe(0.5);
   });
 
+  // FREE の字幕要素（1.20・ADR-0008 追補）：自前の文言は持たず、通常テンプレの subtitle レイヤーと同じ解決で
+  // 場面の読み上げ字幕を描く（isSubtitle=true・掛け合いの行連動・トグル＝preview/export 同一経路）。
+  it('subtitle 要素は場面の読み上げ字幕（texts.subtitle）を isSubtitle=true で描く（自前 text は無い）', () => {
+    const s = { ...freeScene, freeLayout: [{ id: 'free_010', kind: 'subtitle', x: 100, y: 900, w: 1000, h: 100 }] } as unknown as Scene;
+    const sub = layoutScene(s, freeTemplate).items.find((i) => i.id === 'free_010') as TextItem;
+    expect(sub).toMatchObject({ kind: 'text', isSubtitle: true, text: scene.texts.subtitle });
+  });
+  it('subtitleEnabledDefault=false の単一ナレーションでは subtitle 要素を出さない（通常字幕と同じトグル）', () => {
+    const s = { ...freeScene, subtitleEnabledDefault: false, freeLayout: [{ id: 'free_010', kind: 'subtitle', x: 100, y: 900, w: 1000, h: 100 }] } as unknown as Scene;
+    expect(layoutScene(s, freeTemplate).items.find((i) => i.id === 'free_010')).toBeUndefined();
+  });
+  it('掛け合いの行字幕（subtitleText 上書き）は subtitle 要素に反映＝string 表示 / null 非表示', () => {
+    const s = { ...freeScene, subtitleEnabledDefault: false, freeLayout: [{ id: 'free_010', kind: 'subtitle', x: 100, y: 900, w: 1000, h: 100 }] } as unknown as Scene;
+    const shown = layoutScene(s, freeTemplate, { subtitleText: '行の字幕' }).items.find((i) => i.id === 'free_010') as TextItem;
+    expect(shown).toMatchObject({ isSubtitle: true, text: '行の字幕' });
+    expect(layoutScene(s, freeTemplate, { subtitleText: null }).items.find((i) => i.id === 'free_010')).toBeUndefined();
+  });
+
   // ④(3) グループ対象アニメ：合成前の group.transform に重なり、メンバー全員が動く。
   const groupScene = {
     ...freeScene,

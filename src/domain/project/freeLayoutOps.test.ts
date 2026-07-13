@@ -34,6 +34,17 @@ describe('createFreeElement / addFreeElement', () => {
     expect(shape.fillColor).toBeTruthy();
   });
 
+  it('subtitle の既定値（下部の帯・白太字中央・黒縁取り／自前の text は持たない＝場面の字幕を表示）', () => {
+    const sub = createFreeElement([], 'subtitle');
+    expect(sub.kind).toBe('subtitle');
+    expect(sub.text).toBeUndefined(); // 文言は持たない（描画時に場面の読み上げ字幕を表示）
+    expect(sub.color).toBe('#ffffff');
+    expect(sub.fontWeight).toBe('bold');
+    expect(sub.textAlign).toBe('center');
+    expect(sub.strokeWidth).toBeGreaterThan(0);
+    expect(sub.y).toBeGreaterThan(sub.h); // 画面下部寄り（帯位置）
+  });
+
   it('canvas 比で既定の位置・大きさをスケール（横型は不変・縦型は幅が画面に対し過大にならない・#273）', () => {
     const ref = createFreeElement([], 'text'); // 引数なし＝横型基準（1920×1080）
     const land = createFreeElement([], 'text', 1920, 1080);

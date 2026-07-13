@@ -1,7 +1,7 @@
 // シーン＋テンプレ → 各レイヤーの配置（矩形・zIndex・内容・スタイル）を解決する純粋ロジック。
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
-import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
+import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_SHAPE_TYPE, TEXT_KEY } from '../domain/enums';
 import type { Fit, FreeShapeType, LayerType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT } from '../domain/constants';
 import type { ElementAnimation, Scene } from '../domain/project/types';
@@ -294,6 +294,21 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
           items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
+          break;
+        }
+        case 'subtitle': {
+          // FREE の字幕要素：自前の文言は持たず、場面の読み上げ字幕を表示する（通常テンプレの subtitle レイヤーと同じ解決）。
+          // 掛け合いは opts.subtitleText で行連動（string=表示／null=間・行OFFで非表示）、単一 narration は
+          // subtitleEnabledDefault=false で非表示（#413）。位置/体裁は FREE 要素側（el.*）＝自由に置ける。isSubtitle=true ゆえ
+          // 「字幕を入れる」ON/OFF・掛け合いの行OFF も通常字幕と同じく効く（preview=export は同一 layoutScene 経路・ADR-0001）。
+          const overrideSub = opts != null && 'subtitleText' in opts;
+          const staticOff = !overrideSub && scene.subtitleEnabledDefault === false;
+          const subText = overrideSub ? opts.subtitleText ?? '' : staticOff ? '' : scene.texts[TEXT_KEY.subtitle] ?? '';
+          if (subText.length === 0) break;
+          const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
+          const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
+          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
+          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
           break;
         }
         case 'shape':

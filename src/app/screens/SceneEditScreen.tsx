@@ -109,6 +109,7 @@ const freeKindLabel: Record<FreeElementKind, string> = {
   slot: "素材",
   text: "文字",
   shape: "図形",
+  subtitle: "字幕",
 };
 
 // 自由配置の位置・サイズ等の数値入力（キーボードで調整＝a11y。ドラッグ操作は Phase 4b）。
@@ -407,6 +408,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 非FREE場面のテキスト入力欄は、選択テンプレのテキスト層が使う textKey から生成する（#214 ④b・全5キー対応）。
   const sceneTextKeys = template ? usedTextKeys(template.layers) : [];
   const freeLayout = selected.freeLayout ?? [];
+  // 字幕要素は場面に1つまで（読み上げ字幕を表示する枠＝通常テンプレの字幕層と同じく単一）。既にあれば「字幕」追加を無効化。
+  const hasFreeSubtitle = freeLayout.some((e) => e.kind === FREE_ELEMENT_KIND.subtitle);
   const sceneGroups = selected.groups ?? [];
   const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
   // 自由配置 slot に割り当て可能な素材（画像・動画）。
@@ -599,13 +602,20 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         </div>
       );
     }
-    if (el.kind === FREE_ELEMENT_KIND.text) {
+    if (el.kind === FREE_ELEMENT_KIND.text || el.kind === FREE_ELEMENT_KIND.subtitle) {
       return (
         <>
-          <div className="field" style={{ marginBottom: 6 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>文字</label>
-            <input className="input" value={el.text ?? ""} {...textGroup} onChange={(e) => patchFreeEl(el.id, { text: e.target.value })} />
-          </div>
+          {el.kind === FREE_ELEMENT_KIND.text ? (
+            <div className="field" style={{ marginBottom: 6 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>文字</label>
+              <input className="input" value={el.text ?? ""} {...textGroup} onChange={(e) => patchFreeEl(el.id, { text: e.target.value })} />
+            </div>
+          ) : (
+            // 字幕は文言を持たず、読み上げの字幕（セリフ・台本）を自動表示する。ここでは位置/大きさ/色などの体裁だけ整える。
+            <p className="field-hint" style={{ marginTop: 0, marginBottom: 6 }}>
+              読み上げの字幕を自動で表示します（文言はセリフ・台本から）。位置・大きさ・色・縁取りをここで整えられます。
+            </p>
+          )}
           <div className="row gap-sm" style={{ marginBottom: 6 }}>
             <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
             <div className="field" style={{ margin: 0 }}>
@@ -1460,7 +1470,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <CollapsibleSection title="自由配置">
               <div className="field">
                 <p className="field-hint" style={{ marginTop: 0 }}>
-                  素材・文字・図形を追加し、プレビュー上でドラッグして動かす・角をつまんで大きさを変える、または数字で調整できます。
+                  素材・文字・図形・字幕を追加し、プレビュー上でドラッグして動かす・角をつまんで大きさを変える、または数字で調整できます。
                 </p>
                 <div className="row gap-sm" style={{ marginBottom: 8, flexWrap: "wrap" }}>
                   <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.slot)}>
@@ -1471,6 +1481,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </button>
                   <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.shape)}>
                     <PlusIcon size={14} />図形
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-icon text-sm"
+                    onClick={() => addFreeEl(FREE_ELEMENT_KIND.subtitle)}
+                    disabled={hasFreeSubtitle}
+                    title={hasFreeSubtitle ? "字幕はこの場面にもう置かれています（1つまで）" : "読み上げの字幕を表示する枠を置きます"}
+                  >
+                    <PlusIcon size={14} />字幕
                   </button>
                   <button
                     className="btn btn-ghost btn-icon text-sm"
