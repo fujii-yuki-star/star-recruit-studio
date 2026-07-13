@@ -410,6 +410,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const freeLayout = selected.freeLayout ?? [];
   // 字幕要素は場面に1つまで（読み上げ字幕を表示する枠＝通常テンプレの字幕層と同じく単一）。既にあれば「字幕」追加を無効化。
   const hasFreeSubtitle = freeLayout.some((e) => e.kind === FREE_ELEMENT_KIND.subtitle);
+  // 字幕クリップの貼り付けは、既に字幕がある場面では不可（1つまで＝ドメイン pasteFreeElement も拒否・二重防御）。
+  const pasteBlockedBySubtitle = freeClipboard?.kind === FREE_ELEMENT_KIND.subtitle && hasFreeSubtitle;
   const sceneGroups = selected.groups ?? [];
   const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
   // 自由配置 slot に割り当て可能な素材（画像・動画）。
@@ -611,10 +613,24 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <input className="input" value={el.text ?? ""} {...textGroup} onChange={(e) => patchFreeEl(el.id, { text: e.target.value })} />
             </div>
           ) : (
-            // 字幕は文言を持たず、読み上げの字幕（セリフ・台本）を自動表示する。ここでは位置/大きさ/色などの体裁だけ整える。
-            <p className="field-hint" style={{ marginTop: 0, marginBottom: 6 }}>
-              読み上げの字幕を自動で表示します（文言はセリフ・台本から）。位置・大きさ・色・縁取りをここで整えられます。
-            </p>
+            // 字幕要素は自前の文言を持たず、場面の字幕文（texts.subtitle）を表示する。単独読み上げはここで字幕の文を入力
+            // （読み上げ〈セリフ〉とは別に書ける・ADR-0015 の単独契約）。掛け合いは行ごとの字幕が優先されるため案内に留める。
+            (selected.lines?.length ?? 0) > 0 ? (
+              <p className="field-hint" style={{ marginTop: 0, marginBottom: 6 }}>
+                掛け合いのときは、セリフの行ごとに字幕が出ます（下の「セリフ」で各行の字幕を編集）。位置・大きさ・色・縁取りはここで整えられます。
+              </p>
+            ) : (
+              <div className="field" style={{ marginBottom: 6 }}>
+                <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕の文</label>
+                <input
+                  className="input"
+                  value={selected.texts?.subtitle ?? ""}
+                  {...textGroup}
+                  onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))}
+                  placeholder="ここに字幕の文を入力（読み上げの言葉とは別に書けます）"
+                />
+              </div>
+            )
           )}
           <div className="row gap-sm" style={{ marginBottom: 6 }}>
             <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
@@ -1493,10 +1509,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <button
                     className="btn btn-ghost btn-icon text-sm"
                     onClick={pasteFreeEl}
-                    disabled={!freeClipboard}
-                    title={freeClipboard
-                      ? `「${freeKindLabel[freeClipboard.kind]}」を貼り付け（別の場面からでも貼れます）`
-                      : "先に配置を「コピー」すると貼り付けられます"}
+                    disabled={!freeClipboard || pasteBlockedBySubtitle}
+                    title={
+                      pasteBlockedBySubtitle
+                        ? "字幕はこの場面にもう置かれています（1つまで）"
+                        : freeClipboard
+                          ? `「${freeKindLabel[freeClipboard.kind]}」を貼り付け（別の場面からでも貼れます）`
+                          : "先に配置を「コピー」すると貼り付けられます"
+                    }
                   >
                     {freeClipboard ? `貼り付け（${freeKindLabel[freeClipboard.kind]}）` : "貼り付け"}
                   </button>
@@ -1707,6 +1727,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               className="btn btn-ghost text-sm"
                               onClick={(e) => { e.stopPropagation(); duplicateFreeEl(el.id); }}
                               aria-label="この配置を複製"
+                              disabled={el.kind === FREE_ELEMENT_KIND.subtitle}
+                              title={el.kind === FREE_ELEMENT_KIND.subtitle ? "字幕は場面に1つまでです" : undefined}
                             >
                               複製
                             </button>

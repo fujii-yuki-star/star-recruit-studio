@@ -75,6 +75,24 @@ describe('createFreeElement / addFreeElement', () => {
     const next = addFreeElement(existing, 'text').freeLayout;
     expect(next[1].zIndex).toBe(51);
   });
+
+  it('字幕は場面に1つまで＝既に字幕がある場面への貼り付け/複製は拒否（変化なし・newId=null）', () => {
+    const sub = (id: string): FreeElement => ({ id, kind: 'subtitle', x: 0, y: 0, w: 100, h: 50 });
+    const withSub: FreeElement[] = [sub('free_001')];
+    // 別場面からのコピー相当（clipboard=字幕）を貼り付け → 増えない。
+    const pasted = pasteFreeElement(withSub, sub('free_099'));
+    expect(pasted.freeLayout).toBe(withSub); // 同一参照＝変化なし
+    expect(pasted.newId).toBeNull();
+    // 既存字幕の複製 → 増えない。
+    const duped = duplicateFreeElement(withSub, 'free_001');
+    expect(duped.freeLayout).toBe(withSub);
+    expect(duped.newId).toBeNull();
+    // 字幕が無い場面へは1つ目として貼れる。
+    const noSub: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }];
+    const first = pasteFreeElement(noSub, sub('free_099'));
+    expect(first.freeLayout).toHaveLength(2);
+    expect(first.newId).toBe('free_002');
+  });
 });
 
 describe('updateFreeElement', () => {

@@ -253,7 +253,12 @@ const FREE_DUPLICATE_OFFSET = 20;
  */
 export function pasteFreeElement(
   freeLayout: FreeElement[], element: FreeElement,
-): { freeLayout: FreeElement[]; newId: string } {
+): { freeLayout: FreeElement[]; newId: string | null } {
+  // 字幕は場面に1つまで（読み上げ字幕の枠＝通常テンプレの字幕層と同じ単一制約・#（FREE字幕レビュー P1））。
+  // 既に字幕があるとき、字幕の複製/貼り付け（同一場面・別場面どちらからでも）は拒否＝変化なし・newId=null。
+  if (element.kind === FREE_ELEMENT_KIND.subtitle && freeLayout.some((e) => e.kind === FREE_ELEMENT_KIND.subtitle)) {
+    return { freeLayout, newId: null };
+  }
   const newId = createFreeElementId(freeLayout.map((e) => e.id));
   const zIndex = freeLayout.reduce((max, e) => Math.max(max, e.zIndex ?? 0), 0) + 1;
   const copy: FreeElement = {
