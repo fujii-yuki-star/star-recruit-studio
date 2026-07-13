@@ -1103,3 +1103,67 @@ describe('buildExportScenes：中止（#380）', () => {
     expect(out).toHaveLength(2);
   });
 });
+
+// #434（ADR-0026④）の「黙って代替しない」を派生経路にも広げる（Codex 監査 P1）。基準 layout は precheck 済みだが、
+// 掛け合いの行区間・アニメの settled 区間・毎フレームの派生レイアウトで分割に失敗すると、以前は行を飛ばす/基準 layout で
+// 代替して「字幕・音声・動画位置の欠けた MP4」を成功扱いにしていた。各派生経路が同じ §2-5 エラーで停止することを固定する。
+describe('buildExportScenes：派生レイアウトの分割失敗も停止（#434 拡張・掛け合い/settled/毎フレーム）', () => {
+  const validSplit = () => ({
+    belowSvg: '<below/>', midSvgs: [], aboveSvg: '<above/>',
+    slots: [{ layerId: 'mainVisual', rect: { x: 80, y: 140, w: 1040, h: 800 } }],
+  });
+  const videoSlot = () => [{
+    slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const,
+    clipStartSec: 0, useOriginalAudio: false, speed: 1,
+  }];
+  const slotAnim = (sceneId: string, endSec: number): ElementAnimation =>
+    ({ id: 'a', sceneId, targetId: 'mainVisual', keyframes: [{ timeSec: 0, x: -200 }, { timeSec: endSec, x: 0 }] } as unknown as ElementAnimation);
+  // 以降の describe が無いよう、テスト後に既定 mock（有効な分割を返す）へ戻す。
+  afterEach(() => {
+    vi.mocked(splitVideoSceneSvgMulti).mockReset();
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValue(validSplit());
+  });
+
+  it('掛け合い×動画：行区間の派生 layout の分割に失敗したら、行を黙って飛ばさず停止（§2-5）', async () => {
+    // base(splitM) は成功、先頭行セグメントの分割だけ null＝以前は continue で字幕/音声を落としていた。
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValueOnce(validSplit()).mockReturnValueOnce(null);
+    await expect(
+      buildExportScenes(
+        [{ sceneId: 's1', templateId: 'tpl', durationSec: 8, lines: [{ lineId: 'line_001', text: 'a', startSec: 0, status: 'none' }] }] as unknown as Scene[],
+        templateById, noAsset,
+        (_s, lineId) => ({ audioBase64: lineId ? `A_${lineId}` : undefined, narrationVolume: 1 }),
+        videoSlot,
+      ),
+    ).rejects.toThrow(/場面1の動画を配置できませんでした/);
+  });
+
+  it('動画スロット本体アニメ：settled（アニメ収束）区間の分割に失敗したら、基準 layout で代替せず停止（§2-5）', async () => {
+    // base 成功 → settled 分割 null＝以前は `?? splitM` で位置/字幕が基準のまま焼かれていた。
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValueOnce(validSplit()).mockReturnValueOnce(null);
+    await expect(
+      buildExportScenes(
+        [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+        templateById, noAsset,
+        () => ({ narrationVolume: 1 }),
+        videoSlot, undefined, {},
+        (s) => [slotAnim(s.sceneId, 1)], // animEnd=1<尺8 → settled 区間あり
+        async () => {},
+      ),
+    ).rejects.toThrow(/場面1の動画を配置できませんでした/);
+  });
+
+  it('動画×アニメ（スロット以外）：毎フレームの派生 layout の分割に失敗したら、静止層で代替せず停止（§2-5）', async () => {
+    // base 成功 → フレーム0の分割 null＝以前は console.warn＋`?? splitM` でそのフレームだけ動きが飛んでいた。
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValueOnce(validSplit()).mockReturnValueOnce(null);
+    await expect(
+      buildExportScenes(
+        [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+        templateById, noAsset,
+        () => ({ narrationVolume: 1 }),
+        videoSlot, undefined, {},
+        (s) => [({ id: 'a', sceneId: s.sceneId, targetId: 'text_1', keyframes: [{ timeSec: 0, x: -50 }, { timeSec: 1, x: 0 }] } as unknown as ElementAnimation)],
+        async () => {},
+      ),
+    ).rejects.toThrow(/場面1の動画を配置できませんでした/);
+  });
+});

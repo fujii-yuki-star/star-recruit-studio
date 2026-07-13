@@ -174,6 +174,18 @@ export class ExportCancelledError extends Error {
 }
 
 /**
+ * 動画の層分割に失敗したときの利用者向けエラー（#434・ADR-0026④・§2-5）。基準 layout（precheck 済み）だけでなく、
+ * 派生レイアウト（掛け合いの行区間・アニメの settled 区間・毎フレーム）でも分割に失敗したら**黙って静止層で代替せず**
+ * 同一の文言で停止する＝字幕/音声/動画位置の欠けた MP4 を成功扱いにしない（precheck は基準 layout のみ見るため捕捉不可）。
+ * 派生レイアウトは要素プロパティしか変えず基準で分割成功済みのため通常来ない防御だが、内部不整合時は静かに壊さない。
+ */
+function videoUnplaceableError(sceneNumber: number): Error {
+  return new Error(
+    `場面${sceneNumber}の動画を配置できませんでした。場面編集で動画を置き直してから、もう一度お試しください。`,
+  );
+}
+
+/**
  * 各場面をプレビューと同一のSVGで実寸PNG化し、ナレーション音声を添える。テンプレ未解決の場面はスキップ。
  * 動画スロットがある場面は下/上2枚PNG＋クリップ情報（ADR-0006）。onProgress(done, total) で進捗通知。
  */
@@ -298,7 +310,9 @@ export async function buildExportScenes(
               sceneFontFamily,
               segCredit,
             );
-            if (!segSplit) continue; // 基準 layout で分割成功済みのため通常来ない（防御）
+            // #434 の精神：行区間の派生 layout（字幕差し替え）でも分割に失敗したら、その行の字幕/音声を黙って
+            // 落とさず停止する（基準 layout で成功済みのため通常来ない防御・字幕欠けの MP4 を成功扱いにしない）。
+            if (!segSplit) throw videoUnplaceableError(i + 1);
             aboveSegments.push({
               pngBase64: await svgToPngDataUrl(segSplit.aboveSvg, width, height),
               // 各区間の表示窓＝そのまま [startSec, startSec+durationSec)。先頭行の開始前の「間」は
@@ -466,8 +480,10 @@ export async function buildExportScenes(
             // (2) settled：実動画を最終位置で流す。below/mid/above は settled レイアウト（timeSec=animEnd で全アニメが収束）で焼く。
             if (hasSettled) {
               const settledLayout = layoutScene(scene, template, { timeSec: animEnd, animations: sceneAnims });
-              const sSplit =
-                splitVideoSceneSvgMulti(settledLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit) ?? splitM;
+              // #434 の精神：settled（アニメ収束）レイアウトの分割に失敗したら基準 splitM で黙って代替せず停止する
+              // （代替すると動画位置/字幕が settled でなく基準のまま焼かれる＝壊れた成功。通常来ない防御）。
+              const sSplit = splitVideoSceneSvgMulti(settledLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit);
+              if (!sSplit) throw videoUnplaceableError(i + 1);
               const sLayers = sSplit.slots.map((s) => {
                 const info = slotById.get(s.layerId)!;
                 // #444：窓で実際に再生した尺は W−d（[0,d] は静止で消費しない・アニメ対象のみ効く）。settled はその続きから。
@@ -526,11 +542,10 @@ export async function buildExportScenes(
               // 場面内絶対時刻でアニメ補間（プレビューと同一 layoutScene(t)＝パリティ）。下/中/上層に切り出して焼く。
               const frameLayout = layoutScene(scene, template, { timeSec: f / fps, animations: sceneAnims });
               const fSplit = splitVideoSceneSvgMulti(frameLayout, slotIds, assetSrc, itemFilter, sceneFontFamily, credit);
-              if (!fSplit) {
-                // 通常来ない（基準 layout で分割成功済み・アニメは要素プロパティのみ変える）。静かに静止へ落とさず追跡ログ（#434 の精神）。
-                console.warn('[buildExportScenes] 動画×アニメの層分割に失敗したフレームがあります（静止層で代替）。frame:', f);
-              }
-              const s = fSplit ?? splitM;
+              // #434 の精神：毎フレームの派生 layout の分割に失敗したら、基準 splitM で黙って代替せず停止する
+              // （代替するとそのフレームだけ動きが飛ぶ＝壊れた成功。基準で成功済みのため通常来ない防御）。
+              if (!fSplit) throw videoUnplaceableError(i + 1);
+              const s = fSplit;
               await stageAnimationFrame(belowDir, f, await svgToPngDataUrl(s.belowSvg, width, height));
               for (let m = 0; m < midDirs.length; m += 1) {
                 await stageAnimationFrame(midDirs[m], f, await svgToPngDataUrl(s.midSvgs[m], width, height));
@@ -560,9 +575,7 @@ export async function buildExportScenes(
           // slotLayerId がレイアウトに見つからない内部不整合や、スロット要素/グループを非表示にした等。
           // 黙って静止画へ落とすと「書き出したら動画が消えた」に見え原因も次の行動も示せないため、**停止して**
           // 原因と次の行動を示す（precheck でも事前に場面つきで警告済み）。場面番号は書き出し順（i+1）。
-          throw new Error(
-            `場面${i + 1}の動画を配置できませんでした。場面編集で動画を置き直してから、もう一度お試しください。`,
-          );
+          throw videoUnplaceableError(i + 1);
         }
         // 掛け合い（明示 lines・静止画）は行ごとのセグメントに展開（追加A/B・ADR-0015 PR-E）。
         // 動画スロットありの掛け合いは上の video 経路（1セグメントのまま最上層PNG差し替え＋adelay）で処理済み。
