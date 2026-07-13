@@ -12,7 +12,8 @@ import type { BoundaryTransition } from "../../domain/project/sceneTransitions";
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from "../../domain/enums";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
-import { firstFrameLineIndex, lastFrameLineIndex, resolveLineSubtitle } from "../../domain/project/lineTimeline";
+import { firstFrameBoundary, lastFrameBoundary, type BoundaryFrame } from "../../domain/project/lineTimeline";
+import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -59,23 +60,18 @@ export function TransitionPreview({
 }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
+  const narrationAudioById = useProjectStore((s) => s.narrationAudioById);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
   const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
-  // 境界フレームを ScenePreview と同一ロジック（inGap/activeLine/applyLineSub）で焼く（#408 レビュー P1 パリティ）。
-  // activeLineIndex：B（この場面）＝先頭フレーム（頭に間があれば -1＝字幕なし・既定クレジット＝書き出しの headGap と一致・
-  // かつ場面編集の下地 ScenePreview と同値＝停止フラッシュなし）／A（前場面）＝末尾行。非掛け合いは undefined でテンプレ既定。
-  const svgFor = (sc: Scene, tpl: Template, activeLineIndex: number | undefined): string => {
-    const hasLines = !!(sc.lines && sc.lines.length > 0);
-    const inGap = hasLines && activeLineIndex !== undefined && activeLineIndex < 0;
-    const activeLine = hasLines && !inGap ? (sc.lines![activeLineIndex ?? 0] ?? sc.lines![0]) : undefined;
-    const lineSub = activeLine ? resolveLineSubtitle(activeLine, sc) : undefined;
-    const applyLineSub = inGap || !!lineSub;
-    const layoutOpts = applyLineSub
-      ? { subtitleText: inGap ? null : lineSub && lineSub.enabled ? lineSub.text : null }
-      : undefined;
-    const credit = activeLine ? creditForLine(activeLine, baseCredit) : baseCredit;
+  // 端フレームの字幕/クレジットは firstFrameBoundary/lastFrameBoundary（sceneSegmentSpecs 準拠）で解決＝
+  // 0 秒行除外・頭の間・全 0 秒フォールバックまで書き出しと一致（#408 レビュー P1）。B（この場面）＝先頭フレーム
+  // （場面編集の下地 ScenePreview と同値＝停止フラッシュなし）／A（前場面）＝最終フレーム。
+  const svgFor = (sc: Scene, tpl: Template, boundaryFrame: BoundaryFrame): string => {
+    const applyLineSub = boundaryFrame.subtitleText !== undefined;
+    const layoutOpts = applyLineSub ? { subtitleText: boundaryFrame.subtitleText } : undefined;
+    const credit = boundaryFrame.creditLine ? creditForLine(boundaryFrame.creditLine, baseCredit) : baseCredit;
     return layoutToSvg(layoutScene(sc, tpl, layoutOpts), {
       assetSrc,
       responsive: true,
@@ -86,8 +82,18 @@ export function TransitionPreview({
   const { a, b } = layerStyles(boundary, progress);
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: "var(--radius)" }} aria-hidden>
-      <div style={a} dangerouslySetInnerHTML={{ __html: svgFor(prevScene, prevTemplate, lastFrameLineIndex(prevScene)) }} />
-      <div style={b} dangerouslySetInnerHTML={{ __html: svgFor(scene, template, firstFrameLineIndex(scene)) }} />
+      <div
+        style={a}
+        dangerouslySetInnerHTML={{
+          __html: svgFor(prevScene, prevTemplate, lastFrameBoundary(prevScene, lineDurationsFromAudio(prevScene, narrationAudioById))),
+        }}
+      />
+      <div
+        style={b}
+        dangerouslySetInnerHTML={{
+          __html: svgFor(scene, template, firstFrameBoundary(scene, lineDurationsFromAudio(scene, narrationAudioById))),
+        }}
+      />
     </div>
   );
 }

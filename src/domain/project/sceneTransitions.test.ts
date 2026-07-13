@@ -107,4 +107,30 @@ describe('resolveBoundaryTransition（#408 Part 2・プレビュー用の境界�
   it('wipe/zoom は fade に丸める（resolveTransition と一致）', () => {
     expect(resolveBoundaryTransition({ in: 'zoom', durationSec: 0.5 }, 8, 8).type).toBe('fade');
   });
+
+  // #408 Part 2 レビュー P3：単境界（prev, B）clamp が、書き出しの全場面 transitionTimeline（左 clamp=累積結合尺 acc）
+  // と 3 場面以上でも一致することを固定する。acc≥prev（結合尺は最後の場面尺以上）ゆえ、左 clamp が実効値を変えるのは
+  // 希望 D>prev のときだけ＝有効な場面尺（≥3・D 既定 0.5）では常に一致（パリティ）。
+  describe('3 場面以上でも書き出しの累積 clamp と一致（P3 不変条件）', () => {
+    it('D≤prev なら単境界＝書き出し累積（境界 i の step と一致・大きめ D 含む）', () => {
+      const durations = [5, 4, 6]; // すべて SCENE_MIN_DURATION_SEC=3 以上
+      for (const D of [0.5, 2, 4]) {
+        // 境界 i（scene i に入る遷移）ごとに、全場面 timeline の step[i-1] と単境界解決を突き合わせる。
+        const full = transitionTimeline(durations, durations.map((_, i) => (i === 0 ? 0 : D)));
+        for (let i = 1; i < durations.length; i += 1) {
+          const single = resolveBoundaryTransition({ in: 'fade', durationSec: D }, durations[i - 1], durations[i]);
+          expect(single.durationSec).toBe(full.steps[i - 1].durationSec);
+        }
+      }
+    });
+
+    it('（反例）希望 D>prev のときだけ単境界＜累積になり得る＝有効尺（≥3・既定0.5）では到達不能', () => {
+      // scene2 に D=5 を入れると prev=4<5 で binding。単境界は min(5,4,6)=4、累積は acc=7 で min(5,7,6)=5。
+      const full = transitionTimeline([5, 4, 6], [0, 0, 5]);
+      const single = resolveBoundaryTransition({ in: 'fade', durationSec: 5 }, 4, 6);
+      expect(single.durationSec).toBe(4);
+      expect(full.steps[1].durationSec).toBe(5);
+      // ＝D(5)>prev(4) の極端値でのみズレる。SCENE_MIN_DURATION_SEC=3・D 既定 0.5 では D≤prev ゆえ起きない。
+    });
+  });
 });

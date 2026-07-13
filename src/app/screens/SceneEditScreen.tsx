@@ -24,7 +24,7 @@ import { clampSceneDuration } from "../../domain/project/sceneDuration";
 import { pickableTemplatesForScene } from "../../domain/template/templateSelection";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
-import { lineAudioKey, validateSceneLines } from "../../domain/project/narrationLines";
+import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
@@ -33,7 +33,7 @@ import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
-import { firstFrameLineIndex } from "../../domain/project/lineTimeline";
+import { firstFrameBoundary } from "../../domain/project/lineTimeline";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
@@ -1087,9 +1087,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
               {/* オーバーレイは ScenePreview の fit 箱内に重なる（#273）。editPopover は position:fixed のため外側 relative は不要。 */}
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
-              {/* activeLineIndex＝先頭フレームの実効状態（掛け合いで頭に間があれば -1＝字幕なし）。切替プレビュー B と
-                  揃え、書き出しの先頭フレームに一致させる（#408 レビュー P1）。非掛け合いは undefined でテンプレ既定。 */}
-              <ScenePreview scene={selected} template={template} activeLineIndex={selected ? firstFrameLineIndex(selected) : undefined} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
+              {/* boundaryFrame＝先頭フレームの実効状態（sceneSegmentSpecs 準拠＝0 秒行除外・頭の間・全 0 秒フォールバック）。
+                  切替プレビュー B と同値に揃え、書き出しの先頭フレームに一致させる（#408 レビュー P1）。 */}
+              <ScenePreview scene={selected} template={template} boundaryFrame={selected ? firstFrameBoundary(selected, lineDurationsFromAudio(selected, narrationAudioById)) : undefined} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview

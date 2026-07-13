@@ -55,10 +55,12 @@ export interface BoundaryTransition {
 /**
  * A→B 境界（B に入る遷移＝transition.in）の実効値を、書き出しと同じ clamp モデルで解決する（#408 Part 2 のプレビュー用）。
  * 直前場面が無い（先頭）／type=none／希望 D<=0 のときは durationSec=0（プレビューしない）を返す。
- * clamp は transitionTimeline を**単境界（2場面 [prev, B]）**に適用＝D=min(希望, prev尺, B尺)。書き出しは全場面に
- * transitionTimeline を回し左 clamp を「累積結合尺 acc」で行うため、3番目以降＋prev尺<実効D の極端ケースでは D が
- * 食い違い得る（現状は SCENE_MIN_DURATION_SEC=3・D 既定 0.5 固定で prev尺 が binding にならず到達不能＝パリティ成立）。
- * type/direction は resolveTransition と同一（wipe/zoom→fade）＝プレビュー=書き出し（ADR-0001/0026）。
+ * clamp は transitionTimeline を**単境界（2場面 [prev, B]）**に適用＝D=min(希望, prev尺, B尺)。書き出しは全場面へ
+ * transitionTimeline を回し左 clamp を「累積結合尺 acc」で行うが、acc は常に直前場面尺以上（acc≥prev＝結合尺は最後の
+ * 場面尺を下回らない・transitionTimeline のテストで固定）。左 clamp が実効値を変えるのは binding＝希望 D>prev尺 のときだけで、
+ * その場合に限り単境界とズレ得る。有効な場面尺は SCENE_MIN_DURATION_SEC=3 以上・D 既定 0.5 ゆえ常に D≤prev＝
+ * 単境界＝書き出し（3場面以上でも一致・sceneTransitions.test で固定）。type/direction は resolveTransition と同一
+ * （wipe/zoom→fade）＝プレビュー=書き出し（ADR-0001/0026）。
  */
 export function resolveBoundaryTransition(
   transition: Transition | undefined,
