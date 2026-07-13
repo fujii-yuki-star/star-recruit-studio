@@ -114,6 +114,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setProgress({ done: 0, total: scenes.length });
     setExportRun({ encode: undefined }); // 前回の encoding 進捗を持ち越さない（#376）
     setPhase("rendering");
+    // end-to-end 計測（#376 レビュー P2）：利用者の待ち時間全体は「レンダリング段（フレーム焼き/準備＝TS）＋
+    // encoding 段（結合/字幕/BGM＝Rust）」。Rust の eprintln は後段のみなので、全体は開始〜完了を TS で測る。
+    const startedAt = performance.now();
     // encoding 段（結合/字幕/BGM）の実進捗を Rust から受け取りバーを 80→100% で描く（#376）。Tauri 非検出時は no-op。
     let unlistenProgress: (() => void) | undefined;
     try {
@@ -205,6 +208,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         fontFamily: fontFamilyForId(snapFontId),
         fontId: resolveFontId(null, snapFontId),
       });
+      // レンダリング段（フレーム焼き＋テロップ/BGM準備）の所要。encoding 段の内訳は Rust eprintln 側（#376 計測）。
+      console.info(`[export] rendering (frames+prep): ${Math.round(performance.now() - startedAt)} ms / ${scenes.length} scenes`);
       setPhase("encoding");
       // 場面ごとBGM（ADR-0018 ③(7)）：区間を解決→配置＋クロスフェード計画→各区間のソースを data URL 化して Rust へ。
       // 表示用 src ではなく実体を data URL 化する（asset:// は FFmpeg へ渡せない）。同梱は public/bgm、自分のBGM はプロジェクトから。
@@ -241,6 +246,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       }
       const report = await exportVideo(built, fileName.trim() || "export", bgmRuns, pid || undefined, outputPath, telops);
       setResultPath(report.outputPath);
+      // end-to-end 総待ち時間＝レンダリング（上の rendering ログ）＋書き出し（encode/join/telop/bgm＝Rust eprintln 内訳）。
+      // 代表ケースの Before/After はこの total と上の rendering 行で記録できる（#376 レビュー P2）。
+      console.info(`[export] end-to-end (render→save): ${Math.round(performance.now() - startedAt)} ms / ${scenes.length} scenes`);
       setPhase("done");
     } catch (e) {
       // ユーザーが中止した場合は、エラーではなく「中止しました」で終える（走行中 ffmpeg は kill 済み・§2-5・#380）。
