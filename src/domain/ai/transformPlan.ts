@@ -5,6 +5,7 @@ import { ASSET_TYPE, NARRATION_STATUS, isSceneCategory } from '../enums';
 import type { Orientation, SceneCategory, WarningSeverity } from '../enums';
 import {
   DEFAULT_CHARACTER_ID,
+  DEFAULT_SCENE_CATEGORY,
   MAX_NARRATION_LEN_DEFAULT,
   MAX_SCENES_PER_VIDEO,
   MAX_SUBTITLE_LEN_DEFAULT,
@@ -153,7 +154,7 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
       const validSceneType = isSceneCategory(aiScene.sceneType);
       const sceneType: SceneCategory = validSceneType
         ? aiScene.sceneType
-        : (template?.category ?? 'photo_intro');
+        : (template?.category ?? DEFAULT_SCENE_CATEGORY);
       if (!validSceneType) {
         w.push(warn('SCENE_TYPE_FALLBACK', '不明な場面種別を調整しました', 'sceneType', 'info', true));
       }

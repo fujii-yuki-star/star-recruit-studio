@@ -93,6 +93,22 @@ describe("buildPrecheckItems（動画の配置 / #434・ADR-0026）", () => {
   });
 });
 
+describe("buildPrecheckItems（場面の見た目 / テンプレ未解決・Codex 監査 2026-07-13・#434 同流儀）", () => {
+  it("見た目（テンプレ）が見つからない場面は『場面の見た目』が要対応で場面つき＋該当場面へ飛ぶ", () => {
+    // templateId が templates に無い＝ダングリング（利用者テンプレ削除等）。黙って書き出しから落とさず場面つきで警告する。
+    const scene = { ...freeScene(undefined), sceneId: "sX", templateId: "missing" } as Scene;
+    const item = buildPrecheckItems([scene], assets, [freeTemplate]).find((i) => i.id === "sceneTemplate");
+    expect(item?.severity).toBe("action");
+    expect(item?.detail).toContain("場面1");
+    expect(item?.sceneId).toBe("sX"); // 該当場面へ戻れる導線（#400）
+  });
+
+  it("見た目が解決できる場面だけなら『場面の見た目』項目は出さない（ノイズ回避）", () => {
+    const item = buildPrecheckItems([freeScene(undefined)], assets, [freeTemplate]).find((i) => i.id === "sceneTemplate");
+    expect(item).toBeUndefined();
+  });
+});
+
 describe("buildPrecheckItems（動画の再生タイミング / #444・ADR-0027 D3）", () => {
   const videoAsset: Asset = { assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "assets/v.mp4" };
   const slotEl = [{ id: "slot_1", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_v", fit: "cover" }] as unknown as Scene["freeLayout"];

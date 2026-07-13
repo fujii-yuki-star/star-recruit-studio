@@ -1,8 +1,9 @@
 // シーン＋テンプレ → 各レイヤーの配置（矩形・zIndex・内容・スタイル）を解決する純粋ロジック。
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
-import { FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
+import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, LayerType, TextAlign } from '../domain/enums';
+import { DEFAULT_FIT } from '../domain/constants';
 import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { Layer, Template } from '../domain/template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
@@ -168,7 +169,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       case 'background': {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
-          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'cover', role: 'background', label: '背景' });
+          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? DEFAULT_FIT, role: 'background', label: '背景' });
         } else {
           items.push({ ...base, kind: 'fill', color: layer.fillColor ?? backgroundColor, opacity: layer.opacity ?? 1, radius: layer.radius ?? 0 });
         }
@@ -177,13 +178,13 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       case 'slot': {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         // ラベルは未解決時のプレースホルダ表示に使う。生の layer.id は技術用語漏れ（§2-3）なので日本語に。
-        items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'cover', role: 'slot', label: '素材' });
+        items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? DEFAULT_FIT, role: 'slot', label: '素材' });
         break;
       }
       case 'logo': {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
-          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'contain', role: 'logo', label: 'ロゴ' });
+          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? FIT.contain, role: 'logo', label: 'ロゴ' });
         }
         break;
       }
@@ -191,7 +192,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // ゆうこ表示はテンプレ依存（この case=character レイヤー有）。poseAssetId があれば表示する。
         // character.enabled（旧・場面ごと表示トグル）は廃止＝描画では参照しない（互換のため値は残す。req5・01§7.3）。
         if (scene.character.poseAssetId) {
-          items.push({ ...base, kind: 'image', assetId: scene.character.poseAssetId, fit: layer.fit ?? 'contain', role: 'character', label: 'ゆうこ' });
+          items.push({ ...base, kind: 'image', assetId: scene.character.poseAssetId, fit: layer.fit ?? FIT.contain, role: 'character', label: 'ゆうこ' });
         }
         break;
       }
@@ -230,7 +231,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           kind: 'text',
           text,
           fontSize: layer.fontSize ?? DEFAULT_FONT_SIZE,
-          fontWeight: layer.fontWeight ?? 'normal',
+          fontWeight: layer.fontWeight ?? FONT_WEIGHT.normal,
           color: layer.color ?? DEFAULT_TEXT_COLOR,
           maxLines: layer.maxLines ?? 2,
           background: bg,
@@ -284,7 +285,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       const base: ItemBase = { id: el.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: el.zIndex ?? 1, rotation: cg.rotation };
       switch (el.kind) {
         case 'slot':
-          items.push({ ...base, kind: 'image', assetId: el.assetId ?? null, fit: el.fit ?? 'cover', role: 'slot', label: '素材' });
+          items.push({ ...base, kind: 'image', assetId: el.assetId ?? null, fit: el.fit ?? DEFAULT_FIT, role: 'slot', label: '素材' });
           break;
         case 'text': {
           const text = el.text ?? '';
@@ -292,7 +293,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? 'normal', color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
           break;
         }
         case 'shape':

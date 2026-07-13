@@ -1,7 +1,7 @@
 // 定数の正典は docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md §4。
 // 文字列・数値リテラルの直書きを避け、ここを単一の参照元にする（CLAUDE.md §2-7 / §6）。
 import { ORIENTATION } from './enums';
-import type { Orientation } from './enums';
+import type { Orientation, SceneCategory } from './enums';
 
 export const SCENE_MIN_DURATION_SEC = 3;
 export const SCENE_MAX_DURATION_SEC = 15;
@@ -100,6 +100,9 @@ export const DEFAULT_CHARACTER_ID = 'yuko';
 
 // スロットの既定フィット（テンプレ・clip 未指定時）。正典(§4)に既定の明記は無く、cover を既定とする（MVP）。
 export const DEFAULT_FIT = 'cover' as const;
+
+// AI 出力の場面種別が未知/未指定でテンプレからも解決できないときの既定カテゴリ（transformPlan の補正フォールバック・§2-7）。
+export const DEFAULT_SCENE_CATEGORY: SceneCategory = 'photo_intro';
 
 // 矩形（FREE 要素／テンプレ Layer）をドラッグ/リサイズで潰さないための最小サイズ（canvas px）。両者で共有する単一の参照元（§2-7）。
 export const GEOM_MIN_SIZE = 20;
