@@ -329,11 +329,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
   const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
   // 切替効果（トランジション）の単境界プレビュー（#408 Part 2）。A=直前場面（表示順）→ B=この場面。
-  // prevScene は scenes 配列への参照＝安定（scenes 不変なら同一参照）。先頭場面は prevScene=undefined で非活性。
+  // 実効 D は書き出しと同じ全場面 transitionTimeline で解決するため、hook には scenes 全体と当該場面の添字を渡す
+  // （直前場面が短い場合も書き出しと一致＝#408 レビュー P1）。先頭場面（selectedIdx<=0）は非活性。
   const selectedIdx = selected ? scenes.findIndex((s) => s.sceneId === selected.sceneId) : -1;
   const prevScene = selectedIdx > 0 ? scenes[selectedIdx - 1] : undefined;
   const prevTemplate = prevScene ? templates.find((t) => t.templateId === prevScene.templateId) : undefined;
-  const transitionPreview = useSceneTransitionPreview(prevScene, selected);
+  const transitionPreview = useSceneTransitionPreview(scenes, selectedIdx);
   // 動き再生と切替再生は排他（同時に別々の合成が走らないよう、開始時にもう一方を止める）。
   const canPlayTransition = transitionPreview.transitionActive && !!prevScene && !!prevTemplate && !!template;
   // 掛け合い（scene.lines）×動画スロット併用の場面は「動き」（④）が v1 未対応で静止になる（sceneAnimation.ts の gate）。

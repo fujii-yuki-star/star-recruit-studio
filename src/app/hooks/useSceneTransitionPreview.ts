@@ -22,17 +22,19 @@ export interface SceneTransitionPreview {
 }
 
 /**
- * A（prevScene）→ B（scene）境界の切替効果を再生確認する状態を返す。先頭（prevScene 無し）や none は transitionActive=false。
- * 再生中は progress を 0→1 へ、書き出しと同じ 30fps 量子化（ADR-0019 決定②の格子）で進め、D 秒で自動停止する
- * （停止時はオーバーレイを外し、下の ScenePreview が当該場面 B を表示＝最終フレームと一致してカクつかない）。
+ * scenes[targetIndex] に入る境界（A=直前場面→ B=当該場面）の切替効果を再生確認する状態を返す。先頭（targetIndex<=0）や
+ * none は transitionActive=false。実効 D は書き出しと同じ**全場面 transitionTimeline**で解決＝直前場面が短くても一致
+ * （#408 レビュー P1）。再生中は progress を 0→1 へ、書き出しと同じ 30fps 量子化（ADR-0019 決定②の格子）で進め、
+ * D 秒で自動停止する（停止時はオーバーレイを外し、下の ScenePreview が当該場面 B を表示＝最終フレームと一致してカクつかない）。
  */
 export function useSceneTransitionPreview(
-  prevScene: Scene | undefined,
-  scene: Scene | undefined,
+  scenes: Scene[],
+  targetIndex: number,
 ): SceneTransitionPreview {
+  const scene = targetIndex >= 0 ? scenes[targetIndex] : undefined;
   const boundary = useMemo(
-    () => resolveBoundaryTransition(scene?.transition, prevScene?.durationSec, scene?.durationSec ?? 0),
-    [scene?.transition, prevScene?.durationSec, scene?.durationSec],
+    () => resolveBoundaryTransition(scenes, targetIndex),
+    [scenes, targetIndex],
   );
   const transitionActive = !!scene && boundary.durationSec > 0;
 
