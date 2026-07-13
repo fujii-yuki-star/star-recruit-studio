@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { loadBundledTemplates, parseTemplateFiles, parseTemplatePack, templatesForOrientation } from './templateFs';
 import { sampleTemplates } from './sampleData';
-import { SCENE_CATEGORIES } from '../domain/enums';
+import { buildTemplateSummaries } from '../domain/ai/videoPlanInput';
+import { FREE_CATEGORY, SCENE_CATEGORIES } from '../domain/enums';
 
 // 検証用の最小・正当なテンプレ（schema 必須項目のみ）。category/aspectRatio を差し替えて異常系を作る。
 const validLandscape = {
@@ -75,10 +76,21 @@ describe('loadBundledTemplates', () => {
       [...new Set(templatesForOrientation(all, o).map((t) => t.category))].sort();
     // 縦型が持つ全カテゴリを横型も持つ（横型の在庫不足の解消）。集合として完全対称。
     expect(catsFor('16:9')).toEqual(catsFor('9:16'));
-    // 両向きとも全カテゴリ（SCENE_CATEGORIES）を網羅している（AI生成・手動選択が向きで偏らない・#415/#456）。
+    // 両向きとも全カテゴリ（SCENE_CATEGORIES）を網羅している（手動の見た目選択が向きで偏らない・#415/#456）。
     for (const o of ['16:9', '9:16'] as const) {
       const cats = new Set(templatesForOrientation(all, o).map((t) => t.category));
       for (const c of SCENE_CATEGORIES) expect(cats.has(c)).toBe(true);
+    }
+  });
+
+  it('AI候補は両向きとも FREE を除く全9カテゴリを網羅する（AI経路・ADR-0008 で FREE は手動専用・#456）', () => {
+    // 手動選択（templatesForOrientation）だけでなく、AI 入力（buildTemplateSummaries）の実経路まで固定する（#456 レビュー P3）。
+    const all = loadBundledTemplates();
+    const nonFree = SCENE_CATEGORIES.filter((c) => c !== FREE_CATEGORY);
+    for (const o of ['16:9', '9:16'] as const) {
+      const cats = new Set(buildTemplateSummaries(all, o).map((s) => s.category));
+      expect(cats.has(FREE_CATEGORY)).toBe(false); // FREE は AI 候補に出さない（手動専用・ADR-0008）
+      for (const c of nonFree) expect(cats.has(c)).toBe(true);
     }
   });
 });
