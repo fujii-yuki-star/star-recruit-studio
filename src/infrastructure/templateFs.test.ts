@@ -68,6 +68,19 @@ describe('loadBundledTemplates', () => {
     // ID 直書きに依存せず「同梱の全件が検証を通る」ことを件数一致で確認。
     expect(loadBundledTemplates()).toHaveLength(sampleTemplates.length);
   });
+
+  it('横型と縦型で同じカテゴリ集合を収録する＝向き別のカテゴリ網羅が対称（#456）', () => {
+    const all = loadBundledTemplates();
+    const catsFor = (o: '16:9' | '9:16') =>
+      [...new Set(templatesForOrientation(all, o).map((t) => t.category))].sort();
+    // 縦型が持つ全カテゴリを横型も持つ（横型の在庫不足の解消）。集合として完全対称。
+    expect(catsFor('16:9')).toEqual(catsFor('9:16'));
+    // 両向きとも全カテゴリ（SCENE_CATEGORIES）を網羅している（AI生成・手動選択が向きで偏らない・#415/#456）。
+    for (const o of ['16:9', '9:16'] as const) {
+      const cats = new Set(templatesForOrientation(all, o).map((t) => t.category));
+      for (const c of SCENE_CATEGORIES) expect(cats.has(c)).toBe(true);
+    }
+  });
 });
 
 describe('parseTemplateFiles', () => {
