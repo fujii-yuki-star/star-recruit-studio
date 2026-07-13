@@ -176,7 +176,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       setClipUrlByLayer(map); // 全置換＝当場面のスロットぶんだけ残す（前場面の残骸を消す）
     })();
     return () => { cancelled = true; };
-    // clipSig（スロットとクリップパスの実質変化）で解決＝場面送り/素材差し替えでのみ再解決。
+    // clipSig（スロットとクリップパスの実質変化）で解決＝場面送り/素材差し替えでのみ再解決。videoSlots は本文で参照するが、
+    // 依存は clipSig（実質シグネチャ）に限定＝オブジェクト参照の毎レンダー変化で無駄に再解決/ちらつきを起こさないため（意図的）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clipSig, meta.projectId]);
   // ScenePreview へ渡す実映像再生情報（URL 解決済み **かつ 現在の clipRelPath と一致** するスロットのみ・#432 P2）。
   const videoPlaybackSlots: VideoSlotPlayback[] = useMemo(
