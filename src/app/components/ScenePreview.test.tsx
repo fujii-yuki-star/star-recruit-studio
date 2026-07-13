@@ -43,6 +43,30 @@ describe("ScenePreview 掛け合いの「間」（#386・A案＝間は字幕な�
     const { container } = render(<ScenePreview scene={scene} template={template} activeLineIndex={-1} />);
     expect(container.textContent).not.toContain("ゆうこの字幕テスト");
   });
+
+  // #408 Part 2 レビュー P1：切替プレビューの端フレームを sceneSegmentSpecs 準拠で解決した BoundaryFrame を
+  // 下地 ScenePreview にも渡し、書き出しの端フレームへ揃える。boundaryFrame は activeLineIndex より優先。
+  it("boundaryFrame.subtitleText=string は上書き字幕を描く", () => {
+    const { container } = render(
+      <ScenePreview scene={scene} template={template} boundaryFrame={{ subtitleText: "境界の字幕", creditLine: undefined }} />,
+    );
+    expect(container.textContent).toContain("境界の字幕");
+  });
+
+  it("boundaryFrame.subtitleText=null は字幕なし（頭の間・全0秒フォールバック＝行の字幕を描かない）", () => {
+    const { container } = render(
+      <ScenePreview scene={scene} template={template} boundaryFrame={{ subtitleText: null, creditLine: undefined }} />,
+    );
+    expect(container.textContent).not.toContain("ゆうこの字幕テスト");
+  });
+
+  it("boundaryFrame は activeLineIndex より優先（0秒行除外の書き出し一致）", () => {
+    // activeLineIndex=0 なら通常 line_001 を描くが、boundaryFrame(null) が勝ち字幕なし。
+    const { container } = render(
+      <ScenePreview scene={scene} template={template} activeLineIndex={0} boundaryFrame={{ subtitleText: null, creditLine: undefined }} />,
+    );
+    expect(container.textContent).not.toContain("ゆうこの字幕テスト");
+  });
 });
 
 // #432・仕上がり確認で動画スロットを実映像で再生：再生中のみ video 要素を出す（停止中はサムネSVGのまま）。

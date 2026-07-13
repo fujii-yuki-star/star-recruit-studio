@@ -114,3 +114,40 @@ export function activeLineIndexAt(segments: LineSegment[], t: number): number {
   }
   return segments.length > 0 ? 0 : -1;
 }
+
+/** 場面の端フレーム（先頭/末尾）で有効な「字幕・クレジット状態」（切替プレビュー＋停止後の下地 ScenePreview 用・#408 Part 2）。 */
+export interface BoundaryFrame {
+  /**
+   * subtitle レイヤーの上書き（string=表示／null=非表示＝間や OFF 行／undefined=テンプレ既定＝scene.texts）。
+   * sceneSegmentSpecs の端セグメントに一致＝0 秒行（startSec===durationSec 等）を除外した後の実効状態。
+   */
+  subtitleText: string | null | undefined;
+  /** クレジット解決に使う実効行（掛け合いの行。頭の間・単一 narration・全 0 秒フォールバックでは undefined＝既定クレジット）。 */
+  creditLine: NarrationLine | undefined;
+}
+
+/** sceneSegmentSpecs の1セグメント（端フレーム）から BoundaryFrame（字幕上書き＋クレジット行）へ落とす。 */
+function boundaryFrameFromSpec(scene: Scene, spec: SceneSegmentSpec): BoundaryFrame {
+  const creditLine = spec.lineId ? sceneLines(scene).find((l) => l.lineId === spec.lineId) : undefined;
+  return { subtitleText: spec.subtitleText, creditLine };
+}
+
+/**
+ * 場面の「先頭フレーム（t=0）」の実効状態（切替プレビュー B＝当該場面の頭・停止後の下地 ScenePreview 用・#408 Part 2 レビュー P1）。
+ * **書き出しの sceneSegmentSpecs を起点**にするので、0 秒行の除外・頭の間（先頭行 startSec>0 の headGap＝字幕なし）・
+ * 全 0 秒フォールバック（先頭行 startSec===durationSec 等＝テンプレ既定へ）を書き出しと同一に扱う＝プレビュー=書き出し（ADR-0001/0026）。
+ * lineDurations は掛け合いの自動逐次（startSec 未指定）で区間を決めるのに使う（明示 startSec なら不要・端の判定は音声非依存）。
+ */
+export function firstFrameBoundary(scene: Scene, lineDurations: Record<string, number> = {}): BoundaryFrame {
+  const specs = sceneSegmentSpecs(scene, lineDurations);
+  return boundaryFrameFromSpec(scene, specs[0]);
+}
+
+/**
+ * 場面の「最終フレーム」の実効状態（切替プレビュー A＝前場面の末尾フレーム用・#408 Part 2 レビュー P1）。
+ * sceneSegmentSpecs の末尾セグメントに一致＝最終行が startSec===durationSec で 0 秒なら直前の生存行を採る（書き出しと同じ）。
+ */
+export function lastFrameBoundary(scene: Scene, lineDurations: Record<string, number> = {}): BoundaryFrame {
+  const specs = sceneSegmentSpecs(scene, lineDurations);
+  return boundaryFrameFromSpec(scene, specs[specs.length - 1]);
+}

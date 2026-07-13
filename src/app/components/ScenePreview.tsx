@@ -7,7 +7,7 @@ import { ORIGINAL_AUDIO_VOLUME } from "../../domain/constants";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
-import { resolveLineSubtitle } from "../../domain/project/lineTimeline";
+import { resolveLineSubtitle, type BoundaryFrame } from "../../domain/project/lineTimeline";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { resolveVideoStartDelaySec } from "../../domain/project/videoStartTiming";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
@@ -164,7 +164,7 @@ function SlotVideo({
 }
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex, telops, timeSec, animations, videoPlayback, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; telops?: { text: string; row: number }[]; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; children?: ReactNode }) {
+export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, telops, timeSec, animations, videoPlayback, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; telops?: { text: string; row: number }[]; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
@@ -233,16 +233,26 @@ export function ScenePreview({ scene, template, activeLineIndex, telops, timeSec
     ? scene.lines![activeLineIndex ?? 0] ?? scene.lines![0]
     : undefined;
   const lineSub = activeLine ? resolveLineSubtitle(activeLine, scene) : undefined;
-  // 掛け合いで字幕を上書きするか（行の字幕、または「間」の非表示 null）。
-  const applyLineSub = inGap || !!lineSub;
+  // 字幕上書き（string=表示／null=非表示／undefined=テンプレ既定＝scene.texts）とクレジット行を解決する。
+  // boundaryFrame（切替プレビューの端フレーム・sceneSegmentSpecs 準拠）があればそれを優先＝0 秒行除外/頭の間/フォールバックを
+  // 書き出しと一致させる（#408 Part 2 レビュー P1）。無ければ activeLineIndex から（再生中の有効行）。
+  const subtitleOverride: string | null | undefined = boundaryFrame
+    ? boundaryFrame.subtitleText
+    : inGap
+      ? null
+      : lineSub
+        ? lineSub.enabled ? lineSub.text : null
+        : undefined;
+  const creditLine = boundaryFrame ? boundaryFrame.creditLine : activeLine;
+  const applyLineSub = subtitleOverride !== undefined;
   // タイムラインのテロップ（ADR-0018・並行テロップ③(8)）＝再生位置の overlay テロップを段違いで重ねる（書き出しと同一 item＝パリティ）。
   const hasTelops = !!(telops && telops.length > 0);
   // キーフレームアニメ（④・ADR-0019）＝再生位置 timeSec で補間して描く（書き出しと同一 layoutScene(t)＝パリティ）。
   const hasAnim = !!(animations && animations.length > 0);
   const layoutOpts = applyLineSub || hasTelops || hasAnim
     ? {
-        // 間（inGap）は字幕なし＝null。行があれば enabled で text/null。
-        ...(applyLineSub ? { subtitleText: inGap ? null : lineSub && lineSub.enabled ? lineSub.text : null } : {}),
+        // 字幕上書き（間/OFF は null・行は text）。undefined（テンプレ既定）は applyLineSub=false で載せない。
+        ...(applyLineSub ? { subtitleText: subtitleOverride } : {}),
         // テロップは動画全体フォント（場面フォントに左右されない＝書き出しと一致・ADR-0001）。
         ...(hasTelops ? { telops, telopFontId: resolveFontId(null, fontId) } : {}),
         ...(hasAnim ? { timeSec: timeSec ?? 0, animations } : {}),
@@ -250,7 +260,7 @@ export function ScenePreview({ scene, template, activeLineIndex, telops, timeSec
     : undefined;
   // 常時クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。
   const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
-  const credit = activeLine ? creditForLine(activeLine, baseCredit) : baseCredit;
+  const credit = creditLine ? creditForLine(creditLine, baseCredit) : baseCredit;
   const fontFamily = fontFamilyForId(resolveFontId(scene.fontId, fontId));
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
