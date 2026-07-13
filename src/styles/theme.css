@@ -18,6 +18,7 @@
 
   --color-yellow: #fbf3cf;      /* 淡い黄色 (ゆうこ/注目) */
   --color-yellow-strong: #f6e7a3;
+  --color-warn: #8a6d1a;        /* 注意文字（黄色帯の上の濃い文字）。警告文言の色の単一参照元 (#413) */
 
   --color-text: #20323c;        /* 文字 (濃いめのスレート) */
   --color-text-muted: #5d7480;  /* 補助文字 */
@@ -298,6 +299,24 @@ button {
   white-space: nowrap;
 }
 
+/* 押せないボタンは全画面共通で「押せない見た目」に（#412）。
+   従来は :disabled の共通スタイルが無く、保存中/端に達した↑↓/準備中などが通常色+pointer のままだった。 */
+.btn:disabled,
+.nav-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* キーボード操作のフォーカス可視化（input/.textarea/.select の :focus リングと対・#412）。
+   マウスクリックでは出ない（:focus-visible）＝見た目のノイズを増やさない。 */
+.btn:focus-visible,
+.nav-item:focus-visible,
+.segment button:focus-visible,
+.switch:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .btn-primary {
   background: var(--color-primary);
   color: #fff;
@@ -494,11 +513,18 @@ button {
 }
 .badge-yellow {
   background: var(--color-yellow);
-  color: #8a6d1a;
+  color: var(--color-warn);
 }
 .badge-gray {
   background: var(--color-surface-alt);
   color: var(--color-text-muted);
+}
+/* バッジを「押せるボタン」として使う場合は UA 既定のボタン枠/フォントをリセットする（.chip button / .segment button と同慣習）。
+   背景・文字色は .badge-* が持つので書かない（button.badge は詳細度が高く、background を書くと .badge-* の塗りを上書きしてしまう）。#406 */
+button.badge {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 /* ===== 注意書き ===== */
@@ -518,7 +544,7 @@ button {
 }
 .notice-warn {
   background: var(--color-yellow);
-  color: #8a6d1a;
+  color: var(--color-warn);
 }
 .notice-strong {
   background: var(--color-primary-soft);
@@ -644,7 +670,7 @@ button {
 }
 .thumb-audio {
   background: linear-gradient(135deg, #fbf3cf, #f4e7a8);
-  color: #8a6d1a;
+  color: var(--color-warn);
   aspect-ratio: auto;
   padding: 14px;
 }
@@ -717,6 +743,29 @@ button {
   background: var(--color-primary);
   border-radius: 999px;
   transition: width 0.3s;
+}
+
+/* 進捗値が無い段（動画のまとめ中＝encoding）で使う不定バー。一定幅の帯が左右に流れて「動いている」ことを伝える。 */
+.progress-fill--indeterminate {
+  width: 40%;
+  transition: none;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes progress-indeterminate {
+  0% {
+    margin-left: -40%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+/* アニメを控える設定の利用者には、流れる帯の代わりに満杯近くの静止バーを見せる（規約：prefers-reduced-motion 尊重）。 */
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill--indeterminate {
+    width: 90%;
+    margin-left: 0;
+    animation: none;
+  }
 }
 
 /* ステップ表示 */
@@ -938,7 +987,9 @@ button {
   border-radius: var(--radius);
   background: var(--color-surface);
   padding: 12px;
-  min-width: 160px;
+  /* 幅固定＝カードごとに内容依存で幅が変わらない（セリフ先頭は 1 行省略で収める・#413 レビュー）。 */
+  width: 168px;
+  box-sizing: border-box;
   cursor: pointer;
   transition: border-color 0.12s;
   flex-shrink: 0;

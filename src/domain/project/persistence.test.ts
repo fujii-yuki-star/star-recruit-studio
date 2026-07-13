@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createPartId,
+  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createOverlayClipId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
-  isSupportedSchemaVersion, parseProjectDoc,
+  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject, ProjectLoadError,
 } from './persistence';
 import type { ProjectHeader } from './persistence';
+import type { Part, Scene } from './types';
 
 function header(overrides: Partial<ProjectHeader> = {}): ProjectHeader {
   return {
@@ -16,6 +17,17 @@ function header(overrides: Partial<ProjectHeader> = {}): ProjectHeader {
     videoSettings: defaultVideoSettings(),
     companyInfo: { companyName: '株式会社サンプル' },
     voiceSettings: defaultVoiceSettings(),
+    ...overrides,
+  };
+}
+
+// 正典スキーマ（Scene の必須：sceneId/partId/order/sceneType/templateId/durationSec/assetRefs/character/texts/narration/warnings）を
+// 満たす最小 Scene。移行テストで場面を差し替える際に、読込時検証（#416）を通る構造にする（旧版フィールドは overrides で足す）。
+function validScene(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'tpl_x',
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+    narration: { text: '', voiceId: null, status: 'none' }, warnings: [],
     ...overrides,
   };
 }
@@ -101,6 +113,19 @@ describe('createGroupId (§2.1 group_{NNN}・scene/template 内一意・ADR-0022
   });
 });
 
+describe('createOverlayClipId (§2.1 ovclip_{NNN}・project 内一意・ADR-0018)', () => {
+  it('既存が無ければ ovclip_001', () => {
+    expect(createOverlayClipId([])).toBe('ovclip_001');
+  });
+  it('既存と衝突しない最小番号を採る（歯抜けを埋める）', () => {
+    expect(createOverlayClipId(['ovclip_001', 'ovclip_003'])).toBe('ovclip_002');
+  });
+  it('999 を超えると4桁になる（pattern ^ovclip_[0-9]{3,}$）', () => {
+    const existing = Array.from({ length: 999 }, (_, i) => `ovclip_${String(i + 1).padStart(3, '0')}`);
+    expect(createOverlayClipId(existing)).toBe('ovclip_1000');
+  });
+});
+
 describe('createLineId (§2.1 line_{NNN}・scene 内一意・ADR-0015)', () => {
   it('既存が無ければ line_001', () => {
     expect(createLineId([])).toBe('line_001');
@@ -142,6 +167,19 @@ describe('assembleProject', () => {
     expect(g.generalBrief?.targetAudience).toBe('全社員'); // ADR-0011 #12: 対象視聴者
     // general では companyInfo を出力しない（schema if/then/else の not:required を満たす・ADR-0011）。
     expect('companyInfo' in g).toBe(false);
+  });
+});
+
+describe('projectHeaderFromProject（assembleProject の逆・#324）', () => {
+  it('任意フィールド（timelineOverlay・toneSettings）を取りこぼさず round-trip する', () => {
+    const overlay: ProjectHeader['timelineOverlay'] = { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', startSec: 1, durationSec: 2, text: 'x' }] };
+    const p = assembleProject(header({ toneSettings: { tone: 'やわらか' }, timelineOverlay: overlay }), [], [], []);
+    const back = projectHeaderFromProject(p);
+    // 読込時に store が meta を組む経路の縮図：overlay 等のヘッダ系フィールドが消えない。
+    expect(back.timelineOverlay).toEqual(overlay);
+    expect(back.toneSettings).toEqual({ tone: 'やわらか' });
+    // ヘッダ→Project→ヘッダ→Project が一致（フィールド取りこぼしの検出）。
+    expect(assembleProject(back, [], [], [])).toEqual(p);
   });
 });
 
@@ -220,6 +258,56 @@ describe('parseProjectDoc', () => {
     const back = parseProjectDoc(JSON.stringify(doc));
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.13→1.14 へ昇格
     expect(back.scenes[0].groups?.[0]).toMatchObject({ id: 'group_001', members: ['free_001'] });
+  });
+  it('タイムライン層：timelineOverlay を持つ旧版(1.14)が移行し保持する（ADR-0018）', () => {
+    const overlay = { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', startSec: 1, durationSec: 2, text: '補足' }] };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.14', timelineOverlay: overlay } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.14→現行へ昇格（任意追加＝変換不要）
+    expect(back.timelineOverlay).toEqual(overlay);
+  });
+  it('場面ごとBGM：scene.bgmSettings を持つ旧版(1.15)が移行し保持する（ADR-0018 ③(7)）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'intro', templateId: 'tpl_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' }, warnings: [],
+      bgmSettings: { enabled: true, bundledBgmId: 'found-new-hope', volume: 0.3, loop: true },
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.15', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.15→現行へ昇格（任意追加＝変換不要）
+    expect(back.scenes[0].bgmSettings).toEqual({ enabled: true, bundledBgmId: 'found-new-hope', volume: 0.3, loop: true });
+  });
+  it('キーフレーム：timelineOverlay.animations を持つ旧版(1.16)が移行し保持する（ADR-0019 ④）', () => {
+    const animations = [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, opacity: 1, easing: 'ease-in-out' }] }];
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.16', timelineOverlay: { animations } } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.16→現行へ昇格（任意追加＝変換不要）
+    expect(back.timelineOverlay?.animations).toEqual(animations);
+  });
+  it('動画スロット再生開始：scene.slotVideoStart を持つ旧版(1.17)が移行し保持する（ADR-0027・#444）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'intro', templateId: 'tpl_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' }, warnings: [],
+      slotVideoStart: { mainVisual: { mode: 'afterAnim' }, sub: { mode: 'delay', delaySec: 0.6 } },
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.17', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.17→1.18 へ昇格（任意追加＝変換不要・欠落=withAnim）
+    expect(back.scenes[0].slotVideoStart).toEqual({ mainVisual: { mode: 'afterAnim' }, sub: { mode: 'delay', delaySec: 0.6 } });
+  });
+  it('クリップ per-use 上書き：scene.slotClips を持つ旧版(1.18)が移行し保持する（ADR-0028・#472）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'intro', templateId: 'tpl_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' }, warnings: [],
+      slotClips: { mainVisual: { startSec: 1, endSec: 5, speed: 1.5, useOriginalAudio: true, originalAudioVolume: 0.4 } },
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.18', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.18→1.19 へ昇格（任意追加＝変換不要・欠落は asset.clip 継承）
+    expect(back.scenes[0].slotClips).toEqual({ mainVisual: { startSec: 1, endSec: 5, speed: 1.5, useOriginalAudio: true, originalAudioVolume: 0.4 } });
   });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;
@@ -330,10 +418,10 @@ describe('parseProjectDoc', () => {
       ...assembleProject(header(), [], [], []),
       schemaVersion: '1.4',
       scenes: [
-        { sceneId: 'scene_001', fontId: 'kaitou-yokoku-gothic' },
-        { sceneId: 'scene_002', fontId: 'old-font' },
-        { sceneId: 'scene_003', fontId: null },
-        { sceneId: 'scene_004' },
+        validScene({ sceneId: 'scene_001', fontId: 'kaitou-yokoku-gothic' }),
+        validScene({ sceneId: 'scene_002', fontId: 'old-font' }),
+        validScene({ sceneId: 'scene_003', fontId: null }),
+        validScene({ sceneId: 'scene_004' }),
       ],
     } as Record<string, unknown>;
     const back = parseProjectDoc(JSON.stringify(doc));
@@ -355,6 +443,57 @@ describe('parseProjectDoc', () => {
     const doc = { ...assembleProject(header(), [], [], []) } as Record<string, unknown>;
     delete doc.scenes;
     expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();
+  });
+
+  // 読込時スキーマ検証（#416・11 §8 V2）。構造破損（型不正・必須欠落）は拒否、内容制約違反は読み込む（作りかけを弾かない）。
+  describe('読込時スキーマ検証（#416）', () => {
+    // 拒否は「ProjectLoadError かつ §2-5 文言」まで固定する（生 TypeError を UI に出さない・#416 P1/P2）。
+    const expectLoadReject = (doc: unknown): void => {
+      let err: unknown;
+      try {
+        parseProjectDoc(JSON.stringify(doc));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(ProjectLoadError);
+      expect((err as Error).message).toContain('別のプロジェクトを選んでください');
+    };
+
+    it('場面の型不正（durationSec が文字列）は読込拒否', () => {
+      expectLoadReject({ ...assembleProject(header(), [], [], [validScene({ durationSec: 'abc' }) as unknown as Scene]) });
+    });
+    it('場面の必須欠落（partId 無し）は読込拒否', () => {
+      const scene = validScene();
+      delete scene.partId;
+      expectLoadReject({ ...assembleProject(header(), [], [], [scene as unknown as Scene]) });
+    });
+    it('videoSettings の必須欠落（fps 無し）は読込拒否', () => {
+      const doc = { ...assembleProject(header(), [], [], []) } as Record<string, unknown>;
+      const vs = { ...(doc.videoSettings as Record<string, unknown>) };
+      delete vs.fps;
+      doc.videoSettings = vs;
+      expectLoadReject(doc);
+    });
+    it('videoSettings が非オブジェクト（"bad"）でも生 TypeError にせず読込拒否（#416 P1）', () => {
+      const doc = { ...assembleProject(header(), [], [], []), videoSettings: 'bad' } as Record<string, unknown>;
+      expectLoadReject(doc);
+    });
+    it('scenes に null 要素があっても生 TypeError にせず読込拒否（#416 P1）', () => {
+      const doc = { ...assembleProject(header(), [], [], []), scenes: [null] } as Record<string, unknown>;
+      expectLoadReject(doc);
+    });
+    it('内容制約違反（companyName 空＝作りかけの新規）は拒否せず読み込む', () => {
+      const doc = { ...assembleProject(header({ companyInfo: { companyName: '' } }), [], [], []) };
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
+    it('内容制約違反（projectName 80字超＝#411 の入力防御対象）は拒否せず読み込む', () => {
+      const doc = { ...assembleProject(header({ projectName: 'あ'.repeat(120) }), [], [], []) };
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
+    it('正常な完全プロジェクトは読み込める（回帰なし）', () => {
+      const doc = { ...assembleProject(header(), [], [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] } as unknown as Part], [validScene() as unknown as Scene]) };
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
   });
 });
 

@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.14" },
+    "schemaVersion": { "const": "1.19" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -35,7 +35,8 @@
     "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
     "assets": { "type": "array", "items": { "$ref": "#/$defs/Asset" } },
     "parts": { "type": "array", "items": { "$ref": "#/$defs/Part" } },
-    "scenes": { "type": "array", "items": { "$ref": "#/$defs/Scene" }, "maxItems": 80 }
+    "scenes": { "type": "array", "items": { "$ref": "#/$defs/Scene" }, "maxItems": 80 },
+    "timelineOverlay": { "$ref": "#/$defs/TimelineOverlay" }
   },
   "if": { "properties": { "videoKind": { "const": "general" } }, "required": ["videoKind"] },
   "then": {
@@ -121,6 +122,56 @@
         "fadeOutSec": { "type": "number", "minimum": 0 }
       }
     },
+    "TimelineOverlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。AI/簡易編集は無視する。",
+      "properties": {
+        "clips": { "type": "array", "items": { "$ref": "#/$defs/OverlayClip" } },
+        "animations": { "type": "array", "items": { "$ref": "#/$defs/ElementAnimation" } }
+      }
+    },
+    "ElementAnimation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "要素アニメーション（④・ADR-0019）。場面内の1要素（FREE 要素/グループ id）を時間で補間。timelineOverlay に格納＝AI/場面正準は不変。",
+      "required": ["id", "sceneId", "targetId", "keyframes"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^anim_[0-9]{3,}$" },
+        "sceneId": { "type": "string", "pattern": "^scene_[0-9]{3}$" },
+        "targetId": { "type": "string" },
+        "keyframes": { "type": "array", "items": { "$ref": "#/$defs/Keyframe" } }
+      }
+    },
+    "Keyframe": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "1キーフレーム（場面ローカル秒 timeSec の要素プロパティ・④）。設定したプロパティのみ補間・値は絶対上書き。",
+      "required": ["timeSec"],
+      "properties": {
+        "timeSec": { "type": "number", "minimum": 0 },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "scale": { "type": "number", "exclusiveMinimum": 0 },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rotation": { "type": "number" },
+        "easing": { "enum": ["linear", "ease-in-out"] }
+      }
+    },
+    "OverlayClip": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "時間軸に足すクリップ（まずはテロップ）。anchorSceneId があれば場面相対（startSec=場面開始からの相対秒）、無ければ絶対時間（startSec=グローバル秒）。",
+      "required": ["id", "track", "startSec", "durationSec"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ovclip_[0-9]{3,}$" },
+        "track": { "enum": ["telop"] },
+        "anchorSceneId": { "type": "string", "pattern": "^scene_[0-9]{3}$" },
+        "startSec": { "type": "number", "minimum": 0 },
+        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
+        "text": { "type": "string" }
+      }
+    },
     "Asset": {
       "type": "object",
       "additionalProperties": false,
@@ -188,6 +239,7 @@
         "templateId": { "type": "string" },
         "durationSec": { "type": "number", "minimum": 0 },
         "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
+        "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
         "textFontIds": {
           "type": "object",
           "additionalProperties": false,
@@ -212,6 +264,34 @@
         "slotFits": {
           "type": "object",
           "additionalProperties": { "enum": ["cover", "contain", "stretch"] }
+        },
+        "slotClips": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "startSec": { "type": "number", "minimum": 0 },
+              "endSec": { "type": "number", "minimum": 0 },
+              "useOriginalAudio": { "type": "boolean" },
+              "originalAudioVolume": { "type": "number", "minimum": 0, "maximum": 1.5 },
+              "speed": { "type": "number", "minimum": 0.5, "maximum": 2.0 }
+            }
+          }
+        },
+        "slotVideoStart": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mode"],
+            "properties": {
+              "mode": { "enum": ["withAnim", "afterAnim", "delay"] },
+              "delaySec": { "type": "number", "minimum": 0 }
+            },
+            "if": { "properties": { "mode": { "const": "delay" } }, "required": ["mode"] },
+            "then": { "required": ["delaySec"] }
+          }
         },
         "groups": { "type": "array", "items": { "$ref": "#/$defs/Group" } }
       }

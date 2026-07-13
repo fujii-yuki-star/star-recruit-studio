@@ -13,18 +13,19 @@ interface PrecheckProps {
 
 const severityStyle: Record<PrecheckItem["severity"], { label: string; color: string; bg: string }> = {
   ok: { label: "問題なし", color: "var(--color-success)", bg: "var(--color-primary-soft)" },
-  warning: { label: "注意", color: "#8a6d1a", bg: "var(--color-yellow)" },
+  warning: { label: "注意", color: "var(--color-warn)", bg: "var(--color-yellow)" },
   action: { label: "要対応", color: "var(--color-danger)", bg: "var(--color-danger-soft)" },
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
-  const { status, scenes, assets, templates, generate } = useProjectStore();
+  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, generateAllNarrations, isGeneratingNarration, narrationError } = useProjectStore();
   // 書き出し能力（標準方式 h264_mf の可用性）の事前検知（#120）。Tauri 環境でのみ取得。
   const [capability, setCapability] = useState<ExportCapability | null>(null);
 
+  // 自動生成は Mock（外部送信なし）のときだけ（#384・§2-6）。実プロバイダは空状態のまま。
   useEffect(() => {
-    if (status === "idle") void generate();
-  }, [status, generate]);
+    void autoGenerateIfSafe();
+  }, [status, autoGenerateIfSafe]);
 
   useEffect(() => {
     if (!canExport()) return;
@@ -41,7 +42,25 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
     };
   }, []);
 
-  const baseItems = buildPrecheckItems(scenes, assets, templates);
+  // 場面ゼロは「全項目問題なし」に見えて書き出しに進めてしまう（押すと保存先選択後に失敗）＝空状態で止める（#403）。
+  if (scenes.length === 0) {
+    return (
+      <div className="main-scroll">
+        <PageHead title="公開前チェック" desc="動画を書き出す前に内容を点検します。" />
+        <div className="card text-center" style={{ padding: "48px 24px" }}>
+          <p className="text-muted" style={{ marginBottom: 16 }}>
+            まだ場面がありません。動画のたたき台を作ってから、公開前チェックに進みましょう。
+          </p>
+          <button className="btn btn-primary btn-lg" onClick={() => onNavigate("draft")}>
+            たたき台へ
+            <ChevronRightIcon size={18} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const baseItems = buildPrecheckItems(scenes, assets, templates, meta.timelineOverlay?.animations);
   // 書き出し能力チェックを先頭に差し込む（取得できた場合のみ・#120）。
   const capNotice = capability ? EXPORT_CAPABILITY_NOTICE[capability] : null;
   const items: PrecheckItem[] = capNotice
@@ -68,7 +87,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
           <div className="text-muted text-sm">要対応</div>
         </div>
         <div className="card text-center">
-          <div className="page-title" style={{ color: "#8a6d1a" }}>{count("warning")}</div>
+          <div className="page-title" style={{ color: "var(--color-warn)" }}>{count("warning")}</div>
           <div className="text-muted text-sm">注意</div>
         </div>
         <div className="card text-center">
@@ -105,9 +124,27 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                   <td className="text-pretty">{item.detail}</td>
                   <td>
                     {item.action ? (
-                      <button className="btn btn-ghost btn-icon text-sm" onClick={() => onNavigate("scene-edit")}>
-                        {item.action}
-                      </button>
+                      item.id === "voice" ? (
+                        // 「声を作成」はラベルどおりその場で一括生成する（従来は場面編集へ飛ぶだけだった＝#403）。
+                        <button
+                          className="btn btn-ghost btn-icon text-sm"
+                          onClick={() => void generateAllNarrations()}
+                          disabled={isGeneratingNarration}
+                        >
+                          {isGeneratingNarration ? "作成中…" : item.action}
+                        </button>
+                      ) : (
+                        // その他（字幕を短く/動画を直す）は該当場面を指定してから場面編集へ（#400）。
+                        <button
+                          className="btn btn-ghost btn-icon text-sm"
+                          onClick={() => {
+                            if (item.sceneId) setEditingSceneId(item.sceneId);
+                            onNavigate("scene-edit");
+                          }}
+                        >
+                          {item.action}
+                        </button>
+                      )
                     ) : (
                       <span className="text-faint text-sm">—</span>
                     )}
@@ -119,11 +156,18 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
         </table>
       </div>
 
+      {/* 声の一括生成に失敗したとき（VOICEVOX 未起動など）は「次の行動」を示す（§2-5）。 */}
+      {narrationError && (
+        <div className="notice notice-warn mt" role="alert">
+          <span>{narrationError}</span>
+        </div>
+      )}
+
       {/* 操作 */}
       <div className="row-between mt-lg">
-        <button className="btn btn-ghost" onClick={() => onNavigate("scene-edit")}>
-          <ArrowLeftIcon size={18} />
-          戻って直す
+        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("scene-edit")}>
+          <ArrowLeftIcon size={16} />
+          場面編集へ戻る
         </button>
         <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
           <button

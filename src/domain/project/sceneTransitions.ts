@@ -4,7 +4,7 @@
 import { TRANSITION_DEFAULT_SEC } from '../constants';
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import type { TransitionDirection, TransitionType } from '../enums';
-import type { Transition } from './types';
+import type { Scene, Transition } from './types';
 
 export interface ResolvedTransition {
   /** none/fade/slide（MVP）。wipe/zoom は fade に丸める。 */
@@ -43,6 +43,41 @@ export function resolveTransition(transition: Transition | undefined): ResolvedT
 export function deriveTransitionSelectValue(transition: Transition | undefined): string {
   const r = resolveTransition(transition);
   return r.type === TRANSITION_TYPE.slide ? `slide:${r.direction}` : r.type;
+}
+
+export interface BoundaryTransition {
+  type: TransitionType;
+  direction: TransitionDirection;
+  /** clamp 済みの実効 D（秒）。書き出しと同じく両隣の場面尺で clamp する。0＝遷移なし（プレビュー不要）。 */
+  durationSec: number;
+}
+
+/**
+ * A→B 境界（scenes[targetIndex] に入る遷移＝transition.in）の実効値を、**書き出しと同じ全場面 transitionTimeline**で
+ * 解決する（#408 Part 2 のプレビュー用）。scenes は project.scenes と同じ再生順、targetIndex は当該場面の添字。
+ * targetIndex<=0（先頭＝切り替え元なし）／type=none／希望 D<=0 は durationSec=0（プレビューしない）を返す。
+ * clamp は書き出し（buildExportScenes）と同一：対象境界までの全場面尺 sceneDurations と境界希望 boundaryDs
+ * （none/先頭=0）から transitionTimeline を回し steps[targetIndex-1] を採る。左 clamp を累積結合尺 acc で行うため、
+ * **直前場面が実効 D より短い（prev<D）場面でもプレビュー=書き出しが一致**する（2場面近似 min(D,prev,cur) だと
+ * prev で過小になっていた＝#408 レビュー P1）。type/direction は resolveTransition と同一（wipe/zoom→fade）
+ * ＝プレビュー=書き出し（ADR-0001/0026）。
+ */
+export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number): BoundaryTransition {
+  const scene = targetIndex >= 0 ? scenes[targetIndex] : undefined;
+  const r = resolveTransition(scene?.transition);
+  if (targetIndex <= 0 || !scene || r.type === TRANSITION_TYPE.none || r.durationSec <= 0) {
+    return { type: r.type, direction: r.direction, durationSec: 0 };
+  }
+  // 書き出し（buildExportScenes）と同一の sceneDurations / boundaryDs を対象境界まで組む（none/先頭=0）。
+  const upto = scenes.slice(0, targetIndex + 1);
+  const sceneDurations = upto.map((s) => s.durationSec);
+  const boundaryDs = upto.map((s, k) => {
+    if (k === 0) return 0;
+    const rr = resolveTransition(s.transition);
+    return rr.type === TRANSITION_TYPE.none ? 0 : rr.durationSec;
+  });
+  const { steps } = transitionTimeline(sceneDurations, boundaryDs);
+  return { type: r.type, direction: r.direction, durationSec: steps[targetIndex - 1]?.durationSec ?? 0 };
 }
 
 export interface TransitionStep {

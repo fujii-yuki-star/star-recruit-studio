@@ -1,13 +1,17 @@
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
-import { ASSET_TYPE, NARRATION_STATUS, type SceneCategory } from "../domain/enums";
+import { ASSET_TYPE, type SceneCategory } from "../domain/enums";
 import { HEIGHT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
-import type { Asset, Part, Scene, Warning } from "../domain/project/types";
+import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
+import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
+import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
 
-const sceneTypeLabel: Record<SceneCategory, string> = {
+// 場面種別のユーザー向けラベル（§2-3）。型付き（SceneCategory 網羅）＝場面種別追加時にコンパイル検知。
+// 表示語の単一参照元＝場面編集など他画面もこれを使う（#413・二重定義の解消）。
+export const sceneTypeLabel: Record<SceneCategory, string> = {
   opening: "オープニング",
   closing: "クロージング",
   photo_intro: "写真紹介",
@@ -59,7 +63,7 @@ export function sceneToDraftRow(
     scene: sceneTypeLabel[scene.sceneType],
     material: asset?.displayName ?? "（未設定）",
     line: scene.narration.text,
-    look: template?.name ?? scene.templateId,
+    look: template?.name ?? "見た目が見つかりません",
     materialType,
     // NarrationStatus と VoiceStatus は同一の値集合
     voiceStatus: scene.narration.status,
@@ -75,35 +79,42 @@ export function warningsToDraftWarnings(warnings: Warning[]): DraftWarning[] {
 }
 
 /** 公開前チェックの結果を、実際のシーン/素材から算出する（一部は自動チェック未対応の定型）。 */
-export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[]): PrecheckItem[] {
+export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[], overlayAnimations?: ElementAnimation[]): PrecheckItem[] {
   const items: PrecheckItem[] = [];
+  const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
+  // 場面に紐づく項目は「どの場面か」を番号で列挙し（#403・どの場面が問題か示す）、action がある項目は最初の該当場面へ
+  // 飛べるよう sceneId を持たせる（#400）。番号は scenes の位置（1始まり）＝利用者が見る場面番号。多いと先頭8件＋「ほか N 件」。
+  const fmtScenes = (nums: number[]): string =>
+    nums.length <= 8 ? `場面${nums.join("・")}` : `場面${nums.slice(0, 8).join("・")} ほか${nums.length - 8}件`;
+  const offending = (pred: (s: Scene) => boolean): { nums: number[]; firstId?: string } => {
+    const hits: { id: string; n: number }[] = [];
+    scenes.forEach((s, i) => { if (pred(s)) hits.push({ id: s.sceneId, n: i + 1 }); });
+    return { nums: hits.map((h) => h.n), firstId: hits[0]?.id };
+  };
 
-  const noVoice = scenes.filter((s) => s.narration.status !== NARRATION_STATUS.generated).length;
+  // 掛け合い・単一 narration を統一して見る（sceneNeedsVoice＝実効行の未生成・#403 P1）。scene.narration.status は直接見ない
+  // ＝掛け合いは全行生成済みでも narration.status が更新されないため「要対応」に残り、「声を作成」が no-op に見えるバグを防ぐ。
+  const voice = offending(sceneNeedsVoice);
   items.push(
-    noVoice > 0
-      ? { id: "voice", label: "読み上げの声", detail: `${noVoice}つの場面で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成" }
+    voice.nums.length > 0
+      ? { id: "voice", label: "読み上げの声", detail: `${fmtScenes(voice.nums)}で声がまだ作成されていません。書き出し前に作成してください。`, severity: "action", action: "声を作成", sceneId: voice.firstId }
       : { id: "voice", label: "読み上げの声", detail: "すべての場面で声が作成済みです。", severity: "ok" },
   );
 
-  const longSubtitle = scenes.filter((s) => {
-    const template = templates.find((t) => t.templateId === s.templateId);
-    const max = template?.aiHint?.maxSubtitleLength ?? 60;
-    return (s.texts.subtitle?.length ?? 0) > max;
-  }).length;
+  const subtitle = offending((s) => (s.texts.subtitle?.length ?? 0) > (templateOf(s)?.aiHint?.maxSubtitleLength ?? 60));
   items.push(
-    longSubtitle > 0
-      ? { id: "subtitle", label: "字幕の長さ", detail: `字幕が長い場面が${longSubtitle}つあります。短くすると読みやすくなります。`, severity: "action", action: "短くする" }
+    subtitle.nums.length > 0
+      ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: "短くする", sceneId: subtitle.firstId }
       : { id: "subtitle", label: "字幕の長さ", detail: "字幕の長さは読みやすい範囲です。", severity: "ok" },
   );
 
-  const longLine = scenes.filter((s) => {
-    const template = templates.find((t) => t.templateId === s.templateId);
-    const max = template?.aiHint?.maxNarrationLength ?? 120;
-    return s.narration.text.length > max;
-  }).length;
+  // セリフの長さ／自由配置は warning のみで action ボタンが無いため sceneId は持たせない（場面番号は内容に列挙する）。
+  // 掛け合いは本文が lines[].text 側にあるため、実効行（sceneLines）で各行の長さを見る（scene.narration.text 直参照は
+  // 掛け合いで空＝未検出になる・ADR-0015）。単一 narration は sceneLines が1行に写すので従来と同一。
+  const line = offending((s) => sceneLines(s).some((l) => l.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120)));
   items.push(
-    longLine > 0
-      ? { id: "line", label: "セリフの長さ", detail: `セリフが長い場面が${longLine}つあります。`, severity: "warning" }
+    line.nums.length > 0
+      ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。短くすると聞き取りやすくなります。`, severity: "warning" }
       : { id: "line", label: "セリフの長さ", detail: "セリフの長さは適切です。", severity: "ok" },
   );
 
@@ -117,7 +128,7 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   const unused = assets.filter((a) => !used.has(a.assetId)).length;
   items.push(
     unused > 0
-      ? { id: "unused", label: "使っていない素材", detail: `使われていない素材が${unused}つあります。`, severity: "warning" }
+      ? { id: "unused", label: "使っていない素材", detail: `使われていない素材が${unused}つあります。動画には入らないので、そのままでも問題ありません。`, severity: "warning" }
       : { id: "unused", label: "使っていない素材", detail: "すべての素材が使われています。", severity: "ok" },
   );
 
@@ -125,16 +136,68 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   // FREE 場面が無いプロジェクトでは項目を出さない（通常プロジェクトのノイズを避ける）。
   const freeScenes = scenes.filter((s) => (s.freeLayout?.length ?? 0) > 0);
   if (freeScenes.length > 0) {
-    const badCount = freeScenes.filter((s) => {
-      const template = templates.find((t) => t.templateId === s.templateId);
-      const cv = template?.canvas ?? { width: WIDTH, height: HEIGHT };
+    const badFree = offending((s) => {
+      if ((s.freeLayout?.length ?? 0) === 0) return false;
+      const cv = templateOf(s)?.canvas ?? { width: WIDTH, height: HEIGHT };
       return validateFreeLayout(s.freeLayout ?? [], assets, cv).length > 0;
-    }).length;
+    });
     items.push(
-      badCount > 0
-        ? { id: "freeLayout", label: "自由配置の確認", detail: `自由に配置した場面が${badCount}つ、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning" }
+      badFree.nums.length > 0
+        ? { id: "freeLayout", label: "自由配置の確認", detail: `${fmtScenes(badFree.nums)}が、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning" }
         : { id: "freeLayout", label: "自由配置の確認", detail: "自由配置の場面は問題ありません。", severity: "ok" },
     );
+  }
+
+  // 場面の見た目（テンプレ・Codex 監査 2026-07-13・#434 と同流儀）：templateId が解決できない場面（利用者テンプレの削除・
+  // 別環境で開く等でダングリング）は、書き出しで黙って落とすと場面が MP4 から消えテロップ/BGM もズレるため §2-5 で停止する。
+  // ここでは事前に**場面つきで**警告し、該当場面へ戻れる導線（action＝直す）を出す。問題が無ければ項目を出さない。
+  const noTemplate = offending((s) => !templateOf(s));
+  if (noTemplate.nums.length > 0) {
+    items.push({
+      id: "sceneTemplate",
+      label: "場面の見た目",
+      detail: `${fmtScenes(noTemplate.nums)}の見た目が見つかりません。場面編集で見た目を選び直してから書き出してください。`,
+      severity: "action",
+      action: "直す",
+      sceneId: noTemplate.firstId,
+    });
+  }
+
+  // 動画の配置（#434・ADR-0026）：動画スロットがあるのにレイアウトへ配置できない場面（分割失敗＝内部不整合や
+  // スロット/グループの非表示など）を**場面つきで**警告する。これを見逃すと書き出しが停止する（黙って静止画化しない）。
+  // 問題がある場面が無ければ項目自体を出さない（通常プロジェクトのノイズを避ける・freeLayout チェックと同方針）。
+  const templateById = new Map(templates.map((t) => [t.templateId, t] as const));
+  const unplaceable = unplaceableVideoSceneNumbers(scenes, templateById, (id) => assets.find((a) => a.assetId === id));
+  if (unplaceable.length > 0) {
+    items.push({
+      id: "videoPlacement",
+      label: "動画の配置",
+      detail: `${fmtScenes(unplaceable)}で動画を配置できません。場面編集で動画を置き直してから書き出してください。`,
+      severity: "action",
+      action: "直す",
+      // 最初の該当場面（unplaceable は 1始まりの位置）へ飛ぶ。
+      sceneId: scenes[unplaceable[0] - 1]?.sceneId,
+    });
+  }
+
+  // 動画の再生タイミング（#444・ADR-0027 D3）：再生開始が「アニメの後（afterAnim）」なのにアニメが場面尺いっぱい
+  // （settled 区間が無い）で、動画が一度も再生されない場面を**場面つきで**警告。UI は afterAnim を非表示にするが、
+  // afterAnim を選んだ後にアニメを場面尺まで伸ばすと到達し得る。書き出しは同一判定で停止（黙って静止画にしない・§2-5）。
+  const afterAnimNoPlay = afterAnimNoSettledSceneNumbers(
+    scenes,
+    templateById,
+    (id) => assets.find((a) => a.assetId === id),
+    (s) => (overlayAnimations ?? []).filter((a) => a.sceneId === s.sceneId),
+  );
+  if (afterAnimNoPlay.length > 0) {
+    items.push({
+      id: "videoStartAfterAnim",
+      label: "動画の再生タイミング",
+      detail: `${fmtScenes(afterAnimNoPlay)}は、アニメが場面の最後まで続くため「アニメの後」だと動画が再生されません。アニメを短くするか、「途中から」か「アニメと同時」に変えてください。`,
+      severity: "action",
+      action: "直す",
+      sceneId: scenes[afterAnimNoPlay[0] - 1]?.sceneId,
+    });
   }
 
   // 誤字脱字・誇大表現・個人情報の写り込みは自動チェック未対応のため、人の目での確認を促す

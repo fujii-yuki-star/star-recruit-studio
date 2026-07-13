@@ -42,6 +42,16 @@ export const TEXT_ALIGN = {
   right: 'right',
 } as const satisfies Record<string, TextAlign>;
 
+/** キーフレームのイージング（④・ADR-0019）。 */
+export const EASINGS = ['linear', 'ease-in-out'] as const;
+export type Easing = (typeof EASINGS)[number];
+
+/** Easing の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const EASING = {
+  linear: 'linear',
+  easeInOut: 'ease-in-out',
+} as const satisfies Record<string, Easing>;
+
 /** FREE 図形要素の種別（ADR-0008・line は矩形モデルと相性が悪く MVP 対象外）。 */
 export const FREE_SHAPE_TYPES = [
   'rect', 'ellipse', 'rounded_rect', 'triangle', 'star', 'arrow', 'speech_bubble',
@@ -132,6 +142,21 @@ export const FIT = {
   contain: 'contain',
   stretch: 'stretch',
 } as const satisfies Record<string, Fit>;
+
+/**
+ * 動画スロット本体アニメの再生開始タイミング（ADR-0027・#444）。
+ * withAnim=アニメと同時・先頭から（既定）／afterAnim=アニメの後（アニメ中は代表フレームで待つ）／
+ * delay=途中から（delaySec 秒だけ遅らせて再生）。絶対秒でなくモードで保存＝アニメ長が変わっても意味が化けない。
+ */
+export const VIDEO_START_MODES = ['withAnim', 'afterAnim', 'delay'] as const;
+export type VideoStartMode = (typeof VIDEO_START_MODES)[number];
+
+/** VideoStartMode の値を参照するための定数（§6/§2-7：文字列直書きを避ける）。 */
+export const VIDEO_START_MODE = {
+  withAnim: 'withAnim',
+  afterAnim: 'afterAnim',
+  delay: 'delay',
+} as const satisfies Record<string, VideoStartMode>;
 
 export const TEXT_KEYS = ['title', 'main', 'subtitle', 'caption', 'url'] as const;
 export type TextKey = (typeof TEXT_KEYS)[number];

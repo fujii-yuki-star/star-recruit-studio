@@ -1,11 +1,15 @@
 // シーン＋テンプレ → 各レイヤーの配置（矩形・zIndex・内容・スタイル）を解決する純粋ロジック。
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
-import { FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
+import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, LayerType, TextAlign } from '../domain/enums';
-import type { Scene } from '../domain/project/types';
+import { DEFAULT_FIT } from '../domain/constants';
+import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { Layer, Template } from '../domain/template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
+import { interpolateKeyframes } from '../domain/project/keyframes';
+import type { InterpolatedTransform } from '../domain/project/keyframes';
+import { groupElementIds } from '../domain/project/groupOps';
 
 export interface Rect {
   x: number;
@@ -39,6 +43,8 @@ export interface ImageItem extends ItemBase {
   fit: Fit;
   role: 'background' | 'slot' | 'character' | 'logo';
   label: string;
+  /** 要素の不透明度（0..1・アニメの opacity 適用先・④ ADR-0019）。未指定＝1（不透明）。 */
+  opacity?: number;
 }
 
 export interface TextItem extends ItemBase {
@@ -58,6 +64,8 @@ export interface TextItem extends ItemBase {
   textAlign?: TextAlign;
   strokeColor?: string;
   strokeWidth?: number;
+  /** 要素の不透明度（0..1・アニメの opacity 適用先・④ ADR-0019）。未指定＝1（不透明）。 */
+  opacity?: number;
 }
 
 export type LayoutItem = FillItem | ImageItem | TextItem;
@@ -89,6 +97,57 @@ export interface LayoutOptions {
    * 未指定＝従来どおり scene.texts['subtitle'] を使う。
    */
   subtitleText?: string | null;
+  /**
+   * タイムラインのテロップ（timelineOverlay・ADR-0018）をこのフレームに描く（並行テロップ＝③(8)）。各要素は文言＋段(row)。
+   * 未指定/空＝なし。プレビューはこのオプション、書き出しは overlayTelopItem を段ごとの帯PNGに焼いて overlay 合成＝同一ジオメトリでパリティ。
+   */
+  telops?: { text: string; row: number }[];
+  /** テロップのフォント id（**動画全体フォントを解決済みで渡す**）。テロップは場面横断のため場面フォント（scene.fontId）に左右されない（ADR-0001）。 */
+  telopFontId?: string | null;
+  /**
+   * キーフレームアニメの再生位置（場面ローカル秒・④・ADR-0019）。指定時、この場面の animations を補間して対象要素へ適用する。
+   * 未指定＝静止（後方互換）。preview/export は同一の timeSec/animations で呼び、フレーム単位パリティを保つ。
+   */
+  timeSec?: number;
+  /** この場面の要素アニメーション（timelineOverlay.animations のうち sceneId 一致分）。timeSec と併せて渡す。 */
+  animations?: ElementAnimation[];
+}
+
+// タイムラインのテロップ帯の既定ジオメトリ（キャンバス比・ADR-0018 テロップ実描画）。
+// 位置は画面上部の帯＝下部の字幕（subtitle）と衝突しない。単一の参照元（§2-7）。
+const OVERLAY_TELOP_X_RATIO = 0.08;
+const OVERLAY_TELOP_Y_RATIO = 0.06;
+const OVERLAY_TELOP_W_RATIO = 0.84;
+const OVERLAY_TELOP_H_RATIO = 0.14;
+const OVERLAY_TELOP_FONT_RATIO = 0.045;
+// 段（row）ごとの縦の送り（並行テロップ・③(8)）。帯の高さ分ずつ下へ積む（重ならない）。
+const OVERLAY_TELOP_ROW_STRIDE_RATIO = OVERLAY_TELOP_H_RATIO;
+// 常に最前面（テンプレ/FREE の zIndex より大きく・クレジットピルは layoutToSvg が items の後に描くため影響なし）。
+const OVERLAY_TELOP_Z = 9500;
+
+/** タイムラインのテロップ帯の LayoutItem（プレビューと書き出し帯PNGが共有＝パリティの単一参照元）。row＝段（0=最上段・下へ積む）。 */
+export function overlayTelopItem(width: number, height: number, text: string, fontId?: string | null, row = 0): TextItem {
+  return {
+    id: `overlay_telop_${row}`,
+    kind: 'text',
+    x: Math.round(width * OVERLAY_TELOP_X_RATIO),
+    y: Math.round(height * (OVERLAY_TELOP_Y_RATIO + row * OVERLAY_TELOP_ROW_STRIDE_RATIO)),
+    w: Math.round(width * OVERLAY_TELOP_W_RATIO),
+    h: Math.round(height * OVERLAY_TELOP_H_RATIO),
+    zIndex: OVERLAY_TELOP_Z,
+    text,
+    fontSize: Math.round(height * OVERLAY_TELOP_FONT_RATIO),
+    fontWeight: 'bold',
+    color: '#ffffff',
+    maxLines: 2,
+    textAlign: 'center',
+    // 縁取りで背景を問わず可読に（帯背景は敷かない＝映像を隠しすぎない）。
+    strokeColor: '#000000',
+    strokeWidth: 3,
+    isSubtitle: false,
+    // 動画全体フォントを item に明示（textToSvg は item.fontId 優先＝描画側 fontFamily（場面フォント）に左右されない・ADR-0001）。
+    fontId: fontId ?? null,
+  };
 }
 
 /** シーンをテンプレに沿って配置解決する。 */
@@ -110,7 +169,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       case 'background': {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
-          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'cover', role: 'background', label: '背景' });
+          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? DEFAULT_FIT, role: 'background', label: '背景' });
         } else {
           items.push({ ...base, kind: 'fill', color: layer.fillColor ?? backgroundColor, opacity: layer.opacity ?? 1, radius: layer.radius ?? 0 });
         }
@@ -119,13 +178,13 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       case 'slot': {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         // ラベルは未解決時のプレースホルダ表示に使う。生の layer.id は技術用語漏れ（§2-3）なので日本語に。
-        items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'cover', role: 'slot', label: '素材' });
+        items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? DEFAULT_FIT, role: 'slot', label: '素材' });
         break;
       }
       case 'logo': {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
-          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? 'contain', role: 'logo', label: 'ロゴ' });
+          items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? FIT.contain, role: 'logo', label: 'ロゴ' });
         }
         break;
       }
@@ -133,7 +192,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // ゆうこ表示はテンプレ依存（この case=character レイヤー有）。poseAssetId があれば表示する。
         // character.enabled（旧・場面ごと表示トグル）は廃止＝描画では参照しない（互換のため値は残す。req5・01§7.3）。
         if (scene.character.poseAssetId) {
-          items.push({ ...base, kind: 'image', assetId: scene.character.poseAssetId, fit: layer.fit ?? 'contain', role: 'character', label: 'ゆうこ' });
+          items.push({ ...base, kind: 'image', assetId: scene.character.poseAssetId, fit: layer.fit ?? FIT.contain, role: 'character', label: 'ゆうこ' });
         }
         break;
       }
@@ -149,9 +208,16 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
       case 'subtitle': {
         // 掛け合い：subtitle レイヤーのみ行の字幕で上書き（追加A/B）。null＝非表示・未指定＝従来。
         const overrideSub = layer.type === 'subtitle' && opts != null && 'subtitleText' in opts;
+        // 単一ナレーション等の静的字幕（override 無し）は場面の字幕トグル subtitleEnabledDefault=false で出さない（#413）。
+        // preview/export とも layoutScene 経由なのでここが単一の参照元。掛け合いは opts.subtitleText 側で行ごとに
+        // 解決済み（resolveLineSubtitle が subtitleEnabledDefault を継承）＝override 経路は触らない。
+        const staticSubtitleOff =
+          layer.type === 'subtitle' && !overrideSub && scene.subtitleEnabledDefault === false;
         const text = overrideSub
           ? opts.subtitleText ?? ''
-          : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
+          : staticSubtitleOff
+            ? ''
+            : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
         if (text.length === 0) break;
         const bg = layer.type === 'subtitle' && layer.background?.enabled
           ? {
@@ -165,7 +231,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           kind: 'text',
           text,
           fontSize: layer.fontSize ?? DEFAULT_FONT_SIZE,
-          fontWeight: layer.fontWeight ?? 'normal',
+          fontWeight: layer.fontWeight ?? FONT_WEIGHT.normal,
           color: layer.color ?? DEFAULT_TEXT_COLOR,
           maxLines: layer.maxLines ?? 2,
           background: bg,
@@ -181,20 +247,45 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     }
   }
 
+  // グループアニメ（④(3)・ADR-0019）：グループ(group_NNN)を対象にした animation を、合成前に静的 transform へ重ねる
+  // （位置=加算／拡縮=乗算／回転=加算・グループ中心は不変）。opacity はメンバー要素へ乗算で後段適用。FREE 場面のみ。
+  const sceneGroups = template.category === FREE_CATEGORY ? scene.groups ?? [] : [];
+  const groupAnim = new Map<string, InterpolatedTransform>();
+  if (opts?.timeSec != null && opts.animations && sceneGroups.length > 0) {
+    const groupIds = new Set(sceneGroups.map((g) => g.id));
+    for (const a of opts.animations) {
+      if (a.sceneId === scene.sceneId && groupIds.has(a.targetId)) {
+        groupAnim.set(a.targetId, interpolateKeyframes(a.keyframes, opts.timeSec));
+      }
+    }
+  }
+  const effectiveGroups = groupAnim.size === 0
+    ? sceneGroups
+    : sceneGroups.map((g) => {
+        const tr = groupAnim.get(g.id);
+        return tr
+          ? { ...g, transform: {
+              x: g.transform.x + (tr.x ?? 0),
+              y: g.transform.y + (tr.y ?? 0),
+              scale: g.transform.scale * (tr.scale ?? 1),
+              rotation: g.transform.rotation + (tr.rotation ?? 0),
+            } }
+          : g;
+      });
+
   // FREE テンプレ場面のみ：scene.freeLayout の要素を LayoutItem として重ねる（ADR-0008）。テンプレ層の上に zIndex 順。
   // 通常テンプレに誤って freeLayout が付いても描画しない（防御。category で判定）。
   if (template.category === FREE_CATEGORY) {
-    const sceneGroups = scene.groups ?? [];
-    const elGeom = composeGroupGeometry(scene.freeLayout ?? [], sceneGroups);
+    const elGeom = composeGroupGeometry(scene.freeLayout ?? [], effectiveGroups);
     for (const el of scene.freeLayout ?? []) {
       if (el.hidden) continue; // 非表示の要素は描画しない（レイヤー一覧で隠す・#210）。
-      if (isHiddenByGroup(el.id, sceneGroups)) continue; // hidden グループのメンバーも描画しない（ADR-0022）。
+      if (isHiddenByGroup(el.id, effectiveGroups)) continue; // hidden グループのメンバーも描画しない（ADR-0022）。
       // zIndex 未指定は 1（背景=0 より前面に置く）。rotation はグループ合成後の値（未所属＝el.rotation）。
       const cg = elGeom.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation };
       const base: ItemBase = { id: el.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: el.zIndex ?? 1, rotation: cg.rotation };
       switch (el.kind) {
         case 'slot':
-          items.push({ ...base, kind: 'image', assetId: el.assetId ?? null, fit: el.fit ?? 'cover', role: 'slot', label: '素材' });
+          items.push({ ...base, kind: 'image', assetId: el.assetId ?? null, fit: el.fit ?? DEFAULT_FIT, role: 'slot', label: '素材' });
           break;
         case 'text': {
           const text = el.text ?? '';
@@ -202,13 +293,60 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? 'normal', color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
           break;
         }
         case 'shape':
           items.push({ ...base, kind: 'fill', color: el.fillColor ?? '#ffffff', opacity: el.opacity ?? 1, radius: el.radius ?? 0, shapeType: el.shapeType ?? FREE_SHAPE_TYPE.rect, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
           break;
       }
+    }
+  }
+
+  // キーフレームアニメ（④・ADR-0019）：timeSec 指定時、この場面の対象要素へ補間した transform を適用する。
+  // 変換は要素の「本来の状態」を基準とする相対値（CSS transform 相当）＝**後から位置/大きさ/角度を編集しても追従**する
+  //  （絶対焼き込みだと編集後に古い値へ固定される・レビュー対応）。x/y=本来位置からのオフセット／scale=係数（中心維持）／
+  //  rotation=本来角度からのオフセット。opacity は絶対（0..1・fill=塗り／image・text=要素全体＝sceneSvg の <g opacity>）。
+  // static（timeSec 未指定/アニメ無し）は素通し＝後方互換。グループ対象は下（geometry は effectiveGroups で合成済・opacity のみ後段）。
+  if (opts?.timeSec != null && opts.animations && opts.animations.length > 0) {
+    const byTarget = new Map<string, ElementAnimation>();
+    for (const a of opts.animations) {
+      if (a.sceneId === scene.sceneId) byTarget.set(a.targetId, a);
+    }
+    for (const item of items) {
+      const anim = byTarget.get(item.id); // グループ対象（group_NNN）はここでは一致しない＝要素だけ処理
+      if (!anim) continue;
+      const tr = interpolateKeyframes(anim.keyframes, opts.timeSec);
+      // scale（中心維持）→ x/y オフセット → rotation オフセット の順で本来値に重ねる。
+      if (tr.scale != null) {
+        const ow = item.w;
+        const oh = item.h;
+        item.w *= tr.scale;
+        item.h *= tr.scale;
+        item.x -= (item.w - ow) / 2;
+        item.y -= (item.h - oh) / 2;
+      }
+      if (tr.x != null) item.x += tr.x;
+      if (tr.y != null) item.y += tr.y;
+      if (tr.rotation != null) item.rotation = (item.rotation ?? 0) + tr.rotation;
+      // opacity は全種別へ（fill=塗り不透明度／image・text=要素の不透明度＝sceneSvg の <g opacity>）。
+      if (tr.opacity != null) item.opacity = tr.opacity;
+    }
+  }
+  // グループの opacity（④(3)）：メンバー要素（推移的）へ乗算で適用（geometry は effectiveGroups で合成済）。
+  // 要素自身のアニメ opacity とも乗算で重なる（グループのフェード×要素のフェード）。
+  for (const [gid, tr] of groupAnim) {
+    if (tr.opacity == null) continue;
+    const members = new Set(groupElementIds(sceneGroups, gid));
+    for (const item of items) {
+      if (members.has(item.id)) item.opacity = (item.opacity ?? 1) * tr.opacity;
+    }
+  }
+
+  // タイムラインのテロップ（ADR-0018・並行テロップ③(8)）。プレビュー経路のみ（書き出しは段ごとの帯PNGを overlay 合成＝同一 item を共有）。
+  if (opts?.telops) {
+    for (const t of opts.telops) {
+      items.push(overlayTelopItem(template.canvas.width, template.canvas.height, t.text, opts.telopFontId, t.row));
     }
   }
 

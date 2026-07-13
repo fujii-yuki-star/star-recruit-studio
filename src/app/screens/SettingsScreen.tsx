@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import { useProjectStore } from "../store/projectStore";
+import { useAudioPreview } from "../hooks/useAudioPreview";
+import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
 import {
   DEFAULT_AI_MODEL, getAiModel, getVoicevoxSpeaker, getVoicevoxUrl,
@@ -20,11 +23,15 @@ export function SettingsScreen() {
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
+  // 声パラメータ（速さ/高さ/抑揚）スライダーのドラッグを1履歴に（#389・場面編集側と同じ挙動に揃える）。
+  const { dragGroup } = useHistoryGroup();
 
   const [keyInput, setKeyInput] = useState("");
   const [aiConnected, setAiConnected] = useState(false);
   const [keyBusy, setKeyBusy] = useState(false);
   const [keyError, setKeyError] = useState("");
+  // 接続キーの削除も共通の確認へ（#410）。キーは復元できないため確認必須（即時削除だった）。
+  const [confirmClearKey, setConfirmClearKey] = useState(false);
   const [aiModel, setAiModelState] = useState(() => getAiModel());
 
   function onChangeModel(value: string) {
@@ -39,6 +46,8 @@ export function SettingsScreen() {
   });
   const [testState, setTestState] = useState<"idle" | "loading" | "error">("idle");
   const [testError, setTestError] = useState("");
+  // 試し聞きの再生制御（#388）：画面遷移で停止・連打で重ならない・再生中は「停止」表示。
+  const audioPreview = useAudioPreview();
   // 動画保存の予備機能の状態（実検出は取得・検証実装後＝pin 後。今は表示枠用のプレースホルダ）。
   const h264Status: H264FeatureStatus = H264_INITIAL_STATUS;
 
@@ -51,12 +60,20 @@ export function SettingsScreen() {
     setVoicevoxSpeaker(value);
   }
   async function onTestVoice() {
+    // 再生中にもう一度押したら停止（投げっぱなしにしない・#388）。
+    if (audioPreview.playingKey === "settings") {
+      audioPreview.stop();
+      return;
+    }
     setTestState("loading");
     setTestError("");
     try {
       const url = await synthesizePreview();
-      // 再生失敗（コーデック/自動再生制限など）も握りつぶさず通知する（§2-5）。
-      await new Audio(url).play();
+      // 再生失敗（コーデック/自動再生制限など）も握りつぶさず通知する（§2-5）。停止制御は audioPreview に委ねる。
+      audioPreview.play("settings", url, () => {
+        setTestError("声の確認に失敗しました。もう一度お試しください。");
+        setTestState("error");
+      });
       setTestState("idle");
     } catch (e) {
       // VOICEVOX 由来の失敗は Rust が行動明示の文字列で返す。それ以外（再生失敗等）は定型文。
@@ -98,6 +115,7 @@ export function SettingsScreen() {
       setKeyError(typeof e === "string" ? e : "接続を削除できませんでした。もう一度お試しください。");
     } finally {
       setKeyBusy(false);
+      setConfirmClearKey(false);
     }
   }
 
@@ -105,7 +123,7 @@ export function SettingsScreen() {
     <div className="main-scroll">
       <PageHead
         title="設定"
-        desc="使用するAIやナレーターの声、保存先などを設定できます。"
+        desc="使用するAIやナレーターの声などを設定できます。"
       />
 
       <div style={{ maxWidth: 760 }} className="col gap-lg">
@@ -133,13 +151,22 @@ export function SettingsScreen() {
           </div>
 
           {aiConnected ? (
-            <button
-              className="btn btn-secondary"
-              onClick={() => void onClearKey()}
-              disabled={keyBusy}
-            >
-              接続を削除する
-            </button>
+            confirmClearKey ? (
+              <DeleteConfirm
+                busy={keyBusy}
+                message="接続キーを削除しますか？もう一度使うには、キーを貼り付け直す必要があります。"
+                onCancel={() => setConfirmClearKey(false)}
+                onConfirm={() => void onClearKey()}
+              />
+            ) : (
+              <button
+                className="btn btn-secondary"
+                onClick={() => setConfirmClearKey(true)}
+                disabled={keyBusy}
+              >
+                接続を削除する
+              </button>
+            )
           ) : (
             <div className="field">
               <label className="field-label" htmlFor="aiKey">
@@ -160,7 +187,7 @@ export function SettingsScreen() {
                   onClick={() => void onSaveKey()}
                   disabled={!keyInput.trim() || keyBusy}
                 >
-                  保存する
+                  {keyBusy ? "保存中…" : "保存する"}
                 </button>
               </div>
               <p className="field-hint">
@@ -256,6 +283,7 @@ export function SettingsScreen() {
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.speed ?? SPEED_RANGE.def, SPEED_RANGE)}
+              {...dragGroup}
               onChange={(e) =>
                 updateVoiceSettings({ speed: sliderToValue(Number(e.target.value), SPEED_RANGE) })
               }
@@ -277,6 +305,7 @@ export function SettingsScreen() {
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.pitch ?? PITCH_RANGE.def, PITCH_RANGE)}
+              {...dragGroup}
               onChange={(e) =>
                 updateVoiceSettings({ pitch: sliderToValue(Number(e.target.value), PITCH_RANGE) })
               }
@@ -298,6 +327,7 @@ export function SettingsScreen() {
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.intonation ?? INTONATION_RANGE.def, INTONATION_RANGE)}
+              {...dragGroup}
               onChange={(e) =>
                 updateVoiceSettings({
                   intonation: sliderToValue(Number(e.target.value), INTONATION_RANGE),
@@ -320,21 +350,17 @@ export function SettingsScreen() {
             onClick={() => void onTestVoice()}
             disabled={testState === "loading"}
           >
-            {testState === "loading" ? "確認中…" : "声を試し聞きする"}
+            {audioPreview.playingKey === "settings"
+              ? "■ 停止"
+              : testState === "loading"
+                ? "確認中…"
+                : "声を試し聞きする"}
           </button>
           {testState === "error" && (
             <div className="notice notice-warn" role="alert" style={{ marginTop: 8 }}>
               <span>{testError}</span>
             </div>
           )}
-        </div>
-
-        {/* 保存先 */}
-        <div className="card">
-          <h2 className="section-title">保存先</h2>
-          <p className="page-desc text-pretty">
-            動画の保存先は、書き出し（「動画を保存」）のときに毎回選べます。
-          </p>
         </div>
 
         {/* H.264動画保存機能の「OpenH264フォールバック」情報。主経路は Windows 標準機能（Media Foundation）＝ADR-0013。通常＋開発中は機能フラグで既定非表示。 */}

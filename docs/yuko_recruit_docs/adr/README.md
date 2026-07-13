@@ -7,7 +7,7 @@
 
 | ID | タイトル | 状態 |
 |---|---|---|
-| [0001](0001-rendering-parity.md) | プレビューと本番出力の一致方式（描画アーキテクチャ） | **Accepted** |
+| [0001](0001-rendering-parity.md) | プレビューと本番出力の一致方式（描画アーキテクチャ） | **Accepted**／一部 Superseded（0019・場面内静止のみ） |
 | [0002](0002-ffmpeg-codec.md) | FFmpegビルドとH.264コーデック方針（OpenH264） | **Accepted** |
 | [0003](0003-narration-voice.md) | ナレーション音声とゆうこの関係（ずんだもん＝ナレーター） | **Accepted** |
 | [0004](0004-rasterization-method.md) | 本番ラスタライズ手段の単一化（WebView CanvasでSVG→PNG） | **Accepted** |
@@ -24,11 +24,17 @@
 | [0015](0015-dialogue-timeline-model.md) | 掛け合い＝場面のセリフ列（ミニタイムライン）モデル | **Accepted** |
 | [0016](0016-detailed-editing-completion-roadmap.md) | 詳細編集の完全化（ロードマップ／アンブレラ・α-3〜） | **Proposed** |
 | [0017](0017-template-authoring-editor.md) | テンプレ作成・編集エディタ（ユーザーテンプレート） | **Accepted** |
-| [0018](0018-cross-scene-timeline-model.md) | 場面横断タイムライン／複数トラックのモデル（③・設計のみ） | **Proposed** |
-| [0019](0019-keyframe-animation-model.md) | キーフレーム／場面内アニメ（④・設計のみ・ADR-0001 を supersede） | **Proposed** |
+| [0018](0018-cross-scene-timeline-model.md) | 場面横断タイムライン／複数トラックのモデル（③・2モデル方式・α-4 実装中） | **Accepted** |
+| [0019](0019-keyframe-animation-model.md) | キーフレーム／場面内アニメ（④・per-frame・FREE要素＋グループ・実装時に ADR-0001 を部分 supersede） | **Accepted** |
 | [0020](0020-undo-redo-model.md) | 取り消し/やり直し（Undo/Redo）モデル | **Accepted** |
 | [0021](0021-template-owned-assets.md) | テンプレ既定素材（template-owned default assets・場面素材優先のフォールバック） | **Accepted** |
 | [0022](0022-element-grouping.md) | 要素のグループ化（groups＋独自transform・FREE/テンプレ両エディタ） | **Accepted** |
+| [0023](0023-integrated-timeline-editing.md) | 統合タイムライン編集（再生ヘッド＋同期プレビュー・上位仕上げ編集面・α-5 主軸） | **Proposed** |
+| [0024](0024-non-destructive-editing-model.md) | 非破壊編集モデル（Asset＝源泉／使用単位＝非破壊の範囲参照・解析キャッシュ・VoiceClip 方向） | **Proposed** |
+| [0025](0025-credit-display-modes.md) | クレジット表示方式（常時/最初/最後/両方/非表示・既定=最初と最後・About 必須維持・α-6） | **Accepted**（0003 を一部 supersede） |
+| [0026](0026-alpha4-behavior-consistency.md) | α-4 挙動一致の原則（設定どおり・経路間統一・プレビュー=書き出し。間×遷移=切替尺優先／複数動画スロット／動画実再生／collapse撤去／分割失敗の表面化／動画×アニメ解除） | **Accepted**（0006 の2枚固定を一部改め・0019 の動画スロット除外を解除方向） |
+| [0027](0027-video-slot-start-timing.md) | 動画スロット本体アニメの再生開始タイミング（同時／途中／アニメ後・`scene.slotVideoStart` モード明示・schema 1.18・#442 後続） | **Accepted**（実装は段階） |
+| [0028](0028-per-use-clip-and-undo.md) | 動画クリップ調整を per-use 上書き（`scene.slotClips`）にして Undo 可能に（ADR-0024 決定1 の確定・#472） | **Accepted** |
 
 ## 状態の意味
 

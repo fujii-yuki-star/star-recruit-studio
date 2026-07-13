@@ -41,16 +41,3 @@ export function Switch({ on, onChange, label, disabled = false }: SwitchProps) {
     </button>
   );
 }
-
-interface SeekbarProps {
-  value: number; // 0-100
-}
-
-export function Seekbar({ value }: SeekbarProps) {
-  return (
-    <div className="seekbar" role="slider" aria-valuenow={value} aria-valuemin={0} aria-valuemax={100} tabIndex={0}>
-      <div className="seekbar-fill" style={{ width: `${value}%` }} />
-      <div className="seekbar-knob" style={{ left: `${value}%` }} />
-    </div>
-  );
-}

@@ -13,8 +13,10 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   const status = useProjectStore((s) => s.status);
   const aiError = useProjectStore((s) => s.aiError);
   const generate = useProjectStore((s) => s.generate);
+  const cancelGeneration = useProjectStore((s) => s.cancelGeneration);
   const fail = useProjectStore((s) => s.fail);
   const reset = useProjectStore((s) => s.reset);
+  const startManualEdit = useProjectStore((s) => s.startManualEdit);
   const [progress, setProgress] = useState(8);
 
   useEffect(() => {
@@ -23,8 +25,9 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
 
   useEffect(() => {
     if (status === "error") return;
+    // ready になるまでは 90% で頭打ち＝生成完了前に 100% へ達して「100%なのに終わらない」表示になるのを防ぐ（#392）。
     const tick = setInterval(() => {
-      setProgress((p) => Math.min(100, p + 6));
+      setProgress((p) => Math.min(status === "ready" ? 100 : 90, p + 6));
     }, 180);
     return () => clearInterval(tick);
   }, [status]);
@@ -49,7 +52,8 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
                 void generate();
               },
             },
-            { label: "手動で作成する", onClick: () => onNavigate("draft") },
+            // 手動作成リカバリ（#393 P1）：status を error のままにせず ready にし、入力済みメタ/素材を残して draft へ。
+            { label: "手動で作成する", onClick: () => { startManualEdit(); onNavigate("draft"); } },
           ]}
         />
       </div>
@@ -68,7 +72,14 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
             : "会社情報と素材をもとに、動画のたたき台を準備しています。少しだけお待ちください。"
         }
         progress={progress}
-        onCancel={ready ? undefined : () => onNavigate("confirm")}
+        onCancel={
+          ready
+            ? undefined
+            : () => {
+                cancelGeneration(); // 生成を本当に中止＝裏で完走しても場面を置き換えない（#402）
+                onNavigate("confirm");
+              }
+        }
       />
       {ready ? (
         <div className="text-center">
@@ -77,11 +88,14 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
           </button>
         </div>
       ) : (
-        <div className="text-center mt">
-          <button className="btn btn-ghost text-sm text-faint" onClick={() => fail()}>
-            うまくいかない場合の表示（デモ）
-          </button>
-        </div>
+        // 「デモ（失敗表示）」ボタンは開発時のみ表示＝本番UIに出さない（#392）。
+        import.meta.env.DEV && (
+          <div className="text-center mt">
+            <button className="btn btn-ghost text-sm text-faint" onClick={() => fail()}>
+              うまくいかない場合の表示（デモ）
+            </button>
+          </div>
+        )
       )}
     </div>
   );

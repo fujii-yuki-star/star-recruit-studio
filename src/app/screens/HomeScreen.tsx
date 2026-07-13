@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { YukoPanel } from "../components/YukoPanel";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import {
   PlusIcon,
   LayoutIcon,
@@ -27,20 +29,25 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
   const loadProject = useProjectStore((s) => s.loadProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
+  // 書き出し中はプロジェクトの切替/削除/新規をブロック（#379）。store 側も no-op で守るが、UI でも無効化して
+  // 「削除→一覧から消える（実体は残る）」等の不整合と誤操作を防ぐ。
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const renameProject = useProjectStore((s) => s.renameProject);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   // 「新しい動画を作る」はヘッダと同じ破棄ガード付きフロー（共有フックで挙動統一）。
-  const { confirming: confirmNew, start: startNew, confirm: confirmStartNew, cancel: cancelNew } =
+  const { confirming: confirmNew, start: startNew, startBlank, confirm: confirmStartNew, cancel: cancelNew } =
     useStartNewProject(onNavigate);
   // プロジェクトを開けなかったときのユーザー向け表示（§2-5）。
   const [openError, setOpenError] = useState(false);
   // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // プロジェクトを開いている最中の id（#392）。連打・別プロジェクト並走で loadProject が後勝ちするのを防ぐ。
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState(false);
 
   async function removeProject(projectId: string) {
-    if (deleteBusy) return;
+    if (deleteBusy || isExporting) return; // 書き出し中は削除しない（no-op 後に一覧だけ消える不整合を防ぐ・#379）
     setDeleteBusy(true);
     setDeleteError(false);
     try {
@@ -103,12 +110,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   }, [listProjects]);
 
   async function openProject(projectId: string) {
+    if (isExporting) return; // 書き出し中は切替をブロック（loadProject は no-op・遷移もしない・#379）
+    if (openingId) return; // 既に別プロジェクトを開いている最中は無視（連打・並走で後勝ちを防ぐ・#392）
     setOpenError(false);
+    setOpeningId(projectId);
     try {
       await loadProject(projectId);
-      onNavigate("draft");
+      onNavigate("draft"); // 成功で draft へ遷移＝HomeScreen アンマウント（openingId は解除不要）。
     } catch {
       setOpenError(true);
+      setOpeningId(null); // 失敗時のみ解除して再度開けるように。
     }
   }
 
@@ -134,17 +145,26 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </div>
           )}
 
+          {isExporting && (
+            <div className="notice notice-info mb" role="status">
+              <span>
+                動画の書き出し中です。終わるまで、新しい動画づくり・プロジェクトの切り替え・削除はできません（完了までお待ちください）。
+              </span>
+            </div>
+          )}
+
           {confirmNew && (
             <div className="notice notice-warn mb" role="alert">
               <span>
                 今の編集内容を閉じて新しく作りますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
               </span>
+              {/* 確認ダイアログは「やめる（左・ghost）／実行（右）」で全画面統一（#410 sub2・削除確認と同じ並び）。 */}
               <div className="row gap-sm">
-                <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
-                  新しく作る
-                </button>
                 <button className="btn btn-ghost btn-icon" onClick={cancelNew}>
                   やめる
+                </button>
+                <button className="btn btn-primary btn-icon" onClick={confirmStartNew}>
+                  新しく作る
                 </button>
               </div>
             </div>
@@ -161,10 +181,16 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 伝えたい内容と写真・動画を入れると、ゆうこが動画のたたき台を作ります。
                 内容を確認・修正してから、動画として保存できます。
               </p>
-              <button className="btn btn-primary btn-lg mt" onClick={startNew}>
-                <PlusIcon size={20} />
-                新しい動画を作る
-              </button>
+              <div className="row gap-sm mt" style={{ flexWrap: "wrap" }}>
+                <button className="btn btn-primary btn-lg" onClick={startNew} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}>
+                  <PlusIcon size={20} />
+                  新しい動画を作る
+                </button>
+                {/* 白紙から作る（#393）＝ウィザード/AI を通らず、空のたたき台から自分で場面を組み立てる。 */}
+                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : "AI を使わず、自分で場面を組み立てます"}>
+                  白紙から作る
+                </button>
+              </div>
             </div>
             <div
               className="thumb thumb-video"
@@ -177,7 +203,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
 
           {/* クイック操作 */}
           <div className="card-grid cols-3 mb">
-            <button className="action-card" onClick={startNew}>
+            <button className="action-card" onClick={startNew} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}>
               <div
                 className="action-card-icon"
                 style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}
@@ -206,27 +232,19 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             <button className="action-card" onClick={() => onNavigate("settings")}>
               <div
                 className="action-card-icon"
-                style={{ background: "var(--color-yellow)", color: "#8a6d1a" }}
+                style={{ background: "var(--color-yellow)", color: "var(--color-warn)" }}
               >
                 <SettingsIcon size={24} />
               </div>
               <span className="action-card-title">設定</span>
               <span className="action-card-desc">
-                使用するAIや読み上げの声、保存先を設定します。
+                使用するAIや読み上げの声を設定します。
               </span>
             </button>
           </div>
 
-          {/* 最近のプロジェクト */}
-          <div className="row-between mb">
-            <h2 className="section-title" style={{ margin: 0 }}>
-              最近のプロジェクト
-            </h2>
-            <button className="btn btn-ghost" onClick={() => onNavigate("draft")}>
-              すべて見る
-              <ChevronRightIcon size={16} />
-            </button>
-          </div>
+          {/* 最近のプロジェクト（この画面自体が一覧なので「すべて見る」導線は置かない・#399 レビュー）。 */}
+          <h2 className="section-title mb">最近のプロジェクト</h2>
           <div className="col gap-sm">
             {projects.length === 0 ? (
               <div className="text-sm text-muted">
@@ -240,6 +258,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       className="input grow"
                       value={renameValue}
                       onChange={(e) => setRenameValue(e.target.value)}
+                      maxLength={PROJECT_NAME_MAX_LENGTH}
                       placeholder="プロジェクト名"
                       aria-label="プロジェクト名"
                       autoFocus
@@ -271,36 +290,24 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     </button>
                   </div>
                 ) : deletingId === p.projectId ? (
-                  <div key={p.projectId} className="notice notice-warn" role="alert">
-                    <span>
-                      「{p.projectName || "無題のプロジェクト"}」を削除しますか？保存した場面・素材・音声ごと消え、元に戻せません。
-                    </span>
-                    <div className="row gap-sm">
-                      <button
-                        className="btn btn-primary btn-icon"
-                        disabled={deleteBusy}
-                        onClick={() => void removeProject(p.projectId)}
-                      >
-                        {deleteBusy ? "削除中…" : "削除する"}
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-icon"
-                        disabled={deleteBusy}
-                        onClick={() => {
-                          setDeletingId(null);
-                          setDeleteError(false);
-                        }}
-                      >
-                        やめる
-                      </button>
-                    </div>
-                  </div>
+                  <DeleteConfirm
+                    key={p.projectId}
+                    busy={deleteBusy}
+                    message={`「${p.projectName || "無題のプロジェクト"}」を削除しますか？保存した場面・素材・音声ごと消え、元に戻せません。`}
+                    onCancel={() => {
+                      setDeletingId(null);
+                      setDeleteError(false);
+                    }}
+                    onConfirm={() => void removeProject(p.projectId)}
+                  />
                 ) : (
                   <div key={p.projectId} className="list-item">
                     <button
                       className="row gap-sm grow"
                       onClick={() => void openProject(p.projectId)}
-                      style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
+                      disabled={isExporting || openingId !== null}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : undefined}
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
                       <div
                         className="thumb thumb-photo"
@@ -314,7 +321,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                           <strong>{p.projectName || "無題のプロジェクト"}</strong>
                         </div>
                         <div className="text-sm text-muted">
-                          更新日 {formatDate(p.updatedAt)}
+                          {openingId === p.projectId ? "開いています…" : `更新日 ${formatDate(p.updatedAt)}`}
                         </div>
                       </div>
                       <ChevronRightIcon size={20} className="text-faint" />
@@ -329,12 +336,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     </button>
                     <button
                       className="btn btn-ghost btn-icon"
+                      disabled={isExporting}
                       onClick={() => {
                         setDeletingId(p.projectId);
                         setDeleteError(false);
                       }}
                       aria-label={`「${p.projectName || "無題のプロジェクト"}」を削除`}
-                      title="削除"
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : "削除"}
                     >
                       <TrashIcon size={18} />
                     </button>

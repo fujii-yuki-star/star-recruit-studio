@@ -37,6 +37,150 @@ const scene: Scene = {
   warnings: [],
 };
 
+describe('layoutScene：タイムラインのテロップ（ADR-0018 テロップ実描画・並行テロップ③(8)）', () => {
+  const telopItems = (layout: { items: LayoutItem[] }): TextItem[] =>
+    layout.items.filter((i) => i.id.startsWith('overlay_telop')) as TextItem[];
+  it('opts.telops で段付きの帯テキストが足される（プレビュー経路・書き出し帯PNGと同一 item）', () => {
+    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'ここがポイント', row: 0 }] });
+    const t = telopItems(layout);
+    expect(t).toHaveLength(1);
+    expect(t[0].id).toBe('overlay_telop_0');
+    expect(t[0].text).toBe('ここがポイント');
+    expect(t[0].isSubtitle).toBe(false); // 「字幕を入れる」OFF でも消えない（独立要素）
+    expect(layout.items[layout.items.length - 1].id).toBe('overlay_telop_0'); // 最前面＝末尾
+    expect(t[0].y).toBe(Math.round(1080 * 0.06));
+    expect(t[0].fontSize).toBe(Math.round(1080 * 0.045));
+  });
+  it('並行テロップ：段ごとに y が帯高さ分だけ下へずれる（③(8)）', () => {
+    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'A', row: 0 }, { text: 'B', row: 1 }] });
+    const t = telopItems(layout);
+    expect(t.map((i) => i.id)).toEqual(['overlay_telop_0', 'overlay_telop_1']);
+    expect(t[0].y).toBe(Math.round(1080 * 0.06));
+    expect(t[1].y).toBe(Math.round(1080 * (0.06 + 0.14))); // 段1 は帯高さ(0.14)分下
+  });
+  it('telopFontId（動画全体フォント）が item.fontId に載る＝場面フォントに左右されない（パリティ）', () => {
+    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'x', row: 0 }], telopFontId: 'kaitou-yokoku-gothic' });
+    expect(telopItems(layout)[0].fontId).toBe('kaitou-yokoku-gothic');
+    // 未指定は null（描画側 fontFamily へフォールバック）。
+    const l2 = layoutScene(scene, openingTemplate, { telops: [{ text: 'x', row: 0 }] });
+    expect(telopItems(l2)[0].fontId).toBeNull();
+  });
+  it('未指定/空では telop item を足さない（従来どおり）', () => {
+    expect(telopItems(layoutScene(scene, openingTemplate))).toHaveLength(0);
+    expect(telopItems(layoutScene(scene, openingTemplate, { telops: [] }))).toHaveLength(0);
+  });
+});
+
+describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413/#495 レビュー）', () => {
+  const subtitleItems = (layout: { items: LayoutItem[] }): TextItem[] =>
+    layout.items.filter((i): i is TextItem => i.kind === 'text' && i.isSubtitle);
+
+  it('既定（未設定/true）は静的字幕（texts.subtitle）を出す', () => {
+    expect(subtitleItems(layoutScene(scene, openingTemplate))).toHaveLength(1);
+    expect(subtitleItems(layoutScene({ ...scene, subtitleEnabledDefault: true }, openingTemplate))).toHaveLength(1);
+  });
+
+  it('subtitleEnabledDefault=false は静的字幕（単一ナレーション）を出さない＝トグルが preview/export に効く', () => {
+    expect(subtitleItems(layoutScene({ ...scene, subtitleEnabledDefault: false }, openingTemplate))).toHaveLength(0);
+  });
+
+  it('掛け合いの行字幕（subtitleText 上書き）は scene 既定 false でも出る＝行が優先（override 経路は不変）', () => {
+    const subs = subtitleItems(
+      layoutScene({ ...scene, subtitleEnabledDefault: false }, openingTemplate, { subtitleText: '行の字幕' }),
+    );
+    expect(subs).toHaveLength(1);
+    expect(subs[0].text).toBe('行の字幕');
+  });
+});
+
+describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => {
+  const freeTemplate: Template = {
+    schemaVersion: '1.0', templateId: 'free_v1', name: 'FREE', category: 'free',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 }, layers: [],
+  };
+  const freeScene = {
+    ...scene, sceneType: 'free', templateId: 'free_v1',
+    freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 20, w: 100, h: 50, fillColor: '#ff0000', opacity: 1 }],
+  } as unknown as Scene;
+  const anim = {
+    id: 'anim_001', sceneId: freeScene.sceneId, targetId: 'free_001',
+    keyframes: [
+      { timeSec: 0, x: 0, y: 0, scale: 1, opacity: 0, rotation: 0 },
+      { timeSec: 2, x: 200, y: 100, scale: 2, opacity: 1, rotation: 90 },
+    ],
+  };
+  it('timeSec 指定で対象 FREE 要素へ相対 transform を適用（scale 中心維持・x/y/rotation はオフセット）', () => {
+    const layout = layoutScene(freeScene, freeTemplate, { timeSec: 1, animations: [anim] });
+    const el = layout.items.find((i) => i.id === 'free_001') as FillItem;
+    // t=1（中間・線形）：scale 1→2=1.5（w100→150/h50→75・中心維持で x−25/y−12.5）→ x オフセット+100/y+50／rotation 0+45／opacity 0.5。
+    // x = 10 −25 +100 = 85・y = 20 −12.5 +50 = 57.5。
+    expect(el).toMatchObject({ x: 85, y: 57.5, w: 150, h: 75, rotation: 45, opacity: 0.5 });
+  });
+  it('相対オフセットは要素の本来位置に追従する（後から動かしても再生が新位置基準・レビュー対応）', () => {
+    // スライド相当（x オフセット −400 → 0）。要素の本来 x が違えば終点も本来 x に一致する（旧位置に固定されない）。
+    const slide = { id: 'anim_005', sceneId: freeScene.sceneId, targetId: 'free_001', keyframes: [{ timeSec: 0, x: -400 }, { timeSec: 2, x: 0 }] };
+    const moved = { ...freeScene, freeLayout: [{ id: 'free_001', kind: 'shape', x: 500, y: 20, w: 100, h: 50, fillColor: '#ff0000', opacity: 1 }] } as unknown as Scene;
+    const el = layoutScene(moved, freeTemplate, { timeSec: 2, animations: [slide] }).items.find((i) => i.id === 'free_001') as FillItem;
+    expect(el.x).toBe(500); // el.x(500) + オフセット0
+  });
+  it('timeSec 未指定は静止（後方互換・基準値のまま）', () => {
+    const el = layoutScene(freeScene, freeTemplate, { animations: [anim] }).items.find((i) => i.id === 'free_001') as FillItem;
+    expect(el).toMatchObject({ x: 10, y: 20, w: 100, h: 50, opacity: 1 });
+    expect(el.rotation).toBeUndefined();
+  });
+  it('別場面のアニメ（sceneId 不一致）は適用しない', () => {
+    const other = { ...anim, sceneId: 'scene_999' };
+    const el = layoutScene(freeScene, freeTemplate, { timeSec: 1, animations: [other] }).items.find((i) => i.id === 'free_001') as FillItem;
+    expect(el).toMatchObject({ x: 10, y: 20, opacity: 1 });
+  });
+  it('text 要素にも相対 transform（x/rotation オフセット）を適用する（fill 以外の経路）', () => {
+    const textScene = { ...freeScene, freeLayout: [{ id: 'free_002', kind: 'text', x: 10, y: 20, w: 200, h: 60, text: 'あ' }] } as unknown as Scene;
+    const textAnim = { id: 'anim_002', sceneId: freeScene.sceneId, targetId: 'free_002', keyframes: [{ timeSec: 0, x: 0, rotation: 0 }, { timeSec: 2, x: 100, rotation: 60 }] };
+    const el = layoutScene(textScene, freeTemplate, { timeSec: 1, animations: [textAnim] }).items.find((i) => i.id === 'free_002') as TextItem;
+    expect(el).toMatchObject({ kind: 'text', x: 60, rotation: 30 }); // x 10+50・rotation 0+30
+  });
+  it('text 要素に opacity（フェードイン）を適用する（(1c) 要素不透明度）', () => {
+    const textScene = { ...freeScene, freeLayout: [{ id: 'free_002', kind: 'text', x: 10, y: 20, w: 200, h: 60, text: 'あ' }] } as unknown as Scene;
+    const fade = { id: 'anim_003', sceneId: freeScene.sceneId, targetId: 'free_002', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, opacity: 1 }] };
+    const el = layoutScene(textScene, freeTemplate, { timeSec: 1, animations: [fade] }).items.find((i) => i.id === 'free_002') as TextItem;
+    expect(el.opacity).toBe(0.5); // t=1 の線形 0→1
+  });
+  it('slot（画像）要素にも opacity を適用する（(1c) 要素不透明度）', () => {
+    const slotScene = { ...freeScene, freeLayout: [{ id: 'free_003', kind: 'slot', x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001' }] } as unknown as Scene;
+    const fade = { id: 'anim_004', sceneId: freeScene.sceneId, targetId: 'free_003', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, opacity: 1 }] };
+    const el = layoutScene(slotScene, freeTemplate, { timeSec: 1, animations: [fade] }).items.find((i) => i.id === 'free_003') as ImageItem;
+    expect(el.opacity).toBe(0.5);
+  });
+
+  // ④(3) グループ対象アニメ：合成前の group.transform に重なり、メンバー全員が動く。
+  const groupScene = {
+    ...freeScene,
+    freeLayout: [
+      { id: 'free_001', kind: 'shape', x: 10, y: 20, w: 100, h: 50, fillColor: '#ff0000', opacity: 1 },
+      { id: 'free_002', kind: 'shape', x: 200, y: 20, w: 100, h: 50, fillColor: '#00ff00', opacity: 1 },
+    ],
+    groups: [{ id: 'group_001', members: ['free_001', 'free_002'], transform: { x: 0, y: 0, scale: 1, rotation: 0 } }],
+  } as unknown as Scene;
+  it('グループ slide はメンバー全員を同じオフセットで動かす（合成前 transform に加算）', () => {
+    const gAnim = { id: 'anim_g1', sceneId: freeScene.sceneId, targetId: 'group_001', keyframes: [{ timeSec: 0, x: -100 }, { timeSec: 2, x: 0 }] };
+    const items = layoutScene(groupScene, freeTemplate, { timeSec: 0, animations: [gAnim] }).items;
+    expect((items.find((i) => i.id === 'free_001') as FillItem).x).toBe(-90); // 10 − 100
+    expect((items.find((i) => i.id === 'free_002') as FillItem).x).toBe(100); // 200 − 100
+  });
+  it('グループ pop はメンバー全員を縮める（transform.scale に乗算）', () => {
+    const gAnim = { id: 'anim_g2', sceneId: freeScene.sceneId, targetId: 'group_001', keyframes: [{ timeSec: 0, scale: 0.5 }, { timeSec: 2, scale: 1 }] };
+    const items = layoutScene(groupScene, freeTemplate, { timeSec: 0, animations: [gAnim] }).items;
+    expect((items.find((i) => i.id === 'free_001') as FillItem).w).toBe(50); // 100 × 0.5
+    expect((items.find((i) => i.id === 'free_002') as FillItem).w).toBe(50);
+  });
+  it('グループ fade はメンバー全員の opacity を乗算で下げる', () => {
+    const gAnim = { id: 'anim_g3', sceneId: freeScene.sceneId, targetId: 'group_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 2, opacity: 1 }] };
+    const items = layoutScene(groupScene, freeTemplate, { timeSec: 1, animations: [gAnim] }).items;
+    expect((items.find((i) => i.id === 'free_001') as FillItem).opacity).toBe(0.5); // 1 × 0.5
+    expect((items.find((i) => i.id === 'free_002') as FillItem).opacity).toBe(0.5);
+  });
+});
+
 describe('layoutScene', () => {
   it('テンプレ＋シーンを配置解決し zIndex 昇順で返す', () => {
     const layout = layoutScene(scene, openingTemplate);

@@ -1,13 +1,16 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
+import { scenesUsingTemplate } from "../../domain/project/templateUsage";
 import { useProjectStore } from "../store/projectStore";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
+import { UsedScenesRow } from "../components/UsedScenesRow";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import { layerLabel, buildSampleScene } from "./looksShared";
 
 // SceneCategory のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
@@ -50,6 +53,8 @@ function usedElements(template: Template): string[] {
 export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
   const templates = useProjectStore((s) => s.templates);
   const assets = useProjectStore((s) => s.assets);
+  const scenes = useProjectStore((s) => s.scenes);
+  const setEditingSceneId = useProjectStore((s) => s.setEditingSceneId);
   const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
   const duplicateAsUserTemplate = useProjectStore((s) => s.duplicateAsUserTemplate);
   const createBlankUserTemplate = useProjectStore((s) => s.createBlankUserTemplate);
@@ -61,12 +66,16 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   const [loadMsg, setLoadMsg] = useState("");
   const [loadOk, setLoadOk] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [busy, setBusy] = useState(false);
+  // 実行中の操作（#410 sub4 レビュー）。押した操作だけラベルを「作成中…／複製中…／削除中…」にし、
+  // どれか実行中は全ボタンを disabled にして連打・多重実行を防ぐ。単一 busy だとラベルが出し分けられない。
+  const [busyAction, setBusyAction] = useState<"create" | "duplicate" | "delete" | null>(null);
   // ゼロから新規作成フォーム（ADR-0017「ゼロから作成」の導線＝複製に頼らず一から作る）。向き/カテゴリは編集画面で変えられないため作成時に決める。
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("新しい見た目");
   const [newOrientation, setNewOrientation] = useState<Orientation>(ORIENTATION.landscape);
   const [newCategory, setNewCategory] = useState<SceneCategory>(SCENE_CATEGORIES[0]);
+  // 読み込みの file input（label htmlFor でなく button+ref.click()＝キーボードで押せる・BgmPicker と同方式・#412）
+  const packInputRef = useRef<HTMLInputElement>(null);
   const current = templates.find((t) => t.templateId === selectedId) ?? templates[0];
 
   // 選択が変わったら削除確認は閉じる（別テンプレへ確認状態を持ち越さない）。描画中リセット＝effect 内 setState を避ける React 推奨パターン。
@@ -82,10 +91,10 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
 
   const isUserCurrent = current ? isUserTemplate(current.templateId) : false;
 
-  // この見た目を複製してマイテンプレにし、そのまま編集画面へ。連打は busy で防ぐ（採番の余分な前進を避ける）。
+  // この見た目を複製してマイテンプレにし、そのまま編集画面へ。連打は busyAction で防ぐ（採番の余分な前進を避ける）。
   async function onDuplicate() {
-    if (!current || busy) return;
-    setBusy(true);
+    if (!current || busyAction) return;
+    setBusyAction("duplicate");
     try {
       const newId = await duplicateAsUserTemplate(current.templateId);
       if (newId) {
@@ -94,13 +103,13 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         onNavigate("looks-edit");
       }
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
-  // ゼロから新規作成し、そのまま編集画面へ。名前は空白なら既定にフォールバック。連打は busy で防ぐ。
+  // ゼロから新規作成し、そのまま編集画面へ。名前は空白なら既定にフォールバック。連打は busyAction で防ぐ。
   async function onCreateBlank() {
-    if (busy) return;
-    setBusy(true);
+    if (busyAction) return;
+    setBusyAction("create");
     try {
       const name = newName.trim() || "新しい見た目";
       const newId = await createBlankUserTemplate(name, newCategory, newOrientation);
@@ -112,7 +121,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         onNavigate("looks-edit");
       }
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
   // このマイテンプレを編集画面で開く。
@@ -123,12 +132,17 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   }
   // マイテンプレを削除し、別の見た目を選択する。削除が成功したときだけ選択を移す（失敗時は対象が残るので留まる）。
   async function onDelete() {
-    if (!current || !isUserCurrent) return;
+    if (!current || !isUserCurrent || busyAction) return;
     const targetId = current.templateId;
     const fallback = templates.find((t) => t.templateId !== targetId)?.templateId ?? "";
-    const ok = await deleteUserTemplate(targetId);
-    setConfirmDelete(false);
-    if (ok) setSelectedId(fallback);
+    setBusyAction("delete");
+    try {
+      const ok = await deleteUserTemplate(targetId);
+      setConfirmDelete(false);
+      if (ok) setSelectedId(fallback);
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   // 用意した見た目パターンのファイルを取り込む（検証は templateFs＝§2-2）。件数のみ提示（§2-3）。
@@ -163,6 +177,10 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   }
 
   const sampleScene = buildSampleScene(current, assets);
+  // この見た目を使っている場面（逆引き・#406）。標準/マイテンプレを問わず scene.templateId で判定する。
+  const usedScenes = scenesUsingTemplate(scenes, current.templateId);
+  // 使用場面バッジを押したら、その場面の編集を開く（editingSceneId 機構＝#400・素材画面と同方式）。
+  const jumpToScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
 
   return (
     <div className="main-scroll">
@@ -170,6 +188,10 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         title="見た目パターンを管理"
         desc="動画の見た目のパターンを確認できます。各場面に当てる見た目は「場面編集」で選べます。"
       />
+      {/* 説明だけで行き止まりにしない：実際に見た目を割り当てる「場面編集」への導線を添える（§2-5・#413）。 */}
+      <button className="btn btn-ghost text-sm" style={{ marginBottom: "var(--gap)" }} onClick={() => onNavigate("scene-edit")}>
+        場面編集を開く
+      </button>
 
       {/* ゼロから新規作成（ADR-0017）：複製だけでなく一から作れる導線。向き・種類は編集画面で変えられないため作成時に決める。 */}
       {creating ? (
@@ -195,8 +217,8 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
               </div>
             </div>
             <div className="row gap-sm">
-              <button className="btn btn-primary" disabled={busy} onClick={() => void onCreateBlank()}>作成して編集する</button>
-              <button className="btn btn-ghost" onClick={() => setCreating(false)}>やめる</button>
+              <button className="btn btn-primary" disabled={busyAction !== null} onClick={() => void onCreateBlank()}>{busyAction === "create" ? "作成中…" : "作成して編集する"}</button>
+              <button className="btn btn-ghost" disabled={busyAction !== null} onClick={() => setCreating(false)}>やめる</button>
             </div>
             {/* 作成失敗時はフォーム内にエラーを出す（押しても何も起きないように見えるのを防ぐ・§2-5）。 */}
             {templateError && (
@@ -208,7 +230,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           </div>
         </div>
       ) : (
-        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} onClick={() => { clearTemplateError(); setCreating(true); }}>
+        <button className="btn btn-primary" style={{ marginBottom: "var(--gap-lg)" }} disabled={busyAction !== null} onClick={() => { clearTemplateError(); setCreating(true); }}>
           ＋ ゼロから新しい見た目を作る
         </button>
       )}
@@ -231,10 +253,11 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
                 borderColor: current.templateId === t.templateId ? "var(--color-primary)" : undefined,
                 background: current.templateId === t.templateId ? "var(--color-primary-soft)" : undefined,
               }}
+              disabled={busyAction !== null}
               onClick={() => setSelectedId(t.templateId)}
             >
               <span className="action-card-title">{t.name}</span>
-              <span className="action-card-desc">{categoryLabel[t.category]}{isUserTemplate(t.templateId) ? "・マイテンプレ" : ""}</span>
+              <span className="action-card-desc">{categoryLabel[t.category]}{isUserTemplate(t.templateId) ? "・自分の見た目" : ""}</span>
             </button>
           ))}
         </div>
@@ -271,34 +294,41 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             ))}
           </div>
 
+          {/* 使用場面の逆引き（#406）：この見た目を当てている場面へ1クリックで飛べる。 */}
+          <hr className="divider" />
+          <h3 className="field-label">使用場面</h3>
+          <UsedScenesRow scenes={usedScenes} onJump={jumpToScene} emptyText="まだどの場面でも使われていません。" disabled={busyAction !== null} />
+
           <hr className="divider" />
           {/* マイテンプレ（ユーザーテンプレ）の作成・編集（ADR-0017）。編集は専用画面へ遷移（#271）。 */}
           <h3 className="field-label">この見た目を編集</h3>
           <span className={`badge ${isUserCurrent ? "badge-teal" : "badge-gray"}`}>
-            {isUserCurrent ? "マイテンプレ" : "標準（編集するには複製します）"}
+            {isUserCurrent ? "自分の見た目" : "標準（編集するには複製します）"}
           </span>
           <div className="col gap-sm mt">
             {isUserCurrent && (
-              <button className="btn btn-primary" onClick={onEdit}>この見た目を編集する</button>
+              <button className="btn btn-primary" disabled={busyAction !== null} onClick={onEdit}>この見た目を編集する</button>
             )}
-            <button className="btn btn-secondary" disabled={busy} onClick={() => void onDuplicate()}>
-              この見た目を複製して編集する
+            <button className="btn btn-secondary" disabled={busyAction !== null} onClick={() => void onDuplicate()}>
+              {busyAction === "duplicate" ? "複製中…" : "この見た目を複製して編集する"}
             </button>
 
             {/* 削除（マイテンプレのみ） */}
             {isUserCurrent && (confirmDelete ? (
-              <div className="row gap-sm" style={{ alignItems: "center" }}>
-                <span className="text-sm">このマイテンプレを削除しますか？</span>
-                <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
-                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
-              </div>
+              <DeleteConfirm
+                busy={busyAction === "delete"}
+                message="この見た目パターンを削除しますか？元に戻せません。"
+                onCancel={() => setConfirmDelete(false)}
+                onConfirm={() => void onDelete()}
+              />
             ) : (
               <button
                 className="btn btn-ghost text-sm"
                 style={{ color: "var(--color-danger)", alignSelf: "flex-start" }}
+                disabled={busyAction !== null}
                 onClick={() => setConfirmDelete(true)}
               >
-                このマイテンプレを削除
+                この見た目パターンを削除
               </button>
             ))}
           </div>
@@ -310,16 +340,16 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
 
           <hr className="divider" />
           <input
-            id="tmplPack"
+            ref={packInputRef}
             type="file"
             accept=".json,application/json"
             multiple
             hidden
             onChange={(e) => void onLoadPack(e)}
           />
-          <label htmlFor="tmplPack" className="btn btn-secondary" style={{ cursor: "pointer" }}>
+          <button type="button" className="btn btn-secondary" disabled={busyAction !== null} onClick={() => packInputRef.current?.click()}>
             見た目パターンを読み込む
-          </label>
+          </button>
           <p className="field-hint mt">用意した見た目パターンのファイルを追加できます。</p>
           {loadMsg && (
             <div className={`notice ${loadOk ? "notice-info" : "notice-warn"} mt`} role={loadOk ? "status" : "alert"}>

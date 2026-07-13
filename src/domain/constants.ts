@@ -1,11 +1,14 @@
 // 定数の正典は docs/yuko_recruit_docs/11_SCHEMA_REFERENCE.md §4。
 // 文字列・数値リテラルの直書きを避け、ここを単一の参照元にする（CLAUDE.md §2-7 / §6）。
 import { ORIENTATION } from './enums';
-import type { Orientation } from './enums';
+import type { Orientation, SceneCategory } from './enums';
 
 export const SCENE_MIN_DURATION_SEC = 3;
 export const SCENE_MAX_DURATION_SEC = 15;
 export const SCENE_DEFAULT_DURATION_SEC = 8;
+// プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる
+//（§5・全入力口で共有する上限＝入力防御 #411／検証ネット #416 の prevention 側）。
+export const PROJECT_NAME_MAX_LENGTH = 80;
 export const TRANSITION_DEFAULT_SEC = 0.5;
 
 export const VIDEO_TARGET_MAX_SEC_MVP = 300;
@@ -54,9 +57,14 @@ export function exportDimsForOrientation(
 export const NARRATION_VOLUME = 1.0;
 export const BGM_VOLUME = 0.25;
 export const ORIGINAL_AUDIO_VOLUME = 0.2;
+// 場面ごとBGMで曲が変わる境界のクロスフェード長（秒・ADR-0018 ③(7)）。前後を half ずつ重ねる。単一の参照元（§2-7）。
+export const BGM_CROSSFADE_SEC = 1.0;
 // 音量の値域（§4：0.0〜1.5、1.0=原音）。
 export const VOLUME_MIN = 0.0;
 export const VOLUME_MAX = 1.5;
+// 原音量（100%・等倍）。プレビュー再生で「これ以下は HTMLMediaElement.volume で厳密／超過は Web Audio GainNode で増幅」
+// を分ける境界であり、要素の .volume 物理上限でもある（単一の参照元＝§2-7・直書き禁止）。
+export const UNITY_VOLUME = 1.0;
 // 音量スライダーの刻み（UI）。
 export const VOLUME_STEP = 0.05;
 
@@ -93,8 +101,14 @@ export const DEFAULT_CHARACTER_ID = 'yuko';
 // スロットの既定フィット（テンプレ・clip 未指定時）。正典(§4)に既定の明記は無く、cover を既定とする（MVP）。
 export const DEFAULT_FIT = 'cover' as const;
 
+// AI 出力の場面種別が未知/未指定でテンプレからも解決できないときの既定カテゴリ（transformPlan の補正フォールバック・§2-7）。
+export const DEFAULT_SCENE_CATEGORY: SceneCategory = 'photo_intro';
+
 // 矩形（FREE 要素／テンプレ Layer）をドラッグ/リサイズで潰さないための最小サイズ（canvas px）。両者で共有する単一の参照元（§2-7）。
 export const GEOM_MIN_SIZE = 20;
 
 // グループ拡縮の最小倍率（schema: scale>0 を UI でも担保）。FREE/テンプレのグループ枠で共有（ADR-0022・§2-7）。
 export const GROUP_MIN_SCALE = 0.1;
+
+// タイムライン overlay クリップの最小長（秒）。トリミングで潰さないための下限（schema: durationSec>0 を UI でも担保・ADR-0018・§2-7）。
+export const TIMELINE_MIN_CLIP_SEC = 0.5;

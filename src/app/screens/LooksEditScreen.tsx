@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
@@ -14,6 +14,11 @@ import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
 import { Switch } from "../components/ui";
+import { NumberField } from "../components/NumberField";
+import { DeleteConfirm } from "../components/DeleteConfirm";
+import { UnsavedMark } from "../components/SaveStatusBadge";
+import { ArrowLeftIcon } from "../components/icons";
+import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { textKeyLabel } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
 
@@ -28,29 +33,10 @@ function cloneTemplate(t: Template): Template {
   return { ...t, layers: t.layers.map((l) => ({ ...l })) };
 }
 
-/** レイヤーの座標/サイズ用の小さな数値入力（整数 px。入力途中の NaN/空は無視、min 指定（幅/高さ）は下限クランプ）。 */
+// レイヤーの座標/サイズ/濃さ用の数値入力は共有 NumberField（#459）＝入力途中の NaN/空は無視、blur で min/max クランプ。
+// flex: "1 0 40%" で従来どおり2列で折り返す。呼び出しを短くするための薄いラッパ。
 function numField(label: string, value: number, onChange: (v: number) => void, min?: number, max?: number) {
-  return (
-    <label className="text-sm" style={{ display: "flex", flexDirection: "column", flex: "1 0 40%" }}>
-      {label}
-      <input
-        className="input"
-        type="number"
-        step={1}
-        min={min}
-        max={max}
-        value={value}
-        onChange={(e) => {
-          const v = parseInt(e.target.value, 10);
-          if (Number.isNaN(v)) return;
-          let clamped = v;
-          if (min != null) clamped = Math.max(min, clamped);
-          if (max != null) clamped = Math.min(max, clamped);
-          onChange(clamped);
-        }}
-      />
-    </label>
-  );
+  return <NumberField label={label} value={value} onChange={onChange} min={min} max={max} style={{ flex: "1 0 40%" }} />;
 }
 
 // 見た目パターンの作成・編集の専用画面（ADR-0017 当初設計＝新規画面・#271）。
@@ -69,6 +55,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
   const editing = templates.find((t) => t.templateId === editingTemplateId) ?? null;
   const yukoPoseTags = buildYukoPoseTags(assets);
+  // レイヤーごとの既定素材 file input（レイヤー単位で複数あるため id 単一の useRef でなく id→要素のマップ・#412）。
+  const defaultAssetInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const [draft, setDraft] = useState<Template | null>(() => (editing ? cloneTemplate(editing) : null));
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
@@ -76,7 +64,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // 主＝末尾選択（種別別エディタ・削除はこれを基準）。複数選択は一括移動／④[#307] グループ化の土台。
   const selectedLayerId = selectedLayerIds.length > 0 ? selectedLayerIds[selectedLayerIds.length - 1] : null;
   const [addType, setAddType] = useState<LayerType>("text");
-  const [busy, setBusy] = useState(false);
+  // 実行中の操作（#410 sub4 レビュー）。押した操作だけラベルを「保存中…／削除中…」にし、
+  // どれか実行中は保存/削除/素材を disabled にして連打・多重実行を防ぐ。
+  const [busyAction, setBusyAction] = useState<"save" | "delete" | "asset" | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [assetError, setAssetError] = useState<{ layerId: string; msg: string } | null>(null);
@@ -183,22 +173,28 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "back") } : d));
   }
   async function onSave() {
-    if (busy) return;
+    if (busyAction) return;
     // 名前は前後空白を除去し、空なら元の名前にフォールバック。
     const normalized = { ...draft!, name: draft!.name.trim() || editing!.name };
-    setBusy(true);
+    setBusyAction("save");
     try {
       await saveUserTemplate(normalized);
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
     // 保存成功（失敗文言が無い）なら一覧へ戻る。失敗時は templateError が出るので留まる。
     if (!useProjectStore.getState().templateError) backToList();
   }
   async function onDelete() {
-    const ok = await deleteUserTemplate(editing!.templateId);
-    setConfirmDelete(false);
-    if (ok) backToList(); // 削除成功で一覧へ（参照中プロジェクトは §9 補正）。
+    if (busyAction) return;
+    setBusyAction("delete");
+    try {
+      const ok = await deleteUserTemplate(editing!.templateId);
+      setConfirmDelete(false);
+      if (ok) backToList(); // 削除成功で一覧へ（参照中プロジェクトは §9 補正）。
+    } finally {
+      setBusyAction(null);
+    }
   }
   function onBack() {
     if (dirty) setConfirmDiscard(true);
@@ -208,21 +204,21 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   async function onPickDefaultAsset(layerId: string, e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file || busy) return;
+    if (!file || busyAction) return;
     // プロジェクト素材と同じ上限で弾く（data URL を表示用 src に常駐させるためメモリ逼迫を防ぐ・PR#295 レビュー🔴1）。
     if (exceedsInlineAssetLimit(file.size)) {
       const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
       setAssetError({ layerId, msg: `この画像は大きすぎます（上限${limitMb}MB）。別の小さい画像を選び直してください。` });
       return;
     }
-    setBusy(true);
+    setBusyAction("asset");
     setAssetError(null);
     try {
       const assetId = await registerTemplateAsset(file);
       if (assetId) onUpdateLayer(layerId, { assetId });
       else setAssetError({ layerId, msg: "素材を登録できませんでした。もう一度お試しください。" });
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
   // 既定素材の登録/プレビュー/解除（background/slot/logo で共用）。場面に素材が無いとき使われる既定（ADR-0021）。
@@ -242,9 +238,26 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           </div>
         ) : (
           <>
-            <input id={`tmplAsset_${l.id}`} type="file" accept="image/*" hidden disabled={busy} onChange={(e) => void onPickDefaultAsset(l.id, e)} />
-            <label htmlFor={`tmplAsset_${l.id}`} className="btn btn-secondary text-sm" style={{ cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.5 : 1, alignSelf: "flex-start" }}>素材を選ぶ</label>
-            <p className="field-hint" style={{ marginTop: 2 }}>このテンプレを使うと、場面に素材が無いときこの画像が入ります。</p>
+            {/* label htmlFor でなく button＝Tab フォーカス・:disabled の共通見た目が効く（#412）。
+                レイヤーごとに input があるため ref マップ（id→要素）で click（他2画面の useRef と同じ ref 経由に統一）。 */}
+            <input
+              ref={(el) => { defaultAssetInputs.current[l.id] = el; }}
+              type="file"
+              accept="image/*"
+              hidden
+              disabled={busyAction !== null}
+              onChange={(e) => void onPickDefaultAsset(l.id, e)}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary text-sm"
+              style={{ alignSelf: "flex-start" }}
+              disabled={busyAction !== null}
+              onClick={() => defaultAssetInputs.current[l.id]?.click()}
+            >
+              素材を選ぶ
+            </button>
+            <p className="field-hint" style={{ marginTop: 2 }}>この見た目パターンを使うと、場面に素材が無いときこの画像が入ります。</p>
           </>
         )}
         {assetError?.layerId === l.id && (
@@ -301,7 +314,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
                     <input className="input" type="color" value={l.background?.color ?? "#000000"} onChange={(e) => onUpdateLayer(l.id, { background: { ...l.background, color: e.target.value } })} />
                   </div>
-                  {numField("濃さ(%)", Math.round((l.background?.opacity ?? 0.55) * 100), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: v / 100 } }), 0, 100)}
+                  {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? 0.55), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
                 </div>
               )}
             </div>
@@ -396,13 +409,13 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       {/* ヘッダ：戻る・タイトル・保存（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ） */}
       <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
         <div className="row gap-sm" style={{ alignItems: "center" }}>
-          <button className="btn btn-ghost btn-icon" onClick={onBack}>← 一覧へ戻る</button>
+          <button className="btn btn-ghost btn-icon" disabled={busyAction !== null} onClick={onBack}><ArrowLeftIcon size={16} />一覧へ戻る</button>
           <span className="topbar-title">見た目パターンを編集</span>
         </div>
         <div className="row gap-sm" style={{ alignItems: "center" }}>
-          {dirty && <span className="text-sm text-muted">未保存の変更があります</span>}
-          <button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void onSave()}>
-            {busy ? "保存中…" : "変更を保存"}
+          {dirty && <UnsavedMark />}
+          <button className="btn btn-primary" disabled={!dirty || busyAction !== null} onClick={() => void onSave()}>
+            {busyAction === "save" ? "保存中…" : "保存"}
           </button>
         </div>
       </div>
@@ -410,9 +423,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       {confirmDiscard && (
         <div className="notice notice-warn mb" role="alert">
           <span>編集中の変更を保存せずに一覧へ戻りますか？</span>
+          {/* 確認は「やめる（左）／実行（右）」で統一（#410 sub2）。キャンセル語は「やめる」に揃える。 */}
           <div className="row gap-sm">
+            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDiscard(false)}>やめる</button>
             <button className="btn btn-primary btn-icon" onClick={backToList}>戻る（破棄）</button>
-            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDiscard(false)}>編集を続ける</button>
           </div>
         </div>
       )}
@@ -479,7 +493,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
           {/* レイヤー一覧（重ね順・上が手前）＋追加 */}
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>レイヤー（上が手前）</label>
+            <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>重ね順（上が手前）</label>
             <div className="col" style={{ gap: 2 }}>
               {[...draft.layers].sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0)).map((l) => (
                 <div
@@ -494,7 +508,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                     className="btn btn-ghost btn-icon text-sm"
                     style={{ color: "var(--color-danger)" }}
                     disabled={draft.layers.length <= 1}
-                    title={draft.layers.length <= 1 ? "最後の1枚は消せません" : "このレイヤーを削除"}
+                    title={draft.layers.length <= 1 ? "最後の1つは消せません" : "この要素を削除"}
                     onClick={() => onRemoveLayer(l.id)}
                   >
                     削除
@@ -506,7 +520,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               <select className="select" value={addType} onChange={(e) => setAddType(e.target.value as LayerType)}>
                 {TEMPLATE_ADDABLE_LAYER_TYPES.map((t) => (<option key={t} value={t}>{layerLabel[t]}</option>))}
               </select>
-              <button className="btn btn-secondary" onClick={onAddLayer}>レイヤーを追加</button>
+              <button className="btn btn-secondary" onClick={onAddLayer}>要素を追加</button>
             </div>
           </div>
 
@@ -532,14 +546,15 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             <>
               <hr className="divider" />
               {confirmDelete ? (
-                <div className="row gap-sm" style={{ alignItems: "center" }}>
-                  <span className="text-sm">このマイテンプレを削除しますか？</span>
-                  <button className="btn btn-ghost text-sm" onClick={() => setConfirmDelete(false)}>やめる</button>
-                  <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)" }} onClick={() => void onDelete()}>削除する</button>
-                </div>
+                <DeleteConfirm
+                  busy={busyAction === "delete"}
+                  message="この見た目パターンを削除しますか？元に戻せません。"
+                  onCancel={() => setConfirmDelete(false)}
+                  onConfirm={() => void onDelete()}
+                />
               ) : (
                 <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} onClick={() => setConfirmDelete(true)}>
-                  このマイテンプレを削除
+                  この見た目パターンを削除
                 </button>
               )}
             </>

@@ -13,3 +13,5 @@ export interface StandaloneValidate {
 export const validateAiVideoPlan: StandaloneValidate;
 /** template.schema.json の事前コンパイル済み検証関数。 */
 export const validateTemplate: StandaloneValidate;
+/** project.schema.json の事前コンパイル済み検証関数（読込時の網＝型/必須/enum/範囲・#416）。 */
+export const validateProject: StandaloneValidate;

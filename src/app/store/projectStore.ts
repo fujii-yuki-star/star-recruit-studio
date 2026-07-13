@@ -1,10 +1,11 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
-import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
-import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, GeneralBrief, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
+import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, PROJECT_NAME_MAX_LENGTH, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
+import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
+import type { ExportProgressEvent } from "../../domain/export/exportProgress";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
@@ -12,21 +13,24 @@ import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from
 import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
-  assembleProject, createAssetId, createBgmId, createPartId, createProjectId, createSceneId,
-  defaultVideoSettings, defaultVoiceSettings, parseProjectDoc,
+  assembleProject, createAnimationId, createAssetId, createBgmId, createOverlayClipId, createPartId, createProjectId, createSceneId,
+  defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
-import { duplicateSceneInList, moveSceneInList, splitSceneInList } from "../../domain/project/sceneOps";
+import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSceneInList, splitSceneLinesInList } from "../../domain/project/sceneOps";
+import { substituteDeletedTemplateInScenes } from "../../domain/project/templateUsage";
+import { duplicateSceneAnimations, removeAnimationsForTargets } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
-import { GEMINI_PROVIDER, hasApiKey, isTauri } from "../../infrastructure/aiClient";
+import { willSendExternally } from "../../infrastructure/aiClient";
 import { getAiModel } from "../../infrastructure/appSettings";
+import type { ScreenId } from "../data/mockData";
 import { loadBundledTemplates } from "../../infrastructure/templateFs";
 import * as userTemplateFs from "../../infrastructure/userTemplateFs";
 import { buildBlankTemplate, isUserTemplate, replaceUserTemplates, upsertUserTemplate } from "../../domain/template/userTemplate";
-import { templateAssetIdsOf } from "../../domain/template/templateAsset";
+import { orphanTemplateAssetIds, templateAssetIdsOf } from "../../domain/template/templateAsset";
 import { deleteTemplateAsset, importTemplateAsset, loadTemplateAssetUrls } from "../../infrastructure/templateAssetFs";
 import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
@@ -35,15 +39,53 @@ import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
 import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../domain/asset/assetFile";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
-import { resolveLineVoice, resolveNarrationVoice } from "../../domain/voice/voiceProvider";
+import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
-import { lineAudioKey, lineVoiceStem, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
+import { lineAudioKey, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
+/** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
+export type ExportPhase = "idle" | "rendering" | "encoding" | "done" | "error" | "unsupported" | "cancelled";
+/** 書き出しの進行状態（#379）。画面横断で参照＝進捗の可視化・書き出し中の再実行/破壊操作ブロックに使う。 */
+export interface ExportRunState {
+  phase: ExportPhase;
+  // frameFraction＝処理中の場面内の進み具合（0〜1・任意）。アニメ場面は数百フレームを焼く間 done が動かず
+  // バーが凍って見える（フリーズ誤認→二重書き出しの引き金）ため、フレーム進捗で滑らかに進める（#391）。
+  progress: { done: number; total: number; frameFraction?: number };
+  // encoding 段（結合・字幕・BGM）の実進捗（#376）。Rust の export_progress イベントで更新しバーを 80→100% に。
+  // 未受信（旧 Rust/ブラウザ）は undefined＝従来の不定バーにフォールバック。
+  encode?: ExportProgressEvent;
+  resultPath: string;
+  message: string;
+  bgmWarning: "" | "partial" | "all";
+  // ユーザーが中止を要求したか（#380）。画面横断で保持し、書き出しの各段が「中止しました」で終えられるようにする。
+  cancelling: boolean;
+}
+/** 書き出し中（rendering/encoding）か。再実行・プロジェクト切替/削除のブロック判定で共有（#379）。 */
+export function isExportBusy(phase: ExportPhase): boolean {
+  return phase === "rendering" || phase === "encoding";
+}
+const IDLE_EXPORT_RUN: ExportRunState = {
+  phase: "idle",
+  progress: { done: 0, total: 0 },
+  resultPath: "",
+  message: "",
+  bgmWarning: "",
+  cancelling: false,
+};
+/** 書き出し画面の入力（ファイル名・画質・字幕）。仕上がり確認（BGM選び）への往復で ExportScreen が
+ *  再マウントされても入力を失わないよう画面横断で保持する（#410 sub3 レビュー・exportRun と同じ transient state）。
+ *  fileName=null は「プロジェクト名から既定」。永続 JSON ではないので schema 影響なし。 */
+export interface ExportFormState {
+  fileName: string | null;
+  size: string;
+  withSubtitle: boolean;
+}
+const IDLE_EXPORT_FORM: ExportFormState = { fileName: null, size: "fullhd", withSubtitle: true };
 /** 声設定の編集可能パラメータのみ（defaultVoiceId は必須なので更新対象から除外）。 */
 export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "intonation" | "volume">>;
 /** BGM設定の編集可能フィールドのみ（assetId は取り込み時に確定するので更新対象から除外）。 */
@@ -53,6 +95,9 @@ type DocSnapshot = { meta: ProjectHeader; parts: Part[]; scenes: Scene[] };
 
 interface ProjectState {
   status: GenerateStatus;
+  /** 現在のたたき台が「AI 生成直後」か（#467）。generate 成功でのみ true。白紙/手動/読込済みは false。
+   *  たたき台の「ゆうこ(AI)が作成した」文言はこれが true のときだけ出す＝表示と実挙動を一致させる（ADR-0026）。 */
+  draftFromAi: boolean;
   saveStatus: SaveStatus;
   /** 素材の取り込み失敗のユーザー向け文言（§2-5。プロジェクト保存状態とは別物。再試行/成功で消える）。 */
   importError: string | null;
@@ -69,6 +114,11 @@ interface ProjectState {
   templateAssetSrcById: Record<string, string>;
   /** 生成済みナレーション音声（data URL）。キーは単一 narration＝sceneId／掛け合い＝lineAudioKey(sceneId,lineId)（ADR-0015 PR-C2）。メモリ保持し保存時に voicePath として永続化する。 */
   narrationAudioById: Record<string, string>;
+  /**
+   * 前回保存以降に新規生成された音声キー（narrationAudioById のキー部分集合・#390）。保存時はこの集合だけ WAV 書き出しし、
+   * 未変更（＝既に voicePath を持つ）音声の再書き出しを避ける（保存の高速化）。project.json には入れず永続化しない。
+   */
+  _dirtyAudioKeys: Set<string>;
   /** 「全場面の声を作成」実行中フラグ（多重起動防止）。 */
   isGeneratingNarration: boolean;
   /** 素材/BGM の取り込み中フラグ（多重取り込み防止・取り込み中表示）。 */
@@ -81,13 +131,31 @@ interface ProjectState {
   aiError: string | null;
   /** AI（鍵があれば実プロバイダ／無ければ Mock）→ 検証/変換 → 内部 Scene を生成してストアへ反映する。 */
   generate: () => Promise<void>;
+  /**
+   * 画面に直接landしたときの自動たたき台生成（#384・§2-6）。status=idle かつ**外部送信にならない（Mock）**ときだけ生成する。
+   * 実プロバイダ（Gemini キーあり）では、送信前確認（ConfirmScreen）を通らない自動送信を避けて何もしない
+   * ＝画面は空状態のまま（利用者はウィザード→確認画面の同意フローへ）。Mock は従来どおり利便性のため生成する。
+   */
+  autoGenerateIfSafe: () => Promise<void>;
+  /** 生成の世代番号（#402・内部）。generate 開始で進め、cancelGeneration でも進める。
+   *  in-flight の generate は自分の世代が現行と一致するときだけ結果を反映する（キャンセル/後発生成で置換されたら破棄）。 */
+  _generationSeq: number;
+  /** 生成中のキャンセル（#402）。世代を進めて in-flight の結果適用を無効化し、既存の場面があれば ready・無ければ idle へ戻す。 */
+  cancelGeneration: () => void;
   /** デモ/テスト用にエラー状態へ。 */
   fail: () => void;
   reset: () => void;
   /** 新規プロジェクト（作業状態を初期化）。 */
   newProject: () => void;
-  /** 現在の状態を project.json として保存する。 */
+  /** 白紙から作る（ウィザード/AI を通らない・#393）。空プロジェクトにし status を "ready" にして自動生成（§2-6）を発火させない。 */
+  newBlankProject: () => void;
+  /** 生成失敗/中断から手動作成へ入る（#393 P1・12 §9.3／15）。入力済みの会社情報・素材は残し、status を "ready"・
+   *  aiError をクリアして手動で組む状態にする（AI 生成はしない＝draftFromAi=false）。 */
+  startManualEdit: () => void;
+  /** 現在の状態を project.json として保存する。進行中の保存があればその完了を待つ（多重起動防止＋await で保存完了を保証・#256）。 */
   saveProject: () => Promise<void>;
+  /** 実際の保存処理（内部・saveProject 経由でのみ呼ぶ）。 */
+  _doSave: () => Promise<void>;
   /** 保存済みプロジェクトを読み込んで反映する。 */
   loadProject: (projectId: string) => Promise<void>;
   /** 保存済みプロジェクトの要約一覧を返す。 */
@@ -96,6 +164,8 @@ interface ProjectState {
   deleteProject: (projectId: string) => Promise<void>;
   /** 保存済みプロジェクトの名前（projectName）を変更して保存する（#241）。 */
   renameProject: (projectId: string, newName: string) => Promise<void>;
+  /** 編集中プロジェクトの名前を変更する（#252・メモリの meta.projectName を更新＝保存/自動保存で永続化）。 */
+  setProjectName: (name: string) => void;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
   updateScene: (sceneId: string, update: (scene: Scene) => Scene) => void;
   /** 末尾パートに新しい空の場面を追加し、その sceneId を返す（既定テンプレ）。テンプレ未読込時は ""。 */
@@ -104,10 +174,28 @@ interface ProjectState {
   removeScene: (sceneId: string) => void;
   /** 場面を上/下へ1つ移動する（表示順＝配列順を入れ替え、order と part.sceneIds を整合）。 */
   moveScene: (sceneId: string, direction: "up" | "down") => void;
+  /** 場面を任意の位置（移動後の配列index）へ動かす（ドラッグ&ドロップ・#398）。1操作=1履歴。 */
+  moveSceneToIndex: (sceneId: string, toIndex: number) => void;
+  /** タイムライン上位編集：テロップ overlay クリップを追加し、その id を返す（ADR-0018・③(4)）。 */
+  addOverlayClip: (clip: Partial<Omit<OverlayClip, "id">>) => string;
+  /** overlay クリップを部分更新（移動＝startSec/anchorSceneId、文言＝text 等）。Undo は meta スナップショットで自動。 */
+  updateOverlayClip: (id: string, patch: Partial<Omit<OverlayClip, "id">>) => void;
+  /** overlay クリップを削除する。 */
+  removeOverlayClip: (id: string) => void;
+  /** 要素アニメーション（キーフレーム）を追加し、その id を返す（④・ADR-0019・timelineOverlay.animations）。 */
+  addAnimation: (sceneId: string, targetId: string, keyframes: Keyframe[]) => string;
+  /** 要素アニメーションのキーフレームを差し替える（フェードインの所要秒変更など）。Undo は meta スナップショットで自動。 */
+  updateAnimation: (animId: string, keyframes: Keyframe[]) => void;
+  /** 要素アニメーションを削除する（「動きをやめる」）。 */
+  removeAnimation: (animId: string) => void;
+  /** 指定場面の指定要素(targetIds)に紐づくアニメを取り除く（要素削除時の孤児掃除・④）。対象なしなら何もしない。 */
+  removeAnimationsForElements: (sceneId: string, targetIds: string[]) => void;
   /** 場面を複製して直後に挿入し、新しい sceneId を返す（セリフは引き継ぎ・音声は作り直し）。 */
   duplicateScene: (sceneId: string) => string;
   /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
   splitScene: (sceneId: string, splitIndex: number) => string;
+  /** 掛け合い場面（scene.lines）を lineIndex（この行から後ろ）で2場面に分ける。新しい sceneId を返す（#405）。 */
+  splitSceneAtLine: (sceneId: string, lineIndex: number) => string;
   /** ウィザードで入力した目的・会社情報を現在のプロジェクト(meta)へ反映する（保存・生成で使う）。 */
   applyProjectInfo: (input: {
     videoKind?: VideoKind;
@@ -143,7 +231,8 @@ interface ProjectState {
   loadUserTemplates: () => Promise<void>;
   /** ユーザーテンプレを保存し一覧へ反映する（新規 id は allocateUserTemplateId で払い出し済み前提）。 */
   saveUserTemplate: (template: Template) => Promise<void>;
-  /** ユーザーテンプレを削除し一覧から外す（成功＝true。参照していたプロジェクトは読込時に §9 補正へ委ねる）。 */
+  /** ユーザーテンプレを削除し一覧から外す（成功＝true）。開いているプロジェクトの参照場面は即時に標準へ置換し
+   *  （#458・substituteDeletedTemplateInScenes）、他プロジェクト（disk）の参照は次回の読込/表示時の §9 補正に委ねる。 */
   deleteUserTemplate: (templateId: string) => Promise<boolean>;
   /** 既存テンプレ（同梱/ユーザー）を複製してマイテンプレ（ユーザーテンプレ）として保存し、新 id を返す。 */
   duplicateAsUserTemplate: (sourceTemplateId: string) => Promise<string>;
@@ -157,6 +246,31 @@ interface ProjectState {
   /** 専用の見た目パターン編集画面で編集中のテンプレ id（#271。param 無しの画面遷移で「どれを編集するか」を渡す）。 */
   editingTemplateId: string | null;
   setEditingTemplateId: (templateId: string | null) => void;
+  /** 場面編集画面を「どの場面で開くか」を渡す id（#400。onNavigate はペイロードを運べないため editingTemplateId と同方式）。
+   *  たたき台の行ボタン・仕上がり確認「場面を直す」等が set→遷移し、SceneEditScreen が初期選択に使う。null=先頭場面。 */
+  editingSceneId: string | null;
+  setEditingSceneId: (sceneId: string | null) => void;
+  /** ウィザードの現在ステップ（#401）。画面遷移/離脱でローカル state が消えても復元できるよう store に保持する。
+   *  サイドバー離脱→復帰・confirm「キャンセル」→ウィザードで、step0 に戻らず直前のステップを開く。新規/読込で 0。 */
+  wizardStep: number;
+  setWizardStep: (step: number) => void;
+  /** 送信前確認（ConfirmScreen）から「キャンセル」で戻る画面（#423・§2-6）。ウィザード起点は既定（null＝"wizard"）、
+   *  たたき台の「作り直す」起点は "draft"。ConfirmScreen がマウント時に読み取り消費する（editingSceneId と同方式の一度きりペイロード）。 */
+  confirmReturnTo: ScreenId | null;
+  setConfirmReturnTo: (screen: ScreenId | null) => void;
+  /** 仕上がり確認（PreviewScreen）の「戻る」で戻る画面（#410 sub3）。多入口（たたき台/場面編集/書き出し）
+   *  のため、開いた側が「来た画面」を記録する。confirmReturnTo と違い読み取り後も消費せず永続させる＝Preview→
+   *  タイムライン→「仕上がり確認へ戻る」で Preview に再入場しても直前の入口ラベルを保つため（消費すると退行）。
+   *  ※「編集中の場面」自体は editingSceneId（一度きり）で別に受け渡す（場面編集→仕上がり確認→戻るで同じ場面へ）。 */
+  previewReturnTo: ScreenId | null;
+  setPreviewReturnTo: (screen: ScreenId | null) => void;
+  /** 書き出しの進行状態（#379・画面横断）。ExportScreen が更新し、他画面から戻っても進捗が見える。 */
+  exportRun: ExportRunState;
+  /** 書き出し状態を部分更新する（ExportScreen の setPhase/setProgress 等の単一入口）。 */
+  setExportRun: (patch: Partial<ExportRunState>) => void;
+  /** 書き出し画面の入力（ファイル名・画質・字幕）。仕上がり確認への往復で失わないよう画面横断で保持（#410 sub3）。 */
+  exportForm: ExportFormState;
+  setExportForm: (patch: Partial<ExportFormState>) => void;
   /** 画像ファイルを素材に取り込み、プロジェクトフォルダへ永続化する（表示用srcも即時更新）。 */
   setAssetImage: (assetId: string, file: File) => Promise<void>;
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
@@ -180,9 +294,11 @@ interface ProjectState {
   future: DocSnapshot[];
   /** 連続操作（ドラッグ等）を1ステップに合成するためのネスト深さ（内部）。 */
   _historyGroupDepth: number;
-  /** 文書を変える操作の「適用前」に呼び、現在状態を past へ積む（グループ中は積まない・transient 変更では呼ばない）。 */
+  /** グループ中でまだ snapshot 未記録か（内部）。最初の実変更で記録＝未変更 focus/pointerdown では履歴を消費しない（#389）。 */
+  _historyGroupPending: boolean;
+  /** 文書を変える操作の「適用前」に呼び、現在状態を past へ積む（グループ中は最初の実変更の1回だけ積む・transient 変更では呼ばない）。 */
   pushHistory: () => void;
-  /** 連続操作の開始/終了（開始で1回だけ「編集前」を記録し、連続中の細かい更新は積まない）。 */
+  /** 連続操作の開始/終了。開始では記録せず（遅延）、グループ中の最初の pushHistory＝最初の実変更で1回だけ「編集前」を記録する。 */
   beginHistoryGroup: () => void;
   endHistoryGroup: () => void;
   /** 取り消し（直前の編集前へ戻す）。 */
@@ -194,11 +310,37 @@ interface ProjectState {
 /** 文書slice（undo 対象）を現在状態から取り出す。 */
 const docSnapshot = (s: ProjectState): DocSnapshot => ({ meta: s.meta, parts: s.parts, scenes: s.scenes });
 
-// AI 構成案プロバイダの選択：Tauri かつ Gemini キーありなら実 Gemini、なければ Mock
-// （非Tauri／オフライン／鍵未設定のフォールバック＝ADR-0010）。
+// 進行中の保存 Promise（#256 レビュー🔴）。多重起動は防ぎつつ、**`await saveProject()` が「保存の完了」を保証**する
+// （早期 return だと書き出し前の保存が no-op になり projectId 未確定→画像欠落の恐れ）。進行中があれば同じ Promise を待つ。
+let saveInFlight: Promise<void> | null = null;
+
+// 音声合成リクエストの世代（音声キー＝sceneId／lineAudioKey ごと）。synthesize は非同期で await 中に後発の生成が来得るため、
+// 完了時に「この結果がまだ最新の要求か」を token で判定する。後発が来ていれば（token 不一致）先発の完了は状態へ一切触れない
+// ＝新しい pending や新しい結果を消さない。不一致（合成中に入力変更）で pending を none へ戻す処理が、後発の要求を壊さないための保護（#390 レビュー P1）。
+const synthReqSeq = new Map<string, number>();
+function nextSynthSeq(key: string): number {
+  const n = (synthReqSeq.get(key) ?? 0) + 1;
+  synthReqSeq.set(key, n);
+  return n;
+}
+function isLatestSynth(key: string, token: number): boolean {
+  return synthReqSeq.get(key) === token;
+}
+
+/** 場面複製/分割で、元場面の要素アニメ（④・ADR-0019）を新場面へ引き継いだ meta を返す（無ければ meta そのまま）。 */
+function metaWithDuplicatedAnimations(meta: ProjectHeader, srcSceneId: string, newSceneId: string): ProjectHeader {
+  const anims = meta.timelineOverlay?.animations;
+  if (!anims || anims.length === 0) return meta;
+  const copies = duplicateSceneAnimations(anims, srcSceneId, newSceneId, createAnimationId);
+  if (copies.length === 0) return meta;
+  return { ...meta, timelineOverlay: { ...meta.timelineOverlay, animations: [...anims, ...copies] } };
+}
+
+// AI 構成案プロバイダの選択：外部送信になる構成（Tauri かつ Gemini キーあり）なら実 Gemini、なければ Mock
+// （非Tauri／オフライン／鍵未設定のフォールバック＝ADR-0010）。判定は willSendExternally に一元化（§2-6/§2-7）。
 // 実 AI を試みて失敗したときは Mock に倒さずエラーを伝播する（黙って差し替えない）。
 async function generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
-  if (isTauri() && (await hasApiKey(GEMINI_PROVIDER))) {
+  if (await willSendExternally()) {
     return new GeminiProvider(getAiModel()).generateVideoPlan(input);
   }
   return new MockAiProvider().generateVideoPlan(input);
@@ -264,6 +406,15 @@ function importErrorMessage(e: unknown): string {
   return "素材を取り込めませんでした。もう一度お選びください。";
 }
 
+/** record から keep に含まれるキーだけ残した新しい record を返す（音声/素材キャッシュの剪定・#390）。 */
+function pickKeys<T>(record: Record<string, T>, keep: Set<string>): Record<string, T> {
+  const next: Record<string, T> = {};
+  for (const k of Object.keys(record)) {
+    if (keep.has(k)) next[k] = record[k];
+  }
+  return next;
+}
+
 function defaultHeader(): ProjectHeader {
   const now = new Date().toISOString();
   return {
@@ -273,12 +424,11 @@ function defaultHeader(): ProjectHeader {
     createdAt: now,
     updatedAt: now,
     videoSettings: defaultVideoSettings(),
-    // 新規プロジェクトの既定（デモ用の会社情報）。ウィザードはこの meta を初期値に開く（単一の既定ソース）。
+    // 新規プロジェクトの会社情報は空で開く（#414・§2-6）。デモ値を既定にすると、未入力のまま進んだとき
+    // 「株式会社サンプル」の動画案ができ、実 AI キー設定時は無自覚のまま外部送信されてしまう。
+    // ウィザードは各欄の placeholder（例：株式会社サンプル）で入力を案内し、会社名は next() で必須にする。
     companyInfo: {
-      companyName: "株式会社サンプル",
-      industry: "IT・業務システム開発",
-      jobType: "エンジニア（新卒）",
-      strengths: ["相談しやすい環境", "若手が成長しやすい"],
+      companyName: "",
     },
     voiceSettings: defaultVoiceSettings(),
   };
@@ -286,11 +436,13 @@ function defaultHeader(): ProjectHeader {
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
+  draftFromAi: false,
   saveStatus: "idle",
   importError: null,
   past: [],
   future: [],
   _historyGroupDepth: 0,
+  _historyGroupPending: false,
   meta: defaultHeader(),
   parts: [],
   scenes: [],
@@ -300,6 +452,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   assetSrcById: {},
   templateAssetSrcById: {},
   narrationAudioById: {},
+  _dirtyAudioKeys: new Set(),
   isGeneratingNarration: false,
   isImporting: false,
   narrationError: null,
@@ -307,11 +460,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   aiError: null,
   templateError: null,
   editingTemplateId: null,
+  editingSceneId: null,
+  wizardStep: 0,
+  confirmReturnTo: null,
+  previewReturnTo: null,
+  _generationSeq: 0,
+  exportRun: IDLE_EXPORT_RUN,
+  exportForm: IDLE_EXPORT_FORM,
+  autoGenerateIfSafe: async () => {
+    // 画面に直接landしたときだけの自動生成（#384・§2-6）。既に生成済み/生成中なら何もしない。
+    if (get().status !== "idle") return;
+    // 外部送信になる構成（実 Gemini）では、送信前確認（ConfirmScreen）を通らない自動送信をしない。
+    // Mock（送信なし）のときだけ従来どおり自動生成する。判定は generate と同じ willSendExternally（§2-7）。
+    // 判定自体が失敗（鍵ストアにアクセス不能等で reject）したときは fail-closed で「送らない」側に倒す
+    // ＝§2-6（外部送信は事前確認必須）を厳守。ここで generate() へ素通りさせると、再判定が成功した場合に
+    // 確認画面を通さず自動送信してしまうため素通りしない。unhandled rejection にしないよう try/catch で握る。
+    // 画面は空状態のまま（→ウィザードの導線）。エラー文言（§2-5）は能動的に生成を要求したとき＝generate() の catch が示す。
+    let external = true; // 判定不能時の既定＝送信しない側（fail-closed）
+    try {
+      external = await willSendExternally();
+    } catch {
+      // 判定不能（鍵ストアにアクセス不能等）＝external は初期値 true のまま＝送らない（fail-closed）。
+    }
+    if (external) return;
+    await get().generate();
+  },
   generate: async () => {
     // 多重起動ガード：開発時の StrictMode 二重 mount や連打で generate が同時に走ると、片方が失敗・片方が成功して
     // 「成功の前に失敗表示が出る」競合や、並行呼び出しによる API エラーを招く。生成中は1本だけに絞る（isImporting 等と同方針）。
     if (get().status === "generating") return;
-    set({ status: "generating", aiError: null });
+    // 世代トークン（#402）：この生成の世代を記録し、結果を反映する前に「まだ現行か」を確認する。
+    // キャンセル/後発の生成で世代が進んでいたら結果を破棄する（裏で完走しても場面を置き換えない）。
+    const seq = get()._generationSeq + 1;
+    set({ status: "generating", aiError: null, _generationSeq: seq });
     try {
       // 会社情報・目的・素材はウィザードで反映済み（未経由なら既定値）。
       // 送信前確認（ConfirmScreen）の表示と AI へ渡す内容を一致させるため get() の実データを使う（§2-6）。
@@ -328,21 +509,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // トーン: ウィザードで選んだ toneSettings.tone（未設定なら既定 DEFAULT_TONE・§2-7 で一本化）。
         tone: meta.toneSettings?.tone ?? DEFAULT_TONE,
         additionalNotes: meta.additionalNotes,
-        templates: buildTemplateSummaries(templates),
+        templates: buildTemplateSummaries(templates, meta.videoSettings.aspectRatio),
         assets,
         yukoPoseTags: buildYukoPoseTags(assets),
       });
+      if (get()._generationSeq !== seq) return; // キャンセル/後発生成で置換された＝結果を破棄（#402）
       const { parts, scenes, warnings } = transformVideoPlan(plan, {
         templates,
         assets,
         // プロジェクトの向き（縦/横）に一致するテンプレへ補正する（ADR-0012・B4）。
         orientation: meta.videoSettings.aspectRatio,
       });
-      set({ status: "ready", parts, scenes, warnings });
+      if (get()._generationSeq !== seq) return; // 変換中にキャンセルされ得るので反映直前にも再確認（#402）
+      set({ status: "ready", parts, scenes, warnings, draftFromAi: true }); // AI 生成直後＝たたき台のAI作成文言を出す（#467）
       // 動画案ができたら未生成のセリフ音声をバックグラウンドで自動生成（非ブロッキング・#176）。
       // 仕上がり確認へ着いた時点で成功分は鳴る。失敗場面は per-scene の「声を作り直す」で作り直せる。
       void get().generateAllNarrations();
     } catch (e) {
+      if (get()._generationSeq !== seq) return; // キャンセル済みなら失敗表示も出さない（#402）
       // 失敗の文言を保持し、UI が「次の行動」を出せるようにする（§2-5）。
       // Rust/プロバイダは §2-5 のユーザー向け文言で reject する（鍵未設定→設定へ／不適合→再試行 等）。
       const aiError =
@@ -350,11 +534,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ status: "error", aiError });
     }
   },
+  cancelGeneration: () => {
+    // in-flight の generate の結果適用を無効化し（世代を進める）、既存の下書きがあれば残す（ready）・
+    // 無ければ未生成（idle）へ戻す。GeneratingScreen の「キャンセル」から呼ぶ（#402）。
+    set((s) => ({
+      _generationSeq: s._generationSeq + 1,
+      status: s.scenes.length > 0 ? "ready" : "idle",
+    }));
+  },
   fail: () => set({ status: "error" }),
-  reset: () => set({ status: "idle", saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null }),
-  newProject: () =>
-    set({
+  // reset/newProject/loadProject も世代を進めて in-flight の generate を無効化する（#402 レビュー）。
+  // キャンセル以外の経路（キャンセルせず離脱→ホームで新規/切替）でも、裏で走る旧生成が新しい状態を上書きしないように。
+  reset: () =>
+    set((s) => ({ status: "idle", draftFromAi: false, saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null, _generationSeq: s._generationSeq + 1 })),
+  newProject: () => {
+    // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
+    if (isExportBusy(get().exportRun.phase)) return;
+    set((s) => ({
       status: "idle",
+      draftFromAi: false,
       saveStatus: "idle",
       meta: defaultHeader(),
       parts: [],
@@ -363,13 +561,48 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets: [],
       assetSrcById: {},
       narrationAudioById: {},
+      _dirtyAudioKeys: new Set(),
       narrationError: null,
       aiError: null,
       past: [], // 別文書＝履歴をクリア（ADR-0020）
       future: [],
       _historyGroupDepth: 0,
-    }),
+      _historyGroupPending: false,
+      wizardStep: 0, // 新規＝ウィザードは先頭ステップから（#401）
+      exportRun: IDLE_EXPORT_RUN, // 新規＝前の書き出し結果を持ち越さない
+      exportForm: IDLE_EXPORT_FORM, // 新規＝前の書き出し入力（ファイル名等）も持ち越さない
+      _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
+    }));
+  },
+  newBlankProject: () => {
+    // 白紙から作る（#393）＝ウィザード/AI を通らず手動で場面を組む。共通リセット（newProject）を流用し、
+    // status を "idle" のままにしない（"ready" にする）ことで、各画面マウント時の autoGenerateIfSafe（§2-6）が
+    // 発火しない＝白紙開始がそのまま AI 送信を誘発しない。書き出し中ガードは newProject 側と二重で持つ（早期 return）。
+    if (isExportBusy(get().exportRun.phase)) return;
+    get().newProject();
+    set({ status: "ready" });
+  },
+  startManualEdit: () => {
+    // 生成失敗/中断からの手動作成リカバリ（#393 P1・12 §9.3／15＝失敗時の手動作成は正規リカバリ）。
+    // 入力済みの会社情報・素材・（あれば）場面は残したまま、status を "ready"・aiError をクリアして手動で組む状態にする。
+    // status を error のままにしないことで、たたき台が「場面を追加」導線を出す（白紙導線と同じ手動状態＝draftFromAi=false）。
+    // _generationSeq を進めて in-flight の generate を無効化する（デモ/失敗表示から手動へ移った場合など、後から生成が
+    // 成功して手動作成を上書きしないように・#402 と同方針・PR#468 P2）。
+    set((s) => ({ status: "ready", aiError: null, draftFromAi: false, _generationSeq: s._generationSeq + 1 }));
+  },
+  // 保存の入口（#256 レビュー🔴）：進行中の保存があればその Promise を待って戻る＝多重起動は防ぎつつ
+  // 「await saveProject() は保存の完了を保証」（書き出し前保存が no-op で projectId 未確定→画像欠落になるのを防ぐ）。
   saveProject: async () => {
+    if (saveInFlight) return saveInFlight;
+    saveInFlight = get()._doSave();
+    try {
+      await saveInFlight;
+    } finally {
+      saveInFlight = null;
+    }
+  },
+  // 実際の保存処理（saveProject 経由でのみ呼ぶ）。saveStatus を saving→saved/error に更新。
+  _doSave: async () => {
     set({ saveStatus: "saving" });
     try {
       const s = get();
@@ -380,7 +613,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       // ナレーション音声をディスクへ保存し、voicePath を更新（生成済みのみ）。
       // 生成済みでない場面は古い音声参照を残さない（再生成で上書きされる）。
+      // 効率化（#390）：新規生成された音声（_dirtyAudioKeys）だけ WAV を書き出す。未変更の音声（既に voicePath 済み）は
+      // 再書き出しせず既存 voicePath を保持する。dirty でも voicePath 未設定なら念のため書く（取りこぼし防止）。
       const audioById = s.narrationAudioById;
+      const dirty = s._dirtyAudioKeys;
+      // 今回ディスクへ書けたキー→{voicePath, 書き出した音声}。保存完了時に live state へ voicePath をマージし dirty を落とすが、
+      // 保存中に同キーが再生成されていたら（live 音声 ≠ 書き出した音声）マージも dirty クリアもしない（新しい音声を失わない・#390 レビュー）。
+      const writtenPath = new Map<string, string>();
+      const writtenAudio = new Map<string, string>();
       const scenes = await Promise.all(
         s.scenes.map(async (sc) => {
           // 掛け合い（明示 lines）は行ごとに保存・voicePath 更新する（ADR-0015 PR-C2）。
@@ -391,12 +631,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 if (line.voicePath) next = withLineVoicePath(next, line.lineId, null);
                 continue;
               }
-              const lineAudio = audioById[lineAudioKey(sc.sceneId, line.lineId)];
-              if (lineAudio) {
+              const key = lineAudioKey(sc.sceneId, line.lineId);
+              const lineAudio = audioById[key];
+              // 未変更（非 dirty で voicePath 済み）は再書き出しせず据え置き（#390）。
+              if (lineAudio && (dirty.has(key) || !line.voicePath)) {
                 const vp = await importVoiceFile(projectId, lineVoiceStem(sc.sceneId, line.lineId), lineAudio);
-                if (vp) next = withLineVoicePath(next, line.lineId, vp);
+                if (vp) {
+                  next = withLineVoicePath(next, line.lineId, vp);
+                  writtenPath.set(key, vp);
+                  writtenAudio.set(key, lineAudio);
+                }
               }
-              // 生成済みだがメモリに音声なし → 既存 voicePath を保持（何もしない）。
+              // 生成済みだがメモリに音声なし／未変更 → 既存 voicePath を保持（何もしない）。
             }
             return next;
           }
@@ -406,26 +652,94 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               ? { ...sc, narration: { ...sc.narration, voicePath: null } }
               : sc;
           }
-          // 生成済み：メモリに音声があればディスク保存して voicePath を更新。
+          // 生成済み：メモリに音声があり、かつ変更あり（dirty）／voicePath 未設定ならディスク保存して voicePath を更新。
           const audio = audioById[sc.sceneId];
-          if (audio) {
+          if (audio && (dirty.has(sc.sceneId) || !sc.narration.voicePath)) {
             const voicePath = await importVoiceFile(projectId, sc.sceneId, audio);
-            return voicePath ? { ...sc, narration: { ...sc.narration, voicePath } } : sc;
+            if (voicePath) {
+              writtenPath.set(sc.sceneId, voicePath);
+              writtenAudio.set(sc.sceneId, audio);
+              return { ...sc, narration: { ...sc.narration, voicePath } };
+            }
+            return sc;
           }
-          // 生成済みだがメモリに音声なし（復元失敗・非Tauri等）→ 既存 voicePath を保持する。
+          // 生成済みだがメモリに音声なし（復元失敗・非Tauri等）／未変更 → 既存 voicePath を保持する。
           return sc;
         }),
       );
-      const meta: ProjectHeader = { ...s.meta, projectId, updatedAt: new Date().toISOString() };
+      // ディスクへ書く project は「保存開始時のスナップショット（scenes）」で組む＝一貫した時点の内容。
+      const updatedAt = new Date().toISOString();
+      const meta: ProjectHeader = { ...s.meta, projectId, updatedAt };
       const project = assembleProject(meta, s.assets, s.parts, scenes);
+      // 保存前検証（#416）：当面は警告ログのみ（アプリが正典に反するデータを作っていないか監視・入力防御は #411）。
+      const pv = validateProjectDoc(project);
+      if (!pv.valid) console.warn("[project] 保存内容がスキーマに未適合（要修正・#416）:", pv.errors);
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
       setLastProjectId(projectId);
-      set({ meta, scenes, saveStatus: "saved" });
+      // 保存完了時は「スナップショットを丸ごと戻す」のではなく、書けた voicePath だけを **live state** へマージする。
+      // これで保存中の削除・編集・同一キー再生成を巻き戻さない（#390 レビュー・P1）：
+      //  - 書けた voicePath は、対象の場面/行がまだ存在し、かつ音声が書き出し時と同じ（＝保存中に再生成されていない）ときだけ反映。
+      //  - dirty は「書けて」かつ「未変更」のキーだけ落とす（再生成された分は dirty のまま＝次回保存で書く）。
+      //  - 孤児（現存しない場面/行のキー）はメモリから剪定。saveStatus は sentinel（下記）で判定。
+      set((st) => {
+        const applyWritten = (sc: Scene): Scene => {
+          if (sc.lines && sc.lines.length > 0) {
+            let changed = false;
+            const lines = sc.lines.map((l) => {
+              if (l.status !== NARRATION_STATUS.generated) return l;
+              const key = lineAudioKey(sc.sceneId, l.lineId);
+              if (writtenPath.has(key) && st.narrationAudioById[key] === writtenAudio.get(key)) {
+                changed = true;
+                return { ...l, voicePath: writtenPath.get(key)! };
+              }
+              return l;
+            });
+            return changed ? { ...sc, lines } : sc;
+          }
+          if (sc.narration.status !== NARRATION_STATUS.generated) return sc;
+          const key = sc.sceneId;
+          if (writtenPath.has(key) && st.narrationAudioById[key] === writtenAudio.get(key)) {
+            return { ...sc, narration: { ...sc.narration, voicePath: writtenPath.get(key)! } };
+          }
+          return sc;
+        };
+        const nextScenes = st.scenes.map(applyWritten);
+        const liveKeys = liveNarrationAudioKeys(nextScenes); // 現在の場面が参照するキー（書き出し対象の判定に使う）
+        // 剪定は「現在＋Undo/Redo 履歴で到達可能な場面」の和集合で行う（#390 レビュー🔴）。削除は Undo 可・Undo は
+        // 音声キャッシュを戻さないため、履歴に残る場面のキーを消すと取り消し後に音声が失われる。履歴から落ちた（＝もう
+        // Undo でも戻せない）キーだけ解放する。past/future の DocSnapshot も走査。
+        const reachable = new Set(liveKeys);
+        for (const snap of [...st.past, ...st.future]) {
+          for (const k of liveNarrationAudioKeys(snap.scenes)) reachable.add(k);
+        }
+        const nextAudio = pickKeys(st.narrationAudioById, reachable); // 到達不能な孤児だけ落とす
+        const nextDirty = new Set<string>();
+        for (const k of st._dirtyAudioKeys) {
+          if (!reachable.has(k)) continue; // 到達不能＝もう書き出す必要なし
+          if (liveKeys.has(k) && writtenPath.has(k) && st.narrationAudioById[k] === writtenAudio.get(k)) continue; // 書けて未変更＝もう dirty でない
+          nextDirty.add(k); // 未書き出し／保存中に再生成／Undo 履歴のみで到達（復活時に !voicePath で書き直す）＝dirty のまま
+        }
+        // sentinel：_doSave 冒頭で saveStatus="saving"。保存中に編集・削除・生成の**完了**（成功/失敗いずれも idle をセット）が
+        // 入れば "idle" に変わる。まだ "saving" のまま＝保存中に確定変更なし → "saved"。変わっていれば（idle 等）そのまま＝
+        // 自動保存が再度走る（作業を失わない）。※in-flight の pending は idle を立てないが、その生成は完了時に idle をセットする
+        // ので、保存がちょうど pending 中に終わっても次サイクルで拾える。
+        const saveStatus = st.saveStatus === "saving" ? "saved" : st.saveStatus;
+        // projectId（新規採番）と updatedAt は stamp しつつ、保存中の meta 編集（改名等）は live を優先して残す。
+        return {
+          meta: { ...st.meta, projectId, updatedAt },
+          scenes: nextScenes,
+          saveStatus,
+          narrationAudioById: nextAudio,
+          _dirtyAudioKeys: nextDirty,
+        };
+      });
     } catch {
       set({ saveStatus: "error" });
     }
   },
   loadProject: async (projectId) => {
+    // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
+    if (isExportBusy(get().exportRun.phase)) return;
     const text = await loadProjectDoc(projectId);
     const project = parseProjectDoc(text);
     // ディスクの素材を表示用 src に解決（Tauri は asset://・ブラウザは null）。filePath を持つもの・未配置のサンプル等は null でスキップ。並列実行（A3-2）。
@@ -483,25 +797,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     for (const entry of [...voiceLoaded, ...lineVoiceLoaded]) {
       if (entry) narrationAudioById[entry[0]] = entry[1];
     }
-    set({
+    set((s) => ({
       status: "ready",
-      saveStatus: "idle",
-      meta: {
-        projectId: project.projectId,
-        projectName: project.projectName,
-        // ADR-0011: 種別・発表内容・自由記述も復元する（欠落すると保存→再読込で general が recruit に化ける）。
-        videoKind: project.videoKind,
-        purpose: project.purpose,
-        createdAt: project.createdAt,
-        updatedAt: project.updatedAt,
-        videoSettings: project.videoSettings,
-        companyInfo: project.companyInfo,
-        generalBrief: project.generalBrief,
-        additionalNotes: project.additionalNotes,
-        toneSettings: project.toneSettings,
-        voiceSettings: project.voiceSettings,
-        bgmSettings: project.bgmSettings,
-      },
+      draftFromAi: false, // 読込済みプロジェクトは「生成直後」ではない＝AI作成文言は出さない（#467）
+      saveStatus: "saved", // 読み込み直後はディスクと一致＝保存済み扱い（未保存検知の基準・#256）
+      // 保存用ヘッダは projectHeaderFromProject に一元化（Project のヘッダ系フィールドの取りこぼしを防ぐ・#324）。
+      // ADR-0011 の種別/発表内容/自由記述、ADR-0018 の timelineOverlay もここでまとめて復元される。
+      meta: projectHeaderFromProject(project),
       assets: project.assets.map((a) =>
         videoThumb[a.assetId] ? { ...a, thumbnailPath: videoThumb[a.assetId] } : a,
       ),
@@ -510,27 +812,43 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       warnings: [],
       assetSrcById,
       narrationAudioById,
+      _dirtyAudioKeys: new Set(), // 読込直後は全音声が voicePath 済み＝再書き出し不要（#390）
       narrationError: null,
       past: [], // 別文書を開く＝履歴をクリア（ADR-0020）
       future: [],
       _historyGroupDepth: 0,
-    });
+      _historyGroupPending: false,
+      wizardStep: 0, // 別文書＝ウィザードのステップも初期化（#401）
+      exportRun: IDLE_EXPORT_RUN, // 別文書＝前の書き出し結果を持ち越さない
+      exportForm: IDLE_EXPORT_FORM, // 別文書＝前の書き出し入力も持ち越さない
+      _generationSeq: s._generationSeq + 1, // 別文書へ切替＝in-flight の旧生成を無効化（#402 レビュー）
+    }));
     setLastProjectId(projectId);
   },
   listProjects: () => listProjectSummaries(),
   deleteProject: async (projectId) => {
+    // 書き出し中に当該（開いている）プロジェクトを消すと、素材ファイルが読取り中に消えて
+    // 写真の抜けた MP4 が正常完了してしまう（#379）。開いていない別プロジェクトの削除は安全なので許可。
+    if (isExportBusy(get().exportRun.phase) && get().meta.projectId === projectId) return;
     await deleteProjectDoc(projectId);
     // 削除したのが最後に開いたプロジェクトなら、次回起動の自動復元対象から外す（消えたものを開こうとしない）。
     if (getLastProjectId() === projectId) clearLastProjectId();
+    // 開いているプロジェクトを消したら編集状態も新規化する（#383）。そのままだと自動保存（useAutoSave）が
+    // 同じ projectId を書き戻し、「元に戻せません」の説明に反して一覧へ復活してしまう。書き出し中は上でブロック済み。
+    if (get().meta.projectId === projectId) get().newProject();
   },
   renameProject: async (projectId, newName) => {
-    const name = newName.trim();
+    // 上限で切り詰めて保存＝schema の projectName maxLength(80) 超を保存させない（入力防御 #411・#416 と対）。
+    const name = newName.trim().slice(0, PROJECT_NAME_MAX_LENGTH);
     if (!name) return; // 空名は変更しない（UI 側でも保存を抑止）
     // 保存済み project.json を読み、名前と更新日時だけ差し替えて書き戻す（他のデータは保持）。
     const updatedAt = new Date().toISOString();
     const doc = JSON.parse(await loadProjectDoc(projectId)) as Record<string, unknown>;
     doc.projectName = name;
     doc.updatedAt = updatedAt;
+    // 保存前検証（#416）：改名は projectName の maxLength(80) を超え得る（#411）。当面は警告ログのみ。
+    const rv = validateProjectDoc(doc);
+    if (!rv.valid) console.warn("[project] 改名後の保存内容がスキーマに未適合（要修正・#416）:", rv.errors);
     await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
     // 開いているプロジェクトを改名したなら、画面表示名・更新日時（meta）も同期する。
     if (get().meta.projectId === projectId) set((s) => ({ meta: { ...s.meta, projectName: name, updatedAt } }));
@@ -540,6 +858,81 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
       // 編集したら「保存しました」表示を解除（未保存と分かるように）。
+      saveStatus: "idle",
+    }));
+  },
+  addOverlayClip: (clip) => {
+    const clips = get().meta.timelineOverlay?.clips ?? [];
+    const id = createOverlayClipId(clips.map((c) => c.id));
+    // 既定＝telop・開始0秒・長さ3秒。呼び出し側でアンカー場面/開始秒/文言を上書きする。
+    const newClip: OverlayClip = { id, track: "telop", startSec: 0, durationSec: 3, ...clip };
+    get().pushHistory();
+    set((s) => ({
+      meta: { ...s.meta, timelineOverlay: { ...s.meta.timelineOverlay, clips: [...(s.meta.timelineOverlay?.clips ?? []), newClip] } },
+      saveStatus: "idle",
+    }));
+    return id;
+  },
+  updateOverlayClip: (id, patch) => {
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        timelineOverlay: {
+          ...s.meta.timelineOverlay,
+          clips: (s.meta.timelineOverlay?.clips ?? []).map((c) => (c.id === id ? { ...c, ...patch } : c)),
+        },
+      },
+      saveStatus: "idle",
+    }));
+  },
+  removeOverlayClip: (id) => {
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        timelineOverlay: {
+          ...s.meta.timelineOverlay,
+          clips: (s.meta.timelineOverlay?.clips ?? []).filter((c) => c.id !== id),
+        },
+      },
+      saveStatus: "idle",
+    }));
+  },
+  addAnimation: (sceneId, targetId, keyframes) => {
+    const anims = get().meta.timelineOverlay?.animations ?? [];
+    const id = createAnimationId(anims.map((a) => a.id));
+    const newAnim: ElementAnimation = { id, sceneId, targetId, keyframes };
+    get().pushHistory();
+    set((s) => ({
+      meta: { ...s.meta, timelineOverlay: { ...s.meta.timelineOverlay, animations: [...(s.meta.timelineOverlay?.animations ?? []), newAnim] } },
+      saveStatus: "idle",
+    }));
+    return id;
+  },
+  updateAnimation: (animId, keyframes) => {
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        timelineOverlay: {
+          ...s.meta.timelineOverlay,
+          animations: (s.meta.timelineOverlay?.animations ?? []).map((a) => (a.id === animId ? { ...a, keyframes } : a)),
+        },
+      },
+      saveStatus: "idle",
+    }));
+  },
+  removeAnimation: (animId) => {
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        timelineOverlay: {
+          ...s.meta.timelineOverlay,
+          animations: (s.meta.timelineOverlay?.animations ?? []).filter((a) => a.id !== animId),
+        },
+      },
       saveStatus: "idle",
     }));
   },
@@ -590,6 +983,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ...p,
         sceneIds: p.sceneIds.filter((id) => id !== sceneId),
       })),
+      // 音声キャッシュ（narrationAudioById／dirty）はここで剪定しない：削除は Undo 可（履歴に残る）で、Undo は
+      // 音声キャッシュを復元しない（DocSnapshot=meta/parts/scenes・ADR-0020）。ここで消すと「生成→削除→取り消し」で
+      // 復元場面の音声が失われる（保存前は voicePath も無く復旧不能＝#390 レビュー🔴）。剪定は _doSave が「現在＋Undo/Redo
+      // 履歴で到達可能な場面」を除いて行う（履歴から落ちて初めて解放＝到達不能なら Undo でも戻せず安全）。
       saveStatus: "idle",
     }));
   },
@@ -600,13 +997,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().pushHistory();
     set({ ...next, saveStatus: "idle" });
   },
+  moveSceneToIndex: (sceneId, toIndex) => {
+    const s = get();
+    const next = moveSceneToIndexInList(s.scenes, s.parts, sceneId, toIndex);
+    if (next.scenes === s.scenes) return; // 位置不変/対象なし＝変化なし（未保存/履歴にしない）
+    get().pushHistory();
+    set({ ...next, saveStatus: "idle" });
+  },
   duplicateScene: (sceneId) => {
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = duplicateSceneInList(s.scenes, s.parts, sceneId, newId);
     if (next.scenes === s.scenes) return ""; // 対象なし＝変化なし
     get().pushHistory();
-    set({ ...next, saveStatus: "idle" });
+    // 複製元の要素アニメ（④・ADR-0019）も新場面へ引き継ぐ（複製で freeLayout の要素id は不変＝targetId そのまま）。
+    set({ ...next, meta: metaWithDuplicatedAnimations(s.meta, sceneId, newId), saveStatus: "idle" });
     return newId;
   },
   splitScene: (sceneId, splitIndex) => {
@@ -615,8 +1020,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const next = splitSceneInList(s.scenes, s.parts, sceneId, splitIndex, newId);
     if (next.scenes === s.scenes) return ""; // 分割不能＝変化なし（未保存にしない）
     get().pushHistory();
-    set({ ...next, saveStatus: "idle" });
+    // 分割後の後半場面（newId）は前半と同じ freeLayout を持つ＝元場面のアニメを後半にも引き継ぐ（④・ADR-0019）。
+    set({ ...next, meta: metaWithDuplicatedAnimations(s.meta, sceneId, newId), saveStatus: "idle" });
     return newId;
+  },
+  splitSceneAtLine: (sceneId, lineIndex) => {
+    const s = get();
+    const newId = createSceneId(s.scenes.map((x) => x.sceneId));
+    const next = splitSceneLinesInList(s.scenes, s.parts, sceneId, lineIndex, newId);
+    if (next.scenes === s.scenes) return ""; // 分割不能（掛け合いでない/1行/尺不足）＝変化なし（未保存にしない）
+    get().pushHistory();
+    // 後半場面（newId）は前半と同じ freeLayout を持つ＝元場面のアニメを後半にも引き継ぐ（splitScene と同じ・④）。
+    set({ ...next, meta: metaWithDuplicatedAnimations(s.meta, sceneId, newId), saveStatus: "idle" });
+    return newId;
+  },
+  removeAnimationsForElements: (sceneId, targetIds) => {
+    const anims = get().meta.timelineOverlay?.animations;
+    if (!anims || anims.length === 0) return;
+    const rest = removeAnimationsForTargets(anims, sceneId, targetIds);
+    if (rest.length === anims.length) return; // 対象なし＝変化なし（未保存/履歴にしない）
+    get().pushHistory();
+    set((s) => ({
+      meta: { ...s.meta, timelineOverlay: { ...s.meta.timelineOverlay, animations: rest } },
+      saveStatus: "idle",
+    }));
   },
   applyProjectInfo: (input) => {
     get().pushHistory();
@@ -665,6 +1092,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       saveStatus: "idle",
     }));
   },
+  setProjectName: (name) => {
+    // 編集中の名前変更＝メモリの meta を更新（保存/自動保存で永続化）。UI 側は blur/Enter で確定＝1改名=1履歴。
+    // 上限で切り詰め＝schema の projectName maxLength(80) 超をメモリにも入れない（貼り付け等の保険・#411）。
+    get().pushHistory();
+    set((s) => ({ meta: { ...s.meta, projectName: name.slice(0, PROJECT_NAME_MAX_LENGTH) }, saveStatus: "idle" }));
+  },
   updateVoiceSettings: (patch) => {
     get().pushHistory();
     set((s) => ({
@@ -703,7 +1136,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       saveStatus: "idle",
     })),
   removeAsset: (assetId) =>
-    set((s) => ({ assets: s.assets.filter((a) => a.assetId !== assetId), saveStatus: "idle" })),
+    set((s) => {
+      // 表示用 src（data URL）も即メモリから落とす（消した素材の src を残さない・#390）。
+      const { [assetId]: _removed, ...assetSrcById } = s.assetSrcById;
+      return { assets: s.assets.filter((a) => a.assetId !== assetId), assetSrcById, saveStatus: "idle" };
+    }),
   addTemplatePack: (incoming) =>
     set((s) => {
       // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
@@ -720,7 +1157,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       userTemplateFs.loadUserTemplates(),
       loadTemplateAssetUrls(),
     ]);
-    set((s) => ({ templates: replaceUserTemplates(s.templates, user), templateAssetSrcById }));
+    set((s) => ({ templates: replaceUserTemplates(s.templates, user.templates), templateAssetSrcById }));
+    // 孤立したテンプレ素材ファイルを安全条件下で掃除（#299）。下書き破棄やテンプレ削除時の削除失敗で残ったファイルが対象。
+    // user.complete が false（読込失敗・破損・検証却下）なら何もしない＝「空を全削除」の誤削除を防ぐ（ADR-0021 の注意）。
+    const orphans = orphanTemplateAssetIds(get().templates, Object.keys(templateAssetSrcById), user.complete);
+    if (orphans.length > 0) {
+      for (const assetId of orphans) await deleteTemplateAsset(assetId); // 失敗は templateAssetFs 内で握る（非致命）
+      set((s) => ({
+        templateAssetSrcById: Object.fromEntries(
+          Object.entries(s.templateAssetSrcById).filter(([id]) => !orphans.includes(id)),
+        ),
+      }));
+    }
   },
   saveUserTemplate: async (template) => {
     try {
@@ -737,15 +1185,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const owned = templateAssetIdsOf(get().templates.find((t) => t.templateId === templateId)?.layers ?? []);
     try {
       await userTemplateFs.deleteUserTemplate(templateId);
-      // 各素材ファイルの削除失敗は templateAssetFs 内で握る（非致命）。失敗時はファイルが残るが、参照していたテンプレは消えるため未参照＝孤立（disk のみ・許容。安全な一括掃除は将来＝読込失敗時の誤削除を避けるため自動掃除はしない）。
+      // 各素材ファイルの削除失敗は templateAssetFs 内で握る（非致命）。失敗時はファイルが残るが、参照していたテンプレは消えるため未参照＝孤立（disk のみ・許容）。残った孤立は次回起動の読込時に安全条件下で掃除される（#299・loadUserTemplates）。
       for (const assetId of owned) await deleteTemplateAsset(assetId);
-      set((s) => ({
-        templates: s.templates.filter((t) => t.templateId !== templateId),
-        templateAssetSrcById: Object.fromEntries(
-          Object.entries(s.templateAssetSrcById).filter(([id]) => !owned.includes(id)),
-        ),
-        templateError: null,
-      }));
+      set((s) => {
+        const remainingTemplates = s.templates.filter((t) => t.templateId !== templateId);
+        // 開いているプロジェクトで、この見た目を使っていた場面を標準へ置換＝孤立参照（存在しない templateId）を
+        // 残さない（#458・§9「参照中のプロジェクトは標準へ自動置換」）。代替が無い場面は原状維持（§9 補正が描画時に対応）。
+        const nextScenes = substituteDeletedTemplateInScenes(
+          s.scenes, templateId, remainingTemplates, s.meta.videoSettings.aspectRatio,
+        );
+        return {
+          templates: remainingTemplates,
+          scenes: nextScenes,
+          templateAssetSrcById: Object.fromEntries(
+            Object.entries(s.templateAssetSrcById).filter(([id]) => !owned.includes(id)),
+          ),
+          templateError: null,
+          // 場面を置換したら未保存に（保存で永続化）。変化なし（同一参照）なら現状維持。
+          ...(nextScenes !== s.scenes ? { saveStatus: "idle" as const } : {}),
+        };
+      });
       return true;
     } catch {
       set({ templateError: "見た目パターンを削除できませんでした。もう一度お試しください。" });
@@ -780,6 +1239,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   clearTemplateError: () => set({ templateError: null }),
   setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),
+  setEditingSceneId: (sceneId) => set({ editingSceneId: sceneId }),
+  setWizardStep: (step) => set({ wizardStep: step }),
+  setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
+  setPreviewReturnTo: (screen) => set({ previewReturnTo: screen }),
+  setExportRun: (patch) => set((s) => ({ exportRun: { ...s.exportRun, ...patch } })),
+  setExportForm: (patch) => set((s) => ({ exportForm: { ...s.exportForm, ...patch } })),
   setAssetImage: async (assetId, file) => {
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。
@@ -1034,25 +1499,62 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }));
       for (const l of targets) setLineStatus(l.lineId, NARRATION_STATUS.pending);
       set({ narrationError: null });
-      try {
+      {
         const base = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
+        const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
+        // 行ごとに try/catch。1行の失敗が他行を巻き込まず、成功/失敗どちらの完了も token/genSeq で保護する（#390 レビュー P1）。
         for (const line of targets) {
-          const result = await voiceProvider.synthesize(resolveLineVoice(line, base));
-          set((st) => ({
-            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
-            narrationAudioById: { ...st.narrationAudioById, [lineAudioKey(sceneId, line.lineId)]: result.audioDataUrl },
-          }));
+          const input = resolveLineVoice(line, base);
+          const key = lineAudioKey(sceneId, line.lineId);
+          const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
+          try {
+            const result = await voiceProvider.synthesize(input);
+            set((st) => {
+              // 後発の生成が同じ行に来た／別プロジェクトへ切替＝この完了は状態へ触れない（新しい pending・結果を消さない・#390 レビュー P1）。
+              if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+              // 合成の await 中に対象の場面/行が消えた（削除・掛け合い解除）なら結果を捨てる＝削除の即時剪定を打ち消さない（#390 レビュー P1）。
+              const sc = st.scenes.find((x) => x.sceneId === sceneId);
+              const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
+              if (!sc || !cur) return {};
+              // 合成中に本文・話し方（全体設定含む）を編集していたら旧結果は使わない。pending のままだと再試行不能なので
+              // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
+              const curInput = resolveLineVoice(cur, resolveNarrationVoice(sc.narration, st.meta.voiceSettings));
+              if (!sameSynthInput(input, curInput)) {
+                return {
+                  scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.none) : s)),
+                  saveStatus: "idle",
+                };
+              }
+              return {
+                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
+                narrationAudioById: { ...st.narrationAudioById, [key]: result.audioDataUrl },
+                _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(key), // 新規生成＝次回保存で書き出す（#390）
+                saveStatus: "idle", // 音声は履歴外＝生成だけでも未保存にして自動保存の対象にする（#390 レビュー P1）
+              };
+            });
+          } catch (e) {
+            set((st) => {
+              // 失敗も成功と同じく保護：後発/別文書ならこの失敗は無視（新しい pending・成功結果を failed で潰さない・#390 レビュー P1）。
+              if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+              const sc = st.scenes.find((x) => x.sceneId === sceneId);
+              const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
+              if (!sc || !cur) return {};
+              // 合成中に入力が変わっていたら、この失敗は古い入力のもの＝失敗表示せず none（作り直し可）に戻す（全体設定変更の pending 固着も解消）。
+              const curInput = resolveLineVoice(cur, resolveNarrationVoice(sc.narration, st.meta.voiceSettings));
+              if (!sameSynthInput(input, curInput)) {
+                return {
+                  scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.none) : s)),
+                  saveStatus: "idle",
+                };
+              }
+              return {
+                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.failed) : s)),
+                narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+                saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（sentinel が保存中の変化を取りこぼさない・#390 レビュー）
+              };
+            });
+          }
         }
-      } catch (e) {
-        // pending の行だけ failed にする（既に generated 済みの行とその音声は保持＝不整合を避ける）。
-        set((st) => ({
-          scenes: st.scenes.map((s) =>
-            s.sceneId === sceneId && s.lines
-              ? { ...s, lines: s.lines.map((l) => (l.status === NARRATION_STATUS.pending ? { ...l, status: NARRATION_STATUS.failed } : l)) }
-              : s,
-          ),
-        }));
-        set({ narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。" });
       }
       return;
     }
@@ -1067,20 +1569,56 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }));
     setStatus(NARRATION_STATUS.pending);
     set({ narrationError: null });
+    const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
+    const input = { text: scene.narration.text, ...v };
+    const key = sceneId;
+    const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
+    const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
     try {
-      const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
-      const result = await voiceProvider.synthesize({ text: scene.narration.text, ...v });
-      set((st) => ({
-        scenes: st.scenes.map((s) =>
-          s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,
-        ),
-        narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
-      }));
+      const result = await voiceProvider.synthesize(input);
+      set((st) => {
+        // 後発の生成が来た／別プロジェクトへ切替＝この完了は状態へ触れない（新しい pending・結果を消さない・#390 レビュー P1）。
+        if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+        // await 中に場面が消えた／掛け合いへ切替（lines 化）していたら結果を捨てる（#390 レビュー P1）。
+        const sc = st.scenes.find((x) => x.sceneId === sceneId);
+        if (!sc || (sc.lines && sc.lines.length > 0)) return {};
+        // 合成中に本文・話し方（全体設定含む）を編集していたら旧結果は使わない。pending のままだと再試行不能なので
+        // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
+        const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
+        if (!sameSynthInput(input, curInput)) {
+          return {
+            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),
+            saveStatus: "idle",
+          };
+        }
+        return {
+          scenes: st.scenes.map((s) =>
+            s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.generated } } : s,
+          ),
+          narrationAudioById: { ...st.narrationAudioById, [sceneId]: result.audioDataUrl },
+          _dirtyAudioKeys: new Set(st._dirtyAudioKeys).add(sceneId), // 新規生成＝次回保存で書き出す（#390）
+          saveStatus: "idle", // 音声は履歴外＝生成だけでも未保存にして自動保存の対象にする（#390 レビュー P1）
+        };
+      });
     } catch (e) {
-      setStatus(NARRATION_STATUS.failed);
-      set({
-        narrationError:
-          typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+      set((st) => {
+        // 失敗も成功と同じく保護：後発/別文書ならこの失敗は無視（新しい pending・成功結果を failed で潰さない・#390 レビュー P1）。
+        if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+        const sc = st.scenes.find((x) => x.sceneId === sceneId);
+        if (!sc || (sc.lines && sc.lines.length > 0)) return {};
+        // 合成中に入力が変わっていたら、この失敗は古い入力のもの＝失敗表示せず none（作り直し可）に戻す（全体設定変更の pending 固着も解消）。
+        const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
+        if (!sameSynthInput(input, curInput)) {
+          return {
+            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),
+            saveStatus: "idle",
+          };
+        }
+        return {
+          scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.failed } } : s)),
+          narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+          saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（#390 レビュー）
+        };
       });
     }
   },
@@ -1089,12 +1627,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ isGeneratingNarration: true });
     try {
       // 未生成（none/pending/failed）のみ対象。生成済みは個別の「声を作り直す」で上書きする。
-      // 掛け合い（明示 lines）は本文非空・未生成の行が1つでもあれば対象（ADR-0015 PR-C2）。
-      const needsGen = (s: Scene): boolean =>
-        s.lines && s.lines.length > 0
-          ? s.lines.some((l) => l.text.trim().length > 0 && l.status !== NARRATION_STATUS.generated)
-          : s.narration.text.trim().length > 0 && s.narration.status !== NARRATION_STATUS.generated;
-      const ids = get().scenes.filter(needsGen).map((s) => s.sceneId);
+      // 掛け合い・単一 narration 共通の実効判定（sceneNeedsVoice）を precheck と共有＝同概念同挙動（#403）。
+      const ids = get().scenes.filter(sceneNeedsVoice).map((s) => s.sceneId);
       await Promise.all(ids.map((id) => get().generateNarration(id, { fromBulk: true })));
     } finally {
       set({ isGeneratingNarration: false });
@@ -1108,28 +1642,33 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return result.audioDataUrl;
   },
   // ── Undo/Redo（ADR-0020・#211）。文書を変える action は適用前に pushHistory を呼ぶ。連続操作は begin/endHistoryGroup で1ステップに合成。 ──
-  pushHistory: () => {
-    if (get()._historyGroupDepth > 0) return; // グループ中は begin で記録済みなので積まない（ドラッグ＝1ステップ）
-    set((s) => recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)));
-  },
-  beginHistoryGroup: () =>
-    // 連続操作の開始。深さ0→1 のときだけ「編集前」を1回記録する。記録と深さ更新は1回の set でアトミックに。
+  // グループは**遅延記録**：begin では snapshot を取らず、グループ中の**最初の pushHistory（＝最初の実変更）**で
+  // 「編集前」を1回だけ記録する。これで focus/pointerdown しただけ（未変更）では履歴を消費しない（#389 レビュー）。
+  pushHistory: () =>
     set((s) => {
-      if (s._historyGroupDepth === 0) {
-        const snap = recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
-        return { ...snap, _historyGroupDepth: 1 };
+      if (s._historyGroupDepth > 0) {
+        if (!s._historyGroupPending) return {}; // グループ中・記録済み＝積まない（1文字/1tick 毎に積まない）
+        // グループ中の最初の変更：ここで初めて「編集前」を記録する（begin だけでは積まない）。
+        return { ...recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)), _historyGroupPending: false };
       }
-      return { _historyGroupDepth: s._historyGroupDepth + 1 };
+      return recordSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s)); // グループ外＝従来どおり1操作=1履歴
     }),
+  beginHistoryGroup: () =>
+    // 連続操作の開始。深さ0→1 で「保留」にするだけ（snapshot は最初の pushHistory まで遅延＝未変更 focus で積まない）。
+    set((s) => (s._historyGroupDepth === 0 ? { _historyGroupDepth: 1, _historyGroupPending: true } : { _historyGroupDepth: s._historyGroupDepth + 1 })),
   endHistoryGroup: () => set((s) => ({ _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) })),
   undo: () =>
     set((s) => {
+      // 書き出し中は文書 slice（scenes/parts/meta）を変えない＝進行中の書き出しが不整合データを読むのを防ぐ
+      // （newProject/loadProject と同じ #379 ガード。Undo は全画面ショートカット化で書き出し中も到達し得る・#413）。
+      if (isExportBusy(s.exportRun.phase)) return {};
       const r = undoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // 戻せない
       return { ...r.restored, past: r.history.past, future: r.history.future, saveStatus: "idle" };
     }),
   redo: () =>
     set((s) => {
+      if (isExportBusy(s.exportRun.phase)) return {}; // 同上（書き出し中は redo も文書 slice を変えない・#379/#413）
       const r = redoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // やり直せない
       return { ...r.restored, past: r.history.past, future: r.history.future, saveStatus: "idle" };

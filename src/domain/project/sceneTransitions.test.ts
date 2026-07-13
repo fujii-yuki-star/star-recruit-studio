@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { deriveTransitionSelectValue, resolveTransition, transitionTimeline } from './sceneTransitions';
+import { deriveTransitionSelectValue, resolveBoundaryTransition, resolveTransition, transitionTimeline } from './sceneTransitions';
+import type { Scene, Transition } from './types';
+
+// resolveBoundaryTransition は scenes 配列＋対象添字で呼ぶ（書き出しと同じ全場面 transitionTimeline）。最小の Scene を作る。
+const sc = (durationSec: number, transition?: Transition): Scene =>
+  ({
+    sceneId: `scene_${durationSec}`, partId: 'part_001', order: 1, sceneType: 'opening', templateId: 't',
+    durationSec, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+    texts: {}, narration: { text: '', status: 'none' }, warnings: [], ...(transition ? { transition } : {}),
+  } as unknown as Scene);
 
 describe('resolveTransition', () => {
   it('未設定は none / 既定方向 left / 既定 0.5 秒', () => {
@@ -73,5 +82,69 @@ describe('transitionTimeline', () => {
     const r = transitionTimeline([3, 3], [0, 5]);
     expect(r.steps).toEqual([{ offsetSec: 0, durationSec: 3 }]);
     expect(r.effectiveTotalSec).toBe(3);
+  });
+});
+
+describe('resolveBoundaryTransition（#408 Part 2・プレビュー用の境界解決）', () => {
+  const fade = (durationSec: number): Transition => ({ in: 'fade', durationSec });
+
+  it('先頭場面（targetIndex=0）＝durationSec 0（プレビューしない）', () => {
+    expect(resolveBoundaryTransition([sc(8, fade(0.5))], 0)).toEqual({
+      type: 'fade', direction: 'left', durationSec: 0,
+    });
+  });
+
+  it('type=none＝durationSec 0（プレビューしない）', () => {
+    expect(resolveBoundaryTransition([sc(8), sc(8, { in: 'none' })], 1).durationSec).toBe(0);
+  });
+
+  it('fade は希望 D をそのまま（両場面尺内なら clamp なし）＝書き出しと同じ実効値', () => {
+    expect(resolveBoundaryTransition([sc(8), sc(10, fade(0.5))], 1)).toEqual({
+      type: 'fade', direction: 'left', durationSec: 0.5,
+    });
+  });
+
+  it('slide の方向を保つ・希望 D を返す', () => {
+    expect(resolveBoundaryTransition([sc(8), sc(8, { in: 'slide', direction: 'up', durationSec: 0.8 })], 1)).toEqual({
+      type: 'slide', direction: 'up', durationSec: 0.8,
+    });
+  });
+
+  it('現在場面が極短なら D を場面尺で clamp（書き出しと同じ）', () => {
+    // 希望 5 だが cur=3 → D=min(5, acc=8, 3)=3。
+    expect(resolveBoundaryTransition([sc(8), sc(3, fade(5))], 1).durationSec).toBe(3);
+  });
+
+  it('wipe/zoom は fade に丸める（resolveTransition と一致）', () => {
+    expect(resolveBoundaryTransition([sc(8), sc(8, { in: 'zoom', durationSec: 0.5 })], 1).type).toBe('fade');
+  });
+
+  // #408 Part 2 レビュー P1：プレビューの実効 D は、書き出し（buildExportScenes）と同じ全場面 transitionTimeline を
+  // 正準として解決する。直前場面が実効 D より短い（prev<D）3 場面でも「プレビュー=書き出し」であることを固定する
+  // （2 場面近似 min(D,prev,cur) だと prev で過小になっていた）。
+  describe('全場面 transitionTimeline を正準に＝プレビュー=書き出し（P1 パリティ）', () => {
+    // 書き出しと同じ boundaryDs（none/先頭=0）を組んで期待値を作るヘルパ。
+    const exportStepSec = (scenes: Scene[], i: number): number => {
+      const durations = scenes.map((s) => s.durationSec);
+      const boundaryDs = scenes.map((s, k) => (k === 0 ? 0 : resolveTransition(s.transition).type === 'none' ? 0 : resolveTransition(s.transition).durationSec));
+      return transitionTimeline(durations, boundaryDs).steps[i - 1].durationSec;
+    };
+
+    it('直前が実効 D より短い場面でも一致（[5,4,6]・3 境界目 D=5＝書き出しは 5・2 場面近似の 4 ではない）', () => {
+      const scenes = [sc(5), sc(4), sc(6, fade(5))];
+      // 直前(4)<D(5) だが累積 acc=9 ゆえ書き出しは 5 秒。プレビューも 5 秒＝一致。
+      expect(resolveBoundaryTransition(scenes, 2).durationSec).toBe(5);
+      expect(resolveBoundaryTransition(scenes, 2).durationSec).toBe(exportStepSec(scenes, 2));
+    });
+
+    it('中間境界（none 挟み）でも全境界で書き出しと一致', () => {
+      const scenes = [sc(5, fade(2)), sc(4, { in: 'none' }), sc(6, fade(3))];
+      for (let i = 1; i < scenes.length; i += 1) {
+        const r = resolveBoundaryTransition(scenes, i);
+        const t = resolveTransition(scenes[i].transition);
+        // none 境界は 0（プレビューしない）、それ以外は書き出しの step と同一。
+        expect(r.durationSec).toBe(t.type === 'none' ? 0 : exportStepSec(scenes, i));
+      }
+    });
   });
 });

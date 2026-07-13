@@ -217,6 +217,16 @@ export function VolumeIcon({ size = 20, className, style }: IconProps) {
   );
 }
 
+// ミュート中：スピーカー＋×（消音を形でも示す。色差だけに頼らない・#413）。
+export function VolumeMuteIcon({ size = 20, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <path d="M11 5 6 9H3v6h3l5 4z" />
+      <path d="M22 9l-6 6M16 9l6 6" />
+    </svg>
+  );
+}
+
 export function ArrowLeftIcon({ size = 20, className, style }: IconProps) {
   return (
     <svg {...base(size, className, style)}>

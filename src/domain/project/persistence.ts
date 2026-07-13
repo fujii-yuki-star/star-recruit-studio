@@ -8,13 +8,14 @@ import { ORIENTATION, VIDEO_KIND } from '../enums';
 import type { Purpose, VideoKind } from '../enums';
 import { DEFAULT_FONT_ID, isKnownFontId } from '../font/fontCatalog';
 import { isKnownBundledBgmId } from '../bgm/bgmCatalog';
+import { validateProject } from '../validation/generated/validators.js';
 import type {
   Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
-  ToneSettings, VideoSettings, VoiceSettings,
+  TimelineOverlay, ToneSettings, VideoSettings, VoiceSettings,
 } from './types';
 
-/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。1.5→1.6：FREE 図形種別/枠線（#173）。1.6→1.7：テキストごとのフォント（#178）。1.7→1.8：掛け合い＝scene.lines（NarrationLine[]）＋scene.subtitleEnabledDefault を追加（任意・narration 残置・ADR-0015/#180）。1.8→1.9：FREE 要素の回転 FreeElement.rotation（度・任意・未指定=回転なし・#208）。1.9→1.10：FREE text の体裁 lineHeight（行間）/textAlign（揃え）を追加（任意・縁取りは既存 strokeColor/strokeWidth を text にも適用・#209）。1.10→1.11：FREE 要素の hidden（非表示）/locked（ロック）を追加（任意・レイヤー一覧・#210）。1.11→1.12：掛け合いの行ごとの抑揚 NarrationLine.intonation を追加（任意・null=場面/動画の既定を継承・#242）。1.12→1.13：scene.slotFits（場面ごと・スロット別の画像の収め方）を追加（任意・未指定=テンプレ層の fit を使用・④）。1.13→1.14：scene.groups（要素のグループ化・ADR-0022）を追加（任意・未指定=グループ無し）。 */
-export const PROJECT_SCHEMA_VERSION = '1.14';
+/** project.json の schemaVersion（正典 §1）。1.0→1.1：videoKind/generalBrief・additionalNotes 移送（ADR-0011）。1.1→1.2：videoSettings.width/height を撤廃し aspectRatio を単一の真実に（ADR-0012）。1.2→1.3：videoSettings.fontId（同梱フォント選択）を追加（任意・未指定は既定フォント）。1.3→1.4：bgmSettings.bundledBgmId（標準BGM選択）を追加（任意・未指定は標準BGM未選択）。1.4→1.5：scene.fontId（場面ごとのフォント）を追加（任意・null/未指定は動画全体を継承）。1.5→1.6：FREE 図形種別/枠線（#173）。1.6→1.7：テキストごとのフォント（#178）。1.7→1.8：掛け合い＝scene.lines（NarrationLine[]）＋scene.subtitleEnabledDefault を追加（任意・narration 残置・ADR-0015/#180）。1.8→1.9：FREE 要素の回転 FreeElement.rotation（度・任意・未指定=回転なし・#208）。1.9→1.10：FREE text の体裁 lineHeight（行間）/textAlign（揃え）を追加（任意・縁取りは既存 strokeColor/strokeWidth を text にも適用・#209）。1.10→1.11：FREE 要素の hidden（非表示）/locked（ロック）を追加（任意・レイヤー一覧・#210）。1.11→1.12：掛け合いの行ごとの抑揚 NarrationLine.intonation を追加（任意・null=場面/動画の既定を継承・#242）。1.12→1.13：scene.slotFits（場面ごと・スロット別の画像の収め方）を追加（任意・未指定=テンプレ層の fit を使用・④）。1.13→1.14：scene.groups（要素のグループ化・ADR-0022）を追加（任意・未指定=グループ無し）。1.14→1.15：timelineOverlay（場面横断タイムラインの上位編集・ADR-0018）を追加（任意・未指定=場面射影のみ・無変換）。1.15→1.16：scene.bgmSettings（場面ごとのBGM・ADR-0018 ③(7)）を追加（任意・未指定=プロジェクト既定を継承・無変換）。1.16→1.17：timelineOverlay.animations（要素アニメーション＝キーフレーム・ADR-0019 ④）を追加（任意・未指定=アニメ無し＝静止・無変換）。1.17→1.18：scene.slotVideoStart（動画スロット本体アニメの再生開始タイミング＝モード明示・ADR-0027・#444）を追加（任意・未指定=withAnim＝アニメと同時・無変換）。1.18→1.19：scene.slotClips（動画クリップ調整の per-use 上書き＝範囲/速度/元音声・ADR-0028・#472）を追加（任意・未上書きフィールドは asset.clip を継承・無変換）。 */
+export const PROJECT_SCHEMA_VERSION = '1.19';
 
 /** プロジェクト保存に必要な見出し情報（Asset/Part/Scene 以外）。 */
 export interface ProjectHeader {
@@ -35,6 +36,8 @@ export interface ProjectHeader {
   toneSettings?: ToneSettings;
   voiceSettings: VoiceSettings;
   bgmSettings?: BgmSettings;
+  /** 場面横断タイムラインの上位編集（ADR-0018・任意・schema 1.15）。未設定＝場面射影のみ。 */
+  timelineOverlay?: TimelineOverlay;
 }
 
 /** 既定 videoSettings（横型16:9・30fps。寸法は aspectRatio から導出＝ADR-0012）。 */
@@ -147,6 +150,16 @@ export function createGroupId(existingIds: readonly string[]): string {
   return nextNumberedId('group', existingIds);
 }
 
+/** ovclip_NNN を発行する（§2.1・overlay クリップ id・project 内一意・ADR-0018）。 */
+export function createOverlayClipId(existingIds: readonly string[]): string {
+  return nextNumberedId('ovclip', existingIds);
+}
+
+/** anim_NNN を発行する（§2.1・要素アニメーション id・project 内一意・ADR-0019 ④）。 */
+export function createAnimationId(existingIds: readonly string[]): string {
+  return nextNumberedId('anim', existingIds);
+}
+
 /** ストアの作業状態を schema 準拠の Project へ組み立てる。 */
 export function assembleProject(
   header: ProjectHeader,
@@ -172,6 +185,28 @@ export function assembleProject(
     assets,
     parts,
     scenes,
+    ...(header.timelineOverlay ? { timelineOverlay: header.timelineOverlay } : {}),
+  };
+}
+
+/** 読込済み Project から保存用ヘッダ（ProjectHeader）を取り出す＝assembleProject の逆。
+ *  Project にヘッダ系フィールドを足したら必ずここにも足す（store の loadProject が meta を手組みして取りこぼすのを防ぐ・#324）。 */
+export function projectHeaderFromProject(project: Project): ProjectHeader {
+  return {
+    projectId: project.projectId,
+    projectName: project.projectName,
+    videoKind: project.videoKind,
+    purpose: project.purpose,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+    videoSettings: project.videoSettings,
+    companyInfo: project.companyInfo,
+    generalBrief: project.generalBrief,
+    additionalNotes: project.additionalNotes,
+    toneSettings: project.toneSettings,
+    voiceSettings: project.voiceSettings,
+    bgmSettings: project.bgmSettings,
+    timelineOverlay: project.timelineOverlay,
   };
 }
 
@@ -209,10 +244,48 @@ export function parseProjectDoc(text: string): Project {
       throw new ProjectLoadError('プロジェクトの必須情報が欠けています。別のプロジェクトを選んでください。');
     }
   }
-  return migrateProject(doc as unknown as Project);
+  let migrated: Project;
+  try {
+    migrated = migrateProject(doc as unknown as Project);
+  } catch (e) {
+    // 移行中の想定外エラー（防御しきれない型不正）も §2-5 文言で拒否する＝生 TypeError を UI へ出さない（#416 P1）。
+    console.warn('[project] 移行中に想定外のエラー:', e);
+    throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。');
+  }
+  // 移行後（現行版）を正典スキーマで検証する（11 §8 V2・#416）。旧版は migrate 済みなので現行スキーマで判定できる（後方互換）。
+  // 読込拒否は「型不正・必須欠落」（構造破損）に限定する（受け入れ条件）。minLength/enum/範囲などの内容制約違反は
+  // 作りかけプロジェクト（新規は companyName 空・#411 の 80字超/尺0秒 等）が正常に出すため拒否しない＝弾かない。
+  // どの違反もログには残す（§2-3＝UI には出さない・技術詳細はログのみ／保存側は当面すべて警告）。
+  const check = validateProjectDoc(migrated);
+  if (!check.valid) {
+    console.warn('[project] 読込スキーマ検証に失敗:', check.errors);
+    if (check.structural) {
+      throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。');
+    }
+  }
+  return migrated;
 }
 
-/** 読込時に旧バージョン(1.0〜1.13)を現行(1.14)へ移行する。
+/** 構造破損（型不正・必須欠落）とみなす ajv キーワード。これらのみ読込拒否の対象（#416・受け入れ条件）。 */
+const STRUCTURAL_VALIDATION_KEYWORDS = new Set(['type', 'required']);
+
+/** ajv の検証エラーを読みやすい1行配列へ整形（ログ・デバッグ用。UI には出さない＝§2-3/§2-5）。 */
+function formatProjectErrors(): string[] {
+  return (validateProject.errors ?? []).map((e) => `${e.instancePath || '(root)'} ${e.message ?? ''}`.trim());
+}
+
+/**
+ * project を正典スキーマ（型・必須・enum・範囲）で検証する（11 §8 V2・#416）。適合で valid:true。
+ * 不適合は valid:false＋技術エラー（ログ用）＋ structural（型不正/必須欠落を含むか＝読込拒否の対象か）。
+ * 読込は structural のときだけ拒否、保存側は当面すべて警告ログに使う（段階的に強制）。
+ */
+export function validateProjectDoc(data: unknown): { valid: boolean; errors: string[]; structural: boolean } {
+  if (validateProject(data)) return { valid: true, errors: [], structural: false };
+  const structural = (validateProject.errors ?? []).some((e) => STRUCTURAL_VALIDATION_KEYWORDS.has(e.keyword));
+  return { valid: false, errors: formatProjectErrors(), structural };
+}
+
+/** 読込時に旧バージョン(1.0〜1.16)を現行(1.17)へ移行する。
  *  1.0→1.1: videoKind 既定 recruit・companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
  *  1.1→1.2: videoSettings.width/height を除去（aspectRatio を単一の真実に＝ADR-0012）。
  *  1.2→1.3: videoSettings.fontId を補完（同梱フォント選択・未指定は既定フォント）。
@@ -227,7 +300,15 @@ export function parseProjectDoc(text: string): Project {
  *  1.10→1.11: FREE 要素の hidden（非表示）/locked（ロック）。後方互換の任意追加＝変換不要（未指定＝表示・編集可・#210）。
  *  1.11→1.12: 掛け合いの行ごとの抑揚（NarrationLine.intonation）。後方互換の任意追加＝変換不要（未指定＝場面/動画の既定を継承・#242）。
  *  1.12→1.13: 場面ごと・スロット別の画像の収め方（scene.slotFits）。後方互換の任意追加＝変換不要（未指定＝テンプレ層の fit を使用・④）。
- *  1.13→1.14: 要素のグループ化（scene.groups）。後方互換の任意追加＝変換不要（未指定＝グループ無し・ADR-0022）。 */
+ *  1.13→1.14: 要素のグループ化（scene.groups）。後方互換の任意追加＝変換不要（未指定＝グループ無し・ADR-0022）。
+ *  1.14→1.15: 場面横断タイムラインの上位編集（timelineOverlay）。後方互換の任意追加＝変換不要（未指定＝場面射影のみ・ADR-0018）。
+ *  1.15→1.16: 場面ごとのBGM（scene.bgmSettings）。後方互換の任意追加＝変換不要（未指定＝プロジェクト既定を継承・ADR-0018 ③(7)）。
+ *  1.16→1.17: 要素アニメーション（timelineOverlay.animations＝キーフレーム）。後方互換の任意追加＝変換不要（未指定＝アニメ無し・静止・ADR-0019 ④）。 */
+/** プレーンオブジェクト（配列・null 以外）か。移行を型不正な値で落とさず、壊れた値はそのまま validateProjectDoc に拾わせる（#416 P1）。 */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 function migrateProject(project: Project): Project {
   const next: Project = {
     ...project,
@@ -235,39 +316,42 @@ function migrateProject(project: Project): Project {
     videoKind: project.videoKind ?? VIDEO_KIND.recruit,
   };
   // 旧 companyInfo.additionalNotes をトップレベル additionalNotes へ移送し、companyInfo からは除去する。
-  const ci = project.companyInfo as Record<string, unknown> | undefined;
-  if (ci && typeof ci.additionalNotes === 'string') {
+  const ci: unknown = project.companyInfo;
+  if (isRecord(ci) && typeof ci.additionalNotes === 'string') {
     if (next.additionalNotes === undefined) next.additionalNotes = ci.additionalNotes;
     const rest = { ...ci };
     delete rest.additionalNotes;
     next.companyInfo = rest as unknown as CompanyInfo;
   }
   // 1.1→1.2: videoSettings から width/height を除去（寸法は aspectRatio から導出＝ADR-0012）。
-  const vs = project.videoSettings as unknown as Record<string, unknown> | undefined;
-  if (vs && ('width' in vs || 'height' in vs)) {
+  const vs: unknown = project.videoSettings;
+  if (isRecord(vs) && ('width' in vs || 'height' in vs)) {
     const cleaned = { ...vs };
     delete cleaned.width;
     delete cleaned.height;
     next.videoSettings = cleaned as unknown as VideoSettings;
   }
-  // 1.2→1.3: videoSettings.fontId を補完（未指定/不明は既定フォント＝同梱フォント選択の追加）。
-  const vsFont = (next.videoSettings ?? {}) as unknown as Record<string, unknown>;
-  if (!isKnownFontId(vsFont.fontId)) {
+  // 1.2→1.3: videoSettings.fontId を補完（未指定/不明は既定フォント＝同梱フォント選択の追加）。videoSettings が
+  // オブジェクトのときだけ触る（壊れた値は検証で拒否＝ここで作り込まない・#416 P1）。
+  const vsFont: unknown = next.videoSettings;
+  if (isRecord(vsFont) && !isKnownFontId(vsFont.fontId)) {
     next.videoSettings = { ...vsFont, fontId: DEFAULT_FONT_ID } as unknown as VideoSettings;
   }
   // 1.3→1.4: 未知の bundledBgmId（旧版・破損）は標準BGM未選択へ落とす（assetId/なしへフォールバック）。
-  const bgm = next.bgmSettings as Record<string, unknown> | undefined;
-  if (bgm && bgm.bundledBgmId != null && !isKnownBundledBgmId(bgm.bundledBgmId)) {
+  const bgm: unknown = next.bgmSettings;
+  if (isRecord(bgm) && bgm.bundledBgmId != null && !isKnownBundledBgmId(bgm.bundledBgmId)) {
     const cleaned = { ...bgm };
     delete cleaned.bundledBgmId;
     next.bgmSettings = cleaned as unknown as BgmSettings;
   }
   // 1.4→1.5: 未知の scene.fontId（旧版・破損）は継承（未指定）へ落とす。null は継承の明示なので保持。
+  // 場面がオブジェクトでない（null 等の壊れた要素）ときはそのまま通し、検証で型不正として拒否させる（#416 P1）。
   if (Array.isArray(next.scenes)) {
     next.scenes = next.scenes.map((sc) => {
-      const f = (sc as unknown as Record<string, unknown>).fontId;
+      if (!isRecord(sc)) return sc;
+      const f = sc.fontId;
       if (f != null && !isKnownFontId(f)) {
-        const cleaned = { ...sc } as unknown as Record<string, unknown>;
+        const cleaned = { ...sc };
         delete cleaned.fontId;
         return cleaned as unknown as Scene;
       }

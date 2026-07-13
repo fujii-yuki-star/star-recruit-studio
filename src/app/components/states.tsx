@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { DraftWarning, VoiceStatus } from "../data/mockData";
-import { CheckIcon, SparkleIcon } from "./icons";
+import { CheckIcon, FolderIcon, SparkleIcon } from "./icons";
 
 // 生成中などのローディング表示
 export function LoadingView({
@@ -48,8 +48,8 @@ export function EmptyState({
 }) {
   return (
     <div className="card text-center text-muted" style={{ padding: "var(--gap-xl)" }}>
-      <div style={{ fontSize: 40, lineHeight: 1 }} aria-hidden="true">
-        🗂️
+      <div style={{ lineHeight: 1 }} aria-hidden="true">
+        <FolderIcon size={40} style={{ opacity: 0.55 }} />
       </div>
       <h3 className="section-title" style={{ marginTop: "var(--gap-sm)" }}>
         {title}
@@ -98,7 +98,7 @@ const voiceStatusLabel: Record<VoiceStatus, string> = {
   none: "声：未作成",
   pending: "声：作成中",
   generated: "声：作成済み",
-  failed: "声：失敗",
+  failed: "声：作り直せます",
 };
 
 export function VoiceStatusBadge({ status }: { status: VoiceStatus }) {
@@ -120,7 +120,7 @@ export function VoiceStatusBadge({ status }: { status: VoiceStatus }) {
   }
   if (status === "pending") {
     return (
-      <span className="badge" style={{ background: "var(--color-yellow)", color: "#8a6d1a" }}>
+      <span className="badge" style={{ background: "var(--color-yellow)", color: "var(--color-warn)" }}>
         {label}
       </span>
     );

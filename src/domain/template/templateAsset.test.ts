@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Layer } from './types';
+import type { Layer, Template } from './types';
 import {
-  createTemplateAssetId, isTemplateAsset, templateAssetIdsOf, templateAssetSeq, TEMPLATE_ASSET_PREFIX,
+  createTemplateAssetId, isTemplateAsset, orphanTemplateAssetIds, templateAssetIdsOf, templateAssetSeq, TEMPLATE_ASSET_PREFIX,
 } from './templateAsset';
 
 describe('isTemplateAsset', () => {
@@ -55,5 +55,44 @@ describe('templateAssetIdsOf', () => {
 
   it('テンプレ所有素材が無ければ空配列', () => {
     expect(templateAssetIdsOf([layer('background'), layer('slot', 'asset_001')])).toEqual([]);
+  });
+});
+
+describe('orphanTemplateAssetIds', () => {
+  const layer = (id: string, assetId?: string): Layer => ({ id, type: 'background', x: 0, y: 0, w: 10, h: 10, ...(assetId ? { assetId } : {}) });
+  const tmpl = (templateId: string, layers: Layer[]): Template => ({
+    schemaVersion: '1.0', templateId, name: templateId, category: 'free', aspectRatio: '16:9',
+    canvas: { width: 1920, height: 1080 }, layers,
+  });
+
+  it('読込が不確実（loadComplete=false）なら、孤立に見えても必ず空＝誤削除しない（#299 の安全条件）', () => {
+    // tmpl_asset_002 はどのテンプレも参照しないが、読込不確実ゆえ掃除対象にしない。
+    const templates = [tmpl('user_tmpl_001', [layer('bg', 'tmpl_asset_001')])];
+    expect(orphanTemplateAssetIds(templates, ['tmpl_asset_001', 'tmpl_asset_002'], false)).toEqual([]);
+    // 読込失敗でテンプレが空に見えるときも、disk 上の素材を全削除しない（データ消失防止）。
+    expect(orphanTemplateAssetIds([], ['tmpl_asset_001', 'tmpl_asset_002'], false)).toEqual([]);
+  });
+
+  it('読込成功時、どのテンプレも参照しない disk 上の tmpl_asset だけを返す', () => {
+    const templates = [
+      tmpl('user_tmpl_001', [layer('bg', 'tmpl_asset_001'), layer('logo', 'tmpl_asset_003')]),
+      tmpl('user_tmpl_002', [layer('bg', 'tmpl_asset_005')]),
+    ];
+    // disk=001..005／参照=001,003,005 → 孤立=002,004。
+    const disk = ['tmpl_asset_001', 'tmpl_asset_002', 'tmpl_asset_003', 'tmpl_asset_004', 'tmpl_asset_005'];
+    expect(orphanTemplateAssetIds(templates, disk, true)).toEqual(['tmpl_asset_002', 'tmpl_asset_004']);
+  });
+
+  it('テンプレが1つも無ければ、disk 上の tmpl_asset は全て孤立（下書き全破棄などのケース）', () => {
+    expect(orphanTemplateAssetIds([], ['tmpl_asset_001', 'tmpl_asset_002'], true)).toEqual(['tmpl_asset_001', 'tmpl_asset_002']);
+  });
+
+  it('tmpl_asset_ 以外の id（万一混じった他種ファイル）は掃除対象にしない', () => {
+    expect(orphanTemplateAssetIds([], ['asset_009', 'bgm_001', 'tmpl_asset_002'], true)).toEqual(['tmpl_asset_002']);
+  });
+
+  it('全ての disk 素材が参照されていれば孤立なし（空配列）', () => {
+    const templates = [tmpl('user_tmpl_001', [layer('bg', 'tmpl_asset_001'), layer('slot', 'tmpl_asset_002')])];
+    expect(orphanTemplateAssetIds(templates, ['tmpl_asset_001', 'tmpl_asset_002'], true)).toEqual([]);
   });
 });

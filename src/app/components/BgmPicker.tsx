@@ -2,14 +2,19 @@ import type { ChangeEvent } from "react";
 import { useEffect, useRef } from "react";
 import { Switch } from "./ui";
 import { useProjectStore } from "../store/projectStore";
+import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import { BGM_VOLUME, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 
 /**
  * BGM の選択UI（標準3曲＋自分のBGM＋音量、入/切）。仕上がり確認で BGM を決められるようにする。
  * bgmSettings（store）を直接読み書きするので、書き出しなど他画面とも設定を共有する。
+ *
+ * disabled：いまの場面が「個別のBGM」を持つときなど、この全体UIでは変えられない状況で操作を止める（#465 レビュー P1）。
+ * note：無効化の理由＋次の行動（例「場面を直す」）。設定できるのに効かない誤認を防ぐ（§2-5）。
+ * ※ 場面ごとBGM音量スライダーは未実装だが、将来その画面でも流用できるよう disabled 基盤をここに用意する（#465）。
  */
-export function BgmPicker() {
+export function BgmPicker({ disabled = false, note }: { disabled?: boolean; note?: string } = {}) {
   const assets = useProjectStore((s) => s.assets);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const setBgm = useProjectStore((s) => s.setBgm);
@@ -18,6 +23,8 @@ export function BgmPicker() {
   const bgmError = useProjectStore((s) => s.bgmError);
   const clearBgmError = useProjectStore((s) => s.clearBgmError);
   const fileRef = useRef<HTMLInputElement>(null);
+  // BGM音量ドラッグ中の連続変更を1履歴にまとめる（#389）。
+  const { dragGroup } = useHistoryGroup();
 
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
   const withBgm = bgmSettings?.enabled ?? true;
@@ -45,13 +52,15 @@ export function BgmPicker() {
   }
 
   return (
-    <div>
+    <div style={disabled ? { opacity: 0.6 } : undefined}>
+      {disabled && note && <p className="field-hint" style={{ marginTop: 0 }}>{note}</p>}
       <div className="toggle-row">
         <span className="field-label" style={{ margin: 0 }}>
           BGMを入れる
         </span>
         <Switch
           on={withBgm}
+          disabled={disabled}
           onChange={(v) => {
             // 初めて入れるとき（未選択）は標準BGMの先頭を既定にする。切るときは選択を保持。
             if (v && !bgmSettings?.bundledBgmId && !bgmAsset) setBundledBgm(BGM_CATALOG[0].id);
@@ -78,6 +87,7 @@ export function BgmPicker() {
                   type="radio"
                   name="bgmChoice"
                   checked={bgmSettings?.bundledBgmId === b.id}
+                  disabled={disabled}
                   onChange={() => setBundledBgm(b.id)}
                   style={{ accentColor: "var(--color-primary)" }}
                 />
@@ -100,6 +110,7 @@ export function BgmPicker() {
             <button
               type="button"
               className="btn btn-ghost btn-icon text-sm"
+              disabled={disabled}
               onClick={() => fileRef.current?.click()}
             >
               {bgmAsset && !bgmSettings?.bundledBgmId ? "BGMを変更する" : "自分のBGMを読み込む"}
@@ -116,8 +127,10 @@ export function BgmPicker() {
               max={VOLUME_MAX}
               step={VOLUME_STEP}
               value={bgmSettings?.volume ?? BGM_VOLUME}
+              disabled={disabled}
+              {...dragGroup}
               onChange={(e) => updateBgmSettings({ volume: Number(e.target.value) })}
-              style={{ width: "100%", accentColor: "var(--color-primary)" }}
+              style={{ width: "100%", accentColor: "var(--color-primary)", ...(disabled ? { cursor: "not-allowed" } : {}) }}
             />
             <div className="row-between text-faint text-sm">
               <span>小さい</span>

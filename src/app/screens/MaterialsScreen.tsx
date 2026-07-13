@@ -1,11 +1,17 @@
-import { useState, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
+import type { ScreenId } from "../data/mockData";
 import { ASSET_TYPE } from "../../domain/enums";
+import { pickPanelAsset } from "./materialsSelection";
+import { scenesUsingAsset } from "../../domain/project/assetUsage";
 import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { PageHead, Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
+import { ClipDetailControls } from "../components/ClipDetailControls";
+import { UsedScenesRow } from "../components/UsedScenesRow";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import {
   PhotoIcon,
   VideoIcon,
@@ -18,7 +24,7 @@ import {
 
 type Filter = "all" | "image" | "video" | "yuko";
 
-// 音声系（BGM/ナレーション）は素材一覧に出さない（BGMは書き出し画面で管理）ため、音タブも持たない。
+// 音声系（BGM/ナレーション）は素材一覧に出さない（BGMは仕上がり確認で選ぶ）ため、音タブも持たない。
 const filters: [Filter, string][] = [
   ["all", "すべて"],
   ["image", "写真"],
@@ -57,18 +63,31 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
   );
 }
 
-export function MaterialsScreen() {
-  const { assets, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting } = useProjectStore();
+export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
+  const { assets, scenes, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
+  // 素材名は編集中だけドラフトで持ち、確定は blur。空/未変更は破棄して元の名前へ戻す＝素材名を空にできないようにする（#411 item7・ProjectNameField と同型）。
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  // 素材削除は取り消せない（assets は Undo 対象外＝ADR-0020）ので、他の削除と同様にインライン確認を挟む（#383）。
+  // id で持つ＝別の素材を選び直したら確認は自動的に解除される。
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // 画像差し替えの file input（label ラップでなく button+ref.click()＝キーボードで押せる・BgmPicker と同方式・#412）
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
-  // 音声系（BGM/ナレーション）は「素材」一覧に出さない（BGMは書き出し画面で管理）。
+  // 音声系（BGM/ナレーション）は「素材」一覧に出さない（BGMは仕上がり確認で選ぶ）。
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
   );
   const visible = materials.filter((a) => filter === "all" || a.assetType === filter);
-  const selected = materials.find((a) => a.assetId === selectedId) ?? visible[0] ?? materials[0];
+  // 右パネルは「表示中（フィルタ後）」の中からだけ選ぶ＝フィルタ0件のとき別フィルタの素材を出さない（#413）。
+  const selected = pickPanelAsset(visible, selectedId);
+  // この素材を使っている場面（逆引き・#406）。削除確認の件数（#383）と「使用場面」バッジで共有する。
+  const usedScenes = selected ? scenesUsingAsset(scenes, selected.assetId) : [];
+  const usedSceneCount = usedScenes.length;
+  // 使用場面バッジを押したら、その場面の編集を開く（editingSceneId 機構＝#400・DraftScreen と同方式）。
+  const jumpToScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
 
   function addTag() {
     const v = newTag.trim();
@@ -185,7 +204,7 @@ export function MaterialsScreen() {
         ) : (
           <EmptyState
             title="この種類の素材はまだありません"
-            message="「素材を追加」から、写真・動画・BGM・ゆうこの素材を登録できます。"
+            message="「素材を追加」から、写真・動画・ゆうこの素材を登録できます。BGMは仕上がり確認で選べます。"
           />
         )}
 
@@ -197,26 +216,40 @@ export function MaterialsScreen() {
               <AssetThumb type={selected.assetType} src={assetSrcById[selected.assetId]} size={28} />
             </div>
 
+            {/* 動画クリップの「素材の既定」を編集（使う範囲・速度・元音声）。ここは asset.clip＝全場面の既定・Undo 対象外（ADR-0028 D3）。
+                場面ごとの調整は場面編集の per-use（scene.slotClips）で（そちらは Undo 可）。 */}
+            {selected.assetType === ASSET_TYPE.video && (
+              <ClipDetailControls
+                asset={selected}
+                clip={selected.clip}
+                scope="material"
+                patchClip={(p) => updateAsset(selected.assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }))}
+              />
+            )}
+
             {isVisual(selected.assetType) && (
               <div className="field">
                 <label className="field-label">画像</label>
-                {/* ネイティブの「ファイル未選択」表示を避け、設定済みかどうかが分かるボタンにする */}
-                <label
+                {/* ネイティブの「ファイル未選択」表示を避けたボタン。label ラップでなく button+ref.click()
+                    ＝Tab フォーカス・:disabled 見た目が効く（BgmPicker と同方式・#412） */}
+                <input
+                  ref={imageInputRef}
+                  key={selected.assetId}
+                  type="file"
+                  accept="image/*"
+                  onChange={onPickImage}
+                  disabled={isImporting}
+                  hidden
+                />
+                <button
+                  type="button"
                   className="btn btn-secondary"
-                  style={{ cursor: isImporting ? "default" : "pointer", opacity: isImporting ? 0.6 : 1 }}
-                  aria-disabled={isImporting}
+                  disabled={isImporting}
+                  onClick={() => imageInputRef.current?.click()}
                 >
                   <UploadIcon size={16} />
                   {assetSrcById[selected.assetId] ? "画像を変更する" : "画像を選ぶ"}
-                  <input
-                    key={selected.assetId}
-                    type="file"
-                    accept="image/*"
-                    onChange={onPickImage}
-                    disabled={isImporting}
-                    style={{ display: "none" }}
-                  />
-                </label>
+                </button>
                 <p className="text-sm text-muted" style={{ marginTop: 4 }}>
                   {assetSrcById[selected.assetId]
                     ? "この素材に画像を設定済みです（仕上がり確認の枠に表示）。差し替えるには「画像を変更する」から選び直してください。"
@@ -230,8 +263,14 @@ export function MaterialsScreen() {
               <input
                 id="mat-name"
                 className="input"
-                value={selected.displayName}
-                onChange={(e) => updateAsset(selected.assetId, (a) => ({ ...a, displayName: e.target.value }))}
+                value={nameDraft ?? selected.displayName}
+                onFocus={() => setNameDraft(selected.displayName)}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => {
+                  const name = (nameDraft ?? "").trim();
+                  if (name && name !== selected.displayName) updateAsset(selected.assetId, (a) => ({ ...a, displayName: name }));
+                  setNameDraft(null); // 空・未変更は破棄＝元の名前に戻す（素材名を空にできない・#411）
+                }}
               />
             </div>
 
@@ -269,7 +308,7 @@ export function MaterialsScreen() {
                   value={newTag}
                   placeholder="タグを追加"
                   onChange={(e) => setNewTag(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addTag()}
+                  onKeyDown={(e) => { if (!e.nativeEvent.isComposing && e.key === "Enter") addTag(); }}
                 />
                 <button className="btn btn-secondary" onClick={addTag}>
                   <PlusIcon size={16} />
@@ -287,10 +326,36 @@ export function MaterialsScreen() {
               />
             </div>
 
-            <button className="btn btn-danger btn-block mt" onClick={() => removeAsset(selected.assetId)}>
-              <TrashIcon size={16} />
-              この素材を削除
-            </button>
+            {/* 使用場面の逆引き（#406）：この素材を使っている場面へ1クリックで飛べる。削除の前に影響範囲も分かる。 */}
+            <hr className="divider" />
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field-label">使用場面</label>
+              <UsedScenesRow scenes={usedScenes} onJump={jumpToScene} emptyText="まだどの場面でも使われていません。" />
+            </div>
+
+            {confirmDeleteId === selected.assetId ? (
+              <DeleteConfirm
+                className="mt"
+                message={
+                  <>
+                    「{selected.displayName || "この素材"}」を削除しますか？元に戻せません。
+                    {usedSceneCount > 0
+                      ? `使っている${usedSceneCount}つの場面は、この素材が空欄になります。`
+                      : "この素材はどの場面でも使われていません。"}
+                  </>
+                }
+                onCancel={() => setConfirmDeleteId(null)}
+                onConfirm={() => {
+                  removeAsset(selected.assetId);
+                  setConfirmDeleteId(null);
+                }}
+              />
+            ) : (
+              <button className="btn btn-danger btn-block mt" onClick={() => setConfirmDeleteId(selected.assetId)}>
+                <TrashIcon size={16} />
+                この素材を削除
+              </button>
+            )}
           </div>
         )}
       </div>

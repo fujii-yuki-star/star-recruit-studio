@@ -1,7 +1,7 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
-  AssetType, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
-  SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, WarningSeverity,
+  AssetType, Easing, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
+  SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, VideoStartMode, WarningSeverity,
 } from '../enums';
 import type { FontId } from '../font/fontCatalog';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
@@ -72,6 +72,30 @@ export interface Clip {
   originalAudioVolume?: number;
   fit?: Fit;
   /** 再生速度（0.5–2.0・既定1.0）。尺は据え置き、スロット内のクリップ再生速度のみ変える（ADR-0007 Phase 3b）。 */
+  speed?: number;
+}
+
+/**
+ * 動画スロット本体アニメの再生開始タイミング（ADR-0027・#444）。モードで保存＝アニメ長が変わっても意味不変。
+ * delaySec は mode='delay' のときだけ有効（0〜アニメ長・描画時に [0, animEnd] へクランプ）。
+ * 効くのは「スロット本体がアニメ対象」の場面のみ（slotIsAnimated）。アニメが無いスロットには持たせない。
+ */
+export interface VideoStartSpec {
+  mode: VideoStartMode;
+  delaySec?: number;
+}
+
+/**
+ * 動画クリップ調整の per-use 上書き（場面×スロット・ADR-0028・#472）。`Clip` の per-use 上書き可能な部分集合。
+ * 未設定フィールドは `asset.clip` の既定を継承（null=継承・11 §6）。`fit` は含めない（既に scene.slotFits で per-use）。
+ * scenes に載るので ADR-0020 の履歴で自動 Undo。
+ */
+export interface SlotClipOverride {
+  startSec?: number;
+  endSec?: number;
+  useOriginalAudio?: boolean;
+  originalAudioVolume?: number;
+  /** 再生速度（0.5–2.0・既定1.0）。 */
   speed?: number;
 }
 
@@ -230,6 +254,8 @@ export interface Scene {
   fontId?: FontId | null;
   /** テキスト種別（textKey）ごとのフォント上書き（#178・schema 1.7）。未設定の種別は scene.fontId→動画全体→既定を継承。 */
   textFontIds?: Partial<Record<TextKey, FontId>>;
+  /** この場面のBGM。未指定＝プロジェクト既定（bgmSettings）を継承（schema 1.16・null=継承・ADR-0018 ③(7)）。enabled:false でこの場面は無音。 */
+  bgmSettings?: BgmSettings;
   assetRefs: AssetRefs;
   character: Character;
   texts: Texts;
@@ -243,10 +269,63 @@ export interface Scene {
   warnings: Warning[];
   /** 場面ごと・スロット別の画像の収め方（④）。キー＝テンプレのスロット/背景/ロゴの layer.id。未指定＝テンプレ層の fit を使用。 */
   slotFits?: Record<string, Fit>;
+  /** 場面ごと・スロット別の動画クリップ調整の per-use 上書き（ADR-0028・#472）。キー＝スロットの layer.id。未指定/未上書きフィールドは asset.clip を継承。scenes に載るので Undo 可。 */
+  slotClips?: Record<string, SlotClipOverride>;
+  /** 動画スロット本体アニメの再生開始タイミング（ADR-0027・#444）。キー＝スロットの layer.id。未指定＝withAnim（アニメと同時）。スロット本体がアニメ対象の場面でのみ効く。 */
+  slotVideoStart?: Record<string, VideoStartSpec>;
   /** FREE テンプレ場面のみ：自由配置要素（ADR-0008）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
   freeLayout?: FreeElement[];
   /** 要素のグループ化（ADR-0022）。メンバー＝freeLayout 要素 id（ネストで group id も可）。未設定＝グループ無し。 */
   groups?: Group[];
+}
+
+/** 時間軸に足すクリップ（ADR-0018・まずはテロップ）。anchorSceneId 有＝場面相対（startSec=場面開始からの相対秒）／無＝絶対時間（startSec=グローバル秒）。 */
+export interface OverlayClip {
+  /** ovclip_NNN（project 内一意・§2.1）。 */
+  id: string;
+  /** 出すレーン（現状 telop のみ・将来 audio/bgm へ拡張）。 */
+  track: 'telop';
+  /** アンカー場面 id（AI 再生成時の照合キー）。未指定＝絶対時間クリップ。 */
+  anchorSceneId?: string;
+  startSec: number;
+  durationSec: number;
+  /** テロップの文言。 */
+  text?: string;
+}
+
+/** 1キーフレーム（場面ローカル秒 timeSec の要素プロパティ・④・ADR-0019）。設定したプロパティのみ補間対象。値は絶対上書き。 */
+export interface Keyframe {
+  /** 場面開始からの相対秒。 */
+  timeSec: number;
+  x?: number;
+  y?: number;
+  /** 拡大縮小の倍率（基準 w/h に対する係数）。 */
+  scale?: number;
+  /** 不透明度 0.0〜1.0。 */
+  opacity?: number;
+  /** 回転角（度）。 */
+  rotation?: number;
+  /** 前KFからこのKFへ入るイージング（先頭KFでは無視）。未指定＝linear。 */
+  easing?: Easing;
+}
+
+/** 要素アニメーション（④・ADR-0019）。場面内の1要素（FREE 要素／グループ id）を時間で補間する。timelineOverlay に格納＝AI/場面正準は不変。 */
+export interface ElementAnimation {
+  /** anim_NNN（project 内一意・§2.1）。 */
+  id: string;
+  /** アンカー場面 id（scene_NNN）。 */
+  sceneId: string;
+  /** 対象の要素 id（scene.freeLayout の要素 id、またはグループ id）。 */
+  targetId: string;
+  /** timeSec 昇順のキーフレーム列。 */
+  keyframes: Keyframe[];
+}
+
+/** 場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。AI/簡易編集は無視する。 */
+export interface TimelineOverlay {
+  clips?: OverlayClip[];
+  /** 要素アニメーション（④・ADR-0019・任意）。未指定＝アニメ無し（静止）。 */
+  animations?: ElementAnimation[];
 }
 
 export interface Project {
@@ -270,4 +349,6 @@ export interface Project {
   assets: Asset[];
   parts: Part[];
   scenes: Scene[];
+  /** 場面横断タイムラインの上位編集（ADR-0018・任意・schema 1.15）。未設定＝場面射影のみ。AI/簡易は無視。 */
+  timelineOverlay?: TimelineOverlay;
 }
