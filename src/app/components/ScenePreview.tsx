@@ -177,7 +177,8 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   const ch = template?.canvas.height ?? 9;
 
   // プレビューを「使える領域」に収める（縦型でもスクロールせず全体が見えるように）。
-  // 高さの基準＝直近のスクロール領域（場面編集の確認エリア等）。無ければ viewport。さらに 72vh を上限にする。
+  // 高さの基準＝直近のスクロール領域（場面編集の確認エリア等）の下端（無ければ viewport 下端）までの、プレビュー上端からの実利用高。
+  // 計測前/空振り（fit=null）の間は CSS フォールバック（fallbackWidthCss＝幅を「(100vh−予備)×アスペクト比」で絞る）で縦型もはみ出さない。
   // 横幅が制約になる横型では実質「幅100%」になり、従来の重ね合わせ（FREEオーバーレイ）と整合する。
   useLayoutEffect(() => {
     const el = ref.current;
