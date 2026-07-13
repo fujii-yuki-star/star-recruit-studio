@@ -45,6 +45,32 @@ export function deriveTransitionSelectValue(transition: Transition | undefined):
   return r.type === TRANSITION_TYPE.slide ? `slide:${r.direction}` : r.type;
 }
 
+export interface BoundaryTransition {
+  type: TransitionType;
+  direction: TransitionDirection;
+  /** clamp 済みの実効 D（秒）。書き出しと同じく両隣の場面尺で clamp する。0＝遷移なし（プレビュー不要）。 */
+  durationSec: number;
+}
+
+/**
+ * A→B 境界（B に入る遷移＝transition.in）の実効値を、書き出しと同じ clamp で解決する（#408 Part 2 のプレビュー用）。
+ * 直前場面が無い（先頭）／type=none／希望 D<=0 のときは durationSec=0（プレビューしない）を返す。
+ * clamp は transitionTimeline を2場面 [prev, B] に適用＝D=min(希望, prev尺, B尺)＝書き出しの per-scene 境界と一致
+ * （プレビュー=書き出しパリティ・ADR-0001/0026）。type/direction は resolveTransition と同一（wipe/zoom→fade）。
+ */
+export function resolveBoundaryTransition(
+  transition: Transition | undefined,
+  prevSceneDurationSec: number | undefined,
+  sceneDurationSec: number,
+): BoundaryTransition {
+  const r = resolveTransition(transition);
+  if (prevSceneDurationSec === undefined || r.type === TRANSITION_TYPE.none || r.durationSec <= 0) {
+    return { type: r.type, direction: r.direction, durationSec: 0 };
+  }
+  const { steps } = transitionTimeline([prevSceneDurationSec, sceneDurationSec], [0, r.durationSec]);
+  return { type: r.type, direction: r.direction, durationSec: steps[0]?.durationSec ?? 0 };
+}
+
 export interface TransitionStep {
   /** それまでの結合結果に対する xfade 開始位置（秒）。 */
   offsetSec: number;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveTransitionSelectValue, resolveTransition, transitionTimeline } from './sceneTransitions';
+import { deriveTransitionSelectValue, resolveBoundaryTransition, resolveTransition, transitionTimeline } from './sceneTransitions';
 
 describe('resolveTransition', () => {
   it('未設定は none / 既定方向 left / 既定 0.5 秒', () => {
@@ -73,5 +73,38 @@ describe('transitionTimeline', () => {
     const r = transitionTimeline([3, 3], [0, 5]);
     expect(r.steps).toEqual([{ offsetSec: 0, durationSec: 3 }]);
     expect(r.effectiveTotalSec).toBe(3);
+  });
+});
+
+describe('resolveBoundaryTransition（#408 Part 2・プレビュー用の境界解決）', () => {
+  it('直前場面が無い（先頭）＝durationSec 0（プレビューしない）', () => {
+    expect(resolveBoundaryTransition({ in: 'fade', durationSec: 0.5 }, undefined, 8)).toEqual({
+      type: 'fade', direction: 'left', durationSec: 0,
+    });
+  });
+
+  it('type=none＝durationSec 0（プレビューしない）', () => {
+    expect(resolveBoundaryTransition({ in: 'none' }, 8, 8).durationSec).toBe(0);
+  });
+
+  it('fade は希望 D をそのまま（両場面尺内なら clamp なし）＝書き出しと同じ実効値', () => {
+    expect(resolveBoundaryTransition({ in: 'fade', durationSec: 0.5 }, 8, 10)).toEqual({
+      type: 'fade', direction: 'left', durationSec: 0.5,
+    });
+  });
+
+  it('slide の方向を保つ・希望 D を返す', () => {
+    expect(resolveBoundaryTransition({ in: 'slide', direction: 'up', durationSec: 0.8 }, 8, 8)).toEqual({
+      type: 'slide', direction: 'up', durationSec: 0.8,
+    });
+  });
+
+  it('極短場面では D を両隣の尺で clamp（書き出しと同じ）', () => {
+    // 希望 5 だが prev=3 → D=min(5,3,10)=3。
+    expect(resolveBoundaryTransition({ in: 'fade', durationSec: 5 }, 3, 10).durationSec).toBe(3);
+  });
+
+  it('wipe/zoom は fade に丸める（resolveTransition と一致）', () => {
+    expect(resolveBoundaryTransition({ in: 'zoom', durationSec: 0.5 }, 8, 8).type).toBe('fade');
   });
 });

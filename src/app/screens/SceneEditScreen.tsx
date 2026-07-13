@@ -31,6 +31,8 @@ import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlide
 import { useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
+import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
+import { TransitionPreview } from "../components/TransitionPreview";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
@@ -325,6 +327,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 「動き」（簡易アニメ・ADR-0019）をこの場で再生確認する（#408 Part 1・仕上がり確認への往復をなくす）。
   // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
   const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
+  // 切替効果（トランジション）の単境界プレビュー（#408 Part 2）。A=直前場面（表示順）→ B=この場面。
+  // prevScene は scenes 配列への参照＝安定（scenes 不変なら同一参照）。先頭場面は prevScene=undefined で非活性。
+  const selectedIdx = selected ? scenes.findIndex((s) => s.sceneId === selected.sceneId) : -1;
+  const prevScene = selectedIdx > 0 ? scenes[selectedIdx - 1] : undefined;
+  const prevTemplate = prevScene ? templates.find((t) => t.templateId === prevScene.templateId) : undefined;
+  const transitionPreview = useSceneTransitionPreview(prevScene, selected);
+  // 動き再生と切替再生は排他（同時に別々の合成が走らないよう、開始時にもう一方を止める）。
+  const canPlayTransition = transitionPreview.transitionActive && !!prevScene && !!prevTemplate && !!template;
   // 掛け合い（scene.lines）×動画スロット併用の場面は「動き」（④）が v1 未対応で静止になる（sceneAnimation.ts の gate）。
   // 「設定だけできて無効」を避けるため（#469・ADR-0026④）、この組み合わせでは動きUIを設定不可＋理由提示にする。
   const animBlockedByDialogueVideo = motionPreview.hasVideoSlot && !!(selected?.lines && selected.lines.length > 0);
@@ -1043,23 +1053,54 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <div className="editor-col grow" style={{ overflow: "auto" }}>
               <div className="row-between" style={{ alignItems: "center" }}>
                 <h2 className="field-label" style={{ margin: 0 }}>仕上がり確認</h2>
-                {/* この場面に「動き」があるときだけ再生ボタンを出す（無ければ何も再生できないので出さない・#408 Part 1）。 */}
-                {motionPreview.animActive && (
-                  <button
-                    className="btn btn-ghost text-sm btn-icon"
-                    onClick={() => (motionPreview.playing ? motionPreview.stop() : motionPreview.play())}
-                  >
-                    {motionPreview.playing ? <StopIcon size={16} /> : <PlayIcon size={16} />}
-                    {motionPreview.playing ? "停止" : "動きを再生"}
-                  </button>
-                )}
+                <div className="row gap-sm" style={{ alignItems: "center" }}>
+                  {/* 前の場面からの「切り替え効果」を再生確認（#408 Part 2）。効果があり前場面が描けるときだけ出す。 */}
+                  {canPlayTransition && (
+                    <button
+                      className="btn btn-ghost text-sm btn-icon"
+                      onClick={() => {
+                        motionPreview.stop(); // 排他：切替を見る間は動き再生を止める
+                        if (transitionPreview.playing) transitionPreview.stop();
+                        else transitionPreview.play();
+                      }}
+                    >
+                      {transitionPreview.playing ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                      {transitionPreview.playing ? "停止" : "切り替えを見る"}
+                    </button>
+                  )}
+                  {/* この場面に「動き」があるときだけ再生ボタンを出す（無ければ何も再生できないので出さない・#408 Part 1）。 */}
+                  {motionPreview.animActive && (
+                    <button
+                      className="btn btn-ghost text-sm btn-icon"
+                      onClick={() => {
+                        transitionPreview.stop(); // 排他：動きを見る間は切替再生を止める
+                        if (motionPreview.playing) motionPreview.stop();
+                        else motionPreview.play();
+                      }}
+                    >
+                      {motionPreview.playing ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                      {motionPreview.playing ? "停止" : "動きを再生"}
+                    </button>
+                  )}
+                </div>
               </div>
               {/* オーバーレイは ScenePreview の fit 箱内に重なる（#273）。editPopover は position:fixed のため外側 relative は不要。 */}
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
               <ScenePreview scene={selected} template={template} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
+                {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
+                {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
+                  <TransitionPreview
+                    prevScene={prevScene}
+                    prevTemplate={prevTemplate}
+                    scene={selected}
+                    template={template}
+                    boundary={transitionPreview.boundary}
+                    progress={transitionPreview.progress}
+                  />
+                )}
                 {/* FREE 場面：プレビュー（fit箱）の子に重ねる＝縦型でも実寸一致でドラッグ移動・角リサイズが追従（#273・Phase 4b）。 */}
-                {/* 再生中は編集用オーバーレイ（選択枠・ハンドル）を隠す＝動く要素と設計位置のハンドルがズレて見えるのを避ける。 */}
-                {isFree && template && !motionPreview.playing && (
+                {/* 再生中（動き/切替）は編集用オーバーレイ（選択枠・ハンドル）を隠す＝動く要素と設計位置のハンドルがズレて見えるのを避ける。 */}
+                {isFree && template && !motionPreview.playing && !transitionPreview.playing && (
                   <FreeLayoutOverlay
                     freeLayout={freeLayout}
                     canvasW={template.canvas.width}
@@ -2079,7 +2120,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <option value={`slide:${TRANSITION_DIRECTION.down}`}>スライド（下へ）</option>
                     </select>
                     <p className="field-hint">
-                      ※ 仕上がり確認では動きませんが、書き出すと切り替わります。
+                      {transitionPreview.transitionActive
+                        ? "※ 上の「切り替えを見る」で、書き出しと同じ切り替わり方を確認できます。"
+                        : "※「なし」では切り替えません。効果を選ぶと、上の「切り替えを見る」で確認できます。"}
                     </p>
                   </>
                 )}
