@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
-use tauri::Manager;
+use std::time::{Duration, Instant, SystemTime};
+use tauri::{Emitter, Manager};
 
 // 既定FPS（videoSettings.fps の正典は project.json。B2でフロントから受け取る予定）。
 const DEFAULT_FPS: u32 = 30;
@@ -1527,12 +1527,36 @@ fn validate_xfade_name(name: &str) -> Option<String> {
     XFADE_NAMES.contains(&name).then(|| name.to_string())
 }
 
+/// 書き出しの進捗イベント（#376）：フロントの ExportScreen が受けて encoding 段のバーを実進捗（80→100%）で描く。
+/// phase＝"encode"（場面ごとエンコード・step/total 有効）/"join"（結合）/"telop"（字幕合成）/"bgm"（BGM合成）。
+/// 出力（ffmpeg 引数）には一切影響しない＝パリティ不変（ADR-0001）。
+#[derive(Clone, serde::Serialize)]
+struct ExportProgressEvent {
+    phase: String,
+    step: usize,
+    total: usize,
+}
+
+/// 進捗イベントを emit（送れなくても書き出しは続行＝best-effort・#376）。app が None（テスト等）は何もしない。
+fn emit_export_progress(app: Option<&tauri::AppHandle>, phase: &str, step: usize, total: usize) {
+    if let Some(app) = app {
+        let _ = app.emit(
+            "export_progress",
+            ExportProgressEvent {
+                phase: phase.to_string(),
+                step,
+                total,
+            },
+        );
+    }
+}
+
 /// 各シーン（静止画 or 動画）→ MP4 にし、トランジション有無で結合方法を選ぶ（ADR-0009 T2）。
 /// 全境界ハードカット（遷移なし）なら concat demuxer の無劣化コピー、1つでも遷移ありなら xfade チェーンで再エンコード。
-/// `joins` は jobs と同じ長さ（joins[0]＝先頭で未使用）。
+/// `joins` は jobs と同じ長さ（joins[0]＝先頭で未使用）。progress＝進捗イベントの送り先（None＝送らない・#376）。
 // bitrate は export_video で1回算出し、場面/xfade/テロップ overlay の3経路で同一値を共有するため引数で受ける（#121）。
 // 内部オーケストレータで、引数は infra ハンドル（ffmpeg/tmp/output）＋エンコード設定の混在＝自然な構造体化が難しいため、
-// 意図した8引数として clippy::too_many_arguments を抑制する。
+// 意図した引数数として clippy::too_many_arguments を抑制する。
 #[allow(clippy::too_many_arguments)]
 fn encode_jobs(
     ffmpeg: &Path,
@@ -1543,6 +1567,7 @@ fn encode_jobs(
     bitrate: &str,
     tmp_dir: &Path,
     output: &Path,
+    progress: Option<&tauri::AppHandle>,
 ) -> Result<(), String> {
     fs::create_dir_all(tmp_dir).map_err(|e| {
         export_failure(
@@ -1551,6 +1576,7 @@ fn encode_jobs(
         )
     })?;
     let mut files: Vec<String> = Vec::with_capacity(jobs.len());
+    let encode_start = Instant::now();
     for (i, job) in jobs.iter().enumerate() {
         let clip = tmp_dir.join(format!("scene_{i:03}.mp4"));
         let args = match job {
@@ -1713,7 +1739,19 @@ fn encode_jobs(
             )
         })?;
         files.push(clip.to_string_lossy().into_owned());
+        // 場面1本を焼くたびに実進捗を通知＝encoding 段のバーが場面ごとに進む（#376）。
+        emit_export_progress(progress, "encode", i + 1, jobs.len());
     }
+    eprintln!(
+        "[export] encode {} clips: {} ms",
+        jobs.len(),
+        encode_start.elapsed().as_millis()
+    );
+    // 結合（concat/xfade）に入る前に通知＝場面が2本以上あるときの結合待ちを「進行中」と示す（#376）。
+    if files.len() >= 2 {
+        emit_export_progress(progress, "join", 0, 0);
+    }
+    let join_start = Instant::now();
 
     // 境界は joins[1..] のみ有効（joins[0]＝先頭場面は遷移元なし。skip(1) で除外＝コメントと一致）。
     let has_transition = joins.iter().skip(1).any(|j| j.xfade.is_some());
@@ -1798,6 +1836,13 @@ fn encode_jobs(
                 "場面の結合に失敗しました。もう一度お試しください。",
             )
         })?;
+    }
+    if files.len() >= 2 {
+        eprintln!(
+            "[export] join {} clips: {} ms",
+            files.len(),
+            join_start.elapsed().as_millis()
+        );
     }
     Ok(())
 }
@@ -3060,6 +3105,7 @@ fn export_video_impl(
     } else {
         out.clone()
     };
+    let export_start = Instant::now();
     encode_jobs(
         &ffmpeg,
         &jobs,
@@ -3069,10 +3115,13 @@ fn export_video_impl(
         &bitrate,
         &tmp,
         &joined_path,
+        Some(&app),
     )?;
 
     // タイムラインのテロップ帯を結合後の動画へ overlay（区間はグローバル秒＝xfade 重なり込みの実効時間軸）。
     let video_path = if has_telops {
+        emit_export_progress(Some(&app), "telop", 0, 0); // 字幕合成中（#376）
+        let telop_start = Instant::now();
         let list = telops.unwrap_or_default();
         let target = if has_bgm {
             tmp.join("video.mp4")
@@ -3107,6 +3156,10 @@ fn export_video_impl(
                 "テロップの合成に失敗しました。もう一度お試しください。",
             )
         })?;
+        eprintln!(
+            "[export] telop overlay: {} ms",
+            telop_start.elapsed().as_millis()
+        );
         target
     } else {
         joined_path
@@ -3114,6 +3167,8 @@ fn export_video_impl(
 
     // 場面ごとBGM（ADR-0018 ③(7)）：各クリップを一時ファイルへ書き出し、planBgmMix の配置で結合後の動画へ amix。
     if has_bgm {
+        emit_export_progress(Some(&app), "bgm", 0, 0); // BGM合成中（#376）
+        let bgm_start = Instant::now();
         let list = bgm_runs.unwrap_or_default();
         // xfade で重なった分だけ実効総尺が縮む（ADR-0009）。-t にこの値を使う。境界は joins[1..] のみ。
         let applied: f64 = joins
@@ -3166,7 +3221,14 @@ fn export_video_impl(
                 "BGMの合成に失敗しました。もう一度お試しください。",
             )
         })?;
+        eprintln!("[export] bgm mix: {} ms", bgm_start.elapsed().as_millis());
     }
+    // 書き出し全体（エンコード＋結合＋字幕＋BGM）の所要時間。代表ケースで Before/After を測るための計測ログ（#376）。
+    eprintln!(
+        "[export] total (encode+join+telop+bgm): {} ms / {} scenes",
+        export_start.elapsed().as_millis(),
+        scenes.len()
+    );
 
     Ok(ExportReport {
         output_path: out.to_string_lossy().into_owned(),
@@ -4103,8 +4165,10 @@ mod tests {
                 scene_start: true,
             })
             .collect();
-        encode_jobs(&ffmpeg, &scenes, &joins, codec, 30, "12000k", &tmp, &out)
-            .expect("encode_jobs");
+        encode_jobs(
+            &ffmpeg, &scenes, &joins, codec, 30, "12000k", &tmp, &out, None,
+        )
+        .expect("encode_jobs");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 
@@ -4172,8 +4236,10 @@ mod tests {
         let encoders = run(&ffmpeg, &["-hide_banner".into(), "-encoders".into()]).unwrap();
         let codec = pick_codec(&encoders).expect("an h264 encoder");
         let out = tmp.join("final.mp4");
-        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out)
-            .expect("encode_jobs scene group");
+        encode_jobs(
+            &ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out, None,
+        )
+        .expect("encode_jobs scene group");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
         // 場面A の内部セグメントが連結クリップ（scene_group_000.mp4）に束ねられた。
         assert!(
@@ -4234,6 +4300,7 @@ mod tests {
             "12000k",
             &tmp,
             &video,
+            None,
         )
         .expect("encode video");
 
@@ -5574,8 +5641,10 @@ mod tests {
                 scene_start: true,
             })
             .collect();
-        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out)
-            .expect("encode_jobs video");
+        encode_jobs(
+            &ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out, None,
+        )
+        .expect("encode_jobs video");
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
     }
 
@@ -5721,8 +5790,10 @@ mod tests {
             },
         ];
         let out = tmp.join("final.mp4");
-        encode_jobs(&ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out)
-            .expect("encode_jobs frames+video group concat");
+        encode_jobs(
+            &ffmpeg, &jobs, &joins, codec, 30, "12000k", &tmp, &out, None,
+        )
+        .expect("encode_jobs frames+video group concat");
         // 連結成功＝両セグメントが -c copy 互換（非互換なら concat が失敗し上で panic）。両セグメント MP4 も生成済み。
         assert!(fs::metadata(&out).expect("final.mp4 exists").len() > 0);
         assert!(
