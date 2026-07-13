@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
 import {
-  lineAudioKey, lineFromNarration, lineVoiceStem, liveNarrationAudioKeys, sceneLines, sceneNeedsVoice,
-  validateSceneLines, withLineStatus, withLineVoicePath,
+  lineAudioKey, lineDurationsFromAudio, lineFromNarration, lineVoiceStem, liveNarrationAudioKeys, sceneLines,
+  sceneNeedsVoice, validateSceneLines, withLineStatus, withLineVoicePath,
 } from './narrationLines';
+import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import type { Narration, NarrationLine, Scene } from './types';
 
 const narration: Narration = {
@@ -168,6 +169,45 @@ describe('行ごと音声の補助（PR-C2）', () => {
     // sceneLines と同じく lines.length===0 は単一 narration とみなす（sceneId キー）。
     const keys = liveNarrationAudioKeys([{ ...sceneWith({}), sceneId: 'scene_003', lines: [] }]);
     expect([...keys]).toEqual(['scene_003']);
+  });
+
+  it('lineDurationsFromAudio：掛け合いの各行に実音声長を返す（音声のある行のみ・#392）', async () => {
+    const mock = new MockVoiceProvider();
+    const a1 = (await mock.synthesize({ text: 'あ', voiceId: 'v', speed: 1, pitch: 0, intonation: 1 })).audioDataUrl;
+    const a2 = (await mock.synthesize({ text: 'これはずっと長いセリフです。', voiceId: 'v', speed: 1, pitch: 0, intonation: 1 })).audioDataUrl;
+    const scene = sceneWith({
+      sceneId: 'scene_001',
+      lines: [
+        { lineId: 'line_001', text: 'あ', status: NARRATION_STATUS.generated },
+        { lineId: 'line_002', text: 'これはずっと長いセリフです。', status: NARRATION_STATUS.generated },
+        { lineId: 'line_003', text: '未生成', status: NARRATION_STATUS.none },
+      ],
+    });
+    const dur = lineDurationsFromAudio(scene, { 'scene_001/line_001': a1, 'scene_001/line_002': a2 });
+    expect(dur.line_001).toBeGreaterThan(0);
+    expect(dur.line_002).toBeGreaterThan(dur.line_001); // 長いセリフほど区間が長い
+    expect(dur.line_003).toBeUndefined(); // 音声未生成の行は含めない（0＝自動逐次のまま）
+  });
+
+  it('lineDurationsFromAudio：単一 narration（明示 lines 無し）は空を返す', () => {
+    // 実効1行＝常に全幅ゆえ区間尺は不要。
+    expect(lineDurationsFromAudio(sceneWith({ sceneId: 'scene_001' }), { scene_001: 'x' })).toEqual({});
+  });
+
+  it('lineDurationsFromAudio：本文編集で none に戻った行は旧音声キャッシュの尺を使わない（#392 レビュー P1）', async () => {
+    const mock = new MockVoiceProvider();
+    const a1 = (await mock.synthesize({ text: 'これはそこそこ長いセリフです', voiceId: 'v', speed: 1, pitch: 0, intonation: 1 })).audioDataUrl;
+    // line_001＝生成済み。line_002＝本文編集で none へ戻ったが旧 data URL がキャッシュに残存（Undo 安全のため・#390）。
+    const scene = sceneWith({
+      sceneId: 'scene_001',
+      lines: [
+        { lineId: 'line_001', text: 'A', status: NARRATION_STATUS.generated },
+        { lineId: 'line_002', text: '編集後の新しい本文（未生成）', status: NARRATION_STATUS.none },
+      ],
+    });
+    const dur = lineDurationsFromAudio(scene, { 'scene_001/line_001': a1, 'scene_001/line_002': a1 });
+    expect(dur.line_001).toBeGreaterThan(0);
+    expect(dur.line_002).toBeUndefined(); // none の行は旧尺を適用しない＝自動逐次へ（新本文に旧区間長を出さない）
   });
 
   it('withLineStatus：明示 lines は該当行・無ければ単一 narration を更新', () => {
