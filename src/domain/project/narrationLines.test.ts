@@ -194,6 +194,22 @@ describe('行ごと音声の補助（PR-C2）', () => {
     expect(lineDurationsFromAudio(sceneWith({ sceneId: 'scene_001' }), { scene_001: 'x' })).toEqual({});
   });
 
+  it('lineDurationsFromAudio：本文編集で none に戻った行は旧音声キャッシュの尺を使わない（#392 レビュー P1）', async () => {
+    const mock = new MockVoiceProvider();
+    const a1 = (await mock.synthesize({ text: 'これはそこそこ長いセリフです', voiceId: 'v', speed: 1, pitch: 0, intonation: 1 })).audioDataUrl;
+    // line_001＝生成済み。line_002＝本文編集で none へ戻ったが旧 data URL がキャッシュに残存（Undo 安全のため・#390）。
+    const scene = sceneWith({
+      sceneId: 'scene_001',
+      lines: [
+        { lineId: 'line_001', text: 'A', status: NARRATION_STATUS.generated },
+        { lineId: 'line_002', text: '編集後の新しい本文（未生成）', status: NARRATION_STATUS.none },
+      ],
+    });
+    const dur = lineDurationsFromAudio(scene, { 'scene_001/line_001': a1, 'scene_001/line_002': a1 });
+    expect(dur.line_001).toBeGreaterThan(0);
+    expect(dur.line_002).toBeUndefined(); // none の行は旧尺を適用しない＝自動逐次へ（新本文に旧区間長を出さない）
+  });
+
   it('withLineStatus：明示 lines は該当行・無ければ単一 narration を更新', () => {
     const multi = sceneWith({
       lines: [
