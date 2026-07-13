@@ -8,6 +8,7 @@ import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { resolveLineSubtitle, type BoundaryFrame } from "../../domain/project/lineTimeline";
+import { containBox, fallbackWidthCss } from "./previewFit";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { resolveVideoStartDelaySec } from "../../domain/project/videoStartTiming";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
@@ -191,18 +192,20 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
       const elTop = el.getBoundingClientRect().top;
       const scBottom = sc ? Math.min(sc.getBoundingClientRect().bottom, window.innerHeight) : window.innerHeight;
       const availH = scBottom - elTop - 12;
+      // 幅が未確定（レイアウト前で 0）の間は計測しない＝CSS フォールバック（fallbackWidthCss）が縦型でもはみ出さない箱にする。
       if (availW <= 0 || availH <= 0) return;
-      const scale = Math.min(availW / cw, availH / ch);
-      const w = Math.floor(cw * scale);
-      const h = Math.floor(ch * scale);
+      const { width: w, height: h } = containBox(cw, ch, availW, availH);
       // 同値なら state を変えない（ResizeObserver の無限ループ防止）。
       setFit((prev) => (prev && prev.width === w && prev.height === h ? prev : { width: w, height: h }));
     };
     measure();
+    // レイアウト確定後にもう一度（初回計測が幅0で空振りしても、縦型プレビューがフォールバックのまま残らないよう拾う）。
+    const raf = requestAnimationFrame(measure);
     const ro = new ResizeObserver(measure);
     if (el.parentElement) ro.observe(el.parentElement);
     window.addEventListener("resize", measure);
     return () => {
+      cancelAnimationFrame(raf);
       ro.disconnect();
       window.removeEventListener("resize", measure);
     };
@@ -344,7 +347,10 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
       <div
         style={{
           position: "relative",
-          width: fit ? fit.width : "100%",
+          // fit（JS 計測）があれば実寸。計測前/空振り時は fallbackWidthCss で「使える高さ×アスペクト比」に幅を絞り、
+          // 縦型（9:16）でも箱高さ ≤ (100vh − 予備) に収める（従来の width:100% だと縦型が画面をはみ出していた）。
+          width: fit ? fit.width : fallbackWidthCss(cw, ch),
+          maxWidth: "100%",
           height: fit?.height,
           flexShrink: 0,
           aspectRatio: `${cw} / ${ch}`,
