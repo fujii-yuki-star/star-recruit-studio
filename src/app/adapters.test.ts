@@ -100,6 +100,7 @@ describe("buildPrecheckItems（場面の見た目 / テンプレ未解決・Code
     const item = buildPrecheckItems([scene], assets, [freeTemplate]).find((i) => i.id === "sceneTemplate");
     expect(item?.severity).toBe("action");
     expect(item?.detail).toContain("場面1");
+    expect(item?.action).toBe("直す"); // 「直す」ボタンが出る条件＝action の有無（画面遷移の受け入れ条件をデータ層で固定）
     expect(item?.sceneId).toBe("sX"); // 該当場面へ戻れる導線（#400）
   });
 

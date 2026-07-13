@@ -198,7 +198,8 @@ function templateUnresolvedError(sceneNumber: number): Error {
 }
 
 /**
- * 各場面をプレビューと同一のSVGで実寸PNG化し、ナレーション音声を添える。テンプレ未解決の場面はスキップ。
+ * 各場面をプレビューと同一のSVGで実寸PNG化し、ナレーション音声を添える。見た目（テンプレ）が解決できない場面は
+ * **黙って落とさず、場面番号付きの利用者向けエラーで停止**する（templateUnresolvedError・#434 同流儀・precheck も同項目を出す）。
  * 動画スロットがある場面は下/上2枚PNG＋クリップ情報（ADR-0006）。onProgress(done, total) で進捗通知。
  */
 export async function buildExportScenes(
