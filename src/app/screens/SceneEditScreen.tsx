@@ -33,6 +33,7 @@ import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
+import { firstFrameLineIndex } from "../../domain/project/lineTimeline";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
@@ -1086,7 +1087,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
               {/* オーバーレイは ScenePreview の fit 箱内に重なる（#273）。editPopover は position:fixed のため外側 relative は不要。 */}
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
-              <ScenePreview scene={selected} template={template} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
+              {/* activeLineIndex＝先頭フレームの実効状態（掛け合いで頭に間があれば -1＝字幕なし）。切替プレビュー B と
+                  揃え、書き出しの先頭フレームに一致させる（#408 レビュー P1）。非掛け合いは undefined でテンプレ既定。 */}
+              <ScenePreview scene={selected} template={template} activeLineIndex={selected ? firstFrameLineIndex(selected) : undefined} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview

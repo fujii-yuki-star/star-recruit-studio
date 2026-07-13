@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { activeLineIndexAt, lineSegments, resolveLineSubtitle, sceneSegmentSpecs } from './lineTimeline';
+import { activeLineIndexAt, firstFrameLineIndex, lastFrameLineIndex, lineSegments, resolveLineSubtitle, sceneSegmentSpecs } from './lineTimeline';
 import type { NarrationLine, Scene } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -144,5 +144,26 @@ describe('sceneSegmentSpecs（書き出しセグメント・PR-E）', () => {
     const specs = sceneSegmentSpecs(sceneWith({ lines }), {});
     expect(specs.some((s) => 'isGap' in s)).toBe(false);
     expect(specs[0]).toMatchObject({ lineId: 'line_001', startSec: 0, isFirst: true });
+  });
+});
+
+describe('firstFrameLineIndex / lastFrameLineIndex（切替プレビューの境界フレーム・#408 Part 2 レビュー P1）', () => {
+  it('非掛け合い（行なし）は undefined（テンプレ既定＝字幕欄）', () => {
+    expect(firstFrameLineIndex(sceneWith({}))).toBeUndefined();
+    expect(lastFrameLineIndex(sceneWith({}))).toBeUndefined();
+  });
+
+  it('掛け合いで頭に間（先頭行 startSec>0）＝先頭フレームは -1（間＝字幕なし・既定クレジット・書き出しの headGap と一致）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', startSec: 2, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', status: NARRATION_STATUS.none },
+    ];
+    expect(firstFrameLineIndex(sceneWith({ lines }))).toBe(-1);
+    expect(lastFrameLineIndex(sceneWith({ lines }))).toBe(1); // 末尾行
+  });
+
+  it('掛け合いで頭に間が無い（先頭行 startSec=0 または未指定）＝先頭フレームは 0（先頭行）', () => {
+    expect(firstFrameLineIndex(sceneWith({ lines: [{ lineId: 'line_001', text: 'a', startSec: 0, status: NARRATION_STATUS.none }] }))).toBe(0);
+    expect(firstFrameLineIndex(sceneWith({ lines: [{ lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none }] }))).toBe(0);
   });
 });

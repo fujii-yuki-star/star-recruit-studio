@@ -12,7 +12,7 @@ import type { BoundaryTransition } from "../../domain/project/sceneTransitions";
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from "../../domain/enums";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
-import { resolveLineSubtitle } from "../../domain/project/lineTimeline";
+import { firstFrameLineIndex, lastFrameLineIndex, resolveLineSubtitle } from "../../domain/project/lineTimeline";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
@@ -63,14 +63,19 @@ export function TransitionPreview({
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
   const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
-  // 境界フレームを ScenePreview と同じ責務・パラメータで焼く（#408 レビュー P2 パリティ）。掛け合いは行認識で描く：
-  // A（前場面）＝末尾行（書き出し xfade の A タイル＝最終フレーム）、B（この場面）＝先頭行（ScenePreview 既定＝停止時に
-  // 表示される下地と一致＝停止フラッシュを消す）。字幕（resolveLineSubtitle）とクレジット（creditForLine）を行ごとに反映。
-  const svgFor = (sc: Scene, tpl: Template, lineIndex: number): string => {
-    const line = sc.lines && sc.lines.length > 0 ? (sc.lines[lineIndex] ?? sc.lines[0]) : undefined;
-    const lineSub = line ? resolveLineSubtitle(line, sc) : undefined;
-    const layoutOpts = lineSub ? { subtitleText: lineSub.enabled ? lineSub.text : null } : undefined;
-    const credit = line ? creditForLine(line, baseCredit) : baseCredit;
+  // 境界フレームを ScenePreview と同一ロジック（inGap/activeLine/applyLineSub）で焼く（#408 レビュー P1 パリティ）。
+  // activeLineIndex：B（この場面）＝先頭フレーム（頭に間があれば -1＝字幕なし・既定クレジット＝書き出しの headGap と一致・
+  // かつ場面編集の下地 ScenePreview と同値＝停止フラッシュなし）／A（前場面）＝末尾行。非掛け合いは undefined でテンプレ既定。
+  const svgFor = (sc: Scene, tpl: Template, activeLineIndex: number | undefined): string => {
+    const hasLines = !!(sc.lines && sc.lines.length > 0);
+    const inGap = hasLines && activeLineIndex !== undefined && activeLineIndex < 0;
+    const activeLine = hasLines && !inGap ? (sc.lines![activeLineIndex ?? 0] ?? sc.lines![0]) : undefined;
+    const lineSub = activeLine ? resolveLineSubtitle(activeLine, sc) : undefined;
+    const applyLineSub = inGap || !!lineSub;
+    const layoutOpts = applyLineSub
+      ? { subtitleText: inGap ? null : lineSub && lineSub.enabled ? lineSub.text : null }
+      : undefined;
+    const credit = activeLine ? creditForLine(activeLine, baseCredit) : baseCredit;
     return layoutToSvg(layoutScene(sc, tpl, layoutOpts), {
       assetSrc,
       responsive: true,
@@ -81,8 +86,8 @@ export function TransitionPreview({
   const { a, b } = layerStyles(boundary, progress);
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: "var(--radius)" }} aria-hidden>
-      <div style={a} dangerouslySetInnerHTML={{ __html: svgFor(prevScene, prevTemplate, (prevScene.lines?.length ?? 1) - 1) }} />
-      <div style={b} dangerouslySetInnerHTML={{ __html: svgFor(scene, template, 0) }} />
+      <div style={a} dangerouslySetInnerHTML={{ __html: svgFor(prevScene, prevTemplate, lastFrameLineIndex(prevScene)) }} />
+      <div style={b} dangerouslySetInnerHTML={{ __html: svgFor(scene, template, firstFrameLineIndex(scene)) }} />
     </div>
   );
 }
