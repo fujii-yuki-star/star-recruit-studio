@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layerStyles } from './TransitionPreview';
+import { layerStyles } from './transitionLayerStyles';
 import type { BoundaryTransition } from '../../domain/project/sceneTransitions';
 
 // TransitionPreview の補間ロジック（fade=opacity・slide=押し出しの translate%）を単体で固定する（#408 Part 2）。
