@@ -1,8 +1,10 @@
 // MP4書き出し（Tauriコマンド境界）。FFmpegの実行・コーデック選択はRust側（ffmpeg.rs）に隔離する（CLAUDE.md §4）。
 // フロントは各場面のPNG（data URL）と尺を渡すだけ。SVG→PNGの生成は ADR-0004（WebView Canvas）でフロントが行う。
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { Fit } from '../domain/enums';
 import type { ExportCapability } from '../domain/export/exportCapability';
+import type { ExportProgressEvent } from '../domain/export/exportProgress';
 
 /** 動画ありシーンの入力（ADR-0006）。下/上PNGは data URL、クリップはプロジェクト相対パス。 */
 export interface ExportVideoInput {
@@ -133,6 +135,17 @@ export async function exportVideo(
     outputPath: outputPath ?? null,
     telops: telops && telops.length > 0 ? telops : null,
   });
+}
+
+/** 書き出しの進捗イベント（#376）を購読する。Rust の export_video が段階（映像/結合/字幕/BGM）ごとに emit する。
+ *  戻り値は購読解除関数。Tauri 非検出時は no-op を返す（ブラウザ開発/テストで安全）。 */
+export async function listenExportProgress(cb: (e: ExportProgressEvent) => void): Promise<() => void> {
+  if (!canExport()) return () => {};
+  try {
+    return await listen<ExportProgressEvent>('export_progress', (ev) => cb(ev.payload));
+  } catch {
+    return () => {};
+  }
 }
 
 /** 書き出し開始を宣言する（#380）。準備（クリップ抽出）と本体を同一のキャンセルスコープに入れ、前回の中止要求を持ち越さない。

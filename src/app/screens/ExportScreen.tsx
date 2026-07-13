@@ -11,7 +11,8 @@ import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
-import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
+import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
+import { exportEncodePercent, exportPhaseLabel } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -63,7 +64,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // 再実行・プロジェクト破壊操作を全画面でブロックできる。ローカル setter は store 更新へ委譲（本体は不変）。
   const exportRun = useProjectStore((s) => s.exportRun);
   const setExportRun = useProjectStore((s) => s.setExportRun);
-  const { phase, progress, resultPath, message, bgmWarning, cancelling } = exportRun;
+  const { phase, progress, encode, resultPath, message, bgmWarning, cancelling } = exportRun;
   const setPhase = (phase: ExportPhase) => setExportRun({ phase });
   const setProgress = (progress: { done: number; total: number; frameFraction?: number }) => setExportRun({ progress });
   const setResultPath = (resultPath: string) => setExportRun({ resultPath });
@@ -111,8 +112,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
     await beginExport();
     setProgress({ done: 0, total: scenes.length });
+    setExportRun({ encode: undefined }); // 前回の encoding 進捗を持ち越さない（#376）
     setPhase("rendering");
+    // encoding 段（結合/字幕/BGM）の実進捗を Rust から受け取りバーを 80→100% で描く（#376）。Tauri 非検出時は no-op。
+    let unlistenProgress: (() => void) | undefined;
     try {
+      unlistenProgress = await listenExportProgress((e) => setExportRun({ encode: e }));
       // 開始時点の完全スナップショット（#381）：映像・テロップ・BGM をすべてこの1つの内容から供給し、書き出し中の編集（#377）で
       // 「映像は旧・テロップ/BGMは新」の不整合MP4になるのを防ぐ。saveProject の前＝従来 closure と同一瞬間に確定し、projectId のみ保存後の採番値を使う。
       const snap = useProjectStore.getState();
@@ -251,6 +256,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         console.error("[export] failed:", e);
       }
     } finally {
+      unlistenProgress?.(); // 進捗購読を解除（#376）
       setExportRun({ cancelling: false }); // 中止フラグは1回の書き出しで完結（次回に持ち越さない・#380）
       // ステージングしたアニメフレームを掃除（成功/失敗いずれも）＝次回書き出しに残さない（#書き出しRangeError）。
       await clearExportFramesStage().catch(() => {});
@@ -261,7 +267,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     phase === "done"
       ? 100
       : phase === "encoding"
-        ? 90
+        ? // Rust の実進捗イベントがあれば 80→100% で描く。未受信（旧経路/ブラウザ）は基準 80%＋不定バー（#376）。
+          // 未受信を 90% にすると最初のイベント（≈82%）で後退して見えるため、基準は 80%（レンダリング終端と連続・単調）。
+          encode
+          ? exportEncodePercent(encode)
+          : 80
         : phase === "rendering" && progress.total > 0
           ? // 場面数ベース＋処理中の場面のフレーム進捗（frameFraction）で 0〜80% を滑らかに（#391）。
             Math.round(((progress.done + (progress.frameFraction ?? 0)) / progress.total) * 80)
@@ -380,8 +390,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                 </div>
               </div>
               <div className="progress mb">
-                {/* エンコード段は進捗値が無い＝不定バー（左右に流れる）で「動いている」ことだけ伝える。それ以外は幅で表す（#391）。 */}
-                {phase === "encoding" ? (
+                {/* エンコード段：Rust の実進捗イベントがあれば幅で表す（#376）。無ければ従来どおり不定バー（左右に流れる）で
+                    「動いている」ことだけ伝える（#391）。レンダリング段/完了は常に幅で表す。 */}
+                {phase === "encoding" && !encode ? (
                   <div className="progress-fill progress-fill--indeterminate" />
                 ) : (
                   <div className="progress-fill" style={{ width: `${percent}%` }} />
@@ -393,11 +404,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   場面 {Math.min(progress.done + 1, progress.total)} / {progress.total} を処理中
                 </div>
               )}
-              {/* エンコード段は Rust 側の進捗イベントがまだ無い。90% 固定＋静止バーは「止まった」ように見えるので、
-                  バーを不定表示（下の progress-fill--indeterminate）にして「進んでいる」ことを伝える（#391 レビュー）。 */}
+              {/* エンコード段：Rust の進捗イベントがあれば段階（映像/結合/字幕/BGM）を文言で示す（#376）。
+                  無ければ従来の不定バー＋「最後の仕上げ中」（#391）。 */}
               {phase === "encoding" && (
                 <div className="text-center text-sm text-muted">
-                  最後の仕上げ中です。そのままお待ちください。
+                  {encode ? exportPhaseLabel(encode) : "最後の仕上げ中です。そのままお待ちください。"}
                 </div>
               )}
               {/* 書き出しの中止（#380）：走行中の変換を止めて、すぐやり直せる。 */}

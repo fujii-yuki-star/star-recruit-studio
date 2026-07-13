@@ -5,6 +5,7 @@ import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
+import type { ExportProgressEvent } from "../../domain/export/exportProgress";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
@@ -55,6 +56,9 @@ export interface ExportRunState {
   // frameFraction＝処理中の場面内の進み具合（0〜1・任意）。アニメ場面は数百フレームを焼く間 done が動かず
   // バーが凍って見える（フリーズ誤認→二重書き出しの引き金）ため、フレーム進捗で滑らかに進める（#391）。
   progress: { done: number; total: number; frameFraction?: number };
+  // encoding 段（結合・字幕・BGM）の実進捗（#376）。Rust の export_progress イベントで更新しバーを 80→100% に。
+  // 未受信（旧 Rust/ブラウザ）は undefined＝従来の不定バーにフォールバック。
+  encode?: ExportProgressEvent;
   resultPath: string;
   message: string;
   bgmWarning: "" | "partial" | "all";
