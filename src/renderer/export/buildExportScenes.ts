@@ -186,7 +186,20 @@ function videoUnplaceableError(sceneNumber: number): Error {
 }
 
 /**
- * 各場面をプレビューと同一のSVGで実寸PNG化し、ナレーション音声を添える。テンプレ未解決の場面はスキップ。
+ * 見た目（テンプレ）が解決できない場面の利用者向けエラー（Codex 監査 2026-07-13・#434 と同流儀・§2-5）。
+ * templateId が templateById に無い場面を**黙って書き出しから落とさず**停止する。落とすと当該場面が MP4 から消え、
+ * 全 project.scenes を基準にするテロップ/BGM（compileTimeline）と実映像がズレる（基準 layout しか見ない precheck も捕捉不可）。
+ * 事前には precheck の「場面の見た目」項目（adapters.ts）が同一文言で場面つき警告＋該当場面への導線を出す。
+ */
+function templateUnresolvedError(sceneNumber: number): Error {
+  return new Error(
+    `場面${sceneNumber}の見た目が見つかりませんでした。場面編集で見た目を選び直してから、もう一度お試しください。`,
+  );
+}
+
+/**
+ * 各場面をプレビューと同一のSVGで実寸PNG化し、ナレーション音声を添える。見た目（テンプレ）が解決できない場面は
+ * **黙って落とさず、場面番号付きの利用者向けエラーで停止**する（templateUnresolvedError・#434 同流儀・precheck も同項目を出す）。
  * 動画スロットがある場面は下/上2枚PNG＋クリップ情報（ADR-0006）。onProgress(done, total) で進捗通知。
  */
 export async function buildExportScenes(
@@ -678,6 +691,10 @@ export async function buildExportScenes(
           segIndex += 1;
         }
       }
+    } else {
+      // 見た目（テンプレ）が解決できない場面を黙って書き出しから落とさない（Codex 監査 2026-07-13・#434 と同流儀）。
+      // 落とすと当該場面が MP4 から消え、テロップ/BGM もズレる。§2-5 で停止し場面編集での選び直しを促す（precheck も同項目を出す）。
+      throw templateUnresolvedError(i + 1);
     }
     onProgress?.(i + 1, scenes.length);
   }

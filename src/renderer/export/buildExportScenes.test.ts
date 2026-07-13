@@ -25,10 +25,11 @@ import { splitVideoSceneSvgMulti } from './videoSceneSplit';
 import { buildExportScenes, ExportCancelledError } from './buildExportScenes';
 
 // buildExportScenes が参照するのは templateId / durationSec / (narrationFor へ渡す scene) のみ。
+// 見た目（テンプレ）未解決の場面は黙って落とさず停止する（Codex 監査 2026-07-13）ため、共有 fixture は解決可能な2場面のみ。
+// 未解決の停止は下の専用テスト（「見た目が見つからない場面は停止」）で固定する。
 const scenes = [
   { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
   { sceneId: 's2', templateId: 'tpl', durationSec: 5 },
-  { sceneId: 'sX', templateId: 'missing', durationSec: 4 },
 ] as unknown as Scene[];
 
 // canvas は svgToPngDataUrl への寸法渡しで参照されるため最小限だけ持たせる。
@@ -44,8 +45,7 @@ describe('buildExportScenes：ナレーション音声の付与', () => {
         ? { audioBase64: 'data:audio/wav;base64,AAAA', narrationVolume: 0.5 }
         : { narrationVolume: 1.0 },
     );
-    // テンプレ未解決の sX はスキップされる。
-    expect(out).toHaveLength(2);
+    expect(out).toHaveLength(2); // 解決可能な2場面
     expect(out[0]).toMatchObject({
       pngBase64: 'data:image/png;base64,PNG',
       durationSec: 8,
@@ -75,6 +75,22 @@ describe('buildExportScenes：ナレーション音声の付与', () => {
     expect(out[0].audioBase64).toBeUndefined();
     expect(out[0].narrationVolume).toBeUndefined();
     expect(out).toHaveLength(2);
+  });
+
+  it('見た目（テンプレ）が見つからない場面は黙って落とさず停止（§2-5・Codex 監査 2026-07-13・#434 同流儀）', async () => {
+    // templateId 未解決の場面を書き出しから silent skip すると場面が MP4 から消えテロップ/BGM もズレるため停止する。
+    // 旧挙動（skip して out から除外）を「停止」に変更＝該当場面つきの利用者向け文言で reject。
+    await expect(
+      buildExportScenes(
+        [
+          { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
+          { sceneId: 'sX', templateId: 'missing', durationSec: 4 }, // 見た目が見つからない場面
+        ] as unknown as Scene[],
+        templateById,
+        noAsset,
+        () => ({ narrationVolume: 1 }),
+      ),
+    ).rejects.toThrow(/場面2の見た目が見つかりませんでした/);
   });
 
   it('掛け合い（明示 lines）は行ごとセグメントへ展開し、行ごと音声・区間尺を付与（PR-E）', async () => {
@@ -117,7 +133,7 @@ describe('buildExportScenes：ナレーション音声の付与', () => {
       audioBase64: s.sceneId === 's1' ? 'A1' : undefined,
       narrationVolume: 1,
     }));
-    expect(out).toHaveLength(2); // s1,s2（sX はテンプレ未解決でスキップ）
+    expect(out).toHaveLength(2); // s1,s2（ともに解決可能）
     expect(out[0]).toMatchObject({ durationSec: 8, audioBase64: 'A1' });
   });
 });
@@ -1095,7 +1111,7 @@ describe('buildExportScenes：中止（#380）', () => {
     const out = await buildExportScenes(scenes, templateById, noAsset, undefined, undefined, undefined, {
       shouldCancel: () => false,
     });
-    expect(out).toHaveLength(2); // テンプレ未解決の sX を除く s1/s2
+    expect(out).toHaveLength(2); // s1/s2
   });
 
   it('shouldCancel を渡さなければ従来どおり（中止判定なし）', async () => {

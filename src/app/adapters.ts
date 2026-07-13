@@ -148,6 +148,21 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
     );
   }
 
+  // 場面の見た目（テンプレ・Codex 監査 2026-07-13・#434 と同流儀）：templateId が解決できない場面（利用者テンプレの削除・
+  // 別環境で開く等でダングリング）は、書き出しで黙って落とすと場面が MP4 から消えテロップ/BGM もズレるため §2-5 で停止する。
+  // ここでは事前に**場面つきで**警告し、該当場面へ戻れる導線（action＝直す）を出す。問題が無ければ項目を出さない。
+  const noTemplate = offending((s) => !templateOf(s));
+  if (noTemplate.nums.length > 0) {
+    items.push({
+      id: "sceneTemplate",
+      label: "場面の見た目",
+      detail: `${fmtScenes(noTemplate.nums)}の見た目が見つかりません。場面編集で見た目を選び直してから書き出してください。`,
+      severity: "action",
+      action: "直す",
+      sceneId: noTemplate.firstId,
+    });
+  }
+
   // 動画の配置（#434・ADR-0026）：動画スロットがあるのにレイアウトへ配置できない場面（分割失敗＝内部不整合や
   // スロット/グループの非表示など）を**場面つきで**警告する。これを見逃すと書き出しが停止する（黙って静止画化しない）。
   // 問題がある場面が無ければ項目自体を出さない（通常プロジェクトのノイズを避ける・freeLayout チェックと同方針）。
