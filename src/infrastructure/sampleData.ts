@@ -334,6 +334,42 @@ export const sampleTemplates: Template[] = [
       { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0, fillColor: "#ffffff" },
     ],
   },
+  // ===== 見た目パターンの選択肢拡充（0.4.0 動確・利用者決定＝カテゴリごとに2つ目の見た目を用意）。=====
+  // 各カテゴリ×向きに「配置違いの2つ目」を追加＝場面編集の見た目ピッカーが1択でなく選び直せるようにする（#415 のフィルタは維持）。
+  {
+    schemaVersion: "1.0",
+    templateId: "opening_yuko_left_v1",
+    name: "オープニング・ゆうこ左",
+    category: "opening",
+    aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 },
+    aiHint: { maxDurationSec: 12, maxNarrationLength: 120, maxSubtitleLength: 60 },
+    defaults: { durationSec: 8, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "logo", type: "logo", required: false, x: 1640, y: 60, w: 220, h: 120, zIndex: 60 },
+      { id: "title", type: "text", textKey: "title", required: true, x: 620, y: 400, w: 1140, h: 220, zIndex: 30, fontSize: 76, fontWeight: "bold" },
+      { id: "yuko", type: "character", required: false, x: 120, y: 560, w: 420, h: 500, zIndex: 40 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 240, y: 920, w: 1440, h: 90, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  {
+    schemaVersion: "1.0",
+    templateId: "opening_yuko_top_portrait_v1",
+    name: "オープニング・縦（ゆうこ上）",
+    category: "opening",
+    aspectRatio: "9:16",
+    canvas: { width: 1080, height: 1920 },
+    aiHint: { maxDurationSec: 12, maxNarrationLength: 120, maxSubtitleLength: 60 },
+    defaults: { durationSec: 8, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0 },
+      { id: "logo", type: "logo", required: false, x: 80, y: 130, w: 300, h: 130, zIndex: 60 },
+      { id: "yuko", type: "character", required: false, x: 300, y: 320, w: 480, h: 700, zIndex: 40 },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 1120, w: 900, h: 300, zIndex: 30, fontSize: 76, fontWeight: "bold" },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1580, w: 900, h: 120, zIndex: 50, fontSize: 40, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
 ];
 
 export const sampleAssets: Asset[] = [
