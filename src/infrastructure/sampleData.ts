@@ -370,6 +370,217 @@ export const sampleTemplates: Template[] = [
       { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1580, w: 900, h: 120, zIndex: 50, fontSize: 40, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
     ],
   },
+  // --- photo_intro（写真右・説明左・ゆうこ左 ／ 縦は説明上・写真下）---
+  {
+    schemaVersion: "1.0", templateId: "photo_right_text_left_yuko_v1", name: "写真右・説明左・ゆうこ", category: "photo_intro",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    aiHint: { maxDurationSec: 15, maxNarrationLength: 120, maxSubtitleLength: 60 },
+    defaults: { durationSec: 10, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#f5f5f5" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0, fillColor: "#f5f5f5" },
+      { id: "mainVisual", type: "slot", slotType: "image_or_video", required: true, x: 800, y: 140, w: 1040, h: 800, zIndex: 10, fit: "cover" },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 220, w: 620, h: 110, zIndex: 30, fontSize: 52, fontWeight: "bold" },
+      { id: "yuko", type: "character", required: false, x: 90, y: 560, w: 380, h: 460, zIndex: 40 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 240, y: 960, w: 1440, h: 90, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  {
+    schemaVersion: "1.0", templateId: "photo_text_top_portrait_v1", name: "写真・縦（説明上）", category: "photo_intro",
+    aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
+    aiHint: { maxDurationSec: 15, maxNarrationLength: 120, maxSubtitleLength: 60 },
+    defaults: { durationSec: 10, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#f5f5f5" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0, fillColor: "#f5f5f5" },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 160, w: 680, h: 100, zIndex: 30, fontSize: 54, fontWeight: "bold" },
+      { id: "main", type: "text", textKey: "main", x: 90, y: 280, w: 680, h: 240, zIndex: 30, fontSize: 34, color: "#333333", maxLines: 4 },
+      { id: "yuko", type: "character", required: false, x: 790, y: 200, w: 240, h: 360, zIndex: 40 },
+      { id: "mainVisual", type: "slot", slotType: "image_or_video", required: true, x: 60, y: 600, w: 960, h: 900, zIndex: 10, fit: "cover" },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1580, w: 900, h: 110, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  // --- closing（ゆうこ左 ／ 縦はゆうこ上）---
+  {
+    schemaVersion: "1.0", templateId: "closing_yuko_left_v1", name: "クロージング・ゆうこ左", category: "closing",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    aiHint: { maxDurationSec: 10, maxNarrationLength: 100, maxSubtitleLength: 60 },
+    defaults: { durationSec: 8, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "logo", type: "logo", required: false, x: 1640, y: 70, w: 200, h: 110, zIndex: 60 },
+      { id: "title", type: "text", textKey: "title", required: true, x: 560, y: 420, w: 1200, h: 200, zIndex: 30, fontSize: 72, fontWeight: "bold" },
+      { id: "yuko", type: "character", required: false, x: 120, y: 580, w: 380, h: 460, zIndex: 40 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 240, y: 920, w: 1440, h: 90, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  {
+    schemaVersion: "1.0", templateId: "closing_yuko_top_portrait_v1", name: "クロージング・縦（ゆうこ上）", category: "closing",
+    aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
+    aiHint: { maxDurationSec: 10, maxNarrationLength: 100, maxSubtitleLength: 60 },
+    defaults: { durationSec: 8, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0 },
+      { id: "logo", type: "logo", required: false, x: 390, y: 170, w: 300, h: 130, zIndex: 60 },
+      { id: "yuko", type: "character", required: false, x: 300, y: 360, w: 480, h: 680, zIndex: 40 },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 1120, w: 900, h: 280, zIndex: 30, fontSize: 72, fontWeight: "bold" },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1600, w: 900, h: 110, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  // --- video_intro（動画右・ゆうこ左 ／ 縦は説明上・動画下）---
+  {
+    schemaVersion: "1.0", templateId: "video_intro_left_yuko_v1", name: "動画右・ゆうこ左", category: "video_intro",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    aiHint: { maxDurationSec: 20, maxNarrationLength: 120, maxSubtitleLength: 60 },
+    defaults: { durationSec: 12, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#f0f0f0" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0, fillColor: "#f0f0f0" },
+      { id: "mainVisual", type: "slot", slotType: "video", required: true, x: 640, y: 130, w: 1180, h: 820, zIndex: 10, fit: "cover" },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 230, w: 500, h: 110, zIndex: 30, fontSize: 50, fontWeight: "bold" },
+      { id: "yuko", type: "character", required: false, x: 90, y: 560, w: 380, h: 460, zIndex: 40 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 240, y: 970, w: 1440, h: 90, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  {
+    schemaVersion: "1.0", templateId: "video_intro_text_top_portrait_v1", name: "動画紹介・縦（説明上）", category: "video_intro",
+    aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
+    aiHint: { maxDurationSec: 20, maxNarrationLength: 120, maxSubtitleLength: 60 },
+    defaults: { durationSec: 12, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#f0f0f0" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0, fillColor: "#f0f0f0" },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 170, w: 680, h: 100, zIndex: 30, fontSize: 52, fontWeight: "bold" },
+      { id: "yuko", type: "character", required: false, x: 790, y: 180, w: 240, h: 360, zIndex: 40 },
+      { id: "mainVisual", type: "slot", slotType: "video", required: true, x: 60, y: 600, w: 960, h: 920, zIndex: 10, fit: "cover" },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1600, w: 900, h: 110, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  // --- point_list（ゆうこ左 ／ 縦はゆうこ上）---
+  {
+    schemaVersion: "1.0", templateId: "point_list_left_yuko_v1", name: "ポイント紹介・ゆうこ左", category: "point_list",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    aiHint: { maxDurationSec: 18, maxNarrationLength: 140, maxSubtitleLength: 60 },
+    defaults: { durationSec: 12, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "title", type: "text", textKey: "title", required: true, x: 160, y: 120, w: 1400, h: 120, zIndex: 30, fontSize: 56, fontWeight: "bold" },
+      { id: "main", type: "text", textKey: "main", x: 640, y: 300, w: 1120, h: 600, zIndex: 30, fontSize: 40, color: "#333333", maxLines: 10 },
+      { id: "yuko", type: "character", required: false, x: 110, y: 480, w: 360, h: 470, zIndex: 40 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 240, y: 960, w: 1440, h: 90, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  {
+    schemaVersion: "1.0", templateId: "point_list_yuko_top_portrait_v1", name: "ポイント紹介・縦（ゆうこ上）", category: "point_list",
+    aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
+    aiHint: { maxDurationSec: 18, maxNarrationLength: 140, maxSubtitleLength: 60 },
+    defaults: { durationSec: 12, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0 },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 180, w: 680, h: 120, zIndex: 30, fontSize: 56, fontWeight: "bold" },
+      { id: "yuko", type: "character", required: false, x: 780, y: 160, w: 250, h: 380, zIndex: 40 },
+      { id: "main", type: "text", textKey: "main", x: 90, y: 580, w: 900, h: 980, zIndex: 30, fontSize: 40, color: "#333333", maxLines: 13 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1620, w: 900, h: 110, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  // --- message（ゆうこ左 ／ 縦はゆうこ下小）---
+  {
+    schemaVersion: "1.0", templateId: "message_yuko_left_v1", name: "メッセージ・ゆうこ左", category: "message",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    aiHint: { maxDurationSec: 15, maxNarrationLength: 140, maxSubtitleLength: 60 },
+    defaults: { durationSec: 10, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "title", type: "text", textKey: "title", x: 520, y: 150, w: 1240, h: 100, zIndex: 30, fontSize: 44, fontWeight: "bold" },
+      { id: "main", type: "text", textKey: "main", required: true, x: 560, y: 330, w: 1200, h: 470, zIndex: 30, fontSize: 52, maxLines: 6 },
+      { id: "yuko", type: "character", required: false, x: 110, y: 460, w: 380, h: 500, zIndex: 40 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 240, y: 950, w: 1440, h: 90, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  {
+    schemaVersion: "1.0", templateId: "message_yuko_bottom_portrait_v1", name: "メッセージ・縦（ゆうこ下）", category: "message",
+    aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
+    aiHint: { maxDurationSec: 15, maxNarrationLength: 140, maxSubtitleLength: 60 },
+    defaults: { durationSec: 10, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0 },
+      { id: "title", type: "text", textKey: "title", x: 90, y: 200, w: 900, h: 100, zIndex: 30, fontSize: 44, fontWeight: "bold" },
+      { id: "main", type: "text", textKey: "main", required: true, x: 90, y: 380, w: 900, h: 760, zIndex: 30, fontSize: 52, maxLines: 10 },
+      { id: "yuko", type: "character", required: false, x: 760, y: 1180, w: 260, h: 380, zIndex: 40 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1620, w: 900, h: 110, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  // --- full_visual（ゆうこ左）---
+  {
+    schemaVersion: "1.0", templateId: "full_visual_yuko_left_v1", name: "全画面・ゆうこ左", category: "full_visual",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    aiHint: { maxDurationSec: 15, maxNarrationLength: 100, maxSubtitleLength: 60 },
+    defaults: { durationSec: 8, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#000000" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "mainVisual", type: "slot", slotType: "image_or_video", required: true, x: 0, y: 0, w: 1920, h: 1080, zIndex: 10, fit: "cover" },
+      { id: "yuko", type: "character", required: false, x: 40, y: 600, w: 320, h: 460, zIndex: 40 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 240, y: 920, w: 1440, h: 100, zIndex: 50, fontSize: 42, background: { enabled: true, color: "#000000", opacity: 0.6, radius: 16 } },
+    ],
+  },
+  {
+    schemaVersion: "1.0", templateId: "full_visual_yuko_left_portrait_v1", name: "全画面・縦（ゆうこ左）", category: "full_visual",
+    aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
+    aiHint: { maxDurationSec: 15, maxNarrationLength: 100, maxSubtitleLength: 60 },
+    defaults: { durationSec: 8, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#000000" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0 },
+      { id: "mainVisual", type: "slot", slotType: "image_or_video", required: true, x: 0, y: 0, w: 1080, h: 1920, zIndex: 10, fit: "cover" },
+      { id: "yuko", type: "character", required: false, x: 50, y: 1240, w: 240, h: 400, zIndex: 40 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1560, w: 900, h: 120, zIndex: 50, fontSize: 42, background: { enabled: true, color: "#000000", opacity: 0.6, radius: 16 } },
+    ],
+  },
+  // --- chapter（明るい背景・中央）---
+  {
+    schemaVersion: "1.0", templateId: "chapter_light_v1", name: "区切り・明るい", category: "chapter",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40 },
+    defaults: { durationSec: 5, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0, fillColor: "#ffffff" },
+      { id: "title", type: "text", textKey: "title", required: true, x: 160, y: 430, w: 1600, h: 200, zIndex: 30, fontSize: 90, fontWeight: "bold", color: "#1a1a1a" },
+      { id: "main", type: "text", textKey: "main", x: 160, y: 680, w: 1600, h: 110, zIndex: 30, fontSize: 42, color: "#555555", maxLines: 2 },
+    ],
+  },
+  {
+    schemaVersion: "1.0", templateId: "chapter_light_portrait_v1", name: "区切り・縦（明るい）", category: "chapter",
+    aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
+    aiHint: { maxDurationSec: 6, maxNarrationLength: 60, maxSubtitleLength: 40 },
+    defaults: { durationSec: 5, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0, fillColor: "#ffffff" },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 820, w: 900, h: 280, zIndex: 30, fontSize: 88, fontWeight: "bold", color: "#1a1a1a" },
+      { id: "main", type: "text", textKey: "main", x: 90, y: 1140, w: 900, h: 120, zIndex: 30, fontSize: 42, color: "#555555", maxLines: 2 },
+    ],
+  },
+  // --- no_yuko（写真右・説明左 ／ 縦は説明上・写真下）---
+  {
+    schemaVersion: "1.0", templateId: "no_yuko_photo_right_v1", name: "ゆうこなし・写真右", category: "no_yuko",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    aiHint: { maxDurationSec: 15, maxNarrationLength: 120, maxSubtitleLength: 60 },
+    defaults: { durationSec: 10, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "title", type: "text", textKey: "title", required: true, x: 160, y: 120, w: 1600, h: 120, zIndex: 30, fontSize: 56, fontWeight: "bold" },
+      { id: "mainVisual", type: "slot", slotType: "image_or_video", required: false, x: 720, y: 300, w: 1080, h: 620, zIndex: 10, fit: "cover" },
+      { id: "main", type: "text", textKey: "main", x: 120, y: 320, w: 540, h: 560, zIndex: 30, fontSize: 36, color: "#333333", maxLines: 8 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 240, y: 960, w: 1440, h: 90, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
+  {
+    schemaVersion: "1.0", templateId: "no_yuko_text_top_portrait_v1", name: "ゆうこなし・縦（説明上）", category: "no_yuko",
+    aspectRatio: "9:16", canvas: { width: 1080, height: 1920 },
+    aiHint: { maxDurationSec: 15, maxNarrationLength: 120, maxSubtitleLength: 60 },
+    defaults: { durationSec: 10, transitionIn: "fade", transitionOut: "fade", backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1080, h: 1920, zIndex: 0 },
+      { id: "title", type: "text", textKey: "title", required: true, x: 90, y: 200, w: 900, h: 120, zIndex: 30, fontSize: 56, fontWeight: "bold" },
+      { id: "main", type: "text", textKey: "main", x: 90, y: 360, w: 900, h: 280, zIndex: 30, fontSize: 36, color: "#333333", maxLines: 5 },
+      { id: "mainVisual", type: "slot", slotType: "image_or_video", required: false, x: 60, y: 700, w: 960, h: 800, zIndex: 10, fit: "cover" },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 90, y: 1600, w: 900, h: 110, zIndex: 50, fontSize: 38, background: { enabled: true, color: "#000000", opacity: 0.55, radius: 16 } },
+    ],
+  },
 ];
 
 export const sampleAssets: Asset[] = [
