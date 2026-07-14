@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Template } from './types';
-import { pickableTemplatesForScene } from './templateSelection';
+import { pickableTemplatesForScene, sceneCategoriesForOrientation } from './templateSelection';
 
 function tpl(over: Partial<Template> & Pick<Template, 'templateId' | 'category' | 'aspectRatio'>): Template {
   return {
@@ -76,5 +76,13 @@ describe('pickableTemplatesForScene：FREE 全場面化（0.4.2 動確）', () =
     const r = pickableTemplatesForScene(all, 'opening', '16:9', freePort);
     expect(r.mismatchedCurrent?.templateId).toBe('free_port'); // 向きが違えば FREE でも不一致
     expect(r.options.some((t) => t.templateId === 'free_port')).toBe(false);
+  });
+});
+
+describe('sceneCategoriesForOrientation（種類の選択肢・#528）', () => {
+  // 先頭 describe の all（openingLand/photoLand/openingPort/openingLand2）を使う＝16:9 は opening/photo_intro、9:16 は opening。
+  it('その向きで1つ以上見た目がある全カテゴリを SCENE_CATEGORIES 順で返す（別向きは除外）', () => {
+    expect(sceneCategoriesForOrientation(all, '16:9')).toEqual(['opening', 'photo_intro']);
+    expect(sceneCategoriesForOrientation(all, '9:16')).toEqual(['opening']); // openingPort のみ 9:16
   });
 });

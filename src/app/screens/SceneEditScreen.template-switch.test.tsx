@@ -16,6 +16,10 @@ const normalTemplate = {
   schemaVersion: "1.0", templateId: "photo_v1", name: "写真", category: "photo_intro", aspectRatio: "16:9",
   canvas: { width: 1920, height: 1080 }, layers: [{ id: "mainVisual", type: "slot", x: 0, y: 0, w: 1920, h: 1080 }],
 } as unknown as Template;
+const openTemplate = {
+  schemaVersion: "1.0", templateId: "open_v1", name: "オープニング", category: "opening", aspectRatio: "16:9",
+  canvas: { width: 1920, height: 1080 }, layers: [{ id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 1920, h: 200 }],
+} as unknown as Template;
 
 const freeScene = (partial: Partial<Scene> = {}): Scene =>
   ({
@@ -27,7 +31,7 @@ const freeScene = (partial: Partial<Scene> = {}): Scene =>
 
 function setup(scene: Scene) {
   useProjectStore.setState({
-    templates: [freeTemplate, normalTemplate],
+    templates: [freeTemplate, normalTemplate, openTemplate],
     parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
     scenes: [scene], assets: [], editingSceneId: "scene_001",
     past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
@@ -71,5 +75,25 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
     const s = useProjectStore.getState().scenes[0];
     expect(s.templateId).toBe("photo_v1"); // 即切替
     expect(s.assetRefs.mainVisual).toBe("asset_v"); // 通常配置が復元
+  });
+});
+
+describe("SceneEditScreen 種類（カテゴリ）変更（#528）", () => {
+  const photoScene = (): Scene =>
+    ({
+      sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "photo_intro",
+      templateId: "photo_v1", durationSec: 8, assetRefs: {},
+      character: { enabled: false, characterId: "yuko" }, texts: {},
+      narration: { text: "こんにちは", status: "none" }, warnings: [],
+    }) as unknown as Scene;
+
+  it("種類を変えると、その種類の先頭の見た目へ直接切り替わる（オープニング固定を解く）", () => {
+    setup(photoScene());
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("種類"), { target: { value: "opening" } });
+    const s = useProjectStore.getState().scenes[0];
+    expect(s.sceneType).toBe("opening"); // カテゴリ変更
+    expect(s.templateId).toBe("open_v1"); // その種類の先頭テンプレへ直接切替
+    expect(screen.queryByText(CONFIRM)).toBeNull(); // 通常→通常は確認なし
   });
 });

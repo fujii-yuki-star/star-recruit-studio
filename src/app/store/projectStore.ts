@@ -938,7 +938,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   addScene: () => {
     const s = get();
-    const tmpl = s.templates[0];
+    // 追加場面の見た目は末尾（直前）の場面から引き継ぐ＝連続作成が自然で、先頭テンプレ（オープニング）固定にならない（#528）。
+    // 場面が無ければ先頭テンプレ。末尾場面のテンプレがダングリング（削除済み等）でも先頭テンプレへ落ちる。
+    const lastScene = s.scenes[s.scenes.length - 1];
+    const tmpl = (lastScene && s.templates.find((t) => t.templateId === lastScene.templateId)) || s.templates[0];
     if (!tmpl) return ""; // テンプレ未読込（通常は起こらない）なら追加しない
     const sceneId = createSceneId(s.scenes.map((x) => x.sceneId));
     // 末尾パート（無ければ新規作成）に追加する。

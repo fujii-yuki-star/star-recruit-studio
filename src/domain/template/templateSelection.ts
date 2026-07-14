@@ -1,5 +1,5 @@
 // 見た目パターンの選択整合（ADR-0012・#415／FREE 全場面化・0.4.2 動確）。純粋関数（副作用なし・テスト容易）。
-import { FREE_CATEGORY } from '../enums';
+import { FREE_CATEGORY, SCENE_CATEGORIES } from '../enums';
 import type { Orientation, SceneCategory } from '../enums';
 import type { Template } from './types';
 
@@ -37,4 +37,13 @@ export function pickableTemplatesForScene(
   const mismatchedCurrent =
     current && !options.some((t) => t.templateId === current.templateId) ? current : undefined;
   return { options, mismatchedCurrent };
+}
+
+/**
+ * その向きで少なくとも1つ見た目パターンがある場面カテゴリ（＝「種類」の選択肢・#528）。`SCENE_CATEGORIES` の順で安定。
+ * 場面編集の「種類」セレクタに渡す＝FREE を含む全カテゴリへ**直接**切り替えられる（追加場面がオープニング固定になる罠を解く）。純粋関数。
+ */
+export function sceneCategoriesForOrientation(templates: Template[], orientation: Orientation): SceneCategory[] {
+  const present = new Set(templates.filter((t) => t.aspectRatio === orientation).map((t) => t.category));
+  return SCENE_CATEGORIES.filter((c) => present.has(c));
 }
