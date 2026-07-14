@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { loadBundledTemplates, parseTemplateFiles, parseTemplatePack, templatesForOrientation } from './templateFs';
 import { sampleTemplates } from './sampleData';
 import { buildTemplateSummaries } from '../domain/ai/videoPlanInput';
-import { FREE_CATEGORY, SCENE_CATEGORIES } from '../domain/enums';
+import { pickableTemplatesForScene } from '../domain/template/templateSelection';
+import { FREE_CATEGORY, ORIENTATIONS, SCENE_CATEGORIES } from '../domain/enums';
 
 // 検証用の最小・正当なテンプレ（schema 必須項目のみ）。category/aspectRatio を差し替えて異常系を作る。
 const validLandscape = {
@@ -91,6 +92,18 @@ describe('loadBundledTemplates', () => {
       const cats = new Set(buildTemplateSummaries(all, o).map((s) => s.category));
       expect(cats.has(FREE_CATEGORY)).toBe(false); // FREE は AI 候補に出さない（手動専用・ADR-0008）
       for (const c of nonFree) expect(cats.has(c)).toBe(true);
+    }
+  });
+
+  it('見た目ピッカーは FREE 以外の各カテゴリ・各向きで選択肢が2件以上（「常に1択」への逆戻り防止・#415）', () => {
+    // 場面編集の見た目ピッカーが呼ぶ正準関数（pickableTemplatesForScene）で、同梱データが「選び直せる＝2択以上」を満たすことを固定する。
+    // SCENE_CATEGORIES / ORIENTATIONS 由来で回すため、将来カテゴリ追加時も自動で同じ2択基準を課す（人工データでなく実 sampleTemplates を対象）。
+    const nonFree = SCENE_CATEGORIES.filter((c) => c !== FREE_CATEGORY);
+    for (const cat of nonFree) {
+      for (const o of ORIENTATIONS) {
+        const { options } = pickableTemplatesForScene(sampleTemplates, cat, o, undefined);
+        expect(options.length, `${cat} / ${o} の見た目が2択未満`).toBeGreaterThanOrEqual(2);
+      }
     }
   });
 });

@@ -14,8 +14,8 @@ import type { TemplateSummary } from './aiProvider';
  * ユーザーテンプレ（user_tmpl_）は AI へ渡さない＝AI の誤選択を防ぐ（ADR-0017 不変条件）。手動選択（簡易/詳細）には別途出す。
  * プロジェクトの向き（orientation）に一致するテンプレのみ渡す＝AI が向き不一致の見た目を選べない（ADR-0012・#415）。
  * 向きは正典としてプロジェクト側にあり AI 出力は向き非依存（12§8）。当該向きにテンプレが少ない場合は AI の選択肢も減る
- *（例: 横型は同梱在庫3カテゴリ〔opening/photo_intro/free〕だが、下記 FREE 除外で AI 候補は opening/photo_intro の2）
- * ＝テンプレ在庫の課題であり、ここでの絞り込み自体は正しい（在庫拡充は #456）。
+ *（現在の同梱在庫は FREE を除く全9カテゴリを各向き2種類ずつ収録＝AI 候補もその9カテゴリ。向き対称・カテゴリ網羅は #456、各カテゴリ2択は #415）
+ * ＝在庫が薄いときに候補が減るのは想定挙動で、ここでの絞り込み自体は正しい。
  * FREE（自由配置）は利用者の手動選択のみ＝AI は選ばない（ai-video-plan の sceneType enum に free は無い・11 §3.1／ADR-0008）。
  */
 export function buildTemplateSummaries(templates: Template[], orientation: Orientation): TemplateSummary[] {
