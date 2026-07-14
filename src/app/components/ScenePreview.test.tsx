@@ -5,6 +5,7 @@ import { ScenePreview } from "./ScenePreview";
 import type { VideoSlotPlayback } from "./ScenePreview";
 import type { ElementAnimation, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
+import { sceneSegmentSpecs, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
 
 // #386・A案＝掛け合いの先頭「間」は字幕なし。プレビュー（ScenePreview）が activeLineIndex<0（間）で
 // 行の字幕を描かず、有効行（0以上）では描くことをコンポーネントで検証する（ADR-0014・jsdom）。
@@ -202,5 +203,35 @@ describe("ScenePreview 再生開始タイミング（#444・delay は d 秒待�
     } finally {
       play.mockRestore();
     }
+  });
+});
+
+// ADR-0029 P1-2：FREE 字幕の対象解決は呼び出し側が渡す正準セグメント（sceneSegmentSpecs/segmentAt 由来）で行う。
+// 全ゼロ長行では sceneSegmentSpecs が「場面全体1区間・lineId なし」を返し、allLines は非表示＝書き出しと一致。
+// activeLineIndex から lineId を再構成しないことをコンポーネントで固定する（jsdom）。
+describe("ScenePreview FREE 字幕の正準セグメント（ADR-0029・全ゼロ長行のプレビュー=書き出し・P1-2）", () => {
+  const freeTemplate = {
+    schemaVersion: "1.0", templateId: "free_v1", name: "FREE", category: "free",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 }, layers: [],
+  } as unknown as Template;
+  // 全行 startSec===durationSec(=10)＝全ゼロ長 → sceneSegmentSpecs は「場面全体1区間・lineId なし」。
+  const zeroLenScene = {
+    sceneId: "s1", templateId: "free_v1", sceneType: "free", durationSec: 10,
+    texts: { subtitle: "読み上げ" },
+    lines: [{ lineId: "line_001", text: "行の字幕テスト", startSec: 10, status: "none" }],
+    freeLayout: [{ id: "free_sub", kind: "subtitle", x: 240, y: 900, w: 1440, h: 120, subtitleSource: { kind: "allLines" } }],
+  } as unknown as Scene;
+
+  it("全ゼロ長行＝allLines は非表示（activeLineIndex=0 でも行を再構成せず・書き出しと一致）", () => {
+    const seg = sceneSegmentSpecs(zeroLenScene, {})[0]; // 場面全体1区間・lineId なし（=書き出しのフォールバック）
+    const { container } = render(<ScenePreview scene={zeroLenScene} template={freeTemplate} activeLineIndex={0} subtitleSegment={seg} />);
+    expect(container.textContent).not.toContain("行の字幕テスト");
+  });
+
+  it("有効な行セグメントを渡せば allLines は行字幕を描く（正準セグメント経由）", () => {
+    const lineScene = { ...zeroLenScene, lines: [{ lineId: "line_001", text: "行の字幕テスト", status: "none" }] } as unknown as Scene;
+    const seg: SceneSegmentSpec = { lineId: "line_001", subtitleText: "行の字幕テスト", startSec: 0, durationSec: 10, isFirst: true };
+    const { container } = render(<ScenePreview scene={lineScene} template={freeTemplate} activeLineIndex={0} subtitleSegment={seg} />);
+    expect(container.textContent).toContain("行の字幕テスト");
   });
 });

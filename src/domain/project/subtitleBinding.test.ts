@@ -77,6 +77,11 @@ describe('resolveSubtitleForElement（対象解決・ADR-0029）', () => {
       const s = sceneWith({ texts: { subtitle: 'S' } });
       expect(resolveSubtitleForElement(subEl(), s, { segment: seg({}) })).toBe('S');
     });
+    it('narration も間（isGap）では非表示＝対象を問わず間は出さない（P1-1）', () => {
+      // 掛け合いの頭空白（先頭行 startSec>0）で narration を選んでも texts.subtitle を出さない。
+      const s = sceneWith({ texts: { subtitle: 'S' }, lines: [line('line_001', 'A', { startSec: 2 })] });
+      expect(resolveSubtitleForElement(subEl({ kind: 'narration' }), s, { segment: seg({ isGap: true, subtitleText: null }) })).toBeNull();
+    });
   });
 
   describe('allLines（全行）', () => {

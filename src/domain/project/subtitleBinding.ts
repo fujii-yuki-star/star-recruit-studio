@@ -46,6 +46,8 @@ export function defaultSubtitleSource(scene: Scene): SubtitleSource {
  */
 export function resolveSubtitleForElement(el: FreeElement, scene: Scene, moment: SubtitleMoment): string | null {
   if (el.kind !== FREE_ELEMENT_KIND.subtitle) return null;
+  // 間（無言の頭空白＝isGap）はどの対象でも常に非表示（ADR-0029・narration も含む・P1-1）。ソース分岐より先に判定する。
+  if (moment.segment.isGap === true) return null;
   const source = el.subtitleSource ?? defaultSubtitleSource(scene);
   if (source.kind === SUBTITLE_SOURCE_KIND.narration) {
     if (scene.subtitleEnabledDefault === false) return null;
@@ -53,7 +55,6 @@ export function resolveSubtitleForElement(el: FreeElement, scene: Scene, moment:
     return text.length > 0 ? text : null;
   }
   const seg = moment.segment;
-  if (seg.isGap === true) return null;
   const text = seg.subtitleText ?? null;
   if (text == null || text.length === 0) return null;
   if (source.kind === SUBTITLE_SOURCE_KIND.allLines) return text;
