@@ -722,7 +722,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             ) : (
               <p className="field-hint" style={{ marginTop: 0 }}>この場面は読み上げ（1人）です。下の「字幕の文」が字幕になります。</p>
             )}
-            {hasLines && sameTargetCount > 1 && (
+            {sameTargetCount > 1 && (
               <p className="field-hint" style={{ marginTop: 4 }}>同じ対象の字幕が他にもあります。同じ文が2か所に出ます。</p>
             )}
           </div>

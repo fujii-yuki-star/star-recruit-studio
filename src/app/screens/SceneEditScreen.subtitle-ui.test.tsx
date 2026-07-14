@@ -48,3 +48,25 @@ describe("SceneEditScreen FREE 字幕の追加（ADR-0029・PR-C）", () => {
     expect(subtitles()).toHaveLength(2); // 単一制約なし＝複数配置できる
   });
 });
+
+describe("SceneEditScreen 字幕の同一対象の注意（ADR-0029・PR-C P2）", () => {
+  const twoSubs = (): Scene =>
+    freeScene({
+      freeLayout: [
+        { id: "free_001", kind: "subtitle", x: 0, y: 0, w: 100, h: 50 },
+        { id: "free_002", kind: "subtitle", x: 0, y: 60, w: 100, h: 50 },
+      ],
+    } as Partial<Scene>);
+
+  it("単独読み上げで同じ対象の字幕を2つ置くと注意が出る（hasLines に依らない・P2）", () => {
+    setup(twoSubs()); // lines なし＝単独。両字幕とも既定＝読み上げ（同一対象）。
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByText(/同じ対象の字幕が他にもあります/).length).toBeGreaterThan(0);
+  });
+
+  it("字幕が1つなら注意は出ない", () => {
+    setup(freeScene({ freeLayout: [{ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 100, h: 50 }] } as Partial<Scene>));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/同じ対象の字幕が他にもあります/)).toBeNull();
+  });
+});

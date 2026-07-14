@@ -103,3 +103,34 @@ export function subtitleSourceFromValue(value: string): SubtitleSource {
   if (m) return { kind: SUBTITLE_SOURCE_KIND.speaker, speaker: { kind: SPEAKER_KEY_KIND.catalog, speaker: Number(m[1]) } };
   return { kind: SUBTITLE_SOURCE_KIND.narration };
 }
+
+/**
+ * 場面のセリフ構成が変わったとき、無効になった字幕対象（subtitleSource）を未設定（＝既定）へ戻す（ADR-0026④・黙って消さない）。
+ * - 単独ナレーション（lines なし）では allLines/speaker は描画されない → 未設定（＝narration＝texts.subtitle）へ。
+ * - 掛け合いで、選択済み話者が場面からいなくなった speaker も未設定（＝allLines）へ。
+ * narration・有効な対象・対象を持たない字幕は不変。無効な対象が無ければ同一参照を返す（未保存/履歴にしない）。
+ * 掛け合い解除・行の話者変更/削除の各 lineEditOps から呼ぶ（「設定できるのに後で効かなくなる」経路を塞ぐ）。
+ */
+export function normalizeSubtitleSources(scene: Scene): Scene {
+  const layout = scene.freeLayout;
+  if (!layout || !layout.some((e) => e.kind === FREE_ELEMENT_KIND.subtitle && e.subtitleSource != null)) return scene;
+  const hasLines = (scene.lines?.length ?? 0) > 0;
+  const sceneKeys = hasLines ? sceneLines(scene).map(effectiveSpeakerKey) : [];
+  let changed = false;
+  const next = layout.map((el) => {
+    if (el.kind !== FREE_ELEMENT_KIND.subtitle || el.subtitleSource == null) return el;
+    const src = el.subtitleSource;
+    const valid =
+      src.kind === SUBTITLE_SOURCE_KIND.narration
+        ? true
+        : src.kind === SUBTITLE_SOURCE_KIND.allLines
+          ? hasLines
+          : hasLines && sceneKeys.some((k) => speakerKeyEquals(k, src.speaker)); // speaker：実在する実効話者のみ有効
+    if (valid) return el;
+    changed = true;
+    const rest = { ...el };
+    delete rest.subtitleSource; // 無効＝未設定（既定＝単独→読み上げ・掛け合い→全行）へ戻す
+    return rest;
+  });
+  return changed ? { ...scene, freeLayout: next } : scene;
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
 import type { SceneSegmentSpec } from './lineTimeline';
 import { segmentAt } from './lineTimeline';
-import { defaultSubtitleSource, effectiveSpeakerKey, resolveSubtitleForElement, sceneSubtitleSpeakerOptions, speakerKeyEquals, subtitleSourceFromValue, subtitleSourceToValue } from './subtitleBinding';
+import { defaultSubtitleSource, effectiveSpeakerKey, normalizeSubtitleSources, resolveSubtitleForElement, sceneSubtitleSpeakerOptions, speakerKeyEquals, subtitleSourceFromValue, subtitleSourceToValue } from './subtitleBinding';
 import type { FreeElement, NarrationLine, Scene, SubtitleSource } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -169,5 +169,39 @@ describe('subtitleSourceToValue / subtitleSourceFromValue（UI シリアライ�
   });
   it('未知値は narration へフォールバック（黙って壊さない）', () => {
     expect(subtitleSourceFromValue('bogus')).toEqual({ kind: 'narration' });
+  });
+});
+
+describe('normalizeSubtitleSources（無効な対象を既定へ戻す・ADR-0026④・P1）', () => {
+  const withSub = (subtitleSource: SubtitleSource | undefined, extra: Partial<Scene> = {}): Scene =>
+    sceneWith({ freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, ...(subtitleSource ? { subtitleSource } : {}) }], ...extra });
+  const subSource = (s: Scene): SubtitleSource | undefined => s.freeLayout?.[0]?.subtitleSource;
+
+  it('単独（lines なし）では allLines/speaker を未設定へ戻す（→ 読み上げ＝黙って消さない）', () => {
+    expect(subSource(normalizeSubtitleSources(withSub({ kind: 'allLines' })))).toBeUndefined();
+    expect(subSource(normalizeSubtitleSources(withSub({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } })))).toBeUndefined();
+  });
+
+  it('単独でも narration は不変（有効）', () => {
+    const s = withSub({ kind: 'narration' });
+    expect(normalizeSubtitleSources(s)).toBe(s); // 同一参照＝変化なし
+  });
+
+  it('掛け合いで対象話者が場面にいれば不変・いなければ未設定へ戻す', () => {
+    const lines = [line('line_001', 'A', { speaker: 3 })];
+    // speaker 3 は在席＝有効
+    const ok = withSub({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } }, { lines });
+    expect(normalizeSubtitleSources(ok)).toBe(ok);
+    // speaker 2 は不在＝未設定へ
+    const gone = withSub({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 2 } }, { lines });
+    expect(subSource(normalizeSubtitleSources(gone))).toBeUndefined();
+    // allLines は掛け合いでは有効
+    const all = withSub({ kind: 'allLines' }, { lines });
+    expect(normalizeSubtitleSources(all)).toBe(all);
+  });
+
+  it('対象を持つ字幕が無ければ同一参照（未保存/履歴にしない）', () => {
+    const s = withSub(undefined);
+    expect(normalizeSubtitleSources(s)).toBe(s);
   });
 });

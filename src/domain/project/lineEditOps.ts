@@ -4,6 +4,7 @@
 import { NARRATION_STATUS } from '../enums';
 import { lineFromNarration } from './narrationLines';
 import { createLineId } from './persistence';
+import { normalizeSubtitleSources } from './subtitleBinding';
 import type { NarrationLine, Scene } from './types';
 
 /** 単一 narration を lines:[line_001] へ昇格（掛け合い化）。既に lines があればそのまま。 */
@@ -16,7 +17,8 @@ export function promoteToLines(scene: Scene): Scene {
 export function demoteFromLines(scene: Scene): Scene {
   if (!scene.lines || scene.lines.length === 0) return scene;
   const first = scene.lines[0];
-  return {
+  // 単独へ戻すと allLines/speaker の字幕対象は描画されなくなるため未設定（＝読み上げ）へ正規化する（ADR-0026④・黙って消さない）。
+  return normalizeSubtitleSources({
     ...scene,
     narration: {
       ...scene.narration,
@@ -28,7 +30,7 @@ export function demoteFromLines(scene: Scene): Scene {
       intonation: first.intonation ?? null,
     },
     lines: undefined,
-  };
+  });
 }
 
 /** 末尾に新しい空セリフ行を追加（lines が無ければ先に昇格する）。 */
@@ -44,7 +46,8 @@ export function removeLine(scene: Scene, lineId: string): Scene {
   if (!scene.lines) return scene;
   const remaining = scene.lines.filter((l) => l.lineId !== lineId);
   if (remaining.length === 0) return demoteFromLines(scene);
-  return { ...scene, lines: remaining };
+  // 消した行が「その話者の最後の行」なら、その話者を対象にした字幕は無効になるため正規化する（ADR-0026④）。
+  return normalizeSubtitleSources({ ...scene, lines: remaining });
 }
 
 /** 声に影響する編集（text/speaker/speed/pitch/intonation）か。これらの変更は音声の作り直しが必要。 */
@@ -65,7 +68,8 @@ export function updateLine(
   patch: Partial<Omit<NarrationLine, 'lineId'>>,
 ): Scene {
   if (!scene.lines) return scene;
-  return {
+  // 話者変更で「対象にしていた話者が場面からいなくなる」と字幕が無効になるため正規化する（ADR-0026④）。
+  return normalizeSubtitleSources({
     ...scene,
     lines: scene.lines.map((l) => {
       if (l.lineId !== lineId) return l;
@@ -76,7 +80,7 @@ export function updateLine(
       }
       return next;
     }),
-  };
+  });
 }
 
 /** 指定行を delta 分だけ並べ替え（-1=前へ / +1=後ろへ）。範囲外は変化なし。 */
