@@ -35,7 +35,7 @@
 | [0026](0026-alpha4-behavior-consistency.md) | α-4 挙動一致の原則（設定どおり・経路間統一・プレビュー=書き出し。間×遷移=切替尺優先／複数動画スロット／動画実再生／collapse撤去／分割失敗の表面化／動画×アニメ解除） | **Accepted**（0006 の2枚固定を一部改め・0019 の動画スロット除外を解除方向） |
 | [0027](0027-video-slot-start-timing.md) | 動画スロット本体アニメの再生開始タイミング（同時／途中／アニメ後・`scene.slotVideoStart` モード明示・schema 1.18・#442 後続） | **Accepted**（実装は段階） |
 | [0028](0028-per-use-clip-and-undo.md) | 動画クリップ調整を per-use 上書き（`scene.slotClips`）にして Undo 可能に（ADR-0024 決定1 の確定・#472） | **Accepted** |
-| [0029](0029-free-subtitle-multi-and-binding.md) | FREE 字幕要素＝複数配置＋対象（読み上げ／話者）への紐づけ（#518 再スコープ・単一制約は固めない・0.4.2） | **Accepted**（PR-A 済・(2b) は α-5） |
+| [0029](0029-free-subtitle-multi-and-binding.md) | FREE 字幕要素＝複数配置＋対象（読み上げ／話者）への紐づけ（#518 再スコープ・単一制約は固めない・0.4.2） | **Accepted**（PR-A+B 済＝#521・PR-C は UI・(2b) は α-5） |
 
 ## 状態の意味
 

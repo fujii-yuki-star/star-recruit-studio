@@ -150,7 +150,7 @@ function resolveSubtitleForElement(el: FreeElementSubtitle, scene: Scene, moment
 
 - **後方互換**：旧 project.json は無変換で動作（additive マイナー・§1 互換方針）。
 - **正典同期**：`11 §7`（FreeElement に `subtitleSource`・意味）／`schemas/project.schema.json`（additive・版バンプ）／[`adr/0008`](0008-free-layout-editor.md)（「字幕は場面1つ」→「複数可・対象紐づけ」へ追補・#518 の 1.20 追補を本 ADR に統合）／[`adr/0015`](0015-dialogue-timeline-model.md)（「場面の単一字幕ストリーム」→「複数ボックス・話者別」へ拡張）を実装 PR で同期。
-- **§10/§11**：§10（MVP 非対象）には抵触しない（FREE 拡張・本格タイムラインではない）。§11 に本 ADR を **Proposed** として追記。
+- **§10/§11**：§10（MVP 非対象）には抵触しない（FREE 拡張・本格タイムラインではない）。§11 に本 ADR を **Accepted** として記載（#520 で Proposed 起票 → #521 スコープ確定で Accepted）。
 - **UI 文言（§2-3/§2-5）**：「字幕の対象」「話者」「全部」等の利用者語。`speaker` 番号・要素 id・`subtitleSource` は非表示。同一対象重複は「次の行動」を示す注意に留める。
 - **テスト（§7）**：`resolveSubtitleForElement`（対象解決・実効話者絞り込み・**`sceneSegmentSpecs` と一致する有効行**・継承）＋`effectiveSpeakerKey`（`resolveLineVoice` と一致）を純粋関数でフルテスト。`layout` は複数字幕の golden（プレビュー＝書き出し）。参照切れの解除/修復。schema 許可/拒否。UI はコンポーネントテスト。
 - **#518 の扱い**：単一制約を固める方向では**マージしない**。ブランチ `feat/free-subtitle-element` の scaffolding（enum・layout case・UI フォーム・`texts.subtitle` 編集）は本機能の土台として流用し、PR は draft 化・再スコープ。

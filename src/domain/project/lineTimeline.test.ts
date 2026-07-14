@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { activeLineIndexAt, firstFrameBoundary, lastFrameBoundary, lineSegments, resolveLineSubtitle, sceneSegmentSpecs, segmentAt } from './lineTimeline';
+import { activeLineIndexAt, firstFrameBoundary, lastFrameBoundary, lineSegments, previewSubtitleSegment, resolveLineSubtitle, sceneSegmentSpecs, segmentAt } from './lineTimeline';
 import type { NarrationLine, Scene } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -234,5 +234,37 @@ describe('segmentAt（ADR-0029・字幕解決の正準入力＝sceneSegmentSpecs
     expect(segmentAt(s, {}, 1)).toMatchObject({ isGap: true }); // [0,2) は間
     expect(segmentAt(s, {}, 1).lineId).toBeUndefined();
     expect(segmentAt(s, {}, 2).lineId).toBe('line_001'); // [2,10] は行
+  });
+});
+
+describe('previewSubtitleSegment（ADR-0029・停止/再生の正準セグメント・P1 停止時パリティ）', () => {
+  const gapScene = (): Scene => sceneWith({ lines: [
+    { lineId: 'line_001', text: 'A', startSec: 2, status: NARRATION_STATUS.none }, // 頭空白 [0,2)
+    { lineId: 'line_002', text: 'B', startSec: 5, status: NARRATION_STATUS.none },
+  ] });
+
+  it('停止中（初期）は先頭セグメント＝頭空白があれば間（isGap）＝t=0 の書き出しと一致', () => {
+    const seg = previewSubtitleSegment(gapScene(), {}, 0, false); // activeLine=0 でも停止なら先頭（間）
+    expect(seg.isGap).toBe(true);
+    expect(seg.lineId).toBeUndefined();
+  });
+
+  it('再生中・有効行は行セグメント（lineId）', () => {
+    expect(previewSubtitleSegment(gapScene(), {}, 0, true).lineId).toBe('line_001');
+  });
+
+  it('再生中・間（activeLine<0）は isGap セグメント', () => {
+    expect(previewSubtitleSegment(gapScene(), {}, -1, true).isGap).toBe(true);
+  });
+
+  it('全ゼロ長行は停止・再生とも場面全体1区間（lineId なし）＝書き出しフォールバックと一致', () => {
+    const zero = sceneWith({ lines: [{ lineId: 'line_001', text: 'A', startSec: 10, status: NARRATION_STATUS.none }] });
+    expect(previewSubtitleSegment(zero, {}, 0, false).lineId).toBeUndefined();
+    expect(previewSubtitleSegment(zero, {}, 0, true).lineId).toBeUndefined();
+  });
+
+  it('頭空白なしは停止時に先頭行セグメント', () => {
+    const s = sceneWith({ lines: [{ lineId: 'line_001', text: 'A', status: NARRATION_STATUS.none }] });
+    expect(previewSubtitleSegment(s, {}, 0, false).lineId).toBe('line_001');
   });
 });

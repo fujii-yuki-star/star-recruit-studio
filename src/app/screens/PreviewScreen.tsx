@@ -12,7 +12,7 @@ import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
 import { lineAudioKey, lineDurationsFromAudio } from "../../domain/project/narrationLines";
-import { lineSegments, sceneSegmentSpecs } from "../../domain/project/lineTimeline";
+import { lineSegments, previewSubtitleSegment } from "../../domain/project/lineTimeline";
 import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
 import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
@@ -98,18 +98,13 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
   const current = scenes[safeIdx];
   // FREE 字幕（ADR-0029）の対象解決に渡す「その瞬間の正準セグメント」＝書き出しと同じ sceneSegmentSpecs 由来（P1-2）。
-  // activeLine（有効行）/間から対応セグメントを引く。全ゼロ長行は sceneSegmentSpecs が「場面全体1区間・lineId なし」を返し、
-  // allLines は非表示＝書き出しと一致（activeLine から lineId を再構成しない）。narrationAudioById は #382 に従い getState
-  // スナップショット読み（購読しない）＝activeLine/場面が変わるたび再計算で追従する。
-  const previewSubtitleSegment = useMemo(() => {
+  // 停止中(初期)は t=0 の先頭セグメント（頭空白があれば間）、再生中は有効行/間に対応（previewSubtitleSegment に集約）。
+  // narrationAudioById は #382 に従い getState スナップショット読み（購読しない）＝activeLine/再生状態/場面が変わるたび再計算で追従。
+  const currentSubtitleSegment = useMemo(() => {
     if (!current) return undefined;
     const durations = lineDurationsFromAudio(current, useProjectStore.getState().narrationAudioById);
-    const specs = sceneSegmentSpecs(current, durations);
-    const hasLines = (current.lines?.length ?? 0) > 0;
-    if (hasLines && activeLine < 0) return specs.find((s) => s.isGap) ?? specs[0]; // 間（頭空白）
-    const lineId = activeLine >= 0 ? current.lines?.[activeLine]?.lineId : undefined;
-    return specs.find((s) => s.lineId === lineId) ?? specs[0];
-  }, [current, activeLine]);
+    return previewSubtitleSegment(current, durations, activeLine, playing);
+  }, [current, activeLine, playing]);
   // 現在の場面が変わったら、場面ジャンプの番号ストリップで今の場面を可視域へ寄せる（再生の進行にも追従・#413）。
   useEffect(() => {
     // scrollIntoView は一部環境（jsdom）に無いため任意呼び出し。
@@ -480,7 +475,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             scene={current}
             template={template}
             activeLineIndex={activeLine}
-            subtitleSegment={previewSubtitleSegment}
+            subtitleSegment={currentSubtitleSegment}
             telops={activeTelops}
             timeSec={animTimeSec}
             animations={previewAnimations}
