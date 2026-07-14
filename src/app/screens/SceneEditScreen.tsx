@@ -6,7 +6,7 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, VideoStartSpec } from
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
@@ -416,8 +416,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const freeLayout = selected.freeLayout ?? [];
   const sceneGroups = selected.groups ?? [];
   const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
-  // 自由配置 slot に割り当て可能な素材（画像・動画）。
-  const freeSlotAssets = assets.filter((a) => a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video);
+  // 自由配置 slot に割り当て可能な素材（映像として描ける非音声＝image/video/yuko/logo/qr/decor・#524 P1）。
+  // FREE 化で移送した立ち絵（yuko）/ロゴも選択肢に出る＝差し替え・削除しても同じ編集画面で戻せる。判定は isFreeSlotAssetType に集約。
+  const freeSlotAssets = assets.filter((a) => isFreeSlotAssetType(a.assetType));
   // 追加：新要素を末尾に積み、追加直後のその要素を選択状態にする（詳細モードでも即表示・#179）。
   // duplicateFreeEl と同様に updater 内の最新 s.freeLayout から計算（同期実行で newId は下の前に確定）。
   const addFreeEl = (kind: FreeElementKind) => {
@@ -580,12 +581,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const renderFreeKindControls = (el: FreeElement) => {
     if (el.kind === FREE_ELEMENT_KIND.slot) {
       const a = el.assetId ? assets.find((x) => x.assetId === el.assetId) : undefined;
+      // 現在値が候補に無くても必ず選択肢へ含める＝差し替え途中でも今の素材を見失わない（#524 P1・立ち絵/ロゴの復帰）。
+      const slotOptions = a && !freeSlotAssets.some((x) => x.assetId === a.assetId) ? [a, ...freeSlotAssets] : freeSlotAssets;
       return (
         <div className="field" style={{ marginBottom: 6 }}>
           <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>素材</label>
           <select className="select" value={el.assetId ?? ""} onChange={(e) => patchFreeEl(el.id, { assetId: e.target.value || null })}>
             <option value="">なし（空の枠）</option>
-            {freeSlotAssets.map((x) => (<option key={x.assetId} value={x.assetId}>{x.displayName}</option>))}
+            {slotOptions.map((x) => (<option key={x.assetId} value={x.assetId}>{x.displayName}</option>))}
           </select>
           {/* 収め方（fit）は画像/動画とも FREE 要素ごと（el.fit・layoutScene が読む・Undo 可）＝#472 P1 で動画も per-use に統一。 */}
           {a && (

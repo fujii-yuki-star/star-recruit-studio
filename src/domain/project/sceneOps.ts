@@ -6,6 +6,7 @@ import { SCENE_MIN_DURATION_SEC } from '../constants';
 import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } from '../enums';
 import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
+import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { createFreeElementId } from './persistence';
 import { defaultSubtitleSource } from './subtitleBinding';
 import type { FreeElement, Part, Scene } from './types';
@@ -90,18 +91,24 @@ export function freeLayoutFromPlacedContent(
   const elements: FreeElement[] = [];
   const slotClips: NonNullable<Scene['slotClips']> = {};
   const nextId = (): string => createFreeElementId(elements.map((e) => e.id));
+  // 通常描画（layoutScene）と同じくグループ transform を前合成し、非表示グループのメンバーは持ち込まない（ADR-0022・#524 P1）。
+  // これで生の layer.x/y/w/h ではなく「実効配置」を FREE 要素へ写す＝グループ利用テンプレでも FREE 化直後に崩れない。
+  const groups = template.groups ?? [];
+  const layerGeom = composeGroupGeometry(template.layers, groups);
   // 字幕を出す場面か（単独＝texts.subtitle が非空かつ OFF でない／掛け合い＝行がある）。出ない場面は空の字幕要素を作らない。
   const hasLines = (scene.lines?.length ?? 0) > 0;
   const staticSubtitle = scene.texts[TEXT_KEY.subtitle];
   const showsSubtitle =
     hasLines || (!!staticSubtitle && staticSubtitle.length > 0 && scene.subtitleEnabledDefault !== false);
   for (const layer of template.layers) {
+    if (isHiddenByGroup(layer.id, groups)) continue; // 非表示グループのメンバーは変換しない（通常描画と一致）
+    const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h, rotation: layer.rotation };
     const geom = {
-      x: layer.x,
-      y: layer.y,
-      w: layer.w,
-      h: layer.h,
-      ...(layer.rotation ? { rotation: layer.rotation } : {}),
+      x: cg.x,
+      y: cg.y,
+      w: cg.w,
+      h: cg.h,
+      ...(cg.rotation ? { rotation: cg.rotation } : {}),
       ...(layer.zIndex != null ? { zIndex: layer.zIndex } : {}),
     };
     if (layer.type === 'background' || layer.type === 'slot' || layer.type === 'logo') {

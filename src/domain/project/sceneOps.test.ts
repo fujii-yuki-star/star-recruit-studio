@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Part, Scene } from './types';
 import type { Layer, Template } from '../template/types';
+import { composeGroupGeometry } from '../group/compose';
 import { NARRATION_STATUS } from '../enums';
 import { duplicateSceneInList, freeLayoutFromPlacedContent, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
 
@@ -465,5 +466,28 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(elements.filter((e) => e.kind === 'text')).toHaveLength(1);
     const mv = elements.find((e) => e.assetId === 'asset_v')!;
     expect(slotClips[mv.id]).toEqual({ speed: 2 });
+  });
+
+  it('通常→FREE：グループ変形・非表示を実効配置で展開（生の座標でなく composeGroupGeometry・#524 P1）', () => {
+    const grouped: Template = {
+      ...prevTemplate(),
+      layers: [
+        layer('mainVisual', 'slot', { x: 100, y: 100, w: 200, h: 200 }),
+        layer('hiddenSlot', 'slot', { x: 500, y: 500, w: 100, h: 100 }),
+      ],
+      groups: [
+        { id: 'group_001', members: ['mainVisual'], transform: { x: 50, y: 30, scale: 2, rotation: 0 } },
+        { id: 'group_002', members: ['hiddenSlot'], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, hidden: true },
+      ],
+    };
+    const sc = { ...richScene(), assetRefs: { mainVisual: 'asset_v', hiddenSlot: 'asset_h' } } as Scene;
+    const { elements } = freeLayoutFromPlacedContent(sc, grouped);
+    // 非表示グループのメンバー（hiddenSlot）は変換しない（通常描画＝isHiddenByGroup と一致）。
+    expect(elements.some((e) => e.assetId === 'asset_h')).toBe(false);
+    // mainVisual は実効配置（composeGroupGeometry）で展開＝生の x/y/w/h ではない（グループ移動/拡縮が効く）。
+    const expected = composeGroupGeometry(grouped.layers, grouped.groups!).get('mainVisual')!;
+    const mv = elements.find((e) => e.assetId === 'asset_v')!;
+    expect({ x: mv.x, y: mv.y, w: mv.w, h: mv.h }).toEqual({ x: expected.x, y: expected.y, w: expected.w, h: expected.h });
+    expect(mv.x).not.toBe(100); // 生の座標のまま持ち込んでいない
   });
 });
