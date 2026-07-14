@@ -47,3 +47,34 @@ describe('pickableTemplatesForScene（ADR-0012・#415）', () => {
     expect(r.mismatchedCurrent).toBeUndefined();
   });
 });
+
+describe('pickableTemplatesForScene：FREE 全場面化（0.4.2 動確）', () => {
+  const openLand = tpl({ templateId: 'open_land', category: 'opening', aspectRatio: '16:9' });
+  const closeLand = tpl({ templateId: 'close_land', category: 'closing', aspectRatio: '16:9' });
+  const freeLand = tpl({ templateId: 'free_land', category: 'free', aspectRatio: '16:9' });
+  const freePort = tpl({ templateId: 'free_port', category: 'free', aspectRatio: '9:16' });
+  const all = [openLand, closeLand, freeLand, freePort];
+
+  it('通常場面（opening）でも FREE（同じ向き）が候補に出る＝全場面で自由配置を選べる', () => {
+    const r = pickableTemplatesForScene(all, 'opening', '16:9', openLand);
+    expect(r.options.map((t) => t.templateId).sort()).toEqual(['free_land', 'open_land']); // closing/縦は出ない
+  });
+
+  it('FREE 場面はどのカテゴリの見た目へも切替可＝FREE 化から戻れる（同じ向き）', () => {
+    const r = pickableTemplatesForScene(all, 'free', '16:9', freeLand);
+    expect(r.options.map((t) => t.templateId).sort()).toEqual(['close_land', 'free_land', 'open_land']);
+    expect(r.mismatchedCurrent).toBeUndefined();
+  });
+
+  it('FREE の現行テンプレは通常場面でも「合っていない」にしない（同じ向きなら有効）', () => {
+    const r = pickableTemplatesForScene(all, 'opening', '16:9', freeLand); // opening 場面が FREE を使用中
+    expect(r.options.some((t) => t.templateId === 'free_land')).toBe(true);
+    expect(r.mismatchedCurrent).toBeUndefined();
+  });
+
+  it('向き不一致の FREE は mismatchedCurrent（縦 FREE を横型場面で使用中）', () => {
+    const r = pickableTemplatesForScene(all, 'opening', '16:9', freePort);
+    expect(r.mismatchedCurrent?.templateId).toBe('free_port'); // 向きが違えば FREE でも不一致
+    expect(r.options.some((t) => t.templateId === 'free_port')).toBe(false);
+  });
+});

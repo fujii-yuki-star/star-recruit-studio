@@ -4,6 +4,7 @@
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
 import { SCENE_MIN_DURATION_SEC } from '../constants';
 import { NARRATION_STATUS } from '../enums';
+import type { SceneCategory } from '../enums';
 import type { Layer } from '../template/types';
 import type { Part, Scene } from './types';
 
@@ -24,8 +25,16 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
  *   ※ 将来この非対称を「揃える」目的で texts を清算しないこと（利用者の入力消失になる）。
  * - **warnings はクリアする**：旧テンプレ基準の検証結果（例: 必須スロット未設定）は切替で陳腐化するため引き継がない＝
  *   再検証前提（`duplicateSceneInList`/`splitSceneInList` と同ポリシー）。残すと存在しないスロットの警告などが誤って残る。
+ * - **sceneType は新テンプレのカテゴリに追従する**（0.4.2 動確・FREE 全場面化）：見た目とカテゴリを常に一致させ、
+ *   FREE を選べば自由配置に、通常テンプレを選べばその役割に変換する（ピッカーの整合＝`pickableTemplatesForScene` と対）。
+ *   FREE 化しても freeLayout は保持（非破壊・戻せる）。newCategory 未指定（旧呼び出し）は sceneType 据え置き（後方互換）。
  */
-export function switchSceneTemplate(scene: Scene, newTemplateId: string, newTemplateLayers: Layer[]): Scene {
+export function switchSceneTemplate(
+  scene: Scene,
+  newTemplateId: string,
+  newTemplateLayers: Layer[],
+  newCategory?: SceneCategory,
+): Scene {
   const slotIds = new Set(
     newTemplateLayers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id),
   );
@@ -36,6 +45,7 @@ export function switchSceneTemplate(scene: Scene, newTemplateId: string, newTemp
   return {
     ...scene,
     templateId: newTemplateId,
+    sceneType: newCategory ?? scene.sceneType, // 見た目のカテゴリに追従（未指定は据え置き＝後方互換）
     assetRefs: Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k))),
     slotFits: keptFits && Object.keys(keptFits).length ? keptFits : undefined,
     // texts / textFontIds は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。

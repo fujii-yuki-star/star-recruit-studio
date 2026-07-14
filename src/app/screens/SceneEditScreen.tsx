@@ -1312,8 +1312,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 onChange={(e) => {
                   const newTemplateId = e.target.value;
                   // 切替時：assetRefs は新テンプレのスロットへ清算／texts・textFontIds は保持（#236・switchSceneTemplate 参照）。
-                  const newLayers = templates.find((t) => t.templateId === newTemplateId)?.layers ?? [];
-                  patch((s) => switchSceneTemplate(s, newTemplateId, newLayers));
+                  // sceneType は新テンプレのカテゴリに追従（FREE を選べば自由配置へ変換・0.4.2 動確）。
+                  const newTemplate = templates.find((t) => t.templateId === newTemplateId);
+                  patch((s) => switchSceneTemplate(s, newTemplateId, newTemplate?.layers ?? [], newTemplate?.category));
                 }}
               >
                 {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}

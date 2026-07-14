@@ -348,6 +348,16 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     expect(switchSceneTemplate(richScene(), 'new_tmpl', newLayers).warnings).toEqual([]);
   });
 
+  it('newCategory を渡すと sceneType が追従する＝FREE 化（自由配置へ変換・0.4.2 動確）', () => {
+    expect(switchSceneTemplate(richScene(), 'free_v1', [], 'free').sceneType).toBe('free');
+    expect(switchSceneTemplate(richScene(), 'closing_v1', newLayers, 'closing').sceneType).toBe('closing');
+  });
+
+  it('newCategory 未指定（旧呼び出し）は sceneType 据え置き（後方互換）', () => {
+    const before = richScene();
+    expect(switchSceneTemplate(before, 'new_tmpl', newLayers).sceneType).toBe(before.sceneType);
+  });
+
   it('テンプレ未発見（layers 空）でも assetRefs は全清算・texts は保持', () => {
     const r = switchSceneTemplate(richScene(), 'missing', []);
     expect(r.assetRefs).toEqual({});
