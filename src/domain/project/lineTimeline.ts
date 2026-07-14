@@ -103,6 +103,23 @@ export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, nu
 }
 
 /**
+ * 時刻 t（秒）に有効な書き出しセグメント（`sceneSegmentSpecs` の1つ）を返す（ADR-0029・字幕解決の正準入力）。
+ * 区間は [startSec, startSec+durationSec)（最終セグメントは端 t=尺 を含む）。どの区間にも入らない（t が先頭より前等）ときは先頭へ。
+ * **プレビューと書き出しが同一の `sceneSegmentSpecs` 出力を消費する**ための共通関数＝間(isGap)・0秒行除外・自動逐次を一致させる。
+ * `activeLineIndexAt` は「間」で先頭行を返し isGap を表せないため、字幕解決ではこちら（sceneSegmentSpecs 直結）を使う。
+ */
+export function segmentAt(scene: Scene, lineDurations: Record<string, number>, t: number): SceneSegmentSpec {
+  const specs = sceneSegmentSpecs(scene, lineDurations);
+  for (let i = 0; i < specs.length; i += 1) {
+    const s = specs[i];
+    const isLast = i === specs.length - 1;
+    const end = s.startSec + s.durationSec;
+    if (t >= s.startSec && (isLast ? t <= end : t < end)) return s;
+  }
+  return specs[0];
+}
+
+/**
  * 時刻 t（秒）に有効な行セグメントの index。区間は [startSec, endSec)（最終行は endSec を含む）。
  * どの区間にも入らない（t が先頭開始より前など）ときは先頭(0)へフォールバック。空なら -1。
  */

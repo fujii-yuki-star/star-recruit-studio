@@ -1,6 +1,6 @@
 # ADR-0029: FREE 自由配置の「字幕」要素＝複数配置＋対象（読み上げ／話者）への紐づけ
 
-- **状態**: Proposed
+- **状態**: Accepted（2026-07-14・#520 で設計3論点確定＋利用者スコープ決定／実装は段階＝PR-A 済）
 - **日付**: 2026-07-14
 - **関連**: [`adr/0008`](0008-free-layout-editor.md)（FREE 自由配置・`scene.freeLayout`）/ [`adr/0015`](0015-dialogue-timeline-model.md)（掛け合い＝セリフ列・`sceneLines()`・行ごと `speaker`/`subtitleText`/`subtitleEnabled`）/ [`adr/0001`](0001-rendering-parity.md)（プレビュー＝書き出しのパリティ）/ [`adr/0023`](0023-integrated-timeline-editing.md)（α-5 統合タイムライン）/ `11_SCHEMA_REFERENCE.md §7`（FreeElement）/ `schemas/project.schema.json`（`$defs.FreeElement`）/ `CLAUDE.md §2-3, §10, §11`
 - **対象**: #518（FREE 字幕要素・**再スコープ元**）→ 本 ADR 承認後に新 EPIC を起票（α-5 目標・0.4.x で前倒しも可）
@@ -100,18 +100,19 @@ function segmentAt(scene: Scene, lineDurations: Record<string, number>, t: numbe
 // フレーム/セグメントごとに 1 回だけ作る正準状態（プレビューと書き出しで共有）。
 interface SubtitleMoment {
   segment: SceneSegmentSpec;   // 現在のセグメント。isGap＝間／lineId＝掛け合い行／subtitleText＝sceneSegmentSpecs 解決済み字幕
-  voiceBase: ResolvedVoice;    // resolveNarrationVoice(scene 既定, project.voiceSettings)＝実効話者の base
 }
 // el ごとの解決はこの正準状態を消費する（t 依存の再計算をしない＝プレビュー=書き出し）。
 function resolveSubtitleForElement(el: FreeElementSubtitle, scene: Scene, moment: SubtitleMoment): string | null;
 ```
+
+> **PR-A 実装での確定（voiceBase は不要と判明）**：`SubtitleMoment` に当初含めた `voiceBase` は実装で不要と確定した。実効話者の判定は `effectiveSpeakerKey(line)`＝`characterForSpeaker(line.speaker)` があれば `{catalog, speaker}`／無ければ `{default}` で、`resolveLineVoice` の「有効 speaker か・null なら base 声」という**分岐と1対1に対応**する。既定声（`{default}`）は**場面ごとに1つ**ゆえ voiceId の実値は不要（場面内で一意のバケツ）。よって音声との整合（ADR-0026②）は保ったまま `voiceBase` を落とし、`SubtitleMoment = { segment }`・`effectiveSpeakerKey(line)` とした（ADR は「キー表現の確定は PR-A」に従い本確定を反映）。
 
 - **プレビュー**は `segmentAt(scene, lineDurations, t)` で `moment.segment` を作る（既存 `firstFrameBoundary`/`boundaryFrameFromSpec` が `sceneSegmentSpecs` の端セグメントから状態を作る流儀を、任意 `t` へ一般化）。
 - **書き出し**は `sceneSegmentSpecs` を反復する**その時の現在セグメント**をそのまま `moment.segment` に渡す。**両者が同一の `sceneSegmentSpecs` 出力を消費**するので、間（`isGap`）・全 0 秒・自動逐次（音声長）を**確実に一致**させられる（別経路の再判定を作らない）。
 
 **【話者解決】「話者で絞る」は実効話者で比較する（レビュー P1-2）。** `line.speaker` が未指定/カタログ外なら、実際の声は場面/プロジェクト既定（`resolveLineVoice`＝`base.voiceId`）へ継承される（null＝「声なし」ではない・ADR-0015）。生の `line.speaker` で絞ると「**既定の声で話す行**」がどの話者ボックスにも出ない。よって:
 
-- 対象 `speaker`（`SpeakerKey`）は **実効話者**（音声生成と同じ）で比較する。判定は**共有純粋関数** `effectiveSpeakerKey(line, voiceBase): SpeakerKey`（`characterForSpeaker(line.speaker)!=null` → `{kind:'catalog', speaker}`／それ以外 → `{kind:'default'}`）で行い、`voiceBase` を `SubtitleMoment` に含める＝音声と同じ入力で同じ話者（ADR-0026②「同概念同挙動」）。
+- 対象 `speaker`（`SpeakerKey`）は **実効話者**（音声生成と同じ）で比較する。判定は**共有純粋関数** `effectiveSpeakerKey(line): SpeakerKey`（`characterForSpeaker(line.speaker)!=null` → `{kind:'catalog', speaker}`／それ以外 → `{kind:'default'}`）で行う＝`resolveLineVoice` の catalog/null 分岐と同型で音声と同じ話者（ADR-0026②「同概念同挙動」）。**voiceBase は不要**（上記 PR-A 確定：`{default}` は場面内で一意ゆえ voiceId 実値を要さない）。
 - これで **`number|null` の型矛盾を解消**する（P1-2）：`null`＝全行 は `{kind:'allLines'}` として別種別に分離、既定声は `{kind:'default'}`。**`{kind:'default'}` は場面の既定声へ動的追従**（既定声を変えると追従・voiceId 直書き保存はしない）。UI は**その場面に実在する `SpeakerKey` だけ**を選択肢に出す。
 
 **【解決（layout）】** `template.category==='free'` の各 `subtitle` 要素で `subtitleSource ?? 既定` を `moment` で解決:
@@ -138,7 +139,7 @@ function resolveSubtitleForElement(el: FreeElementSubtitle, scene: Scene, moment
 ## 実装計画（サブ PR・各 PR で `check:frontend` 緑＋`/canon-check`）
 
 1. **本 ADR**（合意）＋ 新 EPIC 起票（#518 を再スコープ）。
-2. **PR-A モデル＋解決**：`SubtitleSource`／`SpeakerKey` 判別 union・domain 定数（`SUBTITLE_SOURCE_KIND` 等）、**共通 `segmentAt(scene, lineDurations, t)`＝`sceneSegmentSpecs` を直接正準入力にする（P1-1）**、**正準状態 `SubtitleMoment{segment, voiceBase}`**、**共有 `effectiveSpeakerKey(line, voiceBase): SpeakerKey`（音声と同じ話者解決・P1-2）**、`resolveSubtitleForElement(el, scene, moment)` 純粋関数、schema additive、検証（許可/拒否）。**挙動不変**（未指定＝現状）。純粋ロジックのフルテスト（`segmentAt(t)` が `sceneSegmentSpecs` の同区間・間/0秒行で `isGap`／`effectiveSpeakerKey` が `resolveLineVoice` の catalog/default と一致）。
+2. **PR-A モデル＋解決【実装済・schema 1.20】**：`SubtitleSource`／`SpeakerKey` 判別 union（`types.ts`）・domain 定数（`SUBTITLE_SOURCE_KIND`/`SPEAKER_KEY_KIND`・`enums.ts`）、**共通 `segmentAt(scene, lineDurations, t)`＝`sceneSegmentSpecs` を直接正準入力にする（P1-1・`lineTimeline.ts`）**、**正準状態 `SubtitleMoment{segment}`＋`effectiveSpeakerKey(line)`＋`resolveSubtitleForElement(el, scene, moment)`（`subtitleBinding.ts`）**、`FreeElement.kind='subtitle'`＋`subtitleSource`（schema additive 1.19→1.20・`createFreeElement` に字幕バー既定）、検証（許可/拒否）。**挙動不変**（描画/UI は未接続＝PR-B/PR-C）。純粋ロジックのフルテスト済（`segmentAt(t)` が `sceneSegmentSpecs` の同区間・間/0秒行で `isGap`／`effectiveSpeakerKey` が `resolveLineVoice` の catalog/default と一致）。
 3. **PR-B 描画（複数対象）**：`layout.ts` の `subtitle` 要素を `SubtitleMoment` 経由の対象解決へ（`FREE_ELEMENT_KIND.subtitle` 参照＝#518 P3 の enum 直書き是正も同時）。**プレビューは `segmentAt(scene, lineDurations, t)`、書き出しは `sceneSegmentSpecs` の現在セグメントから同じ `moment` を作る（字幕解決に `activeLineIndexAt` は使わない）**（別経路の再判定を作らない）。単独／掛け合い／複数ボックスの golden（プレビュー＝書き出し一致）。
 4. **PR-C UI（複数＋対象選択）**：字幕要素の複数追加、要素ごとの「対象」選択（掛け合い時は**その場面に実在する実効話者キー**／全部）、単独読み上げの `texts.subtitle` 編集欄（#518 の欄を包含）。**右クリック「複製」を字幕でも自然に許可**（複数可ゆえ no-op 問題は消える）＝レビュー P1 も解消。同一対象重複のやんわり注意（§2-5）。コンポーネントテスト（単独＝入力欄／掛け合い＝話者紐づけ／複製が機能）。
 5. **PR-D（任意・α-5 判断）行→ボックス上書き (2b)＋参照切れ処理**：`NarrationLine.subtitleTarget` と割り当て UI。**有効な指定先がある行は指定先だけに排他表示（P2）／要素削除で指す行の `subtitleTarget` を解除して (2a) へ戻す（`freeLayoutOps`）／読込検証で壊れ参照を検知・修復（`15 §6` 警告）**。受け入れ条件＝**削除・壊れ参照でも字幕が消えず・指定先では二重表示しない**（テスト必須）。統合タイムライン（ADR-0023）と整合。
@@ -157,14 +158,18 @@ function resolveSubtitleForElement(el: FreeElementSubtitle, scene: Scene, moment
 ## 決定済み（レビュー #520 で確定した設計論点）
 
 - **[P1-1 正準入力＝`sceneSegmentSpecs` 直結]**（初版の `lineSegments`＋`activeLineIndexAt` を訂正）：`activeLineIndexAt` は該当区間なしで**先頭行を返す**ため先頭の「間」を `null` にできない。**`SubtitleMoment` は `sceneSegmentSpecs` を直接正準入力にする共通関数 `segmentAt(scene, lineDurations, t)` から作る**。プレビューは「時刻 t のセグメント」、書き出しは「現在のセグメント」を渡し、**同一の `sceneSegmentSpecs` 出力**を消費＝間（`isGap`）・全 0 秒・自動逐次を確実に一致（ADR-0001/0026③）。
-- **[P1-2 実効話者＋保存型の判別 union]**：`lines.speaker` は**実効話者（音声生成と同じ）で比較**（生の `line.speaker` ではない）。`number|null` は既定声（voiceId 由来）を表せず矛盾するため、**`SubtitleSource` を判別 union に**（`narration`／`allLines`／`speaker:{catalog:number | default}`）。共有 `effectiveSpeakerKey(line, voiceBase): SpeakerKey`（catalog あり→`{catalog}`／なし→`{default}`）で判定し、`voiceBase`（`resolveNarrationVoice`）を正準入力へ。`{default}` は場面の既定声へ動的追従（voiceId 直書き保存はしない）。既定声の行も正しく話者ボックスへ（ADR-0026②）。
+- **[P1-2 実効話者＋保存型の判別 union]**：`lines.speaker` は**実効話者（音声生成と同じ）で比較**（生の `line.speaker` ではない）。`number|null` は既定声（voiceId 由来）を表せず矛盾するため、**`SubtitleSource` を判別 union に**（`narration`／`allLines`／`speaker:{catalog:number | default}`）。共有 `effectiveSpeakerKey(line): SpeakerKey`（catalog あり→`{catalog}`／なし→`{default}`）で判定＝`resolveLineVoice` の catalog/null 分岐と同型。`{default}` は場面の既定声へ動的追従（voiceId 直書き保存はしない・場面内で一意ゆえ voiceBase 実値は不要＝PR-A 確定）。既定声の行も正しく話者ボックスへ（ADR-0026②）。
 - **[P2 参照切れ＋排他ルーティング]**：有効な `subtitleTarget` を持つ行は**指定先の欄だけに排他表示**（他の話者・`allLines` ボックスは非表示＝二重表示しない）。`subtitleTarget` は**要素削除で解除→(2a) へフォールバック／読込検証で壊れ参照を修復**（`15 §6` 警告）。**どのケースでも字幕を黙って消さない**（§2-5／ADR-0026④）。受け入れ条件とテストを PR-D へ。
 
-## 未解決の論点 / 確認ポイント（ユーザー確認）
+## スコープ・リリースの決定（利用者・2026-07-14）
 
-1. **紐づけ粒度（要確認）**：基本を **(2a) ボックス→話者**、細かい振り分けは **(2b) 行→ボックスを上書き層**として重ねる **(2c)** を推奨。利用者の「それぞれのセリフをどの字幕欄に」は (2b) 相当ゆえ、(2b) を**初回に含めるか／α-5 の統合タイムライン（ADR-0023）へ回すか**。
-2. **同一対象の重複（要確認）**：許容＋やんわり注意（推奨）／それとも 1 対象 1 ボックスに制限するか。
-3. **リリース段（要確認）**：本機能を **α-5 の EPIC** に載せるか、**0.4.2 で前倒し**するか（0.4.1＝#517/#519 は先行）。
-4. **既存 `template.schema` の subtitle 層との関係**：通常テンプレの `type:'subtitle'` 層（ADR-0015）は据え置き。FREE の複数対象はこの ADR の範囲（通常テンプレへの複数字幕は対象外・将来検討）。
+1. **紐づけ粒度＝(2a) 先行・(2b) は α-5**：初回は **(2a) ボックス→実効話者**（`narration`/`allLines`/`speaker`）まで。**(2b) 行→ボックス（`NarrationLine.subtitleTarget`・排他ルーティング）は α-5 の統合タイムライン（ADR-0023）へ回す**（per-line 割当 UI が重く統合編集面と重なるため）。よって PR-A の schema は `subtitleTarget` を含めない（`FreeElement.subtitleSource` のみ・1.20）。
+2. **同一対象の重複**：許容＋やんわり注意（PR-C で実装・破壊しない・§2-5）。
+3. **リリース段＝0.4.2 前倒し**：本機能は **0.4.2**（0.4.1＝#517/#519 の直後）。**schema 1.20 は 0.4.1 に混ぜない**＝PR-A は 0.4.1 を develop→main で切ってから develop へマージ（0.4.1 に描画/UI 無しの字幕 schema が載らないように）。
 
-> P1-1/P1-2/P2 は #520 レビューで確定。残る 1〜3 を確認のうえ、PR-A（モデル＋解決）から着手する。#518 は本 ADR 承認まで draft。
+## 未解決の論点
+
+- **既存 `template.schema` の subtitle 層との関係**：通常テンプレの `type:'subtitle'` 層（ADR-0015）は据え置き。FREE の複数対象はこの ADR の範囲（通常テンプレへの複数字幕は対象外・将来検討）。
+- **(2b) の詳細（α-5）**：`NarrationLine.subtitleTarget` の schema・排他ルーティング・参照切れ修復（本 ADR「決定済み [P2]」）は α-5 の実装 PR で。
+
+> P1-1/P1-2/P2 は #520 で確定。スコープ（(2a) 先行・0.4.2）は利用者決定。**PR-A（モデル＋解決・schema 1.20）実装済＝0.4.1 リリース後に develop へマージ**。PR-B（描画）→ PR-C（UI・複数追加＋対象選択）が続く。#518 は本機能に置換（draft・scaffolding 流用）。

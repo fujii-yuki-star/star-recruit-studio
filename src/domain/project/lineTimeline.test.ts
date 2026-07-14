@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { activeLineIndexAt, firstFrameBoundary, lastFrameBoundary, lineSegments, resolveLineSubtitle, sceneSegmentSpecs } from './lineTimeline';
+import { activeLineIndexAt, firstFrameBoundary, lastFrameBoundary, lineSegments, resolveLineSubtitle, sceneSegmentSpecs, segmentAt } from './lineTimeline';
 import type { NarrationLine, Scene } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -204,5 +204,35 @@ describe('firstFrameBoundary / lastFrameBoundary（切替プレビューの端�
     const durs = { line_001: 3, line_002: 4 }; // [0,3],[3,10]
     expect(firstFrameBoundary(sceneWith({ lines }), durs)).toEqual({ subtitleText: 'a', creditLine: lines[0] });
     expect(lastFrameBoundary(sceneWith({ lines }), durs)).toEqual({ subtitleText: 'b', creditLine: lines[1] });
+  });
+});
+
+describe('segmentAt（ADR-0029・字幕解決の正準入力＝sceneSegmentSpecs 直結）', () => {
+  it('単一 narration はどの t でも1セグメント（lineId/isGap なし）', () => {
+    const s = sceneWith({});
+    expect(segmentAt(s, {}, 0)).toMatchObject({ startSec: 0, durationSec: 10, isFirst: true });
+    expect(segmentAt(s, {}, 5).lineId).toBeUndefined();
+    expect(segmentAt(s, {}, 10).durationSec).toBe(10);
+  });
+
+  it('掛け合い自動逐次：t が属する行セグメントを返す（末尾 t=尺 は最終行）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', status: NARRATION_STATUS.none },
+    ];
+    const s = sceneWith({ lines });
+    const durs = { line_001: 3, line_002: 4 }; // [0,3),[3,10]
+    expect(segmentAt(s, durs, 0).lineId).toBe('line_001');
+    expect(segmentAt(s, durs, 2.9).lineId).toBe('line_001');
+    expect(segmentAt(s, durs, 3).lineId).toBe('line_002');
+    expect(segmentAt(s, durs, 10).lineId).toBe('line_002'); // 末尾は端含む
+  });
+
+  it('先頭の「間」（先頭行 startSec>0）は isGap セグメント・行に入ると行セグメント（activeLineIndexAt と違い間を表せる）', () => {
+    const lines: NarrationLine[] = [{ lineId: 'line_001', text: 'a', startSec: 2, status: NARRATION_STATUS.none }];
+    const s = sceneWith({ lines });
+    expect(segmentAt(s, {}, 1)).toMatchObject({ isGap: true }); // [0,2) は間
+    expect(segmentAt(s, {}, 1).lineId).toBeUndefined();
+    expect(segmentAt(s, {}, 2).lineId).toBe('line_001'); // [2,10] は行
   });
 });

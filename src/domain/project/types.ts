@@ -203,7 +203,18 @@ export interface Warning {
   autoFixed?: boolean;
 }
 
-/** FREE テンプレ場面の自由配置要素（ADR-0008）。id は scene 内一意。x/y/w/h は canvas(1920×1080) 基準。 */
+/** 実効話者キー（ADR-0029・P1-2）＝音声生成と同じ話者空間。number|null では既定声を表せないため判別 union。 */
+export type SpeakerKey =
+  | { kind: 'catalog'; speaker: number } // 明示話者（voiceCatalog の speaker 番号）
+  | { kind: 'default' }; // 既定声の行（継承 voiceId・catalog 番号なし・場面の既定へ動的追従）
+
+/** FREE 字幕要素の「対象」＝何を表示するか（ADR-0029）。未指定＝後方互換（単独→narration・掛け合い→allLines）。 */
+export type SubtitleSource =
+  | { kind: 'narration' } // 読み上げ（texts.subtitle・単独ナレーション）
+  | { kind: 'allLines' } // 掛け合い：全行（話者で絞らない）
+  | { kind: 'speaker'; speaker: SpeakerKey }; // 掛け合い：特定の実効話者の行のみ
+
+/** FREE テンプレ場面の自由配置要素（ADR-0008／字幕＝ADR-0029）。id は scene 内一意。x/y/w/h は canvas(1920×1080) 基準。 */
 export interface FreeElement {
   id: string;
   kind: FreeElementKind;
@@ -241,6 +252,8 @@ export interface FreeElement {
   hidden?: boolean;
   /** ロック（レイヤー一覧で固定・#210）。true のときプレビュー上での移動/拡縮を禁止（未指定/false＝編集可）。 */
   locked?: boolean;
+  /** kind='subtitle' の「対象」（ADR-0029）。未指定＝後方互換（単独→読み上げ texts.subtitle・掛け合い→全行）。 */
+  subtitleSource?: SubtitleSource;
 }
 
 export interface Scene {

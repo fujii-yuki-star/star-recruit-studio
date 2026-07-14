@@ -109,6 +109,7 @@ const freeKindLabel: Record<FreeElementKind, string> = {
   slot: "素材",
   text: "文字",
   shape: "図形",
+  subtitle: "字幕",
 };
 
 // 自由配置の位置・サイズ等の数値入力（キーボードで調整＝a11y。ドラッグ操作は Phase 4b）。
