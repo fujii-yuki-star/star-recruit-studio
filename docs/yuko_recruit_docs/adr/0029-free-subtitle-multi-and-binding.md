@@ -61,7 +61,7 @@
 
 ## 決定（Proposed）
 
-> **FREE の「字幕」要素を複数配置可能にし、各要素に「対象（`subtitleSource`）」を持たせる。** 対象は**基本＝ボックスが対象を選ぶ (2a)**（`読み上げ` / 掛け合いの `話者N` または `全部`）とし、**行→ボックスの上書き (2b) は任意層として重ねられる (2c)**。`layout.ts` は字幕要素ごとに、**書き出しと同じ正準経路（`sceneSegmentSpecs`／`lineSegments`＋`activeLineIndexAt`）から作った「その瞬間の行状態」**（`lineId`・`isGap`・行字幕）と、**音声生成と同じ実効話者**（`resolveLineVoice` の base）で表示テキストを解決する。したがって**プレビューの「現在の行選択」と書き出しの「セグメント処理」が同一の正準状態を消費**し、**二重描画は「別対象＝別文」で構造的に解消**する。**「場面に字幕は1つ」の制約（schema 上限・破壊的移行）は導入しない。** 既存データ（対象未指定）は現状挙動（単独＝読み上げ／掛け合い＝全行）へ**無変換で解決**する。プレビュー＝書き出しは共有 `layoutScene` を通しパリティを維持する（ADR-0001／memory：近似せず正準関数を共有）。
+> **FREE の「字幕」要素を複数配置可能にし、各要素に「対象（`subtitleSource`）」を持たせる。** 対象は**基本＝ボックスが対象を選ぶ (2a)**（`読み上げ` / 掛け合いの `話者N` または `全部`）とし、**行→ボックスの上書き (2b) は任意層として重ねられる (2c)**。`layout.ts` は字幕要素ごとに、**書き出しと同じ正準経路（`sceneSegmentSpecs` を `segmentAt` で直結・字幕解決に `activeLineIndexAt` は使わない）から作った「その瞬間のセグメント」**（`lineId`・`isGap`・行字幕）と、**音声生成と同じ実効話者**（`resolveLineVoice` の base）で表示テキストを解決する。したがって**プレビューの「現在の行選択」と書き出しの「セグメント処理」が同一の正準状態を消費**し、**二重描画は「別対象＝別文」で構造的に解消**する。**「場面に字幕は1つ」の制約（schema 上限・破壊的移行）は導入しない。** 既存データ（対象未指定）は現状挙動（単独＝読み上げ／掛け合い＝全行）へ**無変換で解決**する。プレビュー＝書き出しは共有 `layoutScene` を通しパリティを維持する（ADR-0001／memory：近似せず正準関数を共有）。
 
 ### モデル定義（target・schema は additive／§9-2 で最終確認）
 
@@ -139,7 +139,7 @@ function resolveSubtitleForElement(el: FreeElementSubtitle, scene: Scene, moment
 
 1. **本 ADR**（合意）＋ 新 EPIC 起票（#518 を再スコープ）。
 2. **PR-A モデル＋解決**：`SubtitleSource`／`SpeakerKey` 判別 union・domain 定数（`SUBTITLE_SOURCE_KIND` 等）、**共通 `segmentAt(scene, lineDurations, t)`＝`sceneSegmentSpecs` を直接正準入力にする（P1-1）**、**正準状態 `SubtitleMoment{segment, voiceBase}`**、**共有 `effectiveSpeakerKey(line, voiceBase): SpeakerKey`（音声と同じ話者解決・P1-2）**、`resolveSubtitleForElement(el, scene, moment)` 純粋関数、schema additive、検証（許可/拒否）。**挙動不変**（未指定＝現状）。純粋ロジックのフルテスト（`segmentAt(t)` が `sceneSegmentSpecs` の同区間・間/0秒行で `isGap`／`effectiveSpeakerKey` が `resolveLineVoice` の catalog/default と一致）。
-3. **PR-B 描画（複数対象）**：`layout.ts` の `subtitle` 要素を `SubtitleMoment` 経由の対象解決へ（`FREE_ELEMENT_KIND.subtitle` 参照＝#518 P3 の enum 直書き是正も同時）。**プレビューは `lineSegments`+`activeLineIndexAt`、書き出しは `sceneSegmentSpecs` の各セグメントから同じ `moment` を作る**（別経路の再判定を作らない）。単独／掛け合い／複数ボックスの golden（プレビュー＝書き出し一致）。
+3. **PR-B 描画（複数対象）**：`layout.ts` の `subtitle` 要素を `SubtitleMoment` 経由の対象解決へ（`FREE_ELEMENT_KIND.subtitle` 参照＝#518 P3 の enum 直書き是正も同時）。**プレビューは `segmentAt(scene, lineDurations, t)`、書き出しは `sceneSegmentSpecs` の現在セグメントから同じ `moment` を作る（字幕解決に `activeLineIndexAt` は使わない）**（別経路の再判定を作らない）。単独／掛け合い／複数ボックスの golden（プレビュー＝書き出し一致）。
 4. **PR-C UI（複数＋対象選択）**：字幕要素の複数追加、要素ごとの「対象」選択（掛け合い時は**その場面に実在する実効話者キー**／全部）、単独読み上げの `texts.subtitle` 編集欄（#518 の欄を包含）。**右クリック「複製」を字幕でも自然に許可**（複数可ゆえ no-op 問題は消える）＝レビュー P1 も解消。同一対象重複のやんわり注意（§2-5）。コンポーネントテスト（単独＝入力欄／掛け合い＝話者紐づけ／複製が機能）。
 5. **PR-D（任意・α-5 判断）行→ボックス上書き (2b)＋参照切れ処理**：`NarrationLine.subtitleTarget` と割り当て UI。**有効な指定先がある行は指定先だけに排他表示（P2）／要素削除で指す行の `subtitleTarget` を解除して (2a) へ戻す（`freeLayoutOps`）／読込検証で壊れ参照を検知・修復（`15 §6` 警告）**。受け入れ条件＝**削除・壊れ参照でも字幕が消えず・指定先では二重表示しない**（テスト必須）。統合タイムライン（ADR-0023）と整合。
 
