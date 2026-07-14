@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { Part, Scene } from './types';
-import type { Layer } from '../template/types';
+import type { Layer, Template } from '../template/types';
 import { NARRATION_STATUS } from '../enums';
-import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
+import { duplicateSceneInList, freeLayoutFromPlacedContent, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
 
 function scene(id: string, order: number, partId = 'part_001', narration?: Scene['narration']): Scene {
   return {
@@ -362,5 +362,74 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     const r = switchSceneTemplate(richScene(), 'missing', []);
     expect(r.assetRefs).toEqual({});
     expect(r.texts).toEqual({ title: 'タイトル', main: '本文' });
+  });
+});
+
+describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524 P1/P2）', () => {
+  const layer = (id: string, type: Layer['type'], extra: Partial<Layer> = {}): Layer => ({ id, type, x: 0, y: 0, w: 100, h: 100, ...extra });
+  const newLayers: Layer[] = [layer('background', 'background'), layer('mainVisual', 'slot'), layer('logo', 'logo')];
+  // 旧テンプレ（通常）：スロット/テキスト層に幾何を持たせて変換の継承を確かめる。
+  const prevTemplate = (): Template => ({
+    schemaVersion: '1.0', templateId: 'old_tmpl', name: '旧', category: 'opening', aspectRatio: '16:9',
+    canvas: { width: 1920, height: 1080 },
+    layers: [
+      layer('background', 'background', { x: 0, y: 0, w: 1920, h: 1080 }),
+      layer('mainVisual', 'slot', { x: 100, y: 200, w: 800, h: 600, rotation: 15, zIndex: 2, fit: 'cover' }),
+      layer('logo', 'logo', { x: 50, y: 50, w: 120, h: 120 }),
+      layer('title', 'text', { textKey: 'title', x: 200, y: 900, w: 1500, h: 120, fontSize: 64, color: '#ffffff', fontWeight: 'bold' }),
+      layer('emptySlot', 'slot', { x: 0, y: 0, w: 10, h: 10 }), // 素材なし＝変換されない
+      layer('decor', 'shape', { x: 0, y: 0, w: 100, h: 100 }), // 装飾＝対象外
+    ],
+  });
+  const richScene = (): Scene => ({
+    ...scene('scene_001', 1),
+    templateId: 'old_tmpl', sceneType: 'opening',
+    assetRefs: { background: 'asset_bg', mainVisual: 'asset_v', logo: 'asset_logo', oldSlot: 'asset_dangling' },
+    slotFits: { mainVisual: 'contain' },
+    texts: { title: 'タイトル', main: '本文' },
+    textFontIds: { title: 'gen-interface-jp-display' },
+  });
+
+  it('通常→FREE：表示中の素材/文字を freeLayout へ変換（位置/収め方/回転/体裁を継承・空スロット/装飾/テキスト層なしは除外）', () => {
+    const r = switchSceneTemplate(richScene(), 'free_v1', [], 'free', prevTemplate());
+    const fl = r.freeLayout ?? [];
+    const slots = fl.filter((e) => e.kind === 'slot');
+    const texts = fl.filter((e) => e.kind === 'text');
+    // 素材ありスロット3（bg/mainVisual/logo）＋テキスト層1（title）。emptySlot/decor/main(層なし)/oldSlot(層なし)は除外。
+    expect(slots.map((e) => e.assetId).sort()).toEqual(['asset_bg', 'asset_logo', 'asset_v']);
+    const mv = slots.find((e) => e.assetId === 'asset_v')!;
+    expect(mv).toMatchObject({ x: 100, y: 200, w: 800, h: 600, rotation: 15, fit: 'contain' }); // slotFits(contain) 優先
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toMatchObject({ text: 'タイトル', x: 200, y: 900, fontSize: 64, color: '#ffffff', fontWeight: 'bold', fontId: 'gen-interface-jp-display' });
+    expect(new Set(fl.map((e) => e.id)).size).toBe(fl.length); // id 重複なし
+    expect(fl.every((e) => /^free_\d{3}$/.test(e.id))).toBe(true); // free_NNN 採番
+    expect(r.assetRefs).toEqual({}); // FREE はスロット無し＝清算（内容は freeLayout へ移動）
+  });
+
+  it('seed は freeLayout が空のときだけ（既存の自由配置は上書きしない）', () => {
+    const withFree = { ...richScene(), freeLayout: [{ id: 'free_001', kind: 'slot', x: 0, y: 0, w: 10, h: 10, assetId: 'keep' }] } as Scene;
+    const r = switchSceneTemplate(withFree, 'free_v1', [], 'free', prevTemplate());
+    expect(r.freeLayout).toEqual(withFree.freeLayout);
+  });
+
+  it('prevTemplate 未指定（旧呼び出し）は seed しない（後方互換）', () => {
+    expect(switchSceneTemplate(richScene(), 'free_v1', [], 'free').freeLayout ?? []).toEqual([]);
+  });
+
+  it('通常テンプレ間の切替（newCategory≠free）では seed しない', () => {
+    expect(switchSceneTemplate(richScene(), 'closing_v1', newLayers, 'closing', prevTemplate()).freeLayout ?? []).toEqual([]);
+  });
+
+  it('FREE→通常は freeLayout を休眠保持（消さない）＝往復で自由配置が戻る', () => {
+    const freeSc = { ...richScene(), sceneType: 'free', templateId: 'free_v1', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ' }] } as Scene;
+    const r = switchSceneTemplate(freeSc, 'closing_v1', newLayers, 'closing');
+    expect(r.sceneType).toBe('closing');
+    expect(r.freeLayout).toEqual(freeSc.freeLayout);
+  });
+
+  it('freeLayoutFromPlacedContent 単体：素材ありスロットと文字層のみを幾何ごと変換', () => {
+    const els = freeLayoutFromPlacedContent(richScene(), prevTemplate());
+    expect(els.filter((e) => e.kind === 'slot')).toHaveLength(3);
+    expect(els.filter((e) => e.kind === 'text')).toHaveLength(1);
   });
 });

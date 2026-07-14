@@ -1,6 +1,6 @@
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
-import { ASSET_TYPE, type SceneCategory } from "../domain/enums";
+import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
 import { HEIGHT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
@@ -120,10 +120,14 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
 
   const used = new Set<string>();
   for (const s of scenes) {
-    for (const value of Object.values(s.assetRefs)) if (value) used.add(value);
+    // 実効表現だけを「使用中」と数える（ADR-0030）：FREE 場面は freeLayout[].assetId（ADR-0008）、通常場面は assetRefs。
+    // 休眠側（通常場面に残った freeLayout／FREE 場面の assetRefs）は描画されないので数えない＝切替後の誤カウント（P2）を防ぐ。
+    if (templateOf(s)?.category === FREE_CATEGORY) {
+      for (const el of s.freeLayout ?? []) if (el.assetId) used.add(el.assetId);
+    } else {
+      for (const value of Object.values(s.assetRefs)) if (value) used.add(value);
+    }
     if (s.character.poseAssetId) used.add(s.character.poseAssetId);
-    // FREE 場面の素材は assetRefs ではなく freeLayout[].assetId 経由で使われる（ADR-0008）。
-    for (const el of s.freeLayout ?? []) if (el.assetId) used.add(el.assetId);
   }
   const unused = assets.filter((a) => !used.has(a.assetId)).length;
   items.push(
@@ -134,10 +138,11 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
 
   // 自由配置（FREE 場面）の確認：要素が画面外・素材未解決・サイズ不正などがないか（ADR-0008 §8）。
   // FREE 場面が無いプロジェクトでは項目を出さない（通常プロジェクトのノイズを避ける）。
-  const freeScenes = scenes.filter((s) => (s.freeLayout?.length ?? 0) > 0);
+  // 実際に FREE の場面（テンプレ category=free）だけを対象にする＝通常テンプレへ戻した休眠 freeLayout は検査しない（ADR-0030・P2）。
+  const freeScenes = scenes.filter((s) => templateOf(s)?.category === FREE_CATEGORY && (s.freeLayout?.length ?? 0) > 0);
   if (freeScenes.length > 0) {
     const badFree = offending((s) => {
-      if ((s.freeLayout?.length ?? 0) === 0) return false;
+      if (templateOf(s)?.category !== FREE_CATEGORY || (s.freeLayout?.length ?? 0) === 0) return false;
       const cv = templateOf(s)?.canvas ?? { width: WIDTH, height: HEIGHT };
       return validateFreeLayout(s.freeLayout ?? [], assets, cv).length > 0;
     });

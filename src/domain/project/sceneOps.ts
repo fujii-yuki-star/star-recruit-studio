@@ -3,10 +3,11 @@
 // scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
 import { SCENE_MIN_DURATION_SEC } from '../constants';
-import { NARRATION_STATUS } from '../enums';
+import { FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS } from '../enums';
 import type { SceneCategory } from '../enums';
-import type { Layer } from '../template/types';
-import type { Part, Scene } from './types';
+import type { Layer, Template } from '../template/types';
+import { createFreeElementId } from './persistence';
+import type { FreeElement, Part, Scene } from './types';
 
 /** 各パートの sceneIds を、現在の scenes 配列順（パート所属は保持）に合わせて作り直す。 */
 export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
@@ -27,13 +28,19 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
  *   再検証前提（`duplicateSceneInList`/`splitSceneInList` と同ポリシー）。残すと存在しないスロットの警告などが誤って残る。
  * - **sceneType は新テンプレのカテゴリに追従する**（0.4.2 動確・FREE 全場面化）：見た目とカテゴリを常に一致させ、
  *   FREE を選べば自由配置に、通常テンプレを選べばその役割に変換する（ピッカーの整合＝`pickableTemplatesForScene` と対）。
- *   FREE 化しても freeLayout は保持（非破壊・戻せる）。newCategory 未指定（旧呼び出し）は sceneType 据え置き（後方互換）。
+ *   newCategory 未指定（旧呼び出し）は sceneType 据え置き（後方互換）。
+ * - **通常→FREE は表示中の内容を `freeLayout` へ seed する**（ADR-0030・#524 P1）：旧テンプレ（`prevTemplate`）のスロット素材＋
+ *   文字を FreeElement へ変換して持ち込む（`freeLayout` が空のときだけ＝既存の自由配置は上書きしない）。これで FREE 化で
+ *   写真・動画・文字が無言消失しない（§2-2）。`prevTemplate` 未指定（旧呼び出し・テスト）は seed しない（後方互換）。
+ * - **`freeLayout` は保持（休眠）**：通常テンプレへ戻しても消さない（`texts` と同じ #236 の非対称の延長・ADR-0030）。
+ *   通常テンプレでは描画/編集/事前確認/素材使用の対象外（実効表現＝category でゲート）＝休眠データが悪さをしない（P2）。
  */
 export function switchSceneTemplate(
   scene: Scene,
   newTemplateId: string,
   newTemplateLayers: Layer[],
   newCategory?: SceneCategory,
+  prevTemplate?: Template,
 ): Scene {
   const slotIds = new Set(
     newTemplateLayers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id),
@@ -42,15 +49,68 @@ export function switchSceneTemplate(
   const keptFits = scene.slotFits
     ? Object.fromEntries(Object.entries(scene.slotFits).filter(([k]) => slotIds.has(k)))
     : undefined;
+  // 通常→FREE：表示中の配置内容（スロット素材＋文字）を freeLayout へ seed（空のときだけ・ADR-0030）。旧テンプレの幾何が要る。
+  const seededFreeLayout =
+    newCategory === FREE_CATEGORY &&
+    prevTemplate &&
+    prevTemplate.category !== FREE_CATEGORY &&
+    (scene.freeLayout?.length ?? 0) === 0
+      ? freeLayoutFromPlacedContent(scene, prevTemplate)
+      : undefined;
   return {
     ...scene,
     templateId: newTemplateId,
     sceneType: newCategory ?? scene.sceneType, // 見た目のカテゴリに追従（未指定は据え置き＝後方互換）
     assetRefs: Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k))),
     slotFits: keptFits && Object.keys(keptFits).length ? keptFits : undefined,
+    // 通常→FREE の seed 結果があれば freeLayout を差し替え（空 seed・非該当は ...scene の freeLayout を休眠保持）。
+    ...(seededFreeLayout && seededFreeLayout.length ? { freeLayout: seededFreeLayout } : {}),
     // texts / textFontIds は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。
     warnings: [],
   };
+}
+
+/**
+ * 通常テンプレの「表示中の配置内容」を FREE 要素へ変換する（ADR-0030・通常→FREE の seed 用）。
+ * スロット層（background/slot/logo）に置かれた素材（`assetRefs`）と文字層（text）のテキスト（`texts`）を、
+ * 旧テンプレのレイヤー幾何（x/y/w/h/rotation/zIndex）ごと FreeElement（slot/text）へ写す。純粋関数。
+ * - 空スロット（素材なし）・空文字は変換しない（表示されていないものは持ち込まない）。
+ * - 立ち絵（`scene.character`）・装飾レイヤー（shape/背景色）は対象外＝データは `...scene` で保持（ADR-0030 未解決）。
+ */
+export function freeLayoutFromPlacedContent(scene: Scene, template: Template): FreeElement[] {
+  const out: FreeElement[] = [];
+  const nextId = (): string => createFreeElementId(out.map((e) => e.id));
+  for (const layer of template.layers) {
+    const geom = {
+      x: layer.x,
+      y: layer.y,
+      w: layer.w,
+      h: layer.h,
+      ...(layer.rotation ? { rotation: layer.rotation } : {}),
+      ...(layer.zIndex != null ? { zIndex: layer.zIndex } : {}),
+    };
+    if (layer.type === 'background' || layer.type === 'slot' || layer.type === 'logo') {
+      const assetId = scene.assetRefs[layer.id];
+      if (!assetId) continue; // 空スロットは持ち込まない
+      out.push({ id: nextId(), kind: FREE_ELEMENT_KIND.slot, ...geom, assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit });
+    } else if (layer.type === 'text' && layer.textKey) {
+      const text = scene.texts[layer.textKey];
+      if (!text) continue; // 空文字は持ち込まない
+      out.push({
+        id: nextId(),
+        kind: FREE_ELEMENT_KIND.text,
+        ...geom,
+        text,
+        fontSize: layer.fontSize,
+        color: layer.color,
+        fontWeight: layer.fontWeight,
+        fontId: scene.textFontIds?.[layer.textKey],
+        ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
+        ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+      });
+    }
+  }
+  return out;
 }
 
 /** order を配列順に 1..N で振り直す。 */
