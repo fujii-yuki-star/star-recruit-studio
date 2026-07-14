@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
 import type { SceneSegmentSpec } from './lineTimeline';
 import { segmentAt } from './lineTimeline';
-import { defaultSubtitleSource, effectiveSpeakerKey, resolveSubtitleForElement, speakerKeyEquals } from './subtitleBinding';
+import { defaultSubtitleSource, effectiveSpeakerKey, normalizeSubtitleSources, resolveSubtitleForElement, sceneSubtitleSpeakerOptions, speakerKeyEquals, subtitleSourceFromValue, subtitleSourceToValue } from './subtitleBinding';
 import type { FreeElement, NarrationLine, Scene, SubtitleSource } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -135,5 +135,73 @@ describe('resolveSubtitleForElement（対象解決・ADR-0029）', () => {
     expect(seg0.lineId).toBeUndefined(); // フォールバック＝行 id なし
     expect(resolveSubtitleForElement(subEl({ kind: 'allLines' }), s, { segment: seg0 })).toBeNull();
     expect(resolveSubtitleForElement(subEl({ kind: 'narration' }), s, { segment: seg0 })).toBe('読み上げ');
+  });
+});
+
+describe('sceneSubtitleSpeakerOptions（対象＝話者の選択肢・PR-C）', () => {
+  it('掛け合いの実効話者を重複排除して返す（catalog はキャラ名・default は既定の声・登場順）', () => {
+    const lines = [
+      line('line_001', 'A', { speaker: 3 }), // ずんだもん
+      line('line_002', 'B', { speaker: 3 }), // 重複＝1件に
+      line('line_003', 'C', { speaker: 2 }), // 四国めたん
+      line('line_004', 'D'),                 // 既定の声（speaker なし）
+    ];
+    const opts = sceneSubtitleSpeakerOptions(sceneWith({ lines }));
+    expect(opts.map((o) => o.label)).toEqual(['ずんだもん', '四国めたん', '既定の声']);
+    expect(opts.map((o) => o.key)).toEqual([
+      { kind: 'catalog', speaker: 3 }, { kind: 'catalog', speaker: 2 }, { kind: 'default' },
+    ]);
+  });
+});
+
+describe('subtitleSourceToValue / subtitleSourceFromValue（UI シリアライズ・PR-C）', () => {
+  const cases: [SubtitleSource, string][] = [
+    [{ kind: 'narration' }, 'narration'],
+    [{ kind: 'allLines' }, 'allLines'],
+    [{ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } }, 'speaker:catalog:3'],
+    [{ kind: 'speaker', speaker: { kind: 'default' } }, 'speaker:default'],
+  ];
+  it('往復（source→value→source）で一致', () => {
+    for (const [src, val] of cases) {
+      expect(subtitleSourceToValue(src)).toBe(val);
+      expect(subtitleSourceFromValue(val)).toEqual(src);
+    }
+  });
+  it('未知値は narration へフォールバック（黙って壊さない）', () => {
+    expect(subtitleSourceFromValue('bogus')).toEqual({ kind: 'narration' });
+  });
+});
+
+describe('normalizeSubtitleSources（無効な対象を既定へ戻す・ADR-0026④・P1）', () => {
+  const withSub = (subtitleSource: SubtitleSource | undefined, extra: Partial<Scene> = {}): Scene =>
+    sceneWith({ freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, ...(subtitleSource ? { subtitleSource } : {}) }], ...extra });
+  const subSource = (s: Scene): SubtitleSource | undefined => s.freeLayout?.[0]?.subtitleSource;
+
+  it('単独（lines なし）では allLines/speaker を未設定へ戻す（→ 読み上げ＝黙って消さない）', () => {
+    expect(subSource(normalizeSubtitleSources(withSub({ kind: 'allLines' })))).toBeUndefined();
+    expect(subSource(normalizeSubtitleSources(withSub({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } })))).toBeUndefined();
+  });
+
+  it('単独でも narration は不変（有効）', () => {
+    const s = withSub({ kind: 'narration' });
+    expect(normalizeSubtitleSources(s)).toBe(s); // 同一参照＝変化なし
+  });
+
+  it('掛け合いで対象話者が場面にいれば不変・いなければ未設定へ戻す', () => {
+    const lines = [line('line_001', 'A', { speaker: 3 })];
+    // speaker 3 は在席＝有効
+    const ok = withSub({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } }, { lines });
+    expect(normalizeSubtitleSources(ok)).toBe(ok);
+    // speaker 2 は不在＝未設定へ
+    const gone = withSub({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 2 } }, { lines });
+    expect(subSource(normalizeSubtitleSources(gone))).toBeUndefined();
+    // allLines は掛け合いでは有効
+    const all = withSub({ kind: 'allLines' }, { lines });
+    expect(normalizeSubtitleSources(all)).toBe(all);
+  });
+
+  it('対象を持つ字幕が無ければ同一参照（未保存/履歴にしない）', () => {
+    const s = withSub(undefined);
+    expect(normalizeSubtitleSources(s)).toBe(s);
   });
 });

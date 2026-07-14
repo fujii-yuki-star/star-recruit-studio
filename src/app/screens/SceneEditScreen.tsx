@@ -6,13 +6,14 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, VideoStartSpec } from
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
@@ -33,7 +34,7 @@ import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
-import { firstFrameBoundary, sceneSegmentSpecs } from "../../domain/project/lineTimeline";
+import { motionSubtitleAt } from "../../domain/project/lineTimeline";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
@@ -329,6 +330,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 「動き」（簡易アニメ・ADR-0019）をこの場で再生確認する（#408 Part 1・仕上がり確認への往復をなくす）。
   // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
   const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
+  // 「動き」再生の現在時刻に対応する字幕入力（通常テンプレ字幕＝boundary／FREE 字幕＝segment／クレジットへ**同一セグメント**）。
+  // 停止中 t=0＝先頭（静止と一致）／再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1・ADR-0029/0001）。先頭固定にしない。
+  const motionSubtitle = selected
+    ? motionSubtitleAt(selected, lineDurationsFromAudio(selected, narrationAudioById), motionPreview.timeSec)
+    : undefined;
   // 切替効果（トランジション）の単境界プレビュー（#408 Part 2）。A=直前場面（表示順）→ B=この場面。
   // 実効 D は書き出しと同じ全場面 transitionTimeline で解決するため、hook には scenes 全体と当該場面の添字を渡す
   // （直前場面が短い場合も書き出しと一致＝#408 レビュー P1）。先頭場面（selectedIdx<=0）は非活性。
@@ -688,6 +694,83 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</label>
+              <input type="color" value={el.strokeColor ?? "#000000"} onChange={(e) => patchFreeEl(el.id, { strokeColor: e.target.value })} />
+            </div>
+          </div>
+        </>
+      );
+    }
+    if (el.kind === FREE_ELEMENT_KIND.subtitle) {
+      // 字幕要素（ADR-0029）：表示文言は「対象」から解決＝「文字」入力は持たない。対象＝読み上げ/全部のセリフ/話者ごと。
+      const hasLines = (selected.lines?.length ?? 0) > 0;
+      const source = el.subtitleSource ?? defaultSubtitleSource(selected);
+      const sourceValue = subtitleSourceToValue(source);
+      const speakerOpts = sceneSubtitleSpeakerOptions(selected);
+      const showNarrationText = !hasLines || source.kind === SUBTITLE_SOURCE_KIND.narration;
+      // 同一対象の字幕が複数あると同じ文が2か所に出る（許容＋やんわり注意・§2-5・ADR-0029）。
+      const sameTargetCount = (selected.freeLayout ?? []).filter(
+        (e) => e.kind === FREE_ELEMENT_KIND.subtitle && subtitleSourceToValue(e.subtitleSource ?? defaultSubtitleSource(selected)) === sourceValue,
+      ).length;
+      return (
+        <>
+          <div className="field" style={{ marginBottom: 6 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕の対象</label>
+            {hasLines ? (
+              <select className="select" value={sourceValue} onChange={(e) => patchFreeEl(el.id, { subtitleSource: subtitleSourceFromValue(e.target.value) })}>
+                <option value="narration">読み上げ（この場面の字幕）</option>
+                <option value="allLines">全部のセリフ</option>
+                {speakerOpts.map((o) => {
+                  const v = subtitleSourceToValue({ kind: SUBTITLE_SOURCE_KIND.speaker, speaker: o.key });
+                  return <option key={v} value={v}>{o.label}のセリフ</option>;
+                })}
+              </select>
+            ) : (
+              <p className="field-hint" style={{ marginTop: 0 }}>この場面は読み上げ（1人）です。下の「字幕の文」が字幕になります。</p>
+            )}
+            {sameTargetCount > 1 && (
+              <p className="field-hint" style={{ marginTop: 4 }}>同じ対象の字幕が他にもあります。同じ文が2か所に出ます。</p>
+            )}
+          </div>
+          {showNarrationText && (
+            <div className="field" style={{ marginBottom: 6 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕の文</label>
+              <input className="input" value={selected.texts.subtitle ?? ""} {...textGroup} onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))} />
+            </div>
+          )}
+          {/* 見た目（文字の体裁を流用・文言は対象から解決ゆえ「文字」入力は無し） */}
+          <div className="row gap-sm" style={{ marginBottom: 6 }}>
+            <NumberField label="文字の大きさ" value={el.fontSize ?? 52} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              <input type="color" value={el.color ?? "#ffffff"} onChange={(e) => patchFreeEl(el.id, { color: e.target.value })} />
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
+              <select className="select" value={el.fontWeight ?? FONT_WEIGHT.bold} onChange={(e) => patchFreeEl(el.id, { fontWeight: e.target.value as FontWeight })}>
+                <option value={FONT_WEIGHT.normal}>標準</option>
+                <option value={FONT_WEIGHT.bold}>太字</option>
+              </select>
+            </div>
+          </div>
+          <div className="field" style={{ marginBottom: 6 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
+            <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
+          </div>
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+            <NumberField label="行間" value={el.lineHeight ?? 1.3} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>揃え</label>
+              <select className="select" value={el.textAlign ?? TEXT_ALIGN.center} onChange={(e) => patchFreeEl(el.id, { textAlign: e.target.value as TextAlign })}>
+                <option value={TEXT_ALIGN.left}>左</option>
+                <option value={TEXT_ALIGN.center}>中央</option>
+                <option value={TEXT_ALIGN.right}>右</option>
+              </select>
+            </div>
+          </div>
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+            <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
               <input type="color" value={el.strokeColor ?? "#000000"} onChange={(e) => patchFreeEl(el.id, { strokeColor: e.target.value })} />
             </div>
           </div>
@@ -1089,9 +1172,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
               {/* オーバーレイは ScenePreview の fit 箱内に重なる（#273）。editPopover は position:fixed のため外側 relative は不要。 */}
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
-              {/* boundaryFrame＝先頭フレームの実効状態（sceneSegmentSpecs 準拠＝0 秒行除外・頭の間・全 0 秒フォールバック）。
-                  切替プレビュー B と同値に揃え、書き出しの先頭フレームに一致させる（#408 レビュー P1）。 */}
-              <ScenePreview scene={selected} template={template} boundaryFrame={selected ? firstFrameBoundary(selected, lineDurationsFromAudio(selected, narrationAudioById)) : undefined} subtitleSegment={selected ? sceneSegmentSpecs(selected, lineDurationsFromAudio(selected, narrationAudioById))[0] : undefined} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
+              {/* boundaryFrame（通常テンプレ字幕/クレジット）と subtitleSegment（FREE 字幕）は再生時刻の同一セグメント（motionSubtitleAt）。
+                  停止中は t=0＝先頭（0 秒行除外・頭の間・全 0 秒フォールバックは sceneSegmentSpecs 準拠）、再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1）。 */}
+              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview
@@ -1472,6 +1555,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </button>
                   <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.shape)}>
                     <PlusIcon size={14} />図形
+                  </button>
+                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.subtitle)}>
+                    <PlusIcon size={14} />字幕
                   </button>
                   <button
                     className="btn btn-ghost btn-icon text-sm"
