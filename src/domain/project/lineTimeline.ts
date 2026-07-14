@@ -189,3 +189,18 @@ export function lastFrameBoundary(scene: Scene, lineDurations: Record<string, nu
   const specs = sceneSegmentSpecs(scene, lineDurations);
   return boundaryFrameFromSpec(scene, specs[specs.length - 1]);
 }
+
+/**
+ * 場面編集の「動き」再生で、現在時刻 t の字幕入力（通常テンプレ字幕＝boundary／FREE 字幕＝segment）をまとめて返す（#527 P1）。
+ * t=0（停止中）は先頭セグメント＝従来の静止表示に一致。再生中は `segmentAt(t)` で掛け合いの現在行に追従し、
+ * 通常字幕・FREE 字幕・クレジットの3者へ**同一セグメント**を渡す＝書き出し（`sceneSegmentSpecs` をフレーム時刻で駆動）と一致（ADR-0029/0001）。
+ * 先頭を固定（`sceneSegmentSpecs[0]`／`firstFrameBoundary`）にすると、アニメ中に2行目へ切り替わる掛け合いでプレビューだけ頭のままになる（#527 P1）。
+ */
+export function motionSubtitleAt(
+  scene: Scene,
+  lineDurations: Record<string, number>,
+  t: number,
+): { segment: SceneSegmentSpec; boundary: BoundaryFrame } {
+  const segment = segmentAt(scene, lineDurations, t);
+  return { segment, boundary: boundaryFrameFromSpec(scene, segment) };
+}

@@ -34,7 +34,7 @@ import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
-import { firstFrameBoundary, sceneSegmentSpecs } from "../../domain/project/lineTimeline";
+import { motionSubtitleAt } from "../../domain/project/lineTimeline";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
@@ -330,6 +330,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 「動き」（簡易アニメ・ADR-0019）をこの場で再生確認する（#408 Part 1・仕上がり確認への往復をなくす）。
   // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
   const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
+  // 「動き」再生の現在時刻に対応する字幕入力（通常テンプレ字幕＝boundary／FREE 字幕＝segment／クレジットへ**同一セグメント**）。
+  // 停止中 t=0＝先頭（静止と一致）／再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1・ADR-0029/0001）。先頭固定にしない。
+  const motionSubtitle = selected
+    ? motionSubtitleAt(selected, lineDurationsFromAudio(selected, narrationAudioById), motionPreview.timeSec)
+    : undefined;
   // 切替効果（トランジション）の単境界プレビュー（#408 Part 2）。A=直前場面（表示順）→ B=この場面。
   // 実効 D は書き出しと同じ全場面 transitionTimeline で解決するため、hook には scenes 全体と当該場面の添字を渡す
   // （直前場面が短い場合も書き出しと一致＝#408 レビュー P1）。先頭場面（selectedIdx<=0）は非活性。
@@ -712,7 +717,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕の対象</label>
             {hasLines ? (
               <select className="select" value={sourceValue} onChange={(e) => patchFreeEl(el.id, { subtitleSource: subtitleSourceFromValue(e.target.value) })}>
-                <option value="narration">読み上げ（動画全体の字幕）</option>
+                <option value="narration">読み上げ（この場面の字幕）</option>
                 <option value="allLines">全部のセリフ</option>
                 {speakerOpts.map((o) => {
                   const v = subtitleSourceToValue({ kind: SUBTITLE_SOURCE_KIND.speaker, speaker: o.key });
@@ -1167,9 +1172,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
               {/* オーバーレイは ScenePreview の fit 箱内に重なる（#273）。editPopover は position:fixed のため外側 relative は不要。 */}
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
-              {/* boundaryFrame＝先頭フレームの実効状態（sceneSegmentSpecs 準拠＝0 秒行除外・頭の間・全 0 秒フォールバック）。
-                  切替プレビュー B と同値に揃え、書き出しの先頭フレームに一致させる（#408 レビュー P1）。 */}
-              <ScenePreview scene={selected} template={template} boundaryFrame={selected ? firstFrameBoundary(selected, lineDurationsFromAudio(selected, narrationAudioById)) : undefined} subtitleSegment={selected ? sceneSegmentSpecs(selected, lineDurationsFromAudio(selected, narrationAudioById))[0] : undefined} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
+              {/* boundaryFrame（通常テンプレ字幕/クレジット）と subtitleSegment（FREE 字幕）は再生時刻の同一セグメント（motionSubtitleAt）。
+                  停止中は t=0＝先頭（0 秒行除外・頭の間・全 0 秒フォールバックは sceneSegmentSpecs 準拠）、再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1）。 */}
+              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { activeLineIndexAt, firstFrameBoundary, lastFrameBoundary, lineSegments, previewSubtitleSegment, resolveLineSubtitle, sceneSegmentSpecs, segmentAt } from './lineTimeline';
+import { activeLineIndexAt, firstFrameBoundary, lastFrameBoundary, lineSegments, motionSubtitleAt, previewSubtitleSegment, resolveLineSubtitle, sceneSegmentSpecs, segmentAt } from './lineTimeline';
 import type { NarrationLine, Scene } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -234,6 +234,38 @@ describe('segmentAt（ADR-0029・字幕解決の正準入力＝sceneSegmentSpecs
     expect(segmentAt(s, {}, 1)).toMatchObject({ isGap: true }); // [0,2) は間
     expect(segmentAt(s, {}, 1).lineId).toBeUndefined();
     expect(segmentAt(s, {}, 2).lineId).toBe('line_001'); // [2,10] は行
+  });
+});
+
+describe('motionSubtitleAt（#527 P1・「動き」再生の字幕は時刻追従＝先頭固定にしない・書き出しと一致）', () => {
+  const lines: NarrationLine[] = [
+    { lineId: 'line_001', text: 'あ', subtitleText: '字幕1', speaker: 3, status: NARRATION_STATUS.none },
+    { lineId: 'line_002', text: 'い', subtitleText: '字幕2', speaker: 2, status: NARRATION_STATUS.none },
+  ];
+  const durs = { line_001: 3, line_002: 4 }; // [0,3),[3,10]
+
+  it('t=0（停止相当）は先頭セグメント＝firstFrameBoundary と同値（静止表示の後方互換）', () => {
+    const s = sceneWith({ lines });
+    const r = motionSubtitleAt(s, durs, 0);
+    expect(r.segment.lineId).toBe('line_001');
+    expect(r.boundary).toEqual(firstFrameBoundary(s, durs)); // 停止時は従来の先頭フレームと一致
+  });
+
+  it('アニメ中に2行目の窓へ入ると segment・通常字幕・クレジット行が2行目へ追従（先頭固定の回帰防止）', () => {
+    const s = sceneWith({ lines });
+    expect(motionSubtitleAt(s, durs, 2.9).segment.lineId).toBe('line_001');
+    const r = motionSubtitleAt(s, durs, 3); // line_002 の窓 [3,10]
+    expect(r.segment.lineId).toBe('line_002'); // FREE 字幕の対象解決に渡すセグメント
+    expect(r.boundary.subtitleText).toBe('字幕2'); // 通常テンプレ字幕も2行目
+    expect(r.boundary.creditLine).toEqual(lines[1]); // クレジット行（話者連動）も2行目
+  });
+
+  it('頭空白（先頭行 startSec>0）の t は間（isGap）＝字幕なし（間は表示しない）', () => {
+    const gap = sceneWith({ lines: [{ lineId: 'line_001', text: 'A', startSec: 2, status: NARRATION_STATUS.none }] });
+    const r = motionSubtitleAt(gap, {}, 1); // [0,2) は間
+    expect(r.segment.isGap).toBe(true);
+    expect(r.boundary.subtitleText).toBeNull();
+    expect(r.boundary.creditLine).toBeUndefined();
   });
 });
 
