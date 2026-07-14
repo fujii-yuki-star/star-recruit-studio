@@ -64,7 +64,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
-  const { assets, scenes, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
+  const { assets, scenes, templates, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -84,7 +84,8 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // 右パネルは「表示中（フィルタ後）」の中からだけ選ぶ＝フィルタ0件のとき別フィルタの素材を出さない（#413）。
   const selected = pickPanelAsset(visible, selectedId);
   // この素材を使っている場面（逆引き・#406）。削除確認の件数（#383）と「使用場面」バッジで共有する。
-  const usedScenes = selected ? scenesUsingAsset(scenes, selected.assetId) : [];
+  // 実効テンプレでゲート＝FREE→通常で休眠した素材を「使用場面」に出さない・事前確認と同一規則（ADR-0030）。
+  const usedScenes = selected ? scenesUsingAsset(scenes, selected.assetId, (s) => templates.find((t) => t.templateId === s.templateId)) : [];
   const usedSceneCount = usedScenes.length;
   // 使用場面バッジを押したら、その場面の編集を開く（editingSceneId 機構＝#400・DraftScreen と同方式）。
   const jumpToScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };

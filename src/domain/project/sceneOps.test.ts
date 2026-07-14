@@ -377,6 +377,8 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
       layer('mainVisual', 'slot', { x: 100, y: 200, w: 800, h: 600, rotation: 15, zIndex: 2, fit: 'cover' }),
       layer('logo', 'logo', { x: 50, y: 50, w: 120, h: 120 }),
       layer('title', 'text', { textKey: 'title', x: 200, y: 900, w: 1500, h: 120, fontSize: 64, color: '#ffffff', fontWeight: 'bold' }),
+      layer('subtitle', 'subtitle', { textKey: 'subtitle', x: 100, y: 980, w: 1720, h: 80, fontSize: 48, color: '#ffffff' }),
+      layer('yuko', 'character', { x: 1300, y: 300, w: 500, h: 700, fit: 'contain' }),
       layer('emptySlot', 'slot', { x: 0, y: 0, w: 10, h: 10 }), // 素材なし＝変換されない
       layer('decor', 'shape', { x: 0, y: 0, w: 100, h: 100 }), // 装飾＝対象外
     ],
@@ -427,9 +429,41 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(r.freeLayout).toEqual(freeSc.freeLayout);
   });
 
-  it('freeLayoutFromPlacedContent 単体：素材ありスロットと文字層のみを幾何ごと変換', () => {
-    const els = freeLayoutFromPlacedContent(richScene(), prevTemplate());
-    expect(els.filter((e) => e.kind === 'slot')).toHaveLength(3);
-    expect(els.filter((e) => e.kind === 'text')).toHaveLength(1);
+  it('通常→FREE：動画クリップ調整（slotClips）を新 FREE 要素 id へ移送（#524 P1）', () => {
+    const sc = { ...richScene(), slotClips: { mainVisual: { startSec: 1, endSec: 5, speed: 1.5 } } } as Scene;
+    const r = switchSceneTemplate(sc, 'free_v1', [], 'free', prevTemplate());
+    const mv = (r.freeLayout ?? []).find((e) => e.assetId === 'asset_v')!;
+    expect(r.slotClips?.[mv.id]).toEqual({ startSec: 1, endSec: 5, speed: 1.5 }); // 新 id でクリップ設定が読める
+  });
+
+  it('通常→FREE：立ち絵（poseAssetId）を slot 要素で持ち込み・scene.character は休眠保持（#524 P1）', () => {
+    const sc = { ...richScene(), character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_yuko' } } as Scene;
+    const r = switchSceneTemplate(sc, 'free_v1', [], 'free', prevTemplate());
+    const pose = (r.freeLayout ?? []).find((e) => e.assetId === 'asset_yuko');
+    expect(pose).toMatchObject({ kind: 'slot', x: 1300, y: 300, w: 500, h: 700, fit: 'contain' });
+    expect(r.character.poseAssetId).toBe('asset_yuko'); // 休眠保持（往復で通常へ戻すと立ち絵が戻る）
+  });
+
+  it('通常→FREE：字幕層を subtitle 要素へ（単独=narration／掛け合い=allLines・#524 P1）', () => {
+    const single = { ...richScene(), texts: { title: 'タイトル', main: '本文', subtitle: '字幕テキスト' } } as Scene;
+    const subS = (switchSceneTemplate(single, 'free_v1', [], 'free', prevTemplate()).freeLayout ?? []).find((e) => e.kind === 'subtitle');
+    expect(subS).toMatchObject({ x: 100, y: 980, subtitleSource: { kind: 'narration' } });
+    const dialogue = { ...richScene(), lines: [{ lineId: 'line_001', text: 'A', status: 'none' }] } as Scene;
+    const subD = (switchSceneTemplate(dialogue, 'free_v1', [], 'free', prevTemplate()).freeLayout ?? []).find((e) => e.kind === 'subtitle')!;
+    expect(subD.subtitleSource).toEqual({ kind: 'allLines' });
+  });
+
+  it('字幕が出ない単独場面（subtitle 空）は subtitle 要素を作らない', () => {
+    const r = switchSceneTemplate(richScene(), 'free_v1', [], 'free', prevTemplate()); // texts.subtitle なし・lines なし
+    expect((r.freeLayout ?? []).some((e) => e.kind === 'subtitle')).toBe(false);
+  });
+
+  it('freeLayoutFromPlacedContent 単体：{elements, slotClips} を返す（slotClips 移送マップ）', () => {
+    const sc = { ...richScene(), slotClips: { mainVisual: { speed: 2 } } } as Scene;
+    const { elements, slotClips } = freeLayoutFromPlacedContent(sc, prevTemplate());
+    expect(elements.filter((e) => e.kind === 'slot')).toHaveLength(3);
+    expect(elements.filter((e) => e.kind === 'text')).toHaveLength(1);
+    const mv = elements.find((e) => e.assetId === 'asset_v')!;
+    expect(slotClips[mv.id]).toEqual({ speed: 2 });
   });
 });

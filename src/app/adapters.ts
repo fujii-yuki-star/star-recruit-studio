@@ -3,6 +3,7 @@
 import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
 import { HEIGHT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
+import { sceneActiveAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
@@ -119,15 +120,9 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   );
 
   const used = new Set<string>();
+  // 実効表現だけを「使用中」と数える（休眠は除外）＝逆引き（MaterialsScreen）・削除確認と同一規則（ADR-0030・sceneActiveAssetIds）。
   for (const s of scenes) {
-    // 実効表現だけを「使用中」と数える（ADR-0030）：FREE 場面は freeLayout[].assetId（ADR-0008）、通常場面は assetRefs。
-    // 休眠側（通常場面に残った freeLayout／FREE 場面の assetRefs）は描画されないので数えない＝切替後の誤カウント（P2）を防ぐ。
-    if (templateOf(s)?.category === FREE_CATEGORY) {
-      for (const el of s.freeLayout ?? []) if (el.assetId) used.add(el.assetId);
-    } else {
-      for (const value of Object.values(s.assetRefs)) if (value) used.add(value);
-    }
-    if (s.character.poseAssetId) used.add(s.character.poseAssetId);
+    for (const id of sceneActiveAssetIds(s, templateOf(s))) used.add(id);
   }
   const unused = assets.filter((a) => !used.has(a.assetId)).length;
   items.push(

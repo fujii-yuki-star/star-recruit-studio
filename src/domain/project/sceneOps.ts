@@ -3,10 +3,11 @@
 // scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
 import { SCENE_MIN_DURATION_SEC } from '../constants';
-import { FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS } from '../enums';
+import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } from '../enums';
 import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
 import { createFreeElementId } from './persistence';
+import { defaultSubtitleSource } from './subtitleBinding';
 import type { FreeElement, Part, Scene } from './types';
 
 /** 各パートの sceneIds を、現在の scenes 配列順（パート所属は保持）に合わせて作り直す。 */
@@ -49,8 +50,8 @@ export function switchSceneTemplate(
   const keptFits = scene.slotFits
     ? Object.fromEntries(Object.entries(scene.slotFits).filter(([k]) => slotIds.has(k)))
     : undefined;
-  // 通常→FREE：表示中の配置内容（スロット素材＋文字）を freeLayout へ seed（空のときだけ・ADR-0030）。旧テンプレの幾何が要る。
-  const seededFreeLayout =
+  // 通常→FREE：表示中の配置内容（スロット素材＋文字＋字幕＋立ち絵）を freeLayout へ seed（空のときだけ・ADR-0030）。旧テンプレの幾何が要る。
+  const seeded =
     newCategory === FREE_CATEGORY &&
     prevTemplate &&
     prevTemplate.category !== FREE_CATEGORY &&
@@ -64,22 +65,36 @@ export function switchSceneTemplate(
     assetRefs: Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k))),
     slotFits: keptFits && Object.keys(keptFits).length ? keptFits : undefined,
     // 通常→FREE の seed 結果があれば freeLayout を差し替え（空 seed・非該当は ...scene の freeLayout を休眠保持）。
-    ...(seededFreeLayout && seededFreeLayout.length ? { freeLayout: seededFreeLayout } : {}),
+    ...(seeded && seeded.elements.length ? { freeLayout: seeded.elements } : {}),
+    // 動画クリップ調整（範囲/速度/元音声）を旧層 id → 新 FREE 要素 id へ移送（#524 P1）。旧キーは休眠のまま残す（往復）。
+    ...(seeded && Object.keys(seeded.slotClips).length ? { slotClips: { ...scene.slotClips, ...seeded.slotClips } } : {}),
     // texts / textFontIds は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。
     warnings: [],
   };
 }
 
 /**
- * 通常テンプレの「表示中の配置内容」を FREE 要素へ変換する（ADR-0030・通常→FREE の seed 用）。
- * スロット層（background/slot/logo）に置かれた素材（`assetRefs`）と文字層（text）のテキスト（`texts`）を、
- * 旧テンプレのレイヤー幾何（x/y/w/h/rotation/zIndex）ごと FreeElement（slot/text）へ写す。純粋関数。
- * - 空スロット（素材なし）・空文字は変換しない（表示されていないものは持ち込まない）。
- * - 立ち絵（`scene.character`）・装飾レイヤー（shape/背景色）は対象外＝データは `...scene` で保持（ADR-0030 未解決）。
+ * 通常テンプレの「表示中の配置内容」を FREE 要素へ変換する（ADR-0030・通常→FREE の seed 用）。純粋関数。
+ * 旧テンプレのレイヤー幾何（x/y/w/h/rotation/zIndex）ごと、以下を FreeElement へ写す（表示されていないものは持ち込まない）:
+ * - スロット層（background/slot/logo）の素材（`assetRefs`）→ slot 要素。**動画クリップ調整（`slotClips`）は新 id へ移送**（#524 P1）。
+ * - 立ち絵層（character）の `scene.character.poseAssetId` → slot 要素（画像）。`scene.character` は休眠保持（往復で戻る・#524 P1）。
+ * - 文字層（text）のテキスト（`texts`）→ text 要素。
+ * - 字幕層（subtitle）→ subtitle 要素（`subtitleSource`＝単独 narration／掛け合い allLines・ADR-0029）。字幕が出る場面のみ（#524 P1）。
+ * 装飾レイヤー（shape/背景色）は対象外＝意匠。字幕の背景帯（`layer.background`）は FreeElement に無く引き継がない（既知の軽微差）。
+ * 戻り値の `slotClips` は「新 FREE 要素 id → クリップ調整」（呼び出し側 `switchSceneTemplate` が既存 `slotClips` へマージ）。
  */
-export function freeLayoutFromPlacedContent(scene: Scene, template: Template): FreeElement[] {
-  const out: FreeElement[] = [];
-  const nextId = (): string => createFreeElementId(out.map((e) => e.id));
+export function freeLayoutFromPlacedContent(
+  scene: Scene,
+  template: Template,
+): { elements: FreeElement[]; slotClips: NonNullable<Scene['slotClips']> } {
+  const elements: FreeElement[] = [];
+  const slotClips: NonNullable<Scene['slotClips']> = {};
+  const nextId = (): string => createFreeElementId(elements.map((e) => e.id));
+  // 字幕を出す場面か（単独＝texts.subtitle が非空かつ OFF でない／掛け合い＝行がある）。出ない場面は空の字幕要素を作らない。
+  const hasLines = (scene.lines?.length ?? 0) > 0;
+  const staticSubtitle = scene.texts[TEXT_KEY.subtitle];
+  const showsSubtitle =
+    hasLines || (!!staticSubtitle && staticSubtitle.length > 0 && scene.subtitleEnabledDefault !== false);
   for (const layer of template.layers) {
     const geom = {
       x: layer.x,
@@ -92,11 +107,19 @@ export function freeLayoutFromPlacedContent(scene: Scene, template: Template): F
     if (layer.type === 'background' || layer.type === 'slot' || layer.type === 'logo') {
       const assetId = scene.assetRefs[layer.id];
       if (!assetId) continue; // 空スロットは持ち込まない
-      out.push({ id: nextId(), kind: FREE_ELEMENT_KIND.slot, ...geom, assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit });
+      const id = nextId();
+      elements.push({ id, kind: FREE_ELEMENT_KIND.slot, ...geom, assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit });
+      const clip = scene.slotClips?.[layer.id];
+      if (clip) slotClips[id] = clip; // 動画クリップ調整を新 id へ移送（#524 P1）
+    } else if (layer.type === 'character') {
+      const poseId = scene.character?.poseAssetId;
+      if (!poseId) continue; // ポーズ未設定は持ち込まない
+      // 立ち絵は slot 要素（画像）で持ち込む＝FREE で見えて自由に動かせる。scene.character は休眠保持（往復で戻る）。
+      elements.push({ id: nextId(), kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: poseId, fit: layer.fit ?? FIT.contain });
     } else if (layer.type === 'text' && layer.textKey) {
       const text = scene.texts[layer.textKey];
       if (!text) continue; // 空文字は持ち込まない
-      out.push({
+      elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.text,
         ...geom,
@@ -108,9 +131,24 @@ export function freeLayoutFromPlacedContent(scene: Scene, template: Template): F
         ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
         ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
       });
+    } else if (layer.type === 'subtitle') {
+      if (!showsSubtitle) continue; // 字幕が出ない場面は空の字幕要素を作らない
+      // 表示文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。単独→narration／掛け合い→allLines。
+      elements.push({
+        id: nextId(),
+        kind: FREE_ELEMENT_KIND.subtitle,
+        ...geom,
+        subtitleSource: defaultSubtitleSource(scene),
+        fontSize: layer.fontSize,
+        color: layer.color,
+        fontWeight: layer.fontWeight,
+        fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
+        ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
+        ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+      });
     }
   }
-  return out;
+  return { elements, slotClips };
 }
 
 /** order を配列順に 1..N で振り直す。 */
