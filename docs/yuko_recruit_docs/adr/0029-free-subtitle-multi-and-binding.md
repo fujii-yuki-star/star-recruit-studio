@@ -1,6 +1,6 @@
 # ADR-0029: FREE 自由配置の「字幕」要素＝複数配置＋対象（読み上げ／話者）への紐づけ
 
-- **状態**: Accepted（2026-07-14・#520 で設計3論点確定＋利用者スコープ決定／実装は段階＝PR-A 済）
+- **状態**: Accepted（2026-07-14・#520 で設計3論点確定＋利用者スコープ決定／実装は段階＝**PR-A+B 済**＝模型＋描画を #521 で一括・UI は PR-C）
 - **日付**: 2026-07-14
 - **関連**: [`adr/0008`](0008-free-layout-editor.md)（FREE 自由配置・`scene.freeLayout`）/ [`adr/0015`](0015-dialogue-timeline-model.md)（掛け合い＝セリフ列・`sceneLines()`・行ごと `speaker`/`subtitleText`/`subtitleEnabled`）/ [`adr/0001`](0001-rendering-parity.md)（プレビュー＝書き出しのパリティ）/ [`adr/0023`](0023-integrated-timeline-editing.md)（α-5 統合タイムライン）/ `11_SCHEMA_REFERENCE.md §7`（FreeElement）/ `schemas/project.schema.json`（`$defs.FreeElement`）/ `CLAUDE.md §2-3, §10, §11`
 - **対象**: #518（FREE 字幕要素・**再スコープ元**）→ 本 ADR 承認後に新 EPIC を起票（α-5 目標・0.4.x で前倒しも可）
@@ -139,8 +139,8 @@ function resolveSubtitleForElement(el: FreeElementSubtitle, scene: Scene, moment
 ## 実装計画（サブ PR・各 PR で `check:frontend` 緑＋`/canon-check`）
 
 1. **本 ADR**（合意）＋ 新 EPIC 起票（#518 を再スコープ）。
-2. **PR-A モデル＋解決【実装済・schema 1.20】**：`SubtitleSource`／`SpeakerKey` 判別 union（`types.ts`）・domain 定数（`SUBTITLE_SOURCE_KIND`/`SPEAKER_KEY_KIND`・`enums.ts`）、**共通 `segmentAt(scene, lineDurations, t)`＝`sceneSegmentSpecs` を直接正準入力にする（P1-1・`lineTimeline.ts`）**、**正準状態 `SubtitleMoment{segment}`＋`effectiveSpeakerKey(line)`＋`resolveSubtitleForElement(el, scene, moment)`（`subtitleBinding.ts`）**、`FreeElement.kind='subtitle'`＋`subtitleSource`（schema additive 1.19→1.20・`createFreeElement` に字幕バー既定）、検証（許可/拒否）。**挙動不変**（描画/UI は未接続＝PR-B/PR-C）。純粋ロジックのフルテスト済（`segmentAt(t)` が `sceneSegmentSpecs` の同区間・間/0秒行で `isGap`／`effectiveSpeakerKey` が `resolveLineVoice` の catalog/default と一致）。
-3. **PR-B 描画（複数対象）**：`layout.ts` の `subtitle` 要素を `SubtitleMoment` 経由の対象解決へ（`FREE_ELEMENT_KIND.subtitle` 参照＝#518 P3 の enum 直書き是正も同時）。**プレビューは `segmentAt(scene, lineDurations, t)`、書き出しは `sceneSegmentSpecs` の現在セグメントから同じ `moment` を作る（字幕解決に `activeLineIndexAt` は使わない）**（別経路の再判定を作らない）。単独／掛け合い／複数ボックスの golden（プレビュー＝書き出し一致）。
+2. **PR-A モデル＋解決【実装済・schema 1.20】**：`SubtitleSource`／`SpeakerKey` 判別 union（`types.ts`）・domain 定数（`SUBTITLE_SOURCE_KIND`/`SPEAKER_KEY_KIND`・`enums.ts`）、**共通 `segmentAt(scene, lineDurations, t)`＝`sceneSegmentSpecs` を直接正準入力にする（P1-1・`lineTimeline.ts`）**、**正準状態 `SubtitleMoment{segment}`＋`effectiveSpeakerKey(line)`＋`resolveSubtitleForElement(el, scene, moment)`（`subtitleBinding.ts`）**、`FreeElement.kind='subtitle'`＋`subtitleSource`（schema additive 1.19→1.20・`createFreeElement` に字幕バー既定）、検証（許可/拒否）。**PR-B（描画）と同一 PR（#521）で一括**＝レビュー指摘「save-able な schema を描画未接続で単独マージしない」（ADR 自身の「機能PR一括バンプ」）に沿う。UI は PR-C。純粋ロジックのフルテスト済（`segmentAt(t)` が `sceneSegmentSpecs` の同区間・間/0秒行で `isGap`／`effectiveSpeakerKey` が `resolveLineVoice` の catalog/default と一致）。
+3. **PR-B 描画【実装済・#521 で PR-A と一括】**：`layout.ts` の FREE `case FREE_ELEMENT_KIND.subtitle`＝`resolveSubtitleForElement(el, scene, {segment})` で対象解決し `isSubtitle:true` の text item を積む（＝「字幕を出さない」書き出し `withSubtitle=false` で除外／#518 P3 の enum 直書きも是正）。**書き出しは掛け合い3経路（video掛け合い・非video 静止・非video アニメ）で `subtitleSegment: spec` を渡す**（`buildExportScenes`）／**プレビューは端フレーム（boundaryFrame＝sceneSegmentSpecs 準拠）優先で `subtitleSegment` を作る**（`ScenePreview`）＝別経路の再判定を作らない。golden（単独/掛け合い allLines/speaker・間・非FREE ガード・プレビュー=書き出し一致）。
 4. **PR-C UI（複数＋対象選択）**：字幕要素の複数追加、要素ごとの「対象」選択（掛け合い時は**その場面に実在する実効話者キー**／全部）、単独読み上げの `texts.subtitle` 編集欄（#518 の欄を包含）。**右クリック「複製」を字幕でも自然に許可**（複数可ゆえ no-op 問題は消える）＝レビュー P1 も解消。同一対象重複のやんわり注意（§2-5）。コンポーネントテスト（単独＝入力欄／掛け合い＝話者紐づけ／複製が機能）。
 5. **PR-D（任意・α-5 判断）行→ボックス上書き (2b)＋参照切れ処理**：`NarrationLine.subtitleTarget` と割り当て UI。**有効な指定先がある行は指定先だけに排他表示（P2）／要素削除で指す行の `subtitleTarget` を解除して (2a) へ戻す（`freeLayoutOps`）／読込検証で壊れ参照を検知・修復（`15 §6` 警告）**。受け入れ条件＝**削除・壊れ参照でも字幕が消えず・指定先では二重表示しない**（テスト必須）。統合タイムライン（ADR-0023）と整合。
 

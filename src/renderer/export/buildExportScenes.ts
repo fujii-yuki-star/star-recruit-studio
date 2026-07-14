@@ -313,7 +313,7 @@ export async function buildExportScenes(
             const segCredit = segLine ? creditForLine(segLine, credit) : credit;
             const segLayout =
               spec.subtitleText !== undefined
-                ? layoutScene(scene, template, { subtitleText: spec.subtitleText })
+                ? layoutScene(scene, template, { subtitleText: spec.subtitleText, subtitleSegment: spec })
                 : layout;
             const segSplit = splitVideoSceneSvgMulti(
               segLayout,
@@ -650,6 +650,7 @@ export async function buildExportScenes(
               const frameLayout = layoutScene(scene, template, {
                 timeSec: spec.startSec + f / fps,
                 animations: sceneAnims,
+                subtitleSegment: spec, // FREE 字幕（ADR-0029）＝掛け合いの現在セグメントで対象解決（プレビュー=書き出し）
                 ...(segSubtitle !== undefined ? { subtitleText: segSubtitle } : {}),
               });
               const dataUrl = await svgToPngDataUrl(
@@ -672,7 +673,7 @@ export async function buildExportScenes(
             // 静止区間（従来）：字幕上書きがあれば行字幕で焼き直し、無ければ共有 layout を再利用。
             const segLayout =
               segSubtitle !== undefined
-                ? layoutScene(scene, template, { subtitleText: segSubtitle })
+                ? layoutScene(scene, template, { subtitleText: segSubtitle, subtitleSegment: spec })
                 : layout;
             const pngBase64 = await svgToPngDataUrl(
               layoutToSvg(segLayout, { assetSrc, itemFilter, credit: segCredit, fontFamily: sceneFontFamily }),

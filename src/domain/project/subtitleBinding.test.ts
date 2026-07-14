@@ -121,4 +121,14 @@ describe('resolveSubtitleForElement（対象解決・ADR-0029）', () => {
     expect(resolveSubtitleForElement(el, s, { segment: segmentAt(s, {}, 1) })).toBeNull(); // 間
     expect(resolveSubtitleForElement(el, s, { segment: segmentAt(s, {}, 5) })).toBe('A'); // 行
   });
+
+  it('全0秒行フォールバック：segmentAt は場面全体1セグメント（lineId なし）＝allLines は非表示・narration は texts.subtitle', () => {
+    // 全行 startSec===durationSec ＝全0秒 → sceneSegmentSpecs は場面全体1セグメント（行 id なし）＝書き出しと一致（ADR-0029 P1-1）。
+    const lines = [line('line_001', 'A', { speaker: 3, startSec: 10 })]; // durationSec(10) と同値ゆえ全0秒
+    const s = sceneWith({ lines, texts: { subtitle: '読み上げ' } });
+    const seg0 = segmentAt(s, {}, 0);
+    expect(seg0.lineId).toBeUndefined(); // フォールバック＝行 id なし
+    expect(resolveSubtitleForElement(subEl({ kind: 'allLines' }), s, { segment: seg0 })).toBeNull();
+    expect(resolveSubtitleForElement(subEl({ kind: 'narration' }), s, { segment: seg0 })).toBe('読み上げ');
+  });
 });

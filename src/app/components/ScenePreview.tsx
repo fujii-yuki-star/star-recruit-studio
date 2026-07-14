@@ -3,11 +3,12 @@ import type { CSSProperties, ReactNode } from "react";
 import type { ElementAnimation, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import type { Fit } from "../../domain/enums";
+import { FREE_CATEGORY } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME } from "../../domain/constants";
 import { layoutScene } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
-import { resolveLineSubtitle, type BoundaryFrame } from "../../domain/project/lineTimeline";
+import { resolveLineSubtitle, type BoundaryFrame, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
 import { containBox, fallbackWidthCss } from "./previewFit";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { resolveVideoStartDelaySec } from "../../domain/project/videoStartTiming";
@@ -253,13 +254,29 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   const hasTelops = !!(telops && telops.length > 0);
   // キーフレームアニメ（④・ADR-0019）＝再生位置 timeSec で補間して描く（書き出しと同一 layoutScene(t)＝パリティ）。
   const hasAnim = !!(animations && animations.length > 0);
-  const layoutOpts = applyLineSub || hasTelops || hasAnim
+  // FREE 字幕（ADR-0029）の対象解決用の「その瞬間のセグメント」。boundaryFrame（端フレーム＝sceneSegmentSpecs 準拠・書き出し一致）
+  // 優先、無ければ再生中の有効行。単独 narration（applyLineSub=false）は lineId/subtitleText なし＝narration が texts.subtitle を読む。
+  const isFreeTemplate = template.category === FREE_CATEGORY;
+  const subtitleLine = boundaryFrame ? boundaryFrame.creditLine : activeLine;
+  const subtitleSegment: SceneSegmentSpec | undefined = isFreeTemplate
+    ? {
+        startSec: 0,
+        durationSec: scene.durationSec,
+        isFirst: true,
+        ...(inGap ? { isGap: true } : {}),
+        ...(subtitleLine ? { lineId: subtitleLine.lineId } : {}),
+        ...(applyLineSub ? { subtitleText: subtitleOverride } : {}),
+      }
+    : undefined;
+  const layoutOpts = applyLineSub || hasTelops || hasAnim || subtitleSegment
     ? {
         // 字幕上書き（間/OFF は null・行は text）。undefined（テンプレ既定）は applyLineSub=false で載せない。
         ...(applyLineSub ? { subtitleText: subtitleOverride } : {}),
         // テロップは動画全体フォント（場面フォントに左右されない＝書き出しと一致・ADR-0001）。
         ...(hasTelops ? { telops, telopFontId: resolveFontId(null, fontId) } : {}),
         ...(hasAnim ? { timeSec: timeSec ?? 0, animations } : {}),
+        // FREE 字幕要素の対象解決（ADR-0029・掛け合いは行、単独は texts.subtitle）。
+        ...(subtitleSegment ? { subtitleSegment } : {}),
       }
     : undefined;
   // 常時クレジットは選択話者のキャラを動的に（#177）。掛け合いは有効行の話者に連動（#243・書き出しと一致）。
