@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
 import type { SceneSegmentSpec } from './lineTimeline';
 import { segmentAt } from './lineTimeline';
-import { defaultSubtitleSource, effectiveSpeakerKey, resolveSubtitleForElement, speakerKeyEquals } from './subtitleBinding';
+import { defaultSubtitleSource, effectiveSpeakerKey, resolveSubtitleForElement, sceneSubtitleSpeakerOptions, speakerKeyEquals, subtitleSourceFromValue, subtitleSourceToValue } from './subtitleBinding';
 import type { FreeElement, NarrationLine, Scene, SubtitleSource } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -135,5 +135,39 @@ describe('resolveSubtitleForElement（対象解決・ADR-0029）', () => {
     expect(seg0.lineId).toBeUndefined(); // フォールバック＝行 id なし
     expect(resolveSubtitleForElement(subEl({ kind: 'allLines' }), s, { segment: seg0 })).toBeNull();
     expect(resolveSubtitleForElement(subEl({ kind: 'narration' }), s, { segment: seg0 })).toBe('読み上げ');
+  });
+});
+
+describe('sceneSubtitleSpeakerOptions（対象＝話者の選択肢・PR-C）', () => {
+  it('掛け合いの実効話者を重複排除して返す（catalog はキャラ名・default は既定の声・登場順）', () => {
+    const lines = [
+      line('line_001', 'A', { speaker: 3 }), // ずんだもん
+      line('line_002', 'B', { speaker: 3 }), // 重複＝1件に
+      line('line_003', 'C', { speaker: 2 }), // 四国めたん
+      line('line_004', 'D'),                 // 既定の声（speaker なし）
+    ];
+    const opts = sceneSubtitleSpeakerOptions(sceneWith({ lines }));
+    expect(opts.map((o) => o.label)).toEqual(['ずんだもん', '四国めたん', '既定の声']);
+    expect(opts.map((o) => o.key)).toEqual([
+      { kind: 'catalog', speaker: 3 }, { kind: 'catalog', speaker: 2 }, { kind: 'default' },
+    ]);
+  });
+});
+
+describe('subtitleSourceToValue / subtitleSourceFromValue（UI シリアライズ・PR-C）', () => {
+  const cases: [SubtitleSource, string][] = [
+    [{ kind: 'narration' }, 'narration'],
+    [{ kind: 'allLines' }, 'allLines'],
+    [{ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } }, 'speaker:catalog:3'],
+    [{ kind: 'speaker', speaker: { kind: 'default' } }, 'speaker:default'],
+  ];
+  it('往復（source→value→source）で一致', () => {
+    for (const [src, val] of cases) {
+      expect(subtitleSourceToValue(src)).toBe(val);
+      expect(subtitleSourceFromValue(val)).toEqual(src);
+    }
+  });
+  it('未知値は narration へフォールバック（黙って壊さない）', () => {
+    expect(subtitleSourceFromValue('bogus')).toEqual({ kind: 'narration' });
   });
 });

@@ -6,13 +6,14 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, VideoStartSpec } from
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
 import type { GroupTransform } from "../../domain/group/types";
@@ -688,6 +689,83 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</label>
+              <input type="color" value={el.strokeColor ?? "#000000"} onChange={(e) => patchFreeEl(el.id, { strokeColor: e.target.value })} />
+            </div>
+          </div>
+        </>
+      );
+    }
+    if (el.kind === FREE_ELEMENT_KIND.subtitle) {
+      // 字幕要素（ADR-0029）：表示文言は「対象」から解決＝「文字」入力は持たない。対象＝読み上げ/全部のセリフ/話者ごと。
+      const hasLines = (selected.lines?.length ?? 0) > 0;
+      const source = el.subtitleSource ?? defaultSubtitleSource(selected);
+      const sourceValue = subtitleSourceToValue(source);
+      const speakerOpts = sceneSubtitleSpeakerOptions(selected);
+      const showNarrationText = !hasLines || source.kind === SUBTITLE_SOURCE_KIND.narration;
+      // 同一対象の字幕が複数あると同じ文が2か所に出る（許容＋やんわり注意・§2-5・ADR-0029）。
+      const sameTargetCount = (selected.freeLayout ?? []).filter(
+        (e) => e.kind === FREE_ELEMENT_KIND.subtitle && subtitleSourceToValue(e.subtitleSource ?? defaultSubtitleSource(selected)) === sourceValue,
+      ).length;
+      return (
+        <>
+          <div className="field" style={{ marginBottom: 6 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕の対象</label>
+            {hasLines ? (
+              <select className="select" value={sourceValue} onChange={(e) => patchFreeEl(el.id, { subtitleSource: subtitleSourceFromValue(e.target.value) })}>
+                <option value="narration">読み上げ（動画全体の字幕）</option>
+                <option value="allLines">全部のセリフ</option>
+                {speakerOpts.map((o) => {
+                  const v = subtitleSourceToValue({ kind: SUBTITLE_SOURCE_KIND.speaker, speaker: o.key });
+                  return <option key={v} value={v}>{o.label}のセリフ</option>;
+                })}
+              </select>
+            ) : (
+              <p className="field-hint" style={{ marginTop: 0 }}>この場面は読み上げ（1人）です。下の「字幕の文」が字幕になります。</p>
+            )}
+            {hasLines && sameTargetCount > 1 && (
+              <p className="field-hint" style={{ marginTop: 4 }}>同じ対象の字幕が他にもあります。同じ文が2か所に出ます。</p>
+            )}
+          </div>
+          {showNarrationText && (
+            <div className="field" style={{ marginBottom: 6 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕の文</label>
+              <input className="input" value={selected.texts.subtitle ?? ""} {...textGroup} onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))} />
+            </div>
+          )}
+          {/* 見た目（文字の体裁を流用・文言は対象から解決ゆえ「文字」入力は無し） */}
+          <div className="row gap-sm" style={{ marginBottom: 6 }}>
+            <NumberField label="文字の大きさ" value={el.fontSize ?? 52} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
+              <input type="color" value={el.color ?? "#ffffff"} onChange={(e) => patchFreeEl(el.id, { color: e.target.value })} />
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
+              <select className="select" value={el.fontWeight ?? FONT_WEIGHT.bold} onChange={(e) => patchFreeEl(el.id, { fontWeight: e.target.value as FontWeight })}>
+                <option value={FONT_WEIGHT.normal}>標準</option>
+                <option value={FONT_WEIGHT.bold}>太字</option>
+              </select>
+            </div>
+          </div>
+          <div className="field" style={{ marginBottom: 6 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>フォント</label>
+            <FontPicker value={el.fontId} onChange={(id) => patchFreeEl(el.id, { fontId: id })} allowInherit />
+          </div>
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+            <NumberField label="行間" value={el.lineHeight ?? 1.3} min={0.5} max={3} step={0.1} onChange={(v) => patchFreeEl(el.id, { lineHeight: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>揃え</label>
+              <select className="select" value={el.textAlign ?? TEXT_ALIGN.center} onChange={(e) => patchFreeEl(el.id, { textAlign: e.target.value as TextAlign })}>
+                <option value={TEXT_ALIGN.left}>左</option>
+                <option value={TEXT_ALIGN.center}>中央</option>
+                <option value={TEXT_ALIGN.right}>右</option>
+              </select>
+            </div>
+          </div>
+          <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+            <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
               <input type="color" value={el.strokeColor ?? "#000000"} onChange={(e) => patchFreeEl(el.id, { strokeColor: e.target.value })} />
             </div>
           </div>
@@ -1472,6 +1550,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </button>
                   <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.shape)}>
                     <PlusIcon size={14} />図形
+                  </button>
+                  <button className="btn btn-secondary btn-icon text-sm" onClick={() => addFreeEl(FREE_ELEMENT_KIND.subtitle)}>
+                    <PlusIcon size={14} />字幕
                   </button>
                   <button
                     className="btn btn-ghost btn-icon text-sm"
