@@ -2,10 +2,11 @@
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
 import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../domain/enums';
-import type { Fit, FreeShapeType, LayerType, TextAlign } from '../domain/enums';
+import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT } from '../domain/constants';
 import type { ElementAnimation, Scene } from '../domain/project/types';
-import type { Layer, Template } from '../domain/template/types';
+import type { Template } from '../domain/template/types';
+import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
 import type { InterpolatedTransform } from '../domain/project/keyframes';
@@ -80,17 +81,11 @@ export interface SceneLayout {
   items: LayoutItem[];
 }
 
-// 標準描画順（05 §7）。テンプレに zIndex があればそれを優先。
-const DEFAULT_Z: Record<LayerType, number> = {
-  background: 0, slot: 10, shape: 20, decor: 20, text: 30, character: 40, subtitle: 50, logo: 60,
-};
 const DEFAULT_TEXT_COLOR = '#222222';
 const DEFAULT_FONT_SIZE = 40;
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 /** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
 export const DEFAULT_LINE_HEIGHT = 1.3;
-
-const zOf = (layer: Layer): number => layer.zIndex ?? DEFAULT_Z[layer.type];
 
 /** layoutScene のオプション（掛け合いの行字幕の上書き等・ADR-0015 追加A/B）。 */
 export interface LayoutOptions {
@@ -169,7 +164,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   for (const layer of template.layers) {
     if (isHiddenByGroup(layer.id, templateGroups)) continue; // hidden グループのメンバーは描画しない
     const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h };
-    const base: ItemBase = { id: layer.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: zOf(layer) };
+    const base: ItemBase = { id: layer.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, zIndex: effectiveLayerZ(layer) };
     if (cg.rotation) base.rotation = cg.rotation; // 0/未指定は付けない＝グループ未所属は従来どおり
 
     switch (layer.type) {

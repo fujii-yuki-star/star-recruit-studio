@@ -6,7 +6,7 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, VideoStartSpec } from
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
@@ -261,6 +261,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
   const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
+  // FREE→通常テンプレへ戻すと素材が画面から消える場合の確認（保留中の切替先テンプレ id・#524 P1・ADR-0030）。場面が変われば解除。
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
   // 自由配置で選択中の要素（オーバーレイのハンドル表示・編集カードの強調に使う）。
   // 複数選択（#206）。配列が真＝選択集合、末尾が「主」。単一要素編集（カード/詳細モード/ポップオーバー）は主を対象にする。
   const [selectedFreeIds, setSelectedFreeIds] = useState<string[]>([]);
@@ -416,8 +418,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const freeLayout = selected.freeLayout ?? [];
   const sceneGroups = selected.groups ?? [];
   const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
-  // 自由配置 slot に割り当て可能な素材（画像・動画）。
-  const freeSlotAssets = assets.filter((a) => a.assetType === ASSET_TYPE.image || a.assetType === ASSET_TYPE.video);
+  // 自由配置 slot に割り当て可能な素材（映像として描ける非音声＝image/video/yuko/logo/qr/decor・#524 P1）。
+  // FREE 化で移送した立ち絵（yuko）/ロゴも選択肢に出る＝差し替え・削除しても同じ編集画面で戻せる。判定は isFreeSlotAssetType に集約。
+  const freeSlotAssets = assets.filter((a) => isFreeSlotAssetType(a.assetType));
   // 追加：新要素を末尾に積み、追加直後のその要素を選択状態にする（詳細モードでも即表示・#179）。
   // duplicateFreeEl と同様に updater 内の最新 s.freeLayout から計算（同期実行で newId は下の前に確定）。
   const addFreeEl = (kind: FreeElementKind) => {
@@ -580,12 +583,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const renderFreeKindControls = (el: FreeElement) => {
     if (el.kind === FREE_ELEMENT_KIND.slot) {
       const a = el.assetId ? assets.find((x) => x.assetId === el.assetId) : undefined;
+      // 現在値が候補に無くても必ず選択肢へ含める＝差し替え途中でも今の素材を見失わない（#524 P1・立ち絵/ロゴの復帰）。
+      const slotOptions = a && !freeSlotAssets.some((x) => x.assetId === a.assetId) ? [a, ...freeSlotAssets] : freeSlotAssets;
       return (
         <div className="field" style={{ marginBottom: 6 }}>
           <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>素材</label>
           <select className="select" value={el.assetId ?? ""} onChange={(e) => patchFreeEl(el.id, { assetId: e.target.value || null })}>
             <option value="">なし（空の枠）</option>
-            {freeSlotAssets.map((x) => (<option key={x.assetId} value={x.assetId}>{x.displayName}</option>))}
+            {slotOptions.map((x) => (<option key={x.assetId} value={x.assetId}>{x.displayName}</option>))}
           </select>
           {/* 収め方（fit）は画像/動画とも FREE 要素ごと（el.fit・layoutScene が読む・Undo 可）＝#472 P1 で動画も per-use に統一。 */}
           {a && (
@@ -959,6 +964,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedId(id);
     setConfirmDelete(false);
     setConfirmDialogueOff(false); // 掛け合い解除の確認も場面ごとに持ち越さない
+    setPendingTemplateId(null); // 見た目切替の確認も持ち越さない
     setConfirmDeleteLineId(null); // セリフ行の削除確認も持ち越さない
     setSelectedFreeIds([]); // 場面が変わったら自由配置の選択は持ち越さない
     setEditPopover(null); // 開いていた kind 別エディタも閉じる（旧場面の要素 id を指したまま残さない）
@@ -1395,9 +1401,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 value={selected.templateId}
                 onChange={(e) => {
                   const newTemplateId = e.target.value;
-                  // 切替時：assetRefs は新テンプレのスロットへ清算／texts・textFontIds は保持（#236・switchSceneTemplate 参照）。
-                  const newLayers = templates.find((t) => t.templateId === newTemplateId)?.layers ?? [];
-                  patch((s) => switchSceneTemplate(s, newTemplateId, newLayers));
+                  const newTemplate = templates.find((t) => t.templateId === newTemplateId);
+                  // FREE 場面（自由配置あり）を通常テンプレへ戻すとき、その通常テンプレへ復元できる素材が無ければ素材が
+                  // 画面から消える（自由配置は休眠）。黙って消さず確認する（ADR-0030・非破壊往復＋確認）。復元できる（往復）ときは確認不要。
+                  const goingToNormal = !!newTemplate && newTemplate.category !== FREE_CATEGORY;
+                  const newSlotIds = new Set((newTemplate?.layers ?? []).filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo").map((l) => l.id));
+                  const willRestore = Object.keys(selected.assetRefs).some((k) => newSlotIds.has(k));
+                  if (isFree && freeLayout.length > 0 && goingToNormal && !willRestore) { setPendingTemplateId(newTemplateId); return; }
+                  // 通常→FREE は旧テンプレ（s.templateId 解決）を渡し、表示中の素材/文字/立ち絵を freeLayout へ seed（ADR-0030）。
+                  patch((s) => switchSceneTemplate(s, newTemplateId, newTemplate?.layers ?? [], newTemplate?.category, templates.find((t) => t.templateId === s.templateId)));
                 }}
               >
                 {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}
@@ -1428,6 +1440,25 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   この向き・場面に合う見た目パターンは、今はこれだけです。
                 </p>
               ) : null}
+              {/* FREE→通常で素材が画面から消える場合の確認（データは残り、自由配置に戻せば元に戻る・ADR-0030・#524 P1）。 */}
+              {pendingTemplateId && (
+                <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
+                  <span>通常の見た目に変えると、いまの自由配置の素材は画面に表示されなくなります（データは残り、自由配置に戻せば元に戻ります）。</span>
+                  <div className="row gap-sm" style={{ marginTop: 6 }}>
+                    <button className="btn btn-ghost text-sm" onClick={() => setPendingTemplateId(null)}>やめる</button>
+                    <button
+                      className="btn btn-danger text-sm"
+                      onClick={() => {
+                        const nt = templates.find((t) => t.templateId === pendingTemplateId);
+                        patch((s) => switchSceneTemplate(s, pendingTemplateId, nt?.layers ?? [], nt?.category, templates.find((t) => t.templateId === s.templateId)));
+                        setPendingTemplateId(null);
+                      }}
+                    >
+                      通常の見た目に変える
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="field">

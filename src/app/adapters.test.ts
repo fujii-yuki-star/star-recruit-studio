@@ -71,6 +71,35 @@ describe("buildPrecheckItems（自由配置 / ADR-0008 §8 結線）", () => {
   });
 });
 
+describe("buildPrecheckItems（通常テンプレへ戻した休眠 freeLayout・ADR-0030・#524 P2）", () => {
+  const normalTemplate: Template = {
+    schemaVersion: "1.0", templateId: "opening_v1", name: "オープニング", category: "opening",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+  };
+  // FREE→通常へ戻して休眠している freeLayout（描画されない）を持つ通常場面。素材参照は freeLayout のみ。
+  const dormant: Scene["freeLayout"] = [
+    { id: "free_001", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_001", fit: "cover" },
+  ];
+  const normalWithDormant = (): Scene => ({ ...freeScene(dormant), sceneType: "opening", templateId: "opening_v1" });
+
+  it("通常場面に残った休眠 freeLayout は「自由配置の確認」の対象にしない", () => {
+    const items = buildPrecheckItems([normalWithDormant()], assets, [normalTemplate]);
+    expect(items.find((i) => i.id === "freeLayout")).toBeUndefined();
+  });
+
+  it("休眠 freeLayout の素材は「使用中」に数えない（通常場面は assetRefs が実効＝未使用扱い）", () => {
+    const unused = buildPrecheckItems([normalWithDormant()], assets, [normalTemplate]).find((i) => i.id === "unused");
+    expect(unused?.severity).toBe("warning"); // asset_001 は描画されない＝未使用
+  });
+
+  it("同じ freeLayout でも FREE 場面なら従来どおり検査・使用中カウント（休眠ゲートは通常場面のみ）", () => {
+    const items = buildPrecheckItems([freeScene(dormant)], assets, [freeTemplate]);
+    expect(items.find((i) => i.id === "freeLayout")?.severity).toBe("ok");
+    expect(items.find((i) => i.id === "unused")?.severity).toBe("ok"); // asset_001 使用中
+  });
+});
+
 describe("buildPrecheckItems（動画の配置 / #434・ADR-0026）", () => {
   const videoAsset: Asset = { assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "assets/v.mp4" };
 
