@@ -286,7 +286,7 @@ export interface Scene {
   slotClips?: Record<string, SlotClipOverride>;
   /** 動画スロット本体アニメの再生開始タイミング（ADR-0027・#444）。キー＝スロットの layer.id。未指定＝withAnim（アニメと同時）。スロット本体がアニメ対象の場面でのみ効く。 */
   slotVideoStart?: Record<string, VideoStartSpec>;
-  /** FREE テンプレ場面のみ：自由配置要素（ADR-0008）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
+  /** 自由配置要素（ADR-0008）。**有効なのは FREE テンプレ場面のときだけ**（描画/編集/事前確認/素材使用は category でゲート）。通常テンプレへ切り替えても休眠保持し FREE へ戻すと復元（ADR-0030）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
   freeLayout?: FreeElement[];
   /** 要素のグループ化（ADR-0022）。メンバー＝freeLayout 要素 id（ネストで group id も可）。未設定＝グループ無し。 */
   groups?: Group[];

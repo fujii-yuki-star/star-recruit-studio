@@ -119,6 +119,20 @@ export const ASSET_TYPE = {
   qr: 'qr',
 } as const satisfies Record<string, AssetType>;
 
+/**
+ * FREE スロット（自由配置の素材枠）に置ける素材種別＝映像として描ける非音声（image/video/yuko/logo/qr/decor）。§2-7。
+ * 通常テンプレのスロット層と FREE スロットで「置ける素材」の判定を一本化する（FREE 化で立ち絵/ロゴを移送しても
+ * 編集画面の選択肢に現れる＝選び直せる・#524 P1）。bgm/voice（音声）は対象外。
+ */
+export const FREE_SLOT_ASSET_TYPES = [
+  ASSET_TYPE.image, ASSET_TYPE.video, ASSET_TYPE.yuko, ASSET_TYPE.logo, ASSET_TYPE.qr, ASSET_TYPE.decor,
+] as const satisfies readonly AssetType[];
+
+/** 素材が FREE スロットに置けるか（映像として描ける非音声か・#524 P1）。 */
+export function isFreeSlotAssetType(type: AssetType): boolean {
+  return (FREE_SLOT_ASSET_TYPES as readonly AssetType[]).includes(type);
+}
+
 // 動画の種類（ADR-0011）。recruit=採用・会社紹介／general=一般・社内発表。省略時は recruit。
 export const VIDEO_KINDS = ['recruit', 'general'] as const;
 export type VideoKind = (typeof VIDEO_KINDS)[number];
