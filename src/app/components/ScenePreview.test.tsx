@@ -5,7 +5,7 @@ import { ScenePreview } from "./ScenePreview";
 import type { VideoSlotPlayback } from "./ScenePreview";
 import type { ElementAnimation, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
-import { sceneSegmentSpecs, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
+import { firstFrameBoundary, sceneSegmentSpecs, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
 
 // #386・A案＝掛け合いの先頭「間」は字幕なし。プレビュー（ScenePreview）が activeLineIndex<0（間）で
 // 行の字幕を描かず、有効行（0以上）では描くことをコンポーネントで検証する（ADR-0014・jsdom）。
@@ -67,6 +67,18 @@ describe("ScenePreview 掛け合いの「間」（#386・A案＝間は字幕な�
       <ScenePreview scene={scene} template={template} activeLineIndex={0} boundaryFrame={{ subtitleText: null, creditLine: undefined }} />,
     );
     expect(container.textContent).not.toContain("ゆうこの字幕テスト");
+  });
+
+  it("停止中は firstFrameBoundary 由来の boundaryFrame で頭空白の通常字幕を隠す（PreviewScreen 停止時の配線・#386/P1）", () => {
+    // scene は先頭行 startSec=2 の掛け合い＝停止中(t=0)は間。firstFrameBoundary→{subtitleText:null} で通常テンプレ字幕も隠れる。
+    const { container } = render(<ScenePreview scene={scene} template={template} boundaryFrame={firstFrameBoundary(scene, {})} />);
+    expect(container.textContent).not.toContain("ゆうこの字幕テスト");
+  });
+
+  it("firstFrameBoundary は先頭行が発話区間から始まるなら停止中でも先頭行字幕を出す（頭空白なし・書き出し一致）", () => {
+    const noGap = { ...scene, lines: [{ lineId: "line_001", text: "ゆうこの字幕テスト", startSec: 0, status: "none" }] } as unknown as Scene;
+    const { container } = render(<ScenePreview scene={noGap} template={template} boundaryFrame={firstFrameBoundary(noGap, {})} />);
+    expect(container.textContent).toContain("ゆうこの字幕テスト"); // 頭空白なし＝先頭は行0（書き出しの t=0 と一致）
   });
 });
 
