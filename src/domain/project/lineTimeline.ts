@@ -103,6 +103,44 @@ export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, nu
 }
 
 /**
+ * 時刻 t（秒）に有効な書き出しセグメント（`sceneSegmentSpecs` の1つ）を返す（ADR-0029・字幕解決の正準入力）。
+ * 区間は [startSec, startSec+durationSec)（最終セグメントは端 t=尺 を含む）。どの区間にも入らない（t が先頭より前等）ときは先頭へ。
+ * **プレビューと書き出しが同一の `sceneSegmentSpecs` 出力を消費する**ための共通関数＝間(isGap)・0秒行除外・自動逐次を一致させる。
+ * `activeLineIndexAt` は「間」で先頭行を返し isGap を表せないため、字幕解決ではこちら（sceneSegmentSpecs 直結）を使う。
+ */
+export function segmentAt(scene: Scene, lineDurations: Record<string, number>, t: number): SceneSegmentSpec {
+  const specs = sceneSegmentSpecs(scene, lineDurations);
+  for (let i = 0; i < specs.length; i += 1) {
+    const s = specs[i];
+    const isLast = i === specs.length - 1;
+    const end = s.startSec + s.durationSec;
+    if (t >= s.startSec && (isLast ? t <= end : t < end)) return s;
+  }
+  return specs[0];
+}
+
+/**
+ * プレビュー（仕上がり確認）の「今のセグメント」を返す（ADR-0029・字幕の対象解決に渡す・P1 停止時パリティ）。
+ * - **停止中（!playing）＝初期＝t=0** ＝ 先頭の正準セグメント（頭空白があれば isGap＝間）。`activeLineIndex=0` が
+ *   「停止＝初期」と「再生中の行0」で両義になり、頭空白ありの停止時に行0の字幕を出す不具合を防ぐ（書き出しの t=0 と一致）。
+ * - **再生中** ＝ 有効行（`activeLineIndex`）に対応するセグメント。間（`activeLineIndex<0`）は isGap セグメント。
+ * どのケースでも `sceneSegmentSpecs` 由来＝書き出しと同一経路（`activeLine` から lineId を再構成しない）。
+ */
+export function previewSubtitleSegment(
+  scene: Scene,
+  lineDurations: Record<string, number>,
+  activeLineIndex: number,
+  playing: boolean,
+): SceneSegmentSpec {
+  const specs = sceneSegmentSpecs(scene, lineDurations);
+  if (!playing) return specs[0]; // 停止＝初期＝t=0（頭空白があれば間）
+  const hasLines = (scene.lines?.length ?? 0) > 0;
+  if (hasLines && activeLineIndex < 0) return specs.find((s) => s.isGap) ?? specs[0]; // 再生中の間
+  const lineId = activeLineIndex >= 0 ? scene.lines?.[activeLineIndex]?.lineId : undefined;
+  return specs.find((s) => s.lineId === lineId) ?? specs[0];
+}
+
+/**
  * 時刻 t（秒）に有効な行セグメントの index。区間は [startSec, endSec)（最終行は endSec を含む）。
  * どの区間にも入らない（t が先頭開始より前など）ときは先頭(0)へフォールバック。空なら -1。
  */
@@ -150,4 +188,19 @@ export function firstFrameBoundary(scene: Scene, lineDurations: Record<string, n
 export function lastFrameBoundary(scene: Scene, lineDurations: Record<string, number> = {}): BoundaryFrame {
   const specs = sceneSegmentSpecs(scene, lineDurations);
   return boundaryFrameFromSpec(scene, specs[specs.length - 1]);
+}
+
+/**
+ * 場面編集の「動き」再生で、現在時刻 t の字幕入力（通常テンプレ字幕＝boundary／FREE 字幕＝segment）をまとめて返す（#527 P1）。
+ * t=0（停止中）は先頭セグメント＝従来の静止表示に一致。再生中は `segmentAt(t)` で掛け合いの現在行に追従し、
+ * 通常字幕・FREE 字幕・クレジットの3者へ**同一セグメント**を渡す＝書き出し（`sceneSegmentSpecs` をフレーム時刻で駆動）と一致（ADR-0029/0001）。
+ * 先頭を固定（`sceneSegmentSpecs[0]`／`firstFrameBoundary`）にすると、アニメ中に2行目へ切り替わる掛け合いでプレビューだけ頭のままになる（#527 P1）。
+ */
+export function motionSubtitleAt(
+  scene: Scene,
+  lineDurations: Record<string, number>,
+  t: number,
+): { segment: SceneSegmentSpec; boundary: BoundaryFrame } {
+  const segment = segmentAt(scene, lineDurations, t);
+  return { segment, boundary: boundaryFrameFromSpec(scene, segment) };
 }

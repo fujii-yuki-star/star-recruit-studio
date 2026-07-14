@@ -1,7 +1,7 @@
 // シーン＋テンプレ → 各レイヤーの配置（矩形・zIndex・内容・スタイル）を解決する純粋ロジック。
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
-import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_SHAPE_TYPE } from '../domain/enums';
+import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, LayerType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT } from '../domain/constants';
 import type { ElementAnimation, Scene } from '../domain/project/types';
@@ -10,6 +10,8 @@ import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
 import type { InterpolatedTransform } from '../domain/project/keyframes';
 import { groupElementIds } from '../domain/project/groupOps';
+import type { SceneSegmentSpec } from '../domain/project/lineTimeline';
+import { resolveSubtitleForElement, type SubtitleMoment } from '../domain/project/subtitleBinding';
 
 export interface Rect {
   x: number;
@@ -97,6 +99,11 @@ export interface LayoutOptions {
    * 未指定＝従来どおり scene.texts['subtitle'] を使う。
    */
   subtitleText?: string | null;
+  /**
+   * FREE 字幕要素（ADR-0029）の対象解決に使う「その瞬間のセグメント」。掛け合いは呼び出し側が sceneSegmentSpecs の
+   * 現在セグメント（書き出し）／現在行（プレビュー）を渡す＝プレビュー=書き出しで同一。未指定は場面全体の1セグメント。
+   */
+  subtitleSegment?: SceneSegmentSpec | null;
   /**
    * タイムラインのテロップ（timelineOverlay・ADR-0018）をこのフレームに描く（並行テロップ＝③(8)）。各要素は文言＋段(row)。
    * 未指定/空＝なし。プレビューはこのオプション、書き出しは overlayTelopItem を段ごとの帯PNGに焼いて overlay 合成＝同一ジオメトリでパリティ。
@@ -277,6 +284,11 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   // 通常テンプレに誤って freeLayout が付いても描画しない（防御。category で判定）。
   if (template.category === FREE_CATEGORY) {
     const elGeom = composeGroupGeometry(scene.freeLayout ?? [], effectiveGroups);
+    // FREE 字幕要素の対象解決に使う「その瞬間のセグメント」（ADR-0029）。掛け合いは呼び出し側が opts.subtitleSegment を渡す
+    // （書き出し=sceneSegmentSpecs の現在セグメント／プレビュー=現在行）。未指定は場面全体の1セグメント＝単独 narration が texts.subtitle を読む。
+    const subMoment: SubtitleMoment = {
+      segment: opts?.subtitleSegment ?? { startSec: 0, durationSec: scene.durationSec, isFirst: true },
+    };
     for (const el of scene.freeLayout ?? []) {
       if (el.hidden) continue; // 非表示の要素は描画しない（レイヤー一覧で隠す・#210）。
       if (isHiddenByGroup(el.id, effectiveGroups)) continue; // hidden グループのメンバーも描画しない（ADR-0022）。
@@ -299,6 +311,17 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         case 'shape':
           items.push({ ...base, kind: 'fill', color: el.fillColor ?? '#ffffff', opacity: el.opacity ?? 1, radius: el.radius ?? 0, shapeType: el.shapeType ?? FREE_SHAPE_TYPE.rect, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
           break;
+        case FREE_ELEMENT_KIND.subtitle: {
+          // 表示文言は対象（subtitleSource）から解決＝el.text は持たない（ADR-0029）。対象に一致しない/間/OFF は非表示。
+          // isSubtitle:true＝「字幕を出さない」書き出し（withSubtitle=false）でテンプレ字幕と同じく除外される（buildExportScenes）。
+          const subText = resolveSubtitleForElement(el, scene, subMoment);
+          if (subText == null || subText.length === 0) break;
+          const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
+          const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
+          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
+          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
+          break;
+        }
       }
     }
   }

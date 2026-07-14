@@ -11,8 +11,8 @@ import { BgmPicker } from "../components/BgmPicker";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
-import { lineAudioKey } from "../../domain/project/narrationLines";
-import { lineSegments } from "../../domain/project/lineTimeline";
+import { lineAudioKey, lineDurationsFromAudio } from "../../domain/project/narrationLines";
+import { lineSegments, previewSubtitleSegment, firstFrameBoundary } from "../../domain/project/lineTimeline";
 import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
 import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
@@ -97,6 +97,19 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
 
   const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
   const current = scenes[safeIdx];
+  // 字幕（ADR-0029・#386）は停止中/再生中とも書き出しと同じ sceneSegmentSpecs 由来にする（P1・パリティ）。
+  // - FREE 字幕＝previewSubtitleSegment（停止中は先頭 t=0、再生中は有効行/間）。
+  // - 通常テンプレの字幕レイヤー＝停止中は firstFrameBoundary（先頭正準フレーム・頭空白は subtitleText:null で非表示）、
+  //   再生中は undefined＝activeLineIndex 駆動。どちらも「先頭正準セグメント」から導く（SceneEditScreen と同流儀）。
+  // narrationAudioById は #382 に従い getState スナップショット読み（購読しない）＝activeLine/再生状態/場面が変わるたび再計算で追従。
+  const previewSubtitleState = useMemo(() => {
+    if (!current) return { segment: undefined, boundaryFrame: undefined };
+    const durations = lineDurationsFromAudio(current, useProjectStore.getState().narrationAudioById);
+    return {
+      segment: previewSubtitleSegment(current, durations, activeLine, playing),
+      boundaryFrame: !playing ? firstFrameBoundary(current, durations) : undefined,
+    };
+  }, [current, activeLine, playing]);
   // 現在の場面が変わったら、場面ジャンプの番号ストリップで今の場面を可視域へ寄せる（再生の進行にも追従・#413）。
   useEffect(() => {
     // scrollIntoView は一部環境（jsdom）に無いため任意呼び出し。
@@ -467,6 +480,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             scene={current}
             template={template}
             activeLineIndex={activeLine}
+            subtitleSegment={previewSubtitleState.segment}
+            boundaryFrame={previewSubtitleState.boundaryFrame}
             telops={activeTelops}
             timeSec={animTimeSec}
             animations={previewAnimations}

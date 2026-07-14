@@ -34,6 +34,25 @@ describe('createFreeElement / addFreeElement', () => {
     expect(shape.fillColor).toBeTruthy();
   });
 
+  it('subtitle の既定値（文言 text を持たず・字幕バーの位置/体裁・ADR-0029）', () => {
+    const sub = createFreeElement([], 'subtitle');
+    expect(sub.kind).toBe('subtitle');
+    expect(sub.text).toBeUndefined(); // 文言は対象（subtitleSource）から解決＝el.text なし
+    expect(sub.subtitleSource).toBeUndefined(); // 既定は後方互換（単独→読み上げ・掛け合い→全行）
+    expect(sub.color).toBe('#ffffff'); // 白文字＋黒縁で可読性
+    expect(sub.strokeColor).toBe('#000000');
+    expect(sub.strokeWidth).toBe(6);
+    expect(sub.textAlign).toBe('center');
+    expect(sub.fontSize).toBeGreaterThan(0);
+  });
+
+  it('subtitle も canvas 比でスケール（縦型は幅・fontSize が縮む・#273 と同じ流儀）', () => {
+    const land = createFreeElement([], 'subtitle', 1920, 1080);
+    const port = createFreeElement([], 'subtitle', 1080, 1920);
+    expect(port.w).toBeLessThan(land.w);
+    expect(port.fontSize).toBeLessThan(land.fontSize ?? 0);
+  });
+
   it('canvas 比で既定の位置・大きさをスケール（横型は不変・縦型は幅が画面に対し過大にならない・#273）', () => {
     const ref = createFreeElement([], 'text'); // 引数なし＝横型基準（1920×1080）
     const land = createFreeElement([], 'text', 1920, 1080);

@@ -525,3 +525,59 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(items.find((i) => i.id === 'free_002')).toBeDefined();
   });
 });
+
+describe('layoutScene：FREE 字幕要素の描画（ADR-0029）', () => {
+  const freeTemplate: Template = {
+    schemaVersion: '1.0', templateId: 'free_v1', name: 'FREE', category: 'free',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 }, layers: [],
+  } as Template;
+  const subEl = (subtitleSource?: unknown) => ({
+    id: 'free_sub', kind: 'subtitle', x: 240, y: 900, w: 1440, h: 120,
+    fontSize: 52, color: '#ffffff', strokeColor: '#000000', strokeWidth: 6,
+    ...(subtitleSource ? { subtitleSource } : {}),
+  });
+  const subItem = (layout: { items: LayoutItem[] }): TextItem | undefined =>
+    layout.items.find((i): i is TextItem => i.kind === 'text' && i.isSubtitle);
+
+  it('単独ナレーション：subtitleSource 未指定は texts.subtitle を字幕として描く（isSubtitle=true・el 体裁）', () => {
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', texts: { subtitle: '読み上げの字幕' }, freeLayout: [subEl()] } as unknown as Scene;
+    const item = subItem(layoutScene(s, freeTemplate));
+    expect(item?.text).toBe('読み上げの字幕');
+    expect(item?.isSubtitle).toBe(true);
+    expect(item?.color).toBe('#ffffff');
+    expect(item?.strokeWidth).toBe(6);
+  });
+
+  it('subtitleEnabledDefault=false は単独字幕を描かない', () => {
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', texts: { subtitle: 'S' }, subtitleEnabledDefault: false, freeLayout: [subEl()] } as unknown as Scene;
+    expect(subItem(layoutScene(s, freeTemplate))).toBeUndefined();
+  });
+
+  it('掛け合い allLines：opts.subtitleSegment の字幕を描く（正準セグメント＝プレビュー=書き出し）', () => {
+    const lines = [{ lineId: 'line_001', text: 'A', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'B', speaker: 2, status: 'none' }];
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', lines, freeLayout: [subEl({ kind: 'allLines' })] } as unknown as Scene;
+    const item = subItem(layoutScene(s, freeTemplate, { subtitleSegment: { lineId: 'line_001', subtitleText: 'A', startSec: 0, durationSec: 4, isFirst: true } }));
+    expect(item?.text).toBe('A');
+    expect(item?.isSubtitle).toBe(true);
+  });
+
+  it('掛け合い allLines：間（isGap）セグメントでは描かない', () => {
+    const lines = [{ lineId: 'line_001', text: 'A', status: 'none' }];
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', lines, freeLayout: [subEl({ kind: 'allLines' })] } as unknown as Scene;
+    expect(subItem(layoutScene(s, freeTemplate, { subtitleSegment: { isGap: true, subtitleText: null, startSec: 0, durationSec: 2, isFirst: true } }))).toBeUndefined();
+  });
+
+  it('掛け合い speaker：対象話者(catalog 3)の行だけ描く（他話者のセグメントは非表示＝二重描画にしない）', () => {
+    const lines = [{ lineId: 'line_001', text: 'A', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'B', speaker: 2, status: 'none' }];
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', lines, freeLayout: [subEl({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } })] } as unknown as Scene;
+    const hit = subItem(layoutScene(s, freeTemplate, { subtitleSegment: { lineId: 'line_001', subtitleText: 'A', startSec: 0, durationSec: 4, isFirst: true } }));
+    expect(hit?.text).toBe('A');
+    const miss = subItem(layoutScene(s, freeTemplate, { subtitleSegment: { lineId: 'line_002', subtitleText: 'B', startSec: 4, durationSec: 4, isFirst: false } }));
+    expect(miss).toBeUndefined();
+  });
+
+  it('通常テンプレ（非 FREE）は freeLayout の字幕要素を描かない（category ガード）', () => {
+    const s = { ...scene, freeLayout: [subEl()] } as unknown as Scene;
+    expect(layoutScene(s, openingTemplate).items.some((i) => i.id === 'free_sub')).toBe(false);
+  });
+});
