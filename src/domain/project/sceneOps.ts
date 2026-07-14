@@ -7,6 +7,7 @@ import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } fro
 import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
+import { effectiveLayerZ } from '../template/layerOrder';
 import { createFreeElementId } from './persistence';
 import { defaultSubtitleSource } from './subtitleBinding';
 import type { FreeElement, Part, Scene } from './types';
@@ -47,10 +48,17 @@ export function switchSceneTemplate(
   const slotIds = new Set(
     newTemplateLayers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id),
   );
-  // slotFits も新テンプレのスロット id 集合で清算（assetRefs と同ポリシー＝11 §5・キー ⊆ スロット id）。空なら未設定に。
-  const keptFits = scene.slotFits
-    ? Object.fromEntries(Object.entries(scene.slotFits).filter(([k]) => slotIds.has(k)))
-    : undefined;
+  const toFree = newCategory === FREE_CATEGORY;
+  // FREE へ切り替えるときは通常配置（assetRefs/slotFits）を休眠のまま保持し、通常テンプレへ戻すと自動復元する（ADR-0030・非破壊往復）。
+  // 通常テンプレへ切り替えるときは #236 どおり新スロット id へ清算＝休眠していた一致分が復元される（ダングリングは sceneActiveAssetIds で無害化済み）。
+  const nextAssetRefs = toFree
+    ? scene.assetRefs
+    : Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k)));
+  const keptFits = toFree
+    ? scene.slotFits
+    : scene.slotFits
+      ? Object.fromEntries(Object.entries(scene.slotFits).filter(([k]) => slotIds.has(k)))
+      : undefined;
   // 通常→FREE：表示中の配置内容（スロット素材＋文字＋字幕＋立ち絵）を freeLayout へ seed（空のときだけ・ADR-0030）。旧テンプレの幾何が要る。
   const seeded =
     newCategory === FREE_CATEGORY &&
@@ -63,7 +71,7 @@ export function switchSceneTemplate(
     ...scene,
     templateId: newTemplateId,
     sceneType: newCategory ?? scene.sceneType, // 見た目のカテゴリに追従（未指定は据え置き＝後方互換）
-    assetRefs: Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k))),
+    assetRefs: nextAssetRefs,
     slotFits: keptFits && Object.keys(keptFits).length ? keptFits : undefined,
     // 通常→FREE の seed 結果があれば freeLayout を差し替え（空 seed・非該当は ...scene の freeLayout を休眠保持）。
     ...(seeded && seeded.elements.length ? { freeLayout: seeded.elements } : {}),
@@ -109,7 +117,7 @@ export function freeLayoutFromPlacedContent(
       w: cg.w,
       h: cg.h,
       ...(cg.rotation ? { rotation: cg.rotation } : {}),
-      ...(layer.zIndex != null ? { zIndex: layer.zIndex } : {}),
+      zIndex: effectiveLayerZ(layer), // 実効 z（明示 zIndex 優先・無ければ種別既定）＝通常描画と重なり順が一致（#524 P2）
     };
     if (layer.type === 'background' || layer.type === 'slot' || layer.type === 'logo') {
       const assetId = scene.assetRefs[layer.id];

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { Part, Scene } from './types';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry } from '../group/compose';
+import { DEFAULT_LAYER_Z } from '../template/layerOrder';
 import { NARRATION_STATUS } from '../enums';
 import { duplicateSceneInList, freeLayoutFromPlacedContent, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
 
@@ -406,7 +407,7 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(texts[0]).toMatchObject({ text: 'タイトル', x: 200, y: 900, fontSize: 64, color: '#ffffff', fontWeight: 'bold', fontId: 'gen-interface-jp-display' });
     expect(new Set(fl.map((e) => e.id)).size).toBe(fl.length); // id 重複なし
     expect(fl.every((e) => /^free_\d{3}$/.test(e.id))).toBe(true); // free_NNN 採番
-    expect(r.assetRefs).toEqual({}); // FREE はスロット無し＝清算（内容は freeLayout へ移動）
+    expect(r.assetRefs).toEqual(richScene().assetRefs); // Option A：通常配置は休眠保持（清算しない＝往復で復元・ADR-0030）
   });
 
   it('seed は freeLayout が空のときだけ（既存の自由配置は上書きしない）', () => {
@@ -489,5 +490,26 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     const mv = elements.find((e) => e.assetId === 'asset_v')!;
     expect({ x: mv.x, y: mv.y, w: mv.w, h: mv.h }).toEqual({ x: expected.x, y: expected.y, w: expected.w, h: expected.h });
     expect(mv.x).not.toBe(100); // 生の座標のまま持ち込んでいない
+  });
+
+  it('非破壊往復：通常→FREE で通常配置（assetRefs/slotFits）を休眠保持し、FREE→通常で復元（Option A・ADR-0030）', () => {
+    const original = richScene();
+    const toFree = switchSceneTemplate(original, 'free_v1', [], 'free', prevTemplate());
+    expect(toFree.assetRefs).toEqual(original.assetRefs); // FREE でも清算せず休眠保持
+    expect(toFree.slotFits).toEqual(original.slotFits);
+    // FREE→通常（元の通常テンプレへ）：休眠 assetRefs が新スロット id へ復元（oldSlot は新テンプレに無く落ちる＝#236）。
+    const back = switchSceneTemplate(toFree, 'old_tmpl', prevTemplate().layers, 'opening');
+    expect(back.assetRefs).toEqual({ background: 'asset_bg', mainVisual: 'asset_v', logo: 'asset_logo' });
+    expect(back.slotFits).toEqual({ mainVisual: 'contain' });
+    expect(back.sceneType).toBe('opening');
+  });
+
+  it('通常→FREE：zIndex 未指定レイヤーは実効 z（種別既定）で展開＝通常描画と重なり順一致（#524 P2）', () => {
+    const { elements } = freeLayoutFromPlacedContent(richScene(), prevTemplate()); // prevTemplate は zIndex 未指定
+    const bg = elements.find((e) => e.assetId === 'asset_bg')!; // background 層
+    const logo = elements.find((e) => e.assetId === 'asset_logo')!; // logo 層
+    expect(bg.zIndex).toBe(DEFAULT_LAYER_Z.background); // 0（生の未指定→FREE 既定 1 ではない）
+    expect(logo.zIndex).toBe(DEFAULT_LAYER_Z.logo); // 60
+    expect((logo.zIndex ?? 0) > (bg.zIndex ?? 0)).toBe(true); // ロゴが背景より前面（通常描画と一致）
   });
 });

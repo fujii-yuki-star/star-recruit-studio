@@ -31,7 +31,7 @@ PR #524 で「見た目ピッカーは全場面で FREE を候補に出し、選
    - **字幕層 → subtitle 要素**（`subtitleSource`＝単独 `narration`／掛け合い `allLines`＝`defaultSubtitleSource`・ADR-0029）。字幕が出る場面のみ（#524 P1）。
    `freeLayout` が空のときだけ seed し、既存の自由配置は上書きしない。`assetRefs`/`slotFits` は #236 どおり清算＝内容は `freeLayout` に移る（単一の源）。
 2. **FREE→通常は `freeLayout` を休眠保持**（従来どおり `...scene`）。**描画・編集は既に category でゲート済み**。**事前確認・逆引き（使用場面）・削除確認の「実効使用」判定を共通化**（`sceneActiveAssetIds(scene, template)`＝FREE 場面は `freeLayout[].assetId`／通常場面は `assetRefs`＋`character.poseAssetId`）＝休眠側を検査・誤カウント・誤表示しない（P2 解消・`adapters.ts`／`assetUsage.ts`）。
-3. **往復**：FREE→通常→FREE は休眠 `freeLayout` が戻る。通常→FREE は内容を `freeLayout` へ移す片道変換（戻すと通常スロットは空・内容は FREE 側に残る＝データは消えない）。
+3. **非破壊往復（Option A・#524 再レビュー・利用者決定 2026-07-14）**：通常配置（`assetRefs`/`slotFits`/`texts`）は切替で清算せず**休眠保持**し、**FREE→通常で自動復元**する（#236 の「切替で清算」を「**FREE 化では清算しない**」へ改める＝ダングリングは `sceneActiveAssetIds` で無害化済み）。FREE→通常→FREE は休眠 `freeLayout` が戻る。**元々通常配置が無いネイティブ FREE 場面→通常は空になるので、その場合だけ切替前にインライン確認**（`SceneEditScreen` の見た目ピッカー・自然な文言＝黙って消さない・ADR-0026④）。
 4. **FREE スロットの選択肢を一本化**：立ち絵/ロゴを移送しても FREE 編集画面で選び直せるよう、置ける素材種別を `isFreeSlotAssetType`（image/video/yuko/logo/qr/decor）へ集約し、現在値も必ず選択肢へ含める（#524 P1）。
 5. **対象外**：装飾レイヤー（`shape`/背景色）は変換しない（意匠）。字幕の背景帯（`layer.background`）は FreeElement に持ち込み先が無く引き継がない＝**#529 で追跡（0.4.2）**。
 
@@ -39,10 +39,11 @@ PR #524 で「見た目ピッカーは全場面で FREE を候補に出し、選
 - `src/domain/project/sceneOps.ts`：`freeLayoutFromPlacedContent`（**実効配置＝`composeGroupGeometry`/`isHiddenByGroup`**・slot/character/text/subtitle＋`slotClips` 移送マップ `{elements, slotClips}` を返す）＋`switchSceneTemplate` に `prevTemplate?` 引数・seed・`slotClips` マージ。
 - `src/domain/enums.ts`：`FREE_SLOT_ASSET_TYPES`／`isFreeSlotAssetType`（FREE スロットに置ける素材種別＝映像として描ける非音声）を新設。`SceneEditScreen` の FREE 素材候補と現在値保持を一本化。
 - `src/domain/project/assetUsage.ts`：`sceneActiveAssetIds`（実効テンプレでゲート）を新設し `sceneUsesAsset`/`scenesUsingAsset` を template 受け取りへ。`adapters.ts`（precheck）と `MaterialsScreen.tsx`（逆引き/削除確認）が同一規則を共有。
-- `src/app/screens/SceneEditScreen.tsx`：ピッカー onChange で旧テンプレ（`s.templateId` 解決）を `switchSceneTemplate` へ渡す。
+- `src/domain/template/layerOrder.ts`：`DEFAULT_LAYER_Z`／`effectiveLayerZ`（レイヤーの実効 z＝05§7）を新設。通常描画（`layout.ts`）と 通常→FREE 変換が同じ実効 z を参照＝`zIndex` 未指定でも重なり順一致（#524 P2）。
+- `src/app/screens/SceneEditScreen.tsx`：ピッカー onChange で旧テンプレ（`s.templateId` 解決）を `switchSceneTemplate` へ渡す。**FREE→通常で素材が復元できず消える場合はインライン確認**（`pendingTemplateId`）。
 - **正典**：`11_SCHEMA_REFERENCE.md` に「`freeLayout` は任意 `sceneType` に存在しうる（**有効なのは FREE テンプレのときだけ＝それ以外は休眠**）」を明記。#236 の非対称（`texts` は保持）を `freeLayout`/`assetRefs` にも広げる読み。**schema 据え置き**（`freeLayout` は enum 条件を課さない任意フィールド＝`project.schema` の版は変えない）。
-- テスト：通常→FREE の素材/収め方/回転/`slotClips`/立ち絵/字幕（単独=narration・掛け合い=allLines）変換、休眠 `freeLayout`・assetRefs・character が precheck/逆引きに出ないこと。
+- テスト：通常→FREE の素材/収め方/回転/`slotClips`/立ち絵/字幕（単独=narration・掛け合い=allLines）変換・**グループ実効配置**・**zIndex 未指定の実効 z**、**非破壊往復（通常→FREE→通常で assetRefs/slotFits 復元）**、休眠 `freeLayout`・assetRefs・character が precheck/逆引きに出ないこと。
 
 ## 未解決の論点
-- 通常→FREE→通常で通常スロットを復元するか（現状は片道。必要なら `assetRefs` も休眠保持へ拡張＝#236 の再検討・**要ユーザー確認**）。
-- 字幕の背景帯（`layer.background`）の FREE への持ち込み（FreeElement に背景帯フィールドが無い＝軽微・別途）。
+- 字幕の背景帯（`layer.background`）の FREE への持ち込み＝**#529 で追跡（0.4.2・`FreeElement` に背景帯追加・#264 と統合検討）**。
+- 通常配置と自由配置の二重表現（切替で各面が自分の並びを保ち相互にマージしない）は仕様として許容（往復でデータは消えない）。FREE 編集後に通常へ戻すと通常は元の並び（FREE 編集は FREE 側に残る）。

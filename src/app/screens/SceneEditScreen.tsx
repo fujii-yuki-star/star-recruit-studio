@@ -261,6 +261,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
   const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
+  // FREE→通常テンプレへ戻すと素材が画面から消える場合の確認（保留中の切替先テンプレ id・#524 P1・ADR-0030）。場面が変われば解除。
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
   // 自由配置で選択中の要素（オーバーレイのハンドル表示・編集カードの強調に使う）。
   // 複数選択（#206）。配列が真＝選択集合、末尾が「主」。単一要素編集（カード/詳細モード/ポップオーバー）は主を対象にする。
   const [selectedFreeIds, setSelectedFreeIds] = useState<string[]>([]);
@@ -962,6 +964,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedId(id);
     setConfirmDelete(false);
     setConfirmDialogueOff(false); // 掛け合い解除の確認も場面ごとに持ち越さない
+    setPendingTemplateId(null); // 見た目切替の確認も持ち越さない
     setConfirmDeleteLineId(null); // セリフ行の削除確認も持ち越さない
     setSelectedFreeIds([]); // 場面が変わったら自由配置の選択は持ち越さない
     setEditPopover(null); // 開いていた kind 別エディタも閉じる（旧場面の要素 id を指したまま残さない）
@@ -1398,14 +1401,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 value={selected.templateId}
                 onChange={(e) => {
                   const newTemplateId = e.target.value;
-                  // 切替時：assetRefs は新テンプレのスロットへ清算／texts・textFontIds は保持（#236・switchSceneTemplate 参照）。
-                  // sceneType は新テンプレのカテゴリに追従（FREE を選べば自由配置へ変換・0.4.2 動確）。
-                  // 通常→FREE は旧テンプレ（s.templateId 解決）を渡し、表示中の素材/文字を freeLayout へ seed（無言消失を防ぐ・ADR-0030）。
                   const newTemplate = templates.find((t) => t.templateId === newTemplateId);
-                  patch((s) => {
-                    const prevTemplate = templates.find((t) => t.templateId === s.templateId);
-                    return switchSceneTemplate(s, newTemplateId, newTemplate?.layers ?? [], newTemplate?.category, prevTemplate);
-                  });
+                  // FREE 場面（自由配置あり）を通常テンプレへ戻すとき、その通常テンプレへ復元できる素材が無ければ素材が
+                  // 画面から消える（自由配置は休眠）。黙って消さず確認する（ADR-0030・非破壊往復＋確認）。復元できる（往復）ときは確認不要。
+                  const goingToNormal = !!newTemplate && newTemplate.category !== FREE_CATEGORY;
+                  const newSlotIds = new Set((newTemplate?.layers ?? []).filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo").map((l) => l.id));
+                  const willRestore = Object.keys(selected.assetRefs).some((k) => newSlotIds.has(k));
+                  if (isFree && freeLayout.length > 0 && goingToNormal && !willRestore) { setPendingTemplateId(newTemplateId); return; }
+                  // 通常→FREE は旧テンプレ（s.templateId 解決）を渡し、表示中の素材/文字/立ち絵を freeLayout へ seed（ADR-0030）。
+                  patch((s) => switchSceneTemplate(s, newTemplateId, newTemplate?.layers ?? [], newTemplate?.category, templates.find((t) => t.templateId === s.templateId)));
                 }}
               >
                 {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}
@@ -1436,6 +1440,25 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   この向き・場面に合う見た目パターンは、今はこれだけです。
                 </p>
               ) : null}
+              {/* FREE→通常で素材が画面から消える場合の確認（データは残り、自由配置に戻せば元に戻る・ADR-0030・#524 P1）。 */}
+              {pendingTemplateId && (
+                <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
+                  <span>通常の見た目に変えると、いまの自由配置の素材は画面に表示されなくなります（データは残り、自由配置に戻せば元に戻ります）。</span>
+                  <div className="row gap-sm" style={{ marginTop: 6 }}>
+                    <button className="btn btn-ghost text-sm" onClick={() => setPendingTemplateId(null)}>やめる</button>
+                    <button
+                      className="btn btn-danger text-sm"
+                      onClick={() => {
+                        const nt = templates.find((t) => t.templateId === pendingTemplateId);
+                        patch((s) => switchSceneTemplate(s, pendingTemplateId, nt?.layers ?? [], nt?.category, templates.find((t) => t.templateId === s.templateId)));
+                        setPendingTemplateId(null);
+                      }}
+                    >
+                      通常の見た目に変える
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="field">
