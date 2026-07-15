@@ -2297,6 +2297,10 @@ pub struct SceneInput {
     /// ナレーション音量（§6で解決済み）。未指定なら既定。
     #[serde(default)]
     narration_volume: Option<f64>,
+    /// 同時開始（掛け合いの並行・ADR-0031）：audio_base64（primary）と**同時に**流す他行のナレーション。
+    /// 非空のとき primary と amix して 1 本の narration にする（非動画の掛け合い＝still/frames 全経路が narration を使う）。
+    #[serde(default)]
+    narration_segments: Vec<NarrationSegmentInput>,
     /// 動画ありシーン（ADR-0006）。指定時は overlay 合成経路へ。
     #[serde(default)]
     video: Option<VideoSceneInput>,
@@ -2607,6 +2611,84 @@ fn build_window_audio(
     Ok(out)
 }
 
+/// mix_narrations の filter_complex を組む純粋部分（テスト可能・ADR-0031）。入力は primary（あれば先頭）→各同時行の順。
+/// primary は unit gain の passthrough（anull）、各同時行は window_sec で atrim・delay_sec で adelay（無ければ anull）。
+/// 全入力を amix（duration=longest＝一番長い声に合わせ短い声は無音尾・normalize=0＝各声フル音量）。
+fn narration_mix_filter(has_primary: bool, segments: &[NarrationSegmentInput]) -> String {
+    let mut fc = String::new();
+    let mut labels = String::new();
+    let mut input_idx = 0usize;
+    if has_primary {
+        fc.push_str(&format!("[{input_idx}:a]anull[n0];"));
+        labels.push_str("[n0]");
+        input_idx += 1;
+    }
+    for (k, seg) in segments.iter().enumerate() {
+        let mut chain: Vec<String> = Vec::new();
+        if let Some(w) = seg.window_sec {
+            if w > 0.0 {
+                chain.push(format!("atrim=0:{w}"));
+                chain.push("asetpts=N/SR/TB".into());
+            }
+        }
+        let delay_ms = (seg.delay_sec.max(0.0) * 1000.0).round() as i64;
+        if delay_ms > 0 {
+            chain.push(format!("adelay={delay_ms}:all=1"));
+        }
+        if chain.is_empty() {
+            chain.push("anull".into()); // フィルタ無しでもラベルを有効にする passthrough
+        }
+        fc.push_str(&format!("[{input_idx}:a]{}[p{k}];", chain.join(",")));
+        labels.push_str(&format!("[p{k}]"));
+        input_idx += 1;
+    }
+    // amix（1本でも通す＝ラベル整形のみで passthrough）。
+    format!("{fc}{labels}amix=inputs={input_idx}:duration=longest:normalize=0[a]")
+}
+
+/// 同時開始（掛け合いの並行・ADR-0031）：primary ナレーション（任意）＋各同時行（delay_sec 秒に配置・window_sec 窓で
+/// 切り詰め）を amix して 1 本の WAV にする。音量は焼かない（unit gain）＝下流で場面の narration_volume を1回だけ適用する
+/// （build_window_audio と違い二重適用の心配がない＝全員同じ場面音量）。呼び出しは narration_segments 非空時のみ。
+/// primary が無い場面（segments だけ）でも混ぜられる。全 non-video 経路（still/frames/frames_dir）が共有する narration を差し替える。
+fn mix_narrations(
+    ffmpeg: &Path,
+    tmp: &Path,
+    idx: usize,
+    primary: Option<&Path>,
+    segments: &[NarrationSegmentInput],
+) -> Result<PathBuf, String> {
+    let out = tmp.join(format!("dualvoice_{idx:03}.wav"));
+    let mut args: Vec<String> = vec!["-y".into()];
+    // 入力を filter と同じ順（primary→各同時行）で並べる。
+    if let Some(p) = primary {
+        args.extend(["-i".into(), p.to_string_lossy().into_owned()]);
+    }
+    for (k, seg) in segments.iter().enumerate() {
+        let wav = tmp.join(format!("dualvoice_{idx:03}_{k:02}.wav"));
+        decode_b64_to_file(
+            &seg.audio_base64,
+            &wav,
+            &format!("scene {} parallel narration {}", idx + 1, k + 1),
+        )?;
+        args.extend(["-i".into(), wav.to_string_lossy().into_owned()]);
+    }
+    let filter = narration_mix_filter(primary.is_some(), segments);
+    args.extend([
+        "-filter_complex".into(),
+        filter,
+        "-map".into(),
+        "[a]".into(),
+        out.to_string_lossy().into_owned(),
+    ]);
+    run_export(ffmpeg, &args).map_err(|e| {
+        export_failure(
+            format!("dual-voice mix: {e}"),
+            "動画の変換に失敗しました。もう一度お試しください。",
+        )
+    })?;
+    Ok(out)
+}
+
 /// 書き出し本体（ブロッキング）。`export_video` が spawn_blocking 上で呼ぶ（#375）。
 #[allow(clippy::too_many_arguments)]
 fn export_video_impl(
@@ -2669,6 +2751,20 @@ fn export_video_impl(
                 Some(wav)
             }
             _ => None,
+        };
+        // 同時開始（掛け合いの並行・ADR-0031）：並行ナレーションがあれば primary と amix して 1 本に差し替える。
+        // 非動画（still/frames/frames_dir）が共有する narration をここで確定＝以降の全経路が同時ボイスを鳴らす。
+        // 動画ありシーンは v.narration_segments を使う（TS は s.narration_segments を非動画にだけ載せる）ので空＝素通り。
+        let narration = if !s.narration_segments.is_empty() {
+            Some(mix_narrations(
+                &ffmpeg,
+                &tmp,
+                i,
+                narration.as_deref(),
+                &s.narration_segments,
+            )?)
+        } else {
+            narration
         };
 
         if let Some(v) = &s.video {
@@ -4014,6 +4110,43 @@ mod tests {
         let args = xfade_chain_args(&files, &steps, &out.to_string_lossy(), codec, 30, "12000k");
         run(&ffmpeg, &args).expect("xfade join");
         assert!(fs::metadata(&out).expect("xf.mp4 exists").len() > 0);
+    }
+
+    #[test]
+    fn narration_mix_filter_primary_plus_one_window() {
+        // 同時開始（ADR-0031）：primary＋同時行1本（window=8・delay=0）。primary は anull passthrough、
+        // 同時行は atrim で窓に切り詰め（delay 無しゆえ adelay 無し）、amix inputs=2・duration=longest。
+        let segs = vec![NarrationSegmentInput {
+            audio_base64: String::new(),
+            delay_sec: 0.0,
+            window_sec: Some(8.0),
+        }];
+        assert_eq!(
+            narration_mix_filter(true, &segs),
+            "[0:a]anull[n0];[1:a]atrim=0:8,asetpts=N/SR/TB[p0];[n0][p0]amix=inputs=2:duration=longest:normalize=0[a]"
+        );
+    }
+
+    #[test]
+    fn narration_mix_filter_no_primary_delay_and_window() {
+        // primary 無し＋2本：1本目は delay=1.5s→adelay=1500（window 無し）、2本目は window=3（delay 0）。amix inputs=2。
+        let segs = vec![
+            NarrationSegmentInput { audio_base64: String::new(), delay_sec: 1.5, window_sec: None },
+            NarrationSegmentInput { audio_base64: String::new(), delay_sec: 0.0, window_sec: Some(3.0) },
+        ];
+        assert_eq!(
+            narration_mix_filter(false, &segs),
+            "[0:a]adelay=1500:all=1[p0];[1:a]atrim=0:3,asetpts=N/SR/TB[p1];[p0][p1]amix=inputs=2:duration=longest:normalize=0[a]"
+        );
+    }
+
+    #[test]
+    fn narration_mix_filter_primary_only_passthrough() {
+        // 同時行が空（primary だけ）＝anull passthrough を1本 amix（inputs=1・ラベル整形のみ）。
+        assert_eq!(
+            narration_mix_filter(true, &[]),
+            "[0:a]anull[n0];[n0]amix=inputs=1:duration=longest:normalize=0[a]"
+        );
     }
 
     #[test]
