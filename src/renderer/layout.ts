@@ -60,6 +60,12 @@ export interface TextItem extends ItemBase {
   background?: { color: string; opacity: number; radius: number };
   /** subtitle レイヤー由来か（書き出しの「字幕を入れる」ON/OFFで判定に使う）。layoutScene が常に設定する。 */
   isSubtitle: boolean;
+  /**
+   * 下端を基準に上へ伸ばすか（テンプレ字幕帯の複数行対策・ADR-0031）。true のとき、行が増えても最終行は元の1行位置に
+   * 留まり、追加行と背景は**上方向**へ積む＝画面下端に置いた字幕帯が2行で画面外へはみ出さない。FREE 字幕（利用者が箱を
+   * 置く）は未設定＝従来どおり上端起点で下へ伸ばす（箱の高さは利用者管理）。
+   */
+  anchorBottom?: boolean;
   /** この要素自身のフォント id（#178）。既知ならこれを使い、未指定/不明は場面既定（描画側 fontFamily）へ。 */
   fontId?: string | null;
   /** 行間（倍率・未指定=1.3）・揃え（未指定=left）・縁取り（FREE text の体裁・#209）。 */
@@ -238,6 +244,8 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           maxLines: layer.maxLines ?? 2,
           background: bg,
           isSubtitle: layer.type === 'subtitle',
+          // テンプレ字幕は下端基準で上へ伸ばす（2行でも画面下端からはみ出さない・ADR-0031）。text 層は従来どおり。
+          anchorBottom: layer.type === 'subtitle',
           fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
           // 縁取り（#275）。LayoutItem/SVG は既存（FREE の #209）と同じ仕組みで描画。
           // 太さ>0 で色未指定なら白を既定（外部テンプレ等で色だけ無いと縁取りが silent に消えるのを防ぐ・PR#289レビュー）。

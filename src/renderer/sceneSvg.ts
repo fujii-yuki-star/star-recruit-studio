@@ -70,11 +70,14 @@ function textToSvg(item: TextItem, fontFamily: string): string {
   const family = isKnownFontId(item.fontId) ? fontFamilyForId(item.fontId) : fontFamily;
   const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines);
   const lineHeight = item.fontSize * (item.lineHeight ?? DEFAULT_LINE_HEIGHT); // 行間（#209）
+  // 下端基準（テンプレ字幕・ADR-0031）：行が増えたぶんを上へずらし、最終行は1行時の位置に留める＝画面下端に
+  // 置いた字幕帯が2行で画面外へはみ出さない。anchorBottom でないもの（見出し・FREE text）は 0＝従来どおり上端起点。
+  const shiftUp = item.anchorBottom ? Math.max(0, lines.length - 1) * lineHeight : 0;
 
   if (item.background) {
     const bgHeight = lineHeight * lines.length + item.fontSize * 0.6;
     parts.push(
-      `<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${bgHeight}" rx="${item.background.radius}" fill="${item.background.color}" fill-opacity="${item.background.opacity}"/>`,
+      `<rect x="${item.x}" y="${item.y - shiftUp}" width="${item.w}" height="${bgHeight}" rx="${item.background.radius}" fill="${item.background.color}" fill-opacity="${item.background.opacity}"/>`,
     );
   }
 
@@ -88,7 +91,7 @@ function textToSvg(item: TextItem, fontFamily: string): string {
     ? ` stroke="${item.strokeColor}" stroke-width="${item.strokeWidth}" paint-order="stroke"`
     : '';
 
-  const baseY = item.y + item.fontSize;
+  const baseY = item.y + item.fontSize - shiftUp;
   lines.forEach((line, i) => {
     parts.push(
       `<text x="${textX}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}" text-anchor="${anchor}"${stroke}>${escapeXml(line)}</text>`,
