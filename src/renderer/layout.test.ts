@@ -2,16 +2,16 @@ import { describe, expect, it } from 'vitest';
 import type { Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
-import { layoutScene } from './layout';
+import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleStackOverflowsTop } from './layout';
 import { layoutToSvg } from './sceneSvg';
 import { wrapText } from './textWrap';
 
-// 字幕帯の実 [top, bottom]（描画と同じ wrapText の行数＋anchorBottom で算出）。段間の重なり検証に使う。
+// 字幕帯の実 [top, bottom]（描画と同じ wrapText の行数＋anchorBottom で算出・共有定数を参照）。段間の重なり検証に使う。
 const bandRect = (item: TextItem): { top: number; bottom: number } => {
   const n = wrapText(item.text, item.w, item.fontSize, item.maxLines).length;
-  const lh = item.fontSize * 1.3; // DEFAULT_LINE_HEIGHT
+  const lh = item.fontSize * DEFAULT_LINE_HEIGHT;
   const top = item.y - (item.anchorBottom ? (n - 1) * lh : 0);
-  return { top, bottom: top + lh * n + item.fontSize * 0.6 };
+  return { top, bottom: top + lh * n + item.fontSize * SUBTITLE_BAND_PAD_EM };
 };
 // 上→下に並べ、隣接帯が重ならない（上の下端 ≤ 下の上端）か。
 const noOverlap = (subs: TextItem[]): boolean => {
@@ -19,6 +19,8 @@ const noOverlap = (subs: TextItem[]): boolean => {
   for (let i = 0; i + 1 < rects.length; i += 1) if (rects[i].bottom > rects[i + 1].top + 1e-6) return false;
   return true;
 };
+// 全帯がキャンバス上端内（top ≥ 0）か（#533 P2・画面外に切れない）。
+const allWithinCanvas = (subs: TextItem[]): boolean => subs.every((s) => bandRect(s).top >= 0);
 
 const openingTemplate: Template = {
   schemaVersion: '1.0',
@@ -149,6 +151,7 @@ describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413
     const subs = subtitleItems(layoutScene(dialogue, openingTemplate, { subtitleText: '短い', subtitleSegment: segment }));
     expect(subs).toHaveLength(3);
     expect(noOverlap(subs)).toBe(true);
+    expect(allWithinCanvas(subs)).toBe(true); // 3人は画面内に収まる
   });
 
   it('縦型（狭幅）で行数が増えても重ならない', () => {
@@ -165,6 +168,33 @@ describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413
     const subs = subtitleItems(layoutScene(dialogue, portrait, { subtitleText: long, subtitleSegment: segment }));
     expect(subs).toHaveLength(2);
     expect(noOverlap(subs)).toBe(true);
+    expect(allWithinCanvas(subs)).toBe(true); // 縦型2人も画面内
+  });
+});
+
+describe('subtitleStackOverflowsTop（同時字幕の画面外はみ出し・#533 P2）', () => {
+  const dialogueScene = (lines: unknown[]): Scene => ({ ...scene, lines } as Scene);
+  const groupLines = (n: number, text: string): unknown[] =>
+    Array.from({ length: n }, (_, i) => ({
+      lineId: `line_${String(i + 1).padStart(3, '0')}`, text, status: 'none',
+      ...(i > 0 ? { startWithPrevious: true } : {}),
+    }));
+
+  it('2〜3人（通常の長さ）は画面内＝はみ出さない（false）', () => {
+    expect(subtitleStackOverflowsTop(dialogueScene(groupLines(2, 'こんにちは')), openingTemplate)).toBe(false);
+    expect(subtitleStackOverflowsTop(dialogueScene(groupLines(3, 'こんにちは')), openingTemplate)).toBe(false);
+  });
+
+  it('8人×長文はスタックが画面上端を超える＝はみ出す（true）＝警告対象', () => {
+    expect(subtitleStackOverflowsTop(dialogueScene(groupLines(8, 'あ'.repeat(50))), openingTemplate)).toBe(true);
+  });
+
+  it('逐次（同時開始なし）は積まないので対象外（false）', () => {
+    const seq = dialogueScene([
+      { lineId: 'line_001', text: 'あ'.repeat(50), status: 'none' },
+      { lineId: 'line_002', text: 'あ'.repeat(50), status: 'none' }, // startWithPrevious なし＝逐次
+    ]);
+    expect(subtitleStackOverflowsTop(seq, openingTemplate)).toBe(false);
   });
 });
 

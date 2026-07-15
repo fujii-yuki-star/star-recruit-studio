@@ -59,3 +59,44 @@ describe("SceneEditScreen 同時開始トグル（ADR-0031）", () => {
     expect(screen.getAllByText("開始（場面の頭から）")).toHaveLength(1);
   });
 });
+
+describe("SceneEditScreen 同時字幕の画面外はみ出し警告（ADR-0031・#533 P2）", () => {
+  // 多人数×長文の同時開始（全行 startWithPrevious）＝字幕帯が上へ積み切れず画面外になる場面。
+  const overflowScene = (): Scene =>
+    ({
+      sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "photo_intro",
+      templateId: "photo_left_text_right_yuko_v1", durationSec: 8, assetRefs: {},
+      character: { enabled: false, characterId: "yuko" }, texts: {},
+      narration: { text: "", status: "none" },
+      lines: Array.from({ length: 9 }, (_, i) => ({
+        lineId: `line_${String(i + 1).padStart(3, "0")}`, text: "あ".repeat(50), status: "none",
+        ...(i > 0 ? { startWithPrevious: true } : {}),
+      })),
+      warnings: [],
+    }) as unknown as Scene;
+
+  const setScene = (sc: Scene): void => {
+    useProjectStore.setState({
+      templates: sampleTemplates,
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [sc], assets: [], editingSceneId: "scene_001",
+      past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+  };
+
+  it("多人数×長文の同時開始は「画面からはみ出します」警告を出す（次の行動を案内・§2-5）", () => {
+    setScene(overflowScene());
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/一部の字幕が画面からはみ出します/)).toBeTruthy();
+  });
+
+  it("通常の2人同時（短文）では警告を出さない（誤検出しない）", () => {
+    const ok = { ...overflowScene(), lines: [
+      { lineId: "line_001", text: "こんにちは", status: "none" },
+      { lineId: "line_002", text: "どうも", startWithPrevious: true, status: "none" },
+    ] } as unknown as Scene;
+    setScene(ok);
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/画面からはみ出します/)).toBeNull();
+  });
+});

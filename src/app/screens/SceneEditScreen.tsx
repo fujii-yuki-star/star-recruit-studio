@@ -27,6 +27,7 @@ import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
+import { subtitleStackOverflowsTop } from "../../renderer/layout";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { useProjectStore } from "../store/projectStore";
@@ -977,8 +978,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 掛け合い（複数のセリフ）モードか。明示 lines があるとき＝ON（ADR-0015・#180）。
   const isDialogue = (selected.lines?.length ?? 0) > 0;
   // セリフ列の検証（V16-19）。開始秒の範囲/順序・話者の実在などをユーザー向け文言で案内（重複文言は1つに）。
+  // 同時開始（ADR-0031）：字幕帯が多くて画面外へ積み切れないときは「次の行動」を示す警告（黙って画面外に切らない・#533 P2）。
   const lineWarningMessages = isDialogue
-    ? [...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message))]
+    ? [
+        ...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message)),
+        ...(template && subtitleStackOverflowsTop(selected, template)
+          ? ["同時に表示するセリフが多く、一部の字幕が画面からはみ出します。同時のセリフを減らすか、字幕を短くしてください。"]
+          : []),
+      ]
     : [];
   // 場面ごとの声の大きさ（null/未設定＝全体設定を継承 §6/§2.2、値＝この場面だけ上書き）。
   const sceneNarrationVolume = selected.audioMix?.narrationVolume ?? null;

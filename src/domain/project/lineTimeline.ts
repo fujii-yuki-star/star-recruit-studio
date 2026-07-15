@@ -34,7 +34,7 @@ export interface LineSegment {
  * 新しいグループを始め、続く `startWithPrevious` の行は同じグループへ join＝同時開始（並行）。`true` の連続で N 人同時。
  * フラグ無し（従来の逐次）は各行が単独グループ＝後方互換。純粋関数。
  */
-function groupIndices(lines: NarrationLine[]): number[][] {
+export function groupIndices(lines: NarrationLine[]): number[][] {
   const groups: number[][] = [];
   lines.forEach((line, i) => {
     if (i > 0 && line.startWithPrevious === true) groups[groups.length - 1].push(i);

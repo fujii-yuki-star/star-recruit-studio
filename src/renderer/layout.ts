@@ -11,7 +11,7 @@ import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
 import type { InterpolatedTransform } from '../domain/project/keyframes';
 import { groupElementIds } from '../domain/project/groupOps';
-import { resolveLineSubtitle } from '../domain/project/lineTimeline';
+import { groupIndices, resolveLineSubtitle } from '../domain/project/lineTimeline';
 import type { SceneSegmentSpec } from '../domain/project/lineTimeline';
 import { sceneLines } from '../domain/project/narrationLines';
 import { resolveSubtitleForElement, type SubtitleMoment } from '../domain/project/subtitleBinding';
@@ -96,9 +96,61 @@ const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 /** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
 export const DEFAULT_LINE_HEIGHT = 1.3;
 /** 字幕帯の背景の上下パディング（em）。sceneSvg の bgHeight = 行間×行数 + 0.6*fontSize と一致（帯の下端＝y + 行間 + これ）。 */
-const SUBTITLE_BAND_PAD_EM = 0.6;
+export const SUBTITLE_BAND_PAD_EM = 0.6;
 /** 同時字幕（ADR-0031）で2人目以降を上へ積むときの帯間の余白（em）。**実際の折返し行数**で詰めたうえで、この隙間を空ける（重ならない）。 */
-const SUBTITLE_STACK_GAP_EM = 0.4;
+export const SUBTITLE_STACK_GAP_EM = 0.4;
+
+/**
+ * 同時字幕（ADR-0031）の帯を下→上に積んだときの、各帯の anchor y と上端 top（キャンバス座標・px）。純粋関数。
+ * bandTexts[0] が下（primary）＝baseY。以降は**実際の折返し行数**（`wrapText`）で詰め、`anchorBottom` の上伸び
+ * （行が増えると上端が上がる）を見込んで次帯の下端を前帯の上端＋gap 上へ置く＝2行でも重ならない。
+ * layout（描画）／はみ出し判定（`subtitleStackOverflowsTop`）／precheck が同じ配置を共有する（drift 防止・#533 P1/P2）。
+ */
+export function stackedSubtitleBands(
+  bandTexts: string[],
+  baseY: number,
+  w: number,
+  fontSize: number,
+  maxLines: number,
+): { y: number; top: number }[] {
+  const lineHeightPx = fontSize * DEFAULT_LINE_HEIGHT;
+  const bottomOffsetPx = lineHeightPx + fontSize * SUBTITLE_BAND_PAD_EM; // anchor y から帯の下端まで
+  const gapPx = fontSize * SUBTITLE_STACK_GAP_EM;
+  const out: { y: number; top: number }[] = [];
+  let prevTop = Number.POSITIVE_INFINITY;
+  bandTexts.forEach((t, i) => {
+    const y = i === 0 ? baseY : prevTop - gapPx - bottomOffsetPx;
+    const n = wrapText(t, w, fontSize, maxLines).length; // 実際の折返し行数（描画と同じ wrapText）
+    const top = y - (n - 1) * lineHeightPx; // この帯の上端（anchorBottom で上へ伸びるぶんを反映）
+    out.push({ y, top });
+    prevTop = top;
+  });
+  return out;
+}
+
+/**
+ * 同時字幕（ADR-0031）の帯スタックがキャンバス**上端をはみ出す**か（#533 P2）。テンプレ字幕層の位置から各同時グループの
+ * 帯（enabled 字幕）を積み、最上段の上端 < 0 なら true。N人＋長文で上へ積み切れないときの警告に使う（黙って画面外に切らない）。
+ * 純粋関数（描画と同じ `stackedSubtitleBands`／`groupIndices` を共有＝判定と実描画が一致）。
+ */
+export function subtitleStackOverflowsTop(scene: Scene, template: Template): boolean {
+  const layer = template.layers.find((l) => l.type === 'subtitle');
+  if (!layer || !scene.lines || scene.lines.length === 0) return false;
+  const fontSize = layer.fontSize ?? DEFAULT_FONT_SIZE;
+  const maxLines = layer.maxLines ?? 2;
+  const lines = sceneLines(scene);
+  for (const g of groupIndices(lines)) {
+    if (g.length < 2) continue; // 単独行は積まない
+    const bandTexts = g
+      .map((i) => resolveLineSubtitle(lines[i], scene))
+      .filter((s) => s.enabled && s.text.length > 0)
+      .map((s) => s.text);
+    if (bandTexts.length < 2) continue; // 実際に2帯以上出るときだけ判定
+    const placed = stackedSubtitleBands(bandTexts, layer.y, layer.w, fontSize, maxLines);
+    if (placed[placed.length - 1].top < 0) return true; // 最上段が画面上端を超える＝画面外
+  }
+  return false;
+}
 
 /** layoutScene のオプション（掛け合いの行字幕の上書き等・ADR-0015 追加A/B）。 */
 export interface LayoutOptions {
@@ -277,19 +329,13 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             k += 1;
           }
         }
-        // 最初（下）の帯は base.y、以降は「上へ」積む。段間は**実際の折返し行数**で詰める＝長文で2行に折れても重ならない（#530/#533 P1）。
-        // 帯（anchor y・n 行・anchorBottom）: 上端 = y − (n−1)*行間、下端 = y + 行間 + パディング。次帯の下端を前帯の上端より gap 上へ。
-        const lineHeightPx = fontSize * DEFAULT_LINE_HEIGHT;
-        const bottomOffsetPx = lineHeightPx + fontSize * SUBTITLE_BAND_PAD_EM; // anchor y から帯の下端まで
-        const gapPx = fontSize * SUBTITLE_STACK_GAP_EM;
-        const maxLines = layer.maxLines ?? 2;
-        let prevTop = Number.POSITIVE_INFINITY;
-        bands.forEach((b, i) => {
-          const y = i === 0 ? base.y : prevTop - gapPx - bottomOffsetPx;
-          pushBand(b.text, y, b.idSuffix);
-          const n = isSub ? wrapText(b.text, base.w, fontSize, maxLines).length : 1; // 実際の折返し行数（描画と同じ wrapText）
-          prevTop = y - (n - 1) * lineHeightPx; // この帯の上端（anchorBottom で上へ伸びるぶんを反映）
-        });
+        // 帯を配置：字幕は下→上に積む（実折返し行数で詰める＝重ならない・共有 stackedSubtitleBands・#533 P1）。text 層は単一で base.y。
+        if (isSub) {
+          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? 2);
+          bands.forEach((b, i) => pushBand(b.text, placed[i].y, b.idSuffix));
+        } else if (bands.length > 0) {
+          pushBand(bands[0].text, base.y, bands[0].idSuffix);
+        }
         break;
       }
     }
