@@ -185,3 +185,11 @@ export function isHiddenByGroup(memberId: string, groups: ReadonlyArray<Group>):
   }
   return false;
 }
+
+/**
+ * グループ自身または祖先グループが非表示か（ネスト対応）。非表示グループの操作枠（選択枠/ハンドル）を出さない判定に使う
+ * （描画されないグループを操作可能にしない・#525-9 レビュー）。isHiddenByGroup は祖先のみを見るため、自身の hidden を足す。
+ */
+export function isGroupHidden(groupId: string, groups: ReadonlyArray<Group>): boolean {
+  return groups.find((g) => g.id === groupId)?.hidden === true || isHiddenByGroup(groupId, groups);
+}

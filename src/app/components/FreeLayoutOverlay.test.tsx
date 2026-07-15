@@ -134,6 +134,11 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     expect(screen.getByTestId("group-frame")).toBeInTheDocument();
   });
 
+  it("非表示グループを選択中でも操作枠（group-frame）は出さない＝描画されないものを操作可能にしない（#525-9 レビュー）", () => {
+    renderOverlay({ groups: [{ ...grp, hidden: true }], activeGroupId: "group_001" });
+    expect(screen.queryByTestId("group-frame")).toBeNull();
+  });
+
   it("所属グループが非表示なら、その要素の箱は出さない（描画と一致・操作枠を残さない・#525-9a）", () => {
     const { root } = renderOverlay({ groups: [{ ...grp, hidden: true }] });
     expect(root.querySelector('[data-free-id="free_001"]')).toBeNull(); // group_001 のメンバー＝非表示で箱なし

@@ -4,7 +4,7 @@ import type { Layer } from "../../domain/template/types";
 import { freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GEOM_MIN_SIZE, GROUP_MIN_SCALE } from "../../domain/constants";
-import { composeGroupGeometry, isHiddenByGroup } from "../../domain/group/compose";
+import { composeGroupGeometry, isGroupHidden, isHiddenByGroup } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { topGroupOfMember } from "../../domain/project/groupOps";
 
@@ -362,8 +362,9 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
         );
       })}
 
-      {/* 選択中グループの枠（ADR-0022・#307）：枠をドラッグでグループ移動（transform.x/y）。拡縮/回転は part2b。 */}
-      {activeGroupFrame && activeGroup && (
+      {/* 選択中グループの枠（ADR-0022・#307）：枠をドラッグでグループ移動（transform.x/y）。拡縮/回転は part2b。
+          非表示グループ（自身/祖先）は枠も出さない＝描画されないものを操作可能にしない（選択は保持・一覧で再表示・#525-9 レビュー）。 */}
+      {activeGroupFrame && activeGroup && !isGroupHidden(activeGroup.id, groups) && (
         <div
           data-testid="tmpl-group-frame"
           onPointerDown={(e) => beginGroupDrag(e, activeGroup)}

@@ -5,7 +5,7 @@ import { FREE_ELEMENT_KIND } from "../../domain/enums";
 import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GROUP_MIN_SCALE } from "../../domain/constants";
-import { composeGroupGeometry, isHiddenByGroup } from "../../domain/group/compose";
+import { composeGroupGeometry, isGroupHidden, isHiddenByGroup } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { topGroupOfMember } from "../../domain/project/groupOps";
 
@@ -598,8 +598,9 @@ export function FreeLayoutOverlay({
         />
       )}
 
-      {/* 選択中グループの向き付き枠（ADR-0022・#305-2）：ドラッグで移動、角で拡縮、上ハンドルで回転（transform を更新）。 */}
-      {activeGroupFrame && activeGroup && (
+      {/* 選択中グループの向き付き枠（ADR-0022・#305-2）：ドラッグで移動、角で拡縮、上ハンドルで回転（transform を更新）。
+          非表示グループ（自身/祖先）は枠も出さない＝描画されないものを操作可能にしない（選択状態は保持・一覧で再表示・#525-9 レビュー）。 */}
+      {activeGroupFrame && activeGroup && !isGroupHidden(activeGroup.id, groups) && (
         <div
           data-testid="group-frame"
           onPointerDown={(e) => beginGroupDrag(e, activeGroup)}

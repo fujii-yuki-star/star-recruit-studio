@@ -122,6 +122,11 @@ describe("TemplateLayerOverlay", () => {
     expect(root.querySelector('[data-testid="tmpl-group-frame"]')).not.toBeNull();
   });
 
+  it("非表示グループを選択中でも操作枠（tmpl-group-frame）は出さない＝描画されないものを操作可能にしない（#525-9 レビュー）", () => {
+    const { root } = renderOverlay({ groups: [{ ...grp, hidden: true }], activeGroupId: "group_001" });
+    expect(root.querySelector('[data-testid="tmpl-group-frame"]')).toBeNull();
+  });
+
   it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform・#307）", () => {
     const onGroupTransform = vi.fn();
     const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
