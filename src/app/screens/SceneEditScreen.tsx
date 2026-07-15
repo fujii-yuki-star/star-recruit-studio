@@ -444,6 +444,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const first = templates.find((t) => t.category === category && t.aspectRatio === aspectRatio);
     if (first) requestTemplateSwitch(first.templateId);
   };
+  // 確認待ち（pendingTemplateId）の間は、選んだ先の種類/見た目を選択表示に保つ＝「選んだのに元へ戻った」を防ぐ（#532 レビュー）。
+  const pendingCategory = pendingTemplateId ? templates.find((t) => t.templateId === pendingTemplateId)?.category : undefined;
   // 追加：新要素を末尾に積み、追加直後のその要素を選択状態にする（詳細モードでも即表示・#179）。
   // duplicateFreeEl と同様に updater 内の最新 s.freeLayout から計算（同期実行で newId は下の前に確定）。
   const addFreeEl = (kind: FreeElementKind) => {
@@ -1422,7 +1424,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <select
                 id="scene-kind"
                 className="select"
-                value={selected.sceneType}
+                value={pendingCategory ?? selected.sceneType}
                 onChange={(e) => switchSceneCategory(e.target.value as SceneCategory)}
               >
                 {/* 現在の種類が候補に無い（旧データ・向き不一致等）ときも選択値を保つ。 */}
@@ -1440,7 +1442,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <select
                 id="look"
                 className="select"
-                value={selected.templateId}
+                value={pendingTemplateId ?? selected.templateId}
                 onChange={(e) => requestTemplateSwitch(e.target.value)}
               >
                 {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}

@@ -96,4 +96,19 @@ describe("SceneEditScreen 種類（カテゴリ）変更（#528）", () => {
     expect(s.templateId).toBe("open_v1"); // その種類の先頭テンプレへ直接切替
     expect(screen.queryByText(CONFIRM)).toBeNull(); // 通常→通常は確認なし
   });
+
+  it("種類で FREE→通常（自由配置あり・復元不可）は確認が出て、確定するまで切替えない＋選択表示を保持（#532）", () => {
+    setup(withSlot()); // FREE 場面・自由配置あり・assetRefs なし＝復元できない
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const kind = screen.getByLabelText("種類") as HTMLSelectElement;
+    fireEvent.change(kind, { target: { value: "photo_intro" } }); // 種類経由で FREE→通常
+    expect(screen.getByText(CONFIRM)).toBeTruthy(); // 確認が出る
+    expect(useProjectStore.getState().scenes[0].templateId).toBe("free_v1"); // まだ切替えない
+    expect(kind.value).toBe("photo_intro"); // 確認待ちでも選んだ先を保持表示（「戻った」を防ぐ・#532 レビュー）
+
+    fireEvent.click(screen.getByText("通常の見た目に変える"));
+    const s = useProjectStore.getState().scenes[0];
+    expect(s.sceneType).toBe("photo_intro"); // 確定で切替
+    expect(s.templateId).toBe("photo_v1");
+  });
 });
