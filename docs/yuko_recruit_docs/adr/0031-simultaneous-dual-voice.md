@@ -32,6 +32,7 @@
 ## 結果・影響（実装済み 2026-07-15・4 stage を1 vertical で・機能PR一括バンプ）
 - `schemas/project.schema.json`＋`11`：`NarrationLine.startWithPrevious`（1.20→**1.21**・additive）。`persistence`/`validate-schemas`/fixture 同期。
 - `domain/project/lineTimeline`：`groupIndices`（同時開始グループ）／`lineSegments`（同一窓共有）／`sceneSegmentSpecs`（1グループ=1セグメント＋`parallelLineIds`）／`segmentLineIds`。単独行は不変（後方互換）。
+- `domain/project/narrationLines`：`normalizeDialogueTiming`＝不変条件の正規化（**先頭行はフラグを持たない**・**`startWithPrevious` の行は `startSec` を持たない**）。行の削除/移動・場面分割・読込（`migrateProject`）で呼び、「並べ替えで先頭になった休眠フラグの復活」「実装が無視する `startSec` の残存」を消す＝**設定できるのに効かない状態を残さない**（ADR-0026④・#533 レビュー P2）。`groupIndices` は先頭フラグを実行時にも無視（二重の安全）。
 - `renderer/export/buildExportScenes`＋Rust `ffmpeg.rs`：動画経路は `narrationSegments` を同 delay で重ねる（既存 amix が並行化）。非動画経路は primary=`audioBase64`＋並行行=`narrationSegments`、Rust `mix_narrations`（純粋 `narration_mix_filter`＋単体テスト）で `narration` に amix（still/frames/frames_dir 共通）。
 - `PreviewScreen`：同時グループは前を止めず重ねて再生（`groupAudios`）・`activeLine` は primary・ライブ音量/ミュートを全員へ。
 - `subtitle`：`sceneSegmentSpecs.subtitleText` を全員結合（2行表示）・`wrapText` が `\n` をハード改行・`resolveSubtitleForElement`（speaker）は `segmentLineIds` 走査で並行話者ボックスに対応（ADR-0029・話者ごとの2ボックスも可）。

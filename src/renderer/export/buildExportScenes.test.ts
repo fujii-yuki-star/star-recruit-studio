@@ -440,6 +440,27 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
     });
   });
 
+  it('動画シーン×同時開始：video.narrationSegments に primary＋同時行が同じ delaySec で入る（並行 amix・ADR-0031）', async () => {
+    const dual = {
+      sceneId: 's1', templateId: 'tpl', durationSec: 8,
+      lines: [
+        { lineId: 'line_001', text: 'A', status: 'none' },
+        { lineId: 'line_002', text: 'B', startWithPrevious: true, status: 'none' }, // line_001 と同時
+      ],
+    } as unknown as Scene;
+    const out = await buildExportScenes(
+      [dual], templateById, noAsset,
+      (_s, lineId) => ({ audioBase64: lineId ? `AUDIO_${lineId}` : undefined, narrationVolume: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+    );
+    expect(out).toHaveLength(1);
+    // 同時グループ＝1区間・全尺。両話者を同じ delaySec=0（区間頭）で重ねる＝Rust が amix（掛け合い×動画）。
+    expect(out[0].video?.narrationSegments).toEqual([
+      { audioBase64: 'AUDIO_line_001', delaySec: 0, windowSec: 8 },
+      { audioBase64: 'AUDIO_line_002', delaySec: 0, windowSec: 8 },
+    ]);
+  });
+
   it('opts.credit を渡すと splitVideoSceneSvgMulti の credit 引数（6番目）に反映（#177・動画シーン）', async () => {
     vi.mocked(splitVideoSceneSvgMulti).mockClear();
     await buildExportScenes(

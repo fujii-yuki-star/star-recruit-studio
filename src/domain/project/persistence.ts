@@ -9,6 +9,7 @@ import type { Purpose, VideoKind } from '../enums';
 import { DEFAULT_FONT_ID, isKnownFontId } from '../font/fontCatalog';
 import { isKnownBundledBgmId } from '../bgm/bgmCatalog';
 import { validateProject } from '../validation/generated/validators.js';
+import { normalizeDialogueTiming } from './narrationLines';
 import type {
   Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
   TimelineOverlay, ToneSettings, VideoSettings, VoiceSettings,
@@ -357,6 +358,14 @@ function migrateProject(project: Project): Project {
       }
       return sc;
     });
+  }
+  // 同時開始（ADR-0031）：先頭行の休眠フラグ・startWithPrevious×startSec の併存を読込時に正規化する
+  // （実装が無視する状態を残さない・schema は併存を許すが読込で解消・ADR-0026④）。lines が配列の場面のみ触る
+  // （壊れた値はそのまま検証へ＝#416 P1）。normalizeDialogueTiming は違反が無ければ同一参照を返す（無変換）。
+  if (Array.isArray(next.scenes)) {
+    next.scenes = next.scenes.map((sc) =>
+      isRecord(sc) && Array.isArray(sc.lines) ? normalizeDialogueTiming(sc as unknown as Scene) : sc,
+    );
   }
   return next;
 }

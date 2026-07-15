@@ -4131,8 +4131,16 @@ mod tests {
     fn narration_mix_filter_no_primary_delay_and_window() {
         // primary 無し＋2本：1本目は delay=1.5s→adelay=1500（window 無し）、2本目は window=3（delay 0）。amix inputs=2。
         let segs = vec![
-            NarrationSegmentInput { audio_base64: String::new(), delay_sec: 1.5, window_sec: None },
-            NarrationSegmentInput { audio_base64: String::new(), delay_sec: 0.0, window_sec: Some(3.0) },
+            NarrationSegmentInput {
+                audio_base64: String::new(),
+                delay_sec: 1.5,
+                window_sec: None,
+            },
+            NarrationSegmentInput {
+                audio_base64: String::new(),
+                delay_sec: 0.0,
+                window_sec: Some(3.0),
+            },
         ];
         assert_eq!(
             narration_mix_filter(false, &segs),

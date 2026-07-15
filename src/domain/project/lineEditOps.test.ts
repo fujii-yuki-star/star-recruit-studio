@@ -63,6 +63,17 @@ describe('removeLine', () => {
     expect(r.lines).toBeUndefined();
     expect(r.narration.text).toBe('のこり');
   });
+
+  it('先頭行を消して同時開始フラグの行が先頭になったら startWithPrevious を落とす（ADR-0031）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startWithPrevious: true, status: NARRATION_STATUS.none },
+      { lineId: 'line_003', text: 'c', status: NARRATION_STATUS.none },
+    ];
+    const r = removeLine(sceneWith({ lines }), 'line_001');
+    expect(r.lines?.map((l) => l.lineId)).toEqual(['line_002', 'line_003']);
+    expect(r.lines?.[0].startWithPrevious).toBeUndefined(); // 先頭になった line_002 のフラグは落ちる
+  });
 });
 
 describe('updateLine', () => {
@@ -111,6 +122,16 @@ describe('moveLine', () => {
 
   it('範囲外（先頭をさらに前へ）は変化なし', () => {
     expect(moveLine(sceneWith({ lines }), 'line_001', -1).lines?.map((l) => l.lineId)).toEqual(['line_001', 'line_002', 'line_003']);
+  });
+
+  it('同時開始フラグの行を先頭へ移動すると startWithPrevious を落とす（休眠フラグの復活防止・ADR-0031）', () => {
+    const withFlag: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startWithPrevious: true, status: NARRATION_STATUS.none },
+    ];
+    const moved = moveLine(sceneWith({ lines: withFlag }), 'line_002', -1); // line_002 を先頭へ
+    expect(moved.lines?.map((l) => l.lineId)).toEqual(['line_002', 'line_001']);
+    expect(moved.lines?.[0].startWithPrevious).toBeUndefined();
   });
 });
 

@@ -29,6 +29,32 @@ export function sceneLines(scene: Scene): NarrationLine[] {
 }
 
 /**
+ * 同時開始（ADR-0031）の不変条件を保つ正規化（純粋・冪等）。読込・行の削除/移動・場面分割で呼ぶ＝
+ * 「設定できるのに効かない状態」を残さない（ADR-0026④）。
+ * ① 先頭行は「前と同時」にできない＝`startWithPrevious` を落とす（並べ替え/削除で先頭になった休眠フラグの復活を防ぐ）。
+ * ② `startWithPrevious` の行は `startSec` を持たない（実装が無視＝正典 11 §8。schema は併存を許すが読込で解消）。
+ * 違反が無ければ同一参照を返す（未保存/履歴にしない）。単一 narration（lines 不在）は対象外。
+ */
+export function normalizeDialogueTiming(scene: Scene): Scene {
+  if (!scene.lines || scene.lines.length === 0) return scene;
+  let changed = false;
+  const lines = scene.lines.map((l, i) => {
+    let next = l;
+    if (i === 0 && l.startWithPrevious === true) {
+      next = { ...next };
+      delete next.startWithPrevious; // 先頭は同時にする相手がいない
+    }
+    if (next.startWithPrevious === true && next.startSec != null) {
+      if (next === l) next = { ...next };
+      delete next.startSec; // 同時開始は開始秒を保存しない（ADR-0031）
+    }
+    if (next !== l) changed = true;
+    return next;
+  });
+  return changed ? { ...scene, lines } : scene;
+}
+
+/**
  * この場面に「まだ声が作られていない実効行」があるか（掛け合い・単一 narration 共通・ADR-0015）。
  * 本文（trim 非空）のある行が1つでも未生成（status!==generated）なら true。本文が無い行は対象外（読む物が無い）。
  * `generateAllNarrations`（一括生成の対象判定）と precheck の「読み上げの声」チェックがこの単一判定を共有する

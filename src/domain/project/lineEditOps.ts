@@ -2,7 +2,7 @@
 // 純粋関数（副作用なし）。UI は patch/updateScene 経由でこれらを呼び、結果の Scene で差し替える（freeLayoutOps と同型）。
 // ID 採番は createLineId（§2.1・scene 内一意）に委譲する。
 import { NARRATION_STATUS } from '../enums';
-import { lineFromNarration } from './narrationLines';
+import { lineFromNarration, normalizeDialogueTiming } from './narrationLines';
 import { createLineId } from './persistence';
 import { normalizeSubtitleSources } from './subtitleBinding';
 import type { NarrationLine, Scene } from './types';
@@ -47,7 +47,8 @@ export function removeLine(scene: Scene, lineId: string): Scene {
   const remaining = scene.lines.filter((l) => l.lineId !== lineId);
   if (remaining.length === 0) return demoteFromLines(scene);
   // 消した行が「その話者の最後の行」なら、その話者を対象にした字幕は無効になるため正規化する（ADR-0026④）。
-  return normalizeSubtitleSources({ ...scene, lines: remaining });
+  // 併せて同時開始の不変条件（先頭の休眠フラグ）も正規化する（削除で先頭が変わる・ADR-0031）。
+  return normalizeDialogueTiming(normalizeSubtitleSources({ ...scene, lines: remaining }));
 }
 
 /** 声に影響する編集（text/speaker/speed/pitch/intonation）か。これらの変更は音声の作り直しが必要。 */
@@ -69,18 +70,21 @@ export function updateLine(
 ): Scene {
   if (!scene.lines) return scene;
   // 話者変更で「対象にしていた話者が場面からいなくなる」と字幕が無効になるため正規化する（ADR-0026④）。
-  return normalizeSubtitleSources({
-    ...scene,
-    lines: scene.lines.map((l) => {
-      if (l.lineId !== lineId) return l;
-      const next: NarrationLine = { ...l, ...patch };
-      if (affectsVoice(patch, l)) {
-        next.status = NARRATION_STATUS.none;
-        next.voicePath = null;
-      }
-      return next;
+  // 同時開始トグルは startSec を消して呼ぶが、直接更新でも startWithPrevious×startSec の併存を残さない（ADR-0031・防御）。
+  return normalizeDialogueTiming(
+    normalizeSubtitleSources({
+      ...scene,
+      lines: scene.lines.map((l) => {
+        if (l.lineId !== lineId) return l;
+        const next: NarrationLine = { ...l, ...patch };
+        if (affectsVoice(patch, l)) {
+          next.status = NARRATION_STATUS.none;
+          next.voicePath = null;
+        }
+        return next;
+      }),
     }),
-  });
+  );
 }
 
 /** 指定行を delta 分だけ並べ替え（-1=前へ / +1=後ろへ）。範囲外は変化なし。 */
@@ -93,5 +97,6 @@ export function moveLine(scene: Scene, lineId: string, delta: number): Scene {
   const lines = [...scene.lines];
   const [moved] = lines.splice(idx, 1);
   lines.splice(to, 0, moved);
-  return { ...scene, lines };
+  // 並べ替えで先頭になった同時開始フラグを落とす（休眠フラグが別の並べ替えで復活するのを防ぐ・ADR-0031）。
+  return normalizeDialogueTiming({ ...scene, lines });
 }
