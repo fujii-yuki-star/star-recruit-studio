@@ -6,6 +6,11 @@ import { fontFamilyForId, isKnownFontId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT } from './layout';
 import { freeShapeSvg } from './freeShapes';
+import { charWidthEm, wrapText } from './textWrap';
+
+// 折返し（charWidthEm/wrapText）は layout（帯の段位置計算）と共有＝行数と描画を一致させる（textWrap）。
+// 既存の import 元（'./sceneSvg'）を保つため再エクスポートする。
+export { charWidthEm, wrapText } from './textWrap';
 
 // 既定の font-family（opts.fontFamily 未指定時のフォールバック＝同梱の既定フォント）。
 const DEFAULT_FONT_FAMILY = fontFamilyForId(undefined);
@@ -19,52 +24,20 @@ function escapeXml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-// 文字幅の概算（フォント実測の代替・05 §10 / ADR-0001 未解決）。半角(ASCII)は約0.55em、
-// それ以外（日本語など全角）はほぼ1em。全角を 0.58em 一律とみなすと縦型の狭幅で折返し不足＝見切れるため区別する。
-export function charWidthEm(ch: string): number {
-  return ch.charCodeAt(0) <= 0xff ? 0.55 : 1.0;
-}
-
-// 幅(px)に収まるよう行へ分割する（全角/半角を区別）。maxLines を超える分は末尾を … で切る。
-export function wrapText(text: string, maxWidth: number, fontSize: number, maxLines: number): string[] {
-  if (maxWidth < fontSize || maxLines < 1) return [text];
-  const chars = [...text];
-  const lines: string[] = [];
-  let line = '';
-  let lineW = 0;
-  for (let i = 0; i < chars.length; i += 1) {
-    const w = charWidthEm(chars[i]) * fontSize;
-    if (lineW + w > maxWidth && line.length > 0) {
-      lines.push(line);
-      line = '';
-      lineW = 0;
-      if (lines.length >= maxLines) {
-        // 行数上限に到達。まだ文字が残るなら直前の行末を … にする。
-        if (chars.slice(i).join('').length > 0) {
-          const last = lines[lines.length - 1];
-          lines[lines.length - 1] = `${last.slice(0, Math.max(0, last.length - 1))}…`;
-        }
-        return lines;
-      }
-    }
-    line += chars[i];
-    lineW += w;
-  }
-  if (line.length > 0) lines.push(line);
-  return lines;
-}
-
 function textToSvg(item: TextItem, fontFamily: string): string {
   const parts: string[] = [];
   // 要素自身の fontId（既知）を優先し、未指定/不明は場面既定（fontFamily＝場面→動画全体→既定の解決済み）へ（#178）。
   const family = isKnownFontId(item.fontId) ? fontFamilyForId(item.fontId) : fontFamily;
   const lines = wrapText(item.text, item.w, item.fontSize, item.maxLines);
   const lineHeight = item.fontSize * (item.lineHeight ?? DEFAULT_LINE_HEIGHT); // 行間（#209）
+  // 下端基準（テンプレ字幕・ADR-0031）：行が増えたぶんを上へずらし、最終行は1行時の位置に留める＝画面下端に
+  // 置いた字幕帯が2行で画面外へはみ出さない。anchorBottom でないもの（見出し・FREE text）は 0＝従来どおり上端起点。
+  const shiftUp = item.anchorBottom ? Math.max(0, lines.length - 1) * lineHeight : 0;
 
   if (item.background) {
     const bgHeight = lineHeight * lines.length + item.fontSize * 0.6;
     parts.push(
-      `<rect x="${item.x}" y="${item.y}" width="${item.w}" height="${bgHeight}" rx="${item.background.radius}" fill="${item.background.color}" fill-opacity="${item.background.opacity}"/>`,
+      `<rect x="${item.x}" y="${item.y - shiftUp}" width="${item.w}" height="${bgHeight}" rx="${item.background.radius}" fill="${item.background.color}" fill-opacity="${item.background.opacity}"/>`,
     );
   }
 
@@ -78,7 +51,7 @@ function textToSvg(item: TextItem, fontFamily: string): string {
     ? ` stroke="${item.strokeColor}" stroke-width="${item.strokeWidth}" paint-order="stroke"`
     : '';
 
-  const baseY = item.y + item.fontSize;
+  const baseY = item.y + item.fontSize - shiftUp;
   lines.forEach((line, i) => {
     parts.push(
       `<text x="${textX}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}" text-anchor="${anchor}"${stroke}>${escapeXml(line)}</text>`,

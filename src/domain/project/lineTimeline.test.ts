@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { activeLineIndexAt, firstFrameBoundary, lastFrameBoundary, lineSegments, motionSubtitleAt, previewSubtitleSegment, resolveLineSubtitle, sceneSegmentSpecs, segmentAt } from './lineTimeline';
+import { activeLineIndexAt, firstFrameBoundary, lastFrameBoundary, lineSegments, motionSubtitleAt, previewSubtitleSegment, resolveLineSubtitle, sceneSegmentSpecs, segmentAt, segmentLineIds } from './lineTimeline';
 import type { NarrationLine, Scene } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -298,5 +298,85 @@ describe('previewSubtitleSegment（ADR-0029・停止/再生の正準セグメン
   it('頭空白なしは停止時に先頭行セグメント', () => {
     const s = sceneWith({ lines: [{ lineId: 'line_001', text: 'A', status: NARRATION_STATUS.none }] });
     expect(previewSubtitleSegment(s, {}, 0, false).lineId).toBe('line_001');
+  });
+});
+
+describe('同時開始（startWithPrevious・並行・ADR-0031）', () => {
+  it('lineSegments：2行同時＝同一窓を共有・グループ長は音声長の最大で次行が続く', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'A', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: NARRATION_STATUS.none }, // line_001 と同時
+      { lineId: 'line_003', text: 'C', status: NARRATION_STATUS.none },
+    ];
+    // 同時グループ[0,5)＝max(3,5)=5、line_003 は [5,10]。
+    const segs = lineSegments(sceneWith({ lines }), { line_001: 3, line_002: 5, line_003: 2 });
+    expect(segs.map((s) => [s.startSec, s.endSec])).toEqual([[0, 5], [0, 5], [5, 10]]);
+  });
+
+  it('lineSegments：3人同時（startWithPrevious 連続）＝全員が同じ窓（最終グループは場面末）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'A', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: NARRATION_STATUS.none },
+      { lineId: 'line_003', text: 'C', startWithPrevious: true, status: NARRATION_STATUS.none },
+    ];
+    const segs = lineSegments(sceneWith({ lines }), { line_001: 3, line_002: 4, line_003: 6 });
+    expect(segs.map((s) => [s.startSec, s.endSec])).toEqual([[0, 10], [0, 10], [0, 10]]);
+  });
+
+  it('sceneSegmentSpecs：同時グループは1セグメント（primary＝先頭・parallelLineIds＝残り・subtitleText は primary のみ）＋逐次に戻る', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'A', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: NARRATION_STATUS.none },
+      { lineId: 'line_003', text: 'C', status: NARRATION_STATUS.none },
+    ];
+    // subtitleText は primary（先頭話者）のみ。同時行 B は parallelLineIds＝各消費者が解決（通常字幕は上へ積む・FREE は結合）。
+    expect(sceneSegmentSpecs(sceneWith({ lines }), { line_001: 3, line_002: 5, line_003: 2 })).toEqual([
+      { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'A', startSec: 0, durationSec: 5, isFirst: true },
+      { lineId: 'line_003', subtitleText: 'C', startSec: 5, durationSec: 5, isFirst: false }, // parallelLineIds なし
+    ]);
+  });
+
+  it('sceneSegmentSpecs：subtitleText は primary の字幕のみ（primary OFF なら null・同時行は parallelLineIds へ）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'A', subtitleEnabled: false, status: NARRATION_STATUS.none }, // primary OFF
+      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: NARRATION_STATUS.none },
+    ];
+    // primary OFF＝subtitleText null（B は parallelLineIds で保持＝resolveSubtitleForElement/layout が解決）。
+    expect(sceneSegmentSpecs(sceneWith({ lines }), { line_001: 3, line_002: 4 })[0]).toMatchObject({
+      lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: null,
+    });
+  });
+
+  it('segmentLineIds：primary＋同時行を返す（間/単一 narration は空）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'A', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: NARRATION_STATUS.none },
+    ];
+    const specs = sceneSegmentSpecs(sceneWith({ lines }), { line_001: 3, line_002: 4 });
+    expect(segmentLineIds(specs[0])).toEqual(['line_001', 'line_002']);
+    expect(segmentLineIds(sceneSegmentSpecs(sceneWith({}), {})[0])).toEqual([]); // 単一＝lineId なし
+  });
+
+  it('先頭行の startWithPrevious は無視＝アンカー扱い（同時にする相手がいない）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'A', startWithPrevious: true, status: NARRATION_STATUS.none }, // 先頭＝無視
+      { lineId: 'line_002', text: 'B', status: NARRATION_STATUS.none },
+    ];
+    const specs = sceneSegmentSpecs(sceneWith({ lines }), { line_001: 3, line_002: 4 });
+    expect(specs.map((s) => s.lineId)).toEqual(['line_001', 'line_002']); // 逐次
+    expect(specs[0].parallelLineIds).toBeUndefined();
+  });
+
+  it('segmentAt：同時グループの窓内はそのグループ spec（parallelLineIds つき）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'A', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: NARRATION_STATUS.none },
+      { lineId: 'line_003', text: 'C', status: NARRATION_STATUS.none },
+    ];
+    const s = sceneWith({ lines });
+    const durs = { line_001: 3, line_002: 5, line_003: 2 }; // group[0,5)・line_003[5,10]
+    expect(segmentAt(s, durs, 2)).toMatchObject({ lineId: 'line_001', parallelLineIds: ['line_002'] });
+    expect(segmentAt(s, durs, 6).lineId).toBe('line_003');
+    expect(segmentAt(s, durs, 6).parallelLineIds).toBeUndefined();
   });
 });

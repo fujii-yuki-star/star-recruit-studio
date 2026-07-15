@@ -27,6 +27,7 @@ import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
+import { subtitleOverflowsCanvas } from "../../renderer/layout";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { useProjectStore } from "../store/projectStore";
@@ -977,8 +978,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 掛け合い（複数のセリフ）モードか。明示 lines があるとき＝ON（ADR-0015・#180）。
   const isDialogue = (selected.lines?.length ?? 0) > 0;
   // セリフ列の検証（V16-19）。開始秒の範囲/順序・話者の実在などをユーザー向け文言で案内（重複文言は1つに）。
+  // 同時開始（ADR-0031）：字幕帯が多くて画面外へ積み切れないときは「次の行動」を示す警告（黙って画面外に切らない・#533 P2）。
   const lineWarningMessages = isDialogue
-    ? [...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message))]
+    ? [
+        ...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message)),
+        ...(template && subtitleOverflowsCanvas(selected, template)
+          ? ["同時に表示するセリフが多く、一部の字幕が画面からはみ出します。同時のセリフを減らすか、字幕を短くしてください。"]
+          : []),
+      ]
     : [];
   // 場面ごとの声の大きさ（null/未設定＝全体設定を継承 §6/§2.2、値＝この場面だけ上書き）。
   const sceneNarrationVolume = selected.audioMix?.narrationVolume ?? null;
@@ -2027,23 +2034,43 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           value={line.subtitleText ?? ""}
                           onChange={(e) => patch((s) => updateLine(s, line.lineId, { subtitleText: e.target.value ? e.target.value : null }))}
                         />
-                        <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
-                          <span className="text-sm text-muted">開始（場面の頭から）</span>
-                          {/* 共有 NumberField（#459）。空欄＝自動（クリア）、値ありは blur で [0, 場面尺] にクランプ（範囲外を残さない＝#411/V17）。 */}
-                          <NumberField
-                            value={line.startSec}
-                            min={0}
-                            max={selected.durationSec}
-                            step={0.1}
-                            placeholder="自動"
-                            title="このセリフが始まるタイミング（場面の頭からの秒数）。空欄にすると前のセリフの後に自動で続きます。"
-                            inputClassName="input text-sm"
-                            inputStyle={{ width: 90 }}
-                            onChange={(v) => patch((s) => updateLine(s, line.lineId, { startSec: v }))}
-                            onClear={() => patch((s) => updateLine(s, line.lineId, { startSec: undefined }))}
-                          />
-                          <span className="text-sm text-muted">秒（空欄＝前のセリフの後に自動）</span>
-                        </div>
+                        {/* 前のセリフと同時に流す（並行・ADR-0031）。2人目以降だけ（先頭は同時にする相手がいない）。
+                            ONにすると前のセリフに合わせて始まり声が重なる＝startSec は使わないので隠す（意味の二重化を防ぐ）。 */}
+                        {i > 0 && (
+                          <div className="toggle-row">
+                            <span className="text-sm text-muted">前のセリフと同時に流す</span>
+                            <Switch
+                              on={line.startWithPrevious === true}
+                              onChange={(on) =>
+                                patch((s) =>
+                                  updateLine(s, line.lineId, on ? { startWithPrevious: true, startSec: undefined } : { startWithPrevious: undefined }),
+                                )
+                              }
+                              label="前のセリフと同時に流す"
+                            />
+                          </div>
+                        )}
+                        {line.startWithPrevious === true ? (
+                          <p className="field-hint" style={{ marginTop: 0 }}>前のセリフと同時に始まり、声が重なって流れます（開始は前のセリフに合わせます）。</p>
+                        ) : (
+                          <div className="row gap-sm" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                            <span className="text-sm text-muted">開始（場面の頭から）</span>
+                            {/* 共有 NumberField（#459）。空欄＝自動（クリア）、値ありは blur で [0, 場面尺] にクランプ（範囲外を残さない＝#411/V17）。 */}
+                            <NumberField
+                              value={line.startSec}
+                              min={0}
+                              max={selected.durationSec}
+                              step={0.1}
+                              placeholder="自動"
+                              title="このセリフが始まるタイミング（場面の頭からの秒数）。空欄にすると前のセリフの後に自動で続きます。"
+                              inputClassName="input text-sm"
+                              inputStyle={{ width: 90 }}
+                              onChange={(v) => patch((s) => updateLine(s, line.lineId, { startSec: v }))}
+                              onClear={() => patch((s) => updateLine(s, line.lineId, { startSec: undefined }))}
+                            />
+                            <span className="text-sm text-muted">秒（空欄＝前のセリフの後に自動）</span>
+                          </div>
+                        )}
                         <div className="row-between">
                           <span className="text-sm text-muted">音声：{narrationStatusText(line.status)}</span>
                           {lineAudio && (

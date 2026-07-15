@@ -117,6 +117,23 @@ describe('compileTimeline：掛け合い（行トラック）', () => {
     ]);
   });
 
+  it('同時開始（startWithPrevious）の2行は同じ時間窓の音声クリップになる（並行＝重なり・ADR-0031）', () => {
+    const s = scene({
+      sceneId: 's1',
+      durationSec: 10,
+      lines: [
+        { lineId: 'l1', text: 'やあ', status: 'idle' },
+        { lineId: 'l2', text: 'どうも', startWithPrevious: true, status: 'idle' },
+      ],
+    });
+    // 同時グループ＝唯一のグループ＝場面末まで。両行が [0,10] を共有（重なり＝並行音声を正しく射影）。
+    const tl = compileTimeline(project([s]));
+    expect(tl.tracks.audio).toEqual([
+      { id: 's1/l1', sceneId: 's1', lineId: 'l1', startSec: 0, endSec: 10, label: 'やあ' },
+      { id: 's1/l2', sceneId: 's1', lineId: 'l2', startSec: 0, endSec: 10, label: 'どうも' },
+    ]);
+  });
+
   it('前場面の遷移重なりぶん、後場面の行クリップもグローバルにずれる', () => {
     const tl = compileTimeline(project([
       scene({ sceneId: 's1', durationSec: 8 }),

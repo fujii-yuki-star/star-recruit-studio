@@ -97,7 +97,7 @@ ok = ok && sem;
 
 // generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
 const generalBase = {
-  schemaVersion: '1.20', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  schemaVersion: '1.21', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
   videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
@@ -127,6 +127,7 @@ const mustAccept = [
   ['freeLayout: 字幕 subtitleSource=読み上げ/全行を許容（1.20）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'narration' } }, { id: 'free_002', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'allLines' } }] })],
   ['freeLayout: 字幕 subtitleSource=話者(catalog/default)を許容（1.20・P1-2）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } } }, { id: 'free_002', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'speaker', speaker: { kind: 'default' } } }] })],
   ['scene: lines（掛け合い・行ごと speaker/字幕/開始秒）を許容（1.8・ADR-0015）', withScene({ lines: [{ lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'どうも', speaker: 2, subtitleEnabled: true, startSec: 2, status: 'none' }], subtitleEnabledDefault: true })],
+  ['scene: lines の startWithPrevious（前のセリフと同時開始）を許容（1.21・ADR-0031）', withScene({ lines: [{ lineId: 'line_001', text: 'やあ', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'どうも', speaker: 2, startWithPrevious: true, status: 'none' }] })],
   ['scene: slotFits（場面ごとの収め方上書き）を許容（1.13・④）', withScene({ slotFits: { background: 'contain', mainVisual: 'stretch' } })],
   ['scene: groups（要素のグループ化・ネスト）を許容（1.14・ADR-0022）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }], groups: [{ id: 'group_001', members: ['free_001'], transform: { x: 10, y: -5, rotation: 15, scale: 1.5 }, name: 'まとまり', hidden: false, locked: false }, { id: 'group_002', members: ['group_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }] })],
   ['timelineOverlay: 場面アンカー＋絶対のテロップクリップを許容（1.15・ADR-0018）', { ...withBrief({}), timelineOverlay: { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', startSec: 1, durationSec: 2, text: '補足' }, { id: 'ovclip_002', track: 'telop', startSec: 3, durationSec: 1.5 }] } }],
@@ -172,6 +173,7 @@ const mustReject = [
   ['freeLayout: subtitleSource 未知フィールドは拒否（additionalProperties:false・1.20）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'narration', extra: 1 } }] })],
   ['lines: lineId が不正(line_1)は拒否', withScene({ lines: [{ lineId: 'line_1', text: 'x', status: 'none' }] })],
   ['lines: speaker 非整数は拒否', withScene({ lines: [{ lineId: 'line_001', text: 'x', speaker: 1.5, status: 'none' }] })],
+  ['lines: startWithPrevious 非真偽は拒否（1.21）', withScene({ lines: [{ lineId: 'line_001', text: 'x', startWithPrevious: 'yes', status: 'none' }] })],
   ['lines: speaker 負数は拒否', withScene({ lines: [{ lineId: 'line_001', text: 'x', speaker: -1, status: 'none' }] })],
   ['lines: 未知フィールド(voiceId)は拒否＝行は speaker（additionalProperties:false）', withScene({ lines: [{ lineId: 'line_001', text: 'x', status: 'none', voiceId: 'voicevox_zundamon' }] })],
   ['groups: id が group_ 形式でないと拒否（g1）', withScene({ groups: [{ id: 'g1', members: [], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }] })],

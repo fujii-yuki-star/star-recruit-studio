@@ -11,8 +11,11 @@ import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
 import type { InterpolatedTransform } from '../domain/project/keyframes';
 import { groupElementIds } from '../domain/project/groupOps';
+import { groupIndices, resolveLineSubtitle } from '../domain/project/lineTimeline';
 import type { SceneSegmentSpec } from '../domain/project/lineTimeline';
+import { sceneLines } from '../domain/project/narrationLines';
 import { resolveSubtitleForElement, type SubtitleMoment } from '../domain/project/subtitleBinding';
+import { wrapText } from './textWrap';
 
 export interface Rect {
   x: number;
@@ -60,6 +63,12 @@ export interface TextItem extends ItemBase {
   background?: { color: string; opacity: number; radius: number };
   /** subtitle レイヤー由来か（書き出しの「字幕を入れる」ON/OFFで判定に使う）。layoutScene が常に設定する。 */
   isSubtitle: boolean;
+  /**
+   * 下端を基準に上へ伸ばすか（テンプレ字幕帯の複数行対策・ADR-0031）。true のとき、行が増えても最終行は元の1行位置に
+   * 留まり、追加行と背景は**上方向**へ積む＝画面下端に置いた字幕帯が2行で画面外へはみ出さない。FREE 字幕（利用者が箱を
+   * 置く）は未設定＝従来どおり上端起点で下へ伸ばす（箱の高さは利用者管理）。
+   */
+  anchorBottom?: boolean;
   /** この要素自身のフォント id（#178）。既知ならこれを使い、未指定/不明は場面既定（描画側 fontFamily）へ。 */
   fontId?: string | null;
   /** 行間（倍率・未指定=1.3）・揃え（未指定=left）・縁取り（FREE text の体裁・#209）。 */
@@ -86,6 +95,92 @@ const DEFAULT_FONT_SIZE = 40;
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 /** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
 export const DEFAULT_LINE_HEIGHT = 1.3;
+/** 字幕帯の背景の上下パディング（em）。sceneSvg の bgHeight = 行間×行数 + 0.6*fontSize と一致（帯の下端＝y + 行間 + これ）。 */
+export const SUBTITLE_BAND_PAD_EM = 0.6;
+/** 同時字幕（ADR-0031）で2人目以降を上へ積むときの帯間の余白（em）。**実際の折返し行数**で詰めたうえで、この隙間を空ける（重ならない）。 */
+export const SUBTITLE_STACK_GAP_EM = 0.4;
+
+/**
+ * 同時字幕（ADR-0031）の帯を下→上に積んだときの、各帯の anchor y と上端 top（キャンバス座標・px）。純粋関数。
+ * bandTexts[0] が下（primary）＝baseY。以降は**実際の折返し行数**（`wrapText`）で詰め、`anchorBottom` の上伸び
+ * （行が増えると上端が上がる）を見込んで次帯の下端を前帯の上端＋gap 上へ置く＝2行でも重ならない。
+ * layout（描画）と、はみ出し判定（`subtitleOverflowsCanvas` は実 `layoutScene` の字幕アイテムを検査）が同じ配置を共有する（drift 防止・#533 P1/P2）。
+ */
+export function stackedSubtitleBands(
+  bandTexts: string[],
+  baseY: number,
+  w: number,
+  fontSize: number,
+  maxLines: number,
+): { y: number; top: number }[] {
+  const lineHeightPx = fontSize * DEFAULT_LINE_HEIGHT;
+  const bottomOffsetPx = lineHeightPx + fontSize * SUBTITLE_BAND_PAD_EM; // anchor y から帯の下端まで
+  const gapPx = fontSize * SUBTITLE_STACK_GAP_EM;
+  const out: { y: number; top: number }[] = [];
+  let prevTop = Number.POSITIVE_INFINITY;
+  bandTexts.forEach((t, i) => {
+    const y = i === 0 ? baseY : prevTop - gapPx - bottomOffsetPx;
+    const n = wrapText(t, w, fontSize, maxLines).length; // 実際の折返し行数（描画と同じ wrapText）
+    const top = y - (n - 1) * lineHeightPx; // この帯の上端（anchorBottom で上へ伸びるぶんを反映）
+    out.push({ y, top });
+    prevTop = top;
+  });
+  return out;
+}
+
+/** 字幕帯アイテム1つが回転後にキャンバス外へ出るか（上下左右すべての辺）。矩形＝x/y/w＋折返し行数＋anchorBottom、rotation は中心軸で回して AABB 判定（#533 P2）。 */
+function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: number): boolean {
+  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines).length;
+  const lineHeightPx = item.fontSize * DEFAULT_LINE_HEIGHT;
+  const x0 = item.x;
+  const y0 = item.y - (item.anchorBottom ? (n - 1) * lineHeightPx : 0); // 帯背景の上端（sceneSvg と一致）
+  const w = item.w;
+  const h = lineHeightPx * n + item.fontSize * SUBTITLE_BAND_PAD_EM;
+  const rot = ((item.rotation ?? 0) * Math.PI) / 180;
+  if (rot === 0) return x0 < 0 || y0 < 0 || x0 + w > canvasW || y0 + h > canvasH;
+  const cx = x0 + w / 2;
+  const cy = y0 + h / 2;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const corners: [number, number][] = [[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h]];
+  const xs = corners.map(([px, py]) => cx + (px - cx) * cos - (py - cy) * sin);
+  const ys = corners.map(([px, py]) => cy + (px - cx) * sin + (py - cy) * cos);
+  return Math.min(...xs) < 0 || Math.min(...ys) < 0 || Math.max(...xs) > canvasW || Math.max(...ys) > canvasH;
+}
+
+/**
+ * 同時字幕（ADR-0031）が**キャンバス外へはみ出す**か（#533 レビュー P2）。**実描画（`layoutScene`）の字幕アイテム**を基に、
+ * 各同時グループで生成される全テンプレ字幕層×全帯を、回転・グループ transform・非表示込みで**上下左右すべての辺**で判定する
+ * （2個目の字幕層・下移動・回転・N人長文の見切れを実描画と一致して検出）。FREE 字幕は利用者配置ゆえ対象外。純粋関数。
+ */
+export function subtitleOverflowsCanvas(scene: Scene, template: Template): boolean {
+  if (!scene.lines || scene.lines.length === 0) return false;
+  const { width, height } = template.canvas;
+  // テンプレ字幕層の id（同時行の追加帯は `${id}__subN`）。FREE 字幕（free_NNN）と区別するのに使う。
+  const subtitleLayerIds = new Set(template.layers.filter((l) => l.type === 'subtitle').map((l) => l.id));
+  if (subtitleLayerIds.size === 0) return false;
+  const lines = sceneLines(scene);
+  for (const g of groupIndices(lines)) {
+    if (g.length < 2) continue; // 単独行は積まない
+    const primary = lines[g[0]];
+    const primarySub = resolveLineSubtitle(primary, scene);
+    const seg: SceneSegmentSpec = {
+      lineId: primary.lineId,
+      parallelLineIds: g.slice(1).map((i) => lines[i].lineId),
+      startSec: 0,
+      durationSec: scene.durationSec,
+      isFirst: true,
+    };
+    // 実描画と同じ layoutScene を回し、テンプレ字幕層由来の帯だけ（回転・グループ transform・非表示は layout が反映済み）を全辺で検査。
+    const layout = layoutScene(scene, template, { subtitleText: primarySub.enabled ? primarySub.text : null, subtitleSegment: seg });
+    for (const item of layout.items) {
+      if (item.kind !== 'text' || !item.isSubtitle) continue;
+      if (!subtitleLayerIds.has(item.id.split('__sub')[0])) continue; // FREE 字幕は対象外
+      if (subtitleItemOutOfCanvas(item, width, height)) return true;
+    }
+  }
+  return false;
+}
 
 /** layoutScene のオプション（掛け合いの行字幕の上書き等・ADR-0015 追加A/B）。 */
 export interface LayoutOptions {
@@ -211,39 +306,66 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // 掛け合い：subtitle レイヤーのみ行の字幕で上書き（追加A/B）。null＝非表示・未指定＝従来。
         const overrideSub = layer.type === 'subtitle' && opts != null && 'subtitleText' in opts;
         // 単一ナレーション等の静的字幕（override 無し）は場面の字幕トグル subtitleEnabledDefault=false で出さない（#413）。
-        // preview/export とも layoutScene 経由なのでここが単一の参照元。掛け合いは opts.subtitleText 側で行ごとに
-        // 解決済み（resolveLineSubtitle が subtitleEnabledDefault を継承）＝override 経路は触らない。
-        const staticSubtitleOff =
-          layer.type === 'subtitle' && !overrideSub && scene.subtitleEnabledDefault === false;
+        // preview/export とも layoutScene 経由なのでここが単一の参照元。掛け合いは opts.subtitleText 側で primary 行を
+        // 解決済み（resolveLineSubtitle が subtitleEnabledDefault を継承）。同時行は下の parallelLineIds から解決する。
+        const isSub = layer.type === 'subtitle';
+        const staticSubtitleOff = isSub && !overrideSub && scene.subtitleEnabledDefault === false;
         const text = overrideSub
           ? opts.subtitleText ?? ''
           : staticSubtitleOff
             ? ''
             : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
-        if (text.length === 0) break;
-        const bg = layer.type === 'subtitle' && layer.background?.enabled
+        const bg = isSub && layer.background?.enabled
           ? {
               color: layer.background.color ?? '#000000',
               opacity: layer.background.opacity ?? 0.55,
               radius: layer.background.radius ?? 16,
             }
           : undefined;
-        items.push({
-          ...base,
-          kind: 'text',
-          text,
-          fontSize: layer.fontSize ?? DEFAULT_FONT_SIZE,
-          fontWeight: layer.fontWeight ?? FONT_WEIGHT.normal,
-          color: layer.color ?? DEFAULT_TEXT_COLOR,
-          maxLines: layer.maxLines ?? 2,
-          background: bg,
-          isSubtitle: layer.type === 'subtitle',
-          fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
-          // 縁取り（#275）。LayoutItem/SVG は既存（FREE の #209）と同じ仕組みで描画。
-          // 太さ>0 で色未指定なら白を既定（外部テンプレ等で色だけ無いと縁取りが silent に消えるのを防ぐ・PR#289レビュー）。
-          strokeColor: (layer.strokeWidth ?? 0) > 0 ? (layer.strokeColor ?? '#ffffff') : layer.strokeColor,
-          strokeWidth: layer.strokeWidth,
-        });
+        const fontSize = layer.fontSize ?? DEFAULT_FONT_SIZE;
+        // 字幕帯を1つ積む（y を差し替え・id を一意化）。primary はテンプレ位置、同時行はその上へ（ADR-0031）。
+        const pushBand = (bandText: string, y: number, idSuffix: string): void => {
+          items.push({
+            ...base,
+            id: base.id + idSuffix,
+            y,
+            kind: 'text',
+            text: bandText,
+            fontSize,
+            fontWeight: layer.fontWeight ?? FONT_WEIGHT.normal,
+            color: layer.color ?? DEFAULT_TEXT_COLOR,
+            maxLines: layer.maxLines ?? 2,
+            background: bg,
+            isSubtitle: isSub,
+            // テンプレ字幕は下端基準で上へ伸ばす（1帯が2行でも画面下端からはみ出さない・ADR-0031）。text 層は従来どおり。
+            anchorBottom: isSub,
+            fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
+            // 縁取り（#275）。太さ>0 で色未指定なら白を既定（色だけ無いと縁取りが silent に消えるのを防ぐ・PR#289レビュー）。
+            strokeColor: (layer.strokeWidth ?? 0) > 0 ? (layer.strokeColor ?? '#ffffff') : layer.strokeColor,
+            strokeWidth: layer.strokeWidth,
+          });
+        };
+        // 表示する帯（下→上の順）＝primary（あれば）＋同時行（enabled・ADR-0031）。primary は layer.id 据え置き（後方互換）。
+        const bands: { text: string; idSuffix: string }[] = [];
+        if (text.length > 0) bands.push({ text, idSuffix: '' });
+        if (isSub) {
+          let k = 1;
+          for (const lineId of opts?.subtitleSegment?.parallelLineIds ?? []) {
+            const line = sceneLines(scene).find((l) => l.lineId === lineId);
+            if (line == null) continue;
+            const sub = resolveLineSubtitle(line, scene);
+            if (!sub.enabled || sub.text.length === 0) continue; // OFF/空は帯を作らない（段も詰めない）
+            bands.push({ text: sub.text, idSuffix: `__sub${k}` });
+            k += 1;
+          }
+        }
+        // 帯を配置：字幕は下→上に積む（実折返し行数で詰める＝重ならない・共有 stackedSubtitleBands・#533 P1）。text 層は単一で base.y。
+        if (isSub) {
+          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? 2);
+          bands.forEach((b, i) => pushBand(b.text, placed[i].y, b.idSuffix));
+        } else if (bands.length > 0) {
+          pushBand(bands[0].text, base.y, bands[0].idSuffix);
+        }
         break;
       }
     }

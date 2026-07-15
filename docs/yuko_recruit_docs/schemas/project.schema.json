@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.20" },
+    "schemaVersion": { "const": "1.21" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -436,6 +436,7 @@
         "subtitleText": { "type": ["string", "null"] },
         "subtitleEnabled": { "type": "boolean" },
         "startSec": { "type": "number", "minimum": 0 },
+        "startWithPrevious": { "type": "boolean" },
         "voicePath": { "type": ["string", "null"] },
         "status": { "enum": ["none", "pending", "generated", "failed"] }
       }

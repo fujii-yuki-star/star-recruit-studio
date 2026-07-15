@@ -37,7 +37,7 @@
 | [0028](0028-per-use-clip-and-undo.md) | 動画クリップ調整を per-use 上書き（`scene.slotClips`）にして Undo 可能に（ADR-0024 決定1 の確定・#472） | **Accepted** |
 | [0029](0029-free-subtitle-multi-and-binding.md) | FREE 字幕要素＝複数配置＋対象（読み上げ／話者）への紐づけ（#518 再スコープ・単一制約は固めない・0.4.2） | **Accepted**（PR-A+B 済＝#521・PR-C 済＝UI・(2b) は α-5） |
 | [0030](0030-normal-free-switch-migration.md) | 通常↔FREE 切替の非破壊コンテンツ移送（通常→FREE は `freeLayout` へ seed／FREE→通常は休眠保持・precheck を category ゲート・#524 P1/P2） | **Accepted** |
-| [0031](0031-simultaneous-dual-voice.md) | 同時2ボイス（並行音声・α-4 最小形＝同時開始＋amix＋字幕2段・0.4.2 前倒し・タイムライン非依存） | **Proposed** |
+| [0031](0031-simultaneous-dual-voice.md) | 同時2ボイス（並行音声・α-4 最小形＝同時開始＋amix＋字幕2行・0.4.2・`startWithPrevious` フラグ・N人） | **Accepted** |
 
 ## 状態の意味
 

@@ -110,6 +110,41 @@ describe('buildExportScenes：ナレーション音声の付与', () => {
     expect(out.map((o) => o.audioBase64)).toEqual(['AUDIO_line_001', 'AUDIO_line_002']);
   });
 
+  it('同時開始（startWithPrevious・非動画）は1グループ=1セグメント＝primary は audioBase64・同時行は narrationSegments へ（ADR-0031）', async () => {
+    const dual = {
+      sceneId: 's1', templateId: 'tpl', durationSec: 8,
+      lines: [
+        { lineId: 'line_001', text: 'A', status: 'none' },
+        { lineId: 'line_002', text: 'B', startWithPrevious: true, status: 'none' }, // line_001 と同時
+      ],
+    } as unknown as Scene;
+    const out = await buildExportScenes([dual], templateById, noAsset, (_s, lineId) => ({
+      audioBase64: lineId ? `AUDIO_${lineId}` : undefined,
+      narrationVolume: 1,
+    }));
+    expect(out).toHaveLength(1); // 同時グループは逐次の2つに割らず1セグメント
+    expect(out[0].durationSec).toBe(8);
+    expect(out[0].audioBase64).toBe('AUDIO_line_001'); // primary（アンカー）
+    // 同時行は並行ナレーション＝Rust が amix（delaySec=0＝この区間の頭から・windowSec=区間尺）。
+    expect(out[0].narrationSegments).toEqual([{ audioBase64: 'AUDIO_line_002', delaySec: 0, windowSec: 8 }]);
+  });
+
+  it('逐次（startWithPrevious なし）は narrationSegments を付けない＝従来どおり行ごとに割る（後方互換）', async () => {
+    const seq = {
+      sceneId: 's1', templateId: 'tpl', durationSec: 8,
+      lines: [
+        { lineId: 'line_001', text: 'A', startSec: 0, status: 'none' },
+        { lineId: 'line_002', text: 'B', startSec: 4, status: 'none' },
+      ],
+    } as unknown as Scene;
+    const out = await buildExportScenes([seq], templateById, noAsset, (_s, lineId) => ({
+      audioBase64: lineId ? `AUDIO_${lineId}` : undefined,
+      narrationVolume: 1,
+    }));
+    expect(out).toHaveLength(2);
+    expect(out.every((o) => o.narrationSegments === undefined)).toBe(true); // 並行なし
+  });
+
   it('掛け合い（静止画）で先頭行が途中開始なら先頭に「間」区間（音声なし・場面尺を保つ）が入る（#386・A案）', async () => {
     const gapScene = {
       sceneId: 's1', templateId: 'tpl', durationSec: 10,
@@ -403,6 +438,27 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
       clipStartSec: 0,
       useOriginalAudio: false,
     });
+  });
+
+  it('動画シーン×同時開始：video.narrationSegments に primary＋同時行が同じ delaySec で入る（並行 amix・ADR-0031）', async () => {
+    const dual = {
+      sceneId: 's1', templateId: 'tpl', durationSec: 8,
+      lines: [
+        { lineId: 'line_001', text: 'A', status: 'none' },
+        { lineId: 'line_002', text: 'B', startWithPrevious: true, status: 'none' }, // line_001 と同時
+      ],
+    } as unknown as Scene;
+    const out = await buildExportScenes(
+      [dual], templateById, noAsset,
+      (_s, lineId) => ({ audioBase64: lineId ? `AUDIO_${lineId}` : undefined, narrationVolume: 1 }),
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+    );
+    expect(out).toHaveLength(1);
+    // 同時グループ＝1区間・全尺。両話者を同じ delaySec=0（区間頭）で重ねる＝Rust が amix（掛け合い×動画）。
+    expect(out[0].video?.narrationSegments).toEqual([
+      { audioBase64: 'AUDIO_line_001', delaySec: 0, windowSec: 8 },
+      { audioBase64: 'AUDIO_line_002', delaySec: 0, windowSec: 8 },
+    ]);
   });
 
   it('opts.credit を渡すと splitVideoSceneSvgMulti の credit 引数（6番目）に反映（#177・動画シーン）', async () => {

@@ -206,6 +206,23 @@ describe('parseProjectDoc', () => {
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     expect(back.scenes[0].lines?.map((l) => l.speaker)).toEqual([3, 2]);
   });
+  it('同時開始：先頭行のフラグと startWithPrevious×startSec の併存を読込時に正規化する（ADR-0031・実装が無視する状態を残さない）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'tpl',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' },
+      lines: [
+        { lineId: 'line_001', text: 'A', startWithPrevious: true, status: 'none' }, // 先頭＝同時にする相手がいない→落とす
+        { lineId: 'line_002', text: 'B', startWithPrevious: true, startSec: 3, status: 'none' }, // 併存 startSec→落とす
+      ],
+      warnings: [],
+    };
+    const doc = { ...assembleProject(header(), [], [], []), scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.scenes[0].lines?.[0].startWithPrevious).toBeUndefined(); // 先頭の休眠フラグは落ちる
+    expect(back.scenes[0].lines?.[1].startWithPrevious).toBe(true); // 2行目は保持
+    expect(back.scenes[0].lines?.[1].startSec).toBeUndefined(); // 併存 startSec は落ちる
+  });
   it('FREE 回転：rotation を持つ旧版(1.8)が 1.9 へ移行し rotation を保持する（#208）', () => {
     const scene = {
       sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'free', templateId: 'free_canvas_v1',

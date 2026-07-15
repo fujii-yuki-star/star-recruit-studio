@@ -175,6 +175,11 @@ export interface NarrationLine {
   subtitleEnabled?: boolean;
   /** 明示開始秒（任意・簡易手動タイミング）。未指定＝直前行の積み上げ＝自動逐次。 */
   startSec?: number;
+  /**
+   * 直前の行と**同時に**開始する（＝並行して重ねて流す・ADR-0031）。true の連続で N 人同時。
+   * 未指定/false＝逐次（従来どおり）。startSec を保存しないので V18（重なり禁止）に触れない。
+   */
+  startWithPrevious?: boolean;
   /** 生成済み音声の保存先（行ごと）。 */
   voicePath?: string | null;
   status: NarrationStatus;

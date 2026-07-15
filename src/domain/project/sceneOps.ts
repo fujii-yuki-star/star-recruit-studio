@@ -8,6 +8,7 @@ import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
+import { normalizeDialogueTiming } from './narrationLines';
 import { createFreeElementId } from './persistence';
 import { defaultSubtitleSource } from './subtitleBinding';
 import type { FreeElement, Part, Scene } from './types';
@@ -315,8 +316,9 @@ export function splitSceneLinesInList(
   const len1 = firstLines.reduce((n, l) => n + l.text.length, 0);
   const len2 = secondLines.reduce((n, l) => n + l.text.length, 0);
   const [d1, d2] = apportionDuration(src.durationSec, len1, len2);
-  const first: Scene = { ...src, durationSec: d1, lines: firstLines, warnings: [] };
-  const second: Scene = { ...src, sceneId: newSceneId, durationSec: d2, lines: secondLines, warnings: [] };
+  // 後半の先頭になった同時開始フラグを落とす（前と同時にする相手がいない・ADR-0031）。startSec は上で自動逐次へ戻し済み。
+  const first: Scene = normalizeDialogueTiming({ ...src, durationSec: d1, lines: firstLines, warnings: [] });
+  const second: Scene = normalizeDialogueTiming({ ...src, sceneId: newSceneId, durationSec: d2, lines: secondLines, warnings: [] });
   const next = [...scenes];
   next.splice(idx, 1, first, second);
   const reordered = reindexOrder(next);

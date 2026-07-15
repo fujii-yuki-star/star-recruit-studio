@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { charWidthEm, layoutToSvg, wrapText } from './sceneSvg';
 import { fontFamilyForId } from '../domain/font/fontCatalog';
 import type { Fit } from '../domain/enums';
-import type { SceneLayout } from './layout';
+import type { SceneLayout, TextItem } from './layout';
 
 function imageLayout(fit: Fit = 'cover', assetId: string | null = 'asset_office_001'): SceneLayout {
   return {
@@ -120,6 +120,21 @@ describe('wrapText（折返し・あふれ判定・§7）', () => {
   it('maxWidth < fontSize はガードしてそのまま返す', () => {
     expect(wrapText('あいうえお', 10, 40, 3)).toEqual(['あいうえお']);
   });
+  it('明示改行（\\n）はハード改行（同時字幕の2行表示・ADR-0031）', () => {
+    // 幅は十分＝各段落は折れない。\n でちょうど2行。
+    expect(wrapText('あ\nい', 1000, 40, 3)).toEqual(['あ', 'い']);
+  });
+  it('各段落を幅で折ったうえで \\n も尊重（段落内折返し×ハード改行）', () => {
+    // 1段落目は幅で2行に折れ、2段落目が3行目。maxLines=3 に収まる。
+    const lines = wrapText(`${'あ'.repeat(15)}\nX`, 400, 40, 3);
+    expect(lines.length).toBe(3);
+    expect(lines[lines.length - 1]).toBe('X'); // 最終行は2段落目
+  });
+  it('\\n を含み maxLines を超えると末尾を … で切る（3人目以降が溢れたら省略）', () => {
+    const lines = wrapText('あ\nい\nう', 1000, 40, 2); // 3段落を2行上限
+    expect(lines).toHaveLength(2);
+    expect(lines[1].endsWith('…')).toBe(true);
+  });
 });
 
 describe('layoutToSvg：responsive オプション（A3-2・向きプレビュー）', () => {
@@ -213,5 +228,37 @@ describe('layoutToSvg：テキストの XSS エスケープ（dangerouslySetInne
     expect(svg).toContain('&quot;'); // "
     expect(svg).not.toContain('<script>'); // 生タグが注入されない
     expect(svg).not.toContain("O'Brien"); // 生の ' を残さない
+  });
+});
+
+describe('layoutToSvg：字幕帯の複数行は下端基準で上へ伸ばす（ADR-0031・P2 画面外はみ出し防止）', () => {
+  const subtitleLayout = (over: Partial<TextItem> = {}): SceneLayout => ({
+    width: 1920, height: 1080, backgroundColor: '#ffffff',
+    items: [{
+      kind: 'text', id: 'sub', x: 240, y: 960, w: 1440, h: 100, zIndex: 50,
+      text: 'A\nB', fontSize: 38, fontWeight: 'normal', color: '#ffffff', maxLines: 2,
+      isSubtitle: true, anchorBottom: true,
+      background: { color: '#111111', opacity: 0.55, radius: 16 }, ...over,
+    }],
+  });
+  // 字幕背景の rect（distinctive な fill="#111111"＝キャンバス背景と区別）から y/height を読む。
+  const bgRect = (svg: string): { y: number; h: number } => {
+    const m = /<rect [^>]*\by="([\d.]+)"[^>]*\bheight="([\d.]+)"[^>]*fill="#111111"/.exec(svg);
+    if (!m) throw new Error('字幕背景 rect が見つからない');
+    return { y: Number(m[1]), h: Number(m[2]) };
+  };
+
+  it('2行の字幕帯は上へずれ、背景の下端がキャンバス内に収まる（y=960・fontSize38 でも 1080 を越えない）', () => {
+    const { y, h } = bgRect(layoutToSvg(subtitleLayout()));
+    expect(y).toBeLessThan(960); // 下端基準で上へ伸ばす
+    expect(y + h).toBeLessThanOrEqual(1080); // 画面内に収まる（従来は 1081.6 で越えていた）
+  });
+
+  it('1行の字幕帯は従来どおり（y=960 のまま・後方互換）', () => {
+    expect(bgRect(layoutToSvg(subtitleLayout({ text: 'A' }))).y).toBe(960);
+  });
+
+  it('anchorBottom でない text（見出し/FREE 字幕）は上端起点のまま下へ伸ばす（従来・箱は利用者管理）', () => {
+    expect(bgRect(layoutToSvg(subtitleLayout({ anchorBottom: false }))).y).toBe(960);
   });
 });
