@@ -124,27 +124,15 @@ export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, nu
   const nonEmpty = groups
     .map((g) => ({ primary: segs[g[0]], parallel: g.slice(1).map((idx) => segs[idx]) }))
     .filter(({ primary }) => primary.endSec > primary.startSec)
-    .map(({ primary, parallel }) => {
-      // 同時グループは全員の字幕を改行で重ねて2行表示（ADR-0031）。単独（同時行なし）は従来どおり（enabled なら空文字も維持）。
-      const groupSubs = [primary, ...parallel]
-        .filter((s) => s.subtitle.enabled && s.subtitle.text.length > 0)
-        .map((s) => s.subtitle.text);
-      const subtitleText =
-        parallel.length === 0
-          ? primary.subtitle.enabled
-            ? primary.subtitle.text
-            : null
-          : groupSubs.length > 0
-            ? groupSubs.join('\n')
-            : null;
-      return {
-        lineId: primary.lineId,
-        parallelLineIds: parallel.length > 0 ? parallel.map((s) => s.lineId) : undefined,
-        subtitleText,
-        startSec: primary.startSec,
-        durationSec: primary.endSec - primary.startSec,
-      };
-    });
+    .map(({ primary, parallel }) => ({
+      // subtitleText は primary（先頭話者）の字幕のみ（enabled のとき text・OFF は null）。同時行の字幕は
+      // parallelLineIds から各消費者が解決する（通常字幕＝話者ごとに帯を積む・FREE allLines＝改行結合・ADR-0031）。
+      lineId: primary.lineId,
+      parallelLineIds: parallel.length > 0 ? parallel.map((s) => s.lineId) : undefined,
+      subtitleText: primary.subtitle.enabled ? primary.subtitle.text : null,
+      startSec: primary.startSec,
+      durationSec: primary.endSec - primary.startSec,
+    }));
   // すべて0秒（degenerate）なら場面全体を1セグメントに（場面が書き出しから消えないように）。
   if (nonEmpty.length === 0) return [{ startSec: 0, durationSec: scene.durationSec, isFirst: true }];
   // 先頭グループの開始が 0 より後なら「間（頭空白）」区間 [0, 先頭start) を先頭に足す（#386・A案）。

@@ -4,7 +4,7 @@
 // - 話者絞り込みは音声生成（resolveLineVoice）と同じ実効話者（effectiveSpeakerKey）で比較する（P1-2）。
 import { FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
 import { characterForSpeaker } from '../voice/voiceCatalog';
-import { resolveLineSubtitle, segmentLineIds } from './lineTimeline';
+import { resolveLineSubtitle } from './lineTimeline';
 import type { SceneSegmentSpec } from './lineTimeline';
 import { sceneLines } from './narrationLines';
 import type { FreeElement, NarrationLine, Scene, SpeakerKey, SubtitleSource } from './types';
@@ -39,36 +39,52 @@ export function defaultSubtitleSource(scene: Scene): SubtitleSource {
 }
 
 /**
- * FREE 字幕要素 el が、その瞬間（moment）に表示する字幕文を返す（表示なしは null）。ADR-0029。
+ * FREE 字幕要素 el が、その瞬間（moment）に表示する字幕文を返す（表示なしは null）。ADR-0029/0031。
  * - narration → texts.subtitle（subtitleEnabledDefault===false は非表示）。static ゆえセグメント非依存。
- * - allLines  → セグメントの字幕（間 isGap・OFF 行は非表示）。
- * - speaker   → セグメント行の実効話者が対象話者と一致するときのみ（不一致は別ボックスが受ける＝二重描画にしない）。
- * subtitle 以外の要素は対象外（null）。
+ * - allLines  → primary（seg.subtitleText）＋同時行（parallelLineIds）を改行結合（間 isGap・OFF 行は非表示）。単独/逐次は primary のみ。
+ * - speaker   → primary＋同時行から対象話者に一致する行の**自身**の字幕（不一致は別ボックスが受ける＝二重描画にしない）。
+ * subtitle 以外の要素は対象外（null）。**通常テンプレ字幕の「2人目を上へ自動配置」は layout 側**（本関数は FREE 要素の解決）。
  */
 export function resolveSubtitleForElement(el: FreeElement, scene: Scene, moment: SubtitleMoment): string | null {
   if (el.kind !== FREE_ELEMENT_KIND.subtitle) return null;
+  const seg = moment.segment;
   // 間（無言の頭空白＝isGap）はどの対象でも常に非表示（ADR-0029・narration も含む・P1-1）。ソース分岐より先に判定する。
-  if (moment.segment.isGap === true) return null;
+  if (seg.isGap === true) return null;
   const source = el.subtitleSource ?? defaultSubtitleSource(scene);
   if (source.kind === SUBTITLE_SOURCE_KIND.narration) {
     if (scene.subtitleEnabledDefault === false) return null;
     const text = scene.texts[TEXT_KEY.subtitle] ?? '';
     return text.length > 0 ? text : null;
   }
-  const seg = moment.segment;
-  const text = seg.subtitleText ?? null;
-  if (text == null || text.length === 0) return null;
-  // allLines＝セグメントの字幕（同時グループは全員分を改行で結合済み＝2行表示・ADR-0031）。
-  if (source.kind === SUBTITLE_SOURCE_KIND.allLines) return text;
-  // speaker：セグメントの全行（primary＋同時行＝ADR-0031）から対象話者に一致する行を探し、その行**自身**の字幕を出す。
-  // seg.subtitleText は同時グループでは全員分の結合ゆえ使わない（話者ボックスは自分の行だけ＝二重描画にしない・P2）。
   const lines = sceneLines(scene);
-  for (const id of segmentLineIds(seg)) {
+  // 同時行（parallelLineIds）1本ぶんの字幕（enabled かつ非空のみ）。primary は seg.subtitleText（既に enabled 解決済み）。
+  const resolveParallel = (lineId: string): string | null => {
+    const line = lines.find((l) => l.lineId === lineId);
+    if (line == null) return null;
+    const sub = resolveLineSubtitle(line, scene);
+    return sub.enabled && sub.text.length > 0 ? sub.text : null;
+  };
+  if (source.kind === SUBTITLE_SOURCE_KIND.allLines) {
+    // primary＋同時行を改行結合（同時開始は2行表示・ADR-0031）。単独/逐次は primary のみ＝従来と同値。
+    const parts: string[] = [];
+    if (seg.subtitleText != null && seg.subtitleText.length > 0) parts.push(seg.subtitleText);
+    for (const id of seg.parallelLineIds ?? []) {
+      const t = resolveParallel(id);
+      if (t != null) parts.push(t);
+    }
+    return parts.length > 0 ? parts.join('\n') : null;
+  }
+  // speaker：primary（seg.lineId/subtitleText）→同時行 の順に対象話者一致を探し、その行**自身**の字幕を返す。
+  if (seg.lineId != null) {
+    const primaryLine = lines.find((l) => l.lineId === seg.lineId);
+    if (primaryLine != null && speakerKeyEquals(effectiveSpeakerKey(primaryLine), source.speaker)) {
+      return seg.subtitleText != null && seg.subtitleText.length > 0 ? seg.subtitleText : null;
+    }
+  }
+  for (const id of seg.parallelLineIds ?? []) {
     const line = lines.find((l) => l.lineId === id);
-    if (line == null) continue;
-    if (speakerKeyEquals(effectiveSpeakerKey(line), source.speaker)) {
-      const sub = resolveLineSubtitle(line, scene);
-      return sub.enabled && sub.text.length > 0 ? sub.text : null;
+    if (line != null && speakerKeyEquals(effectiveSpeakerKey(line), source.speaker)) {
+      return resolveParallel(id);
     }
   }
   return null;

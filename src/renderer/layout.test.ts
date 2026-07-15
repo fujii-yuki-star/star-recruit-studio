@@ -91,6 +91,26 @@ describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413
     expect(subs).toHaveLength(1);
     expect(subs[0].text).toBe('行の字幕');
   });
+
+  it('同時開始：2人目の字幕を「上へ」自動配置＝重ならない別ボックス（ADR-0031・#530）', () => {
+    const dialogue = { ...scene, lines: [
+      { lineId: 'line_001', text: 'A', status: 'none' },
+      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    // primary（先頭話者）は subtitleText='A'、同時行 line_002 は parallelLineIds から解決。
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'A', startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, openingTemplate, { subtitleText: 'A', subtitleSegment: segment }));
+    expect(subs).toHaveLength(2); // primary＋2人目
+    const primary = subs.find((s) => s.text === 'A')!;
+    const second = subs.find((s) => s.text === 'B')!;
+    expect(primary.y).toBe(920); // テンプレ位置（画面下）
+    expect(primary.id).toBe('subtitle'); // primary は layer.id 据え置き（後方互換）
+    expect(second.y).toBeLessThan(920); // 2人目は上へ
+    expect(second.id).toBe('subtitle__sub1'); // 別ボックス（一意 id）
+    // 重ならない：2人目の帯の下端（y + 1行背景高）が primary の上端（920）以下。
+    const bandH = second.fontSize * (1.3 + 0.6); // 1行帯の高さ（sceneSvg の背景高と一致）
+    expect(second.y + bandH).toBeLessThanOrEqual(920);
+  });
 });
 
 describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => {

@@ -11,7 +11,9 @@ import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
 import type { InterpolatedTransform } from '../domain/project/keyframes';
 import { groupElementIds } from '../domain/project/groupOps';
+import { resolveLineSubtitle } from '../domain/project/lineTimeline';
 import type { SceneSegmentSpec } from '../domain/project/lineTimeline';
+import { sceneLines } from '../domain/project/narrationLines';
 import { resolveSubtitleForElement, type SubtitleMoment } from '../domain/project/subtitleBinding';
 
 export interface Rect {
@@ -92,6 +94,11 @@ const DEFAULT_FONT_SIZE = 40;
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 /** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
 export const DEFAULT_LINE_HEIGHT = 1.3;
+/**
+ * 同時字幕（ADR-0031）で2人目以降の字幕帯を「上へ」積むときの段間（em＝fontSize 倍率）。
+ * ＝1行帯の縦占有（行間 DEFAULT_LINE_HEIGHT ＋背景の上下パディング 0.6・sceneSvg と一致）＋余白 0.4。重ならない別ボックスにする。
+ */
+const SUBTITLE_STACK_STEP_EM = DEFAULT_LINE_HEIGHT + 0.6 + 0.4;
 
 /** layoutScene のオプション（掛け合いの行字幕の上書き等・ADR-0015 追加A/B）。 */
 export interface LayoutOptions {
@@ -217,41 +224,60 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // 掛け合い：subtitle レイヤーのみ行の字幕で上書き（追加A/B）。null＝非表示・未指定＝従来。
         const overrideSub = layer.type === 'subtitle' && opts != null && 'subtitleText' in opts;
         // 単一ナレーション等の静的字幕（override 無し）は場面の字幕トグル subtitleEnabledDefault=false で出さない（#413）。
-        // preview/export とも layoutScene 経由なのでここが単一の参照元。掛け合いは opts.subtitleText 側で行ごとに
-        // 解決済み（resolveLineSubtitle が subtitleEnabledDefault を継承）＝override 経路は触らない。
-        const staticSubtitleOff =
-          layer.type === 'subtitle' && !overrideSub && scene.subtitleEnabledDefault === false;
+        // preview/export とも layoutScene 経由なのでここが単一の参照元。掛け合いは opts.subtitleText 側で primary 行を
+        // 解決済み（resolveLineSubtitle が subtitleEnabledDefault を継承）。同時行は下の parallelLineIds から解決する。
+        const isSub = layer.type === 'subtitle';
+        const staticSubtitleOff = isSub && !overrideSub && scene.subtitleEnabledDefault === false;
         const text = overrideSub
           ? opts.subtitleText ?? ''
           : staticSubtitleOff
             ? ''
             : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
-        if (text.length === 0) break;
-        const bg = layer.type === 'subtitle' && layer.background?.enabled
+        const bg = isSub && layer.background?.enabled
           ? {
               color: layer.background.color ?? '#000000',
               opacity: layer.background.opacity ?? 0.55,
               radius: layer.background.radius ?? 16,
             }
           : undefined;
-        items.push({
-          ...base,
-          kind: 'text',
-          text,
-          fontSize: layer.fontSize ?? DEFAULT_FONT_SIZE,
-          fontWeight: layer.fontWeight ?? FONT_WEIGHT.normal,
-          color: layer.color ?? DEFAULT_TEXT_COLOR,
-          maxLines: layer.maxLines ?? 2,
-          background: bg,
-          isSubtitle: layer.type === 'subtitle',
-          // テンプレ字幕は下端基準で上へ伸ばす（2行でも画面下端からはみ出さない・ADR-0031）。text 層は従来どおり。
-          anchorBottom: layer.type === 'subtitle',
-          fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
-          // 縁取り（#275）。LayoutItem/SVG は既存（FREE の #209）と同じ仕組みで描画。
-          // 太さ>0 で色未指定なら白を既定（外部テンプレ等で色だけ無いと縁取りが silent に消えるのを防ぐ・PR#289レビュー）。
-          strokeColor: (layer.strokeWidth ?? 0) > 0 ? (layer.strokeColor ?? '#ffffff') : layer.strokeColor,
-          strokeWidth: layer.strokeWidth,
-        });
+        const fontSize = layer.fontSize ?? DEFAULT_FONT_SIZE;
+        // 字幕帯を1つ積む（y を差し替え・id を一意化）。primary はテンプレ位置、同時行はその上へ（ADR-0031）。
+        const pushBand = (bandText: string, y: number, idSuffix: string): void => {
+          items.push({
+            ...base,
+            id: base.id + idSuffix,
+            y,
+            kind: 'text',
+            text: bandText,
+            fontSize,
+            fontWeight: layer.fontWeight ?? FONT_WEIGHT.normal,
+            color: layer.color ?? DEFAULT_TEXT_COLOR,
+            maxLines: layer.maxLines ?? 2,
+            background: bg,
+            isSubtitle: isSub,
+            // テンプレ字幕は下端基準で上へ伸ばす（1帯が2行でも画面下端からはみ出さない・ADR-0031）。text 層は従来どおり。
+            anchorBottom: isSub,
+            fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
+            // 縁取り（#275）。太さ>0 で色未指定なら白を既定（色だけ無いと縁取りが silent に消えるのを防ぐ・PR#289レビュー）。
+            strokeColor: (layer.strokeWidth ?? 0) > 0 ? (layer.strokeColor ?? '#ffffff') : layer.strokeColor,
+            strokeWidth: layer.strokeWidth,
+          });
+        };
+        if (text.length > 0) pushBand(text, base.y, ''); // primary（先頭話者）＝テンプレ位置。id は従来どおり layer.id。
+        // 同時開始（ADR-0031）：字幕層は2人目以降を「上へ」自動配置＝重ならない別ボックス。primary が出ていれば1段空ける。
+        const parallelIds = isSub ? opts?.subtitleSegment?.parallelLineIds ?? [] : [];
+        if (parallelIds.length > 0) {
+          const step = fontSize * SUBTITLE_STACK_STEP_EM;
+          let tier = text.length > 0 ? 1 : 0;
+          for (const lineId of parallelIds) {
+            const line = sceneLines(scene).find((l) => l.lineId === lineId);
+            if (line == null) continue;
+            const sub = resolveLineSubtitle(line, scene);
+            if (!sub.enabled || sub.text.length === 0) continue; // OFF/空は帯を作らない（段も詰めない）
+            pushBand(sub.text, base.y - tier * step, `__sub${tier}`);
+            tier += 1;
+          }
+        }
         break;
       }
     }

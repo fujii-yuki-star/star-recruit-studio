@@ -118,15 +118,16 @@ describe('resolveSubtitleForElement（対象解決・ADR-0029）', () => {
       expect(resolveSubtitleForElement(el, s, { segment: seg({ isGap: true, subtitleText: null }) })).toBeNull();
     });
     it('同時開始：primary 以外（parallelLineIds）の話者ボックスも自分の行の字幕を出す（ADR-0031）', () => {
-      // segment＝primary line_001(話者3)＋同時に line_002(話者2)。subtitleText は結合（A\nB）。
-      const segSimul = seg({ lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'A\nB' });
+      // segment＝primary line_001(話者3・subtitleText='A')＋同時に line_002(話者2)。話者2は parallelLineIds から解決。
+      const segSimul = seg({ lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'A' });
       const el3 = subEl({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } });
       const el2 = subEl({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 2 } });
-      expect(resolveSubtitleForElement(el3, s, { segment: segSimul })).toBe('A'); // primary＝自分の行だけ（結合ではない）
+      expect(resolveSubtitleForElement(el3, s, { segment: segSimul })).toBe('A'); // primary＝自分の行だけ
       expect(resolveSubtitleForElement(el2, s, { segment: segSimul })).toBe('B'); // 同時の話者2＝line_002 の字幕
     });
-    it('同時開始：allLines は結合済み字幕（2行）をそのまま出す（ADR-0031）', () => {
-      const segSimul = seg({ lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'A\nB' });
+    it('同時開始：allLines は primary＋同時行を改行結合（2行表示）', () => {
+      // subtitleText は primary のみ（'A'）。line_002 は parallelLineIds から解決して結合＝'A\nB'。
+      const segSimul = seg({ lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'A' });
       expect(resolveSubtitleForElement(subEl({ kind: 'allLines' }), s, { segment: segSimul })).toBe('A\nB');
     });
   });

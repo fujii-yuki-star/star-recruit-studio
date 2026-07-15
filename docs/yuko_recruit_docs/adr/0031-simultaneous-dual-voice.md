@@ -35,7 +35,7 @@
 - `domain/project/narrationLines`：`normalizeDialogueTiming`＝不変条件の正規化（**先頭行はフラグを持たない**・**`startWithPrevious` の行は `startSec` を持たない**）。行の削除/移動・場面分割・読込（`migrateProject`）で呼び、「並べ替えで先頭になった休眠フラグの復活」「実装が無視する `startSec` の残存」を消す＝**設定できるのに効かない状態を残さない**（ADR-0026④・#533 レビュー P2）。`groupIndices` は先頭フラグを実行時にも無視（二重の安全）。
 - `renderer/export/buildExportScenes`＋Rust `ffmpeg.rs`：動画経路は `narrationSegments` を同 delay で重ねる（既存 amix が並行化）。非動画経路は primary=`audioBase64`＋並行行=`narrationSegments`、Rust `mix_narrations`（純粋 `narration_mix_filter`＋単体テスト）で `narration` に amix（still/frames/frames_dir 共通）。
 - `PreviewScreen`：同時グループは前を止めず重ねて再生（`groupAudios`）・`activeLine` は primary・ライブ音量/ミュートを全員へ。
-- `subtitle`：`sceneSegmentSpecs.subtitleText` を全員結合（2行表示）・`wrapText` が `\n` をハード改行・`resolveSubtitleForElement`（speaker）は `segmentLineIds` 走査で並行話者ボックスに対応（ADR-0029・話者ごとの2ボックスも可）。
+- `subtitle`：**通常テンプレ字幕は2人目以降を「上へ」自動配置＝重ならない別ボックス**（#530・#533 レビュー P1）。`layout` が `subtitleSegment.parallelLineIds` から帯を積む（段間 `SUBTITLE_STACK_STEP_EM`＝1行帯＋余白）。`sceneSegmentSpecs.subtitleText` は **primary のみ**（同時行は `parallelLineIds`）。FREE `allLines` は primary＋同時行を `\n` 結合（`resolveSubtitleForElement`＋`wrapText` の `\n`）、FREE `speaker` は自分の話者行だけ。テンプレ字幕は下端基準（`anchorBottom`）で複数行でも画面外に出さない。preview=export は共有 `layoutScene`（`subtitleSegment` 配線）でパリティ。
 - `SceneEditScreen`：2人目以降の行に「前のセリフと同時に流す」トグル（ON で `startSec` を隠す・Undo 可）。
 - 正典：**`11` の V18 は改定不要**（フラグ方式は startSec を保存しない）＝V18 に対象外の注記のみ追記。並行音声は ADR-0024 で α-5（amix パス新設が前提）としていたのを A の範囲で α-4（0.4.2）へ前倒し。
 
@@ -45,7 +45,7 @@
 - **モデル＝フラグ**（`NarrationLine.startWithPrevious?`・利用者決定 2026-07-15）。
 - **上限＝N 人**（2人固定でなく `true` の連続で N・利用者決定）。
 - **既存消費者の影響**：`lineSegments`（単独行は不変）・`compileTimeline`（zip 維持＝同時行は同一窓の重なりクリップとして射影＝読み取りUIでは重なり表示＝意味的に正しい）・字幕解決（`segmentLineIds` 経由）・動画区間（`narrationSegments` amix）を洗い出し済み。パリティは共有 `sceneSegmentSpecs`/`layoutScene` で維持（回帰テスト緑）。
-- **字幕2段**：自動字幕は `\n` 結合の2行表示（`sceneSegmentSpecs.subtitleText`＋`wrapText`）。話者ごとの独立ボックスは ADR-0029 の `subtitleSource={kind:'speaker'}` を並行対応（重ならない位置に置けば「2つ目の字幕欄」）。
+- **字幕2段（利用者決定 2026-07-15＝自動2ボックス）**：通常テンプレの自動字幕は**2人目以降を上へ自動配置**（重ならない別ボックス・#530 文面どおり）。当初 `\n` 2行結合で出したが #533 レビューで #530 スコープとの差を指摘され、利用者が「2つ目の字幕欄を自動配置」を選択（本 PR で実装）。話者ごとの手動配置は引き続き ADR-0029 の `subtitleSource={kind:'speaker'}`（FREE ボックス）で可能。
 - **amix**：`mix_narrations`（unit gain・場面 narration_volume は下流で1回）／動画経路は既存 `narrationSegments` amix を流用。#259 ノーマライズは将来。
 
 **残論点（α-5・別途）**

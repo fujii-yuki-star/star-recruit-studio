@@ -323,26 +323,27 @@ describe('同時開始（startWithPrevious・並行・ADR-0031）', () => {
     expect(segs.map((s) => [s.startSec, s.endSec])).toEqual([[0, 10], [0, 10], [0, 10]]);
   });
 
-  it('sceneSegmentSpecs：同時グループは1セグメント（primary＋parallelLineIds・字幕は全員を改行結合＝2行）＋逐次に戻る', () => {
+  it('sceneSegmentSpecs：同時グループは1セグメント（primary＝先頭・parallelLineIds＝残り・subtitleText は primary のみ）＋逐次に戻る', () => {
     const lines: NarrationLine[] = [
       { lineId: 'line_001', text: 'A', status: NARRATION_STATUS.none },
       { lineId: 'line_002', text: 'B', startWithPrevious: true, status: NARRATION_STATUS.none },
       { lineId: 'line_003', text: 'C', status: NARRATION_STATUS.none },
     ];
+    // subtitleText は primary（先頭話者）のみ。同時行 B は parallelLineIds＝各消費者が解決（通常字幕は上へ積む・FREE は結合）。
     expect(sceneSegmentSpecs(sceneWith({ lines }), { line_001: 3, line_002: 5, line_003: 2 })).toEqual([
-      { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'A\nB', startSec: 0, durationSec: 5, isFirst: true }, // 2行表示
+      { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'A', startSec: 0, durationSec: 5, isFirst: true },
       { lineId: 'line_003', subtitleText: 'C', startSec: 5, durationSec: 5, isFirst: false }, // parallelLineIds なし
     ]);
   });
 
-  it('sceneSegmentSpecs：同時グループで字幕 OFF の行は結合から除く（残りだけ表示・全 OFF は null）', () => {
+  it('sceneSegmentSpecs：subtitleText は primary の字幕のみ（primary OFF なら null・同時行は parallelLineIds へ）', () => {
     const lines: NarrationLine[] = [
-      { lineId: 'line_001', text: 'A', subtitleEnabled: false, status: NARRATION_STATUS.none }, // OFF
-      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: NARRATION_STATUS.none }, // ON
+      { lineId: 'line_001', text: 'A', subtitleEnabled: false, status: NARRATION_STATUS.none }, // primary OFF
+      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: NARRATION_STATUS.none },
     ];
-    // 先頭グループ（[0,10]・最終）＝primary OFF・同時行 ON → 'B' のみ。
+    // primary OFF＝subtitleText null（B は parallelLineIds で保持＝resolveSubtitleForElement/layout が解決）。
     expect(sceneSegmentSpecs(sceneWith({ lines }), { line_001: 3, line_002: 4 })[0]).toMatchObject({
-      lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'B',
+      lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: null,
     });
   });
 
