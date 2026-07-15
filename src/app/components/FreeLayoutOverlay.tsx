@@ -478,6 +478,7 @@ export function FreeLayoutOverlay({
         return (
           <div
             key={el.id}
+            data-free-id={el.id}
             onPointerDown={(e) => (elGroup ? beginGroupDrag(e, elGroup) : beginDrag(e, el, "move"))}
             onContextMenu={(e) => openMenu(e, el)}
             onDoubleClick={(e) => {

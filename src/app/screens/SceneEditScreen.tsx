@@ -999,6 +999,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setPendingTemplateId(null); // 見た目切替の確認も持ち越さない
     setConfirmDeleteLineId(null); // セリフ行の削除確認も持ち越さない
     setSelectedFreeIds([]); // 場面が変わったら自由配置の選択は持ち越さない
+    setActiveGroupId(null); // グループ選択も持ち越さない（別場面が同名 group_001 を持つと誤選択になる・#525-8 P1）
     setEditPopover(null); // 開いていた kind 別エディタも閉じる（旧場面の要素 id を指したまま残さない）
     setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
   };
