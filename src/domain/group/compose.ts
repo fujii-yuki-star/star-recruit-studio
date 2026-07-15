@@ -193,3 +193,44 @@ export function isHiddenByGroup(memberId: string, groups: ReadonlyArray<Group>):
 export function isGroupHidden(groupId: string, groups: ReadonlyArray<Group>): boolean {
   return groups.find((g) => g.id === groupId)?.hidden === true || isHiddenByGroup(groupId, groups);
 }
+
+/** グループの「向き付き枠」（選択枠・拡縮/回転の pivot 用）。 */
+export interface OrientedFrame {
+  /** 枠の中心（canvas 座標）＝グループ変形の pivot。 */
+  cx: number;
+  cy: number;
+  /** 枠のサイズ（scale 適用後）。 */
+  w: number;
+  h: number;
+  /** 枠の回転（度・group transform の rotation）。 */
+  rotation: number;
+}
+
+/**
+ * グループの向き付き枠を、**composeGroupGeometry と同じ anchor（メンバーの回転後 AABB 基準）**で算出する。
+ * メンバーの回転後 AABB を包む local bbox にグループ transform を適用：中心＝anchor＋平行移動／サイズ＝local×scale／
+ * 回転＝rotation。旧実装は素の x/y/w/h（軸平行）で bbox を取っていたため、回転メンバーを含むグループで枠中心＝
+ * 拡縮/回転 pivot が実描画とずれていた（#312 既知制限）。これを解消し overlay と描画で pivot を一致させる（#525-10）。
+ * flat 前提（members＝要素/レイヤー id・不在メンバーは無視）。回転メンバーが無ければ従来と同値（後方互換）。
+ * @returns 枠（メンバーが1つも無ければ null）。
+ */
+export function orientedGroupFrame(
+  group: Group,
+  elements: ReadonlyArray<{ id: string } & Geom>,
+): OrientedFrame | null {
+  const byId = new Map(elements.map((e) => [e.id, e] as const));
+  const aabbs = group.members
+    .map((id) => byId.get(id))
+    .filter((e): e is { id: string } & Geom => e != null)
+    .map((e) => rotatedRectAABB({ x: e.x, y: e.y, w: e.w, h: e.h }, e.rotation ?? 0));
+  if (aabbs.length === 0) return null;
+  const u = unionRects(aabbs);
+  const t = group.transform;
+  return {
+    cx: u.x + u.w / 2 + t.x,
+    cy: u.y + u.h / 2 + t.y,
+    w: u.w * t.scale,
+    h: u.h * t.scale,
+    rotation: t.rotation,
+  };
+}

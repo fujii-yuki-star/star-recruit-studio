@@ -5,7 +5,7 @@ import { FREE_ELEMENT_KIND } from "../../domain/enums";
 import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GROUP_MIN_SCALE } from "../../domain/constants";
-import { composeGroupGeometry, isGroupHidden, isHiddenByGroup } from "../../domain/group/compose";
+import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { topGroupOfMember } from "../../domain/project/groupOps";
 
@@ -57,27 +57,9 @@ function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
 }
 
 
-// 選択中グループの「向き付き枠」（ADR-0022・#305-2）。メンバー（要素）の素の外接矩形（=ローカル bbox）に
-// グループ transform を適用：中心＝アンカー＋平行移動／サイズ＝ローカル×scale／回転＝rotation。
-// ※ flat 前提（メンバー＝要素 id）。素の e.x/w で AABB を取るため**メンバー個別回転は枠 bbox に含めない**。
-//   composeGroupGeometry は rotatedRectAABB でメンバー回転込みの anchor を使うので、回転要素を含むグループでは
-//   この中心が実描画中心から僅かにずれ、拡縮（中心固定）の基準もずれる。将来 rotatedRectAABB に揃える（#312 レビュー）。
-function orientedGroupFrame(
-  group: Group, freeLayout: FreeElement[],
-): { cx: number; cy: number; w: number; h: number; rotation: number } | null {
-  const rects = group.members
-    .map((id) => freeLayout.find((e) => e.id === id))
-    .filter((e): e is FreeElement => e != null);
-  if (rects.length === 0) return null;
-  const minX = Math.min(...rects.map((e) => e.x));
-  const minY = Math.min(...rects.map((e) => e.y));
-  const maxX = Math.max(...rects.map((e) => e.x + e.w));
-  const maxY = Math.max(...rects.map((e) => e.y + e.h));
-  const lw = maxX - minX;
-  const lh = maxY - minY;
-  const t = group.transform;
-  return { cx: minX + lw / 2 + t.x, cy: minY + lh / 2 + t.y, w: lw * t.scale, h: lh * t.scale, rotation: t.rotation };
-}
+// 選択中グループの「向き付き枠」は domain/group/compose の orientedGroupFrame を共有する（#525-10）。
+// composeGroupGeometry と同じ anchor（メンバー回転後 AABB 基準）を使うため、回転メンバーを含むグループでも
+// 枠中心＝拡縮/回転 pivot が実描画と一致する（旧実装の素 bbox ずれ＝#312 既知制限を解消）。
 
 // 吸着ガイド線の色（選択枠＝primary と区別できるよう、整列ガイドは別アクセント色にする）。
 const SNAP_GUIDE_COLOR = "#ff3d8b";

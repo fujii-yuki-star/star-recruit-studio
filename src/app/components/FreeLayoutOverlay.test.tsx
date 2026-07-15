@@ -191,6 +191,23 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     expect(screen.queryByTestId("group-scale-se")).toBeNull(); // 拡縮ハンドルなし
     expect(screen.queryByTestId("group-rotate-handle")).toBeNull(); // 回転ハンドルなし
   });
+
+  it("回転メンバーを含むグループの拡縮 pivot は回転後 AABB 中心＝描画と一致（#525-10）", () => {
+    const onGroupTransform = vi.fn();
+    // A(0,0,100,100 rot0) と B(200,0,100,20 rot90) → 回転後 AABB の合成中心は (130,30)（素 bbox 中心 150,50 とは違う）。
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 200, y: 0, w: 100, h: 20, zIndex: 2, rotation: 90 },
+    ];
+    const grp2 = { id: "group_001", members: ["free_001", "free_002"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+    const { root } = renderOverlay({ freeLayout: layout, groups: [grp2], activeGroupId: "group_001", onGroupTransform });
+    mockRect(root);
+    const se = screen.getByTestId("group-scale-se");
+    // 中心(130,30)から距離100→200 で scale 2。素 bbox 中心(150,50)を pivot にしていると 2 にならない。
+    fireEvent.pointerDown(se, { button: 0, clientX: 230, clientY: 30, pointerId: 1 });
+    fireEvent.pointerMove(se, { clientX: 330, clientY: 30, pointerId: 1 });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { scale: 2 });
+  });
 });
 
 describe("FreeLayoutOverlay: 範囲選択（マーキー・#274）", () => {
