@@ -6,6 +6,9 @@ import { ColorPicker } from "./ColorPicker";
 // 自前カラーピッカー（#525-6）。ポップオーバーは body ポータル＋role="dialog"、面/バーは data-testid、
 // パレットは aria-label で引ける。jsdom はレイアウトを持たないため面のドラッグは getBoundingClientRect をモックする。
 
+const rect = (left: number, top: number, w = 40, h = 26): DOMRect =>
+  ({ left, top, right: left + w, bottom: top + h, width: w, height: h, x: left, y: top, toJSON: () => undefined }) as DOMRect;
+
 describe("ColorPicker", () => {
   it("見本を押すと色の面・色相バー・定番パレットが出る", () => {
     render(<ColorPicker value="#3b82f6" onChange={vi.fn()} />);
@@ -64,6 +67,40 @@ describe("ColorPicker", () => {
     // x=120 → 色相120°（緑）・s=1・v=1 → #00ff00。
     fireEvent.pointerDown(hue, { clientX: 120, clientY: 7, pointerId: 1 });
     expect(onChange).toHaveBeenLastCalledWith("#00ff00");
+  });
+
+  it("開いた後の内側スクロールで位置を再計算・クランプする（トリガー追従・#525-6 レビュー P2）", () => {
+    // 詳細編集パネルのような内側スクロール領域に置く。capture scroll なので子孫の scroll も拾えることを確認する。
+    render(
+      <div data-testid="scroller" style={{ overflow: "auto" }}>
+        <ColorPicker value="#000000" onChange={vi.fn()} />
+      </div>,
+    );
+    const trigger = screen.getByRole("button", { name: "色を選ぶ" });
+    trigger.getBoundingClientRect = () => rect(10, 10);
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.style.left).toBe("10px"); // 初期＝トリガー左に沿う
+    // 内側スクロールでトリガーが右端へ動いた想定 → 元位置に取り残されず再クランプ。
+    trigger.getBoundingClientRect = () => rect(window.innerWidth - 20, 300);
+    fireEvent.scroll(screen.getByTestId("scroller"));
+    expect(dialog.style.left).not.toBe("10px"); // 追従した
+    expect(parseFloat(dialog.style.left) + 236).toBeLessThanOrEqual(window.innerWidth - 8 + 0.01); // 画面内に収まる
+  });
+
+  it("開いた後のウィンドウ縮小で画面内へ収め直す（#525-6 レビュー P2）", () => {
+    const origW = window.innerWidth;
+    render(<ColorPicker value="#000000" onChange={vi.fn()} />);
+    const trigger = screen.getByRole("button", { name: "色を選ぶ" });
+    trigger.getBoundingClientRect = () => rect(800, 100);
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    const before = parseFloat(dialog.style.left);
+    (window as unknown as { innerWidth: number }).innerWidth = 400; // 縮小して右端を内側へ
+    fireEvent(window, new Event("resize"));
+    expect(parseFloat(dialog.style.left)).toBeLessThan(before); // 左へ寄る
+    expect(parseFloat(dialog.style.left) + 236).toBeLessThanOrEqual(400 - 8 + 0.01);
+    (window as unknown as { innerWidth: number }).innerWidth = origW; // 後始末（他テストへ影響しない）
   });
 
   it("Escape で閉じる", () => {

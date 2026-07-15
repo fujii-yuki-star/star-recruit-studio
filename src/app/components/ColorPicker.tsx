@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { hexToHsv, hsvToHex, normalizeHex, type Hsv } from "../../domain/format/color";
 
@@ -52,8 +52,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
 
   // 位置決め：トリガーの実座標→ビューポート内へクランプ。右端では左寄せ・下がはみ出れば上に開く。
   // fixed＋body ポータルなので祖先の overflow に切られない（サイドバーでも画面内に必ず収まる）。
-  useLayoutEffect(() => {
-    if (!open) return;
+  const reposition = useCallback(() => {
     const tr = triggerRef.current?.getBoundingClientRect();
     if (!tr) return;
     const pw = popRef.current?.offsetWidth || POPOVER_W;
@@ -65,8 +64,25 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     let top = tr.bottom + 4;
     if (top + ph > window.innerHeight - pad) top = tr.top - ph - 4; // 下に入らなければ上へ
     top = Math.max(pad, top);
-    setPos({ left, top });
-  }, [open]);
+    setPos((prev) => (prev && prev.left === left && prev.top === top ? prev : { left, top })); // 変化時のみ再描画
+  }, []);
+
+  useLayoutEffect(() => {
+    if (open) reposition();
+  }, [open, reposition]);
+
+  // 開いている間はスクロール・リサイズに追従して再クランプする（トリガーだけ動いて枠が取り残される/画面外に出るのを防ぐ・
+  // #525-6 レビュー P2）。scroll は capture＝内側スクロール領域（詳細編集パネル等）も拾う。
+  useEffect(() => {
+    if (!open) return;
+    const onMove = () => reposition();
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [open, reposition]);
 
   // 外側クリック / Escape で閉じる（capture でトリガー自身の再クリックと二重発火しない）。
   useEffect(() => {
