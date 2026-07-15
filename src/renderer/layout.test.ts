@@ -196,6 +196,26 @@ describe('subtitleStackOverflowsTop（同時字幕の画面外はみ出し・#53
     ]);
     expect(subtitleStackOverflowsTop(seq, openingTemplate)).toBe(false);
   });
+
+  it('グループ transform で字幕層が上へ移動していれば、その実位置で判定する（実描画と一致・#533 レビュー）', () => {
+    // subtitle 層をグループで y=920→100 へ上げる。2人同時（長文2行）でも上端を超える＝true（生 y=920 なら収まる）。
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: -820, rotation: 0, scale: 1 } }],
+    };
+    const long2 = dialogueScene(groupLines(2, 'あ'.repeat(50)));
+    expect(subtitleStackOverflowsTop(long2, grouped)).toBe(true);
+    expect(subtitleStackOverflowsTop(long2, openingTemplate)).toBe(false); // グループ無し＝生 y で収まる
+  });
+
+  it('字幕層がグループで非表示なら描画されない＝はみ出し判定の対象外（false）', () => {
+    const hidden: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
+    };
+    const many = dialogueScene(groupLines(8, 'あ'.repeat(50))); // 通常なら true だが非表示なので false
+    expect(subtitleStackOverflowsTop(many, hidden)).toBe(false);
+  });
 });
 
 describe('layoutScene：キーフレームアニメ（④・ADR-0019）', () => {

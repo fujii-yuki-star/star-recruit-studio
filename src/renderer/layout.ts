@@ -136,6 +136,11 @@ export function stackedSubtitleBands(
 export function subtitleStackOverflowsTop(scene: Scene, template: Template): boolean {
   const layer = template.layers.find((l) => l.type === 'subtitle');
   if (!layer || !scene.lines || scene.lines.length === 0) return false;
+  const templateGroups = template.groups ?? [];
+  // グループで非表示にされた字幕層は描画されない＝はみ出し判定の対象外（layoutScene の isHiddenByGroup と一致）。
+  if (isHiddenByGroup(layer.id, templateGroups)) return false;
+  // 実描画（layoutScene）と同じくグループ transform を前合成した位置/幅で判定する＝判定と実描画がズレない（#533 レビュー）。
+  const cg = composeGroupGeometry(template.layers, templateGroups).get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h };
   const fontSize = layer.fontSize ?? DEFAULT_FONT_SIZE;
   const maxLines = layer.maxLines ?? 2;
   const lines = sceneLines(scene);
@@ -146,7 +151,7 @@ export function subtitleStackOverflowsTop(scene: Scene, template: Template): boo
       .filter((s) => s.enabled && s.text.length > 0)
       .map((s) => s.text);
     if (bandTexts.length < 2) continue; // 実際に2帯以上出るときだけ判定
-    const placed = stackedSubtitleBands(bandTexts, layer.y, layer.w, fontSize, maxLines);
+    const placed = stackedSubtitleBands(bandTexts, cg.y, cg.w, fontSize, maxLines);
     if (placed[placed.length - 1].top < 0) return true; // 最上段が画面上端を超える＝画面外
   }
   return false;
