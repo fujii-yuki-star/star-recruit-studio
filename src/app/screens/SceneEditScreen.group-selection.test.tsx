@@ -56,3 +56,28 @@ describe("SceneEditScreen グループ選択は場面切替で持ち越さない
     expect(screen.queryByText(/グループを選択中/)).toBeNull();
   });
 });
+
+describe("SceneEditScreen グループ一覧で隠したグループを戻せる（#525-9）", () => {
+  const hiddenGroupScene = (): Scene =>
+    ({
+      ...freeScene("scene_001"),
+      groups: [{ id: "group_001", members: ["free_001", "free_002"], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
+    }) as unknown as Scene;
+
+  beforeEach(() => {
+    useProjectStore.setState({
+      templates: [freeTemplate],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [hiddenGroupScene()],
+      assets: [], editingSceneId: "scene_001",
+      past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+  });
+
+  it("隠したグループが一覧に出て、「表示」で戻せる（#9 の再表示導線）", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/グループ1（非表示）/)).toBeTruthy(); // 自動名＋非表示ラベルで一覧に出る
+    fireEvent.click(screen.getByRole("button", { name: "表示する" })); // 一覧の「表示」で戻す
+    expect(useProjectStore.getState().scenes[0].groups?.[0].hidden).toBeFalsy();
+  });
+});

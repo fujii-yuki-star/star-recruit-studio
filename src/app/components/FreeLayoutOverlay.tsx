@@ -5,7 +5,7 @@ import { FREE_ELEMENT_KIND } from "../../domain/enums";
 import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GROUP_MIN_SCALE } from "../../domain/constants";
-import { composeGroupGeometry } from "../../domain/group/compose";
+import { composeGroupGeometry, isHiddenByGroup } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { topGroupOfMember } from "../../domain/project/groupOps";
 
@@ -465,7 +465,7 @@ export function FreeLayoutOverlay({
       onContextMenu={(e) => { e.preventDefault(); }}
     >
       {freeLayout.map((el) => {
-        if (el.hidden) return null; // 非表示の要素は箱を出さない（描画も layout 側で除外・レイヤー一覧で再表示・#210）
+        if (el.hidden || isHiddenByGroup(el.id, groups)) return null; // 非表示（要素 or 所属グループ）は箱を出さない＝描画（layout.ts）と一致・操作枠だけ残さない（#525-9a）
         const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation }; // グループ合成後の位置
         const elGroup = topGroupByEl.get(el.id) ?? null; // 所属グループ（最上位）／未所属は null
         const grouped = elGroup != null;
