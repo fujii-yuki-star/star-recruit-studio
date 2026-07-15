@@ -6,7 +6,7 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, VideoStartSpec } from
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
@@ -22,7 +22,7 @@ import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { switchSceneTemplate } from "../../domain/project/sceneOps";
 import { clampSceneDuration } from "../../domain/project/sceneDuration";
-import { pickableTemplatesForScene } from "../../domain/template/templateSelection";
+import { pickableTemplatesForScene, sceneCategoriesForOrientation } from "../../domain/template/templateSelection";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
@@ -421,6 +421,31 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 自由配置 slot に割り当て可能な素材（映像として描ける非音声＝image/video/yuko/logo/qr/decor・#524 P1）。
   // FREE 化で移送した立ち絵（yuko）/ロゴも選択肢に出る＝差し替え・削除しても同じ編集画面で戻せる。判定は isFreeSlotAssetType に集約。
   const freeSlotAssets = assets.filter((a) => isFreeSlotAssetType(a.assetType));
+  // 見た目切替の共通処理（「見た目パターン」ピッカーと「種類」セレクタで共用・#528）。
+  const applyTemplateSwitch = (newTemplateId: string) => {
+    const nt = templates.find((t) => t.templateId === newTemplateId);
+    patch((s) => switchSceneTemplate(s, newTemplateId, nt?.layers ?? [], nt?.category, templates.find((t) => t.templateId === s.templateId)));
+  };
+  // FREE→通常で素材が復元できず消える場合だけ確認へ回す（ADR-0030・非破壊往復＋確認）。復元できる往復・同一テンプレは即適用。
+  const requestTemplateSwitch = (newTemplateId: string) => {
+    if (newTemplateId === selected.templateId) return;
+    const nt = templates.find((t) => t.templateId === newTemplateId);
+    const goingToNormal = !!nt && nt.category !== FREE_CATEGORY;
+    const newSlotIds = new Set((nt?.layers ?? []).filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo").map((l) => l.id));
+    const willRestore = Object.keys(selected.assetRefs).some((k) => newSlotIds.has(k));
+    if (isFree && freeLayout.length > 0 && goingToNormal && !willRestore) { setPendingTemplateId(newTemplateId); return; }
+    applyTemplateSwitch(newTemplateId);
+  };
+  // 「種類」（場面カテゴリ）の選択肢＝この向きで1つ以上見た目がある全カテゴリ（FREE 含む・#528）。
+  const sceneCategories = sceneCategoriesForOrientation(templates, aspectRatio);
+  // 「種類」を変えたら、その種類の先頭の見た目へ直接切り替える（同カテゴリ内の詳細は「見た目パターン」で選ぶ）。
+  const switchSceneCategory = (category: SceneCategory) => {
+    if (category === selected.sceneType) return;
+    const first = templates.find((t) => t.category === category && t.aspectRatio === aspectRatio);
+    if (first) requestTemplateSwitch(first.templateId);
+  };
+  // 確認待ち（pendingTemplateId）の間は、選んだ先の種類/見た目を選択表示に保つ＝「選んだのに元へ戻った」を防ぐ（#532 レビュー）。
+  const pendingCategory = pendingTemplateId ? templates.find((t) => t.templateId === pendingTemplateId)?.category : undefined;
   // 追加：新要素を末尾に積み、追加直後のその要素を選択状態にする（詳細モードでも即表示・#179）。
   // duplicateFreeEl と同様に updater 内の最新 s.freeLayout から計算（同期実行で newId は下の前に確定）。
   const addFreeEl = (kind: FreeElementKind) => {
@@ -1393,24 +1418,32 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             )}
 
             <CollapsibleSection title="見た目・フォント">
+            {/* 場面の種類（カテゴリ）を直接変える導線（#528）。変えるとその種類の見た目へ切り替わる＝オープニング固定を解く。 */}
+            <div className="field">
+              <label className="field-label" htmlFor="scene-kind">種類</label>
+              <select
+                id="scene-kind"
+                className="select"
+                value={pendingCategory ?? selected.sceneType}
+                onChange={(e) => switchSceneCategory(e.target.value as SceneCategory)}
+              >
+                {/* 現在の種類が候補に無い（旧データ・向き不一致等）ときも選択値を保つ。 */}
+                {!sceneCategories.includes(selected.sceneType) && (
+                  <option value={selected.sceneType}>{sceneTypeLabel[selected.sceneType]}</option>
+                )}
+                {sceneCategories.map((c) => (
+                  <option key={c} value={c}>{sceneTypeLabel[c]}</option>
+                ))}
+              </select>
+              <p className="field-hint" style={{ marginTop: 4 }}>この場面の種類。変えると、その種類の見た目に切り替わります。</p>
+            </div>
             <div className="field">
               <label className="field-label" htmlFor="look">見た目パターン</label>
               <select
                 id="look"
                 className="select"
-                value={selected.templateId}
-                onChange={(e) => {
-                  const newTemplateId = e.target.value;
-                  const newTemplate = templates.find((t) => t.templateId === newTemplateId);
-                  // FREE 場面（自由配置あり）を通常テンプレへ戻すとき、その通常テンプレへ復元できる素材が無ければ素材が
-                  // 画面から消える（自由配置は休眠）。黙って消さず確認する（ADR-0030・非破壊往復＋確認）。復元できる（往復）ときは確認不要。
-                  const goingToNormal = !!newTemplate && newTemplate.category !== FREE_CATEGORY;
-                  const newSlotIds = new Set((newTemplate?.layers ?? []).filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo").map((l) => l.id));
-                  const willRestore = Object.keys(selected.assetRefs).some((k) => newSlotIds.has(k));
-                  if (isFree && freeLayout.length > 0 && goingToNormal && !willRestore) { setPendingTemplateId(newTemplateId); return; }
-                  // 通常→FREE は旧テンプレ（s.templateId 解決）を渡し、表示中の素材/文字/立ち絵を freeLayout へ seed（ADR-0030）。
-                  patch((s) => switchSceneTemplate(s, newTemplateId, newTemplate?.layers ?? [], newTemplate?.category, templates.find((t) => t.templateId === s.templateId)));
-                }}
+                value={pendingTemplateId ?? selected.templateId}
+                onChange={(e) => requestTemplateSwitch(e.target.value)}
               >
                 {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}
                 {mismatchedCurrent && (
@@ -1448,11 +1481,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     <button className="btn btn-ghost text-sm" onClick={() => setPendingTemplateId(null)}>やめる</button>
                     <button
                       className="btn btn-danger text-sm"
-                      onClick={() => {
-                        const nt = templates.find((t) => t.templateId === pendingTemplateId);
-                        patch((s) => switchSceneTemplate(s, pendingTemplateId, nt?.layers ?? [], nt?.category, templates.find((t) => t.templateId === s.templateId)));
-                        setPendingTemplateId(null);
-                      }}
+                      onClick={() => { applyTemplateSwitch(pendingTemplateId); setPendingTemplateId(null); }}
                     >
                       通常の見た目に変える
                     </button>
