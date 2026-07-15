@@ -4,7 +4,7 @@ import type { Layer } from "../../domain/template/types";
 import { freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GEOM_MIN_SIZE, GROUP_MIN_SCALE } from "../../domain/constants";
-import { composeGroupGeometry, isGroupHidden, isHiddenByGroup } from "../../domain/group/compose";
+import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { topGroupOfMember } from "../../domain/project/groupOps";
 
@@ -48,22 +48,9 @@ function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
   return RESIZE_CURSORS[Math.round(a / 45) % 4];
 }
 
-// 選択中グループの「向き付き枠」（ADR-0022・#307）。メンバー（Layer）の素の外接矩形に group transform を適用。
-// flat 前提。メンバー個別回転は枠 bbox に含めない（FREE と同方針・将来精緻化）。
-function orientedGroupFrame(
-  group: Group, layers: Layer[],
-): { cx: number; cy: number; w: number; h: number; rotation: number } | null {
-  const rects = group.members.map((id) => layers.find((l) => l.id === id)).filter((l): l is Layer => l != null);
-  if (rects.length === 0) return null;
-  const minX = Math.min(...rects.map((l) => l.x));
-  const minY = Math.min(...rects.map((l) => l.y));
-  const maxX = Math.max(...rects.map((l) => l.x + l.w));
-  const maxY = Math.max(...rects.map((l) => l.y + l.h));
-  const lw = maxX - minX;
-  const lh = maxY - minY;
-  const t = group.transform;
-  return { cx: minX + lw / 2 + t.x, cy: minY + lh / 2 + t.y, w: lw * t.scale, h: lh * t.scale, rotation: t.rotation };
-}
+// 選択中グループの「向き付き枠」は domain/group/compose の orientedGroupFrame を共有する（FREE と同一・#525-10）。
+// composeGroupGeometry と同じ anchor（メンバー回転後 AABB 基準）ゆえ、回転メンバーを含むグループでも枠中心＝
+// 拡縮/回転 pivot が実描画と一致する（旧実装の素 bbox ずれ＝#312 既知制限を解消）。
 
 interface Props {
   layers: Layer[];
@@ -106,7 +93,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
   const topGroupByEl = new Map<string, Group>();
   if (groups.length > 0) for (const l of layers) { const tg = topGroupOfMember(groups, l.id); if (tg) topGroupByEl.set(l.id, tg); }
   const activeGroup = activeGroupId ? groups.find((g) => g.id === activeGroupId) ?? null : null;
-  const activeGroupFrame = activeGroup ? orientedGroupFrame(activeGroup, layers) : null;
+  const activeGroupFrame = activeGroup ? orientedGroupFrame(activeGroup, layers, groups) : null;
 
   // ポインタの画面座標→canvas 座標（オーバーレイは fit 箱内＝実寸一致）。描画前(0幅)は原点に潰す。
   const toCanvas = (clientX: number, clientY: number): { x: number; y: number } => {
