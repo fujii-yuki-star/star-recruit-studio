@@ -104,7 +104,7 @@ export const SUBTITLE_STACK_GAP_EM = 0.4;
  * 同時字幕（ADR-0031）の帯を下→上に積んだときの、各帯の anchor y と上端 top（キャンバス座標・px）。純粋関数。
  * bandTexts[0] が下（primary）＝baseY。以降は**実際の折返し行数**（`wrapText`）で詰め、`anchorBottom` の上伸び
  * （行が増えると上端が上がる）を見込んで次帯の下端を前帯の上端＋gap 上へ置く＝2行でも重ならない。
- * layout（描画）／はみ出し判定（`subtitleStackOverflowsTop`）／precheck が同じ配置を共有する（drift 防止・#533 P1/P2）。
+ * layout（描画）と、はみ出し判定（`subtitleOverflowsCanvas` は実 `layoutScene` の字幕アイテムを検査）が同じ配置を共有する（drift 防止・#533 P1/P2）。
  */
 export function stackedSubtitleBands(
   bandTexts: string[],
@@ -128,31 +128,56 @@ export function stackedSubtitleBands(
   return out;
 }
 
+/** 字幕帯アイテム1つが回転後にキャンバス外へ出るか（上下左右すべての辺）。矩形＝x/y/w＋折返し行数＋anchorBottom、rotation は中心軸で回して AABB 判定（#533 P2）。 */
+function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: number): boolean {
+  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines).length;
+  const lineHeightPx = item.fontSize * DEFAULT_LINE_HEIGHT;
+  const x0 = item.x;
+  const y0 = item.y - (item.anchorBottom ? (n - 1) * lineHeightPx : 0); // 帯背景の上端（sceneSvg と一致）
+  const w = item.w;
+  const h = lineHeightPx * n + item.fontSize * SUBTITLE_BAND_PAD_EM;
+  const rot = ((item.rotation ?? 0) * Math.PI) / 180;
+  if (rot === 0) return x0 < 0 || y0 < 0 || x0 + w > canvasW || y0 + h > canvasH;
+  const cx = x0 + w / 2;
+  const cy = y0 + h / 2;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const corners: [number, number][] = [[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h]];
+  const xs = corners.map(([px, py]) => cx + (px - cx) * cos - (py - cy) * sin);
+  const ys = corners.map(([px, py]) => cy + (px - cx) * sin + (py - cy) * cos);
+  return Math.min(...xs) < 0 || Math.min(...ys) < 0 || Math.max(...xs) > canvasW || Math.max(...ys) > canvasH;
+}
+
 /**
- * 同時字幕（ADR-0031）の帯スタックがキャンバス**上端をはみ出す**か（#533 P2）。テンプレ字幕層の位置から各同時グループの
- * 帯（enabled 字幕）を積み、最上段の上端 < 0 なら true。N人＋長文で上へ積み切れないときの警告に使う（黙って画面外に切らない）。
- * 純粋関数（描画と同じ `stackedSubtitleBands`／`groupIndices` を共有＝判定と実描画が一致）。
+ * 同時字幕（ADR-0031）が**キャンバス外へはみ出す**か（#533 レビュー P2）。**実描画（`layoutScene`）の字幕アイテム**を基に、
+ * 各同時グループで生成される全テンプレ字幕層×全帯を、回転・グループ transform・非表示込みで**上下左右すべての辺**で判定する
+ * （2個目の字幕層・下移動・回転・N人長文の見切れを実描画と一致して検出）。FREE 字幕は利用者配置ゆえ対象外。純粋関数。
  */
-export function subtitleStackOverflowsTop(scene: Scene, template: Template): boolean {
-  const layer = template.layers.find((l) => l.type === 'subtitle');
-  if (!layer || !scene.lines || scene.lines.length === 0) return false;
-  const templateGroups = template.groups ?? [];
-  // グループで非表示にされた字幕層は描画されない＝はみ出し判定の対象外（layoutScene の isHiddenByGroup と一致）。
-  if (isHiddenByGroup(layer.id, templateGroups)) return false;
-  // 実描画（layoutScene）と同じくグループ transform を前合成した位置/幅で判定する＝判定と実描画がズレない（#533 レビュー）。
-  const cg = composeGroupGeometry(template.layers, templateGroups).get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h };
-  const fontSize = layer.fontSize ?? DEFAULT_FONT_SIZE;
-  const maxLines = layer.maxLines ?? 2;
+export function subtitleOverflowsCanvas(scene: Scene, template: Template): boolean {
+  if (!scene.lines || scene.lines.length === 0) return false;
+  const { width, height } = template.canvas;
+  // テンプレ字幕層の id（同時行の追加帯は `${id}__subN`）。FREE 字幕（free_NNN）と区別するのに使う。
+  const subtitleLayerIds = new Set(template.layers.filter((l) => l.type === 'subtitle').map((l) => l.id));
+  if (subtitleLayerIds.size === 0) return false;
   const lines = sceneLines(scene);
   for (const g of groupIndices(lines)) {
     if (g.length < 2) continue; // 単独行は積まない
-    const bandTexts = g
-      .map((i) => resolveLineSubtitle(lines[i], scene))
-      .filter((s) => s.enabled && s.text.length > 0)
-      .map((s) => s.text);
-    if (bandTexts.length < 2) continue; // 実際に2帯以上出るときだけ判定
-    const placed = stackedSubtitleBands(bandTexts, cg.y, cg.w, fontSize, maxLines);
-    if (placed[placed.length - 1].top < 0) return true; // 最上段が画面上端を超える＝画面外
+    const primary = lines[g[0]];
+    const primarySub = resolveLineSubtitle(primary, scene);
+    const seg: SceneSegmentSpec = {
+      lineId: primary.lineId,
+      parallelLineIds: g.slice(1).map((i) => lines[i].lineId),
+      startSec: 0,
+      durationSec: scene.durationSec,
+      isFirst: true,
+    };
+    // 実描画と同じ layoutScene を回し、テンプレ字幕層由来の帯だけ（回転・グループ transform・非表示は layout が反映済み）を全辺で検査。
+    const layout = layoutScene(scene, template, { subtitleText: primarySub.enabled ? primarySub.text : null, subtitleSegment: seg });
+    for (const item of layout.items) {
+      if (item.kind !== 'text' || !item.isSubtitle) continue;
+      if (!subtitleLayerIds.has(item.id.split('__sub')[0])) continue; // FREE 字幕は対象外
+      if (subtitleItemOutOfCanvas(item, width, height)) return true;
+    }
   }
   return false;
 }

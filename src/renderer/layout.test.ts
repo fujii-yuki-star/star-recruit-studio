@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
-import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleStackOverflowsTop } from './layout';
+import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas } from './layout';
 import { layoutToSvg } from './sceneSvg';
 import { wrapText } from './textWrap';
 
@@ -172,7 +172,7 @@ describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413
   });
 });
 
-describe('subtitleStackOverflowsTop（同時字幕の画面外はみ出し・#533 P2）', () => {
+describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 P2）', () => {
   const dialogueScene = (lines: unknown[]): Scene => ({ ...scene, lines } as Scene);
   const groupLines = (n: number, text: string): unknown[] =>
     Array.from({ length: n }, (_, i) => ({
@@ -181,12 +181,12 @@ describe('subtitleStackOverflowsTop（同時字幕の画面外はみ出し・#53
     }));
 
   it('2〜3人（通常の長さ）は画面内＝はみ出さない（false）', () => {
-    expect(subtitleStackOverflowsTop(dialogueScene(groupLines(2, 'こんにちは')), openingTemplate)).toBe(false);
-    expect(subtitleStackOverflowsTop(dialogueScene(groupLines(3, 'こんにちは')), openingTemplate)).toBe(false);
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), openingTemplate)).toBe(false);
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(3, 'こんにちは')), openingTemplate)).toBe(false);
   });
 
   it('8人×長文はスタックが画面上端を超える＝はみ出す（true）＝警告対象', () => {
-    expect(subtitleStackOverflowsTop(dialogueScene(groupLines(8, 'あ'.repeat(50))), openingTemplate)).toBe(true);
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(8, 'あ'.repeat(50))), openingTemplate)).toBe(true);
   });
 
   it('逐次（同時開始なし）は積まないので対象外（false）', () => {
@@ -194,7 +194,7 @@ describe('subtitleStackOverflowsTop（同時字幕の画面外はみ出し・#53
       { lineId: 'line_001', text: 'あ'.repeat(50), status: 'none' },
       { lineId: 'line_002', text: 'あ'.repeat(50), status: 'none' }, // startWithPrevious なし＝逐次
     ]);
-    expect(subtitleStackOverflowsTop(seq, openingTemplate)).toBe(false);
+    expect(subtitleOverflowsCanvas(seq, openingTemplate)).toBe(false);
   });
 
   it('グループ transform で字幕層が上へ移動していれば、その実位置で判定する（実描画と一致・#533 レビュー）', () => {
@@ -204,8 +204,8 @@ describe('subtitleStackOverflowsTop（同時字幕の画面外はみ出し・#53
       groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: -820, rotation: 0, scale: 1 } }],
     };
     const long2 = dialogueScene(groupLines(2, 'あ'.repeat(50)));
-    expect(subtitleStackOverflowsTop(long2, grouped)).toBe(true);
-    expect(subtitleStackOverflowsTop(long2, openingTemplate)).toBe(false); // グループ無し＝生 y で収まる
+    expect(subtitleOverflowsCanvas(long2, grouped)).toBe(true);
+    expect(subtitleOverflowsCanvas(long2, openingTemplate)).toBe(false); // グループ無し＝生 y で収まる
   });
 
   it('字幕層がグループで非表示なら描画されない＝はみ出し判定の対象外（false）', () => {
@@ -214,7 +214,39 @@ describe('subtitleStackOverflowsTop（同時字幕の画面外はみ出し・#53
       groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
     };
     const many = dialogueScene(groupLines(8, 'あ'.repeat(50))); // 通常なら true だが非表示なので false
-    expect(subtitleStackOverflowsTop(many, hidden)).toBe(false);
+    expect(subtitleOverflowsCanvas(many, hidden)).toBe(false);
+  });
+
+  it('2個目の字幕層のはみ出しも検出する（最初の層だけ見ない・#533 レビュー）', () => {
+    const twoSub: Template = {
+      ...openingTemplate,
+      layers: [
+        ...openingTemplate.layers,
+        { id: 'subtitle2', type: 'subtitle', textKey: 'subtitle', x: 240, y: 30, w: 1440, h: 90, zIndex: 51, fontSize: 38 },
+      ],
+    };
+    // 1個目（y=920）は収まるが、2個目（y=30・上寄り）は2人同時で上へ積むと画面上端を超える。
+    const twoPeople = dialogueScene(groupLines(2, 'こんにちは'));
+    expect(subtitleOverflowsCanvas(twoPeople, twoSub)).toBe(true);
+    expect(subtitleOverflowsCanvas(twoPeople, openingTemplate)).toBe(false); // 1層だけなら収まる
+  });
+
+  it('下方向への移動で下端がはみ出すのも検出する（上端だけ見ない）', () => {
+    const movedDown: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 100, rotation: 0, scale: 1 } }],
+    };
+    // subtitle が y=920→1020 へ下がると primary 帯の下端（≒1092）が 1080 を超える。
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), movedDown)).toBe(true);
+  });
+
+  it('90度回転で上下左右にはみ出すのも検出する（回転を判定に反映）', () => {
+    const rotated: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 0, rotation: 90, scale: 1 } }],
+    };
+    // 幅1440の帯を90度回すと縦≒1440になり、字幕位置を中心に上下へ大きくはみ出す。
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), rotated)).toBe(true);
   });
 });
 

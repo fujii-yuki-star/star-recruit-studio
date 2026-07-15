@@ -27,7 +27,7 @@ import { resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
-import { subtitleStackOverflowsTop } from "../../renderer/layout";
+import { subtitleOverflowsCanvas } from "../../renderer/layout";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
 import { useProjectStore } from "../store/projectStore";
@@ -982,7 +982,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const lineWarningMessages = isDialogue
     ? [
         ...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message)),
-        ...(template && subtitleStackOverflowsTop(selected, template)
+        ...(template && subtitleOverflowsCanvas(selected, template)
           ? ["同時に表示するセリフが多く、一部の字幕が画面からはみ出します。同時のセリフを減らすか、字幕を短くしてください。"]
           : []),
       ]
