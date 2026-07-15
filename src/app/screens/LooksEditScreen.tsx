@@ -11,7 +11,8 @@ import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
-import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { GroupList } from "../components/GroupList";
 import type { GroupTransform } from "../../domain/group/types";
 import { Switch } from "../components/ui";
 import { NumberField } from "../components/NumberField";
@@ -163,6 +164,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   }
   function toggleGroupLocked(groupId: string) {
     setDraft((d) => (d ? { ...d, groups: toggleGroupFlag(d.groups ?? [], groupId, "locked") } : d));
+  }
+  // グループの改名（#525-9・任意 name）。空文字は自動名（グループN）へフォールバック表示。
+  function renameGroup(groupId: string, name: string) {
+    setDraft((d) => (d ? { ...d, groups: updateGroupMeta(d.groups ?? [], groupId, { name }) } : d));
   }
   function bringGroupFront(groupId: string) {
     if (tplGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は重ね順も抑止（多重防御・#319 レビュー）
@@ -458,6 +463,14 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             />
           </ScenePreview>
           <p className="text-sm text-muted mt">プレビュー上で要素をドラッグ・拡大縮小・回転できます（写真・文字は例として表示）。</p>
+          {/* グループ一覧（#525-9）：全グループを選択・再表示（隠したものを戻す）・改名できる。隠したグループを選び直せる導線。 */}
+          <GroupList
+            groups={tplGroups}
+            activeGroupId={effectiveActiveGroupId}
+            onSelect={(id) => selectGroup(id)}
+            onToggleHidden={toggleGroupHidden}
+            onRename={renameGroup}
+          />
           {/* グループ（ADR-0022・#307）：2つ以上選択でグループ化／選択中グループは解除。拡縮・回転・非表示等は part2b。 */}
           {(selectedLayerIds.length >= 2 || effectiveActiveGroupId) && (
             <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>

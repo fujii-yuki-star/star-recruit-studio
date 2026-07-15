@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeGroupGeometry, isHiddenByGroup, type Geom } from './compose';
+import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, type Geom } from './compose';
 import type { Group, GroupTransform } from './types';
 
 const I: GroupTransform = { x: 0, y: 0, rotation: 0, scale: 1 };
@@ -113,5 +113,27 @@ describe('isHiddenByGroup', () => {
 
   it('グループ無しは false', () => {
     expect(isHiddenByGroup('a', [])).toBe(false);
+  });
+});
+
+describe('isGroupHidden（自身＋祖先・#525-9 レビュー）', () => {
+  it('グループ自身が hidden なら true（isHiddenByGroup は祖先のみゆえ自身を足す）', () => {
+    const groups = [g('group_001', ['a'], {}, { hidden: true })];
+    expect(isGroupHidden('group_001', groups)).toBe(true);
+    expect(isHiddenByGroup('group_001', groups)).toBe(false); // 自身は見ない（差分の確認）
+  });
+
+  it('祖先グループが hidden なら true（ネスト）', () => {
+    const groups = [
+      g('group_001', ['a']),
+      g('group_002', ['group_001'], {}, { hidden: true }),
+    ];
+    expect(isGroupHidden('group_001', groups)).toBe(true);
+  });
+
+  it('非表示でない/存在しないグループは false', () => {
+    const groups = [g('group_001', ['a'])];
+    expect(isGroupHidden('group_001', groups)).toBe(false);
+    expect(isGroupHidden('group_999', groups)).toBe(false);
   });
 });
