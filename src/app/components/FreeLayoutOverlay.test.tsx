@@ -524,6 +524,17 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
     fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
+
+  // 非左ボタン（中クリック）は begin* のボタン判定で早期 return するが、判定より前に履歴を切るので候補は解除される。
+  it("中クリック（非左ボタン）を挟んだ二度押しは編集に入らない＝非左押下でも履歴を切る（#525-4 レビュー）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 左クリック（記録）
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 1, clientX: 120, clientY: 120, pointerId: 1 }); // 中クリック（別操作）
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 左クリック
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
 });
 
 describe("FreeLayoutOverlay: 回転（#208）", () => {

@@ -195,12 +195,12 @@ export function FreeLayoutOverlay({
   const beginDrag = (
     e: ReactPointerEvent, el: FreeElement, mode: "move" | "resize", corner?: ResizeCorner,
   ) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前に実行（#525-4 レビュー）
     if (e.button !== 0) return; // 左ボタンのみドラッグ（右クリックはメニュー・中クリックは無視）
     e.preventDefault();
     e.stopPropagation(); // 角ハンドルのドラッグが本体の移動を兼ねないように
     setMenu(null);
     setEditingId(null); // ドラッグ開始でインライン編集を抜ける
-    lastTapRef.current = null; // ドラッグ等の別操作を挟んだら二度押し履歴を無効化（#525-4 レビュー）
     // Shift+クリック（移動操作）＝選択トグル。ドラッグは始めない（複数選択を作る/外すための操作）。
     if (mode === "move" && e.shiftKey) { onSelect(el.id, true); return; }
     // ロック中は選択だけ行い、移動/拡縮はしない（レイヤー一覧で解除できる・#210）。
@@ -238,12 +238,12 @@ export function FreeLayoutOverlay({
 
   // 複数同時リサイズ（#274）のグループ角ハンドル押下：bbox を基準に選択要素をまとめてスケールする。
   const beginGroupResize = (e: ReactPointerEvent, corner: ResizeCorner) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0 || !groupBox) return;
     e.preventDefault();
     e.stopPropagation(); // ルートのマーキー開始を兼ねない
     setMenu(null);
     setEditingId(null);
-    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     onInteractionStart?.(); // 連続リサイズを Undo の1ステップに合成（#211）
@@ -258,12 +258,12 @@ export function FreeLayoutOverlay({
 
   // 回転ハンドル押下（#279）：要素中心からポインタへの角度で rotation を更新する。
   const beginRotate = (e: ReactPointerEvent, el: FreeElement) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation(); // ルートのマーキー開始を兼ねない
     setMenu(null);
     setEditingId(null);
-    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     onInteractionStart?.(); // 連続回転を Undo の1ステップに合成（#211）
     setDrag({
@@ -276,12 +276,12 @@ export function FreeLayoutOverlay({
 
   // グループのメンバー押下（ADR-0022・#305-1）：グループを選択し、グループ移動（transform.x/y）を開始する。
   const beginGroupDrag = (e: ReactPointerEvent, group: Group) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     setMenu(null);
     setEditingId(null);
-    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     onSelectGroup?.(group.id); // メンバー個別ではなくグループ単位で選択
     if (group.locked) return; // ロック中は選択のみ
     const width = ref.current?.clientWidth ?? canvasW;
@@ -299,12 +299,12 @@ export function FreeLayoutOverlay({
   // グループ枠の角ハンドル押下（ADR-0022・#305-2）：中心からの距離比で transform.scale を更新（中心固定の一様拡縮）。
   // ※ 名前は既存 #274 の一時グループリサイズ（beginGroupResize）と区別するため beginGroupScale。
   const beginGroupScale = (e: ReactPointerEvent, group: Group, frame: { cx: number; cy: number }) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0 || group.locked) return;
     e.preventDefault();
     e.stopPropagation();
     setMenu(null);
     setEditingId(null);
-    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     onInteractionStart?.();
     const p = toCanvas(e.clientX, e.clientY);
@@ -319,12 +319,12 @@ export function FreeLayoutOverlay({
 
   // グループ枠の回転ハンドル押下（ADR-0022・#305-2）：中心→ポインタ角で transform.rotation を更新（Shift で15°）。
   const beginGroupRotate = (e: ReactPointerEvent, group: Group, frame: { cx: number; cy: number }) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0 || group.locked) return;
     e.preventDefault();
     e.stopPropagation();
     setMenu(null);
     setEditingId(null);
-    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     onInteractionStart?.();
     setDrag({
