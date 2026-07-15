@@ -4,6 +4,21 @@ import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
 import { layoutScene } from './layout';
 import { layoutToSvg } from './sceneSvg';
+import { wrapText } from './textWrap';
+
+// 字幕帯の実 [top, bottom]（描画と同じ wrapText の行数＋anchorBottom で算出）。段間の重なり検証に使う。
+const bandRect = (item: TextItem): { top: number; bottom: number } => {
+  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines).length;
+  const lh = item.fontSize * 1.3; // DEFAULT_LINE_HEIGHT
+  const top = item.y - (item.anchorBottom ? (n - 1) * lh : 0);
+  return { top, bottom: top + lh * n + item.fontSize * 0.6 };
+};
+// 上→下に並べ、隣接帯が重ならない（上の下端 ≤ 下の上端）か。
+const noOverlap = (subs: TextItem[]): boolean => {
+  const rects = subs.map(bandRect).sort((a, b) => a.top - b.top);
+  for (let i = 0; i + 1 < rects.length; i += 1) if (rects[i].bottom > rects[i + 1].top + 1e-6) return false;
+  return true;
+};
 
 const openingTemplate: Template = {
   schemaVersion: '1.0',
@@ -107,9 +122,49 @@ describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413
     expect(primary.id).toBe('subtitle'); // primary は layer.id 据え置き（後方互換）
     expect(second.y).toBeLessThan(920); // 2人目は上へ
     expect(second.id).toBe('subtitle__sub1'); // 別ボックス（一意 id）
-    // 重ならない：2人目の帯の下端（y + 1行背景高）が primary の上端（920）以下。
-    const bandH = second.fontSize * (1.3 + 0.6); // 1行帯の高さ（sceneSvg の背景高と一致）
-    expect(second.y + bandH).toBeLessThanOrEqual(920);
+    expect(noOverlap(subs)).toBe(true); // 重ならない
+  });
+
+  it('長文で各帯が2行に折れても重ならない（実折返し行数で段を詰める・#533 P1）', () => {
+    const long = 'あ'.repeat(50); // 幅1440/38≒37字ゆえ2行に折れる
+    const dialogue = { ...scene, lines: [
+      { lineId: 'line_001', text: long, status: 'none' },
+      { lineId: 'line_002', text: long, startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: long, startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, openingTemplate, { subtitleText: long, subtitleSegment: segment }));
+    expect(subs).toHaveLength(2);
+    expect(bandRect(subs[0]).bottom - bandRect(subs[0]).top).toBeGreaterThan(subs[0].fontSize * 1.9); // 実際に2行（1行帯より高い）
+    expect(noOverlap(subs)).toBe(true);
+  });
+
+  it('3人同時（長文混在）でも各帯が重ならない（N人）', () => {
+    const long = 'い'.repeat(45);
+    const dialogue = { ...scene, lines: [
+      { lineId: 'line_001', text: '短い', status: 'none' },
+      { lineId: 'line_002', text: long, startWithPrevious: true, status: 'none' },
+      { lineId: 'line_003', text: 'また短い', startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002', 'line_003'], subtitleText: '短い', startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, openingTemplate, { subtitleText: '短い', subtitleSegment: segment }));
+    expect(subs).toHaveLength(3);
+    expect(noOverlap(subs)).toBe(true);
+  });
+
+  it('縦型（狭幅）で行数が増えても重ならない', () => {
+    const portrait: Template = {
+      ...openingTemplate, aspectRatio: '9:16', canvas: { width: 1080, height: 1920 },
+      layers: openingTemplate.layers.map((l) => (l.id === 'subtitle' ? { ...l, x: 60, y: 1600, w: 960 } : l)),
+    };
+    const long = 'う'.repeat(40); // 幅960/38≒25字ゆえ2行に折れる
+    const dialogue = { ...scene, lines: [
+      { lineId: 'line_001', text: long, status: 'none' },
+      { lineId: 'line_002', text: long, startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: long, startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, portrait, { subtitleText: long, subtitleSegment: segment }));
+    expect(subs).toHaveLength(2);
+    expect(noOverlap(subs)).toBe(true);
   });
 });
 

@@ -15,6 +15,7 @@ import { resolveLineSubtitle } from '../domain/project/lineTimeline';
 import type { SceneSegmentSpec } from '../domain/project/lineTimeline';
 import { sceneLines } from '../domain/project/narrationLines';
 import { resolveSubtitleForElement, type SubtitleMoment } from '../domain/project/subtitleBinding';
+import { wrapText } from './textWrap';
 
 export interface Rect {
   x: number;
@@ -94,11 +95,10 @@ const DEFAULT_FONT_SIZE = 40;
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 /** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
 export const DEFAULT_LINE_HEIGHT = 1.3;
-/**
- * 同時字幕（ADR-0031）で2人目以降の字幕帯を「上へ」積むときの段間（em＝fontSize 倍率）。
- * ＝1行帯の縦占有（行間 DEFAULT_LINE_HEIGHT ＋背景の上下パディング 0.6・sceneSvg と一致）＋余白 0.4。重ならない別ボックスにする。
- */
-const SUBTITLE_STACK_STEP_EM = DEFAULT_LINE_HEIGHT + 0.6 + 0.4;
+/** 字幕帯の背景の上下パディング（em）。sceneSvg の bgHeight = 行間×行数 + 0.6*fontSize と一致（帯の下端＝y + 行間 + これ）。 */
+const SUBTITLE_BAND_PAD_EM = 0.6;
+/** 同時字幕（ADR-0031）で2人目以降を上へ積むときの帯間の余白（em）。**実際の折返し行数**で詰めたうえで、この隙間を空ける（重ならない）。 */
+const SUBTITLE_STACK_GAP_EM = 0.4;
 
 /** layoutScene のオプション（掛け合いの行字幕の上書き等・ADR-0015 追加A/B）。 */
 export interface LayoutOptions {
@@ -263,21 +263,33 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             strokeWidth: layer.strokeWidth,
           });
         };
-        if (text.length > 0) pushBand(text, base.y, ''); // primary（先頭話者）＝テンプレ位置。id は従来どおり layer.id。
-        // 同時開始（ADR-0031）：字幕層は2人目以降を「上へ」自動配置＝重ならない別ボックス。primary が出ていれば1段空ける。
-        const parallelIds = isSub ? opts?.subtitleSegment?.parallelLineIds ?? [] : [];
-        if (parallelIds.length > 0) {
-          const step = fontSize * SUBTITLE_STACK_STEP_EM;
-          let tier = text.length > 0 ? 1 : 0;
-          for (const lineId of parallelIds) {
+        // 表示する帯（下→上の順）＝primary（あれば）＋同時行（enabled・ADR-0031）。primary は layer.id 据え置き（後方互換）。
+        const bands: { text: string; idSuffix: string }[] = [];
+        if (text.length > 0) bands.push({ text, idSuffix: '' });
+        if (isSub) {
+          let k = 1;
+          for (const lineId of opts?.subtitleSegment?.parallelLineIds ?? []) {
             const line = sceneLines(scene).find((l) => l.lineId === lineId);
             if (line == null) continue;
             const sub = resolveLineSubtitle(line, scene);
             if (!sub.enabled || sub.text.length === 0) continue; // OFF/空は帯を作らない（段も詰めない）
-            pushBand(sub.text, base.y - tier * step, `__sub${tier}`);
-            tier += 1;
+            bands.push({ text: sub.text, idSuffix: `__sub${k}` });
+            k += 1;
           }
         }
+        // 最初（下）の帯は base.y、以降は「上へ」積む。段間は**実際の折返し行数**で詰める＝長文で2行に折れても重ならない（#530/#533 P1）。
+        // 帯（anchor y・n 行・anchorBottom）: 上端 = y − (n−1)*行間、下端 = y + 行間 + パディング。次帯の下端を前帯の上端より gap 上へ。
+        const lineHeightPx = fontSize * DEFAULT_LINE_HEIGHT;
+        const bottomOffsetPx = lineHeightPx + fontSize * SUBTITLE_BAND_PAD_EM; // anchor y から帯の下端まで
+        const gapPx = fontSize * SUBTITLE_STACK_GAP_EM;
+        const maxLines = layer.maxLines ?? 2;
+        let prevTop = Number.POSITIVE_INFINITY;
+        bands.forEach((b, i) => {
+          const y = i === 0 ? base.y : prevTop - gapPx - bottomOffsetPx;
+          pushBand(b.text, y, b.idSuffix);
+          const n = isSub ? wrapText(b.text, base.w, fontSize, maxLines).length : 1; // 実際の折返し行数（描画と同じ wrapText）
+          prevTop = y - (n - 1) * lineHeightPx; // この帯の上端（anchorBottom で上へ伸びるぶんを反映）
+        });
         break;
       }
     }
