@@ -116,6 +116,13 @@ const freeKindLabel: Record<FreeElementKind, string> = {
   subtitle: "字幕",
 };
 
+// FREE 要素の表示名（#525-12）：任意 name ＞ 種類＋連番（index は freeLayout の並び順で安定）。
+// 見分けやすさのため一覧/チップ/詳細見出しで共有する（グループ名＝#9 と同じ「オブジェクトに名前」UX）。
+function freeElementName(el: FreeElement, index: number): string {
+  const custom = el.name?.trim();
+  return custom ? custom : `${freeKindLabel[el.kind]}${index + 1}`;
+}
+
 // 自由配置の位置・サイズ等の数値入力（キーボードで調整＝a11y。ドラッグ操作は Phase 4b）。
 // 既定 step=1＝座標/サイズ/重なり順は整数 px（非整数を renderer に渡さない）。
 // 掛け合いの行ごとの声パラメータ（話す速さ/声の高さ/抑揚）。設定画面と同じ voiceParams スライダーを流用（#242）。
@@ -270,6 +277,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 複数選択（#206）。配列が真＝選択集合、末尾が「主」。単一要素編集（カード/詳細モード/ポップオーバー）は主を対象にする。
   const [selectedFreeIds, setSelectedFreeIds] = useState<string[]>([]);
   const selectedFreeId = selectedFreeIds.length > 0 ? selectedFreeIds[selectedFreeIds.length - 1] : null;
+  // FREE 要素の改名（#525-12）：一覧でインライン編集する id と下書き（グループ改名＝#9 と同じ UX）。
+  const [renamingFreeId, setRenamingFreeId] = useState<string | null>(null);
+  const [draftFreeName, setDraftFreeName] = useState("");
   // 一括削除の確認中フラグ（複数まとめ削除は破壊的なので誤操作防止の1段確認を挟む・#206。Undo でも戻せるが確認は維持）。
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   // セリフ行の削除も確認してから（#410・即時削除だった）。確認中の行 id（行が変わると自動解除）。
@@ -419,6 +429,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 非FREE場面のテキスト入力欄は、選択テンプレのテキスト層が使う textKey から生成する（#214 ④b・全5キー対応）。
   const sceneTextKeys = template ? usedTextKeys(template.layers) : [];
   const freeLayout = selected.freeLayout ?? [];
+  // 自動名の連番を安定させるための並び順 index（表示名 freeElementName で共有・#525-12）。
+  const freeAutoIndexById = new Map(freeLayout.map((e, i) => [e.id, i] as const));
+  const freeName = (el: FreeElement): string => freeElementName(el, freeAutoIndexById.get(el.id) ?? 0);
   const sceneGroups = selected.groups ?? [];
   const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
   // 自由配置 slot に割り当て可能な素材（映像として描ける非音声＝image/video/yuko/logo/qr/decor・#524 P1）。
@@ -537,6 +550,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // グループの改名（#525-9・任意 name）。空文字は自動名（グループN）へフォールバック表示。
   const renameGroup = (groupId: string, name: string) =>
     patch((s) => ({ ...s, groups: updateGroupMeta(s.groups ?? [], groupId, { name }) }));
+  // FREE 要素の改名（#525-12・任意 name）。空文字は name を外して自動名へ戻す。Undo 可（patchFreeEl 経由）。
+  const startRenameFree = (el: FreeElement) => { setDraftFreeName(el.name ?? ""); setRenamingFreeId(el.id); };
+  const commitFreeRename = () => {
+    if (renamingFreeId) patchFreeEl(renamingFreeId, { name: draftFreeName.trim() || undefined });
+    setRenamingFreeId(null);
+  };
   // グループの重ね順（#305）：メンバー全体を最前面/最背面へ（相対順は保つ）。
   const bringGroupFront = (groupId: string) => {
     if (sceneGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は重ね順も抑止（多重防御・#319 レビュー）
@@ -1676,21 +1695,38 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         {[...freeLayout].sort((a, b) => (b.zIndex ?? 1) - (a.zIndex ?? 1)).map((el) => {
                           const isSel = selectedFreeIds.includes(el.id);
                           const hint = el.kind === FREE_ELEMENT_KIND.text && el.text ? `「${el.text.slice(0, 8)}」` : "";
+                          const autoName = `${freeKindLabel[el.kind]}${(freeAutoIndexById.get(el.id) ?? 0) + 1}`;
                           return (
                             <div
                               key={el.id}
                               className="row-between"
                               style={{ padding: "2px 6px", borderRadius: 4, background: isSel ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)", opacity: el.hidden ? 0.55 : 1 }}
                             >
-                              <button
-                                className="btn btn-ghost text-sm"
-                                style={{ flex: 1, textAlign: "left", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                                onClick={(e) => selectFree(el.id, e.shiftKey)}
-                                title="クリックで選択（Shift＋クリックで複数選択）"
-                              >
-                                {freeKindLabel[el.kind]}{hint}{el.locked ? "（ロック）" : ""}
-                              </button>
+                              {renamingFreeId === el.id ? (
+                                <input
+                                  className="input text-sm"
+                                  style={{ flex: 1, minWidth: 0 }}
+                                  autoFocus
+                                  value={draftFreeName}
+                                  placeholder={autoName}
+                                  aria-label="要素名"
+                                  onChange={(e) => setDraftFreeName(e.target.value)}
+                                  onBlur={commitFreeRename}
+                                  onKeyDown={(e) => { if (e.key === "Enter") commitFreeRename(); else if (e.key === "Escape") setRenamingFreeId(null); }}
+                                />
+                              ) : (
+                                <button
+                                  className="btn btn-ghost text-sm"
+                                  style={{ flex: 1, textAlign: "left", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                                  onClick={(e) => selectFree(el.id, e.shiftKey)}
+                                  onDoubleClick={() => startRenameFree(el)}
+                                  title="クリックで選択・ダブルクリックで名前を変更（Shift＋クリックで複数選択）"
+                                >
+                                  {freeName(el)}{hint}{el.locked ? "（ロック）" : ""}
+                                </button>
+                              )}
                               <div className="row" style={{ gap: 2 }}>
+                                <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRenameFree(el)}>名前</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label="前面へ" onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label="背面へ" onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title={el.hidden ? "表示する" : "隠す"} onClick={() => toggleFreeHidden(el.id)}>{el.hidden ? "表示" : "隠す"}</button>
@@ -1806,7 +1842,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {/* 詳細編集モード：選択要素を切り替えるチップ（カード一覧を長くスクロールせず選べる・#179）。 */}
                     {focusSelectedFree && (
                       <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
-                        {freeLayout.map((el, i) => (
+                        {freeLayout.map((el) => (
                           <button
                             key={el.id}
                             className="btn btn-ghost text-sm"
@@ -1814,7 +1850,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             onClick={() => selectFree(el.id)}
                             aria-pressed={el.id === selectedFreeId}
                           >
-                            {freeKindLabel[el.kind]}{i + 1}
+                            {freeName(el)}
                           </button>
                         ))}
                       </div>
@@ -1844,7 +1880,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         }}
                       >
                         <div className="row-between" style={{ marginBottom: 4 }}>
-                          <strong className="text-sm">{freeKindLabel[el.kind]}{el.hidden ? "（非表示）" : ""}</strong>
+                          <strong className="text-sm">{freeName(el)}{el.hidden ? "（非表示）" : ""}</strong>
                           <div className="row gap-sm">
                             <button
                               className="btn btn-ghost text-sm"
