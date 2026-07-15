@@ -200,6 +200,7 @@ export function FreeLayoutOverlay({
     e.stopPropagation(); // 角ハンドルのドラッグが本体の移動を兼ねないように
     setMenu(null);
     setEditingId(null); // ドラッグ開始でインライン編集を抜ける
+    lastTapRef.current = null; // ドラッグ等の別操作を挟んだら二度押し履歴を無効化（#525-4 レビュー）
     // Shift+クリック（移動操作）＝選択トグル。ドラッグは始めない（複数選択を作る/外すための操作）。
     if (mode === "move" && e.shiftKey) { onSelect(el.id, true); return; }
     // ロック中は選択だけ行い、移動/拡縮はしない（レイヤー一覧で解除できる・#210）。
@@ -242,6 +243,7 @@ export function FreeLayoutOverlay({
     e.stopPropagation(); // ルートのマーキー開始を兼ねない
     setMenu(null);
     setEditingId(null);
+    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     onInteractionStart?.(); // 連続リサイズを Undo の1ステップに合成（#211）
@@ -261,6 +263,7 @@ export function FreeLayoutOverlay({
     e.stopPropagation(); // ルートのマーキー開始を兼ねない
     setMenu(null);
     setEditingId(null);
+    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     onInteractionStart?.(); // 連続回転を Undo の1ステップに合成（#211）
     setDrag({
@@ -278,6 +281,7 @@ export function FreeLayoutOverlay({
     e.stopPropagation();
     setMenu(null);
     setEditingId(null);
+    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     onSelectGroup?.(group.id); // メンバー個別ではなくグループ単位で選択
     if (group.locked) return; // ロック中は選択のみ
     const width = ref.current?.clientWidth ?? canvasW;
@@ -300,6 +304,7 @@ export function FreeLayoutOverlay({
     e.stopPropagation();
     setMenu(null);
     setEditingId(null);
+    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     onInteractionStart?.();
     const p = toCanvas(e.clientX, e.clientY);
@@ -319,6 +324,7 @@ export function FreeLayoutOverlay({
     e.stopPropagation();
     setMenu(null);
     setEditingId(null);
+    lastTapRef.current = null; // 別操作の開始＝二度押し履歴を無効化（#525-4 レビュー）
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     onInteractionStart?.();
     setDrag({
@@ -465,6 +471,7 @@ export function FreeLayoutOverlay({
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
         onSelect(null); setEditingId(null); setMenu(null); // 空白クリック＝選択解除（ドラッグせず離せば解除のまま）
+        lastTapRef.current = null; // 空白操作を挟んだら二度押し履歴を切る（#525-4 レビュー）
         if (e.button !== 0) return; // 左ボタンのみマーキー
         // 範囲選択（マーキー）開始：空白ドラッグで矩形を引き交差要素を選択（#274）。
         const p = toCanvas(e.clientX, e.clientY);
@@ -490,11 +497,12 @@ export function FreeLayoutOverlay({
             key={el.id}
             data-free-id={el.id}
             onPointerDown={(e) => {
-              // テキストの二度押しは編集へ（#525-4）。実機ではドラッグ開始時の preventDefault が
-              // 互換 dblclick を潰すので、onDoubleClick に頼らず pointerdown 自体で検出する。
-              if (el.kind === FREE_ELEMENT_KIND.text && e.button === 0) {
+              // テキストの素押し（左ボタン・Shift 無し）だけが二度押し候補。実機ではドラッグ開始時の preventDefault が
+              // 互換 dblclick を潰すので、onDoubleClick に頼らず pointerdown 自体で二度押しを検出する（#525-4）。
+              const isPlainTextPress = el.kind === FREE_ELEMENT_KIND.text && e.button === 0 && !e.shiftKey;
+              if (isPlainTextPress) {
                 const prev = lastTapRef.current;
-                const near = prev && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_DIST;
+                const near = prev != null && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_DIST;
                 if (prev && prev.id === el.id && e.timeStamp - prev.t < DOUBLE_TAP_MS && near) {
                   e.preventDefault();
                   e.stopPropagation();
@@ -504,9 +512,11 @@ export function FreeLayoutOverlay({
                   setEditingId(el.id);
                   return;
                 }
-                lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
               }
-              return elGroup ? beginGroupDrag(e, elGroup) : beginDrag(e, el, "move");
+              // 通常のドラッグ/選択開始。begin* が二度押し履歴を解除するので、素押しの記録はこの後に行う
+              // （＝間に別操作を挟んだら履歴が残らない・#525-4 レビュー）。
+              if (elGroup) beginGroupDrag(e, elGroup); else beginDrag(e, el, "move");
+              if (isPlainTextPress) lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
             }}
             onContextMenu={(e) => openMenu(e, el)}
             onDoubleClick={(e) => {
