@@ -463,6 +463,36 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
     fireEvent.doubleClick(boxes[1]); // free_002（shape）
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
+
+  // #525-4：実機ではドラッグ開始の preventDefault が互換 dblclick を潰すため、pointerdown の二度押しでも
+  // 編集へ入れることを、素のポインタ列（fireEvent.doubleClick ではない）で検証する。旧実装ではここが無反応だった。
+  it("テキストの二度押し（pointerdown×2）で編集に入る＝実機の互換 dblclick 欠落に耐える（#525-4）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument(); // 1度目は編集に入らない（ドラッグ扱い）
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea).toBeInTheDocument(); // 2度目＝ダブルタップで編集へ
+    expect(textarea).toHaveValue("見出し");
+  });
+
+  it("図形の二度押しでは編集に入らない（テキストのみ対象）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 }); // free_002（shape）
+    fireEvent.pointerUp(boxes[1], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("離れた二度押し（間にドラッグ想定）は編集に入らない＝距離ガード（#525-4）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    // 2度目が離れている（≒ドラッグ後のタップ）＝ダブルタップと見なさない。
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
 });
 
 describe("FreeLayoutOverlay: 回転（#208）", () => {
