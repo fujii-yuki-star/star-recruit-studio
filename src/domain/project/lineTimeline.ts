@@ -30,32 +30,68 @@ export interface LineSegment {
 }
 
 /**
- * 行のタイムライン（追加A）。各行の開始秒は明示 startSec、無ければ直前までの音声長の積み上げ（自動逐次）。
- * 各行は次の行の開始まで表示（行間の「間」は直前フレームを保持）、最終行は場面末まで。すべて [0, durationSec] にクランプ。
+ * 掛け合いの「同時開始グループ」を index で束ねる（ADR-0031）。各行は「アンカー（先頭 or `startWithPrevious` でない）」で
+ * 新しいグループを始め、続く `startWithPrevious` の行は同じグループへ join＝同時開始（並行）。`true` の連続で N 人同時。
+ * フラグ無し（従来の逐次）は各行が単独グループ＝後方互換。純粋関数。
+ */
+function groupIndices(lines: NarrationLine[]): number[][] {
+  const groups: number[][] = [];
+  lines.forEach((line, i) => {
+    if (i > 0 && line.startWithPrevious === true) groups[groups.length - 1].push(i);
+    else groups.push([i]);
+  });
+  return groups;
+}
+
+/**
+ * 行のタイムライン（追加A・同時開始＝ADR-0031）。各グループ（同時開始の束）の開始秒は明示 startSec、無ければ直前
+ * グループまでの音声長の積み上げ（自動逐次）。グループ長＝メンバー音声長の最大。**同時グループのメンバーは同じ窓
+ * [グループ開始, 次グループ開始) を共有**（並行して重ねて流す）。各グループは次グループの開始まで表示（行間の「間」は
+ * 直前フレームを保持）、最終グループは場面末まで。すべて [0, durationSec] にクランプ。単独行（フラグ無し）は従来と同値。
  * lineDurations＝行ごとの音声長（秒・lineId→秒）。未測定の行は 0（startSec 明示なら不要）。
  */
 export function lineSegments(scene: Scene, lineDurations: Record<string, number> = {}): LineSegment[] {
   const lines = sceneLines(scene);
   const dur = scene.durationSec;
   const clamp = (v: number): number => Math.min(Math.max(0, v), dur);
-  const starts: number[] = [];
+  const groups = groupIndices(lines);
+  // 各グループの開始秒（アンカーの明示 startSec、無ければ直前グループ末＝自動逐次）。グループ長＝メンバー音声長の最大。
+  const groupStart: number[] = [];
   let cursor = 0;
-  for (const line of lines) {
-    const start = line.startSec ?? cursor;
-    starts.push(start);
-    cursor = start + (lineDurations[line.lineId] ?? 0);
+  for (const g of groups) {
+    const anchor = lines[g[0]];
+    const s = anchor.startSec ?? cursor;
+    groupStart.push(s);
+    const groupDur = g.reduce((m, idx) => Math.max(m, lineDurations[lines[idx].lineId] ?? 0), 0);
+    cursor = s + groupDur;
   }
+  // 行ごとの窓＝所属グループの [開始, 次グループ開始)（最終グループは場面末）。同時グループのメンバーは同一窓を共有。
+  const startOf: number[] = new Array<number>(lines.length).fill(0);
+  const endOf: number[] = new Array<number>(lines.length).fill(dur);
+  groups.forEach((g, gi) => {
+    const s = groupStart[gi];
+    const displayEnd = gi + 1 < groups.length ? groupStart[gi + 1] : dur;
+    for (const idx of g) {
+      startOf[idx] = s;
+      endOf[idx] = displayEnd;
+    }
+  });
   return lines.map((line, i) => {
-    const startSec = clamp(starts[i]);
-    const rawEnd = i + 1 < lines.length ? starts[i + 1] : dur;
-    const endSec = Math.max(startSec, clamp(rawEnd));
+    const startSec = clamp(startOf[i]);
+    const endSec = Math.max(startSec, clamp(endOf[i]));
     return { lineId: line.lineId, startSec, endSec, subtitle: resolveLineSubtitle(line, scene) };
   });
 }
 
 export interface SceneSegmentSpec {
-  /** 掛け合いのとき行 id（音声参照に使う）。単一 narration・頭空白（間）では undefined。 */
+  /** 掛け合いのとき行 id（音声参照に使う）。単一 narration・頭空白（間）では undefined。同時グループでは primary（アンカー）。 */
   lineId?: string;
+  /**
+   * この区間で `lineId` と**同時に**流す他の行 id（ADR-0031・同時開始グループの2人目以降）。
+   * 音声は `[lineId, ...parallelLineIds]` を並行ミックス（amix）・字幕は各行を重ならないよう段積み（stage 3）。
+   * 未指定＝同時行なし（従来＝逐次）。取得は `segmentLineIds(spec)`。
+   */
+  parallelLineIds?: string[];
   /** subtitle レイヤーの上書き文言（追加A/B）。string＝表示／null＝非表示／undefined＝従来（scene.texts）。 */
   subtitleText?: string | null;
   /** 場面内の開始秒。アニメ場面のフレーム描画で layoutScene(t) の t 起点に使う（③・掛け合い×アニメ）。 */
@@ -81,25 +117,38 @@ export function sceneSegmentSpecs(scene: Scene, lineDurations: Record<string, nu
   if (!scene.lines || scene.lines.length === 0) {
     return [{ startSec: 0, durationSec: scene.durationSec, isFirst: true }];
   }
-  // 0秒（開始がクランプ/音声未測定で endSec===startSec）のセグメントは出さない（書き出し/再生の不正を防ぐ）。
-  const nonEmpty = lineSegments(scene, lineDurations)
-    .filter((s) => s.endSec > s.startSec)
-    .map((s) => ({
-      lineId: s.lineId,
-      subtitleText: s.subtitle.enabled ? s.subtitle.text : null,
-      startSec: s.startSec,
-      durationSec: s.endSec - s.startSec,
+  const groups = groupIndices(sceneLines(scene));
+  const segs = lineSegments(scene, lineDurations);
+  // 1グループ＝1セグメント（primary＝アンカー＝先頭メンバー・parallelLineIds＝同時の残り・ADR-0031）。窓は primary の
+  // [start, end]（同時メンバーは同一窓を共有）。0秒（開始クランプ/音声未測定で endSec===startSec）のグループは出さない。
+  const nonEmpty = groups
+    .map((g) => ({ primary: segs[g[0]], parallel: g.slice(1).map((idx) => segs[idx]) }))
+    .filter(({ primary }) => primary.endSec > primary.startSec)
+    .map(({ primary, parallel }) => ({
+      lineId: primary.lineId,
+      parallelLineIds: parallel.length > 0 ? parallel.map((s) => s.lineId) : undefined,
+      subtitleText: primary.subtitle.enabled ? primary.subtitle.text : null,
+      startSec: primary.startSec,
+      durationSec: primary.endSec - primary.startSec,
     }));
   // すべて0秒（degenerate）なら場面全体を1セグメントに（場面が書き出しから消えないように）。
   if (nonEmpty.length === 0) return [{ startSec: 0, durationSec: scene.durationSec, isFirst: true }];
-  // 先頭行の開始が 0 より後なら「間（頭空白）」区間 [0, 先頭start) を先頭に足す（#386・A案）。
+  // 先頭グループの開始が 0 より後なら「間（頭空白）」区間 [0, 先頭start) を先頭に足す（#386・A案）。
   // 間は字幕なし・音声なし。これで区間尺の合計＝場面尺（＝正準/動画経路）になり、静止画/プレビューが場面を短縮しない。
   const headGap = nonEmpty[0].startSec;
-  const segs: Array<Omit<SceneSegmentSpec, "isFirst">> =
+  const segs2: Array<Omit<SceneSegmentSpec, "isFirst">> =
     headGap > 0
       ? [{ subtitleText: null, startSec: 0, durationSec: headGap, isGap: true }, ...nonEmpty]
       : nonEmpty;
-  return segs.map((s, i) => ({ ...s, isFirst: i === 0 }));
+  return segs2.map((s, i) => ({ ...s, isFirst: i === 0 }));
+}
+
+/**
+ * セグメントで実際に流す行 id の一覧＝ [lineId, ...parallelLineIds]（ADR-0031）。primary＋同時行。
+ * 音声ミックス（stage 2）・字幕段積み（stage 3）が「この区間の全話者」を得る共通入口。間/単一 narration では空。
+ */
+export function segmentLineIds(spec: SceneSegmentSpec): string[] {
+  return spec.lineId ? [spec.lineId, ...(spec.parallelLineIds ?? [])] : [];
 }
 
 /**
