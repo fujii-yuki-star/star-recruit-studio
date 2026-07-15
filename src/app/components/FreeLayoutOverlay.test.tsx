@@ -463,6 +463,78 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
     fireEvent.doubleClick(boxes[1]); // free_002（shape）
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
+
+  // #525-4：実機ではドラッグ開始の preventDefault が互換 dblclick を潰すため、pointerdown の二度押しでも
+  // 編集へ入れることを、素のポインタ列（fireEvent.doubleClick ではない）で検証する。旧実装ではここが無反応だった。
+  it("テキストの二度押し（pointerdown×2）で編集に入る＝実機の互換 dblclick 欠落に耐える（#525-4）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument(); // 1度目は編集に入らない（ドラッグ扱い）
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea).toBeInTheDocument(); // 2度目＝ダブルタップで編集へ
+    expect(textarea).toHaveValue("見出し");
+  });
+
+  it("図形の二度押しでは編集に入らない（テキストのみ対象）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 }); // free_002（shape）
+    fireEvent.pointerUp(boxes[1], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("離れた二度押し（間にドラッグ想定）は編集に入らない＝距離ガード（#525-4）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    // 2度目が離れている（≒ドラッグ後のタップ）＝ダブルタップと見なさない。
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  // #525-4 レビュー（P2）：対象テキスト以外の操作を挟んだら二度押し履歴を切る。近接・時間内でも編集に入らない。
+  it("空白クリックを挟んだ二度押しは編集に入らない＝別操作で履歴が切れる（#525-4 レビュー）", () => {
+    const { root, boxes } = renderOverlay({ selectedIds: ["free_001"] });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(root, { button: 0, clientX: 800, clientY: 600, pointerId: 1 }); // 空白＝選択解除
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A 再押下
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("別要素（図形）を挟んだ二度押しは編集に入らない（#525-4 レビュー）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[1], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 図形B
+    fireEvent.pointerUp(boxes[1], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("ハンドル操作（回転）を挟んだ二度押しは編集に入らない（#525-4 レビュー）", () => {
+    const { boxes } = renderOverlay({ selectedIds: ["free_001"] }); // 選択中＝ハンドルが出る
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(screen.getByTestId("rotate-handle"), { button: 0, clientX: 130, clientY: 90, pointerId: 1 }); // 回転開始
+    fireEvent.pointerUp(screen.getByTestId("rotate-handle"), { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  // 非左ボタン（中クリック）は begin* のボタン判定で早期 return するが、判定より前に履歴を切るので候補は解除される。
+  it("中クリック（非左ボタン）を挟んだ二度押しは編集に入らない＝非左押下でも履歴を切る（#525-4 レビュー）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 左クリック（記録）
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 1, clientX: 120, clientY: 120, pointerId: 1 }); // 中クリック（別操作）
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 左クリック
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
 });
 
 describe("FreeLayoutOverlay: 回転（#208）", () => {

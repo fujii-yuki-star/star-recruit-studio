@@ -86,6 +86,12 @@ const SNAP_GUIDE_COLOR = "#ff3d8b";
 const MENU_W = 160;
 const MENU_H = 220;
 
+// ダブルタップ（テキスト編集へ入る）と見なす2回の pointerdown の間隔（ms）と近接（画面px）。実機ではドラッグ開始の
+// preventDefault が互換 dblclick を潰すため、pointerdown 自体で二度押しを検出する（#525-4）。距離も見るのは
+// ブラウザの dblclick 判定と同様＝間にドラッグを挟んだ離れた二度押しを編集と誤認しないため。
+const DOUBLE_TAP_MS = 350;
+const DOUBLE_TAP_DIST = 12;
+
 interface OverlayProps {
   freeLayout: FreeElement[];
   canvasW: number;
@@ -140,6 +146,10 @@ export function FreeLayoutOverlay({
   // ref 更新は effect 内（render 中の ref 書き込みは禁止）。閉じる effect は unmount 時のみ＝通常の endDrag と二重に閉じない。
   const dragRef = useRef<DragState | null>(null);
   useEffect(() => { dragRef.current = drag; }, [drag]);
+  // 直前に押したテキスト要素・時刻・画面座標（ダブルタップ検出用・#525-4）。実機は pointerdown の preventDefault で
+  // 互換 dblclick が来ないため、同一テキストを DOUBLE_TAP_MS 内かつ近接（DOUBLE_TAP_DIST 内）で二度押ししたら
+  // 編集へ入る。座標も見るのはブラウザの dblclick 同様（間にドラッグを挟んだ二度押しを編集と誤認しない）。
+  const lastTapRef = useRef<{ id: string; t: number; x: number; y: number } | null>(null);
   useEffect(() => () => { if (dragRef.current) onInteractionEnd?.(); }, [onInteractionEnd]);
   // 主＝最後に選択した要素（リサイズハンドルはこれだけに出す。複数同時リサイズは曖昧なので非対応）。
   const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
@@ -185,6 +195,7 @@ export function FreeLayoutOverlay({
   const beginDrag = (
     e: ReactPointerEvent, el: FreeElement, mode: "move" | "resize", corner?: ResizeCorner,
   ) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前に実行（#525-4 レビュー）
     if (e.button !== 0) return; // 左ボタンのみドラッグ（右クリックはメニュー・中クリックは無視）
     e.preventDefault();
     e.stopPropagation(); // 角ハンドルのドラッグが本体の移動を兼ねないように
@@ -227,6 +238,7 @@ export function FreeLayoutOverlay({
 
   // 複数同時リサイズ（#274）のグループ角ハンドル押下：bbox を基準に選択要素をまとめてスケールする。
   const beginGroupResize = (e: ReactPointerEvent, corner: ResizeCorner) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0 || !groupBox) return;
     e.preventDefault();
     e.stopPropagation(); // ルートのマーキー開始を兼ねない
@@ -246,6 +258,7 @@ export function FreeLayoutOverlay({
 
   // 回転ハンドル押下（#279）：要素中心からポインタへの角度で rotation を更新する。
   const beginRotate = (e: ReactPointerEvent, el: FreeElement) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation(); // ルートのマーキー開始を兼ねない
@@ -263,6 +276,7 @@ export function FreeLayoutOverlay({
 
   // グループのメンバー押下（ADR-0022・#305-1）：グループを選択し、グループ移動（transform.x/y）を開始する。
   const beginGroupDrag = (e: ReactPointerEvent, group: Group) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -285,6 +299,7 @@ export function FreeLayoutOverlay({
   // グループ枠の角ハンドル押下（ADR-0022・#305-2）：中心からの距離比で transform.scale を更新（中心固定の一様拡縮）。
   // ※ 名前は既存 #274 の一時グループリサイズ（beginGroupResize）と区別するため beginGroupScale。
   const beginGroupScale = (e: ReactPointerEvent, group: Group, frame: { cx: number; cy: number }) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0 || group.locked) return;
     e.preventDefault();
     e.stopPropagation();
@@ -304,6 +319,7 @@ export function FreeLayoutOverlay({
 
   // グループ枠の回転ハンドル押下（ADR-0022・#305-2）：中心→ポインタ角で transform.rotation を更新（Shift で15°）。
   const beginGroupRotate = (e: ReactPointerEvent, group: Group, frame: { cx: number; cy: number }) => {
+    lastTapRef.current = null; // 別操作の押下（非左ボタン含む）で二度押し履歴を無効化＝ボタン判定より前（#525-4 レビュー）
     if (e.button !== 0 || group.locked) return;
     e.preventDefault();
     e.stopPropagation();
@@ -455,6 +471,7 @@ export function FreeLayoutOverlay({
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
         onSelect(null); setEditingId(null); setMenu(null); // 空白クリック＝選択解除（ドラッグせず離せば解除のまま）
+        lastTapRef.current = null; // 空白操作を挟んだら二度押し履歴を切る（#525-4 レビュー）
         if (e.button !== 0) return; // 左ボタンのみマーキー
         // 範囲選択（マーキー）開始：空白ドラッグで矩形を引き交差要素を選択（#274）。
         const p = toCanvas(e.clientX, e.clientY);
@@ -479,9 +496,31 @@ export function FreeLayoutOverlay({
           <div
             key={el.id}
             data-free-id={el.id}
-            onPointerDown={(e) => (elGroup ? beginGroupDrag(e, elGroup) : beginDrag(e, el, "move"))}
+            onPointerDown={(e) => {
+              // テキストの素押し（左ボタン・Shift 無し）だけが二度押し候補。実機ではドラッグ開始時の preventDefault が
+              // 互換 dblclick を潰すので、onDoubleClick に頼らず pointerdown 自体で二度押しを検出する（#525-4）。
+              const isPlainTextPress = el.kind === FREE_ELEMENT_KIND.text && e.button === 0 && !e.shiftKey;
+              if (isPlainTextPress) {
+                const prev = lastTapRef.current;
+                const near = prev != null && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_DIST;
+                if (prev && prev.id === el.id && e.timeStamp - prev.t < DOUBLE_TAP_MS && near) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  lastTapRef.current = null;
+                  setMenu(null);
+                  onSelect(el.id);
+                  setEditingId(el.id);
+                  return;
+                }
+              }
+              // 通常のドラッグ/選択開始。begin* が二度押し履歴を解除するので、素押しの記録はこの後に行う
+              // （＝間に別操作を挟んだら履歴が残らない・#525-4 レビュー）。
+              if (elGroup) beginGroupDrag(e, elGroup); else beginDrag(e, el, "move");
+              if (isPlainTextPress) lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
+            }}
             onContextMenu={(e) => openMenu(e, el)}
             onDoubleClick={(e) => {
+              // jsdom / 互換 dblclick が来る環境用のフォールバック（実機は上の pointerdown 検出が主経路）。
               if (el.kind !== FREE_ELEMENT_KIND.text) return;
               e.preventDefault();
               e.stopPropagation();
