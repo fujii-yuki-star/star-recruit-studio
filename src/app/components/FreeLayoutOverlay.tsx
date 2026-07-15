@@ -148,7 +148,7 @@ export function FreeLayoutOverlay({
   if (groups.length > 0) for (const el of freeLayout) { const tg = topGroupOfMember(groups, el.id); if (tg) topGroupByEl.set(el.id, tg); }
   // 選択中グループ＝編集対象。枠はメンバー合成位置の外接矩形（#305-1 は移動のみ）。
   const activeGroup = activeGroupId ? groups.find((g) => g.id === activeGroupId) ?? null : null;
-  const activeGroupFrame = activeGroup ? orientedGroupFrame(activeGroup, freeLayout) : null;
+  const activeGroupFrame = activeGroup ? orientedGroupFrame(activeGroup, freeLayout, groups) : null;
   // 右クリックメニュー（対象 id とビューポート座標）。
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。

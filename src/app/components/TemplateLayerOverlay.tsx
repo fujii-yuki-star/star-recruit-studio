@@ -93,7 +93,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
   const topGroupByEl = new Map<string, Group>();
   if (groups.length > 0) for (const l of layers) { const tg = topGroupOfMember(groups, l.id); if (tg) topGroupByEl.set(l.id, tg); }
   const activeGroup = activeGroupId ? groups.find((g) => g.id === activeGroupId) ?? null : null;
-  const activeGroupFrame = activeGroup ? orientedGroupFrame(activeGroup, layers) : null;
+  const activeGroupFrame = activeGroup ? orientedGroupFrame(activeGroup, layers, groups) : null;
 
   // ポインタの画面座標→canvas 座標（オーバーレイは fit 箱内＝実寸一致）。描画前(0幅)は原点に潰す。
   const toCanvas = (clientX: number, clientY: number): { x: number; y: number } => {

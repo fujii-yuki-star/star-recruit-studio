@@ -134,6 +134,12 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     expect(screen.getByTestId("group-frame")).toBeInTheDocument();
   });
 
+  it("ネストした外側グループ（メンバーが子グループ id だけ）でも操作枠が出る（#525-10 レビュー）", () => {
+    const outer = { id: "group_002", members: ["group_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+    renderOverlay({ groups: [grp, outer], activeGroupId: "group_002" });
+    expect(screen.getByTestId("group-frame")).toBeInTheDocument(); // 旧実装は枠が消えていた
+  });
+
   it("非表示グループを選択中でも操作枠（group-frame）は出さない＝描画されないものを操作可能にしない（#525-9 レビュー）", () => {
     renderOverlay({ groups: [{ ...grp, hidden: true }], activeGroupId: "group_001" });
     expect(screen.queryByTestId("group-frame")).toBeNull();
