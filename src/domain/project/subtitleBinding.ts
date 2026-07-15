@@ -4,6 +4,7 @@
 // - 話者絞り込みは音声生成（resolveLineVoice）と同じ実効話者（effectiveSpeakerKey）で比較する（P1-2）。
 import { FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
 import { characterForSpeaker } from '../voice/voiceCatalog';
+import { resolveLineSubtitle, segmentLineIds } from './lineTimeline';
 import type { SceneSegmentSpec } from './lineTimeline';
 import { sceneLines } from './narrationLines';
 import type { FreeElement, NarrationLine, Scene, SpeakerKey, SubtitleSource } from './types';
@@ -57,12 +58,20 @@ export function resolveSubtitleForElement(el: FreeElement, scene: Scene, moment:
   const seg = moment.segment;
   const text = seg.subtitleText ?? null;
   if (text == null || text.length === 0) return null;
+  // allLines＝セグメントの字幕（同時グループは全員分を改行で結合済み＝2行表示・ADR-0031）。
   if (source.kind === SUBTITLE_SOURCE_KIND.allLines) return text;
-  // speaker：セグメント行の実効話者が対象と一致するときのみ表示。
-  if (seg.lineId == null) return null;
-  const line = sceneLines(scene).find((l) => l.lineId === seg.lineId);
-  if (line == null) return null;
-  return speakerKeyEquals(effectiveSpeakerKey(line), source.speaker) ? text : null;
+  // speaker：セグメントの全行（primary＋同時行＝ADR-0031）から対象話者に一致する行を探し、その行**自身**の字幕を出す。
+  // seg.subtitleText は同時グループでは全員分の結合ゆえ使わない（話者ボックスは自分の行だけ＝二重描画にしない・P2）。
+  const lines = sceneLines(scene);
+  for (const id of segmentLineIds(seg)) {
+    const line = lines.find((l) => l.lineId === id);
+    if (line == null) continue;
+    if (speakerKeyEquals(effectiveSpeakerKey(line), source.speaker)) {
+      const sub = resolveLineSubtitle(line, scene);
+      return sub.enabled && sub.text.length > 0 ? sub.text : null;
+    }
+  }
+  return null;
 }
 
 /** SpeakerKey を選択 value 用の安定文字列にする（UI select・重複排除キー）。 */

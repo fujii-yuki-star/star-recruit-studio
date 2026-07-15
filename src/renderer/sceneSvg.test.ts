@@ -120,6 +120,21 @@ describe('wrapText（折返し・あふれ判定・§7）', () => {
   it('maxWidth < fontSize はガードしてそのまま返す', () => {
     expect(wrapText('あいうえお', 10, 40, 3)).toEqual(['あいうえお']);
   });
+  it('明示改行（\\n）はハード改行（同時字幕の2行表示・ADR-0031）', () => {
+    // 幅は十分＝各段落は折れない。\n でちょうど2行。
+    expect(wrapText('あ\nい', 1000, 40, 3)).toEqual(['あ', 'い']);
+  });
+  it('各段落を幅で折ったうえで \\n も尊重（段落内折返し×ハード改行）', () => {
+    // 1段落目は幅で2行に折れ、2段落目が3行目。maxLines=3 に収まる。
+    const lines = wrapText(`${'あ'.repeat(15)}\nX`, 400, 40, 3);
+    expect(lines.length).toBe(3);
+    expect(lines[lines.length - 1]).toBe('X'); // 最終行は2段落目
+  });
+  it('\\n を含み maxLines を超えると末尾を … で切る（3人目以降が溢れたら省略）', () => {
+    const lines = wrapText('あ\nい\nう', 1000, 40, 2); // 3段落を2行上限
+    expect(lines).toHaveLength(2);
+    expect(lines[1].endsWith('…')).toBe(true);
+  });
 });
 
 describe('layoutToSvg：responsive オプション（A3-2・向きプレビュー）', () => {
