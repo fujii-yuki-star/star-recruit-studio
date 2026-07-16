@@ -165,15 +165,30 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     expect(onSelect).toHaveBeenLastCalledWith("free_001"); // そのメンバーだけ選択（グループ解除は selectFree が担う）
   });
 
-  it("ドリルインした未変形グループメンバーは個別ハンドルを出す＝直接編集できる（#525-5）", () => {
-    const { boxes } = renderOverlay({ groups: [grp], selectedIds: ["free_001"] }); // 個別選択＝ドリルイン
-    expect(boxes[0].children.length).toBeGreaterThan(0); // リサイズ＋回転ハンドルが出る（未変形なので base==合成で正しい）
+  it("ドリルインした純並進グループメンバーは個別ハンドルを出す＝直接編集できる（合成が並進差のみ・#525-5）", () => {
+    const transGrp = { ...grp, transform: { x: 50, y: 0, rotation: 0, scale: 1 } }; // 移動済みでも純並進
+    const { boxes } = renderOverlay({ groups: [transGrp], selectedIds: ["free_001"] }); // 個別選択＝ドリルイン
+    expect(boxes[0].children.length).toBeGreaterThan(0); // 合成後が base と w/h/rotation 一致＝delta 1:1 で正しい
   });
 
-  it("変形グループのメンバーは個別選択しても canvas ハンドルを出さない＝ずれ防止（#525-5）", () => {
+  it("拡縮グループのメンバーは個別選択しても canvas ハンドルを出さない＝ずれ防止（#525-5）", () => {
     const scaledGrp = { ...grp, transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
     const { boxes } = renderOverlay({ groups: [scaledGrp], selectedIds: ["free_001"] });
-    expect(boxes[0].children).toHaveLength(0); // 変形グループ＝base≠合成なので直接編集は無効（選択のみ＝詳細パネルで編集）
+    expect(boxes[0].children).toHaveLength(0); // 合成後 w≠base なので直接編集は無効（選択のみ＝詳細パネルで編集）
+  });
+
+  it("回転グループのメンバーも個別選択で canvas ハンドルを出さない（#525-5）", () => {
+    const rotGrp = { ...grp, transform: { x: 0, y: 0, rotation: 90, scale: 1 } };
+    const { boxes } = renderOverlay({ groups: [rotGrp], selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // 合成後 rotation≠base
+  });
+
+  it("ネスト：素の外グループ×変形した内グループでも、メンバーに個別ハンドルを出さない（最外だけ見ないで合成後で判定・#525-5 レビュー P2）", () => {
+    // free_001 → 内グループ group_001(scale2) → 外グループ group_002(identity)。最外は素だが合成後は拡縮を含む。
+    const inner = { id: "group_001", members: ["free_001"], transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const outer = { id: "group_002", members: ["group_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+    const { boxes } = renderOverlay({ groups: [inner, outer], selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // 旧実装は最外(素)を見てハンドルを出す誤り→合成後で判定して抑止
   });
 
   it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform）", () => {

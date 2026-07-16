@@ -49,5 +49,7 @@ describe("SceneEditScreen グループメンバーのドリルイン選択（#52
     fireEvent.pointerUp(member, { pointerId: 1 });
     fireEvent.pointerDown(member, { button: 0, clientX: 150, clientY: 150, pointerId: 1 });
     expect(screen.queryByText(/グループを選択中/)).toBeNull(); // まとまり選択から個別選択へ移った
+    // ドリルインしたメンバーの詳細編集には「グループ内の値」注記が出る（数値が絶対座標に見える誤解を避ける・#525-5 レビュー）。
+    expect(screen.getAllByText(/グループ内の要素です/).length).toBeGreaterThan(0);
   });
 });

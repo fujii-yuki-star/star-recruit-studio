@@ -468,11 +468,13 @@ export function FreeLayoutOverlay({
         const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation }; // グループ合成後の位置
         const elGroup = topGroupByEl.get(el.id) ?? null; // 所属グループ（最上位）／未所属は null
         // ドリルイン（#525-5）：グループのメンバーをダブルクリックすると、そのメンバーだけを個別選択して直接編集できる。
-        // グループが未変形（拡縮/回転なし）なら合成後＝素の座標なので canvas 上の移動/拡縮も正しい（base==composed）。
-        // 変形済みグループはずれるため canvas 直接編集は無効（選択＋詳細パネルでの編集に留める）。マーキーはメンバーを選ばない。
+        // canvas 直接編集（個別ドラッグ/ハンドル）が正しいのは、合成後（cg）が base（el）と**並進差のみ**のとき＝純並進で
+        // 個別 delta が画面上 1:1 に効く（∂composed/∂base=1）。w/h/rotation が変わる＝チェーンのどこか（ネスト内側含む）に
+        // 拡縮/回転がある場合はずれるので canvas 直接編集は無効（選択＋詳細パネルで編集）。**最外だけでなく合成後を直接見る**
+        // ことでネスト深さに依らず厳密に正しい（#525-5 レビュー P2）。マーキーはメンバーを選ばない。
         const drilledIn = elGroup != null && selectedIds.includes(el.id); // このメンバーを個別選択中
-        const groupPlain = elGroup != null && elGroup.transform.scale === 1 && (elGroup.transform.rotation ?? 0) === 0;
-        const drilledEditable = drilledIn && groupPlain; // canvas 上で直接編集可能なドリルインメンバー
+        const groupPlain = elGroup != null && cg.w === el.w && cg.h === el.h && (cg.rotation ?? 0) === (el.rotation ?? 0);
+        const drilledEditable = drilledIn && groupPlain; // canvas 上で直接編集可能なドリルインメンバー（純並進グループ）
         const grouped = elGroup != null && !drilledEditable; // 実質グループ扱い（ドリルイン編集中は非グループとして扱う）
         const inActiveGroup = elGroup != null && elGroup.id === activeGroupId; // 選択中グループのメンバー
         const selected = inActiveGroup || selectedIds.includes(el.id); // 枠を強調（ドリルインしたメンバーも含む）
