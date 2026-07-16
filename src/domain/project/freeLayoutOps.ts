@@ -105,6 +105,42 @@ export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeEl
 }
 
 /**
+ * 点（canvas 座標）が要素の矩形の中か。**回転を考慮**する＝点を要素中心まわりに -rotation 回して軸平行で判定
+ * （描画は中心軸で回すため・#208 と同じ基準）。rotation 未指定＝0。
+ */
+export function pointInElement(
+  el: { x: number; y: number; w: number; h: number; rotation?: number },
+  point: { x: number; y: number },
+): boolean {
+  const cx = el.x + el.w / 2;
+  const cy = el.y + el.h / 2;
+  const rad = (-(el.rotation ?? 0) * Math.PI) / 180;
+  const dx = point.x - cx;
+  const dy = point.y - cy;
+  const lx = dx * Math.cos(rad) - dy * Math.sin(rad); // 要素ローカル座標へ戻す
+  const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+  return Math.abs(lx) <= el.w / 2 && Math.abs(ly) <= el.h / 2;
+}
+
+/**
+ * 点に当たる**最前面**の要素 id を返す（無ければ null）。`items` は**描画順（奥→手前）**で渡す＝
+ * 最後に当たったものが最前面（layout.ts が zIndex 昇順で描くのと同じ並び。同 zIndex は後勝ち）。
+ *
+ * 用途＝グループ枠が内部クリックを貪欲に食わないようにするヒットテスト（#548/#552）。枠は不透明で
+ * グループの外接矩形**全域**を覆うため、枠の pointerdown で「ポインタの下に実際は何があるか」を
+ * 判定して分岐する（メンバー／グループ外の要素／空白）。呼び出し側で非表示・合成後座標を解決して渡す。
+ */
+// 構造型で受ける＝FreeElement だけでなくテンプレの Layer にも流用（ADR-0017・#306）。
+export function elementAtPoint(
+  items: ReadonlyArray<{ id: string; x: number; y: number; w: number; h: number; rotation?: number }>,
+  point: { x: number; y: number },
+): string | null {
+  let hit: string | null = null;
+  for (const el of items) if (pointInElement(el, point)) hit = el.id; // 後ほど＝手前
+  return hit;
+}
+
+/**
  * 範囲選択（マーキー・#274）：矩形（canvas 座標・2点は順不同）と AABB が交差する要素の id を返す。
  * 非表示・ロック中の要素は対象外＝一括操作に巻き込まない（非表示は触れない・ロックは固定）。
  */
