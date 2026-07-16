@@ -676,6 +676,26 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       return { ...s, slotFits: Object.keys(next).length ? next : undefined };
     });
 
+  // FREE の text/subtitle の背景帯（可読性の下地・#529）。通常字幕層の layer.background と同じ UX（付ける/色/濃さ/角丸）。
+  const renderFreeBandBg = (el: FreeElement) => (
+    <div className="col gap-sm" style={{ marginTop: 4 }}>
+      <div className="toggle-row">
+        <label className="field-label text-sm" style={{ margin: 0 }}>背景帯を付ける</label>
+        <Switch on={el.background?.enabled ?? false} onChange={(on) => patchFreeEl(el.id, { background: { ...el.background, enabled: on } })} label="背景帯を付ける" />
+      </div>
+      {el.background?.enabled && (
+        <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
+            <ColorPicker value={el.background?.color ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" />
+          </div>
+          <NumberField label="濃さ(%)" value={opacityToPercent(el.background?.opacity ?? 0.55)} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, opacity: percentToOpacity(v) } })} />
+          <NumberField label="角丸" value={el.background?.radius ?? 16} min={0} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, radius: v } })} />
+        </div>
+      )}
+    </div>
+  );
+
   // FREE 要素の種別ごとの編集コントロール。右パネルのカードと、右クリック「編集」ポップオーバーで共用（DRY）。
   // 角の丸み（radius）は廃止（#185・図形種類を増やすため不要）。位置/サイズはカードのフッタとドラッグで扱う。
   const renderFreeKindControls = (el: FreeElement) => {
@@ -753,6 +773,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
             </div>
           </div>
+          {renderFreeBandBg(el)}
         </>
       );
     }
@@ -877,6 +898,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
             </div>
           </div>
+          {renderFreeBandBg(el)}
         </>
       );
     }

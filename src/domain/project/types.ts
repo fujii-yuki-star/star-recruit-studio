@@ -6,6 +6,7 @@ import type {
 import type { FontId } from '../font/fontCatalog';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import type { Group } from '../group/types';
+import type { LayerBackground } from '../template/types';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -255,6 +256,9 @@ export interface FreeElement {
   /** 枠線/縁取り（#173・任意）。strokeWidth>0 のとき描画。kind='shape'＝図形の枠線、kind='text'＝文字の縁取り（#209）。 */
   strokeColor?: string;
   strokeWidth?: number;
+  /** kind='text'/'subtitle' の背景帯（可読性の下地・#529）。enabled で描画。通常テンプレ字幕層の layer.background と同型・
+   *  通常→FREE 化で移送（ADR-0030）。未指定/enabled:false＝背景帯なし。 */
+  background?: LayerBackground;
   /** 非表示（レイヤー一覧で隠す・#210）。true のとき描画・操作対象から除外（未指定/false＝表示）。 */
   hidden?: boolean;
   /** ロック（レイヤー一覧で固定・#210）。true のときプレビュー上での移動/拡縮を禁止（未指定/false＝編集可）。 */

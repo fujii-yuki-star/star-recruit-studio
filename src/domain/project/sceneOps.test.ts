@@ -460,6 +460,27 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect((r.freeLayout ?? []).some((e) => e.kind === 'subtitle')).toBe(false);
   });
 
+  it('通常→FREE：字幕/文字の背景帯（layer.background）を FreeElement.background へ移送（#529）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [
+        layer('title', 'text', { textKey: 'title', x: 200, y: 900, w: 1500, h: 120, background: { enabled: true, color: '#112233', opacity: 0.4, radius: 8 } }),
+        layer('subtitle', 'subtitle', { textKey: 'subtitle', x: 100, y: 980, w: 1720, h: 80, background: { enabled: true, color: '#000000', opacity: 0.6 } }),
+      ],
+    };
+    const sc = { ...richScene(), texts: { title: 'タイトル', subtitle: '字幕' } } as Scene;
+    const { elements } = freeLayoutFromPlacedContent(sc, tmpl);
+    const t = elements.find((e) => e.kind === 'text')!;
+    const s = elements.find((e) => e.kind === 'subtitle')!;
+    expect(t.background).toEqual({ enabled: true, color: '#112233', opacity: 0.4, radius: 8 });
+    expect(s.background).toEqual({ enabled: true, color: '#000000', opacity: 0.6 });
+  });
+
+  it('通常→FREE：背景帯なし（layer.background 未指定）は FreeElement.background を付けない（#529）', () => {
+    const t = freeLayoutFromPlacedContent(richScene(), prevTemplate()).elements.find((e) => e.kind === 'text')!;
+    expect(t.background).toBeUndefined(); // prevTemplate の title 層は background 未指定
+  });
+
   it('freeLayoutFromPlacedContent 単体：{elements, slotClips} を返す（slotClips 移送マップ）', () => {
     const sc = { ...richScene(), slotClips: { mainVisual: { speed: 2 } } } as Scene;
     const { elements, slotClips } = freeLayoutFromPlacedContent(sc, prevTemplate());

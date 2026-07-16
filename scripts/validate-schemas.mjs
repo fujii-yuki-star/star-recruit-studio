@@ -97,7 +97,7 @@ ok = ok && sem;
 
 // generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
 const generalBase = {
-  schemaVersion: '1.22', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  schemaVersion: '1.23', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
   videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
@@ -124,6 +124,7 @@ const mustAccept = [
   ['freeLayout: text 体裁 lineHeight/textAlign/縁取り を許容（1.10・#209）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', lineHeight: 1.6, textAlign: 'center', strokeColor: '#000000', strokeWidth: 2 }] })],
   ['freeLayout: hidden/locked を許容（1.11・#210）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 50, hidden: true, locked: true }] })],
   ['freeLayout: 任意の表示名 name を許容（1.22・#525-12）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 50, name: 'ロゴ枠' }] })],
+  ['freeLayout: text/subtitle の背景帯 background を許容（1.23・#529）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 400, h: 80, background: { enabled: true, color: '#000000', opacity: 0.55, radius: 16 } }, { id: 'free_002', kind: 'text', x: 0, y: 0, w: 200, h: 60, text: 'a', background: { enabled: false } }] })],
   ['freeLayout: 字幕要素(subtitle)＋対象なしを許容（1.20・ADR-0029）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 240, y: 900, w: 1440, h: 120 }] })],
   ['freeLayout: 字幕 subtitleSource=読み上げ/全行を許容（1.20）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'narration' } }, { id: 'free_002', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'allLines' } }] })],
   ['freeLayout: 字幕 subtitleSource=話者(catalog/default)を許容（1.20・P1-2）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } } }, { id: 'free_002', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'speaker', speaker: { kind: 'default' } } }] })],
@@ -167,6 +168,8 @@ const mustReject = [
   ['freeLayout: lineHeight 範囲外(5)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', lineHeight: 5 }] })],
   ['freeLayout: hidden 非boolean は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 50, hidden: 'yes' }] })],
   ['freeLayout: name 非文字列は拒否（1.22・#525-12）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 100, h: 50, name: 123 }] })],
+  ['freeLayout: background.opacity 範囲外(1.5)は拒否（1.23・#529）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, opacity: 1.5 } }] })],
+  ['freeLayout: background 未知フィールドは拒否（additionalProperties:false・1.23）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, blur: 2 } }] })],
   ['scene: textFontIds 未知フォントは拒否', withScene({ textFontIds: { title: 'old-font' } })],
   ['freeLayout: text の fontId 未知は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', fontId: 'old-font' }] })],
   ['freeLayout: subtitleSource 未知 kind は拒否（1.20・ADR-0029）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'lines' } }] })],

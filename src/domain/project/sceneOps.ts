@@ -91,7 +91,7 @@ export function switchSceneTemplate(
  * - 立ち絵層（character）の `scene.character.poseAssetId` → slot 要素（画像）。`scene.character` は休眠保持（往復で戻る・#524 P1）。
  * - 文字層（text）のテキスト（`texts`）→ text 要素。
  * - 字幕層（subtitle）→ subtitle 要素（`subtitleSource`＝単独 narration／掛け合い allLines・ADR-0029）。字幕が出る場面のみ（#524 P1）。
- * 装飾レイヤー（shape/背景色）は対象外＝意匠。字幕の背景帯（`layer.background`）は FreeElement に無く引き継がない（既知の軽微差）。
+ * 装飾レイヤー（shape/背景色）は対象外＝意匠。字幕/文字の背景帯（`layer.background`）は FreeElement.background へ移送する（#529）。
  * 戻り値の `slotClips` は「新 FREE 要素 id → クリップ調整」（呼び出し側 `switchSceneTemplate` が既存 `slotClips` へマージ）。
  */
 export function freeLayoutFromPlacedContent(
@@ -147,6 +147,7 @@ export function freeLayoutFromPlacedContent(
         fontId: scene.textFontIds?.[layer.textKey],
         ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
         ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+        ...(layer.background != null ? { background: layer.background } : {}), // 背景帯（可読性の下地）も移送（#529）
       });
     } else if (layer.type === 'subtitle') {
       if (!showsSubtitle) continue; // 字幕が出ない場面は空の字幕要素を作らない
@@ -162,6 +163,7 @@ export function freeLayoutFromPlacedContent(
         fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
         ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
         ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+        ...(layer.background != null ? { background: layer.background } : {}), // 字幕の背景帯（可読性の下地）を移送（#529）
       });
     }
   }
