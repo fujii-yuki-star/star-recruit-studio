@@ -467,10 +467,16 @@ export function FreeLayoutOverlay({
         if (el.hidden || isHiddenByGroup(el.id, groups)) return null; // 非表示（要素 or 所属グループ）は箱を出さない＝描画（layout.ts）と一致・操作枠だけ残さない（#525-9a）
         const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation }; // グループ合成後の位置
         const elGroup = topGroupByEl.get(el.id) ?? null; // 所属グループ（最上位）／未所属は null
-        const grouped = elGroup != null;
-        const inActiveGroup = grouped && elGroup.id === activeGroupId; // 選択中グループのメンバー
-        const selected = inActiveGroup || (!grouped && selectedIds.includes(el.id)); // 枠を強調
-        const isPrimary = el.id === primaryId; // 主＝リサイズハンドルを出す対象（グループ未所属のみ）
+        // ドリルイン（#525-5）：グループのメンバーをダブルクリックすると、そのメンバーだけを個別選択して直接編集できる。
+        // グループが未変形（拡縮/回転なし）なら合成後＝素の座標なので canvas 上の移動/拡縮も正しい（base==composed）。
+        // 変形済みグループはずれるため canvas 直接編集は無効（選択＋詳細パネルでの編集に留める）。マーキーはメンバーを選ばない。
+        const drilledIn = elGroup != null && selectedIds.includes(el.id); // このメンバーを個別選択中
+        const groupPlain = elGroup != null && elGroup.transform.scale === 1 && (elGroup.transform.rotation ?? 0) === 0;
+        const drilledEditable = drilledIn && groupPlain; // canvas 上で直接編集可能なドリルインメンバー
+        const grouped = elGroup != null && !drilledEditable; // 実質グループ扱い（ドリルイン編集中は非グループとして扱う）
+        const inActiveGroup = elGroup != null && elGroup.id === activeGroupId; // 選択中グループのメンバー
+        const selected = inActiveGroup || selectedIds.includes(el.id); // 枠を強調（ドリルインしたメンバーも含む）
+        const isPrimary = el.id === primaryId; // 主＝リサイズハンドルを出す対象（未所属 or ドリルイン編集中）
         const rotated = (cg.rotation ?? 0) !== 0; // 回転あり（合成後・中心軸）
         const locked = el.locked === true; // ロック中＝移動/拡縮しない・ハンドルも出さない（#210）
         const editing = el.id === editingId && el.kind === FREE_ELEMENT_KIND.text;
@@ -479,10 +485,13 @@ export function FreeLayoutOverlay({
             key={el.id}
             data-free-id={el.id}
             onPointerDown={(e) => {
-              // テキストの素押し（左ボタン・Shift 無し）だけが二度押し候補。実機ではドラッグ開始時の preventDefault が
-              // 互換 dblclick を潰すので、onDoubleClick に頼らず pointerdown 自体で二度押しを検出する（#525-4）。
-              const isPlainTextPress = el.kind === FREE_ELEMENT_KIND.text && e.button === 0 && !e.shiftKey;
-              if (isPlainTextPress) {
+              // 二度押し候補（実機はドラッグ開始の preventDefault が互換 dblclick を潰すので pointerdown で検出・#525-4）：
+              //  ・非グループのテキスト＝インライン編集（#525-4）
+              //  ・グループのメンバー（まだ個別選択していない）＝そのメンバーへドリルイン選択（#525-5）
+              const button0 = e.button === 0 && !e.shiftKey;
+              const dtEdit = button0 && el.kind === FREE_ELEMENT_KIND.text && elGroup == null;
+              const dtDrill = button0 && elGroup != null && !selectedIds.includes(el.id);
+              if (dtEdit || dtDrill) {
                 const prev = lastTapRef.current;
                 const near = prev != null && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_DIST;
                 if (prev && prev.id === el.id && e.timeStamp - prev.t < DOUBLE_TAP_MS && near) {
@@ -490,20 +499,28 @@ export function FreeLayoutOverlay({
                   e.stopPropagation();
                   lastTapRef.current = null;
                   setMenu(null);
-                  onSelect(el.id);
-                  setEditingId(el.id);
+                  onSelect(el.id); // 要素選択＝selectFree がグループ選択を解除しこの要素だけ選ぶ
+                  if (dtEdit) setEditingId(el.id); // テキストはそのままインライン編集へ
                   return;
                 }
               }
-              // 通常のドラッグ/選択開始。begin* が二度押し履歴を解除するので、素押しの記録はこの後に行う
-              // （＝間に別操作を挟んだら履歴が残らない・#525-4 レビュー）。
-              if (elGroup) beginGroupDrag(e, elGroup); else beginDrag(e, el, "move");
-              if (isPlainTextPress) lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
+              // 通常のドラッグ/選択開始。ドリルイン編集中（grouped=false）はメンバーを個別ドラッグ、それ以外のメンバーは
+              // グループごと。begin* が二度押し履歴を解除するので、候補の記録はこの後に行う（#525-4 レビュー）。
+              if (elGroup && !drilledEditable) beginGroupDrag(e, elGroup); else beginDrag(e, el, "move");
+              if (dtEdit || dtDrill) lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
             }}
             onContextMenu={(e) => openMenu(e, el)}
             onDoubleClick={(e) => {
-              // jsdom / 互換 dblclick が来る環境用のフォールバック（実機は上の pointerdown 検出が主経路）。
-              if (el.kind !== FREE_ELEMENT_KIND.text) return;
+              // jsdom / 互換 dblclick 用フォールバック（実機は上の pointerdown 検出が主経路）。グループのメンバー＝ドリルイン、
+              // 非グループのテキスト＝インライン編集。
+              if (elGroup != null && !selectedIds.includes(el.id)) {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenu(null);
+                onSelect(el.id);
+                return;
+              }
+              if (el.kind !== FREE_ELEMENT_KIND.text || elGroup != null) return;
               e.preventDefault();
               e.stopPropagation();
               setMenu(null);

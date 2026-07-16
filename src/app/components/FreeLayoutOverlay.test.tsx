@@ -151,9 +151,29 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     expect(root.querySelector('[data-free-id="free_002"]')).not.toBeNull(); // 非所属＝従来どおり表示
   });
 
-  it("グループのメンバーには個別リサイズハンドルを出さない（グループ単位で編集）", () => {
-    const { boxes } = renderOverlay({ groups: [grp], activeGroupId: "group_001", selectedIds: ["free_001"] });
-    expect(boxes[0].children).toHaveLength(0); // grouped＝primary でもハンドルなし
+  it("グループ単位（メンバー未ドリルイン）ではメンバーに個別ハンドルを出さない", () => {
+    const { boxes } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
+    expect(boxes[0].children).toHaveLength(0); // グループ選択中＝メンバーはグループごと編集・個別ハンドルなし
+  });
+
+  it("未変形グループのメンバーをダブルクリックするとそのメンバーだけ選択（ドリルイン・#525-5）", () => {
+    const { boxes, onSelect } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
+    // 実機経路＝素の pointerdown×2（fireEvent.doubleClick ではない）。
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    expect(onSelect).toHaveBeenLastCalledWith("free_001"); // そのメンバーだけ選択（グループ解除は selectFree が担う）
+  });
+
+  it("ドリルインした未変形グループメンバーは個別ハンドルを出す＝直接編集できる（#525-5）", () => {
+    const { boxes } = renderOverlay({ groups: [grp], selectedIds: ["free_001"] }); // 個別選択＝ドリルイン
+    expect(boxes[0].children.length).toBeGreaterThan(0); // リサイズ＋回転ハンドルが出る（未変形なので base==合成で正しい）
+  });
+
+  it("変形グループのメンバーは個別選択しても canvas ハンドルを出さない＝ずれ防止（#525-5）", () => {
+    const scaledGrp = { ...grp, transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const { boxes } = renderOverlay({ groups: [scaledGrp], selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // 変形グループ＝base≠合成なので直接編集は無効（選択のみ＝詳細パネルで編集）
   });
 
   it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform）", () => {

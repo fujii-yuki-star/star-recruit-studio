@@ -299,7 +299,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const selectFreeMany = (ids: string[]) => {
     setConfirmBulkDelete(false);
     setActiveGroupId(null);
-    setSelectedFreeIds(ids);
+    // 範囲選択（マーキー）はグループ所属の要素を巻き込まない＝グループはまとまりで扱う（個別選択はメンバーの
+    // ダブルクリック＝ドリルイン・#525-5）。未所属の要素だけを選ぶ。
+    setSelectedFreeIds(ids.filter((id) => topGroupOfMember(sceneGroups, id) == null));
   };
   // グループ選択（メンバークリック・#305）：要素選択をクリアしてグループをアクティブにする。
   const selectGroup = (groupId: string | null) => {
