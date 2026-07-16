@@ -152,6 +152,31 @@ export function applyFreeElementPositions(
 }
 
 /**
+ * キーボード微調整（#525-11）：選択中の非ロック要素を dx,dy だけずらす移動リスト。
+ * ロック要素は動かさない（レイヤー一覧のロックと一貫・#210）。存在しない id は無視。applyFreeElementPositions と併用。
+ */
+export function nudgeFreeElements(
+  freeLayout: FreeElement[], ids: ReadonlyArray<string>, dx: number, dy: number,
+): FreeElementMove[] {
+  const sel = new Set(ids);
+  return freeLayout
+    .filter((el) => sel.has(el.id) && !el.locked)
+    .map((el) => ({ id: el.id, x: el.x + dx, y: el.y + dy }));
+}
+
+/** キーボードの矢印キー → 移動量（px・#525-11）。Shift で 10px、通常 1px。矢印以外は null。 */
+export function keyboardNudgeDelta(key: string, shiftKey: boolean): { dx: number; dy: number } | null {
+  const step = shiftKey ? 10 : 1;
+  switch (key) {
+    case 'ArrowLeft': return { dx: -step, dy: 0 };
+    case 'ArrowRight': return { dx: step, dy: 0 };
+    case 'ArrowUp': return { dx: 0, dy: -step };
+    case 'ArrowDown': return { dx: 0, dy: step };
+    default: return null;
+  }
+}
+
+/**
  * 要素の見た目（回転後）の AABB（canvas 座標）。rotation 未指定/0 は素の x/y/w/h に一致。
  * 中心まわり回転の閉形式（vw=w·|cosθ|+h·|sinθ|／vh=w·|sinθ|+h·|cosθ|）。回転は中心を不変に保つ。
  * 複数同時リサイズのグループ枠(#300(a))が回転要素も囲めるようにするための基準。

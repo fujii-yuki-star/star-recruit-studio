@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
 import {
   addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  elementVisualBBox, freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
+  elementVisualBBox, freeElementsInRect, FREE_MIN_SIZE, groupBBox, keyboardNudgeDelta, moveFreeElement, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
   snapAngle, snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -623,5 +623,43 @@ describe('snapToGrid とグリッド吸着（FREE 仕上げ）', () => {
     const sw = resizeFreeElement({ x: 100, y: 0, w: 100, h: 100 }, 'sw', -15, 15, 20, 20);
     expect(sw.x).toBe(80);
     expect(sw.x + sw.w).toBe(200); // 右辺固定
+  });
+});
+
+describe('nudgeFreeElements（キーボード微調整・#525-11）', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 50, h: 50 },
+    { id: 'free_002', kind: 'shape', x: 200, y: 200, w: 50, h: 50, locked: true },
+    { id: 'free_003', kind: 'text', x: 0, y: 0, w: 50, h: 50, text: 'a' },
+  ];
+
+  it('選択中の要素だけを dx,dy ずらす移動リストを返す', () => {
+    const moves = nudgeFreeElements(layout, ['free_001', 'free_003'], 1, -1);
+    expect(moves).toEqual([{ id: 'free_001', x: 101, y: 99 }, { id: 'free_003', x: 1, y: -1 }]);
+  });
+
+  it('ロック要素は動かさない（除外）', () => {
+    const moves = nudgeFreeElements(layout, ['free_001', 'free_002'], 10, 0);
+    expect(moves).toEqual([{ id: 'free_001', x: 110, y: 100 }]); // free_002(locked) は含まれない
+  });
+
+  it('存在しない id は無視・空選択は空配列', () => {
+    expect(nudgeFreeElements(layout, ['zzz'], 1, 1)).toEqual([]);
+    expect(nudgeFreeElements(layout, [], 1, 1)).toEqual([]);
+  });
+});
+
+describe('keyboardNudgeDelta（矢印→移動量・#525-11）', () => {
+  it('矢印は 1px、Shift で 10px', () => {
+    expect(keyboardNudgeDelta('ArrowLeft', false)).toEqual({ dx: -1, dy: 0 });
+    expect(keyboardNudgeDelta('ArrowRight', false)).toEqual({ dx: 1, dy: 0 });
+    expect(keyboardNudgeDelta('ArrowUp', false)).toEqual({ dx: 0, dy: -1 });
+    expect(keyboardNudgeDelta('ArrowDown', false)).toEqual({ dx: 0, dy: 1 });
+    expect(keyboardNudgeDelta('ArrowRight', true)).toEqual({ dx: 10, dy: 0 }); // Shift=10px
+    expect(keyboardNudgeDelta('ArrowUp', true)).toEqual({ dx: 0, dy: -10 });
+  });
+  it('矢印以外は null', () => {
+    expect(keyboardNudgeDelta('a', false)).toBeNull();
+    expect(keyboardNudgeDelta('Enter', false)).toBeNull();
   });
 });
