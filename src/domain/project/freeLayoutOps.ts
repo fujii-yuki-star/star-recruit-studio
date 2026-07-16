@@ -157,10 +157,12 @@ export function applyFreeElementPositions(
  * キーボード微調整（#525-11）：選択中の非ロック要素を**画面上 dx,dy** だけずらす移動リスト。
  * ロック要素は動かさない（レイヤー一覧のロックと一貫・#210）。存在しない id は無視。applyFreeElementPositions と併用。
  *
- * グループのメンバーは描画が composeGroupGeometry（拡縮→回転→並進）で合成されるため、base をそのまま dx,dy 動かすと
- * 画面上は拡縮/回転ぶんズレる（scale=2 で 2px・回転で斜め）。そこで**画面デルタを要素の合成変形の逆で base デルタへ**落とし、
- * 見た目を画面上 1:1 に保つ（#525-11 レビュー P2＝ドリルインした変形メンバーや混在選択でも直感どおり動く）。
- * 合成後（cg）を直接見るのでネスト深さ非依存。未所属/純並進（合成後 w・rotation が素と一致）は base デルタ＝画面デルタ。
+ * 未所属・純並進グループのメンバー（合成後 w・rotation が素と一致）は base==画面ゆえ **base デルタ＝画面デルタ で厳密 1:1**。
+ * **拡縮/回転グループのメンバーは対象外**（＝#542 の canvas select-only と一貫・詳細パネルで編集）。理由：描画は
+ * composeGroupGeometry で anch（メンバー境界の中心）まわりに拡縮/回転するが、その anchor は base を動かすと再計算で
+ * ドリフトするため base→画面の写像が一意な線形逆変換にならない（内部メンバーは scale·R だが単一/縁メンバーは係数が変わり、
+ * 単一回転では逆方向になる）。よって「画面 1:1 で動かす」保証ができるのは純並進/未所属に限り、変形メンバーは動かさない
+ * （壊れて見える近似移動を出さない・ADR-0026／#525-11 レビュー P2）。混在選択でも未所属だけが 1:1 で動き、変形メンバーは据え置き。
  */
 export function nudgeFreeElements(
   freeLayout: FreeElement[], groups: ReadonlyArray<Group>, ids: ReadonlyArray<string>, dx: number, dy: number,
@@ -169,19 +171,11 @@ export function nudgeFreeElements(
   const composed = groups.length > 0 ? composeGroupGeometry(freeLayout, groups) : null;
   return freeLayout
     .filter((el) => sel.has(el.id) && !el.locked)
-    .map((el) => {
+    .filter((el) => {
       const cg = composed?.get(el.id);
-      // 合成後が素と同寸・同角＝拡縮/回転なし（未所属 or 純並進）＝画面 1:1。
-      if (!cg || (cg.w === el.w && (cg.rotation ?? 0) === (el.rotation ?? 0))) {
-        return { id: el.id, x: el.x + dx, y: el.y + dy };
-      }
-      // 合成の総拡縮＝cg.w/el.w、総回転＝cg.rotation−el.rotation。∂composed/∂base = scale·R(θ) の逆で base デルタを得る。
-      const scale = el.w !== 0 ? cg.w / el.w : 1;
-      const rad = (((cg.rotation ?? 0) - (el.rotation ?? 0)) * Math.PI) / 180;
-      const cos = Math.cos(rad);
-      const sin = Math.sin(rad);
-      return { id: el.id, x: el.x + (dx * cos + dy * sin) / scale, y: el.y + (-dx * sin + dy * cos) / scale };
-    });
+      return !cg || (cg.w === el.w && (cg.rotation ?? 0) === (el.rotation ?? 0)); // 未所属 or 純並進のみ（変形メンバーは select-only）
+    })
+    .map((el) => ({ id: el.id, x: el.x + dx, y: el.y + dy }));
 }
 
 /** キーボードの矢印キー → 移動量（px・#525-11）。Shift で 10px、通常 1px。矢印以外は null。 */

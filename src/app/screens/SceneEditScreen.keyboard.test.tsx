@@ -87,7 +87,7 @@ describe("SceneEditScreen キーボード操作（#525-11）", () => {
     expect(useProjectStore.getState().scenes[0].freeLayout?.length).toBe(1); // 消えない
   });
 
-  it("変形グループのドリルインメンバーは矢印で画面1:1動く（base は 1/scale・#525-11 レビュー P2）", () => {
+  it("変形グループのドリルインメンバーは矢印で動かさない（canvas select-only・#542 と一貫・#525-11 レビュー P2）", () => {
     // free_001 を scale=2 のグループに入れる。
     useProjectStore.setState((s) => ({
       scenes: s.scenes.map((sc) => sc.sceneId === "scene_001"
@@ -100,7 +100,7 @@ describe("SceneEditScreen キーボード操作（#525-11）", () => {
     fireEvent.pointerDown(box, { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
     fireEvent.pointerUp(box, { pointerId: 1 });
     fireEvent.pointerDown(box, { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
-    fireEvent.keyDown(document.body, { key: "ArrowRight" }); // 画面 +1px を期待
-    expect(el()?.x).toBeCloseTo(100.5, 5); // base +0.5（合成 scale2 で画面 +1px）＝画面1:1
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(el()?.x).toBe(100); // 変形グループのメンバーは動かさない（詳細パネルで編集）
   });
 });

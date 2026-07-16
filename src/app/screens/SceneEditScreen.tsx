@@ -588,8 +588,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       const g = sceneGroups.find((x) => x.id === effectiveActiveGroupId);
       if (g) transformGroup(g.id, { x: g.transform.x + dx, y: g.transform.y + dy }); // グループ全体は canvas 並進＝画面 1:1
     } else if (selectedFreeIds.length > 0) {
-      const moves = nudgeFreeElements(freeLayout, sceneGroups, selectedFreeIds, dx, dy); // 変形メンバーは逆変換で画面 1:1
-      if (moves.length > 0) moveFreeMany(moves); // ロックのみの選択なら何もしない
+      const moves = nudgeFreeElements(freeLayout, sceneGroups, selectedFreeIds, dx, dy); // 未所属/純並進は画面1:1・変形メンバーは対象外
+      if (moves.length > 0) moveFreeMany(moves); // ロックのみ・変形メンバーのみの選択なら何もしない
     }
   };
   const onCanvasDelete = () => {
