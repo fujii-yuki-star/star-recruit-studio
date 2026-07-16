@@ -223,6 +223,8 @@ export type SubtitleSource =
 export interface FreeElement {
   id: string;
   kind: FreeElementKind;
+  /** 任意の表示名（重ね順一覧/選択チップの見分け用・未設定＝種類＋連番の自動名にフォールバック・#525-12）。全 kind 共通・テンプレの Layer.name に相当。 */
+  name?: string;
   x: number;
   y: number;
   w: number;
