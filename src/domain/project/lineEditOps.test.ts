@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from './lineEditOps';
-import type { NarrationLine, Scene } from './types';
+import type { NarrationLine, Scene, SubtitleSource } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
   return {
@@ -63,6 +63,17 @@ describe('removeLine', () => {
     expect(r.lines).toBeUndefined();
     expect(r.narration.text).toBe('のこり');
   });
+
+  it('先頭行を消して同時開始フラグの行が先頭になったら startWithPrevious を落とす（ADR-0031）', () => {
+    const lines: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startWithPrevious: true, status: NARRATION_STATUS.none },
+      { lineId: 'line_003', text: 'c', status: NARRATION_STATUS.none },
+    ];
+    const r = removeLine(sceneWith({ lines }), 'line_001');
+    expect(r.lines?.map((l) => l.lineId)).toEqual(['line_002', 'line_003']);
+    expect(r.lines?.[0].startWithPrevious).toBeUndefined(); // 先頭になった line_002 のフラグは落ちる
+  });
 });
 
 describe('updateLine', () => {
@@ -111,5 +122,49 @@ describe('moveLine', () => {
 
   it('範囲外（先頭をさらに前へ）は変化なし', () => {
     expect(moveLine(sceneWith({ lines }), 'line_001', -1).lines?.map((l) => l.lineId)).toEqual(['line_001', 'line_002', 'line_003']);
+  });
+
+  it('同時開始フラグの行を先頭へ移動すると startWithPrevious を落とす（休眠フラグの復活防止・ADR-0031）', () => {
+    const withFlag: NarrationLine[] = [
+      { lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'b', startWithPrevious: true, status: NARRATION_STATUS.none },
+    ];
+    const moved = moveLine(sceneWith({ lines: withFlag }), 'line_002', -1); // line_002 を先頭へ
+    expect(moved.lines?.map((l) => l.lineId)).toEqual(['line_002', 'line_001']);
+    expect(moved.lines?.[0].startWithPrevious).toBeUndefined();
+  });
+});
+
+describe('字幕対象の正規化（掛け合い解除・話者変更/削除で無効な対象を戻す・ADR-0026④・PR-C P1）', () => {
+  const dialogueWithSub = (source: SubtitleSource, lines: NarrationLine[]): Scene =>
+    sceneWith({ sceneType: 'free', lines, freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: source }] } as Partial<Scene>);
+  const subSource = (s: Scene): SubtitleSource | undefined => s.freeLayout?.[0]?.subtitleSource;
+
+  it('掛け合い解除（demoteFromLines）で allLines 対象を未設定へ戻す（黙って消さない）', () => {
+    const s = dialogueWithSub({ kind: 'allLines' }, [{ lineId: 'line_001', text: 'A', speaker: 3, status: NARRATION_STATUS.none }]);
+    expect(subSource(demoteFromLines(s))).toBeUndefined();
+  });
+
+  it('話者変更（updateLine）で対象話者が場面から消えたら未設定へ戻す', () => {
+    const s = dialogueWithSub({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } }, [{ lineId: 'line_001', text: 'A', speaker: 3, status: NARRATION_STATUS.none }]);
+    expect(subSource(updateLine(s, 'line_001', { speaker: 2 }))).toBeUndefined(); // speaker3 が不在に
+  });
+
+  it('話者削除（removeLine）で対象話者が消えたら未設定へ戻す（他行は残す）', () => {
+    const s = dialogueWithSub({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } }, [
+      { lineId: 'line_001', text: 'A', speaker: 3, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'B', speaker: 2, status: NARRATION_STATUS.none },
+    ]);
+    const r = removeLine(s, 'line_001');
+    expect(r.lines?.map((l) => l.lineId)).toEqual(['line_002']);
+    expect(subSource(r)).toBeUndefined();
+  });
+
+  it('対象話者が残っていれば不変（有効な対象は消さない）', () => {
+    const s = dialogueWithSub({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } }, [
+      { lineId: 'line_001', text: 'A', speaker: 3, status: NARRATION_STATUS.none },
+      { lineId: 'line_002', text: 'B', speaker: 3, status: NARRATION_STATUS.none },
+    ]);
+    expect(subSource(removeLine(s, 'line_001'))).toEqual({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } });
   });
 });

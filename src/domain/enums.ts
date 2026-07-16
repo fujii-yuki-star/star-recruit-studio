@@ -10,8 +10,8 @@ export type SceneCategory = (typeof SCENE_CATEGORIES)[number];
 /** FREE テンプレのカテゴリ値（§6・ロジック比較用。自由配置 freeLayout を持つ場面）。 */
 export const FREE_CATEGORY = 'free' satisfies SceneCategory;
 
-/** FREE テンプレの自由配置要素の種別（ADR-0008）。layer.type 語彙に合わせる（image は使わず素材は slot）。 */
-export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape'] as const;
+/** FREE テンプレの自由配置要素の種別（ADR-0008／字幕＝ADR-0029）。layer.type 語彙に合わせる（image は使わず素材は slot）。 */
+export const FREE_ELEMENT_KINDS = ['slot', 'text', 'shape', 'subtitle'] as const;
 export type FreeElementKind = (typeof FREE_ELEMENT_KINDS)[number];
 
 /** FreeElementKind の値を参照するための定数（§6：ロジックでの文字列直書きを避ける）。 */
@@ -19,7 +19,29 @@ export const FREE_ELEMENT_KIND = {
   slot: 'slot',
   text: 'text',
   shape: 'shape',
+  subtitle: 'subtitle',
 } as const satisfies Record<string, FreeElementKind>;
+
+/** FREE 字幕要素の「対象」種別（ADR-0029）。narration=読み上げ(texts.subtitle)／allLines=掛け合い全行／speaker=特定の実効話者。 */
+export const SUBTITLE_SOURCE_KINDS = ['narration', 'allLines', 'speaker'] as const;
+export type SubtitleSourceKind = (typeof SUBTITLE_SOURCE_KINDS)[number];
+
+/** SubtitleSourceKind の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const SUBTITLE_SOURCE_KIND = {
+  narration: 'narration',
+  allLines: 'allLines',
+  speaker: 'speaker',
+} as const satisfies Record<string, SubtitleSourceKind>;
+
+/** 実効話者キーの種別（ADR-0029・P1-2）。catalog=明示話者(voiceCatalog の speaker 番号)／default=既定声(継承 voiceId・番号なし)。 */
+export const SPEAKER_KEY_KINDS = ['catalog', 'default'] as const;
+export type SpeakerKeyKind = (typeof SPEAKER_KEY_KINDS)[number];
+
+/** SpeakerKeyKind の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const SPEAKER_KEY_KIND = {
+  catalog: 'catalog',
+  default: 'default',
+} as const satisfies Record<string, SpeakerKeyKind>;
 
 /** FREE テキスト要素のフォント太さ（ADR-0008）。 */
 export const FONT_WEIGHTS = ['normal', 'bold'] as const;
@@ -96,6 +118,20 @@ export const ASSET_TYPE = {
   logo: 'logo',
   qr: 'qr',
 } as const satisfies Record<string, AssetType>;
+
+/**
+ * FREE スロット（自由配置の素材枠）に置ける素材種別＝映像として描ける非音声（image/video/yuko/logo/qr/decor）。§2-7。
+ * 通常テンプレのスロット層と FREE スロットで「置ける素材」の判定を一本化する（FREE 化で立ち絵/ロゴを移送しても
+ * 編集画面の選択肢に現れる＝選び直せる・#524 P1）。bgm/voice（音声）は対象外。
+ */
+export const FREE_SLOT_ASSET_TYPES = [
+  ASSET_TYPE.image, ASSET_TYPE.video, ASSET_TYPE.yuko, ASSET_TYPE.logo, ASSET_TYPE.qr, ASSET_TYPE.decor,
+] as const satisfies readonly AssetType[];
+
+/** 素材が FREE スロットに置けるか（映像として描ける非音声か・#524 P1）。 */
+export function isFreeSlotAssetType(type: AssetType): boolean {
+  return (FREE_SLOT_ASSET_TYPES as readonly AssetType[]).includes(type);
+}
 
 // 動画の種類（ADR-0011）。recruit=採用・会社紹介／general=一般・社内発表。省略時は recruit。
 export const VIDEO_KINDS = ['recruit', 'general'] as const;

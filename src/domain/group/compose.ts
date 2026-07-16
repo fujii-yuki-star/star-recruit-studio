@@ -100,6 +100,41 @@ function applyTransform(t: GroupTransform, ax: number, ay: number, geom: Geom): 
   return { x: cx - w / 2, y: cy - h / 2, w, h, rotation: (geom.rotation ?? 0) + t.rotation };
 }
 
+type ElemById = Map<string, { id: string } & Geom>;
+type GroupById = Map<string, Group>;
+
+/** ノード（要素 or グループ）の AABB を、自身＋子孫の transform 適用後・祖先未適用の空間で返す。visiting で循環ガード。
+ *  グループなら子孫の bounds を union し、自 transform を子の中心まわりに適用する（**ネスト対応**）。
+ *  members に存在しない id（要素でもグループでもない）は空矩形＝サイレント無視（不正参照の検証 V_group は #308＝11 §8 V20）。 */
+function boundsOfNode(nodeId: string, visiting: Set<string>, elemById: ElemById, groupById: GroupById): Rect {
+  const g = groupById.get(nodeId);
+  if (!g) {
+    const el = elemById.get(nodeId);
+    return el ? rotatedRectAABB({ x: el.x, y: el.y, w: el.w, h: el.h }, el.rotation ?? 0) : EMPTY_RECT;
+  }
+  if (visiting.has(nodeId)) return EMPTY_RECT; // 循環は無視
+  visiting.add(nodeId);
+  const childBounds = g.members.map((m) => boundsOfNode(m, visiting, elemById, groupById));
+  visiting.delete(nodeId);
+  if (childBounds.length === 0) return EMPTY_RECT;
+  const u = unionRects(childBounds);
+  const ax = u.x + u.w / 2;
+  const ay = u.y + u.h / 2;
+  return unionRects(childBounds.map((b) => transformRectAABB(g.transform, ax, ay, b)));
+}
+
+/** メンバー集合の外接矩形（各メンバーの子孫 transform 適用後・当該グループ transform 適用前＝ネスト対応）。 */
+function unionOfMemberBounds(members: ReadonlyArray<string>, elemById: ElemById, groupById: GroupById): Rect {
+  const childBounds = members.map((m) => boundsOfNode(m, new Set<string>(), elemById, groupById));
+  return unionRects(childBounds.length ? childBounds : [EMPTY_RECT]);
+}
+
+/** グループ中心（メンバー bbox の中心・自 transform 前）。ネスト（メンバー＝グループ）も再帰で扱う。 */
+function groupAnchor(g: Group, elemById: ElemById, groupById: GroupById): [number, number] {
+  const u = unionOfMemberBounds(g.members, elemById, groupById);
+  return [u.x + u.w / 2, u.y + u.h / 2];
+}
+
 /**
  * 各要素の最終 geometry を算出する（グループ未所属はそのまま）。
  * @param elements 要素／レイヤーの幾何（id 一意）。
@@ -116,40 +151,13 @@ export function composeGroupGeometry(
     return result;
   }
 
-  const elemById = new Map(elements.map((e) => [e.id, e] as const));
-  const groupById = new Map(groups.map((g) => [g.id, g] as const));
+  const elemById: ElemById = new Map(elements.map((e) => [e.id, e] as const));
+  const groupById: GroupById = new Map(groups.map((g) => [g.id, g] as const));
 
   // メンバー → 親グループ（最大1。重複指定は先勝ち）。
   const parentOf = new Map<string, string>();
   for (const g of groups) {
     for (const m of g.members) if (!parentOf.has(m)) parentOf.set(m, g.id);
-  }
-
-  // ノード（要素 or グループ）の AABB を、自身＋子孫の transform 適用後・祖先未適用の空間で返す。visiting で循環ガード。
-  function boundsOf(nodeId: string, visiting: Set<string>): Rect {
-    const g = groupById.get(nodeId);
-    if (!g) {
-      // members に存在しない id（要素でもグループでもない）は空矩形＝サイレント無視（堅牢性優先）。
-      // 不正メンバー参照の検証（V_group）は #308 で 11 §8（V20）に追補済（不在は描画で無視＋削除経路で除去）。
-      const el = elemById.get(nodeId);
-      return el ? rotatedRectAABB({ x: el.x, y: el.y, w: el.w, h: el.h }, el.rotation ?? 0) : EMPTY_RECT;
-    }
-    if (visiting.has(nodeId)) return EMPTY_RECT; // 循環は無視
-    visiting.add(nodeId);
-    const childBounds = g.members.map((m) => boundsOf(m, visiting));
-    visiting.delete(nodeId);
-    if (childBounds.length === 0) return EMPTY_RECT;
-    const u = unionRects(childBounds);
-    const ax = u.x + u.w / 2;
-    const ay = u.y + u.h / 2;
-    return unionRects(childBounds.map((b) => transformRectAABB(g.transform, ax, ay, b)));
-  }
-
-  /** グループ中心（メンバー bbox の中心・自 transform 前）。 */
-  function anchorOf(g: Group): [number, number] {
-    const childBounds = g.members.map((m) => boundsOf(m, new Set<string>()));
-    const u = unionRects(childBounds.length ? childBounds : [EMPTY_RECT]);
-    return [u.x + u.w / 2, u.y + u.h / 2];
   }
 
   for (const el of elements) {
@@ -164,7 +172,7 @@ export function composeGroupGeometry(
       chain.push(g);
     }
     for (const g of chain) {
-      const [ax, ay] = anchorOf(g);
+      const [ax, ay] = groupAnchor(g, elemById, groupById);
       geom = applyTransform(g.transform, ax, ay, geom);
     }
     result.set(el.id, geom);
@@ -184,4 +192,55 @@ export function isHiddenByGroup(memberId: string, groups: ReadonlyArray<Group>):
     if (groupById.get(cur)?.hidden) return true;
   }
   return false;
+}
+
+/**
+ * グループ自身または祖先グループが非表示か（ネスト対応）。非表示グループの操作枠（選択枠/ハンドル）を出さない判定に使う
+ * （描画されないグループを操作可能にしない・#525-9 レビュー）。isHiddenByGroup は祖先のみを見るため、自身の hidden を足す。
+ */
+export function isGroupHidden(groupId: string, groups: ReadonlyArray<Group>): boolean {
+  return groups.find((g) => g.id === groupId)?.hidden === true || isHiddenByGroup(groupId, groups);
+}
+
+/** グループの「向き付き枠」（選択枠・拡縮/回転の pivot 用）。 */
+export interface OrientedFrame {
+  /** 枠の中心（canvas 座標）＝グループ変形の pivot。 */
+  cx: number;
+  cy: number;
+  /** 枠のサイズ（scale 適用後）。 */
+  w: number;
+  h: number;
+  /** 枠の回転（度・group transform の rotation）。 */
+  rotation: number;
+}
+
+/**
+ * グループの向き付き枠を、**composeGroupGeometry と同じ再帰 bounds／anchor**で算出する。
+ * メンバー（要素 or 子グループ）の bounds を包む local bbox にグループ transform を適用：中心＝anchor＋平行移動／
+ * サイズ＝local×scale／回転＝rotation。旧実装は素の x/y/w/h（軸平行・かつ要素のみ直接参照）で bbox を取っていたため、
+ * ①回転メンバーで枠中心＝pivot がずれ（#312）／②メンバーが子グループ id だけの**ネスト**で枠が消える（#525-10 レビュー）
+ * という乖離があった。これを解消し overlay と描画で pivot を一致させる。回転もネストも無ければ従来と同値（後方互換）。
+ * @param group    枠を出すグループ。
+ * @param elements 要素／レイヤーの幾何（葉ノード）。
+ * @param groups   全グループ（ネストのメンバー解決に必要）。
+ * @returns 枠（解決できるメンバーが1つも無ければ null）。
+ */
+export function orientedGroupFrame(
+  group: Group,
+  elements: ReadonlyArray<{ id: string } & Geom>,
+  groups: ReadonlyArray<Group>,
+): OrientedFrame | null {
+  const elemById: ElemById = new Map(elements.map((e) => [e.id, e] as const));
+  const groupById: GroupById = new Map(groups.map((g) => [g.id, g] as const));
+  // 解決できるメンバー（要素 or グループ）が1つも無ければ枠なし（不在 id だけのグループには枠を出さない）。
+  if (!group.members.some((m) => elemById.has(m) || groupById.has(m))) return null;
+  const u = unionOfMemberBounds(group.members, elemById, groupById);
+  const t = group.transform;
+  return {
+    cx: u.x + u.w / 2 + t.x,
+    cy: u.y + u.h / 2 + t.y,
+    w: u.w * t.scale,
+    h: u.h * t.scale,
+    rotation: t.rotation,
+  };
 }

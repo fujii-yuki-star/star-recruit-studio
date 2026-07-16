@@ -11,7 +11,9 @@ import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
-import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupTransform } from "../../domain/project/groupOps";
+import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { GroupList } from "../components/GroupList";
+import { ColorPicker } from "../components/ColorPicker";
 import type { GroupTransform } from "../../domain/group/types";
 import { Switch } from "../components/ui";
 import { NumberField } from "../components/NumberField";
@@ -164,6 +166,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   function toggleGroupLocked(groupId: string) {
     setDraft((d) => (d ? { ...d, groups: toggleGroupFlag(d.groups ?? [], groupId, "locked") } : d));
   }
+  // グループの改名（#525-9・任意 name）。空文字は自動名（グループN）へフォールバック表示。
+  function renameGroup(groupId: string, name: string) {
+    setDraft((d) => (d ? { ...d, groups: updateGroupMeta(d.groups ?? [], groupId, { name }) } : d));
+  }
   function bringGroupFront(groupId: string) {
     if (tplGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は重ね順も抑止（多重防御・#319 レビュー）
     setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "front") } : d));
@@ -282,7 +288,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             {numField("文字の大きさ", l.fontSize ?? 40, (v) => onUpdateLayer(l.id, { fontSize: v }), 1)}
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <input className="input" type="color" value={l.color ?? "#222222"} onChange={(e) => onUpdateLayer(l.id, { color: e.target.value })} />
+              <ColorPicker value={l.color ?? "#222222"} onChange={(v) => onUpdateLayer(l.id, { color: v })} ariaLabel="文字の色を選ぶ" />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
@@ -297,11 +303,12 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             {(l.strokeWidth ?? 0) > 0 && (
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-                <input className="input" type="color" value={l.strokeColor ?? "#ffffff"} onChange={(e) => onUpdateLayer(l.id, { strokeColor: e.target.value })} />
+                <ColorPicker value={l.strokeColor ?? "#ffffff"} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
               </div>
             )}
           </div>
-          {/* 字幕は背景帯（黒固定で実用性が低い＝#275）。付ける/色/濃さを編集できるよう開放（描画は既存の layer.background を使用）。 */}
+          {/* 字幕は背景帯（黒固定で実用性が低い＝#275）。付ける/色/濃さ/角丸を編集できるよう開放（描画は既存の layer.background を使用）。
+              角丸は FREE 帯 UI（SceneEditScreen）と揃える＝同概念「字幕の背景帯」を編集画面で同じ編集性に（ADR-0026 観点6・#544 P3）。 */}
           {l.type === "subtitle" && (
             <div className="col gap-sm" style={{ marginTop: 4 }}>
               <div className="toggle-row">
@@ -312,9 +319,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
                   <div className="field" style={{ margin: 0 }}>
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
-                    <input className="input" type="color" value={l.background?.color ?? "#000000"} onChange={(e) => onUpdateLayer(l.id, { background: { ...l.background, color: e.target.value } })} />
+                    <ColorPicker value={l.background?.color ?? "#000000"} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" />
                   </div>
                   {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? 0.55), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
+                  {numField("角丸", l.background?.radius ?? 16, (v) => onUpdateLayer(l.id, { background: { ...l.background, radius: v } }), 0)}
                 </div>
               )}
             </div>
@@ -333,7 +341,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-            <input className="input" type="color" value={l.fillColor ?? "#cccccc"} onChange={(e) => onUpdateLayer(l.id, { fillColor: e.target.value })} />
+            <ColorPicker value={l.fillColor ?? "#cccccc"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="色を選ぶ" />
           </div>
         </div>
       );
@@ -365,7 +373,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           {renderDefaultAssetControl(l)}
           <div className="field" style={{ margin: "8px 0 0" }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</label>
-            <input className="input" type="color" value={l.fillColor ?? "#ffffff"} onChange={(e) => onUpdateLayer(l.id, { fillColor: e.target.value })} />
+            <ColorPicker value={l.fillColor ?? "#ffffff"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="背景色を選ぶ" />
           </div>
         </>
       );
@@ -458,6 +466,14 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             />
           </ScenePreview>
           <p className="text-sm text-muted mt">プレビュー上で要素をドラッグ・拡大縮小・回転できます（写真・文字は例として表示）。</p>
+          {/* グループ一覧（#525-9）：全グループを選択・再表示（隠したものを戻す）・改名できる。隠したグループを選び直せる導線。 */}
+          <GroupList
+            groups={tplGroups}
+            activeGroupId={effectiveActiveGroupId}
+            onSelect={(id) => selectGroup(id)}
+            onToggleHidden={toggleGroupHidden}
+            onRename={renameGroup}
+          />
           {/* グループ（ADR-0022・#307）：2つ以上選択でグループ化／選択中グループは解除。拡縮・回転・非表示等は part2b。 */}
           {(selectedLayerIds.length >= 2 || effectiveActiveGroupId) && (
             <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>

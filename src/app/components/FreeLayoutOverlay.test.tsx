@@ -134,9 +134,86 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     expect(screen.getByTestId("group-frame")).toBeInTheDocument();
   });
 
-  it("グループのメンバーには個別リサイズハンドルを出さない（グループ単位で編集）", () => {
-    const { boxes } = renderOverlay({ groups: [grp], activeGroupId: "group_001", selectedIds: ["free_001"] });
-    expect(boxes[0].children).toHaveLength(0); // grouped＝primary でもハンドルなし
+  it("ネストした外側グループ（メンバーが子グループ id だけ）でも操作枠が出る（#525-10 レビュー）", () => {
+    const outer = { id: "group_002", members: ["group_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+    renderOverlay({ groups: [grp, outer], activeGroupId: "group_002" });
+    expect(screen.getByTestId("group-frame")).toBeInTheDocument(); // 旧実装は枠が消えていた
+  });
+
+  it("非表示グループを選択中でも操作枠（group-frame）は出さない＝描画されないものを操作可能にしない（#525-9 レビュー）", () => {
+    renderOverlay({ groups: [{ ...grp, hidden: true }], activeGroupId: "group_001" });
+    expect(screen.queryByTestId("group-frame")).toBeNull();
+  });
+
+  it("所属グループが非表示なら、その要素の箱は出さない（描画と一致・操作枠を残さない・#525-9a）", () => {
+    const { root } = renderOverlay({ groups: [{ ...grp, hidden: true }] });
+    expect(root.querySelector('[data-free-id="free_001"]')).toBeNull(); // group_001 のメンバー＝非表示で箱なし
+    expect(root.querySelector('[data-free-id="free_002"]')).not.toBeNull(); // 非所属＝従来どおり表示
+  });
+
+  it("グループ単位（メンバー未ドリルイン）ではメンバーに個別ハンドルを出さない", () => {
+    const { boxes } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
+    expect(boxes[0].children).toHaveLength(0); // グループ選択中＝メンバーはグループごと編集・個別ハンドルなし
+  });
+
+  it("未変形グループのメンバーをダブルクリックするとそのメンバーだけ選択（ドリルイン・#525-5）", () => {
+    const { boxes, onSelect } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
+    // 実機経路＝素の pointerdown×2（fireEvent.doubleClick ではない）。
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    expect(onSelect).toHaveBeenLastCalledWith("free_001"); // そのメンバーだけ選択（グループ解除は selectFree が担う）
+  });
+
+  it("ドリルインした純並進グループメンバーは個別ハンドルを出す＝直接編集できる（合成が並進差のみ・#525-5）", () => {
+    const transGrp = { ...grp, transform: { x: 50, y: 0, rotation: 0, scale: 1 } }; // 移動済みでも純並進
+    const { boxes } = renderOverlay({ groups: [transGrp], selectedIds: ["free_001"] }); // 個別選択＝ドリルイン
+    expect(boxes[0].children.length).toBeGreaterThan(0); // 合成後が base と w/h/rotation 一致＝delta 1:1 で正しい
+  });
+
+  it("拡縮グループのメンバーは個別選択しても canvas ハンドルを出さない＝ずれ防止（#525-5）", () => {
+    const scaledGrp = { ...grp, transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const { boxes } = renderOverlay({ groups: [scaledGrp], selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // 合成後 w≠base なので直接編集は無効（選択のみ＝詳細パネルで編集）
+  });
+
+  it("回転グループのメンバーも個別選択で canvas ハンドルを出さない（#525-5）", () => {
+    const rotGrp = { ...grp, transform: { x: 0, y: 0, rotation: 90, scale: 1 } };
+    const { boxes } = renderOverlay({ groups: [rotGrp], selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // 合成後 rotation≠base
+  });
+
+  it("ネスト：素の外グループ×変形した内グループでも、メンバーに個別ハンドルを出さない（最外だけ見ないで合成後で判定・#525-5 レビュー P2）", () => {
+    // free_001 → 内グループ group_001(scale2) → 外グループ group_002(identity)。最外は素だが合成後は拡縮を含む。
+    const inner = { id: "group_001", members: ["free_001"], transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const outer = { id: "group_002", members: ["group_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+    const { boxes } = renderOverlay({ groups: [inner, outer], selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // 旧実装は最外(素)を見てハンドルを出す誤り→合成後で判定して抑止
+  });
+
+  it("変形グループのドリルインメンバーを再クリックしても無言でグループへ戻さない・動かさない（#525-5 レビュー P2）", () => {
+    const scaledGrp = { ...grp, transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const onSelectGroup = vi.fn();
+    const onGroupTransform = vi.fn();
+    const { root, boxes, onMoveMany } = renderOverlay({ groups: [scaledGrp], selectedIds: ["free_001"], onSelectGroup, onGroupTransform });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // 万一ドラッグが始まっても検知できるよう scale=1
+    // ドリルイン済み（selectedIds=[free_001]）のメンバーを再クリック → グループ選択へ戻らない。
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    expect(onSelectGroup).not.toHaveBeenCalled(); // 無言のグループ再選択なし
+    // そのままドラッグしてもグループ全体も個別メンバーも動かない（変形グループは詳細パネルで編集）。
+    fireEvent.pointerMove(boxes[0], { clientX: 220, clientY: 220, pointerId: 1 });
+    expect(onGroupTransform).not.toHaveBeenCalled();
+    expect(onMoveMany).not.toHaveBeenCalled();
+  });
+
+  it("純並進グループのドリルインメンバーは再クリック＋ドラッグで個別移動する（グループへ戻さない・#525-5）", () => {
+    const onSelectGroup = vi.fn();
+    const { root, boxes, onMoveMany } = renderOverlay({ groups: [grp], selectedIds: ["free_001"], onSelectGroup });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onSelectGroup).not.toHaveBeenCalled(); // 個別ドラッグ＝グループ再選択なし
+    fireEvent.pointerMove(boxes[0], { clientX: 30, clientY: 40, pointerId: 1 });
+    expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 130, y: 140 }]); // free_001(100,100) を +30,+40 個別移動
   });
 
   it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform）", () => {
@@ -179,6 +256,23 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     expect(screen.getByTestId("group-frame")).toBeInTheDocument(); // 枠は出る
     expect(screen.queryByTestId("group-scale-se")).toBeNull(); // 拡縮ハンドルなし
     expect(screen.queryByTestId("group-rotate-handle")).toBeNull(); // 回転ハンドルなし
+  });
+
+  it("回転メンバーを含むグループの拡縮 pivot は回転後 AABB 中心＝描画と一致（#525-10）", () => {
+    const onGroupTransform = vi.fn();
+    // A(0,0,100,100 rot0) と B(200,0,100,20 rot90) → 回転後 AABB の合成中心は (130,30)（素 bbox 中心 150,50 とは違う）。
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 200, y: 0, w: 100, h: 20, zIndex: 2, rotation: 90 },
+    ];
+    const grp2 = { id: "group_001", members: ["free_001", "free_002"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+    const { root } = renderOverlay({ freeLayout: layout, groups: [grp2], activeGroupId: "group_001", onGroupTransform });
+    mockRect(root);
+    const se = screen.getByTestId("group-scale-se");
+    // 中心(130,30)から距離100→200 で scale 2。素 bbox 中心(150,50)を pivot にしていると 2 にならない。
+    fireEvent.pointerDown(se, { button: 0, clientX: 230, clientY: 30, pointerId: 1 });
+    fireEvent.pointerMove(se, { clientX: 330, clientY: 30, pointerId: 1 });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { scale: 2 });
   });
 });
 
@@ -450,6 +544,78 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
   it("テキスト以外（図形）のダブルクリックでは textarea は出ない", () => {
     const { boxes } = renderOverlay();
     fireEvent.doubleClick(boxes[1]); // free_002（shape）
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  // #525-4：実機ではドラッグ開始の preventDefault が互換 dblclick を潰すため、pointerdown の二度押しでも
+  // 編集へ入れることを、素のポインタ列（fireEvent.doubleClick ではない）で検証する。旧実装ではここが無反応だった。
+  it("テキストの二度押し（pointerdown×2）で編集に入る＝実機の互換 dblclick 欠落に耐える（#525-4）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument(); // 1度目は編集に入らない（ドラッグ扱い）
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea).toBeInTheDocument(); // 2度目＝ダブルタップで編集へ
+    expect(textarea).toHaveValue("見出し");
+  });
+
+  it("図形の二度押しでは編集に入らない（テキストのみ対象）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 }); // free_002（shape）
+    fireEvent.pointerUp(boxes[1], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("離れた二度押し（間にドラッグ想定）は編集に入らない＝距離ガード（#525-4）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    // 2度目が離れている（≒ドラッグ後のタップ）＝ダブルタップと見なさない。
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  // #525-4 レビュー（P2）：対象テキスト以外の操作を挟んだら二度押し履歴を切る。近接・時間内でも編集に入らない。
+  it("空白クリックを挟んだ二度押しは編集に入らない＝別操作で履歴が切れる（#525-4 レビュー）", () => {
+    const { root, boxes } = renderOverlay({ selectedIds: ["free_001"] });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(root, { button: 0, clientX: 800, clientY: 600, pointerId: 1 }); // 空白＝選択解除
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A 再押下
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("別要素（図形）を挟んだ二度押しは編集に入らない（#525-4 レビュー）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[1], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 図形B
+    fireEvent.pointerUp(boxes[1], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("ハンドル操作（回転）を挟んだ二度押しは編集に入らない（#525-4 レビュー）", () => {
+    const { boxes } = renderOverlay({ selectedIds: ["free_001"] }); // 選択中＝ハンドルが出る
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(screen.getByTestId("rotate-handle"), { button: 0, clientX: 130, clientY: 90, pointerId: 1 }); // 回転開始
+    fireEvent.pointerUp(screen.getByTestId("rotate-handle"), { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 文字A
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  // 非左ボタン（中クリック）は begin* のボタン判定で早期 return するが、判定より前に履歴を切るので候補は解除される。
+  it("中クリック（非左ボタン）を挟んだ二度押しは編集に入らない＝非左押下でも履歴を切る（#525-4 レビュー）", () => {
+    const { boxes } = renderOverlay();
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 左クリック（記録）
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 1, clientX: 120, clientY: 120, pointerId: 1 }); // 中クリック（別操作）
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 }); // 左クリック
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 });

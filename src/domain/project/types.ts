@@ -6,6 +6,7 @@ import type {
 import type { FontId } from '../font/fontCatalog';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import type { Group } from '../group/types';
+import type { LayerBackground } from '../template/types';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -175,6 +176,11 @@ export interface NarrationLine {
   subtitleEnabled?: boolean;
   /** 明示開始秒（任意・簡易手動タイミング）。未指定＝直前行の積み上げ＝自動逐次。 */
   startSec?: number;
+  /**
+   * 直前の行と**同時に**開始する（＝並行して重ねて流す・ADR-0031）。true の連続で N 人同時。
+   * 未指定/false＝逐次（従来どおり）。startSec を保存しないので V18（重なり禁止）に触れない。
+   */
+  startWithPrevious?: boolean;
   /** 生成済み音声の保存先（行ごと）。 */
   voicePath?: string | null;
   status: NarrationStatus;
@@ -203,10 +209,23 @@ export interface Warning {
   autoFixed?: boolean;
 }
 
-/** FREE テンプレ場面の自由配置要素（ADR-0008）。id は scene 内一意。x/y/w/h は canvas(1920×1080) 基準。 */
+/** 実効話者キー（ADR-0029・P1-2）＝音声生成と同じ話者空間。number|null では既定声を表せないため判別 union。 */
+export type SpeakerKey =
+  | { kind: 'catalog'; speaker: number } // 明示話者（voiceCatalog の speaker 番号）
+  | { kind: 'default' }; // 既定声の行（継承 voiceId・catalog 番号なし・場面の既定へ動的追従）
+
+/** FREE 字幕要素の「対象」＝何を表示するか（ADR-0029）。未指定＝後方互換（単独→narration・掛け合い→allLines）。 */
+export type SubtitleSource =
+  | { kind: 'narration' } // 読み上げ（texts.subtitle・単独ナレーション）
+  | { kind: 'allLines' } // 掛け合い：全行（話者で絞らない）
+  | { kind: 'speaker'; speaker: SpeakerKey }; // 掛け合い：特定の実効話者の行のみ
+
+/** FREE テンプレ場面の自由配置要素（ADR-0008／字幕＝ADR-0029）。id は scene 内一意。x/y/w/h は canvas(1920×1080) 基準。 */
 export interface FreeElement {
   id: string;
   kind: FreeElementKind;
+  /** 任意の表示名（重ね順一覧/選択チップの見分け用・未設定＝種類＋連番の自動名にフォールバック・#525-12）。全 kind 共通・テンプレの Layer.name に相当。 */
+  name?: string;
   x: number;
   y: number;
   w: number;
@@ -237,10 +256,15 @@ export interface FreeElement {
   /** 枠線/縁取り（#173・任意）。strokeWidth>0 のとき描画。kind='shape'＝図形の枠線、kind='text'＝文字の縁取り（#209）。 */
   strokeColor?: string;
   strokeWidth?: number;
+  /** kind='text'/'subtitle' の背景帯（可読性の下地・#529）。enabled で描画。通常テンプレ字幕層の layer.background と同型・
+   *  通常→FREE 化で移送（ADR-0030）。未指定/enabled:false＝背景帯なし。 */
+  background?: LayerBackground;
   /** 非表示（レイヤー一覧で隠す・#210）。true のとき描画・操作対象から除外（未指定/false＝表示）。 */
   hidden?: boolean;
   /** ロック（レイヤー一覧で固定・#210）。true のときプレビュー上での移動/拡縮を禁止（未指定/false＝編集可）。 */
   locked?: boolean;
+  /** kind='subtitle' の「対象」（ADR-0029）。未指定＝後方互換（単独→読み上げ texts.subtitle・掛け合い→全行）。 */
+  subtitleSource?: SubtitleSource;
 }
 
 export interface Scene {
@@ -273,7 +297,7 @@ export interface Scene {
   slotClips?: Record<string, SlotClipOverride>;
   /** 動画スロット本体アニメの再生開始タイミング（ADR-0027・#444）。キー＝スロットの layer.id。未指定＝withAnim（アニメと同時）。スロット本体がアニメ対象の場面でのみ効く。 */
   slotVideoStart?: Record<string, VideoStartSpec>;
-  /** FREE テンプレ場面のみ：自由配置要素（ADR-0008）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
+  /** 自由配置要素（ADR-0008）。**有効なのは FREE テンプレ場面のときだけ**（描画/編集/事前確認/素材使用は category でゲート）。通常テンプレへ切り替えても休眠保持し FREE へ戻すと復元（ADR-0030）。未設定＝通常テンプレ（assetRefs/texts ベース）。 */
   freeLayout?: FreeElement[];
   /** 要素のグループ化（ADR-0022）。メンバー＝freeLayout 要素 id（ネストで group id も可）。未設定＝グループ無し。 */
   groups?: Group[];

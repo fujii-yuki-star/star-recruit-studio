@@ -35,7 +35,7 @@ describe('projectStore addScene / removeScene', () => {
     });
   });
 
-  it('addScene は末尾パートに既定テンプレの場面を追加し、新IDを返す', () => {
+  it('addScene は末尾パートに場面を追加し（見た目は末尾場面を引き継ぐ・#528）、新IDを返す', () => {
     const id = useProjectStore.getState().addScene();
     const st = useProjectStore.getState();
     expect(id).toBe('scene_003');
@@ -43,9 +43,19 @@ describe('projectStore addScene / removeScene', () => {
     expect(st.scenes[2].sceneId).toBe('scene_003');
     expect(st.scenes[2].partId).toBe('part_001');
     expect(st.scenes[2].order).toBe(3);
-    expect(st.scenes[2].templateId).toBe(sampleTemplates[0].templateId);
+    // 末尾場面（scene_002＝photo_intro）の見た目を引き継ぐ＝先頭テンプレ（opening）固定にしない（#528）。
+    expect(st.scenes[2].templateId).toBe('photo_left_text_right_yuko_v1');
+    expect(st.scenes[2].sceneType).toBe('photo_intro');
     expect(st.parts[0].sceneIds).toContain('scene_003');
     expect(st.saveStatus).toBe('idle'); // 変更で未保存に戻る
+  });
+
+  it('場面が無いときの addScene は先頭テンプレを使う（#528 フォールバック）', () => {
+    useProjectStore.setState({ scenes: [], parts: [] });
+    useProjectStore.getState().addScene();
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].templateId).toBe(sampleTemplates[0].templateId);
+    expect(st.scenes[0].sceneType).toBe(sampleTemplates[0].category);
   });
 
   it('removeScene は削除し order を 1..N に振り直す（パートからも除く）', () => {

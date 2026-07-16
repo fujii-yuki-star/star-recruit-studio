@@ -11,8 +11,8 @@ import { BgmPicker } from "../components/BgmPicker";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
-import { lineAudioKey } from "../../domain/project/narrationLines";
-import { lineSegments } from "../../domain/project/lineTimeline";
+import { lineAudioKey, lineDurationsFromAudio } from "../../domain/project/narrationLines";
+import { lineSegments, previewSubtitleSegment, firstFrameBoundary } from "../../domain/project/lineTimeline";
 import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
 import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
@@ -73,6 +73,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // 100%超（最大150%）の音量を書き出しと一致させる Web Audio 用の共有 AudioContext と、各再生の音量/ミュート制御（#452 P1）。
   const audioCtxRef: AudioCtxRef = useRef<AudioContext | null>(null);
   const narrationCtlRef = useRef<VolumeControl | null>(null);
+  // 同時開始（掛け合いの並行・ADR-0031）：いま鳴っている「同時グループ」の音量制御一覧。ライブの音量/ミュートを
+  // 全員へ反映する（単一 narrationCtlRef だけだと最後の1声にしか効かない）。グループ切替・cleanup でリセット。
+  const narrationGroupCtlsRef = useRef<VolumeControl[]>([]);
   const bgmCtlRef = useRef<VolumeControl | null>(null);
   // BGM 音量の最新値（100%境界の張り直し用 deps を bgmVolume>1 の真偽にするため、attach が読む実値は ref で持つ・#392/#465）。
   const bgmVolumeRef = useRef(1);
@@ -90,6 +93,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     mutedRef.current = muted;
     bgmCtlRef.current?.setMuted(muted);
     narrationCtlRef.current?.setMuted(muted);
+    narrationGroupCtlsRef.current.forEach((c) => c.setMuted(muted)); // 同時グループ（並行）は全員へ
   }, [muted]);
 
   // unmount で共有 AudioContext を閉じる（#452 P1）。
@@ -97,6 +101,19 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
 
   const safeIdx = Math.min(idx, Math.max(0, scenes.length - 1));
   const current = scenes[safeIdx];
+  // 字幕（ADR-0029・#386）は停止中/再生中とも書き出しと同じ sceneSegmentSpecs 由来にする（P1・パリティ）。
+  // - FREE 字幕＝previewSubtitleSegment（停止中は先頭 t=0、再生中は有効行/間）。
+  // - 通常テンプレの字幕レイヤー＝停止中は firstFrameBoundary（先頭正準フレーム・頭空白は subtitleText:null で非表示）、
+  //   再生中は undefined＝activeLineIndex 駆動。どちらも「先頭正準セグメント」から導く（SceneEditScreen と同流儀）。
+  // narrationAudioById は #382 に従い getState スナップショット読み（購読しない）＝activeLine/再生状態/場面が変わるたび再計算で追従。
+  const previewSubtitleState = useMemo(() => {
+    if (!current) return { segment: undefined, boundaryFrame: undefined };
+    const durations = lineDurationsFromAudio(current, useProjectStore.getState().narrationAudioById);
+    return {
+      segment: previewSubtitleSegment(current, durations, activeLine, playing),
+      boundaryFrame: !playing ? firstFrameBoundary(current, durations) : undefined,
+    };
+  }, [current, activeLine, playing]);
   // 現在の場面が変わったら、場面ジャンプの番号ストリップで今の場面を可視域へ寄せる（再生の進行にも追従・#413）。
   useEffect(() => {
     // scrollIntoView は一部環境（jsdom）に無いため任意呼び出し。
@@ -250,6 +267,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // 張り直さない＝音声だけ場面頭へ戻り映像/アニメ/テロップの時計と乖離する不整合を作らない（#465 レビュー P1）。
   useEffect(() => {
     narrationCtlRef.current?.setVolume(liveNarrationVolume);
+    narrationGroupCtlsRef.current.forEach((c) => c.setVolume(liveNarrationVolume)); // 同時グループも全員
   }, [liveNarrationVolume]);
   useEffect(() => {
     bgmVolumeRef.current = bgmVolume;
@@ -289,18 +307,27 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       const lineTimers: number[] = [];
       const lineAudios: HTMLAudioElement[] = [];
       const lineControls: VolumeControl[] = []; // 各行の音量制御。cleanup で GainNode グラフを切る（#465 P2）。
-      let currentAudio: HTMLAudioElement | undefined;
+      let groupAudios: HTMLAudioElement[] = []; // いま鳴っている同時グループ（新グループ開始でまとめて止める・ADR-0031）
+      narrationGroupCtlsRef.current = [];
       let cancelled = false; // クリーンアップ後に遅延スケジュールが走らないようにする。
       // 行を順に再生する“連鎖”。次の行への送りは「この行の窓（次の開始−この開始）」ぶん後だが、
       // その計測を**この行が実際に鳴り始めてから**にする＝再生開始の遅延で末尾が切れない（#掛け合い・①）。
       // 固定タイマー（場面頭からの絶対秒）だと、音声が遅れて鳴り始めたぶん前の行を早く止めて途切れていた。
       // 編集画面の全文再生・書き出しの行連結（各行を丸ごと連結）とパリティが取れる。
+      // 同時開始（ADR-0031）：開始秒が直前と同じ segs は「同時グループ」＝前を止めず重ねて流す（窓0で連鎖）。
       const playLine = (i: number): void => {
         if (cancelled || i >= segs.length) return;
-        currentAudio?.pause(); // 前の行の音声を止めてから次へ（被り防止）。
-        // segs と sc.lines のズレに依らず lineId で実体の行 index を引く（誤字幕防止・M-2）。
-        const lineIdx = lines.findIndex((l) => l.lineId === segs[i].lineId);
-        setActiveLine(lineIdx >= 0 ? lineIdx : 0);
+        // フィルタ済み segs では開始秒一致⟺同一グループ（各グループ開始＝前グループ末で厳密に増加）。
+        const simulWithPrev = i > 0 && segs[i].startSec === segs[i - 1].startSec;
+        if (!simulWithPrev) {
+          groupAudios.forEach((a) => a.pause()); // 前グループを止めてから次へ（被り防止）。同時グループ内では止めない。
+          groupAudios = [];
+          narrationGroupCtlsRef.current = [];
+          // 有効行＝グループの primary（アンカー）。同時メンバーでは変えない＝字幕はグループ spec で解決（並行の段積み）。
+          // segs と sc.lines のズレに依らず lineId で実体の行 index を引く（誤字幕防止・M-2）。
+          const lineIdx = lines.findIndex((l) => l.lineId === segs[i].lineId);
+          setActiveLine(lineIdx >= 0 ? lineIdx : 0);
+        }
         const scheduleNext = (): void => {
           if (cancelled) return;
           if (i + 1 < segs.length) {
@@ -316,13 +343,16 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         const u = narrationAudioById[lineAudioKey(sc.sceneId, segs[i].lineId)];
         if (u) {
           // 常に生成し attachVolume（≤1.0=.volume／>1.0=GainNode）で音量/ミュートを制御＝書き出しと一致＋即時ミュート（#452 P1）。
-          currentAudio = new Audio(u);
-          narrationAudioRef.current = currentAudio;
-          narrationCtlRef.current = attachVolume(audioCtxRef, currentAudio, readNarrationVolume(), mutedRef.current);
-          lineAudios.push(currentAudio);
-          lineControls.push(narrationCtlRef.current);
+          const audio = new Audio(u);
+          narrationAudioRef.current = audio;
+          const ctl = attachVolume(audioCtxRef, audio, readNarrationVolume(), mutedRef.current);
+          narrationCtlRef.current = ctl;
+          lineAudios.push(audio);
+          lineControls.push(ctl);
+          groupAudios.push(audio); // 同時グループの一員＝次グループ開始時にまとめて止める
+          narrationGroupCtlsRef.current.push(ctl); // ライブ音量/ミュートを全員へ
           // play() の解決＝再生開始。そこから窓を測って次へ。resolve/reject いずれでも一度だけ進む。
-          void currentAudio.play().then(scheduleNext, (e) => {
+          void audio.play().then(scheduleNext, (e) => {
             // 停止・場面送り・行切替で中断された AbortError は正常系＝偽の失敗通知/ログ汚染にしない
             // （単一ナレーション/BGM と同挙動・#392 レビュー）。進行は既存の scheduleNext（cancelled guard）に委ねる。
             if (!(e instanceof DOMException && e.name === "AbortError")) {
@@ -357,6 +387,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         lineControls.forEach((c) => c.dispose()); // 共有 ctx に古い source/gain を残さない（#465 P2）
         narrationAudioRef.current = null;
         narrationCtlRef.current = null;
+        narrationGroupCtlsRef.current = []; // 同時グループ参照も掃除（disposeは lineControls 側で実施済み）
         setActiveLine(0);
       };
     }
@@ -467,6 +498,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             scene={current}
             template={template}
             activeLineIndex={activeLine}
+            subtitleSegment={previewSubtitleState.segment}
+            boundaryFrame={previewSubtitleState.boundaryFrame}
             telops={activeTelops}
             timeSec={animTimeSec}
             animations={previewAnimations}

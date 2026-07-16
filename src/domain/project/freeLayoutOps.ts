@@ -2,8 +2,10 @@
 // 純粋関数（副作用なし）。store は updateScene 経由でこれらを呼び、結果の配列で freeLayout を差し替える。
 // ID 採番は createFreeElementId（§2.1・scene 内一意）に委譲する。
 import { DEFAULT_FIT, GEOM_MIN_SIZE } from '../constants';
-import { FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../enums';
+import { FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, TEXT_ALIGN } from '../enums';
 import type { FreeElementKind } from '../enums';
+import { composeGroupGeometry } from '../group/compose';
+import type { Group } from '../group/types';
 import { createFreeElementId } from './persistence';
 import type { FreeElement } from './types';
 
@@ -20,6 +22,15 @@ const DEFAULT_SHAPE_H = 400;
 const DEFAULT_TEXT = 'テキスト';
 const DEFAULT_TEXT_COLOR = '#222222';
 const DEFAULT_SHAPE_COLOR = '#cccccc';
+// 字幕要素（ADR-0029）：画面下寄りの字幕バー。表示文言は subtitleSource（対象）から解決＝el.text は持たない。
+const DEFAULT_SUBTITLE_X = 240;
+const DEFAULT_SUBTITLE_Y = 900;
+const DEFAULT_SUBTITLE_W = 1440;
+const DEFAULT_SUBTITLE_H = 120;
+const DEFAULT_SUBTITLE_FONT_SIZE = 52;
+const DEFAULT_SUBTITLE_COLOR = '#ffffff';
+const DEFAULT_SUBTITLE_STROKE = '#000000';
+const DEFAULT_SUBTITLE_STROKE_WIDTH = 6;
 // 上の既定値は横型 canvas（1920×1080）で見やすいよう調整した基準。実 canvas に合わせて比例縮尺し、
 // 縦型（1080×1920）でも要素が画面幅いっぱいで中央に寄って見える等の違和感を防ぐ（#273）。横型では係数1＝従来どおり。
 export const REF_CANVAS_W = 1920;
@@ -48,6 +59,14 @@ export function createFreeElement(
       return {
         ...base, kind, w: sx(DEFAULT_SHAPE_W), h: sy(DEFAULT_SHAPE_H),
         shapeType: FREE_SHAPE_TYPE.rect, fillColor: DEFAULT_SHAPE_COLOR, opacity: 1, radius: 0,
+      };
+    case FREE_ELEMENT_KIND.subtitle:
+      // 字幕バー（白文字＋黒縁で可読性）。文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。
+      // subtitleSource 未指定＝後方互換（単独→読み上げ・掛け合い→全行）。対象の選択は場面編集 UI（PR-C）で。
+      return {
+        ...base, kind, x: sx(DEFAULT_SUBTITLE_X), y: sy(DEFAULT_SUBTITLE_Y), w: sx(DEFAULT_SUBTITLE_W), h: sy(DEFAULT_SUBTITLE_H),
+        fontSize: sx(DEFAULT_SUBTITLE_FONT_SIZE), color: DEFAULT_SUBTITLE_COLOR, fontWeight: FONT_WEIGHT.bold,
+        textAlign: TEXT_ALIGN.center, strokeColor: DEFAULT_SUBTITLE_STROKE, strokeWidth: DEFAULT_SUBTITLE_STROKE_WIDTH,
       };
     default: {
       // FreeElementKind を網羅していることを型で保証する（kind 追加時はコンパイルエラー）。
@@ -132,6 +151,43 @@ export function applyFreeElementPositions(
     const m = byId.get(el.id);
     return m ? { ...el, x: m.x, y: m.y } : el;
   });
+}
+
+/**
+ * キーボード微調整（#525-11）：選択中の非ロック要素を**画面上 dx,dy** だけずらす移動リスト。
+ * ロック要素は動かさない（レイヤー一覧のロックと一貫・#210）。存在しない id は無視。applyFreeElementPositions と併用。
+ *
+ * 未所属・純並進グループのメンバー（合成後 w・rotation が素と一致）は base==画面ゆえ **base デルタ＝画面デルタ で厳密 1:1**。
+ * **拡縮/回転グループのメンバーは対象外**（＝#542 の canvas select-only と一貫・詳細パネルで編集）。理由：描画は
+ * composeGroupGeometry で anch（メンバー境界の中心）まわりに拡縮/回転するが、その anchor は base を動かすと再計算で
+ * ドリフトするため base→画面の写像が一意な線形逆変換にならない（内部メンバーは scale·R だが単一/縁メンバーは係数が変わり、
+ * 単一回転では逆方向になる）。よって「画面 1:1 で動かす」保証ができるのは純並進/未所属に限り、変形メンバーは動かさない
+ * （壊れて見える近似移動を出さない・ADR-0026／#525-11 レビュー P2）。混在選択でも未所属だけが 1:1 で動き、変形メンバーは据え置き。
+ */
+export function nudgeFreeElements(
+  freeLayout: FreeElement[], groups: ReadonlyArray<Group>, ids: ReadonlyArray<string>, dx: number, dy: number,
+): FreeElementMove[] {
+  const sel = new Set(ids);
+  const composed = groups.length > 0 ? composeGroupGeometry(freeLayout, groups) : null;
+  return freeLayout
+    .filter((el) => sel.has(el.id) && !el.locked)
+    .filter((el) => {
+      const cg = composed?.get(el.id);
+      return !cg || (cg.w === el.w && (cg.rotation ?? 0) === (el.rotation ?? 0)); // 未所属 or 純並進のみ（変形メンバーは select-only）
+    })
+    .map((el) => ({ id: el.id, x: el.x + dx, y: el.y + dy }));
+}
+
+/** キーボードの矢印キー → 移動量（px・#525-11）。Shift で 10px、通常 1px。矢印以外は null。 */
+export function keyboardNudgeDelta(key: string, shiftKey: boolean): { dx: number; dy: number } | null {
+  const step = shiftKey ? 10 : 1;
+  switch (key) {
+    case 'ArrowLeft': return { dx: -step, dy: 0 };
+    case 'ArrowRight': return { dx: step, dy: 0 };
+    case 'ArrowUp': return { dx: 0, dy: -step };
+    case 'ArrowDown': return { dx: 0, dy: step };
+    default: return null;
+  }
 }
 
 /**

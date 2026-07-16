@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.19" },
+    "schemaVersion": { "const": "1.23" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -331,7 +331,8 @@
       "required": ["id", "kind", "x", "y", "w", "h"],
       "properties": {
         "id": { "type": "string", "pattern": "^free_[0-9]{3,}$" },
-        "kind": { "enum": ["slot", "text", "shape"] },
+        "kind": { "enum": ["slot", "text", "shape", "subtitle"] },
+        "name": { "type": "string" },
         "x": { "type": "number" },
         "y": { "type": "number" },
         "w": { "type": "number", "exclusiveMinimum": 0 },
@@ -353,8 +354,39 @@
         "radius": { "type": "number", "minimum": 0 },
         "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
         "strokeWidth": { "type": "number", "minimum": 0 },
+        "background": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+            "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+            "radius": { "type": "number", "minimum": 0 }
+          }
+        },
         "hidden": { "type": "boolean" },
-        "locked": { "type": "boolean" }
+        "locked": { "type": "boolean" },
+        "subtitleSource": {
+          "description": "kind='subtitle' の対象（ADR-0029）。未指定＝後方互換（単独→読み上げ・掛け合い→全行）。",
+          "oneOf": [
+            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "narration" } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "allLines" } } },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "speaker"],
+              "properties": {
+                "kind": { "const": "speaker" },
+                "speaker": {
+                  "oneOf": [
+                    { "type": "object", "additionalProperties": false, "required": ["kind", "speaker"], "properties": { "kind": { "const": "catalog" }, "speaker": { "type": "integer", "minimum": 0 } } },
+                    { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "default" } } }
+                  ]
+                }
+              }
+            }
+          ]
+        }
       }
     },
     "AssetRefs": {
@@ -415,6 +447,7 @@
         "subtitleText": { "type": ["string", "null"] },
         "subtitleEnabled": { "type": "boolean" },
         "startSec": { "type": "number", "minimum": 0 },
+        "startWithPrevious": { "type": "boolean" },
         "voicePath": { "type": ["string", "null"] },
         "status": { "enum": ["none", "pending", "generated", "failed"] }
       }

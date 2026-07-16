@@ -206,6 +206,23 @@ describe('parseProjectDoc', () => {
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     expect(back.scenes[0].lines?.map((l) => l.speaker)).toEqual([3, 2]);
   });
+  it('同時開始：先頭行のフラグと startWithPrevious×startSec の併存を読込時に正規化する（ADR-0031・実装が無視する状態を残さない）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'tpl',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' },
+      lines: [
+        { lineId: 'line_001', text: 'A', startWithPrevious: true, status: 'none' }, // 先頭＝同時にする相手がいない→落とす
+        { lineId: 'line_002', text: 'B', startWithPrevious: true, startSec: 3, status: 'none' }, // 併存 startSec→落とす
+      ],
+      warnings: [],
+    };
+    const doc = { ...assembleProject(header(), [], [], []), scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.scenes[0].lines?.[0].startWithPrevious).toBeUndefined(); // 先頭の休眠フラグは落ちる
+    expect(back.scenes[0].lines?.[1].startWithPrevious).toBe(true); // 2行目は保持
+    expect(back.scenes[0].lines?.[1].startSec).toBeUndefined(); // 併存 startSec は落ちる
+  });
   it('FREE 回転：rotation を持つ旧版(1.8)が 1.9 へ移行し rotation を保持する（#208）', () => {
     const scene = {
       sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'free', templateId: 'free_canvas_v1',
@@ -308,6 +325,21 @@ describe('parseProjectDoc', () => {
     const back = parseProjectDoc(JSON.stringify(doc));
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.18→1.19 へ昇格（任意追加＝変換不要・欠落は asset.clip 継承）
     expect(back.scenes[0].slotClips).toEqual({ mainVisual: { startSec: 1, endSec: 5, speed: 1.5, useOriginalAudio: true, originalAudioVolume: 0.4 } });
+  });
+  it('FREE 背景帯：scene.freeLayout の FreeElement.background を持つ旧版(1.22)が移行し保持する（#529）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'free', templateId: 'free_canvas_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: {},
+      narration: { text: '', status: 'none' }, warnings: [],
+      freeLayout: [
+        { id: 'free_001', kind: 'text', x: 0, y: 0, w: 200, h: 60, text: 'あ', background: { enabled: true, color: '#112233', opacity: 0.4, radius: 8 } },
+        { id: 'free_002', kind: 'subtitle', x: 0, y: 80, w: 400, h: 80, background: { enabled: false } },
+      ],
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.22', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.22→1.23 へ昇格（任意追加＝変換不要）
+    expect(back.scenes[0].freeLayout).toEqual(scene.freeLayout); // 背景帯を取りこぼさず保持（migrateProject のスプレッド保持）
   });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;

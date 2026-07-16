@@ -122,6 +122,17 @@ describe("TemplateLayerOverlay", () => {
     expect(root.querySelector('[data-testid="tmpl-group-frame"]')).not.toBeNull();
   });
 
+  it("ネストした外側グループ（メンバーが子グループ id だけ）でも操作枠が出る（#525-10 レビュー）", () => {
+    const outer = { id: "group_002", members: ["group_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+    const { root } = renderOverlay({ groups: [grp, outer], activeGroupId: "group_002" });
+    expect(root.querySelector('[data-testid="tmpl-group-frame"]')).not.toBeNull(); // 旧実装は枠が消えていた
+  });
+
+  it("非表示グループを選択中でも操作枠（tmpl-group-frame）は出さない＝描画されないものを操作可能にしない（#525-9 レビュー）", () => {
+    const { root } = renderOverlay({ groups: [{ ...grp, hidden: true }], activeGroupId: "group_001" });
+    expect(root.querySelector('[data-testid="tmpl-group-frame"]')).toBeNull();
+  });
+
   it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform・#307）", () => {
     const onGroupTransform = vi.fn();
     const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });

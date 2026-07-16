@@ -4,6 +4,8 @@
 import { FIT, FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../enums';
 import { createFreeElementId } from './persistence';
 import { REF_CANVAS_W, REF_CANVAS_H } from './freeLayoutOps';
+import { createGroupFromSelection } from './groupOps';
+import type { Group } from '../group/types';
 import type { FreeElement } from './types';
 
 /** パーツの要素テンプレ。id は展開時に採番するため持たない。x/y はパーツ内の相対座標。 */
@@ -107,4 +109,22 @@ export function addFreeComponentGroup(
     newIds.push(id);
   });
   return { freeLayout: next, newIds };
+}
+
+/**
+ * 見た目パーツを展開し、複数要素なら**最初から1つのグループ**にまとめて返す（ADR-0022・#525-3）。
+ * まとまりとして移動/拡縮/回転/重ね順できる。グループ名はパーツ名（label）にして一覧で見分けやすくする（#525-12 と同趣旨）。
+ * 要素が1つ以下ならグループは作らない（`groupId=null`）。展開・採番・配置は addFreeComponentGroup に委譲。
+ * @returns 展開後 freeLayout・更新後 groups・追加要素 id・作成グループ id（未作成は null）。
+ */
+export function addFreeComponentAsGroup(
+  freeLayout: FreeElement[], groups: Group[], componentId: string,
+  canvasW: number = REF_CANVAS_W, canvasH: number = REF_CANVAS_H,
+): { freeLayout: FreeElement[]; groups: Group[]; newIds: string[]; groupId: string | null } {
+  const { freeLayout: nextLayout, newIds } = addFreeComponentGroup(freeLayout, componentId, canvasW, canvasH);
+  if (newIds.length < 2) return { freeLayout: nextLayout, groups, newIds, groupId: null };
+  const { groups: created, groupId } = createGroupFromSelection(groups, newIds);
+  const label = FREE_COMPONENTS.find((c) => c.id === componentId)?.label;
+  const named = label ? created.map((g) => (g.id === groupId ? { ...g, name: label } : g)) : created;
+  return { freeLayout: nextLayout, groups: named, newIds, groupId };
 }

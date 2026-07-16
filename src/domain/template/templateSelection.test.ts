@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Template } from './types';
-import { pickableTemplatesForScene } from './templateSelection';
+import { pickableTemplatesForScene, sceneCategoriesForOrientation } from './templateSelection';
 
 function tpl(over: Partial<Template> & Pick<Template, 'templateId' | 'category' | 'aspectRatio'>): Template {
   return {
@@ -45,5 +45,44 @@ describe('pickableTemplatesForScene（ADR-0012・#415）', () => {
     const r = pickableTemplatesForScene(all, 'photo_intro', '16:9', undefined);
     expect(r.options.map((t) => t.templateId)).toEqual(['photo_land']);
     expect(r.mismatchedCurrent).toBeUndefined();
+  });
+});
+
+describe('pickableTemplatesForScene：FREE 全場面化（0.4.2 動確）', () => {
+  const openLand = tpl({ templateId: 'open_land', category: 'opening', aspectRatio: '16:9' });
+  const closeLand = tpl({ templateId: 'close_land', category: 'closing', aspectRatio: '16:9' });
+  const freeLand = tpl({ templateId: 'free_land', category: 'free', aspectRatio: '16:9' });
+  const freePort = tpl({ templateId: 'free_port', category: 'free', aspectRatio: '9:16' });
+  const all = [openLand, closeLand, freeLand, freePort];
+
+  it('通常場面（opening）でも FREE（同じ向き）が候補に出る＝全場面で自由配置を選べる', () => {
+    const r = pickableTemplatesForScene(all, 'opening', '16:9', openLand);
+    expect(r.options.map((t) => t.templateId).sort()).toEqual(['free_land', 'open_land']); // closing/縦は出ない
+  });
+
+  it('FREE 場面はどのカテゴリの見た目へも切替可＝FREE 化から戻れる（同じ向き）', () => {
+    const r = pickableTemplatesForScene(all, 'free', '16:9', freeLand);
+    expect(r.options.map((t) => t.templateId).sort()).toEqual(['close_land', 'free_land', 'open_land']);
+    expect(r.mismatchedCurrent).toBeUndefined();
+  });
+
+  it('FREE の現行テンプレは通常場面でも「合っていない」にしない（同じ向きなら有効）', () => {
+    const r = pickableTemplatesForScene(all, 'opening', '16:9', freeLand); // opening 場面が FREE を使用中
+    expect(r.options.some((t) => t.templateId === 'free_land')).toBe(true);
+    expect(r.mismatchedCurrent).toBeUndefined();
+  });
+
+  it('向き不一致の FREE は mismatchedCurrent（縦 FREE を横型場面で使用中）', () => {
+    const r = pickableTemplatesForScene(all, 'opening', '16:9', freePort);
+    expect(r.mismatchedCurrent?.templateId).toBe('free_port'); // 向きが違えば FREE でも不一致
+    expect(r.options.some((t) => t.templateId === 'free_port')).toBe(false);
+  });
+});
+
+describe('sceneCategoriesForOrientation（種類の選択肢・#528）', () => {
+  // 先頭 describe の all（openingLand/photoLand/openingPort/openingLand2）を使う＝16:9 は opening/photo_intro、9:16 は opening。
+  it('その向きで1つ以上見た目がある全カテゴリを SCENE_CATEGORIES 順で返す（別向きは除外）', () => {
+    expect(sceneCategoriesForOrientation(all, '16:9')).toEqual(['opening', 'photo_intro']);
+    expect(sceneCategoriesForOrientation(all, '9:16')).toEqual(['opening']); // openingPort のみ 9:16
   });
 });

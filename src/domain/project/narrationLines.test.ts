@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
 import {
-  lineAudioKey, lineDurationsFromAudio, lineFromNarration, lineVoiceStem, liveNarrationAudioKeys, sceneLines,
+  lineAudioKey, lineDurationsFromAudio, lineFromNarration, lineVoiceStem, liveNarrationAudioKeys, normalizeDialogueTiming, sceneLines,
   sceneNeedsVoice, validateSceneLines, withLineStatus, withLineVoicePath,
 } from './narrationLines';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
@@ -227,5 +227,31 @@ describe('行ごと音声の補助（PR-C2）', () => {
     const multi = sceneWith({ lines: [{ lineId: 'line_001', text: 'a', status: NARRATION_STATUS.none }] });
     expect(withLineVoicePath(multi, 'line_001', 'voices/x.wav').lines?.[0].voicePath).toBe('voices/x.wav');
     expect(withLineVoicePath(sceneWith({}), 'line_001', null).narration.voicePath).toBeNull();
+  });
+});
+
+describe('normalizeDialogueTiming（同時開始の不変条件・ADR-0031）', () => {
+  const ln = (over: Partial<NarrationLine> & { lineId: string }): NarrationLine => ({ text: 'x', status: NARRATION_STATUS.none, ...over });
+
+  it('先頭行の startWithPrevious は落とす（並べ替え/削除で先頭になった休眠フラグの復活防止）', () => {
+    const s = sceneWith({ lines: [ln({ lineId: 'line_001', startWithPrevious: true }), ln({ lineId: 'line_002' })] });
+    expect(normalizeDialogueTiming(s).lines?.[0].startWithPrevious).toBeUndefined();
+  });
+
+  it('startWithPrevious の行の startSec は落とす（実装が無視＝併存を残さない）', () => {
+    const s = sceneWith({ lines: [ln({ lineId: 'line_001' }), ln({ lineId: 'line_002', startWithPrevious: true, startSec: 3 })] });
+    const n = normalizeDialogueTiming(s);
+    expect(n.lines?.[1].startWithPrevious).toBe(true);
+    expect(n.lines?.[1].startSec).toBeUndefined();
+  });
+
+  it('違反が無ければ同一参照（未保存/履歴にしない）＝先頭に startSec・2行目に同時フラグは正当', () => {
+    const s = sceneWith({ lines: [ln({ lineId: 'line_001', startSec: 2 }), ln({ lineId: 'line_002', startWithPrevious: true })] });
+    expect(normalizeDialogueTiming(s)).toBe(s);
+  });
+
+  it('単一 narration（lines 不在）は対象外（同一参照）', () => {
+    const s = sceneWith({});
+    expect(normalizeDialogueTiming(s)).toBe(s);
   });
 });

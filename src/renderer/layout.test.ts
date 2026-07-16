@@ -2,8 +2,25 @@ import { describe, expect, it } from 'vitest';
 import type { Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
-import { layoutScene } from './layout';
+import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas } from './layout';
 import { layoutToSvg } from './sceneSvg';
+import { wrapText } from './textWrap';
+
+// 字幕帯の実 [top, bottom]（描画と同じ wrapText の行数＋anchorBottom で算出・共有定数を参照）。段間の重なり検証に使う。
+const bandRect = (item: TextItem): { top: number; bottom: number } => {
+  const n = wrapText(item.text, item.w, item.fontSize, item.maxLines).length;
+  const lh = item.fontSize * DEFAULT_LINE_HEIGHT;
+  const top = item.y - (item.anchorBottom ? (n - 1) * lh : 0);
+  return { top, bottom: top + lh * n + item.fontSize * SUBTITLE_BAND_PAD_EM };
+};
+// 上→下に並べ、隣接帯が重ならない（上の下端 ≤ 下の上端）か。
+const noOverlap = (subs: TextItem[]): boolean => {
+  const rects = subs.map(bandRect).sort((a, b) => a.top - b.top);
+  for (let i = 0; i + 1 < rects.length; i += 1) if (rects[i].bottom > rects[i + 1].top + 1e-6) return false;
+  return true;
+};
+// 全帯がキャンバス上端内（top ≥ 0）か（#533 P2・画面外に切れない）。
+const allWithinCanvas = (subs: TextItem[]): boolean => subs.every((s) => bandRect(s).top >= 0);
 
 const openingTemplate: Template = {
   schemaVersion: '1.0',
@@ -90,6 +107,146 @@ describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413
     );
     expect(subs).toHaveLength(1);
     expect(subs[0].text).toBe('行の字幕');
+  });
+
+  it('同時開始：2人目の字幕を「上へ」自動配置＝重ならない別ボックス（ADR-0031・#530）', () => {
+    const dialogue = { ...scene, lines: [
+      { lineId: 'line_001', text: 'A', status: 'none' },
+      { lineId: 'line_002', text: 'B', startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    // primary（先頭話者）は subtitleText='A'、同時行 line_002 は parallelLineIds から解決。
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'A', startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, openingTemplate, { subtitleText: 'A', subtitleSegment: segment }));
+    expect(subs).toHaveLength(2); // primary＋2人目
+    const primary = subs.find((s) => s.text === 'A')!;
+    const second = subs.find((s) => s.text === 'B')!;
+    expect(primary.y).toBe(920); // テンプレ位置（画面下）
+    expect(primary.id).toBe('subtitle'); // primary は layer.id 据え置き（後方互換）
+    expect(second.y).toBeLessThan(920); // 2人目は上へ
+    expect(second.id).toBe('subtitle__sub1'); // 別ボックス（一意 id）
+    expect(noOverlap(subs)).toBe(true); // 重ならない
+  });
+
+  it('長文で各帯が2行に折れても重ならない（実折返し行数で段を詰める・#533 P1）', () => {
+    const long = 'あ'.repeat(50); // 幅1440/38≒37字ゆえ2行に折れる
+    const dialogue = { ...scene, lines: [
+      { lineId: 'line_001', text: long, status: 'none' },
+      { lineId: 'line_002', text: long, startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: long, startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, openingTemplate, { subtitleText: long, subtitleSegment: segment }));
+    expect(subs).toHaveLength(2);
+    expect(bandRect(subs[0]).bottom - bandRect(subs[0]).top).toBeGreaterThan(subs[0].fontSize * 1.9); // 実際に2行（1行帯より高い）
+    expect(noOverlap(subs)).toBe(true);
+  });
+
+  it('3人同時（長文混在）でも各帯が重ならない（N人）', () => {
+    const long = 'い'.repeat(45);
+    const dialogue = { ...scene, lines: [
+      { lineId: 'line_001', text: '短い', status: 'none' },
+      { lineId: 'line_002', text: long, startWithPrevious: true, status: 'none' },
+      { lineId: 'line_003', text: 'また短い', startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002', 'line_003'], subtitleText: '短い', startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, openingTemplate, { subtitleText: '短い', subtitleSegment: segment }));
+    expect(subs).toHaveLength(3);
+    expect(noOverlap(subs)).toBe(true);
+    expect(allWithinCanvas(subs)).toBe(true); // 3人は画面内に収まる
+  });
+
+  it('縦型（狭幅）で行数が増えても重ならない', () => {
+    const portrait: Template = {
+      ...openingTemplate, aspectRatio: '9:16', canvas: { width: 1080, height: 1920 },
+      layers: openingTemplate.layers.map((l) => (l.id === 'subtitle' ? { ...l, x: 60, y: 1600, w: 960 } : l)),
+    };
+    const long = 'う'.repeat(40); // 幅960/38≒25字ゆえ2行に折れる
+    const dialogue = { ...scene, lines: [
+      { lineId: 'line_001', text: long, status: 'none' },
+      { lineId: 'line_002', text: long, startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: long, startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, portrait, { subtitleText: long, subtitleSegment: segment }));
+    expect(subs).toHaveLength(2);
+    expect(noOverlap(subs)).toBe(true);
+    expect(allWithinCanvas(subs)).toBe(true); // 縦型2人も画面内
+  });
+});
+
+describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 P2）', () => {
+  const dialogueScene = (lines: unknown[]): Scene => ({ ...scene, lines } as Scene);
+  const groupLines = (n: number, text: string): unknown[] =>
+    Array.from({ length: n }, (_, i) => ({
+      lineId: `line_${String(i + 1).padStart(3, '0')}`, text, status: 'none',
+      ...(i > 0 ? { startWithPrevious: true } : {}),
+    }));
+
+  it('2〜3人（通常の長さ）は画面内＝はみ出さない（false）', () => {
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), openingTemplate)).toBe(false);
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(3, 'こんにちは')), openingTemplate)).toBe(false);
+  });
+
+  it('8人×長文はスタックが画面上端を超える＝はみ出す（true）＝警告対象', () => {
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(8, 'あ'.repeat(50))), openingTemplate)).toBe(true);
+  });
+
+  it('逐次（同時開始なし）は積まないので対象外（false）', () => {
+    const seq = dialogueScene([
+      { lineId: 'line_001', text: 'あ'.repeat(50), status: 'none' },
+      { lineId: 'line_002', text: 'あ'.repeat(50), status: 'none' }, // startWithPrevious なし＝逐次
+    ]);
+    expect(subtitleOverflowsCanvas(seq, openingTemplate)).toBe(false);
+  });
+
+  it('グループ transform で字幕層が上へ移動していれば、その実位置で判定する（実描画と一致・#533 レビュー）', () => {
+    // subtitle 層をグループで y=920→100 へ上げる。2人同時（長文2行）でも上端を超える＝true（生 y=920 なら収まる）。
+    const grouped: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: -820, rotation: 0, scale: 1 } }],
+    };
+    const long2 = dialogueScene(groupLines(2, 'あ'.repeat(50)));
+    expect(subtitleOverflowsCanvas(long2, grouped)).toBe(true);
+    expect(subtitleOverflowsCanvas(long2, openingTemplate)).toBe(false); // グループ無し＝生 y で収まる
+  });
+
+  it('字幕層がグループで非表示なら描画されない＝はみ出し判定の対象外（false）', () => {
+    const hidden: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
+    };
+    const many = dialogueScene(groupLines(8, 'あ'.repeat(50))); // 通常なら true だが非表示なので false
+    expect(subtitleOverflowsCanvas(many, hidden)).toBe(false);
+  });
+
+  it('2個目の字幕層のはみ出しも検出する（最初の層だけ見ない・#533 レビュー）', () => {
+    const twoSub: Template = {
+      ...openingTemplate,
+      layers: [
+        ...openingTemplate.layers,
+        { id: 'subtitle2', type: 'subtitle', textKey: 'subtitle', x: 240, y: 30, w: 1440, h: 90, zIndex: 51, fontSize: 38 },
+      ],
+    };
+    // 1個目（y=920）は収まるが、2個目（y=30・上寄り）は2人同時で上へ積むと画面上端を超える。
+    const twoPeople = dialogueScene(groupLines(2, 'こんにちは'));
+    expect(subtitleOverflowsCanvas(twoPeople, twoSub)).toBe(true);
+    expect(subtitleOverflowsCanvas(twoPeople, openingTemplate)).toBe(false); // 1層だけなら収まる
+  });
+
+  it('下方向への移動で下端がはみ出すのも検出する（上端だけ見ない）', () => {
+    const movedDown: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 100, rotation: 0, scale: 1 } }],
+    };
+    // subtitle が y=920→1020 へ下がると primary 帯の下端（≒1092）が 1080 を超える。
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), movedDown)).toBe(true);
+  });
+
+  it('90度回転で上下左右にはみ出すのも検出する（回転を判定に反映）', () => {
+    const rotated: Template = {
+      ...openingTemplate,
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 0, rotation: 90, scale: 1 } }],
+    };
+    // 幅1440の帯を90度回すと縦≒1440になり、字幕位置を中心に上下へ大きくはみ出す。
+    expect(subtitleOverflowsCanvas(dialogueScene(groupLines(2, 'こんにちは')), rotated)).toBe(true);
   });
 });
 
@@ -404,6 +561,25 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(item?.fontId).toBe('gen-interface-jp-display');
   });
 
+  it('FREE text/subtitle の背景帯（el.background.enabled）が TextItem.background に反映される（#529・可読性の下地）', () => {
+    const bgScene: Scene = {
+      ...freeScene,
+      texts: { subtitle: 'ナレ字幕' }, // subtitle(narration) の解決元＝scene.texts.subtitle
+      freeLayout: [
+        { id: 'free_001', kind: 'text', x: 0, y: 0, w: 400, h: 100, zIndex: 5, text: 'あ', fontSize: 40, background: { enabled: true, color: '#112233', opacity: 0.4, radius: 8 } },
+        { id: 'free_002', kind: 'subtitle', x: 0, y: 200, w: 400, h: 100, zIndex: 6, subtitleSource: { kind: 'narration' }, background: { enabled: true } }, // 既定値で埋まる
+        { id: 'free_003', kind: 'text', x: 0, y: 400, w: 400, h: 100, zIndex: 7, text: 'い', background: { enabled: false } }, // OFF → 帯なし
+        { id: 'free_004', kind: 'text', x: 0, y: 600, w: 400, h: 100, zIndex: 8, text: 'う' }, // 未指定 → 帯なし
+      ],
+    } as unknown as Scene;
+    const items = layoutScene(bgScene, freeTemplate).items;
+    const byId = (id: string) => items.find((i): i is TextItem => i.kind === 'text' && i.id === id)!;
+    expect(byId('free_001').background).toEqual({ color: '#112233', opacity: 0.4, radius: 8 });
+    expect(byId('free_002').background).toEqual({ color: '#000000', opacity: 0.55, radius: 16 }); // enabled のみ＝既定で補完
+    expect(byId('free_003').background).toBeUndefined(); // enabled:false は帯を付けない
+    expect(byId('free_004').background).toBeUndefined(); // 未指定も帯なし（後方互換）
+  });
+
   it('通常テンプレ（category!==free）の場面に freeLayout が付いていても描画しない（category ガード）', () => {
     // 防御: 通常テンプレ（opening）に誤って freeLayout が混入しても無視する。
     const sceneWithStrayFree: Scene = {
@@ -523,5 +699,61 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     const items = layoutScene(withHidden, freeTemplate).items;
     expect(items.find((i) => i.id === 'free_001')).toBeUndefined(); // 非表示は除外
     expect(items.find((i) => i.id === 'free_002')).toBeDefined();
+  });
+});
+
+describe('layoutScene：FREE 字幕要素の描画（ADR-0029）', () => {
+  const freeTemplate: Template = {
+    schemaVersion: '1.0', templateId: 'free_v1', name: 'FREE', category: 'free',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 }, layers: [],
+  } as Template;
+  const subEl = (subtitleSource?: unknown) => ({
+    id: 'free_sub', kind: 'subtitle', x: 240, y: 900, w: 1440, h: 120,
+    fontSize: 52, color: '#ffffff', strokeColor: '#000000', strokeWidth: 6,
+    ...(subtitleSource ? { subtitleSource } : {}),
+  });
+  const subItem = (layout: { items: LayoutItem[] }): TextItem | undefined =>
+    layout.items.find((i): i is TextItem => i.kind === 'text' && i.isSubtitle);
+
+  it('単独ナレーション：subtitleSource 未指定は texts.subtitle を字幕として描く（isSubtitle=true・el 体裁）', () => {
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', texts: { subtitle: '読み上げの字幕' }, freeLayout: [subEl()] } as unknown as Scene;
+    const item = subItem(layoutScene(s, freeTemplate));
+    expect(item?.text).toBe('読み上げの字幕');
+    expect(item?.isSubtitle).toBe(true);
+    expect(item?.color).toBe('#ffffff');
+    expect(item?.strokeWidth).toBe(6);
+  });
+
+  it('subtitleEnabledDefault=false は単独字幕を描かない', () => {
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', texts: { subtitle: 'S' }, subtitleEnabledDefault: false, freeLayout: [subEl()] } as unknown as Scene;
+    expect(subItem(layoutScene(s, freeTemplate))).toBeUndefined();
+  });
+
+  it('掛け合い allLines：opts.subtitleSegment の字幕を描く（正準セグメント＝プレビュー=書き出し）', () => {
+    const lines = [{ lineId: 'line_001', text: 'A', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'B', speaker: 2, status: 'none' }];
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', lines, freeLayout: [subEl({ kind: 'allLines' })] } as unknown as Scene;
+    const item = subItem(layoutScene(s, freeTemplate, { subtitleSegment: { lineId: 'line_001', subtitleText: 'A', startSec: 0, durationSec: 4, isFirst: true } }));
+    expect(item?.text).toBe('A');
+    expect(item?.isSubtitle).toBe(true);
+  });
+
+  it('掛け合い allLines：間（isGap）セグメントでは描かない', () => {
+    const lines = [{ lineId: 'line_001', text: 'A', status: 'none' }];
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', lines, freeLayout: [subEl({ kind: 'allLines' })] } as unknown as Scene;
+    expect(subItem(layoutScene(s, freeTemplate, { subtitleSegment: { isGap: true, subtitleText: null, startSec: 0, durationSec: 2, isFirst: true } }))).toBeUndefined();
+  });
+
+  it('掛け合い speaker：対象話者(catalog 3)の行だけ描く（他話者のセグメントは非表示＝二重描画にしない）', () => {
+    const lines = [{ lineId: 'line_001', text: 'A', speaker: 3, status: 'none' }, { lineId: 'line_002', text: 'B', speaker: 2, status: 'none' }];
+    const s = { ...scene, sceneType: 'free', templateId: 'free_v1', lines, freeLayout: [subEl({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } })] } as unknown as Scene;
+    const hit = subItem(layoutScene(s, freeTemplate, { subtitleSegment: { lineId: 'line_001', subtitleText: 'A', startSec: 0, durationSec: 4, isFirst: true } }));
+    expect(hit?.text).toBe('A');
+    const miss = subItem(layoutScene(s, freeTemplate, { subtitleSegment: { lineId: 'line_002', subtitleText: 'B', startSec: 4, durationSec: 4, isFirst: false } }));
+    expect(miss).toBeUndefined();
+  });
+
+  it('通常テンプレ（非 FREE）は freeLayout の字幕要素を描かない（category ガード）', () => {
+    const s = { ...scene, freeLayout: [subEl()] } as unknown as Scene;
+    expect(layoutScene(s, openingTemplate).items.some((i) => i.id === 'free_sub')).toBe(false);
   });
 });

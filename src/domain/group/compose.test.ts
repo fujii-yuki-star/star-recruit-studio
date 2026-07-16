@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeGroupGeometry, isHiddenByGroup, type Geom } from './compose';
+import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame, type Geom } from './compose';
 import type { Group, GroupTransform } from './types';
 
 const I: GroupTransform = { x: 0, y: 0, rotation: 0, scale: 1 };
@@ -113,5 +113,103 @@ describe('isHiddenByGroup', () => {
 
   it('グループ無しは false', () => {
     expect(isHiddenByGroup('a', [])).toBe(false);
+  });
+});
+
+describe('isGroupHidden（自身＋祖先・#525-9 レビュー）', () => {
+  it('グループ自身が hidden なら true（isHiddenByGroup は祖先のみゆえ自身を足す）', () => {
+    const groups = [g('group_001', ['a'], {}, { hidden: true })];
+    expect(isGroupHidden('group_001', groups)).toBe(true);
+    expect(isHiddenByGroup('group_001', groups)).toBe(false); // 自身は見ない（差分の確認）
+  });
+
+  it('祖先グループが hidden なら true（ネスト）', () => {
+    const groups = [
+      g('group_001', ['a']),
+      g('group_002', ['group_001'], {}, { hidden: true }),
+    ];
+    expect(isGroupHidden('group_001', groups)).toBe(true);
+  });
+
+  it('非表示でない/存在しないグループは false', () => {
+    const groups = [g('group_001', ['a'])];
+    expect(isGroupHidden('group_001', groups)).toBe(false);
+    expect(isGroupHidden('group_999', groups)).toBe(false);
+  });
+});
+
+describe('orientedGroupFrame（回転メンバー込みで pivot が描画と一致・#525-10）', () => {
+  // A＝非回転、B＝90°回転（縦長化）で bbox が回転前後で変わる非対称配置。
+  const A = { id: 'a', x: 0, y: 0, w: 100, h: 100 };
+  const B = { id: 'b', x: 200, y: 0, w: 100, h: 20, rotation: 90 };
+  const centerOf = (r: Geom) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+
+  it('回転メンバーなしは素の外接矩形（後方互換）', () => {
+    const els = [{ id: 'a', x: 10, y: 20, w: 30, h: 40 }, { id: 'b', x: 100, y: 100, w: 20, h: 20 }];
+    const f = orientedGroupFrame(g('group_001', ['a', 'b']), els, []);
+    expect(f).not.toBeNull();
+    expect(f!.cx).toBeCloseTo(65, 5); // bbox (10,20)-(120,120) 中心
+    expect(f!.cy).toBeCloseTo(70, 5);
+    expect(f!.w).toBeCloseTo(110, 5);
+    expect(f!.h).toBeCloseTo(100, 5);
+  });
+
+  it('回転メンバーを含むと中心が回転後 AABB 基準になる（素の bbox 中心 150,50 とは異なる）', () => {
+    const f = orientedGroupFrame(g('group_001', ['a', 'b']), [A, B], []);
+    expect(f!.cx).toBeCloseTo(130, 5);
+    expect(f!.cy).toBeCloseTo(30, 5);
+  });
+
+  it('枠中心＝composeGroupGeometry の拡縮 pivot（回転メンバー込み・不動点で照合）', () => {
+    const frame = orientedGroupFrame(g('group_001', ['a', 'b']), [A, B], [])!;
+    const c1 = centerOf(composeGroupGeometry([A, B], [g('group_001', ['a', 'b'], { scale: 1 })]).get('a')!);
+    const c2 = centerOf(composeGroupGeometry([A, B], [g('group_001', ['a', 'b'], { scale: 2 })]).get('a')!);
+    // scale の不動点 F：center(scale2)=F+(center(scale1)-F)*2 ⇒ F=2*c1-c2。枠中心と一致すれば pivot が描画と同じ。
+    expect(2 * c1.x - c2.x).toBeCloseTo(frame.cx, 5);
+    expect(2 * c1.y - c2.y).toBeCloseTo(frame.cy, 5);
+  });
+
+  it('枠中心＝composeGroupGeometry の回転 pivot（回転で中心が不動）', () => {
+    const frame = orientedGroupFrame(g('group_001', ['a', 'b']), [A, B], [])!;
+    // 90°回転しても枠中心まわりに回るだけ＝メンバー集合の重心（回転後 AABB 基準）は枠中心のまわりで対称に動く。
+    const r0 = composeGroupGeometry([A, B], [g('group_001', ['a', 'b'], { rotation: 0 })]);
+    const r90 = composeGroupGeometry([A, B], [g('group_001', ['a', 'b'], { rotation: 90 })]);
+    // メンバー a の中心が枠中心まわりに 90°回った位置に来る（pivot が frame 中心である証拠）。
+    const p0 = centerOf(r0.get('a')!);
+    const p90 = centerOf(r90.get('a')!);
+    // (p0 - center) を 90°CW 回すと (p90 - center) になる：(dx,dy)->(-dy,dx)。
+    const dx = p0.x - frame.cx, dy = p0.y - frame.cy;
+    expect(frame.cx - dy).toBeCloseTo(p90.x, 5);
+    expect(frame.cy + dx).toBeCloseTo(p90.y, 5);
+  });
+
+  it('平行移動・scale・rotation を反映する', () => {
+    const f = orientedGroupFrame(g('group_001', ['a', 'b'], { x: 10, y: -5, scale: 2, rotation: 30 }), [A, B], []);
+    expect(f!.cx).toBeCloseTo(140, 5); // 130 + 10
+    expect(f!.cy).toBeCloseTo(25, 5); // 30 - 5
+    expect(f!.w).toBeCloseTo(520, 5); // 260 * 2
+    expect(f!.h).toBeCloseTo(280, 5); // 140 * 2
+    expect(f!.rotation).toBeCloseTo(30, 5);
+  });
+
+  it('ネスト：外側グループ（メンバーが子グループ id だけ）でも枠が出て pivot が描画と一致（#525-10 レビュー）', () => {
+    const els = [{ id: 'a', x: 0, y: 0, w: 100, h: 100 }, { id: 'b', x: 200, y: 0, w: 100, h: 100 }];
+    const inner = g('group_001', ['a', 'b']); // 子グループ（a,b をまとめる）
+    const outer = (scale: number) => g('group_002', ['group_001'], { scale }); // 外側＝子グループ id だけを持つ
+    const f = orientedGroupFrame(outer(2), els, [inner, outer(2)]);
+    expect(f).not.toBeNull(); // ← 旧実装は null＝外側グループの枠が消える（本レビューの P2）
+    expect(f!.cx).toBeCloseTo(150, 5); // 子 bbox (0,0,300,100) 中心
+    expect(f!.cy).toBeCloseTo(50, 5);
+    expect(f!.w).toBeCloseTo(600, 5); // 300 * 2
+    expect(f!.h).toBeCloseTo(200, 5); // 100 * 2
+    // 外側グループ拡縮の不動点＝枠中心（ネストでも pivot が描画と一致）。
+    const c1 = centerOf(composeGroupGeometry(els, [inner, outer(1)]).get('a')!);
+    const c2 = centerOf(composeGroupGeometry(els, [inner, outer(2)]).get('a')!);
+    expect(2 * c1.x - c2.x).toBeCloseTo(f!.cx, 5);
+    expect(2 * c1.y - c2.y).toBeCloseTo(f!.cy, 5);
+  });
+
+  it('メンバー不在は null', () => {
+    expect(orientedGroupFrame(g('group_001', ['zzz']), [A], [])).toBeNull();
   });
 });

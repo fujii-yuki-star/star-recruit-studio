@@ -3,9 +3,15 @@
 // scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
 import { SCENE_MIN_DURATION_SEC } from '../constants';
-import { NARRATION_STATUS } from '../enums';
-import type { Layer } from '../template/types';
-import type { Part, Scene } from './types';
+import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } from '../enums';
+import type { SceneCategory } from '../enums';
+import type { Layer, Template } from '../template/types';
+import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
+import { effectiveLayerZ } from '../template/layerOrder';
+import { normalizeDialogueTiming } from './narrationLines';
+import { createFreeElementId } from './persistence';
+import { defaultSubtitleSource } from './subtitleBinding';
+import type { FreeElement, Part, Scene } from './types';
 
 /** 各パートの sceneIds を、現在の scenes 配列順（パート所属は保持）に合わせて作り直す。 */
 export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
@@ -16,31 +22,152 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
 }
 
 /**
- * 場面の見た目パターン（テンプレ）を切り替えた結果を返す＝参照スコープの補正（issue #236 の清算ポリシー）。
- * - **assetRefs / slotFits は清算する**：新テンプレに無いスロット（`background`/`slot`/`logo` レイヤーの id）への
- *   参照/収め方を捨てる（11 §5＝キー集合 ⊆ テンプレのスロット id 集合。実在しないスロットへのダングリングを残さない）。
+ * 場面の見た目パターン（テンプレ）を切り替えた結果を返す＝参照スコープの補正（#236 ＋ ADR-0030 の非破壊往復・Option A）。
+ * - **assetRefs / slotFits は「通常テンプレへ切り替えるときだけ」清算する**（ADR-0030）：新テンプレに無いスロット
+ *   （`background`/`slot`/`logo` レイヤーの id）への参照/収め方を捨てる（11 §5＝キー ⊆ スロット id）。**FREE へ切り替える
+ *   ときは清算せず休眠保持し、通常テンプレへ戻すと自動復元する**（ダングリングは実効使用ゲート `sceneActiveAssetIds` で無害化済み・#524 P1）。
  * - **texts / textFontIds は保持する**：これらは固定の `TextKey` enum がキーでテンプレ非依存ゆえダングリングにならず、
  *   別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と非対称だが**意図的**（#236＝保持を採用）。
  *   ※ 将来この非対称を「揃える」目的で texts を清算しないこと（利用者の入力消失になる）。
  * - **warnings はクリアする**：旧テンプレ基準の検証結果（例: 必須スロット未設定）は切替で陳腐化するため引き継がない＝
  *   再検証前提（`duplicateSceneInList`/`splitSceneInList` と同ポリシー）。残すと存在しないスロットの警告などが誤って残る。
+ * - **sceneType は新テンプレのカテゴリに追従する**（0.4.2 動確・FREE 全場面化）：見た目とカテゴリを常に一致させ、
+ *   FREE を選べば自由配置に、通常テンプレを選べばその役割に変換する（ピッカーの整合＝`pickableTemplatesForScene` と対）。
+ *   newCategory 未指定（旧呼び出し）は sceneType 据え置き（後方互換）。
+ * - **通常→FREE は表示中の内容を `freeLayout` へ seed する**（ADR-0030・#524 P1）：旧テンプレ（`prevTemplate`）のスロット素材＋
+ *   文字を FreeElement へ変換して持ち込む（`freeLayout` が空のときだけ＝既存の自由配置は上書きしない）。これで FREE 化で
+ *   写真・動画・文字が無言消失しない（§2-2）。`prevTemplate` 未指定（旧呼び出し・テスト）は seed しない（後方互換）。
+ * - **`freeLayout` は保持（休眠）**：通常テンプレへ戻しても消さない（`texts` と同じ #236 の非対称の延長・ADR-0030）。
+ *   通常テンプレでは描画/編集/事前確認/素材使用の対象外（実効表現＝category でゲート）＝休眠データが悪さをしない（P2）。
  */
-export function switchSceneTemplate(scene: Scene, newTemplateId: string, newTemplateLayers: Layer[]): Scene {
+export function switchSceneTemplate(
+  scene: Scene,
+  newTemplateId: string,
+  newTemplateLayers: Layer[],
+  newCategory?: SceneCategory,
+  prevTemplate?: Template,
+): Scene {
   const slotIds = new Set(
     newTemplateLayers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id),
   );
-  // slotFits も新テンプレのスロット id 集合で清算（assetRefs と同ポリシー＝11 §5・キー ⊆ スロット id）。空なら未設定に。
-  const keptFits = scene.slotFits
-    ? Object.fromEntries(Object.entries(scene.slotFits).filter(([k]) => slotIds.has(k)))
-    : undefined;
+  const toFree = newCategory === FREE_CATEGORY;
+  // FREE へ切り替えるときは通常配置（assetRefs/slotFits）を休眠のまま保持し、通常テンプレへ戻すと自動復元する（ADR-0030・非破壊往復）。
+  // 通常テンプレへ切り替えるときは #236 どおり新スロット id へ清算＝休眠していた一致分が復元される（ダングリングは sceneActiveAssetIds で無害化済み）。
+  const nextAssetRefs = toFree
+    ? scene.assetRefs
+    : Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k)));
+  const keptFits = toFree
+    ? scene.slotFits
+    : scene.slotFits
+      ? Object.fromEntries(Object.entries(scene.slotFits).filter(([k]) => slotIds.has(k)))
+      : undefined;
+  // 通常→FREE：表示中の配置内容（スロット素材＋文字＋字幕＋立ち絵）を freeLayout へ seed（空のときだけ・ADR-0030）。旧テンプレの幾何が要る。
+  const seeded =
+    newCategory === FREE_CATEGORY &&
+    prevTemplate &&
+    prevTemplate.category !== FREE_CATEGORY &&
+    (scene.freeLayout?.length ?? 0) === 0
+      ? freeLayoutFromPlacedContent(scene, prevTemplate)
+      : undefined;
   return {
     ...scene,
     templateId: newTemplateId,
-    assetRefs: Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k))),
+    sceneType: newCategory ?? scene.sceneType, // 見た目のカテゴリに追従（未指定は据え置き＝後方互換）
+    assetRefs: nextAssetRefs,
     slotFits: keptFits && Object.keys(keptFits).length ? keptFits : undefined,
+    // 通常→FREE の seed 結果があれば freeLayout を差し替え（空 seed・非該当は ...scene の freeLayout を休眠保持）。
+    ...(seeded && seeded.elements.length ? { freeLayout: seeded.elements } : {}),
+    // 動画クリップ調整（範囲/速度/元音声）を旧層 id → 新 FREE 要素 id へ移送（#524 P1）。旧キーは休眠のまま残す（往復）。
+    ...(seeded && Object.keys(seeded.slotClips).length ? { slotClips: { ...scene.slotClips, ...seeded.slotClips } } : {}),
     // texts / textFontIds は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。
     warnings: [],
   };
+}
+
+/**
+ * 通常テンプレの「表示中の配置内容」を FREE 要素へ変換する（ADR-0030・通常→FREE の seed 用）。純粋関数。
+ * 旧テンプレのレイヤー幾何（x/y/w/h/rotation/zIndex）ごと、以下を FreeElement へ写す（表示されていないものは持ち込まない）:
+ * - スロット層（background/slot/logo）の素材（`assetRefs`）→ slot 要素。**動画クリップ調整（`slotClips`）は新 id へ移送**（#524 P1）。
+ * - 立ち絵層（character）の `scene.character.poseAssetId` → slot 要素（画像）。`scene.character` は休眠保持（往復で戻る・#524 P1）。
+ * - 文字層（text）のテキスト（`texts`）→ text 要素。
+ * - 字幕層（subtitle）→ subtitle 要素（`subtitleSource`＝単独 narration／掛け合い allLines・ADR-0029）。字幕が出る場面のみ（#524 P1）。
+ * 装飾レイヤー（shape/背景色）は対象外＝意匠。字幕/文字の背景帯（`layer.background`）は FreeElement.background へ移送する（#529）。
+ * 戻り値の `slotClips` は「新 FREE 要素 id → クリップ調整」（呼び出し側 `switchSceneTemplate` が既存 `slotClips` へマージ）。
+ */
+export function freeLayoutFromPlacedContent(
+  scene: Scene,
+  template: Template,
+): { elements: FreeElement[]; slotClips: NonNullable<Scene['slotClips']> } {
+  const elements: FreeElement[] = [];
+  const slotClips: NonNullable<Scene['slotClips']> = {};
+  const nextId = (): string => createFreeElementId(elements.map((e) => e.id));
+  // 通常描画（layoutScene）と同じくグループ transform を前合成し、非表示グループのメンバーは持ち込まない（ADR-0022・#524 P1）。
+  // これで生の layer.x/y/w/h ではなく「実効配置」を FREE 要素へ写す＝グループ利用テンプレでも FREE 化直後に崩れない。
+  const groups = template.groups ?? [];
+  const layerGeom = composeGroupGeometry(template.layers, groups);
+  // 字幕を出す場面か（単独＝texts.subtitle が非空かつ OFF でない／掛け合い＝行がある）。出ない場面は空の字幕要素を作らない。
+  const hasLines = (scene.lines?.length ?? 0) > 0;
+  const staticSubtitle = scene.texts[TEXT_KEY.subtitle];
+  const showsSubtitle =
+    hasLines || (!!staticSubtitle && staticSubtitle.length > 0 && scene.subtitleEnabledDefault !== false);
+  for (const layer of template.layers) {
+    if (isHiddenByGroup(layer.id, groups)) continue; // 非表示グループのメンバーは変換しない（通常描画と一致）
+    const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h, rotation: layer.rotation };
+    const geom = {
+      x: cg.x,
+      y: cg.y,
+      w: cg.w,
+      h: cg.h,
+      ...(cg.rotation ? { rotation: cg.rotation } : {}),
+      zIndex: effectiveLayerZ(layer), // 実効 z（明示 zIndex 優先・無ければ種別既定）＝通常描画と重なり順が一致（#524 P2）
+    };
+    if (layer.type === 'background' || layer.type === 'slot' || layer.type === 'logo') {
+      const assetId = scene.assetRefs[layer.id];
+      if (!assetId) continue; // 空スロットは持ち込まない
+      const id = nextId();
+      elements.push({ id, kind: FREE_ELEMENT_KIND.slot, ...geom, assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit });
+      const clip = scene.slotClips?.[layer.id];
+      if (clip) slotClips[id] = clip; // 動画クリップ調整を新 id へ移送（#524 P1）
+    } else if (layer.type === 'character') {
+      const poseId = scene.character?.poseAssetId;
+      if (!poseId) continue; // ポーズ未設定は持ち込まない
+      // 立ち絵は slot 要素（画像）で持ち込む＝FREE で見えて自由に動かせる。scene.character は休眠保持（往復で戻る）。
+      elements.push({ id: nextId(), kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: poseId, fit: layer.fit ?? FIT.contain });
+    } else if (layer.type === 'text' && layer.textKey) {
+      const text = scene.texts[layer.textKey];
+      if (!text) continue; // 空文字は持ち込まない
+      elements.push({
+        id: nextId(),
+        kind: FREE_ELEMENT_KIND.text,
+        ...geom,
+        text,
+        fontSize: layer.fontSize,
+        color: layer.color,
+        fontWeight: layer.fontWeight,
+        fontId: scene.textFontIds?.[layer.textKey],
+        ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
+        ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+        ...(layer.background != null ? { background: layer.background } : {}), // 背景帯（可読性の下地）も移送（#529）
+      });
+    } else if (layer.type === 'subtitle') {
+      if (!showsSubtitle) continue; // 字幕が出ない場面は空の字幕要素を作らない
+      // 表示文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。単独→narration／掛け合い→allLines。
+      elements.push({
+        id: nextId(),
+        kind: FREE_ELEMENT_KIND.subtitle,
+        ...geom,
+        subtitleSource: defaultSubtitleSource(scene),
+        fontSize: layer.fontSize,
+        color: layer.color,
+        fontWeight: layer.fontWeight,
+        fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
+        ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
+        ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+        ...(layer.background != null ? { background: layer.background } : {}), // 字幕の背景帯（可読性の下地）を移送（#529）
+      });
+    }
+  }
+  return { elements, slotClips };
 }
 
 /** order を配列順に 1..N で振り直す。 */
@@ -191,8 +318,9 @@ export function splitSceneLinesInList(
   const len1 = firstLines.reduce((n, l) => n + l.text.length, 0);
   const len2 = secondLines.reduce((n, l) => n + l.text.length, 0);
   const [d1, d2] = apportionDuration(src.durationSec, len1, len2);
-  const first: Scene = { ...src, durationSec: d1, lines: firstLines, warnings: [] };
-  const second: Scene = { ...src, sceneId: newSceneId, durationSec: d2, lines: secondLines, warnings: [] };
+  // 後半の先頭になった同時開始フラグを落とす（前と同時にする相手がいない・ADR-0031）。startSec は上で自動逐次へ戻し済み。
+  const first: Scene = normalizeDialogueTiming({ ...src, durationSec: d1, lines: firstLines, warnings: [] });
+  const second: Scene = normalizeDialogueTiming({ ...src, sceneId: newSceneId, durationSec: d2, lines: secondLines, warnings: [] });
   const next = [...scenes];
   next.splice(idx, 1, first, second);
   const reordered = reindexOrder(next);

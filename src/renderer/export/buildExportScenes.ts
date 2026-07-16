@@ -6,7 +6,7 @@ import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
-import { sceneSegmentSpecs } from '../../domain/project/lineTimeline';
+import { sceneSegmentSpecs, segmentLineIds } from '../../domain/project/lineTimeline';
 import { animationsEndSec, sceneAnimationActive, slotIsAnimated } from '../../domain/project/sceneAnimation';
 import { resolveVideoStartDelaySec } from '../../domain/project/videoStartTiming';
 import { layoutScene } from '../layout';
@@ -90,6 +90,9 @@ export interface ExportSceneData {
   durationSec: number;
   audioBase64?: string;
   narrationVolume?: number;
+  /** 同時開始（掛け合いの並行・ADR-0031）：この区間で audioBase64（primary）と**同時に**流す他行のナレーション。
+   *  非空のとき Rust が audioBase64 と全本を amix（delaySec 秒に配置・windowSec 窓で切り詰め）。非動画の掛け合いで使う。 */
+  narrationSegments?: { audioBase64: string; delaySec: number; windowSec: number }[];
   /** 窓 Frames セグメント（#442・動画スロット本体アニメ）のクリップ元音声（**複数動画スロット対応＝各スロット1本**）。
    *  非空のとき Rust が audioBase64（ナレーション）と全本を amix する（アニメ区間から再生される元音声・useOriginalAudio のスロットぶん）。 */
   clipAudios?: { clipRelPath: string; clipStartSec: number; durSec: number; speed: number; volume?: number; delaySec?: number }[];
@@ -313,7 +316,7 @@ export async function buildExportScenes(
             const segCredit = segLine ? creditForLine(segLine, credit) : credit;
             const segLayout =
               spec.subtitleText !== undefined
-                ? layoutScene(scene, template, { subtitleText: spec.subtitleText })
+                ? layoutScene(scene, template, { subtitleText: spec.subtitleText, subtitleSegment: spec })
                 : layout;
             const segSplit = splitVideoSceneSvgMulti(
               segLayout,
@@ -333,15 +336,19 @@ export async function buildExportScenes(
               startSec: spec.startSec,
               endSec: spec.startSec + spec.durationSec,
             });
-            const segNarration = spec.lineId ? narrationFor?.(scene, spec.lineId) : undefined;
-            if (segNarration?.audioBase64) {
-              // windowSec=行の窓（次の行の開始まで＝表示尺）で音声を切る＝前の行が次の行に重ならない（#385）。
-              narrationSegments.push({
-                audioBase64: segNarration.audioBase64,
-                delaySec: spec.startSec,
-                windowSec: spec.durationSec,
-              });
-              narrationVolume = segNarration.narrationVolume;
+            // 同時開始（ADR-0031）：この区間の全話者（primary＋同時行）を同じ delaySec で重ねて配置＝Rust が amix
+            // （掛け合い×動画）。単独行は従来どおり1本。
+            for (const lineId of segmentLineIds(spec)) {
+              const segNarration = narrationFor?.(scene, lineId);
+              if (segNarration?.audioBase64) {
+                // windowSec=行の窓（次の行の開始まで＝表示尺）で音声を切る＝前の行が次の行に重ならない（#385）。
+                narrationSegments.push({
+                  audioBase64: segNarration.audioBase64,
+                  delaySec: spec.startSec,
+                  windowSec: spec.durationSec,
+                });
+                narrationVolume = segNarration.narrationVolume;
+              }
             }
           }
           if (aboveSegments.length > 0) {
@@ -621,6 +628,16 @@ export async function buildExportScenes(
           // 「間」（頭空白＝isGap）は音声なし（#386・A案）。単一 narration（lineId キー無し）は場面音声を継続。
           const isGap = 'isGap' in spec && spec.isGap === true;
           const segNarration = isGap ? undefined : narrationFor?.(scene, segLineId);
+          // 同時開始（ADR-0031）：この区間の同時行（primary 以外）を並行ナレーションとして集める＝Rust が audioBase64 と amix。
+          // 各区間はそれ自体が1サブ場面（t=0 起点）ゆえ delaySec=0（全員この区間の頭から）・windowSec=区間尺で切り詰め。
+          const parallelSegments: { audioBase64: string; delaySec: number; windowSec: number }[] = [];
+          if (!isGap && 'parallelLineIds' in spec && spec.parallelLineIds) {
+            for (const lineId of spec.parallelLineIds) {
+              const n = narrationFor?.(scene, lineId);
+              if (n?.audioBase64) parallelSegments.push({ audioBase64: n.audioBase64, delaySec: 0, windowSec: spec.durationSec });
+            }
+          }
+          const narrationSegments = parallelSegments.length > 0 ? parallelSegments : undefined;
           if (animate) {
             // アニメ区間：この区間 [startSec, +durationSec] を毎フレーム描画（掛け合いは行ごと・単一は1区間）。
             const fps = FPS;
@@ -650,6 +667,7 @@ export async function buildExportScenes(
               const frameLayout = layoutScene(scene, template, {
                 timeSec: spec.startSec + f / fps,
                 animations: sceneAnims,
+                subtitleSegment: spec, // FREE 字幕（ADR-0029）＝掛け合いの現在セグメントで対象解決（プレビュー=書き出し）
                 ...(segSubtitle !== undefined ? { subtitleText: segSubtitle } : {}),
               });
               const dataUrl = await svgToPngDataUrl(
@@ -667,12 +685,13 @@ export async function buildExportScenes(
               durationSec: spec.durationSec,
               audioBase64: segNarration?.audioBase64,
               narrationVolume: segNarration?.narrationVolume,
+              narrationSegments,
             });
           } else {
             // 静止区間（従来）：字幕上書きがあれば行字幕で焼き直し、無ければ共有 layout を再利用。
             const segLayout =
               segSubtitle !== undefined
-                ? layoutScene(scene, template, { subtitleText: segSubtitle })
+                ? layoutScene(scene, template, { subtitleText: segSubtitle, subtitleSegment: spec })
                 : layout;
             const pngBase64 = await svgToPngDataUrl(
               layoutToSvg(segLayout, { assetSrc, itemFilter, credit: segCredit, fontFamily: sceneFontFamily }),
@@ -684,6 +703,7 @@ export async function buildExportScenes(
               durationSec: spec.durationSec,
               audioBase64: segNarration?.audioBase64,
               narrationVolume: segNarration?.narrationVolume,
+              narrationSegments,
             });
           }
           // included は out と 1:1。先頭セグメントは上の included.push(scene) ＝ 2つ目以降のみ push（場面内はハードカット）。
