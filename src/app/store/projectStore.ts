@@ -1663,7 +1663,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   undo: () =>
     set((s) => {
       // 書き出し中は文書 slice（scenes/parts/meta）を変えない＝進行中の書き出しが不整合データを読むのを防ぐ
-      // （newProject/loadProject と同じ #379 ガード。Undo は全画面ショートカット化で書き出し中も到達し得る・#413）。
+      // （newProject/loadProject と同じ #379 ガード。書き出し中もサイドバーで たたき台/場面編集/タイムライン編集 へ移動でき、
+      //   Ctrl+Z も取り消すボタンも到達し得るのでガードは必須・#413/#547 P1-1）。
       if (isExportBusy(s.exportRun.phase)) return {};
       const r = undoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // 戻せない

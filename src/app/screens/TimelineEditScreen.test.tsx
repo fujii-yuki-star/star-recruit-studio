@@ -79,7 +79,8 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
   });
 
-  // Ctrl+Z / Ctrl+Y のキーボード入口は App の全画面登録へ集約した（#413）＝画面単体ではもう登録しない。
+  // Ctrl+Z / Ctrl+Y のキーボード入口は App へ集約した（#413）＝画面単体ではもう登録しない。
+  // 有効画面は UNDO_REDO_SCREENS に限定（この画面は有効・#547 P1-1）。
   // ショートカットの挙動（修飾キー判定・テキスト入力フォーカス除外）は useUndoRedoShortcuts.test.tsx で検証する。
   // ここは画面内の「↶ 取り消す / ↷ やり直す」ボタン（上のケース）を担保する。
 
