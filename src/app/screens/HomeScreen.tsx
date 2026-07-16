@@ -369,13 +369,15 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     </button>
                     <button
                       className="btn btn-ghost btn-icon"
-                      disabled={isExporting}
+                      // 確認バナー表示中は削除も止める（確認中の「開く先」を消せてしまい、「開く」が失敗するのを防ぐ＝
+                      // カード/新規作成ボタンと同じ「確認中は他操作を止める」方針に揃える・レビュー対応）。
+                      disabled={isExporting || pendingOpenId !== null || confirmNew}
                       onClick={() => {
                         setDeletingId(p.projectId);
                         setDeleteError(false);
                       }}
                       aria-label={`「${p.projectName || "無題のプロジェクト"}」を削除`}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : "削除"}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : (pendingOpenId !== null || confirmNew) ? "確認に答えてから操作できます" : "削除"}
                     >
                       <TrashIcon size={18} />
                     </button>

@@ -76,6 +76,14 @@ describe("HomeScreen プロジェクトを開く破棄ガード（#547 P1-2）",
     expect(loadProject).not.toHaveBeenCalledWith("proj_002"); // すり替わらない
   });
 
+  it("確認バナー表示中は削除も止まる（確認中の開く先を消せない）", async () => {
+    setup("idle", true);
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    await clickCard();
+    const del = screen.getByRole("button", { name: /「テスト動画」を削除/ }) as HTMLButtonElement;
+    expect(del.disabled).toBe(true); // カード/新規作成ボタンと同じ「確認中は他操作を止める」方針
+  });
+
   it("確認中に書き出しが始まったら「開く」を押しても開かない（多重防御）", async () => {
     const loadProject = setup("idle", true);
     render(<HomeScreen onNavigate={vi.fn()} />);
