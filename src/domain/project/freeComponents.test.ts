@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
-import { addFreeComponentGroup, FREE_COMPONENTS } from './freeComponents';
+import type { Group } from '../group/types';
+import { addFreeComponentAsGroup, addFreeComponentGroup, FREE_COMPONENTS } from './freeComponents';
 
 describe('FREE_COMPONENTS カタログ', () => {
   it('5種・各パーツは id/label/要素を持ち、要素は kind と正のサイズを持つ', () => {
@@ -84,5 +85,45 @@ describe('addFreeComponentGroup', () => {
       expect(e.x + e.w).toBeLessThanOrEqual(1080);
       expect(e.y + e.h).toBeLessThanOrEqual(1920);
     });
+  });
+});
+
+describe('addFreeComponentAsGroup（プリセットを最初からグループ化・#525-3）', () => {
+  it('複数要素パーツは展開要素を1つのグループに束ね、名前はパーツ名にする', () => {
+    const { freeLayout, groups, newIds, groupId } = addFreeComponentAsGroup([], [], 'number_card');
+    expect(newIds).toEqual(['free_001', 'free_002', 'free_003']);
+    expect(freeLayout).toHaveLength(3);
+    expect(groupId).toBe('group_001');
+    expect(groups).toHaveLength(1);
+    expect(groups[0].members).toEqual(newIds); // 追加要素がそのままメンバー
+    expect(groups[0].name).toBe('数字カード'); // 一覧で見分けやすいようパーツ名（#525-12 と同趣旨）
+    expect(groups[0].transform).toEqual({ x: 0, y: 0, rotation: 0, scale: 1 }); // 素の identity
+  });
+
+  it('既存グループは保持し、新グループの id は衝突しない', () => {
+    const existing: Group[] = [{ id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }];
+    const layout: FreeElement[] = [{ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 1 }];
+    const { groups, groupId } = addFreeComponentAsGroup(layout, existing, 'speech_balloon');
+    expect(groups).toHaveLength(2); // 既存＋新規
+    expect(groupId).toBe('group_002'); // 衝突しない採番
+    expect(groups[1].members.every((m) => m.startsWith('free_'))).toBe(true);
+  });
+
+  it('未知の partId は変化なし・グループを作らない', () => {
+    const { freeLayout, groups, newIds, groupId } = addFreeComponentAsGroup([], [], 'unknown');
+    expect(freeLayout).toEqual([]);
+    expect(groups).toEqual([]);
+    expect(newIds).toEqual([]);
+    expect(groupId).toBeNull();
+  });
+
+  it('全カタログ：複数要素パーツは必ずグループ化される（全メンバーが追加要素）', () => {
+    for (const c of FREE_COMPONENTS) {
+      const { newIds, groups, groupId } = addFreeComponentAsGroup([], [], c.id);
+      if (c.elements.length >= 2) {
+        expect(groupId).not.toBeNull();
+        expect(groups.find((g) => g.id === groupId)?.members).toEqual(newIds);
+      }
+    }
   });
 });
