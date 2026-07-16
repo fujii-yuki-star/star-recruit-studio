@@ -46,7 +46,7 @@ import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
 import { textKeyLabel } from "../uiLabels";
-import type { FontId } from "../../domain/font/fontCatalog";
+import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
 import { ClipDetailControls } from "../components/ClipDetailControls";
@@ -333,6 +333,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   // FREE 要素のコピー&ペースト用クリップボード。SceneEditScreen は場面切替で再マウントしないため場面をまたいで貼れる（#207）。
   const [freeClipboard, setFreeClipboard] = useState<FreeElement | null>(null);
+  // インライン編集中の FREE テキスト要素 id（#549）。オーバーレイから通知され、ScenePreview の hideItemIds へ渡して
+  // SVG 側の同じ文字を伏せる＝textarea と二重表示にしない（入力は即 store 反映＝SVG も毎打鍵更新されるため）。
+  const [editingFreeId, setEditingFreeId] = useState<string | null>(null);
   // 右クリック「編集」で開く kind 別エディタのポップオーバー（対象 id とビューポート座標）。
   const [editPopover, setEditPopover] = useState<{ id: string; x: number; y: number } | null>(null);
   // 自由配置：グリッドに合わせる（ドラッグ/リサイズの吸着＋グリッド表示）。表示設定・非永続。
@@ -366,6 +369,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
   const template = selected ? templates.find((t) => t.templateId === selected.templateId) : undefined;
+  // この場面で解決済みの CSS font-family（場面→動画全体→既定）。FREE テキストのインライン編集を実描画と同じ
+  // 見た目にするためオーバーレイへ渡す（#549）。解決順は ScenePreview／sceneSvg と同じ（要素の fontId は要素側で優先）。
+  const sceneFontFamily = fontFamilyForId(resolveFontId(selected?.fontId, fontId));
   // 「動き」（簡易アニメ・ADR-0019）をこの場で再生確認する（#408 Part 1・仕上がり確認への往復をなくす）。
   // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
   const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
@@ -1309,7 +1315,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
               {/* boundaryFrame（通常テンプレ字幕/クレジット）と subtitleSegment（FREE 字幕）は再生時刻の同一セグメント（motionSubtitleAt）。
                   停止中は t=0＝先頭（0 秒行除外・頭の間・全 0 秒フォールバックは sceneSegmentSpecs 準拠）、再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1）。 */}
-              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
+              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId && freeLayout.some((el) => el.id === editingFreeId && el.kind === FREE_ELEMENT_KIND.text) ? [editingFreeId] : undefined}>
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview
@@ -1325,6 +1331,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 {/* 再生中（動き/切替）は編集用オーバーレイ（選択枠・ハンドル）を隠す＝動く要素と設計位置のハンドルがズレて見えるのを避ける。 */}
                 {isFree && template && !motionPreview.playing && !transitionPreview.playing && (
                   <FreeLayoutOverlay
+                    // 場面ごとに作り直す（#549 レビュー P2）。FREE→FREE の切替では同一分岐のまま再描画されるだけで
+                    // アンマウントされず、overlay ローカルの editingId が持ち越される。free_NNN は**場面内一意**なので、
+                    // 残ると次の場面の同名要素を伏せ（プレビューだけ消えて書き出しには出る＝無言のパリティ乖離）、
+                    // その要素がテキストならダブルクリックせずに編集モードで開いてしまう。key で両方まとめて断つ。
+                    key={selected.sceneId}
                     freeLayout={freeLayout}
                     canvasW={template.canvas.width}
                     canvasH={template.canvas.height}
@@ -1342,6 +1353,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onDelete={removeFreeEl}
                     onChangeText={(id, text) => patchFreeEl(id, { text })}
                     onRequestEdit={openFreeEditPopover}
+                    onEditingIdChange={setEditingFreeId}
+                    textFontFamily={sceneFontFamily}
                     onInteractionStart={beginHistoryGroup}
                     onInteractionEnd={endHistoryGroup}
                     groups={sceneGroups}

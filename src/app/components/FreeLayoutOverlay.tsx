@@ -8,6 +8,11 @@ import { GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { topGroupOfMember } from "../../domain/project/groupOps";
+// インライン編集（#549）を実描画に合わせるため、描画側の既定値/帯解決/フォント解決を共有する（体裁のドリフト防止）。
+import { bandBackground, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEXT_COLOR } from "../../renderer/layout";
+import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
+import { hexToRgb } from "../../domain/format/color";
+import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -71,6 +76,15 @@ const MENU_H = 220;
 // ダブルタップ（テキスト編集へ入る）と見なす2回の pointerdown の間隔（ms）と近接（画面px）。実機ではドラッグ開始の
 // preventDefault が互換 dblclick を潰すため、pointerdown 自体で二度押しを検出する（#525-4）。距離も見るのは
 // ブラウザの dblclick 判定と同様＝間にドラッグを挟んだ離れた二度押しを編集と誤認しないため。
+/** インライン編集の背景帯（#549）。実描画（layout.bandBackground → sceneSvg の rect）と同じ既定・同じ見え方を
+ *  textarea へ再現する。帯は同じ TextItem 内なので親の hideItemIds で消える＝ここで敷かないと下地を失う。 */
+function bandStyle(el: FreeElement): { background: string; borderRadius?: number } {
+  const bg = bandBackground(el.background);
+  const rgb = bg ? hexToRgb(bg.color) : null;
+  if (!bg || !rgb) return { background: "transparent" };
+  return { background: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${bg.opacity})`, borderRadius: bg.radius };
+}
+
 const DOUBLE_TAP_MS = 350;
 const DOUBLE_TAP_DIST = 12;
 
@@ -112,6 +126,13 @@ interface OverlayProps {
   activeGroupId?: string | null;
   /** メンバー要素クリックでグループを選択（null で解除）。 */
   onSelectGroup?: (groupId: string | null) => void;
+  /** インライン編集中の要素 id を親へ通知（#549）。親は ScenePreview の hideItemIds に渡してSVG側の二重表示を消す。
+   *  setState 等の**参照が安定した関数**を渡すこと（effect の依存に入るため）。 */
+  onEditingIdChange?: (id: string | null) => void;
+  /** 場面で解決済みの描画用 font-family（`fontFamilyForId` の戻り値＝sans-serif フォールバック込み・場面→動画全体→既定）。
+   *  インライン編集の見た目を実描画に合わせる（#549）。要素自身が既知の fontId を持つ場合はそちらを優先＝
+   *  sceneSvg の textToSvg と同じ解決順。 */
+  textFontFamily?: string;
   /** グループの transform を更新（移動/拡縮/回転＝中心まわり）。 */
   onGroupTransform?: (groupId: string, patch: Partial<GroupTransform>) => void;
 }
@@ -120,7 +141,7 @@ export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
-  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform,
+  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onEditingIdChange, textFontFamily,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -153,6 +174,30 @@ export function FreeLayoutOverlay({
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 編集中の要素を親へ通知＝親が ScenePreview の hideItemIds に渡し、SVG 側の同じ文字を伏せる（二重表示回避・#549）。
+  useEffect(() => { onEditingIdChange?.(editingId); }, [editingId, onEditingIdChange]);
+  // アンマウント時は必ず「編集していない」へ戻す（#549 レビュー ℹ️）。free_NNN は**場面内一意**なので、伏せたまま
+  // 残すと別 FREE 場面で同名 id の別要素を伏せ、プレビューだけ消えて書き出しには出る（無言のパリティ乖離）。
+  const editingNotifyRef = useRef(onEditingIdChange);
+  useEffect(() => { editingNotifyRef.current = onEditingIdChange; }, [onEditingIdChange]);
+  useEffect(() => () => editingNotifyRef.current?.(null), []);
+  // 表示px→canvas の縮尺（#549）。オーバーレイは fit 箱の子＝幅が canvas 実寸に対応する（#273）。インライン編集の
+  // textarea を実描画と同じ大きさで出すために必要（canvas 単位の fontSize を表示pxへ換算する）。
+  // 0＝未計測（描画前）。ResizeObserver で追従＝ウィンドウ/パネル幅の変化にも合う。
+  const [viewScale, setViewScale] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      const next = w > 0 ? w / canvasW : 0;
+      setViewScale((prev) => (Math.abs(prev - next) < 0.0001 ? prev : next)); // 同値なら更新しない（無限ループ防止）
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [canvasW]);
   // 吸着ガイド（ドラッグ中に他要素の辺/中心へそろったとき表示する縦/横の線・canvas 座標。#205 後半）。
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   // 範囲選択（マーキー・#274）の矩形（canvas 座標・null=非アクティブ）。空白ドラッグで矩形を引き交差要素を選択。
@@ -573,10 +618,33 @@ export function FreeLayoutOverlay({
                     setEditingId(null);
                   }
                 }}
+                // その場（WYSIWYG）編集（#549）：実描画（sceneSvg の textToSvg）と同じ体裁で重ねる。
+                //  ・fontSize は canvas 単位 → 表示px へ換算（viewScale）＝見た目の大きさが一致。
+                //  ・font-family は要素の fontId 優先→場面既定（textToSvg と同じ解決順）。色/揃え/太さ/行間も要素から。
+                //  ・line-height は無単位＝SVG の行間（fontSize × lineHeight）と一致。padding:0 で1行目のベースラインが
+                //    SVG の baseY（＝要素上端 + fontSize）にほぼ揃う（差は fontSize の数%）。
+                //  ・背景は透明。下の SVG 側は親が hideItemIds で伏せる＝二重表示にならない。
                 style={{
                   width: "100%", height: "100%", boxSizing: "border-box", resize: "none",
-                  border: "none", outline: "none", padding: 4, margin: 0,
-                  background: "#fff", color: "#222", fontSize: 16, lineHeight: 1.3,
+                  border: "none", outline: "none", padding: 0, margin: 0,
+                  // 背景帯（#529）は実描画では同じ TextItem の中に入る＝親が hideItemIds で伏せると帯ごと消える。
+                  // 帯を敷いた文字（例：白文字＋黒帯）が編集中だけ下地を失って読めなくなるため、ここでも同じ帯を再現する
+                  //（既定値は描画側の bandBackground を共有＝ドリフトしない）。帯が無ければ透明。
+                  ...bandStyle(el),
+                  color: el.color ?? DEFAULT_TEXT_COLOR,
+                  // 実描画（sceneSvg.textToSvg）と同じ解決順＝要素の既知 fontId 優先→場面既定。**fontFamilyForId**（sans-serif
+                  // フォールバック込み＝描画側と同じ関数）を使う。cssFamilyForId は bare 名でフォント未ロード時に
+                  // textarea 既定（monospace）へ落ちて実描画と乖離する。
+                  fontFamily: isKnownFontId(el.fontId) ? fontFamilyForId(el.fontId) : textFontFamily,
+                  fontSize: viewScale > 0 ? (el.fontSize ?? DEFAULT_FONT_SIZE) * viewScale : undefined,
+                  fontWeight: el.fontWeight ?? FONT_WEIGHT.normal,
+                  textAlign: el.textAlign ?? TEXT_ALIGN.left,
+                  lineHeight: el.lineHeight ?? DEFAULT_LINE_HEIGHT,
+                  // 縁取り（#209）も同じ TextItem 内＝伏せると消えるので近似再現（paint-order で塗りの下に敷く）。
+                  ...(el.strokeColor && (el.strokeWidth ?? 0) > 0 && viewScale > 0
+                    ? { WebkitTextStroke: `${(el.strokeWidth ?? 0) * viewScale}px ${el.strokeColor}`, paintOrder: "stroke" as const }
+                    : {}),
+                  overflow: "hidden", // はみ出しはSVG側の maxLines と揃えて見せない（実描画に寄せる）
                 }}
               />
             ) : (

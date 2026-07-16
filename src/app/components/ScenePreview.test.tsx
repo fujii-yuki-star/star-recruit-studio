@@ -247,3 +247,34 @@ describe("ScenePreview FREE 字幕の正準セグメント（ADR-0029・全ゼ�
     expect(container.textContent).toContain("行の字幕テスト");
   });
 });
+
+// #549：インライン編集中の要素は SVG から伏せる（同じ文字を textarea が同じ体裁で出すため、伏せないと二重表示になる
+// ＝入力は即 store 反映で SVG も毎打鍵更新される）。**プレビュー限定の編集用アフォーダンス**で、正準 layoutScene の
+// 結果を後段で間引くだけ＝書き出しは hideItemIds を渡さないのでパリティに影響しない（ADR-0001）。
+describe("ScenePreview hideItemIds＝編集中の要素をSVGから伏せる（#549）", () => {
+  const freeTemplate = {
+    schemaVersion: "1.0", templateId: "free_canvas_v1", name: "自由配置", category: "free", aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 }, defaults: { backgroundColor: "#ffffff" },
+    layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+  } as unknown as Template;
+  const freeScene = {
+    sceneId: "s_free", templateId: "free_canvas_v1", sceneType: "free", durationSec: 8, texts: {}, assetRefs: {},
+    character: { enabled: false, characterId: "yuko" }, narration: { text: "", status: "none" }, warnings: [],
+    freeLayout: [
+      { id: "free_001", kind: "text", x: 100, y: 100, w: 600, h: 200, text: "編集中の文字", fontSize: 48 },
+      { id: "free_002", kind: "text", x: 100, y: 400, w: 600, h: 200, text: "ほかの文字", fontSize: 48 },
+    ],
+  } as unknown as Scene;
+
+  it("既定（hideItemIds 未指定）は全要素を描く＝従来どおり", () => {
+    const { container } = render(<ScenePreview scene={freeScene} template={freeTemplate} />);
+    expect(container.textContent).toContain("編集中の文字");
+    expect(container.textContent).toContain("ほかの文字");
+  });
+
+  it("hideItemIds の要素だけ描かない（他は描く）＝インライン編集の textarea と二重表示にならない", () => {
+    const { container } = render(<ScenePreview scene={freeScene} template={freeTemplate} hideItemIds={["free_001"]} />);
+    expect(container.textContent).not.toContain("編集中の文字"); // 編集中＝SVG からは伏せる
+    expect(container.textContent).toContain("ほかの文字"); // 他の要素は従来どおり描く
+  });
+});
