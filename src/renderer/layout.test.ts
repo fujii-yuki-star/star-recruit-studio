@@ -561,6 +561,25 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(item?.fontId).toBe('gen-interface-jp-display');
   });
 
+  it('FREE text/subtitle の背景帯（el.background.enabled）が TextItem.background に反映される（#529・可読性の下地）', () => {
+    const bgScene: Scene = {
+      ...freeScene,
+      texts: { subtitle: 'ナレ字幕' }, // subtitle(narration) の解決元＝scene.texts.subtitle
+      freeLayout: [
+        { id: 'free_001', kind: 'text', x: 0, y: 0, w: 400, h: 100, zIndex: 5, text: 'あ', fontSize: 40, background: { enabled: true, color: '#112233', opacity: 0.4, radius: 8 } },
+        { id: 'free_002', kind: 'subtitle', x: 0, y: 200, w: 400, h: 100, zIndex: 6, subtitleSource: { kind: 'narration' }, background: { enabled: true } }, // 既定値で埋まる
+        { id: 'free_003', kind: 'text', x: 0, y: 400, w: 400, h: 100, zIndex: 7, text: 'い', background: { enabled: false } }, // OFF → 帯なし
+        { id: 'free_004', kind: 'text', x: 0, y: 600, w: 400, h: 100, zIndex: 8, text: 'う' }, // 未指定 → 帯なし
+      ],
+    } as unknown as Scene;
+    const items = layoutScene(bgScene, freeTemplate).items;
+    const byId = (id: string) => items.find((i): i is TextItem => i.kind === 'text' && i.id === id)!;
+    expect(byId('free_001').background).toEqual({ color: '#112233', opacity: 0.4, radius: 8 });
+    expect(byId('free_002').background).toEqual({ color: '#000000', opacity: 0.55, radius: 16 }); // enabled のみ＝既定で補完
+    expect(byId('free_003').background).toBeUndefined(); // enabled:false は帯を付けない
+    expect(byId('free_004').background).toBeUndefined(); // 未指定も帯なし（後方互換）
+  });
+
   it('通常テンプレ（category!==free）の場面に freeLayout が付いていても描画しない（category ガード）', () => {
     // 防御: 通常テンプレ（opening）に誤って freeLayout が混入しても無視する。
     const sceneWithStrayFree: Scene = {

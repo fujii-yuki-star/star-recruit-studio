@@ -5,7 +5,7 @@ import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } f
 import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT } from '../domain/constants';
 import type { ElementAnimation, Scene } from '../domain/project/types';
-import type { Template } from '../domain/template/types';
+import type { LayerBackground, Template } from '../domain/template/types';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
@@ -93,6 +93,11 @@ export interface SceneLayout {
 const DEFAULT_TEXT_COLOR = '#222222';
 const DEFAULT_FONT_SIZE = 40;
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+
+/** 背景帯（可読性の下地）を TextItem.background へ。enabled のときだけ描く。通常字幕層／FREE 字幕・文字で共有（#529・#275）。 */
+function bandBackground(bg: LayerBackground | undefined): { color: string; opacity: number; radius: number } | undefined {
+  return bg?.enabled ? { color: bg.color ?? '#000000', opacity: bg.opacity ?? 0.55, radius: bg.radius ?? 16 } : undefined;
+}
 /** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
 export const DEFAULT_LINE_HEIGHT = 1.3;
 /** 字幕帯の背景の上下パディング（em）。sceneSvg の bgHeight = 行間×行数 + 0.6*fontSize と一致（帯の下端＝y + 行間 + これ）。 */
@@ -315,13 +320,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           : staticSubtitleOff
             ? ''
             : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
-        const bg = isSub && layer.background?.enabled
-          ? {
-              color: layer.background.color ?? '#000000',
-              opacity: layer.background.opacity ?? 0.55,
-              radius: layer.background.radius ?? 16,
-            }
-          : undefined;
+        const bg = isSub ? bandBackground(layer.background) : undefined;
         const fontSize = layer.fontSize ?? DEFAULT_FONT_SIZE;
         // 字幕帯を1つ積む（y を差し替え・id を一意化）。primary はテンプレ位置、同時行はその上へ（ADR-0031）。
         const pushBand = (bandText: string, y: number, idSuffix: string): void => {
@@ -422,7 +421,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
           break;
         }
         case 'shape':
@@ -436,7 +435,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
-          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
+          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
           break;
         }
       }
