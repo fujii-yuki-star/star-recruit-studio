@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
+import type { Group } from '../group/types';
+import { composeGroupGeometry } from '../group/compose';
 import {
   addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
-  elementVisualBBox, freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
+  elementVisualBBox, freeElementsInRect, FREE_MIN_SIZE, groupBBox, keyboardNudgeDelta, moveFreeElement, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
   snapAngle, snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
 
@@ -623,5 +625,74 @@ describe('snapToGrid とグリッド吸着（FREE 仕上げ）', () => {
     const sw = resizeFreeElement({ x: 100, y: 0, w: 100, h: 100 }, 'sw', -15, 15, 20, 20);
     expect(sw.x).toBe(80);
     expect(sw.x + sw.w).toBe(200); // 右辺固定
+  });
+});
+
+describe('nudgeFreeElements（キーボード微調整・#525-11）', () => {
+  const layout: FreeElement[] = [
+    { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 50, h: 50 },
+    { id: 'free_002', kind: 'shape', x: 200, y: 200, w: 50, h: 50, locked: true },
+    { id: 'free_003', kind: 'text', x: 0, y: 0, w: 50, h: 50, text: 'a' },
+  ];
+
+  it('未所属の要素は画面デルタ＝base デルタ（1:1）', () => {
+    const moves = nudgeFreeElements(layout, [], ['free_001', 'free_003'], 1, -1);
+    expect(moves).toEqual([{ id: 'free_001', x: 101, y: 99 }, { id: 'free_003', x: 1, y: -1 }]);
+  });
+
+  it('ロック要素は動かさない（除外）', () => {
+    const moves = nudgeFreeElements(layout, [], ['free_001', 'free_002'], 10, 0);
+    expect(moves).toEqual([{ id: 'free_001', x: 110, y: 100 }]); // free_002(locked) は含まれない
+  });
+
+  it('存在しない id は無視・空選択は空配列', () => {
+    expect(nudgeFreeElements(layout, [], ['zzz'], 1, 1)).toEqual([]);
+    expect(nudgeFreeElements(layout, [], [], 1, 1)).toEqual([]);
+  });
+
+  it('純並進グループのメンバーは画面 1:1（合成後の実移動量で検証・#525-11 レビュー P2）', () => {
+    // 複数メンバー群にして anchor が定義される状況で、純並進の内部メンバーが画面どおり動くことを compose で実測。
+    const multi: FreeElement[] = [
+      { id: 'free_001', kind: 'shape', x: 100, y: 100, w: 50, h: 50 },
+      { id: 'free_002', kind: 'shape', x: 400, y: 400, w: 50, h: 50 },
+    ];
+    const g: Group = { id: 'group_001', members: ['free_001', 'free_002'], transform: { x: 50, y: -30, rotation: 0, scale: 1 } };
+    const moves = nudgeFreeElements(multi, [g], ['free_001'], 3, -2); // 画面 +3,-2 を意図
+    const after = applyFreeElementPositions(multi, moves);
+    const before = composeGroupGeometry(multi, [g]).get('free_001')!;
+    const now = composeGroupGeometry(after, [g]).get('free_001')!;
+    expect(now.x - before.x).toBeCloseTo(3, 5); // 合成後の画面移動が意図どおり（純並進＝厳密1:1）
+    expect(now.y - before.y).toBeCloseTo(-2, 5);
+  });
+
+  it('拡縮グループのメンバーは nudge 対象外（select-only・#542 と一貫・#525-11 レビュー P2）', () => {
+    const g: Group = { id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    expect(nudgeFreeElements(layout, [g], ['free_001'], 4, 0)).toEqual([]); // 動かさない
+  });
+
+  it('回転グループのメンバーも nudge 対象外（単一回転の逆方向＝壊れて見えるを出さない）', () => {
+    const g: Group = { id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 90, scale: 1 } };
+    expect(nudgeFreeElements(layout, [g], ['free_001'], 1, 0)).toEqual([]);
+  });
+
+  it('混在選択：未所属は 1:1・変形メンバーは据え置き（対象外）', () => {
+    const g: Group = { id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const moves = nudgeFreeElements(layout, [g], ['free_001', 'free_003'], 2, 0);
+    expect(moves).toEqual([{ id: 'free_003', x: 2, y: 0 }]); // 未所属のみ・変形メンバー(free_001)は除外
+  });
+});
+
+describe('keyboardNudgeDelta（矢印→移動量・#525-11）', () => {
+  it('矢印は 1px、Shift で 10px', () => {
+    expect(keyboardNudgeDelta('ArrowLeft', false)).toEqual({ dx: -1, dy: 0 });
+    expect(keyboardNudgeDelta('ArrowRight', false)).toEqual({ dx: 1, dy: 0 });
+    expect(keyboardNudgeDelta('ArrowUp', false)).toEqual({ dx: 0, dy: -1 });
+    expect(keyboardNudgeDelta('ArrowDown', false)).toEqual({ dx: 0, dy: 1 });
+    expect(keyboardNudgeDelta('ArrowRight', true)).toEqual({ dx: 10, dy: 0 }); // Shift=10px
+    expect(keyboardNudgeDelta('ArrowUp', true)).toEqual({ dx: 0, dy: -10 });
+  });
+  it('矢印以外は null', () => {
+    expect(keyboardNudgeDelta('a', false)).toBeNull();
+    expect(keyboardNudgeDelta('Enter', false)).toBeNull();
   });
 });

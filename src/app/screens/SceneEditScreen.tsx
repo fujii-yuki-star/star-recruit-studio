@@ -12,7 +12,7 @@ import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
@@ -121,6 +121,28 @@ const freeKindLabel: Record<FreeElementKind, string> = {
 function freeElementName(el: FreeElement, index: number): string {
   const custom = el.name?.trim();
   return custom ? custom : `${freeKindLabel[el.kind]}${index + 1}`;
+}
+
+// キーボード微調整/削除の window 購読（#525-11）。SceneEditScreen は early return を持つため hooks を含む購読は子へ切り出す
+// （親 JSX 内で描画＝マウント時に一貫して hooks を呼ぶ・rules-of-hooks を満たす）。入力欄フォーカス中は無視。描画なし。
+function KeyboardNudge({ active, onArrow, onDelete }: {
+  active: boolean;
+  onArrow: (dx: number, dy: number) => void;
+  onDelete: () => void;
+}) {
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const d = keyboardNudgeDelta(e.key, e.shiftKey);
+      if (d) { e.preventDefault(); onArrow(d.dx, d.dy); return; }
+      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onDelete(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, onArrow, onDelete]);
+  return null;
 }
 
 // 自由配置の位置・サイズ等の数値入力（キーボードで調整＝a11y。ドラッグ操作は Phase 4b）。
@@ -558,6 +580,26 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (renamingFreeId) patchFreeEl(renamingFreeId, { name: draftFreeName.trim() || undefined });
     setRenamingFreeId(null);
   };
+
+  // キーボード操作（#525-11）の行動：矢印＝選択中の要素/グループを dx,dy 動かす／Delete＝要素を削除。
+  // 実際の window 購読は <KeyboardNudge>（JSX 内・early return より後でも hooks 規約を満たす）が行う。
+  const onCanvasNudge = (dx: number, dy: number) => {
+    if (effectiveActiveGroupId != null && !activeGroup?.locked) {
+      const g = sceneGroups.find((x) => x.id === effectiveActiveGroupId);
+      if (g) transformGroup(g.id, { x: g.transform.x + dx, y: g.transform.y + dy }); // グループ全体は canvas 並進＝画面 1:1
+    } else if (selectedFreeIds.length > 0) {
+      const moves = nudgeFreeElements(freeLayout, sceneGroups, selectedFreeIds, dx, dy); // 未所属/純並進は画面1:1・変形メンバーは対象外
+      if (moves.length > 0) moveFreeMany(moves); // ロックのみ・変形メンバーのみの選択なら何もしない
+    }
+  };
+  const onCanvasDelete = () => {
+    if (effectiveActiveGroupId) return; // グループ削除はキーボード対象外（ツールバー/ドリルイン経由で扱う）
+    if (selectedFreeIds.length >= 2) { setConfirmBulkDelete(true); return; } // 既存の一括削除確認UIへ
+    // 単一は直接削除（右クリック「削除」と同じ）。ロック要素はキーボードで消さない＝移動と同じ流儀（#525-11 レビュー P3）。
+    const id = selectedFreeIds[0];
+    if (id && !freeLayout.find((el) => el.id === id)?.locked) removeFreeEl(id);
+  };
+  const canvasKbdActive = isFree && (selectedFreeIds.length > 0 || (effectiveActiveGroupId != null && !activeGroup?.locked));
   // グループの重ね順（#305）：メンバー全体を最前面/最背面へ（相対順は保つ）。
   const bringGroupFront = (groupId: string) => {
     if (sceneGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は重ね順も抑止（多重防御・#319 レビュー）
@@ -1053,6 +1095,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
+      <KeyboardNudge active={canvasKbdActive} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
       <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
         {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
         <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
