@@ -4,6 +4,7 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
+import { hasUnsavedChanges } from "../hooks/newProjectGuard";
 import { YukoPanel } from "../components/YukoPanel";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import {
@@ -33,6 +34,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   // 「削除→一覧から消える（実体は残る）」等の不整合と誤操作を防ぐ。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const renameProject = useProjectStore((s) => s.renameProject);
+  // 未保存の変更があるか。新規作成と同じ破棄ガードを「プロジェクトを開く」にも適用する（#547 P1-2・データ喪失防止）。
+  const hasWork = useProjectStore((s) => hasUnsavedChanges(s.saveStatus, s.scenes.length, s.assets, s.meta));
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   // 「新しい動画を作る」はヘッダと同じ破棄ガード付きフロー（共有フックで挙動統一）。
   const { confirming: confirmNew, start: startNew, startBlank, confirm: confirmStartNew, cancel: cancelNew } =
@@ -45,6 +48,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   // プロジェクトを開いている最中の id（#392）。連打・別プロジェクト並走で loadProject が後勝ちするのを防ぐ。
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState(false);
+  // 別プロジェクトを開く前の破棄確認（#547 P1-2）。未保存があるとき「開く先」をここに保持し、確認後に実行する。
+  const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
 
   async function removeProject(projectId: string) {
     if (deleteBusy || isExporting) return; // 書き出し中は削除しない（no-op 後に一覧だけ消える不整合を防ぐ・#379）
@@ -109,9 +114,17 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     };
   }, [listProjects]);
 
-  async function openProject(projectId: string) {
+  // 「開く」要求：未保存の変更があれば破棄確認を挟む（新規作成と同じガード＝#547 P1-2）。
+  // 自動保存で保存済み（saved）なら確認せず即開く。保存済みの内容はディスクに残り一覧から開き直せる。
+  function requestOpenProject(projectId: string) {
     if (isExporting) return; // 書き出し中は切替をブロック（loadProject は no-op・遷移もしない・#379）
     if (openingId) return; // 既に別プロジェクトを開いている最中は無視（連打・並走で後勝ちを防ぐ・#392）
+    if (pendingOpenId) return; // 既に別の「開く」確認中は上書きしない（確認中は他カードも無効化＝多重防御・レビュー対応）
+    if (hasWork) { setPendingOpenId(projectId); return; } // 未保存＝確認してから開く
+    void doOpenProject(projectId);
+  }
+  async function doOpenProject(projectId: string) {
+    if (isExporting || openingId) return; // 確認中に書き出し開始/並走した場合の多重防御（requestOpenProject と同条件）
     setOpenError(false);
     setOpeningId(projectId);
     try {
@@ -170,6 +183,26 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </div>
           )}
 
+          {pendingOpenId && (
+            <div className="notice notice-warn mb" role="alert">
+              <span>
+                今の編集内容を閉じて別のプロジェクトを開きますか？保存していない素材や場面は失われます（保存済みのプロジェクトは下の一覧からいつでも開けます）。
+              </span>
+              {/* 破棄確認は「やめる（左・ghost）／実行（右）」で全画面統一（新規作成・削除確認と同じ並び）。 */}
+              <div className="row gap-sm">
+                <button className="btn btn-ghost btn-icon" onClick={() => setPendingOpenId(null)}>
+                  やめる
+                </button>
+                <button
+                  className="btn btn-primary btn-icon"
+                  onClick={() => { const id = pendingOpenId; setPendingOpenId(null); void doOpenProject(id); }}
+                >
+                  開く
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* ヒーロー: 新しい動画を作る */}
           <div className="hero">
             <div>
@@ -182,12 +215,12 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 内容を確認・修正してから、動画として保存できます。
               </p>
               <div className="row gap-sm mt" style={{ flexWrap: "wrap" }}>
-                <button className="btn btn-primary btn-lg" onClick={startNew} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}>
+                <button className="btn btn-primary btn-lg" onClick={startNew} disabled={isExporting || pendingOpenId !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingOpenId !== null ? "確認に答えてから操作できます" : undefined}>
                   <PlusIcon size={20} />
                   新しい動画を作る
                 </button>
                 {/* 白紙から作る（#393）＝ウィザード/AI を通らず、空のたたき台から自分で場面を組み立てる。 */}
-                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : "AI を使わず、自分で場面を組み立てます"}>
+                <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting || pendingOpenId !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingOpenId !== null ? "確認に答えてから操作できます" : "AI を使わず、自分で場面を組み立てます"}>
                   白紙から作る
                 </button>
               </div>
@@ -203,7 +236,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
 
           {/* クイック操作 */}
           <div className="card-grid cols-3 mb">
-            <button className="action-card" onClick={startNew} disabled={isExporting} title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}>
+            <button className="action-card" onClick={startNew} disabled={isExporting || pendingOpenId !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingOpenId !== null ? "確認に答えてから操作できます" : undefined}>
               <div
                 className="action-card-icon"
                 style={{ background: "var(--color-primary-soft)", color: "var(--color-primary)" }}
@@ -304,10 +337,10 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                   <div key={p.projectId} className="list-item">
                     <button
                       className="row gap-sm grow"
-                      onClick={() => void openProject(p.projectId)}
-                      disabled={isExporting || openingId !== null}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : undefined}
-                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null) ? "not-allowed" : "pointer", textAlign: "left" }}
+                      onClick={() => requestOpenProject(p.projectId)}
+                      disabled={isExporting || openingId !== null || pendingOpenId !== null || confirmNew}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : openingId !== null ? "プロジェクトを開いています…" : (pendingOpenId !== null || confirmNew) ? "確認に答えてから操作できます" : undefined}
+                      style={{ background: "transparent", border: "none", padding: 0, cursor: (isExporting || openingId !== null || pendingOpenId !== null || confirmNew) ? "not-allowed" : "pointer", textAlign: "left" }}
                     >
                       <div
                         className="thumb thumb-photo"
@@ -336,13 +369,15 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     </button>
                     <button
                       className="btn btn-ghost btn-icon"
-                      disabled={isExporting}
+                      // 確認バナー表示中は削除も止める（確認中の「開く先」を消せてしまい、「開く」が失敗するのを防ぐ＝
+                      // カード/新規作成ボタンと同じ「確認中は他操作を止める」方針に揃える・レビュー対応）。
+                      disabled={isExporting || pendingOpenId !== null || confirmNew}
                       onClick={() => {
                         setDeletingId(p.projectId);
                         setDeleteError(false);
                       }}
                       aria-label={`「${p.projectName || "無題のプロジェクト"}」を削除`}
-                      title={isExporting ? "書き出しが終わるまでお待ちください" : "削除"}
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : (pendingOpenId !== null || confirmNew) ? "確認に答えてから操作できます" : "削除"}
                     >
                       <TrashIcon size={18} />
                     </button>
