@@ -506,9 +506,20 @@ export function FreeLayoutOverlay({
                   return;
                 }
               }
-              // 通常のドラッグ/選択開始。ドリルイン編集中（grouped=false）はメンバーを個別ドラッグ、それ以外のメンバーは
-              // グループごと。begin* が二度押し履歴を解除するので、候補の記録はこの後に行う（#525-4 レビュー）。
-              if (elGroup && !drilledEditable) beginGroupDrag(e, elGroup); else beginDrag(e, el, "move");
+              // 通常のクリック/ドラッグ開始。ドリルイン状態で分岐する（#525-5 レビュー P2）：
+              //  ・グループ未ドリルインのメンバー初回クリック＝まとまり選択（beginGroupDrag）
+              //  ・純並進グループのドリルインメンバー＝個別ドラッグ（beginDrag／drilledEditable）
+              //  ・変形グループのドリルインメンバー＝canvas 直接編集はずれるので**選択を維持のみ**（グループへ戻さない・動かさない）。
+              //    ＝ドリルイン後の再クリックで無言にグループ全体を選択/移動してしまう「壊れて見える操作」を防ぐ。
+              // begin* が二度押し履歴を解除するので、候補の記録はこの後に行う（#525-4 レビュー）。
+              if (elGroup && !drilledIn) {
+                beginGroupDrag(e, elGroup);
+              } else if (elGroup && !drilledEditable) {
+                e.preventDefault();
+                e.stopPropagation(); // グループへ戻さず・ドラッグも始めない（変形グループは詳細パネルで編集）
+              } else {
+                beginDrag(e, el, "move");
+              }
               if (dtEdit || dtDrill) lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
             }}
             onContextMenu={(e) => openMenu(e, el)}
