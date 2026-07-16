@@ -18,7 +18,7 @@ import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE,
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { GroupList } from "../components/GroupList";
 import type { GroupTransform } from "../../domain/group/types";
-import { addFreeComponentGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
+import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
 import { switchSceneTemplate } from "../../domain/project/sceneOps";
@@ -608,12 +608,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // updater 内で最新 s.freeLayout から計算（updateScene→set は同期実行で newIds は下の前に確定）。
   const addFreeComponent = (componentId: string) => {
     let newIds: string[] = [];
+    let groupId: string | null = null;
     patch((s) => {
-      const result = addFreeComponentGroup(s.freeLayout ?? [], componentId, template?.canvas.width, template?.canvas.height);
+      const result = addFreeComponentAsGroup(s.freeLayout ?? [], s.groups ?? [], componentId, template?.canvas.width, template?.canvas.height);
       newIds = result.newIds;
-      return { ...s, freeLayout: result.freeLayout };
+      groupId = result.groupId;
+      return { ...s, freeLayout: result.freeLayout, groups: result.groups };
     });
-    if (newIds[0]) setSelectedFreeIds([newIds[0]]);
+    // 複数要素なら最初からグループとして選択＝まとまりで動かせる（#525-3）。単体なら要素を選択。
+    if (groupId) selectGroup(groupId);
+    else if (newIds[0]) setSelectedFreeIds([newIds[0]]);
   };
   // #472/ADR-0028：場面側のクリップ調整（範囲/速度/元音声）は per-use（scene.slotClips[layerId]）へ＝scenes 更新ゆえ Undo 可。
   // fit は含めない＝収め方は画像スロットと同じ per-use（テンプレ層=scene.slotFits[layerId]／FREE=el.fit）で別 FitSelect が担う（#472 P1）。
