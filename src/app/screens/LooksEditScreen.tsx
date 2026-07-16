@@ -307,7 +307,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               </div>
             )}
           </div>
-          {/* 字幕は背景帯（黒固定で実用性が低い＝#275）。付ける/色/濃さを編集できるよう開放（描画は既存の layer.background を使用）。 */}
+          {/* 字幕は背景帯（黒固定で実用性が低い＝#275）。付ける/色/濃さ/角丸を編集できるよう開放（描画は既存の layer.background を使用）。
+              角丸は FREE 帯 UI（SceneEditScreen）と揃える＝同概念「字幕の背景帯」を編集画面で同じ編集性に（ADR-0026 観点6・#544 P3）。 */}
           {l.type === "subtitle" && (
             <div className="col gap-sm" style={{ marginTop: 4 }}>
               <div className="toggle-row">
@@ -321,6 +322,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                     <ColorPicker value={l.background?.color ?? "#000000"} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" />
                   </div>
                   {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? 0.55), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
+                  {numField("角丸", l.background?.radius ?? 16, (v) => onUpdateLayer(l.id, { background: { ...l.background, radius: v } }), 0)}
                 </div>
               )}
             </div>
