@@ -413,6 +413,15 @@ button {
   min-height: 80px;
 }
 
+/* スライダー（声・音量・クリップ速度など）は width:100% でもブラウザ既定の横マージンで枠を数px はみ出す。
+   横マージンを詰め、max-width で器を超えないようにして詳細編集パネル内に必ず収める（#525-7）。 */
+input[type="range"] {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+}
+
 .chip-input-row {
   display: flex;
   flex-wrap: wrap;
