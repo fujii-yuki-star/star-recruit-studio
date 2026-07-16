@@ -21,6 +21,13 @@ const freeScene = (): Scene =>
     ],
   }) as unknown as Scene;
 
+/** 2つ目の FREE 場面。`free_NNN` は**場面内一意**なので、別場面にも同じ `free_001` が普通に存在する。 */
+const freeSceneB = (): Scene =>
+  ({
+    ...freeScene(), sceneId: "scene_002", order: 2,
+    freeLayout: [{ id: "free_001", kind: "text", x: 100, y: 100, w: 800, h: 200, text: "Bの文字", fontSize: 48 }],
+  }) as unknown as Scene;
+
 /** 仕上がりSVG（プレビュー）の中身だけを見る＝右パネルの入力欄や textarea の値と混ざらない。 */
 const svgText = () => (document.querySelector('[aria-label="場面の仕上がり"]') as HTMLElement | null)?.textContent ?? "";
 
@@ -53,5 +60,39 @@ describe("SceneEditScreen インライン編集の配線（#549）", () => {
 
     fireEvent.blur(ta);
     expect(svgText()).toContain("編集する文字"); // 編集を抜けたら戻る
+  });
+});
+
+// #549 レビュー P2：FREE→FREE の場面切替では overlay はアンマウントしない（同一分岐・key なし／SceneEditScreen も
+// 場面切替で再マウントしない＝#207）ため、unmount cleanup だけでは overlay ローカルの editingId が持ち越される。
+// free_NNN は**場面内一意**＝ほとんどの FREE 場面が free_001 を持つので、「編集 → 隣の場面カードをクリック」で踏む。
+// 残ると (a) 次の場面の同名要素を伏せ続ける＝プレビューだけ消えて書き出しには出る（無言のパリティ乖離・ADR-0001）
+//       (b) その要素がテキストならダブルクリックせずに編集モードで開く。
+describe("SceneEditScreen 場面切替で編集状態を持ち越さない（#549 レビュー P2）", () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      templates: sampleTemplates,
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002"] }],
+      scenes: [freeScene(), freeSceneB()], assets: [], editingSceneId: "scene_001",
+      past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+  });
+
+  it("編集中に隣の場面へ切り替えても、同名 free_001 を伏せない・勝手に編集モードにならない", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const el = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
+    const opts = { button: 0, clientX: 10, clientY: 10, pointerId: 1 };
+    fireEvent.pointerDown(el, opts);
+    fireEvent.pointerUp(el, { pointerId: 1 });
+    fireEvent.pointerDown(el, opts);
+    expect(svgText()).not.toContain("編集する文字"); // 場面Aは編集中＝伏せている
+
+    const cards = document.querySelectorAll("button.scene-card");
+    fireEvent.click(cards[1]); // 場面B へ切替（overlay はアンマウントされない経路）
+
+    // (a) 場面Bの free_001 は伏せられていない＝プレビューに出る（書き出しと一致）。
+    expect(svgText()).toContain("Bの文字");
+    // (b) ダブルクリックしていないので編集モードにならない。
+    expect(document.querySelector('[data-free-id="free_001"] textarea')).toBeNull();
   });
 });

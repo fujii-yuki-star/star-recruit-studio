@@ -1315,7 +1315,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
               {/* boundaryFrame（通常テンプレ字幕/クレジット）と subtitleSegment（FREE 字幕）は再生時刻の同一セグメント（motionSubtitleAt）。
                   停止中は t=0＝先頭（0 秒行除外・頭の間・全 0 秒フォールバックは sceneSegmentSpecs 準拠）、再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1）。 */}
-              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId ? [editingFreeId] : undefined}>
+              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId && freeLayout.some((el) => el.id === editingFreeId && el.kind === FREE_ELEMENT_KIND.text) ? [editingFreeId] : undefined}>
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview
@@ -1331,6 +1331,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 {/* 再生中（動き/切替）は編集用オーバーレイ（選択枠・ハンドル）を隠す＝動く要素と設計位置のハンドルがズレて見えるのを避ける。 */}
                 {isFree && template && !motionPreview.playing && !transitionPreview.playing && (
                   <FreeLayoutOverlay
+                    // 場面ごとに作り直す（#549 レビュー P2）。FREE→FREE の切替では同一分岐のまま再描画されるだけで
+                    // アンマウントされず、overlay ローカルの editingId が持ち越される。free_NNN は**場面内一意**なので、
+                    // 残ると次の場面の同名要素を伏せ（プレビューだけ消えて書き出しには出る＝無言のパリティ乖離）、
+                    // その要素がテキストならダブルクリックせずに編集モードで開いてしまう。key で両方まとめて断つ。
+                    key={selected.sceneId}
                     freeLayout={freeLayout}
                     canvasW={template.canvas.width}
                     canvasH={template.canvas.height}
