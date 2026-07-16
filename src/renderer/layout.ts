@@ -90,12 +90,15 @@ export interface SceneLayout {
   items: LayoutItem[];
 }
 
-const DEFAULT_TEXT_COLOR = '#222222';
-const DEFAULT_FONT_SIZE = 40;
+// テキストの既定色/既定サイズ。**インライン編集（FreeLayoutOverlay）が実描画に体裁を合わせるため共有**する（#549）＝
+// 編集中の見た目と描画結果がドリフトしないよう単一の参照元にする（§2-7）。
+export const DEFAULT_TEXT_COLOR = '#222222';
+export const DEFAULT_FONT_SIZE = 40;
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 
-/** 背景帯（可読性の下地）を TextItem.background へ。enabled のときだけ描く。通常字幕層／FREE 字幕・文字で共有（#529・#275）。 */
-function bandBackground(bg: LayerBackground | undefined): { color: string; opacity: number; radius: number } | undefined {
+/** 背景帯（可読性の下地）を TextItem.background へ。enabled のときだけ描く。通常字幕層／FREE 字幕・文字で共有（#529・#275）。
+ *  **インライン編集（FreeLayoutOverlay）も同じ既定で帯を敷くため export**（#549）＝編集中と描画結果の帯がドリフトしない。 */
+export function bandBackground(bg: LayerBackground | undefined): { color: string; opacity: number; radius: number } | undefined {
   return bg?.enabled ? { color: bg.color ?? '#000000', opacity: bg.opacity ?? 0.55, radius: bg.radius ?? 16 } : undefined;
 }
 /** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */

@@ -165,7 +165,7 @@ function SlotVideo({
 }
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, telops, timeSec, animations, videoPlayback, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; telops?: { text: string; row: number }[]; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; children?: ReactNode }) {
+export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, telops, timeSec, animations, videoPlayback, hideItemIds, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; telops?: { text: string; row: number }[]; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
@@ -274,7 +274,13 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
   // 場面のレイアウト（アニメ再生中は timeSec で補間済み＝書き出しと同一 layoutScene(t)・ADR-0001）。
-  const layout = layoutScene(scene, template, layoutOpts);
+  const fullLayout = layoutScene(scene, template, layoutOpts);
+  // hideItemIds＝インライン編集中の要素をSVGから伏せる（#549）。編集中は textarea が同じ体裁で同じ位置に文字を出すため、
+  // 伏せないと二重表示になる（入力は即 store へ反映＝SVG も毎打鍵更新されるため）。**プレビュー限定の編集用アフォーダンス**で、
+  // 正準 layoutScene の結果を後段で間引くだけ＝書き出しは hideItemIds を渡さないのでパリティに影響しない（ADR-0001）。
+  const layout = hideItemIds && hideItemIds.length > 0
+    ? { ...fullLayout, items: fullLayout.items.filter((i) => !hideItemIds.includes(i.id)) }
+    : fullLayout;
   // responsive:true で SVG ルートを 100%（viewBox は canvas 実寸を保持）にし、外枠の実寸は計測結果に従う。
   // プレビューも書き出しと同じく常時クレジットを表示（ADR-0001 パリティ）。
   const svg = layoutToSvg(layout, { assetSrc, responsive: true, credit, fontFamily });
