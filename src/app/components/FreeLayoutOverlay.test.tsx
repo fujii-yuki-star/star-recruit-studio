@@ -151,9 +151,69 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     expect(root.querySelector('[data-free-id="free_002"]')).not.toBeNull(); // 非所属＝従来どおり表示
   });
 
-  it("グループのメンバーには個別リサイズハンドルを出さない（グループ単位で編集）", () => {
-    const { boxes } = renderOverlay({ groups: [grp], activeGroupId: "group_001", selectedIds: ["free_001"] });
-    expect(boxes[0].children).toHaveLength(0); // grouped＝primary でもハンドルなし
+  it("グループ単位（メンバー未ドリルイン）ではメンバーに個別ハンドルを出さない", () => {
+    const { boxes } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
+    expect(boxes[0].children).toHaveLength(0); // グループ選択中＝メンバーはグループごと編集・個別ハンドルなし
+  });
+
+  it("未変形グループのメンバーをダブルクリックするとそのメンバーだけ選択（ドリルイン・#525-5）", () => {
+    const { boxes, onSelect } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
+    // 実機経路＝素の pointerdown×2（fireEvent.doubleClick ではない）。
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    expect(onSelect).toHaveBeenLastCalledWith("free_001"); // そのメンバーだけ選択（グループ解除は selectFree が担う）
+  });
+
+  it("ドリルインした純並進グループメンバーは個別ハンドルを出す＝直接編集できる（合成が並進差のみ・#525-5）", () => {
+    const transGrp = { ...grp, transform: { x: 50, y: 0, rotation: 0, scale: 1 } }; // 移動済みでも純並進
+    const { boxes } = renderOverlay({ groups: [transGrp], selectedIds: ["free_001"] }); // 個別選択＝ドリルイン
+    expect(boxes[0].children.length).toBeGreaterThan(0); // 合成後が base と w/h/rotation 一致＝delta 1:1 で正しい
+  });
+
+  it("拡縮グループのメンバーは個別選択しても canvas ハンドルを出さない＝ずれ防止（#525-5）", () => {
+    const scaledGrp = { ...grp, transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const { boxes } = renderOverlay({ groups: [scaledGrp], selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // 合成後 w≠base なので直接編集は無効（選択のみ＝詳細パネルで編集）
+  });
+
+  it("回転グループのメンバーも個別選択で canvas ハンドルを出さない（#525-5）", () => {
+    const rotGrp = { ...grp, transform: { x: 0, y: 0, rotation: 90, scale: 1 } };
+    const { boxes } = renderOverlay({ groups: [rotGrp], selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // 合成後 rotation≠base
+  });
+
+  it("ネスト：素の外グループ×変形した内グループでも、メンバーに個別ハンドルを出さない（最外だけ見ないで合成後で判定・#525-5 レビュー P2）", () => {
+    // free_001 → 内グループ group_001(scale2) → 外グループ group_002(identity)。最外は素だが合成後は拡縮を含む。
+    const inner = { id: "group_001", members: ["free_001"], transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const outer = { id: "group_002", members: ["group_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+    const { boxes } = renderOverlay({ groups: [inner, outer], selectedIds: ["free_001"] });
+    expect(boxes[0].children).toHaveLength(0); // 旧実装は最外(素)を見てハンドルを出す誤り→合成後で判定して抑止
+  });
+
+  it("変形グループのドリルインメンバーを再クリックしても無言でグループへ戻さない・動かさない（#525-5 レビュー P2）", () => {
+    const scaledGrp = { ...grp, transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const onSelectGroup = vi.fn();
+    const onGroupTransform = vi.fn();
+    const { root, boxes, onMoveMany } = renderOverlay({ groups: [scaledGrp], selectedIds: ["free_001"], onSelectGroup, onGroupTransform });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // 万一ドラッグが始まっても検知できるよう scale=1
+    // ドリルイン済み（selectedIds=[free_001]）のメンバーを再クリック → グループ選択へ戻らない。
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    expect(onSelectGroup).not.toHaveBeenCalled(); // 無言のグループ再選択なし
+    // そのままドラッグしてもグループ全体も個別メンバーも動かない（変形グループは詳細パネルで編集）。
+    fireEvent.pointerMove(boxes[0], { clientX: 220, clientY: 220, pointerId: 1 });
+    expect(onGroupTransform).not.toHaveBeenCalled();
+    expect(onMoveMany).not.toHaveBeenCalled();
+  });
+
+  it("純並進グループのドリルインメンバーは再クリック＋ドラッグで個別移動する（グループへ戻さない・#525-5）", () => {
+    const onSelectGroup = vi.fn();
+    const { root, boxes, onMoveMany } = renderOverlay({ groups: [grp], selectedIds: ["free_001"], onSelectGroup });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onSelectGroup).not.toHaveBeenCalled(); // 個別ドラッグ＝グループ再選択なし
+    fireEvent.pointerMove(boxes[0], { clientX: 30, clientY: 40, pointerId: 1 });
+    expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 130, y: 140 }]); // free_001(100,100) を +30,+40 個別移動
   });
 
   it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform）", () => {

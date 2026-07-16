@@ -299,7 +299,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const selectFreeMany = (ids: string[]) => {
     setConfirmBulkDelete(false);
     setActiveGroupId(null);
-    setSelectedFreeIds(ids);
+    // 範囲選択（マーキー）はグループ所属の要素を巻き込まない＝グループはまとまりで扱う（個別選択はメンバーの
+    // ダブルクリック＝ドリルイン・#525-5）。未所属の要素だけを選ぶ。
+    setSelectedFreeIds(ids.filter((id) => topGroupOfMember(sceneGroups, id) == null));
   };
   // グループ選択（メンバークリック・#305）：要素選択をクリアしてグループをアクティブにする。
   const selectGroup = (groupId: string | null) => {
@@ -1927,6 +1929,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
                         {renderFreeKindControls(el)}
 
+                        {/* グループのメンバー（ドリルイン選択・#525-5）は位置/大きさ/角度が「グループの中での値」＝画面の
+                            見え方とずれることがある（グループの移動/拡縮/回転ぶん）。数値が絶対座標に見える誤解を避ける注記。 */}
+                        {topGroupOfMember(sceneGroups, el.id) != null && (
+                          <p className="text-sm text-muted" style={{ margin: "0 0 4px" }}>
+                            グループ内の要素です。下の数値は「グループの中での値」で、画面の見え方とずれることがあります（まとまりで動かすにはグループを選び直してください）。
+                          </p>
+                        )}
                         <div className="row gap-sm" style={{ marginBottom: 4 }}>
                           <NumberField label="横位置" value={el.x} onChange={(v) => patchFreeEl(el.id, { x: v })} />
                           <NumberField label="縦位置" value={el.y} onChange={(v) => patchFreeEl(el.id, { y: v })} />
