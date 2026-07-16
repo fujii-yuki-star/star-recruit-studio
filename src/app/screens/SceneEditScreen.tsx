@@ -586,16 +586,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const onCanvasNudge = (dx: number, dy: number) => {
     if (effectiveActiveGroupId != null && !activeGroup?.locked) {
       const g = sceneGroups.find((x) => x.id === effectiveActiveGroupId);
-      if (g) transformGroup(g.id, { x: g.transform.x + dx, y: g.transform.y + dy });
+      if (g) transformGroup(g.id, { x: g.transform.x + dx, y: g.transform.y + dy }); // グループ全体は canvas 並進＝画面 1:1
     } else if (selectedFreeIds.length > 0) {
-      const moves = nudgeFreeElements(freeLayout, selectedFreeIds, dx, dy);
+      const moves = nudgeFreeElements(freeLayout, sceneGroups, selectedFreeIds, dx, dy); // 変形メンバーは逆変換で画面 1:1
       if (moves.length > 0) moveFreeMany(moves); // ロックのみの選択なら何もしない
     }
   };
   const onCanvasDelete = () => {
     if (effectiveActiveGroupId) return; // グループ削除はキーボード対象外（ツールバー/ドリルイン経由で扱う）
-    if (selectedFreeIds.length >= 2) setConfirmBulkDelete(true); // 既存の一括削除確認UIへ
-    else if (selectedFreeIds.length === 1) removeFreeEl(selectedFreeIds[0]); // 単一は直接削除（右クリック「削除」と同じ）
+    if (selectedFreeIds.length >= 2) { setConfirmBulkDelete(true); return; } // 既存の一括削除確認UIへ
+    // 単一は直接削除（右クリック「削除」と同じ）。ロック要素はキーボードで消さない＝移動と同じ流儀（#525-11 レビュー P3）。
+    const id = selectedFreeIds[0];
+    if (id && !freeLayout.find((el) => el.id === id)?.locked) removeFreeEl(id);
   };
   const canvasKbdActive = isFree && (selectedFreeIds.length > 0 || (effectiveActiveGroupId != null && !activeGroup?.locked));
   // グループの重ね順（#305）：メンバー全体を最前面/最背面へ（相対順は保つ）。

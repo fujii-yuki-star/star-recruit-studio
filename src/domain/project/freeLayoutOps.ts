@@ -4,6 +4,8 @@
 import { DEFAULT_FIT, GEOM_MIN_SIZE } from '../constants';
 import { FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, TEXT_ALIGN } from '../enums';
 import type { FreeElementKind } from '../enums';
+import { composeGroupGeometry } from '../group/compose';
+import type { Group } from '../group/types';
 import { createFreeElementId } from './persistence';
 import type { FreeElement } from './types';
 
@@ -152,16 +154,34 @@ export function applyFreeElementPositions(
 }
 
 /**
- * キーボード微調整（#525-11）：選択中の非ロック要素を dx,dy だけずらす移動リスト。
+ * キーボード微調整（#525-11）：選択中の非ロック要素を**画面上 dx,dy** だけずらす移動リスト。
  * ロック要素は動かさない（レイヤー一覧のロックと一貫・#210）。存在しない id は無視。applyFreeElementPositions と併用。
+ *
+ * グループのメンバーは描画が composeGroupGeometry（拡縮→回転→並進）で合成されるため、base をそのまま dx,dy 動かすと
+ * 画面上は拡縮/回転ぶんズレる（scale=2 で 2px・回転で斜め）。そこで**画面デルタを要素の合成変形の逆で base デルタへ**落とし、
+ * 見た目を画面上 1:1 に保つ（#525-11 レビュー P2＝ドリルインした変形メンバーや混在選択でも直感どおり動く）。
+ * 合成後（cg）を直接見るのでネスト深さ非依存。未所属/純並進（合成後 w・rotation が素と一致）は base デルタ＝画面デルタ。
  */
 export function nudgeFreeElements(
-  freeLayout: FreeElement[], ids: ReadonlyArray<string>, dx: number, dy: number,
+  freeLayout: FreeElement[], groups: ReadonlyArray<Group>, ids: ReadonlyArray<string>, dx: number, dy: number,
 ): FreeElementMove[] {
   const sel = new Set(ids);
+  const composed = groups.length > 0 ? composeGroupGeometry(freeLayout, groups) : null;
   return freeLayout
     .filter((el) => sel.has(el.id) && !el.locked)
-    .map((el) => ({ id: el.id, x: el.x + dx, y: el.y + dy }));
+    .map((el) => {
+      const cg = composed?.get(el.id);
+      // 合成後が素と同寸・同角＝拡縮/回転なし（未所属 or 純並進）＝画面 1:1。
+      if (!cg || (cg.w === el.w && (cg.rotation ?? 0) === (el.rotation ?? 0))) {
+        return { id: el.id, x: el.x + dx, y: el.y + dy };
+      }
+      // 合成の総拡縮＝cg.w/el.w、総回転＝cg.rotation−el.rotation。∂composed/∂base = scale·R(θ) の逆で base デルタを得る。
+      const scale = el.w !== 0 ? cg.w / el.w : 1;
+      const rad = (((cg.rotation ?? 0) - (el.rotation ?? 0)) * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      return { id: el.id, x: el.x + (dx * cos + dy * sin) / scale, y: el.y + (-dx * sin + dy * cos) / scale };
+    });
 }
 
 /** キーボードの矢印キー → 移動量（px・#525-11）。Shift で 10px、通常 1px。矢印以外は null。 */

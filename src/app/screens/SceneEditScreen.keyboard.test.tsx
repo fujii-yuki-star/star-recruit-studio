@@ -74,4 +74,33 @@ describe("SceneEditScreen キーボード操作（#525-11）", () => {
     fireEvent.keyDown(document.body, { key: "Delete" });
     expect(useProjectStore.getState().scenes[0].freeLayout?.length).toBe(0);
   });
+
+  it("ロック要素はキーボード Delete で消さない（移動と同じ流儀・#525-11 レビュー P3）", () => {
+    useProjectStore.setState((s) => ({
+      scenes: s.scenes.map((sc) => sc.sceneId === "scene_001"
+        ? { ...sc, freeLayout: sc.freeLayout?.map((e) => e.id === "free_001" ? { ...e, locked: true } : e) }
+        : sc),
+    }));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree001(); // ロック要素も選択はできる（右クリック/一覧解除用）
+    fireEvent.keyDown(document.body, { key: "Delete" });
+    expect(useProjectStore.getState().scenes[0].freeLayout?.length).toBe(1); // 消えない
+  });
+
+  it("変形グループのドリルインメンバーは矢印で画面1:1動く（base は 1/scale・#525-11 レビュー P2）", () => {
+    // free_001 を scale=2 のグループに入れる。
+    useProjectStore.setState((s) => ({
+      scenes: s.scenes.map((sc) => sc.sceneId === "scene_001"
+        ? { ...sc, groups: [{ id: "group_001", members: ["free_001"], transform: { x: 0, y: 0, rotation: 0, scale: 2 } }] }
+        : sc),
+    }));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const box = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
+    // ダブルクリック（pointerdown×2）でドリルイン＝そのメンバーを個別選択。
+    fireEvent.pointerDown(box, { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.pointerUp(box, { pointerId: 1 });
+    fireEvent.pointerDown(box, { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    fireEvent.keyDown(document.body, { key: "ArrowRight" }); // 画面 +1px を期待
+    expect(el()?.x).toBeCloseTo(100.5, 5); // base +0.5（合成 scale2 で画面 +1px）＝画面1:1
+  });
 });

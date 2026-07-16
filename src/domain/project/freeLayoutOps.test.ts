@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FreeElement } from './types';
+import type { Group } from '../group/types';
 import {
   addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
   elementVisualBBox, freeElementsInRect, FREE_MIN_SIZE, groupBBox, keyboardNudgeDelta, moveFreeElement, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
@@ -633,19 +634,43 @@ describe('nudgeFreeElements（キーボード微調整・#525-11）', () => {
     { id: 'free_003', kind: 'text', x: 0, y: 0, w: 50, h: 50, text: 'a' },
   ];
 
-  it('選択中の要素だけを dx,dy ずらす移動リストを返す', () => {
-    const moves = nudgeFreeElements(layout, ['free_001', 'free_003'], 1, -1);
+  it('未所属の要素は画面デルタ＝base デルタ（1:1）', () => {
+    const moves = nudgeFreeElements(layout, [], ['free_001', 'free_003'], 1, -1);
     expect(moves).toEqual([{ id: 'free_001', x: 101, y: 99 }, { id: 'free_003', x: 1, y: -1 }]);
   });
 
   it('ロック要素は動かさない（除外）', () => {
-    const moves = nudgeFreeElements(layout, ['free_001', 'free_002'], 10, 0);
+    const moves = nudgeFreeElements(layout, [], ['free_001', 'free_002'], 10, 0);
     expect(moves).toEqual([{ id: 'free_001', x: 110, y: 100 }]); // free_002(locked) は含まれない
   });
 
   it('存在しない id は無視・空選択は空配列', () => {
-    expect(nudgeFreeElements(layout, ['zzz'], 1, 1)).toEqual([]);
-    expect(nudgeFreeElements(layout, [], 1, 1)).toEqual([]);
+    expect(nudgeFreeElements(layout, [], ['zzz'], 1, 1)).toEqual([]);
+    expect(nudgeFreeElements(layout, [], [], 1, 1)).toEqual([]);
+  });
+
+  it('拡縮グループのメンバーは base デルタを 1/scale にして画面 1:1（#525-11 レビュー P2）', () => {
+    const g: Group = { id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const moves = nudgeFreeElements(layout, [g], ['free_001'], 4, 0); // 画面 +4px
+    expect(moves[0].x).toBeCloseTo(102, 5); // base +2（合成 scale2 で画面 +4）
+    expect(moves[0].y).toBeCloseTo(100, 5);
+  });
+
+  it('回転グループのメンバーは画面デルタを逆回転して base へ（arrow-right→画面右・#525-11 レビュー P2）', () => {
+    const g: Group = { id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 90, scale: 1 } };
+    const moves = nudgeFreeElements(layout, [g], ['free_001'], 1, 0); // 画面 arrow-right +1
+    // 90°CW 合成では base を上(-y)へ動かすと画面右へ来る。逆変換で base=(x, y-1)。
+    expect(moves[0].x).toBeCloseTo(100, 5);
+    expect(moves[0].y).toBeCloseTo(99, 5);
+  });
+
+  it('混在選択：未所属は 1:1・変形メンバーは逆変換で、どちらも画面 1:1', () => {
+    const g: Group = { id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 0, scale: 2 } };
+    const moves = nudgeFreeElements(layout, [g], ['free_001', 'free_003'], 2, 0); // 画面 +2px
+    const m1 = moves.find((m) => m.id === 'free_001')!; // 変形メンバー
+    const u1 = moves.find((m) => m.id === 'free_003')!; // 未所属
+    expect(m1.x).toBeCloseTo(101, 5); // base +1（scale2 で画面 +2）
+    expect(u1.x).toBeCloseTo(2, 5); // base +2（画面 +2）
   });
 });
 
