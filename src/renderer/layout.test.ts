@@ -4,7 +4,7 @@ import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas } from './layout';
 import { layoutToSvg } from './sceneSvg';
-import { wrapText } from './textWrap';
+import { wrapText } from '../domain/text/textWrap';
 
 // 字幕帯の実 [top, bottom]（描画と同じ wrapText の行数＋anchorBottom で算出・共有定数を参照）。段間の重なり検証に使う。
 const bandRect = (item: TextItem): { top: number; bottom: number } => {

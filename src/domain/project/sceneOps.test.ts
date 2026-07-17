@@ -5,8 +5,9 @@ import { composeGroupGeometry } from '../group/compose';
 import { DEFAULT_LAYER_Z } from '../template/layerOrder';
 import { NARRATION_STATUS } from '../enums';
 import { duplicateSceneInList, freeLayoutFromPlacedContent, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
-import { DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight } from '../template/textStyle';
-import { wrapText } from '../../renderer/textWrap';
+import { DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight } from '../template/textStyle';
+import { layoutScene, type TextItem } from '../../renderer/layout';
+import { wrapText } from '../text/textWrap';
 
 function scene(id: string, order: number, partId = 'part_001', narration?: Scene['narration']): Scene {
   return {
@@ -448,6 +449,45 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(freeMaxLines).toBeGreaterThanOrEqual(normalLines);
     expect(wrapText(el.text ?? '', el.w, el.fontSize ?? fontSize, freeMaxLines).length).toBe(normalLines);
     expect((el.text ?? '').length).toBe(long.length); // 文言そのものは持ち込まれている
+  });
+
+  // #555 再レビュー P2：テンプレ字幕は下端基準（anchorBottom＝行が増えると上へ伸び下端が動かない）だが、
+  // FREE 字幕は上端起点で下へ伸びる。同じ y に置くと2行字幕が1行ぶん下がり、画面下端からはみ出しうる。
+  // **実際に描かれる帯の位置**（layoutScene の字幕アイテム）で、変換前後が一致することを見る。
+  const bandTop = (item: { y: number; fontSize: number; anchorBottom?: boolean }, lines: number): number =>
+    item.y - (item.anchorBottom ? (lines - 1) * item.fontSize * DEFAULT_LINE_HEIGHT : 0);
+
+  it.each([
+    { name: '既定サイズ', fontSize: undefined, expectLines: 2 },
+    { name: '場面で大きくした（#555）', fontSize: 60, expectLines: 2 },
+  ])('通常→FREE：2行字幕の帯の位置が変わらない（$name・下端基準を座標へ翻訳・P2）', ({ fontSize, expectLines }) => {
+    const long = 'あ'.repeat(50); // 幅1720 の字幕層で2行に折れる長さ
+    const base = {
+      ...richScene(),
+      texts: { subtitle: long },
+      ...(fontSize ? { textStyles: { subtitle: { fontSize } } } : {}),
+    } as Scene;
+    const tpl = prevTemplate();
+    // 変換前：通常テンプレでの字幕帯の上端。
+    const before = layoutScene(base, tpl).items.find((i) => i.id === 'subtitle') as TextItem;
+    expect(wrapText(before.text, before.w, before.fontSize, before.maxLines).length).toBe(expectLines); // 前提：2行
+    const topBefore = bandTop(before, expectLines);
+
+    // 変換後：FREE テンプレでの同じ字幕の上端。
+    const freeTpl = { ...tpl, templateId: 'free_v1', category: 'free', layers: [] } as unknown as Template;
+    const r = switchSceneTemplate(base, 'free_v1', [], 'free', tpl);
+    const after = layoutScene(r, freeTpl).items.find((i) => i.kind === 'text' && i.isSubtitle) as TextItem;
+    expect(after).toBeTruthy();
+    expect(wrapText(after.text, after.w, after.fontSize, after.maxLines).length).toBe(expectLines); // 行は減っていない（P1）
+    expect(bandTop(after, expectLines)).toBeCloseTo(topBefore, 5); // 帯の位置が一致（P2）
+  });
+
+  it('通常→FREE：1行字幕は元から一致しているので動かさない', () => {
+    const base = { ...richScene(), texts: { subtitle: '短い字幕' } } as Scene;
+    const tpl = prevTemplate();
+    const r = switchSceneTemplate(base, 'free_v1', [], 'free', tpl);
+    const el = (r.freeLayout ?? []).find((e) => e.kind === 'subtitle')!;
+    expect(el.y).toBe(tpl.layers.find((l) => l.id === 'subtitle')!.y); // y 据え置き
   });
 
   it('通常→FREE：枠が十分に高いときは広げない（幾何をむやみに変えない）', () => {

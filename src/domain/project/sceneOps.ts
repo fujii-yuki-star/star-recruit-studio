@@ -7,7 +7,9 @@ import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
-import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
+import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
+import { wrapText } from '../text/textWrap';
+import { resolveLineSubtitle } from './lineTimeline';
 import { normalizeDialogueTiming } from './narrationLines';
 import { createFreeElementId } from './persistence';
 import { defaultSubtitleSource } from './subtitleBinding';
@@ -101,6 +103,37 @@ function textBoxH(h: number, fontSize: number, maxLines: number | undefined): nu
 }
 
 /**
+ * 通常→FREE 変換で字幕の枠に与える上端 y（#555 再レビュー P2）。
+ *
+ * **字幕はアンカーが逆**：テンプレ字幕層は**下端基準**（`anchorBottom`＝行が増えると上へ伸び、下端が動かない
+ * ＝画面下端に置いた帯が2行でも画面外へ出ない・ADR-0031）。一方 FREE 字幕は**上端起点**で下へ伸びる
+ * （箱の高さは利用者が持つ＝ADR-0008）。同じ y に置くと帯が `(行数-1)×行高` ぶん**下がり**、画面下端から
+ * はみ出しうる（例：字幕60px・2行なら下端が 1034→1112 でキャンバス外）。
+ *
+ * そこで**アンカーの違いを座標へ翻訳**する＝帯が実際に占めていた上端へ y を移す。**1行の字幕は元から一致
+ * している**ので動かさない（`行数-1 = 0`）。掛け合いは行ごとに行数が変わり単一の y では一致させられないため、
+ * **全行の最大行数**に寄せる＝どの行でもテンプレより下がらない（はみ出しを増やさない）側を採る。
+ */
+function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxLines: number | undefined): number {
+  const cap = maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
+  // 単独/掛け合いの判別は **生の `scene.lines`** で行う（`showsSubtitle`／`defaultSubtitleSource` と同じ規則）。
+  // `sceneLines()` は lines 不在のとき narration から1行を合成して返すため、ここで使うと単独場面まで
+  // 掛け合い扱いになり静的字幕（`texts.subtitle`）の行数を見落とす。
+  const lines = scene.lines ?? [];
+  const shown =
+    lines.length > 0
+      ? Math.max(
+          1,
+          ...lines.map((l) => {
+            const sub = resolveLineSubtitle(l, scene);
+            return sub.enabled && sub.text.length > 0 ? wrapText(sub.text, w, fontSize, cap).length : 1;
+          }),
+        )
+      : wrapText(scene.texts[TEXT_KEY.subtitle] ?? '', w, fontSize, cap).length;
+  return y - (shown - 1) * fontSize * DEFAULT_LINE_HEIGHT;
+}
+
+/**
  * 通常テンプレの「表示中の配置内容」を FREE 要素へ変換する（ADR-0030・通常→FREE の seed 用）。純粋関数。
  * 旧テンプレのレイヤー幾何（x/y/w/h/rotation/zIndex）ごと、以下を FreeElement へ写す（表示されていないものは持ち込まない）:
  * - スロット層（background/slot/logo）の素材（`assetRefs`）→ slot 要素。**動画クリップ調整（`slotClips`）は新 id へ移送**（#524 P1）。
@@ -178,6 +211,7 @@ export function freeLayoutFromPlacedContent(
         id: nextId(),
         kind: FREE_ELEMENT_KIND.subtitle,
         ...geom,
+        y: subtitleTopY(scene, cg.y, cg.w, st.fontSize, layer.maxLines),
         h: textBoxH(geom.h, st.fontSize, layer.maxLines),
         subtitleSource: defaultSubtitleSource(scene),
         fontSize: st.fontSize,

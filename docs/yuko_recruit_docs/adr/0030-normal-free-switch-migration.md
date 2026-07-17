@@ -40,6 +40,11 @@ PR #524 で「見た目ピッカーは全場面で FREE を候補に出し、選
 - **文字/字幕の「表示中の内容」には体裁と行数も含む**（#555 レビュー）：
   - 体裁は `resolveTextStyle(layer, scene.textStyles?.[textKey])` の**実効値**を写す（生の `layer.*` を写すと、場面で変えた色/大きさが FREE 化で黙ってテンプレ既定へ戻る＝隣の `fontId` は per-scene で移送しているのに体裁だけ戻る非対称・ADR-0026②）。
   - **枠高は「同じ行数が入る高さ」へ広げる**（`boxHeightForLines`）。通常は `maxLines`（既定2）で行数が決まるのに対し **FREE は枠高から行数を導出する**（`linesForBoxHeight`）ため、枠高をそのまま持ち込むと行が減って文字が切り詰められる（`wrapText` が末尾を … にする）。実例＝標準テンプレの見出し層（h=140・72px）は通常2行だが、そのままでは FREE で1行。**縮めはしない**＝枠高は回転の中心（`y + h/2`）にも効くため、利用者テンプレ（ADR-0017）が文字層を回転させていた場合に位置が動くのを避ける。
+  - **字幕の枠は上端 y を「帯が実際に占めていた上端」へ移す**（`subtitleTopY`）。テンプレ字幕層は**下端基準**
+    （`anchorBottom`＝行が増えると上へ伸び下端が動かない・ADR-0031）だが、**FREE 字幕は上端起点で下へ伸びる**
+    （箱は利用者のもの＝ADR-0008）＝同じ y に置くと帯が `(行数-1)×行高` ぶん下がり、画面下端からはみ出しうる
+    （字幕60px・2行で下端 1034→1112＝キャンバス外）。1行字幕は元から一致するので動かさない。掛け合いは行ごとに
+    行数が変わり単一の y では一致させられないため、**全行の最大行数**に寄せる＝どの行でもテンプレより下がらない側を採る。
   - ＝本 ADR の「表示中の内容を持ち込む」は**幾何の逐語コピーではなく、見える結果の保存**と読む（両立しないときは内容を優先）。
 - `src/domain/enums.ts`：`FREE_SLOT_ASSET_TYPES`／`isFreeSlotAssetType`（FREE スロットに置ける素材種別＝映像として描ける非音声）を新設。`SceneEditScreen` の FREE 素材候補と現在値保持を一本化。
 - `src/domain/project/assetUsage.ts`：`sceneActiveAssetIds`（実効テンプレでゲート）を新設し `sceneUsesAsset`/`scenesUsingAsset` を template 受け取りへ。`adapters.ts`（precheck）と `MaterialsScreen.tsx`（逆引き/削除確認）が同一規則を共有。

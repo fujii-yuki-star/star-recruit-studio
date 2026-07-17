@@ -16,7 +16,7 @@ import { groupIndices, resolveLineSubtitle } from '../domain/project/lineTimelin
 import type { SceneSegmentSpec } from '../domain/project/lineTimeline';
 import { sceneLines } from '../domain/project/narrationLines';
 import { resolveSubtitleForElement, type SubtitleMoment } from '../domain/project/subtitleBinding';
-import { wrapText } from './textWrap';
+import { wrapText } from '../domain/text/textWrap';
 
 export interface Rect {
   x: number;
