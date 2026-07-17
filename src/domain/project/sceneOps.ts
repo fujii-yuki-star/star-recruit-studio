@@ -7,6 +7,7 @@ import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
+import { resolveTextStyle } from '../template/textStyle';
 import { normalizeDialogueTiming } from './narrationLines';
 import { createFreeElementId } from './persistence';
 import { defaultSubtitleSource } from './subtitleBinding';
@@ -25,7 +26,7 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
  * - **assetRefs / slotFits は「通常テンプレへ切り替えるときだけ」清算する**（ADR-0030）：新テンプレに無いスロット
  *   （`background`/`slot`/`logo` レイヤーの id）への参照/収め方を捨てる（11 §5＝キー ⊆ スロット id）。**FREE へ切り替える
  *   ときは清算せず休眠保持し、通常テンプレへ戻すと自動復元する**（ダングリングは実効使用ゲート `sceneActiveAssetIds` で無害化済み・#524 P1）。
- * - **texts / textFontIds は保持する**：これらは固定の `TextKey` enum がキーでテンプレ非依存ゆえダングリングにならず、
+ * - **texts / textFontIds / textStyles は保持する**：これらは固定の `TextKey` enum がキーでテンプレ非依存ゆえダングリングにならず、
  *   別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と非対称だが**意図的**（#236＝保持を採用）。
  *   ※ 将来この非対称を「揃える」目的で texts を清算しないこと（利用者の入力消失になる）。
  * - **warnings はクリアする**：旧テンプレ基準の検証結果（例: 必須スロット未設定）は切替で陳腐化するため引き継がない＝
@@ -78,7 +79,7 @@ export function switchSceneTemplate(
     ...(seeded && seeded.elements.length ? { freeLayout: seeded.elements } : {}),
     // 動画クリップ調整（範囲/速度/元音声）を旧層 id → 新 FREE 要素 id へ移送（#524 P1）。旧キーは休眠のまま残す（往復）。
     ...(seeded && Object.keys(seeded.slotClips).length ? { slotClips: { ...scene.slotClips, ...seeded.slotClips } } : {}),
-    // texts / textFontIds は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。
+    // texts / textFontIds / textStyles は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。
     warnings: [],
   };
 }
@@ -135,33 +136,38 @@ export function freeLayoutFromPlacedContent(
     } else if (layer.type === 'text' && layer.textKey) {
       const text = scene.texts[layer.textKey];
       if (!text) continue; // 空文字は持ち込まない
+      // 体裁は**場面の上書き（textStyles・#555）を解決した実効値**を写す。生の layer.* を写すと、場面で
+      // 変えた色/大きさが FREE 化で黙ってテンプレ既定へ戻る（隣の fontId は per-scene なのに体裁だけ戻る＝
+      // ADR-0026②の非対称・ADR-0030「表示中の内容を持ち込む」に反する）。
+      const st = resolveTextStyle(layer, scene.textStyles?.[layer.textKey]);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.text,
         ...geom,
         text,
-        fontSize: layer.fontSize,
-        color: layer.color,
-        fontWeight: layer.fontWeight,
+        fontSize: st.fontSize,
+        color: st.color,
+        fontWeight: st.fontWeight,
         fontId: scene.textFontIds?.[layer.textKey],
-        ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
-        ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+        ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
+        ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
         ...(layer.background != null ? { background: layer.background } : {}), // 背景帯（可読性の下地）も移送（#529）
       });
     } else if (layer.type === 'subtitle') {
       if (!showsSubtitle) continue; // 字幕が出ない場面は空の字幕要素を作らない
       // 表示文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。単独→narration／掛け合い→allLines。
+      const st = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.subtitle,
         ...geom,
         subtitleSource: defaultSubtitleSource(scene),
-        fontSize: layer.fontSize,
-        color: layer.color,
-        fontWeight: layer.fontWeight,
+        fontSize: st.fontSize,
+        color: st.color,
+        fontWeight: st.fontWeight,
         fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
-        ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
-        ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+        ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
+        ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
         ...(layer.background != null ? { background: layer.background } : {}), // 字幕の背景帯（可読性の下地）を移送（#529）
       });
     }

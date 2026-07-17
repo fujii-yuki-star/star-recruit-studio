@@ -106,7 +106,7 @@ describe("SceneEditScreen 文字の体裁の場面別上書き（#555）", () =>
     const scene = setup({ textStyles: { title: { color: "#ff0000", fontSize: 96 } } });
     expect(screen.getByText(/この場面だけ変更中/)).toBeTruthy();
     const panel = openStyles();
-    fireEvent.click(within(panel).getByText("見た目パターンの文字づかいに戻す"));
+    fireEvent.click(within(panel).getByText("すべて見た目パターンに合わせる"));
     expect(scene().textStyles).toBeUndefined();
     expect(screen.queryByText(/この場面だけ変更中/)).toBeNull();
   });
@@ -114,7 +114,49 @@ describe("SceneEditScreen 文字の体裁の場面別上書き（#555）", () =>
   it("上書きが無いときは「戻す」を出さない", () => {
     setup();
     const panel = openStyles();
-    expect(within(panel).queryByText("見た目パターンの文字づかいに戻す")).toBeNull();
+    expect(within(panel).queryByText("すべて見た目パターンに合わせる")).toBeNull();
+  });
+
+  // 色・縁取りも #555 の対象4軸。大きさ/太さだけ検証すると、この2つの UI 配線が無検証で通ってしまう。
+  it("色を選ぶと場面の上書きになる（ColorPicker の配線）", () => {
+    const scene = setup();
+    const panel = openStyles();
+    fireEvent.click(within(panel).getByRole("button", { name: "見出しの色を選ぶ" }));
+    fireEvent.click(screen.getByRole("button", { name: "色 #22c55e" }));
+    expect(scene().textStyles?.title?.color).toBe("#22c55e");
+  });
+
+  it("縁取りの色を選ぶと場面の上書きになる", () => {
+    const scene = setup();
+    const panel = openStyles();
+    fireEvent.click(within(panel).getByRole("button", { name: "見出しの縁取りの色を選ぶ" }));
+    fireEvent.click(screen.getByRole("button", { name: "色 #22c55e" }));
+    expect(scene().textStyles?.title?.strokeColor).toBe("#22c55e");
+  });
+
+  it("縁取りの太さは空＝継承で、入れると上書き・空に戻すと継承へ戻る", () => {
+    const scene = setup();
+    const panel = openStyles();
+    const sw = within(panel).getByLabelText("縁取りの太さ") as HTMLInputElement;
+    expect(sw.value).toBe("");
+    expect(sw.placeholder).toBe("0"); // テンプレ層に縁取りが無い＝0
+    fireEvent.focus(sw);
+    fireEvent.change(sw, { target: { value: "5" } });
+    fireEvent.blur(sw);
+    expect(scene().textStyles?.title?.strokeWidth).toBe(5);
+    fireEvent.focus(sw);
+    fireEvent.change(sw, { target: { value: "" } });
+    fireEvent.blur(sw);
+    expect(scene().textStyles).toBeUndefined();
+  });
+
+  // 縁取りは「太さ>0 で色未指定なら白」が実描画の既定（#275）。見本が継承値（＝縁取り無し）を出すと
+  // 「実描画は白／見本は黒」のドリフトになる＝この欄が防ぐと謳っているもの（§2-7・#555 レビュー）。
+  it("太さだけ足したときの縁取りの色の見本は、実描画と同じ既定（白）を出す", () => {
+    setup({ textStyles: { title: { strokeWidth: 3 } } });
+    const panel = openStyles();
+    fireEvent.click(within(panel).getByRole("button", { name: "見出しの縁取りの色を選ぶ" }));
+    expect(screen.getByLabelText("色コード")).toHaveValue("#ffffff"); // 継承値(縁取り無し→黒)ではない
   });
 
   it("Undo で戻せる（履歴に載る）", () => {

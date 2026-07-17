@@ -295,8 +295,6 @@ export function validateProjectDoc(data: unknown): { valid: boolean; errors: str
  *  1.5→1.6: FREE 図形の種別追加（rounded_rect/triangle/star/arrow/speech_bubble）＋枠線（strokeColor/strokeWidth）。
  *          いずれも後方互換の任意追加のため、版番号の付け替え以外の変換は不要（#173）。
  *  1.6→1.7: テキストごとのフォント（FreeElement.fontId＋scene.textFontIds）。後方互換の任意追加＝変換不要（#178）。
- *  1.23→1.24: 文字の体裁の場面別上書き（scene.textStyles＝種別ごとの色/サイズ/太さ/縁取り）。後方互換の任意追加＝変換不要
- *           （各プロパティ未指定＝テンプレ層→既定を継承。配置/座標は対象外＝テンプレ駆動のまま・#555）。
  *  1.7→1.8: 掛け合い（scene.lines＝NarrationLine[]＋scene.subtitleEnabledDefault）。後方互換の任意追加＝変換不要（ADR-0015/#180）。
  *  1.8→1.9: FREE 要素の回転（FreeElement.rotation・度）。後方互換の任意追加＝変換不要（未指定=回転なし・#208）。
  *  1.9→1.10: FREE text の体裁（lineHeight＝行間・textAlign＝揃え）。後方互換の任意追加＝変換不要（未指定は既定＝行間1.3/左揃え・#209）。

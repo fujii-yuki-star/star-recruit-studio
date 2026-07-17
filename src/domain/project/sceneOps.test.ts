@@ -328,6 +328,7 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     slotFits: { mainVisual: 'contain', oldSlot: 'stretch' },
     texts: { title: 'タイトル', main: '本文' },
     textFontIds: { main: 'gen-interface-jp', title: 'gen-interface-jp-display' },
+    textStyles: { title: { color: '#ff0000', fontSize: 96 } },
     warnings: [{ code: 'SLOT_REQUIRED_EMPTY', message: '旧テンプレ基準の警告', field: 'assetRefs', severity: 'warning' }],
   });
 
@@ -343,11 +344,12 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     expect(r.slotFits?.oldSlot).toBeUndefined(); // 新テンプレに無いスロットの収め方は捨てる
   });
 
-  it('texts / textFontIds は保持する（#236＝固定TextKeyキー・別パターンへ変えて戻すと入力が復元）', () => {
+  it('texts / textFontIds / textStyles は保持する（#236＝固定TextKeyキー・別パターンへ変えて戻すと入力が復元）', () => {
     const r = switchSceneTemplate(richScene(), 'new_tmpl', newLayers);
     // 新テンプレが main を使わなくても texts.main / textFontIds.main は残す。
     expect(r.texts).toEqual({ title: 'タイトル', main: '本文' });
     expect(r.textFontIds).toEqual({ main: 'gen-interface-jp', title: 'gen-interface-jp-display' });
+    expect(r.textStyles).toEqual({ title: { color: '#ff0000', fontSize: 96 } }); // 体裁も同じ理由で保持（#555）
   });
 
   it('templateId を新しい値に更新する', () => {
@@ -400,6 +402,35 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     slotFits: { mainVisual: 'contain' },
     texts: { title: 'タイトル', main: '本文' },
     textFontIds: { title: 'gen-interface-jp-display' },
+  });
+
+  // #555：場面で変えた体裁（textStyles）も「表示中の内容」＝FREE へ持ち込む。生の layer.* を写すと、
+  // 隣の fontId は per-scene で移送されるのに体裁だけテンプレ既定へ戻る＝FREE 化で見た目が黙って変わる
+  // （ADR-0030「表示中の内容を持ち込む」／ADR-0026② 同概念同挙動）。
+  it('通常→FREE：場面で変えた文字の体裁（textStyles）も持ち込む＝FREE 化で見た目が戻らない（#555）', () => {
+    const styled = {
+      ...richScene(),
+      texts: { title: 'タイトル', subtitle: '字幕' },
+      textStyles: {
+        title: { color: '#ff0000', fontSize: 96, fontWeight: 'bold' as const, strokeColor: '#0000ff', strokeWidth: 4 },
+        subtitle: { fontSize: 76 },
+      },
+    };
+    const r = switchSceneTemplate(styled, 'free_v1', [], 'free', prevTemplate());
+    const title = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
+    // テンプレ層は fontSize:64 / color:#ffffff / bold。場面の上書きが勝つ。
+    expect(title).toMatchObject({ color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#0000ff', strokeWidth: 4 });
+    const sub = (r.freeLayout ?? []).find((e) => e.kind === 'subtitle')!;
+    expect(sub).toMatchObject({ fontSize: 76, color: '#ffffff' }); // 触っていない色はテンプレ層のまま継承
+  });
+
+  it('通常→FREE：場面で縁取りの太さだけ足したときも既定色ごと持ち込む（縁取りが消えない・#555）', () => {
+    // テンプレ層に縁取りが無く、場面で太さだけ足した状態。FREE の text 要素は「太さ>0 なら白」の既定を
+    // 持たない（el.strokeColor をそのまま描く）ので、解決済みの色を写さないと縁取りが黙って消える。
+    const styled = { ...richScene(), textStyles: { title: { strokeWidth: 3 } } };
+    const r = switchSceneTemplate(styled, 'free_v1', [], 'free', prevTemplate());
+    const title = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
+    expect(title).toMatchObject({ strokeWidth: 3, strokeColor: '#ffffff' });
   });
 
   it('通常→FREE：表示中の素材/文字を freeLayout へ変換（位置/収め方/回転/体裁を継承・空スロット/装飾/テキスト層なしは除外）', () => {

@@ -2,10 +2,11 @@
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
 import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../domain/enums';
-import type { Fit, FontWeight, FreeShapeType, TextAlign } from '../domain/enums';
+import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT } from '../domain/constants';
-import type { ElementAnimation, Scene, TextStyleOverride } from '../domain/project/types';
-import type { Layer, LayerBackground, Template } from '../domain/template/types';
+import type { ElementAnimation, Scene } from '../domain/project/types';
+import type { LayerBackground, Template } from '../domain/template/types';
+import { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE, resolveTextStyle } from '../domain/template/textStyle';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
@@ -90,45 +91,10 @@ export interface SceneLayout {
   items: LayoutItem[];
 }
 
-// テキストの既定色/既定サイズ。**インライン編集（FreeLayoutOverlay）が実描画に体裁を合わせるため共有**する（#549）＝
-// 編集中の見た目と描画結果がドリフトしないよう単一の参照元にする（§2-7）。
-export const DEFAULT_TEXT_COLOR = '#222222';
-export const DEFAULT_FONT_SIZE = 40;
+// テキストの既定色/既定サイズは domain（template/textStyle）が正典＝描画・インライン編集・体裁欄・
+// 通常→FREE 変換の4か所で共有する（§2-7）。既存の import 元を保つため、ここから re-export する。
+export { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE } from '../domain/template/textStyle';
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
-/** 縁取りの太さ>0 で色が未指定のときの既定色（色だけ無いと縁取りが silent に消えるのを防ぐ・#275/PR#289）。 */
-const DEFAULT_STROKE_COLOR = '#ffffff';
-
-/** 通常テンプレの text/subtitle 層の「実際に描く体裁」。resolveTextStyle の戻り値。 */
-export interface ResolvedTextStyle {
-  color: string;
-  fontSize: number;
-  fontWeight: FontWeight;
-  strokeColor?: string;
-  strokeWidth?: number;
-}
-
-/**
- * テンプレ層＋場面の上書き（`scene.textStyles`・#555）から、実際に描く文字の体裁を解決する。
- * 継承の順序は **場面の上書き → テンプレ層 → 既定**（各プロパティ独立＝触ったものだけ固有値・11 §6）。
- *
- * **描画（layoutScene）と場面編集の体裁欄で共有する**（§2-7）＝欄が「テンプレに合わせる」と示す値と、
- * 実際に描かれる値がドリフトしない。preview/export はどちらも layoutScene 経由ゆえパリティも保たれる（ADR-0001）。
- */
-export function resolveTextStyle(
-  layer: Pick<Layer, 'color' | 'fontSize' | 'fontWeight' | 'strokeColor' | 'strokeWidth'>,
-  ov?: TextStyleOverride,
-): ResolvedTextStyle {
-  const strokeWidth = ov?.strokeWidth ?? layer.strokeWidth;
-  const strokeColorRaw = ov?.strokeColor ?? layer.strokeColor;
-  return {
-    color: ov?.color ?? layer.color ?? DEFAULT_TEXT_COLOR,
-    fontSize: ov?.fontSize ?? layer.fontSize ?? DEFAULT_FONT_SIZE,
-    fontWeight: ov?.fontWeight ?? layer.fontWeight ?? FONT_WEIGHT.normal,
-    // 太さ>0 で色未指定なら既定色。**上書きを解決したあとの値で判定する**＝場面で太さだけ足しても縁取りが消えない。
-    strokeColor: (strokeWidth ?? 0) > 0 ? (strokeColorRaw ?? DEFAULT_STROKE_COLOR) : strokeColorRaw,
-    strokeWidth,
-  };
-}
 
 /** 背景帯（可読性の下地）を TextItem.background へ。enabled のときだけ描く。通常字幕層／FREE 字幕・文字で共有（#529・#275）。
  *  **インライン編集（FreeLayoutOverlay）も同じ既定で帯を敷くため export**（#549）＝編集中と描画結果の帯がドリフトしない。 */

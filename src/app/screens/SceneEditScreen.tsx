@@ -50,7 +50,7 @@ import { textKeyLabel } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
-import { resolveTextStyle } from "../../renderer/layout";
+import { DEFAULT_STROKE_COLOR, resolveTextStyle } from "../../domain/template/textStyle";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
@@ -709,13 +709,20 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const layer = template?.layers.find((l) => (l.type === "text" || l.type === "subtitle") && l.textKey === key);
     if (!layer) return null;
     const ov = selected.textStyles?.[key];
-    const inherited = resolveTextStyle(layer); // 上書き無しの解決値＝「テンプレに合わせる」ときに実際に描かれる体裁
+    // 2つを使い分ける（#555 レビュー）：
+    //  inherited＝上書き無しの解決値＝「見た目パターンに合わせる」と何になるか＝**空欄のプレースホルダ用**。
+    //  effective＝上書き込みの解決値＝**いま実際に描かれている体裁**＝色の見本用。
+    // 色は ColorPicker が常に色を返す（空＝継承を表せない）ので、見本には effective を出す必要がある。
+    // inherited を出すと、縁取りの色のように「太さ>0 なら白が既定」という**太さ依存の既定**があるとき、
+    // 実描画は白なのに見本は黒、というドリフトになる（この欄が防ぐと謳っているもの＝§2-7）。
+    const inherited = resolveTextStyle(layer);
+    const effective = resolveTextStyle(layer, ov);
     const overridden = ov != null && Object.keys(ov).length > 0;
     const set = (p: Partial<TextStyleOverride>) => setSceneTextStyle(key, p);
     return (
       <CollapsibleSection title={`${textKeyLabel[key]}の見た目${overridden ? "（この場面だけ変更中）" : ""}`} defaultOpen={false}>
         <p className="field-hint" style={{ marginTop: 0 }}>
-          この場面だけ変えられます。触っていない項目は見た目パターンのままです（場所や大きさの配置は変わりません）。
+          この場面だけ変えられます。触っていない項目は見た目パターンのままです（文字を置く場所や枠の大きさは変わりません）。
         </p>
         <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
           {/* 空欄＝継承。placeholder に「テンプレに合わせたときの実値」を出す＝何が継承されるか見える。 */}
@@ -729,7 +736,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           />
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-            <ColorPicker value={ov?.color ?? inherited.color} onChange={(v) => set({ color: v })} ariaLabel={`${textKeyLabel[key]}の色を選ぶ`} />
+            <ColorPicker value={effective.color} onChange={(v) => set({ color: v })} ariaLabel={`${textKeyLabel[key]}の色を選ぶ`} />
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor={`weight-${key}`}>太さ</label>
@@ -758,7 +765,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
             <ColorPicker
-              value={ov?.strokeColor ?? inherited.strokeColor ?? "#000000"}
+              value={effective.strokeColor ?? DEFAULT_STROKE_COLOR}
               onChange={(v) => set({ strokeColor: v })}
               ariaLabel={`${textKeyLabel[key]}の縁取りの色を選ぶ`}
             />
@@ -768,7 +775,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             「一度触ると二度とテンプレ追従に戻せない」を作らない。変更が無いときは出さない。 */}
         {overridden && (
           <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined })}>
-            見た目パターンの文字づかいに戻す
+            すべて見た目パターンに合わせる
           </button>
         )}
       </CollapsibleSection>
