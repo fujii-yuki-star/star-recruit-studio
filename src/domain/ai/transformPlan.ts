@@ -9,8 +9,8 @@ import {
   MAX_NARRATION_LEN_DEFAULT,
   MAX_SCENES_PER_VIDEO,
   MAX_SUBTITLE_LEN_DEFAULT,
-  SCENE_MAX_DURATION_SEC,
-  SCENE_MIN_DURATION_SEC,
+  AI_SCENE_MAX_DURATION_SEC,
+  AI_SCENE_MIN_DURATION_SEC,
   TRANSITION_DEFAULT_SEC,
   VIDEO_HARD_MAX_SEC,
 } from '../constants';
@@ -182,8 +182,8 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
       }
 
       // 表示時間 clamp（11 §4,§9）
-      const maxDuration = template?.aiHint?.maxDurationSec ?? SCENE_MAX_DURATION_SEC;
-      const clamped = clampDuration(aiScene.durationSec, SCENE_MIN_DURATION_SEC, maxDuration);
+      const maxDuration = template?.aiHint?.maxDurationSec ?? AI_SCENE_MAX_DURATION_SEC;
+      const clamped = clampDuration(aiScene.durationSec, AI_SCENE_MIN_DURATION_SEC, maxDuration);
       if (clamped.clamped) {
         w.push(warn('DURATION_CLAMPED', '表示時間を見やすい長さに調整しました', 'durationSec', 'info', true));
       }

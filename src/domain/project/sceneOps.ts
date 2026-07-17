@@ -2,7 +2,6 @@
 // 再生・表示順の「正」＝scenes 配列順（buildExportScenes も scenes 配列を順に処理する）。
 // scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
-import { SCENE_MIN_DURATION_SEC } from '../constants';
 import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } from '../enums';
 import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
@@ -260,8 +259,8 @@ export function splitSceneInList(
   const idx = scenes.findIndex((s) => s.sceneId === sceneId);
   if (idx < 0) return { scenes, parts };
   const src = scenes[idx];
-  // 尺が最小尺の2倍未満だと両場面が最小尺（11 §4）を割るため分割しない。
-  if (src.durationSec < 2 * SCENE_MIN_DURATION_SEC) return { scenes, parts };
+  // 尺が 0 以下なら分割しない（両側 >0 を作れない）。場面ごとの下限は持たない（#553）。
+  if (src.durationSec <= 0) return { scenes, parts };
   const at = resolveSplitIndex(src.narration.text, splitIndex);
   if (at == null) return { scenes, parts }; // セリフが短すぎて分割できない
   const firstText = src.narration.text.slice(0, at).trimEnd();
@@ -293,7 +292,7 @@ export function splitSceneInList(
  * 場面尺が d1 に縮むと手動 startSec が新しい尺を超え得る（例: 10秒場面で startSec:6 の行が前半 d1<6 で範囲外→
  * lineTimeline でクランプされ0秒区間として落ち「作成済みなのに出ない」不整合＝ADR-0026 ④）ため、**両場面とも
  * startSec は自動逐次に戻す**（保存された startSec が新しい durationSec を超えて残らないことを保証）。
- * 掛け合いでない/1行/範囲外/尺が最小尺の2倍未満は分割しない（変化なし）。表示時間は各側の総文字数比で按分（各最低 SCENE_MIN_DURATION_SEC・合計は元のまま）。
+ * 掛け合いでない/1行/範囲外/尺が0以下は分割しない（変化なし）。表示時間は各側の総文字数比で按分（両側 >0・合計は元のまま）。
  */
 export function splitSceneLinesInList(
   scenes: Scene[],
@@ -308,7 +307,7 @@ export function splitSceneLinesInList(
   const lines = src.lines;
   if (!lines || lines.length < 2) return { scenes, parts }; // 掛け合いでない/1行＝分割不能
   if (lineIndex < 1 || lineIndex > lines.length - 1) return { scenes, parts }; // 各側1行以上
-  if (src.durationSec < 2 * SCENE_MIN_DURATION_SEC) return { scenes, parts }; // 両場面が最小尺（11 §4）を割る
+  if (src.durationSec <= 0) return { scenes, parts }; // 両側 >0 を作れない（#553：場面ごとの下限は持たない）
   // 前半は音声（sceneId 不変ゆえキー lineAudioKey も不変）を保つが、尺が縮み手動 startSec が範囲外になり得るため
   // startSec は自動逐次へ戻す（後半と対称・上記 JSDoc の不整合を分割時に潰す）。lineId/text/speaker/subtitle 等は保持。
   const firstLines = lines.slice(0, lineIndex).map((l) => ({ ...l, startSec: undefined }));
@@ -341,11 +340,17 @@ function resolveSplitIndex(text: string, index: number): number | null {
   return boundaries.reduce((best, b) => (Math.abs(b - mid) < Math.abs(best - mid) ? b : best));
 }
 
-/** 表示時間を文字数比で按分する（各最低 SCENE_MIN_DURATION_SEC・合計は元のまま。最小尺の2倍未満は等分）。 */
+/**
+ * 表示時間を文字数比で按分する（合計は元のまま）。**場面ごとの下限は持たない**（#553）＝守るのは「両側とも >0」だけ
+ * （0秒の場面を作らない＝11 §9 の自動補正と同じ流儀）。片側の文字数が 0 で比が潰れるときは等分。
+ * 整数丸めはやめたが（旧実装は各側を最低3秒に揃えていた）、**生の二進浮動小数を持ち込まない**よう 0.1 秒へ量子化する
+ * ＝秒（実数）が正準（ADR-0023）でも UI に 2.3333333333333335 のような値を出さないため。**合計は d2 = total - d1 で厳密保持**。
+ */
 function apportionDuration(total: number, len1: number, len2: number): [number, number] {
-  const min = SCENE_MIN_DURATION_SEC;
-  if (total < 2 * min || len1 + len2 === 0) return [total / 2, total / 2];
-  let d1 = Math.round((total * len1) / (len1 + len2));
-  d1 = Math.min(Math.max(d1, min), total - min);
-  return [d1, total - d1];
+  const half: [number, number] = [total / 2, total / 2];
+  if (len1 + len2 === 0) return half;
+  const raw = (total * len1) / (len1 + len2);
+  const d1 = Math.round(raw * 10) / 10; // 0.1 秒へ量子化（表示・入力の刻みと揃える）
+  if (d1 <= 0 || total - d1 <= 0) return half; // 片側が潰れる＝等分（>0 を守る）
+  return [d1, total - d1]; // 合計は元のまま（差で出す＝丸め誤差を残さない）
 }

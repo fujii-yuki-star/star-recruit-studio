@@ -229,13 +229,17 @@ describe('splitSceneInList', () => {
     expect(r.scenes).toHaveLength(1);
   });
 
-  it('表示時間が最小尺の2倍未満なら分割しない（各場面が最小尺を割るため）', () => {
+  // #553：場面ごとの下限を撤廃＝短い場面でも分割できる（旧実装は 2*3=6秒未満を弾いていた）。守るのは両側 >0 だけ。
+  it('短い場面でも分割できる（旧・最小尺の2倍未満ガードは撤廃・#553）', () => {
     const scenes = [
       { ...scene('scene_001', 1, 'part_001', { text: 'いちです。にいです。', status: NARRATION_STATUS.none }), durationSec: 5 },
     ];
     const parts: Part[] = [{ partId: 'part_001', title: 'P1', order: 1, sceneIds: ['scene_001'] }];
     const r = splitSceneInList(scenes, parts, 'scene_001', 5, 'scene_002');
-    expect(r.scenes).toHaveLength(1); // 5 < 2*SCENE_MIN_DURATION_SEC(3) ＝ 変化なし
+    expect(r.scenes).toHaveLength(2); // 5秒（旧ガードでは不可）でも分割できる
+    expect(r.scenes[0].durationSec + r.scenes[1].durationSec).toBeCloseTo(5); // 合計は元のまま
+    expect(r.scenes[0].durationSec).toBeGreaterThan(0); // 両側 >0（schema 不変条件）
+    expect(r.scenes[1].durationSec).toBeGreaterThan(0);
   });
 });
 
@@ -274,8 +278,12 @@ describe('splitSceneLinesInList（掛け合いの行境界分割・#405）', () 
     expect(splitSceneLinesInList(oneLine, p1(), 'scene_001', 1, 'scene_002').scenes).toHaveLength(1);
   });
 
-  it('尺が最小尺の2倍未満なら分割しない', () => {
-    expect(splitSceneLinesInList([dialogueScene({ durationSec: 5 })], p1(), 'scene_001', 1, 'scene_002').scenes).toHaveLength(1);
+  // #553：場面ごとの下限を撤廃＝短い場面でも行境界で分割できる。分割しないのは尺が 0 以下のときだけ。
+  it('短い場面でも分割できる（旧・最小尺の2倍未満ガードは撤廃・#553）', () => {
+    const r = splitSceneLinesInList([dialogueScene({ durationSec: 5 })], p1(), 'scene_001', 1, 'scene_002');
+    expect(r.scenes).toHaveLength(2);
+    expect(r.scenes[0].durationSec).toBeGreaterThan(0);
+    expect(r.scenes[1].durationSec).toBeGreaterThan(0);
   });
 
   it('手動 startSec つき掛け合いを分割しても、前半/後半とも範囲外 startSec が残らない（#405 P1）', () => {

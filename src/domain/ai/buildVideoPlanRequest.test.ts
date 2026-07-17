@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC } from '../constants';
+import { AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constants';
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
@@ -70,7 +70,7 @@ describe('buildVideoPlanMessages', () => {
     expect(system).toContain('sceneType は、選んだ templateId の category と同じ値にする');
     expect(system).toContain('該当が無ければ null');
     // 尺の目安は 11§4 の定数を埋め込む（検証側 clamp と黙って矛盾しない＝§2-7）。
-    expect(system).toContain(`durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒`);
+    expect(system).toContain(`durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒`);
   });
 
   it('ユーザーメッセージに会社情報・方針・素材・テンプレ・表情タグが入る', () => {
@@ -225,7 +225,7 @@ describe('buildVideoPlanMessages（一般・社内発表 general・§5b/§6b）'
     // 共通ルール（templateId 必須・sceneType=category・尺）は採用と同じく堅持。
     expect(system).toContain('各シーンに templateId を必ず設定');
     expect(system).toContain('sceneType は、選んだ templateId の category と同じ値にする');
-    expect(system).toContain(`durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒`);
+    expect(system).toContain(`durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒`);
     // 章立て→parts・要点反映の一般固有指示。
     expect(system).toContain('「構成（章立て）」をパート（parts）に対応');
     expect(system).toContain('「伝えたい要点」を各シーンの texts や narrationText に反映');

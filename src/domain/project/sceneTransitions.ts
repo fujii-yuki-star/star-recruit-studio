@@ -105,6 +105,9 @@ export function transitionTimeline(
     // 左右どちらの尺も超えない。ADR-0009 は strict `<` だが、ここは `≤`（D=尺の極端値を許容）。
     // FFmpeg xfade は duration が入力尺以上だと未定義動作になりうるため、T2 で strict 化（min−ε 等）するか
     // 実測で許容を確認してから clamp を締める（境界計算自体は本関数に集約されている）。
+    // ※ #553（場面ごとの下限を撤廃）で「切り替え既定 0.5 秒より短い場面」が作れるようになり、d==尺＝その場面が
+    //   総尺から丸ごと消える経路の**到達性が上がった**（旧: 最小3秒 > 0.5秒 で構造的に到達不能）。strict 化は
+    //   ε の決め方（比率か固定か）と FFmpeg 実挙動の確認が要るため #554（P3-4）で扱う。
     const d = Math.min(want, acc, sceneDurations[i]);
     steps.push({ offsetSec: acc - d, durationSec: d });
     acc = acc + sceneDurations[i] - d;

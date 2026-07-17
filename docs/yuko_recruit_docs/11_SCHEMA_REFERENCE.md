@@ -126,8 +126,8 @@
 
 | 定数 | 値 | 用途 |
 |---|---:|---|
-| `SCENE_MIN_DURATION_SEC` | `3` | シーン最小尺（下回ると補正） |
-| `SCENE_MAX_DURATION_SEC` | `15` | シーン最大尺の既定（テンプレ `aiHint.maxDurationSec` で上書き可） |
+| `AI_SCENE_MIN_DURATION_SEC` | `3` | **AI 生成の目安**（下限）。手編集の制約ではない（#553） |
+| `AI_SCENE_MAX_DURATION_SEC` | `15` | **AI 生成の目安**（上限の既定・テンプレ `aiHint.maxDurationSec` で上書き可）。手編集の制約ではない（#553） |
 | `SCENE_DEFAULT_DURATION_SEC` | `8` | 既定シーン尺 |
 | `TRANSITION_DEFAULT_SEC` | `0.5` | 既定トランジション長 |
 | `VIDEO_TARGET_MAX_SEC_MVP` | `300` | MVP想定の目標上限（5分） |
@@ -268,7 +268,7 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 | templateId | string | ● | 既存テンプレ参照 |
 | fontId | enum | ○ | 場面のフォント（同梱フォントの id・`domain/font/fontCatalog`）。null/未指定＝動画全体（`videoSettings.fontId`）を継承（1.5 追加） |
 | textFontIds | object | ○ | テキスト種別（textKey）ごとのフォント上書き（`{title?,main?,subtitle?,caption?,url?}`＝同梱フォントの id）。未設定の種別は `fontId`→動画全体→既定を継承（1.7 追加・#178） |
-| durationSec | number | ● | `[SCENE_MIN, テンプレ上限 or SCENE_MAX]` |
+| durationSec | number | ● | `> 0`（**場面ごとの上限/下限は持たない**・#553）。手編集の確定は §9 で `(0, VIDEO_HARD_MAX_SEC]` へ自動補正。AI 生成時のみ目安 `[AI_SCENE_MIN, テンプレ上限 or AI_SCENE_MAX]` へ寄せる |
 | assetRefs | object | ● | §5。値は既存 assetId or null |
 | character | object | ● | enabled / characterId / poseAssetId(既存 yuko asset or null) |
 | texts | object | ● | title / main / subtitle / caption / url（各 string、テンプレ必須キーは必須） |
@@ -305,7 +305,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V4 | `assetRefs` の各 assetId が実在 | 補正/警告（§9） |
 | V5 | `poseAssetId`（解決後）が実在 yuko asset | 既定yukoへ置換（§9） |
 | V6 | テンプレ必須スロット/必須テキストが埋まっている | 警告（required=true のみ） |
-| V7 | `durationSec` が範囲内 | clamp（§9） |
+| V7 | `durationSec` が範囲内（手編集＝`>0`／AI 生成＝目安 `[3, テンプレ上限 or 15]`・#553） | clamp（§9） |
 | V8 | テキスト長 ≤ テンプレ上限（`maxNarrationLength`等） | 警告＋短縮提案 |
 | V9 | 合計尺 ≤ `videoSettings.maxDurationSec` | 警告 |
 | V10 | シーン数 ≤ `MAX_SCENES_PER_VIDEO` | 警告（異常検知） |
@@ -334,8 +334,10 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | 存在しない `templateId` | 同 `category` の標準テンプレへ置換（無ければ警告し選択を促す） |
 | テンプレの `aspectRatio` がプロジェクトの向きと不一致 | 同 `category`・同 `orientation` のテンプレへ置換（無ければ警告・原状維持／ADR-0012・B4） |
 | 存在しない `assetId` | `null` にし、未使用素材から候補提示（警告） |
-| `durationSec < SCENE_MIN_DURATION_SEC` | `SCENE_MIN_DURATION_SEC`（3秒）へ |
-| `durationSec >` テンプレ上限 | テンプレ `aiHint.maxDurationSec`（無ければ `SCENE_MAX_DURATION_SEC`=15秒）へ |
+| `durationSec <= 0` / NaN（**手編集の確定時**） | `SCENE_DEFAULT_DURATION_SEC`（8秒）へ＝壊れた入力の既定（0秒の場面は作らない・#553） |
+| `durationSec > VIDEO_HARD_MAX_SEC`（**手編集の確定時**） | `VIDEO_HARD_MAX_SEC`（600秒）へ＝1場面に効く唯一の硬い天井（#553） |
+| `durationSec < AI_SCENE_MIN_DURATION_SEC`（**AI 生成時のみ**） | `AI_SCENE_MIN_DURATION_SEC`（3秒）へ＝生成のペース配分の目安（手編集は縛らない・#553） |
+| `durationSec >` テンプレ上限（**AI 生成時のみ**） | テンプレ `aiHint.maxDurationSec`（無ければ `AI_SCENE_MAX_DURATION_SEC`=15秒）へ。**手編集は縛らない**（`VIDEO_HARD_MAX_SEC` で頭打ち・#553） |
 | `poseTag` 解決不可 / `poseAssetId` 不在 | 既定yuko（`isDefaultYuko` → 無ければ先頭 yuko）へ。yuko素材皆無かつ character 任意 → 非表示 |
 | テキストがテンプレ上限超過 | 警告＋「AIで短くする」提示（自動切詰めはしない） |
 

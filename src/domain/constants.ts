@@ -3,8 +3,13 @@
 import { ORIENTATION } from './enums';
 import type { Orientation, SceneCategory } from './enums';
 
-export const SCENE_MIN_DURATION_SEC = 3;
-export const SCENE_MAX_DURATION_SEC = 15;
+// **AI 生成の“目安”**（#553）。手編集の制約ではない＝利用者が場面の尺を決めるときは縛らない（動画全体の
+// 上限 VIDEO_HARD_MAX_SEC だけで縛る）。AI にはテンポの良いたたき台を作らせたいので、生成側だけこの範囲を
+// 目安として渡し（buildVideoPlanRequest）、返ってきた値もこの範囲へ寄せる（transformPlan）。
+// ※ 旧 SCENE_MIN/MAX_DURATION_SEC。「場面の最大尺」という名前で手編集にもハード適用されていたのを #553 で
+//   用途別に分離した（根拠は AI のペース配分の目安のみで、技術要件でも schema 制約でもなかった）。
+export const AI_SCENE_MIN_DURATION_SEC = 3;
+export const AI_SCENE_MAX_DURATION_SEC = 15;
 export const SCENE_DEFAULT_DURATION_SEC = 8;
 // プロジェクト名の最大文字数。schemas/project.schema.json の projectName maxLength(80) と一致させる
 //（§5・全入力口で共有する上限＝入力防御 #411／検証ネット #416 の prevention 側）。
