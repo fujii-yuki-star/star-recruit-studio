@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
-import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { elementAtPoint, freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
-import { topGroupOfMember } from "../../domain/project/groupOps";
+import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
 // インライン編集（#549）を実描画に合わせるため、描画側の既定値/帯解決/フォント解決を共有する（体裁のドリフト防止）。
 import { bandBackground, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEXT_COLOR } from "../../renderer/layout";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
@@ -451,6 +451,85 @@ export function FreeLayoutOverlay({
   };
 
   // 右クリック：対象を選択しカーソル位置にメニューを開く（画面端でクランプ）。
+  // 要素押下のルーティング（#525-4 二度押し編集／#525-5 ドリルイン／通常ドラッグ）。要素 div と**グループ枠**
+  // （#548/#552）の両方から呼ぶ＝枠の上を押しても「その要素を直接押したとき」と同じ挙動になる。枠は不透明で
+  // グループ全域を覆うため、枠がそのまま beginGroupDrag していた頃はドリルインが発火せず（#548）、枠内に重なる
+  // グループ外の要素も選べなかった（#552）。分岐条件は要素ごとに再計算する（描画側の導出と同じ式）。
+  const routeElementPointerDown = (e: ReactPointerEvent, el: FreeElement) => {
+    const elGroup = topGroupByEl.get(el.id) ?? null;
+    const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation };
+    const drilledIn = elGroup != null && selectedIds.includes(el.id); // このメンバーを個別選択中
+    // 合成後が base と並進差のみ＝純並進なら canvas 直接編集が 1:1 で効く（#525-5 レビュー P2・ネスト深さに依らず厳密）。
+    const groupPlain = elGroup != null && cg.w === el.w && cg.h === el.h && (cg.rotation ?? 0) === (el.rotation ?? 0);
+    const drilledEditable = drilledIn && groupPlain;
+    // 二度押し候補（実機はドラッグ開始の preventDefault が互換 dblclick を潰すので pointerdown で検出・#525-4）：
+    //  ・非グループのテキスト＝インライン編集（#525-4）
+    //  ・グループのメンバー（まだ個別選択していない）＝そのメンバーへドリルイン選択（#525-5）
+    const button0 = e.button === 0 && !e.shiftKey;
+    const dtEdit = button0 && el.kind === FREE_ELEMENT_KIND.text && elGroup == null;
+    const dtDrill = button0 && elGroup != null && !selectedIds.includes(el.id);
+    if (dtEdit || dtDrill) {
+      const prev = lastTapRef.current;
+      const near = prev != null && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_DIST;
+      if (prev && prev.id === el.id && e.timeStamp - prev.t < DOUBLE_TAP_MS && near) {
+        e.preventDefault();
+        e.stopPropagation();
+        lastTapRef.current = null;
+        setMenu(null);
+        onSelect(el.id); // 要素選択＝selectFree がグループ選択を解除しこの要素だけ選ぶ
+        if (dtEdit) setEditingId(el.id); // テキストはそのままインライン編集へ
+        return;
+      }
+    }
+    // 通常のクリック/ドラッグ開始。ドリルイン状態で分岐する（#525-5 レビュー P2）：
+    //  ・グループ未ドリルインのメンバー初回クリック＝まとまり選択（beginGroupDrag）
+    //  ・純並進グループのドリルインメンバー＝個別ドラッグ（beginDrag／drilledEditable）
+    //  ・変形グループのドリルインメンバー＝canvas 直接編集はずれるので**選択を維持のみ**（グループへ戻さない・動かさない）。
+    // begin* が二度押し履歴を解除するので、候補の記録はこの後に行う（#525-4 レビュー）。
+    if (elGroup && !drilledIn) {
+      beginGroupDrag(e, elGroup);
+    } else if (elGroup && !drilledEditable) {
+      e.preventDefault();
+      e.stopPropagation(); // グループへ戻さず・ドラッグも始めない（変形グループは詳細パネルで編集）
+    } else {
+      beginDrag(e, el, "move");
+    }
+    if (dtEdit || dtDrill) lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
+  };
+
+  // グループ枠の押下（#548/#552）：枠は不透明でグループの外接矩形**全域**を覆うので、そのまま beginGroupDrag すると
+  // 内部クリックを貪欲に食う。ポインタの下を**実ヒットテスト**して分岐する：
+  //  ・要素（メンバー/グループ外を問わず）＝その要素を押したのと同じ経路へ委譲（ドリルインも非メンバー選択も成立）
+  //  ・空白＝従来どおりグループ移動
+  const beginFrameDrag = (e: ReactPointerEvent, group: Group) => {
+    const p = toCanvas(e.clientX, e.clientY);
+    // 委譲するのは「**枠が実際に覆って触れなくしていたもの**」だけに絞る（レビュー🔴）：
+    //  ・グループのメンバー（＝ドリルイン・#548）
+    //  ・メンバーより**手前**の非メンバー（＝枠内に重なって選べなかった・#552）
+    // メンバーより奥のもの（全面の背景／背面バックドロップ等）は委譲しない＝**枠の内部ドラッグ＝グループ移動**
+    // （#307・ADR-0022）を保つ。全面背景は常に当たるため、これが無いとフォールバックが到達不能になり、
+    // 枠内の空白ドラッグが背景を掴んで動かす（グループは動かず選択も無言解除）。
+    const memberIds = new Set(groupElementIds(groups, group.id)); // 推移的メンバー
+    const zOf = (el: FreeElement) => el.zIndex ?? 1; // 未指定=1（layout.ts と同じ）
+    const memberMaxZ = Math.max(...freeLayout.filter((el) => memberIds.has(el.id)).map(zOf), Number.NEGATIVE_INFINITY);
+    // 描画順（zIndex 昇順・同値は配列順＝layout.ts と同じ）に並べ、非表示を除き合成後の座標で当てる。
+    const hitId = elementAtPoint(
+      freeLayout
+        .filter((el) => !el.hidden && !isHiddenByGroup(el.id, groups))
+        .filter((el) => memberIds.has(el.id) || zOf(el) > memberMaxZ)
+        .slice()
+        .sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1))
+        .map((el) => {
+          const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation };
+          return { id: el.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, rotation: cg.rotation };
+        }),
+      p,
+    );
+    const hitEl = hitId != null ? freeLayout.find((el) => el.id === hitId) : undefined;
+    if (hitEl) { routeElementPointerDown(e, hitEl); return; }
+    beginGroupDrag(e, group);
+  };
+
   const openMenu = (e: ReactMouseEvent, el: FreeElement) => {
     e.preventDefault();
     e.stopPropagation();
@@ -531,42 +610,7 @@ export function FreeLayoutOverlay({
           <div
             key={el.id}
             data-free-id={el.id}
-            onPointerDown={(e) => {
-              // 二度押し候補（実機はドラッグ開始の preventDefault が互換 dblclick を潰すので pointerdown で検出・#525-4）：
-              //  ・非グループのテキスト＝インライン編集（#525-4）
-              //  ・グループのメンバー（まだ個別選択していない）＝そのメンバーへドリルイン選択（#525-5）
-              const button0 = e.button === 0 && !e.shiftKey;
-              const dtEdit = button0 && el.kind === FREE_ELEMENT_KIND.text && elGroup == null;
-              const dtDrill = button0 && elGroup != null && !selectedIds.includes(el.id);
-              if (dtEdit || dtDrill) {
-                const prev = lastTapRef.current;
-                const near = prev != null && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_DIST;
-                if (prev && prev.id === el.id && e.timeStamp - prev.t < DOUBLE_TAP_MS && near) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  lastTapRef.current = null;
-                  setMenu(null);
-                  onSelect(el.id); // 要素選択＝selectFree がグループ選択を解除しこの要素だけ選ぶ
-                  if (dtEdit) setEditingId(el.id); // テキストはそのままインライン編集へ
-                  return;
-                }
-              }
-              // 通常のクリック/ドラッグ開始。ドリルイン状態で分岐する（#525-5 レビュー P2）：
-              //  ・グループ未ドリルインのメンバー初回クリック＝まとまり選択（beginGroupDrag）
-              //  ・純並進グループのドリルインメンバー＝個別ドラッグ（beginDrag／drilledEditable）
-              //  ・変形グループのドリルインメンバー＝canvas 直接編集はずれるので**選択を維持のみ**（グループへ戻さない・動かさない）。
-              //    ＝ドリルイン後の再クリックで無言にグループ全体を選択/移動してしまう「壊れて見える操作」を防ぐ。
-              // begin* が二度押し履歴を解除するので、候補の記録はこの後に行う（#525-4 レビュー）。
-              if (elGroup && !drilledIn) {
-                beginGroupDrag(e, elGroup);
-              } else if (elGroup && !drilledEditable) {
-                e.preventDefault();
-                e.stopPropagation(); // グループへ戻さず・ドラッグも始めない（変形グループは詳細パネルで編集）
-              } else {
-                beginDrag(e, el, "move");
-              }
-              if (dtEdit || dtDrill) lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
-            }}
+            onPointerDown={(e) => routeElementPointerDown(e, el)}
             onContextMenu={(e) => openMenu(e, el)}
             onDoubleClick={(e) => {
               // jsdom / 互換 dblclick 用フォールバック（実機は上の pointerdown 検出が主経路）。グループのメンバー＝ドリルイン、
@@ -722,7 +766,7 @@ export function FreeLayoutOverlay({
       {activeGroupFrame && activeGroup && !isGroupHidden(activeGroup.id, groups) && (
         <div
           data-testid="group-frame"
-          onPointerDown={(e) => beginGroupDrag(e, activeGroup)}
+          onPointerDown={(e) => beginFrameDrag(e, activeGroup)}
           style={{
             position: "absolute",
             left: `${((activeGroupFrame.cx - activeGroupFrame.w / 2) / canvasW) * 100}%`,
