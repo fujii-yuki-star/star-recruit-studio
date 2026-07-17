@@ -757,3 +757,76 @@ describe('layoutScene：FREE 字幕要素の描画（ADR-0029）', () => {
     expect(layoutScene(s, openingTemplate).items.some((i) => i.id === 'free_sub')).toBe(false);
   });
 });
+
+describe('layoutScene：文字の体裁の場面別上書き（scene.textStyles・#555）', () => {
+  const byId = (s: Scene, id: string): TextItem =>
+    layoutScene(s, openingTemplate).items.find((i) => i.id === id) as TextItem;
+  const subtitleItems = (layout: { items: LayoutItem[] }): TextItem[] =>
+    layout.items.filter((i): i is TextItem => i.kind === 'text' && i.isSubtitle);
+
+  it('未指定は従来どおりテンプレ層を継承する（後方互換）', () => {
+    const t = byId(scene, 'title');
+    expect(t.fontSize).toBe(72); // openingTemplate の title 層
+    expect(t.fontWeight).toBe('bold');
+  });
+
+  it('色/サイズ/太さ/縁取りを場面別に上書きできる（text 層）', () => {
+    const s = { ...scene, textStyles: { title: { color: '#ff0000', fontSize: 96, fontWeight: 'normal', strokeColor: '#123456', strokeWidth: 4 } } } as Scene;
+    const t = byId(s, 'title');
+    expect(t.color).toBe('#ff0000');
+    expect(t.fontSize).toBe(96);
+    expect(t.fontWeight).toBe('normal'); // テンプレの bold を上書きできる（継承と区別がつく向き）
+    expect(t.strokeColor).toBe('#123456');
+    expect(t.strokeWidth).toBe(4);
+  });
+
+  it('指定したプロパティだけが固有値＝残りはテンプレ層を継承する', () => {
+    const s = { ...scene, textStyles: { title: { color: '#00ff00' } } } as Scene;
+    const t = byId(s, 'title');
+    expect(t.color).toBe('#00ff00');
+    expect(t.fontSize).toBe(72); // テンプレのまま
+    expect(t.fontWeight).toBe('bold'); // テンプレのまま
+  });
+
+  it('他の種別（textKey）には影響しない', () => {
+    const s = { ...scene, textStyles: { title: { fontSize: 96 } } } as Scene;
+    expect(byId(s, 'title').fontSize).toBe(96);
+    expect(byId(s, 'subtitle').fontSize).toBe(38); // subtitle 層は据え置き
+  });
+
+  it('字幕層（subtitle）にも効く', () => {
+    const s = { ...scene, textStyles: { subtitle: { color: '#ffff00', fontSize: 50 } } } as Scene;
+    const sub = byId(s, 'subtitle');
+    expect(sub.color).toBe('#ffff00');
+    expect(sub.fontSize).toBe(50);
+  });
+
+  // 縁取りは「太さ>0 なのに色が無いと silent に消える」を防ぐ既定（#275/PR#289）が入っている。
+  // 場面側で太さだけ足したときも、その既定が働く（＝解決後の値で判定している）こと。
+  it('場面で縁取りの太さだけ足すと白が既定になる（縁取りが黙って消えない）', () => {
+    const s = { ...scene, textStyles: { title: { strokeWidth: 3 } } } as Scene;
+    const t = byId(s, 'title');
+    expect(t.strokeWidth).toBe(3);
+    expect(t.strokeColor).toBe('#ffffff');
+  });
+
+  it('場面で縁取りの太さを 0 にすると色は既定化しない（縁取りなし）', () => {
+    const s = { ...scene, textStyles: { title: { strokeWidth: 0 } } } as Scene;
+    expect(byId(s, 'title').strokeWidth).toBe(0);
+    expect(byId(s, 'title').strokeColor).toBeUndefined();
+  });
+
+  // 上書きした fontSize は同時字幕の段組み（stackedSubtitleBands）にも渡す必要がある。
+  // テンプレ層の値のまま段を積むと、場面で字幕を大きくしたときに帯どうしが重なる（#533 P1 の再来）。
+  it('字幕を大きくしても同時字幕の帯が重ならない（段組みが上書き後のサイズを使う）', () => {
+    const dialogue = { ...scene, textStyles: { subtitle: { fontSize: 76 } }, lines: [
+      { lineId: 'line_001', text: 'あ'.repeat(30), status: 'none' },
+      { lineId: 'line_002', text: 'い'.repeat(30), startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'あ'.repeat(30), startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, openingTemplate, { subtitleText: 'あ'.repeat(30), subtitleSegment: segment }));
+    expect(subs).toHaveLength(2);
+    expect(subs.every((s) => s.fontSize === 76)).toBe(true); // 段組みも上書き後のサイズで計算されている
+    expect(noOverlap(subs)).toBe(true);
+  });
+});

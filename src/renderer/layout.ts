@@ -2,10 +2,10 @@
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
 import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../domain/enums';
-import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
+import type { Fit, FontWeight, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT } from '../domain/constants';
-import type { ElementAnimation, Scene } from '../domain/project/types';
-import type { LayerBackground, Template } from '../domain/template/types';
+import type { ElementAnimation, Scene, TextStyleOverride } from '../domain/project/types';
+import type { Layer, LayerBackground, Template } from '../domain/template/types';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
@@ -95,6 +95,40 @@ export interface SceneLayout {
 export const DEFAULT_TEXT_COLOR = '#222222';
 export const DEFAULT_FONT_SIZE = 40;
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+/** 縁取りの太さ>0 で色が未指定のときの既定色（色だけ無いと縁取りが silent に消えるのを防ぐ・#275/PR#289）。 */
+const DEFAULT_STROKE_COLOR = '#ffffff';
+
+/** 通常テンプレの text/subtitle 層の「実際に描く体裁」。resolveTextStyle の戻り値。 */
+export interface ResolvedTextStyle {
+  color: string;
+  fontSize: number;
+  fontWeight: FontWeight;
+  strokeColor?: string;
+  strokeWidth?: number;
+}
+
+/**
+ * テンプレ層＋場面の上書き（`scene.textStyles`・#555）から、実際に描く文字の体裁を解決する。
+ * 継承の順序は **場面の上書き → テンプレ層 → 既定**（各プロパティ独立＝触ったものだけ固有値・11 §6）。
+ *
+ * **描画（layoutScene）と場面編集の体裁欄で共有する**（§2-7）＝欄が「テンプレに合わせる」と示す値と、
+ * 実際に描かれる値がドリフトしない。preview/export はどちらも layoutScene 経由ゆえパリティも保たれる（ADR-0001）。
+ */
+export function resolveTextStyle(
+  layer: Pick<Layer, 'color' | 'fontSize' | 'fontWeight' | 'strokeColor' | 'strokeWidth'>,
+  ov?: TextStyleOverride,
+): ResolvedTextStyle {
+  const strokeWidth = ov?.strokeWidth ?? layer.strokeWidth;
+  const strokeColorRaw = ov?.strokeColor ?? layer.strokeColor;
+  return {
+    color: ov?.color ?? layer.color ?? DEFAULT_TEXT_COLOR,
+    fontSize: ov?.fontSize ?? layer.fontSize ?? DEFAULT_FONT_SIZE,
+    fontWeight: ov?.fontWeight ?? layer.fontWeight ?? FONT_WEIGHT.normal,
+    // 太さ>0 で色未指定なら既定色。**上書きを解決したあとの値で判定する**＝場面で太さだけ足しても縁取りが消えない。
+    strokeColor: (strokeWidth ?? 0) > 0 ? (strokeColorRaw ?? DEFAULT_STROKE_COLOR) : strokeColorRaw,
+    strokeWidth,
+  };
+}
 
 /** 背景帯（可読性の下地）を TextItem.background へ。enabled のときだけ描く。通常字幕層／FREE 字幕・文字で共有（#529・#275）。
  *  **インライン編集（FreeLayoutOverlay）も同じ既定で帯を敷くため export**（#549）＝編集中と描画結果の帯がドリフトしない。 */
@@ -324,7 +358,13 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             ? ''
             : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
         const bg = isSub ? bandBackground(layer.background) : undefined;
-        const fontSize = layer.fontSize ?? DEFAULT_FONT_SIZE;
+        // 文字の体裁は場面別に上書きできる（#555・schema 1.24）。未指定はテンプレ層→既定を継承＝
+        // 触ったものだけが固有値（フォント＝textFontIds と同型・§2-4 の対象は配置なので体裁は自由化してよい）。
+        // 解決は共有 resolveTextStyle（場面編集の体裁欄と同じ関数＝欄の「テンプレに合わせる」表示と描画が一致）。
+        const style = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
+        // fontSize は下の stackedSubtitleBands（同時字幕の段組み）にも渡るため、**上書き後の値**を使う
+        // ＝上書きで文字が大きくなっても帯が重ならない（#533 P1 の実折返し行数計算と同じ値）。
+        const fontSize = style.fontSize;
         // 字幕帯を1つ積む（y を差し替え・id を一意化）。primary はテンプレ位置、同時行はその上へ（ADR-0031）。
         const pushBand = (bandText: string, y: number, idSuffix: string): void => {
           items.push({
@@ -334,17 +374,17 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             kind: 'text',
             text: bandText,
             fontSize,
-            fontWeight: layer.fontWeight ?? FONT_WEIGHT.normal,
-            color: layer.color ?? DEFAULT_TEXT_COLOR,
+            fontWeight: style.fontWeight,
+            color: style.color,
             maxLines: layer.maxLines ?? 2,
             background: bg,
             isSubtitle: isSub,
             // テンプレ字幕は下端基準で上へ伸ばす（1帯が2行でも画面下端からはみ出さない・ADR-0031）。text 層は従来どおり。
             anchorBottom: isSub,
             fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
-            // 縁取り（#275）。太さ>0 で色未指定なら白を既定（色だけ無いと縁取りが silent に消えるのを防ぐ・PR#289レビュー）。
-            strokeColor: (layer.strokeWidth ?? 0) > 0 ? (layer.strokeColor ?? '#ffffff') : layer.strokeColor,
-            strokeWidth: layer.strokeWidth,
+            // 縁取り（#275）。太さ>0 で色未指定なら既定色（resolveTextStyle が担保）。
+            strokeColor: style.strokeColor,
+            strokeWidth: style.strokeWidth,
           });
         };
         // 表示する帯（下→上の順）＝primary（あれば）＋同時行（enabled・ADR-0031）。primary は layer.id 据え置き（後方互換）。

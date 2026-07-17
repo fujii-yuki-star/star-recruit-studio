@@ -341,6 +341,21 @@ describe('parseProjectDoc', () => {
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.22→1.23 へ昇格（任意追加＝変換不要）
     expect(back.scenes[0].freeLayout).toEqual(scene.freeLayout); // 背景帯を取りこぼさず保持（migrateProject のスプレッド保持）
   });
+  it('文字の体裁：scene.textStyles を持つ旧版(1.23)が移行し保持する（#555）', () => {
+    const textStyles = {
+      title: { color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#000000', strokeWidth: 4 },
+      subtitle: { color: '#00ff00' }, // 一部だけ＝残りはテンプレ継承
+    };
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'opening_yuko_right_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: { title: 'あ' },
+      narration: { text: '', status: 'none' }, warnings: [], textStyles,
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.23', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.23→1.24 へ昇格（任意追加＝変換不要）
+    expect(back.scenes[0].textStyles).toEqual(textStyles); // 体裁を取りこぼさず保持（migrateProject のスプレッド保持）
+  });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;
     delete doc.videoKind;

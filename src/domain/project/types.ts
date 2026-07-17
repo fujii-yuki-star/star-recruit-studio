@@ -267,6 +267,24 @@ export interface FreeElement {
   subtitleSource?: SubtitleSource;
 }
 
+/**
+ * 通常テンプレの文字の体裁を場面別に上書きする値（#555・schema 1.24 `$defs/TextStyle`）。
+ * 各プロパティ未指定＝テンプレ層（`layer.*`）を継承＝**触ったものだけが固有値になる**（11 §6 の null=継承と同じ流儀）。
+ * 制約は `Layer`/`FreeElement` の同名プロパティと同一（同じ概念は同じ制約＝§2-7）。
+ */
+export interface TextStyleOverride {
+  /** 文字色（`#RRGGBB`）。 */
+  color?: string;
+  /** 文字サイズ（canvas px・>0）。 */
+  fontSize?: number;
+  /** 太さ。 */
+  fontWeight?: FontWeight;
+  /** 縁取りの色（`#RRGGBB`）。 */
+  strokeColor?: string;
+  /** 縁取りの太さ（canvas px・>=0）。0 で縁取りなし。 */
+  strokeWidth?: number;
+}
+
 export interface Scene {
   sceneId: string;
   partId: string;
@@ -278,6 +296,12 @@ export interface Scene {
   fontId?: FontId | null;
   /** テキスト種別（textKey）ごとのフォント上書き（#178・schema 1.7）。未設定の種別は scene.fontId→動画全体→既定を継承。 */
   textFontIds?: Partial<Record<TextKey, FontId>>;
+  /**
+   * テキスト種別（textKey）ごとの体裁上書き（色/サイズ/太さ/縁取り・#555・schema 1.24）。
+   * `textFontIds`（フォント）と同型で、**配置・座標はテンプレ駆動のまま**（§2-4 の対象は配置＝体裁は対象外）。
+   * 未設定のプロパティはテンプレ層（`layer.*`）→既定を継承（null=継承・11 §6）。AI は生成しない（利用者編集専用）。
+   */
+  textStyles?: Partial<Record<TextKey, TextStyleOverride>>;
   /** この場面のBGM。未指定＝プロジェクト既定（bgmSettings）を継承（schema 1.16・null=継承・ADR-0018 ③(7)）。enabled:false でこの場面は無音。 */
   bgmSettings?: BgmSettings;
   assetRefs: AssetRefs;
