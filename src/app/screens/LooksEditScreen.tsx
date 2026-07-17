@@ -158,6 +158,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setSelectedLayerIds(memberIds);
   }
   function transformGroup(groupId: string, patch: Partial<GroupTransform>) {
+    if (tplGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は移動/拡縮/回転も抑止（多重防御・#319 レビュー／#554 レビュー）
     setDraft((d) => (d ? { ...d, groups: updateGroupTransform(d.groups ?? [], groupId, patch) } : d));
   }
   // グループの非表示/ロック切替・重ね順（#307 part2b）。

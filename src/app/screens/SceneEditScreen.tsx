@@ -571,8 +571,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setSelectedFreeIds(memberIds);
   };
   // グループの transform 更新（移動・#305-1。拡縮/回転は #305-2）。
-  const transformGroup = (groupId: string, p: Partial<GroupTransform>) =>
+  const transformGroup = (groupId: string, p: Partial<GroupTransform>) => {
+    if (sceneGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は移動/拡縮/回転も抑止（多重防御・#319 レビュー／#554 レビュー）
     patch((s) => ({ ...s, groups: updateGroupTransform(s.groups ?? [], groupId, p) }));
+  };
   // グループの非表示/ロック切替（#305-2）。hidden は描画抑止（isHiddenByGroup）、locked は枠操作を抑止。
   const toggleGroupHidden = (groupId: string) =>
     patch((s) => ({ ...s, groups: toggleGroupFlag(s.groups ?? [], groupId, "hidden") }));
@@ -1833,7 +1835,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     />
                     {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。動き（④(3)）はグループ全体に付く。 */}
                     {effectiveActiveGroupId && (
-                      <div className="col gap-sm" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
+                      <div className="col gap-sm" data-testid="group-panel" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
                         <div className="row-between">
                           <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
                           <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
