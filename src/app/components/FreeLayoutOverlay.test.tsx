@@ -216,14 +216,55 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
     expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "free_001", x: 130, y: 140 }]); // free_001(100,100) を +30,+40 個別移動
   });
 
-  it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform）", () => {
+  it("グループ枠をメンバーの上でドラッグするとグループの transform.x/y が更新される（onGroupTransform）", () => {
     const onGroupTransform = vi.fn();
     const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    // #548/#552 で枠の押下は「ポインタの下に何があるか」を実ヒットテストするようになったため、rect の実寸が要る
+    // （旧テストは clientWidth だけ与え座標は任意だった＝jsdom が当たり判定をせず何でも通っていた）。
+    // clientWidth はドラッグの縮尺（drag.scale）用に従来どおり必要。
+    mockRect(root);
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
     const frame = screen.getByTestId("group-frame");
-    fireEvent.pointerDown(frame, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(frame, { clientX: 30, clientY: 40, pointerId: 1 });
+    // 枠内かつ**メンバー**（free_001＝100,100,400,120）の上＝まとまり移動（従来どおり）。
+    fireEvent.pointerDown(frame, { button: 0, clientX: 200, clientY: 150, pointerId: 1 });
+    fireEvent.pointerMove(frame, { clientX: 230, clientY: 190, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 });
+  });
+
+  // #548/#552：グループ枠は不透明でグループ全域を覆うため、そのまま beginGroupDrag していた頃は内部クリックを
+  // 貪欲に食い、(#548) メンバーの二度押し（ドリルイン）が発火せず、(#552) 枠内に重なるグループ外の要素も選べなかった。
+  // **枠の pointerdown 経由**で発火させる＝実機と同じ経路（要素 div へ直接発火すると jsdom が重なり順を無視して偽陽性になる）。
+  describe("グループ枠が内部クリックを奪わない（#548/#552）", () => {
+    // 枠（＝free_001 の bbox 100,100-500,220）の内側に、**グループ外**の要素を最前面（zIndex 5）で重ねる。
+    const withOutsider = () => [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.text, x: 100, y: 100, w: 400, h: 120, zIndex: 2, text: "見出し" },
+      { id: "free_003", kind: FREE_ELEMENT_KIND.shape, x: 150, y: 120, w: 100, h: 60, zIndex: 5 },
+    ] as FreeElement[];
+
+    it("枠内でもグループ外の要素の上を押したらその要素が選ばれる（グループは動かない・#552）", () => {
+      const onGroupTransform = vi.fn();
+      const { root, onSelect } = renderOverlay({
+        freeLayout: withOutsider(), groups: [grp], activeGroupId: "group_001", onGroupTransform,
+      });
+      mockRect(root);
+      const frame = screen.getByTestId("group-frame");
+      // (200,150)＝free_003（150,120,100,60・最前面）の上。枠に隠れて選べなかった要素。
+      fireEvent.pointerDown(frame, { button: 0, clientX: 200, clientY: 150, pointerId: 1 });
+      expect(onSelect).toHaveBeenCalledWith("free_003"); // 奥の要素へ届く
+      expect(onGroupTransform).not.toHaveBeenCalled(); // グループ移動にはならない
+    });
+
+    it("枠越しにメンバーを二度押しするとドリルイン＝そのメンバーだけ選択（#548）", () => {
+      const { root, onSelect } = renderOverlay({ freeLayout: withOutsider(), groups: [grp], activeGroupId: "group_001" });
+      mockRect(root);
+      const frame = screen.getByTestId("group-frame");
+      // (400,150)＝free_001 だけがある場所（free_003 の外）。1度目＝まとまり選択、2度目＝ドリルイン。
+      const at = { button: 0, clientX: 400, clientY: 150, pointerId: 1 };
+      fireEvent.pointerDown(frame, at);
+      fireEvent.pointerUp(frame, { pointerId: 1 });
+      fireEvent.pointerDown(frame, at);
+      expect(onSelect).toHaveBeenCalledWith("free_001"); // 枠に奪われずドリルインが発火
+    });
   });
 
   it("グループ枠の角ハンドルをドラッグすると transform.scale が更新される（中心固定の一様拡縮・#305-2）", () => {

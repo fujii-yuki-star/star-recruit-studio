@@ -3,7 +3,7 @@ import type { FreeElement } from './types';
 import type { Group } from '../group/types';
 import { composeGroupGeometry } from '../group/compose';
 import {
-  addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement,
+  addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, createFreeElement, duplicateFreeElement, elementAtPoint, pointInElement,
   elementVisualBBox, freeElementsInRect, FREE_MIN_SIZE, groupBBox, keyboardNudgeDelta, moveFreeElement, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, sendFreeElementToBack,
   snapAngle, snapToGrid, updateFreeElement,
 } from './freeLayoutOps';
@@ -694,5 +694,45 @@ describe('keyboardNudgeDelta（矢印→移動量・#525-11）', () => {
   it('矢印以外は null', () => {
     expect(keyboardNudgeDelta('a', false)).toBeNull();
     expect(keyboardNudgeDelta('Enter', false)).toBeNull();
+  });
+});
+
+// #548/#552：グループ枠が内部クリックを貪欲に食わないよう、「ポインタの下に実際は何があるか」を判定する
+// ヒットテスト。枠は不透明でグループの外接矩形**全域**を覆うため、この判定でメンバー／グループ外の要素／空白へ分岐する。
+describe('pointInElement（回転を考慮した点の内外判定・#548/#552）', () => {
+  const rect = { x: 100, y: 100, w: 200, h: 100 }; // 中心 (200,150)
+
+  it('回転なし：矩形の中は true・外は false', () => {
+    expect(pointInElement(rect, { x: 200, y: 150 })).toBe(true); // 中心
+    expect(pointInElement(rect, { x: 105, y: 105 })).toBe(true); // 左上寄り
+    expect(pointInElement(rect, { x: 99, y: 150 })).toBe(false); // 左外
+    expect(pointInElement(rect, { x: 200, y: 201 })).toBe(false); // 下外
+  });
+
+  it('回転あり：AABB の中でも回転後の矩形の外なら false（軸平行判定では取り違える点）', () => {
+    const rotated = { ...rect, rotation: 90 }; // 中心まわりに90°＝縦長 100x200 相当に見える
+    expect(pointInElement(rotated, { x: 200, y: 150 })).toBe(true); // 中心は回転しても中
+    // 回転前は中（x=290,y=150＝右端寄り）だが、90°回すとその位置は矩形の外になる。
+    expect(pointInElement(rect, { x: 290, y: 150 })).toBe(true);
+    expect(pointInElement(rotated, { x: 290, y: 150 })).toBe(false);
+    // 逆に回転前は外（真下）だが、90°回すと中に入る。
+    expect(pointInElement(rect, { x: 200, y: 195 })).toBe(true);
+    expect(pointInElement({ ...rect, rotation: 90 }, { x: 200, y: 240 })).toBe(true);
+  });
+});
+
+describe('elementAtPoint（点に当たる最前面の要素・#548/#552）', () => {
+  it('描画順（奥→手前）で最後に当たったものを返す＝重なりは手前が勝つ', () => {
+    const items = [
+      { id: 'back', x: 0, y: 0, w: 200, h: 200 },
+      { id: 'front', x: 50, y: 50, w: 100, h: 100 }, // back の上に重なる
+    ];
+    expect(elementAtPoint(items, { x: 100, y: 100 })).toBe('front'); // 重なり部分＝手前
+    expect(elementAtPoint(items, { x: 10, y: 10 })).toBe('back'); // back だけの場所
+  });
+
+  it('どれにも当たらなければ null（＝枠内の空白＝グループ移動へ回す）', () => {
+    expect(elementAtPoint([{ id: 'a', x: 0, y: 0, w: 10, h: 10 }], { x: 500, y: 500 })).toBeNull();
+    expect(elementAtPoint([], { x: 0, y: 0 })).toBeNull();
   });
 });

@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Layer } from "../../domain/template/types";
-import { freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { elementAtPoint, freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GEOM_MIN_SIZE, GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
-import { topGroupOfMember } from "../../domain/project/groupOps";
+import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
 
 // テンプレ作成エディタのレイヤーをプレビュー上でドラッグ/リサイズ/吸着＋複数選択するオーバーレイ（ADR-0017・#306）。
 // ①の FREE オーバーレイの純粋 ops（{x,y,w,h} を受ける move/resize/snap、id 集合を返す freeElementsInRect）を Layer 編集へ流用する。
@@ -167,6 +167,43 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     });
   };
 
+  // レイヤー押下のルーティング。レイヤー div と**グループ枠**（#548/#552）の両方から呼ぶ＝枠の上を押しても
+  // 「そのレイヤーを直接押したとき」と同じ挙動になる。
+  const routeLayerPointerDown = (e: ReactPointerEvent, l: Layer) => {
+    const lGroup = topGroupByEl.get(l.id) ?? null;
+    if (lGroup) beginGroupDrag(e, lGroup);
+    else beginDrag(e, l, "move");
+  };
+
+  // グループ枠の押下（#548/#552）：枠は不透明でグループの外接矩形**全域**を覆うので、そのまま beginGroupDrag すると
+  // 枠内に重なる**グループ外のレイヤー**を選べない（FREE 側 FreeLayoutOverlay と同型の欠陥＝片方だけ直すと取り残される）。
+  // ポインタの下を実ヒットテストして分岐：レイヤーがあればそれを押した扱い／空白なら従来どおりグループ移動。
+  const beginFrameDrag = (e: ReactPointerEvent, group: Group) => {
+    const p = toCanvas(e.clientX, e.clientY);
+    // 委譲するのは「**枠が実際に覆って触れなくしていたもの**」だけに絞る（レビュー🔴）：メンバー、および
+    // メンバーより**手前**の非メンバー（＝枠内に重なって選べなかった・#552）。メンバーより奥のものは委譲しない
+    // ＝**枠の内部ドラッグ＝グループ移動**（#307）を保つ。テンプレは全面 background を必ず持つため、これが無いと
+    // フォールバックが到達不能になり、枠内の空白ドラッグが背景を掴んで動かす（グループは動かず選択も無言解除）。
+    const memberIds = new Set(groupElementIds(groups, group.id)); // 推移的メンバー
+    const zOf = (l: Layer) => l.zIndex ?? 0;
+    const memberMaxZ = Math.max(...layers.filter((l) => memberIds.has(l.id)).map(zOf), Number.NEGATIVE_INFINITY);
+    // 描画順（zIndex 昇順＝下の map と同じ並び）に並べ、非表示を除き合成後の座標で当てる。
+    const hitId = elementAtPoint(
+      [...layers]
+        .filter((l) => !isHiddenByGroup(l.id, groups))
+        .filter((l) => memberIds.has(l.id) || zOf(l) > memberMaxZ)
+        .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+        .map((l) => {
+          const cg = composed.get(l.id) ?? { x: l.x, y: l.y, w: l.w, h: l.h, rotation: l.rotation };
+          return { id: l.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, rotation: cg.rotation };
+        }),
+      p,
+    );
+    const hitLayer = hitId != null ? layers.find((l) => l.id === hitId) : undefined;
+    if (hitLayer) { routeLayerPointerDown(e, hitLayer); return; }
+    beginGroupDrag(e, group);
+  };
+
   // グループ枠の角ハンドル押下（#307）：中心からの距離比で transform.scale を更新（中心固定の一様拡縮）。
   const beginGroupScale = (e: ReactPointerEvent, group: Group, frame: { cx: number; cy: number }) => {
     if (e.button !== 0 || group.locked) return;
@@ -308,7 +345,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
         return (
           <div
             key={l.id}
-            onPointerDown={(e) => (lGroup ? beginGroupDrag(e, lGroup) : beginDrag(e, l, "move"))}
+            onPointerDown={(e) => routeLayerPointerDown(e, l)}
             style={{
               position: "absolute",
               left: `${(cg.x / canvasW) * 100}%`,
@@ -354,7 +391,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       {activeGroupFrame && activeGroup && !isGroupHidden(activeGroup.id, groups) && (
         <div
           data-testid="tmpl-group-frame"
-          onPointerDown={(e) => beginGroupDrag(e, activeGroup)}
+          onPointerDown={(e) => beginFrameDrag(e, activeGroup)}
           style={{
             position: "absolute",
             left: `${((activeGroupFrame.cx - activeGroupFrame.w / 2) / canvasW) * 100}%`,
