@@ -7,6 +7,8 @@ import { isUserTemplate } from "../../domain/template/userTemplate";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
 import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants";
+// 文字の既定値は domain（template/textStyle）が正典＝描画・場面編集の体裁欄・通常→FREE 変換と同じ値を使う（§2-7・#555）。
+import { DEFAULT_FONT_SIZE, DEFAULT_STROKE_COLOR, DEFAULT_TEXT_COLOR } from "../../domain/template/textStyle";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
@@ -287,10 +289,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             </select>
           </div>
           <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-            {numField("文字の大きさ", l.fontSize ?? 40, (v) => onUpdateLayer(l.id, { fontSize: v }), 1)}
+            {numField("文字の大きさ", l.fontSize ?? DEFAULT_FONT_SIZE, (v) => onUpdateLayer(l.id, { fontSize: v }), 1)}
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={l.color ?? "#222222"} onChange={(v) => onUpdateLayer(l.id, { color: v })} ariaLabel="文字の色を選ぶ" />
+              <ColorPicker value={l.color ?? DEFAULT_TEXT_COLOR} onChange={(v) => onUpdateLayer(l.id, { color: v })} ariaLabel="文字の色を選ぶ" />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
@@ -302,11 +304,11 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           {/* 縁取り（#275）：太さ>0 で文字（字幕含む）に縁取りを敷く。描画は既存（FREE の #209）と同じ仕組み。 */}
           <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
             {/* 上限は FREE 側と同じ共有定数（#554）。以前はここだけ 20 で、同じ「縁取りの太さ」が編集画面で別上限だった。 */}
-            {numField("縁取りの太さ", l.strokeWidth ?? 0, (v) => onUpdateLayer(l.id, { strokeWidth: v, ...(v > 0 && l.strokeColor == null ? { strokeColor: "#ffffff" } : {}) }), 0, STROKE_WIDTH_MAX)}
+            {numField("縁取りの太さ", l.strokeWidth ?? 0, (v) => onUpdateLayer(l.id, { strokeWidth: v, ...(v > 0 && l.strokeColor == null ? { strokeColor: DEFAULT_STROKE_COLOR } : {}) }), 0, STROKE_WIDTH_MAX)}
             {(l.strokeWidth ?? 0) > 0 && (
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-                <ColorPicker value={l.strokeColor ?? "#ffffff"} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
+                <ColorPicker value={l.strokeColor ?? DEFAULT_STROKE_COLOR} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
               </div>
             )}
           </div>

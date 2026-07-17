@@ -6,6 +6,7 @@ import { FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, TEXT_ALIGN } from '../
 import type { FreeElementKind } from '../enums';
 import { composeGroupGeometry } from '../group/compose';
 import type { Group } from '../group/types';
+import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { createFreeElementId } from './persistence';
 import type { FreeElement } from './types';
 
@@ -20,7 +21,6 @@ const DEFAULT_TEXT_FONT_SIZE = 48;
 const DEFAULT_SHAPE_W = 600;
 const DEFAULT_SHAPE_H = 400;
 const DEFAULT_TEXT = 'テキスト';
-const DEFAULT_TEXT_COLOR = '#222222';
 const DEFAULT_SHAPE_COLOR = '#cccccc';
 // 字幕要素（ADR-0029）：画面下寄りの字幕バー。表示文言は subtitleSource（対象）から解決＝el.text は持たない。
 const DEFAULT_SUBTITLE_X = 240;
