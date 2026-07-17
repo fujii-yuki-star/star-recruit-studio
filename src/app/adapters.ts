@@ -191,7 +191,11 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       id: "transitionSwallow",
       label: "切り替えと表示時間",
       detail: `${fmtScenes(swallowed)}は画面の切り替えに飲み込まれて動画に出ません。表示時間を長くするか、切り替えを短く（または「なし」に）してください。`,
-      severity: "warning",
+      // #444（設定できるのに効かない）と同じ重さ＝action にする。warning だと PrecheckScreen が
+      // 操作列に「—」を出すだけで sceneId が読まれず（ジャンプは item.action があるときのみ描画）、
+      // 「該当場面へ飛べる」が成立しない（レビュー指摘）。場面が動画から消える＝直すべき事象。
+      severity: "action",
+      action: "直す",
       sceneId: scenes[swallowed[0] - 1]?.sceneId,
     });
   }
