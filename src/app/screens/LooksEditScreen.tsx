@@ -6,13 +6,14 @@ import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
-import { MAX_INLINE_ASSET_BYTES } from "../../domain/constants";
+import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants";
 import { useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
 import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { GroupList } from "../components/GroupList";
+import { GroupTransformFields } from "../components/GroupTransformFields";
 import { ColorPicker } from "../components/ColorPicker";
 import type { GroupTransform } from "../../domain/group/types";
 import { Switch } from "../components/ui";
@@ -157,6 +158,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setSelectedLayerIds(memberIds);
   }
   function transformGroup(groupId: string, patch: Partial<GroupTransform>) {
+    if (tplGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は移動/拡縮/回転も抑止（多重防御・#319 レビュー／#554 レビュー）
     setDraft((d) => (d ? { ...d, groups: updateGroupTransform(d.groups ?? [], groupId, patch) } : d));
   }
   // グループの非表示/ロック切替・重ね順（#307 part2b）。
@@ -299,7 +301,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           </div>
           {/* 縁取り（#275）：太さ>0 で文字（字幕含む）に縁取りを敷く。描画は既存（FREE の #209）と同じ仕組み。 */}
           <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
-            {numField("縁取りの太さ", l.strokeWidth ?? 0, (v) => onUpdateLayer(l.id, { strokeWidth: v, ...(v > 0 && l.strokeColor == null ? { strokeColor: "#ffffff" } : {}) }), 0, 20)}
+            {/* 上限は FREE 側と同じ共有定数（#554）。以前はここだけ 20 で、同じ「縁取りの太さ」が編集画面で別上限だった。 */}
+            {numField("縁取りの太さ", l.strokeWidth ?? 0, (v) => onUpdateLayer(l.id, { strokeWidth: v, ...(v > 0 && l.strokeColor == null ? { strokeColor: "#ffffff" } : {}) }), 0, STROKE_WIDTH_MAX)}
             {(l.strokeWidth ?? 0) > 0 && (
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
@@ -496,6 +499,20 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 </>
               )}
             </div>
+          )}
+          {/* 位置・大きさ・角度の数値入力（#554）。場面編集（FREE）と同じ共有欄＝同概念同挙動（ADR-0026②）。
+              ロック中はボタン群と揃えて fieldset で無効化。 */}
+          {effectiveActiveGroupId && activeGroup && (
+            <fieldset
+              disabled={!!activeGroup.locked}
+              className="mt"
+              style={{ border: "none", padding: 0, margin: 0, minInlineSize: "auto", opacity: activeGroup.locked ? 0.5 : 1 }}
+            >
+              <GroupTransformFields
+                transform={activeGroup.transform}
+                onChange={(p) => transformGroup(effectiveActiveGroupId, p)}
+              />
+            </fieldset>
           )}
         </div>
 

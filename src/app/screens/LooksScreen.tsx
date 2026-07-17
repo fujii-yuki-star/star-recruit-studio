@@ -200,7 +200,10 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           <div className="col gap-sm">
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
-              <input className="input" value={newName} maxLength={40} onChange={(e) => setNewName(e.target.value)} />
+              {/* 作成だけ 40 字で切っていたが、編集側（LooksEditScreen の名前欄）にも template schema（name は
+                  minLength:1・上限なし）にも根拠が無く、同じ「見た目パターンの名前」が入口で別挙動だった
+                  （#554・ADR-0026②）。上限なしへ統一する。 */}
+              <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
             </div>
             <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
               <div className="field" style={{ margin: 0 }}>
