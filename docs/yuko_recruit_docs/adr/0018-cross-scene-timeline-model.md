@@ -12,7 +12,7 @@
 ADR-0016（詳細編集の完全化アンブレラ）の **③ 場面横断タイムライン／複数トラック**を設計する。`§10`「完全自由タイムライン」を段階的に緩和し、**場面列→時間軸 UI**・複数トラック（映像／テロップ／音声／BGM）を最終像に含める。
 
 ### 現状（調査）— モデルは「場面中心・逐次」
-- **場面が時間の単位**：`project.scenes[]` は `scene.order` 順で**端から端へ逐次**。`scene.durationSec`（3〜15s・`11 §4`）。場面間の重なりは**データに持たず**、書き出し時に `transitionTimeline()` が xfade overlap を計算（`src/renderer/export/buildExportScenes.ts`・`src/domain/project/sceneTransitions.ts`）。
+- **場面が時間の単位**：`project.scenes[]` は `scene.order` 順で**端から端へ逐次**。`scene.durationSec`（`>0`・**場面ごとの上限/下限なし**＝#553／`11 §4`）。場面間の重なりは**データに持たず**、書き出し時に `transitionTimeline()` が xfade overlap を計算（`src/renderer/export/buildExportScenes.ts`・`src/domain/project/sceneTransitions.ts`）。
 - **場面内ミニタイムラインは既にある**（ADR-0015・schema 1.8）：`scene.lines[]`（`NarrationLine`）が `startSec`／自動逐次で区間化（`src/domain/project/lineTimeline.ts`）。ただし**行は重ならない**（V18 検証）。`sceneLines()` が単一 narration との差を吸収。
 - **音声**：ナレーション（場面/行）＋音量解決（`11 §6`・`scene.audioMix`）。**BGM は動画全体に1本**（`project.bgmSettings`）＝**場面ごとBGMは無い**。
 - **トラックの概念は無い**：1場面＝1レイアウト＋1ナレーション系列（行は逐次）＋全体BGM。平行音声・平行テロップ・場面内アニメは**未対応**。

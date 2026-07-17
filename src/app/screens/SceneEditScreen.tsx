@@ -9,7 +9,7 @@ import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
-import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { BGM_VOLUME, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
@@ -2107,11 +2107,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               <button className="btn btn-ghost btn-icon text-sm" title="上へ" disabled={i === 0} onClick={() => patch((s) => moveLine(s, line.lineId, -1))}>↑</button>
                               <button className="btn btn-ghost btn-icon text-sm" title="下へ" disabled={i === lastIdx} onClick={() => patch((s) => moveLine(s, line.lineId, 1))}>↓</button>
                               <button className="btn btn-ghost btn-icon text-sm" title="このセリフを削除" onClick={() => setConfirmDeleteLineId(line.lineId)}>削除</button>
-                              {/* 掛け合いでも分割できる（この行から後ろを別の場面へ・#405）。先頭行や短い場面（両側が最小尺を割る）では不可。 */}
+                              {/* 掛け合いでも分割できる（この行から後ろを別の場面へ・#405）。先頭行と尺0以下では不可（#553 で最小尺ガードは撤廃）。 */}
                               <button
                                 className="btn btn-ghost btn-icon text-sm"
                                 title="この行から後ろを別の場面に分ける"
-                                disabled={i === 0 || selected.durationSec < 2 * SCENE_MIN_DURATION_SEC}
+                                disabled={i === 0 || selected.durationSec <= 0}
                                 onClick={() => splitSceneAtLine(selected.sceneId, i)}
                               >
                                 分ける
@@ -2319,7 +2319,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   title="カーソル位置でこの場面を2つに分ける"
                   disabled={
                     selected.narration.text.trim().length < 2 ||
-                    selected.durationSec < 2 * SCENE_MIN_DURATION_SEC
+                    selected.durationSec <= 0
                   }
                   onClick={() => splitScene(selected.sceneId, lineRef.current?.selectionStart ?? 0)}
                 >
@@ -2399,9 +2399,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 id="duration"
                 className="input"
                 type="number"
-                min={SCENE_MIN_DURATION_SEC}
-                max={SCENE_MAX_DURATION_SEC}
-                step={1}
+                min={0.1}
+                max={VIDEO_HARD_MAX_SEC}
+                step={0.1}
                 value={durationDraft?.sceneId === selected.sceneId ? durationDraft.value : selected.durationSec}
                 onFocus={() => setDurationDraft({ sceneId: selected.sceneId, value: String(selected.durationSec) })}
                 onChange={(e) => setDurationDraft({ sceneId: selected.sceneId, value: e.target.value })} // 途中値は store に入れない＝範囲外値を自動保存しない（#411 P1）

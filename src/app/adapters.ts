@@ -6,6 +6,7 @@ import { validateFreeLayout } from "../domain/project/freeLayout";
 import { sceneActiveAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
+import { swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
 import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -177,6 +178,25 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       action: "直す",
       // 最初の該当場面（unplaceable は 1始まりの位置）へ飛ぶ。
       sceneId: scenes[unplaceable[0] - 1]?.sceneId,
+    });
+  }
+
+  // 切り替えに飲み込まれる場面（#553/#554・ADR-0026④）：切り替えが場面尺以上だと、その場面は総尺に寄与せず
+  // **プレビューには出るのに書き出しでは独立した尺を持たない**（preview≠export）。#553 で場面尺の下限を撤廃する
+  // までは構造的に到達不能だった（最短3秒 > 切り替え既定0.5秒）が、「0.3秒の場面＋フェード」が作れるように
+  // なったため**黙って壊さず警告で見せる**。原因＋次の行動を示す（§2-5）。クランプの strict 化は #554。
+  const swallowed = swallowedByTransitionSceneNumbers(scenes);
+  if (swallowed.length > 0) {
+    items.push({
+      id: "transitionSwallow",
+      label: "切り替えと表示時間",
+      detail: `${fmtScenes(swallowed)}は画面の切り替えに飲み込まれて動画に出ません。表示時間を長くするか、切り替えを短く（または「なし」に）してください。`,
+      // #444（設定できるのに効かない）と同じ重さ＝action にする。warning だと PrecheckScreen が
+      // 操作列に「—」を出すだけで sceneId が読まれず（ジャンプは item.action があるときのみ描画）、
+      // 「該当場面へ飛べる」が成立しない（レビュー指摘）。場面が動画から消える＝直すべき事象。
+      severity: "action",
+      action: "直す",
+      sceneId: scenes[swallowed[0] - 1]?.sceneId,
     });
   }
 
