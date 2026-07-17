@@ -1,0 +1,113 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { useProjectStore } from "../store/projectStore";
+import type { Scene } from "../../domain/project/types";
+import type { Template } from "../../domain/template/types";
+import { SceneEditScreen } from "./SceneEditScreen";
+
+// #551：グループを中身ごと削除できる（解除して1つずつ消す手間をなくす）。
+// 要素・グループ・アニメを1手で落とし、Undo 1回で丸ごと戻ることを見る。
+const freeTemplate = {
+  schemaVersion: "1.0", templateId: "free_canvas_v1", name: "自由配置", category: "free", aspectRatio: "16:9",
+  canvas: { width: 1920, height: 1080 }, defaults: { backgroundColor: "#ffffff" },
+  layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+} as unknown as Template;
+
+const scene = (locked?: boolean): Scene =>
+  ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "free", templateId: "free_canvas_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+    narration: { text: "", status: "none" },
+    freeLayout: [
+      { id: "free_001", kind: "shape", x: 100, y: 100, w: 200, h: 200, zIndex: 1 },
+      { id: "free_002", kind: "shape", x: 400, y: 100, w: 200, h: 200, zIndex: 2 },
+      { id: "free_003", kind: "shape", x: 700, y: 100, w: 200, h: 200, zIndex: 3 }, // グループ外＝残る
+    ],
+    groups: [{ id: "group_001", members: ["free_001", "free_002"], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, ...(locked ? { locked: true } : {}) }],
+    warnings: [],
+  }) as unknown as Scene;
+
+const setup = (opts?: { locked?: boolean; animations?: unknown[] }) => {
+  const st = useProjectStore.getState();
+  useProjectStore.setState({
+    templates: [freeTemplate],
+    parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+    scenes: [scene(opts?.locked)],
+    assets: [], editingSceneId: "scene_001",
+    meta: { ...st.meta, timelineOverlay: opts?.animations ? { animations: opts.animations } : undefined } as never,
+    past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+  });
+  render(<SceneEditScreen onNavigate={vi.fn()} />);
+  return () => useProjectStore.getState().scenes[0];
+};
+
+/** メンバーを1回押す＝グループ選択（ツールバーが出る）。 */
+const selectGroup = () => {
+  const member = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
+  fireEvent.pointerDown(member, { button: 0, clientX: 150, clientY: 150, pointerId: 1 });
+  fireEvent.pointerUp(member, { pointerId: 1 });
+};
+
+describe("SceneEditScreen グループを中身ごと削除（#551）", () => {
+  beforeEach(() => {
+    useProjectStore.setState({ past: [], future: [], _historyGroupDepth: 0 });
+  });
+
+  it("ツールバーの「削除」は確認を出し、確定でメンバーごと消える（グループ外の要素は残る）", () => {
+    const s = setup();
+    selectGroup();
+    const panel = screen.getByTestId("group-panel");
+    fireEvent.click(within(panel).getByText("削除"));
+    // 確認前は消えない＋何個消えるかを伝える（§2-5）。
+    expect(s().freeLayout).toHaveLength(3);
+    expect(screen.getByText(/中の2個の要素も一緒に消えます/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText("削除する"));
+    expect(s().freeLayout?.map((e) => e.id)).toEqual(["free_003"]); // メンバー2つが消え、グループ外は残る
+    expect(s().groups ?? []).toEqual([]); // グループ自体も消える
+  });
+
+  it("「やめる」で何も消えない", () => {
+    const s = setup();
+    selectGroup();
+    fireEvent.click(within(screen.getByTestId("group-panel")).getByText("削除"));
+    fireEvent.click(screen.getByText("やめる"));
+    expect(s().freeLayout).toHaveLength(3);
+    expect(s().groups).toHaveLength(1);
+  });
+
+  it("Undo 1回で要素もグループもまとめて戻る（履歴グループ）", () => {
+    const s = setup();
+    selectGroup();
+    fireEvent.click(within(screen.getByTestId("group-panel")).getByText("削除"));
+    fireEvent.click(screen.getByText("削除する"));
+    expect(s().freeLayout).toHaveLength(1);
+
+    useProjectStore.getState().undo();
+    expect(s().freeLayout).toHaveLength(3);
+    expect(s().groups).toHaveLength(1);
+  });
+
+  // グループ自体もアニメの対象になりうる（④(3)・ADR-0019）。要素だけ掃除するとグループのアニメが孤児になる。
+  it("メンバーとグループ自身のアニメを両方掃除する（孤児を残さない）", () => {
+    const anims = [
+      { id: "anim_001", sceneId: "scene_001", targetId: "free_001", keyframes: [{ timeSec: 0, opacity: 0 }] },
+      { id: "anim_002", sceneId: "scene_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0 }] },
+      { id: "anim_003", sceneId: "scene_001", targetId: "free_003", keyframes: [{ timeSec: 0, opacity: 0 }] }, // 残る要素
+    ];
+    setup({ animations: anims });
+    selectGroup();
+    fireEvent.click(within(screen.getByTestId("group-panel")).getByText("削除"));
+    fireEvent.click(screen.getByText("削除する"));
+    const left = useProjectStore.getState().meta.timelineOverlay?.animations ?? [];
+    expect(left.map((a) => a.targetId)).toEqual(["free_003"]); // free_001（メンバー）と group_001（グループ自身）が消える
+  });
+
+  it("ロック中のグループは削除できない（ボタンが無効）", () => {
+    const s = setup({ locked: true });
+    selectGroup();
+    expect(within(screen.getByTestId("group-panel")).getByText("削除")).toBeDisabled();
+    expect(s().groups).toHaveLength(1);
+  });
+});
