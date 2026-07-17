@@ -49,7 +49,10 @@ export function GroupList({
             ? "ロック中は削除できません（先にロックを解除してください）"
             : deleteDisabledReason?.(g.id);
           // 削除確認中はその行を確認へ差し替える（一覧の位置を保ったまま・他の行は触れる）。
-          if (confirmDeleteId === g.id) {
+          // **確認中に削除できなくなったら確認を出さない**（`!deleteReason`）＝確認を開いたまま別の場所で
+          // ロックした/要素を減らした場合、「削除する」を押しても内側のガードが無言 return して
+          // 「消えたはずが消えていない」サイレント失敗になる（#551 レビュー P2）。理由つきの無効ボタン（下）へ戻す。
+          if (confirmDeleteId === g.id && !deleteReason) {
             const n = memberCount(g.id);
             return (
               <DeleteConfirm

@@ -135,6 +135,12 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const activeGroupStillExists = activeGroupId != null && tplGroups.some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
   const activeGroup = tplGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
+  // グループ削除の確認を出すか（#551 レビュー P2）。**削除できる状態のときだけ**出す＝確認を開いたまま
+  // 別の場所でロック/レイヤー削除が起きたら確認を引っ込め、理由つきの無効ボタンへ戻す（サイレント失敗を作らない）。
+  const showGroupDeleteConfirm =
+    !!effectiveActiveGroupId &&
+    confirmDeleteGroupId === effectiveActiveGroupId &&
+    !groupDeleteBlockedReason(effectiveActiveGroupId);
   // グループ化できる件数（既に別グループのものは除外）。ボタンの活性判定に使う（サイレント no-op を防ぐ）。
   const groupableCount = selectedLayerIds.filter((id) => topGroupOfMember(tplGroups, id) == null).length;
   function selectGroup(groupId: string | null) {
@@ -175,9 +181,20 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setActiveGroupId(null);
     setSelectedLayerIds((cur) => cur.filter((x) => !removed.has(x)));
   }
-  /** そのグループを中身ごと消すと最低1枚を割るか（＝削除導線を出さない理由）。 */
+  /** そのグループを中身ごと消すと最低1枚を割るか（`template.schema` の `layers.minItems:1`）。 */
   function wouldEmptyTemplate(groupId: string): boolean {
     return draft!.layers.length - groupElementIds(tplGroups, groupId).length < 1;
+  }
+  /**
+   * グループを中身ごと削除できない理由（無ければ undefined）。**ボタンの無効化・確認の自動解除・`GroupList` への
+   * 受け渡しで同じ関数を使う**＝どこから来ても判定が一致する（§2-7）。
+   * 確認中にこれが立ったら確認を引っ込める＝内側のガードが無言 return して「消えたはずが消えていない」に
+   * ならないようにする（#551 レビュー P2）。
+   */
+  function groupDeleteBlockedReason(groupId: string): string | undefined {
+    if (tplGroups.find((g) => g.id === groupId)?.locked) return "ロック中は削除できません（先にロックを解除してください）";
+    if (wouldEmptyTemplate(groupId)) return "この見た目パターンから全部が消えてしまうため削除できません（先に別の要素を足してください）";
+    return undefined;
   }
   function transformGroup(groupId: string, patch: Partial<GroupTransform>) {
     if (tplGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は移動/拡縮/回転も抑止（多重防御・#319 レビュー／#554 レビュー）
@@ -500,10 +517,11 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             onRename={renameGroup}
             onDelete={deleteGroupWithMembers}
             memberCount={(id) => groupElementIds(tplGroups, id).length}
-            deleteDisabledReason={(id) => (wouldEmptyTemplate(id) ? "この見た目パターンから全部が消えてしまうため削除できません（先に別の要素を足してください）" : undefined)}
+            deleteDisabledReason={groupDeleteBlockedReason}
           />
-          {/* グループを中身ごと削除の確認（#551）。id 比較なので選ぶグループが変わると自動で解除される。 */}
-          {effectiveActiveGroupId && confirmDeleteGroupId === effectiveActiveGroupId && (
+          {/* グループを中身ごと削除の確認（#551）。id 比較なので選ぶグループが変わると自動で解除される。
+              確認中は下の操作列を隠す（SceneEditScreen と同じ＝確認中にロックできてしまう窓を塞ぐ・レビュー P2）。 */}
+          {showGroupDeleteConfirm && effectiveActiveGroupId && (
             <DeleteConfirm
               className="mt"
               message={`このグループを中身ごと削除しますか？中の${groupElementIds(tplGroups, effectiveActiveGroupId).length}個の要素も一緒に消えます。`}
@@ -512,7 +530,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             />
           )}
           {/* グループ（ADR-0022・#307）：2つ以上選択でグループ化／選択中グループは解除。拡縮・回転・非表示等は part2b。 */}
-          {(selectedLayerIds.length >= 2 || effectiveActiveGroupId) && (
+          {(selectedLayerIds.length >= 2 || effectiveActiveGroupId) && !showGroupDeleteConfirm && (
             <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>
               {selectedLayerIds.length >= 2 && (
                 <button
@@ -533,8 +551,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   {/* 中身ごと削除（#551）。「解除」（要素は残る）との違いを説明で明示。最低1枚は残す制約に触れるときは出さない。 */}
                   <button
                     className="btn btn-ghost text-sm"
-                    title={wouldEmptyTemplate(effectiveActiveGroupId) ? "この見た目パターンから全部が消えてしまうため削除できません（先に別の要素を足してください）" : "グループを中身ごと削除（中の要素も消えます）"}
-                    disabled={!!activeGroup?.locked || wouldEmptyTemplate(effectiveActiveGroupId)}
+                    title={groupDeleteBlockedReason(effectiveActiveGroupId) ?? "グループを中身ごと削除（中の要素も消えます）"}
+                    disabled={!!groupDeleteBlockedReason(effectiveActiveGroupId)}
                     onClick={() => setConfirmDeleteGroupId(effectiveActiveGroupId)}
                   >削除</button>
                 </>

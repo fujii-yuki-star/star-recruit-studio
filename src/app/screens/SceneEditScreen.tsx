@@ -1986,8 +1986,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。動き（④(3)）はグループ全体に付く。 */}
                     {effectiveActiveGroupId && (
                       <div className="col gap-sm" data-testid="group-panel" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
-                        {/* 中身ごと削除の確認（#551）。破壊的＋複数要素が一度に消えるので、他の操作を隠して確認だけ出す。 */}
-                        {confirmDeleteGroupId === effectiveActiveGroupId ? (
+                        {/* 中身ごと削除の確認（#551）。破壊的＋複数要素が一度に消えるので、他の操作を隠して確認だけ出す。
+                            **ロック中は確認を出さない**＝グループ一覧（GroupList）の行から確認を開いたままここでロックすると、
+                            「削除する」を押しても `deleteGroupWithMembers` の内側ガードが無言 return して「消えたはずが
+                            消えていない」サイレント失敗になる（#551 レビュー P2）。ロックされたら操作列（無効の削除ボタン）へ戻す。 */}
+                        {confirmDeleteGroupId === effectiveActiveGroupId && !activeGroup?.locked ? (
                           <DeleteConfirm
                             message={`このグループを中身ごと削除しますか？中の${groupElementIds(sceneGroups, effectiveActiveGroupId).length}個の要素も一緒に消えます。`}
                             onCancel={() => setConfirmDeleteGroupId(null)}

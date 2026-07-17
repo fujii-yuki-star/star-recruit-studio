@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
@@ -137,6 +137,28 @@ describe("SceneEditScreen グループを中身ごと削除（#551）", () => {
     expect(s().slotClips).toEqual({ free_003: { speed: 1.5 } }); // 消えた free_001 のぶんだけ落ちる
     expect(s().slotVideoStart).toBeUndefined(); // 空になったら undefined
     expect(s().slotFits).toBeUndefined();
+  });
+
+  // #551 レビュー P2：確認を開いたままロックされると、「削除する」を押しても内側のガードが無言 return し、
+  // 確認だけ閉じて「消えたはずが消えていない」サイレント失敗になる。確認をロック状態に追従させて窓を塞ぐ。
+  // （グループ一覧の行から確認を開くと、この操作列は隠れず「ロック」を押せてしまう＝実際に到達しうる。）
+  it("確認中にロックされたら確認が消え、無言で失敗する窓を作らない", () => {
+    const s = setup();
+    selectGroup();
+    const panel = () => screen.getByTestId("group-panel");
+    fireEvent.click(within(panel()).getByText("削除"));
+    expect(screen.getByText("削除する")).toBeTruthy();
+
+    // 確認を出したまま（別導線から）ロックした状態を作る。act で再描画を流してから確かめる
+    // （生の setState は再描画前に assert すると古い DOM を見てしまう）。
+    act(() => {
+      useProjectStore.setState({
+        scenes: [{ ...s(), groups: [{ ...(s().groups ?? [])[0], locked: true }] } as unknown as Scene],
+      });
+    });
+    expect(screen.queryByText("削除する")).toBeNull(); // 確認は消える
+    expect(within(panel()).getByText("削除")).toBeDisabled(); // 理由つきの無効ボタンへ戻る
+    expect(s().groups).toHaveLength(1); // グループは残ったまま＝「消えたはず」にならない
   });
 
   it("ロック中のグループは削除できない（ボタンが無効）", () => {

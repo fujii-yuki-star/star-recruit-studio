@@ -101,3 +101,39 @@ describe("GroupList：中身ごと削除（#551）", () => {
     expect(screen.getByRole("button", { name: "背景まとまりを中身ごと削除" })).not.toBeDisabled(); // 理由が無い行は押せる
   });
 });
+
+// #551 レビュー P2：確認を開いたまま別の場所でロック/制約に触れると、内側のガードが無言 return して
+// 「消えたはずが消えていない」サイレント失敗になる。確認中に削除不可へ変わったら確認を引っ込める。
+describe("GroupList：確認中に削除できなくなったら確認を引っ込める（#551 レビュー P2）", () => {
+  const unlocked: Group[] = [{ id: "group_001", members: ["free_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }];
+  const locked: Group[] = [{ ...unlocked[0], locked: true }];
+
+  it("確認中にロックされたら確認が消え、理由つきの無効ボタンへ戻る", () => {
+    const onDelete = vi.fn();
+    const { rerender } = render(
+      <GroupList groups={unlocked} activeGroupId={null} onSelect={vi.fn()} onToggleHidden={vi.fn()} onRename={vi.fn()} onDelete={onDelete} memberCount={() => 1} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "グループ1を中身ごと削除" }));
+    expect(screen.getByText("削除する")).toBeTruthy(); // 確認が出ている
+
+    // 別の場所（選択中グループのツールバー等）でロックされた＝props が更新される。
+    rerender(
+      <GroupList groups={locked} activeGroupId={null} onSelect={vi.fn()} onToggleHidden={vi.fn()} onRename={vi.fn()} onDelete={onDelete} memberCount={() => 1} />,
+    );
+    expect(screen.queryByText("削除する")).toBeNull(); // 確認は消える＝押して無言で失敗する窓が無い
+    expect(screen.getByRole("button", { name: "グループ1を中身ごと削除" })).toBeDisabled();
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it("確認中に親が理由を返し始めたら確認が消える（テンプレの最低1枚など）", () => {
+    const onDelete = vi.fn();
+    const props = { groups: unlocked, activeGroupId: null, onSelect: vi.fn(), onToggleHidden: vi.fn(), onRename: vi.fn(), onDelete, memberCount: () => 1 };
+    const { rerender } = render(<GroupList {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "グループ1を中身ごと削除" }));
+    expect(screen.getByText("削除する")).toBeTruthy();
+
+    rerender(<GroupList {...props} deleteDisabledReason={() => "全部が消えてしまうため削除できません"} />);
+    expect(screen.queryByText("削除する")).toBeNull();
+    expect(screen.getByRole("button", { name: "グループ1を中身ごと削除" })).toHaveAttribute("title", "全部が消えてしまうため削除できません");
+  });
+});
