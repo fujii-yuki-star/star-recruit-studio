@@ -5,6 +5,8 @@ import { composeGroupGeometry } from '../group/compose';
 import { DEFAULT_LAYER_Z } from '../template/layerOrder';
 import { NARRATION_STATUS } from '../enums';
 import { duplicateSceneInList, freeLayoutFromPlacedContent, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
+import { DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight } from '../template/textStyle';
+import { wrapText } from '../../renderer/textWrap';
 
 function scene(id: string, order: number, partId = 'part_001', narration?: Scene['narration']): Scene {
   return {
@@ -422,6 +424,37 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(title).toMatchObject({ color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#0000ff', strokeWidth: 4 });
     const sub = (r.freeLayout ?? []).find((e) => e.kind === 'subtitle')!;
     expect(sub).toMatchObject({ fontSize: 76, color: '#ffffff' }); // 触っていない色はテンプレ層のまま継承
+  });
+
+  // #555 レビュー P1：通常は maxLines（既定2）で行数が決まるが、FREE は枠高から導出する（別モデル）。
+  // 枠高をそのまま持ち込むと行が減って文字が切り詰められる（wrapText が末尾を … にする）。
+  // **実際の折返し行数**で確かめる（枠高の数値だけ見ても「見える内容が同じ」の担保にならない）。
+  it.each([
+    { name: 'テンプレのまま（上書きなし）', textStyles: undefined, fontSize: 64 },
+    { name: '場面で文字を大きくした（#555）', textStyles: { title: { fontSize: 96 } }, fontSize: 96 },
+  ])('通常→FREE：$name でも表示行数が減らない＝文字が切り詰められない（P1）', ({ textStyles, fontSize }) => {
+    const long = 'あ'.repeat(30); // 幅1500 なら 64px でも 96px でも2行に折れる長さ
+    const styled = { ...richScene(), texts: { title: long }, ...(textStyles ? { textStyles } : {}) } as Scene;
+    const tpl = prevTemplate();
+    const titleLayer = tpl.layers.find((l) => l.id === 'title')!;
+    // 通常テンプレでの表示行数（layoutScene と同じ wrapText・同じ maxLines 既定）。
+    const normalLines = wrapText(long, titleLayer.w, fontSize, titleLayer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES).length;
+    expect(normalLines).toBe(2); // 前提：この文字数・幅で2行になっている
+
+    const r = switchSceneTemplate(styled, 'free_v1', [], 'free', tpl);
+    const el = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
+    // FREE 側の行数モデル（枠高から導出）で、同じ行数が出ること。
+    const freeMaxLines = linesForBoxHeight(el.h, el.fontSize ?? fontSize);
+    expect(freeMaxLines).toBeGreaterThanOrEqual(normalLines);
+    expect(wrapText(el.text ?? '', el.w, el.fontSize ?? fontSize, freeMaxLines).length).toBe(normalLines);
+    expect((el.text ?? '').length).toBe(long.length); // 文言そのものは持ち込まれている
+  });
+
+  it('通常→FREE：枠が十分に高いときは広げない（幾何をむやみに変えない）', () => {
+    const tall = prevTemplate();
+    tall.layers = tall.layers.map((l) => (l.id === 'title' ? { ...l, h: 900 } : l));
+    const r = switchSceneTemplate(richScene(), 'free_v1', [], 'free', tall);
+    expect((r.freeLayout ?? []).find((e) => e.kind === 'text')!.h).toBe(900); // 旧テンプレの枠高のまま
   });
 
   it('通常→FREE：場面で縁取りの太さだけ足したときも既定色ごと持ち込む（縁取りが消えない・#555）', () => {

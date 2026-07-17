@@ -7,7 +7,7 @@ import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
-import { resolveTextStyle } from '../template/textStyle';
+import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
 import { normalizeDialogueTiming } from './narrationLines';
 import { createFreeElementId } from './persistence';
 import { defaultSubtitleSource } from './subtitleBinding';
@@ -85,11 +85,27 @@ export function switchSceneTemplate(
 }
 
 /**
+ * 通常→FREE 変換で文字/字幕の枠に与える高さ（#555 レビュー P1）。
+ *
+ * **通常テンプレと FREE は行数のモデルが違う**：通常は `layer.maxLines`（既定2）で行数が決まり枠高は行数に効かないが、
+ * FREE は**枠高から行数を導出**する（`linesForBoxHeight`）。枠高をそのまま持ち込むと、テンプレの枠が行数ぶんの高さを
+ * 持たない場合に**行が減って文字が切り詰められる**（`wrapText` が末尾を … にする）。実例＝標準テンプレの見出し層
+ * （h=140・72px）は通常2行だが、そのままでは FREE で1行になる。#555 以前からの欠陥だが、文字を大きくできる
+ * ようになって悪化した（96px なら 140px の枠に1行も入らない）。
+ *
+ * ADR-0030「表示中の内容を持ち込む」に従い、**同じ行数が入る高さ**へ広げる。**縮めない**のは、枠高が回転の中心
+ * （`y + h/2`）にも効くため＝利用者テンプレ（ADR-0017）が文字層を回転させていた場合に位置が動くのを避ける。
+ */
+function textBoxH(h: number, fontSize: number, maxLines: number | undefined): number {
+  return Math.max(h, boxHeightForLines(maxLines ?? DEFAULT_TEMPLATE_MAX_LINES, fontSize));
+}
+
+/**
  * 通常テンプレの「表示中の配置内容」を FREE 要素へ変換する（ADR-0030・通常→FREE の seed 用）。純粋関数。
  * 旧テンプレのレイヤー幾何（x/y/w/h/rotation/zIndex）ごと、以下を FreeElement へ写す（表示されていないものは持ち込まない）:
  * - スロット層（background/slot/logo）の素材（`assetRefs`）→ slot 要素。**動画クリップ調整（`slotClips`）は新 id へ移送**（#524 P1）。
  * - 立ち絵層（character）の `scene.character.poseAssetId` → slot 要素（画像）。`scene.character` は休眠保持（往復で戻る・#524 P1）。
- * - 文字層（text）のテキスト（`texts`）→ text 要素。
+ * - 文字層（text）のテキスト（`texts`）→ text 要素。**枠高は行数を保つよう広げる**（`textBoxH`・#555 レビュー P1）。
  * - 字幕層（subtitle）→ subtitle 要素（`subtitleSource`＝単独 narration／掛け合い allLines・ADR-0029）。字幕が出る場面のみ（#524 P1）。
  * 装飾レイヤー（shape/背景色）は対象外＝意匠。字幕/文字の背景帯（`layer.background`）は FreeElement.background へ移送する（#529）。
  * 戻り値の `slotClips` は「新 FREE 要素 id → クリップ調整」（呼び出し側 `switchSceneTemplate` が既存 `slotClips` へマージ）。
@@ -144,6 +160,7 @@ export function freeLayoutFromPlacedContent(
         id: nextId(),
         kind: FREE_ELEMENT_KIND.text,
         ...geom,
+        h: textBoxH(geom.h, st.fontSize, layer.maxLines),
         text,
         fontSize: st.fontSize,
         color: st.color,
@@ -161,6 +178,7 @@ export function freeLayoutFromPlacedContent(
         id: nextId(),
         kind: FREE_ELEMENT_KIND.subtitle,
         ...geom,
+        h: textBoxH(geom.h, st.fontSize, layer.maxLines),
         subtitleSource: defaultSubtitleSource(scene),
         fontSize: st.fontSize,
         color: st.color,

@@ -6,7 +6,7 @@ import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT } from '../domain/constants';
 import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { LayerBackground, Template } from '../domain/template/types';
-import { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE, resolveTextStyle } from '../domain/template/textStyle';
+import { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveTextStyle } from '../domain/template/textStyle';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
@@ -101,8 +101,8 @@ const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 export function bandBackground(bg: LayerBackground | undefined): { color: string; opacity: number; radius: number } | undefined {
   return bg?.enabled ? { color: bg.color ?? '#000000', opacity: bg.opacity ?? 0.55, radius: bg.radius ?? 16 } : undefined;
 }
-/** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
-export const DEFAULT_LINE_HEIGHT = 1.3;
+// 既定行間も domain（template/textStyle）が正典＝FREE の行数導出・通常→FREE 変換・描画で共有（§2-7）。
+export { DEFAULT_LINE_HEIGHT } from '../domain/template/textStyle';
 /** 字幕帯の背景の上下パディング（em）。sceneSvg の bgHeight = 行間×行数 + 0.6*fontSize と一致（帯の下端＝y + 行間 + これ）。 */
 export const SUBTITLE_BAND_PAD_EM = 0.6;
 /** 同時字幕（ADR-0031）で2人目以降を上へ積むときの帯間の余白（em）。**実際の折返し行数**で詰めたうえで、この隙間を空ける（重ならない）。 */
@@ -342,7 +342,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             fontSize,
             fontWeight: style.fontWeight,
             color: style.color,
-            maxLines: layer.maxLines ?? 2,
+            maxLines: layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES,
             background: bg,
             isSubtitle: isSub,
             // テンプレ字幕は下端基準で上へ伸ばす（1帯が2行でも画面下端からはみ出さない・ADR-0031）。text 層は従来どおり。
@@ -369,7 +369,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         }
         // 帯を配置：字幕は下→上に積む（実折返し行数で詰める＝重ならない・共有 stackedSubtitleBands・#533 P1）。text 層は単一で base.y。
         if (isSub) {
-          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? 2);
+          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES);
           bands.forEach((b, i) => pushBand(b.text, placed[i].y, b.idSuffix));
         } else if (bands.length > 0) {
           pushBand(bands[0].text, base.y, bands[0].idSuffix);
@@ -429,7 +429,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           if (text.length === 0) break;
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
-          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
+          const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
           items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
           break;
         }
@@ -443,7 +443,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           if (subText == null || subText.length === 0) break;
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
-          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
+          const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
           items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
           break;
         }

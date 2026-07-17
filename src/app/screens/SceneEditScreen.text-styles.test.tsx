@@ -159,6 +159,37 @@ describe("SceneEditScreen 文字の体裁の場面別上書き（#555）", () =>
     expect(screen.getByLabelText("色コード")).toHaveValue("#ffffff"); // 継承値(縁取り無し→黒)ではない
   });
 
+  // #555 レビュー P2：数値欄は空欄・太さは選択肢で個別に継承へ戻せるのに、色は ColorPicker が常に色を返すため
+  // 「すべて戻す」しか無かった＝大きさを残して色だけ戻せない。同じ色を選び直しても固有値のまま残り、将来の
+  // テンプレ変更に追従しなくなる（「触ったものだけ固有値」モデルから外れる）。
+  it("色だけを個別に継承へ戻せる（他の上書きは残る）", () => {
+    const scene = setup({ textStyles: { title: { color: "#ff0000", fontSize: 96 } } });
+    const panel = openStyles();
+    fireEvent.click(within(panel).getByRole("button", { name: "色を見た目パターンに合わせる" }));
+    expect(scene().textStyles?.title).toEqual({ fontSize: 96 }); // 色だけ落ちて大きさは残る
+  });
+
+  it("縁取りの色だけを個別に継承へ戻せる", () => {
+    const scene = setup({ textStyles: { title: { strokeColor: "#0000ff", strokeWidth: 4 } } });
+    const panel = openStyles();
+    fireEvent.click(within(panel).getByRole("button", { name: "縁取りの色を見た目パターンに合わせる" }));
+    expect(scene().textStyles?.title).toEqual({ strokeWidth: 4 }); // 太さは残る
+  });
+
+  it("色の復帰ボタンは上書き中だけ出す（触っていない欄に戻す導線を出さない）", () => {
+    setup();
+    const panel = openStyles();
+    expect(within(panel).queryByRole("button", { name: "色を見た目パターンに合わせる" })).toBeNull();
+    expect(within(panel).queryByRole("button", { name: "縁取りの色を見た目パターンに合わせる" })).toBeNull();
+  });
+
+  it("色だけの上書きを戻すと textStyles ごと消える（意味のない {} を残さない）", () => {
+    const scene = setup({ textStyles: { title: { color: "#ff0000" } } });
+    const panel = openStyles();
+    fireEvent.click(within(panel).getByRole("button", { name: "色を見た目パターンに合わせる" }));
+    expect(scene().textStyles).toBeUndefined();
+  });
+
   it("Undo で戻せる（履歴に載る）", () => {
     const scene = setup();
     const panel = openStyles();

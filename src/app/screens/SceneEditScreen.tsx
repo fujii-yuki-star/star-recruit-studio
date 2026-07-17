@@ -705,6 +705,40 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
    * 欄が「テンプレに合わせる」と示す値は、描画と同じ `resolveTextStyle` から引く（§2-7＝欄の表示と実描画がずれない）。
    * 既定は閉じておく（開かない人のスクロール量を増やさない・#550）。
    */
+  /**
+   * 体裁の色欄（#555 レビュー P2）。**項目ごとに継承へ戻せる**ようにする。
+   *
+   * 数値欄は空欄、太さは「見た目パターンに合わせる」で個別に継承へ戻せるのに、色は ColorPicker が常に色を返す
+   * ＝「触っていない」状態を表せないため、戻す手段が「すべて〜」しか無かった。それだと**大きさ96 は残して色だけ
+   * 戻す**ができず、同じ色を選び直しても固有値のまま残って将来のテンプレ変更に追従しない（#555 の「触ったものだけ
+   * 固有値」モデルから外れる）。上書き中のときだけ小さな復帰ボタンを出す。
+   */
+  const colorField = (
+    label: string,
+    value: string,
+    isOverridden: boolean,
+    ariaBase: string,
+    onChange: (v: string) => void,
+    onClear: () => void,
+  ) => (
+    <div className="field" style={{ margin: 0 }}>
+      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{label}</label>
+      <span className="row gap-sm" style={{ alignItems: "center" }}>
+        <ColorPicker value={value} onChange={onChange} ariaLabel={`${ariaBase}を選ぶ`} />
+        {isOverridden && (
+          <button
+            className="btn btn-ghost text-sm"
+            aria-label={`${label}を見た目パターンに合わせる`}
+            title="この場面だけの指定をやめて、見た目パターンの色に戻します"
+            onClick={onClear}
+          >
+            合わせる
+          </button>
+        )}
+      </span>
+    </div>
+  );
+
   const renderTextStyleControls = (key: TextKey) => {
     const layer = template?.layers.find((l) => (l.type === "text" || l.type === "subtitle") && l.textKey === key);
     if (!layer) return null;
@@ -734,10 +768,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             onClear={() => set({ fontSize: undefined })}
             onChange={(v) => set({ fontSize: v })}
           />
-          <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-            <ColorPicker value={effective.color} onChange={(v) => set({ color: v })} ariaLabel={`${textKeyLabel[key]}の色を選ぶ`} />
-          </div>
+          {colorField("色", effective.color, ov?.color != null, `${textKeyLabel[key]}の色`, (v) => set({ color: v }), () => set({ color: undefined }))}
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor={`weight-${key}`}>太さ</label>
             <select
@@ -762,17 +793,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             onClear={() => set({ strokeWidth: undefined })}
             onChange={(v) => set({ strokeWidth: v })}
           />
-          <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-            <ColorPicker
-              value={effective.strokeColor ?? DEFAULT_STROKE_COLOR}
-              onChange={(v) => set({ strokeColor: v })}
-              ariaLabel={`${textKeyLabel[key]}の縁取りの色を選ぶ`}
-            />
-          </div>
+          {colorField("縁取りの色", effective.strokeColor ?? DEFAULT_STROKE_COLOR, ov?.strokeColor != null, `${textKeyLabel[key]}の縁取りの色`, (v) => set({ strokeColor: v }), () => set({ strokeColor: undefined }))}
         </div>
-        {/* 色は空欄で継承へ戻せない（ColorPicker は常に色を返す）ので、戻す導線を明示的に置く＝
-            「一度触ると二度とテンプレ追従に戻せない」を作らない。変更が無いときは出さない。 */}
+        {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。 */}
         {overridden && (
           <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined })}>
             すべて見た目パターンに合わせる

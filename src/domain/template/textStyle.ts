@@ -15,6 +15,36 @@ export const DEFAULT_TEXT_COLOR = '#222222';
 export const DEFAULT_FONT_SIZE = 40;
 /** 縁取りの太さ>0 で色が未指定のときの既定色（色だけ無いと縁取りが silent に消えるのを防ぐ・#275/PR#289）。 */
 export const DEFAULT_STROKE_COLOR = '#ffffff';
+/** テキストの既定行間（倍率）。行数計算と描画で共有する（#209）。 */
+export const DEFAULT_LINE_HEIGHT = 1.3;
+/**
+ * 通常テンプレの text/subtitle 層の既定の行数上限（`layer.maxLines` 未指定時）。
+ * 描画（layoutScene）と通常→FREE 変換（`freeLayoutFromPlacedContent`）で共有する＝**変換後の行数が描画と一致する**（§2-7）。
+ */
+export const DEFAULT_TEMPLATE_MAX_LINES = 2;
+
+/**
+ * FREE 要素の**枠高から表示行数を導出**する（FREE の行数モデル＝箱の高さが入る行数を決める・ADR-0008）。
+ * 通常テンプレは `layer.maxLines`（既定2）で行数を決める＝**別モデル**なので、通常→FREE 変換では
+ * `boxHeightForLines` で行数を保つ枠高へ翻訳する（#555 レビュー P1）。
+ */
+export function linesForBoxHeight(h: number, fontSize: number, lineHeight: number = DEFAULT_LINE_HEIGHT): number {
+  return Math.max(1, Math.floor(h / (fontSize * lineHeight)));
+}
+
+/**
+ * 指定行数が入る最小の枠高（`linesForBoxHeight` の逆）。通常→FREE 変換で**表示行数を保つ**のに使う。
+ *
+ * **`ceil` だけでは足りない**：`Math.ceil(5*12*1.3)` は 78 になるが `78 / (12*1.3)` は二進で 4.999999999999999 で、
+ * `floor` すると **1行減る**。丸めの偶然に頼らず、**守りたい不変条件（行数）を満たすまで詰めて**逆関数であることを
+ * 構造で保証する（通常は 0〜1 回で収束）。往復は textStyle.test.ts で検証する。
+ */
+export function boxHeightForLines(lines: number, fontSize: number, lineHeight: number = DEFAULT_LINE_HEIGHT): number {
+  const n = Math.max(1, lines);
+  let h = Math.ceil(n * fontSize * lineHeight);
+  while (linesForBoxHeight(h, fontSize, lineHeight) < n) h += 1;
+  return h;
+}
 
 /** 通常テンプレの text/subtitle 層の「実際に描く体裁」。`resolveTextStyle` の戻り値。 */
 export interface ResolvedTextStyle {
