@@ -138,6 +138,23 @@ describe("SceneEditScreen 右パネルの既定表示量（#550）", () => {
     expect(screen.getByRole("switch", { name: "選択した要素だけ編集" })).toHaveAttribute("aria-checked", "false");
   });
 
+  // #550 レビュー P3：体裁節（#555）の見出しは上書きの有無で「〜の見た目」「〜の見た目（この場面だけ変更中）」と
+  // 変わる。見出しをそのまま記憶キーにすると2キーに割れ、「上書き中に開いた記憶」が非上書き時に引かれない
+  // （＝記憶が当てにならない）。キーは textKey で固定する。
+  it("体裁節の開閉は見出しの変化（この場面だけ変更中）で割れない", async () => {
+    const { unmount } = setup();
+    fireEvent.click(screen.getByText("見出しの見た目")); // 上書き無しの状態で開く
+    await waitFor(() => expect(localStorage.getItem("sceneEdit.sectionOpen")).not.toBeNull());
+    // 見出しではなく textKey で覚えている。
+    expect(JSON.parse(localStorage.getItem("sceneEdit.sectionOpen") ?? "{}")).toEqual({ "textStyle:title": true });
+    unmount();
+
+    // 上書きがある状態（＝見出しが「見出しの見た目（この場面だけ変更中）」に変わる）で開き直す。
+    setup(scene({ textStyles: { title: { fontSize: 96 } } } as Partial<Scene>));
+    expect(screen.getByText(/この場面だけ変更中/)).toBeTruthy(); // 前提：見出しが変わっている
+    expect(section("見出しの見た目（この場面だけ変更中）").open).toBe(true); // 記憶が引かれる（既定 false に落ちない）
+  });
+
   it("壊れた記憶は既定へ倒す（編集を止めない）", () => {
     localStorage.setItem("sceneEdit.sectionOpen", "{壊れた");
     setup();

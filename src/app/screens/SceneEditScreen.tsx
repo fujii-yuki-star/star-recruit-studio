@@ -138,9 +138,20 @@ function saveSectionOpen(title: string, open: boolean): void {
 // 場面編集の右欄の節を開閉できるアコーディオン（#276）。details/summary ベース。
 // 内部 state を持つので親（SceneEditScreen）の再描画でも開閉が保たれる（モジュール定義＝再マウントしない）。
 // さらに開閉を localStorage へ覚える（#550 ③）＝画面を往復しても開き直さなくてよい。
-function CollapsibleSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
+function CollapsibleSection({ title, storageKey, defaultOpen = true, children }: {
+  title: string;
+  /**
+   * 記憶のキー（#550 レビュー P3）。既定は見出しそのもの。**見出しが状態で変わる節は必ず渡す**＝
+   * 例「〜の見た目（この場面だけ変更中）」（#555）は上書きの有無で見出しが変わるため、素で使うと記憶が
+   * 2キーに割れて「上書き中に開いた記憶」が非上書き時に引かれない（記憶が当てにならなくなる）。
+   */
+  storageKey?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const memoKey = storageKey ?? title;
   // 記憶があればそれを、無ければ既定（#550 ①＝主編集の節だけ開く）。lazy init＝初回描画時に1度だけ読む。
-  const [open, setOpen] = useState(() => loadSectionOpen()[title] ?? defaultOpen);
+  const [open, setOpen] = useState(() => loadSectionOpen()[memoKey] ?? defaultOpen);
   const onToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
     const next = e.currentTarget.open;
     // **既定のままなら保存しない**：`<details open>` は描画しただけで（非同期に）toggle を発火するため、
@@ -148,7 +159,7 @@ function CollapsibleSection({ title, defaultOpen = true, children }: { title: st
     // （記憶が既定を上書きし続ける）。利用者が実際に開閉したときだけ覚える。
     if (next === open) return;
     setOpen(next);
-    saveSectionOpen(title, next);
+    saveSectionOpen(memoKey, next);
   };
   return (
     <details className="accordion" open={open} onToggle={onToggle}>
@@ -831,7 +842,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const overridden = ov != null && Object.keys(ov).length > 0;
     const set = (p: Partial<TextStyleOverride>) => setSceneTextStyle(key, p);
     return (
-      <CollapsibleSection title={`${textKeyLabel[key]}の見た目${overridden ? "（この場面だけ変更中）" : ""}`} defaultOpen={false}>
+      <CollapsibleSection
+        title={`${textKeyLabel[key]}の見た目${overridden ? "（この場面だけ変更中）" : ""}`}
+        storageKey={`textStyle:${key}`}
+        defaultOpen={false}
+      >
         <p className="field-hint" style={{ marginTop: 0 }}>
           この場面だけ変えられます。触っていない項目は見た目パターンのままです（文字を置く場所や枠の大きさは変わりません）。
         </p>
