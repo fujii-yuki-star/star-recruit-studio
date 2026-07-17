@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as Rea
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
 import { sceneFirstLine } from "./sceneCardPreview";
-import type { Asset, FreeElement, Scene, SlotClipOverride, VideoStartSpec } from "../../domain/project/types";
+import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
@@ -50,6 +50,7 @@ import { textKeyLabel } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
+import { DEFAULT_STROKE_COLOR, resolveTextStyle } from "../../domain/template/textStyle";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
@@ -455,6 +456,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       // 全種別を継承に戻したら空オブジェクトを残さず未設定へ（意味のない {} を永続化しない）。
       return { ...s, textFontIds: Object.keys(next).length ? next : undefined };
     });
+  // テキスト種別ごとの体裁上書き（#555）。undefined＝そのプロパティを継承（キーを外す）＝textFontIds と同じ流儀。
+  // プロパティが全部消えたらその種別ごと、種別が全部消えたら textStyles ごと未設定へ（意味のない {} を永続化しない）。
+  const setSceneTextStyle = (textKey: TextKey, patchStyle: Partial<TextStyleOverride>) =>
+    patch((s) => {
+      // patchStyle の undefined は「そのプロパティを継承へ戻す」＝マージ後にキーごと落とす（{k: undefined} を保存しない）。
+      const merged = { ...(s.textStyles?.[textKey] ?? {}), ...patchStyle };
+      const cur = Object.fromEntries(Object.entries(merged).filter(([, v]) => v !== undefined)) as TextStyleOverride;
+      const next = { ...(s.textStyles ?? {}) };
+      if (Object.keys(cur).length) next[textKey] = cur;
+      else delete next[textKey];
+      return { ...s, textStyles: Object.keys(next).length ? next : undefined };
+    });
   // FREE 場面（自由配置）か。FREE のときだけ自由配置エディタを主編集面として出す（ADR-0008・§2-4）。
   const isFree = template?.category === FREE_CATEGORY;
   // 非FREE場面のテキスト入力欄は、選択テンプレのテキスト層が使う textKey から生成する（#214 ④b・全5キー対応）。
@@ -684,6 +697,113 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       else delete next[layerId];
       return { ...s, slotFits: Object.keys(next).length ? next : undefined };
     });
+
+  /**
+   * 通常テンプレの文字の体裁を場面別に変える欄（#555）。**配置・座標はテンプレのまま**（§2-4）＝体裁だけ開放する。
+   *
+   * 継承の流儀は「その種別のフォント」（#178・FontPicker の allowInherit）と同じ＝**触ったものだけが固有値**。
+   * 欄が「テンプレに合わせる」と示す値は、描画と同じ `resolveTextStyle` から引く（§2-7＝欄の表示と実描画がずれない）。
+   * 既定は閉じておく（開かない人のスクロール量を増やさない・#550）。
+   */
+  /**
+   * 体裁の色欄（#555 レビュー P2）。**項目ごとに継承へ戻せる**ようにする。
+   *
+   * 数値欄は空欄、太さは「見た目パターンに合わせる」で個別に継承へ戻せるのに、色は ColorPicker が常に色を返す
+   * ＝「触っていない」状態を表せないため、戻す手段が「すべて〜」しか無かった。それだと**大きさ96 は残して色だけ
+   * 戻す**ができず、同じ色を選び直しても固有値のまま残って将来のテンプレ変更に追従しない（#555 の「触ったものだけ
+   * 固有値」モデルから外れる）。上書き中のときだけ小さな復帰ボタンを出す。
+   */
+  const colorField = (
+    label: string,
+    value: string,
+    isOverridden: boolean,
+    ariaBase: string,
+    onChange: (v: string) => void,
+    onClear: () => void,
+  ) => (
+    <div className="field" style={{ margin: 0 }}>
+      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{label}</label>
+      <span className="row gap-sm" style={{ alignItems: "center" }}>
+        <ColorPicker value={value} onChange={onChange} ariaLabel={`${ariaBase}を選ぶ`} />
+        {isOverridden && (
+          <button
+            className="btn btn-ghost text-sm"
+            aria-label={`${label}を見た目パターンに合わせる`}
+            title="この場面だけの指定をやめて、見た目パターンの色に戻します"
+            onClick={onClear}
+          >
+            合わせる
+          </button>
+        )}
+      </span>
+    </div>
+  );
+
+  const renderTextStyleControls = (key: TextKey) => {
+    const layer = template?.layers.find((l) => (l.type === "text" || l.type === "subtitle") && l.textKey === key);
+    if (!layer) return null;
+    const ov = selected.textStyles?.[key];
+    // 2つを使い分ける（#555 レビュー）：
+    //  inherited＝上書き無しの解決値＝「見た目パターンに合わせる」と何になるか＝**空欄のプレースホルダ用**。
+    //  effective＝上書き込みの解決値＝**いま実際に描かれている体裁**＝色の見本用。
+    // 色は ColorPicker が常に色を返す（空＝継承を表せない）ので、見本には effective を出す必要がある。
+    // inherited を出すと、縁取りの色のように「太さ>0 なら白が既定」という**太さ依存の既定**があるとき、
+    // 実描画は白なのに見本は黒、というドリフトになる（この欄が防ぐと謳っているもの＝§2-7）。
+    const inherited = resolveTextStyle(layer);
+    const effective = resolveTextStyle(layer, ov);
+    const overridden = ov != null && Object.keys(ov).length > 0;
+    const set = (p: Partial<TextStyleOverride>) => setSceneTextStyle(key, p);
+    return (
+      <CollapsibleSection title={`${textKeyLabel[key]}の見た目${overridden ? "（この場面だけ変更中）" : ""}`} defaultOpen={false}>
+        <p className="field-hint" style={{ marginTop: 0 }}>
+          この場面だけ変えられます。触っていない項目は見た目パターンのままです（文字を置く場所や枠の大きさは変わりません）。
+        </p>
+        <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+          {/* 空欄＝継承。placeholder に「テンプレに合わせたときの実値」を出す＝何が継承されるか見える。 */}
+          <NumberField
+            label="文字の大きさ"
+            value={ov?.fontSize ?? null}
+            min={1}
+            placeholder={String(inherited.fontSize)}
+            onClear={() => set({ fontSize: undefined })}
+            onChange={(v) => set({ fontSize: v })}
+          />
+          {colorField("色", effective.color, ov?.color != null, `${textKeyLabel[key]}の色`, (v) => set({ color: v }), () => set({ color: undefined }))}
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor={`weight-${key}`}>太さ</label>
+            <select
+              id={`weight-${key}`}
+              className="select"
+              value={ov?.fontWeight ?? ""}
+              onChange={(e) => set({ fontWeight: e.target.value ? (e.target.value as FontWeight) : undefined })}
+            >
+              <option value="">見た目パターンに合わせる</option>
+              <option value={FONT_WEIGHT.normal}>標準</option>
+              <option value={FONT_WEIGHT.bold}>太字</option>
+            </select>
+          </div>
+        </div>
+        <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+          <NumberField
+            label="縁取りの太さ"
+            value={ov?.strokeWidth ?? null}
+            min={0}
+            max={STROKE_WIDTH_MAX}
+            placeholder={String(inherited.strokeWidth ?? 0)}
+            onClear={() => set({ strokeWidth: undefined })}
+            onChange={(v) => set({ strokeWidth: v })}
+          />
+          {colorField("縁取りの色", effective.strokeColor ?? DEFAULT_STROKE_COLOR, ov?.strokeColor != null, `${textKeyLabel[key]}の縁取りの色`, (v) => set({ strokeColor: v }), () => set({ strokeColor: undefined }))}
+        </div>
+        {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。 */}
+        {overridden && (
+          <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined })}>
+            すべて見た目パターンに合わせる
+          </button>
+        )}
+      </CollapsibleSection>
+    );
+  };
 
   // FREE の text/subtitle の背景帯（可読性の下地・#529）。通常字幕層の layer.background と同じ UX（付ける/色/濃さ/角丸）。
   const renderFreeBandBg = (el: FreeElement) => (
@@ -1531,6 +1651,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
                       <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
                     </div>
+                    {renderTextStyleControls(key)}
                   </div>
                 );
               })}

@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.23" },
+    "schemaVersion": { "const": "1.24" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -251,6 +251,17 @@
             "url": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
           }
         },
+        "textStyles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": { "$ref": "#/$defs/TextStyle" },
+            "main": { "$ref": "#/$defs/TextStyle" },
+            "subtitle": { "$ref": "#/$defs/TextStyle" },
+            "caption": { "$ref": "#/$defs/TextStyle" },
+            "url": { "$ref": "#/$defs/TextStyle" }
+          }
+        },
         "assetRefs": { "$ref": "#/$defs/AssetRefs" },
         "character": { "$ref": "#/$defs/Character" },
         "texts": { "$ref": "#/$defs/Texts" },
@@ -387,6 +398,18 @@
             }
           ]
         }
+      }
+    },
+    "TextStyle": {
+      "type": "object",
+      "description": "テキスト種別ごとの体裁の上書き（#555）。各プロパティ未指定＝テンプレ層の値を継承（null=継承・11 §6）。配置・座標はテンプレ駆動のまま（§2-4）。制約は Layer/FreeElement の同名プロパティと同一。",
+      "additionalProperties": false,
+      "properties": {
+        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "fontSize": { "type": "number", "exclusiveMinimum": 0 },
+        "fontWeight": { "enum": ["normal", "bold"] },
+        "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "strokeWidth": { "type": "number", "minimum": 0 }
       }
     },
     "AssetRefs": {

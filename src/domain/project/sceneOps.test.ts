@@ -5,6 +5,9 @@ import { composeGroupGeometry } from '../group/compose';
 import { DEFAULT_LAYER_Z } from '../template/layerOrder';
 import { NARRATION_STATUS } from '../enums';
 import { duplicateSceneInList, freeLayoutFromPlacedContent, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
+import { DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight } from '../template/textStyle';
+import { layoutScene, type TextItem } from '../../renderer/layout';
+import { wrapText } from '../text/textWrap';
 
 function scene(id: string, order: number, partId = 'part_001', narration?: Scene['narration']): Scene {
   return {
@@ -328,6 +331,7 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     slotFits: { mainVisual: 'contain', oldSlot: 'stretch' },
     texts: { title: 'タイトル', main: '本文' },
     textFontIds: { main: 'gen-interface-jp', title: 'gen-interface-jp-display' },
+    textStyles: { title: { color: '#ff0000', fontSize: 96 } },
     warnings: [{ code: 'SLOT_REQUIRED_EMPTY', message: '旧テンプレ基準の警告', field: 'assetRefs', severity: 'warning' }],
   });
 
@@ -343,11 +347,12 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     expect(r.slotFits?.oldSlot).toBeUndefined(); // 新テンプレに無いスロットの収め方は捨てる
   });
 
-  it('texts / textFontIds は保持する（#236＝固定TextKeyキー・別パターンへ変えて戻すと入力が復元）', () => {
+  it('texts / textFontIds / textStyles は保持する（#236＝固定TextKeyキー・別パターンへ変えて戻すと入力が復元）', () => {
     const r = switchSceneTemplate(richScene(), 'new_tmpl', newLayers);
     // 新テンプレが main を使わなくても texts.main / textFontIds.main は残す。
     expect(r.texts).toEqual({ title: 'タイトル', main: '本文' });
     expect(r.textFontIds).toEqual({ main: 'gen-interface-jp', title: 'gen-interface-jp-display' });
+    expect(r.textStyles).toEqual({ title: { color: '#ff0000', fontSize: 96 } }); // 体裁も同じ理由で保持（#555）
   });
 
   it('templateId を新しい値に更新する', () => {
@@ -400,6 +405,105 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     slotFits: { mainVisual: 'contain' },
     texts: { title: 'タイトル', main: '本文' },
     textFontIds: { title: 'gen-interface-jp-display' },
+  });
+
+  // #555：場面で変えた体裁（textStyles）も「表示中の内容」＝FREE へ持ち込む。生の layer.* を写すと、
+  // 隣の fontId は per-scene で移送されるのに体裁だけテンプレ既定へ戻る＝FREE 化で見た目が黙って変わる
+  // （ADR-0030「表示中の内容を持ち込む」／ADR-0026② 同概念同挙動）。
+  it('通常→FREE：場面で変えた文字の体裁（textStyles）も持ち込む＝FREE 化で見た目が戻らない（#555）', () => {
+    const styled = {
+      ...richScene(),
+      texts: { title: 'タイトル', subtitle: '字幕' },
+      textStyles: {
+        title: { color: '#ff0000', fontSize: 96, fontWeight: 'bold' as const, strokeColor: '#0000ff', strokeWidth: 4 },
+        subtitle: { fontSize: 76 },
+      },
+    };
+    const r = switchSceneTemplate(styled, 'free_v1', [], 'free', prevTemplate());
+    const title = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
+    // テンプレ層は fontSize:64 / color:#ffffff / bold。場面の上書きが勝つ。
+    expect(title).toMatchObject({ color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#0000ff', strokeWidth: 4 });
+    const sub = (r.freeLayout ?? []).find((e) => e.kind === 'subtitle')!;
+    expect(sub).toMatchObject({ fontSize: 76, color: '#ffffff' }); // 触っていない色はテンプレ層のまま継承
+  });
+
+  // #555 レビュー P1：通常は maxLines（既定2）で行数が決まるが、FREE は枠高から導出する（別モデル）。
+  // 枠高をそのまま持ち込むと行が減って文字が切り詰められる（wrapText が末尾を … にする）。
+  // **実際の折返し行数**で確かめる（枠高の数値だけ見ても「見える内容が同じ」の担保にならない）。
+  it.each([
+    { name: 'テンプレのまま（上書きなし）', textStyles: undefined, fontSize: 64 },
+    { name: '場面で文字を大きくした（#555）', textStyles: { title: { fontSize: 96 } }, fontSize: 96 },
+  ])('通常→FREE：$name でも表示行数が減らない＝文字が切り詰められない（P1）', ({ textStyles, fontSize }) => {
+    const long = 'あ'.repeat(30); // 幅1500 なら 64px でも 96px でも2行に折れる長さ
+    const styled = { ...richScene(), texts: { title: long }, ...(textStyles ? { textStyles } : {}) } as Scene;
+    const tpl = prevTemplate();
+    const titleLayer = tpl.layers.find((l) => l.id === 'title')!;
+    // 通常テンプレでの表示行数（layoutScene と同じ wrapText・同じ maxLines 既定）。
+    const normalLines = wrapText(long, titleLayer.w, fontSize, titleLayer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES).length;
+    expect(normalLines).toBe(2); // 前提：この文字数・幅で2行になっている
+
+    const r = switchSceneTemplate(styled, 'free_v1', [], 'free', tpl);
+    const el = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
+    // FREE 側の行数モデル（枠高から導出）で、同じ行数が出ること。
+    const freeMaxLines = linesForBoxHeight(el.h, el.fontSize ?? fontSize);
+    expect(freeMaxLines).toBeGreaterThanOrEqual(normalLines);
+    expect(wrapText(el.text ?? '', el.w, el.fontSize ?? fontSize, freeMaxLines).length).toBe(normalLines);
+    expect((el.text ?? '').length).toBe(long.length); // 文言そのものは持ち込まれている
+  });
+
+  // #555 再レビュー P2：テンプレ字幕は下端基準（anchorBottom＝行が増えると上へ伸び下端が動かない）だが、
+  // FREE 字幕は上端起点で下へ伸びる。同じ y に置くと2行字幕が1行ぶん下がり、画面下端からはみ出しうる。
+  // **実際に描かれる帯の位置**（layoutScene の字幕アイテム）で、変換前後が一致することを見る。
+  const bandTop = (item: { y: number; fontSize: number; anchorBottom?: boolean }, lines: number): number =>
+    item.y - (item.anchorBottom ? (lines - 1) * item.fontSize * DEFAULT_LINE_HEIGHT : 0);
+
+  it.each([
+    { name: '既定サイズ', fontSize: undefined, expectLines: 2 },
+    { name: '場面で大きくした（#555）', fontSize: 60, expectLines: 2 },
+  ])('通常→FREE：2行字幕の帯の位置が変わらない（$name・下端基準を座標へ翻訳・P2）', ({ fontSize, expectLines }) => {
+    const long = 'あ'.repeat(50); // 幅1720 の字幕層で2行に折れる長さ
+    const base = {
+      ...richScene(),
+      texts: { subtitle: long },
+      ...(fontSize ? { textStyles: { subtitle: { fontSize } } } : {}),
+    } as Scene;
+    const tpl = prevTemplate();
+    // 変換前：通常テンプレでの字幕帯の上端。
+    const before = layoutScene(base, tpl).items.find((i) => i.id === 'subtitle') as TextItem;
+    expect(wrapText(before.text, before.w, before.fontSize, before.maxLines).length).toBe(expectLines); // 前提：2行
+    const topBefore = bandTop(before, expectLines);
+
+    // 変換後：FREE テンプレでの同じ字幕の上端。
+    const freeTpl = { ...tpl, templateId: 'free_v1', category: 'free', layers: [] } as unknown as Template;
+    const r = switchSceneTemplate(base, 'free_v1', [], 'free', tpl);
+    const after = layoutScene(r, freeTpl).items.find((i) => i.kind === 'text' && i.isSubtitle) as TextItem;
+    expect(after).toBeTruthy();
+    expect(wrapText(after.text, after.w, after.fontSize, after.maxLines).length).toBe(expectLines); // 行は減っていない（P1）
+    expect(bandTop(after, expectLines)).toBeCloseTo(topBefore, 5); // 帯の位置が一致（P2）
+  });
+
+  it('通常→FREE：1行字幕は元から一致しているので動かさない', () => {
+    const base = { ...richScene(), texts: { subtitle: '短い字幕' } } as Scene;
+    const tpl = prevTemplate();
+    const r = switchSceneTemplate(base, 'free_v1', [], 'free', tpl);
+    const el = (r.freeLayout ?? []).find((e) => e.kind === 'subtitle')!;
+    expect(el.y).toBe(tpl.layers.find((l) => l.id === 'subtitle')!.y); // y 据え置き
+  });
+
+  it('通常→FREE：枠が十分に高いときは広げない（幾何をむやみに変えない）', () => {
+    const tall = prevTemplate();
+    tall.layers = tall.layers.map((l) => (l.id === 'title' ? { ...l, h: 900 } : l));
+    const r = switchSceneTemplate(richScene(), 'free_v1', [], 'free', tall);
+    expect((r.freeLayout ?? []).find((e) => e.kind === 'text')!.h).toBe(900); // 旧テンプレの枠高のまま
+  });
+
+  it('通常→FREE：場面で縁取りの太さだけ足したときも既定色ごと持ち込む（縁取りが消えない・#555）', () => {
+    // テンプレ層に縁取りが無く、場面で太さだけ足した状態。FREE の text 要素は「太さ>0 なら白」の既定を
+    // 持たない（el.strokeColor をそのまま描く）ので、解決済みの色を写さないと縁取りが黙って消える。
+    const styled = { ...richScene(), textStyles: { title: { strokeWidth: 3 } } };
+    const r = switchSceneTemplate(styled, 'free_v1', [], 'free', prevTemplate());
+    const title = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
+    expect(title).toMatchObject({ strokeWidth: 3, strokeColor: '#ffffff' });
   });
 
   it('通常→FREE：表示中の素材/文字を freeLayout へ変換（位置/収め方/回転/体裁を継承・空スロット/装飾/テキスト層なしは除外）', () => {

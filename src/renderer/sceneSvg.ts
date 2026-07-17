@@ -6,11 +6,11 @@ import { fontFamilyForId, isKnownFontId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT } from './layout';
 import { freeShapeSvg } from './freeShapes';
-import { charWidthEm, wrapText } from './textWrap';
+import { charWidthEm, wrapText } from '../domain/text/textWrap';
 
 // 折返し（charWidthEm/wrapText）は layout（帯の段位置計算）と共有＝行数と描画を一致させる（textWrap）。
 // 既存の import 元（'./sceneSvg'）を保つため再エクスポートする。
-export { charWidthEm, wrapText } from './textWrap';
+export { charWidthEm, wrapText } from '../domain/text/textWrap';
 
 // 既定の font-family（opts.fontFamily 未指定時のフォールバック＝同梱の既定フォント）。
 const DEFAULT_FONT_FAMILY = fontFamilyForId(undefined);

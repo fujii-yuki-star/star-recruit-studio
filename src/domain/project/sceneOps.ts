@@ -7,6 +7,9 @@ import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
+import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
+import { wrapText } from '../text/textWrap';
+import { resolveLineSubtitle } from './lineTimeline';
 import { normalizeDialogueTiming } from './narrationLines';
 import { createFreeElementId } from './persistence';
 import { defaultSubtitleSource } from './subtitleBinding';
@@ -25,7 +28,7 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
  * - **assetRefs / slotFits は「通常テンプレへ切り替えるときだけ」清算する**（ADR-0030）：新テンプレに無いスロット
  *   （`background`/`slot`/`logo` レイヤーの id）への参照/収め方を捨てる（11 §5＝キー ⊆ スロット id）。**FREE へ切り替える
  *   ときは清算せず休眠保持し、通常テンプレへ戻すと自動復元する**（ダングリングは実効使用ゲート `sceneActiveAssetIds` で無害化済み・#524 P1）。
- * - **texts / textFontIds は保持する**：これらは固定の `TextKey` enum がキーでテンプレ非依存ゆえダングリングにならず、
+ * - **texts / textFontIds / textStyles は保持する**：これらは固定の `TextKey` enum がキーでテンプレ非依存ゆえダングリングにならず、
  *   別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と非対称だが**意図的**（#236＝保持を採用）。
  *   ※ 将来この非対称を「揃える」目的で texts を清算しないこと（利用者の入力消失になる）。
  * - **warnings はクリアする**：旧テンプレ基準の検証結果（例: 必須スロット未設定）は切替で陳腐化するため引き継がない＝
@@ -78,9 +81,56 @@ export function switchSceneTemplate(
     ...(seeded && seeded.elements.length ? { freeLayout: seeded.elements } : {}),
     // 動画クリップ調整（範囲/速度/元音声）を旧層 id → 新 FREE 要素 id へ移送（#524 P1）。旧キーは休眠のまま残す（往復）。
     ...(seeded && Object.keys(seeded.slotClips).length ? { slotClips: { ...scene.slotClips, ...seeded.slotClips } } : {}),
-    // texts / textFontIds は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。
+    // texts / textFontIds / textStyles は保持（上記ポリシー＝#236）。warnings は再検証前提でクリア。
     warnings: [],
   };
+}
+
+/**
+ * 通常→FREE 変換で文字/字幕の枠に与える高さ（#555 レビュー P1）。
+ *
+ * **通常テンプレと FREE は行数のモデルが違う**：通常は `layer.maxLines`（既定2）で行数が決まり枠高は行数に効かないが、
+ * FREE は**枠高から行数を導出**する（`linesForBoxHeight`）。枠高をそのまま持ち込むと、テンプレの枠が行数ぶんの高さを
+ * 持たない場合に**行が減って文字が切り詰められる**（`wrapText` が末尾を … にする）。実例＝標準テンプレの見出し層
+ * （h=140・72px）は通常2行だが、そのままでは FREE で1行になる。#555 以前からの欠陥だが、文字を大きくできる
+ * ようになって悪化した（96px なら 140px の枠に1行も入らない）。
+ *
+ * ADR-0030「表示中の内容を持ち込む」に従い、**同じ行数が入る高さ**へ広げる。**縮めない**のは、枠高が回転の中心
+ * （`y + h/2`）にも効くため＝利用者テンプレ（ADR-0017）が文字層を回転させていた場合に位置が動くのを避ける。
+ */
+function textBoxH(h: number, fontSize: number, maxLines: number | undefined): number {
+  return Math.max(h, boxHeightForLines(maxLines ?? DEFAULT_TEMPLATE_MAX_LINES, fontSize));
+}
+
+/**
+ * 通常→FREE 変換で字幕の枠に与える上端 y（#555 再レビュー P2）。
+ *
+ * **字幕はアンカーが逆**：テンプレ字幕層は**下端基準**（`anchorBottom`＝行が増えると上へ伸び、下端が動かない
+ * ＝画面下端に置いた帯が2行でも画面外へ出ない・ADR-0031）。一方 FREE 字幕は**上端起点**で下へ伸びる
+ * （箱の高さは利用者が持つ＝ADR-0008）。同じ y に置くと帯が `(行数-1)×行高` ぶん**下がり**、画面下端から
+ * はみ出しうる（例：字幕60px・2行なら下端が 1034→1112 でキャンバス外）。
+ *
+ * そこで**アンカーの違いを座標へ翻訳**する＝帯が実際に占めていた上端へ y を移す。**1行の字幕は元から一致
+ * している**ので動かさない（`行数-1 = 0`）。掛け合いは行ごとに行数が変わり単一の y では一致させられないため、
+ * **全行の最大行数**に寄せる＝どの行でもテンプレより下がらない（はみ出しを増やさない）側を採る。
+ */
+function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxLines: number | undefined): number {
+  const cap = maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
+  // 単独/掛け合いの判別は **生の `scene.lines`** で行う（`showsSubtitle`／`defaultSubtitleSource` と同じ規則）。
+  // `sceneLines()` は lines 不在のとき narration から1行を合成して返すため、ここで使うと単独場面まで
+  // 掛け合い扱いになり静的字幕（`texts.subtitle`）の行数を見落とす。
+  const lines = scene.lines ?? [];
+  const shown =
+    lines.length > 0
+      ? Math.max(
+          1,
+          ...lines.map((l) => {
+            const sub = resolveLineSubtitle(l, scene);
+            return sub.enabled && sub.text.length > 0 ? wrapText(sub.text, w, fontSize, cap).length : 1;
+          }),
+        )
+      : wrapText(scene.texts[TEXT_KEY.subtitle] ?? '', w, fontSize, cap).length;
+  return y - (shown - 1) * fontSize * DEFAULT_LINE_HEIGHT;
 }
 
 /**
@@ -88,7 +138,7 @@ export function switchSceneTemplate(
  * 旧テンプレのレイヤー幾何（x/y/w/h/rotation/zIndex）ごと、以下を FreeElement へ写す（表示されていないものは持ち込まない）:
  * - スロット層（background/slot/logo）の素材（`assetRefs`）→ slot 要素。**動画クリップ調整（`slotClips`）は新 id へ移送**（#524 P1）。
  * - 立ち絵層（character）の `scene.character.poseAssetId` → slot 要素（画像）。`scene.character` は休眠保持（往復で戻る・#524 P1）。
- * - 文字層（text）のテキスト（`texts`）→ text 要素。
+ * - 文字層（text）のテキスト（`texts`）→ text 要素。**枠高は行数を保つよう広げる**（`textBoxH`・#555 レビュー P1）。
  * - 字幕層（subtitle）→ subtitle 要素（`subtitleSource`＝単独 narration／掛け合い allLines・ADR-0029）。字幕が出る場面のみ（#524 P1）。
  * 装飾レイヤー（shape/背景色）は対象外＝意匠。字幕/文字の背景帯（`layer.background`）は FreeElement.background へ移送する（#529）。
  * 戻り値の `slotClips` は「新 FREE 要素 id → クリップ調整」（呼び出し側 `switchSceneTemplate` が既存 `slotClips` へマージ）。
@@ -135,33 +185,41 @@ export function freeLayoutFromPlacedContent(
     } else if (layer.type === 'text' && layer.textKey) {
       const text = scene.texts[layer.textKey];
       if (!text) continue; // 空文字は持ち込まない
+      // 体裁は**場面の上書き（textStyles・#555）を解決した実効値**を写す。生の layer.* を写すと、場面で
+      // 変えた色/大きさが FREE 化で黙ってテンプレ既定へ戻る（隣の fontId は per-scene なのに体裁だけ戻る＝
+      // ADR-0026②の非対称・ADR-0030「表示中の内容を持ち込む」に反する）。
+      const st = resolveTextStyle(layer, scene.textStyles?.[layer.textKey]);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.text,
         ...geom,
+        h: textBoxH(geom.h, st.fontSize, layer.maxLines),
         text,
-        fontSize: layer.fontSize,
-        color: layer.color,
-        fontWeight: layer.fontWeight,
+        fontSize: st.fontSize,
+        color: st.color,
+        fontWeight: st.fontWeight,
         fontId: scene.textFontIds?.[layer.textKey],
-        ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
-        ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+        ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
+        ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
         ...(layer.background != null ? { background: layer.background } : {}), // 背景帯（可読性の下地）も移送（#529）
       });
     } else if (layer.type === 'subtitle') {
       if (!showsSubtitle) continue; // 字幕が出ない場面は空の字幕要素を作らない
       // 表示文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。単独→narration／掛け合い→allLines。
+      const st = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
       elements.push({
         id: nextId(),
         kind: FREE_ELEMENT_KIND.subtitle,
         ...geom,
+        y: subtitleTopY(scene, cg.y, cg.w, st.fontSize, layer.maxLines),
+        h: textBoxH(geom.h, st.fontSize, layer.maxLines),
         subtitleSource: defaultSubtitleSource(scene),
-        fontSize: layer.fontSize,
-        color: layer.color,
-        fontWeight: layer.fontWeight,
+        fontSize: st.fontSize,
+        color: st.color,
+        fontWeight: st.fontWeight,
         fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
-        ...(layer.strokeColor != null ? { strokeColor: layer.strokeColor } : {}),
-        ...(layer.strokeWidth != null ? { strokeWidth: layer.strokeWidth } : {}),
+        ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
+        ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
         ...(layer.background != null ? { background: layer.background } : {}), // 字幕の背景帯（可読性の下地）を移送（#529）
       });
     }
