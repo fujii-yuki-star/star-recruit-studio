@@ -15,7 +15,8 @@ import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
-import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { prunePerUseMaps } from "../../domain/project/perUseMaps";
+import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { GroupList } from "../components/GroupList";
 import { GroupTransformFields } from "../components/GroupTransformFields";
 import type { GroupTransform } from "../../domain/group/types";
@@ -306,6 +307,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [draftFreeName, setDraftFreeName] = useState("");
   // 一括削除の確認中フラグ（複数まとめ削除は破壊的なので誤操作防止の1段確認を挟む・#206。Undo でも戻せるが確認は維持）。
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  // グループを中身ごと削除する確認（#551）。**boolean ではなく id で持つ**＝選ぶグループが変わると確認が自動で
+  // 解除される（TimelineEditScreen の confirmDeleteClipId と同じ流儀・#410）。boolean だと確認を出したまま別の
+  // グループを選ぶと、その別グループを消してしまう。
+  const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   // セリフ行の削除も確認してから（#410・即時削除だった）。確認中の行 id（行が変わると自動解除）。
   const [confirmDeleteLineId, setConfirmDeleteLineId] = useState<string | null>(null);
   // 選択中のグループ id（ADR-0022・#305）。要素選択とは排他＝片方を選ぶともう片方は解除する。
@@ -532,10 +537,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   const removeFreeEl = (id: string) => {
     // freeLayout から消すと同時に groups からも除去し、空グループは落とす（orphan 参照防止・#311 レビュー）。
-    // 要素アニメ（④）も孤児にならないよう掃除する。scene（freeLayout/groups）＋meta（animations）の2更新を
-    // 履歴グループで1手にまとめる（Undo は1回で両方戻る）。
+    // 要素アニメ（④）と per-use マップ（ADR-0028 D6）も孤児にならないよう掃除する。scene（freeLayout/groups/
+    // per-use）＋meta（animations）の更新を履歴グループで1手にまとめる（Undo は1回で全部戻る）。
     beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]) }));
+    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]), ...prunePerUseMaps(s, [id]) }));
     removeAnimationsForElements(selected.sceneId, [id]);
     endHistoryGroup();
     setSelectedFreeIds((cur) => cur.filter((x) => x !== id)); // 選択中を消したら選択から外す（詳細モードは案内へ）
@@ -548,9 +553,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: applyFreeElementGeoms(s.freeLayout ?? [], updates) }));
   // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
   const removeFreeMany = (ids: string[]) => {
-    // 一括削除でも要素アニメ（④）を孤児にしないよう掃除する（scene＋meta を履歴グループで1手に）。
+    // 一括削除でも要素アニメ（④）と per-use マップ（ADR-0028 D6）を孤児にしないよう掃除する（scene＋meta を履歴グループで1手に）。
     beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids) }));
+    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids), ...prunePerUseMaps(s, ids) }));
     removeAnimationsForElements(selected.sceneId, ids);
     endHistoryGroup();
     setSelectedFreeIds([]);
@@ -582,6 +587,28 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     });
     setActiveGroupId(null);
     setSelectedFreeIds(memberIds);
+  };
+  // グループを中身ごと削除（#551）。解除して1つずつ消す手間をなくす。要素・グループ・要素/グループのアニメを
+  // 1手（履歴グループ）で落とす＝Undo 1回で丸ごと戻る。ロック中は解除/重ね順と揃えて抑止（多重防御・#319）。
+  const deleteGroupWithMembers = (groupId: string) => {
+    if (sceneGroups.find((g) => g.id === groupId)?.locked) return;
+    // 消す対象は現在の groups から先に決める（`ungroupActive` と同じ流儀）。updater の中で外の変数へ書くと
+    // updater が再実行されたときに壊れるため、ここで確定させてから patch/アニメ掃除の両方に渡す。
+    const { elementIds, groupIds } = removeGroupWithMembers(sceneGroups, groupId);
+    beginHistoryGroup();
+    patch((s) => ({
+      ...s,
+      freeLayout: removeFreeElements(s.freeLayout ?? [], elementIds),
+      groups: removeGroupWithMembers(s.groups ?? [], groupId).groups,
+      // 消えたスロット要素の per-use 上書き（収め方/クリップ/再生開始）も落とす（ADR-0028 D6）。
+      // free_NNN は歯抜けを再利用するので、残すと将来の別要素に憑依する（「設定していないのに効く」）。
+      ...prunePerUseMaps(s, elementIds),
+    }));
+    // グループ自体もアニメの対象になりうる（④(3)・ADR-0019）ので、要素とグループの両方を掃除して孤児を残さない。
+    removeAnimationsForElements(selected.sceneId, [...elementIds, ...groupIds]);
+    endHistoryGroup();
+    setActiveGroupId(null);
+    setSelectedFreeIds([]);
   };
   // グループの transform 更新（移動・#305-1。拡縮/回転は #305-2）。
   const transformGroup = (groupId: string, p: Partial<GroupTransform>) => {
@@ -1953,10 +1980,23 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       onSelect={(id) => selectGroup(id)}
                       onToggleHidden={toggleGroupHidden}
                       onRename={renameGroup}
+                      onDelete={deleteGroupWithMembers}
+                      memberCount={(id) => groupElementIds(sceneGroups, id).length}
                     />
                     {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。動き（④(3)）はグループ全体に付く。 */}
                     {effectiveActiveGroupId && (
                       <div className="col gap-sm" data-testid="group-panel" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
+                        {/* 中身ごと削除の確認（#551）。破壊的＋複数要素が一度に消えるので、他の操作を隠して確認だけ出す。
+                            **ロック中は確認を出さない**＝グループ一覧（GroupList）の行から確認を開いたままここでロックすると、
+                            「削除する」を押しても `deleteGroupWithMembers` の内側ガードが無言 return して「消えたはずが
+                            消えていない」サイレント失敗になる（#551 レビュー P2）。ロックされたら操作列（無効の削除ボタン）へ戻す。 */}
+                        {confirmDeleteGroupId === effectiveActiveGroupId && !activeGroup?.locked ? (
+                          <DeleteConfirm
+                            message={`このグループを中身ごと削除しますか？中の${groupElementIds(sceneGroups, effectiveActiveGroupId).length}個の要素も一緒に消えます。`}
+                            onCancel={() => setConfirmDeleteGroupId(null)}
+                            onConfirm={() => { deleteGroupWithMembers(effectiveActiveGroupId); setConfirmDeleteGroupId(null); }}
+                          />
+                        ) : (
                         <div className="row-between">
                           <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
                           <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
@@ -1964,9 +2004,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             <button className="btn btn-ghost text-sm" title="グループを最背面へ" disabled={!!activeGroup?.locked} onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
                             <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
                             <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
-                            <button className="btn btn-ghost text-sm" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
+                            <button className="btn btn-ghost text-sm" title="グループを解除して要素をばらす（要素は残る）" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
+                            {/* 「解除」（要素は残る）との違いが分かるよう、文言・説明で「中身ごと」を明示する（#551）。 */}
+                            <button className="btn btn-ghost text-sm" title="グループを中身ごと削除（中の要素も消えます）" disabled={!!activeGroup?.locked} onClick={() => setConfirmDeleteGroupId(effectiveActiveGroupId)}>削除</button>
                           </div>
                         </div>
+                        )}
                         {/* グループ全体に登場の動きをつける（④(3)・ADR-0019）。メンバーをまとめて動かす。
                             ロック中は「まとめて移動・拡縮・回転」の抑止と揃えて操作不可（fieldset で中の入力を一括無効化）。 */}
                         <fieldset
