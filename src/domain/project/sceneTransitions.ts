@@ -80,6 +80,30 @@ export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number):
   return { type: r.type, direction: r.direction, durationSec: steps[targetIndex - 1]?.durationSec ?? 0 };
 }
 
+/**
+ * 「切り替えに飲み込まれて総尺に寄与しない場面」の番号（1始まり・公開前チェック用・#553/#554）。
+ *
+ * `transitionTimeline` は `d = min(want, acc, 場面尺)` で、`d == 場面尺` になると `acc = acc + 尺 - d` ＝
+ * **その場面が総尺に1秒も寄与しない**（プレビューには出るのに書き出しでは独立した尺を持たない＝preview≠export）。
+ * さらに FFmpeg xfade は duration が入力尺以上だと未定義動作になりうる。
+ *
+ * **#553 で場面ごとの尺の下限（3秒）を撤廃するまでは構造的に到達不能**だった（最短3秒 > 切り替え既定0.5秒）。
+ * 下限撤廃で「0.3秒の場面＋フェード」が普通に作れるようになったため、**黙って壊さず警告で見せる**（ADR-0026④・§2-5）。
+ * クランプ自体を strict `<` に締める（ADR-0009）のは ε の決め方と FFmpeg 実挙動の確認が要るため #554 で扱う。
+ *
+ * 判定は書き出し（buildExportScenes）と同じ `resolveTransition` 由来の want と場面尺の比較＝経路を共有する。
+ */
+export function swallowedByTransitionSceneNumbers(scenes: Scene[]): number[] {
+  const nums: number[] = [];
+  scenes.forEach((s, i) => {
+    if (i === 0) return; // 先頭に入場の切り替えは無い（boundaryDs[0]=0）
+    const r = resolveTransition(s.transition);
+    if (r.type === TRANSITION_TYPE.none || r.durationSec <= 0) return;
+    if (r.durationSec >= s.durationSec) nums.push(i + 1); // 切り替えが場面尺以上＝丸ごと飲まれる
+  });
+  return nums;
+}
+
 export interface TransitionStep {
   /** それまでの結合結果に対する xfade 開始位置（秒）。 */
   offsetSec: number;

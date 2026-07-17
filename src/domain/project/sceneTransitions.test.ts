@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveTransitionSelectValue, resolveBoundaryTransition, resolveTransition, transitionTimeline } from './sceneTransitions';
+import { deriveTransitionSelectValue, resolveBoundaryTransition, resolveTransition, transitionTimeline, swallowedByTransitionSceneNumbers } from './sceneTransitions';
 import type { Scene, Transition } from './types';
 
 // resolveBoundaryTransition は scenes 配列＋対象添字で呼ぶ（書き出しと同じ全場面 transitionTimeline）。最小の Scene を作る。
@@ -146,5 +146,34 @@ describe('resolveBoundaryTransition（#408 Part 2・プレビュー用の境界�
         expect(r.durationSec).toBe(t.type === 'none' ? 0 : exportStepSec(scenes, i));
       }
     });
+  });
+});
+
+// #553/#554・ADR-0026④：切り替えが場面尺以上だと、その場面は総尺に寄与しない（プレビューには出るのに書き出しでは
+// 独立した尺を持たない＝preview≠export）。#553 で場面尺の下限（3秒）を撤廃するまでは構造的に到達不能だった
+// （最短3秒 > 切り替え既定0.5秒）が、「0.3秒の場面＋フェード」が作れるようになったため警告で見せる。
+describe('swallowedByTransitionSceneNumbers（切り替えに飲み込まれる場面・#553/#554）', () => {
+  const sc = (durationSec: number, transition?: Scene['transition']): Scene =>
+    ({ sceneId: 's', durationSec, transition } as unknown as Scene);
+
+  it('切り替えが場面尺以上の場面を番号（1始まり）で返す', () => {
+    const scenes = [sc(8), sc(0.3, { in: 'fade', out: 'fade', durationSec: 0.5 })];
+    expect(swallowedByTransitionSceneNumbers(scenes)).toEqual([2]); // 0.3秒 < 0.5秒＝丸ごと飲まれる
+  });
+
+  it('実際に総尺へ寄与しないことと一致する（transitionTimeline と同じ条件）', () => {
+    const scenes = [sc(8), sc(0.4, { in: 'fade', out: 'fade', durationSec: 0.5 })];
+    expect(swallowedByTransitionSceneNumbers(scenes)).toEqual([2]);
+    // 実挙動：0.4秒の場面が総尺に寄与しない（8 のまま）＝警告の根拠。
+    expect(transitionTimeline([8, 0.4], [0, 0.5]).effectiveTotalSec).toBe(8);
+  });
+
+  it('切り替えより長い場面は対象外（通常のケースはノイズを出さない）', () => {
+    expect(swallowedByTransitionSceneNumbers([sc(8), sc(3, { in: 'fade', out: 'fade', durationSec: 0.5 })])).toEqual([]);
+  });
+
+  it('切り替えなし・先頭の場面は対象外（先頭に入場の切り替えは無い）', () => {
+    expect(swallowedByTransitionSceneNumbers([sc(0.2), sc(5)])).toEqual([]); // 先頭が短くても飲まれない
+    expect(swallowedByTransitionSceneNumbers([sc(8), sc(0.2, { in: 'none', out: 'none', durationSec: 0.5 })])).toEqual([]);
   });
 });
