@@ -15,6 +15,7 @@ import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
+import { prunePerUseMaps } from "../../domain/project/perUseMaps";
 import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { GroupList } from "../components/GroupList";
 import { GroupTransformFields } from "../components/GroupTransformFields";
@@ -536,10 +537,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   const removeFreeEl = (id: string) => {
     // freeLayout から消すと同時に groups からも除去し、空グループは落とす（orphan 参照防止・#311 レビュー）。
-    // 要素アニメ（④）も孤児にならないよう掃除する。scene（freeLayout/groups）＋meta（animations）の2更新を
-    // 履歴グループで1手にまとめる（Undo は1回で両方戻る）。
+    // 要素アニメ（④）と per-use マップ（ADR-0028 D6）も孤児にならないよう掃除する。scene（freeLayout/groups/
+    // per-use）＋meta（animations）の更新を履歴グループで1手にまとめる（Undo は1回で全部戻る）。
     beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]) }));
+    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]), ...prunePerUseMaps(s, [id]) }));
     removeAnimationsForElements(selected.sceneId, [id]);
     endHistoryGroup();
     setSelectedFreeIds((cur) => cur.filter((x) => x !== id)); // 選択中を消したら選択から外す（詳細モードは案内へ）
@@ -552,9 +553,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: applyFreeElementGeoms(s.freeLayout ?? [], updates) }));
   // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
   const removeFreeMany = (ids: string[]) => {
-    // 一括削除でも要素アニメ（④）を孤児にしないよう掃除する（scene＋meta を履歴グループで1手に）。
+    // 一括削除でも要素アニメ（④）と per-use マップ（ADR-0028 D6）を孤児にしないよう掃除する（scene＋meta を履歴グループで1手に）。
     beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids) }));
+    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids), ...prunePerUseMaps(s, ids) }));
     removeAnimationsForElements(selected.sceneId, ids);
     endHistoryGroup();
     setSelectedFreeIds([]);
@@ -599,6 +600,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       ...s,
       freeLayout: removeFreeElements(s.freeLayout ?? [], elementIds),
       groups: removeGroupWithMembers(s.groups ?? [], groupId).groups,
+      // 消えたスロット要素の per-use 上書き（収め方/クリップ/再生開始）も落とす（ADR-0028 D6）。
+      // free_NNN は歯抜けを再利用するので、残すと将来の別要素に憑依する（「設定していないのに効く」）。
+      ...prunePerUseMaps(s, elementIds),
     }));
     // グループ自体もアニメの対象になりうる（④(3)・ADR-0019）ので、要素とグループの両方を掃除して孤児を残さない。
     removeAnimationsForElements(selected.sceneId, [...elementIds, ...groupIds]);

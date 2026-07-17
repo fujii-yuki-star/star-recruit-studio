@@ -104,6 +104,41 @@ describe("SceneEditScreen グループを中身ごと削除（#551）", () => {
     expect(left.map((a) => a.targetId)).toEqual(["free_003"]); // free_001（メンバー）と group_001（グループ自身）が消える
   });
 
+  // ADR-0028 D6：スロットが消滅したら per-use の3マップとも当該キーを掃除する。
+  // free_NNN は歯抜けを再利用する（createFreeElementId）ので、残すと将来の別要素に憑依し
+  // 「設定した覚えのない速度/再生開始が黙って効く」（ADR-0026① の裏面）。
+  it("消えたスロット要素の per-use 上書き（クリップ/再生開始/収め方）も掃除する（D6）", () => {
+    const st = useProjectStore.getState();
+    useProjectStore.setState({
+      templates: [freeTemplate],
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [{
+        ...scene(),
+        freeLayout: [
+          { id: "free_001", kind: "slot", x: 0, y: 0, w: 200, h: 200, assetId: "asset_v", zIndex: 1 },
+          { id: "free_002", kind: "shape", x: 400, y: 100, w: 200, h: 200, zIndex: 2 },
+          { id: "free_003", kind: "slot", x: 700, y: 100, w: 200, h: 200, assetId: "asset_w", zIndex: 3 },
+        ],
+        groups: [{ id: "group_001", members: ["free_001", "free_002"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+        slotClips: { free_001: { speed: 2 }, free_003: { speed: 1.5 } },
+        slotVideoStart: { free_001: { mode: "delay", delaySec: 1 } },
+        slotFits: { free_001: "cover" },
+      } as unknown as Scene],
+      assets: [], editingSceneId: "scene_001",
+      meta: { ...st.meta, timelineOverlay: undefined } as never,
+      past: [], future: [], _historyGroupDepth: 0, saveStatus: "saved",
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const s = () => useProjectStore.getState().scenes[0];
+    selectGroup();
+    fireEvent.click(within(screen.getByTestId("group-panel")).getByText("削除"));
+    fireEvent.click(screen.getByText("削除する"));
+
+    expect(s().slotClips).toEqual({ free_003: { speed: 1.5 } }); // 消えた free_001 のぶんだけ落ちる
+    expect(s().slotVideoStart).toBeUndefined(); // 空になったら undefined
+    expect(s().slotFits).toBeUndefined();
+  });
+
   it("ロック中のグループは削除できない（ボタンが無効）", () => {
     const s = setup({ locked: true });
     selectGroup();
