@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from "../domain/constants";
 import type { Asset, ElementAnimation, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import { buildPrecheckItems, sceneToDraftRow } from "./adapters";
@@ -244,5 +245,41 @@ describe("sceneToDraftRow（見た目バッジの §2-3 フォールバック・
     const row = sceneToDraftRow(freeScene(undefined), [], [], []); // templates 空＝解決不能
     expect(row.look).toBe("見た目が見つかりません");
     expect(row.look).not.toContain("free_canvas_v1"); // 内部IDが UI に漏れない（§2-3）
+  });
+});
+
+// #547 P1-3：字幕/セリフの「長すぎ」判定は、テンプレの aiHint が無ければ**正典定数**へ落ちる（生成側 transformPlan と
+// 同じ参照元）。閾値を定数から導出して検証する＝将来 定数を変えたとき precheck と生成上限が食い違わないことを固定する
+// （直書き 60/120 で検証すると、定数を変えても緑のまま＝ドリフトを見逃す）。テンプレは aiHint 無し（＝既定へ落ちる）。
+describe("buildPrecheckItems（字幕/セリフの長さ閾値＝正典定数と同じ参照元・#547 P1-3）", () => {
+  const normalTemplate: Template = {
+    schemaVersion: "1.0", templateId: "opening_v1", name: "オープニング", category: "opening", aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 }, defaults: { backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 1720, h: 80, zIndex: 10 },
+    ],
+  };
+  const textScene = (over: Partial<Scene>): Scene => ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "opening", templateId: "opening_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+    narration: { text: "", status: "generated" }, warnings: [], ...over,
+  } as Scene);
+  const item = (s: Scene, id: string) => buildPrecheckItems([s], assets, [normalTemplate]).find((i) => i.id === id)!;
+
+  it("字幕が定数ちょうどは OK・+1 で「短くする」警告", () => {
+    expect(item(textScene({ texts: { subtitle: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT) } }), "subtitle").severity).toBe("ok");
+    expect(item(textScene({ texts: { subtitle: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1) } }), "subtitle").severity).toBe("action");
+  });
+
+  it("セリフが定数ちょうどは OK・+1 で長さ警告", () => {
+    expect(item(textScene({ narration: { text: "あ".repeat(MAX_NARRATION_LEN_DEFAULT), status: "generated" } }), "line").severity).toBe("ok");
+    expect(item(textScene({ narration: { text: "あ".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "generated" } }), "line").severity).toBe("warning");
+  });
+
+  it("テンプレの aiHint があればそちらが優先（既定へ落ちない）", () => {
+    const withHint: Template = { ...normalTemplate, aiHint: { maxSubtitleLength: 5 } as Template["aiHint"] };
+    const s = textScene({ texts: { subtitle: "あ".repeat(6) } }); // 既定(60)未満だが hint(5) 超え
+    expect(buildPrecheckItems([s], assets, [withHint]).find((i) => i.id === "subtitle")!.severity).toBe("action");
   });
 });

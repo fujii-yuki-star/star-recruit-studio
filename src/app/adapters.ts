@@ -1,7 +1,7 @@
 // ドメイン（Scene/Part/Asset/Warning）→ 画面用UIモデル への変換。
 // UIは見た目に専念し、ドメインを正とする（CLAUDE.md §4）。表示語は非技術語。
 import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
-import { HEIGHT, WIDTH } from "../domain/constants";
+import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
 import { sceneActiveAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
@@ -103,7 +103,9 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       : { id: "voice", label: "読み上げの声", detail: "すべての場面で声が作成済みです。", severity: "ok" },
   );
 
-  const subtitle = offending((s) => (s.texts.subtitle?.length ?? 0) > (templateOf(s)?.aiHint?.maxSubtitleLength ?? 60));
+  // 上限のフォールバックは正典定数を使う（生成側 transformPlan と同じ参照元・§2-7）。直書き（60/120）だと
+  // 将来 定数を変えたとき「AI が生成する上限」と precheck の「長すぎ」警告が食い違う（#547 P1-3）。
+  const subtitle = offending((s) => (s.texts.subtitle?.length ?? 0) > (templateOf(s)?.aiHint?.maxSubtitleLength ?? MAX_SUBTITLE_LEN_DEFAULT));
   items.push(
     subtitle.nums.length > 0
       ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: "短くする", sceneId: subtitle.firstId }
@@ -113,7 +115,7 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   // セリフの長さ／自由配置は warning のみで action ボタンが無いため sceneId は持たせない（場面番号は内容に列挙する）。
   // 掛け合いは本文が lines[].text 側にあるため、実効行（sceneLines）で各行の長さを見る（scene.narration.text 直参照は
   // 掛け合いで空＝未検出になる・ADR-0015）。単一 narration は sceneLines が1行に写すので従来と同一。
-  const line = offending((s) => sceneLines(s).some((l) => l.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? 120)));
+  const line = offending((s) => sceneLines(s).some((l) => l.text.length > (templateOf(s)?.aiHint?.maxNarrationLength ?? MAX_NARRATION_LEN_DEFAULT)));
   items.push(
     line.nums.length > 0
       ? { id: "line", label: "セリフの長さ", detail: `${fmtScenes(line.nums)}のセリフが長いです。短くすると聞き取りやすくなります。`, severity: "warning" }
