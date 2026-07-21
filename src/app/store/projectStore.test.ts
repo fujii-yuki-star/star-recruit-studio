@@ -518,6 +518,24 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     spy.mockRestore();
   });
 
+  it('書き出し中は「開いているプロジェクト」の改名を弾く／別プロジェクトの改名は許可（project.json の lost-update 防止・#570 レビュー）', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    const validDoc = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(validDoc);
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('proj_other/project.json');
+    const beforeName = useProjectStore.getState().meta.projectName;
+    await useProjectStore.getState().renameProject('proj_open', '新しい名前'); // 開いている＝書き出し中の保存と同一 project.json を取り合う
+    expect(load).not.toHaveBeenCalled(); // read-modify-write に到達しない＝保存の更新を消さない
+    expect(save).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().meta.projectName).toBe(beforeName); // 凍結中の meta も触らない
+    await useProjectStore.getState().renameProject('proj_other', '別名'); // 開いていない別プロジェクトは書き出しと無関係＝許可
+    expect(save).toHaveBeenCalledTimes(1);
+    const [savedId, savedJson] = save.mock.calls[0];
+    expect(savedId).toBe('proj_other');
+    expect(JSON.parse(savedJson).projectName).toBe('別名'); // 許可側は新しい名前が実際に書き戻される（no-op でなく完走）
+    load.mockRestore(); save.mockRestore();
+  });
+
   it('開いているプロジェクトを削除したら編集状態を新規化する（自動保存での復活防止・#383）', async () => {
     const delSpy = vi.spyOn(fsMod, 'deleteProjectDoc').mockResolvedValue();
     // proj_open を開いている状態（beforeEach で projectId=proj_open・場面1つ）

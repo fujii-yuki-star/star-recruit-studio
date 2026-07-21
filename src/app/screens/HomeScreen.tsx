@@ -361,9 +361,12 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     </button>
                     <button
                       className="btn btn-ghost btn-icon"
+                      // 書き出し中は改名を止める（開いているプロジェクトの改名が project.json の保存と競合する・#570 レビュー）。
+                      // store 側も no-op で守るが、鉛筆を無効化して「押せるのに効かない」を避ける（ADR-0026④）。
+                      disabled={isExporting}
                       onClick={() => startRename(p)}
                       aria-label={`「${p.projectName || "無題のプロジェクト"}」の名前を変更`}
-                      title="名前を変更"
+                      title={isExporting ? "書き出しが終わるまでお待ちください" : "名前を変更"}
                     >
                       <PencilIcon size={18} />
                     </button>

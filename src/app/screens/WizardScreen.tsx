@@ -11,6 +11,7 @@ import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { YukoPanel } from "../components/YukoPanel";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { saveButtonLabel } from "../components/saveButtonLabel";
 import {
   ArrowLeftIcon,
@@ -232,6 +233,9 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     <div className="main-scroll">
       <div className="content-with-yuko">
         <div>
+          {/* 書き出し中の案内（#570 P3 レビュー）。ウィザードの入力保存（applyProjectInfo）は書き出し中 no-op のため、
+              他画面と同じくバナーで「効かない」を明示する（silent no-op を避ける・ADR-0026④）。 */}
+          <ExportLockBanner />
           {/* ステッパー */}
           <div className="stepper">
             {steps.map((label, i) => (

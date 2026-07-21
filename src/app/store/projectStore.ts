@@ -850,6 +850,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (get().meta.projectId === projectId) get().newProject();
   },
   renameProject: async (projectId, newName) => {
+    // 書き出し中に「開いている」プロジェクトを改名すると、meta 直変更（凍結中の文書を触る）＋ project.json の
+    // read-modify-write が、書き出し中の保存（voicePath 更新）と同一ファイルを取り合い、保存済みの更新を黙って
+    // 消す（lost-update・#570 レビュー）。deleteProject と同じ線引き＝開いていない別プロジェクトの改名は書き出しと
+    // 無関係なので許可（UI 側でも鉛筆を無効化・案内する＝多重防御）。
+    // 逆向き（rename が in-flight のまま書き出し開始）は現状 HomeScreen 単独呼び出し＝ExportScreen へ移ると unmount する
+    // ため到達不能（isImporting/isTemplateMutating のような開始フラグは不要）。呼び出し元が増えたら書き出し開始側に in-flight 検知を足す。
+    if (isExportBusy(get().exportRun.phase) && get().meta.projectId === projectId) return;
     // 上限で切り詰めて保存＝schema の projectName maxLength(80) 超を保存させない（入力防御 #411・#416 と対）。
     const name = newName.trim().slice(0, PROJECT_NAME_MAX_LENGTH);
     if (!name) return; // 空名は変更しない（UI 側でも保存を抑止）
