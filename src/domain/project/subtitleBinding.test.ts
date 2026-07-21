@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
 import type { SceneSegmentSpec } from './lineTimeline';
 import { segmentAt } from './lineTimeline';
-import { defaultSubtitleSource, effectiveSpeakerKey, normalizeSubtitleSources, resolveSubtitleForElement, sceneSubtitleSpeakerOptions, speakerKeyEquals, subtitleSourceFromValue, subtitleSourceToValue } from './subtitleBinding';
+import { defaultSubtitleSource, effectiveSpeakerKey, normalizeSubtitleSources, resolveSubtitleForElement, sceneDisplayedSubtitleTexts, sceneSubtitleSpeakerOptions, speakerKeyEquals, subtitleSourceFromValue, subtitleSourceToValue } from './subtitleBinding';
 import type { FreeElement, NarrationLine, Scene, SubtitleSource } from './types';
+import type { Template } from '../template/types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
   return {
@@ -216,5 +217,87 @@ describe('normalizeSubtitleSources（無効な対象を既定へ戻す・ADR-002
   it('対象を持つ字幕が無ければ同一参照（未保存/履歴にしない）', () => {
     const s = withSub(undefined);
     expect(normalizeSubtitleSources(s)).toBe(s);
+  });
+});
+
+// 場面が「実際に表示する字幕文」の列挙（precheck の長さ判定などが描画と同じ経路で見るための共通関数・#547 P1-3 レビュー）。
+// resolveSubtitleForElement / layout の字幕層と同じ分岐・同じ OFF 除外で解く＝表示と検査がずれない。
+describe('sceneDisplayedSubtitleTexts（表示される字幕文の列挙・ADR-0029・#547 P1-3）', () => {
+  const freeTemplate = { category: 'free', layers: [] } as unknown as Template;
+  const normalTemplate = (hasSubtitleLayer: boolean): Template =>
+    ({ category: 'opening', layers: hasSubtitleLayer ? [{ id: 'subtitle', type: 'subtitle' }] : [{ id: 'title', type: 'text' }] }) as unknown as Template;
+  const freeScene = (over: Partial<Scene>): Scene => sceneWith({ sceneType: 'free', templateId: 'free_canvas_v1', ...over });
+
+  describe('FREE（字幕要素の subtitleSource で解決）', () => {
+    it('narration：texts.subtitle を列挙（OFF は除外・空は除外）', () => {
+      const el = subEl({ kind: 'narration' });
+      expect(sceneDisplayedSubtitleTexts(freeScene({ texts: { subtitle: 'S' }, freeLayout: [el] }), freeTemplate)).toEqual(['S']);
+      expect(sceneDisplayedSubtitleTexts(freeScene({ texts: { subtitle: 'S' }, subtitleEnabledDefault: false, freeLayout: [el] }), freeTemplate)).toEqual([]);
+      expect(sceneDisplayedSubtitleTexts(freeScene({ texts: {}, freeLayout: [el] }), freeTemplate)).toEqual([]);
+    });
+    it('allLines：ON の全行字幕を列挙（OFF 行は除外）', () => {
+      const s = freeScene({
+        lines: [line('line_001', 'A'), line('line_002', 'B', { subtitleEnabled: false }), line('line_003', 'C', { subtitleText: 'Cを表示' })],
+        freeLayout: [subEl({ kind: 'allLines' })],
+      });
+      expect(sceneDisplayedSubtitleTexts(s, freeTemplate)).toEqual(['A', 'Cを表示']); // B は OFF・C は subtitleText 優先
+    });
+    it('speaker：対象話者の行だけ列挙（他話者は除外）', () => {
+      const s = freeScene({
+        lines: [line('line_001', 'A', { speaker: 3 }), line('line_002', 'B', { speaker: 2 })],
+        freeLayout: [subEl({ kind: 'speaker', speaker: { kind: 'catalog', speaker: 3 } })],
+      });
+      expect(sceneDisplayedSubtitleTexts(s, freeTemplate)).toEqual(['A']);
+    });
+    it('字幕要素が複数あれば各対象を合算（narration＋allLines）', () => {
+      const s = freeScene({
+        texts: { subtitle: 'S' },
+        lines: [line('line_001', 'A')],
+        freeLayout: [subEl({ kind: 'narration' }), { id: 'free_002', kind: 'subtitle', x: 0, y: 60, w: 100, h: 50, subtitleSource: { kind: 'allLines' } }],
+      });
+      expect(sceneDisplayedSubtitleTexts(s, freeTemplate)).toEqual(['S', 'A']);
+    });
+    it('字幕要素が無ければ空（texts.subtitle があっても FREE では描画されない）', () => {
+      expect(sceneDisplayedSubtitleTexts(freeScene({ texts: { subtitle: 'S' }, freeLayout: [] }), freeTemplate)).toEqual([]);
+    });
+    // subtitleSource 未設定＝字幕欄を追加した直後の実 UI 初期状態（createFreeElement は対象を設定しない・PR-C）。
+    // 既定解決（defaultSubtitleSource）は resolveSubtitleForElement と別コードで複製されているため独立に検証する。
+    it('subtitleSource 未設定：単独場面（lines なし）は既定=narration＝texts.subtitle を列挙', () => {
+      const s = freeScene({ texts: { subtitle: 'S' }, freeLayout: [subEl(undefined)] });
+      expect(sceneDisplayedSubtitleTexts(s, freeTemplate)).toEqual(['S']);
+    });
+    it('subtitleSource 未設定：掛け合い場面（lines あり）は既定=allLines＝全行を列挙', () => {
+      const s = freeScene({ lines: [line('line_001', 'A'), line('line_002', 'B')], freeLayout: [subEl(undefined)] });
+      expect(sceneDisplayedSubtitleTexts(s, freeTemplate)).toEqual(['A', 'B']);
+    });
+    // ℹ️1（correctness）：FREE テンプレが字幕**層**を持つと layout は層ループ（全カテゴリ）で描画する＝数える。
+    // schema 上 category は単なるタグで FREE テンプレも字幕層を持ち得る（到達可能性は schema 基準）。
+    it('FREE テンプレが字幕層を持てば、テンプレ層の字幕も数える（要素＝freeLayout の上に合算）', () => {
+      const freeWithSubLayer = { category: 'free', layers: [{ id: 'subtitle', type: 'subtitle' }] } as unknown as Template;
+      // 字幕要素は無いが、字幕層が texts.subtitle を描画する（単独）。
+      expect(sceneDisplayedSubtitleTexts(freeScene({ texts: { subtitle: 'S' }, freeLayout: [] }), freeWithSubLayer)).toEqual(['S']);
+      // 字幕層（texts.subtitle）＋ freeLayout 要素（narration＝texts.subtitle）＝両段を合算（重複は長さ判定に無害）。
+      const both = freeScene({ texts: { subtitle: 'S' }, freeLayout: [subEl({ kind: 'narration' })] });
+      expect(sceneDisplayedSubtitleTexts(both, freeWithSubLayer)).toEqual(['S', 'S']);
+    });
+  });
+
+  describe('通常テンプレ（字幕層があるときだけ）', () => {
+    it('字幕層あり・単独：static字幕（texts.subtitle・OFF 除外）', () => {
+      const s = sceneWith({ sceneType: 'opening', texts: { subtitle: 'S' } });
+      expect(sceneDisplayedSubtitleTexts(s, normalTemplate(true))).toEqual(['S']);
+      expect(sceneDisplayedSubtitleTexts(sceneWith({ ...s, subtitleEnabledDefault: false }), normalTemplate(true))).toEqual([]);
+    });
+    it('字幕層あり・掛け合い：各行の実効字幕（subtitleText ?? text・OFF 行除外）', () => {
+      const s = sceneWith({ sceneType: 'opening', lines: [line('line_001', '本文', { subtitleText: '字幕' }), line('line_002', 'B', { subtitleEnabled: false })] });
+      expect(sceneDisplayedSubtitleTexts(s, normalTemplate(true))).toEqual(['字幕']);
+    });
+    it('字幕層が無いテンプレは空（texts.subtitle があっても描画されない字幕を数えない）', () => {
+      const s = sceneWith({ sceneType: 'opening', texts: { subtitle: 'S' } });
+      expect(sceneDisplayedSubtitleTexts(s, normalTemplate(false))).toEqual([]);
+    });
+    it('テンプレ未解決（undefined）は空', () => {
+      expect(sceneDisplayedSubtitleTexts(sceneWith({ texts: { subtitle: 'S' } }), undefined)).toEqual([]);
+    });
   });
 });

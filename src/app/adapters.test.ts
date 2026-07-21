@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from "../domain/constants";
-import type { Asset, ElementAnimation, Scene } from "../domain/project/types";
+import type { Asset, ElementAnimation, FreeElement, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import { buildPrecheckItems, sceneToDraftRow } from "./adapters";
 
@@ -175,8 +175,10 @@ describe("buildPrecheckItems（#400・項目 action が該当場面へ飛ぶ sce
   });
 
   it("字幕が長い項目は最初の該当場面 id を持つ（action で飛べる項目）", () => {
-    const a = scn("a", { texts: { subtitle: "短い字幕" } });
-    const b = scn("b", { texts: { subtitle: "あ".repeat(61) } }); // > 既定60字
+    // FREE 場面で texts.subtitle を実表示するには字幕要素（読み上げ対象）が要る（ADR-0029・sceneDisplayedSubtitleTexts）。
+    const subEl = [{ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 400, h: 80, subtitleSource: { kind: "narration" } }] as unknown as Scene["freeLayout"];
+    const a = scn("a", { texts: { subtitle: "短い字幕" }, freeLayout: subEl });
+    const b = scn("b", { texts: { subtitle: "あ".repeat(61) }, freeLayout: subEl }); // > 既定60字
     const sub = buildPrecheckItems([a, b], assets, [freeTemplate]).find((i) => i.id === "subtitle");
     expect(sub?.severity).toBe("action");
     expect(sub?.sceneId).toBe("b");
@@ -329,5 +331,85 @@ describe("buildPrecheckItems（字幕/セリフの長さ閾値＝正典定数と
       dlgLine({ lineId: "line_002", text: "こんにちは", subtitleText: "こちらも短い" }),
     ] });
     expect(item(good, "subtitle").severity).toBe("ok");
+  });
+});
+
+// #547 P1-3 レビュー（FREE）：FREE 場面の字幕は字幕**要素**の subtitleSource（読み上げ/全部/話者）で実表示が決まる。
+// texts.subtitle だけ／掛け合い行だけを見ると、FREE 字幕対象を無視して見逃し・誤警告する（実測の回帰）。
+// sceneDisplayedSubtitleTexts に寄せ、描画（layoutScene）と同じ経路で長さを判定する（ADR-0029・ADR-0026②③）。
+describe("buildPrecheckItems（FREE 字幕の対象別の長さ判定・#547 P1-3 レビュー・ADR-0029）", () => {
+  const long = "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1);
+  const subEl = (over: Record<string, unknown> = {}): FreeElement =>
+    ({ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 400, h: 80, ...over }) as unknown as FreeElement;
+  const free = (over: Partial<Scene>): Scene => ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "free", templateId: "free_canvas_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+    narration: { text: "", status: "generated" }, warnings: [], ...over,
+  } as Scene);
+  const sev = (s: Scene) => buildPrecheckItems([s], [], [freeTemplate]).find((i) => i.id === "subtitle")?.severity;
+
+  it("読み上げ対象：texts.subtitle を実表示＝長ければ警告（掛け合いでも・回帰の再現）", () => {
+    // 短い行テキスト＋長い texts.subtitle＋FREE 字幕対象=読み上げ → 画面には texts.subtitle が出る。
+    const s = free({
+      texts: { subtitle: long },
+      lines: [{ lineId: "line_001", text: "短い", subtitleText: "短", status: "none" }] as Scene["lines"],
+      freeLayout: [subEl({ subtitleSource: { kind: "narration" } })],
+    });
+    expect(sev(s)).toBe("action");
+  });
+
+  it("読み上げ対象：texts.subtitle が短ければ、行字幕が長くても OK（表示されない行字幕で誤警告しない）", () => {
+    const s = free({
+      texts: { subtitle: "みじかい" },
+      lines: [{ lineId: "line_001", text: long, status: "none" }] as Scene["lines"], // 行字幕は長いが読み上げ対象では非表示
+      freeLayout: [subEl({ subtitleSource: { kind: "narration" } })],
+    });
+    expect(sev(s)).toBe("ok");
+  });
+
+  it("全部対象：いずれかの行字幕が長ければ警告", () => {
+    const s = free({
+      lines: [
+        { lineId: "line_001", text: "やあ", status: "none" },
+        { lineId: "line_002", text: long, status: "none" },
+      ] as Scene["lines"],
+      freeLayout: [subEl({ subtitleSource: { kind: "allLines" } })],
+    });
+    expect(sev(s)).toBe("action");
+  });
+
+  it("話者対象：対象話者の行だけ見る（他話者の長い行では警告しない）", () => {
+    const base = (over: Partial<Scene>) => free({
+      freeLayout: [subEl({ subtitleSource: { kind: "speaker", speaker: { kind: "catalog", speaker: 3 } } })],
+      ...over,
+    });
+    const targetLong = base({ lines: [
+      { lineId: "line_001", text: long, speaker: 3, status: "none" },
+    ] as Scene["lines"] });
+    expect(sev(targetLong)).toBe("action"); // 対象話者(3)の行が長い
+    const otherLong = base({ lines: [
+      { lineId: "line_001", text: "短い", speaker: 3, status: "none" },
+      { lineId: "line_002", text: long, speaker: 2, status: "none" }, // 別話者＝この要素は表示しない
+    ] as Scene["lines"] });
+    expect(sev(otherLong)).toBe("ok");
+  });
+
+  it("字幕 OFF は対象外（読み上げ対象・subtitleEnabledDefault=false）", () => {
+    const s = free({
+      texts: { subtitle: long }, subtitleEnabledDefault: false,
+      freeLayout: [subEl({ subtitleSource: { kind: "narration" } })],
+    });
+    expect(sev(s)).toBe("ok");
+  });
+
+  it("字幕要素が無ければ判定対象なし（texts.subtitle が長くても OK＝表示されない）", () => {
+    const s = free({ texts: { subtitle: long } }); // subtitle 要素なし＝FREE では字幕は描画されない
+    expect(sev(s)).toBe("ok");
+  });
+
+  it("対象未設定（字幕欄を足した直後の既定）：単独場面は読み上げ＝長い texts.subtitle で警告", () => {
+    // createFreeElement は subtitleSource を設定しない（PR-C）。追加直後の既定解決も実表示と一致させる。
+    const s = free({ texts: { subtitle: long }, freeLayout: [subEl()] }); // subEl() = subtitleSource 未設定
+    expect(sev(s)).toBe("action");
   });
 });

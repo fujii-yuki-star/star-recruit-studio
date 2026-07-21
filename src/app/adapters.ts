@@ -5,7 +5,7 @@ import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } fr
 import { validateFreeLayout } from "../domain/project/freeLayout";
 import { sceneActiveAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
-import { resolveLineSubtitle } from "../domain/project/lineTimeline";
+import { sceneDisplayedSubtitleTexts } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import { swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
 import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
@@ -106,17 +106,12 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
 
   // 上限のフォールバックは正典定数を使う（生成側 transformPlan と同じ参照元・§2-7）。直書き（60/120）だと
   // 将来 定数を変えたとき「AI が生成する上限」と precheck の「長すぎ」警告が食い違う（#547 P1-3）。
-  // 掛け合い（scene.lines）は**行ごとの実効字幕**（subtitleText ?? text・OFF 行は除外）を見る。texts.subtitle だけだと
-  // 掛け合いの個別字幕が漏れ、長い字幕を実際に描画するのに precheck が「OK」と断言する（ADR-0015/ADR-0026②・
-  // #547 P1-3 レビュー）。#569（生成側の行テキストの長さ漏れ）とは別＝こちらは precheck 側の字幕漏れ。単独は従来判定を維持。
+  // 判定対象は**その場面が実際に表示しうる全字幕**（sceneDisplayedSubtitleTexts）＝通常/FREE・単独/掛け合い・
+  // subtitleSource（読み上げ/全行/話者）・字幕 OFF を、描画（layout）・書き出しと同じ経路で解決する。texts.subtitle
+  // だけ／掛け合い行だけ、といった分岐ごとの取りこぼし・誤警告（FREE 字幕対象を無視する等）を構造的に断つ
+  // （#547 P1-3 レビュー・ADR-0029/ADR-0026②）。#569（生成側の行テキスト長の漏れ）とは別＝これは precheck 側。
   const subtitleMax = (s: Scene) => templateOf(s)?.aiHint?.maxSubtitleLength ?? MAX_SUBTITLE_LEN_DEFAULT;
-  const subtitle = offending((s) =>
-    s.lines && s.lines.length > 0
-      ? s.lines.some((l) => { const sub = resolveLineSubtitle(l, s); return sub.enabled && sub.text.length > subtitleMax(s); })
-      // 単独：字幕 OFF（subtitleEnabledDefault===false）は描画されない（layout の staticSubtitleOff）ので警告しない
-      // ＝掛け合いの OFF 行除外と挙動を揃える（ADR-0026②）＋出ない字幕を「長い」と言わない（表示に合わせる）。
-      : s.subtitleEnabledDefault !== false && (s.texts.subtitle?.length ?? 0) > subtitleMax(s),
-  );
+  const subtitle = offending((s) => sceneDisplayedSubtitleTexts(s, templateOf(s)).some((t) => t.length > subtitleMax(s)));
   items.push(
     subtitle.nums.length > 0
       ? { id: "subtitle", label: "字幕の長さ", detail: `${fmtScenes(subtitle.nums)}の字幕が長いです。短くすると読みやすくなります。`, severity: "action", action: "短くする", sceneId: subtitle.firstId }

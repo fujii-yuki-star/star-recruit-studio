@@ -2,12 +2,13 @@
 // - 時刻 t は直接受けず、書き出しと同じ sceneSegmentSpecs から作る「その瞬間のセグメント」（SubtitleMoment）を受ける（P1-1）。
 //   セグメントは domain/project/lineTimeline.ts の segmentAt(scene, lineDurations, t) で作る＝プレビュー＝書き出しで同一。
 // - 話者絞り込みは音声生成（resolveLineVoice）と同じ実効話者（effectiveSpeakerKey）で比較する（P1-2）。
-import { FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
+import { FREE_CATEGORY, FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
 import { characterForSpeaker } from '../voice/voiceCatalog';
 import { resolveLineSubtitle } from './lineTimeline';
 import type { SceneSegmentSpec } from './lineTimeline';
 import { sceneLines } from './narrationLines';
 import type { FreeElement, NarrationLine, Scene, SpeakerKey, SubtitleSource } from './types';
+import type { Template } from '../template/types';
 
 /** 字幕解決の正準状態（プレビュー＝書き出しで共有・ADR-0029）。segment は sceneSegmentSpecs 由来の「その瞬間のセグメント」。 */
 export interface SubtitleMoment {
@@ -158,4 +159,52 @@ export function normalizeSubtitleSources(scene: Scene): Scene {
     return rest;
   });
   return changed ? { ...scene, freeLayout: next } : scene;
+}
+
+/**
+ * 場面が表示しうる字幕文の集合（実表示に合わせた検査＝長さ判定などの**共通経路**・ADR-0029/#547 P1-3 レビュー）。
+ *
+ * precheck は timeline（行の尺）未確定なので、単一セグメント（SubtitleMoment）ではなく「その場面で表示されうる
+ * 全字幕」を列挙する（どれか1つでも長ければ「長すぎ」と判定できる）。プレビュー/書き出しの実解決
+ * （`resolveSubtitleForElement` / layout の字幕層）と**同じ分岐・同じ enabled/OFF・同じ subtitleSource**で解く＝
+ * 表示と判定がずれない（掛け合い/FREE/字幕対象で precheck が実表示と食い違う、を構造的に断つ）。
+ *
+ * 描画（`layout.ts`）は **(a) テンプレ層ループ（全カテゴリで走る＝字幕層があれば category を問わず描画）** に加え、
+ * **(b) FREE 場面のみ freeLayout 要素をその上に重ねる**（`layout.ts:312-378` / `:408-417`）。本関数もこの2段を合算する：
+ * - (a) テンプレ字幕層：字幕層があるときだけ、掛け合いは各行の実効字幕・単独は静的字幕（層が無ければ寄与ゼロ＝出ない字幕を数えない）。
+ *       通常テンプレも FREE テンプレも同じ（FREE テンプレが字幕層を持てば描画されるので数える＝表示と一致・ADR-0026③）。
+ * - (b) FREE：字幕要素ごとに `subtitleSource` で解決（narration→静的字幕／allLines→全行／speaker→対象話者の行）。
+ * - 各段で OFF（`subtitleEnabledDefault===false`・行の `subtitleEnabled`）は除外＝描画されない字幕を数えない。
+ * 長さ判定は重複に非依存（同じ字幕を2段で数えても `.some(長すぎ)` は不変）ゆえ厳密な重複排除はしない。
+ */
+export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | undefined): string[] {
+  const staticSubtitle = (): string[] => {
+    if (scene.subtitleEnabledDefault === false) return []; // OFF は描画されない（layout の staticSubtitleOff）
+    const t = scene.texts[TEXT_KEY.subtitle] ?? '';
+    return t.length > 0 ? [t] : [];
+  };
+  const lineSubs = (pred?: (l: NarrationLine) => boolean): string[] =>
+    sceneLines(scene)
+      .filter((l) => pred == null || pred(l))
+      .map((l) => resolveLineSubtitle(l, scene))
+      .filter((r) => r.enabled && r.text.length > 0)
+      .map((r) => r.text);
+  const hasLines = (scene.lines?.length ?? 0) > 0;
+
+  const out: string[] = [];
+  // (a) テンプレ字幕層（layout の層ループはカテゴリ非依存）。掛け合いは各行の実効字幕・単独は静的字幕。
+  if (template?.layers.some((l) => l.type === 'subtitle') ?? false) {
+    out.push(...(hasLines ? lineSubs() : staticSubtitle()));
+  }
+  // (b) FREE：freeLayout の字幕要素を subtitleSource で解決してテンプレ層の上に重ねる（resolveSubtitleForElement と同分岐）。
+  if (template?.category === FREE_CATEGORY) {
+    for (const el of scene.freeLayout ?? []) {
+      if (el.kind !== FREE_ELEMENT_KIND.subtitle) continue;
+      const source = el.subtitleSource ?? defaultSubtitleSource(scene);
+      if (source.kind === SUBTITLE_SOURCE_KIND.narration) out.push(...staticSubtitle());
+      else if (source.kind === SUBTITLE_SOURCE_KIND.allLines) out.push(...lineSubs());
+      else out.push(...lineSubs((l) => speakerKeyEquals(effectiveSpeakerKey(l), source.speaker)));
+    }
+  }
+  return out;
 }
