@@ -225,7 +225,7 @@ describe('normalizeSubtitleSources（無効な対象を既定へ戻す・ADR-002
 describe('sceneDisplayedSubtitleTexts（表示される字幕文の列挙・ADR-0029・#547 P1-3）', () => {
   const freeTemplate = { category: 'free', layers: [] } as unknown as Template;
   const normalTemplate = (hasSubtitleLayer: boolean): Template =>
-    ({ category: 'opening', layers: hasSubtitleLayer ? [{ id: 'subtitle', type: 'subtitle' }] : [{ id: 'title', type: 'text' }] }) as unknown as Template;
+    ({ category: 'opening', layers: hasSubtitleLayer ? [{ id: 'subtitle', type: 'subtitle', textKey: 'subtitle' }] : [{ id: 'title', type: 'text' }] }) as unknown as Template;
   const freeScene = (over: Partial<Scene>): Scene => sceneWith({ sceneType: 'free', templateId: 'free_canvas_v1', ...over });
   const hiddenGroup = (id: string, members: string[]): NonNullable<Scene['groups']>[number] =>
     ({ id, members, transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true });
@@ -275,7 +275,7 @@ describe('sceneDisplayedSubtitleTexts（表示される字幕文の列挙・ADR-
     // ℹ️1（correctness）：FREE テンプレが字幕**層**を持つと layout は層ループ（全カテゴリ）で描画する＝数える。
     // schema 上 category は単なるタグで FREE テンプレも字幕層を持ち得る（到達可能性は schema 基準）。
     it('FREE テンプレが字幕層を持てば、テンプレ層の字幕も数える（要素＝freeLayout の上に合算）', () => {
-      const freeWithSubLayer = { category: 'free', layers: [{ id: 'subtitle', type: 'subtitle' }] } as unknown as Template;
+      const freeWithSubLayer = { category: 'free', layers: [{ id: 'subtitle', type: 'subtitle', textKey: 'subtitle' }] } as unknown as Template;
       // 字幕要素は無いが、字幕層が texts.subtitle を描画する（単独）。
       expect(sceneDisplayedSubtitleTexts(freeScene({ texts: { subtitle: 'S' }, freeLayout: [] }), freeWithSubLayer)).toEqual(['S']);
       // 字幕層（texts.subtitle）＋ freeLayout 要素（narration＝texts.subtitle）＝両段を合算（重複は長さ判定に無害）。
@@ -310,7 +310,18 @@ describe('sceneDisplayedSubtitleTexts（表示される字幕文の列挙・ADR-
     });
     // P2（#547 レビュー）：非表示グループ内のテンプレ字幕層は描画されない＝数えない（layout.ts:268 isHiddenByGroup）。
     it('非表示グループ内のテンプレ字幕層は空（通常字幕を隠した場合）', () => {
-      const tmpl = { category: 'opening', layers: [{ id: 'subtitle', type: 'subtitle' }], groups: [hiddenGroup('group_001', ['subtitle'])] } as unknown as Template;
+      const tmpl = { category: 'opening', layers: [{ id: 'subtitle', type: 'subtitle', textKey: 'subtitle' }], groups: [hiddenGroup('group_001', ['subtitle'])] } as unknown as Template;
+      const s = sceneWith({ sceneType: 'opening', texts: { subtitle: 'S' } });
+      expect(sceneDisplayedSubtitleTexts(s, tmpl)).toEqual([]);
+    });
+    // P2（#547 レビュー）：静的字幕は層の textKey で引く（描画 layout.ts:325 と一致）。textKey が subtitle 以外・未指定でも一致させる。
+    it('字幕層の textKey が subtitle 以外なら、その textKey の texts を数える（描画と一致）', () => {
+      const tmpl = { category: 'opening', layers: [{ id: 'subtitle', type: 'subtitle', textKey: 'caption' }] } as unknown as Template;
+      const s = sceneWith({ sceneType: 'opening', texts: { subtitle: 'S', caption: 'キャプション' } });
+      expect(sceneDisplayedSubtitleTexts(s, tmpl)).toEqual(['キャプション']); // caption を数え、texts.subtitle は数えない
+    });
+    it('字幕層に textKey が無ければ静的字幕は空（描画も layer.textKey 無しは空・layout.ts:325 の else）', () => {
+      const tmpl = { category: 'opening', layers: [{ id: 'subtitle', type: 'subtitle' }] } as unknown as Template;
       const s = sceneWith({ sceneType: 'opening', texts: { subtitle: 'S' } });
       expect(sceneDisplayedSubtitleTexts(s, tmpl)).toEqual([]);
     });

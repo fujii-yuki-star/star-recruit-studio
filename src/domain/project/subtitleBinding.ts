@@ -3,6 +3,7 @@
 //   セグメントは domain/project/lineTimeline.ts の segmentAt(scene, lineDurations, t) で作る＝プレビュー＝書き出しで同一。
 // - 話者絞り込みは音声生成（resolveLineVoice）と同じ実効話者（effectiveSpeakerKey）で比較する（P1-2）。
 import { FREE_CATEGORY, FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
+import type { TextKey } from '../enums';
 import { isHiddenByGroup } from '../group/compose';
 import { characterForSpeaker } from '../voice/voiceCatalog';
 import { resolveLineSubtitle } from './lineTimeline';
@@ -179,9 +180,12 @@ export function normalizeSubtitleSources(scene: Scene): Scene {
  * 長さ判定は重複に非依存（同じ字幕を2段で数えても `.some(長すぎ)` は不変）ゆえ厳密な重複排除はしない。
  */
 export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | undefined): string[] {
-  const staticSubtitle = (): string[] => {
+  // 静的字幕（単独＝掛け合いでない）の描画テキストを **textKey** で引く。テンプレ層は層の textKey、FREE narration
+  // 要素は TEXT_KEY.subtitle（要素は textKey を持たず narration=texts.subtitle 固定）。textKey 経由で引くことで
+  // 描画（layout.ts:325 の `scene.texts[layer.textKey]` / resolveSubtitleForElement の texts.subtitle）と一致させる。
+  const staticSubtitleFor = (textKey: TextKey | undefined): string[] => {
     if (scene.subtitleEnabledDefault === false) return []; // OFF は描画されない（layout の staticSubtitleOff）
-    const t = scene.texts[TEXT_KEY.subtitle] ?? '';
+    const t = (textKey != null ? scene.texts[textKey] : undefined) ?? ''; // textKey 無し＝描画も空（layout.ts:325 の else）
     return t.length > 0 ? [t] : [];
   };
   const lineSubs = (pred?: (l: NarrationLine) => boolean): string[] =>
@@ -193,21 +197,27 @@ export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | u
   const hasLines = (scene.lines?.length ?? 0) > 0;
 
   const out: string[] = [];
-  // (a) テンプレ字幕層（layout の層ループはカテゴリ非依存）。掛け合いは各行の実効字幕・単独は静的字幕。
-  //     非表示グループのメンバー層は描画されない（layout.ts:268 isHiddenByGroup）＝数えない（テンプレ層に per-layer hidden は無い）。
+  // (a) テンプレ字幕層（layout の層ループはカテゴリ非依存）。非表示グループのメンバー層は描画されない（layout.ts:268）＝除外
+  //     （テンプレ層に per-layer hidden は無い）。掛け合いは各行の実効字幕（層の textKey に依らず opts.subtitleText で
+  //     上書き＝layout.ts:315,321）・単独は**各字幕層の textKey** の静的字幕（textKey が 'subtitle' 以外・未指定でも
+  //     描画と一致＝layout.ts:325・#547 P2 レビュー）。
   const templateGroups = template?.groups ?? [];
-  if (template?.layers.some((l) => l.type === 'subtitle' && !isHiddenByGroup(l.id, templateGroups)) ?? false) {
-    out.push(...(hasLines ? lineSubs() : staticSubtitle()));
+  const visibleSubtitleLayers = (template?.layers ?? []).filter(
+    (l) => l.type === 'subtitle' && !isHiddenByGroup(l.id, templateGroups),
+  );
+  if (visibleSubtitleLayers.length > 0) {
+    if (hasLines) out.push(...lineSubs());
+    else for (const l of visibleSubtitleLayers) out.push(...staticSubtitleFor(l.textKey));
   }
   // (b) FREE：freeLayout の字幕要素を subtitleSource で解決してテンプレ層の上に重ねる（resolveSubtitleForElement と同分岐）。
-  //     要素自身の非表示（el.hidden）・非表示グループのメンバーは描画されない（layout.ts:418-419）＝数えない。
+  //     要素自身の非表示（el.hidden）・非表示グループのメンバーは描画されない（layout.ts:418-419）＝除外。
   if (template?.category === FREE_CATEGORY) {
     const sceneGroups = scene.groups ?? [];
     for (const el of scene.freeLayout ?? []) {
       if (el.kind !== FREE_ELEMENT_KIND.subtitle) continue;
       if (el.hidden || isHiddenByGroup(el.id, sceneGroups)) continue; // 非表示は描画されない＝数えない
       const source = el.subtitleSource ?? defaultSubtitleSource(scene);
-      if (source.kind === SUBTITLE_SOURCE_KIND.narration) out.push(...staticSubtitle());
+      if (source.kind === SUBTITLE_SOURCE_KIND.narration) out.push(...staticSubtitleFor(TEXT_KEY.subtitle));
       else if (source.kind === SUBTITLE_SOURCE_KIND.allLines) out.push(...lineSubs());
       else out.push(...lineSubs((l) => speakerKeyEquals(effectiveSpeakerKey(l), source.speaker)));
     }
