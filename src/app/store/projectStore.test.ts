@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isExportBusy, useProjectStore } from './projectStore';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
+import * as userTemplateFsMod from '../../infrastructure/userTemplateFs';
 import * as aiClient from '../../infrastructure/aiClient';
 import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
@@ -352,7 +353,7 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
   // 保存/削除すると MP4(開始時 snap の見た目) と 保存/仕上がり確認(新) が食い違う（15§4・ADR-0026④＝α-4 パリティ）。
   describe('書き出し中は見た目パターンを固定（#570 P1 レビュー）', () => {
     const BUSY = /書き出しが終わるまで/;
-    afterEach(() => useProjectStore.getState().setExportRun({ phase: 'idle' }));
+    afterEach(() => { useProjectStore.getState().setExportRun({ phase: 'idle' }); useProjectStore.setState({ isTemplateMutating: false }); });
 
     it('saveUserTemplate は書き出し中 no-op＋案内（一覧に反映しない）', async () => {
       useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
@@ -392,6 +393,52 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
       useProjectStore.getState().addTemplatePack([userTmpl('user_tmpl_pack_1')]);
       expect(useProjectStore.getState().templates).toHaveLength(before); // 追加/上書きしない
       expect(useProjectStore.getState().templateError).toMatch(BUSY);
+    });
+
+    // 非同期境界の排他（#570 P1 レビュー）：保存は最初の await 前に isTemplateMutating を立てる＝書き出し開始側がこれを
+    // 見て止まる（isImporting と対称）。「保存を押す→完了前に書き出す」で MP4(旧)と一覧/保存(新)が食い違うのを防ぐ。
+    it('saveUserTemplate は保存中 isTemplateMutating を立て、完了後に戻す（保存はファイル/一覧まで完走）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], isTemplateMutating: false });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      let resolveSave: () => void = () => {};
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockReturnValue(new Promise<void>((r) => { resolveSave = () => r(); }));
+      const p = useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_flag'));
+      expect(useProjectStore.getState().isTemplateMutating).toBe(true); // 保存中は排他が立つ＝ExportScreen がこれを見て止まる
+      resolveSave();
+      await p;
+      expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 完了で戻す
+      expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_flag')).toBe(true); // 一覧まで完走（中断しない）
+      spy.mockRestore();
+    });
+
+    // 自己再入ガード（#570 レビュー・correctness）：進行中の見た目変更は1本だけ＝flag を真の相互排他に保つ。無いと2本目の
+    // finally が先に flag を落とし、その隙に書き出しが割り込む（MP4(旧)・保存/画面(新)の食い違い＝#547 P2-1 が防ぎたい不整合）。
+    it('保存中の二重 saveUserTemplate は2本目を捨てる（進行中は1本・flag は1本目に対応し続ける）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], isTemplateMutating: false });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      let resolveSave: () => void = () => {};
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockReturnValue(new Promise<void>((r) => { resolveSave = () => r(); }));
+      const p1 = useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_a'));
+      expect(useProjectStore.getState().isTemplateMutating).toBe(true); // 1本目が進行中
+      await useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_b')); // 2本目：進行中ゆえ即 return（await 前）
+      expect(spy).toHaveBeenCalledTimes(1); // ファイル書き込みは1本目だけ＝2本目は素通りしない
+      expect(useProjectStore.getState().isTemplateMutating).toBe(true); // 2本目の早期 return では flag を落とさない＝1本目に対応
+      resolveSave();
+      await p1;
+      expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 1本目の完了で戻る
+      spy.mockRestore();
+    });
+
+    // finally の解除（#570 レビュー）：保存が失敗しても flag を戻す＝書き出しが永久にブロックされない。次の行動も出す（§2-5）。
+    it('saveUserTemplate が失敗しても isTemplateMutating を戻し、案内を出す（finally）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], isTemplateMutating: false, templateError: null });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockRejectedValue(new Error('disk full'));
+      await useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_fail'));
+      expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 失敗でも finally で戻す
+      expect(useProjectStore.getState().templateError).toMatch(/保存できませんでした/); // 次の行動（もう一度お試しください）
+      expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_fail')).toBe(false); // 失敗＝一覧に入らない
+      spy.mockRestore();
     });
   });
 });

@@ -116,6 +116,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     const startBlockedMessage = (): string | null => {
       const st = useProjectStore.getState();
       if (st.isImporting) return "素材の取り込み中です。取り込みが終わってから書き出してください。";
+      if (st.isTemplateMutating) return "見た目パターンの変更中です。変更が終わってから書き出してください。";
       if (st.status === "generating") return "動画案を作成中です。作成が終わってから書き出してください。";
       if (st.isGeneratingNarration || isNarrationGenerating(st.scenes)) return "声を作成中です。作成が終わってから書き出してください。";
       return null;

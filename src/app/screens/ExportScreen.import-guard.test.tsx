@@ -30,7 +30,7 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     });
     vi.spyOn(ffmpeg, "canExport").mockReturnValue(true); // jsdom は Tauri 非検出＝canExport false のため真にする
   });
-  afterEach(() => { vi.restoreAllMocks(); useProjectStore.setState({ isImporting: false, status: "ready" }); });
+  afterEach(() => { vi.restoreAllMocks(); useProjectStore.setState({ isImporting: false, isTemplateMutating: false, status: "ready" }); });
 
   it("取り込み中に「動画を保存」を押すと理由を出して止まり、beginExport を呼ばない", async () => {
     const saveDialog = vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
@@ -96,5 +96,29 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     resolveBegin();
     await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error")); // 後段の再チェックが捕捉
     expect(screen.getByText(/声を作成中/)).toBeTruthy();
+  });
+
+  it("見た目パターンの変更中（isTemplateMutating）は書き出しを始めない（#570 P1 レビュー・テンプレ保存/削除の非同期境界）", async () => {
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    useProjectStore.setState({ isTemplateMutating: true }); // 見た目の保存/削除が進行中（最初の await 前に立つ排他）
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
+    expect(screen.getByText(/見た目パターンの変更中/)).toBeTruthy(); // 理由（次の行動）
+    expect(begin).not.toHaveBeenCalled(); // スナップショットも作らない
+  });
+
+  it("beginExport の途中で動画案生成が始まっても捕捉して止める（post-beginExport 再チェック・status 版）", async () => {
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    let resolveBegin: () => void = () => {};
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />); // 開始時は生成中でない＝pre チェック通過
+    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(begin).toHaveBeenCalled()); // beginExport の待機に入った
+    useProjectStore.setState({ status: "generating" }); // beginExport 窓で動画案生成が始まる
+    resolveBegin();
+    await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error")); // 後段の再チェックが捕捉
+    expect(screen.getByText(/動画案を作成中/)).toBeTruthy();
   });
 });

@@ -128,6 +128,9 @@ interface ProjectState {
   isGeneratingNarration: boolean;
   /** 素材/BGM の取り込み中フラグ（多重取り込み防止・取り込み中表示）。 */
   isImporting: boolean;
+  /** 見た目パターンの保存/削除/素材登録が非同期実行中か（#570 レビュー）。最初の await 前に立て、書き出し開始側が
+   *  これを見て止まる＝isImporting と同じ「開始の相互排他」。書き出し中の見た目変更で MP4 とプレビュー/保存がずれるのを防ぐ。 */
+  isTemplateMutating: boolean;
   /** ナレーション生成に失敗したときのユーザー向け文言（成功/再試行で消える）。 */
   narrationError: string | null;
   /** BGM 取り込みに失敗したときのユーザー向け文言（§2-5。次のBGM操作で消える）。保存状態とは別物。 */
@@ -460,6 +463,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   _dirtyAudioKeys: new Set(),
   isGeneratingNarration: false,
   isImporting: false,
+  isTemplateMutating: false,
   narrationError: null,
   bgmError: null,
   aiError: null,
@@ -1220,11 +1224,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 書き出し中は見た目パターンを保存しない（#570 P1 レビュー）。使用中テンプレを保存すると、書き出しは開始時の見た目を
     // snap するのに保存/仕上がり確認だけ新しくなる＝MP4 と食い違う（15§4・ADR-0026④）。duplicate/createBlank もここを通る。
     if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return; }
+    if (get().isTemplateMutating) return; // 進行中の見た目変更を1本に保つ（isImporting と対称）。無いと2本目の finally が先に flag を落とし、その隙に書き出しが割り込む（#570 レビュー）。
+    set({ isTemplateMutating: true }); // 最初の await 前に排他を立てる＝書き出し開始側がこれを見て止まる（#570 レビュー・isImporting と対称）。
     try {
+      // 排他フラグで書き出し開始をブロックするので、await 中に書き出しが割り込まない＝保存はファイル/一覧まで完走できる
+      //（途中で set をスキップするとファイルだけ残り一覧に出ない不整合になるため、完了側の中断はしない）。
       await userTemplateFs.saveUserTemplate(template);
       set((s) => ({ templates: upsertUserTemplate(s.templates, template), templateError: null }));
     } catch {
       set({ templateError: "見た目パターンを保存できませんでした。もう一度お試しください。" });
+    } finally {
+      set({ isTemplateMutating: false });
     }
   },
   deleteUserTemplate: async (templateId) => {
@@ -1234,6 +1244,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!isUserTemplate(templateId)) return false;
     // 削除前に所有素材 id を控える（テンプレ素材は登録テンプレ専用ゆえ、テンプレと一緒に掃除する＝ADR-0021）。
     const owned = templateAssetIdsOf(get().templates.find((t) => t.templateId === templateId)?.layers ?? []);
+    if (get().isTemplateMutating) return false; // 進行中の見た目変更を1本に保つ（isImporting と対称・#570 レビュー）。
+    set({ isTemplateMutating: true }); // 最初の await 前に排他（#570 レビュー）。書き出し開始がこれを見て止まる＝削除はファイル/場面置換まで完走できる。
     try {
       await userTemplateFs.deleteUserTemplate(templateId);
       // 各素材ファイルの削除失敗は templateAssetFs 内で握る（非致命）。失敗時はファイルが残るが、参照していたテンプレは消えるため未参照＝孤立（disk のみ・許容）。残った孤立は次回起動の読込時に安全条件下で掃除される（#299・loadUserTemplates）。
@@ -1260,6 +1272,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch {
       set({ templateError: "見た目パターンを削除できませんでした。もう一度お試しください。" });
       return false;
+    } finally {
+      set({ isTemplateMutating: false });
     }
   },
   duplicateAsUserTemplate: async (sourceTemplateId) => {
@@ -1284,12 +1298,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   registerTemplateAsset: async (file) => {
     // 書き出し中は見た目の既定素材も追加しない（テンプレ変更と同じく固定・#570 P1 レビュー）。
     if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return null; }
-    // 取り込み→グローバル保存（Tauri）→ 表示用 src を合流。採番は現存テンプレ素材 id を基に最大連番+1。
-    const result = await importTemplateAsset(file, Object.keys(get().templateAssetSrcById));
-    if (!result) return null;
-    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return null; } // await 中に書き出しが始まったら反映しない（setAssetImage と対称・#570 レビュー）
-    set((s) => ({ templateAssetSrcById: { ...s.templateAssetSrcById, [result.assetId]: result.url } }));
-    return result.assetId;
+    if (get().isTemplateMutating) return null; // 進行中の見た目変更を1本に保つ（isImporting と対称・#570 レビュー）。
+    set({ isTemplateMutating: true }); // 最初の await 前に排他（書き出し開始側がこれを見て止まる＝取り込みも完走できる）。
+    try {
+      // 取り込み→グローバル保存（Tauri）→ 表示用 src を合流。採番は現存テンプレ素材 id を基に最大連番+1。
+      const result = await importTemplateAsset(file, Object.keys(get().templateAssetSrcById));
+      if (!result) return null;
+      set((s) => ({ templateAssetSrcById: { ...s.templateAssetSrcById, [result.assetId]: result.url } }));
+      return result.assetId;
+    } finally {
+      set({ isTemplateMutating: false });
+    }
   },
   clearTemplateError: () => set({ templateError: null }),
   setEditingTemplateId: (templateId) => set({ editingTemplateId: templateId }),

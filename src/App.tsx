@@ -9,7 +9,7 @@ import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
 import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
-import { UNDO_REDO_SCREENS, useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
+import { isUndoRedoEnabledFor, useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -51,7 +51,9 @@ function App() {
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
   // 書き出し中はヘッダの新規作成を無効化（切替で進行中の書き出しデータが壊れるのを防ぐ・#379）。
-  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
+  // phase を選び、Undo/Redo 結線（下の isUndoRedoEnabledFor）と新規作成無効化の両方の元にする。
+  const exportPhase = useProjectStore((s) => s.exportRun.phase);
+  const isExporting = isExportBusy(exportPhase);
   const loadProject = useProjectStore((s) => s.loadProject);
   const loadUserTemplates = useProjectStore((s) => s.loadUserTemplates);
   // サイドバー「今の動画（名前）」用（#399 B案・#252 合流）：動画を開いている間だけ出し、名前を表示する。
@@ -67,7 +69,8 @@ function App() {
   // 全画面で有効にすると、テンプレ作成のように編集が画面ローカルの画面で Ctrl+Z が画面外の編集を無言で巻き戻し、
   // 自動保存が永続化してしまう（#547 P1-1・データ喪失・ADR-0020「入口」）。#413 の「たたき台でも Ctrl+Z」は draft を含めて満たす。
   // 書き出し中は undo/redo を無効化（ボタンは inert で操作不可なのに Ctrl+Z だけ無言 no-op になる不整合を防ぐ・#570 P2 レビュー）。
-  useUndoRedoShortcuts(UNDO_REDO_SCREENS.has(screen) && !isExporting);
+  // 結線式は共有述語に集約＝回帰テストと同じシンボルを参照し、ここのドリフトを1箇所で検知する。
+  useUndoRedoShortcuts(isUndoRedoEnabledFor(screen, exportPhase));
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
   // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。

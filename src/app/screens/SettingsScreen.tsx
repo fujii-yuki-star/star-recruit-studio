@@ -350,7 +350,7 @@ export function SettingsScreen() {
           </div>
 
           <p className="field-hint">
-            話す速さ・高さ・抑揚はこのプロジェクトのナレーションに使われます（保存すると残ります）。
+            話す速さ・高さ・抑揚はこのプロジェクトの読み上げの声に使われます（保存すると残ります）。
           </p>
 
           <button
@@ -392,7 +392,7 @@ export function SettingsScreen() {
             <details style={{ marginTop: "var(--gap-sm)" }}>
               <summary className="text-sm text-muted" style={{ cursor: "pointer" }}>詳細情報</summary>
               <div className="col gap-sm mt text-sm">
-                <div className="row-between"><span className="text-muted">コーデック</span><span>OpenH264（H.264）</span></div>
+                <div className="row-between"><span className="text-muted">動画の形式</span><span>OpenH264（H.264）</span></div>
                 <div className="row-between"><span className="text-muted">提供元</span><span>Cisco Systems, Inc.</span></div>
                 <div className="row-between"><span className="text-muted">バージョン</span><span>—</span></div>
                 <div className="row-between"><span className="text-muted">検証結果</span><span>—</span></div>
