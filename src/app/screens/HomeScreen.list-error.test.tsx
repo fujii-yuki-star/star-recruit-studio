@@ -10,13 +10,15 @@ import { HomeScreen } from "./HomeScreen";
 // 失敗時は原因＋「もう一度読み込む」（再試行）を出し、成功したら失敗表示を消して一覧を出す。
 describe("HomeScreen 一覧取得の失敗表示と再試行（#547 P2-2）", () => {
   let origList: () => Promise<ProjectSummary[]>;
+  let origRename: ReturnType<typeof useProjectStore.getState>["renameProject"];
   const project = (name: string): ProjectSummary => ({ projectId: "proj_001", projectName: name, updatedAt: "2026-07-09T00:00:00Z" });
 
   beforeEach(() => {
     origList = useProjectStore.getState().listProjects;
+    origRename = useProjectStore.getState().renameProject;
   });
   afterEach(() => {
-    useProjectStore.setState({ listProjects: origList });
+    useProjectStore.setState({ listProjects: origList, renameProject: origRename });
     vi.restoreAllMocks();
   });
 
@@ -50,6 +52,23 @@ describe("HomeScreen 一覧取得の失敗表示と再試行（#547 P2-2）", ()
     const retry = (await screen.findByText("もう一度読み込む")) as HTMLButtonElement;
     expect(retry.disabled).toBe(false);
     expect(screen.queryByText("読み込み中…")).toBeNull();
+  });
+
+  // 改名後の再取得だけは失敗を無視する（一覧全体を失敗表示に置き換えると既存行が隠れ「改名が失敗した」と誤読させる）。
+  // その無視を安全にするのが楽観更新＝再取得が落ちても行は新しい名前のまま（#547 P2-2 レビュー）。
+  it("改名成功＋再取得失敗：行は新しい名前のまま（旧名に戻らず、一覧の失敗表示にも化けない）", async () => {
+    const list = vi
+      .fn<() => Promise<ProjectSummary[]>>()
+      .mockResolvedValueOnce([project("旧タイトル")]) // マウント時の取得は成功
+      .mockRejectedValueOnce(new Error("fs down")); // 改名後の再取得だけ失敗
+    useProjectStore.setState({ listProjects: list, renameProject: vi.fn(async () => {}) });
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    fireEvent.click(await screen.findByLabelText("「旧タイトル」の名前を変更")); // 鉛筆で改名へ
+    fireEvent.change(screen.getByLabelText("プロジェクト名"), { target: { value: "新タイトル" } });
+    fireEvent.click(screen.getByText("保存"));
+    expect(await screen.findByText("新タイトル")).toBeTruthy(); // 楽観更新で新しい名前が出る
+    await waitFor(() => expect(screen.queryByText("旧タイトル")).toBeNull()); // 再取得失敗でも旧名に戻らない
+    expect(screen.queryByText(/読み込めませんでした/)).toBeNull(); // 一覧の失敗表示には化けない（改名は成功）
   });
 
   it("本当に空（成功して0件）：失敗表示ではなく空の案内を出す", async () => {

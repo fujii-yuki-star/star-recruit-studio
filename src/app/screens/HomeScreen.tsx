@@ -105,10 +105,14 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     }
     // リネーム成功。入力欄を閉じ、一覧を最新化する。一覧の再取得失敗はリネーム完了に影響しないのでサイレント。
     setRenamingId(null);
+    // 先に楽観更新でディスクの結果（改名済み）を反映する。こうすると下の再取得が失敗しても行が旧名に戻らず、
+    // 「改名は成功したのに失敗に見える」ズレが出ない＝再取得失敗を安全に無視できる（#547 P2-2 レビュー）。
+    // ここで listError を立てないのは意図的：一覧全体が失敗表示に置き換わると既存行が隠れ、改名失敗と誤読させるため。
+    setProjects((cur) => cur.map((p) => (p.projectId === projectId ? { ...p, projectName: name } : p)));
     try {
       setProjects(await listProjects());
     } catch {
-      /* 一覧の再取得失敗は無視（リネーム自体は済んでいる＝誤った失敗表示・二重実行を防ぐ） */
+      /* 再取得の失敗は無視（上の楽観更新で表示は正しい＝誤った失敗表示・二重実行を防ぐ） */
     }
   }
 
