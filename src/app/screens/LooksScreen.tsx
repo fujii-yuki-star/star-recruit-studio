@@ -5,6 +5,7 @@ import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orient
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { scenesUsingTemplate } from "../../domain/project/templateUsage";
 import { useProjectStore } from "../store/projectStore";
+import { ExportLock } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
@@ -188,6 +189,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         title="見た目パターンを管理"
         desc="動画の見た目のパターンを確認できます。各場面に当てる見た目は「場面編集」で選べます。"
       />
+      <ExportLock>
       {/* 説明だけで行き止まりにしない：実際に見た目を割り当てる「場面編集」への導線を添える（§2-5・#413）。 */}
       <button className="btn btn-ghost text-sm" style={{ marginBottom: "var(--gap)" }} onClick={() => onNavigate("scene-edit")}>
         場面編集を開く
@@ -361,6 +363,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           )}
         </div>
       </div>
+      </ExportLock>
     </div>
   );
 }

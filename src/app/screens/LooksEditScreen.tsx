@@ -9,7 +9,8 @@ import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
 import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants";
 // 文字の既定値は domain（template/textStyle）が正典＝描画・場面編集の体裁欄・通常→FREE 変換と同じ値を使う（§2-7・#555）。
 import { DEFAULT_FONT_SIZE, DEFAULT_STROKE_COLOR, DEFAULT_TEXT_COLOR } from "../../domain/template/textStyle";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
@@ -57,6 +58,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const templateError = useProjectStore((s) => s.templateError);
   const registerTemplateAsset = useProjectStore((s) => s.registerTemplateAsset);
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は見た目の保存/削除を止める（#570 P1 レビュー）
 
   const editing = templates.find((t) => t.templateId === editingTemplateId) ?? null;
   const yukoPoseTags = buildYukoPoseTags(assets);
@@ -456,6 +458,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
   return (
     <div className="main-scroll">
+      <ExportLockBanner />
       {/* ヘッダ：戻る・タイトル・保存（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ） */}
       <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
         <div className="row gap-sm" style={{ alignItems: "center" }}>
@@ -464,7 +467,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         </div>
         <div className="row gap-sm" style={{ alignItems: "center" }}>
           {dirty && <UnsavedMark />}
-          <button className="btn btn-primary" disabled={!dirty || busyAction !== null} onClick={() => void onSave()}>
+          <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
             {busyAction === "save" ? "保存中…" : "保存"}
           </button>
         </div>
@@ -645,7 +648,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   onConfirm={() => void onDelete()}
                 />
               ) : (
-                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} onClick={() => setConfirmDelete(true)}>
+                <button className="btn btn-ghost text-sm" style={{ color: "var(--color-danger)", alignSelf: "flex-start" }} disabled={isExporting} onClick={() => setConfirmDelete(true)}>
                   この見た目パターンを削除
                 </button>
               )}

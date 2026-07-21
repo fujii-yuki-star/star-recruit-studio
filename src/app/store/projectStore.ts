@@ -73,6 +73,7 @@ export function isExportBusy(phase: ExportPhase): boolean {
 // これを出す＝素材画面以外（場面編集・ウィザードは importError を表示）からの操作でも「押しても効かない」を避ける（ADR-0026④）。
 const EXPORT_BUSY_ASSET_MSG = "書き出しが終わるまで、素材の追加や変更はできません。書き出しが終わってからお試しください。";
 const EXPORT_BUSY_BGM_MSG = "書き出しが終わるまで、BGM は変更できません。書き出しが終わってからお試しください。";
+const EXPORT_BUSY_TEMPLATE_MSG = "書き出しが終わるまで、見た目パターンは変更できません。書き出しが終わってからお試しください。";
 const IDLE_EXPORT_RUN: ExportRunState = {
   phase: "idle",
   progress: { done: 0, total: 0 },
@@ -550,8 +551,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   fail: () => set({ status: "error" }),
   // reset/newProject/loadProject も世代を進めて in-flight の generate を無効化する（#402 レビュー）。
   // キャンセル以外の経路（キャンセルせず離脱→ホームで新規/切替）でも、裏で走る旧生成が新しい状態を上書きしないように。
-  reset: () =>
-    set((s) => ({ status: "idle", draftFromAi: false, saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null, _generationSeq: s._generationSeq + 1 })),
+  reset: () => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は場面/構成を破壊しない（#379 と同方針・#570 レビュー follow-up）
+    set((s) => ({ status: "idle", draftFromAi: false, saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null, _generationSeq: s._generationSeq + 1 }));
+  },
   newProject: () => {
     // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
     if (isExportBusy(get().exportRun.phase)) return;
@@ -1181,7 +1184,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return { assets: s.assets.filter((a) => a.assetId !== assetId), assetSrcById, saveStatus: "idle" };
     });
   },
-  addTemplatePack: (incoming) =>
+  addTemplatePack: (incoming) => {
+    // 書き出し中はパック取り込みも止める（同 id の使用中テンプレを上書きしうる＝save/delete と同じ固定・#570 レビュー・store 側の2層目）。
+    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return; }
     set((s) => {
       // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
       // テンプレは project.json に保存しない（利用可能な見た目パターン）ので saveStatus は変えない。
@@ -1189,7 +1194,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const byId = new Map(s.templates.map((t) => [t.templateId, t] as const));
       for (const t of incoming) byId.set(t.templateId, t);
       return { templates: [...byId.values()] };
-    }),
+    });
+  },
   loadUserTemplates: async () => {
     // グローバルのユーザーテンプレを読み、templates の user_tmpl 部分を差し替える（冪等）。非 Tauri は空。
     // 同時にテンプレ所有素材の表示用 URL も一括ロード（プロジェクト非依存・起動時＝ADR-0021 PR C）。
@@ -1211,6 +1217,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   saveUserTemplate: async (template) => {
+    // 書き出し中は見た目パターンを保存しない（#570 P1 レビュー）。使用中テンプレを保存すると、書き出しは開始時の見た目を
+    // snap するのに保存/仕上がり確認だけ新しくなる＝MP4 と食い違う（15§4・ADR-0026④）。duplicate/createBlank もここを通る。
+    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return; }
     try {
       await userTemplateFs.saveUserTemplate(template);
       set((s) => ({ templates: upsertUserTemplate(s.templates, template), templateError: null }));
@@ -1219,6 +1228,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   deleteUserTemplate: async (templateId) => {
+    // 書き出し中は削除しない（使用中テンプレを消すと場面が標準へ置換され、MP4(旧)と保存/確認(新)が食い違う・#570 P1 レビュー）。
+    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return false; }
     // ユーザーテンプレ以外（同梱/取り込みパック）はこのアクションで消さない（誤渡し時の同梱消去防止）。
     if (!isUserTemplate(templateId)) return false;
     // 削除前に所有素材 id を控える（テンプレ素材は登録テンプレ専用ゆえ、テンプレと一緒に掃除する＝ADR-0021）。
@@ -1271,9 +1282,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return get().templates.some((t) => t.templateId === newId) ? newId : "";
   },
   registerTemplateAsset: async (file) => {
+    // 書き出し中は見た目の既定素材も追加しない（テンプレ変更と同じく固定・#570 P1 レビュー）。
+    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return null; }
     // 取り込み→グローバル保存（Tauri）→ 表示用 src を合流。採番は現存テンプレ素材 id を基に最大連番+1。
     const result = await importTemplateAsset(file, Object.keys(get().templateAssetSrcById));
     if (!result) return null;
+    if (isExportBusy(get().exportRun.phase)) { set({ templateError: EXPORT_BUSY_TEMPLATE_MSG }); return null; } // await 中に書き出しが始まったら反映しない（setAssetImage と対称・#570 レビュー）
     set((s) => ({ templateAssetSrcById: { ...s.templateAssetSrcById, [result.assetId]: result.url } }));
     return result.assetId;
   },

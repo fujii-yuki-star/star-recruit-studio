@@ -25,11 +25,12 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
       parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
       scenes: [scene("scene_001", 1)],
       isImporting: false,
+      status: "ready", // 生成中でない既定（前テストの status:'generating' を持ち越さない＝相互排他テストの isolation）
       saveStatus: "saved",
     });
     vi.spyOn(ffmpeg, "canExport").mockReturnValue(true); // jsdom は Tauri 非検出＝canExport false のため真にする
   });
-  afterEach(() => { vi.restoreAllMocks(); useProjectStore.setState({ isImporting: false }); });
+  afterEach(() => { vi.restoreAllMocks(); useProjectStore.setState({ isImporting: false, status: "ready" }); });
 
   it("取り込み中に「動画を保存」を押すと理由を出して止まり、beginExport を呼ばない", async () => {
     const saveDialog = vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
@@ -70,5 +71,30 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
     expect(screen.getByText(/声を作成中/)).toBeTruthy(); // 理由（次の行動）
     expect(begin).not.toHaveBeenCalled(); // 生成中は書き出しを始めない
+  });
+
+  it("動画案生成中（status='generating'）は書き出しを始めない（#570 P1 レビュー・生成中分岐）", async () => {
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    useProjectStore.setState({ status: "generating" }); // AI 動画案を生成中
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
+    expect(screen.getByText(/動画案を作成中/)).toBeTruthy(); // 理由（次の行動）
+    expect(begin).not.toHaveBeenCalled(); // スナップショットも作らない（beginExport 未実行）
+  });
+
+  it("beginExport の途中で声作成が始まっても捕捉して止める（post-beginExport 再チェック・生成版・残り窓）", async () => {
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    let resolveBegin: () => void = () => {};
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />); // 開始時は生成中でない＝pre チェック通過
+    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(begin).toHaveBeenCalled()); // beginExport の待機に入った
+    // beginExport 窓で声作成が始まる（pending 行＝isNarrationGenerating が true に）。
+    useProjectStore.setState({ scenes: [{ ...scene("scene_001", 1), narration: { text: "", status: "none" }, lines: [{ lineId: "l1", text: "A", status: "pending" }] } as unknown as Scene] });
+    resolveBegin();
+    await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error")); // 後段の再チェックが捕捉
+    expect(screen.getByText(/声を作成中/)).toBeTruthy();
   });
 });

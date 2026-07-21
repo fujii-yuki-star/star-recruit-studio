@@ -347,6 +347,53 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
     expect(id).toBeNull();
     expect(useProjectStore.getState().templateAssetSrcById).toEqual({});
   });
+
+  // #570 P1 レビュー：書き出し中は見た目パターン（＝場面が使う templateId）とその既定素材を固定する。使用中テンプレを
+  // 保存/削除すると MP4(開始時 snap の見た目) と 保存/仕上がり確認(新) が食い違う（15§4・ADR-0026④＝α-4 パリティ）。
+  describe('書き出し中は見た目パターンを固定（#570 P1 レビュー）', () => {
+    const BUSY = /書き出しが終わるまで/;
+    afterEach(() => useProjectStore.getState().setExportRun({ phase: 'idle' }));
+
+    it('saveUserTemplate は書き出し中 no-op＋案内（一覧に反映しない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      useProjectStore.getState().setExportRun({ phase: 'rendering' });
+      const before = useProjectStore.getState().templates.length;
+      await useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_099'));
+      expect(useProjectStore.getState().templates).toHaveLength(before); // 追加されない
+      expect(useProjectStore.getState().templateError).toMatch(BUSY);
+    });
+
+    it('deleteUserTemplate は書き出し中 no-op＋案内（使用中の場面を標準へ置換しない）／false を返す', async () => {
+      useProjectStore.setState({
+        templates: [...sampleTemplates, userTmpl('user_tmpl_001')],
+        scenes: [{ ...scene('scene_001', 1), templateId: 'user_tmpl_001' }],
+        templateError: null,
+      });
+      useProjectStore.getState().setExportRun({ phase: 'encoding' });
+      const ok = await useProjectStore.getState().deleteUserTemplate('user_tmpl_001');
+      expect(ok).toBe(false);
+      expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_001')).toBe(true); // 消えない
+      expect(useProjectStore.getState().scenes[0].templateId).toBe('user_tmpl_001'); // 置換されない＝MP4 と一致
+      expect(useProjectStore.getState().templateError).toMatch(BUSY);
+    });
+
+    it('registerTemplateAsset は書き出し中 no-op＋案内（null）', async () => {
+      useProjectStore.setState({ templateAssetSrcById: {}, templateError: null });
+      useProjectStore.getState().setExportRun({ phase: 'rendering' });
+      const id = await useProjectStore.getState().registerTemplateAsset({} as File);
+      expect(id).toBeNull();
+      expect(useProjectStore.getState().templateError).toMatch(BUSY);
+    });
+
+    it('addTemplatePack（取り込みパック）も書き出し中 no-op＋案内（同 id 上書きを止める）', () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      useProjectStore.getState().setExportRun({ phase: 'rendering' });
+      const before = useProjectStore.getState().templates.length;
+      useProjectStore.getState().addTemplatePack([userTmpl('user_tmpl_pack_1')]);
+      expect(useProjectStore.getState().templates).toHaveLength(before); // 追加/上書きしない
+      expect(useProjectStore.getState().templateError).toMatch(BUSY);
+    });
+  });
 });
 
 describe('projectStore editingSceneId（#400・場面編集の遷移ペイロード）', () => {
@@ -722,6 +769,26 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     await genP;
     expect(useProjectStore.getState().narrationAudioById['scene_001']).toBeUndefined(); // 音声を書き込まない
     expect(useProjectStore.getState().scenes[0].narration.status).toBe('none'); // 作り直せるよう none へ
+    spy.mockRestore();
+  });
+
+  // 掛け合い（scene.lines）でも完了側で書き込まないことを固定（#570 P2 レビュー・単一だけでなく行ごと経路も）。
+  it('掛け合いでも：声作成中に書き出しが始まり合成完了しても、行の音声を書き込まず none へ戻す', async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene('scene_001', 1), narration: { text: '', status: 'none' }, lines: [{ lineId: 'line_001', text: 'こんにちは', status: 'none' }] }],
+      narrationAudioById: {}, isGeneratingNarration: false,
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+    });
+    let resolveSynth: (v: unknown) => void = () => {};
+    const synthP = new Promise((r) => { resolveSynth = r; });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockReturnValue(synthP as never);
+    const genP = useProjectStore.getState().generateNarration('scene_001'); // 行が pending（開始時 idle＝top ガードは通る）
+    expect(useProjectStore.getState().scenes[0].lines?.[0].status).toBe('pending');
+    useProjectStore.getState().setExportRun({ phase: 'rendering' }); // 合成 in-flight 中に書き出しが始まる
+    resolveSynth({ audioDataUrl: 'data:audio/wav;base64,AAAA', durationSec: 1 });
+    await genP;
+    expect(useProjectStore.getState().narrationAudioById['scene_001/line_001']).toBeUndefined(); // 行の音声を書き込まない
+    expect(useProjectStore.getState().scenes[0].lines?.[0].status).toBe('none'); // 行を none へ戻す
     spy.mockRestore();
   });
 });

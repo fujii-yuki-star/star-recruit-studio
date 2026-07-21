@@ -66,7 +66,8 @@ function App() {
   // 有効にするのは「取り消す/やり直す」UI がある画面だけ（UNDO_REDO_SCREENS＝たたき台/場面編集/タイムライン編集）。
   // 全画面で有効にすると、テンプレ作成のように編集が画面ローカルの画面で Ctrl+Z が画面外の編集を無言で巻き戻し、
   // 自動保存が永続化してしまう（#547 P1-1・データ喪失・ADR-0020「入口」）。#413 の「たたき台でも Ctrl+Z」は draft を含めて満たす。
-  useUndoRedoShortcuts(UNDO_REDO_SCREENS.has(screen));
+  // 書き出し中は undo/redo を無効化（ボタンは inert で操作不可なのに Ctrl+Z だけ無言 no-op になる不整合を防ぐ・#570 P2 レビュー）。
+  useUndoRedoShortcuts(UNDO_REDO_SCREENS.has(screen) && !isExporting);
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
   // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。
