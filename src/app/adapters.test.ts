@@ -282,4 +282,52 @@ describe("buildPrecheckItems（字幕/セリフの長さ閾値＝正典定数と
     const s = textScene({ texts: { subtitle: "あ".repeat(6) } }); // 既定(60)未満だが hint(5) 超え
     expect(buildPrecheckItems([s], assets, [withHint]).find((i) => i.id === "subtitle")!.severity).toBe("action");
   });
+
+  // #547 P1-3 レビュー：掛け合い（scene.lines）の**行ごとの実効字幕**（subtitleText ?? text）は precheck の
+  // 字幕チェックから漏れていた（texts.subtitle しか見ていなかった）＝長い字幕を描画するのに「OK」と断言していた。
+  // #569（生成側の行テキスト長の漏れ）とは別＝これは precheck 側の字幕漏れ。ADR-0015/ADR-0026②。
+  const dlgLine = (over: Partial<Scene["lines"] extends (infer L)[] | undefined ? L : never>) =>
+    ({ lineId: "line_001", text: "短い", status: "none", ...over }) as NonNullable<Scene["lines"]>[number];
+
+  it("掛け合い：行の字幕(subtitleText)が定数ちょうどは OK・+1 で警告（precheck の字幕漏れ）", () => {
+    const ok = textScene({ lines: [dlgLine({ subtitleText: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT) })] });
+    expect(item(ok, "subtitle").severity).toBe("ok");
+    const over = textScene({ lines: [dlgLine({ subtitleText: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1) })] });
+    expect(item(over, "subtitle").severity).toBe("action");
+  });
+
+  it("掛け合い：字幕 OFF の行は長くても対象外・ON なら警告（除外条件そのものの回帰も見る）", () => {
+    const long = "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1);
+    expect(item(textScene({ lines: [dlgLine({ subtitleText: long, subtitleEnabled: false })] }), "subtitle").severity).toBe("ok");
+    expect(item(textScene({ lines: [dlgLine({ subtitleText: long, subtitleEnabled: true })] }), "subtitle").severity).toBe("action");
+  });
+
+  // 単独場面も同様に、字幕 OFF（subtitleEnabledDefault===false）なら長くても警告しない（掛け合いの OFF 除外と挙動を
+  // 揃える・ADR-0026②）＝描画されない字幕を「長い」と言わない。ON（未指定/true）なら従来どおり警告する。
+  it("単独：字幕 OFF は長くても対象外・ON なら警告", () => {
+    const long = "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1);
+    expect(item(textScene({ texts: { subtitle: long }, subtitleEnabledDefault: false }), "subtitle").severity).toBe("ok");
+    expect(item(textScene({ texts: { subtitle: long }, subtitleEnabledDefault: true }), "subtitle").severity).toBe("action");
+    expect(item(textScene({ texts: { subtitle: long } }), "subtitle").severity).toBe("action"); // 未指定＝表示（既定 ON）
+  });
+
+  it("掛け合い：subtitleText 未指定は行テキストが実効字幕＝字幕上限(60)で判定する（セリフ上限120ではない）", () => {
+    // 61文字の line.text：セリフ上限(120)は OK だが、字幕として表示されるので字幕上限(60)で警告する。
+    const s = textScene({ lines: [dlgLine({ text: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1) })] });
+    expect(item(s, "subtitle").severity).toBe("action"); // 字幕は長い
+    expect(item(s, "line").severity).toBe("ok"); // セリフ(120)は範囲内
+  });
+
+  it("複数行のうち1行でも字幕が長ければ警告・全行 OK なら OK（実測の再現＝短い読み上げ+長い subtitleText）", () => {
+    const bad = textScene({ lines: [
+      dlgLine({ text: "やあ", subtitleText: "短い字幕" }),
+      dlgLine({ lineId: "line_002", text: "こんにちは", subtitleText: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1) }),
+    ] });
+    expect(item(bad, "subtitle").severity).toBe("action");
+    const good = textScene({ lines: [
+      dlgLine({ text: "やあ", subtitleText: "短い字幕" }),
+      dlgLine({ lineId: "line_002", text: "こんにちは", subtitleText: "こちらも短い" }),
+    ] });
+    expect(item(good, "subtitle").severity).toBe("ok");
+  });
 });
