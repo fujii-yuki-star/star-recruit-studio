@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Scene } from '../project/types';
-import { narrationProgress } from './narrationProgress';
+import { isNarrationGenerating, narrationProgress } from './narrationProgress';
 
 function scene(id: string, text: string, status: Scene['narration']['status']): Scene {
   return {
@@ -39,5 +39,28 @@ describe('narrationProgress', () => {
       ],
     };
     expect(narrationProgress([s])).toEqual({ done: 1, total: 2 });
+  });
+});
+
+describe('isNarrationGenerating（書き出し開始のブロック判定・#570 P1 レビュー・#547 P2-6）', () => {
+  it('pending の場面があれば true（生成中）', () => {
+    expect(isNarrationGenerating([scene('s1', 'あ', 'generated'), scene('s2', 'い', 'pending')])).toBe(true);
+  });
+  it('pending が無ければ false（none/generated/failed）', () => {
+    expect(isNarrationGenerating([scene('s1', 'あ', 'generated'), scene('s2', 'い', 'none'), scene('s3', 'う', 'failed')])).toBe(false);
+  });
+  it('掛け合いは行の pending を見る（sceneLines・pending 行を取りこぼさない）', () => {
+    const dlg = {
+      ...scene('d', '', 'none'),
+      lines: [{ lineId: 'l1', text: 'A', status: 'generated' }, { lineId: 'l2', text: 'B', status: 'pending' }],
+    } as Scene;
+    expect(isNarrationGenerating([dlg])).toBe(true);
+  });
+  it('掛け合いで pending 行が無ければ false（生成完了/未生成のみ）', () => {
+    const dlg = {
+      ...scene('d', '', 'none'),
+      lines: [{ lineId: 'l1', text: 'A', status: 'generated' }, { lineId: 'l2', text: 'B', status: 'none' }],
+    } as Scene;
+    expect(isNarrationGenerating([dlg])).toBe(false);
   });
 });

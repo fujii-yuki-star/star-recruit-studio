@@ -3,7 +3,8 @@
 // App 一箇所で登録する（画面ごとの二重登録＝二重 Undo を防ぐ・#413）が、**有効にする画面は enabled で絞る**（下記）。
 import { useEffect } from "react";
 import type { ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
+import type { ExportPhase } from "../store/projectStore";
 
 /**
  * Ctrl/⌘+Z・Y を有効にする画面（#413 の「全画面」から #547 P1-1 で限定・ADR-0020「入口」）。
@@ -22,7 +23,17 @@ import { useProjectStore } from "../store/projectStore";
  */
 export const UNDO_REDO_SCREENS: ReadonlySet<ScreenId> = new Set<ScreenId>(["draft", "scene-edit", "timeline-edit"]);
 
-/** @param enabled この画面で Ctrl/⌘+Z・Y を有効にするか（App から `UNDO_REDO_SCREENS.has(screen)` を渡す）。 */
+/**
+ * App のキーボード Undo/Redo 結線を1つの純粋述語に集約する（#570 P2 レビュー）。
+ * 「取り消す/やり直すUIのある画面（{@link UNDO_REDO_SCREENS}）」かつ「書き出し中でない」ときだけ有効
+ * ＝キー入口をボタンの活性状態に一致させる（書き出し中はボタンが inert なのにキーだけ効く不整合を防ぐ・ADR-0026②/④）。
+ * App も回帰テストも**同じこの関数**を参照し、結線のドリフト（`&&` の欠落・参照画面/フェーズの取り違え）を1箇所で検知する。
+ */
+export function isUndoRedoEnabledFor(screen: ScreenId, exportPhase: ExportPhase): boolean {
+  return UNDO_REDO_SCREENS.has(screen) && !isExportBusy(exportPhase);
+}
+
+/** @param enabled この画面で Ctrl/⌘+Z・Y を有効にするか（App から {@link isUndoRedoEnabledFor} を渡す）。 */
 export function useUndoRedoShortcuts(enabled: boolean): void {
   const undo = useProjectStore((s) => s.undo);
   const redo = useProjectStore((s) => s.redo);

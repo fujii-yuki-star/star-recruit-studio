@@ -33,7 +33,7 @@ import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateL
 import { subtitleOverflowsCanvas } from "../../renderer/layout";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
@@ -59,6 +59,7 @@ import { DeleteConfirm } from "../components/DeleteConfirm";
 import { saveButtonLabel } from "../components/saveButtonLabel";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { Switch } from "../components/ui";
+import { ExportLock } from "../components/ExportLockBanner";
 import { EmptyState } from "../components/states";
 import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import {
@@ -301,6 +302,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const setEditingSceneId = useProjectStore((s) => s.setEditingSceneId);
   // プロジェクトの向き（ADR-0012）。見た目ピッカーを場面カテゴリ＋この向きに絞る（#415）。
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中はキャンバス/フォームを止める（#570 P2）
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
   // 場面カード列のドラッグ&ドロップ並び替え（#398）。カード自身を持ち手＋落下先にする（クリックで選択・ドラッグで並び替え）。
   const sceneDnd = useDragReorder(moveSceneToIndex);
@@ -1339,7 +1341,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
-      <KeyboardNudge active={canvasKbdActive} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
+      <KeyboardNudge active={canvasKbdActive && !isExporting} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
+      <ExportLock>
       <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
         {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
         <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -2740,6 +2743,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
         </div>
       </div>
+      </ExportLock>
     </div>
   );
 }

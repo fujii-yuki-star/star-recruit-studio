@@ -24,3 +24,24 @@ describe("HomeScreen プロジェクトを開く busy（#392）", () => {
     expect((screen.getByText("テスト動画").closest("button") as HTMLButtonElement).disabled).toBe(true);
   });
 });
+
+// #570 レビュー：書き出し中は「開いているプロジェクトの改名」が project.json の保存と競合する（lost-update）。
+// store も no-op で守るが、鉛筆（名前を変更）を無効化して「押せるのに効かない」を避ける（ADR-0026④）。
+describe("HomeScreen 書き出し中は改名を無効化（#570 レビュー）", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useProjectStore.setState({ exportRun: { phase: "idle", progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", cancelling: false } });
+  });
+
+  it("書き出し中：鉛筆（名前を変更）ボタンを無効化する", async () => {
+    useProjectStore.setState({
+      listProjects: vi.fn(() =>
+        Promise.resolve([{ projectId: "proj_001", projectName: "テスト動画", updatedAt: "2026-07-09T00:00:00Z" }] as unknown as ProjectHeader[]),
+      ),
+      exportRun: { phase: "rendering", progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", cancelling: false },
+    });
+    render(<HomeScreen onNavigate={vi.fn()} />);
+    const pencil = (await screen.findByLabelText("「テスト動画」の名前を変更")) as HTMLButtonElement;
+    expect(pencil.disabled).toBe(true); // 書き出し中は改名を開始できない（lost-update 防止の UI 側）
+  });
+});

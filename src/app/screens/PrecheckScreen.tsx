@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { PrecheckItem, ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { buildPrecheckItems } from "../adapters";
 import { PageHead } from "../components/ui";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
 import { canExport, detectH264Capability } from "../../infrastructure/ffmpegExport";
 import { EXPORT_CAPABILITY_NOTICE, blocksExport, type ExportCapability } from "../../domain/export/exportCapability";
@@ -19,6 +20,7 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, generateAllNarrations, isGeneratingNarration, narrationError } = useProjectStore();
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
   // 書き出し能力（標準方式 h264_mf の可用性）の事前検知（#120）。Tauri 環境でのみ取得。
   const [capability, setCapability] = useState<ExportCapability | null>(null);
 
@@ -47,6 +49,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
     return (
       <div className="main-scroll">
         <PageHead title="公開前チェック" desc="動画を書き出す前に内容を点検します。" />
+        <ExportLockBanner />
         <div className="card text-center" style={{ padding: "48px 24px" }}>
           <p className="text-muted" style={{ marginBottom: 16 }}>
             まだ場面がありません。動画のたたき台を作ってから、公開前チェックに進みましょう。
@@ -129,7 +132,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                         <button
                           className="btn btn-ghost btn-icon text-sm"
                           onClick={() => void generateAllNarrations()}
-                          disabled={isGeneratingNarration}
+                          disabled={isGeneratingNarration || isExporting}
                         >
                           {isGeneratingNarration ? "作成中…" : item.action}
                         </button>

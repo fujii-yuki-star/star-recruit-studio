@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
@@ -8,6 +8,7 @@ import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
 import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import { YukoPanel } from "../components/YukoPanel";
@@ -33,6 +34,7 @@ interface DraftProps {
 export function DraftScreen({ onNavigate }: DraftProps) {
   const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, generateAllNarrations, isGeneratingNarration, undo, redo } =
     useProjectStore();
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は編集を止める（#570 P2）
   // 取り消し/やり直し（ADR-0020・#413）。たたき台の削除/並べ替えも戻せる（キーボード Ctrl+Z/Y は App で登録・
   // 有効画面はたたき台/場面編集/タイムライン編集＝UNDO_REDO_SCREENS・#547 P1-1）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
@@ -98,6 +100,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
     return (
       <div className="main-scroll">
         <PageHead title="動画のたたき台を確認" desc="台本表で場面を確認・修正できます。" />
+        <ExportLockBanner />
         <EmptyState
           title={status === "generating" ? "動画案を作成中です…" : started ? "場面を追加して作り始めましょう" : "まだ動画案がありません"}
           message={
@@ -122,7 +125,8 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
   return (
     <div className="main-scroll">
-      <div className="content-with-yuko">
+      <ExportLockBanner />
+      <div className="content-with-yuko" inert={isExporting}>
         <div>
           <PageHead
             title="動画のたたき台を確認"

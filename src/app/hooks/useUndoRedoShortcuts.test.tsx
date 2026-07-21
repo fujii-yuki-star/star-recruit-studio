@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
-import { UNDO_REDO_SCREENS, useUndoRedoShortcuts } from "./useUndoRedoShortcuts";
+import type { ExportPhase } from "../store/projectStore";
+import { isUndoRedoEnabledFor, UNDO_REDO_SCREENS, useUndoRedoShortcuts } from "./useUndoRedoShortcuts";
 
 // #211/#413：Undo/Redo のキーボード入口。App 一箇所で登録＝ここが唯一の入口なので挙動を固定する。
 // テキスト入力中（input/textarea/contentEditable）は標準の文字 Undo に任せて奪わないことも含めて検証。
@@ -109,5 +110,43 @@ describe("useUndoRedoShortcuts 有効画面の限定（#547 P1-1）", () => {
     expect(UNDO_REDO_SCREENS.has("home")).toBe(false);
     // 意図しない拡大/縮小の検知（Undo UI を持つ画面と一致し続けること）。増やすときは ADR-0020「入口」も更新する。
     expect(UNDO_REDO_SCREENS.size).toBe(3);
+  });
+});
+
+// #570 P2 レビュー：App 結線 `useUndoRedoShortcuts(isUndoRedoEnabledFor(screen, exportPhase))` の挙動を固定。
+// App も本テストも**同じ述語 isUndoRedoEnabledFor** を参照＝結線のドリフト（&& 欠落・画面/フェーズ取り違え）をここで捕捉する。
+// ボタンは inert で操作不可なのに Ctrl+Z だけ効く不整合を防ぐ＝書き出し中はリスナーを登録しない。
+describe("書き出し中は Undo/Redo を無効化（App 結線・#570 P2 レビュー）", () => {
+  let undo: ReturnType<typeof vi.fn>;
+  let origUndo: () => void;
+  beforeEach(() => {
+    origUndo = useProjectStore.getState().undo;
+    undo = vi.fn();
+    useProjectStore.setState({ undo: undo as unknown as () => void });
+  });
+  afterEach(() => { useProjectStore.setState({ undo: origUndo }); vi.restoreAllMocks(); });
+
+  it("結線述語：取り消しUIのある画面かつ書き出し中でないときだけ有効（App.tsx と同じシンボル）", () => {
+    expect(isUndoRedoEnabledFor("draft", "idle")).toBe(true);
+    expect(isUndoRedoEnabledFor("draft", "rendering")).toBe(false); // 書き出し中は無効
+    expect(isUndoRedoEnabledFor("draft", "encoding")).toBe(false); // encoding も busy
+    expect(isUndoRedoEnabledFor("draft", "done")).toBe(true); // 完了後は再び有効
+    expect(isUndoRedoEnabledFor("materials", "idle")).toBe(false); // 取り消しUIの無い画面は常に無効
+  });
+
+  it("idle→rendering→idle：書き出し中だけ Ctrl+Z が効かず、完了後に再び効く", () => {
+    // App と同じ述語でフックを駆動＝phase 遷移で enabled が切り替わる（App は exportPhase を store から選んで渡す）。
+    let phase: ExportPhase = "idle";
+    const { rerender } = renderHook(() => useUndoRedoShortcuts(isUndoRedoEnabledFor("draft", phase)));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
+    expect(undo).toHaveBeenCalledTimes(1); // 書き出しでない＝効く
+
+    phase = "rendering"; rerender();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
+    expect(undo).toHaveBeenCalledTimes(1); // 書き出し中＝リスナ未登録で効かない（増えない）
+
+    phase = "idle"; rerender();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
+    expect(undo).toHaveBeenCalledTimes(2); // 完了後＝再び効く
   });
 });

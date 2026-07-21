@@ -4,7 +4,7 @@ import type { ScreenId } from "../data/mockData";
 import { ASSET_TYPE } from "../../domain/enums";
 import { pickPanelAsset } from "./materialsSelection";
 import { scenesUsingAsset } from "../../domain/project/assetUsage";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { PageHead, Switch } from "../components/ui";
@@ -65,6 +65,10 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 
 export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
   const { assets, scenes, templates, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
+  // 書き出し中は素材の追加/削除/編集を止める（store 側も #547 P2-1 でガード＝ここは無言 no-op を避ける表示側・ADR-0026④）。
+  // 進行中の書き出しが読むファイル/データと競合するため（プロジェクト切替 loadProject 等は #379 で既にガード済み）。
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
+  const addDisabled = isImporting || isExporting; // 「素材を追加」は取り込み中・書き出し中は押せない
   const [filter, setFilter] = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -127,12 +131,13 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         actions={
           <label
             className="btn btn-primary"
-            style={{ cursor: isImporting ? "default" : "pointer", opacity: isImporting ? 0.6 : 1 }}
+            style={{ cursor: addDisabled ? "default" : "pointer", opacity: addDisabled ? 0.6 : 1 }}
             role="button"
             tabIndex={0}
-            aria-disabled={isImporting}
+            aria-disabled={addDisabled}
+            title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}
             onClick={(e) => {
-              if (isImporting) { e.preventDefault(); return; }
+              if (addDisabled) { e.preventDefault(); return; }
               if (isTauri()) {
                 e.preventDefault();
                 void onPickAsset();
@@ -141,7 +146,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                if (isImporting) return;
+                if (addDisabled) return;
                 if (isTauri()) {
                   void onPickAsset();
                 } else {
@@ -152,7 +157,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           >
             <UploadIcon size={18} />
             {isImporting ? "取り込み中…" : "素材を追加"}
-            <input type="file" accept="image/*,video/*" onChange={onAddAsset} disabled={isImporting} style={{ display: "none" }} />
+            <input type="file" accept="image/*,video/*" onChange={onAddAsset} disabled={addDisabled} style={{ display: "none" }} />
           </label>
         }
       />
@@ -161,6 +166,12 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         <div className="notice notice-warn row-between mb" role="alert">
           <span>{importError}</span>
           <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+        </div>
+      )}
+
+      {isExporting && (
+        <div className="notice notice-info mb" role="status">
+          書き出し中は素材の追加・編集・削除ができません。書き出しが終わってからお試しください。
         </div>
       )}
 
@@ -217,6 +228,14 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               <AssetThumb type={selected.assetType} src={assetSrcById[selected.assetId]} size={28} />
             </div>
 
+            {isExporting && (
+              <p className="text-sm text-muted" style={{ margin: "0 0 var(--gap)" }}>
+                書き出し中は編集できません。書き出しが終わってからお試しください。
+              </p>
+            )}
+            {/* 書き出し中は編集控えを丸ごと隠す（無言 no-op を避ける＝ADR-0026④・store も #547 P2-1 でガード）。使用場面は下で常に表示。 */}
+            {!isExporting && (
+            <>
             {/* 動画クリップの「素材の既定」を編集（使う範囲・速度・元音声）。ここは asset.clip＝全場面の既定・Undo 対象外（ADR-0028 D3）。
                 場面ごとの調整は場面編集の per-use（scene.slotClips）で（そちらは Undo 可）。 */}
             {selected.assetType === ASSET_TYPE.video && (
@@ -326,6 +345,8 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 label="公開チェック済み"
               />
             </div>
+            </>
+            )}
 
             {/* 使用場面の逆引き（#406）：この素材を使っている場面へ1クリックで飛べる。削除の前に影響範囲も分かる。 */}
             <hr className="divider" />
@@ -334,7 +355,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               <UsedScenesRow scenes={usedScenes} onJump={jumpToScene} emptyText="まだどの場面でも使われていません。" />
             </div>
 
-            {confirmDeleteId === selected.assetId ? (
+            {!isExporting && (confirmDeleteId === selected.assetId ? (
               <DeleteConfirm
                 className="mt"
                 message={
@@ -356,7 +377,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 <TrashIcon size={16} />
                 この素材を削除
               </button>
-            )}
+            ))}
           </div>
         )}
       </div>
