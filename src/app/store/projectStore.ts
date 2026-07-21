@@ -65,10 +65,14 @@ export interface ExportRunState {
   // ユーザーが中止を要求したか（#380）。画面横断で保持し、書き出しの各段が「中止しました」で終えられるようにする。
   cancelling: boolean;
 }
-/** 書き出し中（rendering/encoding）か。再実行・プロジェクト切替/削除のブロック判定で共有（#379）。 */
+/** 書き出し中（rendering/encoding）か。再実行・プロジェクト切替/削除・素材編集のブロック判定で共有（#379/#547 P2-1）。 */
 export function isExportBusy(phase: ExportPhase): boolean {
   return phase === "rendering" || phase === "encoding";
 }
+// 書き出し中に素材/BGM を変更しようとしたときの案内（#547 P2-1・§2-5 次の行動）。ガードは無言 no-op にせず
+// これを出す＝素材画面以外（場面編集・ウィザードは importError を表示）からの操作でも「押しても効かない」を避ける（ADR-0026④）。
+const EXPORT_BUSY_ASSET_MSG = "書き出しが終わるまで、素材の追加や変更はできません。書き出しが終わってからお試しください。";
+const EXPORT_BUSY_BGM_MSG = "書き出しが終わるまで、BGM は変更できません。書き出しが終わってからお試しください。";
 const IDLE_EXPORT_RUN: ExportRunState = {
   phase: "idle",
   progress: { done: 0, total: 0 },
@@ -1133,17 +1137,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       bgmError: null,
     }));
   },
-  updateAsset: (assetId, update) =>
+  updateAsset: (assetId, update) => {
+    // 書き出し中はプロジェクトを固定する（#547 P2-1・#379 と同じ「書き出し中は編集不可」＝ADR-0026②）。書き出しは素材
+    // リストをスナップショットして進むので追加/削除/メタ編集は進行中の書き出しには波及しないが、画像/BGM の差し替えは
+    // 同一パスへ上書きするため（setAssetImage/setBgm）書き出しが disk から読むファイルと競合しうる＝一貫して止める。
+    // 無言 no-op にせず案内を出す（素材画面以外＝場面編集/ウィザードからの操作でも「押しても効かない」を避ける・ADR-0026④）。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; }
     set((s) => ({
       assets: s.assets.map((a) => (a.assetId === assetId ? update(a) : a)),
       saveStatus: "idle",
-    })),
-  removeAsset: (assetId) =>
+    }));
+  },
+  removeAsset: (assetId) => {
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; } // 書き出し中は固定（#547 P2-1）
     set((s) => {
       // 表示用 src（data URL）も即メモリから落とす（消した素材の src を残さない・#390）。
       const { [assetId]: _removed, ...assetSrcById } = s.assetSrcById;
       return { assets: s.assets.filter((a) => a.assetId !== assetId), assetSrcById, saveStatus: "idle" };
-    }),
+    });
+  },
   addTemplatePack: (incoming) =>
     set((s) => {
       // templateId で重複排除（取り込んだものが同IDの既存を上書き）。順序は既存→新規。
@@ -1249,6 +1261,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setExportRun: (patch) => set((s) => ({ exportRun: { ...s.exportRun, ...patch } })),
   setExportForm: (patch) => set((s) => ({ exportForm: { ...s.exportForm, ...patch } })),
   setAssetImage: async (assetId, file) => {
+    // 書き出し中は同一パスへの画像上書きを止める（書き出しが読んでいるファイルと競合して壊れる＝実害・#547 P2-1）。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; }
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開しない（#48・A3）。小さい画像のみ data URL で即時表示する。
     if (exceedsInlineAssetLimit(file.size)) {
@@ -1297,6 +1311,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   addAsset: async (file) => {
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; } // 書き出し中は固定（#547 P2-1）
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開せず、ネイティブ「開く」のパス0コピー取り込み（addAssetByPath）へ誘導する（#48・A3）。
     if (exceedsInlineAssetLimit(file.size)) {
@@ -1378,6 +1393,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // 真の0コピー取り込み（Tauri）：ネイティブ「開く」で選んだ絶対パスを Rust がコピーする。
   // JS は素材バイトを一切読まない。画像の表示用 data URL は取り込み後にディスクから読み戻す（ADR-0004）。
   addAssetByPath: async (path) => {
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; } // 書き出し中は固定（#547 P2-1）
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     const assetId = createAssetId(get().assets.map((a) => a.assetId));
     // パス末尾（ファイル名部分。/ と \ の両方に対応）から種別・拡張子・表示名を決める。
@@ -1431,6 +1447,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   clearImportError: () => set({ importError: null }),
   clearBgmError: () => set({ bgmError: null }),
   setBgm: async (file) => {
+    // BGM も素材（ASSET_TYPE.bgm）。差し替えは既存 assetId の同一パスへファイルを上書きするため、書き出しが読んで
+    // いる BGM ファイルと競合しうる＝setAssetImage と同クラスのハザード（#547 P2-1・ADR-0026②）。BgmPicker は bgmError を表示。
+    if (isExportBusy(get().exportRun.phase)) { set({ bgmError: EXPORT_BUSY_BGM_MSG }); return; }
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     set({ bgmError: null, isImporting: true });
     try {

@@ -6,7 +6,7 @@ import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider';
-import type { Scene } from '../../domain/project/types';
+import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
 function scene(id: string, order: number, partId = 'part_001'): Scene {
@@ -489,6 +489,83 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
 
     loadSpy.mockRestore();
     setLastSpy.mockRestore();
+  });
+});
+
+// #547 P2-1：素材の追加/削除/差し替え/編集も書き出し中はブロックする（#379 の素材版・ADR-0026②）。プロジェクト切替
+// (loadProject 等)は #379 でガード済みなのに素材編集だけ漏れていた。書き出しは素材リストをスナップショットして進むので
+// 追加/削除/メタ編集は進行中の書き出しに波及しないが、画像/BGM の同一パス上書き（setAssetImage/setBgm）は書き出しが
+// disk から読むファイルと競合しうる（実害）＝一貫して固定する。ガードは無言 no-op でなく案内(importError/bgmError)を出す
+// ＝素材画面以外（場面編集/ウィザードも importError 表示）からの操作でも「押しても効かない」を避ける（ADR-0026④）。
+describe('projectStore 書き出し中は素材編集を弾く（#547 P2-1・ADR-0026②）', () => {
+  const asset = (id: string): Asset => ({ assetId: id, assetType: 'image', displayName: id, filePath: `assets/${id}.png` });
+  const BUSY_MSG = /書き出しが終わるまで/; // ガードが出す案内（無言 no-op でない＝ADR-0026④）
+  beforeEach(() => {
+    useProjectStore.setState({
+      meta: { ...useProjectStore.getState().meta, projectId: 'proj_open' },
+      assets: [asset('asset_001')],
+      assetSrcById: { asset_001: 'data:image/png;base64,x' },
+      importError: null,
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+    });
+  });
+  // 書き出し中フェーズを次の describe へ漏らさない（startBlank 等は #379 で exportRun ガード＝leak すると後続が no-op で落ちる）。
+  afterEach(() => useProjectStore.getState().setExportRun({ phase: 'idle' }));
+
+  it('書き出し中は removeAsset が no-op＋案内を出す／idle では消える', () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.getState().removeAsset('asset_001');
+    expect(useProjectStore.getState().assets).toHaveLength(1); // no-op
+    expect(useProjectStore.getState().assetSrcById.asset_001).toBeDefined(); // src も落とさない
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG); // 無言でない
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().removeAsset('asset_001');
+    expect(useProjectStore.getState().assets).toHaveLength(0); // idle では通常どおり消える
+  });
+
+  it('書き出し中は updateAsset が no-op（保存も idle にしない）＋案内／idle では反映', () => {
+    useProjectStore.getState().setExportRun({ phase: 'encoding' });
+    useProjectStore.setState({ saveStatus: 'saved' });
+    useProjectStore.getState().updateAsset('asset_001', (a) => ({ ...a, displayName: 'changed' }));
+    expect(useProjectStore.getState().assets[0].displayName).toBe('asset_001'); // no-op
+    expect(useProjectStore.getState().saveStatus).toBe('saved'); // 未保存(idle)にも倒さない
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG);
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().updateAsset('asset_001', (a) => ({ ...a, displayName: 'changed' }));
+    expect(useProjectStore.getState().assets[0].displayName).toBe('changed'); // idle では反映
+  });
+
+  it('書き出し中は addAssetByPath が no-op＋案内／idle では素材を増やす（ガード反転も検知）', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    await useProjectStore.getState().addAssetByPath('/some/where/photo.png');
+    expect(useProjectStore.getState().assets).toHaveLength(1); // 増えない（ガードが最初に返る）
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG);
+    // idle 対照：非 Tauri でも楽観追加は走る（importAssetByPath は null 返しでもストア追加は残る）＝ガード条件反転を検知。
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    await useProjectStore.getState().addAssetByPath('/some/where/photo.png');
+    expect(useProjectStore.getState().assets.length).toBeGreaterThan(1);
+  });
+
+  it('書き出し中は setAssetImage/addAsset が no-op＋案内（file に触れる前に返る）', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.setState({ importError: null });
+    await useProjectStore.getState().setAssetImage('asset_001', {} as File); // ガードが最初＝File は読まない
+    // 案内を検証する（node は FileReader 未定義で filePath/isImporting はガード有無に依らず不変＝判別力が無いため案内で見る）。
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG); // ガードを外すと別メッセージ/未設定になり red
+    expect(useProjectStore.getState().assets[0].filePath).toBe('assets/asset_001.png'); // 差し替わらない
+    expect(useProjectStore.getState().isImporting).toBe(false); // 取り込みにも入らない
+    useProjectStore.setState({ importError: null });
+    await useProjectStore.getState().addAsset({} as File);
+    expect(useProjectStore.getState().assets).toHaveLength(1); // 増えない
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG);
+  });
+
+  it('書き出し中は setBgm が no-op＋BGM 用の案内（bgmError）', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.setState({ bgmError: null });
+    await useProjectStore.getState().setBgm({ name: 'song.mp3', dataUrl: 'data:audio/mp3;base64,x' });
+    expect(useProjectStore.getState().assets.some((a) => a.assetType === 'bgm')).toBe(false); // BGM は入らない
+    expect(useProjectStore.getState().bgmError).toMatch(BUSY_MSG); // BGM ピッカーが見せる案内
   });
 });
 
