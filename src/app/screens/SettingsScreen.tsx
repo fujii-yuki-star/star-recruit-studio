@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
@@ -273,6 +274,9 @@ export function SettingsScreen() {
             </p>
           </div>
 
+          {/* 話す速さ/高さ/抑揚は updateVoiceSettings＝書き出し中は固定（#570 P1）。生成パラメタなので今回のMP4は不変だが、
+              無言 no-op を避けて理由を示す（ADR-0026④）。声のクレジット/接続先/キャラは対象外なので section 全体でなくここに置く。 */}
+          <ExportLockBanner />
           <div className="field">
             <label className="field-label" htmlFor="speed">
               話す速さ

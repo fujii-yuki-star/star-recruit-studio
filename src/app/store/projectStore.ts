@@ -858,6 +858,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (get().meta.projectId === projectId) set((s) => ({ meta: { ...s.meta, projectName: name, updatedAt } }));
   },
   updateScene: (sceneId, update) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     get().pushHistory(); // 適用前を履歴へ（ドラッグ中はグループ化で1ステップに合成・#211）
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
@@ -866,6 +867,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   addOverlayClip: (clip) => {
+    if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const clips = get().meta.timelineOverlay?.clips ?? [];
     const id = createOverlayClipId(clips.map((c) => c.id));
     // 既定＝telop・開始0秒・長さ3秒。呼び出し側でアンカー場面/開始秒/文言を上書きする。
@@ -878,6 +880,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return id;
   },
   updateOverlayClip: (id, patch) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     get().pushHistory();
     set((s) => ({
       meta: {
@@ -891,6 +894,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   removeOverlayClip: (id) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     get().pushHistory();
     set((s) => ({
       meta: {
@@ -904,6 +908,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   addAnimation: (sceneId, targetId, keyframes) => {
+    if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const anims = get().meta.timelineOverlay?.animations ?? [];
     const id = createAnimationId(anims.map((a) => a.id));
     const newAnim: ElementAnimation = { id, sceneId, targetId, keyframes };
@@ -915,6 +920,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return id;
   },
   updateAnimation: (animId, keyframes) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     get().pushHistory();
     set((s) => ({
       meta: {
@@ -928,6 +934,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   removeAnimation: (animId) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     get().pushHistory();
     set((s) => ({
       meta: {
@@ -941,6 +948,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   addScene: () => {
+    if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const s = get();
     // 追加場面の見た目は末尾（直前）の場面から引き継ぐ＝連続作成が自然で、先頭テンプレ（オープニング）固定にならない（#528）。
     // 場面が無ければ先頭テンプレ。末尾場面のテンプレがダングリング（削除済み等）でも先頭テンプレへ落ちる。
@@ -980,6 +988,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return sceneId;
   },
   removeScene: (sceneId) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     get().pushHistory();
     set((s) => ({
       // 削除して order を 1..N に振り直す（表示順＝配列順を保つ）。
@@ -998,6 +1007,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   moveScene: (sceneId, direction) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const s = get();
     const next = moveSceneInList(s.scenes, s.parts, sceneId, direction);
     if (next.scenes === s.scenes) return; // 端＝変化なし（未保存にしない）
@@ -1005,6 +1015,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ ...next, saveStatus: "idle" });
   },
   moveSceneToIndex: (sceneId, toIndex) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const s = get();
     const next = moveSceneToIndexInList(s.scenes, s.parts, sceneId, toIndex);
     if (next.scenes === s.scenes) return; // 位置不変/対象なし＝変化なし（未保存/履歴にしない）
@@ -1012,6 +1023,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ ...next, saveStatus: "idle" });
   },
   duplicateScene: (sceneId) => {
+    if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = duplicateSceneInList(s.scenes, s.parts, sceneId, newId);
@@ -1022,6 +1034,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return newId;
   },
   splitScene: (sceneId, splitIndex) => {
+    if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = splitSceneInList(s.scenes, s.parts, sceneId, splitIndex, newId);
@@ -1032,6 +1045,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return newId;
   },
   splitSceneAtLine: (sceneId, lineIndex) => {
+    if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const s = get();
     const newId = createSceneId(s.scenes.map((x) => x.sceneId));
     const next = splitSceneLinesInList(s.scenes, s.parts, sceneId, lineIndex, newId);
@@ -1042,6 +1056,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return newId;
   },
   removeAnimationsForElements: (sceneId, targetIds) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const anims = get().meta.timelineOverlay?.animations;
     if (!anims || anims.length === 0) return;
     const rest = removeAnimationsForTargets(anims, sceneId, targetIds);
@@ -1053,6 +1068,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   applyProjectInfo: (input) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     get().pushHistory();
     set((s) => ({
       // ADR-0011: videoKind で会社情報/発表内容を排他に持つ。渡されなかった側を undefined にして
@@ -1078,6 +1094,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   changeOrientation: (target) => {
+    if (isExportBusy(get().exportRun.phase)) return { changed: 0, unsupported: 0 }; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     const s = get();
     const result = changeScenesOrientation(s.scenes, s.templates, target);
     // 1件も切り替えられない（既に目標向き or 対応する見た目なし）なら向き・場面とも変えない。
@@ -1093,6 +1110,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return { changed: result.changed, unsupported: result.unsupported };
   },
   setFontId: (fontId) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, fontId } },
@@ -1100,12 +1118,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   setProjectName: (name) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     // 編集中の名前変更＝メモリの meta を更新（保存/自動保存で永続化）。UI 側は blur/Enter で確定＝1改名=1履歴。
     // 上限で切り詰め＝schema の projectName maxLength(80) 超をメモリにも入れない（貼り付け等の保険・#411）。
     get().pushHistory();
     set((s) => ({ meta: { ...s.meta, projectName: name.slice(0, PROJECT_NAME_MAX_LENGTH) }, saveStatus: "idle" }));
   },
   updateVoiceSettings: (patch) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
     get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, voiceSettings: { ...s.meta.voiceSettings, ...patch } },
@@ -1515,6 +1535,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   generateNarration: async (sceneId, opts) => {
+    // 書き出し中は声を作らない（#570 P1 レビュー）。書き出しは開始時 snapNarration を使うので、いま作った声は
+    // 保存/プレビューには入るが今のMP4には入らない＝バナー「編集できません」と挙動が矛盾する（15§4・ADR-0026④）。
+    if (isExportBusy(get().exportRun.phase)) return;
     const scene = get().scenes.find((s) => s.sceneId === sceneId);
     if (!scene) return;
     // 全場面生成中は個別呼び出し（UI/他画面/テストからの直接呼び出し）を弾く。bulk 自身は fromBulk で通す。
@@ -1658,6 +1681,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
   generateAllNarrations: async () => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は声を作らない（#570 P1 レビュー・15§4・snapNarration とMP4が食い違う）
     if (get().isGeneratingNarration) return;
     set({ isGeneratingNarration: true });
     try {

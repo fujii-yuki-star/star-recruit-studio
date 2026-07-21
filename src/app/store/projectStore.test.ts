@@ -619,6 +619,84 @@ describe('projectStore 取り込み↔書き出しの相互排他（#570 P1）',
   });
 });
 
+// #570 P1 レビュー：素材/BGM だけでなく**全ての文書編集**（場面・音声・構成）を書き出し中は固定する（15§4・ADR-0026④）。
+// 書き出しは開始時スナップショットで進むので、編集すると「画面/保存は新・MP4 は旧」の不一致になる。UI はバナー/無効化で理由を示す。
+describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4）', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      scenes: [scene('scene_001', 1)],
+      parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
+      past: [], future: [],
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+    });
+  });
+  afterEach(() => useProjectStore.getState().setExportRun({ phase: 'idle' }));
+
+  it('updateScene は書き出し中 no-op／idle では反映（場面内容が MP4 と食い違わない）', () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.getState().updateScene('scene_001', (sc) => ({ ...sc, durationSec: 99 }));
+    expect(useProjectStore.getState().scenes[0].durationSec).toBe(8); // no-op
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().updateScene('scene_001', (sc) => ({ ...sc, durationSec: 99 }));
+    expect(useProjectStore.getState().scenes[0].durationSec).toBe(99); // idle では反映
+  });
+
+  it('updateVoiceSettings（読み上げ音量）は書き出し中 no-op／idle では反映', () => {
+    useProjectStore.getState().updateVoiceSettings({ volume: 0.7 }); // idle（beforeEach）で設定
+    expect(useProjectStore.getState().meta.voiceSettings?.volume).toBe(0.7);
+    useProjectStore.getState().setExportRun({ phase: 'encoding' });
+    useProjectStore.getState().updateVoiceSettings({ volume: 0.2 });
+    expect(useProjectStore.getState().meta.voiceSettings?.volume).toBe(0.7); // no-op（0.2 にならない）
+  });
+
+  it('場面構成（addScene/removeScene）も書き出し中は固定＝MP4 の場面と食い違わない', () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    expect(useProjectStore.getState().addScene()).toBe(''); // 追加しない（sentinel）
+    expect(useProjectStore.getState().scenes).toHaveLength(1);
+    useProjectStore.getState().removeScene('scene_001');
+    expect(useProjectStore.getState().scenes).toHaveLength(1); // 消えない
+  });
+
+  // 全20の文書編集アクションは同型の1行ガード。代表テストで「書き出し中は pushHistory 前に返る＝履歴を積まない」を一括検証
+  // （ガードを外すと各アクションが pushHistory して past が伸び red 化＝回帰検知・#570 P1 レビュー tests）。
+  it.each<[string, () => void]>([
+    ['updateScene', () => useProjectStore.getState().updateScene('scene_001', (sc) => ({ ...sc, durationSec: 5 }))],
+    ['moveScene', () => useProjectStore.getState().moveScene('scene_001', 'up')],
+    ['moveSceneToIndex', () => useProjectStore.getState().moveSceneToIndex('scene_001', 0)],
+    ['duplicateScene', () => { useProjectStore.getState().duplicateScene('scene_001'); }],
+    ['splitScene', () => { useProjectStore.getState().splitScene('scene_001', 1); }],
+    ['addAnimation', () => { useProjectStore.getState().addAnimation('scene_001', 'el_1', []); }],
+    ['updateAnimation', () => useProjectStore.getState().updateAnimation('anim_1', [])],
+    ['removeAnimation', () => useProjectStore.getState().removeAnimation('anim_1')],
+    ['removeAnimationsForElements', () => useProjectStore.getState().removeAnimationsForElements('scene_001', ['el_1'])],
+    ['addOverlayClip', () => { useProjectStore.getState().addOverlayClip({ track: 'telop' }); }],
+    ['updateOverlayClip', () => useProjectStore.getState().updateOverlayClip('clip_1', { startSec: 1 })],
+    ['removeOverlayClip', () => useProjectStore.getState().removeOverlayClip('clip_1')],
+    ['applyProjectInfo', () => useProjectStore.getState().applyProjectInfo({ companyInfo: { name: 'x' } } as never)],
+    ['changeOrientation', () => { useProjectStore.getState().changeOrientation('9:16'); }],
+    ['setFontId', () => useProjectStore.getState().setFontId('gen-interface-jp' as never)],
+    ['setProjectName', () => useProjectStore.getState().setProjectName('x')],
+    ['updateVoiceSettings', () => useProjectStore.getState().updateVoiceSettings({ volume: 0.4 })],
+  ])('%s は書き出し中に履歴を積まない＝ガードが pushHistory 前に返る', (_name, act) => {
+    useProjectStore.setState({ past: [] });
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    act();
+    expect(useProjectStore.getState().past).toHaveLength(0); // ガードで文書に触れず返る（idle なら pushHistory で past が伸びる）
+  });
+
+  // 音声生成も固定（#570 P1 レビュー・履歴外＝pushHistory 走査の外）。書き出しは snapNarration を使うので、書き出し中に
+  // 声を作ると「保存/プレビューには入るが今のMP4には入らない」＝バナー「編集できません」と矛盾する。
+  it('generateNarration / generateAllNarrations は書き出し中 no-op（声を作らない）', async () => {
+    useProjectStore.setState({ scenes: [{ ...scene('scene_001', 1), narration: { text: 'こんにちは', status: 'none' } }] });
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    await useProjectStore.getState().generateNarration('scene_001');
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('none'); // 生成しない（ガードが最初に返る）
+    await useProjectStore.getState().generateAllNarrations();
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('none');
+    expect(useProjectStore.getState().isGeneratingNarration).toBe(false); // 一括生成にも入らない
+  });
+});
+
 describe('projectStore autoGenerateIfSafe（#384・§2-6：自動生成が送信前確認を迂回しない）', () => {
   const realGenerate = useProjectStore.getState().generate;
   afterEach(() => {

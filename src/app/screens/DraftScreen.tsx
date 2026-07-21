@@ -8,6 +8,7 @@ import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
 import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import { YukoPanel } from "../components/YukoPanel";
@@ -98,6 +99,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
     return (
       <div className="main-scroll">
         <PageHead title="動画のたたき台を確認" desc="台本表で場面を確認・修正できます。" />
+        <ExportLockBanner />
         <EmptyState
           title={status === "generating" ? "動画案を作成中です…" : started ? "場面を追加して作り始めましょう" : "まだ動画案がありません"}
           message={
@@ -132,6 +134,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                 : "台本表を見ながら、場面を自由に足したり並べ替えたり直したりできます。"
             }
           />
+          <ExportLockBanner />
 
           {/* 取り消し/やり直し（#413）＝たたき台の削除・並べ替えも戻せる。キーボードは Ctrl+Z/Y（App で登録・この画面は有効・#547 P1-1）。 */}
           <div className="row gap-sm" style={{ justifyContent: "flex-end", marginBottom: "var(--gap-sm)" }}>

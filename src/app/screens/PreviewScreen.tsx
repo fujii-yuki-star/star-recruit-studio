@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { EmptyState } from "../components/states";
 import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
@@ -484,6 +485,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         title="仕上がり確認"
         desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。"
       />
+      <ExportLockBanner />
 
       {/* 多入口（たたき台/場面編集/書き出し）のため、開いた側が記録した「来た画面」へ戻る（#410 sub3・タイムライン編集と同じ上左パターン）。 */}
       <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
@@ -657,11 +659,13 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <NarrationVolumeControl
               volume={liveNarrationVolume}
               onChange={(v) => updateVoiceSettings({ volume: v })}
-              disabled={sceneNarrationOverride}
+              disabled={sceneNarrationOverride || isExporting}
               hint={
-                sceneNarrationOverride
-                  ? "いまの場面は個別の声量が設定されています。下の「場面を直す」で変えられます。"
-                  : "読み上げの声の大きさです。再生しながらでもその場で変わります。"
+                isExporting
+                  ? "書き出し中は声の大きさを変えられません。書き出しが終わってからお試しください。"
+                  : sceneNarrationOverride
+                    ? "いまの場面は個別の声量が設定されています。下の「場面を直す」で変えられます。"
+                    : "読み上げの声の大きさです。再生しながらでもその場で変わります。"
               }
             />
           </div>

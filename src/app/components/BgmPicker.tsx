@@ -33,12 +33,13 @@ export function BgmPicker({ disabled = false, note }: { disabled?: boolean; note
   // 明示的に「なし（enabled=false）」にした場合は触らない。
   const didInit = useRef(false);
   useEffect(() => {
+    if (disabled) return; // disabled 中は自動初期化しない（書き出し中は setBundledBgm がガードされ、操作していないのに bgmError が出る・#570 P2）。didInit も立てず、解除後に初期化できるようにする。
     if (didInit.current) return;
     didInit.current = true;
     if (bgmSettings?.enabled !== false && !bgmSettings?.bundledBgmId && !bgmAsset) {
       setBundledBgm(BGM_CATALOG[0].id);
     }
-  }, [bgmSettings, bgmAsset, setBundledBgm]);
+  }, [disabled, bgmSettings, bgmAsset, setBundledBgm]);
 
   function onPickBgm(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
