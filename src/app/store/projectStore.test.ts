@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isExportBusy, useProjectStore } from './projectStore';
 import * as fsMod from '../../infrastructure/projectFs';
+import * as assetFsMod from '../../infrastructure/assetFs';
 import * as aiClient from '../../infrastructure/aiClient';
 import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
@@ -566,6 +567,55 @@ describe('projectStore 書き出し中は素材編集を弾く（#547 P2-1・ADR
     await useProjectStore.getState().setBgm({ name: 'song.mp3', dataUrl: 'data:audio/mp3;base64,x' });
     expect(useProjectStore.getState().assets.some((a) => a.assetType === 'bgm')).toBe(false); // BGM は入らない
     expect(useProjectStore.getState().bgmError).toMatch(BUSY_MSG); // BGM ピッカーが見せる案内
+  });
+
+  // #570 P1 レビュー：標準BGMの選択・音量・オンオフ（updateBgmSettings/setBundledBgm）も書き出し中は固定する。
+  it('書き出し中は updateBgmSettings / setBundledBgm が no-op＋BGM案内（設定だけ変わって効かないを防ぐ）', () => {
+    useProjectStore.getState().setExportRun({ phase: 'encoding' });
+    useProjectStore.setState({
+      bgmError: null,
+      meta: { ...useProjectStore.getState().meta, bgmSettings: { enabled: true, volume: 0.25, bundledBgmId: undefined, assetId: null } },
+    });
+    useProjectStore.getState().updateBgmSettings({ volume: 0.5 });
+    expect(useProjectStore.getState().meta.bgmSettings?.volume).toBe(0.25); // no-op（音量は変わらない）
+    expect(useProjectStore.getState().bgmError).toMatch(BUSY_MSG);
+    useProjectStore.setState({ bgmError: null });
+    useProjectStore.getState().setBundledBgm('bundled_x' as never);
+    expect(useProjectStore.getState().meta.bgmSettings?.bundledBgmId).toBeUndefined(); // no-op（曲は変わらない）
+    expect(useProjectStore.getState().bgmError).toMatch(BUSY_MSG);
+  });
+});
+
+// #570 P1 レビュー：取り込みと書き出し開始の相互排他。取り込みは最初の await 前に isImporting を立て、書き込み直前に
+// 再チェックする。書き出し側（ExportScreen）は開始前に isImporting を見て止まる（別ファイルのコンポーネントテストで検証）。
+describe('projectStore 取り込み↔書き出しの相互排他（#570 P1）', () => {
+  const BUSY_MSG = /書き出しが終わるまで/;
+  beforeEach(() => {
+    useProjectStore.setState({
+      meta: { ...useProjectStore.getState().meta, projectId: 'proj_open' },
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: 'A', filePath: 'assets/asset_001.png' }],
+      assetSrcById: { asset_001: 'data:image/png;base64,x' },
+      importError: null,
+      isImporting: false,
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+    });
+  });
+  afterEach(() => { useProjectStore.getState().setExportRun({ phase: 'idle' }); useProjectStore.setState({ isImporting: false }); });
+
+  it('取り込みは最初の await の前に isImporting を立て、待機中に書き出しが始まったら上書きせず戻る（残り窓）', async () => {
+    // fileToDataUrl を保留にして「取り込みの await 中」を作る（deferred mock＝競合の再現）。
+    let resolveRead!: (v: string) => void;
+    const spy = vi.spyOn(assetFsMod, 'fileToDataUrl').mockReturnValue(new Promise<string>((r) => { resolveRead = r; }));
+    const p = useProjectStore.getState().setAssetImage('asset_001', {} as File); // fileToDataUrl で待機
+    expect(useProjectStore.getState().isImporting).toBe(true); // 最初の await の前にロック取得済み（書き出し側はこれを見て止まる）
+    // 待機中に書き出しが始まる（開始チェックをすり抜けた残り窓）。
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    resolveRead('data:image/png;base64,NEW');
+    await p;
+    expect(useProjectStore.getState().assets[0].filePath).toBe('assets/asset_001.png'); // 同一パスを上書きしていない
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG); // 黙って壊さず理由を出す（ADR-0026④）
+    expect(useProjectStore.getState().isImporting).toBe(false); // ロックは解放
+    spy.mockRestore();
   });
 });
 

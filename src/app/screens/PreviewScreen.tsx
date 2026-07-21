@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
 import { EmptyState } from "../components/states";
@@ -262,6 +262,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // 誤認を防ぐ・#465 レビュー P1）。声・BGM は別個に判定する（声だけ個別なら BGM は操作可・その逆も）。
   const sceneNarrationOverride = current?.audioMix?.narrationVolume != null;
   const sceneBgmOverride = current?.bgmSettings !== undefined;
+  // 書き出し中は BGM 設定を変えられない（store も #570 P1 でガード＝ここは無言化を避ける proactive な無効化・ADR-0026④）。
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   // 音量を再生中の音声へその場で反映する（頭出ししない＝掛け合いも先頭行へ戻さない・#465/#392）。100% 境界
   // （要素 .volume ↔ GainNode）を跨ぐ変更も attachVolume が内部で経路を載せ替えて吸収するため、再生 effect は
   // 張り直さない＝音声だけ場面頭へ戻り映像/アニメ/テロップの時計と乖離する不整合を作らない（#465 レビュー P1）。
@@ -639,8 +641,14 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             音楽と読み上げの声の大きさを整えて、バランスを確かめられます。
           </p>
           <BgmPicker
-            disabled={sceneBgmOverride}
-            note={sceneBgmOverride ? "いまの場面は個別のBGMが設定されています。下の「場面を直す」で変えられます。" : undefined}
+            disabled={sceneBgmOverride || isExporting}
+            note={
+              isExporting
+                ? "書き出し中はBGMを変えられません。書き出しが終わってからお試しください。"
+                : sceneBgmOverride
+                  ? "いまの場面は個別のBGMが設定されています。下の「場面を直す」で変えられます。"
+                  : undefined
+            }
           />
           {/* ナレーション音量をここに併置（#407）＝BGM とのバランスを調整できる。声・BGM とも再生中はその場で反映する
               （#465/#392）。ただし「いまの場面が個別の声量/BGM」のときは全体スライダーでは変わらない（§6＝個別が優先）ため、

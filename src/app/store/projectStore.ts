@@ -1113,6 +1113,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   updateBgmSettings: (patch) => {
+    // 書き出し中は BGM 設定（曲/音量/オンオフ）も固定する（#547 P2-1 レビュー・#570 P1）。設定だけ変わって進行中の
+    // 書き出し（スナップショット）に効かない「設定できるのに効かない」を避ける（ADR-0026④）。BgmPicker が bgmError を表示。
+    if (isExportBusy(get().exportRun.phase)) { set({ bgmError: EXPORT_BUSY_BGM_MSG }); return; }
     get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, bgmSettings: { ...s.meta.bgmSettings, ...patch } },
@@ -1120,6 +1123,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
   setBundledBgm: (bundledBgmId) => {
+    if (isExportBusy(get().exportRun.phase)) { set({ bgmError: EXPORT_BUSY_BGM_MSG }); return; } // 書き出し中は固定（#570 P1・ADR-0026④）
     get().pushHistory();
     set((s) => ({
       meta: {
@@ -1270,16 +1274,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ importError: `この画像は大きすぎます（上限${limitMb}MB）。別の小さい画像を選び直してください。` });
       return;
     }
+    // 最初の await の前に取り込みロック(isImporting)を取得＝書き出し開始と相互排他（#570 P1）。書き出し側は開始前に
+    // isImporting を見て止まる（ExportScreen）。以降は全ての離脱経路で isImporting を戻す（下の catch/finally）。
+    set({ isImporting: true });
     // 画像は表示＋書き出し(ADR-0004)で data URL が必要。読み込んで即時表示。
     let dataUrl: string;
     try {
       dataUrl = await fileToDataUrl(file);
     } catch {
-      set({ importError: "画像を読み込めませんでした。別の画像をお選びください。" }); // §2-5：次の行動。
+      set({ importError: "画像を読み込めませんでした。別の画像をお選びください。", isImporting: false }); // §2-5：次の行動。
       return;
     }
+    // 読み込み中に書き出しが始まっていたら、表示も上書きもせず戻る（開始チェックをすり抜けた残り窓・#570 P1）。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG, isImporting: false }); return; }
     set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: dataUrl }, importError: null }));
-    set({ isImporting: true });
     try {
       // 保存先フォルダの名前空間のため projectId を確保する。
       let projectId = get().meta.projectId;
@@ -1332,6 +1340,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       displayName: baseName.trim() || "新しい素材",
       filePath: `assets/${fileName}`,
     };
+    // 最初の await の前に取り込みロック(isImporting)を取得＝書き出し開始と相互排他（#570 P1）。以降の離脱は isImporting を戻す。
+    set({ isImporting: true });
     // 画像は表示＋書き出し(ADR-0004)で data URL が要る。動画は表示用srcを持たない
     //（サムネは別途・書き出しはスロットを別経路で合成＝src不要。ADR-0006）。
     let dataUrl: string | undefined;
@@ -1339,10 +1349,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       try {
         dataUrl = await fileToDataUrl(file);
       } catch {
-        set({ importError: "画像を読み込めませんでした。別の画像をお選びください。" }); // §2-5。素材は追加しない。
+        set({ importError: "画像を読み込めませんでした。別の画像をお選びください。", isImporting: false }); // §2-5。素材は追加しない。
         return;
       }
     }
+    // 読み込み中に書き出しが始まっていたら、一覧に足さず戻る（開始チェックをすり抜けた残り窓・#570 P1）。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG, isImporting: false }); return; }
     // 即時：一覧へ追加（画像は表示も）。素材追加で未保存に戻す（「保存しました」取り残し防止）。
     set((s) => ({
       assets: [...s.assets, asset],
@@ -1351,7 +1363,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       importError: null,
     }));
     // 永続化（プロジェクトフォルダへコピー）。
-    set({ isImporting: true });
     try {
       let projectId = get().meta.projectId;
       if (!projectId) {
@@ -1468,6 +1479,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const assetId =
         existingBgm?.assetId ?? createBgmId(baseName, get().assets.map((a) => a.assetId));
       const fileName = `${assetId}.${ext}`;
+      // 書き込み直前に再チェック：await 中に書き出しが始まっていたら、既存 BGM の同一パスを上書きせず戻る（#570 P1）。
+      if (isExportBusy(get().exportRun.phase)) { set({ bgmError: EXPORT_BUSY_BGM_MSG }); return; }
       // 先に取り込み（失敗時はストアを変えない＝ゴースト防止）。Tauri 非検出時は null（非永続）。
       const filePath = await importAssetFile(projectId, fileName, file.dataUrl);
       const asset: Asset = {
