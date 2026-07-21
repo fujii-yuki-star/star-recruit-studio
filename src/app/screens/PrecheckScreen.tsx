@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { PrecheckItem, ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { buildPrecheckItems } from "../adapters";
 import { PageHead } from "../components/ui";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -20,6 +20,7 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, generateAllNarrations, isGeneratingNarration, narrationError } = useProjectStore();
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
   // 書き出し能力（標準方式 h264_mf の可用性）の事前検知（#120）。Tauri 環境でのみ取得。
   const [capability, setCapability] = useState<ExportCapability | null>(null);
 
@@ -131,7 +132,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                         <button
                           className="btn btn-ghost btn-icon text-sm"
                           onClick={() => void generateAllNarrations()}
-                          disabled={isGeneratingNarration}
+                          disabled={isGeneratingNarration || isExporting}
                         >
                           {isGeneratingNarration ? "作成中…" : item.action}
                         </button>

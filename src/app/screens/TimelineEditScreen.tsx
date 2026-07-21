@@ -11,7 +11,7 @@ import { DeleteConfirm } from "../components/DeleteConfirm";
 import type { ClipDragMode } from "../components/TimelineView";
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { PageHead } from "../components/ui";
-import { ExportLockBanner } from "../components/ExportLockBanner";
+import { ExportLock } from "../components/ExportLockBanner";
 import { ArrowLeftIcon } from "../components/icons";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 
@@ -87,7 +87,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
         title="タイムラインを編集"
         desc="テロップ（字幕）を足して、時間軸の位置や文言を調整できます。編集した内容は上の「保存」で保存されます。"
       />
-      <ExportLockBanner />
+      <ExportLock>
 
       <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
         <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("timeline")}>
@@ -175,6 +175,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
           </p>
         )}
       </div>
+      </ExportLock>
     </div>
   );
 }

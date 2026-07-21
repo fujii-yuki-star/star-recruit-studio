@@ -695,6 +695,35 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     expect(useProjectStore.getState().scenes[0].narration.status).toBe('none');
     expect(useProjectStore.getState().isGeneratingNarration).toBe(false); // 一括生成にも入らない
   });
+
+  it('generate（動画案生成）は書き出し中 no-op（生成を始めない）', async () => {
+    useProjectStore.setState({ scenes: [], status: 'ready' });
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    await useProjectStore.getState().generate();
+    expect(useProjectStore.getState().status).not.toBe('generating'); // 開始しない（ガードが status チェックの直後で返る）
+    expect(useProjectStore.getState().scenes).toHaveLength(0);
+  });
+
+  // 「生成開始→（残り窓で）書き出し開始→生成完了」の往復（deferred synthesize）。開始チェックをすり抜けても、完了側が
+  // 書き出し中を再確認して音声を書き込まない＝無音MP4/「保存だけ新」の不整合を防ぐ（#570 P1 レビュー・完了側の再確認）。
+  it('声作成中に書き出しが始まり合成が完了しても、音声を書き込まず none へ戻す', async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene('scene_001', 1), narration: { text: 'こんにちは', status: 'none' } }],
+      narrationAudioById: {}, isGeneratingNarration: false,
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+    });
+    let resolveSynth: (v: unknown) => void = () => {};
+    const synthP = new Promise((r) => { resolveSynth = r; });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockReturnValue(synthP as never);
+    const genP = useProjectStore.getState().generateNarration('scene_001'); // 開始＝synth 待ちで pending（開始時は idle なので top ガードは通る）
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('pending');
+    useProjectStore.getState().setExportRun({ phase: 'rendering' }); // 合成 in-flight 中に書き出しが始まる（すり抜けた残り窓）
+    resolveSynth({ audioDataUrl: 'data:audio/wav;base64,AAAA', durationSec: 1 }); // 裏で合成完了
+    await genP;
+    expect(useProjectStore.getState().narrationAudioById['scene_001']).toBeUndefined(); // 音声を書き込まない
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('none'); // 作り直せるよう none へ
+    spy.mockRestore();
+  });
 });
 
 describe('projectStore autoGenerateIfSafe（#384・§2-6：自動生成が送信前確認を迂回しない）', () => {

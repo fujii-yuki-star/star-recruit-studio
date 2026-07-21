@@ -17,3 +17,9 @@ export function narrationProgress(scenes: Scene[]): { done: number; total: numbe
   }
   return { done, total };
 }
+
+// 音声生成が進行中（pending の行が1つでもある）か。書き出し開始のブロック判定で共有する正準関数
+// （#570 P1 レビュー・#547 P2-6）。掛け合いは sceneLines で行ごとに見る＝pending 行を取りこぼさない。
+export function isNarrationGenerating(scenes: Scene[]): boolean {
+  return scenes.some((scene) => sceneLines(scene).some((line) => line.status === NARRATION_STATUS.pending));
+}

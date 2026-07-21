@@ -16,6 +16,7 @@ import { exportEncodePercent, exportPhaseLabel } from "../../domain/export/expor
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
@@ -109,24 +110,25 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setBgmWarning("");
     setOpenError(""); // 前回の「開けなかった/再生できなかった」表示を持ち越さない（新しい書き出しの成功に残らないように・#404 P2）
     setExportRun({ cancelling: false }); // 前回の中止要求を持ち越さない（#380）
-    // 取り込み中は書き出しを始めない（#570 P1・相互排他）。進行中の素材/BGM 取り込みが同一パスへ上書きし、書き出しが
-    // 後から読む実ファイルと競合して「混在/壊れた MP4」になるのを防ぐ。取り込み側は最初の await 前に isImporting を立てる
-    // ので、ここで見れば取り込み↔書き出しが排他になる（黙って壊さず理由を出す＝§2-5/ADR-0026④）。
-    if (useProjectStore.getState().isImporting) {
-      setMessage("素材の取り込み中です。取り込みが終わってから書き出してください。");
-      setPhase("error");
-      return;
-    }
+    // 取り込み・生成中は書き出しを始めない（#570 P1・相互排他＝§2-5/ADR-0026④）。進行中の素材取り込みは同一パス上書きで
+    // 「壊れたMP4」に、進行中の音声/動画案生成は開始時 snap の外で完了して「保存/画面は新・MP4 は旧（無音MP4が成功扱い）」に
+    // なる（#547 P2-6）。取り込みは最初の await 前に isImporting を、生成は pending 行/フラグを立てるので、ここで見れば排他になる。
+    const startBlockedMessage = (): string | null => {
+      const st = useProjectStore.getState();
+      if (st.isImporting) return "素材の取り込み中です。取り込みが終わってから書き出してください。";
+      if (st.status === "generating") return "動画案を作成中です。作成が終わってから書き出してください。";
+      if (st.isGeneratingNarration || isNarrationGenerating(st.scenes)) return "声を作成中です。作成が終わってから書き出してください。";
+      return null;
+    };
+    const blockedBefore = startBlockedMessage();
+    if (blockedBefore) { setMessage(blockedBefore); setPhase("error"); return; }
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
     await beginExport();
-    // beginExport の IPC 往復中に取り込みが起動していないか再確認する（#570 P1 レビュー）。取り込みは最初の await の前に
-    // isImporting を立てるので、beginExport 窓で始まった取り込みもこの時点で true＝確実に捕捉できる。setPhase("rendering")
+    // beginExport の IPC 往復中に取り込み/生成が起動していないか再確認する（#570 P1 レビュー）。相手は最初の await の前に
+    // isImporting/pending を立てるので、beginExport 窓で始まったものもこの時点で真＝確実に捕捉できる。setPhase("rendering")
     //（busy 化）の前に弾く＝#380 のキャンセルスコープ不変条件を保ったまま、上の一度きりチェックが取りこぼす窓を閉じる。
-    if (useProjectStore.getState().isImporting) {
-      setMessage("素材の取り込み中です。取り込みが終わってから書き出してください。");
-      setPhase("error");
-      return;
-    }
+    const blockedAfter = startBlockedMessage();
+    if (blockedAfter) { setMessage(blockedAfter); setPhase("error"); return; }
     setProgress({ done: 0, total: scenes.length });
     setExportRun({ encode: undefined }); // 前回の encoding 進捗を持ち越さない（#376）
     setPhase("rendering");

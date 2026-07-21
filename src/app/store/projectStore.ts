@@ -493,6 +493,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 多重起動ガード：開発時の StrictMode 二重 mount や連打で generate が同時に走ると、片方が失敗・片方が成功して
     // 「成功の前に失敗表示が出る」競合や、並行呼び出しによる API エラーを招く。生成中は1本だけに絞る（isImporting 等と同方針）。
     if (get().status === "generating") return;
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は動画案生成を始めない（進行中の書き出しは snap で進む＝#570 P1 レビュー・15§4）
     // 世代トークン（#402）：この生成の世代を記録し、結果を反映する前に「まだ現行か」を確認する。
     // キャンセル/後発の生成で世代が進んでいたら結果を破棄する（裏で完走しても場面を置き換えない）。
     const seq = get()._generationSeq + 1;
@@ -1583,6 +1584,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                   saveStatus: "idle",
                 };
               }
+              // 合成中に書き出しが始まっていたら、開始時 snapNarration に無い音声を今書くと「保存/画面だけ新・MP4 は無音」に
+              // なる（pending が undo/同一文字編集で消えて開始チェックをすり抜けた残り窓・#570 P1 レビュー）。書き込まず none へ
+              // 戻す（書き出し後に作り直せる）＝取り込み側の書込直前 isExportBusy 再確認と対称。
+              if (isExportBusy(st.exportRun.phase)) {
+                return {
+                  scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.none) : s)),
+                  saveStatus: "idle",
+                };
+              }
               return {
                 scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.generated) : s)),
                 narrationAudioById: { ...st.narrationAudioById, [key]: result.audioDataUrl },
@@ -1644,6 +1654,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // status を none（作り直し可）へ戻す（#390 レビュー P1）。token 保護済みなので後発の pending は消さない。
         const curInput = { text: sc.narration.text, ...resolveNarrationVoice(sc.narration, st.meta.voiceSettings) };
         if (!sameSynthInput(input, curInput)) {
+          return {
+            scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),
+            saveStatus: "idle",
+          };
+        }
+        // 合成中に書き出しが始まっていたら書き込まず none へ戻す（開始時 snap に無い音声を今書くと MP4 と食い違う・#570 P1 レビュー）。
+        if (isExportBusy(st.exportRun.phase)) {
           return {
             scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.none } } : s)),
             saveStatus: "idle",

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { PageHead } from "../components/ui";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { DeleteConfirm } from "../components/DeleteConfirm";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
@@ -24,6 +24,7 @@ export function SettingsScreen() {
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声パラメタを止める（#570 P2）
   // 声パラメータ（速さ/高さ/抑揚）スライダーのドラッグを1履歴に（#389・場面編集側と同じ挙動に揃える）。
   const { dragGroup } = useHistoryGroup();
 
@@ -284,6 +285,7 @@ export function SettingsScreen() {
             <input
               id="speed"
               type="range"
+              disabled={isExporting}
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.speed ?? SPEED_RANGE.def, SPEED_RANGE)}
@@ -306,6 +308,7 @@ export function SettingsScreen() {
             <input
               id="pitch"
               type="range"
+              disabled={isExporting}
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.pitch ?? PITCH_RANGE.def, PITCH_RANGE)}
@@ -328,6 +331,7 @@ export function SettingsScreen() {
             <input
               id="intonation"
               type="range"
+              disabled={isExporting}
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.intonation ?? INTONATION_RANGE.def, INTONATION_RANGE)}

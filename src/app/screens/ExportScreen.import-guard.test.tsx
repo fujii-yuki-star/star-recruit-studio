@@ -57,4 +57,18 @@ describe("ExportScreen 取り込み中は書き出しを始めない（#570 P1�
     await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error")); // 再チェックが捕捉
     expect(screen.getByText(/取り込み中/)).toBeTruthy();
   });
+
+  it("音声生成中（pending 行）は書き出しを始めない＝無音MP4が成功扱いにならない（#570 P1 レビュー・#547 P2-6）", async () => {
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    // 生成中＝pending 行がある場面（掛け合い・sceneLines 正準経路）。書き出しは開始時 snap を使うので、生成完了は今のMP4に入らない。
+    useProjectStore.setState({
+      scenes: [{ ...scene("scene_001", 1), narration: { text: "", status: "none" }, lines: [{ lineId: "l1", text: "A", status: "pending" }] } as unknown as Scene],
+    });
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("動画を保存").closest("button") as HTMLButtonElement);
+    await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
+    expect(screen.getByText(/声を作成中/)).toBeTruthy(); // 理由（次の行動）
+    expect(begin).not.toHaveBeenCalled(); // 生成中は書き出しを始めない
+  });
 });
