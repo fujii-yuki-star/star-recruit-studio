@@ -227,6 +227,8 @@ describe('sceneDisplayedSubtitleTexts（表示される字幕文の列挙・ADR-
   const normalTemplate = (hasSubtitleLayer: boolean): Template =>
     ({ category: 'opening', layers: hasSubtitleLayer ? [{ id: 'subtitle', type: 'subtitle' }] : [{ id: 'title', type: 'text' }] }) as unknown as Template;
   const freeScene = (over: Partial<Scene>): Scene => sceneWith({ sceneType: 'free', templateId: 'free_canvas_v1', ...over });
+  const hiddenGroup = (id: string, members: string[]): NonNullable<Scene['groups']>[number] =>
+    ({ id, members, transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true });
 
   describe('FREE（字幕要素の subtitleSource で解決）', () => {
     it('narration：texts.subtitle を列挙（OFF は除外・空は除外）', () => {
@@ -280,6 +282,16 @@ describe('sceneDisplayedSubtitleTexts（表示される字幕文の列挙・ADR-
       const both = freeScene({ texts: { subtitle: 'S' }, freeLayout: [subEl({ kind: 'narration' })] });
       expect(sceneDisplayedSubtitleTexts(both, freeWithSubLayer)).toEqual(['S', 'S']);
     });
+    // P2（#547 レビュー）：非表示は描画されない＝数えない（実表示に一致・layout.ts:418-419）。
+    it('非表示の字幕要素（el.hidden）は数えない（レイヤー一覧で隠した字幕）', () => {
+      const el: FreeElement = { id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, hidden: true, subtitleSource: { kind: 'narration' } };
+      expect(sceneDisplayedSubtitleTexts(freeScene({ texts: { subtitle: 'S' }, freeLayout: [el] }), freeTemplate)).toEqual([]);
+    });
+    it('非表示グループ内の FREE 字幕要素は数えない（isHiddenByGroup・ADR-0022）', () => {
+      const el: FreeElement = { id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'narration' } };
+      const s = freeScene({ texts: { subtitle: 'S' }, freeLayout: [el], groups: [hiddenGroup('group_001', ['free_001'])] });
+      expect(sceneDisplayedSubtitleTexts(s, freeTemplate)).toEqual([]);
+    });
   });
 
   describe('通常テンプレ（字幕層があるときだけ）', () => {
@@ -295,6 +307,12 @@ describe('sceneDisplayedSubtitleTexts（表示される字幕文の列挙・ADR-
     it('字幕層が無いテンプレは空（texts.subtitle があっても描画されない字幕を数えない）', () => {
       const s = sceneWith({ sceneType: 'opening', texts: { subtitle: 'S' } });
       expect(sceneDisplayedSubtitleTexts(s, normalTemplate(false))).toEqual([]);
+    });
+    // P2（#547 レビュー）：非表示グループ内のテンプレ字幕層は描画されない＝数えない（layout.ts:268 isHiddenByGroup）。
+    it('非表示グループ内のテンプレ字幕層は空（通常字幕を隠した場合）', () => {
+      const tmpl = { category: 'opening', layers: [{ id: 'subtitle', type: 'subtitle' }], groups: [hiddenGroup('group_001', ['subtitle'])] } as unknown as Template;
+      const s = sceneWith({ sceneType: 'opening', texts: { subtitle: 'S' } });
+      expect(sceneDisplayedSubtitleTexts(s, tmpl)).toEqual([]);
     });
     it('テンプレ未解決（undefined）は空', () => {
       expect(sceneDisplayedSubtitleTexts(sceneWith({ texts: { subtitle: 'S' } }), undefined)).toEqual([]);

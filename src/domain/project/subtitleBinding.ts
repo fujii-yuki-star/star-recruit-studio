@@ -3,6 +3,7 @@
 //   セグメントは domain/project/lineTimeline.ts の segmentAt(scene, lineDurations, t) で作る＝プレビュー＝書き出しで同一。
 // - 話者絞り込みは音声生成（resolveLineVoice）と同じ実効話者（effectiveSpeakerKey）で比較する（P1-2）。
 import { FREE_CATEGORY, FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
+import { isHiddenByGroup } from '../group/compose';
 import { characterForSpeaker } from '../voice/voiceCatalog';
 import { resolveLineSubtitle } from './lineTimeline';
 import type { SceneSegmentSpec } from './lineTimeline';
@@ -193,13 +194,18 @@ export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | u
 
   const out: string[] = [];
   // (a) テンプレ字幕層（layout の層ループはカテゴリ非依存）。掛け合いは各行の実効字幕・単独は静的字幕。
-  if (template?.layers.some((l) => l.type === 'subtitle') ?? false) {
+  //     非表示グループのメンバー層は描画されない（layout.ts:268 isHiddenByGroup）＝数えない（テンプレ層に per-layer hidden は無い）。
+  const templateGroups = template?.groups ?? [];
+  if (template?.layers.some((l) => l.type === 'subtitle' && !isHiddenByGroup(l.id, templateGroups)) ?? false) {
     out.push(...(hasLines ? lineSubs() : staticSubtitle()));
   }
   // (b) FREE：freeLayout の字幕要素を subtitleSource で解決してテンプレ層の上に重ねる（resolveSubtitleForElement と同分岐）。
+  //     要素自身の非表示（el.hidden）・非表示グループのメンバーは描画されない（layout.ts:418-419）＝数えない。
   if (template?.category === FREE_CATEGORY) {
+    const sceneGroups = scene.groups ?? [];
     for (const el of scene.freeLayout ?? []) {
       if (el.kind !== FREE_ELEMENT_KIND.subtitle) continue;
+      if (el.hidden || isHiddenByGroup(el.id, sceneGroups)) continue; // 非表示は描画されない＝数えない
       const source = el.subtitleSource ?? defaultSubtitleSource(scene);
       if (source.kind === SUBTITLE_SOURCE_KIND.narration) out.push(...staticSubtitle());
       else if (source.kind === SUBTITLE_SOURCE_KIND.allLines) out.push(...lineSubs());
