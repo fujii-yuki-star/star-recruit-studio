@@ -89,6 +89,31 @@ describe("LooksEditScreen 下書きの取り消し/やり直し（#547 P2-3）",
     expect(undoBtn().disabled).toBe(true); // 2回で初期状態
   });
 
+  // 色の面（鮮やかさ×明るさ／色相）は pointermove ごとに onChange する。境界が無いと**ひと撫でで数十件**の履歴が
+  // 積まれ、履歴上限（50）を流し切って「戻したかった直前の誤操作」が履歴から消える＝この機能の価値を壊す
+  // （#547 P2-3 レビュー）。1ドラッグ＝1取り消しであることを固定する。
+  it("色のドラッグは1回の取り消しでまとめて戻る（履歴を洪水させない）", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字" })); // 文字レイヤーを選ぶ＝文字色の欄が出る（選択は履歴に積まない）
+    expect(undoBtn().disabled).toBe(true);
+
+    fireEvent.click(screen.getByLabelText("文字の色を選ぶ")); // 色ポップオーバーを開く
+    const sv = screen.getByTestId("cp-sv");
+    // jsdom はレイアウトを持たないので面の実寸をモック（無いと applySvAt が早期 return して色が動かない）。
+    sv.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+
+    fireEvent.pointerDown(sv, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(sv, { clientX: 30, clientY: 30, pointerId: 1 }); // ひと撫で＝連続発火
+    fireEvent.pointerMove(sv, { clientX: 50, clientY: 50, pointerId: 1 });
+    fireEvent.pointerMove(sv, { clientX: 70, clientY: 70, pointerId: 1 });
+    fireEvent.pointerUp(sv, { pointerId: 1 });
+
+    expect(undoBtn().disabled).toBe(false); // 色は変わった
+    fireEvent.click(undoBtn());
+    expect(undoBtn().disabled).toBe(true); // 1回で撫でる前へ＝履歴は1件だけ（洪水していない）
+  });
+
   // 保存/削除の実行中はボタンを無効化している。キーだけ効くと「押せないのに効く」不整合になるので同条件で止める。
   it("保存/削除の実行中は Ctrl+Z も効かない（ボタンの無効化と揃える）", () => {
     useProjectStore.setState({ deleteUserTemplate: vi.fn(() => new Promise<boolean>(() => {})) }); // 永久 pending＝削除中を保つ

@@ -815,7 +815,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     <div className="field" style={{ margin: 0 }}>
       <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{label}</label>
       <span className="row gap-sm" style={{ alignItems: "center" }}>
-        <ColorPicker value={value} onChange={onChange} ariaLabel={`${ariaBase}を選ぶ`} />
+        <ColorPicker value={value} onChange={onChange} ariaLabel={`${ariaBase}を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
         {isOverridden && (
           <button
             className="btn btn-ghost text-sm"
@@ -911,7 +911,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
-            <ColorPicker value={el.background?.color ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" />
+            <ColorPicker value={el.background?.color ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
           </div>
           <NumberField label="濃さ(%)" value={opacityToPercent(el.background?.opacity ?? 0.55)} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, opacity: percentToOpacity(v) } })} />
           <NumberField label="角丸" value={el.background?.radius ?? 16} min={0} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, radius: v } })} />
@@ -964,7 +964,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={el.color ?? "#222222"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" />
+              <ColorPicker value={el.color ?? "#222222"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
@@ -994,7 +994,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
+              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
           {renderFreeBandBg(el)}
@@ -1019,7 +1019,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={el.fillColor ?? "#cccccc"} onChange={(v) => patchFreeEl(el.id, { fillColor: v })} ariaLabel="色を選ぶ" />
+              <ColorPicker value={el.fillColor ?? "#cccccc"} onChange={(v) => patchFreeEl(el.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
           <div className="field" style={{ marginBottom: 6 }}>
@@ -1042,7 +1042,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</label>
-              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="枠線の色を選ぶ" />
+              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="枠線の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
         </>
@@ -1090,7 +1090,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="文字の大きさ" value={el.fontSize ?? 52} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={el.color ?? "#ffffff"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" />
+              <ColorPicker value={el.color ?? "#ffffff"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
@@ -1119,7 +1119,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
+              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
           {renderFreeBandBg(el)}

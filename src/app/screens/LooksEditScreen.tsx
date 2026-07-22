@@ -352,7 +352,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             {numField("文字の大きさ", l.fontSize ?? DEFAULT_FONT_SIZE, (v) => onUpdateLayer(l.id, { fontSize: v }), 1)}
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={l.color ?? DEFAULT_TEXT_COLOR} onChange={(v) => onUpdateLayer(l.id, { color: v })} ariaLabel="文字の色を選ぶ" />
+              <ColorPicker value={l.color ?? DEFAULT_TEXT_COLOR} onChange={(v) => onUpdateLayer(l.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
@@ -368,7 +368,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             {(l.strokeWidth ?? 0) > 0 && (
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-                <ColorPicker value={l.strokeColor ?? DEFAULT_STROKE_COLOR} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
+                <ColorPicker value={l.strokeColor ?? DEFAULT_STROKE_COLOR} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
               </div>
             )}
           </div>
@@ -384,7 +384,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
                   <div className="field" style={{ margin: 0 }}>
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
-                    <ColorPicker value={l.background?.color ?? "#000000"} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" />
+                    <ColorPicker value={l.background?.color ?? "#000000"} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
                   </div>
                   {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? 0.55), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
                   {numField("角丸", l.background?.radius ?? 16, (v) => onUpdateLayer(l.id, { background: { ...l.background, radius: v } }), 0)}
@@ -406,7 +406,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-            <ColorPicker value={l.fillColor ?? "#cccccc"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="色を選ぶ" />
+            <ColorPicker value={l.fillColor ?? "#cccccc"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
           </div>
         </div>
       );
@@ -438,7 +438,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           {renderDefaultAssetControl(l)}
           <div className="field" style={{ margin: "8px 0 0" }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</label>
-            <ColorPicker value={l.fillColor ?? "#ffffff"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="背景色を選ぶ" />
+            <ColorPicker value={l.fillColor ?? "#ffffff"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
           </div>
         </>
       );
