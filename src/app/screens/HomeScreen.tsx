@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
@@ -37,6 +37,18 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   // 未保存の変更があるか。新規作成と同じ破棄ガードを「プロジェクトを開く」にも適用する（#547 P1-2・データ喪失防止）。
   const hasWork = useProjectStore((s) => hasUnsavedChanges(s.saveStatus, s.scenes.length, s.assets, s.meta));
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  // 一覧の取得に失敗したか（§2-5）。失敗を「空（保存物なし）」と区別する＝一時失敗で保存物が消えたように見せない。
+  const [listError, setListError] = useState(false);
+  // 一覧の再取得中（もう一度読み込む の連打防止＋フィードバック）。
+  const [listRetrying, setListRetrying] = useState(false);
+  // マウント中か（再取得の解決が離脱後に届いても state を触らない＝アンマウント後 setState を避ける）。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   // 「新しい動画を作る」はヘッダと同じ破棄ガード付きフロー（共有フックで挙動統一）。
   const { confirming: confirmNew, start: startNew, startBlank, confirm: confirmStartNew, cancel: cancelNew } =
     useStartNewProject(onNavigate);
@@ -93,21 +105,45 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     }
     // リネーム成功。入力欄を閉じ、一覧を最新化する。一覧の再取得失敗はリネーム完了に影響しないのでサイレント。
     setRenamingId(null);
+    // 先に楽観更新でディスクの結果（改名済み）を反映する。こうすると下の再取得が失敗しても行が旧名に戻らず、
+    // 「改名は成功したのに失敗に見える」ズレが出ない＝再取得失敗を安全に無視できる（#547 P2-2 レビュー）。
+    // ここで listError を立てないのは意図的：一覧全体が失敗表示に置き換わると既存行が隠れ、改名失敗と誤読させるため。
+    setProjects((cur) => cur.map((p) => (p.projectId === projectId ? { ...p, projectName: name } : p)));
     try {
       setProjects(await listProjects());
     } catch {
-      /* 一覧の再取得失敗は無視（リネーム自体は済んでいる＝誤った失敗表示・二重実行を防ぐ） */
+      /* 再取得の失敗は無視（上の楽観更新で表示は正しい＝誤った失敗表示・二重実行を防ぐ） */
     }
   }
+
+  // 一覧の再取得（「もう一度読み込む」＝再試行）。成功で失敗表示を消し、失敗なら §2-5 の失敗表示を残す。
+  // 解決が離脱後に届く場合に備え、各 state 更新前に mountedRef を確認する（アンマウント後 setState を避ける）。
+  const refreshProjects = useCallback(async () => {
+    setListRetrying(true);
+    try {
+      const list = await listProjects();
+      if (!mountedRef.current) return;
+      setProjects(list);
+      setListError(false);
+    } catch {
+      if (mountedRef.current) setListError(true); // 失敗を「空（保存物なし）」と区別＝保存物が消えたように見せない
+    } finally {
+      if (mountedRef.current) setListRetrying(false);
+    }
+  }, [listProjects]);
 
   useEffect(() => {
     let alive = true;
     listProjects()
       .then((list) => {
-        if (alive) setProjects(list);
+        if (alive) {
+          setProjects(list);
+          setListError(false);
+        }
       })
       .catch(() => {
-        /* 一覧の取得に失敗しても画面は表示する */
+        // 取得失敗は「保存物なし」と混同させず、原因＋次の行動（再試行）を出す（§2-5・ADR-0026④）。
+        if (alive) setListError(true);
       });
     return () => {
       alive = false;
@@ -279,7 +315,15 @@ export function HomeScreen({ onNavigate }: HomeProps) {
           {/* 最近のプロジェクト（この画面自体が一覧なので「すべて見る」導線は置かない・#399 レビュー）。 */}
           <h2 className="section-title mb">最近のプロジェクト</h2>
           <div className="col gap-sm">
-            {projects.length === 0 ? (
+            {listError ? (
+              // 取得失敗（§2-5）：空（保存物なし）と区別し、原因＋次の行動（再試行）を出す＝無言で「保存物なし」にしない。
+              <div className="notice notice-warn" role="alert" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                <span>保存したプロジェクトの一覧を読み込めませんでした。もう一度お試しください。</span>
+                <button className="btn btn-secondary mt" onClick={refreshProjects} disabled={listRetrying}>
+                  {listRetrying ? "読み込み中…" : "もう一度読み込む"}
+                </button>
+              </div>
+            ) : projects.length === 0 ? (
               <div className="text-sm text-muted">
                 保存したプロジェクトはまだありません。「新しい動画を作る」から始めましょう。
               </div>
