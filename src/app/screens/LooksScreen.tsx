@@ -3,7 +3,8 @@ import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
-import { scenesUsingTemplate } from "../../domain/project/templateUsage";
+import { scenesLosingContentOnTemplateDelete, scenesUsingTemplate } from "../../domain/project/templateUsage";
+import { deleteLookConfirmMessage } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { ExportLock } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
@@ -54,6 +55,7 @@ function usedElements(template: Template): string[] {
 export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
   const templates = useProjectStore((s) => s.templates);
   const assets = useProjectStore((s) => s.assets);
+  const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio); // 削除時の当て先（標準）は動画の向きで決まる
   const scenes = useProjectStore((s) => s.scenes);
   const setEditingSceneId = useProjectStore((s) => s.setEditingSceneId);
   const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
@@ -180,6 +182,8 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   const sampleScene = buildSampleScene(current, assets);
   // この見た目を使っている場面（逆引き・#406）。標準/マイテンプレを問わず scene.templateId で判定する。
   const usedScenes = scenesUsingTemplate(scenes, current.templateId);
+  // 削除すると標準へ寄る＝写真・文字が動画に出なくなる場面（#547・削除は取り消せないので先に示す）。
+  const losingContentScenes = scenesLosingContentOnTemplateDelete(scenes, current.templateId, templates, aspectRatio);
   // 使用場面バッジを押したら、その場面の編集を開く（editingSceneId 機構＝#400・素材画面と同方式）。
   const jumpToScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
 
@@ -322,7 +326,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             {isUserCurrent && (confirmDelete ? (
               <DeleteConfirm
                 busy={busyAction === "delete"}
-                message="この見た目パターンを削除しますか？元に戻せません。"
+                message={deleteLookConfirmMessage(usedScenes.length, losingContentScenes.length)}
                 onCancel={() => setConfirmDelete(false)}
                 onConfirm={() => void onDelete()}
               />

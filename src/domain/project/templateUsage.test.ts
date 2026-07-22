@@ -32,6 +32,31 @@ describe('templateUsage', () => {
       tpl({ templateId: 'std_photo_9', category: 'photo_intro', aspectRatio: '9:16' }),
     ];
 
+    // 削除確認で「標準の見た目に変わります」と約束する以上、**別のマイ見た目**へ化けさせない（#547）。
+    // 当て先の規則は standardTemplateForScene に一本化してある。
+    it('当て先にマイ見た目を選ばない（別のマイ見た目へ化けさせない）', () => {
+      const withUser = [
+        tpl({ templateId: 'user_tmpl_002', category: 'photo_intro', aspectRatio: '16:9' }), // 先頭に置いても
+        ...templates,
+      ];
+      const scenes = [base({ sceneId: 's1', sceneType: 'photo_intro', templateId: 'user_tmpl_001' })];
+      const next = substituteDeletedTemplateInScenes(scenes, 'user_tmpl_001', withUser, '16:9');
+      expect(next[0].templateId).toBe('std_photo_16'); // 同梱が選ばれる
+    });
+
+    // ADR-0030（非破壊往復）：FREE 場面は通常配置を休眠保持する。category を渡さないと通常扱いになり、
+    // 「通常テンプレへ戻せば復元」が失われる。一括適用（store）と同じ規則にそろえてある。
+    it('FREE 場面の置換で、休眠している通常配置を消さない（ADR-0030）', () => {
+      const freeTemplates = [
+        tpl({ templateId: 'std_free_16', category: 'free', aspectRatio: '16:9' }),
+        ...templates,
+      ];
+      const scenes = [base({ sceneId: 's1', sceneType: 'free', templateId: 'user_tmpl_001', assetRefs: { mainVisual: 'asset_001' } })];
+      const next = substituteDeletedTemplateInScenes(scenes, 'user_tmpl_001', freeTemplates, '16:9');
+      expect(next[0].templateId).toBe('std_free_16');
+      expect(next[0].assetRefs.mainVisual).toBe('asset_001'); // 休眠のまま残る（通常へ戻せば復元できる）
+    });
+
     it('削除テンプレを参照する場面を同カテゴリ・同じ向きの標準へ置換する（非参照は不変）', () => {
       const scenes = [
         base({ sceneId: 's1', sceneType: 'photo_intro', templateId: 'user_tmpl_001' }),

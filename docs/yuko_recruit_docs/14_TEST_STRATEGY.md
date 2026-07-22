@@ -42,7 +42,7 @@
 | durationのclamp（AI 生成） | `11 §9` / `12 §8.2` | `<3`→3／`>`テンプレ上限 or 15→上限（生成の**目安**＝手編集は縛らない） | unit |
 | アセット⇄レイヤー束縛 | `11 §5` | `assetRefs`キー↔layer id一致／null＋required→警告／slotType不整合→警告 | unit |
 | 検証 V1–V11 | `11 §8` | 各チェックの正常・異常（templateId/assetId実在、合計尺、シーン数上限 等） | unit |
-| 自動補正 | `11 §9` | templateId不在→同category既定／assetId不在→null＋候補／補正は`warnings`へ記録 | unit |
+| 自動補正 | `11 §9` | templateId不在→**取り込み時のみ**同category既定（既存場面は置換せず警告＝`15 §6`・#547）／assetId不在→null＋候補／補正は`warnings`へ記録 | unit |
 | 声・音量の解決順序 | `11 §6` | `scene > project > 定数`／null=継承 を各フィールドで | unit |
 | 音量ミックス | `05 §14` / `11 §4` | 既定（ナレ1.0/BGM0.25/元音声0.20）と上書き値の合成 | unit |
 | テキスト折返し・あふれ | `04 §9` / `05 §10` | maxLines超過→警告／autoResize→縮小／上限超過→`TEXT_OVERFLOW` | unit |

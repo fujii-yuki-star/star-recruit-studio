@@ -1072,3 +1072,106 @@ describe('projectStore 履歴グループ（#389・連続編集を1履歴にま�
     expect(useProjectStore.getState().past).toHaveLength(2);
   });
 });
+
+// #547：見た目が見つからない場面は**自動置換しない**（黙って中身が減った動画を出さない）。
+// 代わりに「まとめて標準にする」を利用者の明示操作として提供する＝押したときだけ、まとめて標準へ寄せる。
+describe('applyStandardLookToUnresolvedScenes（まとめて標準にする・#547）', () => {
+  const unresolved = (id: string) => ({ ...scene(id, 1), sceneId: id, templateId: 'missing_tmpl' }) as Scene;
+
+  beforeEach(() => {
+    useProjectStore.setState({
+      templates: [...sampleTemplates],
+      meta: { ...useProjectStore.getState().meta, videoSettings: { ...useProjectStore.getState().meta.videoSettings, aspectRatio: '16:9' } },
+      past: [], future: [],
+    });
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+  });
+
+  it('見つからない場面だけ標準へ寄せ、直した場面番号を返す（解決済みは触らない）', () => {
+    const ok = { ...scene('scene_ok', 2), templateId: sampleTemplates[0].templateId } as Scene;
+    useProjectStore.setState({ scenes: [unresolved('scene_ng'), ok] });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([1]); // 場面番号（1始まり）＝公開前チェックの数え方
+    expect(r.unfixable).toEqual([]);
+    const after = useProjectStore.getState().scenes;
+    // 直した場面は解決できる見た目になっている（＝もう「見つからない」ではない）。
+    expect(useProjectStore.getState().templates.some((t) => t.templateId === after[0].templateId)).toBe(true);
+    expect(after[1].templateId).toBe(ok.templateId); // 解決済みは不変
+  });
+
+  // マイ見た目の層 id は標準に無いことが多く、寄せると写真の割り当てが外れる。件数だけ返すと
+  // 「直った」ように見えて中身が減ったまま書き出せる（#547 が防ぎたい失敗そのもの）。
+  it('動画に出なくなった中身のある場面を返す（直った件数だけを見せない）', () => {
+    const ng = { ...unresolved('scene_ng'), assetRefs: { layer_001: 'asset_001' } } as Scene;
+    useProjectStore.setState({ scenes: [ng] });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([1]);
+    expect(r.lostContent).toEqual([1]); // 入れ直しが要る場面として返る
+    expect(useProjectStore.getState().scenes[0].assetRefs.layer_001).toBeUndefined();
+  });
+
+  it('当て先が無い場面は unfixable で返す（押した後も項目が残る理由を出せる）', () => {
+    // 縦向きに切り替えると、横向き前提の場面種別に合う標準が無くなる組み合わせを作る。
+    const ng = { ...unresolved('scene_ng'), sceneType: 'photo_intro' } as Scene;
+    useProjectStore.setState({
+      scenes: [ng],
+      templates: sampleTemplates.filter((t) => t.category !== 'photo_intro'), // 写真紹介の標準を外す
+    });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([]);
+    expect(r.unfixable).toEqual([1]);
+  });
+
+  it('種類の違う未解決場面を、それぞれ自分の種類の標準へ寄せる（一律に同じ見た目にしない）', () => {
+    const opening = { ...unresolved('scene_op'), sceneType: 'opening' } as Scene;
+    const photo = { ...unresolved('scene_ph'), sceneType: 'photo_intro' } as Scene;
+    useProjectStore.setState({ scenes: [opening, photo] });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([1, 2]);
+    const [a, b] = useProjectStore.getState().scenes;
+    const catOf = (id: string) => useProjectStore.getState().templates.find((t) => t.templateId === id)?.category;
+    expect(catOf(a.templateId)).toBe('opening');
+    expect(catOf(b.templateId)).toBe('photo_intro');
+    expect(a.templateId).not.toBe(b.templateId); // 別々の見た目が当たっている
+  });
+
+  it('直る場面・中身が減る場面・直せない場面が混在しても、場面番号を取り違えない', () => {
+    const ok = { ...scene('scene_ok', 1), templateId: sampleTemplates[0].templateId } as Scene; // 場面1：解決済み
+    const losing = { ...unresolved('scene_lose'), sceneType: 'opening', assetRefs: { layer_001: 'asset_001' } } as Scene; // 場面2
+    const nofix = { ...unresolved('scene_nofix'), sceneType: 'photo_intro' } as Scene; // 場面3：当て先を外す
+    useProjectStore.setState({
+      scenes: [ok, losing, nofix],
+      templates: sampleTemplates.filter((t) => t.category !== 'photo_intro'),
+    });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([2]);
+    expect(r.lostContent).toEqual([2]);
+    expect(r.unfixable).toEqual([3]);
+    expect(useProjectStore.getState().scenes[0].templateId).toBe(ok.templateId); // 解決済みは不変
+    expect(useProjectStore.getState().scenes[2].templateId).toBe('missing_tmpl'); // 直せない場面も不変
+  });
+
+  it('取り消せる（1回の操作＝1履歴）', () => {
+    useProjectStore.setState({ scenes: [unresolved('scene_ng')] });
+    useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(useProjectStore.getState().past).toHaveLength(1); // 1操作＝1履歴（pushHistory の重複を捉える）
+    expect(useProjectStore.getState().scenes[0].templateId).not.toBe('missing_tmpl');
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().scenes[0].templateId).toBe('missing_tmpl'); // 元へ戻る
+  });
+
+  it('直せる場面が無ければ履歴を積まない（空の取り消しを作らない）', () => {
+    const ok = { ...scene('scene_ok', 1), templateId: sampleTemplates[0].templateId } as Scene;
+    useProjectStore.setState({ scenes: [ok], past: [] });
+    expect(useProjectStore.getState().applyStandardLookToUnresolvedScenes().fixed).toEqual([]);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it('書き出し中は何もしない（文書編集を固定・#570）', () => {
+    useProjectStore.setState({ scenes: [unresolved('scene_ng')] });
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    expect(useProjectStore.getState().applyStandardLookToUnresolvedScenes().fixed).toEqual([]);
+    expect(useProjectStore.getState().scenes[0].templateId).toBe('missing_tmpl'); // 変わらない
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+  });
+});

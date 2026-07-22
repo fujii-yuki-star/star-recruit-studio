@@ -18,6 +18,7 @@ import type {
   Asset, AssetRefs, Character, Narration, NarrationLine, Part, Scene, Texts, Transition, Warning,
 } from '../project/types';
 import type { Template } from '../template/types';
+import { standardTemplateForScene } from '../template/templateSelection';
 import { speakerForCharacter } from '../voice/voiceCatalog';
 import { createSequentialIdFactory } from './idFactory';
 import type { IdFactory } from './idFactory';
@@ -162,9 +163,9 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
       // テンプレ解決＋向き整合（B4・ADR-0012）。見つからない、またはプロジェクトの向きと一致しない場合は、
       // 同カテゴリ・同じ向きの見た目へ補正する（AI出力は向き非依存＝12§8 / 向きはプロジェクト側の正典）。
       if (!template || template.aspectRatio !== ctx.orientation) {
-        const alt = ctx.templates.find(
-          (t) => t.category === sceneType && t.aspectRatio === ctx.orientation,
-        );
+        // 当て先は「標準の見た目」＝マイ見た目を除く（`standardTemplateForScene` に一本化・#547）。
+        // ADR-0017「マイ見た目は AI 入力から除外」と揃える（AI は提案できないのに補正では当たる、を作らない）。
+        const alt = standardTemplateForScene(ctx.templates, sceneType, ctx.orientation);
         if (alt) {
           w.push(
             template

@@ -7,6 +7,7 @@ import type { SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
+import { templateSlotIds } from '../template/layerOps';
 import { boxHeightForLines, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
 import { wrapText } from '../text/textWrap';
 import { resolveLineSubtitle } from './lineTimeline';
@@ -49,9 +50,7 @@ export function switchSceneTemplate(
   newCategory?: SceneCategory,
   prevTemplate?: Template,
 ): Scene {
-  const slotIds = new Set(
-    newTemplateLayers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id),
-  );
+  const slotIds = templateSlotIds(newTemplateLayers);
   const toFree = newCategory === FREE_CATEGORY;
   // FREE へ切り替えるときは通常配置（assetRefs/slotFits）を休眠のまま保持し、通常テンプレへ戻すと自動復元する（ADR-0030・非破壊往復）。
   // 通常テンプレへ切り替えるときは #236 どおり新スロット id へ清算＝休眠していた一致分が復元される（ダングリングは sceneActiveAssetIds で無害化済み）。

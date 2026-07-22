@@ -62,3 +62,12 @@ export function usedTextKeys(layers: Layer[]): TextKey[] {
   }
   return TEXT_KEYS.filter((k) => used.has(k));
 }
+
+/**
+ * テンプレの層のうち「素材を差し込める先」の id 集合（背景・スロット・ロゴ）。
+ * `switchSceneTemplate` の清算対象と、切替で**何が外れるか**の事前判定（`slotAssetIdsDroppedBySwitch`）で
+ * 同じ規則を使うための単一の参照元（§2-7。別々に書くと「外れないと言って外れる」表示になる）。
+ */
+export function templateSlotIds(layers: Layer[]): Set<string> {
+  return new Set(layers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id));
+}

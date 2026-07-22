@@ -5,7 +5,7 @@ import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
-import { usedTextKeys } from "../../domain/template/layerOps";
+import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
@@ -560,7 +560,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (newTemplateId === selected.templateId) return;
     const nt = templates.find((t) => t.templateId === newTemplateId);
     const goingToNormal = !!nt && nt.category !== FREE_CATEGORY;
-    const newSlotIds = new Set((nt?.layers ?? []).filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo").map((l) => l.id));
+    const newSlotIds = templateSlotIds(nt?.layers ?? []); // 差し込み先の判定は切替の清算規則と同じ（§2-7）
     const willRestore = Object.keys(selected.assetRefs).some((k) => newSlotIds.has(k));
     if (isFree && freeLayout.length > 0 && goingToNormal && !willRestore) { setPendingTemplateId(newTemplateId); return; }
     applyTemplateSwitch(newTemplateId);

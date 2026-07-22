@@ -4,6 +4,8 @@ import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
+import { scenesLosingContentOnTemplateDelete, scenesUsingTemplate } from "../../domain/project/templateUsage";
+import { deleteLookConfirmMessage } from "../uiLabels";
 import { effectiveLayerZ, moveLayerZ } from "../../domain/template/layerOrder";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
@@ -55,6 +57,8 @@ function numField(label: string, value: number, onChange: (v: number) => void, m
 export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
   const templates = useProjectStore((s) => s.templates);
   const assets = useProjectStore((s) => s.assets);
+  const scenes = useProjectStore((s) => s.scenes); // 削除の影響（使用中の場面数）を確認に出すため（#547）
+  const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio); // 削除時の当て先（標準）は動画の向きで決まる
   const editingTemplateId = useProjectStore((s) => s.editingTemplateId);
   const setEditingTemplateId = useProjectStore((s) => s.setEditingTemplateId);
   const saveUserTemplate = useProjectStore((s) => s.saveUserTemplate);
@@ -703,7 +707,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               {confirmDelete ? (
                 <DeleteConfirm
                   busy={busyAction === "delete"}
-                  message="この見た目パターンを削除しますか？元に戻せません。"
+                  message={deleteLookConfirmMessage(scenesUsingTemplate(scenes, editing.templateId).length, scenesLosingContentOnTemplateDelete(scenes, editing.templateId, templates, aspectRatio).length)}
                   onCancel={() => setConfirmDelete(false)}
                   onConfirm={() => void onDelete()}
                 />
