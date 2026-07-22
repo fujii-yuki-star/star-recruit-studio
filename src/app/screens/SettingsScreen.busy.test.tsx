@@ -16,7 +16,7 @@ describe("SettingsScreen 接続キー保存の busy 表示（#410 sub4）", () =
   afterEach(() => vi.restoreAllMocks());
 
   it("保存中は「保存中…」＋ボタン無効", async () => {
-    render(<SettingsScreen />);
+    render(<SettingsScreen onNavigate={vi.fn()} />);
     const input = await screen.findByPlaceholderText("接続キーを貼り付け");
     fireEvent.change(input, { target: { value: "test-key" } });
     fireEvent.click(screen.getByText("保存する"));

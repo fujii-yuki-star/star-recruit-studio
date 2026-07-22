@@ -106,3 +106,22 @@ describe("マイ見た目の削除確認は影響を先に示す（#547）", () 
     expect(screen.queryByText(/標準の見た目に変わります/)).toBeNull();
   });
 });
+
+// #547 P2-1：この画面は ExportLock（ラッパ）経由でバナーを出す。導線は inert の**外**に置いてあるので
+// 書き出し中でも押せる＝どの画面からでも中止へ到達できる（15 §4）。直接 <ExportLockBanner /> を置く経路は
+// HomeScreen.busy.test.tsx が担保。onNavigate は必須 prop なので「渡し忘れ」自体は型で防いでいる。
+describe("LooksScreen 書き出し中は復帰導線を出す（#547 P2-1）", () => {
+  afterEach(() => useProjectStore.getState().setExportRun({ phase: "idle" }));
+
+  it("書き出し中でも「書き出しへ戻る」を押せる（ロックの抜け道に到達できる）", () => {
+    useProjectStore.setState({
+      exportRun: { phase: "rendering", progress: { done: 1, total: 2 }, resultPath: "", message: "", bgmWarning: "", cancelling: false },
+    });
+    const onNavigate = vi.fn();
+    render(<LooksScreen onNavigate={onNavigate} />);
+    const back = screen.getByText("書き出しへ戻る");
+    expect(back.closest("[inert]")).toBeNull(); // 操作不可の部分木に入っていない
+    fireEvent.click(back);
+    expect(onNavigate).toHaveBeenCalledWith("export");
+  });
+});

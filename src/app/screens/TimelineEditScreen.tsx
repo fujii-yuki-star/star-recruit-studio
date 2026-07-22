@@ -88,7 +88,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
         title="タイムラインを編集"
         desc="テロップ（字幕）を足して、時間軸の位置や文言を調整できます。編集した内容は上の「保存」で保存されます。"
       />
-      <ExportLock>
+      <ExportLock onNavigate={onNavigate}>
 
       <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
         <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("timeline")}>

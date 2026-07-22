@@ -15,7 +15,7 @@ import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
-import { exportEncodePercent, exportPhaseLabel } from "../../domain/export/exportProgress";
+import { exportHeadingLabel, exportOverallPercent, exportProgressLabel } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -310,19 +310,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     }
   }
 
-  const percent =
-    phase === "done"
-      ? 100
-      : phase === "encoding"
-        ? // Rust の実進捗イベントがあれば 80→100% で描く。未受信（旧経路/ブラウザ）は基準 80%＋不定バー（#376）。
-          // 未受信を 90% にすると最初のイベント（≈82%）で後退して見えるため、基準は 80%（レンダリング終端と連続・単調）。
-          encode
-          ? exportEncodePercent(encode)
-          : 80
-        : phase === "rendering" && progress.total > 0
-          ? // 場面数ベース＋処理中の場面のフレーム進捗（frameFraction）で 0〜80% を滑らかに（#391）。
-            Math.round(((progress.done + (progress.frameFraction ?? 0)) / progress.total) * 80)
-          : 0;
+  // バーの % と1行の説明は共有の純粋関数（他画面の「書き出し中」バナーと同じ数字・説明を出す＝§2-7/ADR-0026②）。
+  const percent = exportOverallPercent({ phase, progress, encode });
+  const progressLabel = exportProgressLabel({ phase, progress, encode });
 
   return (
     <div className="main-scroll">
@@ -440,9 +430,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                 <div className="page-title" style={{ fontSize: 32, color: "var(--color-primary)" }}>
                   {percent}%
                 </div>
-                <div className="text-muted">
-                  {phase === "done" ? "保存しました" : phase === "encoding" ? "動画にまとめています" : "動画を準備しています"}
-                </div>
+                <div className="text-muted">{exportHeadingLabel({ phase, progress, encode })}</div>
               </div>
               <div className="progress mb">
                 {/* エンコード段：Rust の実進捗イベントがあれば幅で表す（#376）。無ければ従来どおり不定バー（左右に流れる）で
@@ -453,19 +441,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   <div className="progress-fill" style={{ width: `${percent}%` }} />
                 )}
               </div>
-              {phase === "rendering" && (
-                <div className="text-center text-sm text-muted">
-                  {/* done は「完了した場面数」。処理中は +1 した1始まりで読ませる（バーが動くのにカウンタが0のまま、を防ぐ・#391 レビュー）。 */}
-                  場面 {Math.min(progress.done + 1, progress.total)} / {progress.total} を処理中
-                </div>
-              )}
-              {/* エンコード段：Rust の進捗イベントがあれば段階（映像/結合/字幕/BGM）を文言で示す（#376）。
-                  無ければ従来の不定バー＋「最後の仕上げ中」（#391）。 */}
-              {phase === "encoding" && (
-                <div className="text-center text-sm text-muted">
-                  {encode ? exportPhaseLabel(encode) : "最後の仕上げ中です。そのままお待ちください。"}
-                </div>
-              )}
+              {/* いま何をしているか（場面 n/N ／ 映像・結合・字幕・BGM）。バナーと同じ説明を出す（ADR-0026②）。 */}
+              {progressLabel && <div className="text-center text-sm text-muted">{progressLabel}</div>}
               {/* 書き出しの中止（#380）：走行中の変換を止めて、すぐやり直せる。 */}
               {busy && (
                 <div className="row mt" style={{ justifyContent: "center" }}>

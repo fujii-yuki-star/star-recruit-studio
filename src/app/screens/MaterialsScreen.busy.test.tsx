@@ -23,10 +23,10 @@ const setup = (phase: "idle" | "rendering") => {
 describe("MaterialsScreen 書き出し中は編集をロック（#547 P2-1・ADR-0026④）", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("書き出し中：注意バナーを出し「素材を追加」を無効化する", () => {
+  it("書き出し中：共通バナー（進捗つき）を出し「素材を追加」を無効化する", () => {
     setup("rendering");
     render(<MaterialsScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/書き出し中は素材の追加・編集・削除ができません/)).toBeTruthy();
+    expect(screen.getByText(/動画を書き出し中です/)).toBeTruthy();
     const add = screen.getByText("素材を追加").closest("label") as HTMLElement;
     expect(add.getAttribute("aria-disabled")).toBe("true");
   });
@@ -35,7 +35,9 @@ describe("MaterialsScreen 書き出し中は編集をロック（#547 P2-1・ADR
     setup("rendering");
     render(<MaterialsScreen onNavigate={vi.fn()} />);
     // 右パネルは出る（自動選択）が、編集控えは隠れる＝押しても効かないボタンを残さない（無言 no-op 回避）。
-    expect(screen.getByText(/書き出し中は編集できません/)).toBeTruthy();
+    // 理由はバナーと重複しない文で示す（同じ画面に同じ案内を二度出さない・#547 P2-1 レビュー）。
+    expect(screen.getByText("書き出しが終わると、ここで編集できます。")).toBeTruthy();
+    expect(screen.getAllByText(/動画を書き出し中です/)).toHaveLength(1); // バナーは1つだけ
     expect(screen.queryByLabelText("名前")).toBeNull();
     expect(screen.queryByText("この素材を削除")).toBeNull();
     // 使用場面は編集ではないので出したまま（情報は見られる）。
@@ -45,7 +47,7 @@ describe("MaterialsScreen 書き出し中は編集をロック（#547 P2-1・ADR
   it("idle（書き出しでない）：編集控えは通常どおり出る・バナーは無い（対照）", () => {
     setup("idle");
     render(<MaterialsScreen onNavigate={vi.fn()} />);
-    expect(screen.queryByText(/書き出し中は素材の追加・編集・削除ができません/)).toBeNull();
+    expect(screen.queryByText(/動画を書き出し中です/)).toBeNull();
     expect(screen.getByLabelText("名前")).toBeTruthy();
     expect(screen.getByText("この素材を削除")).toBeTruthy();
     expect((screen.getByText("素材を追加").closest("label") as HTMLElement).getAttribute("aria-disabled")).toBe("false");

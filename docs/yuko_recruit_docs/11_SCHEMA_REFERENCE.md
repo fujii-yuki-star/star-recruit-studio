@@ -115,7 +115,7 @@
 | enum | 値 |
 |---|---|
 | `narration.status`（音声生成） | `none` / `pending` / `generated` / `failed` |
-| `renderStatus` | `idle` / `running` / `completed` / `failed` / `cancelled`（ユーザー中止・#380） |
+| `renderStatus` | `idle` / `rendering` / `encoding` / `done` / `error` / `unsupported` / `cancelled`（ユーザー中止・#380）。**実行時のみ**（`project.json` に持たない＝`15 §1`）。`running` は進捗表示のため `rendering`（場面を焼く）／`encoding`（結合・字幕・BGM）に分かれる（#376）。`unsupported` はこの端末で書き出せない（#120・ADR-0013）。値の定義は `domain/export/exportProgress.ts` の `EXPORT_RUN_PHASES` が単一の参照元（§2-7） |
 | `formality` | `casual` / `standard` / `formal` |
 | `voiceId` | `voicevox_zundamon`（既定）ほか。形式 `^[a-z0-9_]+$` |
 | `poseTag` | 自由文字列タグ（例 `smile` / `guide` / `bow` / `surprise` / `think` / `cheer`）。enum固定しない |

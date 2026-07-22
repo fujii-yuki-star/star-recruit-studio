@@ -485,7 +485,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         title="仕上がり確認"
         desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。"
       />
-      <ExportLockBanner />
+      <ExportLockBanner onNavigate={onNavigate} />
 
       {/* 多入口（たたき台/場面編集/書き出し）のため、開いた側が記録した「来た画面」へ戻る（#410 sub3・タイムライン編集と同じ上左パターン）。 */}
       <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>

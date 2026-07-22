@@ -45,3 +45,27 @@ describe("HomeScreen 書き出し中は改名を無効化（#570 レビュー）
     expect(pencil.disabled).toBe(true); // 書き出し中は改名を開始できない（lost-update 防止の UI 側）
   });
 });
+
+// #547 P2-1：ここは独自 notice（進捗なし・戻る導線なし）だった。書き出し中に「新しい動画づくり」を試す
+// ＝二重書き出しの引き金が最も出やすい画面なので、進捗と復帰導線を他画面と同じバナーで出す（ADR-0026②）。
+describe("HomeScreen 書き出し中は共通バナーで進捗と復帰導線を出す（#547 P2-1）", () => {
+  afterEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    vi.restoreAllMocks();
+  });
+
+  it("進捗・この画面でできなくなること・書き出しへ戻る導線をまとめて出す", () => {
+    useProjectStore.setState({
+      listProjects: vi.fn(() => Promise.resolve([] as unknown as ProjectHeader[])),
+      exportRun: { phase: "rendering", progress: { done: 1, total: 4 }, resultPath: "", message: "", bgmWarning: "", cancelling: false },
+    });
+    const onNavigate = vi.fn();
+    render(<HomeScreen onNavigate={onNavigate} />);
+
+    const note = screen.getByRole("status");
+    expect(note.textContent).toContain("20%"); // 1/4 の 80% 換算＝他画面と同じ数字
+    expect(note.textContent).toContain("切り替え・削除はできません"); // この画面固有の補足
+    fireEvent.click(screen.getByText("書き出しへ戻る"));
+    expect(onNavigate).toHaveBeenCalledWith("export");
+  });
+});

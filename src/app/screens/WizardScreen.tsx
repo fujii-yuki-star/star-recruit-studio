@@ -235,7 +235,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
         <div>
           {/* 書き出し中の案内（#570 P3 レビュー）。ウィザードの入力保存（applyProjectInfo）は書き出し中 no-op のため、
               他画面と同じくバナーで「効かない」を明示する（silent no-op を避ける・ADR-0026④）。 */}
-          <ExportLockBanner />
+          <ExportLockBanner onNavigate={onNavigate} />
           {/* ステッパー */}
           <div className="stepper">
             {steps.map((label, i) => (

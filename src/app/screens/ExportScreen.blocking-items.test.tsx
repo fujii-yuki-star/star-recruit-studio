@@ -97,3 +97,20 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     expect(screen.getByText(/動画を書き出せない項目があります/)).toBeTruthy();
   });
 });
+
+// #547 P2-1：% と説明を共有純粋関数へ委譲したので、**渡し間違え**（progress と encode の取り違え等）は
+// ドメイン単体テストでは捕まらない。書き出し画面は一次的な表示面なので、描画まで確認する。
+describe("ExportScreen 進捗の配線（#547 P2-1）", () => {
+  afterEach(() => useProjectStore.getState().setExportRun({ phase: "idle" }));
+
+  it("共有関数の % と「場面 n / N」を実際に描く（バナーと同じ数字）", () => {
+    setup([scene()]);
+    useProjectStore.setState({
+      exportRun: { phase: "rendering", progress: { done: 2, total: 8 }, resultPath: "", message: "", bgmWarning: "", cancelling: false },
+    });
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("20%")).toBeTruthy();
+    expect(screen.getByText("場面 3 / 8 を処理中")).toBeTruthy();
+    expect(screen.getByText("動画を書き出しています")).toBeTruthy(); // 見出しは段階で言い分けない
+  });
+});
