@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Layer } from "../../domain/template/types";
 import { elementAtPoint, freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
@@ -78,11 +78,43 @@ interface Props {
   onGroupTransform?: (groupId: string, patch: Partial<GroupTransform>) => void;
   /** レイヤーのユーザー向けラベル（種別名）。 */
   label: (layer: Layer) => string;
+  /**
+   * ドラッグ/リサイズ/回転の開始・終了（取り消しの「1操作＝1ステップ」境界・#211/#547 P2-3）。
+   * レイヤー/ハンドルの onPointerDown は stopPropagation するため、**祖先での pointerdown 検知では拾えない**。
+   * FREE オーバーレイ（`FreeLayoutOverlay`）と同じ明示コールバックで境界を通知する。
+   */
+  onInteractionStart?: () => void;
+  onInteractionEnd?: () => void;
 }
 
-export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onRotate, groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, label }: Props) {
+export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onRotate, groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, label, onInteractionStart, onInteractionEnd }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // 取り消しの合成境界（#547 P2-3）。開始したものだけを終了させる＝深さが釣り合う（多重 end で履歴が壊れない）。
+  const interactingRef = useRef(false);
+  const finishInteraction = (): void => {
+    if (!interactingRef.current) return;
+    interactingRef.current = false;
+    onInteractionEnd?.();
+  };
+  const startInteraction = (): void => {
+    if (interactingRef.current) return;
+    interactingRef.current = true;
+    onInteractionStart?.();
+    // 終了は下の onPointerUp/onPointerCancel（pointer capture 前提）で拾うが、capture は best-effort（try/catch）。
+    // 捕捉に失敗して枠外で離すと閉じ漏れ＝以後の編集が全て同じ履歴に合成されるので、**window でも**保険で拾う
+    // （useHistoryGroup と同じ機構・one-shot で自己解除。finishInteraction は冪等なので二重呼び出しは無害）。
+    const finish = (): void => {
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      finishInteraction();
+    };
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  };
+  // ドラッグ中にアンマウントしても閉じる（開きっぱなしだと以後の編集が全て同じ履歴に合成される・FreeLayoutOverlay と同機構）。
+  // ref も戻す＝将来インライン関数を渡されて cleanup が繰り返し走っても、外側のグループまで閉じない。
+  useEffect(() => () => { if (interactingRef.current) { interactingRef.current = false; onInteractionEnd?.(); } }, [onInteractionEnd]);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   // 範囲選択（マーキー）の矩形（canvas 座標・null=非アクティブ）。空白ドラッグで矩形を引き交差レイヤーを選択。
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -120,6 +152,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     const width = ref.current?.clientWidth ?? canvasW;
     // pointer capture は best-effort（一部環境で例外）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: layer.id, mode, corner,
       rotation: layer.rotation, // 回転考慮リサイズの基準（開始時点に固定・#279）
@@ -139,6 +172,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     e.stopPropagation();
     if (!selectedIds.includes(layer.id)) onSelect(layer.id);
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: layer.id, mode: "rotate",
       startClientX: e.clientX, startClientY: e.clientY,
@@ -157,6 +191,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     if (group.locked) return; // ロック中は選択のみ
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-move", groupId: group.id,
       startTransform: { ...group.transform },
@@ -212,6 +247,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     const p = toCanvas(e.clientX, e.clientY);
     const dist = Math.hypot(p.x - frame.cx, p.y - frame.cy) || 1; // 0 除算防止
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-scale", groupId: group.id,
       startTransform: { ...group.transform }, groupCenter: { x: frame.cx, y: frame.cy }, startDist: dist,
@@ -227,6 +263,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     e.preventDefault();
     e.stopPropagation();
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-rotate", groupId: group.id, groupCenter: { x: frame.cx, y: frame.cy },
       startClientX: e.clientX, startClientY: e.clientY, start: { x: 0, y: 0, w: 0, h: 0 },
@@ -312,6 +349,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     }
     if (!drag) return;
     try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    finishInteraction(); // 合成境界の終了（開始した分だけ閉じる）
     setDrag(null);
     setGuides({ x: null, y: null });
   };

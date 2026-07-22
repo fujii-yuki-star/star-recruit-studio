@@ -10,6 +10,8 @@ import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants
 // 文字の既定値は domain（template/textStyle）が正典＝描画・場面編集の体裁欄・通常→FREE 変換と同じ値を使う（§2-7・#555）。
 import { DEFAULT_FONT_SIZE, DEFAULT_STROKE_COLOR, DEFAULT_TEXT_COLOR } from "../../domain/template/textStyle";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { useDraftHistory } from "../hooks/useDraftHistory";
+import { isTextEntryTarget, useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
@@ -23,6 +25,7 @@ import { Switch } from "../components/ui";
 import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { UnsavedMark } from "../components/SaveStatusBadge";
+import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { ArrowLeftIcon } from "../components/icons";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { textKeyLabel } from "../uiLabels";
@@ -65,7 +68,19 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // レイヤーごとの既定素材 file input（レイヤー単位で複数あるため id 単一の useRef でなく id→要素のマップ・#412）。
   const defaultAssetInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  const [draft, setDraft] = useState<Template | null>(() => (editing ? cloneTemplate(editing) : null));
+  // 下書きは画面ローカル（store 履歴の対象外＝#547 P1-1）。そのため取り消し/やり直しも専用の局所履歴で用意する
+  // （#547 P2-3）。これが無いと復旧手段が「破棄して戻る」だけになり、1回の誤ドラッグで全編集の破棄を迫られる。
+  const {
+    value: draft,
+    set: setDraft,
+    undo: undoDraft,
+    redo: redoDraft,
+    canUndo,
+    canRedo,
+    beginGroup,
+    endGroup,
+    textGroup,
+  } = useDraftHistory<Template | null>(() => (editing ? cloneTemplate(editing) : null));
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   // 主＝末尾選択（種別別エディタ・削除はこれを基準）。複数選択は一括移動／④[#307] グループ化の土台。
@@ -79,6 +94,12 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // グループを中身ごと削除する確認（#551）。id で持つ＝選ぶグループが変わると確認が自動で解除される（#410 の流儀）。
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   const [assetError, setAssetError] = useState<{ layerId: string; msg: string } | null>(null);
+  // キーボード入口は全画面共通の判定（修飾キー・入力欄では奪わない）を共有し、実体だけ局所履歴に差し替える。
+  // App の全体登録は UNDO_REDO_SCREENS で looks-edit を除外済み＝二重登録・二重 Undo にならない（#547 P1-1）。
+  // 有効条件は**ボタンと同じ**（保存/削除の実行中は止める）＝「押せないのにキーだけ効く」不整合を作らない（ADR-0026②/④）。
+  // 書き出し中は止めない：ADR-0020 の「書き出し中は undo/redo を止める」は**文書 slice**を守るためのガードで、
+  // この下書きは書き出しのスナップショットに入らない＝MP4 に影響しない（この画面が書き出し中に止めるのは保存/削除だけ・#570）。
+  useUndoRedoShortcuts(busyAction === null, { undo: undoDraft, redo: redoDraft });
 
   function backToList() {
     setEditingTemplateId(null);
@@ -331,7 +352,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             {numField("文字の大きさ", l.fontSize ?? DEFAULT_FONT_SIZE, (v) => onUpdateLayer(l.id, { fontSize: v }), 1)}
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={l.color ?? DEFAULT_TEXT_COLOR} onChange={(v) => onUpdateLayer(l.id, { color: v })} ariaLabel="文字の色を選ぶ" />
+              <ColorPicker value={l.color ?? DEFAULT_TEXT_COLOR} onChange={(v) => onUpdateLayer(l.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
@@ -347,7 +368,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             {(l.strokeWidth ?? 0) > 0 && (
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-                <ColorPicker value={l.strokeColor ?? DEFAULT_STROKE_COLOR} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
+                <ColorPicker value={l.strokeColor ?? DEFAULT_STROKE_COLOR} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
               </div>
             )}
           </div>
@@ -363,7 +384,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
                   <div className="field" style={{ margin: 0 }}>
                     <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
-                    <ColorPicker value={l.background?.color ?? "#000000"} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" />
+                    <ColorPicker value={l.background?.color ?? "#000000"} onChange={(v) => onUpdateLayer(l.id, { background: { ...l.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
                   </div>
                   {numField("濃さ(%)", opacityToPercent(l.background?.opacity ?? 0.55), (v) => onUpdateLayer(l.id, { background: { ...l.background, opacity: percentToOpacity(v) } }), 0, 100)}
                   {numField("角丸", l.background?.radius ?? 16, (v) => onUpdateLayer(l.id, { background: { ...l.background, radius: v } }), 0)}
@@ -385,7 +406,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-            <ColorPicker value={l.fillColor ?? "#cccccc"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="色を選ぶ" />
+            <ColorPicker value={l.fillColor ?? "#cccccc"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
           </div>
         </div>
       );
@@ -417,7 +438,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           {renderDefaultAssetControl(l)}
           <div className="field" style={{ margin: "8px 0 0" }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色（写真を入れないとき）</label>
-            <ColorPicker value={l.fillColor ?? "#ffffff"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="背景色を選ぶ" />
+            <ColorPicker value={l.fillColor ?? "#ffffff"} onChange={(v) => onUpdateLayer(l.id, { fillColor: v })} ariaLabel="背景色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
           </div>
         </>
       );
@@ -466,6 +487,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           <span className="topbar-title">見た目パターンを編集</span>
         </div>
         <div className="row gap-sm" style={{ alignItems: "center" }}>
+          {/* 取り消す/やり直す（#547 P2-3）。見た目・語彙は共有コンポーネントで他画面と一致（ADR-0026②）。
+              対象は**この画面の下書き**＝保存前の編集だけを戻す（store の履歴には触れない・#547 P1-1）。
+              保存/削除の実行中は他の操作と揃えて止める。 */}
+          <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undoDraft} onRedo={redoDraft} disabled={busyAction !== null} />
           {dirty && <UnsavedMark />}
           <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
             {busyAction === "save" ? "保存中…" : "保存"}
@@ -488,7 +513,13 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       )}
 
       {/* 本体：左＝キャンバス（広く）／右＝編集パネル */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "var(--gap-lg)", alignItems: "start" }}>
+      {/* フォーカス中の連続入力を1つの取り消しに合成する（#547 P2-3）。onFocus/onBlur は子孫から伝播するので、
+          数値欄・名前欄・色欄をここ1か所で束ねる（欄ごとに書き分けない）。未変更のフォーカスは記録しない（遅延記録）。 */}
+      <div
+        style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "var(--gap-lg)", alignItems: "start" }}
+        onFocus={(e) => { if (isTextEntryTarget(e.target)) textGroup.onFocus(); }}
+        onBlur={(e) => { if (isTextEntryTarget(e.target)) textGroup.onBlur(); }}
+      >
         {/* 左：プレビュー＋レイヤー操作オーバーレイ（ドラッグ/リサイズ/吸着・③c） */}
         <div className="card">
           <h2 className="section-title">プレビュー</h2>
@@ -508,6 +539,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               onSelectGroup={selectGroup}
               onGroupTransform={transformGroup}
               label={(l) => layerLabel[l.type]}
+              // 1回のドラッグ/リサイズ/回転＝1回の取り消し（#547 P2-3）。レイヤーの onPointerDown は stopPropagation
+              // するため祖先では拾えず、オーバーレイからの明示通知で境界を取る（場面編集の FREE と同じ結線）。
+              onInteractionStart={beginGroup}
+              onInteractionEnd={endGroup}
             />
           </ScenePreview>
           <p className="text-sm text-muted mt">プレビュー上で要素をドラッグ・拡大縮小・回転できます（写真・文字は例として表示）。</p>

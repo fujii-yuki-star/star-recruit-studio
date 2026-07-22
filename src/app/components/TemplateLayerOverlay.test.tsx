@@ -237,3 +237,61 @@ describe("TemplateLayerOverlay", () => {
     expect(root.querySelector('[data-testid="tmpl-group-rotate-handle"]')).toBeNull();
   });
 });
+
+// #547 P2-3：取り消しの「1操作＝1ステップ」境界。レイヤー/ハンドルの onPointerDown は stopPropagation するため、
+// 祖先で pointerdown を見る方式では境界を取れない（＝連続移動が pointermove ごとに1履歴になり履歴上限を食い潰す）。
+// 明示コールバックで通知することを固定する（FreeLayoutOverlay と同じ流儀）。
+describe("TemplateLayerOverlay: 取り消しの合成境界（#547 P2-3）", () => {
+  it("ドラッグは onInteractionStart/End を1回ずつ呼ぶ（連続移動では増えない）", () => {
+    const onInteractionStart = vi.fn();
+    const onInteractionEnd = vi.fn();
+    const { root, boxes } = renderOverlay({ selectedIds: ["title"], onInteractionStart, onInteractionEnd });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
+    fireEvent.pointerDown(boxes[1], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onInteractionStart).toHaveBeenCalledTimes(1);
+    fireEvent.pointerMove(root, { clientX: 40, clientY: 20, pointerId: 1 });
+    fireEvent.pointerMove(root, { clientX: 80, clientY: 40, pointerId: 1 });
+    expect(onInteractionStart).toHaveBeenCalledTimes(1); // 移動中は増やさない
+    expect(onInteractionEnd).not.toHaveBeenCalled(); // まだ閉じない
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    expect(onInteractionEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("回転ハンドルのドラッグでも境界を通知する", () => {
+    const onInteractionStart = vi.fn();
+    const onInteractionEnd = vi.fn();
+    const { root, boxes } = renderOverlay({ selectedIds: ["title"], onInteractionStart, onInteractionEnd });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    const knob = boxes[1].querySelectorAll("div")[5] as HTMLElement; // 回転ノブ（リサイズ4＋stem の次）
+    fireEvent.pointerDown(knob, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onInteractionStart).toHaveBeenCalledTimes(1);
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    expect(onInteractionEnd).toHaveBeenCalledTimes(1);
+  });
+
+  // この性質が「祖先で pointerdown を拾う実装」を成立させない理由そのもの＝退行の再発防止。
+  it("レイヤーの onPointerDown は祖先へ伝播しない（祖先検知では境界を取れない）", () => {
+    const ancestorDown = vi.fn();
+    const onInteractionStart = vi.fn();
+    const { getByText } = render(
+      <div onPointerDown={ancestorDown}>
+        <TemplateLayerOverlay
+          layers={makeLayers()}
+          canvasW={CANVAS_W}
+          canvasH={CANVAS_H}
+          selectedIds={["title"]}
+          onSelect={vi.fn()}
+          onSelectMany={vi.fn()}
+          onChange={vi.fn()}
+          onMoveMany={vi.fn()}
+          onRotate={vi.fn()}
+          label={(l) => l.type}
+          onInteractionStart={onInteractionStart}
+        />
+      </div>,
+    );
+    fireEvent.pointerDown(getByText("text"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(ancestorDown).not.toHaveBeenCalled(); // stopPropagation ＝祖先には届かない
+    expect(onInteractionStart).toHaveBeenCalledTimes(1); // 明示コールバックなら届く
+  });
+});

@@ -8,6 +8,7 @@ import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
+import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
 import { StartNewVideoButton } from "../components/StartNewVideoButton";
@@ -139,8 +140,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
           {/* 取り消し/やり直し（#413）＝たたき台の削除・並べ替えも戻せる。キーボードは Ctrl+Z/Y（App で登録・この画面は有効・#547 P1-1）。 */}
           <div className="row gap-sm" style={{ justifyContent: "flex-end", marginBottom: "var(--gap-sm)" }}>
-            <button className="btn btn-ghost btn-icon text-sm" onClick={undo} disabled={!canUndo} aria-label="取り消す" title="取り消す（Ctrl+Z）">↶ 取り消す</button>
-            <button className="btn btn-ghost btn-icon text-sm" onClick={redo} disabled={!canRedo} aria-label="やり直す" title="やり直す（Ctrl+Y）">↷ やり直す</button>
+            <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} />
           </div>
 
           {/* AI 生成直後だけ「ゆうこ(AI)が作成した」旨を出す（白紙/手動/読込済みでは出さない＝表示と実挙動の一致・#467/ADR-0026）。 */}

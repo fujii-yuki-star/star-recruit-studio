@@ -97,18 +97,19 @@ describe("useUndoRedoShortcuts 有効画面の限定（#547 P1-1）", () => {
     useProjectStore.setState({ undo: origUndo });
   });
 
-  it("有効画面＝取り消す/やり直すUIがある画面だけ（テンプレ作成 looks-edit は対象外）", () => {
-    // 取り消す/やり直すUI を持ち、store 履歴（meta/parts/scenes）をその画面で編集している画面。
+  it("有効画面＝store 履歴をその画面で編集している画面だけ（テンプレ作成 looks-edit は対象外）", () => {
+    // 判定基準は「取り消すUIの有無」ではなく **store 履歴（meta/parts/scenes）をその画面で編集しているか**。
     expect(UNDO_REDO_SCREENS.has("draft")).toBe(true); // #413：たたき台の削除/移動も Ctrl+Z で戻せる
     expect(UNDO_REDO_SCREENS.has("scene-edit")).toBe(true);
     expect(UNDO_REDO_SCREENS.has("timeline-edit")).toBe(true);
-    // 編集が画面ローカル（draft state）＝store Undo は画面外を巻き戻すので対象外（本 issue の本体）。
+    // テンプレ作成は #547 P2-3 で取り消す/やり直すを持つが、戻す対象は**画面ローカル下書き**（useDraftHistory）。
+    // store Undo を有効にすると画面外の編集を巻き戻すので、この集合には入れない（本 issue の本体・#547 P1-1）。
     expect(UNDO_REDO_SCREENS.has("looks-edit")).toBe(false);
     // store 履歴を画面で扱っていない画面も「見えていないものを Undo」になるため対象外。
     expect(UNDO_REDO_SCREENS.has("materials")).toBe(false); // 素材は履歴対象外（ADR-0020）
     expect(UNDO_REDO_SCREENS.has("settings")).toBe(false);
     expect(UNDO_REDO_SCREENS.has("home")).toBe(false);
-    // 意図しない拡大/縮小の検知（Undo UI を持つ画面と一致し続けること）。増やすときは ADR-0020「入口」も更新する。
+    // 意図しない拡大/縮小の検知（store 履歴を編集する画面と一致し続けること）。増やすときは ADR-0020「入口」も更新する。
     expect(UNDO_REDO_SCREENS.size).toBe(3);
   });
 });
@@ -148,5 +149,29 @@ describe("書き出し中は Undo/Redo を無効化（App 結線・#570 P2 レ�
     phase = "idle"; rerender();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
     expect(undo).toHaveBeenCalledTimes(2); // 完了後＝再び効く
+  });
+});
+
+// #547 P2-3：画面ローカル履歴を持つ画面（テンプレ作成）は実体だけを差し替える。
+// フック単体で分岐を固定しておくと、壊れたときに「フックか画面配線か」の切り分けが早い。
+describe("handlers で実体を差し替えられる（#547 P2-3）", () => {
+  it("handlers を渡すと store ではなくそちらが呼ばれる", () => {
+    const origUndo = useProjectStore.getState().undo;
+    const origRedo = useProjectStore.getState().redo;
+    const storeUndo = vi.fn();
+    const storeRedo = vi.fn();
+    const localUndo = vi.fn();
+    const localRedo = vi.fn();
+    useProjectStore.setState({ undo: storeUndo as unknown as () => void, redo: storeRedo as unknown as () => void });
+    renderHook(() => useUndoRedoShortcuts(true, { undo: localUndo, redo: localRedo }));
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true }));
+    expect(localUndo).toHaveBeenCalledTimes(1);
+    expect(localRedo).toHaveBeenCalledTimes(1);
+    expect(storeUndo).not.toHaveBeenCalled(); // store 履歴（画面外の編集）には触れない
+    expect(storeRedo).not.toHaveBeenCalled();
+
+    useProjectStore.setState({ undo: origUndo, redo: origRedo });
   });
 });
