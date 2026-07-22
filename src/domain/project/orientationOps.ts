@@ -20,7 +20,10 @@ export interface OrientationChangeResult {
  * 全場面のテンプレを目標の向きへ写像する。各場面を「同カテゴリ・目標向き」のテンプレへ差し替える。
  * 既に目標向きの場面はそのまま。目標向きの同カテゴリ・テンプレが無い場面は原状維持し、
  * 向き不一致を scene.warnings に記録する（11.9。横型は一部カテゴリのみ＝縦→横で変換先が無い場面が出うる・ADR-0012）。
- * テンプレ選択は category＋aspectRatio の最初の一致（B4 transformPlan と同基準。schema に「標準」マーカーは無い）。
+ * テンプレ選択は category＋aspectRatio の最初の一致（schema に「標準」マーカーは無い）。
+ * **マイ見た目も当て先に含める**（利用者が自分のプロジェクトの向きを変える操作なので、自作の見た目に寄るのは自然）。
+ * 取り込み（AI 変換）と削除時の置換は `standardTemplateForScene` でマイ見た目を除外する（ADR-0017「AI 入力から除外」・
+ * 削除は「標準へ寄せる」と明示する＝#547）。**意図的な差**なのでここは一本化しない。
  */
 export function changeScenesOrientation(
   scenes: Scene[],

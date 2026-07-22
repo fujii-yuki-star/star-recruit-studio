@@ -1,6 +1,7 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
+import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, PROJECT_NAME_MAX_LENGTH, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
@@ -17,7 +18,7 @@ import {
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
-import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSceneInList, splitSceneLinesInList } from "../../domain/project/sceneOps";
+import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from "../../domain/project/sceneOps";
 import { substituteDeletedTemplateInScenes } from "../../domain/project/templateUsage";
 import { duplicateSceneAnimations, removeAnimationsForTargets } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
@@ -97,6 +98,16 @@ export type VoiceParamPatch = Partial<Pick<VoiceSettings, "speed" | "pitch" | "i
 export type BgmPatch = Partial<Pick<BgmSettings, "volume" | "enabled" | "loop" | "fadeInSec" | "fadeOutSec">>;
 /** Undo/Redo が出し入れする文書slice（ADR-0020：assets は含めない＝素材取込のディスクIOは undo 対象外）。 */
 type DocSnapshot = { meta: ProjectHeader; parts: Part[]; scenes: Scene[] };
+
+/** 「まとめて標準にする」（#547）の結果。番号は利用者が見る場面番号（1始まり）。 */
+export interface StandardLookApplyResult {
+  /** 標準の見た目にした場面。 */
+  fixed: number[];
+  /** 合う標準が無くて直せなかった場面（押した後も項目が残る理由）。 */
+  unfixable: number[];
+  /** 直したが、動画に出なくなった中身（写真・文字・立ち絵）がある場面（確認が要る）。 */
+  lostContent: number[];
+}
 
 interface ProjectState {
   status: GenerateStatus;
@@ -221,6 +232,13 @@ interface ProjectState {
   /** 動画全体の向きを切り替え、各場面のテンプレを同カテゴリ・新向きへ写像する（B5-b・ADR-0012）。
    *  切替えた件数と、対応する見た目が無く原状維持した件数を返す（UIの結果表示用）。 */
   changeOrientation: (target: Orientation) => { changed: number; unsupported: number };
+  /**
+   * 見た目が見つからない場面を**まとめて標準の見た目にする**（#547）。直した場面数を返す。
+   * TEMPLATE_NOT_FOUND は自動置換しない方針（黙って中身が減った動画を出さない）だが、別PCで開いた等で
+   * 多数の場面が該当すると手直しが重いので、**利用者の明示操作**として一括で寄せられるようにする（15 §3）。
+   * 当てる先が無い場面（その向き・種類の同梱テンプレが無い）は触らない。Undo 可（pushHistory）。
+   */
+  applyStandardLookToUnresolvedScenes: () => StandardLookApplyResult;
   /** 動画全体のフォントを切り替える（videoSettings.fontId・保存時に永続化）。 */
   setFontId: (fontId: FontId) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
@@ -1107,6 +1125,35 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       },
       saveStatus: "idle",
     }));
+  },
+  applyStandardLookToUnresolvedScenes: () => {
+    const none: StandardLookApplyResult = { fixed: [], unfixable: [], lostContent: [] };
+    if (isExportBusy(get().exportRun.phase)) return none; // 書き出し中は文書編集を固定（#570）
+    const st = get();
+    const fixes = standardLookFixesForUnresolved(st.scenes, st.templates, st.meta.videoSettings.aspectRatio);
+    const byScene = new Map(fixes.map((f) => [f.sceneId, f] as const));
+    // 番号は scenes の位置（1始まり）＝利用者が見る場面番号（buildPrecheckItems と同じ数え方）。
+    const numberOf = (sceneId: string): number => st.scenes.findIndex((sc) => sc.sceneId === sceneId) + 1;
+    const result: StandardLookApplyResult = {
+      fixed: fixes.map((f) => numberOf(f.sceneId)),
+      lostContent: fixes.filter((f) => f.losesContent).map((f) => numberOf(f.sceneId)),
+      // 当て先が無くて直せない場面（その向き・種類の標準が無い）。押した後も項目が残る理由を出すために返す。
+      unfixable: st.scenes
+        .map((sc, i) => ({ sc, n: i + 1 }))
+        .filter(({ sc }) => !st.templates.some((t) => t.templateId === sc.templateId) && !byScene.has(sc.sceneId))
+        .map(({ n }) => n),
+    };
+    if (fixes.length === 0) return result; // 直せる場面が無い＝履歴も積まない（空の取り消しを作らない）
+    get().pushHistory();
+    set((s2) => ({
+      scenes: s2.scenes.map((sc) => {
+        const f = byScene.get(sc.sceneId);
+        // 手で選び直すのと同じ経路（配置・文字の移送も同じ規則＝ADR-0030）。旧テンプレは解決できないので prev は無し。
+        return f ? switchSceneTemplate(sc, f.template.templateId, f.template.layers, f.template.category, undefined) : sc;
+      }),
+      saveStatus: "idle",
+    }));
+    return result;
   },
   changeOrientation: (target) => {
     if (isExportBusy(get().exportRun.phase)) return { changed: 0, unsupported: 0 }; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）

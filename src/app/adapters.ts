@@ -112,14 +112,21 @@ export function exportBlockedMessage(items: PrecheckItem[], from: "precheck" | "
   return `このままでは動画を書き出せない項目があります（${names}）。${next}、もう一度お試しください。`;
 }
 
+/**
+ * 場面番号の並べ方（1始まり・多いと先頭8件＋「ほか N 件」）。公開前チェックの各項目と、
+ * 一括操作の結果表示（`standardLookResultMessage`）で**同じ見せ方**にするための単一の参照元（§2-7）。
+ */
+export function formatSceneNumbers(nums: number[]): string {
+  return nums.length <= 8 ? `場面${nums.join("・")}` : `場面${nums.slice(0, 8).join("・")} ほか${nums.length - 8}件`;
+}
+
 /** 公開前チェックの結果を、実際のシーン/素材から算出する（一部は自動チェック未対応の定型）。 */
 export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[], overlayAnimations?: ElementAnimation[]): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
   // 場面に紐づく項目は「どの場面か」を番号で列挙し（#403・どの場面が問題か示す）、action がある項目は最初の該当場面へ
   // 飛べるよう sceneId を持たせる（#400）。番号は scenes の位置（1始まり）＝利用者が見る場面番号。多いと先頭8件＋「ほか N 件」。
-  const fmtScenes = (nums: number[]): string =>
-    nums.length <= 8 ? `場面${nums.join("・")}` : `場面${nums.slice(0, 8).join("・")} ほか${nums.length - 8}件`;
+  const fmtScenes = formatSceneNumbers;
   const offending = (pred: (s: Scene) => boolean): { nums: number[]; firstId?: string } => {
     const hits: { id: string; n: number }[] = [];
     scenes.forEach((s, i) => { if (pred(s)) hits.push({ id: s.sceneId, n: i + 1 }); });
@@ -196,7 +203,7 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
     items.push({
       id: "sceneTemplate",
       label: "場面の見た目",
-      detail: `${fmtScenes(noTemplate.nums)}の見た目が見つかりません。場面編集で見た目を選び直してから書き出してください。`,
+      detail: `${fmtScenes(noTemplate.nums)}の見た目が見つかりません。場面編集で選び直すか、「まとめて標準にする」で標準の見た目に変えてください。`,
       severity: "action",
       action: "直す",
       sceneId: noTemplate.firstId,

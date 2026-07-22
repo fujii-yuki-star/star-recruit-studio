@@ -194,6 +194,19 @@ describe('transformVideoPlan', () => {
     expect(scenes[0].warnings.some((w) => w.code === 'TEMPLATE_NOT_FOUND' && w.autoFixed === true)).toBe(true);
   });
 
+  // マイ見た目は AI 入力から除外される（ADR-0017）＝AI が提案できないものへ**補正で**化けさせない（#547）。
+  // 当て先の規則は standardTemplateForScene に一本化してあるので、その除外がここでも効くことを固定する。
+  it('補正の当て先にマイ見た目を選ばない（候補がマイ見た目だけなら手動選択を促す）', () => {
+    const userOnly: Template[] = [
+      { ...templates[0], templateId: 'user_tmpl_001', name: 'マイ見た目' }, // 同カテゴリ・同じ向きだが自作
+    ];
+    const plan = singleScenePlan({ sceneType: 'opening', templateId: 'does_not_exist_v1' });
+    const { scenes } = transformVideoPlan(plan, { ...baseCtx(), templates: userOnly });
+    expect(scenes[0].templateId).not.toBe('user_tmpl_001'); // 化けない
+    // 自動補正できないので「手で選ぶ」案内に倒れる（autoFixed=false・§2-5）。
+    expect(scenes[0].warnings.some((w) => w.code === 'TEMPLATE_NOT_FOUND' && w.autoFixed === false)).toBe(true);
+  });
+
   it('長すぎる durationSec をテンプレ上限へ clamp する', () => {
     const plan = singleScenePlan({ durationSec: 100 });
     const { scenes } = transformVideoPlan(plan, baseCtx());

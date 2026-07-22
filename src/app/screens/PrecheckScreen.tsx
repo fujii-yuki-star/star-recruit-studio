@@ -1,8 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { PrecheckItem, ScreenId } from "../data/mockData";
-import { isExportBusy, useProjectStore } from "../store/projectStore";
+import type { Scene } from "../../domain/project/types";
+import { isExportBusy, useProjectStore, type StandardLookApplyResult } from "../store/projectStore";
 import { buildPrecheckItems, exportBlockedMessage, isExportBlocking } from "../adapters";
 import { useExportCapability } from "../hooks/useExportCapability";
+import { standardLookFixesForUnresolved } from "../../domain/template/templateSelection";
+import { standardLookButtonReason, standardLookResultMessage } from "../uiLabels";
 import { PageHead } from "../components/ui";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
@@ -19,8 +22,16 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
-  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, generateAllNarrations, isGeneratingNarration, narrationError } = useProjectStore();
+  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, generateAllNarrations, isGeneratingNarration, narrationError, applyStandardLookToUnresolvedScenes } = useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
+  const undo = useProjectStore((s) => s.undo);
+  // 「まとめて標準にする」の結果（直した件数・入れ直しが要る場面）。この画面に取り消しの入口が無いため
+  // 「取り消す」もここに添える（他画面へ移動して Ctrl+Z、を強いない・#547 P1-1 の方針は変えない）。語彙は UndoRedoButtons と統一。
+  // 適用直後の scenes 参照も控える：この画面の「声を作成」は履歴を積まない（narration.status を直接書く）ため、
+  // その後に undo() すると**声の作成まで巻き戻る**。場面が変わったら「取り消す」は出さない（無関係な編集を消さない）。
+  const [lookFix, setLookFix] = useState<{ result: StandardLookApplyResult; scenesRef: Scene[] } | null>(null);
+  const lookFixResult = lookFix?.result ?? null;
+  const canUndoLookFix = lookFix != null && lookFix.scenesRef === scenes;
   // 書き出し能力（標準方式 h264_mf の可用性）の事前検知（#120）。書き出し画面と**同じフック**を使う（検知を1か所に）。
   const capability = useExportCapability();
 
@@ -66,6 +77,8 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   // 書き出し画面の「動画を保存」と**同じ述語**を使う（片方だけ別条件で止めない・ADR-0026②）。
   // 既に算出済みの items を絞るだけ＝重い buildPrecheckItems を二度走らせない。
   const blockingItems = items.filter(isExportBlocking);
+  // 「まとめて標準にする」で直せる場面（store の一括適用と**同じ判定**＝押せるのに何も起きない、を作らない）。
+  const standardFixes = standardLookFixesForUnresolved(scenes, templates, meta.videoSettings.aspectRatio);
   const exportBlocked = capabilityBlocked || blockingItems.length > 0;
 
   return (
@@ -128,6 +141,31 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                         >
                           {isGeneratingNarration ? "作成中…" : item.action}
                         </button>
+                      ) : item.id === "sceneTemplate" ? (
+                        // 見た目が見つからない場面（TEMPLATE_NOT_FOUND）。自動では置換しない方針なので、
+                        // 「1つずつ選び直す」と「まとめて標準に寄せる」の**どちらも利用者が選べる**ようにする（15 §3）。
+                        <span className="row gap-sm">
+                          <button
+                            className="btn btn-ghost btn-icon text-sm"
+                            onClick={() => {
+                              if (item.sceneId) setEditingSceneId(item.sceneId);
+                              onNavigate("scene-edit");
+                            }}
+                          >
+                            {item.action}
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-icon text-sm"
+                            onClick={() => {
+                              const result = applyStandardLookToUnresolvedScenes();
+                              setLookFix({ result, scenesRef: useProjectStore.getState().scenes });
+                            }}
+                            disabled={standardFixes.length === 0 || isExporting}
+                            title={standardLookButtonReason(standardFixes.length, isExporting)}
+                          >
+                            まとめて標準にする
+                          </button>
+                        </span>
                       ) : (
                         // その他（字幕を短く/動画を直す）は該当場面を指定してから場面編集へ（#400）。
                         <button
@@ -150,6 +188,28 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
           </tbody>
         </table>
       </div>
+
+      {/* 「まとめて標準にする」の結果（#547）。件数だけでなく**中身が減った場面**まで示す＝直った風に見えて
+          写真が外れたまま書き出す、を作らない（15 §5 の「3件を自動調整、1件は確認が必要」流儀・ADR-0026④）。
+          全部直ると該当行ごと消えるので、表の中ではなく外に出す。 */}
+      {lookFixResult && standardLookResultMessage(lookFixResult) !== "" && (
+        <div className={`notice ${lookFixResult.lostContent.length > 0 || lookFixResult.unfixable.length > 0 ? "notice-warn" : ""} mt`} role="status">
+          <span>{standardLookResultMessage(lookFixResult)}</span>
+          {lookFixResult.fixed.length > 0 && canUndoLookFix && (
+            <button
+              className="btn btn-ghost text-sm"
+              disabled={isExporting}
+              title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}
+              onClick={() => {
+                undo();
+                setLookFix(null);
+              }}
+            >
+              取り消す
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 声の一括生成に失敗したとき（VOICEVOX 未起動など）は「次の行動」を示す（§2-5）。 */}
       {narrationError && (

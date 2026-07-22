@@ -54,3 +54,55 @@ describe("LooksScreen busy 表示（#410 sub4 レビュー）", () => {
     expect((document.querySelector(".action-card") as HTMLButtonElement).disabled).toBe(true);
   });
 });
+
+// #547：削除は「使っている場面が標準へ変わる／中身が出なくなる」副作用を伴う（#458）。
+// 文言そのものは uiLabels.test.ts で担保するので、ここは**画面が正しい件数を渡しているか**（配線）を見る。
+describe("マイ見た目の削除確認は影響を先に示す（#547）", () => {
+  const usingScene = (sceneId: string, over: Record<string, unknown> = {}) =>
+    ({ sceneId, partId: "part_001", order: 1, sceneType: userTemplate.category, templateId: "user_tmpl_001",
+       durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+       narration: { text: "", status: "none" }, warnings: [], ...over }) as never;
+
+  it("使用中の場面数を確認ダイアログに出す（全場面数ではなく、この見た目を使っている数）", () => {
+    useProjectStore.setState({
+      scenes: [usingScene("s1"), usingScene("s2"), usingScene("s3", { templateId: sampleTemplates[1].templateId })],
+    });
+    render(<LooksScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("この見た目パターンを削除"));
+    expect(screen.getByText(/2個の場面は、標準の見た目に変わります/)).toBeTruthy(); // 3ではなく2
+  });
+
+  it("合う標準が無い場面は「変わります」と言わない（約束と実挙動をずらさない）", () => {
+    // その向き・種類の標準を外すと、この場面は削除後も未解決のまま残る。
+    useProjectStore.setState({
+      templates: [userTemplate, ...sampleTemplates.filter((t) => t.category !== userTemplate.category)],
+      scenes: [usingScene("s1")],
+    });
+    render(<LooksScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("この見た目パターンを削除"));
+    expect(screen.getByText(/1個の場面は合う標準が無いため、見た目を選び直すまで書き出せません/)).toBeTruthy();
+    expect(screen.queryByText(/標準の見た目に変わります/)).toBeNull();
+  });
+
+  it("中身が出なくなる場面があれば、その数も先に示す（削除は取り消せないため）", () => {
+    // マイ見た目**にだけある差し込み先**に写真が入っている＝標準へ寄せると受け皿が無く、動画に出なくなる。
+    const withOwnSlot = {
+      ...userTemplate,
+      layers: [...userTemplate.layers, { id: "layer_001", type: "slot", x: 0, y: 0, w: 100, h: 100 } as (typeof userTemplate.layers)[number]],
+    };
+    useProjectStore.setState({
+      templates: [withOwnSlot, ...sampleTemplates],
+      scenes: [usingScene("s1", { assetRefs: { layer_001: "asset_001" } })],
+    });
+    render(<LooksScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("この見た目パターンを削除"));
+    expect(screen.getByText(/1個の場面は写真・文字などが動画に出なくなります/)).toBeTruthy();
+  });
+
+  it("使っていなければ場面の話は出さない（無関係な不安を作らない）", () => {
+    useProjectStore.setState({ scenes: [] });
+    render(<LooksScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("この見た目パターンを削除"));
+    expect(screen.queryByText(/標準の見た目に変わります/)).toBeNull();
+  });
+});

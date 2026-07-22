@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Template } from './types';
-import { pickableTemplatesForScene, sceneCategoriesForOrientation } from './templateSelection';
+import type { Scene } from '../project/types';
+import type { Layer } from './types';
+import { pickableTemplatesForScene, sceneCategoriesForOrientation, contentHiddenBySwitch, standardLookFixesForUnresolved, standardTemplateForScene } from './templateSelection';
 
 function tpl(over: Partial<Template> & Pick<Template, 'templateId' | 'category' | 'aspectRatio'>): Template {
   return {
@@ -84,5 +86,137 @@ describe('sceneCategoriesForOrientation（種類の選択肢・#528）', () => {
   it('その向きで1つ以上見た目がある全カテゴリを SCENE_CATEGORIES 順で返す（別向きは除外）', () => {
     expect(sceneCategoriesForOrientation(all, '16:9')).toEqual(['opening', 'photo_intro']);
     expect(sceneCategoriesForOrientation(all, '9:16')).toEqual(['opening']); // openingPort のみ 9:16
+  });
+});
+
+// #547：TEMPLATE_NOT_FOUND は**自動置換しない**（黙って中身が減った動画を出さない）。
+// 代わりに「まとめて標準にする」を利用者の明示操作として出すので、その当て先と対象の判定を固定する。
+describe('standardTemplateForScene / standardLookFixesForUnresolved（#547・標準へ寄せる明示操作）', () => {
+  const userTmpl = tpl({ templateId: 'user_tmpl_001', category: 'opening', aspectRatio: '16:9' });
+  const lay = (id: string, type: Layer['type']): Layer => ({ id, type, x: 0, y: 0, w: 10, h: 10 });
+  const scn = (sceneId: string, sceneType: Scene['sceneType'], templateId: string, assetRefs: Record<string, string | null> = {}): Scene =>
+    ({ sceneId, sceneType, templateId, partId: 'part_001', order: 1, durationSec: 8, assetRefs,
+       character: { enabled: false, characterId: 'yuko' }, texts: {}, narration: { text: '', status: 'none' }, warnings: [] }) as Scene;
+  // 差し込み先を持つ写真紹介（既定の fixture は layers: [] なので、外れる/残るの判定には層が要る）。
+  const photoWithSlots = tpl({
+    templateId: 'photo_land', category: 'photo_intro', aspectRatio: '16:9',
+    layers: [lay('bg', 'background'), lay('mainVisual', 'slot'), lay('headline', 'text')],
+  });
+  const withSlots = [openingLand, photoWithSlots, openingPort, openingLand2];
+
+  it('同じ向き・同じ種類の同梱テンプレの先頭を返す', () => {
+    expect(standardTemplateForScene(all, 'opening', '16:9')?.templateId).toBe('opening_land');
+    expect(standardTemplateForScene(all, 'photo_intro', '16:9')?.templateId).toBe('photo_land');
+    expect(standardTemplateForScene(all, 'opening', '9:16')?.templateId).toBe('opening_port');
+  });
+
+  it('マイ見た目は当て先にしない（「見つからない」原因がマイ見た目の削除であることが多いため）', () => {
+    // ユーザーテンプレを先頭に置いても、同梱テンプレが選ばれる。
+    expect(standardTemplateForScene([userTmpl, ...all], 'opening', '16:9')?.templateId).toBe('opening_land');
+    // 同梱が無ければ当て先なし＝手で選び直す（勝手にマイ見た目を当てない）。
+    expect(standardTemplateForScene([userTmpl], 'opening', '16:9')).toBeUndefined();
+  });
+
+  it('その向き・種類に同梱テンプレが無ければ当て先なし', () => {
+    expect(standardTemplateForScene(all, 'photo_intro', '9:16')).toBeUndefined(); // 縦の写真紹介は無い
+  });
+
+  it('解決できない場面だけを、当て先つきで返す（解決済みは触らない）', () => {
+    const scenes = [
+      scn('s1', 'opening', 'missing'),
+      scn('s2', 'opening', 'opening_land'), // 解決済み
+      scn('s3', 'photo_intro', 'gone'),
+    ];
+    const fixes = standardLookFixesForUnresolved(scenes, all, '16:9');
+    expect(fixes.map((f) => [f.sceneId, f.template.templateId])).toEqual([
+      ['s1', 'opening_land'],
+      ['s3', 'photo_land'],
+    ]);
+  });
+
+  it('当て先が無い場面は返さない（押しても何も起きないボタンを作らないための判定）', () => {
+    expect(standardLookFixesForUnresolved([scn('s1', 'photo_intro', 'missing')], all, '9:16')).toEqual([]); // 縦の写真紹介は当て先なし
+  });
+
+  // マイ見た目は層 id が独自（layer_001…）なので、標準の差し込み先と一致せず写真が外れる。
+  // 「3件直しました」だけ出すと中身が減ったことに気づけないまま書き出せるので、先に判定して示す（#547）。
+  it('写真の割り当てが外れる場面は losesContent で分かる', () => {
+    const keeps = standardLookFixesForUnresolved([scn('s1', 'photo_intro', 'gone', { mainVisual: 'asset_001' })], withSlots, '16:9');
+    expect(keeps[0].losesContent).toBe(false); // 同じ差し込み先がある＝そのまま残る
+
+    const loses = standardLookFixesForUnresolved([scn('s1', 'photo_intro', 'gone', { layer_001: 'asset_001' })], withSlots, '16:9');
+    expect(loses[0].losesContent).toBe(true); // マイ見た目の層 id は標準に無い＝外れる
+  });
+
+  it('割り当てが空の差し込み先は「外れる」に数えない（失うものが無い）', () => {
+    const fixes = standardLookFixesForUnresolved([scn('s1', 'photo_intro', 'gone', { layer_001: null })], withSlots, '16:9');
+    expect(fixes[0].losesContent).toBe(false);
+  });
+
+  // FREE へ寄せる場合は通常配置を休眠保持する（ADR-0030 非破壊往復）＝自由配置が残っていれば中身は消えない。
+  it('FREE へ寄せるとき、自由配置が残っていれば「出なくなる」とは言わない', () => {
+    const freeTmpl = tpl({ templateId: 'free_std', category: 'free', aspectRatio: '16:9', layers: [lay('bg', 'background')] });
+    const scene = { ...scn('s1', 'free', 'gone', { layer_001: 'asset_001' }), freeLayout: [{ id: 'free_001' }] } as unknown as Scene;
+    const fixes = standardLookFixesForUnresolved([scene], [freeTmpl], '16:9');
+    expect(fixes[0].template.templateId).toBe('free_std');
+    expect(fixes[0].losesContent).toBe(false); // 休眠保持＝動画の中身は減らない
+  });
+
+  it('FREE へ寄せても自由配置が空なら、今出ている中身は消えると言う', () => {
+    const freeTmpl = tpl({ templateId: 'free_std', category: 'free', aspectRatio: '16:9', layers: [lay('bg', 'background')] });
+    const scene = scn('s1', 'free', 'gone', { layer_001: 'asset_001' }); // freeLayout 無し＝何も描かれない
+    expect(standardLookFixesForUnresolved([scene], [freeTmpl], '16:9')[0].losesContent).toBe(true);
+  });
+
+  it('当て先に文字枠・立ち絵枠が無ければ、文字と立ち絵も「出なくなる」に数える', () => {
+    const noTextTmpl = tpl({ templateId: 'plain', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('mainVisual', 'slot')] });
+    const scene = {
+      ...scn('s1', 'photo_intro', 'gone', { mainVisual: 'a1' }),
+      texts: { title: 'ごあいさつ', main: '   ' }, // 空白だけの文字は失うものに数えない
+      character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_pose' },
+    } as unknown as Scene;
+    const hidden = contentHiddenBySwitch(scene, noTextTmpl);
+    expect(hidden.slotIds).toEqual([]); // 差し込み先はある
+    expect(hidden.textKeys).toEqual(['title']); // 文字枠が無い＝出ない
+    expect(hidden.character).toBe(true); // 立ち絵枠が無い＝出ない
+  });
+
+  // 切替前の見た目が分かるなら「いま実際に出ているもの」だけを数える＝休眠のままだったデータを
+  // 「消える」と言わない（過大開示で警告の価値を下げない）。
+  it('切替前の見た目を渡すと、元から出ていなかった中身は「出なくなる」に数えない', () => {
+    const prev = tpl({ templateId: 'prev', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('mainVisual', 'slot')] });
+    const next = tpl({ templateId: 'next', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('other', 'slot')] });
+    const scene = {
+      ...scn('s1', 'photo_intro', 'prev', { mainVisual: 'a1', dormant_slot: 'a2' }),
+      texts: { title: '出ていない文字' }, // prev に文字枠が無い＝元から出ていない
+    } as unknown as Scene;
+
+    expect(contentHiddenBySwitch(scene, next, prev).slotIds).toEqual(['mainVisual']); // 休眠の dormant_slot は数えない
+    expect(contentHiddenBySwitch(scene, next, prev).textKeys).toEqual([]); // 元から出ていない文字は数えない
+    // 渡さない場合は安全側＝データがあるものを全部数える。
+    expect(contentHiddenBySwitch(scene, next).slotIds.sort()).toEqual(['dormant_slot', 'mainVisual']);
+  });
+
+  it('FREE の背景層に入っている素材は「出なくなる」に数えない（FREE でも背景は描かれる）', () => {
+    const freeTmpl = tpl({ templateId: 'free_std', category: 'free', aspectRatio: '16:9', layers: [lay('background', 'background')] });
+    const scene = scn('s1', 'free', 'gone', { background: 'asset_bg', layer_001: 'asset_001' }); // freeLayout 無し
+    const hidden = contentHiddenBySwitch(scene, freeTmpl);
+    expect(hidden.slotIds).toEqual(['layer_001']); // background は残る
+  });
+
+  it('FREE から通常へ移ると、自由配置の中身が出なくなる', () => {
+    const freePrev = tpl({ templateId: 'free_prev', category: 'free', aspectRatio: '16:9', layers: [lay('background', 'background')] });
+    const normal = tpl({ templateId: 'normal', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('mainVisual', 'slot')] });
+    const scene = { ...scn('s1', 'free', 'free_prev'), freeLayout: [{ id: 'free_001' }] } as unknown as Scene;
+    expect(contentHiddenBySwitch(scene, normal, freePrev).freeLayout).toBe(true);
+    // 通常→通常では自由配置は元から出ていない＝数えない。
+    const normalPrev = tpl({ templateId: 'p', category: 'photo_intro', aspectRatio: '16:9', layers: [] });
+    expect(contentHiddenBySwitch(scene, normal, normalPrev).freeLayout).toBe(false);
+  });
+
+  it('判定は switchSceneTemplate の清算規則と同じ差し込み先（背景・スロット・ロゴ）を見る', () => {
+    const photo = photoWithSlots;
+    const scene = scn('s1', 'photo_intro', 'gone', { mainVisual: 'a1', bg: 'a2', layer_009: 'a3' });
+    expect(contentHiddenBySwitch(scene, photo).slotIds).toEqual(['layer_009']); // テンプレにある先は残り、無い先だけ外れる
   });
 });
