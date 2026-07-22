@@ -94,7 +94,7 @@ describe("LooksEditScreen 下書きの取り消し/やり直し（#547 P2-3）",
   // （#547 P2-3 レビュー）。1ドラッグ＝1取り消しであることを固定する。
   it("色のドラッグは1回の取り消しでまとめて戻る（履歴を洪水させない）", () => {
     render(<LooksEditScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "文字" })); // 文字レイヤーを選ぶ＝文字色の欄が出る（選択は履歴に積まない）
+    fireEvent.click(screen.getByRole("button", { name: "文字（見出し）" })); // 文字レイヤーを選ぶ＝文字色の欄が出る（選択は履歴に積まない）
     expect(undoBtn().disabled).toBe(true);
 
     fireEvent.click(screen.getByLabelText("文字の色を選ぶ")); // 色ポップオーバーを開く

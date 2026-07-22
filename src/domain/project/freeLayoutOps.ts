@@ -9,6 +9,7 @@ import type { Group } from '../group/types';
 import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { createFreeElementId } from './persistence';
 import type { FreeElement } from './types';
+import { moveByZ } from '../zOrder';
 
 // 新規要素の既定の配置・大きさ・体裁（canvas 1920×1080 基準の見やすい初期値。描画の fallback とは別の編集用既定）。
 const DEFAULT_X = 200;
@@ -381,21 +382,8 @@ export function sendFreeElementToBack(freeLayout: FreeElement[], id: string): Fr
 export function moveFreeElementZ(
   freeLayout: FreeElement[], id: string, direction: 'up' | 'down',
 ): FreeElement[] {
-  // zIndex 既定は 1（layout の描画既定・パネルの並び順と一致＝absent z を同じに扱う）。
-  const sorted = [...freeLayout].sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1));
-  const i = sorted.findIndex((e) => e.id === id);
-  if (i < 0) return freeLayout;
-  const j = direction === 'up' ? i + 1 : i - 1;
-  if (j < 0 || j >= sorted.length) return freeLayout; // 端＝これ以上動かせない
-  const a = sorted[i];
-  const b = sorted[j];
-  const za = a.zIndex ?? 1;
-  const zb = b.zIndex ?? 1;
-  if (za !== zb) {
-    return freeLayout.map((e) => (e.id === a.id ? { ...e, zIndex: zb } : e.id === b.id ? { ...e, zIndex: za } : e));
-  }
-  const nudged = direction === 'up' ? zb + 1 : Math.max(0, zb - 1);
-  return freeLayout.map((e) => (e.id === a.id ? { ...e, zIndex: nudged } : e));
+  // zIndex 既定は 1（layout の描画既定・パネルの並び順と一致＝absent z を同じに扱う）。入れ替えの意味論は共有（§2-7）。
+  return moveByZ(freeLayout, id, direction, (e) => e.zIndex ?? 1);
 }
 
 // ── ドラッグ移動・角リサイズのジオメトリ（Phase 4b）。純粋関数＝§7 テスト対象。 ──

@@ -1,6 +1,7 @@
 // テンプレ作成エディタのレイヤー操作（ADR-0017・#214 ③b）。Layer[] の追加/削除/更新の純粋関数（§7 テスト対象）。
 import { LAYER_TYPES, TEXT_KEY, TEXT_KEYS, type LayerType, type TextKey } from '../enums';
 import type { Layer } from './types';
+import { effectiveLayerZ } from './layerOrder';
 
 /** エディタで追加できるレイヤー型（ADR-0017：decor は開放しない＝静的装飾は slot/shape で代替）。 */
 export const TEMPLATE_ADDABLE_LAYER_TYPES: LayerType[] = LAYER_TYPES.filter((t) => t !== 'decor');
@@ -19,7 +20,8 @@ export function createLayerId(layers: Layer[]): string {
 /** 指定 type のレイヤーを既定値で追加する（最前面）。background は全面、それ以外はキャンバス中央あたり。 */
 export function addLayer(layers: Layer[], type: LayerType, canvas: { width: number; height: number }): Layer[] {
   const id = createLayerId(layers);
-  const zIndex = layers.reduce((m, l) => Math.max(m, l.zIndex ?? 0), 0) + 1;
+  // 「最前面」は**実効 z**で測る（種別ごとの既定を持つ層より後ろに入らない＝追加したのに下に出る、を防ぐ）。
+  const zIndex = layers.reduce((m, l) => Math.max(m, effectiveLayerZ(l)), 0) + 1;
   // 文字系は textKey 既定を入れて追加直後から場面テキストに紐づく（text→見出し / subtitle→字幕）。未設定だと描画で空になる。
   const textKey = type === 'text' ? TEXT_KEY.title : type === 'subtitle' ? TEXT_KEY.subtitle : undefined;
   const layer: Layer =

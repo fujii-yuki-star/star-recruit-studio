@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Layer } from "../../domain/template/types";
+import { effectiveLayerZ } from "../../domain/template/layerOrder";
 import { elementAtPoint, freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GEOM_MIN_SIZE, GROUP_MIN_SCALE } from "../../domain/constants";
@@ -220,14 +221,14 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     // ＝**枠の内部ドラッグ＝グループ移動**（#307）を保つ。テンプレは全面 background を必ず持つため、これが無いと
     // フォールバックが到達不能になり、枠内の空白ドラッグが背景を掴んで動かす（グループは動かず選択も無言解除）。
     const memberIds = new Set(groupElementIds(groups, group.id)); // 推移的メンバー
-    const zOf = (l: Layer) => l.zIndex ?? 0;
+    const zOf = (l: Layer) => effectiveLayerZ(l); // 実効 z＝一覧・描画と同じ基準（zIndex 未指定でもクリックで拾う要素が一致）
     const memberMaxZ = Math.max(...layers.filter((l) => memberIds.has(l.id)).map(zOf), Number.NEGATIVE_INFINITY);
     // 描画順（zIndex 昇順＝下の map と同じ並び）に並べ、非表示を除き合成後の座標で当てる。
     const hitId = elementAtPoint(
       [...layers]
         .filter((l) => !isHiddenByGroup(l.id, groups))
         .filter((l) => memberIds.has(l.id) || zOf(l) > memberMaxZ)
-        .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+        .sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b))
         .map((l) => {
           const cg = composed.get(l.id) ?? { x: l.x, y: l.y, w: l.w, h: l.h, rotation: l.rotation };
           return { id: l.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, rotation: cg.rotation };
@@ -371,7 +372,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
         setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
       }}
     >
-      {[...layers].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)).map((l) => {
+      {[...layers].sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b)).map((l) => {
         if (isHiddenByGroup(l.id, groups)) return null; // hidden グループのメンバーは描画しない（#307）
         const cg = composed.get(l.id) ?? { x: l.x, y: l.y, w: l.w, h: l.h, rotation: l.rotation }; // グループ合成後の位置
         const lGroup = topGroupByEl.get(l.id) ?? null; // 所属グループ（最上位）／未所属は null
