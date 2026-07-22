@@ -148,12 +148,13 @@ export function removeMembersFromGroups(groups: Group[], removedIds: string[]): 
 /**
  * グループのメンバー全体を最前面('front')/最背面('back')へ動かす（重ね順・ADR-0022）。
  * 非メンバー・メンバーそれぞれの相対順は保ち、全要素の zIndex を 1..n に振り直す（FREE 背景 zIndex 0 の上に乗せる）。
+ * @param zOf 実効 z の求め方（既定＝FREE の `zIndex ?? 1`。テンプレ レイヤーは種別既定を含む `effectiveLayerZ` を渡す）。
  */
 export function reorderGroupZ<T extends { id: string; zIndex?: number }>(
-  elements: T[], memberIds: string[], position: 'front' | 'back',
+  elements: T[], memberIds: string[], position: 'front' | 'back', zOf: (item: T) => number = (e) => e.zIndex ?? 1,
 ): T[] {
   const members = new Set(memberIds);
-  const byZ = (a: T, b: T): number => (a.zIndex ?? 1) - (b.zIndex ?? 1);
+  const byZ = (a: T, b: T): number => zOf(a) - zOf(b);
   const mem = elements.filter((e) => members.has(e.id)).sort(byZ);
   if (mem.length === 0) return elements;
   const oth = elements.filter((e) => !members.has(e.id)).sort(byZ);

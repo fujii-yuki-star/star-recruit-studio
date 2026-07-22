@@ -1998,7 +1998,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     <div className="field" style={{ marginBottom: 4 }}>
                       <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>重ね順（上が手前）</label>
                       <div className="col" style={{ gap: 2 }}>
-                        {[...freeLayout].sort((a, b) => (b.zIndex ?? 1) - (a.zIndex ?? 1)).map((el) => {
+                        {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse＝描画（layout の昇順・安定＝同 z は
+                            配列後方が手前）と同 z でも一致する。降順ソートだと同 z で前後が逆に出て↑↓が1段にならない（#547 P2-4）。 */}
+                        {[...freeLayout].sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1)).reverse().map((el) => {
                           const isSel = selectedFreeIds.includes(el.id);
                           const hint = el.kind === FREE_ELEMENT_KIND.text && el.text ? `「${el.text.slice(0, 8)}」` : "";
                           const autoName = `${freeKindLabel[el.kind]}${(freeAutoIndexById.get(el.id) ?? 0) + 1}`;

@@ -4,6 +4,7 @@ import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
+import { effectiveLayerZ, moveLayerZ } from "../../domain/template/layerOrder";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
 import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants";
@@ -136,6 +137,24 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setDraft({ ...draft!, layers: removeLayer(draft!.layers, id), groups: removeMembersFromGroups(draft!.groups ?? [], [id]) });
     setSelectedLayerIds((cur) => cur.filter((x) => x !== id));
   }
+  // 一覧の行名（#547 P2-4）。同じ種別が複数あると「文字」が2行並んで見分けられないので、
+  // テキスト層は差し込み先（見出し／本文…）を併記する。場面編集の FREE 一覧が名前＋中身で区別できるのと揃える。
+  const layerRowName = (l: Layer): string => {
+    const base = layerLabel[l.type];
+    const key = l.textKey ? textKeyLabel[l.textKey] : "";
+    return key && key !== base ? `${base}（${key}）` : base; // 「字幕（字幕）」のような重複は付けない
+  };
+
+  // 重ね順を1段動かす（#547 P2-4）。場面編集（FREE）の↑↓と同じ操作＝数値欄に頼らず並べ替えられる。
+  // 基準は実効 z（effectiveLayerZ）＝一覧の並び・実際の描画と一致する。
+  function onMoveLayerZ(id: string, dir: "up" | "down") {
+    setDraft((d) => {
+      if (!d) return d;
+      const layers = moveLayerZ(d.layers, id, dir);
+      return layers === d.layers ? d : { ...d, layers }; // 端＝変化なしなら下書きも据え置き＝空の取り消しを作らない
+    });
+  }
+
   // 複数選択（#306）：Shift+クリックでトグル・マーキーで集合置換・一括移動。
   function selectLayer(id: string | null, additive?: boolean) {
     setActiveGroupId(null); // レイヤー選択はグループ選択を解除（排他）
@@ -236,11 +255,11 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   }
   function bringGroupFront(groupId: string) {
     if (tplGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は重ね順も抑止（多重防御・#319 レビュー）
-    setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "front") } : d));
+    setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "front", effectiveLayerZ) } : d));
   }
   function sendGroupBack(groupId: string) {
     if (tplGroups.find((g) => g.id === groupId)?.locked) return;
-    setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "back") } : d));
+    setDraft((d) => (d ? { ...d, layers: reorderGroupZ(d.layers, groupElementIds(d.groups ?? [], groupId), "back", effectiveLayerZ) } : d));
   }
   async function onSave() {
     if (busyAction) return;
@@ -538,7 +557,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               activeGroupId={effectiveActiveGroupId}
               onSelectGroup={selectGroup}
               onGroupTransform={transformGroup}
-              label={(l) => layerLabel[l.type]}
+              label={layerRowName} // 一覧と同じ行名＝キャンバス上でも「文字（見出し）/文字（本文）」を見分けられる
               // 1回のドラッグ/リサイズ/回転＝1回の取り消し（#547 P2-3）。レイヤーの onPointerDown は stopPropagation
               // するため祖先では拾えず、オーバーレイからの明示通知で境界を取る（場面編集の FREE と同じ結線）。
               onInteractionStart={beginGroup}
@@ -625,15 +644,20 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>重ね順（上が手前）</label>
             <div className="col" style={{ gap: 2 }}>
-              {[...draft.layers].sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0)).map((l) => (
+              {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse する＝描画（renderer/layout の
+                  昇順・安定ソート＝同 z は配列後方が手前）と同 z でも一致する。降順ソートだと同 z のとき前後が逆に出て、
+                  ↑↓ が1段にならない（moveByZ 内部の昇順とも食い違う）。 */}
+              {[...draft.layers].sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b)).reverse().map((l) => (
                 <div
                   key={l.id}
                   className="row-between"
                   style={{ padding: "2px 6px", borderRadius: 4, background: selectedLayerIds.includes(l.id) ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)" }}
                 >
                   <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={(e) => selectLayer(l.id, e.shiftKey)}>
-                    {layerLabel[l.type]}
+                    {layerRowName(l)}
                   </button>
+                  <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label={`${layerRowName(l)}を前面へ`} onClick={() => onMoveLayerZ(l.id, "up")}>↑</button>
+                  <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label={`${layerRowName(l)}を背面へ`} onClick={() => onMoveLayerZ(l.id, "down")}>↓</button>
                   <button
                     className="btn btn-ghost btn-icon text-sm"
                     style={{ color: "var(--color-danger)" }}
@@ -664,7 +688,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   {numField("縦位置", selectedLayer.y, (v) => onUpdateLayer(selectedLayer.id, { y: v }))}
                   {numField("幅", selectedLayer.w, (v) => onUpdateLayer(selectedLayer.id, { w: v }), 1)}
                   {numField("高さ", selectedLayer.h, (v) => onUpdateLayer(selectedLayer.id, { h: v }), 1)}
-                  {numField("重なり順", selectedLayer.zIndex ?? 0, (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }))}
+                  {/* 表示は実効 z（一覧・描画と同じ基準）。zIndex 未指定でも「一覧で上なら大きい数」になり、↑↓ と値が食い違わない。 */}
+                  {numField("重なり順", effectiveLayerZ(selectedLayer), (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }), 0)}
                 </div>
               </div>
               {renderLayerControls(selectedLayer)}
