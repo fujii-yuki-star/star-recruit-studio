@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { exportBlockedMessage, exportBlockingItems } from "../adapters";
+import { useExportCapability } from "../hooks/useExportCapability";
+import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
 import type { ExportPhase } from "../store/projectStore";
 import { buildExportScenes, ExportCancelledError } from "../../renderer/export/buildExportScenes";
 import { buildTelopOverlays } from "../../renderer/export/telopOverlays";
@@ -38,6 +41,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const saveProject = useProjectStore((s) => s.saveProject);
   const setPreviewReturnTo = useProjectStore((s) => s.setPreviewReturnTo);
   const assets = useProjectStore((s) => s.assets);
+  const templates = useProjectStore((s) => s.templates);
+  const overlayAnimations = useProjectStore((s) => s.meta.timelineOverlay?.animations);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const projectName = useProjectStore((s) => s.meta.projectName);
@@ -63,6 +68,16 @@ export function ExportScreen({ onNavigate }: ExportProps) {
 
   // 書き出しの進行状態は store に持つ（#379）。他画面へ遷移して戻っても進捗が見え、書き出し中の
   // 再実行・プロジェクト破壊操作を全画面でブロックできる。ローカル setter は store 更新へ委譲（本体は不変）。
+  // 書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと同じ述語を共有する。
+  // useMemo：書き出し中は進捗更新のたびに再描画されるので、毎回 全場面のレイアウト計算をやり直さない（#376 の待ち時間に効く）。
+  const blockingItems = useMemo(
+    () => exportBlockingItems(scenes, assets, templates, overlayAnimations),
+    [scenes, assets, templates, overlayAnimations],
+  );
+  const blockedMessage = blockingItems.length > 0 ? exportBlockedMessage(blockingItems, "export") : null;
+  // この端末で書き出せない（h264 不可）ときも公開前チェックと同じく止める＝直行経路だけ押せてしまうのを防ぐ（ADR-0026②）。
+  const capability = useExportCapability();
+  const capabilityBlocked = capability != null && blocksExport(capability);
   const exportRun = useProjectStore((s) => s.exportRun);
   const setExportRun = useProjectStore((s) => s.setExportRun);
   const { phase, progress, encode, resultPath, message, bgmWarning, cancelling } = exportRun;
@@ -119,6 +134,11 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       if (st.isTemplateMutating) return "見た目パターンの変更中です。変更が終わってから書き出してください。";
       if (st.status === "generating") return "動画案を作成中です。作成が終わってから書き出してください。";
       if (st.isGeneratingNarration || isNarrationGenerating(st.scenes)) return "声を作成中です。作成が終わってから書き出してください。";
+      // 残っていると書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと**同じ述語**で、
+      // サイドバーからこの画面へ直行した経路も止める＝保存先を選ばせた後に落とさない（ADR-0026④）。
+      if (capabilityBlocked && capability) return EXPORT_CAPABILITY_NOTICE[capability].detail;
+      const blocking = exportBlockingItems(st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations);
+      if (blocking.length > 0) return exportBlockedMessage(blocking, "export");
       return null;
     };
     const blockedBefore = startBlockedMessage();
@@ -386,11 +406,19 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </button>
             {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。
                 「動画を保存」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
-            <div className="row gap-sm">
-              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy}>
+            <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
+              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy || blockingItems.length > 0 || capabilityBlocked}>
                 <FilmIcon size={20} />
                 {busy ? "書き出し中…" : "動画を保存"}
               </button>
+              {/* 押した後に落とすのでなく、押す前に理由と次の行動を出す（§2-5・ADR-0026④）。左の「公開前チェックへ戻る」が直す導線。
+                  抑止は「**同じ文**が失敗表示に出ているとき」だけ＝二重に並べない。phase だけで抑止すると、無関係な失敗が
+                  残っている間に blocker ができたとき「押せないのに理由が出ない」になる（レビュー指摘）。 */}
+              {capabilityBlocked && capability ? (
+                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{EXPORT_CAPABILITY_NOTICE[capability].detail}</span>
+              ) : blockedMessage && !(phase === "error" && message === blockedMessage) ? (
+                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{blockedMessage}</span>
+              ) : null}
             </div>
           </div>
         </div>

@@ -81,6 +81,29 @@ export function warningsToDraftWarnings(warnings: Warning[]): DraftWarning[] {
   }));
 }
 
+/**
+ * 残っていると**書き出しが必ず失敗する**項目だけを返す（#547 P2-5）。
+ * 公開前チェックの主ボタンと書き出し画面の「動画を保存」が**同じ述語**を見るための単一の入口。
+ * 片方だけ別の条件で止めると「片方からは出せるのに片方からは止まる」不整合になる（ADR-0026②）。
+ * 立てる条件は書き出し側の停止条件（`renderer/export/buildExportScenes` の throw）と対で維持すること。
+ */
+/**
+ * 上記が空でないときに出す案内（§2-5＝原因＋次の行動）。**文言はここ1か所**に置き、画面ごとに変えるのは
+ * 「次の行動」だけにする（同じ事象で言い回しが割れない・§6）。
+ * @param from 出す画面。公開前チェックは各項目行の「直す」へ、書き出し画面は公開前チェックへ誘導する。
+ */
+export function exportBlockedMessage(items: PrecheckItem[], from: "precheck" | "export"): string {
+  const names = items.map((i) => i.label).join("・");
+  const next = from === "precheck" ? "上の「直す」から直してから" : "公開前チェックで直してから";
+  return `このままでは動画を書き出せない項目があります（${names}）。${next}、もう一度お試しください。`;
+}
+
+export function exportBlockingItems(
+  scenes: Scene[], assets: Asset[], templates: Template[], overlayAnimations?: ElementAnimation[],
+): PrecheckItem[] {
+  return buildPrecheckItems(scenes, assets, templates, overlayAnimations).filter((i) => i.blocksExport);
+}
+
 /** 公開前チェックの結果を、実際のシーン/素材から算出する（一部は自動チェック未対応の定型）。 */
 export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[], overlayAnimations?: ElementAnimation[]): PrecheckItem[] {
   const items: PrecheckItem[] = [];

@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { PrecheckItem, ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
-import { buildPrecheckItems } from "../adapters";
+import { buildPrecheckItems, exportBlockedMessage, exportBlockingItems } from "../adapters";
+import { useExportCapability } from "../hooks/useExportCapability";
 import { PageHead } from "../components/ui";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
-import { canExport, detectH264Capability } from "../../infrastructure/ffmpegExport";
-import { EXPORT_CAPABILITY_NOTICE, blocksExport, type ExportCapability } from "../../domain/export/exportCapability";
+import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
 
 interface PrecheckProps {
   onNavigate: (screen: ScreenId) => void;
@@ -21,28 +21,13 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, generateAllNarrations, isGeneratingNarration, narrationError } = useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
-  // 書き出し能力（標準方式 h264_mf の可用性）の事前検知（#120）。Tauri 環境でのみ取得。
-  const [capability, setCapability] = useState<ExportCapability | null>(null);
+  // 書き出し能力（標準方式 h264_mf の可用性）の事前検知（#120）。書き出し画面と**同じフック**を使う（検知を1か所に）。
+  const capability = useExportCapability();
 
   // 自動生成は Mock（外部送信なし）のときだけ（#384・§2-6）。実プロバイダは空状態のまま。
   useEffect(() => {
     void autoGenerateIfSafe();
   }, [status, autoGenerateIfSafe]);
-
-  useEffect(() => {
-    if (!canExport()) return;
-    let alive = true;
-    detectH264Capability()
-      .then((c) => {
-        if (alive) setCapability(c);
-      })
-      .catch(() => {
-        if (alive) setCapability(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   // 場面ゼロは「全項目問題なし」に見えて書き出しに進めてしまう（押すと保存先選択後に失敗）＝空状態で止める（#403）。
   if (scenes.length === 0) {
@@ -78,7 +63,8 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   // 残っていると書き出しが**必ず失敗する**項目（見た目欠け・動画配置不可・再生タイミング＝#547 P2-5）。
   // 「直せば良くなる」警告（字幕が長い・声が未作成）とは分け、主ボタンを止める根拠にする。
   // 止めないと、保存先を選ばせた後に §2-5 エラーで落ちる＝手戻りが大きい（ADR-0026④）。
-  const blockingItems = items.filter((i) => i.blocksExport);
+  // 書き出し画面の「動画を保存」と**同じ述語**を使う（片方だけ別条件で止めない・ADR-0026②）。
+  const blockingItems = exportBlockingItems(scenes, assets, templates, meta.timelineOverlay?.animations);
   const exportBlocked = capabilityBlocked || blockingItems.length > 0;
 
   return (
@@ -192,7 +178,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
             </span>
           ) : blockingItems.length > 0 ? (
             <span className="text-sm" style={{ color: "var(--color-danger)" }}>
-              このままでは動画を書き出せない項目があります（{blockingItems.map((i) => i.label).join("・")}）。上の「直す」から直してから、もう一度お試しください。
+              {exportBlockedMessage(blockingItems, "precheck")}
             </span>
           ) : null}
         </div>
