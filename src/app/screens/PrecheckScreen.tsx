@@ -74,7 +74,12 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
     : baseItems;
   const count = (s: PrecheckItem["severity"]) => items.filter((i) => i.severity === s).length;
   // 書き出し不可（unavailable/toolMissing）のときだけ事前にブロック。fallback は予備方式で書き出せるので進める。
-  const exportBlocked = capability != null && blocksExport(capability);
+  const capabilityBlocked = capability != null && blocksExport(capability);
+  // 残っていると書き出しが**必ず失敗する**項目（見た目欠け・動画配置不可・再生タイミング＝#547 P2-5）。
+  // 「直せば良くなる」警告（字幕が長い・声が未作成）とは分け、主ボタンを止める根拠にする。
+  // 止めないと、保存先を選ばせた後に §2-5 エラーで落ちる＝手戻りが大きい（ADR-0026④）。
+  const blockingItems = items.filter((i) => i.blocksExport);
+  const exportBlocked = capabilityBlocked || blockingItems.length > 0;
 
   return (
     <div className="main-scroll">
@@ -181,11 +186,15 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
             このまま書き出す
             <ChevronRightIcon size={18} />
           </button>
-          {exportBlocked && (
+          {capabilityBlocked ? (
             <span className="text-sm" style={{ color: "var(--color-danger)" }}>
               この端末では動画を保存できません。上の確認結果で問題の項目を解消してから、もう一度お試しください。
             </span>
-          )}
+          ) : blockingItems.length > 0 ? (
+            <span className="text-sm" style={{ color: "var(--color-danger)" }}>
+              このままでは動画を書き出せない項目があります（{blockingItems.map((i) => i.label).join("・")}）。上の「直す」から直してから、もう一度お試しください。
+            </span>
+          ) : null}
         </div>
       </div>
     </div>

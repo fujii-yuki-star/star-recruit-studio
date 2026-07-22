@@ -81,6 +81,17 @@ describe('videoSlotAfterAnimNeverPlays（#444・afterAnim×settled 無しで動�
   it('スロットがアニメ対象でない（他要素だけ動く）なら false', () => {
     expect(videoSlotAfterAnimNeverPlays(sceneAfterAnim(2), freeTemplate, assetById, [anim('other_el', 2)])).toBe(false);
   });
+
+  // #547 P2-5 レビュー：掛け合い×動画はアニメ自体が効かず**静止で完走する**（#469）＝この degenerate にならない。
+  // ここで false にしないと「書き出しは成功するのに公開前チェックが主ボタンを止める」＝書き出し画面へ到達できない
+  // 行き止まりを作る（公開前チェックが唯一の導線）。書き出し側と同じ sceneAnimationActive を共有して防ぐ。
+  it('掛け合い（scene.lines あり）×動画なら false（アニメが効かず静止で書き出せる＝止めない）', () => {
+    const dialogue = {
+      ...sceneAfterAnim(2),
+      lines: [{ lineId: 'l1', text: 'あ', status: 'generated' }],
+    } as unknown as Scene;
+    expect(videoSlotAfterAnimNeverPlays(dialogue, freeTemplate, assetById, [anim('slot_1', 2)])).toBe(false);
+  });
 });
 
 describe('afterAnimNoSettledSceneNumbers（degenerate 場面の番号・1始まり）', () => {
