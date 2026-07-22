@@ -10,7 +10,7 @@
 | 状態 | 値（enum） | 永続/実行時 | 出典 |
 |---|---|---|---|
 | `narration.status` | none / pending / generated / failed | **永続**（Scene内） | `11 §3.5` |
-| `renderStatus` | idle / running / completed / failed | 実行時（書き出しジョブ） | `11 §3.5` |
+| `renderStatus` | idle / rendering / encoding / done / error / unsupported / cancelled | 実行時（書き出しジョブ） | `11 §3.5` |
 | `aiGenerationStatus` | idle / sending / generating / validating / done / failed | 実行時（AIジョブ） | 本書 |
 
 > `aiGenerationStatus` と `renderStatus` は**ジョブの実行時状態**で、`project.json` には持たない（MVP）。`narration.status` のみシーンに永続する。
@@ -72,7 +72,7 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 
 ## 4. 排他制御（MVP）
 
-- **書き出し（export）実行中**：プロジェクト編集をロックする（または読み取り専用スナップショットに対して実行）。ロックの唯一の抜け道は**「書き出しを中止」**（#380・§2.3）＝走行中の変換を止めてロックを解く。
+- **書き出し（export）実行中**：プロジェクト編集をロックする（または読み取り専用スナップショットに対して実行）。ロックの唯一の抜け道は**「書き出しを中止」**（#380・§2.3）＝走行中の変換を止めてロックを解く。**書き出し中もどの画面へも移動できる**ため、ロック中は**全画面**で進捗（%＋いま何をしているか）と書き出し画面への復帰導線を出し、抜け道に到達できる状態を保つ（#547 P2-1）。進捗が書き出し画面にしか無いと、離れた利用者には止まったように見え、二重書き出しを誘発する（ADR-0026②）。
 - **プレビュー再生中**：編集は可。変更は次回プレビューから反映。
 - **音声生成中のシーン**：そのシーンのセリフ編集はキュー化 or 警告。
 - 同一プロジェクトの**同時多重編集は想定外**（MVP）。

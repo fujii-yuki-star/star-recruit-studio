@@ -502,7 +502,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
   return (
     <div className="main-scroll">
-      <ExportLockBanner />
+      <ExportLockBanner onNavigate={onNavigate} />
       {/* ヘッダ：戻る・タイトル・保存（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ） */}
       <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
         <div className="row gap-sm" style={{ alignItems: "center" }}>

@@ -6,7 +6,7 @@ import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
-import type { ExportProgressEvent } from "../../domain/export/exportProgress";
+import type { ExportProgressEvent, ExportRunPhase } from "../../domain/export/exportProgress";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import type { Template } from "../../domain/template/types";
 import { transformVideoPlan } from "../../domain/ai/transformPlan";
@@ -50,7 +50,8 @@ import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxPr
 export type GenerateStatus = "idle" | "generating" | "ready" | "error";
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 /** 書き出しの進行フェーズ（#379）。ExportScreen ローカルでなく store に持ち、他画面へ遷移しても進捗が残る。 */
-export type ExportPhase = "idle" | "rendering" | "encoding" | "done" | "error" | "unsupported" | "cancelled";
+// 値の定義は domain（`exportProgress.ts`）に1か所だけ置く（§2-7）。ここは別名＝進捗計算と常に同じ語彙になる。
+export type ExportPhase = ExportRunPhase;
 /** 書き出しの進行状態（#379）。画面横断で参照＝進捗の可視化・書き出し中の再実行/破壊操作ブロックに使う。 */
 export interface ExportRunState {
   phase: ExportPhase;

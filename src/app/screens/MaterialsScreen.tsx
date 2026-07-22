@@ -8,6 +8,7 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { PageHead, Switch } from "../components/ui";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { EmptyState } from "../components/states";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { UsedScenesRow } from "../components/UsedScenesRow";
@@ -169,11 +170,10 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         </div>
       )}
 
-      {isExporting && (
-        <div className="notice notice-info mb" role="status">
-          書き出し中は素材の追加・編集・削除ができません。書き出しが終わってからお試しください。
-        </div>
-      )}
+      {/* 書き出し中の案内は共通バナーに寄せる（#547 P2-1）。以前はこの画面だけ独自文言で、進捗も戻る導線も無かった
+          ＝同じ状況なのに画面ごとに見え方が違う（§2-7・ADR-0026②）。素材操作を実際に試したときの個別案内は
+          store の `EXPORT_BUSY_ASSET_MSG`（importError）が出す。 */}
+      <ExportLockBanner onNavigate={onNavigate} />
 
       <div className="segment mb" style={{ display: "inline-flex" }}>
         {filters.map(([id, label]) => (
@@ -230,7 +230,8 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
             {isExporting && (
               <p className="text-sm text-muted" style={{ margin: "0 0 var(--gap)" }}>
-                書き出し中は編集できません。書き出しが終わってからお試しください。
+                {/* 上のバナーと同じ文を繰り返さない（同じ画面に同じ案内を二度出さない・§6）。ここは編集欄が消えた理由だけ。 */}
+                書き出しが終わると、ここで編集できます。
               </p>
             )}
             {/* 書き出し中は編集控えを丸ごと隠す（無言 no-op を避ける＝ADR-0026④・store も #547 P2-1 でガード）。使用場面は下で常に表示。 */}

@@ -5,6 +5,7 @@ import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { hasUnsavedChanges } from "../hooks/newProjectGuard";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { YukoPanel } from "../components/YukoPanel";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import {
@@ -194,13 +195,12 @@ export function HomeScreen({ onNavigate }: HomeProps) {
             </div>
           )}
 
-          {isExporting && (
-            <div className="notice notice-info mb" role="status">
-              <span>
-                動画の書き出し中です。終わるまで、新しい動画づくり・プロジェクトの切り替え・削除はできません（完了までお待ちください）。
-              </span>
-            </div>
-          )}
+          {/* 書き出し中の案内は共通バナーに寄せる（#547 P2-1）。ここは進捗も戻る導線も無い独自 notice だった＝
+              二重書き出しの引き金が最も出やすい画面なのに「止まった」ように見えていた（§2-7・ADR-0026②）。 */}
+          <ExportLockBanner
+            onNavigate={onNavigate}
+            detail="書き出しが終わるまで、新しい動画づくり・プロジェクトの切り替え・削除はできません。"
+          />
 
           {confirmNew && (
             <div className="notice notice-warn mb" role="alert">

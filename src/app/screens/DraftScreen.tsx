@@ -101,7 +101,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
     return (
       <div className="main-scroll">
         <PageHead title="動画のたたき台を確認" desc="台本表で場面を確認・修正できます。" />
-        <ExportLockBanner />
+        <ExportLockBanner onNavigate={onNavigate} />
         <EmptyState
           title={status === "generating" ? "動画案を作成中です…" : started ? "場面を追加して作り始めましょう" : "まだ動画案がありません"}
           message={
@@ -126,7 +126,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
   return (
     <div className="main-scroll">
-      <ExportLockBanner />
+      <ExportLockBanner onNavigate={onNavigate} />
       <div className="content-with-yuko" inert={isExporting}>
         <div>
           <PageHead

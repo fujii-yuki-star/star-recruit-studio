@@ -52,3 +52,65 @@ export function exportPhaseLabel(e: ExportProgressEvent): string {
       return 'BGMを合わせています';
   }
 }
+
+/**
+ * 書き出しジョブの状態（実行時のみ・`project.json` には持たない＝`15 §1`）。
+ * ここを**単一の参照元**にし、store の `ExportPhase` はこれを別名にする（§2-7）。`phase: string` にすると
+ * 値を rename しても型エラーにならず、進捗が黙って 0% に落ちる（この差分が潰した「止まって見える」の再発）。
+ */
+export const EXPORT_RUN_PHASES = ['idle', 'rendering', 'encoding', 'done', 'error', 'unsupported', 'cancelled'] as const;
+export type ExportRunPhase = (typeof EXPORT_RUN_PHASES)[number];
+
+/** 書き出しの実行状態のうち、進捗の表示に要る分（`ExportRunState` の部分集合＝domain は store に依存しない）。 */
+export interface ExportProgressState {
+  phase: ExportRunPhase;
+  progress: { done: number; total: number; frameFraction?: number };
+  encode?: ExportProgressEvent;
+}
+
+/**
+ * 書き出し全体の進み具合（0–100%）。
+ *
+ * レンダリング段が 0–80%、エンコード段が 80–100%（`exportEncodePercent`）。書き出し画面のバーと、
+ * 他画面に出す「書き出し中」バナーが**同じ数字**を出すための単一の参照元（§2-7）。別々に計算すると
+ * 画面を移った利用者に違う進捗が見え、止まった/戻ったと誤認させる（ADR-0026②）。
+ */
+export function exportOverallPercent(run: ExportProgressState): number {
+  if (run.phase === 'done') return 100;
+  if (run.phase === 'encoding') return run.encode ? exportEncodePercent(run.encode) : ENCODE_BASE;
+  if (run.phase === 'rendering' && run.progress.total > 0) {
+    // 場面数ベース＋処理中の場面のフレーム進捗で 0〜80% を滑らかに（#391）。
+    const done = run.progress.done + (run.progress.frameFraction ?? 0);
+    return Math.round((done / run.progress.total) * ENCODE_BASE);
+  }
+  return 0;
+}
+
+/**
+ * いま何をしているか（§2-3：技術用語を出さない）。進捗バーに添える1行。
+ * 書き出し画面と他画面のバナーで共有する（同じ瞬間に違う説明を出さない・ADR-0026②）。
+ *
+ * `compact` は**文の途中に差し込む**とき用（バナーは「動画を書き出し中です（80%・◯◯）。」と括弧内に入れる）。
+ * 句点で終わる完結文を入れると文の中に文が入れ子になり読みにくいので、その分岐だけ短い語にする。
+ */
+export function exportProgressLabel(run: ExportProgressState, opts?: { compact?: boolean }): string {
+  if (run.phase === 'rendering' && run.progress.total > 0) {
+    // done は「完了した場面数」。処理中は +1 した1始まりで読ませる（バーが動くのにカウンタが0のまま、を防ぐ・#391）。
+    return `場面 ${Math.min(run.progress.done + 1, run.progress.total)} / ${run.progress.total} を処理中`;
+  }
+  if (run.phase === 'encoding') {
+    if (run.encode) return exportPhaseLabel(run.encode);
+    return opts?.compact ? '最後の仕上げ中' : '最後の仕上げ中です。そのままお待ちください。';
+  }
+  return '';
+}
+
+/**
+ * 進捗バーに添える見出し（粗い状態）。`06_UI_SPEC §12` の「動画を書き出しています」に合わせる。
+ * 段階の細かい説明は `exportProgressLabel` が受け持つ＝見出しと詳細で別の状態名を出さない（ADR-0026②）。
+ */
+export function exportHeadingLabel(run: ExportProgressState): string {
+  if (run.phase === 'done') return '保存しました';
+  if (run.phase === 'rendering' || run.phase === 'encoding') return '動画を書き出しています';
+  return '';
+}

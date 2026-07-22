@@ -45,7 +45,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
     return (
       <div className="main-scroll">
         <PageHead title="公開前チェック" desc="動画を書き出す前に内容を点検します。" />
-        <ExportLockBanner />
+        <ExportLockBanner onNavigate={onNavigate} />
         <div className="card text-center" style={{ padding: "48px 24px" }}>
           <p className="text-muted" style={{ marginBottom: 16 }}>
             まだ場面がありません。動画のたたき台を作ってから、公開前チェックに進みましょう。

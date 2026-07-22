@@ -118,7 +118,7 @@ function App() {
       case "materials":
         return <MaterialsScreen onNavigate={setScreen} />;
       case "settings":
-        return <SettingsScreen />;
+        return <SettingsScreen onNavigate={setScreen} />;
       case "about":
         return <AboutScreen />;
       default:
