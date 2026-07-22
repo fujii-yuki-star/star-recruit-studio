@@ -4,7 +4,7 @@ import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
-import { scenesLosingContentOnTemplateDelete, scenesUsingTemplate } from "../../domain/project/templateUsage";
+import { deleteImpactCounts, templateDeleteImpact } from "../../domain/project/templateUsage";
 import { deleteLookConfirmMessage } from "../uiLabels";
 import { effectiveLayerZ, moveLayerZ } from "../../domain/template/layerOrder";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
@@ -707,7 +707,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               {confirmDelete ? (
                 <DeleteConfirm
                   busy={busyAction === "delete"}
-                  message={deleteLookConfirmMessage(scenesUsingTemplate(scenes, editing.templateId).length, scenesLosingContentOnTemplateDelete(scenes, editing.templateId, templates, aspectRatio).length)}
+                  message={deleteLookConfirmMessage(deleteImpactCounts(templateDeleteImpact(scenes, editing.templateId, templates, aspectRatio)))}
                   onCancel={() => setConfirmDelete(false)}
                   onConfirm={() => void onDelete()}
                 />

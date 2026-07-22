@@ -3,7 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
-import { scenesLosingContentOnTemplateDelete, scenesUsingTemplate } from "../../domain/project/templateUsage";
+import { deleteImpactCounts, scenesUsingTemplate, templateDeleteImpact } from "../../domain/project/templateUsage";
 import { deleteLookConfirmMessage } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { ExportLock } from "../components/ExportLockBanner";
@@ -182,8 +182,8 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   const sampleScene = buildSampleScene(current, assets);
   // この見た目を使っている場面（逆引き・#406）。標準/マイテンプレを問わず scene.templateId で判定する。
   const usedScenes = scenesUsingTemplate(scenes, current.templateId);
-  // 削除すると標準へ寄る＝写真・文字が動画に出なくなる場面（#547・削除は取り消せないので先に示す）。
-  const losingContentScenes = scenesLosingContentOnTemplateDelete(scenes, current.templateId, templates, aspectRatio);
+  // 削除したときにこのプロジェクトで何が起きるか（#547・削除は取り消せないので先に示す）。
+  const deleteImpact = templateDeleteImpact(scenes, current.templateId, templates, aspectRatio);
   // 使用場面バッジを押したら、その場面の編集を開く（editingSceneId 機構＝#400・素材画面と同方式）。
   const jumpToScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
 
@@ -326,7 +326,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             {isUserCurrent && (confirmDelete ? (
               <DeleteConfirm
                 busy={busyAction === "delete"}
-                message={deleteLookConfirmMessage(usedScenes.length, losingContentScenes.length)}
+                message={deleteLookConfirmMessage(deleteImpactCounts(deleteImpact))}
                 onCancel={() => setConfirmDelete(false)}
                 onConfirm={() => void onDelete()}
               />

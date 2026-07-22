@@ -54,11 +54,24 @@ describe("standardLookResultMessage（一括適用の結果・#547）", () => {
 });
 
 describe("deleteLookConfirmMessage（削除の影響を先に示す・#547）", () => {
-  it("使用中の場面数を示す", () => {
-    expect(deleteLookConfirmMessage(3)).toContain("3個の場面");
+  it("標準へ変わる場面数を示す", () => {
+    expect(deleteLookConfirmMessage({ changing: 3, losingContent: 0, unresolved: 0 })).toContain("3個の場面は、標準の見た目に変わります");
+  });
+
+  it("中身が出なくなる場面数も示す（削除は取り消せないため）", () => {
+    expect(deleteLookConfirmMessage({ changing: 3, losingContent: 1, unresolved: 0 })).toContain("うち1個の場面は写真・文字などが動画に出なくなります");
+  });
+
+  // 合う標準が無い場面は「変わります」に数えない＝約束と実挙動をずらさない（この場面は未解決のまま残る）。
+  it("合う標準が無い場面は「変わります」と言わず、書き出せないことを伝える", () => {
+    const msg = deleteLookConfirmMessage({ changing: 0, losingContent: 0, unresolved: 2 });
+    expect(msg).not.toContain("標準の見た目に変わります");
+    expect(msg).toContain("2個の場面は合う標準が無いため、見た目を選び直すまで書き出せません");
   });
 
   it("使っていなければ場面の話は出さない", () => {
-    expect(deleteLookConfirmMessage(0)).not.toContain("標準の見た目に変わります");
+    const msg = deleteLookConfirmMessage();
+    expect(msg).not.toContain("標準の見た目に変わります");
+    expect(msg).toContain("元に戻せません");
   });
 });

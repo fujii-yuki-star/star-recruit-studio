@@ -98,43 +98,58 @@ export function standardLookFixesForUnresolved(
   return fixes;
 }
 
-/** 切替で**表示されなくなる**中身（データは残るが動画に出ない）。`contentHiddenBySwitch` の結果。 */
+/** 切替で**動画に出なくなる**中身。`contentHiddenBySwitch` の結果。 */
 export interface HiddenContent {
-  /** 割り当てが外れる素材の差し込み先 id（写真・動画）。 */
+  /** 割り当てが外れる素材の差し込み先 id（写真・動画）。通常テンプレへの切替では**データごと消える**（#236 清算）。 */
   slotIds: string[];
-  /** 表示されなくなる文字の種別（中身が入っているものだけ）。 */
+  /** 表示されなくなる文字の種別（中身が入っているものだけ）。データは `scene.texts` に残る（休眠）。 */
   textKeys: TextKey[];
-  /** 立ち絵（ゆうこ）が表示されなくなる。 */
+  /** 立ち絵（ゆうこ）が表示されなくなる。データは残る（休眠）。 */
   character: boolean;
+  /** 自由配置の中身が表示されなくなる（FREE→通常）。データは `scene.freeLayout` に残る（休眠・ADR-0030）。 */
+  freeLayout: boolean;
 }
 
 /**
  * この場面をこの見た目へ切り替えたときに、**動画に出なくなる中身**。
  *
  * 通常テンプレの描画は層駆動＝素材は `templateSlotIds` の差し込み先、文字は `layer.textKey` のある層、
- * 立ち絵は character 層があるときだけ出る（`renderer/layout.ts`）。当て先にその層が無ければ、
- * データは `scene` に残っても**動画からは消える**。件数だけ伝えると「直った」ように見えて中身が減るので、
- * ここで先に洗い出して利用者に示す（#547・§2-5・ADR-0026④）。
+ * 立ち絵は character 層があるときだけ出る（`renderer/layout.ts`）。当て先にその層が無ければ動画から消える。
+ * 件数だけ伝えると「直った」ように見えて中身が減るので、先に洗い出して利用者に示す（#547・§2-5・ADR-0026④）。
+ *
+ * `prev`（切替前の見た目）を渡すと「**いま実際に出ているもの**」だけを数える。渡さないとデータの有無で数えるため、
+ * 元から出ていない休眠データまで「消える」と言ってしまう（過大開示）。見た目が見つからない場面は `prev` を
+ * 解決できないので省略する＝安全側に倒す。
  */
-export function contentHiddenBySwitch(scene: Scene, next: Template): HiddenContent {
-  // FREE への切替は通常配置を休眠保持する（ADR-0030）。表示は freeLayout 由来なので、
-  // 自由配置が空なら**何も出ない**＝今表示されている中身は全部消える。
-  if (next.category === FREE_CATEGORY) {
-    const empty = (scene.freeLayout?.length ?? 0) === 0;
-    if (!empty) return { slotIds: [], textKeys: [], character: false };
-    return {
-      slotIds: Object.entries(scene.assetRefs ?? {}).filter(([, a]) => a).map(([id]) => id),
-      textKeys: filledTextKeys(scene),
-      character: !!scene.character?.poseAssetId,
-    };
+export function contentHiddenBySwitch(scene: Scene, next: Template, prev?: Template): HiddenContent {
+  const nextIsFree = next.category === FREE_CATEGORY;
+  const hasFreeLayout = (scene.freeLayout?.length ?? 0) > 0;
+  // FREE→FREE で自由配置が残っているなら、出ている中身はそのまま出続ける（通常配置は休眠保持＝ADR-0030）。
+  // `prev` が分からないときの安全側の近似：sceneType で当て先を選ぶので、元も FREE だったとみなせる。
+  if (!prev && nextIsFree && hasFreeLayout) {
+    return { slotIds: [], textKeys: [], character: false, freeLayout: false };
   }
   const keepSlots = templateSlotIds(next.layers);
-  const keepTexts = new Set(next.layers.map((l) => l.textKey).filter((k): k is TextKey => !!k));
+  const keepTexts = textKeysOfTemplate(next);
+  // `prev` があれば「切替前に出ていたか」で絞る（休眠のままだったものは「消える」に数えない）。
+  const shownSlots = prev ? templateSlotIds(prev.layers) : null;
+  const shownTexts = prev ? textKeysOfTemplate(prev) : null;
+  const shownCharacter = prev ? prev.layers.some((l) => l.type === 'character') : true;
+  const shownFree = prev ? prev.category === FREE_CATEGORY : true;
   return {
-    slotIds: Object.entries(scene.assetRefs ?? {}).filter(([id, a]) => a && !keepSlots.has(id)).map(([id]) => id),
-    textKeys: filledTextKeys(scene).filter((k) => !keepTexts.has(k)),
-    character: !!scene.character?.poseAssetId && !next.layers.some((l) => l.type === 'character'),
+    slotIds: Object.entries(scene.assetRefs ?? {})
+      .filter(([id, assetId]) => assetId && !keepSlots.has(id) && (!shownSlots || shownSlots.has(id)))
+      .map(([id]) => id),
+    textKeys: filledTextKeys(scene).filter((k) => !keepTexts.has(k) && (!shownTexts || shownTexts.has(k))),
+    character: !!scene.character?.poseAssetId && shownCharacter && !next.layers.some((l) => l.type === 'character'),
+    // 自由配置は FREE テンプレのときだけ描かれる（それ以外では休眠＝ADR-0030）。
+    freeLayout: hasFreeLayout && shownFree && !nextIsFree,
   };
+}
+
+/** テンプレが表示できる文字の種別。 */
+function textKeysOfTemplate(t: Template): Set<TextKey> {
+  return new Set(t.layers.map((l) => l.textKey).filter((k): k is TextKey => !!k));
 }
 
 /** 中身が入っている文字の種別（空文字は「失うもの」に数えない）。 */
@@ -145,7 +160,7 @@ function filledTextKeys(scene: Scene): TextKey[] {
 }
 
 /** 切替で動画に出なくなる中身があるか（`contentHiddenBySwitch` の便利述語）。 */
-export function losesContentBySwitch(scene: Scene, next: Template): boolean {
-  const h = contentHiddenBySwitch(scene, next);
-  return h.slotIds.length > 0 || h.textKeys.length > 0 || h.character;
+export function losesContentBySwitch(scene: Scene, next: Template, prev?: Template): boolean {
+  const h = contentHiddenBySwitch(scene, next, prev);
+  return h.slotIds.length > 0 || h.textKeys.length > 0 || h.character || h.freeLayout;
 }

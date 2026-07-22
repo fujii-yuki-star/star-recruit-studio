@@ -181,6 +181,39 @@ describe('standardTemplateForScene / standardLookFixesForUnresolved（#547・標
     expect(hidden.character).toBe(true); // 立ち絵枠が無い＝出ない
   });
 
+  // 切替前の見た目が分かるなら「いま実際に出ているもの」だけを数える＝休眠のままだったデータを
+  // 「消える」と言わない（過大開示で警告の価値を下げない）。
+  it('切替前の見た目を渡すと、元から出ていなかった中身は「出なくなる」に数えない', () => {
+    const prev = tpl({ templateId: 'prev', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('mainVisual', 'slot')] });
+    const next = tpl({ templateId: 'next', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('other', 'slot')] });
+    const scene = {
+      ...scn('s1', 'photo_intro', 'prev', { mainVisual: 'a1', dormant_slot: 'a2' }),
+      texts: { title: '出ていない文字' }, // prev に文字枠が無い＝元から出ていない
+    } as unknown as Scene;
+
+    expect(contentHiddenBySwitch(scene, next, prev).slotIds).toEqual(['mainVisual']); // 休眠の dormant_slot は数えない
+    expect(contentHiddenBySwitch(scene, next, prev).textKeys).toEqual([]); // 元から出ていない文字は数えない
+    // 渡さない場合は安全側＝データがあるものを全部数える。
+    expect(contentHiddenBySwitch(scene, next).slotIds.sort()).toEqual(['dormant_slot', 'mainVisual']);
+  });
+
+  it('FREE の背景層に入っている素材は「出なくなる」に数えない（FREE でも背景は描かれる）', () => {
+    const freeTmpl = tpl({ templateId: 'free_std', category: 'free', aspectRatio: '16:9', layers: [lay('background', 'background')] });
+    const scene = scn('s1', 'free', 'gone', { background: 'asset_bg', layer_001: 'asset_001' }); // freeLayout 無し
+    const hidden = contentHiddenBySwitch(scene, freeTmpl);
+    expect(hidden.slotIds).toEqual(['layer_001']); // background は残る
+  });
+
+  it('FREE から通常へ移ると、自由配置の中身が出なくなる', () => {
+    const freePrev = tpl({ templateId: 'free_prev', category: 'free', aspectRatio: '16:9', layers: [lay('background', 'background')] });
+    const normal = tpl({ templateId: 'normal', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('mainVisual', 'slot')] });
+    const scene = { ...scn('s1', 'free', 'free_prev'), freeLayout: [{ id: 'free_001' }] } as unknown as Scene;
+    expect(contentHiddenBySwitch(scene, normal, freePrev).freeLayout).toBe(true);
+    // 通常→通常では自由配置は元から出ていない＝数えない。
+    const normalPrev = tpl({ templateId: 'p', category: 'photo_intro', aspectRatio: '16:9', layers: [] });
+    expect(contentHiddenBySwitch(scene, normal, normalPrev).freeLayout).toBe(false);
+  });
+
   it('判定は switchSceneTemplate の清算規則と同じ差し込み先（背景・スロット・ロゴ）を見る', () => {
     const photo = photoWithSlots;
     const scene = scn('s1', 'photo_intro', 'gone', { mainVisual: 'a1', bg: 'a2', layer_009: 'a3' });

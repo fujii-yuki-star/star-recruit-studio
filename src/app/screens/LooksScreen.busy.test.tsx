@@ -72,9 +72,28 @@ describe("マイ見た目の削除確認は影響を先に示す（#547）", () 
     expect(screen.getByText(/2個の場面は、標準の見た目に変わります/)).toBeTruthy(); // 3ではなく2
   });
 
+  it("合う標準が無い場面は「変わります」と言わない（約束と実挙動をずらさない）", () => {
+    // その向き・種類の標準を外すと、この場面は削除後も未解決のまま残る。
+    useProjectStore.setState({
+      templates: [userTemplate, ...sampleTemplates.filter((t) => t.category !== userTemplate.category)],
+      scenes: [usingScene("s1")],
+    });
+    render(<LooksScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("この見た目パターンを削除"));
+    expect(screen.getByText(/1個の場面は合う標準が無いため、見た目を選び直すまで書き出せません/)).toBeTruthy();
+    expect(screen.queryByText(/標準の見た目に変わります/)).toBeNull();
+  });
+
   it("中身が出なくなる場面があれば、その数も先に示す（削除は取り消せないため）", () => {
-    // マイ見た目の層 id に写真が入っている＝標準へ寄せると差し込み先が無く、動画に出なくなる。
-    useProjectStore.setState({ scenes: [usingScene("s1", { assetRefs: { layer_001: "asset_001" } })] });
+    // マイ見た目**にだけある差し込み先**に写真が入っている＝標準へ寄せると受け皿が無く、動画に出なくなる。
+    const withOwnSlot = {
+      ...userTemplate,
+      layers: [...userTemplate.layers, { id: "layer_001", type: "slot", x: 0, y: 0, w: 100, h: 100 } as (typeof userTemplate.layers)[number]],
+    };
+    useProjectStore.setState({
+      templates: [withOwnSlot, ...sampleTemplates],
+      scenes: [usingScene("s1", { assetRefs: { layer_001: "asset_001" } })],
+    });
     render(<LooksScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByText("この見た目パターンを削除"));
     expect(screen.getByText(/1個の場面は写真・文字などが動画に出なくなります/)).toBeTruthy();

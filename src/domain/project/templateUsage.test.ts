@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scenesUsingTemplate, substituteDeletedTemplateInScenes } from './templateUsage';
+import { scenesUsingTemplate, substituteDeletedTemplateInScenes, templateDeleteImpact } from './templateUsage';
 import type { Scene } from './types';
 import type { Template } from '../template/types';
 
@@ -103,5 +103,34 @@ describe('templateUsage', () => {
       const withDeleted = [tpl({ templateId: 'user_tmpl_001', category: 'free', aspectRatio: '16:9' })];
       expect(substituteDeletedTemplateInScenes(scenes, 'user_tmpl_001', withDeleted, '16:9')[0].templateId).toBe('user_tmpl_001');
     });
+  });
+});
+
+// #547：削除確認に出す数は、置換の実挙動と同じ規則で出す（言ったとおりに変わる／過大に脅かさない）。
+describe('templateDeleteImpact（削除の影響・#547）', () => {
+  const lay = (id: string, type: string) => ({ id, type, x: 0, y: 0, w: 10, h: 10 }) as never;
+  const std = tpl({ templateId: 'std_photo_16', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('mainVisual', 'slot')] });
+  const userTmpl = tpl({ templateId: 'user_tmpl_001', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('own_slot', 'slot')] });
+
+  it('変わる場面・出なくなる場面・当て先が無い場面を分けて返す', () => {
+    const other = tpl({ templateId: 'user_tmpl_001', category: 'closing', aspectRatio: '16:9', layers: [] });
+    const scenes = [
+      base({ sceneId: 's1', sceneType: 'photo_intro', templateId: 'user_tmpl_001', assetRefs: { own_slot: 'a1' } }), // 変わる＋出なくなる
+      base({ sceneId: 's2', sceneType: 'closing', templateId: 'user_tmpl_001' }), // クロージングの標準は無い＝当て先なし
+    ];
+    const r = templateDeleteImpact(scenes, 'user_tmpl_001', [userTmpl, std], '16:9');
+    expect(r.changing.map((s) => s.sceneId)).toEqual(['s1']);
+    expect(r.losingContent.map((s) => s.sceneId)).toEqual(['s1']);
+    expect(r.unresolved.map((s) => s.sceneId)).toEqual(['s2']);
+    expect(other).toBeTruthy();
+  });
+
+  // 削除するテンプレに差し込み先が無いデータ（往復のため休眠しているだけ）は、元から動画に出ていない。
+  // それを「出なくなります」と数えると、根拠のない警告で削除をためらわせる。
+  it('元から出ていない休眠データは「出なくなる」に数えない', () => {
+    const scenes = [base({ sceneId: 's1', sceneType: 'photo_intro', templateId: 'user_tmpl_001', assetRefs: { dormant: 'a1' } })];
+    const r = templateDeleteImpact(scenes, 'user_tmpl_001', [userTmpl, std], '16:9');
+    expect(r.changing.map((s) => s.sceneId)).toEqual(['s1']);
+    expect(r.losingContent).toEqual([]); // dormant は userTmpl の層に無い＝出ていなかった
   });
 });

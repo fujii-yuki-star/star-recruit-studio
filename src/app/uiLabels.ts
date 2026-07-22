@@ -16,17 +16,24 @@ export const textKeyLabel: Record<TextKey, string> = {
  *
  * 削除は**場面の見た目が変わる**という副作用を伴う（開いているプロジェクトで使用中の場面は標準の見た目へ
  * 置き換わる＝`substituteDeletedTemplateInScenes`・#458）。「元に戻せません」だけでは何がどれだけ変わるのか
- * 分からず、**黙って別の見た目に差し替わったのと同じ**になるため、影響する場面数を先に示す
+ * 分からず、**黙って別の見た目に差し替わったのと同じ**になるため、影響を先に示す
  * （§2-5／`15_ERROR_STATE_MODEL` の `TEMPLATE_NOT_FOUND` ③＝納得のうえ行う明示操作にする）。
  *
+ * 数は `templateDeleteImpact` で置換と同じ規則から出す＝「変わります」と言った場面が実際に変わる。
  * 他プロジェクトの場面はここでは直せない（マイ見た目はプロジェクト横断で共有＝ADR-0017）。そちらは開いたときに
  * 「見つからない」として書き出しが止まる（同 ②）ので、選び直しが要ることを併せて伝える。
  */
-export function deleteLookConfirmMessage(usedSceneCount: number, losingContentCount = 0): string {
-  const impact = usedSceneCount > 0 ? `この見た目を使っている${usedSceneCount}個の場面は、標準の見た目に変わります。` : "";
+export function deleteLookConfirmMessage(
+  impact: { changing: number; losingContent: number; unresolved: number } = { changing: 0, losingContent: 0, unresolved: 0 },
+): string {
+  const parts = ["この見た目パターンを削除しますか？元に戻せません。"];
+  if (impact.changing > 0) parts.push(`この見た目を使っている${impact.changing}個の場面は、標準の見た目に変わります。`);
   // 標準に同じ差し込み先・文字枠が無いと、写真や文字が動画に出なくなる。削除は取り消せないので**先に**知らせる。
-  const loss = losingContentCount > 0 ? `うち${losingContentCount}個の場面は写真・文字などが動画に出なくなります。` : "";
-  return `この見た目パターンを削除しますか？元に戻せません。${impact}${loss}他のプロジェクトで使っている場面は、開いたときに見た目を選び直してください。`;
+  if (impact.losingContent > 0) parts.push(`うち${impact.losingContent}個の場面は写真・文字などが動画に出なくなります。`);
+  // 合う標準が無い場面は変わらず「見つからない」まま残る＝そのままでは書き出せない（§2-5）。
+  if (impact.unresolved > 0) parts.push(`${impact.unresolved}個の場面は合う標準が無いため、見た目を選び直すまで書き出せません。`);
+  parts.push("他のプロジェクトで使っている場面は、開いたときに見た目を選び直してください。");
+  return parts.join("");
 }
 
 /**
