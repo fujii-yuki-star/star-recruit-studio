@@ -4,6 +4,7 @@
 // これを黙って静止画へ落とすと「書き出したら動画が消えた」に見え、原因も次の行動も示せない（§2-5 違反）。
 // precheck（事前警告）と書き出し（停止）が**同一判定**を共有できるよう純粋関数に切り出す。
 import type { Asset, ElementAnimation, Scene } from '../../domain/project/types';
+import { sceneAnimationActive } from '../../domain/project/sceneAnimation';
 import type { Template } from '../../domain/template/types';
 import { animationsEndSec, slotIsAnimated } from '../../domain/project/sceneAnimation';
 import { VIDEO_START_MODE } from '../../domain/enums';
@@ -56,7 +57,12 @@ export function videoSlotAfterAnimNeverPlays(
 ): boolean {
   // settled 区間がある（animEnd < 尺）なら afterAnim もそこで再生される＝degenerate ではない。
   if (animationsEndSec(sceneAnims) < scene.durationSec) return false;
-  return findVideoSlots(scene, template, assetById).some(
+  const slots = findVideoSlots(scene, template, assetById);
+  // 掛け合い×動画はアニメ自体が効かず**静止で完走する**（#469）＝この degenerate にはならない。
+  // 書き出し側も同じ `sceneAnimationActive` を通ってから停止判定に入るので、ここでゲートを共有しないと
+  // 「書き出しは成功するのに公開前チェックだけが止める」ズレになる（#547 P2-5 レビュー・ADR-0026②）。
+  if (!sceneAnimationActive(scene, sceneAnims, slots.length > 0)) return false;
+  return slots.some(
     (s) =>
       slotIsAnimated(sceneAnims, [s.slotLayerId], scene.groups) &&
       scene.slotVideoStart?.[s.slotLayerId]?.mode === VIDEO_START_MODE.afterAnim,

@@ -413,3 +413,49 @@ describe("buildPrecheckItems（FREE 字幕の対象別の長さ判定・#547 P1-
     expect(sev(s)).toBe("action");
   });
 });
+
+// #547 P2-5：残っていると書き出しが**必ず失敗する**項目だけに blocksExport を立て、公開前チェックの主ボタンを止める根拠にする。
+// 立てる条件は書き出し側の停止条件と対（buildExportScenes の templateUnresolvedError／videoUnplaceableError／afterAnim 判定）。
+// 「直せば良くなる」警告（声が未作成・字幕が長い）に立てると「出せるのに押せない」になるので、そこは立てないことも固定する。
+describe("buildPrecheckItems（書き出しを止める項目の判別・#547 P2-5）", () => {
+  const videoAsset: Asset = { assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "assets/v.mp4" };
+  const blockingIds = (items: ReturnType<typeof buildPrecheckItems>): string[] =>
+    items.filter((i) => i.blocksExport).map((i) => i.id);
+
+  it("見た目が見つからない場面＝書き出しを止める（templateUnresolvedError と対）", () => {
+    const scene = { ...freeScene(undefined), templateId: "missing" } as Scene;
+    expect(blockingIds(buildPrecheckItems([scene], assets, [freeTemplate]))).toEqual(["sceneTemplate"]);
+  });
+
+  it("動画を配置できない場面＝書き出しを止める（videoUnplaceableError と対）", () => {
+    const scene = freeScene([
+      { id: "slot_1", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_v", fit: "cover", hidden: true },
+    ] as unknown as Scene["freeLayout"]);
+    expect(blockingIds(buildPrecheckItems([scene], [...assets, videoAsset], [freeTemplate]))).toEqual(["videoPlacement"]);
+  });
+
+  it("afterAnim × アニメが場面尺いっぱい＝書き出しを止める", () => {
+    const slotEl = [{ id: "slot_1", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_v", fit: "cover" }] as unknown as Scene["freeLayout"];
+    const anim = [{ id: "a", sceneId: "scene_001", targetId: "slot_1", keyframes: [{ timeSec: 0, x: -100 }, { timeSec: 8, x: 0 }] }] as unknown as ElementAnimation[];
+    const scene = { ...freeScene(slotEl), slotVideoStart: { slot_1: { mode: "afterAnim" } } } as unknown as Scene;
+    expect(blockingIds(buildPrecheckItems([scene], [...assets, videoAsset], [freeTemplate], anim))).toEqual(["videoStartAfterAnim"]);
+  });
+
+  it("声が未作成・字幕が長い は止めない（直せば良くなる警告＝出せるのに押せない、を作らない）", () => {
+    // FREE は字幕要素があって初めて texts.subtitle が表示される（ADR-0029）＝置かないと「長すぎ」判定に載らない。
+    const scene = {
+      ...freeScene([{ id: "sub_1", kind: "subtitle", x: 100, y: 900, w: 1000, h: 100 }] as unknown as Scene["freeLayout"]),
+      narration: { text: "よみあげ", status: "none" },
+      texts: { subtitle: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 10) },
+    } as unknown as Scene;
+    const items = buildPrecheckItems([scene], assets, [freeTemplate]);
+    // 該当する警告自体は出ている（出ていないと下の「止めない」が空振りになる）。
+    expect(items.find((i) => i.id === "voice")?.severity).toBe("action");
+    expect(items.find((i) => i.id === "subtitle")?.severity).toBe("action");
+    expect(blockingIds(items)).toEqual([]); // どれも書き出しは止めない
+  });
+
+  it("問題の無いプロジェクトは止める項目ゼロ", () => {
+    expect(blockingIds(buildPrecheckItems([freeScene(undefined)], assets, [freeTemplate]))).toEqual([]);
+  });
+});

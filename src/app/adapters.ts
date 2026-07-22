@@ -169,6 +169,7 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       severity: "action",
       action: "直す",
       sceneId: noTemplate.firstId,
+      blocksExport: true, // 書き出しは templateUnresolvedError で停止する
     });
   }
 
@@ -186,6 +187,7 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       action: "直す",
       // 最初の該当場面（unplaceable は 1始まりの位置）へ飛ぶ。
       sceneId: scenes[unplaceable[0] - 1]?.sceneId,
+      blocksExport: true, // 書き出しは videoUnplaceableError で停止する
     });
   }
 
@@ -225,6 +227,7 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       severity: "action",
       action: "直す",
       sceneId: scenes[afterAnimNoPlay[0] - 1]?.sceneId,
+      blocksExport: true, // 書き出しは同一判定で停止する（buildExportScenes）
     });
   }
 
