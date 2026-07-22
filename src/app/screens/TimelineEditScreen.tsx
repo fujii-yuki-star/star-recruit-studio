@@ -6,6 +6,7 @@ import { compileTimeline } from "../../domain/project/compileTimeline";
 import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import type { OverlayClip } from "../../domain/project/types";
 import { TimelineView } from "../components/TimelineView";
+import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import type { ClipDragMode } from "../components/TimelineView";
@@ -99,8 +100,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
         </button>
         {/* Undo/Redo（#255）。overlay の追加/移動/トリミング/文言も戻せる（履歴は meta スナップショット・場面編集と共通）。 */}
         <div className="row gap-sm" style={{ marginLeft: "auto" }}>
-          <button className="btn btn-ghost btn-icon text-sm" onClick={undo} disabled={!canUndo} aria-label="取り消す" title="取り消す（Ctrl+Z）">↶ 取り消す</button>
-          <button className="btn btn-ghost btn-icon text-sm" onClick={redo} disabled={!canRedo} aria-label="やり直す" title="やり直す（Ctrl+Y）">↷ やり直す</button>
+          <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} />
         </div>
       </div>
 

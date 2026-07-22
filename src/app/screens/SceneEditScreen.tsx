@@ -18,6 +18,7 @@ import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE,
 import { prunePerUseMaps } from "../../domain/project/perUseMaps";
 import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { GroupList } from "../components/GroupList";
+import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { GroupTransformFields } from "../components/GroupTransformFields";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
@@ -1696,8 +1697,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <h2 className="field-label" style={{ margin: 0 }}>選択中の場面を編集</h2>
               {/* 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z・Ctrl+Y でも操作可。 */}
               <div className="row gap-sm">
-                <button className="btn btn-ghost btn-icon text-sm" onClick={undo} disabled={!canUndo} aria-label="取り消す" title="取り消す（Ctrl+Z）">↶ 取り消す</button>
-                <button className="btn btn-ghost btn-icon text-sm" onClick={redo} disabled={!canRedo} aria-label="やり直す" title="やり直す（Ctrl+Y）">↷ やり直す</button>
+                <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} />
               </div>
             </div>
 
