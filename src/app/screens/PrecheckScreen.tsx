@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { PrecheckItem, ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
-import { buildPrecheckItems, exportBlockedMessage, exportBlockingItems } from "../adapters";
+import { buildPrecheckItems, exportBlockedMessage, isExportBlocking } from "../adapters";
 import { useExportCapability } from "../hooks/useExportCapability";
 import { PageHead } from "../components/ui";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -64,7 +64,8 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
   // 「直せば良くなる」警告（字幕が長い・声が未作成）とは分け、主ボタンを止める根拠にする。
   // 止めないと、保存先を選ばせた後に §2-5 エラーで落ちる＝手戻りが大きい（ADR-0026④）。
   // 書き出し画面の「動画を保存」と**同じ述語**を使う（片方だけ別条件で止めない・ADR-0026②）。
-  const blockingItems = exportBlockingItems(scenes, assets, templates, meta.timelineOverlay?.animations);
+  // 既に算出済みの items を絞るだけ＝重い buildPrecheckItems を二度走らせない。
+  const blockingItems = items.filter(isExportBlocking);
   const exportBlocked = capabilityBlocked || blockingItems.length > 0;
 
   return (
