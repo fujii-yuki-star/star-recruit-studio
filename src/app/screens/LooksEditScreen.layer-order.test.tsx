@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import { LooksEditScreen } from "./LooksEditScreen";
+import { fitLabel } from "../uiLabels";
 
 // #547 P2-4：テンプレ作成の「重ね順」一覧を場面編集（FREE）と揃える。
 // 従来は各行が「削除」だけで、並べ替えは数値欄（重なり順）頼みだった＝同じ一覧なのに操作セットが別物（ADR-0026②）。
@@ -98,5 +99,31 @@ describe("LooksEditScreen 重ね順一覧の並べ替え（#547 P2-4）", () => 
     expect(rowOrder()).not.toEqual(before);
     fireEvent.click(undoBtn());
     expect(rowOrder()).toEqual(before); // 1回で戻る
+  });
+});
+
+// #547 P2-11/P2-10：重ね順の数値欄ラベルと、収め方セレクトの文言を正典・共有語にそろえる。
+describe("LooksEditScreen 重ね順・収め方の表記（#547 P2-11/P2-10）", () => {
+  beforeEach(() => {
+    useProjectStore.setState({ templates: [userTemplate, ...sampleTemplates], assets: [], editingTemplateId: "user_tmpl_001" });
+  });
+
+  it("選択レイヤーの数値欄は「重ね順」（「重なり順」にしない・06_UI_SPEC §3）", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "背景" })); // レイヤーを選択
+    expect(screen.getByText("重ね順")).toBeTruthy();
+    expect(screen.queryByText("重なり順")).toBeNull();
+  });
+
+  it("スロットの収め方は共有 fitLabel の文言を出す（テンプレ編集と FitSelect で同じ語・§6）", () => {
+    const withSlot = {
+      ...userTemplate,
+      layers: [{ id: "mainVisual", type: "slot", x: 0, y: 0, w: 100, h: 100 } as (typeof userTemplate.layers)[number]],
+    };
+    useProjectStore.setState({ templates: [withSlot, ...sampleTemplates] });
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "メイン素材" })); // スロットのレイヤー行を選択
+    // 収め方セレクトの選択肢が共有語（枠いっぱい…）になっている。
+    expect(screen.getByRole("option", { name: fitLabel.cover })).toBeTruthy();
   });
 });

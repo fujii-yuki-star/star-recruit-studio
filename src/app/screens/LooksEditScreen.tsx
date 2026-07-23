@@ -31,14 +31,13 @@ import { UnsavedMark } from "../components/SaveStatusBadge";
 import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { ArrowLeftIcon } from "../components/icons";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
-import { textKeyLabel } from "../uiLabels";
+import { FIT_FIELD_LABEL, fitLabel, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
 
 // 型別コントロールのユーザー向けラベル（#214 ④・§2-3）。全値必須＝enum 追加漏れをコンパイルで検知。
 const layerShapeLabel: Record<LayerShapeType, string> = { rect: "四角", ellipse: "丸", line: "線" };
 const fontWeightLabel: Record<FontWeight, string> = { normal: "標準", bold: "太字" };
 const slotTypeLabel: Record<SlotType, string> = { image_or_video: "写真・動画", image: "写真", video: "動画" };
-const fitLabel: Record<Fit, string> = { cover: "切り取って合わせる", contain: "全体を収める", stretch: "引き伸ばす" };
 
 /** テンプレを編集ドラフト用にコピー（レイヤーも個別コピー＝編集が元（store の current）を壊さない）。 */
 function cloneTemplate(t: Template): Template {
@@ -445,7 +444,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               </select>
             </div>
             <div className="field" style={{ margin: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{FIT_FIELD_LABEL}</label>
               <select className="select" value={l.fit ?? FIT.cover} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
                 {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
               </select>
@@ -470,7 +469,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       return (
         <>
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>収め方</label>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{FIT_FIELD_LABEL}</label>
             <select className="select" value={l.fit ?? FIT.contain} onChange={(e) => onUpdateLayer(l.id, { fit: e.target.value as Fit })}>
               {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
             </select>
@@ -646,7 +645,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
           {/* レイヤー一覧（重ね順・上が手前）＋追加 */}
           <div className="field" style={{ margin: 0 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>重ね順（上が手前）</label>
+            <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</label>
             <div className="col" style={{ gap: 2 }}>
               {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse する＝描画（renderer/layout の
                   昇順・安定ソート＝同 z は配列後方が手前）と同 z でも一致する。降順ソートだと同 z のとき前後が逆に出て、
@@ -693,7 +692,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   {numField("幅", selectedLayer.w, (v) => onUpdateLayer(selectedLayer.id, { w: v }), 1)}
                   {numField("高さ", selectedLayer.h, (v) => onUpdateLayer(selectedLayer.id, { h: v }), 1)}
                   {/* 表示は実効 z（一覧・描画と同じ基準）。zIndex 未指定でも「一覧で上なら大きい数」になり、↑↓ と値が食い違わない。 */}
-                  {numField("重なり順", effectiveLayerZ(selectedLayer), (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }), 0)}
+                  {numField(Z_ORDER_LABEL, effectiveLayerZ(selectedLayer), (v) => onUpdateLayer(selectedLayer.id, { zIndex: v }), 0)}
                 </div>
               </div>
               {renderLayerControls(selectedLayer)}

@@ -1,6 +1,23 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
-import type { AssetType, TextKey } from "../domain/enums";
+import type { AssetType, Fit, TextKey } from "../domain/enums";
 import { formatSceneNumbers } from "./adapters";
+
+/**
+ * 「枠への収め方」（Fit）のユーザー向け名称。全値必須＝enum 追加漏れをコンパイル検知。
+ * 語彙は `06_UI_SPEC §9`（シーン編集→右パネル・枠いっぱい/全体/伸縮）に合わせる。FitSelect（動画クリップ・画像スロット）と
+ * LooksEditScreen（テンプレ編集）が**同じ語**を使うための単一の参照元（§6・#547 P2-10）。
+ */
+/** 「枠への収め方」欄の見出し。正典 `06_UI_SPEC §9`（右パネル）＝「枠への収め方」。テンプレ編集・場面編集で共有（§6・#547 P2-10）。 */
+export const FIT_FIELD_LABEL = "枠への収め方";
+
+export const fitLabel: Record<Fit, string> = {
+  cover: "枠いっぱいに表示（はみ出しは切り取り）",
+  contain: "全体を表示（余白が入る）",
+  stretch: "枠に合わせて伸縮",
+};
+
+/** 重ね順（要素の前後関係）のユーザー向け見出し。正典は「重ね順」（`06_UI_SPEC §3`＝layer→要素・並び順）。#547 P2-11。 */
+export const Z_ORDER_LABEL = "重ね順";
 
 /**
  * 送信前確認の「素材の説明・タグ」行の要約（#547 P2-8）。写真・動画・それ以外（ゆうこ/ロゴ等）の件数を出す。

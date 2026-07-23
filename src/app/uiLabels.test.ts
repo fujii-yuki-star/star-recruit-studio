@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { deleteLookConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage } from "./uiLabels";
+import { FITS } from "../domain/enums";
+import { deleteLookConfirmMessage, fitLabel, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -90,5 +91,19 @@ describe("sentAssetTextSummary（送信前確認の素材要約）", () => {
 
   it("素材が無ければ空文字（呼び出し側でフォールバック）", () => {
     expect(sentAssetTextSummary(0, 0, 0)).toBe("");
+  });
+});
+
+// #547 P2-10/P2-11：収め方・重ね順の表記を正典（06_UI_SPEC §9／§3）に合わせ、画面間で1か所に集約する。
+describe("収め方・重ね順の表記（#547 P2-10/P2-11）", () => {
+  it("fitLabel は全ての Fit 値をもち、正典語（枠いっぱい/全体/伸縮）を使う", () => {
+    for (const f of FITS) expect(fitLabel[f]).toBeTruthy(); // enum 追加漏れ検知
+    expect(fitLabel.cover).toContain("枠いっぱい");
+    expect(fitLabel.contain).toContain("全体");
+    expect(fitLabel.stretch).toContain("伸縮");
+  });
+
+  it("重ね順の見出しは正典語「重ね順」（「重なり順」にしない）", () => {
+    expect(Z_ORDER_LABEL).toBe("重ね順");
   });
 });
