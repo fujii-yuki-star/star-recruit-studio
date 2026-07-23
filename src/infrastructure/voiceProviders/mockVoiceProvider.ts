@@ -1,6 +1,7 @@
 // 開発・テスト用のダミー音声合成。無音WAVを返し、ナレーション生成フローを通す（AiProvider と同じ Mock 先行）。
 // 実音声は VOICEVOX プロバイダ（V-B：infrastructure/voicevox でローカルエンジンに HTTP 接続）で差し替える（13 §4 / ADR-0003）。
 import type { SynthesizeInput, SynthesizedVoice, VoiceProvider } from '../../domain/voice/voiceProvider';
+import { wavDurationSec } from '../../domain/voice/wavDuration';
 
 /** 指定秒数の無音WAVを data URL で返す（8kHz/16bit/モノラル）。 */
 function silentWavDataUrl(durationSec: number): string {
@@ -34,8 +35,9 @@ function silentWavDataUrl(durationSec: number): string {
 
 export class MockVoiceProvider implements VoiceProvider {
   synthesize(input: SynthesizeInput): Promise<SynthesizedVoice> {
-    // 日本語のおおよその発話尺（1文字 ≈ 0.18 秒、最低 1 秒）。
-    const durationSec = Math.max(1, Math.round(input.text.length * 1.8) / 10);
-    return Promise.resolve({ audioDataUrl: silentWavDataUrl(durationSec), durationSec });
+    // Mock は実 TTS が無いので、日本語のおおよその発話尺（1文字 ≈ 0.18 秒、最低 1 秒）で無音 WAV を作る。
+    const audioDataUrl = silentWavDataUrl(Math.max(1, Math.round(input.text.length * 1.8) / 10));
+    // 返す尺は**作った WAV から測る**（wavDurationSec）＝本番（VOICEVOX）と同じ導出で durationSec を出す（#547 P3-3）。
+    return Promise.resolve({ audioDataUrl, durationSec: wavDurationSec(audioDataUrl) });
   }
 }
