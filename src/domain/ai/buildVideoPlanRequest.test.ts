@@ -127,6 +127,33 @@ describe('buildVideoPlanMessages', () => {
     expect(user).toContain('# 利用可能なゆうこ表情タグ\n（未入力）');
   });
 
+  // #547 P2-8：assetBlock は assetSentText 経由になり、name を trim し空白のみタグを落とす。
+  // これは意図的＝送信前確認 UI が見せる値（trim 済み）とプロンプトが送る値を一致させるため（shown==sent・§2-6）。
+  it('name を trim し、空白のみのタグは落として送る（確認 UI と同じ正規化）', () => {
+    const input: GenerateVideoPlanInput = {
+      ...fullInput(),
+      assets: [
+        { assetId: 'a1', assetType: 'image', displayName: '  田中さん.jpg  ', tags: ['  社員  ', '   ', ''], filePath: 'x.jpg' },
+      ],
+    };
+    const user = buildVideoPlanUserMessage(input);
+    expect(user).toContain('name=田中さん.jpg'); // 前後空白なし
+    expect(user).toContain('tags=社員');          // 空白のみ・空要素は消える
+    expect(user).not.toContain('name=  田中さん'); // 生値は送らない
+  });
+
+  it('名前が空白のみ・タグが全て空白のみなら「（未入力）」で送る（空文字を送らない）', () => {
+    const input: GenerateVideoPlanInput = {
+      ...fullInput(),
+      assets: [
+        { assetId: 'a1', assetType: 'image', displayName: '   ', tags: ['  ', ' '], filePath: 'x.jpg' },
+      ],
+    };
+    const user = buildVideoPlanUserMessage(input);
+    expect(user).toContain('name=（未入力）');
+    expect(user).toContain('tags=（未入力）');
+  });
+
   it('複数素材・複数テンプレを各行に展開する', () => {
     const input = fullInput();
     input.assets = [

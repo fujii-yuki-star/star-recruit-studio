@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deleteLookConfirmMessage, standardLookButtonReason, standardLookResultMessage } from "./uiLabels";
+import { deleteLookConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -73,5 +73,22 @@ describe("deleteLookConfirmMessage（削除の影響を先に示す・#547）", 
     const msg = deleteLookConfirmMessage();
     expect(msg).not.toContain("標準の見た目に変わります");
     expect(msg).toContain("元に戻せません");
+  });
+});
+
+// #547 P2-8：送信前確認の要約。写真/動画だけ数えて他を無視すると、展開一覧と食い違う（§2-6）。
+describe("sentAssetTextSummary（送信前確認の素材要約）", () => {
+  it("ある種別だけを並べる（0 の種別は書かない）", () => {
+    expect(sentAssetTextSummary(3, 1, 0)).toBe("写真3枚・動画1本ぶんの文字情報");
+    expect(sentAssetTextSummary(2, 0, 0)).toBe("写真2枚ぶんの文字情報");
+  });
+
+  it("写真・動画が無くても、それ以外（ゆうこ・ロゴ等）があれば件数を出す（「写真0枚」で矛盾させない）", () => {
+    expect(sentAssetTextSummary(0, 0, 1)).toBe("ほか1件ぶんの文字情報");
+    expect(sentAssetTextSummary(2, 0, 1)).toBe("写真2枚・ほか1件ぶんの文字情報");
+  });
+
+  it("素材が無ければ空文字（呼び出し側でフォールバック）", () => {
+    expect(sentAssetTextSummary(0, 0, 0)).toBe("");
   });
 });

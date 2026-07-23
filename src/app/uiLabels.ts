@@ -1,6 +1,31 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
-import type { TextKey } from "../domain/enums";
+import type { AssetType, TextKey } from "../domain/enums";
 import { formatSceneNumbers } from "./adapters";
+
+/**
+ * 送信前確認の「素材の説明・タグ」行の要約（#547 P2-8）。写真・動画・それ以外（ゆうこ/ロゴ等）の件数を出す。
+ * **写真・動画だけを数えて他を無視すると、展開一覧に出るのに要約が「写真0枚・動画0本」と食い違う**（§2-6 の確認を妨げる）。
+ * 0 の種別は書かない（「写真0枚」を出さない）。素材が無ければ空文字（呼び出し側で扱う）。
+ */
+export function sentAssetTextSummary(photo: number, video: number, other: number): string {
+  const parts: string[] = [];
+  if (photo > 0) parts.push(`写真${photo}枚`);
+  if (video > 0) parts.push(`動画${video}本`);
+  if (other > 0) parts.push(`ほか${other}件`);
+  return parts.length === 0 ? "" : `${parts.join("・")}ぶんの文字情報`;
+}
+
+/** 素材種別（assetType）のユーザー向け名称。全値必須＝enum 追加漏れをコンパイル検知。§2-3（技術用語を出さない）。 */
+export const assetTypeLabel: Record<AssetType, string> = {
+  image: "写真",
+  video: "動画",
+  bgm: "BGM",
+  voice: "音声",
+  yuko: "ゆうこ",
+  decor: "飾り",
+  logo: "ロゴ",
+  qr: "QRコード",
+};
 
 /** テキスト種別（textKey）のユーザー向け名称。テンプレ編集・場面編集の双方で使う。全値必須＝enum 追加漏れをコンパイル検知。 */
 export const textKeyLabel: Record<TextKey, string> = {

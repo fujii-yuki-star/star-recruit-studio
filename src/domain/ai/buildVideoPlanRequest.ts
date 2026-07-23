@@ -5,6 +5,7 @@
 import { AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constants';
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
+import { assetSentText } from './assetSendText';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 // 12§7 の出力例（few-shot）。AI に ai-video-plan の構造（キー名・入れ子）を厳密に真似させるため、
 // 正典 fixture を直接読む（ミラーしない＝検証スキーマと同じ単一参照元。validate:schemas で適合確認済みの有効サンプル）。
@@ -108,11 +109,13 @@ function templateBlock(t: TemplateSummary): string {
   ].join('\n');
 }
 
-/** 12§6「利用可能な素材」1件分の行（assetId のみ使用可をAIに示す。MVP はテキストのみ）。 */
+/** 12§6「利用可能な素材」1件分の行（assetId のみ使用可をAIに示す。MVP はテキストのみ）。
+ *  送るフィールドは assetSentText を単一の参照元にする＝送信前確認 UI と必ず同じ内容になる（§2-6・ADR-0026②）。 */
 function assetBlock(a: Asset): string {
+  const t = assetSentText(a);
   return [
-    `- assetId=${a.assetId} / type=${a.assetType} / name=${a.displayName}`,
-    `  説明=${orNotProvided(a.description)} / AI解析=${orNotProvided(a.aiDescription)} / tags=${joinList(a.tags, ', ')}`,
+    `- assetId=${t.assetId} / type=${t.assetType} / name=${orNotProvided(t.name)}`,
+    `  説明=${orNotProvided(t.description)} / AI解析=${orNotProvided(t.aiDescription)} / tags=${joinList(t.tags, ', ')}`,
   ].join('\n');
 }
 
