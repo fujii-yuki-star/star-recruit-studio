@@ -4,10 +4,10 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
-import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
+import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
@@ -33,7 +33,7 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, generateAllNarrations, isGeneratingNarration, undo, redo } =
+  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, isGeneratingNarration, undo, redo } =
     useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は編集を止める（#570 P2）
   // 取り消し/やり直し（ADR-0020・#413）。たたき台の削除/並べ替えも戻せる（キーボード Ctrl+Z/Y は App で登録・
@@ -76,14 +76,14 @@ export function DraftScreen({ onNavigate }: DraftProps) {
     }
   }
 
-  // セリフ音声の生成進捗（行単位）。「全場面の声を作成」ボタンの表示条件・進捗表示に使う。
-  const { done: narrDone, total: narrTotal } = narrationProgress(scenes);
-  // 全場面の声を作成（既存 action を呼ぶだけ＝場面編集の一括作成と同じ）。完了後に「まだ声が要る場面」を数えて通知する。
-  const runBulkVoice = async () => {
-    setVoiceResult(null);
-    await generateAllNarrations();
-    const remaining = useProjectStore.getState().scenes.filter(sceneNeedsVoice).length;
-    setVoiceResult({ remaining });
+  // 一括作成が終わったら「まだ声が要る場面」を数えて通知する（進捗・中止は共通操作が担当・#547 P2-6）。
+  // 中止したときは出さない：止めたのは利用者で、残件は進捗（声 5/10（中止しました））が示している。
+  const onBulkVoiceFinished = ({ cancelled }: { cancelled: boolean }) => {
+    if (cancelled) {
+      setVoiceResult(null);
+      return;
+    }
+    setVoiceResult({ remaining: useProjectStore.getState().scenes.filter(sceneNeedsVoice).length });
   };
 
   // たたき台へ直接来た場合は生成する（本実装では保存済みプロジェクトの読込に置き換え）
@@ -169,15 +169,10 @@ export function DraftScreen({ onNavigate }: DraftProps) {
             </div>
           )}
 
-          {/* 全場面の声をまとめて作成（音声バッジは見せているので作る手段もここに置く・#413）。すべて作成済みなら隠す。 */}
-          {narrTotal > 0 && !(narrDone === narrTotal && !isGeneratingNarration) && (
-            <div className="row-between mb">
-              <span className="text-muted">声 <strong>{narrDone}/{narrTotal}</strong>{isGeneratingNarration ? "（作成中…）" : ""}</span>
-              <button className="btn btn-primary" onClick={() => void runBulkVoice()} disabled={isGeneratingNarration}>
-                {isGeneratingNarration ? "作成中…" : "全場面の声を作成"}
-              </button>
-            </div>
-          )}
+          {/* 全場面の声をまとめて作成（音声バッジは見せているので作る手段もここに置く・#413）。進捗・中止・
+              「すべて作成済みなら隠す」の条件は共通操作へ集約（3画面で同じ見え方にする＝#547 P2-6・ADR-0026②）。
+              専用の行なので行ごと共通操作に任せる＝隠れるときに空の行の余白を残さない。 */}
+          <BulkVoiceControls rowClassName="row-between mb" hideWhenNothingToDo onFinished={onBulkVoiceFinished} />
           {/* 一括作成の完了通知（現在は進捗が消えるだけ＝#413）。全部できたら仕上がり確認へ誘導、一部失敗は次の行動を案内。 */}
           {voiceResult && !isGeneratingNarration &&
             (voiceResult.remaining === 0 ? (
