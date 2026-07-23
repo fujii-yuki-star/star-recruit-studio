@@ -2008,7 +2008,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             <div
                               key={el.id}
                               className="row-between"
-                              style={{ padding: "2px 6px", borderRadius: 4, background: isSel ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)", opacity: el.hidden ? 0.55 : 1 }}
+                              style={{ padding: "2px 6px", borderRadius: 4, background: isSel ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)", opacity: el.hidden ? 0.55 : 1 }}
                             >
                               {renamingFreeId === el.id ? (
                                 <input
@@ -2057,7 +2057,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     />
                     {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。動き（④(3)）はグループ全体に付く。 */}
                     {effectiveActiveGroupId && (
-                      <div className="col gap-sm" data-testid="group-panel" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
+                      <div className="col gap-sm" data-testid="group-panel" style={{ padding: "4px 8px", background: "rgba(var(--color-primary-rgb), 0.12)", borderRadius: 6 }}>
                         {/* 中身ごと削除の確認（#551）。破壊的＋複数要素が一度に消えるので、他の操作を隠して確認だけ出す。
                             **ロック中は確認を出さない**＝グループ一覧（GroupList）の行から確認を開いたままここでロックすると、
                             「削除する」を押しても `deleteGroupWithMembers` の内側ガードが無言 return して「消えたはずが

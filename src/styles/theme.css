@@ -12,6 +12,8 @@
   --color-primary: #1f9ea3;     /* 青緑 (メイン操作) */
   --color-primary-hover: #18888d;
   --color-primary-soft: #e3f4f4;
+  --color-primary-rgb: 31, 158, 163; /* #1f9ea3 のチャンネル値。半透明の選択面を合成する単一の参照元 (#547 P2-12)。
+                                        選択ハイライトの塗りはこれで主操作色と同色相にする（選択枠 --color-primary と揃える）。 */
 
   --color-accent: #4aa3df;      /* 水色アクセント */
   --color-accent-soft: #e6f1fb;

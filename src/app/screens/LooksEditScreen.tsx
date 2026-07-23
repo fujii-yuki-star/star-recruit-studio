@@ -654,7 +654,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 <div
                   key={l.id}
                   className="row-between"
-                  style={{ padding: "2px 6px", borderRadius: 4, background: selectedLayerIds.includes(l.id) ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)" }}
+                  style={{ padding: "2px 6px", borderRadius: 4, background: selectedLayerIds.includes(l.id) ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)" }}
                 >
                   <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={(e) => selectLayer(l.id, e.shiftKey)}>
                     {layerRowName(l)}

@@ -137,3 +137,18 @@ describe("GroupList：確認中に削除できなくなったら確認を引っ�
     expect(screen.getByRole("button", { name: "グループ1を中身ごと削除" })).toHaveAttribute("title", "全部が消えてしまうため削除できません");
   });
 });
+
+// #547 P2-12：選択ハイライトの塗りは主操作色（青緑）と同色相のトークンで出す。
+// 従来は別色相の青 rgba(80,130,255) 直書きで、選択枠（--color-primary）と色がちぐはぐだった。
+describe("GroupList 選択ハイライトの色（#547 P2-12）", () => {
+  it("選択行の背景は共有トークン var(--color-primary-rgb) を使い、旧オフパレット青を使わない", () => {
+    const { container } = render(
+      <GroupList groups={groups} activeGroupId="group_001" memberCount={() => 1}
+        onSelect={vi.fn()} onToggleHidden={vi.fn()} onRename={vi.fn()} onDelete={vi.fn()} />,
+    );
+    const styles = Array.from(container.querySelectorAll<HTMLElement>(".row-between")).map((n) => n.getAttribute("style") ?? "");
+    const selected = styles.filter((s) => s.includes("var(--color-primary-rgb)"));
+    expect(selected.length).toBe(1); // 選択された1行だけがハイライト
+    expect(styles.some((s) => s.includes("80,130,255") || s.includes("80, 130, 255"))).toBe(false); // 旧青は残っていない
+  });
+})
