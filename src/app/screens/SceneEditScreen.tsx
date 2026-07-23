@@ -48,7 +48,7 @@ import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { textKeyLabel } from "../uiLabels";
+import { FIT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -937,7 +937,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           {/* 収め方（fit）は画像/動画とも FREE 要素ごと（el.fit・layoutScene が読む・Undo 可）＝#472 P1 で動画も per-use に統一。 */}
           {a && (
             <div className="field" style={{ marginTop: 6, marginBottom: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{FIT_FIELD_LABEL}</label>
               {/* FREE 要素の収め方は要素ごと（継承概念なし）＝常に値を持たせる。inheritLabel 未指定の FitSelect は
                   undefined を返さないが、型上の undefined は既定 cover で明示的に受ける。 */}
               <FitSelect
@@ -1918,7 +1918,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       {/* 収め方（fit）は画像/動画とも per-use＝scene.slotFits[layer.id]（layoutScene が読む・Undo 可・「見た目の既定に合わせる」で継承）＝#472 P1 で動画も統一。 */}
                       {assignedAsset && (
                         <div className="field" style={{ marginTop: 6 }}>
-                          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
+                          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{FIT_FIELD_LABEL}</label>
                           <FitSelect
                             inheritLabel="見た目の既定に合わせる"
                             value={selected.slotFits?.[layer.id]}
@@ -1937,7 +1937,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             </CollapsibleSection>
 
-            {/* FREE 場面：自由配置エディタ（素材/文字/図形を追加・数値で位置/大きさ・重なり順・削除）。Phase 4a-3b。 */}
+            {/* FREE 場面：自由配置エディタ（素材/文字/図形を追加・数値で位置/大きさ・重ね順・削除）。Phase 4a-3b。 */}
             {isFree && (
               <CollapsibleSection title="自由配置">
               <div className="field">
@@ -1996,7 +1996,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <div className="col gap-sm">
                     {/* レイヤー一覧（#210）：重ね順（上が手前）で並べ、選択・前面/背面・表示/隠す・ロックを操作。 */}
                     <div className="field" style={{ marginBottom: 4 }}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>重ね順（上が手前）</label>
+                      <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</label>
                       <div className="col" style={{ gap: 2 }}>
                         {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse＝描画（layout の昇順・安定＝同 z は
                             配列後方が手前）と同 z でも一致する。降順ソートだと同 z で前後が逆に出て↑↓が1段にならない（#547 P2-4）。 */}
@@ -2269,7 +2269,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <div className="row gap-sm">
                           <NumberField label="幅" value={el.w} min={1} onChange={(v) => patchFreeEl(el.id, { w: v })} />
                           <NumberField label="高さ" value={el.h} min={1} onChange={(v) => patchFreeEl(el.id, { h: v })} />
-                          <NumberField label="重なり順" value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
+                          <NumberField label={Z_ORDER_LABEL} value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
                           {/* 角度（回転・度）。値域はグループの角度欄と同じ共有定数（360=0 は重複ゆえ schema で除外）。
                               回転中は角つまみでの拡大縮小が止まるため、大きさはこの数値で調整する（#208）。 */}
                           <NumberField label="角度" value={el.rotation ?? 0} min={ROTATION_DEG_MIN} max={ROTATION_DEG_MAX} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
