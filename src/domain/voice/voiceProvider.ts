@@ -17,7 +17,7 @@ export interface SynthesizeInput {
 export interface SynthesizedVoice {
   /** 合成音声(WAV)の data URL。再生・将来の音声ミックスに使う。 */
   audioDataUrl: string;
-  /** おおよその尺（秒）。 */
+  /** 合成音声(WAV)の実尺（秒）＝`wavDurationSec` で測定。解析不能時は 0（呼び出し側で自動逐次フォールバック）。 */
   durationSec: number;
 }
 

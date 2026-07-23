@@ -11,6 +11,7 @@ describe('wavDurationSec', () => {
     expect(wavDurationSec(audioDataUrl)).toBeCloseTo(durationSec, 1);
   });
 
+
   it('生 base64（data URL でない）でも解析できる', async () => {
     const mock = new MockVoiceProvider();
     const { audioDataUrl } = await mock.synthesize({ text: 'あ', voiceId: 'v', speed: 1, pitch: 0, intonation: 1 });
