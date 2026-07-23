@@ -393,7 +393,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
               height: `${(cg.h / canvasH) * 100}%`,
               boxSizing: "border-box",
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
-              background: selected ? "rgba(80,130,255,0.08)" : "transparent",
+              background: selected ? "rgba(var(--color-primary-rgb), 0.08)" : "transparent",
               cursor: "move",
               transform: rotated ? `rotate(${cg.rotation}deg)` : undefined,
             }}
@@ -438,7 +438,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
             width: `${(activeGroupFrame.w / canvasW) * 100}%`,
             height: `${(activeGroupFrame.h / canvasH) * 100}%`,
             border: "2px solid var(--color-primary)",
-            background: "rgba(80,130,255,0.06)",
+            background: "rgba(var(--color-primary-rgb), 0.06)",
             boxSizing: "border-box",
             cursor: activeGroup.locked ? "default" : "move",
             transform: activeGroupFrame.rotation ? `rotate(${activeGroupFrame.rotation}deg)` : undefined,
@@ -480,7 +480,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
             width: `${(Math.abs(marquee.x1 - marquee.x0) / canvasW) * 100}%`,
             height: `${(Math.abs(marquee.y1 - marquee.y0) / canvasH) * 100}%`,
             border: "1px dashed var(--color-primary)",
-            background: "rgba(80,130,255,0.10)",
+            background: "rgba(var(--color-primary-rgb), 0.10)",
             pointerEvents: "none",
             zIndex: 35,
           }}

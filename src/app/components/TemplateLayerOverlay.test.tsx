@@ -295,3 +295,14 @@ describe("TemplateLayerOverlay: 取り消しの合成境界（#547 P2-3）", () 
     expect(onInteractionStart).toHaveBeenCalledTimes(1); // 明示コールバックなら届く
   });
 });
+
+// #547 P2-12：選択要素の塗りも主操作色（青緑）と同色相のトークン。選択枠は 2px solid var(--color-primary) で、
+// 塗りが別色相の青だと枠と色がちぐはぐだった。塗りは var(--color-primary-rgb) で枠と同色相にする。
+describe("TemplateLayerOverlay 選択ハイライトの色（#547 P2-12）", () => {
+  it("選択した要素の塗りは var(--color-primary-rgb)（旧オフパレット青を使わない）", () => {
+    const { boxes } = renderOverlay({ selectedIds: ["title"] });
+    const styles = boxes.map((b) => b.getAttribute("style") ?? "");
+    expect(styles.some((s) => s.includes("var(--color-primary-rgb)"))).toBe(true);
+    expect(styles.some((s) => s.includes("80,130,255") || s.includes("80, 130, 255"))).toBe(false);
+  });
+})

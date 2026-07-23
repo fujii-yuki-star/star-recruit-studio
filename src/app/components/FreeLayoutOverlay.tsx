@@ -637,7 +637,7 @@ export function FreeLayoutOverlay({
               height: `${(cg.h / canvasH) * 100}%`,
               boxSizing: "border-box",
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
-              background: selected ? "rgba(80,130,255,0.08)" : "transparent",
+              background: selected ? "rgba(var(--color-primary-rgb), 0.08)" : "transparent",
               cursor: locked ? "default" : editing ? "text" : "move", // ロック中はドラッグ不可を示す
 
               // 回転（#208）：中心を軸に回す（既定の transform-origin=中心）。出力 SVG の rotate と一致。合成後の角度を使う。
@@ -754,7 +754,7 @@ export function FreeLayoutOverlay({
             width: `${(Math.abs(marquee.x1 - marquee.x0) / canvasW) * 100}%`,
             height: `${(Math.abs(marquee.y1 - marquee.y0) / canvasH) * 100}%`,
             border: "1px dashed var(--color-primary)",
-            background: "rgba(80,130,255,0.10)",
+            background: "rgba(var(--color-primary-rgb), 0.10)",
             pointerEvents: "none",
             zIndex: 35,
           }}
@@ -774,7 +774,7 @@ export function FreeLayoutOverlay({
             width: `${(activeGroupFrame.w / canvasW) * 100}%`,
             height: `${(activeGroupFrame.h / canvasH) * 100}%`,
             border: "2px solid var(--color-primary)",
-            background: "rgba(80,130,255,0.06)",
+            background: "rgba(var(--color-primary-rgb), 0.06)",
             boxSizing: "border-box",
             cursor: activeGroup.locked ? "default" : "move",
             transform: activeGroupFrame.rotation ? `rotate(${activeGroupFrame.rotation}deg)` : undefined,

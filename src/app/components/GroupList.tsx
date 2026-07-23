@@ -67,7 +67,7 @@ export function GroupList({
             <div
               key={g.id}
               className="row-between"
-              style={{ padding: "2px 6px", borderRadius: 4, background: active ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)", opacity: g.hidden ? 0.55 : 1 }}
+              style={{ padding: "2px 6px", borderRadius: 4, background: active ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)", opacity: g.hidden ? 0.55 : 1 }}
             >
               {renaming ? (
                 <input
