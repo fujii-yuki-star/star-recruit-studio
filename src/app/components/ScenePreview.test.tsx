@@ -40,6 +40,18 @@ describe("ScenePreview 掛け合いの「間」（#386・A案＝間は字幕な�
     expect(container.textContent).toContain("ゆうこの字幕テスト");
   });
 
+  // #547 P2-7：「字幕を入れる」OFF（hideSubtitles）＝有効行でも字幕を描かない。書き出しの withSubtitle=false と
+  // 同じ述語（isSubtitleItem）で消す＝プレビュー＝書き出しのパリティ。
+  it("hideSubtitles＝有効行でも字幕を描かない（字幕なし書き出しの見た目を確認できる）", () => {
+    const { container } = render(<ScenePreview scene={scene} template={template} activeLineIndex={0} hideSubtitles />);
+    expect(container.textContent).not.toContain("ゆうこの字幕テスト");
+  });
+
+  it("hideSubtitles を指定しなければ従来どおり字幕を描く（既定は字幕あり）", () => {
+    const { container } = render(<ScenePreview scene={scene} template={template} activeLineIndex={0} />);
+    expect(container.textContent).toContain("ゆうこの字幕テスト");
+  });
+
   it("間（activeLineIndex<0）は行の字幕を描かない（間は字幕なし・A案）", () => {
     const { container } = render(<ScenePreview scene={scene} template={template} activeLineIndex={-1} />);
     expect(container.textContent).not.toContain("ゆうこの字幕テスト");
@@ -246,6 +258,14 @@ describe("ScenePreview FREE 字幕の正準セグメント（ADR-0029・全ゼ�
     const { container } = render(<ScenePreview scene={lineScene} template={freeTemplate} activeLineIndex={0} subtitleSegment={seg} />);
     expect(container.textContent).toContain("行の字幕テスト");
   });
+
+  // #547 P2-7：FREE 字幕要素（kind:'subtitle'・isSubtitle=true）も hideSubtitles で消える＝テンプレ字幕と同じ扱い。
+  it("hideSubtitles＝FREE 字幕も消える（テンプレ字幕と等しく isSubtitle で除外）", () => {
+    const lineScene = { ...zeroLenScene, lines: [{ lineId: "line_001", text: "行の字幕テスト", status: "none" }] } as unknown as Scene;
+    const seg: SceneSegmentSpec = { lineId: "line_001", subtitleText: "行の字幕テスト", startSec: 0, durationSec: 10, isFirst: true };
+    const { container } = render(<ScenePreview scene={lineScene} template={freeTemplate} activeLineIndex={0} subtitleSegment={seg} hideSubtitles />);
+    expect(container.textContent).not.toContain("行の字幕テスト");
+  });
 });
 
 // #549：インライン編集中の要素は SVG から伏せる（同じ文字を textarea が同じ体裁で出すため、伏せないと二重表示になる
@@ -276,5 +296,36 @@ describe("ScenePreview hideItemIds＝編集中の要素をSVGから伏せる（#
     const { container } = render(<ScenePreview scene={freeScene} template={freeTemplate} hideItemIds={["free_001"]} />);
     expect(container.textContent).not.toContain("編集中の文字"); // 編集中＝SVG からは伏せる
     expect(container.textContent).toContain("ほかの文字"); // 他の要素は従来どおり描く
+  });
+});
+
+
+// #547 P2-7：hideSubtitles は静止と実映像再生の**両経路**で字幕を消す（splitVideoSceneSvgMulti にも同じ filter を渡す）。
+// 静止パスは上の describe で担保。ここは**実映像再生パス**（split 経由）を踏む＝どちらかの引数抜けを検知する。
+describe("ScenePreview hideSubtitles×実映像再生（#547 P2-7・パリティ両経路）", () => {
+  const vsubTemplate = {
+    schemaVersion: "1.0", templateId: "tpl_vsub", name: "vsub", category: "opening", aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 },
+    layers: [
+      { id: "mainVisual", type: "slot", slotType: "image_or_video", x: 0, y: 0, w: 1920, h: 800, zIndex: 10 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 240, y: 920, w: 1440, h: 90, zIndex: 50, fontSize: 38 },
+    ],
+  } as unknown as Template;
+  const vsubScene = {
+    sceneId: "svs", templateId: "tpl_vsub", sceneType: "opening", durationSec: 8, texts: {}, assetRefs: { mainVisual: "asset_v" },
+    lines: [{ lineId: "l1", text: "再生中の字幕文", startSec: 0, status: "none" }],
+  } as unknown as Scene;
+  const play = { playing: true, muted: false, slots: [{ slotLayerId: "mainVisual", clipUrl: "blob:clip", clipStartSec: 0, speed: 1, fit: "cover" as const, useOriginalAudio: true, originalVolume: 0.4 }] };
+
+  it("実映像再生中は字幕が出る（既定・split の上層に字幕）", () => {
+    const { container } = render(<ScenePreview scene={vsubScene} template={vsubTemplate} activeLineIndex={0} videoPlayback={play} />);
+    expect(container.querySelector("video")).not.toBeNull(); // 実映像再生パスに入っている（静止フォールバックでない）
+    expect(container.textContent).toContain("再生中の字幕文");
+  });
+
+  it("hideSubtitles＝実映像再生でも字幕が消える（split 経路にも filter が効く）", () => {
+    const { container } = render(<ScenePreview scene={vsubScene} template={vsubTemplate} activeLineIndex={0} videoPlayback={play} hideSubtitles />);
+    expect(container.querySelector("video")).not.toBeNull(); // まだ再生パス
+    expect(container.textContent).not.toContain("再生中の字幕文"); // 字幕だけ消える
   });
 });

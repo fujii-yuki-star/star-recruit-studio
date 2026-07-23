@@ -360,7 +360,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </span>
             <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" disabled={busy} />
           </div>
-          <p className="field-hint">書き出した動画に反映されます（仕上がり確認では常に字幕ありで表示します）。</p>
+          <p className="field-hint">書き出した動画に反映されます。仕上がり確認でも同じ設定で表示されます。</p>
           <hr className="divider" />
           <div className="toggle-row">
             <span className="field-label" style={{ margin: 0 }}>

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // canvas(ADR-0004) は Node テスト環境に無いため描画系をスタブ化し、音声付与の分岐のみを検証する。
-vi.mock('../layout', () => ({ layoutScene: vi.fn(() => ({ items: [] })) }));
+// layoutScene だけ差し替え、isSubtitleItem など他は実物を使う（字幕除外フィルタは実述語で検証・#547 P2-7）。
+vi.mock('../layout', async (orig) => ({ ...(await orig<typeof import('../layout')>()), layoutScene: vi.fn(() => ({ items: [] })) }));
 vi.mock('../sceneSvg', () => ({ layoutToSvg: vi.fn(() => '<svg/>') }));
 vi.mock('./rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,PNG') }));
 vi.mock('./videoSceneSplit', () => ({

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
-import { PageHead } from "../components/ui";
+import { PageHead, Switch } from "../components/ui";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { EmptyState } from "../components/states";
 import { StartNewVideoButton } from "../components/StartNewVideoButton";
@@ -265,6 +265,10 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const sceneBgmOverride = current?.bgmSettings !== undefined;
   // 書き出し中は BGM 設定を変えられない（store も #570 P1 でガード＝ここは無言化を避ける proactive な無効化・ADR-0026④）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
+  // 「字幕を入れる」は書き出しと**同じ設定**（exportForm.withSubtitle）＝仕上がり確認と書き出しの字幕有無が必ず一致する
+  // （ADR-0026③・#547 P2-7）。従来は確認が常に字幕ありで、字幕なし書き出しの見た目を確認できなかった。
+  const withSubtitle = useProjectStore((s) => s.exportForm.withSubtitle);
+  const setExportForm = useProjectStore((s) => s.setExportForm);
   // 音量を再生中の音声へその場で反映する（頭出ししない＝掛け合いも先頭行へ戻さない・#465/#392）。100% 境界
   // （要素 .volume ↔ GainNode）を跨ぐ変更も attachVolume が内部で経路を載せ替えて吸収するため、再生 effect は
   // 張り直さない＝音声だけ場面頭へ戻り映像/アニメ/テロップの時計と乖離する不整合を作らない（#465 レビュー P1）。
@@ -508,6 +512,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             timeSec={animTimeSec}
             animations={previewAnimations}
             videoPlayback={{ playing, muted, slots: videoPlaybackSlots }}
+            hideSubtitles={!withSubtitle}
           />
 
           {/* 場面送り */}
@@ -585,6 +590,13 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             >
               {muted ? <VolumeMuteIcon size={20} /> : <VolumeIcon size={20} />}
             </button>
+          </div>
+
+          {/* 字幕を入れるか（#547 P2-7）。書き出しの「字幕を入れる」と同じ設定なので、ここで消せば書き出しも字幕なしになる
+              ＝確認した見た目のまま書き出せる（ADR-0026③）。再生中も即反映（同じ layoutScene 由来）。 */}
+          <div className="row gap-sm mt" style={{ alignItems: "center" }}>
+            <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" disabled={isExporting} />
+            <span className="text-sm text-muted">オフにすると字幕なしの仕上がりを確認できます（書き出しにも反映）。</span>
           </div>
 
           {bgmPlayWarning && (

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
-import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas } from './layout';
+import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
 import { layoutToSvg } from './sceneSvg';
 import { wrapText } from '../domain/text/textWrap';
 
@@ -828,5 +828,18 @@ describe('layoutScene：文字の体裁の場面別上書き（scene.textStyles�
     expect(subs).toHaveLength(2);
     expect(subs.every((s) => s.fontSize === 76)).toBe(true); // 段組みも上書き後のサイズで計算されている
     expect(noOverlap(subs)).toBe(true);
+  });
+});
+
+// #547 P2-7：字幕を消す対象の判定を1か所に（書き出しと仕上がり確認が同じ判定＝パリティ）。
+describe('isSubtitleItem（字幕アイテムの判定・#547 P2-7）', () => {
+  const textItem = (over: Partial<import('./layout').LayoutItem> = {}) =>
+    ({ id: 'x', kind: 'text', x: 0, y: 0, w: 10, h: 10, zIndex: 50, text: 'a', fontSize: 20, fontWeight: 'normal', color: '#000', maxLines: 1, isSubtitle: false, ...over }) as import('./layout').LayoutItem;
+
+  it('字幕由来の text だけ true（本文 text・画像・塗りは false）', () => {
+    expect(isSubtitleItem(textItem({ isSubtitle: true }))).toBe(true);
+    expect(isSubtitleItem(textItem({ isSubtitle: false }))).toBe(false); // 本文テキストは消さない
+    expect(isSubtitleItem({ id: 'i', kind: 'image', x: 0, y: 0, w: 1, h: 1, zIndex: 0, assetId: 'a', fit: 'cover', role: 'slot' } as import('./layout').LayoutItem)).toBe(false);
+    expect(isSubtitleItem({ id: 'f', kind: 'fill', x: 0, y: 0, w: 1, h: 1, zIndex: 0, color: '#fff', opacity: 1, radius: 0 } as import('./layout').LayoutItem)).toBe(false);
   });
 });
