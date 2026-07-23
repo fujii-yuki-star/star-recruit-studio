@@ -20,7 +20,7 @@ import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import type { VideoSlotPlayback } from "../components/ScenePreview";
 import { buildVideoPlaybackSlots } from "./previewVideoSlots";
 import { assembleProject } from "../../domain/project/persistence";
-import { FPS } from "../../domain/constants";
+import { FPS, PREVIEW_MIN_PLAY_SEC } from "../../domain/constants";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
@@ -38,8 +38,6 @@ interface PreviewProps {
 
 type RangeMode = "scene" | "part" | "all";
 
-// 場面送りの最小秒（表示時間は SceneEdit で 0/負値にも編集され得るため、即時送り/不正値を防ぐ下限）。
-const MIN_PLAY_SEC = 0.3;
 
 // 仕上がり確認の「戻る」ラベル（来た画面ごと・#410 sub3）。入口はこの3つ。
 const PREVIEW_BACK_LABEL: Partial<Record<ScreenId, string>> = {
@@ -212,8 +210,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const [sceneTimeSec, setSceneTimeSec] = useState(0);
   useEffect(() => {
     if (!playing || !animActive) return;
-    // 実効表示尺は場面送りと同じく MIN_PLAY_SEC でクランプ（アニメの再生窓を実際の表示時間に合わせる）。
-    const dur = Math.max(MIN_PLAY_SEC, current?.durationSec ?? 0);
+    // 実効表示尺は場面送りと同じく PREVIEW_MIN_PLAY_SEC でクランプ（アニメの再生窓を実際の表示時間に合わせる）。
+    const dur = Math.max(PREVIEW_MIN_PLAY_SEC, current?.durationSec ?? 0);
     const start = performance.now();
     let raf = 0;
     const tick = () => {
@@ -343,7 +341,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           } else {
             // 最終行：この行の窓（場面末まで）ぶん後に場面送り（advance）。場面送りも実再生起点にそろえ、
             // 行が増えて遅延が積み上がっても最終行の末尾が場面遷移で切れないようにする（#370 レビュー対応）。
-            const lastWindowSec = Math.max(MIN_PLAY_SEC, segs[i].endSec - segs[i].startSec);
+            const lastWindowSec = Math.max(PREVIEW_MIN_PLAY_SEC, segs[i].endSec - segs[i].startSec);
             lineTimers.push(window.setTimeout(advance, lastWindowSec * 1000));
           }
         };
@@ -385,7 +383,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         }
       } else {
         // 有効な行が無い（全フィルタ＝音声未生成など）は場面尺で送る（従来のフォールバック）。
-        lineTimers.push(window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000));
+        lineTimers.push(window.setTimeout(advance, Math.max(PREVIEW_MIN_PLAY_SEC, sc.durationSec) * 1000));
       }
       return () => {
         cancelled = true;
@@ -400,7 +398,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     }
 
     // 単一 narration（従来）。場面尺の固定タイマーで次の場面へ。
-    const endTimer = window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000);
+    const endTimer = window.setTimeout(advance, Math.max(PREVIEW_MIN_PLAY_SEC, sc.durationSec) * 1000);
     let audio: HTMLAudioElement | undefined;
     const url = narrationAudioById[sc.sceneId];
     if (url) {
