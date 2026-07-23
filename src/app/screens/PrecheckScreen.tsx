@@ -7,6 +7,7 @@ import { useExportCapability } from "../hooks/useExportCapability";
 import { standardLookFixesForUnresolved } from "../../domain/template/templateSelection";
 import { standardLookButtonReason, standardLookResultMessage } from "../uiLabels";
 import { PageHead } from "../components/ui";
+import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
 import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
@@ -22,7 +23,7 @@ const severityStyle: Record<PrecheckItem["severity"], { label: string; color: st
 };
 
 export function PrecheckScreen({ onNavigate }: PrecheckProps) {
-  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, generateAllNarrations, isGeneratingNarration, narrationError, applyStandardLookToUnresolvedScenes } = useProjectStore();
+  const { status, scenes, assets, templates, meta, autoGenerateIfSafe, setEditingSceneId, narrationError, applyStandardLookToUnresolvedScenes } = useProjectStore();
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声作成を止める（#570 P2）
   const undo = useProjectStore((s) => s.undo);
   // 「まとめて標準にする」の結果（直した件数・入れ直しが要る場面）。この画面に取り消しの入口が無いため
@@ -134,13 +135,10 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
                     {item.action ? (
                       item.id === "voice" ? (
                         // 「声を作成」はラベルどおりその場で一括生成する（従来は場面編集へ飛ぶだけだった＝#403）。
-                        <button
-                          className="btn btn-ghost btn-icon text-sm"
-                          onClick={() => void generateAllNarrations()}
-                          disabled={isGeneratingNarration || isExporting}
-                        >
-                          {isGeneratingNarration ? "作成中…" : item.action}
-                        </button>
+                        // 進捗・中止は他画面と同じ共通操作を使う（この画面だけ進捗が無かった＝#547 P2-6・ADR-0026②）。
+                        <span className="col gap-xs" style={{ alignItems: "flex-start" }}>
+                          <BulkVoiceControls label={item.action} buttonClassName="btn btn-ghost btn-icon text-sm" />
+                        </span>
                       ) : item.id === "sceneTemplate" ? (
                         // 見た目が見つからない場面（TEMPLATE_NOT_FOUND）。自動では置換しない方針なので、
                         // 「1つずつ選び直す」と「まとめて標準に寄せる」の**どちらも利用者が選べる**ようにする（15 §3）。

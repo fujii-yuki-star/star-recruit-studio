@@ -17,6 +17,7 @@ import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSourceFromV
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { prunePerUseMaps } from "../../domain/project/perUseMaps";
 import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { GroupList } from "../components/GroupList";
 import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { GroupTransformFields } from "../components/GroupTransformFields";
@@ -28,7 +29,6 @@ import { switchSceneTemplate } from "../../domain/project/sceneOps";
 import { clampSceneDuration } from "../../domain/project/sceneDuration";
 import { pickableTemplatesForScene, sceneCategoriesForOrientation } from "../../domain/template/templateSelection";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
-import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
 import { subtitleOverflowsCanvas } from "../../renderer/layout";
@@ -290,7 +290,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, autoGenerateIfSafe, updateScene, addAsset, addAssetByPath, importError, clearImportError,
     addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus,
-    generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
+    generateNarration, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
     addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements,
   } = useProjectStore();
@@ -1335,10 +1335,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (path) await addAssetByPath(path);
   }
 
-  // セリフ音声の進捗（生成済み/対象）。全部できて生成中でなければ出さない（#176）。
-  const { done: narrDone, total: narrTotal } = narrationProgress(scenes);
-  const showNarrProgress = narrTotal > 0 && !(narrDone === narrTotal && !isGeneratingNarration);
-
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
@@ -1351,18 +1347,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <span className="text-sm text-muted" style={{ flexShrink: 0 }}>場面編集</span>
         </div>
         <div className="topbar-actions">
-          {showNarrProgress && (
-            <span className="text-sm text-muted" style={{ marginRight: 4 }}>
-              声 {narrDone}/{narrTotal}{isGeneratingNarration ? "（準備中…）" : ""}
-            </span>
-          )}
-          <button
-            className="btn btn-ghost"
-            onClick={() => void generateAllNarrations()}
-            disabled={isGeneratingNarration}
-          >
-            {isGeneratingNarration ? "作成中…" : "全場面の声を作成"}
-          </button>
+          {/* 進捗・作成・中止は共通操作（3画面で同じ見え方・同じ挙動＝#547 P2-6・ADR-0026②）。
+              以前はここだけ「準備中…」と表示していた。 */}
+          <BulkVoiceControls buttonClassName="btn btn-ghost" />
           <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("draft")}>
             <ArrowLeftIcon size={16} />
             台本表へ戻る

@@ -2,7 +2,7 @@
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
-import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, PROJECT_NAME_MAX_LENGTH, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
+import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
@@ -43,6 +43,8 @@ import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs"
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { lineAudioKey, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
+import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
+import { runWithConcurrency } from "../../utils/concurrency";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
@@ -312,6 +314,15 @@ interface ProjectState {
   generateNarration: (sceneId: string, opts?: { fromBulk?: boolean }) => Promise<void>;
   /** セリフのある全場面のナレーション音声を生成する。 */
   generateAllNarrations: () => Promise<void>;
+  /**
+   * 声の作成を中止する（#547 P2-6）。**これ以上新しい合成を始めない**だけで、できあがった声は取り消さない
+   * （作った音声を捨てない・開始済みの合成は届いた時点で反映される）。待機中のまま残った「準備中」は未作成へ戻す。
+   */
+  cancelNarrationGeneration: () => void;
+  /** 直前の一括作成を中止したか（UI の案内用）。次に作成を始めると false へ戻る。 */
+  narrationCancelled: boolean;
+  /** 声の作成の世代番号（内部）。中止・新規開始で進め、実行中のループは自分の世代が現行と一致するときだけ次を始める。 */
+  _narrationRunSeq: number;
   /** 設定の試聴：サンプル文を現在の声設定で合成し、音声 data URL を返す。 */
   synthesizePreview: () => Promise<string>;
   // ── Undo/Redo（ADR-0020・#211）。文書slice（meta/parts/scenes）のスナップショット履歴。assets は対象外。 ──
@@ -481,6 +492,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   narrationAudioById: {},
   _dirtyAudioKeys: new Set(),
   isGeneratingNarration: false,
+  narrationCancelled: false,
+  _narrationRunSeq: 0,
   isImporting: false,
   isTemplateMutating: false,
   narrationError: null,
@@ -576,7 +589,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // キャンセル以外の経路（キャンセルせず離脱→ホームで新規/切替）でも、裏で走る旧生成が新しい状態を上書きしないように。
   reset: () => {
     if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は場面/構成を破壊しない（#379 と同方針・#570 レビュー follow-up）
-    set((s) => ({ status: "idle", draftFromAi: false, saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null, _generationSeq: s._generationSeq + 1 }));
+    set((s) => ({
+      status: "idle", draftFromAi: false, saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null,
+      _generationSeq: s._generationSeq + 1,
+      // 声の一括作成も打ち切る（newProject/loadProject と同じ扱い・#547 P2-6）。放置すると空になった文書の上を
+      // 空回りで走り続け、「作成中…」と前の文書の「中止しました」を持ち越す。
+      _narrationRunSeq: s._narrationRunSeq + 1,
+      isGeneratingNarration: false,
+      narrationCancelled: false,
+    }));
   },
   newProject: () => {
     // 書き出し中は現在の場面/素材を読むため、内容を破壊しない（#379・進行中の書き出しが空データになるのを防ぐ）。
@@ -594,6 +615,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       narrationAudioById: {},
       _dirtyAudioKeys: new Set(),
       narrationError: null,
+      narrationCancelled: false, // 新規＝前の文書の「中止しました」を持ち越さない
+      _narrationRunSeq: s._narrationRunSeq + 1, // in-flight の一括作成を打ち切る（新しい声を旧文書の勢いで作らない）
+      // 打ち切った実行の finally は「もう現行でない」ので作成中フラグを下ろさない＝ここで下ろす
+      // （下ろさないと新しい文書で「作成中…」のまま声を作れなくなる）。
+      isGeneratingNarration: false,
       aiError: null,
       past: [], // 別文書＝履歴をクリア（ADR-0020）
       future: [],
@@ -839,12 +865,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         videoThumb[a.assetId] ? { ...a, thumbnailPath: videoThumb[a.assetId] } : a,
       ),
       parts: project.parts,
-      scenes: project.scenes,
+      // 保存時に合成中だった場面は「準備中」のまま保存され得るが、その合成はアプリ終了で消えている＝**誰も作っていない
+      // 準備中**が復元される。放置すると `isNarrationGenerating` が真のままで書き出しが止まり、しかも作成中では
+      // ないので「中止」も出せない＝抜け道の無い行き止まりになる（15 §2.1／§4・ADR-0026④）。読込時に未作成へ戻す
+      // （音声は voicePath 済みのものしか保存されない＝準備中の行に失う音声は無い＝11 §9 の読込時補正と同じ扱い）。
+      scenes: clearPendingNarrations(project.scenes),
       warnings: [],
       assetSrcById,
       narrationAudioById,
       _dirtyAudioKeys: new Set(), // 読込直後は全音声が voicePath 済み＝再書き出し不要（#390）
       narrationError: null,
+      narrationCancelled: false, // 別文書＝前の文書の「中止しました」を持ち越さない
+      _narrationRunSeq: s._narrationRunSeq + 1, // 別文書へ切替＝in-flight の一括作成を打ち切る
+      // 打ち切った実行の finally は作成中フラグを下ろさない（もう現行でない）ので、ここで下ろす。
+      isGeneratingNarration: false,
       past: [], // 別文書を開く＝履歴をクリア（ADR-0020）
       future: [],
       _historyGroupDepth: 0,
@@ -1631,6 +1665,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!scene) return;
     // 全場面生成中は個別呼び出し（UI/他画面/テストからの直接呼び出し）を弾く。bulk 自身は fromBulk で通す。
     if (!opts?.fromBulk && get().isGeneratingNarration) return;
+    // 中止識別（#547 P2-6）。中止されたら次の行から始めない／**失敗表示も出さない**（下記の catch）。
+    // 成功は世代を見ずに反映する＝作った音声を捨てない。中止は「これ以上作らない」であって「作った物を消す」ではない。
+    const runSeq = get()._narrationRunSeq;
 
     // 掛け合い（明示 lines）は行ごとに合成・保存する（ADR-0015 PR-C2）。単一 narration は下の従来経路。
     if (scene.lines && scene.lines.length > 0) {
@@ -1645,12 +1682,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, lineId, status) : s)),
         }));
       for (const l of targets) setLineStatus(l.lineId, NARRATION_STATUS.pending);
-      set({ narrationError: null });
+      set({ narrationError: null, narrationCancelled: false }); // 新しく声を作り始めた＝直前の「中止しました」の表示は消す（#547 P2-6）
       {
         const base = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
         const genSeq = get()._generationSeq; // 文書識別：別プロジェクトへ切替たら完了処理は何もしない
         // 行ごとに try/catch。1行の失敗が他行を巻き込まず、成功/失敗どちらの完了も token/genSeq で保護する（#390 レビュー P1）。
         for (const line of targets) {
+          // 中止済み＝ここから先の行は**始めない**。先に「準備中」にした残りは中止側が未作成へ戻すので固着しない
+          // （clearPendingNarrations）。開始済みの合成は下の完了処理でそのまま反映＝作った音声を捨てない。
+          if (get()._narrationRunSeq !== runSeq) break;
           const input = resolveLineVoice(line, base);
           const key = lineAudioKey(sceneId, line.lineId);
           const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
@@ -1692,6 +1732,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             set((st) => {
               // 失敗も成功と同じく保護：後発/別文書ならこの失敗は無視（新しい pending・成功結果を failed で潰さない・#390 レビュー P1）。
               if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+              // 中止したあとの失敗は表に出さない（#547 P2-6）：中止で未作成へ戻した行を failed に書き戻すと、
+              // 15 §2.1 に無い「未作成→失敗」になり、止めた直後にエラー文言まで出る。成功は残す／失敗は捨てる
+              // ＝「作った音声は無駄にしない、頼んでいない失敗は見せない」。
+              if (st._narrationRunSeq !== runSeq) return {};
               const sc = st.scenes.find((x) => x.sceneId === sceneId);
               const cur = sc?.lines?.find((l) => l.lineId === line.lineId);
               if (!sc || !cur) return {};
@@ -1724,7 +1768,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
       }));
     setStatus(NARRATION_STATUS.pending);
-    set({ narrationError: null });
+    set({ narrationError: null, narrationCancelled: false }); // 新しく声を作り始めた＝直前の「中止しました」の表示は消す（#547 P2-6）
     const v = resolveNarrationVoice(scene.narration, get().meta.voiceSettings);
     const input = { text: scene.narration.text, ...v };
     const key = sceneId;
@@ -1767,6 +1811,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set((st) => {
         // 失敗も成功と同じく保護：後発/別文書ならこの失敗は無視（新しい pending・成功結果を failed で潰さない・#390 レビュー P1）。
         if (!isLatestSynth(key, token) || st._generationSeq !== genSeq) return {};
+        // 中止したあとの失敗は表に出さない（#547 P2-6・掛け合い経路と同じ扱い）。
+        if (st._narrationRunSeq !== runSeq) return {};
         const sc = st.scenes.find((x) => x.sceneId === sceneId);
         if (!sc || (sc.lines && sc.lines.length > 0)) return {};
         // 合成中に入力が変わっていたら、この失敗は古い入力のもの＝失敗表示せず none（作り直し可）に戻す（全体設定変更の pending 固着も解消）。
@@ -1788,15 +1834,38 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generateAllNarrations: async () => {
     if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は声を作らない（#570 P1 レビュー・15§4・snapNarration とMP4が食い違う）
     if (get().isGeneratingNarration) return;
-    set({ isGeneratingNarration: true });
+    const runSeq = get()._narrationRunSeq + 1; // この実行の世代。中止・文書切替で進み、以降は新しい合成を始めない（#547 P2-6）。
+    set({ isGeneratingNarration: true, narrationCancelled: false, _narrationRunSeq: runSeq });
     try {
       // 未生成（none/pending/failed）のみ対象。生成済みは個別の「声を作り直す」で上書きする。
       // 掛け合い・単一 narration 共通の実効判定（sceneNeedsVoice）を precheck と共有＝同概念同挙動（#403）。
       const ids = get().scenes.filter(sceneNeedsVoice).map((s) => s.sceneId);
-      await Promise.all(ids.map((id) => get().generateNarration(id, { fromBulk: true })));
+      // 同時実行数を絞る（#547 P2-6）。全件を一度に投げると「まだ始まっていない仕事」が残らず**中止が効かない**
+      // ＝ボタンはあるのに止まらない（ADR-0026④）。絞れば残りは待機列に残り、進捗も少しずつ進む。
+      await runWithConcurrency(ids, NARRATION_BULK_CONCURRENCY, (id) => get().generateNarration(id, { fromBulk: true }), {
+        shouldStop: () => get()._narrationRunSeq !== runSeq,
+      });
     } finally {
-      set({ isGeneratingNarration: false });
+      // 中止・文書切替で世代が進んでいたら、この実行はもう現行ではない＝後発の実行/中止が立てた状態を消さない。
+      if (get()._narrationRunSeq === runSeq) set({ isGeneratingNarration: false });
     }
+  },
+  // 中止には `isExportBusy` ガードを**置かない**（scenes を書く他の action とは非対称だが意図的）。中止は「止める」
+  // 側の操作で、止められないと 15 §4 の抜け道が消える。書き出し中は `generateAllNarrations` に入れない＝
+  // `isGeneratingNarration` が立たず、下の早期 return で実質到達しないが、仮に到達しても止められる方が正しい。
+  cancelNarrationGeneration: () => {
+    if (!get().isGeneratingNarration) return;
+    set((s) => ({
+      // 世代を進める＝実行中のループはここで打ち切られ、新しい合成は始まらない。
+      _narrationRunSeq: s._narrationRunSeq + 1,
+      isGeneratingNarration: false,
+      narrationCancelled: true,
+      // 待機中のまま「準備中」で残った行/場面を未作成へ戻す。残すと進捗が止まって見え、書き出しも
+      // isNarrationGenerating で止まったままになる（行き止まり＝§2-5／ADR-0026④）。
+      scenes: clearPendingNarrations(s.scenes),
+      // 音声は履歴外＝状態変更だけでも未保存にして自動保存の対象にする（#390 の生成系と同じ扱い）。
+      saveStatus: "idle",
+    }));
   },
   synthesizePreview: async () => {
     const text = "こんにちは。ナレーションの聞こえ方を確認します。";
@@ -1821,6 +1890,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 連続操作の開始。深さ0→1 で「保留」にするだけ（snapshot は最初の pushHistory まで遅延＝未変更 focus で積まない）。
     set((s) => (s._historyGroupDepth === 0 ? { _historyGroupDepth: 1, _historyGroupPending: true } : { _historyGroupDepth: s._historyGroupDepth + 1 })),
   endHistoryGroup: () => set((s) => ({ _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) })),
+  // 復元した場面の「準備中」は落とす（#547 P2-6）：`pending` は**そのとき合成が走っていた**という実行時の状態で、
+  // 履歴に載せる意味がない。声の作成中に別の編集をすると `pending` 入りのスナップショットが積まれ、中止したあとに
+  // 取り消すと**誰も作っていない準備中**が復活する＝書き出しは「声を作成中です」で止まり、作成中ではないので中止も出せず、
+  // その場面の作り直しも押せない行き止まりになる（15 §2.1／§4・ADR-0026④）。
   undo: () =>
     set((s) => {
       // 書き出し中は文書 slice（scenes/parts/meta）を変えない＝進行中の書き出しが不整合データを読むのを防ぐ
@@ -1829,13 +1902,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (isExportBusy(s.exportRun.phase)) return {};
       const r = undoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // 戻せない
-      return { ...r.restored, past: r.history.past, future: r.history.future, saveStatus: "idle" };
+      return { ...r.restored, scenes: clearPendingNarrations(r.restored.scenes), past: r.history.past, future: r.history.future, saveStatus: "idle" };
     }),
   redo: () =>
     set((s) => {
       if (isExportBusy(s.exportRun.phase)) return {}; // 同上（書き出し中は redo も文書 slice を変えない・#379/#413）
       const r = redoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // やり直せない
-      return { ...r.restored, past: r.history.past, future: r.history.future, saveStatus: "idle" };
+      return { ...r.restored, scenes: clearPendingNarrations(r.restored.scenes), past: r.history.past, future: r.history.future, saveStatus: "idle" };
     }),
 }));

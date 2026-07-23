@@ -93,6 +93,13 @@ export const SPEED_STEP = 0.25;
 // schema/データには影響しない実装上の保険のため 11§4 定数カタログには載せない（HD_SHORT 等と同じ扱い）。
 export const MAX_INLINE_ASSET_BYTES = 50 * 1024 * 1024; // 50 MB
 
+// 「全場面の声を作成」で同時に走らせる合成の数（#547 P2-6）。
+// 全件を一度に投げると**待機列が空になり中止が効かない**（始まっていない仕事が無い）ため上限を設ける。
+// 小さくするほど中止が速く効き進捗も細かく進むが、そのぶん全体は遅くなる。3 は「1件あたり数秒の合成でも
+// 中止がおおむね1件ぶんの待ちで効く」ことを狙った実装上の値。schema/データには影響しないため
+// 11§4 定数カタログには載せない（MAX_INLINE_ASSET_BYTES と同じ扱い）。
+export const NARRATION_BULK_CONCURRENCY = 3;
+
 export const MAX_NARRATION_LEN_DEFAULT = 120;
 export const MAX_SUBTITLE_LEN_DEFAULT = 60;
 // 自由記述「その他」(トップレベル additionalNotes・両用途共通・ADR-0011) の上限。schemas/project.schema.json の maxLength と一致させる。

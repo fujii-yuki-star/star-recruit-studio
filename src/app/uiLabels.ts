@@ -19,6 +19,52 @@ export const fitLabel: Record<Fit, string> = {
 /** 重ね順（要素の前後関係）のユーザー向け見出し。正典は「重ね順」（`06_UI_SPEC §3`＝layer→要素・並び順）。#547 P2-11。 */
 export const Z_ORDER_LABEL = "重ね順";
 
+// ── 声の一括作成（#547 P2-6）。たたき台・場面編集・公開前チェックの3画面で同じ語・同じ挙動にする（§6・ADR-0026②）。 ──
+
+/** 一括作成ボタンの通常時の文言（既定）。公開前チェックだけは検査項目側の導線名（「声を作成」）を使う。 */
+export const BULK_VOICE_LABEL = "全場面の声を作成";
+/** 作成中のボタン文言。以前は画面ごとに「作成中…」「準備中…」が混在していた（#547 ④）。 */
+export const BULK_VOICE_BUSY_LABEL = "作成中…";
+/** 一括作成を止めるボタンの文言。 */
+export const BULK_VOICE_CANCEL_LABEL = "中止する";
+
+/** 一括作成の状態（進捗表示の括弧書き）。 */
+export type BulkVoiceState = "generating" | "cancelled" | "idle";
+
+/**
+ * 「声 3/10（作成中…）」。行単位の進捗（掛け合いは行ごと）＝`narrationProgress` の結果をそのまま見せる。
+ *
+ * 中止したときは同じ形で「（中止しました）」を出す＝**分数がそのまま残る**ので、作った声は消えていないことが
+ * 数字で分かる（別の注意書きを足さなくても済み、上部バーや表の狭い場所にも同じ表示を置ける・§2-5）。
+ * 次の行動（作成し直す）は隣のボタンがそのまま担う。
+ */
+export function bulkVoiceProgressText(done: number, total: number, state: BulkVoiceState): string {
+  const suffix = state === "generating" ? `（${BULK_VOICE_BUSY_LABEL}）` : state === "cancelled" ? "（中止しました）" : "";
+  return `声 ${done}/${total}${suffix}`;
+}
+
+/**
+ * 一括作成が押せない理由（押せないのに理由が出ない、を作らない＝§2-5）。押せるときは undefined。
+ *
+ * 「作る対象が無い」は2種類あり、混同すると嘘になる：**セリフが1つも無い**（まだ何も書いていない）と
+ * **全部作成済み**（書いた声はもうある）。前者に「作成済みです」と言うと、作った覚えのない声があることになる。
+ */
+export function bulkVoiceDisabledReason(state: {
+  isExporting: boolean;
+  generating: boolean;
+  /** まだ声が要る場面があるか（`sceneNeedsVoice`）。 */
+  needsVoice: boolean;
+  /** 声の対象になるセリフが1つでもあるか（`narrationProgress().total > 0`）。 */
+  hasNarrationText: boolean;
+}): string | undefined {
+  if (state.isExporting) return "動画の書き出し中は声を作成できません。書き出しが終わってから、もう一度お試しください。";
+  if (state.generating) return "いま声を作成しています。止めるときは「中止する」を押してください。";
+  // 対象が無いのに押せると「押しても何も起きない」になる（ADR-0026④）。どうすれば押せるようになるかを添える。
+  if (!state.hasNarrationText) return "まだセリフがありません。場面にセリフを入れると、ここで声を作れます。";
+  if (!state.needsVoice) return "すべての場面の声が作成済みです。セリフを書き直すと、その場面の声を作り直せます。";
+  return undefined;
+}
+
 /**
  * 送信前確認の「素材の説明・タグ」行の要約（#547 P2-8）。写真・動画・それ以外（ゆうこ/ロゴ等）の件数を出す。
  * **写真・動画だけを数えて他を無視すると、展開一覧に出るのに要約が「写真0枚・動画0本」と食い違う**（§2-6 の確認を妨げる）。
