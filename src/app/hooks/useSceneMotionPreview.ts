@@ -7,10 +7,8 @@ import type { Asset, ElementAnimation, Scene } from "../../domain/project/types"
 import type { Template } from "../../domain/template/types";
 import { animationsEndSec, sceneAnimationActive } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
-import { FPS } from "../../domain/constants";
+import { FPS, PREVIEW_MIN_PLAY_SEC } from "../../domain/constants";
 
-// 動きの再生窓の下限（秒）。アニメが極端に短くても最低これだけは回す（PreviewScreen の MIN_PLAY_SEC と同趣旨）。
-const MOTION_PREVIEW_MIN_SEC = 0.3;
 
 export interface SceneMotionPreview {
   /** この場面に再生できる「動き」があるか（＝再生ボタンを出す条件）。 */
@@ -76,7 +74,7 @@ export function useSceneMotionPreview(
 
   useEffect(() => {
     if (!playing || !animActive) return;
-    const playDur = Math.max(MOTION_PREVIEW_MIN_SEC, animationsEndSec(sceneAnimations));
+    const playDur = Math.max(PREVIEW_MIN_PLAY_SEC, animationsEndSec(sceneAnimations));
     const start = performance.now();
     let raf = 0;
     const tick = () => {

@@ -3,7 +3,7 @@
 import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, type LayerType } from "../../domain/enums";
-import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
+import { DEFAULT_CHARACTER_ID, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
 
 // レイヤー種別 → 「使用している要素」のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
 export const layerLabel: Record<LayerType, string> = {
@@ -48,7 +48,7 @@ export function buildSampleScene(template: Template, assets: Asset[]): Scene {
     order: 1,
     sceneType: template.category,
     templateId: template.templateId,
-    durationSec: template.defaults?.durationSec ?? 8,
+    durationSec: template.defaults?.durationSec ?? SCENE_DEFAULT_DURATION_SEC,
     assetRefs,
     character: {
       enabled: hasCharacter,

@@ -15,6 +15,15 @@ export const SCENE_DEFAULT_DURATION_SEC = 8;
 //（§5・全入力口で共有する上限＝入力防御 #411／検証ネット #416 の prevention 側）。
 export const PROJECT_NAME_MAX_LENGTH = 80;
 export const TRANSITION_DEFAULT_SEC = 0.5;
+// 「1回に再生する窓」の下限（秒）。**再生側だけの下限**で schema/正典の値ではない（#547 P3-15 で二重管理を1本化）。
+// 必要な理由＝場面の表示時間は 0 になり得る（`project.schema.json` の Scene.durationSec は minimum:0＝読み込んだ
+// データに 0 があり得る）し、#553 で手編集の下限を撤めたため 0.3 秒未満の極短場面も作れる。これらで再生窓が
+// 0 になると即時送り・0 長のアニメ窓になるため下限を噛ませる。
+// （場面編集の確定入力自体は `clampSceneDuration` が別途クランプ済み＝ここは読み込みデータ・極短場面向けの防御。）
+// 使用箇所は3つ：仕上がり確認の場面送りタイマー／仕上がり確認のアニメ窓／場面編集の動きプレビュー窓。
+// 用途が分かれたら名前を分けて別値にする（そのとき3か所とも見直す）。
+// **書き出しでは使わない**：MP4 は実際の表示時間で焼く（下限を混ぜるとプレビュー=書き出しが崩れる・ADR-0001/ADR-0026③）。
+export const PREVIEW_MIN_PLAY_SEC = 0.3;
 
 export const VIDEO_TARGET_MAX_SEC_MVP = 300;
 export const VIDEO_HARD_MAX_SEC = 600;
