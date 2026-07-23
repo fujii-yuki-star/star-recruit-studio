@@ -83,6 +83,15 @@ export interface TextItem extends ItemBase {
 
 export type LayoutItem = FillItem | ImageItem | TextItem;
 
+/**
+ * 字幕由来の描画アイテムか（テンプレ字幕層・FREE 字幕・掛け合い字幕）。「字幕を入れる」OFF で除外する対象を1か所で定義する。
+ * 書き出し（buildExportScenes の itemFilter）と仕上がり確認（ScenePreview の hideSubtitles）が**同じ判定**で字幕を消す
+ * ＝プレビュー＝書き出しのパリティ（ADR-0001・ADR-0026③・#547 P2-7）。
+ */
+export function isSubtitleItem(item: LayoutItem): boolean {
+  return item.kind === 'text' && item.isSubtitle;
+}
+
 export interface SceneLayout {
   width: number;
   height: number;

@@ -9,7 +9,7 @@ import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs, segmentLineIds } from '../../domain/project/lineTimeline';
 import { animationsEndSec, sceneAnimationActive, slotIsAnimated } from '../../domain/project/sceneAnimation';
 import { resolveVideoStartDelaySec } from '../../domain/project/videoStartTiming';
-import { layoutScene } from '../layout';
+import { isSubtitleItem, layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { creditForLine, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
@@ -220,7 +220,7 @@ export async function buildExportScenes(
 ): Promise<ExportSceneData[]> {
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
-    opts.withSubtitle === false ? (it) => !(it.kind === 'text' && it.isSubtitle) : undefined;
+    opts.withSubtitle === false ? (it) => !isSubtitleItem(it) : undefined;
   // 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。export 全体で一定（#177）。
   const credit = opts.credit ?? NARRATOR_CREDIT;
   const out: ExportSceneData[] = [];
