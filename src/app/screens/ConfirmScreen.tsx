@@ -3,6 +3,8 @@ import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { ASSET_TYPE, VIDEO_KIND } from "../../domain/enums";
+import { assetSentText } from "../../domain/ai/assetSendText";
+import { assetTypeLabel, sentAssetTextSummary } from "../uiLabels";
 import { SparkleIcon, CheckIcon } from "../components/icons";
 
 interface ConfirmProps {
@@ -26,6 +28,13 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
   const assets = useProjectStore((s) => s.assets);
   const photoCount = assets.filter((a) => a.assetType === ASSET_TYPE.image).length;
   const videoCount = assets.filter((a) => a.assetType === ASSET_TYPE.video).length;
+  // ゆうこ・ロゴ等（写真/動画以外）も送るので件数に含める＝要約と展開一覧が食い違わない（§2-6・#547 P2-8 レビュー）。
+  const otherCount = assets.length - photoCount - videoCount;
+  // 実際に送るテキスト（プロンプトの assetBlock と同じ参照元＝見せた内容と送る内容がズレない・§2-6）。
+  // 名前（ファイル名）は素材ごとに必ず送るので、説明・タグが無い素材も**1件ずつ名前を見せる**
+  // ＝人名入りファイル名（例「田中さん.jpg」）を最後の送信ゲートで確認できる（件数集約にしない・#547 P2-8 レビュー）。
+  const sentTexts = assets.map(assetSentText);
+  const [showAssetText, setShowAssetText] = useState(false);
   const isGeneral = videoKind === VIDEO_KIND.general;
   // 目的の表示名は採用/一般どちらの選択肢からも引く（混在しても1件だけ一致する）。
   const purposeLabel =
@@ -96,12 +105,43 @@ export function ConfirmScreen({ onNavigate }: ConfirmProps) {
                 </>
               )}
               <hr className="divider" style={{ margin: "4px 0" }} />
-              <div className="row-between">
+              <div className="row-between" style={{ alignItems: "flex-start", gap: "var(--gap-md)" }}>
                 <span className="text-muted">素材の説明・タグ</span>
-                <strong>
-                  写真{photoCount}枚・動画{videoCount}本ぶんの文字情報
-                </strong>
+                <div style={{ textAlign: "right", maxWidth: "70%" }}>
+                  <strong>{sentAssetTextSummary(photoCount, videoCount, otherCount) || "（素材はありません）"}</strong>
+                  {/* §2-6：件数だけでなく**実際に送る文字**を見せる（#547 P2-8）。個人情報の確認は中身を見ないとできない。 */}
+                  {sentTexts.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost text-sm"
+                      style={{ marginTop: 4 }}
+                      onClick={() => setShowAssetText((v) => !v)}
+                      aria-expanded={showAssetText}
+                    >
+                      {showAssetText ? "文字情報を隠す" : "送る文字情報を確認する"}
+                    </button>
+                  )}
+                </div>
               </div>
+              {showAssetText && (
+                <ul className="col gap-sm" style={{ listStyle: "none", margin: "4px 0 0", padding: 0 }}>
+                  {sentTexts.map((t) => (
+                    <li key={t.assetId} className="card card-tight" style={{ textAlign: "left" }}>
+                      {/* 種別は正しいラベルで（写真/動画に畳まない＝ロゴ・QRコード等も実体どおり・§2-3）。 */}
+                      <div className="text-sm" style={{ fontWeight: 600 }}>
+                        {assetTypeLabel[t.assetType]}：{t.name || "（名前なし）"}
+                      </div>
+                      {t.description && (
+                        <div className="text-sm" style={{ whiteSpace: "pre-wrap" }}>説明：{t.description}</div>
+                      )}
+                      {t.aiDescription && (
+                        <div className="text-sm text-muted" style={{ whiteSpace: "pre-wrap" }}>AI解析：{t.aiDescription}</div>
+                      )}
+                      {t.tags.length > 0 && <div className="text-sm text-muted">タグ：{t.tags.join("、")}</div>}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {additionalNotes?.trim() && (
                 <>
                   <hr className="divider" style={{ margin: "4px 0" }} />
