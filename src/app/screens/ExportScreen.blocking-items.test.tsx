@@ -114,3 +114,37 @@ describe("ExportScreen 進捗の配線（#547 P2-1）", () => {
     expect(screen.getByText("動画を書き出しています")).toBeTruthy(); // 見出しは段階で言い分けない
   });
 });
+
+// #547 P3-10：場面ゼロは押しても必ず失敗する（startExport が止める）。設定フォームを出して入力させたうえで断るのでなく、
+// 上流へ促す空状態で止める（ADR-0026④・仕上がり確認/公開前チェックと同じ流儀＝#403）。
+describe("ExportScreen 場面ゼロは空状態（#547 P3-10）", () => {
+  afterEach(() => useProjectStore.getState().setExportRun({ phase: "idle" }));
+
+  it("場面が無ければ設定フォームを出さず、上流へ促す空状態にする", () => {
+    setup([]); // 場面ゼロ
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("まだ場面がありません")).toBeTruthy();
+    expect(screen.queryByText("動画を保存")).toBeNull(); // 押せば必ず失敗するボタンを出さない
+    expect(screen.queryByLabelText("ファイル名")).toBeNull(); // 入力させてから断る、をしない
+    // 設定フォームが無いのに「設定を確認して」と促さない＝次の行動が空状態と食い違わない（§2-5）。
+    expect(screen.queryByText(/設定を確認して/)).toBeNull();
+  });
+
+  // 走行中の書き出しを空状態で覆い隠すと、進捗と「書き出しを中止」＝編集ロックの唯一の抜け道（15 §4）が消える。
+  it("書き出し中は（場面ゼロでも）空状態にせず進捗を出し続ける＝中止できる道を残す", () => {
+    setup([]);
+    useProjectStore.setState({
+      exportRun: { phase: "rendering", progress: { done: 1, total: 2 }, resultPath: "", message: "", bgmWarning: "", cancelling: false },
+    });
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText("まだ場面がありません")).toBeNull(); // 空状態で覆わない
+    expect(screen.getByText("書き出しを中止")).toBeTruthy(); // 抜け道が残っている
+  });
+
+  it("場面があれば従来どおり設定フォームを出す", () => {
+    setup([scene()]);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText("まだ場面がありません")).toBeNull();
+    expect(screen.getByText("動画を保存")).toBeTruthy();
+  });
+});
