@@ -1,7 +1,7 @@
 // 場面間トランジション（ADR-0009）の解決と xfade タイムライン計算。純粋関数（§7 テスト対象）。
 // 描画/書き出しの実適用は T2（renderer/export + Rust filtergraph）。本モジュールは型安全な値解決と
 // offset/実効尺の算出だけを担い、副作用を持たない。
-import { TRANSITION_DEFAULT_SEC } from '../constants';
+import { TRANSITION_DEFAULT_SEC, TRANSITION_MIN_TAIL_SEC } from '../constants';
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import type { TransitionDirection, TransitionType } from '../enums';
 import type { Scene, Transition } from './types';
@@ -83,13 +83,13 @@ export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number):
 /**
  * 「切り替えに飲み込まれて総尺に寄与しない場面」の番号（1始まり・公開前チェック用・#553/#554）。
  *
- * `transitionTimeline` は `d = min(want, acc, 場面尺)` で、`d == 場面尺` になると `acc = acc + 尺 - d` ＝
- * **その場面が総尺に1秒も寄与しない**（プレビューには出るのに書き出しでは独立した尺を持たない＝preview≠export）。
- * さらに FFmpeg xfade は duration が入力尺以上だと未定義動作になりうる。
+ * `transitionTimeline` は strict `<`（`d = min(want, acc−ε, 尺−ε)`＝#547 P3-4）で clamp するので、切り替えが尺以上でも
+ * その場面は**最低1フレーム（ε）だけ残る**＝FFmpeg xfade は壊れない。ただし残りが1フレームでは**実質的に飲み込まれて見えない**
+ * ので、利用者には引き続き警告する（ADR-0026④・§2-5「次の行動」）。判定の閾値は「切り替え尺 ≥ 場面尺」で据え置き
+ * ＝設定した切り替えが場面を覆い尽くす意図のときに知らせる（strict clamp は"壊さない"、この警告は"直させる"の別レイヤー）。
  *
  * **#553 で場面ごとの尺の下限（3秒）を撤廃するまでは構造的に到達不能**だった（最短3秒 > 切り替え既定0.5秒）。
- * 下限撤廃で「0.3秒の場面＋フェード」が普通に作れるようになったため、**黙って壊さず警告で見せる**（ADR-0026④・§2-5）。
- * クランプ自体を strict `<` に締める（ADR-0009）のは ε の決め方と FFmpeg 実挙動の確認が要るため #554 で扱う。
+ * 下限撤廃で「0.3秒の場面＋フェード」が普通に作れるようになったため到達性が上がった。
  *
  * 判定は書き出し（buildExportScenes）と同じ `resolveTransition` 由来の want と場面尺の比較＝経路を共有する。
  */
@@ -126,13 +126,12 @@ export function transitionTimeline(
   let acc = sceneDurations[0];
   for (let i = 1; i < sceneDurations.length; i += 1) {
     const want = Math.max(0, boundaryDs[i] ?? 0);
-    // 左右どちらの尺も超えない。ADR-0009 は strict `<` だが、ここは `≤`（D=尺の極端値を許容）。
-    // FFmpeg xfade は duration が入力尺以上だと未定義動作になりうるため、T2 で strict 化（min−ε 等）するか
-    // 実測で許容を確認してから clamp を締める（境界計算自体は本関数に集約されている）。
-    // ※ #553（場面ごとの下限を撤廃）で「切り替え既定 0.5 秒より短い場面」が作れるようになり、d==尺＝その場面が
-    //   総尺から丸ごと消える経路の**到達性が上がった**（旧: 最小3秒 > 0.5秒 で構造的に到達不能）。strict 化は
-    //   ε の決め方（比率か固定か）と FFmpeg 実挙動の確認が要るため #554（P3-4）で扱う。
-    const d = Math.min(want, acc, sceneDurations[i]);
+    // 左（それまでの結合結果 acc）と右（場面 i）のどちらの尺も **strict `<`** で超えない（ADR-0009：`0 ≤ D < 隣接場面尺`）。
+    // ε＝1フレーム（TRANSITION_MIN_TAIL_SEC）を引くことで、切り替えが場面を丸ごと飲み込まず（各場面が最低1フレーム残る）、
+    // FFmpeg xfade へ `duration ≥ 入力尺`（未定義動作）を渡さない（#547 P3-4／ADR-0009 未解決#4）。
+    // 通常の切り替え（want が場面尺より十分小さい）は want がそのまま採られ、影響を受けるのは退化ケース（want ≥ 尺−ε）だけ。
+    // 場面尺 ≤ ε（1フレーム以下の極短場面）は max(0,…) で d→0＝ハードカット（重ねようがない）。
+    const d = Math.max(0, Math.min(want, acc - TRANSITION_MIN_TAIL_SEC, sceneDurations[i] - TRANSITION_MIN_TAIL_SEC));
     steps.push({ offsetSec: acc - d, durationSec: d });
     acc = acc + sceneDurations[i] - d;
   }
