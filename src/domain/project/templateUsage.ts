@@ -33,11 +33,10 @@ export function substituteDeletedTemplateInScenes(
     const alt = standardTemplateForScene(candidates, sc.sceneType, orientation);
     if (!alt) return sc; // 代替が無ければ原状維持（§9 補正が読込/描画時に対応）。
     changed = true;
-    // templateId 差し替えだけでなく、テンプレ依存の assetRefs/slotFits/warnings も正準経路で清算する
-    // （手動のテンプレ切替と同じ＝11 §5・#236。別の孤立参照＝存在しないスロットへの残骸を残さない・#458 レビュー）。
-    // category を渡す（ADR-0030）。渡さないと FREE 場面でも通常扱いになり、休眠中の通常配置が清算される
-    // ＝「通常へ戻せば復元」が失われる。一括適用（store）と同じ規則にする（ADR-0026②）。
-    return switchSceneTemplate(sc, alt.templateId, alt.layers, alt.category);
+    // templateId 差し替えだけでなく、sceneType の追従・warnings の再検証も正準経路（手動のテンプレ切替と同じ）に委ねる。
+    // 配置（assetRefs/slotFits/freeLayout）は清算せず休眠保持＝当て先に差し込み先が無くても、あとで選び直せば戻る
+    // （ADR-0030 追補・#547 P3-14）。category を渡すのは sceneType を当て先に合わせるため（ADR-0026②）。
+    return switchSceneTemplate(sc, alt.templateId, alt.category);
   });
   return changed ? next : scenes;
 }

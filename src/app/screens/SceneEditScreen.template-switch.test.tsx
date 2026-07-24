@@ -291,4 +291,24 @@ describe("SceneEditScreen 種類（カテゴリ）変更（#528）", () => {
     expect(kind.value).toBe("free"); // 選んだとおりに戻る（候補へ跳ね戻らない）
     expect(useProjectStore.getState().scenes[0].templateId).toBe("free_v1");
   });
+
+  // 通常→通常の種類変更でも写真の割当を消さない（texts・自由配置と同じ非破壊往復＝ADR-0026②・#547 P3-14）。
+  // 以前は差し込み先が無い種類へ変えた時点で assetRefs から消え、元の種類へ戻しても復活しなかった。
+  it("差し込み先の無い種類へ変えても写真の割当は消えず、戻せば復元する（#547 P3-14）", () => {
+    setup(freeScene({ sceneType: "photo_intro", templateId: "photo_v1", assetRefs: { mainVisual: "asset_v" } } as Partial<Scene>));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const kind = screen.getByLabelText("種類") as HTMLSelectElement;
+
+    // オープニング＝文字だけの見た目（mainVisual が無い）へ変える。
+    fireEvent.change(kind, { target: { value: "opening" } });
+    const away = useProjectStore.getState().scenes[0];
+    expect(away.templateId).toBe("open_v1");
+    expect(away.assetRefs.mainVisual).toBe("asset_v"); // 休眠のまま残る（データを消さない）
+
+    // 元の種類へ戻すと、そのまま写真が出る（入れ直しが要らない）。
+    fireEvent.change(kind, { target: { value: "photo_intro" } });
+    const back = useProjectStore.getState().scenes[0];
+    expect(back.templateId).toBe("photo_v1");
+    expect(back.assetRefs.mainVisual).toBe("asset_v");
+  });
 });

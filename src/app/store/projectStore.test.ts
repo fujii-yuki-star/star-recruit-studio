@@ -1107,7 +1107,9 @@ describe('applyStandardLookToUnresolvedScenes（まとめて標準にする・#5
     const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
     expect(r.fixed).toEqual([1]);
     expect(r.lostContent).toEqual([1]); // 入れ直しが要る場面として返る
-    expect(useProjectStore.getState().scenes[0].assetRefs.layer_001).toBeUndefined();
+    // 割当そのものは消さない＝休眠保持（ADR-0030 追補・#547 P3-14）。標準に受け皿が無いので動画には出ないが、
+    // データを削らないので「一括で寄せたら写真の割当ごと消えた」にはならない（実効使用は assetUsage がゲート）。
+    expect(useProjectStore.getState().scenes[0].assetRefs.layer_001).toBe('asset_001');
   });
 
   it('当て先が無い場面は unfixable で返す（押した後も項目が残る理由を出せる）', () => {

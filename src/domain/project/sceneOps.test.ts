@@ -319,11 +319,7 @@ describe('splitSceneLinesInList（掛け合いの行境界分割・#405）', () 
   });
 });
 
-describe('switchSceneTemplate（見た目パターン切替の清算ポリシー・#236）', () => {
-  const layer = (id: string, type: Layer['type']): Layer => ({ id, type, x: 0, y: 0, w: 100, h: 100 });
-  // 新テンプレのスロット系（background/slot/logo）＋テキスト層。text 層は assetRefs の対象外。
-  const newLayers: Layer[] = [layer('background', 'background'), layer('mainVisual', 'slot'), layer('logo', 'logo'), layer('title', 'text')];
-
+describe('switchSceneTemplate（見た目パターン切替の保持ポリシー・#236／ADR-0030 追補・#547 P3-14）', () => {
   const richScene = (): Scene => ({
     ...scene('scene_001', 1),
     templateId: 'old_tmpl',
@@ -335,20 +331,25 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
     warnings: [{ code: 'SLOT_REQUIRED_EMPTY', message: '旧テンプレ基準の警告', field: 'assetRefs', severity: 'warning' }],
   });
 
-  it('assetRefs は新テンプレのスロット id（background/slot/logo）だけ残す＝ダングリング清算（§5）', () => {
-    const r = switchSceneTemplate(richScene(), 'new_tmpl', newLayers);
-    expect(r.assetRefs).toEqual({ background: 'asset_bg_001', mainVisual: 'asset_v_001', logo: 'asset_logo_001' });
-    expect(r.assetRefs.oldSlot).toBeUndefined(); // 新テンプレに無いスロット参照は捨てる
+  it('assetRefs は清算せず全部残す＝差し込み先を失った割当も休眠保持（#547 P3-14）', () => {
+    const r = switchSceneTemplate(richScene(), 'new_tmpl');
+    expect(r.assetRefs).toEqual({ background: 'asset_bg_001', mainVisual: 'asset_v_001', logo: 'asset_logo_001', oldSlot: 'asset_x_001' });
   });
 
-  it('slotFits も新テンプレのスロット id だけ残す＝ダングリング清算（assetRefs と同ポリシー・🟡①）', () => {
-    const r = switchSceneTemplate(richScene(), 'new_tmpl', newLayers);
-    expect(r.slotFits).toEqual({ mainVisual: 'contain' }); // 残るのは新テンプレにある mainVisual のみ
-    expect(r.slotFits?.oldSlot).toBeUndefined(); // 新テンプレに無いスロットの収め方は捨てる
+  it('slotFits も清算しない（assetRefs と同ポリシー＝収め方だけ先に消えない）', () => {
+    const r = switchSceneTemplate(richScene(), 'new_tmpl');
+    expect(r.slotFits).toEqual({ mainVisual: 'contain', oldSlot: 'stretch' });
+  });
+
+  it('往復で戻る：差し込み先の無い種類へ変えても、元の種類へ戻せば割当が復元する（texts と同じ非破壊・ADR-0026②）', () => {
+    const away = switchSceneTemplate(richScene(), 'text_only_v1', 'message'); // mainVisual を持たない見た目
+    const back = switchSceneTemplate(away, 'old_tmpl', 'photo_intro');
+    expect(back.assetRefs.mainVisual).toBe('asset_v_001');
+    expect(back.slotFits?.mainVisual).toBe('contain');
   });
 
   it('texts / textFontIds / textStyles は保持する（#236＝固定TextKeyキー・別パターンへ変えて戻すと入力が復元）', () => {
-    const r = switchSceneTemplate(richScene(), 'new_tmpl', newLayers);
+    const r = switchSceneTemplate(richScene(), 'new_tmpl');
     // 新テンプレが main を使わなくても texts.main / textFontIds.main は残す。
     expect(r.texts).toEqual({ title: 'タイトル', main: '本文' });
     expect(r.textFontIds).toEqual({ main: 'gen-interface-jp', title: 'gen-interface-jp-display' });
@@ -356,33 +357,32 @@ describe('switchSceneTemplate（見た目パターン切替の清算ポリシー
   });
 
   it('templateId を新しい値に更新する', () => {
-    expect(switchSceneTemplate(richScene(), 'new_tmpl', newLayers).templateId).toBe('new_tmpl');
+    expect(switchSceneTemplate(richScene(), 'new_tmpl').templateId).toBe('new_tmpl');
   });
 
   it('warnings はクリアする（旧テンプレ基準の検証結果を引き継がない＝duplicate/split と同ポリシー・再検証前提）', () => {
-    expect(switchSceneTemplate(richScene(), 'new_tmpl', newLayers).warnings).toEqual([]);
+    expect(switchSceneTemplate(richScene(), 'new_tmpl').warnings).toEqual([]);
   });
 
   it('newCategory を渡すと sceneType が追従する＝FREE 化（自由配置へ変換・0.4.2 動確）', () => {
-    expect(switchSceneTemplate(richScene(), 'free_v1', [], 'free').sceneType).toBe('free');
-    expect(switchSceneTemplate(richScene(), 'closing_v1', newLayers, 'closing').sceneType).toBe('closing');
+    expect(switchSceneTemplate(richScene(), 'free_v1', 'free').sceneType).toBe('free');
+    expect(switchSceneTemplate(richScene(), 'closing_v1', 'closing').sceneType).toBe('closing');
   });
 
   it('newCategory 未指定（旧呼び出し）は sceneType 据え置き（後方互換）', () => {
     const before = richScene();
-    expect(switchSceneTemplate(before, 'new_tmpl', newLayers).sceneType).toBe(before.sceneType);
+    expect(switchSceneTemplate(before, 'new_tmpl').sceneType).toBe(before.sceneType);
   });
 
-  it('テンプレ未発見（layers 空）でも assetRefs は全清算・texts は保持', () => {
-    const r = switchSceneTemplate(richScene(), 'missing', []);
-    expect(r.assetRefs).toEqual({});
+  it('見た目が見つからない先へ切り替えても assetRefs・texts は消さない（選び直せば戻る）', () => {
+    const r = switchSceneTemplate(richScene(), 'missing');
+    expect(r.assetRefs).toEqual(richScene().assetRefs);
     expect(r.texts).toEqual({ title: 'タイトル', main: '本文' });
   });
 });
 
 describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524 P1/P2）', () => {
   const layer = (id: string, type: Layer['type'], extra: Partial<Layer> = {}): Layer => ({ id, type, x: 0, y: 0, w: 100, h: 100, ...extra });
-  const newLayers: Layer[] = [layer('background', 'background'), layer('mainVisual', 'slot'), layer('logo', 'logo')];
   // 旧テンプレ（通常）：スロット/テキスト層に幾何を持たせて変換の継承を確かめる。
   const prevTemplate = (): Template => ({
     schemaVersion: '1.0', templateId: 'old_tmpl', name: '旧', category: 'opening', aspectRatio: '16:9',
@@ -419,7 +419,7 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
         subtitle: { fontSize: 76 },
       },
     };
-    const r = switchSceneTemplate(styled, 'free_v1', [], 'free', prevTemplate());
+    const r = switchSceneTemplate(styled, 'free_v1', 'free', prevTemplate());
     const title = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
     // テンプレ層は fontSize:64 / color:#ffffff / bold。場面の上書きが勝つ。
     expect(title).toMatchObject({ color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#0000ff', strokeWidth: 4 });
@@ -442,7 +442,7 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     const normalLines = wrapText(long, titleLayer.w, fontSize, titleLayer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES).length;
     expect(normalLines).toBe(2); // 前提：この文字数・幅で2行になっている
 
-    const r = switchSceneTemplate(styled, 'free_v1', [], 'free', tpl);
+    const r = switchSceneTemplate(styled, 'free_v1', 'free', tpl);
     const el = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
     // FREE 側の行数モデル（枠高から導出）で、同じ行数が出ること。
     const freeMaxLines = linesForBoxHeight(el.h, el.fontSize ?? fontSize);
@@ -475,7 +475,7 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
 
     // 変換後：FREE テンプレでの同じ字幕の上端。
     const freeTpl = { ...tpl, templateId: 'free_v1', category: 'free', layers: [] } as unknown as Template;
-    const r = switchSceneTemplate(base, 'free_v1', [], 'free', tpl);
+    const r = switchSceneTemplate(base, 'free_v1', 'free', tpl);
     const after = layoutScene(r, freeTpl).items.find((i) => i.kind === 'text' && i.isSubtitle) as TextItem;
     expect(after).toBeTruthy();
     expect(wrapText(after.text, after.w, after.fontSize, after.maxLines).length).toBe(expectLines); // 行は減っていない（P1）
@@ -485,7 +485,7 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
   it('通常→FREE：1行字幕は元から一致しているので動かさない', () => {
     const base = { ...richScene(), texts: { subtitle: '短い字幕' } } as Scene;
     const tpl = prevTemplate();
-    const r = switchSceneTemplate(base, 'free_v1', [], 'free', tpl);
+    const r = switchSceneTemplate(base, 'free_v1', 'free', tpl);
     const el = (r.freeLayout ?? []).find((e) => e.kind === 'subtitle')!;
     expect(el.y).toBe(tpl.layers.find((l) => l.id === 'subtitle')!.y); // y 据え置き
   });
@@ -493,7 +493,7 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
   it('通常→FREE：枠が十分に高いときは広げない（幾何をむやみに変えない）', () => {
     const tall = prevTemplate();
     tall.layers = tall.layers.map((l) => (l.id === 'title' ? { ...l, h: 900 } : l));
-    const r = switchSceneTemplate(richScene(), 'free_v1', [], 'free', tall);
+    const r = switchSceneTemplate(richScene(), 'free_v1', 'free', tall);
     expect((r.freeLayout ?? []).find((e) => e.kind === 'text')!.h).toBe(900); // 旧テンプレの枠高のまま
   });
 
@@ -501,13 +501,13 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     // テンプレ層に縁取りが無く、場面で太さだけ足した状態。FREE の text 要素は「太さ>0 なら白」の既定を
     // 持たない（el.strokeColor をそのまま描く）ので、解決済みの色を写さないと縁取りが黙って消える。
     const styled = { ...richScene(), textStyles: { title: { strokeWidth: 3 } } };
-    const r = switchSceneTemplate(styled, 'free_v1', [], 'free', prevTemplate());
+    const r = switchSceneTemplate(styled, 'free_v1', 'free', prevTemplate());
     const title = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
     expect(title).toMatchObject({ strokeWidth: 3, strokeColor: '#ffffff' });
   });
 
   it('通常→FREE：表示中の素材/文字を freeLayout へ変換（位置/収め方/回転/体裁を継承・空スロット/装飾/テキスト層なしは除外）', () => {
-    const r = switchSceneTemplate(richScene(), 'free_v1', [], 'free', prevTemplate());
+    const r = switchSceneTemplate(richScene(), 'free_v1', 'free', prevTemplate());
     const fl = r.freeLayout ?? [];
     const slots = fl.filter((e) => e.kind === 'slot');
     const texts = fl.filter((e) => e.kind === 'text');
@@ -524,35 +524,35 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
 
   it('seed は freeLayout が空のときだけ（既存の自由配置は上書きしない）', () => {
     const withFree = { ...richScene(), freeLayout: [{ id: 'free_001', kind: 'slot', x: 0, y: 0, w: 10, h: 10, assetId: 'keep' }] } as Scene;
-    const r = switchSceneTemplate(withFree, 'free_v1', [], 'free', prevTemplate());
+    const r = switchSceneTemplate(withFree, 'free_v1', 'free', prevTemplate());
     expect(r.freeLayout).toEqual(withFree.freeLayout);
   });
 
   it('prevTemplate 未指定（旧呼び出し）は seed しない（後方互換）', () => {
-    expect(switchSceneTemplate(richScene(), 'free_v1', [], 'free').freeLayout ?? []).toEqual([]);
+    expect(switchSceneTemplate(richScene(), 'free_v1', 'free').freeLayout ?? []).toEqual([]);
   });
 
   it('通常テンプレ間の切替（newCategory≠free）では seed しない', () => {
-    expect(switchSceneTemplate(richScene(), 'closing_v1', newLayers, 'closing', prevTemplate()).freeLayout ?? []).toEqual([]);
+    expect(switchSceneTemplate(richScene(), 'closing_v1', 'closing', prevTemplate()).freeLayout ?? []).toEqual([]);
   });
 
   it('FREE→通常は freeLayout を休眠保持（消さない）＝往復で自由配置が戻る', () => {
     const freeSc = { ...richScene(), sceneType: 'free', templateId: 'free_v1', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ' }] } as Scene;
-    const r = switchSceneTemplate(freeSc, 'closing_v1', newLayers, 'closing');
+    const r = switchSceneTemplate(freeSc, 'closing_v1', 'closing');
     expect(r.sceneType).toBe('closing');
     expect(r.freeLayout).toEqual(freeSc.freeLayout);
   });
 
   it('通常→FREE：動画クリップ調整（slotClips）を新 FREE 要素 id へ移送（#524 P1）', () => {
     const sc = { ...richScene(), slotClips: { mainVisual: { startSec: 1, endSec: 5, speed: 1.5 } } } as Scene;
-    const r = switchSceneTemplate(sc, 'free_v1', [], 'free', prevTemplate());
+    const r = switchSceneTemplate(sc, 'free_v1', 'free', prevTemplate());
     const mv = (r.freeLayout ?? []).find((e) => e.assetId === 'asset_v')!;
     expect(r.slotClips?.[mv.id]).toEqual({ startSec: 1, endSec: 5, speed: 1.5 }); // 新 id でクリップ設定が読める
   });
 
   it('通常→FREE：立ち絵（poseAssetId）を slot 要素で持ち込み・scene.character は休眠保持（#524 P1）', () => {
     const sc = { ...richScene(), character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_yuko' } } as Scene;
-    const r = switchSceneTemplate(sc, 'free_v1', [], 'free', prevTemplate());
+    const r = switchSceneTemplate(sc, 'free_v1', 'free', prevTemplate());
     const pose = (r.freeLayout ?? []).find((e) => e.assetId === 'asset_yuko');
     expect(pose).toMatchObject({ kind: 'slot', x: 1300, y: 300, w: 500, h: 700, fit: 'contain' });
     expect(r.character.poseAssetId).toBe('asset_yuko'); // 休眠保持（往復で通常へ戻すと立ち絵が戻る）
@@ -560,15 +560,15 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
 
   it('通常→FREE：字幕層を subtitle 要素へ（単独=narration／掛け合い=allLines・#524 P1）', () => {
     const single = { ...richScene(), texts: { title: 'タイトル', main: '本文', subtitle: '字幕テキスト' } } as Scene;
-    const subS = (switchSceneTemplate(single, 'free_v1', [], 'free', prevTemplate()).freeLayout ?? []).find((e) => e.kind === 'subtitle');
+    const subS = (switchSceneTemplate(single, 'free_v1', 'free', prevTemplate()).freeLayout ?? []).find((e) => e.kind === 'subtitle');
     expect(subS).toMatchObject({ x: 100, y: 980, subtitleSource: { kind: 'narration' } });
     const dialogue = { ...richScene(), lines: [{ lineId: 'line_001', text: 'A', status: 'none' }] } as Scene;
-    const subD = (switchSceneTemplate(dialogue, 'free_v1', [], 'free', prevTemplate()).freeLayout ?? []).find((e) => e.kind === 'subtitle')!;
+    const subD = (switchSceneTemplate(dialogue, 'free_v1', 'free', prevTemplate()).freeLayout ?? []).find((e) => e.kind === 'subtitle')!;
     expect(subD.subtitleSource).toEqual({ kind: 'allLines' });
   });
 
   it('字幕が出ない単独場面（subtitle 空）は subtitle 要素を作らない', () => {
-    const r = switchSceneTemplate(richScene(), 'free_v1', [], 'free', prevTemplate()); // texts.subtitle なし・lines なし
+    const r = switchSceneTemplate(richScene(), 'free_v1', 'free', prevTemplate()); // texts.subtitle なし・lines なし
     expect((r.freeLayout ?? []).some((e) => e.kind === 'subtitle')).toBe(false);
   });
 
@@ -627,13 +627,14 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
 
   it('非破壊往復：通常→FREE で通常配置（assetRefs/slotFits）を休眠保持し、FREE→通常で復元（Option A・ADR-0030）', () => {
     const original = richScene();
-    const toFree = switchSceneTemplate(original, 'free_v1', [], 'free', prevTemplate());
+    const toFree = switchSceneTemplate(original, 'free_v1', 'free', prevTemplate());
     expect(toFree.assetRefs).toEqual(original.assetRefs); // FREE でも清算せず休眠保持
     expect(toFree.slotFits).toEqual(original.slotFits);
-    // FREE→通常（元の通常テンプレへ）：休眠 assetRefs が新スロット id へ復元（oldSlot は新テンプレに無く落ちる＝#236）。
-    const back = switchSceneTemplate(toFree, 'old_tmpl', prevTemplate().layers, 'opening');
-    expect(back.assetRefs).toEqual({ background: 'asset_bg', mainVisual: 'asset_v', logo: 'asset_logo' });
-    expect(back.slotFits).toEqual({ mainVisual: 'contain' });
+    // FREE→通常（元の通常テンプレへ）：休眠 assetRefs がそのまま戻る（差し込み先を持つキーが再び描かれる）。
+    // 当て先に無い oldSlot も**落とさない**＝それを持つ見た目へ変えれば復活する（#547 P3-14・実効使用は assetUsage がゲート）。
+    const back = switchSceneTemplate(toFree, 'old_tmpl', 'opening');
+    expect(back.assetRefs).toEqual(original.assetRefs);
+    expect(back.slotFits).toEqual(original.slotFits);
     expect(back.sceneType).toBe('opening');
   });
 
@@ -720,7 +721,7 @@ describe('freeContentHiddenBySwitch（FREE→通常で出なくなる中身・#5
     expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ slot: 1, total: 1 });
   });
 
-  // 復元されるのは**切替先テンプレに実在する差し込み先**の分だけ（switchSceneTemplate の清算規則と同じ）。
+  // 復元されるのは**切替先テンプレに実在する差し込み先**の分だけ（描画・実効使用と同じ規則）。
   // 休眠したままのキーを「復元される」と数えると、実際には出ない素材を出ると言ってしまう。
   it('切替先に無い差し込み先の休眠素材は「復元される」に数えない', () => {
     const s = freeScene([freeEl('free_001', 'slot', { assetId: 'asset_old' })], {

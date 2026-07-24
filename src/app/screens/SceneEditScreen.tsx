@@ -545,7 +545,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 見た目切替の共通処理（「見た目パターン」ピッカーと「種類」セレクタで共用・#528）。
   const applyTemplateSwitch = (newTemplateId: string) => {
     const nt = templates.find((t) => t.templateId === newTemplateId);
-    patch((s) => switchSceneTemplate(s, newTemplateId, nt?.layers ?? [], nt?.category, templates.find((t) => t.templateId === s.templateId)));
+    patch((s) => switchSceneTemplate(s, newTemplateId, nt?.category, templates.find((t) => t.templateId === s.templateId)));
     // 確認待ちを解除する：確認中に別の見た目（何も隠れないもの）を選ぶと即適用されるので、残しておくと
     // **適用済みとは別の切替先**を指す確認が出たままになる（押すと二重に切り替わる・§2-5）。
     setPendingTemplateId(null);

@@ -37,7 +37,7 @@
 | Scene | 場面。templateId・assetRefs・texts・narration 等を持つ | `11 §7.4` |
 | Template | 見た目パターン。canvas＋layers | `04` / `11 §7.5` |
 | Layer | テンプレ内の描画要素（background/slot/text/subtitle/character/decor/shape/logo） | `11 §3.4` |
-| assetRefs | scene が素材をレイヤーに割り当てる対応表。キー＝レイヤー id | `11 §5` |
+| assetRefs | scene が素材をレイヤーに割り当てる対応表。キー＝レイヤー id（見た目の切替で一致しなくなったキーは休眠として残る） | `11 §5` |
 | character / poseAssetId | ゆうこの表示設定／使用する表情素材ID | `11 §7.4` / `17` |
 | narration.status | 音声生成状態（none/pending/generated/failed） | `11 §3.5` / `15` |
 | audioMix | シーン単位の音量上書き（null＝project継承） | `11 §6` |
@@ -53,7 +53,7 @@
 | AI構成案（ai-video-plan） | AIが生成する動画の設計JSON。映像そのものではない（`CLAUDE.md §2-1`） |
 | 構造化出力（structured output） | AIにスキーマ準拠JSONを強制する仕組み（`12 §3`） |
 | 変換（mapping） | AI出力→内部Scene への規則的変換（採番・解決・clamp・初期化）（`12 §8`） |
-| バインディング | assetRefs キーとテンプレ layer id を一致で結ぶ契約（`11 §5`） |
+| バインディング | assetRefs キーとテンプレ layer id を一致で結ぶ契約＝一致するキーだけが描かれる（`11 §5`） |
 | 解決順序 | 声・音量を scene＞project＞定数 で解決（`11 §6`） |
 | 自動補正 | AI出力の軽微な問題をソフトが補正し warnings に記録（`11 §9`） |
 | パリティ | プレビューと本番出力の見た目一致（`ADR-0001`） |

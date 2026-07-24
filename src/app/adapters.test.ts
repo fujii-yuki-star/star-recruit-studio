@@ -248,6 +248,50 @@ describe("sceneToDraftRow（見た目バッジの §2-3 フォールバック・
     expect(row.look).toBe("見た目が見つかりません");
     expect(row.look).not.toContain("free_canvas_v1"); // 内部IDが UI に漏れない（§2-3）
   });
+
+  // 台本表の「素材」は**動画に出る分**を示す。切替で差し込み先を失った休眠の割当（#547 P3-14 で消さずに残す）を
+  // そのまま出すと、動画には映らないのに一覧では「写真あり」＝表示と実挙動がずれる（ADR-0026①）。
+  it("差し込み先を失った休眠の割当は素材に出さない（実効使用と同じ規則・#547 P3-14）", () => {
+    const photoTemplate = {
+      ...freeTemplate, templateId: "photo_v1", name: "写真", category: "photo_intro",
+      layers: [{ id: "mainVisual", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 1 }],
+    } as Template;
+    const textTemplate = {
+      ...freeTemplate, templateId: "text_v1", name: "メッセージ", category: "message",
+      layers: [{ id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 1920, h: 200, zIndex: 1 }],
+    } as Template;
+    const scene = { ...freeScene(undefined), sceneType: "photo_intro", assetRefs: { mainVisual: "asset_001" } } as Scene;
+    const shown = { ...scene, templateId: "photo_v1" } as Scene;
+    const dormant = { ...scene, templateId: "text_v1", sceneType: "message" } as Scene;
+    expect(sceneToDraftRow(shown, [], [photoTemplate, textTemplate], assets).material).toBe("写真A");
+    expect(sceneToDraftRow(dormant, [], [photoTemplate, textTemplate], assets).material).toBe("（未設定）");
+  });
+
+  // 立ち絵（ゆうこ）は「素材」ではなく登場人物。素材欄の主役候補に混ぜると、`assetType:'yuko'` は video でないので
+  // 「写真」として表情画像の名前が並ぶ（materialType の分岐は video 以外を photo にする）＝写真を入れていない場面が
+  // 「写真あり」に見える。同梱の `opening_yuko_right_v1` は背景が必須でないので、ゆうこだけの場面は普通に作れる。
+  it("立ち絵だけの場面は素材欄に出さない（ゆうこは写真ではない・#547 P3-14 レビュー）", () => {
+    const yukoTemplate = {
+      ...freeTemplate, templateId: "opening_v1", name: "オープニング", category: "opening",
+      layers: [
+        { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+        { id: "yuko", type: "character", x: 0, y: 0, w: 500, h: 700, zIndex: 5 },
+      ],
+    } as Template;
+    const yukoAsset = { assetId: "asset_pose", assetType: "yuko", displayName: "ゆうこ（笑顔）", filePath: "y.png" } as Asset;
+    const scene = {
+      ...freeScene(undefined), sceneType: "opening", templateId: "opening_v1",
+      character: { enabled: true, characterId: "yuko", poseAssetId: "asset_pose" },
+    } as Scene;
+    const row = sceneToDraftRow(scene, [], [yukoTemplate], [...assets, yukoAsset]);
+    expect(row.material).toBe("（未設定）");
+    expect(row.materialType).toBe("none");
+  });
+
+  it("FREE 場面は自由配置の素材を主役にする（休眠 assetRefs ではなく実効表現・ADR-0030）", () => {
+    const sc = { ...freeScene([{ id: "el1", kind: "slot", x: 0, y: 0, w: 10, h: 10, assetId: "asset_001" } as FreeElement]), assetRefs: { mainVisual: "asset_zzz" } } as Scene;
+    expect(sceneToDraftRow(sc, [], [freeTemplate], assets).material).toBe("写真A");
+  });
 });
 
 // #547 P1-3：字幕/セリフの「長すぎ」判定は、テンプレの aiHint が無ければ**正典定数**へ落ちる（生成側 transformPlan と
