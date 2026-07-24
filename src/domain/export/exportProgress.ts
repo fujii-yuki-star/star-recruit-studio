@@ -114,3 +114,38 @@ export function exportHeadingLabel(run: ExportProgressState): string {
   if (run.phase === 'rendering' || run.phase === 'encoding') return '動画を書き出しています';
   return '';
 }
+
+/**
+ * 結果が確定して**もう動かない**状態か（`done`/`error`/`cancelled`）。走行中は `isExportBusy`（store）。
+ *
+ * `unsupported` は入れない：これは「この端末では書き出せない」という**環境の事情**で、書き出した結果ではない。
+ * 過去形（前回の…）で示すと「いま押せば書き出せる」と読めてしまう（ADR-0026①）。
+ */
+export function isExportFinished(phase: ExportRunPhase): boolean {
+  return phase === 'done' || phase === 'error' || phase === 'cancelled';
+}
+
+/**
+ * 書き出し画面に**入った時点で既に終わっていた**結果に添える1行（#547 P3-11）。
+ *
+ * 実行状態は次の書き出しまで残す（`15 §1` 実行時状態。書き出し中に画面を移っても進捗が見えるように＝#379/P2-1）。
+ * そのため画面を離れて戻ると「100%・保存しました」「失敗しました」が**いま起きたことのように**出続け、
+ * 直したはずの内容が既に書き出せている／たったいま失敗した、と誤読させる（ADR-0026④）。
+ * 過去のことだと分かる言い方にし、そのうえで次の行動（もう一度「動画を保存」）を示す（§2-5）。
+ *
+ * 走行中・未実行（`idle`/`rendering`/`encoding`/`unsupported`）は空文字＝呼び出し側で phase を場合分けしない。
+ */
+export function pastExportNotice(phase: ExportRunPhase): string {
+  switch (phase) {
+    case 'done':
+      // 「完了しています」で止めると、そのあとの編集も入っていると読める。保存し直せることまで言う。
+      return '前回の書き出しは完了しています。そのあとに動画を直したときは、もう一度「動画を保存」を押すと、いまの内容で保存し直せます。';
+    case 'error':
+      // 失敗の中身（原因と次の行動）は書き出し画面がこの下に出す。ここは「いつのことか」だけを足す。
+      return '前回の書き出しは失敗しました。';
+    case 'cancelled':
+      return '前回の書き出しは中止しました。もう一度「動画を保存」を押すと、やり直せます。';
+    default:
+      return '';
+  }
+}
