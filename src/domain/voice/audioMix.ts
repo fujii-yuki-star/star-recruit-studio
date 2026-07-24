@@ -32,7 +32,8 @@ export function hasSceneNarrationOverride(audioMix: AudioMix | undefined): boole
 
 /**
  * BGM音量を解決（§6）：scene.audioMix.bgmVolume → project.bgmSettings.volume → BGM_VOLUME。
- * V-C3 のBGM合成で使用予定（現状はV-C1のナレーション合成のみ実装）。
+ * 書き出しの BGM ミックス（`planBgmMix`＝`domain/project/bgmExport.ts`）と仕上がり確認（`PreviewScreen`）で共有する
+ * ＝プレビュー=書き出しで同じ値域・同じ継承（ADR-0026②）。
  */
 export function resolveBgmVolume(
   audioMix: AudioMix | undefined,
