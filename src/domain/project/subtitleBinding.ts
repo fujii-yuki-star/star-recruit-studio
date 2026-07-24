@@ -180,20 +180,6 @@ export function normalizeSubtitleSources(scene: Scene): Scene {
  * 長さ判定は重複に非依存（同じ字幕を2段で数えても `.some(長すぎ)` は不変）ゆえ厳密な重複排除はしない。
  */
 export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | undefined): string[] {
-  // 静的字幕（単独＝掛け合いでない）の描画テキストを **textKey** で引く。テンプレ層は層の textKey、FREE narration
-  // 要素は TEXT_KEY.subtitle（要素は textKey を持たず narration=texts.subtitle 固定）。textKey 経由で引くことで
-  // 描画（layout.ts:325 の `scene.texts[layer.textKey]` / resolveSubtitleForElement の texts.subtitle）と一致させる。
-  const staticSubtitleFor = (textKey: TextKey | undefined): string[] => {
-    if (scene.subtitleEnabledDefault === false) return []; // OFF は描画されない（layout の staticSubtitleOff）
-    const t = (textKey != null ? scene.texts[textKey] : undefined) ?? ''; // textKey 無し＝描画も空（layout.ts:325 の else）
-    return t.length > 0 ? [t] : [];
-  };
-  const lineSubs = (pred?: (l: NarrationLine) => boolean): string[] =>
-    sceneLines(scene)
-      .filter((l) => pred == null || pred(l))
-      .map((l) => resolveLineSubtitle(l, scene))
-      .filter((r) => r.enabled && r.text.length > 0)
-      .map((r) => r.text);
   const hasLines = (scene.lines?.length ?? 0) > 0;
 
   const out: string[] = [];
@@ -206,8 +192,8 @@ export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | u
     (l) => l.type === 'subtitle' && !isHiddenByGroup(l.id, templateGroups),
   );
   if (visibleSubtitleLayers.length > 0) {
-    if (hasLines) out.push(...lineSubs());
-    else for (const l of visibleSubtitleLayers) out.push(...staticSubtitleFor(l.textKey));
+    if (hasLines) out.push(...lineSubs(scene));
+    else for (const l of visibleSubtitleLayers) out.push(...staticSubtitleFor(scene, l.textKey));
   }
   // (b) FREE：freeLayout の字幕要素を subtitleSource で解決してテンプレ層の上に重ねる（resolveSubtitleForElement と同分岐）。
   //     要素自身の非表示（el.hidden）・非表示グループのメンバーは描画されない（layout.ts:418-419）＝除外。
@@ -216,11 +202,37 @@ export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | u
     for (const el of scene.freeLayout ?? []) {
       if (el.kind !== FREE_ELEMENT_KIND.subtitle) continue;
       if (el.hidden || isHiddenByGroup(el.id, sceneGroups)) continue; // 非表示は描画されない＝数えない
-      const source = el.subtitleSource ?? defaultSubtitleSource(scene);
-      if (source.kind === SUBTITLE_SOURCE_KIND.narration) out.push(...staticSubtitleFor(TEXT_KEY.subtitle));
-      else if (source.kind === SUBTITLE_SOURCE_KIND.allLines) out.push(...lineSubs());
-      else out.push(...lineSubs((l) => speakerKeyEquals(effectiveSpeakerKey(l), source.speaker)));
+      out.push(...freeSubtitleElementTexts(el, scene));
     }
   }
   return out;
+}
+
+/** 静的字幕（単独＝掛け合いでない）の描画テキストを **textKey** で引く。textKey 経由で引くことで描画と一致させる
+ *  （layout.ts の `scene.texts[layer.textKey]` / `resolveSubtitleForElement` の texts.subtitle）。 */
+function staticSubtitleFor(scene: Scene, textKey: TextKey | undefined): string[] {
+  if (scene.subtitleEnabledDefault === false) return []; // OFF は描画されない（layout の staticSubtitleOff）
+  const t = (textKey != null ? scene.texts[textKey] : undefined) ?? ''; // textKey 無し＝描画も空
+  return t.length > 0 ? [t] : [];
+}
+
+/** 実効行の字幕（OFF・空は除外）。pred で対象話者に絞れる。 */
+function lineSubs(scene: Scene, pred?: (l: NarrationLine) => boolean): string[] {
+  return sceneLines(scene)
+    .filter((l) => pred == null || pred(l))
+    .map((l) => resolveLineSubtitle(l, scene))
+    .filter((r) => r.enabled && r.text.length > 0)
+    .map((r) => r.text);
+}
+
+/**
+ * この FREE 字幕要素が**実際に表示する**字幕文（`subtitleSource` で解決・ADR-0029）。空配列＝いま何も出ていない。
+ * `sceneDisplayedSubtitleTexts` の FREE 段と、切替で失う中身の判定（`freeContentHiddenBySwitch`）が同じ規則を使う
+ * ための単一の参照元（§6）。要素自身の非表示・非表示グループの除外は**呼び出し側**の責務（描画の可視判定と対）。
+ */
+export function freeSubtitleElementTexts(el: FreeElement, scene: Scene): string[] {
+  const source = el.subtitleSource ?? defaultSubtitleSource(scene);
+  if (source.kind === SUBTITLE_SOURCE_KIND.narration) return staticSubtitleFor(scene, TEXT_KEY.subtitle);
+  if (source.kind === SUBTITLE_SOURCE_KIND.allLines) return lineSubs(scene);
+  return lineSubs(scene, (l) => speakerKeyEquals(effectiveSpeakerKey(l), source.speaker));
 }
