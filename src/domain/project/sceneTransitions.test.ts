@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { deriveTransitionSelectValue, resolveBoundaryTransition, resolveTransition, transitionTimeline, swallowedByTransitionSceneNumbers } from './sceneTransitions';
+import { FPS } from '../constants';
 import type { Scene, Transition } from './types';
+
+const EPS = 1 / FPS; // 切り替えが場面から残す最小の尺＝1フレーム（TRANSITION_MIN_TAIL_SEC・#547 P3-4）
 
 // resolveBoundaryTransition は scenes 配列＋対象添字で呼ぶ（書き出しと同じ全場面 transitionTimeline）。最小の Scene を作る。
 const sc = (durationSec: number, transition?: Transition): Scene =>
@@ -77,11 +80,31 @@ describe('transitionTimeline', () => {
     expect(r.effectiveTotalSec).toBe(18);
   });
 
-  it('極短場面：D は左右どちらの尺も超えないよう clamp', () => {
-    // D 希望 5 だが両場面とも 3 → d=3、offset=0、総尺=3+3-3=3
+  it('極短場面：D は左右どちらの尺も strict `<` で clamp＝場面は最低1フレーム残す（#547 P3-4）', () => {
+    // D 希望 5 だが両場面とも 3 → d は 3 未満（3−ε）＝丸ごと飲み込まない（旧実装は d==3 を許していた）。
     const r = transitionTimeline([3, 3], [0, 5]);
-    expect(r.steps).toEqual([{ offsetSec: 0, durationSec: 3 }]);
-    expect(r.effectiveTotalSec).toBe(3);
+    expect(r.steps).toHaveLength(1);
+    expect(r.steps[0].durationSec).toBeLessThan(3); // strict `<`
+    expect(r.steps[0].durationSec).toBeCloseTo(3 - EPS, 6); // 尺−ε（1フレーム）
+    expect(r.steps[0].offsetSec).toBeCloseTo(EPS, 6); // acc−d=ε
+    expect(r.effectiveTotalSec).toBeCloseTo(3 + EPS, 6); // 右場面が ε だけ寄与
+  });
+
+  it('D は常に右場面尺 **未満**（strict `<`）＝FFmpeg xfade に duration≥入力尺を渡さない（#547 P3-4）', () => {
+    // want が尺以上でも d<尺。短尺・複数境界の退化ケースを含めて各 step の d が右場面尺未満であることを固定。
+    const durations = [3, 0.3, 2, 8];
+    const boundaryDs = [0, 10, 5, 0.5]; // 2つ目/3つ目は want≫尺の退化・4つ目は通常
+    const { steps } = transitionTimeline(durations, boundaryDs);
+    steps.forEach((s, k) => {
+      expect(s.durationSec).toBeLessThan(durations[k + 1]); // 右場面尺未満
+      expect(s.durationSec).toBeGreaterThanOrEqual(0);
+    });
+    expect(steps[2].durationSec).toBeCloseTo(0.5, 6); // 通常（want<尺−ε）は want そのまま
+  });
+
+  it('場面尺が1フレーム（ε）以下ならハードカット＝d=0（重ねようがない）', () => {
+    const { steps } = transitionTimeline([8, EPS / 2], [0, 5]); // 2つ目が半フレーム
+    expect(steps[0].durationSec).toBe(0);
   });
 });
 
@@ -110,9 +133,11 @@ describe('resolveBoundaryTransition（#408 Part 2・プレビュー用の境界�
     });
   });
 
-  it('現在場面が極短なら D を場面尺で clamp（書き出しと同じ）', () => {
-    // 希望 5 だが cur=3 → D=min(5, acc=8, 3)=3。
-    expect(resolveBoundaryTransition([sc(8), sc(3, fade(5))], 1).durationSec).toBe(3);
+  it('現在場面が極短なら D を場面尺 strict `<` で clamp＝1フレーム残す（書き出しと同じ・#547 P3-4）', () => {
+    // 希望 5 だが cur=3 → D=3−ε（<3）。旧実装は 3 ちょうどで場面を丸ごと飲み込んでいた。
+    const d = resolveBoundaryTransition([sc(8), sc(3, fade(5))], 1).durationSec;
+    expect(d).toBeLessThan(3);
+    expect(d).toBeCloseTo(3 - EPS, 6);
   });
 
   it('wipe/zoom は fade に丸める（resolveTransition と一致）', () => {
@@ -161,11 +186,12 @@ describe('swallowedByTransitionSceneNumbers（切り替えに飲み込まれる�
     expect(swallowedByTransitionSceneNumbers(scenes)).toEqual([2]); // 0.3秒 < 0.5秒＝丸ごと飲まれる
   });
 
-  it('実際に総尺へ寄与しないことと一致する（transitionTimeline と同じ条件）', () => {
+  it('実際に総尺へほぼ寄与しないことと一致する（transitionTimeline と同じ条件・#547 P3-4）', () => {
     const scenes = [sc(8), sc(0.4, { in: 'fade', out: 'fade', durationSec: 0.5 })];
     expect(swallowedByTransitionSceneNumbers(scenes)).toEqual([2]);
-    // 実挙動：0.4秒の場面が総尺に寄与しない（8 のまま）＝警告の根拠。
-    expect(transitionTimeline([8, 0.4], [0, 0.5]).effectiveTotalSec).toBe(8);
+    // 実挙動：0.4秒の場面は strict clamp で最低1フレーム（ε）だけ残るが、それは実質不可視＝「飲み込まれた」警告の根拠。
+    // 旧実装は total=8（丸ごと消滅）だったが、strict 化で total=8+ε（1フレーム寄与・FFmpeg xfade は壊れない）。
+    expect(transitionTimeline([8, 0.4], [0, 0.5]).effectiveTotalSec).toBeCloseTo(8 + EPS, 6);
   });
 
   it('切り替えより長い場面は対象外（通常のケースはノイズを出さない）', () => {

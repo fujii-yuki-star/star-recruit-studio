@@ -70,6 +70,6 @@
 1. **`transition.out` の役割**: 末尾 exit 演出／in と out の二重指定の解釈。MVP は in 主導・out ミラー。
 2. **wipe / zoom**: enum にはあるが MVP 対象外（fade フォールバック）。将来サポートするか。
 3. **音声クロスフェードの既定**: `acrossfade` か単純カットか。MVP は acrossfade。
-4. **極短場面（D ≥ 場面尺）**: D の clamp と利用者への警告（§2-5「次の行動」）。
+4. **極短場面（D ≥ 場面尺）**: D の clamp と利用者への警告（§2-5「次の行動」）。**→ 解決（#547 P3-4）**：`transitionTimeline` の clamp を **strict `<`** にした（`d = min(want, acc−ε, 尺−ε)`）。ε＝**1フレーム＝`TRANSITION_MIN_TAIL_SEC = 1/FPS`**（固定）＝出力のフレーム格子で「各場面が最低1フレームは残る」下限。比率 ε は短尺場面（#553 で下限撤廃）で 1 フレーム未満になり量子化で 0＝守れないため**不採用**。これで場面丸ごと消滅と FFmpeg xfade の `duration ≥ 入力尺`（未定義動作）を構造的に防ぐ。単一の参照元（`transitionTimeline`）を preview/export/timeline/BGM が共有＝パリティ維持（Rust は場面尺を持たないため再クランプせず、算出元で担保）。利用者への警告（切り替え尺 ≥ 場面尺＝実質飲み込まれる）は `swallowedByTransitionSceneNumbers` で据え置き（clamp は"壊さない"・警告は"直させる"の別レイヤー）。
 5. **通し再生プレビュー**: 書き出し前に遷移を確認できる簡易再生。別課題。
 6. **BGM との整合（解決方針あり・T2 で実測確認）**: BGM は xfade 後の実効総尺（Σ尺−ΣD）に amix し、`fadeOutSec` も実効総尺基点で計算する（「結果・影響」に記載）。実フェード timing は T2 で実測確認。

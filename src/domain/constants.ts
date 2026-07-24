@@ -31,6 +31,11 @@ export const MAX_SCENES_PER_VIDEO = 80;
 export const DEFAULT_TARGET_DURATION_SEC = 60;
 
 export const FPS = 30;
+// 切り替え（xfade）が場面から食ってはいけない最小の「残り」＝1フレーム（1/FPS）。ADR-0009 の strict `<`
+// （`0 ≤ D < 隣接場面尺`）を、出力のフレーム格子の上で「各場面が最低1フレームは残る」よう実装するための ε。
+// 出力はフレームに量子化されるため、これ未満の残りは0フレーム＝実質不可視になる（比率 ε だと短尺場面で守れない）。
+// D=場面尺（＝場面丸ごと消滅＋FFmpeg xfade の duration≥入力尺で未定義動作）を構造的に防ぐ（#547 P3-4／ADR-0009 未解決#4）。
+export const TRANSITION_MIN_TAIL_SEC = 1 / FPS;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
 // 縦型（9:16・ADR-0012）。SoT は videoSettings.aspectRatio で、寸法はここから導出する。

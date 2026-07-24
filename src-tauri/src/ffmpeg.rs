@@ -369,6 +369,10 @@ pub fn xfade_chain_args(
         let cur = i + 1;
         let v_out = format!("v{cur}");
         match st.xfade {
+            // duration は必ず**入力尺未満**であることが上流で保証される：`transitionTimeline`（TS・単一の参照元）が
+            // strict `<` で clamp 済み（`d = min(want, acc−ε, 尺−ε)`・ε=1フレーム＝#547 P3-4／ADR-0009）。
+            // ゆえに xfade へ `duration ≥ 入力尺`（未定義動作）は渡らない。Rust 側は場面尺を持たないため（steps は
+            // duration/offset のみ）ここで再クランプはしない＝不変条件は算出元の1か所で担保する（多層で式を写経しない）。
             Some(name) => filters.push(format!(
                 "[{v_prev}][nv{cur}]xfade=transition={name}:duration={d}:offset={o}[{v_out}]",
                 d = st.duration_sec,
