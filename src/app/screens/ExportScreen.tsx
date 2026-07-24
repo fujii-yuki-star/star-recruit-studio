@@ -17,7 +17,7 @@ import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
-import { exportHeadingLabel, exportOverallPercent, exportProgressLabel } from "../../domain/export/exportProgress";
+import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -89,7 +89,15 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const exportRun = useProjectStore((s) => s.exportRun);
   const setExportRun = useProjectStore((s) => s.setExportRun);
   const { phase, progress, encode, resultPath, message, bgmWarning, cancelling } = exportRun;
-  const setPhase = (phase: ExportPhase) => setExportRun({ phase });
+  // この画面に**入った時点で既に終わっていた**結果を見ているか（#547 P3-11）。実行状態は画面横断で保持する
+  //（#379＝書き出し中に他画面へ移っても進捗が見える）ため、離れて戻ると前回の「保存しました（100%）」
+  //「失敗しました」が**いま起きたこと**のように残り続ける。マウント時の phase を初期値にし、以後は
+  // `setPhase`（この画面で結果が変わる唯一の入口）で下ろす＝この訪問で起きた結果を「前回の…」と言わない。
+  const [enteredFinished, setEnteredFinished] = useState(() => isExportFinished(phase));
+  const setPhase = (phase: ExportPhase) => {
+    setEnteredFinished(false); // 何かが起きた＝ここから先の表示はこの訪問の結果（保存先の選択を取り消した等、phase が動かない経路では下ろさない）
+    setExportRun({ phase });
+  };
   const setProgress = (progress: { done: number; total: number; frameFraction?: number }) => setExportRun({ progress });
   const setResultPath = (resultPath: string) => setExportRun({ resultPath });
   const setMessage = (message: string) => setExportRun({ message });
@@ -97,6 +105,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const setBgmWarning = (bgmWarning: "" | "partial" | "all") => setExportRun({ bgmWarning });
 
   const busy = isExportBusy(phase);
+  // 「前回の結果」表示中か＝入った時点で終わっていて、かついま見えているのも終わった結果（走行中・未実行には出さない）。
+  const showsPastResult = enteredFinished && isExportFinished(phase);
 
   // assetId が未設定(null/undefined)なら一致せず undefined（assetId は非空文字）。
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
@@ -452,7 +462,17 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </div>
           )}
 
-          {(busy || phase === "done") && (
+          {/* 前回の書き出しの結果（#547 P3-11）＝この画面に入った時点で既に終わっていた結果。
+              「100%・保存しました」を出したままにすると、そのあとの編集も書き出し済みに見える（ADR-0026④）。 */}
+          {showsPastResult && (
+            <div className={`notice ${phase === "error" ? "notice-warn" : "notice-info"} mb`} role="status">
+              <span>{pastExportNotice(phase)}</span>
+            </div>
+          )}
+
+          {/* 進捗（%・バー・いま何をしているか・中止）は**いま走っている書き出し**のもの。前回の完了を
+              100% のバーで再現しない＝今回のことのように見せない。保存先と導線は下で別に出す。 */}
+          {(busy || (phase === "done" && !showsPastResult)) && (
             <>
               <div className="text-center mb">
                 <div className="page-title" style={{ fontSize: 32, color: "var(--color-primary)" }}>
@@ -483,7 +503,14 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   </button>
                 </div>
               )}
-              {phase === "done" && resultPath && (
+            </>
+          )}
+
+          {/* 保存した動画そのものの情報（保存先・開く導線・BGMの欠け）は、進捗パネルとは別に出す。
+              前回の結果として見ているときも**保存したファイルへ辿れる**必要がある（#404 の導線を消さない）。 */}
+          {phase === "done" && (
+            <>
+              {resultPath && (
                 <>
                   <div className="notice notice-info mt">
                     <span>保存先：{resultPath}</span>
@@ -518,7 +545,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   )}
                 </>
               )}
-              {phase === "done" && bgmWarning && (
+              {bgmWarning && (
                 <div className="notice notice-warn mt">
                   <span>
                     {bgmWarning === "partial"
@@ -530,13 +557,16 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </>
           )}
 
+          {/* 失敗の中身（原因と次の行動）。前回の結果として見ているときは読み上げの割り込み（alert）にしない
+              ＝画面に入るたび「たったいま失敗した」と再通知しない。いつのことかは上の1行が示す。 */}
           {phase === "error" && (
-            <div className="notice notice-warn" role="alert">
+            <div className="notice notice-warn" role={showsPastResult ? "status" : "alert"}>
               <span>{message}</span>
             </div>
           )}
 
-          {phase === "cancelled" && (
+          {/* 中止は上の「前回の…」が同じ内容（中止した・やり直せる）を出すので、そのときは重ねない。 */}
+          {phase === "cancelled" && !showsPastResult && (
             <div className="notice notice-info" role="status">
               <span>書き出しを中止しました。もう一度「動画を保存」を押すと、やり直せます。</span>
             </div>

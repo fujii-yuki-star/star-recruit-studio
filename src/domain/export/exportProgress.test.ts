@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportEncodePercent, exportHeadingLabel, exportOverallPercent, exportPhaseLabel, exportProgressLabel } from './exportProgress';
+import { EXPORT_RUN_PHASES, exportEncodePercent, exportHeadingLabel, exportOverallPercent, exportPhaseLabel, exportProgressLabel, isExportFinished, pastExportNotice } from './exportProgress';
 
 describe('exportEncodePercent（#376）', () => {
   it('encode は step/total を 80→92 に按分する', () => {
@@ -100,5 +100,46 @@ describe('exportHeadingLabel（進捗の見出し・#547 P2-1）', () => {
     expect(exportHeadingLabel({ phase: 'done', progress: { done: 0, total: 0 } })).toBe('保存しました');
     expect(exportHeadingLabel({ phase: 'idle', progress: { done: 0, total: 0 } })).toBe('');
     expect(exportHeadingLabel({ phase: 'cancelled', progress: { done: 0, total: 0 } })).toBe('');
+  });
+});
+
+// 前回の書き出しの結果を「いま起きたこと」として出し続けない（#547 P3-11）。
+// 実行状態は次の書き出しまで残る（画面を移っても進捗が見える＝#379/P2-1）ので、離れて戻ったときの
+// 見せ方だけを変える。どのフェーズを「終わった結果」とみなすかを、この2関数で1か所に置く。
+describe('isExportFinished / pastExportNotice（前回の結果・#547 P3-11）', () => {
+  it('結果が確定した3つ（保存・失敗・中止）だけを「終わった結果」とみなす', () => {
+    expect(isExportFinished('done')).toBe(true);
+    expect(isExportFinished('error')).toBe(true);
+    expect(isExportFinished('cancelled')).toBe(true);
+    expect(isExportFinished('idle')).toBe(false);
+    expect(isExportFinished('rendering')).toBe(false);
+    expect(isExportFinished('encoding')).toBe(false);
+  });
+
+  it('unsupported は「この端末では書き出せない」という今の事情＝前回の結果にしない', () => {
+    // 過去形で示すと「いま押せば書き出せる」と読めてしまう（ADR-0026①）。
+    expect(isExportFinished('unsupported')).toBe(false);
+    expect(pastExportNotice('unsupported')).toBe('');
+  });
+
+  it('前回の結果には、いつのことかと次の行動を書く（§2-5）', () => {
+    for (const phase of ['done', 'error', 'cancelled'] as const) {
+      expect(pastExportNotice(phase).startsWith('前回の書き出しは')).toBe(true);
+    }
+    // 保存済み＝そのあとの編集は入っていないので、保存し直せることまで言う（完了表示だけだと最新に見える）。
+    expect(pastExportNotice('done')).toContain('もう一度「動画を保存」');
+    expect(pastExportNotice('cancelled')).toContain('もう一度「動画を保存」');
+  });
+
+  it('走行中・未実行には出さない（呼び出し側で phase を場合分けしない）', () => {
+    expect(pastExportNotice('idle')).toBe('');
+    expect(pastExportNotice('rendering')).toBe('');
+    expect(pastExportNotice('encoding')).toBe('');
+  });
+
+  it('終わった結果には必ず1行あり、そうでなければ空（2関数が食い違わない）', () => {
+    for (const phase of EXPORT_RUN_PHASES) {
+      expect(pastExportNotice(phase) !== '').toBe(isExportFinished(phase));
+    }
   });
 });
