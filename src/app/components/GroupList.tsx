@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Group } from "../../domain/group/types";
 import { DeleteConfirm } from "./DeleteConfirm";
+import { PencilIcon } from "./icons";
 
 /**
  * グループ一覧（#525-9・ADR-0022）。FREE（場面）／テンプレ作成の両エディタで共有する。
@@ -93,7 +94,8 @@ export function GroupList({
                 </button>
               )}
               <div className="row" style={{ gap: 2 }}>
-                <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRename(g)}>名前</button>
+                {/* 可視ラベルは名詞「名前」でなく操作＝ペンアイコンにする（動詞規約・#547 P3-6）。名前は title/aria-label が担う。 */}
+                <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRename(g)}><PencilIcon size={14} /></button>
                 <button className="btn btn-ghost btn-icon text-sm" title={g.hidden ? "表示する" : "隠す"} aria-label={g.hidden ? "表示する" : "隠す"} onClick={() => onToggleHidden(g.id)}>{g.hidden ? "表示" : "隠す"}</button>
                 {/* 中身ごと削除（#551）。ロック中は「まとめて移動・拡縮・回転」「解除」と揃えて抑止し、
                     画面固有の制約（例：テンプレは最低1枚）は deleteDisabledReason で理由ごと受け取る。 */}

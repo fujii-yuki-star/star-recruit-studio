@@ -40,7 +40,14 @@ describe("GroupList（#525-9 グループ一覧）", () => {
     expect(onToggleHidden).toHaveBeenCalledWith("group_002");
   });
 
-  it("「名前」→入力→Enter で onRename（改名）", () => {
+  it("改名ボタンは名詞ラベルでなくアイコン＋『名前を変更』（動詞規約・#547 P3-6）", () => {
+    setup();
+    const btn = screen.getAllByRole("button", { name: "名前を変更" })[0];
+    expect(btn.querySelector("svg")).not.toBeNull(); // ペンアイコンで示す
+    expect(btn.textContent).toBe(""); // 可視ラベルに名詞「名前」を出さない
+  });
+
+  it("「名前を変更」→入力→Enter で onRename（改名）", () => {
     const { onRename } = setup();
     fireEvent.click(screen.getAllByRole("button", { name: "名前を変更" })[0]); // group_001
     const input = screen.getByLabelText("グループ名");

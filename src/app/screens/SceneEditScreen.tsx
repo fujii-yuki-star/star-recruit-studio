@@ -76,6 +76,7 @@ import {
   PlayIcon,
   StopIcon,
   ArrowLeftIcon,
+  PencilIcon,
 } from "../components/icons";
 
 interface SceneEditProps {
@@ -2042,7 +2043,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                 </button>
                               )}
                               <div className="row" style={{ gap: 2 }}>
-                                <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRenameFree(el)}>名前</button>
+                                {/* 可視ラベルは名詞「名前」でなく操作＝ペンアイコンにする（動詞規約・#547 P3-6）。名前は title/aria-label が担う。 */}
+                                <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRenameFree(el)}><PencilIcon size={14} /></button>
                                 <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label="前面へ" onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label="背面へ" onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title={el.hidden ? "表示する" : "隠す"} onClick={() => toggleFreeHidden(el.id)}>{el.hidden ? "表示" : "隠す"}</button>
