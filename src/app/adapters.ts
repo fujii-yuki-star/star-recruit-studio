@@ -3,7 +3,7 @@
 import { ASSET_TYPE, FREE_CATEGORY, type SceneCategory } from "../domain/enums";
 import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } from "../domain/constants";
 import { validateFreeLayout } from "../domain/project/freeLayout";
-import { sceneActiveAssetIds } from "../domain/project/assetUsage";
+import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { sceneDisplayedSubtitleTexts } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
@@ -29,11 +29,13 @@ export const sceneTypeLabel: Record<SceneCategory, string> = {
 
 /**
  * シーンの主役素材（mainVisual→background→最初の非null）を返す。
- * 数える対象は**その見た目が実際に描く分だけ**＝実効使用（`sceneActiveAssetIds`）と同じ規則で、
- * 切替で差し込み先を失った休眠の割当は主役にしない（台本表に「写真あり」と出るのに動画に出ない、を防ぐ・#547 P3-14）。
+ * 数える対象は**その見た目が実際に描く差し込み素材だけ**（`sceneActivePlacedAssetIds`）：
+ * - 切替で差し込み先を失った休眠の割当は主役にしない（台本表に「写真あり」と出るのに動画に出ない、を防ぐ・#547 P3-14）。
+ * - **立ち絵（ゆうこ）は候補に入れない**＝素材ではなく登場人物。入れると `assetType:'yuko'` が「写真」として
+ *   素材欄に並ぶ（写真を入れていない場面が「写真あり」に見える・#547 P3-14 レビュー）。
  */
 function mainAsset(scene: Scene, template: Template | undefined, assets: Asset[]): Asset | undefined {
-  const activeIds = sceneActiveAssetIds(scene, template); // 実効表現だけ（FREE は自由配置の素材・通常は描かれる差し込み先）
+  const activeIds = sceneActivePlacedAssetIds(scene, template); // FREE は自由配置の素材・通常は描かれる差し込み先
   const active = new Set(activeIds);
   const find = (id: string | null | undefined): Asset | undefined =>
     id && active.has(id) ? assets.find((a) => a.assetId === id) : undefined;

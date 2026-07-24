@@ -25,6 +25,21 @@ import type { Scene } from './types';
  * 非表示グループを除外する＝目的が違うので規則も違う。
  */
 export function sceneActiveAssetIds(scene: Scene, template: Template | undefined): string[] {
+  const ids = sceneActivePlacedAssetIds(scene, template);
+  const hasCharacterLayer = template ? template.layers.some((l) => l.type === 'character') : true;
+  if (scene.character?.poseAssetId && hasCharacterLayer) ids.push(scene.character.poseAssetId);
+  return ids;
+}
+
+/**
+ * 場面が実効的に使う**差し込み素材**の id（`assetRefs`＋自由配置の要素）。**立ち絵（ゆうこ）は含めない**。
+ *
+ * 「この場面の写真・動画」を見せる用途（台本表の素材欄）で使う。立ち絵は素材ではなく登場人物で、
+ * 混ぜると `assetType:'yuko'` が「写真」として素材欄に並ぶ（写真を入れていない場面が「写真あり」に見える・
+ * #547 P3-14 レビュー）。**素材の生存判定（使用中カウント・削除確認）には使わないこと**＝立ち絵が漏れて
+ * 使用中の素材を消させる。そちらは `sceneActiveAssetIds`。
+ */
+export function sceneActivePlacedAssetIds(scene: Scene, template: Template | undefined): string[] {
   const ids: string[] = [];
   // 自由配置の要素は FREE テンプレのときだけ描かれる（それ以外では休眠＝ADR-0030 決定2）。
   if (template?.category === FREE_CATEGORY) {
@@ -35,8 +50,6 @@ export function sceneActiveAssetIds(scene: Scene, template: Template | undefined
   // category で切ると、出ている背景写真を「どの場面でも使われていません」と言って消させてしまう（#547 P3-14 レビュー）。
   const slotIds = template ? templateSlotIds(template.layers) : null;
   for (const [layerId, v] of Object.entries(scene.assetRefs)) if (v && (!slotIds || slotIds.has(layerId))) ids.push(v);
-  const hasCharacterLayer = template ? template.layers.some((l) => l.type === 'character') : true;
-  if (scene.character?.poseAssetId && hasCharacterLayer) ids.push(scene.character.poseAssetId);
   return ids;
 }
 

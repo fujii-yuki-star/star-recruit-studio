@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sceneActiveAssetIds, scenesUsingAsset, sceneUsesAsset } from './assetUsage';
+import { sceneActiveAssetIds, sceneActivePlacedAssetIds, scenesUsingAsset, sceneUsesAsset } from './assetUsage';
 import type { Scene } from './types';
 import type { Template } from '../template/types';
 
@@ -82,6 +82,22 @@ describe('assetUsage（実効使用・ADR-0030）', () => {
     const s = base({ character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_pose' } as never });
     expect(sceneUsesAsset(s, 'asset_pose', normalTmpl)).toBe(true); // yuko 層あり
     expect(sceneUsesAsset(s, 'asset_pose', textOnlyTmpl)).toBe(false); // 立ち絵枠が無い＝出ない
+  });
+
+  // 立ち絵は「素材」ではなく登場人物。素材として見せる用途（台本表の素材欄）に混ぜると `assetType:'yuko'` が
+  // 「写真」として並ぶ＝写真を入れていない場面が「写真あり」に見える（#547 P3-14 レビュー）。
+  // 逆に**素材の生存判定**（使用中カウント・削除確認）から漏らすと、使っているゆうこの表情画像を消させる。
+  it('sceneActivePlacedAssetIds は立ち絵を含めない／sceneActiveAssetIds は含める', () => {
+    const s = base({
+      assetRefs: { mainVisual: 'asset_photo' } as never,
+      character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_pose' } as never,
+    });
+    expect(sceneActivePlacedAssetIds(s, normalTmpl)).toEqual(['asset_photo']);
+    expect(sceneActiveAssetIds(s, normalTmpl)).toEqual(['asset_photo', 'asset_pose']);
+    // 立ち絵しか無い場面＝差し込み素材はゼロ（「写真なし」）だが、素材としては使用中。
+    const onlyPose = base({ character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_pose' } as never });
+    expect(sceneActivePlacedAssetIds(onlyPose, normalTmpl)).toEqual([]);
+    expect(sceneUsesAsset(onlyPose, 'asset_pose', normalTmpl)).toBe(true);
   });
 
   it('sceneActiveAssetIds：template 未解決は通常扱い（assetRefs＋character・freeLayout は休眠）', () => {
