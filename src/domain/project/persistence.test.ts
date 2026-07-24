@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createOverlayClipId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
-  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject, ProjectLoadError,
+  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject, ProjectLoadError, validateProjectDoc,
 } from './persistence';
 import type { ProjectHeader } from './persistence';
 import type { Part, Scene } from './types';
@@ -31,6 +31,33 @@ function validScene(overrides: Record<string, unknown> = {}): Record<string, unk
     ...overrides,
   };
 }
+
+// #586：正典どうしの矛盾（11 §7 は `> 0`／schema は minimum:0）を「schema を 11 に合わせる」で解消
+// ＝Scene.durationSec は exclusiveMinimum:0（> 0）。0秒の場面は作らない（11 §9）＝schema でも弾く。
+// 生成側は 0 を作らない（手編集=8秒補正・AI≥3秒・分割は apportionDuration が >0 保証・追加=8秒）が、
+// 旧/手書きの不正データに 0 が残り得るため、schema は範囲違反として拾い、PREVIEW_MIN_PLAY_SEC が再生を防御する。
+describe('validateProjectDoc: Scene.durationSec は > 0（#586・schema=11 で exclusiveMinimum:0）', () => {
+  const projectWith = (durationSec: number) => ({
+    ...assembleProject(header(), [], [], []),
+    scenes: [validScene({ durationSec })],
+  });
+
+  it('durationSec > 0 は valid（8秒・0.1秒とも）', () => {
+    expect(validateProjectDoc(projectWith(8)).valid).toBe(true);
+    expect(validateProjectDoc(projectWith(0.1)).valid).toBe(true);
+  });
+
+  it('durationSec = 0 は invalid（0秒の場面は作らない・11 §9）', () => {
+    const r = validateProjectDoc(projectWith(0));
+    expect(r.valid).toBe(false);
+    // 範囲違反＝**非 structural**＝読込は拒否せず警告のみ（型/必須欠落だけが読込拒否・#416）。
+    expect(r.structural).toBe(false);
+  });
+
+  it('durationSec が負も invalid', () => {
+    expect(validateProjectDoc(projectWith(-1)).valid).toBe(false);
+  });
+});
 
 describe('createProjectId', () => {
   it('同日の既存が無ければ _001', () => {

@@ -237,7 +237,7 @@
         "order": { "type": "integer", "minimum": 1 },
         "sceneType": { "$ref": "#/$defs/SceneCategory" },
         "templateId": { "type": "string" },
-        "durationSec": { "type": "number", "minimum": 0 },
+        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
         "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
         "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
         "textFontIds": {
