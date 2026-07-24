@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import "./styles/theme.css";
 import "./styles/fonts.css";
 import type { ScreenId } from "./app/data/mockData";
@@ -10,6 +10,7 @@ import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
 import { isUndoRedoEnabledFor, useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
+import { DEFAULT_PROJECT_RETURN, stickyProjectScreen } from "./app/navigation";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -48,6 +49,15 @@ const titles: Record<ScreenId, string> = {
 
 function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
+  // 「今の動画」の戻り先＝直近に開いていた工程画面（#547 P3-7）。工程画面にいる間はそこを覚え、工程外
+  // （素材・設定・一覧）へ出ても位置を保持する＝押すとたたき台固定で先頭へ飛ばされず、居場所に戻れる。
+  const [projectReturnTo, setProjectReturnTo] = useState<ScreenId>(DEFAULT_PROJECT_RETURN);
+  // 画面遷移は必ずこの navigate を通す（直接 setScreen を配らない）＝遷移のたびに戻り先を同時更新する。
+  // effect で screen を後追いすると setState 連鎖になる（React の警告）ため、遷移時に1回で確定する（純粋関数で判定）。
+  const navigate = useCallback((next: ScreenId) => {
+    setProjectReturnTo((prev) => stickyProjectScreen(prev, next));
+    setScreen(next);
+  }, []);
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
   // 書き出し中はヘッダの新規作成を無効化（切替で進行中の書き出しデータが壊れるのを防ぐ・#379）。
@@ -61,7 +71,7 @@ function App() {
   const projectName = useProjectStore((s) => s.meta.projectName);
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
-    useStartNewProject(setScreen);
+    useStartNewProject(navigate);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
   // Undo/Redo のキーボード（Ctrl/⌘+Z・Y）。App 一箇所に集約＝画面ごとの二重登録（二重 Undo）を防ぐ（#413）。
@@ -90,39 +100,39 @@ function App() {
   function renderScreen() {
     switch (screen) {
       case "home":
-        return <HomeScreen onNavigate={setScreen} />;
+        return <HomeScreen onNavigate={navigate} />;
       case "wizard":
-        return <WizardScreen onNavigate={setScreen} />;
+        return <WizardScreen onNavigate={navigate} />;
       case "confirm":
-        return <ConfirmScreen onNavigate={setScreen} />;
+        return <ConfirmScreen onNavigate={navigate} />;
       case "generating":
-        return <GeneratingScreen onNavigate={setScreen} />;
+        return <GeneratingScreen onNavigate={navigate} />;
       case "draft":
-        return <DraftScreen onNavigate={setScreen} />;
+        return <DraftScreen onNavigate={navigate} />;
       case "scene-edit":
-        return <SceneEditScreen onNavigate={setScreen} />;
+        return <SceneEditScreen onNavigate={navigate} />;
       case "preview":
-        return <PreviewScreen onNavigate={setScreen} />;
+        return <PreviewScreen onNavigate={navigate} />;
       case "timeline":
-        return <TimelineScreen onNavigate={setScreen} />;
+        return <TimelineScreen onNavigate={navigate} />;
       case "timeline-edit":
-        return <TimelineEditScreen onNavigate={setScreen} />;
+        return <TimelineEditScreen onNavigate={navigate} />;
       case "precheck":
-        return <PrecheckScreen onNavigate={setScreen} />;
+        return <PrecheckScreen onNavigate={navigate} />;
       case "export":
-        return <ExportScreen onNavigate={setScreen} />;
+        return <ExportScreen onNavigate={navigate} />;
       case "looks":
-        return <LooksScreen onNavigate={setScreen} />;
+        return <LooksScreen onNavigate={navigate} />;
       case "looks-edit":
-        return <LooksEditScreen onNavigate={setScreen} />;
+        return <LooksEditScreen onNavigate={navigate} />;
       case "materials":
-        return <MaterialsScreen onNavigate={setScreen} />;
+        return <MaterialsScreen onNavigate={navigate} />;
       case "settings":
-        return <SettingsScreen onNavigate={setScreen} />;
+        return <SettingsScreen onNavigate={navigate} />;
       case "about":
         return <AboutScreen />;
       default:
-        return <HomeScreen onNavigate={setScreen} />;
+        return <HomeScreen onNavigate={navigate} />;
     }
   }
 
@@ -131,7 +141,7 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar current={screen} onNavigate={setScreen} projectName={projectName} hasProjectContent={hasProjectContent} />
+      <Sidebar current={screen} onNavigate={navigate} projectName={projectName} hasProjectContent={hasProjectContent} currentProjectTarget={projectReturnTo} />
       <div className="main">
         {!hasOwnHeader && (
           <header className="topbar">
