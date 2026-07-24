@@ -1702,7 +1702,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <h2 className="field-label" style={{ margin: 0 }}>選択中の場面を編集</h2>
               {/* 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z・Ctrl+Y でも操作可。 */}
               <div className="row gap-sm">
-                <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} />
+                {/* 書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも disabled にして誤認を防ぐ（ADR-0026④・#547 P3-12）。 */}
+                <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} disabled={isExporting} />
               </div>
             </div>
 

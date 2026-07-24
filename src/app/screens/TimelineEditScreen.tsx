@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { assembleProject } from "../../domain/project/persistence";
 import { compileTimeline } from "../../domain/project/compileTimeline";
 import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
@@ -30,6 +30,9 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   // Undo/Redo（#255・ADR-0020）：overlay 編集も履歴対象（docSnapshot が meta.timelineOverlay を含む＝自動）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
+  // 書き出し中は store の undo/redo が無言 no-op（#379 ガード）。ボタンも disabled にして「押せるのに効かない」を無くす
+  //（ExportLock の inert で操作は既に止まるが、見た目が活性のままだと誤認する・ADR-0026④/#547 P3-12・キー入口 isUndoRedoEnabledFor と同条件）。
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   // テロップ文言/数値の連続編集を1履歴にまとめる（#389）。
   const { textGroup } = useHistoryGroup();
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -100,7 +103,7 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
         </button>
         {/* Undo/Redo（#255）。overlay の追加/移動/トリミング/文言も戻せる（履歴は meta スナップショット・場面編集と共通）。 */}
         <div className="row gap-sm" style={{ marginLeft: "auto" }}>
-          <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} />
+          <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} disabled={isExporting} />
         </div>
       </div>
 
