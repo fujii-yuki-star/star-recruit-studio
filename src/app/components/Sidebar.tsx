@@ -1,4 +1,5 @@
 import type { ScreenId } from "../data/mockData";
+import { isProjectScreen } from "../navigation";
 import {
   FolderIcon,
   FilmIcon,
@@ -17,21 +18,9 @@ interface SidebarProps {
   projectName: string;
   /** 動画を開いているか（生成済み/生成中/場面あり）。開いている間だけ「今の動画」を出す。 */
   hasProjectContent: boolean;
+  /** 「今の動画」を押したときに戻る先＝直近に開いていた工程画面（App が記憶・#547 P3-7）。たたき台固定にしない。 */
+  currentProjectTarget: ScreenId;
 }
-
-// 動画づくりの工程画面群（サイドバーの「今の動画」で束ねる＝#399 B案）。
-const projectScreens: ScreenId[] = [
-  "wizard",
-  "confirm",
-  "generating",
-  "draft",
-  "scene-edit",
-  "preview",
-  "timeline",
-  "timeline-edit",
-  "precheck",
-  "export",
-];
 
 // 先頭「プロジェクト」＝一覧（現ホームを統合）＋素材/見た目/設定。「今の動画」は工程画面群を束ねる別項目で条件表示（#399 B案）。
 const mainMenu: { id: ScreenId; label: string; icon: typeof FolderIcon }[] = [
@@ -41,12 +30,12 @@ const mainMenu: { id: ScreenId; label: string; icon: typeof FolderIcon }[] = [
   { id: "settings", label: "設定", icon: SettingsIcon },
 ];
 
-export function Sidebar({ current, onNavigate, projectName, hasProjectContent }: SidebarProps) {
+export function Sidebar({ current, onNavigate, projectName, hasProjectContent, currentProjectTarget }: SidebarProps) {
   // 「プロジェクト」（一覧）は一覧画面でのみ active。工程画面は「今の動画」を active にする。
   // 「見た目パターン」は一覧(looks)＋編集(looks-edit)を束ねて active にする（工程画面群と同じ考え方・#399 レビュー）。
   const isActive = (id: ScreenId): boolean =>
     id === "looks" ? current === "looks" || current === "looks-edit" : current === id;
-  const currentIsProject = projectScreens.includes(current);
+  const currentIsProject = isProjectScreen(current);
   // 動画を開いている、または今まさに工程画面にいるときだけ「今の動画」を出す（未オープン時は出さない＝一覧へ誘導）。
   const showCurrentProject = hasProjectContent || currentIsProject;
 
@@ -72,11 +61,12 @@ export function Sidebar({ current, onNavigate, projectName, hasProjectContent }:
           プロジェクト
         </button>
 
-        {/* 今の動画（開いている間だけ・工程画面群を束ねる）。押すとたたき台へ。名前も出す（#252 合流）。 */}
+        {/* 今の動画（開いている間だけ・工程画面群を束ねる）。押すと直近に開いていた工程画面へ戻る（たたき台固定にしない・
+            後半工程から押しても居場所を失わない＝#547 P3-7）。名前も出す（#252 合流）。 */}
         {showCurrentProject && (
           <button
             className={`nav-item${currentIsProject ? " active" : ""}`}
-            onClick={() => onNavigate("draft")}
+            onClick={() => onNavigate(currentProjectTarget)}
             aria-current={currentIsProject ? "page" : undefined}
             title={`今の動画：${projectName}`}
           >
