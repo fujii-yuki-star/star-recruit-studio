@@ -24,6 +24,7 @@ function scene(id: string, order: number): Scene {
 
 describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
   beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" }); // 各テストは非書き出しで開始（overlay 編集は書き出し中ガードされるため）
     useProjectStore.setState({
       templates: sampleTemplates,
       parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
@@ -77,6 +78,15 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     // やり直す → 追加が復活（1本）。
     fireEvent.click(screen.getByText("↷ やり直す"));
     expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+  });
+
+  it("書き出し中は履歴があっても取り消す/やり直すを無効にする（#547 P3-12）", () => {
+    // canUndo/canRedo が真でも、書き出し中は store の undo/redo が無言 no-op ＝ボタンも disabled にして誤認を防ぐ（ADR-0026④）。
+    useProjectStore.setState({ past: [{} as never], future: [{} as never] });
+    useProjectStore.getState().setExportRun({ phase: "rendering" });
+    render(<TimelineEditScreen onNavigate={() => {}} />);
+    expect(screen.getByText("↶ 取り消す")).toBeDisabled();
+    expect(screen.getByText("↷ やり直す")).toBeDisabled();
   });
 
   // Ctrl+Z / Ctrl+Y のキーボード入口は App へ集約した（#413）＝画面単体ではもう登録しない。
