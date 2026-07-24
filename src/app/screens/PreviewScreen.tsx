@@ -10,7 +10,7 @@ import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { formatDuration } from "../../domain/format/duration";
 import { BgmPicker } from "../components/BgmPicker";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
-import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { hasSceneNarrationOverride, resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
 import { lineAudioKey, lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import { lineSegments, previewSubtitleSegment, firstFrameBoundary } from "../../domain/project/lineTimeline";
@@ -259,7 +259,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // いまの場面が「個別の声量/BGM」を持つか（§6＝個別設定が全体既定より優先）。持つ場面では全体スライダーを動かしても
   // その場面の音は変わらないため、下の音UIをその場面だけ無効化し理由＋「場面を直す」導線を出す（設定できるのに効かない
   // 誤認を防ぐ・#465 レビュー P1）。声・BGM は別個に判定する（声だけ個別なら BGM は操作可・その逆も）。
-  const sceneNarrationOverride = current?.audioMix?.narrationVolume != null;
+  const sceneNarrationOverride = hasSceneNarrationOverride(current?.audioMix); // 判定は書き出し画面と共有（§6・ADR-0026②）
   const sceneBgmOverride = current?.bgmSettings !== undefined;
   // 書き出し中は BGM 設定を変えられない（store も #570 P1 でガード＝ここは無言化を避ける proactive な無効化・ADR-0026④）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));

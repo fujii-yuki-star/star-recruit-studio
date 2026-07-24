@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BGM_VOLUME, NARRATION_VOLUME, VOLUME_MAX, VOLUME_MIN } from '../constants';
 import type { AudioMix, BgmSettings, VoiceSettings } from '../project/types';
-import { clampVolume, resolveBgmVolume, resolveNarrationVolume } from './audioMix';
+import { clampVolume, hasSceneNarrationOverride, resolveBgmVolume, resolveNarrationVolume } from './audioMix';
 
 const voice: VoiceSettings = { defaultVoiceId: 'voicevox_zundamon', volume: 0.8 };
 
@@ -25,6 +25,31 @@ describe('resolveNarrationVolume (11 §6)', () => {
   it('値域 [VOLUME_MIN, VOLUME_MAX] にクランプする', () => {
     expect(resolveNarrationVolume({ narrationVolume: 9 }, voice)).toBe(VOLUME_MAX);
     expect(resolveNarrationVolume({ narrationVolume: -1 }, voice)).toBe(VOLUME_MIN);
+  });
+});
+
+// 「個別の声量を持つ場面か」の単一判定（#547 P3-13）。全体スライダーの効かない場面を仕上がり確認/書き出しで
+// 同じ意味で案内するための述語＝resolveNarrationVolume の「第一候補が使われる」条件と一致する（ADR-0026②/§6）。
+describe('hasSceneNarrationOverride (11 §6)', () => {
+  it('narrationVolume に値があれば true（＝この場面は全体既定より個別が優先）', () => {
+    expect(hasSceneNarrationOverride({ narrationVolume: 0.5 })).toBe(true);
+    expect(hasSceneNarrationOverride({ narrationVolume: 0 })).toBe(true); // 0（無音）も「設定した」＝優先される
+  });
+
+  it('null/未指定/audioMix 自体が無ければ false（＝全体既定を継承）', () => {
+    expect(hasSceneNarrationOverride({ narrationVolume: null })).toBe(false);
+    expect(hasSceneNarrationOverride({})).toBe(false);
+    expect(hasSceneNarrationOverride(undefined)).toBe(false);
+  });
+
+  it('resolveNarrationVolume の分岐と一致する：true のときだけ場面値が使われる', () => {
+    // 述語が resolveNarrationVolume の「上書き採用/継承」の境界と同じであることを固定（drift 防止）。
+    const overridden: AudioMix = { narrationVolume: 0.3 };
+    const inherited: AudioMix = { narrationVolume: null };
+    expect(hasSceneNarrationOverride(overridden)).toBe(true);
+    expect(resolveNarrationVolume(overridden, voice)).toBe(0.3); // 場面値
+    expect(hasSceneNarrationOverride(inherited)).toBe(false);
+    expect(resolveNarrationVolume(inherited, voice)).toBe(0.8); // 全体既定
   });
 });
 

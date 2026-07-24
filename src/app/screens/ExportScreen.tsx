@@ -20,7 +20,7 @@ import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVid
 import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
-import { resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
@@ -107,6 +107,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const busy = isExportBusy(phase);
   // 「前回の結果」表示中か＝入った時点で終わっていて、かついま見えているのも終わった結果（走行中・未実行には出さない）。
   const showsPastResult = enteredFinished && isExportFinished(phase);
+  // 全体の音量スライダーが効かない場面（個別の声量あり）が1つでもあるか（#547 P3-13）。あれば案内を添える
+  // ＝仕上がり確認（いまの場面）と同じ意味の注意を、書き出し（全場面のいずれか）でも出す（ADR-0026②）。判定は §6 の共有述語。
+  const someSceneHasVolumeOverride = scenes.some((s) => hasSceneNarrationOverride(s.audioMix));
 
   // assetId が未設定(null/undefined)なら一致せず undefined（assetId は非空文字）。
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
@@ -417,11 +420,17 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           </div>
 
           <hr className="divider" />
-          {/* ナレーション音量は仕上がり確認と共用の部品（#407・DRY）。仕上がり確認では聞きながら調整できる。 */}
+          {/* ナレーション音量は仕上がり確認と共用の部品（#407・DRY）。仕上がり確認では聞きながら調整できる。
+              このスライダーは**動画全体の既定**（voiceSettings.volume・11 §6）。場面ごとに個別の声量を設定した場面は
+              その設定が優先されて変わらない（設定できるのに一部に効かない誤認を避ける・仕上がり確認は「いまの場面」で
+              同じ案内を出す＝ADR-0026②・#547 P3-13）。全体スライダー自体は他の場面に効くのでここでは無効化しない。 */}
           <NarrationVolumeControl
             volume={voiceSettings.volume}
             onChange={(v) => updateVoiceSettings({ volume: v })}
             disabled={busy}
+            hint={someSceneHasVolumeOverride
+              ? "一部の場面は個別の声量を設定しています。その場面は、この全体の設定より個別の設定が優先されます（場面編集で変えられます）。"
+              : undefined}
           />
           <div className="notice notice-info mt">
             <span>声を作成済みの場面には、その音声が入ります。</span>

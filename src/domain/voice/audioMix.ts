@@ -20,6 +20,17 @@ export function resolveNarrationVolume(
 }
 
 /**
+ * この場面が「個別の声量」を持つか（§6＝個別設定が動画全体の既定より優先＝`resolveNarrationVolume` の第一候補）。
+ * true の場面は、全体のナレーション音量スライダーを動かしても `audioMix.narrationVolume` が優先されて変わらない。
+ *
+ * 「設定できるのに（一部に）効かない」誤認を避ける案内を、仕上がり確認（現在の場面）と書き出し（全場面のいずれか）で
+ * **同じ意味**で出すための単一の判定（ADR-0026②）。判定条件をここへ集約し、両画面でインライン比較を書き分けない（§6）。
+ */
+export function hasSceneNarrationOverride(audioMix: AudioMix | undefined): boolean {
+  return audioMix?.narrationVolume != null;
+}
+
+/**
  * BGM音量を解決（§6）：scene.audioMix.bgmVolume → project.bgmSettings.volume → BGM_VOLUME。
  * V-C3 のBGM合成で使用予定（現状はV-C1のナレーション合成のみ実装）。
  */
