@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
+import { PlayIcon, StopIcon } from "../components/icons";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -355,15 +356,19 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           </p>
 
           <button
-            className="btn btn-secondary"
+            className="btn btn-secondary btn-icon"
             onClick={() => void onTestVoice()}
             disabled={testState === "loading"}
           >
-            {audioPreview.playingKey === "settings"
-              ? "■ 停止"
-              : testState === "loading"
-                ? "確認中…"
-                : "声を試し聞きする"}
+            {/* 再生/停止は SVG アイコンに統一（Unicode「■」をやめる・#547 P3-1）。読み込み中は無アイコンの状態表示。
+                アイコンと文字の間隔は .btn の gap に任せる（他画面の再生/停止ボタンと同じ・余分な空白を挟まない）。 */}
+            {audioPreview.playingKey === "settings" ? (
+              <><StopIcon size={16} />停止</>
+            ) : testState === "loading" ? (
+              "確認中…"
+            ) : (
+              <><PlayIcon size={16} />声を試し聞きする</>
+            )}
           </button>
           {testState === "error" && (
             <div className="notice notice-warn" role="alert" style={{ marginTop: 8 }}>

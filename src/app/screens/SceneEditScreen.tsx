@@ -2486,7 +2486,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               className="btn btn-ghost btn-icon text-sm"
                               onClick={() => { setNarrationPlayError(false); audioPreview.play(`line:${line.lineId}`, lineAudio, () => setNarrationPlayError(true)); }}
                             >
-                              {audioPreview.playingKey === `line:${line.lineId}` ? "■ 停止" : "▶ 再生"}
+                              {/* 再生/停止は全画面で SVG アイコンに統一（Unicode グリフ「▶ ■」をやめる・#547 P3-1）。
+                                  仕上がり確認・切替/動き再生と同じ PlayIcon/StopIcon＋テキスト（間隔は .btn の gap）。 */}
+                              {audioPreview.playingKey === `line:${line.lineId}` ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                              {audioPreview.playingKey === `line:${line.lineId}` ? "停止" : "再生"}
                             </button>
                           )}
                         </div>
@@ -2548,7 +2551,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         audioPreview.play("scene", narrationAudioById[selected.sceneId], () => setNarrationPlayError(true));
                       }}
                     >
-                      {audioPreview.playingKey === "scene" ? "■ 停止" : "▶ 再生"}
+                      {/* 再生/停止は SVG アイコンに統一（#547 P3-1）。 */}
+                      {audioPreview.playingKey === "scene" ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                      {audioPreview.playingKey === "scene" ? "停止" : "再生"}
                     </button>
                   )}
                   <button
