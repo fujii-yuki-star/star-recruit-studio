@@ -236,3 +236,66 @@ export function freeSubtitleElementTexts(el: FreeElement, scene: Scene): string[
   if (source.kind === SUBTITLE_SOURCE_KIND.allLines) return lineSubs(scene);
   return lineSubs(scene, (l) => speakerKeyEquals(effectiveSpeakerKey(l), source.speaker));
 }
+
+/**
+ * 置いた字幕ボックスが何も表示しない理由（#547 P3-9）。UI が「次の行動」を出すための分類で、**行動が違うものだけ**分ける。
+ * - `sceneSubtitleOff` … 場面の字幕スイッチが切ってあるのが原因（入れれば出る）。
+ * - `noTargetLine` … 対象に選んだ話者のセリフが場面に無い（文を入れても出ない＝対象の付け替えが必要）。
+ * - `noText` … 字幕にする文が空、または対象のセリフが個別に字幕 OFF。
+ * 永続データの enum ではない（保存しない・UI 内部の分類）ので `11 §3`／`domain/enums.ts` には持ち込まない。
+ */
+export const SUBTITLE_SILENT_REASON = {
+  sceneSubtitleOff: 'sceneSubtitleOff',
+  noTargetLine: 'noTargetLine',
+  noText: 'noText',
+} as const;
+export type SubtitleSilentReason = (typeof SUBTITLE_SILENT_REASON)[keyof typeof SUBTITLE_SILENT_REASON];
+
+/**
+ * FREE 字幕要素が「置いてあるのに何も表示しない」理由（表示されるなら null）。純粋関数。
+ *
+ * 字幕ボックスは表示文を `subtitleSource` から解決するため、**字幕 OFF・文が空・対象話者の不在**で黙って何も出ない。
+ * 原因が要素の外（場面の字幕スイッチ・各セリフの字幕 ON/OFF）にもあり、置いた本人には見えない＝§2-5／ADR-0026④。
+ * 場面編集の手がかり（字幕欄のヒント）と公開前チェックが**この1か所**を共有する。
+ *
+ * 判定は実表示と同じ `freeSubtitleElementTexts`（描画・書き出し・長さ検査と同じ参照元）で行い、分岐を書き写さない。
+ * 「字幕スイッチだけが原因か」も条件を再実装せず、**ON と仮定して同じ関数で解き直す**＝解決規則が増えても追随する。
+ */
+export function subtitleSilentReason(el: FreeElement, scene: Scene): SubtitleSilentReason | null {
+  if (el.kind !== FREE_ELEMENT_KIND.subtitle) return null;
+  if (freeSubtitleElementTexts(el, scene).length > 0) return null; // 出ている
+  const source = el.subtitleSource ?? defaultSubtitleSource(scene);
+  // 対象話者の行が1本も無い＝文を入れても出ない（対象を選び直す／その話者のセリフを足す）。字幕 OFF より先に見る
+  // ＝スイッチを入れても出ないものを「入れれば出る」と案内しない。
+  if (
+    source.kind === SUBTITLE_SOURCE_KIND.speaker &&
+    !sceneLines(scene).some((l) => speakerKeyEquals(effectiveSpeakerKey(l), source.speaker))
+  ) {
+    return SUBTITLE_SILENT_REASON.noTargetLine;
+  }
+  // 場面の字幕スイッチが切ってあり、入れれば出る（行ごとに OFF なら出ないので noText 側へ落ちる）。
+  if (
+    scene.subtitleEnabledDefault === false &&
+    freeSubtitleElementTexts(el, { ...scene, subtitleEnabledDefault: true }).length > 0
+  ) {
+    return SUBTITLE_SILENT_REASON.sceneSubtitleOff;
+  }
+  return SUBTITLE_SILENT_REASON.noText;
+}
+
+/**
+ * その場面で「置いてあるのに何も表示しない」字幕ボックスの数（公開前チェック用・#547 P3-9）。
+ * 可視判定は `sceneDisplayedSubtitleTexts` の FREE 段と同じ＝**FREE テンプレのときだけ**数え（通常テンプレへ戻した
+ * 休眠 `freeLayout` は数えない・ADR-0030）、要素自身の非表示・非表示グループのメンバーも数えない（描かれない物を警告しない）。
+ */
+export function sceneSilentSubtitleCount(scene: Scene, template: Template | undefined): number {
+  if (template?.category !== FREE_CATEGORY) return 0;
+  const sceneGroups = scene.groups ?? [];
+  return (scene.freeLayout ?? []).filter(
+    (el) =>
+      el.kind === FREE_ELEMENT_KIND.subtitle &&
+      !el.hidden &&
+      !isHiddenByGroup(el.id, sceneGroups) &&
+      subtitleSilentReason(el, scene) != null,
+  ).length;
+}

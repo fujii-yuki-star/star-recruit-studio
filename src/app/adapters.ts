@@ -5,7 +5,7 @@ import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } fr
 import { validateFreeLayout } from "../domain/project/freeLayout";
 import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
-import { sceneDisplayedSubtitleTexts } from "../domain/project/subtitleBinding";
+import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import { swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
 import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
@@ -198,6 +198,23 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
         ? { id: "freeLayout", label: "自由配置の確認", detail: `${fmtScenes(badFree.nums)}が、見直したほうがよい状態です（画面の外・素材の未設定など）。`, severity: "warning" }
         : { id: "freeLayout", label: "自由配置の確認", detail: "自由配置の場面は問題ありません。", severity: "ok" },
     );
+  }
+
+  // 置いたのに何も表示しない字幕（#547 P3-9・ADR-0026④）：字幕ボックスは表示文を「対象」から解決するため、
+  // 場面の字幕 OFF・文が空・対象話者の不在で**黙って出ない**。原因が要素の外（読み上げ側のスイッチ・行ごとの字幕 ON/OFF）
+  // にもあり、置いた本人には見えないので書き出し前に**場面つきで**知らせる（§2-5＝次の行動）。判定は描画と同じ単一の
+  // 参照元（`sceneSilentSubtitleCount`→`subtitleSilentReason`→`freeSubtitleElementTexts`）＝実表示と食い違わない。
+  // 理由ごとの直し方は場面編集の字幕欄が出すので、ここは場面へ戻す導線だけ持つ。問題が無ければ項目を出さない。
+  const silentSubtitle = offending((s) => sceneSilentSubtitleCount(s, templateOf(s)) > 0);
+  if (silentSubtitle.nums.length > 0) {
+    items.push({
+      id: "silentSubtitle",
+      label: "表示されない字幕",
+      detail: `${fmtScenes(silentSubtitle.nums)}に、いまは何も表示しない字幕があります。場面編集でその字幕を選ぶと、出ない理由と直し方が出ます。`,
+      severity: "action",
+      action: "直す",
+      sceneId: silentSubtitle.firstId,
+    });
   }
 
   // 場面の見た目（テンプレ・Codex 監査 2026-07-13・#434 と同流儀）：templateId が解決できない場面（利用者テンプレの削除・
