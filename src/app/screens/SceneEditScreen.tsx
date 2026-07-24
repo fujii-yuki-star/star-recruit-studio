@@ -1039,21 +1039,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <ColorPicker value={el.fillColor ?? "#cccccc"} onChange={(v) => patchFreeEl(el.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
-          <div className="field" style={{ marginBottom: 6 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>濃さ</label>
-            {/* 内部は 0〜1・UI は「濃さ(%)」0〜100 に統一（#459 item5・変換は domain/format/opacity に集約）。
-                dragGroup＝1ドラッグ1履歴（#389）。pointerup の取りこぼしは useHistoryGroup が window で拾って必ず閉じる。 */}
-            <input
-              type="range" min={0} max={100} step={1} value={opacityToPercent(el.opacity ?? 1)}
-              {...dragGroup}
-              onChange={(e) => setFreeElementOpacity(el, percentToOpacity(Number(e.target.value)))}
-              style={{ width: "100%", accentColor: "var(--color-primary)" }}
-            />
-            <div className="row-between text-faint text-sm">
-              <span>薄い</span>
-              <span>{opacityToPercent(el.opacity ?? 1)}%</span>
-              <span>濃い</span>
-            </div>
+          {/* 濃さは数値欄「濃さ(%)」に統一する（図形もスライダーをやめ、背景帯や枠線の太さ等と同じ NumberField・#547 P3-2）。
+              内部は 0〜1・UI は 0〜100%（変換は domain/format/opacity に集約・#459 item5）。
+              setFreeElementOpacity が既存の動き（フェード等）の終端の濃さも合わせ、履歴も1手にまとめる。 */}
+          <div className="row gap-sm" style={{ marginBottom: 6 }}>
+            <NumberField label="濃さ(%)" value={opacityToPercent(el.opacity ?? 1)} min={0} max={100} onChange={(v) => setFreeElementOpacity(el, percentToOpacity(v))} />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
             <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
