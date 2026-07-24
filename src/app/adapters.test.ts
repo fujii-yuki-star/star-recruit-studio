@@ -248,6 +248,29 @@ describe("sceneToDraftRow（見た目バッジの §2-3 フォールバック・
     expect(row.look).toBe("見た目が見つかりません");
     expect(row.look).not.toContain("free_canvas_v1"); // 内部IDが UI に漏れない（§2-3）
   });
+
+  // 台本表の「素材」は**動画に出る分**を示す。切替で差し込み先を失った休眠の割当（#547 P3-14 で消さずに残す）を
+  // そのまま出すと、動画には映らないのに一覧では「写真あり」＝表示と実挙動がずれる（ADR-0026①）。
+  it("差し込み先を失った休眠の割当は素材に出さない（実効使用と同じ規則・#547 P3-14）", () => {
+    const photoTemplate = {
+      ...freeTemplate, templateId: "photo_v1", name: "写真", category: "photo_intro",
+      layers: [{ id: "mainVisual", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 1 }],
+    } as Template;
+    const textTemplate = {
+      ...freeTemplate, templateId: "text_v1", name: "メッセージ", category: "message",
+      layers: [{ id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 1920, h: 200, zIndex: 1 }],
+    } as Template;
+    const scene = { ...freeScene(undefined), sceneType: "photo_intro", assetRefs: { mainVisual: "asset_001" } } as Scene;
+    const shown = { ...scene, templateId: "photo_v1" } as Scene;
+    const dormant = { ...scene, templateId: "text_v1", sceneType: "message" } as Scene;
+    expect(sceneToDraftRow(shown, [], [photoTemplate, textTemplate], assets).material).toBe("写真A");
+    expect(sceneToDraftRow(dormant, [], [photoTemplate, textTemplate], assets).material).toBe("（未設定）");
+  });
+
+  it("FREE 場面は自由配置の素材を主役にする（休眠 assetRefs ではなく実効表現・ADR-0030）", () => {
+    const sc = { ...freeScene([{ id: "el1", kind: "slot", x: 0, y: 0, w: 10, h: 10, assetId: "asset_001" } as FreeElement]), assetRefs: { mainVisual: "asset_zzz" } } as Scene;
+    expect(sceneToDraftRow(sc, [], [freeTemplate], assets).material).toBe("写真A");
+  });
 });
 
 // #547 P1-3：字幕/セリフの「長すぎ」判定は、テンプレの aiHint が無ければ**正典定数**へ落ちる（生成側 transformPlan と

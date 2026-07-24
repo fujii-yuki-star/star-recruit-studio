@@ -80,7 +80,7 @@ describe('templateUsage', () => {
       expect(substituteDeletedTemplateInScenes(scenes, 'user_tmpl_001', templates, '16:9')).toBe(scenes);
     });
 
-    it('置換時にテンプレ依存の assetRefs / slotFits / warnings を正準経路で清算する（switchSceneTemplate・11§5・#236）', () => {
+    it('置換時も配置は消さず休眠保持し、warnings だけ再検証前提でクリアする（switchSceneTemplate・ADR-0030 追補・#547 P3-14）', () => {
       const scene = base({
         sceneId: 's1', sceneType: 'opening', templateId: 'user_tmpl_001',
         assetRefs: { oldSlot: 'asset_x' }, // 削除テンプレ固有のスロット参照（新テンプレに無い）
@@ -93,8 +93,9 @@ describe('templateUsage', () => {
       } as unknown as Partial<Template>);
       const next = substituteDeletedTemplateInScenes([scene], 'user_tmpl_001', [alt], '16:9');
       expect(next[0].templateId).toBe('std_opening_16');
-      expect(next[0].assetRefs).toEqual({}); // 旧スロット参照は清算（新テンプレのスロット id 集合に無い）
-      expect(next[0].slotFits).toBeUndefined();
+      // 見た目が消えても中身は消さない＝当て先に差し込み先が無いだけで、あとで選び直せば戻る（実効使用は assetUsage がゲート）。
+      expect(next[0].assetRefs).toEqual({ oldSlot: 'asset_x' });
+      expect(next[0].slotFits).toEqual({ oldSlot: 'cover' });
       expect(next[0].warnings).toEqual([]); // 旧テンプレ基準の検証結果はクリア（再検証前提）
     });
 

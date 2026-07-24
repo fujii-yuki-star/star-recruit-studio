@@ -101,7 +101,7 @@ export function standardLookFixesForUnresolved(
 
 /** 切替で**動画に出なくなる**中身。`contentHiddenBySwitch` の結果。 */
 export interface HiddenContent {
-  /** 割り当てが外れる素材の差し込み先 id（写真・動画）。通常テンプレへの切替では**データごと消える**（#236 清算）。 */
+  /** 表示されなくなる素材の差し込み先 id（写真・動画）。データは `scene.assetRefs` に残る（休眠・ADR-0030 追補6）。 */
   slotIds: string[];
   /** 表示されなくなる文字の種別（中身が入っているものだけ）。データは `scene.texts` に残る（休眠）。 */
   textKeys: TextKey[];

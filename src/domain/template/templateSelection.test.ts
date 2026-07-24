@@ -233,9 +233,9 @@ describe('standardTemplateForScene / standardLookFixesForUnresolved（#547・標
     expect(contentHiddenBySwitch(added, normal, freePrev).freeLayout).toBe(true);
   });
 
-  it('判定は switchSceneTemplate の清算規則と同じ差し込み先（背景・スロット・ロゴ）を見る', () => {
+  it('判定は描画・実効使用と同じ差し込み先（背景・スロット・ロゴ＝templateSlotIds）を見る', () => {
     const photo = photoWithSlots;
     const scene = scn('s1', 'photo_intro', 'gone', { mainVisual: 'a1', bg: 'a2', layer_009: 'a3' });
-    expect(contentHiddenBySwitch(scene, photo).slotIds).toEqual(['layer_009']); // テンプレにある先は残り、無い先だけ外れる
+    expect(contentHiddenBySwitch(scene, photo).slotIds).toEqual(['layer_009']); // テンプレにある先は出続け、無い先だけ出なくなる
   });
 });

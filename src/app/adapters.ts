@@ -27,21 +27,24 @@ export const sceneTypeLabel: Record<SceneCategory, string> = {
   free: "自由配置",
 };
 
-/** シーンの主役素材（mainVisual→background→最初の非null）を返す。 */
-function mainAsset(scene: Scene, assets: Asset[]): Asset | undefined {
-  const preferredKeys = ["mainVisual", "background"];
-  for (const key of preferredKeys) {
-    const id = scene.assetRefs[key];
-    if (id) {
-      const found = assets.find((a) => a.assetId === id);
-      if (found) return found;
-    }
+/**
+ * シーンの主役素材（mainVisual→background→最初の非null）を返す。
+ * 数える対象は**その見た目が実際に描く分だけ**＝実効使用（`sceneActiveAssetIds`）と同じ規則で、
+ * 切替で差し込み先を失った休眠の割当は主役にしない（台本表に「写真あり」と出るのに動画に出ない、を防ぐ・#547 P3-14）。
+ */
+function mainAsset(scene: Scene, template: Template | undefined, assets: Asset[]): Asset | undefined {
+  const activeIds = sceneActiveAssetIds(scene, template); // 実効表現だけ（FREE は自由配置の素材・通常は描かれる差し込み先）
+  const active = new Set(activeIds);
+  const find = (id: string | null | undefined): Asset | undefined =>
+    id && active.has(id) ? assets.find((a) => a.assetId === id) : undefined;
+  for (const key of ["mainVisual", "background"]) {
+    const found = find(scene.assetRefs[key]);
+    if (found) return found;
   }
-  for (const id of Object.values(scene.assetRefs)) {
-    if (id) {
-      const found = assets.find((a) => a.assetId === id);
-      if (found) return found;
-    }
+  // 主役キーが無ければ実効表現の先頭（通常は assetRefs の並び順、FREE は自由配置の並び順）。
+  for (const id of activeIds) {
+    const found = assets.find((a) => a.assetId === id);
+    if (found) return found;
   }
   return undefined;
 }
@@ -55,7 +58,7 @@ export function sceneToDraftRow(
 ): DraftRow {
   const part = parts.find((p) => p.partId === scene.partId);
   const template = templates.find((t) => t.templateId === scene.templateId);
-  const asset = mainAsset(scene, assets);
+  const asset = mainAsset(scene, template, assets);
   const materialType: DraftRow["materialType"] =
     asset?.assetType === ASSET_TYPE.video ? "video" : asset ? "photo" : "none";
 

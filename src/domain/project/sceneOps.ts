@@ -4,7 +4,7 @@
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
 import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } from '../enums';
 import type { FreeElementKind, SceneCategory } from '../enums';
-import type { Layer, Template } from '../template/types';
+import type { Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
 import { templateSlotIds } from '../template/layerOps';
@@ -25,13 +25,15 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
 }
 
 /**
- * 場面の見た目パターン（テンプレ）を切り替えた結果を返す＝参照スコープの補正（#236 ＋ ADR-0030 の非破壊往復・Option A）。
- * - **assetRefs / slotFits は「通常テンプレへ切り替えるときだけ」清算する**（ADR-0030）：新テンプレに無いスロット
- *   （`background`/`slot`/`logo` レイヤーの id）への参照/収め方を捨てる（11 §5＝キー ⊆ スロット id）。**FREE へ切り替える
- *   ときは清算せず休眠保持し、通常テンプレへ戻すと自動復元する**（ダングリングは実効使用ゲート `sceneActiveAssetIds` で無害化済み・#524 P1）。
- * - **texts / textFontIds / textStyles は保持する**：これらは固定の `TextKey` enum がキーでテンプレ非依存ゆえダングリングにならず、
- *   別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と非対称だが**意図的**（#236＝保持を採用）。
- *   ※ 将来この非対称を「揃える」目的で texts を清算しないこと（利用者の入力消失になる）。
+ * 場面の見た目パターン（テンプレ）を切り替えた結果を返す＝ADR-0030 の非破壊往復（Option A）。
+ * - **assetRefs / slotFits は清算しない＝休眠保持**（ADR-0030 追補・#547 P3-14）：切替先に無い差し込み先
+ *   （`background`/`slot`/`logo` レイヤーの id）への参照/収め方もそのまま残し、その差し込み先を持つ見た目へ戻すと復元される。
+ *   休眠キーは描かれず（`layoutScene` は層駆動）実効使用にも数えない（`sceneActiveAssetIds` が同じ規則でゲート）＝
+ *   ダングリングは無害（11 §5）。**以前は通常テンプレへの切替だけ #236 で清算していた**が、`mainVisual` の無い種類へ
+ *   変えると写真の割当が消えて戻せず、`texts`/`freeLayout` は復元されるのに**非対称**だった（#547 P3-14・ADR-0026②）。
+ * - **texts / textFontIds / textStyles も同じく保持する**（#236 から一貫）：固定の `TextKey` enum がキーでテンプレ非依存ゆえ
+ *   ダングリングにならず、別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。
+ *   ※ 「揃える」目的でどれかを清算しないこと（利用者の入力消失になる）。揃えるなら**保持する側**へ寄せる。
  * - **warnings はクリアする**：旧テンプレ基準の検証結果（例: 必須スロット未設定）は切替で陳腐化するため引き継がない＝
  *   再検証前提（`duplicateSceneInList`/`splitSceneInList` と同ポリシー）。残すと存在しないスロットの警告などが誤って残る。
  * - **sceneType は新テンプレのカテゴリに追従する**（0.4.2 動確・FREE 全場面化）：見た目とカテゴリを常に一致させ、
@@ -46,22 +48,9 @@ export function rebuildPartSceneIds(parts: Part[], scenes: Scene[]): Part[] {
 export function switchSceneTemplate(
   scene: Scene,
   newTemplateId: string,
-  newTemplateLayers: Layer[],
   newCategory?: SceneCategory,
   prevTemplate?: Template,
 ): Scene {
-  const slotIds = templateSlotIds(newTemplateLayers);
-  const toFree = newCategory === FREE_CATEGORY;
-  // FREE へ切り替えるときは通常配置（assetRefs/slotFits）を休眠のまま保持し、通常テンプレへ戻すと自動復元する（ADR-0030・非破壊往復）。
-  // 通常テンプレへ切り替えるときは #236 どおり新スロット id へ清算＝休眠していた一致分が復元される（ダングリングは sceneActiveAssetIds で無害化済み）。
-  const nextAssetRefs = toFree
-    ? scene.assetRefs
-    : Object.fromEntries(Object.entries(scene.assetRefs).filter(([k]) => slotIds.has(k)));
-  const keptFits = toFree
-    ? scene.slotFits
-    : scene.slotFits
-      ? Object.fromEntries(Object.entries(scene.slotFits).filter(([k]) => slotIds.has(k)))
-      : undefined;
   // 通常→FREE：表示中の配置内容（スロット素材＋文字＋字幕＋立ち絵）を freeLayout へ seed（空のときだけ・ADR-0030）。旧テンプレの幾何が要る。
   const seeded =
     newCategory === FREE_CATEGORY &&
@@ -74,8 +63,8 @@ export function switchSceneTemplate(
     ...scene,
     templateId: newTemplateId,
     sceneType: newCategory ?? scene.sceneType, // 見た目のカテゴリに追従（未指定は据え置き＝後方互換）
-    assetRefs: nextAssetRefs,
-    slotFits: keptFits && Object.keys(keptFits).length ? keptFits : undefined,
+    // assetRefs / slotFits は素通し＝清算しない（休眠保持・上記ポリシー）。切替先の層一覧は要らない
+    // ＝**引数で受け取らない**ことで「実は絞っている」という誤解と、絞り込みの復活を構造的に防ぐ。
     // 通常→FREE の seed 結果があれば freeLayout を差し替え（空 seed・非該当は ...scene の freeLayout を休眠保持）。
     ...(seeded && seeded.elements.length ? { freeLayout: seeded.elements } : {}),
     // 動画クリップ調整（範囲/速度/元音声）を旧層 id → 新 FREE 要素 id へ移送（#524 P1）。旧キーは休眠のまま残す（往復）。
@@ -280,7 +269,7 @@ export function freeContentHiddenBySwitch(scene: Scene, newTemplate: Template | 
   // 数えてしまうと「受け皿がある」と誤認して確認が出ず、本来直したい無言消失がそのまま残る。
   const tmplGroups = newTemplate.groups ?? [];
   const shownLayers = newTemplate.layers.filter((l) => !isHiddenByGroup(l.id, tmplGroups));
-  const slotIds = templateSlotIds(shownLayers); // 差し込み先の判定は切替の清算規則と同じ（§2-7）
+  const slotIds = templateSlotIds(shownLayers); // 差し込み先の判定は描画・実効使用と同じ `templateSlotIds`（§2-7）
   const assetBag = new Map<string, number>();
   const add = (bag: Map<string, number>, key: string) => bag.set(key, (bag.get(key) ?? 0) + 1);
   for (const layer of shownLayers) {

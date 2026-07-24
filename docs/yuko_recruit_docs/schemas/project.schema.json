@@ -414,7 +414,7 @@
     },
     "AssetRefs": {
       "type": "object",
-      "description": "キーはテンプレの background/slot/logo レイヤーの id。値は既存 assetId または null。詳細は 11_SCHEMA_REFERENCE.md §5。",
+      "description": "キーはテンプレの background/slot/logo レイヤーの id。値は既存 assetId または null。見た目を切り替えて差し込み先を失ったキーは休眠として残りうる（描かれず・使用中にも数えない＝ADR-0030 追補6）。詳細は 11_SCHEMA_REFERENCE.md §5。",
       "patternProperties": {
         "^[a-zA-Z0-9_]+$": { "type": ["string", "null"] }
       },

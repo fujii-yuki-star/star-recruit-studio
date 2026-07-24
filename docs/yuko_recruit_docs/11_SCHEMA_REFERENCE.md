@@ -145,7 +145,7 @@
 
 ## 5. アセット ⇄ テンプレレイヤー バインディング契約（論点②）
 
-**原則: `scene.assetRefs` のキーは、テンプレの「素材を受けるレイヤー」の `id` と一致させる。レンダラーは id 一致で素材を流し込む。**
+**原則: レンダラーは `scene.assetRefs` のキーとテンプレの「素材を受けるレイヤー」の `id` を突き合わせて素材を流し込む。一致するキーだけが描かれ、「使用中」にも数えられる**（見た目を切り替えて一致しなくなったキーは**休眠**として残る＝下記「切替時の保持」）。
 
 | レイヤー `type` | 素材の供給元 | バインドキー |
 |---|---|---|
@@ -157,11 +157,12 @@
 | `decor` / `shape` | テンプレ内 `assetId` / 図形定義 | 固定（シーン素材ではない） |
 
 **規則**
-- `assetRefs` のキー集合 ⊆ テンプレ内の `background`/`slot`/`logo` レイヤーの `id` 集合。
+- **描画・実効使用の条件**: テンプレ内の `background`/`slot`/`logo` レイヤーの `id` 集合に**含まれるキーだけ**が描かれ、「使用中の素材」に数えられる（`layoutScene` は層を辿って描く／`sceneActiveAssetIds`）。**保存データはこれを超えるキーを持ちうる**＝見た目を切り替えたとき差し込み先を失った割当は**休眠として残す**（ADR-0030 追補6・#547 P3-14。下の「切替時の保持」参照）。
 - 値が `null`/未指定: テンプレ既定素材（`layer.assetId`）があればそれを表示（ADR-0021・場面素材が優先・無ければテンプレ既定へ委譲）。無ければ レイヤー `required=false` → 非表示、`required=true` → 検証警告（§8）。
 - `slotType` と素材の `assetType` が不整合（例: `image` スロットに `video`）→ 補正/警告（§9）。
 - 旧 `01_REQUIREMENTS.md` 例の `type:"asset" + assetRole` 表記は本契約（typed layer + id一致）に置き換える。
-- **見た目パターン切替時の清算（issue #236・`switchSceneTemplate`）**：場面の `templateId` を変えたら、`assetRefs` は**新テンプレのスロット id へ清算**する（上記キー集合の不変条件を保つ＝ダングリング防止）。一方 **`texts` / `textFontIds` / `textStyles` は清算せず保持**する＝これらは固定の `TextKey` enum（§3.4）がキーで**テンプレ非依存ゆえダングリングにならず**、別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と**非対称だが意図的**（保持を採用）。
+- **見た目パターン切替時の保持（issue #236 → ADR-0030 追補6・`switchSceneTemplate`）**：場面の `templateId` を変えても、`assetRefs` / `slotFits` / `texts` / `textFontIds` / `textStyles` / `freeLayout` は**どれも清算せず保持**する＝**非破壊往復**（別パターンへ変えて戻すと、その差し込み先・文字枠を持つ見た目で再び描かれる）。差し込み先を失ったキーは**休眠**（描かれず・使用中にも数えない＝上記「描画・実効使用の条件」）なのでダングリングは無害。`warnings` だけは旧テンプレ基準の検証結果なのでクリアする（再検証前提）。
+  - ※ 当初（#236）は `assetRefs` のみ「新テンプレのスロット id へ清算」だったが、**`mainVisual` を持たない種類へ変えると写真の割当がその場で消え、元の種類へ戻しても復活しない**（`texts` は戻るのに非対称）ため、ADR-0030 の非破壊往復へ揃えた（#547 P3-14）。
 
 **例**
 
@@ -280,7 +281,7 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 | freeLayout | FreeElement[] | ○ | **有効なのは FREE テンプレの場面のみ**（描画/編集/事前確認/素材使用は `templateOf(scene).category===free` でゲート）。**通常テンプレへ切り替えても休眠データとして保持**し、FREE へ戻すと復元（`texts` 休眠と同じ・ADR-0030／#236）。通常→FREE 切替時は表示中の内容（スロット素材＋文字＋**体裁**〔`textStyles` 解決後の実効値＝#555〕）を旧テンプレ幾何ごと自動変換（seed）。**ただし文字/字幕の枠高だけは「同じ行数が入る高さ」へ広げる**＝通常は `maxLines`（既定2）で行数が決まるのに対し FREE は枠高から行数を導出するため、そのまま持ち込むと行が減って文字が切り詰められる（縮めはしない＝回転の中心が動かないように・#555 レビュー P1）。自由配置要素（ADR-0008・id=`free_NNN`(scene内一意)・kind: slot/text/shape/**subtitle**（字幕＝ADR-0029・1.20）・x/y/w/h は canvas基準で w>0/h>0。shape の `shapeType`＝rect/ellipse/rounded_rect/triangle/star/arrow/speech_bubble、枠線/縁取り `strokeColor`/`strokeWidth`（shape=枠線・text=文字の縁取り＝#209）は任意・1.6。text の `fontId`（同梱フォント・null/未指定＝場面/全体を継承）は任意・1.7。`rotation`＝回転角（度・0以上360未満・中心を軸に時計回り・未指定=回転なし・360=0は除外）は任意・1.9＝#208。text の `lineHeight`＝行間（倍率0.5〜3・未指定=1.3）＋`textAlign`＝揃え（left/center/right・未指定=left）は任意・1.10＝#209。`hidden`＝非表示（true で描画/操作対象から除外）・`locked`＝ロック（true で移動/拡縮を禁止）は任意・1.11＝#210。`name`＝任意の表示名（重ね順一覧/選択チップの見分け用・全 kind 共通・未指定=種類＋連番の自動名）は任意・1.22＝#525-12。`background`＝text/subtitle の背景帯（可読性の下地・`{enabled,color,opacity,radius}`・通常字幕層 `layer.background` と同型・未指定/`enabled:false`=なし・通常→FREE で移送）は任意・1.23＝#529） |
 | lines | NarrationLine[] | ○ | 掛け合い：時間順のセリフ列（§7.4b）。あれば実効タイムライン（`sceneLines()`）。未設定＝単一 `narration` を1行とみなす（1.8・ADR-0015・#180） |
 | subtitleEnabledDefault | bool | ○ | 場面の字幕既定 ON/OFF（行 `subtitleEnabled` 未指定時に継承・1.8） |
-| slotFits | object | ○ | 場面ごと・スロット別の画像の収め方上書き（キー＝テンプレの `background`/`slot`/`logo` の layer.id、値＝`cover`/`contain`/`stretch`）。未指定＝テンプレ層の `fit` を使用（1.13・④） |
+| slotFits | object | ○ | 場面ごと・スロット別の画像の収め方上書き（キー＝テンプレの `background`/`slot`/`logo` の layer.id、値＝`cover`/`contain`/`stretch`）。未指定＝テンプレ層の `fit` を使用（1.13・④）。**見た目切替で一致しなくなったキーは休眠として残る（§5 と同じ）** |
 | slotClips | object | ○ | 場面ごと・スロット別の**動画クリップ調整の per-use 上書き**（キー＝スロットの layer.id、値＝`{ startSec?, endSec?, speed?, useOriginalAudio?, originalAudioVolume? }`）。`fit` は含めない（per-use は `slotFits`）。未上書きフィールドは `asset.clip`（素材既定）を**継承**（`slotClips ?? asset.clip ?? 既定`・null=継承 §6）。scenes に載るので**Undo 可**（ADR-0020）。同じ動画を場面ごと別範囲で使える（1.19・ADR-0028・#472） |
 | slotVideoStart | object | ○ | 動画スロット本体アニメの再生開始タイミング（キー＝スロットの layer.id、値＝`{ mode, delaySec? }`）。`mode`＝`withAnim`（アニメと同時・既定）/`afterAnim`（アニメの後）/`delay`（`delaySec`≥0 秒だけ遅らせて途中から）。**`mode=delay` は `delaySec` 必須**（schema if/then で強制＝「途中から」が黙って「同時」に落ちない）。`delaySec` は `mode=delay` のときのみ意味を持ち、**保存値は上限なし・描画で `[0, animEnd]` にクランプ**（UI のスライダー上限＝アニメ長で頭打ち＝保存値と実効値を一致させる）。**mode を `delay` 以外へ切り替えたら `delaySec` は落とす**（stale 値を残さない・アニメ削除時のエントリ破棄と同流儀）。**スロット本体がアニメ対象の場面でのみ効く**（`slotIsAnimated`）。未指定＝`withAnim`（1.18・ADR-0027・#444） |
 | groups | Group[] | ○ | 要素のグループ化（メンバー＝`freeLayout` 要素 id、ネストで group id も可。グループ自身の `transform` を持つ）。未設定＝グループ無し（1.14・ADR-0022） |

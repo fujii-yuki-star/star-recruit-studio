@@ -1184,7 +1184,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       scenes: s2.scenes.map((sc) => {
         const f = byScene.get(sc.sceneId);
         // 手で選び直すのと同じ経路（配置・文字の移送も同じ規則＝ADR-0030）。旧テンプレは解決できないので prev は無し。
-        return f ? switchSceneTemplate(sc, f.template.templateId, f.template.layers, f.template.category, undefined) : sc;
+        return f ? switchSceneTemplate(sc, f.template.templateId, f.template.category, undefined) : sc;
       }),
       saveStatus: "idle",
     }));
