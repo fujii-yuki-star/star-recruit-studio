@@ -687,13 +687,14 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                         </div>
                         {/* 間違えて選んだ素材を外せるようにする（#547 P3-8）。まだ場面はできていない（生成前）ので
                             この素材を参照している場面は無く、外してもどこも空欄にならない＝即時でよい（この画面の
-                            「アピールしたいこと」の × 同様・確認は挟まない）。語は見た目パターンの素材「外す」に合わせる。 */}
+                            「アピールしたいこと」の × 同様・確認は挟まない）。語は見た目パターンの素材「外す」に合わせる。
+                            ホバーの説明（title）も読み上げ名（aria-label）と同じ文にする＝同じボタンで名前が2通りに割れない（§6）。 */}
                         <button
                           className="btn btn-ghost text-sm"
                           style={{ flex: "0 0 auto" }}
                           onClick={() => removeAsset(a.assetId)}
                           aria-label={`${a.displayName}を外す`}
-                          title="この素材を外す"
+                          title={`${a.displayName}を外す`}
                         >
                           外す
                         </button>

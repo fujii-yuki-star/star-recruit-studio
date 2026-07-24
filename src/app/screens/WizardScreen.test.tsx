@@ -71,8 +71,11 @@ describe("WizardScreen 素材の外す（#547 P3-8）", () => {
     // 両方表示されている
     expect(screen.getByText("オフィス")).toBeInTheDocument();
     expect(screen.getByText("社員")).toBeInTheDocument();
+    // ホバー説明（title）と読み上げ名（aria-label）が同じ＝同じボタンで名前が2通りに割れない（#547 P3-8 レビュー）
+    const removeBtn = screen.getByRole("button", { name: "オフィスを外す" });
+    expect(removeBtn.getAttribute("title")).toBe("オフィスを外す");
     // 「オフィス」を外す
-    fireEvent.click(screen.getByRole("button", { name: "オフィスを外す" }));
+    fireEvent.click(removeBtn);
     // store から消え、もう片方は残る
     const ids = useProjectStore.getState().assets.map((a) => a.assetId);
     expect(ids).toEqual(["asset_b"]);
