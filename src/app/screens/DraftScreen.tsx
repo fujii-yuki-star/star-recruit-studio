@@ -140,7 +140,8 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
           {/* 取り消し/やり直し（#413）＝たたき台の削除・並べ替えも戻せる。キーボードは Ctrl+Z/Y（App で登録・この画面は有効・#547 P1-1）。 */}
           <div className="row gap-sm" style={{ justifyContent: "flex-end", marginBottom: "var(--gap-sm)" }}>
-            <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} />
+            {/* 書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも disabled にして誤認を防ぐ（ADR-0026④・#547 P3-12）。 */}
+            <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} disabled={isExporting} />
           </div>
 
           {/* AI 生成直後だけ「ゆうこ(AI)が作成した」旨を出す（白紙/手動/読込済みでは出さない＝表示と実挙動の一致・#467/ADR-0026）。 */}
