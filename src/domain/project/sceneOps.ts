@@ -235,7 +235,7 @@ export function freeLayoutFromPlacedContent(
 }
 
 /**
- * FREE→通常の切替で**画面から出なくなる**自由配置の中身の数（要素の種別ごと）。`total===0` なら見た目が保たれる。
+ * FREE→通常の切替で**動画に出なくなる**自由配置の中身の数（要素の種別ごと）。`total===0` なら見た目が保たれる。
  *
  * キーは `FreeElementKind` 由来＝**種別が増えたら数える側も見せる側もコンパイルエラー**になる（数え漏らし・
  * 表示漏れに気づける）。`slot`＝素材（写真・動画・立ち絵など）、`shape`＝図形（飾り）。
@@ -256,10 +256,11 @@ function takeOne<T>(bag: Map<T, number>, key: T): boolean {
 }
 
 /**
- * FREE→通常の切替で**画面から出なくなる**自由配置の中身を数える（#547 P2-9・ADR-0030）。純粋関数。
+ * FREE→通常の切替で**動画に出なくなる**自由配置の中身を数える（#547 P2-9・ADR-0030）。純粋関数。
+ * （語は確認文言と揃えて「動画に出なくなる」＝この製品の「画面」は編集画面を指すので紛れる。）
  *
  * 切替そのものは非破壊で `freeLayout` は休眠保持されるが、**通常の見た目には自由配置の要素という枠が無い**ため、
- * 通常側で表示される中身（差し込み先の素材・文字・字幕）に対応しないものは画面から消える。
+ * 通常側で表示される中身（差し込み先の素材・文字・字幕）に対応しないものは動画に出なくなる。
  * 元の確認は「復元される休眠配置があるか（`willRestore`）」だけを見ていたので、**1枚でも復元されれば確認が出ず**、
  * FREE で足した残りが無言で消えていた（ADR-0026④）。ここでは逆に「**復元先を超えた分**」を数える。
  *
@@ -291,13 +292,17 @@ export function freeContentHiddenBySwitch(scene: Scene, newTemplate: Template | 
   }
   // 立ち絵（character 層）も通常側で出る素材＝FREE 化で slot 要素へ移した立ち絵と対応づく（ADR-0030）。
   // `character.enabled` は**見ない**：描画（`layoutScene`）も実効使用（`sceneActiveAssetIds`）も廃止済みで参照しない。
+  // 層の数だけ積む：`layoutScene` は character 層ごとに立ち絵を描くので、2層あるテンプレでは2つ受け皿がある
+  // （1つしか数えないと、立ち絵を2つ置いた往復で「出なくなる」と過剰に言う）。
   const poseAssetId = scene.character?.poseAssetId;
-  if (poseAssetId && shownLayers.some((l) => l.type === 'character')) add(assetBag, poseAssetId);
+  if (poseAssetId) for (const l of shownLayers) if (l.type === 'character') add(assetBag, poseAssetId);
   const textBag = new Map<string, number>();
   for (const layer of shownLayers) {
     if (layer.type !== 'text' || !layer.textKey) continue;
     const text = scene.texts[layer.textKey];
-    if (text && text.trim() !== '') add(textBag, text); // 空白だけの文字は描画されない＝受け皿にしない
+    // 空文字だけを除く＝`layoutScene` が描く条件（`text.length > 0`）と同じ。空白だけの文字も**描かれる**
+    // （背景帯つきなら帯が出る）ので、trim で落とすと受け皿を数え落とす。
+    if (text) add(textBag, text);
   }
   // 字幕は箱の数では突き合わせない：通常テンプレの字幕層1枚がその場面の字幕を**すべて**受け持つ
   // （逐次も同時字幕の段積みも1層＝ADR-0031／`layoutScene`）。**箱が出している文が切替後も出るか**で判断する。
@@ -316,7 +321,9 @@ export function freeContentHiddenBySwitch(scene: Scene, newTemplate: Template | 
       if (!el.assetId) continue; // 空スロットは失う中身が無い
       if (!takeOne(assetBag, el.assetId)) out.slot += 1;
     } else if (el.kind === FREE_ELEMENT_KIND.text) {
-      if (!el.text || el.text.trim() === '') continue; // 空文字は失う中身が無い
+      // 空文字だけが「失う中身が無い」＝描画条件（`layoutScene` の `text.length > 0`）と同じ。空白だけの文字は
+      // 背景帯つきなら帯が出ているので、数えないと帯が確認なしで消える（受け皿側と同じ規則で対称）。
+      if (!el.text) continue;
       if (!takeOne(textBag, el.text)) out.text += 1;
     } else if (el.kind === FREE_ELEMENT_KIND.subtitle) {
       const own = freeSubtitleElementTexts(el, scene);

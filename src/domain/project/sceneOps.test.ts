@@ -786,6 +786,28 @@ describe('freeContentHiddenBySwitch（FREE→通常で出なくなる中身・#5
     expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ total: 0 });
   });
 
+  // 話者ボックス（ADR-0029 (2a)＝掛け合いの主要ユースケース）。対象＝その話者の行だけなので、
+  // 通常テンプレの字幕層がその行を出すかで決まる（判定は freeSubtitleElementTexts＝実表示に委譲）。
+  it('掛け合い場面で対象＝話者の字幕箱は、その話者の行が切替後も出るかで数える', () => {
+    const s = freeScene(
+      [freeEl('free_001', 'subtitle', { subtitleSource: { kind: 'speaker', speaker: { kind: 'catalog', speaker: 2 } } })],
+      {
+        texts: {},
+        lines: [
+          { lineId: 'line_001', text: 'こんにちは', status: 'none', speaker: 2 },
+          { lineId: 'line_002', text: 'よろしく', status: 'none', speaker: 3 },
+        ],
+      } as Partial<Scene>,
+    );
+    // 字幕層1枚がその場面の字幕を全部受け持つ（ADR-0031）＝この話者の行も切替後に出る。
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ total: 0 });
+    const noSubtitle = (): Template => ({
+      ...normalTemplate(),
+      layers: normalTemplate().layers.filter((l) => l.type !== 'subtitle'),
+    });
+    expect(freeContentHiddenBySwitch(s, noSubtitle())).toMatchObject({ subtitle: 1, total: 1 });
+  });
+
   it('いま何も出していない字幕の箱は数えない（字幕オフ／文が空）', () => {
     const off = freeScene([freeEl('free_001', 'subtitle')], {
       texts: { subtitle: '字幕の文' },
@@ -846,12 +868,35 @@ describe('freeContentHiddenBySwitch（FREE→通常で出なくなる中身・#5
     expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ total: 0 });
   });
 
+  // 立ち絵は character 層ごとに描かれる（layoutScene）＝層の数だけ受け皿がある。
+  it('立ち絵の受け皿は character 層の数だけ数える（2層の見た目で過剰に警告しない）', () => {
+    const twoCharacters = (): Template => ({
+      ...normalTemplate(),
+      layers: [...normalTemplate().layers, layer('yuko2', 'character')],
+    });
+    const s = freeScene(
+      [freeEl('free_001', 'slot', { assetId: 'asset_pose' }), freeEl('free_002', 'slot', { assetId: 'asset_pose' })],
+      { assetRefs: {}, texts: {}, character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_pose' } },
+    );
+    expect(freeContentHiddenBySwitch(s, twoCharacters())).toMatchObject({ total: 0 }); // 2層＝2つとも出る
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ slot: 1, total: 1 }); // 1層なら1つ超過
+  });
+
   it('空スロット・空文字は失う中身が無いので数えない', () => {
     const s = freeScene(
       [freeEl('free_001', 'slot', { assetId: null }), freeEl('free_002', 'text', { text: '' })],
       { assetRefs: {}, texts: {} },
     );
     expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ total: 0 });
+  });
+
+  // 描画は `text.length > 0` で出す（layoutScene）＝空白だけの文字も描かれ、背景帯つきなら帯が出る。
+  // trim で落とすと、その帯が確認なしで消える（直そうとしている無言消失そのもの）。両側とも同じ規則で見る。
+  it('空白だけの文字も数える（描かれるので）／通常側に同じ文字があれば数えない', () => {
+    const only = freeScene([freeEl('free_001', 'text', { text: '  ' })], { assetRefs: {}, texts: {} });
+    expect(freeContentHiddenBySwitch(only, normalTemplate())).toMatchObject({ text: 1, total: 1 });
+    const restored = freeScene([freeEl('free_001', 'text', { text: '  ' })], { assetRefs: {}, texts: { title: '  ' } });
+    expect(freeContentHiddenBySwitch(restored, normalTemplate())).toMatchObject({ total: 0 });
   });
 
   it('自由配置が空／切替先が自由配置／見た目が見つからない場合は 0（確認を出さない）', () => {

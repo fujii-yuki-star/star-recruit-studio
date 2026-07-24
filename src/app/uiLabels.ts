@@ -1,4 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
+import { FREE_ELEMENT_KINDS } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, TextKey } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import { formatSceneNumbers } from "./adapters";
@@ -35,21 +36,21 @@ export const freeKindLabel: Record<FreeElementKind, string> = {
  * 自由配置→通常の見た目へ変えるときの確認（#547 P2-9・ADR-0030）。
  *
  * 切替は非破壊（自由配置のデータは残る）なので「消えます」とは言わない。ただし通常の見た目には自由配置の枠が無く、
- * **差し込み先を超えた分は画面に出なくなる**。何がいくつ出なくなるかを先に示す（15 §5 の件数表示の流儀・ADR-0026④）。
+ * **差し込み先を超えた分は動画に出なくなる**。何がいくつ出なくなるかを先に示す（15 §5 の件数表示の流儀・ADR-0026④）。
  * 数は `freeContentHiddenBySwitch` で描画と同じ規則から出す＝「出なくなる」と言った数だけ実際に出なくなる。
+ * 語はこのファイルの他の確認（`deleteLookConfirmMessage`／`standardLookResultMessage`）と揃えて「**動画に**出なくなる」（§6）。
  *
- * 種別名は自由配置エディタと同じ `freeKindLabel` を使う（同じ物を画面内で別の名で呼ばない）。
- * 引数は domain の `FreeContentHidden`（キーは `FreeElementKind` 由来）＝種別が増えたら **`freeKindLabel` とこの関数が
- * コンパイルエラー**になり、表示漏れに気づける。
+ * 種別名は自由配置エディタと同じ `freeKindLabel` を使う（同じ物を画面内で別の名で呼ばない）。並べる順・対象は
+ * `FREE_ELEMENT_KINDS` を回して決める＝**種別が増えても文言から漏れない**（増えた種別の名前は `freeKindLabel` が
+ * Record なのでコンパイルエラーになり、決めるまでビルドが通らない）。
+ *
+ * 0件のとき（確認中に中身を消した）も**確認は残す**ので、ここで言い切る。件数で確認ごと出し入れすると、消して
+ * 足し直しただけで**触ってもいない確認が蘇る**（ADR-0030 決定3・PR #592 レビュー）。嘘の警告も出さない（ADR-0026①）。
  */
 export function freeSwitchConfirmMessage(hidden: FreeContentHidden): string {
-  const parts: string[] = [];
-  if (hidden.slot > 0) parts.push(`${freeKindLabel.slot}${hidden.slot}個`);
-  if (hidden.text > 0) parts.push(`${freeKindLabel.text}${hidden.text}個`);
-  if (hidden.subtitle > 0) parts.push(`${freeKindLabel.subtitle}${hidden.subtitle}個`);
-  if (hidden.shape > 0) parts.push(`${freeKindLabel.shape}${hidden.shape}個`);
-  const what = parts.length > 0 ? parts.join("・") : "いまの自由配置の中身";
-  return `通常の見た目に変えると、${what}が画面に出なくなります。データは残るので、自由配置に戻せば元どおりになります。`;
+  const parts = FREE_ELEMENT_KINDS.filter((k) => hidden[k] > 0).map((k) => `${freeKindLabel[k]}${hidden[k]}個`);
+  if (parts.length === 0) return "通常の見た目に変えても、動画に出なくなる中身はありません。この見た目に変えますか？";
+  return `通常の見た目に変えると、${parts.join("・")}が動画に出なくなります。データは残るので、自由配置に戻せば元どおりになります。`;
 }
 
 // ── 声の一括作成（#547 P2-6）。たたき台・場面編集・公開前チェックの3画面で同じ語・同じ挙動にする（§6・ADR-0026②）。 ──

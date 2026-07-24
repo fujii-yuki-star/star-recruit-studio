@@ -134,7 +134,19 @@ describe("自由配置→通常の確認文言（#547 P2-9）", () => {
     expect(m).not.toContain("消え"); // 「消えます」とは言わない（戻せるので）
   });
 
-  it("種別の内訳が無くても文として成立する（呼び出し側の想定外でも壊れた文にしない）", () => {
-    expect(freeSwitchConfirmMessage(none)).toContain("いまの自由配置の中身");
+  // 確認は答えるまで消さない（ADR-0030 決定3・PR #592 レビュー）ので、確認中に中身を消して0件になった状態も
+  // この文言が受け持つ。0件で「出なくなります」と言うと嘘の警告になる（ADR-0026①）。
+  it("0件のときは「出なくなる物は無い」と言い切る（嘘の警告を出さない）", () => {
+    const m = freeSwitchConfirmMessage(none);
+    expect(m).toContain("出なくなる中身はありません");
+    expect(m).not.toContain("出なくなります");
+    expect(m).toContain("変えますか？"); // 次の行動（このまま変えるか）を示す（§2-5）
+  });
+
+  // 語はこのファイルの同種の確認と揃える（§6）。「画面」はこの製品では編集画面を指し、動画のことだと伝わらない。
+  it("「動画に出なくなる」で語を揃える（削除確認・まとめて標準にすると同じ言い方）", () => {
+    expect(freeSwitchConfirmMessage({ ...none, slot: 1, total: 1 })).toContain("動画に出なくなります");
+    expect(deleteLookConfirmMessage({ changing: 1, losingContent: 1, unresolved: 0 })).toContain("動画に出なくなります");
+    expect(standardLookResultMessage({ fixed: [1], unfixable: [], lostContent: [1] })).toContain("動画に出なくなった");
   });
 });

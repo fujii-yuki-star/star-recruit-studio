@@ -6,7 +6,7 @@ import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import { SceneEditScreen } from "./SceneEditScreen";
 
-// ADR-0030 Option A：FREE→通常の切替で**画面から出なくなる中身がある場合**に確認を出し、確定するまで切替えない
+// ADR-0030 Option A：FREE→通常の切替で**動画に出なくなる中身がある場合**に確認を出し、確定するまで切替えない
 // （#524 P1/P2。当初は「素材が復元できない場合だけ」＝1枚でも復元されれば確認が出ず無言消失した＝#547 P2-9 で改定）。
 // カスタムテンプレ（16:9）でピッカーを制御。FREE 場面は pickableTemplatesForScene で全カテゴリが候補に出る。
 const freeTemplate = {
@@ -41,7 +41,9 @@ function setup(scene: Scene) {
 
 const withSlot = () => freeScene({ freeLayout: [{ id: "free_001", kind: "slot", x: 0, y: 0, w: 100, h: 100, assetId: "a" }] } as Partial<Scene>);
 const picker = () => screen.getByLabelText("見た目パターン");
-const CONFIRM = /画面に出なくなります/;
+const CONFIRM = /動画に出なくなります/;
+/** 確認中に中身を消して0件になったときの文言（確認自体は答えるまで残る＝PR #592 レビュー）。 */
+const CONFIRM_NONE = /出なくなる中身はありません/;
 
 describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1/P2）", () => {
   it("ネイティブFREE→通常：確認表示・キャンセルで未変更・確定で切替", () => {
@@ -79,7 +81,7 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
   });
 
   // #547 P2-9：以前は「復元される休眠配置があるか」だけで判定していたため、**1枚でも復元されれば確認が出ず**、
-  // FREE で足した分が無言で画面から消えていた（ADR-0026④）。復元の有無ではなく「超過した中身の数」で判断する。
+  // FREE で足した分が無言で動画から消えていた（ADR-0026④）。復元の有無ではなく「超過した中身の数」で判断する。
   it("復元される素材があっても、FREE で足した分が出なくなるなら確認を出す（#547 P2-9）", () => {
     setup(freeScene({
       freeLayout: [
@@ -133,9 +135,10 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
     expect((picker() as HTMLSelectElement).value).toBe("photo_v1");
   });
 
-  // 確認は毎回いまの場面から数え直す＝確認中に中身を消して失う物が無くなったら、警告ごと引っ込める
-  // （何も失わないのに「出なくなります」と言い続けない・ADR-0026①）。
-  it("確認中に自由配置の中身を消して失う物が無くなったら、確認は消えて選択表示も実際の見た目へ戻る", () => {
+  // 件数は毎レンダ数え直して**文言**へ反映するが、確認そのものは答えるまで消さない（ADR-0030 決定3・PR #592 レビュー）。
+  // 表示を件数に連動させると、中身を消したあと足し直した／取り消しで戻しただけで**触ってもいない確認が蘇り**、
+  // 選択表示が選んでいない見た目へ跳ぶ（#532「選んだのに元へ戻った」と同型）。
+  it("確認中に中身を消すと文言だけ変わり、足し直しても確認は蘇らない（ずっと同じ確認）", () => {
     setup(withSlot());
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     fireEvent.change(picker(), { target: { value: "photo_v1" } });
@@ -146,17 +149,45 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
         scenes: st.scenes.map((sc) => ({ ...sc, freeLayout: [] })),
       }));
     });
+    // 失う物が無くなったら「出なくなります」とは言わない（嘘の警告を出さない・ADR-0026①）。
     expect(screen.queryByText(CONFIRM)).toBeNull();
-    // 確認は答えられないまま失効した＝切替は起きていない。**選択表示も実際の見た目へ戻す**のが要点：
-    // 表示だけ引っ込めて選んだ先を指したままにすると、確認ボタンも無く同じ値の選び直しでは onChange も出ない
-    // ＝「選んだのに切り替わらない」行き止まりになる。
+    expect(screen.getByText(CONFIRM_NONE)).toBeTruthy();
+    // 確認は消えていない＝選んだ先を指したまま・切替はまだ起きない（勝手に切り替えも取り下げもしない）。
+    expect((picker() as HTMLSelectElement).value).toBe("photo_v1");
     expect(useProjectStore.getState().scenes[0].templateId).toBe("free_v1");
-    expect((picker() as HTMLSelectElement).value).toBe("free_v1");
 
-    // 選び直せば、もう何も失わないので即座に切り替わる。
-    fireEvent.change(picker(), { target: { value: "photo_v1" } });
-    expect(useProjectStore.getState().scenes[0].templateId).toBe("photo_v1");
+    // 消した中身を足し直す（取り消しで戻したときと同じ）。ここで確認が湧き直すと、触ってもいないのに
+    // 選択表示が跳ぶ。上で確認が消えていないので、ここは「同じ確認が続いている」だけになる。
+    act(() => {
+      useProjectStore.setState((st) => ({
+        scenes: st.scenes.map((sc) => ({ ...sc, freeLayout: withSlot().freeLayout })),
+      }));
+    });
+    expect(screen.getByText(CONFIRM)).toBeTruthy();
+    expect((picker() as HTMLSelectElement).value).toBe("photo_v1");
+
+    // 「やめる」でいつでも抜けられる＝選択表示も実際の見た目へ戻る。
+    fireEvent.click(screen.getByText("やめる"));
     expect(screen.queryByText(CONFIRM)).toBeNull();
+    expect(screen.queryByText(CONFIRM_NONE)).toBeNull();
+    expect((picker() as HTMLSelectElement).value).toBe("free_v1");
+  });
+
+  // 0件でも確認のボタンは残す＝「選んだのに切り替えられない」行き止まりを作らない（同じ値の選び直しでは
+  // 変更イベントが出ないので、ボタンを引っ込めると切替える手立てが無くなる）。
+  it("確認中に中身を消して0件になっても、そのまま切り替えられる", () => {
+    setup(withSlot());
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    fireEvent.change(picker(), { target: { value: "photo_v1" } });
+    act(() => {
+      useProjectStore.setState((st) => ({
+        scenes: st.scenes.map((sc) => ({ ...sc, freeLayout: [] })),
+      }));
+    });
+    expect(screen.getByText(CONFIRM_NONE)).toBeTruthy();
+
+    fireEvent.click(screen.getByText("通常の見た目に変える"));
+    expect(useProjectStore.getState().scenes[0].templateId).toBe("photo_v1");
   });
 
   it("確認中に今の見た目を選び直すと、確認は消える（元へ戻せる）", () => {
@@ -215,5 +246,21 @@ describe("SceneEditScreen 種類（カテゴリ）変更（#528）", () => {
     const s = useProjectStore.getState().scenes[0];
     expect(s.sceneType).toBe("photo_intro"); // 確定で切替
     expect(s.templateId).toBe("photo_v1");
+  });
+
+  // 「いまのを選び直したら確認を解く」を見た目ピッカーだけに入れると、同じ概念のもう一方のセレクタに
+  // 「選んだのに元へ戻った」（#532）が残る＝同概念同挙動（ADR-0026②）。
+  it("確認中に今の種類を選び直すと確認は消える（見た目ピッカーと同じ挙動）", () => {
+    setup(withSlot());
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const kind = screen.getByLabelText("種類") as HTMLSelectElement;
+    fireEvent.change(kind, { target: { value: "photo_intro" } });
+    expect(screen.getByText(CONFIRM)).toBeTruthy();
+    expect(kind.value).toBe("photo_intro"); // 確認待ちは選んだ先を保持表示
+
+    fireEvent.change(kind, { target: { value: "free" } }); // いまの種類＝切替をやめた
+    expect(screen.queryByText(CONFIRM)).toBeNull();
+    expect(kind.value).toBe("free"); // 選んだとおりに戻る（候補へ跳ね戻らない）
+    expect(useProjectStore.getState().scenes[0].templateId).toBe("free_v1");
   });
 });
