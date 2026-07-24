@@ -41,7 +41,8 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
             aiError ??
             "通信状況や設定を確認して、もう一度お試しください。手動で作成を始めることもできます。"
           }
-          // 正典 §9.3③「前回 ai/latest_result.json から復元」は post-α・未実装のため導線を出さない（①再試行/②手動のみ）。
+          // 正典 `12_AI_PROMPT_AND_MAPPING §9.3③`「前回 ai/latest_result.json から復元」は **post-α・未実装として正典で追跡中**の
+          // ため導線を出さない（GH issue でなく正典が追跡元＝復元しない導線で誤誘導しないため。現状 UI は ①再試行 / ②手動のみ）。
           actions={[
             {
               label: "もう一度試す",
