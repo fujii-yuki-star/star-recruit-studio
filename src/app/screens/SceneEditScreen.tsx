@@ -5,7 +5,7 @@ import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
-import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
+import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
@@ -25,7 +25,7 @@ import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
-import { switchSceneTemplate } from "../../domain/project/sceneOps";
+import { freeContentHiddenBySwitch, switchSceneTemplate } from "../../domain/project/sceneOps";
 import { clampSceneDuration } from "../../domain/project/sceneDuration";
 import { pickableTemplatesForScene, sceneCategoriesForOrientation } from "../../domain/template/templateSelection";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
@@ -48,7 +48,7 @@ import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { FIT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
+import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -170,14 +170,6 @@ function CollapsibleSection({ title, storageKey, defaultOpen = true, children }:
     </details>
   );
 }
-
-// 自由配置要素のユーザー向けラベル（§2-3：技術語を出さない）。全 kind 必須＝追加時にコンパイル検知。
-const freeKindLabel: Record<FreeElementKind, string> = {
-  slot: "素材",
-  text: "文字",
-  shape: "図形",
-  subtitle: "字幕",
-};
 
 // FREE 要素の表示名（#525-12）：任意 name ＞ 種類＋連番（index は freeLayout の並び順で安定）。
 // 見分けやすさのため一覧/チップ/詳細見出しで共有する（グループ名＝#9 と同じ「オブジェクトに名前」UX）。
@@ -554,15 +546,21 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const applyTemplateSwitch = (newTemplateId: string) => {
     const nt = templates.find((t) => t.templateId === newTemplateId);
     patch((s) => switchSceneTemplate(s, newTemplateId, nt?.layers ?? [], nt?.category, templates.find((t) => t.templateId === s.templateId)));
+    // 確認待ちを解除する：確認中に別の見た目（何も隠れないもの）を選ぶと即適用されるので、残しておくと
+    // **適用済みとは別の切替先**を指す確認が出たままになる（押すと二重に切り替わる・§2-5）。
+    setPendingTemplateId(null);
   };
-  // FREE→通常で素材が復元できず消える場合だけ確認へ回す（ADR-0030・非破壊往復＋確認）。復元できる往復・同一テンプレは即適用。
+  // FREE→通常で中身が画面から出なくなる場合だけ確認へ回す（ADR-0030・非破壊往復＋確認）。往復で見た目が保たれるなら即適用。
+  //
+  // 以前は「復元される休眠配置があるか（willRestore）」だけを見ていたため、**1枚でも復元されれば確認が出なかった**
+  // ＝FREE で足した写真・文字が無言で画面から消えていた（#547 P2-9・ADR-0026④）。復元の有無ではなく
+  // 「**復元先を超えて出なくなる中身が何個あるか**」で判断する（数え方は描画と同じ規則＝`freeContentHiddenBySwitch`）。
   const requestTemplateSwitch = (newTemplateId: string) => {
-    if (newTemplateId === selected.templateId) return;
+    // いまの見た目を選び直した＝切替をやめた、として確認も解く。解かないとピッカーは確認待ちの候補へ跳ね戻り、
+    // 「元の見た目を選んだのに戻せない」行き止まりになる（選択表示は pendingTemplateId 優先＝#532）。
+    if (newTemplateId === selected.templateId) { setPendingTemplateId(null); return; }
     const nt = templates.find((t) => t.templateId === newTemplateId);
-    const goingToNormal = !!nt && nt.category !== FREE_CATEGORY;
-    const newSlotIds = templateSlotIds(nt?.layers ?? []); // 差し込み先の判定は切替の清算規則と同じ（§2-7）
-    const willRestore = Object.keys(selected.assetRefs).some((k) => newSlotIds.has(k));
-    if (isFree && freeLayout.length > 0 && goingToNormal && !willRestore) { setPendingTemplateId(newTemplateId); return; }
+    if (isFree && freeContentHiddenBySwitch(selected, nt).total > 0) { setPendingTemplateId(newTemplateId); return; }
     applyTemplateSwitch(newTemplateId);
   };
   // 「種類」（場面カテゴリ）の選択肢＝この向きで1つ以上見た目がある全カテゴリ（FREE 含む・#528）。
@@ -573,8 +571,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const first = templates.find((t) => t.category === category && t.aspectRatio === aspectRatio);
     if (first) requestTemplateSwitch(first.templateId);
   };
-  // 確認待ち（pendingTemplateId）の間は、選んだ先の種類/見た目を選択表示に保つ＝「選んだのに元へ戻った」を防ぐ（#532 レビュー）。
-  const pendingCategory = pendingTemplateId ? templates.find((t) => t.templateId === pendingTemplateId)?.category : undefined;
+  // 確認に出す件数（毎レンダで数え直す＝確認中に自由配置の中身を消したら文言も追従する）。FREE 以外では休眠 freeLayout を数えない。
+  const pendingHidden = pendingTemplateId && isFree
+    ? freeContentHiddenBySwitch(selected, templates.find((t) => t.templateId === pendingTemplateId))
+    : null;
+  // 確認が「生きている」のは、出なくなる中身がまだあるときだけ。中身を消して失う物が無くなったら確認ごと畳み、
+  // **選択表示も実際の見た目へ戻す**（何も失わないのに警告を出し続けない・ADR-0026①）。
+  // 表示だけ引っ込めて選択表示を候補のままにすると、確認ボタンも無く同じ値の選び直しでは onChange も出ない
+  // ＝「選んだのに切り替わらない」行き止まりになる（#532 の「選んだのに戻った」の裏返しを作らない）。
+  const pendingActive = pendingTemplateId != null && pendingHidden != null && pendingHidden.total > 0;
+  // 確認が生きている間は、選んだ先の種類/見た目を選択表示に保つ＝「選んだのに元へ戻った」を防ぐ（#532 レビュー）。
+  const pendingCategory = pendingActive ? templates.find((t) => t.templateId === pendingTemplateId)?.category : undefined;
   // 追加：新要素を末尾に積み、追加直後のその要素を選択状態にする（詳細モードでも即表示・#179）。
   // duplicateFreeEl と同様に updater 内の最新 s.freeLayout から計算（同期実行で newId は下の前に確定）。
   const addFreeEl = (kind: FreeElementKind) => {
@@ -1767,7 +1774,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <select
                 id="look"
                 className="select"
-                value={pendingTemplateId ?? selected.templateId}
+                value={pendingActive ? pendingTemplateId : selected.templateId}
                 onChange={(e) => requestTemplateSwitch(e.target.value)}
               >
                 {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}
@@ -1798,15 +1805,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   この向き・場面に合う見た目パターンは、今はこれだけです。
                 </p>
               ) : null}
-              {/* FREE→通常で素材が画面から消える場合の確認（データは残り、自由配置に戻せば元に戻る・ADR-0030・#524 P1）。 */}
-              {pendingTemplateId && (
+              {/* FREE→通常で中身が画面から出なくなる場合の確認（データは残り、自由配置に戻せば元に戻る・ADR-0030・#524 P1）。
+                  何がいくつ出なくなるかを示す＝「素材が消える」とだけ言って文字・図形の消失に気づけない、を作らない（#547 P2-9）。
+                  件数は**毎回いまの場面から数え直す**：確認中に自由配置の中身を消して出なくなる物が0になったら、
+                  何も失わないのに警告が残る（言っていることと実際が食い違う・ADR-0026①）ので確認ごと引っ込める。 */}
+              {pendingActive && pendingHidden && (
                 <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
-                  <span>通常の見た目に変えると、いまの自由配置の素材は画面に表示されなくなります（データは残り、自由配置に戻せば元に戻ります）。</span>
+                  <span>{freeSwitchConfirmMessage(pendingHidden)}</span>
                   <div className="row gap-sm" style={{ marginTop: 6 }}>
                     <button className="btn btn-ghost text-sm" onClick={() => setPendingTemplateId(null)}>やめる</button>
                     <button
                       className="btn btn-danger text-sm"
-                      onClick={() => { applyTemplateSwitch(pendingTemplateId); setPendingTemplateId(null); }}
+                      onClick={() => applyTemplateSwitch(pendingTemplateId)}
                     >
                       通常の見た目に変える
                     </button>

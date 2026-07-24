@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
-import { deleteLookConfirmMessage, fitLabel, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
+import { deleteLookConfirmMessage, fitLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -105,5 +105,36 @@ describe("収め方・重ね順の表記（#547 P2-10/P2-11）", () => {
 
   it("重ね順の見出しは正典語「重ね順」（「重なり順」にしない）", () => {
     expect(Z_ORDER_LABEL).toBe("重ね順");
+  });
+});
+
+// #547 P2-9：FREE→通常で「何がいくつ出なくなるか」を先に示す（非破壊なので「消える」とは言わない）。
+describe("自由配置→通常の確認文言（#547 P2-9）", () => {
+  const none = { slot: 0, text: 0, subtitle: 0, shape: 0, total: 0 };
+
+  it("0 の種別は書かない（「文字0個」を出さない）", () => {
+    const m = freeSwitchConfirmMessage({ ...none, slot: 2, total: 2 });
+    expect(m).toContain("素材2個");
+    expect(m).not.toContain("文字");
+    expect(m).not.toContain("図形");
+  });
+
+  it("複数の種別は並べて示す（素材だけ言って文字の消失に気づけない、を作らない）", () => {
+    const m = freeSwitchConfirmMessage({ slot: 1, text: 2, subtitle: 1, shape: 3, total: 7 });
+    expect(m).toContain("素材1個");
+    expect(m).toContain("文字2個");
+    expect(m).toContain("字幕1個");
+    expect(m).toContain("図形3個");
+  });
+
+  it("非破壊であること（データは残る・自由配置に戻せば元どおり）を必ず添える", () => {
+    const m = freeSwitchConfirmMessage({ ...none, shape: 1, total: 1 });
+    expect(m).toContain("データは残る");
+    expect(m).toContain("自由配置に戻せば");
+    expect(m).not.toContain("消え"); // 「消えます」とは言わない（戻せるので）
+  });
+
+  it("種別の内訳が無くても文として成立する（呼び出し側の想定外でも壊れた文にしない）", () => {
+    expect(freeSwitchConfirmMessage(none)).toContain("いまの自由配置の中身");
   });
 });

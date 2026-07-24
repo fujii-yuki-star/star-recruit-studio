@@ -1,5 +1,6 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
-import type { AssetType, Fit, TextKey } from "../domain/enums";
+import type { AssetType, Fit, FreeElementKind, TextKey } from "../domain/enums";
+import type { FreeContentHidden } from "../domain/project/sceneOps";
 import { formatSceneNumbers } from "./adapters";
 
 /**
@@ -18,6 +19,38 @@ export const fitLabel: Record<Fit, string> = {
 
 /** 重ね順（要素の前後関係）のユーザー向け見出し。正典は「重ね順」（`06_UI_SPEC §3`＝layer→要素・並び順）。#547 P2-11。 */
 export const Z_ORDER_LABEL = "重ね順";
+
+/**
+ * 自由配置の要素種別のユーザー向け名称（§2-3：技術語を出さない）。全 kind 必須＝追加時にコンパイル検知。
+ * 自由配置エディタ（要素名・編集ポップオーバー・貼り付け）と、切替の確認文言が**同じ語**を使うための単一の参照元（§6・#547 P2-9）。
+ */
+export const freeKindLabel: Record<FreeElementKind, string> = {
+  slot: "素材",
+  text: "文字",
+  shape: "図形",
+  subtitle: "字幕",
+};
+
+/**
+ * 自由配置→通常の見た目へ変えるときの確認（#547 P2-9・ADR-0030）。
+ *
+ * 切替は非破壊（自由配置のデータは残る）なので「消えます」とは言わない。ただし通常の見た目には自由配置の枠が無く、
+ * **差し込み先を超えた分は画面に出なくなる**。何がいくつ出なくなるかを先に示す（15 §5 の件数表示の流儀・ADR-0026④）。
+ * 数は `freeContentHiddenBySwitch` で描画と同じ規則から出す＝「出なくなる」と言った数だけ実際に出なくなる。
+ *
+ * 種別名は自由配置エディタと同じ `freeKindLabel` を使う（同じ物を画面内で別の名で呼ばない）。
+ * 引数は domain の `FreeContentHidden`（キーは `FreeElementKind` 由来）＝種別が増えたら **`freeKindLabel` とこの関数が
+ * コンパイルエラー**になり、表示漏れに気づける。
+ */
+export function freeSwitchConfirmMessage(hidden: FreeContentHidden): string {
+  const parts: string[] = [];
+  if (hidden.slot > 0) parts.push(`${freeKindLabel.slot}${hidden.slot}個`);
+  if (hidden.text > 0) parts.push(`${freeKindLabel.text}${hidden.text}個`);
+  if (hidden.subtitle > 0) parts.push(`${freeKindLabel.subtitle}${hidden.subtitle}個`);
+  if (hidden.shape > 0) parts.push(`${freeKindLabel.shape}${hidden.shape}個`);
+  const what = parts.length > 0 ? parts.join("・") : "いまの自由配置の中身";
+  return `通常の見た目に変えると、${what}が画面に出なくなります。データは残るので、自由配置に戻せば元どおりになります。`;
+}
 
 // ── 声の一括作成（#547 P2-6）。たたき台・場面編集・公開前チェックの3画面で同じ語・同じ挙動にする（§6・ADR-0026②）。 ──
 

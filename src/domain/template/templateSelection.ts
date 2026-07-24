@@ -5,6 +5,7 @@ import type { Template } from './types';
 import type { Scene } from '../project/types';
 import { templateSlotIds } from './layerOps';
 import { isUserTemplate } from './userTemplate';
+import { freeContentHiddenBySwitch } from '../project/sceneOps';
 
 /** 場面編集の見た目ピッカーに渡す整合結果（#415）。 */
 export interface PickableTemplates {
@@ -143,7 +144,9 @@ export function contentHiddenBySwitch(scene: Scene, next: Template, prev?: Templ
     textKeys: filledTextKeys(scene).filter((k) => !keepTexts.has(k) && (!shownTexts || shownTexts.has(k))),
     character: !!scene.character?.poseAssetId && shownCharacter && !next.layers.some((l) => l.type === 'character'),
     // 自由配置は FREE テンプレのときだけ描かれる（それ以外では休眠＝ADR-0030）。
-    freeLayout: hasFreeLayout && shownFree && !nextIsFree,
+    // 「中身が出なくなるか」の数え方は場面編集の切替確認と**同じ関数**に委ねる（§6・ADR-0026②）。
+    // 別々に書くと、往復で見た目が保たれる場面に対して片方は「出なくなる」と言い片方は言わない、が起きる。
+    freeLayout: hasFreeLayout && shownFree && freeContentHiddenBySwitch(scene, next).total > 0,
   };
 }
 

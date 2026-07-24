@@ -1,8 +1,8 @@
 # ADR-0030: 通常↔FREE 切替の非破壊コンテンツ移送（freeLayout の seed と休眠）
 
 - **状態**: Accepted
-- **日付**: 2026-07-14
-- **関連**: `CLAUDE.md §2-2/§2-4` / [`ADR-0008`](0008-free-layout-editor.md)（自由配置＝`scene.freeLayout`） / [`ADR-0024`](0024-non-destructive-editing-model.md)（非破壊） / `#236`（切替の清算ポリシー） / `11_SCHEMA_REFERENCE.md`（freeLayout の正典） / PR #524（FREE 全場面化）レビュー P1/P2
+- **日付**: 2026-07-14（**決定3 の確認条件を 2026-07-24 に改定＝#547 P2-9**）
+- **関連**: `CLAUDE.md §2-2/§2-4` / [`ADR-0008`](0008-free-layout-editor.md)（自由配置＝`scene.freeLayout`） / [`ADR-0024`](0024-non-destructive-editing-model.md)（非破壊） / [`ADR-0022`](0022-element-grouping.md)（グループの非表示） / [`ADR-0029`](0029-free-subtitle-multi-and-binding.md)・[`ADR-0031`](0031-simultaneous-dual-voice.md)（字幕の実表示） / `#236`（切替の清算ポリシー） / `11_SCHEMA_REFERENCE.md`（freeLayout の正典） / PR #524（FREE 全場面化）レビュー P1/P2 / #547 P2-9（確認条件の改定）
 
 ## コンテキスト
 PR #524 で「見た目ピッカーは全場面で FREE を候補に出し、選ぶと FREE 化」を実装したが、レビューで切替時のデータ移送が欠けていた:
@@ -31,7 +31,28 @@ PR #524 で「見た目ピッカーは全場面で FREE を候補に出し、選
    - **字幕層 → subtitle 要素**（`subtitleSource`＝単独 `narration`／掛け合い `allLines`＝`defaultSubtitleSource`・ADR-0029）。字幕が出る場面のみ（#524 P1）。
    `freeLayout` が空のときだけ seed し、既存の自由配置は上書きしない。`assetRefs`/`slotFits` は #236 どおり清算＝内容は `freeLayout` に移る（単一の源）。
 2. **FREE→通常は `freeLayout` を休眠保持**（従来どおり `...scene`）。**描画・編集は既に category でゲート済み**。**事前確認・逆引き（使用場面）・削除確認の「実効使用」判定を共通化**（`sceneActiveAssetIds(scene, template)`＝FREE 場面は `freeLayout[].assetId`／通常場面は `assetRefs`＋`character.poseAssetId`）＝休眠側を検査・誤カウント・誤表示しない（P2 解消・`adapters.ts`／`assetUsage.ts`）。
-3. **非破壊往復（Option A・#524 再レビュー・利用者決定 2026-07-14）**：通常配置（`assetRefs`/`slotFits`/`texts`）は切替で清算せず**休眠保持**し、**FREE→通常で自動復元**する（#236 の「切替で清算」を「**FREE 化では清算しない**」へ改める＝ダングリングは `sceneActiveAssetIds` で無害化済み）。FREE→通常→FREE は休眠 `freeLayout` が戻る。**元々通常配置が無いネイティブ FREE 場面→通常は空になるので、その場合だけ切替前にインライン確認**（`SceneEditScreen` の見た目ピッカー・自然な文言＝黙って消さない・ADR-0026④）。
+3. **非破壊往復（Option A・#524 再レビュー・利用者決定 2026-07-14）**：通常配置（`assetRefs`/`slotFits`/`texts`）は切替で清算せず**休眠保持**し、**FREE→通常で自動復元**する（#236 の「切替で清算」を「**FREE 化では清算しない**」へ改める＝ダングリングは `sceneActiveAssetIds` で無害化済み）。FREE→通常→FREE は休眠 `freeLayout` が戻る。**FREE→通常で画面から出なくなる中身があるときは切替前にインライン確認**（`SceneEditScreen` の見た目ピッカー・黙って消さない＝ADR-0026④）。
+   - **確認の条件（#547 P2-9 で改定・2026-07-24）**：当初は「**素材が復元できない**（＝ネイティブ FREE 場面）ときだけ」としていたが、これは
+     「**1枚でも復元されれば確認しない**」を意味し、FREE で足した写真・文字が無言で画面から消えていた（通常→FREE→自由配置で追加→通常、が該当）。
+     判定を「復元の有無」から「**復元先を超えて出なくなる中身が1つでもあるか**」へ改める＝`freeContentHiddenBySwitch(scene, next)`。
+   - **数え方**：要素 id では辿れない（seed は変換のたびに新 id を振り由来を残さない）ため、**中身の同値＋多重度**で突き合わせる。
+     通常側で出る中身（差し込み先の素材〔テンプレ既定素材 `layer.assetId` のフォールバック込み〕・立ち絵・text 層が引く `texts`）を多重集合に積み、
+     自由配置の各要素を1つずつ消費して**消費できなかった分**を数える。図形は通常テンプレに受け皿が無いので必ず数える。
+     **字幕は箱の数で突き合わせない**：通常テンプレの字幕層1枚がその場面の字幕をすべて受け持つ（逐次も同時字幕の段積みも1層＝ADR-0031）ため、
+     **その箱が出している文が切替後もすべて出るか**（`sceneDisplayedSubtitleTexts` に含まれるか）で判断する。
+     「字幕が1つでも出るか」では足りない＝掛け合い場面で対象＝読み上げ（`texts.subtitle`）の箱は、通常テンプレの字幕層が
+     行の字幕で上書きされる（`layoutScene` の `opts.subtitleText`）ため**決して出ない**のに、行字幕があるせいで見逃す。
+   - **数えないもの**＝いま出ていない中身：`hidden` の要素・非表示グループのメンバー（ADR-0022）・空スロット/空文字・何も表示していない字幕箱。
+     受け皿の数え上げも同じ規則に従う（**非表示グループのメンバー層は受け皿にしない**＝描画されないため）。
+   - **確認文言は件数つき**（「素材2個・文字1個が画面に出なくなります」＝15 §5 の件数表示の流儀）。非破壊なので「消える」とは言わず「自由配置に戻せば元どおり」を添える。
+   - **確認は毎回いまの場面から数え直す**。確認中に中身を消して失う物が無くなったら、確認ごと畳み**選択表示も実際の見た目へ戻す**
+     （＝確認は答えられないまま失効し、切替は起きない。選び直せば何も失わないので即座に切り替わる）。表示だけ引っ込めて
+     選択表示を候補のままにすると、確認ボタンも無く同じ値の選び直しでは変更イベントも出ない＝「選んだのに切り替わらない」
+     行き止まりになる（#532 の「選んだのに元へ戻った」の裏返しを作らない）。**いまの見た目を選び直したときも確認を解く**（切替をやめた）。
+   - **通常→FREE の seed も同じ実表示規則で判定する**：字幕要素を作るかは `sceneDisplayedSubtitleTexts` で見る
+     （`texts.subtitle` 固定で見ると、字幕層の `textKey` を変えたマイ見た目〔ADR-0017〕で「元は出ていない字幕」を持ち込み、
+     戻すときに「往復しただけなのに字幕が出なくなります」と言う）。
+   - 「まとめて標準にする」（`contentHiddenBySwitch` の `freeLayout`）も**同じ関数へ委譲**する＝同じ場面に画面ごとに別の答えを返さない（ADR-0026②）。
 4. **FREE スロットの選択肢を一本化**：立ち絵/ロゴを移送しても FREE 編集画面で選び直せるよう、置ける素材種別を `isFreeSlotAssetType`（image/video/yuko/logo/qr/decor）へ集約し、現在値も必ず選択肢へ含める（#524 P1）。
 5. **対象外**：装飾レイヤー（`shape`/背景色）は変換しない（意匠）。字幕の背景帯（`layer.background`）は FreeElement に持ち込み先が無く引き継がない＝**#529 で追跡（0.4.2）**。
 
@@ -49,7 +70,8 @@ PR #524 で「見た目ピッカーは全場面で FREE を候補に出し、選
 - `src/domain/enums.ts`：`FREE_SLOT_ASSET_TYPES`／`isFreeSlotAssetType`（FREE スロットに置ける素材種別＝映像として描ける非音声）を新設。`SceneEditScreen` の FREE 素材候補と現在値保持を一本化。
 - `src/domain/project/assetUsage.ts`：`sceneActiveAssetIds`（実効テンプレでゲート）を新設し `sceneUsesAsset`/`scenesUsingAsset` を template 受け取りへ。`adapters.ts`（precheck）と `MaterialsScreen.tsx`（逆引き/削除確認）が同一規則を共有。
 - `src/domain/template/layerOrder.ts`：`DEFAULT_LAYER_Z`／`effectiveLayerZ`（レイヤーの実効 z＝05§7）を新設。通常描画（`layout.ts`）と 通常→FREE 変換が同じ実効 z を参照＝`zIndex` 未指定でも重なり順一致（#524 P2）。
-- `src/app/screens/SceneEditScreen.tsx`：ピッカー onChange で旧テンプレ（`s.templateId` 解決）を `switchSceneTemplate` へ渡す。**FREE→通常で素材が復元できず消える場合はインライン確認**（`pendingTemplateId`）。
+- `src/app/screens/SceneEditScreen.tsx`：ピッカー onChange で旧テンプレ（`s.templateId` 解決）を `switchSceneTemplate` へ渡す。**FREE→通常で画面から出なくなる中身があるときはインライン確認**（`pendingTemplateId`・件数は毎レンダで数え直す＝確認中に中身を消したら確認ごと引っ込める）。
+- `src/domain/project/sceneOps.ts`：`freeContentHiddenBySwitch`（#547 P2-9・上記 決定3）。`src/domain/project/subtitleBinding.ts`：`freeSubtitleElementTexts`（字幕箱の実表示を `sceneDisplayedSubtitleTexts` と共有）。
 - **正典**：`11_SCHEMA_REFERENCE.md` に「`freeLayout` は任意 `sceneType` に存在しうる（**有効なのは FREE テンプレのときだけ＝それ以外は休眠**）」を明記。#236 の非対称（`texts` は保持）を `freeLayout`/`assetRefs` にも広げる読み。**schema 据え置き**（`freeLayout` は enum 条件を課さない任意フィールド＝`project.schema` の版は変えない）。
 - テスト：通常→FREE の素材/収め方/回転/`slotClips`/立ち絵/字幕（単独=narration・掛け合い=allLines）変換・**グループ実効配置**・**zIndex 未指定の実効 z**、**非破壊往復（通常→FREE→通常で assetRefs/slotFits 復元）**、休眠 `freeLayout`・assetRefs・character が precheck/逆引きに出ないこと。
 

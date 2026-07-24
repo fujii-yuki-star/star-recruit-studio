@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import type { Part, Scene } from './types';
+import type { FreeElement, Part, Scene } from './types';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry } from '../group/compose';
 import { DEFAULT_LAYER_Z } from '../template/layerOrder';
 import { NARRATION_STATUS } from '../enums';
-import { duplicateSceneInList, freeLayoutFromPlacedContent, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
+import { duplicateSceneInList, freeContentHiddenBySwitch, freeLayoutFromPlacedContent, moveSceneInList, moveSceneToIndexInList, rebuildPartSceneIds, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from './sceneOps';
 import { DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight } from '../template/textStyle';
 import { layoutScene, type TextItem } from '../../renderer/layout';
 import { wrapText } from '../text/textWrap';
@@ -637,6 +637,22 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(back.sceneType).toBe('opening');
   });
 
+  // 字幕層の textKey はテンプレ作成エディタで変えられる（ADR-0017）。seed の判定を TEXT_KEY.subtitle 固定にすると
+  // 「元は出ていない字幕」を FREE へ持ち込み、戻すときに「往復しただけなのに字幕が出なくなります」と言う（#547 P2-9）。
+  it('通常→FREE：字幕層の textKey が subtitle 以外なら、texts.subtitle があっても字幕要素を作らない', () => {
+    const tmpl = prevTemplate();
+    const customKey: Template = {
+      ...tmpl,
+      layers: tmpl.layers.map((l) => (l.type === 'subtitle' ? { ...l, textKey: 'caption' as const } : l)),
+    };
+    const sc = { ...richScene(), texts: { subtitle: '出ていない字幕' } } as Scene;
+    const { elements } = freeLayoutFromPlacedContent(sc, customKey);
+    expect(elements.some((e) => e.kind === 'subtitle')).toBe(false); // 出ていないものは持ち込まない
+    // 逆に層の textKey に中身があれば持ち込む（描画と一致）。
+    const withCaption = { ...richScene(), texts: { caption: 'キャプション字幕' } } as Scene;
+    expect(freeLayoutFromPlacedContent(withCaption, customKey).elements.some((e) => e.kind === 'subtitle')).toBe(true);
+  });
+
   it('通常→FREE：zIndex 未指定レイヤーは実効 z（種別既定）で展開＝通常描画と重なり順一致（#524 P2）', () => {
     const { elements } = freeLayoutFromPlacedContent(richScene(), prevTemplate()); // prevTemplate は zIndex 未指定
     const bg = elements.find((e) => e.assetId === 'asset_bg')!; // background 層
@@ -644,5 +660,204 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(bg.zIndex).toBe(DEFAULT_LAYER_Z.background); // 0（生の未指定→FREE 既定 1 ではない）
     expect(logo.zIndex).toBe(DEFAULT_LAYER_Z.logo); // 60
     expect((logo.zIndex ?? 0) > (bg.zIndex ?? 0)).toBe(true); // ロゴが背景より前面（通常描画と一致）
+  });
+});
+
+describe('freeContentHiddenBySwitch（FREE→通常で出なくなる中身・#547 P2-9）', () => {
+  const layer = (id: string, type: Layer['type'], extra: Partial<Layer> = {}): Layer => ({ id, type, x: 0, y: 0, w: 100, h: 100, ...extra });
+  /** 通常テンプレ：差し込み先1つ・見出し1つ・字幕1つ・立ち絵1つ。 */
+  const normalTemplate = (): Template => ({
+    schemaVersion: '1.0', templateId: 'normal_v1', name: '通常', category: 'opening', aspectRatio: '16:9',
+    canvas: { width: 1920, height: 1080 },
+    layers: [
+      layer('mainVisual', 'slot'),
+      layer('title', 'text', { textKey: 'title' }),
+      layer('subtitle', 'subtitle', { textKey: 'subtitle' }),
+      layer('yuko', 'character'),
+    ],
+  });
+  const freeTemplate = (): Template => ({ ...normalTemplate(), templateId: 'free_v1', category: 'free', layers: [] });
+  const freeEl = (id: string, kind: FreeElement['kind'], extra: Partial<FreeElement> = {}): FreeElement =>
+    ({ id, kind, x: 0, y: 0, w: 10, h: 10, ...extra });
+  /** FREE 場面：通常から往復してきた想定（差し込み先の素材＋見出しが休眠している）。 */
+  const freeScene = (elements: FreeElement[], over: Partial<Scene> = {}): Scene => ({
+    ...scene('scene_001', 1),
+    templateId: 'free_v1', sceneType: 'free',
+    assetRefs: { mainVisual: 'asset_a' },
+    texts: { title: 'タイトル' },
+    freeLayout: elements,
+    ...over,
+  });
+
+  it('往復しただけ（追加なし）なら出なくなる中身は無い＝確認を出さない', () => {
+    const s = freeScene(
+      [
+        freeEl('free_001', 'slot', { assetId: 'asset_a' }),
+        freeEl('free_002', 'text', { text: 'タイトル' }),
+        freeEl('free_003', 'subtitle'),
+      ],
+      { texts: { title: 'タイトル', subtitle: '字幕の文' } },
+    );
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toEqual({ slot: 0, text: 0, subtitle: 0, shape: 0, total: 0 });
+  });
+
+  it('FREE で足した分は、復元される素材があっても数える（これが元の穴＝willRestore では見えない）', () => {
+    const s = freeScene([
+      freeEl('free_001', 'slot', { assetId: 'asset_a' }), // 復元される
+      freeEl('free_002', 'slot', { assetId: 'asset_b' }), // FREE で追加＝出なくなる
+      freeEl('free_003', 'slot', { assetId: 'asset_c' }), // 同上
+      freeEl('free_004', 'text', { text: 'FREEで足した文字' }),
+    ]);
+    const r = freeContentHiddenBySwitch(s, normalTemplate());
+    expect(r).toMatchObject({ slot: 2, text: 1, total: 3 });
+  });
+
+  it('同じ素材を2つ置いていたら、差し込み先1つぶんを超えた分を数える（多重度を見る）', () => {
+    const s = freeScene([
+      freeEl('free_001', 'slot', { assetId: 'asset_a' }),
+      freeEl('free_002', 'slot', { assetId: 'asset_a' }), // 同じ素材の2枚目＝通常では1枚しか出ない
+    ]);
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ slot: 1, total: 1 });
+  });
+
+  // 復元されるのは**切替先テンプレに実在する差し込み先**の分だけ（switchSceneTemplate の清算規則と同じ）。
+  // 休眠したままのキーを「復元される」と数えると、実際には出ない素材を出ると言ってしまう。
+  it('切替先に無い差し込み先の休眠素材は「復元される」に数えない', () => {
+    const s = freeScene([freeEl('free_001', 'slot', { assetId: 'asset_old' })], {
+      assetRefs: { oldSlot: 'asset_old' }, // oldSlot は通常テンプレに無い＝復元されない
+    });
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ slot: 1, total: 1 });
+  });
+
+  it('自由配置で作った場面（休眠する通常配置が無い）は中身すべてを数える', () => {
+    const s = freeScene(
+      [freeEl('free_001', 'slot', { assetId: 'asset_x' }), freeEl('free_002', 'text', { text: 'あいさつ' })],
+      { assetRefs: {}, texts: {} },
+    );
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ slot: 1, text: 1, total: 2 });
+  });
+
+  it('図形（飾り）は通常テンプレに受け皿が無いので必ず数える', () => {
+    const s = freeScene([freeEl('free_001', 'shape', { shapeType: 'rect' })]);
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ shape: 1, total: 1 });
+  });
+
+  // 字幕は箱の数で突き合わせない：通常テンプレの字幕層1枚がその場面の字幕を**すべて**受け持つ
+  // （逐次も同時字幕の段積みも1層＝ADR-0031）。話者別に複数置いても、切替後に字幕が出るなら失われていない。
+  it('字幕層のある通常テンプレへは、箱を複数置いていても出なくならない（1層が全話者を受け持つ）', () => {
+    const s = freeScene([freeEl('free_001', 'subtitle'), freeEl('free_002', 'subtitle')], {
+      texts: { subtitle: '字幕の文' },
+    });
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ subtitle: 0, total: 0 });
+  });
+
+  it('字幕層の無い通常テンプレへ変えると、出ていた字幕の箱を数える', () => {
+    const noSubtitle = (): Template => ({
+      ...normalTemplate(),
+      layers: normalTemplate().layers.filter((l) => l.type !== 'subtitle'),
+    });
+    const s = freeScene([freeEl('free_001', 'subtitle'), freeEl('free_002', 'subtitle')], {
+      texts: { subtitle: '字幕の文' },
+    });
+    expect(freeContentHiddenBySwitch(s, noSubtitle())).toMatchObject({ subtitle: 2, total: 2 });
+  });
+
+  // 掛け合い場面の通常テンプレは、字幕層を**行の字幕で上書き**する（layoutScene の opts.subtitleText）。
+  // つまり `texts.subtitle`（対象＝読み上げ）は通常テンプレでは決して出ない＝「字幕が出ているから失っていない」では取りこぼす。
+  it('掛け合い場面で対象＝読み上げの字幕箱は、切替後に行字幕が出ていても「出なくなる」と数える', () => {
+    const s = freeScene([freeEl('free_001', 'subtitle', { subtitleSource: { kind: 'narration' } })], {
+      texts: { subtitle: 'ここに注釈' },
+      lines: [
+        { lineId: 'line_001', text: 'こんにちは', status: 'none' },
+        { lineId: 'line_002', text: 'よろしく', status: 'none' },
+      ],
+    } as Partial<Scene>);
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ subtitle: 1, total: 1 });
+  });
+
+  it('掛け合い場面で対象＝全部の字幕箱は、切替後も同じ行字幕が出るので数えない', () => {
+    const s = freeScene([freeEl('free_001', 'subtitle', { subtitleSource: { kind: 'allLines' } })], {
+      texts: {},
+      lines: [
+        { lineId: 'line_001', text: 'こんにちは', status: 'none' },
+        { lineId: 'line_002', text: 'よろしく', status: 'none' },
+      ],
+    } as Partial<Scene>);
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ total: 0 });
+  });
+
+  it('いま何も出していない字幕の箱は数えない（字幕オフ／文が空）', () => {
+    const off = freeScene([freeEl('free_001', 'subtitle')], {
+      texts: { subtitle: '字幕の文' },
+      subtitleEnabledDefault: false,
+    });
+    const empty = freeScene([freeEl('free_001', 'subtitle')], { texts: {} });
+    const noSubtitle = (): Template => ({
+      ...normalTemplate(),
+      layers: normalTemplate().layers.filter((l) => l.type !== 'subtitle'),
+    });
+    expect(freeContentHiddenBySwitch(off, noSubtitle()).total).toBe(0);
+    expect(freeContentHiddenBySwitch(empty, noSubtitle()).total).toBe(0);
+  });
+
+  // 受け皿の数え上げは描画と同じ規則（ADR-0022）。非表示グループのメンバー層は描かれない＝受け皿にしない。
+  it('切替先の差し込み先が非表示グループにあると、受け皿として数えない（無言消失を作らない）', () => {
+    const hiddenSlot = (): Template => ({
+      ...normalTemplate(),
+      groups: [{ id: 'group_001', members: ['mainVisual'], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, hidden: true }],
+    });
+    const s = freeScene([freeEl('free_001', 'slot', { assetId: 'asset_a' })]);
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ total: 0 }); // 通常は受け皿あり
+    expect(freeContentHiddenBySwitch(s, hiddenSlot())).toMatchObject({ slot: 1, total: 1 }); // 非表示なら出ない
+  });
+
+  // 描画は「場面の素材 ?? テンプレ既定素材」（ADR-0021）。既定素材で出るものを「出なくなる」と言わない。
+  it('テンプレ既定素材（背景）で出る素材は受け皿として数える', () => {
+    const withDefault = (): Template => ({
+      ...normalTemplate(),
+      layers: [...normalTemplate().layers, layer('background', 'background', { assetId: 'asset_bg' })],
+    });
+    const s = freeScene([freeEl('free_001', 'slot', { assetId: 'asset_bg' })], { assetRefs: {} });
+    expect(freeContentHiddenBySwitch(s, withDefault())).toMatchObject({ total: 0 });
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ slot: 1, total: 1 }); // 既定素材が無ければ出ない
+  });
+
+  // 描画（layoutScene）も実効使用（sceneActiveAssetIds）も character.enabled を見ない＝ここも見ない。
+  it('立ち絵は character.enabled を見ずに対応づける（描画と同じ規則）', () => {
+    const s = freeScene([freeEl('free_001', 'slot', { assetId: 'asset_pose' })], {
+      assetRefs: {},
+      character: { enabled: false, characterId: 'yuko', poseAssetId: 'asset_pose' },
+    });
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ total: 0 });
+  });
+
+  it('いま見えていないもの（非表示・非表示グループのメンバー）は数えない', () => {
+    const s = freeScene(
+      [
+        freeEl('free_001', 'shape', { hidden: true }),
+        freeEl('free_002', 'shape'),
+      ],
+      {
+        assetRefs: {},
+        texts: {},
+        groups: [{ id: 'group_001', members: ['free_002'], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, hidden: true }],
+      },
+    );
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ total: 0 });
+  });
+
+  it('空スロット・空文字は失う中身が無いので数えない', () => {
+    const s = freeScene(
+      [freeEl('free_001', 'slot', { assetId: null }), freeEl('free_002', 'text', { text: '' })],
+      { assetRefs: {}, texts: {} },
+    );
+    expect(freeContentHiddenBySwitch(s, normalTemplate())).toMatchObject({ total: 0 });
+  });
+
+  it('自由配置が空／切替先が自由配置／見た目が見つからない場合は 0（確認を出さない）', () => {
+    expect(freeContentHiddenBySwitch(freeScene([]), normalTemplate()).total).toBe(0);
+    const s = freeScene([freeEl('free_001', 'shape')]);
+    expect(freeContentHiddenBySwitch(s, freeTemplate()).total).toBe(0); // FREE→FREE は隠れない
+    expect(freeContentHiddenBySwitch(s, undefined).total).toBe(0); // 見た目未解決は判断材料が無い
   });
 });

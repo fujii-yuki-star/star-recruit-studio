@@ -214,6 +214,25 @@ describe('standardTemplateForScene / standardLookFixesForUnresolved（#547・標
     expect(contentHiddenBySwitch(scene, normal, normalPrev).freeLayout).toBe(false);
   });
 
+  // #547 P2-9：数え方は場面編集の切替確認と同じ関数（freeContentHiddenBySwitch）へ委ねる。
+  // 別々に書くと、往復で見た目が保たれる場面に対して片方は「出なくなる」と言い片方は言わない（ADR-0026②）。
+  it('自由配置の中身が全部通常側で出るなら「出なくなる」とは言わない（場面編集の確認と同じ答え）', () => {
+    const freePrev = tpl({ templateId: 'free_prev', category: 'free', aspectRatio: '16:9', layers: [] });
+    const normal = tpl({ templateId: 'normal', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('mainVisual', 'slot')] });
+    // 往復の途中＝FREE 要素の素材が、通常側の差し込み先へ復元される休眠 assetRefs と同じ。
+    const scene = {
+      ...scn('s1', 'free', 'free_prev', { mainVisual: 'asset_a' }),
+      freeLayout: [{ id: 'free_001', kind: 'slot', x: 0, y: 0, w: 10, h: 10, assetId: 'asset_a' }],
+    } as unknown as Scene;
+    expect(contentHiddenBySwitch(scene, normal, freePrev).freeLayout).toBe(false);
+    // FREE で足した分があれば言う。
+    const added = {
+      ...scene,
+      freeLayout: [...(scene.freeLayout ?? []), { id: 'free_002', kind: 'shape', x: 0, y: 0, w: 10, h: 10 }],
+    } as unknown as Scene;
+    expect(contentHiddenBySwitch(added, normal, freePrev).freeLayout).toBe(true);
+  });
+
   it('判定は switchSceneTemplate の清算規則と同じ差し込み先（背景・スロット・ロゴ）を見る', () => {
     const photo = photoWithSlots;
     const scene = scn('s1', 'photo_intro', 'gone', { mainVisual: 'a1', bg: 'a2', layer_009: 'a3' });

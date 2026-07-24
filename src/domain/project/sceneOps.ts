@@ -3,7 +3,7 @@
 // scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
 import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } from '../enums';
-import type { SceneCategory } from '../enums';
+import type { FreeElementKind, SceneCategory } from '../enums';
 import type { Layer, Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { effectiveLayerZ } from '../template/layerOrder';
@@ -13,7 +13,7 @@ import { wrapText } from '../text/textWrap';
 import { resolveLineSubtitle } from './lineTimeline';
 import { normalizeDialogueTiming } from './narrationLines';
 import { createFreeElementId } from './persistence';
-import { defaultSubtitleSource } from './subtitleBinding';
+import { defaultSubtitleSource, freeSubtitleElementTexts, sceneDisplayedSubtitleTexts } from './subtitleBinding';
 import type { FreeElement, Part, Scene } from './types';
 
 /** 各パートの sceneIds を、現在の scenes 配列順（パート所属は保持）に合わせて作り直す。 */
@@ -115,7 +115,7 @@ function textBoxH(h: number, fontSize: number, maxLines: number | undefined): nu
  */
 function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxLines: number | undefined): number {
   const cap = maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
-  // 単独/掛け合いの判別は **生の `scene.lines`** で行う（`showsSubtitle`／`defaultSubtitleSource` と同じ規則）。
+  // 単独/掛け合いの判別は **生の `scene.lines`** で行う（`defaultSubtitleSource` と同じ規則）。
   // `sceneLines()` は lines 不在のとき narration から1行を合成して返すため、ここで使うと単独場面まで
   // 掛け合い扱いになり静的字幕（`texts.subtitle`）の行数を見落とす。
   const lines = scene.lines ?? [];
@@ -130,6 +130,18 @@ function subtitleTopY(scene: Scene, y: number, w: number, fontSize: number, maxL
         )
       : wrapText(scene.texts[TEXT_KEY.subtitle] ?? '', w, fontSize, cap).length;
   return y - (shown - 1) * fontSize * DEFAULT_LINE_HEIGHT;
+}
+
+/**
+ * 通常→FREE 変換で**字幕要素を作るか**（＝いま字幕が出ているか）。純粋関数。
+ *
+ * 判定は実表示の正典（`sceneDisplayedSubtitleTexts`）に委ねる＝字幕層の `textKey` が `subtitle` 以外でも
+ * （テンプレ作成エディタで変更できる・ADR-0017）、OFF でも、非表示グループでも描画と一致する。
+ * `TEXT_KEY.subtitle` 固定で見ると、元は出ていない字幕を FREE へ持ち込み、戻すときに
+ * 「往復しただけなのに字幕が出なくなります」と言う（`freeContentHiddenBySwitch` は実表示で数えるため）。
+ */
+function showsSubtitle(scene: Scene, template: Template): boolean {
+  return sceneDisplayedSubtitleTexts(scene, template).length > 0;
 }
 
 /**
@@ -153,11 +165,7 @@ export function freeLayoutFromPlacedContent(
   // これで生の layer.x/y/w/h ではなく「実効配置」を FREE 要素へ写す＝グループ利用テンプレでも FREE 化直後に崩れない。
   const groups = template.groups ?? [];
   const layerGeom = composeGroupGeometry(template.layers, groups);
-  // 字幕を出す場面か（単独＝texts.subtitle が非空かつ OFF でない／掛け合い＝行がある）。出ない場面は空の字幕要素を作らない。
-  const hasLines = (scene.lines?.length ?? 0) > 0;
-  const staticSubtitle = scene.texts[TEXT_KEY.subtitle];
-  const showsSubtitle =
-    hasLines || (!!staticSubtitle && staticSubtitle.length > 0 && scene.subtitleEnabledDefault !== false);
+  const subtitleShown = showsSubtitle(scene, template);
   for (const layer of template.layers) {
     if (isHiddenByGroup(layer.id, groups)) continue; // 非表示グループのメンバーは変換しない（通常描画と一致）
     const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h, rotation: layer.rotation };
@@ -203,7 +211,7 @@ export function freeLayoutFromPlacedContent(
         ...(layer.background != null ? { background: layer.background } : {}), // 背景帯（可読性の下地）も移送（#529）
       });
     } else if (layer.type === 'subtitle') {
-      if (!showsSubtitle) continue; // 字幕が出ない場面は空の字幕要素を作らない
+      if (!subtitleShown) continue; // 字幕が出ない場面は空の字幕要素を作らない
       // 表示文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。単独→narration／掛け合い→allLines。
       const st = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
       elements.push({
@@ -224,6 +232,106 @@ export function freeLayoutFromPlacedContent(
     }
   }
   return { elements, slotClips };
+}
+
+/**
+ * FREE→通常の切替で**画面から出なくなる**自由配置の中身の数（要素の種別ごと）。`total===0` なら見た目が保たれる。
+ *
+ * キーは `FreeElementKind` 由来＝**種別が増えたら数える側も見せる側もコンパイルエラー**になる（数え漏らし・
+ * 表示漏れに気づける）。`slot`＝素材（写真・動画・立ち絵など）、`shape`＝図形（飾り）。
+ */
+export type FreeContentHidden = Record<FreeElementKind, number> & { total: number };
+
+/** 「何も出なくならない」結果。**毎回新しいオブジェクト**を返す（共有インスタンスを返すと呼び出し側の書き換えが伝播する）。 */
+function noFreeContentHidden(): FreeContentHidden {
+  return { slot: 0, text: 0, subtitle: 0, shape: 0, total: 0 };
+}
+
+/** 多重集合から1つ消費する。あれば true（＝その中身は通常の見た目でも出る）。 */
+function takeOne<T>(bag: Map<T, number>, key: T): boolean {
+  const n = bag.get(key) ?? 0;
+  if (n <= 0) return false;
+  bag.set(key, n - 1);
+  return true;
+}
+
+/**
+ * FREE→通常の切替で**画面から出なくなる**自由配置の中身を数える（#547 P2-9・ADR-0030）。純粋関数。
+ *
+ * 切替そのものは非破壊で `freeLayout` は休眠保持されるが、**通常の見た目には自由配置の要素という枠が無い**ため、
+ * 通常側で表示される中身（差し込み先の素材・文字・字幕）に対応しないものは画面から消える。
+ * 元の確認は「復元される休眠配置があるか（`willRestore`）」だけを見ていたので、**1枚でも復元されれば確認が出ず**、
+ * FREE で足した残りが無言で消えていた（ADR-0026④）。ここでは逆に「**復元先を超えた分**」を数える。
+ *
+ * 突き合わせは**中身の同値＋多重度**で行う（要素 id ではない）：`freeLayoutFromPlacedContent` は変換のたびに新しい
+ * 要素 id を振り、由来を残さないため id では辿れない。素材は assetId、文字は文字列、字幕は「通常側に字幕層があるか」で見る。
+ * 同じ素材を2つ置いたのに通常側の差し込み先が1つなら、超過1つを数える（多重度を見ないと取りこぼす）。
+ *
+ * **いま見えていないものは数えない**：`hidden` の要素・非表示グループのメンバーは、切替で失う見た目が無い
+ * （PR #576 の `contentHiddenBySwitch` と同じ流儀＝出ないものを「出なくなる」と言わない）。
+ */
+export function freeContentHiddenBySwitch(scene: Scene, newTemplate: Template | undefined): FreeContentHidden {
+  const freeLayout = scene.freeLayout ?? [];
+  if (freeLayout.length === 0 || !newTemplate || newTemplate.category === FREE_CATEGORY) return noFreeContentHidden();
+
+  // 通常側で表示される中身を多重集合に積む（＝この分は切替後も出る）。
+  // **非表示グループのメンバー層は描かれない**ので受け皿に数えない（ADR-0022・`layoutScene` と同じ除外）。
+  // 数えてしまうと「受け皿がある」と誤認して確認が出ず、本来直したい無言消失がそのまま残る。
+  const tmplGroups = newTemplate.groups ?? [];
+  const shownLayers = newTemplate.layers.filter((l) => !isHiddenByGroup(l.id, tmplGroups));
+  const slotIds = templateSlotIds(shownLayers); // 差し込み先の判定は切替の清算規則と同じ（§2-7）
+  const assetBag = new Map<string, number>();
+  const add = (bag: Map<string, number>, key: string) => bag.set(key, (bag.get(key) ?? 0) + 1);
+  for (const layer of shownLayers) {
+    if (!slotIds.has(layer.id)) continue;
+    // 描画は「場面の素材 ?? テンプレ既定素材」（ADR-0021・`layoutScene`）。同じ規則で受け皿を数える
+    // ＝テンプレ既定の背景で出る素材を「出なくなる」と誤って言わない。
+    const assetId = scene.assetRefs[layer.id] ?? layer.assetId;
+    if (assetId) add(assetBag, assetId);
+  }
+  // 立ち絵（character 層）も通常側で出る素材＝FREE 化で slot 要素へ移した立ち絵と対応づく（ADR-0030）。
+  // `character.enabled` は**見ない**：描画（`layoutScene`）も実効使用（`sceneActiveAssetIds`）も廃止済みで参照しない。
+  const poseAssetId = scene.character?.poseAssetId;
+  if (poseAssetId && shownLayers.some((l) => l.type === 'character')) add(assetBag, poseAssetId);
+  const textBag = new Map<string, number>();
+  for (const layer of shownLayers) {
+    if (layer.type !== 'text' || !layer.textKey) continue;
+    const text = scene.texts[layer.textKey];
+    if (text && text.trim() !== '') add(textBag, text); // 空白だけの文字は描画されない＝受け皿にしない
+  }
+  // 字幕は箱の数では突き合わせない：通常テンプレの字幕層1枚がその場面の字幕を**すべて**受け持つ
+  // （逐次も同時字幕の段積みも1層＝ADR-0031／`layoutScene`）。**箱が出している文が切替後も出るか**で判断する。
+  // 判定は実表示の正典（`sceneDisplayedSubtitleTexts`）に委ねる＝層の textKey 違い・OFF・非表示グループも織り込み済み。
+  //
+  // 「切替後に字幕が1つでも出るか」では足りない：掛け合い場面で対象＝読み上げ（`texts.subtitle`）の箱を置くと、
+  // 通常テンプレの字幕層は行の字幕で上書きされる（`layoutScene` の `opts.subtitleText`）ため **`texts.subtitle` は
+  // 決して出ない**のに、行字幕があるせいで「字幕は出ている」と誤判定して無言消失する。
+  const subtitlesAfter = new Set(sceneDisplayedSubtitleTexts(scene, newTemplate));
+
+  const groups = scene.groups ?? [];
+  const out = noFreeContentHidden();
+  for (const el of freeLayout) {
+    if (el.hidden || isHiddenByGroup(el.id, groups)) continue; // いま出ていないものは「出なくなる」に数えない
+    if (el.kind === FREE_ELEMENT_KIND.slot) {
+      if (!el.assetId) continue; // 空スロットは失う中身が無い
+      if (!takeOne(assetBag, el.assetId)) out.slot += 1;
+    } else if (el.kind === FREE_ELEMENT_KIND.text) {
+      if (!el.text || el.text.trim() === '') continue; // 空文字は失う中身が無い
+      if (!takeOne(textBag, el.text)) out.text += 1;
+    } else if (el.kind === FREE_ELEMENT_KIND.subtitle) {
+      const own = freeSubtitleElementTexts(el, scene);
+      if (own.length === 0) continue; // いま何も出していない字幕箱は数えない
+      // この箱が出している文が**すべて**切替後にも出るなら失っていない（1層が全話者・全行を受け持つ）。
+      if (!own.every((t) => subtitlesAfter.has(t))) out.subtitle += 1;
+    } else {
+      // 図形は通常テンプレに受け皿が無い（飾りはテンプレ側が持つ）＝必ず出なくなる。
+      // ここは `shape` 以外の種別（将来 `FREE_ELEMENT_KINDS` が増えた場合）も拾う **意図的な受け皿**：
+      // 数え漏らすと「確認が出ないまま消える」＝直そうとしている不具合そのものになるため、
+      // 種別名がずれてでも数える側に倒す（種別が増えたらここの分類を見直す）。
+      out.shape += 1;
+    }
+  }
+  return { ...out, total: out.slot + out.text + out.subtitle + out.shape };
 }
 
 /** order を配列順に 1..N で振り直す。 */
