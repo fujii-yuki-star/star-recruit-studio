@@ -574,6 +574,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (first) requestTemplateSwitch(first.templateId);
   };
   // 確認中の切替先。FREE でない場面（休眠 freeLayout を持つ通常場面）では数えない＝undefined を渡して0件にする。
+  // **この `isFree` は防御ではなく効いている**：確認を開いたまま「取り消す」と、見た目切替は履歴に載っている
+  // （ADR-0020）ので場面は通常テンプレへ戻り、確認だけが残る。ここで休眠 freeLayout を数えると
+  // 「素材1個が動画に出なくなります」と、出てもいない中身について嘘の警告が出る（ADR-0030 決定2・ADR-0026①）。
+  // 外すとテストが赤くなる（`SceneEditScreen.template-switch.test.tsx` の「取り消しで通常の見た目へ戻ったら…」）。
   const pendingTemplate = pendingTemplateId != null && isFree
     ? templates.find((t) => t.templateId === pendingTemplateId)
     : undefined;

@@ -203,6 +203,34 @@ describe("SceneEditScreen 見た目切替の確認（ADR-0030 Option A・#524 P1
     expect(useProjectStore.getState().scenes[0].templateId).toBe("free_v1");
   });
 
+  // 確認を開いたまま「取り消す」と、見た目切替が履歴に載っている（ADR-0020）ので場面は通常テンプレへ戻る
+  // ＝**確認が残ったまま FREE でなくなる**。このとき休眠 freeLayout を数えると「出なくなります」と嘘の警告になる
+  // （休眠は数えない＝ADR-0030 決定2／ADR-0026①）。件数を出す前に「いま自由配置か」で必ずゲートする。
+  it("確認中に取り消しで通常の見た目へ戻ったら、休眠中の自由配置は数えない", () => {
+    // 以前 FREE で作って通常へ戻した場面＝休眠中の自由配置が残っている（非破壊往復）。
+    setup(freeScene({
+      sceneType: "photo_intro", templateId: "photo_v1",
+      assetRefs: { mainVisual: "asset_a" },
+      freeLayout: [
+        { id: "free_001", kind: "slot", x: 0, y: 0, w: 100, h: 100, assetId: "asset_x" },
+        { id: "free_002", kind: "shape", x: 0, y: 0, w: 100, h: 100, shapeType: "rect" },
+      ],
+    } as Partial<Scene>));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+
+    // 通常→FREE（休眠していた自由配置が戻る）→ 受け皿の無い通常テンプレを選んで確認を出す。
+    fireEvent.change(screen.getByLabelText("種類"), { target: { value: "free" } });
+    fireEvent.change(picker(), { target: { value: "open_v1" } });
+    expect(screen.getByText(CONFIRM)).toBeTruthy();
+
+    // 確認を開いたまま取り消す＝場面は通常テンプレへ戻り、自由配置は休眠に戻る。
+    fireEvent.click(screen.getByLabelText("取り消す"));
+    expect(useProjectStore.getState().scenes[0].templateId).toBe("photo_v1");
+    expect(useProjectStore.getState().scenes[0].freeLayout ?? []).toHaveLength(2); // 休眠は保持（非破壊）
+    expect(screen.queryByText(CONFIRM)).toBeNull(); // 出ていない中身を「出なくなる」と言わない
+    expect(screen.getByText(CONFIRM_NONE)).toBeTruthy();
+  });
+
   it("図形（飾り）だけの自由配置でも確認を出す（通常テンプレに受け皿が無い）", () => {
     setup(freeScene({
       freeLayout: [{ id: "free_001", kind: "shape", x: 0, y: 0, w: 100, h: 100, shapeType: "rect" }],
