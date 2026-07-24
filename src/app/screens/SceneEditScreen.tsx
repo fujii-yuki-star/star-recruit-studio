@@ -13,7 +13,7 @@ import { BGM_VOLUME, ROTATION_DEG_MAX, ROTATION_DEG_MIN, STROKE_WIDTH_MAX, VIDEO
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
-import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
+import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSilentReason, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { prunePerUseMaps } from "../../domain/project/perUseMaps";
 import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
@@ -48,7 +48,7 @@ import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
+import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -1076,6 +1076,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       const sameTargetCount = (selected.freeLayout ?? []).filter(
         (e) => e.kind === FREE_ELEMENT_KIND.subtitle && subtitleSourceToValue(e.subtitleSource ?? defaultSubtitleSource(selected)) === sourceValue,
       ).length;
+      // 置いたのに何も出ない状態は、原因が要素の外（場面のスイッチ・セリフ側）にもあり黙っていると気づけない（#547 P3-9）。
+      // 判定は公開前チェックと同じ domain の1か所（subtitleSilentReason）＝表示と案内が食い違わない。
+      const silentReason = subtitleSilentReason(el, selected);
       return (
         <>
           <div className="field" style={{ marginBottom: 6 }}>
@@ -1090,7 +1093,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 })}
               </select>
             ) : (
-              <p className="field-hint" style={{ marginTop: 0 }}>この場面は読み上げ（1人）です。下の「字幕の文」が字幕になります。</p>
+              <p className="field-hint" style={{ marginTop: 0 }}>この場面は読み上げ（1人）です。下の「{SUBTITLE_TEXT_FIELD_LABEL}」が字幕になります。</p>
             )}
             {sameTargetCount > 1 && (
               <p className="field-hint" style={{ marginTop: 4 }}>同じ対象の字幕が他にもあります。同じ文が2か所に出ます。</p>
@@ -1098,8 +1101,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
           {showNarrationText && (
             <div className="field" style={{ marginBottom: 6 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕の文</label>
-              <input className="input" value={selected.texts.subtitle ?? ""} {...textGroup} onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))} />
+              {/* 欄と入力を紐づける（要素ごとに一意な id）＝読み上げソフトでも「何の入力か」が分かる。 */}
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor={`subtitleText-${el.id}`}>{SUBTITLE_TEXT_FIELD_LABEL}</label>
+              <input id={`subtitleText-${el.id}`} className="input" value={selected.texts.subtitle ?? ""} {...textGroup} onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))} />
+            </div>
+          )}
+          {/* 出ない字幕の手がかり（#547 P3-9）。対象欄と文欄の両方を見たうえで出すので、この位置に置く。 */}
+          {silentReason && (
+            <div className="notice notice-warn text-sm" role="status" style={{ marginBottom: 6, padding: "8px 10px" }}>
+              <span>{silentSubtitleMessage(silentReason, source.kind)}</span>
             </div>
           )}
           {/* 見た目（文字の体裁を流用・文言は対象から解決ゆえ「文字」入力は無し） */}
@@ -2327,15 +2337,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {/* 場面ごとの字幕ON/OFF（scene.subtitleEnabledDefault・#413）。単一ナレーションはこれが直接の制御、
                   掛け合いは既定（各セリフの「字幕を表示する」で個別に上書き可＝line.subtitleEnabled ?? これ ?? true）。 */}
               <div className="toggle-row" style={{ marginTop: 8 }}>
-                <span className="field-label" style={{ margin: 0 }}>この場面の字幕を表示する</span>
+                <span className="field-label" style={{ margin: 0 }}>{SCENE_SUBTITLE_TOGGLE_LABEL}</span>
                 <Switch
                   on={selected.subtitleEnabledDefault ?? true}
                   onChange={(on) => patch((s) => ({ ...s, subtitleEnabledDefault: on }))}
-                  label="この場面の字幕を表示する"
+                  label={SCENE_SUBTITLE_TOGGLE_LABEL}
                 />
               </div>
               {isDialogue && (
-                <p className="field-hint" style={{ marginTop: 0 }}>各セリフの「字幕を表示する」で個別に上書きできます。</p>
+                <p className="field-hint" style={{ marginTop: 0 }}>各セリフの「{LINE_SUBTITLE_TOGGLE_LABEL}」で個別に上書きできます。</p>
               )}
               {isDialogue ? (
                 <div className="col gap-sm" style={{ marginTop: 8 }}>
@@ -2419,11 +2429,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           />
                         </details>
                         <div className="toggle-row">
-                          <span className="text-sm text-muted">字幕を表示する</span>
+                          <span className="text-sm text-muted">{LINE_SUBTITLE_TOGGLE_LABEL}</span>
                           <Switch
                             on={line.subtitleEnabled ?? selected.subtitleEnabledDefault ?? true}
                             onChange={(on) => patch((s) => updateLine(s, line.lineId, { subtitleEnabled: on }))}
-                            label="字幕を表示する"
+                            label={LINE_SUBTITLE_TOGGLE_LABEL}
                           />
                         </div>
                         <input

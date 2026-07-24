@@ -458,6 +458,52 @@ describe("buildPrecheckItems（FREE 字幕の対象別の長さ判定・#547 P1-
   });
 });
 
+// #547 P3-9：置いたのに何も表示しない字幕を、書き出し前に場面つきで知らせる（黙って出ないまま MP4 にしない・ADR-0026④）。
+describe("buildPrecheckItems（表示されない字幕・#547 P3-9）", () => {
+  const subEl = (over: Record<string, unknown> = {}): FreeElement =>
+    ({ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 400, h: 80, ...over }) as unknown as FreeElement;
+  const free = (over: Partial<Scene>): Scene => ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "free", templateId: "free_canvas_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+    narration: { text: "", status: "generated" }, warnings: [], ...over,
+  } as Scene);
+  const silent = (scenes: Scene[]) => buildPrecheckItems(scenes, [], [freeTemplate]).find((i) => i.id === "silentSubtitle");
+
+  it("出ない字幕がある場面を挙げ、その場面へ戻す導線を出す", () => {
+    const s = free({ texts: {}, freeLayout: [subEl({ subtitleSource: { kind: "narration" } })] }); // 文が空＝出ない
+    const it0 = silent([s]);
+    expect(it0?.severity).toBe("action");
+    expect(it0?.detail).toContain("場面1");
+    expect(it0?.sceneId).toBe("scene_001"); // 「直す」で該当場面を開く（#400 と同じ流儀）
+  });
+
+  it("字幕が出ていれば項目自体を出さない（通常プロジェクトにノイズを足さない）", () => {
+    const s = free({ texts: { subtitle: "ようこそ" }, freeLayout: [subEl({ subtitleSource: { kind: "narration" } })] });
+    expect(silent([s])).toBeUndefined();
+  });
+
+  it("字幕を置いていない場面だけなら項目を出さない", () => {
+    expect(silent([free({ texts: { subtitle: "ようこそ" } })])).toBeUndefined();
+  });
+
+  // 判定は場面編集の手がかりと同じ単一の参照元（subtitleSilentReason）＝画面で「出ない」と言われた場面がここにも並ぶ。
+  it("場面の字幕オフ・対象話者の不在も拾う（複数場面は番号を並べる）", () => {
+    const off = free({ sceneId: "scene_001", texts: { subtitle: "ようこそ" }, subtitleEnabledDefault: false, freeLayout: [subEl({ subtitleSource: { kind: "narration" } })] });
+    const noSpeaker = free({
+      sceneId: "scene_002",
+      lines: [{ lineId: "line_001", text: "やあ", speaker: 3, status: "none" }] as Scene["lines"],
+      freeLayout: [subEl({ subtitleSource: { kind: "speaker", speaker: { kind: "catalog", speaker: 2 } } })],
+    });
+    expect(silent([off, noSpeaker])?.detail).toContain("場面1・2");
+  });
+
+  // 書き出しは止めない（字幕が1つ出ないだけで動画は作れる）＝ハードブロッカーと混ぜない（#547 P2-5）。
+  it("書き出しは止めない（blocksExport を立てない）", () => {
+    const s = free({ texts: {}, freeLayout: [subEl({ subtitleSource: { kind: "narration" } })] });
+    expect(silent([s])?.blocksExport).toBeUndefined();
+  });
+});
+
 // #547 P2-5：残っていると書き出しが**必ず失敗する**項目だけに blocksExport を立て、公開前チェックの主ボタンを止める根拠にする。
 // 立てる条件は書き出し側の停止条件と対（buildExportScenes の templateUnresolvedError／videoUnplaceableError／afterAnim 判定）。
 // 「直せば良くなる」警告（声が未作成・字幕が長い）に立てると「出せるのに押せない」になるので、そこは立てないことも固定する。

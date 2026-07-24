@@ -1,7 +1,8 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
-import { FREE_ELEMENT_KINDS } from "../domain/enums";
-import type { AssetType, Fit, FreeElementKind, TextKey } from "../domain/enums";
+import { FREE_ELEMENT_KINDS, SUBTITLE_SOURCE_KIND } from "../domain/enums";
+import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
+import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
 import { formatSceneNumbers } from "./adapters";
 
 /**
@@ -51,6 +52,39 @@ export function freeSwitchConfirmMessage(hidden: FreeContentHidden): string {
   const parts = FREE_ELEMENT_KINDS.filter((k) => hidden[k] > 0).map((k) => `${freeKindLabel[k]}${hidden[k]}個`);
   if (parts.length === 0) return "通常の見た目に変えても、動画に出なくなる中身はありません。この見た目に変えますか？";
   return `通常の見た目に変えると、${parts.join("・")}が動画に出なくなります。データは残るので、自由配置に戻せば元どおりになります。`;
+}
+
+// ── 字幕（#547 P3-9）。置いた字幕が出ないときの案内が、実際のスイッチ名・欄名と同じ語で呼ぶための単一の参照元（§6）。 ──
+
+/** 場面の字幕スイッチの表示名（場面編集の読み上げ欄）。案内文が別名で呼ぶと、探しても見つからない指示になる。 */
+export const SCENE_SUBTITLE_TOGGLE_LABEL = "この場面の字幕を表示する";
+/** セリフごとの字幕スイッチの表示名（掛け合いの各行）。上と同じ理由でここに置く。 */
+export const LINE_SUBTITLE_TOGGLE_LABEL = "字幕を表示する";
+/** 自由配置の字幕要素で、読み上げの字幕文を入れる欄の見出し。 */
+export const SUBTITLE_TEXT_FIELD_LABEL = "字幕の文";
+
+/**
+ * 理由ごとの「どうすれば出るか」（#547 P3-9）。全 reason 必須＝理由が増えたら文言の決め漏れをコンパイル検知。
+ * `noText` だけは対象で直す場所が変わる（読み上げ＝この欄／セリフ＝各セリフ側）ので、対象種別を受けて出し分ける。
+ */
+const SILENT_SUBTITLE_NEXT_ACTION: Record<SubtitleSilentReason, (sourceKind: SubtitleSourceKind) => string> = {
+  sceneSubtitleOff: () => `「${SCENE_SUBTITLE_TOGGLE_LABEL}」がオフになっています。オンにすると出ます。`,
+  noTargetLine: () => "選んだ話者のセリフが、この場面にありません。対象を選び直すか、その話者のセリフを足してください。",
+  noText: (sourceKind) =>
+    sourceKind === SUBTITLE_SOURCE_KIND.narration
+      ? `「${SUBTITLE_TEXT_FIELD_LABEL}」に文字を入れると出ます。`
+      : `対象のセリフの字幕が空か、そのセリフの「${LINE_SUBTITLE_TOGGLE_LABEL}」がオフになっています。`,
+};
+
+/**
+ * 置いた字幕が動画に出ないときの手がかり（#547 P3-9・§2-5＝原因ではなく次の行動／ADR-0026④）。
+ *
+ * 字幕ボックスは表示文を「対象」から解決するため、**要素の外**（場面の字幕スイッチ・セリフごとの字幕・話者の顔ぶれ）
+ * が原因で何も出ないことがある。置いた本人はその外側を見ていないので、黙って出ないと「置いたのに出ない」だけが残る。
+ * どの理由かは `subtitleSilentReason`（domain・公開前チェックと同じ単一の参照元）が決め、ここは言い方だけを持つ。
+ */
+export function silentSubtitleMessage(reason: SubtitleSilentReason, sourceKind: SubtitleSourceKind): string {
+  return `この字幕は、いまは動画に出ません。${SILENT_SUBTITLE_NEXT_ACTION[reason](sourceKind)}`;
 }
 
 // ── 声の一括作成（#547 P2-6）。たたき台・場面編集・公開前チェックの3画面で同じ語・同じ挙動にする（§6・ADR-0026②）。 ──
