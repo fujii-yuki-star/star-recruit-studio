@@ -2,6 +2,7 @@
 // 再生・表示順の「正」＝scenes 配列順（buildExportScenes も scenes 配列を順に処理する）。
 // scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
+import { quantizeSec } from '../constants';
 import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } from '../enums';
 import type { FreeElementKind, SceneCategory } from '../enums';
 import type { Template } from '../template/types';
@@ -511,7 +512,7 @@ function apportionDuration(total: number, len1: number, len2: number): [number, 
   const half: [number, number] = [total / 2, total / 2];
   if (len1 + len2 === 0) return half;
   const raw = (total * len1) / (len1 + len2);
-  const d1 = Math.round(raw * 10) / 10; // 0.1 秒へ量子化（表示・入力の刻みと揃える）
+  const d1 = quantizeSec(raw); // 表示・入力と同じ格子（SEC_STEP）へ量子化＝欄の値と表示が食い違わない（§2-7）
   if (d1 <= 0 || total - d1 <= 0) return half; // 片側が潰れる＝等分（>0 を守る）
   return [d1, total - d1]; // 合計は元のまま（差で出す＝丸め誤差を残さない）
 }

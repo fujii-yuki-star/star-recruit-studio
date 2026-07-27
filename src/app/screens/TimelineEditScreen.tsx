@@ -9,8 +9,8 @@ import { TimelineView } from "../components/TimelineView";
 import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
-import type { ClipDragMode } from "../components/TimelineView";
-import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
+import { applyClipEdge, type ClipDragMode } from "../../domain/project/overlayClipEdit";
+import { SEC_STEP, TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { PageHead } from "../components/ui";
 import { ExportLock } from "../components/ExportLockBanner";
 import { ArrowLeftIcon } from "../components/icons";
@@ -60,23 +60,18 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
       startSec: Math.max(0, effective - sceneGlobalStart(newAnchor)),
     });
   };
-  // タイムライン上のドラッグ確定（1ドロップ=1操作）。move=移動（startSec）／trim-end=右端（durationSec）／
-  // trim-start=左端（右端 end を固定して startSec と durationSec）。いずれもクランプ後に実効差分が無ければ更新しない（no-op な履歴を作らない）。
-  const editClip = (id: string, mode: ClipDragMode, deltaSec: number): void => {
+  /**
+   * タイムライン上のドラッグ確定（1ドロップ=1操作）。`edgeSec` は**動かした端のグローバル秒**（吸着済み・未クランプ）。
+   * store の `startSec` は**場面アンカー相対**なので、ここでアンカー開始を引いて座標系を合わせ、
+   * クランプは共有の `applyClipEdge` に**1回だけ**通す（#561＝差分で受け取って足し戻すと下限へ厳密に戻らない）。
+   * クランプ後に実効差分が無ければ更新しない（no-op な履歴を作らない）。
+   */
+  const editClip = (id: string, mode: ClipDragMode, edgeSec: number): void => {
     const clip = overlayClips.find((c) => c.id === id);
     if (!clip) return;
-    if (mode === "move") {
-      const startSec = Math.max(0, clip.startSec + deltaSec);
-      if (startSec !== clip.startSec) updateOverlayClip(id, { startSec });
-    } else if (mode === "trim-end") {
-      const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, clip.durationSec + deltaSec);
-      if (durationSec !== clip.durationSec) updateOverlayClip(id, { durationSec });
-    } else {
-      // trim-start：右端(end)を固定して左端を動かす。startSec∈[0, end−最小長]、durationSec=end−startSec。
-      const end = clip.startSec + clip.durationSec;
-      const startSec = Math.min(Math.max(0, clip.startSec + deltaSec), end - TIMELINE_MIN_CLIP_SEC);
-      if (startSec !== clip.startSec) updateOverlayClip(id, { startSec, durationSec: end - startSec });
-    }
+    const anchorStart = clip.anchorSceneId ? timeline.scenes.find((s) => s.sceneId === clip.anchorSceneId)?.startSec ?? 0 : 0;
+    const next = applyClipEdge(clip, mode, edgeSec - anchorStart, 0, TIMELINE_MIN_CLIP_SEC);
+    if (next.startSec !== clip.startSec || next.durationSec !== clip.durationSec) updateOverlayClip(id, next);
   };
 
   const addTelop = () => {
@@ -146,9 +141,9 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
             </div>
             {/* 開始/長さは共有 NumberField（#459・blur 確定・空/NaN は元値へ・min クランプ）。commit が1回なので #389 の history グループは不要。 */}
             <div className="row gap-sm">
-              <NumberField label="開始（秒）" value={selectedClip.startSec} min={0} step={0.5}
+              <NumberField label="開始（秒）" value={selectedClip.startSec} min={0} step={SEC_STEP}
                 onChange={(v) => updateOverlayClip(selectedClip.id, { startSec: v })} />
-              <NumberField label="長さ（秒）" value={selectedClip.durationSec} min={TIMELINE_MIN_CLIP_SEC} step={0.5}
+              <NumberField label="長さ（秒）" value={selectedClip.durationSec} min={TIMELINE_MIN_CLIP_SEC} step={SEC_STEP}
                 onChange={(v) => updateOverlayClip(selectedClip.id, { durationSec: v })} />
             </div>
             {confirmDeleteClipId === selectedClip.id ? (

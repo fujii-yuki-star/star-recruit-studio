@@ -9,7 +9,7 @@ import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
-import { BGM_VOLUME, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
@@ -1227,7 +1227,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         {anim && kind && (
           <div className="col gap-sm" style={{ marginTop: 6 }}>
             <div className="row gap-sm" style={{ alignItems: "flex-end" }}>
-              <NumberField label="かける時間（秒）" value={durationSec} min={PRESET_MIN_SEC} max={PRESET_MAX_SEC} step={0.1} onChange={(v) => apply({ durationSec: v })} />
+              <NumberField label="かける時間（秒）" value={durationSec} min={PRESET_MIN_SEC} max={PRESET_MAX_SEC} step={SEC_STEP} onChange={(v) => apply({ durationSec: v })} />
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動きの感じ</label>
                 <select className="select" value={easing} onChange={(e) => apply({ easing: e.target.value as Easing })}>
@@ -1271,7 +1271,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         return { ...s, slotVideoStart: Object.keys(m).length ? m : undefined };
       });
     // delay の秒（保存値 or 既定＝窓の中ほど）を [0,W] にクランプ＝保存値と実効値を一致（11 §7.1）。
-    const delaySec = Math.min(Math.max(0, spec?.delaySec ?? Math.round((W / 2) * 10) / 10), W);
+    const delaySec = Math.min(Math.max(0, spec?.delaySec ?? quantizeSec(W / 2)), W);
     const showAfterAnim = hasSettled || mode === VIDEO_START_MODE.afterAnim; // 保存済み afterAnim は select を壊さないため残す
     return (
       <div className="field" style={{ marginBottom: 6 }}>
@@ -1296,7 +1296,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               type="range"
               min={0}
               max={W}
-              step={0.1}
+              step={SEC_STEP}
               value={delaySec}
               onChange={(e) => setSpec({ mode: VIDEO_START_MODE.delay, delaySec: Number(e.target.value) })}
               style={{ flex: 1 }}
@@ -2496,7 +2496,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               value={line.startSec}
                               min={0}
                               max={selected.durationSec}
-                              step={0.1}
+                              step={SEC_STEP}
                               placeholder="自動"
                               title="このセリフが始まるタイミング（場面の頭からの秒数）。空欄にすると前のセリフの後に自動で続きます。"
                               inputClassName="input text-sm"
@@ -2700,7 +2700,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 type="number"
                 min={0.1}
                 max={VIDEO_HARD_MAX_SEC}
-                step={0.1}
+                step={SEC_STEP}
                 value={durationDraft?.sceneId === selected.sceneId ? durationDraft.value : selected.durationSec}
                 onFocus={() => setDurationDraft({ sceneId: selected.sceneId, value: String(selected.durationSec) })}
                 onChange={(e) => setDurationDraft({ sceneId: selected.sceneId, value: e.target.value })} // 途中値は store に入れない＝範囲外値を自動保存しない（#411 P1）
