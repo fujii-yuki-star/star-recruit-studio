@@ -564,6 +564,13 @@ describe('parseProjectDoc', () => {
       const doc = { ...assembleProject(header({ projectName: 'あ'.repeat(120) }), [], [], []) };
       expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
     });
+    // #586：`durationSec` は `> 0`（schema `exclusiveMinimum:0`）だが、**範囲違反は構造破損ではない**＝旧データを
+    // 読めなくしない（再生側は PREVIEW_MIN_PLAY_SEC が防御）。上の validateProjectDoc の structural:false を
+    // 読込経路の end-to-end でも固定する（型不正 `durationSec:'abc'` が拒否されるのと対になるケース）。
+    it('内容制約違反（durationSec 0＝旧データ）は拒否せず読み込む（#586）', () => {
+      const doc = { ...assembleProject(header(), [], [], [validScene({ durationSec: 0 }) as unknown as Scene]) };
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
     it('正常な完全プロジェクトは読み込める（回帰なし）', () => {
       const doc = { ...assembleProject(header(), [], [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] } as unknown as Part], [validScene() as unknown as Scene]) };
       expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
