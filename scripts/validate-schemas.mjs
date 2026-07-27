@@ -118,6 +118,9 @@ const withScene = (extra) => ({ ...withBrief({}), scenes: [{ ...sceneBase, ...ex
 const mustAccept = [
   ['general: 上限内（agenda20件/各100字・targetAudience100字）', withBrief({ agenda: Array.from({ length: 20 }, () => 'あ'.repeat(100)), keyPoints: ['要点'], targetAudience: 'あ'.repeat(100) })],
   ['videoSettings: 縦型 9:16（width/height なし）', { ...withBrief({}), videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
+  // 場面の表示時間は `> 0`（11 §7・schema `exclusiveMinimum:0`＝#586 で正典どうしの矛盾を解消）。
+  // 場面ごとの上限/下限は持たない（#553）ので、0 より大きければ極端に短くても許容する。
+  ['scene: durationSec 0.1（極短でも >0 なら許容・下限は持たない #553）', withScene({ durationSec: 0.1 })],
   ['scene: fontId=null（継承）を許容', withScene({ fontId: null })],
   ['scene: fontId 既知（kaitou-yokoku-gothic）を許容', withScene({ fontId: 'kaitou-yokoku-gothic' })],
   ['scene: fontId 未指定（継承）を許容', withScene({})],
@@ -159,6 +162,9 @@ const mustReject = [
   ['general: targetAudience 101字', withBrief({ targetAudience: 'あ'.repeat(101) })],
   ['videoSettings: 旧 width/height 同梱は拒否（1.2 で撤廃）', { ...withBrief({}), videoSettings: { aspectRatio: '16:9', width: 1920, height: 1080, fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
   ['videoSettings: 未知の比率 1:1 は拒否', { ...withBrief({}), videoSettings: { aspectRatio: '1:1', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
+  // 0秒の場面は作らない（11 §9 の自動補正が `≤0` を既定 8 秒へ寄せる）＝schema でも弾く（#586）。
+  ['scene: durationSec 0 は拒否（exclusiveMinimum・#586）', withScene({ durationSec: 0 })],
+  ['scene: durationSec 負は拒否（#586）', withScene({ durationSec: -1 })],
   ['scene: fontId 未知（old-font）は拒否', withScene({ fontId: 'old-font' })],
   ['scene: slotFits の不正な収め方(zoom)は拒否', withScene({ slotFits: { background: 'zoom' } })],
   ['freeLayout: 未知の図形(hexagon)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, shapeType: 'hexagon' }] })],
