@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Scene } from '../domain/project/types';
+import type { FreeElement, Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
@@ -673,6 +673,29 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(svg).toContain('stroke="#112233"'); // 縁取り
     expect(svg).toContain('stroke-width="3"');
     expect(svg).toContain('paint-order="stroke"'); // 塗りの下に縁取り（可読性）
+  });
+
+  // #565：FREE 側には「太さ>0 で色が無ければ既定色」の担保が無く、太さだけ入れても縁取りが**描かれなかった**
+  // （通常テンプレ層は resolveTextStyle が担保済み）。色見本は黒を出していたので「見本は色、実際は無し」のドリフト。
+  // 既定色は下地（文字色／図形の塗り）と反対側＝白文字に白い縁取りで消える、も同時に防ぐ（ADR-0026①/②）。
+  it('FREE text/字幕/図形は「太さだけ」でも縁取りが描かれる（既定色は下地と反対・#565）', () => {
+    const svgOf = (el: FreeElement) =>
+      layoutToSvg(layoutScene({ ...freeScene, texts: { subtitle: 'じまく' }, freeLayout: [el] }, freeTemplate));
+    // 暗い文字（既定色）＋太さだけ → 白い縁取り。
+    const dark = svgOf({ id: 'free_001', kind: 'text', x: 0, y: 0, w: 400, h: 200, zIndex: 5, text: 'あ', fontSize: 40, strokeWidth: 3 });
+    expect(dark).toContain('stroke="#ffffff"');
+    expect(dark).toContain('paint-order="stroke"');
+    // 白い文字＋太さだけ → 黒い縁取り（固定の白なら見えないまま＝直っていない）。
+    expect(svgOf({ id: 'free_001', kind: 'text', x: 0, y: 0, w: 400, h: 200, zIndex: 5, text: 'あ', fontSize: 40, color: '#ffffff', strokeWidth: 3 }))
+      .toContain('stroke="#000000"');
+    // 字幕要素も同じ（対象未指定＝読み上げの字幕文言へ無変換解決・ADR-0029）。
+    expect(svgOf({ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 400, h: 200, zIndex: 5, fontSize: 40, color: '#ffffff', strokeWidth: 4 }))
+      .toContain('stroke="#000000"');
+    // 図形の枠線は塗りが下地。明るい塗り→黒枠／暗い塗り→白枠（塗りと同じ色で消えない）。
+    expect(svgOf({ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 200, h: 200, zIndex: 5, fillColor: '#eeeeee', strokeWidth: 5 }))
+      .toContain('stroke="#000000"');
+    expect(svgOf({ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 200, h: 200, zIndex: 5, fillColor: '#111111', strokeWidth: 5 }))
+      .toContain('stroke="#ffffff"');
   });
 
   it('FREE text の体裁が未指定なら左揃え・縁取りなし（既定）', () => {

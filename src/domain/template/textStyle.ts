@@ -13,8 +13,13 @@ import type { TextStyleOverride } from '../project/types';
 /** テキストの既定色/既定サイズ。描画・インライン編集・体裁欄で共有する単一の参照元（§2-7・#549）。 */
 export const DEFAULT_TEXT_COLOR = '#222222';
 export const DEFAULT_FONT_SIZE = 40;
-/** 縁取りの太さ>0 で色が未指定のときの既定色（色だけ無いと縁取りが silent に消えるのを防ぐ・#275/PR#289）。 */
-export const DEFAULT_STROKE_COLOR = '#ffffff';
+/**
+ * 縁取り/枠線の太さ>0 で**色が未指定**のときに使う既定色（色だけ無いと縁取りが silent に消えるのを防ぐ・#275/PR#289）。
+ * **下地（文字色・図形の塗り）と反対側**を選ぶ＝固定の白だと「白文字に白い縁取り」で結局なにも起きず、
+ * 同じ苦情（太さを入れたのに変わらない）に戻る（#565・ADR-0026①）。
+ */
+export const STROKE_COLOR_ON_DARK = '#ffffff';
+export const STROKE_COLOR_ON_LIGHT = '#000000';
 /** テキストの既定行間（倍率）。行数計算と描画で共有する（#209）。 */
 export const DEFAULT_LINE_HEIGHT = 1.3;
 /**
@@ -67,12 +72,53 @@ export type TextStyleSource = Pick<Layer, 'color' | 'fontSize' | 'fontWeight' | 
 export function resolveTextStyle(layer: TextStyleSource, ov?: TextStyleOverride): ResolvedTextStyle {
   const strokeWidth = ov?.strokeWidth ?? layer.strokeWidth;
   const strokeColorRaw = ov?.strokeColor ?? layer.strokeColor;
+  const color = ov?.color ?? layer.color ?? DEFAULT_TEXT_COLOR;
   return {
-    color: ov?.color ?? layer.color ?? DEFAULT_TEXT_COLOR,
+    color,
     fontSize: ov?.fontSize ?? layer.fontSize ?? DEFAULT_FONT_SIZE,
     fontWeight: ov?.fontWeight ?? layer.fontWeight ?? FONT_WEIGHT.normal,
-    // 太さ>0 で色未指定なら既定色。**上書きを解決したあとの値で判定する**＝場面で太さだけ足しても縁取りが消えない。
-    strokeColor: (strokeWidth ?? 0) > 0 ? (strokeColorRaw ?? DEFAULT_STROKE_COLOR) : strokeColorRaw,
+    // **上書きを解決したあとの値で判定する**＝場面で太さだけ足しても縁取りが消えない。下地は解決後の文字色。
+    strokeColor: resolveStrokeColor(strokeWidth, strokeColorRaw, color),
     strokeWidth,
   };
+}
+
+/**
+ * 縁取り/枠線の色の解決（**単一の参照元**）。太さ>0 で色が未指定なら下地と反対の既定色、そうでなければ指定値をそのまま。
+ *
+ * 通常テンプレの文字（`resolveTextStyle`）と FREE 要素（文字/字幕/図形＝`layoutScene`）、体裁欄の色見本が
+ * これを共有する＝**「見本は色を出すのに描かれない」「太さを入れたのに何も起きない」が構造的に起きない**（§2-7・#565）。
+ * 太さ 0/未指定のときに色を消さないのは、太さを 0 に戻しても選んだ色が残る＝また太くすれば元に戻るため。
+ */
+export function resolveStrokeColor(
+  strokeWidth: number | undefined, strokeColor: string | undefined, baseColor: string,
+): string | undefined {
+  return (strokeWidth ?? 0) > 0 ? (strokeColor ?? defaultStrokeColor(baseColor)) : strokeColor;
+}
+
+/** 下地の色に対して見える既定の縁取り色（明るい下地→黒／暗い下地→白）。 */
+export function defaultStrokeColor(baseColor: string): string {
+  return relativeLuminance(baseColor) > STROKE_LIGHT_THRESHOLD ? STROKE_COLOR_ON_LIGHT : STROKE_COLOR_ON_DARK;
+}
+
+/**
+ * 白と黒のどちらがより強くコントラストするかの境目（WCAG 2.x のコントラスト比が入れ替わる輝度）。
+ * 比は白 `1.05/(L+0.05)`・黒 `(L+0.05)/0.05` なので、等しくなるのは `L = sqrt(0.0525) - 0.05`。
+ * 既定の文字色（`#222222`・L≈0.012）は白側＝**#275 以来の挙動（白い縁取り）を保つ**。
+ */
+const STROKE_LIGHT_THRESHOLD = Math.sqrt(0.0525) - 0.05;
+
+/**
+ * 相対輝度（WCAG 2.x）。`#rgb`/`#rrggbb` 以外（未知の記法）は 0＝暗いとみなす＝白い縁取りを返す（従来どおり）。
+ * schema の色は `^#[0-9a-fA-F]{6}$` に限られるので短縮形は防御。
+ */
+function relativeLuminance(hex: string): number {
+  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return 0;
+  const h = m[1].length === 3 ? m[1].replace(/./g, (c) => c + c) : m[1];
+  const ch = [0, 2, 4].map((i) => {
+    const s = parseInt(h.slice(i, i + 2), 16) / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
 }

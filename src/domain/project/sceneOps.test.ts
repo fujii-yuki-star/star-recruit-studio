@@ -498,12 +498,13 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
   });
 
   it('通常→FREE：場面で縁取りの太さだけ足したときも既定色ごと持ち込む（縁取りが消えない・#555）', () => {
-    // テンプレ層に縁取りが無く、場面で太さだけ足した状態。FREE の text 要素は「太さ>0 なら白」の既定を
-    // 持たない（el.strokeColor をそのまま描く）ので、解決済みの色を写さないと縁取りが黙って消える。
+    // テンプレ層に縁取りが無く、場面で太さだけ足した状態。**解決済みの色**を写すので、変換後に文字色を
+    // いじっても FREE 化した時点の見た目が保たれる（#565 で FREE 側にも同じ既定が入ったが、写す方が変換の
+    // 「見えているものをそのまま持ち込む」に忠実）。この層は白文字なので既定の縁取りは黒（#565）。
     const styled = { ...richScene(), textStyles: { title: { strokeWidth: 3 } } };
     const r = switchSceneTemplate(styled, 'free_v1', 'free', prevTemplate());
     const title = (r.freeLayout ?? []).find((e) => e.kind === 'text')!;
-    expect(title).toMatchObject({ strokeWidth: 3, strokeColor: '#ffffff' });
+    expect(title).toMatchObject({ strokeWidth: 3, strokeColor: '#000000' });
   });
 
   it('通常→FREE：表示中の素材/文字を freeLayout へ変換（位置/収め方/回転/体裁を継承・空スロット/装飾/テキスト層なしは除外）', () => {

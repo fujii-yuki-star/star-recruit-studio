@@ -76,10 +76,14 @@ describe('freeShapeSvg（FillItem → SVG・枠線付与）', () => {
     expect(freeShapeSvg(fill({ shapeType: FREE_SHAPE_TYPE.speech_bubble }))).toContain('<path d="');
   });
 
-  it('strokeWidth>0 で枠線属性を付与（色は既定 #000000）', () => {
+  // 既定色は**ここでは決めない**（#565）＝下地（塗り）に応じて `layoutScene` が `resolveStrokeColor` で決め、
+  // 色見本もそれを出す。ここに別の既定を置くと、見本と実描画が2つの規則で動いてドリフトする（§2-7）。
+  // 「太さだけ指定 → 枠線が出る」は layout.test.ts（実 FREE 場面）で担保する。
+  it('strokeWidth>0 でも色が決まっていなければ枠線属性を出さない（色は layout が解決する）', () => {
     const svg = freeShapeSvg(fill({ shapeType: FREE_SHAPE_TYPE.star, strokeWidth: 4 }));
-    expect(svg).toContain('stroke="#000000"');
-    expect(svg).toContain('stroke-width="4"');
+    expect(svg).not.toContain('stroke=');
+    expect(freeShapeSvg(fill({ shapeType: FREE_SHAPE_TYPE.star, strokeWidth: 4, strokeColor: '#000000' })))
+      .toContain('stroke-width="4"');
   });
 
   it('strokeColor は反映、strokeWidth 0/未指定では枠線属性なし', () => {

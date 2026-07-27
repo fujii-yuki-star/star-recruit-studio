@@ -71,13 +71,16 @@ export function speechBubblePath(x: number, y: number, w: number, h: number): st
 }
 
 /**
- * FillItem を SVG 図形要素へ。fill/opacity に加え、strokeWidth>0 のとき枠線を付与する。
+ * FillItem を SVG 図形要素へ。fill/opacity に加え、strokeWidth>0 **かつ色が決まっている**とき枠線を付与する。
  * rect/ellipse は枠線なし時に従来出力と完全一致（後方互換）。新図形は polygon/path で描く。
+ *
+ * **色の既定はここでは決めない**（#565）＝`layoutScene` が `resolveStrokeColor` で解決済みの値を渡す。
+ * ここでも別に既定を持つと、色見本（場面編集）と実描画が別々の規則で動いてドリフトする（§2-7）。文字側（sceneSvg）と同じ流儀。
  */
 export function freeShapeSvg(item: FillItem): string {
   const stroke =
-    item.strokeWidth && item.strokeWidth > 0
-      ? ` stroke="${item.strokeColor ?? '#000000'}" stroke-width="${item.strokeWidth}"`
+    item.strokeColor && item.strokeWidth && item.strokeWidth > 0
+      ? ` stroke="${item.strokeColor}" stroke-width="${item.strokeWidth}"`
       : '';
   const common = `fill="${item.color}" fill-opacity="${item.opacity}"${stroke}`;
   const { x, y, w, h } = item;

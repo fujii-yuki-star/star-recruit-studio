@@ -3,10 +3,10 @@
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
 import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
-import { DEFAULT_FIT } from '../domain/constants';
+import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR } from '../domain/constants';
 import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { LayerBackground, Template } from '../domain/template/types';
-import { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveTextStyle } from '../domain/template/textStyle';
+import { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle } from '../domain/template/textStyle';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
@@ -322,7 +322,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // layer.shapeType は rect/ellipse/line。FillItem(=FreeShapeType: rect/ellipse)へ転送し、ellipse のみ楕円・他は rect。
         const shapeType: FreeShapeType =
           layer.shapeType === FREE_SHAPE_TYPE.ellipse ? FREE_SHAPE_TYPE.ellipse : FREE_SHAPE_TYPE.rect;
-        items.push({ ...base, kind: 'fill', color: layer.fillColor ?? '#ffffff', opacity: layer.opacity ?? 1, radius: layer.radius ?? 0, shapeType });
+        items.push({ ...base, kind: 'fill', color: layer.fillColor ?? SHAPE_FILL_FALLBACK_COLOR, opacity: layer.opacity ?? 1, radius: layer.radius ?? 0, shapeType });
         break;
       }
       case 'text':
@@ -446,12 +446,17 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
+          const color = el.color ?? DEFAULT_TEXT_COLOR;
+          // 縁取りは通常テンプレ層と同じ規則で解決する（太さだけ入れても消えない・#565）。
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: resolveStrokeColor(el.strokeWidth, el.strokeColor, color), strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
           break;
         }
-        case 'shape':
-          items.push({ ...base, kind: 'fill', color: el.fillColor ?? '#ffffff', opacity: el.opacity ?? 1, radius: el.radius ?? 0, shapeType: el.shapeType ?? FREE_SHAPE_TYPE.rect, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
+        case 'shape': {
+          // 図形の枠線も同じ規則（下地＝塗りの色）。塗りと同じ色になって枠線が消えない（#565）。
+          const fillColor = el.fillColor ?? SHAPE_FILL_FALLBACK_COLOR;
+          items.push({ ...base, kind: 'fill', color: fillColor, opacity: el.opacity ?? 1, radius: el.radius ?? 0, shapeType: el.shapeType ?? FREE_SHAPE_TYPE.rect, strokeColor: resolveStrokeColor(el.strokeWidth, el.strokeColor, fillColor), strokeWidth: el.strokeWidth });
           break;
+        }
         case FREE_ELEMENT_KIND.subtitle: {
           // 表示文言は対象（subtitleSource）から解決＝el.text は持たない（ADR-0029）。対象に一致しない/間/OFF は非表示。
           // isSubtitle:true＝「字幕を出さない」書き出し（withSubtitle=false）でテンプレ字幕と同じく除外される（buildExportScenes）。
@@ -460,7 +465,8 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
-          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
+          const color = el.color ?? DEFAULT_TEXT_COLOR;
+          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: resolveStrokeColor(el.strokeWidth, el.strokeColor, color), strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
           break;
         }
       }

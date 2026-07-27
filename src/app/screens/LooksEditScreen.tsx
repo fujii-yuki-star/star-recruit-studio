@@ -11,7 +11,7 @@ import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
 import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants";
 // 文字の既定値は domain（template/textStyle）が正典＝描画・場面編集の体裁欄・通常→FREE 変換と同じ値を使う（§2-7・#555）。
-import { DEFAULT_FONT_SIZE, DEFAULT_STROKE_COLOR, DEFAULT_TEXT_COLOR } from "../../domain/template/textStyle";
+import { DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR, defaultStrokeColor } from "../../domain/template/textStyle";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDraftHistory } from "../hooks/useDraftHistory";
 import { isTextEntryTarget, useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
@@ -386,11 +386,13 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           {/* 縁取り（#275）：太さ>0 で文字（字幕含む）に縁取りを敷く。描画は既存（FREE の #209）と同じ仕組み。 */}
           <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
             {/* 上限は FREE 側と同じ共有定数（#554）。以前はここだけ 20 で、同じ「縁取りの太さ」が編集画面で別上限だった。 */}
-            {numField("縁取りの太さ", l.strokeWidth ?? 0, (v) => onUpdateLayer(l.id, { strokeWidth: v, ...(v > 0 && l.strokeColor == null ? { strokeColor: DEFAULT_STROKE_COLOR } : {}) }), 0, STROKE_WIDTH_MAX)}
+            {/* 太さを入れるだけで縁取りは出る（色は描画側が下地と反対の既定色で解決＝`resolveStrokeColor`・#565）。
+                以前はここで既定色を**書き込んで**いたが、規則が描画側と2か所に分かれて FREE 側だけ抜ける原因になった（§2-7）。 */}
+            {numField("縁取りの太さ", l.strokeWidth ?? 0, (v) => onUpdateLayer(l.id, { strokeWidth: v }), 0, STROKE_WIDTH_MAX)}
             {(l.strokeWidth ?? 0) > 0 && (
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-                <ColorPicker value={l.strokeColor ?? DEFAULT_STROKE_COLOR} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
+                <ColorPicker value={l.strokeColor ?? defaultStrokeColor(l.color ?? DEFAULT_TEXT_COLOR)} onChange={(v) => onUpdateLayer(l.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginGroup} onDragEnd={endGroup} />
               </div>
             )}
           </div>
