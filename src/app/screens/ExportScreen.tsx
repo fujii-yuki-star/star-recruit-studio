@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
-import { EmptyState } from "../components/states";
-import { StartNewVideoButton } from "../components/StartNewVideoButton";
+import { NoScenesState } from "../components/NoScenesState";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -36,7 +35,7 @@ import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 // 画面タイトルは1か所（空状態と通常の両分岐で共有＝片方だけ直して drift しない・§6）。
 const EXPORT_TITLE = "動画を書き出す";
 // 説明は**設定フォームを出す分岐だけ**に付ける。場面ゼロの空状態で「設定を確認して」と促すと、
-// 直下の空状態（「先に動画のたたき台を作ると…」）と次の行動が食い違う（§2-5）。空状態の次の行動は EmptyState が示す。
+// 直下の空状態と次の行動が食い違う（§2-5）。空状態の次の行動は NoScenesState が状態に応じて示す。
 const EXPORT_DESC = "設定を確認して、動画をMP4ファイルとして保存します。";
 
 interface ExportProps {
@@ -343,7 +342,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
 
   // 場面ゼロは**押しても必ず失敗**する（startExport が「書き出す場面がありません」で止める）。設定フォームを出すと
   // 入力させたうえで断る形になるので、上流へ促す空状態で止める（#547 P3-10・ADR-0026④）。
-  // 仕上がり確認・公開前チェックと同じ「空なら上流へ」の流儀（#403）＝共有の EmptyState を使う。
+  // 仕上がり確認・公開前チェック・たたき台と同じ表示・同じ次の行動にする（#403/#590）＝共有の NoScenesState。
   // `!busy` も条件に入れる：走行中の書き出しを空状態で覆い隠すと、進捗と「書き出しを中止」＝編集ロックの
   // **唯一の抜け道**（15 §4・ExportLockBanner の案内）が消える。場面ゼロで書き出しが走らない担保は store 側
   // （#379 の newProject/loadProject 等のガード）に依存するので、この画面でも明示して他ファイル依存にしない。
@@ -352,11 +351,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       <div className="main-scroll">
         <PageHead title={EXPORT_TITLE} />
         {/* 書き出し中バナーは出さない：この画面は自前の進捗表示を持ち、かつ場面ゼロでは書き出しが走らない。 */}
-        <EmptyState
-          title="まだ場面がありません"
-          message="先に動画のたたき台を作ると、ここで動画を書き出せます。"
-          action={<StartNewVideoButton onNavigate={onNavigate} />}
-        />
+        <NoScenesState purpose="ここで動画を書き出せます" onNavigate={onNavigate} />
       </div>
     );
   }

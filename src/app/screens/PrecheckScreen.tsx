@@ -10,6 +10,7 @@ import { PageHead } from "../components/ui";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { CheckIcon, ChevronRightIcon, ArrowLeftIcon } from "../components/icons";
+import { NoScenesState } from "../components/NoScenesState";
 import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
 
 interface PrecheckProps {
@@ -47,15 +48,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
       <div className="main-scroll">
         <PageHead title="公開前チェック" desc="動画を書き出す前に内容を点検します。" />
         <ExportLockBanner onNavigate={onNavigate} />
-        <div className="card text-center" style={{ padding: "48px 24px" }}>
-          <p className="text-muted" style={{ marginBottom: 16 }}>
-            まだ場面がありません。動画のたたき台を作ってから、公開前チェックに進みましょう。
-          </p>
-          <button className="btn btn-primary btn-lg" onClick={() => onNavigate("draft")}>
-            たたき台へ
-            <ChevronRightIcon size={18} />
-          </button>
-        </div>
+        <NoScenesState purpose="ここで公開前チェックができます" onNavigate={onNavigate} />
       </div>
     );
   }

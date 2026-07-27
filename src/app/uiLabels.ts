@@ -4,6 +4,8 @@ import { FREE_ELEMENT_KINDS, SUBTITLE_SOURCE_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
+// 型のみ（実行時 import なし＝store との循環を作らない）。空状態の文言が状態で変わるため（#590）。
+import type { GenerateStatus } from "./store/projectStore";
 /**
  * 場面番号の並べ方（1始まり・多いと先頭8件＋「ほか N 件」）。公開前チェックの各項目と、
  * 一括操作の結果表示（`standardLookResultMessage`）で**同じ見せ方**にするための単一の参照元（§2-7）。
@@ -268,4 +270,50 @@ export function standardLookResultMessage(r: { fixed: number[]; unfixable: numbe
     parts.push(`${formatSceneNumbers(r.unfixable)}は合う標準の見た目が無いため、場面編集で選び直してください。`);
   }
   return parts.join("");
+}
+
+/**
+ * 「場面が1つも無い」ときの見出し・説明（#590）。**公開前チェック／仕上がり確認／書き出し／たたき台の4画面で共有**する。
+ *
+ * 以前は画面ごとに手書きで、見た目（共有コンポーネントの有無）も次の行動も揃っていなかった。とくに
+ * **生成が失敗したとき**（`status: "error"`）、たたき台以外は理由に触れず「まだ場面がありません」とだけ出していた
+ * ＝原因も次の行動も分からない（§2-5）。状態の見分けをここ1か所に置く（ADR-0026②）。
+ *
+ * `purpose`＝その画面で何ができるようになるか（例「仕上がりを確認できます」）。
+ * `canAddScene`＝その画面自身で場面を作れるか（たたき台のみ true）。
+ */
+export function noScenesTitle(status: GenerateStatus, canAddScene: boolean): string {
+  switch (status) {
+    case "generating": return "動画案を作成中です…";
+    case "error": return GENERATE_FAILED_TITLE;
+    case "ready": return canAddScene ? "場面を追加して作り始めましょう" : "まだ場面がありません";
+    case "idle": return "まだ動画案がありません";
+  }
+}
+
+export function noScenesMessage(status: GenerateStatus, canAddScene: boolean, purpose: string, reason?: string | null): string {
+  switch (status) {
+    case "generating": return `できあがると、${purpose}。`;
+    case "error": return generateFailedMessage(reason);
+    case "ready": return canAddScene
+      ? "「場面を追加」で最初の場面を作り、セリフ・素材・見た目を設定していきましょう。"
+      : `場面を作ると、${purpose}。`;
+    case "idle": return "「新しい動画を作る」から、会社情報と素材を入れて動画案を作成しましょう。";
+  }
+}
+
+/** 空状態から「場面を作る画面」へ行く導線のラベル（4画面で同じ言葉＝同じ行き先）。 */
+export const GO_TO_DRAFT_LABEL = "たたき台へ";
+
+/**
+ * 動画案の作成に失敗したときの見出し・説明・復帰の2択（#393 P1）。**生成中の画面と空状態（4画面）で共有**する（#590）。
+ * 挙動（再試行／`startManualEdit`＋たたき台へ）が同じなのにラベルだけ2通りあると、片方だけ直って言葉が割れる（§6・PR #615 レビュー）。
+ * 「手動で作成する」でなく**「手動で場面を作る」**なのは、押した先で実際にすることを言うため（§2-5）。
+ */
+export const GENERATE_FAILED_TITLE = "動画案の作成に失敗しました";
+export const RETRY_GENERATE_LABEL = "もう一度試す";
+export const START_MANUAL_LABEL = "手動で場面を作る";
+/** 失敗の理由は生成が持っている（`aiError`）。無いときも「次に何をすればよいか」だけは必ず出す（§2-5）。 */
+export function generateFailedMessage(reason?: string | null): string {
+  return reason ?? "通信状況や設定を確認して、もう一度お試しください。手動で場面を作ることもできます。";
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useProjectStore } from "../store/projectStore";
 import { LoadingView, ErrorView } from "../components/states";
+import { GENERATE_FAILED_TITLE, generateFailedMessage, RETRY_GENERATE_LABEL, START_MANUAL_LABEL } from "../uiLabels";
 
 interface GeneratingProps {
   onNavigate: (screen: ScreenId) => void;
@@ -35,17 +36,15 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
   if (status === "error") {
     return (
       <div className="main-scroll">
+        {/* 見出し・説明・2択のラベルは空状態（NoScenesState）と共有する＝この画面を離れても言葉が変わらない（§6・#590）。 */}
         <ErrorView
-          title="動画案の作成に失敗しました"
-          message={
-            aiError ??
-            "通信状況や設定を確認して、もう一度お試しください。手動で作成を始めることもできます。"
-          }
+          title={GENERATE_FAILED_TITLE}
+          message={generateFailedMessage(aiError)}
           // 正典 `12_AI_PROMPT_AND_MAPPING §9.3③`「前回 ai/latest_result.json から復元」は **post-α・未実装として正典で追跡中**の
           // ため導線を出さない（GH issue でなく正典が追跡元＝復元しない導線で誤誘導しないため。現状 UI は ①再試行 / ②手動のみ）。
           actions={[
             {
-              label: "もう一度試す",
+              label: RETRY_GENERATE_LABEL,
               primary: true,
               onClick: () => {
                 setProgress(8);
@@ -54,7 +53,7 @@ export function GeneratingScreen({ onNavigate }: GeneratingProps) {
               },
             },
             // 手動作成リカバリ（#393 P1）：status を error のままにせず ready にし、入力済みメタ/素材を残して draft へ。
-            { label: "手動で作成する", onClick: () => { startManualEdit(); onNavigate("draft"); } },
+            { label: START_MANUAL_LABEL, onClick: () => { startManualEdit(); onNavigate("draft"); } },
           ]}
         />
       </div>
