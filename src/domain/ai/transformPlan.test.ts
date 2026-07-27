@@ -3,6 +3,7 @@ import type { Asset } from '../project/types';
 import type { Template } from '../template/types';
 import type { AiScene, AiVideoPlan } from './types';
 import type { Orientation } from '../enums';
+import { AI_SCENE_MIN_DURATION_SEC, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from '../constants';
 import { createSequentialIdFactory } from './idFactory';
 import { transformVideoPlan } from './transformPlan';
 import type { TransformContext } from './transformPlan';
@@ -194,11 +195,57 @@ describe('transformVideoPlan', () => {
     expect(scenes[0].warnings.some((w) => w.code === 'TEMPLATE_NOT_FOUND' && w.autoFixed === true)).toBe(true);
   });
 
+  // マイ見た目は AI 入力から除外される（ADR-0017）＝AI が提案できないものへ**補正で**化けさせない（#547）。
+  // 当て先の規則は standardTemplateForScene に一本化してあるので、その除外がここでも効くことを固定する。
+  it('補正の当て先にマイ見た目を選ばない（候補がマイ見た目だけなら手動選択を促す）', () => {
+    const userOnly: Template[] = [
+      { ...templates[0], templateId: 'user_tmpl_001', name: 'マイ見た目' }, // 同カテゴリ・同じ向きだが自作
+    ];
+    const plan = singleScenePlan({ sceneType: 'opening', templateId: 'does_not_exist_v1' });
+    const { scenes } = transformVideoPlan(plan, { ...baseCtx(), templates: userOnly });
+    expect(scenes[0].templateId).not.toBe('user_tmpl_001'); // 化けない
+    // 自動補正できないので「手で選ぶ」案内に倒れる（autoFixed=false・§2-5）。
+    expect(scenes[0].warnings.some((w) => w.code === 'TEMPLATE_NOT_FOUND' && w.autoFixed === false)).toBe(true);
+  });
+
   it('長すぎる durationSec をテンプレ上限へ clamp する', () => {
     const plan = singleScenePlan({ durationSec: 100 });
     const { scenes } = transformVideoPlan(plan, baseCtx());
     expect(scenes[0].durationSec).toBe(12); // opening の aiHint.maxDurationSec
     expect(scenes[0].warnings.some((w) => w.code === 'DURATION_CLAMPED')).toBe(true);
+  });
+
+  // #607：テンプレ上限が生成の下限（3秒）より小さいとき、素直に「下限→上限」の順で clamp すると
+  // **評価順で上限を破る**（短い値が3秒に引き上げられ、テンプレが宣言した1秒を超える）。
+  // どちらも #553 の「生成の目安」だが、上限は**そのテンプレについて作者が明示した値**なので優先する。
+  // 到達経路は手編集テンプレ/テンプレートパック取り込み（`aiHint` は作成エディタ非開放）。
+  describe('テンプレ上限が生成の下限より小さいとき（#607）', () => {
+    const tightCtx = () => {
+      const ctx = baseCtx();
+      return {
+        ...ctx,
+        templates: ctx.templates.map((t) =>
+          t.templateId === 'opening_yuko_right_v1' ? { ...t, aiHint: { ...t.aiHint, maxDurationSec: 1 } } : t,
+        ),
+      };
+    };
+
+    it('短すぎる値でも上限を超えない（下限へ引き上げない）', () => {
+      const { scenes } = transformVideoPlan(singleScenePlan({ durationSec: 0.5 }), tightCtx());
+      expect(scenes[0].durationSec).toBe(1); // 3 に引き上げると「最長1秒」の宣言を破る
+      expect(scenes[0].durationSec).toBeGreaterThan(0); // schema: durationSec > 0（11 §7）
+      expect(scenes[0].warnings.some((w) => w.code === 'DURATION_CLAMPED')).toBe(true);
+    });
+
+    it('長すぎる値も上限へ寄る（範囲が1点に潰れても壊れない）', () => {
+      const { scenes } = transformVideoPlan(singleScenePlan({ durationSec: 10 }), tightCtx());
+      expect(scenes[0].durationSec).toBe(1);
+    });
+
+    it('上限が下限以上のときは従来どおり下限が効く（この是正で通常経路を変えない）', () => {
+      const { scenes } = transformVideoPlan(singleScenePlan({ durationSec: 0.5 }), baseCtx());
+      expect(scenes[0].durationSec).toBe(AI_SCENE_MIN_DURATION_SEC);
+    });
   });
 
   it('一致しない poseTag は既定の yuko 素材へフォールバックする', () => {
@@ -247,5 +294,69 @@ describe('transformVideoPlan', () => {
     expect(
       scenes[0].warnings.some((w) => w.code === 'TEMPLATE_ORIENTATION_MISMATCH' && w.autoFixed === false),
     ).toBe(true);
+  });
+});
+
+// #569：生成側の長さ助言（TEXT_OVERFLOW）が掛け合いの各行を見ていなかった＝precheck（sceneLines で各行を見る）と非対称。
+// 「同じ長すぎが掛け合いの有無で生成時だけ静か」を解消する（ADR-0026②）。閾値の継承順は precheck と既に一致（#568）。
+describe('長さの助言が掛け合いの各行も見る（#569・ADR-0026②）', () => {
+  const overNarration = 'あ'.repeat(MAX_NARRATION_LEN_DEFAULT + 1);
+  const overSubtitle = 'い'.repeat(MAX_SUBTITLE_LEN_DEFAULT + 1);
+  const codes = (plan: AiVideoPlan): string[] =>
+    transformVideoPlan(plan, baseCtx()).scenes.flatMap((s) => s.warnings.map((w) => w.code));
+
+  it('単一ナレーションが長ければ従来どおり警告する（回帰なし）', () => {
+    expect(codes(singleScenePlan({ narrationText: overNarration }))).toContain('TEXT_OVERFLOW');
+  });
+
+  it('掛け合いの行が長ければ警告する（旧実装は narrationText が空で素通りしていた）', () => {
+    // 掛け合いでは narrationText が空になりうる（AI が省略）＝旧実装は '' を検査して実質ノーチェックだった。
+    const plan = singleScenePlan({ narrationText: '', narrationLines: [{ text: '短い' }, { text: overNarration }] });
+    expect(codes(plan)).toContain('TEXT_OVERFLOW');
+  });
+
+  it('掛け合いの行が全て短ければ警告しない（誤警告を出さない）', () => {
+    const plan = singleScenePlan({ narrationText: '', narrationLines: [{ text: '短い' }, { text: 'これも短い' }] });
+    expect(codes(plan)).not.toContain('TEXT_OVERFLOW');
+  });
+
+  it('掛け合いがあるとき、単一 narrationText の長さでは判定しない（本体は各行＝precheck と同じ対象）', () => {
+    // narrationText（mirror 用の残骸）が長くても、実体である行が短ければ助言しない。
+    const plan = singleScenePlan({ narrationText: overNarration, narrationLines: [{ text: '短い' }] });
+    expect(codes(plan)).not.toContain('TEXT_OVERFLOW');
+  });
+
+  it('行の字幕が長ければ警告する（テンプレ字幕 texts.subtitle と同じ扱い）', () => {
+    const plan = singleScenePlan({
+      narrationText: '', texts: { title: 'x' },
+      narrationLines: [{ text: '短い', subtitle: overSubtitle }],
+    });
+    expect(codes(plan)).toContain('TEXT_OVERFLOW');
+  });
+
+  it('行の字幕が未指定なら text を流用したものを検査する（null=継承・#569 レビュー）', () => {
+    // AI が subtitle を省略するのが通常パターン。字幕上限(60)超・セリフ上限(120)以下の長さにすると、
+    // 「実際に表示される字幕（=text）」を見ていなければ**どちらの警告も出ない**＝取りこぼしになる。
+    const between = 'う'.repeat(MAX_SUBTITLE_LEN_DEFAULT + 10);
+    expect(between.length).toBeGreaterThan(MAX_SUBTITLE_LEN_DEFAULT);
+    expect(between.length).toBeLessThanOrEqual(MAX_NARRATION_LEN_DEFAULT); // セリフ側では引っかからない長さ
+    const plan = singleScenePlan({
+      narrationText: '', texts: { title: 'x' },
+      narrationLines: [{ text: between }], // subtitle 未指定＝text が字幕として表示される
+    });
+    expect(codes(plan)).toContain('TEXT_OVERFLOW');
+  });
+
+  it('長い行が複数あっても種類ごとに警告は1つ（1場面で警告が並ばない＝precheck と同じ流儀）', () => {
+    // 集約性だけを見るため、字幕は明示的に短くしてセリフ側だけを長くする（字幕未指定だと text 流用で字幕側も鳴る）。
+    const line = { text: overNarration, subtitle: '短い字幕' };
+    const plan = singleScenePlan({ narrationText: '', narrationLines: [line, line, line] });
+    expect(codes(plan).filter((c) => c === 'TEXT_OVERFLOW')).toHaveLength(1);
+  });
+
+  it('セリフと字幕の両方が長ければ2件出る（別々の問題＝直し方が違うので畳まない）', () => {
+    // 字幕未指定で text が両上限を超える＝「行を短くする」と「短い字幕を明示する」の2つの助言が要る。
+    const plan = singleScenePlan({ narrationText: '', narrationLines: [{ text: overNarration }] });
+    expect(codes(plan).filter((c) => c === 'TEXT_OVERFLOW')).toHaveLength(2);
   });
 });

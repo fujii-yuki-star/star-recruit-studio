@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { DEFAULT_VOICE_ID } from '../../domain/constants';
 import { getVoicevoxSpeaker, getVoicevoxUrl } from '../appSettings';
 import type { SynthesizeInput, SynthesizedVoice, VoiceProvider } from '../../domain/voice/voiceProvider';
+import { wavDurationSec } from '../../domain/voice/wavDuration';
 import { DEFAULT_SPEAKER } from '../../domain/voice/voiceCatalog';
 
 // 本アプリの voiceId → VOICEVOX の speaker(スタイル)番号。既定話者は voiceCatalog の単一参照元（§2-7）。
@@ -39,8 +40,9 @@ export class VoicevoxProvider implements VoiceProvider {
       // 空なら Rust 側が環境変数→既定にフォールバックする。
       baseUrl: baseUrl || null,
     });
-    // 尺は文字数からの概算（正確な尺は将来 WAV から取得予定）。
-    const durationSec = Math.max(1, Math.round(input.text.length * 1.8) / 10);
-    return { audioDataUrl, durationSec };
+    // 尺は**実 WAV から測る**（wavDurationSec）。文字数概算だと本番エンジンの実尺とズレる（#547 P3-3）。
+    // 仕上がり確認/書き出しの尺解決（lineDurationsFromAudio）と同じ導出＝将来 durationSec を使っても一致。
+    // 解析不能（不正 WAV）は 0＝呼び出し側で自動逐次フォールバック（lineDurationsFromAudio と同じ扱い）。
+    return { audioDataUrl, durationSec: wavDurationSec(audioDataUrl) };
   }
 }

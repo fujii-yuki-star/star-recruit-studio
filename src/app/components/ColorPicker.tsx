@@ -28,9 +28,17 @@ interface Props {
   className?: string;
   /** 読み上げ用ラベル。 */
   ariaLabel?: string;
+  /**
+   * 面のドラッグ（鮮やかさ×明るさ／色相バー）の開始・終了＝取り消しの「1操作＝1ステップ」境界（#547 P2-3 レビュー）。
+   * これらの面は pointermove ごとに {@link Props.onChange} を発火するため、境界が無いと**ひと撫でで数十〜百件**の
+   * 履歴が積まれ、履歴上限（`HISTORY_LIMIT`）を流し切って「戻したかった直前の誤操作」を追い出してしまう。
+   * パレットのクリックと色コード欄は単発確定なので対象外（渡さなくてよい）。
+   */
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
 }
 
-export function ColorPicker({ value, onChange, className, ariaLabel = "色を選ぶ" }: Props) {
+export function ColorPicker({ value, onChange, className, ariaLabel = "色を選ぶ", onDragStart, onDragEnd }: Props) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   // 開いている間の作業用 HSV（value からの往復で色相が飛ばないよう保持）。開くたびに現在値へ同期する。
@@ -42,6 +50,30 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   const hueRef = useRef<HTMLDivElement>(null);
   const draggingSv = useRef(false);
   const draggingHue = useRef(false);
+  // 取り消しの合成境界（#547 P2-3 レビュー）。SV面・色相バーで共有し、開始したものだけを閉じる（冪等）。
+  const boundaryRef = useRef(false);
+  const endDragBoundary = useCallback(() => {
+    if (!boundaryRef.current) return;
+    boundaryRef.current = false;
+    onDragEnd?.();
+  }, [onDragEnd]);
+  const startDragBoundary = useCallback(() => {
+    if (boundaryRef.current) return;
+    boundaryRef.current = true;
+    onDragStart?.();
+    // pointer capture は best-effort（try/catch）。面の外で離しても必ず閉じるよう **window でも**拾う（one-shot）。
+    // 閉じ漏れると以後の編集が全て同じ履歴に合成され、取り消しが効かなくなる（オーバーレイと同機構）。
+    const finish = (): void => {
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      endDragBoundary();
+    };
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  }, [onDragStart, endDragBoundary]);
+  // ポップオーバーが閉じた（Escape・外側クリック）／アンマウントしたときも取り残さない。
+  useEffect(() => { if (!open) endDragBoundary(); }, [open, endDragBoundary]);
+  useEffect(() => () => endDragBoundary(), [endDragBoundary]);
 
   const openPicker = () => {
     setHsv(hexToHsv(value) ?? { h: 0, s: 0, v: 0 }); // 開いた瞬間の値を取り込む
@@ -169,6 +201,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
             onPointerDown={(e) => {
               e.preventDefault();
               draggingSv.current = true;
+              startDragBoundary(); // 1ドラッグ＝1取り消し（#547 P2-3 レビュー）
               try { svRef.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
               applySvAt(e.clientX, e.clientY);
             }}
@@ -176,6 +209,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
             onPointerUp={(e) => {
               draggingSv.current = false;
               try { svRef.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+              endDragBoundary();
             }}
             style={{
               position: "relative", width: "100%", height: 130, borderRadius: 6, cursor: "crosshair",
@@ -200,6 +234,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
             onPointerDown={(e) => {
               e.preventDefault();
               draggingHue.current = true;
+              startDragBoundary(); // 同上
               try { hueRef.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
               applyHueAt(e.clientX);
             }}
@@ -207,6 +242,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
             onPointerUp={(e) => {
               draggingHue.current = false;
               try { hueRef.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+              endDragBoundary();
             }}
             style={{
               position: "relative", width: "100%", height: 14, borderRadius: 7, cursor: "ew-resize",

@@ -18,7 +18,11 @@ const load = (p) => JSON.parse(readFileSync(p, 'utf8'));
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 addFormats(ajv);
 
-const vProject = ajv.compile(load(join(base, 'schemas/project.schema.json')));
+const projectSchema = load(join(base, 'schemas/project.schema.json'));
+// 版はスキーマから引く（直書きしない・§2-7）。ここに版を書くと、バンプのたびに本ファイルの代表データが
+// 全部落ちて「無関係な失敗」を直す作業が毎回発生する（実際 #555 の 1.24 で発生）。
+const PROJECT_VERSION = projectSchema.properties.schemaVersion.const;
+const vProject = ajv.compile(projectSchema);
 const vTemplate = ajv.compile(load(join(base, 'schemas/template.schema.json')));
 const vPlan = ajv.compile(load(join(base, 'schemas/ai-video-plan.schema.json')));
 
@@ -97,7 +101,7 @@ ok = ok && sem;
 
 // generalBrief の上限（ADR-0011 #4）を代表データ（正常・異常）で常設検証（CLAUDE.md §7）。
 const generalBase = {
-  schemaVersion: '1.23', projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
+  schemaVersion: PROJECT_VERSION, projectId: 'proj_20260101_001', projectName: 'check', purpose: 'report',
   videoKind: 'general', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 300 },
   voiceSettings: { defaultVoiceId: 'voicevox_zundamon' }, assets: [], parts: [], scenes: [],
@@ -114,11 +118,19 @@ const withScene = (extra) => ({ ...withBrief({}), scenes: [{ ...sceneBase, ...ex
 const mustAccept = [
   ['general: 上限内（agenda20件/各100字・targetAudience100字）', withBrief({ agenda: Array.from({ length: 20 }, () => 'あ'.repeat(100)), keyPoints: ['要点'], targetAudience: 'あ'.repeat(100) })],
   ['videoSettings: 縦型 9:16（width/height なし）', { ...withBrief({}), videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
+  // 場面の表示時間は `> 0`（11 §7・schema `exclusiveMinimum:0`＝#586 で正典どうしの矛盾を解消）。
+  // 場面ごとの上限/下限は持たない（#553）ので、0 より大きければ極端に短くても許容する。
+  ['scene: durationSec 0.1（極短でも >0 なら許容・下限は持たない #553）', withScene({ durationSec: 0.1 })],
   ['scene: fontId=null（継承）を許容', withScene({ fontId: null })],
   ['scene: fontId 既知（kaitou-yokoku-gothic）を許容', withScene({ fontId: 'kaitou-yokoku-gothic' })],
   ['scene: fontId 未指定（継承）を許容', withScene({})],
   ['freeLayout: 新図形(star)＋枠線(stroke)を許容', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, shapeType: 'star', fillColor: '#ff0000', opacity: 1, strokeColor: '#112233', strokeWidth: 3 }] })],
   ['scene: textFontIds（title フォント上書き）を許容', withScene({ textFontIds: { title: 'kaitou-yokoku-gothic' } })],
+  // 文字の体裁の場面別上書き（scene.textStyles・1.24・#555）。制約は Layer/FreeElement の同名プロパティと同一。
+  ['scene: textStyles（色/サイズ/太さ/縁取り）を許容（1.24・#555）', withScene({ textStyles: { title: { color: '#ff0000', fontSize: 72, fontWeight: 'bold', strokeColor: '#000000', strokeWidth: 4 } } })],
+  ['scene: textStyles の一部だけ指定を許容（残りはテンプレ継承）', withScene({ textStyles: { subtitle: { color: '#00ff00' } } })],
+  ['scene: textStyles 空オブジェクト（全部継承）を許容', withScene({ textStyles: { main: {} } })],
+  ['scene: textStyles strokeWidth=0（縁取りなし・境界）を許容', withScene({ textStyles: { url: { strokeWidth: 0 } } })],
   ['freeLayout: text の fontId を許容', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', fontId: 'gen-interface-jp-display' }] })],
   ['freeLayout: rotation（回転・度）を許容（1.9・#208）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, rotation: 30 }] })],
   ['freeLayout: text 体裁 lineHeight/textAlign/縁取り を許容（1.10・#209）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', lineHeight: 1.6, textAlign: 'center', strokeColor: '#000000', strokeWidth: 2 }] })],
@@ -150,6 +162,9 @@ const mustReject = [
   ['general: targetAudience 101字', withBrief({ targetAudience: 'あ'.repeat(101) })],
   ['videoSettings: 旧 width/height 同梱は拒否（1.2 で撤廃）', { ...withBrief({}), videoSettings: { aspectRatio: '16:9', width: 1920, height: 1080, fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
   ['videoSettings: 未知の比率 1:1 は拒否', { ...withBrief({}), videoSettings: { aspectRatio: '1:1', fps: 30, targetDurationSec: 60, maxDurationSec: 300 } }],
+  // 0秒の場面は作らない（11 §9 の自動補正が `≤0` を既定 8 秒へ寄せる）＝schema でも弾く（#586）。
+  ['scene: durationSec 0 は拒否（exclusiveMinimum・#586）', withScene({ durationSec: 0 })],
+  ['scene: durationSec 負は拒否（#586）', withScene({ durationSec: -1 })],
   ['scene: fontId 未知（old-font）は拒否', withScene({ fontId: 'old-font' })],
   ['scene: slotFits の不正な収め方(zoom)は拒否', withScene({ slotFits: { background: 'zoom' } })],
   ['freeLayout: 未知の図形(hexagon)は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'shape', x: 10, y: 10, w: 100, h: 100, shapeType: 'hexagon' }] })],
@@ -171,6 +186,13 @@ const mustReject = [
   ['freeLayout: background.opacity 範囲外(1.5)は拒否（1.23・#529）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, opacity: 1.5 } }] })],
   ['freeLayout: background 未知フィールドは拒否（additionalProperties:false・1.23）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, background: { enabled: true, blur: 2 } }] })],
   ['scene: textFontIds 未知フォントは拒否', withScene({ textFontIds: { title: 'old-font' } })],
+  ['scene: textStyles 色が非hexは拒否（1.24）', withScene({ textStyles: { title: { color: 'red' } } })],
+  ['scene: textStyles fontSize=0 は拒否（exclusiveMinimum）', withScene({ textStyles: { title: { fontSize: 0 } } })],
+  ['scene: textStyles fontSize 負は拒否', withScene({ textStyles: { title: { fontSize: -10 } } })],
+  ['scene: textStyles fontWeight 未知は拒否（enum）', withScene({ textStyles: { title: { fontWeight: 'heavy' } } })],
+  ['scene: textStyles strokeWidth 負は拒否', withScene({ textStyles: { title: { strokeWidth: -1 } } })],
+  ['scene: textStyles 未知の textKey は拒否（additionalProperties:false）', withScene({ textStyles: { heading: { color: '#ffffff' } } })],
+  ['scene: textStyles 未知フィールド(lineHeight)は拒否＝配置/行間は開放しない（§2-4）', withScene({ textStyles: { title: { lineHeight: 1.5 } } })],
   ['freeLayout: text の fontId 未知は拒否', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 100, h: 50, text: 'a', fontId: 'old-font' }] })],
   ['freeLayout: subtitleSource 未知 kind は拒否（1.20・ADR-0029）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'lines' } }] })],
   ['freeLayout: subtitleSource=speaker で speaker 欠落は拒否（1.20）', withScene({ sceneType: 'free', freeLayout: [{ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: 'speaker' } }] })],

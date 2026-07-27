@@ -4,7 +4,8 @@ import type { ElementAnimation, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import type { Fit } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME } from "../../domain/constants";
-import { layoutScene } from "../../renderer/layout";
+import { isSubtitleItem, layoutScene } from "../../renderer/layout";
+import type { LayoutItem } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { resolveLineSubtitle, type BoundaryFrame, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
@@ -165,7 +166,7 @@ function SlotVideo({
 }
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, telops, timeSec, animations, videoPlayback, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; telops?: { text: string; row: number }[]; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; children?: ReactNode }) {
+export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, telops, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; telops?: { text: string; row: number }[]; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
@@ -274,17 +275,26 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
   // 場面のレイアウト（アニメ再生中は timeSec で補間済み＝書き出しと同一 layoutScene(t)・ADR-0001）。
-  const layout = layoutScene(scene, template, layoutOpts);
+  const fullLayout = layoutScene(scene, template, layoutOpts);
+  // hideItemIds＝インライン編集中の要素をSVGから伏せる（#549）。編集中は textarea が同じ体裁で同じ位置に文字を出すため、
+  // 伏せないと二重表示になる（入力は即 store へ反映＝SVG も毎打鍵更新されるため）。**プレビュー限定の編集用アフォーダンス**で、
+  // 正準 layoutScene の結果を後段で間引くだけ＝書き出しは hideItemIds を渡さないのでパリティに影響しない（ADR-0001）。
+  const layout = hideItemIds && hideItemIds.length > 0
+    ? { ...fullLayout, items: fullLayout.items.filter((i) => !hideItemIds.includes(i.id)) }
+    : fullLayout;
   // responsive:true で SVG ルートを 100%（viewBox は canvas 実寸を保持）にし、外枠の実寸は計測結果に従う。
   // プレビューも書き出しと同じく常時クレジットを表示（ADR-0001 パリティ）。
-  const svg = layoutToSvg(layout, { assetSrc, responsive: true, credit, fontFamily });
+  // 「字幕を入れる」OFF（hideSubtitles）は、書き出しと同じ itemFilter＋同じ述語（isSubtitleItem）で字幕を消す
+  // ＝プレビュー＝書き出しのパリティ（ADR-0026③・#547 P2-7）。静止・実映像再生の両経路に同じ filter を渡す。
+  const subtitleFilter = hideSubtitles ? (it: LayoutItem) => !isSubtitleItem(it) : undefined;
+  const svg = layoutToSvg(layout, { assetSrc, responsive: true, credit, fontFamily, itemFilter: subtitleFilter });
 
   // 実映像再生（#432）：再生中かつ動画スロットのある場面のみ、下SVG / video要素 / 上SVG の3層に分けて実映像を流す。
   // 分割は書き出し（splitVideoSceneSvgMulti）と同型＝スロットは穴（透過）にして video 要素で埋める＝ADR-0001 パリティ。
   const playbackSlots = videoPlayback?.playing ? videoPlayback.slots.filter((s) => s.clipUrl) : [];
   const split =
     playbackSlots.length > 0
-      ? splitVideoSceneSvgMulti(layout, playbackSlots.map((s) => s.slotLayerId), assetSrc, undefined, fontFamily, credit, true)
+      ? splitVideoSceneSvgMulti(layout, playbackSlots.map((s) => s.slotLayerId), assetSrc, subtitleFilter, fontFamily, credit, true)
       : null;
 
   const boxStyle: CSSProperties = {

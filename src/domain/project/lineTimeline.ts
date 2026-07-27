@@ -255,3 +255,14 @@ export function motionSubtitleAt(
   const segment = segmentAt(scene, lineDurations, t);
   return { segment, boundary: boundaryFrameFromSpec(scene, segment) };
 }
+
+/**
+ * この場面に「同時に流れるセリフ」があるか（＝2行以上の同時開始グループ・ADR-0031）。純粋関数。
+ *
+ * 字幕はみ出しの案内文を原因で出し分けるのに使う（#563）：**同時**なら帯を積むので「同時のセリフを減らす」、
+ * **単独/逐次**なら1帯が大きすぎ/長すぎなので「文字を小さくする・字幕を短くする」＝「次の行動」が違う（§2-5）。
+ * 単一 narration（lines 不在）は `sceneLines` が1行へ解決するので常に false。
+ */
+export function hasSimultaneousLines(scene: Scene): boolean {
+  return groupIndices(sceneLines(scene)).some((g) => g.length >= 2);
+}

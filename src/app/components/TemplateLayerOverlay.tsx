@@ -1,12 +1,13 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Layer } from "../../domain/template/types";
-import { freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { effectiveLayerZ } from "../../domain/template/layerOrder";
+import { elementAtPoint, freeElementsInRect, moveFreeElement, resizeFreeElement, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementMove, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GEOM_MIN_SIZE, GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
-import { topGroupOfMember } from "../../domain/project/groupOps";
+import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
 
 // テンプレ作成エディタのレイヤーをプレビュー上でドラッグ/リサイズ/吸着＋複数選択するオーバーレイ（ADR-0017・#306）。
 // ①の FREE オーバーレイの純粋 ops（{x,y,w,h} を受ける move/resize/snap、id 集合を返す freeElementsInRect）を Layer 編集へ流用する。
@@ -78,11 +79,43 @@ interface Props {
   onGroupTransform?: (groupId: string, patch: Partial<GroupTransform>) => void;
   /** レイヤーのユーザー向けラベル（種別名）。 */
   label: (layer: Layer) => string;
+  /**
+   * ドラッグ/リサイズ/回転の開始・終了（取り消しの「1操作＝1ステップ」境界・#211/#547 P2-3）。
+   * レイヤー/ハンドルの onPointerDown は stopPropagation するため、**祖先での pointerdown 検知では拾えない**。
+   * FREE オーバーレイ（`FreeLayoutOverlay`）と同じ明示コールバックで境界を通知する。
+   */
+  onInteractionStart?: () => void;
+  onInteractionEnd?: () => void;
 }
 
-export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onRotate, groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, label }: Props) {
+export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onRotate, groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, label, onInteractionStart, onInteractionEnd }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // 取り消しの合成境界（#547 P2-3）。開始したものだけを終了させる＝深さが釣り合う（多重 end で履歴が壊れない）。
+  const interactingRef = useRef(false);
+  const finishInteraction = (): void => {
+    if (!interactingRef.current) return;
+    interactingRef.current = false;
+    onInteractionEnd?.();
+  };
+  const startInteraction = (): void => {
+    if (interactingRef.current) return;
+    interactingRef.current = true;
+    onInteractionStart?.();
+    // 終了は下の onPointerUp/onPointerCancel（pointer capture 前提）で拾うが、capture は best-effort（try/catch）。
+    // 捕捉に失敗して枠外で離すと閉じ漏れ＝以後の編集が全て同じ履歴に合成されるので、**window でも**保険で拾う
+    // （useHistoryGroup と同じ機構・one-shot で自己解除。finishInteraction は冪等なので二重呼び出しは無害）。
+    const finish = (): void => {
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      finishInteraction();
+    };
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  };
+  // ドラッグ中にアンマウントしても閉じる（開きっぱなしだと以後の編集が全て同じ履歴に合成される・FreeLayoutOverlay と同機構）。
+  // ref も戻す＝将来インライン関数を渡されて cleanup が繰り返し走っても、外側のグループまで閉じない。
+  useEffect(() => () => { if (interactingRef.current) { interactingRef.current = false; onInteractionEnd?.(); } }, [onInteractionEnd]);
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   // 範囲選択（マーキー）の矩形（canvas 座標・null=非アクティブ）。空白ドラッグで矩形を引き交差レイヤーを選択。
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -120,6 +153,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     const width = ref.current?.clientWidth ?? canvasW;
     // pointer capture は best-effort（一部環境で例外）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: layer.id, mode, corner,
       rotation: layer.rotation, // 回転考慮リサイズの基準（開始時点に固定・#279）
@@ -139,6 +173,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     e.stopPropagation();
     if (!selectedIds.includes(layer.id)) onSelect(layer.id);
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: layer.id, mode: "rotate",
       startClientX: e.clientX, startClientY: e.clientY,
@@ -157,6 +192,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     if (group.locked) return; // ロック中は選択のみ
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-move", groupId: group.id,
       startTransform: { ...group.transform },
@@ -167,6 +203,43 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     });
   };
 
+  // レイヤー押下のルーティング。レイヤー div と**グループ枠**（#548/#552）の両方から呼ぶ＝枠の上を押しても
+  // 「そのレイヤーを直接押したとき」と同じ挙動になる。
+  const routeLayerPointerDown = (e: ReactPointerEvent, l: Layer) => {
+    const lGroup = topGroupByEl.get(l.id) ?? null;
+    if (lGroup) beginGroupDrag(e, lGroup);
+    else beginDrag(e, l, "move");
+  };
+
+  // グループ枠の押下（#548/#552）：枠は不透明でグループの外接矩形**全域**を覆うので、そのまま beginGroupDrag すると
+  // 枠内に重なる**グループ外のレイヤー**を選べない（FREE 側 FreeLayoutOverlay と同型の欠陥＝片方だけ直すと取り残される）。
+  // ポインタの下を実ヒットテストして分岐：レイヤーがあればそれを押した扱い／空白なら従来どおりグループ移動。
+  const beginFrameDrag = (e: ReactPointerEvent, group: Group) => {
+    const p = toCanvas(e.clientX, e.clientY);
+    // 委譲するのは「**枠が実際に覆って触れなくしていたもの**」だけに絞る（レビュー🔴）：メンバー、および
+    // メンバーより**手前**の非メンバー（＝枠内に重なって選べなかった・#552）。メンバーより奥のものは委譲しない
+    // ＝**枠の内部ドラッグ＝グループ移動**（#307）を保つ。テンプレは全面 background を必ず持つため、これが無いと
+    // フォールバックが到達不能になり、枠内の空白ドラッグが背景を掴んで動かす（グループは動かず選択も無言解除）。
+    const memberIds = new Set(groupElementIds(groups, group.id)); // 推移的メンバー
+    const zOf = (l: Layer) => effectiveLayerZ(l); // 実効 z＝一覧・描画と同じ基準（zIndex 未指定でもクリックで拾う要素が一致）
+    const memberMaxZ = Math.max(...layers.filter((l) => memberIds.has(l.id)).map(zOf), Number.NEGATIVE_INFINITY);
+    // 描画順（zIndex 昇順＝下の map と同じ並び）に並べ、非表示を除き合成後の座標で当てる。
+    const hitId = elementAtPoint(
+      [...layers]
+        .filter((l) => !isHiddenByGroup(l.id, groups))
+        .filter((l) => memberIds.has(l.id) || zOf(l) > memberMaxZ)
+        .sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b))
+        .map((l) => {
+          const cg = composed.get(l.id) ?? { x: l.x, y: l.y, w: l.w, h: l.h, rotation: l.rotation };
+          return { id: l.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, rotation: cg.rotation };
+        }),
+      p,
+    );
+    const hitLayer = hitId != null ? layers.find((l) => l.id === hitId) : undefined;
+    if (hitLayer) { routeLayerPointerDown(e, hitLayer); return; }
+    beginGroupDrag(e, group);
+  };
+
   // グループ枠の角ハンドル押下（#307）：中心からの距離比で transform.scale を更新（中心固定の一様拡縮）。
   const beginGroupScale = (e: ReactPointerEvent, group: Group, frame: { cx: number; cy: number }) => {
     if (e.button !== 0 || group.locked) return;
@@ -175,6 +248,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     const p = toCanvas(e.clientX, e.clientY);
     const dist = Math.hypot(p.x - frame.cx, p.y - frame.cy) || 1; // 0 除算防止
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-scale", groupId: group.id,
       startTransform: { ...group.transform }, groupCenter: { x: frame.cx, y: frame.cy }, startDist: dist,
@@ -190,6 +264,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     e.preventDefault();
     e.stopPropagation();
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-rotate", groupId: group.id, groupCenter: { x: frame.cx, y: frame.cy },
       startClientX: e.clientX, startClientY: e.clientY, start: { x: 0, y: 0, w: 0, h: 0 },
@@ -275,6 +350,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     }
     if (!drag) return;
     try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    finishInteraction(); // 合成境界の終了（開始した分だけ閉じる）
     setDrag(null);
     setGuides({ x: null, y: null });
   };
@@ -296,7 +372,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
         setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
       }}
     >
-      {[...layers].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)).map((l) => {
+      {[...layers].sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b)).map((l) => {
         if (isHiddenByGroup(l.id, groups)) return null; // hidden グループのメンバーは描画しない（#307）
         const cg = composed.get(l.id) ?? { x: l.x, y: l.y, w: l.w, h: l.h, rotation: l.rotation }; // グループ合成後の位置
         const lGroup = topGroupByEl.get(l.id) ?? null; // 所属グループ（最上位）／未所属は null
@@ -308,7 +384,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
         return (
           <div
             key={l.id}
-            onPointerDown={(e) => (lGroup ? beginGroupDrag(e, lGroup) : beginDrag(e, l, "move"))}
+            onPointerDown={(e) => routeLayerPointerDown(e, l)}
             style={{
               position: "absolute",
               left: `${(cg.x / canvasW) * 100}%`,
@@ -317,7 +393,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
               height: `${(cg.h / canvasH) * 100}%`,
               boxSizing: "border-box",
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
-              background: selected ? "rgba(80,130,255,0.08)" : "transparent",
+              background: selected ? "rgba(var(--color-primary-rgb), 0.08)" : "transparent",
               cursor: "move",
               transform: rotated ? `rotate(${cg.rotation}deg)` : undefined,
             }}
@@ -354,7 +430,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       {activeGroupFrame && activeGroup && !isGroupHidden(activeGroup.id, groups) && (
         <div
           data-testid="tmpl-group-frame"
-          onPointerDown={(e) => beginGroupDrag(e, activeGroup)}
+          onPointerDown={(e) => beginFrameDrag(e, activeGroup)}
           style={{
             position: "absolute",
             left: `${((activeGroupFrame.cx - activeGroupFrame.w / 2) / canvasW) * 100}%`,
@@ -362,7 +438,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
             width: `${(activeGroupFrame.w / canvasW) * 100}%`,
             height: `${(activeGroupFrame.h / canvasH) * 100}%`,
             border: "2px solid var(--color-primary)",
-            background: "rgba(80,130,255,0.06)",
+            background: "rgba(var(--color-primary-rgb), 0.06)",
             boxSizing: "border-box",
             cursor: activeGroup.locked ? "default" : "move",
             transform: activeGroupFrame.rotation ? `rotate(${activeGroupFrame.rotation}deg)` : undefined,
@@ -404,7 +480,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
             width: `${(Math.abs(marquee.x1 - marquee.x0) / canvasW) * 100}%`,
             height: `${(Math.abs(marquee.y1 - marquee.y0) / canvasH) * 100}%`,
             border: "1px dashed var(--color-primary)",
-            background: "rgba(80,130,255,0.10)",
+            background: "rgba(var(--color-primary-rgb), 0.10)",
             pointerEvents: "none",
             zIndex: 35,
           }}

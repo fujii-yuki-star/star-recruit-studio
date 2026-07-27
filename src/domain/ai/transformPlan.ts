@@ -9,8 +9,8 @@ import {
   MAX_NARRATION_LEN_DEFAULT,
   MAX_SCENES_PER_VIDEO,
   MAX_SUBTITLE_LEN_DEFAULT,
-  SCENE_MAX_DURATION_SEC,
-  SCENE_MIN_DURATION_SEC,
+  AI_SCENE_MAX_DURATION_SEC,
+  AI_SCENE_MIN_DURATION_SEC,
   TRANSITION_DEFAULT_SEC,
   VIDEO_HARD_MAX_SEC,
 } from '../constants';
@@ -18,6 +18,7 @@ import type {
   Asset, AssetRefs, Character, Narration, NarrationLine, Part, Scene, Texts, Transition, Warning,
 } from '../project/types';
 import type { Template } from '../template/types';
+import { standardTemplateForScene } from '../template/templateSelection';
 import { speakerForCharacter } from '../voice/voiceCatalog';
 import { createSequentialIdFactory } from './idFactory';
 import type { IdFactory } from './idFactory';
@@ -73,8 +74,20 @@ function mapNarrationLines(
   });
 }
 
+/**
+ * AI 生成の表示時間を目安の範囲へ寄せる（11 §9）。
+ *
+ * **下限が上限を上回るときは上限を優先する**（#607）。下限（`AI_SCENE_MIN_DURATION_SEC`）は**どのテンプレにも
+ * 共通の既定**で per-template の上書きが無いのに対し、上限はテンプレ作者が `aiHint.maxDurationSec` で
+ * **そのテンプレについて明示**した値だから＝具体的な宣言を一般的な既定より優先する（ADR-0026①：
+ * 「最長1秒」と書いたテンプレから3秒の場面を作らない）。どちらも #553 の「生成の目安」で硬い制約ではないので、
+ * どちらを採っても `durationSec > 0`（schema）は保たれる（`maxDurationSec` は schema で `exclusiveMinimum: 0`）。
+ *
+ * 素の `if (value < min)` を先に置くと、`min > max` のとき**評価順で上限を破る**（0.5 が 3 になる＝上限1を超える）。
+ */
 function clampDuration(value: number, min: number, max: number): { value: number; clamped: boolean } {
-  if (value < min) return { value: min, clamped: true };
+  const lower = Math.min(min, max);
+  if (value < lower) return { value: lower, clamped: true };
   if (value > max) return { value: max, clamped: true };
   return { value, clamped: false };
 }
@@ -102,16 +115,40 @@ function resolveCharacter(
   return { enabled: false, characterId: DEFAULT_CHARACTER_ID, poseAssetId: null };
 }
 
+/**
+ * 長さの助言（V8・自動切詰めはしない）。**掛け合い（narrationLines）があるときは各行が本体**なので、
+ * 単一 narrationText だけでなく**行のテキスト/字幕も見る**（#569）。
+ *
+ * 直す前は `narrationText`（単一）と `texts.subtitle` しか見ておらず、掛け合いでは `aiScene.narrationText` が
+ * 空になりうる（`?? ''`）ため**実質ノーチェック**だった＝precheck（`sceneLines` で各行を見る）と対象が非対称で、
+ * 「同じ長すぎが掛け合いの有無で生成時だけ静か」になっていた（ADR-0026②）。
+ * 閾値の継承順（テンプレ aiHint → 既定定数）は precheck と既に一致（#568）＝**対象を揃えれば判定が完全一致**する。
+ *
+ * 警告は種類ごとに**1つ**にまとめる（行ごとに出すと1場面で警告が並ぶ）＝precheck の「場面単位で1項目」と同じ流儀。
+ */
 function checkLengths(
-  texts: Texts, narrationText: string, template: Template | undefined, warnings: Warning[],
+  texts: Texts, narrationText: string, aiLines: AiNarrationLine[] | undefined,
+  template: Template | undefined, warnings: Warning[],
 ): void {
   const maxNarration = template?.aiHint?.maxNarrationLength ?? MAX_NARRATION_LEN_DEFAULT;
   const maxSubtitle = template?.aiHint?.maxSubtitleLength ?? MAX_SUBTITLE_LEN_DEFAULT;
-  if (narrationText.length > maxNarration) {
+  const hasLines = aiLines != null && aiLines.length > 0;
+  // セリフ本体＝掛け合いなら各行、そうでなければ単一 narration（precheck の `sceneLines` と同じ対象）。
+  const narrationTexts = hasLines ? aiLines.map((l) => l.text) : [narrationText];
+  if (narrationTexts.some((t) => t.length > maxNarration)) {
     warnings.push(warn('TEXT_OVERFLOW', 'セリフが長いため読みづらくなる可能性があります', 'narration', 'warning', false));
   }
-  const subtitle = texts.subtitle;
-  if (subtitle !== undefined && subtitle.length > maxSubtitle) {
+  // 字幕は**両方**見る：掛け合いの行字幕（`narrationLines[].subtitle`）と、テンプレ字幕層に載る `texts.subtitle`。
+  // どちらが実際に表示されるかは場面のテンプレ/FREE 字幕の対象で決まる（ADR-0029）が、ここは生成直後の**助言**なので
+  // 取りこぼさない側に倒す（precheck が表示実体で最終判定する）。
+  // **行字幕の未指定は `text` を流用する**（`AiNarrationLine.subtitle` の仕様・`subtitleText: al.subtitle ?? null` →
+  // `resolveLineSubtitle` の `subtitleText ?? text`＝null は継承・11 §2.2）。ここで `?? ''` にすると、
+  // 字幕を省略した行（AI の通常パターン）で**実際に表示される文字を検査しない**＝precheck とまた食い違う（#569 レビュー）。
+  const subtitleTexts = [
+    ...(texts.subtitle !== undefined ? [texts.subtitle] : []),
+    ...(hasLines ? aiLines.map((l) => l.subtitle ?? l.text) : []),
+  ];
+  if (subtitleTexts.some((t) => t.length > maxSubtitle)) {
     warnings.push(warn('TEXT_OVERFLOW', '字幕が長いため読みづらくなる可能性があります', 'texts.subtitle', 'warning', false));
   }
 }
@@ -162,9 +199,9 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
       // テンプレ解決＋向き整合（B4・ADR-0012）。見つからない、またはプロジェクトの向きと一致しない場合は、
       // 同カテゴリ・同じ向きの見た目へ補正する（AI出力は向き非依存＝12§8 / 向きはプロジェクト側の正典）。
       if (!template || template.aspectRatio !== ctx.orientation) {
-        const alt = ctx.templates.find(
-          (t) => t.category === sceneType && t.aspectRatio === ctx.orientation,
-        );
+        // 当て先は「標準の見た目」＝マイ見た目を除く（`standardTemplateForScene` に一本化・#547）。
+        // ADR-0017「マイ見た目は AI 入力から除外」と揃える（AI は提案できないのに補正では当たる、を作らない）。
+        const alt = standardTemplateForScene(ctx.templates, sceneType, ctx.orientation);
         if (alt) {
           w.push(
             template
@@ -182,8 +219,8 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
       }
 
       // 表示時間 clamp（11 §4,§9）
-      const maxDuration = template?.aiHint?.maxDurationSec ?? SCENE_MAX_DURATION_SEC;
-      const clamped = clampDuration(aiScene.durationSec, SCENE_MIN_DURATION_SEC, maxDuration);
+      const maxDuration = template?.aiHint?.maxDurationSec ?? AI_SCENE_MAX_DURATION_SEC;
+      const clamped = clampDuration(aiScene.durationSec, AI_SCENE_MIN_DURATION_SEC, maxDuration);
       if (clamped.clamped) {
         w.push(warn('DURATION_CLAMPED', '表示時間を見やすい長さに調整しました', 'durationSec', 'info', true));
       }
@@ -219,7 +256,8 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
       // narrationText は AI が空のとき null/省略しうる（自動リトライせず1回で通すための許容）。空文字に整え、
       // 無音シーンとして成立させる（ナレーションは後から場面編集で追加可。§9 補正）。
       const narrationText = aiScene.narrationText ?? '';
-      checkLengths(texts, narrationText, template, w);
+      // 掛け合い（narrationLines）があるときは各行が本体なので、行のテキスト/字幕も長さ助言の対象にする（#569）。
+      checkLengths(texts, narrationText, aiScene.narrationLines, template, w);
 
       // 掛け合い（#180）：narrationLines があれば scene.lines を作る（無ければ単一 narration のまま）。
       const lines = mapNarrationLines(aiScene.narrationLines, w);

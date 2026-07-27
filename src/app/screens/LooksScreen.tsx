@@ -3,8 +3,10 @@ import type { ScreenId } from "../data/mockData";
 import type { Template } from "../../domain/template/types";
 import { FREE_CATEGORY, ORIENTATION, ORIENTATIONS, SCENE_CATEGORIES, type Orientation, type SceneCategory } from "../../domain/enums";
 import { isUserTemplate } from "../../domain/template/userTemplate";
-import { scenesUsingTemplate } from "../../domain/project/templateUsage";
+import { deleteImpactCounts, scenesUsingTemplate, templateDeleteImpact } from "../../domain/project/templateUsage";
+import { deleteLookConfirmMessage } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
+import { ExportLock } from "../components/ExportLockBanner";
 import { parseTemplateFiles } from "../../infrastructure/templateFs";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead } from "../components/ui";
@@ -53,6 +55,7 @@ function usedElements(template: Template): string[] {
 export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
   const templates = useProjectStore((s) => s.templates);
   const assets = useProjectStore((s) => s.assets);
+  const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio); // 削除時の当て先（標準）は動画の向きで決まる
   const scenes = useProjectStore((s) => s.scenes);
   const setEditingSceneId = useProjectStore((s) => s.setEditingSceneId);
   const addTemplatePack = useProjectStore((s) => s.addTemplatePack);
@@ -179,6 +182,8 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
   const sampleScene = buildSampleScene(current, assets);
   // この見た目を使っている場面（逆引き・#406）。標準/マイテンプレを問わず scene.templateId で判定する。
   const usedScenes = scenesUsingTemplate(scenes, current.templateId);
+  // 削除したときにこのプロジェクトで何が起きるか（#547・削除は取り消せないので先に示す）。
+  const deleteImpact = templateDeleteImpact(scenes, current.templateId, templates, aspectRatio);
   // 使用場面バッジを押したら、その場面の編集を開く（editingSceneId 機構＝#400・素材画面と同方式）。
   const jumpToScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
 
@@ -188,6 +193,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
         title="見た目パターンを管理"
         desc="動画の見た目のパターンを確認できます。各場面に当てる見た目は「場面編集」で選べます。"
       />
+      <ExportLock onNavigate={onNavigate}>
       {/* 説明だけで行き止まりにしない：実際に見た目を割り当てる「場面編集」への導線を添える（§2-5・#413）。 */}
       <button className="btn btn-ghost text-sm" style={{ marginBottom: "var(--gap)" }} onClick={() => onNavigate("scene-edit")}>
         場面編集を開く
@@ -200,7 +206,10 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           <div className="col gap-sm">
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
-              <input className="input" value={newName} maxLength={40} onChange={(e) => setNewName(e.target.value)} />
+              {/* 作成だけ 40 字で切っていたが、編集側（LooksEditScreen の名前欄）にも template schema（name は
+                  minLength:1・上限なし）にも根拠が無く、同じ「見た目パターンの名前」が入口で別挙動だった
+                  （#554・ADR-0026②）。上限なしへ統一する。 */}
+              <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
             </div>
             <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
               <div className="field" style={{ margin: 0 }}>
@@ -317,7 +326,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
             {isUserCurrent && (confirmDelete ? (
               <DeleteConfirm
                 busy={busyAction === "delete"}
-                message="この見た目パターンを削除しますか？元に戻せません。"
+                message={deleteLookConfirmMessage(deleteImpactCounts(deleteImpact))}
                 onCancel={() => setConfirmDelete(false)}
                 onConfirm={() => void onDelete()}
               />
@@ -358,6 +367,7 @@ export function LooksScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void 
           )}
         </div>
       </div>
+      </ExportLock>
     </div>
   );
 }

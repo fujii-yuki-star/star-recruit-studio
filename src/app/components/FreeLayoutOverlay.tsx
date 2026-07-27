@@ -2,12 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
-import { freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
+import { elementAtPoint, freeElementsInRect, FREE_MIN_SIZE, groupBBox, moveFreeElement, resizeFreeElement, resizeGroup, resizeRotatedFreeElement, rotationFromPointer, snapAngle, type FreeElementGeom, type ResizeCorner } from "../../domain/project/freeLayoutOps";
 import { edgesOf, snapToTargets, SNAP_THRESHOLD_PX, type SnapEdges } from "../../domain/project/freeSnap";
 import { GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
-import { topGroupOfMember } from "../../domain/project/groupOps";
+import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
+// インライン編集（#549）を実描画に合わせるため、描画側の既定値/帯解決/フォント解決を共有する（体裁のドリフト防止）。
+import { bandBackground, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEXT_COLOR } from "../../renderer/layout";
+import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
+import { hexToRgb } from "../../domain/format/color";
+import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -71,6 +76,15 @@ const MENU_H = 220;
 // ダブルタップ（テキスト編集へ入る）と見なす2回の pointerdown の間隔（ms）と近接（画面px）。実機ではドラッグ開始の
 // preventDefault が互換 dblclick を潰すため、pointerdown 自体で二度押しを検出する（#525-4）。距離も見るのは
 // ブラウザの dblclick 判定と同様＝間にドラッグを挟んだ離れた二度押しを編集と誤認しないため。
+/** インライン編集の背景帯（#549）。実描画（layout.bandBackground → sceneSvg の rect）と同じ既定・同じ見え方を
+ *  textarea へ再現する。帯は同じ TextItem 内なので親の hideItemIds で消える＝ここで敷かないと下地を失う。 */
+function bandStyle(el: FreeElement): { background: string; borderRadius?: number } {
+  const bg = bandBackground(el.background);
+  const rgb = bg ? hexToRgb(bg.color) : null;
+  if (!bg || !rgb) return { background: "transparent" };
+  return { background: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${bg.opacity})`, borderRadius: bg.radius };
+}
+
 const DOUBLE_TAP_MS = 350;
 const DOUBLE_TAP_DIST = 12;
 
@@ -112,6 +126,13 @@ interface OverlayProps {
   activeGroupId?: string | null;
   /** メンバー要素クリックでグループを選択（null で解除）。 */
   onSelectGroup?: (groupId: string | null) => void;
+  /** インライン編集中の要素 id を親へ通知（#549）。親は ScenePreview の hideItemIds に渡してSVG側の二重表示を消す。
+   *  setState 等の**参照が安定した関数**を渡すこと（effect の依存に入るため）。 */
+  onEditingIdChange?: (id: string | null) => void;
+  /** 場面で解決済みの描画用 font-family（`fontFamilyForId` の戻り値＝sans-serif フォールバック込み・場面→動画全体→既定）。
+   *  インライン編集の見た目を実描画に合わせる（#549）。要素自身が既知の fontId を持つ場合はそちらを優先＝
+   *  sceneSvg の textToSvg と同じ解決順。 */
+  textFontFamily?: string;
   /** グループの transform を更新（移動/拡縮/回転＝中心まわり）。 */
   onGroupTransform?: (groupId: string, patch: Partial<GroupTransform>) => void;
 }
@@ -120,7 +141,7 @@ export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
-  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform,
+  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onEditingIdChange, textFontFamily,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -153,6 +174,30 @@ export function FreeLayoutOverlay({
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 編集中の要素を親へ通知＝親が ScenePreview の hideItemIds に渡し、SVG 側の同じ文字を伏せる（二重表示回避・#549）。
+  useEffect(() => { onEditingIdChange?.(editingId); }, [editingId, onEditingIdChange]);
+  // アンマウント時は必ず「編集していない」へ戻す（#549 レビュー ℹ️）。free_NNN は**場面内一意**なので、伏せたまま
+  // 残すと別 FREE 場面で同名 id の別要素を伏せ、プレビューだけ消えて書き出しには出る（無言のパリティ乖離）。
+  const editingNotifyRef = useRef(onEditingIdChange);
+  useEffect(() => { editingNotifyRef.current = onEditingIdChange; }, [onEditingIdChange]);
+  useEffect(() => () => editingNotifyRef.current?.(null), []);
+  // 表示px→canvas の縮尺（#549）。オーバーレイは fit 箱の子＝幅が canvas 実寸に対応する（#273）。インライン編集の
+  // textarea を実描画と同じ大きさで出すために必要（canvas 単位の fontSize を表示pxへ換算する）。
+  // 0＝未計測（描画前）。ResizeObserver で追従＝ウィンドウ/パネル幅の変化にも合う。
+  const [viewScale, setViewScale] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      const next = w > 0 ? w / canvasW : 0;
+      setViewScale((prev) => (Math.abs(prev - next) < 0.0001 ? prev : next)); // 同値なら更新しない（無限ループ防止）
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [canvasW]);
   // 吸着ガイド（ドラッグ中に他要素の辺/中心へそろったとき表示する縦/横の線・canvas 座標。#205 後半）。
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   // 範囲選択（マーキー・#274）の矩形（canvas 座標・null=非アクティブ）。空白ドラッグで矩形を引き交差要素を選択。
@@ -406,6 +451,85 @@ export function FreeLayoutOverlay({
   };
 
   // 右クリック：対象を選択しカーソル位置にメニューを開く（画面端でクランプ）。
+  // 要素押下のルーティング（#525-4 二度押し編集／#525-5 ドリルイン／通常ドラッグ）。要素 div と**グループ枠**
+  // （#548/#552）の両方から呼ぶ＝枠の上を押しても「その要素を直接押したとき」と同じ挙動になる。枠は不透明で
+  // グループ全域を覆うため、枠がそのまま beginGroupDrag していた頃はドリルインが発火せず（#548）、枠内に重なる
+  // グループ外の要素も選べなかった（#552）。分岐条件は要素ごとに再計算する（描画側の導出と同じ式）。
+  const routeElementPointerDown = (e: ReactPointerEvent, el: FreeElement) => {
+    const elGroup = topGroupByEl.get(el.id) ?? null;
+    const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation };
+    const drilledIn = elGroup != null && selectedIds.includes(el.id); // このメンバーを個別選択中
+    // 合成後が base と並進差のみ＝純並進なら canvas 直接編集が 1:1 で効く（#525-5 レビュー P2・ネスト深さに依らず厳密）。
+    const groupPlain = elGroup != null && cg.w === el.w && cg.h === el.h && (cg.rotation ?? 0) === (el.rotation ?? 0);
+    const drilledEditable = drilledIn && groupPlain;
+    // 二度押し候補（実機はドラッグ開始の preventDefault が互換 dblclick を潰すので pointerdown で検出・#525-4）：
+    //  ・非グループのテキスト＝インライン編集（#525-4）
+    //  ・グループのメンバー（まだ個別選択していない）＝そのメンバーへドリルイン選択（#525-5）
+    const button0 = e.button === 0 && !e.shiftKey;
+    const dtEdit = button0 && el.kind === FREE_ELEMENT_KIND.text && elGroup == null;
+    const dtDrill = button0 && elGroup != null && !selectedIds.includes(el.id);
+    if (dtEdit || dtDrill) {
+      const prev = lastTapRef.current;
+      const near = prev != null && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_DIST;
+      if (prev && prev.id === el.id && e.timeStamp - prev.t < DOUBLE_TAP_MS && near) {
+        e.preventDefault();
+        e.stopPropagation();
+        lastTapRef.current = null;
+        setMenu(null);
+        onSelect(el.id); // 要素選択＝selectFree がグループ選択を解除しこの要素だけ選ぶ
+        if (dtEdit) setEditingId(el.id); // テキストはそのままインライン編集へ
+        return;
+      }
+    }
+    // 通常のクリック/ドラッグ開始。ドリルイン状態で分岐する（#525-5 レビュー P2）：
+    //  ・グループ未ドリルインのメンバー初回クリック＝まとまり選択（beginGroupDrag）
+    //  ・純並進グループのドリルインメンバー＝個別ドラッグ（beginDrag／drilledEditable）
+    //  ・変形グループのドリルインメンバー＝canvas 直接編集はずれるので**選択を維持のみ**（グループへ戻さない・動かさない）。
+    // begin* が二度押し履歴を解除するので、候補の記録はこの後に行う（#525-4 レビュー）。
+    if (elGroup && !drilledIn) {
+      beginGroupDrag(e, elGroup);
+    } else if (elGroup && !drilledEditable) {
+      e.preventDefault();
+      e.stopPropagation(); // グループへ戻さず・ドラッグも始めない（変形グループは詳細パネルで編集）
+    } else {
+      beginDrag(e, el, "move");
+    }
+    if (dtEdit || dtDrill) lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
+  };
+
+  // グループ枠の押下（#548/#552）：枠は不透明でグループの外接矩形**全域**を覆うので、そのまま beginGroupDrag すると
+  // 内部クリックを貪欲に食う。ポインタの下を**実ヒットテスト**して分岐する：
+  //  ・要素（メンバー/グループ外を問わず）＝その要素を押したのと同じ経路へ委譲（ドリルインも非メンバー選択も成立）
+  //  ・空白＝従来どおりグループ移動
+  const beginFrameDrag = (e: ReactPointerEvent, group: Group) => {
+    const p = toCanvas(e.clientX, e.clientY);
+    // 委譲するのは「**枠が実際に覆って触れなくしていたもの**」だけに絞る（レビュー🔴）：
+    //  ・グループのメンバー（＝ドリルイン・#548）
+    //  ・メンバーより**手前**の非メンバー（＝枠内に重なって選べなかった・#552）
+    // メンバーより奥のもの（全面の背景／背面バックドロップ等）は委譲しない＝**枠の内部ドラッグ＝グループ移動**
+    // （#307・ADR-0022）を保つ。全面背景は常に当たるため、これが無いとフォールバックが到達不能になり、
+    // 枠内の空白ドラッグが背景を掴んで動かす（グループは動かず選択も無言解除）。
+    const memberIds = new Set(groupElementIds(groups, group.id)); // 推移的メンバー
+    const zOf = (el: FreeElement) => el.zIndex ?? 1; // 未指定=1（layout.ts と同じ）
+    const memberMaxZ = Math.max(...freeLayout.filter((el) => memberIds.has(el.id)).map(zOf), Number.NEGATIVE_INFINITY);
+    // 描画順（zIndex 昇順・同値は配列順＝layout.ts と同じ）に並べ、非表示を除き合成後の座標で当てる。
+    const hitId = elementAtPoint(
+      freeLayout
+        .filter((el) => !el.hidden && !isHiddenByGroup(el.id, groups))
+        .filter((el) => memberIds.has(el.id) || zOf(el) > memberMaxZ)
+        .slice()
+        .sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1))
+        .map((el) => {
+          const cg = composed.get(el.id) ?? { x: el.x, y: el.y, w: el.w, h: el.h, rotation: el.rotation };
+          return { id: el.id, x: cg.x, y: cg.y, w: cg.w, h: cg.h, rotation: cg.rotation };
+        }),
+      p,
+    );
+    const hitEl = hitId != null ? freeLayout.find((el) => el.id === hitId) : undefined;
+    if (hitEl) { routeElementPointerDown(e, hitEl); return; }
+    beginGroupDrag(e, group);
+  };
+
   const openMenu = (e: ReactMouseEvent, el: FreeElement) => {
     e.preventDefault();
     e.stopPropagation();
@@ -486,42 +610,7 @@ export function FreeLayoutOverlay({
           <div
             key={el.id}
             data-free-id={el.id}
-            onPointerDown={(e) => {
-              // 二度押し候補（実機はドラッグ開始の preventDefault が互換 dblclick を潰すので pointerdown で検出・#525-4）：
-              //  ・非グループのテキスト＝インライン編集（#525-4）
-              //  ・グループのメンバー（まだ個別選択していない）＝そのメンバーへドリルイン選択（#525-5）
-              const button0 = e.button === 0 && !e.shiftKey;
-              const dtEdit = button0 && el.kind === FREE_ELEMENT_KIND.text && elGroup == null;
-              const dtDrill = button0 && elGroup != null && !selectedIds.includes(el.id);
-              if (dtEdit || dtDrill) {
-                const prev = lastTapRef.current;
-                const near = prev != null && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_DIST;
-                if (prev && prev.id === el.id && e.timeStamp - prev.t < DOUBLE_TAP_MS && near) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  lastTapRef.current = null;
-                  setMenu(null);
-                  onSelect(el.id); // 要素選択＝selectFree がグループ選択を解除しこの要素だけ選ぶ
-                  if (dtEdit) setEditingId(el.id); // テキストはそのままインライン編集へ
-                  return;
-                }
-              }
-              // 通常のクリック/ドラッグ開始。ドリルイン状態で分岐する（#525-5 レビュー P2）：
-              //  ・グループ未ドリルインのメンバー初回クリック＝まとまり選択（beginGroupDrag）
-              //  ・純並進グループのドリルインメンバー＝個別ドラッグ（beginDrag／drilledEditable）
-              //  ・変形グループのドリルインメンバー＝canvas 直接編集はずれるので**選択を維持のみ**（グループへ戻さない・動かさない）。
-              //    ＝ドリルイン後の再クリックで無言にグループ全体を選択/移動してしまう「壊れて見える操作」を防ぐ。
-              // begin* が二度押し履歴を解除するので、候補の記録はこの後に行う（#525-4 レビュー）。
-              if (elGroup && !drilledIn) {
-                beginGroupDrag(e, elGroup);
-              } else if (elGroup && !drilledEditable) {
-                e.preventDefault();
-                e.stopPropagation(); // グループへ戻さず・ドラッグも始めない（変形グループは詳細パネルで編集）
-              } else {
-                beginDrag(e, el, "move");
-              }
-              if (dtEdit || dtDrill) lastTapRef.current = { id: el.id, t: e.timeStamp, x: e.clientX, y: e.clientY };
-            }}
+            onPointerDown={(e) => routeElementPointerDown(e, el)}
             onContextMenu={(e) => openMenu(e, el)}
             onDoubleClick={(e) => {
               // jsdom / 互換 dblclick 用フォールバック（実機は上の pointerdown 検出が主経路）。グループのメンバー＝ドリルイン、
@@ -548,7 +637,7 @@ export function FreeLayoutOverlay({
               height: `${(cg.h / canvasH) * 100}%`,
               boxSizing: "border-box",
               border: selected ? "2px solid var(--color-primary)" : "1px dashed rgba(0,0,0,0.4)",
-              background: selected ? "rgba(80,130,255,0.08)" : "transparent",
+              background: selected ? "rgba(var(--color-primary-rgb), 0.08)" : "transparent",
               cursor: locked ? "default" : editing ? "text" : "move", // ロック中はドラッグ不可を示す
 
               // 回転（#208）：中心を軸に回す（既定の transform-origin=中心）。出力 SVG の rotate と一致。合成後の角度を使う。
@@ -573,10 +662,33 @@ export function FreeLayoutOverlay({
                     setEditingId(null);
                   }
                 }}
+                // その場（WYSIWYG）編集（#549）：実描画（sceneSvg の textToSvg）と同じ体裁で重ねる。
+                //  ・fontSize は canvas 単位 → 表示px へ換算（viewScale）＝見た目の大きさが一致。
+                //  ・font-family は要素の fontId 優先→場面既定（textToSvg と同じ解決順）。色/揃え/太さ/行間も要素から。
+                //  ・line-height は無単位＝SVG の行間（fontSize × lineHeight）と一致。padding:0 で1行目のベースラインが
+                //    SVG の baseY（＝要素上端 + fontSize）にほぼ揃う（差は fontSize の数%）。
+                //  ・背景は透明。下の SVG 側は親が hideItemIds で伏せる＝二重表示にならない。
                 style={{
                   width: "100%", height: "100%", boxSizing: "border-box", resize: "none",
-                  border: "none", outline: "none", padding: 4, margin: 0,
-                  background: "#fff", color: "#222", fontSize: 16, lineHeight: 1.3,
+                  border: "none", outline: "none", padding: 0, margin: 0,
+                  // 背景帯（#529）は実描画では同じ TextItem の中に入る＝親が hideItemIds で伏せると帯ごと消える。
+                  // 帯を敷いた文字（例：白文字＋黒帯）が編集中だけ下地を失って読めなくなるため、ここでも同じ帯を再現する
+                  //（既定値は描画側の bandBackground を共有＝ドリフトしない）。帯が無ければ透明。
+                  ...bandStyle(el),
+                  color: el.color ?? DEFAULT_TEXT_COLOR,
+                  // 実描画（sceneSvg.textToSvg）と同じ解決順＝要素の既知 fontId 優先→場面既定。**fontFamilyForId**（sans-serif
+                  // フォールバック込み＝描画側と同じ関数）を使う。cssFamilyForId は bare 名でフォント未ロード時に
+                  // textarea 既定（monospace）へ落ちて実描画と乖離する。
+                  fontFamily: isKnownFontId(el.fontId) ? fontFamilyForId(el.fontId) : textFontFamily,
+                  fontSize: viewScale > 0 ? (el.fontSize ?? DEFAULT_FONT_SIZE) * viewScale : undefined,
+                  fontWeight: el.fontWeight ?? FONT_WEIGHT.normal,
+                  textAlign: el.textAlign ?? TEXT_ALIGN.left,
+                  lineHeight: el.lineHeight ?? DEFAULT_LINE_HEIGHT,
+                  // 縁取り（#209）も同じ TextItem 内＝伏せると消えるので近似再現（paint-order で塗りの下に敷く）。
+                  ...(el.strokeColor && (el.strokeWidth ?? 0) > 0 && viewScale > 0
+                    ? { WebkitTextStroke: `${(el.strokeWidth ?? 0) * viewScale}px ${el.strokeColor}`, paintOrder: "stroke" as const }
+                    : {}),
+                  overflow: "hidden", // はみ出しはSVG側の maxLines と揃えて見せない（実描画に寄せる）
                 }}
               />
             ) : (
@@ -642,7 +754,7 @@ export function FreeLayoutOverlay({
             width: `${(Math.abs(marquee.x1 - marquee.x0) / canvasW) * 100}%`,
             height: `${(Math.abs(marquee.y1 - marquee.y0) / canvasH) * 100}%`,
             border: "1px dashed var(--color-primary)",
-            background: "rgba(80,130,255,0.10)",
+            background: "rgba(var(--color-primary-rgb), 0.10)",
             pointerEvents: "none",
             zIndex: 35,
           }}
@@ -654,7 +766,7 @@ export function FreeLayoutOverlay({
       {activeGroupFrame && activeGroup && !isGroupHidden(activeGroup.id, groups) && (
         <div
           data-testid="group-frame"
-          onPointerDown={(e) => beginGroupDrag(e, activeGroup)}
+          onPointerDown={(e) => beginFrameDrag(e, activeGroup)}
           style={{
             position: "absolute",
             left: `${((activeGroupFrame.cx - activeGroupFrame.w / 2) / canvasW) * 100}%`,
@@ -662,7 +774,7 @@ export function FreeLayoutOverlay({
             width: `${(activeGroupFrame.w / canvasW) * 100}%`,
             height: `${(activeGroupFrame.h / canvasH) * 100}%`,
             border: "2px solid var(--color-primary)",
-            background: "rgba(80,130,255,0.06)",
+            background: "rgba(var(--color-primary-rgb), 0.06)",
             boxSizing: "border-box",
             cursor: activeGroup.locked ? "default" : "move",
             transform: activeGroupFrame.rotation ? `rotate(${activeGroupFrame.rotation}deg)` : undefined,

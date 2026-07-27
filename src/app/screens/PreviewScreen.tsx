@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
-import { PageHead } from "../components/ui";
-import { EmptyState } from "../components/states";
-import { StartNewVideoButton } from "../components/StartNewVideoButton";
+import { PageHead, Switch } from "../components/ui";
+import { ExportLockBanner } from "../components/ExportLockBanner";
+import { NoScenesState } from "../components/NoScenesState";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { formatDuration } from "../../domain/format/duration";
 import { BgmPicker } from "../components/BgmPicker";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
-import { resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { hasSceneNarrationOverride, resolveBgmVolume, resolveNarrationVolume } from "../../domain/voice/audioMix";
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
 import { lineAudioKey, lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import { lineSegments, previewSubtitleSegment, firstFrameBoundary } from "../../domain/project/lineTimeline";
@@ -18,8 +18,9 @@ import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import type { VideoSlotPlayback } from "../components/ScenePreview";
 import { buildVideoPlaybackSlots } from "./previewVideoSlots";
+import { lineAdvanceWindowSec } from "./previewLineTiming";
 import { assembleProject } from "../../domain/project/persistence";
-import { FPS } from "../../domain/constants";
+import { FPS, PREVIEW_MIN_PLAY_SEC } from "../../domain/constants";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
 import {
@@ -37,8 +38,6 @@ interface PreviewProps {
 
 type RangeMode = "scene" | "part" | "all";
 
-// 場面送りの最小秒（表示時間は SceneEdit で 0/負値にも編集され得るため、即時送り/不正値を防ぐ下限）。
-const MIN_PLAY_SEC = 0.3;
 
 // 仕上がり確認の「戻る」ラベル（来た画面ごと・#410 sub3）。入口はこの3つ。
 const PREVIEW_BACK_LABEL: Partial<Record<ScreenId, string>> = {
@@ -211,8 +210,8 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const [sceneTimeSec, setSceneTimeSec] = useState(0);
   useEffect(() => {
     if (!playing || !animActive) return;
-    // 実効表示尺は場面送りと同じく MIN_PLAY_SEC でクランプ（アニメの再生窓を実際の表示時間に合わせる）。
-    const dur = Math.max(MIN_PLAY_SEC, current?.durationSec ?? 0);
+    // 実効表示尺は場面送りと同じく PREVIEW_MIN_PLAY_SEC でクランプ（アニメの再生窓を実際の表示時間に合わせる）。
+    const dur = Math.max(PREVIEW_MIN_PLAY_SEC, current?.durationSec ?? 0);
     const start = performance.now();
     let raf = 0;
     const tick = () => {
@@ -260,8 +259,14 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   // いまの場面が「個別の声量/BGM」を持つか（§6＝個別設定が全体既定より優先）。持つ場面では全体スライダーを動かしても
   // その場面の音は変わらないため、下の音UIをその場面だけ無効化し理由＋「場面を直す」導線を出す（設定できるのに効かない
   // 誤認を防ぐ・#465 レビュー P1）。声・BGM は別個に判定する（声だけ個別なら BGM は操作可・その逆も）。
-  const sceneNarrationOverride = current?.audioMix?.narrationVolume != null;
+  const sceneNarrationOverride = hasSceneNarrationOverride(current?.audioMix); // 判定は書き出し画面と共有（§6・ADR-0026②）
   const sceneBgmOverride = current?.bgmSettings !== undefined;
+  // 書き出し中は BGM 設定を変えられない（store も #570 P1 でガード＝ここは無言化を避ける proactive な無効化・ADR-0026④）。
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
+  // 「字幕を入れる」は書き出しと**同じ設定**（exportForm.withSubtitle）＝仕上がり確認と書き出しの字幕有無が必ず一致する
+  // （ADR-0026③・#547 P2-7）。従来は確認が常に字幕ありで、字幕なし書き出しの見た目を確認できなかった。
+  const withSubtitle = useProjectStore((s) => s.exportForm.withSubtitle);
+  const setExportForm = useProjectStore((s) => s.setExportForm);
   // 音量を再生中の音声へその場で反映する（頭出ししない＝掛け合いも先頭行へ戻さない・#465/#392）。100% 境界
   // （要素 .volume ↔ GainNode）を跨ぐ変更も attachVolume が内部で経路を載せ替えて吸収するため、再生 effect は
   // 張り直さない＝音声だけ場面頭へ戻り映像/アニメ/テロップの時計と乖離する不整合を作らない（#465 レビュー P1）。
@@ -330,15 +335,12 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         }
         const scheduleNext = (): void => {
           if (cancelled) return;
-          if (i + 1 < segs.length) {
-            const windowSec = Math.max(0, segs[i + 1].startSec - segs[i].startSec);
-            lineTimers.push(window.setTimeout(() => playLine(i + 1), windowSec * 1000));
-          } else {
-            // 最終行：この行の窓（場面末まで）ぶん後に場面送り（advance）。場面送りも実再生起点にそろえ、
-            // 行が増えて遅延が積み上がっても最終行の末尾が場面遷移で切れないようにする（#370 レビュー対応）。
-            const lastWindowSec = Math.max(MIN_PLAY_SEC, segs[i].endSec - segs[i].startSec);
-            lineTimers.push(window.setTimeout(advance, lastWindowSec * 1000));
-          }
+          // 中間行（次の行へ）も最終行（場面送り）も**同じ送りタイマー＝同じ窓の決め方**（#608・`lineAdvanceWindowSec`）。
+          // 最終行は「この行の窓＝場面末まで」ぶん後に送る。場面送りも実再生起点にそろえ、行が増えて遅延が
+          // 積み上がっても最終行の末尾が場面遷移で切れない（#370 レビュー対応）。
+          const windowSec = lineAdvanceWindowSec(segs, i);
+          const next = i + 1 < segs.length ? () => playLine(i + 1) : advance;
+          lineTimers.push(window.setTimeout(next, windowSec * 1000));
         };
         const u = narrationAudioById[lineAudioKey(sc.sceneId, segs[i].lineId)];
         if (u) {
@@ -378,7 +380,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         }
       } else {
         // 有効な行が無い（全フィルタ＝音声未生成など）は場面尺で送る（従来のフォールバック）。
-        lineTimers.push(window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000));
+        lineTimers.push(window.setTimeout(advance, Math.max(PREVIEW_MIN_PLAY_SEC, sc.durationSec) * 1000));
       }
       return () => {
         cancelled = true;
@@ -393,7 +395,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     }
 
     // 単一 narration（従来）。場面尺の固定タイマーで次の場面へ。
-    const endTimer = window.setTimeout(advance, Math.max(MIN_PLAY_SEC, sc.durationSec) * 1000);
+    const endTimer = window.setTimeout(advance, Math.max(PREVIEW_MIN_PLAY_SEC, sc.durationSec) * 1000);
     let audio: HTMLAudioElement | undefined;
     const url = narrationAudioById[sc.sceneId];
     if (url) {
@@ -467,11 +469,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             {PREVIEW_BACK_LABEL[previewBackTo]}
           </button>
         </div>
-        <EmptyState
-          title="まだ場面がありません"
-          message="先に動画のたたき台を作ると、ここで仕上がりを確認できます。"
-          action={<StartNewVideoButton onNavigate={onNavigate} />}
-        />
+        <NoScenesState purpose="ここで仕上がりを確認できます" onNavigate={onNavigate} />
       </div>
     );
   }
@@ -482,6 +480,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         title="仕上がり確認"
         desc="動画の仕上がりを確認できます。気になるところは場面編集で直せます。"
       />
+      <ExportLockBanner onNavigate={onNavigate} />
 
       {/* 多入口（たたき台/場面編集/書き出し）のため、開いた側が記録した「来た画面」へ戻る（#410 sub3・タイムライン編集と同じ上左パターン）。 */}
       <div className="row gap-sm" style={{ margin: "0 0 var(--gap)", alignItems: "center" }}>
@@ -504,6 +503,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             timeSec={animTimeSec}
             animations={previewAnimations}
             videoPlayback={{ playing, muted, slots: videoPlaybackSlots }}
+            hideSubtitles={!withSubtitle}
           />
 
           {/* 場面送り */}
@@ -583,6 +583,13 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             </button>
           </div>
 
+          {/* 字幕を入れるか（#547 P2-7）。書き出しの「字幕を入れる」と同じ設定なので、ここで消せば書き出しも字幕なしになる
+              ＝確認した見た目のまま書き出せる（ADR-0026③）。再生中も即反映（同じ layoutScene 由来）。 */}
+          <div className="row gap-sm mt" style={{ alignItems: "center" }}>
+            <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" disabled={isExporting} />
+            <span className="text-sm text-muted">オフにすると字幕なしの仕上がりを確認できます（書き出しにも反映）。</span>
+          </div>
+
           {bgmPlayWarning && (
             <div className="notice notice-warn mt" role="alert">
               <span>BGMを再生できませんでした。別のBGMを選ぶか、もう一度お試しください。</span>
@@ -639,8 +646,14 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             音楽と読み上げの声の大きさを整えて、バランスを確かめられます。
           </p>
           <BgmPicker
-            disabled={sceneBgmOverride}
-            note={sceneBgmOverride ? "いまの場面は個別のBGMが設定されています。下の「場面を直す」で変えられます。" : undefined}
+            disabled={sceneBgmOverride || isExporting}
+            note={
+              isExporting
+                ? "書き出し中はBGMを変えられません。書き出しが終わってからお試しください。"
+                : sceneBgmOverride
+                  ? "いまの場面は個別のBGMが設定されています。下の「場面を直す」で変えられます。"
+                  : undefined
+            }
           />
           {/* ナレーション音量をここに併置（#407）＝BGM とのバランスを調整できる。声・BGM とも再生中はその場で反映する
               （#465/#392）。ただし「いまの場面が個別の声量/BGM」のときは全体スライダーでは変わらない（§6＝個別が優先）ため、
@@ -649,11 +662,13 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             <NarrationVolumeControl
               volume={liveNarrationVolume}
               onChange={(v) => updateVoiceSettings({ volume: v })}
-              disabled={sceneNarrationOverride}
+              disabled={sceneNarrationOverride || isExporting}
               hint={
-                sceneNarrationOverride
-                  ? "いまの場面は個別の声量が設定されています。下の「場面を直す」で変えられます。"
-                  : "読み上げの声の大きさです。再生しながらでもその場で変わります。"
+                isExporting
+                  ? "書き出し中は声の大きさを変えられません。書き出しが終わってからお試しください。"
+                  : sceneNarrationOverride
+                    ? "いまの場面は個別の声量が設定されています。下の「場面を直す」で変えられます。"
+                    : "読み上げの声の大きさです。再生しながらでもその場で変わります。"
               }
             />
           </div>

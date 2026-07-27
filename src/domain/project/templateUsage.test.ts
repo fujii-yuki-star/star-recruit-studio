@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scenesUsingTemplate, substituteDeletedTemplateInScenes } from './templateUsage';
+import { scenesUsingTemplate, substituteDeletedTemplateInScenes, templateDeleteImpact } from './templateUsage';
 import type { Scene } from './types';
 import type { Template } from '../template/types';
 
@@ -32,6 +32,31 @@ describe('templateUsage', () => {
       tpl({ templateId: 'std_photo_9', category: 'photo_intro', aspectRatio: '9:16' }),
     ];
 
+    // 削除確認で「標準の見た目に変わります」と約束する以上、**別のマイ見た目**へ化けさせない（#547）。
+    // 当て先の規則は standardTemplateForScene に一本化してある。
+    it('当て先にマイ見た目を選ばない（別のマイ見た目へ化けさせない）', () => {
+      const withUser = [
+        tpl({ templateId: 'user_tmpl_002', category: 'photo_intro', aspectRatio: '16:9' }), // 先頭に置いても
+        ...templates,
+      ];
+      const scenes = [base({ sceneId: 's1', sceneType: 'photo_intro', templateId: 'user_tmpl_001' })];
+      const next = substituteDeletedTemplateInScenes(scenes, 'user_tmpl_001', withUser, '16:9');
+      expect(next[0].templateId).toBe('std_photo_16'); // 同梱が選ばれる
+    });
+
+    // ADR-0030（非破壊往復）：FREE 場面は通常配置を休眠保持する。category を渡さないと通常扱いになり、
+    // 「通常テンプレへ戻せば復元」が失われる。一括適用（store）と同じ規則にそろえてある。
+    it('FREE 場面の置換で、休眠している通常配置を消さない（ADR-0030）', () => {
+      const freeTemplates = [
+        tpl({ templateId: 'std_free_16', category: 'free', aspectRatio: '16:9' }),
+        ...templates,
+      ];
+      const scenes = [base({ sceneId: 's1', sceneType: 'free', templateId: 'user_tmpl_001', assetRefs: { mainVisual: 'asset_001' } })];
+      const next = substituteDeletedTemplateInScenes(scenes, 'user_tmpl_001', freeTemplates, '16:9');
+      expect(next[0].templateId).toBe('std_free_16');
+      expect(next[0].assetRefs.mainVisual).toBe('asset_001'); // 休眠のまま残る（通常へ戻せば復元できる）
+    });
+
     it('削除テンプレを参照する場面を同カテゴリ・同じ向きの標準へ置換する（非参照は不変）', () => {
       const scenes = [
         base({ sceneId: 's1', sceneType: 'photo_intro', templateId: 'user_tmpl_001' }),
@@ -55,7 +80,7 @@ describe('templateUsage', () => {
       expect(substituteDeletedTemplateInScenes(scenes, 'user_tmpl_001', templates, '16:9')).toBe(scenes);
     });
 
-    it('置換時にテンプレ依存の assetRefs / slotFits / warnings を正準経路で清算する（switchSceneTemplate・11§5・#236）', () => {
+    it('置換時も配置は消さず休眠保持し、warnings だけ再検証前提でクリアする（switchSceneTemplate・ADR-0030 追補・#547 P3-14）', () => {
       const scene = base({
         sceneId: 's1', sceneType: 'opening', templateId: 'user_tmpl_001',
         assetRefs: { oldSlot: 'asset_x' }, // 削除テンプレ固有のスロット参照（新テンプレに無い）
@@ -68,8 +93,9 @@ describe('templateUsage', () => {
       } as unknown as Partial<Template>);
       const next = substituteDeletedTemplateInScenes([scene], 'user_tmpl_001', [alt], '16:9');
       expect(next[0].templateId).toBe('std_opening_16');
-      expect(next[0].assetRefs).toEqual({}); // 旧スロット参照は清算（新テンプレのスロット id 集合に無い）
-      expect(next[0].slotFits).toBeUndefined();
+      // 見た目が消えても中身は消さない＝当て先に差し込み先が無いだけで、あとで選び直せば戻る（実効使用は assetUsage がゲート）。
+      expect(next[0].assetRefs).toEqual({ oldSlot: 'asset_x' });
+      expect(next[0].slotFits).toEqual({ oldSlot: 'cover' });
       expect(next[0].warnings).toEqual([]); // 旧テンプレ基準の検証結果はクリア（再検証前提）
     });
 
@@ -78,5 +104,34 @@ describe('templateUsage', () => {
       const withDeleted = [tpl({ templateId: 'user_tmpl_001', category: 'free', aspectRatio: '16:9' })];
       expect(substituteDeletedTemplateInScenes(scenes, 'user_tmpl_001', withDeleted, '16:9')[0].templateId).toBe('user_tmpl_001');
     });
+  });
+});
+
+// #547：削除確認に出す数は、置換の実挙動と同じ規則で出す（言ったとおりに変わる／過大に脅かさない）。
+describe('templateDeleteImpact（削除の影響・#547）', () => {
+  const lay = (id: string, type: string) => ({ id, type, x: 0, y: 0, w: 10, h: 10 }) as never;
+  const std = tpl({ templateId: 'std_photo_16', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('mainVisual', 'slot')] });
+  const userTmpl = tpl({ templateId: 'user_tmpl_001', category: 'photo_intro', aspectRatio: '16:9', layers: [lay('own_slot', 'slot')] });
+
+  it('変わる場面・出なくなる場面・当て先が無い場面を分けて返す', () => {
+    const other = tpl({ templateId: 'user_tmpl_001', category: 'closing', aspectRatio: '16:9', layers: [] });
+    const scenes = [
+      base({ sceneId: 's1', sceneType: 'photo_intro', templateId: 'user_tmpl_001', assetRefs: { own_slot: 'a1' } }), // 変わる＋出なくなる
+      base({ sceneId: 's2', sceneType: 'closing', templateId: 'user_tmpl_001' }), // クロージングの標準は無い＝当て先なし
+    ];
+    const r = templateDeleteImpact(scenes, 'user_tmpl_001', [userTmpl, std], '16:9');
+    expect(r.changing.map((s) => s.sceneId)).toEqual(['s1']);
+    expect(r.losingContent.map((s) => s.sceneId)).toEqual(['s1']);
+    expect(r.unresolved.map((s) => s.sceneId)).toEqual(['s2']);
+    expect(other).toBeTruthy();
+  });
+
+  // 削除するテンプレに差し込み先が無いデータ（往復のため休眠しているだけ）は、元から動画に出ていない。
+  // それを「出なくなります」と数えると、根拠のない警告で削除をためらわせる。
+  it('元から出ていない休眠データは「出なくなる」に数えない', () => {
+    const scenes = [base({ sceneId: 's1', sceneType: 'photo_intro', templateId: 'user_tmpl_001', assetRefs: { dormant: 'a1' } })];
+    const r = templateDeleteImpact(scenes, 'user_tmpl_001', [userTmpl, std], '16:9');
+    expect(r.changing.map((s) => s.sceneId)).toEqual(['s1']);
+    expect(r.losingContent).toEqual([]); // dormant は userTmpl の層に無い＝出ていなかった
   });
 });

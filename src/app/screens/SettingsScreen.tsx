@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
+import { PlayIcon, StopIcon } from "../components/icons";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { DeleteConfirm } from "../components/DeleteConfirm";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { GEMINI_PROVIDER, deleteApiKey, hasApiKey, saveApiKey } from "../../infrastructure/aiClient";
@@ -19,10 +22,11 @@ import {
   type H264FeatureStatus,
 } from "../../domain/export/h264Feature";
 
-export function SettingsScreen() {
+export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) => void }) {
   const synthesizePreview = useProjectStore((s) => s.synthesizePreview);
   const voiceSettings = useProjectStore((s) => s.meta.voiceSettings);
   const updateVoiceSettings = useProjectStore((s) => s.updateVoiceSettings);
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は声パラメタを止める（#570 P2）
   // 声パラメータ（速さ/高さ/抑揚）スライダーのドラッグを1履歴に（#389・場面編集側と同じ挙動に揃える）。
   const { dragGroup } = useHistoryGroup();
 
@@ -273,6 +277,9 @@ export function SettingsScreen() {
             </p>
           </div>
 
+          {/* 話す速さ/高さ/抑揚は updateVoiceSettings＝書き出し中は固定（#570 P1）。生成パラメタなので今回のMP4は不変だが、
+              無言 no-op を避けて理由を示す（ADR-0026④）。声のクレジット/接続先/キャラは対象外なので section 全体でなくここに置く。 */}
+          <ExportLockBanner onNavigate={onNavigate} />
           <div className="field">
             <label className="field-label" htmlFor="speed">
               話す速さ
@@ -280,6 +287,7 @@ export function SettingsScreen() {
             <input
               id="speed"
               type="range"
+              disabled={isExporting}
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.speed ?? SPEED_RANGE.def, SPEED_RANGE)}
@@ -302,6 +310,7 @@ export function SettingsScreen() {
             <input
               id="pitch"
               type="range"
+              disabled={isExporting}
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.pitch ?? PITCH_RANGE.def, PITCH_RANGE)}
@@ -324,6 +333,7 @@ export function SettingsScreen() {
             <input
               id="intonation"
               type="range"
+              disabled={isExporting}
               min={0}
               max={100}
               value={valueToSlider(voiceSettings.intonation ?? INTONATION_RANGE.def, INTONATION_RANGE)}
@@ -342,19 +352,23 @@ export function SettingsScreen() {
           </div>
 
           <p className="field-hint">
-            話す速さ・高さ・抑揚はこのプロジェクトのナレーションに使われます（保存すると残ります）。
+            話す速さ・高さ・抑揚はこのプロジェクトの読み上げの声に使われます（保存すると残ります）。
           </p>
 
           <button
-            className="btn btn-secondary"
+            className="btn btn-secondary btn-icon"
             onClick={() => void onTestVoice()}
             disabled={testState === "loading"}
           >
-            {audioPreview.playingKey === "settings"
-              ? "■ 停止"
-              : testState === "loading"
-                ? "確認中…"
-                : "声を試し聞きする"}
+            {/* 再生/停止は SVG アイコンに統一（Unicode「■」をやめる・#547 P3-1）。読み込み中は無アイコンの状態表示。
+                アイコンと文字の間隔は .btn の gap に任せる（他画面の再生/停止ボタンと同じ・余分な空白を挟まない）。 */}
+            {audioPreview.playingKey === "settings" ? (
+              <><StopIcon size={16} />停止</>
+            ) : testState === "loading" ? (
+              "確認中…"
+            ) : (
+              <><PlayIcon size={16} />声を試し聞きする</>
+            )}
           </button>
           {testState === "error" && (
             <div className="notice notice-warn" role="alert" style={{ marginTop: 8 }}>
@@ -384,7 +398,7 @@ export function SettingsScreen() {
             <details style={{ marginTop: "var(--gap-sm)" }}>
               <summary className="text-sm text-muted" style={{ cursor: "pointer" }}>詳細情報</summary>
               <div className="col gap-sm mt text-sm">
-                <div className="row-between"><span className="text-muted">コーデック</span><span>OpenH264（H.264）</span></div>
+                <div className="row-between"><span className="text-muted">動画の形式</span><span>OpenH264（H.264）</span></div>
                 <div className="row-between"><span className="text-muted">提供元</span><span>Cisco Systems, Inc.</span></div>
                 <div className="row-between"><span className="text-muted">バージョン</span><span>—</span></div>
                 <div className="row-between"><span className="text-muted">検証結果</span><span>—</span></div>

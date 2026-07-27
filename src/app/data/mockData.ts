@@ -175,6 +175,8 @@ export const draftRows: DraftRow[] = [
 ];
 
 // ---- 自動補正・確認の通知（たたき台確認で表示するサンプル） ----
+// 見た目の自動置換はここ＝**取り込み時**（AI出力→場面への変換）だけに許される（`15 §6` TEMPLATE_NOT_FOUND ①）。
+// 既存の場面が後から解決できなくなった場合は置換せず書き出しを止める（同 ②・#547）。文言を流用しないこと。
 export const sampleWarnings: DraftWarning[] = [
   {
     message: "見た目パターンが見つからない場面があったため、標準の見た目に調整しました。",
@@ -267,6 +269,13 @@ export interface PrecheckItem {
   action?: string;
   /** action を押したときに開く対象場面（#400・editingSceneId 経由）。場面に紐づく項目のみ。未設定＝先頭場面。 */
   sceneId?: string;
+  /**
+   * この項目が残っていると**書き出しが必ず失敗する**か（#547 P2-5）。
+   * 書き出し（`renderer/export/buildExportScenes`）が §2-5 エラーで停止する条件だけに付ける＝
+   * 「直せば出せる警告」（字幕が長い・声が未作成など）とは分けて、主ボタンを止める根拠にする。
+   * 付けたら書き出し側の停止条件と対で維持すること（片方だけ変えると「押せるのに必ず失敗」か「押せないのに出せる」になる）。
+   */
+  blocksExport?: boolean;
 }
 
 export const precheckItems: PrecheckItem[] = [

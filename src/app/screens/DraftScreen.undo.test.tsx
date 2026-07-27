@@ -51,4 +51,13 @@ describe("DraftScreen 取り消す/やり直す（#413）", () => {
     fireEvent.click(btn);
     expect(undo).toHaveBeenCalledTimes(1);
   });
+
+  it("書き出し中は履歴があっても取り消す/やり直すを無効にする（store は無言 no-op・#547 P3-12）", () => {
+    // canUndo/canRedo が真でも、書き出し中は store の undo/redo が no-op ＝ボタンも disabled にして誤認を防ぐ（ADR-0026④）。
+    useProjectStore.setState({ past: [{} as never], future: [{} as never] });
+    useProjectStore.getState().setExportRun({ phase: "rendering" });
+    render(<DraftScreen onNavigate={vi.fn()} />);
+    expect((screen.getByRole("button", { name: "取り消す" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "やり直す" }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });

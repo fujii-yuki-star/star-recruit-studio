@@ -11,6 +11,7 @@ import { useProjectStore } from "../store/projectStore";
 import { isTauri } from "../../infrastructure/assetFs";
 import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { YukoPanel } from "../components/YukoPanel";
+import { ExportLockBanner } from "../components/ExportLockBanner";
 import { saveButtonLabel } from "../components/saveButtonLabel";
 import {
   ArrowLeftIcon,
@@ -115,7 +116,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // フォーム入力の不足を伝えるユーザー向け文言（§2-5・次の行動を示す）。
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, saveProject, saveStatus, applyProjectInfo, setWizardStep, importError, clearImportError } =
+  const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, removeAsset, saveProject, saveStatus, applyProjectInfo, setWizardStep, importError, clearImportError } =
     useProjectStore();
 
   const steps = stepsFor(videoKind);
@@ -232,6 +233,9 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     <div className="main-scroll">
       <div className="content-with-yuko">
         <div>
+          {/* 書き出し中の案内（#570 P3 レビュー）。ウィザードの入力保存（applyProjectInfo）は書き出し中 no-op のため、
+              他画面と同じくバナーで「効かない」を明示する（silent no-op を避ける・ADR-0026④）。 */}
+          <ExportLockBanner onNavigate={onNavigate} />
           {/* ステッパー */}
           <div className="stepper">
             {steps.map((label, i) => (
@@ -681,6 +685,19 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                             placeholder="この素材の説明（例：オフィスの様子）"
                           />
                         </div>
+                        {/* 間違えて選んだ素材を外せるようにする（#547 P3-8）。まだ場面はできていない（生成前）ので
+                            この素材を参照している場面は無く、外してもどこも空欄にならない＝即時でよい（この画面の
+                            「アピールしたいこと」の × 同様・確認は挟まない）。語は見た目パターンの素材「外す」に合わせる。
+                            ホバーの説明（title）も読み上げ名（aria-label）と同じ文にする＝同じボタンで名前が2通りに割れない（§6）。 */}
+                        <button
+                          className="btn btn-ghost text-sm"
+                          style={{ flex: "0 0 auto" }}
+                          onClick={() => removeAsset(a.assetId)}
+                          aria-label={`${a.displayName}を外す`}
+                          title={`${a.displayName}を外す`}
+                        >
+                          外す
+                        </button>
                       </div>
                     ))}
                   </div>

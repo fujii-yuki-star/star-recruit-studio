@@ -13,9 +13,10 @@
 | Template | `schemas/template.schema.json` | 見た目パターン定義 | 内部・取込 |
 | AiVideoPlan | `schemas/ai-video-plan.schema.json` | **AI出力**（内部Sceneとは別物） | 受信・一時 |
 
-- 各スキーマは独立した `schemaVersion`（semver文字列）を持つ。初期は全て `"1.0"`。**project は ADR-0011 で `"1.1"`**（`videoKind`/`generalBrief` の追加・`additionalNotes` を companyInfo→トップレベルへ移動）、**ADR-0012 で `"1.2"`**（`videoSettings.width/height` を撤廃し `aspectRatio` を寸法の単一の真実に・`aspectRatio` に `9:16` を追加＝後方互換のマイナー）、**フォント選択で `"1.3"`**（`videoSettings.fontId`＝同梱フォントの id を追加・任意・後方互換のマイナー）、**標準BGM選択で `"1.4"`**（`bgmSettings.bundledBgmId`＝同梱BGMの id を追加・任意・後方互換のマイナー）、**場面ごとのフォントで `"1.5"`**（`scene.fontId`＝場面のフォントの id を追加・任意・null/未指定は動画全体を継承・後方互換のマイナー）、**FREE 図形の拡張で `"1.6"`**（freeLayout shape の `shapeType` に `rounded_rect`/`triangle`/`star`/`arrow`/`speech_bubble` を追加し `strokeColor`/`strokeWidth`＝枠線を追加・いずれも任意・後方互換のマイナー＝#173）、**テキストごとのフォントで `"1.7"`**（`FreeElement.fontId`＝FREE/パーツのテキスト要素ごと＋`scene.textFontIds`＝textKey 別のフォント上書きを追加・いずれも任意・後方互換のマイナー＝#178）、**掛け合いで `"1.8"`**（`scene.lines`＝NarrationLine[] のセリフ列＋`scene.subtitleEnabledDefault` を追加・いずれも任意・null/未指定は継承・`narration` 残置・後方互換のマイナー＝ADR-0015/#180）、**FREE 要素の回転で `"1.9"`**（`FreeElement.rotation`＝度・0以上360未満・任意・未指定=回転なし・後方互換のマイナー＝#208）、**FREE text の体裁で `"1.10"`**（`lineHeight`＝行間倍率0.5〜3＋`textAlign`＝揃え left/center/right を追加・縁取りは既存 `strokeColor`/`strokeWidth` を text にも適用・いずれも任意・後方互換のマイナー＝#209）、**FREE 要素の非表示/ロックで `"1.11"`**（`hidden`＝非表示・`locked`＝ロックを追加・いずれも任意・後方互換のマイナー＝レイヤー一覧・#210）、**掛け合いの行ごとの抑揚で `"1.12"`**（`NarrationLine.intonation`＝抑揚0.0〜2.0 を追加・任意・null/未指定は場面/動画の既定を継承・後方互換のマイナー＝#242）、**場面ごとの画像の収め方で `"1.13"`**（`scene.slotFits`＝スロット別の収め方上書き object を追加・任意・未指定はテンプレ層の `fit` を使用・後方互換のマイナー＝④）、**要素のグループ化で `"1.14"`**（`scene.groups`＝要素のグループ化（`Group[]`・自前 transform を持つ独立オブジェクト・ネスト可）を追加・任意・未指定＝グループ無し・後方互換のマイナー＝ADR-0022）、**場面横断タイムラインで `"1.15"`**（`timelineOverlay`＝場面横断タイムラインの上位編集〔場面アンカー＋絶対時間の `OverlayClip[]`。まず telop トラック〕を追加・任意・未指定＝場面射影のみ・後方互換のマイナー＝ADR-0018）、**場面ごとのBGMで `"1.16"`**（`scene.bgmSettings`＝場面のBGM設定〔`BgmSettings`〕を追加・任意・未指定＝プロジェクト既定〔`bgmSettings`〕を継承〔null=継承〕・`enabled:false` でこの場面は無音・後方互換のマイナー＝ADR-0018 ③(7)）、**要素アニメーション（キーフレーム）で `"1.17"`**（`timelineOverlay.animations`＝`ElementAnimation[]`〔場面内の1要素を時間で補間・FREE 要素／グループ id が対象・timelineOverlay 格納ゆえ AI/場面正準は不変〕を追加・任意・未指定＝アニメ無し＝静止・後方互換のマイナー＝ADR-0019 ④）、**動画スロット再生開始タイミングで `"1.18"`**（`scene.slotVideoStart`＝スロット別の再生開始モード〔`{ mode: withAnim/afterAnim/delay, delaySec? }`〕を追加・任意・未指定＝`withAnim`＝アニメと同時・スロット本体アニメ場面でのみ有効・後方互換のマイナー＝ADR-0027・#444）、**動画クリップ調整の per-use 上書きで `"1.19"`**（`scene.slotClips`＝スロット別のクリップ上書き〔`startSec`/`endSec`/`speed`/`useOriginalAudio`/`originalAudioVolume`。`fit` は除く＝`slotFits` が担う〕を追加・任意・未上書きフィールドは `asset.clip` を継承・後方互換のマイナー＝ADR-0028・#472）、**FREE 字幕要素で `"1.20"`**（`FreeElement.kind` に `subtitle`＝自由配置の字幕要素を追加し、`FreeElement.subtitleSource`＝字幕の対象〔`{kind:'narration'}`＝読み上げ `texts.subtitle`／`{kind:'allLines'}`＝掛け合いの全行／`{kind:'speaker', speaker}`＝特定の実効話者〕を追加・いずれも任意・**未指定＝後方互換**〔単独→読み上げ・掛け合い→全行へ無変換解決〕・後方互換のマイナー＝ADR-0029・#521）、**掛け合いの同時開始で `"1.21"`**（`NarrationLine.startWithPrevious`＝直前の行と**同時に**開始〔並行して重ねて流す・`true` の連続で N 人同時〕を追加・任意・未指定/`false`＝逐次〔従来どおり〕・`startSec` を保存しないので **V18〔重なり禁止〕に触れない**・後方互換のマイナー＝ADR-0031・#530）、**FREE 要素の任意表示名で `"1.22"`**（`FreeElement.name`＝重ね順一覧/選択チップの見分け用の任意表示名〔全 kind 共通・テンプレの `Layer.name` に相当〕を追加・任意・**未指定＝種類＋連番の自動名にフォールバック**・後方互換のマイナー＝#525-12）、**FREE 字幕/文字の背景帯で `"1.23"`**（`FreeElement.background`＝FREE の text/subtitle 要素の背景帯〔可読性の下地・`{enabled?,color?,opacity?,radius?}`・通常字幕層 `layer.background` と同型〕を追加・任意・**未指定/`enabled:false`＝背景帯なし**・通常→FREE 化で移送〔ADR-0030〕・後方互換のマイナー＝#529）。template は `aspectRatio` に `9:16` を追加（enum 追加＝非破壊で `"1.0"` 据え置き）、さらに Layer に `strokeColor`/`strokeWidth`＝text/subtitle の縁取りを追加（任意・後方互換のマイナー＝#275。template はマイグレーション機構を持たず、非破壊の追加は版を上げない方針＝aspectRatio 9:16 と同じ。さらに `template.groups`＝要素のグループ化（ADR-0022）と Layer の `rotation`＝回転（0以上360未満・FreeElement と同仕様・#307）も任意追加で版据え置き）。ai-video-plan は **`narrationLines`（掛け合い・任意追加）を加えても後方互換ゆえ `"1.0"` 据え置き**（AI出力は transient で永続化/migration 不要・optional 追加のため版を上げない＝ADR-0015 PR-G/#180）。
+- 各スキーマは独立した `schemaVersion`（semver文字列）を持つ。初期は全て `"1.0"`。**project は ADR-0011 で `"1.1"`**（`videoKind`/`generalBrief` の追加・`additionalNotes` を companyInfo→トップレベルへ移動）、**ADR-0012 で `"1.2"`**（`videoSettings.width/height` を撤廃し `aspectRatio` を寸法の単一の真実に・`aspectRatio` に `9:16` を追加＝後方互換のマイナー）、**フォント選択で `"1.3"`**（`videoSettings.fontId`＝同梱フォントの id を追加・任意・後方互換のマイナー）、**標準BGM選択で `"1.4"`**（`bgmSettings.bundledBgmId`＝同梱BGMの id を追加・任意・後方互換のマイナー）、**場面ごとのフォントで `"1.5"`**（`scene.fontId`＝場面のフォントの id を追加・任意・null/未指定は動画全体を継承・後方互換のマイナー）、**FREE 図形の拡張で `"1.6"`**（freeLayout shape の `shapeType` に `rounded_rect`/`triangle`/`star`/`arrow`/`speech_bubble` を追加し `strokeColor`/`strokeWidth`＝枠線を追加・いずれも任意・後方互換のマイナー＝#173）、**テキストごとのフォントで `"1.7"`**（`FreeElement.fontId`＝FREE/パーツのテキスト要素ごと＋`scene.textFontIds`＝textKey 別のフォント上書きを追加・いずれも任意・後方互換のマイナー＝#178）、**掛け合いで `"1.8"`**（`scene.lines`＝NarrationLine[] のセリフ列＋`scene.subtitleEnabledDefault` を追加・いずれも任意・null/未指定は継承・`narration` 残置・後方互換のマイナー＝ADR-0015/#180）、**FREE 要素の回転で `"1.9"`**（`FreeElement.rotation`＝度・0以上360未満・任意・未指定=回転なし・後方互換のマイナー＝#208）、**FREE text の体裁で `"1.10"`**（`lineHeight`＝行間倍率0.5〜3＋`textAlign`＝揃え left/center/right を追加・縁取りは既存 `strokeColor`/`strokeWidth` を text にも適用・いずれも任意・後方互換のマイナー＝#209）、**FREE 要素の非表示/ロックで `"1.11"`**（`hidden`＝非表示・`locked`＝ロックを追加・いずれも任意・後方互換のマイナー＝レイヤー一覧・#210）、**掛け合いの行ごとの抑揚で `"1.12"`**（`NarrationLine.intonation`＝抑揚0.0〜2.0 を追加・任意・null/未指定は場面/動画の既定を継承・後方互換のマイナー＝#242）、**場面ごとの画像の収め方で `"1.13"`**（`scene.slotFits`＝スロット別の収め方上書き object を追加・任意・未指定はテンプレ層の `fit` を使用・後方互換のマイナー＝④）、**要素のグループ化で `"1.14"`**（`scene.groups`＝要素のグループ化（`Group[]`・自前 transform を持つ独立オブジェクト・ネスト可）を追加・任意・未指定＝グループ無し・後方互換のマイナー＝ADR-0022）、**場面横断タイムラインで `"1.15"`**（`timelineOverlay`＝場面横断タイムラインの上位編集〔場面アンカー＋絶対時間の `OverlayClip[]`。まず telop トラック〕を追加・任意・未指定＝場面射影のみ・後方互換のマイナー＝ADR-0018）、**場面ごとのBGMで `"1.16"`**（`scene.bgmSettings`＝場面のBGM設定〔`BgmSettings`〕を追加・任意・未指定＝プロジェクト既定〔`bgmSettings`〕を継承〔null=継承〕・`enabled:false` でこの場面は無音・後方互換のマイナー＝ADR-0018 ③(7)）、**要素アニメーション（キーフレーム）で `"1.17"`**（`timelineOverlay.animations`＝`ElementAnimation[]`〔場面内の1要素を時間で補間・FREE 要素／グループ id が対象・timelineOverlay 格納ゆえ AI/場面正準は不変〕を追加・任意・未指定＝アニメ無し＝静止・後方互換のマイナー＝ADR-0019 ④）、**動画スロット再生開始タイミングで `"1.18"`**（`scene.slotVideoStart`＝スロット別の再生開始モード〔`{ mode: withAnim/afterAnim/delay, delaySec? }`〕を追加・任意・未指定＝`withAnim`＝アニメと同時・スロット本体アニメ場面でのみ有効・後方互換のマイナー＝ADR-0027・#444）、**動画クリップ調整の per-use 上書きで `"1.19"`**（`scene.slotClips`＝スロット別のクリップ上書き〔`startSec`/`endSec`/`speed`/`useOriginalAudio`/`originalAudioVolume`。`fit` は除く＝`slotFits` が担う〕を追加・任意・未上書きフィールドは `asset.clip` を継承・後方互換のマイナー＝ADR-0028・#472）、**FREE 字幕要素で `"1.20"`**（`FreeElement.kind` に `subtitle`＝自由配置の字幕要素を追加し、`FreeElement.subtitleSource`＝字幕の対象〔`{kind:'narration'}`＝読み上げ `texts.subtitle`／`{kind:'allLines'}`＝掛け合いの全行／`{kind:'speaker', speaker}`＝特定の実効話者〕を追加・いずれも任意・**未指定＝後方互換**〔単独→読み上げ・掛け合い→全行へ無変換解決〕・後方互換のマイナー＝ADR-0029・#521）、**掛け合いの同時開始で `"1.21"`**（`NarrationLine.startWithPrevious`＝直前の行と**同時に**開始〔並行して重ねて流す・`true` の連続で N 人同時〕を追加・任意・未指定/`false`＝逐次〔従来どおり〕・`startSec` を保存しないので **V18〔重なり禁止〕に触れない**・後方互換のマイナー＝ADR-0031・#530）、**FREE 要素の任意表示名で `"1.22"`**（`FreeElement.name`＝重ね順一覧/選択チップの見分け用の任意表示名〔全 kind 共通。**テンプレの `Layer` に同等のフィールドは無い**＝テンプレ作成の一覧は種別名＋差し込み先で見分ける・#547 P2-4〕を追加・任意・**未指定＝種類＋連番の自動名にフォールバック**・後方互換のマイナー＝#525-12）、**FREE 字幕/文字の背景帯で `"1.23"`**（`FreeElement.background`＝FREE の text/subtitle 要素の背景帯〔可読性の下地・`{enabled?,color?,opacity?,radius?}`・通常字幕層 `layer.background` と同型〕を追加・任意・**未指定/`enabled:false`＝背景帯なし**・通常→FREE 化で移送〔ADR-0030〕・後方互換のマイナー＝#529）、**文字の体裁の場面別上書きで `"1.24"`**（`scene.textStyles`＝テキスト種別ごとの体裁上書き〔`{color?,fontSize?,fontWeight?,strokeColor?,strokeWidth?}`・`$defs/TextStyle`・制約は Layer/FreeElement の同名プロパティと同一〕を追加・任意・**各プロパティ未指定＝テンプレ層→既定を継承**〔触ったものだけ固有値〕・**配置/座標はテンプレ駆動のまま**〔§2-4 の対象は配置＝体裁は対象外・`textFontIds` と同型の前例踏襲〕・AI は生成しない〔利用者編集専用〕・後方互換のマイナー＝#555）。template は `aspectRatio` に `9:16` を追加（enum 追加＝非破壊で `"1.0"` 据え置き）、さらに Layer に `strokeColor`/`strokeWidth`＝text/subtitle の縁取りを追加（任意・後方互換のマイナー＝#275。template はマイグレーション機構を持たず、非破壊の追加は版を上げない方針＝aspectRatio 9:16 と同じ。さらに `template.groups`＝要素のグループ化（ADR-0022）と Layer の `rotation`＝回転（0以上360未満・FreeElement と同仕様・#307）も任意追加で版据え置き）。ai-video-plan は **`narrationLines`（掛け合い・任意追加）を加えても後方互換ゆえ `"1.0"` 据え置き**（AI出力は transient で永続化/migration 不要・optional 追加のため版を上げない＝ADR-0015 PR-G/#180）。
   - 移行: 既存 `"1.0"`〜`"1.6"` の project.json は読込時に `"1.7"` へ更新（`videoKind` 省略＝recruit 既定、`companyInfo.additionalNotes` をトップレベル `additionalNotes` へ移送、`videoSettings.width/height` を除去、`videoSettings.fontId` 未指定は既定フォントを補完、未知の `bgmSettings.bundledBgmId` は標準BGM未選択へ落とす、未知の `scene.fontId` は継承（未指定）へ落とす。`"1.5"`→`"1.6"` は FREE 図形種別・枠線の追加のみで版番号の付け替え以外の変換は不要＝#173。`"1.6"`→`"1.7"` はテキストごとのフォント追加のみで変換不要＝#178。`"1.7"`→`"1.8"` は掛け合い（`scene.lines`/`subtitleEnabledDefault`）の任意追加のみで変換不要＝ADR-0015/#180。`"1.8"`→`"1.9"` は FREE 要素の回転（`FreeElement.rotation`）の任意追加のみで変換不要＝#208。`"1.9"`→`"1.10"` は FREE text の体裁（`lineHeight`/`textAlign`）の任意追加のみで変換不要＝#209。`"1.10"`→`"1.11"` は FREE 要素の `hidden`/`locked` の任意追加のみで変換不要＝#210。`"1.11"`→`"1.12"` は `NarrationLine.intonation` の任意追加のみで変換不要＝#242。`"1.12"`→`"1.13"` は `scene.slotFits` の任意追加のみで変換不要＝④）。
 - **互換性方針**: マイナー（`1.x`）＝後方互換の追加のみ。メジャー（`2.0`）＝破壊的変更で、読込時にマイグレーション関数を通す。未知のメジャーは読込拒否しユーザー向けに告知。
+- **制約の是正（バンプ無し）**: schema の制約が**本書に文書化済みの契約と食い違っていた**場合、schema を本書へ合わせる修正は**版を上げない**（契約は元から本書のとおりで、追加でも破壊的変更でもない＝誤記の訂正）。条件＝①アプリの生成経路が新制約を既に満たす ②既存データが違反しても**読込は拒否されない**（範囲違反は非 structural＝`§8` V2・#416）こと。前例＝`scene.durationSec` を `minimum:0`→`exclusiveMinimum:0`（#586・`§7`）。①②が満たせない（既存データが読めなくなる/移行が要る）なら通常どおりメジャー＋マイグレーション。
 - 読込時、`schemaVersion` 不在 or 未対応なら検証エラー（`§8`）。
 
 ---
@@ -115,7 +116,7 @@
 | enum | 値 |
 |---|---|
 | `narration.status`（音声生成） | `none` / `pending` / `generated` / `failed` |
-| `renderStatus` | `idle` / `running` / `completed` / `failed` / `cancelled`（ユーザー中止・#380） |
+| `renderStatus` | `idle` / `rendering` / `encoding` / `done` / `error` / `unsupported` / `cancelled`（ユーザー中止・#380）。**実行時のみ**（`project.json` に持たない＝`15 §1`）。`running` は進捗表示のため `rendering`（場面を焼く）／`encoding`（結合・字幕・BGM）に分かれる（#376）。`unsupported` はこの端末で書き出せない（#120・ADR-0013）。値の定義は `domain/export/exportProgress.ts` の `EXPORT_RUN_PHASES` が単一の参照元（§2-7） |
 | `formality` | `casual` / `standard` / `formal` |
 | `voiceId` | `voicevox_zundamon`（既定）ほか。形式 `^[a-z0-9_]+$` |
 | `poseTag` | 自由文字列タグ（例 `smile` / `guide` / `bow` / `surprise` / `think` / `cheer`）。enum固定しない |
@@ -126,8 +127,8 @@
 
 | 定数 | 値 | 用途 |
 |---|---:|---|
-| `SCENE_MIN_DURATION_SEC` | `3` | シーン最小尺（下回ると補正） |
-| `SCENE_MAX_DURATION_SEC` | `15` | シーン最大尺の既定（テンプレ `aiHint.maxDurationSec` で上書き可） |
+| `AI_SCENE_MIN_DURATION_SEC` | `3` | **AI 生成の目安**（下限）。手編集の制約ではない（#553） |
+| `AI_SCENE_MAX_DURATION_SEC` | `15` | **AI 生成の目安**（上限の既定・テンプレ `aiHint.maxDurationSec` で上書き可）。手編集の制約ではない（#553） |
 | `SCENE_DEFAULT_DURATION_SEC` | `8` | 既定シーン尺 |
 | `TRANSITION_DEFAULT_SEC` | `0.5` | 既定トランジション長 |
 | `VIDEO_TARGET_MAX_SEC_MVP` | `300` | MVP想定の目標上限（5分） |
@@ -140,12 +141,27 @@
 | `ORIGINAL_AUDIO_VOLUME` | `0.20` | 動画素材の元音声既定音量 |
 | `MAX_NARRATION_LEN_DEFAULT` | `120` | ナレーション文字数上限の既定（テンプレで上書き可） |
 | `MAX_SUBTITLE_LEN_DEFAULT` | `60` | 字幕文字数上限の既定（テンプレで上書き可） |
+| `SEC_STEP` | `0.1` | 秒の**入力欄の刻み・表示の丸め・量子化**の格子（#561） |
+| `STROKE_COLOR_ON_DARK` | `#ffffff` | 縁取り/枠線の既定色（**暗い下地**のとき）＝#275/#565 |
+| `STROKE_COLOR_ON_LIGHT` | `#000000` | 縁取り/枠線の既定色（**明るい下地**のとき）＝#565 |
+| `SHAPE_FILL_FALLBACK_COLOR` | `#ffffff` | 図形の `fillColor` 未指定時に**描く**色（新規作成の既定色とは別＝古いデータ向けの描画フォールバック） |
+
+**秒の格子（`SEC_STEP`・#561）**：**秒（実数）が正準**（ADR-0023）で、0.1 の格子は
+**入力欄の刻み・表示の丸め・場面分割の按分**にだけ使う（`quantizeSec` が単一の参照元＝欄の値と表示が食い違わない）。
+**ドラッグ結果は量子化しない**：場面尺は実数を取りうる（`clampSceneDuration` は量子化しない）ので、
+量子化すると**格子に乗らない場面境界への吸着が黙って捨てられる**（3.25 秒の境界へ合わせたのに 3.3 へ動く・ADR-0026①）。
+
+**縁取り/枠線の既定色（#275／#565）**：`strokeWidth > 0` で `strokeColor` が未指定のときは、**下地**
+（文字なら解決後の文字色／図形なら解決後の塗り）と**反対側**の既定色で描く。固定色にすると「白い文字に白い縁取り」で
+**設定したのに何も起きない**（ADR-0026①）ため。**通常テンプレの文字層・FREE 要素（文字/字幕/図形）・編集画面の色見本**は
+この規則を共有する（`resolveStrokeColor`＝単一の参照元・§2-7）。`strokeWidth` が `0`/未指定なら既定化しない
+（＝縁取りなし。選んだ色は消さず残す）。
 
 ---
 
 ## 5. アセット ⇄ テンプレレイヤー バインディング契約（論点②）
 
-**原則: `scene.assetRefs` のキーは、テンプレの「素材を受けるレイヤー」の `id` と一致させる。レンダラーは id 一致で素材を流し込む。**
+**原則: レンダラーは `scene.assetRefs` のキーとテンプレの「素材を受けるレイヤー」の `id` を突き合わせて素材を流し込む。一致するキーだけが描かれ、「使用中」にも数えられる**（見た目を切り替えて一致しなくなったキーは**休眠**として残る＝下記「切替時の保持」）。
 
 | レイヤー `type` | 素材の供給元 | バインドキー |
 |---|---|---|
@@ -157,11 +173,12 @@
 | `decor` / `shape` | テンプレ内 `assetId` / 図形定義 | 固定（シーン素材ではない） |
 
 **規則**
-- `assetRefs` のキー集合 ⊆ テンプレ内の `background`/`slot`/`logo` レイヤーの `id` 集合。
+- **描画・実効使用の条件**: テンプレ内の `background`/`slot`/`logo` レイヤーの `id` 集合に**含まれるキーだけ**が描かれ、「使用中の素材」に数えられる（`layoutScene` は層を辿って描く／`sceneActiveAssetIds`）。**保存データはこれを超えるキーを持ちうる**＝見た目を切り替えたとき差し込み先を失った割当は**休眠として残す**（ADR-0030 追補6・#547 P3-14。下の「切替時の保持」参照）。
 - 値が `null`/未指定: テンプレ既定素材（`layer.assetId`）があればそれを表示（ADR-0021・場面素材が優先・無ければテンプレ既定へ委譲）。無ければ レイヤー `required=false` → 非表示、`required=true` → 検証警告（§8）。
 - `slotType` と素材の `assetType` が不整合（例: `image` スロットに `video`）→ 補正/警告（§9）。
 - 旧 `01_REQUIREMENTS.md` 例の `type:"asset" + assetRole` 表記は本契約（typed layer + id一致）に置き換える。
-- **見た目パターン切替時の清算（issue #236・`switchSceneTemplate`）**：場面の `templateId` を変えたら、`assetRefs` は**新テンプレのスロット id へ清算**する（上記キー集合の不変条件を保つ＝ダングリング防止）。一方 **`texts` / `textFontIds` は清算せず保持**する＝これらは固定の `TextKey` enum（§3.4）がキーで**テンプレ非依存ゆえダングリングにならず**、別パターンへ変えて戻したとき入力が復元される（描画は未使用 textKey を無視）。`assetRefs` と**非対称だが意図的**（保持を採用）。
+- **見た目パターン切替時の保持（issue #236 → ADR-0030 追補6・`switchSceneTemplate`）**：場面の `templateId` を変えても、`assetRefs` / `slotFits` / `texts` / `textFontIds` / `textStyles` / `freeLayout` は**どれも清算せず保持**する＝**非破壊往復**（別パターンへ変えて戻すと、その差し込み先・文字枠を持つ見た目で再び描かれる）。差し込み先を失ったキーは**休眠**（描かれず・使用中にも数えない＝上記「描画・実効使用の条件」）なのでダングリングは無害。`warnings` だけは旧テンプレ基準の検証結果なのでクリアする（再検証前提）。
+  - ※ 当初（#236）は `assetRefs` のみ「新テンプレのスロット id へ清算」だったが、**`mainVisual` を持たない種類へ変えると写真の割当がその場で消え、元の種類へ戻しても復活しない**（`texts` は戻るのに非対称）ため、ADR-0030 の非破壊往復へ揃えた（#547 P3-14）。
 
 **例**
 
@@ -268,7 +285,8 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 | templateId | string | ● | 既存テンプレ参照 |
 | fontId | enum | ○ | 場面のフォント（同梱フォントの id・`domain/font/fontCatalog`）。null/未指定＝動画全体（`videoSettings.fontId`）を継承（1.5 追加） |
 | textFontIds | object | ○ | テキスト種別（textKey）ごとのフォント上書き（`{title?,main?,subtitle?,caption?,url?}`＝同梱フォントの id）。未設定の種別は `fontId`→動画全体→既定を継承（1.7 追加・#178） |
-| durationSec | number | ● | `[SCENE_MIN, テンプレ上限 or SCENE_MAX]` |
+| textStyles | object | ○ | テキスト種別（textKey）ごとの**体裁**上書き（`{title?,main?,subtitle?,caption?,url?}`＝各 `TextStyle`＝`{color?,fontSize?,fontWeight?,strokeColor?,strokeWidth?}`）。**各プロパティ未指定＝テンプレ層（`layer.*`）→既定を継承**＝触ったものだけ固有値。**配置/座標は対象外**（テンプレ駆動＝§2-4）。AI は生成しない（1.24 追加・#555） |
+| durationSec | number | ● | `> 0`（schema も `exclusiveMinimum:0` で一致＝#586 で矛盾解消。**場面ごとの上限/下限は持たない**・#553）。手編集の確定は §9 で `(0, VIDEO_HARD_MAX_SEC]` へ自動補正。AI 生成時のみ目安 `[AI_SCENE_MIN, テンプレ上限 or AI_SCENE_MAX]` へ寄せる |
 | assetRefs | object | ● | §5。値は既存 assetId or null |
 | character | object | ● | enabled / characterId / poseAssetId(既存 yuko asset or null) |
 | texts | object | ● | title / main / subtitle / caption / url（各 string、テンプレ必須キーは必須） |
@@ -276,10 +294,10 @@ partId ● / title ● / description ○ / order(int≥1) ● / sceneIds(string[
 | audioMix | object | ○ | §6（全フィールド任意・null可） |
 | transition | object | ○ | in/out(enum) / durationSec（既定 `TRANSITION_DEFAULT_SEC`）/ direction(enum `left`/`right`/`up`/`down`・slide 用・ADR-0009) |
 | warnings | Warning[] | ● | 検証・補正の結果（空配列可） |
-| freeLayout | FreeElement[] | ○ | **有効なのは FREE テンプレの場面のみ**（描画/編集/事前確認/素材使用は `templateOf(scene).category===free` でゲート）。**通常テンプレへ切り替えても休眠データとして保持**し、FREE へ戻すと復元（`texts` 休眠と同じ・ADR-0030／#236）。通常→FREE 切替時は表示中の内容（スロット素材＋文字）を旧テンプレ幾何ごと自動変換（seed）。自由配置要素（ADR-0008・id=`free_NNN`(scene内一意)・kind: slot/text/shape/**subtitle**（字幕＝ADR-0029・1.20）・x/y/w/h は canvas基準で w>0/h>0。shape の `shapeType`＝rect/ellipse/rounded_rect/triangle/star/arrow/speech_bubble、枠線/縁取り `strokeColor`/`strokeWidth`（shape=枠線・text=文字の縁取り＝#209）は任意・1.6。text の `fontId`（同梱フォント・null/未指定＝場面/全体を継承）は任意・1.7。`rotation`＝回転角（度・0以上360未満・中心を軸に時計回り・未指定=回転なし・360=0は除外）は任意・1.9＝#208。text の `lineHeight`＝行間（倍率0.5〜3・未指定=1.3）＋`textAlign`＝揃え（left/center/right・未指定=left）は任意・1.10＝#209。`hidden`＝非表示（true で描画/操作対象から除外）・`locked`＝ロック（true で移動/拡縮を禁止）は任意・1.11＝#210。`name`＝任意の表示名（重ね順一覧/選択チップの見分け用・全 kind 共通・未指定=種類＋連番の自動名）は任意・1.22＝#525-12。`background`＝text/subtitle の背景帯（可読性の下地・`{enabled,color,opacity,radius}`・通常字幕層 `layer.background` と同型・未指定/`enabled:false`=なし・通常→FREE で移送）は任意・1.23＝#529） |
+| freeLayout | FreeElement[] | ○ | **有効なのは FREE テンプレの場面のみ**（描画/編集/事前確認/素材使用は `templateOf(scene).category===free` でゲート）。**通常テンプレへ切り替えても休眠データとして保持**し、FREE へ戻すと復元（`texts` 休眠と同じ・ADR-0030／#236）。通常→FREE 切替時は表示中の内容（スロット素材＋文字＋**体裁**〔`textStyles` 解決後の実効値＝#555〕）を旧テンプレ幾何ごと自動変換（seed）。**ただし文字/字幕の枠高だけは「同じ行数が入る高さ」へ広げる**＝通常は `maxLines`（既定2）で行数が決まるのに対し FREE は枠高から行数を導出するため、そのまま持ち込むと行が減って文字が切り詰められる（縮めはしない＝回転の中心が動かないように・#555 レビュー P1）。自由配置要素（ADR-0008・id=`free_NNN`(scene内一意)・kind: slot/text/shape/**subtitle**（字幕＝ADR-0029・1.20）・x/y/w/h は canvas基準で w>0/h>0。shape の `shapeType`＝rect/ellipse/rounded_rect/triangle/star/arrow/speech_bubble、枠線/縁取り `strokeColor`/`strokeWidth`（shape=枠線・text=文字の縁取り＝#209。**太さ>0 で色が未指定なら下地と反対の既定色**で描く＝§4・#565）は任意・1.6。text の `fontId`（同梱フォント・null/未指定＝場面/全体を継承）は任意・1.7。`rotation`＝回転角（度・0以上360未満・中心を軸に時計回り・未指定=回転なし・360=0は除外）は任意・1.9＝#208。text の `lineHeight`＝行間（倍率0.5〜3・未指定=1.3）＋`textAlign`＝揃え（left/center/right・未指定=left）は任意・1.10＝#209。`hidden`＝非表示（true で描画/操作対象から除外）・`locked`＝ロック（true で移動/拡縮を禁止）は任意・1.11＝#210。`name`＝任意の表示名（重ね順一覧/選択チップの見分け用・全 kind 共通・未指定=種類＋連番の自動名）は任意・1.22＝#525-12。`background`＝text/subtitle の背景帯（可読性の下地・`{enabled,color,opacity,radius}`・通常字幕層 `layer.background` と同型・未指定/`enabled:false`=なし・通常→FREE で移送）は任意・1.23＝#529） |
 | lines | NarrationLine[] | ○ | 掛け合い：時間順のセリフ列（§7.4b）。あれば実効タイムライン（`sceneLines()`）。未設定＝単一 `narration` を1行とみなす（1.8・ADR-0015・#180） |
 | subtitleEnabledDefault | bool | ○ | 場面の字幕既定 ON/OFF（行 `subtitleEnabled` 未指定時に継承・1.8） |
-| slotFits | object | ○ | 場面ごと・スロット別の画像の収め方上書き（キー＝テンプレの `background`/`slot`/`logo` の layer.id、値＝`cover`/`contain`/`stretch`）。未指定＝テンプレ層の `fit` を使用（1.13・④） |
+| slotFits | object | ○ | 場面ごと・スロット別の画像の収め方上書き（キー＝テンプレの `background`/`slot`/`logo` の layer.id、値＝`cover`/`contain`/`stretch`）。未指定＝テンプレ層の `fit` を使用（1.13・④）。**見た目切替で一致しなくなったキーは休眠として残る（§5 と同じ）** |
 | slotClips | object | ○ | 場面ごと・スロット別の**動画クリップ調整の per-use 上書き**（キー＝スロットの layer.id、値＝`{ startSec?, endSec?, speed?, useOriginalAudio?, originalAudioVolume? }`）。`fit` は含めない（per-use は `slotFits`）。未上書きフィールドは `asset.clip`（素材既定）を**継承**（`slotClips ?? asset.clip ?? 既定`・null=継承 §6）。scenes に載るので**Undo 可**（ADR-0020）。同じ動画を場面ごと別範囲で使える（1.19・ADR-0028・#472） |
 | slotVideoStart | object | ○ | 動画スロット本体アニメの再生開始タイミング（キー＝スロットの layer.id、値＝`{ mode, delaySec? }`）。`mode`＝`withAnim`（アニメと同時・既定）/`afterAnim`（アニメの後）/`delay`（`delaySec`≥0 秒だけ遅らせて途中から）。**`mode=delay` は `delaySec` 必須**（schema if/then で強制＝「途中から」が黙って「同時」に落ちない）。`delaySec` は `mode=delay` のときのみ意味を持ち、**保存値は上限なし・描画で `[0, animEnd]` にクランプ**（UI のスライダー上限＝アニメ長で頭打ち＝保存値と実効値を一致させる）。**mode を `delay` 以外へ切り替えたら `delaySec` は落とす**（stale 値を残さない・アニメ削除時のエントリ破棄と同流儀）。**スロット本体がアニメ対象の場面でのみ効く**（`slotIsAnimated`）。未指定＝`withAnim`（1.18・ADR-0027・#444） |
 | groups | Group[] | ○ | 要素のグループ化（メンバー＝`freeLayout` 要素 id、ネストで group id も可。グループ自身の `transform` を持つ）。未設定＝グループ無し（1.14・ADR-0022） |
@@ -301,12 +319,12 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 |---|---|---|
 | V1 | JSONパース可 / `schemaVersion` 対応範囲 | 致命: 再生成 or 読込拒否 |
 | V2 | スキーマ適合（型・必須・enum・範囲） | 致命 or 補正（§9） |
-| V3 | `templateId` が実在 | 補正（§9） |
+| V3 | `templateId` が実在 | 取り込み時＝補正（§9）／既存場面＝警告のみ（置換しない・`15 §6`） |
 | V4 | `assetRefs` の各 assetId が実在 | 補正/警告（§9） |
 | V5 | `poseAssetId`（解決後）が実在 yuko asset | 既定yukoへ置換（§9） |
 | V6 | テンプレ必須スロット/必須テキストが埋まっている | 警告（required=true のみ） |
-| V7 | `durationSec` が範囲内 | clamp（§9） |
-| V8 | テキスト長 ≤ テンプレ上限（`maxNarrationLength`等） | 警告＋短縮提案 |
+| V7 | `durationSec` が範囲内（手編集＝`>0`／AI 生成＝目安 `[3, テンプレ上限 or 15]`・#553） | clamp（§9） |
+| V8 | テキスト長 ≤ テンプレ上限（`maxNarrationLength`等）。**掛け合い（`lines`/`narrationLines`）があるときは各行が対象**（単一 `narration` はその1行）＝生成時（`transformPlan`）と公開前チェック（`sceneLines`）で**同じ対象**を見る（#569・ADR-0026②）。閾値の継承順はテンプレ `aiHint` → 既定定数で両者共通（#568） | 警告＋短縮提案 |
 | V9 | 合計尺 ≤ `videoSettings.maxDurationSec` | 警告 |
 | V10 | シーン数 ≤ `MAX_SCENES_PER_VIDEO` | 警告（異常検知） |
 | V11 | `part.sceneIds` と `scenes[].partId` の整合 | 致命: 再構築 |
@@ -331,11 +349,14 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 
 | 問題 | 補正 |
 |---|---|
-| 存在しない `templateId` | 同 `category` の標準テンプレへ置換（無ければ警告し選択を促す） |
-| テンプレの `aspectRatio` がプロジェクトの向きと不一致 | 同 `category`・同 `orientation` のテンプレへ置換（無ければ警告・原状維持／ADR-0012・B4） |
+| 存在しない `templateId` | **取り込み時（AI出力→場面への変換）のみ**、同 `category`・同 `orientation` の標準テンプレ（マイ見た目を除く）へ置換（無ければ警告し選択を促す）。**既存プロジェクトの場面は置換しない**＝警告のまま書き出しを停止し、標準へ寄せるのは利用者の明示操作「まとめて標準にする」（`15 §6` `TEMPLATE_NOT_FOUND`・#547） |
+| テンプレの `aspectRatio` がプロジェクトの向きと不一致 | 同 `category`・同 `orientation` のテンプレへ置換（無ければ警告・原状維持／ADR-0012・B4）。**取り込み時はマイ見た目を当て先にしない**（ADR-0017）／利用者が向きを変える操作ではマイ見た目も当て先にする |
 | 存在しない `assetId` | `null` にし、未使用素材から候補提示（警告） |
-| `durationSec < SCENE_MIN_DURATION_SEC` | `SCENE_MIN_DURATION_SEC`（3秒）へ |
-| `durationSec >` テンプレ上限 | テンプレ `aiHint.maxDurationSec`（無ければ `SCENE_MAX_DURATION_SEC`=15秒）へ |
+| `durationSec <= 0` / NaN（**手編集の確定時**） | `SCENE_DEFAULT_DURATION_SEC`（8秒）へ＝壊れた入力の既定（0秒の場面は作らない・#553） |
+| `durationSec > VIDEO_HARD_MAX_SEC`（**手編集の確定時**） | `VIDEO_HARD_MAX_SEC`（600秒）へ＝1場面に効く唯一の硬い天井（#553） |
+| `durationSec < AI_SCENE_MIN_DURATION_SEC`（**AI 生成時のみ**） | `AI_SCENE_MIN_DURATION_SEC`（3秒）へ＝生成のペース配分の目安（手編集は縛らない・#553） |
+| `durationSec >` テンプレ上限（**AI 生成時のみ**） | テンプレ `aiHint.maxDurationSec`（無ければ `AI_SCENE_MAX_DURATION_SEC`=15秒）へ。**手編集は縛らない**（`VIDEO_HARD_MAX_SEC` で頭打ち・#553） |
+| テンプレ上限が生成の下限を下回る（`aiHint.maxDurationSec < AI_SCENE_MIN_DURATION_SEC`） | **上限を優先**（範囲は上限の1点へ潰れる）＝#607。下限は全テンプレ共通の既定で per-template の上書きが無いのに対し、上限は**そのテンプレについて作者が明示した値**なので、具体的な宣言を一般的な既定より優先する（ADR-0026①）。どちらも #553 の「生成の目安」で硬い制約ではないため、`durationSec > 0`（`§7`）は保たれる。警告は既存の `DURATION_CLAMPED` のまま（`aiHint` は作成エディタ非開放＝利用者に別の次の行動が無い・`§2-5`） |
 | `poseTag` 解決不可 / `poseAssetId` 不在 | 既定yuko（`isDefaultYuko` → 無ければ先頭 yuko）へ。yuko素材皆無かつ character 任意 → 非表示 |
 | テキストがテンプレ上限超過 | 警告＋「AIで短くする」提示（自動切詰めはしない） |
 

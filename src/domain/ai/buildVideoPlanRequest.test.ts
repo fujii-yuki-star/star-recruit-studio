@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC } from '../constants';
+import { AI_ASSET_SEND_MAX, AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constants';
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
@@ -70,7 +70,7 @@ describe('buildVideoPlanMessages', () => {
     expect(system).toContain('sceneType は、選んだ templateId の category と同じ値にする');
     expect(system).toContain('該当が無ければ null');
     // 尺の目安は 11§4 の定数を埋め込む（検証側 clamp と黙って矛盾しない＝§2-7）。
-    expect(system).toContain(`durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒`);
+    expect(system).toContain(`durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒`);
   });
 
   it('ユーザーメッセージに会社情報・方針・素材・テンプレ・表情タグが入る', () => {
@@ -125,6 +125,33 @@ describe('buildVideoPlanMessages', () => {
     expect(user).toContain('説明=（未入力） / AI解析=（未入力） / tags=（未入力）');
     // 表情タグ空。
     expect(user).toContain('# 利用可能なゆうこ表情タグ\n（未入力）');
+  });
+
+  // #547 P2-8：assetBlock は assetSentText 経由になり、name を trim し空白のみタグを落とす。
+  // これは意図的＝送信前確認 UI が見せる値（trim 済み）とプロンプトが送る値を一致させるため（shown==sent・§2-6）。
+  it('name を trim し、空白のみのタグは落として送る（確認 UI と同じ正規化）', () => {
+    const input: GenerateVideoPlanInput = {
+      ...fullInput(),
+      assets: [
+        { assetId: 'a1', assetType: 'image', displayName: '  田中さん.jpg  ', tags: ['  社員  ', '   ', ''], filePath: 'x.jpg' },
+      ],
+    };
+    const user = buildVideoPlanUserMessage(input);
+    expect(user).toContain('name=田中さん.jpg'); // 前後空白なし
+    expect(user).toContain('tags=社員');          // 空白のみ・空要素は消える
+    expect(user).not.toContain('name=  田中さん'); // 生値は送らない
+  });
+
+  it('名前が空白のみ・タグが全て空白のみなら「（未入力）」で送る（空文字を送らない）', () => {
+    const input: GenerateVideoPlanInput = {
+      ...fullInput(),
+      assets: [
+        { assetId: 'a1', assetType: 'image', displayName: '   ', tags: ['  ', ' '], filePath: 'x.jpg' },
+      ],
+    };
+    const user = buildVideoPlanUserMessage(input);
+    expect(user).toContain('name=（未入力）');
+    expect(user).toContain('tags=（未入力）');
   });
 
   it('複数素材・複数テンプレを各行に展開する', () => {
@@ -225,7 +252,7 @@ describe('buildVideoPlanMessages（一般・社内発表 general・§5b/§6b）'
     // 共通ルール（templateId 必須・sceneType=category・尺）は採用と同じく堅持。
     expect(system).toContain('各シーンに templateId を必ず設定');
     expect(system).toContain('sceneType は、選んだ templateId の category と同じ値にする');
-    expect(system).toContain(`durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒`);
+    expect(system).toContain(`durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒`);
     // 章立て→parts・要点反映の一般固有指示。
     expect(system).toContain('「構成（章立て）」をパート（parts）に対応');
     expect(system).toContain('「伝えたい要点」を各シーンの texts や narrationText に反映');
@@ -292,5 +319,33 @@ describe('buildVideoPlanMessages（一般・社内発表 general・§5b/§6b）'
     expect(user).toContain('今期のハイライト'); // 一般 few-shot 固有の partTitle
     expect(user).toContain('"purpose": "report"'); // 出力例の一般 purpose（入力の「種別(purpose): report」とは別表記）
     expect(user).not.toContain('株式会社サンプル 会社紹介'); // 採用 few-shot は使わない
+  });
+});
+
+// 12§6「素材が多い場合は…上位 N 件（既定 40）を送信」（#585）。選定は assetSendText の共有関数
+// （selectAssetsForSend）に集約し、送信前確認（ConfirmScreen）と同じ結果になる＝画面と送信内容がズレない（§2-6）。
+describe('利用可能な素材の上限（12§6・#585）', () => {
+  const manyAssets = (n: number, rich: (i: number) => boolean): Asset[] =>
+    Array.from({ length: n }, (_, i) => ({
+      assetId: `a${i + 1}`, assetType: 'image', displayName: `写真${i + 1}.jpg`, filePath: `x${i}.jpg`,
+      ...(rich(i) ? { description: '受付前で撮影した明るい写真', tags: ['社員'] } : {}),
+    } as Asset));
+
+  it('上限以下なら全素材を載せる（従来どおり）', () => {
+    const input: GenerateVideoPlanInput = { ...fullInput(), assets: manyAssets(5, () => false) };
+    const user = buildVideoPlanUserMessage(input);
+    for (let i = 1; i <= 5; i += 1) expect(user).toContain(`assetId=a${i}`);
+  });
+
+  it('上限を超えたら上位N件だけ載せる（説明のある素材が残り、無い素材が落ちる）', () => {
+    // 41件。最後の1件だけ説明・タグあり＝説明なしの1件が押し出される。
+    const input: GenerateVideoPlanInput = {
+      ...fullInput(),
+      assets: manyAssets(AI_ASSET_SEND_MAX + 1, (i) => i === AI_ASSET_SEND_MAX),
+    };
+    const user = buildVideoPlanUserMessage(input);
+    const sentCount = (user.match(/assetId=a\d+/g) ?? []).length;
+    expect(sentCount).toBe(AI_ASSET_SEND_MAX); // プロンプトに載るのは上限まで
+    expect(user).toContain(`assetId=a${AI_ASSET_SEND_MAX + 1}`); // 説明のある素材は残る
   });
 });

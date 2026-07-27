@@ -136,11 +136,62 @@ describe("TemplateLayerOverlay", () => {
   it("グループ枠をドラッグするとグループの transform.x/y が更新される（onGroupTransform・#307）", () => {
     const onGroupTransform = vi.fn();
     const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
-    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1（ドラッグの縮尺）
+    // #548/#552：枠の押下は「ポインタの下に何があるか」を実ヒットテストするようになったため rect の実寸が要る
+    // （旧テストは座標が任意だった＝jsdom が当たり判定をせず何でも通っていた）。
+    root.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
     const frame = root.querySelector('[data-testid="tmpl-group-frame"]') as HTMLElement;
-    fireEvent.pointerDown(frame, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(frame, { clientX: 30, clientY: 40, pointerId: 1 });
+    // 枠内かつ**メンバー**（title＝200,200,400,120）の上を押す＝まとまり移動（従来どおり）。
+    fireEvent.pointerDown(frame, { button: 0, clientX: 300, clientY: 250, pointerId: 1 });
+    fireEvent.pointerMove(frame, { clientX: 330, clientY: 290, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 });
+  });
+
+  // #548/#552：グループ枠は不透明でグループ全域を覆うため、そのまま beginGroupDrag していた頃は枠内に重なる
+  // **グループ外のレイヤー**を選べなかった（FREE 側 FreeLayoutOverlay と同型の欠陥＝テンプレ作成側も直す）。
+  // **枠の pointerdown 経由**で発火＝実機と同じ経路（レイヤー div へ直接発火すると jsdom が重なり順を無視して偽陽性になる）。
+  it("枠内でもグループ外のレイヤーの上を押したらそのレイヤーが選ばれる（グループは動かない・#552）", () => {
+    const onGroupTransform = vi.fn();
+    // 枠（＝title の bbox 200,200-600,320）の内側に、**グループ外**のレイヤーを最前面（zIndex 5）で重ねる。
+    const layers = [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "title", type: "text", x: 200, y: 200, w: 400, h: 120, zIndex: 1 },
+      { id: "logo", type: "logo", x: 250, y: 220, w: 100, h: 60, zIndex: 5 },
+    ] as Layer[];
+    const { root, onSelect } = renderOverlay({ layers, groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    root.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    const frame = root.querySelector('[data-testid="tmpl-group-frame"]') as HTMLElement;
+    // (300,250)＝logo（250,220,100,60・最前面）の上。枠に隠れて選べなかったレイヤー。
+    fireEvent.pointerDown(frame, { button: 0, clientX: 300, clientY: 250, pointerId: 1 });
+    expect(onSelect).toHaveBeenCalledWith("logo"); // 奥のレイヤーへ届く
+    expect(onGroupTransform).not.toHaveBeenCalled(); // グループ移動にはならない
+  });
+
+  // レビュー🔴の回帰：テンプレは**全面 background を必ず持ち**、グループは**2メンバー以上**（LooksEditScreen が
+  // 2未満を弾く）＝枠にはメンバー間の**空白**が必ずできる。委譲対象を絞らないと空白でも background に当たって
+  // しまい、グループ移動どころか背景が動く（＋グループ選択も無言解除）。空白＝グループ移動を固定する。
+  it("枠内の空白（メンバーの隙間）を押したらグループ移動＝奥の背景を掴まない（#307 維持）", () => {
+    const onGroupTransform = vi.fn();
+    const layers = [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }, // 全面・メンバーより奥
+      { id: "title", type: "text", x: 200, y: 200, w: 400, h: 120, zIndex: 1 },
+      { id: "logo", type: "logo", x: 1400, y: 200, w: 200, h: 120, zIndex: 2 },
+    ] as Layer[];
+    const twoMemberGrp = { id: "group_001", members: ["title", "logo"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } };
+    const { root, onSelect, onMoveMany } = renderOverlay({ layers, groups: [twoMemberGrp], activeGroupId: "group_001", onGroupTransform });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    root.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    const frame = root.querySelector('[data-testid="tmpl-group-frame"]') as HTMLElement;
+    // 枠 AABB(200,200)-(1600,320) の (900,250)＝title と logo の隙間。見えているのは background だが枠の内部。
+    fireEvent.pointerDown(frame, { button: 0, clientX: 900, clientY: 250, pointerId: 1 });
+    fireEvent.pointerMove(frame, { clientX: 930, clientY: 290, pointerId: 1 });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 }); // まとまりが動く
+    expect(onSelect).not.toHaveBeenCalledWith("background"); // 奥の背景を掴まない
+    expect(onMoveMany).not.toHaveBeenCalled();
   });
 
   it("hidden グループのメンバーは描画されない（#307）", () => {
@@ -186,3 +237,72 @@ describe("TemplateLayerOverlay", () => {
     expect(root.querySelector('[data-testid="tmpl-group-rotate-handle"]')).toBeNull();
   });
 });
+
+// #547 P2-3：取り消しの「1操作＝1ステップ」境界。レイヤー/ハンドルの onPointerDown は stopPropagation するため、
+// 祖先で pointerdown を見る方式では境界を取れない（＝連続移動が pointermove ごとに1履歴になり履歴上限を食い潰す）。
+// 明示コールバックで通知することを固定する（FreeLayoutOverlay と同じ流儀）。
+describe("TemplateLayerOverlay: 取り消しの合成境界（#547 P2-3）", () => {
+  it("ドラッグは onInteractionStart/End を1回ずつ呼ぶ（連続移動では増えない）", () => {
+    const onInteractionStart = vi.fn();
+    const onInteractionEnd = vi.fn();
+    const { root, boxes } = renderOverlay({ selectedIds: ["title"], onInteractionStart, onInteractionEnd });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
+    fireEvent.pointerDown(boxes[1], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onInteractionStart).toHaveBeenCalledTimes(1);
+    fireEvent.pointerMove(root, { clientX: 40, clientY: 20, pointerId: 1 });
+    fireEvent.pointerMove(root, { clientX: 80, clientY: 40, pointerId: 1 });
+    expect(onInteractionStart).toHaveBeenCalledTimes(1); // 移動中は増やさない
+    expect(onInteractionEnd).not.toHaveBeenCalled(); // まだ閉じない
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    expect(onInteractionEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("回転ハンドルのドラッグでも境界を通知する", () => {
+    const onInteractionStart = vi.fn();
+    const onInteractionEnd = vi.fn();
+    const { root, boxes } = renderOverlay({ selectedIds: ["title"], onInteractionStart, onInteractionEnd });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    const knob = boxes[1].querySelectorAll("div")[5] as HTMLElement; // 回転ノブ（リサイズ4＋stem の次）
+    fireEvent.pointerDown(knob, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onInteractionStart).toHaveBeenCalledTimes(1);
+    fireEvent.pointerUp(root, { pointerId: 1 });
+    expect(onInteractionEnd).toHaveBeenCalledTimes(1);
+  });
+
+  // この性質が「祖先で pointerdown を拾う実装」を成立させない理由そのもの＝退行の再発防止。
+  it("レイヤーの onPointerDown は祖先へ伝播しない（祖先検知では境界を取れない）", () => {
+    const ancestorDown = vi.fn();
+    const onInteractionStart = vi.fn();
+    const { getByText } = render(
+      <div onPointerDown={ancestorDown}>
+        <TemplateLayerOverlay
+          layers={makeLayers()}
+          canvasW={CANVAS_W}
+          canvasH={CANVAS_H}
+          selectedIds={["title"]}
+          onSelect={vi.fn()}
+          onSelectMany={vi.fn()}
+          onChange={vi.fn()}
+          onMoveMany={vi.fn()}
+          onRotate={vi.fn()}
+          label={(l) => l.type}
+          onInteractionStart={onInteractionStart}
+        />
+      </div>,
+    );
+    fireEvent.pointerDown(getByText("text"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(ancestorDown).not.toHaveBeenCalled(); // stopPropagation ＝祖先には届かない
+    expect(onInteractionStart).toHaveBeenCalledTimes(1); // 明示コールバックなら届く
+  });
+});
+
+// #547 P2-12：選択要素の塗りも主操作色（青緑）と同色相のトークン。選択枠は 2px solid var(--color-primary) で、
+// 塗りが別色相の青だと枠と色がちぐはぐだった。塗りは var(--color-primary-rgb) で枠と同色相にする。
+describe("TemplateLayerOverlay 選択ハイライトの色（#547 P2-12）", () => {
+  it("選択した要素の塗りは var(--color-primary-rgb)（旧オフパレット青を使わない）", () => {
+    const { boxes } = renderOverlay({ selectedIds: ["title"] });
+    const styles = boxes.map((b) => b.getAttribute("style") ?? "");
+    expect(styles.some((s) => s.includes("var(--color-primary-rgb)"))).toBe(true);
+    expect(styles.some((s) => s.includes("80,130,255") || s.includes("80, 130, 255"))).toBe(false);
+  });
+})

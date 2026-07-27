@@ -1,42 +1,45 @@
-import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type SyntheticEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
 import { sceneFirstLine } from "./sceneCardPreview";
-import type { Asset, FreeElement, Scene, SlotClipOverride, VideoStartSpec } from "../../domain/project/types";
+import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
-import { BGM_VOLUME, SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
-import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
+import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSilentReason, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
-import { createGroupFromSelection, groupElementIds, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { prunePerUseMaps } from "../../domain/project/perUseMaps";
+import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
+import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { GroupList } from "../components/GroupList";
+import { UndoRedoButtons } from "../components/UndoRedoButtons";
+import { GroupTransformFields } from "../components/GroupTransformFields";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
 import { presetKeyframes, describeAnimation, withEndOpacity, PRESET_KINDS, SLIDE_DIRECTIONS, PRESET_DEFAULT_SEC, PRESET_MIN_SEC, PRESET_MAX_SEC, type PresetKind, type SlideDirection } from "../../domain/project/animationPresets";
 import { deriveTransitionSelectValue } from "../../domain/project/sceneTransitions";
-import { switchSceneTemplate } from "../../domain/project/sceneOps";
+import { freeContentHiddenBySwitch, switchSceneTemplate } from "../../domain/project/sceneOps";
 import { clampSceneDuration } from "../../domain/project/sceneDuration";
 import { pickableTemplatesForScene, sceneCategoriesForOrientation } from "../../domain/template/templateSelection";
 import { resolveNarrationVolume } from "../../domain/voice/audioMix";
-import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { lineAudioKey, lineDurationsFromAudio, validateSceneLines } from "../../domain/project/narrationLines";
 import { addLine, demoteFromLines, moveLine, promoteToLines, removeLine, updateLine } from "../../domain/project/lineEditOps";
 import { subtitleOverflowsCanvas } from "../../renderer/layout";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { SPEED_RANGE, PITCH_RANGE, INTONATION_RANGE, sliderToValue, valueToSlider, type ParamRange } from "../../domain/voice/voiceParams";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
-import { motionSubtitleAt } from "../../domain/project/lineTimeline";
+import { hasSimultaneousLines, motionSubtitleAt } from "../../domain/project/lineTimeline";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
@@ -45,10 +48,11 @@ import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { textKeyLabel } from "../uiLabels";
-import type { FontId } from "../../domain/font/fontCatalog";
+import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
+import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
+import { DEFAULT_TEXT_COLOR, defaultStrokeColor, resolveTextStyle } from "../../domain/template/textStyle";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
@@ -56,6 +60,7 @@ import { DeleteConfirm } from "../components/DeleteConfirm";
 import { saveButtonLabel } from "../components/saveButtonLabel";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { Switch } from "../components/ui";
+import { ExportLock } from "../components/ExportLockBanner";
 import { EmptyState } from "../components/states";
 import { StartNewVideoButton } from "../components/StartNewVideoButton";
 import {
@@ -71,6 +76,7 @@ import {
   PlayIcon,
   StopIcon,
   ArrowLeftIcon,
+  PencilIcon,
 } from "../components/icons";
 
 interface SceneEditProps {
@@ -86,6 +92,7 @@ const LEFT_WIDTH = 240;
 const LEFT_COLLAPSED_WIDTH = 44;
 const LS_RIGHT_WIDTH = "sceneEdit.rightWidth";
 const LS_LEFT_COLLAPSED = "sceneEdit.leftCollapsed";
+const LS_SECTION_OPEN = "sceneEdit.sectionOpen";
 function loadRightWidth(): number {
   try {
     const v = Number(localStorage.getItem(LS_RIGHT_WIDTH));
@@ -96,31 +103,103 @@ function loadLeftCollapsed(): boolean {
   try { return localStorage.getItem(LS_LEFT_COLLAPSED) === "1"; } catch { return false; }
 }
 
+/**
+ * 節の開閉の記憶（#550 ③）。**場面をまたぐだけなら元から保たれる**（節は再マウントされない）が、
+ * 台本表/仕上がり確認へ行って戻ると画面ごと作り直されて忘れる＝毎回開き直す手間になっていた。
+ * 右パネルの幅・左パネルの折りたたみ（#276）と同じ「場面編集パネルのレイアウト設定」なので、同じく localStorage に置く。
+ * キーは節の見出し（安定・少数）。壊れた値・保存不可（プライベートモード等）は既定へ倒す＝編集を止めない。
+ */
+type SectionOpenMap = Record<string, boolean>;
+function loadSectionOpen(): SectionOpenMap {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(LS_SECTION_OPEN) ?? "{}");
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return {};
+    return Object.fromEntries(Object.entries(v).filter(([, b]) => typeof b === "boolean")) as SectionOpenMap;
+  } catch { return {}; }
+}
+/**
+ * 「選択した要素だけ編集」（#179）の記憶（#550 ②）。既定 ON。節の開閉（③）と同じ理由で覚える＝
+ * 既定を変えたぶん「毎回 OFF にし直す」手間を作らない。
+ */
+const LS_FOCUS_FREE = "sceneEdit.focusSelectedFree";
+function loadFocusSelectedFree(): boolean {
+  try {
+    const v = localStorage.getItem(LS_FOCUS_FREE);
+    return v === null ? true : v === "1"; // 未設定＝既定 ON
+  } catch { return true; }
+}
+function saveFocusSelectedFree(on: boolean): void {
+  try { localStorage.setItem(LS_FOCUS_FREE, on ? "1" : "0"); } catch { /* 保存できなくても編集は続けられる */ }
+}
+
+function saveSectionOpen(title: string, open: boolean): void {
+  try {
+    localStorage.setItem(LS_SECTION_OPEN, JSON.stringify({ ...loadSectionOpen(), [title]: open }));
+  } catch { /* 保存できなくても編集は続けられる（次回は既定で開く/畳む） */ }
+}
+
 // 場面編集の右欄の節を開閉できるアコーディオン（#276）。details/summary ベース。
 // 内部 state を持つので親（SceneEditScreen）の再描画でも開閉が保たれる（モジュール定義＝再マウントしない）。
-function CollapsibleSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
+// さらに開閉を localStorage へ覚える（#550 ③）＝画面を往復しても開き直さなくてよい。
+function CollapsibleSection({ title, storageKey, defaultOpen = true, children }: {
+  title: string;
+  /**
+   * 記憶のキー（#550 レビュー P3）。既定は見出しそのもの。**見出しが状態で変わる節は必ず渡す**＝
+   * 例「〜の見た目（この場面だけ変更中）」（#555）は上書きの有無で見出しが変わるため、素で使うと記憶が
+   * 2キーに割れて「上書き中に開いた記憶」が非上書き時に引かれない（記憶が当てにならなくなる）。
+   */
+  storageKey?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const memoKey = storageKey ?? title;
+  // 記憶があればそれを、無ければ既定（#550 ①＝主編集の節だけ開く）。lazy init＝初回描画時に1度だけ読む。
+  const [open, setOpen] = useState(() => loadSectionOpen()[memoKey] ?? defaultOpen);
+  const onToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
+    const next = e.currentTarget.open;
+    // **既定のままなら保存しない**：`<details open>` は描画しただけで（非同期に）toggle を発火するため、
+    // 素通しにすると「触ってもいない節の既定値」が保存され、**将来 既定を変えても既存利用者に届かなくなる**
+    // （記憶が既定を上書きし続ける）。利用者が実際に開閉したときだけ覚える。
+    if (next === open) return;
+    setOpen(next);
+    saveSectionOpen(memoKey, next);
+  };
   return (
-    <details className="accordion" open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+    <details className="accordion" open={open} onToggle={onToggle}>
       <summary className="accordion-summary">{title}</summary>
       <div className="accordion-body">{children}</div>
     </details>
   );
 }
 
-// 自由配置要素のユーザー向けラベル（§2-3：技術語を出さない）。全 kind 必須＝追加時にコンパイル検知。
-const freeKindLabel: Record<FreeElementKind, string> = {
-  slot: "素材",
-  text: "文字",
-  shape: "図形",
-  subtitle: "字幕",
-};
-
 // FREE 要素の表示名（#525-12）：任意 name ＞ 種類＋連番（index は freeLayout の並び順で安定）。
 // 見分けやすさのため一覧/チップ/詳細見出しで共有する（グループ名＝#9 と同じ「オブジェクトに名前」UX）。
 function freeElementName(el: FreeElement, index: number): string {
   const custom = el.name?.trim();
   return custom ? custom : `${freeKindLabel[el.kind]}${index + 1}`;
+}
+
+/**
+ * 自動名の連番（id→index）。**id の数値順＝作った順**で振る（配列の位置ではない）。
+ * 重ね順の1段移動は同じ z のとき配列を入れ替える（#587）ので、配列位置で振ると移動のたびに名前が入れ替わる。
+ * id は `free_NNN`（3桁ゼロ詰め・999超は桁上がり）なので、桁数が混ざっても崩れないよう数値で比べる。
+ */
+function freeAutoIndexes(freeLayout: FreeElement[]): Map<string, number> {
+  const num = (id: string): number => Number(id.replace(/\D/g, "")) || 0;
+  return new Map(
+    [...freeLayout].sort((a, b) => num(a.id) - num(b.id)).map((e, i) => [e.id, i] as const),
+  );
+}
+
+/**
+ * FREE 要素の「縁取り/枠線の色」の見本が出す値（#565）。**実描画（`layoutScene`→`resolveStrokeColor`）と同じ規則**で、
+ * 色が未指定なら下地（文字色／図形の塗り）と反対の既定色を出す＝「見本は黒と言うのに何も描かれない」を無くす（§2-7）。
+ */
+function freeStrokeSwatch(el: FreeElement): string {
+  const base = el.kind === FREE_ELEMENT_KIND.shape
+    ? (el.fillColor ?? SHAPE_FILL_FALLBACK_COLOR)
+    : (el.color ?? DEFAULT_TEXT_COLOR);
+  return el.strokeColor ?? defaultStrokeColor(base);
 }
 
 // キーボード微調整/削除の window 購読（#525-11）。SceneEditScreen は early return を持つため hooks を含む購読は子へ切り出す
@@ -227,7 +306,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
     status, scenes, templates, assets, autoGenerateIfSafe, updateScene, addAsset, addAssetByPath, importError, clearImportError,
     addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus,
-    generateNarration, generateAllNarrations, isGeneratingNarration, narrationAudioById, narrationError,
+    generateNarration, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
     addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements,
   } = useProjectStore();
@@ -240,6 +319,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const setEditingSceneId = useProjectStore((s) => s.setEditingSceneId);
   // プロジェクトの向き（ADR-0012）。見た目ピッカーを場面カテゴリ＋この向きに絞る（#415）。
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中はキャンバス/フォームを止める（#570 P2）
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
   // 場面カード列のドラッグ&ドロップ並び替え（#398）。カード自身を持ち手＋落下先にする（クリックで選択・ドラッグで並び替え）。
   const sceneDnd = useDragReorder(moveSceneToIndex);
@@ -293,7 +373,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
   const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
-  // FREE→通常テンプレへ戻すと素材が画面から消える場合の確認（保留中の切替先テンプレ id・#524 P1・ADR-0030）。場面が変われば解除。
+  // FREE→通常テンプレへ戻すと素材が動画に出なくなる場合の確認（保留中の切替先テンプレ id・#524 P1・ADR-0030）。場面が変われば解除。
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
   // 自由配置で選択中の要素（オーバーレイのハンドル表示・編集カードの強調に使う）。
   // 複数選択（#206）。配列が真＝選択集合、末尾が「主」。単一要素編集（カード/詳細モード/ポップオーバー）は主を対象にする。
@@ -304,6 +384,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [draftFreeName, setDraftFreeName] = useState("");
   // 一括削除の確認中フラグ（複数まとめ削除は破壊的なので誤操作防止の1段確認を挟む・#206。Undo でも戻せるが確認は維持）。
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  // グループを中身ごと削除する確認（#551）。**boolean ではなく id で持つ**＝選ぶグループが変わると確認が自動で
+  // 解除される（TimelineEditScreen の confirmDeleteClipId と同じ流儀・#410）。boolean だと確認を出したまま別の
+  // グループを選ぶと、その別グループを消してしまう。
+  const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   // セリフ行の削除も確認してから（#410・即時削除だった）。確認中の行 id（行が変わると自動解除）。
   const [confirmDeleteLineId, setConfirmDeleteLineId] = useState<string | null>(null);
   // 選択中のグループ id（ADR-0022・#305）。要素選択とは排他＝片方を選ぶともう片方は解除する。
@@ -333,12 +417,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   // FREE 要素のコピー&ペースト用クリップボード。SceneEditScreen は場面切替で再マウントしないため場面をまたいで貼れる（#207）。
   const [freeClipboard, setFreeClipboard] = useState<FreeElement | null>(null);
+  // インライン編集中の FREE テキスト要素 id（#549）。オーバーレイから通知され、ScenePreview の hideItemIds へ渡して
+  // SVG 側の同じ文字を伏せる＝textarea と二重表示にしない（入力は即 store 反映＝SVG も毎打鍵更新されるため）。
+  const [editingFreeId, setEditingFreeId] = useState<string | null>(null);
   // 右クリック「編集」で開く kind 別エディタのポップオーバー（対象 id とビューポート座標）。
   const [editPopover, setEditPopover] = useState<{ id: string; x: number; y: number } | null>(null);
   // 自由配置：グリッドに合わせる（ドラッグ/リサイズの吸着＋グリッド表示）。表示設定・非永続。
   const [gridSnap, setGridSnap] = useState(false);
-  // 自由配置：詳細編集モード（選択した要素だけを編集面に出す＝長いスクロールを避ける・#179）。表示設定・非永続。
-  const [focusSelectedFree, setFocusSelectedFree] = useState(false);
+  // 自由配置：詳細編集モード（選択した要素だけを編集面に出す＝長いスクロールを避ける・#179）。
+  // **既定 ON**（#550 ②）＝全要素のカードを展開すると要素数に比例して伸びる（実測：要素5つで自由配置の節だけ
+  // 3492px＝右パネルの64%・1枚あたり約580px）。切りたい人は下のトグルで OFF にでき、その選択は覚える（③と同じ理由＝
+  // 既定を変えたぶん「毎回 OFF にし直す」手間を新造しないため）。
+  const [focusSelectedFree, setFocusSelectedFree] = useState(loadFocusSelectedFree);
   // ナレーションの▶再生に失敗したとき通知（§2-5・設定の試聴と扱いを統一）。
   const [narrationPlayError, setNarrationPlayError] = useState(false);
   // 試し聞きの再生制御（#388）：投げっぱなしにせず、画面遷移で停止・連打で重ならない・再生中は「停止」表示。
@@ -366,6 +456,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
   const selected = scenes.find((s) => s.sceneId === selectedId) ?? scenes[0];
   const template = selected ? templates.find((t) => t.templateId === selected.templateId) : undefined;
+  // この場面で解決済みの CSS font-family（場面→動画全体→既定）。FREE テキストのインライン編集を実描画と同じ
+  // 見た目にするためオーバーレイへ渡す（#549）。解決順は ScenePreview／sceneSvg と同じ（要素の fontId は要素側で優先）。
+  const sceneFontFamily = fontFamilyForId(resolveFontId(selected?.fontId, fontId));
   // 「動き」（簡易アニメ・ADR-0019）をこの場で再生確認する（#408 Part 1・仕上がり確認への往復をなくす）。
   // フックは guard より前で無条件に呼ぶ（Hooks ルール）。scene 未定なら animActive=false で何も再生しない。
   const motionPreview = useSceneMotionPreview(selected, template, assets, timelineOverlay?.animations);
@@ -448,13 +541,27 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       // 全種別を継承に戻したら空オブジェクトを残さず未設定へ（意味のない {} を永続化しない）。
       return { ...s, textFontIds: Object.keys(next).length ? next : undefined };
     });
+  // テキスト種別ごとの体裁上書き（#555）。undefined＝そのプロパティを継承（キーを外す）＝textFontIds と同じ流儀。
+  // プロパティが全部消えたらその種別ごと、種別が全部消えたら textStyles ごと未設定へ（意味のない {} を永続化しない）。
+  const setSceneTextStyle = (textKey: TextKey, patchStyle: Partial<TextStyleOverride>) =>
+    patch((s) => {
+      // patchStyle の undefined は「そのプロパティを継承へ戻す」＝マージ後にキーごと落とす（{k: undefined} を保存しない）。
+      const merged = { ...(s.textStyles?.[textKey] ?? {}), ...patchStyle };
+      const cur = Object.fromEntries(Object.entries(merged).filter(([, v]) => v !== undefined)) as TextStyleOverride;
+      const next = { ...(s.textStyles ?? {}) };
+      if (Object.keys(cur).length) next[textKey] = cur;
+      else delete next[textKey];
+      return { ...s, textStyles: Object.keys(next).length ? next : undefined };
+    });
   // FREE 場面（自由配置）か。FREE のときだけ自由配置エディタを主編集面として出す（ADR-0008・§2-4）。
   const isFree = template?.category === FREE_CATEGORY;
   // 非FREE場面のテキスト入力欄は、選択テンプレのテキスト層が使う textKey から生成する（#214 ④b・全5キー対応）。
   const sceneTextKeys = template ? usedTextKeys(template.layers) : [];
   const freeLayout = selected.freeLayout ?? [];
   // 自動名の連番を安定させるための並び順 index（表示名 freeElementName で共有・#525-12）。
-  const freeAutoIndexById = new Map(freeLayout.map((e, i) => [e.id, i] as const));
+  // **配列の位置ではなく id の順（＝作った順）**で決める：重ね順の1段移動は同じ z のとき配列を入れ替えるので
+  // （#587）、配列位置で番号を振ると「上げただけなのに名前が入れ替わる」ことになる。
+  const freeAutoIndexById = freeAutoIndexes(freeLayout);
   const freeName = (el: FreeElement): string => freeElementName(el, freeAutoIndexById.get(el.id) ?? 0);
   const sceneGroups = selected.groups ?? [];
   const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
@@ -464,28 +571,53 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 見た目切替の共通処理（「見た目パターン」ピッカーと「種類」セレクタで共用・#528）。
   const applyTemplateSwitch = (newTemplateId: string) => {
     const nt = templates.find((t) => t.templateId === newTemplateId);
-    patch((s) => switchSceneTemplate(s, newTemplateId, nt?.layers ?? [], nt?.category, templates.find((t) => t.templateId === s.templateId)));
+    patch((s) => switchSceneTemplate(s, newTemplateId, nt?.category, templates.find((t) => t.templateId === s.templateId)));
+    // 確認待ちを解除する：確認中に別の見た目（何も隠れないもの）を選ぶと即適用されるので、残しておくと
+    // **適用済みとは別の切替先**を指す確認が出たままになる（押すと二重に切り替わる・§2-5）。
+    setPendingTemplateId(null);
   };
-  // FREE→通常で素材が復元できず消える場合だけ確認へ回す（ADR-0030・非破壊往復＋確認）。復元できる往復・同一テンプレは即適用。
+  // FREE→通常で中身が動画に出なくなる場合だけ確認へ回す（ADR-0030・非破壊往復＋確認）。往復で見た目が保たれるなら即適用。
+  //
+  // 以前は「復元される休眠配置があるか（willRestore）」だけを見ていたため、**1枚でも復元されれば確認が出なかった**
+  // ＝FREE で足した写真・文字が無言で動画から消えていた（#547 P2-9・ADR-0026④）。復元の有無ではなく
+  // 「**復元先を超えて出なくなる中身が何個あるか**」で判断する（数え方は描画と同じ規則＝`freeContentHiddenBySwitch`）。
   const requestTemplateSwitch = (newTemplateId: string) => {
-    if (newTemplateId === selected.templateId) return;
+    // いまの見た目を選び直した＝切替をやめた、として確認も解く。解かないとピッカーは確認待ちの候補へ跳ね戻り、
+    // 「元の見た目を選んだのに戻せない」行き止まりになる（選択表示は pendingTemplateId 優先＝#532）。
+    if (newTemplateId === selected.templateId) { setPendingTemplateId(null); return; }
     const nt = templates.find((t) => t.templateId === newTemplateId);
-    const goingToNormal = !!nt && nt.category !== FREE_CATEGORY;
-    const newSlotIds = new Set((nt?.layers ?? []).filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo").map((l) => l.id));
-    const willRestore = Object.keys(selected.assetRefs).some((k) => newSlotIds.has(k));
-    if (isFree && freeLayout.length > 0 && goingToNormal && !willRestore) { setPendingTemplateId(newTemplateId); return; }
+    if (isFree && freeContentHiddenBySwitch(selected, nt).total > 0) { setPendingTemplateId(newTemplateId); return; }
     applyTemplateSwitch(newTemplateId);
   };
   // 「種類」（場面カテゴリ）の選択肢＝この向きで1つ以上見た目がある全カテゴリ（FREE 含む・#528）。
   const sceneCategories = sceneCategoriesForOrientation(templates, aspectRatio);
   // 「種類」を変えたら、その種類の先頭の見た目へ直接切り替える（同カテゴリ内の詳細は「見た目パターン」で選ぶ）。
   const switchSceneCategory = (category: SceneCategory) => {
-    if (category === selected.sceneType) return;
+    // いまの種類を選び直した＝切替をやめた、として確認も解く（`requestTemplateSwitch` 先頭と同じ挙動・ADR-0026②）。
+    // 解かないと種類の表示だけが確認待ちの候補へ跳ね戻り、「選んだのに元へ戻った」が片方のセレクタに残る（#532）。
+    if (category === selected.sceneType) { setPendingTemplateId(null); return; }
     const first = templates.find((t) => t.category === category && t.aspectRatio === aspectRatio);
     if (first) requestTemplateSwitch(first.templateId);
   };
-  // 確認待ち（pendingTemplateId）の間は、選んだ先の種類/見た目を選択表示に保つ＝「選んだのに元へ戻った」を防ぐ（#532 レビュー）。
-  const pendingCategory = pendingTemplateId ? templates.find((t) => t.templateId === pendingTemplateId)?.category : undefined;
+  // 確認中の切替先。FREE でない場面（休眠 freeLayout を持つ通常場面）では数えない＝undefined を渡して0件にする。
+  // **この `isFree` は防御ではなく効いている**：確認を開いたまま「取り消す」と、見た目切替は履歴に載っている
+  // （ADR-0020）ので場面は通常テンプレへ戻り、確認だけが残る。ここで休眠 freeLayout を数えると
+  // 「素材1個が動画に出なくなります」と、出てもいない中身について嘘の警告が出る（ADR-0030 決定2・ADR-0026①）。
+  // 外すとテストが赤くなる（`SceneEditScreen.template-switch.test.tsx` の「取り消しで通常の見た目へ戻ったら…」）。
+  const pendingTemplate = pendingTemplateId != null && isFree
+    ? templates.find((t) => t.templateId === pendingTemplateId)
+    : undefined;
+  // 確認に出す件数は毎レンダで数え直す＝確認中に自由配置の中身を消したら文言も追従する（0件なら「出なくなる中身はありません」）。
+  const pendingHidden = freeContentHiddenBySwitch(selected, pendingTemplate);
+  // 確認は**答えるまで残す**（件数が0になっても引っ込めない）。表示を件数に連動させると、中身を消したあと
+  // 足し直した／Ctrl+Z で戻しただけで**触ってもいない確認が蘇り**、選択表示が選んでいない見た目へ跳ぶ
+  // （#532「選んだのに元へ戻った」と同型・PR #592 レビュー）。出し入れせず文言だけ実態に合わせれば、
+  // 嘘の警告も、ボタンが消える行き止まりも作らずに済む（ADR-0026①・ADR-0030 決定3）。
+  const pendingActive = pendingTemplateId != null;
+  // 実際に出なくなる中身があるか＝注意の見せ方（黄色の注意／確認の色）を分ける。0件で赤い警告を出すと言葉と色が食い違う。
+  const pendingLosesContent = pendingHidden.total > 0;
+  // 確認が生きている間は、選んだ先の種類/見た目を選択表示に保つ＝「選んだのに元へ戻った」を防ぐ（#532 レビュー）。
+  const pendingCategory = pendingActive ? templates.find((t) => t.templateId === pendingTemplateId)?.category : undefined;
   // 追加：新要素を末尾に積み、追加直後のその要素を選択状態にする（詳細モードでも即表示・#179）。
   // duplicateFreeEl と同様に updater 内の最新 s.freeLayout から計算（同期実行で newId は下の前に確定）。
   const addFreeEl = (kind: FreeElementKind) => {
@@ -512,10 +644,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   };
   const removeFreeEl = (id: string) => {
     // freeLayout から消すと同時に groups からも除去し、空グループは落とす（orphan 参照防止・#311 レビュー）。
-    // 要素アニメ（④）も孤児にならないよう掃除する。scene（freeLayout/groups）＋meta（animations）の2更新を
-    // 履歴グループで1手にまとめる（Undo は1回で両方戻る）。
+    // 要素アニメ（④）と per-use マップ（ADR-0028 D6）も孤児にならないよう掃除する。scene（freeLayout/groups/
+    // per-use）＋meta（animations）の更新を履歴グループで1手にまとめる（Undo は1回で全部戻る）。
     beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]) }));
+    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]), ...prunePerUseMaps(s, [id]) }));
     removeAnimationsForElements(selected.sceneId, [id]);
     endHistoryGroup();
     setSelectedFreeIds((cur) => cur.filter((x) => x !== id)); // 選択中を消したら選択から外す（詳細モードは案内へ）
@@ -528,9 +660,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: applyFreeElementGeoms(s.freeLayout ?? [], updates) }));
   // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
   const removeFreeMany = (ids: string[]) => {
-    // 一括削除でも要素アニメ（④）を孤児にしないよう掃除する（scene＋meta を履歴グループで1手に）。
+    // 一括削除でも要素アニメ（④）と per-use マップ（ADR-0028 D6）を孤児にしないよう掃除する（scene＋meta を履歴グループで1手に）。
     beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids) }));
+    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids), ...prunePerUseMaps(s, ids) }));
     removeAnimationsForElements(selected.sceneId, ids);
     endHistoryGroup();
     setSelectedFreeIds([]);
@@ -563,9 +695,33 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setActiveGroupId(null);
     setSelectedFreeIds(memberIds);
   };
+  // グループを中身ごと削除（#551）。解除して1つずつ消す手間をなくす。要素・グループ・要素/グループのアニメを
+  // 1手（履歴グループ）で落とす＝Undo 1回で丸ごと戻る。ロック中は解除/重ね順と揃えて抑止（多重防御・#319）。
+  const deleteGroupWithMembers = (groupId: string) => {
+    if (sceneGroups.find((g) => g.id === groupId)?.locked) return;
+    // 消す対象は現在の groups から先に決める（`ungroupActive` と同じ流儀）。updater の中で外の変数へ書くと
+    // updater が再実行されたときに壊れるため、ここで確定させてから patch/アニメ掃除の両方に渡す。
+    const { elementIds, groupIds } = removeGroupWithMembers(sceneGroups, groupId);
+    beginHistoryGroup();
+    patch((s) => ({
+      ...s,
+      freeLayout: removeFreeElements(s.freeLayout ?? [], elementIds),
+      groups: removeGroupWithMembers(s.groups ?? [], groupId).groups,
+      // 消えたスロット要素の per-use 上書き（収め方/クリップ/再生開始）も落とす（ADR-0028 D6）。
+      // free_NNN は歯抜けを再利用するので、残すと将来の別要素に憑依する（「設定していないのに効く」）。
+      ...prunePerUseMaps(s, elementIds),
+    }));
+    // グループ自体もアニメの対象になりうる（④(3)・ADR-0019）ので、要素とグループの両方を掃除して孤児を残さない。
+    removeAnimationsForElements(selected.sceneId, [...elementIds, ...groupIds]);
+    endHistoryGroup();
+    setActiveGroupId(null);
+    setSelectedFreeIds([]);
+  };
   // グループの transform 更新（移動・#305-1。拡縮/回転は #305-2）。
-  const transformGroup = (groupId: string, p: Partial<GroupTransform>) =>
+  const transformGroup = (groupId: string, p: Partial<GroupTransform>) => {
+    if (sceneGroups.find((g) => g.id === groupId)?.locked) return; // ロック中は移動/拡縮/回転も抑止（多重防御・#319 レビュー／#554 レビュー）
     patch((s) => ({ ...s, groups: updateGroupTransform(s.groups ?? [], groupId, p) }));
+  };
   // グループの非表示/ロック切替（#305-2）。hidden は描画抑止（isHiddenByGroup）、locked は枠操作を抑止。
   const toggleGroupHidden = (groupId: string) =>
     patch((s) => ({ ...s, groups: toggleGroupFlag(s.groups ?? [], groupId, "hidden") }));
@@ -676,6 +832,118 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       return { ...s, slotFits: Object.keys(next).length ? next : undefined };
     });
 
+  /**
+   * 通常テンプレの文字の体裁を場面別に変える欄（#555）。**配置・座標はテンプレのまま**（§2-4）＝体裁だけ開放する。
+   *
+   * 継承の流儀は「その種別のフォント」（#178・FontPicker の allowInherit）と同じ＝**触ったものだけが固有値**。
+   * 欄が「テンプレに合わせる」と示す値は、描画と同じ `resolveTextStyle` から引く（§2-7＝欄の表示と実描画がずれない）。
+   * 既定は閉じておく（開かない人のスクロール量を増やさない・#550）。
+   */
+  /**
+   * 体裁の色欄（#555 レビュー P2）。**項目ごとに継承へ戻せる**ようにする。
+   *
+   * 数値欄は空欄、太さは「見た目パターンに合わせる」で個別に継承へ戻せるのに、色は ColorPicker が常に色を返す
+   * ＝「触っていない」状態を表せないため、戻す手段が「すべて〜」しか無かった。それだと**大きさ96 は残して色だけ
+   * 戻す**ができず、同じ色を選び直しても固有値のまま残って将来のテンプレ変更に追従しない（#555 の「触ったものだけ
+   * 固有値」モデルから外れる）。上書き中のときだけ小さな復帰ボタンを出す。
+   */
+  const colorField = (
+    label: string,
+    value: string,
+    isOverridden: boolean,
+    ariaBase: string,
+    onChange: (v: string) => void,
+    onClear: () => void,
+  ) => (
+    <div className="field" style={{ margin: 0 }}>
+      <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{label}</label>
+      <span className="row gap-sm" style={{ alignItems: "center" }}>
+        <ColorPicker value={value} onChange={onChange} ariaLabel={`${ariaBase}を選ぶ`} onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+        {isOverridden && (
+          <button
+            className="btn btn-ghost text-sm"
+            aria-label={`${label}を見た目パターンに合わせる`}
+            title="この場面だけの指定をやめて、見た目パターンの色に戻します"
+            onClick={onClear}
+          >
+            合わせる
+          </button>
+        )}
+      </span>
+    </div>
+  );
+
+  const renderTextStyleControls = (key: TextKey) => {
+    const layer = template?.layers.find((l) => (l.type === "text" || l.type === "subtitle") && l.textKey === key);
+    if (!layer) return null;
+    const ov = selected.textStyles?.[key];
+    // 2つを使い分ける（#555 レビュー）：
+    //  inherited＝上書き無しの解決値＝「見た目パターンに合わせる」と何になるか＝**空欄のプレースホルダ用**。
+    //  effective＝上書き込みの解決値＝**いま実際に描かれている体裁**＝色の見本用。
+    // 色は ColorPicker が常に色を返す（空＝継承を表せない）ので、見本には effective を出す必要がある。
+    // inherited を出すと、縁取りの色のように「太さ>0 なら白が既定」という**太さ依存の既定**があるとき、
+    // 実描画は白なのに見本は黒、というドリフトになる（この欄が防ぐと謳っているもの＝§2-7）。
+    const inherited = resolveTextStyle(layer);
+    const effective = resolveTextStyle(layer, ov);
+    const overridden = ov != null && Object.keys(ov).length > 0;
+    const set = (p: Partial<TextStyleOverride>) => setSceneTextStyle(key, p);
+    return (
+      <CollapsibleSection
+        title={`${textKeyLabel[key]}の見た目${overridden ? "（この場面だけ変更中）" : ""}`}
+        storageKey={`textStyle:${key}`}
+        defaultOpen={false}
+      >
+        <p className="field-hint" style={{ marginTop: 0 }}>
+          この場面だけ変えられます。触っていない項目は見た目パターンのままです（文字を置く場所や枠の大きさは変わりません）。
+        </p>
+        <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+          {/* 空欄＝継承。placeholder に「テンプレに合わせたときの実値」を出す＝何が継承されるか見える。 */}
+          <NumberField
+            label="文字の大きさ"
+            value={ov?.fontSize ?? null}
+            min={1}
+            placeholder={String(inherited.fontSize)}
+            onClear={() => set({ fontSize: undefined })}
+            onChange={(v) => set({ fontSize: v })}
+          />
+          {colorField("色", effective.color, ov?.color != null, `${textKeyLabel[key]}の色`, (v) => set({ color: v }), () => set({ color: undefined }))}
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor={`weight-${key}`}>太さ</label>
+            <select
+              id={`weight-${key}`}
+              className="select"
+              value={ov?.fontWeight ?? ""}
+              onChange={(e) => set({ fontWeight: e.target.value ? (e.target.value as FontWeight) : undefined })}
+            >
+              <option value="">見た目パターンに合わせる</option>
+              <option value={FONT_WEIGHT.normal}>標準</option>
+              <option value={FONT_WEIGHT.bold}>太字</option>
+            </select>
+          </div>
+        </div>
+        <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
+          <NumberField
+            label="縁取りの太さ"
+            value={ov?.strokeWidth ?? null}
+            min={0}
+            max={STROKE_WIDTH_MAX}
+            placeholder={String(inherited.strokeWidth ?? 0)}
+            onClear={() => set({ strokeWidth: undefined })}
+            onChange={(v) => set({ strokeWidth: v })}
+          />
+          {/* 見本は実描画の解決値（`effective`＝太さ>0 なら既定色入り）。太さ0で縁取りが無いときは「足したらこうなる」既定を出す。 */}
+          {colorField("縁取りの色", effective.strokeColor ?? defaultStrokeColor(effective.color), ov?.strokeColor != null, `${textKeyLabel[key]}の縁取りの色`, (v) => set({ strokeColor: v }), () => set({ strokeColor: undefined }))}
+        </div>
+        {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。 */}
+        {overridden && (
+          <button className="btn btn-ghost text-sm" onClick={() => setSceneTextStyle(key, { color: undefined, fontSize: undefined, fontWeight: undefined, strokeColor: undefined, strokeWidth: undefined })}>
+            すべて見た目パターンに合わせる
+          </button>
+        )}
+      </CollapsibleSection>
+    );
+  };
+
   // FREE の text/subtitle の背景帯（可読性の下地・#529）。通常字幕層の layer.background と同じ UX（付ける/色/濃さ/角丸）。
   const renderFreeBandBg = (el: FreeElement) => (
     <div className="col gap-sm" style={{ marginTop: 4 }}>
@@ -687,7 +955,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>背景色</label>
-            <ColorPicker value={el.background?.color ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" />
+            <ColorPicker value={el.background?.color ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, color: v } })} ariaLabel="背景色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
           </div>
           <NumberField label="濃さ(%)" value={opacityToPercent(el.background?.opacity ?? 0.55)} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, opacity: percentToOpacity(v) } })} />
           <NumberField label="角丸" value={el.background?.radius ?? 16} min={0} onChange={(v) => patchFreeEl(el.id, { background: { ...el.background, radius: v } })} />
@@ -713,7 +981,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           {/* 収め方（fit）は画像/動画とも FREE 要素ごと（el.fit・layoutScene が読む・Undo 可）＝#472 P1 で動画も per-use に統一。 */}
           {a && (
             <div className="field" style={{ marginTop: 6, marginBottom: 0 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{FIT_FIELD_LABEL}</label>
               {/* FREE 要素の収め方は要素ごと（継承概念なし）＝常に値を持たせる。inheritLabel 未指定の FitSelect は
                   undefined を返さないが、型上の undefined は既定 cover で明示的に受ける。 */}
               <FitSelect
@@ -740,7 +1008,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="文字の大きさ" value={el.fontSize ?? 48} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={el.color ?? "#222222"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" />
+              <ColorPicker value={el.color ?? "#222222"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
@@ -767,10 +1035,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
+            <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
+              <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
           {renderFreeBandBg(el)}
@@ -795,30 +1063,20 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={el.fillColor ?? "#cccccc"} onChange={(v) => patchFreeEl(el.id, { fillColor: v })} ariaLabel="色を選ぶ" />
+              <ColorPicker value={el.fillColor ?? SHAPE_FILL_FALLBACK_COLOR} onChange={(v) => patchFreeEl(el.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
-          <div className="field" style={{ marginBottom: 6 }}>
-            <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>濃さ</label>
-            {/* 内部は 0〜1・UI は「濃さ(%)」0〜100 に統一（#459 item5・変換は domain/format/opacity に集約）。
-                dragGroup＝1ドラッグ1履歴（#389）。pointerup の取りこぼしは useHistoryGroup が window で拾って必ず閉じる。 */}
-            <input
-              type="range" min={0} max={100} step={1} value={opacityToPercent(el.opacity ?? 1)}
-              {...dragGroup}
-              onChange={(e) => setFreeElementOpacity(el, percentToOpacity(Number(e.target.value)))}
-              style={{ width: "100%", accentColor: "var(--color-primary)" }}
-            />
-            <div className="row-between text-faint text-sm">
-              <span>薄い</span>
-              <span>{opacityToPercent(el.opacity ?? 1)}%</span>
-              <span>濃い</span>
-            </div>
+          {/* 濃さは数値欄「濃さ(%)」に統一する（図形もスライダーをやめ、背景帯や枠線の太さ等と同じ NumberField・#547 P3-2）。
+              内部は 0〜1・UI は 0〜100%（変換は domain/format/opacity に集約・#459 item5）。
+              setFreeElementOpacity が既存の動き（フェード等）の終端の濃さも合わせ、履歴も1手にまとめる。 */}
+          <div className="row gap-sm" style={{ marginBottom: 6 }}>
+            <NumberField label="濃さ(%)" value={opacityToPercent(el.opacity ?? 1)} min={0} max={100} onChange={(v) => setFreeElementOpacity(el, percentToOpacity(v))} />
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
+            <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</label>
-              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="枠線の色を選ぶ" />
+              <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="枠線の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
         </>
@@ -835,6 +1093,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       const sameTargetCount = (selected.freeLayout ?? []).filter(
         (e) => e.kind === FREE_ELEMENT_KIND.subtitle && subtitleSourceToValue(e.subtitleSource ?? defaultSubtitleSource(selected)) === sourceValue,
       ).length;
+      // 置いたのに何も出ない状態は、原因が要素の外（場面のスイッチ・セリフ側）にもあり黙っていると気づけない（#547 P3-9）。
+      // 判定は公開前チェックと同じ domain の1か所（subtitleSilentReason）＝表示と案内が食い違わない。
+      const silentReason = subtitleSilentReason(el, selected);
       return (
         <>
           <div className="field" style={{ marginBottom: 6 }}>
@@ -849,7 +1110,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 })}
               </select>
             ) : (
-              <p className="field-hint" style={{ marginTop: 0 }}>この場面は読み上げ（1人）です。下の「字幕の文」が字幕になります。</p>
+              <p className="field-hint" style={{ marginTop: 0 }}>この場面は読み上げ（1人）です。下の「{SUBTITLE_TEXT_FIELD_LABEL}」が字幕になります。</p>
             )}
             {sameTargetCount > 1 && (
               <p className="field-hint" style={{ marginTop: 4 }}>同じ対象の字幕が他にもあります。同じ文が2か所に出ます。</p>
@@ -857,8 +1118,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
           {showNarrationText && (
             <div className="field" style={{ marginBottom: 6 }}>
-              <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>字幕の文</label>
-              <input className="input" value={selected.texts.subtitle ?? ""} {...textGroup} onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))} />
+              {/* 欄と入力を紐づける（要素ごとに一意な id）＝読み上げソフトでも「何の入力か」が分かる。 */}
+              <label className="field-label text-sm" style={{ margin: "0 0 2px" }} htmlFor={`subtitleText-${el.id}`}>{SUBTITLE_TEXT_FIELD_LABEL}</label>
+              <input id={`subtitleText-${el.id}`} className="input" value={selected.texts.subtitle ?? ""} {...textGroup} onChange={(e) => patch((s) => ({ ...s, texts: { ...s.texts, subtitle: e.target.value } }))} />
+            </div>
+          )}
+          {/* 出ない字幕の手がかり（#547 P3-9）。対象欄と文欄の両方を見たうえで出すので、この位置に置く。 */}
+          {silentReason && (
+            <div className="notice notice-warn text-sm" role="status" style={{ marginBottom: 6, padding: "8px 10px" }}>
+              <span>{silentSubtitleMessage(silentReason, source.kind)}</span>
             </div>
           )}
           {/* 見た目（文字の体裁を流用・文言は対象から解決ゆえ「文字」入力は無し） */}
@@ -866,7 +1134,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="文字の大きさ" value={el.fontSize ?? 52} min={1} onChange={(v) => patchFreeEl(el.id, { fontSize: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={el.color ?? "#ffffff"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" />
+              <ColorPicker value={el.color ?? "#ffffff"} onChange={(v) => patchFreeEl(el.id, { color: v })} ariaLabel="文字の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>太さ</label>
@@ -892,10 +1160,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
           </div>
           <div className="row gap-sm" style={{ marginBottom: 6, alignItems: "flex-end" }}>
-            <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={100} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
+            <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" />
+              <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
           {renderFreeBandBg(el)}
@@ -959,7 +1227,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         {anim && kind && (
           <div className="col gap-sm" style={{ marginTop: 6 }}>
             <div className="row gap-sm" style={{ alignItems: "flex-end" }}>
-              <NumberField label="かける時間（秒）" value={durationSec} min={PRESET_MIN_SEC} max={PRESET_MAX_SEC} step={0.1} onChange={(v) => apply({ durationSec: v })} />
+              <NumberField label="かける時間（秒）" value={durationSec} min={PRESET_MIN_SEC} max={PRESET_MAX_SEC} step={SEC_STEP} onChange={(v) => apply({ durationSec: v })} />
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動きの感じ</label>
                 <select className="select" value={easing} onChange={(e) => apply({ easing: e.target.value as Easing })}>
@@ -1003,7 +1271,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         return { ...s, slotVideoStart: Object.keys(m).length ? m : undefined };
       });
     // delay の秒（保存値 or 既定＝窓の中ほど）を [0,W] にクランプ＝保存値と実効値を一致（11 §7.1）。
-    const delaySec = Math.min(Math.max(0, spec?.delaySec ?? Math.round((W / 2) * 10) / 10), W);
+    const delaySec = Math.min(Math.max(0, spec?.delaySec ?? quantizeSec(W / 2)), W);
     const showAfterAnim = hasSettled || mode === VIDEO_START_MODE.afterAnim; // 保存済み afterAnim は select を壊さないため残す
     return (
       <div className="field" style={{ marginBottom: 6 }}>
@@ -1028,7 +1296,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               type="range"
               min={0}
               max={W}
-              step={0.1}
+              step={SEC_STEP}
               value={delaySec}
               onChange={(e) => setSpec({ mode: VIDEO_START_MODE.delay, delaySec: Number(e.target.value) })}
               style={{ flex: 1 }}
@@ -1073,13 +1341,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const isDialogue = (selected.lines?.length ?? 0) > 0;
   // セリフ列の検証（V16-19）。開始秒の範囲/順序・話者の実在などをユーザー向け文言で案内（重複文言は1つに）。
   // 同時開始（ADR-0031）：字幕帯が多くて画面外へ積み切れないときは「次の行動」を示す警告（黙って画面外に切らない・#533 P2）。
+  // 字幕のはみ出しは**掛け合いに限らない**（#563）：#555 で場面ごとに字幕を拡大できるようになり、単独/逐次でも
+  // 画面外へ切れる。`isDialogue` ゲートの内側に置くと単独場面では検査すらされないので外に出す（ADR-0026②/④）。
+  // 文言は原因で変える＝「次の行動」が違う（同時なら行を減らす／1帯なら小さく・短く）＝§2-5。
+  // はみ出しの案内は**文字（字幕）の欄の下**に出す（下記）＝掛け合いの有無に関わらず見え、直す場所がその場にある。
+  // ここ（セリフ列の検証）に混ぜると掛け合いブロックの中でしか描画されず、単独/逐次では出ない（#563）。
+  const subtitleOverflows = template != null && subtitleOverflowsCanvas(selected, template);
   const lineWarningMessages = isDialogue
-    ? [
-        ...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message)),
-        ...(template && subtitleOverflowsCanvas(selected, template)
-          ? ["同時に表示するセリフが多く、一部の字幕が画面からはみ出します。同時のセリフを減らすか、字幕を短くしてください。"]
-          : []),
-      ]
+    ? [...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message))]
     : [];
   // 場面ごとの声の大きさ（null/未設定＝全体設定を継承 §6/§2.2、値＝この場面だけ上書き）。
   const sceneNarrationVolume = selected.audioMix?.narrationVolume ?? null;
@@ -1111,14 +1380,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (path) await addAssetByPath(path);
   }
 
-  // セリフ音声の進捗（生成済み/対象）。全部できて生成中でなければ出さない（#176）。
-  const { done: narrDone, total: narrTotal } = narrationProgress(scenes);
-  const showNarrProgress = narrTotal > 0 && !(narrDone === narrTotal && !isGeneratingNarration);
-
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
-      <KeyboardNudge active={canvasKbdActive} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
+      <KeyboardNudge active={canvasKbdActive && !isExporting} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
+      <ExportLock onNavigate={onNavigate}>
       <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
         {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
         <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -1126,18 +1392,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <span className="text-sm text-muted" style={{ flexShrink: 0 }}>場面編集</span>
         </div>
         <div className="topbar-actions">
-          {showNarrProgress && (
-            <span className="text-sm text-muted" style={{ marginRight: 4 }}>
-              声 {narrDone}/{narrTotal}{isGeneratingNarration ? "（準備中…）" : ""}
-            </span>
-          )}
-          <button
-            className="btn btn-ghost"
-            onClick={() => void generateAllNarrations()}
-            disabled={isGeneratingNarration}
-          >
-            {isGeneratingNarration ? "作成中…" : "全場面の声を作成"}
-          </button>
+          {/* 進捗・作成・中止は共通操作（3画面で同じ見え方・同じ挙動＝#547 P2-6・ADR-0026②）。
+              以前はここだけ「準備中…」と表示していた。 */}
+          <BulkVoiceControls buttonClassName="btn btn-ghost" />
           <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("draft")}>
             <ArrowLeftIcon size={16} />
             台本表へ戻る
@@ -1309,7 +1566,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
               {/* boundaryFrame（通常テンプレ字幕/クレジット）と subtitleSegment（FREE 字幕）は再生時刻の同一セグメント（motionSubtitleAt）。
                   停止中は t=0＝先頭（0 秒行除外・頭の間・全 0 秒フォールバックは sceneSegmentSpecs 準拠）、再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1）。 */}
-              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations}>
+              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId && freeLayout.some((el) => el.id === editingFreeId && el.kind === FREE_ELEMENT_KIND.text) ? [editingFreeId] : undefined}>
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview
@@ -1325,6 +1582,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 {/* 再生中（動き/切替）は編集用オーバーレイ（選択枠・ハンドル）を隠す＝動く要素と設計位置のハンドルがズレて見えるのを避ける。 */}
                 {isFree && template && !motionPreview.playing && !transitionPreview.playing && (
                   <FreeLayoutOverlay
+                    // 場面ごとに作り直す（#549 レビュー P2）。FREE→FREE の切替では同一分岐のまま再描画されるだけで
+                    // アンマウントされず、overlay ローカルの editingId が持ち越される。free_NNN は**場面内一意**なので、
+                    // 残ると次の場面の同名要素を伏せ（プレビューだけ消えて書き出しには出る＝無言のパリティ乖離）、
+                    // その要素がテキストならダブルクリックせずに編集モードで開いてしまう。key で両方まとめて断つ。
+                    key={selected.sceneId}
                     freeLayout={freeLayout}
                     canvasW={template.canvas.width}
                     canvasH={template.canvas.height}
@@ -1342,6 +1604,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onDelete={removeFreeEl}
                     onChangeText={(id, text) => patchFreeEl(id, { text })}
                     onRequestEdit={openFreeEditPopover}
+                    onEditingIdChange={setEditingFreeId}
+                    textFontFamily={sceneFontFamily}
                     onInteractionStart={beginHistoryGroup}
                     onInteractionEnd={endHistoryGroup}
                     groups={sceneGroups}
@@ -1465,8 +1729,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <h2 className="field-label" style={{ margin: 0 }}>選択中の場面を編集</h2>
               {/* 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z・Ctrl+Y でも操作可。 */}
               <div className="row gap-sm">
-                <button className="btn btn-ghost btn-icon text-sm" onClick={undo} disabled={!canUndo} aria-label="取り消す" title="取り消す（Ctrl+Z）">↶ 取り消す</button>
-                <button className="btn btn-ghost btn-icon text-sm" onClick={redo} disabled={!canRedo} aria-label="やり直す" title="やり直す（Ctrl+Y）">↷ やり直す</button>
+                {/* 書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも disabled にして誤認を防ぐ（ADR-0026④・#547 P3-12）。 */}
+                <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} disabled={isExporting} />
               </div>
             </div>
 
@@ -1515,13 +1779,23 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{textKeyLabel[key]}のフォント</label>
                       <FontPicker value={selected.textFontIds?.[key]} onChange={(id) => setSceneTextFont(key, id)} allowInherit />
                     </div>
+                    {renderTextStyleControls(key)}
                   </div>
                 );
               })}
+              {/* 字幕が画面外へ切れているときの案内（#533 P2／#563）。**掛け合いに限らず単独/逐次でも出す**ため、
+                  掛け合いブロックの中ではなくここ（文字＝字幕の文と大きさを直せる場所）に置く＝次の行動がその場にある（§2-5）。 */}
+              {subtitleOverflows && (
+                <div className="notice notice-warn" role="alert">
+                  <span className="text-sm">{subtitleOverflowMessage(hasSimultaneousLines(selected))}</span>
+                </div>
+              )}
               </CollapsibleSection>
             )}
 
-            <CollapsibleSection title="見た目・フォント">
+            {/* 二次的な節は既定で畳む（#550 ①）＝場面ごとに毎回いじる所ではない（種類/見た目/フォント/BGM は
+                だいたい最初に決めて以後は触らない）。一度開けば記憶される（③）ので、よく使う人の手間は増えない。 */}
+            <CollapsibleSection title="見た目・フォント" defaultOpen={false}>
             {/* 場面の種類（カテゴリ）を直接変える導線（#528）。変えるとその種類の見た目へ切り替わる＝オープニング固定を解く。 */}
             <div className="field">
               <label className="field-label" htmlFor="scene-kind">種類</label>
@@ -1546,7 +1820,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <select
                 id="look"
                 className="select"
-                value={pendingTemplateId ?? selected.templateId}
+                value={pendingActive ? pendingTemplateId : selected.templateId}
                 onChange={(e) => requestTemplateSwitch(e.target.value)}
               >
                 {/* 不一致の現行テンプレは選択値として表示しつつ選択不可＝「合っていない」を明示（#415 P2）。 */}
@@ -1577,15 +1851,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   この向き・場面に合う見た目パターンは、今はこれだけです。
                 </p>
               ) : null}
-              {/* FREE→通常で素材が画面から消える場合の確認（データは残り、自由配置に戻せば元に戻る・ADR-0030・#524 P1）。 */}
-              {pendingTemplateId && (
-                <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
-                  <span>通常の見た目に変えると、いまの自由配置の素材は画面に表示されなくなります（データは残り、自由配置に戻せば元に戻ります）。</span>
+              {/* FREE→通常で中身が動画に出なくなる場合の確認（データは残り、自由配置に戻せば元に戻る・ADR-0030・#524 P1）。
+                  何がいくつ出なくなるかを示す＝「素材が消える」とだけ言って文字・図形の消失に気づけない、を作らない（#547 P2-9）。
+                  件数は**毎回いまの場面から数え直す**：確認中に自由配置の中身を消して0になったら文言も色も
+                  「出なくなる中身はありません」へ変える（言っていることと実際を食い違わせない・ADR-0026①）。
+                  ただし**確認そのものは答えるまで消さない**＝消して足し直しただけで確認が蘇るのを防ぐ（PR #592 レビュー）。 */}
+              {pendingActive && (
+                <div className={pendingLosesContent ? "notice notice-warn" : "notice notice-info"} role="alert" style={{ marginTop: 6 }}>
+                  <span>{freeSwitchConfirmMessage(pendingHidden)}</span>
                   <div className="row gap-sm" style={{ marginTop: 6 }}>
                     <button className="btn btn-ghost text-sm" onClick={() => setPendingTemplateId(null)}>やめる</button>
                     <button
-                      className="btn btn-danger text-sm"
-                      onClick={() => { applyTemplateSwitch(pendingTemplateId); setPendingTemplateId(null); }}
+                      className={pendingLosesContent ? "btn btn-danger text-sm" : "btn btn-primary text-sm"}
+                      onClick={() => applyTemplateSwitch(pendingTemplateId)}
                     >
                       通常の見た目に変える
                     </button>
@@ -1648,7 +1926,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             </CollapsibleSection>
 
-            <CollapsibleSection title="使用素材">
+            <CollapsibleSection title="使用素材" defaultOpen={false}>
             <div className="field">
               {slotLayers.length === 0 ? (
                 <p className="text-sm text-muted">この見た目パターンに素材を入れる場所はありません。</p>
@@ -1684,7 +1962,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       {/* 収め方（fit）は画像/動画とも per-use＝scene.slotFits[layer.id]（layoutScene が読む・Undo 可・「見た目の既定に合わせる」で継承）＝#472 P1 で動画も統一。 */}
                       {assignedAsset && (
                         <div className="field" style={{ marginTop: 6 }}>
-                          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠への収め方</label>
+                          <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>{FIT_FIELD_LABEL}</label>
                           <FitSelect
                             inheritLabel="見た目の既定に合わせる"
                             value={selected.slotFits?.[layer.id]}
@@ -1703,7 +1981,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             </CollapsibleSection>
 
-            {/* FREE 場面：自由配置エディタ（素材/文字/図形を追加・数値で位置/大きさ・重なり順・削除）。Phase 4a-3b。 */}
+            {/* FREE 場面：自由配置エディタ（素材/文字/図形を追加・数値で位置/大きさ・重ね順・削除）。Phase 4a-3b。 */}
             {isFree && (
               <CollapsibleSection title="自由配置">
               <div className="field">
@@ -1754,7 +2032,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </div>
                 <div className="toggle-row">
                   <span className="field-label text-sm" style={{ margin: 0 }}>選択した要素だけ編集</span>
-                  <Switch on={focusSelectedFree} onChange={setFocusSelectedFree} label="選択した要素だけ編集" />
+                  <Switch on={focusSelectedFree} onChange={(v) => { setFocusSelectedFree(v); saveFocusSelectedFree(v); }} label="選択した要素だけ編集" />
                 </div>
                 {freeLayout.length === 0 ? (
                   <p className="text-sm text-muted">まだ何も配置されていません。上のボタンで追加してください。</p>
@@ -1762,9 +2040,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <div className="col gap-sm">
                     {/* レイヤー一覧（#210）：重ね順（上が手前）で並べ、選択・前面/背面・表示/隠す・ロックを操作。 */}
                     <div className="field" style={{ marginBottom: 4 }}>
-                      <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>重ね順（上が手前）</label>
+                      <label className="field-label text-sm" style={{ margin: "0 0 4px" }}>{Z_ORDER_LABEL}（上が手前）</label>
                       <div className="col" style={{ gap: 2 }}>
-                        {[...freeLayout].sort((a, b) => (b.zIndex ?? 1) - (a.zIndex ?? 1)).map((el) => {
+                        {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse＝描画（layout の昇順・安定＝同 z は
+                            配列後方が手前）と同 z でも一致する。降順ソートだと同 z で前後が逆に出て↑↓が1段にならない（#547 P2-4）。 */}
+                        {[...freeLayout].sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1)).reverse().map((el) => {
                           const isSel = selectedFreeIds.includes(el.id);
                           const hint = el.kind === FREE_ELEMENT_KIND.text && el.text ? `「${el.text.slice(0, 8)}」` : "";
                           const autoName = `${freeKindLabel[el.kind]}${(freeAutoIndexById.get(el.id) ?? 0) + 1}`;
@@ -1772,7 +2052,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             <div
                               key={el.id}
                               className="row-between"
-                              style={{ padding: "2px 6px", borderRadius: 4, background: isSel ? "rgba(80,130,255,0.12)" : "var(--color-surface-alt)", opacity: el.hidden ? 0.55 : 1 }}
+                              style={{ padding: "2px 6px", borderRadius: 4, background: isSel ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)", opacity: el.hidden ? 0.55 : 1 }}
                             >
                               {renamingFreeId === el.id ? (
                                 <input
@@ -1798,9 +2078,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                                 </button>
                               )}
                               <div className="row" style={{ gap: 2 }}>
-                                <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRenameFree(el)}>名前</button>
-                                <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label="前面へ" onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
-                                <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label="背面へ" onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
+                                {/* 可視ラベルは名詞「名前」でなく操作＝ペンアイコンにする（動詞規約・#547 P3-6）。名前は title/aria-label が担う。 */}
+                                <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRenameFree(el)}><PencilIcon size={14} /></button>
+                                {/* どの行の↑↓かを読み上げで区別できるよう名前を含める（テンプレ作成の一覧と同じ流儀・ADR-0026②）。 */}
+                                <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label={`${freeName(el)}を前面へ`} onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label={`${freeName(el)}を背面へ`} onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title={el.hidden ? "表示する" : "隠す"} onClick={() => toggleFreeHidden(el.id)}>{el.hidden ? "表示" : "隠す"}</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title={el.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleFreeLocked(el.id)}>{el.locked ? "解除" : "固定"}</button>
                               </div>
@@ -1816,10 +2098,23 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       onSelect={(id) => selectGroup(id)}
                       onToggleHidden={toggleGroupHidden}
                       onRename={renameGroup}
+                      onDelete={deleteGroupWithMembers}
+                      memberCount={(id) => groupElementIds(sceneGroups, id).length}
                     />
                     {/* 選択中グループ（ADR-0022・#305）：解除でばらす（transform をメンバーへ焼き込み）。動き（④(3)）はグループ全体に付く。 */}
                     {effectiveActiveGroupId && (
-                      <div className="col gap-sm" style={{ padding: "4px 8px", background: "rgba(80,130,255,0.12)", borderRadius: 6 }}>
+                      <div className="col gap-sm" data-testid="group-panel" style={{ padding: "4px 8px", background: "rgba(var(--color-primary-rgb), 0.12)", borderRadius: 6 }}>
+                        {/* 中身ごと削除の確認（#551）。破壊的＋複数要素が一度に消えるので、他の操作を隠して確認だけ出す。
+                            **ロック中は確認を出さない**＝グループ一覧（GroupList）の行から確認を開いたままここでロックすると、
+                            「削除する」を押しても `deleteGroupWithMembers` の内側ガードが無言 return して「消えたはずが
+                            消えていない」サイレント失敗になる（#551 レビュー P2）。ロックされたら操作列（無効の削除ボタン）へ戻す。 */}
+                        {confirmDeleteGroupId === effectiveActiveGroupId && !activeGroup?.locked ? (
+                          <DeleteConfirm
+                            message={`このグループを中身ごと削除しますか？中の${groupElementIds(sceneGroups, effectiveActiveGroupId).length}個の要素も一緒に消えます。`}
+                            onCancel={() => setConfirmDeleteGroupId(null)}
+                            onConfirm={() => { deleteGroupWithMembers(effectiveActiveGroupId); setConfirmDeleteGroupId(null); }}
+                          />
+                        ) : (
                         <div className="row-between">
                           <span className="text-sm">グループを選択中{activeGroup?.locked ? "（ロック中）" : "（まとめて移動・拡縮・回転）"}</span>
                           <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
@@ -1827,15 +2122,26 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                             <button className="btn btn-ghost text-sm" title="グループを最背面へ" disabled={!!activeGroup?.locked} onClick={() => sendGroupBack(effectiveActiveGroupId)}>背面</button>
                             <button className="btn btn-ghost text-sm" title={activeGroup?.hidden ? "表示する" : "隠す"} onClick={() => toggleGroupHidden(effectiveActiveGroupId)}>{activeGroup?.hidden ? "表示" : "隠す"}</button>
                             <button className="btn btn-ghost text-sm" title={activeGroup?.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleGroupLocked(effectiveActiveGroupId)}>{activeGroup?.locked ? "ロック解除" : "ロック"}</button>
-                            <button className="btn btn-ghost text-sm" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
+                            <button className="btn btn-ghost text-sm" title="グループを解除して要素をばらす（要素は残る）" disabled={!!activeGroup?.locked} onClick={ungroupActive}>解除</button>
+                            {/* 「解除」（要素は残る）との違いが分かるよう、文言・説明で「中身ごと」を明示する（#551）。 */}
+                            <button className="btn btn-ghost text-sm" title="グループを中身ごと削除（中の要素も消えます）" disabled={!!activeGroup?.locked} onClick={() => setConfirmDeleteGroupId(effectiveActiveGroupId)}>削除</button>
                           </div>
                         </div>
+                        )}
                         {/* グループ全体に登場の動きをつける（④(3)・ADR-0019）。メンバーをまとめて動かす。
                             ロック中は「まとめて移動・拡縮・回転」の抑止と揃えて操作不可（fieldset で中の入力を一括無効化）。 */}
                         <fieldset
                           disabled={!!activeGroup?.locked}
                           style={{ border: "none", padding: 0, margin: 0, minInlineSize: "auto", opacity: activeGroup?.locked ? 0.5 : 1 }}
                         >
+                          {/* 位置・大きさ・角度の数値入力（#554）。枠のドラッグでは届かない細かい値への逃げ道＝
+                              FREE 要素の幅/高さ欄と同じ役割。ロック中は上のボタン群と揃えて fieldset で無効化。 */}
+                          {activeGroup && (
+                            <GroupTransformFields
+                              transform={activeGroup.transform}
+                              onChange={(p) => transformGroup(effectiveActiveGroupId, p)}
+                            />
+                          )}
                           {renderAnimationControls(effectiveActiveGroupId, 1)}
                         </fieldset>
                       </div>
@@ -2009,9 +2315,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         <div className="row gap-sm">
                           <NumberField label="幅" value={el.w} min={1} onChange={(v) => patchFreeEl(el.id, { w: v })} />
                           <NumberField label="高さ" value={el.h} min={1} onChange={(v) => patchFreeEl(el.id, { h: v })} />
-                          <NumberField label="重なり順" value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
-                          {/* 角度（回転・度）。0〜359（360=0 は重複ゆえ schema で除外）。回転中は角つまみでの拡大縮小が止まるため、大きさはこの数値で調整する（#208）。 */}
-                          <NumberField label="角度" value={el.rotation ?? 0} min={0} max={359} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
+                          <NumberField label={Z_ORDER_LABEL} value={el.zIndex ?? 1} min={0} onChange={(v) => patchFreeEl(el.id, { zIndex: v })} />
+                          {/* 角度（回転・度）。値域はグループの角度欄と同じ共有定数（360=0 は重複ゆえ schema で除外）。
+                              回転中は角つまみでの拡大縮小が止まるため、大きさはこの数値で調整する（#208）。 */}
+                          <NumberField label="角度" value={el.rotation ?? 0} min={ROTATION_DEG_MIN} max={ROTATION_DEG_MAX} onChange={(v) => patchFreeEl(el.id, { rotation: v })} />
                         </div>
 
                         {renderAnimationControls(el.id, el.opacity ?? 1)}
@@ -2058,15 +2365,15 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {/* 場面ごとの字幕ON/OFF（scene.subtitleEnabledDefault・#413）。単一ナレーションはこれが直接の制御、
                   掛け合いは既定（各セリフの「字幕を表示する」で個別に上書き可＝line.subtitleEnabled ?? これ ?? true）。 */}
               <div className="toggle-row" style={{ marginTop: 8 }}>
-                <span className="field-label" style={{ margin: 0 }}>この場面の字幕を表示する</span>
+                <span className="field-label" style={{ margin: 0 }}>{SCENE_SUBTITLE_TOGGLE_LABEL}</span>
                 <Switch
                   on={selected.subtitleEnabledDefault ?? true}
                   onChange={(on) => patch((s) => ({ ...s, subtitleEnabledDefault: on }))}
-                  label="この場面の字幕を表示する"
+                  label={SCENE_SUBTITLE_TOGGLE_LABEL}
                 />
               </div>
               {isDialogue && (
-                <p className="field-hint" style={{ marginTop: 0 }}>各セリフの「字幕を表示する」で個別に上書きできます。</p>
+                <p className="field-hint" style={{ marginTop: 0 }}>各セリフの「{LINE_SUBTITLE_TOGGLE_LABEL}」で個別に上書きできます。</p>
               )}
               {isDialogue ? (
                 <div className="col gap-sm" style={{ marginTop: 8 }}>
@@ -2094,11 +2401,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               <button className="btn btn-ghost btn-icon text-sm" title="上へ" disabled={i === 0} onClick={() => patch((s) => moveLine(s, line.lineId, -1))}>↑</button>
                               <button className="btn btn-ghost btn-icon text-sm" title="下へ" disabled={i === lastIdx} onClick={() => patch((s) => moveLine(s, line.lineId, 1))}>↓</button>
                               <button className="btn btn-ghost btn-icon text-sm" title="このセリフを削除" onClick={() => setConfirmDeleteLineId(line.lineId)}>削除</button>
-                              {/* 掛け合いでも分割できる（この行から後ろを別の場面へ・#405）。先頭行や短い場面（両側が最小尺を割る）では不可。 */}
+                              {/* 掛け合いでも分割できる（この行から後ろを別の場面へ・#405）。先頭行と尺0以下では不可（#553 で最小尺ガードは撤廃）。 */}
                               <button
                                 className="btn btn-ghost btn-icon text-sm"
                                 title="この行から後ろを別の場面に分ける"
-                                disabled={i === 0 || selected.durationSec < 2 * SCENE_MIN_DURATION_SEC}
+                                disabled={i === 0 || selected.durationSec <= 0}
                                 onClick={() => splitSceneAtLine(selected.sceneId, i)}
                               >
                                 分ける
@@ -2150,11 +2457,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                           />
                         </details>
                         <div className="toggle-row">
-                          <span className="text-sm text-muted">字幕を表示する</span>
+                          <span className="text-sm text-muted">{LINE_SUBTITLE_TOGGLE_LABEL}</span>
                           <Switch
                             on={line.subtitleEnabled ?? selected.subtitleEnabledDefault ?? true}
                             onChange={(on) => patch((s) => updateLine(s, line.lineId, { subtitleEnabled: on }))}
-                            label="字幕を表示する"
+                            label={LINE_SUBTITLE_TOGGLE_LABEL}
                           />
                         </div>
                         <input
@@ -2189,7 +2496,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               value={line.startSec}
                               min={0}
                               max={selected.durationSec}
-                              step={0.1}
+                              step={SEC_STEP}
                               placeholder="自動"
                               title="このセリフが始まるタイミング（場面の頭からの秒数）。空欄にすると前のセリフの後に自動で続きます。"
                               inputClassName="input text-sm"
@@ -2207,7 +2514,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               className="btn btn-ghost btn-icon text-sm"
                               onClick={() => { setNarrationPlayError(false); audioPreview.play(`line:${line.lineId}`, lineAudio, () => setNarrationPlayError(true)); }}
                             >
-                              {audioPreview.playingKey === `line:${line.lineId}` ? "■ 停止" : "▶ 再生"}
+                              {/* 再生/停止は全画面で SVG アイコンに統一（Unicode グリフ「▶ ■」をやめる・#547 P3-1）。
+                                  仕上がり確認・切替/動き再生と同じ PlayIcon/StopIcon＋テキスト（間隔は .btn の gap）。 */}
+                              {audioPreview.playingKey === `line:${line.lineId}` ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                              {audioPreview.playingKey === `line:${line.lineId}` ? "停止" : "再生"}
                             </button>
                           )}
                         </div>
@@ -2269,7 +2579,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                         audioPreview.play("scene", narrationAudioById[selected.sceneId], () => setNarrationPlayError(true));
                       }}
                     >
-                      {audioPreview.playingKey === "scene" ? "■ 停止" : "▶ 再生"}
+                      {/* 再生/停止は SVG アイコンに統一（#547 P3-1）。 */}
+                      {audioPreview.playingKey === "scene" ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                      {audioPreview.playingKey === "scene" ? "停止" : "再生"}
                     </button>
                   )}
                   <button
@@ -2306,7 +2618,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   title="カーソル位置でこの場面を2つに分ける"
                   disabled={
                     selected.narration.text.trim().length < 2 ||
-                    selected.durationSec < 2 * SCENE_MIN_DURATION_SEC
+                    selected.durationSec <= 0
                   }
                   onClick={() => splitScene(selected.sceneId, lineRef.current?.selectionStart ?? 0)}
                 >
@@ -2379,16 +2691,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </CollapsibleSection>
 
 
-            <CollapsibleSection title="表示時間">
+            <CollapsibleSection title="表示時間" defaultOpen={false}>
             <div className="field">
               <label className="field-label" htmlFor="duration">表示時間（秒）</label>
               <input
                 id="duration"
                 className="input"
                 type="number"
-                min={SCENE_MIN_DURATION_SEC}
-                max={SCENE_MAX_DURATION_SEC}
-                step={1}
+                min={0.1}
+                max={VIDEO_HARD_MAX_SEC}
+                step={SEC_STEP}
                 value={durationDraft?.sceneId === selected.sceneId ? durationDraft.value : selected.durationSec}
                 onFocus={() => setDurationDraft({ sceneId: selected.sceneId, value: String(selected.durationSec) })}
                 onChange={(e) => setDurationDraft({ sceneId: selected.sceneId, value: e.target.value })} // 途中値は store に入れない＝範囲外値を自動保存しない（#411 P1）
@@ -2484,6 +2796,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           </div>
         </div>
       </div>
+      </ExportLock>
     </div>
   );
 }

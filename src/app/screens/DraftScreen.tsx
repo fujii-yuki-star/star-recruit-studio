@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { useProjectStore } from "../store/projectStore";
+import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { willSendExternally } from "../../infrastructure/aiClient";
 import { ORIENTATION, type Orientation } from "../../domain/enums";
-import { narrationProgress } from "../../domain/voice/narrationProgress";
 import { sceneNeedsVoice } from "../../domain/project/narrationLines";
 import { sceneToDraftRow, warningsToDraftWarnings } from "../adapters";
 import { PageHead } from "../components/ui";
-import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
-import { StartNewVideoButton } from "../components/StartNewVideoButton";
+import { BulkVoiceControls } from "../components/BulkVoiceControls";
+import { UndoRedoButtons } from "../components/UndoRedoButtons";
+import { ExportLockBanner } from "../components/ExportLockBanner";
+import { WarningBanner, VoiceStatusBadge } from "../components/states";
+import { NoScenesState } from "../components/NoScenesState";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   CheckIcon,
@@ -31,9 +33,11 @@ interface DraftProps {
 }
 
 export function DraftScreen({ onNavigate }: DraftProps) {
-  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, generateAllNarrations, isGeneratingNarration, undo, redo } =
+  const { status, draftFromAi, scenes, parts, templates, assets, warnings, meta, generate, autoGenerateIfSafe, addScene, removeScene, moveScene, moveSceneToIndex, duplicateScene, changeOrientation, setEditingSceneId, setConfirmReturnTo, setPreviewReturnTo, isGeneratingNarration, undo, redo } =
     useProjectStore();
-  // 取り消し/やり直し（ADR-0020・#413）。たたき台の削除/並べ替えも戻せる（キーボード Ctrl+Z/Y は App で全画面有効）。
+  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中は編集を止める（#570 P2）
+  // 取り消し/やり直し（ADR-0020・#413）。たたき台の削除/並べ替えも戻せる（キーボード Ctrl+Z/Y は App で登録・
+  // 有効画面はたたき台/場面編集/タイムライン編集＝UNDO_REDO_SCREENS・#547 P1-1）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
@@ -72,14 +76,14 @@ export function DraftScreen({ onNavigate }: DraftProps) {
     }
   }
 
-  // セリフ音声の生成進捗（行単位）。「全場面の声を作成」ボタンの表示条件・進捗表示に使う。
-  const { done: narrDone, total: narrTotal } = narrationProgress(scenes);
-  // 全場面の声を作成（既存 action を呼ぶだけ＝場面編集の一括作成と同じ）。完了後に「まだ声が要る場面」を数えて通知する。
-  const runBulkVoice = async () => {
-    setVoiceResult(null);
-    await generateAllNarrations();
-    const remaining = useProjectStore.getState().scenes.filter(sceneNeedsVoice).length;
-    setVoiceResult({ remaining });
+  // 一括作成が終わったら「まだ声が要る場面」を数えて通知する（進捗・中止は共通操作が担当・#547 P2-6）。
+  // 中止したときは出さない：止めたのは利用者で、残件は進捗（声 5/10（中止しました））が示している。
+  const onBulkVoiceFinished = ({ cancelled }: { cancelled: boolean }) => {
+    if (cancelled) {
+      setVoiceResult(null);
+      return;
+    }
+    setVoiceResult({ remaining: useProjectStore.getState().scenes.filter(sceneNeedsVoice).length });
   };
 
   // たたき台へ直接来た場合は生成する（本実装では保存済みプロジェクトの読込に置き換え）
@@ -92,36 +96,21 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
   if (rows.length === 0) {
     // 場面ゼロだがプロジェクトはある（白紙開始／全削除＝status "ready"）＝手動で場面を足す導線を出す（#393）。
-    // status "idle"（まだ何も無い）はウィザードへ誘導。生成中は「作成中」表示。
-    const started = status === "ready";
+    // status "idle"（まだ何も無い）はウィザードへ誘導。生成中は「作成中」表示。失敗は理由＋復帰の2択（#590）。
+    // 見分けと文言は他3画面（公開前チェック/仕上がり確認/書き出し）と共有する＝`NoScenesState`。
     return (
       <div className="main-scroll">
         <PageHead title="動画のたたき台を確認" desc="台本表で場面を確認・修正できます。" />
-        <EmptyState
-          title={status === "generating" ? "動画案を作成中です…" : started ? "場面を追加して作り始めましょう" : "まだ動画案がありません"}
-          message={
-            started
-              ? "「場面を追加」で最初の場面を作り、セリフ・素材・見た目を設定していきましょう。"
-              : "「新しい動画を作る」から、会社情報と素材を入れて動画案を作成しましょう。"
-          }
-          action={
-            started ? (
-              <button className="btn btn-primary" onClick={() => addScene()}>
-                <PlusIcon size={18} />
-                場面を追加
-              </button>
-            ) : (
-              <StartNewVideoButton onNavigate={onNavigate} />
-            )
-          }
-        />
+        <ExportLockBanner onNavigate={onNavigate} />
+        <NoScenesState purpose="ここで場面を直せます" onNavigate={onNavigate} onAddScene={() => addScene()} />
       </div>
     );
   }
 
   return (
     <div className="main-scroll">
-      <div className="content-with-yuko">
+      <ExportLockBanner onNavigate={onNavigate} />
+      <div className="content-with-yuko" inert={isExporting}>
         <div>
           <PageHead
             title="動画のたたき台を確認"
@@ -132,10 +121,10 @@ export function DraftScreen({ onNavigate }: DraftProps) {
             }
           />
 
-          {/* 取り消し/やり直し（#413）＝たたき台の削除・並べ替えも戻せる。キーボードは Ctrl+Z/Y（全画面・App で有効）。 */}
+          {/* 取り消し/やり直し（#413）＝たたき台の削除・並べ替えも戻せる。キーボードは Ctrl+Z/Y（App で登録・この画面は有効・#547 P1-1）。 */}
           <div className="row gap-sm" style={{ justifyContent: "flex-end", marginBottom: "var(--gap-sm)" }}>
-            <button className="btn btn-ghost btn-icon text-sm" onClick={undo} disabled={!canUndo} aria-label="取り消す" title="取り消す（Ctrl+Z）">↶ 取り消す</button>
-            <button className="btn btn-ghost btn-icon text-sm" onClick={redo} disabled={!canRedo} aria-label="やり直す" title="やり直す（Ctrl+Y）">↷ やり直す</button>
+            {/* 書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも disabled にして誤認を防ぐ（ADR-0026④・#547 P3-12）。 */}
+            <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} disabled={isExporting} />
           </div>
 
           {/* AI 生成直後だけ「ゆうこ(AI)が作成した」旨を出す（白紙/手動/読込済みでは出さない＝表示と実挙動の一致・#467/ADR-0026）。 */}
@@ -164,15 +153,10 @@ export function DraftScreen({ onNavigate }: DraftProps) {
             </div>
           )}
 
-          {/* 全場面の声をまとめて作成（音声バッジは見せているので作る手段もここに置く・#413）。すべて作成済みなら隠す。 */}
-          {narrTotal > 0 && !(narrDone === narrTotal && !isGeneratingNarration) && (
-            <div className="row-between mb">
-              <span className="text-muted">声 <strong>{narrDone}/{narrTotal}</strong>{isGeneratingNarration ? "（作成中…）" : ""}</span>
-              <button className="btn btn-primary" onClick={() => void runBulkVoice()} disabled={isGeneratingNarration}>
-                {isGeneratingNarration ? "作成中…" : "全場面の声を作成"}
-              </button>
-            </div>
-          )}
+          {/* 全場面の声をまとめて作成（音声バッジは見せているので作る手段もここに置く・#413）。進捗・中止・
+              「すべて作成済みなら隠す」の条件は共通操作へ集約（3画面で同じ見え方にする＝#547 P2-6・ADR-0026②）。
+              専用の行なので行ごと共通操作に任せる＝隠れるときに空の行の余白を残さない。 */}
+          <BulkVoiceControls rowClassName="row-between mb" hideWhenNothingToDo onFinished={onBulkVoiceFinished} />
           {/* 一括作成の完了通知（現在は進捗が消えるだけ＝#413）。全部できたら仕上がり確認へ誘導、一部失敗は次の行動を案内。 */}
           {voiceResult && !isGeneratingNarration &&
             (voiceResult.remaining === 0 ? (

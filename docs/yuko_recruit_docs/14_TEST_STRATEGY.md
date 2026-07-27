@@ -38,10 +38,11 @@
 | 内部データスキーマ適合 | `11` / `project`・`template.schema` | `project.sample`・テンプレはpass／異常はfail | schema |
 | **AI出力→Scene変換** | `12 §8` | `ai-video-plan.sample` → 期待 `project.sample` に一致（採番・order・partId） | unit |
 | poseTag解決 | `11 §3.5` / `12 §8.3` | `smile`→該当yuko／不一致→既定yuko＋警告／yuko皆無→`enabled=false` | unit |
-| durationのclamp | `11 §4` / `12 §8.2` | `<3`→3／`>`上限→上限／範囲内→不変 | unit |
-| アセット⇄レイヤー束縛 | `11 §5` | `assetRefs`キー↔layer id一致／null＋required→警告／slotType不整合→警告 | unit |
+| durationのclamp（手編集） | `11 §9` | `>0` は不変（**場面ごとの上限/下限なし**・#553）／`<=0`・NaN→既定8／`>600`→600 | unit |
+| durationのclamp（AI 生成） | `11 §9` / `12 §8.2` | `<3`→3／`>`テンプレ上限 or 15→上限（生成の**目安**＝手編集は縛らない） | unit |
+| アセット⇄レイヤー束縛 | `11 §5` | `assetRefs`キー↔layer id 一致で描画・実効使用（一致しないキーは休眠＝ADR-0030 追補6）／null＋required→警告／slotType不整合→警告 | unit |
 | 検証 V1–V11 | `11 §8` | 各チェックの正常・異常（templateId/assetId実在、合計尺、シーン数上限 等） | unit |
-| 自動補正 | `11 §9` | templateId不在→同category既定／assetId不在→null＋候補／補正は`warnings`へ記録 | unit |
+| 自動補正 | `11 §9` | templateId不在→**取り込み時のみ**同category既定（既存場面は置換せず警告＝`15 §6`・#547）／assetId不在→null＋候補／補正は`warnings`へ記録 | unit |
 | 声・音量の解決順序 | `11 §6` | `scene > project > 定数`／null=継承 を各フィールドで | unit |
 | 音量ミックス | `05 §14` / `11 §4` | 既定（ナレ1.0/BGM0.25/元音声0.20）と上書き値の合成 | unit |
 | テキスト折返し・あふれ | `04 §9` / `05 §10` | maxLines超過→警告／autoResize→縮小／上限超過→`TEXT_OVERFLOW` | unit |

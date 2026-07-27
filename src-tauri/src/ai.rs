@@ -36,6 +36,9 @@ fn http_client() -> &'static reqwest::Client {
         reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(AI_REQUEST_TIMEOUT_SECS))
             .build()
+            // build() が失敗するのは TLS バックエンドの初期化不能など**致命的な環境不備のみ**＝実質到達不能。
+            // その場合は HTTP を一切送れず継続に意味がないため、ここは fail-fast（voicevox.rs の `Client::new()` も
+            // 内部で同様に panic する＝同方針）。通常の通信失敗・タイムアウトは送信時に Result で扱う（ここではない）。
             .expect("HTTP クライアントの初期化に失敗しました")
     })
 }

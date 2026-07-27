@@ -23,6 +23,7 @@ describe("PreviewScreen 場面ジャンプ（#413）", () => {
       templates: sampleTemplates,
       parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002", "scene_003"] }],
       scenes: [scene("scene_001", 1), scene("scene_002", 2), scene("scene_003", 3)],
+      status: "ready", // 自動生成（autoGenerateIfSafe）を発火させない＝この場面が差し替えられない（#620）
       saveStatus: "saved",
     });
   });

@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isExportBusy, useProjectStore } from './projectStore';
 import * as fsMod from '../../infrastructure/projectFs';
+import * as assetFsMod from '../../infrastructure/assetFs';
+import * as userTemplateFsMod from '../../infrastructure/userTemplateFs';
 import * as aiClient from '../../infrastructure/aiClient';
 import { assembleProject } from '../../domain/project/persistence';
 import { sampleTemplates } from '../../infrastructure/sampleData';
 import { MockVoiceProvider } from '../../infrastructure/voiceProviders/mockVoiceProvider';
 import { MockAiProvider } from '../../infrastructure/aiProviders/mockAiProvider';
-import type { Scene } from '../../domain/project/types';
+import type { Asset, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
 function scene(id: string, order: number, partId = 'part_001'): Scene {
@@ -346,6 +348,99 @@ describe('projectStore テンプレ既定素材（ADR-0021）', () => {
     expect(id).toBeNull();
     expect(useProjectStore.getState().templateAssetSrcById).toEqual({});
   });
+
+  // #570 P1 レビュー：書き出し中は見た目パターン（＝場面が使う templateId）とその既定素材を固定する。使用中テンプレを
+  // 保存/削除すると MP4(開始時 snap の見た目) と 保存/仕上がり確認(新) が食い違う（15§4・ADR-0026④＝α-4 パリティ）。
+  describe('書き出し中は見た目パターンを固定（#570 P1 レビュー）', () => {
+    const BUSY = /書き出しが終わるまで/;
+    afterEach(() => { useProjectStore.getState().setExportRun({ phase: 'idle' }); useProjectStore.setState({ isTemplateMutating: false }); });
+
+    it('saveUserTemplate は書き出し中 no-op＋案内（一覧に反映しない）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      useProjectStore.getState().setExportRun({ phase: 'rendering' });
+      const before = useProjectStore.getState().templates.length;
+      await useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_099'));
+      expect(useProjectStore.getState().templates).toHaveLength(before); // 追加されない
+      expect(useProjectStore.getState().templateError).toMatch(BUSY);
+    });
+
+    it('deleteUserTemplate は書き出し中 no-op＋案内（使用中の場面を標準へ置換しない）／false を返す', async () => {
+      useProjectStore.setState({
+        templates: [...sampleTemplates, userTmpl('user_tmpl_001')],
+        scenes: [{ ...scene('scene_001', 1), templateId: 'user_tmpl_001' }],
+        templateError: null,
+      });
+      useProjectStore.getState().setExportRun({ phase: 'encoding' });
+      const ok = await useProjectStore.getState().deleteUserTemplate('user_tmpl_001');
+      expect(ok).toBe(false);
+      expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_001')).toBe(true); // 消えない
+      expect(useProjectStore.getState().scenes[0].templateId).toBe('user_tmpl_001'); // 置換されない＝MP4 と一致
+      expect(useProjectStore.getState().templateError).toMatch(BUSY);
+    });
+
+    it('registerTemplateAsset は書き出し中 no-op＋案内（null）', async () => {
+      useProjectStore.setState({ templateAssetSrcById: {}, templateError: null });
+      useProjectStore.getState().setExportRun({ phase: 'rendering' });
+      const id = await useProjectStore.getState().registerTemplateAsset({} as File);
+      expect(id).toBeNull();
+      expect(useProjectStore.getState().templateError).toMatch(BUSY);
+    });
+
+    it('addTemplatePack（取り込みパック）も書き出し中 no-op＋案内（同 id 上書きを止める）', () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], templateError: null });
+      useProjectStore.getState().setExportRun({ phase: 'rendering' });
+      const before = useProjectStore.getState().templates.length;
+      useProjectStore.getState().addTemplatePack([userTmpl('user_tmpl_pack_1')]);
+      expect(useProjectStore.getState().templates).toHaveLength(before); // 追加/上書きしない
+      expect(useProjectStore.getState().templateError).toMatch(BUSY);
+    });
+
+    // 非同期境界の排他（#570 P1 レビュー）：保存は最初の await 前に isTemplateMutating を立てる＝書き出し開始側がこれを
+    // 見て止まる（isImporting と対称）。「保存を押す→完了前に書き出す」で MP4(旧)と一覧/保存(新)が食い違うのを防ぐ。
+    it('saveUserTemplate は保存中 isTemplateMutating を立て、完了後に戻す（保存はファイル/一覧まで完走）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], isTemplateMutating: false });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      let resolveSave: () => void = () => {};
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockReturnValue(new Promise<void>((r) => { resolveSave = () => r(); }));
+      const p = useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_flag'));
+      expect(useProjectStore.getState().isTemplateMutating).toBe(true); // 保存中は排他が立つ＝ExportScreen がこれを見て止まる
+      resolveSave();
+      await p;
+      expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 完了で戻す
+      expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_flag')).toBe(true); // 一覧まで完走（中断しない）
+      spy.mockRestore();
+    });
+
+    // 自己再入ガード（#570 レビュー・correctness）：進行中の見た目変更は1本だけ＝flag を真の相互排他に保つ。無いと2本目の
+    // finally が先に flag を落とし、その隙に書き出しが割り込む（MP4(旧)・保存/画面(新)の食い違い＝#547 P2-1 が防ぎたい不整合）。
+    it('保存中の二重 saveUserTemplate は2本目を捨てる（進行中は1本・flag は1本目に対応し続ける）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], isTemplateMutating: false });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      let resolveSave: () => void = () => {};
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockReturnValue(new Promise<void>((r) => { resolveSave = () => r(); }));
+      const p1 = useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_a'));
+      expect(useProjectStore.getState().isTemplateMutating).toBe(true); // 1本目が進行中
+      await useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_b')); // 2本目：進行中ゆえ即 return（await 前）
+      expect(spy).toHaveBeenCalledTimes(1); // ファイル書き込みは1本目だけ＝2本目は素通りしない
+      expect(useProjectStore.getState().isTemplateMutating).toBe(true); // 2本目の早期 return では flag を落とさない＝1本目に対応
+      resolveSave();
+      await p1;
+      expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 1本目の完了で戻る
+      spy.mockRestore();
+    });
+
+    // finally の解除（#570 レビュー）：保存が失敗しても flag を戻す＝書き出しが永久にブロックされない。次の行動も出す（§2-5）。
+    it('saveUserTemplate が失敗しても isTemplateMutating を戻し、案内を出す（finally）', async () => {
+      useProjectStore.setState({ templates: [...sampleTemplates], isTemplateMutating: false, templateError: null });
+      useProjectStore.getState().setExportRun({ phase: 'idle' });
+      const spy = vi.spyOn(userTemplateFsMod, 'saveUserTemplate').mockRejectedValue(new Error('disk full'));
+      await useProjectStore.getState().saveUserTemplate(userTmpl('user_tmpl_fail'));
+      expect(useProjectStore.getState().isTemplateMutating).toBe(false); // 失敗でも finally で戻す
+      expect(useProjectStore.getState().templateError).toMatch(/保存できませんでした/); // 次の行動（もう一度お試しください）
+      expect(useProjectStore.getState().templates.some((t) => t.templateId === 'user_tmpl_fail')).toBe(false); // 失敗＝一覧に入らない
+      spy.mockRestore();
+    });
+  });
 });
 
 describe('projectStore editingSceneId（#400・場面編集の遷移ペイロード）', () => {
@@ -375,7 +470,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     useProjectStore.setState({
       meta: { ...useProjectStore.getState().meta, projectId: 'proj_open' },
       scenes: [scene('scene_001', 1)],
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
     });
   });
 
@@ -421,6 +516,24 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     await useProjectStore.getState().deleteProject('proj_other'); // 別プロジェクトは安全＝許可
     expect(spy).toHaveBeenCalledWith('proj_other');
     spy.mockRestore();
+  });
+
+  it('書き出し中は「開いているプロジェクト」の改名を弾く／別プロジェクトの改名は許可（project.json の lost-update 防止・#570 レビュー）', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    const validDoc = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(validDoc);
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('proj_other/project.json');
+    const beforeName = useProjectStore.getState().meta.projectName;
+    await useProjectStore.getState().renameProject('proj_open', '新しい名前'); // 開いている＝書き出し中の保存と同一 project.json を取り合う
+    expect(load).not.toHaveBeenCalled(); // read-modify-write に到達しない＝保存の更新を消さない
+    expect(save).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().meta.projectName).toBe(beforeName); // 凍結中の meta も触らない
+    await useProjectStore.getState().renameProject('proj_other', '別名'); // 開いていない別プロジェクトは書き出しと無関係＝許可
+    expect(save).toHaveBeenCalledTimes(1);
+    const [savedId, savedJson] = save.mock.calls[0];
+    expect(savedId).toBe('proj_other');
+    expect(JSON.parse(savedJson).projectName).toBe('別名'); // 許可側は新しい名前が実際に書き戻される（no-op でなく完走）
+    load.mockRestore(); save.mockRestore();
   });
 
   it('開いているプロジェクトを削除したら編集状態を新規化する（自動保存での復活防止・#383）', async () => {
@@ -480,7 +593,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
 
     // idle（done は非busy）：読み込み成功し、前の結果を持ち越さず exportRun が idle にリセットされる。
     useProjectStore.setState({
-      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '', cancelling: false },
+      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
     });
     await useProjectStore.getState().loadProject('proj_any');
     expect(loadSpy).toHaveBeenCalledWith('proj_any');
@@ -489,6 +602,259 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
 
     loadSpy.mockRestore();
     setLastSpy.mockRestore();
+  });
+});
+
+// #547 P2-1：素材の追加/削除/差し替え/編集も書き出し中はブロックする（#379 の素材版・ADR-0026②）。プロジェクト切替
+// (loadProject 等)は #379 でガード済みなのに素材編集だけ漏れていた。書き出しは素材リストをスナップショットして進むので
+// 追加/削除/メタ編集は進行中の書き出しに波及しないが、画像/BGM の同一パス上書き（setAssetImage/setBgm）は書き出しが
+// disk から読むファイルと競合しうる（実害）＝一貫して固定する。ガードは無言 no-op でなく案内(importError/bgmError)を出す
+// ＝素材画面以外（場面編集/ウィザードも importError 表示）からの操作でも「押しても効かない」を避ける（ADR-0026④）。
+describe('projectStore 書き出し中は素材編集を弾く（#547 P2-1・ADR-0026②）', () => {
+  const asset = (id: string): Asset => ({ assetId: id, assetType: 'image', displayName: id, filePath: `assets/${id}.png` });
+  const BUSY_MSG = /書き出しが終わるまで/; // ガードが出す案内（無言 no-op でない＝ADR-0026④）
+  beforeEach(() => {
+    useProjectStore.setState({
+      meta: { ...useProjectStore.getState().meta, projectId: 'proj_open' },
+      assets: [asset('asset_001')],
+      assetSrcById: { asset_001: 'data:image/png;base64,x' },
+      importError: null,
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+    });
+  });
+  // 書き出し中フェーズを次の describe へ漏らさない（startBlank 等は #379 で exportRun ガード＝leak すると後続が no-op で落ちる）。
+  afterEach(() => useProjectStore.getState().setExportRun({ phase: 'idle' }));
+
+  it('書き出し中は removeAsset が no-op＋案内を出す／idle では消える', () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.getState().removeAsset('asset_001');
+    expect(useProjectStore.getState().assets).toHaveLength(1); // no-op
+    expect(useProjectStore.getState().assetSrcById.asset_001).toBeDefined(); // src も落とさない
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG); // 無言でない
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().removeAsset('asset_001');
+    expect(useProjectStore.getState().assets).toHaveLength(0); // idle では通常どおり消える
+  });
+
+  it('書き出し中は updateAsset が no-op（保存も idle にしない）＋案内／idle では反映', () => {
+    useProjectStore.getState().setExportRun({ phase: 'encoding' });
+    useProjectStore.setState({ saveStatus: 'saved' });
+    useProjectStore.getState().updateAsset('asset_001', (a) => ({ ...a, displayName: 'changed' }));
+    expect(useProjectStore.getState().assets[0].displayName).toBe('asset_001'); // no-op
+    expect(useProjectStore.getState().saveStatus).toBe('saved'); // 未保存(idle)にも倒さない
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG);
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().updateAsset('asset_001', (a) => ({ ...a, displayName: 'changed' }));
+    expect(useProjectStore.getState().assets[0].displayName).toBe('changed'); // idle では反映
+  });
+
+  it('書き出し中は addAssetByPath が no-op＋案内／idle では素材を増やす（ガード反転も検知）', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    await useProjectStore.getState().addAssetByPath('/some/where/photo.png');
+    expect(useProjectStore.getState().assets).toHaveLength(1); // 増えない（ガードが最初に返る）
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG);
+    // idle 対照：非 Tauri でも楽観追加は走る（importAssetByPath は null 返しでもストア追加は残る）＝ガード条件反転を検知。
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    await useProjectStore.getState().addAssetByPath('/some/where/photo.png');
+    expect(useProjectStore.getState().assets.length).toBeGreaterThan(1);
+  });
+
+  it('書き出し中は setAssetImage/addAsset が no-op＋案内（file に触れる前に返る）', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.setState({ importError: null });
+    await useProjectStore.getState().setAssetImage('asset_001', {} as File); // ガードが最初＝File は読まない
+    // 案内を検証する（node は FileReader 未定義で filePath/isImporting はガード有無に依らず不変＝判別力が無いため案内で見る）。
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG); // ガードを外すと別メッセージ/未設定になり red
+    expect(useProjectStore.getState().assets[0].filePath).toBe('assets/asset_001.png'); // 差し替わらない
+    expect(useProjectStore.getState().isImporting).toBe(false); // 取り込みにも入らない
+    useProjectStore.setState({ importError: null });
+    await useProjectStore.getState().addAsset({} as File);
+    expect(useProjectStore.getState().assets).toHaveLength(1); // 増えない
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG);
+  });
+
+  it('書き出し中は setBgm が no-op＋BGM 用の案内（bgmError）', async () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.setState({ bgmError: null });
+    await useProjectStore.getState().setBgm({ name: 'song.mp3', dataUrl: 'data:audio/mp3;base64,x' });
+    expect(useProjectStore.getState().assets.some((a) => a.assetType === 'bgm')).toBe(false); // BGM は入らない
+    expect(useProjectStore.getState().bgmError).toMatch(BUSY_MSG); // BGM ピッカーが見せる案内
+  });
+
+  // #570 P1 レビュー：標準BGMの選択・音量・オンオフ（updateBgmSettings/setBundledBgm）も書き出し中は固定する。
+  it('書き出し中は updateBgmSettings / setBundledBgm が no-op＋BGM案内（設定だけ変わって効かないを防ぐ）', () => {
+    useProjectStore.getState().setExportRun({ phase: 'encoding' });
+    useProjectStore.setState({
+      bgmError: null,
+      meta: { ...useProjectStore.getState().meta, bgmSettings: { enabled: true, volume: 0.25, bundledBgmId: undefined, assetId: null } },
+    });
+    useProjectStore.getState().updateBgmSettings({ volume: 0.5 });
+    expect(useProjectStore.getState().meta.bgmSettings?.volume).toBe(0.25); // no-op（音量は変わらない）
+    expect(useProjectStore.getState().bgmError).toMatch(BUSY_MSG);
+    useProjectStore.setState({ bgmError: null });
+    useProjectStore.getState().setBundledBgm('bundled_x' as never);
+    expect(useProjectStore.getState().meta.bgmSettings?.bundledBgmId).toBeUndefined(); // no-op（曲は変わらない）
+    expect(useProjectStore.getState().bgmError).toMatch(BUSY_MSG);
+  });
+});
+
+// #570 P1 レビュー：取り込みと書き出し開始の相互排他。取り込みは最初の await 前に isImporting を立て、書き込み直前に
+// 再チェックする。書き出し側（ExportScreen）は開始前に isImporting を見て止まる（別ファイルのコンポーネントテストで検証）。
+describe('projectStore 取り込み↔書き出しの相互排他（#570 P1）', () => {
+  const BUSY_MSG = /書き出しが終わるまで/;
+  beforeEach(() => {
+    useProjectStore.setState({
+      meta: { ...useProjectStore.getState().meta, projectId: 'proj_open' },
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: 'A', filePath: 'assets/asset_001.png' }],
+      assetSrcById: { asset_001: 'data:image/png;base64,x' },
+      importError: null,
+      isImporting: false,
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+    });
+  });
+  afterEach(() => { useProjectStore.getState().setExportRun({ phase: 'idle' }); useProjectStore.setState({ isImporting: false }); });
+
+  it('取り込みは最初の await の前に isImporting を立て、待機中に書き出しが始まったら上書きせず戻る（残り窓）', async () => {
+    // fileToDataUrl を保留にして「取り込みの await 中」を作る（deferred mock＝競合の再現）。
+    let resolveRead!: (v: string) => void;
+    const spy = vi.spyOn(assetFsMod, 'fileToDataUrl').mockReturnValue(new Promise<string>((r) => { resolveRead = r; }));
+    const p = useProjectStore.getState().setAssetImage('asset_001', {} as File); // fileToDataUrl で待機
+    expect(useProjectStore.getState().isImporting).toBe(true); // 最初の await の前にロック取得済み（書き出し側はこれを見て止まる）
+    // 待機中に書き出しが始まる（開始チェックをすり抜けた残り窓）。
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    resolveRead('data:image/png;base64,NEW');
+    await p;
+    expect(useProjectStore.getState().assets[0].filePath).toBe('assets/asset_001.png'); // 同一パスを上書きしていない
+    expect(useProjectStore.getState().importError).toMatch(BUSY_MSG); // 黙って壊さず理由を出す（ADR-0026④）
+    expect(useProjectStore.getState().isImporting).toBe(false); // ロックは解放
+    spy.mockRestore();
+  });
+});
+
+// #570 P1 レビュー：素材/BGM だけでなく**全ての文書編集**（場面・音声・構成）を書き出し中は固定する（15§4・ADR-0026④）。
+// 書き出しは開始時スナップショットで進むので、編集すると「画面/保存は新・MP4 は旧」の不一致になる。UI はバナー/無効化で理由を示す。
+describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4）', () => {
+  beforeEach(() => {
+    useProjectStore.setState({
+      scenes: [scene('scene_001', 1)],
+      parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
+      past: [], future: [],
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+    });
+  });
+  afterEach(() => useProjectStore.getState().setExportRun({ phase: 'idle' }));
+
+  it('updateScene は書き出し中 no-op／idle では反映（場面内容が MP4 と食い違わない）', () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.getState().updateScene('scene_001', (sc) => ({ ...sc, durationSec: 99 }));
+    expect(useProjectStore.getState().scenes[0].durationSec).toBe(8); // no-op
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    useProjectStore.getState().updateScene('scene_001', (sc) => ({ ...sc, durationSec: 99 }));
+    expect(useProjectStore.getState().scenes[0].durationSec).toBe(99); // idle では反映
+  });
+
+  it('updateVoiceSettings（読み上げ音量）は書き出し中 no-op／idle では反映', () => {
+    useProjectStore.getState().updateVoiceSettings({ volume: 0.7 }); // idle（beforeEach）で設定
+    expect(useProjectStore.getState().meta.voiceSettings?.volume).toBe(0.7);
+    useProjectStore.getState().setExportRun({ phase: 'encoding' });
+    useProjectStore.getState().updateVoiceSettings({ volume: 0.2 });
+    expect(useProjectStore.getState().meta.voiceSettings?.volume).toBe(0.7); // no-op（0.2 にならない）
+  });
+
+  it('場面構成（addScene/removeScene）も書き出し中は固定＝MP4 の場面と食い違わない', () => {
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    expect(useProjectStore.getState().addScene()).toBe(''); // 追加しない（sentinel）
+    expect(useProjectStore.getState().scenes).toHaveLength(1);
+    useProjectStore.getState().removeScene('scene_001');
+    expect(useProjectStore.getState().scenes).toHaveLength(1); // 消えない
+  });
+
+  // 全20の文書編集アクションは同型の1行ガード。代表テストで「書き出し中は pushHistory 前に返る＝履歴を積まない」を一括検証
+  // （ガードを外すと各アクションが pushHistory して past が伸び red 化＝回帰検知・#570 P1 レビュー tests）。
+  it.each<[string, () => void]>([
+    ['updateScene', () => useProjectStore.getState().updateScene('scene_001', (sc) => ({ ...sc, durationSec: 5 }))],
+    ['moveScene', () => useProjectStore.getState().moveScene('scene_001', 'up')],
+    ['moveSceneToIndex', () => useProjectStore.getState().moveSceneToIndex('scene_001', 0)],
+    ['duplicateScene', () => { useProjectStore.getState().duplicateScene('scene_001'); }],
+    ['splitScene', () => { useProjectStore.getState().splitScene('scene_001', 1); }],
+    ['addAnimation', () => { useProjectStore.getState().addAnimation('scene_001', 'el_1', []); }],
+    ['updateAnimation', () => useProjectStore.getState().updateAnimation('anim_1', [])],
+    ['removeAnimation', () => useProjectStore.getState().removeAnimation('anim_1')],
+    ['removeAnimationsForElements', () => useProjectStore.getState().removeAnimationsForElements('scene_001', ['el_1'])],
+    ['addOverlayClip', () => { useProjectStore.getState().addOverlayClip({ track: 'telop' }); }],
+    ['updateOverlayClip', () => useProjectStore.getState().updateOverlayClip('clip_1', { startSec: 1 })],
+    ['removeOverlayClip', () => useProjectStore.getState().removeOverlayClip('clip_1')],
+    ['applyProjectInfo', () => useProjectStore.getState().applyProjectInfo({ companyInfo: { name: 'x' } } as never)],
+    ['changeOrientation', () => { useProjectStore.getState().changeOrientation('9:16'); }],
+    ['setFontId', () => useProjectStore.getState().setFontId('gen-interface-jp' as never)],
+    ['setProjectName', () => useProjectStore.getState().setProjectName('x')],
+    ['updateVoiceSettings', () => useProjectStore.getState().updateVoiceSettings({ volume: 0.4 })],
+  ])('%s は書き出し中に履歴を積まない＝ガードが pushHistory 前に返る', (_name, act) => {
+    useProjectStore.setState({ past: [] });
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    act();
+    expect(useProjectStore.getState().past).toHaveLength(0); // ガードで文書に触れず返る（idle なら pushHistory で past が伸びる）
+  });
+
+  // 音声生成も固定（#570 P1 レビュー・履歴外＝pushHistory 走査の外）。書き出しは snapNarration を使うので、書き出し中に
+  // 声を作ると「保存/プレビューには入るが今のMP4には入らない」＝バナー「編集できません」と矛盾する。
+  it('generateNarration / generateAllNarrations は書き出し中 no-op（声を作らない）', async () => {
+    useProjectStore.setState({ scenes: [{ ...scene('scene_001', 1), narration: { text: 'こんにちは', status: 'none' } }] });
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    await useProjectStore.getState().generateNarration('scene_001');
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('none'); // 生成しない（ガードが最初に返る）
+    await useProjectStore.getState().generateAllNarrations();
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('none');
+    expect(useProjectStore.getState().isGeneratingNarration).toBe(false); // 一括生成にも入らない
+  });
+
+  it('generate（動画案生成）は書き出し中 no-op（生成を始めない）', async () => {
+    useProjectStore.setState({ scenes: [], status: 'ready' });
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    await useProjectStore.getState().generate();
+    expect(useProjectStore.getState().status).not.toBe('generating'); // 開始しない（ガードが status チェックの直後で返る）
+    expect(useProjectStore.getState().scenes).toHaveLength(0);
+  });
+
+  // 「生成開始→（残り窓で）書き出し開始→生成完了」の往復（deferred synthesize）。開始チェックをすり抜けても、完了側が
+  // 書き出し中を再確認して音声を書き込まない＝無音MP4/「保存だけ新」の不整合を防ぐ（#570 P1 レビュー・完了側の再確認）。
+  it('声作成中に書き出しが始まり合成が完了しても、音声を書き込まず none へ戻す', async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene('scene_001', 1), narration: { text: 'こんにちは', status: 'none' } }],
+      narrationAudioById: {}, isGeneratingNarration: false,
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+    });
+    let resolveSynth: (v: unknown) => void = () => {};
+    const synthP = new Promise((r) => { resolveSynth = r; });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockReturnValue(synthP as never);
+    const genP = useProjectStore.getState().generateNarration('scene_001'); // 開始＝synth 待ちで pending（開始時は idle なので top ガードは通る）
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('pending');
+    useProjectStore.getState().setExportRun({ phase: 'rendering' }); // 合成 in-flight 中に書き出しが始まる（すり抜けた残り窓）
+    resolveSynth({ audioDataUrl: 'data:audio/wav;base64,AAAA', durationSec: 1 }); // 裏で合成完了
+    await genP;
+    expect(useProjectStore.getState().narrationAudioById['scene_001']).toBeUndefined(); // 音声を書き込まない
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('none'); // 作り直せるよう none へ
+    spy.mockRestore();
+  });
+
+  // 掛け合い（scene.lines）でも完了側で書き込まないことを固定（#570 P2 レビュー・単一だけでなく行ごと経路も）。
+  it('掛け合いでも：声作成中に書き出しが始まり合成完了しても、行の音声を書き込まず none へ戻す', async () => {
+    useProjectStore.setState({
+      scenes: [{ ...scene('scene_001', 1), narration: { text: '', status: 'none' }, lines: [{ lineId: 'line_001', text: 'こんにちは', status: 'none' }] }],
+      narrationAudioById: {}, isGeneratingNarration: false,
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
+    });
+    let resolveSynth: (v: unknown) => void = () => {};
+    const synthP = new Promise((r) => { resolveSynth = r; });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockReturnValue(synthP as never);
+    const genP = useProjectStore.getState().generateNarration('scene_001'); // 行が pending（開始時 idle＝top ガードは通る）
+    expect(useProjectStore.getState().scenes[0].lines?.[0].status).toBe('pending');
+    useProjectStore.getState().setExportRun({ phase: 'rendering' }); // 合成 in-flight 中に書き出しが始まる
+    resolveSynth({ audioDataUrl: 'data:audio/wav;base64,AAAA', durationSec: 1 });
+    await genP;
+    expect(useProjectStore.getState().narrationAudioById['scene_001/line_001']).toBeUndefined(); // 行の音声を書き込まない
+    expect(useProjectStore.getState().scenes[0].lines?.[0].status).toBe('none'); // 行を none へ戻す
+    spy.mockRestore();
   });
 });
 
@@ -637,7 +1003,7 @@ describe('projectStore 生成のキャンセル（#402）', () => {
   });
 
   it('キャンセルせず newProject しても、裏で完走した旧生成が新しい状態を上書きしない（#402 レビュー）', async () => {
-    useProjectStore.setState({ scenes: [scene('scene_001', 1)], parts: [], status: 'idle', _generationSeq: 0, exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false } });
+    useProjectStore.setState({ scenes: [scene('scene_001', 1)], parts: [], status: 'idle', _generationSeq: 0, exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false } });
     let resolvePlan: (v: unknown) => void = () => {};
     const planPromise = new Promise((r) => { resolvePlan = r; });
     const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan').mockReturnValue(planPromise as never);
@@ -704,5 +1070,110 @@ describe('projectStore 履歴グループ（#389・連続編集を1履歴にま�
     useProjectStore.getState().pushHistory();
     useProjectStore.getState().pushHistory();
     expect(useProjectStore.getState().past).toHaveLength(2);
+  });
+});
+
+// #547：見た目が見つからない場面は**自動置換しない**（黙って中身が減った動画を出さない）。
+// 代わりに「まとめて標準にする」を利用者の明示操作として提供する＝押したときだけ、まとめて標準へ寄せる。
+describe('applyStandardLookToUnresolvedScenes（まとめて標準にする・#547）', () => {
+  const unresolved = (id: string) => ({ ...scene(id, 1), sceneId: id, templateId: 'missing_tmpl' }) as Scene;
+
+  beforeEach(() => {
+    useProjectStore.setState({
+      templates: [...sampleTemplates],
+      meta: { ...useProjectStore.getState().meta, videoSettings: { ...useProjectStore.getState().meta.videoSettings, aspectRatio: '16:9' } },
+      past: [], future: [],
+    });
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+  });
+
+  it('見つからない場面だけ標準へ寄せ、直した場面番号を返す（解決済みは触らない）', () => {
+    const ok = { ...scene('scene_ok', 2), templateId: sampleTemplates[0].templateId } as Scene;
+    useProjectStore.setState({ scenes: [unresolved('scene_ng'), ok] });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([1]); // 場面番号（1始まり）＝公開前チェックの数え方
+    expect(r.unfixable).toEqual([]);
+    const after = useProjectStore.getState().scenes;
+    // 直した場面は解決できる見た目になっている（＝もう「見つからない」ではない）。
+    expect(useProjectStore.getState().templates.some((t) => t.templateId === after[0].templateId)).toBe(true);
+    expect(after[1].templateId).toBe(ok.templateId); // 解決済みは不変
+  });
+
+  // マイ見た目の層 id は標準に無いことが多く、寄せると写真の割り当てが外れる。件数だけ返すと
+  // 「直った」ように見えて中身が減ったまま書き出せる（#547 が防ぎたい失敗そのもの）。
+  it('動画に出なくなった中身のある場面を返す（直った件数だけを見せない）', () => {
+    const ng = { ...unresolved('scene_ng'), assetRefs: { layer_001: 'asset_001' } } as Scene;
+    useProjectStore.setState({ scenes: [ng] });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([1]);
+    expect(r.lostContent).toEqual([1]); // 入れ直しが要る場面として返る
+    // 割当そのものは消さない＝休眠保持（ADR-0030 追補・#547 P3-14）。標準に受け皿が無いので動画には出ないが、
+    // データを削らないので「一括で寄せたら写真の割当ごと消えた」にはならない（実効使用は assetUsage がゲート）。
+    expect(useProjectStore.getState().scenes[0].assetRefs.layer_001).toBe('asset_001');
+  });
+
+  it('当て先が無い場面は unfixable で返す（押した後も項目が残る理由を出せる）', () => {
+    // 縦向きに切り替えると、横向き前提の場面種別に合う標準が無くなる組み合わせを作る。
+    const ng = { ...unresolved('scene_ng'), sceneType: 'photo_intro' } as Scene;
+    useProjectStore.setState({
+      scenes: [ng],
+      templates: sampleTemplates.filter((t) => t.category !== 'photo_intro'), // 写真紹介の標準を外す
+    });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([]);
+    expect(r.unfixable).toEqual([1]);
+  });
+
+  it('種類の違う未解決場面を、それぞれ自分の種類の標準へ寄せる（一律に同じ見た目にしない）', () => {
+    const opening = { ...unresolved('scene_op'), sceneType: 'opening' } as Scene;
+    const photo = { ...unresolved('scene_ph'), sceneType: 'photo_intro' } as Scene;
+    useProjectStore.setState({ scenes: [opening, photo] });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([1, 2]);
+    const [a, b] = useProjectStore.getState().scenes;
+    const catOf = (id: string) => useProjectStore.getState().templates.find((t) => t.templateId === id)?.category;
+    expect(catOf(a.templateId)).toBe('opening');
+    expect(catOf(b.templateId)).toBe('photo_intro');
+    expect(a.templateId).not.toBe(b.templateId); // 別々の見た目が当たっている
+  });
+
+  it('直る場面・中身が減る場面・直せない場面が混在しても、場面番号を取り違えない', () => {
+    const ok = { ...scene('scene_ok', 1), templateId: sampleTemplates[0].templateId } as Scene; // 場面1：解決済み
+    const losing = { ...unresolved('scene_lose'), sceneType: 'opening', assetRefs: { layer_001: 'asset_001' } } as Scene; // 場面2
+    const nofix = { ...unresolved('scene_nofix'), sceneType: 'photo_intro' } as Scene; // 場面3：当て先を外す
+    useProjectStore.setState({
+      scenes: [ok, losing, nofix],
+      templates: sampleTemplates.filter((t) => t.category !== 'photo_intro'),
+    });
+    const r = useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(r.fixed).toEqual([2]);
+    expect(r.lostContent).toEqual([2]);
+    expect(r.unfixable).toEqual([3]);
+    expect(useProjectStore.getState().scenes[0].templateId).toBe(ok.templateId); // 解決済みは不変
+    expect(useProjectStore.getState().scenes[2].templateId).toBe('missing_tmpl'); // 直せない場面も不変
+  });
+
+  it('取り消せる（1回の操作＝1履歴）', () => {
+    useProjectStore.setState({ scenes: [unresolved('scene_ng')] });
+    useProjectStore.getState().applyStandardLookToUnresolvedScenes();
+    expect(useProjectStore.getState().past).toHaveLength(1); // 1操作＝1履歴（pushHistory の重複を捉える）
+    expect(useProjectStore.getState().scenes[0].templateId).not.toBe('missing_tmpl');
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().scenes[0].templateId).toBe('missing_tmpl'); // 元へ戻る
+  });
+
+  it('直せる場面が無ければ履歴を積まない（空の取り消しを作らない）', () => {
+    const ok = { ...scene('scene_ok', 1), templateId: sampleTemplates[0].templateId } as Scene;
+    useProjectStore.setState({ scenes: [ok], past: [] });
+    expect(useProjectStore.getState().applyStandardLookToUnresolvedScenes().fixed).toEqual([]);
+    expect(useProjectStore.getState().past).toHaveLength(0);
+  });
+
+  it('書き出し中は何もしない（文書編集を固定・#570）', () => {
+    useProjectStore.setState({ scenes: [unresolved('scene_ng')] });
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    expect(useProjectStore.getState().applyStandardLookToUnresolvedScenes().fixed).toEqual([]);
+    expect(useProjectStore.getState().scenes[0].templateId).toBe('missing_tmpl'); // 変わらない
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
   });
 });

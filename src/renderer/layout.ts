@@ -3,9 +3,10 @@
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
 import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
-import { DEFAULT_FIT } from '../domain/constants';
+import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR } from '../domain/constants';
 import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { LayerBackground, Template } from '../domain/template/types';
+import { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle } from '../domain/template/textStyle';
 import { effectiveLayerZ } from '../domain/template/layerOrder';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { interpolateKeyframes } from '../domain/project/keyframes';
@@ -15,7 +16,7 @@ import { groupIndices, resolveLineSubtitle } from '../domain/project/lineTimelin
 import type { SceneSegmentSpec } from '../domain/project/lineTimeline';
 import { sceneLines } from '../domain/project/narrationLines';
 import { resolveSubtitleForElement, type SubtitleMoment } from '../domain/project/subtitleBinding';
-import { wrapText } from './textWrap';
+import { wrapText } from '../domain/text/textWrap';
 
 export interface Rect {
   x: number;
@@ -82,6 +83,15 @@ export interface TextItem extends ItemBase {
 
 export type LayoutItem = FillItem | ImageItem | TextItem;
 
+/**
+ * 字幕由来の描画アイテムか（テンプレ字幕層・FREE 字幕・掛け合い字幕）。「字幕を入れる」OFF で除外する対象を1か所で定義する。
+ * 書き出し（buildExportScenes の itemFilter）と仕上がり確認（ScenePreview の hideSubtitles）が**同じ判定**で字幕を消す
+ * ＝プレビュー＝書き出しのパリティ（ADR-0001・ADR-0026③・#547 P2-7）。
+ */
+export function isSubtitleItem(item: LayoutItem): boolean {
+  return item.kind === 'text' && item.isSubtitle;
+}
+
 export interface SceneLayout {
   width: number;
   height: number;
@@ -90,16 +100,18 @@ export interface SceneLayout {
   items: LayoutItem[];
 }
 
-const DEFAULT_TEXT_COLOR = '#222222';
-const DEFAULT_FONT_SIZE = 40;
+// テキストの既定色/既定サイズは domain（template/textStyle）が正典＝描画・インライン編集・体裁欄・
+// 通常→FREE 変換の4か所で共有する（§2-7）。既存の import 元を保つため、ここから re-export する。
+export { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE } from '../domain/template/textStyle';
 const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 
-/** 背景帯（可読性の下地）を TextItem.background へ。enabled のときだけ描く。通常字幕層／FREE 字幕・文字で共有（#529・#275）。 */
-function bandBackground(bg: LayerBackground | undefined): { color: string; opacity: number; radius: number } | undefined {
+/** 背景帯（可読性の下地）を TextItem.background へ。enabled のときだけ描く。通常字幕層／FREE 字幕・文字で共有（#529・#275）。
+ *  **インライン編集（FreeLayoutOverlay）も同じ既定で帯を敷くため export**（#549）＝編集中と描画結果の帯がドリフトしない。 */
+export function bandBackground(bg: LayerBackground | undefined): { color: string; opacity: number; radius: number } | undefined {
   return bg?.enabled ? { color: bg.color ?? '#000000', opacity: bg.opacity ?? 0.55, radius: bg.radius ?? 16 } : undefined;
 }
-/** テキストの既定行間（倍率）。lineHeight 未指定時に使う＝maxLines 計算と描画で共有（#209）。 */
-export const DEFAULT_LINE_HEIGHT = 1.3;
+// 既定行間も domain（template/textStyle）が正典＝FREE の行数導出・通常→FREE 変換・描画で共有（§2-7）。
+export { DEFAULT_LINE_HEIGHT } from '../domain/template/textStyle';
 /** 字幕帯の背景の上下パディング（em）。sceneSvg の bgHeight = 行間×行数 + 0.6*fontSize と一致（帯の下端＝y + 行間 + これ）。 */
 export const SUBTITLE_BAND_PAD_EM = 0.6;
 /** 同時字幕（ADR-0031）で2人目以降を上へ積むときの帯間の余白（em）。**実際の折返し行数**で詰めたうえで、この隙間を空ける（重ならない）。 */
@@ -159,14 +171,26 @@ function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: numbe
  * （2個目の字幕層・下移動・回転・N人長文の見切れを実描画と一致して検出）。FREE 字幕は利用者配置ゆえ対象外。純粋関数。
  */
 export function subtitleOverflowsCanvas(scene: Scene, template: Template): boolean {
-  if (!scene.lines || scene.lines.length === 0) return false;
   const { width, height } = template.canvas;
   // テンプレ字幕層の id（同時行の追加帯は `${id}__subN`）。FREE 字幕（free_NNN）と区別するのに使う。
   const subtitleLayerIds = new Set(template.layers.filter((l) => l.type === 'subtitle').map((l) => l.id));
   if (subtitleLayerIds.size === 0) return false;
+  // 実描画（layoutScene）の結果からテンプレ字幕層由来の帯だけを全辺で検査する（回転・グループ transform・非表示は layout が反映済み）。
+  const overflows = (layout: SceneLayout): boolean =>
+    layout.items.some(
+      (item) =>
+        item.kind === 'text' && item.isSubtitle &&
+        subtitleLayerIds.has(item.id.split('__sub')[0]) && // FREE 字幕は対象外（利用者配置）
+        subtitleItemOutOfCanvas(item, width, height),
+    );
+  // 単独ナレーション（lines 無し）＝静的字幕（`texts.subtitle`）をそのまま描く経路で検査する（#563）。
+  // opts を渡さない＝layoutScene 内の `subtitleEnabledDefault === false` で消える扱いもそのまま効く（#413）。
+  if (!scene.lines || scene.lines.length === 0) return overflows(layoutScene(scene, template));
   const lines = sceneLines(scene);
   for (const g of groupIndices(lines)) {
-    if (g.length < 2) continue; // 単独行は積まない
+    // 同時グループ（2行以上）は帯を積む。**逐次/単独行（1行）も対象**＝1帯でも拡大・回転・長文で見切れるため（#563）。
+    // 以前は `g.length < 2` で読み飛ばしており、#555（文字の体裁の場面別上書き）で字幕を大きくできるようになって
+    // 到達性が上がった＝「黙って画面外に切れる」が単独/逐次だけ検出できない非対称になっていた（ADR-0026④）。
     const primary = lines[g[0]];
     const primarySub = resolveLineSubtitle(primary, scene);
     const seg: SceneSegmentSpec = {
@@ -176,13 +200,8 @@ export function subtitleOverflowsCanvas(scene: Scene, template: Template): boole
       durationSec: scene.durationSec,
       isFirst: true,
     };
-    // 実描画と同じ layoutScene を回し、テンプレ字幕層由来の帯だけ（回転・グループ transform・非表示は layout が反映済み）を全辺で検査。
     const layout = layoutScene(scene, template, { subtitleText: primarySub.enabled ? primarySub.text : null, subtitleSegment: seg });
-    for (const item of layout.items) {
-      if (item.kind !== 'text' || !item.isSubtitle) continue;
-      if (!subtitleLayerIds.has(item.id.split('__sub')[0])) continue; // FREE 字幕は対象外
-      if (subtitleItemOutOfCanvas(item, width, height)) return true;
-    }
+    if (overflows(layout)) return true;
   }
   return false;
 }
@@ -303,7 +322,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         // layer.shapeType は rect/ellipse/line。FillItem(=FreeShapeType: rect/ellipse)へ転送し、ellipse のみ楕円・他は rect。
         const shapeType: FreeShapeType =
           layer.shapeType === FREE_SHAPE_TYPE.ellipse ? FREE_SHAPE_TYPE.ellipse : FREE_SHAPE_TYPE.rect;
-        items.push({ ...base, kind: 'fill', color: layer.fillColor ?? '#ffffff', opacity: layer.opacity ?? 1, radius: layer.radius ?? 0, shapeType });
+        items.push({ ...base, kind: 'fill', color: layer.fillColor ?? SHAPE_FILL_FALLBACK_COLOR, opacity: layer.opacity ?? 1, radius: layer.radius ?? 0, shapeType });
         break;
       }
       case 'text':
@@ -321,7 +340,13 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             ? ''
             : layer.textKey ? scene.texts[layer.textKey] ?? '' : '';
         const bg = isSub ? bandBackground(layer.background) : undefined;
-        const fontSize = layer.fontSize ?? DEFAULT_FONT_SIZE;
+        // 文字の体裁は場面別に上書きできる（#555・schema 1.24）。未指定はテンプレ層→既定を継承＝
+        // 触ったものだけが固有値（フォント＝textFontIds と同型・§2-4 の対象は配置なので体裁は自由化してよい）。
+        // 解決は共有 resolveTextStyle（場面編集の体裁欄と同じ関数＝欄の「テンプレに合わせる」表示と描画が一致）。
+        const style = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
+        // fontSize は下の stackedSubtitleBands（同時字幕の段組み）にも渡るため、**上書き後の値**を使う
+        // ＝上書きで文字が大きくなっても帯が重ならない（#533 P1 の実折返し行数計算と同じ値）。
+        const fontSize = style.fontSize;
         // 字幕帯を1つ積む（y を差し替え・id を一意化）。primary はテンプレ位置、同時行はその上へ（ADR-0031）。
         const pushBand = (bandText: string, y: number, idSuffix: string): void => {
           items.push({
@@ -331,17 +356,17 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
             kind: 'text',
             text: bandText,
             fontSize,
-            fontWeight: layer.fontWeight ?? FONT_WEIGHT.normal,
-            color: layer.color ?? DEFAULT_TEXT_COLOR,
-            maxLines: layer.maxLines ?? 2,
+            fontWeight: style.fontWeight,
+            color: style.color,
+            maxLines: layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES,
             background: bg,
             isSubtitle: isSub,
             // テンプレ字幕は下端基準で上へ伸ばす（1帯が2行でも画面下端からはみ出さない・ADR-0031）。text 層は従来どおり。
             anchorBottom: isSub,
             fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
-            // 縁取り（#275）。太さ>0 で色未指定なら白を既定（色だけ無いと縁取りが silent に消えるのを防ぐ・PR#289レビュー）。
-            strokeColor: (layer.strokeWidth ?? 0) > 0 ? (layer.strokeColor ?? '#ffffff') : layer.strokeColor,
-            strokeWidth: layer.strokeWidth,
+            // 縁取り（#275）。太さ>0 で色未指定なら既定色（resolveTextStyle が担保）。
+            strokeColor: style.strokeColor,
+            strokeWidth: style.strokeWidth,
           });
         };
         // 表示する帯（下→上の順）＝primary（あれば）＋同時行（enabled・ADR-0031）。primary は layer.id 据え置き（後方互換）。
@@ -360,7 +385,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         }
         // 帯を配置：字幕は下→上に積む（実折返し行数で詰める＝重ならない・共有 stackedSubtitleBands・#533 P1）。text 層は単一で base.y。
         if (isSub) {
-          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? 2);
+          const placed = stackedSubtitleBands(bands.map((b) => b.text), base.y, base.w, fontSize, layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES);
           bands.forEach((b, i) => pushBand(b.text, placed[i].y, b.idSuffix));
         } else if (bands.length > 0) {
           pushBand(bands[0].text, base.y, bands[0].idSuffix);
@@ -420,13 +445,18 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           if (text.length === 0) break;
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
-          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
+          const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
+          const color = el.color ?? DEFAULT_TEXT_COLOR;
+          // 縁取りは通常テンプレ層と同じ規則で解決する（太さだけ入れても消えない・#565）。
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: resolveStrokeColor(el.strokeWidth, el.strokeColor, color), strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
           break;
         }
-        case 'shape':
-          items.push({ ...base, kind: 'fill', color: el.fillColor ?? '#ffffff', opacity: el.opacity ?? 1, radius: el.radius ?? 0, shapeType: el.shapeType ?? FREE_SHAPE_TYPE.rect, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth });
+        case 'shape': {
+          // 図形の枠線も同じ規則（下地＝塗りの色）。塗りと同じ色になって枠線が消えない（#565）。
+          const fillColor = el.fillColor ?? SHAPE_FILL_FALLBACK_COLOR;
+          items.push({ ...base, kind: 'fill', color: fillColor, opacity: el.opacity ?? 1, radius: el.radius ?? 0, shapeType: el.shapeType ?? FREE_SHAPE_TYPE.rect, strokeColor: resolveStrokeColor(el.strokeWidth, el.strokeColor, fillColor), strokeWidth: el.strokeWidth });
           break;
+        }
         case FREE_ELEMENT_KIND.subtitle: {
           // 表示文言は対象（subtitleSource）から解決＝el.text は持たない（ADR-0029）。対象に一致しない/間/OFF は非表示。
           // isSubtitle:true＝「字幕を出さない」書き出し（withSubtitle=false）でテンプレ字幕と同じく除外される（buildExportScenes）。
@@ -434,8 +464,9 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           if (subText == null || subText.length === 0) break;
           const fontSize = el.fontSize ?? DEFAULT_FONT_SIZE;
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
-          const maxLines = Math.max(1, Math.floor(el.h / (fontSize * lineHeight)));
-          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color: el.color ?? DEFAULT_TEXT_COLOR, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: el.strokeColor, strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
+          const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
+          const color = el.color ?? DEFAULT_TEXT_COLOR;
+          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: resolveStrokeColor(el.strokeWidth, el.strokeColor, color), strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
           break;
         }
       }

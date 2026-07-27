@@ -4,7 +4,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { Sidebar } from "./Sidebar";
 import type { ScreenId } from "../data/mockData";
 
-const setup = (over: { current?: ScreenId; hasProjectContent?: boolean; projectName?: string } = {}) => {
+const setup = (over: { current?: ScreenId; hasProjectContent?: boolean; projectName?: string; currentProjectTarget?: ScreenId } = {}) => {
   const onNavigate = vi.fn();
   render(
     <Sidebar
@@ -12,6 +12,7 @@ const setup = (over: { current?: ScreenId; hasProjectContent?: boolean; projectN
       onNavigate={onNavigate}
       projectName={over.projectName ?? "無題のプロジェクト"}
       hasProjectContent={over.hasProjectContent ?? false}
+      currentProjectTarget={over.currentProjectTarget ?? "draft"}
     />,
   );
   return { onNavigate };
@@ -32,12 +33,19 @@ describe("Sidebar（IA再構成・#399 B案）", () => {
     expect(currentVideoButton()).toBeNull();
   });
 
-  it("動画を開いている間は「今の動画（名前）」を出し、押すとたたき台（draft）へ", () => {
+  it("動画を開いている間は「今の動画（名前）」を出し、押すと戻り先（既定＝たたき台）へ", () => {
     const { onNavigate } = setup({ current: "home", hasProjectContent: true, projectName: "採用2026" });
     expect(currentVideoButton()).not.toBeNull();
     expect(screen.getByText("採用2026")).toBeTruthy(); // 名前を表示（#252 合流）
     fireEvent.click(currentVideoButton()!);
-    expect(onNavigate).toHaveBeenCalledWith("draft");
+    expect(onNavigate).toHaveBeenCalledWith("draft"); // currentProjectTarget 既定
+  });
+
+  it("「今の動画」は直近に開いていた工程画面（currentProjectTarget）へ戻る＝たたき台固定にしない（#547 P3-7）", () => {
+    // 素材画面から「今の動画」を押す。直前は書き出し画面にいた＝そこへ戻る（先頭のたたき台へ飛ばさない）。
+    const { onNavigate } = setup({ current: "materials", hasProjectContent: true, currentProjectTarget: "export" });
+    fireEvent.click(currentVideoButton()!);
+    expect(onNavigate).toHaveBeenCalledWith("export");
   });
 
   it("工程画面にいる間は content 無しでも「今の動画」を出す（active）", () => {

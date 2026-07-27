@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createOverlayClipId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
-  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject, ProjectLoadError,
+  isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject, ProjectLoadError, validateProjectDoc,
 } from './persistence';
 import type { ProjectHeader } from './persistence';
 import type { Part, Scene } from './types';
@@ -31,6 +31,33 @@ function validScene(overrides: Record<string, unknown> = {}): Record<string, unk
     ...overrides,
   };
 }
+
+// #586：正典どうしの矛盾（11 §7 は `> 0`／schema は minimum:0）を「schema を 11 に合わせる」で解消
+// ＝Scene.durationSec は exclusiveMinimum:0（> 0）。0秒の場面は作らない（11 §9）＝schema でも弾く。
+// 生成側は 0 を作らない（手編集=8秒補正・AI≥3秒・分割は apportionDuration が >0 保証・追加=8秒）が、
+// 旧/手書きの不正データに 0 が残り得るため、schema は範囲違反として拾い、PREVIEW_MIN_PLAY_SEC が再生を防御する。
+describe('validateProjectDoc: Scene.durationSec は > 0（#586・schema=11 で exclusiveMinimum:0）', () => {
+  const projectWith = (durationSec: number) => ({
+    ...assembleProject(header(), [], [], []),
+    scenes: [validScene({ durationSec })],
+  });
+
+  it('durationSec > 0 は valid（8秒・0.1秒とも）', () => {
+    expect(validateProjectDoc(projectWith(8)).valid).toBe(true);
+    expect(validateProjectDoc(projectWith(0.1)).valid).toBe(true);
+  });
+
+  it('durationSec = 0 は invalid（0秒の場面は作らない・11 §9）', () => {
+    const r = validateProjectDoc(projectWith(0));
+    expect(r.valid).toBe(false);
+    // 範囲違反＝**非 structural**＝読込は拒否せず警告のみ（型/必須欠落だけが読込拒否・#416）。
+    expect(r.structural).toBe(false);
+  });
+
+  it('durationSec が負も invalid', () => {
+    expect(validateProjectDoc(projectWith(-1)).valid).toBe(false);
+  });
+});
 
 describe('createProjectId', () => {
   it('同日の既存が無ければ _001', () => {
@@ -341,6 +368,21 @@ describe('parseProjectDoc', () => {
     expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.22→1.23 へ昇格（任意追加＝変換不要）
     expect(back.scenes[0].freeLayout).toEqual(scene.freeLayout); // 背景帯を取りこぼさず保持（migrateProject のスプレッド保持）
   });
+  it('文字の体裁：scene.textStyles を持つ旧版(1.23)が移行し保持する（#555）', () => {
+    const textStyles = {
+      title: { color: '#ff0000', fontSize: 96, fontWeight: 'bold', strokeColor: '#000000', strokeWidth: 4 },
+      subtitle: { color: '#00ff00' }, // 一部だけ＝残りはテンプレ継承
+    };
+    const scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'opening_yuko_right_v1',
+      durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' }, texts: { title: 'あ' },
+      narration: { text: '', status: 'none' }, warnings: [], textStyles,
+    };
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.23', scenes: [scene] } as Record<string, unknown>;
+    const back = parseProjectDoc(JSON.stringify(doc));
+    expect(back.schemaVersion).toBe(PROJECT_SCHEMA_VERSION); // 1.23→1.24 へ昇格（任意追加＝変換不要）
+    expect(back.scenes[0].textStyles).toEqual(textStyles); // 体裁を取りこぼさず保持（migrateProject のスプレッド保持）
+  });
   it('videoKind 省略の旧データ(1.0)は recruit に移行して読める（ADR-0011）', () => {
     const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.0' } as Record<string, unknown>;
     delete doc.videoKind;
@@ -520,6 +562,13 @@ describe('parseProjectDoc', () => {
     });
     it('内容制約違反（projectName 80字超＝#411 の入力防御対象）は拒否せず読み込む', () => {
       const doc = { ...assembleProject(header({ projectName: 'あ'.repeat(120) }), [], [], []) };
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
+    // #586：`durationSec` は `> 0`（schema `exclusiveMinimum:0`）だが、**範囲違反は構造破損ではない**＝旧データを
+    // 読めなくしない（再生側は PREVIEW_MIN_PLAY_SEC が防御）。上の validateProjectDoc の structural:false を
+    // 読込経路の end-to-end でも固定する（型不正 `durationSec:'abc'` が拒否されるのと対になるケース）。
+    it('内容制約違反（durationSec 0＝旧データ）は拒否せず読み込む（#586）', () => {
+      const doc = { ...assembleProject(header(), [], [], [validScene({ durationSec: 0 }) as unknown as Scene]) };
       expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
     });
     it('正常な完全プロジェクトは読み込める（回帰なし）', () => {

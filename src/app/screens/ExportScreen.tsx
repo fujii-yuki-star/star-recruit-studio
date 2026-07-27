@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
+import { NoScenesState } from "../components/NoScenesState";
 import { ArrowLeftIcon, FilmIcon } from "../components/icons";
 import { NarrationVolumeControl } from "../components/NarrationVolumeControl";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { exportBlockedMessage, exportBlockingItems } from "../adapters";
+import { useExportCapability } from "../hooks/useExportCapability";
+import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
 import type { ExportPhase } from "../store/projectStore";
 import { buildExportScenes, ExportCancelledError } from "../../renderer/export/buildExportScenes";
 import { buildTelopOverlays } from "../../renderer/export/telopOverlays";
@@ -12,10 +16,11 @@ import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import { beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, readExportFrame, stageClipFrames, stageExportFrame } from "../../infrastructure/ffmpegExport";
-import { exportEncodePercent, exportPhaseLabel } from "../../domain/export/exportProgress";
+import { exportHeadingLabel, exportOverallPercent, exportProgressLabel, isExportFinished, pastExportNotice } from "../../domain/export/exportProgress";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import { BGM_CROSSFADE_SEC, exportDimsForOrientation } from "../../domain/constants";
-import { resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { hasSceneNarrationOverride, resolveNarrationVolume } from "../../domain/voice/audioMix";
+import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
@@ -27,6 +32,12 @@ import { fontFamilyForId, resolveFontId, FONT_CATALOG } from "../../domain/font/
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 
+// 画面タイトルは1か所（空状態と通常の両分岐で共有＝片方だけ直して drift しない・§6）。
+const EXPORT_TITLE = "動画を書き出す";
+// 説明は**設定フォームを出す分岐だけ**に付ける。場面ゼロの空状態で「設定を確認して」と促すと、
+// 直下の空状態と次の行動が食い違う（§2-5）。空状態の次の行動は NoScenesState が状態に応じて示す。
+const EXPORT_DESC = "設定を確認して、動画をMP4ファイルとして保存します。";
+
 interface ExportProps {
   onNavigate: (screen: ScreenId) => void;
 }
@@ -37,6 +48,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const saveProject = useProjectStore((s) => s.saveProject);
   const setPreviewReturnTo = useProjectStore((s) => s.setPreviewReturnTo);
   const assets = useProjectStore((s) => s.assets);
+  const templates = useProjectStore((s) => s.templates);
+  const overlayAnimations = useProjectStore((s) => s.meta.timelineOverlay?.animations);
   const bgmSettings = useProjectStore((s) => s.meta.bgmSettings);
   const aspectRatio = useProjectStore((s) => s.meta.videoSettings.aspectRatio);
   const projectName = useProjectStore((s) => s.meta.projectName);
@@ -62,10 +75,28 @@ export function ExportScreen({ onNavigate }: ExportProps) {
 
   // 書き出しの進行状態は store に持つ（#379）。他画面へ遷移して戻っても進捗が見え、書き出し中の
   // 再実行・プロジェクト破壊操作を全画面でブロックできる。ローカル setter は store 更新へ委譲（本体は不変）。
+  // 書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと同じ述語を共有する。
+  // useMemo：書き出し中は進捗更新のたびに再描画されるので、毎回 全場面のレイアウト計算をやり直さない（#376 の待ち時間に効く）。
+  const blockingItems = useMemo(
+    () => exportBlockingItems(scenes, assets, templates, overlayAnimations),
+    [scenes, assets, templates, overlayAnimations],
+  );
+  const blockedMessage = blockingItems.length > 0 ? exportBlockedMessage(blockingItems, "export") : null;
+  // この端末で書き出せない（h264 不可）ときも公開前チェックと同じく止める＝直行経路だけ押せてしまうのを防ぐ（ADR-0026②）。
+  const capability = useExportCapability();
+  const capabilityBlocked = capability != null && blocksExport(capability);
   const exportRun = useProjectStore((s) => s.exportRun);
   const setExportRun = useProjectStore((s) => s.setExportRun);
   const { phase, progress, encode, resultPath, message, bgmWarning, cancelling } = exportRun;
-  const setPhase = (phase: ExportPhase) => setExportRun({ phase });
+  // この画面に**入った時点で既に終わっていた**結果を見ているか（#547 P3-11）。実行状態は画面横断で保持する
+  //（#379＝書き出し中に他画面へ移っても進捗が見える）ため、離れて戻ると前回の「保存しました（100%）」
+  //「失敗しました」が**いま起きたこと**のように残り続ける。マウント時の phase を初期値にし、以後は
+  // `setPhase`（この画面で結果が変わる唯一の入口）で下ろす＝この訪問で起きた結果を「前回の…」と言わない。
+  const [enteredFinished, setEnteredFinished] = useState(() => isExportFinished(phase));
+  const setPhase = (phase: ExportPhase) => {
+    setEnteredFinished(false); // 何かが起きた＝ここから先の表示はこの訪問の結果（保存先の選択を取り消した等、phase が動かない経路では下ろさない）
+    setExportRun({ phase });
+  };
   const setProgress = (progress: { done: number; total: number; frameFraction?: number }) => setExportRun({ progress });
   const setResultPath = (resultPath: string) => setExportRun({ resultPath });
   const setMessage = (message: string) => setExportRun({ message });
@@ -73,6 +104,17 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const setBgmWarning = (bgmWarning: "" | "partial" | "all") => setExportRun({ bgmWarning });
 
   const busy = isExportBusy(phase);
+  // 「前回の結果」表示中か＝入った時点で終わっていて、かついま見えているのも終わった結果（走行中・未実行には出さない）。
+  const showsPastResult = enteredFinished && isExportFinished(phase);
+  // この画面には結果そのものが出ているので、他画面向けの終了通知（#589）は**既読**にする。
+  // ここで落とさないと、書き出し画面で結果を見たあとに他画面へ移ってまた通知が出る＝#547 P3-11 の「古い通知が残る」の再発。
+  const resultUnseen = useProjectStore((s) => s.exportRun.resultUnseen);
+  useEffect(() => {
+    if (resultUnseen) setExportRun({ resultUnseen: false });
+  }, [resultUnseen, setExportRun]);
+  // 全体の音量スライダーが効かない場面（個別の声量あり）が1つでもあるか（#547 P3-13）。あれば案内を添える
+  // ＝仕上がり確認（いまの場面）と同じ意味の注意を、書き出し（全場面のいずれか）でも出す（ADR-0026②）。判定は §6 の共有述語。
+  const someSceneHasVolumeOverride = scenes.some((s) => hasSceneNarrationOverride(s.audioMix));
 
   // assetId が未設定(null/undefined)なら一致せず undefined（assetId は非空文字）。
   const bgmAsset = assets.find((a) => a.assetId === bgmSettings?.assetId);
@@ -109,8 +151,31 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     setBgmWarning("");
     setOpenError(""); // 前回の「開けなかった/再生できなかった」表示を持ち越さない（新しい書き出しの成功に残らないように・#404 P2）
     setExportRun({ cancelling: false }); // 前回の中止要求を持ち越さない（#380）
+    // 取り込み・生成中は書き出しを始めない（#570 P1・相互排他＝§2-5/ADR-0026④）。進行中の素材取り込みは同一パス上書きで
+    // 「壊れたMP4」に、進行中の音声/動画案生成は開始時 snap の外で完了して「保存/画面は新・MP4 は旧（無音MP4が成功扱い）」に
+    // なる（#547 P2-6）。取り込みは最初の await 前に isImporting を、生成は pending 行/フラグを立てるので、ここで見れば排他になる。
+    const startBlockedMessage = (): string | null => {
+      const st = useProjectStore.getState();
+      if (st.isImporting) return "素材の取り込み中です。取り込みが終わってから書き出してください。";
+      if (st.isTemplateMutating) return "見た目パターンの変更中です。変更が終わってから書き出してください。";
+      if (st.status === "generating") return "動画案を作成中です。作成が終わってから書き出してください。";
+      if (st.isGeneratingNarration || isNarrationGenerating(st.scenes)) return "声を作成中です。作成が終わってから書き出してください。";
+      // 残っていると書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと**同じ述語**で、
+      // サイドバーからこの画面へ直行した経路も止める＝保存先を選ばせた後に落とさない（ADR-0026④）。
+      if (capabilityBlocked && capability) return EXPORT_CAPABILITY_NOTICE[capability].detail;
+      const blocking = exportBlockingItems(st.scenes, st.assets, st.templates, st.meta.timelineOverlay?.animations);
+      if (blocking.length > 0) return exportBlockedMessage(blocking, "export");
+      return null;
+    };
+    const blockedBefore = startBlockedMessage();
+    if (blockedBefore) { setMessage(blockedBefore); setPhase("error"); return; }
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
     await beginExport();
+    // beginExport の IPC 往復中に取り込み/生成が起動していないか再確認する（#570 P1 レビュー）。相手は最初の await の前に
+    // isImporting/pending を立てるので、beginExport 窓で始まったものもこの時点で真＝確実に捕捉できる。setPhase("rendering")
+    //（busy 化）の前に弾く＝#380 のキャンセルスコープ不変条件を保ったまま、上の一度きりチェックが取りこぼす窓を閉じる。
+    const blockedAfter = startBlockedMessage();
+    if (blockedAfter) { setMessage(blockedAfter); setPhase("error"); return; }
     setProgress({ done: 0, total: scenes.length });
     setExportRun({ encode: undefined }); // 前回の encoding 進捗を持ち越さない（#376）
     setPhase("rendering");
@@ -271,23 +336,29 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     }
   }
 
-  const percent =
-    phase === "done"
-      ? 100
-      : phase === "encoding"
-        ? // Rust の実進捗イベントがあれば 80→100% で描く。未受信（旧経路/ブラウザ）は基準 80%＋不定バー（#376）。
-          // 未受信を 90% にすると最初のイベント（≈82%）で後退して見えるため、基準は 80%（レンダリング終端と連続・単調）。
-          encode
-          ? exportEncodePercent(encode)
-          : 80
-        : phase === "rendering" && progress.total > 0
-          ? // 場面数ベース＋処理中の場面のフレーム進捗（frameFraction）で 0〜80% を滑らかに（#391）。
-            Math.round(((progress.done + (progress.frameFraction ?? 0)) / progress.total) * 80)
-          : 0;
+  // バーの % と1行の説明は共有の純粋関数（他画面の「書き出し中」バナーと同じ数字・説明を出す＝§2-7/ADR-0026②）。
+  const percent = exportOverallPercent({ phase, progress, encode });
+  const progressLabel = exportProgressLabel({ phase, progress, encode });
+
+  // 場面ゼロは**押しても必ず失敗**する（startExport が「書き出す場面がありません」で止める）。設定フォームを出すと
+  // 入力させたうえで断る形になるので、上流へ促す空状態で止める（#547 P3-10・ADR-0026④）。
+  // 仕上がり確認・公開前チェック・たたき台と同じ表示・同じ次の行動にする（#403/#590）＝共有の NoScenesState。
+  // `!busy` も条件に入れる：走行中の書き出しを空状態で覆い隠すと、進捗と「書き出しを中止」＝編集ロックの
+  // **唯一の抜け道**（15 §4・ExportLockBanner の案内）が消える。場面ゼロで書き出しが走らない担保は store 側
+  // （#379 の newProject/loadProject 等のガード）に依存するので、この画面でも明示して他ファイル依存にしない。
+  if (scenes.length === 0 && !busy) {
+    return (
+      <div className="main-scroll">
+        <PageHead title={EXPORT_TITLE} />
+        {/* 書き出し中バナーは出さない：この画面は自前の進捗表示を持ち、かつ場面ゼロでは書き出しが走らない。 */}
+        <NoScenesState purpose="ここで動画を書き出せます" onNavigate={onNavigate} />
+      </div>
+    );
+  }
 
   return (
     <div className="main-scroll">
-      <PageHead title="動画を書き出す" desc="設定を確認して、動画をMP4ファイルとして保存します。" />
+      <PageHead title={EXPORT_TITLE} desc={EXPORT_DESC} />
 
       <div
         style={{
@@ -331,7 +402,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </span>
             <Switch on={withSubtitle} onChange={(v) => setExportForm({ withSubtitle: v })} label="字幕を入れる" disabled={busy} />
           </div>
-          <p className="field-hint">書き出した動画に反映されます（仕上がり確認では常に字幕ありで表示します）。</p>
+          <p className="field-hint">書き出した動画に反映されます。仕上がり確認でも同じ設定で表示されます。</p>
           <hr className="divider" />
           <div className="toggle-row">
             <span className="field-label" style={{ margin: 0 }}>
@@ -350,11 +421,17 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           </div>
 
           <hr className="divider" />
-          {/* ナレーション音量は仕上がり確認と共用の部品（#407・DRY）。仕上がり確認では聞きながら調整できる。 */}
+          {/* ナレーション音量は仕上がり確認と共用の部品（#407・DRY）。仕上がり確認では聞きながら調整できる。
+              このスライダーは**動画全体の既定**（voiceSettings.volume・11 §6）。場面ごとに個別の声量を設定した場面は
+              その設定が優先されて変わらない（設定できるのに一部に効かない誤認を避ける・仕上がり確認は「いまの場面」で
+              同じ案内を出す＝ADR-0026②・#547 P3-13）。全体スライダー自体は他の場面に効くのでここでは無効化しない。 */}
           <NarrationVolumeControl
             volume={voiceSettings.volume}
             onChange={(v) => updateVoiceSettings({ volume: v })}
             disabled={busy}
+            hint={someSceneHasVolumeOverride
+              ? "一部の場面は個別の声量を設定しています。その場面は、この全体の設定より個別の設定が優先されます（場面編集で変えられます）。"
+              : undefined}
           />
           <div className="notice notice-info mt">
             <span>声を作成済みの場面には、その音声が入ります。</span>
@@ -367,11 +444,19 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </button>
             {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。
                 「動画を保存」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
-            <div className="row gap-sm">
-              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy}>
+            <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
+              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy || blockingItems.length > 0 || capabilityBlocked}>
                 <FilmIcon size={20} />
                 {busy ? "書き出し中…" : "動画を保存"}
               </button>
+              {/* 押した後に落とすのでなく、押す前に理由と次の行動を出す（§2-5・ADR-0026④）。左の「公開前チェックへ戻る」が直す導線。
+                  抑止は「**同じ文**が失敗表示に出ているとき」だけ＝二重に並べない。phase だけで抑止すると、無関係な失敗が
+                  残っている間に blocker ができたとき「押せないのに理由が出ない」になる（レビュー指摘）。 */}
+              {capabilityBlocked && capability ? (
+                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{EXPORT_CAPABILITY_NOTICE[capability].detail}</span>
+              ) : blockedMessage && !(phase === "error" && message === blockedMessage) ? (
+                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{blockedMessage}</span>
+              ) : null}
             </div>
           </div>
         </div>
@@ -387,15 +472,23 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </div>
           )}
 
-          {(busy || phase === "done") && (
+          {/* 前回の書き出しの結果（#547 P3-11）＝この画面に入った時点で既に終わっていた結果。
+              「100%・保存しました」を出したままにすると、そのあとの編集も書き出し済みに見える（ADR-0026④）。 */}
+          {showsPastResult && (
+            <div className={`notice ${phase === "error" ? "notice-warn" : "notice-info"} mb`} role="status">
+              <span>{pastExportNotice(phase)}</span>
+            </div>
+          )}
+
+          {/* 進捗（%・バー・いま何をしているか・中止）は**いま走っている書き出し**のもの。前回の完了を
+              100% のバーで再現しない＝今回のことのように見せない。保存先と導線は下で別に出す。 */}
+          {(busy || (phase === "done" && !showsPastResult)) && (
             <>
               <div className="text-center mb">
                 <div className="page-title" style={{ fontSize: 32, color: "var(--color-primary)" }}>
                   {percent}%
                 </div>
-                <div className="text-muted">
-                  {phase === "done" ? "保存しました" : phase === "encoding" ? "動画にまとめています" : "動画を準備しています"}
-                </div>
+                <div className="text-muted">{exportHeadingLabel({ phase, progress, encode })}</div>
               </div>
               <div className="progress mb">
                 {/* エンコード段：Rust の実進捗イベントがあれば幅で表す（#376）。無ければ従来どおり不定バー（左右に流れる）で
@@ -406,19 +499,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   <div className="progress-fill" style={{ width: `${percent}%` }} />
                 )}
               </div>
-              {phase === "rendering" && (
-                <div className="text-center text-sm text-muted">
-                  {/* done は「完了した場面数」。処理中は +1 した1始まりで読ませる（バーが動くのにカウンタが0のまま、を防ぐ・#391 レビュー）。 */}
-                  場面 {Math.min(progress.done + 1, progress.total)} / {progress.total} を処理中
-                </div>
-              )}
-              {/* エンコード段：Rust の進捗イベントがあれば段階（映像/結合/字幕/BGM）を文言で示す（#376）。
-                  無ければ従来の不定バー＋「最後の仕上げ中」（#391）。 */}
-              {phase === "encoding" && (
-                <div className="text-center text-sm text-muted">
-                  {encode ? exportPhaseLabel(encode) : "最後の仕上げ中です。そのままお待ちください。"}
-                </div>
-              )}
+              {/* いま何をしているか（場面 n/N ／ 映像・結合・字幕・BGM）。バナーと同じ説明を出す（ADR-0026②）。 */}
+              {progressLabel && <div className="text-center text-sm text-muted">{progressLabel}</div>}
               {/* 書き出しの中止（#380）：走行中の変換を止めて、すぐやり直せる。 */}
               {busy && (
                 <div className="row mt" style={{ justifyContent: "center" }}>
@@ -431,7 +513,14 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   </button>
                 </div>
               )}
-              {phase === "done" && resultPath && (
+            </>
+          )}
+
+          {/* 保存した動画そのものの情報（保存先・開く導線・BGMの欠け）は、進捗パネルとは別に出す。
+              前回の結果として見ているときも**保存したファイルへ辿れる**必要がある（#404 の導線を消さない）。 */}
+          {phase === "done" && (
+            <>
+              {resultPath && (
                 <>
                   <div className="notice notice-info mt">
                     <span>保存先：{resultPath}</span>
@@ -466,7 +555,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   )}
                 </>
               )}
-              {phase === "done" && bgmWarning && (
+              {bgmWarning && (
                 <div className="notice notice-warn mt">
                   <span>
                     {bgmWarning === "partial"
@@ -478,13 +567,16 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             </>
           )}
 
+          {/* 失敗の中身（原因と次の行動）。前回の結果として見ているときは読み上げの割り込み（alert）にしない
+              ＝画面に入るたび「たったいま失敗した」と再通知しない。いつのことかは上の1行が示す。 */}
           {phase === "error" && (
-            <div className="notice notice-warn" role="alert">
+            <div className="notice notice-warn" role={showsPastResult ? "status" : "alert"}>
               <span>{message}</span>
             </div>
           )}
 
-          {phase === "cancelled" && (
+          {/* 中止は上の「前回の…」が同じ内容（中止した・やり直せる）を出すので、そのときは重ねない。 */}
+          {phase === "cancelled" && !showsPastResult && (
             <div className="notice notice-info" role="status">
               <span>書き出しを中止しました。もう一度「動画を保存」を押すと、やり直せます。</span>
             </div>

@@ -26,11 +26,22 @@ function setup(scene: Scene) {
 
 const firstEl = () => useProjectStore.getState().scenes[0].freeLayout![0];
 
+/**
+ * 要素を選ぶ（#550 ②で「選択した要素だけ編集」が既定 ON になったため、カードは選んで初めて出る）。
+ * ※これを省くとカードごと無いので、「〜を出さない」系の検査が**空振りで緑**になる（無条件 null）。
+ */
+const selectFirst = () => {
+  const el = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
+  fireEvent.pointerDown(el, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+  fireEvent.pointerUp(el, { pointerId: 1 });
+};
+
 describe("SceneEditScreen FREE 背景帯（#529）", () => {
   beforeEach(() => setup(freeScene({ freeLayout: [{ id: "free_001", kind: "text", x: 0, y: 0, w: 200, h: 60, text: "あ" }] } as Partial<Scene>)));
 
   it("文字要素の背景帯トグルON で background.enabled=true になり、色/濃さの詳細が現れる", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFirst();
     expect(screen.queryByText("背景色")).toBeNull(); // OFF のときは色/濃さ/角丸は隠れている
     const sw = screen.getByRole("switch", { name: "背景帯を付ける" });
     expect(sw).toHaveAttribute("aria-checked", "false");
@@ -43,6 +54,7 @@ describe("SceneEditScreen FREE 背景帯（#529）", () => {
   it("字幕要素にも背景帯トグルがある（文字と同じ下地）", () => {
     setup(freeScene({ freeLayout: [{ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 200, h: 60 }] } as Partial<Scene>));
     render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFirst();
     fireEvent.click(screen.getByRole("switch", { name: "背景帯を付ける" }));
     expect(firstEl().background?.enabled).toBe(true);
   });
@@ -50,6 +62,8 @@ describe("SceneEditScreen FREE 背景帯（#529）", () => {
   it("図形要素には背景帯トグルを出さない（文字/字幕だけの下地）", () => {
     setup(freeScene({ freeLayout: [{ id: "free_001", kind: "shape", x: 0, y: 0, w: 200, h: 60, shapeType: "rect", fillColor: "#000000" }] } as Partial<Scene>));
     render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFirst(); // 選んでカードを出したうえで「無い」ことを見る（選ばないと空振りで緑になる）
+    expect(screen.getByLabelText("横位置")).toBeTruthy(); // 前提：カードは出ている
     expect(screen.queryByRole("switch", { name: "背景帯を付ける" })).toBeNull();
   });
 });

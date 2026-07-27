@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import "./styles/theme.css";
 import "./styles/fonts.css";
 import type { ScreenId } from "./app/data/mockData";
@@ -6,10 +6,12 @@ import { isExportBusy, useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
+import { ExportResultNotice } from "./app/components/ExportResultNotice";
 import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
-import { useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
+import { isUndoRedoEnabledFor, useUndoRedoShortcuts } from "./app/hooks/useUndoRedoShortcuts";
+import { DEFAULT_PROJECT_RETURN, stickyProjectScreen } from "./app/navigation";
 import { HomeScreen } from "./app/screens/HomeScreen";
 import { WizardScreen } from "./app/screens/WizardScreen";
 import { ConfirmScreen } from "./app/screens/ConfirmScreen";
@@ -48,10 +50,21 @@ const titles: Record<ScreenId, string> = {
 
 function App() {
   const [screen, setScreen] = useState<ScreenId>("home");
+  // 「今の動画」の戻り先＝直近に開いていた工程画面（#547 P3-7）。工程画面にいる間はそこを覚え、工程外
+  // （素材・設定・一覧）へ出ても位置を保持する＝押すとたたき台固定で先頭へ飛ばされず、居場所に戻れる。
+  const [projectReturnTo, setProjectReturnTo] = useState<ScreenId>(DEFAULT_PROJECT_RETURN);
+  // 画面遷移は必ずこの navigate を通す（直接 setScreen を配らない）＝遷移のたびに戻り先を同時更新する。
+  // effect で screen を後追いすると setState 連鎖になる（React の警告）ため、遷移時に1回で確定する（純粋関数で判定）。
+  const navigate = useCallback((next: ScreenId) => {
+    setProjectReturnTo((prev) => stickyProjectScreen(prev, next));
+    setScreen(next);
+  }, []);
   const saveProject = useProjectStore((s) => s.saveProject);
   const saveStatus = useProjectStore((s) => s.saveStatus);
   // 書き出し中はヘッダの新規作成を無効化（切替で進行中の書き出しデータが壊れるのを防ぐ・#379）。
-  const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
+  // phase を選び、Undo/Redo 結線（下の isUndoRedoEnabledFor）と新規作成無効化の両方の元にする。
+  const exportPhase = useProjectStore((s) => s.exportRun.phase);
+  const isExporting = isExportBusy(exportPhase);
   const loadProject = useProjectStore((s) => s.loadProject);
   const loadUserTemplates = useProjectStore((s) => s.loadUserTemplates);
   // サイドバー「今の動画（名前）」用（#399 B案・#252 合流）：動画を開いている間だけ出し、名前を表示する。
@@ -59,12 +72,16 @@ function App() {
   const projectName = useProjectStore((s) => s.meta.projectName);
   // 「新しい動画を作る」はホームと同じ破棄ガード付きフローに統一する。
   const { confirming: confirmNew, start: startNewProject, confirm: confirmNewProject, cancel: cancelNewProject } =
-    useStartNewProject(setScreen);
+    useStartNewProject(navigate);
   // 編集が落ち着いたら自動でバックグラウンド保存（#256）。App は常時マウント＝全画面で有効。
   useAutoSave();
-  // Undo/Redo のキーボード（Ctrl/⌘+Z・Y）を全画面で有効化（#413）。以前は場面編集/タイムライン編集だけで、
-  // たたき台の削除/移動が Ctrl+Z で戻せなかった。App 一箇所に集約＝画面ごとの二重登録（二重 Undo）も防ぐ。
-  useUndoRedoShortcuts();
+  // Undo/Redo のキーボード（Ctrl/⌘+Z・Y）。App 一箇所に集約＝画面ごとの二重登録（二重 Undo）を防ぐ（#413）。
+  // 有効にするのは「取り消す/やり直す」UI がある画面だけ（UNDO_REDO_SCREENS＝たたき台/場面編集/タイムライン編集）。
+  // 全画面で有効にすると、テンプレ作成のように編集が画面ローカルの画面で Ctrl+Z が画面外の編集を無言で巻き戻し、
+  // 自動保存が永続化してしまう（#547 P1-1・データ喪失・ADR-0020「入口」）。#413 の「たたき台でも Ctrl+Z」は draft を含めて満たす。
+  // 書き出し中は undo/redo を無効化（ボタンは inert で操作不可なのに Ctrl+Z だけ無言 no-op になる不整合を防ぐ・#570 P2 レビュー）。
+  // 結線式は共有述語に集約＝回帰テストと同じシンボルを参照し、ここのドリフトを1箇所で検知する。
+  useUndoRedoShortcuts(isUndoRedoEnabledFor(screen, exportPhase));
 
   // 起動時に最後のプロジェクトを自動で開く（保存済みデータを復元。失敗時は新規状態のまま）。
   // あわせてグローバルのユーザーテンプレ（ADR-0017）を読み込み、見た目パターン一覧へマージする。
@@ -84,39 +101,39 @@ function App() {
   function renderScreen() {
     switch (screen) {
       case "home":
-        return <HomeScreen onNavigate={setScreen} />;
+        return <HomeScreen onNavigate={navigate} />;
       case "wizard":
-        return <WizardScreen onNavigate={setScreen} />;
+        return <WizardScreen onNavigate={navigate} />;
       case "confirm":
-        return <ConfirmScreen onNavigate={setScreen} />;
+        return <ConfirmScreen onNavigate={navigate} />;
       case "generating":
-        return <GeneratingScreen onNavigate={setScreen} />;
+        return <GeneratingScreen onNavigate={navigate} />;
       case "draft":
-        return <DraftScreen onNavigate={setScreen} />;
+        return <DraftScreen onNavigate={navigate} />;
       case "scene-edit":
-        return <SceneEditScreen onNavigate={setScreen} />;
+        return <SceneEditScreen onNavigate={navigate} />;
       case "preview":
-        return <PreviewScreen onNavigate={setScreen} />;
+        return <PreviewScreen onNavigate={navigate} />;
       case "timeline":
-        return <TimelineScreen onNavigate={setScreen} />;
+        return <TimelineScreen onNavigate={navigate} />;
       case "timeline-edit":
-        return <TimelineEditScreen onNavigate={setScreen} />;
+        return <TimelineEditScreen onNavigate={navigate} />;
       case "precheck":
-        return <PrecheckScreen onNavigate={setScreen} />;
+        return <PrecheckScreen onNavigate={navigate} />;
       case "export":
-        return <ExportScreen onNavigate={setScreen} />;
+        return <ExportScreen onNavigate={navigate} />;
       case "looks":
-        return <LooksScreen onNavigate={setScreen} />;
+        return <LooksScreen onNavigate={navigate} />;
       case "looks-edit":
-        return <LooksEditScreen onNavigate={setScreen} />;
+        return <LooksEditScreen onNavigate={navigate} />;
       case "materials":
-        return <MaterialsScreen onNavigate={setScreen} />;
+        return <MaterialsScreen onNavigate={navigate} />;
       case "settings":
-        return <SettingsScreen />;
+        return <SettingsScreen onNavigate={navigate} />;
       case "about":
         return <AboutScreen />;
       default:
-        return <HomeScreen onNavigate={setScreen} />;
+        return <HomeScreen onNavigate={navigate} />;
     }
   }
 
@@ -125,7 +142,7 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar current={screen} onNavigate={setScreen} projectName={projectName} hasProjectContent={hasProjectContent} />
+      <Sidebar current={screen} onNavigate={navigate} projectName={projectName} hasProjectContent={hasProjectContent} currentProjectTarget={projectReturnTo} />
       <div className="main">
         {!hasOwnHeader && (
           <header className="topbar">
@@ -174,6 +191,10 @@ function App() {
             </div>
           </div>
         )}
+        {/* 書き出しの終了（成功/失敗/中止）をどの画面にいても知らせる（#589）。**独自ヘッダの画面でも出す**
+            （`hasOwnHeader` で囲まない）＝場面編集で待っている利用者にこそ必要。書き出し画面では出さない
+            （そこに結果が出ており二重になる）＝開いた時点で既読にする（下の ExportScreen 側で解除）。 */}
+        {screen !== "export" && <ExportResultNotice onNavigate={navigate} />}
         {renderScreen()}
       </div>
     </div>

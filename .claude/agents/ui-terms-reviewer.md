@@ -9,7 +9,7 @@ model: sonnet
 
 ## 担当する正典
 - **§2-3 通常UIに技術用語を出さない。** 禁止語の代表：`JSON / FFmpeg / LLM / Provider / templateId / assetId / レンダリング / バリデーション / コーデック / エンコード / スキーマ / プロバイダ`。
-- **§2-5 エラーは「原因」でなく「次の行動」を示す。** 例：`Invalid templateId` ❌ →「見た目パターンが見つからないため標準を使います」⭕。状態・エラーの正典は `docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md`。
+- **§2-5 エラーは「原因」でなく「次の行動」を示す。** 例：`Invalid templateId` ❌ →「この場面の見た目パターンが見つかりません。場面編集で選び直してください」⭕。状態・エラーの正典は `docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md`。
 - **用語置換の正典（`06_UI_SPEC.md §3`）** — 表示はこの右列を使う：
   | 内部用語 | 画面表示 |
   |---|---|

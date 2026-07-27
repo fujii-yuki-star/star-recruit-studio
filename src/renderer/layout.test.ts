@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { Scene } from '../domain/project/types';
+import type { FreeElement, Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
-import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas } from './layout';
+import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
 import { layoutToSvg } from './sceneSvg';
-import { wrapText } from './textWrap';
+import { wrapText } from '../domain/text/textWrap';
+import { sampleTemplates } from '../infrastructure/sampleData';
+import { MAX_SUBTITLE_LEN_DEFAULT } from '../domain/constants';
 
 // 字幕帯の実 [top, bottom]（描画と同じ wrapText の行数＋anchorBottom で算出・共有定数を参照）。段間の重なり検証に使う。
 const bandRect = (item: TextItem): { top: number; bottom: number } => {
@@ -189,7 +191,8 @@ describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 
     expect(subtitleOverflowsCanvas(dialogueScene(groupLines(8, 'あ'.repeat(50))), openingTemplate)).toBe(true);
   });
 
-  it('逐次（同時開始なし）は積まないので対象外（false）', () => {
+  it('逐次（同時開始なし）は帯を積まないので、通常の長さでは収まる（false）', () => {
+    // #563 で逐次も**検査対象**にはなった（積まないだけ）。通常長ならはみ出さない＝既存プロジェクトに警告を増やさない。
     const seq = dialogueScene([
       { lineId: 'line_001', text: 'あ'.repeat(50), status: 'none' },
       { lineId: 'line_002', text: 'あ'.repeat(50), status: 'none' }, // startWithPrevious なし＝逐次
@@ -672,6 +675,29 @@ describe('layoutScene freeLayout (FREE テンプレ・ADR-0008)', () => {
     expect(svg).toContain('paint-order="stroke"'); // 塗りの下に縁取り（可読性）
   });
 
+  // #565：FREE 側には「太さ>0 で色が無ければ既定色」の担保が無く、太さだけ入れても縁取りが**描かれなかった**
+  // （通常テンプレ層は resolveTextStyle が担保済み）。色見本は黒を出していたので「見本は色、実際は無し」のドリフト。
+  // 既定色は下地（文字色／図形の塗り）と反対側＝白文字に白い縁取りで消える、も同時に防ぐ（ADR-0026①/②）。
+  it('FREE text/字幕/図形は「太さだけ」でも縁取りが描かれる（既定色は下地と反対・#565）', () => {
+    const svgOf = (el: FreeElement) =>
+      layoutToSvg(layoutScene({ ...freeScene, texts: { subtitle: 'じまく' }, freeLayout: [el] }, freeTemplate));
+    // 暗い文字（既定色）＋太さだけ → 白い縁取り。
+    const dark = svgOf({ id: 'free_001', kind: 'text', x: 0, y: 0, w: 400, h: 200, zIndex: 5, text: 'あ', fontSize: 40, strokeWidth: 3 });
+    expect(dark).toContain('stroke="#ffffff"');
+    expect(dark).toContain('paint-order="stroke"');
+    // 白い文字＋太さだけ → 黒い縁取り（固定の白なら見えないまま＝直っていない）。
+    expect(svgOf({ id: 'free_001', kind: 'text', x: 0, y: 0, w: 400, h: 200, zIndex: 5, text: 'あ', fontSize: 40, color: '#ffffff', strokeWidth: 3 }))
+      .toContain('stroke="#000000"');
+    // 字幕要素も同じ（対象未指定＝読み上げの字幕文言へ無変換解決・ADR-0029）。
+    expect(svgOf({ id: 'free_001', kind: 'subtitle', x: 0, y: 0, w: 400, h: 200, zIndex: 5, fontSize: 40, color: '#ffffff', strokeWidth: 4 }))
+      .toContain('stroke="#000000"');
+    // 図形の枠線は塗りが下地。明るい塗り→黒枠／暗い塗り→白枠（塗りと同じ色で消えない）。
+    expect(svgOf({ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 200, h: 200, zIndex: 5, fillColor: '#eeeeee', strokeWidth: 5 }))
+      .toContain('stroke="#000000"');
+    expect(svgOf({ id: 'free_001', kind: 'shape', x: 0, y: 0, w: 200, h: 200, zIndex: 5, fillColor: '#111111', strokeWidth: 5 }))
+      .toContain('stroke="#ffffff"');
+  });
+
   it('FREE text の体裁が未指定なら左揃え・縁取りなし（既定）', () => {
     const plain: Scene = { ...freeScene, freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 200, h: 80, zIndex: 5, text: 'あ', fontSize: 40 }] };
     const svg = layoutToSvg(layoutScene(plain, freeTemplate));
@@ -755,5 +781,146 @@ describe('layoutScene：FREE 字幕要素の描画（ADR-0029）', () => {
   it('通常テンプレ（非 FREE）は freeLayout の字幕要素を描かない（category ガード）', () => {
     const s = { ...scene, freeLayout: [subEl()] } as unknown as Scene;
     expect(layoutScene(s, openingTemplate).items.some((i) => i.id === 'free_sub')).toBe(false);
+  });
+});
+
+describe('layoutScene：文字の体裁の場面別上書き（scene.textStyles・#555）', () => {
+  const byId = (s: Scene, id: string): TextItem =>
+    layoutScene(s, openingTemplate).items.find((i) => i.id === id) as TextItem;
+  const subtitleItems = (layout: { items: LayoutItem[] }): TextItem[] =>
+    layout.items.filter((i): i is TextItem => i.kind === 'text' && i.isSubtitle);
+
+  it('未指定は従来どおりテンプレ層を継承する（後方互換）', () => {
+    const t = byId(scene, 'title');
+    expect(t.fontSize).toBe(72); // openingTemplate の title 層
+    expect(t.fontWeight).toBe('bold');
+  });
+
+  it('色/サイズ/太さ/縁取りを場面別に上書きできる（text 層）', () => {
+    const s = { ...scene, textStyles: { title: { color: '#ff0000', fontSize: 96, fontWeight: 'normal', strokeColor: '#123456', strokeWidth: 4 } } } as Scene;
+    const t = byId(s, 'title');
+    expect(t.color).toBe('#ff0000');
+    expect(t.fontSize).toBe(96);
+    expect(t.fontWeight).toBe('normal'); // テンプレの bold を上書きできる（継承と区別がつく向き）
+    expect(t.strokeColor).toBe('#123456');
+    expect(t.strokeWidth).toBe(4);
+  });
+
+  it('指定したプロパティだけが固有値＝残りはテンプレ層を継承する', () => {
+    const s = { ...scene, textStyles: { title: { color: '#00ff00' } } } as Scene;
+    const t = byId(s, 'title');
+    expect(t.color).toBe('#00ff00');
+    expect(t.fontSize).toBe(72); // テンプレのまま
+    expect(t.fontWeight).toBe('bold'); // テンプレのまま
+  });
+
+  it('他の種別（textKey）には影響しない', () => {
+    const s = { ...scene, textStyles: { title: { fontSize: 96 } } } as Scene;
+    expect(byId(s, 'title').fontSize).toBe(96);
+    expect(byId(s, 'subtitle').fontSize).toBe(38); // subtitle 層は据え置き
+  });
+
+  it('字幕層（subtitle）にも効く', () => {
+    const s = { ...scene, textStyles: { subtitle: { color: '#ffff00', fontSize: 50 } } } as Scene;
+    const sub = byId(s, 'subtitle');
+    expect(sub.color).toBe('#ffff00');
+    expect(sub.fontSize).toBe(50);
+  });
+
+  // 縁取りは「太さ>0 なのに色が無いと silent に消える」を防ぐ既定（#275/PR#289）が入っている。
+  // 場面側で太さだけ足したときも、その既定が働く（＝解決後の値で判定している）こと。
+  it('場面で縁取りの太さだけ足すと白が既定になる（縁取りが黙って消えない）', () => {
+    const s = { ...scene, textStyles: { title: { strokeWidth: 3 } } } as Scene;
+    const t = byId(s, 'title');
+    expect(t.strokeWidth).toBe(3);
+    expect(t.strokeColor).toBe('#ffffff');
+  });
+
+  it('場面で縁取りの太さを 0 にすると色は既定化しない（縁取りなし）', () => {
+    const s = { ...scene, textStyles: { title: { strokeWidth: 0 } } } as Scene;
+    expect(byId(s, 'title').strokeWidth).toBe(0);
+    expect(byId(s, 'title').strokeColor).toBeUndefined();
+  });
+
+  // 上書きした fontSize は同時字幕の段組み（stackedSubtitleBands）にも渡す必要がある。
+  // テンプレ層の値のまま段を積むと、場面で字幕を大きくしたときに帯どうしが重なる（#533 P1 の再来）。
+  it('字幕を大きくしても同時字幕の帯が重ならない（段組みが上書き後のサイズを使う）', () => {
+    const dialogue = { ...scene, textStyles: { subtitle: { fontSize: 76 } }, lines: [
+      { lineId: 'line_001', text: 'あ'.repeat(30), status: 'none' },
+      { lineId: 'line_002', text: 'い'.repeat(30), startWithPrevious: true, status: 'none' },
+    ] } as Scene;
+    const segment = { lineId: 'line_001', parallelLineIds: ['line_002'], subtitleText: 'あ'.repeat(30), startSec: 0, durationSec: 8, isFirst: true };
+    const subs = subtitleItems(layoutScene(dialogue, openingTemplate, { subtitleText: 'あ'.repeat(30), subtitleSegment: segment }));
+    expect(subs).toHaveLength(2);
+    expect(subs.every((s) => s.fontSize === 76)).toBe(true); // 段組みも上書き後のサイズで計算されている
+    expect(noOverlap(subs)).toBe(true);
+  });
+});
+
+// #547 P2-7：字幕を消す対象の判定を1か所に（書き出しと仕上がり確認が同じ判定＝パリティ）。
+describe('isSubtitleItem（字幕アイテムの判定・#547 P2-7）', () => {
+  const textItem = (over: Partial<import('./layout').LayoutItem> = {}) =>
+    ({ id: 'x', kind: 'text', x: 0, y: 0, w: 10, h: 10, zIndex: 50, text: 'a', fontSize: 20, fontWeight: 'normal', color: '#000', maxLines: 1, isSubtitle: false, ...over }) as import('./layout').LayoutItem;
+
+  it('字幕由来の text だけ true（本文 text・画像・塗りは false）', () => {
+    expect(isSubtitleItem(textItem({ isSubtitle: true }))).toBe(true);
+    expect(isSubtitleItem(textItem({ isSubtitle: false }))).toBe(false); // 本文テキストは消さない
+    expect(isSubtitleItem({ id: 'i', kind: 'image', x: 0, y: 0, w: 1, h: 1, zIndex: 0, assetId: 'a', fit: 'cover', role: 'slot' } as import('./layout').LayoutItem)).toBe(false);
+    expect(isSubtitleItem({ id: 'f', kind: 'fill', x: 0, y: 0, w: 1, h: 1, zIndex: 0, color: '#fff', opacity: 1, radius: 0 } as import('./layout').LayoutItem)).toBe(false);
+  });
+});
+
+// #563：はみ出し検査を**単独ナレーション／逐次の場面にも広げる**。
+// #533 P2 の初出時は「同時字幕の段積み」だけが対象だったが、#555（文字の体裁の場面別上書き）で
+// **利用者が場面編集から字幕を拡大できる**ようになり、単独場面でも画面外へ切れる到達性が上がった（ADR-0026④・§2-5）。
+describe('subtitleOverflowsCanvas：単独/逐次も対象（#563）', () => {
+  const soloScene = (over: Partial<Scene>): Scene => ({ ...scene, ...over } as Scene);
+
+  it('単独ナレーション（lines 無し）の静的字幕も検査する＝拡大しすぎればはみ出す（true）', () => {
+    // #555 の体裁上書きで字幕を極端に大きくした場面。旧実装は lines 無しで即 false ＝黙って画面外に切れていた。
+    const huge = soloScene({
+      texts: { subtitle: 'あ'.repeat(40) },
+      textStyles: { subtitle: { fontSize: 300 } },
+    } as Partial<Scene>);
+    expect(subtitleOverflowsCanvas(huge, openingTemplate)).toBe(true);
+  });
+
+  it('単独ナレーションでも通常の体裁なら収まる（false）＝既定では警告しない', () => {
+    expect(subtitleOverflowsCanvas(soloScene({ texts: { subtitle: 'あ'.repeat(40) } }), openingTemplate)).toBe(false);
+  });
+
+  it('場面の字幕がオフなら、拡大していても検査対象にならない（描かれないものを警告しない）', () => {
+    const off = soloScene({
+      texts: { subtitle: 'あ'.repeat(40) },
+      textStyles: { subtitle: { fontSize: 300 } },
+      subtitleEnabledDefault: false,
+    } as Partial<Scene>);
+    expect(subtitleOverflowsCanvas(off, openingTemplate)).toBe(false);
+  });
+
+  it('逐次の行でも拡大しすぎればはみ出す（true）＝同時字幕だけの特権にしない（ADR-0026②）', () => {
+    const seqHuge = {
+      ...scene,
+      textStyles: { subtitle: { fontSize: 300 } },
+      lines: [
+        { lineId: 'line_001', text: 'あ'.repeat(40), status: 'none' },
+        { lineId: 'line_002', text: 'あ'.repeat(40), status: 'none' }, // 逐次
+      ],
+    } as unknown as Scene;
+    expect(subtitleOverflowsCanvas(seqHuge, openingTemplate)).toBe(true);
+  });
+
+  // ノイズガード（#563 の「既存プロジェクトで警告が増えないか要確認」への実測回答）。
+  // 全同梱テンプレ×推奨上限(60字)の倍まで、**既定の体裁なら1件もはみ出さない**ことを固定する。
+  // ここが赤くなる＝標準テンプレか字幕レイアウトが変わって「普通に使うだけで警告が出る」状態になった合図。
+  it('全同梱テンプレ×既定体裁では、推奨上限の倍の長さでも警告しない（ノイズガード）', () => {
+    const withSubtitle = sampleTemplates.filter((t) => t.layers.some((l) => l.type === 'subtitle'));
+    expect(withSubtitle.length).toBeGreaterThan(0);
+    for (const t of withSubtitle) {
+      for (const n of [20, 40, MAX_SUBTITLE_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT * 2]) {
+        const s = { ...scene, templateId: t.templateId, texts: { subtitle: 'あ'.repeat(n) } } as Scene;
+        expect(subtitleOverflowsCanvas(s, t), `${t.templateId} / ${n}字`).toBe(false);
+      }
+    }
   });
 });

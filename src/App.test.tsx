@@ -1,0 +1,129 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, within } from "@testing-library/react";
+import App from "./App";
+import { useProjectStore } from "./app/store/projectStore";
+import { sampleTemplates } from "./infrastructure/sampleData";
+import type { Scene } from "./domain/project/types";
+
+// #547 P3-7 レビュー：navigation.ts の単体テストと Sidebar の props テストの"接着"＝App 側の配線
+// （navigate が projectReturnTo を更新 → Sidebar の currentProjectTarget → 実クリック遷移）を統合で固定する。
+// これが無いと、App.tsx の結線が崩れても両単体テストは緑のまま（レビュー指摘）。
+function scene(id: string, order: number): Scene {
+  return {
+    sceneId: id,
+    partId: "part_001",
+    order,
+    sceneType: "photo_intro",
+    templateId: "photo_left_text_right_yuko_v1",
+    durationSec: 8,
+    assetRefs: {},
+    character: { enabled: false, characterId: "yuko" },
+    texts: {},
+    narration: { text: "", status: "none" },
+    warnings: [],
+  };
+}
+
+/** サイドバー内に限定してボタンを押す（場面編集など本文にも「素材」等が出るため、ナビと取り違えない）。 */
+function clickSidebar(container: HTMLElement, label: string) {
+  const sidebar = container.querySelector(".sidebar") as HTMLElement;
+  fireEvent.click(within(sidebar).getByText(label).closest("button")!);
+}
+
+describe("App「今の動画」の戻り先の配線（#547 P3-7 統合）", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+    useProjectStore.setState({
+      templates: sampleTemplates,
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [scene("scene_001", 1)],
+      status: "ready",
+      saveStatus: "saved",
+    });
+  });
+
+  it("工程画面（場面編集）へ入って工程外（素材）へ出ても、「今の動画」で場面編集に戻る（たたき台固定にしない）", () => {
+    const { container } = render(<App />);
+
+    // 動画を開いている＝サイドバーに「今の動画」が出る。押すと既定の戻り先＝たたき台。
+    clickSidebar(container, "今の動画");
+    expect(container.querySelector(".sidebar")).not.toBeNull();
+    // たたき台の固有ボタン。
+    expect(within(container).getByText("この内容で確認・編集する")).toBeInTheDocument();
+
+    // たたき台 → 場面編集（工程内の移動＝戻り先が draft から scene-edit へ更新される）。
+    fireEvent.click(within(container).getByText("この内容で確認・編集する").closest("button")!);
+    expect(within(container).getByText("台本表へ戻る")).toBeInTheDocument(); // 場面編集に居る
+
+    // 工程外（素材）へ出る。
+    clickSidebar(container, "素材");
+    expect(within(container).queryByText("台本表へ戻る")).toBeNull(); // 場面編集を離れた
+    // 「素材を管理」はトップバー見出し＋本文見出しで2箇所に出るため、トップバーで確定する（工程外＝独自ヘッダ無し）。
+    expect((container.querySelector(".topbar-title") as HTMLElement).textContent).toBe("素材を管理");
+
+    // 「今の動画」＝直近の工程画面（場面編集）へ戻る。たたき台へは飛ばない。
+    clickSidebar(container, "今の動画");
+    expect(within(container).getByText("台本表へ戻る")).toBeInTheDocument(); // 場面編集へ復帰
+    expect(within(container).queryByText("この内容で確認・編集する")).toBeNull(); // たたき台ではない
+  });
+
+  it("まだ工程画面に入っていなければ、「今の動画」は入口＝たたき台へ（既定の戻り先）", () => {
+    const { container } = render(<App />);
+    // 一覧（home）から直接。工程画面は未訪問＝既定の draft。
+    clickSidebar(container, "今の動画");
+    expect(within(container).getByText("この内容で確認・編集する")).toBeInTheDocument();
+  });
+});
+
+// #589：書き出しの終了通知は**どの画面にいても**出す（書き出し画面だけ除く＝そこに結果がある）。
+// 判定・文言の単体テストだけでは「App のどこに置いたか（独自ヘッダ画面で消えていないか・書き出し画面で二重に出ないか）」を
+// 保証できないため、実 App で配線を固定する（#563 で domain を直しても画面に出なかった教訓）。
+describe("App 書き出しの終了通知の配線（#589 統合）", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+    useProjectStore.setState({
+      templates: sampleTemplates,
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+      scenes: [scene("scene_001", 1)],
+      status: "ready",
+      saveStatus: "saved",
+    });
+  });
+
+  it("他画面（たたき台）にいるときに終わったら通知が出る", () => {
+    const { container } = render(<App />);
+    clickSidebar(container, "今の動画"); // → たたき台
+    act(() => {
+      useProjectStore.getState().setExportRun({ phase: "done" });
+    });
+    expect(within(container).getByText(/動画の書き出しが終わりました/)).toBeInTheDocument();
+  });
+
+  it("独自ヘッダの画面（場面編集）でも消えない＝待っている人にこそ必要", () => {
+    const { container } = render(<App />);
+    clickSidebar(container, "今の動画");
+    fireEvent.click(within(container).getByText("この内容で確認・編集する").closest("button")!);
+    expect(within(container).getByText("台本表へ戻る")).toBeInTheDocument(); // 場面編集（独自ヘッダ）
+    act(() => {
+      useProjectStore.getState().setExportRun({ phase: "error", message: "失敗の理由" });
+    });
+    expect(within(container).getByText(/書き出しに失敗しました/)).toBeInTheDocument();
+  });
+
+  it("書き出し画面では出さず、開いた時点で既読になる（他画面へ戻っても再び出ない）", () => {
+    const { container } = render(<App />);
+    act(() => {
+      useProjectStore.getState().setExportRun({ phase: "done" });
+    });
+    // 通知の「書き出しの画面へ」で移動＝そこに結果があるので通知は出さない。
+    fireEvent.click(within(container).getByRole("button", { name: "書き出しの画面へ" }));
+    expect(within(container).queryByText(/動画の書き出しが終わりました/)).toBeNull();
+    expect(useProjectStore.getState().exportRun.resultUnseen).toBe(false); // 既読になった
+    // 他画面へ戻っても再掲しない（#547 P3-11 の「古い通知が残る」を作らない）。
+    clickSidebar(container, "素材");
+    expect(within(container).queryByText(/動画の書き出しが終わりました/)).toBeNull();
+  });
+});

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { Asset, ElementAnimation, Scene } from "../domain/project/types";
+import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from "../domain/constants";
+import type { Asset, ElementAnimation, FreeElement, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import { buildPrecheckItems, sceneToDraftRow } from "./adapters";
+import { subtitleOverflowMessage } from "./uiLabels";
 
 const freeTemplate: Template = {
   schemaVersion: "1.0",
@@ -174,8 +176,10 @@ describe("buildPrecheckItems（#400・項目 action が該当場面へ飛ぶ sce
   });
 
   it("字幕が長い項目は最初の該当場面 id を持つ（action で飛べる項目）", () => {
-    const a = scn("a", { texts: { subtitle: "短い字幕" } });
-    const b = scn("b", { texts: { subtitle: "あ".repeat(61) } }); // > 既定60字
+    // FREE 場面で texts.subtitle を実表示するには字幕要素（読み上げ対象）が要る（ADR-0029・sceneDisplayedSubtitleTexts）。
+    const subEl = [{ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 400, h: 80, subtitleSource: { kind: "narration" } }] as unknown as Scene["freeLayout"];
+    const a = scn("a", { texts: { subtitle: "短い字幕" }, freeLayout: subEl });
+    const b = scn("b", { texts: { subtitle: "あ".repeat(61) }, freeLayout: subEl }); // > 既定60字
     const sub = buildPrecheckItems([a, b], assets, [freeTemplate]).find((i) => i.id === "subtitle");
     expect(sub?.severity).toBe("action");
     expect(sub?.sceneId).toBe("b");
@@ -244,5 +248,400 @@ describe("sceneToDraftRow（見た目バッジの §2-3 フォールバック・
     const row = sceneToDraftRow(freeScene(undefined), [], [], []); // templates 空＝解決不能
     expect(row.look).toBe("見た目が見つかりません");
     expect(row.look).not.toContain("free_canvas_v1"); // 内部IDが UI に漏れない（§2-3）
+  });
+
+  // 台本表の「素材」は**動画に出る分**を示す。切替で差し込み先を失った休眠の割当（#547 P3-14 で消さずに残す）を
+  // そのまま出すと、動画には映らないのに一覧では「写真あり」＝表示と実挙動がずれる（ADR-0026①）。
+  it("差し込み先を失った休眠の割当は素材に出さない（実効使用と同じ規則・#547 P3-14）", () => {
+    const photoTemplate = {
+      ...freeTemplate, templateId: "photo_v1", name: "写真", category: "photo_intro",
+      layers: [{ id: "mainVisual", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 1 }],
+    } as Template;
+    const textTemplate = {
+      ...freeTemplate, templateId: "text_v1", name: "メッセージ", category: "message",
+      layers: [{ id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 1920, h: 200, zIndex: 1 }],
+    } as Template;
+    const scene = { ...freeScene(undefined), sceneType: "photo_intro", assetRefs: { mainVisual: "asset_001" } } as Scene;
+    const shown = { ...scene, templateId: "photo_v1" } as Scene;
+    const dormant = { ...scene, templateId: "text_v1", sceneType: "message" } as Scene;
+    expect(sceneToDraftRow(shown, [], [photoTemplate, textTemplate], assets).material).toBe("写真A");
+    expect(sceneToDraftRow(dormant, [], [photoTemplate, textTemplate], assets).material).toBe("（未設定）");
+  });
+
+  // 立ち絵（ゆうこ）は「素材」ではなく登場人物。素材欄の主役候補に混ぜると、`assetType:'yuko'` は video でないので
+  // 「写真」として表情画像の名前が並ぶ（materialType の分岐は video 以外を photo にする）＝写真を入れていない場面が
+  // 「写真あり」に見える。同梱の `opening_yuko_right_v1` は背景が必須でないので、ゆうこだけの場面は普通に作れる。
+  it("立ち絵だけの場面は素材欄に出さない（ゆうこは写真ではない・#547 P3-14 レビュー）", () => {
+    const yukoTemplate = {
+      ...freeTemplate, templateId: "opening_v1", name: "オープニング", category: "opening",
+      layers: [
+        { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+        { id: "yuko", type: "character", x: 0, y: 0, w: 500, h: 700, zIndex: 5 },
+      ],
+    } as Template;
+    const yukoAsset = { assetId: "asset_pose", assetType: "yuko", displayName: "ゆうこ（笑顔）", filePath: "y.png" } as Asset;
+    const scene = {
+      ...freeScene(undefined), sceneType: "opening", templateId: "opening_v1",
+      character: { enabled: true, characterId: "yuko", poseAssetId: "asset_pose" },
+    } as Scene;
+    const row = sceneToDraftRow(scene, [], [yukoTemplate], [...assets, yukoAsset]);
+    expect(row.material).toBe("（未設定）");
+    expect(row.materialType).toBe("none");
+  });
+
+  it("FREE 場面は自由配置の素材を主役にする（休眠 assetRefs ではなく実効表現・ADR-0030）", () => {
+    const sc = { ...freeScene([{ id: "el1", kind: "slot", x: 0, y: 0, w: 10, h: 10, assetId: "asset_001" } as FreeElement]), assetRefs: { mainVisual: "asset_zzz" } } as Scene;
+    expect(sceneToDraftRow(sc, [], [freeTemplate], assets).material).toBe("写真A");
+  });
+});
+
+// #547 P1-3：字幕/セリフの「長すぎ」判定は、テンプレの aiHint が無ければ**正典定数**へ落ちる（生成側 transformPlan と
+// 同じ参照元）。閾値を定数から導出して検証する＝将来 定数を変えたとき precheck と生成上限が食い違わないことを固定する
+// （直書き 60/120 で検証すると、定数を変えても緑のまま＝ドリフトを見逃す）。テンプレは aiHint 無し（＝既定へ落ちる）。
+describe("buildPrecheckItems（字幕/セリフの長さ閾値＝正典定数と同じ参照元・#547 P1-3）", () => {
+  const normalTemplate: Template = {
+    schemaVersion: "1.0", templateId: "opening_v1", name: "オープニング", category: "opening", aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 }, defaults: { backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 1720, h: 80, zIndex: 10 },
+    ],
+  };
+  const textScene = (over: Partial<Scene>): Scene => ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "opening", templateId: "opening_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+    narration: { text: "", status: "generated" }, warnings: [], ...over,
+  } as Scene);
+  const item = (s: Scene, id: string) => buildPrecheckItems([s], assets, [normalTemplate]).find((i) => i.id === id)!;
+
+  it("字幕が定数ちょうどは OK・+1 で「短くする」警告", () => {
+    expect(item(textScene({ texts: { subtitle: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT) } }), "subtitle").severity).toBe("ok");
+    expect(item(textScene({ texts: { subtitle: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1) } }), "subtitle").severity).toBe("action");
+  });
+
+  it("セリフが定数ちょうどは OK・+1 で長さ警告", () => {
+    expect(item(textScene({ narration: { text: "あ".repeat(MAX_NARRATION_LEN_DEFAULT), status: "generated" } }), "line").severity).toBe("ok");
+    expect(item(textScene({ narration: { text: "あ".repeat(MAX_NARRATION_LEN_DEFAULT + 1), status: "generated" } }), "line").severity).toBe("warning");
+  });
+
+  it("テンプレの aiHint があればそちらが優先（既定へ落ちない）", () => {
+    const withHint: Template = { ...normalTemplate, aiHint: { maxSubtitleLength: 5 } as Template["aiHint"] };
+    const s = textScene({ texts: { subtitle: "あ".repeat(6) } }); // 既定(60)未満だが hint(5) 超え
+    expect(buildPrecheckItems([s], assets, [withHint]).find((i) => i.id === "subtitle")!.severity).toBe("action");
+  });
+
+  // #547 P1-3 レビュー：掛け合い（scene.lines）の**行ごとの実効字幕**（subtitleText ?? text）は precheck の
+  // 字幕チェックから漏れていた（texts.subtitle しか見ていなかった）＝長い字幕を描画するのに「OK」と断言していた。
+  // #569（生成側の行テキスト長の漏れ）とは別＝これは precheck 側の字幕漏れ。ADR-0015/ADR-0026②。
+  const dlgLine = (over: Partial<Scene["lines"] extends (infer L)[] | undefined ? L : never>) =>
+    ({ lineId: "line_001", text: "短い", status: "none", ...over }) as NonNullable<Scene["lines"]>[number];
+
+  it("掛け合い：行の字幕(subtitleText)が定数ちょうどは OK・+1 で警告（precheck の字幕漏れ）", () => {
+    const ok = textScene({ lines: [dlgLine({ subtitleText: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT) })] });
+    expect(item(ok, "subtitle").severity).toBe("ok");
+    const over = textScene({ lines: [dlgLine({ subtitleText: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1) })] });
+    expect(item(over, "subtitle").severity).toBe("action");
+  });
+
+  it("掛け合い：字幕 OFF の行は長くても対象外・ON なら警告（除外条件そのものの回帰も見る）", () => {
+    const long = "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1);
+    expect(item(textScene({ lines: [dlgLine({ subtitleText: long, subtitleEnabled: false })] }), "subtitle").severity).toBe("ok");
+    expect(item(textScene({ lines: [dlgLine({ subtitleText: long, subtitleEnabled: true })] }), "subtitle").severity).toBe("action");
+  });
+
+  // 単独場面も同様に、字幕 OFF（subtitleEnabledDefault===false）なら長くても警告しない（掛け合いの OFF 除外と挙動を
+  // 揃える・ADR-0026②）＝描画されない字幕を「長い」と言わない。ON（未指定/true）なら従来どおり警告する。
+  it("単独：字幕 OFF は長くても対象外・ON なら警告", () => {
+    const long = "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1);
+    expect(item(textScene({ texts: { subtitle: long }, subtitleEnabledDefault: false }), "subtitle").severity).toBe("ok");
+    expect(item(textScene({ texts: { subtitle: long }, subtitleEnabledDefault: true }), "subtitle").severity).toBe("action");
+    expect(item(textScene({ texts: { subtitle: long } }), "subtitle").severity).toBe("action"); // 未指定＝表示（既定 ON）
+  });
+
+  it("掛け合い：subtitleText 未指定は行テキストが実効字幕＝字幕上限(60)で判定する（セリフ上限120ではない）", () => {
+    // 61文字の line.text：セリフ上限(120)は OK だが、字幕として表示されるので字幕上限(60)で警告する。
+    const s = textScene({ lines: [dlgLine({ text: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1) })] });
+    expect(item(s, "subtitle").severity).toBe("action"); // 字幕は長い
+    expect(item(s, "line").severity).toBe("ok"); // セリフ(120)は範囲内
+  });
+
+  it("複数行のうち1行でも字幕が長ければ警告・全行 OK なら OK（実測の再現＝短い読み上げ+長い subtitleText）", () => {
+    const bad = textScene({ lines: [
+      dlgLine({ text: "やあ", subtitleText: "短い字幕" }),
+      dlgLine({ lineId: "line_002", text: "こんにちは", subtitleText: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1) }),
+    ] });
+    expect(item(bad, "subtitle").severity).toBe("action");
+    const good = textScene({ lines: [
+      dlgLine({ text: "やあ", subtitleText: "短い字幕" }),
+      dlgLine({ lineId: "line_002", text: "こんにちは", subtitleText: "こちらも短い" }),
+    ] });
+    expect(item(good, "subtitle").severity).toBe("ok");
+  });
+});
+
+// #547 P1-3 レビュー（FREE）：FREE 場面の字幕は字幕**要素**の subtitleSource（読み上げ/全部/話者）で実表示が決まる。
+// texts.subtitle だけ／掛け合い行だけを見ると、FREE 字幕対象を無視して見逃し・誤警告する（実測の回帰）。
+// sceneDisplayedSubtitleTexts に寄せ、描画（layoutScene）と同じ経路で長さを判定する（ADR-0029・ADR-0026②③）。
+describe("buildPrecheckItems（FREE 字幕の対象別の長さ判定・#547 P1-3 レビュー・ADR-0029）", () => {
+  const long = "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 1);
+  const subEl = (over: Record<string, unknown> = {}): FreeElement =>
+    ({ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 400, h: 80, ...over }) as unknown as FreeElement;
+  const free = (over: Partial<Scene>): Scene => ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "free", templateId: "free_canvas_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+    narration: { text: "", status: "generated" }, warnings: [], ...over,
+  } as Scene);
+  const sev = (s: Scene) => buildPrecheckItems([s], [], [freeTemplate]).find((i) => i.id === "subtitle")?.severity;
+
+  it("読み上げ対象：texts.subtitle を実表示＝長ければ警告（掛け合いでも・回帰の再現）", () => {
+    // 短い行テキスト＋長い texts.subtitle＋FREE 字幕対象=読み上げ → 画面には texts.subtitle が出る。
+    const s = free({
+      texts: { subtitle: long },
+      lines: [{ lineId: "line_001", text: "短い", subtitleText: "短", status: "none" }] as Scene["lines"],
+      freeLayout: [subEl({ subtitleSource: { kind: "narration" } })],
+    });
+    expect(sev(s)).toBe("action");
+  });
+
+  it("読み上げ対象：texts.subtitle が短ければ、行字幕が長くても OK（表示されない行字幕で誤警告しない）", () => {
+    const s = free({
+      texts: { subtitle: "みじかい" },
+      lines: [{ lineId: "line_001", text: long, status: "none" }] as Scene["lines"], // 行字幕は長いが読み上げ対象では非表示
+      freeLayout: [subEl({ subtitleSource: { kind: "narration" } })],
+    });
+    expect(sev(s)).toBe("ok");
+  });
+
+  it("全部対象：いずれかの行字幕が長ければ警告", () => {
+    const s = free({
+      lines: [
+        { lineId: "line_001", text: "やあ", status: "none" },
+        { lineId: "line_002", text: long, status: "none" },
+      ] as Scene["lines"],
+      freeLayout: [subEl({ subtitleSource: { kind: "allLines" } })],
+    });
+    expect(sev(s)).toBe("action");
+  });
+
+  it("話者対象：対象話者の行だけ見る（他話者の長い行では警告しない）", () => {
+    const base = (over: Partial<Scene>) => free({
+      freeLayout: [subEl({ subtitleSource: { kind: "speaker", speaker: { kind: "catalog", speaker: 3 } } })],
+      ...over,
+    });
+    const targetLong = base({ lines: [
+      { lineId: "line_001", text: long, speaker: 3, status: "none" },
+    ] as Scene["lines"] });
+    expect(sev(targetLong)).toBe("action"); // 対象話者(3)の行が長い
+    const otherLong = base({ lines: [
+      { lineId: "line_001", text: "短い", speaker: 3, status: "none" },
+      { lineId: "line_002", text: long, speaker: 2, status: "none" }, // 別話者＝この要素は表示しない
+    ] as Scene["lines"] });
+    expect(sev(otherLong)).toBe("ok");
+  });
+
+  it("字幕 OFF は対象外（読み上げ対象・subtitleEnabledDefault=false）", () => {
+    const s = free({
+      texts: { subtitle: long }, subtitleEnabledDefault: false,
+      freeLayout: [subEl({ subtitleSource: { kind: "narration" } })],
+    });
+    expect(sev(s)).toBe("ok");
+  });
+
+  it("字幕要素が無ければ判定対象なし（texts.subtitle が長くても OK＝表示されない）", () => {
+    const s = free({ texts: { subtitle: long } }); // subtitle 要素なし＝FREE では字幕は描画されない
+    expect(sev(s)).toBe("ok");
+  });
+
+  it("対象未設定（字幕欄を足した直後の既定）：単独場面は読み上げ＝長い texts.subtitle で警告", () => {
+    // createFreeElement は subtitleSource を設定しない（PR-C）。追加直後の既定解決も実表示と一致させる。
+    const s = free({ texts: { subtitle: long }, freeLayout: [subEl()] }); // subEl() = subtitleSource 未設定
+    expect(sev(s)).toBe("action");
+  });
+});
+
+// #547 P3-9：置いたのに何も表示しない字幕を、書き出し前に場面つきで知らせる（黙って出ないまま MP4 にしない・ADR-0026④）。
+describe("buildPrecheckItems（表示されない字幕・#547 P3-9）", () => {
+  const subEl = (over: Record<string, unknown> = {}): FreeElement =>
+    ({ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 400, h: 80, ...over }) as unknown as FreeElement;
+  const free = (over: Partial<Scene>): Scene => ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "free", templateId: "free_canvas_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" }, texts: {},
+    narration: { text: "", status: "generated" }, warnings: [], ...over,
+  } as Scene);
+  const silent = (scenes: Scene[]) => buildPrecheckItems(scenes, [], [freeTemplate]).find((i) => i.id === "silentSubtitle");
+
+  it("出ない字幕がある場面を挙げ、その場面へ戻す導線を出す", () => {
+    const s = free({ texts: {}, freeLayout: [subEl({ subtitleSource: { kind: "narration" } })] }); // 文が空＝出ない
+    const it0 = silent([s]);
+    expect(it0?.severity).toBe("action");
+    expect(it0?.detail).toContain("場面1");
+    expect(it0?.sceneId).toBe("scene_001"); // 「直す」で該当場面を開く（#400 と同じ流儀）
+  });
+
+  it("字幕が出ていれば項目自体を出さない（通常プロジェクトにノイズを足さない）", () => {
+    const s = free({ texts: { subtitle: "ようこそ" }, freeLayout: [subEl({ subtitleSource: { kind: "narration" } })] });
+    expect(silent([s])).toBeUndefined();
+  });
+
+  it("字幕を置いていない場面だけなら項目を出さない", () => {
+    expect(silent([free({ texts: { subtitle: "ようこそ" } })])).toBeUndefined();
+  });
+
+  // 判定は場面編集の手がかりと同じ単一の参照元（subtitleSilentReason）＝画面で「出ない」と言われた場面がここにも並ぶ。
+  it("場面の字幕オフ・対象話者の不在も拾う（複数場面は番号を並べる）", () => {
+    const off = free({ sceneId: "scene_001", texts: { subtitle: "ようこそ" }, subtitleEnabledDefault: false, freeLayout: [subEl({ subtitleSource: { kind: "narration" } })] });
+    const noSpeaker = free({
+      sceneId: "scene_002",
+      lines: [{ lineId: "line_001", text: "やあ", speaker: 3, status: "none" }] as Scene["lines"],
+      freeLayout: [subEl({ subtitleSource: { kind: "speaker", speaker: { kind: "catalog", speaker: 2 } } })],
+    });
+    expect(silent([off, noSpeaker])?.detail).toContain("場面1・2");
+  });
+
+  // 書き出しは止めない（字幕が1つ出ないだけで動画は作れる）＝ハードブロッカーと混ぜない（#547 P2-5）。
+  it("書き出しは止めない（blocksExport を立てない）", () => {
+    const s = free({ texts: {}, freeLayout: [subEl({ subtitleSource: { kind: "narration" } })] });
+    expect(silent([s])?.blocksExport).toBeUndefined();
+  });
+});
+
+// #547 P2-5：残っていると書き出しが**必ず失敗する**項目だけに blocksExport を立て、公開前チェックの主ボタンを止める根拠にする。
+// 立てる条件は書き出し側の停止条件と対（buildExportScenes の templateUnresolvedError／videoUnplaceableError／afterAnim 判定）。
+// 「直せば良くなる」警告（声が未作成・字幕が長い）に立てると「出せるのに押せない」になるので、そこは立てないことも固定する。
+describe("buildPrecheckItems（書き出しを止める項目の判別・#547 P2-5）", () => {
+  const videoAsset: Asset = { assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "assets/v.mp4" };
+  const blockingIds = (items: ReturnType<typeof buildPrecheckItems>): string[] =>
+    items.filter((i) => i.blocksExport).map((i) => i.id);
+
+  it("見た目が見つからない場面＝書き出しを止める（templateUnresolvedError と対）", () => {
+    const scene = { ...freeScene(undefined), templateId: "missing" } as Scene;
+    expect(blockingIds(buildPrecheckItems([scene], assets, [freeTemplate]))).toEqual(["sceneTemplate"]);
+  });
+
+  it("動画を配置できない場面＝書き出しを止める（videoUnplaceableError と対）", () => {
+    const scene = freeScene([
+      { id: "slot_1", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_v", fit: "cover", hidden: true },
+    ] as unknown as Scene["freeLayout"]);
+    expect(blockingIds(buildPrecheckItems([scene], [...assets, videoAsset], [freeTemplate]))).toEqual(["videoPlacement"]);
+  });
+
+  it("afterAnim × アニメが場面尺いっぱい＝書き出しを止める", () => {
+    const slotEl = [{ id: "slot_1", kind: "slot", x: 100, y: 100, w: 800, h: 600, assetId: "asset_v", fit: "cover" }] as unknown as Scene["freeLayout"];
+    const anim = [{ id: "a", sceneId: "scene_001", targetId: "slot_1", keyframes: [{ timeSec: 0, x: -100 }, { timeSec: 8, x: 0 }] }] as unknown as ElementAnimation[];
+    const scene = { ...freeScene(slotEl), slotVideoStart: { slot_1: { mode: "afterAnim" } } } as unknown as Scene;
+    expect(blockingIds(buildPrecheckItems([scene], [...assets, videoAsset], [freeTemplate], anim))).toEqual(["videoStartAfterAnim"]);
+  });
+
+  it("声が未作成・字幕が長い は止めない（直せば良くなる警告＝出せるのに押せない、を作らない）", () => {
+    // FREE は字幕要素があって初めて texts.subtitle が表示される（ADR-0029）＝置かないと「長すぎ」判定に載らない。
+    const scene = {
+      ...freeScene([{ id: "sub_1", kind: "subtitle", x: 100, y: 900, w: 1000, h: 100 }] as unknown as Scene["freeLayout"]),
+      narration: { text: "よみあげ", status: "none" },
+      texts: { subtitle: "あ".repeat(MAX_SUBTITLE_LEN_DEFAULT + 10) },
+    } as unknown as Scene;
+    const items = buildPrecheckItems([scene], assets, [freeTemplate]);
+    // 該当する警告自体は出ている（出ていないと下の「止めない」が空振りになる）。
+    expect(items.find((i) => i.id === "voice")?.severity).toBe("action");
+    expect(items.find((i) => i.id === "subtitle")?.severity).toBe("action");
+    expect(blockingIds(items)).toEqual([]); // どれも書き出しは止めない
+  });
+
+  it("問題の無いプロジェクトは止める項目ゼロ", () => {
+    expect(blockingIds(buildPrecheckItems([freeScene(undefined)], assets, [freeTemplate]))).toEqual([]);
+  });
+});
+
+
+// #563：字幕のはみ出しを公開前チェックでも拾う（場面編集を開かないと気づけない状態にしない・ADR-0026④）。
+// 判定は実描画と同じ layoutScene を通る共有関数（subtitleOverflowsCanvas）＝画面の見え方と警告が食い違わない。
+describe("buildPrecheckItems（画面からはみ出す字幕・#563）", () => {
+  // 字幕層を持つ最小テンプレ（下端固定＝anchorBottom で上へ伸びる）。
+  const subTemplate: Template = {
+    schemaVersion: "1.0",
+    templateId: "sub_v1",
+    name: "字幕あり",
+    category: "message",
+    aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 },
+    defaults: { backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 160, y: 950, w: 1600, h: 100, zIndex: 50, fontSize: 48, anchorBottom: true },
+    ],
+  } as unknown as Template;
+  const subScene = (over: Partial<Scene> = {}): Scene => ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "message", templateId: "sub_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" },
+    texts: { subtitle: "あ".repeat(40) },
+    narration: { text: "", status: "none" }, warnings: [], ...over,
+  } as Scene);
+  const overflowItem = (scenes: Scene[]) =>
+    buildPrecheckItems(scenes, [], [subTemplate]).find((i) => i.id === "subtitleOverflow");
+
+  it("はみ出す場面を場面番号つきで挙げ、その場面へ戻す導線を出す", () => {
+    // #555 の体裁上書きで字幕を極端に拡大＝1帯でも画面外へ出る（単独ナレーションでも検出する＝#563 の本題）。
+    const item = overflowItem([subScene({ textStyles: { subtitle: { fontSize: 300 } } } as Partial<Scene>)]);
+    expect(item).toBeDefined();
+    expect(item?.detail).toContain("場面1");
+    expect(item?.severity).toBe("action");
+    expect(item?.sceneId).toBe("scene_001");
+  });
+
+  it("既定の体裁なら項目自体を出さない（普通に使うだけでは警告しない＝ノイズを出さない）", () => {
+    expect(overflowItem([subScene()])).toBeUndefined();
+  });
+
+  it("書き出しは止めない（直せば良くなる警告＝ハードブロッカーとは分離）", () => {
+    const item = overflowItem([subScene({ textStyles: { subtitle: { fontSize: 300 } } } as Partial<Scene>)]);
+    expect(item?.blocksExport).toBeUndefined();
+  });
+});
+
+// #563 レビュー：precheck の文言も原因で出し分ける。ただし複数場面をまとめて挙げるので、
+// **原因が揃っているときだけ断定**する（混在で片方の文言を出すと、もう片方の場面に誤った直し方を示す・§2-5）。
+describe("buildPrecheckItems（はみ出しの説明を原因で出し分ける・#563 レビュー）", () => {
+  const subTemplate: Template = {
+    schemaVersion: "1.0", templateId: "sub_v1", name: "字幕あり", category: "message",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 }, defaults: { backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 160, y: 950, w: 1600, h: 100, zIndex: 50, fontSize: 48, anchorBottom: true },
+    ],
+  } as unknown as Template;
+  const big = { subtitle: { fontSize: 300 } };
+  const mk = (id: string, order: number, simultaneous: boolean): Scene => ({
+    sceneId: id, partId: "part_001", order, sceneType: "message", templateId: "sub_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" },
+    texts: { subtitle: "あ".repeat(40) }, textStyles: big,
+    narration: { text: "", status: "none" }, warnings: [],
+    ...(simultaneous
+      ? { lines: [
+          { lineId: "line_001", text: "A", status: "none" },
+          { lineId: "line_002", text: "B", status: "none", startWithPrevious: true },
+        ] }
+      : {}),
+  } as unknown as Scene);
+  const detail = (scenes: Scene[]) =>
+    buildPrecheckItems(scenes, [], [subTemplate]).find((i) => i.id === "subtitleOverflow")?.detail ?? "";
+
+  it("全部が単独/逐次なら「文字の大きさを小さくする」と断定する", () => {
+    expect(detail([mk("scene_001", 1, false)])).toContain("文字の大きさを小さくするか、字幕を短くしてください");
+  });
+
+  it("全部が同時なら「同時のセリフを減らす」と断定する", () => {
+    expect(detail([mk("scene_001", 1, true)])).toContain("同時のセリフを減らすか、字幕を短くしてください");
+  });
+
+  it("原因が混ざったら断定せず場面編集へ誘導する（誤った直し方を示さない）", () => {
+    const d = detail([mk("scene_001", 1, true), mk("scene_002", 2, false)]);
+    expect(d).toContain("場面によって理由が違う");
+    expect(d).not.toContain("同時のセリフを減らす"); // 単独原因の場面に誤案内しない
+    expect(d).not.toContain("文字の大きさを小さくする"); // 同時原因の場面にも誤案内しない
+  });
+
+  it("断定するときの言い回しは場面編集の案内と同じ（言い回しのドリフトを作らない）", () => {
+    // 場面編集は subtitleOverflowMessage、precheck は subtitleOverflowPrecheckDetail だが「次の行動」句は共有。
+    expect(detail([mk("scene_001", 1, false)])).toContain(subtitleOverflowMessage(false).split("。")[1]);
+    expect(detail([mk("scene_001", 1, true)])).toContain(subtitleOverflowMessage(true).split("。")[1]);
   });
 });

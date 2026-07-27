@@ -1,6 +1,6 @@
 [package]
 name = "star-recruit-studio"
-version = "0.4.2"
+version = "0.4.3"
 description = "ゆうこ採用ムービーメーカー (working name: star-recruit-studio)"
 authors = ["Star System"]
 edition = "2021"

@@ -6,8 +6,10 @@ import { FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, TEXT_ALIGN } from '../
 import type { FreeElementKind } from '../enums';
 import { composeGroupGeometry } from '../group/compose';
 import type { Group } from '../group/types';
+import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { createFreeElementId } from './persistence';
 import type { FreeElement } from './types';
+import { moveByZ } from '../zOrder';
 
 // 新規要素の既定の配置・大きさ・体裁（canvas 1920×1080 基準の見やすい初期値。描画の fallback とは別の編集用既定）。
 const DEFAULT_X = 200;
@@ -20,7 +22,6 @@ const DEFAULT_TEXT_FONT_SIZE = 48;
 const DEFAULT_SHAPE_W = 600;
 const DEFAULT_SHAPE_H = 400;
 const DEFAULT_TEXT = 'テキスト';
-const DEFAULT_TEXT_COLOR = '#222222';
 const DEFAULT_SHAPE_COLOR = '#cccccc';
 // 字幕要素（ADR-0029）：画面下寄りの字幕バー。表示文言は subtitleSource（対象）から解決＝el.text は持たない。
 const DEFAULT_SUBTITLE_X = 240;
@@ -102,6 +103,42 @@ export function updateFreeElement(
 /** 指定 id の要素を取り除いた配列を返す。 */
 export function removeFreeElement(freeLayout: FreeElement[], id: string): FreeElement[] {
   return freeLayout.filter((e) => e.id !== id);
+}
+
+/**
+ * 点（canvas 座標）が要素の矩形の中か。**回転を考慮**する＝点を要素中心まわりに -rotation 回して軸平行で判定
+ * （描画は中心軸で回すため・#208 と同じ基準）。rotation 未指定＝0。
+ */
+export function pointInElement(
+  el: { x: number; y: number; w: number; h: number; rotation?: number },
+  point: { x: number; y: number },
+): boolean {
+  const cx = el.x + el.w / 2;
+  const cy = el.y + el.h / 2;
+  const rad = (-(el.rotation ?? 0) * Math.PI) / 180;
+  const dx = point.x - cx;
+  const dy = point.y - cy;
+  const lx = dx * Math.cos(rad) - dy * Math.sin(rad); // 要素ローカル座標へ戻す
+  const ly = dx * Math.sin(rad) + dy * Math.cos(rad);
+  return Math.abs(lx) <= el.w / 2 && Math.abs(ly) <= el.h / 2;
+}
+
+/**
+ * 点に当たる**最前面**の要素 id を返す（無ければ null）。`items` は**描画順（奥→手前）**で渡す＝
+ * 最後に当たったものが最前面（layout.ts が zIndex 昇順で描くのと同じ並び。同 zIndex は後勝ち）。
+ *
+ * 用途＝グループ枠が内部クリックを貪欲に食わないようにするヒットテスト（#548/#552）。枠は不透明で
+ * グループの外接矩形**全域**を覆うため、枠の pointerdown で「ポインタの下に実際は何があるか」を
+ * 判定して分岐する（メンバー／グループ外の要素／空白）。呼び出し側で非表示・合成後座標を解決して渡す。
+ */
+// 構造型で受ける＝FreeElement だけでなくテンプレの Layer にも流用（ADR-0017・#306）。
+export function elementAtPoint(
+  items: ReadonlyArray<{ id: string; x: number; y: number; w: number; h: number; rotation?: number }>,
+  point: { x: number; y: number },
+): string | null {
+  let hit: string | null = null;
+  for (const el of items) if (pointInElement(el, point)) hit = el.id; // 後ほど＝手前
+  return hit;
 }
 
 /**
@@ -340,26 +377,14 @@ export function sendFreeElementToBack(freeLayout: FreeElement[], id: string): Fr
 
 /**
  * 重ね順を1段だけ前面('up')/背面('down')へ動かす（レイヤー一覧の↑↓・#210）。
- * zIndex 昇順で隣の要素と zIndex を入れ替える。端ならそのまま。同 zIndex のときは移動方向へ寄せて前後を確定（背面側は 0 が下限）。
+ * **入れ替えの意味論は `moveByZ` が持つ**（ここに書き写すと、片方だけ直って説明が古くなる＝#587 PR レビュー）。
+ * ここが決めるのは**実効 z の求め方だけ**＝FREE 要素は `zIndex ?? 1`。
  */
 export function moveFreeElementZ(
   freeLayout: FreeElement[], id: string, direction: 'up' | 'down',
 ): FreeElement[] {
-  // zIndex 既定は 1（layout の描画既定・パネルの並び順と一致＝absent z を同じに扱う）。
-  const sorted = [...freeLayout].sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1));
-  const i = sorted.findIndex((e) => e.id === id);
-  if (i < 0) return freeLayout;
-  const j = direction === 'up' ? i + 1 : i - 1;
-  if (j < 0 || j >= sorted.length) return freeLayout; // 端＝これ以上動かせない
-  const a = sorted[i];
-  const b = sorted[j];
-  const za = a.zIndex ?? 1;
-  const zb = b.zIndex ?? 1;
-  if (za !== zb) {
-    return freeLayout.map((e) => (e.id === a.id ? { ...e, zIndex: zb } : e.id === b.id ? { ...e, zIndex: za } : e));
-  }
-  const nudged = direction === 'up' ? zb + 1 : Math.max(0, zb - 1);
-  return freeLayout.map((e) => (e.id === a.id ? { ...e, zIndex: nudged } : e));
+  // zIndex 既定は 1（layout の描画既定・パネルの並び順と一致＝absent z を同じに扱う）。入れ替えの意味論は共有（§2-7）。
+  return moveByZ(freeLayout, id, direction, (e) => e.zIndex ?? 1);
 }
 
 // ── ドラッグ移動・角リサイズのジオメトリ（Phase 4b）。純粋関数＝§7 テスト対象。 ──

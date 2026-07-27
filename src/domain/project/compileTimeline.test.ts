@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
+import { FPS } from '../constants';
 import { transitionTimeline, resolveTransition } from './sceneTransitions';
 import { activeTelopsAt, assignTelopRows, compileTimeline, resolveSceneBgm, sceneLocalTelops } from './compileTimeline';
 import type { Project, Scene } from './types';
@@ -86,14 +87,15 @@ describe('compileTimeline：場面の並びと遷移（xfade 重なり）', () =
     ]);
   });
 
-  it('遷移尺は左右どちらの場面尺も超えないよう clamp される', () => {
+  it('遷移尺は左右どちらの場面尺も strict `<` で clamp（各場面が最低1フレーム残す・#547 P3-4）', () => {
     const tl = compileTimeline(project([
       scene({ sceneId: 's1', durationSec: 3 }),
       scene({ sceneId: 's2', durationSec: 10, transition: { in: TRANSITION_TYPE.fade, durationSec: 5 } }),
     ]));
-    // 希望 5 だが直前場面尺 3 で clamp → 重なり 3。total = 3 + 10 - 3 = 10。
-    expect(tl.transitions[0].durationSec).toBe(3);
-    expect(tl.totalSec).toBe(10);
+    // 希望 5 だが直前場面尺 3（左）で clamp → 重なりは 3 **未満**（3−ε）＝直前場面を丸ごと飲み込まない（旧: ちょうど 3）。
+    expect(tl.transitions[0].durationSec).toBeLessThan(3);
+    expect(tl.transitions[0].durationSec).toBeCloseTo(3 - 1 / FPS, 6);
+    expect(tl.totalSec).toBeCloseTo(10 + 1 / FPS, 6);
   });
 });
 

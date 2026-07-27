@@ -2,12 +2,15 @@
 // - 時刻 t は直接受けず、書き出しと同じ sceneSegmentSpecs から作る「その瞬間のセグメント」（SubtitleMoment）を受ける（P1-1）。
 //   セグメントは domain/project/lineTimeline.ts の segmentAt(scene, lineDurations, t) で作る＝プレビュー＝書き出しで同一。
 // - 話者絞り込みは音声生成（resolveLineVoice）と同じ実効話者（effectiveSpeakerKey）で比較する（P1-2）。
-import { FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
+import { FREE_CATEGORY, FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
+import type { TextKey } from '../enums';
+import { isHiddenByGroup } from '../group/compose';
 import { characterForSpeaker } from '../voice/voiceCatalog';
 import { resolveLineSubtitle } from './lineTimeline';
 import type { SceneSegmentSpec } from './lineTimeline';
 import { sceneLines } from './narrationLines';
 import type { FreeElement, NarrationLine, Scene, SpeakerKey, SubtitleSource } from './types';
+import type { Template } from '../template/types';
 
 /** 字幕解決の正準状態（プレビュー＝書き出しで共有・ADR-0029）。segment は sceneSegmentSpecs 由来の「その瞬間のセグメント」。 */
 export interface SubtitleMoment {
@@ -158,4 +161,141 @@ export function normalizeSubtitleSources(scene: Scene): Scene {
     return rest;
   });
   return changed ? { ...scene, freeLayout: next } : scene;
+}
+
+/**
+ * 場面が表示しうる字幕文の集合（実表示に合わせた検査＝長さ判定などの**共通経路**・ADR-0029/#547 P1-3 レビュー）。
+ *
+ * precheck は timeline（行の尺）未確定なので、単一セグメント（SubtitleMoment）ではなく「その場面で表示されうる
+ * 全字幕」を列挙する（どれか1つでも長ければ「長すぎ」と判定できる）。プレビュー/書き出しの実解決
+ * （`resolveSubtitleForElement` / layout の字幕層）と**同じ分岐・同じ enabled/OFF・同じ subtitleSource**で解く＝
+ * 表示と判定がずれない（掛け合い/FREE/字幕対象で precheck が実表示と食い違う、を構造的に断つ）。
+ *
+ * 描画（`layout.ts`）は **(a) テンプレ層ループ（全カテゴリで走る＝字幕層があれば category を問わず描画）** に加え、
+ * **(b) FREE 場面のみ freeLayout 要素をその上に重ねる**（`layout.ts:312-378` / `:408-417`）。本関数もこの2段を合算する：
+ * - (a) テンプレ字幕層：字幕層があるときだけ、掛け合いは各行の実効字幕・単独は静的字幕（層が無ければ寄与ゼロ＝出ない字幕を数えない）。
+ *       通常テンプレも FREE テンプレも同じ（FREE テンプレが字幕層を持てば描画されるので数える＝表示と一致・ADR-0026③）。
+ * - (b) FREE：字幕要素ごとに `subtitleSource` で解決（narration→静的字幕／allLines→全行／speaker→対象話者の行）。
+ * - 各段で OFF（`subtitleEnabledDefault===false`・行の `subtitleEnabled`）は除外＝描画されない字幕を数えない。
+ * 長さ判定は重複に非依存（同じ字幕を2段で数えても `.some(長すぎ)` は不変）ゆえ厳密な重複排除はしない。
+ */
+export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | undefined): string[] {
+  const hasLines = (scene.lines?.length ?? 0) > 0;
+
+  const out: string[] = [];
+  // (a) テンプレ字幕層（layout の層ループはカテゴリ非依存）。非表示グループのメンバー層は描画されない（layout.ts:268）＝除外
+  //     （テンプレ層に per-layer hidden は無い）。掛け合いは各行の実効字幕（層の textKey に依らず opts.subtitleText で
+  //     上書き＝layout.ts:315,321）・単独は**各字幕層の textKey** の静的字幕（textKey が 'subtitle' 以外・未指定でも
+  //     描画と一致＝layout.ts:325・#547 P2 レビュー）。
+  const templateGroups = template?.groups ?? [];
+  const visibleSubtitleLayers = (template?.layers ?? []).filter(
+    (l) => l.type === 'subtitle' && !isHiddenByGroup(l.id, templateGroups),
+  );
+  if (visibleSubtitleLayers.length > 0) {
+    if (hasLines) out.push(...lineSubs(scene));
+    else for (const l of visibleSubtitleLayers) out.push(...staticSubtitleFor(scene, l.textKey));
+  }
+  // (b) FREE：freeLayout の字幕要素を subtitleSource で解決してテンプレ層の上に重ねる（resolveSubtitleForElement と同分岐）。
+  //     要素自身の非表示（el.hidden）・非表示グループのメンバーは描画されない（layout.ts:418-419）＝除外。
+  if (template?.category === FREE_CATEGORY) {
+    const sceneGroups = scene.groups ?? [];
+    for (const el of scene.freeLayout ?? []) {
+      if (el.kind !== FREE_ELEMENT_KIND.subtitle) continue;
+      if (el.hidden || isHiddenByGroup(el.id, sceneGroups)) continue; // 非表示は描画されない＝数えない
+      out.push(...freeSubtitleElementTexts(el, scene));
+    }
+  }
+  return out;
+}
+
+/** 静的字幕（単独＝掛け合いでない）の描画テキストを **textKey** で引く。textKey 経由で引くことで描画と一致させる
+ *  （layout.ts の `scene.texts[layer.textKey]` / `resolveSubtitleForElement` の texts.subtitle）。 */
+function staticSubtitleFor(scene: Scene, textKey: TextKey | undefined): string[] {
+  if (scene.subtitleEnabledDefault === false) return []; // OFF は描画されない（layout の staticSubtitleOff）
+  const t = (textKey != null ? scene.texts[textKey] : undefined) ?? ''; // textKey 無し＝描画も空
+  return t.length > 0 ? [t] : [];
+}
+
+/** 実効行の字幕（OFF・空は除外）。pred で対象話者に絞れる。 */
+function lineSubs(scene: Scene, pred?: (l: NarrationLine) => boolean): string[] {
+  return sceneLines(scene)
+    .filter((l) => pred == null || pred(l))
+    .map((l) => resolveLineSubtitle(l, scene))
+    .filter((r) => r.enabled && r.text.length > 0)
+    .map((r) => r.text);
+}
+
+/**
+ * この FREE 字幕要素が**実際に表示する**字幕文（`subtitleSource` で解決・ADR-0029）。空配列＝いま何も出ていない。
+ * `sceneDisplayedSubtitleTexts` の FREE 段と、切替で失う中身の判定（`freeContentHiddenBySwitch`）が同じ規則を使う
+ * ための単一の参照元（§6）。要素自身の非表示・非表示グループの除外は**呼び出し側**の責務（描画の可視判定と対）。
+ */
+export function freeSubtitleElementTexts(el: FreeElement, scene: Scene): string[] {
+  const source = el.subtitleSource ?? defaultSubtitleSource(scene);
+  if (source.kind === SUBTITLE_SOURCE_KIND.narration) return staticSubtitleFor(scene, TEXT_KEY.subtitle);
+  if (source.kind === SUBTITLE_SOURCE_KIND.allLines) return lineSubs(scene);
+  return lineSubs(scene, (l) => speakerKeyEquals(effectiveSpeakerKey(l), source.speaker));
+}
+
+/**
+ * 置いた字幕ボックスが何も表示しない理由（#547 P3-9）。UI が「次の行動」を出すための分類で、**行動が違うものだけ**分ける。
+ * - `sceneSubtitleOff` … 場面の字幕スイッチが切ってあるのが原因（入れれば出る）。
+ * - `noTargetLine` … 対象に選んだ話者のセリフが場面に無い（文を入れても出ない＝対象の付け替えが必要）。
+ * - `noText` … 字幕にする文が空、または対象のセリフが個別に字幕 OFF。
+ * 永続データの enum ではない（保存しない・UI 内部の分類）ので `11 §3`／`domain/enums.ts` には持ち込まない。
+ */
+export const SUBTITLE_SILENT_REASON = {
+  sceneSubtitleOff: 'sceneSubtitleOff',
+  noTargetLine: 'noTargetLine',
+  noText: 'noText',
+} as const;
+export type SubtitleSilentReason = (typeof SUBTITLE_SILENT_REASON)[keyof typeof SUBTITLE_SILENT_REASON];
+
+/**
+ * FREE 字幕要素が「置いてあるのに何も表示しない」理由（表示されるなら null）。純粋関数。
+ *
+ * 字幕ボックスは表示文を `subtitleSource` から解決するため、**字幕 OFF・文が空・対象話者の不在**で黙って何も出ない。
+ * 原因が要素の外（場面の字幕スイッチ・各セリフの字幕 ON/OFF）にもあり、置いた本人には見えない＝§2-5／ADR-0026④。
+ * 場面編集の手がかり（字幕欄のヒント）と公開前チェックが**この1か所**を共有する。
+ *
+ * 判定は実表示と同じ `freeSubtitleElementTexts`（描画・書き出し・長さ検査と同じ参照元）で行い、分岐を書き写さない。
+ * 「字幕スイッチだけが原因か」も条件を再実装せず、**ON と仮定して同じ関数で解き直す**＝解決規則が増えても追随する。
+ */
+export function subtitleSilentReason(el: FreeElement, scene: Scene): SubtitleSilentReason | null {
+  if (el.kind !== FREE_ELEMENT_KIND.subtitle) return null;
+  if (freeSubtitleElementTexts(el, scene).length > 0) return null; // 出ている
+  const source = el.subtitleSource ?? defaultSubtitleSource(scene);
+  // 対象話者の行が1本も無い＝文を入れても出ない（対象を選び直す／その話者のセリフを足す）。字幕 OFF より先に見る
+  // ＝スイッチを入れても出ないものを「入れれば出る」と案内しない。
+  if (
+    source.kind === SUBTITLE_SOURCE_KIND.speaker &&
+    !sceneLines(scene).some((l) => speakerKeyEquals(effectiveSpeakerKey(l), source.speaker))
+  ) {
+    return SUBTITLE_SILENT_REASON.noTargetLine;
+  }
+  // 場面の字幕スイッチが切ってあり、入れれば出る（行ごとに OFF なら出ないので noText 側へ落ちる）。
+  if (
+    scene.subtitleEnabledDefault === false &&
+    freeSubtitleElementTexts(el, { ...scene, subtitleEnabledDefault: true }).length > 0
+  ) {
+    return SUBTITLE_SILENT_REASON.sceneSubtitleOff;
+  }
+  return SUBTITLE_SILENT_REASON.noText;
+}
+
+/**
+ * その場面で「置いてあるのに何も表示しない」字幕ボックスの数（公開前チェック用・#547 P3-9）。
+ * 可視判定は `sceneDisplayedSubtitleTexts` の FREE 段と同じ＝**FREE テンプレのときだけ**数え（通常テンプレへ戻した
+ * 休眠 `freeLayout` は数えない・ADR-0030）、要素自身の非表示・非表示グループのメンバーも数えない（描かれない物を警告しない）。
+ */
+export function sceneSilentSubtitleCount(scene: Scene, template: Template | undefined): number {
+  if (template?.category !== FREE_CATEGORY) return 0;
+  const sceneGroups = scene.groups ?? [];
+  return (scene.freeLayout ?? []).filter(
+    (el) =>
+      el.kind === FREE_ELEMENT_KIND.subtitle &&
+      !el.hidden &&
+      !isHiddenByGroup(el.id, sceneGroups) &&
+      subtitleSilentReason(el, scene) != null,
+  ).length;
 }

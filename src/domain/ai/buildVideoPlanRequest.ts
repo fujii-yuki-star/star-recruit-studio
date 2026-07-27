@@ -2,9 +2,11 @@
 // 正典: 12_AI_PROMPT_AND_MAPPING §5（システムプロンプト確定版）/ §6（ユーザーメッセージテンプレート）。
 // MVP はテキストのみ（素材サムネイルは添付しない＝12§4 更新・ADR-0010 P3 へ繰り延べ）。
 // 出力契約（JSON モード／schema 指定）と検証（ajv→transformVideoPlan）は別モジュールが担う。
-import { SCENE_MAX_DURATION_SEC, SCENE_MIN_DURATION_SEC } from '../constants';
+import { AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constants';
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
+import { assetSentText, selectAssetsForSend } from './assetSendText';
+import type { AssetSendSelection } from './assetSendText';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 // 12§7 の出力例（few-shot）。AI に ai-video-plan の構造（キー名・入れ子）を厳密に真似させるため、
 // 正典 fixture を直接読む（ミラーしない＝検証スキーマと同じ単一参照元。validate:schemas で適合確認済みの有効サンプル）。
@@ -33,7 +35,7 @@ export const VIDEO_PLAN_SYSTEM_PROMPT = `あなたは採用動画の構成プラ
 - 掛け合い（複数の声で交互に話す）にしたい場面に限り、narrationText の代わりに narrationLines（[{ text, voiceCharacter, subtitle? }] の配列）で行ごとに分けてよい。voiceCharacter は声のキャラ名（例「ずんだもん」「四国めたん」）。その場面の narrationText は省略してよい。掛け合いが不要なら narrationText（単一）にする。
 - texts.subtitle は字幕用に短くする（各見た目パターンの maxSubtitleLength 以内）。ナレーションの要約でよい。
 - texts.title / texts.main は画面に出す短い語句にする。
-- durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒を目安にする。見た目パターンに上限（maxDuration）があれば従う。
+- durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒を目安にする。見た目パターンに上限（maxDuration）があれば従う。
 - 全シーンの合計尺を targetDurationSec に近づける。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。
 - yukoPoseTag は場面に合う表情タグ（例：smile, guide, bow）を「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
@@ -58,7 +60,7 @@ export const VIDEO_PLAN_SYSTEM_PROMPT_GENERAL = `あなたは社内向け・一�
 - narrationText は会社マスコット「ゆうこ」が話す、対象視聴者に合った自然な日本語にする。各見た目パターンの maxNarrationLength を超えない。
 - 掛け合い（複数の声で交互に話す）にしたい場面に限り、narrationText の代わりに narrationLines（[{ text, voiceCharacter, subtitle? }] の配列）で行ごとに分けてよい。voiceCharacter は声のキャラ名（例「ずんだもん」「四国めたん」）。その場面の narrationText は省略してよい。掛け合いが不要なら narrationText（単一）にする。
 - texts.subtitle は字幕用に短くする（maxSubtitleLength 以内）。texts.title / texts.main は画面に出す短い語句にする。
-- durationSec は ${SCENE_MIN_DURATION_SEC}〜${SCENE_MAX_DURATION_SEC} 秒を目安にする。見た目パターンに上限があれば従う。全シーンの合計尺を targetDurationSec に近づける。
+- durationSec は ${AI_SCENE_MIN_DURATION_SEC}〜${AI_SCENE_MAX_DURATION_SEC} 秒を目安にする。見た目パターンに上限があれば従う。全シーンの合計尺を targetDurationSec に近づける。
 - 誇大表現・差別的表現・事実と異なる断定を避ける。社外秘・個人情報が含まれそうな場合は reviewNotes に確認を促す一文を入れる。
 - yukoPoseTag は場面に合う表情タグを「利用可能なゆうこ表情タグ一覧」から選ぶ。ゆうこを出さない見た目パターンでは null にする。
 - purpose は一般の種別（${GENERAL_PURPOSES.join(' / ')}）に沿った内容にする。`;
@@ -108,11 +110,13 @@ function templateBlock(t: TemplateSummary): string {
   ].join('\n');
 }
 
-/** 12§6「利用可能な素材」1件分の行（assetId のみ使用可をAIに示す。MVP はテキストのみ）。 */
+/** 12§6「利用可能な素材」1件分の行（assetId のみ使用可をAIに示す。MVP はテキストのみ）。
+ *  送るフィールドは assetSentText を単一の参照元にする＝送信前確認 UI と必ず同じ内容になる（§2-6・ADR-0026②）。 */
 function assetBlock(a: Asset): string {
+  const t = assetSentText(a);
   return [
-    `- assetId=${a.assetId} / type=${a.assetType} / name=${a.displayName}`,
-    `  説明=${orNotProvided(a.description)} / AI解析=${orNotProvided(a.aiDescription)} / tags=${joinList(a.tags, ', ')}`,
+    `- assetId=${t.assetId} / type=${t.assetType} / name=${orNotProvided(t.name)}`,
+    `  説明=${orNotProvided(t.description)} / AI解析=${orNotProvided(t.aiDescription)} / tags=${joinList(t.tags, ', ')}`,
   ].join('\n');
 }
 
@@ -163,11 +167,17 @@ function generalHead(input: GenerateVideoPlanInput): string[] {
  * videoKind=general のときは §6b（テーマ／章立て／要点）に切り替え、補足・素材・見た目・表情タグ・出力契約は共通。
  * 送信前確認で利用者に提示する「外部AIへ送る内容」の実体でもある（§2-6）。
  */
-export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string {
+export function buildVideoPlanUserMessage(
+  input: GenerateVideoPlanInput,
+  // 素材が多いときは「説明・タグの充実した順に上位 N 件」だけ送る（12§6・#585）。選定は送信前確認と共有の純粋関数
+  // ＝**画面で見せた内容と実際に送る内容が必ず一致**する（§2-6・ADR-0026②）。上限以下なら全件・並びも元のまま。
+  // 呼び出し側（buildVideoPlanMessages）が選定済みなら**それを渡して二重計算を避ける**。単体で呼ぶときは既定で計算する。
+  selection: AssetSendSelection = selectAssetsForSend(input.assets),
+): string {
   const isGeneral = input.videoKind === VIDEO_KIND.general;
   const head = isGeneral ? generalHead(input) : recruitHead(input);
   const templates = input.templates.map(templateBlock).join('\n');
-  const assets = input.assets.map(assetBlock).join('\n');
+  const assets = selection.sent.map(assetBlock).join('\n');
   // 「値だけ今回の◯◯に合わせて作る」の主語は用途で変える（recruit=会社情報 / general=テーマ・構成・要点）。
   const exampleSubject = isGeneral ? 'テーマ・構成・要点' : '会社情報';
   // few-shot 出力例も用途で切り替える（general は §7b の発表・説明サンプル＝ADR-0011 #7）。
@@ -207,6 +217,12 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
 export interface VideoPlanMessages {
   system: string;
   user: string;
+  /**
+   * 上限（`AI_ASSET_SEND_MAX`）超過で **user に載せなかった素材の件数**（12§6・#585）。
+   * プロバイダの `log`（無言の打ち切りをしない）用。**このメッセージを組んだのと同じ選定結果**から出すので、
+   * 「ログの件数」と「実際に送った内容」が構造的にズレない（選定を2回計算して片方だけ条件が変わる、を防ぐ）。
+   */
+  omittedAssetCount: number;
 }
 
 /**
@@ -216,8 +232,13 @@ export interface VideoPlanMessages {
 export function buildVideoPlanMessages(input: GenerateVideoPlanInput): VideoPlanMessages {
   const system =
     input.videoKind === VIDEO_KIND.general ? VIDEO_PLAN_SYSTEM_PROMPT_GENERAL : VIDEO_PLAN_SYSTEM_PROMPT;
+  // 素材の選定は**ここで1回だけ**行い、本文と「送らなかった件数」の両方をこの結果から作る（#585 レビュー）。
+  // プロバイダ側で選定をやり直すと、同じ入力を2回計算するうえ「ログの件数」と「実際に送った内容」の参照元が
+  // 分かれる＝将来どちらかの条件だけ変わるとズレる。ここに集約して構造的に一致させる（§6）。
+  const selection = selectAssetsForSend(input.assets);
   return {
     system,
-    user: buildVideoPlanUserMessage(input),
+    user: buildVideoPlanUserMessage(input, selection),
+    omittedAssetCount: selection.omitted.length,
   };
 }

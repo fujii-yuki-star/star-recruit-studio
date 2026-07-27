@@ -24,6 +24,16 @@ function setup(scene: Scene) {
   });
 }
 
+/**
+ * 要素を選ぶ（#550 ②で「選択した要素だけ編集」が既定 ON＝カードは選んで初めて出る）。
+ * ※省くとカードごと無いので「注意が出ない」系の検査が**空振りで緑**になる。
+ */
+const selectFree = (id: string) => {
+  const el = document.querySelector(`[data-free-id="${id}"]`) as HTMLElement;
+  fireEvent.pointerDown(el, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+  fireEvent.pointerUp(el, { pointerId: 1 });
+};
+
 const subtitles = (): FreeElement[] =>
   (useProjectStore.getState().scenes[0].freeLayout ?? []).filter((e) => e.kind === "subtitle");
 
@@ -61,12 +71,67 @@ describe("SceneEditScreen 字幕の同一対象の注意（ADR-0029・PR-C P2）
   it("単独読み上げで同じ対象の字幕を2つ置くと注意が出る（hasLines に依らない・P2）", () => {
     setup(twoSubs()); // lines なし＝単独。両字幕とも既定＝読み上げ（同一対象）。
     render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree("free_001");
     expect(screen.getAllByText(/同じ対象の字幕が他にもあります/).length).toBeGreaterThan(0);
   });
 
   it("字幕が1つなら注意は出ない", () => {
     setup(freeScene({ freeLayout: [{ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 100, h: 50 }] } as Partial<Scene>));
     render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree("free_001"); // 選んでカードを出したうえで「注意が無い」ことを見る
+    expect(screen.getByLabelText("横位置")).toBeTruthy(); // 前提：カードは出ている
     expect(screen.queryByText(/同じ対象の字幕が他にもあります/)).toBeNull();
+  });
+});
+
+// #547 P3-9：置いたのに何も出ない字幕に手がかりを出す。原因が要素の外（場面のスイッチ・セリフごとの字幕・話者の顔ぶれ）
+// にあるものほど、字幕欄だけ見ていても気づけない＝理由と次の行動をその場に出す（§2-5・ADR-0026④）。
+describe("SceneEditScreen 出ない字幕の手がかり（#547 P3-9）", () => {
+  const oneSub = (partial: Partial<Scene> = {}): Scene =>
+    freeScene({ freeLayout: [{ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 100, h: 50 }], ...partial } as Partial<Scene>);
+
+  it("字幕が出ているときは手がかりを出さない（読み上げ・文あり）", () => {
+    setup(oneSub({ texts: { subtitle: "ようこそ" } }));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree("free_001");
+    expect(screen.getByLabelText("横位置")).toBeTruthy(); // 前提：カードは出ている
+    expect(screen.queryByText(/いまは動画に出ません/)).toBeNull();
+  });
+
+  it("場面の字幕がオフなら、そのスイッチ名で「オンにすると出る」と示す", () => {
+    setup(oneSub({ texts: { subtitle: "ようこそ" }, subtitleEnabledDefault: false }));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree("free_001");
+    // 案内が名指しするスイッチが実在すること＝探しても見つからない指示にしない（文言はスイッチと同じ参照元）。
+    expect(screen.getByText(/「この場面の字幕を表示する」がオフになっています/)).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "この場面の字幕を表示する" })).toBeTruthy();
+  });
+
+  it("字幕の文が空なら、その欄に入れるよう示す（読み上げ対象）", () => {
+    setup(oneSub({ texts: {} }));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree("free_001");
+    expect(screen.getByText(/「字幕の文」に文字を入れると出ます/)).toBeTruthy();
+  });
+
+  it("選んだ話者のセリフが場面に無ければ、対象を選び直すよう示す", () => {
+    setup(
+      oneSub({
+        lines: [{ lineId: "line_001", text: "A", status: "none", speaker: 3 }],
+        freeLayout: [{ id: "free_001", kind: "subtitle", x: 0, y: 0, w: 100, h: 50, subtitleSource: { kind: "speaker", speaker: { kind: "catalog", speaker: 2 } } }],
+      } as Partial<Scene>),
+    );
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree("free_001");
+    expect(screen.getByText(/選んだ話者のセリフが、この場面にありません/)).toBeTruthy();
+  });
+
+  it("字幕の文を入れると手がかりは消える（直したら案内も消える）", () => {
+    setup(oneSub({ texts: {} }));
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    selectFree("free_001");
+    expect(screen.getByText(/いまは動画に出ません/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("字幕の文"), { target: { value: "ようこそ" } });
+    expect(screen.queryByText(/いまは動画に出ません/)).toBeNull();
   });
 });

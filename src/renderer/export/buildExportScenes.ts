@@ -1,6 +1,6 @@
 // 全場面を「共有レイアウト → SVG → PNG(data URL)」に焼き、書き出し入力を組み立てる（ADR-0001/0004）。
 // 動画ありシーンは下/上2枚の透過PNG＋クリップ情報を渡す（ADR-0006）。FFmpeg呼び出しは infrastructure に分離。
-import { TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Fit } from '../../domain/enums';
+import { TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit } from '../../domain/enums';
 import { FPS } from '../../domain/constants';
 import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
@@ -9,7 +9,7 @@ import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs, segmentLineIds } from '../../domain/project/lineTimeline';
 import { animationsEndSec, sceneAnimationActive, slotIsAnimated } from '../../domain/project/sceneAnimation';
 import { resolveVideoStartDelaySec } from '../../domain/project/videoStartTiming';
-import { layoutScene } from '../layout';
+import { isSubtitleItem, layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { creditForLine, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
@@ -18,6 +18,7 @@ import { sliceWav } from '../../domain/voice/wavSlice';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvgMulti } from './videoSceneSplit';
 import type { VideoSlotInfo } from './findVideoSlot';
+import { afterAnimNeverPlaysForSlots } from './videoSlotPlacement';
 
 /** ResolvedTransition を FFmpeg xfade の transition 名へ（none はハードカット＝"none"）。 */
 function xfadeName(r: ResolvedTransition): string {
@@ -220,7 +221,7 @@ export async function buildExportScenes(
 ): Promise<ExportSceneData[]> {
   // 字幕OFF時は subtitle レイヤー由来の text を描かない（静止画・動画の上レイヤー両方に適用）。
   const itemFilter: ((item: LayoutItem) => boolean) | undefined =
-    opts.withSubtitle === false ? (it) => !(it.kind === 'text' && it.isSubtitle) : undefined;
+    opts.withSubtitle === false ? (it) => !isSubtitleItem(it) : undefined;
   // 常時クレジット文言（選択話者のキャラ＝creditForSpeaker）。export 全体で一定（#177）。
   const credit = opts.credit ?? NARRATOR_CREDIT;
   const out: ExportSceneData[] = [];
@@ -391,16 +392,10 @@ export async function buildExportScenes(
                 ? resolveVideoStartDelaySec(scene.slotVideoStart?.[slotLayerId], W)
                 : 0;
             // #444/ADR-0027 D3：settled 区間が無い（アニメが場面尺いっぱい）のに、**アニメ対象スロット**が「アニメの後（afterAnim）」だと
-            // 窓が全フレーム静止＋settled 無し＝動画が一度も再生されない。黙って静止画にせず§2-5 で停止（#434 と同流儀・precheck の
-            // videoSlotAfterAnimNeverPlays と**同一条件**＝slotIsAnimated ゲートを含める・#444 レビュー P2）。
-            if (
-              !hasSettled &&
-              videoSlots.some(
-                (vs) =>
-                  slotIsAnimated(sceneAnims, [vs.slotLayerId], scene.groups) &&
-                  scene.slotVideoStart?.[vs.slotLayerId]?.mode === VIDEO_START_MODE.afterAnim,
-              )
-            ) {
+            // 窓が全フレーム静止＋settled 無し＝動画が一度も再生されない。黙って静止画にせず§2-5 で停止（#434 と同流儀）。
+            // 判定は precheck と**同一の関数**を呼ぶ（#588）。以前は同じ条件式を両側に書き写しており、片方だけ条件が変われば
+            // 「公開前チェックは止めるのに書き出しは通る／その逆」になり得た＝`15 §3` の「同値に保つ」を構造で担保する。
+            if (afterAnimNeverPlaysForSlots(scene, videoSlots, sceneAnims)) {
               throw new Error(
                 `場面${i + 1}の動画は、アニメが最後まで続くため「アニメの後」だと再生されません。アニメを短くするか、「途中から」か「アニメと同時」に変えてから、もう一度お試しください。`,
               );
