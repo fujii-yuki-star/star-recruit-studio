@@ -18,6 +18,7 @@ import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import type { VideoSlotPlayback } from "../components/ScenePreview";
 import { buildVideoPlaybackSlots } from "./previewVideoSlots";
+import { lineAdvanceWindowSec } from "./previewLineTiming";
 import { assembleProject } from "../../domain/project/persistence";
 import { FPS, PREVIEW_MIN_PLAY_SEC } from "../../domain/constants";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
@@ -334,15 +335,12 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
         }
         const scheduleNext = (): void => {
           if (cancelled) return;
-          if (i + 1 < segs.length) {
-            const windowSec = Math.max(0, segs[i + 1].startSec - segs[i].startSec);
-            lineTimers.push(window.setTimeout(() => playLine(i + 1), windowSec * 1000));
-          } else {
-            // 最終行：この行の窓（場面末まで）ぶん後に場面送り（advance）。場面送りも実再生起点にそろえ、
-            // 行が増えて遅延が積み上がっても最終行の末尾が場面遷移で切れないようにする（#370 レビュー対応）。
-            const lastWindowSec = Math.max(PREVIEW_MIN_PLAY_SEC, segs[i].endSec - segs[i].startSec);
-            lineTimers.push(window.setTimeout(advance, lastWindowSec * 1000));
-          }
+          // 中間行（次の行へ）も最終行（場面送り）も**同じ送りタイマー＝同じ窓の決め方**（#608・`lineAdvanceWindowSec`）。
+          // 最終行は「この行の窓＝場面末まで」ぶん後に送る。場面送りも実再生起点にそろえ、行が増えて遅延が
+          // 積み上がっても最終行の末尾が場面遷移で切れない（#370 レビュー対応）。
+          const windowSec = lineAdvanceWindowSec(segs, i);
+          const next = i + 1 < segs.length ? () => playLine(i + 1) : advance;
+          lineTimers.push(window.setTimeout(next, windowSec * 1000));
         };
         const u = narrationAudioById[lineAudioKey(sc.sceneId, segs[i].lineId)];
         if (u) {
