@@ -3,6 +3,7 @@ import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from "../domain/c
 import type { Asset, ElementAnimation, FreeElement, Scene } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import { buildPrecheckItems, sceneToDraftRow } from "./adapters";
+import { subtitleOverflowMessage } from "./uiLabels";
 
 const freeTemplate: Template = {
   schemaVersion: "1.0",
@@ -593,5 +594,54 @@ describe("buildPrecheckItems（画面からはみ出す字幕・#563）", () => 
   it("書き出しは止めない（直せば良くなる警告＝ハードブロッカーとは分離）", () => {
     const item = overflowItem([subScene({ textStyles: { subtitle: { fontSize: 300 } } } as Partial<Scene>)]);
     expect(item?.blocksExport).toBeUndefined();
+  });
+});
+
+// #563 レビュー：precheck の文言も原因で出し分ける。ただし複数場面をまとめて挙げるので、
+// **原因が揃っているときだけ断定**する（混在で片方の文言を出すと、もう片方の場面に誤った直し方を示す・§2-5）。
+describe("buildPrecheckItems（はみ出しの説明を原因で出し分ける・#563 レビュー）", () => {
+  const subTemplate: Template = {
+    schemaVersion: "1.0", templateId: "sub_v1", name: "字幕あり", category: "message",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 }, defaults: { backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 160, y: 950, w: 1600, h: 100, zIndex: 50, fontSize: 48, anchorBottom: true },
+    ],
+  } as unknown as Template;
+  const big = { subtitle: { fontSize: 300 } };
+  const mk = (id: string, order: number, simultaneous: boolean): Scene => ({
+    sceneId: id, partId: "part_001", order, sceneType: "message", templateId: "sub_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" },
+    texts: { subtitle: "あ".repeat(40) }, textStyles: big,
+    narration: { text: "", status: "none" }, warnings: [],
+    ...(simultaneous
+      ? { lines: [
+          { lineId: "line_001", text: "A", status: "none" },
+          { lineId: "line_002", text: "B", status: "none", startWithPrevious: true },
+        ] }
+      : {}),
+  } as unknown as Scene);
+  const detail = (scenes: Scene[]) =>
+    buildPrecheckItems(scenes, [], [subTemplate]).find((i) => i.id === "subtitleOverflow")?.detail ?? "";
+
+  it("全部が単独/逐次なら「文字の大きさを小さくする」と断定する", () => {
+    expect(detail([mk("scene_001", 1, false)])).toContain("文字の大きさを小さくするか、字幕を短くしてください");
+  });
+
+  it("全部が同時なら「同時のセリフを減らす」と断定する", () => {
+    expect(detail([mk("scene_001", 1, true)])).toContain("同時のセリフを減らすか、字幕を短くしてください");
+  });
+
+  it("原因が混ざったら断定せず場面編集へ誘導する（誤った直し方を示さない）", () => {
+    const d = detail([mk("scene_001", 1, true), mk("scene_002", 2, false)]);
+    expect(d).toContain("場面によって理由が違う");
+    expect(d).not.toContain("同時のセリフを減らす"); // 単独原因の場面に誤案内しない
+    expect(d).not.toContain("文字の大きさを小さくする"); // 同時原因の場面にも誤案内しない
+  });
+
+  it("断定するときの言い回しは場面編集の案内と同じ（言い回しのドリフトを作らない）", () => {
+    // 場面編集は subtitleOverflowMessage、precheck は subtitleOverflowPrecheckDetail だが「次の行動」句は共有。
+    expect(detail([mk("scene_001", 1, false)])).toContain(subtitleOverflowMessage(false).split("。")[1]);
+    expect(detail([mk("scene_001", 1, true)])).toContain(subtitleOverflowMessage(true).split("。")[1]);
   });
 });

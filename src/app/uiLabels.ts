@@ -4,7 +4,15 @@ import { FREE_ELEMENT_KINDS, SUBTITLE_SOURCE_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
-import { formatSceneNumbers } from "./adapters";
+/**
+ * 場面番号の並べ方（1始まり・多いと先頭8件＋「ほか N 件」）。公開前チェックの各項目と、
+ * 一括操作の結果表示（`standardLookResultMessage`）で**同じ見せ方**にするための単一の参照元（§2-7）。
+ * 利用者に見える文言なので置き場はここ（§6）。以前は `adapters` にあり `uiLabels → adapters` の逆向き依存を作っていた
+ * （adapters は利用者向け文字列を組み立てる側なので、依存は adapters → uiLabels が正しい・#563 レビュー）。
+ */
+export function formatSceneNumbers(nums: number[]): string {
+  return nums.length <= 8 ? `場面${nums.join("・")}` : `場面${nums.slice(0, 8).join("・")} ほか${nums.length - 8}件`;
+}
 
 /**
  * 「枠への収め方」（Fit）のユーザー向け名称。全値必須＝enum 追加漏れをコンパイル検知。
@@ -155,8 +163,28 @@ export function sentAssetTextSummary(photo: number, video: number, other: number
  */
 export function subtitleOverflowMessage(hasSimultaneous: boolean): string {
   return hasSimultaneous
-    ? "同時に表示するセリフが多く、一部の字幕が画面からはみ出します。同時のセリフを減らすか、字幕を短くしてください。"
-    : "字幕が画面からはみ出します。文字の大きさを小さくするか、字幕を短くしてください。";
+    ? `同時に表示するセリフが多く、一部の字幕が画面からはみ出します。${SUBTITLE_OVERFLOW_FIX.simultaneous}`
+    : `字幕が画面からはみ出します。${SUBTITLE_OVERFLOW_FIX.single}`;
+}
+/** はみ出しの「次の行動」句。場面編集と公開前チェックで**同一の言い回し**にするための単一の参照元（§6・#563 レビュー）。 */
+const SUBTITLE_OVERFLOW_FIX = {
+  /** 同時に流れるセリフが多い＝帯を積むのではみ出す。 */
+  simultaneous: "同時のセリフを減らすか、字幕を短くしてください。",
+  /** 1つの帯が大きすぎ・長すぎ（#555 で場面ごとに拡大できる）。 */
+  single: "文字の大きさを小さくするか、字幕を短くしてください。",
+} as const;
+
+/**
+ * 公開前チェックの「画面からはみ出す字幕」の説明（#563 レビュー）。**原因が揃っているときだけ断定**する。
+ *
+ * 複数場面をまとめて挙げるので、原因が混ざったまま片方の文言を出すと**もう片方の場面に誤った次の行動**を示す
+ * （例：同時が1件でもあると単独原因の場面にも「同時のセリフを減らして」と言ってしまう）。混在時は原因を断定せず
+ * 場面編集へ誘導する（そこで原因ごとの案内が出る＝`subtitleOverflowMessage`）。§2-5。
+ */
+export function subtitleOverflowPrecheckDetail(scenesText: string, cause: "simultaneous" | "single" | "mixed"): string {
+  const head = `${scenesText}の字幕が画面からはみ出します。`;
+  if (cause === "mixed") return `${head}場面によって理由が違うので、場面編集で確認して直してください。`;
+  return `${head}場面編集で${SUBTITLE_OVERFLOW_FIX[cause]}`;
 }
 
 /**

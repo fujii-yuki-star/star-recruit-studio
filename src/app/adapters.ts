@@ -9,6 +9,10 @@ import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import { swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
 import { subtitleOverflowsCanvas } from "../renderer/layout";
+import { hasSimultaneousLines } from "../domain/project/lineTimeline";
+// 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
+//（以前は uiLabels → adapters で `formatSceneNumbers` を借りており逆向きだった・#563 レビュー）。
+import { formatSceneNumbers, subtitleOverflowPrecheckDetail } from "./uiLabels";
 import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -118,13 +122,6 @@ export function exportBlockedMessage(items: PrecheckItem[], from: "precheck" | "
   return `このままでは動画を書き出せない項目があります（${names}）。${next}、もう一度お試しください。`;
 }
 
-/**
- * 場面番号の並べ方（1始まり・多いと先頭8件＋「ほか N 件」）。公開前チェックの各項目と、
- * 一括操作の結果表示（`standardLookResultMessage`）で**同じ見せ方**にするための単一の参照元（§2-7）。
- */
-export function formatSceneNumbers(nums: number[]): string {
-  return nums.length <= 8 ? `場面${nums.join("・")}` : `場面${nums.slice(0, 8).join("・")} ほか${nums.length - 8}件`;
-}
 
 /** 公開前チェックの結果を、実際のシーン/素材から算出する（一部は自動チェック未対応の定型）。 */
 export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[], overlayAnimations?: ElementAnimation[]): PrecheckItem[] {
@@ -209,15 +206,20 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   // 字幕が画面からはみ出す場面（#533 P2／#563）。場面編集を開かないと気づけない状態にせず、書き出し前に拾う
   // （黙って画面外に切れたまま MP4 にしない・ADR-0026④）。判定は**実描画と同じ layoutScene** を通す共有関数。
   // 書き出しは止めない＝「直せば良くなる」警告側（P2-5 のハードブロッカーとは分離）。
-  const subtitleOverflow = offending((s) => {
+  const isSubtitleOverflow = (s: Scene): boolean => {
     const t = templateOf(s);
     return t != null && subtitleOverflowsCanvas(s, t);
-  });
+  };
+  const subtitleOverflow = offending(isSubtitleOverflow);
   if (subtitleOverflow.nums.length > 0) {
+    // 「次の行動」は原因で変わる（同時＝セリフを減らす／1帯＝小さくする）。挙げた場面の原因が**揃っているときだけ**
+    // 断定し、混ざっていたら場面編集へ誘導する＝片方の場面に誤った直し方を示さない（#563 レビュー・§2-5）。
+    const causes = new Set(scenes.filter(isSubtitleOverflow).map(hasSimultaneousLines));
+    const cause = causes.size === 1 ? (causes.has(true) ? "simultaneous" : "single") : "mixed";
     items.push({
       id: "subtitleOverflow",
       label: "画面からはみ出す字幕",
-      detail: `${fmtScenes(subtitleOverflow.nums)}の字幕が画面からはみ出します。場面編集で字幕を短くするか、文字の大きさを小さくしてください。`,
+      detail: subtitleOverflowPrecheckDetail(fmtScenes(subtitleOverflow.nums), cause),
       severity: "action",
       action: "直す",
       sceneId: subtitleOverflow.firstId,
