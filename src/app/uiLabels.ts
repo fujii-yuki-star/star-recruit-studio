@@ -1,4 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
+import { AI_ASSET_SEND_MAX } from "../domain/constants";
 import { FREE_ELEMENT_KINDS, SUBTITLE_SOURCE_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
@@ -144,6 +145,15 @@ export function sentAssetTextSummary(photo: number, video: number, other: number
   if (video > 0) parts.push(`動画${video}本`);
   if (other > 0) parts.push(`ほか${other}件`);
   return parts.length === 0 ? "" : `${parts.join("・")}ぶんの文字情報`;
+}
+
+/**
+ * 素材が多くて送りきれなかった件数の案内（12§6 の「無言の打ち切りをしない」・#585）。
+ * **何が起きるか（送られない）＋なぜ（多いから説明の詳しい順）＋次の行動（説明を足す／減らす）**を出す（§2-5）。
+ * 件数は `selectAssetsForSend` の `omitted` と同じ数＝画面と実送信がズレない（§2-6・ADR-0026②）。
+ */
+export function omittedAssetsNote(omitted: number): string {
+  return `素材が多いため、説明の詳しい順に${AI_ASSET_SEND_MAX}件だけ送ります（残り${omitted}件は送りません）。送りたい素材には説明やタグを足すか、使わない素材を減らしてください。`;
 }
 
 /** 素材種別（assetType）のユーザー向け名称。全値必須＝enum 追加漏れをコンパイル検知。§2-3（技術用語を出さない）。 */

@@ -5,7 +5,7 @@
 import { AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constants';
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
-import { assetSentText } from './assetSendText';
+import { assetSentText, selectAssetsForSend } from './assetSendText';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 // 12§7 の出力例（few-shot）。AI に ai-video-plan の構造（キー名・入れ子）を厳密に真似させるため、
 // 正典 fixture を直接読む（ミラーしない＝検証スキーマと同じ単一参照元。validate:schemas で適合確認済みの有効サンプル）。
@@ -170,7 +170,10 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
   const isGeneral = input.videoKind === VIDEO_KIND.general;
   const head = isGeneral ? generalHead(input) : recruitHead(input);
   const templates = input.templates.map(templateBlock).join('\n');
-  const assets = input.assets.map(assetBlock).join('\n');
+  // 素材が多いときは「説明・タグの充実した順に上位 N 件」だけ送る（12§6・#585）。選定は送信前確認と共有の純粋関数
+  // ＝**画面で見せた内容と実際に送る内容が必ず一致**する（§2-6・ADR-0026②）。上限以下なら全件・並びも元のまま。
+  const selection = selectAssetsForSend(input.assets);
+  const assets = selection.sent.map(assetBlock).join('\n');
   // 「値だけ今回の◯◯に合わせて作る」の主語は用途で変える（recruit=会社情報 / general=テーマ・構成・要点）。
   const exampleSubject = isGeneral ? 'テーマ・構成・要点' : '会社情報';
   // few-shot 出力例も用途で切り替える（general は §7b の発表・説明サンプル＝ADR-0011 #7）。

@@ -107,6 +107,12 @@ export const MAX_INLINE_ASSET_BYTES = 50 * 1024 * 1024; // 50 MB
 // 11§4 定数カタログには載せない（MAX_INLINE_ASSET_BYTES と同じ扱い）。
 export const NARRATION_BULK_CONCURRENCY = 3;
 
+// AI へ一度に送る素材の上限件数（12§6「素材が多い場合は説明・タグの充実した順に上位 N 件（既定 N=40）」）。
+// 目的＝素材が大量にあるときのプロンプト肥大（トークン上限・コスト）を防ぐこと。超過分は**無言で切らず**、
+// 送信前確認に「送らない件数」を出す（§2-6・12§6 の log 要件は UI 表示＋console で満たす・#585）。
+// 選定ロジックは domain/ai/assetSendText.ts の selectAssetsForSend（プロンプトと送信前確認が共有＝ADR-0026②）。
+export const AI_ASSET_SEND_MAX = 40;
+
 export const MAX_NARRATION_LEN_DEFAULT = 120;
 export const MAX_SUBTITLE_LEN_DEFAULT = 60;
 // 自由記述「その他」(トップレベル additionalNotes・両用途共通・ADR-0011) の上限。schemas/project.schema.json の maxLength と一致させる。

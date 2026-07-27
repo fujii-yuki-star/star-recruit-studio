@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ConfirmScreen } from "./ConfirmScreen";
 import { useProjectStore } from "../store/projectStore";
+import { AI_ASSET_SEND_MAX } from "../../domain/constants";
 
 // #423：送信前確認（ConfirmScreen）の「キャンセル」戻り先を confirmReturnTo で一般化した挙動を検証する（§2-6・ADR-0014）。
 describe("ConfirmScreen キャンセルの戻り先（#423・§2-6）", () => {
@@ -115,5 +116,53 @@ describe("ConfirmScreen 送る文字情報の確認（#547 P2-8・§2-6）", () 
     render(<ConfirmScreen onNavigate={onNavigate} />);
     fireEvent.click(screen.getByRole("button", { name: /送信して動画案を作る/ }));
     expect(onNavigate).toHaveBeenCalledWith("generating");
+  });
+});
+
+// #585：素材が多いときは上位N件だけ送る（12§6）。送信前確認は**プロンプトと同じ選定関数**を通すので、
+// 画面に出るのは常に「本当に送る分」＝確認画面が嘘にならない（§2-6・ADR-0026②）。落ちた分は無言にしない。
+describe("ConfirmScreen 素材が多いときの送信件数（#585・12§6）", () => {
+  const imageAsset = (over: Record<string, unknown>) =>
+    ({ assetId: "asset_001", assetType: "image", displayName: "社屋.jpg", ...over }) as never;
+  const many = (n: number, rich: (i: number) => boolean) =>
+    Array.from({ length: n }, (_, i) =>
+      imageAsset({
+        assetId: `asset_${String(i + 1).padStart(3, "0")}`,
+        displayName: `写真${i + 1}.jpg`,
+        ...(rich(i) ? { description: "受付前で撮影した写真", tags: ["社員"] } : { description: "" }),
+      }),
+    );
+
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+    useProjectStore.getState().setConfirmReturnTo(null);
+  });
+
+  it("上限以下なら「送りません」の案内を出さない（不要な注意を出さない）", () => {
+    useProjectStore.setState({ assets: many(3, () => false) });
+    render(<ConfirmScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/送りません/)).toBeNull();
+  });
+
+  it("上限を超えたら送らない件数と次の行動を出す（無言の打ち切りをしない・§2-5）", () => {
+    useProjectStore.setState({ assets: many(AI_ASSET_SEND_MAX + 3, () => false) });
+    render(<ConfirmScreen onNavigate={vi.fn()} />);
+    // 件数（残り3件）と、次の行動（説明を足す／減らす）を示す。
+    expect(screen.getByText(/残り3件は送りません/)).toBeTruthy();
+    expect(screen.getByText(/説明やタグを足すか、使わない素材を減らして/)).toBeTruthy();
+  });
+
+  it("展開一覧に出るのは**送る分だけ**＝画面と実送信がズレない（§2-6）", () => {
+    // 41件中、最後の1件だけ説明あり＝説明なしの先頭1件が落ちる。
+    const assets = many(AI_ASSET_SEND_MAX + 1, (i) => i === AI_ASSET_SEND_MAX);
+    useProjectStore.setState({ assets });
+    render(<ConfirmScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "送る文字情報を確認する" }));
+    // 説明なしは全て同点なので元の並び順で残り、あぶれるのは**末尾**（写真40.jpg）＝画面にも出ない。
+    expect(screen.queryByText(new RegExp(`写真${AI_ASSET_SEND_MAX}\\.jpg`))).toBeNull();
+    expect(screen.getByText(/写真1\.jpg/)).toBeTruthy(); // 先頭は残る（同点は元の並びを保つ）
+    // 説明のある素材は残る＝画面にも出る。
+    expect(screen.getByText(new RegExp(`写真${AI_ASSET_SEND_MAX + 1}\\.jpg`))).toBeTruthy();
   });
 });
