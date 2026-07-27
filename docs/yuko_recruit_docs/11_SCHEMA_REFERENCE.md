@@ -309,7 +309,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V5 | `poseAssetId`（解決後）が実在 yuko asset | 既定yukoへ置換（§9） |
 | V6 | テンプレ必須スロット/必須テキストが埋まっている | 警告（required=true のみ） |
 | V7 | `durationSec` が範囲内（手編集＝`>0`／AI 生成＝目安 `[3, テンプレ上限 or 15]`・#553） | clamp（§9） |
-| V8 | テキスト長 ≤ テンプレ上限（`maxNarrationLength`等） | 警告＋短縮提案 |
+| V8 | テキスト長 ≤ テンプレ上限（`maxNarrationLength`等）。**掛け合い（`lines`/`narrationLines`）があるときは各行が対象**（単一 `narration` はその1行）＝生成時（`transformPlan`）と公開前チェック（`sceneLines`）で**同じ対象**を見る（#569・ADR-0026②）。閾値の継承順はテンプレ `aiHint` → 既定定数で両者共通（#568） | 警告＋短縮提案 |
 | V9 | 合計尺 ≤ `videoSettings.maxDurationSec` | 警告 |
 | V10 | シーン数 ≤ `MAX_SCENES_PER_VIDEO` | 警告（異常検知） |
 | V11 | `part.sceneIds` と `scenes[].partId` の整合 | 致命: 再構築 |
