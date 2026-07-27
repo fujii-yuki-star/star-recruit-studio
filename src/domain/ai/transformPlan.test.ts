@@ -3,7 +3,7 @@ import type { Asset } from '../project/types';
 import type { Template } from '../template/types';
 import type { AiScene, AiVideoPlan } from './types';
 import type { Orientation } from '../enums';
-import { MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from '../constants';
+import { AI_SCENE_MIN_DURATION_SEC, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT } from '../constants';
 import { createSequentialIdFactory } from './idFactory';
 import { transformVideoPlan } from './transformPlan';
 import type { TransformContext } from './transformPlan';
@@ -213,6 +213,39 @@ describe('transformVideoPlan', () => {
     const { scenes } = transformVideoPlan(plan, baseCtx());
     expect(scenes[0].durationSec).toBe(12); // opening の aiHint.maxDurationSec
     expect(scenes[0].warnings.some((w) => w.code === 'DURATION_CLAMPED')).toBe(true);
+  });
+
+  // #607：テンプレ上限が生成の下限（3秒）より小さいとき、素直に「下限→上限」の順で clamp すると
+  // **評価順で上限を破る**（短い値が3秒に引き上げられ、テンプレが宣言した1秒を超える）。
+  // どちらも #553 の「生成の目安」だが、上限は**そのテンプレについて作者が明示した値**なので優先する。
+  // 到達経路は手編集テンプレ/テンプレートパック取り込み（`aiHint` は作成エディタ非開放）。
+  describe('テンプレ上限が生成の下限より小さいとき（#607）', () => {
+    const tightCtx = () => {
+      const ctx = baseCtx();
+      return {
+        ...ctx,
+        templates: ctx.templates.map((t) =>
+          t.templateId === 'opening_yuko_right_v1' ? { ...t, aiHint: { ...t.aiHint, maxDurationSec: 1 } } : t,
+        ),
+      };
+    };
+
+    it('短すぎる値でも上限を超えない（下限へ引き上げない）', () => {
+      const { scenes } = transformVideoPlan(singleScenePlan({ durationSec: 0.5 }), tightCtx());
+      expect(scenes[0].durationSec).toBe(1); // 3 に引き上げると「最長1秒」の宣言を破る
+      expect(scenes[0].durationSec).toBeGreaterThan(0); // schema: durationSec > 0（11 §7）
+      expect(scenes[0].warnings.some((w) => w.code === 'DURATION_CLAMPED')).toBe(true);
+    });
+
+    it('長すぎる値も上限へ寄る（範囲が1点に潰れても壊れない）', () => {
+      const { scenes } = transformVideoPlan(singleScenePlan({ durationSec: 10 }), tightCtx());
+      expect(scenes[0].durationSec).toBe(1);
+    });
+
+    it('上限が下限以上のときは従来どおり下限が効く（この是正で通常経路を変えない）', () => {
+      const { scenes } = transformVideoPlan(singleScenePlan({ durationSec: 0.5 }), baseCtx());
+      expect(scenes[0].durationSec).toBe(AI_SCENE_MIN_DURATION_SEC);
+    });
   });
 
   it('一致しない poseTag は既定の yuko 素材へフォールバックする', () => {
