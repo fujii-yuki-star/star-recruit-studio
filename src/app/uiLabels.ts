@@ -285,7 +285,7 @@ export function standardLookResultMessage(r: { fixed: number[]; unfixable: numbe
 export function noScenesTitle(status: GenerateStatus, canAddScene: boolean): string {
   switch (status) {
     case "generating": return "動画案を作成中です…";
-    case "error": return "動画案の作成に失敗しました";
+    case "error": return GENERATE_FAILED_TITLE;
     case "ready": return canAddScene ? "場面を追加して作り始めましょう" : "まだ場面がありません";
     case "idle": return "まだ動画案がありません";
   }
@@ -294,8 +294,7 @@ export function noScenesTitle(status: GenerateStatus, canAddScene: boolean): str
 export function noScenesMessage(status: GenerateStatus, canAddScene: boolean, purpose: string, reason?: string | null): string {
   switch (status) {
     case "generating": return `できあがると、${purpose}。`;
-    // 失敗の理由は生成が持っている（`aiError`）。無いときも「次に何をすればよいか」だけは必ず出す（§2-5）。
-    case "error": return reason ?? "通信状況や設定を確認して、もう一度お試しください。手動で場面を作ることもできます。";
+    case "error": return generateFailedMessage(reason);
     case "ready": return canAddScene
       ? "「場面を追加」で最初の場面を作り、セリフ・素材・見た目を設定していきましょう。"
       : `場面を作ると、${purpose}。`;
@@ -305,6 +304,16 @@ export function noScenesMessage(status: GenerateStatus, canAddScene: boolean, pu
 
 /** 空状態から「場面を作る画面」へ行く導線のラベル（4画面で同じ言葉＝同じ行き先）。 */
 export const GO_TO_DRAFT_LABEL = "たたき台へ";
-/** 生成失敗からの復帰（#393 P1・生成中画面の「もう一度試す」「手動で作成する」と同じ2択を空状態でも出す）。 */
-export const RETRY_GENERATE_LABEL = "もう一度作る";
+
+/**
+ * 動画案の作成に失敗したときの見出し・説明・復帰の2択（#393 P1）。**生成中の画面と空状態（4画面）で共有**する（#590）。
+ * 挙動（再試行／`startManualEdit`＋たたき台へ）が同じなのにラベルだけ2通りあると、片方だけ直って言葉が割れる（§6・PR #615 レビュー）。
+ * 「手動で作成する」でなく**「手動で場面を作る」**なのは、押した先で実際にすることを言うため（§2-5）。
+ */
+export const GENERATE_FAILED_TITLE = "動画案の作成に失敗しました";
+export const RETRY_GENERATE_LABEL = "もう一度試す";
 export const START_MANUAL_LABEL = "手動で場面を作る";
+/** 失敗の理由は生成が持っている（`aiError`）。無いときも「次に何をすればよいか」だけは必ず出す（§2-5）。 */
+export function generateFailedMessage(reason?: string | null): string {
+  return reason ?? "通信状況や設定を確認して、もう一度お試しください。手動で場面を作ることもできます。";
+}

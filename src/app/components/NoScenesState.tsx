@@ -41,8 +41,8 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
   // 状態ごとの「次の行動」。作成中は待つだけなので、場面を作れない画面からはたたき台へ送るに留める。
   const action =
     status === "error" ? (
-      // 生成中画面の2択（#393 P1）と同じ＝どの画面から見ても復帰の仕方が変わらない。
-      // 「もう一度作る」は生成中画面へ送る（そこが作成の進捗・中止の持ち主）。
+      // 生成中画面の2択（#393 P1）と同じ＝どの画面から見ても復帰の仕方が変わらない。ラベルも共有する（§6）。
+      // 再試行は生成中画面へ送る（そこが作成の進捗・中止の持ち主）。
       <div className="row gap-sm" style={{ justifyContent: "center", flexWrap: "wrap" }}>
         <button className="btn btn-primary" onClick={() => onNavigate("generating")}>{RETRY_GENERATE_LABEL}</button>
         <button className="btn btn-secondary" onClick={() => { startManualEdit(); onNavigate("draft"); }}>
@@ -52,6 +52,7 @@ export function NoScenesState({ purpose, onNavigate, onAddScene }: {
     ) : status === "idle" ? (
       <StartNewVideoButton onNavigate={onNavigate} />
     ) : status === "generating" ? (
+      // たたき台は自分自身なので送り先が無く、作りかけの動画案に場面を足させるのも避けたい＝待たせる（唯一ボタン無し）。
       canAddScene ? undefined : toDraft
     ) : canAddScene ? (
       <button className="btn btn-primary" onClick={onAddScene}>
