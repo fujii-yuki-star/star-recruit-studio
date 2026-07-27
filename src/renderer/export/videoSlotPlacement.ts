@@ -10,6 +10,7 @@ import { animationsEndSec, slotIsAnimated } from '../../domain/project/sceneAnim
 import { VIDEO_START_MODE } from '../../domain/enums';
 import { layoutScene } from '../layout';
 import { findVideoSlots } from './findVideoSlot';
+import type { VideoSlotInfo } from './findVideoSlot';
 import { splitVideoSceneSvgMulti } from './videoSceneSplit';
 
 /** この場面に動画スロットがあるのにレイアウトへ配置できない（分割失敗）か。動画スロットが無い場面は false。 */
@@ -55,9 +56,24 @@ export function videoSlotAfterAnimNeverPlays(
   assetById: (id: string) => Asset | undefined,
   sceneAnims: ElementAnimation[],
 ): boolean {
+  return afterAnimNeverPlaysForSlots(scene, findVideoSlots(scene, template, assetById), sceneAnims);
+}
+
+/**
+ * 上と同じ判定を**解決済みのスロット**に対して行う（#588）。書き出し（`buildExportScenes`）はスロットを
+ * コールバック（`videoSlotsFor`）で受け取り `template`/`assetById` を持たないため、こちらを使う。
+ *
+ * **precheck と書き出しが「止める条件」を同値に保つ**のは `15 §3` の要求で、以前は同じ条件式を両側に**書き写して**
+ * いた（結論は一致していたが、片方だけ条件が変わると「公開前チェックは止めるのに書き出しは通る（行き止まり）」
+ * または「通したのに書き出しが落ちる（手戻り）」になる）。判定本体をここ1か所にして**構造で**同値を担保する（ADR-0026②）。
+ */
+export function afterAnimNeverPlaysForSlots(
+  scene: Scene,
+  slots: VideoSlotInfo[],
+  sceneAnims: ElementAnimation[],
+): boolean {
   // settled 区間がある（animEnd < 尺）なら afterAnim もそこで再生される＝degenerate ではない。
   if (animationsEndSec(sceneAnims) < scene.durationSec) return false;
-  const slots = findVideoSlots(scene, template, assetById);
   // 掛け合い×動画はアニメ自体が効かず**静止で完走する**（#469）＝この degenerate にはならない。
   // 書き出し側も同じ `sceneAnimationActive` を通ってから停止判定に入るので、ここでゲートを共有しないと
   // 「書き出しは成功するのに公開前チェックだけが止める」ズレになる（#547 P2-5 レビュー・ADR-0026②）。
