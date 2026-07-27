@@ -10,8 +10,8 @@ import { PageHead } from "../components/ui";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { ExportLockBanner } from "../components/ExportLockBanner";
-import { WarningBanner, VoiceStatusBadge, EmptyState } from "../components/states";
-import { StartNewVideoButton } from "../components/StartNewVideoButton";
+import { WarningBanner, VoiceStatusBadge } from "../components/states";
+import { NoScenesState } from "../components/NoScenesState";
 import { YukoPanel } from "../components/YukoPanel";
 import {
   CheckIcon,
@@ -96,30 +96,13 @@ export function DraftScreen({ onNavigate }: DraftProps) {
 
   if (rows.length === 0) {
     // 場面ゼロだがプロジェクトはある（白紙開始／全削除＝status "ready"）＝手動で場面を足す導線を出す（#393）。
-    // status "idle"（まだ何も無い）はウィザードへ誘導。生成中は「作成中」表示。
-    const started = status === "ready";
+    // status "idle"（まだ何も無い）はウィザードへ誘導。生成中は「作成中」表示。失敗は理由＋復帰の2択（#590）。
+    // 見分けと文言は他3画面（公開前チェック/仕上がり確認/書き出し）と共有する＝`NoScenesState`。
     return (
       <div className="main-scroll">
         <PageHead title="動画のたたき台を確認" desc="台本表で場面を確認・修正できます。" />
         <ExportLockBanner onNavigate={onNavigate} />
-        <EmptyState
-          title={status === "generating" ? "動画案を作成中です…" : started ? "場面を追加して作り始めましょう" : "まだ動画案がありません"}
-          message={
-            started
-              ? "「場面を追加」で最初の場面を作り、セリフ・素材・見た目を設定していきましょう。"
-              : "「新しい動画を作る」から、会社情報と素材を入れて動画案を作成しましょう。"
-          }
-          action={
-            started ? (
-              <button className="btn btn-primary" onClick={() => addScene()}>
-                <PlusIcon size={18} />
-                場面を追加
-              </button>
-            ) : (
-              <StartNewVideoButton onNavigate={onNavigate} />
-            )
-          }
-        />
+        <NoScenesState purpose="ここで場面を直せます" onNavigate={onNavigate} onAddScene={() => addScene()} />
       </div>
     );
   }

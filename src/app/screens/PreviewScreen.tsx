@@ -4,8 +4,7 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead, Switch } from "../components/ui";
 import { ExportLockBanner } from "../components/ExportLockBanner";
-import { EmptyState } from "../components/states";
-import { StartNewVideoButton } from "../components/StartNewVideoButton";
+import { NoScenesState } from "../components/NoScenesState";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { formatDuration } from "../../domain/format/duration";
 import { BgmPicker } from "../components/BgmPicker";
@@ -472,11 +471,7 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             {PREVIEW_BACK_LABEL[previewBackTo]}
           </button>
         </div>
-        <EmptyState
-          title="まだ場面がありません"
-          message="先に動画のたたき台を作ると、ここで仕上がりを確認できます。"
-          action={<StartNewVideoButton onNavigate={onNavigate} />}
-        />
+        <NoScenesState purpose="ここで仕上がりを確認できます" onNavigate={onNavigate} />
       </div>
     );
   }
