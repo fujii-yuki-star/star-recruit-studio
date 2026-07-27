@@ -74,8 +74,20 @@ function mapNarrationLines(
   });
 }
 
+/**
+ * AI 生成の表示時間を目安の範囲へ寄せる（11 §9）。
+ *
+ * **下限が上限を上回るときは上限を優先する**（#607）。下限（`AI_SCENE_MIN_DURATION_SEC`）は**どのテンプレにも
+ * 共通の既定**で per-template の上書きが無いのに対し、上限はテンプレ作者が `aiHint.maxDurationSec` で
+ * **そのテンプレについて明示**した値だから＝具体的な宣言を一般的な既定より優先する（ADR-0026①：
+ * 「最長1秒」と書いたテンプレから3秒の場面を作らない）。どちらも #553 の「生成の目安」で硬い制約ではないので、
+ * どちらを採っても `durationSec > 0`（schema）は保たれる（`maxDurationSec` は schema で `exclusiveMinimum: 0`）。
+ *
+ * 素の `if (value < min)` を先に置くと、`min > max` のとき**評価順で上限を破る**（0.5 が 3 になる＝上限1を超える）。
+ */
 function clampDuration(value: number, min: number, max: number): { value: number; clamped: boolean } {
-  if (value < min) return { value: min, clamped: true };
+  const lower = Math.min(min, max);
+  if (value < lower) return { value: lower, clamped: true };
   if (value > max) return { value: max, clamped: true };
   return { value, clamped: false };
 }

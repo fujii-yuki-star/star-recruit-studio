@@ -356,6 +356,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | `durationSec > VIDEO_HARD_MAX_SEC`（**手編集の確定時**） | `VIDEO_HARD_MAX_SEC`（600秒）へ＝1場面に効く唯一の硬い天井（#553） |
 | `durationSec < AI_SCENE_MIN_DURATION_SEC`（**AI 生成時のみ**） | `AI_SCENE_MIN_DURATION_SEC`（3秒）へ＝生成のペース配分の目安（手編集は縛らない・#553） |
 | `durationSec >` テンプレ上限（**AI 生成時のみ**） | テンプレ `aiHint.maxDurationSec`（無ければ `AI_SCENE_MAX_DURATION_SEC`=15秒）へ。**手編集は縛らない**（`VIDEO_HARD_MAX_SEC` で頭打ち・#553） |
+| テンプレ上限が生成の下限を下回る（`aiHint.maxDurationSec < AI_SCENE_MIN_DURATION_SEC`） | **上限を優先**（範囲は上限の1点へ潰れる）＝#607。下限は全テンプレ共通の既定で per-template の上書きが無いのに対し、上限は**そのテンプレについて作者が明示した値**なので、具体的な宣言を一般的な既定より優先する（ADR-0026①）。どちらも #553 の「生成の目安」で硬い制約ではないため、`durationSec > 0`（`§7`）は保たれる。警告は既存の `DURATION_CLAMPED` のまま（`aiHint` は作成エディタ非開放＝利用者に別の次の行動が無い・`§2-5`） |
 | `poseTag` 解決不可 / `poseAssetId` 不在 | 既定yuko（`isDefaultYuko` → 無ければ先頭 yuko）へ。yuko素材皆無かつ character 任意 → 非表示 |
 | テキストがテンプレ上限超過 | 警告＋「AIで短くする」提示（自動切詰めはしない） |
 
