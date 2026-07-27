@@ -6,6 +6,7 @@ import { AI_SCENE_MAX_DURATION_SEC, AI_SCENE_MIN_DURATION_SEC } from '../constan
 import { GENERAL_PURPOSES, VIDEO_KIND } from '../enums';
 import type { Asset } from '../project/types';
 import { assetSentText, selectAssetsForSend } from './assetSendText';
+import type { AssetSendSelection } from './assetSendText';
 import type { GenerateVideoPlanInput, TemplateSummary } from './aiProvider';
 // 12§7 の出力例（few-shot）。AI に ai-video-plan の構造（キー名・入れ子）を厳密に真似させるため、
 // 正典 fixture を直接読む（ミラーしない＝検証スキーマと同じ単一参照元。validate:schemas で適合確認済みの有効サンプル）。
@@ -166,13 +167,16 @@ function generalHead(input: GenerateVideoPlanInput): string[] {
  * videoKind=general のときは §6b（テーマ／章立て／要点）に切り替え、補足・素材・見た目・表情タグ・出力契約は共通。
  * 送信前確認で利用者に提示する「外部AIへ送る内容」の実体でもある（§2-6）。
  */
-export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string {
+export function buildVideoPlanUserMessage(
+  input: GenerateVideoPlanInput,
+  // 素材が多いときは「説明・タグの充実した順に上位 N 件」だけ送る（12§6・#585）。選定は送信前確認と共有の純粋関数
+  // ＝**画面で見せた内容と実際に送る内容が必ず一致**する（§2-6・ADR-0026②）。上限以下なら全件・並びも元のまま。
+  // 呼び出し側（buildVideoPlanMessages）が選定済みなら**それを渡して二重計算を避ける**。単体で呼ぶときは既定で計算する。
+  selection: AssetSendSelection = selectAssetsForSend(input.assets),
+): string {
   const isGeneral = input.videoKind === VIDEO_KIND.general;
   const head = isGeneral ? generalHead(input) : recruitHead(input);
   const templates = input.templates.map(templateBlock).join('\n');
-  // 素材が多いときは「説明・タグの充実した順に上位 N 件」だけ送る（12§6・#585）。選定は送信前確認と共有の純粋関数
-  // ＝**画面で見せた内容と実際に送る内容が必ず一致**する（§2-6・ADR-0026②）。上限以下なら全件・並びも元のまま。
-  const selection = selectAssetsForSend(input.assets);
   const assets = selection.sent.map(assetBlock).join('\n');
   // 「値だけ今回の◯◯に合わせて作る」の主語は用途で変える（recruit=会社情報 / general=テーマ・構成・要点）。
   const exampleSubject = isGeneral ? 'テーマ・構成・要点' : '会社情報';
@@ -213,6 +217,12 @@ export function buildVideoPlanUserMessage(input: GenerateVideoPlanInput): string
 export interface VideoPlanMessages {
   system: string;
   user: string;
+  /**
+   * 上限（`AI_ASSET_SEND_MAX`）超過で **user に載せなかった素材の件数**（12§6・#585）。
+   * プロバイダの `log`（無言の打ち切りをしない）用。**このメッセージを組んだのと同じ選定結果**から出すので、
+   * 「ログの件数」と「実際に送った内容」が構造的にズレない（選定を2回計算して片方だけ条件が変わる、を防ぐ）。
+   */
+  omittedAssetCount: number;
 }
 
 /**
@@ -222,8 +232,13 @@ export interface VideoPlanMessages {
 export function buildVideoPlanMessages(input: GenerateVideoPlanInput): VideoPlanMessages {
   const system =
     input.videoKind === VIDEO_KIND.general ? VIDEO_PLAN_SYSTEM_PROMPT_GENERAL : VIDEO_PLAN_SYSTEM_PROMPT;
+  // 素材の選定は**ここで1回だけ**行い、本文と「送らなかった件数」の両方をこの結果から作る（#585 レビュー）。
+  // プロバイダ側で選定をやり直すと、同じ入力を2回計算するうえ「ログの件数」と「実際に送った内容」の参照元が
+  // 分かれる＝将来どちらかの条件だけ変わるとズレる。ここに集約して構造的に一致させる（§6）。
+  const selection = selectAssetsForSend(input.assets);
   return {
     system,
-    user: buildVideoPlanUserMessage(input),
+    user: buildVideoPlanUserMessage(input, selection),
+    omittedAssetCount: selection.omitted.length,
   };
 }

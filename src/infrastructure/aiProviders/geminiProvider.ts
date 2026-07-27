@@ -2,7 +2,6 @@
 // 入力アセンブリ（プロンプト）＝domain（buildVideoPlanMessages）／呼び出し＝Rust 経由（aiGenerate・鍵は JS に出ない）／
 // 応答検証＝domain（parseAndValidateVideoPlan）。映像生成はしない（§2-1）。
 import { buildVideoPlanMessages } from '../../domain/ai/buildVideoPlanRequest';
-import { selectAssetsForSend } from '../../domain/ai/assetSendText';
 import { AI_ASSET_SEND_MAX } from '../../domain/constants';
 import { parseAndValidateVideoPlan } from '../../domain/ai/validateVideoPlan';
 import type { AiProvider, GenerateVideoPlanInput } from '../../domain/ai/aiProvider';
@@ -25,13 +24,13 @@ export class GeminiProvider implements AiProvider {
   // 再試行は利用者が「もう一度試す」で明示的に行える（GeneratingScreen）。間欠失敗の主因（任意項目の null/[]）は
   // 受信前サニタイズ（sanitizeVideoPlan）が API 追加コストなしで吸収するため、1回でも通りやすい。
   async generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideoPlan> {
-    const { system, user } = buildVideoPlanMessages(input);
+    const { system, user, omittedAssetCount } = buildVideoPlanMessages(input);
     // 素材が上限（AI_ASSET_SEND_MAX）を超えたら**送らなかった件数を記録**する（12§6「超過分は送らない旨を log する
     // ＝無言の打ち切りをしない」）。利用者向けの明示は送信前確認（ConfirmScreen）が同じ選定関数で出す＝ここは診断用。
-    // domain は副作用を持たない（§4）ので、log はこの送信実行側に置く。
-    const omitted = selectAssetsForSend(input.assets).omitted;
-    if (omitted.length > 0) {
-      console.info(`[ai] 素材が多いため上位 ${AI_ASSET_SEND_MAX} 件のみ送信（送らなかった素材: ${omitted.length} 件）`);
+    // 件数は**いま組んだ user 本文と同じ選定結果**（buildVideoPlanMessages が1回だけ計算）なので、
+    // 「ログの件数」と「実際に送った内容」がズレない。domain は副作用を持たない（§4）ので log はこの送信実行側に置く。
+    if (omittedAssetCount > 0) {
+      console.info(`[ai] 素材が多いため上位 ${AI_ASSET_SEND_MAX} 件のみ送信（送らなかった素材: ${omittedAssetCount} 件）`);
     }
     let raw: string;
     try {
