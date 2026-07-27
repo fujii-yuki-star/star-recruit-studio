@@ -9,7 +9,7 @@ import { usedTextKeys } from "../../domain/template/layerOps";
 import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
-import { BGM_VOLUME, ROTATION_DEG_MAX, ROTATION_DEG_MIN, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
+import { BGM_VOLUME, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
@@ -52,7 +52,7 @@ import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
-import { DEFAULT_STROKE_COLOR, resolveTextStyle } from "../../domain/template/textStyle";
+import { DEFAULT_TEXT_COLOR, defaultStrokeColor, resolveTextStyle } from "../../domain/template/textStyle";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
@@ -177,6 +177,17 @@ function CollapsibleSection({ title, storageKey, defaultOpen = true, children }:
 function freeElementName(el: FreeElement, index: number): string {
   const custom = el.name?.trim();
   return custom ? custom : `${freeKindLabel[el.kind]}${index + 1}`;
+}
+
+/**
+ * FREE 要素の「縁取り/枠線の色」の見本が出す値（#565）。**実描画（`layoutScene`→`resolveStrokeColor`）と同じ規則**で、
+ * 色が未指定なら下地（文字色／図形の塗り）と反対の既定色を出す＝「見本は黒と言うのに何も描かれない」を無くす（§2-7）。
+ */
+function freeStrokeSwatch(el: FreeElement): string {
+  const base = el.kind === FREE_ELEMENT_KIND.shape
+    ? (el.fillColor ?? SHAPE_FILL_FALLBACK_COLOR)
+    : (el.color ?? DEFAULT_TEXT_COLOR);
+  return el.strokeColor ?? defaultStrokeColor(base);
 }
 
 // キーボード微調整/削除の window 購読（#525-11）。SceneEditScreen は early return を持つため hooks を含む購読は子へ切り出す
@@ -906,7 +917,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             onClear={() => set({ strokeWidth: undefined })}
             onChange={(v) => set({ strokeWidth: v })}
           />
-          {colorField("縁取りの色", effective.strokeColor ?? DEFAULT_STROKE_COLOR, ov?.strokeColor != null, `${textKeyLabel[key]}の縁取りの色`, (v) => set({ strokeColor: v }), () => set({ strokeColor: undefined }))}
+          {/* 見本は実描画の解決値（`effective`＝太さ>0 なら既定色入り）。太さ0で縁取りが無いときは「足したらこうなる」既定を出す。 */}
+          {colorField("縁取りの色", effective.strokeColor ?? defaultStrokeColor(effective.color), ov?.strokeColor != null, `${textKeyLabel[key]}の縁取りの色`, (v) => set({ strokeColor: v }), () => set({ strokeColor: undefined }))}
         </div>
         {/* まとめて戻す導線。項目ごとの復帰は各欄側（数値欄は空欄・太さは選択肢・色は上の「合わせる」）にある。 */}
         {overridden && (
@@ -1012,7 +1024,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+              <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
           {renderFreeBandBg(el)}
@@ -1037,7 +1049,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>色</label>
-              <ColorPicker value={el.fillColor ?? "#cccccc"} onChange={(v) => patchFreeEl(el.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+              <ColorPicker value={el.fillColor ?? SHAPE_FILL_FALLBACK_COLOR} onChange={(v) => patchFreeEl(el.id, { fillColor: v })} ariaLabel="色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
           {/* 濃さは数値欄「濃さ(%)」に統一する（図形もスライダーをやめ、背景帯や枠線の太さ等と同じ NumberField・#547 P3-2）。
@@ -1050,7 +1062,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="枠線の太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>枠線の色</label>
-              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="枠線の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+              <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="枠線の色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
         </>
@@ -1137,7 +1149,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <NumberField label="縁取りの太さ" value={el.strokeWidth ?? 0} min={0} max={STROKE_WIDTH_MAX} onChange={(v) => patchFreeEl(el.id, { strokeWidth: v })} />
             <div className="field" style={{ margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>縁取りの色</label>
-              <ColorPicker value={el.strokeColor ?? "#000000"} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
+              <ColorPicker value={freeStrokeSwatch(el)} onChange={(v) => patchFreeEl(el.id, { strokeColor: v })} ariaLabel="縁取りの色を選ぶ" onDragStart={beginHistoryGroup} onDragEnd={endHistoryGroup} />
             </div>
           </div>
           {renderFreeBandBg(el)}

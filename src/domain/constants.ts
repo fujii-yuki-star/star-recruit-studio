@@ -135,6 +135,13 @@ export const DEFAULT_CHARACTER_ID = 'yuko';
 // スロットの既定フィット（テンプレ・clip 未指定時）。正典(§4)に既定の明記は無く、cover を既定とする（MVP）。
 export const DEFAULT_FIT = 'cover' as const;
 
+/**
+ * 図形の `fillColor` が未指定のときに**描く**色。**新規作成の既定色（`createFreeElement`）とは別物**＝
+ * こちらは古い/手書きデータ向けの描画フォールバック。色見本もこの値を出す＝「見本と実際の色が違う」を防ぐ（§2-7・#565）。
+ * 図形の枠線の既定色も、この解決後の塗りを下地として決まる（`resolveStrokeColor`）。
+ */
+export const SHAPE_FILL_FALLBACK_COLOR = '#ffffff';
+
 // AI 出力の場面種別が未知/未指定でテンプレからも解決できないときの既定カテゴリ（transformPlan の補正フォールバック・§2-7）。
 export const DEFAULT_SCENE_CATEGORY: SceneCategory = 'photo_intro';
 

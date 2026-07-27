@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boxHeightForLines, DEFAULT_FONT_SIZE, DEFAULT_STROKE_COLOR, DEFAULT_TEXT_COLOR, linesForBoxHeight, resolveTextStyle } from './textStyle';
+import { boxHeightForLines, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR, defaultStrokeColor, linesForBoxHeight, resolveStrokeColor, resolveTextStyle, STROKE_COLOR_ON_DARK, STROKE_COLOR_ON_LIGHT } from './textStyle';
 import type { TextStyleSource } from './textStyle';
 
 // #555：場面の上書き（textStyles）→ テンプレ層 → 既定 の継承解決。描画（layoutScene）・場面編集の体裁欄・
@@ -44,12 +44,18 @@ describe('resolveTextStyle（文字の体裁の継承解決・#555）', () => {
 
   // 縁取りは「太さ>0 なのに色が無いと silent に消える」を防ぐ既定を持つ（#275/PR#289）。
   // **上書きを解決したあとの太さ**で判定する＝場面で太さだけ足しても縁取りが消えない。
+  // 既定色は**文字色と反対側**（#565）＝この層は白文字なので黒。固定の白だと白文字に白い縁取りが付いて、
+  // 結局「太さを入れたのに何も起きない」に戻る（このフィクスチャ自体がその実例だった）。
   it('太さ>0 で色が無ければ既定色（層に太さがある場合）', () => {
-    expect(resolveTextStyle({ ...layer, strokeWidth: 3 }).strokeColor).toBe(DEFAULT_STROKE_COLOR);
+    expect(resolveTextStyle({ ...layer, strokeWidth: 3 }).strokeColor).toBe(STROKE_COLOR_ON_LIGHT);
   });
 
   it('太さ>0 で色が無ければ既定色（場面で太さだけ足した場合）', () => {
-    expect(resolveTextStyle(layer, { strokeWidth: 3 }).strokeColor).toBe(DEFAULT_STROKE_COLOR);
+    expect(resolveTextStyle(layer, { strokeWidth: 3 }).strokeColor).toBe(STROKE_COLOR_ON_LIGHT);
+  });
+
+  it('暗い文字なら既定の縁取りは白（#275 以来の挙動）', () => {
+    expect(resolveTextStyle({ ...layer, color: undefined, strokeWidth: 3 }).strokeColor).toBe(STROKE_COLOR_ON_DARK);
   });
 
   it('太さが 0/未指定なら色を既定化しない（縁取りなし）', () => {
@@ -65,6 +71,44 @@ describe('resolveTextStyle（文字の体裁の継承解決・#555）', () => {
 
   it('空の上書きオブジェクトは継承と同じ（{} を保存しても壊れない）', () => {
     expect(resolveTextStyle(layer, {})).toEqual(resolveTextStyle(layer));
+  });
+
+  // 判定は**解決後**の文字色＝場面で色を変えた瞬間から既定の縁取りもそれに合う（#565・ADR-0026①）。
+  it('場面で文字色を白へ変えたら、既定の縁取りも黒へ切り替わる', () => {
+    const dark: TextStyleSource = { ...layer, color: '#222222' };
+    expect(resolveTextStyle(dark, { strokeWidth: 3 }).strokeColor).toBe(STROKE_COLOR_ON_DARK);
+    expect(resolveTextStyle(dark, { strokeWidth: 3, color: '#ffffff' }).strokeColor).toBe(STROKE_COLOR_ON_LIGHT);
+  });
+});
+
+// 縁取り/枠線の色の既定を決める単一の参照元（#565）。通常テンプレの文字・FREE の文字/字幕/図形・色見本が共有する。
+describe('defaultStrokeColor / resolveStrokeColor（縁取りの既定色・#565）', () => {
+  it('暗い下地には白・明るい下地には黒（既定の文字色は #275 以来の白のまま）', () => {
+    expect(defaultStrokeColor(DEFAULT_TEXT_COLOR)).toBe(STROKE_COLOR_ON_DARK); // #222222
+    expect(defaultStrokeColor('#333333')).toBe(STROKE_COLOR_ON_DARK);
+    expect(defaultStrokeColor('#ffffff')).toBe(STROKE_COLOR_ON_LIGHT);
+    expect(defaultStrokeColor('#dddddd')).toBe(STROKE_COLOR_ON_LIGHT);
+    expect(defaultStrokeColor('#cccccc')).toBe(STROKE_COLOR_ON_LIGHT); // 図形の描画フォールバック側
+  });
+
+  it('色みの明るさの違いを見る（緑は明るく青は暗い）＝RGB の単純平均ではない', () => {
+    expect(defaultStrokeColor('#00ff00')).toBe(STROKE_COLOR_ON_LIGHT); // 純緑は明るい＝黒縁
+    expect(defaultStrokeColor('#0000ff')).toBe(STROKE_COLOR_ON_DARK); // 純青は暗い＝白縁
+  });
+
+  it('色として読めない値は白＝#275 以来の既定へ倒す（例外にしない）', () => {
+    expect(defaultStrokeColor('')).toBe(STROKE_COLOR_ON_DARK);
+    expect(defaultStrokeColor('rgb(255,255,255)')).toBe(STROKE_COLOR_ON_DARK);
+    expect(defaultStrokeColor('#fff')).toBe(STROKE_COLOR_ON_LIGHT); // 短縮形は解釈する（schema 外の手書きデータ）
+  });
+
+  it('太さ>0 で色が無いときだけ既定色を入れる（指定色はそのまま・太さ0では色を消さない）', () => {
+    expect(resolveStrokeColor(3, undefined, '#ffffff')).toBe(STROKE_COLOR_ON_LIGHT);
+    expect(resolveStrokeColor(3, '#00ff00', '#ffffff')).toBe('#00ff00');
+    expect(resolveStrokeColor(0, undefined, '#ffffff')).toBeUndefined();
+    expect(resolveStrokeColor(undefined, undefined, '#ffffff')).toBeUndefined();
+    // 太さを 0 に戻しても選んだ色は残す＝また太くすれば同じ色で戻る。
+    expect(resolveStrokeColor(0, '#00ff00', '#ffffff')).toBe('#00ff00');
   });
 });
 
