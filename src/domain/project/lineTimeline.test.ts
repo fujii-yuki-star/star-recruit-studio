@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { activeLineIndexAt, firstFrameBoundary, lastFrameBoundary, lineSegments, motionSubtitleAt, previewSubtitleSegment, resolveLineSubtitle, sceneSegmentSpecs, segmentAt, segmentLineIds } from './lineTimeline';
+import { activeLineIndexAt, firstFrameBoundary, hasSimultaneousLines, lastFrameBoundary, lineSegments, motionSubtitleAt, previewSubtitleSegment, resolveLineSubtitle, sceneSegmentSpecs, segmentAt, segmentLineIds } from './lineTimeline';
 import type { NarrationLine, Scene } from './types';
 
 function sceneWith(partial: Partial<Scene>): Scene {
@@ -378,5 +378,29 @@ describe('同時開始（startWithPrevious・並行・ADR-0031）', () => {
     expect(segmentAt(s, durs, 2)).toMatchObject({ lineId: 'line_001', parallelLineIds: ['line_002'] });
     expect(segmentAt(s, durs, 6).lineId).toBe('line_003');
     expect(segmentAt(s, durs, 6).parallelLineIds).toBeUndefined();
+  });
+});
+
+// #563：字幕はみ出しの案内文を原因で出し分けるための判定（同時＝帯を積む／単独・逐次＝1帯が大きすぎ）。
+describe('hasSimultaneousLines（同時に流れるセリフがあるか・#563）', () => {
+  const sc = (lines?: unknown[]): Scene =>
+    ({ sceneId: 'scene_001', durationSec: 8, narration: { text: 'ナレ', status: 'none' }, ...(lines ? { lines } : {}) }) as unknown as Scene;
+
+  it('同時開始（startWithPrevious）の行があれば true', () => {
+    expect(hasSimultaneousLines(sc([
+      { lineId: 'line_001', text: 'A', status: 'none' },
+      { lineId: 'line_002', text: 'B', status: 'none', startWithPrevious: true },
+    ]))).toBe(true);
+  });
+
+  it('逐次だけなら false（各行が単独グループ）', () => {
+    expect(hasSimultaneousLines(sc([
+      { lineId: 'line_001', text: 'A', status: 'none' },
+      { lineId: 'line_002', text: 'B', status: 'none' },
+    ]))).toBe(false);
+  });
+
+  it('単一ナレーション（lines 不在）は false', () => {
+    expect(hasSimultaneousLines(sc())).toBe(false);
   });
 });

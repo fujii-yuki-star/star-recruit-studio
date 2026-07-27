@@ -549,3 +549,49 @@ describe("buildPrecheckItems（書き出しを止める項目の判別・#547 P2
     expect(blockingIds(buildPrecheckItems([freeScene(undefined)], assets, [freeTemplate]))).toEqual([]);
   });
 });
+
+
+// #563：字幕のはみ出しを公開前チェックでも拾う（場面編集を開かないと気づけない状態にしない・ADR-0026④）。
+// 判定は実描画と同じ layoutScene を通る共有関数（subtitleOverflowsCanvas）＝画面の見え方と警告が食い違わない。
+describe("buildPrecheckItems（画面からはみ出す字幕・#563）", () => {
+  // 字幕層を持つ最小テンプレ（下端固定＝anchorBottom で上へ伸びる）。
+  const subTemplate: Template = {
+    schemaVersion: "1.0",
+    templateId: "sub_v1",
+    name: "字幕あり",
+    category: "message",
+    aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 },
+    defaults: { backgroundColor: "#ffffff" },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "subtitle", type: "subtitle", textKey: "subtitle", x: 160, y: 950, w: 1600, h: 100, zIndex: 50, fontSize: 48, anchorBottom: true },
+    ],
+  } as unknown as Template;
+  const subScene = (over: Partial<Scene> = {}): Scene => ({
+    sceneId: "scene_001", partId: "part_001", order: 1, sceneType: "message", templateId: "sub_v1",
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: "yuko" },
+    texts: { subtitle: "あ".repeat(40) },
+    narration: { text: "", status: "none" }, warnings: [], ...over,
+  } as Scene);
+  const overflowItem = (scenes: Scene[]) =>
+    buildPrecheckItems(scenes, [], [subTemplate]).find((i) => i.id === "subtitleOverflow");
+
+  it("はみ出す場面を場面番号つきで挙げ、その場面へ戻す導線を出す", () => {
+    // #555 の体裁上書きで字幕を極端に拡大＝1帯でも画面外へ出る（単独ナレーションでも検出する＝#563 の本題）。
+    const item = overflowItem([subScene({ textStyles: { subtitle: { fontSize: 300 } } } as Partial<Scene>)]);
+    expect(item).toBeDefined();
+    expect(item?.detail).toContain("場面1");
+    expect(item?.severity).toBe("action");
+    expect(item?.sceneId).toBe("scene_001");
+  });
+
+  it("既定の体裁なら項目自体を出さない（普通に使うだけでは警告しない＝ノイズを出さない）", () => {
+    expect(overflowItem([subScene()])).toBeUndefined();
+  });
+
+  it("書き出しは止めない（直せば良くなる警告＝ハードブロッカーとは分離）", () => {
+    const item = overflowItem([subScene({ textStyles: { subtitle: { fontSize: 300 } } } as Partial<Scene>)]);
+    expect(item?.blocksExport).toBeUndefined();
+  });
+});

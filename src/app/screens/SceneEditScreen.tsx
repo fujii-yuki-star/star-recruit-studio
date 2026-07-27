@@ -39,7 +39,7 @@ import { useAudioPreview } from "../hooks/useAudioPreview";
 import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
-import { motionSubtitleAt } from "../../domain/project/lineTimeline";
+import { hasSimultaneousLines, motionSubtitleAt } from "../../domain/project/lineTimeline";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
@@ -48,7 +48,7 @@ import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
+import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -1315,13 +1315,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const isDialogue = (selected.lines?.length ?? 0) > 0;
   // セリフ列の検証（V16-19）。開始秒の範囲/順序・話者の実在などをユーザー向け文言で案内（重複文言は1つに）。
   // 同時開始（ADR-0031）：字幕帯が多くて画面外へ積み切れないときは「次の行動」を示す警告（黙って画面外に切らない・#533 P2）。
+  // 字幕のはみ出しは**掛け合いに限らない**（#563）：#555 で場面ごとに字幕を拡大できるようになり、単独/逐次でも
+  // 画面外へ切れる。`isDialogue` ゲートの内側に置くと単独場面では検査すらされないので外に出す（ADR-0026②/④）。
+  // 文言は原因で変える＝「次の行動」が違う（同時なら行を減らす／1帯なら小さく・短く）＝§2-5。
+  // はみ出しの案内は**文字（字幕）の欄の下**に出す（下記）＝掛け合いの有無に関わらず見え、直す場所がその場にある。
+  // ここ（セリフ列の検証）に混ぜると掛け合いブロックの中でしか描画されず、単独/逐次では出ない（#563）。
+  const subtitleOverflows = template != null && subtitleOverflowsCanvas(selected, template);
   const lineWarningMessages = isDialogue
-    ? [
-        ...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message)),
-        ...(template && subtitleOverflowsCanvas(selected, template)
-          ? ["同時に表示するセリフが多く、一部の字幕が画面からはみ出します。同時のセリフを減らすか、字幕を短くしてください。"]
-          : []),
-      ]
+    ? [...new Set(validateSceneLines(selected.lines, selected.durationSec).map((w) => w.message))]
     : [];
   // 場面ごとの声の大きさ（null/未設定＝全体設定を継承 §6/§2.2、値＝この場面だけ上書き）。
   const sceneNarrationVolume = selected.audioMix?.narrationVolume ?? null;
@@ -1756,6 +1757,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </div>
                 );
               })}
+              {/* 字幕が画面外へ切れているときの案内（#533 P2／#563）。**掛け合いに限らず単独/逐次でも出す**ため、
+                  掛け合いブロックの中ではなくここ（文字＝字幕の文と大きさを直せる場所）に置く＝次の行動がその場にある（§2-5）。 */}
+              {subtitleOverflows && (
+                <div className="notice notice-warn" role="alert">
+                  <span className="text-sm">{subtitleOverflowMessage(hasSimultaneousLines(selected))}</span>
+                </div>
+              )}
               </CollapsibleSection>
             )}
 

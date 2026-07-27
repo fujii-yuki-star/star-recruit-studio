@@ -171,14 +171,26 @@ function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: numbe
  * （2個目の字幕層・下移動・回転・N人長文の見切れを実描画と一致して検出）。FREE 字幕は利用者配置ゆえ対象外。純粋関数。
  */
 export function subtitleOverflowsCanvas(scene: Scene, template: Template): boolean {
-  if (!scene.lines || scene.lines.length === 0) return false;
   const { width, height } = template.canvas;
   // テンプレ字幕層の id（同時行の追加帯は `${id}__subN`）。FREE 字幕（free_NNN）と区別するのに使う。
   const subtitleLayerIds = new Set(template.layers.filter((l) => l.type === 'subtitle').map((l) => l.id));
   if (subtitleLayerIds.size === 0) return false;
+  // 実描画（layoutScene）の結果からテンプレ字幕層由来の帯だけを全辺で検査する（回転・グループ transform・非表示は layout が反映済み）。
+  const overflows = (layout: SceneLayout): boolean =>
+    layout.items.some(
+      (item) =>
+        item.kind === 'text' && item.isSubtitle &&
+        subtitleLayerIds.has(item.id.split('__sub')[0]) && // FREE 字幕は対象外（利用者配置）
+        subtitleItemOutOfCanvas(item, width, height),
+    );
+  // 単独ナレーション（lines 無し）＝静的字幕（`texts.subtitle`）をそのまま描く経路で検査する（#563）。
+  // opts を渡さない＝layoutScene 内の `subtitleEnabledDefault === false` で消える扱いもそのまま効く（#413）。
+  if (!scene.lines || scene.lines.length === 0) return overflows(layoutScene(scene, template));
   const lines = sceneLines(scene);
   for (const g of groupIndices(lines)) {
-    if (g.length < 2) continue; // 単独行は積まない
+    // 同時グループ（2行以上）は帯を積む。**逐次/単独行（1行）も対象**＝1帯でも拡大・回転・長文で見切れるため（#563）。
+    // 以前は `g.length < 2` で読み飛ばしており、#555（文字の体裁の場面別上書き）で字幕を大きくできるようになって
+    // 到達性が上がった＝「黙って画面外に切れる」が単独/逐次だけ検出できない非対称になっていた（ADR-0026④）。
     const primary = lines[g[0]];
     const primarySub = resolveLineSubtitle(primary, scene);
     const seg: SceneSegmentSpec = {
@@ -188,13 +200,8 @@ export function subtitleOverflowsCanvas(scene: Scene, template: Template): boole
       durationSec: scene.durationSec,
       isFirst: true,
     };
-    // 実描画と同じ layoutScene を回し、テンプレ字幕層由来の帯だけ（回転・グループ transform・非表示は layout が反映済み）を全辺で検査。
     const layout = layoutScene(scene, template, { subtitleText: primarySub.enabled ? primarySub.text : null, subtitleSegment: seg });
-    for (const item of layout.items) {
-      if (item.kind !== 'text' || !item.isSubtitle) continue;
-      if (!subtitleLayerIds.has(item.id.split('__sub')[0])) continue; // FREE 字幕は対象外
-      if (subtitleItemOutOfCanvas(item, width, height)) return true;
-    }
+    if (overflows(layout)) return true;
   }
   return false;
 }

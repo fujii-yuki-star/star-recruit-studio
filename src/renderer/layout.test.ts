@@ -5,6 +5,8 @@ import type { FillItem, ImageItem, LayoutItem, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT, SUBTITLE_BAND_PAD_EM, layoutScene, subtitleOverflowsCanvas, isSubtitleItem } from './layout';
 import { layoutToSvg } from './sceneSvg';
 import { wrapText } from '../domain/text/textWrap';
+import { sampleTemplates } from '../infrastructure/sampleData';
+import { MAX_SUBTITLE_LEN_DEFAULT } from '../domain/constants';
 
 // 字幕帯の実 [top, bottom]（描画と同じ wrapText の行数＋anchorBottom で算出・共有定数を参照）。段間の重なり検証に使う。
 const bandRect = (item: TextItem): { top: number; bottom: number } => {
@@ -189,7 +191,8 @@ describe('subtitleOverflowsCanvas（同時字幕の画面外はみ出し・#533 
     expect(subtitleOverflowsCanvas(dialogueScene(groupLines(8, 'あ'.repeat(50))), openingTemplate)).toBe(true);
   });
 
-  it('逐次（同時開始なし）は積まないので対象外（false）', () => {
+  it('逐次（同時開始なし）は帯を積まないので、通常の長さでは収まる（false）', () => {
+    // #563 で逐次も**検査対象**にはなった（積まないだけ）。通常長ならはみ出さない＝既存プロジェクトに警告を増やさない。
     const seq = dialogueScene([
       { lineId: 'line_001', text: 'あ'.repeat(50), status: 'none' },
       { lineId: 'line_002', text: 'あ'.repeat(50), status: 'none' }, // startWithPrevious なし＝逐次
@@ -841,5 +844,60 @@ describe('isSubtitleItem（字幕アイテムの判定・#547 P2-7）', () => {
     expect(isSubtitleItem(textItem({ isSubtitle: false }))).toBe(false); // 本文テキストは消さない
     expect(isSubtitleItem({ id: 'i', kind: 'image', x: 0, y: 0, w: 1, h: 1, zIndex: 0, assetId: 'a', fit: 'cover', role: 'slot' } as import('./layout').LayoutItem)).toBe(false);
     expect(isSubtitleItem({ id: 'f', kind: 'fill', x: 0, y: 0, w: 1, h: 1, zIndex: 0, color: '#fff', opacity: 1, radius: 0 } as import('./layout').LayoutItem)).toBe(false);
+  });
+});
+
+// #563：はみ出し検査を**単独ナレーション／逐次の場面にも広げる**。
+// #533 P2 の初出時は「同時字幕の段積み」だけが対象だったが、#555（文字の体裁の場面別上書き）で
+// **利用者が場面編集から字幕を拡大できる**ようになり、単独場面でも画面外へ切れる到達性が上がった（ADR-0026④・§2-5）。
+describe('subtitleOverflowsCanvas：単独/逐次も対象（#563）', () => {
+  const soloScene = (over: Partial<Scene>): Scene => ({ ...scene, ...over } as Scene);
+
+  it('単独ナレーション（lines 無し）の静的字幕も検査する＝拡大しすぎればはみ出す（true）', () => {
+    // #555 の体裁上書きで字幕を極端に大きくした場面。旧実装は lines 無しで即 false ＝黙って画面外に切れていた。
+    const huge = soloScene({
+      texts: { subtitle: 'あ'.repeat(40) },
+      textStyles: { subtitle: { fontSize: 300 } },
+    } as Partial<Scene>);
+    expect(subtitleOverflowsCanvas(huge, openingTemplate)).toBe(true);
+  });
+
+  it('単独ナレーションでも通常の体裁なら収まる（false）＝既定では警告しない', () => {
+    expect(subtitleOverflowsCanvas(soloScene({ texts: { subtitle: 'あ'.repeat(40) } }), openingTemplate)).toBe(false);
+  });
+
+  it('場面の字幕がオフなら、拡大していても検査対象にならない（描かれないものを警告しない）', () => {
+    const off = soloScene({
+      texts: { subtitle: 'あ'.repeat(40) },
+      textStyles: { subtitle: { fontSize: 300 } },
+      subtitleEnabledDefault: false,
+    } as Partial<Scene>);
+    expect(subtitleOverflowsCanvas(off, openingTemplate)).toBe(false);
+  });
+
+  it('逐次の行でも拡大しすぎればはみ出す（true）＝同時字幕だけの特権にしない（ADR-0026②）', () => {
+    const seqHuge = {
+      ...scene,
+      textStyles: { subtitle: { fontSize: 300 } },
+      lines: [
+        { lineId: 'line_001', text: 'あ'.repeat(40), status: 'none' },
+        { lineId: 'line_002', text: 'あ'.repeat(40), status: 'none' }, // 逐次
+      ],
+    } as unknown as Scene;
+    expect(subtitleOverflowsCanvas(seqHuge, openingTemplate)).toBe(true);
+  });
+
+  // ノイズガード（#563 の「既存プロジェクトで警告が増えないか要確認」への実測回答）。
+  // 全同梱テンプレ×推奨上限(60字)の倍まで、**既定の体裁なら1件もはみ出さない**ことを固定する。
+  // ここが赤くなる＝標準テンプレか字幕レイアウトが変わって「普通に使うだけで警告が出る」状態になった合図。
+  it('全同梱テンプレ×既定体裁では、推奨上限の倍の長さでも警告しない（ノイズガード）', () => {
+    const withSubtitle = sampleTemplates.filter((t) => t.layers.some((l) => l.type === 'subtitle'));
+    expect(withSubtitle.length).toBeGreaterThan(0);
+    for (const t of withSubtitle) {
+      for (const n of [20, 40, MAX_SUBTITLE_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT * 2]) {
+        const s = { ...scene, templateId: t.templateId, texts: { subtitle: 'あ'.repeat(n) } } as Scene;
+        expect(subtitleOverflowsCanvas(s, t), `${t.templateId} / ${n}字`).toBe(false);
+      }
+    }
   });
 });

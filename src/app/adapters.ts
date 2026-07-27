@@ -8,6 +8,7 @@ import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import { swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
+import { subtitleOverflowsCanvas } from "../renderer/layout";
 import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -205,6 +206,23 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   // にもあり、置いた本人には見えないので書き出し前に**場面つきで**知らせる（§2-5＝次の行動）。判定は描画と同じ単一の
   // 参照元（`sceneSilentSubtitleCount`→`subtitleSilentReason`→`freeSubtitleElementTexts`）＝実表示と食い違わない。
   // 理由ごとの直し方は場面編集の字幕欄が出すので、ここは場面へ戻す導線だけ持つ。問題が無ければ項目を出さない。
+  // 字幕が画面からはみ出す場面（#533 P2／#563）。場面編集を開かないと気づけない状態にせず、書き出し前に拾う
+  // （黙って画面外に切れたまま MP4 にしない・ADR-0026④）。判定は**実描画と同じ layoutScene** を通す共有関数。
+  // 書き出しは止めない＝「直せば良くなる」警告側（P2-5 のハードブロッカーとは分離）。
+  const subtitleOverflow = offending((s) => {
+    const t = templateOf(s);
+    return t != null && subtitleOverflowsCanvas(s, t);
+  });
+  if (subtitleOverflow.nums.length > 0) {
+    items.push({
+      id: "subtitleOverflow",
+      label: "画面からはみ出す字幕",
+      detail: `${fmtScenes(subtitleOverflow.nums)}の字幕が画面からはみ出します。場面編集で字幕を短くするか、文字の大きさを小さくしてください。`,
+      severity: "action",
+      action: "直す",
+      sceneId: subtitleOverflow.firstId,
+    });
+  }
   const silentSubtitle = offending((s) => sceneSilentSubtitleCount(s, templateOf(s)) > 0);
   if (silentSubtitle.nums.length > 0) {
     items.push({
