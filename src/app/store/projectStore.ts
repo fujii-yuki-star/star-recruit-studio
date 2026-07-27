@@ -6,6 +6,7 @@ import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
+import { isExportFinished } from "../../domain/export/exportProgress";
 import type { ExportProgressEvent, ExportRunPhase } from "../../domain/export/exportProgress";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import type { Template } from "../../domain/template/types";
@@ -68,6 +69,13 @@ export interface ExportRunState {
   bgmWarning: "" | "partial" | "all";
   // ユーザーが中止を要求したか（#380）。画面横断で保持し、書き出しの各段が「中止しました」で終えられるようにする。
   cancelling: boolean;
+  /**
+   * 終わった（done/error/cancelled）が、**書き出し画面でまだ見ていない**か（#589）。
+   * 書き出し中は他画面へ移動できる（`15 §4`）ため、終端で編集ロックのバナーが消えるだけだと
+   * 「消えた＝成功した」と誤読する。これが true の間、書き出し画面**以外**で結果を知らせる。
+   * `setExportRun` が phase の遷移に合わせて自動で立て/落とすので、呼び出し側は意識しなくてよい。
+   */
+  resultUnseen: boolean;
 }
 /** 書き出し中（rendering/encoding）か。再実行・プロジェクト切替/削除・素材編集のブロック判定で共有（#379/#547 P2-1）。 */
 export function isExportBusy(phase: ExportPhase): boolean {
@@ -85,6 +93,7 @@ const IDLE_EXPORT_RUN: ExportRunState = {
   message: "",
   bgmWarning: "",
   cancelling: false,
+  resultUnseen: false,
 };
 /** 書き出し画面の入力（ファイル名・画質・字幕）。仕上がり確認（BGM選び）への往復で ExportScreen が
  *  再マウントされても入力を失わないよう画面横断で保持する（#410 sub3 レビュー・exportRun と同じ transient state）。
@@ -1405,7 +1414,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setWizardStep: (step) => set({ wizardStep: step }),
   setConfirmReturnTo: (screen) => set({ confirmReturnTo: screen }),
   setPreviewReturnTo: (screen) => set({ previewReturnTo: screen }),
-  setExportRun: (patch) => set((s) => ({ exportRun: { ...s.exportRun, ...patch } })),
+  setExportRun: (patch) =>
+    set((s) => {
+      // 「終わったがまだ見ていない」は phase の遷移から自動で決める（#589）＝呼び出し側が立て忘れない。
+      // 終端（done/error/cancelled）へ入ったら未読にし、走行/未実行へ戻ったら落とす（次の書き出しに持ち越さない）。
+      // patch が phase を含まないとき（進捗更新など）は現状維持。明示指定（画面で見た＝false）は最後に効かせる。
+      const auto = patch.phase != null ? { resultUnseen: isExportFinished(patch.phase) } : {};
+      return { exportRun: { ...s.exportRun, ...auto, ...patch } };
+    }),
   setExportForm: (patch) => set((s) => ({ exportForm: { ...s.exportForm, ...patch } })),
   setAssetImage: async (assetId, file) => {
     // 書き出し中は同一パスへの画像上書きを止める（書き出しが読んでいるファイルと競合して壊れる＝実害・#547 P2-1）。

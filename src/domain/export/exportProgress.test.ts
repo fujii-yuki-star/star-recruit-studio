@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EXPORT_RUN_PHASES, exportEncodePercent, exportHeadingLabel, exportOverallPercent, exportPhaseLabel, exportProgressLabel, isExportFinished, pastExportNotice } from './exportProgress';
+import { EXPORT_RUN_PHASES, exportEncodePercent, exportHeadingLabel, exportOverallPercent, exportPhaseLabel, exportProgressLabel, finishedExportNotice, isExportFinished, pastExportNotice } from './exportProgress';
 
 describe('exportEncodePercent（#376）', () => {
   it('encode は step/total を 80→92 に按分する', () => {
@@ -140,6 +140,26 @@ describe('isExportFinished / pastExportNotice（前回の結果・#547 P3-11）'
   it('終わった結果には必ず1行あり、そうでなければ空（2関数が食い違わない）', () => {
     for (const phase of EXPORT_RUN_PHASES) {
       expect(pastExportNotice(phase) !== '').toBe(isExportFinished(phase));
+    }
+  });
+});
+
+// #589：終わったことを書き出し画面**以外**でも知らせる1行。過去形（pastExportNotice）とは役割が違う。
+describe('finishedExportNotice（たったいま終わった通知・#589）', () => {
+  it('終わった3つ（保存・失敗・中止）に文言があり、走行中・未実行は空', () => {
+    for (const phase of EXPORT_RUN_PHASES) {
+      expect(finishedExportNotice(phase) !== '').toBe(isExportFinished(phase));
+    }
+  });
+
+  it('失敗は理由を書き出し画面へ見に行かせる（理由は exportRun.message が持つ・§2-5）', () => {
+    expect(finishedExportNotice('error')).toContain('書き出しの画面');
+  });
+
+  it('過去形（前回の…）とは別物＝いま終わったことを現在形で言う', () => {
+    for (const phase of ['done', 'error', 'cancelled'] as const) {
+      expect(finishedExportNotice(phase)).not.toContain('前回');
+      expect(finishedExportNotice(phase)).not.toBe(pastExportNotice(phase));
     }
   });
 });

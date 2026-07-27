@@ -30,7 +30,7 @@ describe("HomeScreen プロジェクトを開く busy（#392）", () => {
 describe("HomeScreen 書き出し中は改名を無効化（#570 レビュー）", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    useProjectStore.setState({ exportRun: { phase: "idle", progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", cancelling: false } });
+    useProjectStore.setState({ exportRun: { phase: "idle", progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false } });
   });
 
   it("書き出し中：鉛筆（名前を変更）ボタンを無効化する", async () => {
@@ -38,7 +38,7 @@ describe("HomeScreen 書き出し中は改名を無効化（#570 レビュー）
       listProjects: vi.fn(() =>
         Promise.resolve([{ projectId: "proj_001", projectName: "テスト動画", updatedAt: "2026-07-09T00:00:00Z" }] as unknown as ProjectHeader[]),
       ),
-      exportRun: { phase: "rendering", progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", cancelling: false },
+      exportRun: { phase: "rendering", progress: { done: 0, total: 0 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false },
     });
     render(<HomeScreen onNavigate={vi.fn()} />);
     const pencil = (await screen.findByLabelText("「テスト動画」の名前を変更")) as HTMLButtonElement;
@@ -57,7 +57,7 @@ describe("HomeScreen 書き出し中は共通バナーで進捗と復帰導線�
   it("進捗・この画面でできなくなること・書き出しへ戻る導線をまとめて出す", () => {
     useProjectStore.setState({
       listProjects: vi.fn(() => Promise.resolve([] as unknown as ProjectHeader[])),
-      exportRun: { phase: "rendering", progress: { done: 1, total: 4 }, resultPath: "", message: "", bgmWarning: "", cancelling: false },
+      exportRun: { phase: "rendering", progress: { done: 1, total: 4 }, resultPath: "", message: "", bgmWarning: "", cancelling: false, resultUnseen: false },
     });
     const onNavigate = vi.fn();
     render(<HomeScreen onNavigate={onNavigate} />);

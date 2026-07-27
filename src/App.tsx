@@ -6,6 +6,7 @@ import { isExportBusy, useProjectStore } from "./app/store/projectStore";
 import { getLastProjectId } from "./infrastructure/projectFs";
 import { Sidebar } from "./app/components/Sidebar";
 import { SaveStatusBadge } from "./app/components/SaveStatusBadge";
+import { ExportResultNotice } from "./app/components/ExportResultNotice";
 import { saveButtonLabel } from "./app/components/saveButtonLabel";
 import { useStartNewProject } from "./app/hooks/useStartNewProject";
 import { useAutoSave } from "./app/hooks/useAutoSave";
@@ -190,6 +191,10 @@ function App() {
             </div>
           </div>
         )}
+        {/* 書き出しの終了（成功/失敗/中止）をどの画面にいても知らせる（#589）。**独自ヘッダの画面でも出す**
+            （`hasOwnHeader` で囲まない）＝場面編集で待っている利用者にこそ必要。書き出し画面では出さない
+            （そこに結果が出ており二重になる）＝開いた時点で既読にする（下の ExportScreen 側で解除）。 */}
+        {screen !== "export" && <ExportResultNotice onNavigate={navigate} />}
         {renderScreen()}
       </div>
     </div>

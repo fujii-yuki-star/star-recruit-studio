@@ -470,7 +470,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     useProjectStore.setState({
       meta: { ...useProjectStore.getState().meta, projectId: 'proj_open' },
       scenes: [scene('scene_001', 1)],
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
     });
   });
 
@@ -593,7 +593,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
 
     // idle（done は非busy）：読み込み成功し、前の結果を持ち越さず exportRun が idle にリセットされる。
     useProjectStore.setState({
-      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '', cancelling: false },
+      exportRun: { phase: 'done', progress: { done: 0, total: 0 }, resultPath: 'C:/out.mp4', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
     });
     await useProjectStore.getState().loadProject('proj_any');
     expect(loadSpy).toHaveBeenCalledWith('proj_any');
@@ -619,7 +619,7 @@ describe('projectStore 書き出し中は素材編集を弾く（#547 P2-1・ADR
       assets: [asset('asset_001')],
       assetSrcById: { asset_001: 'data:image/png;base64,x' },
       importError: null,
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
     });
   });
   // 書き出し中フェーズを次の describe へ漏らさない（startBlank 等は #379 で exportRun ガード＝leak すると後続が no-op で落ちる）。
@@ -709,7 +709,7 @@ describe('projectStore 取り込み↔書き出しの相互排他（#570 P1）',
       assetSrcById: { asset_001: 'data:image/png;base64,x' },
       importError: null,
       isImporting: false,
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
     });
   });
   afterEach(() => { useProjectStore.getState().setExportRun({ phase: 'idle' }); useProjectStore.setState({ isImporting: false }); });
@@ -739,7 +739,7 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
       scenes: [scene('scene_001', 1)],
       parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
       past: [], future: [],
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
     });
   });
   afterEach(() => useProjectStore.getState().setExportRun({ phase: 'idle' }));
@@ -822,7 +822,7 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     useProjectStore.setState({
       scenes: [{ ...scene('scene_001', 1), narration: { text: 'こんにちは', status: 'none' } }],
       narrationAudioById: {}, isGeneratingNarration: false,
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
     });
     let resolveSynth: (v: unknown) => void = () => {};
     const synthP = new Promise((r) => { resolveSynth = r; });
@@ -842,7 +842,7 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     useProjectStore.setState({
       scenes: [{ ...scene('scene_001', 1), narration: { text: '', status: 'none' }, lines: [{ lineId: 'line_001', text: 'こんにちは', status: 'none' }] }],
       narrationAudioById: {}, isGeneratingNarration: false,
-      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false },
+      exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false },
     });
     let resolveSynth: (v: unknown) => void = () => {};
     const synthP = new Promise((r) => { resolveSynth = r; });
@@ -1003,7 +1003,7 @@ describe('projectStore 生成のキャンセル（#402）', () => {
   });
 
   it('キャンセルせず newProject しても、裏で完走した旧生成が新しい状態を上書きしない（#402 レビュー）', async () => {
-    useProjectStore.setState({ scenes: [scene('scene_001', 1)], parts: [], status: 'idle', _generationSeq: 0, exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false } });
+    useProjectStore.setState({ scenes: [scene('scene_001', 1)], parts: [], status: 'idle', _generationSeq: 0, exportRun: { phase: 'idle', progress: { done: 0, total: 0 }, resultPath: '', message: '', bgmWarning: '', cancelling: false, resultUnseen: false } });
     let resolvePlan: (v: unknown) => void = () => {};
     const planPromise = new Promise((r) => { resolvePlan = r; });
     const spy = vi.spyOn(MockAiProvider.prototype, 'generateVideoPlan').mockReturnValue(planPromise as never);
