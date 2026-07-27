@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Scene } from "../../domain/project/types";
+import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { TimelineEditScreen } from "./TimelineEditScreen";
 
 function scene(id: string, order: number): Scene {
@@ -116,6 +117,42 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     expect(clip?.startSec).toBe(10);
   });
 
+  // #561：タイムラインは**グローバル秒**、store の startSec は**場面アンカー相対**。以前は両者で不変な「差分」を
+  // 渡していたが、そのせいでクランプが二重になり下限へ厳密に戻らなかった。いまは端のグローバル秒を渡し、
+  // 画面側でアンカー開始を引いて相対へ直す＝**この変換が効いているか**を実操作で固定する。
+  it("場面を基準にしたテロップも、ドラッグ結果が場面からの相対秒で保存される", () => {
+    // 場面2つ：scene_001(0-8s)・scene_002(8-16s)。clip は場面2アンカー・相対2秒＝グローバル10秒。
+    useProjectStore.setState({
+      parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002"] }],
+      scenes: [scene("scene_001", 1), scene("scene_002", 2)],
+      meta: {
+        ...useProjectStore.getState().meta,
+        timelineOverlay: { clips: [{ id: "ovclip_001", track: "telop", anchorSceneId: "scene_002", startSec: 2, durationSec: 3, text: "x" }] },
+      },
+      past: [], future: [], _historyGroupDepth: 0,
+    });
+    const { container } = render(<TimelineEditScreen onNavigate={() => {}} />);
+    const clip = () => useProjectStore.getState().meta.timelineOverlay?.clips?.[0];
+    const body = () => screen.getByText("x");
+    // 右へ +72px（既定ズーム pxPerSec=36）＝+2秒 → グローバル 10→12 ＝ 相対 2→4（グローバル秒をそのまま保存しない）。
+    fireEvent.pointerDown(body(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(body(), { clientX: 172, pointerId: 1 });
+    fireEvent.pointerUp(body(), { clientX: 172, pointerId: 1 });
+    expect(clip()?.startSec).toBe(4);
+    // 左へ大きく → 場面の頭より前には行かない（相対 0＝schema の startSec ≥ 0）。
+    fireEvent.pointerDown(body(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(body(), { clientX: -560, pointerId: 1 });
+    fireEvent.pointerUp(body(), { clientX: -560, pointerId: 1 });
+    expect(clip()?.startSec).toBe(0);
+    // 右端を大きく縮めても、長さは**定数そのもの**（アンカー変換を挟んでも端数が出ない＝#561 の本体）。
+    const rightHandle = () => container.querySelector(".timeline-clip-handle--right") as HTMLElement;
+    fireEvent.pointerDown(rightHandle(), { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(rightHandle(), { clientX: -560, pointerId: 1 });
+    fireEvent.pointerUp(rightHandle(), { clientX: -560, pointerId: 1 });
+    expect(clip()?.durationSec).toBe(TIMELINE_MIN_CLIP_SEC);
+    expect(clip()?.startSec).toBe(0); // 右端トリミングで開始は動かない
+  });
+
   it("ドラッグ移動で startSec を更新し、左端クランプで実効差分が無いときは履歴を積まない", () => {
     useProjectStore.setState({
       parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001", "scene_002"] }],
@@ -176,11 +213,11 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     fireEvent.pointerMove(leftHandle(), { clientX: 136, pointerId: 1 });
     fireEvent.pointerUp(leftHandle(), { clientX: 136, pointerId: 1 });
     expect(clip()).toMatchObject({ startSec: 3, durationSec: 3 });
-    // 右端を大きく縮める（-360px＝-10秒）→ 最小長 0.5 でクランプ。
+    // 右端を大きく縮める（-360px＝-10秒）→ 最小長でクランプ。**定数そのもの**になる（端数が出ない・#561）。
     fireEvent.pointerDown(rightHandle(), { clientX: 100, pointerId: 1 });
     fireEvent.pointerMove(rightHandle(), { clientX: -260, pointerId: 1 });
     fireEvent.pointerUp(rightHandle(), { clientX: -260, pointerId: 1 });
-    expect(clip()?.durationSec).toBe(0.5);
+    expect(clip()?.durationSec).toBe(TIMELINE_MIN_CLIP_SEC);
   });
 
   it("左端トリミングは 0秒側と最小長側でクランプする", () => {
@@ -203,10 +240,10 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     fireEvent.pointerMove(leftHandle(), { clientX: -260, pointerId: 1 });
     fireEvent.pointerUp(leftHandle(), { clientX: -260, pointerId: 1 });
     expect(clip()).toMatchObject({ startSec: 0, durationSec: 5 });
-    // 右へ大きく（+360px＝+10秒）→ startSec を end−最小長 = 5−0.5 = 4.5 にクランプ（durationSec 0.5）。
+    // 右へ大きく（+360px＝+10秒）→ startSec を end−最小長 にクランプ。長さは**定数そのもの**（#561）。
     fireEvent.pointerDown(leftHandle(), { clientX: 100, pointerId: 1 });
     fireEvent.pointerMove(leftHandle(), { clientX: 460, pointerId: 1 });
     fireEvent.pointerUp(leftHandle(), { clientX: 460, pointerId: 1 });
-    expect(clip()).toMatchObject({ startSec: 4.5, durationSec: 0.5 });
+    expect(clip()).toMatchObject({ startSec: 5 - TIMELINE_MIN_CLIP_SEC, durationSec: TIMELINE_MIN_CLIP_SEC });
   });
 });

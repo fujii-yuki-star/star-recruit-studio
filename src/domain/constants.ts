@@ -132,6 +132,22 @@ export const DEFAULT_TONE = TONE_PRESETS[0];
 export const DEFAULT_VOICE_ID = 'voicevox_zundamon';
 export const DEFAULT_CHARACTER_ID = 'yuko';
 
+/**
+ * 秒の入力・表示の刻み（0.1秒）。**数値欄の `step`・表示の丸め・データの量子化で共有する単一の参照元**（§2-7・#561）。
+ * 以前は `step={0.1}` の直書きと `Math.round(x*10)/10` が別々に散らばっており、片方だけ変えると
+ * 「スピナーで下限に辿り着けない」「欄の値と表示が食い違う」が起きた。
+ *
+ * **ドラッグ結果には使わない**：吸着先（場面境界）は格子に乗るとは限らず、量子化すると合わせたところに着かない
+ * （`applyClipEdge` の注記・ADR-0026①）。
+ */
+export const SEC_STEP = 0.1;
+const SEC_GRID = Math.round(1 / SEC_STEP);
+
+/** 秒を `SEC_STEP` の格子へ丸める。`x*10` 側で丸めるのは `x/0.1` より誤差が小さいため。 */
+export function quantizeSec(sec: number): number {
+  return Math.round(sec * SEC_GRID) / SEC_GRID;
+}
+
 // スロットの既定フィット（テンプレ・clip 未指定時）。正典(§4)に既定の明記は無く、cover を既定とする（MVP）。
 export const DEFAULT_FIT = 'cover' as const;
 
@@ -163,14 +179,14 @@ export const GROUP_MIN_SCALE = 0.01;
 /**
  * タイムライン overlay クリップの最小長（秒）。トリミングで潰さないための下限（schema: `durationSec>0`・ADR-0018・§2-7）。
  *
- * **0.5 は根拠のない任意値**（#554 は 0.1 への緩和を求めている）だが、**下げるにはトリミング経路の修正が先に要る**
- * ため #561 へ切り出した。理由＝この値は「二進で厳密に表せる」ことに偶然依存している：`snappedDelta`
- * （TimelineView）と `editClip`（TimelineEditScreen）が**同じ下限で二重にクランプ**し、その間を**delta（差分）で
- * 受け渡す**ため、`長さ + (clamp済みの端 - 元の端)` が下限へ厳密に戻らない。0.5 では戻る（5-4.5 が厳密）が、
- * 0.1 では `0.09999999999999964`（下限割れ）や `0.10000000000000009`（欄に17桁）になる。
- * delta なのは TimelineView が**グローバル秒**・store が**場面アンカー相対**で、差分だけが両者で不変だから。
+ * **0.5→0.1 へ緩和**（#554 の要求・#561 で実施）。0.5 は根拠のない任意値で、一瞬だけ出すテロップを作れなかった。
+ * 下げる前に経路の修正が必要だった：以前は `TimelineView` と `editClip` が**同じ下限で二重にクランプ**し、
+ * その間を**差分**で受け渡していたため、`長さ + (クランプ済みの端 - 元の端)` が下限へ厳密に戻らなかった
+ * （0.5 は `5 - 4.5` が二進で厳密なので偶然辻褄が合っていただけ）。#561 で**端そのものを渡し、
+ * クランプを `applyClipEdge` の1か所へ**寄せたので、下限に当たった長さはこの定数そのものになる。
+ * 秒の入力・表示の刻み（`SEC_STEP`）と同じ値にして、数値欄のスピナーで下限まで辿り着けるようにしている。
  */
-export const TIMELINE_MIN_CLIP_SEC = 0.5;
+export const TIMELINE_MIN_CLIP_SEC = 0.1;
 
 /**
  * 角度（回転）の数値入力の下限/上限（度）。**要素とグループの角度欄で共有する単一の参照元**（§2-7・#554）。

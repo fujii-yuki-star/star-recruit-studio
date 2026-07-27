@@ -2,7 +2,7 @@ import type { Asset, Clip, SlotClipOverride } from "../../domain/project/types";
 import { clampClipTime } from "../../domain/asset/clip";
 import { formatDuration } from "../../domain/format/duration";
 import {
-  ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
+  ORIGINAL_AUDIO_VOLUME, SEC_STEP, SPEED_DEFAULT, SPEED_MAX, SPEED_MIN, SPEED_STEP,
   VOLUME_MAX, VOLUME_MIN, VOLUME_STEP,
 } from "../../domain/constants";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
@@ -62,7 +62,7 @@ export function ClipDetailControls({
             value={clip?.startSec ?? 0}
             min={0}
             max={dur ?? undefined}
-            step={0.1}
+            step={SEC_STEP}
             onChange={(v) => {
               const start = clampClipTime(v, dur);
               // 開始が終了を超えたら終了をクリア（=最後まで）して無効状態を防ぐ。
@@ -76,7 +76,7 @@ export function ClipDetailControls({
             value={clip?.endSec}
             min={0}
             max={dur ?? undefined}
-            step={0.1}
+            step={SEC_STEP}
             placeholder="最後まで"
             onChange={(v) => patchClip({ endSec: clampClipTime(v, dur, clip?.startSec ?? 0) })}
             onClear={() => patchClip({ endSec: undefined })}
