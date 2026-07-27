@@ -129,9 +129,12 @@ function checkLengths(
   // 字幕は**両方**見る：掛け合いの行字幕（`narrationLines[].subtitle`）と、テンプレ字幕層に載る `texts.subtitle`。
   // どちらが実際に表示されるかは場面のテンプレ/FREE 字幕の対象で決まる（ADR-0029）が、ここは生成直後の**助言**なので
   // 取りこぼさない側に倒す（precheck が表示実体で最終判定する）。
+  // **行字幕の未指定は `text` を流用する**（`AiNarrationLine.subtitle` の仕様・`subtitleText: al.subtitle ?? null` →
+  // `resolveLineSubtitle` の `subtitleText ?? text`＝null は継承・11 §2.2）。ここで `?? ''` にすると、
+  // 字幕を省略した行（AI の通常パターン）で**実際に表示される文字を検査しない**＝precheck とまた食い違う（#569 レビュー）。
   const subtitleTexts = [
     ...(texts.subtitle !== undefined ? [texts.subtitle] : []),
-    ...(hasLines ? aiLines.map((l) => l.subtitle ?? '') : []),
+    ...(hasLines ? aiLines.map((l) => l.subtitle ?? l.text) : []),
   ];
   if (subtitleTexts.some((t) => t.length > maxSubtitle)) {
     warnings.push(warn('TEXT_OVERFLOW', '字幕が長いため読みづらくなる可能性があります', 'texts.subtitle', 'warning', false));

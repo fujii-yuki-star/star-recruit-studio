@@ -301,11 +301,29 @@ describe('長さの助言が掛け合いの各行も見る（#569・ADR-0026②�
     expect(codes(plan)).toContain('TEXT_OVERFLOW');
   });
 
-  it('長い行が複数あっても警告は1つ（1場面で警告が並ばない＝precheck と同じ流儀）', () => {
+  it('行の字幕が未指定なら text を流用したものを検査する（null=継承・#569 レビュー）', () => {
+    // AI が subtitle を省略するのが通常パターン。字幕上限(60)超・セリフ上限(120)以下の長さにすると、
+    // 「実際に表示される字幕（=text）」を見ていなければ**どちらの警告も出ない**＝取りこぼしになる。
+    const between = 'う'.repeat(MAX_SUBTITLE_LEN_DEFAULT + 10);
+    expect(between.length).toBeGreaterThan(MAX_SUBTITLE_LEN_DEFAULT);
+    expect(between.length).toBeLessThanOrEqual(MAX_NARRATION_LEN_DEFAULT); // セリフ側では引っかからない長さ
     const plan = singleScenePlan({
-      narrationText: '',
-      narrationLines: [{ text: overNarration }, { text: overNarration }, { text: overNarration }],
+      narrationText: '', texts: { title: 'x' },
+      narrationLines: [{ text: between }], // subtitle 未指定＝text が字幕として表示される
     });
+    expect(codes(plan)).toContain('TEXT_OVERFLOW');
+  });
+
+  it('長い行が複数あっても種類ごとに警告は1つ（1場面で警告が並ばない＝precheck と同じ流儀）', () => {
+    // 集約性だけを見るため、字幕は明示的に短くしてセリフ側だけを長くする（字幕未指定だと text 流用で字幕側も鳴る）。
+    const line = { text: overNarration, subtitle: '短い字幕' };
+    const plan = singleScenePlan({ narrationText: '', narrationLines: [line, line, line] });
     expect(codes(plan).filter((c) => c === 'TEXT_OVERFLOW')).toHaveLength(1);
+  });
+
+  it('セリフと字幕の両方が長ければ2件出る（別々の問題＝直し方が違うので畳まない）', () => {
+    // 字幕未指定で text が両上限を超える＝「行を短くする」と「短い字幕を明示する」の2つの助言が要る。
+    const plan = singleScenePlan({ narrationText: '', narrationLines: [{ text: overNarration }] });
+    expect(codes(plan).filter((c) => c === 'TEXT_OVERFLOW')).toHaveLength(2);
   });
 });
