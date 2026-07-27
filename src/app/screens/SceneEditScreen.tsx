@@ -180,6 +180,18 @@ function freeElementName(el: FreeElement, index: number): string {
 }
 
 /**
+ * 自動名の連番（id→index）。**id の数値順＝作った順**で振る（配列の位置ではない）。
+ * 重ね順の1段移動は同じ z のとき配列を入れ替える（#587）ので、配列位置で振ると移動のたびに名前が入れ替わる。
+ * id は `free_NNN`（3桁ゼロ詰め・999超は桁上がり）なので、桁数が混ざっても崩れないよう数値で比べる。
+ */
+function freeAutoIndexes(freeLayout: FreeElement[]): Map<string, number> {
+  const num = (id: string): number => Number(id.replace(/\D/g, "")) || 0;
+  return new Map(
+    [...freeLayout].sort((a, b) => num(a.id) - num(b.id)).map((e, i) => [e.id, i] as const),
+  );
+}
+
+/**
  * FREE 要素の「縁取り/枠線の色」の見本が出す値（#565）。**実描画（`layoutScene`→`resolveStrokeColor`）と同じ規則**で、
  * 色が未指定なら下地（文字色／図形の塗り）と反対の既定色を出す＝「見本は黒と言うのに何も描かれない」を無くす（§2-7）。
  */
@@ -547,7 +559,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const sceneTextKeys = template ? usedTextKeys(template.layers) : [];
   const freeLayout = selected.freeLayout ?? [];
   // 自動名の連番を安定させるための並び順 index（表示名 freeElementName で共有・#525-12）。
-  const freeAutoIndexById = new Map(freeLayout.map((e, i) => [e.id, i] as const));
+  // **配列の位置ではなく id の順（＝作った順）**で決める：重ね順の1段移動は同じ z のとき配列を入れ替えるので
+  // （#587）、配列位置で番号を振ると「上げただけなのに名前が入れ替わる」ことになる。
+  const freeAutoIndexById = freeAutoIndexes(freeLayout);
   const freeName = (el: FreeElement): string => freeElementName(el, freeAutoIndexById.get(el.id) ?? 0);
   const sceneGroups = selected.groups ?? [];
   const activeGroup = sceneGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
@@ -2066,8 +2080,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                               <div className="row" style={{ gap: 2 }}>
                                 {/* 可視ラベルは名詞「名前」でなく操作＝ペンアイコンにする（動詞規約・#547 P3-6）。名前は title/aria-label が担う。 */}
                                 <button className="btn btn-ghost btn-icon text-sm" title="名前を変更" aria-label="名前を変更" onClick={() => startRenameFree(el)}><PencilIcon size={14} /></button>
-                                <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label="前面へ" onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
-                                <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label="背面へ" onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
+                                {/* どの行の↑↓かを読み上げで区別できるよう名前を含める（テンプレ作成の一覧と同じ流儀・ADR-0026②）。 */}
+                                <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label={`${freeName(el)}を前面へ`} onClick={() => moveFreeElZ(el.id, "up")}>↑</button>
+                                <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label={`${freeName(el)}を背面へ`} onClick={() => moveFreeElZ(el.id, "down")}>↓</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title={el.hidden ? "表示する" : "隠す"} onClick={() => toggleFreeHidden(el.id)}>{el.hidden ? "表示" : "隠す"}</button>
                                 <button className="btn btn-ghost btn-icon text-sm" title={el.locked ? "ロックを解除" : "ロックして固定"} onClick={() => toggleFreeLocked(el.id)}>{el.locked ? "解除" : "固定"}</button>
                               </div>

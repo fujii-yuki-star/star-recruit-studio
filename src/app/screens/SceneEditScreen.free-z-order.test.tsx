@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
@@ -30,6 +30,12 @@ const tiedScene = (): Scene =>
     warnings: [],
   }) as unknown as Scene;
 
+/** 一覧の行（上＝手前）の表示名。 */
+const rowNames = (): string[] =>
+  screen
+    .getAllByTitle("クリックで選択・ダブルクリックで名前を変更（Shift＋クリックで複数選択）")
+    .map((b) => b.textContent ?? "");
+
 describe("SceneEditScreen FREE 重ね順一覧の並び（#547 P2-4）", () => {
   beforeEach(() => {
     useProjectStore.setState({
@@ -43,10 +49,19 @@ describe("SceneEditScreen FREE 重ね順一覧の並び（#547 P2-4）", () => {
 
   it("同じ z のときも描画どおりの前後で並ぶ（配列の後ろが手前＝一覧の上）", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
-    const rows = screen
-      .getAllByTitle("クリックで選択・ダブルクリックで名前を変更（Shift＋クリックで複数選択）")
-      .map((b) => b.textContent ?? "");
     // 降順ソートだと配列順のまま「図形1, 図形2」になり、描画（図形2 が手前）と上下が逆になる。
-    expect(rows).toEqual(["図形2", "図形1"]);
+    expect(rowNames()).toEqual(["図形2", "図形1"]);
+  });
+
+  // #587：同 z の1段移動は**配列を入れ替える**。自動名を配列位置で振っていると、上げただけで名前が入れ替わって見える。
+  it("1段動かしても自動名は入れ替わらない（順番だけが変わる）", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    expect(rowNames()).toEqual(["図形2", "図形1"]);
+    // 一覧で下にある「図形1」を前面へ＝上下が入れ替わる。名前は付いてこない。
+    fireEvent.click(screen.getByRole("button", { name: "図形1を前面へ" }));
+    expect(rowNames()).toEqual(["図形1", "図形2"]);
+    const els = useProjectStore.getState().scenes[0].freeLayout!;
+    expect(els.map((e) => e.zIndex)).toEqual([30, 30]); // z は増やさない＝階層へ食い込まない
+    expect(els.map((e) => e.id)).toEqual(["free_002", "free_001"]); // 入れ替わったのは配列の順
   });
 });

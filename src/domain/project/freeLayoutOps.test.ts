@@ -389,13 +389,33 @@ describe('moveFreeElementZ（レイヤー一覧の1段移動・#210）', () => {
     expect(moveFreeElementZ(layout, 'zzz', 'up')).toBe(layout); // 不在
   });
 
-  it('同 zIndex のときは移動方向へ寄せて前後を確定（up で前面側が大きく）', () => {
-    const tie: FreeElement[] = [
-      { id: 'a', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 5 },
-      { id: 'b', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 5 },
+  // #587：同 zIndex は**配列の順**で前後が決まる（描画 `layout.ts` の安定ソート・レイヤー一覧の並びと同じ）。
+  // 旧実装は z を ±1 して前後を付けていたが、3つ以上並ぶと1段を表現できず（グループごと飛び越える）、
+  // 繰り返すと種別ごとの既定 z の階層へ食い込んだ。
+  const tie = (ids: string[]): FreeElement[] =>
+    ids.map((id) => ({ id, kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 5 }) as FreeElement);
+  /** 実際の重なり順（奥→手前）＝z 昇順の安定ソート＝同 z は配列の後ろが手前。 */
+  const order = (l: FreeElement[]): string[] =>
+    [...l].sort((a, b) => (a.zIndex ?? 1) - (b.zIndex ?? 1)).map((e) => e.id);
+
+  it('同 zIndex のときは配列の順で入れ替わる（zIndex は増やさない）', () => {
+    const moved = moveFreeElementZ(tie(['a', 'b']), 'a', 'up');
+    expect(order(moved)).toEqual(['b', 'a']);
+    expect(zById(moved)).toMatchObject({ a: 5, b: 5 }); // z は据え置き＝階層へ食い込まない
+  });
+
+  it('同 zIndex が3つ以上でも、動くのはちょうど1段だけ', () => {
+    const three = tie(['a', 'b', 'c']);
+    expect(order(moveFreeElementZ(three, 'a', 'up'))).toEqual(['b', 'a', 'c']); // 旧実装は ['b','c','a']
+    expect(order(moveFreeElementZ(three, 'c', 'down'))).toEqual(['a', 'c', 'b']);
+  });
+
+  it('zIndex が 0 どうしでも背面へ動く（0 で頭打ちにならない）', () => {
+    const zeros: FreeElement[] = [
+      { id: 'a', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 0 },
+      { id: 'b', kind: 'shape', x: 0, y: 0, w: 10, h: 10, zIndex: 0 },
     ];
-    const m = zById(moveFreeElementZ(tie, 'a', 'up'));
-    expect(Number(m.a)).toBeGreaterThan(Number(m.b));
+    expect(order(moveFreeElementZ(zeros, 'b', 'down'))).toEqual(['b', 'a']);
   });
 });
 
