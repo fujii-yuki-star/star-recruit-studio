@@ -4,7 +4,9 @@ import {
   unplaceableVideoSceneNumbers,
   videoSlotAfterAnimNeverPlays,
   afterAnimNoSettledSceneNumbers,
+  afterAnimNeverPlaysForSlots,
 } from './videoSlotPlacement';
+import { findVideoSlots } from './findVideoSlot';
 import type { Asset, ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
 
@@ -103,5 +105,36 @@ describe('afterAnimNoSettledSceneNumbers（degenerate 場面の番号・1始ま�
     ];
     const animsFor = (s: Scene): ElementAnimation[] => (s.sceneId === 'a' ? [anim('slot_1', 1)] : [anim('slot_1', 2)]);
     expect(afterAnimNoSettledSceneNumbers(scenes, templateById, assetById, animsFor)).toEqual([2]);
+  });
+});
+
+// #588：公開前チェックと書き出しが「止める条件」を**同じ関数**で判断することを固定する（`15 §3` の「同値に保つ」）。
+// 以前は同じ条件式を両側に書き写しており、片方だけ条件が変わると
+//  - 過剰ブロック＝公開前チェックで止まるのに書き出しは通る（行き止まり）
+//  - 取りこぼし＝公開前チェックを通ったのに書き出しが §2-5 エラーで落ちる（手戻り）
+// のどちらかになる。ここでは両入口が同一の判定本体を通ることを、代表ケース網羅で突き合わせる。
+describe('precheck と書き出しの停止条件が同値（#588 ドリフトガード）', () => {
+  // [説明, 場面, その場面のアニメ] の代表ケース（degenerate / settled あり / mode 違い / 非アニメ / 掛け合い）。
+  const cases: [string, Scene, ElementAnimation[]][] = [
+    ['degenerate（アニメが尺いっぱい＋afterAnim）', sceneAfterAnim(2), [anim('slot_1', 2)]],
+    ['settled が残る', sceneAfterAnim(8), [anim('slot_1', 1)]],
+    ['mode が delay', { ...sceneAfterAnim(2), slotVideoStart: { slot_1: { mode: 'delay', delaySec: 1 } } } as unknown as Scene, [anim('slot_1', 2)]],
+    ['開始指定なし', { ...sceneWithSlot(false), sceneId: 's1', durationSec: 2 } as unknown as Scene, [anim('slot_1', 2)]],
+    ['スロットがアニメ対象でない', sceneAfterAnim(2), [anim('other_el', 2)]],
+    ['アニメなし', sceneAfterAnim(2), []],
+    ['掛け合い×動画（静止で完走＝止めない）', { ...sceneAfterAnim(2), lines: [{ lineId: 'l1', text: 'あ', status: 'generated' }] } as unknown as Scene, [anim('slot_1', 2)]],
+  ];
+
+  it.each(cases)('%s：precheck の判定と書き出しの判定が一致する', (_label, scene, anims) => {
+    // precheck 入口（テンプレ＋素材からスロットを解決）と、書き出し入口（解決済みスロットを受け取る）。
+    const viaPrecheck = videoSlotAfterAnimNeverPlays(scene, freeTemplate, assetById, anims);
+    const viaExport = afterAnimNeverPlaysForSlots(scene, findVideoSlots(scene, freeTemplate, assetById), anims);
+    expect(viaExport).toBe(viaPrecheck);
+  });
+
+  it('少なくとも1件は true・1件は false（両方向を実際に踏んでいる＝空振りで一致していない）', () => {
+    const verdicts = cases.map(([, s, a]) => videoSlotAfterAnimNeverPlays(s, freeTemplate, assetById, a));
+    expect(verdicts).toContain(true);
+    expect(verdicts).toContain(false);
   });
 });

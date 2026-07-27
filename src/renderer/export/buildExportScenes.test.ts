@@ -24,6 +24,7 @@ import { NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
 import { svgToPngDataUrl } from './rasterize';
 import { splitVideoSceneSvgMulti } from './videoSceneSplit';
 import { buildExportScenes, ExportCancelledError } from './buildExportScenes';
+import { afterAnimNoSettledSceneNumbers } from './videoSlotPlacement';
 
 // buildExportScenes が参照するのは templateId / durationSec / (narrationFor へ渡す scene) のみ。
 // 見た目（テンプレ）未解決の場面は黙って落とさず停止する（Codex 監査 2026-07-13）ため、共有 fixture は解決可能な2場面のみ。
@@ -1238,5 +1239,79 @@ describe('buildExportScenes：派生レイアウトの分割失敗も停止（#4
         async () => {},
       ),
     ).rejects.toThrow(/場面1の動画を配置できませんでした/);
+  });
+});
+
+
+// #588：公開前チェックと書き出しが「止める条件」を**同じ関数**で判断することを、**実際の書き出し経路**で固定する。
+// videoSlotPlacement 側の同値テストは2つの入口関数を比べるだけなので、**buildExportScenes 内で条件を書き直した**
+// ドリフトは捕まえられない。ここは実 buildExportScenes を走らせ「precheck が挙げる ⟺ 書き出しが止まる」を突き合わせる。
+// `15 §3`：止める条件は書き出し側の停止条件と同値に保つ（過剰ブロック＝行き止まり／取りこぼし＝手戻り）。
+describe('precheck と書き出しの停止条件が同値：実経路（#588 ドリフトガード）', () => {
+  // findVideoSlots（precheck 側）が解決できるよう FREE テンプレ＋freeLayout の動画スロットで組み、
+  // **同じスロットを書き出し側へコールバックで注入**する＝両者が同じ動画スロットを見る。
+  const freeTemplate = {
+    schemaVersion: '1.0', templateId: 'tpl_free', name: 'free', category: 'free',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 }, layers: [],
+  } as unknown as Template;
+  const tplById = new Map<string, Template>([['tpl_free', freeTemplate]]);
+  const videoAssetById = (id: string) =>
+    id.startsWith('asset_v') ? ({ assetId: id, assetType: 'video', displayName: 'v', filePath: `assets/${id}.mp4` } as never) : undefined;
+  const slotEl = (id: string, assetId: string, z: number) =>
+    ({ id, kind: 'slot', assetId, x: 100, y: 100, w: 800, h: 600, fit: 'cover', zIndex: z });
+  const sceneWith = (durationSec: number, slotIds: string[], over: Record<string, unknown> = {}): Scene =>
+    ({
+      sceneId: 's1', templateId: 'tpl_free', sceneType: 'opening', durationSec, texts: {},
+      freeLayout: slotIds.map((id, i) => slotEl(id, `asset_v${i + 1}`, i + 1)),
+      ...over,
+    }) as unknown as Scene;
+  const animTo = (targetId: string, endSec: number): ElementAnimation =>
+    ({ id: 'a', sceneId: 's1', targetId, keyframes: [{ timeSec: 0, x: -200 }, { timeSec: endSec, x: 0 }] } as unknown as ElementAnimation);
+  const inject = (slotIds: string[]) => () =>
+    slotIds.map((id, i) => ({
+      slotLayerId: id, clipRelPath: `assets/asset_v${i + 1}.mp4`, fit: 'cover' as const,
+      clipStartSec: 0, useOriginalAudio: false, speed: 1,
+    }));
+
+  // [説明, 場面, アニメ, スロット id 列]
+  const cases: [string, Scene, ElementAnimation[], string[]][] = [
+    ['degenerate（アニメが尺いっぱい＋afterAnim）', sceneWith(2, ['slotA'], { slotVideoStart: { slotA: { mode: 'afterAnim' } } }), [animTo('slotA', 3)], ['slotA']],
+    ['settled が残る', sceneWith(8, ['slotA'], { slotVideoStart: { slotA: { mode: 'afterAnim' } } }), [animTo('slotA', 1)], ['slotA']],
+    ['mode が delay', sceneWith(2, ['slotA'], { slotVideoStart: { slotA: { mode: 'delay', delaySec: 1 } } }), [animTo('slotA', 3)], ['slotA']],
+    ['開始指定なし', sceneWith(2, ['slotA']), [animTo('slotA', 3)], ['slotA']],
+    // 歴史的に割れたケース（#444 レビュー P2）：**非アニメ**スロットに afterAnim が残っている。
+    // slotIsAnimated ゲートを落とすと書き出しだけが止まる＝このガードが赤くなる。
+    ['非アニメスロットに afterAnim（アニメ対象は別スロット）', sceneWith(2, ['slotA', 'slotB'], { slotVideoStart: { slotB: { mode: 'afterAnim' } } }), [animTo('slotA', 3)], ['slotA', 'slotB']],
+  ];
+
+  it.each(cases)('%s：precheck の判定と書き出しの停止が一致する', async (_label, scene, anims, slotIds) => {
+    vi.mocked(layoutScene).mockReturnValue({
+      items: slotIds.map((id, i) => ({ id, kind: 'image', role: 'slot', assetId: `asset_v${i + 1}`, x: 0, y: 0, w: 100, h: 100, zIndex: i + 1 })),
+    } as unknown as SceneLayout);
+    vi.mocked(splitVideoSceneSvgMulti).mockReturnValue({
+      belowSvg: '<below/>', midSvgs: slotIds.slice(1).map(() => '<mid/>'), aboveSvg: '<above/>',
+      slots: slotIds.map((id) => ({ layerId: id, rect: { x: 0, y: 0, w: 100, h: 100 } })),
+    });
+    // precheck の判定（場面番号が返れば「止める」）。
+    const flagged = afterAnimNoSettledSceneNumbers([scene], tplById, videoAssetById, () => anims).length > 0;
+    // 書き出しの実挙動（§2-5 エラーで停止するか）。
+    let threw = false;
+    try {
+      await buildExportScenes(
+        [scene], tplById, noAsset, () => ({ narrationVolume: 1 }),
+        inject(slotIds), undefined, {}, () => anims,
+        async () => {}, async () => 31, async () => 'data:image/png;base64,VF',
+      );
+    } catch (e) {
+      threw = /再生されません/.test(String(e));
+      if (!threw) throw e; // 別要因の失敗は握りつぶさない
+    }
+    expect(threw).toBe(flagged);
+  });
+
+  it('代表ケースに true と false の両方が含まれる（空振りで一致していない）', () => {
+    const verdicts = cases.map(([, s, a]) => afterAnimNoSettledSceneNumbers([s], tplById, videoAssetById, () => a).length > 0);
+    expect(verdicts).toContain(true);
+    expect(verdicts).toContain(false);
   });
 });
