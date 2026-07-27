@@ -377,7 +377,8 @@ export function sendFreeElementToBack(freeLayout: FreeElement[], id: string): Fr
 
 /**
  * 重ね順を1段だけ前面('up')/背面('down')へ動かす（レイヤー一覧の↑↓・#210）。
- * zIndex 昇順で隣の要素と zIndex を入れ替える。端ならそのまま。同 zIndex のときは移動方向へ寄せて前後を確定（背面側は 0 が下限）。
+ * **入れ替えの意味論は `moveByZ` が持つ**（ここに書き写すと、片方だけ直って説明が古くなる＝#587 PR レビュー）。
+ * ここが決めるのは**実効 z の求め方だけ**＝FREE 要素は `zIndex ?? 1`。
  */
 export function moveFreeElementZ(
   freeLayout: FreeElement[], id: string, direction: 'up' | 'down',

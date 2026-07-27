@@ -10,6 +10,13 @@ const layer = (id: string, type: Layer['type'], zIndex?: number): Layer =>
 const zs = (layers: Layer[]): Record<string, number> =>
   Object.fromEntries(layers.map((l) => [l.id, effectiveLayerZ(l)]));
 
+/**
+ * 実際の重なり順（奥→手前）。実効 z の昇順で**安定**ソート＝同じ z は配列の後ろが手前、という
+ * 描画（`renderer/layout` の `items.sort`）・一覧の並びと同じ規則で見る（#587）。
+ */
+const order = (layers: Layer[]): string[] =>
+  [...layers].sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b)).map((l) => l.id);
+
 describe('moveLayerZ（テンプレ レイヤーの重ね順を1段動かす・#547 P2-4）', () => {
   it('明示 zIndex どうしは隣と入れ替わる（前面へ）', () => {
     const layers = [layer('a', 'text', 10), layer('b', 'text', 20)];
@@ -42,20 +49,50 @@ describe('moveLayerZ（テンプレ レイヤーの重ね順を1段動かす・#
     expect(effectiveLayerZ(moved.find((l) => l.id === 'bg')!)).toBe(DEFAULT_LAYER_Z.background); // 無関係は不変
   });
 
-  it('同じ実効 z が並ぶときは移動方向へ寄せて前後を確定する（背面側は 0 が下限）', () => {
+  it('同じ実効 z が並ぶときは配列の順で前後が入れ替わる（z は増やさない）', () => {
     // shape と decor は既定が同じ 20。
     const layers = [layer('s', 'shape'), layer('d', 'decor')];
     const up = moveLayerZ(layers, 's', 'up');
-    expect(effectiveLayerZ(up.find((l) => l.id === 's')!)).toBe(DEFAULT_LAYER_Z.decor + 1); // 前へ寄る
+    expect(order(up)).toEqual(['d', 's']); // s が1段前へ
+    expect(effectiveLayerZ(up.find((l) => l.id === 's')!)).toBe(DEFAULT_LAYER_Z.shape); // z は据え置き
+  });
 
+  // 旧実装は同 z を ±1 で寄せていたため、背面側が 0 だと頭打ちで **↓ が効かなかった**（#587）。
+  it('実効 z が 0 どうしでも背面へ動く（0 で頭打ちにならない）', () => {
     const bg2 = [layer('a', 'background'), layer('b', 'background')]; // どちらも 0
-    const down = moveLayerZ(bg2, 'b', 'down');
-    expect(effectiveLayerZ(down.find((l) => l.id === 'b')!)).toBe(0); // 0 未満にはしない
-    expect(down).toBe(bg2); // 寄せても見た目が変わらない＝同一参照（空の取り消しを積まない）
+    expect(order(bg2)).toEqual(['a', 'b']);
+    expect(order(moveLayerZ(bg2, 'b', 'down'))).toEqual(['b', 'a']);
   });
 
   it('存在しない id は何も変えない', () => {
     const layers = [layer('a', 'text', 10)];
     expect(moveLayerZ(layers, 'nope', 'up')).toBe(layers); // 同一参照
+  });
+});
+
+// #587：同じ実効 z が3つ以上並ぶと、旧実装（z を +1 して前後を付ける）では**1段**を表現できなかった。
+// +1 は同 z のグループ全部を飛び越え、繰り返すと種別ごとの既定 z（10 刻み）の次の階層へ食い込む
+// ＝「文字を1つ上げただけなのに立ち絵より前に出る」。
+describe('moveLayerZ：同じ実効 z が並んでも1段ずつ動く（#587）', () => {
+  it('3つ並んだ真ん中/端でも、動くのはちょうど1段だけ', () => {
+    const three = [layer('a', 'text'), layer('b', 'text'), layer('c', 'text')]; // 全部 30
+    expect(order(three)).toEqual(['a', 'b', 'c']);
+    expect(order(moveLayerZ(three, 'a', 'up'))).toEqual(['b', 'a', 'c']); // 旧実装は ['b','c','a']＝2段飛んだ
+    expect(order(moveLayerZ(three, 'c', 'down'))).toEqual(['a', 'c', 'b']);
+    // 1段ずつ2回で2段（間を飛ばさない）。
+    expect(order(moveLayerZ(moveLayerZ(three, 'a', 'up'), 'a', 'up'))).toEqual(['b', 'c', 'a']);
+  });
+
+  it('同種を11個並べて上げ続けても、種別の階層を越えない（文字が立ち絵より前に出ない）', () => {
+    const texts = Array.from({ length: 11 }, (_, i) => layer(`t${i}`, 'text')); // 全部 30
+    let layers: Layer[] = [...texts, layer('yuko', 'character')]; // 立ち絵は 40
+    // 一番後ろの文字を10回上げる＝文字の集団の先頭まで行く。旧実装ではこの時点で z が 40 に達し、立ち絵を追い越していた。
+    for (let n = 0; n < 10; n++) layers = moveLayerZ(layers, 't0', 'up');
+    expect(order(layers)).toEqual([...texts.slice(1).map((l) => l.id), 't0', 'yuko']);
+    expect(effectiveLayerZ(layers.find((l) => l.id === 't0')!)).toBe(DEFAULT_LAYER_Z.text); // z は上がっていない
+    // もう1回上げて、ここで初めて立ち絵と入れ替わる（z が違うので z の交換）。
+    const crossed = moveLayerZ(layers, 't0', 'up');
+    expect(order(crossed).slice(-1)).toEqual(['t0']);
+    expect(effectiveLayerZ(crossed.find((l) => l.id === 'yuko')!)).toBe(DEFAULT_LAYER_Z.text);
   });
 });
