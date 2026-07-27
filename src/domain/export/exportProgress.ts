@@ -149,3 +149,26 @@ export function pastExportNotice(phase: ExportRunPhase): string {
       return '';
   }
 }
+
+/**
+ * 書き出しが**たったいま終わった**ことを、書き出し画面以外にいる利用者へ伝える1行（#589）。
+ *
+ * 書き出し中は他の画面へ移動できる設計（`15 §4`）だが、終端になると編集ロックのバナー（`ExportLockBanner`）は
+ * 消えるだけだった＝**離席中に失敗しても「消えた＝成功して終わった」と誤読**し、書き出し画面へ戻るまで気づけない。
+ * `pastExportNotice`（後から入り直したとき用の**過去形**）とは別物で、こちらは「いま終わった」の**現在形**。
+ *
+ * 失敗の理由は書き出し画面が持つ（`exportRun.message`）ので、ここでは種別だけを言い切って画面へ誘導する（§2-5）。
+ * 走行中・未実行（`idle`/`rendering`/`encoding`/`unsupported`）は空文字＝呼び出し側で phase を場合分けしない。
+ */
+export function finishedExportNotice(phase: ExportRunPhase): string {
+  switch (phase) {
+    case 'done':
+      return '動画の書き出しが終わりました。';
+    case 'error':
+      return '動画の書き出しに失敗しました。書き出しの画面で理由を確認してください。';
+    case 'cancelled':
+      return '動画の書き出しを中止しました。';
+    default:
+      return '';
+  }
+}

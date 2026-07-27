@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { EmptyState } from "../components/states";
@@ -107,6 +107,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const busy = isExportBusy(phase);
   // 「前回の結果」表示中か＝入った時点で終わっていて、かついま見えているのも終わった結果（走行中・未実行には出さない）。
   const showsPastResult = enteredFinished && isExportFinished(phase);
+  // この画面には結果そのものが出ているので、他画面向けの終了通知（#589）は**既読**にする。
+  // ここで落とさないと、書き出し画面で結果を見たあとに他画面へ移ってまた通知が出る＝#547 P3-11 の「古い通知が残る」の再発。
+  const resultUnseen = useProjectStore((s) => s.exportRun.resultUnseen);
+  useEffect(() => {
+    if (resultUnseen) setExportRun({ resultUnseen: false });
+  }, [resultUnseen, setExportRun]);
   // 全体の音量スライダーが効かない場面（個別の声量あり）が1つでもあるか（#547 P3-13）。あれば案内を添える
   // ＝仕上がり確認（いまの場面）と同じ意味の注意を、書き出し（全場面のいずれか）でも出す（ADR-0026②）。判定は §6 の共有述語。
   const someSceneHasVolumeOverride = scenes.some((s) => hasSceneNarrationOverride(s.audioMix));
