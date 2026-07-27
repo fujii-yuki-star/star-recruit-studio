@@ -26,6 +26,7 @@ function renderWithScene(scene: Scene) {
     templates: sampleTemplates,
     parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
     scenes: [scene],
+    status: "ready", // 自動生成（autoGenerateIfSafe）を発火させない＝この場面が差し替えられない（#620）
     saveStatus: "saved",
   });
   // 全体BGMを「入れる」にしておく（BGM音量スライダーが描画される）。曲は BgmPicker の初期化で既定が入る。

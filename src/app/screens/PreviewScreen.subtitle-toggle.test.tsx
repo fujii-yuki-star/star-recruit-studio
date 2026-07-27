@@ -27,7 +27,8 @@ describe("PreviewScreen 字幕トグル（#547 P2-7）", () => {
     useProjectStore.setState({
       templates: [subtitleTemplate],
       parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
-      scenes: [scene], saveStatus: "saved",
+      // status: 自動生成（autoGenerateIfSafe）を発火させない＝この場面が差し替えられない（#620）
+      scenes: [scene], status: "ready", saveStatus: "saved",
     });
   });
 

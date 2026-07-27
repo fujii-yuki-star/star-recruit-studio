@@ -33,6 +33,7 @@ describe("PreviewScreen 掛け合い行音声の AbortError 黙殺（#392 レビ
       parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
       scenes: [dialogueScene()],
       narrationAudioById: { [lineAudioKey("scene_001", "line_001")]: "blob:fake" },
+      status: "ready", // 自動生成（autoGenerateIfSafe）を発火させない＝この場面が差し替えられない（#620）
       saveStatus: "saved",
     });
   });
