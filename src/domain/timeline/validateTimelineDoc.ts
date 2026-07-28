@@ -25,6 +25,22 @@ const TRACK_KIND_FOR_CLIP = {
   [TIMELINE_CLIP_KIND.voice]: TRACK_KIND.audio,
 } as const satisfies Record<TimelineClipKind, TrackKind>;
 
+/**
+ * そのクリップを置ける列の種別（11 §8 V23）。**検証と編集が同じ表を見る**ための入口（§6）＝
+ * 「音は音の列」の対応を2か所に書かない（片方だけ変えると、検証は通るのに置けない〔逆も〕が起きる）。
+ */
+export function trackKindForClip(kind: TimelineClipKind): TrackKind {
+  return TRACK_KIND_FOR_CLIP[kind];
+}
+
+/**
+ * 2つの時間の区間が重なるか（11 §8 V24）。区間は半開 `[start, end)`＝**端が接するのは重ならない**。
+ * 検証（重なりの警告）と編集（置けるかの判定）が**同じ述語**を使う（境界の扱いを2か所に書かない）。
+ */
+export function spansOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd && bStart < aEnd;
+}
+
 /** 読み上げクリップか（音の出どころが「中身」＝素材でも同梱BGMでもない・#628）。 */
 export function isVoiceClip(clip: TimelineClip): boolean {
   return clip.kind === TIMELINE_CLIP_KIND.voice;
@@ -54,7 +70,9 @@ export function overlappingClipPairs(clips: TimelineClip[]): Array<[TimelineClip
     for (let i = 1; i < sorted.length; i += 1) {
       // 直前だけでなく、それ以前の長いクリップに覆われている場合もあるので端の最大値を持ち回る。
       for (let j = i - 1; j >= 0; j -= 1) {
-        if (clipEndSec(sorted[j]) > sorted[i].startSec) pairs.push([sorted[j], sorted[i]]);
+        if (spansOverlap(sorted[j].startSec, clipEndSec(sorted[j]), sorted[i].startSec, clipEndSec(sorted[i]))) {
+          pairs.push([sorted[j], sorted[i]]);
+        }
       }
     }
   }
@@ -81,7 +99,7 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
     // V22: どのトラックに置くか決まっていない＝描画・書き出しから外れる。黙って消さない（§2-5）。
     if (!track) {
       warnings.push(warn('TIMELINE_TRACK_NOT_FOUND', 'どの列に置くか決まっていない部品があります。列を選び直してください', field));
-    } else if (track.kind !== TRACK_KIND_FOR_CLIP[clip.kind]) {
+    } else if (track.kind !== trackKindForClip(clip.kind)) {
       // V23: 音の部品を映像の列に置く（逆も）と鳴らない/映らないので知らせる。
       warnings.push(warn('TIMELINE_CLIP_TRACK_KIND', '音の部品は音の列に、絵や文字の部品は映像の列に置いてください', field));
     }

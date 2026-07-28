@@ -1,21 +1,30 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { clipCountOnTrack } from "../../domain/timeline/edit";
+import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import type { TrackKind } from "../../domain/enums";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
+import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, trackLabel } from "../uiLabels";
+import { clipLabel, editBlockedMessage, trackLabel } from "../uiLabels";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
 }
+
+/** 編集してから自動保存するまでの待ち（ms）。連続操作のたびに書かないための間。 */
+const AUTOSAVE_DELAY_MS = 800;
+
+/** 「前へ／後ろへ」1回で動かす秒。細かすぎず粗すぎない刻み（再生位置へ寄せる操作と併用する前提）。 */
+const NUDGE_SEC = 0.5;
 
 /** 1秒あたりの表示幅（px）と、レーンの最小幅。読み取り専用タイムラインと同じ見え方に寄せる。 */
 const PX_PER_SEC = 40;
@@ -36,18 +45,41 @@ function tickStepSec(totalSec: number): number {
 /**
  * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。
  *
- * いまは**見て確かめるところまで**＝トラックとクリップの並び、再生ヘッドの位置、その瞬間の仕上がり。
- * 置く・動かす・重ねる・消すは後続。描画は `layoutTimelineAt`（場面形式と核を共有）を通すので、
- * ここで見えているものが書き出しの土台と同じ（ADR-0001）。
+ * 見て確かめる（その瞬間の仕上がり・列と部品の並び）と、置く・動かす・重ねる・消すができる。
+ * 描画は `layoutTimelineAt`（場面形式と核を共有）を通すので、ここで見えているものが書き出しの土台と
+ * 同じ（ADR-0001）。編集は少し待って自動保存する（閉じても消えない）。
  */
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
-  const { doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, setPlayhead, selectClip } = useTimelineStore();
+  const {
+    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, editBlocked, history,
+    setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
+    addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
+  } = useTimelineStore();
+
+  // 取り消し/やり直しのキー操作は**この画面の store** へ繋ぐ（既定は場面形式を巻き戻すので渡さない＝
+  // 見えていない文書を戻して自動保存が永続化する事故を作らない・#547 P1-1 と同じ筋）。
+  useUndoRedoShortcuts(true, { undo, redo });
+
+  // 編集したら少し待って自動保存する（場面形式と同じ「閉じても消えない」＝ADR-0026②）。
+  // 連続操作のたびに書かないよう間を置く。保存中の再編集は `saveTimelineProject` 側で見る。
+  const saveTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (saveStatus !== "idle") return;
+    if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => void saveTimelineProject(), AUTOSAVE_DELAY_MS);
+    return () => {
+      if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
+    };
+  }, [saveStatus, saveTimelineProject]);
   const templates = useProjectStore((s) => s.templates);
   // テンプレが持つ既定素材（ADR-0021）は全プロジェクト共通の置き場にある＝場面形式のプレビュー・書き出しと
   // 同じフォールバック（素材 → テンプレ既定素材）を通す。無いと同じ見た目が場面形式と違う絵になる（ADR-0026②）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
 
+  const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
+  // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
+  const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
   const layout = useMemo(() => {
     if (!doc) return null;
     const byId = new Map(templates.map((t) => [t.templateId, t]));
@@ -130,6 +162,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </p>
       </div>
 
+      {removingTrackId && doc.tracks.some((t) => t.id === removingTrackId) && (
+        <DeleteConfirm
+          message={`「${trackLabel(doc.tracks, removingTrackId)}」を消しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
+          onCancel={() => setRemovingTrackId(null)}
+          onConfirm={() => {
+            removeTrack(removingTrackId);
+            setRemovingTrackId(null);
+          }}
+        />
+      )}
+
       <div className="card">
         <h3>並び</h3>
         {doc.clips.length === 0 ? (
@@ -155,6 +198,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <div className="timeline-row-label">
                       <span>{trackLabel(doc.tracks, track.id)}</span>
                       {track.hidden && <span className="sub">出さない</span>}
+                      {track.locked && <span className="sub">固定中</span>}
+                      <span className="row gap-sm">
+                        <button className="btn btn-ghost btn-sm" title="手前へ" onClick={() => moveTrackOrder(track.id, "front")}>↑</button>
+                        <button className="btn btn-ghost btn-sm" title="奥へ" onClick={() => moveTrackOrder(track.id, "back")}>↓</button>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          title={track.hidden ? "動画に出す" : "動画に出さない"}
+                          onClick={() => setTrackFlag(track.id, "hidden", !track.hidden)}
+                        >
+                          {track.hidden ? "出す" : "隠す"}
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          title={track.locked ? "固定を外す" : "動かせないように固定する"}
+                          onClick={() => setTrackFlag(track.id, "locked", !track.locked)}
+                        >
+                          {track.locked ? "固定を外す" : "固定"}
+                        </button>
+                        <button className="btn btn-ghost btn-sm" title="この列を消す" onClick={() => setRemovingTrackId(track.id)}>消す</button>
+                      </span>
                     </div>
                     <div className="timeline-track timeline-lane" style={{ width: laneWidthPx }}>
                       {doc.clips
@@ -177,6 +240,64 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
           </div>
         )}
+      </div>
+
+      {editBlocked && (
+        <p className="notice notice-warn" role="alert">{editBlockedMessage[editBlocked]}</p>
+      )}
+
+      <div className="card">
+        <h3>選んだ部品</h3>
+        {selected ? (
+          <>
+            <p className="text-muted">
+              {clipLabel(selected)}（{selected.startSec.toFixed(1)}秒から{selected.durationSec.toFixed(1)}秒間）
+            </p>
+            <div className="row gap-sm">
+              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec - NUDGE_SEC })}>
+                前へ
+              </button>
+              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec + NUDGE_SEC })}>
+                後ろへ
+              </button>
+              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: playheadSec })}>
+                再生位置へ
+              </button>
+              <button className="btn btn-secondary" onClick={() => trimSelectedClip("start", playheadSec)}>
+                ここから始める
+              </button>
+              <button className="btn btn-secondary" onClick={() => trimSelectedClip("end", playheadSec)}>
+                ここで終わる
+              </button>
+              <button className="btn btn-secondary" onClick={duplicateSelectedClip}>同じものを足す</button>
+              <button className="btn btn-danger" onClick={removeSelectedClips}>消す</button>
+            </div>
+            <label className="field">
+              <span>置く列</span>
+              <select value={selected.trackId} onChange={(e) => moveSelectedClip({ trackId: e.target.value })}>
+                {doc.tracks.map((t) => (
+                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                ))}
+              </select>
+            </label>
+          </>
+        ) : (
+          <p className="text-muted">
+            {selectedClipIds.length > 1
+              ? "1つだけ選ぶと、位置や長さを変えられます（まとめて消すことはできます）。"
+              : "下の並びから部品を選ぶと、位置や長さを変えられます。"}
+          </p>
+        )}
+        {selectedClipIds.length > 1 && (
+          <button className="btn btn-danger" onClick={removeSelectedClips}>選んだ{selectedClipIds.length}個を消す</button>
+        )}
+      </div>
+
+      <div className="row gap-sm mt-lg">
+        <button className="btn btn-ghost" onClick={undo} disabled={history.past.length === 0}>取り消す</button>
+        <button className="btn btn-ghost" onClick={redo} disabled={history.future.length === 0}>やり直す</button>
+        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)}>映像の列を足す</button>
+        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)}>音の列を足す</button>
       </div>
 
       <div className="row gap-sm mt-lg">
