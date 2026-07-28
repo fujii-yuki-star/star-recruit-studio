@@ -2,11 +2,14 @@
 //
 // **置けない操作は黙って別の結果にしない**（§2-5・ADR-0026④）＝重なる位置へ動かそうとしたら、勝手に
 // 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
-import { TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
-import type { TimelineClipKind, TrackKind } from '../enums';
-import { createClipId, createTrackId } from '../project/persistence';
+import { TIMELINE_MIN_CLIP_SEC } from '../constants';
+import { NARRATION_STATUS } from '../enums';
+import type { TrackKind } from '../enums';
 import type { Group } from '../group/types';
-import { clipEndSec } from './validateTimelineDoc';
+import { removeMembersFromGroups } from '../project/groupOps';
+import { applyClipEdge } from '../project/overlayClipEdit';
+import { createClipId, createTrackId } from '../project/persistence';
+import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
 import type { TimelineClip, TimelineProject, Track } from './types';
 
 /** 置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。永続データではないので schema には持ち込まない。 */
@@ -29,19 +32,9 @@ export type EditResult = { ok: true; doc: TimelineProject } | { ok: false; reaso
 const ok = (doc: TimelineProject): EditResult => ({ ok: true, doc });
 const blocked = (reason: EditBlockedReason): EditResult => ({ ok: false, reason });
 
-/** クリップ種別を置ける列の種別（`validateTimelineDoc` の V23 と同じ規則＝判定を2か所に書かない）。 */
-const TRACK_KIND_FOR_CLIP = {
-  [TIMELINE_CLIP_KIND.slot]: TRACK_KIND.visual,
-  [TIMELINE_CLIP_KIND.text]: TRACK_KIND.visual,
-  [TIMELINE_CLIP_KIND.shape]: TRACK_KIND.visual,
-  [TIMELINE_CLIP_KIND.subtitle]: TRACK_KIND.visual,
-  [TIMELINE_CLIP_KIND.template]: TRACK_KIND.visual,
-  [TIMELINE_CLIP_KIND.audio]: TRACK_KIND.audio,
-  [TIMELINE_CLIP_KIND.voice]: TRACK_KIND.audio,
-} as const satisfies Record<TimelineClipKind, TrackKind>;
-
 /**
  * その列のその時間帯が空いているか（11 §8 V24）。**端が接するのは可**（前の終わり＝次の始まり）。
+ * 重なりの述語そのものは `spansOverlap`（検証と共有）＝半開区間の境界の扱いを2か所に書かない。
  * `exceptClipId` は自分自身を数えないため（動かす当人と重なると判定しない）。
  */
 export function isFreeSpan(
@@ -51,9 +44,11 @@ export function isFreeSpan(
   durationSec: number,
   exceptClipId?: string,
 ): boolean {
-  const end = startSec + durationSec;
   return !clips.some(
-    (c) => c.trackId === trackId && c.id !== exceptClipId && c.startSec < end && startSec < clipEndSec(c),
+    (c) =>
+      c.trackId === trackId &&
+      c.id !== exceptClipId &&
+      spansOverlap(c.startSec, clipEndSec(c), startSec, startSec + durationSec),
   );
 }
 
@@ -68,7 +63,7 @@ function placementIssue(
   const track = doc.tracks.find((t) => t.id === trackId);
   if (!track) return EDIT_BLOCKED.notFound;
   if (track.locked) return EDIT_BLOCKED.locked;
-  if (track.kind !== TRACK_KIND_FOR_CLIP[clip.kind]) return EDIT_BLOCKED.trackKind;
+  if (track.kind !== trackKindForClip(clip.kind)) return EDIT_BLOCKED.trackKind;
   if (!isFreeSpan(doc.clips, trackId, startSec, durationSec, clip.id)) return EDIT_BLOCKED.overlap;
   return null;
 }
@@ -92,40 +87,39 @@ export function moveClip(
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   const trackId = to.trackId ?? clip.trackId;
   const startSec = Math.max(0, to.startSec ?? clip.startSec);
+  // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない（呼び出し側は同一参照で判定する）。
+  if (trackId === clip.trackId && startSec === clip.startSec) return ok(doc);
   const issue = placementIssue(doc, clip, trackId, startSec, clip.durationSec);
   return issue ? blocked(issue) : ok(withClip(doc, { ...clip, trackId, startSec }));
 }
 
-/** トリムの最小の長さ（秒）。0 以下のクリップを作らない（schema の `durationSec > 0`）。 */
-export const MIN_CLIP_DURATION_SEC = 0.1;
-
 /**
  * クリップの端を動かす（トリム）。`edge='start'` は開始を、`'end'` は終わりを動かす。
  * **反対側の端は動かさない**＝片端を縮めるともう片端が付いてくる、を起こさない。
- * 短くしすぎは最小の長さで止める（0 以下や負の長さを作らない）。
+ *
+ * クランプは **`applyClipEdge`（端の編集の単一の参照元・#561）へ委譲**する。自前で
+ * 「長さを引き算してから `Math.max`」と書くと、同じ入力を2度通したときに下限をわずかに割る
+ * （そこで潰した不具合を書き戻さない）。最小の長さは `TIMELINE_MIN_CLIP_SEC`（§2-7）。
  */
 export function trimClip(doc: TimelineProject, clipId: string, edge: 'start' | 'end', sec: number): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
-  const end = clipEndSec(clip);
-  const next =
-    edge === 'start'
-      ? (() => {
-          const startSec = Math.max(0, Math.min(sec, end - MIN_CLIP_DURATION_SEC));
-          return { ...clip, startSec, durationSec: end - startSec };
-        })()
-      : { ...clip, durationSec: Math.max(MIN_CLIP_DURATION_SEC, sec - clip.startSec) };
+  const span = applyClipEdge(clip, edge === 'start' ? 'trim-start' : 'trim-end', sec, 0, TIMELINE_MIN_CLIP_SEC);
+  // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない（呼び出し側は同一参照で判定する）。
+  if (span.startSec === clip.startSec && span.durationSec === clip.durationSec) return ok(doc);
+  const next = { ...clip, ...span };
   const issue = placementIssue(doc, next, next.trackId, next.startSec, next.durationSec);
   return issue ? blocked(issue) : ok(withClip(doc, next));
 }
 
-/** グループのメンバーから消えた id を落とす（空になったグループも畳む＝中身の無い入れ物を残さない・V26）。 */
+/**
+ * グループのメンバーから消えた id を落とす（空になったグループも畳む＝中身の無い入れ物を残さない・V26）。
+ * 1段ぶんの除去は場面形式と同じ `removeMembersFromGroups` を使い、**入れ子は収束するまで繰り返す**
+ * （消えたグループを入れ子に持つ側からも落とす）。
+ */
 function pruneGroups(groups: readonly Group[], removed: ReadonlySet<string>): Group[] {
-  const next = groups
-    .map((g) => ({ ...g, members: g.members.filter((m) => !removed.has(m)) }))
-    .filter((g) => g.members.length > 0);
-  // グループ自身が消えたら、それを入れ子に持つ側からも落とす（1段ずつ収束させる）。
+  const next = removeMembersFromGroups([...groups], [...removed]);
   const goneIds = new Set(groups.filter((g) => !next.some((n) => n.id === g.id)).map((g) => g.id));
   return goneIds.size === 0 ? next : pruneGroups(next, goneIds);
 }
@@ -138,9 +132,10 @@ export function removeClips(doc: TimelineProject, clipIds: readonly string[]): T
   const removed = new Set(clipIds);
   const clips = doc.clips.filter((c) => !removed.has(c.id));
   const groups = pruneGroups(doc.groups ?? [], removed);
-  const animations = (doc.animations ?? []).filter(
-    (a) => !removed.has(a.targetId) && (groups.some((g) => g.id === a.targetId) || clips.some((c) => c.id === a.targetId)),
-  );
+  // 落とすのは**今回消したもの**への参照と、**畳んだグループ**への参照だけ。元から参照切れだったものは
+  // 触らない（V26 は「描画で無視」＝掃除は `danglingTimelineRefs` を使う側の役割で、削除のついでにやらない）。
+  const goneGroupIds = new Set((doc.groups ?? []).filter((g) => !groups.some((n) => n.id === g.id)).map((g) => g.id));
+  const animations = (doc.animations ?? []).filter((a) => !removed.has(a.targetId) && !goneGroupIds.has(a.targetId));
   // **条件付きスプレッドでは消せない**（`...doc` が元の groups/animations を残すので、
   // 空になったときに古い値が生き残る）。無くなったキーは明示的に落とす。
   const next: TimelineProject = { ...doc, clips };
@@ -163,11 +158,15 @@ export function addTrack(doc: TimelineProject, kind: TrackKind): TimelineProject
 /**
  * 列を消す。**その列に載っているクリップも一緒に消える**（行き場が無くなるため）。
  * 何が消えるかは呼び出し側が数えて確認を出す＝黙って消さない（§2-5）。
+ * **固定した列は消せない**＝「動かせないのに消せる」という非対称を作らない（ADR-0026②）。
  */
-export function removeTrack(doc: TimelineProject, trackId: string): TimelineProject {
+export function removeTrack(doc: TimelineProject, trackId: string): EditResult {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  if (track.locked) return blocked(EDIT_BLOCKED.locked);
   const ids = doc.clips.filter((c) => c.trackId === trackId).map((c) => c.id);
   const withoutClips = removeClips(doc, ids);
-  return { ...withoutClips, tracks: withoutClips.tracks.filter((t) => t.id !== trackId) };
+  return ok({ ...withoutClips, tracks: withoutClips.tracks.filter((t) => t.id !== trackId) });
 }
 
 /** その列に載っているクリップの数（列を消す前の確認に使う）。 */
@@ -207,5 +206,8 @@ export function duplicateClip(doc: TimelineProject, clipId: string): EditResult 
   const startSec = clipEndSec(clip);
   if (!isFreeSpan(doc.clips, clip.trackId, startSec, clip.durationSec)) return blocked(EDIT_BLOCKED.overlap);
   const next: TimelineClip = { ...clip, id: createClipId(doc.clips.map((c) => c.id)), startSec };
+  // 読み上げは**作成済みの音声を引き継がない**（場面形式の場面複製と同じ＝「作成済みに見えるのに
+  // 別の部品の音声を指す」を作らない）。文と話者は残るので作り直せる。
+  if (next.voice) next.voice = { ...next.voice, voicePath: null, status: NARRATION_STATUS.none };
   return ok({ ...doc, clips: [...doc.clips, next] });
 }

@@ -2,9 +2,10 @@
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
-import { loadProjectDoc } from "../../infrastructure/projectFs";
+import { loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
+import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { ASSET_TYPE } from "../../domain/enums";
-import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec } from "../../domain/timeline/persistence";
+import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { TrackKind } from "../../domain/enums";
 import {
@@ -34,6 +35,8 @@ export interface TimelineState {
   history: HistoryStacks<TimelineProject>;
   /** 直前の操作が置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。次の操作で消す。 */
   editBlocked: EditBlockedReason | null;
+  /** 保存の状態（場面形式の `saveStatus` と同じ語彙＝同じ概念を同じ言葉で扱う）。 */
+  saveStatus: "idle" | "saving" | "saved" | "error";
 
   openTimelineProject: (projectId: string) => Promise<void>;
   closeTimelineProject: () => void;
@@ -55,6 +58,8 @@ export interface TimelineState {
   setTrackFlag: (trackId: string, flag: "hidden" | "locked", value: boolean) => void;
   undo: () => void;
   redo: () => void;
+  /** 編集内容をディスクへ書く（編集のたびに自動で走る＝閉じても消えない）。 */
+  saveTimelineProject: () => Promise<void>;
 }
 
 /**
@@ -71,6 +76,7 @@ function emptyState() {
     assetSrcById: {} as Record<string, string>,
     history: emptyHistory<TimelineProject>(),
     editBlocked: null as EditBlockedReason | null,
+    saveStatus: "saved" as TimelineState["saveStatus"],
   };
 }
 
@@ -141,11 +147,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   removeTrack: (trackId) => {
     const doc = get().doc;
     if (!doc) return;
+    const r = removeTrack(doc, trackId);
+    if (!r.ok) {
+      set({ editBlocked: r.reason });
+      return;
+    }
     // 列と一緒に消えるクリップは選択からも外す（消えたものを選んだままにしない）。
     const gone = new Set(doc.clips.filter((c) => c.trackId === trackId).map((c) => c.id));
-    commit(set, get, removeTrack(doc, trackId), {
-      selectedClipIds: get().selectedClipIds.filter((id) => !gone.has(id)),
-    });
+    commit(set, get, r.doc, { selectedClipIds: get().selectedClipIds.filter((id) => !gone.has(id)) });
   },
   moveTrackOrder: (trackId, direction) => {
     const doc = get().doc;
@@ -160,13 +169,33 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const { doc, history } = get();
     if (!doc) return;
     const r = undoSnapshot(history, doc);
-    if (r) set({ doc: r.restored, history: r.history, editBlocked: null });
+    if (r) restore(set, get, r.restored, r.history);
   },
   redo: () => {
     const { doc, history } = get();
     if (!doc) return;
     const r = redoSnapshot(history, doc);
-    if (r) set({ doc: r.restored, history: r.history, editBlocked: null });
+    if (r) restore(set, get, r.restored, r.history);
+  },
+
+  saveTimelineProject: async () => {
+    const doc = get().doc;
+    if (!doc) return;
+    set({ saveStatus: "saving" });
+    const next = withUpdatedAt(doc, new Date().toISOString());
+    // **適合しないものは書かない**＝一覧に出るのに開けない動画を作らない（焼き出しと同じ判断・読込側は適合を要求する）。
+    if (!validateTimelineProject(next)) {
+      console.warn("[timeline] 保存内容がスキーマに未適合:", validateTimelineProject.errors);
+      set({ saveStatus: "error" });
+      return;
+    }
+    try {
+      await saveProjectDoc(next.projectId, JSON.stringify(next, null, 2));
+      // 保存中に更に編集されていたら「保存しました」にしない（未保存を保存済みに見せない）。
+      set(get().doc === doc ? { doc: next, saveStatus: "saved" } : { saveStatus: "idle" });
+    } catch {
+      set({ saveStatus: "error" });
+    }
   },
 }));
 
@@ -175,7 +204,8 @@ type GetState = () => TimelineState;
 
 /**
  * 変更を確定して履歴へ積む（ADR-0020 と同じ＝**適用前**の文書を past へ）。
- * 文書が変わっていないとき（端で何も起きない操作など）は履歴を汚さない＝取り消しが空振りしない。
+ * 文書が変わっていないとき（端で何も起きない操作など）は履歴を汚さない＝取り消しが空振りしない
+ * （各操作は「変わらないなら同一参照」を返すので、参照比較で足りる）。
  */
 function commit(set: SetState, get: GetState, next: TimelineProject, extra: Partial<TimelineState> = {}): void {
   const current = get().doc;
@@ -183,7 +213,22 @@ function commit(set: SetState, get: GetState, next: TimelineProject, extra: Part
     set({ editBlocked: null, ...extra });
     return;
   }
-  set({ doc: next, history: recordSnapshot(get().history, current), editBlocked: null, ...extra });
+  set({ doc: next, history: recordSnapshot(get().history, current), editBlocked: null, saveStatus: "idle", ...extra });
+}
+
+/**
+ * 取り消し/やり直しで文書を差し替える。**消えたクリップを選んだままにしない**（戻した文書に無い
+ * 選択が残ると、次の操作が「変化ゼロ」の履歴を積む）。
+ */
+function restore(set: SetState, get: GetState, doc: TimelineProject, history: HistoryStacks<TimelineProject>): void {
+  const ids = new Set(doc.clips.map((c) => c.id));
+  set({
+    doc,
+    history,
+    editBlocked: null,
+    saveStatus: "idle",
+    selectedClipIds: get().selectedClipIds.filter((id) => ids.has(id)),
+  });
 }
 
 /**
