@@ -154,6 +154,8 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `TIMELINE_CLIP_TRACK_KIND` | warning | — | 音の部品は音の列に、絵や文字の部品は映像の列に置いてください | `ADR-0032`・`11 §8 V23` |
 | `TIMELINE_CLIP_OVERLAP` | warning | — | 同じ列で時間が重なっています。ずらすか、列を増やして重ねてください | `ADR-0032`・`11 §8 V24` |
 | `TIMELINE_AUDIO_SOURCE_CONFLICT` | warning | — | 音の出どころが2つ指定されています。どちらか一方にしてください | `ADR-0032`・`11 §8 V25` |
+| `TIMELINE_VOICE_TEXT_EMPTY` | info | — | 読み上げる文が入っていません。文を入力してください | `ADR-0032`・`11 §8 V28` |
+| `TIMELINE_VOICE_ON_NON_VOICE` | warning | — | 読み上げの中身は読み上げの部品にだけ置けます。読み上げの部品に置き直してください | `ADR-0032`・`11 §8 V28` |
 | `SCHEMA_VERSION_UNSUPPORTED` | fatal | — | このファイルは対応していないバージョンで作成されています | `11 §1` |
 
 ---

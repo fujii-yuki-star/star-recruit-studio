@@ -248,6 +248,11 @@ const tlAccept = [
   ['timeline: durationSec 0.1（極短でも >0 なら許容・場面形式と同じ流儀 #553）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 0.1 })],
   ['timeline: startSec 0（先頭・境界）を許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
   ['timeline: id 4桁以上（clip_1000・上限なし）を許容', tlClips({ id: 'clip_1000', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+  // 読み上げクリップ（1.1・#628）。声は素材ではなく「中身」（読み上げ文＋話者）を持つ。
+  ['timeline: 読み上げクリップ（voice）を許容（1.1）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: 3, status: 'none' } })],
+  ['timeline: 読み上げは話者/速度なし（既定を継承）でも許容', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'none' } })],
+  ['timeline: 読み上げの話者/話速/抑揚 null（継承）を許容', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: null, speed: null, intonation: null, status: 'generated' } })],
+  ['timeline: テンプレクリップの textFontIds/character/slotClips を許容（1.1）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, templateId: 'opening_yuko_right_v1', textFontIds: { title: 'kaitou-yokoku-gothic' }, character: { enabled: true, characterId: 'yuko', poseAssetId: 'yuko_smile_001' }, slotClips: { background: { startSec: 1, endSec: 5, speed: 1.5 } } })],
 ];
 const tlReject = [
   ['timeline: format="scene" は拒否（場面形式は project.schema で検証する）', tlWith({ format: 'scene' })],
@@ -275,6 +280,17 @@ const tlReject = [
   ['timeline: トップレベルに timelineOverlay は拒否＝旧2モデルは持ち込まない（ADR-0018 Superseded）', tlWith({ timelineOverlay: { clips: [] } })],
   ['timeline: animation id 形式不正(a_001)は拒否', tlWith({ animations: [{ id: 'a_001', targetId: 'clip_003', keyframes: [{ timeSec: 0 }] }] })],
   ['timeline: animation keyframe opacity 範囲外(1.5)は拒否', tlWith({ animations: [{ id: 'anim_001', targetId: 'clip_003', keyframes: [{ timeSec: 0, opacity: 1.5 }] }] })],
+  // 読み上げクリップ（1.1・#628）。「中身の無い声」を作らせない（if/then）。
+  ['timeline: kind=voice で voice 欠落は拒否（if/then＝空の声を作らせない）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3 })],
+  ['timeline: voice.text 欠落は拒否（required）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { status: 'none' } })],
+  ['timeline: voice.status 欠落は拒否（required）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ' } })],
+  ['timeline: voice.status 未知は拒否（enum は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'done' } })],
+  ['timeline: voice.speaker 非整数は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: 1.5, status: 'none' } })],
+  ['timeline: voice に時間の語彙(startSec)は拒否＝時間はクリップが持つ（additionalProperties:false）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'none', startSec: 1 } })],
+  ['timeline: voice に字幕の語彙(subtitleText)は拒否＝字幕は字幕クリップが持つ', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'none', subtitleText: 'やあ' } })],
+  ['timeline: textFontIds 未知フォントは拒否（一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, textFontIds: { title: 'old-font' } })],
+  ['timeline: character に必須欠落(characterId)は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, character: { enabled: true } })],
+  ['timeline: slotClips speed 範囲外(3.0)は拒否（$ref 共有）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, slotClips: { background: { speed: 3.0 } } })],
 ];
 for (const [desc, data] of tlAccept) {
   if (vTimeline(data)) console.log(`PASS  must-accept  ${desc}`);
@@ -291,14 +307,18 @@ const tlAssetIds = new Set(tl.assets.map((a) => a.assetId));
 const trackById = new Map(tl.tracks.map((t) => [t.id, t]));
 let tlSem = true;
 const tlFail = (m) => { tlSem = false; console.log(`   SEM  ${m}`); };
-const kindOfTrack = { slot: 'visual', text: 'visual', shape: 'visual', subtitle: 'visual', template: 'visual', audio: 'audio' };
+const kindOfTrack = { slot: 'visual', text: 'visual', shape: 'visual', subtitle: 'visual', template: 'visual', audio: 'audio', voice: 'audio' };
+const tlYukoIds = new Set(tl.assets.filter((a) => a.assetType === 'yuko').map((a) => a.assetId));
 const byTrack = new Map();
 for (const c of tl.clips) {
   const t = trackById.get(c.trackId);
   if (!t) { tlFail(`${c.id}: trackId ${c.trackId} missing`); continue; }
   if (t.kind !== kindOfTrack[c.kind]) tlFail(`${c.id}: kind ${c.kind} は ${t.kind} トラックに置けない`);
   if (c.assetId != null && !tlAssetIds.has(c.assetId)) tlFail(`${c.id}: assetId ${c.assetId} missing`);
-  if (c.assetId != null && c.bundledBgmId != null) tlFail(`${c.id}: assetId と bundledBgmId は排他`);
+  const sources = [c.assetId != null, c.bundledBgmId != null, c.kind === 'voice'].filter(Boolean).length;
+  if (sources > 1) tlFail(`${c.id}: 音の出どころが2つ以上（素材/同梱BGM/読み上げ）`);
+  if (c.character?.poseAssetId && !tlYukoIds.has(c.character.poseAssetId)) tlFail(`${c.id}: poseAssetId ${c.character.poseAssetId} not a yuko asset`);
+  if (c.voice != null && c.kind !== 'voice') tlFail(`${c.id}: voice は読み上げクリップにだけ置ける`);
   if (!byTrack.has(c.trackId)) byTrack.set(c.trackId, []);
   byTrack.get(c.trackId).push(c);
 }

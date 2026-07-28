@@ -2,13 +2,16 @@
 // 場面（parts/scenes）を持たない**別の文書形式**で、キャンバスは常に自由配置＝FREE（空間の自由）×
 // タイムライン（時間の自由）。AI はこの形式を生成しない（AI の関与は場面形式まで）。
 import type { BundledBgmId } from '../bgm/bgmCatalog';
-import type { Fit, ProjectFormat, TextKey, TimelineClipKind, TrackKind } from '../enums';
+import type { Fit, NarrationStatus, ProjectFormat, TextKey, TimelineClipKind, TrackKind } from '../enums';
+import type { FontId } from '../font/fontCatalog';
 import type { Group } from '../group/types';
 import type {
   Asset,
   AssetRefs,
+  Character,
   FreeElement,
   Keyframe,
+  SlotClipOverride,
   Texts,
   TextStyleOverride,
   VideoSettings,
@@ -41,6 +44,28 @@ export interface Track {
 type ClipSpatial = Omit<FreeElement, 'id' | 'kind' | 'zIndex' | 'subtitleSource' | 'x' | 'y' | 'w' | 'h'> &
   Partial<Pick<FreeElement, 'x' | 'y' | 'w' | 'h'>>;
 
+/**
+ * 読み上げクリップ（`kind='voice'`）の中身（11 §7.6）。
+ * 場面形式の `NarrationLine` から**時間の語彙を除いた**もの＝`startSec`/`startWithPrevious` はクリップの
+ * `startSec` とトラックが担い、`subtitleText`/`subtitleEnabled` は字幕クリップが担う。
+ *
+ * **入れ子にしているのは、クリップ直下の `text`（表示する文字）・`speed`（素材の再生速度）と語が衝突するため。**
+ * 読み上げ文と話速は別概念なので、同じ名前で違う意味を持たせない（ADR-0026②）。
+ */
+export interface TimelineVoice {
+  /** 読み上げる（話す）文。画面に出す字幕は別の字幕クリップが持つ。 */
+  text: string;
+  /** VOICEVOX speaker（#177 voiceCatalog）。null/未指定＝プロジェクト既定の声を継承（11 §6）。 */
+  speaker?: number | null;
+  /** 話速。null/未指定＝既定を継承。クリップ直下の `speed`（素材の再生速度）とは別物。 */
+  speed?: number | null;
+  pitch?: number | null;
+  intonation?: number | null;
+  /** 生成済み音声の保存先。 */
+  voicePath?: string | null;
+  status: NarrationStatus;
+}
+
 /** クリップ＝「FREE 要素 ＋ 時間（trackId/startSec/durationSec）」（11 §7.6）。 */
 export interface TimelineClip extends ClipSpatial {
   /** `clip_NNN`（11 §2.1）。場面形式の `ovclip_NNN` とは別物。 */
@@ -60,6 +85,19 @@ export interface TimelineClip extends ClipSpatial {
   textStyles?: Partial<Record<TextKey, TextStyleOverride>>;
   /** テンプレ層 id → 収め方の上書き（場面形式の `scene.slotFits` と同義）。 */
   slotFits?: Record<string, Fit>;
+  /** テキスト種別ごとのフォント上書き（場面形式の `scene.textFontIds` と同義）。枠全体は `fontId`。 */
+  textFontIds?: Partial<Record<TextKey, FontId>>;
+  /** 立ち絵の表示と表情（場面形式の `scene.character` と同義）。テンプレに character 層があるときだけ効く。 */
+  character?: Character;
+  /**
+   * テンプレ層 id → 動画の使う範囲・速度・元音声の上書き（場面形式の `scene.slotClips` と同義・ADR-0028）。
+   * クリップ直下の `sourceStartSec`/`speed` は kind='slot'/'audio' が直接持つ素材のトリムで、
+   * こちらは**枠の中の差し込み口ごと**の上書き＝別物。
+   */
+  slotClips?: Record<string, SlotClipOverride>;
+
+  /** kind='voice' のとき必須（読み上げの中身・schema の if/then で強制）。 */
+  voice?: TimelineVoice;
 
   /** kind='audio' で同梱BGMを鳴らすとき（`assetId` と排他・11 §8 V25）。 */
   bundledBgmId?: BundledBgmId | null;
@@ -118,4 +156,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.0';
+export const TIMELINE_SCHEMA_VERSION = '1.1';

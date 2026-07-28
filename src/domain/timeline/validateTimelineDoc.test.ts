@@ -167,6 +167,71 @@ describe('validateTimelineDoc: V25 素材の実在と音の出どころの排他
   });
 });
 
+describe('validateTimelineDoc: 読み上げクリップ（#628）', () => {
+  const voice = (over: Partial<TimelineClip> = {}) => clip({
+    id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002',
+    voice: { text: 'やあ', speaker: 3, status: 'none' }, ...over,
+  });
+
+  it('読み上げは音の列に置く（V23）', () => {
+    expect(codes(doc({ clips: [voice()] }))).toEqual([]);
+    expect(codes(doc({ clips: [voice({ trackId: 'track_001' })] }))).toEqual(['TIMELINE_CLIP_TRACK_KIND']);
+  });
+
+  it('読み上げに素材や同梱BGMを重ねると音の出どころが2つになる（V25）', () => {
+    expect(codes(doc({ clips: [voice({ bundledBgmId: 'found-new-hope' })] }))).toEqual(['TIMELINE_AUDIO_SOURCE_CONFLICT']);
+  });
+
+  it('読み上げ文が空白だけなら知らせる（声を作っても無音になる）', () => {
+    const w = validateTimelineDoc(doc({ clips: [voice({ voice: { text: '   ', status: 'none' } })] }));
+    expect(w.map((x) => x.code)).toEqual(['TIMELINE_VOICE_TEXT_EMPTY']);
+    expect(w[0].severity).toBe('info');
+  });
+
+  it('読み上げ以外のクリップに読み上げの中身を置くと知らせる（黙って無視しない）', () => {
+    const w = codes(doc({ clips: [clip({ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, voice: { text: 'やあ', status: 'none' } })] }));
+    expect(w).toEqual(['TIMELINE_VOICE_ON_NON_VOICE']);
+  });
+
+  it('話者・話速の指定なし（既定を継承）は警告しない', () => {
+    expect(codes(doc({ clips: [voice({ voice: { text: 'やあ', status: 'none' } })] }))).toEqual([]);
+  });
+});
+
+describe('validateTimelineDoc: 立ち絵の表情（テンプレクリップ・V27）', () => {
+  const withYuko = (clips: TimelineClip[]) => doc({
+    assets: [
+      { assetId: 'yuko_smile_001', assetType: 'yuko', displayName: 'ゆうこ', filePath: 'assets/y.png' },
+      { assetId: 'asset_img_001', assetType: 'image', displayName: '写真', filePath: 'assets/a.jpg' },
+    ],
+    clips,
+  });
+  const tmpl = (poseAssetId: string | null) => clip({
+    id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, templateId: 'opening_yuko_right_v1',
+    character: { enabled: true, characterId: 'yuko', poseAssetId },
+  });
+
+  it('実在しない表情を指すと知らせる', () => {
+    const w = validateTimelineDoc(withYuko([tmpl('yuko_angry_999')]));
+    expect(w.map((x) => x.code)).toEqual(['ASSET_NOT_FOUND']);
+    expect(w[0].field).toBe('clips.clip_001.character');
+  });
+
+  it('実在する表情なら警告しない', () => {
+    expect(codes(withYuko([tmpl('yuko_smile_001')]))).toEqual([]);
+  });
+
+  it('実在しても yuko でない素材（写真）を指すと知らせる＝実在するだけでは立ち絵にならない', () => {
+    const w = validateTimelineDoc(withYuko([tmpl('asset_img_001')]));
+    expect(w.map((x) => x.code)).toEqual(['ASSET_NOT_FOUND']);
+    expect(w[0].field).toBe('clips.clip_001.character');
+  });
+
+  it('表情の指定なし（null）は警告しない', () => {
+    expect(codes(withYuko([tmpl(null)]))).toEqual([]);
+  });
+});
+
 describe('danglingTimelineRefs: V26 グループ members / アニメ targetId の参照切れ', () => {
   it('実在しないクリップ/グループを指す参照を返す', () => {
     const d = doc({
@@ -220,6 +285,20 @@ describe('正典との照合（ドリフト検知）', () => {
 
   it('format の const が PROJECT_FORMAT.timeline と一致する', () => {
     expect(schema.properties.format.const).toBe(PROJECT_FORMAT.timeline);
+  });
+
+  it('読み上げの中身は場面形式の NarrationLine と制約を共有する（$ref・コピーしない）', () => {
+    const v = schema.$defs.TimelineVoice.properties;
+    for (const k of ['text', 'speaker', 'speed', 'pitch', 'intonation', 'voicePath', 'status']) {
+      expect(v[k].$ref).toBe(`https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/${k}`);
+    }
+  });
+
+  it('読み上げの中身は時間・字幕の語彙を持たない（時間はクリップ、字幕は字幕クリップの担当）', () => {
+    const keys = Object.keys(schema.$defs.TimelineVoice.properties);
+    for (const k of ['startSec', 'startWithPrevious', 'subtitleText', 'subtitleEnabled', 'lineId']) {
+      expect(keys).not.toContain(k);
+    }
   });
 
   it('TimelineClipKind が schema の kind enum と一致する', () => {
