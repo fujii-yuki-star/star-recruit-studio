@@ -156,6 +156,16 @@ export function createOverlayClipId(existingIds: readonly string[]): string {
   return nextNumberedId('ovclip', existingIds);
 }
 
+/** clip_NNN を発行する（§2.1・**タイムライン形式**のクリップ id・project 内一意・ADR-0032）。場面形式の `ovclip_NNN` とは別物。 */
+export function createClipId(existingIds: readonly string[]): string {
+  return nextNumberedId('clip', existingIds);
+}
+
+/** track_NNN を発行する（§2.1・**タイムライン形式**のトラック id・project 内一意・ADR-0032）。 */
+export function createTrackId(existingIds: readonly string[]): string {
+  return nextNumberedId('track', existingIds);
+}
+
 /** anim_NNN を発行する（§2.1・要素アニメーション id・project 内一意・ADR-0019 ④）。 */
 export function createAnimationId(existingIds: readonly string[]): string {
   return nextNumberedId('anim', existingIds);

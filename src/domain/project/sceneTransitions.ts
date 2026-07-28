@@ -6,21 +6,33 @@ import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import type { TransitionDirection, TransitionType } from '../enums';
 import type { Scene, Transition } from './types';
 
+// MVP で実際に描画する種別。これ以外（wipe/zoom）は fade にフォールバックする。
+// **`as const` なのは意図的**（`readonly TransitionType[]` に広げない）＝この配列が
+// `DrawnTransitionType` の単一の参照元で、種別を1つ足した瞬間に下流の網羅 switch が落ちる。
+const DRAWN_TYPES = [TRANSITION_TYPE.none, TRANSITION_TYPE.fade, TRANSITION_TYPE.slide] as const;
+
+/**
+ * **実際に描画される**切り替えの種別（`resolveTransition` の結果の型）。`TransitionType` より狭い。
+ *
+ * これを分けているのは、設定できる種別（`TransitionType`＝wipe/zoom を含む）と、現に画面へ出る種別が
+ * 食い違っているため（wipe/zoom は fade に丸めている＝ADR-0032 決定19）。この型を消費する側を
+ * **網羅 switch（`never` チェック）**で書いておくと、`DRAWN_TYPES` に wipe が入った瞬間に union が
+ * 広がってビルドが落ちる＝黙って fade へ落とし続ける事故を人の注意ではなく型で防ぐ。
+ */
+export type DrawnTransitionType = (typeof DRAWN_TYPES)[number];
+
+function isDrawnType(type: TransitionType): type is DrawnTransitionType {
+  return (DRAWN_TYPES as readonly TransitionType[]).includes(type);
+}
+
 export interface ResolvedTransition {
   /** none/fade/slide（MVP）。wipe/zoom は fade に丸める。 */
-  type: TransitionType;
+  type: DrawnTransitionType;
   /** slide のときのみ意味を持つ（ADR-0009：MVP は in に適用）。 */
   direction: TransitionDirection;
   /** 希望の遷移時間（秒・0 以上）。境界での上限 clamp は transitionTimeline が場面尺を見て行う。 */
   durationSec: number;
 }
-
-// MVP で実際に描画する種別。これ以外（wipe/zoom）は fade にフォールバックする。
-const MVP_TYPES: readonly TransitionType[] = [
-  TRANSITION_TYPE.none,
-  TRANSITION_TYPE.fade,
-  TRANSITION_TYPE.slide,
-];
 
 /**
  * 場面の「入り」トランジション（transition.in）を MVP の実効値へ解決する。
@@ -28,7 +40,7 @@ const MVP_TYPES: readonly TransitionType[] = [
  */
 export function resolveTransition(transition: Transition | undefined): ResolvedTransition {
   const raw = transition?.in ?? TRANSITION_TYPE.none;
-  const type = MVP_TYPES.includes(raw) ? raw : TRANSITION_TYPE.fade;
+  const type = isDrawnType(raw) ? raw : TRANSITION_TYPE.fade;
   return {
     type,
     direction: transition?.direction ?? TRANSITION_DIRECTION.left,
@@ -46,7 +58,7 @@ export function deriveTransitionSelectValue(transition: Transition | undefined):
 }
 
 export interface BoundaryTransition {
-  type: TransitionType;
+  type: DrawnTransitionType;
   direction: TransitionDirection;
   /** clamp 済みの実効 D（秒）。書き出しと同じく両隣の場面尺で clamp する。0＝遷移なし（プレビュー不要）。 */
   durationSec: number;
