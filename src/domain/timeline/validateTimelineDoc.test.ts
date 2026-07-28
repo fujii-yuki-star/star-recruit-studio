@@ -200,7 +200,10 @@ describe('validateTimelineDoc: 読み上げクリップ（#628）', () => {
 
 describe('validateTimelineDoc: 立ち絵の表情（テンプレクリップ・V27）', () => {
   const withYuko = (clips: TimelineClip[]) => doc({
-    assets: [{ assetId: 'yuko_smile_001', assetType: 'yuko', displayName: 'ゆうこ', filePath: 'assets/y.png' }],
+    assets: [
+      { assetId: 'yuko_smile_001', assetType: 'yuko', displayName: 'ゆうこ', filePath: 'assets/y.png' },
+      { assetId: 'asset_img_001', assetType: 'image', displayName: '写真', filePath: 'assets/a.jpg' },
+    ],
     clips,
   });
   const tmpl = (poseAssetId: string | null) => clip({
@@ -216,6 +219,12 @@ describe('validateTimelineDoc: 立ち絵の表情（テンプレクリップ・V
 
   it('実在する表情なら警告しない', () => {
     expect(codes(withYuko([tmpl('yuko_smile_001')]))).toEqual([]);
+  });
+
+  it('実在しても yuko でない素材（写真）を指すと知らせる＝実在するだけでは立ち絵にならない', () => {
+    const w = validateTimelineDoc(withYuko([tmpl('asset_img_001')]));
+    expect(w.map((x) => x.code)).toEqual(['ASSET_NOT_FOUND']);
+    expect(w[0].field).toBe('clips.clip_001.character');
   });
 
   it('表情の指定なし（null）は警告しない', () => {

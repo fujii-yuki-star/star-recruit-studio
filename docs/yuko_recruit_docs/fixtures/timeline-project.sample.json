@@ -115,7 +115,7 @@
       "w": 1920,
       "h": 1080,
       "templateId": "opening_yuko_right_v1",
-      "assetRefs": { "background": "asset_img_001" },
+      "assetRefs": { "background": "asset_mov_001" },
       "texts": { "title": "採用情報", "url": "https://example.co.jp/recruit" },
       "textStyles": { "title": { "color": "#ffee88", "fontWeight": "bold" } },
       "textFontIds": { "title": "kaitou-yokoku-gothic" },
