@@ -159,6 +159,7 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `BAKE_DIALOGUE_SUBTITLE_SKIPPED` | info | — | セリフに合わせて切り替わる字幕は持っていけません。作ったあとに字幕を置き直してください | `ADR-0032`・`11 §7.6.1` |
 | `BAKE_VIDEO_START_TIMING_SKIPPED` | info | — | 動画を再生し始めるタイミングは持っていけません。作ったあとに動画の位置で調整してください | `ADR-0032`・`11 §7.6.1` |
 | `SCHEMA_VERSION_UNSUPPORTED` | fatal | — | このファイルは対応していないバージョンで作成されています | `11 §1` |
+| `PROJECT_FORMAT_UNSUPPORTED` | fatal | — | この動画はタイムラインで編集する形式です。場面の編集画面では開けません。一覧から別の動画を選んでください | `ADR-0032`・`11 §1` |
 
 ---
 

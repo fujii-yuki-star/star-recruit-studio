@@ -182,13 +182,7 @@ pub fn read_asset_data_url(
     project_id: String,
     rel_path: String,
 ) -> Result<String, String> {
-    // パストラバーサル/絶対パス防止（filePath は project.json 由来だが、悪意ある共有プロジェクト対策）。
-    // PathBuf::join は絶対パスを渡すとベースを置き換えるため、絶対パス（Windows の C:\ 含む）も拒否する。
-    if rel_path.contains("..")
-        || rel_path.starts_with('/')
-        || rel_path.starts_with('\\')
-        || Path::new(&rel_path).is_absolute()
-    {
+    if !is_safe_rel_path(&rel_path) {
         return Err("不正なパスです。".to_string());
     }
     let path = project_dir(&app, &project_id)?.join(&rel_path);
@@ -196,6 +190,75 @@ pub fn read_asset_data_url(
     let mime = mime_from_path(&rel_path);
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     Ok(format!("data:{mime};base64,{b64}"))
+}
+
+/// プロジェクト相対パスがパス構成要素として安全か（パストラバーサル・絶対パス防止）。
+///
+/// filePath/voicePath は project.json 由来だが、悪意ある共有プロジェクト対策として読む側で毎回検証する。
+/// PathBuf::join は絶対パスを渡すとベースを置き換えるため、絶対パス（Windows の `C:\` 含む）も拒否する。
+/// **プロジェクト相対パスを受け取る全コマンドがこの1関数を通る**（read_asset_data_url・焼き出しのコピー/容量）
+/// ＝どれか一方だけを直して安全条件が静かに乖離するのを防ぐ。
+fn is_safe_rel_path(rel_path: &str) -> bool {
+    !rel_path.is_empty()
+        && !rel_path.contains("..")
+        && !rel_path.starts_with('/')
+        && !rel_path.starts_with('\\')
+        && !Path::new(rel_path).is_absolute()
+}
+
+/// 指定したプロジェクト相対ファイルの合計バイト数（焼き出し前の容量提示＝ADR-0032 決定13）。
+/// 見つからないファイルは 0 として飛ばす（容量の目安なので、1つ欠けても提示を止めない）。
+#[tauri::command]
+pub fn project_files_size(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<u64, String> {
+    let dir = project_dir(&app, &project_id)?;
+    let mut total: u64 = 0;
+    for rel in &rel_paths {
+        if !is_safe_rel_path(rel) {
+            return Err("不正なパスです。".to_string());
+        }
+        if let Ok(meta) = fs::metadata(dir.join(rel)) {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    Ok(total)
+}
+
+/// 焼き出し（ADR-0032）でプロジェクト間にファイルをコピーする。
+/// 相対パスの構造（assets/…・voices/…）はそのまま保ち、コピー先の親ディレクトリは作る。
+/// **元プロジェクトには一切書き込まない**（片道＝決定16）。
+#[tauri::command]
+pub fn copy_project_files(
+    app: tauri::AppHandle,
+    src_project_id: String,
+    dest_project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<(), String> {
+    if src_project_id == dest_project_id {
+        return Err("コピー元とコピー先が同じです。".to_string());
+    }
+    let src_dir = project_dir(&app, &src_project_id)?;
+    let dest_dir = project_dir(&app, &dest_project_id)?;
+    for rel in &rel_paths {
+        if !is_safe_rel_path(rel) {
+            return Err("不正なパスです。".to_string());
+        }
+        let src = src_dir.join(rel);
+        // 元に無いファイルは飛ばす（未配置のサンプル素材など）。欠けたぶんは焼いた側で
+        // 「素材が見つかりません」として扱われる（15 §6）＝ここで丸ごと失敗させない。
+        if !src.is_file() {
+            continue;
+        }
+        let dest = dest_dir.join(rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+        }
+        fs::copy(&src, &dest).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+    }
+    Ok(())
 }
 
 /// テンプレ所有素材の保管ディレクトリ <appData>/user_templates/assets（全プロジェクト共通＝ADR-0021）。
@@ -285,6 +348,29 @@ pub fn delete_template_asset(app: tauri::AppHandle, asset_id: String) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// プロジェクト相対パスの安全判定（パストラバーサル・絶対パス・空文字）。
+    /// read_asset_data_url と焼き出しのコピー/容量が**同じこの関数**を通るので、ここが唯一の網。
+    #[test]
+    fn rel_path_safety() {
+        // 通す：assets/ と voices/ の通常の相対パス（サブディレクトリも可）。
+        assert!(is_safe_rel_path("assets/asset_001.png"));
+        assert!(is_safe_rel_path("voices/scene_001.wav"));
+        assert!(is_safe_rel_path("assets/sub/a.png"));
+        // 弾く：親への相対参照（区切りの向きを問わず・途中に現れる場合も）。
+        assert!(!is_safe_rel_path(".."));
+        assert!(!is_safe_rel_path("../secret.txt"));
+        assert!(!is_safe_rel_path("assets/../../secret.txt"));
+        assert!(!is_safe_rel_path("assets\\..\\secret.txt"));
+        // 弾く：ルート起点（join がベースを置き換える）。
+        assert!(!is_safe_rel_path("/etc/passwd"));
+        assert!(!is_safe_rel_path("\\Windows\\System32"));
+        // 弾く：Windows の絶対パス（ドライブレター・UNC）。
+        assert!(!is_safe_rel_path("C:\\Windows\\System32"));
+        assert!(!is_safe_rel_path("\\\\server\\share\\a.png"));
+        // 弾く：空（プロジェクトフォルダ自身を指す＝ファイルではない）。
+        assert!(!is_safe_rel_path(""));
+    }
 
     #[test]
     fn sanitize_and_strip() {

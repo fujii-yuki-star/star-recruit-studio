@@ -587,6 +587,29 @@ function voiceFromLine(line: NarrationLine): NonNullable<TimelineClip['voice']> 
 }
 
 /**
+ * 焼いた文書が参照する**プロジェクト相対のファイル**の一覧（決定13＝コピーして自己完結・ADR-0024 (6)）。純粋関数。
+ *
+ * 実ファイルのコピーと容量の提示は infrastructure の仕事で、ここは「どれを運ぶか」だけを決める
+ * （素材の本体・動画の代表フレーム・作成済みの読み上げ音声）。重複は畳み、並びは決定的にする。
+ * **作成済みの音声も運ぶ**のは、焼いた先で作り直させないため（同じ声を作り直すのは時間もかかる）。
+ */
+export function bakedFilePaths(doc: TimelineProject): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (p: string | null | undefined): void => {
+    if (!p || seen.has(p)) return;
+    seen.add(p);
+    out.push(p);
+  };
+  for (const a of doc.assets) {
+    add(a.filePath);
+    add(a.thumbnailPath);
+  }
+  for (const c of doc.clips) add(c.voice?.voicePath);
+  return out;
+}
+
+/**
  * 焼いた文書が持っていく素材（決定13＝コピーして自己完結・ADR-0024 (6)）。
  * **焼く範囲で実際に使われているものだけ**を持っていく（`sceneActiveAssetIds`＝休眠の割当は数えない）＋
  * 鳴っている BGM の音源。元の `project.assets` は並び順のまま絞る（id は振り直さない＝どの素材か辿れる）。

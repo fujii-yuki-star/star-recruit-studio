@@ -519,6 +519,27 @@ describe('parseProjectDoc', () => {
     expect(() => parseProjectDoc(JSON.stringify(doc))).toThrow();
   });
 
+  describe('タイムライン編集の形式は場面形式として読み込まない（ADR-0032・11 §1）', () => {
+    it('format=timeline は「形式が違う」と断る（版の話にすり替えない）', () => {
+      let err: unknown;
+      try {
+        parseProjectDoc(JSON.stringify({ format: 'timeline', schemaVersion: '1.1', projectId: 'proj_20260728_001' }));
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(ProjectLoadError);
+      // 「アプリを更新してください」（版が新しい）ではなく、形式が違うことと次の行動を伝える（§2-5）。
+      expect((err as Error).message).toContain('タイムライン');
+      expect((err as Error).message).toContain('別の動画を選んでください');
+    });
+
+    it('format を持たない既存データは今までどおり読める（不在＝場面形式）', () => {
+      const doc = assembleProject(header(), [], [], []) as unknown as Record<string, unknown>;
+      expect('format' in doc).toBe(false);
+      expect(() => parseProjectDoc(JSON.stringify(doc))).not.toThrow();
+    });
+  });
+
   // 読込時スキーマ検証（#416・11 §8 V2）。構造破損（型不正・必須欠落）は拒否、内容制約違反は読み込む（作りかけを弾かない）。
   describe('読込時スキーマ検証（#416）', () => {
     // 拒否は「ProjectLoadError かつ §2-5 文言」まで固定する（生 TypeError を UI に出さない・#416 P1/P2）。

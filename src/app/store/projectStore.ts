@@ -43,7 +43,11 @@ import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../d
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
-import { lineAudioKey, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
+import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
+import { bakeTimelineProject, bakedFilePaths } from "../../domain/timeline/bake";
+import type { BakeNote, BakeRange, BakeResult } from "../../domain/timeline/bake";
+import { bakeSizeBytes, copyBakedFiles } from "../../infrastructure/bakeFs";
+import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
@@ -195,6 +199,12 @@ interface ProjectState {
   deleteProject: (projectId: string) => Promise<void>;
   /** 保存済みプロジェクトの名前（projectName）を変更して保存する（#241）。 */
   renameProject: (projectId: string, newName: string) => Promise<void>;
+  /** 焼き出したときに増えるディスク容量（バイト）と、持っていけないもの（焼く前の確認用・ADR-0032 決定13）。 */
+  estimateBake: (range: BakeRange) => Promise<{ bytes: number; notes: BakeNote[] }>;
+  /** タイムライン編集の形式へ焼き出して**新しいプロジェクト**として保存する（片道・ADR-0032 決定16）。 */
+  bakeToTimeline: (range: BakeRange, projectName: string) => Promise<{ projectId: string; notes: BakeNote[] }>;
+  /** 焼き出しの変換だけ（内部・estimateBake / bakeToTimeline が共有＝見積りと本番で同じ結果を見る）。 */
+  _bake: (range: BakeRange, projectName: string, projectId?: string) => BakeResult;
   /** 編集中プロジェクトの名前を変更する（#252・メモリの meta.projectName を更新＝保存/自動保存で永続化）。 */
   setProjectName: (name: string) => void;
   /** 指定シーンを更新する（編集→プレビュー即反映）。 */
@@ -910,6 +920,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 開いているプロジェクトを消したら編集状態も新規化する（#383）。そのままだと自動保存（useAutoSave）が
     // 同じ projectId を書き戻し、「元に戻せません」の説明に反して一覧へ復活してしまう。書き出し中は上でブロック済み。
     if (get().meta.projectId === projectId) get().newProject();
+  },
+  estimateBake: async (range) => {
+    const { doc, notes } = get()._bake(range, get().meta.projectName);
+    return { bytes: await bakeSizeBytes(get().meta.projectId, bakedFilePaths(doc)), notes };
+  },
+  bakeToTimeline: async (range, projectName) => {
+    // 焼く前に元を保存する＝**ディスクにあるファイル**（素材・作成済みの声）を運ぶので、
+    // 保存していない声が抜け落ちるのを防ぐ。元の中身は変えない（片道＝決定16）。
+    await get().saveProject();
+    const srcProjectId = get().meta.projectId;
+    const existing = await listProjectSummaries();
+    const projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+    const { doc, notes } = get()._bake(range, projectName, projectId);
+    const rv = validateTimelineProject(doc);
+    if (!rv) console.warn("[timeline] 焼き出した内容がスキーマに未適合（要修正）:", validateTimelineProject.errors);
+    // 先にファイルを運んでから文書を保存する＝途中で失敗しても「素材の無いプロジェクト」が一覧に残らない。
+    await copyBakedFiles(srcProjectId, projectId, bakedFilePaths(doc));
+    await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
+    return { projectId, notes };
+  },
+  _bake: (range, projectName, projectId) => {
+    const s = get();
+    const project = assembleProject(s.meta, s.assets, s.parts, s.scenes);
+    const templateById = new Map(s.templates.map((t) => [t.templateId, t]));
+    return bakeTimelineProject(project, {
+      range,
+      // 容量の見積りでは新しい id をまだ発行しない（採番は本当に焼くときだけ＝番号を飛ばさない）。
+      projectId: projectId ?? project.projectId,
+      projectName,
+      nowIso: new Date().toISOString(),
+      templateOf: (id) => templateById.get(id),
+      lineDurationsFor: (sc) => lineDurationsFromAudio(sc, s.narrationAudioById),
+    });
   },
   renameProject: async (projectId, newName) => {
     // 書き出し中に「開いている」プロジェクトを改名すると、meta 直変更（凍結中の文書を触る）＋ project.json の
