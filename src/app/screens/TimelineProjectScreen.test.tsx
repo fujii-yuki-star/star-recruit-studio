@@ -255,3 +255,28 @@ describe("TimelineProjectScreen: 再生まわりのレビュー指摘（/canon-c
     expect(screen.getByText("再生").getAttribute("title")).toContain("まだ部品を置いていない");
   });
 });
+
+describe("TimelineProjectScreen: 音（#630 後半）", () => {
+  it("音が見つからない部品があることを知らせる（黙って無音にしない）", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_101", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "あ", status: "none" } },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("音が見つからない部品が1個"))).toBe(true);
+  });
+
+  it("音源が用意できている部品では知らせない", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_101", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "あ", status: "generated", voicePath: "voices/a.wav" } },
+      ],
+    });
+    useTimelineStore.setState({ audioSrcByKey: { "voice:voices/a.wav": "data:audio/wav;base64,QQ==" } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/音が見つからない部品/)).not.toBeInTheDocument();
+  });
+});

@@ -1,7 +1,10 @@
 // タイムライン編集プロジェクト（ADR-0032・#629）の編集状態。**場面形式とは別の文書**なので store も分ける
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
-import { assetDisplayUrl } from "../../infrastructure/assetFs";
+import { assetDisplayUrl, readAssetDataUrl } from "../../infrastructure/assetFs";
+import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
+import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
+import { audioSourceKey, audioSourcesOf } from "../../domain/timeline/audio";
 import { loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -32,6 +35,13 @@ export interface TimelineState {
   selectedClipIds: string[];
   /** 素材の表示用 src（assetId → URL）。場面形式の `assetSrcById` と同じ役割。 */
   assetSrcById: Record<string, string>;
+  /**
+   * 音源（**音源キー** → 再生できる URL）。**開いたときにまとめて用意する**＝鳴らす瞬間に読みに行くと
+   * 頭が欠ける。キーはクリップ id ではなく**音源の中身**（`audioSourceKey`）なので、同じ曲を使う複数の
+   * クリップで使い回せ、セッション中に増えたクリップ（複製）も読み直さずに鳴る。
+   * 読めなかったものは入らない（その部品は鳴らない）。
+   */
+  audioSrcByKey: Record<string, string>;
   /** 取り消し/やり直し（ADR-0020 と同じスナップショット方式・積むのは文書そのもの）。 */
   history: HistoryStacks<TimelineProject>;
   /** 直前の操作が置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。次の操作で消す。 */
@@ -91,6 +101,7 @@ function emptyState() {
     playheadSec: 0,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
+    audioSrcByKey: {} as Record<string, string>,
     history: emptyHistory<TimelineProject>(),
     editBlocked: null as EditBlockedReason | null,
     saveStatus: "saved" as TimelineState["saveStatus"],
@@ -118,7 +129,23 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       );
       const assetSrcById: Record<string, string> = {};
       for (const e of entries) if (e) assetSrcById[e[0]] = e[1];
-      set({ doc, assetSrcById, isLoading: false });
+      // 音源も**先に**用意する（鳴らす瞬間に読みに行くと頭が欠ける）。読めないものは黙って飛ばし、
+      // その部品は鳴らない（読み込み失敗で動画全体を開けなくしない）。
+      const audioEntries = await Promise.all(
+        audioSourcesOf(doc).map(async (src): Promise<[string, string] | null> => {
+          const url = src.voicePath
+            ? await readVoiceDataUrl(doc.projectId, src.voicePath)
+            : src.bundledBgmId
+              ? (await readBundledBgmDataUrl(src.bundledBgmId)) ?? null
+              : src.assetId
+                ? await readAssetDataUrl(doc.projectId, assetPathOf(doc, src.assetId) ?? "")
+                : null;
+          return url ? [audioSourceKey(src), url] : null;
+        }),
+      );
+      const audioSrcByKey: Record<string, string> = {};
+      for (const e of audioEntries) if (e) audioSrcByKey[e[0]] = e[1];
+      set({ doc, assetSrcById, audioSrcByKey, isLoading: false });
     } catch (e) {
       // 読込の失敗理由は文書側（TimelineLoadError）が「次の行動」つきで持っている。それ以外は既定文言。
       set({ ...emptyState(), loadError: e instanceof TimelineLoadError ? e.message : LOAD_FAILED_MESSAGE });
@@ -230,6 +257,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
   },
 }));
+
+/** 素材 id → プロジェクト相対のファイルパス（音の素材を読むのに使う）。 */
+function assetPathOf(doc: TimelineProject, assetId: string): string | undefined {
+  return doc.assets.find((a) => a.assetId === assetId)?.filePath;
+}
 
 type SetState = (partial: Partial<TimelineState>) => void;
 type GetState = () => TimelineState;
