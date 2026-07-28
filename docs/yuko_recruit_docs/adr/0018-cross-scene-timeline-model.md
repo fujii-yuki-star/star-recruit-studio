@@ -1,6 +1,12 @@
 # ADR-0018: 場面横断タイムライン／複数トラックのモデル（③・設計のみ）
 
 - **状態**: Accepted（2026-07-01・α-4 実装着手）— 2モデル方式を採用（当初 Proposed の設計を確定）。**実装＝α-4**：③(1) `compileTimeline`（#322）／③(2) 読み取り専用タイムラインUI（#323）／③(3) `timelineOverlay` スキーマ＋`compileTimeline` マージ（schema 1.15）。編集UI・平行トラック拡張・AI 再生成整合は後続サブPRで段階的に。
+  > ⚠️ **[`adr/0032`](0032-timeline-project-format.md)（Proposed・2026-07-28）が本ADRを一部置き換える方向**。
+  > **本ADRが検討した3案に「片道変換で別文書を作る」案は入っていなかった**（(A) の不採用理由「AI が時間軸を吐く必要」は
+  > その案には当たらない）。ADR-0032 では**タイムライン編集を別プロジェクト形式**として作り直し、
+  > **`timelineOverlay` は捨て・編集UIは廃止**する。**残るのは `compileTimeline` による読み取り射影のみ**
+  > （場面形式で尺を見わたす用）。**`timelineOverlay` を前提とした新規実装に着手しないこと。**
+  > ADR-0032 が Accepted になった時点で、本ADRの状態を **一部 Superseded by ADR-0032** へ改める。
 - **日付**: 2026-06-28
 - **関連**: [`adr/0016`](0016-detailed-editing-completion-roadmap.md)（アンブレラ・本ADRは③）/ [`adr/0007`](0007-detailed-edit-mode.md)（単一パイプライン M-A）/ [`adr/0009`](0009-scene-transitions.md)（トランジション）/ [`adr/0015`](0015-dialogue-timeline-model.md)（掛け合い `lines`＝場面内ミニタイムライン）/ [`adr/0001`](0001-rendering-parity.md)（場面内静止・単一フレーム＝④で supersede）/ `adr/0019`（④ キーフレーム・将来）/ `CLAUDE.md §10`（完全自由タイムライン＝MVP外）・`§2-4`（テンプレ駆動）・`11 §7`（scene モデル）
 - **対象**: α-3 ③（場面横断タイムライン／複数トラック）。本 ADR は**設計のみ**。実装は α-4+。
