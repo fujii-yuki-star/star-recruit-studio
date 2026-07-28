@@ -150,6 +150,10 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `LINE_START_OUT_OF_RANGE` | warning | 案内（入力は[0,場面尺]へclamp・描画も clamp） | セリフの開始位置が場面の長さを超えています。場面の長さ内にしてください | `ADR-0015 §8 V17` |
 | `LINE_ORDER_INVALID` | warning | 時間順へ並べ直し | セリフの開始順序が前後しています。時間順に並べ直せます | `ADR-0015 §8 V18` |
 | `LINE_SPEAKER_UNKNOWN` | warning | 既定の声へ | 選べない声が指定されています。標準の声を使います | `ADR-0015 §8 V19` |
+| `TIMELINE_TRACK_NOT_FOUND` | warning | — | どの列に置くか決まっていない部品があります。列を選び直してください | `ADR-0032`・`11 §8 V22` |
+| `TIMELINE_CLIP_TRACK_KIND` | warning | — | 音の部品は音の列に、絵や文字の部品は映像の列に置いてください | `ADR-0032`・`11 §8 V23` |
+| `TIMELINE_CLIP_OVERLAP` | warning | — | 同じ列で時間が重なっています。ずらすか、列を増やして重ねてください | `ADR-0032`・`11 §8 V24` |
+| `TIMELINE_AUDIO_SOURCE_CONFLICT` | warning | — | 音の出どころが2つ指定されています。どちらか一方にしてください | `ADR-0032`・`11 §8 V25` |
 | `SCHEMA_VERSION_UNSUPPORTED` | fatal | — | このファイルは対応していないバージョンで作成されています | `11 §1` |
 
 ---

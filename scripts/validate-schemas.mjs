@@ -25,12 +25,16 @@ const PROJECT_VERSION = projectSchema.properties.schemaVersion.const;
 const vProject = ajv.compile(projectSchema);
 const vTemplate = ajv.compile(load(join(base, 'schemas/template.schema.json')));
 const vPlan = ajv.compile(load(join(base, 'schemas/ai-video-plan.schema.json')));
+// タイムライン形式（ADR-0032・#627）。project の $defs を $ref で共有するので、vProject を先に compile して
+// $id を ajv に登録しておく必要がある（上の行順に依存＝入れ替えると $ref が解決できず落ちる）。
+const vTimeline = ajv.compile(load(join(base, 'schemas/timeline-project.schema.json')));
 
 const fx = (p) => join(base, 'fixtures', p);
 const cases = [
   ['project.sample.json', vProject, fx('project.sample.json')],
   ['ai-video-plan.sample.json', vPlan, fx('ai-video-plan.sample.json')],
   ['ai-video-plan.general.sample.json', vPlan, fx('ai-video-plan.general.sample.json')],
+  ['timeline-project.sample.json', vTimeline, fx('timeline-project.sample.json')],
   ['template-pack/opening_yuko_right_v1', vTemplate, fx('template-pack/opening_yuko_right_v1/template.json')],
   ['template-pack/photo_left_text_right_yuko_v1', vTemplate, fx('template-pack/photo_left_text_right_yuko_v1/template.json')],
 ];
@@ -155,6 +159,11 @@ const mustAccept = [
   ['scene: slotClips（クリップ per-use 上書き・範囲/速度/元音声）を許容（1.19・ADR-0028）', withScene({ slotClips: { mainVisual: { startSec: 1, endSec: 5, speed: 1.5, useOriginalAudio: true, originalAudioVolume: 0.4 }, sub: { speed: 0.5 } } })],
 ];
 const mustReject = [
+  // 形式の判別（ADR-0032・11 §1）。**場面形式は `format` を書かない**（不在＝場面形式）。`'scene'` は
+  // 読込時の解決値であって永続化しない値で、書くとここで落ちる。#627 レビューで挙がった
+  // 「後続で保存時に format:'scene' を明示すると壊れる」を、正典の記述ではなく CI で止めるための固定。
+  ['project: format:"scene" は拒否＝場面形式は format を書かない（判別は timeline か否か・ADR-0032）', { ...withBrief({}), format: 'scene' }],
+  ['project: format:"timeline" も拒否＝タイムライン形式は timeline-project.schema で検証する', { ...withBrief({}), format: 'timeline' }],
   ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
   ['general: agenda 21件', withBrief({ agenda: Array.from({ length: 21 }, () => 'x') })],
   ['general: agenda 1項目101字', withBrief({ agenda: ['あ'.repeat(101)] })],
@@ -226,6 +235,91 @@ for (const [desc, data] of mustReject) {
   if (!vProject(data)) console.log(`PASS  must-reject  ${desc}`);
   else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
 }
+
+// タイムライン形式（ADR-0032・#627）の代表データ。**schema で表せる範囲だけ**をここで縛る。
+// トラック未存在・種別違い・同一トラック内の時間重なり・グループ/アニメの参照切れは cross-field なので
+// schema では弾けず、domain の検証（validateTimelineDoc）が終端。下の semantic 節で sample を横断検査する。
+const tlBase = load(fx('timeline-project.sample.json'));
+const tlWith = (extra) => ({ ...tlBase, ...extra });
+const tlClips = (...clips) => tlWith({ clips });
+const tlAccept = [
+  ['timeline: クリップ0本（作りかけの空プロジェクト）を許容', tlWith({ clips: [], groups: [], animations: [] })],
+  ['timeline: sourceProjectId なし（完全新規）を許容', (() => { const { sourceProjectId, ...rest } = tlBase; return rest; })()],
+  ['timeline: durationSec 0.1（極短でも >0 なら許容・場面形式と同じ流儀 #553）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 0.1 })],
+  ['timeline: startSec 0（先頭・境界）を許容', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+  ['timeline: id 4桁以上（clip_1000・上限なし）を許容', tlClips({ id: 'clip_1000', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+];
+const tlReject = [
+  ['timeline: format="scene" は拒否（場面形式は project.schema で検証する）', tlWith({ format: 'scene' })],
+  ['timeline: format 欠落は拒否（形式の判別ができない）', (() => { const { format, ...rest } = tlBase; return rest; })()],
+  ['timeline: schemaVersion 未知(2.0)は拒否', tlWith({ schemaVersion: '2.0' })],
+  ['timeline: tracks 欠落は拒否（required）', (() => { const { tracks, ...rest } = tlBase; return rest; })()],
+  ['timeline: projectId が場面形式と同じ採番でないと拒否（tl_...）', tlWith({ projectId: 'tl_20260728_001' })],
+  ['timeline: track id 形式不正(track_1)は拒否', tlWith({ tracks: [{ id: 'track_1', kind: 'visual' }] })],
+  ['timeline: track kind 未知(telop)は拒否＝トラックは映像か音声（enum）', tlWith({ tracks: [{ id: 'track_001', kind: 'telop' }] })],
+  ['timeline: clip id 形式不正(ovclip_001)は拒否', tlClips({ id: 'ovclip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+  ['timeline: clip kind 未知(character)は拒否', tlClips({ id: 'clip_001', kind: 'character', trackId: 'track_002', startSec: 0, durationSec: 1 })],
+  ['timeline: durationSec 0 は拒否（exclusiveMinimum・0尺クリップを作らない）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 0 })],
+  ['timeline: durationSec 負は拒否', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: -1 })],
+  ['timeline: startSec 負は拒否（時間 0 より前は無い）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: -1, durationSec: 1 })],
+  ['timeline: trackId 欠落は拒否（どのトラックか決まらない）', tlClips({ id: 'clip_001', kind: 'text', startSec: 0, durationSec: 1 })],
+  ['timeline: sourceStartSec 負は拒否（素材の先頭より前は無い）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 1, sourceStartSec: -1 })],
+  ['timeline: speed 0 は拒否（exclusiveMinimum＝止まった素材にしない）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_004', startSec: 0, durationSec: 1, speed: 0 })],
+  ['timeline: bundledBgmId 未知は拒否（曲の一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_005', startSec: 0, durationSec: 1, bundledBgmId: 'nope' })],
+  ['timeline: fontId 未知は拒否（フォント一覧は場面形式と共有＝$ref）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, fontId: 'old-font' })],
+  ['timeline: rotation 360（=0と重複）は除外（exclusiveMaximum・場面形式と同じ）', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_002', startSec: 0, durationSec: 1, rotation: 360 })],
+  ['timeline: 未知の図形(hexagon)は拒否', tlClips({ id: 'clip_001', kind: 'shape', trackId: 'track_002', startSec: 0, durationSec: 1, shapeType: 'hexagon' })],
+  ['timeline: color 非hexは拒否', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, color: 'white' })],
+  ['timeline: 未知フィールド(sceneId)は拒否＝タイムラインに場面は無い（additionalProperties:false）', tlClips({ id: 'clip_001', kind: 'text', trackId: 'track_002', startSec: 0, durationSec: 1, sceneId: 'scene_001' })],
+  ['timeline: トップレベルに scenes は拒否＝場面形式のフィールドを混ぜない', tlWith({ scenes: [] })],
+  ['timeline: トップレベルに timelineOverlay は拒否＝旧2モデルは持ち込まない（ADR-0018 Superseded）', tlWith({ timelineOverlay: { clips: [] } })],
+  ['timeline: animation id 形式不正(a_001)は拒否', tlWith({ animations: [{ id: 'a_001', targetId: 'clip_003', keyframes: [{ timeSec: 0 }] }] })],
+  ['timeline: animation keyframe opacity 範囲外(1.5)は拒否', tlWith({ animations: [{ id: 'anim_001', targetId: 'clip_003', keyframes: [{ timeSec: 0, opacity: 1.5 }] }] })],
+];
+for (const [desc, data] of tlAccept) {
+  if (vTimeline(data)) console.log(`PASS  must-accept  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-accept  ${desc}`); for (const e of vTimeline.errors ?? []) console.log(`   ${e.instancePath} ${e.message}`); }
+}
+for (const [desc, data] of tlReject) {
+  if (!vTimeline(data)) console.log(`PASS  must-reject  ${desc}`);
+  else { ok = false; console.log(`FAIL  must-reject  ${desc}（スキーマが許容してしまった）`); }
+}
+
+// タイムライン sample の相互参照（schema では表せない横断条件・domain の validateTimelineDoc と同じ規則）
+const tl = load(fx('timeline-project.sample.json'));
+const tlAssetIds = new Set(tl.assets.map((a) => a.assetId));
+const trackById = new Map(tl.tracks.map((t) => [t.id, t]));
+let tlSem = true;
+const tlFail = (m) => { tlSem = false; console.log(`   SEM  ${m}`); };
+const kindOfTrack = { slot: 'visual', text: 'visual', shape: 'visual', subtitle: 'visual', template: 'visual', audio: 'audio' };
+const byTrack = new Map();
+for (const c of tl.clips) {
+  const t = trackById.get(c.trackId);
+  if (!t) { tlFail(`${c.id}: trackId ${c.trackId} missing`); continue; }
+  if (t.kind !== kindOfTrack[c.kind]) tlFail(`${c.id}: kind ${c.kind} は ${t.kind} トラックに置けない`);
+  if (c.assetId != null && !tlAssetIds.has(c.assetId)) tlFail(`${c.id}: assetId ${c.assetId} missing`);
+  if (c.assetId != null && c.bundledBgmId != null) tlFail(`${c.id}: assetId と bundledBgmId は排他`);
+  if (!byTrack.has(c.trackId)) byTrack.set(c.trackId, []);
+  byTrack.get(c.trackId).push(c);
+}
+// 同一トラック内で時間は重ならない（重ね順がトラック順だけで一意に決まる＝ADR-0032）
+for (const [tid, list] of byTrack) {
+  const sorted = [...list].sort((a, b) => a.startSec - b.startSec);
+  for (let i = 1; i < sorted.length; i += 1) {
+    const prev = sorted[i - 1];
+    if (prev.startSec + prev.durationSec > sorted[i].startSec) tlFail(`${tid}: ${prev.id} と ${sorted[i].id} が時間で重なっている`);
+  }
+}
+const tlClipIds = new Set(tl.clips.map((c) => c.id));
+const tlGroupIds = new Set((tl.groups ?? []).map((g) => g.id));
+for (const g of tl.groups ?? []) {
+  for (const m of g.members) if (!tlClipIds.has(m) && !tlGroupIds.has(m)) tlFail(`group ${g.id}: member ${m} missing`);
+}
+for (const a of tl.animations ?? []) {
+  if (!tlClipIds.has(a.targetId) && !tlGroupIds.has(a.targetId)) tlFail(`animation ${a.id}: targetId ${a.targetId} missing`);
+}
+console.log(tlSem ? 'PASS  semantic  timeline-project.sample cross-refs' : 'FAIL  semantic  timeline-project.sample cross-refs');
+ok = ok && tlSem;
 
 // ai-video-plan の掛け合い（narrationLines・#180）を schema レベルで検証（任意追加・1.0 据え置き）。
 const aiBase = {
