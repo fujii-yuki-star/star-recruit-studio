@@ -55,7 +55,7 @@ describe("TimelineView", () => {
     expect(screen.queryByTestId("timeline-view")).not.toBeInTheDocument();
   });
 
-  it("編集モードでは overlay 由来クリップだけ選択でき、選択がハイライトされる", () => {
+  it("編集モードでは overlay も場面射影クリップも選べ、選択がハイライトされる（#329 (3)）", () => {
     const tl = sampleTimeline();
     tl.tracks.telop.push({ id: "ovclip_001", sceneId: "s1", startSec: 1, endSec: 4, label: "追加テロップ", origin: "overlay" });
     const onSelect = vi.fn();
@@ -64,12 +64,26 @@ describe("TimelineView", () => {
     fireEvent.pointerDown(screen.getByText("追加テロップ"), { clientX: 10, pointerId: 1 });
     fireEvent.pointerUp(screen.getByText("追加テロップ"), { clientX: 10, pointerId: 1 });
     expect(onSelect).toHaveBeenLastCalledWith("ovclip_001");
-    // 場面射影クリップ（origin 無し）は選択せず、空領域扱いで選択解除（null）。
+    // 場面射影クリップ（origin 無し）も**選べる**＝編集元へ辿るため（#329 (3)）。ただし動かせはしない。
     fireEvent.click(screen.getByText("字幕テキスト"));
+    expect(onSelect).toHaveBeenLastCalledWith("s1/l1");
+    // 何も無いところを押したときだけ選択解除（null）。
+    fireEvent.click(screen.getByTestId("timeline-view").querySelector(".timeline-scroll") as HTMLElement);
     expect(onSelect).toHaveBeenLastCalledWith(null);
     // 選択中はハイライト class が付く。
     rerender(<TimelineView timeline={tl} editable selectedClipId="ovclip_001" onSelectClip={onSelect} />);
     expect(screen.getByText("追加テロップ").className).toContain("timeline-clip--selected");
+  });
+
+  it("場面射影クリップはドラッグで動かせない（正準は場面側・ADR-0018）", () => {
+    const tl = sampleTimeline();
+    const onDrag = vi.fn();
+    render(<TimelineView timeline={tl} editable onSelectClip={vi.fn()} onClipDrag={onDrag} />);
+    const clip = screen.getByText("字幕テキスト");
+    fireEvent.pointerDown(clip, { clientX: 100, pointerId: 1 });
+    fireEvent.pointerMove(clip, { clientX: 172, pointerId: 1 });
+    fireEvent.pointerUp(clip, { clientX: 172, pointerId: 1 });
+    expect(onDrag).not.toHaveBeenCalled();
   });
 
   it("編集モードで overlay クリップ本体をドラッグすると onClipDrag(id, 'move', 端のグローバル秒) が確定する", () => {

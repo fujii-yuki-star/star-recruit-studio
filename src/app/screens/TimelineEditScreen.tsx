@@ -3,6 +3,7 @@ import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { assembleProject } from "../../domain/project/persistence";
 import { activeTelopsAt, compileTimeline, sceneLocalTelops } from "../../domain/project/compileTimeline";
+import type { Timeline, TimelineClip, TimelineTrackKind } from "../../domain/project/compileTimeline";
 import { activeLineIndexAt, lineSegments, segmentAt } from "../../domain/project/lineTimeline";
 import { clampPlayheadSec, playheadFrameAt } from "../../domain/project/playhead";
 import { formatDuration } from "../../domain/format/duration";
@@ -20,6 +21,25 @@ import { ExportLock } from "../components/ExportLockBanner";
 import { ArrowLeftIcon } from "../components/icons";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 
+/** 射影クリップを探すレーン（BGM は場面に紐づかないので対象外）。 */
+const TIMELINE_LANES: TimelineTrackKind[] = ["video", "telop", "audio"];
+
+/**
+ * 選んだ id が**場面から射影されたクリップ**（場面・セリフ・字幕）なら、それと場面の表示名を返す（ADR-0023 (3)）。
+ * 音声レーンと字幕レーンの同じ行は id を共有する（`sceneId/lineId`）＝**同じセリフ**なので、先に見つかったほうでよい。
+ */
+function findSceneClip(timeline: Timeline, clipId: string | null): { clip: TimelineClip; sceneLabel: string } | null {
+  if (clipId == null) return null;
+  for (const kind of TIMELINE_LANES) {
+    const clip = timeline.tracks[kind].find((c) => c.id === clipId && c.sceneId != null);
+    if (clip) {
+      const order = timeline.scenes.find((s) => s.sceneId === clip.sceneId)?.order ?? 0;
+      return { clip, sceneLabel: `場面 ${order + 1}` };
+    }
+  }
+  return null;
+}
+
 interface TimelineEditScreenProps {
   onNavigate: (screen: ScreenId) => void;
 }
@@ -30,7 +50,7 @@ interface TimelineEditScreenProps {
  * タイムライン上のドラッグ移動は ③(4b) で追加予定（本PRは選択＋数値/文言編集まで）。
  */
 export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
-  const { scenes, parts, assets, templates, meta, narrationAudioById, addOverlayClip, updateOverlayClip, removeOverlayClip, undo, redo } = useProjectStore();
+  const { scenes, parts, assets, templates, meta, narrationAudioById, addOverlayClip, updateOverlayClip, removeOverlayClip, setEditingSceneId, generateNarration, isGeneratingNarration, undo, redo } = useProjectStore();
   // Undo/Redo（#255・ADR-0020）：overlay 編集も履歴対象（docSnapshot が meta.timelineOverlay を含む＝自動）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
@@ -52,6 +72,10 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   );
   const overlayClips = meta.timelineOverlay?.clips ?? [];
   const selectedClip = overlayClips.find((c) => c.id === selectedClipId) ?? null;
+
+  // 場面から射影されたクリップ（場面・セリフ・字幕）を選んだとき（ADR-0023 (3)・#329）。overlay でない選択がこれ。
+  // 音声レーンと字幕レーンの同じ行は id を共有する（`sceneId/lineId`）＝**同じセリフ**なので、両方光って良い。
+  const selectedSceneClip = findSceneClip(timeline, selectedClip ? null : selectedClipId);
 
   // 再生ヘッド（ADR-0023 段階(1)）。時間軸で選んだ瞬間の**静止フレーム**を右の窓へ。
   // グローバル秒→場面ローカル秒の橋渡しだけ `playheadFrameAt` が担い、そこから先（字幕・有効行・テロップ）は
@@ -219,9 +243,43 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
               </div>
             )}
           </div>
+        ) : selectedSceneClip ? (
+          /* 場面から射影されたクリップ（場面・セリフ・字幕）を選んだとき（ADR-0023 (3)）。
+             ここでは直接いじらず、**編集元へ辿る**導線と、その場でできる「声を作り直す」だけを出す
+             （正準は場面側＝タイムラインで書き換えない・ADR-0018 の2モデル方式）。 */
+          <div className="col gap-sm" data-testid="scene-clip-editor">
+            <h2 className="section-title">選んだ場面</h2>
+            <p className="text-sm text-muted" style={{ margin: 0 }}>
+              {selectedSceneClip.sceneLabel}（{formatDuration(selectedSceneClip.clip.startSec)}〜{formatDuration(selectedSceneClip.clip.endSec)}）
+            </p>
+            {selectedSceneClip.clip.lineId && (
+              <p className="text-sm" style={{ margin: 0 }}>「{selectedSceneClip.clip.label}」</p>
+            )}
+            <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setEditingSceneId(selectedSceneClip.clip.sceneId ?? null);
+                  onNavigate("scene-edit");
+                }}
+              >
+                この場面を編集する
+              </button>
+              {/* 声は場面まるごと作り直す（行だけの作り直しは store に無い＝場面編集と同じ粒度に揃える）。
+                  作成中・書き出し中は押せない＝押せるのに何も起きない、を作らない（ADR-0026④）。 */}
+              <button
+                className="btn btn-secondary"
+                disabled={isGeneratingNarration || isExporting}
+                onClick={() => void generateNarration(selectedSceneClip.clip.sceneId ?? "")}
+              >
+                {isGeneratingNarration ? "声を作成中…" : "この場面の声を作り直す"}
+              </button>
+            </div>
+          </div>
         ) : (
           <p className="text-muted" style={{ margin: 0 }}>
             「＋ テロップを追加」で字幕を足し、タイムライン上のテロップをクリックすると、ここで文言や位置を調整できます。
+            場面・セリフ・字幕のクリップを選ぶと、その場面の編集へ移れます。
           </p>
         )}
       </div>

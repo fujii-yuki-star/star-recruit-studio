@@ -281,8 +281,11 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
                     />
                   ))}
                 {timeline.tracks[lane.kind].map((clip) => {
-                  // overlay 由来クリップだけ編集モードで選択・ドラッグ可能。判別は domain の origin（UI は id 形式を知らない・§2-7）。
-                  const selectable = !!editable && clip.origin === "overlay";
+                  // overlay 由来クリップだけ**ドラッグで編集**できる。判別は domain の origin（UI は id 形式を知らない・§2-7）。
+                  const editableClip = !!editable && clip.origin === "overlay";
+                  // 場面から射影されたクリップ（場面・セリフ・字幕）も**選べる**＝編集元へ辿るため（ADR-0023 (3)・#329）。
+                  // 動かせはしない（正準は場面側。ここで直接いじると2モデル方式が崩れる＝ADR-0018）。
+                  const selectable = editableClip || (!!editable && clip.sceneId != null);
                   const selected = selectable && clip.id === selectedClipId;
                   const isDragging = drag?.id === clip.id;
                   const baseLeft = clip.startSec * pxPerSec;
@@ -303,11 +306,12 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
                       className={`timeline-clip timeline-clip--${lane.kind}${selected ? " timeline-clip--selected" : ""}${selectable ? " timeline-clip--editable" : ""}${isDragging ? " timeline-clip--dragging" : ""}`}
                       style={{ left: Math.max(0, left), width: Math.max(4, width) }}
                       title={clipTitle(clip)}
-                      onClick={selectable ? (e) => e.stopPropagation() : undefined}
-                      onPointerDown={selectable ? (e) => beginDrag(e, clip.id, "move") : undefined}
+                      // 射影クリップは**押して選ぶだけ**（ドラッグ開始はしない）。空領域扱いの選択解除は止める。
+                      onClick={selectable ? (e) => { e.stopPropagation(); if (!editableClip) onSelectClip?.(clip.id); } : undefined}
+                      onPointerDown={editableClip ? (e) => beginDrag(e, clip.id, "move") : undefined}
                     >
                       {clip.label}
-                      {selectable && (
+                      {editableClip && (
                         <>
                           <span
                             className="timeline-clip-handle timeline-clip-handle--left"
