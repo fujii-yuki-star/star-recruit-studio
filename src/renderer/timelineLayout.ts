@@ -4,32 +4,50 @@
 // 「その時刻に生きているクリップを、トラックの並び順に重ねる」だけを担い、1クリップの中身は
 // `layoutScene` に委ねる。こうするとテンプレの層解決・FREE 要素・文字の体裁・キーフレームの重ね方が
 // 両形式で1つの実装に収まり、プレビュー＝書き出しのパリティ（ADR-0001）を二重に作らずに済む。
-import { dimsForOrientation } from '../domain/constants';
-import { FREE_CATEGORY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
-import type { FreeElementKind } from '../domain/enums';
+import { DEFAULT_CHARACTER_ID, dimsForOrientation } from '../domain/constants';
+import { FREE_CATEGORY, NARRATION_STATUS, TEXT_KEY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
+import type { FreeElementKind, TimelineClipKind } from '../domain/enums';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { groupElementIds } from '../domain/project/groupOps';
 import type { Group } from '../domain/group/types';
 import { interpolateKeyframes } from '../domain/project/keyframes';
 import type { InterpolatedTransform } from '../domain/project/keyframes';
 import type { FreeElement, Scene } from '../domain/project/types';
+import { TEMPLATE_SCHEMA_VERSION } from '../domain/template/types';
 import type { Template } from '../domain/template/types';
 import { clipEndSec } from '../domain/timeline/validateTimelineDoc';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
-import { layoutScene } from './layout';
+import { applyInterpolatedTransform, DEFAULT_BACKGROUND_COLOR, layoutScene } from './layout';
 import type { LayoutItem, SceneLayout } from './layout';
-
-/** キャンバスの下地。テンプレを置いていない場所の色＝場面形式の既定（`layoutScene`）と同じ白に揃える。 */
-const CANVAS_BACKGROUND_COLOR = '#ffffff';
+import type { Orientation } from '../domain/enums';
 
 /** クリップが時刻 t に生きているか。区間は `[startSec, startSec+durationSec)`（V24 と同じ半開区間）。 */
 export function clipIsLiveAt(clip: TimelineClip, timeSec: number): boolean {
   return timeSec >= clip.startSec && timeSec < clipEndSec(clip);
 }
 
-/** 映像として描くクリップか（音だけのものは絵を持たない）。 */
+/**
+ * 映像として描くクリップか（音だけのものは絵を持たない）。
+ * **網羅 switch**（`never` チェック）で書くのは、`TimelineClipKind` に種別が増えたとき「映像扱いのまま
+ * 描き方が無く黙って何も出ない」を型で止めるため（ADR-0032 決定19 の取りこぼし防止と同じ流儀）。
+ */
 function isVisualClip(clip: TimelineClip): boolean {
-  return clip.kind !== TIMELINE_CLIP_KIND.audio && clip.kind !== TIMELINE_CLIP_KIND.voice;
+  const kind: TimelineClipKind = clip.kind;
+  switch (kind) {
+    case TIMELINE_CLIP_KIND.slot:
+    case TIMELINE_CLIP_KIND.text:
+    case TIMELINE_CLIP_KIND.shape:
+    case TIMELINE_CLIP_KIND.subtitle:
+    case TIMELINE_CLIP_KIND.template:
+      return true;
+    case TIMELINE_CLIP_KIND.audio:
+    case TIMELINE_CLIP_KIND.voice:
+      return false;
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
+  }
 }
 
 /**
@@ -56,19 +74,13 @@ interface Box {
 }
 
 /**
- * 箱へ補間済みの変換を重ねる（`applyInterpolatedTransform` と同じ規則を矩形に対して行う）。
- * `scale` は**自身の中心を保ったまま**拡縮 → `x`/`y` オフセット → `rotation` オフセット。
+ * 箱へ補間済みの変換を重ねる。**規則そのものは `applyInterpolatedTransform`（場面形式と同じ1関数）に委ねる**
+ * ＝「scale は中心維持 → x/y → rotation」を2か所に書かない（片方だけ直って絵が割れるのを防ぐ・§6）。
  */
 function boxWithTransform(box: Box, tr: InterpolatedTransform): Box {
-  const w = box.w * (tr.scale ?? 1);
-  const h = box.h * (tr.scale ?? 1);
-  return {
-    x: box.x - (w - box.w) / 2 + (tr.x ?? 0),
-    y: box.y - (h - box.h) / 2 + (tr.y ?? 0),
-    w,
-    h,
-    rotation: (box.rotation ?? 0) + (tr.rotation ?? 0),
-  };
+  const next: Box = { ...box, rotation: box.rotation ?? 0 };
+  applyInterpolatedTransform(next, tr); // 規則そのものは場面形式と同じ1関数（§6）
+  return next;
 }
 
 /**
@@ -137,20 +149,26 @@ function clipBox(clip: TimelineClip, canvas: { width: number; height: number }):
   };
 }
 
-/** テンプレを置いたクリップ（`kind:'template'`）を、場面形式の Scene へ写して `layoutScene` に渡せる形にする。 */
-function sceneFromTemplateClip(clip: TimelineClip): Scene {
+/**
+ * クリップを、場面形式の Scene へ写して `layoutScene` に渡せる形にする（**保存しない・このフレームの中だけ**）。
+ *
+ * `sceneType` は**実際に使う見た目の `category`** を入れる＝`11 §3.2`「`scene.sceneType` と `template.category` は
+ * 同じ値集合を共有する」に合わせる（描画は `template.category` で分岐するので絵は変わらないが、
+ * `sceneType` を読む規則〔例 `isFreeScene`〕と同じ形の後続コードが誤読しないようにする）。
+ */
+function sceneFromClip(clip: TimelineClip, template: Template): Scene {
   return {
-    // sceneId はこのフレームの中でだけ使う識別子（保存しない）。クリップ id をそのまま使う。
+    // sceneId はこのフレームの中でだけ使う識別子。partId/warnings も器を満たすためのダミー（保存も検証もしない）。
     sceneId: clip.id,
     partId: '',
     order: 0,
-    sceneType: FREE_CATEGORY,
+    sceneType: template.category,
     templateId: clip.templateId ?? '',
     durationSec: clip.durationSec,
     assetRefs: clip.assetRefs ?? {},
-    character: clip.character ?? { enabled: false, characterId: 'yuko' },
-    texts: clip.texts ?? {},
-    narration: { text: '', status: 'none' },
+    character: clip.character ?? { enabled: false, characterId: DEFAULT_CHARACTER_ID },
+    texts: subtitleAwareTexts(clip),
+    narration: { text: '', status: NARRATION_STATUS.none },
     warnings: [],
     ...(clip.textStyles ? { textStyles: clip.textStyles } : {}),
     ...(clip.slotFits ? { slotFits: clip.slotFits } : {}),
@@ -160,23 +178,48 @@ function sceneFromTemplateClip(clip: TimelineClip): Scene {
   };
 }
 
-/** 自由配置のクリップ（slot/text/shape/subtitle）を FREE 要素へ写す。空間の語彙は同じもの（11 §7.6）。 */
-function freeElementFromClip(clip: TimelineClip, canvas: { width: number; height: number }): FreeElement {
-  const { id, kind, trackId: _t, startSec: _s, durationSec: _d, templateId: _tid, assetRefs: _ar, texts: _tx,
-    textStyles: _ts, slotFits: _sf, textFontIds: _tf, character: _c, slotClips: _sc, voice: _v,
-    bundledBgmId: _b, volume: _vol, fadeInSec: _fi, fadeOutSec: _fo, sourceStartSec: _ss, speed: _sp,
-    ...spatial } = clip;
-  return { ...spatial, ...clipBox(clip, canvas), id, kind: kind as FreeElementKind };
+/**
+ * 字幕のクリップ（`kind:'subtitle'`）が持つ**焼き付けた文言**を、`texts.subtitle` として渡す。
+ *
+ * FREE 字幕要素は表示文を「対象（`subtitleSource`）」から解決する（ADR-0029）が、タイムライン形式に対象の語彙は
+ * 無い（連動は #633）。焼き出し（#628 `staticSubtitleText`）は**時間で変わらない字幕を `clip.text` へ焼き付ける**ので、
+ * ここで `texts.subtitle` に載せて既定の対象（＝読み上げ）から解決させる。これが無いと、
+ * **「黙って消さない」ために焼き付けた字幕が受け側で1つも描かれない**（§2-5・#642 レビュー 🔴）。
+ */
+function subtitleAwareTexts(clip: TimelineClip): NonNullable<Scene['texts']> {
+  const texts = clip.texts ?? {};
+  if (clip.kind !== TIMELINE_CLIP_KIND.subtitle || !clip.text) return texts;
+  return { ...texts, [TEXT_KEY.subtitle]: clip.text };
 }
 
-/** タイムライン形式の空の器（自由配置＝層を持たない）。1クリップを FREE 要素として描くために使う。 */
-function emptyFreeTemplate(canvas: { width: number; height: number }): Template {
+/** 自由配置のクリップ（slot/text/shape/subtitle）を FREE 要素へ写す。空間の語彙は同じもの（11 §7.6）。 */
+function freeElementFromClip(clip: TimelineClip, canvas: { width: number; height: number }): FreeElement {
+  // **持っていくものを名指しする**（要らないものを除外する形にしない）＝`TimelineClip` に時間や音の
+  // フィールドが増えたとき、rest 経由で FreeElement へ黙って流れ込まない。空間の語彙は 11 §7.6。
+  const el: FreeElement = { ...clipBox(clip, canvas), id: clip.id, kind: clip.kind as FreeElementKind };
+  const spatial = [
+    'name', 'assetId', 'fit', 'text', 'fontSize', 'color', 'fontWeight', 'fontId', 'lineHeight',
+    'textAlign', 'shapeType', 'fillColor', 'opacity', 'radius', 'strokeColor', 'strokeWidth',
+    'background', 'hidden', 'locked',
+  ] as const satisfies readonly (keyof FreeElement & keyof TimelineClip)[];
+  for (const key of spatial) {
+    const v = clip[key];
+    if (v !== undefined) Object.assign(el, { [key]: v });
+  }
+  return el;
+}
+
+/**
+ * タイムライン形式の空の器（自由配置＝層を持たない）。1クリップを FREE 要素として描くために使う。
+ * **向きは文書の値をそのまま渡す**（寸法から逆算しない）＝将来 `1:1` が入っても黙って `16:9` と名乗らない。
+ */
+function emptyFreeTemplate(canvas: { width: number; height: number }, aspectRatio: Orientation): Template {
   return {
-    schemaVersion: '1.0',
+    schemaVersion: TEMPLATE_SCHEMA_VERSION,
     templateId: '',
     name: '',
     category: FREE_CATEGORY,
-    aspectRatio: canvas.width >= canvas.height ? '16:9' : '9:16',
+    aspectRatio,
     canvas,
     layers: [],
   };
@@ -253,13 +296,13 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
     const template =
       clip.kind === TIMELINE_CLIP_KIND.template
         ? opts.templateOf(clip.templateId ?? '')
-        : emptyFreeTemplate(canvas);
+        : emptyFreeTemplate(canvas, doc.videoSettings.aspectRatio);
     if (!template) continue; // 見た目が見つからないクリップは描かない（案内は呼び出し側）
 
     const scene =
       clip.kind === TIMELINE_CLIP_KIND.template
-        ? sceneFromTemplateClip(clip)
-        : { ...sceneFromTemplateClip(clip), freeLayout: [freeElementFromClip(clip, canvas)] };
+        ? sceneFromClip(clip, template)
+        : { ...sceneFromClip(clip, template), freeLayout: [freeElementFromClip(clip, canvas)] };
     const sub = layoutScene(scene, template);
 
     // クリップは**中身の座標系**として扱う＝クリップに掛かる変形（グループ → 自身のキーフレーム）は、
@@ -275,17 +318,29 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
     const sim = similarityBetween(box, finalBox);
     const groupO = opacityForClip.get(clip.id);
 
-    for (const item of sub.items) {
+    // 見た目パターンの下地（`template.defaults.backgroundColor`）は、場面形式ではフレーム全体を塗る。
+    // タイムラインでは「そのクリップの下地」なので、クリップの箱ぶんの塗りとして最背面へ足す
+    // ＝背景の層を持たない見た目でも下地が黙って白にならない。
+    const clipItems: LayoutItem[] =
+      clip.kind === TIMELINE_CLIP_KIND.template
+        ? [{ id: `${clip.id}__bg`, kind: 'fill', ...box, zIndex: -1, color: sub.backgroundColor, opacity: 1, radius: 0 }, ...sub.items]
+        : sub.items;
+
+    for (const item of clipItems) {
       applySimilarity(item, sim);
+      // 文字のフォント：クリップ全体の指定（`fontId`）は、種別ごとの指定が無いときの受け皿。
+      // 場面形式は「フレーム単位の fontFamily」で効かせるが、1フレームに複数クリップが混ざる本形式では
+      // それができないので、アイテムへ落とす（テンプレのクリップだけ黙って既定へ戻るのを防ぐ・ADR-0026②）。
+      if (item.kind === 'text' && item.fontId == null && clip.fontId != null) item.fontId = clip.fontId;
       // 不透明度は幾何と違い**クリップ全体に等しく効く**（相似変換では運べない）ので別に重ねる。
-      // 自身のキーフレームは絶対上書き、グループは乗算＝場面形式の `layoutScene` と同じ順序。
-      // 混ぜるとクリップ自身の不透明度（例 0.5 の図形）を潰す。
-      if (ownTr.opacity != null) item.opacity = ownTr.opacity;
+      // **自身のキーフレームもグループも乗算**にする＝アイテムごとの絶対上書きだと、区間外クランプで
+      // 層自身の不透明度（例 0.4 の層）がフェード終了後に 1 へ化ける（黙って別物になる・ADR-0026④）。
+      if (ownTr.opacity != null) item.opacity = (item.opacity ?? 1) * ownTr.opacity;
       if (groupO != null) item.opacity = (item.opacity ?? 1) * groupO;
       // 重ね順はトラックの並び順だけで決める＝クリップの中の順序を保ったまま、後のトラックほど手前へ。
       items.push({ ...item, id: `${clip.id}/${item.id}`, zIndex: items.length });
     }
   }
 
-  return { width: canvas.width, height: canvas.height, backgroundColor: CANVAS_BACKGROUND_COLOR, items };
+  return { width: canvas.width, height: canvas.height, backgroundColor: DEFAULT_BACKGROUND_COLOR, items };
 }

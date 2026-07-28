@@ -1,5 +1,6 @@
 // ユーザーが作成したテンプレート（ADR-0017）。同梱テンプレと同じ Template 型で、ID 接頭辞で区別する。
 // グローバル（全プロジェクト再利用）に永続化し、AI 入力からは除外する（誤選択防止＝ADR-0017 不変条件）。
+import { TEMPLATE_SCHEMA_VERSION } from './types';
 import type { Layer, Template } from './types';
 import type { Orientation, SceneCategory } from '../enums';
 import { dimsForOrientation } from '../constants';
@@ -63,7 +64,7 @@ export function buildBlankTemplate(
   const canvas = dimsForOrientation(orientation);
   const background: Layer = { id: 'background', type: 'background', x: 0, y: 0, w: canvas.width, h: canvas.height, zIndex: 0 };
   return {
-    schemaVersion: '1.0', // template schema 版（sampleData と同じ・11 §1）。
+    schemaVersion: TEMPLATE_SCHEMA_VERSION, // 11 §1（値の正典は template.schema.json）
     templateId,
     name,
     category,

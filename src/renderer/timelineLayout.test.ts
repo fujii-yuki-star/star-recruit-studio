@@ -106,7 +106,9 @@ describe('layoutTimelineAt: 並べ方', () => {
 describe('layoutTimelineAt: 1クリップの中身は場面形式と同じ核で描く（ADR-0001）', () => {
   it('テンプレのクリップは、同じ内容の場面を描いたのと同じアイテムになる', () => {
     const d = doc({ clips: [templateClip('clip_001')] });
-    const fromTimeline = layoutTimelineAt(d, 0, opts).items;
+    // 先頭はクリップ自身の下地（場面形式では SceneLayout.backgroundColor がフレームを塗る分）。
+    const [bg, ...fromTimeline] = layoutTimelineAt(d, 0, opts).items;
+    expect(bg).toMatchObject({ kind: 'fill', x: 0, y: 0, w: 1920, h: 1080 });
     // 同じ差し込み口を持つ場面を layoutScene で描いた結果（id と重ね順だけが並べ方で変わる）
     const fromScene = layoutScene(
       {
@@ -242,5 +244,60 @@ describe('layoutTimelineAt: クリップは中身の座標系（#642 レビュ�
     });
     const title = layoutTimelineAt(d, 0, opts).items.find((i) => i.id.endsWith('/title'))!;
     expect(title).toMatchObject({ x: -660, y: -140, w: 1600, h: 280 }); // 拡大後に +100 だけ動く
+  });
+});
+
+describe('layoutTimelineAt: レビュー指摘の修正（PR #642 /canon-check）', () => {
+  it('焼き付けた字幕の文言を描く（#628 の「黙って消さない」が受け側で効く）', () => {
+    const d = doc({
+      clips: [clip({ id: 'clip_001', kind: TIMELINE_CLIP_KIND.subtitle, x: 0, y: 900, w: 1920, h: 120, text: '焼き付けた字幕' })],
+    });
+    const items = layoutTimelineAt(d, 0, opts).items;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'text', text: '焼き付けた字幕', isSubtitle: true });
+  });
+
+  it('文言の無い字幕クリップは何も描かない（空の帯を出さない）', () => {
+    const d = doc({ clips: [clip({ id: 'clip_001', kind: TIMELINE_CLIP_KIND.subtitle, x: 0, y: 900, w: 1920, h: 120 })] });
+    expect(layoutTimelineAt(d, 0, opts).items).toEqual([]);
+  });
+
+  it('クリップの不透明度は乗算＝層自身の濃さを潰さない（区間外でも化けない）', () => {
+    const withOpacity: Template = {
+      ...NORMAL_TEMPLATE,
+      layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, fillColor: '#112233', opacity: 0.4 }],
+    };
+    const d = doc({
+      clips: [templateClip('clip_001', { durationSec: 5 })],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
+    });
+    const at = (t: number) =>
+      layoutTimelineAt(d, t, { templateOf: () => withOpacity }).items.find((i) => i.id.endsWith('/background'))!;
+    expect(at(1).opacity).toBeCloseTo(0.4); // フェード後も層の 0.4 のまま（1 に化けない）
+    expect(at(0.5).opacity).toBeCloseTo(0.2); // 途中は 0.4 × 0.5
+    expect(at(3).opacity).toBeCloseTo(0.4); // 区間外クランプでも化けない
+  });
+
+  it('クリップ全体のフォント指定が文字へ届く（テンプレのクリップだけ既定へ戻らない）', () => {
+    const d = doc({ clips: [templateClip('clip_001', { fontId: 'kaitou-yokoku-gothic' })] });
+    const title = layoutTimelineAt(d, 0, opts).items.find((i) => i.id.endsWith('/title'))!;
+    expect(title.kind === 'text' && title.fontId).toBe('kaitou-yokoku-gothic');
+  });
+
+  it('種別ごとの指定があればそちらが勝つ（クリップ全体は受け皿）', () => {
+    const d = doc({ clips: [templateClip('clip_001', { fontId: 'kaitou-yokoku-gothic', textFontIds: { title: 'gen-interface-jp-display' } })] });
+    const title = layoutTimelineAt(d, 0, opts).items.find((i) => i.id.endsWith('/title'))!;
+    expect(title.kind === 'text' && title.fontId).toBe('gen-interface-jp-display');
+  });
+
+  it('背景の層を持たない見た目でも、その見た目の下地色を敷く（黙って白にしない）', () => {
+    const noBackground: Template = {
+      ...NORMAL_TEMPLATE,
+      defaults: { backgroundColor: '#123456' },
+      layers: [{ id: 'title', type: 'text', textKey: 'title', x: 100, y: 200, w: 800, h: 140, fontSize: 72 }],
+    };
+    const d = doc({ clips: [templateClip('clip_001')] });
+    const items = layoutTimelineAt(d, 0, { templateOf: () => noBackground }).items;
+    expect(items[0]).toMatchObject({ kind: 'fill', color: '#123456', x: 0, y: 0, w: 1920, h: 1080 });
   });
 });

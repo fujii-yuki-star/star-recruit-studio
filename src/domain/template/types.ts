@@ -56,6 +56,13 @@ export interface TemplateDefaults {
   backgroundColor?: string;
 }
 
+/**
+ * テンプレ（見た目パターン）の schema 版（11 §1）。値の正典は `schemas/template.schema.json` の
+ * `properties.schemaVersion.const` で、ここはその写し。場面形式（`PROJECT_SCHEMA_VERSION`）・
+ * タイムライン形式（`TIMELINE_SCHEMA_VERSION`）と**独立に進む**（別の文書なので釣られて上げない）。
+ */
+export const TEMPLATE_SCHEMA_VERSION = '1.0';
+
 export interface Template {
   schemaVersion: string;
   templateId: string;
