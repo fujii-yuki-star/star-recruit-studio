@@ -247,6 +247,41 @@ export type RenderStatus = (typeof RENDER_STATUSES)[number];
 export const FORMALITIES = ['casual', 'standard', 'formal'] as const;
 export type Formality = (typeof FORMALITIES)[number];
 
+/** プロジェクトの文書形式（ADR-0032・11 §1）。project.json のトップレベル `format` で判別する。 */
+export const PROJECT_FORMATS = ['scene', 'timeline'] as const;
+export type ProjectFormat = (typeof PROJECT_FORMATS)[number];
+
+/** ProjectFormat の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const PROJECT_FORMAT = {
+  scene: 'scene',
+  timeline: 'timeline',
+} as const satisfies Record<string, ProjectFormat>;
+
+/** 既存データ（`format` を持たない project.json）は場面形式＝後方互換の既定（11 §1）。 */
+export const DEFAULT_PROJECT_FORMAT = PROJECT_FORMAT.scene;
+
+/** タイムラインのトラック種別（ADR-0032）。置けるクリップの種別を決める。 */
+export const TRACK_KINDS = ['visual', 'audio'] as const;
+export type TrackKind = (typeof TRACK_KINDS)[number];
+
+/** TrackKind の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const TRACK_KIND = {
+  visual: 'visual',
+  audio: 'audio',
+} as const satisfies Record<string, TrackKind>;
+
+/** タイムラインのクリップ種別（ADR-0032）。slot/text/shape/subtitle は FreeElementKind と同義、
+ *  template＝テンプレを素材として置く、audio＝音声。 */
+export const TIMELINE_CLIP_KINDS = [...FREE_ELEMENT_KINDS, 'template', 'audio'] as const;
+export type TimelineClipKind = (typeof TIMELINE_CLIP_KINDS)[number];
+
+/** TimelineClipKind の値を参照するための定数（§6：文字列直書きを避ける）。 */
+export const TIMELINE_CLIP_KIND = {
+  ...FREE_ELEMENT_KIND,
+  template: 'template',
+  audio: 'audio',
+} as const satisfies Record<string, TimelineClipKind>;
+
 // schema の Warning.severity に対応
 export const WARNING_SEVERITIES = ['info', 'warning', 'error'] as const;
 export type WarningSeverity = (typeof WARNING_SEVERITIES)[number];

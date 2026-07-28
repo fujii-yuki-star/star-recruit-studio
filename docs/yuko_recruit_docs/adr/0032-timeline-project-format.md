@@ -134,7 +134,7 @@ ADR-0029（FREE 字幕の `subtitleSource`）で作った「字幕は対象か�
 
 ### 正典
 
-- **schema**：**タイムラインプロジェクト用の新スキーマ**が要る（`project.schema.json` の拡張ではなく別ファイルが妥当か＝未解決）。
+- **schema**：**タイムラインプロジェクト用の新スキーマ**＝`schemas/timeline-project.schema.json`（**#627 で新設・`"1.0"`**）。
   `project.schema.json` からは `timelineOverlay` を**削除**（破壊的変更＝メジャー相当の扱いと移行方針が要る・`11 §1`）。
 - **`11_SCHEMA_REFERENCE`**：新形式のフィールド表・検証ルール・自動補正を追加。
 - **`CLAUDE.md`**：`§10`「本格タイムライン編集」の除外を**全面解除**へ更新。`§11` に本ADRを追記（本PR）。
@@ -151,9 +151,17 @@ ADR-0029（FREE 字幕の `subtitleSource`）で作った「字幕は対象か�
 
 ## 未解決の論点
 
-1. **文書モデルの具体形**（クリップ＝何を持つか。テンプレ由来クリップは Scene 相当を内包するか）。
-2. **スキーマの置き場**：`timeline-project.schema.json` を新設するか、`project.schema.json` に種別を持たせるか。
-   後者は「1つの schemaVersion で2形式」を意味し、`11 §1` の版管理と噛み合うか検証が要る。
+1. ~~**文書モデルの具体形**~~ → **決定（#627）**。`11 §7.6` 参照。**クリップ＝「FREE 要素 ＋ 時間（trackId/startSec/durationSec）」**
+   ＝空間の語彙は `FreeElement`（ADR-0008）と同じものを使う（描画は `layoutScene` の FREE 分岐を共有＝パリティを二重に作らない）。
+   テンプレ由来クリップは **Scene 相当を内包しない**＝`kind:'template'` のクリップが `templateId`＋差し込み口
+   （`assetRefs`/`texts`/`textStyles`/`slotFits`）だけを持つ（場面という入れ子を作らない）。
+   **クリップごとの `zIndex` は持たない**＝重ね順は tracks の並び順だけで決まり、そのために
+   **同一トラック内で時間の重なりを禁止する**（`11 §8` V24。重ねたいならトラックを足す）。
+2. ~~**スキーマの置き場**~~ → **決定（#627）**。**`timeline-project.schema.json` を新設**する（`project.schema.json` の拡張ではない）。
+   版は**独立**（初期 `"1.0"`・場面形式の 1.x バンプに釣られない）＝「1つの schemaVersion で2形式」を避ける。
+   **形式の判別はトップレベル `format`**（`"timeline"` / 未指定 or `"scene"`）で、`projectId` の採番は両形式共通（`11 §1`・`§2.1`）。
+   素材・見た目設定・グループ・キーフレーム、および同梱フォント/同梱BGMの一覧は **`project.schema.json` の `$defs` を `$ref` で共有**する
+   （コピーせず1か所で管理・`CLAUDE.md §2-7`）。
 3. **`timelineOverlay` の削除に伴う移行**：既存プロジェクトを開いたときの断り方（`15` の状態として定義）。
    破壊的変更として project の schemaVersion をメジャーへ上げるかどうか。
 4. **声と字幕の連動の具体形**（音声クリップ id を字幕クリップが参照する／グループ化する 等）。
