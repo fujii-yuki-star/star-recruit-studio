@@ -168,6 +168,7 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `TIMELINE_EDIT_TRACK_KIND` | warning | — | 音の部品は音の列に、絵や文字の部品は映像の列に置いてください | `ADR-0032`・`11 §8 V23` |
 | `TIMELINE_EDIT_LOCKED` | warning | — | この列は固定されています。動かすには固定を外してください | `ADR-0032`・`11 §7.6` |
 | `TIMELINE_EDIT_NOT_FOUND` | warning | — | その部品は見つかりませんでした。選び直してください | `ADR-0032` |
+| `TIMELINE_AUDIO_SOURCE_MISSING` | warning | — | 音が見つからない部品があります。その部品は鳴りません。読み上げを作り直すか、音を選び直してください | `ADR-0032`・`11 §7.6.2.2` |
 | `TIMELINE_TEMPLATE_NOT_FOUND` | warning | — | 見た目パターンが見つからない部品があります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください | `ADR-0032`・`11 §7.6.4`（描かれないものを黙らせない） |
 
 ---

@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTimelineStore } from './timelineStore';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
+import * as voiceFsMod from '../../infrastructure/voiceFs';
+import * as bgmMod from '../../infrastructure/bundledBgm';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
 import type { TimelineProject } from '../../domain/timeline/types';
@@ -314,5 +316,41 @@ describe('再生（#630）', () => {
     useTimelineStore.getState().play();
     await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
     expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+});
+
+describe('音源の用意（#630 後半）', () => {
+  it('開いたときに音源をまとめて用意する（鳴らす瞬間に読みに行かない）', async () => {
+    const withAudio = doc({
+      tracks: [{ id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [
+        { id: 'clip_101', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3, voice: { text: 'あ', status: 'generated', voicePath: 'voices/clip_101.wav' } },
+        { id: 'clip_102', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 3, durationSec: 3, bundledBgmId: 'found-new-hope' },
+      ],
+    });
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(withAudio));
+    vi.spyOn(voiceFsMod, 'readVoiceDataUrl').mockResolvedValue('data:audio/wav;base64,Vk9JQ0U=');
+    vi.spyOn(bgmMod, 'readBundledBgmDataUrl').mockResolvedValue('data:audio/mp3;base64,QkdN');
+
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    // キーは**音源の中身**（クリップ id ではない）＝複製で増えたクリップも読み直さずに鳴る。
+    expect(useTimelineStore.getState().audioSrcByKey).toEqual({
+      'voice:voices/clip_101.wav': 'data:audio/wav;base64,Vk9JQ0U=',
+      'bgm:found-new-hope': 'data:audio/mp3;base64,QkdN',
+    });
+  });
+
+  it('読めない音源はその部品だけ鳴らない（動画全体を開けなくしない）', async () => {
+    const withAudio = doc({
+      tracks: [{ id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_101', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3, voice: { text: 'あ', status: 'generated', voicePath: 'voices/missing.wav' } }],
+    });
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(withAudio));
+    vi.spyOn(voiceFsMod, 'readVoiceDataUrl').mockResolvedValue(null);
+
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    const s = useTimelineStore.getState();
+    expect(s.doc).not.toBeNull(); // 開ける
+    expect(s.audioSrcByKey).toEqual({}); // その部品は鳴らない
   });
 });

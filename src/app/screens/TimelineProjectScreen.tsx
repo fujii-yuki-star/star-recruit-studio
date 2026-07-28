@@ -5,8 +5,10 @@ import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { clipCountOnTrack } from "../../domain/timeline/edit";
+import { audioSourceKeyOfClip } from "../../domain/timeline/audio";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
+import { useTimelineAudio } from "../hooks/useTimelineAudio";
 import type { TrackKind } from "../../domain/enums";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
@@ -52,7 +54,7 @@ function tickStepSec(totalSec: number): number {
  */
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
-    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, editBlocked, history,
+    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, editBlocked, history,
     setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause,
@@ -60,6 +62,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
   useTimelinePlayback();
+  // 音は「その瞬間に鳴っているもの」を時刻から決めて鳴らす（絵と同じ時刻を見る＝ずれない）。
+  useTimelineAudio();
 
   // 取り消し/やり直しのキー操作は**この画面の store** へ繋ぐ（既定は場面形式を巻き戻すので渡さない＝
   // 見えていない文書を戻して自動保存が永続化する事故を作らない・#547 P1-1 と同じ筋）。
@@ -99,6 +103,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   }, [doc, templates]);
   // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
   const warnings = useMemo(() => (doc ? validateTimelineDoc(doc) : []), [doc]);
+  // 音が見つからない部品は**鳴らない**（読み上げ未作成・音源の読み込み失敗）。黙って無音にしない（§2-5）。
+  const missingAudioCount = useMemo(() => {
+    if (!doc) return 0;
+    return doc.clips.filter((c) => {
+      if (c.kind !== TIMELINE_CLIP_KIND.voice && c.kind !== TIMELINE_CLIP_KIND.audio) return false;
+      const key = audioSourceKeyOfClip(c);
+      return !key || !audioSrcByKey[key];
+    }).length;
+  }, [doc, audioSrcByKey]);
 
   if (isLoading) {
     return (
@@ -141,6 +154,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       {missingTemplateCount > 0 && (
         <p className="notice notice-warn" role="alert">
           見た目パターンが見つからない部品が{missingTemplateCount}個あります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください。
+        </p>
+      )}
+      {missingAudioCount > 0 && (
+        <p className="notice notice-warn" role="alert">
+          音が見つからない部品が{missingAudioCount}個あります。その部品は鳴りません。読み上げを作り直すか、音を選び直してください。
         </p>
       )}
       {warnings.length > 0 && (
