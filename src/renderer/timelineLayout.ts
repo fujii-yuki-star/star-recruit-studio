@@ -16,7 +16,7 @@ import type { FreeElement, Scene } from '../domain/project/types';
 import type { Template } from '../domain/template/types';
 import { clipEndSec } from '../domain/timeline/validateTimelineDoc';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
-import { applyInterpolatedTransform, layoutScene } from './layout';
+import { layoutScene } from './layout';
 import type { LayoutItem, SceneLayout } from './layout';
 
 /** キャンバスの下地。テンプレを置いていない場所の色＝場面形式の既定（`layoutScene`）と同じ白に揃える。 */
@@ -46,19 +46,88 @@ function groupStartSec(groups: Group[], groupId: string, clipById: Map<string, T
   return starts.length > 0 ? Math.min(...starts) : 0;
 }
 
-/** 2つの補間結果を重ねる（位置=加算／拡縮=乗算／回転=加算／不透明度=乗算）。グループ×クリップの二重掛け用。 */
-function mergeTransforms(a: InterpolatedTransform, b: InterpolatedTransform): InterpolatedTransform {
-  const out: InterpolatedTransform = {};
-  if (a.x != null || b.x != null) out.x = (a.x ?? 0) + (b.x ?? 0);
-  if (a.y != null || b.y != null) out.y = (a.y ?? 0) + (b.y ?? 0);
-  if (a.scale != null || b.scale != null) out.scale = (a.scale ?? 1) * (b.scale ?? 1);
-  if (a.rotation != null || b.rotation != null) out.rotation = (a.rotation ?? 0) + (b.rotation ?? 0);
-  if (a.opacity != null || b.opacity != null) out.opacity = (a.opacity ?? 1) * (b.opacity ?? 1);
-  return out;
+/** 矩形（クリップの箱）。回転は中心まわりの度数。 */
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation?: number;
+}
+
+/**
+ * 箱へ補間済みの変換を重ねる（`applyInterpolatedTransform` と同じ規則を矩形に対して行う）。
+ * `scale` は**自身の中心を保ったまま**拡縮 → `x`/`y` オフセット → `rotation` オフセット。
+ */
+function boxWithTransform(box: Box, tr: InterpolatedTransform): Box {
+  const w = box.w * (tr.scale ?? 1);
+  const h = box.h * (tr.scale ?? 1);
+  return {
+    x: box.x - (w - box.w) / 2 + (tr.x ?? 0),
+    y: box.y - (h - box.h) / 2 + (tr.y ?? 0),
+    w,
+    h,
+    rotation: (box.rotation ?? 0) + (tr.rotation ?? 0),
+  };
+}
+
+/**
+ * 「箱がこう動いた」を**相似変換**（拡縮＋回転＋平行移動）として取り出す。純粋関数。
+ *
+ * クリップに掛かる変形（グループ・自身のキーフレーム）は**クリップの箱**に対して決まるので、
+ * 中身（`layoutScene` が返したアイテム）はこの1つの変換に**まとめて**乗せる＝**クリップが座標系**になる。
+ * 中身ごとに拡縮を掛けると各アイテム自身の中心まわりになり、テンプレのクリップ（層が複数）で
+ * グループ中心まわりの剛体変形とずれる（#642 レビュー 🔴）。相似変換は
+ * 「拡大率・回転角・1点の移り先」で一意に決まるので、**アンカーの位置は箱の中心の移り先に畳み込まれる**
+ * （`composeGroupGeometry` が使ったグループ中心をここで再計算しなくてよい）。
+ */
+interface Similarity {
+  scale: number;
+  rotationDeg: number;
+  /** 変換前の基準点（箱の中心）。 */
+  fromCenter: { x: number; y: number };
+  /** 変換後の基準点（箱の中心の移り先）。 */
+  toCenter: { x: number; y: number };
+}
+
+function similarityBetween(from: Box, to: Box): Similarity {
+  return {
+    scale: from.w > 0 ? to.w / from.w : 1,
+    rotationDeg: (to.rotation ?? 0) - (from.rotation ?? 0),
+    fromCenter: { x: from.x + from.w / 2, y: from.y + from.h / 2 },
+    toCenter: { x: to.x + to.w / 2, y: to.y + to.h / 2 },
+  };
+}
+
+/** 何も動かさない変換か（アイテムを触らずに済ませる＝浮動小数の誤差を持ち込まない）。 */
+function isIdentity(sim: Similarity): boolean {
+  return (
+    sim.scale === 1 &&
+    sim.rotationDeg === 0 &&
+    sim.fromCenter.x === sim.toCenter.x &&
+    sim.fromCenter.y === sim.toCenter.y
+  );
+}
+
+/** 相似変換を1アイテムへ適用する（中心を移し、大きさを掛け、角度を足す）。 */
+function applySimilarity(item: LayoutItem, sim: Similarity): void {
+  if (isIdentity(sim)) return;
+  const rad = (sim.rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = (item.x + item.w / 2 - sim.fromCenter.x) * sim.scale;
+  const dy = (item.y + item.h / 2 - sim.fromCenter.y) * sim.scale;
+  const cx = sim.toCenter.x + dx * cos - dy * sin;
+  const cy = sim.toCenter.y + dx * sin + dy * cos;
+  item.w *= sim.scale;
+  item.h *= sim.scale;
+  item.x = cx - item.w / 2;
+  item.y = cy - item.h / 2;
+  if (sim.rotationDeg !== 0) item.rotation = (item.rotation ?? 0) + sim.rotationDeg;
 }
 
 /** クリップが占める矩形。テンプレのクリップは画面いっぱい（枠そのもの）＝幾何を持たない。 */
-function clipBox(clip: TimelineClip, canvas: { width: number; height: number }): { x: number; y: number; w: number; h: number; rotation?: number } {
+function clipBox(clip: TimelineClip, canvas: { width: number; height: number }): Box {
   return {
     x: clip.x ?? 0,
     y: clip.y ?? 0,
@@ -125,8 +194,11 @@ export interface TimelineLayoutOptions {
  *   （11 §8 V24）ので、トラック順＝重ね順が一意に決まる＝クリップに `zIndex` を持たせなくてよい。
  * - 1クリップの中身は `layoutScene` に委ねる（テンプレのクリップは Scene へ、自由配置のクリップは
  *   FREE 要素1つの Scene へ写す）＝**描画の核を場面形式と共有**する。
- * - キーフレームは**クリップ対象とグループ対象を重ねて**適用する（位置=加算／拡縮=乗算／回転=加算／
- *   不透明度=乗算）。重ね方は `applyInterpolatedTransform` を場面形式と共有。
+ * - **クリップは中身の座標系**。クリップに掛かる変形（グループ → 自身のキーフレーム）はまず「クリップの箱」に
+ *   効かせ、その**箱の動きを相似変換として中身へまとめて持ち込む**＝テンプレのクリップ（層が複数）でも
+ *   グループ中心まわりの剛体変形と一致する（中身ごとに拡縮すると各アイテム自身の中心まわりになりずれる）。
+ * - 不透明度だけは幾何と違い**クリップ全体に等しく効く**ので別に重ねる（自身＝絶対上書き／グループ＝乗算
+ *   ＝場面形式の `layoutScene` と同じ順序）。
  * - 隠したトラック・隠したグループのメンバーは描かない（音のトラックは絵を持たないので対象外）。
  */
 export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: TimelineLayoutOptions): SceneLayout {
@@ -190,27 +262,25 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
         : { ...sceneFromTemplateClip(clip), freeLayout: [freeElementFromClip(clip, canvas)] };
     const sub = layoutScene(scene, template);
 
-    // クリップ自身のキーフレーム（クリップの先頭からの秒）＋グループのぶんを重ねる。
-    const own = (doc.animations ?? []).find((a) => a.targetId === clip.id);
-    let tr: InterpolatedTransform = own ? interpolateKeyframes(own.keyframes, timeSec - clip.startSec) : {};
-    // グループ変形は矩形の差分として受け取る（通常描画と同じ composeGroupGeometry を通した結果）。
+    // クリップは**中身の座標系**として扱う＝クリップに掛かる変形（グループ → 自身のキーフレーム）は、
+    // まず「クリップの箱」に効かせ、その **箱の動き（相似変換）を中身へそのまま持ち込む**。
+    // 中身ごとに `applyInterpolatedTransform` を掛けると、拡大・回転が**各アイテム自身の中心**まわりに
+    // なってしまい、テンプレのクリップ（層が複数）でグループ中心まわりの剛体変形とずれる（#642 レビュー 🔴）。
     const box = clipBox(clip, canvas);
-    const cg = composed.get(clip.id);
-    if (cg && (cg.x !== box.x || cg.y !== box.y || cg.w !== box.w || cg.rotation !== box.rotation)) {
-      tr = mergeTransforms(tr, {
-        x: cg.x - box.x,
-        y: cg.y - box.y,
-        scale: box.w > 0 ? cg.w / box.w : 1,
-        rotation: (cg.rotation ?? 0) - (box.rotation ?? 0),
-      });
-    }
+    // 順序は場面形式（`layoutScene`）と同じ＝グループを先に合成し、その上へ自身のキーフレームを重ねる。
+    const grouped = composed.get(clip.id) ?? box;
+    const own = (doc.animations ?? []).find((a) => a.targetId === clip.id);
+    const ownTr: InterpolatedTransform = own ? interpolateKeyframes(own.keyframes, timeSec - clip.startSec) : {};
+    const finalBox = boxWithTransform(grouped, ownTr);
+    const sim = similarityBetween(box, finalBox);
     const groupO = opacityForClip.get(clip.id);
 
     for (const item of sub.items) {
-      if (Object.keys(tr).length > 0) applyInterpolatedTransform(item, tr);
-      // グループの不透明度は**乗算**で後から重ねる（場面形式の layoutScene と同じ順序）。
-      // `applyInterpolatedTransform` の opacity は絶対上書きなので、ここへ混ぜると
-      // 要素自身の不透明度（例 0.5 の図形）を潰してしまう。
+      applySimilarity(item, sim);
+      // 不透明度は幾何と違い**クリップ全体に等しく効く**（相似変換では運べない）ので別に重ねる。
+      // 自身のキーフレームは絶対上書き、グループは乗算＝場面形式の `layoutScene` と同じ順序。
+      // 混ぜるとクリップ自身の不透明度（例 0.5 の図形）を潰す。
+      if (ownTr.opacity != null) item.opacity = ownTr.opacity;
       if (groupO != null) item.opacity = (item.opacity ?? 1) * groupO;
       // 重ね順はトラックの並び順だけで決める＝クリップの中の順序を保ったまま、後のトラックほど手前へ。
       items.push({ ...item, id: `${clip.id}/${item.id}`, zIndex: items.length });

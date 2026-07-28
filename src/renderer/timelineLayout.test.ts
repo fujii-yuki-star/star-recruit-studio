@@ -197,3 +197,50 @@ describe('layoutTimelineAt: キャンバス', () => {
     expect(layoutTimelineAt(doc(), 0, opts)).toMatchObject({ backgroundColor: '#ffffff', items: [] });
   });
 });
+
+describe('layoutTimelineAt: クリップは中身の座標系（#642 レビュー 🔴）', () => {
+  // NORMAL_TEMPLATE の title 層は x:100 y:200 w:800 h:140（中心 500,270）。テンプレのクリップは画面いっぱい
+  // （0,0,1920,1080・中心 960,540）なので、グループ中心＝クリップの箱の中心になる。
+  const grouped = (transform: { x: number; y: number; rotation: number; scale: number }) =>
+    doc({
+      clips: [templateClip('clip_001')],
+      groups: [{ id: 'group_001', members: ['clip_001'], transform }],
+    });
+
+  it('グループの拡大は「グループ中心まわり」に効く（アイテム自身の中心まわりではない）', () => {
+    const items = layoutTimelineAt(grouped({ x: 0, y: 0, rotation: 0, scale: 2 }), 0, opts).items;
+    const title = items.find((i) => i.id.endsWith('/title'))!;
+    // 中心 500,270 → 960+(500-960)*2 = 40 ／ 540+(270-540)*2 = 0。大きさは2倍。
+    expect(title).toMatchObject({ x: -760, y: -140, w: 1600, h: 280 });
+    // 箱そのものである background 層は箱の動きと一致する。
+    expect(items.find((i) => i.id.endsWith('/background'))!).toMatchObject({ x: -960, y: -540, w: 3840, h: 2160 });
+  });
+
+  it('グループの回転もグループ中心まわりに効く（層ごとに自転しない）', () => {
+    const items = layoutTimelineAt(grouped({ x: 0, y: 0, rotation: 90, scale: 1 }), 0, opts).items;
+    const title = items.find((i) => i.id.endsWith('/title'))!;
+    // 中心 500,270 を 960,540 まわりに 90° 回すと (960+270, 540-460) = (1230, 80)。
+    expect(title.x + title.w / 2).toBeCloseTo(1230);
+    expect(title.y + title.h / 2).toBeCloseTo(80);
+    expect(title.rotation).toBe(90); // 角度は各層にも足される
+  });
+
+  it('クリップ自身の拡大もクリップの中心まわりに効く（層がばらばらに拡大しない）', () => {
+    const d = doc({
+      clips: [templateClip('clip_001')],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, scale: 2 }] }],
+    });
+    const title = layoutTimelineAt(d, 0, opts).items.find((i) => i.id.endsWith('/title'))!;
+    expect(title).toMatchObject({ x: -760, y: -140, w: 1600, h: 280 });
+  });
+
+  it('グループとクリップ自身の変形は重なる（グループ→自身の順）', () => {
+    const d = doc({
+      clips: [templateClip('clip_001')],
+      groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, rotation: 0, scale: 2 } }],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, x: 100 }] }],
+    });
+    const title = layoutTimelineAt(d, 0, opts).items.find((i) => i.id.endsWith('/title'))!;
+    expect(title).toMatchObject({ x: -660, y: -140, w: 1600, h: 280 }); // 拡大後に +100 だけ動く
+  });
+});
