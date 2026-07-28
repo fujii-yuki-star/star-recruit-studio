@@ -74,6 +74,16 @@ describe("BakeToTimelinePanel", () => {
     expect(screen.getByText("作る内容を確かめる")).toBeInTheDocument();
   });
 
+  it("名前を変えても確認をやり直させる（違う名前の確認内容のまま作らせない）", async () => {
+    render(<BakeToTimelinePanel />);
+    fireEvent.click(screen.getByText("作る内容を確かめる"));
+    await waitFor(() => expect(screen.getByText("この内容で作る")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("新しい動画の名前"), { target: { value: "べつの名前" } });
+    expect(screen.queryByText("この内容で作る")).not.toBeInTheDocument();
+    expect(screen.getByText("作る内容を確かめる")).toBeInTheDocument();
+  });
+
   it("パートを選ぶと、そのパートだけを作る", async () => {
     render(<BakeToTimelinePanel />);
     fireEvent.change(screen.getByLabelText("どこまでを作り直しますか"), { target: { value: "part" } });

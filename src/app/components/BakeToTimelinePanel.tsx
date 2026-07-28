@@ -61,9 +61,12 @@ export function BakeToTimelinePanel() {
     setBusy(true);
     setError(null);
     try {
-      const r = await bakeToTimeline(range, name.trim() || meta.projectName);
+      await bakeToTimeline(range, name.trim() || meta.projectName);
+      // 作った後に注意書きを出し直さない：**確認で見せた `notes` と同じもの**が返る
+      // （見積りも作成も store の同じ変換を通る）ので、上書きしても画面は変わらない。
+      // 出し分けが要るとしたら「確認と作成の間に中身が変わりうる」設計にしたときで、そのときは
+      // ここで結果の `notes` を出す（いまは同じものを2度見せない＝完了だけを伝える）。
       setDone(name.trim() || meta.projectName);
-      setPreview({ bytes: preview?.bytes ?? 0, notes: r.notes });
     } catch {
       setError("作れませんでした。空き容量を確かめて、もう一度お試しください。");
     } finally {

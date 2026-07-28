@@ -89,7 +89,7 @@ describe('exportOverallPercent / exportProgressLabel（進捗の単一参照元�
 });
 
 // 見出し（粗い状態）も共有＝書き出し画面と他画面バナーで別の状態名を出さない（ADR-0026②）。
-// 文言は 06_UI_SPEC §12 の進捗表示例「動画を書き出しています／場面 3 / 12 を処理中」に合わせる。
+// 文言は 06_UI_SPEC §13 の進捗表示例「動画を書き出しています／場面 3 / 12 を処理中」に合わせる。
 describe('exportHeadingLabel（進捗の見出し・#547 P2-1）', () => {
   it('書き出し中は段階によらず同じ見出し（準備/まとめ、と言い分けない）', () => {
     expect(exportHeadingLabel({ phase: 'rendering', progress: { done: 1, total: 4 } })).toBe('動画を書き出しています');
