@@ -5,6 +5,7 @@ import { assembleProject } from "../../domain/project/persistence";
 import { compileTimeline } from "../../domain/project/compileTimeline";
 import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import { TimelineView } from "../components/TimelineView";
+import { BakeToTimelinePanel } from "../components/BakeToTimelinePanel";
 import { PageHead } from "../components/ui";
 import { ArrowLeftIcon } from "../components/icons";
 
@@ -36,6 +37,7 @@ export function TimelineScreen({ onNavigate }: TimelineScreenProps) {
       <div className="card">
         <TimelineView timeline={timeline} />
       </div>
+      <BakeToTimelinePanel />
       <div className="row gap-sm mt-lg">
         <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("preview")}>
           <ArrowLeftIcon size={16} />

@@ -4,6 +4,7 @@ import { FREE_ELEMENT_KINDS, SUBTITLE_SOURCE_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
+import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
 // 型のみ（実行時 import なし＝store との循環を作らない）。空状態の文言が状態で変わるため（#590）。
 import type { GenerateStatus } from "./store/projectStore";
 /**
@@ -316,4 +317,30 @@ export const START_MANUAL_LABEL = "手動で場面を作る";
 /** 失敗の理由は生成が持っている（`aiError`）。無いときも「次に何をすればよいか」だけは必ず出す（§2-5）。 */
 export function generateFailedMessage(reason?: string | null): string {
   return reason ?? "通信状況や設定を確認して、もう一度お試しください。手動で場面を作ることもできます。";
+}
+
+/**
+ * ディスク容量のユーザー向け表記（焼き出し前の「増える容量」＝ADR-0032 決定13）。
+ * **目安として伝えるもの**なので桁を丸め、単位は身近な MB/GB を使う（KB 未満は「1MB 未満」に寄せる＝
+ * 「0.003MB」のような読みづらい数字を出さない）。
+ */
+export function formatDiskSize(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1) return "1MB 未満";
+  if (mb < 1024) return `約 ${Math.round(mb)}MB`;
+  return `約 ${(mb / 1024).toFixed(1)}GB`;
+}
+
+/**
+ * 焼き出しで持っていけないものの案内（`15 §6` の `BAKE_*`）。**全コードに文言が要る**＝
+ * 種類が増えたらコンパイルエラーで気づく（黙って無言の項目を作らない・§2-5）。
+ */
+export const bakeNoteMessage: Record<BakeNoteCode, string> = {
+  BAKE_DIALOGUE_SUBTITLE_SKIPPED: "セリフに合わせて切り替わる字幕は持っていけません。作ったあとに字幕を置き直してください",
+  BAKE_VIDEO_START_TIMING_SKIPPED: "動画を再生し始めるタイミングは持っていけません。作ったあとに動画の位置で調整してください",
+};
+
+/** 持っていけないもの1件の案内＋対象の場面（例:「場面2・5 …」）。 */
+export function bakeNoteText(note: BakeNote): string {
+  return `${formatSceneNumbers(note.sceneNumbers)}：${bakeNoteMessage[note.code]}`;
 }
