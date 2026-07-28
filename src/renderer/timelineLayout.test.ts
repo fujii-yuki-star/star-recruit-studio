@@ -6,6 +6,7 @@ import type { Template } from '../domain/template/types';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import { TIMELINE_SCHEMA_VERSION } from '../domain/timeline/types';
 import { layoutScene } from './layout';
+import { layoutToSvg } from './sceneSvg';
 import { clipIsLiveAt, layoutTimelineAt } from './timelineLayout';
 
 const NORMAL_TEMPLATE: Template = {
@@ -138,9 +139,11 @@ describe('layoutTimelineAt: キーフレーム（切り替えはこれで表す�
       clips: [textClip('clip_001', { startSec: 4, durationSec: 5 })],
       animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
     });
-    expect(layoutTimelineAt(d, 4, opts).items[0].opacity).toBe(0); // クリップの先頭
-    expect(layoutTimelineAt(d, 4.5, opts).items[0].opacity).toBeCloseTo(0.5);
-    expect(layoutTimelineAt(d, 5, opts).items[0].opacity).toBe(1);
+    // クリップ全体の不透明度は**合成してから**掛ける（`compositeOpacity`）＝アイテム自身の濃さとは別物。
+    expect(layoutTimelineAt(d, 4, opts).items[0].composite?.opacity).toBe(0); // クリップの先頭
+    expect(layoutTimelineAt(d, 4.5, opts).items[0].composite?.opacity).toBeCloseTo(0.5);
+    // 不透明（1）になったら包む必要が無いのでキーごと落とす。
+    expect(layoutTimelineAt(d, 5, opts).items[0].composite?.opacity).toBeUndefined();
   });
 
   it('位置は本来位置からの相対（後から動かしても追従する）', () => {
@@ -158,18 +161,21 @@ describe('layoutTimelineAt: キーフレーム（切り替えはこれで表す�
       groups: [{ id: 'group_001', members: ['clip_001', 'clip_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
       animations: [{ id: 'anim_001', targetId: 'group_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
     });
-    expect(layoutTimelineAt(d, 4, opts).items.map((i) => i.opacity)).toEqual([0, 0]);
-    expect(layoutTimelineAt(d, 5, opts).items.map((i) => i.opacity)).toEqual([1, 1]);
+    expect(layoutTimelineAt(d, 4, opts).items.map((i) => i.composite?.opacity)).toEqual([0, 0]);
+    expect(layoutTimelineAt(d, 5, opts).items.map((i) => i.composite?.opacity)).toEqual([undefined, undefined]);
   });
 
-  it('グループの不透明度は要素自身の不透明度へ乗算で効く（潰さない）', () => {
+  it('グループの不透明度はクリップ全体へ効き、要素自身の不透明度は潰さない', () => {
     const d = doc({
       clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.shape, shapeType: 'rect', opacity: 0.5 })],
       groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
       animations: [{ id: 'anim_001', targetId: 'group_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
     });
-    expect(layoutTimelineAt(d, 1, opts).items[0].opacity).toBeCloseTo(0.5); // 0.5 × 1
-    expect(layoutTimelineAt(d, 0.5, opts).items[0].opacity).toBeCloseTo(0.25); // 0.5 × 0.5
+    // 要素自身の 0.5 はそのまま。グループの分は合成後に掛かる（掛け算で潰し込まない）。
+    // α の出どころがグループなので、合成の単位も**グループ**（場面まるごと1枚）。
+    expect(layoutTimelineAt(d, 0.5, opts).items[0]).toMatchObject({ opacity: 0.5, composite: { key: 'group_001', opacity: 0.5 } });
+    expect(layoutTimelineAt(d, 1, opts).items[0].opacity).toBe(0.5);
+    expect(layoutTimelineAt(d, 1, opts).items[0].composite?.opacity).toBeUndefined();
   });
 
   it('グループの変形はメンバーの位置へ効く（通常描画と同じ合成）', () => {
@@ -262,7 +268,7 @@ describe('layoutTimelineAt: レビュー指摘の修正（PR #642 /canon-check�
     expect(layoutTimelineAt(d, 0, opts).items).toEqual([]);
   });
 
-  it('クリップの不透明度は乗算＝層自身の濃さを潰さない（区間外でも化けない）', () => {
+  it('クリップの不透明度は合成後に掛かる＝層自身の濃さを潰さない（区間外でも化けない）', () => {
     const withOpacity: Template = {
       ...NORMAL_TEMPLATE,
       layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, fillColor: '#112233', opacity: 0.4 }],
@@ -273,9 +279,12 @@ describe('layoutTimelineAt: レビュー指摘の修正（PR #642 /canon-check�
     });
     const at = (t: number) =>
       layoutTimelineAt(d, t, { templateOf: () => withOpacity }).items.find((i) => i.id.endsWith('/background'))!;
-    expect(at(1).opacity).toBeCloseTo(0.4); // フェード後も層の 0.4 のまま（1 に化けない）
-    expect(at(0.5).opacity).toBeCloseTo(0.2); // 途中は 0.4 × 0.5
-    expect(at(3).opacity).toBeCloseTo(0.4); // 区間外クランプでも化けない
+    // 層自身の 0.4 は常にそのまま（1 に化けない）。フェードは合成後に掛かる。
+    expect(at(1).opacity).toBe(0.4);
+    expect(at(1).composite?.opacity).toBeUndefined();
+    expect(at(0.5)).toMatchObject({ opacity: 0.4, composite: { key: 'clip_001', opacity: 0.5 } });
+    expect(at(3).opacity).toBe(0.4); // 区間外クランプでも化けない
+    expect(at(3).composite?.opacity).toBeUndefined();
   });
 
   it('クリップ全体のフォント指定が文字へ届く（テンプレのクリップだけ既定へ戻らない）', () => {
@@ -299,5 +308,50 @@ describe('layoutTimelineAt: レビュー指摘の修正（PR #642 /canon-check�
     const d = doc({ clips: [templateClip('clip_001')] });
     const items = layoutTimelineAt(d, 0, { templateOf: () => noBackground }).items;
     expect(items[0]).toMatchObject({ kind: 'fill', color: '#123456', x: 0, y: 0, w: 1920, h: 1080 });
+  });
+});
+
+describe('layoutToSvg: 合成の単位（ADR-0032 決定19・#631）', () => {
+  it('同じ合成の単位の連続したアイテムを1つにまとめて不透明度を掛ける（層ごとに掛けない）', () => {
+    const d = doc({
+      clips: [templateClip('clip_001'), templateClip('clip_002', { trackId: 'track_002' })],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, opacity: 0.5 }] }],
+    });
+    const svg = layoutToSvg(layoutTimelineAt(d, 0, opts));
+    // フェード中のクリップだけが <g opacity> で包まれる（中に複数の層が入る）。
+    expect(svg).toContain('<g opacity="0.5">');
+    expect(svg.match(/<g opacity=/g)).toHaveLength(1);
+  });
+
+  it('不透明なクリップは包まない（余計な要素を出さない）', () => {
+    const svg = layoutToSvg(layoutTimelineAt(doc({ clips: [templateClip('clip_001')] }), 0, opts));
+    expect(svg).not.toContain('<g opacity=');
+  });
+
+  it('場面形式の描画は今までどおり（合成の単位を持たない）', () => {
+    const scene = {
+      sceneId: 'scene_001', partId: '', order: 0, sceneType: 'photo_intro' as const, templateId: 'tmpl_normal',
+      durationSec: 5, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+      texts: { title: 'みだし' }, narration: { text: '', status: 'none' as const }, warnings: [],
+    };
+    expect(layoutToSvg(layoutScene(scene, NORMAL_TEMPLATE))).not.toContain('<g opacity=');
+  });
+});
+
+describe('layoutToSvg: 合成の単位はαの出どころで決まる（#631 レビュー）', () => {
+  it('FREE 場面の切り替えは**場面まるごと1枚**に合成する（要素どうしが透けない）', () => {
+    const free = doc({
+      clips: [
+        textClip('clip_001', { trackId: 'track_001' }),
+        textClip('clip_002', { trackId: 'track_002' }),
+      ],
+      groups: [{ id: 'group_001', members: ['clip_001', 'clip_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+      animations: [{ id: 'anim_001', targetId: 'group_001', keyframes: [{ timeSec: 0, opacity: 0.5 }] }],
+    });
+    const items = layoutTimelineAt(free, 0, opts).items;
+    // 2つのクリップが**同じ**合成の単位に入る。
+    expect(items.map((i) => i.composite?.key)).toEqual(['group_001', 'group_001']);
+    const svg = layoutToSvg(layoutTimelineAt(free, 0, opts));
+    expect(svg.match(/<g opacity="0\.5">/g)).toHaveLength(1); // 包みは1つだけ
   });
 });

@@ -30,6 +30,14 @@ interface ItemBase extends Rect {
   zIndex: number;
   /** 回転角（度・中心を軸に時計回り。FREE 要素のみ設定・未指定=回転なし・#208）。 */
   rotation?: number;
+  /**
+   * **合成の単位**（ADR-0032 決定19・#631）。同じ `key` を持つ**連続した**アイテムは1枚に合成してから
+   * `opacity` を掛ける。フェードを「層ごとに α」でなく「1枚にしてから α」にするため＝FFmpeg の
+   * `xfade=fade`（線形ブレンド）と同じ絵になる（層が重なる所で下が透けない）。
+   * **key と opacity を1つの объект にしてある**のは、片方だけ設定して黙って無視される状態を型で防ぐため。
+   * 場面形式は設定しない（従来どおりアイテムごと）＝この仕組みは出力に影響しない。
+   */
+  composite?: { key: string; opacity: number };
 }
 
 export interface FillItem extends ItemBase {

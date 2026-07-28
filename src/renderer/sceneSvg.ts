@@ -154,10 +154,43 @@ function creditToSvg(width: number, height: number, text: string): string {
   ].join('');
 }
 
+/**
+ * **合成の単位**（`compositeKey`）ごとに `<g opacity>` で包む（ADR-0032 決定19・#631）。
+ *
+ * 連続する同じキーのアイテムを1つの `<g>` にまとめる＝**1枚に合成してから不透明度を掛ける**ので、
+ * 層が重なる所で下が透けない（アイテムごとに α を掛けると透ける）。キーを持たないアイテム
+ * （場面形式はすべてこちら）は素通し＝出力は従来と1バイトも変わらない。
+ * **連続でまとめる**のは、`items` が既に描画順（重ね順）に並んでいるため＝並びを崩さない。
+ */
+function itemsToSvg(items: readonly LayoutItem[], opts: LayoutToSvgOptions, fontFamily: string): string {
+  const out: string[] = [];
+  const closed = new Set<string>();
+  for (let i = 0; i < items.length; i += 1) {
+    const composite = items[i].composite;
+    if (composite == null) {
+      out.push(itemToSvg(items[i], opts, fontFamily));
+      continue;
+    }
+    // **同じ単位は連続している前提**（作る側が1かたまりで並べる）。離れて再び現れたら合成が静かに
+    // 割れて別の絵になるので、開発時に気づけるようにする（本番は包み直して描画自体は続ける）。
+    if (closed.has(composite.key) && import.meta.env?.DEV) {
+      console.warn('[sceneSvg] 合成の単位が連続していません（絵が変わります）:', composite.key);
+    }
+    closed.add(composite.key);
+    let j = i;
+    while (j + 1 < items.length && items[j + 1].composite?.key === composite.key) j += 1;
+    const inner = items.slice(i, j + 1).map((it) => itemToSvg(it, opts, fontFamily)).join('\n');
+    // 不透明（1 以上）なら `<g>` で包む意味が無い＝余計な要素を出さない。
+    out.push(composite.opacity >= 1 ? inner : `<g opacity="${composite.opacity}">\n${inner}\n</g>`);
+    i = j;
+  }
+  return out.join('\n');
+}
+
 export function layoutToSvg(layout: SceneLayout, opts: LayoutToSvgOptions = {}): string {
   const fontFamily = opts.fontFamily ?? DEFAULT_FONT_FAMILY;
   const items = opts.itemFilter ? layout.items.filter(opts.itemFilter) : layout.items;
-  const body = items.map((item) => itemToSvg(item, opts, fontFamily)).join('\n');
+  const body = itemsToSvg(items, opts, fontFamily);
   // transparent 時は背景の全面塗りを出さない（動画が透けて見える上レイヤー用）。
   // responsive: ルート寸法を 100% にしてコンテナへフィットさせる（viewBox で座標系を保持）。
   // 既定は layout 実寸（書き出しのラスタライズは固定px が要るため）。
