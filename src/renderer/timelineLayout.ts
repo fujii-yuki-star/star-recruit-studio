@@ -240,8 +240,9 @@ export interface TimelineLayoutOptions {
  * - **クリップは中身の座標系**。クリップに掛かる変形（グループ → 自身のキーフレーム）はまず「クリップの箱」に
  *   効かせ、その**箱の動きを相似変換として中身へまとめて持ち込む**＝テンプレのクリップ（層が複数）でも
  *   グループ中心まわりの剛体変形と一致する（中身ごとに拡縮すると各アイテム自身の中心まわりになりずれる）。
- * - 不透明度だけは幾何と違い**クリップ全体に等しく効く**ので別に重ねる（自身＝絶対上書き／グループ＝乗算
- *   ＝場面形式の `layoutScene` と同じ順序）。
+ * - 不透明度だけは幾何と違い**クリップ全体に等しく効く**ので、アイテムへ掛けずに**合成の単位**
+ *   （`composite`）として渡す＝`sceneSvg` が `<g opacity>` で1枚にしてから掛ける（ADR-0032 決定19）。
+ *   α の出どころがグループなら**グループ全体**が1枚＝FREE 場面のフェードで要素どうしが透けない。
  * - 隠したトラック・隠したグループのメンバーは描かない（音のトラックは絵を持たないので対象外）。
  */
 export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: TimelineLayoutOptions): SceneLayout {
@@ -283,11 +284,14 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
   const boxes = doc.clips.filter(isVisualClip).map((c) => ({ id: c.id, ...clipBox(c, canvas) }));
   const composed = composeGroupGeometry(boxes, effectiveGroups);
 
-  // グループの不透明度は、メンバー（推移的）へ乗算で効く。
+  // グループの不透明度は、メンバー（推移的）へ効く。**どのグループ由来か**も覚える＝
+  // 合成の単位をそのグループにできる（FREE 場面のフェードが場面まるごと1枚になる・ADR-0026②）。
   const opacityForClip = new Map<string, number>();
+  const opacityGroupOfClip = new Map<string, string>();
   for (const [gid, o] of groupOpacity) {
     for (const id of groupElementIds(effectiveGroups, gid)) {
       opacityForClip.set(id, (opacityForClip.get(id) ?? 1) * o);
+      opacityGroupOfClip.set(id, gid);
     }
   }
 
@@ -326,19 +330,29 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
         ? [{ id: `${clip.id}__bg`, kind: 'fill', ...box, zIndex: -1, color: sub.backgroundColor, opacity: 1, radius: 0 }, ...sub.items]
         : sub.items;
 
+    // クリップ全体に掛かる不透明度＝**1枚に合成してから**掛ける（`compositeKey` で `<g opacity>` へ）。
+    // アイテムごとに掛けると、層が重なる所で下が透けて `xfade=fade` と別の絵になる（決定19 の前提）。
+    // クリップ自身のキーフレームは絶対、グループは乗算＝場面形式の `layoutScene` と同じ順序。
+    const clipOpacity = (ownTr.opacity ?? 1) * (groupO ?? 1);
+    // 合成の単位は**α の出どころ**で決める。グループのフェード（FREE 場面の切り替え）はグループ全体で
+    // 1枚に合成する＝場面の要素どうしがフェード中だけ互いに透ける、を防ぐ。グループのメンバーは
+    // 連続した列に並ぶ（`TrackAllocator` が1場面ぶんを連続で取る）ので、並びも1かたまりになる。
+    const compositeKey = groupO != null ? opacityGroupOfClip.get(clip.id) ?? clip.id : clip.id;
+
     for (const item of clipItems) {
       applySimilarity(item, sim);
       // 文字のフォント：クリップ全体の指定（`fontId`）は、種別ごとの指定が無いときの受け皿。
       // 場面形式は「フレーム単位の fontFamily」で効かせるが、1フレームに複数クリップが混ざる本形式では
       // それができないので、アイテムへ落とす（テンプレのクリップだけ黙って既定へ戻るのを防ぐ・ADR-0026②）。
       if (item.kind === 'text' && item.fontId == null && clip.fontId != null) item.fontId = clip.fontId;
-      // 不透明度は幾何と違い**クリップ全体に等しく効く**（相似変換では運べない）ので別に重ねる。
-      // **自身のキーフレームもグループも乗算**にする＝アイテムごとの絶対上書きだと、区間外クランプで
-      // 層自身の不透明度（例 0.4 の層）がフェード終了後に 1 へ化ける（黙って別物になる・ADR-0026④）。
-      if (ownTr.opacity != null) item.opacity = (item.opacity ?? 1) * ownTr.opacity;
-      if (groupO != null) item.opacity = (item.opacity ?? 1) * groupO;
       // 重ね順はトラックの並び順だけで決める＝クリップの中の順序を保ったまま、後のトラックほど手前へ。
-      items.push({ ...item, id: `${clip.id}/${item.id}`, zIndex: items.length });
+      // アイテム自身の不透明度（FREE 要素の `opacity`）はそのまま＝クリップ全体の α とは別物。
+      items.push({
+        ...item,
+        id: `${clip.id}/${item.id}`,
+        zIndex: items.length,
+        ...(clipOpacity < 1 ? { composite: { key: compositeKey, opacity: clipOpacity } } : {}),
+      });
     }
   }
 
