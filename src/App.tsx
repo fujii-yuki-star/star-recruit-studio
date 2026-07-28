@@ -21,6 +21,7 @@ import { SceneEditScreen } from "./app/screens/SceneEditScreen";
 import { PreviewScreen } from "./app/screens/PreviewScreen";
 import { TimelineScreen } from "./app/screens/TimelineScreen";
 import { TimelineEditScreen } from "./app/screens/TimelineEditScreen";
+import { TimelineProjectScreen } from "./app/screens/TimelineProjectScreen";
 import { PrecheckScreen } from "./app/screens/PrecheckScreen";
 import { ExportScreen } from "./app/screens/ExportScreen";
 import { LooksScreen } from "./app/screens/LooksScreen";
@@ -39,6 +40,7 @@ const titles: Record<ScreenId, string> = {
   preview: "仕上がり確認",
   timeline: "タイムライン",
   "timeline-edit": "タイムラインを編集",
+  "timeline-project": "タイムライン編集",
   precheck: "公開前チェック",
   export: "動画を書き出す",
   looks: "見た目パターンを管理",
@@ -118,6 +120,8 @@ function App() {
         return <TimelineScreen onNavigate={navigate} />;
       case "timeline-edit":
         return <TimelineEditScreen onNavigate={navigate} />;
+      case "timeline-project":
+        return <TimelineProjectScreen onNavigate={navigate} />;
       case "precheck":
         return <PrecheckScreen onNavigate={navigate} />;
       case "export":
@@ -138,7 +142,11 @@ function App() {
   }
 
   // 場面編集・生成中・見た目パターン編集は独自ヘッダのため、共通トップバー（プロジェクト保存等）は表示しない
-  const hasOwnHeader = screen === "scene-edit" || screen === "generating" || screen === "looks-edit";
+  // 共通トップバーの「保存」とバッジは**場面形式の文書**を保存する（projectStore）。タイムライン形式は
+  // 別の文書なので出さない＝見ている文書と違うものが保存される／場面文書を開いていないときは空の
+  // プロジェクトが新しく作られる、を防ぐ（ADR-0026④）。画面は自前の見出し（PageHead）を持つ。
+  const hasOwnHeader =
+    screen === "scene-edit" || screen === "generating" || screen === "looks-edit" || screen === "timeline-project";
 
   return (
     <div className="app">

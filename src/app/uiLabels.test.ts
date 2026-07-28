@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
-import { bakeNoteText, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
+import { bakeNoteText, clipLabel, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -172,5 +172,33 @@ describe('bakeNoteText（持っていけないものの案内）', () => {
     expect(bakeNoteText({ code: 'BAKE_DIALOGUE_SUBTITLE_SKIPPED', sceneNumbers: [2, 5] })).toBe(
       '場面2・5：セリフに合わせて切り替わる字幕は持っていけません。作ったあとに字幕を置き直してください',
     );
+  });
+});
+
+describe('trackLabel / clipLabel（タイムラインの列と部品の名前・ADR-0032）', () => {
+  const tracks = [
+    { id: 'track_001', kind: 'visual' as const },
+    { id: 'track_002', kind: 'visual' as const },
+    { id: 'track_003', kind: 'audio' as const },
+  ];
+
+  it('連番は種別ごとに数える（並び全体の通し番号にしない）', () => {
+    expect(trackLabel(tracks, 'track_001')).toBe('映像1');
+    expect(trackLabel(tracks, 'track_002')).toBe('映像2');
+    expect(trackLabel(tracks, 'track_003')).toBe('音1'); // 通し番号なら「音3」になってしまう
+  });
+
+  it('名前が付いていればそれを使う', () => {
+    expect(trackLabel([{ id: 'track_001', kind: 'audio' as const, name: 'ナレーション' }], 'track_001')).toBe('ナレーション');
+  });
+
+  it('部品の名前：付いていれば優先、無ければ中身、それも無ければ種類', () => {
+    expect(clipLabel({ kind: 'text', name: 'みだし', text: 'あ' })).toBe('みだし');
+    expect(clipLabel({ kind: 'voice', voice: { text: 'よろしくおねがいいたします' } })).toBe('よろしくおねがいいたしま'); // 長いものは切る（列の幅を壊さない）
+    expect(clipLabel({ kind: 'shape' })).toBe('図形');
+  });
+
+  it('自由配置と同じ物は同じ名前で呼ぶ（画面で語が割れない）', () => {
+    expect(clipLabel({ kind: 'slot' })).toBe(freeKindLabel.slot);
   });
 });

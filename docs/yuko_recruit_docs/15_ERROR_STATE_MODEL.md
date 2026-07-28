@@ -160,6 +160,11 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `BAKE_VIDEO_START_TIMING_SKIPPED` | info | — | 動画を再生し始めるタイミングは持っていけません。作ったあとに動画の位置で調整してください | `ADR-0032`・`11 §7.6.1` |
 | `SCHEMA_VERSION_UNSUPPORTED` | fatal | — | このファイルは対応していないバージョンで作成されています | `11 §1` |
 | `PROJECT_FORMAT_UNSUPPORTED` | fatal | — | この動画はタイムラインで編集する形式です。場面の編集画面では開けません。一覧から別の動画を選んでください | `ADR-0032`・`11 §1` |
+| `TIMELINE_FORMAT_UNSUPPORTED` | fatal | — | この動画はタイムラインで編集する形式ではありません。一覧から別の動画を選んでください | `ADR-0032`・`11 §1`（`PROJECT_FORMAT_UNSUPPORTED` の逆向き） |
+| `TIMELINE_VERSION_UNSUPPORTED` | fatal | 同メジャーは現行版へ引き上げ | この動画は対応していないバージョンで作成されています。アプリを更新してください | `ADR-0032`・`11 §1`（**「形式」と言わない**＝形式は場面/タイムラインの別を指す語） |
+| `TIMELINE_DOC_BROKEN` | fatal | — | この動画の内容が正しくありません。一覧から別の動画を選んでください | `ADR-0032`・`11 §8 V1/V2` |
+| `TIMELINE_OPEN_FAILED` | fatal | — | この動画を開けませんでした。一覧から選び直してください | `ADR-0032`（読み出しそのものの失敗＝生のエラーを出さない） |
+| `TIMELINE_TEMPLATE_NOT_FOUND` | warning | — | 見た目パターンが見つからない部品があります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください | `ADR-0032`・`11 §7.6.3`（描かれないものを黙らせない） |
 
 ---
 

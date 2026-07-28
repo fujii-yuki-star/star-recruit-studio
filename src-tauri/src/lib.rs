@@ -23,6 +23,10 @@ struct ProjectSummary {
     project_id: String,
     project_name: String,
     updated_at: String,
+    /// 文書形式（ADR-0032・11 §1）。タイムライン形式のときだけ "timeline"。
+    /// 場面形式は format を書かない（不在＝場面形式）ので、そのまま None を返す＝
+    /// 一覧が開く先を選べる（開いてから「形式が違う」と断らずに済む）。
+    format: Option<String>,
 }
 
 /// appData/projects ディレクトリのパスを返す（作成は呼び出し側）。
@@ -106,6 +110,10 @@ fn list_projects(app: tauri::AppHandle) -> Result<Vec<ProjectSummary>, String> {
             project_id: get("projectId"),
             project_name: get("projectName"),
             updated_at: get("updatedAt"),
+            format: value
+                .get("format")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         });
     }
     out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
