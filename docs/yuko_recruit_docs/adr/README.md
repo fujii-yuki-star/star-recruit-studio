@@ -38,6 +38,7 @@
 | [0029](0029-free-subtitle-multi-and-binding.md) | FREE 字幕要素＝複数配置＋対象（読み上げ／話者）への紐づけ（#518 再スコープ・単一制約は固めない・0.4.2） | **Accepted**（PR-A+B 済＝#521・PR-C 済＝UI・(2b) は α-5） |
 | [0030](0030-normal-free-switch-migration.md) | 通常↔FREE 切替の非破壊コンテンツ移送（通常→FREE は `freeLayout` へ seed／FREE→通常は休眠保持＋**出なくなる中身があれば確認**・precheck を category ゲート・#524 P1/P2／#547 P2-9 で確認条件を改定） | **Accepted** |
 | [0031](0031-simultaneous-dual-voice.md) | 同時2ボイス（並行音声・α-4 最小形＝同時開始＋amix＋字幕2行・0.4.2・`startWithPrevious` フラグ・N人） | **Accepted** |
+| [0032](0032-timeline-project-format.md) | タイムライン編集を「別プロジェクト形式」として新設（場面形式から片道で焼き出し・AI は上流のみ・時間軸ネイティブ・トラック自由・テンプレは素材）＝ADR-0018/0023 を一部 supersede | **Proposed**（α-5 再定義・実装は承認後） |
 
 ## 状態の意味
 
