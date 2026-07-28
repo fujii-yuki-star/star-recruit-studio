@@ -54,9 +54,11 @@ const NORMAL_TEMPLATE: Template = {
   layers: [
     { id: 'mainVisual', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 },
     { id: 'character', type: 'character', x: 100, y: 100, w: 400, h: 800 },
+    { id: 'subtitle', type: 'subtitle', textKey: 'subtitle', x: 100, y: 900, w: 1720, h: 120 },
   ],
 };
 
+// 同梱の自由配置テンプレ（free_canvas_v1）と同じく **background 層を持つ**＝FREE でもテンプレ層は動画に出る。
 const FREE_TEMPLATE: Template = {
   schemaVersion: '1.0',
   templateId: 'tmpl_free',
@@ -64,7 +66,7 @@ const FREE_TEMPLATE: Template = {
   category: FREE_CATEGORY,
   aspectRatio: '16:9',
   canvas: { width: 1920, height: 1080 },
-  layers: [],
+  layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, fillColor: '#ffffff' }],
 };
 
 const templateOf = (id: string): Template | undefined =>
@@ -326,19 +328,27 @@ describe('bakeTimelineProject: FREE の場面＝要素ごとのクリップ＋1�
       ...over,
     });
 
-  it('要素ごとに1クリップ・重ね順どおりに列へ並ぶ', () => {
+  it('最背面に見た目パターンのクリップを置き、その上に要素ごとのクリップを重ね順どおりに並べる', () => {
     const { doc } = bakeTimelineProject(freeProject(), opts());
-    expect(doc.clips.map((c) => c.kind)).toEqual([TIMELINE_CLIP_KIND.slot, TIMELINE_CLIP_KIND.text]);
+    // FREE テンプレも background 層などを持ち動画に出る＝要素だけ焼くと背景が落ちる。
+    expect(doc.clips.map((c) => c.kind)).toEqual([
+      TIMELINE_CLIP_KIND.template,
+      TIMELINE_CLIP_KIND.slot,
+      TIMELINE_CLIP_KIND.text,
+    ]);
+    expect(doc.clips[0].templateId).toBe('tmpl_free');
     const visualTracks = doc.tracks.filter((t) => t.kind === TRACK_KIND.visual).map((t) => t.id);
-    // zIndex の小さい方（slot）が背面＝配列の前
-    expect(visualTracks.indexOf(doc.clips[0].trackId)).toBeLessThan(visualTracks.indexOf(doc.clips[1].trackId));
+    const at = (n: number): number => visualTracks.indexOf(doc.clips[n].trackId);
+    // 見た目パターン → zIndex の小さい要素（slot） → 大きい要素（text）の順に手前へ
+    expect(at(0)).toBeLessThan(at(1));
+    expect(at(1)).toBeLessThan(at(2));
     // 空間の語彙はそのまま持ち込む。zIndex は持たない（重ね順は列の並びだけで決まる）。
-    expect(doc.clips[1]).toMatchObject({ x: 10, y: 20, w: 300, h: 80, text: 'まえ' });
-    expect('zIndex' in doc.clips[1]).toBe(false);
+    expect(doc.clips[2]).toMatchObject({ x: 10, y: 20, w: 300, h: 80, text: 'まえ' });
+    expect('zIndex' in doc.clips[2]).toBe(false);
     expectSound(doc);
   });
 
-  it('場面ごとに1つのグループができ、全クリップがそのメンバーになる', () => {
+  it('場面ごとに1つのグループができ、見た目パターンのクリップも含めて全クリップがメンバーになる', () => {
     const { doc } = bakeTimelineProject(freeProject(), opts());
     expect(doc.groups).toHaveLength(1);
     expect([...doc.groups![0].members].sort()).toEqual(doc.clips.map((c) => c.id).sort());
@@ -351,10 +361,11 @@ describe('bakeTimelineProject: FREE の場面＝要素ごとのクリップ＋1�
     });
     const { doc } = bakeTimelineProject(p, opts());
     const nested = doc.groups!.find((g) => g.transform.x === 5)!;
-    expect([...nested.members].sort()).toEqual(doc.clips.map((c) => c.id).sort());
-    // 場面グループは入れ子グループだけを直接のメンバーに持つ（二重所属を作らない）
+    const elementClipIds = doc.clips.filter((c) => c.kind !== TIMELINE_CLIP_KIND.template).map((c) => c.id);
+    expect([...nested.members].sort()).toEqual([...elementClipIds].sort());
+    // 場面グループは入れ子グループと、入れ子に入っていない見た目パターンのクリップだけを持つ（二重所属を作らない）
     const sceneGroup = doc.groups!.find((g) => g.id !== nested.id)!;
-    expect(sceneGroup.members).toEqual([nested.id]);
+    expect(sceneGroup.members).toEqual([doc.clips[0].id, nested.id]);
     expectSound(doc);
   });
 
@@ -370,9 +381,55 @@ describe('bakeTimelineProject: FREE の場面＝要素ごとのクリップ＋1�
     const { doc } = bakeTimelineProject(p, opts());
     // 参照切れ（free_999）は持ち込まない
     expect(doc.animations).toHaveLength(1);
-    expect(doc.animations![0].targetId).toBe(doc.clips[1].id);
+    expect(doc.animations![0].targetId).toBe(doc.clips[2].id); // free_002 → text クリップ
     expect(doc.animations![0].keyframes).toEqual([{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }]);
     expectSound(doc);
+  });
+
+  it('見た目が見つからない場面でも、場面の種類が自由配置なら自由配置として焼く（黙って中身を落とさない）', () => {
+    // 呼び出し側が見た目を解決できない（削除された・templateOf を省いた）ケース。
+    const p = freeProject({
+      timelineOverlay: {
+        animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_002', keyframes: [{ timeSec: 0, opacity: 0 }] }],
+      },
+    });
+    for (const o of [opts({ templateOf: () => undefined }), opts({ templateOf: undefined })]) {
+      const { doc } = bakeTimelineProject(p, o);
+      expect(doc.clips.map((c) => c.kind)).toEqual([
+        TIMELINE_CLIP_KIND.template,
+        TIMELINE_CLIP_KIND.slot,
+        TIMELINE_CLIP_KIND.text,
+      ]);
+      expect(doc.groups).toHaveLength(1);
+      expect(doc.animations).toHaveLength(1);
+      expect(doc.assets.map((a) => a.assetId)).toEqual(['asset_001']); // 要素が使う素材も持っていく
+      expectSound(doc);
+    }
+  });
+
+  it('通常の見た目の場面に休眠している自由配置（ADR-0030）が残っていても焼かない', () => {
+    // 場面の種類は自由配置のまま（古いプロジェクトは切替で据え置かれることがある）だが、**見た目が解決できるなら
+    // そちらが正**＝通常の見た目では自由配置は描かれない（`layoutScene` と同じ規則）。
+    const p = freeProject({
+      scenes: [{ ...freeScene(), templateId: 'tmpl_normal' }],
+    });
+    const { doc } = bakeTimelineProject(p, opts());
+    expect(doc.clips.map((c) => c.kind)).toEqual([TIMELINE_CLIP_KIND.template]);
+    expect(doc.groups).toBeUndefined();
+  });
+
+  it('自由配置の場面が続いても、場面ごとに列を丸ごと確保する（切り替えの重なりで列を食い合わない）', () => {
+    const p = freeProject({
+      scenes: [
+        { ...freeScene(), durationSec: 5 },
+        { ...freeScene(), sceneId: 'scene_002', durationSec: 5, transition: { in: TRANSITION_TYPE.fade, durationSec: 1 } },
+      ],
+    });
+    const { doc } = bakeTimelineProject(p, opts());
+    // 1場面＝見た目パターン＋要素2つ＝3列。2場面ぶんで6列（重なる区間があるので使い回せない）。
+    expect(doc.tracks.filter((t) => t.kind === TRACK_KIND.visual)).toHaveLength(6);
+    expect(new Set(doc.clips.filter((c) => c.kind !== TIMELINE_CLIP_KIND.voice).map((c) => c.trackId)).size).toBe(6);
+    expectSound(doc); // 同じ列で時間が重なっていない（V24）
   });
 
   it('1場面ぶんの列は必ず連続して取る（切り替えで重なる場面の層が互い違いに挟まらない）', () => {
@@ -394,7 +451,7 @@ describe('bakeTimelineProject: FREE の場面＝要素ごとのクリップ＋1�
     expectSound(doc);
   });
 
-  it('中身が空の FREE 場面は、空のクリップもグループも作らない（切り替えも付けようがない）', () => {
+  it('要素が1つも無い FREE 場面でも、見た目パターンのクリップは残る（背景が消えない）', () => {
     const p = project({
       scenes: [
         scene('scene_001'),
@@ -402,9 +459,9 @@ describe('bakeTimelineProject: FREE の場面＝要素ごとのクリップ＋1�
       ],
     });
     const { doc } = bakeTimelineProject(p, opts());
-    expect(doc.clips).toHaveLength(1); // 1つ目の場面のテンプレクリップだけ
-    expect(doc.groups).toBeUndefined();
-    expect(doc.animations).toBeUndefined();
+    expect(doc.clips.map((c) => c.templateId)).toEqual(['tmpl_normal', 'tmpl_free']);
+    expect(doc.groups).toHaveLength(1); // 1場面=1グループ（メンバーは見た目パターンのクリップ1つ）
+    expect(doc.animations).toHaveLength(1); // 切り替えは場面グループへ付く
     expectSound(doc);
   });
 
@@ -413,9 +470,64 @@ describe('bakeTimelineProject: FREE の場面＝要素ごとのクリップ＋1�
       scenes: [scene('scene_001'), { ...freeScene(), sceneId: 'scene_002', transition: { in: TRANSITION_TYPE.fade, durationSec: 1 } }],
     });
     const { doc } = bakeTimelineProject(p, opts());
-    const sceneGroup = doc.groups!.find((g) => g.members.length === 2)!;
-    expect(doc.animations!.map((a) => a.targetId)).toEqual([sceneGroup.id]);
+    expect(doc.groups).toHaveLength(1);
+    expect(doc.animations!.map((a) => a.targetId)).toEqual([doc.groups![0].id]);
     expectSound(doc);
+  });
+});
+
+describe('bakeTimelineProject: FREE の字幕ボックス（ADR-0029 の「対象」はタイムライン形式に無い）', () => {
+  const withSubtitleBox = (over: Partial<Scene> = {}): Scene =>
+    scene('scene_001', {
+      templateId: 'tmpl_free',
+      sceneType: FREE_CATEGORY,
+      freeLayout: [{ id: 'free_001', kind: FREE_ELEMENT_KIND.subtitle, x: 100, y: 900, w: 1720, h: 120 }],
+      ...over,
+    });
+
+  it('対象が読み上げ（時間で変わらない）なら、いま出ている文を焼き付ける', () => {
+    const p = project({ scenes: [withSubtitleBox({ texts: { subtitle: 'いま出ている字幕' } })] });
+    const { doc, notes } = bakeTimelineProject(p, opts());
+    const box = doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!;
+    expect(box.text).toBe('いま出ている字幕');
+    expect(notes).toEqual([]); // 落ちていないので記録しない
+    expectSound(doc);
+  });
+
+  it('場面の字幕が OFF なら何も焼かない（元から出ていない＝落ちていない）', () => {
+    const p = project({ scenes: [withSubtitleBox({ texts: { subtitle: 'あ' }, subtitleEnabledDefault: false })] });
+    const { doc, notes } = bakeTimelineProject(p, opts());
+    expect(doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!.text).toBeUndefined();
+    expect(notes).toEqual([]);
+  });
+
+  it('対象が行に追従する（全部/話者）なら焼けないので記録する', () => {
+    const p = project({
+      scenes: [
+        withSubtitleBox({
+          freeLayout: [{ id: 'free_001', kind: FREE_ELEMENT_KIND.subtitle, x: 100, y: 900, w: 1720, h: 120, subtitleSource: { kind: 'allLines' } }],
+          lines: [
+            { lineId: 'line_001', text: 'いち', status: NARRATION_STATUS.none },
+            { lineId: 'line_002', text: 'に', status: NARRATION_STATUS.none },
+          ],
+        }),
+      ],
+    });
+    const { doc, notes } = bakeTimelineProject(p, opts());
+    expect(doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!.text).toBeUndefined();
+    expect(notes).toEqual([{ code: BAKE_NOTE_CODE.dialogueSubtitle, sceneNumbers: [1] }]);
+  });
+
+  it('隠してある字幕ボックスは記録しない（描かれていない＝落ちていない）', () => {
+    const p = project({
+      scenes: [
+        withSubtitleBox({
+          freeLayout: [{ id: 'free_001', kind: FREE_ELEMENT_KIND.subtitle, x: 100, y: 900, w: 1720, h: 120, hidden: true, subtitleSource: { kind: 'allLines' } }],
+          lines: [{ lineId: 'line_001', text: 'いち', status: NARRATION_STATUS.none }],
+        }),
+      ],
+    });
+    expect(bakeTimelineProject(p, opts()).notes).toEqual([]);
   });
 });
 
@@ -541,6 +653,23 @@ describe('bakeTimelineProject: 持っていけなかったものを黙って落�
       ],
     });
     expect(bakeTimelineProject(p, opts()).notes).toEqual([]);
+  });
+
+  it('セリフが1行だけでも記録する（テンプレの字幕層は行の字幕へ差し替わるので、焼くと出なくなる）', () => {
+    const p = project({
+      scenes: [scene('scene_001', { lines: [{ lineId: 'line_001', text: 'ひとこと', status: NARRATION_STATUS.none }] })],
+    });
+    expect(bakeTimelineProject(p, opts()).notes).toEqual([
+      { code: BAKE_NOTE_CODE.dialogueSubtitle, sceneNumbers: [1] },
+    ]);
+  });
+
+  it('見た目に字幕の枠が無ければ記録しない（元から字幕が出ていない）', () => {
+    const noSubtitle: Template = { ...NORMAL_TEMPLATE, layers: NORMAL_TEMPLATE.layers.filter((l) => l.type !== 'subtitle') };
+    const p = project({
+      scenes: [scene('scene_001', { lines: [{ lineId: 'line_001', text: 'ひとこと', status: NARRATION_STATUS.none }] })],
+    });
+    expect(bakeTimelineProject(p, opts({ templateOf: () => noSubtitle })).notes).toEqual([]);
   });
 
   it('動画の再生開始タイミング（ADR-0027）がある場面を記録する', () => {

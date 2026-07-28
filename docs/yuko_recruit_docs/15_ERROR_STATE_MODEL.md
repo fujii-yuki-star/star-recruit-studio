@@ -156,7 +156,7 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `TIMELINE_AUDIO_SOURCE_CONFLICT` | warning | — | 音の出どころが2つ指定されています。どちらか一方にしてください | `ADR-0032`・`11 §8 V25` |
 | `TIMELINE_VOICE_TEXT_EMPTY` | info | — | 読み上げる文が入っていません。文を入力してください | `ADR-0032`・`11 §8 V28` |
 | `TIMELINE_VOICE_ON_NON_VOICE` | warning | — | 読み上げの中身は読み上げの部品にだけ置けます。読み上げの部品に置き直してください | `ADR-0032`・`11 §8 V28` |
-| `BAKE_DIALOGUE_SUBTITLE_SKIPPED` | info | — | 掛け合いの字幕は持っていけません。作ったあとに字幕を置き直してください | `ADR-0032`・`11 §7.6.1` |
+| `BAKE_DIALOGUE_SUBTITLE_SKIPPED` | info | — | セリフに合わせて切り替わる字幕は持っていけません。作ったあとに字幕を置き直してください | `ADR-0032`・`11 §7.6.1` |
 | `BAKE_VIDEO_START_TIMING_SKIPPED` | info | — | 動画を再生し始めるタイミングは持っていけません。作ったあとに動画の位置で調整してください | `ADR-0032`・`11 §7.6.1` |
 | `SCHEMA_VERSION_UNSUPPORTED` | fatal | — | このファイルは対応していないバージョンで作成されています | `11 §1` |
 

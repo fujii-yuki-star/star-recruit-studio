@@ -10,16 +10,27 @@
 // 素材は**コピーする前提で `doc.assets` に載せる**（自己完結＝ADR-0024 (6)・決定13）。実ファイルのコピーと
 // 容量の事前提示は infrastructure/UI の仕事で、ここは「どれを持っていくか」だけを決める。
 import { dimsForOrientation } from '../constants';
-import { FREE_CATEGORY, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND, TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
+import {
+  FREE_CATEGORY,
+  FREE_ELEMENT_KIND,
+  PROJECT_FORMAT,
+  SUBTITLE_SOURCE_KIND,
+  TIMELINE_CLIP_KIND,
+  TRACK_KIND,
+  TRANSITION_DIRECTION,
+  TRANSITION_TYPE,
+} from '../enums';
 import type { TransitionDirection } from '../enums';
+import { isHiddenByGroup } from '../group/compose';
 import { sceneActiveAssetIds } from '../project/assetUsage';
 import { groupBgmRuns } from '../project/compileTimeline';
-import { lineSegments } from '../project/lineTimeline';
+import { lineSegments, resolveLineSubtitle } from '../project/lineTimeline';
 import { sceneLines } from '../project/narrationLines';
 import { createAnimationId, createClipId, createGroupId, createTrackId } from '../project/persistence';
 import { resolveTransition, transitionTimeline } from '../project/sceneTransitions';
 import type { DrawnTransitionType } from '../project/sceneTransitions';
-import type { Asset, Keyframe, NarrationLine, Project, Scene } from '../project/types';
+import { defaultSubtitleSource, freeSubtitleElementTexts } from '../project/subtitleBinding';
+import type { Asset, FreeElement, Keyframe, NarrationLine, Project, Scene } from '../project/types';
 import type { Group } from '../group/types';
 import type { Template } from '../template/types';
 import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
@@ -43,7 +54,7 @@ export type BakeRange =
  * 呼び出し側（UI）はこれを「焼く前の確認」と「焼いた後の案内」に使う。
  */
 export const BAKE_NOTE_CODE = {
-  /** 掛け合い（複数セリフ）の字幕。時間で変わる字幕はクリップに分ける必要があり、#633 の連動と同時に入れる。 */
+  /** セリフに追従して切り替わる字幕。時間で変わる字幕はクリップに分ける必要があり、#633 の連動と同時に入れる。 */
   dialogueSubtitle: 'BAKE_DIALOGUE_SUBTITLE_SKIPPED',
   /** 動画の差し込み口の「再生を始めるタイミング」（ADR-0027）。タイムライン形式に置き場が無い。 */
   videoStartTiming: 'BAKE_VIDEO_START_TIMING_SKIPPED',
@@ -66,8 +77,11 @@ export interface BakeOptions {
   /** `createdAt`/`updatedAt`（ISO 文字列）。同じ理由で外から渡す。 */
   nowIso: string;
   /**
-   * 見た目パターンの解決。**素材を絞る**（休眠の割当を持っていかない＝`sceneActiveAssetIds`）ためだけに使う。
-   * 未指定/未解決は絞らずに全部持っていく＝素材を落とすより多めに持つ側へ倒す（`sceneActiveAssetIds` と同じ方針）。
+   * 見た目パターンの解決。2か所で使う：
+   * - **自由配置の場面かどうかの判定**（`isFreeScene`）＝描画（`layoutScene`）と同じく**見た目の category が正**。
+   *   解決できないときだけ場面自身の記録（`scene.sceneType`）へ落ちる。
+   * - **素材を絞る**（休眠の割当を持っていかない＝`sceneActiveAssetIds`）。未指定/未解決は絞らず全部持っていく
+   *   ＝素材を落とすより多めに持つ側へ倒す（`sceneActiveAssetIds` と同じ方針）。
    */
   templateOf?: (templateId: string) => Template | undefined;
   /** 場面→行ごとの音声長（秒・lineId→秒）。掛け合いの自動逐次で区間尺を決める（書き出しと同じ入力）。 */
@@ -258,12 +272,77 @@ function byZIndex<T extends { zIndex?: number }>(items: readonly T[]): T[] {
 }
 
 /**
+ * この場面を自由配置（要素ごとに焼く）として扱うか。純粋関数。
+ *
+ * **見た目が解決できるなら、その category が正**＝描画（`layoutScene`）と同じ規則にする。
+ * 解決できないときだけ**場面自身の記録（`scene.sceneType`）**へ落ちる（`switchSceneTemplate` が
+ * 見た目のカテゴリに追従させている）。見た目だけを見て決めると、**見た目が見つからない場面の
+ * `freeLayout`・グループ・場面内アニメが黙って落ちる**（§2-5／ADR-0030 系の「多く持つ側へ倒す」に反する）。
+ */
+export function isFreeScene(scene: Scene, template: Template | undefined): boolean {
+  return (template?.category ?? scene.sceneType) === FREE_CATEGORY;
+}
+
+/**
+ * 字幕ボックス（`kind:'subtitle'`）のうち、**時間で変わらないもの**の表示文。純粋関数。
+ *
+ * FREE の字幕ボックスは表示文を「対象（`subtitleSource`）」から解く（ADR-0029）が、タイムライン形式に
+ * 対象の語彙は無い（連動は #633）。**対象＝読み上げ（`narration`）だけは静的**＝`texts.subtitle` を出すので、
+ * いま出ている文をそのまま焼き付けられる。これをしないと単独ナレーションの字幕が黙って消える（§2-5）。
+ * 行に追従する対象（全部／話者）は焼けないので何も付けず、`BakeNote` で知らせる。
+ * 字幕 OFF・文が空（`freeSubtitleElementTexts` が空）のときも何も付けない＝元から出ていない。
+ */
+function staticSubtitleText(el: FreeElement, scene: Scene): { text?: string } {
+  if (el.kind !== FREE_ELEMENT_KIND.subtitle) return {};
+  const source = el.subtitleSource ?? defaultSubtitleSource(scene);
+  if (source.kind !== SUBTITLE_SOURCE_KIND.narration) return {};
+  const [text] = freeSubtitleElementTexts(el, scene);
+  return text != null ? { text } : {};
+}
+
+/**
+ * 焼くと出なくなる「時間で変わる字幕」がこの場面にあるか。純粋関数。**実際に表示されているものだけ**数える
+ * （非表示・OFF・空は失われるものが無い＝`freeContentHiddenBySwitch` と同じ流儀）。
+ *
+ * 2経路ある：
+ * - **テンプレの字幕層**は、セリフ列（`scene.lines`）がある場面では**行ごとに文言が差し替わる**
+ *   （`layout` の `opts.subtitleText` 上書き）。焼くとテンプレクリップの `texts` しか残らないので出なくなる。
+ *   **1行だけの `lines` でも同じ**＝行数で判定すると取りこぼす。
+ * - **FREE の字幕ボックス**のうち、対象が行に追従するもの（全部／話者）。対象＝読み上げは静的なので焼ける
+ *   （`staticSubtitleText`）。
+ */
+function hasTimeVaryingSubtitle(scene: Scene, template: Template | undefined, isFree: boolean): boolean {
+  if ((scene.lines?.length ?? 0) > 0) {
+    const visibleSubtitleLayers = (template?.layers ?? []).filter(
+      (l) => l.type === 'subtitle' && !isHiddenByGroup(l.id, template?.groups ?? []),
+    );
+    const shown = sceneLines(scene)
+      .map((l) => resolveLineSubtitle(l, scene))
+      .some((s) => s.enabled && s.text.length > 0);
+    if (visibleSubtitleLayers.length > 0 && shown) return true;
+  }
+  if (isFree) {
+    for (const el of scene.freeLayout ?? []) {
+      if (el.kind !== FREE_ELEMENT_KIND.subtitle) continue;
+      if (el.hidden || isHiddenByGroup(el.id, scene.groups ?? [])) continue; // 描かれない＝失われない
+      const source = el.subtitleSource ?? defaultSubtitleSource(scene);
+      if (source.kind === SUBTITLE_SOURCE_KIND.narration) continue; // 静的＝焼ける
+      if (freeSubtitleElementTexts(el, scene).length > 0) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * 場面形式プロジェクトからタイムラインプロジェクトを焼き出す（片道・ADR-0032）。純粋関数。
  *
- * - **通常テンプレの場面＝1場面1クリップ**（`kind:'template'`）。差し込み口（素材・文字・体裁・立ち絵・
- *   動画のトリム）はクリップが持ったままなので、焼いた後も写真の差し替えや文字の変更ができる（決定5）。
- * - **FREE の場面＝要素ごとのクリップ＋1場面=1グループ**（決定・#628）。FREE はもともと枠が無いので
- *   焼いた時点で「バラした」状態にし、まとめて動かすのはグループが担う。
+ * - **どの場面も、まず見た目パターンのクリップ（`kind:'template'`）を最背面に置く。** 差し込み口
+ *   （素材・文字・体裁・立ち絵・動画のトリム）はクリップが持ったままなので、焼いた後も写真の差し替えや
+ *   文字の変更ができる（決定5）。**FREE でもこれを置く**のは、FREE テンプレも `background` 層などを持ち
+ *   それが動画に出ているため（`layoutScene` は category を問わず層を描いてから自由配置を重ねる）。
+ * - **通常テンプレの場面はそれだけ＝1場面1クリップ。**
+ * - **FREE の場面はその上に要素ごとのクリップを重ね、1場面=1グループにまとめる**（決定・#628）。
+ *   FREE はもともと枠が無いので焼いた時点で「バラした」状態にし、まとめて動かすのはグループが担う。
  * - **読み上げは `kind:'voice'` のクリップ**（決定7）。同時に流れるセリフ（ADR-0031）は列を分ける＝
  *   タイムライン形式では「音声トラックを分けるだけ」で表せる（決定8）。
  * - **BGM は鳴っている区間ごとに1クリップ**（場面ごとの実効BGM＝`groupBgmRuns` と共有）。
@@ -315,8 +394,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
   const audio = new TrackAllocator();
 
   // 場面ごとの「切り替えを付ける対象」（通常＝テンプレクリップ／FREE＝場面グループ）と、占めた列の範囲。
-  // 中身が空の FREE 場面は描くものが無い＝対象なし（undefined）。切り替えも付けようがないので飛ばす。
-  const sceneTargetId: Array<string | undefined> = [];
+  const sceneTargetId: string[] = [];
   const sceneBlock: ColumnBlock[] = [];
   const dialogueSubtitleScenes: number[] = [];
   const videoStartTimingScenes: number[] = [];
@@ -325,11 +403,36 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     const start = starts[i];
     const end = ends[i];
     const template = options.templateOf?.(scene.templateId);
+    const isFree = isFreeScene(scene, template);
+    // 自由配置の要素は**FREE の場面のときだけ**焼く（通常の見た目では休眠＝ADR-0030・描画と同じゲート）。
+    const elements = isFree ? byZIndex(scene.freeLayout ?? []) : [];
 
-    if (template?.category === FREE_CATEGORY) {
-      const elements = byZIndex(scene.freeLayout ?? []);
-      const count = Math.max(1, elements.length);
-      const base = visual.take(count, start, end);
+    // 見た目パターンのクリップは**どの場面にも置く**（最背面）。FREE テンプレも `background` 層などを持ち、
+    // それが動画に出ているため（`layoutScene` は category を問わず層を描いてから自由配置を重ねる）。
+    const count = 1 + elements.length;
+    const base = visual.take(count, start, end);
+    const templateClipId = newClipId();
+    clips.push({
+      id: templateClipId,
+      kind: TIMELINE_CLIP_KIND.template,
+      trackId: trackIdFor(tracks, base, TRACK_KIND.visual),
+      startSec: start,
+      durationSec: scene.durationSec,
+      templateId: scene.templateId,
+      assetRefs: scene.assetRefs,
+      texts: scene.texts,
+      ...(scene.textStyles ? { textStyles: scene.textStyles } : {}),
+      ...(scene.slotFits ? { slotFits: scene.slotFits } : {}),
+      ...(scene.textFontIds ? { textFontIds: scene.textFontIds } : {}),
+      ...(scene.character ? { character: scene.character } : {}),
+      ...(scene.slotClips ? { slotClips: scene.slotClips } : {}),
+      ...(scene.fontId != null ? { fontId: scene.fontId } : {}),
+    });
+    sceneBlock.push({ base, count });
+
+    if (!isFree) {
+      sceneTargetId.push(templateClipId);
+    } else {
       const elementClipId = new Map<string, string>();
       elements.forEach((el, k) => {
         const { id: _id, kind, zIndex: _z, subtitleSource: _s, ...spatial } = el;
@@ -339,9 +442,13 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
           ...spatial,
           id: clipId,
           kind,
-          trackId: trackIdFor(tracks, base + k, TRACK_KIND.visual),
+          trackId: trackIdFor(tracks, base + 1 + k, TRACK_KIND.visual),
           startSec: start,
           durationSec: scene.durationSec,
+          // 字幕ボックスは表示文を「対象」から解くが（ADR-0029）、タイムライン形式に対象の語彙は無い
+          // （連動は #633）。**時間で変わらないもの（対象＝読み上げ）だけ、いま出ている文を焼き付ける**＝
+          // 単独ナレーションの字幕を黙って消さない（§2-5）。行に追従する対象は下の note で知らせる。
+          ...staticSubtitleText(el, scene),
         });
       });
       // 1場面=1グループ（まとめて動かせるようにする）。既存グループは入れ子で残す（メンバー id を差し替え）。
@@ -354,20 +461,18 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
       const nestedMembers = new Set(nested.flatMap((g) => g.members));
       const oldToNewGroupId = new Map((scene.groups ?? []).map((g, k) => [g.id, nested[k].id]));
       for (const g of nested) groups.push(g);
-      // 中身が空の FREE 場面（描くものが無い）は空のグループを作らない＝中身の無い入れ物を残さない。
-      let sceneGroupId: string | undefined;
-      if (elementClipId.size > 0) {
-        sceneGroupId = newGroupId();
-        groups.push({
-          id: sceneGroupId,
-          members: [
-            ...nested.filter((g) => !nestedMembers.has(g.id)).map((g) => g.id),
-            ...[...elementClipId.values()].filter((id) => !nestedMembers.has(id)),
-          ],
-          transform: { x: 0, y: 0, rotation: 0, scale: 1 },
-          name: scene.texts.title,
-        });
-      }
+      const sceneGroupId = newGroupId();
+      groups.push({
+        id: sceneGroupId,
+        // 見た目パターンのクリップも入れる＝「まとめて動かす」で背景ごと動く（切り替えの付け先でもある）。
+        members: [
+          templateClipId,
+          ...nested.filter((g) => !nestedMembers.has(g.id)).map((g) => g.id),
+          ...[...elementClipId.values()].filter((id) => !nestedMembers.has(id)),
+        ],
+        transform: { x: 0, y: 0, rotation: 0, scale: 1 },
+        name: scene.texts.title,
+      });
       // 場面内アニメ（ADR-0019・timelineOverlay に入っている）を持ち込む。**時間の意味は同じ**＝
       // 要素クリップは場面の先頭から始まるので、場面ローカル秒＝クリップローカル秒。
       for (const anim of project.timelineOverlay?.animations ?? []) {
@@ -377,28 +482,6 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
         animations.push({ id: newAnimId(), targetId, keyframes: anim.keyframes });
       }
       sceneTargetId.push(sceneGroupId);
-      sceneBlock.push({ base, count });
-    } else {
-      const column = visual.take(1, start, end);
-      const clipId = newClipId();
-      clips.push({
-        id: clipId,
-        kind: TIMELINE_CLIP_KIND.template,
-        trackId: trackIdFor(tracks, column, TRACK_KIND.visual),
-        startSec: start,
-        durationSec: scene.durationSec,
-        templateId: scene.templateId,
-        assetRefs: scene.assetRefs,
-        texts: scene.texts,
-        ...(scene.textStyles ? { textStyles: scene.textStyles } : {}),
-        ...(scene.slotFits ? { slotFits: scene.slotFits } : {}),
-        ...(scene.textFontIds ? { textFontIds: scene.textFontIds } : {}),
-        ...(scene.character ? { character: scene.character } : {}),
-        ...(scene.slotClips ? { slotClips: scene.slotClips } : {}),
-        ...(scene.fontId != null ? { fontId: scene.fontId } : {}),
-      });
-      sceneTargetId.push(clipId);
-      sceneBlock.push({ base: column, count: 1 });
     }
 
     // 読み上げ：行ごとに1クリップ。同時に流れる行（ADR-0031）は窓が同じなので列が分かれる（決定8）。
@@ -418,7 +501,10 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     }
 
     // 持っていけなかったもの（黙って落とさない・§2-5）。
-    if ((scene.lines?.length ?? 0) > 1 && sceneLines(scene).some((l) => (l.subtitleEnabled ?? scene.subtitleEnabledDefault ?? true))) {
+    // 判定は**実際に表示されている字幕**で行う（`sceneHasTimeVaryingSubtitle`＝描画と同じ解決規則）。
+    // 掛け合いの行数だけを見ると、1行だけの `lines` 場面（テンプレ字幕層が行の字幕へ差し替わる）や
+    // FREE の字幕ボックスを取りこぼす。
+    if (hasTimeVaryingSubtitle(scene, template, isFree)) {
       dialogueSubtitleScenes.push(i + 1);
     }
     if (scene.slotVideoStart != null && Object.keys(scene.slotVideoStart).length > 0) {
@@ -512,7 +598,13 @@ export function bakedAssets(
 ): Asset[] {
   const used = new Set<string>();
   for (const scene of scenes) {
-    for (const id of sceneActiveAssetIds(scene, templateOf?.(scene.templateId))) used.add(id);
+    const template = templateOf?.(scene.templateId);
+    for (const id of sceneActiveAssetIds(scene, template)) used.add(id);
+    // 見た目が解決できないとき `sceneActiveAssetIds` は自由配置を数えない（category で切るため）が、
+    // 焼き出しは `isFreeScene`（場面自身の記録）で焼く。**焼いたのに素材が無い**状態にしないよう足す。
+    if (template == null && isFreeScene(scene, template)) {
+      for (const el of scene.freeLayout ?? []) if (el.assetId) used.add(el.assetId);
+    }
     const bgm = scene.bgmSettings ?? project.bgmSettings;
     if (bgm?.enabled && bgm.bundledBgmId == null && bgm.assetId) used.add(bgm.assetId);
   }
