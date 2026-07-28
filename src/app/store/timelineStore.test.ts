@@ -261,3 +261,58 @@ describe('自動保存（編集した内容が消えない）', () => {
     expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
   });
 });
+
+describe('再生（#630）', () => {
+  beforeEach(async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('path');
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+  });
+
+  it('途中からはその位置で始め、止めても位置は残る（続きから再生できる）', () => {
+    useTimelineStore.getState().setPlayhead(3);
+    useTimelineStore.getState().play();
+    expect(useTimelineStore.getState()).toMatchObject({ isPlaying: true, playheadSec: 3 });
+    useTimelineStore.getState().pause();
+    expect(useTimelineStore.getState()).toMatchObject({ isPlaying: false, playheadSec: 3 });
+  });
+
+  it('終端にいるときは先頭から始める（押しても動かない、を作らない）', () => {
+    useTimelineStore.getState().setPlayhead(99); // 尺（5秒）へクランプされる
+    useTimelineStore.getState().play();
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+  });
+
+  it('何も置いていない動画では再生を始めない', () => {
+    const d = useTimelineStore.getState().doc!;
+    useTimelineStore.setState({ doc: { ...d, clips: [] } });
+    useTimelineStore.getState().play();
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+
+  it('編集したら再生を止める（動いている的を狙わせない）', () => {
+    useTimelineStore.getState().play();
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+
+  it('取り消しでも再生を止める', () => {
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    useTimelineStore.getState().play();
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+
+  it('尺が縮んだら再生位置を収める（消した部品より後ろに取り残さない）', () => {
+    useTimelineStore.getState().setPlayhead(5);
+    useTimelineStore.getState().selectClip('clip_001');
+    useTimelineStore.getState().removeSelectedClips();
+    expect(useTimelineStore.getState().playheadSec).toBe(0); // 尺が 0 になる
+  });
+
+  it('開き直すと再生していない状態に戻る', async () => {
+    useTimelineStore.getState().play();
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+});

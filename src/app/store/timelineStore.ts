@@ -6,6 +6,7 @@ import { loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { ASSET_TYPE } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
+import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { TrackKind } from "../../domain/enums";
 import {
@@ -37,6 +38,13 @@ export interface TimelineState {
   editBlocked: EditBlockedReason | null;
   /** 保存の状態（場面形式の `saveStatus` と同じ語彙＝同じ概念を同じ言葉で扱う）。 */
   saveStatus: "idle" | "saving" | "saved" | "error";
+  /** 再生中か。時計は画面側（`useTimelinePlayback`）が回し、位置は `setPlayhead` で入る。 */
+  isPlaying: boolean;
+  /**
+   * 位置を外から動かした回数。**再生中のシークを時計へ伝える**ための世代番号で、
+   * `playheadSec` を effect の依存にすると effect 自身が更新して回り続けるため、これを依存にする。
+   */
+  seekNonce: number;
 
   openTimelineProject: (projectId: string) => Promise<void>;
   closeTimelineProject: () => void;
@@ -60,6 +68,15 @@ export interface TimelineState {
   redo: () => void;
   /** 編集内容をディスクへ書く（編集のたびに自動で走る＝閉じても消えない）。 */
   saveTimelineProject: () => Promise<void>;
+  /** 再生を始める（終端にいるときは先頭から）。何も置いていない動画では始めない。 */
+  play: () => void;
+  /** 再生を止める（位置はそのまま＝続きから再生できる）。 */
+  pause: () => void;
+  /**
+   * 時計が進めた位置を入れる（内部・`useTimelinePlayback` からのみ）。**`setPlayhead` と違い世代番号を
+   * 上げない**＝時計自身の更新で「外から動かされた」と誤認して測り直しループに入るのを防ぐ。
+   */
+  _advancePlayhead: (sec: number) => void;
 }
 
 /**
@@ -77,6 +94,8 @@ function emptyState() {
     history: emptyHistory<TimelineProject>(),
     editBlocked: null as EditBlockedReason | null,
     saveStatus: "saved" as TimelineState["saveStatus"],
+    isPlaying: false,
+    seekNonce: 0,
   };
 }
 
@@ -111,9 +130,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   // 再生ヘッドは [0, 尺] に収める＝ドラッグやキー操作で動画の外へ出ない（何も無い時刻を指さない）。
   setPlayhead: (sec) => {
     const doc = get().doc;
-    const max = doc ? timelineDurationSec(doc) : 0;
-    if (!Number.isFinite(sec)) return; // 壊れた入力で位置を失わない
-    set({ playheadSec: Math.min(Math.max(0, sec), max) });
+    if (!doc || !Number.isFinite(sec)) return; // 壊れた入力で位置を失わない
+    // 再生中に位置を動かされたら、時計を測り直させる（そうしないと次のフレームで元へ戻る）。
+    set({ playheadSec: clampTimelinePlayheadSec(doc, sec), seekNonce: get().seekNonce + 1 });
   },
 
   selectClip: (clipId, additive = false) =>
@@ -178,6 +197,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (r) restore(set, get, r.restored, r.history);
   },
 
+  play: () => {
+    const doc = get().doc;
+    if (!doc) return;
+    const total = timelineDurationSec(doc);
+    if (total <= 0) return; // 何も置いていない動画では始めない（押しても動かない状態を作らない）
+    set({ isPlaying: true, playheadSec: playbackStartSec(get().playheadSec, total), seekNonce: get().seekNonce + 1 });
+  },
+  pause: () => set({ isPlaying: false }),
+  _advancePlayhead: (sec) => {
+    const doc = get().doc;
+    if (doc) set({ playheadSec: clampTimelinePlayheadSec(doc, sec) });
+  },
+
   saveTimelineProject: async () => {
     const doc = get().doc;
     if (!doc) return;
@@ -213,7 +245,17 @@ function commit(set: SetState, get: GetState, next: TimelineProject, extra: Part
     set({ editBlocked: null, ...extra });
     return;
   }
-  set({ doc: next, history: recordSnapshot(get().history, current), editBlocked: null, saveStatus: "idle", ...extra });
+  set({
+    doc: next,
+    history: recordSnapshot(get().history, current),
+    editBlocked: null,
+    saveStatus: "idle",
+    // 編集したら再生を止める＝「再生位置へ」のような操作が**動いている的**を狙うのを防ぐ（結果が毎回変わる）。
+    isPlaying: false,
+    // 尺が縮んだら位置を収める（消した部品より後ろに取り残さない）。
+    playheadSec: clampTimelinePlayheadSec(next, get().playheadSec),
+    ...extra,
+  });
 }
 
 /**
@@ -227,6 +269,8 @@ function restore(set: SetState, get: GetState, doc: TimelineProject, history: Hi
     history,
     editBlocked: null,
     saveStatus: "idle",
+    isPlaying: false, // 取り消し/やり直しも編集と同じ扱い（動いている的を狙わせない）
+    playheadSec: clampTimelinePlayheadSec(doc, get().playheadSec),
     selectedClipIds: get().selectedClipIds.filter((id) => ids.has(id)),
   });
 }

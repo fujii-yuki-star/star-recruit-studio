@@ -191,3 +191,67 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     expect(useTimelineStore.getState().doc!.tracks.map((t) => t.kind)).toEqual(["visual", "visual", "audio"]);
   });
 });
+
+describe("TimelineProjectScreen: 再生（#630）", () => {
+  it("再生と停止を切り替えられる", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("再生"));
+    expect(useTimelineStore.getState().isPlaying).toBe(true);
+    fireEvent.click(screen.getByText("停止"));
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+
+  it("何も置いていない動画では再生を押せない", () => {
+    open({ clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("再生")).toBeDisabled();
+  });
+
+  it("先頭へ戻せる（先頭にいるときは押せない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("先頭へ")).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    fireEvent.click(screen.getByText("先頭へ"));
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+  });
+
+  it("編集すると再生が止まる（動いている的を狙わせない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("再生"));
+    fireEvent.click(screen.getByText("音の列を足す"));
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+    expect(screen.getByText("再生")).toBeInTheDocument(); // ラベルも戻る
+  });
+});
+
+describe("TimelineProjectScreen: 再生まわりのレビュー指摘（/canon-check）", () => {
+  it("再生中に位置を動かしても戻らない（時計を測り直す）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("再生"));
+    const before = useTimelineStore.getState().seekNonce;
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "3" } });
+    // 世代番号が**このシークで**上がる＝時計が測り直す（上がらないと次のフレームで元の位置へ戻る）。
+    expect(useTimelineStore.getState().playheadSec).toBe(3);
+    expect(useTimelineStore.getState().seekNonce).toBe(before + 1);
+  });
+
+  it("再生中は「再生位置を使う操作」を押せない（走っている位置を掴ませない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
+    expect(screen.getByText("再生位置へ")).not.toBeDisabled();
+    fireEvent.click(screen.getByText("再生"));
+    expect(screen.getByText("再生位置へ")).toBeDisabled();
+    expect(screen.getByText("再生位置へ").getAttribute("title")).toBe("再生を止めてから使えます");
+  });
+
+  it("何も置いていないときは、再生を押せない理由を出す（無言にしない）", () => {
+    open({ clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("再生").getAttribute("title")).toContain("まだ部品を置いていない");
+  });
+});

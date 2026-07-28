@@ -6,6 +6,7 @@ import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persist
 import { TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { clipCountOnTrack } from "../../domain/timeline/edit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import type { TrackKind } from "../../domain/enums";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
@@ -54,7 +55,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, editBlocked, history,
     setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
+    isPlaying, play, pause,
   } = useTimelineStore();
+
+  // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
+  useTimelinePlayback();
 
   // 取り消し/やり直しのキー操作は**この画面の store** へ繋ぐ（既定は場面形式を巻き戻すので渡さない＝
   // 見えていない文書を戻して自動保存が永続化する事故を作らない・#547 P1-1 と同じ筋）。
@@ -118,6 +123,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     );
   }
 
+  // 再生中に押せない操作の理由（§2-5：押せない理由を無言にしない）。
+  const playingHint = isPlaying ? "再生を止めてから使えます" : undefined;
   const svg = layout
     ? layoutToSvg(layout, { assetSrc: (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined), responsive: true })
     : "";
@@ -146,6 +153,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
       <div className="card">
         <div className="preview-stage" dangerouslySetInnerHTML={{ __html: svg }} />
+        <div className="row gap-sm">
+          <button
+            className="btn btn-primary"
+            onClick={isPlaying ? pause : play}
+            disabled={totalSec <= 0}
+            title={totalSec <= 0 ? "まだ部品を置いていないので再生できません" : undefined}
+          >
+            {isPlaying ? "停止" : "再生"}
+          </button>
+          <button className="btn btn-ghost" onClick={() => setPlayhead(0)} disabled={playheadSec === 0}>
+            先頭へ
+          </button>
+        </div>
         <label className="field">
           <span>再生位置</span>
           <input
@@ -260,13 +280,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec + NUDGE_SEC })}>
                 後ろへ
               </button>
-              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: playheadSec })}>
+              {/* 再生位置を使う操作は**再生中に押させない**＝走っている位置を掴むと結果が毎回変わる（§2-5）。 */}
+              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: playheadSec })} disabled={isPlaying} title={playingHint}>
                 再生位置へ
               </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClip("start", playheadSec)}>
+              <button className="btn btn-secondary" onClick={() => trimSelectedClip("start", playheadSec)} disabled={isPlaying} title={playingHint}>
                 ここから始める
               </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClip("end", playheadSec)}>
+              <button className="btn btn-secondary" onClick={() => trimSelectedClip("end", playheadSec)} disabled={isPlaying} title={playingHint}>
                 ここで終わる
               </button>
               <button className="btn btn-secondary" onClick={duplicateSelectedClip}>同じものを足す</button>

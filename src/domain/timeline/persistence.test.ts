@@ -108,6 +108,20 @@ describe('isSupportedTimelineSchemaVersion / frameTimeSec（/canon-check 指摘�
     expect(msg).not.toContain('新しい形式');
   });
 
+  it('見せる時刻は必ずフレームの格子に乗る（書き出しに存在しない時刻の絵を描かない）', () => {
+    const d = doc({ clips: [clip('clip_001', 0, 5)] });
+    const t = frameTimeSec(d, 1.234);
+    expect(t * 30).toBeCloseTo(Math.round(t * 30)); // k/30 になっている
+    expect(t).toBeLessThanOrEqual(1.234);
+  });
+
+  it('尺が格子に乗っていなくても、見せる時刻は格子に乗る', () => {
+    const d = doc({ clips: [clip('clip_001', 0, 5.52)] });
+    const t = frameTimeSec(d, 99);
+    expect(t * 30).toBeCloseTo(Math.round(t * 30));
+    expect(t).toBeLessThan(5.52);
+  });
+
   it('末尾ちょうどは1フレーム手前へ寄せる（半開区間で絵が消えない）', () => {
     const d = doc({ clips: [clip('clip_001', 0, 5)] });
     expect(frameTimeSec(d, 5)).toBeCloseTo(5 - 1 / 30);
