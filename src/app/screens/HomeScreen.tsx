@@ -8,6 +8,8 @@ import { hasUnsavedChanges } from "../hooks/newProjectGuard";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { YukoPanel } from "../components/YukoPanel";
 import { DeleteConfirm } from "../components/DeleteConfirm";
+import { isTimelineProjectDoc } from "../../domain/projectFormat";
+import { useTimelineStore } from "../store/timelineStore";
 import {
   PlusIcon,
   LayoutIcon,
@@ -30,6 +32,7 @@ function formatDate(iso: string): string {
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
   const loadProject = useProjectStore((s) => s.loadProject);
+  const openTimelineProject = useTimelineStore((s) => s.openTimelineProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
   // 書き出し中はプロジェクトの切替/削除/新規をブロック（#379）。store 側も no-op で守るが、UI でも無効化して
   // 「削除→一覧から消える（実体は残る）」等の不整合と誤操作を防ぐ。
@@ -165,6 +168,13 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     setOpenError(false);
     setOpeningId(projectId);
     try {
+      // 形式で開く先を分ける（ADR-0032・11 §1）＝開いてから「形式が違う」と断らない。
+      // タイムライン形式は別の文書なので別の store・別の画面（読み込めなかった理由は画面側が出す）。
+      if (isTimelineProjectDoc({ format: projects.find((p) => p.projectId === projectId)?.format })) {
+        await openTimelineProject(projectId);
+        onNavigate("timeline-project");
+        return;
+      }
       await loadProject(projectId);
       onNavigate("draft"); // 成功で draft へ遷移＝HomeScreen アンマウント（openingId は解除不要）。
     } catch {
@@ -396,6 +406,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                       <div className="grow">
                         <div className="row gap-sm">
                           <strong>{p.projectName || "無題のプロジェクト"}</strong>
+                          {/* どちらの作り方の動画か一目で分かるように（開く先が違うため・ADR-0032）。 */}
+                          {isTimelineProjectDoc({ format: p.format }) && <span className="badge">タイムライン</span>}
                         </div>
                         <div className="text-sm text-muted">
                           {openingId === p.projectId ? "開いています…" : `更新日 ${formatDate(p.updatedAt)}`}

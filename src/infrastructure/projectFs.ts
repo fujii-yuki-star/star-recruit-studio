@@ -6,6 +6,11 @@ export interface ProjectSummary {
   projectId: string;
   projectName: string;
   updatedAt: string;
+  /**
+   * 文書形式（ADR-0032・11 §1）。**タイムライン形式のときだけ `'timeline'`**（場面形式は書かないので未設定）。
+   * 一覧が開く先を選ぶのに使う＝開いてから「形式が違う」と断らずに済む。判定は `resolveProjectFormat` を通す。
+   */
+  format?: string;
 }
 
 const LS_PREFIX = 'project:';
@@ -68,6 +73,7 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
         projectId: v.projectId ?? key.slice(LS_PREFIX.length),
         projectName: v.projectName ?? '',
         updatedAt: v.updatedAt ?? '',
+        ...(typeof v.format === 'string' ? { format: v.format } : {}),
       });
     } catch {
       // 壊れたエントリは一覧から除外する

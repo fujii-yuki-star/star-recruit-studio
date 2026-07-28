@@ -1,0 +1,101 @@
+// タイムライン編集プロジェクトの編集状態（ADR-0032・#629）。開く・再生ヘッド・選択の不変条件を固定する。
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useTimelineStore } from './timelineStore';
+import * as fsMod from '../../infrastructure/projectFs';
+import * as assetFsMod from '../../infrastructure/assetFs';
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
+import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
+import type { TimelineProject } from '../../domain/timeline/types';
+
+function doc(over: Partial<TimelineProject> = {}): TimelineProject {
+  return {
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: PROJECT_FORMAT.timeline,
+    projectId: 'proj_20260728_001',
+    projectName: '焼いた動画',
+    createdAt: '2026-07-28T00:00:00.000Z',
+    updatedAt: '2026-07-28T00:00:00.000Z',
+    videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+    assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+    tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }],
+    clips: [
+      { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: 'あ' },
+    ],
+    ...over,
+  };
+}
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  useTimelineStore.getState().closeTimelineProject();
+  vi.spyOn(assetFsMod, 'assetDisplayUrl').mockResolvedValue('asset://a.png');
+});
+
+describe('openTimelineProject', () => {
+  it('開いた文書と素材の表示先を持つ', async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    const s = useTimelineStore.getState();
+    expect(s.doc?.projectName).toBe('焼いた動画');
+    expect(s.assetSrcById).toEqual({ asset_001: 'asset://a.png' });
+    expect(s.loadError).toBeNull();
+  });
+
+  it('開けなかったら理由を「次の行動」つきで持ち、前の文書を残さない', async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue('{壊れ');
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    const s = useTimelineStore.getState();
+    expect(s.doc).toBeNull();
+    expect(s.loadError).toContain('一覧から別の動画を選んでください');
+  });
+
+  it('読み出しそのものが失敗しても生のエラーを見せない（§2-5）', async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockRejectedValue(new Error('ENOENT: no such file'));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    const s = useTimelineStore.getState();
+    expect(s.loadError).toBe('この動画を開けませんでした。一覧から選び直してください。');
+    expect(s.loadError).not.toContain('ENOENT');
+  });
+
+  it('開き直すと前の選択・再生位置を持ち越さない（別の動画の状態が残らない）', async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    useTimelineStore.getState().setPlayhead(3);
+    useTimelineStore.getState().selectClip('clip_001');
+
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    const s = useTimelineStore.getState();
+    expect(s.playheadSec).toBe(0);
+    expect(s.selectedClipIds).toEqual([]);
+  });
+});
+
+describe('setPlayhead', () => {
+  beforeEach(async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+  });
+
+  it('動画の外へは出ない（[0, 尺] に収める）', () => {
+    const { setPlayhead } = useTimelineStore.getState();
+    setPlayhead(-1);
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+    setPlayhead(99);
+    expect(useTimelineStore.getState().playheadSec).toBe(5); // 尺＝クリップの終わり
+  });
+});
+
+describe('selectClip', () => {
+  it('通常は選び直し、追加選択は付け外しできる', () => {
+    const { selectClip } = useTimelineStore.getState();
+    selectClip('clip_001');
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(['clip_001']);
+    selectClip('clip_002');
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(['clip_002']); // 選び直し
+    selectClip('clip_001', true);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(['clip_002', 'clip_001']); // 追加
+    selectClip('clip_002', true);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(['clip_001']); // 同じ操作で外す
+  });
+});
