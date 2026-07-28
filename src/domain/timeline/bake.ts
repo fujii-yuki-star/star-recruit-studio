@@ -118,6 +118,19 @@ export function scenesForBakeRange(project: Project, range: BakeRange): Scene[] 
 }
 
 /**
+ * 「ここからここまで」で選んだ2場面の間（両端を含む）の場面 id（再生順）。純粋関数。
+ *
+ * 端の指定順は問わない（後ろの場面を先に選んでも同じ範囲になる）＝利用者がどちらから選んでも同じ結果。
+ * どちらかが見つからないときは空（呼び出し側が「範囲を選び直してください」を出す）。
+ */
+export function sceneIdsBetween(scenes: readonly Scene[], aSceneId: string, bSceneId: string): string[] {
+  const ia = scenes.findIndex((s) => s.sceneId === aSceneId);
+  const ib = scenes.findIndex((s) => s.sceneId === bSceneId);
+  if (ia < 0 || ib < 0) return [];
+  return scenes.slice(Math.min(ia, ib), Math.max(ia, ib) + 1).map((s) => s.sceneId);
+}
+
+/**
  * トラックの割り当て（同一トラック内で時間が重ならない＝11 §8 V24 を**構造で**守る）。
  *
  * 1場面ぶんの列は**必ず連続した並び**で取る。こうすると、切り替えで重なる2つの場面は

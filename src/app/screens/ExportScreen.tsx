@@ -525,7 +525,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                   <div className="notice notice-info mt">
                     <span>保存先：{resultPath}</span>
                   </div>
-                  {/* 完了後の導線（06_UI_SPEC §12 完了時・#404）：長いパスを自力で辿らずワンクリックで開ける。 */}
+                  {/* 完了後の導線（06_UI_SPEC §13 完了時・#404）：長いパスを自力で辿らずワンクリックで開ける。 */}
                   <div className="row gap-sm mt" style={{ justifyContent: "center", flexWrap: "wrap" }}>
                     <button
                       className="btn btn-secondary"

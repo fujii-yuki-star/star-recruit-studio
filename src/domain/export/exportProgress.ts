@@ -106,7 +106,7 @@ export function exportProgressLabel(run: ExportProgressState, opts?: { compact?:
 }
 
 /**
- * 進捗バーに添える見出し（粗い状態）。`06_UI_SPEC §12` の「動画を書き出しています」に合わせる。
+ * 進捗バーに添える見出し（粗い状態）。`06_UI_SPEC §13` の「動画を書き出しています」に合わせる。
  * 段階の細かい説明は `exportProgressLabel` が受け持つ＝見出しと詳細で別の状態名を出さない（ADR-0026②）。
  */
 export function exportHeadingLabel(run: ExportProgressState): string {

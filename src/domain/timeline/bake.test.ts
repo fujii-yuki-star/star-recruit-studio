@@ -5,7 +5,7 @@ import { transitionTimeline } from '../project/sceneTransitions';
 import type { Project, Scene } from '../project/types';
 import type { Template } from '../template/types';
 import { validateTimelineProject } from '../validation/generated/validators.js';
-import { BAKE_NOTE_CODE, BAKE_RANGE_KIND, bakeTimelineProject, bakedFilePaths, scenesForBakeRange } from './bake';
+import { BAKE_NOTE_CODE, BAKE_RANGE_KIND, bakeTimelineProject, bakedFilePaths, sceneIdsBetween, scenesForBakeRange } from './bake';
 import type { BakeOptions } from './bake';
 import { validateTimelineDoc } from './validateTimelineDoc';
 
@@ -715,5 +715,25 @@ describe('bakedFilePaths（運ぶファイルの一覧・決定13）', () => {
       ],
     });
     expect(bakedFilePaths(bakeTimelineProject(p, opts()).doc)).toEqual(['assets/asset_001.png']);
+  });
+});
+
+describe('sceneIdsBetween（「ここからここまで」の範囲）', () => {
+  const list = [scene('scene_001'), scene('scene_002'), scene('scene_003'), scene('scene_004')];
+
+  it('両端を含む再生順の場面 id を返す', () => {
+    expect(sceneIdsBetween(list, 'scene_002', 'scene_003')).toEqual(['scene_002', 'scene_003']);
+  });
+
+  it('端を逆から選んでも同じ範囲になる（どちらから選んでもよい）', () => {
+    expect(sceneIdsBetween(list, 'scene_003', 'scene_002')).toEqual(['scene_002', 'scene_003']);
+  });
+
+  it('同じ場面を両端にすると1件', () => {
+    expect(sceneIdsBetween(list, 'scene_002', 'scene_002')).toEqual(['scene_002']);
+  });
+
+  it('見つからない端は空（呼び出し側が選び直しを促す）', () => {
+    expect(sceneIdsBetween(list, 'scene_002', 'scene_999')).toEqual([]);
   });
 });

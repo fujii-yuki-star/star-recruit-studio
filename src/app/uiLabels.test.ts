@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
-import { deleteLookConfirmMessage, fitLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
+import { bakeNoteText, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -148,5 +148,29 @@ describe("自由配置→通常の確認文言（#547 P2-9）", () => {
     expect(freeSwitchConfirmMessage({ ...none, slot: 1, total: 1 })).toContain("動画に出なくなります");
     expect(deleteLookConfirmMessage({ changing: 1, losingContent: 1, unresolved: 0 })).toContain("動画に出なくなります");
     expect(standardLookResultMessage({ fixed: [1], unfixable: [], lostContent: [1] })).toContain("動画に出なくなった");
+  });
+});
+
+describe('formatDiskSize（焼き出しで増える容量の目安・ADR-0032 決定13）', () => {
+  it('MB は整数へ丸める（読みづらい端数を出さない）', () => {
+    expect(formatDiskSize(12.4 * 1024 * 1024)).toBe('約 12MB');
+    expect(formatDiskSize(12.6 * 1024 * 1024)).toBe('約 13MB');
+  });
+
+  it('1MB に満たないものは「1MB 未満」（0.003MB のような表記にしない）', () => {
+    expect(formatDiskSize(0)).toBe('1MB 未満');
+    expect(formatDiskSize(3 * 1024)).toBe('1MB 未満');
+  });
+
+  it('1024MB 以上は GB で小数1桁', () => {
+    expect(formatDiskSize(2.5 * 1024 * 1024 * 1024)).toBe('約 2.5GB');
+  });
+});
+
+describe('bakeNoteText（持っていけないものの案内）', () => {
+  it('対象の場面と「次の行動」を並べる（§2-5）', () => {
+    expect(bakeNoteText({ code: 'BAKE_DIALOGUE_SUBTITLE_SKIPPED', sceneNumbers: [2, 5] })).toBe(
+      '場面2・5：セリフに合わせて切り替わる字幕は持っていけません。作ったあとに字幕を置き直してください',
+    );
   });
 });

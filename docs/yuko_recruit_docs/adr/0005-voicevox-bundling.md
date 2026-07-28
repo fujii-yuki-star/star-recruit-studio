@@ -2,13 +2,13 @@
 
 - **状態**: Accepted（2026-06-13 承認）
 - **日付**: 2026-06-13
-- **関連**: [`0003-narration-voice.md`](0003-narration-voice.md) / `13_DEPENDENCIES_AND_LICENSING.md §4,§5,§9` / `06_UI_SPEC.md §14` / `CLAUDE.md §3,§11`
+- **関連**: [`0003-narration-voice.md`](0003-narration-voice.md) / `13_DEPENDENCIES_AND_LICENSING.md §4,§5,§9` / `06_UI_SPEC.md §15` / `CLAUDE.md §3,§11`
 
 ---
 
 ## コンテキスト
 
-ナレーションは **VOICEVOX:ずんだもん**（ADR-0003）。MVP段階では、ローカルの VOICEVOX エンジンへ `VoiceProvider` 越しに HTTP 接続する実装で進めており、開発者は VOICEVOX を別途起動し、必要に応じて設定画面で接続先URLを指定していた（`13 §4` / `06 §14`）。
+ナレーションは **VOICEVOX:ずんだもん**（ADR-0003）。MVP段階では、ローカルの VOICEVOX エンジンへ `VoiceProvider` 越しに HTTP 接続する実装で進めており、開発者は VOICEVOX を別途起動し、必要に応じて設定画面で接続先URLを指定していた（`13 §4` / `06 §15`）。
 
 しかしエンドユーザーに「VOICEVOX を自分でインストールして起動し、接続先を設定させる」のは受け入れがたい体験であり、リリース後の通常フローにすべきでない。エンジンの**同梱可否・接続方式は `13 §4` / `CLAUDE.md §11` で未決定**として残されていた。
 
