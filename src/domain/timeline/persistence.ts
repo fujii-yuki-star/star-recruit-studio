@@ -1,10 +1,10 @@
 // タイムライン形式（ADR-0032）の読込・尺の算出。純粋関数（I/O は infrastructure・§4）。
 // 場面形式の `project/persistence.ts` と同じ流儀で、読み込めない文書は**生のエラーを UI へ出さず**
 // 「次の行動」を示す文言で断る（§2-5・15 §6）。
-import { FPS } from '../constants';
 import { PROJECT_FORMAT } from '../enums';
 import { isTimelineProjectDoc } from '../projectFormat';
 import { validateTimelineProject } from '../validation/generated/validators.js';
+import { effectiveFps, quantizeToFrameSec } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
 import type { TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
@@ -84,10 +84,13 @@ export function timelineDurationSec(doc: TimelineProject): number {
  * （秒＝正準・フレーム＝出力時の量子化＝ADR-0023）。
  */
 export function frameTimeSec(doc: TimelineProject, playheadSec: number): number {
+  const fps = effectiveFps(doc);
   const total = timelineDurationSec(doc);
-  const fps = doc.videoSettings.fps ?? FPS;
   if (!Number.isFinite(playheadSec)) return 0;
-  return Math.max(0, Math.min(playheadSec, Math.max(0, total - 1 / fps)));
+  // **格子へ落としてから**最後のフレームで頭打ちにする＝見せる時刻が必ず `k/fps` になる
+  // （落とさずにクランプすると、尺が格子に乗っていないとき書き出しに存在しない時刻の絵を描く）。
+  const lastFrame = Math.max(0, quantizeToFrameSec(Math.max(0, total - 1 / fps), fps));
+  return Math.min(Math.max(0, quantizeToFrameSec(playheadSec, fps)), lastFrame);
 }
 
 /** 保存用に更新日時を差し替えた文書を返す（保存そのものは infrastructure）。 */
