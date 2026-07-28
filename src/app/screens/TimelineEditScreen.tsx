@@ -4,7 +4,7 @@ import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { assembleProject } from "../../domain/project/persistence";
 import { activeTelopsAt, compileTimeline, sceneLocalTelops } from "../../domain/project/compileTimeline";
 import { activeLineIndexAt, lineSegments, segmentAt } from "../../domain/project/lineTimeline";
-import { playheadFrameAt } from "../../domain/project/playhead";
+import { clampPlayheadSec, playheadFrameAt } from "../../domain/project/playhead";
 import { formatDuration } from "../../domain/format/duration";
 import { ScenePreview } from "../components/ScenePreview";
 import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
@@ -56,7 +56,12 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   // 再生ヘッド（ADR-0023 段階(1)）。時間軸で選んだ瞬間の**静止フレーム**を右の窓へ。
   // グローバル秒→場面ローカル秒の橋渡しだけ `playheadFrameAt` が担い、そこから先（字幕・有効行・テロップ）は
   // 場面編集/仕上がり確認/書き出しと**同じ共有関数**で解決する＝画面ごとに見え方がぶれない（ADR-0026②/③）。
-  const [playheadSec, setPlayheadSec] = useState(0);
+  // 押された位置は素のまま持ち、**描画のたびに動画の範囲へ収める**（クランプの持ち主はここ1か所）。
+  // 動画が短くなっても（この画面の「取り消す」は ADR-0020 の履歴＝meta/parts/**scenes** を丸ごと戻すので、
+  // 別画面で伸ばした場面尺をここから取り消すと合計尺が縮む）、ヘッドと時計が**存在しない時刻**に残らない。
+  // 素の値を残すのは、やり直しで動画が元の長さに戻ったときに元の位置へ帰れるようにするため。
+  const [rawPlayheadSec, setPlayheadSec] = useState(0);
+  const playheadSec = clampPlayheadSec(timeline, rawPlayheadSec);
   const playheadScene = useMemo(() => {
     const { sceneId, localSec } = playheadFrameAt(timeline, playheadSec);
     const scene = sceneId ? scenes.find((s) => s.sceneId === sceneId) : undefined;

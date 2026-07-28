@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Scene } from "../../domain/project/types";
@@ -18,7 +18,7 @@ const scene = (id: string, order: number, over: Partial<Scene> = {}): Scene =>
   }) as Scene;
 
 /** ルーラー（時間の目盛り）＝シークの受け口。 */
-const ruler = () => screen.getByRole("button", { name: "時間を選ぶ" });
+const ruler = () => screen.getByRole("slider", { name: "再生位置" });
 const playhead = () => screen.getByTestId("timeline-playhead");
 /** 仕上がりプレビュー側の文字だけを引く（タイムラインの帯にも同じ文言が出るため）。 */
 const previewText = (text: string) => within(screen.getByLabelText("場面の仕上がり")).queryByText(text);
@@ -71,10 +71,54 @@ describe("TimelineEditScreen 再生ヘッド（ADR-0023 (1)・#329）", () => {
     expect(previewText("あと")).toBeInTheDocument();
   });
 
+  // 動画が短くなったら、ヘッドも時計もその中に収まる（PR #624 レビュー 🟡）。
+  // この画面の「取り消す」は ADR-0020 の履歴（meta/parts/**scenes**）を丸ごと戻すので、別画面で伸ばした場面尺を
+  // ここから取り消すと合計尺が縮む。画面は再マウントされないため、ヘッドだけ**存在しない時刻**に残り得た。
+  it("動画が短くなったら、ヘッドと時計は新しい末尾へ収まる", () => {
+    render(<TimelineEditScreen onNavigate={vi.fn()} />);
+    seekPx(504); // 14秒＝場面2の中
+    expect(screen.getByText("14秒")).toBeInTheDocument();
+
+    // 場面2が消える（＝場面追加の取り消し相当）。合計 16秒 → 8秒。
+    act(() => {
+      useProjectStore.setState({
+        parts: [{ partId: "part_001", title: "パート1", order: 1, sceneIds: ["scene_001"] }],
+        scenes: [scene("scene_001", 1, { texts: { title: "まえ" } })],
+      });
+    });
+    expect(playhead()).toHaveStyle({ left: "calc(var(--timeline-label-w) + 288px)" }); // 8秒＝288px
+    expect(screen.getByText("8秒")).toBeInTheDocument(); // 存在しない時刻を出し続けない
+    expect(previewText("まえ")).toBeInTheDocument();
+  });
+
   it("選んだ時間を時計表示で示す（どこを見ているかが分かる）", () => {
     render(<TimelineEditScreen onNavigate={vi.fn()} />);
     seekPx(360);
     expect(screen.getByText("10秒")).toBeInTheDocument();
+  });
+
+  // マウスが使えなくてもヘッドを動かせる（PR #624 レビュー ℹ️）。位置を持つ操作なので役割は slider＝
+  // 読み上げに現在位置が伝わり、矢印キーが効く。
+  it("キーボードでもヘッドを動かせる（←→ で1秒・Home/End で端へ）", () => {
+    render(<TimelineEditScreen onNavigate={vi.fn()} />);
+    expect(ruler()).toHaveAttribute("aria-valuemax", "16");
+    expect(ruler()).toHaveAttribute("aria-valuenow", "0");
+
+    fireEvent.keyDown(ruler(), { key: "ArrowRight" });
+    expect(ruler()).toHaveAttribute("aria-valuenow", "1");
+    expect(ruler()).toHaveAttribute("aria-valuetext", "0:01");
+
+    fireEvent.keyDown(ruler(), { key: "ArrowLeft" });
+    fireEvent.keyDown(ruler(), { key: "ArrowLeft" }); // 0 より手前へは行かない
+    expect(ruler()).toHaveAttribute("aria-valuenow", "0");
+
+    fireEvent.keyDown(ruler(), { key: "End" });
+    expect(ruler()).toHaveAttribute("aria-valuenow", "16");
+    expect(previewText("あと")).toBeInTheDocument(); // 末尾＝場面2
+
+    fireEvent.keyDown(ruler(), { key: "Home" });
+    expect(ruler()).toHaveAttribute("aria-valuenow", "0");
+    expect(previewText("まえ")).toBeInTheDocument();
   });
 
   // 場面が切り替わるだけなら「場面の頭を出しているだけ」でも通ってしまう。
