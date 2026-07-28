@@ -31,22 +31,27 @@ export interface TimelineState {
   clearSelection: () => void;
 }
 
-/** 開いていない状態（閉じる・開き直しの初期値）。 */
-const EMPTY = {
-  doc: null,
-  loadError: null,
-  isLoading: false,
-  playheadSec: 0,
-  selectedClipIds: [] as string[],
-  assetSrcById: {} as Record<string, string>,
-};
+/**
+ * 開いていない状態（閉じる・開き直しの初期値）。**毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、
+ * 将来その場書き換えが入ったときに別の文書へ選択が漏れる（構造で防ぐ）。
+ */
+function emptyState() {
+  return {
+    doc: null,
+    loadError: null,
+    isLoading: false,
+    playheadSec: 0,
+    selectedClipIds: [] as string[],
+    assetSrcById: {} as Record<string, string>,
+  };
+}
 
 export const useTimelineStore = create<TimelineState>((set, get) => ({
-  ...EMPTY,
+  ...emptyState(),
 
   openTimelineProject: async (projectId) => {
     if (get().isLoading) return;
-    set({ ...EMPTY, isLoading: true });
+    set({ ...emptyState(), isLoading: true });
     try {
       const doc = parseTimelineProjectDoc(await loadProjectDoc(projectId));
       // 素材の表示用 src を解決する（動画は本体でなく代表フレーム＝場面形式の読込と同じ方針）。
@@ -63,16 +68,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ doc, assetSrcById, isLoading: false });
     } catch (e) {
       // 読込の失敗理由は文書側（TimelineLoadError）が「次の行動」つきで持っている。それ以外は既定文言。
-      set({ ...EMPTY, loadError: e instanceof TimelineLoadError ? e.message : LOAD_FAILED_MESSAGE });
+      set({ ...emptyState(), loadError: e instanceof TimelineLoadError ? e.message : LOAD_FAILED_MESSAGE });
     }
   },
 
-  closeTimelineProject: () => set({ ...EMPTY }),
+  closeTimelineProject: () => set({ ...emptyState() }),
 
   // 再生ヘッドは [0, 尺] に収める＝ドラッグやキー操作で動画の外へ出ない（何も無い時刻を指さない）。
   setPlayhead: (sec) => {
     const doc = get().doc;
     const max = doc ? timelineDurationSec(doc) : 0;
+    if (!Number.isFinite(sec)) return; // 壊れた入力で位置を失わない
     set({ playheadSec: Math.min(Math.max(0, sec), max) });
   },
 

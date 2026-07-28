@@ -354,19 +354,26 @@ const trackKindLabel: Record<TrackKind, string> = {
   audio: "音",
 };
 
-export function trackLabel(kind: TrackKind, order: number): string {
-  return `${trackKindLabel[kind]}${order}`;
+/**
+ * 連番は**種別ごと**に数える（`11 §7.6`「未指定＝種別＋連番の自動名」）。
+ * 並び全体の通し番号にすると、映像3本＋音2本の動画で「音1」が無く「音4・音5」になる。
+ */
+export function trackLabel(tracks: readonly { id: string; kind: TrackKind; name?: string }[], trackId: string): string {
+  const track = tracks.find((t) => t.id === trackId);
+  if (!track) return "";
+  if (track.name) return track.name;
+  const order = tracks.filter((t) => t.kind === track.kind).findIndex((t) => t.id === trackId) + 1;
+  return `${trackKindLabel[track.kind]}${order}`;
 }
 
 /**
  * クリップのユーザー向け名称（ADR-0032・#629）。名前が付いていれば優先し、無ければ中身から短く作る。
  * 全値必須＝`TimelineClipKind` が増えたらコンパイルエラーで気づく（無名の部品ができない）。
  */
+// 空間の語彙は自由配置と**同じもの**（`TIMELINE_CLIP_KIND` は `FREE_ELEMENT_KIND` を広げた集合＝`11 §7.6`）。
+// 名前も `freeKindLabel` から広げる＝同じ物を画面によって別の名で呼ばない（§6・ADR-0026②）。
 const clipKindLabel: Record<TimelineClipKind, string> = {
-  slot: "写真・動画",
-  text: "文字",
-  shape: "図形",
-  subtitle: "字幕",
+  ...freeKindLabel,
   template: "見た目パターン",
   audio: "音",
   voice: "読み上げ",

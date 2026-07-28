@@ -2,11 +2,11 @@ import { useMemo } from "react";
 import type { ScreenId } from "../data/mockData";
 import { useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
-import { timelineDurationSec } from "../../domain/timeline/persistence";
-import { TRACK_KIND } from "../../domain/enums";
+import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
+import { TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { TrackKind } from "../../domain/enums";
 import "../components/timeline.css";
-import { clipEndSec } from "../../domain/timeline/validateTimelineDoc";
+import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
@@ -43,13 +43,25 @@ function tickStepSec(totalSec: number): number {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const { doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, setPlayhead, selectClip } = useTimelineStore();
   const templates = useProjectStore((s) => s.templates);
+  // テンプレが持つ既定素材（ADR-0021）は全プロジェクト共通の置き場にある＝場面形式のプレビュー・書き出しと
+  // 同じフォールバック（素材 → テンプレ既定素材）を通す。無いと同じ見た目が場面形式と違う絵になる（ADR-0026②）。
+  const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
 
   const totalSec = doc ? timelineDurationSec(doc) : 0;
   const layout = useMemo(() => {
     if (!doc) return null;
     const byId = new Map(templates.map((t) => [t.templateId, t]));
-    return layoutTimelineAt(doc, playheadSec, { templateOf: (id) => byId.get(id) });
+    // 末尾ちょうどは1フレーム手前へ寄せる（半開区間で画面が真っ白になるのを防ぐ・`frameTimeSec`）。
+    return layoutTimelineAt(doc, frameTimeSec(doc, playheadSec), { templateOf: (id) => byId.get(id) });
   }, [doc, playheadSec, templates]);
+  // 見た目が見つからないクリップは**描かれない**（`layoutTimelineAt`）。黙って絵だけ消さずに知らせる（§2-5・#547 と同じ筋）。
+  const missingTemplateCount = useMemo(() => {
+    if (!doc) return 0;
+    const known = new Set(templates.map((t) => t.templateId));
+    return doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.template && !known.has(c.templateId ?? "")).length;
+  }, [doc, templates]);
+  // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
+  const warnings = useMemo(() => (doc ? validateTimelineDoc(doc) : []), [doc]);
 
   if (isLoading) {
     return (
@@ -75,7 +87,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   }
 
   const svg = layout
-    ? layoutToSvg(layout, { assetSrc: (id) => (id ? assetSrcById[id] : undefined), responsive: true })
+    ? layoutToSvg(layout, { assetSrc: (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined), responsive: true })
     : "";
   const step = tickStepSec(totalSec);
   const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
@@ -86,6 +98,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   return (
     <div className="main-scroll">
       <PageHead title={doc.projectName} desc="時間の流れを自由に組み替えて動画を作ります。" />
+
+      {missingTemplateCount > 0 && (
+        <p className="notice notice-warn" role="alert">
+          見た目パターンが見つからない部品が{missingTemplateCount}個あります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください。
+        </p>
+      )}
+      {warnings.length > 0 && (
+        <ul className="notice notice-warn" role="alert">
+          {warnings.map((w) => (
+            <li key={`${w.code}/${w.field}`}>{w.message}</li>
+          ))}
+        </ul>
+      )}
 
       <div className="card">
         <div className="preview-stage" dangerouslySetInnerHTML={{ __html: svg }} />
@@ -125,10 +150,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   </div>
                 </div>
                 {/* 表示は**手前が上**（配列は後ろほど手前なので逆順に並べる）＝重なりの見え方と一致させる。 */}
-                {[...doc.tracks].reverse().map((track, i) => (
+                {[...doc.tracks].reverse().map((track) => (
                   <div className="timeline-row" key={track.id}>
                     <div className="timeline-row-label">
-                      <span>{track.name ?? trackLabel(track.kind, doc.tracks.length - i)}</span>
+                      <span>{trackLabel(doc.tracks, track.id)}</span>
                       {track.hidden && <span className="sub">出さない</span>}
                     </div>
                     <div className="timeline-track timeline-lane" style={{ width: laneWidthPx }}>

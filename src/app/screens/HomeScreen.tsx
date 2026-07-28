@@ -160,7 +160,10 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     if (isExporting) return; // 書き出し中は切替をブロック（loadProject は no-op・遷移もしない・#379）
     if (openingId) return; // 既に別プロジェクトを開いている最中は無視（連打・並走で後勝ちを防ぐ・#392）
     if (pendingOpenId) return; // 既に別の「開く」確認中は上書きしない（確認中は他カードも無効化＝多重防御・レビュー対応）
-    if (hasWork) { setPendingOpenId(projectId); return; } // 未保存＝確認してから開く
+    // タイムライン形式は**別の文書**を別の画面で開くだけ＝場面形式の編集内容は閉じないので確認は出さない
+    // （「保存していない素材や場面は失われます」は事実と違う・§2-5）。
+    const isTimeline = isTimelineProjectDoc({ format: projects.find((p) => p.projectId === projectId)?.format });
+    if (hasWork && !isTimeline) { setPendingOpenId(projectId); return; } // 未保存＝確認してから開く
     void doOpenProject(projectId);
   }
   async function doOpenProject(projectId: string) {

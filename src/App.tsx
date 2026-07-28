@@ -142,7 +142,11 @@ function App() {
   }
 
   // 場面編集・生成中・見た目パターン編集は独自ヘッダのため、共通トップバー（プロジェクト保存等）は表示しない
-  const hasOwnHeader = screen === "scene-edit" || screen === "generating" || screen === "looks-edit";
+  // 共通トップバーの「保存」とバッジは**場面形式の文書**を保存する（projectStore）。タイムライン形式は
+  // 別の文書なので出さない＝見ている文書と違うものが保存される／場面文書を開いていないときは空の
+  // プロジェクトが新しく作られる、を防ぐ（ADR-0026④）。画面は自前の見出し（PageHead）を持つ。
+  const hasOwnHeader =
+    screen === "scene-edit" || screen === "generating" || screen === "looks-edit" || screen === "timeline-project";
 
   return (
     <div className="app">

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from './persistence';
+import { frameTimeSec, isSupportedTimelineSchemaVersion, parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from './persistence';
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -82,5 +82,41 @@ describe('withUpdatedAt', () => {
     expect(next.updatedAt).toBe('2026-08-01T00:00:00.000Z');
     expect(next.format).toBe(PROJECT_FORMAT.timeline);
     expect(next.createdAt).toBe('2026-07-28T00:00:00.000Z');
+  });
+});
+
+describe('isSupportedTimelineSchemaVersion / frameTimeSec（/canon-check 指摘の修正）', () => {
+  it('同じメジャーの後方互換な追加は開ける（1回のバンプで既存が開けなくならない）', () => {
+    expect(isSupportedTimelineSchemaVersion('1.0')).toBe(true);
+    expect(isSupportedTimelineSchemaVersion(TIMELINE_SCHEMA_VERSION)).toBe(true);
+    expect(isSupportedTimelineSchemaVersion('1.9')).toBe(true);
+  });
+
+  it('未対応メジャーだけ断る', () => {
+    expect(isSupportedTimelineSchemaVersion('2.0')).toBe(false);
+  });
+
+  it('古い版の文書は現行版へ引き上げて読める（1回のバンプで既存が開けなくならない）', () => {
+    const loaded = parseTimelineProjectDoc(JSON.stringify({ ...doc(), schemaVersion: '1.0' }));
+    expect(loaded.schemaVersion).toBe(TIMELINE_SCHEMA_VERSION);
+    expect(loaded.projectName).toBe('テスト'); // 中身はそのまま
+  });
+
+  it('版の案内は「バージョン」と言う（「形式」は場面/タイムラインの別を指す語）', () => {
+    const msg = rejectMessage(JSON.stringify({ ...doc(), schemaVersion: '2.0' }));
+    expect(msg).toContain('対応していないバージョン');
+    expect(msg).not.toContain('新しい形式');
+  });
+
+  it('末尾ちょうどは1フレーム手前へ寄せる（半開区間で絵が消えない）', () => {
+    const d = doc({ clips: [clip('clip_001', 0, 5)] });
+    expect(frameTimeSec(d, 5)).toBeCloseTo(5 - 1 / 30);
+    expect(frameTimeSec(d, 2)).toBe(2); // 途中はそのまま
+    expect(frameTimeSec(d, -1)).toBe(0);
+    expect(frameTimeSec(d, Number.NaN)).toBe(0); // 壊れた入力で位置を失わない
+  });
+
+  it('何も置いていない動画では 0（負にしない）', () => {
+    expect(frameTimeSec(doc(), 0)).toBe(0);
   });
 });

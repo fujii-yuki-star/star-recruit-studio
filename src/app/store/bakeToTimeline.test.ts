@@ -85,6 +85,14 @@ describe('bakeToTimeline / estimateBake', () => {
     expect(vi.mocked(bakeFsMod.bakeSizeBytes).mock.calls[0][0]).toBe('proj_20260701_001');
   });
 
+  it('スキーマに適合しない結果は保存しない（一覧に出るのに開けない動画を作らない）', async () => {
+    // durationSec>0 は schema の要求（exclusiveMinimum）。壊れた場面から焼くと未適合になる。
+    useProjectStore.setState({ scenes: [scene('scene_001', 1, { durationSec: 0 })] });
+    await expect(useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画')).rejects.toThrow();
+    // 焼いた文書は保存されていない（走るのは元の保存だけ）。
+    expect(vi.mocked(fsMod.saveProjectDoc).mock.calls.every((c) => c[0] === 'proj_20260701_001')).toBe(true);
+  });
+
   it('持っていけないものは見積りでも焼いた後でも同じ内容を返す（同じ変換を共有）', async () => {
     useProjectStore.setState({
       scenes: [scene('scene_001', 1, { slotVideoStart: { mainVisual: { mode: 'afterAnim' } } })],

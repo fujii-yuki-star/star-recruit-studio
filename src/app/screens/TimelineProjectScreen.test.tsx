@@ -8,6 +8,7 @@ import { useProjectStore } from "../store/projectStore";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
 import type { TimelineProject } from "../../domain/timeline/types";
+import type { Template } from "../../domain/template/types";
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -61,7 +62,8 @@ describe("TimelineProjectScreen", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const names = screen.getAllByText(/^(映像|音)\d$/).map((el) => el.textContent);
-    expect(names).toEqual(["音2", "映像1"]);
+    // 連番は**種別ごと**（並び全体の通し番号にすると「音1」が存在しない動画ができる）。
+    expect(names).toEqual(["音1", "映像1"]);
   });
 
   it("クリップを選べる（Shift で追加選択）", () => {
@@ -85,5 +87,44 @@ describe("TimelineProjectScreen", () => {
     open({ clips: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("まだ何も置かれていません。")).toBeInTheDocument();
+  });
+});
+
+describe("TimelineProjectScreen: レビュー指摘の修正（/canon-check）", () => {
+  it("見た目パターンが見つからない部品があることを知らせる（黙って絵だけ消さない）", () => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_missing" }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("alert").textContent).toContain("見た目パターンが見つからない部品が1個あります");
+  });
+
+  it("置き場所の取り違え（11 §8）も知らせる＝描画から外れるものを黙らせない", () => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_999", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("どの列に置くか決まっていない"))).toBe(true);
+  });
+
+  it("見た目パターンが持つ既定素材も表示できる（場面形式と同じ絵になる・ADR-0021）", () => {
+    const withTemplateAsset: Template = {
+      schemaVersion: "1.0", templateId: "tmpl_with_asset", name: "既定素材つき", category: "photo_intro",
+      aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+      layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080, assetId: "tmpl_asset_001" }],
+    };
+    useProjectStore.setState({ templates: [withTemplateAsset], templateAssetSrcById: { tmpl_asset_001: "asset://tmpl.png" } });
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_with_asset" }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(document.querySelector(".preview-stage")?.innerHTML ?? "").toContain("asset://tmpl.png");
+  });
+
+  it("再生位置を末尾へ送っても絵が消えない（半開区間の端を1フレーム手前へ寄せる）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "5" } });
+    // 末尾ちょうどでも、その瞬間のクリップが描かれている（下地だけの空フレームにならない）。
+    // 文言そのものは枠幅で折返し/省略されるので、文字が1つでも描かれていることを見る。
+    expect(document.querySelector(".preview-stage svg text")).not.toBeNull();
   });
 });

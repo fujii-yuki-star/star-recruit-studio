@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
-import { act, fireEvent, render, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { useProjectStore } from "./app/store/projectStore";
 import { sampleTemplates } from "./infrastructure/sampleData";
+import * as fsMod from "./infrastructure/projectFs";
+import { TIMELINE_SCHEMA_VERSION } from "./domain/timeline/types";
 import type { Scene } from "./domain/project/types";
 
 // #547 P3-7 レビュー：navigation.ts の単体テストと Sidebar の props テストの"接着"＝App 側の配線
@@ -125,5 +127,36 @@ describe("App 書き出しの終了通知の配線（#589 統合）", () => {
     // 他画面へ戻っても再掲しない（#547 P3-11 の「古い通知が残る」を作らない）。
     clickSidebar(container, "素材");
     expect(within(container).queryByText(/動画の書き出しが終わりました/)).toBeNull();
+  });
+});
+
+// ADR-0032：タイムライン編集は**別の文書**。共通トップバーの「保存」は場面形式（projectStore）を保存するので、
+// この画面には出さない（見ている文書と違うものが保存される／場面文書が無いと空のプロジェクトが新しく作られる）。
+describe("タイムライン編集の画面には場面形式の保存バーを出さない（#629 /canon-check 🔴）", () => {
+  const timelineDoc = {
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: "timeline",
+    projectId: "proj_20260728_001",
+    projectName: "焼いた動画",
+    createdAt: "2026-07-28T00:00:00.000Z",
+    updatedAt: "2026-07-28T00:00:00.000Z",
+    videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
+    assets: [],
+    tracks: [{ id: "track_001", kind: "visual" }],
+    clips: [],
+  };
+
+  it("一覧から開くと専用画面になり、共通トップバー（保存・保存状態）が出ない", async () => {
+    useProjectStore.setState({ templates: sampleTemplates, scenes: [], parts: [], assets: [] });
+    vi.spyOn(fsMod, "listProjectSummaries").mockResolvedValue([
+      { projectId: "proj_20260728_001", projectName: "焼いた動画", updatedAt: "2026-07-28T00:00:00.000Z", format: "timeline" },
+    ]);
+    vi.spyOn(fsMod, "loadProjectDoc").mockResolvedValue(JSON.stringify(timelineDoc));
+
+    const { container, findByText } = render(<App />);
+    expect(container.querySelector(".topbar")).not.toBeNull(); // 一覧では出ている
+    fireEvent.click(await findByText("焼いた動画"));
+    await waitFor(() => expect(container.querySelector(".topbar")).toBeNull());
   });
 });

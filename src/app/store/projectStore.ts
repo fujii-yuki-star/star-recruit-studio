@@ -933,8 +933,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const existing = await listProjectSummaries();
     const projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
     const { doc, notes } = get()._bake(range, projectName, projectId);
-    const rv = validateTimelineProject(doc);
-    if (!rv) console.warn("[timeline] 焼き出した内容がスキーマに未適合（要修正）:", validateTimelineProject.errors);
+    // **未適合なら保存しない**＝一覧に出るのに開けない動画を作らない（読込側は適合を要求する・ADR-0026④）。
+    // 失敗は呼び出し側（入口 UI）が「作れませんでした…」として見せる（§2-5）。
+    if (!validateTimelineProject(doc)) {
+      console.warn("[timeline] 焼き出した内容がスキーマに未適合:", validateTimelineProject.errors);
+      throw new Error("baked timeline project failed schema validation");
+    }
     // 先にファイルを運んでから文書を保存する＝途中で失敗しても「素材の無いプロジェクト」が一覧に残らない。
     await copyBakedFiles(srcProjectId, projectId, bakedFilePaths(doc));
     await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
