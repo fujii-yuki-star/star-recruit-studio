@@ -159,7 +159,11 @@ ADR-0029（FREE 字幕の `subtitleSource`）で作った「字幕は対象か�
    **同一トラック内で時間の重なりを禁止する**（`11 §8` V24。重ねたいならトラックを足す）。
 2. ~~**スキーマの置き場**~~ → **決定（#627）**。**`timeline-project.schema.json` を新設**する（`project.schema.json` の拡張ではない）。
    版は**独立**（初期 `"1.0"`・場面形式の 1.x バンプに釣られない）＝「1つの schemaVersion で2形式」を避ける。
-   **形式の判別はトップレベル `format`**（`"timeline"` / 未指定 or `"scene"`）で、`projectId` の採番は両形式共通（`11 §1`・`§2.1`）。
+   **形式の判別はトップレベル `format`**＝**`"timeline"` か否かの一点**で、`projectId` の採番は両形式共通（`11 §1`・`§2.1`）。
+   **場面形式のファイルは `format` を書かない**（不在＝場面形式。`project.schema` は `additionalProperties:false` ゆえ
+   `format:"scene"` は検証を通らない＝CI の must-reject で固定）。`ProjectFormat` の `"scene"` は読込時の解決値
+   （`resolveProjectFormat`）であって永続化しない。**この非対称は意図的**で、場面形式は本ADRで凍結されており、
+   情報量ゼロのフィールド追加のために `project.schema` を版上げしないため（#627 レビュー）。
    素材・見た目設定・グループ・キーフレーム、および同梱フォント/同梱BGMの一覧は **`project.schema.json` の `$defs` を `$ref` で共有**する
    （コピーせず1か所で管理・`CLAUDE.md §2-7`）。
 3. **`timelineOverlay` の削除に伴う移行**：既存プロジェクトを開いたときの断り方（`15` の状態として定義）。

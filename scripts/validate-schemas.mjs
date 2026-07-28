@@ -159,6 +159,11 @@ const mustAccept = [
   ['scene: slotClips（クリップ per-use 上書き・範囲/速度/元音声）を許容（1.19・ADR-0028）', withScene({ slotClips: { mainVisual: { startSec: 1, endSec: 5, speed: 1.5, useOriginalAudio: true, originalAudioVolume: 0.4 }, sub: { speed: 0.5 } } })],
 ];
 const mustReject = [
+  // 形式の判別（ADR-0032・11 §1）。**場面形式は `format` を書かない**（不在＝場面形式）。`'scene'` は
+  // 読込時の解決値であって永続化しない値で、書くとここで落ちる。#627 レビューで挙がった
+  // 「後続で保存時に format:'scene' を明示すると壊れる」を、正典の記述ではなく CI で止めるための固定。
+  ['project: format:"scene" は拒否＝場面形式は format を書かない（判別は timeline か否か・ADR-0032）', { ...withBrief({}), format: 'scene' }],
+  ['project: format:"timeline" も拒否＝タイムライン形式は timeline-project.schema で検証する', { ...withBrief({}), format: 'timeline' }],
   ['general: title 101字', withBrief({ title: 'あ'.repeat(101) })],
   ['general: agenda 21件', withBrief({ agenda: Array.from({ length: 21 }, () => 'x') })],
   ['general: agenda 1項目101字', withBrief({ agenda: ['あ'.repeat(101)] })],
