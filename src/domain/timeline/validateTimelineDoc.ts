@@ -22,7 +22,13 @@ const TRACK_KIND_FOR_CLIP = {
   [TIMELINE_CLIP_KIND.subtitle]: TRACK_KIND.visual,
   [TIMELINE_CLIP_KIND.template]: TRACK_KIND.visual,
   [TIMELINE_CLIP_KIND.audio]: TRACK_KIND.audio,
+  [TIMELINE_CLIP_KIND.voice]: TRACK_KIND.audio,
 } as const satisfies Record<TimelineClipKind, TrackKind>;
+
+/** 読み上げクリップか（音の出どころが「中身」＝素材でも同梱BGMでもない・#628）。 */
+export function isVoiceClip(clip: TimelineClip): boolean {
+  return clip.kind === TIMELINE_CLIP_KIND.voice;
+}
 
 /** クリップが占める時間の区間 `[startSec, endSec)`。 */
 export function clipEndSec(clip: TimelineClip): number {
@@ -81,8 +87,26 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
     if (clip.assetId != null && !assetIds.has(clip.assetId)) {
       warnings.push(warn('ASSET_NOT_FOUND', '使う写真・動画が見つかりません。選び直してください', field));
     }
-    if (clip.assetId != null && clip.bundledBgmId != null) {
+    // 読み上げは中身（読み上げ文と話者）が音の出どころなので、素材や同梱BGMを重ねて指定させない。
+    const audioSources = [clip.assetId != null, clip.bundledBgmId != null, isVoiceClip(clip)].filter(Boolean).length;
+    if (audioSources > 1) {
       warnings.push(warn('TIMELINE_AUDIO_SOURCE_CONFLICT', '音の出どころが2つ指定されています。どちらか一方にしてください', field));
+    }
+
+    // V27: 立ち絵の表情（テンプレクリップ）が実在する素材か（場面形式の V5 と同じ観点）。
+    const poseAssetId = clip.character?.poseAssetId;
+    if (poseAssetId != null && !assetIds.has(poseAssetId)) {
+      warnings.push(warn('ASSET_NOT_FOUND', '使う写真・動画が見つかりません。選び直してください', `${field}.character`));
+    }
+
+    // V28: 読み上げクリップの中身。schema が voice の有無と必須（text/status）を担保するので、
+    // ここは「空白だけの読み上げ文」＝声を作っても無音になるものだけを拾う（FREE_TEXT_EMPTY と同じ流儀・info）。
+    if (isVoiceClip(clip) && clip.voice != null && clip.voice.text.trim().length === 0) {
+      warnings.push(warn('TIMELINE_VOICE_TEXT_EMPTY', '読み上げる文が入っていません。文を入力してください', field, 'info'));
+    }
+    // voice を持てるのは読み上げクリップだけ（持たせても鳴らないので黙って無視しない・§2-5）。
+    if (!isVoiceClip(clip) && clip.voice != null) {
+      warnings.push(warn('TIMELINE_VOICE_ON_NON_VOICE', '読み上げの中身は読み上げの部品にだけ置けます。読み上げの部品に置き直してください', field));
     }
   }
 

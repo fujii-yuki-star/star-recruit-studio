@@ -20,8 +20,8 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "1.0",
-      "description": "本形式の版。場面形式（project.schema.json）とは独立に進む（別文書のため・11 §1）。"
+      "const": "1.1",
+      "description": "本形式の版。場面形式（project.schema.json）とは独立に進む（別文書のため・11 §1）。1.0→1.1：読み上げクリップ（kind='voice' ＋ voice）と、テンプレクリップの textFontIds/character/slotClips を追加（いずれも任意追加＝後方互換のマイナー・#628 模型）。"
     },
     "format": {
       "const": "timeline",
@@ -91,11 +91,16 @@
       "additionalProperties": false,
       "description": "クリップ＝「FREE 要素 ＋ 時間（trackId/startSec/durationSec）」。空間の語彙は FreeElement（ADR-0008）と同じものを使う＝描画（layoutScene の FREE 分岐）を共有できる。kind 別の必須フィールドは domain の検証で担保する（FreeElement と同じ流儀＝11 §8）。",
       "required": ["id", "kind", "trackId", "startSec", "durationSec"],
+      "if": { "properties": { "kind": { "const": "voice" } }, "required": ["kind"] },
+      "then": {
+        "required": ["voice"],
+        "description": "読み上げクリップは中身（読み上げ文・話者）が無いと声を作れないので、schema で必須にする（「空の声」を作らせない・#628）。"
+      },
       "properties": {
         "id": { "type": "string", "pattern": "^clip_[0-9]{3,}$" },
         "kind": {
-          "enum": ["slot", "text", "shape", "subtitle", "template", "audio"],
-          "description": "slot/text/shape/subtitle は FreeElement と同義。template＝テンプレを素材として置く（差し込み口が生きている・ADR-0032 決定5）。audio＝音声。"
+          "enum": ["slot", "text", "shape", "subtitle", "template", "audio", "voice"],
+          "description": "slot/text/shape/subtitle は FreeElement と同義。template＝テンプレを素材として置く（差し込み口が生きている・ADR-0032 決定5）。audio＝音（素材/同梱BGM）。voice＝読み上げ（タイムライン側でも声を作れる＝決定7。音の素材とは必須フィールドが別物なので種別を分ける）。"
         },
         "trackId": { "type": "string", "pattern": "^track_[0-9]{3,}$" },
         "startSec": { "type": "number", "minimum": 0 },
@@ -158,6 +163,23 @@
           "additionalProperties": { "enum": ["cover", "contain", "stretch"] },
           "description": "テンプレ層 id → 収め方の上書き（場面形式の scene.slotFits と同義）。"
         },
+        "textFontIds": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Scene/properties/textFontIds",
+          "description": "kind='template': テキスト種別ごとのフォント上書き（場面形式の scene.textFontIds と同義）。枠全体のフォントは上の fontId。"
+        },
+        "character": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Character",
+          "description": "kind='template': 立ち絵の表示と表情（場面形式の scene.character と同義）。テンプレに character 層があるときだけ効く。"
+        },
+        "slotClips": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Scene/properties/slotClips",
+          "description": "kind='template': テンプレ層 id → 動画の使う範囲・速度・元音声の上書き（場面形式の scene.slotClips と同義・ADR-0028）。クリップ直下の sourceStartSec/speed は kind='slot'/'audio' が直接持つ素材のトリムで、こちらは枠の中の差し込み口ごとの上書き。"
+        },
+
+        "voice": {
+          "$ref": "#/$defs/TimelineVoice",
+          "description": "kind='voice' のとき必須。読み上げの中身（上の if/then で強制）。"
+        },
 
         "bundledBgmId": {
           "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/BgmSettings/properties/bundledBgmId",
@@ -172,6 +194,24 @@
           "minimum": 0,
           "description": "素材のどこから使うか（非破壊トリム・ADR-0024）。動画・音声クリップで有効。"
         }
+      }
+    },
+    "TimelineVoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "読み上げクリップ（kind='voice'）の中身。場面形式の NarrationLine から**時間の語彙を除いた**もの（startSec/startWithPrevious はクリップの startSec・トラックが担い、subtitleText/subtitleEnabled は字幕クリップが担う）。制約は NarrationLine の同名プロパティを $ref で共有する（増減を1か所で管理・CLAUDE.md §2-7）。**入れ子にしているのは、クリップ直下の text（表示する文字）・speed（素材の再生速度）と語が衝突するため**＝読み上げ文と話速は別概念（ADR-0026②）。",
+      "required": ["text", "status"],
+      "properties": {
+        "text": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/text",
+          "description": "読み上げる（話す）文。画面に出す字幕は別の字幕クリップが持つ。"
+        },
+        "speaker": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/speaker" },
+        "speed": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/speed" },
+        "pitch": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/pitch" },
+        "intonation": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/intonation" },
+        "voicePath": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/voicePath" },
+        "status": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/status" }
       }
     },
     "ClipAnimation": {

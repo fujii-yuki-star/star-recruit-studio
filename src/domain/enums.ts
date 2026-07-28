@@ -276,8 +276,10 @@ export const TRACK_KIND = {
 } as const satisfies Record<string, TrackKind>;
 
 /** タイムラインのクリップ種別（ADR-0032）。slot/text/shape/subtitle は FreeElementKind と同義、
- *  template＝テンプレを素材として置く、audio＝音声。 */
-export const TIMELINE_CLIP_KINDS = [...FREE_ELEMENT_KINDS, 'template', 'audio'] as const;
+ *  template＝テンプレを素材として置く、audio＝音（素材/同梱BGM）、voice＝読み上げ（#628）。
+ *  audio と voice を分けるのは必須フィールドが別物だから＝voice は読み上げ文と話者を持ち、
+ *  音の素材（assetId/bundledBgmId）を持たない。 */
+export const TIMELINE_CLIP_KINDS = [...FREE_ELEMENT_KINDS, 'template', 'audio', 'voice'] as const;
 export type TimelineClipKind = (typeof TIMELINE_CLIP_KINDS)[number];
 
 /** TimelineClipKind の値を参照するための定数（§6：文字列直書きを避ける）。 */
@@ -285,6 +287,7 @@ export const TIMELINE_CLIP_KIND = {
   ...FREE_ELEMENT_KIND,
   template: 'template',
   audio: 'audio',
+  voice: 'voice',
 } as const satisfies Record<string, TimelineClipKind>;
 
 // schema の Warning.severity に対応
