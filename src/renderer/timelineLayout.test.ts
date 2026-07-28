@@ -1,0 +1,199 @@
+// タイムライン形式の1フレーム（ADR-0032・#629）。並べ方（トラック順・生きている区間）と、
+// 描画の核を場面形式と共有していることを固定する。
+import { describe, expect, it } from 'vitest';
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
+import type { Template } from '../domain/template/types';
+import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
+import { TIMELINE_SCHEMA_VERSION } from '../domain/timeline/types';
+import { layoutScene } from './layout';
+import { clipIsLiveAt, layoutTimelineAt } from './timelineLayout';
+
+const NORMAL_TEMPLATE: Template = {
+  schemaVersion: '1.0',
+  templateId: 'tmpl_normal',
+  name: '通常',
+  category: 'photo_intro',
+  aspectRatio: '16:9',
+  canvas: { width: 1920, height: 1080 },
+  layers: [
+    { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, fillColor: '#112233' },
+    { id: 'title', type: 'text', textKey: 'title', x: 100, y: 200, w: 800, h: 140, fontSize: 72 },
+  ],
+};
+
+const templateOf = (id: string): Template | undefined => (id === 'tmpl_normal' ? NORMAL_TEMPLATE : undefined);
+const opts = { templateOf };
+
+function doc(over: Partial<TimelineProject> = {}): TimelineProject {
+  return {
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: PROJECT_FORMAT.timeline,
+    projectId: 'proj_20260728_001',
+    projectName: 'テスト',
+    createdAt: '2026-07-28T00:00:00.000Z',
+    updatedAt: '2026-07-28T00:00:00.000Z',
+    videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+    assets: [],
+    tracks: [
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.visual },
+      { id: 'track_003', kind: TRACK_KIND.audio },
+    ],
+    clips: [],
+    ...over,
+  };
+}
+
+function clip(over: Partial<TimelineClip> & Pick<TimelineClip, 'id'>): TimelineClip {
+  return { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, ...over };
+}
+
+const textClip = (id: string, over: Partial<TimelineClip> = {}): TimelineClip =>
+  clip({ id, kind: TIMELINE_CLIP_KIND.text, x: 10, y: 20, w: 300, h: 80, text: `文字${id}`, ...over });
+
+const templateClip = (id: string, over: Partial<TimelineClip> = {}): TimelineClip =>
+  clip({ id, kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_normal', texts: { title: 'みだし' }, ...over });
+
+describe('clipIsLiveAt（生きている区間は半開＝V24 と同じ）', () => {
+  const c = clip({ id: 'clip_001', startSec: 2, durationSec: 3 });
+  it.each([
+    [1.9, false],
+    [2, true],
+    [4.9, true],
+    [5, false],
+  ])('t=%s → %s', (t, live) => {
+    expect(clipIsLiveAt(c, t)).toBe(live);
+  });
+});
+
+describe('layoutTimelineAt: 並べ方', () => {
+  it('その時刻に生きているクリップだけを描く', () => {
+    const d = doc({ clips: [textClip('clip_001', { startSec: 0, durationSec: 2 }), textClip('clip_002', { startSec: 2, durationSec: 2 })] });
+    expect(layoutTimelineAt(d, 1, opts).items.map((i) => i.id)).toEqual(['clip_001/clip_001']);
+    expect(layoutTimelineAt(d, 3, opts).items.map((i) => i.id)).toEqual(['clip_002/clip_002']);
+  });
+
+  it('重ね順はトラックの並び順だけで決まる（後ろのトラックほど手前）', () => {
+    const d = doc({
+      clips: [textClip('clip_002', { trackId: 'track_002' }), textClip('clip_001', { trackId: 'track_001' })],
+    });
+    const items = layoutTimelineAt(d, 0, opts).items;
+    // clips 配列の順ではなく tracks の順（track_001 → track_002）に並ぶ
+    expect(items.map((i) => i.id)).toEqual(['clip_001/clip_001', 'clip_002/clip_002']);
+    expect(items[0].zIndex).toBeLessThan(items[1].zIndex);
+  });
+
+  it('隠したトラック・隠したクリップ・音のクリップは描かない', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, hidden: true }, { id: 'track_002', kind: TRACK_KIND.visual }, { id: 'track_003', kind: TRACK_KIND.audio }],
+      clips: [
+        textClip('clip_001', { trackId: 'track_001' }), // 隠したトラック
+        textClip('clip_002', { trackId: 'track_002', hidden: true }), // 隠したクリップ
+        clip({ id: 'clip_003', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', voice: { text: 'あ', status: 'none' } }),
+        textClip('clip_004', { trackId: 'track_002' }),
+      ],
+    });
+    expect(layoutTimelineAt(d, 0, opts).items.map((i) => i.id)).toEqual(['clip_004/clip_004']);
+  });
+
+  it('見た目が見つからないクリップは描かない（他のクリップは描く）', () => {
+    const d = doc({ clips: [templateClip('clip_001', { templateId: 'tmpl_missing' }), textClip('clip_002', { trackId: 'track_002' })] });
+    expect(layoutTimelineAt(d, 0, opts).items.map((i) => i.id)).toEqual(['clip_002/clip_002']);
+  });
+});
+
+describe('layoutTimelineAt: 1クリップの中身は場面形式と同じ核で描く（ADR-0001）', () => {
+  it('テンプレのクリップは、同じ内容の場面を描いたのと同じアイテムになる', () => {
+    const d = doc({ clips: [templateClip('clip_001')] });
+    const fromTimeline = layoutTimelineAt(d, 0, opts).items;
+    // 同じ差し込み口を持つ場面を layoutScene で描いた結果（id と重ね順だけが並べ方で変わる）
+    const fromScene = layoutScene(
+      {
+        sceneId: 'clip_001', partId: '', order: 0, sceneType: 'photo_intro', templateId: 'tmpl_normal',
+        durationSec: 5, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+        texts: { title: 'みだし' }, narration: { text: '', status: 'none' }, warnings: [],
+      },
+      NORMAL_TEMPLATE,
+    ).items;
+    expect(fromTimeline).toHaveLength(fromScene.length);
+    fromTimeline.forEach((item, i) => {
+      expect({ ...item, id: '', zIndex: 0 }).toEqual({ ...fromScene[i], id: '', zIndex: 0 });
+    });
+  });
+
+  it('自由配置のクリップは空間の語彙をそのまま持ち込む', () => {
+    const d = doc({ clips: [textClip('clip_001', { fontSize: 48, color: '#ff0000' })] });
+    expect(layoutTimelineAt(d, 0, opts).items[0]).toMatchObject({
+      x: 10, y: 20, w: 300, h: 80, text: '文字clip_001', fontSize: 48, color: '#ff0000',
+    });
+  });
+});
+
+describe('layoutTimelineAt: キーフレーム（切り替えはこれで表す＝ADR-0032 決定19）', () => {
+  it('クリップ対象は「クリップの先頭からの秒」で補間する', () => {
+    const d = doc({
+      clips: [textClip('clip_001', { startSec: 4, durationSec: 5 })],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
+    });
+    expect(layoutTimelineAt(d, 4, opts).items[0].opacity).toBe(0); // クリップの先頭
+    expect(layoutTimelineAt(d, 4.5, opts).items[0].opacity).toBeCloseTo(0.5);
+    expect(layoutTimelineAt(d, 5, opts).items[0].opacity).toBe(1);
+  });
+
+  it('位置は本来位置からの相対（後から動かしても追従する）', () => {
+    const d = doc({
+      clips: [textClip('clip_001', { x: 10 })],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, x: 100 }, { timeSec: 1, x: 0 }] }],
+    });
+    expect(layoutTimelineAt(d, 0, opts).items[0].x).toBe(110); // 10 + 100
+    expect(layoutTimelineAt(d, 1, opts).items[0].x).toBe(10);
+  });
+
+  it('グループ対象は「所属クリップのうち最も早い開始秒」を起点にする', () => {
+    const d = doc({
+      clips: [textClip('clip_001', { startSec: 4 }), textClip('clip_002', { startSec: 4, trackId: 'track_002' })],
+      groups: [{ id: 'group_001', members: ['clip_001', 'clip_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+      animations: [{ id: 'anim_001', targetId: 'group_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
+    });
+    expect(layoutTimelineAt(d, 4, opts).items.map((i) => i.opacity)).toEqual([0, 0]);
+    expect(layoutTimelineAt(d, 5, opts).items.map((i) => i.opacity)).toEqual([1, 1]);
+  });
+
+  it('グループの不透明度は要素自身の不透明度へ乗算で効く（潰さない）', () => {
+    const d = doc({
+      clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.shape, shapeType: 'rect', opacity: 0.5 })],
+      groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+      animations: [{ id: 'anim_001', targetId: 'group_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
+    });
+    expect(layoutTimelineAt(d, 1, opts).items[0].opacity).toBeCloseTo(0.5); // 0.5 × 1
+    expect(layoutTimelineAt(d, 0.5, opts).items[0].opacity).toBeCloseTo(0.25); // 0.5 × 0.5
+  });
+
+  it('グループの変形はメンバーの位置へ効く（通常描画と同じ合成）', () => {
+    const d = doc({
+      clips: [textClip('clip_001', { x: 10, y: 20 })],
+      groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 30, y: 40, rotation: 0, scale: 1 } }],
+    });
+    expect(layoutTimelineAt(d, 0, opts).items[0]).toMatchObject({ x: 40, y: 60 });
+  });
+
+  it('隠したグループのメンバーは描かない', () => {
+    const d = doc({
+      clips: [textClip('clip_001')],
+      groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 }, hidden: true }],
+    });
+    expect(layoutTimelineAt(d, 0, opts).items).toEqual([]);
+  });
+});
+
+describe('layoutTimelineAt: キャンバス', () => {
+  it('向きから寸法を導く（縦型）', () => {
+    const d = doc({ videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 600 } });
+    expect(layoutTimelineAt(d, 0, opts)).toMatchObject({ width: 1080, height: 1920 });
+  });
+
+  it('何も置いていない時刻でも下地を返す（画面が消えない）', () => {
+    expect(layoutTimelineAt(doc(), 0, opts)).toMatchObject({ backgroundColor: '#ffffff', items: [] });
+  });
+});

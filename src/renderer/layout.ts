@@ -271,6 +271,30 @@ export function overlayTelopItem(width: number, height: number, text: string, fo
   };
 }
 
+/**
+ * 補間済みの変換を1アイテムへ重ねる（④・ADR-0019）。**変換は「本来の状態」からの相対値**（CSS transform 相当）
+ * ＝後から位置/大きさ/角度を編集しても追従する（絶対焼き込みだと編集後に古い値で固定される）。
+ * `scale`（中心維持）→ `x`/`y` オフセット → `rotation` オフセットの順に重ね、`opacity` だけは絶対
+ * （fill=塗り／image・text=要素全体＝`sceneSvg` の `<g opacity>`）。
+ *
+ * **場面形式（`layoutScene` の要素アニメ）とタイムライン形式（`layoutTimelineAt` のクリップ／グループ）で共有**する
+ * ＝同じ「キーフレームの重ね方」を2か所に書かない（片方だけ直って絵が割れるのを防ぐ・§6）。
+ */
+export function applyInterpolatedTransform(item: LayoutItem, tr: InterpolatedTransform): void {
+  if (tr.scale != null) {
+    const ow = item.w;
+    const oh = item.h;
+    item.w *= tr.scale;
+    item.h *= tr.scale;
+    item.x -= (item.w - ow) / 2;
+    item.y -= (item.h - oh) / 2;
+  }
+  if (tr.x != null) item.x += tr.x;
+  if (tr.y != null) item.y += tr.y;
+  if (tr.rotation != null) item.rotation = (item.rotation ?? 0) + tr.rotation;
+  if (tr.opacity != null) item.opacity = tr.opacity;
+}
+
 /** シーンをテンプレに沿って配置解決する。 */
 export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptions): SceneLayout {
   const backgroundColor = template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR;
@@ -486,21 +510,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     for (const item of items) {
       const anim = byTarget.get(item.id); // グループ対象（group_NNN）はここでは一致しない＝要素だけ処理
       if (!anim) continue;
-      const tr = interpolateKeyframes(anim.keyframes, opts.timeSec);
-      // scale（中心維持）→ x/y オフセット → rotation オフセット の順で本来値に重ねる。
-      if (tr.scale != null) {
-        const ow = item.w;
-        const oh = item.h;
-        item.w *= tr.scale;
-        item.h *= tr.scale;
-        item.x -= (item.w - ow) / 2;
-        item.y -= (item.h - oh) / 2;
-      }
-      if (tr.x != null) item.x += tr.x;
-      if (tr.y != null) item.y += tr.y;
-      if (tr.rotation != null) item.rotation = (item.rotation ?? 0) + tr.rotation;
-      // opacity は全種別へ（fill=塗り不透明度／image・text=要素の不透明度＝sceneSvg の <g opacity>）。
-      if (tr.opacity != null) item.opacity = tr.opacity;
+      applyInterpolatedTransform(item, interpolateKeyframes(anim.keyframes, opts.timeSec));
     }
   }
   // グループの opacity（④(3)）：メンバー要素（推移的）へ乗算で適用（geometry は effectiveGroups で合成済）。
