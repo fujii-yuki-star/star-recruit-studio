@@ -2,7 +2,11 @@ import { useMemo, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { assembleProject } from "../../domain/project/persistence";
-import { compileTimeline } from "../../domain/project/compileTimeline";
+import { activeTelopsAt, compileTimeline, sceneLocalTelops } from "../../domain/project/compileTimeline";
+import { activeLineIndexAt, lineSegments, segmentAt } from "../../domain/project/lineTimeline";
+import { playheadFrameAt } from "../../domain/project/playhead";
+import { formatDuration } from "../../domain/format/duration";
+import { ScenePreview } from "../components/ScenePreview";
 import { lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import type { OverlayClip } from "../../domain/project/types";
 import { TimelineView } from "../components/TimelineView";
@@ -26,7 +30,7 @@ interface TimelineEditScreenProps {
  * タイムライン上のドラッグ移動は ③(4b) で追加予定（本PRは選択＋数値/文言編集まで）。
  */
 export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
-  const { scenes, parts, assets, meta, narrationAudioById, addOverlayClip, updateOverlayClip, removeOverlayClip, undo, redo } = useProjectStore();
+  const { scenes, parts, assets, templates, meta, narrationAudioById, addOverlayClip, updateOverlayClip, removeOverlayClip, undo, redo } = useProjectStore();
   // Undo/Redo（#255・ADR-0020）：overlay 編集も履歴対象（docSnapshot が meta.timelineOverlay を含む＝自動）。
   const canUndo = useProjectStore((s) => s.past.length > 0);
   const canRedo = useProjectStore((s) => s.future.length > 0);
@@ -48,6 +52,25 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
   );
   const overlayClips = meta.timelineOverlay?.clips ?? [];
   const selectedClip = overlayClips.find((c) => c.id === selectedClipId) ?? null;
+
+  // 再生ヘッド（ADR-0023 段階(1)）。時間軸で選んだ瞬間の**静止フレーム**を右の窓へ。
+  // グローバル秒→場面ローカル秒の橋渡しだけ `playheadFrameAt` が担い、そこから先（字幕・有効行・テロップ）は
+  // 場面編集/仕上がり確認/書き出しと**同じ共有関数**で解決する＝画面ごとに見え方がぶれない（ADR-0026②/③）。
+  const [playheadSec, setPlayheadSec] = useState(0);
+  const playheadScene = useMemo(() => {
+    const { sceneId, localSec } = playheadFrameAt(timeline, playheadSec);
+    const scene = sceneId ? scenes.find((s) => s.sceneId === sceneId) : undefined;
+    if (!scene) return null;
+    const durations = lineDurationsFromAudio(scene, narrationAudioById);
+    return {
+      scene,
+      template: templates.find((t) => t.templateId === scene.templateId),
+      localSec,
+      activeLineIndex: activeLineIndexAt(lineSegments(scene, durations), localSec),
+      subtitleSegment: segmentAt(scene, durations, localSec),
+      telops: activeTelopsAt(sceneLocalTelops(timeline, scene.sceneId), localSec),
+    };
+  }, [timeline, playheadSec, scenes, templates, narrationAudioById]);
 
   // 場面のグローバル開始秒（射影から引く）。アンカー切替時の startSec 再計算に使う。
   const sceneGlobalStart = (sceneId?: string): number =>
@@ -109,7 +132,31 @@ export function TimelineEditScreen({ onNavigate }: TimelineEditScreenProps) {
           selectedClipId={selectedClipId ?? undefined}
           onSelectClip={setSelectedClipId}
           onClipDrag={editClip}
+          playheadSec={playheadSec}
+          onSeek={setPlayheadSec}
         />
+      </div>
+
+      {/* 再生ヘッドの位置の仕上がり（ADR-0023 段階(1)）。時間軸で選んだ瞬間を、そのまま絵で確かめられるようにする。
+          ここは**静止フレーム**（連続再生は段階(2)）。中身の解決は場面編集・書き出しと同じ共有関数を通す＝見え方がぶれない。 */}
+      <div className="card mt">
+        <div className="row-between" style={{ alignItems: "baseline", marginBottom: "var(--gap-sm)" }}>
+          <h2 className="section-title" style={{ margin: 0 }}>この時間の仕上がり</h2>
+          <span className="text-sm text-muted">{formatDuration(playheadSec)}</span>
+        </div>
+        {playheadScene ? (
+          <ScenePreview
+            scene={playheadScene.scene}
+            template={playheadScene.template}
+            activeLineIndex={playheadScene.activeLineIndex}
+            subtitleSegment={playheadScene.subtitleSegment}
+            telops={playheadScene.telops}
+            timeSec={playheadScene.localSec}
+            animations={meta.timelineOverlay?.animations}
+          />
+        ) : (
+          <p className="text-sm text-muted">この時間には映る場面がありません。上の目盛りを押して時間を選んでください。</p>
+        )}
       </div>
 
       <div className="card mt">

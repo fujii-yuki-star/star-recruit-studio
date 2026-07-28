@@ -5,6 +5,7 @@ import type { Timeline, TimelineClip, TimelineTrackKind } from "../../domain/pro
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { snapTimeSec } from "../../domain/project/timelineSnap";
 import { applyClipEdge, type ClipDragMode } from "../../domain/project/overlayClipEdit";
+import { clampPlayheadSec } from "../../domain/project/playhead";
 import "./timeline.css";
 
 /** overlay クリップのドラッグ種別。move＝本体移動、trim-start／trim-end＝左右端のトリミング。
@@ -24,6 +25,10 @@ interface TimelineViewProps {
    * move/trim-start は開始、trim-end は終了。差分でなく端そのものを渡す＝足し戻しの誤差とクランプの二重化を避ける（#561）。
    */
   onClipDrag?: (id: string, mode: ClipDragMode, edgeSec: number) => void;
+  /** 再生ヘッドの位置（グローバル秒・ADR-0023 段階(1)）。未指定＝ヘッドを出さない（読み取り専用の表示はそのまま）。 */
+  playheadSec?: number;
+  /** ルーラーのクリックでヘッドを動かす。渡したときだけルーラーが押せるようになる。 */
+  onSeek?: (sec: number) => void;
 }
 
 // レーン表示の並びとラベル（§2-3：技術用語を避けた言い換え）。video＝場面の映像。
@@ -112,7 +117,7 @@ function draggedSpan(timeline: Timeline, clip: TimelineClip, mode: ClipDragMode,
   return applyClipEdge(span, mode, edgeSec, anchorStart, TIMELINE_MIN_CLIP_SEC);
 }
 
-export function TimelineView({ timeline, editable, selectedClipId, onSelectClip, onClipDrag }: TimelineViewProps) {
+export function TimelineView({ timeline, editable, selectedClipId, onSelectClip, onClipDrag, playheadSec, onSeek }: TimelineViewProps) {
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const pxPerSec = ZOOM_LEVELS[zoomIndex];
 
@@ -212,7 +217,18 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
             <div className="timeline-row-label">
               <span>時間</span>
             </div>
-            <div className="timeline-track timeline-ruler" style={{ width: trackWidth }}>
+            {/* シークはルーラーが受ける（ADR-0023 段階(1)）。レーン側で受けるとクリップの選択・ドラッグと取り合いになる。 */}
+            <div
+              className={`timeline-track timeline-ruler${onSeek ? " timeline-ruler--seekable" : ""}`}
+              style={{ width: trackWidth }}
+              role={onSeek ? "button" : undefined}
+              aria-label={onSeek ? "時間を選ぶ" : undefined}
+              onClick={onSeek ? (e) => {
+                // トラック左端からの px を秒へ。ヘッドの位置計算（left = 秒×倍率）の逆＝押した所に線が来る。
+                const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
+                onSeek(clampPlayheadSec(timeline, x / pxPerSec));
+              } : undefined}
+            >
               {ticks.map((t) => (
                 <div key={t} className="timeline-tick" style={{ left: t * pxPerSec }}>
                   {clockLabel(t)}
@@ -284,6 +300,18 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
               </div>
             </div>
           ))}
+
+          {/* 再生ヘッド（ADR-0023 段階(1)）。全レーンを縦に貫く＝どの行を見ていても同じ時刻を指す。
+              左位置はラベル幅（CSS の --timeline-label-w が単一の参照元）＋ 時刻×表示倍率。 */}
+          {playheadSec != null && (
+            <div
+              className="timeline-playhead"
+              data-testid="timeline-playhead"
+              // 受け取った時刻をそのまま描く（**クランプはしない**）。範囲へ収めるのは `onSeek` を出す側＝
+              // 入口1か所に寄せる。ここでも収めると二重になり、入口の取りこぼしが表示で隠れる（#561 と同じ轍）。
+              style={{ left: `calc(var(--timeline-label-w) + ${playheadSec * pxPerSec}px)` }}
+            />
+          )}
         </div>
       </div>
     </div>
