@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
-import { bakeNoteText, clipLabel, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
+import { EDIT_BLOCKED } from "../domain/timeline/edit";
+import { bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -200,5 +201,18 @@ describe('trackLabel / clipLabel（タイムラインの列と部品の名前・
 
   it('自由配置と同じ物は同じ名前で呼ぶ（画面で語が割れない）', () => {
     expect(clipLabel({ kind: 'slot' })).toBe(freeKindLabel.slot);
+  });
+});
+
+describe('editBlockedMessage（置けなかった理由の案内）', () => {
+  it('全ての理由に文言がある（無言で操作が効かない状態を作らない）', () => {
+    for (const reason of Object.values(EDIT_BLOCKED)) {
+      expect(editBlockedMessage[reason]).toBeTruthy();
+    }
+  });
+
+  it('「なぜ置けないか」でなく「次にどうすれば置けるか」を言う（§2-5）', () => {
+    expect(editBlockedMessage.TIMELINE_EDIT_OVERLAP).toContain('ずらすか、列を足して');
+    expect(editBlockedMessage.TIMELINE_EDIT_LOCKED).toContain('固定を外して');
   });
 });

@@ -5,6 +5,7 @@ import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey, Time
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
 import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
+import type { EditBlockedReason } from "../domain/timeline/edit";
 // 型のみ（実行時 import なし＝store との循環を作らない）。空状態の文言が状態で変わるため（#590）。
 import type { GenerateStatus } from "./store/projectStore";
 /**
@@ -385,3 +386,15 @@ export function clipLabel(clip: { kind: TimelineClipKind; name?: string; text?: 
   const body = clip.voice?.text ?? clip.text;
   return body ? body.slice(0, 12) : clipKindLabel[clip.kind];
 }
+
+/**
+ * 置けなかった理由の案内（`15 §6` の `TIMELINE_EDIT_*`・ADR-0032）。**全コードに文言が要る**＝
+ * 理由が増えたらコンパイルエラーで気づく（無言で操作が効かない状態を作らない）。
+ * どれも「なぜ置けないか」でなく**次にどうすれば置けるか**を言う（§2-5）。
+ */
+export const editBlockedMessage: Record<EditBlockedReason, string> = {
+  TIMELINE_EDIT_OVERLAP: "その場所には先に置いてある部品があります。ずらすか、列を足して重ねてください",
+  TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",
+  TIMELINE_EDIT_LOCKED: "この列は固定されています。動かすには固定を外してください",
+  TIMELINE_EDIT_NOT_FOUND: "その部品は見つかりませんでした。選び直してください",
+};

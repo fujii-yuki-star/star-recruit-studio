@@ -54,8 +54,8 @@ describe("TimelineProjectScreen", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("焼いた動画")).toBeInTheDocument();
-    expect(screen.getByText("こんにちは")).toBeInTheDocument(); // 文字クリップは中身を見せる
-    expect(screen.getByText("よろしく")).toBeInTheDocument(); // 読み上げは読み上げ文
+    expect(screen.getByRole("button", { name: "こんにちは" })).toBeInTheDocument(); // 文字クリップは中身を見せる
+    expect(screen.getByRole("button", { name: "よろしく" })).toBeInTheDocument(); // 読み上げは読み上げ文
   });
 
   it("列は手前が上（配列の後ろほど手前）＝重なりの見え方と一致させる", () => {
@@ -69,9 +69,9 @@ describe("TimelineProjectScreen", () => {
   it("クリップを選べる（Shift で追加選択）", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getByText("こんにちは"));
+    fireEvent.click(screen.getByRole("button", { name: "こんにちは" }));
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
-    fireEvent.click(screen.getByText("よろしく"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "よろしく" }), { shiftKey: true });
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
   });
 
@@ -126,5 +126,68 @@ describe("TimelineProjectScreen: レビュー指摘の修正（/canon-check）",
     // 末尾ちょうどでも、その瞬間のクリップが描かれている（下地だけの空フレームにならない）。
     // 文言そのものは枠幅で折返し/省略されるので、文字が1つでも描かれていることを見る。
     expect(document.querySelector(".preview-stage svg text")).not.toBeNull();
+  });
+});
+
+describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
+  const twoClips = () =>
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "まえ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 6, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あと" },
+      ],
+    });
+
+  it("選ぶまでは、何をすればよいか案内する", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/下の並びから部品を選ぶと/)).toBeInTheDocument();
+  });
+
+  it("選んだ部品を動かせて、取り消せる", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "まえ" }));
+    fireEvent.click(screen.getByText("後ろへ"));
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0.5);
+    fireEvent.click(screen.getByText("取り消す"));
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0);
+  });
+
+  it("置けないときは「次にどうすれば置けるか」を出す（§2-5）", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "まえ" }));
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "7" } });
+    fireEvent.click(screen.getByText("再生位置へ")); // clip_002（6秒〜）と重なる
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("ずらすか、列を足して重ねて"))).toBe(true);
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0); // 文書は変わらない
+  });
+
+  it("列を消すときは、一緒に消える部品の数を伝える（黙って消さない）", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getAllByTitle("この列を消す")[1]); // 映像1（クリップ2個）
+    expect(screen.getByRole("alert").textContent).toContain("2個の部品も一緒に消えます");
+    fireEvent.click(screen.getByText("削除する"));
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_002"]);
+  });
+
+  it("複数選んだときは、まとめて消せるが位置は変えられない", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "まえ" }));
+    fireEvent.click(screen.getByRole("button", { name: "あと" }), { shiftKey: true });
+    expect(screen.queryByText("後ろへ")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("選んだ2個を消す"));
+    expect(useTimelineStore.getState().doc!.clips).toEqual([]);
+  });
+
+  it("列を足せる", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("音の列を足す"));
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.kind)).toEqual(["visual", "visual", "audio"]);
   });
 });

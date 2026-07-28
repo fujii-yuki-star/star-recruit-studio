@@ -99,3 +99,97 @@ describe('selectClip', () => {
     expect(useTimelineStore.getState().selectedClipIds).toEqual(['clip_001']); // 同じ操作で外す
   });
 });
+
+describe('編集操作と取り消し（#629 後半）', () => {
+  const open = async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual },
+        { id: 'track_002', kind: TRACK_KIND.visual },
+      ],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 6, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: 'い' },
+      ],
+    })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+  };
+
+  beforeEach(async () => {
+    await open();
+  });
+
+  it('動かせたら履歴に積み、取り消しで戻る', () => {
+    const s = useTimelineStore.getState();
+    s.selectClip('clip_001');
+    s.moveSelectedClip({ startSec: 20 });
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(20);
+
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0);
+    useTimelineStore.getState().redo();
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(20);
+  });
+
+  it('置けなかったら文書を変えず、理由だけ持つ（黙って別の場所へ置かない）', () => {
+    const s = useTimelineStore.getState();
+    s.selectClip('clip_001');
+    s.moveSelectedClip({ startSec: 4 }); // clip_002（6秒〜）と重なる
+    const after = useTimelineStore.getState();
+    expect(after.doc!.clips[0].startSec).toBe(0);
+    expect(after.editBlocked).toBe('TIMELINE_EDIT_OVERLAP');
+    expect(after.history.past).toHaveLength(0); // 履歴も汚さない
+  });
+
+  it('複数選んでいるときは動かさない（対象が決まらない）', () => {
+    const s = useTimelineStore.getState();
+    s.selectClip('clip_001');
+    s.selectClip('clip_002', true);
+    s.moveSelectedClip({ startSec: 20 });
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0);
+  });
+
+  it('消したクリップは選択からも外れる', () => {
+    const s = useTimelineStore.getState();
+    s.selectClip('clip_001');
+    s.removeSelectedClips();
+    const after = useTimelineStore.getState();
+    expect(after.doc!.clips.map((c) => c.id)).toEqual(['clip_002']);
+    expect(after.selectedClipIds).toEqual([]);
+  });
+
+  it('列を消すと、その列のクリップも選択から外れる', () => {
+    const s = useTimelineStore.getState();
+    s.selectClip('clip_001');
+    s.removeTrack('track_001');
+    const after = useTimelineStore.getState();
+    expect(after.doc!.tracks.map((t) => t.id)).toEqual(['track_002']);
+    expect(after.selectedClipIds).toEqual([]);
+  });
+
+  it('何も変わらない操作は履歴を汚さない（取り消しが空振りしない）', () => {
+    useTimelineStore.getState().moveTrackOrder('track_001', 'back'); // 端＝動かない
+    expect(useTimelineStore.getState().history.past).toHaveLength(0);
+  });
+
+  it('列を足す・重ね順を変える・表示を切り替えるも取り消せる', () => {
+    const s = useTimelineStore.getState();
+    s.addTrack(TRACK_KIND.audio);
+    expect(useTimelineStore.getState().doc!.tracks).toHaveLength(3);
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().doc!.tracks).toHaveLength(2);
+
+    useTimelineStore.getState().setTrackFlag('track_001', 'hidden', true);
+    expect(useTimelineStore.getState().doc!.tracks[0].hidden).toBe(true);
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().doc!.tracks[0].hidden).toBeUndefined();
+  });
+
+  it('開き直すと履歴を持ち越さない（別の動画の取り消しが効かない）', async () => {
+    const s = useTimelineStore.getState();
+    s.selectClip('clip_001');
+    s.moveSelectedClip({ startSec: 20 });
+    await open();
+    expect(useTimelineStore.getState().history.past).toHaveLength(0);
+  });
+});
