@@ -103,7 +103,7 @@ export interface SceneLayout {
 // テキストの既定色/既定サイズは domain（template/textStyle）が正典＝描画・インライン編集・体裁欄・
 // 通常→FREE 変換の4か所で共有する（§2-7）。既存の import 元を保つため、ここから re-export する。
 export { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE } from '../domain/template/textStyle';
-const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+export const DEFAULT_BACKGROUND_COLOR = '#ffffff';
 
 /** 背景帯（可読性の下地）を TextItem.background へ。enabled のときだけ描く。通常字幕層／FREE 字幕・文字で共有（#529・#275）。
  *  **インライン編集（FreeLayoutOverlay）も同じ既定で帯を敷くため export**（#549）＝編集中と描画結果の帯がドリフトしない。 */
@@ -269,6 +269,41 @@ export function overlayTelopItem(width: number, height: number, text: string, fo
     // 動画全体フォントを item に明示（textToSvg は item.fontId 優先＝描画側 fontFamily（場面フォント）に左右されない・ADR-0001）。
     fontId: fontId ?? null,
   };
+}
+
+/** `applyInterpolatedTransform` が触る最小の形（矩形＋不透明度）。`LayoutItem` もクリップの箱もこれを満たす。 */
+export interface TransformableRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation?: number;
+  opacity?: number;
+}
+
+/**
+ * 補間済みの変換を1つの矩形へ重ねる（④・ADR-0019）。**変換は「本来の状態」からの相対値**（CSS transform 相当）
+ * ＝後から位置/大きさ/角度を編集しても追従する（絶対焼き込みだと編集後に古い値で固定される）。
+ * `scale`（中心維持）→ `x`/`y` オフセット → `rotation` オフセットの順に重ね、`opacity` だけは絶対
+ * （fill=塗り／image・text=要素全体＝`sceneSvg` の `<g opacity>`）。
+ *
+ * **場面形式（`layoutScene` の要素アニメ）とタイムライン形式（`layoutTimelineAt` のクリップの箱）が
+ * この関数を呼ぶ**＝同じ「キーフレームの重ね方」を2か所に書かない（片方だけ直って絵が割れるのを防ぐ・§6）。
+ * 引数を `LayoutItem` でなく矩形にしてあるのは、タイムライン側が**クリップの箱**に対して同じ規則を使うため。
+ */
+export function applyInterpolatedTransform(item: TransformableRect, tr: InterpolatedTransform): void {
+  if (tr.scale != null) {
+    const ow = item.w;
+    const oh = item.h;
+    item.w *= tr.scale;
+    item.h *= tr.scale;
+    item.x -= (item.w - ow) / 2;
+    item.y -= (item.h - oh) / 2;
+  }
+  if (tr.x != null) item.x += tr.x;
+  if (tr.y != null) item.y += tr.y;
+  if (tr.rotation != null) item.rotation = (item.rotation ?? 0) + tr.rotation;
+  if (tr.opacity != null) item.opacity = tr.opacity;
 }
 
 /** シーンをテンプレに沿って配置解決する。 */
@@ -486,21 +521,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     for (const item of items) {
       const anim = byTarget.get(item.id); // グループ対象（group_NNN）はここでは一致しない＝要素だけ処理
       if (!anim) continue;
-      const tr = interpolateKeyframes(anim.keyframes, opts.timeSec);
-      // scale（中心維持）→ x/y オフセット → rotation オフセット の順で本来値に重ねる。
-      if (tr.scale != null) {
-        const ow = item.w;
-        const oh = item.h;
-        item.w *= tr.scale;
-        item.h *= tr.scale;
-        item.x -= (item.w - ow) / 2;
-        item.y -= (item.h - oh) / 2;
-      }
-      if (tr.x != null) item.x += tr.x;
-      if (tr.y != null) item.y += tr.y;
-      if (tr.rotation != null) item.rotation = (item.rotation ?? 0) + tr.rotation;
-      // opacity は全種別へ（fill=塗り不透明度／image・text=要素の不透明度＝sceneSvg の <g opacity>）。
-      if (tr.opacity != null) item.opacity = tr.opacity;
+      applyInterpolatedTransform(item, interpolateKeyframes(anim.keyframes, opts.timeSec));
     }
   }
   // グループの opacity（④(3)）：メンバー要素（推移的）へ乗算で適用（geometry は effectiveGroups で合成済）。
