@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Scene } from "../../domain/project/types";
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { TimelineEditScreen } from "./TimelineEditScreen";
+
+// 同じ文言はタイムラインの帯にも、再生ヘッド位置の仕上がりプレビュー（ADR-0023 (1)）にも出る。
+// 帯を掴む操作はタイムライン内に限定して引く（プレビューの文字と取り違えない）。
+const clipBar = (text: string): HTMLElement => within(screen.getByTestId("timeline-view")).getByText(text);
 
 function scene(id: string, order: number): Scene {
   return {
@@ -107,8 +111,8 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     });
     render(<TimelineEditScreen onNavigate={() => {}} />);
     // タイムライン上の overlay クリップを pointerdown で選択 → 編集パネル。
-    fireEvent.pointerDown(screen.getByText("x"), { clientX: 10, pointerId: 1 });
-    fireEvent.pointerUp(screen.getByText("x"), { clientX: 10, pointerId: 1 });
+    fireEvent.pointerDown(clipBar("x"), { clientX: 10, pointerId: 1 });
+    fireEvent.pointerUp(clipBar("x"), { clientX: 10, pointerId: 1 });
     const select = screen.getByTestId("overlay-clip-editor").querySelector("select") as HTMLSelectElement;
     // 絶対時間へ切替 → 実効10秒（8+2）を保持して startSec=10 になる（無警告ジャンプしない）。
     fireEvent.change(select, { target: { value: "" } });
@@ -133,7 +137,7 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
     });
     const { container } = render(<TimelineEditScreen onNavigate={() => {}} />);
     const clip = () => useProjectStore.getState().meta.timelineOverlay?.clips?.[0];
-    const body = () => screen.getByText("x");
+    const body = () => clipBar("x");
     // 右へ +72px（既定ズーム pxPerSec=36）＝+2秒 → グローバル 10→12 ＝ 相対 2→4（グローバル秒をそのまま保存しない）。
     fireEvent.pointerDown(body(), { clientX: 100, pointerId: 1 });
     fireEvent.pointerMove(body(), { clientX: 172, pointerId: 1 });
@@ -166,7 +170,7 @@ describe("TimelineEditScreen（③(4a) 編集ループ）", () => {
       _historyGroupDepth: 0,
     });
     render(<TimelineEditScreen onNavigate={() => {}} />);
-    const clip = () => screen.getByText("x");
+    const clip = () => clipBar("x");
     const startSec = () => useProjectStore.getState().meta.timelineOverlay?.clips?.[0].startSec;
     // 右へ +72px（既定ズーム pxPerSec=36）＝+2秒 → startSec 1→3。
     fireEvent.pointerDown(clip(), { clientX: 100, pointerId: 1 });

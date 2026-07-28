@@ -4,6 +4,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--gap-sm);
+  /* 左の固定ラベル幅。再生ヘッド（ADR-0023 (1)）の位置合わせもこれを見る＝単一の参照元（§2-7）。 */
+  --timeline-label-w: 84px;
 }
 
 .timeline-toolbar {
@@ -38,7 +40,7 @@
   left: 0;
   z-index: 2;
   flex: 0 0 auto;
-  width: 84px;
+  width: var(--timeline-label-w);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -177,4 +179,30 @@
   padding: var(--gap-lg);
   text-align: center;
   color: var(--color-text-muted);
+}
+
+/* 再生ヘッド（ADR-0023 段階(1)・#329）。全レーンを縦に貫く線＋上端のつまみ。
+   位置は「ラベル幅 ＋ 時刻×表示倍率」＝ラベル幅は --timeline-label-w が単一の参照元（§2-7）。 */
+.timeline-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px solid var(--color-danger);
+  z-index: 3; /* クリップ（1）・行ラベル（2）より前面＝どのレーンでも見える */
+  pointer-events: none; /* 線でクリックを奪わない（シークはルーラーが受ける） */
+}
+.timeline-playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -5px;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 7px solid var(--color-danger);
+}
+
+/* ルーラーはクリックでシークできる（ADR-0023 (1)）＝押せることが分かる見た目にする。 */
+.timeline-ruler--seekable {
+  cursor: pointer;
 }
