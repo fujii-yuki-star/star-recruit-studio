@@ -9,6 +9,7 @@ import type { Purpose, VideoKind } from '../enums';
 import { DEFAULT_FONT_ID, isKnownFontId } from '../font/fontCatalog';
 import { isKnownBundledBgmId } from '../bgm/bgmCatalog';
 import { validateProject } from '../validation/generated/validators.js';
+import { isTimelineProjectDoc } from '../projectFormat';
 import { normalizeDialogueTiming } from './narrationLines';
 import type {
   Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
@@ -241,6 +242,12 @@ export function parseProjectDoc(text: string): Project {
     throw new ProjectLoadError('プロジェクトの内容が正しくありません。別のプロジェクトを選んでください。');
   }
   const doc = raw as Record<string, unknown>;
+  // タイムライン編集の形式（ADR-0032）は**別の文書**なので、場面形式として読み込まない。
+  // 版の判定より先に見る＝版は形式ごとに独立に進むので、「新しい形式のため開けません（更新してください）」
+  // という**別の理由**の案内になってしまう（§2-5・15 §6 `PROJECT_FORMAT_UNSUPPORTED`）。
+  if (isTimelineProjectDoc(doc)) {
+    throw new ProjectLoadError('この動画はタイムラインで編集する形式です。場面の編集画面では開けません。一覧から別の動画を選んでください。');
+  }
   const version = doc.schemaVersion;
   if (typeof version !== 'string' || !isSupportedSchemaVersion(version)) {
     throw new ProjectLoadError('このプロジェクトは新しい形式のため開けません。アプリを更新してください。');

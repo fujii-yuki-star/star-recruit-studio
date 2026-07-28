@@ -198,6 +198,71 @@ pub fn read_asset_data_url(
     Ok(format!("data:{mime};base64,{b64}"))
 }
 
+/// プロジェクト相対パスがパス構成要素として安全か（パストラバーサル・絶対パス防止）。
+/// read_asset_data_url と同じ規則を関数化したもの（焼き出しのコピーでも同じ網をかける）。
+fn is_safe_rel_path(rel_path: &str) -> bool {
+    !rel_path.is_empty()
+        && !rel_path.contains("..")
+        && !rel_path.starts_with('/')
+        && !rel_path.starts_with('\\')
+        && !Path::new(rel_path).is_absolute()
+}
+
+/// 指定したプロジェクト相対ファイルの合計バイト数（焼き出し前の容量提示＝ADR-0032 決定13）。
+/// 見つからないファイルは 0 として飛ばす（容量の目安なので、1つ欠けても提示を止めない）。
+#[tauri::command]
+pub fn project_files_size(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<u64, String> {
+    let dir = project_dir(&app, &project_id)?;
+    let mut total: u64 = 0;
+    for rel in &rel_paths {
+        if !is_safe_rel_path(rel) {
+            return Err("不正なパスです。".to_string());
+        }
+        if let Ok(meta) = fs::metadata(dir.join(rel)) {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    Ok(total)
+}
+
+/// 焼き出し（ADR-0032）でプロジェクト間にファイルをコピーする。
+/// 相対パスの構造（assets/…・voices/…）はそのまま保ち、コピー先の親ディレクトリは作る。
+/// **元プロジェクトには一切書き込まない**（片道＝決定16）。
+#[tauri::command]
+pub fn copy_project_files(
+    app: tauri::AppHandle,
+    src_project_id: String,
+    dest_project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<(), String> {
+    if src_project_id == dest_project_id {
+        return Err("コピー元とコピー先が同じです。".to_string());
+    }
+    let src_dir = project_dir(&app, &src_project_id)?;
+    let dest_dir = project_dir(&app, &dest_project_id)?;
+    for rel in &rel_paths {
+        if !is_safe_rel_path(rel) {
+            return Err("不正なパスです。".to_string());
+        }
+        let src = src_dir.join(rel);
+        // 元に無いファイルは飛ばす（未配置のサンプル素材など）。欠けたぶんは焼いた側で
+        // 「素材が見つかりません」として扱われる（15 §6）＝ここで丸ごと失敗させない。
+        if !src.is_file() {
+            continue;
+        }
+        let dest = dest_dir.join(rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+        }
+        fs::copy(&src, &dest).map_err(|_| ASSET_SAVE_ERR.to_string())?;
+    }
+    Ok(())
+}
+
 /// テンプレ所有素材の保管ディレクトリ <appData>/user_templates/assets（全プロジェクト共通＝ADR-0021）。
 fn template_assets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;

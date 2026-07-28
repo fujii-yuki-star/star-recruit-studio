@@ -5,7 +5,7 @@ import { transitionTimeline } from '../project/sceneTransitions';
 import type { Project, Scene } from '../project/types';
 import type { Template } from '../template/types';
 import { validateTimelineProject } from '../validation/generated/validators.js';
-import { BAKE_NOTE_CODE, BAKE_RANGE_KIND, bakeTimelineProject, scenesForBakeRange } from './bake';
+import { BAKE_NOTE_CODE, BAKE_RANGE_KIND, bakeTimelineProject, bakedFilePaths, scenesForBakeRange } from './bake';
 import type { BakeOptions } from './bake';
 import { validateTimelineDoc } from './validateTimelineDoc';
 
@@ -681,5 +681,39 @@ describe('bakeTimelineProject: 持っていけなかったものを黙って落�
 
   it('単独のナレーションの場面は字幕を記録しない（テンプレの差し込み口で出るため）', () => {
     expect(bakeTimelineProject(project(), opts()).notes).toEqual([]);
+  });
+});
+
+describe('bakedFilePaths（運ぶファイルの一覧・決定13）', () => {
+  it('素材の本体・代表フレーム・作成済みの読み上げ音声を、重複なく決定的な順で返す', () => {
+    const p = project({
+      assets: [
+        { assetId: 'asset_001', assetType: 'video', displayName: '動画', filePath: 'assets/asset_001.mp4', thumbnailPath: 'assets/asset_001.thumb.png' },
+        { assetId: 'asset_002', assetType: 'image', displayName: '写真', filePath: 'assets/asset_002.png' },
+      ],
+      scenes: [
+        scene('scene_001', {
+          assetRefs: { mainVisual: 'asset_001' },
+          narration: { text: 'よろしく', status: NARRATION_STATUS.generated, voicePath: 'voices/scene_001.wav' },
+        }),
+      ],
+    });
+    const { doc } = bakeTimelineProject(p, opts());
+    expect(bakedFilePaths(doc)).toEqual([
+      'assets/asset_001.mp4',
+      'assets/asset_001.thumb.png',
+      'voices/scene_001.wav',
+    ]);
+  });
+
+  it('同じファイルを2回運ばない', () => {
+    const p = project({
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+      scenes: [
+        scene('scene_001', { assetRefs: { mainVisual: 'asset_001' } }),
+        scene('scene_002', { assetRefs: { mainVisual: 'asset_001' } }),
+      ],
+    });
+    expect(bakedFilePaths(bakeTimelineProject(p, opts()).doc)).toEqual(['assets/asset_001.png']);
   });
 });
