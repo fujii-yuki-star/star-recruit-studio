@@ -93,6 +93,15 @@ export interface BgmRunInput {
   playSec: number;
   fadeInSec: number;
   fadeOutSec: number;
+  /**
+   * 素材が置き場所より短いとき繰り返すか。**未指定＝true（従来の BGM の挙動）**。
+   * タイムライン形式の読み上げは false を渡す（繰り返すと言葉が二重に鳴る・#631）。
+   */
+  loopSource?: boolean;
+  /** 素材のどこから使うか（秒）。未指定＝頭から（場面形式は指定しない）。 */
+  sourceStartSec?: number;
+  /** 再生速度（>0・未指定＝等速）。ピッチは維持する。 */
+  speed?: number;
 }
 
 /** タイムラインのテロップ帯（ADR-0018）。透過PNG（出力解像度）を結合後の動画へ enable='between(t,S,E)' で重ねる。 */

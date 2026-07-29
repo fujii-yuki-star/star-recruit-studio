@@ -435,6 +435,38 @@ pub struct BgmRunPlaced<'a> {
     pub play_sec: f64,
     pub fade_in_sec: f64,
     pub fade_out_sec: f64,
+    /// 素材が置き場所より短いとき繰り返すか。**BGM は true**（曲を尺いっぱい鳴らす）。
+    /// **読み上げは false**（繰り返すと言葉が二重に鳴る＝タイムライン形式の音声クリップ・#631）。
+    pub loop_source: bool,
+    /// 素材のどこから使うか（秒・0=頭から）。タイムライン形式のトリム（#631）。
+    pub source_start_sec: f64,
+    /// 再生速度（>0・1.0=等速）。ピッチは維持（atempo）。タイムライン形式の速度変更（#631）。
+    pub speed: f64,
+}
+
+/// `atempo` は1段で 0.5〜2.0 しか受け付けないので、範囲外は**掛け算で分ける**（例 4.0＝`atempo=2,atempo=2`）。
+/// 値を範囲へ丸めない＝設定した速度どおりに鳴る（ADR-0026①）。等速のときは空（従来の引数と同じ並び）。
+fn atempo_chain(speed: f64) -> String {
+    // 壊れた値（NaN/∞/0以下）は等速扱い＝`atempo=NaN` のような引数を作らない。
+    if !speed.is_finite() || speed <= 0.0 || (speed - 1.0).abs() < 1e-6 {
+        return String::new();
+    }
+    let mut rest = speed;
+    let mut stages: Vec<f64> = Vec::new();
+    while rest > SPEED_MAX {
+        stages.push(SPEED_MAX);
+        rest /= SPEED_MAX;
+    }
+    while rest < SPEED_MIN {
+        stages.push(SPEED_MIN);
+        rest /= SPEED_MIN;
+    }
+    stages.push(rest);
+    stages
+        .iter()
+        .map(|v| format!("atempo={v},"))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 /// 結合済み動画（ナレーション入り）へ、場面ごとBGMの各クリップをループ→切り出し→音量→フェード→adelay して amix する引数（純粋・ADR-0018 ③(7)）。
@@ -448,9 +480,11 @@ pub fn mix_bgm_runs_args(
 ) -> Vec<String> {
     let mut args: Vec<String> = vec!["-y".into(), "-i".into(), video.into()];
     for r in runs {
-        // 各BGMソースはループ（尺に満たない曲を繰り返す）。
-        args.push("-stream_loop".into());
-        args.push("-1".into());
+        // ループする音（BGM）は尺に満たない曲を繰り返す。読み上げは繰り返さない（言葉が二重に鳴る）。
+        if r.loop_source {
+            args.push("-stream_loop".into());
+            args.push("-1".into());
+        }
         args.push("-i".into());
         args.push(r.file.into());
     }
@@ -482,9 +516,13 @@ pub fn mix_bgm_runs_args(
         } else {
             String::new()
         };
+        // 切り出しは**素材の時間**で見る（速度を掛けたぶん長く読む）。`asetpts` で 0 起点へ戻したあと
+        // `atempo` で速度を掛けるので、フェードの位置（`play_sec` 基準）は速度が変わってもずれない。
+        let tempo = atempo_chain(r.speed);
         filters.push(format!(
-            "[{src}:a]atrim=0:{play},asetpts=N/SR/TB,volume={vol}{fi}{fo}{d}[{label}]",
-            play = r.play_sec,
+            "[{src}:a]atrim={start}:{end},asetpts=N/SR/TB,{tempo}volume={vol}{fi}{fo}{d}[{label}]",
+            start = r.source_start_sec,
+            end = r.source_start_sec + r.play_sec * if r.speed > 0.0 { r.speed } else { 1.0 },
             vol = r.volume
         ));
         labels.push(format!("[{label}]"));
@@ -2473,6 +2511,24 @@ pub struct BgmRunInput {
     fade_in_sec: f64,
     #[serde(default)]
     fade_out_sec: f64,
+    /// 素材が短いとき繰り返すか。**既定 true＝従来の BGM の挙動**（場面形式の呼び出しは指定しない）。
+    /// タイムライン形式の読み上げは false を渡す（#631）。
+    #[serde(default = "default_true")]
+    loop_source: bool,
+    /// 素材のどこから使うか（秒）。**既定 0＝従来どおり頭から**。
+    #[serde(default)]
+    source_start_sec: f64,
+    /// 再生速度。**既定 1.0＝従来どおり等速**。
+    #[serde(default = "default_speed")]
+    speed: f64,
+}
+
+fn default_speed() -> f64 {
+    DEFAULT_SPEED
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// タイムラインのテロップ帯入力（ADR-0018）。透過PNG（base64/data URL）＋グローバル表示区間（compileTimeline の秒と一致）。
@@ -3307,6 +3363,9 @@ fn export_video_impl(
                 play_sec: r.play_sec,
                 fade_in_sec: r.fade_in_sec,
                 fade_out_sec: r.fade_out_sec,
+                loop_source: r.loop_source,
+                source_start_sec: r.source_start_sec,
+                speed: r.speed,
             })
             .collect();
         let args = mix_bgm_runs_args(
@@ -4171,6 +4230,9 @@ mod tests {
             play_sec: 10.0,
             fade_in_sec: 1.0,
             fade_out_sec: 2.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
         }];
         let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
         assert!(a.windows(2).any(|w| w[0] == "-stream_loop" && w[1] == "-1"));
@@ -4180,6 +4242,66 @@ mod tests {
             "[1:a]atrim=0:10,asetpts=N/SR/TB,volume=0.25,afade=t=in:st=0:d=1,afade=t=out:st=8:d=2[bg0];[0:a][bg0]amix=inputs=2:duration=first:normalize=0[a]"
         );
         assert!(a.windows(2).any(|w| w[0] == "-c:v" && w[1] == "copy")); // 映像は再エンコードしない
+    }
+
+    /// 読み上げ（タイムライン形式の音声クリップ・#631）は繰り返さない＝素材が短くても言葉が二重に鳴らない。
+    /// 既定（BGM）はループのままで、区別は入力の loop_source だけで決まる。
+    #[test]
+    fn mix_bgm_runs_args_no_loop_for_voice() {
+        let runs = [BgmRunPlaced {
+            file: "voice.wav",
+            volume: 1.0,
+            delay_sec: 2.0,
+            play_sec: 3.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            loop_source: false,
+            source_start_sec: 0.0,
+            speed: 1.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
+        assert!(!a.iter().any(|s| s == "-stream_loop")); // 繰り返さない
+        assert!(a.windows(2).any(|w| w[0] == "-i" && w[1] == "voice.wav")); // 入力自体は載る
+    }
+
+    #[test]
+    fn mix_bgm_runs_args_trims_and_speeds_source() {
+        // タイムライン形式のトリム＋速度（#631）：素材の 4.0 秒から、出力 3 秒ぶんを2倍速で。
+        // 素材側で読む長さは 3×2=6 秒＝atrim=4:10。フェードは出力側の秒数（atempo の後）で見る。
+        let runs = [BgmRunPlaced {
+            file: "clip.wav",
+            volume: 1.0,
+            delay_sec: 0.0,
+            play_sec: 3.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 1.0,
+            loop_source: false,
+            source_start_sec: 4.0,
+            speed: 2.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
+        let fc = a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1].clone();
+        assert!(fc.contains("atrim=4:10"), "{fc}");
+        assert!(fc.contains("asetpts=N/SR/TB,atempo=2,volume=1"), "{fc}");
+        assert!(fc.contains("afade=t=out:st=2:d=1"), "{fc}"); // 出力 3 秒の末尾 1 秒
+    }
+
+    #[test]
+    fn atempo_chain_splits_out_of_range_speed_without_rounding() {
+        // 1段で受けられる範囲はそのまま。範囲外は掛け算で分ける＝速度を丸めない（ADR-0026①）。
+        assert_eq!(atempo_chain(1.0), "");
+        assert_eq!(atempo_chain(1.5), "atempo=1.5,");
+        assert_eq!(atempo_chain(4.0), "atempo=2,atempo=2,");
+        assert_eq!(atempo_chain(0.25), "atempo=0.5,atempo=0.5,");
+        // 分けたあとの積は元の速度に戻る（丸めていない）。
+        for speed in [0.1, 0.3, 3.0, 5.0, 8.0] {
+            let product: f64 = atempo_chain(speed)
+                .trim_end_matches(',')
+                .split(',')
+                .map(|s| s.trim_start_matches("atempo=").parse::<f64>().unwrap())
+                .product();
+            assert!((product - speed).abs() < 1e-9, "{speed} => {product}");
+        }
     }
 
     #[test]
@@ -4193,6 +4315,9 @@ mod tests {
                 play_sec: 8.5,
                 fade_in_sec: 1.5,
                 fade_out_sec: 1.0,
+                loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
             },
             BgmRunPlaced {
                 file: "b.mp3",
@@ -4201,6 +4326,9 @@ mod tests {
                 play_sec: 6.5,
                 fade_in_sec: 1.0,
                 fade_out_sec: 2.0,
+                loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
             },
         ];
         let a = mix_bgm_runs_args("v.mp4", &runs, 14.0, "out.mp4");
@@ -4223,6 +4351,9 @@ mod tests {
             play_sec: 10.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
         }];
         let a = mix_bgm_runs_args("v.mp4", &runs, 10.0, "out.mp4");
         assert!(!a.iter().any(|s| s.contains("afade")));
@@ -4475,6 +4606,9 @@ mod tests {
             play_sec: 2.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
         }];
         let args = mix_bgm_runs_args(&video.to_string_lossy(), &runs, 2.0, &out.to_string_lossy());
         run(&ffmpeg, &args).expect("bgm mix");
