@@ -123,7 +123,7 @@
 | enum | 値 |
 |---|---|
 | `narration.status`（音声生成） | `none` / `pending` / `generated` / `failed` |
-| `renderStatus` | `idle` / `rendering` / `encoding` / `done` / `error` / `unsupported` / `cancelled`（ユーザー中止・#380）。**実行時のみ**（`project.json` に持たない＝`15 §1`）。`running` は進捗表示のため `rendering`（場面を焼く）／`encoding`（結合・字幕・BGM）に分かれる（#376）。`unsupported` はこの端末で書き出せない（#120・ADR-0013）。値の定義は `domain/export/exportProgress.ts` の `EXPORT_RUN_PHASES` が単一の参照元（§2-7） |
+| `renderStatus` | `idle` / `preparing` / `rendering` / `encoding` / `done` / `error` / `unsupported` / `cancelled`（ユーザー中止・#380）。`preparing` は保存先を選んでもらっている段（タイムライン形式・#631）＝**ここも走行中に数える**（ダイアログを開いている間に押し直しても二重に走らない）・まだ何も描いていないので進捗は出さない。**実行時のみ**（`project.json` に持たない＝`15 §1`）。`running` は進捗表示のため `rendering`（場面を焼く）／`encoding`（結合・字幕・BGM）に分かれる（#376）。`unsupported` はこの端末で書き出せない（#120・ADR-0013）。値の定義は `domain/export/exportProgress.ts` の `EXPORT_RUN_PHASES` が単一の参照元（§2-7） |
 | `formality` | `casual` / `standard` / `formal` |
 | `voiceId` | `voicevox_zundamon`（既定）ほか。形式 `^[a-z0-9_]+$` |
 | `poseTag` | 自由文字列タグ（例 `smile` / `guide` / `bow` / `surprise` / `think` / `cheer`）。enum固定しない |
@@ -453,6 +453,9 @@ domain の純粋関数 **`src/domain/timeline/edit.ts`**。**置けない操作�
 - **音は `timelineAudioRuns(doc)` が「どこに・どれだけ・どの音量で」置くかを返す**。場面形式の BGM 区間
   （`BgmRunInput`）と同じ形なので、**混ぜる側（FFmpeg の adelay/atrim/afade/amix）は作り直さない**。
   音量とフェードは**再生と同じ関数**（`clipBaseVolume` / `clipFadeSec`）から採る。
+- **音源ファイルの拡張子も渡す**（`fileExt`）。音源キーからは復元できない（同梱BGMの id・読み上げの保存先は
+  拡張子を持たない）ので、同梱BGM＝目録／持ち込み＝素材の保存先／読み上げ＝音声の保存先から採る＝
+  **実際のファイルに合わせる**（判らないときだけ既定）。切り出しの規則は `fileExtension`（domain）と共有。
 - **トリム（`sourceStartSec`）と速度（`speed`）も渡す**。受け口が無いと「素材の途中から」「倍速」が黙って
   無視され、聞いた音と書き出した音が違う（`BgmRunInput.sourceStartSec`/`speed`・未指定＝頭から・等速）。
   切り出しは**素材の時間**で見る（速度ぶん長く読む）ので、置いた長さは速度を変えても変わらない。
@@ -461,7 +464,30 @@ domain の純粋関数 **`src/domain/timeline/edit.ts`**。**置けない操作�
   BGM 混合は常にループする実装なので、この区別を渡さないと**読み上げが繰り返されて言葉が二重に鳴る**
   （`BgmRunInput.loopSource`・未指定＝従来どおりループ）。
 - **⚠️ 動画クリップの元音声はまだ扱えない**（`kind:'slot'` は音源を持たない＝`timelineAudioRuns` に出ない）。
-  持ち込んだ動画の音を黙って落とさないよう、**書き出しの手前で断る**（§2-5・#631 後続）。
+  絵も1枚の静止画として描かれるので、**動画の素材を置いてあるだけで書き出しを断る**
+  （`timelineExportBlockers`＝静止画＋無音の動画を成功として出さない・ADR-0026④）。
+  **見た目パターンが見つからない部品があるときも断る**（描かれない＝そこが丸ごと絵から消えるので、
+  警告だけで通さない＝場面形式の書き出し停止と同じ扱い）。判定材料（読み込めている見た目の一覧）が
+  渡されないときは見ない＝**嘘の理由を出さない**。
+- **描くのは `buildTimelineFrames`**（`renderer/export`）＝`layoutTimelineAt(doc, t)` → SVG → PNG を
+  フレーム数ぶん回し、1枚ずつディスクへ逃がす（数千フレームの base64 を配列に溜めない）。**プレビューと
+  同じ入力**（見た目パターン・素材の src）を画面から受け取る＝見えているものがそのまま出る（ADR-0001）。
+  出来上がりは場面形式の**アニメ場面と同じ形**（`framesDir`＋`fps`＋`durationSec`）なので、**FFmpeg 側は
+  `frames_scene_args` をそのまま使う**＝書き出しの IPC を増やさない。
+- **走っている間は文書と入力を固定する**。描くのに使うもの（素材の表示先・音源）は**始めた時点のものを
+  取っておく**＝途中で別の動画を開かれても混ざらない。さらに**書き出し中は別の動画を開けず・編集も
+  取り消しもできない**（`TIMELINE_EDIT_EXPORTING`）＝焼くのは始めた時点の文書なので、入らない編集を
+  受け付けて「直したのに反映されていない動画」を成功にしない（ADR-0026①）。
+- **形式をまたいで同時に書き出さない**（`exportLock`）。場面形式とタイムライン形式は別の状態を持つが、
+  一時ファイルの置き場はアプリで1つ（片づけは置き場を丸ごと消す）＝片方が相手のフレームを消して
+  壊れた動画が出る。どちらの入口でも同じ締めを見て、走っている間は始めない（§2-5 で理由を出す）。
+- **同梱フォントは描く前にそろえる**（`loadExportFonts`）。ラスタライズは読み込み済みの字体しか使えず、
+  画面に出ていない字を焼くと**プレビューと違う字**になる。動画全体のフォント（`videoSettings.fontId`）は
+  部品ごとの指定が無いときの受け皿として渡す（`11 §6` 継承・渡さないと既定の字体へ化ける）。
+- **クレジット（VOICEVOX）は毎フレーム焼き込む**（ADR-0003・`13 §4`）。出すキャラは**その時刻に
+  しゃべっている声**（`creditSpeakerAt`＋`creditForLine`）＝場面形式の掛け合いと同じ挙動（ADR-0026②）。
+  誰もしゃべっていない時刻は動画の既定の声＝**クレジットが消える瞬間を作らない**。
+  プレビューも同じものを出す（見えていたものと違う動画を出さない）。
 
 ## 8. 検証ルール（コード化可能な形）
 

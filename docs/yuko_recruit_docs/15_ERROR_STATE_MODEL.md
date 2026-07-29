@@ -10,7 +10,7 @@
 | 状態 | 値（enum） | 永続/実行時 | 出典 |
 |---|---|---|---|
 | `narration.status` | none / pending / generated / failed | **永続**（Scene内） | `11 §3.5` |
-| `renderStatus` | idle / rendering / encoding / done / error / unsupported / cancelled | 実行時（書き出しジョブ） | `11 §3.5` |
+| `renderStatus` | idle / preparing / rendering / encoding / done / error / unsupported / cancelled | 実行時（書き出しジョブ） | `11 §3.5` |
 | `aiGenerationStatus` | idle / sending / generating / validating / done / failed | 実行時（AIジョブ） | 本書 |
 
 > `aiGenerationStatus` と `renderStatus` は**ジョブの実行時状態**で、`project.json` には持たない（MVP）。`narration.status` のみシーンに永続する。
@@ -168,10 +168,13 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `TIMELINE_EDIT_TRACK_KIND` | warning | — | 音の部品は音の列に、絵や文字の部品は映像の列に置いてください | `ADR-0032`・`11 §8 V23` |
 | `TIMELINE_EDIT_LOCKED` | warning | — | この列は固定されています。動かすには固定を外してください | `ADR-0032`・`11 §7.6` |
 | `TIMELINE_EDIT_NOT_FOUND` | warning | — | その部品は見つかりませんでした。選び直してください | `ADR-0032` |
+| `TIMELINE_EDIT_EXPORTING` | warning | — | いま動画を書き出しています。終わってから編集してください | `ADR-0032`・`11 §7.6.5`（書き出しは**始めた時点の文書**を焼く＝入らない編集を受け付けない・ADR-0026①） |
 | `TIMELINE_AUDIO_SOURCE_MISSING` | warning | — | 音が見つからない部品があります。その部品は鳴りません。読み上げを作り直すか、音を選び直してください | `ADR-0032`・`11 §7.6.2.2` |
 | `TIMELINE_TEMPLATE_NOT_FOUND` | warning | — | 見た目パターンが見つからない部品があります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください | `ADR-0032`・`11 §7.6.4`（描かれないものを黙らせない） |
 | `TIMELINE_EXPORT_EMPTY` | warning | — | まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください | `ADR-0032`・`11 §7.6.5`（尺 0＝呼び出し側で止める） |
-| `TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED` | warning | — | 動画の素材はまだ書き出せません。その部品を外すか、静止画に置き換えてから書き出してください | `ADR-0032`・`11 §7.6.5`（動かず音も鳴らないので**静止画＋無音を成功として出さない**＝ADR-0026④） |
+| `TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED` | warning | — | 動画の素材はまだ書き出せません。その部品を外すか、写真に置き換えてから書き出してください | `ADR-0032`・`11 §7.6.5`（動かず音も鳴らないので**静止画＋無音を成功として出さない**＝ADR-0026④） |
+| `TIMELINE_EXPORT_TEMPLATE_UNRESOLVED` | warning | — | 見た目パターンが見つからない部品があります。そのままでは動画に出ません。見た目パターンを読み込み直すか、その部品を置き直してください | `ADR-0032`・`11 §7.6.5`（描かれないものを黙って落とした動画を成功にしない＝ADR-0026④・場面形式の書き出し停止と同じ） |
+| `EXPORT_OTHER_RUNNING` | warning | — | ほかの動画を書き出しています。終わってから、もう一度お試しください | `ADR-0032`・`11 §7.6.5`（場面形式とタイムライン形式は一時ファイルの置き場を共有＝同時に走らせない） |
 
 ---
 

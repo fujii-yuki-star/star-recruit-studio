@@ -58,8 +58,21 @@ export function exportPhaseLabel(e: ExportProgressEvent): string {
  * ここを**単一の参照元**にし、store の `ExportPhase` はこれを別名にする（§2-7）。`phase: string` にすると
  * 値を rename しても型エラーにならず、進捗が黙って 0% に落ちる（この差分が潰した「止まって見える」の再発）。
  */
-export const EXPORT_RUN_PHASES = ['idle', 'rendering', 'encoding', 'done', 'error', 'unsupported', 'cancelled'] as const;
-export type ExportRunPhase = (typeof EXPORT_RUN_PHASES)[number];
+export const EXPORT_RUN_PHASE = {
+  idle: 'idle',
+  /** 保存先を選んでもらっている（タイムライン形式・#631）。**ここも走行中に数える**＝ダイアログを
+   *  開いている間に押し直しても書き出しが二重に走らない。まだ何も描いていないので進捗は出さない。 */
+  preparing: 'preparing',
+  rendering: 'rendering',
+  encoding: 'encoding',
+  done: 'done',
+  error: 'error',
+  unsupported: 'unsupported',
+  cancelled: 'cancelled',
+} as const;
+
+export const EXPORT_RUN_PHASES = Object.values(EXPORT_RUN_PHASE);
+export type ExportRunPhase = (typeof EXPORT_RUN_PHASE)[keyof typeof EXPORT_RUN_PHASE];
 
 /** 書き出しの実行状態のうち、進捗の表示に要る分（`ExportRunState` の部分集合＝domain は store に依存しない）。 */
 export interface ExportProgressState {

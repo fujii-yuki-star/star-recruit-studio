@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
-import { useTimelineStore } from "../store/timelineStore";
+import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -13,11 +13,17 @@ import type { TrackKind } from "../../domain/enums";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
+import { timelineExportBlockers } from "../../domain/timeline/export";
+import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
+import { creditSpeakerAt } from "../../domain/timeline/credit";
+import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { fontFamilyForId } from "../../domain/font/fontCatalog";
+import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, editBlockedMessage, trackLabel } from "../uiLabels";
+import { clipLabel, editBlockedMessage, exportBlockedMessage, trackLabel } from "../uiLabels";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -54,10 +60,10 @@ function tickStepSec(totalSec: number): number {
  */
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
-    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, editBlocked, history,
+    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, editBlocked, history, exportRun,
     setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
-    isPlaying, play, pause,
+    isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -103,6 +109,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   }, [doc, templates]);
   // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
   const warnings = useMemo(() => (doc ? validateTimelineDoc(doc) : []), [doc]);
+  // 書き出せない理由（`timelineExportBlockers`）は**押す前に**見せる＝押しても断られるだけ、を作らない（§2-5）。
+  const exportBlockers = useMemo(
+    // 見た目の未解決も理由になる（描かれないものを黙って落とした動画を成功にしない・ADR-0026④）。
+    () => (doc ? timelineExportBlockers(doc, { knownTemplateIds: new Set(templates.map((t) => t.templateId)) }) : []),
+    [doc, templates],
+  );
+  const exporting = isTimelineExportBusy(exportRun.phase);
   // 音が見つからない部品は**鳴らない**（読み上げ未作成・音源の読み込み失敗）。黙って無音にしない（§2-5）。
   const missingAudioCount = useMemo(() => {
     if (!doc) return 0;
@@ -139,7 +152,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 再生中に押せない操作の理由（§2-5：押せない理由を無言にしない）。
   const playingHint = isPlaying ? "再生を止めてから使えます" : undefined;
   const svg = layout
-    ? layoutToSvg(layout, { assetSrc: (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined), responsive: true })
+    ? layoutToSvg(layout, {
+        assetSrc: (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined),
+        // クレジット（ADR-0003）は書き出しで**焼き込まれる**ので、プレビューにも同じものを出す
+        // ＝見えていたものと違う動画が出てこない（ADR-0001）。その時刻にしゃべっている声のキャラ。
+        // 動画全体のフォント（`videoSettings.fontId`）＝部品ごとの指定が無いときの受け皿。書き出しにも
+        // 同じものを渡している（渡さないとプレビューだけ既定の字体になり、焼いた動画と字が変わる）。
+        fontFamily: fontFamilyForId(doc.videoSettings.fontId),
+        credit: creditForLine(
+          { speaker: creditSpeakerAt(doc, frameTimeSec(doc, playheadSec)) },
+          creditForSpeaker(getVoicevoxSpeaker()),
+        ),
+        responsive: true,
+      })
     : "";
   const step = tickStepSec(totalSec);
   const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
@@ -183,7 +208,42 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <button className="btn btn-ghost" onClick={() => setPlayhead(0)} disabled={playheadSec === 0}>
             先頭へ
           </button>
+          {exporting ? (
+            <button className="btn btn-ghost" onClick={cancelTimelineExport} disabled={exportRun.cancelling}>
+              {exportRun.cancelling ? "中止しています…" : "書き出しを中止"}
+            </button>
+          ) : (
+            <button
+              className="btn btn-primary"
+              onClick={() => void exportTimelineVideo({ templates, templateAssetSrcById })}
+              disabled={exportBlockers.length > 0 || isPlaying}
+              title={exportBlockers.length > 0 ? exportBlockedMessage[exportBlockers[0].code] : playingHint}
+            >
+              動画を書き出す
+            </button>
+          )}
         </div>
+        {exportBlockers.length > 0 && !exporting && (
+          <ul className="notice notice-warn" role="alert">
+            {exportBlockers.map((b) => (
+              <li key={b.code}>{exportBlockedMessage[b.code]}</li>
+            ))}
+          </ul>
+        )}
+        {exporting && exportRun.phase !== EXPORT_RUN_PHASE.preparing && (
+          <div className="field" aria-live="polite">
+            <progress value={exportRun.percent} max={100} />
+            <span>動画を書き出しています（{exportRun.percent}%）。そのままお待ちください。</span>
+          </div>
+        )}
+        {exportRun.message && (
+          <p className={exportRun.phase === EXPORT_RUN_PHASE.done ? "notice" : "notice notice-warn"} role="status">
+            {exportRun.message}
+            <button className="btn btn-ghost" onClick={dismissTimelineExport}>
+              閉じる
+            </button>
+          </p>
+        )}
         <label className="field">
           <span>再生位置</span>
           <input
@@ -340,7 +400,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       </div>
 
       <div className="row gap-sm mt-lg">
-        <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("home")}>
+        {/* 書き出し中に別の動画へ移ると、描いている途中の素材や音が入れ替わる（混ざった動画が出る）。 */}
+        <button
+          className="btn btn-ghost btn-icon"
+          onClick={() => onNavigate("home")}
+          disabled={exporting}
+          title={exporting ? "書き出しが終わってから戻れます" : undefined}
+        >
           <ArrowLeftIcon size={16} />
           動画の一覧へ
         </button>

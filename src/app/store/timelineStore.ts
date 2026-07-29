@@ -15,12 +15,37 @@ import type { TrackKind } from "../../domain/enums";
 import {
   addTrack, duplicateClip, moveClip, moveTrackOrder, removeClips, removeTrack, setTrackFlag, trimClip,
 } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
 import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
+import { timelineAudioRuns, timelineExportBlockers } from "../../domain/timeline/export";
+import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
+import { loadExportFonts } from "../../renderer/export/loadExportFonts";
+import { fontFamilyForId } from "../../domain/font/fontCatalog";
+import { ExportCancelledError } from "../../renderer/export/buildExportScenes";
+import { EXPORT_RUN_PHASE, exportOverallPercent } from "../../domain/export/exportProgress";
+import type { ExportRunPhase } from "../../domain/export/exportProgress";
+import { creditForSpeaker } from "../../domain/voice/narratorCredit";
+import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
+import { showSaveVideoDialog } from "../../infrastructure/dialog";
+import {
+  beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, stageExportFrame,
+} from "../../infrastructure/ffmpegExport";
+import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
+import type { Template } from "../../domain/template/types";
+import { exportBlockedMessage } from "../uiLabels";
+import { OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, useExportLockStore } from "./exportLock";
 import type { HistoryStacks } from "../../domain/project/history";
 
 /** 読み込めなかったときの文言（§2-5：原因でなく次の行動）。想定外も生のエラーを見せない。 */
 const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧から選び直してください。";
+
+// 書き出しの結果の文言（§2-5＝次の行動／§2-3＝技術用語を出さない）。
+const EXPORT_BUSY_OPEN_MESSAGE = "いま動画を書き出しています。終わってから、別の動画を開いてください。";
+const EXPORT_DONE_MESSAGE = "動画を保存しました。";
+const EXPORT_FAILED_MESSAGE = "動画を書き出せませんでした。しばらくしてから、もう一度お試しください。";
+const EXPORT_CANCELLED_MESSAGE = "書き出しを中止しました。もう一度書き出せます。";
+const EXPORT_UNSUPPORTED_MESSAGE = "この環境では動画を書き出せません。アプリから起動し直してお試しください。";
 
 export interface TimelineState {
   /** 開いている文書（未オープンは null）。 */
@@ -50,6 +75,8 @@ export interface TimelineState {
   saveStatus: "idle" | "saving" | "saved" | "error";
   /** 再生中か。時計は画面側（`useTimelinePlayback`）が回し、位置は `setPlayhead` で入る。 */
   isPlaying: boolean;
+  /** 書き出しの進み具合（`06 §12.1`）。**この画面の中だけ**で持つ＝場面形式の書き出しと状態を混ぜない。 */
+  exportRun: TimelineExportRun;
   /**
    * 位置を外から動かした回数。**再生中のシークを時計へ伝える**ための世代番号で、
    * `playheadSec` を effect の依存にすると effect 自身が更新して回り続けるため、これを依存にする。
@@ -87,7 +114,56 @@ export interface TimelineState {
    * 上げない**＝時計自身の更新で「外から動かされた」と誤認して測り直しループに入るのを防ぐ。
    */
   _advancePlayhead: (sec: number) => void;
+
+  /**
+   * 動画（MP4）を書き出す。保存先を選ぶところから、描く→仕上げるまで。
+   * **描くのに要るもの（見た目パターン・素材の src）は画面から受け取る**＝プレビューと同じ入力で描く
+   * ＝見えているものがそのまま出る（ADR-0001）。
+   */
+  exportTimelineVideo: (deps: TimelineDrawDeps) => Promise<void>;
+  /** 書き出しを止める（押した時点までの一時ファイルは片づける）。 */
+  cancelTimelineExport: () => void;
+  /** 完了・失敗の知らせを閉じる。 */
+  dismissTimelineExport: () => void;
 }
+
+/** 描くのに要る入力（プレビューと共有＝別々に解決して食い違わせない）。 */
+export interface TimelineDrawDeps {
+  /** 置いてある見た目パターン（グローバル＝場面形式と同じ一覧）。 */
+  templates: Template[];
+  /** 見た目パターンが持つ既定素材の src（ADR-0021）。 */
+  templateAssetSrcById: Record<string, string>;
+}
+
+/** 書き出しの進み具合（画面が読む）。 */
+export interface TimelineExportRun {
+  phase: TimelineExportPhase;
+  /** 0〜100。描く段が 0〜80、仕上げが 80〜100（場面形式のバーと同じ配分＝同じ見え方）。 */
+  percent: number;
+  /** 結果や断りの案内（§2-5＝次の行動）。走行中は null。 */
+  message: string | null;
+  /** 中止を押したか（描くループが次のフレームで気づく）。 */
+  cancelling: boolean;
+}
+
+/**
+ * 書き出しの段。**場面形式と同じ値**（`EXPORT_RUN_PHASE`＝単一の参照元・§2-7）を使う＝
+ * 同じ概念を形式ごとに別の言葉で持たない（ADR-0026②）。
+ */
+export type TimelineExportPhase = ExportRunPhase;
+
+/** 走行中（押せない・二重に始めない）か。画面と store で同じ判定を使う（§6）。 */
+export function isTimelineExportBusy(phase: TimelineExportPhase): boolean {
+  return phase === P.preparing || phase === P.rendering || phase === P.encoding;
+}
+
+const IDLE_EXPORT: TimelineExportRun = { phase: EXPORT_RUN_PHASE.idle, percent: 0, message: null, cancelling: false };
+
+/** 段の値の短い別名（この file 内で何度も使う＝直書きしない・§2-7）。 */
+const P = EXPORT_RUN_PHASE;
+
+/** 書き出しの持ち主（`exportLock`）。場面形式と一時ファイルの置き場を取り合わないために使う。 */
+const EXPORT_OWNER = "timeline" as const;
 
 /**
  * 開いていない状態（閉じる・開き直しの初期値）。**毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、
@@ -107,6 +183,7 @@ function emptyState() {
     saveStatus: "saved" as TimelineState["saveStatus"],
     isPlaying: false,
     seekNonce: 0,
+    exportRun: IDLE_EXPORT,
   };
 }
 
@@ -114,6 +191,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   ...emptyState(),
 
   openTimelineProject: async (projectId) => {
+    // 書き出し中に別の動画を開くと、描いている途中の素材・音が入れ替わる（＝混ざった MP4 が出る）。
+    // 開かずに理由を出す（§2-5）。画面側も一覧へ戻る導線を押せなくしているが、規則はここに置く。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ exportRun: { ...get().exportRun, message: EXPORT_BUSY_OPEN_MESSAGE } });
+      return;
+    }
     if (get().isLoading) return;
     set({ ...emptyState(), isLoading: true });
     try {
@@ -152,7 +235,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
   },
 
-  closeTimelineProject: () => set({ ...emptyState() }),
+  closeTimelineProject: () => {
+    // 開くときと同じ理由で、走行中は閉じない（`exportRun` ごと初期化されると書き出し中の締めが外れる）。
+    if (isTimelineExportBusy(get().exportRun.phase)) return;
+    set({ ...emptyState() });
+  },
 
   // 再生ヘッドは [0, 尺] に収める＝ドラッグやキー操作で動画の外へ出ない（何も無い時刻を指さない）。
   setPlayhead: (sec) => {
@@ -213,13 +300,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
   undo: () => {
     const { doc, history } = get();
-    if (!doc) return;
+    if (!doc || blockedByExport(set, get)) return;
     const r = undoSnapshot(history, doc);
     if (r) restore(set, get, r.restored, r.history);
   },
   redo: () => {
     const { doc, history } = get();
-    if (!doc) return;
+    if (!doc || blockedByExport(set, get)) return;
     const r = redoSnapshot(history, doc);
     if (r) restore(set, get, r.restored, r.history);
   },
@@ -256,7 +343,142 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ saveStatus: "error" });
     }
   },
+
+  exportTimelineVideo: async (deps) => {
+    const doc = get().doc;
+    if (!doc || isTimelineExportBusy(get().exportRun.phase)) return;
+    // 場面形式の書き出しが走っていたら始めない（一時ファイルの置き場を取り合って壊れた動画が出る）。
+    if (isOtherExportRunning(EXPORT_OWNER)) {
+      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: OTHER_EXPORT_RUNNING_MESSAGE } });
+      return;
+    }
+    // 書き出せない理由があれば**作る前に**断る（静止画＋無音の動画を成功として出さない・ADR-0026④）。
+    // 判定材料（読み込めている見た目）は描くときと**同じもの**を渡す＝断る条件と描く条件がずれない。
+    const blockers = timelineExportBlockers(doc, {
+      knownTemplateIds: new Set(deps.templates.map((t) => t.templateId)),
+    });
+    if (blockers.length > 0) {
+      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[blockers[0].code] } });
+      return;
+    }
+    if (!canExport()) {
+      // 「この端末では書き出せない」は失敗と別（場面形式と同じ扱い＝`11 §3.5` の `unsupported`）。
+      set({ exportRun: { ...IDLE_EXPORT, phase: P.unsupported, message: EXPORT_UNSUPPORTED_MESSAGE } });
+      return;
+    }
+    // 保存先を先に決める（重い処理をしてから「やっぱりやめる」を選ばせない）。ここから走行中に数える
+    // ＝ダイアログを開いている間に続けて押しても、書き出しが二重に走らない。
+    set({ exportRun: { ...IDLE_EXPORT, phase: P.preparing } });
+    useExportLockStore.getState().acquire(EXPORT_OWNER);
+    let unlisten: (() => void) | undefined;
+    try {
+      // 保存先を聞くのも try の中（失敗しても `preparing` のまま固まらない＝画面が戻らなくなる）。
+      const outputPath = await showSaveVideoDialog(doc.projectName || "movie");
+      if (!outputPath) {
+        set({ exportRun: IDLE_EXPORT });
+        return;
+      }
+      // ダイアログの間に中止を押していたら始めない（押した中止を黙って無かったことにしない）。
+      if (get().exportRun.cancelling) throw new ExportCancelledError();
+      // 再生したまま書き出すと、鳴っている音と作業が重なる。止めてから始める（ADR-0032 追補と同じ流儀）。
+      get().pause();
+      // **描くのに使うものは、始めた時点のものを取っておく**（数分かかる処理の途中で別の動画を開かれても、
+      // 別プロジェクトの絵や音が混ざらない＝場面形式が #379/#570 で潰したのと同じ事故）。
+      const { assetSrcById, audioSrcByKey } = get();
+      set({ exportRun: { phase: P.rendering, percent: 0, message: null, cancelling: false } });
+      await beginExport();
+      unlisten = await listenExportProgress((ev) => {
+        set({
+          exportRun: {
+            ...get().exportRun,
+            phase: P.encoding,
+            percent: exportOverallPercent({ phase: P.encoding, progress: { done: 0, total: 0 }, encode: ev }),
+          },
+        });
+      });
+      await clearExportFramesStage();
+      // 同梱フォントを先にそろえる（読み込み済みの字体しか焼けない＝プレビューと違う字にしない）。
+      await loadExportFonts();
+      const templateById = new Map(deps.templates.map((t) => [t.templateId, t]));
+      const frames = await buildTimelineFrames(doc, {
+        templateOf: (id) => templateById.get(id),
+        // プレビュー（`TimelineProjectScreen`）と**同じ引き方**＝同じ絵になる。
+        assetSrc: (id) => (id ? assetSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
+        // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。
+        fontFamily: fontFamilyForId(doc.videoSettings.fontId),
+        fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),
+        stageFrame: stageExportFrame,
+        onProgress: (done, total) =>
+          set({
+            exportRun: {
+              ...get().exportRun,
+              percent: exportOverallPercent({ phase: P.rendering, progress: { done, total } }),
+            },
+          }),
+        shouldCancel: () => get().exportRun.cancelling,
+      });
+      if (get().exportRun.cancelling) throw new ExportCancelledError();
+      set({ exportRun: { ...get().exportRun, phase: P.encoding } });
+      const bgmRuns = timelineBgmRunInputs(doc, audioSrcByKey);
+      await exportVideo([frames], doc.projectName || "movie", bgmRuns, doc.projectId, outputPath);
+      set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false } });
+    } catch (e) {
+      const cancelled = e instanceof ExportCancelledError || get().exportRun.cancelling;
+      set({
+        exportRun: {
+          ...IDLE_EXPORT,
+          phase: cancelled ? P.cancelled : P.error,
+          message: cancelled ? EXPORT_CANCELLED_MESSAGE : EXPORT_FAILED_MESSAGE,
+        },
+      });
+    } finally {
+      unlisten?.();
+      useExportLockStore.getState().release(EXPORT_OWNER);
+      // 一時ファイルは成功でも失敗でも片づける（次の書き出しに古いフレームを混ぜない）。
+      await clearExportFramesStage();
+    }
+  },
+
+  cancelTimelineExport: () => {
+    const run = get().exportRun;
+    if (!isTimelineExportBusy(run.phase)) return;
+    set({ exportRun: { ...run, cancelling: true } });
+    void cancelExport();
+  },
+
+  dismissTimelineExport: () => {
+    // 走行中に出る知らせ（別の動画を開こうとした等）を閉じても、**走行中は解除しない**
+    // ＝閉じるボタンが「書き出し中の締め」を外す抜け道にならない（一覧へ戻る・二重起動が開く）。
+    const run = get().exportRun;
+    set({ exportRun: isTimelineExportBusy(run.phase) ? { ...run, message: null } : IDLE_EXPORT });
+  },
 }));
+
+/**
+ * 音の並べ方（domain）を、混ぜる側の入力へ写す。**音源は再生と同じもの**（`audioSrcByKey`）＝
+ * 聞いた音と書き出した音が一致する。読めなかった音源は置かない（その部品は鳴らない）。
+ */
+export function timelineBgmRunInputs(doc: TimelineProject, audioSrcByKey: Record<string, string>): BgmRunInput[] {
+  const runs: BgmRunInput[] = [];
+  for (const run of timelineAudioRuns(doc)) {
+    const audioBase64 = audioSrcByKey[run.sourceKey];
+    if (!audioBase64) continue;
+    runs.push({
+      audioBase64,
+      fileExt: run.fileExt,
+      volume: run.volume,
+      delaySec: run.delaySec,
+      playSec: run.playSec,
+      fadeInSec: run.fadeInSec,
+      fadeOutSec: run.fadeOutSec,
+      loopSource: run.loop,
+      sourceStartSec: run.sourceStartSec,
+      speed: run.speed,
+    });
+  }
+  return runs;
+}
+
 
 /** 素材 id → プロジェクト相対のファイルパス（音の素材を読むのに使う）。 */
 function assetPathOf(doc: TimelineProject, assetId: string): string | undefined {
@@ -272,6 +494,11 @@ type GetState = () => TimelineState;
  * （各操作は「変わらないなら同一参照」を返すので、参照比較で足りる）。
  */
 function commit(set: SetState, get: GetState, next: TimelineProject, extra: Partial<TimelineState> = {}): void {
+  // 書き出しは**始めた時点の文書**を焼く。途中の編集は動画に入らないので、黙って受け付けない（§2-5）。
+  if (isTimelineExportBusy(get().exportRun.phase)) {
+    set({ editBlocked: EDIT_BLOCKED.exporting });
+    return;
+  }
   const current = get().doc;
   if (!current || next === current) {
     set({ editBlocked: null, ...extra });
@@ -294,6 +521,13 @@ function commit(set: SetState, get: GetState, next: TimelineProject, extra: Part
  * 取り消し/やり直しで文書を差し替える。**消えたクリップを選んだままにしない**（戻した文書に無い
  * 選択が残ると、次の操作が「変化ゼロ」の履歴を積む）。
  */
+/** 書き出し中は取り消し・やり直しも止める（`commit` と同じ理由＝焼く文書は始めた時点のもの）。 */
+function blockedByExport(set: SetState, get: GetState): boolean {
+  if (!isTimelineExportBusy(get().exportRun.phase)) return false;
+  set({ editBlocked: EDIT_BLOCKED.exporting });
+  return true;
+}
+
 function restore(set: SetState, get: GetState, doc: TimelineProject, history: HistoryStacks<TimelineProject>): void {
   const ids = new Set(doc.clips.map((c) => c.id));
   set({

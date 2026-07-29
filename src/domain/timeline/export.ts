@@ -9,7 +9,9 @@
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec } from './audio';
 import { FPS } from '../constants';
-import { ASSET_TYPE } from '../enums';
+import { ASSET_TYPE, TIMELINE_CLIP_KIND } from '../enums';
+import { bgmById } from '../bgm/bgmCatalog';
+import { fileExtension } from '../asset/assetFile';
 import { timelineDurationSec } from './persistence';
 import { effectiveFps } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
@@ -64,6 +66,12 @@ export interface TimelineAudioRun {
   clipId: string;
   /** 音源を見分けるキー（`audioSourceKey` と同じ規則）。 */
   sourceKey: string;
+  /**
+   * 音源ファイルの拡張子（`mp3` など・小文字）。FFmpeg が一時ファイルの形式を判定するのに要る。
+   * **音源キーからは復元できない**（同梱BGMの id やクリップの保存先は拡張子を持たない）ので、
+   * 誰が読んでも同じ値になるようここで解決しておく＝呼ぶ側で当て推量しない。
+   */
+  fileExt: string;
   /** 出力の先頭から何秒の位置に置くか。 */
   delaySec: number;
   /** どれだけ鳴らすか（秒）。 */
@@ -103,6 +111,7 @@ export function timelineAudioRuns(doc: TimelineProject): TimelineAudioRun[] {
     runs.push({
       clipId: clip.id,
       sourceKey,
+      fileExt: audioFileExtOf(clip, doc),
       delaySec: clip.startSec,
       playSec: clipEndSec(clip) - clip.startSec,
       sourceStartSec: clip.sourceStartSec ?? 0,
@@ -115,15 +124,44 @@ export function timelineAudioRuns(doc: TimelineProject): TimelineAudioRun[] {
   return runs;
 }
 
+/**
+ * その音源ファイルの拡張子（小文字）。同梱BGMは目録から、持ち込みは素材の保存先から、読み上げは
+ * 音声の保存先から採る＝**実際のファイルに合わせる**（決め打ちにしない）。判らないときだけ `mp3`
+ * （FFmpeg は中身でも判定できるので、拡張子は手がかりに過ぎない）。
+ */
+function audioFileExtOf(clip: TimelineClip, doc: TimelineProject): string {
+  if (clip.kind === TIMELINE_CLIP_KIND.voice) return extOf(clip.voice?.voicePath);
+  if (clip.bundledBgmId) return extOf(bgmById(clip.bundledBgmId)?.fileName);
+  return extOf(doc.assets.find((a) => a.assetId === clip.assetId)?.filePath);
+}
+
+function extOf(path: string | null | undefined): string {
+  // 拡張子の切り出しは既に domain に1つある（`fileExtension`）＝同じ規則を書き直さない（§6）。
+  return (path ? fileExtension(path) : '') || DEFAULT_AUDIO_FILE_EXT;
+}
+
+/** 拡張子が判らないときの既定。 */
+const DEFAULT_AUDIO_FILE_EXT = 'mp3';
+
 /** 書き出しを止める理由（`15 §6` の `TIMELINE_EXPORT_*` と対）。 */
 export const TIMELINE_EXPORT_BLOCK = {
   /** 動画に出るものが1つも無い（尺 0）。 */
   empty: 'TIMELINE_EXPORT_EMPTY',
   /** 動画の素材を置いている＝いまは静止画になり音も鳴らないので、書き出さずに断る。 */
   videoAsset: 'TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED',
+  /** 見た目パターンが見つからない部品がある＝そこが丸ごと絵から消えるので、書き出さずに断る。 */
+  templateUnresolved: 'TIMELINE_EXPORT_TEMPLATE_UNRESOLVED',
 } as const;
 
 export type TimelineExportBlockCode = (typeof TIMELINE_EXPORT_BLOCK)[keyof typeof TIMELINE_EXPORT_BLOCK];
+
+export interface TimelineExportCheckOptions {
+  /**
+   * いま読み込めている見た目パターンの id。**渡さないと見た目の未解決は見ない**（判定材料が無いのに
+   * 「見つからない」と断らない＝読み込み前の一瞬で嘘の理由を出さないため）。
+   */
+  knownTemplateIds?: ReadonlySet<string>;
+}
 
 export interface TimelineExportBlocker {
   code: TimelineExportBlockCode;
@@ -138,10 +176,20 @@ export interface TimelineExportBlocker {
  * `timelineAudioRuns` は元音声を返さない）。黙って静止画＋無音の動画を成功として出さないため、
  * 置いてあるだけで書き出しを止める（ADR-0026④・場面形式の `videoSlotUnplaceable` と同じ流儀）。
  */
-export function timelineExportBlockers(doc: TimelineProject): TimelineExportBlocker[] {
+export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExportCheckOptions = {}): TimelineExportBlocker[] {
   const blockers: TimelineExportBlocker[] = [];
   if (timelineFramePlan(doc).frameCount <= 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.empty, clipIds: [] });
+  }
+  // 見た目が解決できないクリップは描かれない（`layoutTimelineAt`）＝置いたものが丸ごと絵から消える。
+  // 警告だけで通すと、作り込みが化けた動画を成功として出すことになる（ADR-0026④・場面形式と同じ扱い）。
+  if (opts.knownTemplateIds) {
+    const unresolved = doc.clips
+      .filter((c) => c.templateId != null && !opts.knownTemplateIds?.has(c.templateId))
+      .map((c) => c.id);
+    if (unresolved.length > 0) {
+      blockers.push({ code: TIMELINE_EXPORT_BLOCK.templateUnresolved, clipIds: unresolved });
+    }
   }
   const videoAssetIds = new Set(doc.assets.filter((a) => a.assetType === ASSET_TYPE.video).map((a) => a.assetId));
   if (videoAssetIds.size > 0) {
