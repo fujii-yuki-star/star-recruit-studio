@@ -5,8 +5,9 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  moveClip, moveTrackOrder, removeClips, removeTrack, setTrackFlag, trimClip,
+  addTemplateClip, moveClip, moveTrackOrder, removeClips, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
 } from './edit';
+import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
@@ -216,5 +217,136 @@ describe('duplicateClip', () => {
   it('直後が空いていなければ置けない（勝手に別の場所へ置かない）', () => {
     const d = doc({ clips: [clip('clip_001', { startSec: 0, durationSec: 5 }), clip('clip_002', { startSec: 5, durationSec: 5 })] });
     expectBlocked(duplicateClip(d, 'clip_001'), EDIT_BLOCKED.overlap);
+  });
+});
+
+describe('見た目パターンのクリップ（差し込み口が生きている・#632）', () => {
+  const tmplClip = (over: Partial<TimelineClip> = {}): TimelineClip =>
+    clip('clip_001', { kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_001', x: 0, y: 0, w: 1920, h: 1080, ...over });
+
+  describe('setClipAssetRef', () => {
+    it('差し込み口に素材を入れる', () => {
+      const r = setClipAssetRef(doc({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_001');
+      expect(r.ok && r.doc.clips[0].assetRefs).toEqual({ layer_bg: 'asset_001' });
+    });
+
+    it('「なし」はキーごと落とす（null と未指定は解決が同じ＝形も揃える）', () => {
+      const d = doc({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
+      const r = setClipAssetRef(d, 'clip_001', 'layer_bg', null);
+      expect(r.ok && r.doc.clips[0].assetRefs).toEqual({});
+    });
+
+    it('同じものを入れ直しても文書は変わらない（取り消しが空振りしない）', () => {
+      const d = doc({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
+      const r = setClipAssetRef(d, 'clip_001', 'layer_bg', 'asset_001');
+      expect(r.ok && r.doc).toBe(d);
+    });
+
+    it('入っていない差し込み口に「なし」を選んでも文書は変わらない（絵は変わらないのに履歴が1段積まれない）', () => {
+      const d = doc({ clips: [tmplClip()] });
+      const r = setClipAssetRef(d, 'clip_001', 'layer_bg', null);
+      expect(r.ok && r.doc).toBe(d);
+    });
+
+    it('固定した列の部品は変えられない', () => {
+      const d = doc({ clips: [tmplClip()], tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] });
+      expectBlocked(setClipAssetRef(d, 'clip_001', 'layer_bg', 'asset_001'), EDIT_BLOCKED.locked);
+    });
+
+    it('無い部品は変えられない', () => {
+      expectBlocked(setClipAssetRef(doc(), 'clip_999', 'layer_bg', 'asset_001'), EDIT_BLOCKED.notFound);
+    });
+  });
+
+  describe('setClipText', () => {
+    it('文字を書き換える', () => {
+      const r = setClipText(doc({ clips: [tmplClip()] }), 'clip_001', 'title', 'こんにちは');
+      expect(r.ok && r.doc.clips[0].texts).toEqual({ title: 'こんにちは' });
+    });
+
+    it('空にしたら持たない（空文字と未入力を別扱いにしない）', () => {
+      const d = doc({ clips: [tmplClip({ texts: { title: 'あ' } })] });
+      const r = setClipText(d, 'clip_001', 'title', '');
+      expect(r.ok && r.doc.clips[0].texts).toEqual({});
+    });
+
+    it('同じ文字なら文書は変わらない', () => {
+      const d = doc({ clips: [tmplClip({ texts: { title: 'あ' } })] });
+      const r = setClipText(d, 'clip_001', 'title', 'あ');
+      expect(r.ok && r.doc).toBe(d);
+    });
+
+    it('固定した列の部品は変えられない', () => {
+      const d = doc({ clips: [tmplClip()], tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] });
+      expectBlocked(setClipText(d, 'clip_001', 'title', 'あ'), EDIT_BLOCKED.locked);
+    });
+  });
+
+  describe('addTemplateClip', () => {
+    const tmpl = { templateId: 'tmpl_001', aspectRatio: '16:9' } as const;
+
+    it('指定の列・時刻に置き、画面いっぱいの大きさにする', () => {
+      const r = addTemplateClip(doc({ clips: [] }), { template: tmpl, trackId: 'track_001', startSec: 3 });
+      expect(r.ok && r.doc.clips[0]).toMatchObject({
+        kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_001', trackId: 'track_001',
+        startSec: 3, durationSec: 8,
+      });
+      // 箱は持たない（未指定＝画面いっぱい）＝焼き出しと同じ持ち方（向きを変えても古い大きさが残らない）。
+      const placed = r.ok ? r.doc.clips[0] : undefined;
+      expect(placed?.w).toBeUndefined();
+      expect(placed?.h).toBeUndefined();
+    });
+
+    it('長さはテンプレの既定を使う（場面形式の「新しい場面」と同じ）', () => {
+      const r = addTemplateClip(doc({ clips: [] }), { template: { ...tmpl, defaults: { durationSec: 4 } }, trackId: 'track_001', startSec: 0 });
+      expect(r.ok && r.doc.clips[0].durationSec).toBe(4);
+    });
+
+    it('短すぎる長さは最小で止める（潰れた部品を作らない）', () => {
+      const r = addTemplateClip(doc({ clips: [] }), { template: { ...tmpl, defaults: { durationSec: 0 } }, trackId: 'track_001', startSec: 0 });
+      expect(r.ok && r.doc.clips[0].durationSec).toBe(TIMELINE_MIN_CLIP_SEC);
+    });
+
+    it('先に置いてあるものと重なる場所には置かない（寄せない・上書きしない）', () => {
+      expectBlocked(
+        addTemplateClip(doc(), { template: tmpl, trackId: 'track_001', startSec: 1 }),
+        EDIT_BLOCKED.overlap,
+      );
+    });
+
+    it('音の列には置けない', () => {
+      expectBlocked(
+        addTemplateClip(doc(), { template: tmpl, trackId: 'track_003', startSec: 0 }),
+        EDIT_BLOCKED.trackKind,
+      );
+    });
+
+    it('固定した列には置けない', () => {
+      const d = doc({ clips: [], tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] });
+      expectBlocked(addTemplateClip(d, { template: tmpl, trackId: 'track_001', startSec: 0 }), EDIT_BLOCKED.locked);
+    });
+
+    it('無い列には置けない', () => {
+      expectBlocked(addTemplateClip(doc(), { template: tmpl, trackId: 'track_999', startSec: 0 }), EDIT_BLOCKED.notFound);
+    });
+
+    it('向きが違う見た目パターンは置かない（画面からはみ出した絵を作らない）', () => {
+      const d = doc({ clips: [] });
+      expectBlocked(
+        addTemplateClip(d, { template: { templateId: 'tmpl_p', aspectRatio: '9:16' }, trackId: 'track_001', startSec: 0 }),
+        EDIT_BLOCKED.orientation,
+      );
+    });
+
+    it('縦型の動画には縦型の見た目パターンを置ける', () => {
+      const d = doc({ clips: [], videoSettings: { aspectRatio: '9:16', fps: 30, targetDurationSec: 60, maxDurationSec: 600 } });
+      const r = addTemplateClip(d, { template: { templateId: 'tmpl_p', aspectRatio: '9:16' }, trackId: 'track_001', startSec: 0 });
+      expect(r.ok).toBe(true);
+    });
+
+    it('置いた部品は適合する（一覧に出るのに開けない動画を作らない）', () => {
+      const r = addTemplateClip(doc({ clips: [] }), { template: tmpl, trackId: 'track_001', startSec: 0 });
+      expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
+    });
   });
 });

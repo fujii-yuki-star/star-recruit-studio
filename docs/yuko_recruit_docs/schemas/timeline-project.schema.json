@@ -83,7 +83,7 @@
         },
         "name": { "type": "string", "description": "任意の表示名。未指定＝種別＋連番の自動名。" },
         "hidden": { "type": "boolean", "description": "true で描画・書き出しから除外（音声は無音）。" },
-        "locked": { "type": "boolean", "description": "true でクリップの移動・トリムを禁止。" }
+        "locked": { "type": "boolean", "description": "true でクリップの移動・トリム・削除と、中身の差し替えを禁止（11 §7.6.3）。" }
       }
     },
     "TimelineClip": {

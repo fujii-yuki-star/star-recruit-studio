@@ -334,3 +334,165 @@ describe("TimelineProjectScreen: 書き出し（#631）", () => {
     expect(container.querySelector(".preview-stage")?.innerHTML).toContain("VOICEVOX:");
   });
 });
+
+describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () => {
+  const template: Template = {
+    schemaVersion: "1.0",
+    templateId: "tmpl_001",
+    name: "シンプル",
+    category: "opening",
+    aspectRatio: "16:9",
+    canvas: { width: 1920, height: 1080 },
+    layers: [
+      { id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080 },
+      { id: "mainVisual", type: "slot", x: 100, y: 100, w: 800, h: 600 },
+      { id: "titleText", type: "text", textKey: "title", x: 100, y: 800, w: 800, h: 100 },
+    ],
+  };
+
+  const openWithTemplateClip = () => {
+    useProjectStore.setState({ templates: [template], templateAssetSrcById: {} });
+    open({
+      assets: [
+        { assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "assets/a.png" },
+        { assetId: "asset_002", assetType: "video", displayName: "動画B", filePath: "assets/b.mp4" },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+          x: 0, y: 0, w: 1920, h: 1080, templateId: "tmpl_001" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("差し込み口と文字の欄を出す（置いたあとも中身を差し替えられる）", () => {
+    openWithTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("背景")).toBeInTheDocument();
+    expect(screen.getByText("メイン素材")).toBeInTheDocument();
+    expect(screen.getByText("見出し")).toBeInTheDocument();
+  });
+
+  it("差し込み口に素材を入れられる", () => {
+    openWithTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("メイン素材").parentElement?.querySelector("select");
+    fireEvent.change(select!, { target: { value: "asset_001" } });
+    expect(useTimelineStore.getState().doc?.clips[0].assetRefs).toEqual({ mainVisual: "asset_001" });
+  });
+
+  it("動画は選べない（動かず音も鳴らないので、選べるのに使えない選択肢を出さない）", () => {
+    openWithTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("メイン素材").parentElement?.querySelector("select");
+    expect(select?.textContent).toContain("写真A");
+    expect(select?.textContent).not.toContain("動画B");
+  });
+
+  it("文字を書き換えられる", () => {
+    openWithTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByText("見出し").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "会社紹介" } });
+    expect(useTimelineStore.getState().doc?.clips[0].texts).toEqual({ title: "会社紹介" });
+  });
+
+  it("見た目パターンが見つからない部品では、中身の欄でなく次の行動を出す", () => {
+    useProjectStore.setState({ templates: [], templateAssetSrcById: {} });
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+          x: 0, y: 0, w: 1920, h: 1080, templateId: "tmpl_missing" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("この部品を置き直してください"))).toBe(true);
+  });
+
+  it("固定した列の部品は中身も変えられない（押せない理由を出す）", () => {
+    useProjectStore.setState({ templates: [template], templateAssetSrcById: {} });
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }],
+      assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "assets/a.png" }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+          x: 0, y: 0, w: 1920, h: 1080, templateId: "tmpl_001" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("メイン素材").parentElement?.querySelector("select");
+    expect(select).toBeDisabled();
+    expect(select?.getAttribute("title")).toContain("固定を外してください");
+  });
+
+  it("入っている動画は名前を出す（「なし」と見分けが付く）", () => {
+    openWithTemplateClip();
+    useTimelineStore.setState({
+      doc: { ...useTimelineStore.getState().doc!, clips: [{ ...useTimelineStore.getState().doc!.clips[0], assetRefs: { mainVisual: "asset_002" } }] },
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("メイン素材").parentElement?.querySelector("select");
+    expect(select?.textContent).toContain("動画B");
+    expect(select?.querySelector('option[value="asset_002"]')).toBeDisabled();
+  });
+
+  it("素材が入っていない差し込み口を知らせる（灰色の枠が動画に出る）", () => {
+    openWithTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("素材が入っていない差し込み口が2個"))).toBe(true);
+  });
+
+  it("向きが違う見た目パターンは一覧に出さない（押せるのに置けないものを並べない）", () => {
+    const portrait: Template = { ...template, templateId: "tmpl_p", name: "たて型", aspectRatio: "9:16" };
+    useProjectStore.setState({ templates: [template, portrait], templateAssetSrcById: {} });
+    open({ clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "シンプル" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "たて型" })).not.toBeInTheDocument();
+  });
+
+  it("動画しか入れられない差し込み口には、どうすればよいかを出す（永久に埋まらない枠を黙らせない）", () => {
+    const videoOnly: Template = {
+      ...template,
+      layers: [{ id: "mainVisual", type: "slot", slotType: "video", x: 0, y: 0, w: 100, h: 100 }],
+    };
+    useProjectStore.setState({ templates: [videoOnly], templateAssetSrcById: {} });
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_001" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/この形式ではまだ動画を使えません/)).toBeInTheDocument();
+  });
+
+  it("見た目パターンを再生位置から置ける", () => {
+    useProjectStore.setState({ templates: [template], templateAssetSrcById: {} });
+    open({ clips: [] });
+    useTimelineStore.setState({ playheadSec: 2 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "シンプル" }));
+    const clip = useTimelineStore.getState().doc?.clips[0];
+    expect(clip).toMatchObject({ kind: TIMELINE_CLIP_KIND.template, templateId: "tmpl_001", startSec: 2 });
+  });
+
+  it("置いた部品はそのまま選ばれる（続けて中身を入れられる）", () => {
+    useProjectStore.setState({ templates: [template], templateAssetSrcById: {} });
+    open({ clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "シンプル" }));
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([useTimelineStore.getState().doc?.clips[0].id]);
+  });
+
+  it("置けないときは理由を出す（黙って別の場所に置かない）", () => {
+    useProjectStore.setState({ templates: [template], templateAssetSrcById: {} });
+    open();
+    useTimelineStore.setState({ playheadSec: 1 }); // 既にある部品と重なる位置
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "シンプル" }));
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("先に置いてある部品があります"))).toBe(true);
+  });
+});

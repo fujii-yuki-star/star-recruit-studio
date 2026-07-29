@@ -23,7 +23,12 @@ import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, editBlockedMessage, exportBlockedMessage, trackLabel } from "../uiLabels";
+import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, textKeyLabel, trackLabel } from "../uiLabels";
+import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
+import { templatesForOrientation } from "../../infrastructure/templateFs";
+import { ASSET_TYPE, SLOT_TYPE } from "../../domain/enums";
+import type { Asset } from "../../domain/project/types";
+import type { Layer } from "../../domain/template/types";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -52,6 +57,30 @@ function tickStepSec(totalSec: number): number {
 }
 
 /**
+ * その差し込み口に入れられる素材（場面編集の `assignableFor` と同じ規則）。
+ * **動画は出さない**＝タイムライン形式では動かず音も鳴らないので（書き出しも断る・#631）、
+ * 選べるのに使えない選択肢を並べない（§2-5）。すでに入っている動画は「なし」で外せる。
+ */
+/**
+ * いま入っているのに選択肢に出せない素材（＝動画）。`<select>` の value に合う option が無いと**空欄**になり
+ * 「なし」と見分けが付かないので、名前だけ出す（選び直しはできない＝`disabled`）。
+ */
+function unselectableCurrent(assets: readonly Asset[], assetId: string | null | undefined, layer: Layer): Asset | undefined {
+  if (!assetId) return undefined;
+  if (assignableAssets(assets, layer).some((a) => a.assetId === assetId)) return undefined;
+  return assets.find((a) => a.assetId === assetId);
+}
+
+function assignableAssets(assets: readonly Asset[], layer: Layer): Asset[] {
+  return assets.filter((a) => {
+    if (a.assetType === ASSET_TYPE.video) return false;
+    if (layer.type === "logo") return a.assetType === ASSET_TYPE.logo || a.assetType === ASSET_TYPE.image;
+    if (layer.slotType === SLOT_TYPE.video) return false;
+    return a.assetType === ASSET_TYPE.image;
+  });
+}
+
+/**
  * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。
  *
  * 見て確かめる（その瞬間の仕上がり・列と部品の並び）と、置く・動かす・重ねる・消すができる。
@@ -64,6 +93,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
+    setSelectedClipAssetRef, setSelectedClipText, addTemplateClip,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -92,6 +122,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
 
   const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
+  // 見た目パターンを置く先の列（消された/固定されたときは置くときに実在するものへ落とす）。
+  const [placeTrackId, setPlaceTrackId] = useState<string>("");
   const totalSec = doc ? timelineDurationSec(doc) : 0;
   // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
   const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
@@ -107,6 +139,39 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     const known = new Set(templates.map((t) => t.templateId));
     return doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.template && !known.has(c.templateId ?? "")).length;
   }, [doc, templates]);
+  // 選んだ部品が見た目パターンなら、その差し込み口と文字を編集できる（ADR-0032 決定5）。
+  // 層の並び・種別は**描画と同じテンプレ**から採る＝画面に出ている枠と編集欄が食い違わない。
+  const selectedTemplate = selected?.kind === TIMELINE_CLIP_KIND.template
+    ? templates.find((t) => t.templateId === selected.templateId)
+    : undefined;
+  const slotLayers = selectedTemplate?.layers.filter((l) => templateSlotIds(selectedTemplate.layers).has(l.id)) ?? [];
+  const slotNames = slotLabelsFor(slotLayers);
+  // 固定した列の部品は中身も変えられない（domain 側で止まる）＝欄を押せなくして理由を出す
+  // ＝入力しても黙って元へ戻る、を作らない（§2-5）。
+  const selectedLocked = !!selected && !!doc?.tracks.find((t) => t.id === selected.trackId)?.locked;
+  const lockedHint = selectedLocked ? "この列は固定されています。変えるには固定を外してください" : undefined;
+  const textKeys = selectedTemplate ? usedTextKeys(selectedTemplate.layers) : [];
+  // 素材が入っていない差し込み口は、灰色の「（未設定）」の枠がそのまま動画に焼き込まれる（`sceneSvg`）。
+  // 黙ってそのまま出さずに知らせる（§2-5・場面形式の公開前チェックと同じ扱い＝ADR-0026②）。
+  const emptySlotCount = useMemo(() => {
+    if (!doc) return 0;
+    const byId = new Map(templates.map((t) => [t.templateId, t]));
+    let n = 0;
+    for (const clip of doc.clips) {
+      if (clip.kind !== TIMELINE_CLIP_KIND.template) continue;
+      const tmpl = byId.get(clip.templateId ?? "");
+      if (!tmpl) continue; // 見た目が見つからない部品は別の案内が出る
+      for (const layer of tmpl.layers) {
+        if (!templateSlotIds(tmpl.layers).has(layer.id)) continue;
+        if (!(clip.assetRefs?.[layer.id] ?? layer.assetId)) n += 1;
+      }
+    }
+    return n;
+  }, [doc, templates]);
+  // 置ける見た目パターンは**この動画と同じ向き**だけ（向き違いは置いても画面外へ出る＝domain も断る）。
+  const placeableTemplates = doc ? templatesForOrientation(templates, doc.videoSettings.aspectRatio) : [];
+  // 置ける列（映像の列だけ・固定した列は除く）＝押せるのに置けない選択肢を出さない（§2-5）。
+  const placeableTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.locked) ?? [];
   // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
   const warnings = useMemo(() => (doc ? validateTimelineDoc(doc) : []), [doc]);
   // 書き出せない理由（`timelineExportBlockers`）は**押す前に**見せる＝押しても断られるだけ、を作らない（§2-5）。
@@ -179,6 +244,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       {missingTemplateCount > 0 && (
         <p className="notice notice-warn" role="alert">
           見た目パターンが見つからない部品が{missingTemplateCount}個あります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください。
+        </p>
+      )}
+      {emptySlotCount > 0 && (
+        <p className="notice notice-warn" role="alert">
+          素材が入っていない差し込み口が{emptySlotCount}個あります。そのままだと灰色の枠が動画に出ます。部品を選んで素材を入れてください。
         </p>
       )}
       {missingAudioCount > 0 && (
@@ -379,6 +449,65 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 ))}
               </select>
             </label>
+
+            {/* 見た目パターンの部品は、置いたあとも中身を差し替えられる（ADR-0032 決定5）。 */}
+            {selected.kind === TIMELINE_CLIP_KIND.template && (
+              selectedTemplate ? (
+                <div className="mt-lg">
+                  <h4>この見た目パターンの中身</h4>
+                  {slotLayers.length === 0 && textKeys.length === 0 && (
+                    <p className="text-muted">この見た目パターンに入れ替えられる中身はありません。</p>
+                  )}
+                  {slotLayers.map((layer, i) => (
+                    <label className="field" key={layer.id}>
+                      <span>{slotNames[i]}</span>
+                      <select
+                        value={selected.assetRefs?.[layer.id] ?? ""}
+                        disabled={selectedLocked}
+                        title={lockedHint}
+                        onChange={(e) => setSelectedClipAssetRef(layer.id, e.target.value || null)}
+                      >
+                        <option value="">なし</option>
+                        {assignableAssets(doc.assets, layer).map((a) => (
+                          <option key={a.assetId} value={a.assetId}>{a.displayName}</option>
+                        ))}
+                        {/* いま入っているが選び直せないもの（動画）は、名前だけ出す＝「なし」と見分けが付く。 */}
+                        {unselectableCurrent(doc.assets, selected.assetRefs?.[layer.id], layer) && (
+                          <option value={selected.assetRefs?.[layer.id] ?? ""} disabled>
+                            {unselectableCurrent(doc.assets, selected.assetRefs?.[layer.id], layer)?.displayName}（この形式では使えません）
+                          </option>
+                        )}
+                      </select>
+                      {/* 入れられる素材が1つも無い差し込み口は**永久に埋まらない**＝空の枠が動画に焼き込まれる。
+                          黙って未設定のままにせず、何をすれば埋まるかを出す（§2-5・ADR-0026④）。 */}
+                      {assignableAssets(doc.assets, layer).length === 0 && (
+                        <span className="field-hint">
+                          {layer.slotType === SLOT_TYPE.video
+                            ? "ここは動画を入れる場所ですが、この形式ではまだ動画を使えません。別の見た目パターンを選んでください。"
+                            : "入れられる写真がありません。素材の画面で写真を取り込んでください。"}
+                        </span>
+                      )}
+                    </label>
+                  ))}
+                  {textKeys.map((key) => (
+                    <label className="field" key={key}>
+                      <span>{textKeyLabel[key]}</span>
+                      <input
+                        type="text"
+                        value={selected.texts?.[key] ?? ""}
+                        disabled={selectedLocked}
+                        title={lockedHint}
+                        onChange={(e) => setSelectedClipText(key, e.target.value)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="notice notice-warn" role="alert">
+                  この部品の見た目パターンが見つかりません。見た目パターンを読み込み直すか、この部品を置き直してください。
+                </p>
+              )
+            )}
           </>
         ) : (
           <p className="text-muted">
@@ -389,6 +518,49 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
         {selectedClipIds.length > 1 && (
           <button className="btn btn-danger" onClick={removeSelectedClips}>選んだ{selectedClipIds.length}個を消す</button>
+        )}
+      </div>
+
+      {/* 見た目パターンは「楽をするための素材」＝一覧からそのまま置ける（ADR-0032 決定6）。 */}
+      <div className="card">
+        <h3>見た目パターンを置く</h3>
+        {placeableTemplates.length === 0 ? (
+          <p className="text-muted">この向きの動画に置ける見た目パターンがありません。見た目パターンを読み込んでからお試しください。</p>
+        ) : placeableTracks.length === 0 ? (
+          <p className="text-muted">置ける列がありません。「映像の列を足す」で列を作るか、列の固定を外してください。</p>
+        ) : (
+          <>
+            <p className="text-muted">
+              選んだ見た目パターンを、再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとも中身は差し替えられます。
+            </p>
+            <label className="field">
+              <span>置く列</span>
+              <select value={placeTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
+                {placeableTracks.map((t) => (
+                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                ))}
+              </select>
+            </label>
+            <div className="row gap-sm">
+              {placeableTemplates.map((t) => (
+                <button
+                  key={t.templateId}
+                  className="btn btn-secondary"
+                  disabled={isPlaying}
+                  title={playingHint}
+                  onClick={() =>
+                    addTemplateClip({
+                      template: t,
+                      trackId: placeableTracks.some((x) => x.id === placeTrackId) ? placeTrackId : placeableTracks[0].id,
+                      startSec: playheadSec,
+                    })
+                  }
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </div>
 

@@ -3,14 +3,17 @@
 // **置けない操作は黙って別の結果にしない**（§2-5・ADR-0026④）＝重なる位置へ動かそうとしたら、勝手に
 // 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
-import { NARRATION_STATUS } from '../enums';
-import type { TrackKind } from '../enums';
+import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from '../enums';
+import type { TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
 import { removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from '../project/overlayClipEdit';
 import { createClipId, createTrackId } from '../project/persistence';
 import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
 import type { TimelineClip, TimelineProject, Track } from './types';
+import type { Texts } from '../project/types';
+import { defaultDurationForTemplate } from '../template/layerOps';
+import type { Template } from '../template/types';
 
 /** 置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。永続データではないので schema には持ち込まない。 */
 export const EDIT_BLOCKED = {
@@ -27,6 +30,11 @@ export const EDIT_BLOCKED = {
    * 入らない編集を受け付けると「直したのに反映されていない動画」が成功として出る（ADR-0026①）。
    */
   exporting: 'TIMELINE_EDIT_EXPORTING',
+  /**
+   * 向き（横型/縦型）が動画と違う見た目パターン（#632）。置くと層の座標がそのままなので**画面から
+   * はみ出した絵**になり、検証にも書き出しにも引っかからないまま出てしまう。置く前に断る。
+   */
+  orientation: 'TIMELINE_EDIT_ORIENTATION',
 } as const;
 
 export type EditBlockedReason = (typeof EDIT_BLOCKED)[keyof typeof EDIT_BLOCKED];
@@ -215,4 +223,82 @@ export function duplicateClip(doc: TimelineProject, clipId: string): EditResult 
   // 別の部品の音声を指す」を作らない）。文と話者は残るので作り直せる。
   if (next.voice) next.voice = { ...next.voice, voicePath: null, status: NARRATION_STATUS.none };
   return ok({ ...doc, clips: [...doc.clips, next] });
+}
+
+/**
+ * 見た目パターンのクリップの**差し込み口に素材を入れる／外す**（ADR-0032 決定5＝差し込み口は生きている）。
+ *
+ * 固定した列（`locked`）の部品は中身も変えない＝「動かせないのに中身は変えられる」という非対称を作らない
+ * （ADR-0026②・画面は欄自体を押せなくして理由を出す）。
+ *
+ * **「なし」はキーごと落とす**。`null` と未指定は解決が同じ（どちらもテンプレ既定素材へ落ちる＝`11 §5`）
+ * なので、`null` を残すと**絵は変わらないのに文書だけ変わる**＝取り消しが1段空振りする。
+ * （テンプレ既定素材を「なし」で消せないのは場面形式と同じ挙動＝ADR-0026②。）
+ */
+export function setClipAssetRef(
+  doc: TimelineProject,
+  clipId: string,
+  layerId: string,
+  assetId: string | null,
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない。
+  // 比べるのは**解決した値**（`null` と未指定は同じ意味）。
+  if ((clip.assetRefs?.[layerId] ?? null) === assetId) return ok(doc);
+  const assetRefs = { ...clip.assetRefs };
+  if (assetId === null) delete assetRefs[layerId];
+  else assetRefs[layerId] = assetId;
+  return ok(withClip(doc, { ...clip, assetRefs }));
+}
+
+/**
+ * 見た目パターンのクリップの**文字を書き換える**（差し込み口は生きている）。
+ * 空にしたときはキーごと落とす＝「空文字を入れた」と「入れていない」を別扱いにしない
+ * （場面形式の `texts` と同じ解決＝空は描かれない）。
+ */
+export function setClipText(doc: TimelineProject, clipId: string, textKey: TextKey, text: string): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.texts?.[textKey] ?? '') === text) return ok(doc);
+  const texts: Texts = { ...clip.texts };
+  if (text === '') delete texts[textKey];
+  else texts[textKey] = text;
+  return ok(withClip(doc, { ...clip, texts }));
+}
+
+/**
+ * 見た目パターンを**素材として置く**（ADR-0032 決定6＝テンプレは「楽をするための素材」）。
+ * 置き先は指定の列の指定の時刻。空いていなければ置かない（寄せない・上書きしない＝理由を返す）。
+ *
+ * 長さは**テンプレを受け取って domain で決める**（`defaultDurationForTemplate`＝場面形式の「新しい場面」と
+ * 同じ関数）＝同じテンプレが形式や呼び出し口によって違う長さで出てこない（ADR-0026②）。
+ */
+export function addTemplateClip(
+  doc: TimelineProject,
+  input: { template: Pick<Template, 'templateId' | 'defaults' | 'aspectRatio'>; trackId: string; startSec: number },
+): EditResult {
+  // 向きが違うテンプレは層の座標がそのまま使われる（箱＝画面いっぱいなので縮まない）＝画面外へ出る。
+  // 画面が一覧を絞っていても、ここで断る＝別の導線からも同じ壊れ方を作れないようにする（ADR-0026④）。
+  if (input.template.aspectRatio !== doc.videoSettings.aspectRatio) return blocked(EDIT_BLOCKED.orientation);
+  const track = doc.tracks.find((t) => t.id === input.trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  if (track.locked) return blocked(EDIT_BLOCKED.locked);
+  if (track.kind !== trackKindForClip(TIMELINE_CLIP_KIND.template)) return blocked(EDIT_BLOCKED.trackKind);
+  const startSec = Math.max(0, input.startSec);
+  const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, defaultDurationForTemplate(input.template));
+  if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  // **箱は持たない**＝未指定は画面いっぱい（`clipBox`）。焼き出し（`bake.ts`）も同じく持たないので、
+  // 見た目パターンのクリップの箱の持ち方が2通りにならない（向きを変えたときに片方だけ古い大きさで残る）。
+  const clip: TimelineClip = {
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: TIMELINE_CLIP_KIND.template,
+    trackId: input.trackId,
+    startSec,
+    durationSec,
+    templateId: input.template.templateId,
+  };
+  return ok({ ...doc, clips: [...doc.clips, clip] });
 }
