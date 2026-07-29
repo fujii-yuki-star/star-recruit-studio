@@ -4,7 +4,12 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 import { boundVoiceClip, danglingSubtitleLinks, subtitleTextOf, subtitlesBoundTo } from './subtitleLink';
-import { duplicateClip, EDIT_BLOCKED, moveClip, setSubtitleText, setSubtitleVoiceLink, trimClip } from './edit';
+import {
+  addLinkedSubtitleClip, addVoiceClip, duplicateClip, EDIT_BLOCKED, moveClip,
+  setSubtitleText, setSubtitleVoiceLink, setVoiceSpeaker, setVoiceText, trimClip,
+} from './edit';
+import { VOICE_PLACEHOLDER_SEC } from '../constants';
+import { validateTimelineProject } from '../validation/generated/validators.js';
 import { validateTimelineDoc } from './validateTimelineDoc';
 import { timelineExportBlockers } from './export';
 
@@ -248,5 +253,92 @@ describe('書き出しの手前で断る', () => {
   it('自分の文があれば止めない（その文で描かれる）', () => {
     const d = doc({ clips: [subtitle('clip_002', { voiceClipId: 'clip_999', text: '残る文' })] });
     expect(timelineExportBlockers(d).map((b) => b.code)).not.toContain('TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN');
+  });
+});
+
+describe('読み上げを置く・書き換える（#633）', () => {
+  const base = () => doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }] });
+
+  it('音の列に置ける（まだ声は作っていない＝仮の長さ）', () => {
+    const r = addVoiceClip(base(), { text: 'ひとこと', trackId: 'track_002', startSec: 3 });
+    expect(r.ok && r.doc.clips[0]).toMatchObject({
+      kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 3, durationSec: VOICE_PLACEHOLDER_SEC,
+    });
+    expect(r.ok && r.doc.clips[0].voice).toMatchObject({ text: 'ひとこと', status: 'none' });
+  });
+
+  it('映像の列には置けない', () => {
+    const r = addVoiceClip(base(), { text: 'あ', trackId: 'track_001', startSec: 0 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe(EDIT_BLOCKED.trackKind);
+  });
+
+  it('置いた読み上げはスキーマに適合する', () => {
+    const r = addVoiceClip(base(), { text: 'あ', trackId: 'track_002', startSec: 0 });
+    expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
+  });
+
+  it('文を書き換えると、作成済みの音声は外れる（別の文の声を指さない）', () => {
+    const d = doc({ clips: [voice('clip_001')] });
+    const r = setVoiceText(d, 'clip_001', 'べつの文');
+    expect(r.ok && r.doc.clips[0].voice).toMatchObject({ text: 'べつの文', voicePath: null, status: 'none' });
+  });
+
+  it('話者を変えても、作成済みの音声は外れる', () => {
+    const d = doc({ clips: [voice('clip_001')] });
+    const r = setVoiceSpeaker(d, 'clip_001', 2);
+    expect(r.ok && r.doc.clips[0].voice).toMatchObject({ speaker: 2, voicePath: null, status: 'none' });
+  });
+
+  it('話者を「動画全体に合わせる」に戻せる', () => {
+    const d = doc({ clips: [{ ...voice('clip_001'), voice: { text: 'あ', status: 'generated', speaker: 2 } }] });
+    const r = setVoiceSpeaker(d, 'clip_001', null);
+    expect(r.ok && r.doc.clips[0].voice?.speaker).toBeUndefined();
+  });
+
+  it('同じ文・同じ話者なら文書は変わらない（作った声を無駄に捨てない）', () => {
+    const d = doc({ clips: [voice('clip_001')] });
+    expect(setVoiceText(d, 'clip_001', 'こんにちは').ok && setVoiceText(d, 'clip_001', 'こんにちは')).toMatchObject({ doc: d });
+    expect(setVoiceSpeaker(d, 'clip_001', null)).toMatchObject({ doc: d });
+  });
+});
+
+describe('その読み上げの字幕を置く（#633）', () => {
+  it('同じ時間・連動つきで置く（見た目の既定は自由配置の字幕と同じ）', () => {
+    const d = doc({ clips: [voice('clip_001', { startSec: 4, durationSec: 2 })] });
+    const r = addLinkedSubtitleClip(d, 'clip_001');
+    expect(r.ok && r.doc.clips[1]).toMatchObject({
+      kind: TIMELINE_CLIP_KIND.subtitle, voiceClipId: 'clip_001', startSec: 4, durationSec: 2, trackId: 'track_001',
+    });
+    expect(r.ok && r.doc.clips[1].fontSize).toBeGreaterThan(0);
+  });
+
+  it('置ける映像の列が無ければ列を足す（置けないと言って終わらせない）', () => {
+    const d = doc({
+      clips: [
+        voice('clip_001', { startSec: 0, durationSec: 5 }),
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: 'あ' },
+      ],
+    });
+    const r = addLinkedSubtitleClip(d, 'clip_001');
+    expect(r.ok && r.doc.tracks).toHaveLength(3);
+    expect(r.ok && r.doc.clips[2].trackId).toBe(r.ok ? r.doc.tracks[2].id : '');
+  });
+
+  it('置いた字幕は連動先の文を出す', () => {
+    const d = doc({ clips: [voice('clip_001')] });
+    const r = addLinkedSubtitleClip(d, 'clip_001');
+    expect(r.ok && subtitleTextOf(r.doc, r.doc.clips[1])).toBe('こんにちは');
+  });
+
+  it('読み上げでない部品には置けない', () => {
+    const d = doc({ clips: [subtitle('clip_002')] });
+    expect(addLinkedSubtitleClip(d, 'clip_002').ok).toBe(false);
+  });
+
+  it('置いた字幕はスキーマに適合する', () => {
+    const d = doc({ clips: [voice('clip_001')] });
+    const r = addLinkedSubtitleClip(d, 'clip_001');
+    expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
   });
 });

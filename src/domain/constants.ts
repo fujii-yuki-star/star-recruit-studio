@@ -208,3 +208,9 @@ export const STROKE_WIDTH_MAX = 100;
 
 /** 見た目パターンが背景色を指定していないときの下地（`template.defaults.backgroundColor` の既定）。 */
 export const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+
+/**
+ * 声を作る前の読み上げクリップの仮の長さ（秒）。**声を作ると実際の尺へ合わせ直す**ので、
+ * 見えていて掴める程度の長さがあればよい（ADR-0032 決定7・#633）。
+ */
+export const VOICE_PLACEHOLDER_SEC = 3;

@@ -15,6 +15,8 @@ import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateT
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
+import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
+import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { creditSpeakerAt } from "../../domain/timeline/credit";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
@@ -95,6 +97,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
+    addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -179,7 +182,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 置ける見た目パターンは**この動画と同じ向き**だけ（向き違いは置いても画面外へ出る＝domain も断る）。
   const placeableTemplates = doc ? templatesForOrientation(templates, doc.videoSettings.aspectRatio) : [];
   // 置ける列（映像の列だけ・固定した列は除く）＝押せるのに置けない選択肢を出さない（§2-5）。
-  const placeableTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.locked) ?? [];
+  const placeableTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.locked && !t.hidden) ?? [];
+  // 読み上げを置ける列（音の列）。
+  // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
+  const voiceTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.audio && !t.locked && !t.hidden) ?? [];
   // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
   const warnings = useMemo(() => (doc ? validateTimelineDoc(doc) : []), [doc]);
   // 書き出せない理由（`timelineExportBlockers`）は**押す前に**見せる＝押しても断られるだけ、を作らない（§2-5）。
@@ -436,6 +442,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
       </div>
 
+      {voiceError && (
+        <p className="notice notice-warn" role="alert">{voiceError}</p>
+      )}
       {editBlocked && (
         <p className="notice notice-warn" role="alert">{editBlockedMessage[editBlocked]}</p>
       )}
@@ -475,6 +484,59 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 ))}
               </select>
             </label>
+
+            {/* 読み上げは、この画面で文を書いて声を作れる（ADR-0032 決定7）。 */}
+            {selected.kind === TIMELINE_CLIP_KIND.voice && (
+              <div className="mt-lg">
+                <h4>読み上げ</h4>
+                <label className="field">
+                  <span>読み上げる文</span>
+                  <input
+                    type="text"
+                    value={selected.voice?.text ?? ""}
+                    disabled={selectedLocked}
+                    title={lockedHint}
+                    onChange={(e) => setSelectedVoiceText(e.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>声</span>
+                  <select
+                    value={selected.voice?.speaker ?? ""}
+                    disabled={selectedLocked}
+                    title={lockedHint}
+                    onChange={(e) => setSelectedVoiceSpeaker(e.target.value === "" ? null : Number(e.target.value))}
+                  >
+                    <option value="">動画全体に合わせる</option>
+                    {VOICE_CATALOG.flatMap((c) =>
+                      c.styles.map((st) => (
+                        <option key={st.speaker} value={st.speaker}>{`${c.character}（${st.label}）`}</option>
+                      )),
+                    )}
+                  </select>
+                </label>
+                <div className="row gap-sm">
+                  <button
+                    className="btn btn-primary"
+                    disabled={selectedLocked || !selected.voice?.text.trim() || generatingVoiceClipId != null}
+                    title={selectedLocked ? lockedHint : !selected.voice?.text.trim() ? "読み上げる文を入れてください" : undefined}
+                    onClick={() => void generateSelectedVoice()}
+                  >
+                    {generatingVoiceClipId === selected.id ? "作成中…" : "声を作る"}
+                  </button>
+                  <button className="btn btn-secondary" onClick={addLinkedSubtitleClip}>
+                    この読み上げの字幕を置く
+                  </button>
+                </div>
+                <p className="text-muted">
+                  {selected.voice?.status === NARRATION_STATUS.generated
+                    ? "声を作りました。長さは声に合わせています。"
+                    : selected.voice?.status === NARRATION_STATUS.failed
+                      ? "声を作れませんでした。もう一度お試しください。"
+                      : "文を書いて「声を作る」を押すと、長さが声に合います。"}
+                </p>
+              </div>
+            )}
 
             {/* 字幕は読み上げと連動できる（ADR-0032 決定24）＝文言と時間が付いてくる。 */}
             {selected.kind === TIMELINE_CLIP_KIND.subtitle && (
@@ -634,6 +696,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   {t.name}
                 </button>
               ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* 「ここに一言足したい」をこの画面で完結させる（ADR-0032 決定7）。 */}
+      <div className="card">
+        <h3>読み上げを置く</h3>
+        {voiceTracks.length === 0 ? (
+          <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定を外してください。</p>
+        ) : (
+          <>
+            <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに文を書いて声を作ります。</p>
+            <div className="row gap-sm">
+              <button
+                className="btn btn-secondary"
+                disabled={isPlaying}
+                title={playingHint}
+                onClick={() => addVoiceClip({ text: "", trackId: voiceTracks[0].id, startSec: playheadSec })}
+              >
+                読み上げを置く
+              </button>
             </div>
           </>
         )}

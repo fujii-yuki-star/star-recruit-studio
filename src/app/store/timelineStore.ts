@@ -13,12 +13,23 @@ import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timelin
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { TextKey, TrackKind } from "../../domain/enums";
 import {
-  addTemplateClip, addTrack, duplicateClip, moveClip, moveTrackOrder, removeClips, removeTrack,
-  setClipAssetRef, setClipText, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, trimClip,
+  addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip, moveTrackOrder,
+  removeClips, removeTrack, setClipAssetRef, setClipText, setSubtitleText, setSubtitleVoiceLink,
+  setTrackFlag, setVoiceSpeaker, setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
 import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
+import { resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
+import { characterForSpeaker } from "../../domain/voice/voiceCatalog";
+import type { VoiceProvider } from "../../domain/voice/voiceProvider";
+import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
+import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
+import { importVoiceFile } from "../../infrastructure/voiceFs";
+import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from "../../domain/enums";
+import type { NarrationStatus } from "../../domain/enums";
+import type { TimelineVoice } from "../../domain/timeline/types";
+import type { VoiceSettings } from "../../domain/project/types";
 import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { timelineAudioRuns, timelineExportBlockers } from "../../domain/timeline/export";
 import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
@@ -41,6 +52,12 @@ import type { HistoryStacks } from "../../domain/project/history";
 
 /** 読み込めなかったときの文言（§2-5：原因でなく次の行動）。想定外も生のエラーを見せない。 */
 const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧から選び直してください。";
+
+// 声を作れなかったときの文言（§2-5＝次の行動／§2-3＝技術用語を出さない）。
+const VOICE_FAILED_MESSAGE = "声を作れませんでした。しばらくしてから、もう一度お試しください。";
+const VOICE_SAVE_FAILED_MESSAGE = "作った声を保存できませんでした。もう一度お試しください。";
+const VOICE_EXPORTING_MESSAGE = "いま動画を書き出しています。終わってから声を作ってください。";
+const VOICE_DURATION_UNKNOWN_MESSAGE = "声の長さを測れませんでした。部品の長さは手で合わせてください。";
 
 // 書き出しの結果の文言（§2-5＝次の行動／§2-3＝技術用語を出さない）。
 const EXPORT_BUSY_OPEN_MESSAGE = "いま動画を書き出しています。終わってから、別の動画を開いてください。";
@@ -73,6 +90,13 @@ export interface TimelineState {
   history: HistoryStacks<TimelineProject>;
   /** 直前の操作が置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。次の操作で消す。 */
   editBlocked: EditBlockedReason | null;
+  /** 声を作れなかったときの案内（§2-5）。次に作り始めたら消す。 */
+  voiceError: string | null;
+  /**
+   * いま声を作っている部品（`null`＝作っていない）。**文書には持たない**＝自動保存で「作成中」が
+   * 残ると、開き直しても作り直せない状態が固定される（履歴にも積まない）。
+   */
+  generatingVoiceClipId: string | null;
   /** 保存の状態（場面形式の `saveStatus` と同じ語彙＝同じ概念を同じ言葉で扱う）。 */
   saveStatus: "idle" | "saving" | "saved" | "error";
   /** 再生中か。時計は画面側（`useTimelinePlayback`）が回し、位置は `setPlayhead` で入る。 */
@@ -109,6 +133,16 @@ export interface TimelineState {
   setSelectedClipText: (textKey: TextKey, text: string) => void;
   /** 見た目パターンの部品をバラす（中身ぶんの部品へ展開・#632）。**戻せない**（取り消しでだけ戻る）。 */
   explodeClip: (clipId: string, template: Template) => void;
+  /** 読み上げを置く（#633＝タイムライン側でも声を作れる）。 */
+  addVoiceClip: (input: { text: string; trackId: string; startSec: number }) => void;
+  /** 選んでいる読み上げの文を書き換える（作成済みの音声は外れる・#633）。 */
+  setSelectedVoiceText: (text: string) => void;
+  /** 選んでいる読み上げの話者を変える（`null`＝動画全体に合わせる・#633）。 */
+  setSelectedVoiceSpeaker: (speaker: number | null) => void;
+  /** 選んでいる読み上げの声を作る（VOICEVOX）。作れたら**長さを実際の尺へ合わせる**（#633）。 */
+  generateSelectedVoice: () => Promise<void>;
+  /** 選んでいる読み上げに連動する字幕を置く（#633）。 */
+  addLinkedSubtitleClip: () => void;
   /** 見た目パターンを素材として置く（#632）。 */
   addTemplateClip: (input: { template: Template; trackId: string; startSec: number }) => void;
   addTrack: (kind: TrackKind) => void;
@@ -171,6 +205,10 @@ export function isTimelineExportBusy(phase: TimelineExportPhase): boolean {
   return phase === P.preparing || phase === P.rendering || phase === P.encoding;
 }
 
+/** 声の合成（アプリ内は VOICEVOX・それ以外は Mock）。判定は場面形式（`projectStore`）と**同じ式**にする。 */
+const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
+
 const IDLE_EXPORT: TimelineExportRun = { phase: EXPORT_RUN_PHASE.idle, percent: 0, message: null, cancelling: false };
 
 /** 段の値の短い別名（この file 内で何度も使う＝直書きしない・§2-7）。 */
@@ -194,6 +232,8 @@ function emptyState() {
     audioSrcByKey: {} as Record<string, string>,
     history: emptyHistory<TimelineProject>(),
     editBlocked: null as EditBlockedReason | null,
+    voiceError: null as string | null,
+    generatingVoiceClipId: null as string | null,
     saveStatus: "saved" as TimelineState["saveStatus"],
     isPlaying: false,
     seekNonce: 0,
@@ -306,6 +346,105 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // バラした部品をまとめて選ぶ＝続けて動かせる（元の部品はもう無い）。
     const before = new Set(doc.clips.map((c) => c.id));
     commit(set, get, r.doc, { selectedClipIds: r.doc.clips.filter((c) => !before.has(c.id)).map((c) => c.id) });
+  },
+
+  addVoiceClip: (input) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = addVoiceClip(doc, input);
+    if (!r.ok) {
+      set({ editBlocked: r.reason });
+      return;
+    }
+    const before = new Set(doc.clips.map((c) => c.id));
+    const added = r.doc.clips.find((c) => !before.has(c.id));
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id] } : {});
+  },
+
+  setSelectedVoiceText: (text) => applyEdit(set, get, (d, id) => setVoiceText(d, id, text)),
+  setSelectedVoiceSpeaker: (speaker) => applyEdit(set, get, (d, id) => setVoiceSpeaker(d, id, speaker)),
+
+  addLinkedSubtitleClip: () => {
+    const { doc, selectedClipIds } = get();
+    if (!doc || selectedClipIds.length !== 1) return;
+    const r = addLinkedSubtitleClip(doc, selectedClipIds[0]);
+    if (!r.ok) {
+      set({ editBlocked: r.reason });
+      return;
+    }
+    const before = new Set(doc.clips.map((c) => c.id));
+    const added = r.doc.clips.find((c) => !before.has(c.id));
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id] } : {});
+  },
+
+  generateSelectedVoice: async () => {
+    const { doc, selectedClipIds } = get();
+    if (!doc || selectedClipIds.length !== 1) return;
+    const clipId = selectedClipIds[0];
+    const clip = doc.clips.find((c) => c.id === clipId);
+    if (!clip || clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return;
+    if (clip.voice.text.trim().length === 0) return; // 空の文では鳴らない（V28 が案内済み）
+    if (get().generatingVoiceClipId != null) return; // 連打・再入で二重に作らない
+    // 書き出し中は始めない＝作れても文書へ入れられず（`commit` が断る）、作った声を捨てることになる。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ voiceError: VOICE_EXPORTING_MESSAGE });
+      return;
+    }
+    set({ voiceError: null, generatingVoiceClipId: clipId });
+    // 合成に渡した設定。**完了時にこれと今の設定を比べる**＝作っている間に文・声・話し方を変えたら
+    // その結果は使わない（鳴っている声と表示が食い違う状態を作らない）。
+    const input = { text: clip.voice.text, ...resolveTimelineVoice(clip.voice, doc.voiceSettings) };
+    try {
+      const result = await voiceProvider.synthesize(input);
+      const voicePath = await importVoiceFile(doc.projectId, clipId, result.audioDataUrl);
+      // 作っている間に文書が入れ替わった／この部品が消えた／設定を変えた＝結果は捨てる。
+      const now = get().doc;
+      const current = now?.clips.find((c) => c.id === clipId);
+      if (
+        !now ||
+        now.projectId !== doc.projectId ||
+        !current?.voice ||
+        !sameSynthInput(input, { text: current.voice.text, ...resolveTimelineVoice(current.voice, now.voiceSettings) })
+      ) {
+        set({ generatingVoiceClipId: null });
+        return;
+      }
+      if (!voicePath) {
+        setVoiceStatus(set, get, clipId, NARRATION_STATUS.failed);
+        set({ voiceError: VOICE_SAVE_FAILED_MESSAGE, generatingVoiceClipId: null });
+        return;
+      }
+      // **長さを実際の尺へ合わせる**（`trimClip` を通す＝連動している字幕も一緒に動く・ADR-0032 決定24）。
+      const withVoice = {
+        ...now,
+        clips: now.clips.map((c) =>
+          c.id === clipId && c.voice
+            ? { ...c, voice: { ...c.voice, voicePath, status: NARRATION_STATUS.generated } }
+            : c,
+        ),
+      };
+      const sized =
+        result.durationSec > 0 ? trimClip(withVoice, clipId, 'end', current.startSec + result.durationSec) : null;
+      // 長さを合わせられない（置けない）ときは、**声はそのまま置いて**理由を出す＝作った声を捨てない。
+      // 理由は `commit` の中で消えるので、まとめて渡す（`commit` は毎回 `editBlocked` を空にする）。
+      commit(set, get, sized?.ok ? sized.doc : withVoice, {
+        audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
+        ...(sized && !sized.ok ? { editBlocked: sized.reason } : {}),
+      });
+      set({
+        generatingVoiceClipId: null,
+        // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
+        ...(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE }),
+      });
+    } catch {
+      // 失敗も成功と同じく**別の文書の部品を巻き込まない**（id は文書ごとに採番＝同じ id が別文書にもある）。
+      const now = get().doc;
+      if (now && now.projectId === doc.projectId && now.clips.some((c) => c.id === clipId)) {
+        setVoiceStatus(set, get, clipId, NARRATION_STATUS.failed);
+        set({ voiceError: VOICE_FAILED_MESSAGE });
+      }
+      set({ generatingVoiceClipId: null });
+    }
   },
 
   addTemplateClip: (input) => {
@@ -601,4 +740,30 @@ function applyEdit(set: SetState, get: GetState, run: (doc: TimelineProject, cli
   const r = run(doc, selectedClipIds[0]);
   if (r.ok) commit(set, get, r.doc);
   else set({ editBlocked: r.reason });
+}
+
+/** 読み上げクリップの状態だけを差し替える（履歴に積まない＝作成中/失敗は編集ではない）。 */
+function setVoiceStatus(set: SetState, get: GetState, clipId: string, status: NarrationStatus): void {
+  const doc = get().doc;
+  if (!doc) return;
+  set({
+    doc: {
+      ...doc,
+      clips: doc.clips.map((c) => (c.id === clipId && c.voice ? { ...c, voice: { ...c.voice, status } } : c)),
+    },
+  });
+}
+
+/**
+ * 読み上げクリップの声の設定を解く（`11 §6` null=継承）。場面形式の `resolveNarrationVoice` と同じ順序で、
+ * **話者だけはクリップが持つ**（掛け合いの行と同じ扱い＝ADR-0015）。
+ */
+function resolveTimelineVoice(voice: TimelineVoice, settings: VoiceSettings) {
+  const resolved = resolveNarrationVoice(
+    { text: voice.text, status: voice.status, speed: voice.speed, pitch: voice.pitch, intonation: voice.intonation },
+    settings,
+  );
+  // catalog に無い話者は既定の声へ落とす（場面形式の `resolveLineVoice`＝V19 と同じ扱い）。
+  const speaker = voice.speaker != null && characterForSpeaker(voice.speaker) != null ? voice.speaker : null;
+  return { ...resolved, speaker };
 }
