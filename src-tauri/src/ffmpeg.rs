@@ -4316,8 +4316,8 @@ mod tests {
                 fade_in_sec: 1.5,
                 fade_out_sec: 1.0,
                 loop_source: true,
-            source_start_sec: 0.0,
-            speed: 1.0,
+                source_start_sec: 0.0,
+                speed: 1.0,
             },
             BgmRunPlaced {
                 file: "b.mp3",
@@ -4327,8 +4327,8 @@ mod tests {
                 fade_in_sec: 1.0,
                 fade_out_sec: 2.0,
                 loop_source: true,
-            source_start_sec: 0.0,
-            speed: 1.0,
+                source_start_sec: 0.0,
+                speed: 1.0,
             },
         ];
         let a = mix_bgm_runs_args("v.mp4", &runs, 14.0, "out.mp4");
