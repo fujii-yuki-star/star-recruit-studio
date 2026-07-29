@@ -1,10 +1,11 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
 import { AI_ASSET_SEND_MAX } from "../domain/constants";
-import { FREE_ELEMENT_KINDS, SUBTITLE_SOURCE_KIND } from "../domain/enums";
+import { FREE_ELEMENT_KINDS, LAYER_TYPE, SUBTITLE_SOURCE_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
 import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
+import type { Layer } from "../domain/template/types";
 import type { EditBlockedReason } from "../domain/timeline/edit";
 import type { TimelineExportBlockCode } from "../domain/timeline/export";
 // 型のみ（実行時 import なし＝store との循環を作らない）。空状態の文言が状態で変わるため（#590）。
@@ -399,6 +400,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_LOCKED: "この列は固定されています。動かすには固定を外してください",
   TIMELINE_EDIT_NOT_FOUND: "その部品は見つかりませんでした。選び直してください",
   TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
+  TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
 };
 
 /**
@@ -413,3 +415,39 @@ export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
   TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
     "見た目パターンが見つからない部品があります。そのままでは動画に出ません。見た目パターンを読み込み直すか、その部品を置き直してください",
 };
+
+// ── 差し込み口（素材を入れる場所）の名前（§2-3：`layer.id` の生表示を防ぐ）。 ──
+// 場面編集（`SceneEditScreen`）とタイムライン編集（`TimelineProjectScreen`）が**同じ差し込み口を同じ名前で
+// 呼ぶ**ための単一の参照元（§6）。別々に持つと、同じテンプレなのに画面によって「素材2」の指す先が変わる。
+
+/** レイヤー id 別の表示名（複数スロットでも区別できるよう id をキーにする）。 */
+const SLOT_LABEL_BY_ID: Record<string, string> = {
+  background: "背景",
+  mainVisual: "メイン素材",
+  logo: "ロゴ",
+};
+
+/** 差し込み口1つの表示名。未登録 id は種別から日本語化する。 */
+export function slotLabelFor(layer: Pick<Layer, "id" | "type">): string {
+  if (SLOT_LABEL_BY_ID[layer.id]) return SLOT_LABEL_BY_ID[layer.id];
+  if (layer.type === LAYER_TYPE.background) return "背景";
+  if (layer.type === LAYER_TYPE.logo) return "ロゴ";
+  return "素材";
+}
+
+/**
+ * 差し込み口の並びぶんの表示名。**同じ名前が複数あるときだけ連番を付ける**（「素材1」「素材2」）＝
+ * 1つしかないのに「素材1」と出さない。並び順は渡された層の順（描画の並びと同じ）。
+ */
+export function slotLabelsFor(layers: readonly Pick<Layer, "id" | "type">[]): string[] {
+  const total = new Map<string, number>();
+  for (const l of layers) total.set(slotLabelFor(l), (total.get(slotLabelFor(l)) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return layers.map((l) => {
+    const base = slotLabelFor(l);
+    if ((total.get(base) ?? 0) <= 1) return base;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    return `${base}${n}`;
+  });
+}

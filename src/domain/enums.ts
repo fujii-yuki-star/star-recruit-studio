@@ -157,6 +157,19 @@ export type Purpose = (typeof PURPOSES)[number] | (typeof GENERAL_PURPOSES)[numb
 export const LAYER_TYPES = [
   'background', 'slot', 'text', 'subtitle', 'character', 'decor', 'shape', 'logo',
 ] as const;
+
+/** 層の種別の名前つき参照（`LAYER_TYPES` と同じ値・直書きを避けるための単一の参照元＝§2-7）。 */
+export const LAYER_TYPE = {
+  background: 'background',
+  slot: 'slot',
+  text: 'text',
+  subtitle: 'subtitle',
+  character: 'character',
+  decor: 'decor',
+  shape: 'shape',
+  logo: 'logo',
+} as const;
+
 export type LayerType = (typeof LAYER_TYPES)[number];
 
 export const SLOT_TYPES = ['image_or_video', 'image', 'video'] as const;

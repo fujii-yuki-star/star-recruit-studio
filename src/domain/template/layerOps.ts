@@ -1,6 +1,7 @@
 // テンプレ作成エディタのレイヤー操作（ADR-0017・#214 ③b）。Layer[] の追加/削除/更新の純粋関数（§7 テスト対象）。
 import { LAYER_TYPES, TEXT_KEY, TEXT_KEYS, type LayerType, type TextKey } from '../enums';
-import type { Layer } from './types';
+import { SCENE_DEFAULT_DURATION_SEC } from '../constants';
+import type { Layer, Template } from './types';
 import { effectiveLayerZ } from './layerOrder';
 
 /** エディタで追加できるレイヤー型（ADR-0017：decor は開放しない＝静的装飾は slot/shape で代替）。 */
@@ -71,4 +72,13 @@ export function usedTextKeys(layers: Layer[]): TextKey[] {
  */
 export function templateSlotIds(layers: Layer[]): Set<string> {
   return new Set(layers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id));
+}
+
+/**
+ * そのテンプレで場面/クリップを作るときの既定の尺（秒）。テンプレの指定が無ければ共通の既定。
+ * **場面形式（新しい場面・見本）とタイムライン形式（置く）が同じ値を使う**ための単一の参照元（§2-7）＝
+ * 同じテンプレが形式や画面によって違う長さで出てこない（ADR-0026②）。
+ */
+export function defaultDurationForTemplate(template: Pick<Template, 'defaults'>): number {
+  return template.defaults?.durationSec ?? SCENE_DEFAULT_DURATION_SEC;
 }

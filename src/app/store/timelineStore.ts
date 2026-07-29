@@ -11,9 +11,10 @@ import { ASSET_TYPE } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
-import type { TrackKind } from "../../domain/enums";
+import type { TextKey, TrackKind } from "../../domain/enums";
 import {
-  addTrack, duplicateClip, moveClip, moveTrackOrder, removeClips, removeTrack, setTrackFlag, trimClip,
+  addTemplateClip, addTrack, duplicateClip, moveClip, moveTrackOrder, removeClips, removeTrack,
+  setClipAssetRef, setClipText, setTrackFlag, trimClip,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
@@ -97,6 +98,12 @@ export interface TimelineState {
   duplicateSelectedClip: () => void;
   /** 選んでいるクリップを消す。 */
   removeSelectedClips: () => void;
+  /** 選んでいる見た目パターンの差し込み口に素材を入れる／外す（#632）。 */
+  setSelectedClipAssetRef: (layerId: string, assetId: string | null) => void;
+  /** 選んでいる見た目パターンの文字を書き換える（#632）。 */
+  setSelectedClipText: (textKey: TextKey, text: string) => void;
+  /** 見た目パターンを素材として置く（#632）。 */
+  addTemplateClip: (input: { template: Template; trackId: string; startSec: number }) => void;
   addTrack: (kind: TrackKind) => void;
   removeTrack: (trackId: string) => void;
   moveTrackOrder: (trackId: string, direction: "front" | "back") => void;
@@ -271,6 +278,24 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc || selectedClipIds.length === 0) return;
     // 消した後は選択を空にする（消えたものを選んだままにしない）。
     commit(set, get, removeClips(doc, selectedClipIds), { selectedClipIds: [] });
+  },
+
+  setSelectedClipAssetRef: (layerId, assetId) => applyEdit(set, get, (d, id) => setClipAssetRef(d, id, layerId, assetId)),
+  setSelectedClipText: (textKey, text) => applyEdit(set, get, (d, id) => setClipText(d, id, textKey, text)),
+
+  addTemplateClip: (input) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = addTemplateClip(doc, input);
+    if (!r.ok) {
+      set({ editBlocked: r.reason });
+      return;
+    }
+    // 置いた部品をそのまま選ぶ（続けて中身を入れられる）。**id は増えたものを引き当てる**＝
+    // 「末尾に足す」という実装の都合に画面が寄りかからない。
+    const before = new Set(doc.clips.map((c) => c.id));
+    const added = r.doc.clips.find((c) => !before.has(c.id));
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id] } : {});
   },
 
   addTrack: (kind) => {

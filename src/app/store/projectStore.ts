@@ -1,8 +1,9 @@
 // プロジェクトの状態（Zustand）。AI出力→検証/変換→内部Scene の結果を保持し、UIへ供給する。
 // 保存/読込は project.json（infrastructure/projectFs.ts 経由）。AIは Gemini キーがあれば実プロバイダ、無ければ Mock。
 import { create } from "zustand";
+import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
-import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH, SCENE_DEFAULT_DURATION_SEC } from "../../domain/constants";
+import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
@@ -1093,7 +1094,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       order: s.scenes.length + 1,
       sceneType: tmpl.category,
       templateId: tmpl.templateId,
-      durationSec: tmpl.defaults?.durationSec ?? SCENE_DEFAULT_DURATION_SEC,
+      durationSec: defaultDurationForTemplate(tmpl),
       assetRefs: {},
       character: { enabled: false, characterId: DEFAULT_CHARACTER_ID },
       texts: {},

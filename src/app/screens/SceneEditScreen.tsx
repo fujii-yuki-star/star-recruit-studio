@@ -48,7 +48,7 @@ import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
+import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -256,21 +256,6 @@ function LineVoiceParam({ label, range, value, lowLabel, highLabel, onChange, on
       </div>
     </div>
   );
-}
-
-// スロットのユーザー向けラベル（レイヤーid別。複数スロットでも区別できるよう id をキーにする）。
-const slotLabel: Record<string, string> = {
-  background: "背景",
-  mainVisual: "メイン素材",
-  logo: "ロゴ",
-};
-
-// スロットの表示名。未登録 id は layer.type から日本語化し、layer.id の生表示（技術用語漏れ §2-3）を防ぐ。
-function slotLabelFor(layer: Layer): string {
-  if (slotLabel[layer.id]) return slotLabel[layer.id];
-  if (layer.type === "background") return "背景";
-  if (layer.type === "logo") return "ロゴ";
-  return "素材";
 }
 
 const narrationStatusLabel: Record<string, string> = {
@@ -493,21 +478,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const slotLayers =
     template?.layers.filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo") ?? [];
   // 同じラベル（例「素材」）が複数あるスロットは連番で区別する（使用素材UIの区別性・実機FB）。
-  const slotLabels = (() => {
-    const total = new Map<string, number>();
-    for (const l of slotLayers) {
-      const key = slotLabelFor(l);
-      total.set(key, (total.get(key) ?? 0) + 1);
-    }
-    const seen = new Map<string, number>();
-    return slotLayers.map((l) => {
-      const base = slotLabelFor(l);
-      if ((total.get(base) ?? 0) <= 1) return base;
-      const n = (seen.get(base) ?? 0) + 1;
-      seen.set(base, n);
-      return `${base}${n}`;
-    });
-  })();
+  // 付け方はタイムライン編集と**共有**（`slotLabelsFor`）＝同じ差し込み口を画面によって別の名で呼ばない。
+  const slotLabels = slotLabelsFor(slotLayers);
 
   const visibleAssets = assets.filter((a) => {
     const matchType =
