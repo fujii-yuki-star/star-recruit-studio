@@ -2,12 +2,13 @@
 //
 // **置けない操作は黙って別の結果にしない**（§2-5・ADR-0026④）＝重なる位置へ動かそうとしたら、勝手に
 // 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
-import { TIMELINE_MIN_CLIP_SEC } from '../constants';
-import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from '../enums';
+import { TIMELINE_MIN_CLIP_SEC, VOICE_PLACEHOLDER_SEC, dimsForOrientation } from '../constants';
+import { FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
 import { removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from '../project/overlayClipEdit';
+import { createFreeElement } from '../project/freeLayoutOps';
 import { createClipId, createTrackId } from '../project/persistence';
 import { subtitlesBoundTo } from './subtitleLink';
 import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
@@ -394,4 +395,99 @@ export function setSubtitleText(doc: TimelineProject, clipId: string, text: stri
   if (text === '') delete next.text;
   else next.text = text;
   return ok(withClip(doc, next));
+}
+
+/**
+ * **読み上げを置く**（ADR-0032 決定7＝タイムライン側でも声を作れる・#633）。
+ *
+ * 置いた時点では**まだ声を作っていない**（`status='none'`）ので、長さは仮の既定。声を作ると実際の尺へ
+ * 合わせ直す（`trimClip` を通す＝連動している字幕も一緒に動く）。
+ */
+export function addVoiceClip(
+  doc: TimelineProject,
+  input: { text: string; trackId: string; startSec: number; durationSec?: number },
+): EditResult {
+  const track = doc.tracks.find((t) => t.id === input.trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  if (track.locked) return blocked(EDIT_BLOCKED.locked);
+  if (track.kind !== trackKindForClip(TIMELINE_CLIP_KIND.voice)) return blocked(EDIT_BLOCKED.trackKind);
+  const startSec = Math.max(0, input.startSec);
+  const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, input.durationSec ?? VOICE_PLACEHOLDER_SEC);
+  if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  const clip: TimelineClip = {
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: TIMELINE_CLIP_KIND.voice,
+    trackId: input.trackId,
+    startSec,
+    durationSec,
+    voice: { text: input.text, status: NARRATION_STATUS.none },
+  };
+  return ok({ ...doc, clips: [...doc.clips, clip] });
+}
+
+/** 読み上げクリップの文を書き換える。**声は作り直しになる**ので、作成済みの音声は外す（別の文の声を指さない）。 */
+export function setVoiceText(doc: TimelineProject, clipId: string, text: string): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if (clip.voice.text === text) return ok(doc);
+  return ok(
+    withClip(doc, {
+      ...clip,
+      voice: { ...clip.voice, text, voicePath: null, status: NARRATION_STATUS.none },
+    }),
+  );
+}
+
+/** 読み上げクリップの話者を変える（`null`＝動画全体の声を継承）。文と同じく作成済みの音声は外す。 */
+export function setVoiceSpeaker(doc: TimelineProject, clipId: string, speaker: number | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.voice.speaker ?? null) === speaker) return ok(doc);
+  const voice = { ...clip.voice, voicePath: null, status: NARRATION_STATUS.none };
+  if (speaker === null) delete voice.speaker;
+  else voice.speaker = speaker;
+  return ok(withClip(doc, { ...clip, voice }));
+}
+
+/**
+ * **その読み上げの字幕を置く**（#633＝「声を作る → 字幕が連動して出る」の入口）。
+ *
+ * 置き場所は**同じ時間が空いている映像の列**を探し、無ければ**列を足す**（置けないと言って終わらせない）。
+ * 見た目の既定（画面下の字幕バー）は自由配置の字幕要素と**同じ関数**から採る＝形式で見た目が割れない。
+ */
+export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string): EditResult {
+  const voice = doc.clips.find((c) => c.id === voiceClipId);
+  if (!voice || voice.kind !== TIMELINE_CLIP_KIND.voice) return blocked(EDIT_BLOCKED.notFound);
+  const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
+  const el = createFreeElement([], FREE_ELEMENT_KIND.subtitle, canvas.width, canvas.height);
+  const { id: _elId, kind: _kind, zIndex: _z, subtitleSource: _src, ...spatial } = el;
+  void _elId;
+  void _kind;
+  void _z;
+  void _src;
+
+  // 置ける映像の列を探す（同じ時間が空いていて固定されていないもの）。無ければ足す。
+  // **隠した列は選ばない**＝置けても動画に出ない字幕が黙って生まれる（自分で列を選ぶ操作と違い、
+  // 置き場所を任せているので気づけない）。該当が無ければ列を足す。
+  const free = doc.tracks.find(
+    (t) =>
+      t.kind === TRACK_KIND.visual &&
+      !t.locked &&
+      !t.hidden &&
+      isFreeSpan(doc.clips, t.id, voice.startSec, voice.durationSec),
+  );
+  const trackId = free?.id ?? createTrackId(doc.tracks.map((t) => t.id));
+  const tracks = free ? doc.tracks : [...doc.tracks, { id: trackId, kind: TRACK_KIND.visual }];
+  const clip: TimelineClip = {
+    ...spatial,
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: TIMELINE_CLIP_KIND.subtitle,
+    trackId,
+    startSec: voice.startSec,
+    durationSec: voice.durationSec,
+    voiceClipId,
+  };
+  return ok({ ...doc, tracks, clips: [...doc.clips, clip] });
 }

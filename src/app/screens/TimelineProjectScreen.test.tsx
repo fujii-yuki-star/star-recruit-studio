@@ -593,3 +593,68 @@ describe("TimelineProjectScreen: 字幕と読み上げの連動（#633）", () =
     expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("連動する読み上げが見つからない字幕が1個"))).toBe(true);
   });
 });
+
+describe("TimelineProjectScreen: 読み上げを置く・声を作る（#633）", () => {
+  const withVoice = (voiceOver: Record<string, unknown> = {}) => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: "clip_voice", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 2, durationSec: 3, voice: { text: "ひとこと", status: "none", ...voiceOver } },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_voice"] });
+  };
+
+  it("再生位置から読み上げを置ける（置いた部品が選ばれる）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.audio },
+      ],
+      clips: [],
+    });
+    useTimelineStore.setState({ playheadSec: 4 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "読み上げを置く" }));
+    const clip = useTimelineStore.getState().doc?.clips[0];
+    expect(clip).toMatchObject({ kind: TIMELINE_CLIP_KIND.voice, startSec: 4, trackId: "track_002" });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([clip?.id]);
+  });
+
+  it("文を書き換えられる", () => {
+    withVoice();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByText("読み上げる文").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "べつの文" } });
+    expect(useTimelineStore.getState().doc?.clips[0].voice?.text).toBe("べつの文");
+  });
+
+  it("声（話者）を選べる／動画全体に合わせるへ戻せる", () => {
+    withVoice();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("声").parentElement?.querySelector("select");
+    fireEvent.change(select!, { target: { value: "2" } });
+    expect(useTimelineStore.getState().doc?.clips[0].voice?.speaker).toBe(2);
+    fireEvent.change(select!, { target: { value: "" } });
+    expect(useTimelineStore.getState().doc?.clips[0].voice?.speaker).toBeUndefined();
+  });
+
+  it("文が空のときは声を作れない（押せない理由を出す）", () => {
+    withVoice({ text: "" });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: "声を作る" });
+    expect(btn).toBeDisabled();
+    expect(btn.getAttribute("title")).toContain("読み上げる文を入れてください");
+  });
+
+  it("この読み上げの字幕を置ける（連動つき・同じ時間）", () => {
+    withVoice();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "この読み上げの字幕を置く" }));
+    const sub = useTimelineStore.getState().doc?.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle);
+    expect(sub).toMatchObject({ voiceClipId: "clip_voice", startSec: 2, durationSec: 3 });
+  });
+});
