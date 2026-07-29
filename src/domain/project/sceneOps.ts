@@ -2,8 +2,8 @@
 // 再生・表示順の「正」＝scenes 配列順（buildExportScenes も scenes 配列を順に処理する）。
 // scene.order（1..N）は配列順に追従させ、part.sceneIds は「パート所属＋パート内順序」を保持する目印。
 // 並べ替えは scenes 配列の入れ替えで行い partId は変えない（パート間移動は MVP 外＝1パート前提）。
-import { quantizeSec } from '../constants';
-import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TEXT_KEY } from '../enums';
+import { DEFAULT_BACKGROUND_COLOR, quantizeSec, SHAPE_FILL_FALLBACK_COLOR } from '../constants';
+import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, LAYER_TYPE, NARRATION_STATUS, TEXT_KEY } from '../enums';
 import type { FreeElementKind, SceneCategory } from '../enums';
 import type { Template } from '../template/types';
 import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
@@ -141,12 +141,18 @@ function showsSubtitle(scene: Scene, template: Template): boolean {
  * - 立ち絵層（character）の `scene.character.poseAssetId` → slot 要素（画像）。`scene.character` は休眠保持（往復で戻る・#524 P1）。
  * - 文字層（text）のテキスト（`texts`）→ text 要素。**枠高は行数を保つよう広げる**（`textBoxH`・#555 レビュー P1）。
  * - 字幕層（subtitle）→ subtitle 要素（`subtitleSource`＝単独 narration／掛け合い allLines・ADR-0029）。字幕が出る場面のみ（#524 P1）。
- * 装飾レイヤー（shape/背景色）は対象外＝意匠。字幕/文字の背景帯（`layer.background`）は FreeElement.background へ移送する（#529）。
+ * **`opts.faithful`**（既定 false）＝「表示中の**内容**」ではなく「**描かれるものすべて**」を写す。
+ * タイムライン形式の「バラす」（#632）は**前後で絵が変わらない**ことが条件なので、こちらを使う：
+ * 図形・装飾層も写す／**素材の入っていないスロット層も空のまま写す**（灰色の枠が消えない）／
+ * **素材の入っていない背景層は塗りとして写す**（層が持つ色が消えない）。ADR-0030 の切替（通常⇄自由配置）は
+ * 既定のまま＝意匠は持ち込まない。
+ * 字幕/文字の背景帯（`layer.background`）は FreeElement.background へ移送する（#529）。
  * 戻り値の `slotClips` は「新 FREE 要素 id → クリップ調整」（呼び出し側 `switchSceneTemplate` が既存 `slotClips` へマージ）。
  */
 export function freeLayoutFromPlacedContent(
   scene: Scene,
   template: Template,
+  opts: { faithful?: boolean } = {},
 ): { elements: FreeElement[]; slotClips: NonNullable<Scene['slotClips']> } {
   const elements: FreeElement[] = [];
   const slotClips: NonNullable<Scene['slotClips']> = {};
@@ -168,10 +174,36 @@ export function freeLayoutFromPlacedContent(
       zIndex: effectiveLayerZ(layer), // 実効 z（明示 zIndex 優先・無ければ種別既定）＝通常描画と重なり順が一致（#524 P2）
     };
     if (layer.type === 'background' || layer.type === 'slot' || layer.type === 'logo') {
-      const assetId = scene.assetRefs[layer.id];
-      if (!assetId) continue; // 空スロットは持ち込まない
+      const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材→テンプレ既定素材（描画と同じ解決）
+      if (!assetId) {
+        if (!opts.faithful) continue; // 空スロットは持ち込まない（ADR-0030 の切替）
+        // 描かれるものをそのまま写す：背景層は**塗り**、スロット層は**空の枠**（どちらも絵に出ている）。
+        // ロゴ層は素材が無ければ何も描かれないので写さない（描画＝`layoutScene` と同じ扱い）。
+        if (layer.type === LAYER_TYPE.background) {
+          elements.push({
+            id: nextId(),
+            kind: FREE_ELEMENT_KIND.shape,
+            ...geom,
+            shapeType: FREE_SHAPE_TYPE.rect,
+            fillColor: layer.fillColor ?? template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR,
+            opacity: layer.opacity ?? 1,
+            radius: layer.radius ?? 0,
+          });
+        } else if (layer.type === LAYER_TYPE.slot) {
+          elements.push({ id: nextId(), kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: null, fit: scene.slotFits?.[layer.id] ?? layer.fit });
+        }
+        continue;
+      }
       const id = nextId();
-      elements.push({ id, kind: FREE_ELEMENT_KIND.slot, ...geom, assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit });
+      // 収め方の既定は**層の種別ごと**（描画＝`layoutScene` と同じ）。ロゴだけ contain＝写した瞬間に
+      // 切り取られた絵にならない（自由配置の既定は cover なので、既定に任せると変わってしまう）。
+      elements.push({
+        id,
+        kind: FREE_ELEMENT_KIND.slot,
+        ...geom,
+        assetId,
+        fit: scene.slotFits?.[layer.id] ?? layer.fit ?? (layer.type === LAYER_TYPE.logo ? FIT.contain : undefined),
+      });
       const clip = scene.slotClips?.[layer.id];
       if (clip) slotClips[id] = clip; // 動画クリップ調整を新 id へ移送（#524 P1）
     } else if (layer.type === 'character') {
@@ -198,7 +230,22 @@ export function freeLayoutFromPlacedContent(
         fontId: scene.textFontIds?.[layer.textKey],
         ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
         ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
-        ...(layer.background != null ? { background: layer.background } : {}), // 背景帯（可読性の下地）も移送（#529）
+        // 背景帯（可読性の下地）も移送（#529）。ただし**文字層の帯は通常テンプレでは描かれない**
+        // （`layoutScene` は字幕層だけ帯を出す）ので、`faithful`（バラす）では写さない＝元の絵に無い帯を足さない。
+        ...(!opts.faithful && layer.background != null ? { background: layer.background } : {}),
+      });
+    } else if (opts.faithful && (layer.type === LAYER_TYPE.shape || layer.type === LAYER_TYPE.decor)) {
+      // 図形・装飾＝描画（`layoutScene`）と同じ既定へ落とす（線は矩形として写す＝描画の扱いと同じ）。
+      elements.push({
+        id: nextId(),
+        kind: FREE_ELEMENT_KIND.shape,
+        ...geom,
+        shapeType: layer.shapeType === FREE_SHAPE_TYPE.ellipse ? FREE_SHAPE_TYPE.ellipse : FREE_SHAPE_TYPE.rect,
+        fillColor: layer.fillColor ?? SHAPE_FILL_FALLBACK_COLOR,
+        opacity: layer.opacity ?? 1,
+        radius: layer.radius ?? 0,
+        // 枠線（`strokeColor`/`strokeWidth`）は**通常テンプレの図形では描かれない**（`layoutScene`）。
+        // 写すと元の絵に無い線が出る＝バラす前後で見た目が変わる。持ち物ではなく**描かれるもの**を写す。
       });
     } else if (layer.type === 'subtitle') {
       if (!subtitleShown) continue; // 字幕が出ない場面は空の字幕要素を作らない

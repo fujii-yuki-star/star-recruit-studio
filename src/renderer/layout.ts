@@ -3,7 +3,7 @@
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
 import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
-import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR } from '../domain/constants';
+import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR, DEFAULT_BACKGROUND_COLOR } from '../domain/constants';
 import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { LayerBackground, Template } from '../domain/template/types';
 import { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle } from '../domain/template/textStyle';
@@ -111,7 +111,7 @@ export interface SceneLayout {
 // テキストの既定色/既定サイズは domain（template/textStyle）が正典＝描画・インライン編集・体裁欄・
 // 通常→FREE 変換の4か所で共有する（§2-7）。既存の import 元を保つため、ここから re-export する。
 export { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE } from '../domain/template/textStyle';
-export const DEFAULT_BACKGROUND_COLOR = '#ffffff';
+
 
 /** 背景帯（可読性の下地）を TextItem.background へ。enabled のときだけ描く。通常字幕層／FREE 字幕・文字で共有（#529・#275）。
  *  **インライン編集（FreeLayoutOverlay）も同じ既定で帯を敷くため export**（#549）＝編集中と描画結果の帯がドリフトしない。 */

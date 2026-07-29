@@ -594,6 +594,43 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(t.background).toBeUndefined(); // prevTemplate の title 層は background 未指定
   });
 
+  it('通常→FREE：テンプレ既定素材（ADR-0021）も持ち込む（描画と同じ解決＝切替で絵が消えない）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('mainVisual', 'slot', { x: 0, y: 0, w: 100, h: 100, assetId: 'tmpl_asset_001' })],
+    };
+    const sc = { ...richScene(), assetRefs: {} } as Scene;
+    const { elements } = freeLayoutFromPlacedContent(sc, tmpl);
+    expect(elements.find((e) => e.kind === 'slot')?.assetId).toBe('tmpl_asset_001');
+  });
+
+  it('通常→FREE：ロゴの収め方は contain（自由配置の既定 cover に任せると切り取られる）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [layer('logo', 'logo', { x: 0, y: 0, w: 100, h: 100 })],
+    };
+    const sc = { ...richScene(), assetRefs: { logo: 'asset_logo' } } as Scene;
+    const { elements } = freeLayoutFromPlacedContent(sc, tmpl);
+    expect(elements.find((e) => e.kind === 'slot')?.fit).toBe('contain');
+  });
+
+  it('faithful：描かれるものをすべて写す（図形・空のスロット・素材の無い背景の塗り）', () => {
+    const tmpl: Template = {
+      ...prevTemplate(),
+      layers: [
+        layer('background', 'background', { x: 0, y: 0, w: 1920, h: 1080, fillColor: '#123456' }),
+        layer('deco', 'shape', { x: 10, y: 10, w: 50, h: 50, fillColor: '#ff0000' }),
+        layer('mainVisual', 'slot', { x: 100, y: 100, w: 200, h: 200 }),
+      ],
+    };
+    const sc = { ...richScene(), assetRefs: {} } as Scene;
+    expect(freeLayoutFromPlacedContent(sc, tmpl).elements).toHaveLength(0); // 既定（切替）は持ち込まない
+    const faithful = freeLayoutFromPlacedContent(sc, tmpl, { faithful: true }).elements;
+    expect(faithful).toHaveLength(3);
+    expect(faithful.filter((e) => e.kind === 'shape')).toHaveLength(2); // 背景の塗り＋図形
+    expect(faithful.find((e) => e.kind === 'slot')?.assetId).toBeNull(); // 空の枠はそのまま
+  });
+
   it('freeLayoutFromPlacedContent 単体：{elements, slotClips} を返す（slotClips 移送マップ）', () => {
     const sc = { ...richScene(), slotClips: { mainVisual: { speed: 2 } } } as Scene;
     const { elements, slotClips } = freeLayoutFromPlacedContent(sc, prevTemplate());
