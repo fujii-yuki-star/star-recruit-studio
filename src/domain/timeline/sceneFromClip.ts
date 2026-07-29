@@ -8,6 +8,14 @@ import type { Scene } from '../project/types';
 import type { Template } from '../template/types';
 import type { TimelineClip } from './types';
 
+export interface SceneFromClipOptions {
+  /**
+   * 字幕クリップが出す文言（`subtitleTextOf` の解決結果＝連動先の読み上げ文を含む）。
+   * **文書を見ないと解けない**ので呼び出し側から渡す（この関数はクリップ1つしか知らない）。
+   */
+  subtitleText?: string;
+}
+
 /**
  * クリップを、場面形式の Scene へ写して `layoutScene` に渡せる形にする（**保存しない・このフレームの中だけ**）。
  *
@@ -15,7 +23,7 @@ import type { TimelineClip } from './types';
  * 同じ値集合を共有する」に合わせる（描画は `template.category` で分岐するので絵は変わらないが、
  * `sceneType` を読む規則〔例 `isFreeScene`〕と同じ形の後続コードが誤読しないようにする）。
  */
-export function sceneFromClip(clip: TimelineClip, template: Template): Scene {
+export function sceneFromClip(clip: TimelineClip, template: Template, opts: SceneFromClipOptions = {}): Scene {
   return {
     // sceneId はこのフレームの中でだけ使う識別子。partId/warnings も器を満たすためのダミー（保存も検証もしない）。
     sceneId: clip.id,
@@ -26,7 +34,7 @@ export function sceneFromClip(clip: TimelineClip, template: Template): Scene {
     durationSec: clip.durationSec,
     assetRefs: clip.assetRefs ?? {},
     character: clip.character ?? { enabled: false, characterId: DEFAULT_CHARACTER_ID },
-    texts: subtitleAwareTexts(clip),
+    texts: subtitleAwareTexts(clip, opts.subtitleText),
     narration: { text: '', status: NARRATION_STATUS.none },
     warnings: [],
     ...(clip.textStyles ? { textStyles: clip.textStyles } : {}),
@@ -45,8 +53,10 @@ export function sceneFromClip(clip: TimelineClip, template: Template): Scene {
  * ここで `texts.subtitle` に載せて既定の対象（＝読み上げ）から解決させる。これが無いと、
  * **「黙って消さない」ために焼き付けた字幕が受け側で1つも描かれない**（§2-5・#642 レビュー 🔴）。
  */
-function subtitleAwareTexts(clip: TimelineClip): NonNullable<Scene['texts']> {
+function subtitleAwareTexts(clip: TimelineClip, resolved: string | undefined): NonNullable<Scene['texts']> {
   const texts = clip.texts ?? {};
-  if (clip.kind !== TIMELINE_CLIP_KIND.subtitle || !clip.text) return texts;
-  return { ...texts, [TEXT_KEY.subtitle]: clip.text };
+  if (clip.kind !== TIMELINE_CLIP_KIND.subtitle) return texts;
+  // 連動している字幕は**解決済みの文**（`subtitleTextOf`）を受け取る。渡されなければ自分の文。
+  const text = resolved ?? clip.text;
+  return text ? { ...texts, [TEXT_KEY.subtitle]: text } : texts;
 }

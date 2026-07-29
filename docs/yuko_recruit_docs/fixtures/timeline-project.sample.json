@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "format": "timeline",
   "projectId": "proj_20260728_001",
   "projectName": "会社紹介（タイムライン編集）",
@@ -36,11 +36,31 @@
     }
   ],
   "tracks": [
-    { "id": "track_001", "kind": "visual", "name": "背景" },
-    { "id": "track_002", "kind": "visual", "name": "飾り" },
-    { "id": "track_003", "kind": "visual", "name": "文字・字幕" },
-    { "id": "track_004", "kind": "audio", "name": "読み上げ" },
-    { "id": "track_005", "kind": "audio", "name": "音楽" }
+    {
+      "id": "track_001",
+      "kind": "visual",
+      "name": "背景"
+    },
+    {
+      "id": "track_002",
+      "kind": "visual",
+      "name": "飾り"
+    },
+    {
+      "id": "track_003",
+      "kind": "visual",
+      "name": "文字・字幕"
+    },
+    {
+      "id": "track_004",
+      "kind": "audio",
+      "name": "読み上げ"
+    },
+    {
+      "id": "track_005",
+      "kind": "audio",
+      "name": "音楽"
+    }
   ],
   "clips": [
     {
@@ -94,15 +114,20 @@
       "kind": "subtitle",
       "trackId": "track_003",
       "startSec": 6,
-      "durationSec": 8,
+      "durationSec": 7.2,
       "x": 240,
       "y": 900,
       "w": 1440,
       "h": 120,
-      "text": "毎日こんな風に働いています",
       "fontSize": 48,
       "color": "#ffffff",
-      "background": { "enabled": true, "color": "#000000", "opacity": 0.55, "radius": 16 }
+      "background": {
+        "enabled": true,
+        "color": "#000000",
+        "opacity": 0.55,
+        "radius": 16
+      },
+      "voiceClipId": "clip_007"
     },
     {
       "id": "clip_005",
@@ -115,13 +140,37 @@
       "w": 1920,
       "h": 1080,
       "templateId": "opening_yuko_right_v1",
-      "assetRefs": { "background": "asset_mov_001" },
-      "texts": { "title": "採用情報", "url": "https://example.co.jp/recruit" },
-      "textStyles": { "title": { "color": "#ffee88", "fontWeight": "bold" } },
-      "textFontIds": { "title": "kaitou-yokoku-gothic" },
-      "slotFits": { "background": "contain" },
-      "slotClips": { "background": { "startSec": 1, "endSec": 6, "speed": 1.25 } },
-      "character": { "enabled": true, "characterId": "yuko", "poseAssetId": "yuko_smile_001" }
+      "assetRefs": {
+        "background": "asset_mov_001"
+      },
+      "texts": {
+        "title": "採用情報",
+        "url": "https://example.co.jp/recruit"
+      },
+      "textStyles": {
+        "title": {
+          "color": "#ffee88",
+          "fontWeight": "bold"
+        }
+      },
+      "textFontIds": {
+        "title": "kaitou-yokoku-gothic"
+      },
+      "slotFits": {
+        "background": "contain"
+      },
+      "slotClips": {
+        "background": {
+          "startSec": 1,
+          "endSec": 6,
+          "speed": 1.25
+        }
+      },
+      "character": {
+        "enabled": true,
+        "characterId": "yuko",
+        "poseAssetId": "yuko_smile_001"
+      }
     },
     {
       "id": "clip_006",
@@ -168,8 +217,16 @@
   "groups": [
     {
       "id": "group_001",
-      "members": ["clip_003", "clip_006"],
-      "transform": { "x": 0, "y": 0, "rotation": 0, "scale": 1 },
+      "members": [
+        "clip_003",
+        "clip_006"
+      ],
+      "transform": {
+        "x": 0,
+        "y": 0,
+        "rotation": 0,
+        "scale": 1
+      },
       "name": "見出しのまとまり"
     }
   ],
@@ -178,8 +235,17 @@
       "id": "anim_001",
       "targetId": "group_001",
       "keyframes": [
-        { "timeSec": 0, "opacity": 0, "x": -40 },
-        { "timeSec": 0.6, "opacity": 1, "x": 0, "easing": "ease-in-out" }
+        {
+          "timeSec": 0,
+          "opacity": 0,
+          "x": -40
+        },
+        {
+          "timeSec": 0.6,
+          "opacity": 1,
+          "x": 0,
+          "easing": "ease-in-out"
+        }
       ]
     }
   ]

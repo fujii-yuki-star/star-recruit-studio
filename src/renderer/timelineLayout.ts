@@ -6,6 +6,7 @@
 // 両形式で1つの実装に収まり、プレビュー＝書き出しのパリティ（ADR-0001）を二重に作らずに済む。
 import { DEFAULT_BACKGROUND_COLOR, dimsForOrientation } from '../domain/constants';
 import { sceneFromClip } from '../domain/timeline/sceneFromClip';
+import { subtitleTextOf } from '../domain/timeline/subtitleLink';
 import { FREE_CATEGORY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind, TimelineClipKind } from '../domain/enums';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
@@ -261,10 +262,12 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
         : emptyFreeTemplate(canvas, doc.videoSettings.aspectRatio);
     if (!template) continue; // 見た目が見つからないクリップは描かない（案内は呼び出し側）
 
+    // 字幕は**連動先の読み上げ文**まで解いてから渡す（文書を見ないと解けない・ADR-0032 決定24）。
+    const subtitleOpts = { subtitleText: subtitleTextOf(doc, clip) };
     const scene =
       clip.kind === TIMELINE_CLIP_KIND.template
-        ? sceneFromClip(clip, template)
-        : { ...sceneFromClip(clip, template), freeLayout: [freeElementFromClip(clip, canvas)] };
+        ? sceneFromClip(clip, template, subtitleOpts)
+        : { ...sceneFromClip(clip, template, subtitleOpts), freeLayout: [freeElementFromClip(clip, canvas)] };
     const sub = layoutScene(scene, template);
 
     // クリップは**中身の座標系**として扱う＝クリップに掛かる変形（グループ → 自身のキーフレーム）は、

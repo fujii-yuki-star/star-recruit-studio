@@ -14,6 +14,7 @@ import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
+import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { creditSpeakerAt } from "../../domain/timeline/credit";
 import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCredit";
@@ -23,7 +24,7 @@ import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, textKeyLabel, trackLabel } from "../uiLabels";
+import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, trackLabel } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, SLOT_TYPE } from "../../domain/enums";
@@ -93,7 +94,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
-    setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip,
+    setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -153,6 +154,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const selectedLocked = !!selected && !!doc?.tracks.find((t) => t.id === selected.trackId)?.locked;
   const lockedHint = selectedLocked ? "この列は固定されています。変えるには固定を外してください" : undefined;
   const textKeys = selectedTemplate ? usedTextKeys(selectedTemplate.layers) : [];
+  // 連動先が見つからない字幕（V29）。自分の文へ落ちて描かれ続けるので、黙って連動が切れたことに
+  // 気づけない＝知らせる（§2-5）。
+  const danglingLinkCount = useMemo(() => (doc ? danglingSubtitleLinks(doc).length : 0), [doc]);
+  // 連動先の候補（この動画にある読み上げの部品）。
+  const voiceClips = useMemo(() => (doc ? doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.voice) : []), [doc]);
   // 素材が入っていない差し込み口は、灰色の「（未設定）」の枠がそのまま動画に焼き込まれる（`sceneSvg`）。
   // 黙ってそのまま出さずに知らせる（§2-5・場面形式の公開前チェックと同じ扱い＝ADR-0026②）。
   const emptySlotCount = useMemo(() => {
@@ -251,6 +257,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       {emptySlotCount > 0 && (
         <p className="notice notice-warn" role="alert">
           素材が入っていない差し込み口が{emptySlotCount}個あります。そのままだと灰色の枠が動画に出ます。部品を選んで素材を入れてください。
+        </p>
+      )}
+      {danglingLinkCount > 0 && (
+        <p className="notice notice-warn" role="alert">
+          連動する読み上げが見つからない字幕が{danglingLinkCount}個あります。連動先を選び直すか、連動をやめてください。
         </p>
       )}
       {missingAudioCount > 0 && (
@@ -464,6 +475,47 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 ))}
               </select>
             </label>
+
+            {/* 字幕は読み上げと連動できる（ADR-0032 決定24）＝文言と時間が付いてくる。 */}
+            {selected.kind === TIMELINE_CLIP_KIND.subtitle && (
+              <div className="mt-lg">
+                <h4>連動する読み上げ</h4>
+                {voiceClips.length === 0 ? (
+                  <p className="text-muted">連動できる読み上げの部品がまだありません。</p>
+                ) : (
+                  <label className="field">
+                    <span>連動先</span>
+                    <select
+                      value={selected.voiceClipId ?? ""}
+                      disabled={selectedLocked}
+                      title={lockedHint}
+                      onChange={(e) => setSelectedSubtitleVoiceLink(e.target.value || null)}
+                    >
+                      <option value="">連動しない</option>
+                      {voiceClips.map((v) => (
+                        <option key={v.id} value={v.id}>{clipLabel(v)}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="field">
+                  <span>{SUBTITLE_TEXT_FIELD_LABEL}</span>
+                  <input
+                    type="text"
+                    value={selected.text ?? ""}
+                    disabled={selectedLocked}
+                    title={lockedHint}
+                    placeholder={selected.voiceClipId ? "空にすると読み上げの文に合わせます" : ""}
+                    onChange={(e) => setSelectedSubtitleText(e.target.value)}
+                  />
+                </label>
+                <p className="text-muted">
+                  {selected.voiceClipId
+                    ? `いま出る文：「${subtitleTextOf(doc, selected) ?? ""}」${selected.text ? "（この部品の文が優先されています）" : "（連動先の読み上げ文）"}`
+                    : "連動すると、読み上げの文と時間に合わせて字幕が出ます。"}
+                </p>
+              </div>
+            )}
 
             {/* 見た目パターンの部品は、置いたあとも中身を差し替えられる（ADR-0032 決定5）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.template && (

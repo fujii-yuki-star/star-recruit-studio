@@ -11,6 +11,7 @@ import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFade
 import { FPS } from '../constants';
 import { ASSET_TYPE, TIMELINE_CLIP_KIND } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
+import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
 import { timelineDurationSec } from './persistence';
 import { effectiveFps } from './playback';
@@ -151,6 +152,8 @@ export const TIMELINE_EXPORT_BLOCK = {
   videoAsset: 'TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED',
   /** 見た目パターンが見つからない部品がある＝そこが丸ごと絵から消えるので、書き出さずに断る。 */
   templateUnresolved: 'TIMELINE_EXPORT_TEMPLATE_UNRESOLVED',
+  /** 連動先が見つからない字幕で、自分の文も無い＝**何も出ない**ので、書き出さずに断る（#633）。 */
+  subtitleLinkBroken: 'TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN',
 } as const;
 
 export type TimelineExportBlockCode = (typeof TIMELINE_EXPORT_BLOCK)[keyof typeof TIMELINE_EXPORT_BLOCK];
@@ -190,6 +193,12 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
     if (unresolved.length > 0) {
       blockers.push({ code: TIMELINE_EXPORT_BLOCK.templateUnresolved, clipIds: unresolved });
     }
+  }
+  // 連動先が見つからない字幕は、自分の文があればそれで描かれる。**文も無いものは何も出ない**＝
+  // 置いたはずの字幕が消えた動画を成功として出さない（`11 §8` V29 の警告より一段強い＝ADR-0026④）。
+  const brokenSubtitles = danglingSubtitleLinks(doc).filter((c) => !c.text).map((c) => c.id);
+  if (brokenSubtitles.length > 0) {
+    blockers.push({ code: TIMELINE_EXPORT_BLOCK.subtitleLinkBroken, clipIds: brokenSubtitles });
   }
   const videoAssetIds = new Set(doc.assets.filter((a) => a.assetType === ASSET_TYPE.video).map((a) => a.assetId));
   if (videoAssetIds.size > 0) {

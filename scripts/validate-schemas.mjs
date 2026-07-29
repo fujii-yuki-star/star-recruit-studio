@@ -252,6 +252,8 @@ const tlAccept = [
   ['timeline: 読み上げクリップ（voice）を許容（1.1）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: 3, status: 'none' } })],
   ['timeline: 読み上げは話者/速度なし（既定を継承）でも許容', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'none' } })],
   ['timeline: 読み上げの話者/話速/抑揚 null（継承）を許容', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: null, speed: null, intonation: null, status: 'generated' } })],
+  ['timeline: 字幕の連動先（voiceClipId）を許容（1.2・#633）', tlClips({ id: 'clip_001', kind: 'subtitle', trackId: 'track_003', startSec: 0, durationSec: 3, x: 0, y: 900, w: 1920, h: 120, voiceClipId: 'clip_007' })],
+  ['timeline: 連動先と自分の文の両方（言い換え）を許容（1.2・#633）', tlClips({ id: 'clip_001', kind: 'subtitle', trackId: 'track_003', startSec: 0, durationSec: 3, x: 0, y: 900, w: 1920, h: 120, voiceClipId: 'clip_007', text: '言い換えた字幕' })],
   ['timeline: テンプレクリップの textFontIds/character/slotClips を許容（1.1）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, templateId: 'opening_yuko_right_v1', textFontIds: { title: 'kaitou-yokoku-gothic' }, character: { enabled: true, characterId: 'yuko', poseAssetId: 'yuko_smile_001' }, slotClips: { background: { startSec: 1, endSec: 5, speed: 1.5 } } })],
 ];
 const tlReject = [

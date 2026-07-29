@@ -14,7 +14,7 @@ import type { TimelineProject } from "../../domain/timeline/types";
 import type { TextKey, TrackKind } from "../../domain/enums";
 import {
   addTemplateClip, addTrack, duplicateClip, moveClip, moveTrackOrder, removeClips, removeTrack,
-  setClipAssetRef, setClipText, setTrackFlag, trimClip,
+  setClipAssetRef, setClipText, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, trimClip,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
@@ -101,6 +101,10 @@ export interface TimelineState {
   removeSelectedClips: () => void;
   /** 選んでいる見た目パターンの差し込み口に素材を入れる／外す（#632）。 */
   setSelectedClipAssetRef: (layerId: string, assetId: string | null) => void;
+  /** 選んでいる字幕自身の文を書き換える（空にすると連動先の読み上げ文に戻る・#633）。 */
+  setSelectedSubtitleText: (text: string) => void;
+  /** 選んでいる字幕の連動先（読み上げ）を決める／やめる（#633）。 */
+  setSelectedSubtitleVoiceLink: (voiceClipId: string | null) => void;
   /** 選んでいる見た目パターンの文字を書き換える（#632）。 */
   setSelectedClipText: (textKey: TextKey, text: string) => void;
   /** 見た目パターンの部品をバラす（中身ぶんの部品へ展開・#632）。**戻せない**（取り消しでだけ戻る）。 */
@@ -285,6 +289,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
   setSelectedClipAssetRef: (layerId, assetId) => applyEdit(set, get, (d, id) => setClipAssetRef(d, id, layerId, assetId)),
   setSelectedClipText: (textKey, text) => applyEdit(set, get, (d, id) => setClipText(d, id, textKey, text)),
+  setSelectedSubtitleText: (text) => applyEdit(set, get, (d, id) => setSubtitleText(d, id, text)),
+  setSelectedSubtitleVoiceLink: (voiceClipId) =>
+    applyEdit(set, get, (d, id) => setSubtitleVoiceLink(d, id, voiceClipId)),
 
   explodeClip: (clipId, template) => {
     const doc = get().doc;
