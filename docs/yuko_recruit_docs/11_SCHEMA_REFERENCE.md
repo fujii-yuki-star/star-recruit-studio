@@ -321,7 +321,7 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 
 **場面（`parts`/`scenes`）を持たない別文書**。キャンバスは常に自由配置＝**FREE（空間の自由）× タイムライン（時間の自由）**。**AI はこの形式を生成しない**（AI の関与は場面形式まで＝ADR-0007 の単一パイプラインは場面側で不変）。
 
-schemaVersion ●（`"1.0"`） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`）
+schemaVersion ●（現行 `"1.2"`・場面形式とは独立に進む） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`）
 
 **Track**: id ●（`track_NNN`・§2.1） / kind ●（enum `visual`／`audio`＝置けるクリップの種別を決める） / name ○（未指定＝種別＋連番の自動名） / hidden ○（描画・書き出しから除外＝音声は無音） / locked ○（移動・トリムを禁止）。**配列の順＝重ね順（後ろほど手前）**・UI では上が手前に見せる。
 
@@ -331,6 +331,7 @@ schemaVersion ●（`"1.0"`） / format ●（`"timeline"`・§1 の形式判別
 - `kind='template'`（**テンプレを素材として置く**・差し込み口が生きている）: templateId ● / assetRefs ○ / texts ○ / textStyles ○ / slotFits ○ / textFontIds ○（テキスト種別ごとのフォント・枠全体は `fontId`） / character ○（立ち絵の表示と表情・`$ref` 共有） / slotClips ○（差し込み口ごとの動画の範囲/速度/元音声・`$ref` 共有・ADR-0028）
 - `kind='audio'`: bundledBgmId ○（同梱BGM一覧は `$ref` 共有・`assetId` と排他） / volume ○ / fadeInSec ○ / fadeOutSec ○
 - `kind='voice'`（**読み上げ**・ADR-0032 決定7）: voice ●（`TimelineVoice`・**schema の if/then で必須**＝中身の無い声を作らせない） / volume ○
+- `kind='subtitle'`（**読み上げと連動**・ADR-0032 決定24・#633）: voiceClipId ○（連動先の読み上げクリップ id＝`clip_NNN`。**文言と時間が追従**・自分の `text` があればそちらが優先。解決と不変条件は §7.6.2.3／§8 V29）
 - 素材のトリム（非破壊・ADR-0024）: sourceStartSec ○（素材のどこから使うか） / speed ○（>0）。**`kind='template'` の `slotClips` とは別物**＝こちらは自分が持つ素材、あちらは枠の中の差し込み口ごと。
 - **kind 別の必須は domain 検証で担保**（`FreeElement` と同じ流儀＝§8）。ただし `voice` だけは schema の `if/then` でも必須にする（「空の声」は描画既定で補えないため）。
 
@@ -402,6 +403,29 @@ domain の純粋関数 **`bakeTimelineProject`（`src/domain/timeline/bake.ts`�
 - **まだ鳴らないもの**（#630 の範囲外）：動画素材（`kind:'slot'`）と見た目パターンの差し込み口（`slotClips.useOriginalAudio`・ADR-0028）の**元音声**。書き出し（#631）で扱う。
 - **焼き出しはスキーマに適合しない結果を保存しない**＝一覧に出るのに開けない動画を作らない（読込側が適合を要求するため・ADR-0026④）。
 
+#### 7.6.2.3 字幕と読み上げの連動（#633）
+
+**字幕クリップが読み上げクリップを1つ指す**（`voiceClipId`・ADR-0032 決定24・schema 1.2）。解決は
+`domain/timeline/subtitleLink.ts`（純粋）。
+
+- **文言**＝`subtitleTextOf(doc, clip)`＝**自分の文が優先**、無ければ連動先の読み上げ文。描画は解決した文を
+  `sceneFromClip` へ渡す（クリップ1つでは解けないので、文書を持つ側が解く）。
+- **時間**＝「連動している＝**区間が一致している**」を保つ。連動先を動かす・トリムすると字幕は**同じ区間**に
+  なり（動かすときとトリムするときで意味を変えない）、**連動を始めた時点でも合わせる**。
+  **連動している字幕の時間は自分では変えられない**（`TIMELINE_EDIT_LINKED_SUBTITLE_TIME`＝「連動している」と
+  出ているのに区間が合っていない状態を作らない）。**列は変えられる**（重なったときの逃げ道）。
+  **字幕を置けない場所になる操作は、読み上げ側ごと断る**（片方だけ動いた結果を作らない）。理由は
+  `TIMELINE_EDIT_LINKED_SUBTITLE`＝触っていない列の話にしない。
+- **複製した字幕は連動を引き継がない**（同じ区間になるので複製した瞬間に必ず重なり、以後その読み上げを
+  動かすたびに断られるため）。
+- **壊れた参照は黙って消さない**＝V29 が知らせる（`danglingSubtitleLinks`）。字幕自身の文があればその文で
+  描かれ続けるが、**文が無ければ何も出ない**ので、その字幕は**書き出しの手前で止める**
+  （`TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN`＝置いたはずの字幕が消えた動画を成功として出さない）。
+- **字幕自身の文は書き換えられる**（`setSubtitleText`）。**空にすると連動先の読み上げ文に戻る**
+  ＝焼き出しで文が焼き付いた字幕も、空にすれば追従へ切り替えられる。
+- 掛け合い・同時2ボイスに**専用概念は持ち込まない**（決定8）＝**列を分ける**だけ。場面形式の帯の積み上げ
+  （`stackedSubtitleBands`）に当たるものは列の並びが担う。
+
 #### 7.6.3 編集操作（#629）
 
 domain の純粋関数 **`src/domain/timeline/edit.ts`**。**置けない操作は黙って別の結果にしない**＝勝手に近くへ寄せたり上書きしたりせず、**置けなかった理由**（`15 §6` の `TIMELINE_EDIT_*`）を返す（§2-5・ADR-0026④）。
@@ -463,7 +487,7 @@ domain の純粋関数 **`src/domain/timeline/edit.ts`**。**置けない操作�
 - **合成の単位は α の出どころで決まる**：クリップ自身のキーフレームならクリップ、**グループのキーフレームならグループ全体**（FREE 場面の切り替えが場面まるごと1枚になる＝要素どうしがフェード中だけ互いに透ける、を防ぐ）。グループのメンバーは連続した列に並ぶ（`TrackAllocator`）ので、並びも1かたまりになる。
 - **場面形式は `composite` を設定しない**＝この仕組みは場面形式の出力に影響しない。
 - ⚠️ **書き出しの帯分割（`videoSceneSplit`）は合成の単位を跨いで切る**（動画スロットを穴にして下/中/上へ割る）。タイムライン形式の書き出しでこれを再利用すると1枚合成が崩れ、クリップ全体のフェードが動画スロットへ乗らない。**#631 では per-frame の全描画へ倒す**（ADR-0032 決定10「迷ったら全フレーム描画」）か、跨ぐときは分割を拒否して理由を返すこと。
-- **字幕のクリップ**（`kind:'subtitle'`）は、焼き付けた文言（`clip.text`）を `texts.subtitle` として渡す。FREE 字幕要素は表示文を「対象」から解決する（ADR-0029）が本形式に対象の語彙が無いため、これが無いと §7.6.1 で「黙って消さない」ために焼き付けた字幕が**受け側で1つも描かれない**。
+- **字幕のクリップ**（`kind:'subtitle'`）は、**`subtitleTextOf`（§7.6.2.3）で解決した文**（自分の `text` →連動先の読み上げ文）を `texts.subtitle` として渡す。FREE 字幕要素は表示文を「対象」から解決する（ADR-0029）が本形式に対象の語彙が無いため、これが無いと §7.6.1 で「黙って消さない」ために焼き付けた字幕が**受け側で1つも描かれない**。**文書を見ないと解けない**ので、解くのは呼び出し側（`layoutTimelineAt`）。
 - **文字のフォント**：クリップ全体の `fontId` は**種別ごとの指定（`textFontIds`）が無いときの受け皿**としてアイテムへ落とす。場面形式はフレーム単位の `fontFamily` で効かせるが、1フレームに複数クリップが混ざる本形式ではそれができない（テンプレのクリップだけ黙って既定へ戻るのを防ぐ・ADR-0026②）。
 - **見た目の下地**（`template.defaults.backgroundColor`）は、そのクリップの箱ぶんの塗りとして最背面へ足す＝背景の層を持たない見た目でも下地が黙って白にならない。
 
@@ -557,7 +581,9 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V27 | `clips[].character.poseAssetId`（非null時）が実在 yuko 素材（場面形式 V5 と同じ観点） | 警告（`ASSET_NOT_FOUND`・field は `clips.<id>.character`） |
 | V28 | `kind='voice'` の読み上げ文が空白だけでない／`voice` は読み上げクリップにだけ付く | 警告（`TIMELINE_VOICE_TEXT_EMPTY`＝info・`TIMELINE_VOICE_ON_NON_VOICE`） |
 
-> V22–V28 は **タイムライン形式（ADR-0032・#627／読み上げは #628）**。domain の純粋関数 **`validateTimelineDoc`（`src/domain/timeline/validateTimelineDoc.ts`）** が `Warning[]` を返す。**V24 が本形式の要**＝同一トラックで時間が重ならないので、**重ね順は tracks の並び順だけで一意に決まる**（クリップごとの zIndex を持たない）。ID 一意（`clip_NNN`/`track_NNN`/`anim_NNN`）は V16 と同じ扱いで再採番。番号は §8 の続き。
+| V29 | `clips[].voiceClipId`（字幕の連動先）が実在する**読み上げ**クリップを指す／連動先を持てるのは字幕だけ | 警告（`TIMELINE_SUBTITLE_LINK_NOT_FOUND` / `TIMELINE_SUBTITLE_LINK_ON_NON_SUBTITLE`）＝字幕は自分の文へ落ちて描かれ続けるので、黙って連動が切れたことに気づけない |
+
+> V22–V29 は **タイムライン形式（ADR-0032・#627／読み上げは #628／連動は #633）**。domain の純粋関数 **`validateTimelineDoc`（`src/domain/timeline/validateTimelineDoc.ts`）** が `Warning[]` を返す。**V24 が本形式の要**＝同一トラックで時間が重ならないので、**重ね順は tracks の並び順だけで一意に決まる**（クリップごとの zIndex を持たない）。ID 一意（`clip_NNN`/`track_NNN`/`anim_NNN`）は V16 と同じ扱いで再採番。番号は §8 の続き。
 
 > V12–V15 は ADR-0008 §8。FREE テンプレ場面（`sceneType=free`）の `freeLayout` を対象とし、domain の純粋関数 `validateFreeLayout`（`src/domain/project/freeLayout.ts`）で実装。`free_NNN` 要素ごとに `Warning.field=freeLayout.<id>` を付す。V13 が不正なら矩形が確定しないため V14 はスキップ（二重警告を避ける）。
 > kind 別の構造的「必須」（`slot` の `fit` が assetId 非null時・`shape` の `shapeType`）は **Schema（`exclusiveMinimum`/enum）＋ renderer 既定（fit 未指定=cover・shapeType 未指定=rect）で担保＝V2 相当**とし、上記 domain 検証（意味検証）の対象外。`fit` は §2-3 の技術用語のため UI 警告に出さない。

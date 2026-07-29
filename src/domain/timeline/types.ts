@@ -96,6 +96,13 @@ export interface TimelineClip extends ClipSpatial {
    */
   slotClips?: Record<string, SlotClipOverride>;
 
+  /**
+   * kind='subtitle' の**連動先**（読み上げクリップの id・ADR-0032 決定24・#633）。
+   * 指すと**文言と時間**がその読み上げに追従する（文言は `text` が入っていればそちらが優先）。
+   * 未指定＝連動しない。指した先が見つからないときは黙って消さず、検証（`11 §8` V29）が知らせる。
+   */
+  voiceClipId?: string;
+
   /** kind='voice' のとき必須（読み上げの中身・schema の if/then で強制）。 */
   voice?: TimelineVoice;
 
@@ -156,4 +163,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.1';
+export const TIMELINE_SCHEMA_VERSION = '1.2';

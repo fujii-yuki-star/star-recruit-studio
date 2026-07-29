@@ -20,8 +20,8 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "1.1",
-      "description": "本形式の版。場面形式（project.schema.json）とは独立に進む（別文書のため・11 §1）。1.0→1.1：読み上げクリップ（kind='voice' ＋ voice）と、テンプレクリップの textFontIds/character/slotClips を追加（いずれも任意追加＝後方互換のマイナー・#628 模型）。"
+      "const": "1.2",
+      "description": "本形式の版。場面形式（project.schema.json）とは独立に進む（別文書のため・11 §1）。1.0→1.1：読み上げクリップ（kind='voice' ＋ voice）と、テンプレクリップの textFontIds/character/slotClips を追加（いずれも任意追加＝後方互換のマイナー・#628 模型）。／1.1→1.2：字幕クリップの連動先（voiceClipId）を追加（いずれも任意追加＝後方互換のマイナー・#633）。"
     },
     "format": {
       "const": "timeline",
@@ -32,41 +32,62 @@
       "pattern": "^proj_[0-9]{8}_[0-9]{3}$",
       "description": "場面形式と同じ採番（プロジェクト一覧に同列で並ぶため）。形式の判別は format で行う。"
     },
-    "projectName": { "type": "string", "maxLength": 80 },
-    "createdAt": { "type": "string", "format": "date-time" },
-    "updatedAt": { "type": "string", "format": "date-time" },
+    "projectName": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
     "sourceProjectId": {
       "type": "string",
       "pattern": "^proj_[0-9]{8}_[0-9]{3}$",
       "description": "焼き出し元の場面形式プロジェクト（ADR-0032 決定16・片道）。完全新規のときは未指定。元を書き換えることはない（記録のみ）。"
     },
-    "videoSettings": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/VideoSettings" },
+    "videoSettings": {
+      "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/VideoSettings"
+    },
     "voiceSettings": {
       "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/VoiceSettings",
       "description": "タイムライン側でも声を作れる（ADR-0032 決定7）ため既定の声設定を持つ。"
     },
     "assets": {
       "type": "array",
-      "items": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Asset" },
+      "items": {
+        "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Asset"
+      },
       "description": "焼き出し時はコピーする（ADR-0024 (6) の自己完結を守る・ADR-0032 決定13）。"
     },
     "tracks": {
       "type": "array",
-      "items": { "$ref": "#/$defs/Track" },
+      "items": {
+        "$ref": "#/$defs/Track"
+      },
       "description": "**配列の後ろほど手前**（既存の描画規則と同じ）。UI では上が手前に見せる。"
     },
     "clips": {
       "type": "array",
-      "items": { "$ref": "#/$defs/TimelineClip" }
+      "items": {
+        "$ref": "#/$defs/TimelineClip"
+      }
     },
     "groups": {
       "type": "array",
-      "items": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Group" },
+      "items": {
+        "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Group"
+      },
       "description": "要素のグループ化（ADR-0022）。members はクリップ id／ネストでグループ id。"
     },
     "animations": {
       "type": "array",
-      "items": { "$ref": "#/$defs/ClipAnimation" }
+      "items": {
+        "$ref": "#/$defs/ClipAnimation"
+      }
     }
   },
   "$defs": {
@@ -74,93 +95,261 @@
       "type": "object",
       "additionalProperties": false,
       "description": "トラック。同一トラック内でクリップの時間は重ならない（重ねたいならトラックを足す＝重ね順がトラック順だけで一意に決まる）。",
-      "required": ["id", "kind"],
+      "required": [
+        "id",
+        "kind"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^track_[0-9]{3,}$" },
+        "id": {
+          "type": "string",
+          "pattern": "^track_[0-9]{3,}$"
+        },
         "kind": {
-          "enum": ["visual", "audio"],
+          "enum": [
+            "visual",
+            "audio"
+          ],
           "description": "visual＝映像・文字・図形・字幕／audio＝音声。置けるクリップの種別を決める。"
         },
-        "name": { "type": "string", "description": "任意の表示名。未指定＝種別＋連番の自動名。" },
-        "hidden": { "type": "boolean", "description": "true で描画・書き出しから除外（音声は無音）。" },
-        "locked": { "type": "boolean", "description": "true でクリップの移動・トリム・削除と、中身の差し替えを禁止（11 §7.6.3）。" }
+        "name": {
+          "type": "string",
+          "description": "任意の表示名。未指定＝種別＋連番の自動名。"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "true で描画・書き出しから除外（音声は無音）。"
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "true でクリップの移動・トリム・削除と、中身の差し替えを禁止（11 §7.6.3）。"
+        }
       }
     },
     "TimelineClip": {
       "type": "object",
       "additionalProperties": false,
       "description": "クリップ＝「FREE 要素 ＋ 時間（trackId/startSec/durationSec）」。空間の語彙は FreeElement（ADR-0008）と同じものを使う＝描画（layoutScene の FREE 分岐）を共有できる。kind 別の必須フィールドは domain の検証で担保する（FreeElement と同じ流儀＝11 §8）。",
-      "required": ["id", "kind", "trackId", "startSec", "durationSec"],
-      "if": { "properties": { "kind": { "const": "voice" } }, "required": ["kind"] },
+      "required": [
+        "id",
+        "kind",
+        "trackId",
+        "startSec",
+        "durationSec"
+      ],
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "voice"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
       "then": {
-        "required": ["voice"],
+        "required": [
+          "voice"
+        ],
         "description": "読み上げクリップは中身（読み上げ文・話者）が無いと声を作れないので、schema で必須にする（「空の声」を作らせない・#628）。"
       },
       "properties": {
-        "id": { "type": "string", "pattern": "^clip_[0-9]{3,}$" },
+        "id": {
+          "type": "string",
+          "pattern": "^clip_[0-9]{3,}$"
+        },
         "kind": {
-          "enum": ["slot", "text", "shape", "subtitle", "template", "audio", "voice"],
+          "enum": [
+            "slot",
+            "text",
+            "shape",
+            "subtitle",
+            "template",
+            "audio",
+            "voice"
+          ],
           "description": "slot/text/shape/subtitle は FreeElement と同義。template＝テンプレを素材として置く（差し込み口が生きている・ADR-0032 決定5）。audio＝音（素材/同梱BGM）。voice＝読み上げ（タイムライン側でも声を作れる＝決定7。音の素材とは必須フィールドが別物なので種別を分ける）。"
         },
-        "trackId": { "type": "string", "pattern": "^track_[0-9]{3,}$" },
-        "startSec": { "type": "number", "minimum": 0 },
-        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
-        "name": { "type": "string" },
-
-        "x": { "type": "number" },
-        "y": { "type": "number" },
-        "w": { "type": "number", "exclusiveMinimum": 0 },
-        "h": { "type": "number", "exclusiveMinimum": 0 },
-        "rotation": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
-        "assetId": { "type": ["string", "null"] },
-        "fit": { "enum": ["cover", "contain", "stretch"] },
-        "text": { "type": "string" },
-        "fontSize": { "type": "number", "exclusiveMinimum": 0 },
-        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "fontWeight": { "enum": ["normal", "bold"] },
+        "trackId": {
+          "type": "string",
+          "pattern": "^track_[0-9]{3,}$"
+        },
+        "startSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "durationSec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "w": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "h": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rotation": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 360
+        },
+        "assetId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fit": {
+          "enum": [
+            "cover",
+            "contain",
+            "stretch"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "fontSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "fontWeight": {
+          "enum": [
+            "normal",
+            "bold"
+          ]
+        },
         "fontId": {
           "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/FreeElement/properties/fontId",
           "description": "同梱フォントの一覧は場面形式と同じ値を参照する（増減を1か所で管理・CLAUDE.md §2-7）。null＝動画全体に合わせる。"
         },
-        "lineHeight": { "type": "number", "minimum": 0.5, "maximum": 3 },
-        "textAlign": { "enum": ["left", "center", "right"] },
-        "shapeType": { "enum": ["rect", "ellipse", "rounded_rect", "triangle", "star", "arrow", "speech_bubble"] },
-        "fillColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
-        "radius": { "type": "number", "minimum": 0 },
-        "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "strokeWidth": { "type": "number", "minimum": 0 },
+        "lineHeight": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 3
+        },
+        "textAlign": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "shapeType": {
+          "enum": [
+            "rect",
+            "ellipse",
+            "rounded_rect",
+            "triangle",
+            "star",
+            "arrow",
+            "speech_bubble"
+          ]
+        },
+        "fillColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "radius": {
+          "type": "number",
+          "minimum": 0
+        },
+        "strokeColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "strokeWidth": {
+          "type": "number",
+          "minimum": 0
+        },
         "background": {
           "type": "object",
           "additionalProperties": false,
           "description": "文字・字幕の背景帯（可読性の下地）。未指定/enabled:false＝なし。",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-            "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
-            "radius": { "type": "number", "minimum": 0 }
+            "enabled": {
+              "type": "boolean"
+            },
+            "color": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "radius": {
+              "type": "number",
+              "minimum": 0
+            }
           }
         },
-        "hidden": { "type": "boolean" },
-        "locked": { "type": "boolean" },
-
-        "templateId": { "type": "string", "description": "kind='template' のとき必須。置いた見た目パターン。" },
-        "assetRefs": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/AssetRefs" },
-        "texts": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Texts" },
+        "hidden": {
+          "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "templateId": {
+          "type": "string",
+          "description": "kind='template' のとき必須。置いた見た目パターン。"
+        },
+        "assetRefs": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/AssetRefs"
+        },
+        "texts": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Texts"
+        },
         "textStyles": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "title": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle" },
-            "main": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle" },
-            "subtitle": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle" },
-            "caption": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle" },
-            "url": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle" }
+            "title": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            },
+            "main": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            },
+            "subtitle": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            },
+            "caption": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            },
+            "url": {
+              "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/TextStyle"
+            }
           }
         },
         "slotFits": {
           "type": "object",
-          "additionalProperties": { "enum": ["cover", "contain", "stretch"] },
+          "additionalProperties": {
+            "enum": [
+              "cover",
+              "contain",
+              "stretch"
+            ]
+          },
           "description": "テンプレ層 id → 収め方の上書き（場面形式の scene.slotFits と同義）。"
         },
         "textFontIds": {
@@ -175,20 +364,36 @@
           "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Scene/properties/slotClips",
           "description": "kind='template': テンプレ層 id → 動画の使う範囲・速度・元音声の上書き（場面形式の scene.slotClips と同義・ADR-0028）。クリップ直下の sourceStartSec/speed は kind='slot'/'audio' が直接持つ素材のトリムで、こちらは枠の中の差し込み口ごとの上書き。"
         },
-
+        "voiceClipId": {
+          "type": "string",
+          "pattern": "^clip_[0-9]{3,}$",
+          "description": "kind='subtitle' の連動先（読み上げクリップの id・ADR-0032 決定24）。指定すると文言と時間がその読み上げに追従する。未指定＝連動しない。"
+        },
         "voice": {
           "$ref": "#/$defs/TimelineVoice",
           "description": "kind='voice' のとき必須。読み上げの中身（上の if/then で強制）。"
         },
-
         "bundledBgmId": {
           "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/BgmSettings/properties/bundledBgmId",
           "description": "kind='audio' で同梱BGMを鳴らすとき。assetId と排他。曲の一覧は場面形式と同じ値を参照する（増減を1か所で管理・CLAUDE.md §2-7）。"
         },
-        "volume": { "type": "number", "minimum": 0, "maximum": 1.5 },
-        "fadeInSec": { "type": "number", "minimum": 0 },
-        "fadeOutSec": { "type": "number", "minimum": 0 },
-        "speed": { "type": "number", "exclusiveMinimum": 0 },
+        "volume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "fadeInSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fadeOutSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "speed": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
         "sourceStartSec": {
           "type": "number",
           "minimum": 0,
@@ -200,31 +405,58 @@
       "type": "object",
       "additionalProperties": false,
       "description": "読み上げクリップ（kind='voice'）の中身。場面形式の NarrationLine から**時間の語彙を除いた**もの（startSec/startWithPrevious はクリップの startSec・トラックが担い、subtitleText/subtitleEnabled は字幕クリップが担う）。制約は NarrationLine の同名プロパティを $ref で共有する（増減を1か所で管理・CLAUDE.md §2-7）。**入れ子にしているのは、クリップ直下の text（表示する文字）・speed（素材の再生速度）と語が衝突するため**＝読み上げ文と話速は別概念（ADR-0026②）。",
-      "required": ["text", "status"],
+      "required": [
+        "text",
+        "status"
+      ],
       "properties": {
         "text": {
           "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/text",
           "description": "読み上げる（話す）文。画面に出す字幕は別の字幕クリップが持つ。"
         },
-        "speaker": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/speaker" },
-        "speed": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/speed" },
-        "pitch": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/pitch" },
-        "intonation": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/intonation" },
-        "voicePath": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/voicePath" },
-        "status": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/status" }
+        "speaker": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/speaker"
+        },
+        "speed": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/speed"
+        },
+        "pitch": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/pitch"
+        },
+        "intonation": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/intonation"
+        },
+        "voicePath": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/voicePath"
+        },
+        "status": {
+          "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/NarrationLine/properties/status"
+        }
       }
     },
     "ClipAnimation": {
       "type": "object",
       "additionalProperties": false,
       "description": "クリップ（またはグループ）のキーフレームアニメ。timeSec は**クリップの先頭からの秒**（場面形式の ElementAnimation は場面ローカル秒＝そこだけ違う）。",
-      "required": ["id", "targetId", "keyframes"],
+      "required": [
+        "id",
+        "targetId",
+        "keyframes"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^anim_[0-9]{3,}$" },
-        "targetId": { "type": "string", "description": "クリップ id（clip_NNN）またはグループ id（group_NNN）。" },
+        "id": {
+          "type": "string",
+          "pattern": "^anim_[0-9]{3,}$"
+        },
+        "targetId": {
+          "type": "string",
+          "description": "クリップ id（clip_NNN）またはグループ id（group_NNN）。"
+        },
         "keyframes": {
           "type": "array",
-          "items": { "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Keyframe" }
+          "items": {
+            "$ref": "https://yuko-recruit/schemas/project.schema.json#/$defs/Keyframe"
+          }
         }
       }
     }

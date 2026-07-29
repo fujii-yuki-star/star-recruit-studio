@@ -526,3 +526,70 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("先に置いてある部品があります"))).toBe(true);
   });
 });
+
+describe("TimelineProjectScreen: 字幕と読み上げの連動（#633）", () => {
+  const withVoiceAndSubtitle = () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: "clip_sub", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 0, durationSec: 1, x: 0, y: 900, w: 1920, h: 120 },
+        { id: "clip_voice", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 2, durationSec: 3, voice: { text: "よろしく", status: "none" } },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_sub"] });
+  };
+
+  it("連動先を選べる（選ぶと時間も合う）", () => {
+    withVoiceAndSubtitle();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("連動先").parentElement?.querySelector("select");
+    fireEvent.change(select!, { target: { value: "clip_voice" } });
+    const sub = useTimelineStore.getState().doc?.clips.find((c) => c.id === "clip_sub");
+    expect(sub).toMatchObject({ voiceClipId: "clip_voice", startSec: 2, durationSec: 3 });
+  });
+
+  it("連動をやめられる（部品はその場に残る）", () => {
+    withVoiceAndSubtitle();
+    useTimelineStore.setState({
+      doc: {
+        ...useTimelineStore.getState().doc!,
+        clips: useTimelineStore.getState().doc!.clips.map((c) =>
+          c.id === "clip_sub" ? { ...c, voiceClipId: "clip_voice", startSec: 2, durationSec: 3 } : c,
+        ),
+      },
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("連動先").parentElement?.querySelector("select");
+    fireEvent.change(select!, { target: { value: "" } });
+    const sub = useTimelineStore.getState().doc?.clips.find((c) => c.id === "clip_sub");
+    expect(sub?.voiceClipId).toBeUndefined();
+    expect(sub).toMatchObject({ startSec: 2, durationSec: 3 });
+  });
+
+  it("いま出る文を見せる（連動先の読み上げ文）", () => {
+    withVoiceAndSubtitle();
+    useTimelineStore.setState({
+      doc: {
+        ...useTimelineStore.getState().doc!,
+        clips: useTimelineStore.getState().doc!.clips.map((c) =>
+          c.id === "clip_sub" ? { ...c, voiceClipId: "clip_voice", startSec: 2, durationSec: 3 } : c,
+        ),
+      },
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/いま出る文：「よろしく」/)).toBeInTheDocument();
+  });
+
+  it("連動先が見つからない字幕を知らせる（黙って連動が切れない）", () => {
+    open({
+      clips: [
+        { id: "clip_sub", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 0, durationSec: 1, x: 0, y: 900, w: 1920, h: 120, voiceClipId: "clip_999" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("連動する読み上げが見つからない字幕が1個"))).toBe(true);
+  });
+});

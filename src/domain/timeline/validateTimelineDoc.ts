@@ -82,7 +82,8 @@ export function overlappingClipPairs(clips: TimelineClip[]): Array<[TimelineClip
 /**
  * タイムライン文書を検証して警告を返す（警告＝行動は止めない）。
  * V22 trackId 実在／V23 クリップ種別とトラック種別の一致／V24 同一トラック内の時間の重なり／
- * V25 素材の実在・音の出どころの排他／V26 グループ members・アニメ targetId の実在。
+ * V25 素材の実在・音の出どころの排他／V26 グループ members・アニメ targetId の実在／
+ * V29 字幕の連動先の実在（ADR-0032 決定24）。
  */
 export function validateTimelineDoc(doc: TimelineProject): Warning[] {
   const warnings: Warning[] = [];
@@ -92,6 +93,7 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
   // （場面形式 V5 と同じ観点＝写真や動画の id を指しても描けない）。
   const yukoAssetIds = new Set(doc.assets.filter((a) => a.assetType === ASSET_TYPE.yuko).map((a) => a.assetId));
 
+  const clipById = new Map(doc.clips.map((c) => [c.id, c]));
   for (const clip of doc.clips) {
     const field = `clips.${clip.id}`;
     const track = trackById.get(clip.trackId);
@@ -128,6 +130,17 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
     // voice を持てるのは読み上げクリップだけ（持たせても鳴らないので黙って無視しない・§2-5）。
     if (!isVoiceClip(clip) && clip.voice != null) {
       warnings.push(warn('TIMELINE_VOICE_ON_NON_VOICE', '読み上げの中身は読み上げの部品にだけ置けます。読み上げの部品に置き直してください', field));
+    }
+
+    // V29: 字幕の連動先（ADR-0032 決定24）。指しているのに見つからない／読み上げでないものを指している
+    // ＝**黙って連動を解かない**（字幕は自分の文へ落ちて描かれ続けるので、消えたことに気づけない）。
+    if (clip.voiceClipId != null) {
+      const target = clipById.get(clip.voiceClipId);
+      if (clip.kind !== TIMELINE_CLIP_KIND.subtitle) {
+        warnings.push(warn('TIMELINE_SUBTITLE_LINK_ON_NON_SUBTITLE', '読み上げと連動できるのは字幕の部品だけです。字幕の部品に置き直してください', field));
+      } else if (!target || !isVoiceClip(target)) {
+        warnings.push(warn('TIMELINE_SUBTITLE_LINK_NOT_FOUND', '連動する読み上げが見つかりません。連動先を選び直すか、連動をやめてください', field));
+      }
     }
   }
 

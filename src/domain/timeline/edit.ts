@@ -9,6 +9,7 @@ import type { Group } from '../group/types';
 import { removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from '../project/overlayClipEdit';
 import { createClipId, createTrackId } from '../project/persistence';
+import { subtitlesBoundTo } from './subtitleLink';
 import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
 import type { TimelineClip, TimelineProject, Track } from './types';
 import type { Texts } from '../project/types';
@@ -40,6 +41,10 @@ export const EDIT_BLOCKED = {
    * 動きの支点が変わって**絵がずれる**ので、先に動きを外してもらう。
    */
   explodeAnchor: 'TIMELINE_EDIT_EXPLODE_ANCHOR',
+  /** 連動している字幕を置ける場所が無い（読み上げを動かせない理由・#633）。 */
+  linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
+  /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
+  linkedSubtitleTime: 'TIMELINE_EDIT_LINKED_SUBTITLE_TIME',
 } as const;
 
 export type EditBlockedReason = (typeof EDIT_BLOCKED)[keyof typeof EDIT_BLOCKED];
@@ -103,12 +108,23 @@ export function moveClip(
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // 連動している字幕の**時間**は読み上げが決める。ここで動かせると「連動していると出ているのに
+  // 区間が合っていない」を作れてしまう（列の移動だけは許す）。
+  if (clip.voiceClipId != null && to.startSec != null && to.startSec !== clip.startSec) {
+    return blocked(EDIT_BLOCKED.linkedSubtitleTime);
+  }
   const trackId = to.trackId ?? clip.trackId;
   const startSec = Math.max(0, to.startSec ?? clip.startSec);
   // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない（呼び出し側は同一参照で判定する）。
   if (trackId === clip.trackId && startSec === clip.startSec) return ok(doc);
   const issue = placementIssue(doc, clip, trackId, startSec, clip.durationSec);
-  return issue ? blocked(issue) : ok(withClip(doc, { ...clip, trackId, startSec }));
+  if (issue) return blocked(issue);
+  // 連動している字幕は**同じ区間になる**（ADR-0032 決定24）。動かすときとトリムするときで意味を変えない
+  // ＝「連動している＝区間が一致している」を保つ（ずれたまま連動していると表示される状態を作らない）。
+  return withBoundSubtitles(withClip(doc, { ...clip, trackId, startSec }), doc, clip, {
+    startSec,
+    durationSec: clip.durationSec,
+  });
 }
 
 /**
@@ -123,12 +139,16 @@ export function trimClip(doc: TimelineProject, clipId: string, edge: 'start' | '
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // 連動している字幕の長さも読み上げが決める（上と同じ理由）。
+  if (clip.voiceClipId != null) return blocked(EDIT_BLOCKED.linkedSubtitleTime);
   const span = applyClipEdge(clip, edge === 'start' ? 'trim-start' : 'trim-end', sec, 0, TIMELINE_MIN_CLIP_SEC);
   // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない（呼び出し側は同一参照で判定する）。
   if (span.startSec === clip.startSec && span.durationSec === clip.durationSec) return ok(doc);
   const next = { ...clip, ...span };
   const issue = placementIssue(doc, next, next.trackId, next.startSec, next.durationSec);
-  return issue ? blocked(issue) : ok(withClip(doc, next));
+  if (issue) return blocked(issue);
+  // 連動している字幕も同じ区間になる（声を作り直して長さが変わるときも、この関数を通す約束＝#633 の残り）。
+  return withBoundSubtitles(withClip(doc, next), doc, clip, span);
 }
 
 /**
@@ -227,6 +247,9 @@ export function duplicateClip(doc: TimelineProject, clipId: string): EditResult 
   // 読み上げは**作成済みの音声を引き継がない**（場面形式の場面複製と同じ＝「作成済みに見えるのに
   // 別の部品の音声を指す」を作らない）。文と話者は残るので作り直せる。
   if (next.voice) next.voice = { ...next.voice, voicePath: null, status: NARRATION_STATUS.none };
+  // **連動は引き継がない**（読み上げと同じ区間になるので、複製した瞬間に必ず重なる＝以後その読み上げを
+  // 動かすたびに断られる）。連動したい場合は複製後に選び直す。
+  delete next.voiceClipId;
   return ok({ ...doc, clips: [...doc.clips, next] });
 }
 
@@ -306,4 +329,69 @@ export function addTemplateClip(
     templateId: input.template.templateId,
   };
   return ok({ ...doc, clips: [...doc.clips, clip] });
+}
+
+/**
+ * 連動している字幕クリップも一緒に動かす（ADR-0032 決定24）。読み上げ以外は何もしない。
+ *
+ * **置けないときは全体を断る**（字幕だけ置き去りにしない）＝「連動している」と言った以上、片方だけ
+ * 動いた結果を黙って作らない（§2-5・ADR-0026④）。理由は置けなかった字幕のもの。
+ */
+function withBoundSubtitles(
+  next: TimelineProject,
+  before: TimelineProject,
+  moved: TimelineClip,
+  span: { startSec: number; durationSec: number },
+): EditResult {
+  if (moved.kind !== TIMELINE_CLIP_KIND.voice) return ok(next);
+  let doc = next;
+  for (const sub of subtitlesBoundTo(before, moved.id)) {
+    if (span.startSec === sub.startSec && span.durationSec === sub.durationSec) continue;
+    const moving = { ...sub, ...span };
+    // 置けない理由は**字幕側**のもの。そのまま返すと「触ってもいない列が固定されています」に見えるので、
+    // 連動のせいで置けないと分かる理由にまとめる（§2-5＝次の行動へ導く）。
+    if (placementIssue(doc, moving, moving.trackId, moving.startSec, moving.durationSec)) {
+      return blocked(EDIT_BLOCKED.linkedSubtitle);
+    }
+    doc = withClip(doc, moving);
+  }
+  return ok(doc);
+}
+
+/**
+ * 字幕クリップの**連動先**を決める／やめる（ADR-0032 決定24）。`null` で連動をやめる。
+ *
+ * 連動を始めたら**その場で時間も合わせる**＝「連動する」と言ったのに位置がずれたまま、を作らない。
+ * 置けないときは断る（黙って別の場所に置かない）。
+ */
+export function setSubtitleVoiceLink(doc: TimelineProject, clipId: string, voiceClipId: string | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || clip.kind !== TIMELINE_CLIP_KIND.subtitle) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if (voiceClipId === null) {
+    if (clip.voiceClipId == null) return ok(doc);
+    const next = { ...clip };
+    delete next.voiceClipId;
+    return ok(withClip(doc, next));
+  }
+  const voice = doc.clips.find((c) => c.id === voiceClipId);
+  if (!voice || voice.kind !== TIMELINE_CLIP_KIND.voice) return blocked(EDIT_BLOCKED.notFound);
+  const moved = { ...clip, voiceClipId, startSec: voice.startSec, durationSec: voice.durationSec };
+  const issue = placementIssue(doc, moved, moved.trackId, moved.startSec, moved.durationSec);
+  return issue ? blocked(issue) : ok(withClip(doc, moved));
+}
+
+/**
+ * 字幕クリップ自身の文（`text`）を書き換える（#633）。**空にすると連動先の読み上げ文に戻る**
+ * （`subtitleTextOf` の解決＝自分の文が優先）。空文字は持たない（未入力と別扱いにしない）。
+ */
+export function setSubtitleText(doc: TimelineProject, clipId: string, text: string): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip || clip.kind !== TIMELINE_CLIP_KIND.subtitle) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.text ?? '') === text) return ok(doc);
+  const next = { ...clip };
+  if (text === '') delete next.text;
+  else next.text = text;
+  return ok(withClip(doc, next));
 }
