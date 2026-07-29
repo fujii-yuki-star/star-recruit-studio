@@ -6,6 +6,7 @@ import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
 import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
 import type { EditBlockedReason } from "../domain/timeline/edit";
+import type { TimelineExportBlockCode } from "../domain/timeline/export";
 // 型のみ（実行時 import なし＝store との循環を作らない）。空状態の文言が状態で変わるため（#590）。
 import type { GenerateStatus } from "./store/projectStore";
 /**
@@ -397,4 +398,18 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",
   TIMELINE_EDIT_LOCKED: "この列は固定されています。動かすには固定を外してください",
   TIMELINE_EDIT_NOT_FOUND: "その部品は見つかりませんでした。選び直してください",
+  TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
+};
+
+/**
+ * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で
+ * **全コードに文言が要る**＝理由が増えたら気づく。動画の素材は「まだ動かせず音も鳴らない」ので、
+ * 静止画＋無音の動画を成功として出さずに断る（ADR-0026④）。
+ */
+export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
+  TIMELINE_EXPORT_EMPTY: "まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください",
+  TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED:
+    "動画の素材はまだ書き出せません。その部品を外すか、写真に置き換えてから書き出してください",
+  TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
+    "見た目パターンが見つからない部品があります。そのままでは動画に出ません。見た目パターンを読み込み直すか、その部品を置き直してください",
 };

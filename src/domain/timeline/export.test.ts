@@ -105,6 +105,7 @@ describe('timelineAudioRuns', () => {
       {
         clipId: 'clip_001',
         sourceKey: 'voice:voices/clip_001.wav',
+        fileExt: 'wav',
         delaySec: 2,
         playSec: 3,
         sourceStartSec: 0,
@@ -216,6 +217,50 @@ describe('timelineExportBlockers（書き出す前に止める理由）', () => 
 
   it('持っているだけで使っていない動画素材では止めない（消し忘れで書き出せなくならない）', () => {
     const d = doc({ assets: [videoAsset], clips: [textClip('clip_001')] });
+    expect(timelineExportBlockers(d)).toEqual([]);
+  });
+});
+
+describe('音源ファイルの拡張子', () => {
+  it('同梱BGM・持ち込みの音・読み上げで、実際のファイルに合わせる', () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/song.M4A' }],
+      clips: [
+        clip('clip_001', { bundledBgmId: 'found-new-hope' }),
+        clip('clip_002', { assetId: 'asset_001', startSec: 10 }),
+        voiceClip('clip_003', { startSec: 20 }),
+      ],
+    });
+    expect(timelineAudioRuns(d).map((r) => r.fileExt)).toEqual(['mp3', 'm4a', 'wav']);
+  });
+
+  it('拡張子が判らないときも空にしない（形式を判定できる手がかりを渡す）', () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/song' }],
+      clips: [clip('clip_001', { assetId: 'asset_001' })],
+    });
+    expect(timelineAudioRuns(d)[0].fileExt).toBe('mp3');
+  });
+});
+
+describe('見た目が見つからない部品（書き出しを止める）', () => {
+  const tmplClip = (id: string, templateId: string): TimelineClip =>
+    clip(id, { kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', templateId, x: 0, y: 0, w: 100, h: 100 });
+
+  it('読み込めている見た目が渡されたとき、見つからない部品があれば止める', () => {
+    const d = doc({ clips: [tmplClip('clip_001', 'tmpl_missing')] });
+    expect(timelineExportBlockers(d, { knownTemplateIds: new Set(['tmpl_001']) })).toEqual([
+      { code: TIMELINE_EXPORT_BLOCK.templateUnresolved, clipIds: ['clip_001'] },
+    ]);
+  });
+
+  it('見つかっていれば止めない', () => {
+    const d = doc({ clips: [tmplClip('clip_001', 'tmpl_001')] });
+    expect(timelineExportBlockers(d, { knownTemplateIds: new Set(['tmpl_001']) })).toEqual([]);
+  });
+
+  it('判定材料が無いときは見ない（嘘の理由を出さない）', () => {
+    const d = doc({ clips: [tmplClip('clip_001', 'tmpl_missing')] });
     expect(timelineExportBlockers(d)).toEqual([]);
   });
 });

@@ -96,7 +96,9 @@ describe("TimelineProjectScreen: レビュー指摘の修正（/canon-check）",
       clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_missing" }],
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByRole("alert").textContent).toContain("見た目パターンが見つからない部品が1個あります");
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("見た目パターンが見つからない部品が1個あります"))).toBe(true);
+    // 描かれないものが混ざったまま書き出させない（ADR-0026④）。
+    expect(screen.getByRole("button", { name: "動画を書き出す" })).toBeDisabled();
   });
 
   it("置き場所の取り違え（11 §8）も知らせる＝描画から外れるものを黙らせない", () => {
@@ -278,5 +280,57 @@ describe("TimelineProjectScreen: 音（#630 後半）", () => {
     useTimelineStore.setState({ audioSrcByKey: { "voice:voices/a.wav": "data:audio/wav;base64,QQ==" } });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText(/音が見つからない部品/)).not.toBeInTheDocument();
+  });
+});
+
+describe("TimelineProjectScreen: 書き出し（#631）", () => {
+  it("書き出しの導線を出し、押すと書き出しが走る", () => {
+    open();
+    useProjectStore.setState({ templates: [], templateAssetSrcById: {} });
+    const exportTimelineVideo = vi.fn().mockResolvedValue(undefined);
+    useTimelineStore.setState({ exportTimelineVideo });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }));
+    expect(exportTimelineVideo).toHaveBeenCalledWith({ templates: [], templateAssetSrcById: {} });
+  });
+
+  it("書き出せない理由があるときは、押す前に理由を見せて押せなくする（§2-5）", () => {
+    open({ clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: "動画を書き出す" });
+    expect(btn).toBeDisabled();
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("まだ何も置かれていない"))).toBe(true);
+  });
+
+  it("書き出し中は進み具合と中止を出す（書き出すボタンは出さない）", () => {
+    open();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 42, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/動画を書き出しています（42%）/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "書き出しを中止" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "動画を書き出す" })).not.toBeInTheDocument();
+  });
+
+  it("保存先を選んでいる間は進み具合を出さない（まだ何も描いていない）", () => {
+    open();
+    useTimelineStore.setState({ exportRun: { phase: "preparing", percent: 0, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/動画を書き出しています/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "動画を書き出す" })).not.toBeInTheDocument();
+  });
+
+  it("終わったら結果を出し、閉じられる", () => {
+    open();
+    useTimelineStore.setState({ exportRun: { phase: "done", percent: 100, message: "動画を保存しました。", cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/動画を保存しました/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    expect(useTimelineStore.getState().exportRun.phase).toBe("idle");
+  });
+
+  it("クレジットをプレビューにも出す（書き出しでは焼き込まれる＝見えていたものと同じ）", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".preview-stage")?.innerHTML).toContain("VOICEVOX:");
   });
 });

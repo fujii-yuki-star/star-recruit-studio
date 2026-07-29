@@ -22,6 +22,11 @@ export const EDIT_BLOCKED = {
   locked: 'TIMELINE_EDIT_LOCKED',
   /** 対象が見つからない（消された直後の操作など）。 */
   notFound: 'TIMELINE_EDIT_NOT_FOUND',
+  /**
+   * 書き出し中（#631）。書き出しは**始めた時点の文書**を焼くので、途中の編集は動画に入らない。
+   * 入らない編集を受け付けると「直したのに反映されていない動画」が成功として出る（ADR-0026①）。
+   */
+  exporting: 'TIMELINE_EDIT_EXPORTING',
 } as const;
 
 export type EditBlockedReason = (typeof EDIT_BLOCKED)[keyof typeof EDIT_BLOCKED];

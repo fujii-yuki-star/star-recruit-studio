@@ -28,7 +28,9 @@ import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { ASSET_TYPE } from "../../domain/enums";
 import { isTemplateAsset } from "../../domain/template/templateAsset";
-import { fontFamilyForId, resolveFontId, FONT_CATALOG } from "../../domain/font/fontCatalog";
+import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
+import { loadExportFonts } from "../../renderer/export/loadExportFonts";
+import { OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, useExportLockStore } from "../store/exportLock";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 
@@ -121,10 +123,19 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // 標準BGM（同梱）が選ばれていれば、それを最優先で使う（assetId より優先）。
   const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
 
+  // 書き出しの持ち主（`exportLock`）。タイムライン形式と一時ファイルの置き場を取り合わないために使う。
+  const EXPORT_OWNER = "scene" as const;
+
   async function startExport() {
     // 二重書き出しの入口ガード（#379）：ボタンは busy 中 disabled だが、他画面から戻って進捗表示が
     // 消えて見える等での再トリガを store の実状態で弾く（Rust 側にも実行中ガードあり＝多層防御）。
     if (busy) return;
+    // タイムライン形式の書き出しが走っていたら始めない（一時ファイルの置き場を取り合って壊れた動画が出る・#631）。
+    if (isOtherExportRunning(EXPORT_OWNER)) {
+      setMessage(OTHER_EXPORT_RUNNING_MESSAGE);
+      setPhase("error");
+      return;
+    }
     if (!canExport()) {
       setPhase("unsupported");
       return;
@@ -170,6 +181,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     const blockedBefore = startBlockedMessage();
     if (blockedBefore) { setMessage(blockedBefore); setPhase("error"); return; }
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
+    useExportLockStore.getState().acquire(EXPORT_OWNER);
     await beginExport();
     // beginExport の IPC 往復中に取り込み/生成が起動していないか再確認する（#570 P1 レビュー）。相手は最初の await の前に
     // isImporting/pending を立てるので、beginExport 窓で始まったものもこの時点で真＝確実に捕捉できる。setPhase("rendering")
@@ -224,18 +236,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       // まとめず、JSON.stringify の文字列上限超過（RangeError）を避ける（#書き出しRangeError）。前回の残りを掃除。
       await clearExportFramesStage();
       const templateById = new Map(snapTemplates.map((t) => [t.templateId, t] as const));
-      // 書き出し前に同梱フォントを確実に読み込む（場面ごとに別フォントを使い得るため全フォント。
-      // Canvas ラスタライズはロード済みフォントしか使えない・ADR-0004）。
-      if (typeof document !== "undefined" && document.fonts) {
-        try {
-          await Promise.all(
-            FONT_CATALOG.flatMap((f) => [
-              document.fonts.load(`400 1em "${f.cssFamily}"`),
-              document.fonts.load(`700 1em "${f.cssFamily}"`),
-            ]),
-          );
-        } catch { /* 読込失敗時は描画側のフォールバックに任せる */ }
-      }
+      // 書き出し前に同梱フォントを確実に読み込む（場面ごとに別フォントを使い得るため全フォント）。
+      // タイムライン形式と**同じ関数**を通す＝形式によって焼ける字体が割れない（§6・ADR-0026②）。
+      await loadExportFonts();
       const built = await buildExportScenes(
         snapScenes,
         templateById,
@@ -330,6 +333,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       }
     } finally {
       unlistenProgress?.(); // 進捗購読を解除（#376）
+      useExportLockStore.getState().release(EXPORT_OWNER); // 走行中の締めを返す（#631）
       setExportRun({ cancelling: false }); // 中止フラグは1回の書き出しで完結（次回に持ち越さない・#380）
       // ステージングしたアニメフレームを掃除（成功/失敗いずれも）＝次回書き出しに残さない（#書き出しRangeError）。
       await clearExportFramesStage().catch(() => {});
