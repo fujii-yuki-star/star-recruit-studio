@@ -11,14 +11,16 @@ import { clipEndSec } from './validateTimelineDoc';
 import type { TimelineClip, TimelineProject } from './types';
 
 /**
- * クリップの実効音量（`11 §6` の null=継承と同じ流儀）。
+ * クリップの**フェードを掛ける前**の実効音量（`11 §6` の null=継承と同じ流儀）。
+ * 再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）が**同じ解決**を通るように export する
+ * ＝書き出し側で「フェード込みの値から割り戻す」ような当て推量をしない。
  * **読み上げ**＝`clip.volume` → 動画全体の声の音量（`voiceSettings.volume`）→ `NARRATION_VOLUME`。
  * **音（BGM・持ち込み）**＝`clip.volume` → `BGM_VOLUME`。
  *
  * 既定を 1.0 で決め打ちにすると、BGM 音量を明示していない文書（焼き出しは指定が無いと `volume` を
  * 書かない）が場面形式の **4倍**（0.25 → 1.0）で鳴る。値域のクランプも `clampVolume` を共有する。
  */
-function baseVolume(clip: TimelineClip, doc: TimelineProject): number {
+export function clipBaseVolume(clip: TimelineClip, doc: TimelineProject): number {
   if (clip.kind === TIMELINE_CLIP_KIND.voice) {
     return clampVolume(clip.volume ?? doc.voiceSettings.volume ?? NARRATION_VOLUME);
   }
@@ -43,20 +45,23 @@ function isAudioClip(clip: TimelineClip): boolean {
 }
 
 /**
- * フェードを織り込んだ音量。
- *
- * **各フェードを尺の半分までに切り詰めてから掛ける**＝書き出しの BGM ミックス（`planBgmMix`）と同じ規則
+ * フェードの秒数（**各端を尺の半分までに切り詰める**）＝書き出しの BGM ミックス（`planBgmMix`）と同じ規則
  * （そちらも `playSec/2` にクランプしてから afade へ渡す）。規則を2つ持つと、同じデータで
- * プレビューと書き出しの音が違う（ADR-0001）。切り詰めるので両端が重ならず、二重に絞られない。
+ * プレビューと書き出しの音が違う（ADR-0001）。**再生と書き出しでこの関数を共有する。**
  */
+export function clipFadeSec(clip: TimelineClip): { fadeInSec: number; fadeOutSec: number } {
+  const half = clip.durationSec / 2;
+  return {
+    fadeInSec: Math.min(Math.max(0, clip.fadeInSec ?? 0), half),
+    fadeOutSec: Math.min(Math.max(0, clip.fadeOutSec ?? 0), half),
+  };
+}
+
 function fadedVolume(clip: TimelineClip, doc: TimelineProject, localSec: number): number {
-  const base = baseVolume(clip, doc);
-  const dur = clip.durationSec;
-  const half = dur / 2;
-  const fadeIn = Math.min(Math.max(0, clip.fadeInSec ?? 0), half);
-  const fadeOut = Math.min(Math.max(0, clip.fadeOutSec ?? 0), half);
-  const inGain = fadeIn > 0 ? Math.min(1, localSec / fadeIn) : 1;
-  const outGain = fadeOut > 0 ? Math.min(1, (dur - localSec) / fadeOut) : 1;
+  const base = clipBaseVolume(clip, doc);
+  const { fadeInSec, fadeOutSec } = clipFadeSec(clip);
+  const inGain = fadeInSec > 0 ? Math.min(1, localSec / fadeInSec) : 1;
+  const outGain = fadeOutSec > 0 ? Math.min(1, (clip.durationSec - localSec) / fadeOutSec) : 1;
   return Math.max(0, base * inGain * outGain);
 }
 
