@@ -4,20 +4,21 @@
 // 「その時刻に生きているクリップを、トラックの並び順に重ねる」だけを担い、1クリップの中身は
 // `layoutScene` に委ねる。こうするとテンプレの層解決・FREE 要素・文字の体裁・キーフレームの重ね方が
 // 両形式で1つの実装に収まり、プレビュー＝書き出しのパリティ（ADR-0001）を二重に作らずに済む。
-import { DEFAULT_CHARACTER_ID, dimsForOrientation } from '../domain/constants';
-import { FREE_CATEGORY, NARRATION_STATUS, TEXT_KEY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
+import { DEFAULT_BACKGROUND_COLOR, dimsForOrientation } from '../domain/constants';
+import { sceneFromClip } from '../domain/timeline/sceneFromClip';
+import { FREE_CATEGORY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind, TimelineClipKind } from '../domain/enums';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { groupElementIds } from '../domain/project/groupOps';
 import type { Group } from '../domain/group/types';
 import { interpolateKeyframes } from '../domain/project/keyframes';
 import type { InterpolatedTransform } from '../domain/project/keyframes';
-import type { FreeElement, Scene } from '../domain/project/types';
+import type { FreeElement } from '../domain/project/types';
 import { TEMPLATE_SCHEMA_VERSION } from '../domain/template/types';
 import type { Template } from '../domain/template/types';
 import { clipEndSec } from '../domain/timeline/validateTimelineDoc';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
-import { applyInterpolatedTransform, DEFAULT_BACKGROUND_COLOR, layoutScene } from './layout';
+import { applyInterpolatedTransform, layoutScene } from './layout';
 import type { LayoutItem, SceneLayout } from './layout';
 import type { Orientation } from '../domain/enums';
 
@@ -147,49 +148,6 @@ function clipBox(clip: TimelineClip, canvas: { width: number; height: number }):
     h: clip.h ?? canvas.height,
     ...(clip.rotation != null ? { rotation: clip.rotation } : {}),
   };
-}
-
-/**
- * クリップを、場面形式の Scene へ写して `layoutScene` に渡せる形にする（**保存しない・このフレームの中だけ**）。
- *
- * `sceneType` は**実際に使う見た目の `category`** を入れる＝`11 §3.2`「`scene.sceneType` と `template.category` は
- * 同じ値集合を共有する」に合わせる（描画は `template.category` で分岐するので絵は変わらないが、
- * `sceneType` を読む規則〔例 `isFreeScene`〕と同じ形の後続コードが誤読しないようにする）。
- */
-function sceneFromClip(clip: TimelineClip, template: Template): Scene {
-  return {
-    // sceneId はこのフレームの中でだけ使う識別子。partId/warnings も器を満たすためのダミー（保存も検証もしない）。
-    sceneId: clip.id,
-    partId: '',
-    order: 0,
-    sceneType: template.category,
-    templateId: clip.templateId ?? '',
-    durationSec: clip.durationSec,
-    assetRefs: clip.assetRefs ?? {},
-    character: clip.character ?? { enabled: false, characterId: DEFAULT_CHARACTER_ID },
-    texts: subtitleAwareTexts(clip),
-    narration: { text: '', status: NARRATION_STATUS.none },
-    warnings: [],
-    ...(clip.textStyles ? { textStyles: clip.textStyles } : {}),
-    ...(clip.slotFits ? { slotFits: clip.slotFits } : {}),
-    ...(clip.textFontIds ? { textFontIds: clip.textFontIds } : {}),
-    ...(clip.slotClips ? { slotClips: clip.slotClips } : {}),
-    ...(clip.fontId != null ? { fontId: clip.fontId } : {}),
-  };
-}
-
-/**
- * 字幕のクリップ（`kind:'subtitle'`）が持つ**焼き付けた文言**を、`texts.subtitle` として渡す。
- *
- * FREE 字幕要素は表示文を「対象（`subtitleSource`）」から解決する（ADR-0029）が、タイムライン形式に対象の語彙は
- * 無い（連動は #633）。焼き出し（#628 `staticSubtitleText`）は**時間で変わらない字幕を `clip.text` へ焼き付ける**ので、
- * ここで `texts.subtitle` に載せて既定の対象（＝読み上げ）から解決させる。これが無いと、
- * **「黙って消さない」ために焼き付けた字幕が受け側で1つも描かれない**（§2-5・#642 レビュー 🔴）。
- */
-function subtitleAwareTexts(clip: TimelineClip): NonNullable<Scene['texts']> {
-  const texts = clip.texts ?? {};
-  if (clip.kind !== TIMELINE_CLIP_KIND.subtitle || !clip.text) return texts;
-  return { ...texts, [TEXT_KEY.subtitle]: clip.text };
 }
 
 /** 自由配置のクリップ（slot/text/shape/subtitle）を FREE 要素へ写す。空間の語彙は同じもの（11 §7.6）。 */

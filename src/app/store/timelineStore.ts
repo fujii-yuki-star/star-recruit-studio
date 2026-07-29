@@ -19,6 +19,7 @@ import {
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
 import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
+import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { timelineAudioRuns, timelineExportBlockers } from "../../domain/timeline/export";
 import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
@@ -102,6 +103,8 @@ export interface TimelineState {
   setSelectedClipAssetRef: (layerId: string, assetId: string | null) => void;
   /** 選んでいる見た目パターンの文字を書き換える（#632）。 */
   setSelectedClipText: (textKey: TextKey, text: string) => void;
+  /** 見た目パターンの部品をバラす（中身ぶんの部品へ展開・#632）。**戻せない**（取り消しでだけ戻る）。 */
+  explodeClip: (clipId: string, template: Template) => void;
   /** 見た目パターンを素材として置く（#632）。 */
   addTemplateClip: (input: { template: Template; trackId: string; startSec: number }) => void;
   addTrack: (kind: TrackKind) => void;
@@ -282,6 +285,21 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
   setSelectedClipAssetRef: (layerId, assetId) => applyEdit(set, get, (d, id) => setClipAssetRef(d, id, layerId, assetId)),
   setSelectedClipText: (textKey, text) => applyEdit(set, get, (d, id) => setClipText(d, id, textKey, text)),
+
+  explodeClip: (clipId, template) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // **対象は確認したその部品**（選択ではなく id で受ける）＝確認を出したまま別の部品を選んでも、
+    // 戻せない操作が別の部品に効かない。
+    const r = explodeTemplateClip(doc, clipId, template);
+    if (!r.ok) {
+      set({ editBlocked: r.reason });
+      return;
+    }
+    // バラした部品をまとめて選ぶ＝続けて動かせる（元の部品はもう無い）。
+    const before = new Set(doc.clips.map((c) => c.id));
+    commit(set, get, r.doc, { selectedClipIds: r.doc.clips.filter((c) => !before.has(c.id)).map((c) => c.id) });
+  },
 
   addTemplateClip: (input) => {
     const doc = get().doc;

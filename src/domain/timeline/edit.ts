@@ -35,6 +35,11 @@ export const EDIT_BLOCKED = {
    * はみ出した絵**になり、検証にも書き出しにも引っかからないまま出てしまう。置く前に断る。
    */
   orientation: 'TIMELINE_EDIT_ORIENTATION',
+  /**
+   * 拡大・回転の動きが付いた部品を、中身が枠からはみ出した状態でバラそうとした（#632）。
+   * 動きの支点が変わって**絵がずれる**ので、先に動きを外してもらう。
+   */
+  explodeAnchor: 'TIMELINE_EDIT_EXPLODE_ANCHOR',
 } as const;
 
 export type EditBlockedReason = (typeof EDIT_BLOCKED)[keyof typeof EDIT_BLOCKED];

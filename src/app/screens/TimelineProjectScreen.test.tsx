@@ -469,6 +469,36 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     expect(screen.getByText(/この形式ではまだ動画を使えません/)).toBeInTheDocument();
   });
 
+  it("バラす前に断る（戻せないことを知らせる）", () => {
+    openWithTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "中身をバラす" }));
+    expect(screen.getByText(/写真や文字を入れる場所は無くなります/)).toBeInTheDocument();
+    // 確認しただけでは何も起きない。
+    expect(useTimelineStore.getState().doc?.clips).toHaveLength(1);
+  });
+
+  it("バラすと中身ぶんの部品になり、まとめて選ばれる", () => {
+    openWithTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "中身をバラす" }));
+    fireEvent.click(screen.getByRole("button", { name: "バラす" }));
+    const s = useTimelineStore.getState();
+    expect(s.doc?.clips.length).toBeGreaterThan(1);
+    expect(s.doc?.clips.some((c) => c.kind === TIMELINE_CLIP_KIND.template)).toBe(false);
+    expect(s.selectedClipIds).toEqual(s.doc?.clips.map((c) => c.id));
+  });
+
+  it("バラしたあとは取り消しで戻せる", () => {
+    openWithTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "中身をバラす" }));
+    fireEvent.click(screen.getByRole("button", { name: "バラす" }));
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().doc?.clips).toHaveLength(1);
+    expect(useTimelineStore.getState().doc?.clips[0].kind).toBe(TIMELINE_CLIP_KIND.template);
+  });
+
   it("見た目パターンを再生位置から置ける", () => {
     useProjectStore.setState({ templates: [template], templateAssetSrcById: {} });
     open({ clips: [] });

@@ -305,7 +305,7 @@ export function isFreeScene(scene: Scene, template: Template | undefined): boole
  * 行に追従する対象（全部／話者）は焼けないので何も付けず、`BakeNote` で知らせる。
  * 字幕 OFF・文が空（`freeSubtitleElementTexts` が空）のときも何も付けない＝元から出ていない。
  */
-function staticSubtitleText(el: FreeElement, scene: Scene): { text?: string } {
+export function staticSubtitleText(el: FreeElement, scene: Scene): { text?: string } {
   if (el.kind !== FREE_ELEMENT_KIND.subtitle) return {};
   const source = el.subtitleSource ?? defaultSubtitleSource(scene);
   if (source.kind !== SUBTITLE_SOURCE_KIND.narration) return {};

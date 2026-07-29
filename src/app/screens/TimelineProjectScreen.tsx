@@ -93,7 +93,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
-    setSelectedClipAssetRef, setSelectedClipText, addTemplateClip,
+    setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -124,6 +124,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
   // 見た目パターンを置く先の列（消された/固定されたときは置くときに実在するものへ落とす）。
   const [placeTrackId, setPlaceTrackId] = useState<string>("");
+  // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
+  const [explodingClipId, setExplodingClipId] = useState<string | null>(null);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
   // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
   const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
@@ -330,6 +332,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </p>
       </div>
 
+      {explodingClipId && selectedTemplate && (
+        <DeleteConfirm
+          message={`「${selectedTemplate.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
+          confirmLabel="バラす"
+          busyLabel="バラしています…"
+          onCancel={() => setExplodingClipId(null)}
+          onConfirm={() => {
+            explodeClip(explodingClipId, selectedTemplate);
+            setExplodingClipId(null);
+          }}
+        />
+      )}
+
       {removingTrackId && doc.tracks.some((t) => t.id === removingTrackId) && (
         <DeleteConfirm
           message={`「${trackLabel(doc.tracks, removingTrackId)}」を消しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
@@ -501,6 +516,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       />
                     </label>
                   ))}
+                  <button
+                    className="btn btn-secondary"
+                    disabled={selectedLocked}
+                    title={lockedHint}
+                    onClick={() => setExplodingClipId(selected.id)}
+                  >
+                    中身をバラす
+                  </button>
                 </div>
               ) : (
                 <p className="notice notice-warn" role="alert">

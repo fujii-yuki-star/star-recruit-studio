@@ -205,3 +205,6 @@ export const ROTATION_DEG_MAX = 359;
  * 実用上の天井にすぎない＝**広い方（100）に統一**してテンプレ側の不当な制限（21px 以上を作れない）を解く。
  */
 export const STROKE_WIDTH_MAX = 100;
+
+/** 見た目パターンが背景色を指定していないときの下地（`template.defaults.backgroundColor` の既定）。 */
+export const DEFAULT_BACKGROUND_COLOR = '#ffffff';
