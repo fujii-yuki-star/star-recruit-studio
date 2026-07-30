@@ -8,6 +8,10 @@ import { TIMELINE_SCHEMA_VERSION } from '../domain/timeline/types';
 import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import type { Template } from '../domain/template/types';
 import { explodeTemplateClip } from '../domain/timeline/explode';
+import { bakeTimelineProject } from '../domain/timeline/bake';
+import { DEFAULT_LINE_HEIGHT, layoutScene } from './layout';
+import { wrapText } from '../domain/text/textWrap';
+import type { Scene } from '../domain/project/types';
 import { layoutTimelineAt } from './timelineLayout';
 import { layoutToSvg } from './sceneSvg';
 import { validateTimelineProject } from '../domain/validation/generated/validators.js';
@@ -280,5 +284,187 @@ describe('explodeTemplateClip（文書の形）', () => {
     const r = explodeTemplateClip(d, 'clip_001', template);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('TIMELINE_EDIT_LOCKED');
+  });
+});
+
+// ── 焼き出した掛け合い字幕が、場面形式と同じ位置に出るか（#633） ──
+// 「焼く前と焼いた後で字幕の位置が変わらない」を、**描いた結果**で確かめる（変換の書き方に依らない）。
+describe('焼いた掛け合い字幕の位置が場面形式と一致する', () => {
+  const tmpl: Template = {
+    schemaVersion: '1.0',
+    templateId: 'tmpl_dialog',
+    name: '掛け合い',
+    category: 'message',
+    aspectRatio: '16:9',
+    canvas: { width: 1920, height: 1080 },
+    layers: [
+      { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, fillColor: '#101010' },
+      { id: 'subtitleBand', type: 'subtitle', textKey: 'subtitle', x: 100, y: 950, w: 1720, h: 120, fontSize: 52 },
+    ],
+  };
+
+  /** 場面形式の1フレーム（その時刻に出ている字幕を `layoutScene` へ渡す＝書き出しと同じ経路）。 */
+  function sceneFrameSubtitleY(subtitleText: string, parallel?: string): number[] {
+    const sc: Scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'message', templateId: 'tmpl_dialog',
+      durationSec: 10, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+      texts: {}, narration: { text: '', status: 'none' }, warnings: [],
+      lines: [
+        { lineId: 'line_001', text: subtitleText, status: 'none' },
+        ...(parallel ? [{ lineId: 'line_002', text: parallel, startWithPrevious: true, status: 'none' as const }] : []),
+      ],
+    };
+    const layout = layoutScene(sc, tmpl, {
+      subtitleText,
+      ...(parallel ? { subtitleSegment: { startSec: 0, durationSec: 4, isFirst: true, lineId: 'line_001', subtitleText: subtitleText, parallelLineIds: ['line_002'] } } : {}),
+    });
+    return layout.items.filter((it) => it.kind === 'text' && it.isSubtitle).map((it) => it.y);
+  }
+
+  it('単独の行：焼いた字幕クリップの描画位置が場面形式と一致する', () => {
+    const [sceneY] = sceneFrameSubtitleY('こんにちは');
+    const baked = bakeTimelineProject(
+      {
+        schemaVersion: '1.0', projectId: 'proj_20260730_001', projectName: 'x',
+        createdAt: '2026-07-30T00:00:00.000Z', updatedAt: '2026-07-30T00:00:00.000Z',
+        videoKind: 'recruit', purpose: 'company_intro',
+        videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+        voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+        assets: [], parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
+        scenes: [{
+          sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'message', templateId: 'tmpl_dialog',
+          durationSec: 10, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+          texts: {}, narration: { text: '', status: 'none' }, warnings: [],
+          lines: [{ lineId: 'line_001', text: 'こんにちは', status: 'none' }],
+        }],
+      },
+      {
+        range: { kind: 'whole' }, projectId: 'proj_20260730_002', projectName: 'y',
+        nowIso: '2026-07-30T00:00:00.000Z', templateOf: () => tmpl, lineDurationsFor: () => ({ line_001: 4 }),
+      },
+    ).doc;
+    // 焼いた字幕クリップを、タイムラインの描画（`layoutTimelineAt`）で1フレーム描く。
+    const items = layoutTimelineAt(baked, 1, { templateOf: () => tmpl }).items;
+    const drawnY = items.filter((it) => it.kind === 'text' && it.isSubtitle).map((it) => it.y);
+    expect(drawnY).toHaveLength(1);
+    // 場面形式は**下端基準**（`anchorBottom`）・タイムラインは上端起点。1行なら同じ位置に出る。
+    expect(drawnY[0]).toBeCloseTo(sceneY);
+  });
+  it('同時に流れる2行：積んだ字幕の位置も場面形式と一致する', () => {
+    const sceneYs = sceneFrameSubtitleY('いちばんめ', 'にばんめ');
+    const baked = bakeTimelineProject(
+      {
+        schemaVersion: '1.0', projectId: 'proj_20260730_001', projectName: 'x',
+        createdAt: '2026-07-30T00:00:00.000Z', updatedAt: '2026-07-30T00:00:00.000Z',
+        videoKind: 'recruit', purpose: 'company_intro',
+        videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+        voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+        assets: [], parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
+        scenes: [{
+          sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'message', templateId: 'tmpl_dialog',
+          durationSec: 10, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+          texts: {}, narration: { text: '', status: 'none' }, warnings: [],
+          lines: [
+            { lineId: 'line_001', text: 'いちばんめ', status: 'none' },
+            { lineId: 'line_002', text: 'にばんめ', startWithPrevious: true, status: 'none' },
+          ],
+        }],
+      },
+      {
+        range: { kind: 'whole' }, projectId: 'proj_20260730_002', projectName: 'y',
+        nowIso: '2026-07-30T00:00:00.000Z', templateOf: () => tmpl,
+        lineDurationsFor: () => ({ line_001: 4, line_002: 4 }),
+      },
+    ).doc;
+    const drawnYs = layoutTimelineAt(baked, 1, { templateOf: () => tmpl })
+      .items.filter((it) => it.kind === 'text' && it.isSubtitle)
+      .map((it) => it.y)
+      .sort((a, b) => b - a); // 下→上
+    expect(drawnYs).toHaveLength(2);
+    expect(drawnYs[0]).toBeCloseTo(sceneYs.sort((a, b) => b - a)[0]);
+    expect(drawnYs[1]).toBeCloseTo(sceneYs.sort((a, b) => b - a)[1]);
+  });
+  it('2行に折り返す字幕：アンカーの違い（下端基準→上端起点）を座標へ翻訳する', () => {
+    // 場面形式のテンプレ字幕層は**下端基準**（行が増えると上へ伸びる）。タイムラインの字幕クリップは
+    // **上端起点**なので、y をそのまま写すと2行の字幕が1行ぶん下がる（画面外へも出うる）。
+    const long = 'これはとても長い字幕の文で、かならず二行に折り返される長さになっています。';
+    const sceneYs = sceneFrameSubtitleY(long);
+    const baked = bakeTimelineProject(
+      {
+        schemaVersion: '1.0', projectId: 'proj_20260730_001', projectName: 'x',
+        createdAt: '2026-07-30T00:00:00.000Z', updatedAt: '2026-07-30T00:00:00.000Z',
+        videoKind: 'recruit', purpose: 'company_intro',
+        videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+        voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+        assets: [], parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
+        scenes: [{
+          sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'message', templateId: 'tmpl_dialog',
+          durationSec: 10, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+          texts: {}, narration: { text: '', status: 'none' }, warnings: [],
+          lines: [{ lineId: 'line_001', text: long, status: 'none' }],
+        }],
+      },
+      {
+        range: { kind: 'whole' }, projectId: 'proj_20260730_002', projectName: 'y',
+        nowIso: '2026-07-30T00:00:00.000Z', templateOf: () => tmpl, lineDurationsFor: () => ({ line_001: 4 }),
+      },
+    ).doc;
+    const items = layoutTimelineAt(baked, 1, { templateOf: () => tmpl }).items;
+    const sub = items.find((it) => it.kind === 'text' && it.isSubtitle);
+    expect(sub).toBeDefined();
+    if (sub?.kind !== 'text') return;
+    // 折り返しが2行以上あること（この検査が意味を持つ前提）。
+    expect(wrapText(long, 1720, 52, sub.maxLines).length).toBeGreaterThan(1);
+    // 場面形式の帯の**上端**＝タイムラインの y（上端起点）。
+    const lineHeightPx = 52 * DEFAULT_LINE_HEIGHT;
+    const n = wrapText(long, 1720, 52, sub.maxLines).length;
+    expect(sub.y).toBeCloseTo(sceneYs[0] - (n - 1) * lineHeightPx);
+  });
+  it('回転した字幕層：焼いても同じ位置に出る（回転の軸が動くぶんを打ち消す）', () => {
+    const rotated: Template = {
+      ...tmpl,
+      layers: tmpl.layers.map((l) => (l.type === 'subtitle' ? { ...l, rotation: 20 } : l)),
+    };
+    const text = 'かいてん';
+    // 場面形式の1フレーム（回転あり）。
+    const sc: Scene = {
+      sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'message', templateId: 'tmpl_dialog',
+      durationSec: 10, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+      texts: {}, narration: { text: '', status: 'none' }, warnings: [],
+      lines: [{ lineId: 'line_001', text, status: 'none' }],
+    };
+    const sceneSvgOut = layoutToSvg(layoutScene(sc, rotated, { subtitleText: text }), {});
+    const baked = bakeTimelineProject(
+      {
+        schemaVersion: '1.0', projectId: 'proj_20260730_001', projectName: 'x',
+        createdAt: '2026-07-30T00:00:00.000Z', updatedAt: '2026-07-30T00:00:00.000Z',
+        videoKind: 'recruit', purpose: 'company_intro',
+        videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+        voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+        assets: [], parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
+        scenes: [sc],
+      },
+      {
+        range: { kind: 'whole' }, projectId: 'proj_20260730_002', projectName: 'y',
+        nowIso: '2026-07-30T00:00:00.000Z', templateOf: () => rotated, lineDurationsFor: () => ({ line_001: 4 }),
+      },
+    ).doc;
+    const bakedSvg = layoutToSvg(layoutTimelineAt(baked, 1, { templateOf: () => rotated }), {});
+    // **回した後の文字の位置**を比べる（`rotate(...)` の軸そのものは箱が違えば当然変わる）。
+    // 軸 (cx,cy) まわりに角度 deg で回した文字の始点 (x,y) が、焼く前と後で同じ場所に来るか。
+    const drawnPoint = (svg: string): { x: number; y: number } => {
+      const g = svg.match(/rotate\(([-\d.]+) ([-\d.]+) ([-\d.]+)\)"><text x="([-\d.]+)" y="([-\d.]+)"/);
+      if (!g) throw new Error(`回転した文字が見つからない: ${svg.slice(0, 200)}`);
+      const [deg, cx, cy, x, y] = g.slice(1).map(Number);
+      const rad = (deg * Math.PI) / 180;
+      return {
+        x: cx + (x - cx) * Math.cos(rad) - (y - cy) * Math.sin(rad),
+        y: cy + (x - cx) * Math.sin(rad) + (y - cy) * Math.cos(rad),
+      };
+    };
+    const before = drawnPoint(sceneSvgOut);
+    const after = drawnPoint(bakedSvg);
+    expect(after.x).toBeCloseTo(before.x, 3);
+    expect(after.y).toBeCloseTo(before.y, 3);
   });
 });

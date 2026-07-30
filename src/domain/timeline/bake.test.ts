@@ -624,7 +624,7 @@ describe('bakeTimelineProject: 素材はコピーする前提で持っていく�
 });
 
 describe('bakeTimelineProject: 持っていけなかったものを黙って落とさない（§2-5）', () => {
-  it('掛け合いの字幕がある場面を記録する', () => {
+  it('掛け合いの字幕は**焼けるようになった**ので記録しない（#633＝行ごとの字幕クリップ＋連動）', () => {
     const p = project({
       scenes: [
         scene('scene_001'),
@@ -637,7 +637,7 @@ describe('bakeTimelineProject: 持っていけなかったものを黙って落�
       ],
     });
     const { notes } = bakeTimelineProject(p, opts());
-    expect(notes).toEqual([{ code: BAKE_NOTE_CODE.dialogueSubtitle, sceneNumbers: [2] }]);
+    expect(notes.filter((n) => n.code === BAKE_NOTE_CODE.dialogueSubtitle)).toEqual([]);
   });
 
   it('掛け合いでも全行の字幕が OFF なら記録しない（落ちるものが無い）', () => {
@@ -655,13 +655,11 @@ describe('bakeTimelineProject: 持っていけなかったものを黙って落�
     expect(bakeTimelineProject(p, opts()).notes).toEqual([]);
   });
 
-  it('セリフが1行だけでも記録する（テンプレの字幕層は行の字幕へ差し替わるので、焼くと出なくなる）', () => {
+  it('セリフが1行だけの場面も焼ける（記録しない・#633）', () => {
     const p = project({
       scenes: [scene('scene_001', { lines: [{ lineId: 'line_001', text: 'ひとこと', status: NARRATION_STATUS.none }] })],
     });
-    expect(bakeTimelineProject(p, opts()).notes).toEqual([
-      { code: BAKE_NOTE_CODE.dialogueSubtitle, sceneNumbers: [1] },
-    ]);
+    expect(bakeTimelineProject(p, opts()).notes).toEqual([]);
   });
 
   it('見た目に字幕の枠が無ければ記録しない（元から字幕が出ていない）', () => {
@@ -735,5 +733,219 @@ describe('sceneIdsBetween（「ここからここまで」の範囲）', () => {
 
   it('見つからない端は空（呼び出し側が選び直しを促す）', () => {
     expect(sceneIdsBetween(list, 'scene_002', 'scene_999')).toEqual([]);
+  });
+});
+
+describe('bakeTimelineProject: 掛け合いの字幕を行ごとの字幕クリップへ焼く（#633）', () => {
+  const dialogue = (over: Partial<Scene> = {}) =>
+    scene('scene_001', {
+      durationSec: 10,
+      lines: [
+        { lineId: 'line_001', text: 'いちばん', status: NARRATION_STATUS.none },
+        { lineId: 'line_002', text: 'にばん', status: NARRATION_STATUS.none },
+      ],
+      ...over,
+    });
+  const durations = { line_001: 4, line_002: 3 };
+
+  it('行ごとに字幕クリップを作り、同じ行の読み上げへ連動させる', () => {
+    const { doc } = bakeTimelineProject(project({ scenes: [dialogue()] }), opts({ lineDurationsFor: () => durations }));
+    const subs = doc.clips.filter((c) => c.kind === 'subtitle');
+    const voices = doc.clips.filter((c) => c.kind === 'voice');
+    expect(subs).toHaveLength(2);
+    expect(voices).toHaveLength(2);
+    // 連動先＝同じ行の読み上げ（時間も一致する）。
+    subs.forEach((sub) => {
+      const v = voices.find((x) => x.id === sub.voiceClipId);
+      expect(v).toBeDefined();
+      expect({ s: sub.startSec, d: sub.durationSec }).toEqual({ s: v?.startSec, d: v?.durationSec });
+    });
+  });
+
+  it('文言を焼き付ける（受け側で「対象」から解かなくても出る）', () => {
+    const { doc } = bakeTimelineProject(project({ scenes: [dialogue()] }), opts({ lineDurationsFor: () => durations }));
+    expect(doc.clips.filter((c) => c.kind === 'subtitle').map((c) => c.text)).toEqual(['いちばん', 'にばん']);
+  });
+
+  it('セリフごとの字幕文・字幕OFFを尊重する（描画と同じ解決）', () => {
+    const p = project({
+      scenes: [
+        dialogue({
+          lines: [
+            { lineId: 'line_001', text: 'よむ', subtitleText: 'みせる', status: NARRATION_STATUS.none },
+            { lineId: 'line_002', text: 'これは出ない', subtitleEnabled: false, status: NARRATION_STATUS.none },
+          ],
+        }),
+      ],
+    });
+    const { doc } = bakeTimelineProject(p, opts({ lineDurationsFor: () => durations }));
+    expect(doc.clips.filter((c) => c.kind === 'subtitle').map((c) => c.text)).toEqual(['みせる']);
+  });
+
+  it('テンプレクリップからは字幕のキーを落とす（場面いっぱいの静的字幕と二重にしない）', () => {
+    const p = project({ scenes: [dialogue({ texts: { title: 'たいとる', subtitle: 'しずかな字幕' } })] });
+    const { doc } = bakeTimelineProject(p, opts({ lineDurationsFor: () => durations }));
+    const tmpl = doc.clips.find((c) => c.kind === 'template');
+    expect(tmpl?.texts?.subtitle).toBeUndefined();
+    expect(tmpl?.texts?.title).toBe('たいとる'); // ほかの文字は残る
+  });
+
+  it('体裁（場面ごとの上書き）を写す', () => {
+    const p = project({ scenes: [dialogue({ textStyles: { subtitle: { fontSize: 80, color: '#00ff00' } } })] });
+    const { doc } = bakeTimelineProject(p, opts({ lineDurationsFor: () => durations }));
+    expect(doc.clips.find((c) => c.kind === 'subtitle')).toMatchObject({ fontSize: 80, color: '#00ff00' });
+  });
+
+  it('同時に流れるセリフの字幕は重ならないよう積む（下＝先頭・描画と同じ規則）', () => {
+    const p = project({
+      scenes: [
+        dialogue({
+          lines: [
+            { lineId: 'line_001', text: 'いち', status: NARRATION_STATUS.none },
+            { lineId: 'line_002', text: 'に', startWithPrevious: true, status: NARRATION_STATUS.none },
+          ],
+        }),
+      ],
+    });
+    const { doc } = bakeTimelineProject(p, opts({ lineDurationsFor: () => durations }));
+    const subs = doc.clips.filter((c) => c.kind === 'subtitle');
+    expect(subs).toHaveLength(2);
+    expect(subs[0].startSec).toBe(subs[1].startSec); // 同じ窓
+    expect(subs[1].y!).toBeLessThan(subs[0].y!); // 2人目は上へ
+  });
+
+  it('読み上げ文が空でも字幕が出ている行は焼く（声は作らない）', () => {
+    const p = project({
+      scenes: [
+        dialogue({
+          lines: [
+            { lineId: 'line_001', text: '', subtitleText: '声なしの字幕', status: NARRATION_STATUS.none },
+            { lineId: 'line_002', text: 'こえあり', status: NARRATION_STATUS.none },
+          ],
+        }),
+      ],
+    });
+    const { doc } = bakeTimelineProject(p, opts({ lineDurationsFor: () => durations }));
+    expect(doc.clips.filter((c) => c.kind === 'subtitle').map((c) => c.text)).toEqual(['声なしの字幕', 'こえあり']);
+    expect(doc.clips.filter((c) => c.kind === 'voice')).toHaveLength(1); // 声は文があるものだけ
+    // 連動先の無い字幕は連動を持たない（壊れた参照を作らない）。
+    expect(doc.clips.find((c) => c.text === '声なしの字幕')?.voiceClipId).toBeUndefined();
+  });
+
+  it('字幕の枠が無い見た目では焼かない（元から出ていない）', () => {
+    const noSubtitle: Template = { ...NORMAL_TEMPLATE, layers: NORMAL_TEMPLATE.layers.filter((l) => l.type !== 'subtitle') };
+    const { doc } = bakeTimelineProject(
+      project({ scenes: [dialogue()] }),
+      opts({ templateOf: () => noSubtitle, lineDurationsFor: () => durations }),
+    );
+    expect(doc.clips.filter((c) => c.kind === 'subtitle')).toHaveLength(0);
+  });
+
+  it('切り替えは場面まるごとに掛ける（字幕だけ不透明に残らない）', () => {
+    const p = project({
+      scenes: [dialogue(), scene('scene_002', { transition: { in: TRANSITION_TYPE.fade } })],
+    });
+    const { doc } = bakeTimelineProject(p, opts({ lineDurationsFor: () => durations }));
+    // 1場面目は「テンプレ＋字幕」なので場面グループができ、切り替えの付け先はそのグループ。
+    const group = doc.groups?.find((g) => g.members.some((m) => doc.clips.find((c) => c.id === m)?.kind === 'subtitle'));
+    expect(group).toBeDefined();
+    expect(group?.members).toContain(doc.clips.find((c) => c.kind === 'template')?.id);
+  });
+
+  it('焼いた文書はスキーマに適合する', () => {
+    const { doc } = bakeTimelineProject(project({ scenes: [dialogue()] }), opts({ lineDurationsFor: () => durations }));
+    expect(validateTimelineProject(doc)).toBe(true);
+  });
+
+  it('置いたクリップは同じ列で重ならない（V24）', () => {
+    const { doc } = bakeTimelineProject(project({ scenes: [dialogue(), dialogue()] }), opts({ lineDurationsFor: () => durations }));
+    expect(validateTimelineDoc(doc).filter((w) => w.code === 'TIMELINE_CLIP_OVERLAP')).toEqual([]);
+  });
+});
+
+describe('bakeTimelineProject: 焼いた字幕の細部（#633 レビュー）', () => {
+  const durations = { line_001: 4 };
+  const withLines = (over: Partial<Scene> = {}) =>
+    scene('scene_001', {
+      durationSec: 10,
+      texts: { subtitle: 'しずかな字幕' },
+      lines: [{ lineId: 'line_001', text: 'よむ', status: NARRATION_STATUS.none }],
+      ...over,
+    });
+
+  it('セリフ列がある場面は、行の字幕が全部 OFF でも静的字幕を復活させない（元から描かれていない）', () => {
+    // 場面形式は字幕層を**行の字幕で上書き**するので、OFF なら何も出ない。キーを残すと焼いた側だけ
+    // 場面いっぱいの静的字幕が出てしまう。
+    const p = project({ scenes: [withLines({ subtitleEnabledDefault: false })] });
+    const { doc } = bakeTimelineProject(p, opts({ lineDurationsFor: () => durations }));
+    expect(doc.clips.filter((c) => c.kind === 'subtitle')).toHaveLength(0);
+    expect(doc.clips.find((c) => c.kind === 'template')?.texts?.subtitle).toBeUndefined();
+  });
+
+  it('セリフ列が無くても、字幕 OFF の場面は静的字幕を復活させない', () => {
+    const p = project({ scenes: [scene('scene_001', { texts: { subtitle: 'しずかな字幕' }, subtitleEnabledDefault: false })] });
+    const { doc } = bakeTimelineProject(p, opts());
+    expect(doc.clips.find((c) => c.kind === 'template')?.texts?.subtitle).toBeUndefined();
+  });
+
+  it('静的字幕が出ている場面（セリフ列なし・ON）は残す（黙って消さない）', () => {
+    const p = project({ scenes: [scene('scene_001', { texts: { subtitle: 'しずかな字幕' } })] });
+    const { doc } = bakeTimelineProject(p, opts());
+    expect(doc.clips.find((c) => c.kind === 'template')?.texts?.subtitle).toBe('しずかな字幕');
+  });
+
+  it('自由配置の場面でも、見た目パターンの字幕層は行ごとに焼く（層は category を問わず描かれる）', () => {
+    const freeWithSubtitle: Template = {
+      ...FREE_TEMPLATE,
+      layers: [...FREE_TEMPLATE.layers, { id: 'subtitle', type: 'subtitle', textKey: 'subtitle', x: 100, y: 900, w: 1720, h: 120 }],
+    };
+    const p = project({
+      scenes: [scene('scene_001', {
+        sceneType: FREE_CATEGORY, templateId: FREE_TEMPLATE.templateId, durationSec: 10,
+        lines: [{ lineId: 'line_001', text: 'よむ', status: NARRATION_STATUS.none }],
+      })],
+    });
+    const { doc } = bakeTimelineProject(p, opts({ templateOf: () => freeWithSubtitle, lineDurationsFor: () => durations }));
+    expect(doc.clips.filter((c) => c.kind === 'subtitle').map((c) => c.text)).toContain('よむ');
+  });
+
+  it('場面のフォント・種別ごとのフォントを字幕クリップにも載せる（本文と字体が割れない）', () => {
+    const p = project({
+      scenes: [withLines({ fontId: 'kaitou-yokoku-gothic' })],
+    });
+    const { doc } = bakeTimelineProject(p, opts({ lineDurationsFor: () => durations }));
+    expect(doc.clips.find((c) => c.kind === 'subtitle')?.fontId).toBe('kaitou-yokoku-gothic');
+    const p2 = project({
+      scenes: [withLines({ fontId: 'kaitou-yokoku-gothic', textFontIds: { subtitle: 'gen-interface-jp-display' } })],
+    });
+    const { doc: doc2 } = bakeTimelineProject(p2, opts({ lineDurationsFor: () => durations }));
+    expect(doc2.clips.find((c) => c.kind === 'subtitle')?.fontId).toBe('gen-interface-jp-display');
+  });
+
+  it('回転は 0〜360 未満へ収める（グループの回転は足し算なので合成値が 360 を超える）', () => {
+    const rotated: Template = {
+      ...NORMAL_TEMPLATE,
+      layers: NORMAL_TEMPLATE.layers.map((l) => (l.type === 'subtitle' ? { ...l, rotation: 350 } : l)),
+      groups: [{ id: 'group_001', members: ['subtitle'], transform: { x: 0, y: 0, rotation: 340, scale: 1 } }],
+    };
+    const { doc } = bakeTimelineProject(
+      project({ scenes: [withLines()] }),
+      opts({ templateOf: () => rotated, lineDurationsFor: () => durations }),
+    );
+    const sub = doc.clips.find((c) => c.kind === 'subtitle');
+    expect(sub?.rotation).toBeCloseTo(330); // 350+340=690 → 330
+    expect(validateTimelineProject(doc)).toBe(true); // schema は 360 以上を拒む
+  });
+
+  it('枠高は「その行数が入る高さ」にする（層の高さを残すと上限より多く折り返す）', () => {
+    const tall: Template = {
+      ...NORMAL_TEMPLATE,
+      layers: NORMAL_TEMPLATE.layers.map((l) => (l.type === 'subtitle' ? { ...l, h: 600, maxLines: 1 } : l)),
+    };
+    const { doc } = bakeTimelineProject(
+      project({ scenes: [withLines()] }),
+      opts({ templateOf: () => tall, lineDurationsFor: () => durations }),
+    );
+    expect(doc.clips.find((c) => c.kind === 'subtitle')?.h).toBeLessThan(600);
   });
 });

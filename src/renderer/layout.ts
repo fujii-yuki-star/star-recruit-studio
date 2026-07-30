@@ -120,38 +120,10 @@ export function bandBackground(bg: LayerBackground | undefined): { color: string
 }
 // 既定行間も domain（template/textStyle）が正典＝FREE の行数導出・通常→FREE 変換・描画で共有（§2-7）。
 export { DEFAULT_LINE_HEIGHT } from '../domain/template/textStyle';
-/** 字幕帯の背景の上下パディング（em）。sceneSvg の bgHeight = 行間×行数 + 0.6*fontSize と一致（帯の下端＝y + 行間 + これ）。 */
-export const SUBTITLE_BAND_PAD_EM = 0.6;
-/** 同時字幕（ADR-0031）で2人目以降を上へ積むときの帯間の余白（em）。**実際の折返し行数**で詰めたうえで、この隙間を空ける（重ならない）。 */
-export const SUBTITLE_STACK_GAP_EM = 0.4;
-
-/**
- * 同時字幕（ADR-0031）の帯を下→上に積んだときの、各帯の anchor y と上端 top（キャンバス座標・px）。純粋関数。
- * bandTexts[0] が下（primary）＝baseY。以降は**実際の折返し行数**（`wrapText`）で詰め、`anchorBottom` の上伸び
- * （行が増えると上端が上がる）を見込んで次帯の下端を前帯の上端＋gap 上へ置く＝2行でも重ならない。
- * layout（描画）と、はみ出し判定（`subtitleOverflowsCanvas` は実 `layoutScene` の字幕アイテムを検査）が同じ配置を共有する（drift 防止・#533 P1/P2）。
- */
-export function stackedSubtitleBands(
-  bandTexts: string[],
-  baseY: number,
-  w: number,
-  fontSize: number,
-  maxLines: number,
-): { y: number; top: number }[] {
-  const lineHeightPx = fontSize * DEFAULT_LINE_HEIGHT;
-  const bottomOffsetPx = lineHeightPx + fontSize * SUBTITLE_BAND_PAD_EM; // anchor y から帯の下端まで
-  const gapPx = fontSize * SUBTITLE_STACK_GAP_EM;
-  const out: { y: number; top: number }[] = [];
-  let prevTop = Number.POSITIVE_INFINITY;
-  bandTexts.forEach((t, i) => {
-    const y = i === 0 ? baseY : prevTop - gapPx - bottomOffsetPx;
-    const n = wrapText(t, w, fontSize, maxLines).length; // 実際の折返し行数（描画と同じ wrapText）
-    const top = y - (n - 1) * lineHeightPx; // この帯の上端（anchorBottom で上へ伸びるぶんを反映）
-    out.push({ y, top });
-    prevTop = top;
-  });
-  return out;
-}
+import { SUBTITLE_BAND_PAD_EM, stackedSubtitleBands } from '../domain/text/subtitleBands';
+// 字幕帯の積み方（同時字幕・ADR-0031）は **domain が正典**＝描画・はみ出し判定・焼き出し（#633）で共有する。
+// ここからは再輸出だけ（既存の import 経路を保つ・`DEFAULT_LINE_HEIGHT` と同じ流儀）。
+export { SUBTITLE_BAND_PAD_EM, SUBTITLE_STACK_GAP_EM, stackedSubtitleBands } from '../domain/text/subtitleBands';
 
 /** 字幕帯アイテム1つが回転後にキャンバス外へ出るか（上下左右すべての辺）。矩形＝x/y/w＋折返し行数＋anchorBottom、rotation は中心軸で回して AABB 判定（#533 P2）。 */
 function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: number): boolean {
