@@ -162,13 +162,57 @@ function creditToSvg(width: number, height: number, text: string): string {
  * （場面形式はすべてこちら）は素通し＝出力は従来と1バイトも変わらない。
  * **連続でまとめる**のは、`items` が既に描画順（重ね順）に並んでいるため＝並びを崩さない。
  */
+/**
+ * 切り抜き（`clipRect`）で1かたまりを包む（#634）。矩形の外は描かない。
+ * `<clipPath>` の id はアイテム側が持つ（クリップ id 由来＝同じ矩形を何度も定義しない）。
+ */
+function wrapClipRect(inner: string, rect: NonNullable<LayoutItem['clipRect']>): string {
+  const id = `crop_${rect.id}`;
+  // 箱が回っているときは**矩形も同じだけ回す**＝箱の辺に沿って切れる（回転で外へ出た角を一律に落とさない）。
+  const rot = rect.rotation ?? 0;
+  const spin = rot === 0 ? '' : ` transform="rotate(${rot} ${rect.x + rect.w / 2} ${rect.y + rect.h / 2})"`;
+  return [
+    `<g clip-path="url(#${id})">`,
+    `<defs><clipPath id="${id}"><rect x="${rect.x}" y="${rect.y}" width="${rect.w}" height="${rect.h}"${spin}/></clipPath></defs>`,
+    inner,
+    `</g>`,
+  ].join('\n');
+}
+
+/**
+ * 連続したアイテムを**切り抜きごとに小分けして**包む（#634）。切り抜きはクリップごとに違うので、
+ * 同じ矩形が続く区間だけを `<g clip-path>` で包む＝隣のクリップへ効かせない・持っているのに落とさない。
+ */
+function clippedRuns(items: readonly LayoutItem[], opts: LayoutToSvgOptions, fontFamily: string): string {
+  const out: string[] = [];
+  for (let i = 0; i < items.length; i += 1) {
+    const rect = items[i].clipRect;
+    let j = i;
+    while (j + 1 < items.length && sameClipRect(items[j + 1].clipRect, rect)) j += 1;
+    const inner = items.slice(i, j + 1).map((it) => itemToSvg(it, opts, fontFamily)).join('\n');
+    out.push(rect ? wrapClipRect(inner, rect) : inner);
+    i = j;
+  }
+  return out.join('\n');
+}
+
+/** 2つの切り抜き矩形が同じか（`undefined` 同士も同じ）。 */
+function sameClipRect(a: LayoutItem['clipRect'], b: LayoutItem['clipRect']): boolean {
+  if (a == null || b == null) return a == null && b == null;
+  return a.id === b.id && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h && (a.rotation ?? 0) === (b.rotation ?? 0);
+}
+
 function itemsToSvg(items: readonly LayoutItem[], opts: LayoutToSvgOptions, fontFamily: string): string {
   const out: string[] = [];
   const closed = new Set<string>();
   for (let i = 0; i < items.length; i += 1) {
     const composite = items[i].composite;
     if (composite == null) {
-      out.push(itemToSvg(items[i], opts, fontFamily));
+      // 合成の単位が無い区間（クリップ全体の濃さが 1）。切り抜きごとの小分けは `clippedRuns` に任せる。
+      let j = i;
+      while (j + 1 < items.length && items[j + 1].composite == null) j += 1;
+      out.push(clippedRuns(items.slice(i, j + 1), opts, fontFamily));
+      i = j;
       continue;
     }
     // **同じ単位は連続している前提**（作る側が1かたまりで並べる）。離れて再び現れたら合成が静かに
@@ -179,7 +223,10 @@ function itemsToSvg(items: readonly LayoutItem[], opts: LayoutToSvgOptions, font
     closed.add(composite.key);
     let j = i;
     while (j + 1 < items.length && items[j + 1].composite?.key === composite.key) j += 1;
-    const inner = items.slice(i, j + 1).map((it) => itemToSvg(it, opts, fontFamily)).join('\n');
+    // 合成の単位は**複数のクリップに跨る**ことがある（グループのフェード）。切り抜きはクリップごとなので、
+    // かたまりの**中**で切り抜きごとに小分けして包む＝ほかのクリップへ効かせない・黙って落とさない。
+    // 矩形で切るので「切ってから薄める／薄めてから切る」は同じ絵になる（`11 §7.6.4.1`）。
+    const inner = clippedRuns(items.slice(i, j + 1), opts, fontFamily);
     // 不透明（1 以上）なら `<g>` で包む意味が無い＝余計な要素を出さない。
     out.push(composite.opacity >= 1 ? inner : `<g opacity="${composite.opacity}">\n${inner}\n</g>`);
     i = j;

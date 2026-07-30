@@ -15,7 +15,7 @@ import type { TextKey, TrackKind } from "../../domain/enums";
 import {
   addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip,
   moveTrackOrder, removeClips, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
-  setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
+  setClipCrop, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
@@ -156,6 +156,8 @@ export interface TimelineState {
   setSelectedClipSourceStart: (sec: number) => void;
   /** 選んでいる音の音量（`null`＝動画全体に合わせる・#634）。 */
   setSelectedClipVolume: (volume: number | null) => void;
+  /** 選んでいる部品の切り抜き（#634）。 */
+  setSelectedClipCrop: (edge: "top" | "right" | "bottom" | "left", value: number) => void;
   /** 選んでいる音の前後のフェード（#634）。 */
   setSelectedClipFade: (edge: "in" | "out", sec: number) => void;
   /** 読み上げを置く（#633＝タイムライン側でも声を作れる）。 */
@@ -406,6 +408,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipSourceStart: (sec) => applyEdit(set, get, (d, id) => setClipSourceStart(d, id, sec)),
   setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
   setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
+  setSelectedClipCrop: (edge, value) => applyEdit(set, get, (d, id) => setClipCrop(d, id, edge, value)),
 
   addVoiceClip: (input) => {
     const doc = get().doc;

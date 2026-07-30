@@ -331,6 +331,7 @@ schemaVersion ●（現行 `"1.2"`・場面形式とは独立に進む） / form
 - `kind='template'`（**テンプレを素材として置く**・差し込み口が生きている）: templateId ● / assetRefs ○ / texts ○ / textStyles ○ / slotFits ○ / textFontIds ○（テキスト種別ごとのフォント・枠全体は `fontId`） / character ○（立ち絵の表示と表情・`$ref` 共有） / slotClips ○（差し込み口ごとの動画の範囲/速度/元音声・`$ref` 共有・ADR-0028）
 - `kind='audio'`: bundledBgmId ○（同梱BGM一覧は `$ref` 共有・`assetId` と排他） / volume ○ / fadeInSec ○ / fadeOutSec ○
 - `kind='voice'`（**読み上げ**・ADR-0032 決定7）: voice ●（`TimelineVoice`・**schema の if/then で必須**＝中身の無い声を作らせない） / volume ○
+- **切り抜き**（#634・**タイムライン形式だけの語彙**）: crop ○（`{top,right,bottom,left}`＝**箱の各辺を「箱の大きさに対する割合」で隠す**・各辺 0〜1未満・同じ軸の合計も 1 未満＝`§8` V30）。**中身は動かない**（隠れるだけ）。`FreeElement` には足さない（場面形式は凍結＝ADR-0032）＝描画は `layoutTimelineAt` が `LayoutItem.clipRect` として渡す。
 - `kind='subtitle'`（**読み上げと連動**・ADR-0032 決定24・#633）: voiceClipId ○（連動先の読み上げクリップ id＝`clip_NNN`。**文言と時間が追従**・自分の `text` があればそちらが優先。解決と不変条件は §7.6.2.3／§8 V29）
 - 素材のトリム（非破壊・ADR-0024）: sourceStartSec ○（素材のどこから使うか） / speed ○（>0）。**`kind='template'` の `slotClips` とは別物**＝こちらは自分が持つ素材、あちらは枠の中の差し込み口ごと。
 - **kind 別の必須は domain 検証で担保**（`FreeElement` と同じ流儀＝§8）。ただし `voice` だけは schema の `if/then` でも必須にする（「空の声」は描画既定で補えないため）。
@@ -598,6 +599,23 @@ domain の純粋関数 **`src/domain/timeline/edit.ts`**。**置けない操作�
 
 ---
 
+#### 7.6.4.1 切り抜き（#634）
+
+**クリップの箱の各辺を割合で隠す**（`crop`）。`layoutTimelineAt` が**変形のあとの箱**（`finalBox`）から矩形を
+出し、そのクリップのアイテム全部へ `LayoutItem.clipRect` として付ける。`sceneSvg` が同じ矩形を持つ
+**連続したアイテム**を `<g clip-path>` で1つに包む（`composite` と同じ流儀）。
+
+- **変形のあとの箱を基準にする**＝動かした・拡大した先で切れる（設定した意味どおり）。
+- **中身は動かない**（隠れるだけ）＝素材の一部を枠いっぱいに映し直すのは別の機能（将来）。
+- **合成のかたまりの「中」で、切り抜きごとに小分けして包む**（`clippedRuns`）。合成の単位は**複数のクリップに
+  跨る**ことがある（まとまりのフェード＝決定19）ので、かたまりの外で包むと**隣のクリップまで切れる／持っている
+  切り抜きが黙って落ちる**（#634 レビュー 🔴）。矩形で切るので「切ってから薄める／薄めてから切る」は同じ絵。
+- **箱が回っているときは矩形も同じだけ回す**＝箱の辺に沿って切れる（回さないと斜めに切れるうえ、回転で箱の外へ
+  出た角まで一律に落ちる）。
+- 何も隠さない（すべて 0・未指定）ときは**矩形を出さない**＝従来の絵と1バイトも変わらない。
+- 壊れたデータ（同じ軸の合計が 1 以上）でも**1px 残す**＝絵が丸ごと消えるより「切れている」と分かる方を採る
+  （知らせるのは `§8` V30）。**場面形式は `clipRect` を設定しない**＝出力不変。
+
 #### 7.6.5 書き出し（#631）
 
 **常に全フレーム描画**（ADR-0032 決定22）。`timelineFramePlan(doc)` が何フレーム描くかを決め、
@@ -687,7 +705,9 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 
 | V29 | `clips[].voiceClipId`（字幕の連動先）が実在する**読み上げ**クリップを指す／連動先を持てるのは字幕だけ | 警告（`TIMELINE_SUBTITLE_LINK_NOT_FOUND` / `TIMELINE_SUBTITLE_LINK_ON_NON_SUBTITLE`）＝字幕は自分の文へ落ちて描かれ続けるので、黙って連動が切れたことに気づけない |
 
-> V22–V29 は **タイムライン形式（ADR-0032・#627／読み上げは #628／連動は #633）**。domain の純粋関数 **`validateTimelineDoc`（`src/domain/timeline/validateTimelineDoc.ts`）** が `Warning[]` を返す。**V24 が本形式の要**＝同一トラックで時間が重ならないので、**重ね順は tracks の並び順だけで一意に決まる**（クリップごとの zIndex を持たない）。ID 一意（`clip_NNN`/`track_NNN`/`anim_NNN`）は V16 と同じ扱いで再採番。番号は §8 の続き。
+| V30 | `clips[].crop` の同じ軸の合計が 1 未満（上下・左右それぞれ） | 警告（`TIMELINE_CROP_HIDES_ALL`）＝描画は **1px 残す**（丸ごと消えたことに気づけるようにする） |
+
+> V22–V30 は **タイムライン形式（ADR-0032・#627／読み上げは #628／連動は #633／切り抜きは #634）**。domain の純粋関数 **`validateTimelineDoc`（`src/domain/timeline/validateTimelineDoc.ts`）** が `Warning[]` を返す。**V24 が本形式の要**＝同一トラックで時間が重ならないので、**重ね順は tracks の並び順だけで一意に決まる**（クリップごとの zIndex を持たない）。ID 一意（`clip_NNN`/`track_NNN`/`anim_NNN`）は V16 と同じ扱いで再採番。番号は §8 の続き。
 
 > V12–V15 は ADR-0008 §8。FREE テンプレ場面（`sceneType=free`）の `freeLayout` を対象とし、domain の純粋関数 `validateFreeLayout`（`src/domain/project/freeLayout.ts`）で実装。`free_NNN` 要素ごとに `Warning.field=freeLayout.<id>` を付す。V13 が不正なら矩形が確定しないため V14 はスキップ（二重警告を避ける）。
 > kind 別の構造的「必須」（`slot` の `fit` が assetId 非null時・`shape` の `shapeType`）は **Schema（`exclusiveMinimum`/enum）＋ renderer 既定（fit 未指定=cover・shapeType 未指定=rect）で担保＝V2 相当**とし、上記 domain 検証（意味検証）の対象外。`fit` は §2-3 の技術用語のため UI 警告に出さない。

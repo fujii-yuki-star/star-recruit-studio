@@ -97,6 +97,16 @@ export interface TimelineClip extends ClipSpatial {
   slotClips?: Record<string, SlotClipOverride>;
 
   /**
+   * **切り抜き**（#634・タイムライン形式だけの語彙）。クリップの箱の各辺を「箱の大きさに対する割合」で
+   * 隠す（0〜1未満・未指定＝0）。**中身は動かない**＝隠れるだけ（素材の一部を枠いっぱいに映し直すのは
+   * 別の機能・将来）。同じ軸の合計は 1 未満（`11 §8` V30）。
+   *
+   * `FreeElement` には足さない（場面形式は凍結＝ADR-0032）。描画は `layoutTimelineAt` が
+   * **クリップのアイテム全部を1つの切り抜き矩形で包む**形で効かせる（`LayoutItem.clipRect`）。
+   */
+  crop?: { top?: number; right?: number; bottom?: number; left?: number };
+
+  /**
    * kind='subtitle' の**連動先**（読み上げクリップの id・ADR-0032 決定24・#633）。
    * 指すと**文言と時間**がその読み上げに追従する（文言は `text` が入っていればそちらが優先）。
    * 未指定＝連動しない。指した先が見つからないときは黙って消さず、検証（`11 §8` V29）が知らせる。
@@ -163,4 +173,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.2';
+export const TIMELINE_SCHEMA_VERSION = '1.3';
