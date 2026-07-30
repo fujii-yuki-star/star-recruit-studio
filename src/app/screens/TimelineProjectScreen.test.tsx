@@ -658,3 +658,100 @@ describe("TimelineProjectScreen: 読み上げを置く・声を作る（#633）"
     expect(sub).toMatchObject({ voiceClipId: "clip_voice", startSec: 2, durationSec: 3 });
   });
 });
+
+describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
+  const withClip = (over: Record<string, unknown> = {}) => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 2, durationSec: 4, x: 100, y: 50, w: 300, h: 80, text: "うごく" },
+      ],
+      ...over,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 3 });
+  };
+
+  const typeAndPlace = (label: string, value: string) => {
+    const input = screen.getByText(label).parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "この位置に置く" }));
+  };
+
+  it("入れた「ずれ」を再生位置に置く（時刻は部品の先頭からの秒・値は絶対値でない）", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    typeAndPlace("横のずれ（px）", "200");
+    // 再生位置 3 秒 − 部品の開始 2 秒＝1 秒。値は入れた 200（部品の x=100 を足したりしない）。
+    expect(useTimelineStore.getState().doc?.animations?.[0].keyframes).toEqual([{ timeSec: 1, x: 200 }]);
+  });
+
+  it("空欄の項目は動かさない", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    typeAndPlace("濃さ（0〜1）", "0.5");
+    expect(useTimelineStore.getState().doc?.animations?.[0].keyframes).toEqual([{ timeSec: 1, opacity: 0.5 }]);
+  });
+
+  it("置いた動きを一覧に出し、外せる", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    typeAndPlace("濃さ（0〜1）", "0.5");
+    expect(screen.getByText(/3.00秒：濃さ（0〜1） 0.5/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "外す" }));
+    expect(useTimelineStore.getState().doc?.animations).toBeUndefined();
+  });
+
+  it("置いた値を読み込んで直せる", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    typeAndPlace("横のずれ（px）", "200");
+    fireEvent.click(screen.getByRole("button", { name: "この位置の値を読み込む" }));
+    const input = screen.getByText("横のずれ（px）").parentElement?.querySelector("input");
+    expect((input as HTMLInputElement).value).toBe("200");
+    fireEvent.change(input!, { target: { value: "300" } });
+    fireEvent.click(screen.getByRole("button", { name: "この位置に置く" }));
+    expect(useTimelineStore.getState().doc?.animations?.[0].keyframes).toEqual([{ timeSec: 1, x: 300 }]);
+  });
+
+  it("まとめて外せる", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    typeAndPlace("大きさ（倍）", "1.5");
+    fireEvent.click(screen.getByRole("button", { name: "動きをすべて外す" }));
+    expect(useTimelineStore.getState().doc?.animations).toBeUndefined();
+  });
+
+  it("再生位置が部品の外なら置かせない（黙って端へ寄せない）", () => {
+    withClip();
+    useTimelineStore.setState({ playheadSec: 10 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "この位置に置く" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("再生位置がこの部品の外にあります"))).toBe(true);
+  });
+
+  it("固定した列の部品には置けない（欄を押せなくする）", () => {
+    withClip({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("横のずれ（px）").parentElement?.querySelector("input")).toBeDisabled();
+  });
+
+  it("音の部品には動きの欄を出さない（絵が無いので効かない）", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 4, bundledBgmId: "found-new-hope" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText("横のずれ（px）")).not.toBeInTheDocument();
+  });
+
+  it("まとまりに付いた動きも知らせる（画面では動いているのに「無い」と言わない）", () => {
+    withClip({
+      groups: [{ id: "group_001", members: ["clip_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+      animations: [{ id: "anim_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/「まとまり」にも動きが付いています（2か所）/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "まとまりの動きを外す" }));
+    expect(useTimelineStore.getState().doc?.animations).toBeUndefined();
+  });
+});

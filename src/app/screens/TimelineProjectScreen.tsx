@@ -12,9 +12,13 @@ import { useTimelineAudio } from "../hooks/useTimelineAudio";
 import type { TrackKind } from "../../domain/enums";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
-import { layoutTimelineAt } from "../../renderer/timelineLayout";
+import { clipIsLiveAt, layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
+import { animationOriginSec } from "../../domain/timeline/keyframeEdit";
+import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
+import { groupElementIds } from "../../domain/project/groupOps";
+import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
@@ -84,6 +88,47 @@ function assignableAssets(assets: readonly Asset[], layer: Layer): Asset[] {
 }
 
 /**
+ * 「動き」の入力欄（#634）。**値は「本来の見た目からのずれ」**（絶対値ではない＝`Keyframe` の意味）。
+ * `neutral` は「動かさない」ときの値で、欄の**プレースホルダ**に出す（勝手に入れない＝空欄は触らない）。
+ */
+const KEYFRAME_FIELDS: { prop: KeyframeProp; label: string; neutral: number; step: number }[] = [
+  { prop: 'x', label: '横のずれ（px）', neutral: 0, step: 10 },
+  { prop: 'y', label: '縦のずれ（px）', neutral: 0, step: 10 },
+  { prop: 'scale', label: '大きさ（倍）', neutral: 1, step: 0.1 },
+  { prop: 'rotation', label: '傾き（度）', neutral: 0, step: 5 },
+  { prop: 'opacity', label: '濃さ（0〜1）', neutral: 1, step: 0.1 },
+];
+
+/** 入力欄 → 置く値。**空欄は触らない**（`undefined`）・値が入っていればその数だけずらす。 */
+function keyframeInputFromDraft(draft: Partial<Record<KeyframeProp, string>>): KeyframeInput {
+  const out: KeyframeInput = {};
+  for (const f of KEYFRAME_FIELDS) {
+    const raw = draft[f.prop];
+    if (raw == null || raw.trim() === '') continue;
+    const v = Number(raw);
+    if (Number.isFinite(v)) out[f.prop] = v;
+  }
+  return out;
+}
+
+/** 置いてあるキーフレーム → 入力欄（「この位置の値を読み込む」）。 */
+function draftFromKeyframe(k: Keyframe | undefined): Partial<Record<KeyframeProp, string>> {
+  if (!k) return {};
+  const out: Partial<Record<KeyframeProp, string>> = {};
+  for (const f of KEYFRAME_FIELDS) {
+    const v = k[f.prop];
+    if (v != null) out[f.prop] = String(v);
+  }
+  return out;
+}
+
+/** キーフレーム1つの中身を一行で（§2-3：技術用語を出さない）。 */
+function keyframeSummary(k: Keyframe): string {
+  const parts = KEYFRAME_FIELDS.filter((f) => k[f.prop] != null).map((f) => `${f.label} ${k[f.prop]}`);
+  return parts.length > 0 ? parts.join('・') : '（値なし）';
+}
+
+/**
  * タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。
  *
  * 見て確かめる（その瞬間の仕上がり・列と部品の並び）と、置く・動かす・重ねる・消すができる。
@@ -98,6 +143,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
+    setSelectedKeyframe, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -128,6 +174,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
   // 見た目パターンを置く先の列（消された/固定されたときは置くときに実在するものへ落とす）。
   const [placeTrackId, setPlaceTrackId] = useState<string>("");
+  // 「動き」の入力欄（文字列で持つ＝空欄＝その項目は動かさない）。
+  const [kfDraft, setKfDraft] = useState<Partial<Record<KeyframeProp, string>>>({});
   // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
   const [explodingClipId, setExplodingClipId] = useState<string | null>(null);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
@@ -157,6 +205,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const selectedLocked = !!selected && !!doc?.tracks.find((t) => t.id === selected.trackId)?.locked;
   const lockedHint = selectedLocked ? "この列は固定されています。変えるには固定を外してください" : undefined;
   const textKeys = selectedTemplate ? usedTextKeys(selectedTemplate.layers) : [];
+  // 選んだ部品に付いている動き（キーフレーム）。時刻は対象の先頭からの秒なので、表示は起点を足す。
+  const selectedOrigin = doc && selected ? animationOriginSec(doc, selected.id) ?? 0 : 0;
+  const selectedKeyframes =
+    doc && selected ? doc.animations?.find((a) => a.targetId === selected.id)?.keyframes ?? [] : [];
+  // 再生位置が部品の中にあるか＋その時刻に置いてあるキーフレーム（あれば値を読み込める）。
+  const keyframeAtPlayhead = {
+    live: selected != null && clipIsLiveAt(selected, playheadSec),
+    keyframe: selectedKeyframes.find((k) => k.timeSec === playheadSec - selectedOrigin),
+  };
+  // この部品が入っている「まとまり」に付いた動き（画面では動いているのに「無い」と言わない）。
+  const groupKeyframes =
+    doc && selected
+      ? (doc.groups ?? [])
+          .filter((g) => groupElementIds(doc.groups ?? [], g.id).includes(selected.id))
+          .map((g) => ({ groupId: g.id, keyframes: doc.animations?.find((a) => a.targetId === g.id)?.keyframes ?? [] }))
+          .filter((g) => g.keyframes.length > 0)
+      : [];
   // 連動先が見つからない字幕（V29）。自分の文へ落ちて描かれ続けるので、黙って連動が切れたことに
   // 気づけない＝知らせる（§2-5）。
   const danglingLinkCount = useMemo(() => (doc ? danglingSubtitleLinks(doc).length : 0), [doc]);
@@ -484,6 +549,107 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 ))}
               </select>
             </label>
+
+            {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}
+            {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
+              <div className="mt-lg">
+                <h4>動き</h4>
+                <p className="text-muted">
+                  再生位置（{playheadSec.toFixed(1)}秒）に「**本来の見た目からのずれ**」を置きます。
+                  2か所に違う値を置くと、その間はなめらかに変わります。空欄の項目は動かしません。
+                </p>
+                {!keyframeAtPlayhead.live ? (
+                  <p className="notice notice-warn" role="alert">
+                    再生位置がこの部品の外にあります。部品が出ている時間（
+                    {selected.startSec.toFixed(1)}〜{clipEndSec(selected).toFixed(1)}秒）へ動かしてから置いてください。
+                  </p>
+                ) : (
+                  <>
+                    <div className="row gap-sm">
+                      {KEYFRAME_FIELDS.map((f) => (
+                        <label className="field" key={f.prop}>
+                          <span>{f.label}</span>
+                          <input
+                            type="number"
+                            step={f.step}
+                            value={kfDraft[f.prop] ?? ""}
+                            placeholder={String(f.neutral)}
+                            disabled={selectedLocked}
+                            title={lockedHint}
+                            onChange={(e) => setKfDraft({ ...kfDraft, [f.prop]: e.target.value })}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="row gap-sm">
+                      <button
+                        className="btn btn-secondary"
+                        disabled={selectedLocked || isPlaying}
+                        title={selectedLocked ? lockedHint : playingHint}
+                        onClick={() => {
+                          setSelectedKeyframe(keyframeInputFromDraft(kfDraft));
+                          setKfDraft({});
+                        }}
+                      >
+                        この位置に置く
+                      </button>
+                      {keyframeAtPlayhead.keyframe && (
+                        <button
+                          className="btn btn-ghost"
+                          disabled={selectedLocked}
+                          title={lockedHint}
+                          onClick={() => setKfDraft(draftFromKeyframe(keyframeAtPlayhead.keyframe))}
+                        >
+                          この位置の値を読み込む
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+                {selectedKeyframes.length === 0 ? (
+                  <p className="text-muted">まだ動きは付いていません。</p>
+                ) : (
+                  <ul className="notice">
+                    {selectedKeyframes.map((k) => (
+                      <li key={k.timeSec}>
+                        {(selectedOrigin + k.timeSec).toFixed(2)}秒：{keyframeSummary(k)}
+                        <button className="btn btn-ghost btn-sm" onClick={() => setPlayhead(selectedOrigin + k.timeSec)}>
+                          この位置へ
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          disabled={selectedLocked}
+                          title={lockedHint}
+                          onClick={() => removeSelectedKeyframe(k.timeSec)}
+                        >
+                          外す
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {selectedKeyframes.length > 0 && (
+                  <button className="btn btn-ghost" disabled={selectedLocked} title={lockedHint} onClick={clearSelectedKeyframes}>
+                    動きをすべて外す
+                  </button>
+                )}
+                {/* まとまり（グループ）に付いた動きも見せる＝画面では動いているのに「動きは付いていません」と
+                    言わない（焼き出しは自由配置の場面の切り替えをまとまりへ付ける・ADR-0032 決定19）。 */}
+                {groupKeyframes.map((g) => (
+                  <div className="notice" key={g.groupId}>
+                    <p>この部品が入っている「まとまり」にも動きが付いています（{g.keyframes.length}か所）。</p>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={selectedLocked}
+                      title={lockedHint}
+                      onClick={() => clearKeyframesOf(g.groupId)}
+                    >
+                      まとまりの動きを外す
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* 読み上げは、この画面で文を書いて声を作れる（ADR-0032 決定7）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.voice && (
