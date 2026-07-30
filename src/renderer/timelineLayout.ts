@@ -325,8 +325,12 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
       if (item.kind === 'image' && clip.cropAlign != null) item.align = clip.cropAlign;
       // 枠いっぱいに映す場合は、素材を置く矩形をこちらで決める＝SVG の当てはめは切る（二重に効かせない）。
       if (fill && item.kind === 'image') {
-        item.x = finalBox.x + fill.x;
-        item.y = finalBox.y + fill.y;
+        // 回転は各アイテムの**自分の中心**まわりに掛かる（`sceneSvg`）。素材の矩形は箱より大きく中心も
+        // ずれるので、そのままだと切り抜き矩形（＝箱の中心で回る）とピボットが割れる。**箱の中心まわりに
+        // 回した位置**へ寄せておく＝回っていても「箱を基準に切り、残りが枠を満たす」が両立する。
+        const p = pivotShift(fill, finalBox);
+        item.x = finalBox.x + fill.x + p.dx;
+        item.y = finalBox.y + fill.y + p.dy;
         item.w = fill.w;
         item.h = fill.h;
         item.fit = FIT.stretch;
@@ -394,4 +398,19 @@ function boxRect(id: string, box: Box): NonNullable<LayoutItem['clipRect']> {
 /** 1辺でも隠していれば true（`cropRectOf` と同じ判定＝どちらの効かせ方でも入口を揃える）。 */
 function hasCrop(c: TimelineClip['crop']): boolean {
   return !!c && (Math.max(0, c.top ?? 0) > 0 || Math.max(0, c.right ?? 0) > 0 || Math.max(0, c.bottom ?? 0) > 0 || Math.max(0, c.left ?? 0) > 0);
+}
+
+/**
+ * 素材の矩形を、**箱の中心まわりに回した**位置へ寄せるずれ量（#634）。
+ * 自分の中心で回るアイテムに、箱の中心で回った結果と同じ絵を出させるための平行移動。
+ */
+function pivotShift(fill: FillPlacement, box: Box): { dx: number; dy: number } {
+  if (!box.rotation) return { dx: 0, dy: 0 };
+  const rad = (box.rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  // 箱の中心から見た素材の中心（回す前）。
+  const dx = fill.x + fill.w / 2 - box.w / 2;
+  const dy = fill.y + fill.h / 2 - box.h / 2;
+  return { dx: dx * cos - dy * sin - dx, dy: dx * sin + dy * cos - dy };
 }

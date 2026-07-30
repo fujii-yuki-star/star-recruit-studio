@@ -46,8 +46,9 @@ export function fillPlacement(
   const top = Math.max(0, crop?.top ?? 0);
   const bottom = Math.max(0, crop?.bottom ?? 0);
   // 壊れたデータ（合計 1 以上）でも 0 で割らない＝わずかに残す（絵が消えるより切れて見える方を採る）。
-  const cw = Math.max(1e-6, source.w * (1 - left - right));
-  const ch = Math.max(1e-6, source.h * (1 - top - bottom));
+  // 壊れたデータ（合計 1 以上）でも 0 で割らない＝**素材の 1px を残す**（`cropRectOf` の 1px 規則と同じ形）。
+  const cw = Math.max(1, source.w * (1 - left - right));
+  const ch = Math.max(1, source.h * (1 - top - bottom));
   // 残った部分を枠へ当てはめる倍率。`stretch` だけ縦横が別（意図的に比率が崩れる）。
   const sx = fit === FIT.stretch ? box.w / cw : fitScale(fit, box.w / cw, box.h / ch);
   const sy = fit === FIT.stretch ? box.h / ch : sx;
@@ -66,7 +67,7 @@ function fitScale(fit: Fit, byWidth: number, byHeight: number): number {
  * 1 軸ぶんの位置。`visible`（残った部分の表示上の長さ）を枠 `boxLen` の中で寄せ、
  * そこから隠した分（`hidden`）を戻して**素材全体の左上**にする。
  */
-function offset(boxLen: number, visible: number, hidden: number, align: string, atStart: string, atEnd: string): number {
+function offset<T extends string>(boxLen: number, visible: number, hidden: number, align: T, atStart: T, atEnd: T): number {
   const slack = boxLen - visible;
   const placed = align === atStart ? 0 : align === atEnd ? slack : slack / 2;
   return placed - hidden;

@@ -266,6 +266,31 @@ describe('枠いっぱいに映す（描画・#634）', () => {
     expect(w).toBeGreaterThan(400);
   });
 
+  it('箱が回っていても、切り抜き矩形と同じ中心で回る（素材の中心で回らない）', () => {
+    // 素材の矩形は箱より大きく中心もずれるので、自分の中心で回すと切り抜きとピボットが割れる。
+    // 「箱の中心まわりに回してから置く」ので、回転の前後で**素材の中心と箱の中心の距離**が変わらない。
+    const size = { w: 200, h: 100 };
+    const rect = (svg: string) => {
+      const m = /<image[^>]*\sx="(-?[\d.]+)"[^>]*\sy="(-?[\d.]+)"[^>]*\swidth="([\d.]+)"[^>]*\sheight="([\d.]+)"/.exec(svg);
+      if (!m) throw new Error('絵が見つからない');
+      return { x: Number(m[1]), y: Number(m[2]), w: Number(m[3]), h: Number(m[4]) };
+    };
+    const at = (rotation?: number) =>
+      rect(drawWithSize(slot({ crop: { left: 0.5 }, cropMode: CROP_MODE.fill, rotation }), size));
+    // 箱の中心（clip は x:100,y:200,w:400,h:300）。
+    const cx = 100 + 400 / 2;
+    const cy = 200 + 300 / 2;
+    const dist = (r: { x: number; y: number; w: number; h: number }) =>
+      Math.hypot(r.x + r.w / 2 - cx, r.y + r.h / 2 - cy);
+    const flat = at();
+    const turned = at(90);
+    expect(turned).not.toEqual(flat);
+    expect(dist(turned)).toBeCloseTo(dist(flat), 6);
+    // 90度なら、箱の中心から見たずれが直交する（回した先＝(-dy, dx)）。
+    expect(turned.x + turned.w / 2 - cx).toBeCloseTo(-(flat.y + flat.h / 2 - cy), 6);
+    expect(turned.y + turned.h / 2 - cy).toBeCloseTo(flat.x + flat.w / 2 - cx, 6);
+  });
+
   it('実寸が分からない素材は「隠したまま」で描く（黙って別の絵にしない）', () => {
     const unknown = drawWithSize(slot({ crop: { left: 0.5 }, cropMode: CROP_MODE.fill }));
     expect(unknown).toBe(drawWithSize(slot({ crop: { left: 0.5 } })));
