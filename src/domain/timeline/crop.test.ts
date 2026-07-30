@@ -4,7 +4,7 @@ import { CROP_MAX } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
-import { EDIT_BLOCKED, setClipCrop } from './edit';
+import { EDIT_BLOCKED, setClipCrop, setClipCropAlign } from './edit';
 import { validateTimelineDoc } from './validateTimelineDoc';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { layoutTimelineAt } from '../../renderer/timelineLayout';
@@ -155,5 +155,57 @@ describe('切り抜きの描画', () => {
     const wide = doc({ clips: [clip({ crop: { left: 0.7, right: 0.7 } })] });
     expect(draw(wide)).toContain('width="1"'); // 1px 残す（横）
     expect(validateTimelineDoc(d).map((w) => w.code)).toContain('TIMELINE_CROP_HIDES_ALL');
+  });
+});
+
+describe('素材の寄せ（#634・05 §8）', () => {
+  const slot = (over: Partial<TimelineClip> = {}): TimelineClip => ({
+    id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+    startSec: 0, durationSec: 5, x: 0, y: 0, w: 400, h: 300, assetId: 'asset_001', fit: 'cover', ...over,
+  });
+  const drawSlot = (d: TimelineProject): string =>
+    layoutToSvg(layoutTimelineAt(d, 1, { templateOf: () => undefined }), { assetSrc: () => 'asset://a.png' });
+
+  it('未指定は中央（従来どおり＝出力が変わらない）', () => {
+    expect(drawSlot(doc({ clips: [slot()] }))).toContain('preserveAspectRatio="xMidYMid slice"');
+  });
+
+  it('寄せを指定すると切る側が変わる', () => {
+    expect(drawSlot(doc({ clips: [slot({ cropAlign: { x: 'left', y: 'bottom' } })] }))).toContain('preserveAspectRatio="xMinYMax slice"');
+  });
+
+  it('全体を表示（contain）では余白の寄せになる', () => {
+    expect(drawSlot(doc({ clips: [slot({ fit: 'contain', cropAlign: { y: 'top' } })] }))).toContain('preserveAspectRatio="xMidYMin meet"');
+  });
+
+  it('伸縮（stretch）では寄せの意味が無い', () => {
+    expect(drawSlot(doc({ clips: [slot({ fit: 'stretch', cropAlign: { x: 'left' } })] }))).toContain('preserveAspectRatio="none"');
+  });
+
+  it('中央へ戻すとキーごと落ちる（既定と同じ値を書かない）', () => {
+    const a = setClipCropAlign(doc({ clips: [slot()] }), 'clip_001', { x: 'left' });
+    expect(a.ok && a.doc.clips[0].cropAlign).toEqual({ x: 'left' });
+    if (!a.ok) return;
+    const r = setClipCropAlign(a.doc, 'clip_001', { x: 'center' });
+    expect(r.ok && r.doc.clips[0].cropAlign).toBeUndefined();
+    const r2 = setClipCropAlign(a.doc, 'clip_001', { x: null });
+    expect(r2.ok && r2.doc.clips[0].cropAlign).toBeUndefined();
+  });
+
+  it('縦横を別々に指定できる／同じ値なら文書は変わらない', () => {
+    const a = setClipCropAlign(doc({ clips: [slot()] }), 'clip_001', { y: 'top' });
+    expect(a.ok).toBe(true);
+    if (!a.ok) return;
+    const b = setClipCropAlign(a.doc, 'clip_001', { x: 'right' });
+    expect(b.ok && b.doc.clips[0].cropAlign).toEqual({ y: 'top', x: 'right' });
+    if (!b.ok) return;
+    const same = setClipCropAlign(b.doc, 'clip_001', { x: 'right' });
+    expect(same.ok && same.doc).toBe(b.doc);
+    expect(b.ok && validateTimelineProject(b.doc)).toBe(true);
+  });
+
+  it('固定した列では変えられない', () => {
+    const d = doc({ clips: [slot()], tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] });
+    expect(setClipCropAlign(d, 'clip_001', { x: 'left' }).ok).toBe(false);
   });
 });

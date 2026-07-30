@@ -11,11 +11,11 @@ import { ASSET_TYPE } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
-import type { TextKey, TrackKind } from "../../domain/enums";
+import type { CropAlignX, CropAlignY, TextKey, TrackKind } from "../../domain/enums";
 import {
   addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip,
   moveTrackOrder, removeClips, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
-  setClipCrop, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
+  setClipCrop, setClipCropAlign, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
@@ -156,6 +156,8 @@ export interface TimelineState {
   setSelectedClipSourceStart: (sec: number) => void;
   /** 選んでいる音の音量（`null`＝動画全体に合わせる・#634）。 */
   setSelectedClipVolume: (volume: number | null) => void;
+  /** 選んでいる部品の素材の寄せ（#634）。 */
+  setSelectedClipCropAlign: (patch: { x: CropAlignX | null } | { y: CropAlignY | null }) => void;
   /** 選んでいる部品の切り抜き（#634）。 */
   setSelectedClipCrop: (edge: "top" | "right" | "bottom" | "left", value: number) => void;
   /** 選んでいる音の前後のフェード（#634）。 */
@@ -409,6 +411,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
   setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
   setSelectedClipCrop: (edge, value) => applyEdit(set, get, (d, id) => setClipCrop(d, id, edge, value)),
+  setSelectedClipCropAlign: (patch) => applyEdit(set, get, (d, id) => setClipCropAlign(d, id, patch)),
 
   addVoiceClip: (input) => {
     const doc = get().doc;

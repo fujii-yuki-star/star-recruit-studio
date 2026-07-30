@@ -2,7 +2,7 @@
 // 場面（parts/scenes）を持たない**別の文書形式**で、キャンバスは常に自由配置＝FREE（空間の自由）×
 // タイムライン（時間の自由）。AI はこの形式を生成しない（AI の関与は場面形式まで）。
 import type { BundledBgmId } from '../bgm/bgmCatalog';
-import type { Fit, NarrationStatus, ProjectFormat, TextKey, TimelineClipKind, TrackKind } from '../enums';
+import type { CropAlignX, CropAlignY, Fit, NarrationStatus, ProjectFormat, TextKey, TimelineClipKind, TrackKind } from '../enums';
 import type { FontId } from '../font/fontCatalog';
 import type { Group } from '../group/types';
 import type {
@@ -107,6 +107,13 @@ export interface TimelineClip extends ClipSpatial {
   crop?: { top?: number; right?: number; bottom?: number; left?: number };
 
   /**
+   * **素材の寄せ**（#634・`05 §8`「トリミング位置をユーザー調整可能にする」）。
+   * `fit:'cover'` で枠に収まらない側を**どこで切るか**（既定＝中央）。`contain` では余白の寄せになる。
+   * 切り抜き（`crop`）とは別物＝あちらは「箱の辺を隠す」、こちらは「素材を箱のどこへ寄せるか」。
+   */
+  cropAlign?: { x?: CropAlignX; y?: CropAlignY };
+
+  /**
    * kind='subtitle' の**連動先**（読み上げクリップの id・ADR-0032 決定24・#633）。
    * 指すと**文言と時間**がその読み上げに追従する（文言は `text` が入っていればそちらが優先）。
    * 未指定＝連動しない。指した先が見つからないときは黙って消さず、検証（`11 §8` V29）が知らせる。
@@ -173,4 +180,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.3';
+export const TIMELINE_SCHEMA_VERSION = '1.4';

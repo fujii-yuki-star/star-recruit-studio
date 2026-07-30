@@ -172,6 +172,32 @@ export const LAYER_TYPE = {
 
 export type LayerType = (typeof LAYER_TYPES)[number];
 
+/**
+ * 素材の**寄せ**（#634・`05 §8`「トリミング位置をユーザー調整可能にする」）。
+ * `fit:'cover'` で枠に収まらない側をどこで切るかを決める（既定＝中央）。`contain` では余白の寄せになる。
+ */
+export const CROP_ALIGN_XS = ['left', 'center', 'right'] as const;
+export const CROP_ALIGN_YS = ['top', 'middle', 'bottom'] as const;
+export type CropAlignX = (typeof CROP_ALIGN_XS)[number];
+export type CropAlignY = (typeof CROP_ALIGN_YS)[number];
+
+/** 値の名前つき参照（§6/§2-7：文字列直書きを避ける）。 */
+export const CROP_ALIGN_X = {
+  left: 'left',
+  center: 'center',
+  right: 'right',
+} as const satisfies Record<CropAlignX, CropAlignX>;
+
+export const CROP_ALIGN_Y = {
+  top: 'top',
+  middle: 'middle',
+  bottom: 'bottom',
+} as const satisfies Record<CropAlignY, CropAlignY>;
+
+/** 寄せの既定（中央）。**判定・描画・画面がここだけを見る**（既定が3か所に散らない）。 */
+export const CROP_ALIGN_DEFAULT_X = CROP_ALIGN_X.center;
+export const CROP_ALIGN_DEFAULT_Y = CROP_ALIGN_Y.middle;
+
 export const SLOT_TYPES = ['image_or_video', 'image', 'video'] as const;
 export type SlotType = (typeof SLOT_TYPES)[number];
 

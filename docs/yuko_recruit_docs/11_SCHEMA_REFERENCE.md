@@ -321,7 +321,7 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 
 **場面（`parts`/`scenes`）を持たない別文書**。キャンバスは常に自由配置＝**FREE（空間の自由）× タイムライン（時間の自由）**。**AI はこの形式を生成しない**（AI の関与は場面形式まで＝ADR-0007 の単一パイプラインは場面側で不変）。
 
-schemaVersion ●（現行 `"1.2"`・場面形式とは独立に進む） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`）
+schemaVersion ●（現行 `"1.4"`・場面形式とは独立に進む） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`）
 
 **Track**: id ●（`track_NNN`・§2.1） / kind ●（enum `visual`／`audio`＝置けるクリップの種別を決める） / name ○（未指定＝種別＋連番の自動名） / hidden ○（描画・書き出しから除外＝音声は無音） / locked ○（移動・トリムを禁止）。**配列の順＝重ね順（後ろほど手前）**・UI では上が手前に見せる。
 
@@ -331,6 +331,9 @@ schemaVersion ●（現行 `"1.2"`・場面形式とは独立に進む） / form
 - `kind='template'`（**テンプレを素材として置く**・差し込み口が生きている）: templateId ● / assetRefs ○ / texts ○ / textStyles ○ / slotFits ○ / textFontIds ○（テキスト種別ごとのフォント・枠全体は `fontId`） / character ○（立ち絵の表示と表情・`$ref` 共有） / slotClips ○（差し込み口ごとの動画の範囲/速度/元音声・`$ref` 共有・ADR-0028）
 - `kind='audio'`: bundledBgmId ○（同梱BGM一覧は `$ref` 共有・`assetId` と排他） / volume ○ / fadeInSec ○ / fadeOutSec ○
 - `kind='voice'`（**読み上げ**・ADR-0032 決定7）: voice ●（`TimelineVoice`・**schema の if/then で必須**＝中身の無い声を作らせない） / volume ○
+- **素材の寄せ**（#634・タイムライン形式だけの語彙）: cropAlign ○（`{x:left|center|right, y:top|middle|bottom}`＝
+  `fit:'cover'` で枠に収まらない側を**どこで切るか**・未指定＝中央。`contain` では余白の寄せ。`05 §8` の
+  「トリミング位置をユーザー調整可能にする」がこれ）。**切り抜き（`crop`）とは別物**＝あちらは箱の辺を隠す。
 - **切り抜き**（#634・**タイムライン形式だけの語彙**）: crop ○（`{top,right,bottom,left}`＝**箱の各辺を「箱の大きさに対する割合」で隠す**・各辺 0〜1未満・同じ軸の合計も 1 未満＝`§8` V30）。**中身は動かない**（隠れるだけ）。`FreeElement` には足さない（場面形式は凍結＝ADR-0032）＝描画は `layoutTimelineAt` が `LayoutItem.clipRect` として渡す。
 - `kind='subtitle'`（**読み上げと連動**・ADR-0032 決定24・#633）: voiceClipId ○（連動先の読み上げクリップ id＝`clip_NNN`。**文言と時間が追従**・自分の `text` があればそちらが優先。解決と不変条件は §7.6.2.3／§8 V29）
 - 素材のトリム（非破壊・ADR-0024）: sourceStartSec ○（素材のどこから使うか） / speed ○（>0）。**`kind='template'` の `slotClips` とは別物**＝こちらは自分が持つ素材、あちらは枠の中の差し込み口ごと。
@@ -613,6 +616,10 @@ domain の純粋関数 **`src/domain/timeline/edit.ts`**。**置けない操作�
 - **箱が回っているときは矩形も同じだけ回す**＝箱の辺に沿って切れる（回さないと斜めに切れるうえ、回転で箱の外へ
   出た角まで一律に落ちる）。
 - 何も隠さない（すべて 0・未指定）ときは**矩形を出さない**＝従来の絵と1バイトも変わらない。
+- **素材の寄せ**（`cropAlign`）は `<image>` の `preserveAspectRatio` の前半（`xMinYMin` 等）へ落とす＝
+  値を差し替えるだけで表せる（未指定＝`xMidYMid`＝従来どおり）。`stretch` は伸縮するので寄せの意味が無い。
+  クリップの指定は**そのクリップの絵すべて**に効く（テンプレのクリップなら差し込み口すべて＝クリップ単位の設定）。
+  **場面形式は寄せを設定しない**（`ImageItem.align` は付かない）＝中央固定のまま＝出力不変。
 - 壊れたデータ（同じ軸の合計が 1 以上）でも**1px 残す**＝絵が丸ごと消えるより「切れている」と分かる方を採る
   （知らせるのは `§8` V30）。**場面形式は `clipRect` を設定しない**＝出力不変。
 

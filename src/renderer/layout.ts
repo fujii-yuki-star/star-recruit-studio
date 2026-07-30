@@ -4,6 +4,7 @@
 import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR, DEFAULT_BACKGROUND_COLOR } from '../domain/constants';
+import type { CropAlignX, CropAlignY } from '../domain/enums';
 import type { ElementAnimation, Scene } from '../domain/project/types';
 import type { LayerBackground, Template } from '../domain/template/types';
 import { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEMPLATE_MAX_LINES, linesForBoxHeight, resolveStrokeColor, resolveTextStyle } from '../domain/template/textStyle';
@@ -60,6 +61,11 @@ export interface FillItem extends ItemBase {
 
 export interface ImageItem extends ItemBase {
   kind: 'image';
+  /**
+   * 素材の**寄せ**（#634）。`fit:'cover'` で枠に収まらない側をどこで切るか（未指定＝中央）。
+   * 場面形式は設定しない（従来どおり中央）＝出力不変。
+   */
+  align?: { x?: CropAlignX; y?: CropAlignY };
   assetId: string | null;
   fit: Fit;
   role: 'background' | 'slot' | 'character' | 'logo';
