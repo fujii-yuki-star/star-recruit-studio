@@ -755,3 +755,99 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     expect(useTimelineStore.getState().doc?.animations).toBeUndefined();
   });
 });
+
+describe("TimelineProjectScreen: 音の部品（速さ・使い始め・音量・フェード／音を置く・#634）", () => {
+  const withBgm = (over: Record<string, unknown> = {}) => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 10, bundledBgmId: "found-new-hope" },
+      ],
+      ...over,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+  const setField = (label: string, value: string) => {
+    const input = screen.getByText(label).parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value } });
+  };
+
+  it("速さを変えられる（部品の長さは変わらない）", () => {
+    withBgm();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    setField("速さ（倍）", "2");
+    expect(useTimelineStore.getState().doc?.clips[0]).toMatchObject({ speed: 2, durationSec: 10 });
+  });
+
+  it("素材の使い始めを変えられる", () => {
+    withBgm();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    setField("素材の使い始め（秒）", "12");
+    expect(useTimelineStore.getState().doc?.clips[0].sourceStartSec).toBe(12);
+  });
+
+  it("音量を変えられ、空にすると動画全体に合わせる（継承へ戻る）", () => {
+    withBgm();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    setField("音量", "0.8");
+    expect(useTimelineStore.getState().doc?.clips[0].volume).toBe(0.8);
+    setField("音量", "");
+    expect(useTimelineStore.getState().doc?.clips[0].volume).toBeUndefined();
+  });
+
+  it("前後のフェードを付けられる", () => {
+    withBgm();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    setField("だんだん大きく（秒）", "2");
+    setField("だんだん小さく（秒）", "3");
+    expect(useTimelineStore.getState().doc?.clips[0]).toMatchObject({ fadeInSec: 2, fadeOutSec: 3 });
+  });
+
+  it("固定した列では変えられない（欄を押せなくする）", () => {
+    withBgm({ tracks: [{ id: "track_002", kind: TRACK_KIND.audio, locked: true }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("速さ（倍）").parentElement?.querySelector("input")).toBeDisabled();
+  });
+
+  it("同梱BGMを再生位置から置ける", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.audio },
+      ],
+      clips: [],
+    });
+    useTimelineStore.setState({ playheadSec: 5 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "前向きなポップ" }));
+    expect(useTimelineStore.getState().doc?.clips[0]).toMatchObject({
+      kind: TIMELINE_CLIP_KIND.audio, bundledBgmId: "found-new-hope", startSec: 5,
+    });
+  });
+
+  it("持っている音の素材も置ける", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.audio },
+      ],
+      assets: [{ assetId: "asset_001", assetType: "bgm", displayName: "自前の曲", filePath: "assets/a.mp3" }],
+      clips: [],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "自前の曲" }));
+    expect(useTimelineStore.getState().doc?.clips[0].assetId).toBe("asset_001");
+  });
+
+  it("絵の部品には音の欄を出さない", () => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText("速さ（倍）")).not.toBeInTheDocument();
+  });
+});

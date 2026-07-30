@@ -20,6 +20,8 @@ import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframe
 import { groupElementIds } from "../../domain/project/groupOps";
 import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
+import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, VOLUME_MAX } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { creditSpeakerAt } from "../../domain/timeline/credit";
@@ -144,6 +146,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframe, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
+    addAudioClip, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -249,6 +252,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 置ける列（映像の列だけ・固定した列は除く）＝押せるのに置けない選択肢を出さない（§2-5）。
   const placeableTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.locked && !t.hidden) ?? [];
   // 読み上げを置ける列（音の列）。
+  // この動画が持っている音の素材（焼き出しで運ばれたものなど）。
+  const audioAssets = doc?.assets.filter((a) => a.assetType === ASSET_TYPE.bgm) ?? [];
   // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
   const voiceTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.audio && !t.locked && !t.hidden) ?? [];
   // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
@@ -651,6 +656,82 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               </div>
             )}
 
+            {/* 音の部品は、速さ・使い始め・音量・フェードを変えられる（#634＝中位の編集）。 */}
+            {selected.kind === TIMELINE_CLIP_KIND.audio && (
+              <div className="mt-lg">
+                <h4>音</h4>
+                <label className="field">
+                  <span>速さ（倍）</span>
+                  <input
+                    type="number"
+                    step={0.1}
+                    min={CLIP_SPEED_MIN}
+                    max={CLIP_SPEED_MAX}
+                    value={selected.speed ?? 1}
+                    disabled={selectedLocked}
+                    title={lockedHint}
+                    onChange={(e) => setSelectedClipSpeed(Number(e.target.value))}
+                  />
+                </label>
+                <label className="field">
+                  <span>素材の使い始め（秒）</span>
+                  <input
+                    type="number"
+                    step={0.5}
+                    min={0}
+                    value={selected.sourceStartSec ?? 0}
+                    disabled={selectedLocked}
+                    title={lockedHint}
+                    onChange={(e) => setSelectedClipSourceStart(Number(e.target.value))}
+                  />
+                </label>
+                <label className="field">
+                  <span>音量</span>
+                  <input
+                    type="number"
+                    step={0.05}
+                    min={0}
+                    max={VOLUME_MAX}
+                    value={selected.volume ?? ""}
+                    placeholder="動画全体に合わせる"
+                    disabled={selectedLocked}
+                    title={lockedHint}
+                    onChange={(e) => setSelectedClipVolume(e.target.value === "" ? null : Number(e.target.value))}
+                  />
+                </label>
+                <div className="row gap-sm">
+                  <label className="field">
+                    <span>だんだん大きく（秒）</span>
+                    <input
+                      type="number"
+                      step={0.5}
+                      min={0}
+                      value={selected.fadeInSec ?? 0}
+                      disabled={selectedLocked}
+                      title={lockedHint}
+                      onChange={(e) => setSelectedClipFade("in", Number(e.target.value))}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>だんだん小さく（秒）</span>
+                    <input
+                      type="number"
+                      step={0.5}
+                      min={0}
+                      value={selected.fadeOutSec ?? 0}
+                      disabled={selectedLocked}
+                      title={lockedHint}
+                      onChange={(e) => setSelectedClipFade("out", Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+                <p className="text-muted">
+                  速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
+                  素材が置き場所より短いときは繰り返して埋まります。
+                </p>
+              </div>
+            )}
+
             {/* 読み上げは、この画面で文を書いて声を作れる（ADR-0032 決定7）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.voice && (
               <div className="mt-lg">
@@ -860,6 +941,42 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   }
                 >
                   {t.name}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* 音（同梱BGM）を置く（#634）。素材の音は素材画面で取り込んだものから選ぶ。 */}
+      <div className="card">
+        <h3>音を置く</h3>
+        {voiceTracks.length === 0 ? (
+          <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定を外してください。</p>
+        ) : (
+          <>
+            <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに速さ・音量を変えられます。</p>
+            <div className="row gap-sm">
+              {BGM_CATALOG.map((b) => (
+                <button
+                  key={b.id}
+                  className="btn btn-secondary"
+                  disabled={isPlaying}
+                  title={isPlaying ? playingHint : b.note}
+                  onClick={() => addAudioClip({ bundledBgmId: b.id, trackId: voiceTracks[0].id, startSec: playheadSec })}
+                >
+                  {b.label}
+                </button>
+              ))}
+              {audioAssets.map((a) => (
+                <button
+                  key={a.assetId}
+                  className="btn btn-secondary"
+                  disabled={isPlaying}
+                  title={playingHint}
+                  onClick={() => addAudioClip({ assetId: a.assetId, trackId: voiceTracks[0].id, startSec: playheadSec })}
+                >
+                  {a.displayName}
                 </button>
               ))}
             </div>

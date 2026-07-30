@@ -2,7 +2,10 @@
 //
 // **置けない操作は黙って別の結果にしない**（§2-5・ADR-0026④）＝重なる位置へ動かそうとしたら、勝手に
 // 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
-import { TIMELINE_MIN_CLIP_SEC, VOICE_PLACEHOLDER_SEC, dimsForOrientation } from '../constants';
+import {
+  AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX,
+  VOICE_PLACEHOLDER_SEC, dimsForOrientation,
+} from '../constants';
 import { FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
@@ -14,6 +17,7 @@ import { subtitlesBoundTo } from './subtitleLink';
 import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
 import type { TimelineClip, TimelineProject, Track } from './types';
 import type { Texts } from '../project/types';
+import type { BundledBgmId } from '../bgm/bgmCatalog';
 import { defaultDurationForTemplate } from '../template/layerOps';
 import type { Template } from '../template/types';
 
@@ -490,4 +494,97 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
     voiceClipId,
   };
   return ok({ ...doc, tracks, clips: [...doc.clips, clip] });
+}
+
+/**
+ * **音を置く**（#634）＝同梱BGM または持ち込んだ音の素材を音の列へ。
+ *
+ * 長さは指定（無ければ仮の既定）。素材より長い置き場所は**繰り返して埋まる**（BGM の流儀＝`11 §7.6.5`）ので、
+ * 尺が分からなくても置ける。トリム（`sourceStartSec`）と速さ（`speed`）は置いたあとに変えられる。
+ */
+export function addAudioClip(
+  doc: TimelineProject,
+  input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number; durationSec?: number },
+): EditResult {
+  const track = doc.tracks.find((t) => t.id === input.trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  if (track.locked) return blocked(EDIT_BLOCKED.locked);
+  if (track.kind !== trackKindForClip(TIMELINE_CLIP_KIND.audio)) return blocked(EDIT_BLOCKED.trackKind);
+  // 音の出どころは高々1つ（`11 §8` V25）＝どちらも渡されたら置かない（黙って一方を選ばない）。
+  if ((input.bundledBgmId == null) === (input.assetId == null)) return blocked(EDIT_BLOCKED.notFound);
+  if (input.assetId != null && !doc.assets.some((a) => a.assetId === input.assetId)) {
+    return blocked(EDIT_BLOCKED.notFound);
+  }
+  const startSec = Math.max(0, input.startSec);
+  const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, input.durationSec ?? AUDIO_PLACEHOLDER_SEC);
+  if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  const clip: TimelineClip = {
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: TIMELINE_CLIP_KIND.audio,
+    trackId: input.trackId,
+    startSec,
+    durationSec,
+    ...(input.bundledBgmId != null ? { bundledBgmId: input.bundledBgmId } : { assetId: input.assetId }),
+  };
+  return ok({ ...doc, clips: [...doc.clips, clip] });
+}
+
+/**
+ * 音・動画の素材の**再生速度**（#634・`11 §7.6.5`）。1＝そのまま。
+ *
+ * **クリップの長さは変えない**＝速さは「置き場所ぶんの時間に、素材のどれだけを流すか」を決める
+ * （2倍速なら倍の長さぶんの素材が入る）。再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）は
+ * どちらもこの値を読むので、聞いた音と書き出した音が一致する。
+ */
+export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // schema は `exclusiveMinimum: 0`＝0 以下は保存できない文書になる。範囲へ収める（§2-7 の下限を共有）。
+  const next = Math.min(Math.max(CLIP_SPEED_MIN, speed), CLIP_SPEED_MAX);
+  if ((clip.speed ?? 1) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next === 1) delete patched.speed; // 等速は持たない（既定と同じ値を書かない）
+  else patched.speed = next;
+  return ok(withClip(doc, patched));
+}
+
+/** 素材の**どこから使うか**（秒・0＝頭から）。負にはしない（素材の外は読めない）。 */
+export function setClipSourceStart(doc: TimelineProject, clipId: string, sec: number): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = Math.max(0, sec);
+  if ((clip.sourceStartSec ?? 0) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next === 0) delete patched.sourceStartSec;
+  else patched.sourceStartSec = next;
+  return ok(withClip(doc, patched));
+}
+
+/** 音量（0〜1.5・`null` で「動画全体に合わせる」＝継承へ戻す・`11 §6`）。 */
+export function setClipVolume(doc: TimelineProject, clipId: string, volume: number | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = volume == null ? null : Math.min(Math.max(0, volume), VOLUME_MAX);
+  if ((clip.volume ?? null) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next == null) delete patched.volume;
+  else patched.volume = next;
+  return ok(withClip(doc, patched));
+}
+
+/** 前後のフェード（秒・0 で無し）。**尺の半分までに切り詰めるのは再生・書き出し側**（`clipFadeSec`）。 */
+export function setClipFade(doc: TimelineProject, clipId: string, edge: 'in' | 'out', sec: number): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const key = edge === 'in' ? 'fadeInSec' : 'fadeOutSec';
+  const next = Math.max(0, sec);
+  if ((clip[key] ?? 0) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next === 0) delete patched[key];
+  else patched[key] = next;
+  return ok(withClip(doc, patched));
 }
