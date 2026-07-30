@@ -38,6 +38,12 @@ interface ItemBase extends Rect {
    * 場面形式は設定しない（従来どおりアイテムごと）＝この仕組みは出力に影響しない。
    */
   composite?: { key: string; opacity: number };
+  /**
+   * **切り抜き**（ADR-0032・#634）。この矩形（キャンバス座標）の外は描かない。
+   * 同じ矩形を持つ**連続した**アイテムは1つの切り抜きでまとめて包む（`composite` と同じ流儀）。
+   * 場面形式は設定しない（従来どおり切り抜き無し）＝この仕組みは出力に影響しない。
+   */
+  clipRect?: { id: string; x: number; y: number; w: number; h: number; rotation?: number };
 }
 
 export interface FillItem extends ItemBase {

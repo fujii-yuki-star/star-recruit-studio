@@ -3,7 +3,7 @@
 // **置けない操作は黙って別の結果にしない**（§2-5・ADR-0026④）＝重なる位置へ動かそうとしたら、勝手に
 // 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
 import {
-  AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX,
+  AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation,
 } from '../constants';
 import { FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
@@ -586,5 +586,37 @@ export function setClipFade(doc: TimelineProject, clipId: string, edge: 'in' | '
   const patched = { ...clip };
   if (next === 0) delete patched[key];
   else patched[key] = next;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * **切り抜き**（#634）＝クリップの箱の各辺を「箱の大きさに対する割合」で隠す。中身は動かない。
+ *
+ * 各辺は 0〜1 未満へ収め、**同じ軸の合計も 1 未満**に保つ（`11 §8` V30＝丸ごと消える設定を作らない。
+ * 足し合わせが 1 を超える指定は、**いま動かした側を優先して反対側を詰める**＝入力を黙って捨てない）。
+ * すべて 0 になったらキーごと落とす（既定と同じ値を書かない）。
+ */
+export function setClipCrop(
+  doc: TimelineProject,
+  clipId: string,
+  edge: 'top' | 'right' | 'bottom' | 'left',
+  value: number,
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const current = clip.crop ?? {};
+  const next: NonNullable<TimelineClip['crop']> = { ...current };
+  const opposite = edge === 'top' ? 'bottom' : edge === 'bottom' ? 'top' : edge === 'left' ? 'right' : 'left';
+  const moved = Math.min(Math.max(0, value), CROP_MAX);
+  next[edge] = moved;
+  // 反対側と合わせて 1 を超えるなら、反対側を詰める（動かした側の指定は残す）。
+  const room = CROP_MAX - moved;
+  if ((next[opposite] ?? 0) > room) next[opposite] = Math.max(0, room);
+  for (const k of ['top', 'right', 'bottom', 'left'] as const) if (!next[k]) delete next[k];
+  const patched = { ...clip };
+  if (Object.keys(next).length === 0) delete patched.crop;
+  else patched.crop = next;
+  if (JSON.stringify(patched.crop ?? null) === JSON.stringify(clip.crop ?? null)) return ok(doc);
   return ok(withClip(doc, patched));
 }

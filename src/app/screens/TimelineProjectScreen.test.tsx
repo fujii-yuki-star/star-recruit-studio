@@ -851,3 +851,39 @@ describe("TimelineProjectScreen: 音の部品（速さ・使い始め・音量�
     expect(screen.queryByText("速さ（倍）")).not.toBeInTheDocument();
   });
 });
+
+describe("TimelineProjectScreen: 切り抜き（#634）", () => {
+  const withShape = (over: Record<string, unknown> = {}) => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 400, h: 300, fillColor: "#ff0000" },
+      ],
+      ...over,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("%で隠せる（保存は割合）", () => {
+    withShape();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByText("下を隠す（%）").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "25" } });
+    expect(useTimelineStore.getState().doc?.clips[0].crop).toEqual({ bottom: 0.25 });
+  });
+
+  it("固定した列では変えられない", () => {
+    withShape({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("上を隠す（%）").parentElement?.querySelector("input")).toBeDisabled();
+  });
+
+  it("音の部品には出さない（絵が無いので効かない）", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 4, bundledBgmId: "found-new-hope" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText("上を隠す（%）")).not.toBeInTheDocument();
+  });
+});

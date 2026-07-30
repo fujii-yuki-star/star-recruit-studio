@@ -224,3 +224,9 @@ export const AUDIO_PLACEHOLDER_SEC = 10;
  */
 export const CLIP_SPEED_MIN = 0.25;
 export const CLIP_SPEED_MAX = 4;
+
+/**
+ * 切り抜きで隠せる上限（#634）。**同じ軸の合計はこの値未満**＝丸ごと消える設定を作らない
+ * （schema も各辺 `exclusiveMaximum: 1`）。0.99 まで隠せば実用上は足りる。
+ */
+export const CROP_MAX = 0.99;

@@ -1,4 +1,4 @@
-// タイムライン形式（ADR-0032）の意味検証（11 §8 V22–V26）。純粋関数（副作用なし）。
+// タイムライン形式（ADR-0032）の意味検証（11 §8 V22–V30）。純粋関数（副作用なし）。
 // スキーマ適合（型/必須/enum/範囲＝V1,V2）は ajv 済み前提で、ここは schema で表せない
 // 相互参照・横断条件だけを見て Warning[] を返す。
 // エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。文言は §2-5「次の行動」を示す。
@@ -83,7 +83,7 @@ export function overlappingClipPairs(clips: TimelineClip[]): Array<[TimelineClip
  * タイムライン文書を検証して警告を返す（警告＝行動は止めない）。
  * V22 trackId 実在／V23 クリップ種別とトラック種別の一致／V24 同一トラック内の時間の重なり／
  * V25 素材の実在・音の出どころの排他／V26 グループ members・アニメ targetId の実在／
- * V29 字幕の連動先の実在（ADR-0032 決定24）。
+ * V29 字幕の連動先の実在（ADR-0032 決定24）／V30 切り抜きで丸ごと隠れていないか（#634）。
  */
 export function validateTimelineDoc(doc: TimelineProject): Warning[] {
   const warnings: Warning[] = [];
@@ -130,6 +130,17 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
     // voice を持てるのは読み上げクリップだけ（持たせても鳴らないので黙って無視しない・§2-5）。
     if (!isVoiceClip(clip) && clip.voice != null) {
       warnings.push(warn('TIMELINE_VOICE_ON_NON_VOICE', '読み上げの中身は読み上げの部品にだけ置けます。読み上げの部品に置き直してください', field));
+    }
+
+    // V30: 切り抜きで丸ごと隠れていないか（同じ軸の合計が 1 以上＝その部品は動画に出ない）。
+    // 編集からは作れないが、手編集・将来の取り込みで来うる＝黙って消えたことに気づけないので知らせる。
+    const crop = clip.crop;
+    if (crop != null) {
+      const v = (crop.top ?? 0) + (crop.bottom ?? 0);
+      const h = (crop.left ?? 0) + (crop.right ?? 0);
+      if (v >= 1 || h >= 1) {
+        warnings.push(warn('TIMELINE_CROP_HIDES_ALL', '切り抜きで全部隠れている部品があります。切り抜きを小さくしてください', field));
+      }
     }
 
     // V29: 字幕の連動先（ADR-0032 決定24）。指しているのに見つからない／読み上げでないものを指している

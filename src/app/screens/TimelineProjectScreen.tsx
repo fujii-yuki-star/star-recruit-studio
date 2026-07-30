@@ -89,6 +89,14 @@ function assignableAssets(assets: readonly Asset[], layer: Layer): Asset[] {
   });
 }
 
+/** 切り抜きの4辺（#634）。%で入れる（保存は割合＝0〜1未満）。 */
+const CROP_EDGES: { edge: 'top' | 'right' | 'bottom' | 'left'; label: string }[] = [
+  { edge: 'top', label: '上を隠す（%）' },
+  { edge: 'bottom', label: '下を隠す（%）' },
+  { edge: 'left', label: '左を隠す（%）' },
+  { edge: 'right', label: '右を隠す（%）' },
+];
+
 /**
  * 「動き」の入力欄（#634）。**値は「本来の見た目からのずれ」**（絶対値ではない＝`Keyframe` の意味）。
  * `neutral` は「動かさない」ときの値で、欄の**プレースホルダ**に出す（勝手に入れない＝空欄は触らない）。
@@ -147,6 +155,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframe, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
     addAudioClip, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
+    setSelectedClipCrop,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -554,6 +563,33 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 ))}
               </select>
             </label>
+
+            {/* 切り抜き（#634）＝箱の各辺を割合で隠す。中身は動かない（隠れるだけ）。 */}
+            {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
+              <div className="mt-lg">
+                <h4>切り抜き</h4>
+                <div className="row gap-sm">
+                  {CROP_EDGES.map((e) => (
+                    <label className="field" key={e.edge}>
+                      <span>{e.label}</span>
+                      <input
+                        type="number"
+                        step={5}
+                        min={0}
+                        max={99}
+                        value={Math.round((selected.crop?.[e.edge] ?? 0) * 100)}
+                        disabled={selectedLocked}
+                        title={lockedHint}
+                        onChange={(ev) => setSelectedClipCrop(e.edge, Number(ev.target.value) / 100)}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <p className="text-muted">
+                  部品の各辺を%で隠します（中身は動きません）。上下・左右それぞれの合計は99%までです。
+                </p>
+              </div>
+            )}
 
             {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (

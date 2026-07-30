@@ -299,6 +299,9 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
     // 1枚に合成する＝場面の要素どうしがフェード中だけ互いに透ける、を防ぐ。グループのメンバーは
     // 連続した列に並ぶ（`TrackAllocator` が1場面ぶんを連続で取る）ので、並びも1かたまりになる。
     const compositeKey = groupO != null ? opacityGroupOfClip.get(clip.id) ?? clip.id : clip.id;
+    // 切り抜きは「クリップの箱の各辺を割合で隠す」（`11 §7.6.4`）。**変形後の箱**（`finalBox`）から矩形を出す
+    // ＝動かした・拡大した先で切れる（箱の中身と同じ扱い）。何も隠さないときは矩形を持たない。
+    const cropRect = cropRectOf(clip, finalBox);
 
     for (const item of clipItems) {
       applySimilarity(item, sim);
@@ -313,9 +316,32 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
         id: `${clip.id}/${item.id}`,
         zIndex: items.length,
         ...(clipOpacity < 1 ? { composite: { key: compositeKey, opacity: clipOpacity } } : {}),
+        // 切り抜き（#634）＝**変形のあとの箱**を基準に切る（動かした先で切れる＝設定した意味どおり）。
+        ...(cropRect ? { clipRect: cropRect } : {}),
       });
     }
   }
 
   return { width: canvas.width, height: canvas.height, backgroundColor: DEFAULT_BACKGROUND_COLOR, items };
+}
+
+/**
+ * 切り抜きの矩形（キャンバス座標）。各辺を「箱の大きさに対する割合」で内側へ寄せる（#634）。
+ * 何も隠さない（すべて 0／未指定）ときは `undefined`＝切り抜きの `<g>` を出さない。
+ * 同じ軸の合計が 1 以上の壊れたデータは**残り 1px を残す**（絵が丸ごと消えるより、切れていると分かる方を採る）。
+ */
+function cropRectOf(clip: TimelineClip, box: Box): NonNullable<LayoutItem['clipRect']> | undefined {
+  const c = clip.crop;
+  if (!c) return undefined;
+  const top = Math.max(0, c.top ?? 0);
+  const right = Math.max(0, c.right ?? 0);
+  const bottom = Math.max(0, c.bottom ?? 0);
+  const left = Math.max(0, c.left ?? 0);
+  if (top === 0 && right === 0 && bottom === 0 && left === 0) return undefined;
+  const x = box.x + box.w * left;
+  const y = box.y + box.h * top;
+  const w = Math.max(1, box.w * (1 - left - right));
+  const h = Math.max(1, box.h * (1 - top - bottom));
+  // 箱の回転も渡す（矩形を同じだけ回して、箱の辺に沿って切る）。
+  return { id: clip.id, x, y, w, h, ...(box.rotation ? { rotation: box.rotation } : {}) };
 }
