@@ -7,8 +7,8 @@ import {
   VOICE_PLACEHOLDER_SEC, dimsForOrientation,
 } from '../constants';
 import { FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
-import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y } from '../enums';
-import type { CropAlignX, CropAlignY, TextKey, TrackKind } from '../enums';
+import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
+import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
 import { removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from '../project/overlayClipEdit';
@@ -648,5 +648,21 @@ export function setClipCropAlign(
   if (Object.keys(next).length === 0) delete patched.cropAlign;
   else patched.cropAlign = next;
   if (JSON.stringify(patched.cropAlign ?? null) === JSON.stringify(clip.cropAlign ?? null)) return ok(doc);
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * **切り抜きの効かせ方**（#634）。`fill` で「残った素材を枠いっぱいに映し直す」。
+ * `null`／既定（`mask`）はキーごと落とす＝既定と同じ値を書かない。
+ */
+export function setClipCropMode(doc: TimelineProject, clipId: string, mode: CropMode | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = mode == null || mode === CROP_MODE_DEFAULT ? undefined : mode;
+  if ((clip.cropMode ?? undefined) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next == null) delete patched.cropMode;
+  else patched.cropMode = next;
   return ok(withClip(doc, patched));
 }

@@ -321,7 +321,7 @@ schemaVersion ● / templateId ● / name ● / description ○ / category(enum)
 
 **場面（`parts`/`scenes`）を持たない別文書**。キャンバスは常に自由配置＝**FREE（空間の自由）× タイムライン（時間の自由）**。**AI はこの形式を生成しない**（AI の関与は場面形式まで＝ADR-0007 の単一パイプラインは場面側で不変）。
 
-schemaVersion ●（現行 `"1.4"`・場面形式とは独立に進む） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`）
+schemaVersion ●（現行 `"1.5"`・場面形式とは独立に進む） / format ●（`"timeline"`・§1 の形式判別） / projectId ●（`proj_YYYYMMDD_NNN`・場面形式と共通採番） / projectName ● / createdAt ● / updatedAt ● / sourceProjectId ○（焼き出し元の場面形式 project。**記録のみで元は書き換えない**・完全新規なら未指定） / videoSettings ●（`$ref` 共有） / voiceSettings ●（`$ref` 共有。**タイムライン側でも声を作れる**） / assets ●（`Asset[]`・`$ref` 共有。**焼き出し時はコピー**＝自己完結・ADR-0024 (6)） / tracks ●（`Track[]`） / clips ●（`TimelineClip[]`） / groups ○（`Group[]`・`$ref` 共有。members はクリップ id／ネストでグループ id） / animations ○（`ClipAnimation[]`）
 
 **Track**: id ●（`track_NNN`・§2.1） / kind ●（enum `visual`／`audio`＝置けるクリップの種別を決める） / name ○（未指定＝種別＋連番の自動名） / hidden ○（描画・書き出しから除外＝音声は無音） / locked ○（移動・トリムを禁止）。**配列の順＝重ね順（後ろほど手前）**・UI では上が手前に見せる。
 
@@ -331,6 +331,14 @@ schemaVersion ●（現行 `"1.4"`・場面形式とは独立に進む） / form
 - `kind='template'`（**テンプレを素材として置く**・差し込み口が生きている）: templateId ● / assetRefs ○ / texts ○ / textStyles ○ / slotFits ○ / textFontIds ○（テキスト種別ごとのフォント・枠全体は `fontId`） / character ○（立ち絵の表示と表情・`$ref` 共有） / slotClips ○（差し込み口ごとの動画の範囲/速度/元音声・`$ref` 共有・ADR-0028）
 - `kind='audio'`: bundledBgmId ○（同梱BGM一覧は `$ref` 共有・`assetId` と排他） / volume ○ / fadeInSec ○ / fadeOutSec ○
 - `kind='voice'`（**読み上げ**・ADR-0032 決定7）: voice ●（`TimelineVoice`・**schema の if/then で必須**＝中身の無い声を作らせない） / volume ○
+- **切り抜きの効かせ方**（#634・タイムライン形式だけの語彙）: `cropMode` ○（`mask`＝既定＝箱の辺を隠す／`fill`＝**残った素材を枠いっぱいに映し直す**）。
+  `fill` が効くのは **`kind:'slot'`（素材の差し込み口）で切り抜きがあり、素材の実寸が分かるとき**だけ。
+  - **テンプレのクリップには効かせない**＝絵が複数入るので「どの素材を枠いっぱいにするか」が決まらない。
+  - **実寸は描く側から渡す**（`layoutTimelineAt(..., { assetSizeOf })`／`buildTimelineFrames`）。保存データに絵の大きさは無いので、
+    画面が表示中の src をブラウザで測って store（`assetSizes`）へ入れ、**プレビューと書き出しへ同じ値を渡す**（ADR-0001）。
+  - **分からないときは `mask` として描き、画面が理由を出す**（§2-5・ADR-0026④＝黙って別の絵にしない）。
+  - 当てはめの計算は `domain/timeline/cropFill.ts` の `fillPlacement`（純粋）＝**素材全体を置く矩形**を返し、はみ出しは**箱そのもの**で切る。
+    `<image>` は `preserveAspectRatio="none"`（当てはめを SVG にも任せると二重に効く）。`cover`/`contain`/`stretch` と**寄せ**（`cropAlign`）はここに畳み込む。
 - **素材の寄せ**（#634・タイムライン形式だけの語彙）: cropAlign ○（`{x:left|center|right, y:top|middle|bottom}`＝
   `fit:'cover'` で枠に収まらない側を**どこで切るか**・未指定＝中央。`contain` では余白の寄せ。`05 §8` の
   「トリミング位置をユーザー調整可能にする」がこれ）。**切り抜き（`crop`）とは別物**＝あちらは箱の辺を隠す。
@@ -609,7 +617,17 @@ domain の純粋関数 **`src/domain/timeline/edit.ts`**。**置けない操作�
 **連続したアイテム**を `<g clip-path>` で1つに包む（`composite` と同じ流儀）。
 
 - **変形のあとの箱を基準にする**＝動かした・拡大した先で切れる（設定した意味どおり）。
-- **中身は動かない**（隠れるだけ）＝素材の一部を枠いっぱいに映し直すのは別の機能（将来）。
+- **効かせ方は2つ**（`cropMode`）。既定の `mask` は**中身が動かない**（隠れるだけ）。`fill` は**残った素材を
+  枠いっぱいに映し直す**＝`fillPlacement`（`domain/timeline/cropFill.ts`・純粋）が**素材全体を置く矩形**を返し、
+  はみ出しは**箱そのもの**で切る。`<image>` は `preserveAspectRatio="none"`（当てはめを SVG にも任せると二重に効く）
+  ので、`cover`/`contain`/`stretch` と**寄せ**（`cropAlign`）はこの計算へ畳み込む（`fill` のとき `align` は付けない）。
+  - 効くのは **`kind:'slot'`（素材の差し込み口）で切り抜きがあり、素材の実寸が分かるとき**だけ。
+    **テンプレのクリップには効かせない**＝絵が複数入るので「どの素材を枠いっぱいにするか」が決まらない。
+  - **実寸は描く側から渡す**（`layoutTimelineAt(..., { assetSizeOf })`／`buildTimelineFrames`）。保存データに絵の
+    大きさは無いので、画面が表示中の src をブラウザで測って store（`assetSizes`）へ入れ、**プレビューと書き出しへ
+    同じ値を渡す**（ADR-0001）。**分からないときは `mask` として描き、画面が理由を出す**（§2-5・ADR-0026④）。
+  - **箱が回っているときは、素材の矩形を箱の中心まわりに回した位置へ寄せる**（`pivotShift`）＝アイテムは自分の
+    中心で回るので、そのままだと切り抜き矩形（箱の中心で回る）とピボットが割れる。
 - **合成のかたまりの「中」で、切り抜きごとに小分けして包む**（`clippedRuns`）。合成の単位は**複数のクリップに
   跨る**ことがある（まとまりのフェード＝決定19）ので、かたまりの外で包むと**隣のクリップまで切れる／持っている
   切り抜きが黙って落ちる**（#634 レビュー 🔴）。矩形で切るので「切ってから薄める／薄めてから切る」は同じ絵。

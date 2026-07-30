@@ -3,13 +3,13 @@ import type { ScreenId } from "../data/mockData";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
-import { TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { CROP_MODE, CROP_MODE_DEFAULT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { clipCountOnTrack } from "../../domain/timeline/edit";
 import { audioSourceKeyOfClip } from "../../domain/timeline/audio";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
-import type { TrackKind } from "../../domain/enums";
+import type { CropMode, TrackKind } from "../../domain/enums";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { clipIsLiveAt, layoutTimelineAt } from "../../renderer/timelineLayout";
@@ -148,7 +148,7 @@ function keyframeSummary(k: Keyframe): string {
  */
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
-    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, editBlocked, history, exportRun,
+    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
     setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
@@ -156,7 +156,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframe, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
     addAudioClip, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
-    setSelectedClipCrop, setSelectedClipCropAlign,
+    setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -198,8 +198,30 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     if (!doc) return null;
     const byId = new Map(templates.map((t) => [t.templateId, t]));
     // 末尾ちょうどは1フレーム手前へ寄せる（半開区間で画面が真っ白になるのを防ぐ・`frameTimeSec`）。
-    return layoutTimelineAt(doc, frameTimeSec(doc, playheadSec), { templateOf: (id) => byId.get(id) });
-  }, [doc, playheadSec, templates]);
+    return layoutTimelineAt(doc, frameTimeSec(doc, playheadSec), { templateOf: (id) => byId.get(id), assetSizeOf: (id) => assetSizes[id] });
+  }, [doc, playheadSec, templates, assetSizes]);
+
+  // 素材の**実寸**を測る（#634）。「枠いっぱいに映す」は素材の縦横比が要るが、保存データには
+  // 絵の大きさが無い（動画だけ持っている）ので、表示に使っている src をブラウザで測って store へ入れる。
+  // 測れたら描き直す＝プレビューと書き出しが同じ値を見る（ADR-0001）。
+  useEffect(() => {
+    let alive = true;
+    for (const [assetId, src] of Object.entries(assetSrcById)) {
+      if (assetSizes[assetId] || !src) continue;
+      const img = new Image();
+      img.onload = () => {
+        if (alive && img.naturalWidth > 0 && img.naturalHeight > 0) {
+          setAssetSize(assetId, { w: img.naturalWidth, h: img.naturalHeight });
+        }
+      };
+      // 測れないもの（動画など）は入れない＝そのクリップは「辺を隠す」表示のまま（画面が理由を出す）。
+      img.src = src;
+    }
+    return () => {
+      alive = false;
+    };
+  }, [assetSrcById, assetSizes, setAssetSize]);
+
   // 見た目が見つからないクリップは**描かれない**（`layoutTimelineAt`）。黙って絵だけ消さずに知らせる（§2-5・#547 と同じ筋）。
   const missingTemplateCount = useMemo(() => {
     if (!doc) return 0;
@@ -215,6 +237,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const slotNames = slotLabelsFor(slotLayers);
   // 固定した列の部品は中身も変えられない（domain 側で止まる）＝欄を押せなくして理由を出す
   // ＝入力しても黙って元へ戻る、を作らない（§2-5）。
+  // 選んでいる部品の素材の実寸（#634）。分からないと「枠いっぱい」は効かせられない（画面が理由を出す）。
+  const selectedSourceSize =
+    selected?.kind === TIMELINE_CLIP_KIND.slot && selected.assetId ? assetSizes[selected.assetId] : undefined;
   const selectedLocked = !!selected && !!doc?.tracks.find((t) => t.id === selected.trackId)?.locked;
   const lockedHint = selectedLocked ? "この列は固定されています。変えるには固定を外してください" : undefined;
   const textKeys = selectedTemplate ? usedTextKeys(selectedTemplate.layers) : [];
@@ -587,8 +612,31 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   ))}
                 </div>
                 <p className="text-muted">
-                  部品の各辺を%で隠します（中身は動きません）。上下・左右それぞれの合計は99%までです。
+                  部品の各辺を%で隠します。上下・左右それぞれの合計は99%までです。
                 </p>
+                {/* 切り抜きの効かせ方（#634）＝素材の差し込み口だけ（1つの素材に対する操作）。 */}
+                {selected.kind === TIMELINE_CLIP_KIND.slot && (
+                  <>
+                    <label className="field">
+                      <span>切り抜いたあと</span>
+                      <select
+                        value={selected.cropMode ?? CROP_MODE_DEFAULT}
+                        disabled={selectedLocked}
+                        title={lockedHint}
+                        onChange={(e) => setSelectedClipCropMode(e.target.value as CropMode)}
+                      >
+                        <option value={CROP_MODE.mask}>隠したままにする（中身は動かない）</option>
+                        <option value={CROP_MODE.fill}>残った部分を枠いっぱいに映す</option>
+                      </select>
+                    </label>
+                    {selected.cropMode === CROP_MODE.fill && !selectedSourceSize && (
+                      <p className="text-warn">
+                        この素材の大きさがまだ分かりません（表示できていない素材や動画は測れません）。
+                        いまは「隠したままにする」表示です。素材が画面に出れば自動で枠いっぱいに切り替わります。
+                      </p>
+                    )}
+                  </>
+                )}
                 {/* 素材の寄せ（#634・05 §8）＝「枠いっぱいに表示」で収まらない側をどこで切るか。 */}
                 <div className="row gap-sm">
                   <label className="field">

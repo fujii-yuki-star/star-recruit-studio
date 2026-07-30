@@ -2,7 +2,7 @@
 // 場面（parts/scenes）を持たない**別の文書形式**で、キャンバスは常に自由配置＝FREE（空間の自由）×
 // タイムライン（時間の自由）。AI はこの形式を生成しない（AI の関与は場面形式まで）。
 import type { BundledBgmId } from '../bgm/bgmCatalog';
-import type { CropAlignX, CropAlignY, Fit, NarrationStatus, ProjectFormat, TextKey, TimelineClipKind, TrackKind } from '../enums';
+import type { CropAlignX, CropAlignY, CropMode, Fit, NarrationStatus, ProjectFormat, TextKey, TimelineClipKind, TrackKind } from '../enums';
 import type { FontId } from '../font/fontCatalog';
 import type { Group } from '../group/types';
 import type {
@@ -107,6 +107,13 @@ export interface TimelineClip extends ClipSpatial {
   crop?: { top?: number; right?: number; bottom?: number; left?: number };
 
   /**
+   * 切り抜きの**効かせ方**（#634）。未指定＝`mask`＝箱の辺を隠す（中身は動かない）。
+   * `fill`＝**残った素材を枠いっぱいに映し直す**＝`kind='slot'` のときだけ効く（1つの素材に対する操作なので）。
+   * **素材の実寸が要る**（描く側が測って渡す）。分からないときは `mask` として描き、画面が理由を出す。
+   */
+  cropMode?: CropMode;
+
+  /**
    * **素材の寄せ**（#634・`05 §8`「トリミング位置をユーザー調整可能にする」）。
    * `fit:'cover'` で枠に収まらない側を**どこで切るか**（既定＝中央）。`contain` では余白の寄せになる。
    * 切り抜き（`crop`）とは別物＝あちらは「箱の辺を隠す」、こちらは「素材を箱のどこへ寄せるか」。
@@ -180,4 +187,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.4';
+export const TIMELINE_SCHEMA_VERSION = '1.5';

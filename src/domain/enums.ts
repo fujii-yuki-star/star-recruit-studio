@@ -181,6 +181,20 @@ export const CROP_ALIGN_YS = ['top', 'middle', 'bottom'] as const;
 export type CropAlignX = (typeof CROP_ALIGN_XS)[number];
 export type CropAlignY = (typeof CROP_ALIGN_YS)[number];
 
+/**
+ * 切り抜きの効かせ方（#634）。`mask`＝**箱の辺を隠す**（既定・中身は動かない）／
+ * `fill`＝**残った素材を枠いっぱいに映し直す**（`kind='slot'` のみ・素材の実寸が要る）。
+ */
+export const CROP_MODES = ['mask', 'fill'] as const;
+export type CropMode = (typeof CROP_MODES)[number];
+export const CROP_MODE = {
+  mask: 'mask',
+  fill: 'fill',
+} as const satisfies Record<CropMode, CropMode>;
+
+/** 切り抜きの効かせ方の既定（箱の辺を隠す）。**判定・描画・画面がここだけを見る**。 */
+export const CROP_MODE_DEFAULT = CROP_MODE.mask;
+
 /** 値の名前つき参照（§6/§2-7：文字列直書きを避ける）。 */
 export const CROP_ALIGN_X = {
   left: 'left',
