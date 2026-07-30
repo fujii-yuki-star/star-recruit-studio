@@ -8,6 +8,7 @@ import { creditSpeakerAt } from '../../domain/timeline/credit';
 import { creditForLine } from '../../domain/voice/narratorCredit';
 import type { TimelineProject } from '../../domain/timeline/types';
 import type { Template } from '../../domain/template/types';
+import type { SourceSize } from '../../domain/timeline/cropFill';
 import { layoutTimelineAt } from '../timelineLayout';
 import { layoutToSvg } from '../sceneSvg';
 import { svgToPngDataUrl } from './rasterize';
@@ -21,6 +22,8 @@ export interface BuildTimelineFramesOptions {
   templateOf: (templateId: string) => Template | undefined;
   /** 素材の表示用 src（プレビューと同じものを渡す＝同じ絵になる）。 */
   assetSrc: (assetId: string | null) => string | undefined;
+  /** 素材の実寸（#634）。プレビューと同じものを渡す＝「枠いっぱいに映す」が書き出しでも同じ絵になる。 */
+  assetSizeOf?: (assetId: string) => SourceSize | undefined;
   /** 出力の実寸（省略時はレイアウトの寸法＝キャンバス実寸）。 */
   outputSize?: { width: number; height: number };
   /** 誰もしゃべっていない時刻に出すクレジット（動画の既定の声）。 */
@@ -63,7 +66,7 @@ export async function buildTimelineFrames(
   for (let f = 0; f < plan.frameCount; f += 1) {
     bail();
     const timeSec = frameTimeAt(f, plan.fps);
-    const layout = layoutTimelineAt(doc, timeSec, { templateOf: opts.templateOf });
+    const layout = layoutTimelineAt(doc, timeSec, { templateOf: opts.templateOf, assetSizeOf: opts.assetSizeOf });
     const svg = layoutToSvg(layout, {
       assetSrc: opts.assetSrc,
       credit: creditForLine({ speaker: creditSpeakerAt(doc, timeSec) }, opts.fallbackCredit),

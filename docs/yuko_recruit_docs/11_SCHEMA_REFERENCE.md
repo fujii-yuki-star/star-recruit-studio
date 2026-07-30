@@ -331,6 +331,14 @@ schemaVersion ●（現行 `"1.4"`・場面形式とは独立に進む） / form
 - `kind='template'`（**テンプレを素材として置く**・差し込み口が生きている）: templateId ● / assetRefs ○ / texts ○ / textStyles ○ / slotFits ○ / textFontIds ○（テキスト種別ごとのフォント・枠全体は `fontId`） / character ○（立ち絵の表示と表情・`$ref` 共有） / slotClips ○（差し込み口ごとの動画の範囲/速度/元音声・`$ref` 共有・ADR-0028）
 - `kind='audio'`: bundledBgmId ○（同梱BGM一覧は `$ref` 共有・`assetId` と排他） / volume ○ / fadeInSec ○ / fadeOutSec ○
 - `kind='voice'`（**読み上げ**・ADR-0032 決定7）: voice ●（`TimelineVoice`・**schema の if/then で必須**＝中身の無い声を作らせない） / volume ○
+- **切り抜きの効かせ方**（#634・タイムライン形式だけの語彙）: `cropMode` ○（`mask`＝既定＝箱の辺を隠す／`fill`＝**残った素材を枠いっぱいに映し直す**）。
+  `fill` が効くのは **`kind:'slot'`（素材の差し込み口）で切り抜きがあり、素材の実寸が分かるとき**だけ。
+  - **テンプレのクリップには効かせない**＝絵が複数入るので「どの素材を枠いっぱいにするか」が決まらない。
+  - **実寸は描く側から渡す**（`layoutTimelineAt(..., { assetSizeOf })`／`buildTimelineFrames`）。保存データに絵の大きさは無いので、
+    画面が表示中の src をブラウザで測って store（`assetSizes`）へ入れ、**プレビューと書き出しへ同じ値を渡す**（ADR-0001）。
+  - **分からないときは `mask` として描き、画面が理由を出す**（§2-5・ADR-0026④＝黙って別の絵にしない）。
+  - 当てはめの計算は `domain/timeline/cropFill.ts` の `fillPlacement`（純粋）＝**素材全体を置く矩形**を返し、はみ出しは**箱そのもの**で切る。
+    `<image>` は `preserveAspectRatio="none"`（当てはめを SVG にも任せると二重に効く）。`cover`/`contain`/`stretch` と**寄せ**（`cropAlign`）はここに畳み込む。
 - **素材の寄せ**（#634・タイムライン形式だけの語彙）: cropAlign ○（`{x:left|center|right, y:top|middle|bottom}`＝
   `fit:'cover'` で枠に収まらない側を**どこで切るか**・未指定＝中央。`contain` では余白の寄せ。`05 §8` の
   「トリミング位置をユーザー調整可能にする」がこれ）。**切り抜き（`crop`）とは別物**＝あちらは箱の辺を隠す。

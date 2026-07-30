@@ -11,11 +11,12 @@ import { ASSET_TYPE } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
-import type { CropAlignX, CropAlignY, TextKey, TrackKind } from "../../domain/enums";
+import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from "../../domain/enums";
+import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
   addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip,
   moveTrackOrder, removeClips, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
-  setClipCrop, setClipCropAlign, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
+  setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
@@ -83,6 +84,13 @@ export interface TimelineState {
   selectedClipIds: string[];
   /** 素材の表示用 src（assetId → URL）。場面形式の `assetSrcById` と同じ役割。 */
   assetSrcById: Record<string, string>;
+  /**
+   * 素材の**実寸**（assetId → px・#634）。絵を測らないと分からないので**画面が測って入れる**。
+   * プレビューと書き出しが同じ値を見る＝同じ絵になる（ADR-0001）。測れていない素材は入らない。
+   */
+  assetSizes: Record<string, SourceSize>;
+  /** 測った実寸を入れる（#634）。同じ値なら何もしない＝描き直しを増やさない。 */
+  setAssetSize: (assetId: string, size: SourceSize) => void;
   /**
    * 音源（**音源キー** → 再生できる URL）。**開いたときにまとめて用意する**＝鳴らす瞬間に読みに行くと
    * 頭が欠ける。キーはクリップ id ではなく**音源の中身**（`audioSourceKey`）なので、同じ曲を使う複数の
@@ -156,6 +164,8 @@ export interface TimelineState {
   setSelectedClipSourceStart: (sec: number) => void;
   /** 選んでいる音の音量（`null`＝動画全体に合わせる・#634）。 */
   setSelectedClipVolume: (volume: number | null) => void;
+  /** 選んでいる部品の切り抜きの効かせ方（#634）。 */
+  setSelectedClipCropMode: (mode: CropMode | null) => void;
   /** 選んでいる部品の素材の寄せ（#634）。 */
   setSelectedClipCropAlign: (patch: { x: CropAlignX | null } | { y: CropAlignY | null }) => void;
   /** 選んでいる部品の切り抜き（#634）。 */
@@ -258,6 +268,7 @@ function emptyState() {
     playheadSec: 0,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
+    assetSizes: {} as Record<string, SourceSize>,
     audioSrcByKey: {} as Record<string, string>,
     history: emptyHistory<TimelineProject>(),
     editBlocked: null as EditBlockedReason | null,
@@ -311,7 +322,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       );
       const audioSrcByKey: Record<string, string> = {};
       for (const e of audioEntries) if (e) audioSrcByKey[e[0]] = e[1];
-      set({ doc, assetSrcById, audioSrcByKey, isLoading: false });
+      set({ doc, assetSrcById, audioSrcByKey, assetSizes: {}, isLoading: false });
     } catch (e) {
       // 読込の失敗理由は文書側（TimelineLoadError）が「次の行動」つきで持っている。それ以外は既定文言。
       set({ ...emptyState(), loadError: e instanceof TimelineLoadError ? e.message : LOAD_FAILED_MESSAGE });
@@ -412,6 +423,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
   setSelectedClipCrop: (edge, value) => applyEdit(set, get, (d, id) => setClipCrop(d, id, edge, value)),
   setSelectedClipCropAlign: (patch) => applyEdit(set, get, (d, id) => setClipCropAlign(d, id, patch)),
+  setSelectedClipCropMode: (mode) => applyEdit(set, get, (d, id) => setClipCropMode(d, id, mode)),
+  setAssetSize: (assetId, size) => {
+    const cur = get().assetSizes[assetId];
+    if (cur && cur.w === size.w && cur.h === size.h) return;
+    set({ assetSizes: { ...get().assetSizes, [assetId]: size } });
+  },
 
   addVoiceClip: (input) => {
     const doc = get().doc;
@@ -638,7 +655,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       get().pause();
       // **描くのに使うものは、始めた時点のものを取っておく**（数分かかる処理の途中で別の動画を開かれても、
       // 別プロジェクトの絵や音が混ざらない＝場面形式が #379/#570 で潰したのと同じ事故）。
-      const { assetSrcById, audioSrcByKey } = get();
+      const { assetSrcById, audioSrcByKey, assetSizes } = get();
       set({ exportRun: { phase: P.rendering, percent: 0, message: null, cancelling: false } });
       await beginExport();
       unlisten = await listenExportProgress((ev) => {
@@ -658,6 +675,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         templateOf: (id) => templateById.get(id),
         // プレビュー（`TimelineProjectScreen`）と**同じ引き方**＝同じ絵になる。
         assetSrc: (id) => (id ? assetSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
+        // 素材の実寸（#634）＝プレビューと同じものを渡す（渡さないと「枠いっぱい」だけ書き出しで戻る）。
+        assetSizeOf: (id) => assetSizes[id],
         // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。
         fontFamily: fontFamilyForId(doc.videoSettings.fontId),
         fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),

@@ -4,10 +4,12 @@
 // 「その時刻に生きているクリップを、トラックの並び順に重ねる」だけを担い、1クリップの中身は
 // `layoutScene` に委ねる。こうするとテンプレの層解決・FREE 要素・文字の体裁・キーフレームの重ね方が
 // 両形式で1つの実装に収まり、プレビュー＝書き出しのパリティ（ADR-0001）を二重に作らずに済む。
-import { DEFAULT_BACKGROUND_COLOR, dimsForOrientation } from '../domain/constants';
+import { DEFAULT_BACKGROUND_COLOR, DEFAULT_FIT, dimsForOrientation } from '../domain/constants';
+import { fillPlacement } from '../domain/timeline/cropFill';
+import type { FillPlacement, SourceSize } from '../domain/timeline/cropFill';
 import { sceneFromClip } from '../domain/timeline/sceneFromClip';
 import { subtitleTextOf } from '../domain/timeline/subtitleLink';
-import { FREE_CATEGORY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
+import { CROP_MODE, FIT, FREE_CATEGORY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
 import type { FreeElementKind, TimelineClipKind } from '../domain/enums';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { groupElementIds } from '../domain/project/groupOps';
@@ -185,6 +187,12 @@ function emptyFreeTemplate(canvas: { width: number; height: number }, aspectRati
 }
 
 export interface TimelineLayoutOptions {
+  /**
+   * 素材の**実寸**（#634）。`cropMode:'fill'`（残った素材を枠いっぱいに映す）だけが使う。
+   * 絵を測らないと分からないので**描く側から渡す**（プレビューも書き出しも同じ値を使う＝パリティ）。
+   * 分からない素材は `undefined` を返してよい＝そのクリップは `mask` として描く。
+   */
+  assetSizeOf?: (assetId: string) => SourceSize | undefined;
   /** 見た目パターンの解決。見つからないクリップは描かない（案内は呼び出し側＝§2-5）。 */
   templateOf: (templateId: string) => Template | undefined;
 }
@@ -302,6 +310,9 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
     // 切り抜きは「クリップの箱の各辺を割合で隠す」（`11 §7.6.4`）。**変形後の箱**（`finalBox`）から矩形を出す
     // ＝動かした・拡大した先で切れる（箱の中身と同じ扱い）。何も隠さないときは矩形を持たない。
     const cropRect = cropRectOf(clip, finalBox);
+    // 残った素材を枠いっぱいに映す（#634）＝**素材の差し込み口だけ**（1つの素材に対する操作なので、
+    // 複数の絵が入るテンプレのクリップには効かせない）。実寸が分からないときは `undefined`＝`mask` のまま。
+    const fill = fillOf(clip, finalBox, opts.assetSizeOf);
 
     for (const item of clipItems) {
       applySimilarity(item, sim);
@@ -312,6 +323,15 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
       // 素材の寄せ（#634）＝クリップの指定を絵のアイテムへ落とす。**枠の中の差し込み口すべてに効く**
       // （テンプレのクリップも同じ寄せになる）＝クリップ単位の設定なので、そこは意図どおり。
       if (item.kind === 'image' && clip.cropAlign != null) item.align = clip.cropAlign;
+      // 枠いっぱいに映す場合は、素材を置く矩形をこちらで決める＝SVG の当てはめは切る（二重に効かせない）。
+      if (fill && item.kind === 'image') {
+        item.x = finalBox.x + fill.x;
+        item.y = finalBox.y + fill.y;
+        item.w = fill.w;
+        item.h = fill.h;
+        item.fit = FIT.stretch;
+        delete item.align;
+      }
       // 重ね順はトラックの並び順だけで決める＝クリップの中の順序を保ったまま、後のトラックほど手前へ。
       // アイテム自身の不透明度（FREE 要素の `opacity`）はそのまま＝クリップ全体の α とは別物。
       items.push({
@@ -320,7 +340,8 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
         zIndex: items.length,
         ...(clipOpacity < 1 ? { composite: { key: compositeKey, opacity: clipOpacity } } : {}),
         // 切り抜き（#634）＝**変形のあとの箱**を基準に切る（動かした先で切れる＝設定した意味どおり）。
-        ...(cropRect ? { clipRect: cropRect } : {}),
+        // 枠いっぱいに映す場合、切るのは**箱そのもの**（辺を隠すのではなく、はみ出しを収める）。
+        ...(fill ? { clipRect: boxRect(clip.id, finalBox) } : cropRect ? { clipRect: cropRect } : {}),
       });
     }
   }
@@ -347,4 +368,30 @@ function cropRectOf(clip: TimelineClip, box: Box): NonNullable<LayoutItem['clipR
   const h = Math.max(1, box.h * (1 - top - bottom));
   // 箱の回転も渡す（矩形を同じだけ回して、箱の辺に沿って切る）。
   return { id: clip.id, x, y, w, h, ...(box.rotation ? { rotation: box.rotation } : {}) };
+}
+
+/**
+ * 「残った素材を枠いっぱいに映す」ときの素材の矩形（#634）。効かないとき（種別が違う／指定が無い／
+ * 切り抜きが無い／実寸が分からない）は `undefined`＝呼び出し側は従来どおり `mask` として描く。
+ */
+function fillOf(
+  clip: TimelineClip,
+  box: Box,
+  assetSizeOf: TimelineLayoutOptions['assetSizeOf'],
+): FillPlacement | undefined {
+  if (clip.kind !== TIMELINE_CLIP_KIND.slot || clip.cropMode !== CROP_MODE.fill) return undefined;
+  if (!clip.assetId || !hasCrop(clip.crop)) return undefined;
+  const size = assetSizeOf?.(clip.assetId);
+  if (!size || size.w <= 0 || size.h <= 0) return undefined;
+  return fillPlacement(size, box, clip.crop, clip.fit ?? DEFAULT_FIT, clip.cropAlign);
+}
+
+/** 箱そのものを切り抜き矩形にする（回転も箱に合わせる）。 */
+function boxRect(id: string, box: Box): NonNullable<LayoutItem['clipRect']> {
+  return { id, x: box.x, y: box.y, w: box.w, h: box.h, ...(box.rotation ? { rotation: box.rotation } : {}) };
+}
+
+/** 1辺でも隠していれば true（`cropRectOf` と同じ判定＝どちらの効かせ方でも入口を揃える）。 */
+function hasCrop(c: TimelineClip['crop']): boolean {
+  return !!c && (Math.max(0, c.top ?? 0) > 0 || Math.max(0, c.right ?? 0) > 0 || Math.max(0, c.bottom ?? 0) > 0 || Math.max(0, c.left ?? 0) > 0);
 }
