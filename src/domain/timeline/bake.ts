@@ -14,14 +14,17 @@ import {
   FREE_CATEGORY,
   FREE_ELEMENT_KIND,
   PROJECT_FORMAT,
+  LAYER_TYPE,
   SUBTITLE_SOURCE_KIND,
+  TEXT_KEY,
   TIMELINE_CLIP_KIND,
   TRACK_KIND,
   TRANSITION_DIRECTION,
   TRANSITION_TYPE,
 } from '../enums';
-import type { TransitionDirection } from '../enums';
-import { isHiddenByGroup } from '../group/compose';
+import type { TextKey, TransitionDirection } from '../enums';
+import type { FontId } from '../font/fontCatalog';
+import { composeGroupGeometry, isHiddenByGroup } from '../group/compose';
 import { sceneActiveAssetIds } from '../project/assetUsage';
 import { groupBgmRuns } from '../project/compileTimeline';
 import { lineSegments, resolveLineSubtitle } from '../project/lineTimeline';
@@ -30,7 +33,10 @@ import { createAnimationId, createClipId, createGroupId, createTrackId } from '.
 import { resolveTransition, transitionTimeline } from '../project/sceneTransitions';
 import type { DrawnTransitionType } from '../project/sceneTransitions';
 import { defaultSubtitleSource, freeSubtitleElementTexts } from '../project/subtitleBinding';
-import type { Asset, FreeElement, Keyframe, NarrationLine, Project, Scene } from '../project/types';
+import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
+import { stackedSubtitleBands } from '../text/subtitleBands';
+import { wrapText } from '../text/textWrap';
+import type { Asset, FreeElement, Keyframe, NarrationLine, Project, Scene, Texts } from '../project/types';
 import type { Group } from '../group/types';
 import type { Template } from '../template/types';
 import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
@@ -54,7 +60,10 @@ export type BakeRange =
  * 呼び出し側（UI）はこれを「焼く前の確認」と「焼いた後の案内」に使う。
  */
 export const BAKE_NOTE_CODE = {
-  /** セリフに追従して切り替わる字幕。時間で変わる字幕はクリップに分ける必要があり、#633 の連動と同時に入れる。 */
+  /**
+   * **自由配置の字幕ボックス**で対象が行に追従するもの（全部／話者）。要素の「対象」の語彙が本形式に
+   * 無いため持っていけない。**通常の見た目の字幕層は #633 で焼けるようになった**（行ごとの字幕クリップ）。
+   */
   dialogueSubtitle: 'BAKE_DIALOGUE_SUBTITLE_SKIPPED',
   /** 動画の差し込み口の「再生を始めるタイミング」（ADR-0027）。タイムライン形式に置き場が無い。 */
   videoStartTiming: 'BAKE_VIDEO_START_TIMING_SKIPPED',
@@ -168,24 +177,45 @@ interface ColumnBlock {
   count: number;
 }
 
+/** 指定キーを持たない `texts`（行ごとに焼いた字幕を、テンプレクリップ側から落とすのに使う）。 */
+function withoutKeys(texts: Texts, keys: readonly TextKey[]): Texts {
+  if (keys.length === 0) return texts;
+  const out = { ...texts };
+  for (const k of keys) delete out[k];
+  return out;
+}
+
 /** 0 の符号を落とす（`-0` を作らないための正規化。保存される JSON に `-0` を混ぜない）。 */
 function neg(v: number): number {
   return v === 0 ? 0 : -v;
 }
 
-/** 同時開始グループのメンバーも含めた、行ごとの再生窓（0秒は出さない＝ゼロ幅クリップ防止）。 */
-function voiceWindows(scene: Scene, lineDurations: Record<string, number>): Array<{ line: NarrationLine; startSec: number; durationSec: number }> {
+/** 行ごとの窓（同時開始グループのメンバーも含む・0秒は出さない＝ゼロ幅クリップ防止）。 */
+interface LineWindow {
+  line: NarrationLine;
+  startSec: number;
+  durationSec: number;
+}
+
+/** 行ごとの窓（すべての行）。同時開始グループのメンバーは同じ窓を共有する。 */
+function lineWindows(scene: Scene, lineDurations: Record<string, number>): LineWindow[] {
   const lines = sceneLines(scene);
   const segs = lineSegments(scene, lineDurations); // lines と同順・同数
-  const out: Array<{ line: NarrationLine; startSec: number; durationSec: number }> = [];
+  const out: LineWindow[] = [];
   for (let i = 0; i < segs.length; i += 1) {
     const seg = segs[i];
     if (seg.endSec <= seg.startSec) continue;
-    // 読み上げ文が空の行はクリップにしない＝鳴らない「空の声」を作らない（schema の if/then・11 §8 V28 と同じ判断）。
-    if (lines[i].text.trim().length === 0) continue;
     out.push({ line: lines[i], startSec: seg.startSec, durationSec: seg.endSec - seg.startSec });
   }
   return out;
+}
+
+/**
+ * **声にするのは読み上げ文がある行だけ**＝鳴らない「空の声」を作らない（schema の if/then・`11 §8` V28）。
+ * **字幕は別**＝文が空でも字幕は出ていることがあるので、字幕側はすべての行（`lineWindows`）を使う（#633）。
+ */
+function hasVoiceText(w: LineWindow): boolean {
+  return w.line.text.trim().length > 0;
 }
 
 /** 切り替えを表すキーフレーム（クリップ先頭からの秒）。`incoming`＝入る場面／`outgoing`＝出ていく場面。 */
@@ -324,16 +354,10 @@ export function staticSubtitleText(el: FreeElement, scene: Scene): { text?: stri
  * - **FREE の字幕ボックス**のうち、対象が行に追従するもの（全部／話者）。対象＝読み上げは静的なので焼ける
  *   （`staticSubtitleText`）。
  */
-function hasTimeVaryingSubtitle(scene: Scene, template: Template | undefined, isFree: boolean): boolean {
-  if ((scene.lines?.length ?? 0) > 0) {
-    const visibleSubtitleLayers = (template?.layers ?? []).filter(
-      (l) => l.type === 'subtitle' && !isHiddenByGroup(l.id, template?.groups ?? []),
-    );
-    const shown = sceneLines(scene)
-      .map((l) => resolveLineSubtitle(l, scene))
-      .some((s) => s.enabled && s.text.length > 0);
-    if (visibleSubtitleLayers.length > 0 && shown) return true;
-  }
+function hasTimeVaryingSubtitle(scene: Scene, isFree: boolean): boolean {
+  // 通常の見た目の**テンプレ字幕層**は #633 で焼けるようになった（行ごとの字幕クリップ＋連動）。
+  // 残るのは**自由配置の字幕ボックスで対象が行に追従するもの**（全部／話者）＝要素の対象の語彙が
+  // タイムライン形式に無いため、まだ持っていけない。
   if (isFree) {
     for (const el of scene.freeLayout ?? []) {
       if (el.kind !== FREE_ELEMENT_KIND.subtitle) continue;
@@ -344,6 +368,153 @@ function hasTimeVaryingSubtitle(scene: Scene, template: Template | undefined, is
     }
   }
   return false;
+}
+
+/** 焼いた「行ごとの字幕」1つぶん（時間はセリフの窓・文言は焼き付け・連動先は同じ行の読み上げ）。 */
+export interface BakedLineSubtitle {
+  /** 連動させる読み上げの行 id（呼び出し側がクリップ id へ解決する）。 */
+  lineId: string;
+  /** 焼いた元の字幕層の `textKey`（どの層から来たかの記録）。 */
+  textKey: TextKey;
+  /** 場面ローカルの開始秒（読み上げの窓と同じ）。 */
+  startSec: number;
+  durationSec: number;
+  /** 空間・体裁（`FreeElement` の語彙＝そのままクリップへ載る）。 */
+  spatial: Omit<FreeElement, 'id' | 'kind' | 'zIndex' | 'subtitleSource'> & { text: string };
+}
+
+/**
+ * 掛け合い（セリフ列）の字幕を**行ごとの字幕クリップ**へ焼く（#633）。純粋関数。
+ *
+ * 場面形式は「1つのテンプレ字幕層の文言が行ごとに差し替わる」ので、1つのクリップでは表せない
+ * （だから #628 では落として `BakeNote` で知らせていた）。タイムライン形式は**行ごとに別のクリップ**にでき、
+ * それぞれが読み上げクリップへ連動する（決定24）＝時間も文言も追従する。
+ *
+ * 位置は**描画と同じ規則**で決める：
+ * - 同時に流れる行（ADR-0031）は `stackedSubtitleBands` で下から積む（**描画と同じ関数**＝焼く前と後で
+ *   字幕の位置が変わらない）。
+ * - テンプレ字幕層は**下端基準**（行が増えると上へ伸びる）だが、タイムラインの字幕クリップは**上端起点**
+ *   （自由配置と同じ語彙）。そこで帯の**上端**（`stackedSubtitleBands` の `top`）を y に使う＝
+ *   アンカーの違いを座標へ翻訳する（`freeLayoutFromPlacedContent` の `subtitleTopY` と同じ考え方だが、
+ *   **行ごとに文が決まっている**ので最大行数へ寄せる必要がなく、実際の折返し行数で正確に置ける）。
+ * - 体裁（大きさ・色・縁取り・帯）は場面の上書きを解決した実効値（`resolveTextStyle`）＝描画と同じ。
+ */
+export function bakeLineSubtitles(
+  scene: Scene,
+  template: Template | undefined,
+  windows: ReadonlyArray<{ line: NarrationLine; startSec: number; durationSec: number }>,
+): BakedLineSubtitle[] {
+  if (!hasExplicitLines(scene) || !template) return [];
+  const groups = template.groups ?? [];
+  const layerGeom = composeGroupGeometry(template.layers, groups);
+  const out: BakedLineSubtitle[] = [];
+  for (const layer of template.layers) {
+    if (layer.type !== LAYER_TYPE.subtitle || isHiddenByGroup(layer.id, groups)) continue; // 描かれない層は焼かない
+    const cg = layerGeom.get(layer.id) ?? { x: layer.x, y: layer.y, w: layer.w, h: layer.h, rotation: layer.rotation };
+    const style = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
+    const maxLines = layer.maxLines ?? DEFAULT_TEMPLATE_MAX_LINES;
+    // 同時に流れる行は1つの窓を共有する＝窓ごとにまとめて段積みする（描画と同じ積み方）。
+    const byWindow = new Map<string, typeof windows[number][]>();
+    for (const w of windows) {
+      const key = `${w.startSec}/${w.durationSec}`;
+      byWindow.set(key, [...(byWindow.get(key) ?? []), w]);
+    }
+    for (const members of byWindow.values()) {
+      // 出ている字幕だけを積む（OFF・空は元から出ていない＝帯の位置もずらさない）。
+      const shown = members
+        .map((w) => ({ w, sub: resolveLineSubtitle(w.line, scene) }))
+        .filter((x) => x.sub.enabled && x.sub.text.length > 0);
+      if (shown.length === 0) continue;
+      const bands = stackedSubtitleBands(shown.map((x) => x.sub.text), cg.y, cg.w, style.fontSize, maxLines);
+      shown.forEach((x, k) => {
+        const lines = wrapText(x.sub.text, cg.w, style.fontSize, maxLines).length;
+        const boxH = boxHeightForLines(lines, style.fontSize);
+        // 旧箱の中心（アンカー y ＋ 層の高さ）と新箱の中心（帯の上端＋この行数の高さ）の差。
+        const shift = rotationShift(cg.rotation ?? 0, (bands[k].y + cg.h / 2) - (bands[k].top + boxH / 2));
+        out.push({
+          lineId: x.w.line.lineId,
+          textKey: layer.textKey ?? TEXT_KEY.subtitle, // 既定束縛は描画（`layoutScene`）と同じ
+          startSec: x.w.startSec,
+          durationSec: x.w.durationSec,
+          spatial: {
+            // 回転がある層は、**箱が変わると回転の軸（箱の中心）も動く**（`sceneSvg` は箱の中心で回す）。
+            // 中身が同じ場所に来るよう、軸の移動ぶんを平行移動で打ち消す＝焼く前と同じ位置に出る。
+            x: cg.x + shift.dx,
+            // 帯の**上端**へ置き換える（下端基準→上端起点の翻訳）。
+            y: bands[k].top + shift.dy,
+            w: cg.w,
+            // 受け側は枠高から表示行数を導く（FREE 字幕）。層の高さを残すと**テンプレの上限より多く折り返す**
+            // ので、その行数がちょうど入る高さへ翻訳する（`textStyle` の規定どおり）。
+            h: boxH,
+            ...(cg.rotation ? { rotation: normalizeDeg(cg.rotation) } : {}),
+            text: x.sub.text,
+            fontSize: style.fontSize,
+            color: style.color,
+            fontWeight: style.fontWeight,
+            // フォントは**テンプレクリップと同じ解決**（種別ごと→場面）。渡さないと同じ場面で本文と字幕の
+            // 字体が割れる（1フレームに複数クリップが混ざる本形式では、クリップが受け皿・§7.6.4）。
+            ...(fontIdFor(scene, layer.textKey) != null ? { fontId: fontIdFor(scene, layer.textKey) } : {}),
+            ...(style.strokeColor != null ? { strokeColor: style.strokeColor } : {}),
+            ...(style.strokeWidth != null ? { strokeWidth: style.strokeWidth } : {}),
+            ...(layer.background != null ? { background: layer.background } : {}),
+          },
+        });
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * テンプレクリップから落とす `textKey`＝**場面形式で静的字幕が描かれない**字幕層のもの。
+ *
+ * 落とす基準は「行ごとに焼けたか」ではなく「**元は描かれていたか**」。
+ * - セリフ列があって窓が立つ場面は、字幕層が**行の字幕で上書きされる**（`layoutScene` の `overrideSub`）＝
+ *   静的 `texts.subtitle` は元から描かれない。行の字幕が全部 OFF でも同じ（＝焼いた本数は 0 でも落とす）。
+ * - 字幕トグルが OFF の場面も静的字幕は描かれない（`staticSubtitleOff`）。
+ * - どちらでもない（セリフ列が無い／窓が全部 0 秒＝場面まるごと1区間へ落ちる）ときは**残す**＝
+ *   静的字幕が出ている場面の字幕を黙って消さない（§2-5）。
+ */
+/**
+ * **明示のセリフ列**があるか。字幕の上書きは `scene.lines` があるときだけ効く（`sceneLines()` は
+ * 単独ナレーションから1行を合成して返すので、そちらで判定すると単独場面まで上書き扱いになる）。
+ * 判定の規則は `staticSubtitleFor`（`subtitleBinding`）と同じ。
+ */
+function hasExplicitLines(scene: Scene): boolean {
+  return (scene.lines?.length ?? 0) > 0;
+}
+
+export function subtitleTextKeysNotDrawn(
+  scene: Scene,
+  template: Template | undefined,
+  hasLineWindows: boolean,
+): TextKey[] {
+  if (!template) return [];
+  if (!hasLineWindows && scene.subtitleEnabledDefault !== false) return [];
+  const groups = template.groups ?? [];
+  return template.layers
+    .filter((l) => l.type === LAYER_TYPE.subtitle && !isHiddenByGroup(l.id, groups))
+    .map((l) => l.textKey ?? TEXT_KEY.subtitle);
+}
+
+/** 字幕クリップに載せるフォント（種別ごと→場面。動画全体は受け側が持つ）。 */
+function fontIdFor(scene: Scene, textKey: TextKey | undefined): FontId | null | undefined {
+  return (textKey ? scene.textFontIds?.[textKey] : undefined) ?? scene.fontId;
+}
+
+/**
+ * 回転の軸が動いたぶんを打ち消す平行移動。軸が `dy` だけ上（正）へ動いたとき、回転後の中身を元の位置へ
+ * 戻すには `(I − R)·(0, dy)` を足す＝`(sinθ·dy, (1−cosθ)·dy)`。回転が無ければ 0。
+ */
+function rotationShift(deg: number, dy: number): { dx: number; dy: number } {
+  if (deg === 0 || dy === 0) return { dx: 0, dy: 0 };
+  const rad = (deg * Math.PI) / 180;
+  return { dx: Math.sin(rad) * dy, dy: (1 - Math.cos(rad)) * dy };
+}
+
+/** 角度を 0〜360 未満へ（グループの回転は加算されるだけなので合成値が 360 以上になりうる＝schema が拒む）。 */
+function normalizeDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360;
 }
 
 /**
@@ -420,9 +591,20 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     // 自由配置の要素は**FREE の場面のときだけ**焼く（通常の見た目では休眠＝ADR-0030・描画と同じゲート）。
     const elements = isFree ? byZIndex(scene.freeLayout ?? []) : [];
 
+    // 行ごとの窓。**字幕はすべての行**（読み上げ文が空でも字幕は出ていることがある）、**声は文がある行だけ**。
+    const durations = options.lineDurationsFor?.(scene) ?? {};
+    const allWindows = lineWindows(scene, durations);
+    const windows = allWindows.filter(hasVoiceText);
+    // 掛け合いの字幕は**行ごとの字幕クリップ**へ焼く（#633）。**自由配置の場面でも焼く**＝テンプレの層は
+    // category を問わず描かれる（`layoutScene`）ので、外すと FREE テンプレの字幕層が黙って消える。
+    const lineSubtitles = bakeLineSubtitles(scene, template, allWindows);
+    // この場面で、見た目パターンのクリップ以外に作ったクリップ（切り替えの付け先＝場面グループに入れる）。
+    // **id は先に採る**＝グループのメンバーを決めるのが、クリップを作るより先に来るため。
+    const extraClipIds: string[] = [];
+
     // 見た目パターンのクリップは**どの場面にも置く**（最背面）。FREE テンプレも `background` 層などを持ち、
     // それが動画に出ているため（`layoutScene` は category を問わず層を描いてから自由配置を重ねる）。
-    const count = 1 + elements.length;
+    const count = 1 + elements.length + lineSubtitles.length;
     const base = visual.take(count, start, end);
     const templateClipId = newClipId();
     clips.push({
@@ -433,7 +615,9 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
       durationSec: scene.durationSec,
       templateId: scene.templateId,
       assetRefs: scene.assetRefs,
-      texts: scene.texts,
+      // 行ごとに焼いた字幕は別のクリップで出す＝**テンプレクリップからはそのキーを落とす**
+      // （残すと場面の静的字幕が場面いっぱいに出て、行ごとの字幕と二重になる）。
+      texts: withoutKeys(scene.texts, subtitleTextKeysNotDrawn(scene, template, hasExplicitLines(scene) && allWindows.length > 0)),
       ...(scene.textStyles ? { textStyles: scene.textStyles } : {}),
       ...(scene.slotFits ? { slotFits: scene.slotFits } : {}),
       ...(scene.textFontIds ? { textFontIds: scene.textFontIds } : {}),
@@ -443,14 +627,62 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     });
     sceneBlock.push({ base, count });
 
-    if (!isFree) {
+    // 読み上げ：行ごとに1クリップ。同時に流れる行（ADR-0031）は窓が同じなので列が分かれる（決定8）。
+    const voiceClipIdByLine = new Map<string, string>();
+    for (const w of windows) {
+      const startSec = start + w.startSec;
+      const endSec = startSec + w.durationSec;
+      const column = audio.take(1, startSec, endSec);
+      const voiceClipId = newClipId();
+      voiceClipIdByLine.set(w.line.lineId, voiceClipId);
+      clips.push({
+        id: voiceClipId,
+        kind: TIMELINE_CLIP_KIND.voice,
+        trackId: trackIdFor(tracks, column, TRACK_KIND.audio),
+        startSec,
+        durationSec: w.durationSec,
+        voice: voiceFromLine(w.line),
+        ...(scene.audioMix?.narrationVolume != null ? { volume: scene.audioMix.narrationVolume } : {}),
+      });
+    }
+
+    // 行ごとの字幕クリップ＝**同じ行の読み上げへ連動**させる（決定24）＝時間も文言も追従する。
+    lineSubtitles.forEach((sub, k) => {
+      const clipId = newClipId();
+      extraClipIds.push(clipId);
+      clips.push({
+        ...sub.spatial,
+        id: clipId,
+        kind: TIMELINE_CLIP_KIND.subtitle,
+        trackId: trackIdFor(tracks, base + 1 + elements.length + k, TRACK_KIND.visual),
+        startSec: start + sub.startSec,
+        durationSec: sub.durationSec,
+        ...(voiceClipIdByLine.has(sub.lineId) ? { voiceClipId: voiceClipIdByLine.get(sub.lineId) } : {}),
+      });
+    });
+
+    if (!isFree && extraClipIds.length === 0) {
+      // 1場面1クリップ（従来）＝切り替えはそのクリップに付ける。
       sceneTargetId.push(templateClipId);
+    } else if (!isFree) {
+      // 通常の見た目でも、行ごとの字幕クリップができた場面は**1場面が複数クリップ**になる（#633）。
+      // 切り替えは**場面まるごと**に掛けたいので、FREE と同じく場面グループを作ってそこへ付ける
+      // ＝字幕だけ不透明に残る（切り替え中に字幕が浮く）を防ぐ（決定19 の前提を保つ）。
+      const sceneGroupId = newGroupId();
+      groups.push({
+        id: sceneGroupId,
+        members: [templateClipId, ...extraClipIds],
+        transform: { x: 0, y: 0, rotation: 0, scale: 1 },
+        name: scene.texts.title,
+      });
+      sceneTargetId.push(sceneGroupId);
     } else {
       const elementClipId = new Map<string, string>();
       elements.forEach((el, k) => {
         const { id: _id, kind, zIndex: _z, subtitleSource: _s, ...spatial } = el;
         const clipId = newClipId();
         elementClipId.set(el.id, clipId);
+        extraClipIds.push(clipId);
         clips.push({
           ...spatial,
           id: clipId,
@@ -497,27 +729,11 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
       sceneTargetId.push(sceneGroupId);
     }
 
-    // 読み上げ：行ごとに1クリップ。同時に流れる行（ADR-0031）は窓が同じなので列が分かれる（決定8）。
-    for (const w of voiceWindows(scene, options.lineDurationsFor?.(scene) ?? {})) {
-      const startSec = start + w.startSec;
-      const endSec = startSec + w.durationSec;
-      const column = audio.take(1, startSec, endSec);
-      clips.push({
-        id: newClipId(),
-        kind: TIMELINE_CLIP_KIND.voice,
-        trackId: trackIdFor(tracks, column, TRACK_KIND.audio),
-        startSec,
-        durationSec: w.durationSec,
-        voice: voiceFromLine(w.line),
-        ...(scene.audioMix?.narrationVolume != null ? { volume: scene.audioMix.narrationVolume } : {}),
-      });
-    }
-
     // 持っていけなかったもの（黙って落とさない・§2-5）。
     // 判定は**実際に表示されている字幕**で行う（`sceneHasTimeVaryingSubtitle`＝描画と同じ解決規則）。
     // 掛け合いの行数だけを見ると、1行だけの `lines` 場面（テンプレ字幕層が行の字幕へ差し替わる）や
     // FREE の字幕ボックスを取りこぼす。
-    if (hasTimeVaryingSubtitle(scene, template, isFree)) {
+    if (hasTimeVaryingSubtitle(scene, isFree)) {
       dialogueSubtitleScenes.push(i + 1);
     }
     if (scene.slotVideoStart != null && Object.keys(scene.slotVideoStart).length > 0) {
