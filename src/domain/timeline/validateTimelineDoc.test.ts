@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND, CROP_ALIGN_X, CROP_ALIGN_Y } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import { clipEndSec, danglingTimelineRefs, overlappingClipPairs, validateTimelineDoc } from './validateTimelineDoc';
@@ -308,6 +308,15 @@ describe('正典との照合（ドリフト検知）', () => {
 
   it('TrackKind が schema の kind enum と一致する', () => {
     expect([...schema.$defs.Track.properties.kind.enum].sort()).toEqual(Object.values(TRACK_KIND).sort());
+  });
+
+  it('素材の寄せ（cropAlign）が schema の enum と一致する（#634）', () => {
+    expect([...schema.$defs.TimelineClip.properties.cropAlign.properties.x.enum].sort()).toEqual(
+      Object.values(CROP_ALIGN_X).sort(),
+    );
+    expect([...schema.$defs.TimelineClip.properties.cropAlign.properties.y.enum].sort()).toEqual(
+      Object.values(CROP_ALIGN_Y).sort(),
+    );
   });
 
   it('代表データ（fixtures）は意味検証を1件も警告しない', () => {

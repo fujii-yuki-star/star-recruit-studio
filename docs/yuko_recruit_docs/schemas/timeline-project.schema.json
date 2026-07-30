@@ -20,8 +20,8 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "1.3",
-      "description": "本形式の版。場面形式（project.schema.json）とは独立に進む（別文書のため・11 §1）。1.0→1.1：読み上げクリップ（kind='voice' ＋ voice）と、テンプレクリップの textFontIds/character/slotClips を追加（いずれも任意追加＝後方互換のマイナー・#628 模型）。／1.1→1.2：字幕クリップの連動先（voiceClipId）を追加（いずれも任意追加＝後方互換のマイナー・#633）。／1.2→1.3：クリップの切り抜き（crop）を追加（任意追加＝後方互換のマイナー・#634）。"
+      "const": "1.4",
+      "description": "本形式の版。場面形式（project.schema.json）とは独立に進む（別文書のため・11 §1）。1.0→1.1：読み上げクリップ（kind='voice' ＋ voice）と、テンプレクリップの textFontIds/character/slotClips を追加（いずれも任意追加＝後方互換のマイナー・#628 模型）。／1.1→1.2：字幕クリップの連動先（voiceClipId）を追加（いずれも任意追加＝後方互換のマイナー・#633）。／1.2→1.3：クリップの切り抜き（crop）を追加（任意追加＝後方互換のマイナー・#634）。／1.3→1.4：素材の寄せ（cropAlign）を追加（任意追加＝後方互換のマイナー・#634）。"
     },
     "format": {
       "const": "timeline",
@@ -423,6 +423,27 @@
               "type": "number",
               "minimum": 0,
               "exclusiveMaximum": 1
+            }
+          }
+        },
+        "cropAlign": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "素材の寄せ（#634・05 §8）。`fit:'cover'` で枠に収まらない側をどこで切るか（既定＝中央）。`contain` では余白の寄せ。",
+          "properties": {
+            "x": {
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "y": {
+              "enum": [
+                "top",
+                "middle",
+                "bottom"
+              ]
             }
           }
         }

@@ -309,6 +309,9 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
       // 場面形式は「フレーム単位の fontFamily」で効かせるが、1フレームに複数クリップが混ざる本形式では
       // それができないので、アイテムへ落とす（テンプレのクリップだけ黙って既定へ戻るのを防ぐ・ADR-0026②）。
       if (item.kind === 'text' && item.fontId == null && clip.fontId != null) item.fontId = clip.fontId;
+      // 素材の寄せ（#634）＝クリップの指定を絵のアイテムへ落とす。**枠の中の差し込み口すべてに効く**
+      // （テンプレのクリップも同じ寄せになる）＝クリップ単位の設定なので、そこは意図どおり。
+      if (item.kind === 'image' && clip.cropAlign != null) item.align = clip.cropAlign;
       // 重ね順はトラックの並び順だけで決める＝クリップの中の順序を保ったまま、後のトラックほど手前へ。
       // アイテム自身の不透明度（FREE 要素の `opacity`）はそのまま＝クリップ全体の α とは別物。
       items.push({

@@ -7,7 +7,8 @@ import {
   VOICE_PLACEHOLDER_SEC, dimsForOrientation,
 } from '../constants';
 import { FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
-import type { TextKey, TrackKind } from '../enums';
+import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y } from '../enums';
+import type { CropAlignX, CropAlignY, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
 import { removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from '../project/overlayClipEdit';
@@ -618,5 +619,34 @@ export function setClipCrop(
   if (Object.keys(next).length === 0) delete patched.crop;
   else patched.crop = next;
   if (JSON.stringify(patched.crop ?? null) === JSON.stringify(clip.crop ?? null)) return ok(doc);
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * **素材の寄せ**（#634・`05 §8`）＝`fit:'cover'` で枠に収まらない側をどこで切るか。
+ * `null` を渡した軸は「中央（既定）」へ戻す＝既定と同じ値を書かない。
+ */
+export function setClipCropAlign(
+  doc: TimelineProject,
+  clipId: string,
+  // **軸と値を1つの形で受ける**＝`{x:'top'}` のような食い違いが型で止まる（キャストが要らない）。
+  patch: { x: CropAlignX | null } | { y: CropAlignY | null },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next: NonNullable<TimelineClip['cropAlign']> = { ...clip.cropAlign };
+  if ('x' in patch) {
+    if (patch.x == null) delete next.x;
+    else next.x = patch.x;
+  } else if (patch.y == null) delete next.y;
+  else next.y = patch.y;
+  // 既定（中央）はキーごと落とす＝既定と同じ値を書かない（既定の正典は `domain/enums`）。
+  if (next.x === CROP_ALIGN_DEFAULT_X) delete next.x;
+  if (next.y === CROP_ALIGN_DEFAULT_Y) delete next.y;
+  const patched = { ...clip };
+  if (Object.keys(next).length === 0) delete patched.cropAlign;
+  else patched.cropAlign = next;
+  if (JSON.stringify(patched.cropAlign ?? null) === JSON.stringify(clip.cropAlign ?? null)) return ok(doc);
   return ok(withClip(doc, patched));
 }

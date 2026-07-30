@@ -1,7 +1,7 @@
 // SceneLayout → SVG文字列。SVGを「描画の中間表現」とし、プレビュー（WebViewでそのまま表示）と
 // 出力（同じSVGをラスタライズしてPNG化）で同一にすることでパリティを保証する（ADR-0001）。
 // 注: テキスト折返しは暫定で文字幅概算（半角≈0.55em・全角≈1em）。フォント実測への置換は将来（05 §10 / ADR-0001 未解決論点）。
-import { TEXT_ALIGN, type Fit } from '../domain/enums';
+import { CROP_ALIGN_X, CROP_ALIGN_Y, FIT, TEXT_ALIGN, type CropAlignX, type CropAlignY, type Fit } from '../domain/enums';
 import { fontFamilyForId, isKnownFontId } from '../domain/font/fontCatalog';
 import type { ImageItem, LayoutItem, SceneLayout, TextItem } from './layout';
 import { DEFAULT_LINE_HEIGHT } from './layout';
@@ -77,18 +77,25 @@ export interface LayoutToSvgOptions {
   fontFamily?: string;
 }
 
-// fit を <image> の preserveAspectRatio へ（cover=slice / contain=meet / stretch=none）。
-function fitToPreserveAspectRatio(fit: Fit): string {
-  if (fit === 'contain') return 'xMidYMid meet';
-  if (fit === 'stretch') return 'none';
-  return 'xMidYMid slice';
+/**
+ * fit と**寄せ**を `<image>` の `preserveAspectRatio` へ（cover=slice / contain=meet / stretch=none）。
+ *
+ * 寄せ（#634・`05 §8`）＝`cover` で枠に収まらない側を**どこで切るか**。SVG の `preserveAspectRatio` の
+ * 前半（`xMinYMin` 等）がそのまま「寄せ」なので、値を差し替えるだけで表せる（未指定＝中央＝従来どおり）。
+ * `stretch` は伸縮するので寄せの意味が無い（`none` のまま）。
+ */
+function fitToPreserveAspectRatio(fit: Fit, align?: { x?: CropAlignX; y?: CropAlignY }): string {
+  if (fit === FIT.stretch) return 'none';
+  const x = align?.x === CROP_ALIGN_X.left ? 'xMin' : align?.x === CROP_ALIGN_X.right ? 'xMax' : 'xMid';
+  const y = align?.y === CROP_ALIGN_Y.top ? 'YMin' : align?.y === CROP_ALIGN_Y.bottom ? 'YMax' : 'YMid';
+  return `${x}${y} ${fit === FIT.contain ? 'meet' : 'slice'}`;
 }
 
 function imageToSvg(item: ImageItem, src: string | undefined, fontFamily: string): string {
   if (item.assetId && src) {
     // <image> は x/y/width/height の矩形にクリップされ、preserveAspectRatio で fit を表現する。
     // プレビューと出力で同一SVGを共有する（ADR-0004：WebView Canvas でラスタライズ）。
-    return `<image x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" href="${escapeXml(src)}" preserveAspectRatio="${fitToPreserveAspectRatio(item.fit)}"/>`;
+    return `<image x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" href="${escapeXml(src)}" preserveAspectRatio="${fitToPreserveAspectRatio(item.fit, item.align)}"/>`;
   }
   // 未設定 or src未解決：枠＋ラベルのプレースホルダ。
   const fill = item.role === 'character' ? '#eef3fb' : '#e8e8e8';

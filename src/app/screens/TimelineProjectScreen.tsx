@@ -35,7 +35,8 @@ import { ArrowLeftIcon } from "../components/icons";
 import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, trackLabel } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
-import { ASSET_TYPE, SLOT_TYPE } from "../../domain/enums";
+import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, SLOT_TYPE } from "../../domain/enums";
+import type { CropAlignX, CropAlignY } from "../../domain/enums";
 import type { Asset } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 
@@ -155,7 +156,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframe, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
     addAudioClip, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
-    setSelectedClipCrop,
+    setSelectedClipCrop, setSelectedClipCropAlign,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -587,6 +588,38 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 </div>
                 <p className="text-muted">
                   部品の各辺を%で隠します（中身は動きません）。上下・左右それぞれの合計は99%までです。
+                </p>
+                {/* 素材の寄せ（#634・05 §8）＝「枠いっぱいに表示」で収まらない側をどこで切るか。 */}
+                <div className="row gap-sm">
+                  <label className="field">
+                    <span>素材の寄せ（横）</span>
+                    <select
+                      value={selected.cropAlign?.x ?? ""}
+                      disabled={selectedLocked}
+                      title={lockedHint}
+                      onChange={(e) => setSelectedClipCropAlign({ x: (e.target.value || null) as CropAlignX | null })}
+                    >
+                      <option value="">中央</option>
+                      <option value={CROP_ALIGN_X.left}>左</option>
+                      <option value={CROP_ALIGN_X.right}>右</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>素材の寄せ（縦）</span>
+                    <select
+                      value={selected.cropAlign?.y ?? ""}
+                      disabled={selectedLocked}
+                      title={lockedHint}
+                      onChange={(e) => setSelectedClipCropAlign({ y: (e.target.value || null) as CropAlignY | null })}
+                    >
+                      <option value="">中央</option>
+                      <option value={CROP_ALIGN_Y.top}>上</option>
+                      <option value={CROP_ALIGN_Y.bottom}>下</option>
+                    </select>
+                  </label>
+                </div>
+                <p className="text-muted">
+                  寄せは「枠いっぱいに表示」で枠に収まらない側をどこで切るかです（全体を表示のときは余白の寄せになります）。
                 </p>
               </div>
             )}
