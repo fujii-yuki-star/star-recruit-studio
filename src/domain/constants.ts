@@ -214,3 +214,13 @@ export const DEFAULT_BACKGROUND_COLOR = '#ffffff';
  * 見えていて掴める程度の長さがあればよい（ADR-0032 決定7・#633）。
  */
 export const VOICE_PLACEHOLDER_SEC = 3;
+
+/** 音を置いたときの仮の長さ（秒）。素材より長い置き場所は繰り返して埋まるので、尺が分からなくても置ける。 */
+export const AUDIO_PLACEHOLDER_SEC = 10;
+
+/**
+ * クリップの再生速度の範囲（#634）。schema は `exclusiveMinimum: 0` なので**0 以下は保存できない**。
+ * 上限は「実用として意味がある範囲」＝場面形式の動画クリップと同じ考え方（速すぎる音は聞き取れない）。
+ */
+export const CLIP_SPEED_MIN = 0.25;
+export const CLIP_SPEED_MAX = 4;

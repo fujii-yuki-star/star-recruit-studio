@@ -13,9 +13,10 @@ import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timelin
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { TextKey, TrackKind } from "../../domain/enums";
 import {
-  addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip, moveTrackOrder,
-  removeClips, removeTrack, setClipAssetRef, setClipText, setSubtitleText, setSubtitleVoiceLink,
-  setTrackFlag, setVoiceSpeaker, setVoiceText, trimClip,
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip,
+  moveTrackOrder, removeClips, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
+  setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
+  setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
@@ -32,6 +33,7 @@ import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from "../../domain/enums";
 import type { NarrationStatus } from "../../domain/enums";
 import type { TimelineVoice } from "../../domain/timeline/types";
 import type { VoiceSettings } from "../../domain/project/types";
+import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { explodeTemplateClip } from "../../domain/timeline/explode";
 import { timelineAudioRuns, timelineExportBlockers } from "../../domain/timeline/export";
 import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
@@ -146,6 +148,16 @@ export interface TimelineState {
   setSelectedClipText: (textKey: TextKey, text: string) => void;
   /** 見た目パターンの部品をバラす（中身ぶんの部品へ展開・#632）。**戻せない**（取り消しでだけ戻る）。 */
   explodeClip: (clipId: string, template: Template) => void;
+  /** 音（同梱BGM／持ち込んだ音）を置く（#634）。 */
+  addAudioClip: (input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number }) => void;
+  /** 選んでいる音・動画の素材の再生速度（#634）。 */
+  setSelectedClipSpeed: (speed: number) => void;
+  /** 選んでいる素材のどこから使うか（#634）。 */
+  setSelectedClipSourceStart: (sec: number) => void;
+  /** 選んでいる音の音量（`null`＝動画全体に合わせる・#634）。 */
+  setSelectedClipVolume: (volume: number | null) => void;
+  /** 選んでいる音の前後のフェード（#634）。 */
+  setSelectedClipFade: (edge: "in" | "out", sec: number) => void;
   /** 読み上げを置く（#633＝タイムライン側でも声を作れる）。 */
   addVoiceClip: (input: { text: string; trackId: string; startSec: number }) => void;
   /** 選んでいる読み上げの文を書き換える（作成済みの音声は外れる・#633）。 */
@@ -376,6 +388,24 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const before = new Set(doc.clips.map((c) => c.id));
     commit(set, get, r.doc, { selectedClipIds: r.doc.clips.filter((c) => !before.has(c.id)).map((c) => c.id) });
   },
+
+  addAudioClip: (input) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = addAudioClip(doc, input);
+    if (!r.ok) {
+      set({ editBlocked: r.reason });
+      return;
+    }
+    const before = new Set(doc.clips.map((c) => c.id));
+    const added = r.doc.clips.find((c) => !before.has(c.id));
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id] } : {});
+  },
+
+  setSelectedClipSpeed: (speed) => applyEdit(set, get, (d, id) => setClipSpeed(d, id, speed)),
+  setSelectedClipSourceStart: (sec) => applyEdit(set, get, (d, id) => setClipSourceStart(d, id, sec)),
+  setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
+  setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
 
   addVoiceClip: (input) => {
     const doc = get().doc;
