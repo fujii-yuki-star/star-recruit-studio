@@ -190,39 +190,6 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
   });
 });
 
-describe('projectStore overlay クリップ（ADR-0018・③(4)）', () => {
-  beforeEach(() => {
-    useProjectStore.setState({
-      meta: { ...useProjectStore.getState().meta, timelineOverlay: undefined },
-      past: [], future: [], _historyGroupDepth: 0, saveStatus: 'saved',
-    });
-  });
-  it('addOverlayClip は telop クリップを追加し id を返す（既定 track/尺・未保存に戻る）', () => {
-    const id = useProjectStore.getState().addOverlayClip({ anchorSceneId: 'scene_001', text: 'やあ' });
-    const clips = useProjectStore.getState().meta.timelineOverlay?.clips ?? [];
-    expect(id).toBe('ovclip_001');
-    expect(clips).toHaveLength(1);
-    expect(clips[0]).toMatchObject({ id: 'ovclip_001', track: 'telop', anchorSceneId: 'scene_001', text: 'やあ', startSec: 0, durationSec: 3 });
-    expect(useProjectStore.getState().saveStatus).toBe('idle');
-  });
-  it('updateOverlayClip は該当クリップを部分更新する', () => {
-    const id = useProjectStore.getState().addOverlayClip({ text: 'a' });
-    useProjectStore.getState().updateOverlayClip(id, { startSec: 4, text: 'b' });
-    expect(useProjectStore.getState().meta.timelineOverlay?.clips?.[0]).toMatchObject({ id, startSec: 4, text: 'b' });
-  });
-  it('removeOverlayClip はクリップを削除する', () => {
-    const id = useProjectStore.getState().addOverlayClip({});
-    useProjectStore.getState().removeOverlayClip(id);
-    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toEqual([]);
-  });
-  it('overlay 編集は Undo で戻る（meta スナップショット・ADR-0020）', () => {
-    const id = useProjectStore.getState().addOverlayClip({ text: 'x' });
-    useProjectStore.getState().updateOverlayClip(id, { text: 'y' });
-    useProjectStore.getState().undo();
-    expect(useProjectStore.getState().meta.timelineOverlay?.clips?.[0].text).toBe('x');
-  });
-});
-
 describe('projectStore 要素アニメーション（④・ADR-0019 (1c)）', () => {
   beforeEach(() => {
     useProjectStore.setState({
@@ -255,13 +222,6 @@ describe('projectStore 要素アニメーション（④・ADR-0019 (1c)）', ()
     useProjectStore.getState().removeAnimation(id);
     useProjectStore.getState().undo();
     expect(useProjectStore.getState().meta.timelineOverlay?.animations).toHaveLength(1);
-  });
-  it('clips と animations は同じ timelineOverlay に共存できる', () => {
-    useProjectStore.getState().addOverlayClip({ text: 'telop' });
-    useProjectStore.getState().addAnimation('scene_001', 'free_001', fadeKfs);
-    const ov = useProjectStore.getState().meta.timelineOverlay;
-    expect(ov?.clips).toHaveLength(1);
-    expect(ov?.animations).toHaveLength(1);
   });
 });
 
@@ -516,6 +476,38 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     await useProjectStore.getState().deleteProject('proj_other'); // 別プロジェクトは安全＝許可
     expect(spy).toHaveBeenCalledWith('proj_other');
     spy.mockRestore();
+  });
+
+  it('旧タイムライン編集が残っているプロジェクトを開くと、断るための印が立つ（データは消さない・#635）', async () => {
+    const withOverlay = JSON.parse(JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], [])));
+    withOverlay.timelineOverlay = {
+      clips: [{ id: 'ovl_001', track: 'telop', startSec: 0, durationSec: 2, text: '旧テロップ' }],
+    };
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(withOverlay));
+    await useProjectStore.getState().loadProject('proj_old');
+    expect(useProjectStore.getState().hasRetiredTimelineEdits).toBe(true);
+    // **消さない**＝読み込んだ meta にそのまま残っている（次の保存で落ちない）。
+    expect(useProjectStore.getState().meta.timelineOverlay?.clips).toHaveLength(1);
+    // 読み終えたら閉じられる（出し続けない）。
+    useProjectStore.getState().dismissRetiredTimelineNotice();
+    expect(useProjectStore.getState().hasRetiredTimelineEdits).toBe(false);
+    load.mockRestore();
+    // 読み込んだ meta を後続テストへ持ち越さない（この store は1つを共有している）。
+    useProjectStore.setState({ meta: { ...useProjectStore.getState().meta, timelineOverlay: undefined } });
+  });
+
+  it('新しい動画を作ると案内は消える（前の動画の案内を持ち越さない・#635）', () => {
+    useProjectStore.setState({ hasRetiredTimelineEdits: true });
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().hasRetiredTimelineEdits).toBe(false);
+  });
+
+  it('旧タイムライン編集が無いプロジェクトでは印が立たない（無関係な案内を出さない）', async () => {
+    const plain = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(plain);
+    await useProjectStore.getState().loadProject('proj_new');
+    expect(useProjectStore.getState().hasRetiredTimelineEdits).toBe(false);
+    load.mockRestore();
   });
 
   it('書き出し中は「開いているプロジェクト」の改名を弾く／別プロジェクトの改名は許可（project.json の lost-update 防止・#570 レビュー）', async () => {
@@ -781,9 +773,6 @@ describe('projectStore 書き出し中は文書編集を固定（#570 P1・15§4
     ['updateAnimation', () => useProjectStore.getState().updateAnimation('anim_1', [])],
     ['removeAnimation', () => useProjectStore.getState().removeAnimation('anim_1')],
     ['removeAnimationsForElements', () => useProjectStore.getState().removeAnimationsForElements('scene_001', ['el_1'])],
-    ['addOverlayClip', () => { useProjectStore.getState().addOverlayClip({ track: 'telop' }); }],
-    ['updateOverlayClip', () => useProjectStore.getState().updateOverlayClip('clip_1', { startSec: 1 })],
-    ['removeOverlayClip', () => useProjectStore.getState().removeOverlayClip('clip_1')],
     ['applyProjectInfo', () => useProjectStore.getState().applyProjectInfo({ companyInfo: { name: 'x' } } as never)],
     ['changeOrientation', () => { useProjectStore.getState().changeOrientation('9:16'); }],
     ['setFontId', () => useProjectStore.getState().setFontId('gen-interface-jp' as never)],

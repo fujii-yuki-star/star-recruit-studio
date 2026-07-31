@@ -15,7 +15,6 @@ export const PROJECT_SCREENS: readonly ScreenId[] = [
   "scene-edit",
   "preview",
   "timeline",
-  "timeline-edit",
   "precheck",
   "export",
 ];

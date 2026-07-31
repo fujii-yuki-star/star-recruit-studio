@@ -248,14 +248,22 @@
 | assets | Asset[] | ● | §7.2 |
 | parts | Part[] | ● | §7.3 |
 | scenes | Scene[] | ● | §7.4 |
-| timelineOverlay | object | ○ | §7.1.4。場面横断タイムラインの上位編集（場面アンカー＋絶対時間の `OverlayClip[]`）。未設定＝場面射影のみ。**AI/簡易は無視**（schema 1.15・ADR-0018） |
+| timelineOverlay | object | ○ | §7.1.4。**`animations`（場面の登場アニメ・ADR-0019）だけが現役**。`clips` は**非推奨**＝ADR-0032 決定11/12 で引き取り手が無くなった（#635・schema 1.15・ADR-0018） |
 
 > **※ = 条件付き必須＋排他**（`videoKind` による。recruit→companyInfo 必須・generalBrief 禁止／general→generalBrief 必須・companyInfo 禁止＝`project.schema.json` の if/then/else ＋ `not`）。
 
 **7.1.1 videoSettings**: aspectRatio(enum `16:9`/`9:16`) ● / fps(=30) ● / targetDurationSec(≤`VIDEO_TARGET_MAX_SEC_MVP`) ● / maxDurationSec(≤`VIDEO_HARD_MAX_SEC`) ● / fontId(enum＝同梱フォントの id ○・schema 1.3 追加・未指定は既定フォント＝`domain/font/fontCatalog`)（**寸法は保存しない**＝`aspectRatio` を単一の真実とし `dimsForOrientation` で導出。`16:9`→1920×1080 / `9:16`→1080×1920・ADR-0012。出力解像度の縮小は書き出し時の選択）
 **7.1.2 companyInfo**（`videoKind=recruit` のとき必須）: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○
 **7.1.3 generalBrief**（`videoKind=general` のとき必須）: title ●（テーマ・**1〜100字**） / agenda(string[]) ○（章立て・アジェンダ・**最大20件／各100字**） / keyPoints(string[]) ○（伝えたい要点・**最大20件／各100字**） / targetAudience ○（対象視聴者・**100字**。ADR-0011 #12 で追加）。**要素数・文字数の上限は ADR-0011 #4 で確定（任意項目の追加・上限付与ゆえ schemaVersion は 1.1 据え置き）。**
-**7.1.4 timelineOverlay**（ADR-0018・2モデル方式・任意・schema 1.15）: clips(`OverlayClip[]`) ○。**OverlayClip**: id(`ovclip_NNN`・project 内一意) ● / track(enum＝現状 `telop` のみ・将来 audio/bgm) ● / anchorSceneId(`scene_NNN`・任意＝**有れば場面相対**〔startSec=場面開始からの相対秒〕／**無ければ絶対時間**〔startSec=グローバル秒〕) / startSec(≥0) ● / durationSec(>0) ● / text(テロップ文言) ○。`compileTimeline` が「アンカー場面のグローバル開始＋startSec」（絶対は 0 基準）で該当トラックへ合成し、**不明/除外アンカーは描画で無視**（V_overlay・§8）。**AI 出力・場面正準は不変**（AI/簡易は overlay を生成/編集しない）。audio/bgm トラックは後続。
+**7.1.4 timelineOverlay**（ADR-0018・2モデル方式・任意・schema 1.15）
+
+> **`clips` は非推奨**（#635・ADR-0032 決定11/12）。時間軸の編集は**タイムライン形式**（別プロジェクト・§7.6）へ移り、
+> 場面形式に残すのは**読み取り専用の見わたす**タイムラインだけ（編集画面は廃止）。`compileTimeline` は
+> **もう合成しない**＝描画・書き出しに出ない。**保存済みデータは消さない**（schema/型に `deprecated` として残す・
+> 新規に書き込まない）。開いたときに一言断る＝`15 §6` `TIMELINE_OVERLAY_RETIRED`（黙って消えたように見せない）。
+> **同じ入れ物の `animations`（④・ADR-0019）は現役**＝一緒に捨てない（焼き出しもこれを持ち込む）。
+
+（以下は非推奨となった `clips` の記述）clips(`OverlayClip[]`) ○。**OverlayClip**: id(`ovclip_NNN`・project 内一意) ● / track(enum＝現状 `telop` のみ・将来 audio/bgm) ● / anchorSceneId(`scene_NNN`・任意＝**有れば場面相対**〔startSec=場面開始からの相対秒〕／**無ければ絶対時間**〔startSec=グローバル秒〕) / startSec(≥0) ● / durationSec(>0) ● / text(テロップ文言) ○。`compileTimeline` が「アンカー場面のグローバル開始＋startSec」（絶対は 0 基準）で該当トラックへ合成し、**不明/除外アンカーは描画で無視**（V_overlay・§8）。**AI 出力・場面正準は不変**（AI/簡易は overlay を生成/編集しない）。audio/bgm トラックは後続。
 **animations（④・ADR-0019・schema 1.17・任意）**: `ElementAnimation[]`。**ElementAnimation**: id(`anim_NNN`・project 内一意) ● / sceneId(`scene_NNN`) ● / targetId(FREE 要素／グループ id) ● / keyframes(`Keyframe[]`・timeSec 昇順) ●。**Keyframe**: timeSec(場面ローカル秒・≥0) ● / x / y / scale(>0) / opacity(0〜1) / rotation / easing ○。設定したプロパティのみ**独立に補間**・値は**絶対上書き**・区間外は端でクランプ。`layoutScene(scene, template, {timeSec, animations})` が補間して対象要素へ適用＝**preview/export 同一関数でフレーム単位パリティ**（ADR-0001/0019・per-frame）。AI/場面正準は不変（AI はアニメを生成しない・`12` 不変）。
 
 **動き方（`Keyframe.easing`・#262・schema 1.25／timeline 1.6）**＝区間 [前KF, 当KF] に効く。
@@ -276,8 +284,10 @@
 持ち込む。よって「プリセットを自由キーフレームへ変換する」段は**要らない**（変換前後で一致する、が
 構造的に成り立つ）。守り方は `bake.test.ts` の「プリセットの動きは、そのままのキーフレームとして
 持ち込まれ、タイムライン側で直せる」。
-**テロップの実描画**：画面**上部の帯**（キャンバス比の既定ジオメトリ＝`renderer/layout.ts` の `overlayTelopItem` が単一参照元。白字・黒縁取り・中央揃え・**動画全体フォント**）。プレビューは `layoutScene` の `telops` オプションで同一 item を描き、書き出しは同一 item を**透過帯PNG**に焼いて**結合後の動画へ `overlay`（`enable='between(t,S,E)'`・グローバル秒）で合成**＝プレビュー＝書き出しのパリティ（ADR-0001/0004）。場面またぎ・遷移中・動画スロット場面でも時刻どおりに表示される。
-**並行テロップ（③(8)）**：時間が重なるテロップは**段（row）**に自動割当して縦に積む（`assignTelopRows`＝貪欲な区間分割・最小段数）。段はプレビューと書き出しで一貫（同一 run 定義）＝重なっても潰れず全て読める。段は overlay データから導出＝**schema 変更なし**（保存しない）。
+**テロップの実描画・並行テロップ（③(8)）は #635 で撤去**（ADR-0032 決定11/12）。`renderer/layout.ts` の
+`overlayTelopItem`／`layoutScene` の `telops` オプション／`renderer/export/telopOverlays`／段の割り当て
+（`assignTelopRows`）／場面ローカルへの切り出し（`sceneLocalTelops`・`activeTelopsAt`）は**いずれも削除済み**
+＝この節が指していた単一参照元はもう無い。同じことはタイムライン形式（§7.6）の字幕クリップが担う。
 
 ### 7.2 Asset
 
@@ -738,7 +748,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V18 | `scene.lines[]` を `startSec` 昇順・時間重複なし（`startWithPrevious` の行は**同時開始＝並行**ゆえ対象外＝`startSec` を持たない・ADR-0031） | 警告/補正（§9） |
 | V19 | `scene.lines[]` の `speaker` が `voiceCatalog` に実在 | 既定声へ補正＋警告（§9） |
 | V20 | `scene.groups[]`/`template.groups[]` の `members` が実在 id を参照（要素/レイヤー、ネストで group id） | 描画で無視（堅牢性）＋削除経路で除去（`removeMembersFromGroups`・ADR-0022 V_group・#308） |
-| V21 | `timelineOverlay.clips[]` の `anchorSceneId`（指定時）が実在 scene を参照 | 描画で無視（堅牢性・`compileTimeline` が合成時に skip・**V_overlay**・ADR-0018） |
+| V21 | 〜〜（#635 で用済み）〜〜 `timelineOverlay.clips[]` の `anchorSceneId` が実在 scene を参照 | **読まない**＝`compileTimeline` は `clips` を合成しなくなったので、参照切れかどうかを見る場面が無い（ADR-0032 決定11/12・非推奨フィールド） |
 | V22 | `clips[].trackId` が実在 track を参照 | 警告（`TIMELINE_TRACK_NOT_FOUND`）＝描画・書き出しから外れるので黙って消さない（§2-5） |
 | V23 | `clips[].kind` が track の `kind` と合う（`audio` は audio トラック・それ以外は visual トラック） | 警告（`TIMELINE_CLIP_TRACK_KIND`） |
 | V24 | **同一トラック内でクリップの時間が重ならない**（`[startSec, startSec+durationSec)` が互いに素・端が接するのは可） | 警告（`TIMELINE_CLIP_OVERLAP`）＝重ねたいならトラックを足す |

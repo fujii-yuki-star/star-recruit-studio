@@ -11,7 +11,6 @@ export type ScreenId =
   | "scene-edit"
   | "preview"
   | "timeline"
-  | "timeline-edit"
   | "timeline-project"
   | "export"
   | "precheck"

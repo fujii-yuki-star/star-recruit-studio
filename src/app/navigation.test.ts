@@ -4,7 +4,7 @@ import { DEFAULT_PROJECT_RETURN, isProjectScreen, PROJECT_SCREENS, stickyProject
 
 describe("isProjectScreen（工程画面の線引き・#399/#547 P3-7）", () => {
   it("工程画面（ウィザード〜書き出し）は true", () => {
-    for (const s of ["wizard", "confirm", "generating", "draft", "scene-edit", "preview", "timeline", "timeline-edit", "precheck", "export"] as ScreenId[]) {
+    for (const s of ["wizard", "confirm", "generating", "draft", "scene-edit", "preview", "timeline", "precheck", "export"] as ScreenId[]) {
       expect(isProjectScreen(s)).toBe(true);
     }
   });

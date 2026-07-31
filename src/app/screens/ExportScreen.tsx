@@ -10,7 +10,6 @@ import { useExportCapability } from "../hooks/useExportCapability";
 import { EXPORT_CAPABILITY_NOTICE, blocksExport } from "../../domain/export/exportCapability";
 import type { ExportPhase } from "../store/projectStore";
 import { buildExportScenes, ExportCancelledError } from "../../renderer/export/buildExportScenes";
-import { buildTelopOverlays } from "../../renderer/export/telopOverlays";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { assembleProject } from "../../domain/project/persistence";
 import { planBgmMix, resolveBgmExportRuns } from "../../domain/project/bgmExport";
@@ -267,15 +266,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
           : undefined,
         (dirName, frameIndex) => readExportFrame(dirName, frameIndex),
       );
-      // タイムラインのテロップ（ADR-0018 テロップ実描画）。帯PNG＋グローバル区間へ焼き、Rust が結合後に overlay 合成。
-      // テロップは場面横断のため動画全体フォントで焼く。
-      // テロップ/BGM も映像と同じ開始時点スナップショットから供給する（#381）。projectId は保存で採番された値を使う。
+      // 旧・場面横断タイムラインのテロップは**焼かない**（ADR-0032 決定11/12・#635）＝時間軸の編集は
+      // タイムライン形式へ移った。保存データは残すが、この形式の書き出しには出さない（開いたとき断る）。
       const proj = assembleProject({ ...snapMeta, projectId: pid }, snapAssets, snap.parts, snapScenes);
-      const telops = await buildTelopOverlays(proj, {
-        outputSize,
-        fontFamily: fontFamilyForId(snapFontId),
-        fontId: resolveFontId(null, snapFontId),
-      });
       // レンダリング段（フレーム焼き＋テロップ/BGM準備）の所要。encoding 段の内訳は Rust eprintln 側（#376 計測）。
       console.info(`[export] rendering (frames+prep): ${Math.round(performance.now() - startedAt)} ms / ${scenes.length} scenes`);
       setPhase("encoding");
@@ -312,7 +305,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         setPhase("cancelled");
         return;
       }
-      const report = await exportVideo(built, fileName.trim() || "export", bgmRuns, pid || undefined, outputPath, telops);
+      const report = await exportVideo(built, fileName.trim() || "export", bgmRuns, pid || undefined, outputPath);
       setResultPath(report.outputPath);
       // end-to-end 総待ち時間＝レンダリング（上の rendering ログ）＋書き出し（encode/join/telop/bgm＝Rust eprintln 内訳）。
       // 代表ケースの Before/After はこの total と上の rendering 行で記録できる（#376 レビュー P2）。

@@ -1731,13 +1731,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {sceneTextKeys.length === 0 && (
                 <div>
                   <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
-                  {/* 行き止まりにしない：文字を重ねる次の行動（テロップ＝タイムライン編集）を案内する（§2-5・#413）。 */}
+                  {/* 行き止まりにしない：文字を重ねる次の行動を案内する（§2-5・#413。旧「タイムライン編集で
+                      テロップ」は #635 で無くなったので、いま在る行動＝自由配置へ差し替え）。 */}
                   <p className="field-hint" style={{ marginTop: 4 }}>
-                    文字を重ねたいときは、タイムライン編集で「テロップ」を足せます。
+                    文字を重ねたいときは、種類を「自由配置」にすると好きな位置に文字を置けます。
                   </p>
-                  <button className="btn btn-ghost text-sm" style={{ marginTop: 4 }} onClick={() => onNavigate("timeline-edit")}>
-                    タイムライン編集を開く
-                  </button>
                 </div>
               )}
               {sceneTextKeys.map((key) => {

@@ -134,7 +134,6 @@ export async function exportVideo(
   bgmRuns?: BgmRunInput[],
   projectId?: string,
   outputPath?: string,
-  telops?: TelopOverlayInput[],
 ): Promise<ExportReport> {
   return invoke<ExportReport>('export_video', {
     scenes,
@@ -142,7 +141,8 @@ export async function exportVideo(
     bgmRuns: bgmRuns && bgmRuns.length > 0 ? bgmRuns : null,
     projectId: projectId ?? null,
     outputPath: outputPath ?? null,
-    telops: telops && telops.length > 0 ? telops : null,
+    // 旧タイムラインのテロップは送らない（#635＝機能を引き取ったのはタイムライン形式）。
+    telops: null,
   });
 }
 

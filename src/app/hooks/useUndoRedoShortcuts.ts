@@ -25,7 +25,7 @@ import type { ExportPhase } from "../store/projectStore";
  *   無い＝結果を確認できないため対象外（多くはテキスト入力＝下の入力欄ガードで元々効かない）。素材は履歴対象外（ADR-0020）。
  * ※ #413 の「たたき台の削除/移動も Ctrl+Z で戻せるように」という意図は `draft` を含めることで満たす。
  */
-export const UNDO_REDO_SCREENS: ReadonlySet<ScreenId> = new Set<ScreenId>(["draft", "scene-edit", "timeline-edit"]);
+export const UNDO_REDO_SCREENS: ReadonlySet<ScreenId> = new Set<ScreenId>(["draft", "scene-edit"]);
 
 /**
  * App のキーボード Undo/Redo 結線を1つの純粋述語に集約する（#570 P2 レビュー）。
