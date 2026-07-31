@@ -13,13 +13,12 @@ import { hasSceneNarrationOverride, resolveBgmVolume, resolveNarrationVolume } f
 import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "./previewAudioVolume";
 import { lineAudioKey, lineDurationsFromAudio } from "../../domain/project/narrationLines";
 import { lineSegments, previewSubtitleSegment, firstFrameBoundary } from "../../domain/project/lineTimeline";
-import { activeTelopsAt, compileTimeline, resolveSceneBgm, sceneLocalTelops } from "../../domain/project/compileTimeline";
+import { resolveSceneBgm } from "../../domain/project/compileTimeline";
 import { sceneAnimationActive } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import type { VideoSlotPlayback } from "../components/ScenePreview";
 import { buildVideoPlaybackSlots } from "./previewVideoSlots";
 import { lineAdvanceWindowSec } from "./previewLineTiming";
-import { assembleProject } from "../../domain/project/persistence";
 import { FPS, PREVIEW_MIN_PLAY_SEC } from "../../domain/constants";
 import { wavDurationSec } from "../../domain/voice/wavDuration";
 import { assetDisplayUrl } from "../../infrastructure/assetFs";
@@ -118,42 +117,6 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
     // scrollIntoView は一部環境（jsdom）に無いため任意呼び出し。
     activeJumpRef.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [safeIdx]);
-  // タイムラインのテロップ（ADR-0018 テロップ実描画）。現在場面のローカル区間へ切り出し、再生位置で表示を切り替える。
-  const timeline = useMemo(
-    () => compileTimeline(assembleProject(meta, assets, parts, scenes)),
-    [meta, assets, parts, scenes],
-  );
-  const currentTelops = useMemo(
-    () => (current ? sceneLocalTelops(timeline, current.sceneId) : []),
-    [timeline, current],
-  );
-  // 再生中のテロップは区間境界のタイマーで切替（t=0 も 0ms タイマー経由＝effect 内の同期 setState を避ける）。
-  // 停止中は場面頭(t=0)の表示を描画時に導出する。区間は書き出しの enable='between' と同一（パリティ）。
-  // 並行テロップ（③(8)）＝時刻ごとに有効な全テロップ（段付き）を表示する。
-  const [playbackTelops, setPlaybackTelops] = useState<{ text: string; row: number }[]>([]);
-  // テロップ切替タイマーも「開始時点のスナップショット」で組む（#382）。currentTelops は scenes 参照変化で
-  // 別オブジェクトに作り直されるため、内容が同じでも参照差で再起動→タイマーが再生位置基準でずれていた。
-  // 最新値は ref で読み（render 中の代入は禁止＝同期は effect で）、deps は内容シグネチャ（telopSig）にする。
-  const currentTelopsRef = useRef(currentTelops);
-  const telopSig = useMemo(() => JSON.stringify(currentTelops), [currentTelops]);
-  useEffect(() => {
-    currentTelopsRef.current = currentTelops;
-  }, [currentTelops]);
-  useEffect(() => {
-    if (!playing) return;
-    const telops = currentTelopsRef.current;
-    const bounds = [...new Set([0, ...telops.flatMap((iv) => [iv.startSec, iv.endSec])])];
-    const timers = bounds
-      .filter((b) => b >= 0)
-      .map((b) => window.setTimeout(() => setPlaybackTelops(activeTelopsAt(telops, b)), b * 1000));
-    return () => {
-      timers.forEach((t) => window.clearTimeout(t));
-      setPlaybackTelops([]); // 場面送り/停止で前場面の表示を持ち越さない
-    };
-    // safeIdx（場面送り）と telopSig（テロップ内容の変化）でのみ再構成＝scenes の参照変化では再起動しない。
-  }, [playing, safeIdx, telopSig]);
-  const activeTelops = playing ? playbackTelops : activeTelopsAt(currentTelops, 0);
-
   // キーフレームアニメ（④・ADR-0019）：現在場面の animations（timelineOverlay 由来・AI/場面正準は不変）。
   const sceneAnimations = useMemo(
     () => (current ? (meta.timelineOverlay?.animations ?? []).filter((a) => a.sceneId === current.sceneId) : []),
@@ -499,7 +462,6 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
             activeLineIndex={activeLine}
             subtitleSegment={previewSubtitleState.segment}
             boundaryFrame={previewSubtitleState.boundaryFrame}
-            telops={activeTelops}
             timeSec={animTimeSec}
             animations={previewAnimations}
             videoPlayback={{ playing, muted, slots: videoPlaybackSlots }}

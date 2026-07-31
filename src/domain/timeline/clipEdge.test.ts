@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
-import { applyClipEdge } from './overlayClipEdit';
+import { applyClipEdge } from './clipEdge';
 
 // #561：以前は「差分」で受け渡し、送り手と受け手が同じ下限で二重にクランプしていたため、下限へ厳密に戻らなかった。
 // 最小長 0.5 では `5 - 4.5` が二進で厳密なので辻褄が合っていただけで、0.1 にすると下限割れ／17桁が出る。

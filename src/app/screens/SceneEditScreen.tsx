@@ -1735,9 +1735,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   <p className="field-hint" style={{ marginTop: 4 }}>
                     文字を重ねたいときは、タイムライン編集で「テロップ」を足せます。
                   </p>
-                  <button className="btn btn-ghost text-sm" style={{ marginTop: 4 }} onClick={() => onNavigate("timeline-edit")}>
-                    タイムライン編集を開く
-                  </button>
                 </div>
               )}
               {sceneTextKeys.map((key) => {

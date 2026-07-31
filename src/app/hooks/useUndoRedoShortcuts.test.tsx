@@ -101,7 +101,6 @@ describe("useUndoRedoShortcuts 有効画面の限定（#547 P1-1）", () => {
     // 判定基準は「取り消すUIの有無」ではなく **store 履歴（meta/parts/scenes）をその画面で編集しているか**。
     expect(UNDO_REDO_SCREENS.has("draft")).toBe(true); // #413：たたき台の削除/移動も Ctrl+Z で戻せる
     expect(UNDO_REDO_SCREENS.has("scene-edit")).toBe(true);
-    expect(UNDO_REDO_SCREENS.has("timeline-edit")).toBe(true);
     // テンプレ作成は #547 P2-3 で取り消す/やり直すを持つが、戻す対象は**画面ローカル下書き**（useDraftHistory）。
     // store Undo を有効にすると画面外の編集を巻き戻すので、この集合には入れない（本 issue の本体・#547 P1-1）。
     expect(UNDO_REDO_SCREENS.has("looks-edit")).toBe(false);
@@ -110,7 +109,7 @@ describe("useUndoRedoShortcuts 有効画面の限定（#547 P1-1）", () => {
     expect(UNDO_REDO_SCREENS.has("settings")).toBe(false);
     expect(UNDO_REDO_SCREENS.has("home")).toBe(false);
     // 意図しない拡大/縮小の検知（store 履歴を編集する画面と一致し続けること）。増やすときは ADR-0020「入口」も更新する。
-    expect(UNDO_REDO_SCREENS.size).toBe(3);
+    expect(UNDO_REDO_SCREENS.size).toBe(2);
   });
 });
 

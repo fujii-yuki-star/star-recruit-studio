@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
-import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, OverlayClip, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
+import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import { isExportFinished } from "../../domain/export/exportProgress";
@@ -16,7 +16,7 @@ import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from
 import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
-  assembleProject, createAnimationId, createAssetId, createBgmId, createOverlayClipId, createPartId, createProjectId, createSceneId,
+  assembleProject, createAnimationId, createAssetId, createBgmId, createPartId, createProjectId, createSceneId,
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
@@ -215,15 +215,16 @@ interface ProjectState {
   /** 指定の場面を削除する（パートからも除き、order を 1..N に振り直す）。 */
   removeScene: (sceneId: string) => void;
   /** 場面を上/下へ1つ移動する（表示順＝配列順を入れ替え、order と part.sceneIds を整合）。 */
+  /**
+   * 開いたプロジェクトに**旧・場面横断タイムラインの手編集**（`timelineOverlay.clips`）が残っているか（#635）。
+   * データは消さないが動画には出さないので、画面が一言断るために使う（`15 §6` TIMELINE_OVERLAY_RETIRED）。
+   */
+  hasRetiredTimelineEdits: boolean;
+  /** その案内を閉じる（読み終えたら出し続けない）。 */
+  dismissRetiredTimelineNotice: () => void;
   moveScene: (sceneId: string, direction: "up" | "down") => void;
   /** 場面を任意の位置（移動後の配列index）へ動かす（ドラッグ&ドロップ・#398）。1操作=1履歴。 */
   moveSceneToIndex: (sceneId: string, toIndex: number) => void;
-  /** タイムライン上位編集：テロップ overlay クリップを追加し、その id を返す（ADR-0018・③(4)）。 */
-  addOverlayClip: (clip: Partial<Omit<OverlayClip, "id">>) => string;
-  /** overlay クリップを部分更新（移動＝startSec/anchorSceneId、文言＝text 等）。Undo は meta スナップショットで自動。 */
-  updateOverlayClip: (id: string, patch: Partial<Omit<OverlayClip, "id">>) => void;
-  /** overlay クリップを削除する。 */
-  removeOverlayClip: (id: string) => void;
   /** 要素アニメーション（キーフレーム）を追加し、その id を返す（④・ADR-0019・timelineOverlay.animations）。 */
   addAnimation: (sceneId: string, targetId: string, keyframes: Keyframe[]) => string;
   /** 要素アニメーションのキーフレームを差し替える（フェードインの所要秒変更など）。Undo は meta スナップショットで自動。 */
@@ -495,6 +496,7 @@ function defaultHeader(): ProjectHeader {
 export const useProjectStore = create<ProjectState>((set, get) => ({
   status: "idle",
   draftFromAi: false,
+  hasRetiredTimelineEdits: false,
   saveStatus: "idle",
   importError: null,
   past: [],
@@ -610,7 +612,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   reset: () => {
     if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は場面/構成を破壊しない（#379 と同方針・#570 レビュー follow-up）
     set((s) => ({
-      status: "idle", draftFromAi: false, saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null,
+      status: "idle", draftFromAi: false, hasRetiredTimelineEdits: false, saveStatus: "idle", parts: [], scenes: [], warnings: [], aiError: null,
       _generationSeq: s._generationSeq + 1,
       // 声の一括作成も打ち切る（newProject/loadProject と同じ扱い・#547 P2-6）。放置すると空になった文書の上を
       // 空回りで走り続け、「作成中…」と前の文書の「中止しました」を持ち越す。
@@ -814,11 +816,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ saveStatus: "error" });
     }
   },
+  dismissRetiredTimelineNotice: () => set({ hasRetiredTimelineEdits: false }),
   loadProject: async (projectId) => {
     // 書き出し中は別プロジェクトへ切り替えない（進行中の書き出しが参照するデータ/状態を保つ・#379）。
     if (isExportBusy(get().exportRun.phase)) return;
     const text = await loadProjectDoc(projectId);
     const project = parseProjectDoc(text);
+    // 旧・場面横断タイムラインの手編集（ADR-0032 決定11/12・#635）。**データは消さない**が動画には出さないので、
+    // 開いた人に一言断る（黙って消えたように見せない・§2-5・`15 §6` TIMELINE_OVERLAY_RETIRED）。
+    const hasRetiredTimelineEdits = (project.timelineOverlay?.clips?.length ?? 0) > 0;
     // ディスクの素材を表示用 src に解決（Tauri は asset://・ブラウザは null）。filePath を持つもの・未配置のサンプル等は null でスキップ。並列実行（A3-2）。
     type LoadedSrc = { assetId: string; url: string; thumbnailPath?: string };
     const loaded = await Promise.all(
@@ -876,6 +882,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     set((s) => ({
       status: "ready",
+      hasRetiredTimelineEdits,
       draftFromAi: false, // 読込済みプロジェクトは「生成直後」ではない＝AI作成文言は出さない（#467）
       saveStatus: "saved", // 読み込み直後はディスクと一致＝保存済み扱い（未保存検知の基準・#256）
       // 保存用ヘッダは projectHeaderFromProject に一元化（Project のヘッダ系フィールドの取りこぼしを防ぐ・#324）。
@@ -988,47 +995,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({
       scenes: s.scenes.map((sc) => (sc.sceneId === sceneId ? update(sc) : sc)),
       // 編集したら「保存しました」表示を解除（未保存と分かるように）。
-      saveStatus: "idle",
-    }));
-  },
-  addOverlayClip: (clip) => {
-    if (isExportBusy(get().exportRun.phase)) return ""; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
-    const clips = get().meta.timelineOverlay?.clips ?? [];
-    const id = createOverlayClipId(clips.map((c) => c.id));
-    // 既定＝telop・開始0秒・長さ3秒。呼び出し側でアンカー場面/開始秒/文言を上書きする。
-    const newClip: OverlayClip = { id, track: "telop", startSec: 0, durationSec: 3, ...clip };
-    get().pushHistory();
-    set((s) => ({
-      meta: { ...s.meta, timelineOverlay: { ...s.meta.timelineOverlay, clips: [...(s.meta.timelineOverlay?.clips ?? []), newClip] } },
-      saveStatus: "idle",
-    }));
-    return id;
-  },
-  updateOverlayClip: (id, patch) => {
-    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
-    get().pushHistory();
-    set((s) => ({
-      meta: {
-        ...s.meta,
-        timelineOverlay: {
-          ...s.meta.timelineOverlay,
-          clips: (s.meta.timelineOverlay?.clips ?? []).map((c) => (c.id === id ? { ...c, ...patch } : c)),
-        },
-      },
-      saveStatus: "idle",
-    }));
-  },
-  removeOverlayClip: (id) => {
-    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
-    get().pushHistory();
-    set((s) => ({
-      meta: {
-        ...s.meta,
-        timelineOverlay: {
-          ...s.meta.timelineOverlay,
-          clips: (s.meta.timelineOverlay?.clips ?? []).filter((c) => c.id !== id),
-        },
-      },
       saveStatus: "idle",
     }));
   },

@@ -11,7 +11,7 @@ import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '.
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
 import { removeMembersFromGroups } from '../project/groupOps';
-import { applyClipEdge } from '../project/overlayClipEdit';
+import { applyClipEdge } from './clipEdge';
 import { createFreeElement } from '../project/freeLayoutOps';
 import { createClipId, createTrackId } from '../project/persistence';
 import { subtitlesBoundTo } from './subtitleLink';

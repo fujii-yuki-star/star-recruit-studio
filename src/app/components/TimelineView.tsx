@@ -1,29 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { TRANSITION_TYPE } from "../../domain/enums";
 import type { TransitionType } from "../../domain/enums";
 import type { Timeline, TimelineClip, TimelineTrackKind } from "../../domain/project/compileTimeline";
-import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
-import { snapTimeSec } from "../../domain/project/timelineSnap";
-import { applyClipEdge, type ClipDragMode } from "../../domain/project/overlayClipEdit";
 import "./timeline.css";
-
-/** overlay クリップのドラッグ種別。move＝本体移動、trim-start／trim-end＝左右端のトリミング。
- *  編集の意味論（クランプ）は domain（`applyClipEdge`）が持つので、種別も domain 側の定義を使う（#561）。 */
-export type { ClipDragMode };
 
 interface TimelineViewProps {
   timeline: Timeline;
-  /** 編集モード（overlay クリップを選択可能に）。TimelineEditScreen から渡す。読み取りは未指定。 */
-  editable?: boolean;
-  /** 選択中の overlay クリップ id（ハイライト）。 */
-  selectedClipId?: string;
-  /** overlay クリップの選択（空領域クリックで null）。editable のとき有効。 */
-  onSelectClip?: (id: string | null) => void;
-  /**
-   * overlay クリップのドラッグ確定。`edgeSec` は**動かした端のグローバル秒**（吸着済み・**クランプは受け手**）。
-   * move/trim-start は開始、trim-end は終了。差分でなく端そのものを渡す＝足し戻しの誤差とクランプの二重化を避ける（#561）。
-   */
-  onClipDrag?: (id: string, mode: ClipDragMode, edgeSec: number) => void;
   /** 再生ヘッドの位置（グローバル秒・ADR-0023 段階(1)）。未指定＝ヘッドを出さない（読み取り専用の表示はそのまま）。
    *  **動画の範囲へ収めるのは持ち主（渡す側）**＝ここでは収めない（表示側でも収めると入口の取りこぼしが隠れる・#561 の轍）。 */
   playheadSec?: number;
@@ -42,7 +24,6 @@ const LANES: { kind: TimelineTrackKind; label: string; sub: string }[] = [
 
 const ZOOM_LEVELS = [16, 24, 36, 54, 80, 120] as const;
 const DEFAULT_ZOOM_INDEX = 2; // 36 px/秒
-const SNAP_THRESHOLD_PX = 8; // ドラッグ/トリミングの吸着しきい値（px）。px→秒は pxPerSec で換算。
 // 矢印キーでヘッドを動かす幅（秒）。**秒の入力刻み（SEC_STEP）とは用途が違う**＝あちらは尺を打ち込む刻み、
 // こちらは「見たい瞬間を探す」操作の粒度（0.1秒だと十数秒の動画でも端まで百回以上かかる）。
 const SEEK_KEY_STEP_SEC = 1;
@@ -72,106 +53,10 @@ function clipTitle(clip: TimelineClip): string {
   return `${clip.label}（${clockLabel(clip.startSec)}〜${clockLabel(clip.endSec)}）`;
 }
 
-const OVERLAY_TRACK_KINDS: TimelineTrackKind[] = ["video", "telop", "audio", "bgm"];
 
-/** ドラッグ中の吸着先（グローバル秒）：0・各場面の開始/終了・自分以外の overlay クリップの端。 */
-function snapTargetsFor(timeline: Timeline, excludeId: string): number[] {
-  const set = new Set<number>([0]);
-  for (const s of timeline.scenes) {
-    set.add(s.startSec);
-    set.add(s.endSec);
-  }
-  for (const kind of OVERLAY_TRACK_KINDS) {
-    for (const c of timeline.tracks[kind]) {
-      if (c.origin === "overlay" && c.id !== excludeId) {
-        set.add(c.startSec);
-        set.add(c.endSec);
-      }
-    }
-  }
-  return [...set];
-}
-
-function findClip(timeline: Timeline, id: string): TimelineClip | undefined {
-  for (const kind of OVERLAY_TRACK_KINDS) {
-    const c = timeline.tracks[kind].find((x) => x.id === id);
-    if (c) return c;
-  }
-  return undefined;
-}
-
-/** ドラッグ対象クリップのアンカー場面のグローバル開始秒（絶対時間クリップは0）。到達可能範囲の下限に使う。 */
-function anchorGlobalStartOf(timeline: Timeline, clip: TimelineClip): number {
-  return clip.sceneId ? timeline.scenes.find((s) => s.sceneId === clip.sceneId)?.startSec ?? 0 : 0;
-}
-
-/**
- * 動かした端の**グローバル秒**（吸着まで）を出す。**クランプはしない**＝それは `applyClipEdge` の役目で、
- * ここで先にクランプすると受け手と二重になり、境界での辻褄合わせが浮動小数に依存する（#561）。
- */
-function snappedEdge(clip: TimelineClip, mode: ClipDragMode, rawDeltaSec: number, targets: number[], thresholdSec: number): number {
-  const baseEdge = mode === "trim-end" ? clip.endSec : clip.startSec;
-  return snapTimeSec(baseEdge + rawDeltaSec, targets, thresholdSec);
-}
-
-/** ドラッグ結果のクリップ（グローバル秒）。ドロップ後の確定（`editClip`）と**同じ関数**で出す＝スナップバックしない。 */
-function draggedSpan(timeline: Timeline, clip: TimelineClip, mode: ClipDragMode, edgeSec: number): { startSec: number; durationSec: number } {
-  const anchorStart = anchorGlobalStartOf(timeline, clip);
-  const span = { startSec: clip.startSec, durationSec: clip.endSec - clip.startSec };
-  return applyClipEdge(span, mode, edgeSec, anchorStart, TIMELINE_MIN_CLIP_SEC);
-}
-
-export function TimelineView({ timeline, editable, selectedClipId, onSelectClip, onClipDrag, playheadSec, onSeek }: TimelineViewProps) {
+export function TimelineView({ timeline, playheadSec, onSeek }: TimelineViewProps) {
   const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
   const pxPerSec = ZOOM_LEVELS[zoomIndex];
-
-  // overlay クリップのドラッグ（1D・水平＝時間）。mode＝move/trim-start/trim-end。確定は drop 時に onClipDrag(mode, deltaSec)。
-  // 確定用に開始位置(startX)と mode を ref に持ち（タイミング非依存）、pointerup の clientX から直接 delta を出す。preview は offsetPx。
-  const [drag, setDrag] = useState<{ id: string; mode: ClipDragMode; offsetPx: number } | null>(null);
-  const dragMetaRef = useRef<{ id: string; startX: number; mode: ClipDragMode } | null>(null);
-  // 最新の timeline を ref で参照（onUp の吸着計算に使う）。deps に timeline を入れず、effect の再登録を避ける（配列長も一定に保つ）。
-  const timelineRef = useRef(timeline);
-  useEffect(() => {
-    timelineRef.current = timeline;
-  }, [timeline]);
-  const dragging = drag !== null;
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: PointerEvent) => {
-      const m = dragMetaRef.current;
-      if (m) setDrag({ id: m.id, mode: m.mode, offsetPx: e.clientX - m.startX });
-    };
-    const onUp = (e: PointerEvent) => {
-      const m = dragMetaRef.current;
-      if (m) {
-        const rawDeltaSec = (e.clientX - m.startX) / pxPerSec;
-        if (rawDeltaSec !== 0) {
-          // 吸着させてから確定（プレビューと同じ計算・場面境界/他クリップ端/0秒へ）。クランプは受け手（#561）。
-          const tl = timelineRef.current;
-          const clip = findClip(tl, m.id);
-          if (clip) {
-            onClipDrag?.(m.id, m.mode, snappedEdge(clip, m.mode, rawDeltaSec, snapTargetsFor(tl, m.id), SNAP_THRESHOLD_PX / pxPerSec));
-          }
-        }
-      }
-      dragMetaRef.current = null;
-      setDrag(null);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-  }, [dragging, pxPerSec, onClipDrag]);
-
-  // クリップ本体/ハンドルからドラッグ開始（選択＋開始位置と mode を記録）。
-  const beginDrag = (e: { clientX: number; stopPropagation(): void }, id: string, mode: ClipDragMode): void => {
-    e.stopPropagation();
-    onSelectClip?.(id);
-    dragMetaRef.current = { id, startX: e.clientX, mode };
-    setDrag({ id, mode, offsetPx: 0 });
-  };
 
   if (timeline.scenes.length === 0) {
     return (
@@ -214,7 +99,7 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
         </button>
       </div>
 
-      <div className="timeline-scroll" onClick={editable ? () => onSelectClip?.(null) : undefined}>
+      <div className="timeline-scroll">
         <div className="timeline-inner">
           {/* 時間ルーラー */}
           <div className="timeline-row">
@@ -281,44 +166,16 @@ export function TimelineView({ timeline, editable, selectedClipId, onSelectClip,
                     />
                   ))}
                 {timeline.tracks[lane.kind].map((clip) => {
-                  // overlay 由来クリップだけ編集モードで選択・ドラッグ可能。判別は domain の origin（UI は id 形式を知らない・§2-7）。
-                  const selectable = !!editable && clip.origin === "overlay";
-                  const selected = selectable && clip.id === selectedClipId;
-                  const isDragging = drag?.id === clip.id;
-                  const baseLeft = clip.startSec * pxPerSec;
-                  const baseWidth = (clip.endSec - clip.startSec) * pxPerSec;
-                  // ドラッグ中のプレビューは確定（editClip）と同じクランプ式で座標を出す（drop 時のスナップバックを防ぐ）。
-                  let left = baseLeft;
-                  let width = baseWidth;
-                  if (isDragging) {
-                    // 確定（editClip）と**同じ関数**で結果を出す＝ドロップでスナップバックしない（#561・ADR-0026③）。
-                    const edge = snappedEdge(clip, drag.mode, drag.offsetPx / pxPerSec, snapTargetsFor(timeline, clip.id), SNAP_THRESHOLD_PX / pxPerSec);
-                    const span = draggedSpan(timeline, clip, drag.mode, edge);
-                    left = span.startSec * pxPerSec;
-                    width = span.durationSec * pxPerSec;
-                  }
+                  const left = clip.startSec * pxPerSec;
+                  const width = (clip.endSec - clip.startSec) * pxPerSec;
                   return (
                     <div
                       key={clip.id}
-                      className={`timeline-clip timeline-clip--${lane.kind}${selected ? " timeline-clip--selected" : ""}${selectable ? " timeline-clip--editable" : ""}${isDragging ? " timeline-clip--dragging" : ""}`}
+                      className={`timeline-clip timeline-clip--${lane.kind}`}
                       style={{ left: Math.max(0, left), width: Math.max(4, width) }}
                       title={clipTitle(clip)}
-                      onClick={selectable ? (e) => e.stopPropagation() : undefined}
-                      onPointerDown={selectable ? (e) => beginDrag(e, clip.id, "move") : undefined}
                     >
                       {clip.label}
-                      {selectable && (
-                        <>
-                          <span
-                            className="timeline-clip-handle timeline-clip-handle--left"
-                            onPointerDown={(e) => beginDrag(e, clip.id, "trim-start")}
-                          />
-                          <span
-                            className="timeline-clip-handle timeline-clip-handle--right"
-                            onPointerDown={(e) => beginDrag(e, clip.id, "trim-end")}
-                          />
-                        </>
-                      )}
                     </div>
                   );
                 })}

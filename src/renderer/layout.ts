@@ -215,8 +215,6 @@ export interface LayoutOptions {
    * 未指定/空＝なし。プレビューはこのオプション、書き出しは overlayTelopItem を段ごとの帯PNGに焼いて overlay 合成＝同一ジオメトリでパリティ。
    */
   telops?: { text: string; row: number }[];
-  /** テロップのフォント id（**動画全体フォントを解決済みで渡す**）。テロップは場面横断のため場面フォント（scene.fontId）に左右されない（ADR-0001）。 */
-  telopFontId?: string | null;
   /**
    * キーフレームアニメの再生位置（場面ローカル秒・④・ADR-0019）。指定時、この場面の animations を補間して対象要素へ適用する。
    * 未指定＝静止（後方互換）。preview/export は同一の timeSec/animations で呼び、フレーム単位パリティを保つ。
@@ -226,42 +224,6 @@ export interface LayoutOptions {
   animations?: ElementAnimation[];
 }
 
-// タイムラインのテロップ帯の既定ジオメトリ（キャンバス比・ADR-0018 テロップ実描画）。
-// 位置は画面上部の帯＝下部の字幕（subtitle）と衝突しない。単一の参照元（§2-7）。
-const OVERLAY_TELOP_X_RATIO = 0.08;
-const OVERLAY_TELOP_Y_RATIO = 0.06;
-const OVERLAY_TELOP_W_RATIO = 0.84;
-const OVERLAY_TELOP_H_RATIO = 0.14;
-const OVERLAY_TELOP_FONT_RATIO = 0.045;
-// 段（row）ごとの縦の送り（並行テロップ・③(8)）。帯の高さ分ずつ下へ積む（重ならない）。
-const OVERLAY_TELOP_ROW_STRIDE_RATIO = OVERLAY_TELOP_H_RATIO;
-// 常に最前面（テンプレ/FREE の zIndex より大きく・クレジットピルは layoutToSvg が items の後に描くため影響なし）。
-const OVERLAY_TELOP_Z = 9500;
-
-/** タイムラインのテロップ帯の LayoutItem（プレビューと書き出し帯PNGが共有＝パリティの単一参照元）。row＝段（0=最上段・下へ積む）。 */
-export function overlayTelopItem(width: number, height: number, text: string, fontId?: string | null, row = 0): TextItem {
-  return {
-    id: `overlay_telop_${row}`,
-    kind: 'text',
-    x: Math.round(width * OVERLAY_TELOP_X_RATIO),
-    y: Math.round(height * (OVERLAY_TELOP_Y_RATIO + row * OVERLAY_TELOP_ROW_STRIDE_RATIO)),
-    w: Math.round(width * OVERLAY_TELOP_W_RATIO),
-    h: Math.round(height * OVERLAY_TELOP_H_RATIO),
-    zIndex: OVERLAY_TELOP_Z,
-    text,
-    fontSize: Math.round(height * OVERLAY_TELOP_FONT_RATIO),
-    fontWeight: 'bold',
-    color: '#ffffff',
-    maxLines: 2,
-    textAlign: 'center',
-    // 縁取りで背景を問わず可読に（帯背景は敷かない＝映像を隠しすぎない）。
-    strokeColor: '#000000',
-    strokeWidth: 3,
-    isSubtitle: false,
-    // 動画全体フォントを item に明示（textToSvg は item.fontId 優先＝描画側 fontFamily（場面フォント）に左右されない・ADR-0001）。
-    fontId: fontId ?? null,
-  };
-}
 
 /** `applyInterpolatedTransform` が触る最小の形（矩形＋不透明度）。`LayoutItem` もクリップの箱もこれを満たす。 */
 export interface TransformableRect {
@@ -527,11 +489,6 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
   }
 
   // タイムラインのテロップ（ADR-0018・並行テロップ③(8)）。プレビュー経路のみ（書き出しは段ごとの帯PNGを overlay 合成＝同一 item を共有）。
-  if (opts?.telops) {
-    for (const t of opts.telops) {
-      items.push(overlayTelopItem(template.canvas.width, template.canvas.height, t.text, opts.telopFontId, t.row));
-    }
-  }
 
   items.sort((a, b) => a.zIndex - b.zIndex);
   return { width: template.canvas.width, height: template.canvas.height, backgroundColor, items };

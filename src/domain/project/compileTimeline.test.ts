@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
 import { FPS } from '../constants';
 import { transitionTimeline, resolveTransition } from './sceneTransitions';
-import { activeTelopsAt, assignTelopRows, compileTimeline, resolveSceneBgm, sceneLocalTelops } from './compileTimeline';
+import { compileTimeline, resolveSceneBgm } from './compileTimeline';
 import type { Project, Scene } from './types';
 
 // compileTimeline が読むのは sceneId/durationSec/transition/lines/narration/subtitleEnabledDefault のみ。
@@ -213,39 +213,6 @@ describe('compileTimeline：BGM トラック', () => {
   });
 });
 
-describe('compileTimeline：timelineOverlay の合成（ADR-0018）', () => {
-  it('場面アンカーのテロップクリップは場面のグローバル開始＋相対秒に置かれる', () => {
-    const scenes = [
-      scene({ sceneId: 's1', durationSec: 8 }),
-      scene({ sceneId: 's2', durationSec: 6, transition: { in: TRANSITION_TYPE.fade, durationSec: 2 } }),
-    ];
-    const overlay = { clips: [{ id: 'ovclip_001', track: 'telop', anchorSceneId: 's2', startSec: 1, durationSec: 2, text: '補足' }] };
-    const tl = compileTimeline(project(scenes, undefined, overlay));
-    // s2 は 6 から。相対1 → グローバル7、[7,9]。
-    expect(tl.tracks.telop.find((c) => c.id === 'ovclip_001')).toEqual({
-      id: 'ovclip_001', sceneId: 's2', startSec: 7, endSec: 9, label: '補足', origin: 'overlay',
-    });
-  });
-
-  it('anchorSceneId 無しのクリップは絶対時間で置かれる', () => {
-    const overlay = { clips: [{ id: 'ovclip_002', track: 'telop', startSec: 3, durationSec: 2, text: '絶対' }] };
-    const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 10 })], undefined, overlay));
-    expect(tl.tracks.telop.find((c) => c.id === 'ovclip_002')).toEqual({
-      id: 'ovclip_002', sceneId: undefined, startSec: 3, endSec: 5, label: '絶対', origin: 'overlay',
-    });
-  });
-
-  it('存在しない場面アンカーのクリップは無視する（V_overlay）', () => {
-    const overlay = { clips: [{ id: 'ovclip_003', track: 'telop', anchorSceneId: 'sX', startSec: 1, durationSec: 2, text: '孤立' }] };
-    const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 8 })], undefined, overlay));
-    expect(tl.tracks.telop.some((c) => c.id === 'ovclip_003')).toBe(false);
-  });
-
-  it('overlay 未設定なら合成なし（従来どおり）', () => {
-    const tl = compileTimeline(project([scene({ sceneId: 's1', durationSec: 8 })]));
-    expect(tl.tracks.telop.every((c) => c.id.startsWith('s1/'))).toBe(true);
-  });
-});
 
 describe('場面ごとBGM（ADR-0018 ③(7)）', () => {
   const proj = { enabled: true, bundledBgmId: 'summer-morning', volume: 0.25 };
@@ -299,58 +266,6 @@ describe('場面ごとBGM（ADR-0018 ③(7)）', () => {
   });
 });
 
-describe('sceneLocalTelops / activeTelopsAt / assignTelopRows（テロップ実描画・並行テロップ・ADR-0018 ③(8)）', () => {
-  const scenes = [
-    scene({ sceneId: 's1', durationSec: 8 }),
-    scene({ sceneId: 's2', durationSec: 6 }),
-  ];
-  it('場面と重なる overlay テロップを場面ローカル秒＋段へ切り出す（場面またぎは自分の部分だけ・単独は段0）', () => {
-    const overlay = { clips: [
-      { id: 'ovclip_001', track: 'telop', startSec: 6, durationSec: 4, text: 'またぎ' }, // グローバル 6〜10（s1:6-8 / s2:8-10）
-    ] };
-    const tl = compileTimeline(project(scenes, undefined, overlay));
-    expect(sceneLocalTelops(tl, 's1')).toEqual([{ startSec: 6, endSec: 8, text: 'またぎ', row: 0 }]);
-    expect(sceneLocalTelops(tl, 's2')).toEqual([{ startSec: 0, endSec: 2, text: 'またぎ', row: 0 }]);
-  });
-  it('時間が重なる複数テロップは段違いで返す（並行テロップ・③(8)）', () => {
-    const overlay = { clips: [
-      { id: 'ovclip_001', track: 'telop', startSec: 0, durationSec: 5, text: 'A' },
-      { id: 'ovclip_002', track: 'telop', startSec: 2, durationSec: 3, text: 'B' }, // A(0-5) と重なる → 段1
-    ] };
-    const tl = compileTimeline(project(scenes, undefined, overlay));
-    expect(sceneLocalTelops(tl, 's1')).toEqual([
-      { startSec: 0, endSec: 5, text: 'A', row: 0 },
-      { startSec: 2, endSec: 5, text: 'B', row: 1 },
-    ]);
-  });
-  it('場面射影クリップ（行の字幕）や空文言・非重なりは対象外', () => {
-    const overlay = { clips: [{ id: 'ovclip_001', track: 'telop', startSec: 0, durationSec: 2, text: '' }] };
-    const tl = compileTimeline(project(scenes, undefined, overlay));
-    // 行射影（origin なし）はテロップレーンにあっても対象外＝overlay 由来のみ。
-    expect(sceneLocalTelops(tl, 's1')).toEqual([]);
-    expect(sceneLocalTelops(tl, 'sX')).toEqual([]); // 不明場面は空
-  });
-  it('assignTelopRows: 重なるクリップは異なる段・重ならなければ段を再利用', () => {
-    const rows = assignTelopRows([
-      { id: 'c1', startSec: 0, endSec: 5 },
-      { id: 'c2', startSec: 2, endSec: 4 }, // c1 と重なる → 段1
-      { id: 'c3', startSec: 5, endSec: 8 }, // c1 と接する（重ならない）→ 段0 再利用
-    ]);
-    expect(rows.get('c1')).toBe(0);
-    expect(rows.get('c2')).toBe(1);
-    expect(rows.get('c3')).toBe(0);
-  });
-  it('activeTelopsAt は [start, end) で有効な全テロップ（段付き）を並行表示', () => {
-    const ivs = [
-      { startSec: 0, endSec: 5, text: 'A', row: 0 },
-      { startSec: 2, endSec: 4, text: 'B', row: 1 },
-    ];
-    expect(activeTelopsAt(ivs, 0)).toEqual([{ text: 'A', row: 0 }]);
-    expect(activeTelopsAt(ivs, 2)).toEqual([{ text: 'A', row: 0 }, { text: 'B', row: 1 }]); // 並行
-    expect(activeTelopsAt(ivs, 4)).toEqual([{ text: 'A', row: 0 }]); // B 終了で A のみ
-    expect(activeTelopsAt(ivs, 5)).toEqual([]); // end は含まない
-  });
-});
 
 describe('compileTimeline：射影の忠実性と includeScene', () => {
   it('totalSec は transitionTimeline の effectiveTotalSec と一致する（書き出しと同じ境界計算）', () => {
@@ -380,5 +295,29 @@ describe('compileTimeline：射影の忠実性と includeScene', () => {
     expect(tl.scenes.map((s) => s.sceneId)).toEqual(['s1', 's2']);
     expect(tl.scenes.map((s) => [s.startSec, s.endSec])).toEqual([[0, 4], [4, 9]]);
     expect(tl.totalSec).toBe(9);
+  });
+});
+
+describe('旧・場面横断タイムラインの手編集（timelineOverlay.clips・#635）', () => {
+  const one = () => [scene({ sceneId: 'scene_001', durationSec: 4, narration: { text: 'こんにちは', status: 'ready' } })];
+
+  it('保存されていても時間軸には出さない（データは残すが描画・書き出しには使わない）', () => {
+    const clips = [
+      { id: 'ovl_001', track: 'telop', anchorSceneId: 'scene_001', startSec: 1, durationSec: 2, text: '旧テロップ' },
+      { id: 'ovl_002', track: 'telop', startSec: 0, durationSec: 1, text: '絶対時間の旧テロップ' },
+    ];
+    // 場面由来の射影は変わらない＝見わたす表示は「場面のセリフ」だけになる。
+    expect(compileTimeline(project(one(), undefined, { clips }))).toEqual(compileTimeline(project(one())));
+  });
+
+  it('同じ入れ物にある登場アニメ（animations）は残る（一緒に捨てない）', () => {
+    const overlay = {
+      clips: [{ id: 'ovl_001', track: 'telop', startSec: 0, durationSec: 1, text: '旧' }],
+      animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }] }],
+    };
+    const p = project(one(), undefined, overlay);
+    expect(p.timelineOverlay?.animations).toHaveLength(1);
+    // 旧クリップは出ないが、場面のセリフ由来のテロップは従来どおり出る。
+    expect(compileTimeline(p).tracks.telop.every((c) => c.id.startsWith('scene_'))).toBe(true);
   });
 });

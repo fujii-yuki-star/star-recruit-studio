@@ -56,40 +56,6 @@ const scene: Scene = {
   warnings: [],
 };
 
-describe('layoutScene：タイムラインのテロップ（ADR-0018 テロップ実描画・並行テロップ③(8)）', () => {
-  const telopItems = (layout: { items: LayoutItem[] }): TextItem[] =>
-    layout.items.filter((i) => i.id.startsWith('overlay_telop')) as TextItem[];
-  it('opts.telops で段付きの帯テキストが足される（プレビュー経路・書き出し帯PNGと同一 item）', () => {
-    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'ここがポイント', row: 0 }] });
-    const t = telopItems(layout);
-    expect(t).toHaveLength(1);
-    expect(t[0].id).toBe('overlay_telop_0');
-    expect(t[0].text).toBe('ここがポイント');
-    expect(t[0].isSubtitle).toBe(false); // 「字幕を入れる」OFF でも消えない（独立要素）
-    expect(layout.items[layout.items.length - 1].id).toBe('overlay_telop_0'); // 最前面＝末尾
-    expect(t[0].y).toBe(Math.round(1080 * 0.06));
-    expect(t[0].fontSize).toBe(Math.round(1080 * 0.045));
-  });
-  it('並行テロップ：段ごとに y が帯高さ分だけ下へずれる（③(8)）', () => {
-    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'A', row: 0 }, { text: 'B', row: 1 }] });
-    const t = telopItems(layout);
-    expect(t.map((i) => i.id)).toEqual(['overlay_telop_0', 'overlay_telop_1']);
-    expect(t[0].y).toBe(Math.round(1080 * 0.06));
-    expect(t[1].y).toBe(Math.round(1080 * (0.06 + 0.14))); // 段1 は帯高さ(0.14)分下
-  });
-  it('telopFontId（動画全体フォント）が item.fontId に載る＝場面フォントに左右されない（パリティ）', () => {
-    const layout = layoutScene(scene, openingTemplate, { telops: [{ text: 'x', row: 0 }], telopFontId: 'kaitou-yokoku-gothic' });
-    expect(telopItems(layout)[0].fontId).toBe('kaitou-yokoku-gothic');
-    // 未指定は null（描画側 fontFamily へフォールバック）。
-    const l2 = layoutScene(scene, openingTemplate, { telops: [{ text: 'x', row: 0 }] });
-    expect(telopItems(l2)[0].fontId).toBeNull();
-  });
-  it('未指定/空では telop item を足さない（従来どおり）', () => {
-    expect(telopItems(layoutScene(scene, openingTemplate))).toHaveLength(0);
-    expect(telopItems(layoutScene(scene, openingTemplate, { telops: [] }))).toHaveLength(0);
-  });
-});
-
 describe('layoutScene：場面の字幕トグル（subtitleEnabledDefault・#413/#495 レビュー）', () => {
   const subtitleItems = (layout: { items: LayoutItem[] }): TextItem[] =>
     layout.items.filter((i): i is TextItem => i.kind === 'text' && i.isSubtitle);
