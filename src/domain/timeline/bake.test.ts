@@ -1,7 +1,9 @@
 // 場面形式 → タイムライン形式の焼き出し（ADR-0032・#628）。純粋関数のテスト（§7 の必須対象＝変換）。
 import { describe, expect, it } from 'vitest';
-import { FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND, TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
+import { EASING, FREE_CATEGORY, FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND, TRANSITION_DIRECTION, TRANSITION_TYPE } from '../enums';
+import { presetKeyframes } from '../project/animationPresets';
 import { transitionTimeline } from '../project/sceneTransitions';
+import { setKeyframe } from './keyframeEdit';
 import type { Project, Scene } from '../project/types';
 import type { Template } from '../template/types';
 import { validateTimelineProject } from '../validation/generated/validators.js';
@@ -384,6 +386,30 @@ describe('bakeTimelineProject: FREE の場面＝要素ごとのクリップ＋1�
     expect(doc.animations![0].targetId).toBe(doc.clips[2].id); // free_002 → text クリップ
     expect(doc.animations![0].keyframes).toEqual([{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }]);
     expectSound(doc);
+  });
+
+  // #266（プリセット→自由キーフレームへの変換）＝**変換は要らない**。場面形式のプリセットは最初から
+  // 2つのキーフレームとして保存されており（`animationPresets`）、焼き出しはそれをそのまま持ち込むので、
+  // タイムライン側では**ふつうの動き**として編集できる。ここが崩れると #266 の前提が崩れる。
+  it('プリセットの動きは、そのままのキーフレームとして持ち込まれ、タイムライン側で直せる', () => {
+    const kfs = presetKeyframes('fade', { durationSec: 0.6, easing: EASING.easeInOut, direction: 'left' });
+    const p = freeProject({
+      timelineOverlay: {
+        animations: [{ id: 'anim_001', sceneId: 'scene_001', targetId: 'free_002', keyframes: kfs }],
+      },
+    });
+    const { doc } = bakeTimelineProject(p, opts());
+    // 焼いた先の動きは、プリセットが作ったキーフレーム列と**同じもの**（変換も丸めもしない）。
+    expect(doc.animations?.[0].keyframes).toEqual(kfs);
+    // 以後はふつうのキーフレームとして直せる（プリセットという別の状態は残っていない）。
+    const targetId = doc.animations![0].targetId;
+    const r = setKeyframe(doc, targetId, kfs[kfs.length - 1].timeSec, { opacity: 0.5 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const edited = r.doc.animations![0].keyframes;
+    expect(edited[edited.length - 1].opacity).toBe(0.5);
+    // 動き方（イージング）も、そのキーフレームの指定として残っている（#262 で直せる）。
+    expect(edited[edited.length - 1].easing).toBe(EASING.easeInOut);
   });
 
   it('見た目が見つからない場面でも、場面の種類が自由配置なら自由配置として焼く（黙って中身を落とさない）', () => {

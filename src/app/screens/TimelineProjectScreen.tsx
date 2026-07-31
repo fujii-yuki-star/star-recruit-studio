@@ -3,7 +3,9 @@ import type { ScreenId } from "../data/mockData";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
-import { CROP_MODE, CROP_MODE_DEFAULT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import type { Easing, EasingSpec } from "../../domain/enums";
+import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { clipCountOnTrack } from "../../domain/timeline/edit";
 import { audioSourceKeyOfClip } from "../../domain/timeline/audio";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
@@ -133,6 +135,48 @@ function draftFromKeyframe(k: Keyframe | undefined): Partial<Record<KeyframeProp
   return out;
 }
 
+/** 「自由なカーブ」を表す選択肢の値（保存する値ではなく画面の選択肢＝制御点は別に持つ）。 */
+const CURVE_CHOICE = 'curve';
+
+/** カーブの制御点の入力欄。x は 0〜1（時間が戻らない）・y は範囲外も可（行き過ぎて戻る動き）。 */
+const CURVE_FIELDS: { label: string; clamped: boolean }[] = [
+  { label: '始めの強さ', clamped: true },
+  { label: '始めの向き', clamped: false },
+  { label: '終わりの強さ', clamped: true },
+  { label: '終わりの向き', clamped: false },
+];
+
+/** 「自由なカーブ」にするときの初期値＝いまの動き方と同じ形（表せないものは近い形＝画面が断る）。 */
+function curveSeedOf(easing: EasingSpec | undefined): [number, number, number, number] {
+  return easingCurveOf(easing) ?? EASE_IN_OUT_APPROX_CURVE;
+}
+
+/** 制御点の1つを読む／差し替える（`easing` がカーブでないときは初期値から作る）。 */
+function curveValue(easing: EasingSpec | undefined, i: number): number {
+  return curveSeedOf(easing)[i];
+}
+
+function withCurveValue(easing: EasingSpec | undefined, i: number, v: number): EasingSpec {
+  const b = [...curveSeedOf(easing)] as [number, number, number, number];
+  b[i] = Number.isFinite(v) ? v : 0;
+  return { bezier: b };
+}
+
+/** 動き方（イージング）の選び方。**自由なカーブ**は制御点を直接入れる（#262）。 */
+const EASING_CHOICES: { value: string; label: string }[] = [
+  { value: EASING.linear, label: '一定' },
+  { value: EASING.easeIn, label: 'ゆっくり始まる' },
+  { value: EASING.easeOut, label: 'ゆっくり終わる' },
+  { value: EASING.easeInOut, label: '両端ゆっくり' },
+  { value: CURVE_CHOICE, label: '自由なカーブ' },
+];
+
+/** その動き方が「自由なカーブ」かどうか（選択肢の値へ）。 */
+function easingChoiceOf(easing: EasingSpec | undefined): string {
+  if (easing == null) return EASING.linear;
+  return typeof easing === 'string' ? easing : CURVE_CHOICE;
+}
+
 /** キーフレーム1つの中身を一行で（§2-3：技術用語を出さない）。 */
 function keyframeSummary(k: Keyframe): string {
   const parts = KEYFRAME_FIELDS.filter((f) => k[f.prop] != null).map((f) => `${f.label} ${k[f.prop]}`);
@@ -154,7 +198,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
-    setSelectedKeyframe, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
+    setSelectedKeyframe, setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
     addAudioClip, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
   } = useTimelineStore();
@@ -735,6 +779,55 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {selectedKeyframes.map((k) => (
                       <li key={k.timeSec}>
                         {(selectedOrigin + k.timeSec).toFixed(2)}秒：{keyframeSummary(k)}
+                        {/* 動き方は「1つ前のキーフレームからここまで」に効く（#262）。 */}
+                        <label className="field field-inline">
+                          <span>ここまでの動き方</span>
+                          <select
+                            value={easingChoiceOf(k.easing)}
+                            disabled={selectedLocked}
+                            title={lockedHint}
+                            onChange={(e) =>
+                              setSelectedKeyframeAt(k.timeSec, {
+                                easing:
+                                  e.target.value === CURVE_CHOICE
+                                    ? { bezier: curveSeedOf(k.easing) }
+                                    : (e.target.value as Easing),
+                              })
+                            }
+                          >
+                            {EASING_CHOICES.map((c) => (
+                              <option key={c.value} value={c.value}>{c.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        {/* 「両端ゆっくり」はカーブでは正確に表せない＝変える前に断る（ADR-0026④・§2-5）。 */}
+                        {k.easing === EASING.easeInOut && (
+                          <p className="text-muted">
+                            「自由なカーブ」にすると、この動き方は正確には表せないため動きが少し変わります。
+                          </p>
+                        )}
+                        {k.easing != null && typeof k.easing !== 'string' && (
+                          <div className="row gap-sm">
+                            {CURVE_FIELDS.map((f, i) => (
+                              <label className="field" key={f.label}>
+                                <span>{f.label}</span>
+                                <input
+                                  type="number"
+                                  step={0.05}
+                                  {...(f.clamped ? { min: 0, max: 1 } : {})}
+                                  value={curveValue(k.easing, i)}
+                                  disabled={selectedLocked}
+                                  title={lockedHint}
+                                  onChange={(e) =>
+                                    setSelectedKeyframeAt(k.timeSec, {
+                                      easing: withCurveValue(k.easing, i, Number(e.target.value)),
+                                    })
+                                  }
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        )}
                         <button className="btn btn-ghost btn-sm" onClick={() => setPlayhead(selectedOrigin + k.timeSec)}>
                           この位置へ
                         </button>

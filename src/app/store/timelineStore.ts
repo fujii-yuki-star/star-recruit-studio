@@ -142,6 +142,8 @@ export interface TimelineState {
    * 時刻はクリップの先頭からの秒に直して渡す＝画面は再生位置しか知らなくてよい。
    */
   setSelectedKeyframe: (input: KeyframeInput) => void;
+  /** 選んでいる部品の、**指定した時刻**のキーフレームを直す（#262＝一覧から動き方を変える）。 */
+  setSelectedKeyframeAt: (timeSec: number, input: KeyframeInput) => void;
   /** 選んでいる部品の、その時刻のキーフレームを外す（#634）。 */
   removeSelectedKeyframe: (timeSec: number) => void;
   /** 選んでいる部品の動きをすべて外す（#634）。 */
@@ -375,6 +377,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       const origin = animationOriginSec(d, id) ?? 0;
       return setKeyframe(d, id, get().playheadSec - origin, input);
     }),
+  setSelectedKeyframeAt: (timeSec, input) => applyEdit(set, get, (d, id) => setKeyframe(d, id, timeSec, input)),
   removeSelectedKeyframe: (timeSec) => applyEdit(set, get, (d, id) => removeKeyframe(d, id, timeSec)),
   clearSelectedKeyframes: () => applyEdit(set, get, (d, id) => clearKeyframes(d, id)),
   clearKeyframesOf: (targetId) => {

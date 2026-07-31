@@ -11,7 +11,7 @@
 // `opacity` は**クリップ全体に掛かる濃さ**（1＝そのまま）。ここを絶対値と取り違えると、
 // 「いまの見た目を覚える」つもりの操作で絵が飛ぶ（#634 レビュー 🔴）。
 import { GROUP_MIN_SCALE } from '../constants';
-import type { Easing } from '../enums';
+import type { EasingSpec } from '../enums';
 import { groupElementIds } from '../project/groupOps';
 import { createAnimationId } from '../project/persistence';
 import type { Keyframe } from '../project/types';
@@ -24,7 +24,7 @@ export const KEYFRAME_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity'] as cons
 export type KeyframeProp = (typeof KEYFRAME_PROPS)[number];
 
 /** 置く／直す値（渡したプロパティだけを触る＝`null` で「このプロパティは動かさない」に戻す）。 */
-export type KeyframeInput = Partial<Record<KeyframeProp, number | null>> & { easing?: Easing };
+export type KeyframeInput = Partial<Record<KeyframeProp, number | null>> & { easing?: EasingSpec };
 
 /** 対象（クリップまたはグループ）の動きが始まる秒＝時刻の起点（描画と同じ規則）。 */
 export function animationOriginSec(doc: TimelineProject, targetId: string): number | undefined {
@@ -109,7 +109,7 @@ export function setKeyframe(
     if (v === null) delete next[prop];
     else next[prop] = clampProp(prop, v);
   }
-  if (input.easing !== undefined) next.easing = input.easing;
+  if (input.easing !== undefined) next.easing = clampEasing(input.easing);
   const hasProp = KEYFRAME_PROPS.some((p) => next[p] != null);
 
   const keyframes = [...before.filter((k) => k.timeSec !== at), ...(hasProp ? [next] : [])].sort(
@@ -170,4 +170,15 @@ function withAnimation(
   if (animations.length === 0) delete next.animations;
   else next.animations = animations;
   return next;
+}
+
+/**
+ * 自由なカーブ（#262）の制御点を**保存できる範囲**へ収める。`x` は 0〜1（schema の制約＝時間が戻らない）。
+ * `y` は**丸めない**＝範囲外に意味がある（行き過ぎて戻る動き）。名前つきはそのまま。
+ */
+function clampEasing(easing: EasingSpec): EasingSpec {
+  if (typeof easing === 'string') return easing;
+  const [x1, y1, x2, y2] = easing.bezier;
+  const x = (v: number): number => Math.min(Math.max(0, v), 1);
+  return { bezier: [x(x1), y1, x(x2), y2] };
 }

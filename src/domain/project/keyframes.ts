@@ -4,7 +4,7 @@
 // 補間するのは値そのもの。x/y/scale/rotation を「本来値からの相対」として要素に重ねるか（既定）、絶対で使うかは
 // 適用側（layoutScene）が決める（④ の適用は相対＝CSS transform 相当・opacity のみ絶対）。
 import { EASING } from '../enums';
-import type { Easing } from '../enums';
+import type { BezierEasing, EasingSpec } from '../enums';
 import type { Keyframe } from './types';
 
 /** timeSec の補間結果（設定されたプロパティのみ）。 */
@@ -19,10 +19,89 @@ export interface InterpolatedTransform {
 const PROPS = ['x', 'y', 'scale', 'opacity', 'rotation'] as const;
 type AnimProp = (typeof PROPS)[number];
 
-/** イージング（進捗 0..1 → 0..1）。ease-in-out は緩急のある補間。 */
-function applyEasing(t: number, easing: Easing | undefined): number {
-  if (easing === EASING.easeInOut) return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-  return t; // linear
+/**
+ * イージング（進捗 0..1 → 0..1）。名前つき（`EASINGS`）と**自由なカーブ**（#262・制御点4つ）の両方を受ける。
+ * `ease-in-out` は既存の式のまま＝**既に作った動画の動きを変えない**（自由なカーブでは表せない形なので、
+ * カーブへ移すときは画面が「動きが少し変わる」と断る＝ADR-0026④）。
+ */
+export function applyEasing(t: number, easing: EasingSpec | undefined): number {
+  if (easing == null) return t; // linear
+  if (typeof easing !== 'string') return bezierEasing(easing.bezier, t);
+  switch (easing) {
+    case EASING.easeInOut:
+      return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    case EASING.easeIn:
+    case EASING.easeOut:
+      // 名前つきのうち、CSS と同じ定義で**制御点にそのまま置き換えられる**もの（`easingCurveOf`）。
+      return bezierEasing(easingCurveOf(easing) as BezierEasing['bezier'], t);
+    case EASING.linear:
+      return t;
+    default: {
+      // 値が増えたらここがコンパイルエラーになる＝黙って linear に落とさない（§2-7）。
+      const exhaustive: never = easing;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * 「両端ゆっくり」を**カーブで置き換えるときの初期値**（#262）。等価ではない（`easingCurveOf` が `null` を
+ * 返すとおり正確には表せない）ので、**画面は動きが変わることを断ってから**この値を置く（ADR-0026④）。
+ * CSS の `ease-in-out` と同じ制御点。
+ */
+export const EASE_IN_OUT_APPROX_CURVE: BezierEasing['bezier'] = [0.42, 0, 0.58, 1];
+
+/**
+ * 名前つきイージングの**制御点による等価な表し方**（#262）。「自由なカーブにする」で使う。
+ * `ease-in-out` は3次ベジェでは**正確に表せない**ので `null`＝**近い値で黙って置き換えない**（ADR-0026④）。
+ */
+export function easingCurveOf(easing: EasingSpec | undefined): BezierEasing['bezier'] | null {
+  if (easing == null || easing === EASING.linear) return [0, 0, 1, 1];
+  if (typeof easing !== 'string') return easing.bezier;
+  if (easing === EASING.easeIn) return [0.42, 0, 1, 1];
+  if (easing === EASING.easeOut) return [0, 0, 0.58, 1];
+  return null;
+}
+
+/**
+ * 3次ベジェのイージング（CSS の `cubic-bezier` と同じ）。進捗 `x` に対する `y` を返す。
+ * `x` から媒介変数 `t` をニュートン法で求め、収束しなければ二分法へ落とす＝**同じ入力なら必ず同じ値**
+ * （プレビューと書き出しが同じ関数を通る＝フレーム単位のパリティ・ADR-0019）。
+ */
+function bezierEasing(p: BezierEasing['bezier'], x: number): number {
+  const [x1, y1, x2, y2] = p;
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  // 制御点が対角線上（＝linear）なら計算するまでもない。
+  if (x1 === y1 && x2 === y2) return x;
+  const curve = (a: number, b: number, t: number): number => {
+    const u = 1 - t;
+    return 3 * u * u * t * a + 3 * u * t * t * b + t * t * t;
+  };
+  const slope = (a: number, b: number, t: number): number => {
+    const u = 1 - t;
+    return 3 * u * u * (a) + 6 * u * t * (b - a) + 3 * t * t * (1 - b);
+  };
+  let t = x;
+  for (let i = 0; i < 8; i += 1) {
+    const dx = curve(x1, x2, t) - x;
+    if (Math.abs(dx) < 1e-7) return curve(y1, y2, t);
+    const d = slope(x1, x2, t);
+    if (Math.abs(d) < 1e-7) break;
+    t -= dx / d;
+  }
+  // ニュートン法が効かない形（制御点が端に寄っている等）でも必ず答えを返す。
+  let lo = 0;
+  let hi = 1;
+  t = x;
+  for (let i = 0; i < 30; i += 1) {
+    const cx = curve(x1, x2, t);
+    if (Math.abs(cx - x) < 1e-7) break;
+    if (cx > x) hi = t;
+    else lo = t;
+    t = (lo + hi) / 2;
+  }
+  return curve(y1, y2, t);
 }
 
 /**

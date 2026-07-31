@@ -1,6 +1,6 @@
 // project.json の内部データ型。正典は docs/yuko_recruit_docs/schemas/project.schema.json と 11_SCHEMA_REFERENCE.md §7。
 import type {
-  AssetType, Easing, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
+  AssetType, EasingSpec, Fit, FontWeight, Formality, FreeElementKind, FreeShapeType, NarrationStatus, Orientation, Purpose,
   SceneCategory, TextAlign, TextKey, TransitionDirection, TransitionType, VideoKind, VideoStartMode, WarningSeverity,
 } from '../enums';
 import type { FontId } from '../font/fontCatalog';
@@ -354,7 +354,8 @@ export interface Keyframe {
   /** 回転角（度）。 */
   rotation?: number;
   /** 前KFからこのKFへ入るイージング（先頭KFでは無視）。未指定＝linear。 */
-  easing?: Easing;
+  /** 区間 [前KF, 当KF] のイージング（#262＝名前つき／自由なカーブ）。未指定＝`linear`。 */
+  easing?: EasingSpec;
 }
 
 /** 要素アニメーション（④・ADR-0019）。場面内の1要素（FREE 要素／グループ id）を時間で補間する。timelineOverlay に格納＝AI/場面正準は不変。 */

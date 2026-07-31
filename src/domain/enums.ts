@@ -65,12 +65,28 @@ export const TEXT_ALIGN = {
 } as const satisfies Record<string, TextAlign>;
 
 /** キーフレームのイージング（④・ADR-0019）。 */
-export const EASINGS = ['linear', 'ease-in-out'] as const;
+export const EASINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out'] as const;
 export type Easing = (typeof EASINGS)[number];
 
 /** Easing の値を参照するための定数（§6：文字列直書きを避ける）。 */
+/**
+ * **自由なカーブ**（#262）。CSS の `cubic-bezier(x1,y1,x2,y2)` と同じ形＝始点(0,0)・終点(1,1) を結ぶ
+ * 3次ベジェの制御点。`x` は 0〜1（時間が戻らない）・`y` は範囲外も許す（行き過ぎて戻る動きを作れる）。
+ */
+export interface BezierEasing {
+  bezier: [number, number, number, number];
+}
+
+/**
+ * イージングの指定＝**名前つき**か**自由なカーブ**（#262・判別できる形＝どちらの意味かが型で決まる）。
+ * 名前つきは `EASINGS`、自由なカーブは制御点4つ。未指定＝`linear`。
+ */
+export type EasingSpec = Easing | BezierEasing;
+
 export const EASING = {
   linear: 'linear',
+  easeIn: 'ease-in',
+  easeOut: 'ease-out',
   easeInOut: 'ease-in-out',
 } as const satisfies Record<string, Easing>;
 
