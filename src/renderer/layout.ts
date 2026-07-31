@@ -211,11 +211,6 @@ export interface LayoutOptions {
    */
   subtitleSegment?: SceneSegmentSpec | null;
   /**
-   * タイムラインのテロップ（timelineOverlay・ADR-0018）をこのフレームに描く（並行テロップ＝③(8)）。各要素は文言＋段(row)。
-   * 未指定/空＝なし。プレビューはこのオプション、書き出しは overlayTelopItem を段ごとの帯PNGに焼いて overlay 合成＝同一ジオメトリでパリティ。
-   */
-  telops?: { text: string; row: number }[];
-  /**
    * キーフレームアニメの再生位置（場面ローカル秒・④・ADR-0019）。指定時、この場面の animations を補間して対象要素へ適用する。
    * 未指定＝静止（後方互換）。preview/export は同一の timeSec/animations で呼び、フレーム単位パリティを保つ。
    */
@@ -488,7 +483,6 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     }
   }
 
-  // タイムラインのテロップ（ADR-0018・並行テロップ③(8)）。プレビュー経路のみ（書き出しは段ごとの帯PNGを overlay 合成＝同一 item を共有）。
 
   items.sort((a, b) => a.zIndex - b.zIndex);
   return { width: template.canvas.width, height: template.canvas.height, backgroundColor, items };

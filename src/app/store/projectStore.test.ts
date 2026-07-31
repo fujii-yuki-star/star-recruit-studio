@@ -496,6 +496,12 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     useProjectStore.setState({ meta: { ...useProjectStore.getState().meta, timelineOverlay: undefined } });
   });
 
+  it('新しい動画を作ると案内は消える（前の動画の案内を持ち越さない・#635）', () => {
+    useProjectStore.setState({ hasRetiredTimelineEdits: true });
+    useProjectStore.getState().newProject();
+    expect(useProjectStore.getState().hasRetiredTimelineEdits).toBe(false);
+  });
+
   it('旧タイムライン編集が無いプロジェクトでは印が立たない（無関係な案内を出さない）', async () => {
     const plain = JSON.stringify(assembleProject(useProjectStore.getState().meta, [], [], []));
     const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(plain);

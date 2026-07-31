@@ -166,7 +166,7 @@ function SlotVideo({
 }
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, telops, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; telops?: { text: string; row: number }[]; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; children?: ReactNode }) {
+export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
@@ -251,18 +251,16 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   const creditLine = boundaryFrame ? boundaryFrame.creditLine : activeLine;
   const applyLineSub = subtitleOverride !== undefined;
   // タイムラインのテロップ（ADR-0018・並行テロップ③(8)）＝再生位置の overlay テロップを段違いで重ねる（書き出しと同一 item＝パリティ）。
-  const hasTelops = !!(telops && telops.length > 0);
   // キーフレームアニメ（④・ADR-0019）＝再生位置 timeSec で補間して描く（書き出しと同一 layoutScene(t)＝パリティ）。
   const hasAnim = !!(animations && animations.length > 0);
   // FREE 字幕（ADR-0029）の対象解決用「その瞬間のセグメント」は**呼び出し側が sceneSegmentSpecs/segmentAt から作って渡す**
   // （PreviewScreen/SceneEditScreen）＝書き出しと同一の正準経路。activeLine から再構成しない（全ゼロ長行フォールバックで
   // 書き出し〔lineId なし＝allLines 非表示〕とズレるのを防ぐ・P1-2）。未指定は layout の場面全体1区間＝単独 narration が texts.subtitle を読む。
-  const layoutOpts = applyLineSub || hasTelops || hasAnim || subtitleSegment
+  const layoutOpts = applyLineSub || hasAnim || subtitleSegment
     ? {
         // 字幕上書き（間/OFF は null・行は text）。undefined（テンプレ既定）は applyLineSub=false で載せない。
         ...(applyLineSub ? { subtitleText: subtitleOverride } : {}),
         // テロップは動画全体フォント（場面フォントに左右されない＝書き出しと一致・ADR-0001）。
-        ...(hasTelops ? { telops, telopFontId: resolveFontId(null, fontId) } : {}),
         ...(hasAnim ? { timeSec: timeSec ?? 0, animations } : {}),
         // FREE 字幕要素の対象解決（ADR-0029）＝呼び出し側が渡す正準セグメント。
         ...(subtitleSegment ? { subtitleSegment } : {}),

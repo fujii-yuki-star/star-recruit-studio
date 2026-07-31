@@ -38,11 +38,11 @@ export function TimelineScreen({ onNavigate }: TimelineScreenProps) {
       />
       {/* 旧・場面横断タイムラインの手編集（#635）。**消していない**ことと、次の行動を伝える（§2-5）。 */}
       {hasRetiredTimelineEdits && (
-        <div className="notice notice-warn">
+        <div className="notice notice-info" role="status">
           <p>
             この動画には、以前この画面で直した時間の流れ（テロップの位置など）が残っていますが、
             <strong>動画には反映されなくなりました</strong>。内容は消していません。
-            時間の流れを細かく作るときは、下の「タイムライン編集用に書き出す」から作り直してください。
+            時間の流れを細かく作るときは、下の「タイムラインで編集する形にする」から作り直してください。
           </p>
           <button className="btn btn-ghost btn-sm" onClick={dismissRetiredTimelineNotice}>
             閉じる

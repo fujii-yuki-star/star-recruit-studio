@@ -284,8 +284,10 @@
 持ち込む。よって「プリセットを自由キーフレームへ変換する」段は**要らない**（変換前後で一致する、が
 構造的に成り立つ）。守り方は `bake.test.ts` の「プリセットの動きは、そのままのキーフレームとして
 持ち込まれ、タイムライン側で直せる」。
-**テロップの実描画**：画面**上部の帯**（キャンバス比の既定ジオメトリ＝`renderer/layout.ts` の `overlayTelopItem` が単一参照元。白字・黒縁取り・中央揃え・**動画全体フォント**）。プレビューは `layoutScene` の `telops` オプションで同一 item を描き、書き出しは同一 item を**透過帯PNG**に焼いて**結合後の動画へ `overlay`（`enable='between(t,S,E)'`・グローバル秒）で合成**＝プレビュー＝書き出しのパリティ（ADR-0001/0004）。場面またぎ・遷移中・動画スロット場面でも時刻どおりに表示される。
-**並行テロップ（③(8)）**：時間が重なるテロップは**段（row）**に自動割当して縦に積む（`assignTelopRows`＝貪欲な区間分割・最小段数）。段はプレビューと書き出しで一貫（同一 run 定義）＝重なっても潰れず全て読める。段は overlay データから導出＝**schema 変更なし**（保存しない）。
+**テロップの実描画・並行テロップ（③(8)）は #635 で撤去**（ADR-0032 決定11/12）。`renderer/layout.ts` の
+`overlayTelopItem`／`layoutScene` の `telops` オプション／`renderer/export/telopOverlays`／段の割り当て
+（`assignTelopRows`）／場面ローカルへの切り出し（`sceneLocalTelops`・`activeTelopsAt`）は**いずれも削除済み**
+＝この節が指していた単一参照元はもう無い。同じことはタイムライン形式（§7.6）の字幕クリップが担う。
 
 ### 7.2 Asset
 
@@ -746,7 +748,7 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V18 | `scene.lines[]` を `startSec` 昇順・時間重複なし（`startWithPrevious` の行は**同時開始＝並行**ゆえ対象外＝`startSec` を持たない・ADR-0031） | 警告/補正（§9） |
 | V19 | `scene.lines[]` の `speaker` が `voiceCatalog` に実在 | 既定声へ補正＋警告（§9） |
 | V20 | `scene.groups[]`/`template.groups[]` の `members` が実在 id を参照（要素/レイヤー、ネストで group id） | 描画で無視（堅牢性）＋削除経路で除去（`removeMembersFromGroups`・ADR-0022 V_group・#308） |
-| V21 | `timelineOverlay.clips[]` の `anchorSceneId`（指定時）が実在 scene を参照 | 描画で無視（堅牢性・`compileTimeline` が合成時に skip・**V_overlay**・ADR-0018） |
+| V21 | 〜〜（#635 で用済み）〜〜 `timelineOverlay.clips[]` の `anchorSceneId` が実在 scene を参照 | **読まない**＝`compileTimeline` は `clips` を合成しなくなったので、参照切れかどうかを見る場面が無い（ADR-0032 決定11/12・非推奨フィールド） |
 | V22 | `clips[].trackId` が実在 track を参照 | 警告（`TIMELINE_TRACK_NOT_FOUND`）＝描画・書き出しから外れるので黙って消さない（§2-5） |
 | V23 | `clips[].kind` が track の `kind` と合う（`audio` は audio トラック・それ以外は visual トラック） | 警告（`TIMELINE_CLIP_TRACK_KIND`） |
 | V24 | **同一トラック内でクリップの時間が重ならない**（`[startSec, startSec+durationSec)` が互いに素・端が接するのは可） | 警告（`TIMELINE_CLIP_OVERLAP`）＝重ねたいならトラックを足す |

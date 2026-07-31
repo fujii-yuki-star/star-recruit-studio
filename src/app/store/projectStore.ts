@@ -627,6 +627,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({
       status: "idle",
       draftFromAi: false,
+      hasRetiredTimelineEdits: false, // 別の動画に前の案内を持ち越さない（#635）
       saveStatus: "idle",
       meta: defaultHeader(),
       parts: [],

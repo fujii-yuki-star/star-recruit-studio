@@ -1,9 +1,9 @@
 // 場面ベース project を「時間軸＋トラック」へ機械射影する純粋関数（ADR-0018・2モデル方式／§7 テスト対象）。
 // 正準は場面（project.scenes 配列順＝再生順・sceneOps）。本関数は読み取り専用の射影で、専用タイムライン編集UI（別画面・
-// α-4 ③(2)）が使う。加えて本モジュールの補助（sceneLocalTelops/activeTelopsAt＝テロップ配置、resolveSceneBgm/groupBgmRuns
-// ＝BGM 解決）は、テロップの実描画と BGM を**プレビューと書き出しの両方が現に共有する**（プレビュー＝PreviewScreen、
-// 書き出し＝renderer/export/telopOverlays・bgmExport）＝将来配線ではなく現行の単一の参照元。副作用なし。AI/簡易編集は
-// 本射影を無視する（ADR-0007 M-A）。
+// α-4 ③(2)）が使う。加えて本モジュールの補助（resolveSceneBgm/groupBgmRuns＝BGM 解決）は、**プレビューと
+// 書き出しの両方が現に共有する**（プレビュー＝PreviewScreen、書き出し＝renderer/export/bgmExport）＝将来配線では
+// なく現行の単一の参照元。副作用なし。AI/簡易編集は本射影を無視する（ADR-0007 M-A）。
+// テロップの実描画（旧 timelineOverlay.clips）は #635 で退役＝この射影は**場面のセリフ由来だけ**を返す。
 //
 // 忠実性：totalSec と場面境界は buildExportScenes と一致する（掛け合いセグメントは場面尺内に収まるため、場面粒度の
 //   合計＝セグメント粒度の合計）。**先頭行の「間」（頭空白）も場面尺に含まれる**＝本関数は行音声/テロップを
@@ -36,7 +36,6 @@ export interface TimelineClip {
   endSec: number;
   /** 表示ラベル（§2-3 の言い換え前の素の文言。UI 側で技術用語を出さないよう整える）。 */
   label: string;
-  /** timelineOverlay 由来＝タイムライン編集の対象クリップ。場面射影クリップは未設定（UI は id 形式を知らずにこれで判別）。 */
 }
 
 /** 場面ストリップ用の場面スパン（グローバル時間軸）。 */
