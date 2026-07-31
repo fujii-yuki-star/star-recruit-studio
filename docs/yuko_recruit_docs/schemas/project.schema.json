@@ -19,107 +19,334 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.24" },
-    "videoKind": { "enum": ["recruit", "general"] },
-    "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
-    "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "purpose": { "type": "string" },
-    "createdAt": { "type": "string", "format": "date-time" },
-    "updatedAt": { "type": "string", "format": "date-time" },
-    "videoSettings": { "$ref": "#/$defs/VideoSettings" },
-    "companyInfo": { "$ref": "#/$defs/CompanyInfo" },
-    "generalBrief": { "$ref": "#/$defs/GeneralBrief" },
-    "additionalNotes": { "type": "string", "maxLength": 1000 },
-    "toneSettings": { "$ref": "#/$defs/ToneSettings" },
-    "voiceSettings": { "$ref": "#/$defs/VoiceSettings" },
-    "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
-    "assets": { "type": "array", "items": { "$ref": "#/$defs/Asset" } },
-    "parts": { "type": "array", "items": { "$ref": "#/$defs/Part" } },
-    "scenes": { "type": "array", "items": { "$ref": "#/$defs/Scene" }, "maxItems": 80 },
-    "timelineOverlay": { "$ref": "#/$defs/TimelineOverlay" }
+    "schemaVersion": {
+      "const": "1.25"
+    },
+    "videoKind": {
+      "enum": [
+        "recruit",
+        "general"
+      ]
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^proj_[0-9]{8}_[0-9]{3}$"
+    },
+    "projectName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "purpose": {
+      "type": "string"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "videoSettings": {
+      "$ref": "#/$defs/VideoSettings"
+    },
+    "companyInfo": {
+      "$ref": "#/$defs/CompanyInfo"
+    },
+    "generalBrief": {
+      "$ref": "#/$defs/GeneralBrief"
+    },
+    "additionalNotes": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "toneSettings": {
+      "$ref": "#/$defs/ToneSettings"
+    },
+    "voiceSettings": {
+      "$ref": "#/$defs/VoiceSettings"
+    },
+    "bgmSettings": {
+      "$ref": "#/$defs/BgmSettings"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Asset"
+      }
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Part"
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Scene"
+      },
+      "maxItems": 80
+    },
+    "timelineOverlay": {
+      "$ref": "#/$defs/TimelineOverlay"
+    }
   },
-  "if": { "properties": { "videoKind": { "const": "general" } }, "required": ["videoKind"] },
+  "if": {
+    "properties": {
+      "videoKind": {
+        "const": "general"
+      }
+    },
+    "required": [
+      "videoKind"
+    ]
+  },
   "then": {
-    "required": ["generalBrief"],
-    "not": { "required": ["companyInfo"] },
-    "properties": { "purpose": { "enum": ["general_announcement", "report", "product_intro", "general_other"] } }
+    "required": [
+      "generalBrief"
+    ],
+    "not": {
+      "required": [
+        "companyInfo"
+      ]
+    },
+    "properties": {
+      "purpose": {
+        "enum": [
+          "general_announcement",
+          "report",
+          "product_intro",
+          "general_other"
+        ]
+      }
+    }
   },
   "else": {
-    "required": ["companyInfo"],
-    "not": { "required": ["generalBrief"] },
-    "properties": { "purpose": { "enum": ["company_intro", "new_graduate", "mid_career", "inexperienced_welcome", "engineer", "info_session", "sns_short"] } }
+    "required": [
+      "companyInfo"
+    ],
+    "not": {
+      "required": [
+        "generalBrief"
+      ]
+    },
+    "properties": {
+      "purpose": {
+        "enum": [
+          "company_intro",
+          "new_graduate",
+          "mid_career",
+          "inexperienced_welcome",
+          "engineer",
+          "info_session",
+          "sns_short"
+        ]
+      }
+    }
   },
   "$defs": {
     "VideoSettings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["aspectRatio", "fps", "targetDurationSec", "maxDurationSec"],
+      "required": [
+        "aspectRatio",
+        "fps",
+        "targetDurationSec",
+        "maxDurationSec"
+      ],
       "properties": {
-        "aspectRatio": { "enum": ["16:9", "9:16"] },
-        "fps": { "type": "integer", "const": 30 },
-        "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
-        "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
+        "aspectRatio": {
+          "enum": [
+            "16:9",
+            "9:16"
+          ]
+        },
+        "fps": {
+          "type": "integer",
+          "const": 30
+        },
+        "targetDurationSec": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 300
+        },
+        "maxDurationSec": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 600
+        },
+        "fontId": {
+          "enum": [
+            "gen-interface-jp",
+            "gen-interface-jp-display",
+            "kaitou-yokoku-gothic"
+          ]
+        }
       }
     },
     "CompanyInfo": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["companyName"],
+      "required": [
+        "companyName"
+      ],
       "properties": {
-        "companyName": { "type": "string", "minLength": 1 },
-        "industry": { "type": "string" },
-        "businessDescription": { "type": "string" },
-        "recruitTarget": { "type": "string" },
-        "jobType": { "type": "string" },
-        "strengths": { "type": "array", "items": { "type": "string" } },
-        "desiredPerson": { "type": "string" },
-        "recruitUrl": { "type": "string", "format": "uri" }
+        "companyName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "industry": {
+          "type": "string"
+        },
+        "businessDescription": {
+          "type": "string"
+        },
+        "recruitTarget": {
+          "type": "string"
+        },
+        "jobType": {
+          "type": "string"
+        },
+        "strengths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "desiredPerson": {
+          "type": "string"
+        },
+        "recruitUrl": {
+          "type": "string",
+          "format": "uri"
+        }
       }
     },
     "GeneralBrief": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["title"],
+      "required": [
+        "title"
+      ],
       "properties": {
-        "title": { "type": "string", "minLength": 1, "maxLength": 100 },
-        "agenda": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 100 } },
-        "keyPoints": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 100 } },
-        "targetAudience": { "type": "string", "maxLength": 100 }
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "agenda": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "keyPoints": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "targetAudience": {
+          "type": "string",
+          "maxLength": 100
+        }
       }
     },
     "ToneSettings": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "tone": { "type": "string" },
-        "yukoPersonality": { "type": "string" },
-        "formality": { "enum": ["casual", "standard", "formal"] }
+        "tone": {
+          "type": "string"
+        },
+        "yukoPersonality": {
+          "type": "string"
+        },
+        "formality": {
+          "enum": [
+            "casual",
+            "standard",
+            "formal"
+          ]
+        }
       }
     },
     "VoiceSettings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["defaultVoiceId"],
+      "required": [
+        "defaultVoiceId"
+      ],
       "properties": {
-        "defaultVoiceId": { "type": "string", "pattern": "^[a-z0-9_]+$" },
-        "speed": { "type": "number", "minimum": 0.5, "maximum": 2.0 },
-        "pitch": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
-        "intonation": { "type": "number", "minimum": 0.0, "maximum": 2.0 },
-        "volume": { "type": "number", "minimum": 0.0, "maximum": 1.5 }
+        "defaultVoiceId": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2.0
+        },
+        "pitch": {
+          "type": "number",
+          "minimum": -1.0,
+          "maximum": 1.0
+        },
+        "intonation": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 2.0
+        },
+        "volume": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.5
+        }
       }
     },
     "BgmSettings": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean" },
-        "assetId": { "type": ["string", "null"] },
-        "bundledBgmId": { "enum": ["summer-morning", "found-new-hope", "limousine-cruise", null] },
-        "volume": { "type": "number", "minimum": 0.0, "maximum": 1.5 },
-        "loop": { "type": "boolean" },
-        "fadeInSec": { "type": "number", "minimum": 0 },
-        "fadeOutSec": { "type": "number", "minimum": 0 }
+        "enabled": {
+          "type": "boolean"
+        },
+        "assetId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bundledBgmId": {
+          "enum": [
+            "summer-morning",
+            "found-new-hope",
+            "limousine-cruise",
+            null
+          ]
+        },
+        "volume": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.5
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "fadeInSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fadeOutSec": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "TimelineOverlay": {
@@ -127,154 +354,493 @@
       "additionalProperties": false,
       "description": "場面横断タイムラインの上位編集を場面アンカーで保持する任意の層（ADR-0018・2モデル方式）。AI/簡易編集は無視する。",
       "properties": {
-        "clips": { "type": "array", "items": { "$ref": "#/$defs/OverlayClip" } },
-        "animations": { "type": "array", "items": { "$ref": "#/$defs/ElementAnimation" } }
+        "clips": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OverlayClip"
+          }
+        },
+        "animations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ElementAnimation"
+          }
+        }
       }
     },
     "ElementAnimation": {
       "type": "object",
       "additionalProperties": false,
       "description": "要素アニメーション（④・ADR-0019）。場面内の1要素（FREE 要素/グループ id）を時間で補間。timelineOverlay に格納＝AI/場面正準は不変。",
-      "required": ["id", "sceneId", "targetId", "keyframes"],
+      "required": [
+        "id",
+        "sceneId",
+        "targetId",
+        "keyframes"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^anim_[0-9]{3,}$" },
-        "sceneId": { "type": "string", "pattern": "^scene_[0-9]{3}$" },
-        "targetId": { "type": "string" },
-        "keyframes": { "type": "array", "items": { "$ref": "#/$defs/Keyframe" } }
+        "id": {
+          "type": "string",
+          "pattern": "^anim_[0-9]{3,}$"
+        },
+        "sceneId": {
+          "type": "string",
+          "pattern": "^scene_[0-9]{3}$"
+        },
+        "targetId": {
+          "type": "string"
+        },
+        "keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Keyframe"
+          }
+        }
       }
     },
     "Keyframe": {
       "type": "object",
       "additionalProperties": false,
       "description": "1キーフレーム（場面ローカル秒 timeSec の要素プロパティ・④）。設定したプロパティのみ補間・値は絶対上書き。",
-      "required": ["timeSec"],
+      "required": [
+        "timeSec"
+      ],
       "properties": {
-        "timeSec": { "type": "number", "minimum": 0 },
-        "x": { "type": "number" },
-        "y": { "type": "number" },
-        "scale": { "type": "number", "exclusiveMinimum": 0 },
-        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
-        "rotation": { "type": "number" },
-        "easing": { "enum": ["linear", "ease-in-out"] }
+        "timeSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "scale": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "rotation": {
+          "type": "number"
+        },
+        "easing": {
+          "description": "区間 [前KF, 当KF] のイージング（#262）。名前つき（linear/ease-in/ease-out/ease-in-out）か、自由なカーブ（CSS の cubic-bezier と同じ制御点4つ）。未指定＝linear。",
+          "oneOf": [
+            {
+              "enum": [
+                "linear",
+                "ease-in",
+                "ease-out",
+                "ease-in-out"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "bezier"
+              ],
+              "properties": {
+                "bezier": {
+                  "type": "array",
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "description": "x1,y1,x2,y2。x は 0〜1（時間が戻らない）・y は範囲外も可（行き過ぎて戻る動き）。",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "items": false
+                }
+              }
+            }
+          ]
+        }
       }
     },
     "OverlayClip": {
       "type": "object",
       "additionalProperties": false,
       "description": "時間軸に足すクリップ（まずはテロップ）。anchorSceneId があれば場面相対（startSec=場面開始からの相対秒）、無ければ絶対時間（startSec=グローバル秒）。",
-      "required": ["id", "track", "startSec", "durationSec"],
+      "required": [
+        "id",
+        "track",
+        "startSec",
+        "durationSec"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^ovclip_[0-9]{3,}$" },
-        "track": { "enum": ["telop"] },
-        "anchorSceneId": { "type": "string", "pattern": "^scene_[0-9]{3}$" },
-        "startSec": { "type": "number", "minimum": 0 },
-        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
-        "text": { "type": "string" }
+        "id": {
+          "type": "string",
+          "pattern": "^ovclip_[0-9]{3,}$"
+        },
+        "track": {
+          "enum": [
+            "telop"
+          ]
+        },
+        "anchorSceneId": {
+          "type": "string",
+          "pattern": "^scene_[0-9]{3}$"
+        },
+        "startSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "durationSec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "text": {
+          "type": "string"
+        }
       }
     },
     "Asset": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["assetId", "assetType", "displayName", "filePath"],
+      "required": [
+        "assetId",
+        "assetType",
+        "displayName",
+        "filePath"
+      ],
       "properties": {
-        "assetId": { "type": "string", "pattern": "^[a-z0-9_]+$" },
-        "assetType": { "enum": ["image", "video", "bgm", "voice", "yuko", "decor", "logo", "qr"] },
-        "displayName": { "type": "string", "minLength": 1 },
-        "filePath": { "type": "string" },
-        "thumbnailPath": { "type": "string" },
-        "mimeType": { "type": "string" },
-        "tags": { "type": "array", "items": { "type": "string" } },
-        "description": { "type": "string" },
-        "aiDescription": { "type": "string" },
-        "isPublicChecked": { "type": "boolean" },
-        "isDefaultYuko": { "type": "boolean" },
-        "clip": { "$ref": "#/$defs/Clip" },
-        "metadata": { "$ref": "#/$defs/Metadata" }
+        "assetId": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "assetType": {
+          "enum": [
+            "image",
+            "video",
+            "bgm",
+            "voice",
+            "yuko",
+            "decor",
+            "logo",
+            "qr"
+          ]
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "filePath": {
+          "type": "string"
+        },
+        "thumbnailPath": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string"
+        },
+        "aiDescription": {
+          "type": "string"
+        },
+        "isPublicChecked": {
+          "type": "boolean"
+        },
+        "isDefaultYuko": {
+          "type": "boolean"
+        },
+        "clip": {
+          "$ref": "#/$defs/Clip"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata"
+        }
       }
     },
     "Clip": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "startSec": { "type": "number", "minimum": 0 },
-        "endSec": { "type": "number", "minimum": 0 },
-        "useOriginalAudio": { "type": "boolean" },
-        "originalAudioVolume": { "type": "number", "minimum": 0.0, "maximum": 1.5 },
-        "fit": { "enum": ["cover", "contain", "stretch"] },
-        "speed": { "type": "number", "minimum": 0.5, "maximum": 2.0 }
+        "startSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "endSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "useOriginalAudio": {
+          "type": "boolean"
+        },
+        "originalAudioVolume": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.5
+        },
+        "fit": {
+          "enum": [
+            "cover",
+            "contain",
+            "stretch"
+          ]
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2.0
+        }
       }
     },
     "Metadata": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "width": { "type": ["integer", "null"] },
-        "height": { "type": ["integer", "null"] },
-        "durationSec": { "type": ["number", "null"] },
-        "hasAudio": { "type": ["boolean", "null"] }
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "durationSec": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "hasAudio": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
       }
     },
     "Part": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["partId", "title", "order", "sceneIds"],
+      "required": [
+        "partId",
+        "title",
+        "order",
+        "sceneIds"
+      ],
       "properties": {
-        "partId": { "type": "string", "pattern": "^part_[0-9]{3}$" },
-        "title": { "type": "string", "minLength": 1 },
-        "description": { "type": "string" },
-        "order": { "type": "integer", "minimum": 1 },
-        "sceneIds": { "type": "array", "items": { "type": "string", "pattern": "^scene_[0-9]{3}$" } },
-        "targetDurationSec": { "type": "number", "minimum": 0 }
+        "partId": {
+          "type": "string",
+          "pattern": "^part_[0-9]{3}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sceneIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^scene_[0-9]{3}$"
+          }
+        },
+        "targetDurationSec": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "Scene": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sceneId", "partId", "order", "sceneType", "templateId", "durationSec", "assetRefs", "character", "texts", "narration", "warnings"],
+      "required": [
+        "sceneId",
+        "partId",
+        "order",
+        "sceneType",
+        "templateId",
+        "durationSec",
+        "assetRefs",
+        "character",
+        "texts",
+        "narration",
+        "warnings"
+      ],
       "properties": {
-        "sceneId": { "type": "string", "pattern": "^scene_[0-9]{3}$" },
-        "partId": { "type": "string", "pattern": "^part_[0-9]{3}$" },
-        "order": { "type": "integer", "minimum": 1 },
-        "sceneType": { "$ref": "#/$defs/SceneCategory" },
-        "templateId": { "type": "string" },
-        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
-        "bgmSettings": { "$ref": "#/$defs/BgmSettings" },
+        "sceneId": {
+          "type": "string",
+          "pattern": "^scene_[0-9]{3}$"
+        },
+        "partId": {
+          "type": "string",
+          "pattern": "^part_[0-9]{3}$"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sceneType": {
+          "$ref": "#/$defs/SceneCategory"
+        },
+        "templateId": {
+          "type": "string"
+        },
+        "durationSec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "fontId": {
+          "enum": [
+            "gen-interface-jp",
+            "gen-interface-jp-display",
+            "kaitou-yokoku-gothic",
+            null
+          ]
+        },
+        "bgmSettings": {
+          "$ref": "#/$defs/BgmSettings"
+        },
         "textFontIds": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "title": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "main": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "subtitle": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "caption": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
-            "url": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
+            "title": {
+              "enum": [
+                "gen-interface-jp",
+                "gen-interface-jp-display",
+                "kaitou-yokoku-gothic"
+              ]
+            },
+            "main": {
+              "enum": [
+                "gen-interface-jp",
+                "gen-interface-jp-display",
+                "kaitou-yokoku-gothic"
+              ]
+            },
+            "subtitle": {
+              "enum": [
+                "gen-interface-jp",
+                "gen-interface-jp-display",
+                "kaitou-yokoku-gothic"
+              ]
+            },
+            "caption": {
+              "enum": [
+                "gen-interface-jp",
+                "gen-interface-jp-display",
+                "kaitou-yokoku-gothic"
+              ]
+            },
+            "url": {
+              "enum": [
+                "gen-interface-jp",
+                "gen-interface-jp-display",
+                "kaitou-yokoku-gothic"
+              ]
+            }
           }
         },
         "textStyles": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "title": { "$ref": "#/$defs/TextStyle" },
-            "main": { "$ref": "#/$defs/TextStyle" },
-            "subtitle": { "$ref": "#/$defs/TextStyle" },
-            "caption": { "$ref": "#/$defs/TextStyle" },
-            "url": { "$ref": "#/$defs/TextStyle" }
+            "title": {
+              "$ref": "#/$defs/TextStyle"
+            },
+            "main": {
+              "$ref": "#/$defs/TextStyle"
+            },
+            "subtitle": {
+              "$ref": "#/$defs/TextStyle"
+            },
+            "caption": {
+              "$ref": "#/$defs/TextStyle"
+            },
+            "url": {
+              "$ref": "#/$defs/TextStyle"
+            }
           }
         },
-        "assetRefs": { "$ref": "#/$defs/AssetRefs" },
-        "character": { "$ref": "#/$defs/Character" },
-        "texts": { "$ref": "#/$defs/Texts" },
-        "narration": { "$ref": "#/$defs/Narration" },
-        "audioMix": { "$ref": "#/$defs/AudioMix" },
-        "transition": { "$ref": "#/$defs/Transition" },
-        "warnings": { "type": "array", "items": { "$ref": "#/$defs/Warning" } },
-        "freeLayout": { "type": "array", "items": { "$ref": "#/$defs/FreeElement" } },
-        "lines": { "type": "array", "items": { "$ref": "#/$defs/NarrationLine" } },
-        "subtitleEnabledDefault": { "type": "boolean" },
+        "assetRefs": {
+          "$ref": "#/$defs/AssetRefs"
+        },
+        "character": {
+          "$ref": "#/$defs/Character"
+        },
+        "texts": {
+          "$ref": "#/$defs/Texts"
+        },
+        "narration": {
+          "$ref": "#/$defs/Narration"
+        },
+        "audioMix": {
+          "$ref": "#/$defs/AudioMix"
+        },
+        "transition": {
+          "$ref": "#/$defs/Transition"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Warning"
+          }
+        },
+        "freeLayout": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FreeElement"
+          }
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NarrationLine"
+          }
+        },
+        "subtitleEnabledDefault": {
+          "type": "boolean"
+        },
         "slotFits": {
           "type": "object",
-          "additionalProperties": { "enum": ["cover", "contain", "stretch"] }
+          "additionalProperties": {
+            "enum": [
+              "cover",
+              "contain",
+              "stretch"
+            ]
+          }
         },
         "slotClips": {
           "type": "object",
@@ -282,11 +848,27 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "startSec": { "type": "number", "minimum": 0 },
-              "endSec": { "type": "number", "minimum": 0 },
-              "useOriginalAudio": { "type": "boolean" },
-              "originalAudioVolume": { "type": "number", "minimum": 0, "maximum": 1.5 },
-              "speed": { "type": "number", "minimum": 0.5, "maximum": 2.0 }
+              "startSec": {
+                "type": "number",
+                "minimum": 0
+              },
+              "endSec": {
+                "type": "number",
+                "minimum": 0
+              },
+              "useOriginalAudio": {
+                "type": "boolean"
+              },
+              "originalAudioVolume": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1.5
+              },
+              "speed": {
+                "type": "number",
+                "minimum": 0.5,
+                "maximum": 2.0
+              }
             }
           }
         },
@@ -295,103 +877,349 @@
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["mode"],
+            "required": [
+              "mode"
+            ],
             "properties": {
-              "mode": { "enum": ["withAnim", "afterAnim", "delay"] },
-              "delaySec": { "type": "number", "minimum": 0 }
+              "mode": {
+                "enum": [
+                  "withAnim",
+                  "afterAnim",
+                  "delay"
+                ]
+              },
+              "delaySec": {
+                "type": "number",
+                "minimum": 0
+              }
             },
-            "if": { "properties": { "mode": { "const": "delay" } }, "required": ["mode"] },
-            "then": { "required": ["delaySec"] }
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "delay"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "delaySec"
+              ]
+            }
           }
         },
-        "groups": { "type": "array", "items": { "$ref": "#/$defs/Group" } }
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Group"
+          }
+        }
       }
     },
     "Group": {
       "type": "object",
       "additionalProperties": false,
       "description": "要素のグループ化（ADR-0022・11 §2）。members は要素 id、ネストで group id も可。",
-      "required": ["id", "members", "transform"],
+      "required": [
+        "id",
+        "members",
+        "transform"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^group_[0-9]{3,}$" },
-        "members": { "type": "array", "items": { "type": "string" } },
+        "id": {
+          "type": "string",
+          "pattern": "^group_[0-9]{3,}$"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "transform": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["x", "y", "rotation", "scale"],
+          "required": [
+            "x",
+            "y",
+            "rotation",
+            "scale"
+          ],
           "properties": {
-            "x": { "type": "number" },
-            "y": { "type": "number" },
-            "rotation": { "type": "number" },
-            "scale": { "type": "number", "exclusiveMinimum": 0 }
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "rotation": {
+              "type": "number"
+            },
+            "scale": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
           }
         },
-        "name": { "type": "string" },
-        "zIndex": { "type": "integer" },
-        "hidden": { "type": "boolean" },
-        "locked": { "type": "boolean" }
+        "name": {
+          "type": "string"
+        },
+        "zIndex": {
+          "type": "integer"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean"
+        }
       }
     },
     "SceneCategory": {
-      "enum": ["opening", "closing", "photo_intro", "video_intro", "point_list", "message", "full_visual", "chapter", "no_yuko", "free"]
+      "enum": [
+        "opening",
+        "closing",
+        "photo_intro",
+        "video_intro",
+        "point_list",
+        "message",
+        "full_visual",
+        "chapter",
+        "no_yuko",
+        "free"
+      ]
     },
     "FreeElement": {
       "type": "object",
       "additionalProperties": false,
       "description": "FREE テンプレ場面の自由配置要素（ADR-0008・11 §7）。id は scene 内一意。",
-      "required": ["id", "kind", "x", "y", "w", "h"],
+      "required": [
+        "id",
+        "kind",
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^free_[0-9]{3,}$" },
-        "kind": { "enum": ["slot", "text", "shape", "subtitle"] },
-        "name": { "type": "string" },
-        "x": { "type": "number" },
-        "y": { "type": "number" },
-        "w": { "type": "number", "exclusiveMinimum": 0 },
-        "h": { "type": "number", "exclusiveMinimum": 0 },
-        "zIndex": { "type": "integer" },
-        "rotation": { "type": "number", "minimum": 0, "exclusiveMaximum": 360 },
-        "assetId": { "type": ["string", "null"] },
-        "fit": { "enum": ["cover", "contain", "stretch"] },
-        "text": { "type": "string" },
-        "fontSize": { "type": "number", "exclusiveMinimum": 0 },
-        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "fontWeight": { "enum": ["normal", "bold"] },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic", null] },
-        "lineHeight": { "type": "number", "minimum": 0.5, "maximum": 3 },
-        "textAlign": { "enum": ["left", "center", "right"] },
-        "shapeType": { "enum": ["rect", "ellipse", "rounded_rect", "triangle", "star", "arrow", "speech_bubble"] },
-        "fillColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-        "radius": { "type": "number", "minimum": 0 },
-        "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "strokeWidth": { "type": "number", "minimum": 0 },
+        "id": {
+          "type": "string",
+          "pattern": "^free_[0-9]{3,}$"
+        },
+        "kind": {
+          "enum": [
+            "slot",
+            "text",
+            "shape",
+            "subtitle"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "w": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "h": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "zIndex": {
+          "type": "integer"
+        },
+        "rotation": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 360
+        },
+        "assetId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fit": {
+          "enum": [
+            "cover",
+            "contain",
+            "stretch"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "fontSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "fontWeight": {
+          "enum": [
+            "normal",
+            "bold"
+          ]
+        },
+        "fontId": {
+          "enum": [
+            "gen-interface-jp",
+            "gen-interface-jp-display",
+            "kaitou-yokoku-gothic",
+            null
+          ]
+        },
+        "lineHeight": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 3
+        },
+        "textAlign": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "shapeType": {
+          "enum": [
+            "rect",
+            "ellipse",
+            "rounded_rect",
+            "triangle",
+            "star",
+            "arrow",
+            "speech_bubble"
+          ]
+        },
+        "fillColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "radius": {
+          "type": "number",
+          "minimum": 0
+        },
+        "strokeColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "strokeWidth": {
+          "type": "number",
+          "minimum": 0
+        },
         "background": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-            "opacity": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-            "radius": { "type": "number", "minimum": 0 }
+            "enabled": {
+              "type": "boolean"
+            },
+            "color": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "radius": {
+              "type": "number",
+              "minimum": 0
+            }
           }
         },
-        "hidden": { "type": "boolean" },
-        "locked": { "type": "boolean" },
+        "hidden": {
+          "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean"
+        },
         "subtitleSource": {
           "description": "kind='subtitle' の対象（ADR-0029）。未指定＝後方互換（単独→読み上げ・掛け合い→全行）。",
           "oneOf": [
-            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "narration" } } },
-            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "allLines" } } },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["kind", "speaker"],
+              "required": [
+                "kind"
+              ],
               "properties": {
-                "kind": { "const": "speaker" },
+                "kind": {
+                  "const": "narration"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "allLines"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "speaker"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "speaker"
+                },
                 "speaker": {
                   "oneOf": [
-                    { "type": "object", "additionalProperties": false, "required": ["kind", "speaker"], "properties": { "kind": { "const": "catalog" }, "speaker": { "type": "integer", "minimum": 0 } } },
-                    { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "default" } } }
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "speaker"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "catalog"
+                        },
+                        "speaker": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "default"
+                        }
+                      }
+                    }
                   ]
                 }
               }
@@ -405,74 +1233,210 @@
       "description": "テキスト種別ごとの体裁の上書き（#555）。各プロパティ未指定＝テンプレ層の値を継承（null=継承・11 §6）。配置・座標はテンプレ駆動のまま（§2-4）。制約は Layer/FreeElement の同名プロパティと同一。",
       "additionalProperties": false,
       "properties": {
-        "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "fontSize": { "type": "number", "exclusiveMinimum": 0 },
-        "fontWeight": { "enum": ["normal", "bold"] },
-        "strokeColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
-        "strokeWidth": { "type": "number", "minimum": 0 }
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "fontSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "fontWeight": {
+          "enum": [
+            "normal",
+            "bold"
+          ]
+        },
+        "strokeColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "strokeWidth": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "AssetRefs": {
       "type": "object",
       "description": "キーはテンプレの background/slot/logo レイヤーの id。値は既存 assetId または null。見た目を切り替えて差し込み先を失ったキーは休眠として残りうる（描かれず・使用中にも数えない＝ADR-0030 追補6）。詳細は 11_SCHEMA_REFERENCE.md §5。",
       "patternProperties": {
-        "^[a-zA-Z0-9_]+$": { "type": ["string", "null"] }
+        "^[a-zA-Z0-9_]+$": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "Character": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "characterId"],
+      "required": [
+        "enabled",
+        "characterId"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "characterId": { "type": "string" },
-        "poseAssetId": { "type": ["string", "null"] }
+        "enabled": {
+          "type": "boolean"
+        },
+        "characterId": {
+          "type": "string"
+        },
+        "poseAssetId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "Texts": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "title": { "type": "string" },
-        "main": { "type": "string" },
-        "subtitle": { "type": "string" },
-        "caption": { "type": "string" },
-        "url": { "type": "string" }
+        "title": {
+          "type": "string"
+        },
+        "main": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "caption": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
       }
     },
     "Narration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["text", "status"],
+      "required": [
+        "text",
+        "status"
+      ],
       "properties": {
-        "text": { "type": "string" },
-        "voiceId": { "type": ["string", "null"], "pattern": "^[a-z0-9_]+$" },
-        "speed": { "type": ["number", "null"] },
-        "pitch": { "type": ["number", "null"] },
-        "intonation": { "type": ["number", "null"] },
-        "voicePath": { "type": ["string", "null"] },
-        "status": { "enum": ["none", "pending", "generated", "failed"] }
+        "text": {
+          "type": "string"
+        },
+        "voiceId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "speed": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pitch": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "intonation": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "voicePath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "none",
+            "pending",
+            "generated",
+            "failed"
+          ]
+        }
       }
     },
     "NarrationLine": {
       "type": "object",
       "additionalProperties": false,
       "description": "掛け合い：場面のセリフ列の1行（ADR-0015・#180）。null/未指定は継承（11_SCHEMA_REFERENCE.md §6）。",
-      "required": ["lineId", "text", "status"],
+      "required": [
+        "lineId",
+        "text",
+        "status"
+      ],
       "properties": {
-        "lineId": { "type": "string", "pattern": "^line_[0-9]{3,}$" },
-        "text": { "type": "string" },
-        "speaker": { "type": ["integer", "null"], "minimum": 0 },
-        "speed": { "type": ["number", "null"] },
-        "pitch": { "type": ["number", "null"] },
-        "intonation": { "type": ["number", "null"] },
-        "subtitleText": { "type": ["string", "null"] },
-        "subtitleEnabled": { "type": "boolean" },
-        "startSec": { "type": "number", "minimum": 0 },
-        "startWithPrevious": { "type": "boolean" },
-        "voicePath": { "type": ["string", "null"] },
-        "status": { "enum": ["none", "pending", "generated", "failed"] }
+        "lineId": {
+          "type": "string",
+          "pattern": "^line_[0-9]{3,}$"
+        },
+        "text": {
+          "type": "string"
+        },
+        "speaker": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "speed": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pitch": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "intonation": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "subtitleText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subtitleEnabled": {
+          "type": "boolean"
+        },
+        "startSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "startWithPrevious": {
+          "type": "boolean"
+        },
+        "voicePath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "none",
+            "pending",
+            "generated",
+            "failed"
+          ]
+        }
       }
     },
     "AudioMix": {
@@ -480,31 +1444,95 @@
       "additionalProperties": false,
       "description": "全フィールド任意・null可。null は project 既定を継承（11_SCHEMA_REFERENCE.md §6）。",
       "properties": {
-        "narrationVolume": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.5 },
-        "bgmVolume": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.5 },
-        "originalAudioVolume": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.5 }
+        "narrationVolume": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "maximum": 1.5
+        },
+        "bgmVolume": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "maximum": 1.5
+        },
+        "originalAudioVolume": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "maximum": 1.5
+        }
       }
     },
     "Transition": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "in": { "enum": ["none", "fade", "slide", "wipe", "zoom"] },
-        "out": { "enum": ["none", "fade", "slide", "wipe", "zoom"] },
-        "durationSec": { "type": "number", "minimum": 0 },
-        "direction": { "enum": ["left", "right", "up", "down"] }
+        "in": {
+          "enum": [
+            "none",
+            "fade",
+            "slide",
+            "wipe",
+            "zoom"
+          ]
+        },
+        "out": {
+          "enum": [
+            "none",
+            "fade",
+            "slide",
+            "wipe",
+            "zoom"
+          ]
+        },
+        "durationSec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "direction": {
+          "enum": [
+            "left",
+            "right",
+            "up",
+            "down"
+          ]
+        }
       }
     },
     "Warning": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "properties": {
-        "code": { "type": "string" },
-        "message": { "type": "string" },
-        "field": { "type": "string" },
-        "severity": { "enum": ["info", "warning", "error"] },
-        "autoFixed": { "type": "boolean" }
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "autoFixed": {
+          "type": "boolean"
+        }
       }
     }
   }

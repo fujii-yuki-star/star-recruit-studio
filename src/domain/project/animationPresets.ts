@@ -2,7 +2,7 @@
 // 場面編集の簡易オーサリングが使う（詳細な手動キーフレーム編集は将来タイムライン＝上位仕上げ面・ADR-0023）。
 // プリセットは「登場の動き」を2キーフレームで表す。描画（x/y/scale/rotation/opacity 補間）は layoutScene(t) 側（(1a)）。
 import { EASING } from '../enums';
-import type { Easing } from '../enums';
+import type { Easing, EasingSpec } from '../enums';
 import type { Keyframe } from './types';
 
 /** プリセットの所要秒（既定/下限/上限）。場面尺に依らず操作できる簡易範囲。 */
@@ -98,10 +98,11 @@ export function withEndOpacity(keyframes: readonly Keyframe[], endOpacity: numbe
  */
 export function describeAnimation(
   keyframes: readonly Keyframe[],
-): { kind: PresetKind | null; durationSec: number; easing: Easing; direction: SlideDirection } {
+): { kind: PresetKind | null; durationSec: number; easing: EasingSpec; direction: SlideDirection } {
   const durationSec = presetDurationSec(keyframes);
   const last = keyframes[keyframes.length - 1];
-  const easing: Easing = last?.easing ?? EASING.linear;
+  // 自由なカーブ（#262）もそのまま返す＝名前つきへ丸めない（画面が「選べない」ことを出す・ADR-0026④）。
+  const easing: EasingSpec = last?.easing ?? EASING.linear;
   const has = (p: keyof Keyframe): boolean => keyframes.some((k) => k[p] != null);
   let kind: PresetKind | null = null;
   if (keyframes.length === 0) kind = null;

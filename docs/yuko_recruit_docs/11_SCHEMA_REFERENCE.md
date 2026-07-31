@@ -256,7 +256,26 @@
 **7.1.2 companyInfo**（`videoKind=recruit` のとき必須）: companyName ● / industry ○ / businessDescription ○ / recruitTarget ○ / jobType ○ / strengths(string[]) ○ / desiredPerson ○ / recruitUrl(uri) ○
 **7.1.3 generalBrief**（`videoKind=general` のとき必須）: title ●（テーマ・**1〜100字**） / agenda(string[]) ○（章立て・アジェンダ・**最大20件／各100字**） / keyPoints(string[]) ○（伝えたい要点・**最大20件／各100字**） / targetAudience ○（対象視聴者・**100字**。ADR-0011 #12 で追加）。**要素数・文字数の上限は ADR-0011 #4 で確定（任意項目の追加・上限付与ゆえ schemaVersion は 1.1 据え置き）。**
 **7.1.4 timelineOverlay**（ADR-0018・2モデル方式・任意・schema 1.15）: clips(`OverlayClip[]`) ○。**OverlayClip**: id(`ovclip_NNN`・project 内一意) ● / track(enum＝現状 `telop` のみ・将来 audio/bgm) ● / anchorSceneId(`scene_NNN`・任意＝**有れば場面相対**〔startSec=場面開始からの相対秒〕／**無ければ絶対時間**〔startSec=グローバル秒〕) / startSec(≥0) ● / durationSec(>0) ● / text(テロップ文言) ○。`compileTimeline` が「アンカー場面のグローバル開始＋startSec」（絶対は 0 基準）で該当トラックへ合成し、**不明/除外アンカーは描画で無視**（V_overlay・§8）。**AI 出力・場面正準は不変**（AI/簡易は overlay を生成/編集しない）。audio/bgm トラックは後続。
-**animations（④・ADR-0019・schema 1.17・任意）**: `ElementAnimation[]`。**ElementAnimation**: id(`anim_NNN`・project 内一意) ● / sceneId(`scene_NNN`) ● / targetId(FREE 要素／グループ id) ● / keyframes(`Keyframe[]`・timeSec 昇順) ●。**Keyframe**: timeSec(場面ローカル秒・≥0) ● / x / y / scale(>0) / opacity(0〜1) / rotation / easing(`linear`/`ease-in-out`) ○。設定したプロパティのみ**独立に補間**・値は**絶対上書き**・区間外は端でクランプ。`layoutScene(scene, template, {timeSec, animations})` が補間して対象要素へ適用＝**preview/export 同一関数でフレーム単位パリティ**（ADR-0001/0019・per-frame）。AI/場面正準は不変（AI はアニメを生成しない・`12` 不変）。
+**animations（④・ADR-0019・schema 1.17・任意）**: `ElementAnimation[]`。**ElementAnimation**: id(`anim_NNN`・project 内一意) ● / sceneId(`scene_NNN`) ● / targetId(FREE 要素／グループ id) ● / keyframes(`Keyframe[]`・timeSec 昇順) ●。**Keyframe**: timeSec(場面ローカル秒・≥0) ● / x / y / scale(>0) / opacity(0〜1) / rotation / easing ○。設定したプロパティのみ**独立に補間**・値は**絶対上書き**・区間外は端でクランプ。`layoutScene(scene, template, {timeSec, animations})` が補間して対象要素へ適用＝**preview/export 同一関数でフレーム単位パリティ**（ADR-0001/0019・per-frame）。AI/場面正準は不変（AI はアニメを生成しない・`12` 不変）。
+
+**動き方（`Keyframe.easing`・#262・schema 1.25／timeline 1.6）**＝区間 [前KF, 当KF] に効く。
+**名前つき**（`linear`／`ease-in`／`ease-out`／`ease-in-out`）か、**自由なカーブ**（`{ bezier: [x1,y1,x2,y2] }`
+＝CSS の `cubic-bezier` と同じ制御点）。未指定＝`linear`。**`x` は 0〜1**（時間が戻らない＝schema の制約・
+`keyframeEdit` が収める）・**`y` は範囲外も可**（行き過ぎて戻る動きを作れるので丸めない）。
+- 解くのは `applyEasing`（`domain/project/keyframes.ts`・純粋）＝`x` から媒介変数をニュートン法で求め、
+  収束しない形（始まりの傾きが 0 など）は二分法へ落とす＝**同じ入力なら必ず同じ値**（preview＝export）。
+- **`ease-in-out` は既存の式のまま**（区分的な2次式）＝**既に作った動画の動きを変えない**。3次ベジェでは
+  正確に表せないので `easingCurveOf` は `null` を返し、**近い値で黙って置き換えない**（画面が「動きが少し
+  変わる」と断ってから変える＝ADR-0026④）。`linear`/`ease-in`/`ease-out` は CSS と同じ制御点で**そのまま
+  置き換えられる**（`[0,0,1,1]`／`[0.42,0,1,1]`／`[0,0,0.58,1]`）。
+- **編集できるのはタイムライン形式**（`setKeyframe` の `easing`）。場面形式の簡易プリセットは名前つきのみ＝
+  カーブが入っている動きは**選び直させない**（黙って丸めない・場面形式は凍結＝ADR-0032）。
+
+**プリセットと自由キーフレームの関係（#266）**＝場面形式の動きプリセットは**最初からキーフレーム列**
+（`animationPresets`・2KF）として保存されており、焼き出し（`bakeTimelineProject`）はそれを**そのまま**
+持ち込む。よって「プリセットを自由キーフレームへ変換する」段は**要らない**（変換前後で一致する、が
+構造的に成り立つ）。守り方は `bake.test.ts` の「プリセットの動きは、そのままのキーフレームとして
+持ち込まれ、タイムライン側で直せる」。
 **テロップの実描画**：画面**上部の帯**（キャンバス比の既定ジオメトリ＝`renderer/layout.ts` の `overlayTelopItem` が単一参照元。白字・黒縁取り・中央揃え・**動画全体フォント**）。プレビューは `layoutScene` の `telops` オプションで同一 item を描き、書き出しは同一 item を**透過帯PNG**に焼いて**結合後の動画へ `overlay`（`enable='between(t,S,E)'`・グローバル秒）で合成**＝プレビュー＝書き出しのパリティ（ADR-0001/0004）。場面またぎ・遷移中・動画スロット場面でも時刻どおりに表示される。
 **並行テロップ（③(8)）**：時間が重なるテロップは**段（row）**に自動割当して縦に積む（`assignTelopRows`＝貪欲な区間分割・最小段数）。段はプレビューと書き出しで一貫（同一 run 定義）＝重なっても潰れず全て読める。段は overlay データから導出＝**schema 変更なし**（保存しない）。
 

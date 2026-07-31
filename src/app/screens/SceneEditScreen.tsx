@@ -1165,7 +1165,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const desc = anim ? describeAnimation(anim.keyframes) : null;
     const kind = desc?.kind ?? null;
     const durationSec = desc?.durationSec ?? PRESET_DEFAULT_SEC;
-    const easing = desc?.easing ?? EASING.easeInOut;
+    // 自由なカーブ（#262）はタイムライン編集の機能。場面編集では**選び直させない**（黙って名前つきへ
+    // 丸めると、作った動きが操作しただけで変わる＝ADR-0026④）。
+    const curveEasing = desc && typeof desc.easing !== "string" ? desc.easing : null;
+    const easing = curveEasing ? EASING.easeInOut : (desc?.easing as Easing | undefined) ?? EASING.easeInOut;
     const direction = desc?.direction ?? "left";
     // 種類・秒・感じ・向きのどれかを変えたら作り直す（x/y/rotation は相対＝位置編集には layout 側が自動追従）。
     const apply = (over: { kind?: PresetKind | "none"; durationSec?: number; easing?: Easing; direction?: SlideDirection }) => {
@@ -1202,10 +1205,20 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <NumberField label="かける時間（秒）" value={durationSec} min={PRESET_MIN_SEC} max={PRESET_MAX_SEC} step={SEC_STEP} onChange={(v) => apply({ durationSec: v })} />
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動きの感じ</label>
-                <select className="select" value={easing} onChange={(e) => apply({ easing: e.target.value as Easing })}>
+                <select
+                  className="select"
+                  value={easing}
+                  disabled={!!curveEasing}
+                  onChange={(e) => apply({ easing: e.target.value as Easing })}
+                >
                   <option value={EASING.easeInOut}>なめらか</option>
                   <option value={EASING.linear}>一定</option>
                 </select>
+                {curveEasing && (
+                  <p className="text-muted text-sm" style={{ margin: "2px 0 0" }}>
+                    自由なカーブが設定されています。ここで選び直すと動きが変わるため、タイムライン編集で調整してください。
+                  </p>
+                )}
               </div>
               {kind === "slide" && (
                 <div className="field" style={{ margin: 0 }}>

@@ -208,3 +208,27 @@ describe('removeKeyframe / clearKeyframes', () => {
     expect(r.ok && kfs(r.doc, 'clip_001').map((k) => k.timeSec)).toEqual([0, 4]);
   });
 });
+
+describe('動き方（イージング・#262）', () => {
+  it('自由なカーブを置ける（保存できる形）', () => {
+    const r = setKeyframe(doc(), 'clip_001', 1, { x: 10, easing: { bezier: [0.25, 1.6, 0.75, -0.6] } });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.doc.animations?.[0].keyframes[0].easing).toEqual({ bezier: [0.25, 1.6, 0.75, -0.6] });
+    expect(validateTimelineProject(r.doc)).toBe(true);
+  });
+
+  it('カーブの横の制御点は 0〜1 へ収める（時間が戻る形は保存できない）', () => {
+    const r = setKeyframe(doc(), 'clip_001', 1, { x: 10, easing: { bezier: [1.5, 0.2, -0.5, 0.8] } });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.doc.animations?.[0].keyframes[0].easing).toEqual({ bezier: [1, 0.2, 0, 0.8] });
+    // 収めないと schema が拒む＝自動保存が黙って行われなくなる。
+    expect(validateTimelineProject(r.doc)).toBe(true);
+  });
+
+  it('縦の制御点は丸めない（行き過ぎて戻る動きを消さない）', () => {
+    const r = setKeyframe(doc(), 'clip_001', 1, { x: 10, easing: { bezier: [0.3, 3, 0.7, -2] } });
+    expect(r.ok && r.doc.animations?.[0].keyframes[0].easing).toEqual({ bezier: [0.3, 3, 0.7, -2] });
+  });
+});

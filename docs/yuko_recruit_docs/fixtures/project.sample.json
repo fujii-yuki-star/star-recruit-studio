@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.24",
+  "schemaVersion": "1.25",
   "projectId": "proj_20260610_001",
   "projectName": "株式会社サンプル 会社紹介",
   "purpose": "new_graduate",
@@ -18,7 +18,10 @@
     "businessDescription": "業務システム開発を中心に行う会社です。",
     "recruitTarget": "新卒採用",
     "jobType": "エンジニア",
-    "strengths": ["相談しやすい環境", "若手が成長しやすい"],
+    "strengths": [
+      "相談しやすい環境",
+      "若手が成長しやすい"
+    ],
     "desiredPerson": "学ぶ姿勢がある方",
     "recruitUrl": "https://example.com/recruit"
   },
@@ -50,11 +53,19 @@
       "filePath": "assets/images/entrance_001.jpg",
       "thumbnailPath": "thumbnails/asset_entrance_001.jpg",
       "mimeType": "image/jpeg",
-      "tags": ["entrance", "building"],
+      "tags": [
+        "entrance",
+        "building"
+      ],
       "description": "会社入口の写真",
       "aiDescription": "明るい建物のエントランス",
       "isPublicChecked": true,
-      "metadata": { "width": 1920, "height": 1080, "durationSec": null, "hasAudio": false }
+      "metadata": {
+        "width": 1920,
+        "height": 1080,
+        "durationSec": null,
+        "hasAudio": false
+      }
     },
     {
       "assetId": "asset_office_001",
@@ -63,11 +74,19 @@
       "filePath": "assets/images/office_001.jpg",
       "thumbnailPath": "thumbnails/asset_office_001.jpg",
       "mimeType": "image/jpeg",
-      "tags": ["office", "workplace"],
+      "tags": [
+        "office",
+        "workplace"
+      ],
       "description": "若手社員が作業しているオフィス写真",
       "aiDescription": "明るいオフィスで複数人が作業している写真",
       "isPublicChecked": true,
-      "metadata": { "width": 1920, "height": 1080, "durationSec": null, "hasAudio": false }
+      "metadata": {
+        "width": 1920,
+        "height": 1080,
+        "durationSec": null,
+        "hasAudio": false
+      }
     },
     {
       "assetId": "asset_logo_001",
@@ -75,9 +94,16 @@
       "displayName": "会社ロゴ",
       "filePath": "assets/images/logo.png",
       "mimeType": "image/png",
-      "tags": ["logo"],
+      "tags": [
+        "logo"
+      ],
       "isPublicChecked": true,
-      "metadata": { "width": 640, "height": 320, "durationSec": null, "hasAudio": false }
+      "metadata": {
+        "width": 640,
+        "height": 320,
+        "durationSec": null,
+        "hasAudio": false
+      }
     },
     {
       "assetId": "yuko_smile_001",
@@ -85,10 +111,18 @@
       "displayName": "ゆうこ_笑顔",
       "filePath": "assets/yuko/yuko_smile.png",
       "mimeType": "image/png",
-      "tags": ["smile", "opening"],
+      "tags": [
+        "smile",
+        "opening"
+      ],
       "isPublicChecked": true,
       "isDefaultYuko": true,
-      "metadata": { "width": 720, "height": 1280, "durationSec": null, "hasAudio": false }
+      "metadata": {
+        "width": 720,
+        "height": 1280,
+        "durationSec": null,
+        "hasAudio": false
+      }
     },
     {
       "assetId": "yuko_guide_001",
@@ -96,10 +130,18 @@
       "displayName": "ゆうこ_案内",
       "filePath": "assets/yuko/yuko_guide.png",
       "mimeType": "image/png",
-      "tags": ["guide", "point"],
+      "tags": [
+        "guide",
+        "point"
+      ],
       "isPublicChecked": true,
       "isDefaultYuko": false,
-      "metadata": { "width": 720, "height": 1280, "durationSec": null, "hasAudio": false }
+      "metadata": {
+        "width": 720,
+        "height": 1280,
+        "durationSec": null,
+        "hasAudio": false
+      }
     },
     {
       "assetId": "bgm_bright_001",
@@ -107,10 +149,17 @@
       "displayName": "明るいBGM",
       "filePath": "assets/bgm/bright_001.mp3",
       "mimeType": "audio/mpeg",
-      "tags": ["bright"],
+      "tags": [
+        "bright"
+      ],
       "description": "会社紹介向けの明るいBGM",
       "isPublicChecked": true,
-      "metadata": { "width": null, "height": null, "durationSec": 120.0, "hasAudio": true }
+      "metadata": {
+        "width": null,
+        "height": null,
+        "durationSec": 120.0,
+        "hasAudio": true
+      }
     }
   ],
   "parts": [
@@ -119,7 +168,9 @@
       "title": "オープニング",
       "description": "会社名と雰囲気を伝える導入",
       "order": 1,
-      "sceneIds": ["scene_001"],
+      "sceneIds": [
+        "scene_001"
+      ],
       "targetDurationSec": 16
     },
     {
@@ -127,7 +178,9 @@
       "title": "会社紹介",
       "description": "オフィスと働く環境",
       "order": 2,
-      "sceneIds": ["scene_002"],
+      "sceneIds": [
+        "scene_002"
+      ],
       "targetDurationSec": 44
     }
   ],
@@ -139,8 +192,15 @@
       "sceneType": "opening",
       "templateId": "opening_yuko_right_v1",
       "durationSec": 8,
-      "assetRefs": { "background": "asset_entrance_001", "logo": "asset_logo_001" },
-      "character": { "enabled": true, "characterId": "yuko", "poseAssetId": "yuko_smile_001" },
+      "assetRefs": {
+        "background": "asset_entrance_001",
+        "logo": "asset_logo_001"
+      },
+      "character": {
+        "enabled": true,
+        "characterId": "yuko",
+        "poseAssetId": "yuko_smile_001"
+      },
       "texts": {
         "title": "株式会社サンプルへようこそ",
         "main": "若手が活躍できる職場です",
@@ -155,7 +215,11 @@
         "voicePath": null,
         "status": "none"
       },
-      "transition": { "in": "fade", "out": "fade", "durationSec": 0.5 },
+      "transition": {
+        "in": "fade",
+        "out": "fade",
+        "durationSec": 0.5
+      },
       "warnings": []
     },
     {
@@ -166,8 +230,14 @@
       "templateId": "photo_left_text_right_yuko_v1",
       "fontId": "kaitou-yokoku-gothic",
       "durationSec": 10,
-      "assetRefs": { "mainVisual": "asset_office_001" },
-      "character": { "enabled": true, "characterId": "yuko", "poseAssetId": "yuko_guide_001" },
+      "assetRefs": {
+        "mainVisual": "asset_office_001"
+      },
+      "character": {
+        "enabled": true,
+        "characterId": "yuko",
+        "poseAssetId": "yuko_guide_001"
+      },
       "texts": {
         "title": "明るいオフィス",
         "main": "相談しやすい雰囲気",
@@ -182,7 +252,11 @@
         "voicePath": null,
         "status": "none"
       },
-      "transition": { "in": "fade", "out": "fade", "durationSec": 0.5 },
+      "transition": {
+        "in": "fade",
+        "out": "fade",
+        "durationSec": 0.5
+      },
       "warnings": []
     }
   ]
