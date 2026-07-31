@@ -45,6 +45,13 @@ export function applyEasing(t: number, easing: EasingSpec | undefined): number {
 }
 
 /**
+ * 「両端ゆっくり」を**カーブで置き換えるときの初期値**（#262）。等価ではない（`easingCurveOf` が `null` を
+ * 返すとおり正確には表せない）ので、**画面は動きが変わることを断ってから**この値を置く（ADR-0026④）。
+ * CSS の `ease-in-out` と同じ制御点。
+ */
+export const EASE_IN_OUT_APPROX_CURVE: BezierEasing['bezier'] = [0.42, 0, 0.58, 1];
+
+/**
  * 名前つきイージングの**制御点による等価な表し方**（#262）。「自由なカーブにする」で使う。
  * `ease-in-out` は3次ベジェでは**正確に表せない**ので `null`＝**近い値で黙って置き換えない**（ADR-0026④）。
  */

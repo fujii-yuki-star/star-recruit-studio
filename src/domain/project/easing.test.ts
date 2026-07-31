@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { EASING } from '../enums';
+import { readFileSync } from 'node:fs';
+
+import { EASING, EASINGS } from '../enums';
+import { describeAnimation, presetKeyframes, PRESET_KINDS } from './animationPresets';
 import type { EasingSpec } from '../enums';
 import { applyEasing, easingCurveOf, interpolateKeyframes } from './keyframes';
 
@@ -141,5 +144,32 @@ describe('カーブの解き方（#262）', () => {
     for (const x of [0.1, 0.37, 0.62, 0.91]) {
       expect(applyEasing(x, { bezier: p })).toBeCloseTo(reference(p, x), 4);
     }
+  });
+});
+
+describe('プリセットと動き方（#262・#266）', () => {
+  it('プリセットは渡された動き方をそのまま載せる＝自由なカーブも運べる（作り直しで潰れない）', () => {
+    const curve: EasingSpec = { bezier: [0.34, 1.56, 0.64, 1] };
+    for (const kind of PRESET_KINDS) {
+      const kfs = presetKeyframes(kind, { durationSec: 0.6, easing: curve, direction: 'left' });
+      // 動き方は区間 [前KF, 当KF] ＝終点のキーフレームに載る。
+      expect(kfs[kfs.length - 1].easing).toEqual(curve);
+    }
+  });
+
+  it('置いた動き方は読み返せる（画面が「カーブが入っている」と分かる）', () => {
+    const curve: EasingSpec = { bezier: [0.1, 0.2, 0.3, 0.4] };
+    const kfs = presetKeyframes('fade', { durationSec: 0.5, easing: curve, direction: 'left' });
+    expect(describeAnimation(kfs).easing).toEqual(curve);
+  });
+});
+
+describe('動き方の値が正典（schema）と揃っている（§2-7）', () => {
+  it('EASINGS と schema の選択肢が一致する（片方だけ増えたら落ちる）', () => {
+    const schema = JSON.parse(
+      readFileSync(new URL('../../../docs/yuko_recruit_docs/schemas/project.schema.json', import.meta.url), 'utf-8'),
+    );
+    const named = schema.$defs.Keyframe.properties.easing.oneOf.find((b: { enum?: string[] }) => b.enum)?.enum;
+    expect(named).toEqual([...EASINGS]);
   });
 });

@@ -6,7 +6,7 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, Vi
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
@@ -1168,7 +1168,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     // 自由なカーブ（#262）はタイムライン編集の機能。場面編集では**選び直させない**（黙って名前つきへ
     // 丸めると、作った動きが操作しただけで変わる＝ADR-0026④）。
     const curveEasing = desc && typeof desc.easing !== "string" ? desc.easing : null;
-    const easing = curveEasing ? EASING.easeInOut : (desc?.easing as Easing | undefined) ?? EASING.easeInOut;
+    // 選択肢に出す値（カーブは名前つきでは表せないので表示だけ「なめらか」へ寄せる）。
+    const easingChoice = curveEasing ? EASING.easeInOut : (desc?.easing as Easing | undefined) ?? EASING.easeInOut;
+    // **作り直すときに載せる値は元のまま**＝種類や秒を触っただけでカーブが名前つきへ化けない
+    // （黙って別の動きにしない・ADR-0026④）。カーブの編集はタイムライン編集で行う。
+    const easing: EasingSpec = curveEasing ?? easingChoice;
     const direction = desc?.direction ?? "left";
     // 種類・秒・感じ・向きのどれかを変えたら作り直す（x/y/rotation は相対＝位置編集には layout 側が自動追従）。
     const apply = (over: { kind?: PresetKind | "none"; durationSec?: number; easing?: Easing; direction?: SlideDirection }) => {
@@ -1207,7 +1211,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>動きの感じ</label>
                 <select
                   className="select"
-                  value={easing}
+                  value={easingChoice}
                   disabled={!!curveEasing}
                   onChange={(e) => apply({ easing: e.target.value as Easing })}
                 >

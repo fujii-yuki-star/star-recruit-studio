@@ -5,7 +5,7 @@ import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
-import { easingCurveOf } from "../../domain/project/keyframes";
+import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { clipCountOnTrack } from "../../domain/timeline/edit";
 import { audioSourceKeyOfClip } from "../../domain/timeline/audio";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
@@ -148,7 +148,7 @@ const CURVE_FIELDS: { label: string; clamped: boolean }[] = [
 
 /** 「自由なカーブ」にするときの初期値＝いまの動き方と同じ形（表せないものは近い形＝画面が断る）。 */
 function curveSeedOf(easing: EasingSpec | undefined): [number, number, number, number] {
-  return easingCurveOf(easing) ?? [0.42, 0, 0.58, 1];
+  return easingCurveOf(easing) ?? EASE_IN_OUT_APPROX_CURVE;
 }
 
 /** 制御点の1つを読む／差し替える（`easing` がカーブでないときは初期値から作る）。 */
