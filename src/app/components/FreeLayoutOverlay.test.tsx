@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { doubleTap, pointerDownAt } from "../../test/pointer";
 import { describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -259,10 +260,8 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
       mockRect(root);
       const frame = screen.getByTestId("group-frame");
       // (400,150)＝free_001 だけがある場所（free_003 の外）。1度目＝まとまり選択、2度目＝ドリルイン。
-      const at = { button: 0, clientX: 400, clientY: 150, pointerId: 1 };
-      fireEvent.pointerDown(frame, at);
-      fireEvent.pointerUp(frame, { pointerId: 1 });
-      fireEvent.pointerDown(frame, at);
+      // 時刻を固定して送る＝間の再描画が遅くても二度押しとして扱われる（#645）。
+      doubleTap(frame, { clientX: 400, clientY: 150 });
       expect(onSelect).toHaveBeenCalledWith("free_001"); // 枠に奪われずドリルインが発火
     });
   });
@@ -592,10 +591,11 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
   // 編集へ入れることを、素のポインタ列（fireEvent.doubleClick ではない）で検証する。旧実装ではここが無反応だった。
   it("テキストの二度押し（pointerdown×2）で編集に入る＝実機の互換 dblclick 欠落に耐える（#525-4）", () => {
     const { boxes } = renderOverlay();
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    // 1度目と2度目は同じ時刻で送る（#645）＝間の再描画の速さで結論が変わらない。
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
     fireEvent.pointerUp(boxes[0], { pointerId: 1 });
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument(); // 1度目は編集に入らない（ドラッグ扱い）
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     expect(textarea).toBeInTheDocument(); // 2度目＝ダブルタップで編集へ
     expect(textarea).toHaveValue("見出し");

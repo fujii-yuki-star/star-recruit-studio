@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { doubleTap } from "../../test/pointer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
@@ -46,10 +47,8 @@ describe("SceneEditScreen インライン編集の配線（#549）", () => {
     expect(svgText()).toContain("編集する文字"); // 編集前は描かれている
 
     const el = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
-    const opts = { button: 0, clientX: 10, clientY: 10, pointerId: 1 };
-    fireEvent.pointerDown(el, opts);
-    fireEvent.pointerUp(el, { pointerId: 1 });
-    fireEvent.pointerDown(el, opts); // 二度押し＝インライン編集へ（実機経路・#525-4）
+    // 二度押し＝インライン編集へ（実機経路・#525-4）。**時刻は固定**＝間の再描画の速さで判定が変わらない（#645）。
+    doubleTap(el);
 
     // 画面には他にも textbox（動画の名前・右パネル）があるため、要素ボックス内のインライン textarea を直接引く。
     const ta = document.querySelector('[data-free-id="free_001"] textarea') as HTMLTextAreaElement;
@@ -81,10 +80,7 @@ describe("SceneEditScreen 場面切替で編集状態を持ち越さない（#54
   it("編集中に隣の場面へ切り替えても、同名 free_001 を伏せない・勝手に編集モードにならない", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     const el = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
-    const opts = { button: 0, clientX: 10, clientY: 10, pointerId: 1 };
-    fireEvent.pointerDown(el, opts);
-    fireEvent.pointerUp(el, { pointerId: 1 });
-    fireEvent.pointerDown(el, opts);
+    doubleTap(el);
     expect(svgText()).not.toContain("編集する文字"); // 場面Aは編集中＝伏せている
 
     const cards = document.querySelectorAll("button.scene-card");
