@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { pointerDownAt } from "../../test/pointer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
@@ -43,11 +44,12 @@ describe("SceneEditScreen グループメンバーのドリルイン選択（#52
     const member = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
     expect(member).toBeTruthy();
     // 1回押す＝グループ単位で選択（グループツールバーが出る）。
-    fireEvent.pointerDown(member, { button: 0, clientX: 150, clientY: 150, pointerId: 1 });
+    // 1回目と2回目は同じ時刻で送る（#645＝間の再描画の速さで二度押し判定が変わらない）。
+    pointerDownAt(member, 1000, { clientX: 150, clientY: 150 });
     expect(screen.getByText(/グループを選択中/)).toBeTruthy();
     // メンバー上でダブルクリック（pointerdown×2）＝ドリルイン → グループ選択が解除される。
     fireEvent.pointerUp(member, { pointerId: 1 });
-    fireEvent.pointerDown(member, { button: 0, clientX: 150, clientY: 150, pointerId: 1 });
+    pointerDownAt(member, 1000, { clientX: 150, clientY: 150 });
     expect(screen.queryByText(/グループを選択中/)).toBeNull(); // まとまり選択から個別選択へ移った
     // ドリルインしたメンバーの詳細編集には「グループ内の値」注記が出る（数値が絶対座標に見える誤解を避ける・#525-5 レビュー）。
     expect(screen.getAllByText(/グループ内の要素です/).length).toBeGreaterThan(0);

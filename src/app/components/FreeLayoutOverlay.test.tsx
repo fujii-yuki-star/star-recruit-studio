@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { doubleTap, pointerDownAt } from "../../test/pointer";
 import { describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -158,10 +159,8 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
 
   it("未変形グループのメンバーをダブルクリックするとそのメンバーだけ選択（ドリルイン・#525-5）", () => {
     const { boxes, onSelect } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
-    // 実機経路＝素の pointerdown×2（fireEvent.doubleClick ではない）。
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
-    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    // 実機経路＝素の pointerdown×2（fireEvent.doubleClick ではない）。時刻は固定（#645）。
+    doubleTap(boxes[0], { clientX: 120, clientY: 120 });
     expect(onSelect).toHaveBeenLastCalledWith("free_001"); // そのメンバーだけ選択（グループ解除は selectFree が担う）
   });
 
@@ -259,10 +258,8 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
       mockRect(root);
       const frame = screen.getByTestId("group-frame");
       // (400,150)＝free_001 だけがある場所（free_003 の外）。1度目＝まとまり選択、2度目＝ドリルイン。
-      const at = { button: 0, clientX: 400, clientY: 150, pointerId: 1 };
-      fireEvent.pointerDown(frame, at);
-      fireEvent.pointerUp(frame, { pointerId: 1 });
-      fireEvent.pointerDown(frame, at);
+      // 時刻を固定して送る＝間の再描画が遅くても二度押しとして扱われる（#645）。
+      doubleTap(frame, { clientX: 400, clientY: 150 });
       expect(onSelect).toHaveBeenCalledWith("free_001"); // 枠に奪われずドリルインが発火
     });
   });
@@ -592,10 +589,11 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
   // 編集へ入れることを、素のポインタ列（fireEvent.doubleClick ではない）で検証する。旧実装ではここが無反応だった。
   it("テキストの二度押し（pointerdown×2）で編集に入る＝実機の互換 dblclick 欠落に耐える（#525-4）", () => {
     const { boxes } = renderOverlay();
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    // 1度目と2度目は同じ時刻で送る（#645）＝間の再描画の速さで結論が変わらない。
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
     fireEvent.pointerUp(boxes[0], { pointerId: 1 });
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument(); // 1度目は編集に入らない（ドラッグ扱い）
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
     const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     expect(textarea).toBeInTheDocument(); // 2度目＝ダブルタップで編集へ
     expect(textarea).toHaveValue("見出し");
@@ -607,6 +605,24 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
     fireEvent.pointerUp(boxes[1], { pointerId: 1 });
     fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 });
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("間が空いた二度押しは編集に入らない＝時間ガード（#525-4・時刻を明示して検証・#645）", () => {
+    const { boxes } = renderOverlay();
+    // 350ms（DOUBLE_TAP_MS）を超える間隔＝別々の押下として扱う。ヘルパーで時刻を明示するので
+    // 実時間に依存せず、しきい値そのものを検証できる。
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    pointerDownAt(boxes[0], 1400, { clientX: 120, clientY: 120 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("しきい値内なら編集に入る（時間ガードの境界＝#645）", () => {
+    const { boxes } = renderOverlay();
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    pointerDownAt(boxes[0], 1300, { clientX: 120, clientY: 120 });
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
 
   it("離れた二度押し（間にドラッグ想定）は編集に入らない＝距離ガード（#525-4）", () => {

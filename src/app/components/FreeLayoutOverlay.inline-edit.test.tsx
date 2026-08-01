@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { doubleTap } from "../../test/pointer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -32,10 +33,8 @@ function renderOverlay(over: Partial<ComponentProps<typeof FreeLayoutOverlay>> =
 /** 実機の二度押し（互換 dblclick は来ない・#525-4）でインライン編集へ入る。 */
 function enterEdit() {
   const el = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
-  const opts = { button: 0, clientX: 10, clientY: 10, pointerId: 1 };
-  fireEvent.pointerDown(el, opts);
-  fireEvent.pointerUp(el, { pointerId: 1 });
-  fireEvent.pointerDown(el, opts);
+  // 二度押しは**時刻を固定して**送る＝間に入る再描画の速さで判定が変わらない（#645）。
+  doubleTap(el);
   return screen.getByRole("textbox") as HTMLTextAreaElement;
 }
 
