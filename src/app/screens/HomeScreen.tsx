@@ -54,8 +54,11 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     };
   }, []);
   // 「新しい動画を作る」はヘッダと同じ破棄ガード付きフロー（共有フックで挙動統一）。
-  const { confirming: confirmNew, start: startNew, startBlank, confirm: confirmStartNew, cancel: cancelNew } =
-    useStartNewProject(onNavigate);
+  const {
+    confirming: confirmNew, start: startNew, startBlank, startTimeline,
+    creating: creatingTimeline, createFailed: timelineCreateFailed,
+    confirm: confirmStartNew, cancel: cancelNew,
+  } = useStartNewProject(onNavigate);
   // プロジェクトを開けなかったときのユーザー向け表示（§2-5）。
   const [openError, setOpenError] = useState(false);
   // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
@@ -272,7 +275,22 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                 <button className="btn btn-secondary btn-lg" onClick={startBlank} disabled={isExporting || pendingOpenId !== null} title={isExporting ? "書き出しが終わるまでお待ちください" : pendingOpenId !== null ? "確認に答えてから操作できます" : "AI を使わず、自分で場面を組み立てます"}>
                   白紙から作る
                 </button>
+                {/* タイムラインで作る（#635・ADR-0032 決定7/15）＝場面に区切らず、時間の流れの上に自分で
+                    素材を並べる別の作り方。場面形式とは別の動画になる（あとから行き来はしない）。 */}
+                <button
+                  className="btn btn-secondary btn-lg"
+                  onClick={startTimeline}
+                  disabled={isExporting || pendingOpenId !== null || creatingTimeline}
+                  title={isExporting ? "書き出しが終わるまでお待ちください" : pendingOpenId !== null ? "確認に答えてから操作できます" : "場面に区切らず、時間の流れの上に自分で並べます"}
+                >
+                  {creatingTimeline ? "作っています…" : "タイムラインで作る"}
+                </button>
               </div>
+              {timelineCreateFailed && (
+                <p className="text-warn mt">
+                  新しいタイムラインの動画を作れませんでした。少し待ってからもう一度お試しください。
+                </p>
+              )}
             </div>
             <div
               className="thumb thumb-video"

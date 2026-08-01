@@ -636,8 +636,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           </div>
 
           <div className="col gap-sm mt-lg">
+            {/* 見わたす画面には「タイムラインで編集する形にする」も置いてある（#394 → #635 へ吸収）。 */}
             <button className="btn btn-ghost btn-block" onClick={() => onNavigate("timeline")}>
-              タイムラインで見る
+              タイムラインで見る・編集する形にする
             </button>
             <button
               className="btn btn-secondary btn-block"

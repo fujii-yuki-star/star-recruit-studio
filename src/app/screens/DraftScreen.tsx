@@ -320,6 +320,10 @@ export function DraftScreen({ onNavigate }: DraftProps) {
               <PlayIcon size={16} />
               途中まで仕上がり確認
             </button>
+            {/* 時間の流れを見わたす／タイムライン編集用に作り直す入口（#394 → #635 へ吸収・ADR-0032）。 */}
+            <button className="btn btn-ghost" onClick={() => onNavigate("timeline")}>
+              タイムラインで見る
+            </button>
           </div>
 
           {confirmRegen && (
