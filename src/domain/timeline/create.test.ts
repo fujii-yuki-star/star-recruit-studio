@@ -35,11 +35,8 @@ describe('createEmptyTimelineProject（完全新規・#635）', () => {
     expect(createEmptyTimelineProject(input).sourceProjectId).toBeUndefined();
   });
 
-  it('向きを指定できる（既定は場面形式の新規作成と同じ）', () => {
-    const portrait = createEmptyTimelineProject({ ...input, aspectRatio: '9:16' });
-    expect(portrait.videoSettings.aspectRatio).toBe('9:16');
+  it('向きは既定（横型）に固定＝完全新規で縦型を選べるように見せない（#664）', () => {
     expect(createEmptyTimelineProject(input).videoSettings.aspectRatio).toBe('16:9');
-    expect(validateTimelineProject(portrait)).toBe(true);
   });
 
   it('渡した id・名前・時刻をそのまま使う（この関数は時計を持たない）', () => {

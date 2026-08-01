@@ -75,17 +75,23 @@ describe('openTimelineProject', () => {
 
 describe('createTimelineProject（完全新規・#635）', () => {
   it('id を発行して保存し、そのまま開いた状態になる', async () => {
-    vi.spyOn(fsMod, 'listProjectSummaries').mockResolvedValue([
+    const list = vi.spyOn(fsMod, 'listProjectSummaries').mockResolvedValue([
       { projectId: 'proj_20260801_001', projectName: '既存', updatedAt: '2026-08-01T00:00:00.000Z' } as never,
     ]);
     const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
     const id = await useTimelineStore.getState().createTimelineProject('新しいタイムライン');
     // 既存と重ならない番号が付く（採番は場面形式と共通）。
     expect(id).not.toBe('proj_20260801_001');
-    expect(save).toHaveBeenCalledTimes(1);
-    const [savedId, json] = save.mock.calls[0];
-    expect(savedId).toBe(id);
-    expect(JSON.parse(json).format).toBe(PROJECT_FORMAT.timeline);
+    // **採番の前に場面形式の保存を待つ**（同じ番号を二重に発行しないため）＝場面の保存 → 一覧 → 採番の順。
+    // 場面形式の id は保存で初めて発行されるので、待たないと一覧に現れず同じ番号を採りうる（11 §2.1）。
+    const sceneSaveOrder = save.mock.invocationCallOrder[
+      save.mock.calls.findIndex((c) => JSON.parse(c[1] as string).format !== PROJECT_FORMAT.timeline)
+    ];
+    // 採番に使う一覧＝最後の呼び出し（その前に場面形式の保存が終わっている＝ディスクに現れている）。
+    expect(sceneSaveOrder).toBeLessThan(list.mock.invocationCallOrder[list.mock.invocationCallOrder.length - 1]);
+    const timelineSaves = save.mock.calls.filter((c) => JSON.parse(c[1] as string).format === PROJECT_FORMAT.timeline);
+    expect(timelineSaves).toHaveLength(1);
+    expect(timelineSaves[0][0]).toBe(id);
     // 開き直さずにそのまま編集できる（ディスクと同じ内容を持っている）。
     const st = useTimelineStore.getState();
     expect(st.doc?.projectId).toBe(id);
@@ -97,9 +103,38 @@ describe('createTimelineProject（完全新規・#635）', () => {
     const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
     vi.spyOn(fsMod, 'listProjectSummaries').mockRejectedValue(new Error('一覧を読めない'));
     await expect(useTimelineStore.getState().createTimelineProject('新しい')).rejects.toThrow();
-    expect(save).not.toHaveBeenCalled();
+    expect(save.mock.calls.filter((c) => JSON.parse(c[1] as string).format === PROJECT_FORMAT.timeline)).toHaveLength(0);
     // 失敗しても、開いていた文書を巻き込まない（画面がいきなり空にならない）。
     expect(useTimelineStore.getState().doc).toBeNull();
+  });
+
+  it('前に開いていた文書の取り消し履歴・選択を持ち越さない（別の動画を書き戻さない）', async () => {
+    // 先にタイムライン A を開いて履歴を積む。
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    useTimelineStore.getState().selectClip('clip_001');
+    useTimelineStore.getState().trimSelectedClip('end', 3);
+    expect(useTimelineStore.getState().history.past.length).toBeGreaterThan(0);
+    // 新しく作ると、A の履歴・選択は残らない（残ると「取り消す」が A の中身を書き戻す）。
+    vi.spyOn(fsMod, 'listProjectSummaries').mockResolvedValue([]);
+    vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    await useTimelineStore.getState().createTimelineProject('新しい');
+    const st = useTimelineStore.getState();
+    expect(st.history.past).toEqual([]);
+    expect(st.selectedClipIds).toEqual([]);
+    expect(st.playheadSec).toBe(0);
+    expect(st.saveStatus).toBe('saved');
+  });
+
+  it('書き出し中は作らない（開く・閉じると同じ扱い）', async () => {
+    useTimelineStore.setState({ exportRun: { ...useTimelineStore.getState().exportRun, phase: 'rendering' } });
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    await expect(useTimelineStore.getState().createTimelineProject('新しい')).rejects.toThrow();
+    expect(save).not.toHaveBeenCalled();
+    // 断る理由をその場に出す（黙って何も起きないようにしない・§2-5）。
+    expect(useTimelineStore.getState().exportRun.message).toBeTruthy();
+    // 走行中の印を後続テストへ持ち越さない（この store は1つを共有していて、閉じる操作も断られる）。
+    useTimelineStore.setState({ exportRun: { ...useTimelineStore.getState().exportRun, phase: 'idle' } });
   });
 
   it('作った内容が保存できる形であることは作る側で保証する（`create.test.ts` の検証と対）', async () => {

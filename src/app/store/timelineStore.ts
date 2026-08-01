@@ -7,6 +7,7 @@ import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 import { audioSourceKey, audioSourcesOf } from "../../domain/timeline/audio";
 import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { createProjectId } from "../../domain/project/persistence";
+import { useProjectStore } from "./projectStore";
 import { createEmptyTimelineProject } from "../../domain/timeline/create";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -294,6 +295,16 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   ...emptyState(),
 
   createTimelineProject: async (projectName) => {
+    // 書き出し中は作らない（開く・閉じると同じ扱い＝走っている間は入力を固定・ADR-0032）。
+    // 断る理由は store 側に置く（画面ごとに条件を書き分けない）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ exportRun: { ...get().exportRun, message: EXPORT_BUSY_OPEN_MESSAGE } });
+      throw new Error("timeline export busy");
+    }
+    // **採番の前に場面形式の保存を待つ**（`bakeToTimeline` と同じ流儀）。場面形式の id は保存時に初めて
+    // 発行されディスクへ現れるまで一覧に出ないので、待たないと**同じ番号を二重に発行**して
+    // 片方の project.json をもう片方が上書きしうる（11 §2.1）。
+    await useProjectStore.getState().saveProject();
     const existing = await listProjectSummaries();
     const projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
     const now = new Date().toISOString();
@@ -305,7 +316,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
     await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
     // 保存できたものをそのまま開く（読み直さない＝ディスクと同じ内容を持っている）。
-    set({ doc, assetSrcById: {}, audioSrcByKey: {}, assetSizes: {}, isLoading: false, loadError: null });
+    // **必ず `emptyState()` から作る**＝前に開いていた文書の取り消し履歴・選択・作成中の声を持ち越さない
+    // （持ち越すと「新しい動画で取り消す」が**別の動画の内容**を書き戻し、自動保存がそちらを上書きする）。
+    set({ ...emptyState(), doc, saveStatus: "saved" });
     return projectId;
   },
   openTimelineProject: async (projectId) => {

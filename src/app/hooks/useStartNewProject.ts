@@ -62,6 +62,12 @@ export function useStartNewProject(navigate: (screen: ScreenId) => void) {
   // 破棄ガード：未保存があれば確認、無ければ即実行。
   const begin = useCallback(
     (kind: NewProjectKind) => {
+      // タイムライン形式は**別の文書**を作るだけ＝場面形式の作業は失われない。ここで
+      // 「保存していない素材や場面は失われます」と聞くと、**しないことを言う**ことになる（ADR-0026①）。
+      if (kind === "timeline") {
+        run(kind);
+        return;
+      }
       if (hasWork) {
         setPending(kind);
         return;
