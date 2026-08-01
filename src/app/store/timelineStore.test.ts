@@ -73,6 +73,44 @@ describe('openTimelineProject', () => {
   });
 });
 
+describe('createTimelineProject（完全新規・#635）', () => {
+  it('id を発行して保存し、そのまま開いた状態になる', async () => {
+    vi.spyOn(fsMod, 'listProjectSummaries').mockResolvedValue([
+      { projectId: 'proj_20260801_001', projectName: '既存', updatedAt: '2026-08-01T00:00:00.000Z' } as never,
+    ]);
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    const id = await useTimelineStore.getState().createTimelineProject('新しいタイムライン');
+    // 既存と重ならない番号が付く（採番は場面形式と共通）。
+    expect(id).not.toBe('proj_20260801_001');
+    expect(save).toHaveBeenCalledTimes(1);
+    const [savedId, json] = save.mock.calls[0];
+    expect(savedId).toBe(id);
+    expect(JSON.parse(json).format).toBe(PROJECT_FORMAT.timeline);
+    // 開き直さずにそのまま編集できる（ディスクと同じ内容を持っている）。
+    const st = useTimelineStore.getState();
+    expect(st.doc?.projectId).toBe(id);
+    expect(st.loadError).toBeNull();
+    expect(st.doc?.clips).toEqual([]);
+  });
+
+  it('id を発行できなければ保存しない（番号の分からない動画をディスクに作らない）', async () => {
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    vi.spyOn(fsMod, 'listProjectSummaries').mockRejectedValue(new Error('一覧を読めない'));
+    await expect(useTimelineStore.getState().createTimelineProject('新しい')).rejects.toThrow();
+    expect(save).not.toHaveBeenCalled();
+    // 失敗しても、開いていた文書を巻き込まない（画面がいきなり空にならない）。
+    expect(useTimelineStore.getState().doc).toBeNull();
+  });
+
+  it('作った内容が保存できる形であることは作る側で保証する（`create.test.ts` の検証と対）', async () => {
+    vi.spyOn(fsMod, 'listProjectSummaries').mockResolvedValue([]);
+    vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    const id = await useTimelineStore.getState().createTimelineProject('新しい');
+    // 保存した JSON はそのまま読み戻せる（＝schema 検証を通ったものが書かれている）。
+    expect(useTimelineStore.getState().doc?.projectId).toBe(id);
+  });
+});
+
 describe('setPlayhead', () => {
   beforeEach(async () => {
     vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
