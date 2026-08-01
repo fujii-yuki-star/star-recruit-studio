@@ -13,8 +13,18 @@ const DEFAULT_POINT = { clientX: 10, clientY: 10 };
 
 type PointerInit = { button?: number; clientX?: number; clientY?: number; pointerId?: number; shiftKey?: boolean };
 
-/** 時刻を指定して pointerdown を送る（`timeStamp` は読み取り専用なので、作ってから差し替える）。 */
+/**
+ * 時刻を指定して pointerdown を送る（`timeStamp` は読み取り専用なので、作ってから差し替える）。
+ *
+ * ⚠️ **0 は使えない**：React の合成イベントは `event.timeStamp || Date.now()` と書かれており
+ * （`react-dom` の `timeStamp` インターフェース）、**falsy な時刻は実時刻に化ける**。0 を渡すと
+ * 1回目だけ実時刻・2回目は指定値になり、差が負になって「間隔を空けたのに二度押し扱い」になる。
+ * 気づきにくいので、ここで弾く（黙って別の意味にしない）。
+ */
 export function pointerDownAt(el: Element, timeStamp: number, init: PointerInit = {}): void {
+  if (!(timeStamp > 0)) {
+    throw new Error("pointerDownAt: timeStamp は正の値で渡してください（React が falsy な時刻を実時刻へ置き換えます）");
+  }
   const ev = createEvent.pointerDown(el, { button: 0, pointerId: 1, ...DEFAULT_POINT, ...init });
   Object.defineProperty(ev, "timeStamp", { value: timeStamp, configurable: true });
   fireEvent(el, ev);

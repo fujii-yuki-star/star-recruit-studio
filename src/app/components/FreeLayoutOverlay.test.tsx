@@ -159,10 +159,8 @@ describe("FreeLayoutOverlay: グループ（ADR-0022・#305）", () => {
 
   it("未変形グループのメンバーをダブルクリックするとそのメンバーだけ選択（ドリルイン・#525-5）", () => {
     const { boxes, onSelect } = renderOverlay({ groups: [grp], activeGroupId: "group_001" });
-    // 実機経路＝素の pointerdown×2（fireEvent.doubleClick ではない）。
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
-    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
-    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    // 実機経路＝素の pointerdown×2（fireEvent.doubleClick ではない）。時刻は固定（#645）。
+    doubleTap(boxes[0], { clientX: 120, clientY: 120 });
     expect(onSelect).toHaveBeenLastCalledWith("free_001"); // そのメンバーだけ選択（グループ解除は selectFree が担う）
   });
 
@@ -607,6 +605,24 @@ describe("FreeLayoutOverlay: テキストのインライン編集（#174）", ()
     fireEvent.pointerUp(boxes[1], { pointerId: 1 });
     fireEvent.pointerDown(boxes[1], { button: 0, pointerId: 1 });
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("間が空いた二度押しは編集に入らない＝時間ガード（#525-4・時刻を明示して検証・#645）", () => {
+    const { boxes } = renderOverlay();
+    // 350ms（DOUBLE_TAP_MS）を超える間隔＝別々の押下として扱う。ヘルパーで時刻を明示するので
+    // 実時間に依存せず、しきい値そのものを検証できる。
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    pointerDownAt(boxes[0], 1400, { clientX: 120, clientY: 120 });
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("しきい値内なら編集に入る（時間ガードの境界＝#645）", () => {
+    const { boxes } = renderOverlay();
+    pointerDownAt(boxes[0], 1000, { clientX: 120, clientY: 120 });
+    fireEvent.pointerUp(boxes[0], { pointerId: 1 });
+    pointerDownAt(boxes[0], 1300, { clientX: 120, clientY: 120 });
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
   });
 
   it("離れた二度押し（間にドラッグ想定）は編集に入らない＝距離ガード（#525-4）", () => {

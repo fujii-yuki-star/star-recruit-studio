@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { doubleTap } from "../../test/pointer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
@@ -97,9 +98,7 @@ describe("SceneEditScreen キーボード操作（#525-11）", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     const box = document.querySelector('[data-free-id="free_001"]') as HTMLElement;
     // ダブルクリック（pointerdown×2）でドリルイン＝そのメンバーを個別選択。
-    fireEvent.pointerDown(box, { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
-    fireEvent.pointerUp(box, { pointerId: 1 });
-    fireEvent.pointerDown(box, { button: 0, clientX: 120, clientY: 120, pointerId: 1 });
+    doubleTap(box, { clientX: 120, clientY: 120 });
     fireEvent.keyDown(document.body, { key: "ArrowRight" });
     expect(el()?.x).toBe(100); // 変形グループのメンバーは動かさない（詳細パネルで編集）
   });
