@@ -39,6 +39,7 @@
 | [0030](0030-normal-free-switch-migration.md) | 通常↔FREE 切替の非破壊コンテンツ移送（通常→FREE は `freeLayout` へ seed／FREE→通常は休眠保持＋**出なくなる中身があれば確認**・precheck を category ゲート・#524 P1/P2／#547 P2-9 で確認条件を改定） | **Accepted** |
 | [0031](0031-simultaneous-dual-voice.md) | 同時2ボイス（並行音声・α-4 最小形＝同時開始＋amix＋字幕2行・0.4.2・`startWithPrevious` フラグ・N人） | **Accepted** |
 | [0032](0032-timeline-project-format.md) | タイムライン編集を「別プロジェクト形式」として新設（場面形式から片道で焼き出し・AI は上流のみ・時間軸ネイティブ・トラック自由・テンプレは素材）＝ADR-0018/0023 を一部 supersede | **Proposed**（α-5 再定義・実装は承認後） |
+| [0033](0033-editor-panel-layout.md) | 編集画面のパネル配置を利用者が変えられるようにする（ドッキング方式＝欄の移動＋境界のドラッグでサイズ変更・アプリ全体で1つ記憶・**プロジェクトの schema には入れない**・まずタイムライン編集へ適用／#276・#550 の再発を受けて） | **Proposed**（実装は承認後） |
 
 ## 状態の意味
 
