@@ -778,6 +778,8 @@ export function timelineBgmRunInputs(doc: TimelineProject, audioSrcByKey: Record
       audioBase64,
       fileExt: run.fileExt,
       volume: run.volume,
+      // 音量の変化（#512）＝点が無い部品ではキーごと落とす（未指定＝一定値の `volume` で出る）。
+      ...(run.volumeExpr ? { volumeExpr: run.volumeExpr } : {}),
       delaySec: run.delaySec,
       playSec: run.playSec,
       fadeInSec: run.fadeInSec,

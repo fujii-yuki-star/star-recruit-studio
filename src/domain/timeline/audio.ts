@@ -60,9 +60,9 @@ export function clipFadeSec(clip: TimelineClip): { fadeInSec: number; fadeOutSec
 /**
  * **音量の変化**（#512）＝点列を線形に補間する。点の外は端の値で伸ばす（最初の点より前＝最初の値・
  * 最後の点より後＝最後の値）＝区間外で黙って 0 や 1 に化けない。点が無ければ `undefined`＝
- * 呼び出し側がクリップ一定の音量へ落ちる。**いまは再生だけが使う**。書き出しは段3（未着手）で
- * 同じ点列から FFmpeg の式を組んで共有する予定＝**現時点の書き出しは点列を見ず一定音量で出る**
- * （ADR-0032 追補の段取り3）。
+ * 呼び出し側がクリップ一定の音量へ落ちる。**書き出しは同じ点列から `volumeExpr` で式を組む**
+ * ＝規則（線形・端で伸ばす・並びに依存しない）はこの関数と式の**両方が同じ点列**から出る
+ * （ADR-0032 追補＝案A）。
  */
 export function volumeAt(
   points: readonly { timeSec: number; volume: number }[] | undefined,
@@ -177,4 +177,31 @@ export function audioSourceKeyOfClip(clip: TimelineClip): string | null {
 /** この音はループさせるか（BGM は素材が短くても鳴り続ける＝場面形式のプレビュー・書き出しと同じ）。 */
 export function audioLoops(clip: TimelineClip): boolean {
   return clip.kind === TIMELINE_CLIP_KIND.audio;
+}
+
+/**
+ * 音量の変化（#512）を **FFmpeg の `volume` フィルタの式**にする（ADR-0032 追補＝案A）。
+ *
+ * **`volumeAt` と同じ点列・同じ規則**（点の間は線形・点の外は端の値で伸ばす）を式にしただけ＝
+ * ずれうるとしたら「式の書き方」だけに閉じ込める。時刻 `t` はフィルタ入力の秒（クリップの先頭が 0）。
+ * 点が無ければ `undefined`＝呼び出し側が従来どおり一定値の `volume=<数>` を使う。
+ */
+export function volumeExpr(points: readonly { timeSec: number; volume: number }[] | undefined): string | undefined {
+  if (!points || points.length === 0) return undefined;
+  const sorted = [...points].sort((a, b) => a.timeSec - b.timeSec);
+  const v = (x: number): string => String(clampVolume(x));
+  // 末尾（最後の点より後）は最後の値で伸ばす＝`volumeAt` と同じ。内側から外へ if を重ねる。
+  let expr = v(sorted[sorted.length - 1].volume);
+  for (let i = sorted.length - 1; i >= 1; i -= 1) {
+    const a = sorted[i - 1];
+    const b = sorted[i];
+    const span = b.timeSec - a.timeSec;
+    // 同じ時刻が2つ並んでも 0 で割らない（`volumeAt` と同じ扱い＝手前の値のまま）。
+    const seg = span > 0
+      ? `${v(a.volume)}+(${v(b.volume)}-${v(a.volume)})*(t-${a.timeSec})/${span}`
+      : v(a.volume);
+    expr = `if(lt(t,${b.timeSec}),${seg},${expr})`;
+  }
+  // 先頭（最初の点より前）も最初の値で伸ばす。
+  return `if(lt(t,${sorted[0].timeSec}),${v(sorted[0].volume)},${expr})`;
 }

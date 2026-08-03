@@ -136,7 +136,7 @@ export interface TimelineClip extends ClipSpatial {
   /**
    * **音量の変化**（#512・ADR-0032 追補）。クリップ先頭からの秒と音量（0〜1.5）の点列。
    * 未指定＝`volume` の一定値。**フェードはこの上に掛かる**（「基準×フェード係数」の形は変えない）。
-   * 点の間は線形に変える（`volumeAt`）。**いまは再生だけが使う**＝書き出しは段3 で同じ点列から式を組む（ADR-0032 追補）。
+   * 点の間は線形に変える（`volumeAt`）。**書き出しも同じ点列**から式を組む（`volumeExpr`・ADR-0032 追補＝案A）。
    */
   volumePoints?: { timeSec: number; volume: number }[];
   fadeInSec?: number;

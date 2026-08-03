@@ -7,7 +7,7 @@
 //   ② 判定条件（重なり・アニメ・速度・クロップの有無）を増やすほど、**プレビューと書き出しで別経路**が
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
-import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec } from './audio';
+import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, volumeExpr } from './audio';
 import { FPS } from '../constants';
 import { ASSET_TYPE, TIMELINE_CLIP_KIND } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
@@ -81,8 +81,16 @@ export interface TimelineAudioRun {
   sourceStartSec: number;
   /** 再生速度（>0）。 */
   speed: number;
-  /** 実効音量（0〜1.5・継承解決済み）。 */
+  /**
+   * 実効音量（0〜1.5・継承解決済み）。**`volumeExpr` があるときはそちらが基準**＝この値は使われない
+   * （点が無いクリップだけがここへ落ちる＝再生の `volumeAt(points) ?? clipBaseVolume` と同じ分かれ方）。
+   */
   volume: number;
+  /**
+   * **音量の変化**（#512）を FFmpeg の `volume` フィルタの式にしたもの（`volumeExpr`）。点が無ければ
+   * 未指定＝従来どおり `volume` の一定値で出る。**再生と同じ点列・同じ規則**から組む（ADR-0032 追補＝案A）。
+   */
+  volumeExpr?: string;
   fadeInSec: number;
   fadeOutSec: number;
   /**
@@ -95,9 +103,9 @@ export interface TimelineAudioRun {
 /**
  * 音の並べ方を決める（#631）。**再生（`audioCuesAt`）と同じ値を使う**＝聞いた音と書き出した音が一致する。
  *
- * ⚠️ **例外＝音量の変化（`volumePoints`・#512）はまだ見ていない**（段3 で対応）。点列を持つ文書では
- * ここだけ一定音量になるので、**画面から点を置けるようにする段4 は段3 より後**にすること
- * （先に置けるようにすると、聞いた音と出る音が黙って食い違う＝ADR-0026④）。
+ * **音量の変化（`volumePoints`・#512）も渡す**（段3）＝再生と**同じ点列**から `volumeExpr` で式を組み、
+ * FFmpeg 側は受け取った式を `volume` フィルタへ差し込むだけ（ADR-0032 追補＝案A）。式を Rust で組み直すと
+ * 規則が2か所になるので、**組むのはここ（純粋関数）だけ**にしてずれを「式の書き方」に閉じ込める。
  *
  * 音量とフェードは**再生と同じ関数**（`clipBaseVolume` / `clipFadeSec`）から採る。フェードは FFmpeg 側で
  * `afade` として掛けるので、ここでは**素の音量**と**フェードの秒数（切り詰め済み）**を渡す
@@ -113,6 +121,8 @@ export function timelineAudioRuns(doc: TimelineProject): TimelineAudioRun[] {
     const midSec = clip.startSec + clip.durationSec / 2;
     const cue = audioCuesAt(doc, midSec).find((c) => c.clipId === clip.id);
     if (!cue) continue;
+    // 点が無ければキーごと落とす（`undefined` を持たせない）＝渡す側・受ける側とも「未指定＝一定値」で揃う。
+    const expr = volumeExpr(clip.volumePoints);
     runs.push({
       clipId: clip.id,
       sourceKey,
@@ -122,6 +132,7 @@ export function timelineAudioRuns(doc: TimelineProject): TimelineAudioRun[] {
       sourceStartSec: clip.sourceStartSec ?? 0,
       speed: cue.speed,
       volume: clipBaseVolume(clip, doc),
+      ...(expr ? { volumeExpr: expr } : {}),
       ...clipFadeSec(clip),
       loop: audioLoops(clip),
     });

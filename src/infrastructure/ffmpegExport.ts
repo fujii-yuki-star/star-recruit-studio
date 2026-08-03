@@ -87,6 +87,12 @@ export interface BgmRunInput {
   /** 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。 */
   fileExt: string;
   volume: number;
+  /**
+   * 音量の変化（#512）を `volume` フィルタの式にしたもの（`t`＝この音の先頭からの秒）。
+   * **未指定＝`volume` の一定値**（場面形式は指定しない＝従来の音のまま）。式は domain の
+   * `volumeExpr` が点列から組む＝**再生と同じ点列・同じ規則**（ADR-0032 追補＝案A）。
+   */
+  volumeExpr?: string;
   /** グローバル配置開始（秒）＝adelay。 */
   delaySec: number;
   /** ループ素材から使う長さ（秒）＝atrim。 */
