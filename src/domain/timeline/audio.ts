@@ -57,8 +57,37 @@ export function clipFadeSec(clip: TimelineClip): { fadeInSec: number; fadeOutSec
   };
 }
 
+/**
+ * **音量の変化**（#512）＝点列を線形に補間する。点の外は端の値で伸ばす（最初の点より前＝最初の値・
+ * 最後の点より後＝最後の値）＝区間外で黙って 0 や 1 に化けない。点が無ければ `undefined`＝
+ * 呼び出し側がクリップ一定の音量へ落ちる。**再生と書き出しがこの1つを共有する**（書き出しは同じ点列から
+ * 式を組む＝ずれうるのは式の書き方だけ・ADR-0032 追補）。
+ */
+export function volumeAt(
+  points: readonly { timeSec: number; volume: number }[] | undefined,
+  localSec: number,
+): number | undefined {
+  if (!points || points.length === 0) return undefined;
+  const sorted = [...points].sort((a, b) => a.timeSec - b.timeSec);
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  if (localSec <= first.timeSec) return clampVolume(first.volume);
+  if (localSec >= last.timeSec) return clampVolume(last.volume);
+  for (let i = 1; i < sorted.length; i += 1) {
+    const b = sorted[i];
+    if (localSec < b.timeSec) {
+      const a = sorted[i - 1];
+      const span = b.timeSec - a.timeSec;
+      const r = span > 0 ? (localSec - a.timeSec) / span : 0;
+      return clampVolume(a.volume + (b.volume - a.volume) * r);
+    }
+  }
+  return clampVolume(last.volume);
+}
+
 function fadedVolume(clip: TimelineClip, doc: TimelineProject, localSec: number): number {
-  const base = clipBaseVolume(clip, doc);
+  // 基準は「音量の変化」があればそちら（#512）＝フェードはその上に掛ける（形は変えない）。
+  const base = volumeAt(clip.volumePoints, localSec) ?? clipBaseVolume(clip, doc);
   const { fadeInSec, fadeOutSec } = clipFadeSec(clip);
   const inGain = fadeInSec > 0 ? Math.min(1, localSec / fadeInSec) : 1;
   const outGain = fadeOutSec > 0 ? Math.min(1, (clip.durationSec - localSec) / fadeOutSec) : 1;

@@ -363,7 +363,7 @@ ADR-0023 は「**再生しながら複数トラックで編集**」を掲げて�
 
 ### 段取り（承認後）
 
-1. schema（timeline のみ・additive バンプ）＋ `volumeAt`（純粋・再生と書き出しが共有）
-2. 再生（`audioCuesAt` の `fadedVolume` を `volumeAt` 経由へ）
+1. ✅ schema（timeline 1.7・additive）＋ `volumeAt`（`domain/timeline/audio.ts`・純粋）＝**点の間は線形・点の外は端の値で伸ばす**（区間外で黙って 0 や 1 に化けない）・**並びに依存しない**（読み込んでから並べ替える）
+2. ✅ 再生（`fadedVolume` の基準を `volumeAt` 経由へ＝**フェードはその上に掛かる**・点が無ければ従来どおりクリップ一定）
 3. 書き出し（`BgmRunInput` に点列を渡し、Rust が式を組む）＋実機で音を確認
 4. 画面（音の部品パネルに「音量の変化」＝再生位置に点を置く・キーフレームの UI と同じ流儀）
