@@ -10,6 +10,7 @@ import * as framesMod from '../../renderer/export/buildTimelineFrames';
 import * as fontsMod from '../../renderer/export/loadExportFonts';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
+import { volumeExpr } from '../../domain/timeline/audio';
 import type { TimelineClip, TimelineProject } from '../../domain/timeline/types';
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
@@ -306,5 +307,16 @@ describe('timelineBgmRunInputs', () => {
 
   it('読めなかった音源は置かない（無い音を混ぜようとして書き出しごと失敗させない）', () => {
     expect(timelineBgmRunInputs(doc({ clips: [audioClip] }), {})).toEqual([]);
+  });
+
+  it('音量の変化はそのまま式で渡す（#512・混ぜる側で組み直さない）', () => {
+    const withPoints: TimelineClip = { ...audioClip, volumePoints: [{ timeSec: 0, volume: 0.1 }, { timeSec: 4, volume: 1 }] };
+    const runs = timelineBgmRunInputs(doc({ clips: [withPoints] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    expect(runs[0].volumeExpr).toBe(volumeExpr(withPoints.volumePoints));
+  });
+
+  it('点が無ければ式は付けない（従来どおり一定値の音量で出る＝場面形式と同じ引数）', () => {
+    const runs = timelineBgmRunInputs(doc({ clips: [audioClip] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    expect(runs[0]).not.toHaveProperty('volumeExpr');
   });
 });

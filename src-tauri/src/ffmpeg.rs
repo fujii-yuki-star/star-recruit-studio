@@ -431,6 +431,10 @@ pub fn xfade_chain_args(
 pub struct BgmRunPlaced<'a> {
     pub file: &'a str,
     pub volume: f64,
+    /// 音量の変化（#512）＝`volume` フィルタの式（`t`＝この音の先頭からの秒）。**式は front の
+    /// `volumeExpr`（domain・純粋関数）が点列から組む**＝ここでは差し込むだけ（組み直すと規則が2か所になり、
+    /// 再生と書き出しでずれる余地が増える・ADR-0032 追補＝案A）。`None`＝従来どおり `volume` の一定値。
+    pub volume_expr: Option<&'a str>,
     pub delay_sec: f64,
     pub play_sec: f64,
     pub fade_in_sec: f64,
@@ -519,11 +523,19 @@ pub fn mix_bgm_runs_args(
         // 切り出しは**素材の時間**で見る（速度を掛けたぶん長く読む）。`asetpts` で 0 起点へ戻したあと
         // `atempo` で速度を掛けるので、フェードの位置（`play_sec` 基準）は速度が変わってもずれない。
         let tempo = atempo_chain(r.speed);
+        // 音量の変化（#512）。式の `t` は**この音の先頭からの秒**＝`asetpts` で 0 起点に戻し `atempo` を
+        // 掛けたあとの時刻なので、フェード（`play_sec` 基準）と同じ物差しになる＝再生の `volumeAt(points, 局所秒)`
+        // と同じ点を指す。`eval=frame` を付けないと**最初の1回しか評価されず**一定音量に化ける。
+        // 式は `'…'` で囲む＝中の `,` `(` `)` をフィルタの区切りとして読ませない。
+        // 空文字は「式が無い」と同じ意味（曲線を持たない）なので一定値へ落とす＝`volume=''` のような引数を作らない。
+        let vol_filter = match r.volume_expr.map(str::trim).filter(|e| !e.is_empty()) {
+            Some(expr) => format!("volume='{expr}':eval=frame"),
+            None => format!("volume={}", r.volume),
+        };
         filters.push(format!(
-            "[{src}:a]atrim={start}:{end},asetpts=N/SR/TB,{tempo}volume={vol}{fi}{fo}{d}[{label}]",
+            "[{src}:a]atrim={start}:{end},asetpts=N/SR/TB,{tempo}{vol_filter}{fi}{fo}{d}[{label}]",
             start = r.source_start_sec,
             end = r.source_start_sec + r.play_sec * if r.speed > 0.0 { r.speed } else { 1.0 },
-            vol = r.volume
         ));
         labels.push(format!("[{label}]"));
     }
@@ -2447,6 +2459,10 @@ pub struct BgmRunInput {
     /// 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。
     file_ext: String,
     volume: f64,
+    /// 音量の変化（#512）＝`volume` フィルタの式。**未指定＝従来どおり `volume` の一定値**
+    /// （場面形式の呼び出しは渡さない＝出力は不変）。組むのは front の `volumeExpr`（ADR-0032 追補＝案A）。
+    #[serde(default)]
+    volume_expr: Option<String>,
     /// グローバル配置開始（秒）＝adelay。
     #[serde(default)]
     delay_sec: f64,
@@ -3234,6 +3250,7 @@ fn export_video_impl(
             .map(|(r, f)| BgmRunPlaced {
                 file: f.as_str(),
                 volume: r.volume,
+                volume_expr: r.volume_expr.as_deref(),
                 delay_sec: r.delay_sec,
                 play_sec: r.play_sec,
                 fade_in_sec: r.fade_in_sec,
@@ -4064,6 +4081,7 @@ mod tests {
         let runs = [BgmRunPlaced {
             file: "bgm.mp3",
             volume: 0.25,
+            volume_expr: None,
             delay_sec: 0.0,
             play_sec: 10.0,
             fade_in_sec: 1.0,
@@ -4089,6 +4107,7 @@ mod tests {
         let runs = [BgmRunPlaced {
             file: "voice.wav",
             volume: 1.0,
+            volume_expr: None,
             delay_sec: 2.0,
             play_sec: 3.0,
             fade_in_sec: 0.0,
@@ -4109,6 +4128,7 @@ mod tests {
         let runs = [BgmRunPlaced {
             file: "clip.wav",
             volume: 1.0,
+            volume_expr: None,
             delay_sec: 0.0,
             play_sec: 3.0,
             fade_in_sec: 0.0,
@@ -4122,6 +4142,52 @@ mod tests {
         assert!(fc.contains("atrim=4:10"), "{fc}");
         assert!(fc.contains("asetpts=N/SR/TB,atempo=2,volume=1"), "{fc}");
         assert!(fc.contains("afade=t=out:st=2:d=1"), "{fc}"); // 出力 3 秒の末尾 1 秒
+    }
+
+    /// 音量の変化（#512 段3）：front が組んだ式をそのまま `volume` へ差し込む（毎フレーム評価）。
+    /// 一定値の `volume=` は出さない＝2つの音量が重ね掛けにならない。フェードは従来どおり式の上に掛かる。
+    #[test]
+    fn mix_bgm_runs_args_uses_volume_expression_when_given() {
+        let expr = "if(lt(t,0),0.2,if(lt(t,4),0.2+(1-0.2)*(t-0)/4,1))";
+        let runs = [BgmRunPlaced {
+            file: "bgm.mp3",
+            volume: 0.25,
+            volume_expr: Some(expr),
+            delay_sec: 0.0,
+            play_sec: 8.0,
+            fade_in_sec: 1.0,
+            fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 8.0, "out.mp4");
+        let fc = a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1].clone();
+        // 式は `'…'` で囲む（中の `,` を区切りと読ませない）＋ eval=frame（付けないと一定音量に化ける）。
+        assert!(fc.contains(&format!("volume='{expr}':eval=frame")), "{fc}");
+        assert!(!fc.contains("volume=0.25"), "{fc}"); // 一定値は出さない
+        assert!(fc.contains("afade=t=in:st=0:d=1"), "{fc}"); // フェードは式の上に掛かる
+    }
+
+    /// 式が空（点が無いのと同じ意味）のときは一定値へ落とす＝`volume=''` のような壊れた引数を作らない。
+    #[test]
+    fn mix_bgm_runs_args_empty_expression_falls_back_to_constant_volume() {
+        let runs = [BgmRunPlaced {
+            file: "bgm.mp3",
+            volume: 0.25,
+            volume_expr: Some("  "),
+            delay_sec: 0.0,
+            play_sec: 8.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            loop_source: true,
+            source_start_sec: 0.0,
+            speed: 1.0,
+        }];
+        let a = mix_bgm_runs_args("v.mp4", &runs, 8.0, "out.mp4");
+        let fc = a[a.iter().position(|s| s == "-filter_complex").unwrap() + 1].clone();
+        assert!(fc.contains("volume=0.25"), "{fc}");
+        assert!(!fc.contains("eval=frame"), "{fc}");
     }
 
     #[test]
@@ -4149,6 +4215,7 @@ mod tests {
             BgmRunPlaced {
                 file: "a.mp3",
                 volume: 0.25,
+                volume_expr: None,
                 delay_sec: 0.0,
                 play_sec: 8.5,
                 fade_in_sec: 1.5,
@@ -4160,6 +4227,7 @@ mod tests {
             BgmRunPlaced {
                 file: "b.mp3",
                 volume: 0.3,
+                volume_expr: None,
                 delay_sec: 7.5,
                 play_sec: 6.5,
                 fade_in_sec: 1.0,
@@ -4185,6 +4253,7 @@ mod tests {
         let runs = [BgmRunPlaced {
             file: "bgm.mp3",
             volume: 0.25,
+            volume_expr: None,
             delay_sec: 0.0,
             play_sec: 10.0,
             fade_in_sec: 0.0,
@@ -4440,6 +4509,7 @@ mod tests {
         let runs = [BgmRunPlaced {
             file: &bgm_str,
             volume: 0.25,
+            volume_expr: None,
             delay_sec: 0.0,
             play_sec: 2.0,
             fade_in_sec: 0.0,
