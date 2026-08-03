@@ -1,5 +1,15 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { useMemo, useRef, useState, type ChangeEvent } from "react";
+import { PanelLayoutView } from "../components/layout/PanelLayoutView";
+import type { PanelSpec } from "../components/layout/PanelLayoutView";
+import { usePanelLayout } from "../components/layout/usePanelLayout";
+import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
 import type { ScreenId } from "../data/mockData";
+
+/**
+ * この画面が持つ欄（ADR-0033 段階4 後半）。**値集合にする**＝綴り違いで「知らない欄」として落ちない（§2-7）。
+ */
+const PANEL_ID = { preview: "preview", edit: "edit" } as const;
+const PANEL_IDS = Object.values(PANEL_ID);
 import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
@@ -95,6 +105,17 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const [busyAction, setBusyAction] = useState<"save" | "delete" | "asset" | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // 欄の配置（ADR-0033 段階4 後半）。**既定はいままでの並びと同じ**（中央＝プレビュー／右＝編集）。
+  // 出し入れは**共通のフック**（画面ごとに書き写さない・§6）。
+  const defaultLayout = useMemo(() => {
+    const l = emptyLayout();
+    l.nodes.center = { panelId: PANEL_ID.preview };
+    l.nodes.right = { panelId: PANEL_ID.edit };
+    return l;
+  }, []);
+  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed: closedPanels } =
+    usePanelLayout(PANEL_SCREEN.looks, defaultLayout, PANEL_IDS);
   // グループを中身ごと削除する確認（#551）。id で持つ＝選ぶグループが変わると確認が自動で解除される（#410 の流儀）。
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
   const [assetError, setAssetError] = useState<{ layerId: string; msg: string } | null>(null);
@@ -501,52 +522,11 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     return null;
   }
 
-  return (
-    <div className="main-scroll">
-      <ExportLockBanner onNavigate={onNavigate} />
-      {/* ヘッダ：戻る・タイトル・保存（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ） */}
-      <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
-        <div className="row gap-sm" style={{ alignItems: "center" }}>
-          <button className="btn btn-ghost btn-icon" disabled={busyAction !== null} onClick={onBack}><ArrowLeftIcon size={16} />一覧へ戻る</button>
-          <span className="topbar-title">見た目パターンを編集</span>
-        </div>
-        <div className="row gap-sm" style={{ alignItems: "center" }}>
-          {/* 取り消す/やり直す（#547 P2-3）。見た目・語彙は共有コンポーネントで他画面と一致（ADR-0026②）。
-              対象は**この画面の下書き**＝保存前の編集だけを戻す（store の履歴には触れない・#547 P1-1）。
-              保存/削除の実行中は他の操作と揃えて止める。 */}
-          <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undoDraft} onRedo={redoDraft} disabled={busyAction !== null} />
-          {dirty && <UnsavedMark />}
-          <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
-            {busyAction === "save" ? "保存中…" : "保存"}
-          </button>
-        </div>
-      </div>
 
-      {confirmDiscard && (
-        <div className="notice notice-warn mb" role="alert">
-          <span>編集中の変更を保存せずに一覧へ戻りますか？</span>
-          {/* 確認は「やめる（左）／実行（右）」で統一（#410 sub2）。キャンセル語は「やめる」に揃える。 */}
-          <div className="row gap-sm">
-            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDiscard(false)}>やめる</button>
-            <button className="btn btn-primary btn-icon" onClick={backToList}>戻る（破棄）</button>
-          </div>
-        </div>
-      )}
-      {templateError && (
-        <div className="notice notice-warn mb" role="alert"><span>{templateError}</span></div>
-      )}
-
-      {/* 本体：左＝キャンバス（広く）／右＝編集パネル */}
-      {/* フォーカス中の連続入力を1つの取り消しに合成する（#547 P2-3）。onFocus/onBlur は子孫から伝播するので、
-          数値欄・名前欄・色欄をここ1か所で束ねる（欄ごとに書き分けない）。未変更のフォーカスは記録しない（遅延記録）。 */}
-      <div
-        style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: "var(--gap-lg)", alignItems: "start" }}
-        onFocus={(e) => { if (isTextEntryTarget(e.target)) textGroup.onFocus(); }}
-        onBlur={(e) => { if (isTextEntryTarget(e.target)) textGroup.onBlur(); }}
-      >
-        {/* 左：プレビュー＋レイヤー操作オーバーレイ（ドラッグ/リサイズ/吸着・③c） */}
-        <div className="card">
-          <h2 className="section-title">プレビュー</h2>
+  // 欄（ADR-0033 段階4 後半）＝いまの2列をそのまま欄にする。**中身は変えない**。
+  const panels: PanelSpec[] = [
+    { id: PANEL_ID.preview, title: 'プレビュー', content: (
+      <>
           <ScenePreview scene={sampleScene} template={draft}>
             <TemplateLayerOverlay
               layers={draft.layers}
@@ -635,10 +615,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               />
             </fieldset>
           )}
-        </div>
-
-        {/* 右：編集パネル */}
-        <div className="card col gap-sm">
+      </>
+    ) },
+    { id: PANEL_ID.edit, title: '見た目パターンの編集', content: (
+      <>
           {/* 名前 */}
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
@@ -719,6 +699,63 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               )}
             </>
           )}
+      </>
+    ) },
+  ];
+
+  return (
+    <div className="main-scroll">
+      <ExportLockBanner onNavigate={onNavigate} />
+      {/* ヘッダ：戻る・タイトル・保存（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ） */}
+      <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
+        <div className="row gap-sm" style={{ alignItems: "center" }}>
+          <button className="btn btn-ghost btn-icon" disabled={busyAction !== null} onClick={onBack}><ArrowLeftIcon size={16} />一覧へ戻る</button>
+          <span className="topbar-title">見た目パターンを編集</span>
+        </div>
+        <div className="row gap-sm" style={{ alignItems: "center" }}>
+          {/* 取り消す/やり直す（#547 P2-3）。見た目・語彙は共有コンポーネントで他画面と一致（ADR-0026②）。
+              対象は**この画面の下書き**＝保存前の編集だけを戻す（store の履歴には触れない・#547 P1-1）。
+              保存/削除の実行中は他の操作と揃えて止める。 */}
+          <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undoDraft} onRedo={redoDraft} disabled={busyAction !== null} />
+          {dirty && <UnsavedMark />}
+          <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
+            {busyAction === "save" ? "保存中…" : "保存"}
+          </button>
+        </div>
+      </div>
+
+      {confirmDiscard && (
+        <div className="notice notice-warn mb" role="alert">
+          <span>編集中の変更を保存せずに一覧へ戻りますか？</span>
+          {/* 確認は「やめる（左）／実行（右）」で統一（#410 sub2）。キャンセル語は「やめる」に揃える。 */}
+          <div className="row gap-sm">
+            <button className="btn btn-ghost btn-icon" onClick={() => setConfirmDiscard(false)}>やめる</button>
+            <button className="btn btn-primary btn-icon" onClick={backToList}>戻る（破棄）</button>
+          </div>
+        </div>
+      )}
+      {templateError && (
+        <div className="notice notice-warn mb" role="alert"><span>{templateError}</span></div>
+      )}
+
+      {/* 本体：左＝キャンバス（広く）／右＝編集パネル */}
+      {/* フォーカス中の連続入力を1つの取り消しに合成する（#547 P2-3）。onFocus/onBlur は子孫から伝播するので、
+          数値欄・名前欄・色欄をここ1か所で束ねる（欄ごとに書き分けない）。未変更のフォーカスは記録しない（遅延記録）。 */}
+      {/* 本体は**欄**（ADR-0033）＝利用者が配置を組み替えられる。フォーカスの束ね（#547 P2-3）は
+          欄の外側に置く＝どの欄で入力しても1つの取り消しにまとまる。 */}
+      <div
+        style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+        onFocus={(e) => { if (isTextEntryTarget(e.target)) textGroup.onFocus(); }}
+        onBlur={(e) => { if (isTextEntryTarget(e.target)) textGroup.onBlur(); }}
+      >
+        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
+        <div className="row gap-sm" style={{ flexShrink: 0, flexWrap: "wrap" }}>
+          {closedPanels.map((id) => (
+            <button key={id} className="btn btn-secondary" onClick={() => changeLayout(addPanelToRegion(panelLayout, id, PANEL_REGION.left))}>
+              「{panels.find((p) => p.id === id)?.title}」を表示する
+            </button>
+          ))}
+          <button className="btn btn-ghost" onClick={resetLayout}>配置を既定に戻す</button>
         </div>
       </div>
     </div>
