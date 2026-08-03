@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type SyntheticEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
+import { PanelLayoutView } from "../components/layout/PanelLayoutView";
+import type { PanelSpec } from "../components/layout/PanelLayoutView";
+import {
+  PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, closedPanelIds, emptyLayout, normalizeLayout,
+} from "../../domain/layout/panelLayout";
+import type { PanelLayout } from "../../domain/layout/panelLayout";
+import { clearPanelLayout, getPanelLayout, setPanelLayout } from "../../infrastructure/appSettings";
 import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
@@ -85,24 +92,16 @@ interface SceneEditProps {
 
 type AssetFilter = "all" | "image" | "video" | "bgm";
 
-// 場面編集パネルのレイアウト設定（#276）。左パネルは折りたたみ、右パネルは横幅をドラッグで調整（localStorage に保存）。
-const RIGHT_MIN_WIDTH = 260;
-const RIGHT_MAX_WIDTH = 560;
-const LEFT_WIDTH = 240;
-const LEFT_COLLAPSED_WIDTH = 44;
-const LS_RIGHT_WIDTH = "sceneEdit.rightWidth";
-const LS_LEFT_COLLAPSED = "sceneEdit.leftCollapsed";
+/**
+ * この画面が持つ欄（ADR-0033 段階4）。**値集合にする**＝綴り違いで「知らない欄」として落ちない（§2-7）。
+ * 左の折りたたみ（#276）・右幅のドラッグ（#276）・節の既定開閉（#550）でやっていたことは、
+ * **配置の仕組みそのもの**に置き換わった＝画面ごとの作り分けをやめる（§6）。
+ */
+const PANEL_ID = { assets: "assets", preview: "preview", scenes: "scenes", edit: "edit" } as const;
+const PANEL_IDS = Object.values(PANEL_ID);
+/** 配置を覚えるまでの待ち（ms）。境界のドラッグ中に書き続けない。 */
+const LAYOUT_SAVE_DELAY_MS = 300;
 const LS_SECTION_OPEN = "sceneEdit.sectionOpen";
-function loadRightWidth(): number {
-  try {
-    const v = Number(localStorage.getItem(LS_RIGHT_WIDTH));
-    return v >= RIGHT_MIN_WIDTH && v <= RIGHT_MAX_WIDTH ? v : 300;
-  } catch { return 300; }
-}
-function loadLeftCollapsed(): boolean {
-  try { return localStorage.getItem(LS_LEFT_COLLAPSED) === "1"; } catch { return false; }
-}
-
 /**
  * 節の開閉の記憶（#550 ③）。**場面をまたぐだけなら元から保たれる**（節は再マウントされない）が、
  * 台本表/仕上がり確認へ行って戻ると画面ごと作り直されて忘れる＝毎回開き直す手間になっていた。
@@ -329,31 +328,38 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
   // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
-  const [leftCollapsed, setLeftCollapsed] = useState(loadLeftCollapsed);
-  const [rightWidth, setRightWidth] = useState(loadRightWidth);
-  const resizeRef = useRef<{ startX: number; startW: number; latest: number } | null>(null);
-  useEffect(() => { try { localStorage.setItem(LS_LEFT_COLLAPSED, leftCollapsed ? "1" : "0"); } catch { /* noop */ } }, [leftCollapsed]);
-  // 右幅はドラッグ終了時にだけ保存する（毎フレーム書き込みを避けるため effect 依存にはしない・下の onResizeEnd）。
-  // 右パネルの境界をドラッグして幅を変える（左へドラッグ＝広がる）。pointer capture で枠外まで追従。
-  const onResizeDown = (e: ReactPointerEvent) => {
-    e.preventDefault();
-    resizeRef.current = { startX: e.clientX, startW: rightWidth, latest: rightWidth };
-    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* noop */ }
+  // 欄の配置（ADR-0033 段階4）。**既定はいまの見え方と同じ**（左＝素材／中央＝仕上がり確認と場面の一覧／右＝編集）
+  // ＝配置を触っていない利用者には、これまでと同じ画面が出る。
+  const defaultLayout = useMemo(() => {
+    const l = emptyLayout();
+    l.nodes.left = { panelId: PANEL_ID.assets };
+    l.nodes.center = {
+      dir: SPLIT_DIR.column,
+      sizes: [0.68, 0.32],
+      children: [{ panelId: PANEL_ID.preview }, { panelId: PANEL_ID.scenes }],
+    };
+    l.nodes.right = { panelId: PANEL_ID.edit };
+    return l;
+  }, []);
+  const [panelLayout, setPanelLayoutState] = useState<PanelLayout>(() =>
+    normalizeLayout(getPanelLayout(PANEL_SCREEN.scene) ?? defaultLayout, PANEL_IDS),
+  );
+  const changeLayout = (next: PanelLayout): void => setPanelLayoutState(normalizeLayout(next, PANEL_IDS));
+  const resetLayout = (): void => {
+    clearPanelLayout(PANEL_SCREEN.scene);
+    setPanelLayoutState(normalizeLayout(defaultLayout, PANEL_IDS));
   };
-  const onResizeMove = (e: ReactPointerEvent) => {
-    if (!resizeRef.current) return;
-    const delta = resizeRef.current.startX - e.clientX;
-    const w = Math.min(RIGHT_MAX_WIDTH, Math.max(RIGHT_MIN_WIDTH, resizeRef.current.startW + delta));
-    resizeRef.current.latest = w; // 最新値を ref に保持（保存は終了時・closure の遅延に依存しない）
-    setRightWidth(w);
-  };
-  const onResizeEnd = () => {
-    const w = resizeRef.current?.latest;
-    resizeRef.current = null;
-    if (w == null) return; // ドラッグしていない/キャンセルでは保存しない
-    // 幅は終了時にだけ保存（ドラッグ中の毎フレーム localStorage 書き込み＝メインスレッド I/O を避ける・PR#285レビュー）。
-    try { localStorage.setItem(LS_RIGHT_WIDTH, String(w)); } catch { /* noop */ }
-  };
+  const closedPanels = closedPanelIds(panelLayout, PANEL_IDS);
+  // 保存は**少し待ってから**（ドラッグ中に書き続けない）。**画面を離れるときは待たずに書く**。
+  useEffect(() => {
+    const t = setTimeout(() => setPanelLayout(PANEL_SCREEN.scene, panelLayout), LAYOUT_SAVE_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [panelLayout]);
+  const panelLayoutRef = useRef(panelLayout);
+  useEffect(() => {
+    panelLayoutRef.current = panelLayout;
+  }, [panelLayout]);
+  useEffect(() => () => setPanelLayout(PANEL_SCREEN.scene, panelLayoutRef.current), []);
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
@@ -1369,68 +1375,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (path) await addAssetByPath(path);
   }
 
-  return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
-      <KeyboardNudge active={canvasKbdActive && !isExporting} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
-      <ExportLock onNavigate={onNavigate}>
-      <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
-        {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
-        <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <ProjectNameField />
-          <span className="text-sm text-muted" style={{ flexShrink: 0 }}>場面編集</span>
-        </div>
-        <div className="topbar-actions">
-          {/* 進捗・作成・中止は共通操作（3画面で同じ見え方・同じ挙動＝#547 P2-6・ADR-0026②）。
-              以前はここだけ「準備中…」と表示していた。 */}
-          <BulkVoiceControls buttonClassName="btn btn-ghost" />
-          <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("draft")}>
-            <ArrowLeftIcon size={16} />
-            台本表へ戻る
-          </button>
-          {/* 仕上がり確認から「場面編集へ戻る」で“いま編集中の場面”に戻れるよう、現在の場面を editingSceneId に
-              預けてから遷移する（#410 sub3 レビュー）。これが無いと再マウントで先頭場面に戻り作業位置を失う。 */}
-          <button className="btn btn-primary" onClick={() => { setEditingSceneId(selected?.sceneId ?? null); setPreviewReturnTo("scene-edit"); onNavigate("preview"); }}>
-            仕上がり確認へ
-            <ChevronRightIcon size={18} />
-          </button>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden" }}>
-        <div
-          className="editor-grid"
-          style={{ position: "relative", gridTemplateColumns: `${leftCollapsed ? LEFT_COLLAPSED_WIDTH : LEFT_WIDTH}px 1fr ${rightWidth}px` }}
-        >
-          {/* 右パネルの幅をドラッグで変える境界ハンドル（#276・絶対配置でグリッド項目にはならない）。 */}
-          <div
-            onPointerDown={onResizeDown}
-            onPointerMove={onResizeMove}
-            onPointerUp={onResizeEnd}
-            onPointerCancel={onResizeEnd}
-            title="ドラッグで編集欄の幅を変える"
-            style={{
-              position: "absolute", top: 0, bottom: 0,
-              right: `calc(${rightWidth}px + (var(--gap) / 2) - 3px)`,
-              width: 6, cursor: "col-resize", background: "var(--color-border-strong)",
-              borderRadius: 3, opacity: 0.5, zIndex: 5, touchAction: "none",
-            }}
-          />
-          {/* 左: 素材一覧 */}
-          <div className="editor-col">
-            {/* 左パネルの折りたたみ（#276）：見出し＋トグル。畳むと本体は display:none（列幅も縮む）。 */}
-            <div className="row-between" style={{ alignItems: "center", marginBottom: leftCollapsed ? 0 : "var(--gap-sm)" }}>
-              {!leftCollapsed && <h2 className="field-label" style={{ margin: 0 }}>素材一覧</h2>}
-              <button
-                className="btn btn-ghost btn-icon text-sm"
-                title={leftCollapsed ? "素材一覧をひらく" : "素材一覧をとじる"}
-                aria-label={leftCollapsed ? "素材一覧をひらく" : "素材一覧をとじる"}
-                onClick={() => setLeftCollapsed((v) => !v)}
-              >
-                {leftCollapsed ? "▶" : "◀"}
-              </button>
-            </div>
-            <div style={{ display: leftCollapsed ? "none" : "contents" }}>
+  // 欄（ADR-0033 段階4）＝いまの3列をそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
+  const panels: PanelSpec[] = [
+    { id: PANEL_ID.assets, title: '素材一覧', content: (
+      <>
             <div
               className="row gap-sm"
               style={{
@@ -1512,14 +1460,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
               </div>
             )}
-            </div>
-          </div>
-
-          {/* 中央: 仕上がり確認 + 場面カード */}
-          <div className="col gap" style={{ overflow: "hidden" }}>
-            <div className="editor-col grow" style={{ overflow: "auto" }}>
+      </>
+    ) },
+    { id: PANEL_ID.preview, title: '仕上がり確認', content: (
+      <>
               <div className="row-between" style={{ alignItems: "center" }}>
-                <h2 className="field-label" style={{ margin: 0 }}>仕上がり確認</h2>
                 <div className="row gap-sm" style={{ alignItems: "center" }}>
                   {/* 前の場面からの「切り替え効果」を再生確認（#408 Part 2）。効果があり前場面が描けるときだけ出す。 */}
                   {canPlayTransition && (
@@ -1639,14 +1584,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <p className="text-sm text-muted mt">
                 選択中の場面「{sceneTypeLabel[selected.sceneType]}」の仕上がりです。右側を直すとここに反映されます。
               </p>
-            </div>
-
-            {/* 下: 場面カード一覧 */}
-            <div className="editor-col" style={{ flexShrink: 0 }}>
+      </>
+    ) },
+    { id: PANEL_ID.scenes, title: '場面の並び', content: (
+      <>
               <div className="row-between mb">
-                <h2 className="field-label" style={{ margin: 0 }}>
-                  場面の並び
-                </h2>
+                <span />
                 <button className="btn btn-ghost btn-icon" onClick={() => selectScene(addScene())}>
                   <PlusIcon size={16} />
                   場面を追加
@@ -1709,13 +1652,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-
-          {/* 右: 選択中の場面を編集 */}
-          <div className="editor-col">
+      </>
+    ) },
+    { id: PANEL_ID.edit, title: '選択中の場面を編集', content: (
+      <>
             <div className="row-between" style={{ alignItems: "center" }}>
-              <h2 className="field-label" style={{ margin: 0 }}>選択中の場面を編集</h2>
               {/* 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z・Ctrl+Y でも操作可。 */}
               <div className="row gap-sm">
                 {/* 書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも disabled にして誤認を防ぐ（ADR-0026④・#547 P3-12）。 */}
@@ -2780,7 +2721,48 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <SaveIcon size={18} />
               {saveButtonLabel(saveStatus)}
             </button>
-          </div>
+      </>
+    ) },
+  ];
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* キーボード微調整/削除（#525-11）。描画なし＝window keydown 購読のみ。 */}
+      <KeyboardNudge active={canvasKbdActive && !isExporting} onArrow={onCanvasNudge} onDelete={onCanvasDelete} />
+      <ExportLock onNavigate={onNavigate}>
+      <div className="topbar" style={{ borderBottom: "1px solid var(--color-border)" }}>
+        {/* プロジェクト名をその場で表示・変更（#252）。右の「場面編集」は現在地の目印。 */}
+        <div className="topbar-title" style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <ProjectNameField />
+          <span className="text-sm text-muted" style={{ flexShrink: 0 }}>場面編集</span>
+        </div>
+        <div className="topbar-actions">
+          {/* 進捗・作成・中止は共通操作（3画面で同じ見え方・同じ挙動＝#547 P2-6・ADR-0026②）。
+              以前はここだけ「準備中…」と表示していた。 */}
+          <BulkVoiceControls buttonClassName="btn btn-ghost" />
+          <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("draft")}>
+            <ArrowLeftIcon size={16} />
+            台本表へ戻る
+          </button>
+          {/* 仕上がり確認から「場面編集へ戻る」で“いま編集中の場面”に戻れるよう、現在の場面を editingSceneId に
+              預けてから遷移する（#410 sub3 レビュー）。これが無いと再マウントで先頭場面に戻り作業位置を失う。 */}
+          <button className="btn btn-primary" onClick={() => { setEditingSceneId(selected?.sceneId ?? null); setPreviewReturnTo("scene-edit"); onNavigate("preview"); }}>
+            仕上がり確認へ
+            <ChevronRightIcon size={18} />
+          </button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden" }}>
+        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
+        <div className="row gap-sm">
+          {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8）。 */}
+          {closedPanels.map((id) => (
+            <button key={id} className="btn btn-secondary" onClick={() => changeLayout(addPanelToRegion(panelLayout, id, PANEL_REGION.left))}>
+              「{panels.find((p) => p.id === id)?.title}」を表示する
+            </button>
+          ))}
+          <button className="btn btn-ghost" onClick={resetLayout}>配置を既定に戻す</button>
         </div>
       </div>
       </ExportLock>
