@@ -46,11 +46,25 @@ export type PanelNode = PanelLeaf | PanelSplit;
 /** 画面ぜんぶの配置。欄が1つも無い領域は `null`（枠を描かない）。 */
 export type PanelLayout = Record<PanelRegion, PanelNode | null>;
 
-/** 欄1つの最小の割合。0 にすると**掴めない欄**ができる（戻せない＝§2-5）。 */
+/**
+ * 欄1つの最小の割合。0 にすると**掴めない欄**ができる（戻せない＝§2-5）。
+ * **正典（`11.4`）の定数ではない**（動画のデータに出てこない画面だけの下限）ので `domain/constants.ts` へは
+ * 置かず、使う側がここを参照する（単一の参照元・§2-7）。
+ */
 export const MIN_PANEL_RATIO = 0.1;
 
 export function isSplit(node: PanelNode): node is PanelSplit {
-  return 'children' in node;
+  return typeof node === 'object' && node != null && 'children' in node;
+}
+
+/**
+ * 分かれ目を作る**唯一の入口**（子と割合を**対で**受ける）。子が1つなら分かれ目にしない・0 なら無い。
+ * 子と割合を別々に組み立てると、**子を落とした位置と割合を切る位置がずれる**（末尾から切ってしまう等）。
+ */
+function makeSplit(dir: SplitDir, pairs: readonly { node: PanelNode; size: number }[]): PanelNode | null {
+  if (pairs.length === 0) return null;
+  if (pairs.length === 1) return pairs[0].node;
+  return { dir, sizes: normalizeSizes(pairs.map((p) => p.size)), children: pairs.map((p) => p.node) };
 }
 
 /** 空の配置（どの領域にも何も置いていない）。 */
@@ -236,8 +250,11 @@ export function dropPanelBeside(
       const sizes = [...node.sizes.slice(0, at), 1 / children.length, ...node.sizes.slice(at)];
       return { dir: node.dir, sizes: normalizeSizes(sizes), children };
     }
-    const children = node.children.map(walk).filter((c): c is PanelNode => c != null);
-    return { dir: node.dir, sizes: normalizeSizes(node.sizes.slice(0, children.length)), children };
+    // 子と割合は**対で**持ち直す（`slice` で末尾から切ると、落ちた子の位置とずれる）。
+    const pairs = node.children
+      .map((child, i) => ({ node: walk(child), size: node.sizes[i] ?? 1 / node.children.length }))
+      .filter((p): p is { node: PanelNode; size: number } => p.node != null);
+    return makeSplit(node.dir, pairs);
   };
 
   const next = emptyLayout();
@@ -267,9 +284,9 @@ export function movePanelStep(layout: PanelLayout, panelId: PanelId, side: DropS
       done = true;
       const children = [...node.children];
       [children[idx], children[to]] = [children[to], children[idx]];
-      const sizes = [...node.sizes];
+      const sizes = children.map((_, i) => node.sizes[i] ?? 1 / children.length);
       [sizes[idx], sizes[to]] = [sizes[to], sizes[idx]];
-      return { dir: node.dir, sizes, children };
+      return { dir: node.dir, sizes: normalizeSizes(sizes), children };
     }
     return { dir: node.dir, sizes: node.sizes, children: node.children.map(walk).filter((c): c is PanelNode => c != null) };
   };
@@ -310,4 +327,45 @@ export function resizeSplit(
   };
   const next: PanelLayout = { ...layout, [region]: walk(layout[region] ?? null, 0) };
   return changed ? next : layout;
+}
+
+/**
+ * 保存から読んだ**素性の分からない値**を配置として受け取る。形が合わないところは**落とす**（例外にしない）。
+ *
+ * **これが無いと、壊れた設定で画面が開けなくなる**（`{"left":5}` や `sizes` の無い分かれ目で、
+ * 描く前に落ちる）。落ちる先が初期描画なので「配置を既定に戻す」にも辿り着けない＝**設定のせいで
+ * 二度と開けない**（§2-5・ADR-0033 判断軸3）。`normalizeLayout` は**形が整っている前提**の整え役なので、
+ * 入口はここで守る。
+ *
+ * 何も残らなければ `null`＝呼び出し側が既定を使う。
+ */
+export function parsePanelLayout(raw: unknown): PanelLayout | null {
+  if (!isRecord(raw)) return null;
+  const next = emptyLayout();
+  let any = false;
+  for (const region of PANEL_REGIONS) {
+    const node = parseNode(raw[region]);
+    if (node) {
+      next[region] = node;
+      any = true;
+    }
+  }
+  return any ? next : null;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v != null && !Array.isArray(v);
+}
+
+function parseNode(raw: unknown): PanelNode | null {
+  if (!isRecord(raw)) return null;
+  if (typeof raw.panelId === 'string') return raw.panelId === '' ? null : { panelId: raw.panelId };
+  if (!Array.isArray(raw.children)) return null;
+  // 割合が欠けている・数が合わないのは**壊れた値ではなく足りない値**として扱う（等分へ倒す）。
+  const sizes = Array.isArray(raw.sizes) ? raw.sizes : [];
+  const pairs = raw.children
+    .map((child, i) => ({ node: parseNode(child), size: typeof sizes[i] === 'number' ? (sizes[i] as number) : 0 }))
+    .filter((p): p is { node: PanelNode; size: number } => p.node != null);
+  const dir = raw.dir === SPLIT_DIR.row ? SPLIT_DIR.row : SPLIT_DIR.column;
+  return makeSplit(dir, pairs.map((p) => ({ node: p.node, size: p.size > 0 ? p.size : 1 / Math.max(1, pairs.length) })));
 }

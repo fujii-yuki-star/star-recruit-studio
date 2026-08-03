@@ -14,6 +14,8 @@ import {
   movePanelStep,
   normalizeLayout,
   normalizeSizes,
+  PANEL_REGIONS,
+  parsePanelLayout,
   placedPanelIds,
   removePanel,
   resizeSplit,
@@ -39,8 +41,9 @@ describe('placedPanelIds / closedPanelIds', () => {
     expect(placedPanelIds(layout)).toEqual(['a', 'b', 'c', 'd']);
   });
 
-  it('置いていない欄＝閉じている欄（「表示する欄」から戻せる）', () => {
-    expect(closedPanelIds(withLeft(leaf('a')), ['a', 'b', 'c'])).toEqual(['b', 'c']);
+  it('置いていない欄＝閉じている欄（画面が並べた順のまま返す）', () => {
+    // 並べ替えたり並び順を作り直したりしない＝「表示する欄」の並びが画面ごとに勝手に変わらない。
+    expect(closedPanelIds(withLeft(leaf('a')), ['c', 'a', 'b'])).toEqual(['c', 'b']);
   });
 });
 
@@ -49,9 +52,11 @@ describe('normalizeLayout（読める形へ整える）', () => {
     expect(normalizeLayout(withLeft(col([leaf('a'), leaf('zzz')])), ['a']).left).toEqual(leaf('a'));
   });
 
-  it('同じ欄は1か所だけにする（2か所に出ると追えない）', () => {
+  it('同じ欄は1か所だけにする（先に出てきたほうを残す＝2か所に出ると追えない）', () => {
     const layout: PanelLayout = { ...emptyLayout(), left: leaf('a'), right: leaf('a') };
-    expect(placedPanelIds(normalizeLayout(layout, ['a']))).toEqual(['a']);
+    const got = normalizeLayout(layout, ['a']);
+    expect(got.left).toEqual(leaf('a'));
+    expect(got.right).toBeNull();
   });
 
   it('子が1つの分かれ目は畳み、空の枝は消す（空の器を残さない）', () => {
@@ -198,5 +203,81 @@ describe('resizeSplit（境界のドラッグ・決定2）', () => {
     expect(resizeSplit(layout, PANEL_REGION.left, [9], [0.5, 0.5])).toBe(layout);
     expect(resizeSplit(layout, PANEL_REGION.left, [], [0.5, 0.3, 0.2])).toBe(layout);
     expect(resizeSplit(layout, PANEL_REGION.right, [], [0.5, 0.5])).toBe(layout);
+  });
+});
+
+describe('parsePanelLayout（保存から読んだ値を受け取る）', () => {
+  it('形が違うところは落とす（例外にしない＝設定のせいで画面が開けなくならない）', () => {
+    expect(() => parsePanelLayout({ left: 5 })).not.toThrow();
+    expect(parsePanelLayout({ left: 5 })).toBeNull();
+    expect(parsePanelLayout(null)).toBeNull();
+    expect(parsePanelLayout([])).toBeNull();
+    expect(parsePanelLayout({ left: { children: 'x' } })).toBeNull();
+  });
+
+  it('割合が無い分かれ目は等分として読む（中身を黙って捨てない）', () => {
+    const got = parsePanelLayout({ left: { dir: 'column', children: [{ panelId: 'a' }, { panelId: 'b' }] } });
+    expect(got && placedPanelIds(got)).toEqual(['a', 'b']);
+    const node = got?.left;
+    expect(node && isSplit(node) && node.sizes.reduce((x, y) => x + y, 0)).toBeCloseTo(1, 9);
+  });
+
+  it('読める形はそのまま受け取る（往復して同じ配置になる）', () => {
+    const layout: PanelLayout = { ...emptyLayout(), left: col([leaf('a'), row([leaf('b'), leaf('c')])]), bottom: leaf('d') };
+    expect(parsePanelLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+  });
+});
+
+describe('入れ子の奥・4つの領域すべて（/canon-check の指摘）', () => {
+  it('奥にある欄の隣にも差せる（入れ子の深さに上限が無い＝決定11 の核）', () => {
+    const layout: PanelLayout = {
+      ...emptyLayout(),
+      center: col([leaf('a'), row([leaf('b'), col([leaf('c'), leaf('d')])])]),
+      bottom: leaf('e'),
+    };
+    const got = dropPanelBeside(layout, 'e', 'd', DROP_SIDE.right);
+    expect(placedPanelIds(got)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(got.bottom).toBeNull();
+    // 'd' は縦並びの中にいるので、横に差すと新しい分かれ目ができる（入れ子が1段深くなる）。
+    const inner = got.center && isSplit(got.center) ? got.center.children[1] : null;
+    const deep = inner && isSplit(inner) ? inner.children[1] : null;
+    expect(deep && isSplit(deep) && deep.dir).toBe(SPLIT_DIR.column);
+  });
+
+  it('奥にある欄もメニューで入れ替えられる', () => {
+    const layout: PanelLayout = { ...emptyLayout(), right: col([leaf('a'), row([leaf('b'), leaf('c')])]) };
+    const got = movePanelStep(layout, 'c', DROP_SIDE.left);
+    expect(placedPanelIds(got)).toEqual(['a', 'c', 'b']);
+  });
+
+  it('どの領域でも同じように扱える', () => {
+    for (const region of PANEL_REGIONS) {
+      const one = addPanelToRegion(emptyLayout(), 'a', region);
+      const two = addPanelToRegion(one, 'b', region);
+      expect(placedPanelIds(two)).toEqual(['a', 'b']);
+      expect(placedPanelIds(removePanel(two, 'a'))).toEqual(['b']);
+    }
+  });
+});
+
+describe('割合の対応がずれない（/canon-check の指摘）', () => {
+  it('3つ並んだ真ん中を外しても、残りの比が保たれる', () => {
+    const got = removePanel(withLeft(col([leaf('a'), leaf('b'), leaf('c')], [0.2, 0.5, 0.3])), 'b').left;
+    expect(got && isSplit(got) && got.sizes[0]).toBeCloseTo(0.4, 9); // 0.2 : 0.3 → 0.4 : 0.6
+    expect(got && isSplit(got) && got.sizes.reduce((x, y) => x + y, 0)).toBeCloseTo(1, 9);
+  });
+
+  it('すでに積んである領域へ足すと末尾に入る（入れ子を深くしない）', () => {
+    const got = addPanelToRegion(withLeft(col([leaf('a'), leaf('b')])), 'c', PANEL_REGION.left).left;
+    expect(got && isSplit(got) && got.children).toHaveLength(3);
+    expect(placedPanelIds(withLeft(got))).toEqual(['a', 'b', 'c']);
+  });
+
+  it('押し上げのしわ寄せは、余裕のある欄から比例して引く（3つ以上）', () => {
+    const got = normalizeSizes([0.8, 0.19, 0.01]);
+    expect(got[2]).toBeCloseTo(MIN_PANEL_RATIO, 9);
+    expect(got.reduce((x, y) => x + y, 0)).toBeCloseTo(1, 9);
+    // 0.8 と 0.19 から**比例して**引く＝大きいほうが多く引かれる（等分に削らない）。
+    expect(0.8 - got[0]).toBeGreaterThan(0.19 - got[1]);
   });
 });

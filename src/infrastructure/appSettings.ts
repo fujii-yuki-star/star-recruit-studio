@@ -1,4 +1,6 @@
-// アプリ全体の設定（プロジェクト非依存）。VOICEVOX 接続先・ナレーター話者など。localStorage に保持。
+// アプリ全体の設定（プロジェクト非依存）。VOICEVOX 接続先・ナレーター話者・欄の配置など。localStorage に保持。
+import { parsePanelLayout } from '../domain/layout/panelLayout';
+import type { PanelLayout } from '../domain/layout/panelLayout';
 // project.json には入れない（接続先は環境差があり、共有プロジェクトに含めるべきでないため）。
 // Tauri WebView でも localStorage は永続する（projectFs と同様）。
 const VOICEVOX_URL_KEY = 'app.voicevoxUrl';
@@ -51,18 +53,25 @@ export function setAiModel(model: string): void {
  * 読めない・壊れているときは `null`（＝呼び出し側が既定を使う）＝**設定のせいで画面が開けない**を作らない。
  * 整合（知らない欄を落とす・割合をそろえる）は domain（`normalizeLayout`）が行うので、ここは入れ物だけ。
  */
-export function getPanelLayout(screenId: string): unknown | null {
+export function getPanelLayout(screenId: string): PanelLayout | null {
   const raw = read(`${PANEL_LAYOUT_KEY}.${screenId}`);
   if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    // **形の検査は domain（`parsePanelLayout`）に任せる**＝JSON として読めても中身が壊れていることがある
+    // （手で編集した・別の版が書いた）。戻り型を `PanelLayout` にしておくと、使う側が `as` で押し込めない。
+    return parsePanelLayout(JSON.parse(raw));
   } catch {
     return null; // 壊れた値は「無い」と同じ扱い＝既定へ落ちる
   }
 }
 
-export function setPanelLayout(screenId: string, layout: unknown): void {
-  write(`${PANEL_LAYOUT_KEY}.${screenId}`, JSON.stringify(layout));
+export function setPanelLayout(screenId: string, layout: PanelLayout): void {
+  try {
+    write(`${PANEL_LAYOUT_KEY}.${screenId}`, JSON.stringify(layout));
+  } catch {
+    // 保存できなくても**その場の操作は続ける**（境界のドラッグごとに走るので、投げると掴んだまま画面が固まる）。
+    // 次に開いたときに既定へ戻るだけ＝作りかけの動画は失わない。見せ方は段階2 で決める（ADR-0033）。
+  }
 }
 
 /** 「配置を既定に戻す」＝保存を消す（次に開くと既定が使われる・決定6）。 */
