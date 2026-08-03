@@ -376,3 +376,26 @@ describe('dropSideAt（つかんだ欄をどの辺へ差すか・段階3）', ()
     expect(dropSideAt({ left: 0, top: 0, width: 0, height: 0 }, 0, 0)).toBe(DROP_SIDE.top);
   });
 });
+
+describe('落とし直しと境目（/canon-check の指摘）', () => {
+  it('いま居る場所へ落とし直しても何も変えない（決めた割合が等分へ戻らない）', () => {
+    const layout = withLeft(col([leaf('a'), leaf('b')], [0.7, 0.3]));
+    expect(dropPanelBeside(layout, 'a', 'b', DROP_SIDE.top)).toBe(layout);
+    expect(dropPanelBeside(layout, 'b', 'a', DROP_SIDE.bottom)).toBe(layout);
+    // 反対側へ落とすのは「動く」ので、ここは変わってよい。
+    expect(dropPanelBeside(layout, 'a', 'b', DROP_SIDE.bottom)).not.toBe(layout);
+  });
+
+  it('ちょうど中心のときは上下を採る（迷って何も起きない、を作らない）', () => {
+    const box = { left: 100, top: 100, width: 200, height: 100 };
+    expect(dropSideAt(box, 200, 150)).toBe(DROP_SIDE.bottom);
+  });
+
+  it('縦横の割合が同じときは、どの向きでも上下を採る（決め方が象限で変わらない）', () => {
+    const box = { left: 0, top: 0, width: 100, height: 100 };
+    expect(dropSideAt(box, 25, 25)).toBe(DROP_SIDE.top); // 左上
+    expect(dropSideAt(box, 75, 25)).toBe(DROP_SIDE.top); // 右上
+    expect(dropSideAt(box, 25, 75)).toBe(DROP_SIDE.bottom); // 左下
+    expect(dropSideAt(box, 75, 75)).toBe(DROP_SIDE.bottom); // 右下
+  });
+});

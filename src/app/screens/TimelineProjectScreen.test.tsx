@@ -2,6 +2,7 @@
 // タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。開けないときの案内と、並び・選択の見せ方を固定する。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { pointerDownAt } from "../../test/pointer";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
@@ -1119,9 +1120,9 @@ describe("TimelineProjectScreen: 欄をつかんで動かす（ADR-0033 段階3�
     };
     box("selected", 0);
     box("preview", 200);
-    fireEvent.pointerDown(screen.getByRole("heading", { name: "選んだ部品" }).parentElement!, { clientX: 0, clientY: 0 });
-    fireEvent.pointerMove(window, { clientX: 250, clientY: 95 }); // 「仕上がり確認」の下寄り
-    fireEvent.pointerUp(window, { clientX: 250, clientY: 95 });
+    pointerDownAt(screen.getByRole("heading", { name: "選んだ部品" }).parentElement!, 1000, { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { clientX: 250, clientY: 95, pointerId: 1 }); // 「仕上がり確認」の下寄り
+    fireEvent.pointerUp(window, { clientX: 250, clientY: 95, pointerId: 1 });
     // 移しても中身は消えない。
     expect(screen.getByRole("heading", { name: "選んだ部品" })).toBeInTheDocument();
     first.unmount();

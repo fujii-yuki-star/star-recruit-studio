@@ -1163,7 +1163,12 @@ button.badge {
 /* 欄をつかんで動かしている間（段階3）。落とし先は**線で示す**＝どこに入るか分からないまま落とさせない。 */
 .panel-frame { position: relative; }
 .panel-frame--dragging { opacity: 0.6; }
-.panel-frame-head { cursor: grab; }
+.panel-frame-head {
+  cursor: grab;
+  /* 掴んでいる間に文字が選択される／タッチでスクロール判定に取られると、ドラッグが途中で切れる。 */
+  user-select: none;
+  touch-action: none;
+}
 .panel-frame-head:active { cursor: grabbing; }
 .panel-drop-line {
   position: absolute;

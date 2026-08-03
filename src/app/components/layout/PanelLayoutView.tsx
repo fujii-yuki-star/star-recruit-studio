@@ -83,6 +83,10 @@ export function PanelLayoutView({
    * 掴んだ状態にしない。`Escape` でやめられる（掴んだまま戻れない、を作らない・§2-5）。
    */
   const beginPanelDrag = (e: ReactPointerEvent, panelId: PanelId): void => {
+    // 主ボタン（左）以外では掴まない＝**右クリックでメニューを開いたまま配置が書き換わる**を作らない。
+    // 指の取り違え（2本目で別の欄を掴む）は `listenDrag` が pointerId で見る＝ここでは見ない。
+    if (e.button !== 0) return;
+    e.preventDefault(); // 見出しの文字を選択させない（選択が走るとドラッグが途中で切れる）
     const startX = e.clientX;
     const startY = e.clientY;
     let started = false;
@@ -100,31 +104,45 @@ export function PanelLayoutView({
       setDropAt(null);
       if (target) onChange(dropPanelBeside(layout, panelId, target.panelId, target.side));
     };
-    listenDrag(move, finish);
+    listenDrag(e.pointerId, move, finish);
   };
 
   /** ドラッグの購読を1か所で張る（外し忘れ・二重購読を作らない）。 */
-  const listenDrag = (move: (ev: PointerEvent) => void, onEnd?: (ev: PointerEvent) => void): void => {
+  const listenDrag = (
+    pointerId: number,
+    move: (ev: PointerEvent) => void,
+    onEnd?: (ev: PointerEvent) => void,
+    onCancel?: () => void,
+  ): void => {
     stopDragRef.current?.();
+    // **掴んだ指だけ**を見る（別の指の up でその座標へ落ちる、を作らない）。
+    const mine = (ev: PointerEvent): boolean => ev.pointerId === pointerId;
     const stop = (ev?: PointerEvent): void => {
-      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", cancel);
       window.removeEventListener("keydown", onKey);
       stopDragRef.current = null;
       if (ev) onEnd?.(ev);
     };
-    const up = (ev: PointerEvent): void => stop(ev);
-    // 途中でやめたときは**適用しない**（`pointercancel`・`Escape`）＝置くつもりが無いのに動かさない。
+    const onMove = (ev: PointerEvent): void => {
+      if (mine(ev)) move(ev);
+    };
+    const up = (ev: PointerEvent): void => {
+      if (mine(ev)) stop(ev);
+    };
+    // 途中でやめたときは**元へ戻す**（`pointercancel`・`Escape`）＝置くつもりが無いのに動かさない。
+    // 境界のドラッグは動かすたびに適用しているので、**始めた時点の配置へ戻す**（欄のドラッグと同じ意味にする）。
     const cancel = (): void => {
       setDragging(null);
       setDropAt(null);
       stop();
+      onCancel?.();
     };
     const onKey = (ev: KeyboardEvent): void => {
       if (ev.key === "Escape") cancel();
     };
-    window.addEventListener("pointermove", move);
+    window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
     window.addEventListener("keydown", onKey);
@@ -180,7 +198,8 @@ export function PanelLayoutView({
       sizes[index + 1] = a0 + b0 - a;
       onChange(resizeSplit(layout, region, path, sizes));
     };
-    listenDrag(move);
+    const startLayout = layout;
+    listenDrag(e.pointerId, move, undefined, () => onChange(startLayout));
   };
 
   /** 領域の外枠をドラッグ（左右の幅・下の高さ）。 */
@@ -197,7 +216,8 @@ export function PanelLayoutView({
             : (box.bottom - ev.clientY) / box.height;
       onChange(resizeRegion(layout, region, ratio));
     };
-    listenDrag(move);
+    const startLayout = layout;
+    listenDrag(e.pointerId, move, undefined, () => onChange(startLayout));
   };
 
   const renderNode = (node: PanelNode, region: PanelRegion, path: number[]): ReactNode => {
