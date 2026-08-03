@@ -50,8 +50,19 @@ export interface PanelSplit {
 
 export type PanelNode = PanelLeaf | PanelSplit;
 
+/** 外枠の大きさ（画面に対する割合）。**中央は残り全部**なので持たない（合計の辻褄が合わなくならない）。 */
+export interface RegionSizes {
+  left: number;
+  right: number;
+  bottom: number;
+}
+
 /** 画面ぜんぶの配置。欄が1つも無い領域は `null`（枠を描かない）。 */
-export type PanelLayout = Record<PanelRegion, PanelNode | null>;
+export interface PanelLayout {
+  nodes: Record<PanelRegion, PanelNode | null>;
+  /** 外枠の大きさ（決定2＝領域の境界もドラッグで変える）。 */
+  regionSizes: RegionSizes;
+}
 
 /**
  * 欄1つの最小の割合。0 にすると**掴めない欄**ができる（戻せない＝§2-5）。
@@ -59,6 +70,18 @@ export type PanelLayout = Record<PanelRegion, PanelNode | null>;
  * 置かず、使う側がここを参照する（単一の参照元・§2-7）。
  */
 export const MIN_PANEL_RATIO = 0.1;
+
+/**
+ * 外枠の大きさの下限・上限（画面に対する割合）。**中央が潰れない**ように、左右の合計にも上限を置く。
+ * 正典（`11.4`）の定数ではない画面だけの値なので、ここを単一の参照元にする（§2-7）。
+ */
+export const MIN_REGION_RATIO = 0.12;
+export const MAX_REGION_RATIO = 0.5;
+/** 左右を合わせて画面のどれだけまで使えるか（残りが中央の最低幅になる）。 */
+export const MAX_SIDE_TOTAL_RATIO = 0.75;
+
+/** 外枠の既定（左を少し広め・下は控えめ）。 */
+export const DEFAULT_REGION_SIZES: RegionSizes = { left: 0.28, right: 0.24, bottom: 0.28 };
 
 export function isSplit(node: PanelNode): node is PanelSplit {
   return typeof node === 'object' && node != null && 'children' in node;
@@ -76,7 +99,37 @@ function makeSplit(dir: SplitDir, pairs: readonly { node: PanelNode; size: numbe
 
 /** 空の配置（どの領域にも何も置いていない）。 */
 export function emptyLayout(): PanelLayout {
-  return { left: null, center: null, right: null, bottom: null };
+  return {
+    nodes: { left: null, center: null, right: null, bottom: null },
+    regionSizes: { ...DEFAULT_REGION_SIZES },
+  };
+}
+
+/**
+ * 外枠の大きさを**描ける値へ収める**。下限・上限で押さえ、**左右の合計**も抑える（中央が潰れない）。
+ * 壊れた値（NaN・負）は既定へ戻す＝設定のせいで画面が壊れない。
+ */
+export function normalizeRegionSizes(sizes: Partial<RegionSizes> | undefined): RegionSizes {
+  const one = (v: number | undefined, fallback: number): number =>
+    Number.isFinite(v) ? Math.min(MAX_REGION_RATIO, Math.max(MIN_REGION_RATIO, v as number)) : fallback;
+  let left = one(sizes?.left, DEFAULT_REGION_SIZES.left);
+  let right = one(sizes?.right, DEFAULT_REGION_SIZES.right);
+  const bottom = one(sizes?.bottom, DEFAULT_REGION_SIZES.bottom);
+  // 左右が広すぎるときは、**比を保ったまま**縮める（片方だけ削ると掴んだ側が動かないように見える）。
+  const total = left + right;
+  if (total > MAX_SIDE_TOTAL_RATIO) {
+    const scale = MAX_SIDE_TOTAL_RATIO / total;
+    left = Math.max(MIN_REGION_RATIO, left * scale);
+    right = Math.max(MIN_REGION_RATIO, right * scale);
+  }
+  return { left, right, bottom };
+}
+
+/** 外枠の境界をドラッグしたときの更新（決定2）。収まらない値は収める＝何も変わらなければ同じ参照。 */
+export function resizeRegion(layout: PanelLayout, region: keyof RegionSizes, ratio: number): PanelLayout {
+  const next = normalizeRegionSizes({ ...layout.regionSizes, [region]: ratio });
+  const same = (Object.keys(next) as (keyof RegionSizes)[]).every((k) => next[k] === layout.regionSizes[k]);
+  return same ? layout : { ...layout, regionSizes: next };
 }
 
 /** その配置に**いま置かれている**欄の id（前から順）。閉じている欄＝ここに出てこないもの。 */
@@ -87,7 +140,7 @@ export function placedPanelIds(layout: PanelLayout): PanelId[] {
     if (isSplit(node)) node.children.forEach(walk);
     else out.push(node.panelId);
   };
-  PANEL_REGIONS.forEach((r) => walk(layout[r]));
+  PANEL_REGIONS.forEach((r) => walk(layout.nodes[r]));
   return out;
 }
 
@@ -135,8 +188,9 @@ export function normalizeLayout(layout: PanelLayout, knownPanelIds: readonly Pan
   };
 
   const next = emptyLayout();
+  next.regionSizes = normalizeRegionSizes(layout.regionSizes);
   PANEL_REGIONS.forEach((r) => {
-    next[r] = walk(layout[r] ?? null);
+    next.nodes[r] = walk(layout.nodes[r] ?? null);
   });
   return next;
 }
@@ -175,8 +229,9 @@ function spread(sizes: number[]): number[] {
 /** 欄を取り除いた配置（閉じる／移動の前半）。**空になった枝は畳む**。 */
 export function removePanel(layout: PanelLayout, panelId: PanelId): PanelLayout {
   const next = emptyLayout();
+  next.regionSizes = { ...layout.regionSizes };
   PANEL_REGIONS.forEach((r) => {
-    next[r] = removeFrom(layout[r] ?? null, panelId);
+    next.nodes[r] = removeFrom(layout.nodes[r] ?? null, panelId);
   });
   return next;
 }
@@ -202,16 +257,17 @@ function removeFrom(node: PanelNode | null, panelId: PanelId): PanelNode | null 
  */
 export function addPanelToRegion(layout: PanelLayout, panelId: PanelId, region: PanelRegion): PanelLayout {
   const base = removePanel(layout, panelId);
-  const current = base[region];
+  const current = base.nodes[region];
   const leaf: PanelLeaf = { panelId };
-  if (!current) return { ...base, [region]: leaf };
+  const put = (node: PanelNode | null): PanelLayout => ({ ...base, nodes: { ...base.nodes, [region]: node } });
+  if (!current) return put(leaf);
   // 領域の直下が縦並びならその末尾へ。そうでなければ縦に分ける（上下に積むのが既定）。
   if (isSplit(current) && current.dir === SPLIT_DIR.column) {
     const pairs = current.children.map((n, i) => ({ node: n, size: current.sizes[i] ?? 1 / current.children.length }));
-    return { ...base, [region]: makeSplit(SPLIT_DIR.column, [...pairs, { node: leaf, size: 1 / (pairs.length + 1) }]) };
+    return put(makeSplit(SPLIT_DIR.column, [...pairs, { node: leaf, size: 1 / (pairs.length + 1) }]));
   }
   // 直下が横並び（または葉）なら、それごと縦に分ける＝**中の並びは崩さない**。
-  return { ...base, [region]: makeSplit(SPLIT_DIR.column, [{ node: current, size: 1 }, { node: leaf, size: 1 }]) };
+  return put(makeSplit(SPLIT_DIR.column, [{ node: current, size: 1 }, { node: leaf, size: 1 }]));
 }
 
 /** 落とせる場所（欄のどの辺に差すか）＝ドラッグの受け口。 */
@@ -262,8 +318,9 @@ export function dropPanelBeside(
   };
 
   const next = emptyLayout();
+  next.regionSizes = { ...base.regionSizes };
   PANEL_REGIONS.forEach((r) => {
-    next[r] = walk(base[r] ?? null);
+    next.nodes[r] = walk(base.nodes[r] ?? null);
   });
   // 落とし先が見つからない（消された直後など）なら、何も変えない＝黙って別の場所へ置かない。
   return done ? next : layout;
@@ -299,8 +356,9 @@ export function movePanelStep(layout: PanelLayout, panelId: PanelId, side: DropS
   };
 
   const next = emptyLayout();
+  next.regionSizes = { ...layout.regionSizes };
   PANEL_REGIONS.forEach((r) => {
-    next[r] = walk(layout[r] ?? null);
+    next.nodes[r] = walk(layout.nodes[r] ?? null);
   });
   return done ? next : layout;
 }
@@ -333,7 +391,7 @@ export function resizeSplit(
     // 差し替えでも `makeSplit` を通す＝分かれ目を作る道を1本に保つ（コメントの主張を実装で守る）。
     return makeSplit(node.dir, children.map((n, k) => ({ node: n, size: node.sizes[k] ?? 1 / children.length })));
   };
-  const next: PanelLayout = { ...layout, [region]: walk(layout[region] ?? null, 0) };
+  const next: PanelLayout = { ...layout, nodes: { ...layout.nodes, [region]: walk(layout.nodes[region] ?? null, 0) } };
   return changed ? next : layout;
 }
 
@@ -349,21 +407,24 @@ export function resizeSplit(
  */
 export function parsePanelLayout(raw: unknown): PanelLayout | null {
   if (!isRecord(raw)) return null;
+  // 古い形（領域がトップレベルに並ぶ）も読む＝版が上がっただけで配置を捨てない。
+  const rawNodes = isRecord(raw.nodes) ? raw.nodes : raw;
   const next = emptyLayout();
+  next.regionSizes = normalizeRegionSizes(isRecord(raw.regionSizes) ? (raw.regionSizes as Partial<RegionSizes>) : undefined);
   let parsedAny = false;
   let brokenAny = false;
   for (const region of PANEL_REGIONS) {
-    const node = parseNode(raw[region]);
+    const node = parseNode(rawNodes[region]);
     if (node) {
-      next[region] = node;
+      next.nodes[region] = node;
       parsedAny = true;
-    } else if (raw[region] != null) {
+    } else if (rawNodes[region] != null) {
       brokenAny = true; // 値はあるのに読めない＝壊れている（「閉じてある」ではない）
     }
   }
   // **欄をすべて閉じた配置**は「まだ保存していない」と区別する＝しないと、開き直すたびに閉じた欄が黙って戻る。
   // ただし**壊れた値が混ざっているとき**は「閉じてある」と読まない＝何も出ない画面にせず、既定へ落とす。
-  const closedOnPurpose = !brokenAny && PANEL_REGIONS.some((r) => r in raw);
+  const closedOnPurpose = !brokenAny && PANEL_REGIONS.some((r) => r in rawNodes);
   return parsedAny || closedOnPurpose ? next : null;
 }
 

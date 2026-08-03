@@ -1082,3 +1082,80 @@ button.badge {
   border-radius: 6px;
   flex-shrink: 0;
 }
+
+/* ── 欄の配置（ADR-0033）。左・中央・右・下の領域と、その中の入れ子の分割。 ── */
+.panel-layout {
+  display: grid;
+  gap: 0;
+  /* **高さを決める**＝決まっていないと行の割合（下の欄の高さ）が効かず、中身なりに伸びて
+     `.panel-frame-body` のスクロールも発動しない（ページ側がスクロールしてしまう＝ADR-0033 決定10）。 */
+  height: 76vh;
+  min-height: 420px;
+  margin-bottom: var(--space-lg, 16px);
+}
+.panel-layout-main {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+.panel-layout-region {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.panel-layout-region--center {
+  flex: 1 1 0;
+}
+.panel-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.panel-split--row { flex-direction: row; }
+.panel-split--column { flex-direction: column; }
+.panel-split-child {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 掴める境界。掴んでいる間に文字が選択されると、ドラッグが途中で切れる。 */
+.panel-divider {
+  flex: 0 0 auto;
+  background: var(--color-border, rgba(0, 0, 0, 0.12));
+  user-select: none;
+  touch-action: none;
+}
+.panel-divider:hover { background: var(--color-primary, #3b82f6); }
+/* 欄そのもの（見出し＋中身）。**中身は欄の中でスクロール**＝欄からはみ出さない（決定10）。 */
+.panel-frame {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  margin: 2px;
+  overflow: hidden;
+}
+.panel-frame-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+}
+.panel-frame-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.panel-frame-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}

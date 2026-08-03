@@ -41,6 +41,8 @@ beforeEach(() => {
   vi.restoreAllMocks();
   useTimelineStore.getState().closeTimelineProject();
   useProjectStore.setState({ templates: [] });
+  // 欄の配置は**アプリの設定に残る**（ADR-0033）＝テスト間で持ち越さない（前のテストの配置で描かない）。
+  localStorage.clear();
 });
 
 describe("TimelineProjectScreen", () => {
@@ -1047,5 +1049,60 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(screen.getByText("映像1"));
     expect(screen.getByRole("menuitem", { name: "動画に出す" })).toBeInTheDocument();
+  });
+});
+
+describe("TimelineProjectScreen: 欄の配置（ADR-0033 段階2）", () => {
+  it("既定で「再生位置」と「選んだ部品」が同時に出ている（1点置くごとに上下スクロール、を起こさない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByLabelText("再生位置")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "選んだ部品" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "並び" })).toBeInTheDocument();
+  });
+
+  it("欄を閉じられて、閉じたら戻す導線が出る（戻せない欄を作らない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("音を置くの欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    expect(screen.queryByRole("heading", { name: "音を置く" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "「音を置く」を表示する" }));
+    expect(screen.getByRole("heading", { name: "音を置く" })).toBeInTheDocument();
+  });
+
+  it("配置は覚えていて、開き直しても同じ（動画ごとには変わらない）", () => {
+    open();
+    const first = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("音を置くの欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    first.unmount();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByRole("heading", { name: "音を置く" })).not.toBeInTheDocument();
+  });
+
+  it("「配置を既定に戻す」で戻る（組み替えたあとの逃げ道）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("音を置くの欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    fireEvent.click(screen.getByRole("button", { name: "配置を既定に戻す" }));
+    expect(screen.getByRole("heading", { name: "音を置く" })).toBeInTheDocument();
+  });
+
+  it("欄はメニューで別の領域へ移せる（ドラッグが使えなくても組み替えられる）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("選んだ部品の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "左へ移す" }));
+    // 移しても中身は残る（消えない）。
+    expect(screen.getByRole("heading", { name: "選んだ部品" })).toBeInTheDocument();
+  });
+
+  it("境界は掴める（欄の大きさを変えられる）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("separator").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("左の欄の幅")).toBeInTheDocument();
   });
 });
