@@ -2510,14 +2510,7 @@ pub async fn export_video(
     output_path: Option<String>,
 ) -> Result<ExportReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        export_video_impl(
-            app,
-            scenes,
-            file_name,
-            bgm_runs,
-            project_id,
-            output_path,
-        )
+        export_video_impl(app, scenes, file_name, bgm_runs, project_id, output_path)
     })
     .await
     .map_err(|e| {
