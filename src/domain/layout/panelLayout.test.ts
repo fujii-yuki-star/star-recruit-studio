@@ -209,10 +209,18 @@ describe('resizeSplit（境界のドラッグ・決定2）', () => {
 describe('parsePanelLayout（保存から読んだ値を受け取る）', () => {
   it('形が違うところは落とす（例外にしない＝設定のせいで画面が開けなくならない）', () => {
     expect(() => parsePanelLayout({ left: 5 })).not.toThrow();
-    expect(parsePanelLayout({ left: 5 })).toBeNull();
     expect(parsePanelLayout(null)).toBeNull();
     expect(parsePanelLayout([])).toBeNull();
     expect(parsePanelLayout({ left: { children: 'x' } })).toBeNull();
+  });
+
+  it('欄をすべて閉じた配置は「まだ保存していない」と区別する（閉じた欄が黙って戻らない）', () => {
+    expect(parsePanelLayout({ left: null, center: null, right: null, bottom: null })).toEqual(emptyLayout());
+    expect(parsePanelLayout({})).toBeNull(); // 保存していない＝既定を使う
+  });
+
+  it('壊れた値が混ざっていれば「閉じてある」と読まない（何も出ない画面にしない）', () => {
+    expect(parsePanelLayout({ left: 5 })).toBeNull();
   });
 
   it('割合が無い分かれ目は等分として読む（中身を黙って捨てない）', () => {
@@ -271,6 +279,20 @@ describe('割合の対応がずれない（/canon-check の指摘）', () => {
     const got = addPanelToRegion(withLeft(col([leaf('a'), leaf('b')])), 'c', PANEL_REGION.left).left;
     expect(got && isSplit(got) && got.children).toHaveLength(3);
     expect(placedPanelIds(withLeft(got))).toEqual(['a', 'b', 'c']);
+  });
+
+  it('横並びの領域へ足すと、その並びごと縦に分ける（中の並びは崩さない）', () => {
+    const got = addPanelToRegion(withLeft(row([leaf('a'), leaf('b')])), 'c', PANEL_REGION.left).left;
+    expect(got && isSplit(got) && got.dir).toBe(SPLIT_DIR.column);
+    const inner = got && isSplit(got) ? got.children[0] : null;
+    expect(inner && isSplit(inner) && inner.dir).toBe(SPLIT_DIR.row);
+    expect(placedPanelIds(withLeft(got))).toEqual(['a', 'b', 'c']);
+  });
+
+  it('最小値をちょうど満たせない数（10個）でも描ける割合を返す', () => {
+    const got = normalizeSizes(Array.from({ length: 10 }, () => 1));
+    expect(got.reduce((x, y) => x + y, 0)).toBeCloseTo(1, 9);
+    expect(Math.min(...got)).toBeGreaterThan(0);
   });
 
   it('押し上げのしわ寄せは、余裕のある欄から比例して引く（3つ以上）', () => {

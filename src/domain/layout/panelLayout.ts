@@ -26,6 +26,13 @@ export const PANEL_REGIONS: readonly PanelRegion[] = Object.values(PANEL_REGION)
 export const SPLIT_DIR = { row: 'row', column: 'column' } as const;
 export type SplitDir = (typeof SPLIT_DIR)[keyof typeof SPLIT_DIR];
 
+/**
+ * 配置を覚える画面（決定4＝**画面ごとに1つ**）。綴り違いで別のキーへ黙って逃げないよう値集合にする（§2-7）。
+ * 顔ぶれは ADR-0033 の段階（まずタイムライン編集・のちに場面編集と見た目パターン編集）に対応する。
+ */
+export const PANEL_SCREEN = { timeline: 'timeline', scene: 'scene', looks: 'looks' } as const;
+export type PanelScreenId = (typeof PANEL_SCREEN)[keyof typeof PANEL_SCREEN];
+
 /** 欄の識別子（画面が決める。ここでは中身を知らない）。 */
 export type PanelId = string;
 
@@ -122,11 +129,9 @@ export function normalizeLayout(layout: PanelLayout, knownPanelIds: readonly Pan
         sizes.push(node.sizes[i] ?? 1 / node.children.length);
       }
     });
-    if (kept.length === 0) return null;
-    if (kept.length === 1) return kept[0]; // 分かれ目が要らない
     // 向きが壊れた値でも必ず有効な向きにする（読み込んだ設定で描けなくならない）。
     const dir = node.dir === SPLIT_DIR.row ? SPLIT_DIR.row : SPLIT_DIR.column;
-    return { dir, sizes: normalizeSizes(sizes), children: kept };
+    return makeSplit(dir, kept.map((n, i) => ({ node: n, size: sizes[i] })));
   };
 
   const next = emptyLayout();
@@ -188,9 +193,7 @@ function removeFrom(node: PanelNode | null, panelId: PanelId): PanelNode | null 
       sizes.push(node.sizes[i] ?? 1 / node.children.length);
     }
   });
-  if (kept.length === 0) return null;
-  if (kept.length === 1) return kept[0];
-  return { dir: node.dir, sizes: normalizeSizes(sizes), children: kept };
+  return makeSplit(node.dir, kept.map((n, i) => ({ node: n, size: sizes[i] })));
 }
 
 /**
@@ -204,10 +207,11 @@ export function addPanelToRegion(layout: PanelLayout, panelId: PanelId, region: 
   if (!current) return { ...base, [region]: leaf };
   // 領域の直下が縦並びならその末尾へ。そうでなければ縦に分ける（上下に積むのが既定）。
   if (isSplit(current) && current.dir === SPLIT_DIR.column) {
-    const children = [...current.children, leaf];
-    return { ...base, [region]: { dir: SPLIT_DIR.column, sizes: normalizeSizes([...current.sizes, 1 / children.length]), children } };
+    const pairs = current.children.map((n, i) => ({ node: n, size: current.sizes[i] ?? 1 / current.children.length }));
+    return { ...base, [region]: makeSplit(SPLIT_DIR.column, [...pairs, { node: leaf, size: 1 / (pairs.length + 1) }]) };
   }
-  return { ...base, [region]: { dir: SPLIT_DIR.column, sizes: normalizeSizes([1, 1]), children: [current, leaf] } };
+  // 直下が横並び（または葉）なら、それごと縦に分ける＝**中の並びは崩さない**。
+  return { ...base, [region]: makeSplit(SPLIT_DIR.column, [{ node: current, size: 1 }, { node: leaf, size: 1 }]) };
 }
 
 /** 落とせる場所（欄のどの辺に差すか）＝ドラッグの受け口。 */
@@ -238,17 +242,17 @@ export function dropPanelBeside(
     if (!isSplit(node)) {
       if (node.panelId !== targetPanelId) return node;
       done = true;
-      const children = before ? [{ panelId }, node] : [node, { panelId }];
-      return { dir, sizes: normalizeSizes([1, 1]), children };
+      const pair = { node: { panelId } as PanelNode, size: 1 };
+      return makeSplit(dir, before ? [pair, { node, size: 1 }] : [{ node, size: 1 }, pair]);
     }
     // 同じ向きの並びの中に対象があるなら、その並びへ直接挿す（入れ子を増やさない）。
     const idx = node.children.findIndex((c) => !isSplit(c) && c.panelId === targetPanelId);
     if (idx >= 0 && node.dir === dir) {
       done = true;
       const at = before ? idx : idx + 1;
-      const children = [...node.children.slice(0, at), { panelId }, ...node.children.slice(at)];
-      const sizes = [...node.sizes.slice(0, at), 1 / children.length, ...node.sizes.slice(at)];
-      return { dir: node.dir, sizes: normalizeSizes(sizes), children };
+      const pairs = node.children.map((n, i) => ({ node: n, size: node.sizes[i] ?? 1 / node.children.length }));
+      const inserted = [...pairs.slice(0, at), { node: { panelId } as PanelNode, size: 1 / (pairs.length + 1) }, ...pairs.slice(at)];
+      return makeSplit(node.dir, inserted);
     }
     // 子と割合は**対で**持ち直す（`slice` で末尾から切ると、落ちた子の位置とずれる）。
     const pairs = node.children
@@ -286,9 +290,12 @@ export function movePanelStep(layout: PanelLayout, panelId: PanelId, side: DropS
       [children[idx], children[to]] = [children[to], children[idx]];
       const sizes = children.map((_, i) => node.sizes[i] ?? 1 / children.length);
       [sizes[idx], sizes[to]] = [sizes[to], sizes[idx]];
-      return { dir: node.dir, sizes: normalizeSizes(sizes), children };
+      return makeSplit(node.dir, children.map((n, i) => ({ node: n, size: sizes[i] })));
     }
-    return { dir: node.dir, sizes: node.sizes, children: node.children.map(walk).filter((c): c is PanelNode => c != null) };
+    const pairs = node.children
+      .map((child, i) => ({ node: walk(child), size: node.sizes[i] ?? 1 / node.children.length }))
+      .filter((p): p is { node: PanelNode; size: number } => p.node != null);
+    return makeSplit(node.dir, pairs);
   };
 
   const next = emptyLayout();
@@ -315,7 +322,7 @@ export function resizeSplit(
     if (depth === path.length) {
       if (sizes.length !== node.children.length) return node;
       changed = true;
-      return { dir: node.dir, sizes: normalizeSizes(sizes), children: node.children };
+      return makeSplit(node.dir, node.children.map((n, i) => ({ node: n, size: sizes[i] })));
     }
     const i = path[depth];
     if (i < 0 || i >= node.children.length) return node;
@@ -323,7 +330,8 @@ export function resizeSplit(
     const replaced = walk(children[i], depth + 1);
     if (!replaced) return node;
     children[i] = replaced;
-    return { dir: node.dir, sizes: node.sizes, children };
+    // 差し替えでも `makeSplit` を通す＝分かれ目を作る道を1本に保つ（コメントの主張を実装で守る）。
+    return makeSplit(node.dir, children.map((n, k) => ({ node: n, size: node.sizes[k] ?? 1 / children.length })));
   };
   const next: PanelLayout = { ...layout, [region]: walk(layout[region] ?? null, 0) };
   return changed ? next : layout;
@@ -342,15 +350,21 @@ export function resizeSplit(
 export function parsePanelLayout(raw: unknown): PanelLayout | null {
   if (!isRecord(raw)) return null;
   const next = emptyLayout();
-  let any = false;
+  let parsedAny = false;
+  let brokenAny = false;
   for (const region of PANEL_REGIONS) {
     const node = parseNode(raw[region]);
     if (node) {
       next[region] = node;
-      any = true;
+      parsedAny = true;
+    } else if (raw[region] != null) {
+      brokenAny = true; // 値はあるのに読めない＝壊れている（「閉じてある」ではない）
     }
   }
-  return any ? next : null;
+  // **欄をすべて閉じた配置**は「まだ保存していない」と区別する＝しないと、開き直すたびに閉じた欄が黙って戻る。
+  // ただし**壊れた値が混ざっているとき**は「閉じてある」と読まない＝何も出ない画面にせず、既定へ落とす。
+  const closedOnPurpose = !brokenAny && PANEL_REGIONS.some((r) => r in raw);
+  return parsedAny || closedOnPurpose ? next : null;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {

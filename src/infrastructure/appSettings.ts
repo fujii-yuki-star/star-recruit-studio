@@ -1,6 +1,6 @@
 // アプリ全体の設定（プロジェクト非依存）。VOICEVOX 接続先・ナレーター話者・欄の配置など。localStorage に保持。
 import { parsePanelLayout } from '../domain/layout/panelLayout';
-import type { PanelLayout } from '../domain/layout/panelLayout';
+import type { PanelLayout, PanelScreenId } from '../domain/layout/panelLayout';
 // project.json には入れない（接続先は環境差があり、共有プロジェクトに含めるべきでないため）。
 // Tauri WebView でも localStorage は永続する（projectFs と同様）。
 const VOICEVOX_URL_KEY = 'app.voicevoxUrl';
@@ -47,13 +47,14 @@ export function setAiModel(model: string): void {
 }
 
 /**
- * 編集画面の欄の配置（ADR-0033 決定4/5）。**アプリ全体で1つ**＝どの動画を開いても同じ配置。
+ * 編集画面の欄の配置（ADR-0033 決定4/5）。**画面ごとに1つ**＝タイムライン編集と場面編集は別に覚える
+ * （置いてある欄の顔ぶれが違うため）。**動画ごとには持たない**＝どの動画を開いても同じ配置。
  * **プロジェクトの JSON には入れない**（画面の見た目の好みは動画の中身ではない）。
  *
  * 読めない・壊れているときは `null`（＝呼び出し側が既定を使う）＝**設定のせいで画面が開けない**を作らない。
  * 整合（知らない欄を落とす・割合をそろえる）は domain（`normalizeLayout`）が行うので、ここは入れ物だけ。
  */
-export function getPanelLayout(screenId: string): PanelLayout | null {
+export function getPanelLayout(screenId: PanelScreenId): PanelLayout | null {
   const raw = read(`${PANEL_LAYOUT_KEY}.${screenId}`);
   if (!raw) return null;
   try {
@@ -65,7 +66,7 @@ export function getPanelLayout(screenId: string): PanelLayout | null {
   }
 }
 
-export function setPanelLayout(screenId: string, layout: PanelLayout): void {
+export function setPanelLayout(screenId: PanelScreenId, layout: PanelLayout): void {
   try {
     write(`${PANEL_LAYOUT_KEY}.${screenId}`, JSON.stringify(layout));
   } catch {
@@ -75,6 +76,6 @@ export function setPanelLayout(screenId: string, layout: PanelLayout): void {
 }
 
 /** 「配置を既定に戻す」＝保存を消す（次に開くと既定が使われる・決定6）。 */
-export function clearPanelLayout(screenId: string): void {
+export function clearPanelLayout(screenId: PanelScreenId): void {
   if (typeof localStorage !== 'undefined') localStorage.removeItem(`${PANEL_LAYOUT_KEY}.${screenId}`);
 }
