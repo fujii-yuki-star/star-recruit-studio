@@ -1637,6 +1637,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     { id: PANEL_ID.edit, title: '選択中の場面を編集', content: (
       <>
             <div className="row-between" style={{ alignItems: "center" }}>
+              {/* 見出しは欄の側（`PanelSpec.title`）が出すので、両端に寄せるための片方を空けておく
+                  ＝`space-between` は子が2つ揃って初めて右へ寄る（ほかの2つの欄と同じ手当て）。 */}
+              <span />
               {/* 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z・Ctrl+Y でも操作可。 */}
               <div className="row gap-sm">
                 {/* 書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも disabled にして誤認を防ぐ（ADR-0026④・#547 P3-12）。 */}

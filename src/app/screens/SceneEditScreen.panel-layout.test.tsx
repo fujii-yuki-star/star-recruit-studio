@@ -107,3 +107,16 @@ describe("SceneEditScreen: 触っていない画面は覚えない（#550 の教
     expect(localStorage.getItem("app.panelLayout.scene")).toBeNull();
   });
 });
+
+describe("SceneEditScreen: 見出しを欄へ移したあとの並び（/canon-check の指摘）", () => {
+  it("3つの欄とも、右にある操作は右のまま（`space-between` の片方が空いたままにしない）", () => {
+    const { container } = render(<SceneEditScreen onNavigate={vi.fn()} />);
+    // 欄の見出しを欄の側（`PanelSpec.title`）へ移したので、中の `row-between` は子が1つになりうる。
+    // 子が1つだと `space-between` は左寄せになる＝右にあった操作が左へ動いてしまう。
+    const rows = Array.from(container.querySelectorAll(".row-between"));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.children.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
