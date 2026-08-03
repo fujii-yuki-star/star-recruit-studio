@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_REGION_SIZES,
   DROP_SIDE,
+  dropSideAt,
   MAX_REGION_RATIO,
   MAX_SIDE_TOTAL_RATIO,
   MIN_PANEL_RATIO,
@@ -351,5 +352,50 @@ describe('外枠の大きさ（決定2・段階2 で追加）', () => {
     const got = parsePanelLayout({ left: { panelId: 'a' } });
     expect(got?.regionSizes).toEqual(DEFAULT_REGION_SIZES);
     expect(got && placedPanelIds(got)).toEqual(['a']);
+  });
+});
+
+describe('dropSideAt（つかんだ欄をどの辺へ差すか・段階3）', () => {
+  const box = { left: 100, top: 100, width: 200, height: 100 };
+
+  it('指した側の辺になる', () => {
+    expect(dropSideAt(box, 110, 150)).toBe(DROP_SIDE.left);
+    expect(dropSideAt(box, 290, 150)).toBe(DROP_SIDE.right);
+    expect(dropSideAt(box, 200, 105)).toBe(DROP_SIDE.top);
+    expect(dropSideAt(box, 200, 195)).toBe(DROP_SIDE.bottom);
+  });
+
+  it('箱の大きさに対する割合で比べる＝同じ位置でも箱の形で辺が変わる（横長の欄でも上下が取れる）', () => {
+    // 横長（200×100）の左上角付近：px では上辺のほうが近いが、**割合**では横のほうが中心から遠いので「左」。
+    expect(dropSideAt(box, 105, 105)).toBe(DROP_SIDE.left);
+    // 縦長にすると同じ位置関係でも「上」になる。
+    expect(dropSideAt({ left: 100, top: 100, width: 100, height: 200 }, 105, 105)).toBe(DROP_SIDE.top);
+  });
+
+  it('潰れた箱でも決まる（0 で割らない・迷って何も起きない、を作らない）', () => {
+    expect(dropSideAt({ left: 0, top: 0, width: 0, height: 0 }, 0, 0)).toBe(DROP_SIDE.top);
+  });
+});
+
+describe('落とし直しと境目（/canon-check の指摘）', () => {
+  it('いま居る場所へ落とし直しても何も変えない（決めた割合が等分へ戻らない）', () => {
+    const layout = withLeft(col([leaf('a'), leaf('b')], [0.7, 0.3]));
+    expect(dropPanelBeside(layout, 'a', 'b', DROP_SIDE.top)).toBe(layout);
+    expect(dropPanelBeside(layout, 'b', 'a', DROP_SIDE.bottom)).toBe(layout);
+    // 反対側へ落とすのは「動く」ので、ここは変わってよい。
+    expect(dropPanelBeside(layout, 'a', 'b', DROP_SIDE.bottom)).not.toBe(layout);
+  });
+
+  it('ちょうど中心のときは上下を採る（迷って何も起きない、を作らない）', () => {
+    const box = { left: 100, top: 100, width: 200, height: 100 };
+    expect(dropSideAt(box, 200, 150)).toBe(DROP_SIDE.bottom);
+  });
+
+  it('縦横の割合が同じときは、どの向きでも上下を採る（決め方が象限で変わらない）', () => {
+    const box = { left: 0, top: 0, width: 100, height: 100 };
+    expect(dropSideAt(box, 25, 25)).toBe(DROP_SIDE.top); // 左上
+    expect(dropSideAt(box, 75, 25)).toBe(DROP_SIDE.top); // 右上
+    expect(dropSideAt(box, 25, 75)).toBe(DROP_SIDE.bottom); // 左下
+    expect(dropSideAt(box, 75, 75)).toBe(DROP_SIDE.bottom); // 右下
   });
 });

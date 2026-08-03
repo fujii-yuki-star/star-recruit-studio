@@ -288,6 +288,9 @@ export function dropPanelBeside(
   side: DropSide,
 ): PanelLayout {
   if (panelId === targetPanelId) return layout;
+  // **いま居る場所へ落とし直したときは何も変えない**＝見た目は変わらないのに、取り除いて挿し直すと
+  // 利用者が決めた割合が等分へ戻る（黙って別の結果にしない・§2-5）。
+  if (alreadyBeside(layout, panelId, targetPanelId, side)) return layout;
   const base = removePanel(layout, panelId);
   const dir = side === DROP_SIDE.left || side === DROP_SIDE.right ? SPLIT_DIR.row : SPLIT_DIR.column;
   const before = side === DROP_SIDE.left || side === DROP_SIDE.top;
@@ -324,6 +327,27 @@ export function dropPanelBeside(
   });
   // 落とし先が見つからない（消された直後など）なら、何も変えない＝黙って別の場所へ置かない。
   return done ? next : layout;
+}
+
+/** その欄が、指した辺のとおり**すでに隣にいる**か（同じ並びの中で、間に何も挟まっていない）。 */
+function alreadyBeside(layout: PanelLayout, panelId: PanelId, targetPanelId: PanelId, side: DropSide): boolean {
+  const dir = side === DROP_SIDE.left || side === DROP_SIDE.right ? SPLIT_DIR.row : SPLIT_DIR.column;
+  const before = side === DROP_SIDE.left || side === DROP_SIDE.top;
+  let found = false;
+  const walk = (node: PanelNode | null): void => {
+    if (!node || found || !isSplit(node)) return;
+    if (node.dir === dir) {
+      const me = node.children.findIndex((c) => !isSplit(c) && c.panelId === panelId);
+      const you = node.children.findIndex((c) => !isSplit(c) && c.panelId === targetPanelId);
+      if (me >= 0 && you >= 0 && me === (before ? you - 1 : you + 1)) {
+        found = true;
+        return;
+      }
+    }
+    node.children.forEach(walk);
+  };
+  PANEL_REGIONS.forEach((r) => walk(layout.nodes[r]));
+  return found;
 }
 
 /**
@@ -443,4 +467,28 @@ function parseNode(raw: unknown): PanelNode | null {
     .filter((p): p is { node: PanelNode; size: number } => p.node != null);
   const dir = raw.dir === SPLIT_DIR.row ? SPLIT_DIR.row : SPLIT_DIR.column;
   return makeSplit(dir, pairs.map((p) => ({ node: p.node, size: p.size > 0 ? p.size : 1 / Math.max(1, pairs.length) })));
+}
+
+/** 落とす場所を決めるための箱（画面の座標・`getBoundingClientRect` と同じ形）。 */
+export interface DropBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 欄の上のどこを指しているかから、**どの辺に差すか**を決める（段階3＝見出しをつかむドラッグ）。
+ *
+ * 中心からの距離を**箱の大きさに対する割合**で縦横比べる＝横長の欄でも上下の辺が取れる（px で比べると
+ * 長い辺ばかりが選ばれる）。**同じ割合のときは上下を採る**（迷って何も起きない、を作らない）。
+ * 箱が潰れている（幅か高さが 0）ときも決まる（0 で割らない）。
+ */
+export function dropSideAt(box: DropBox, clientX: number, clientY: number): DropSide {
+  const w = box.width > 0 ? box.width : 1;
+  const h = box.height > 0 ? box.height : 1;
+  const dx = (clientX - (box.left + w / 2)) / w;
+  const dy = (clientY - (box.top + h / 2)) / h;
+  if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? DROP_SIDE.left : DROP_SIDE.right;
+  return dy < 0 ? DROP_SIDE.top : DROP_SIDE.bottom;
 }
