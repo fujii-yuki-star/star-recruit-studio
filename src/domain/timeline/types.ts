@@ -133,6 +133,12 @@ export interface TimelineClip extends ClipSpatial {
   /** kind='audio' で同梱BGMを鳴らすとき（`assetId` と排他・11 §8 V25）。 */
   bundledBgmId?: BundledBgmId | null;
   volume?: number;
+  /**
+   * **音量の変化**（#512・ADR-0032 追補）。クリップ先頭からの秒と音量（0〜1.5）の点列。
+   * 未指定＝`volume` の一定値。**フェードはこの上に掛かる**（「基準×フェード係数」の形は変えない）。
+   * 点の間は線形に変える＝再生も書き出しも `volumeAt` から採る（式は同じ点列から組む・パリティ）。
+   */
+  volumePoints?: { timeSec: number; volume: number }[];
   fadeInSec?: number;
   fadeOutSec?: number;
 
@@ -187,4 +193,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.6';
+export const TIMELINE_SCHEMA_VERSION = '1.7';
