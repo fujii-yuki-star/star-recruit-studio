@@ -48,10 +48,13 @@ export function PanelLayoutView({
   layout,
   panels,
   onChange,
+  fill,
 }: {
   layout: PanelLayout;
   panels: readonly PanelSpec[];
   onChange: (next: PanelLayout) => void;
+  /** 器の高さいっぱいに広げる（スクロールしない器に入れるとき）。既定は画面に対する高さ。 */
+  fill?: boolean;
 }): React.ReactElement {
   const byId = new Map(panels.map((p) => [p.id, p]));
   const rootRef = useRef<HTMLDivElement>(null);
@@ -297,7 +300,7 @@ export function PanelLayoutView({
   // **下の境界をドラッグしても空の帯が伸びるだけ**になる（下の欄は中身なりの高さのまま）。
   const rows = hasBottom ? `1fr auto ${bottom * 100}%` : "1fr";
   return (
-    <div className="panel-layout" ref={rootRef} style={{ gridTemplateRows: rows }}>
+    <div className={`panel-layout${fill ? " panel-layout--fill" : ""}`} ref={rootRef} style={{ gridTemplateRows: rows }}>
       <div className="panel-layout-main">
         {hasLeft && (
           <>
