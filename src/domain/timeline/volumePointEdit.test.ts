@@ -5,7 +5,7 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { VOLUME_POINTS_MAX } from '../constants';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { EDIT_BLOCKED } from './edit';
-import { clearVolumePoints, removeVolumePoint, setVolumePoint } from './volumePointEdit';
+import { clearVolumePoints, removeVolumePoint, setVolumePoint, volumePointTimeAt } from './volumePointEdit';
 import { TIMELINE_EXPORT_BLOCK, timelineExportBlockers } from './export';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
@@ -143,5 +143,44 @@ describe('書き出しの停止と数え方をそろえる（/canon-check の指
     const many = Array.from({ length: VOLUME_POINTS_MAX + 5 }, (_, i) => ({ timeSec: i * 0.05, volume: 0.5 }));
     expect(timelineExportBlockers(doc({ volumePoints: many })).map((b) => b.code))
       .toEqual([TIMELINE_EXPORT_BLOCK.volumePointsTooMany]);
+  });
+});
+
+describe('volumePointTimeAt（置ける位置か・#512 実機確認で判明）', () => {
+  const clip = doc({ startSec: 2, durationSec: 8 }).clips[0];
+
+  it('終わりちょうども置ける（「だんだん大きく」の到達点を置けなくしない）', () => {
+    expect(volumePointTimeAt(clip, 10)).toBe(8);
+  });
+
+  it('始まりちょうども置ける', () => {
+    expect(volumePointTimeAt(clip, 2)).toBe(0);
+  });
+
+  it('部品の外は置けない', () => {
+    expect(volumePointTimeAt(clip, 1.9)).toBeNull();
+    expect(volumePointTimeAt(clip, 10.1)).toBeNull();
+  });
+
+  it('返す秒はそのまま setVolumePoint に渡せる（切り詰められない＝同じ規則）', () => {
+    const base = doc({ startSec: 2, durationSec: 8 });
+    const r = setVolumePoint(base, 'clip_001', volumePointTimeAt(clip, 10)!, 1);
+    expect(r.ok && r.doc.clips[0].volumePoints).toEqual([{ timeSec: 8, volume: 1 }]);
+  });
+});
+
+describe('volumePointTimeAt の端（/canon-check の指摘）', () => {
+  it('丸めの都合で右端ちょうどが外れない（案内どおりの秒で置ける）', () => {
+    // (0.1 + 0.2) - 0.1 は 0.20000000000000004＝長さ 0.2 を超える。式を変えないと右端が外れる。
+    const clip = doc({ startSec: 0.1, durationSec: 0.2 }).clips[0];
+    expect(volumePointTimeAt(clip, 0.1 + 0.2)).not.toBeNull();
+    expect(volumePointTimeAt(clip, 0.1 + 0.2)!).toBeLessThanOrEqual(0.2);
+  });
+
+  it('部品を動かしても同じ点は同じ秒になる（置き直しが点を増やさない）', () => {
+    const before = doc({ startSec: 0, durationSec: 100 }).clips[0];
+    const moved = doc({ startSec: 81.242, durationSec: 100 }).clips[0];
+    const local = volumePointTimeAt(before, 5.765)!;
+    expect(volumePointTimeAt(moved, 81.242 + local)).toBe(local);
   });
 });

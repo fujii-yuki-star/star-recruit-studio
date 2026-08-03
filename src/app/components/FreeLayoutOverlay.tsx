@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ContextMenu } from "./ContextMenu";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
@@ -70,8 +71,6 @@ function resizeCursor(corner: ResizeCorner, rotationDeg: number): string {
 const SNAP_GUIDE_COLOR = "#ff3d8b";
 
 // 右クリックメニューの推定サイズ（画面端からはみ出さないようクランプするため）。
-const MENU_W = 160;
-const MENU_H = 220;
 
 // ダブルタップ（テキスト編集へ入る）と見なす2回の pointerdown の間隔（ms）と近接（画面px）。実機ではドラッグ開始の
 // preventDefault が互換 dblclick を潰すため、pointerdown 自体で二度押しを検出する（#525-4）。距離も見るのは
@@ -209,14 +208,6 @@ export function FreeLayoutOverlay({
     const scale = r.width / canvasW;
     return { x: (clientX - r.left) / scale, y: (clientY - r.top) / scale };
   };
-
-  // Escape で右クリックメニューを閉じる（role="menu" の期待動作・フォーカス位置に依らず効く）。
-  useEffect(() => {
-    if (!menu) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [menu]);
 
   // ルートで pointer capture することで、要素/ハンドルの押下後はドラッグがプレビュー外に出ても追従する。
   const beginDrag = (
@@ -536,8 +527,9 @@ export function FreeLayoutOverlay({
     setEditingId(null);
     // 複数選択中の要素を右クリックしたら選択は保つ（メニューは主の単独操作・一括削除はツールバー）。
     if (!selectedIds.includes(el.id)) onSelect(el.id);
-    const x = Math.max(0, Math.min(e.clientX, window.innerWidth - MENU_W));
-    const y = Math.max(0, Math.min(e.clientY, window.innerHeight - MENU_H));
+    // 画面の外へ出さないための寄せは `ContextMenu` に任せる（見込みサイズを2か所に持たない・§6）。
+    const x = e.clientX;
+    const y = e.clientY;
     setMenu({ id: el.id, x, y });
   };
 
@@ -846,38 +838,14 @@ export function FreeLayoutOverlay({
         </div>
       )}
 
+      {/* メニューの見た目・閉じ方は共有部品（`ContextMenu`）＝画面ごとに作り方が割れない（§6・ADR-0033）。 */}
       {menu && menuEl && (
-        <>
-          {/* 外側のクリック/右クリックで閉じる透明バックドロップ。 */}
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 50 }}
-            onPointerDown={() => setMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
-          />
-          <div
-            role="menu"
-            style={{
-              position: "fixed", left: menu.x, top: menu.y, zIndex: 51,
-              background: "#fff", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 8,
-              boxShadow: "0 6px 24px rgba(0,0,0,0.18)", padding: 4, minWidth: 140,
-            }}
-          >
-            {menuItems.map((it) => (
-              <button
-                key={it.label}
-                role="menuitem"
-                className="btn btn-ghost text-sm"
-                style={{
-                  display: "block", width: "100%", textAlign: "left",
-                  color: it.danger ? "var(--color-danger)" : undefined,
-                }}
-                onClick={() => { it.run(menu.id); setMenu(null); }}
-              >
-                {it.label}
-              </button>
-            ))}
-          </div>
-        </>
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems.map((it) => ({ label: it.label, danger: it.danger, onSelect: () => it.run(menu.id) }))}
+          onClose={() => setMenu(null)}
+        />
       )}
     </div>
   );

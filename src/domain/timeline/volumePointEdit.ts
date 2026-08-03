@@ -8,6 +8,7 @@
 // 正規化を通るので、保存の形と読んだ形が食い違わない。
 import { VOLUME_POINTS_MAX } from '../constants';
 import { isAudioClip, normalizedVolumePoints } from './audio';
+import { clipEndSec } from './validateTimelineDoc';
 import { EDIT_BLOCKED } from './edit';
 import type { EditResult } from './edit';
 import type { TimelineClip, TimelineProject, VolumePoint } from './types';
@@ -81,4 +82,26 @@ function withPoints(
 
 function samePoints(a: readonly VolumePoint[], b: readonly VolumePoint[]): boolean {
   return a.length === b.length && a.every((p, i) => p.timeSec === b[i].timeSec && p.volume === b[i].volume);
+}
+
+/**
+ * 再生位置（動画の時刻）を、その部品に置ける「先頭からの秒」へ直す。置けない位置なら `null`。
+ *
+ * **終わりちょうども置ける**（区間は**閉じている**）＝`setVolumePoint` が受け付ける範囲（0〜部品の長さ）と
+ * 同じ規則を、画面と1か所で共有するための関数（§6）。
+ *
+ * ⚠️ **描画の生存判定（`clipIsLiveAt`＝半開 `[開始, 終了)`）を流用してはいけない**。あれは「その瞬間に
+ * 鳴っている／映っているか」で、終端は次の部品のものだから外す。音量の点は**その時刻の値**であって、
+ * 終端は「ここまでにこの音量へ到達する」という到達点＝**外すと「だんだん大きく」の行き先が置けない**
+ * （#512 の実機確認で判明）。
+ */
+export function volumePointTimeAt(clip: TimelineClip, timeSec: number): number | null {
+  // 終わりの判定は**画面が使うのと同じ式**（`clipEndSec`＝`startSec + durationSec`）で見る。
+  // `timeSec - startSec <= durationSec` で見ると、`(s+d)-s > d` になる組（例 s=0.1, d=0.2）で
+  // **右端ちょうどが外れる**＝案内どおりの秒を入れても置けない袋小路になる（浮動小数の丸め）。
+  if (timeSec < clip.startSec || timeSec > clipEndSec(clip)) return null;
+  // 返す秒は**必ず 0〜長さ**に収め、**マイクロ秒で丸める**。丸めないと、部品を動かすたびに
+  // `(新しい開始 + 点) - 新しい開始` が 1e-15 ずれ、同じ点が「別の時刻」になって
+  // 置き直しのつもりが**点をもう1つ増やす**（上限を静かに食う）。音の差は出ない桁（1/30 秒の3万分の1）。
+  return Math.round(Math.min(Math.max(0, timeSec - clip.startSec), clip.durationSec) * 1e6) / 1e6;
 }

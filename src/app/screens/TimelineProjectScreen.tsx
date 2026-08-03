@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
@@ -8,16 +9,17 @@ import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { clipCountOnTrack } from "../../domain/timeline/edit";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
+import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
 import type { CropMode, TrackKind } from "../../domain/enums";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
-import { clipIsLiveAt, layoutTimelineAt } from "../../renderer/timelineLayout";
+import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
-import { animationOriginSec } from "../../domain/timeline/keyframeEdit";
+import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
 import { groupElementIds } from "../../domain/project/groupOps";
 import type { Keyframe } from "../../domain/project/types";
@@ -33,6 +35,9 @@ import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
+import { ContextMenu } from "../components/ContextMenu";
+import type { ContextMenuItem } from "../components/ContextMenu";
+import { PickerList } from "../components/PickerList";
 import { ArrowLeftIcon } from "../components/icons";
 import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
@@ -236,6 +241,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [kfDraft, setKfDraft] = useState<Partial<Record<KeyframeProp, string>>>({});
   // 音量の変化（#512 段4）の入力欄。**空欄のままでは置かない**（0 と空欄を取り違えない）。
   const [volumeDraft, setVolumeDraft] = useState("");
+  // 右クリック（または「⋮」）で開く列の操作メニュー（ADR-0033）。
+  const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
   // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
   const [explodingClipId, setExplodingClipId] = useState<string | null>(null);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
@@ -295,9 +302,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const selectedKeyframes =
     doc && selected ? doc.animations?.find((a) => a.targetId === selected.id)?.keyframes ?? [] : [];
   // 再生位置が部品の中にあるか＋その時刻に置いてあるキーフレーム（あれば値を読み込める）。
+  // 置ける位置か＝**終わりちょうどを含む**（`keyframeTimeAt`＝domain と同じ規則）。音量の変化と同じ扱いに
+  // そろえる（ADR-0026②＝同じ概念は同じ挙動。描画の生存判定＝半開を流用すると終端に置けない）。
+  const keyframeLocalSec = doc && selected ? keyframeTimeAt(doc, selected.id, playheadSec) : null;
   const keyframeAtPlayhead = {
-    live: selected != null && clipIsLiveAt(selected, playheadSec),
-    keyframe: selectedKeyframes.find((k) => k.timeSec === playheadSec - selectedOrigin),
+    live: keyframeLocalSec != null,
+    keyframe: selectedKeyframes.find((k) => k.timeSec === keyframeLocalSec),
   };
   // 選んだ部品の音量の変化（#512 段4）。時刻は部品の先頭からの秒なので、表示は開始秒を足す。
   // 読むときも保存と同じ正規化を通す＝並び・重複・値域が画面と鳴る音で食い違わない。
@@ -306,9 +316,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 欄を触れるままにすると「設定したのに音が変わらない」になる（ADR-0026①＝設定した意味どおり）。
   const hasVolumePoints = selectedVolumePoints.length > 0;
   const volumePointsHint = hasVolumePoints ? VOLUME_POINTS_OVERRIDE_HINT : undefined;
+  // 置ける位置か＝**終わりちょうどを含む**（`volumePointTimeAt`＝domain と同じ規則）。描画の生存判定
+  // （`clipIsLiveAt`＝半開）を使うと、**「だんだん大きく」の到達点**を終端に置けない（#512 実機確認）。
+  const volumePointLocalSec = selected ? volumePointTimeAt(selected, playheadSec) : null;
   const volumePointAtPlayhead = {
-    live: selected != null && clipIsLiveAt(selected, playheadSec),
-    point: selected ? selectedVolumePoints.find((p) => p.timeSec === playheadSec - selected.startSec) : undefined,
+    live: volumePointLocalSec != null,
+    point: selectedVolumePoints.find((p) => p.timeSec === volumePointLocalSec),
   };
   // この部品が入っている「まとまり」に付いた動き（画面では動いているのに「無い」と言わない）。
   const groupKeyframes =
@@ -393,6 +406,37 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 再生中に押せない操作の理由（§2-5：押せない理由を無言にしない）。
   const playingHint = isPlaying ? "再生を止めてから使えます" : undefined;
+
+  // 列の操作（順番・出す出さない・固定・消す）は**右クリックのメニュー**へ畳む（ADR-0033・利用者指摘 2026-08-03）。
+  // 行にボタンを並べると帯より文字のほうが目立ち、並びが読めなくなる。項目名は**いまの状態で意味が通る言い方**にする。
+  const openTrackMenu = (e: ReactMouseEvent, trackId: string): void => {
+    e.preventDefault();
+    setTrackMenu({ trackId, x: e.clientX, y: e.clientY });
+  };
+  const menuTrack = trackMenu ? doc?.tracks.find((t) => t.id === trackMenu.trackId) : undefined;
+  const trackMenuItems: ContextMenuItem[] = menuTrack
+    ? [
+        { label: "手前へ", onSelect: () => moveTrackOrder(menuTrack.id, "front") },
+        { label: "奥へ", onSelect: () => moveTrackOrder(menuTrack.id, "back") },
+        {
+          label: menuTrack.hidden ? "動画に出す" : "動画に出さない",
+          onSelect: () => setTrackFlag(menuTrack.id, "hidden", !menuTrack.hidden),
+        },
+        {
+          label: menuTrack.locked ? "固定を外す" : "動かせないように固定する",
+          onSelect: () => setTrackFlag(menuTrack.id, "locked", !menuTrack.locked),
+        },
+        {
+          label: "この列を消す",
+          danger: true,
+          // 固定した列は消せない（`removeTrack` が断る＝ADR-0032）。押してから断られるのではなく、
+          // **押す前に理由を出す**（長い画面では上部の知らせを見落とす・§2-5）。
+          disabled: menuTrack.locked,
+          disabledHint: "この列は固定されています。消すには固定を外してください",
+          onSelect: () => setRemovingTrackId(menuTrack.id),
+        },
+      ]
+    : [];
   const svg = layout
     ? layoutToSvg(layout, {
         assetSrc: (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined),
@@ -558,29 +602,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 {/* 表示は**手前が上**（配列は後ろほど手前なので逆順に並べる）＝重なりの見え方と一致させる。 */}
                 {[...doc.tracks].reverse().map((track) => (
                   <div className="timeline-row" key={track.id}>
-                    <div className="timeline-row-label">
+                    {/* 操作は右クリックのメニューへ畳む＝行に文字を並べない（帯が読めなくなる・利用者指摘 2026-08-03）。
+                        行に残すのは**名前と状態**だけ。右クリックできると分かるよう、同じメニューを開く小さなボタンも置く
+                        （右クリックを知らない・使えない場合の逃げ道＝§2-5）。 */}
+                    <div className="timeline-row-label" onContextMenu={(e) => openTrackMenu(e, track.id)}>
                       <span>{trackLabel(doc.tracks, track.id)}</span>
                       {track.hidden && <span className="sub">出さない</span>}
                       {track.locked && <span className="sub">固定中</span>}
-                      <span className="row gap-sm">
-                        <button className="btn btn-ghost btn-sm" title="手前へ" onClick={() => moveTrackOrder(track.id, "front")}>↑</button>
-                        <button className="btn btn-ghost btn-sm" title="奥へ" onClick={() => moveTrackOrder(track.id, "back")}>↓</button>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          title={track.hidden ? "動画に出す" : "動画に出さない"}
-                          onClick={() => setTrackFlag(track.id, "hidden", !track.hidden)}
-                        >
-                          {track.hidden ? "出す" : "隠す"}
-                        </button>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          title={track.locked ? "固定を外す" : "動かせないように固定する"}
-                          onClick={() => setTrackFlag(track.id, "locked", !track.locked)}
-                        >
-                          {track.locked ? "固定を外す" : "固定"}
-                        </button>
-                        <button className="btn btn-ghost btn-sm" title="この列を消す" onClick={() => setRemovingTrackId(track.id)}>消す</button>
-                      </span>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        aria-label={`${trackLabel(doc.tracks, track.id)}の操作`}
+                        title="この列の操作（右クリックでも開けます）"
+                        onClick={(e) => openTrackMenu(e, track.id)}
+                      >
+                        ⋮
+                      </button>
                     </div>
                     <div className="timeline-track timeline-lane" style={{ width: laneWidthPx }}>
                       {doc.clips
@@ -1044,7 +1080,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       disabled={selectedLocked || isPlaying || volumeDraft === ""}
                       title={selectedLocked ? lockedHint : playingHint}
                       onClick={() => {
-                        setSelectedVolumePoint(playheadSec - selected.startSec, Number(volumeDraft));
+                        if (volumePointLocalSec == null) return; // 置けない位置なら何もしない（黙って先頭へ置かない）
+                        setSelectedVolumePoint(volumePointLocalSec, Number(volumeDraft));
                         // **置けたときだけ**空にする＝上限などで断られたときに、入力し直しをさせない（§2-5）。
                         if (!useTimelineStore.getState().editBlocked) setVolumeDraft("");
                       }}
@@ -1248,25 +1285,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 ))}
               </select>
             </label>
-            <div className="row gap-sm">
-              {placeableTemplates.map((t) => (
-                <button
-                  key={t.templateId}
-                  className="btn btn-secondary"
-                  disabled={isPlaying}
-                  title={playingHint}
-                  onClick={() =>
-                    addTemplateClip({
-                      template: t,
-                      trackId: placeableTracks.some((x) => x.id === placeTrackId) ? placeTrackId : placeableTracks[0].id,
-                      startSec: playheadSec,
-                    })
-                  }
-                >
-                  {t.name}
-                </button>
-              ))}
-            </div>
+            <PickerList
+              items={placeableTemplates.map((t) => ({ id: t.templateId, label: t.name }))}
+              disabled={isPlaying}
+              disabledHint={playingHint}
+              searchLabel="見た目パターンの絞り込み"
+              onPick={(templateId) => {
+                const t = placeableTemplates.find((x) => x.templateId === templateId);
+                if (!t) return;
+                addTemplateClip({
+                  template: t,
+                  trackId: placeableTracks.some((x) => x.id === placeTrackId) ? placeTrackId : placeableTracks[0].id,
+                  startSec: playheadSec,
+                });
+              }}
+            />
           </>
         )}
       </div>
@@ -1279,30 +1312,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ) : (
           <>
             <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに速さ・音量を変えられます。</p>
-            <div className="row gap-sm">
-              {BGM_CATALOG.map((b) => (
-                <button
-                  key={b.id}
-                  className="btn btn-secondary"
-                  disabled={isPlaying}
-                  title={isPlaying ? playingHint : b.note}
-                  onClick={() => addAudioClip({ bundledBgmId: b.id, trackId: voiceTracks[0].id, startSec: playheadSec })}
-                >
-                  {b.label}
-                </button>
-              ))}
-              {audioAssets.map((a) => (
-                <button
-                  key={a.assetId}
-                  className="btn btn-secondary"
-                  disabled={isPlaying}
-                  title={playingHint}
-                  onClick={() => addAudioClip({ assetId: a.assetId, trackId: voiceTracks[0].id, startSec: playheadSec })}
-                >
-                  {a.displayName}
-                </button>
-              ))}
-            </div>
+            <PickerList
+              items={[
+                ...BGM_CATALOG.map((b) => ({ id: `bgm:${b.id}`, label: b.label, note: b.note })),
+                ...audioAssets.map((a) => ({ id: `asset:${a.assetId}`, label: a.displayName })),
+              ]}
+              disabled={isPlaying}
+              disabledHint={playingHint}
+              searchLabel="音の絞り込み"
+              onPick={(id) => {
+                // id の頭で出どころを分ける＝**音の出どころは高々1つ**（`11 §8` V25）を渡す時点で守る。
+                const [kind, rest] = [id.slice(0, id.indexOf(":")), id.slice(id.indexOf(":") + 1)];
+                // 同梱BGMは**目録から実体を引く**（見た目パターン側と同じ流儀）＝画面の文字列を id の型へ
+                // 押し込まない。目録に無いものは置かない（存在しない曲を指す部品を作らない）。
+                const bgm = kind === "bgm" ? BGM_CATALOG.find((b) => b.id === rest) : undefined;
+                if (kind === "bgm" && !bgm) return;
+                addAudioClip(
+                  bgm
+                    ? { bundledBgmId: bgm.id, trackId: voiceTracks[0].id, startSec: playheadSec }
+                    : { assetId: rest, trackId: voiceTracks[0].id, startSec: playheadSec },
+                );
+              }}
+            />
           </>
         )}
       </div>
@@ -1348,6 +1379,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           動画の一覧へ
         </button>
       </div>
+
+      {trackMenu && menuTrack && (
+        <ContextMenu x={trackMenu.x} y={trackMenu.y} items={trackMenuItems} onClose={() => setTrackMenu(null)} />
+      )}
     </div>
   );
 }

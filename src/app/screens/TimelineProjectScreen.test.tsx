@@ -171,7 +171,9 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
   it("列を消すときは、一緒に消える部品の数を伝える（黙って消さない）", () => {
     twoClips();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.click(screen.getAllByTitle("この列を消す")[1]); // 映像1（クリップ2個）
+    // 操作は右クリックのメニューへ畳んだ（ADR-0033）＝行のボタンではなくメニューから消す。
+    fireEvent.click(screen.getByLabelText("映像1の操作")); // 映像1（クリップ2個）
+    fireEvent.click(screen.getByRole("menuitem", { name: "この列を消す" }));
     expect(screen.getByRole("alert").textContent).toContain("2個の部品も一緒に消えます");
     fireEvent.click(screen.getByText("削除する"));
     expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_002"]);
@@ -993,5 +995,57 @@ describe("TimelineProjectScreen: 音量の変化のレビュー指摘（/canon-c
     fireEvent.change(input!, { target: { value: "0.9" } });
     fireEvent.click(screen.getByText("この位置に置く"));
     expect((screen.getByText("この位置の音量").parentElement?.querySelector("input") as HTMLInputElement).value).toBe("0.9");
+  });
+});
+
+describe("TimelineProjectScreen: 音量の変化を部品の終わりに置く（#512 実機確認）", () => {
+  it("終わりちょうど（部品の最後）にも置ける＝「だんだん大きく」の到達点を置ける", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 10, bundledBgmId: "found-new-hope" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "10" } });
+    // 「部品の外です」ではなく、置く欄が出ている。
+    expect(screen.getByText("この位置に置く")).toBeInTheDocument();
+    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "1" } });
+    fireEvent.click(screen.getByText("この位置に置く"));
+    expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toEqual([{ timeSec: 10, volume: 1 }]);
+  });
+});
+
+describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（ADR-0033）", () => {
+  it("行に操作の文字を常時出さない（帯が読めなくならない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    for (const label of ["隠す", "固定", "消す", "手前へ", "奥へ"]) {
+      expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
+  });
+
+  it("行を右クリックすると、その列の操作が出る", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByText("映像1"));
+    expect(screen.getByRole("menuitem", { name: "動画に出さない" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "この列を消す" })).toBeInTheDocument();
+  });
+
+  it("メニューから操作でき、選ぶと閉じる", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByText("映像1"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "動画に出さない" }));
+    expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.hidden).toBe(true);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("いまの状態で意味が通る言い方にする（出していない列は「動画に出す」）", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }, { id: "track_002", kind: TRACK_KIND.audio }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByText("映像1"));
+    expect(screen.getByRole("menuitem", { name: "動画に出す" })).toBeInTheDocument();
   });
 });
