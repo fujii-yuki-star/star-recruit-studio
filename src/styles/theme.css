@@ -1022,21 +1022,6 @@ button.badge {
   padding-bottom: 6px;
 }
 
-/* 編集レイアウト(場面編集) */
-.editor-grid {
-  display: grid;
-  /* 列は SceneEditScreen がインラインで指定（左折りたたみ 240/44px・中央 1fr・右リサイズ 260〜560px・#276）。 */
-  gap: var(--gap);
-  height: 100%;
-}
-.editor-col {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: var(--gap);
-  overflow-y: auto;
-}
-
 /* 場面編集の右欄アコーディオン（#276）。節ごとに開閉してスクロール量を抑える。 */
 .accordion {
   border: 1px solid var(--color-border);
@@ -1092,6 +1077,13 @@ button.badge {
   height: 76vh;
   min-height: 420px;
   margin-bottom: var(--space-lg, 16px);
+}
+/* スクロールしない器に入れるとき（場面編集）＝器いっぱいに広げる。画面の高さで決め打つと、小さい
+   ウィンドウで下の操作行（閉じた欄を戻す・配置を既定に戻す）が切れて**戻す道が消える**（決定6/8）。 */
+.panel-layout--fill {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 .panel-layout-main {
   display: flex;

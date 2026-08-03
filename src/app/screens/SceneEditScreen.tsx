@@ -3,11 +3,8 @@ import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
-import {
-  PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, closedPanelIds, emptyLayout, normalizeLayout,
-} from "../../domain/layout/panelLayout";
-import type { PanelLayout } from "../../domain/layout/panelLayout";
-import { clearPanelLayout, getPanelLayout, setPanelLayout } from "../../infrastructure/appSettings";
+import { usePanelLayout } from "../components/layout/usePanelLayout";
+import { PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
 import { sceneFirstLine } from "./sceneCardPreview";
 import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, VideoStartSpec } from "../../domain/project/types";
 import { resolveSlotClip } from "../../domain/asset/clip";
@@ -94,13 +91,12 @@ type AssetFilter = "all" | "image" | "video" | "bgm";
 
 /**
  * この画面が持つ欄（ADR-0033 段階4）。**値集合にする**＝綴り違いで「知らない欄」として落ちない（§2-7）。
- * 左の折りたたみ（#276）・右幅のドラッグ（#276）・節の既定開閉（#550）でやっていたことは、
- * **配置の仕組みそのもの**に置き換わった＝画面ごとの作り分けをやめる（§6）。
+ * **#276（左の折りたたみ・右幅のドラッグ）でやっていたことは、配置の仕組みそのものに置き換わった**
+ * ＝画面ごとの作り分けをやめる（§6）。**#550（節の開閉・既定の表示量）はそのまま**＝あれは欄の
+ * **中身**の話で、配置とは別の層（ADR-0033 段階4）。
  */
 const PANEL_ID = { assets: "assets", preview: "preview", scenes: "scenes", edit: "edit" } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
-/** 配置を覚えるまでの待ち（ms）。境界のドラッグ中に書き続けない。 */
-const LAYOUT_SAVE_DELAY_MS = 300;
 const LS_SECTION_OPEN = "sceneEdit.sectionOpen";
 /**
  * 節の開閉の記憶（#550 ③）。**場面をまたぐだけなら元から保たれる**（節は再マウントされない）が、
@@ -327,9 +323,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [durationDraft, setDurationDraft] = useState<{ sceneId: string; value: string } | null>(null);
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
-  // 場面編集レイアウト（#276）：左パネル折りたたみ・右パネル横幅。localStorage に保存して再訪時も維持。
-  // 欄の配置（ADR-0033 段階4）。**既定はいまの見え方と同じ**（左＝素材／中央＝仕上がり確認と場面の一覧／右＝編集）
-  // ＝配置を触っていない利用者には、これまでと同じ画面が出る。
+  // 欄の配置（ADR-0033 段階4）。**既定はいままでの並びと同じ**（左＝素材／中央＝仕上がり確認と場面の並び／
+  // 右＝編集）＝配置を触っていない利用者には、これまでと同じ顔ぶれ・同じ並びが出る。
+  // 出し入れ（読み込み・整え・保存・既定へ戻す）は**共通のフック**が持つ＝画面ごとに書き写さない（§6）。
   const defaultLayout = useMemo(() => {
     const l = emptyLayout();
     l.nodes.left = { panelId: PANEL_ID.assets };
@@ -341,25 +337,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     l.nodes.right = { panelId: PANEL_ID.edit };
     return l;
   }, []);
-  const [panelLayout, setPanelLayoutState] = useState<PanelLayout>(() =>
-    normalizeLayout(getPanelLayout(PANEL_SCREEN.scene) ?? defaultLayout, PANEL_IDS),
-  );
-  const changeLayout = (next: PanelLayout): void => setPanelLayoutState(normalizeLayout(next, PANEL_IDS));
-  const resetLayout = (): void => {
-    clearPanelLayout(PANEL_SCREEN.scene);
-    setPanelLayoutState(normalizeLayout(defaultLayout, PANEL_IDS));
-  };
-  const closedPanels = closedPanelIds(panelLayout, PANEL_IDS);
-  // 保存は**少し待ってから**（ドラッグ中に書き続けない）。**画面を離れるときは待たずに書く**。
-  useEffect(() => {
-    const t = setTimeout(() => setPanelLayout(PANEL_SCREEN.scene, panelLayout), LAYOUT_SAVE_DELAY_MS);
-    return () => clearTimeout(t);
-  }, [panelLayout]);
-  const panelLayoutRef = useRef(panelLayout);
-  useEffect(() => {
-    panelLayoutRef.current = panelLayout;
-  }, [panelLayout]);
-  useEffect(() => () => setPanelLayout(PANEL_SCREEN.scene, panelLayoutRef.current), []);
+  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed: closedPanels } =
+    usePanelLayout(PANEL_SCREEN.scene, defaultLayout, PANEL_IDS);
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
@@ -1465,6 +1444,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     { id: PANEL_ID.preview, title: '仕上がり確認', content: (
       <>
               <div className="row-between" style={{ alignItems: "center" }}>
+                <span />
                 <div className="row gap-sm" style={{ alignItems: "center" }}>
                   {/* 前の場面からの「切り替え効果」を再生確認（#408 Part 2）。効果があり前場面が描けるときだけ出す。 */}
                   {canPlayTransition && (
@@ -2753,9 +2733,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         </div>
       </div>
 
-      <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden" }}>
-        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
-        <div className="row gap-sm">
+      <div style={{ flex: 1, padding: "var(--gap)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {/* 欄は器いっぱいに広げ、**下の操作行は必ず残す**＝閉じた欄を戻す道が画面から切れない（決定6/8）。 */}
+        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} fill />
+        <div className="row gap-sm" style={{ flexShrink: 0, flexWrap: "wrap" }}>
           {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8）。 */}
           {closedPanels.map((id) => (
             <button key={id} className="btn btn-secondary" onClick={() => changeLayout(addPanelToRegion(panelLayout, id, PANEL_REGION.left))}>

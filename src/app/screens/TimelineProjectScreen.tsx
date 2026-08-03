@@ -40,14 +40,8 @@ import type { ContextMenuItem } from "../components/ContextMenu";
 import { PickerList } from "../components/PickerList";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
-import {
-  PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, closedPanelIds, emptyLayout, normalizeLayout,
-} from "../../domain/layout/panelLayout";
-import type { PanelLayout } from "../../domain/layout/panelLayout";
-import { clearPanelLayout, getPanelLayout, setPanelLayout } from "../../infrastructure/appSettings";
-
-/** 配置を覚えるまでの待ち（ms）。境界のドラッグ中に書き続けない。 */
-const LAYOUT_SAVE_DELAY_MS = 300;
+import { usePanelLayout } from "../components/layout/usePanelLayout";
+import { PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
 
 /**
  * この画面が持つ欄（配置に出てくる id の集合＝知らない欄を落とす基準）。**値集合にする**＝
@@ -283,29 +277,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return l;
   }, []);
   // 既存の `layout`（仕上がり確認の並べ方）と名前がぶつからないよう、欄の配置は `panelLayout` と呼ぶ。
-  const [panelLayout, setPanelLayoutState] = useState<PanelLayout>(() =>
-    normalizeLayout(getPanelLayout(PANEL_SCREEN.timeline) ?? defaultLayout, PANEL_IDS),
-  );
-  // 変えたらすぐ覚える（**画面ごとに1つ**＝別の動画を開いても同じ配置・ADR-0033 決定4）。
-  const changeLayout = (next: PanelLayout): void => {
-    setPanelLayoutState(normalizeLayout(next, PANEL_IDS));
-  };
-  // 保存は**少し待ってから**（境界のドラッグは1秒に何十回も変わるので、動くたびに書かない）。
-  useEffect(() => {
-    const t = setTimeout(() => setPanelLayout(PANEL_SCREEN.timeline, panelLayout), LAYOUT_SAVE_DELAY_MS);
-    return () => clearTimeout(t);
-  }, [panelLayout]);
-  // **画面を離れるときは待たずに書く**＝待っている間に離れると、組み替えたことが覚えられない。
-  const panelLayoutRef = useRef(panelLayout);
-  useEffect(() => {
-    panelLayoutRef.current = panelLayout;
-  }, [panelLayout]);
-  useEffect(() => () => setPanelLayout(PANEL_SCREEN.timeline, panelLayoutRef.current), []);
-  const resetLayout = (): void => {
-    clearPanelLayout(PANEL_SCREEN.timeline);
-    setPanelLayoutState(normalizeLayout(defaultLayout, PANEL_IDS));
-  };
-  const closed = closedPanelIds(panelLayout, PANEL_IDS);
+  // 出し入れは**共通のフック**（画面ごとに書き写さない・§6）。
+  const { layout: panelLayout, change: changeLayout, reset: resetLayout, closed } =
+    usePanelLayout(PANEL_SCREEN.timeline, defaultLayout, PANEL_IDS);
 
   // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
   const [explodingClipId, setExplodingClipId] = useState<string | null>(null);

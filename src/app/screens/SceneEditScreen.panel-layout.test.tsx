@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // 場面編集の欄の配置（ADR-0033 段階4）。**いままでの見え方を保ったまま**、組み替えられることを固定する。
-// #276（左の折りたたみ・右幅のドラッグ）と #550（節の開閉）でやっていたことを、配置の仕組みへ畳んだ。
+// #276（左の折りたたみ・右幅のドラッグ）でやっていたことを、配置の仕組みへ畳んだ。
+// #550（節の開閉）は**そのまま**＝あれは欄の中身の話で、配置とは別の層（ADR-0033 段階4）。
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import type { Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
@@ -77,5 +78,32 @@ describe("SceneEditScreen: 欄の配置（ADR-0033 段階4）", () => {
     fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
     expect(localStorage.getItem("app.panelLayout.timeline")).toBeNull();
+  });
+});
+
+describe("SceneEditScreen: 触っていない画面は覚えない（#550 の教訓・/canon-check の指摘）", () => {
+  it("配置を触らずに開いているだけでは、既定を焼き付けない（あとで既定を良くしたときに届く）", () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = render(<SceneEditScreen onNavigate={vi.fn()} />);
+      // 保存は少し待ってから走る＝**その待ちを実際に越えても**書かれないことを見る。
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(localStorage.getItem("app.panelLayout.scene")).toBeNull();
+      unmount();
+      expect(localStorage.getItem("app.panelLayout.scene")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("「配置を既定に戻す」を押したら、覚えていたものも消える（次に開いても既定）", () => {
+    const first = render(<SceneEditScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("素材一覧の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    fireEvent.click(screen.getByRole("button", { name: "配置を既定に戻す" }));
+    first.unmount();
+    expect(localStorage.getItem("app.panelLayout.scene")).toBeNull();
   });
 });
