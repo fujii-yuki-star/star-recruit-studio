@@ -51,6 +51,26 @@ function spanSec(doc: TimelineProject, targetId: string): number | undefined {
   return ends.length > 0 ? Math.max(...ends) - origin : undefined;
 }
 
+/**
+ * 再生位置（動画の時刻）を、その対象に置ける「先頭からの秒」へ直す。置けない位置なら `null`。
+ *
+ * **終わりちょうども置ける**（区間は**閉じている**）＝`setKeyframe` のクランプ範囲（0〜対象の長さ）と
+ * 同じ規則を画面と1か所で共有する（§6）。**描画の生存判定（`clipIsLiveAt`＝半開）を流用してはいけない**＝
+ * 終端に置けず「ここまでに動き終わる」到達点が作れない（音量の変化で同じ誤りをしていた・#512 実機確認）。
+ * グループを対象にしたときの起点・長さは `animationOriginSec`／所属クリップの最後の終わりで見る
+ * （クリップ1つとは範囲が違う）。
+ *
+ * 端は**丸めの都合で外れない**ように見て、返す秒は範囲へ収めたうえでマイクロ秒で丸める
+ * （`volumePointTimeAt` と同じ理由＝置き直しのつもりで点が増えない）。
+ */
+export function keyframeTimeAt(doc: TimelineProject, targetId: string, timeSec: number): number | null {
+  const origin = animationOriginSec(doc, targetId);
+  const span = spanSec(doc, targetId);
+  if (origin == null || span == null) return null;
+  if (timeSec < origin || timeSec > origin + span) return null;
+  return Math.round(Math.min(Math.max(0, timeSec - origin), span) * 1e6) / 1e6;
+}
+
 /** その対象が固定された列に乗っているか（グループはメンバーのどれかが固定なら固定扱い）。 */
 function isLocked(doc: TimelineProject, targetId: string): boolean {
   const lockedTracks = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id));

@@ -168,3 +168,19 @@ describe('volumePointTimeAt（置ける位置か・#512 実機確認で判明）
     expect(r.ok && r.doc.clips[0].volumePoints).toEqual([{ timeSec: 8, volume: 1 }]);
   });
 });
+
+describe('volumePointTimeAt の端（/canon-check の指摘）', () => {
+  it('丸めの都合で右端ちょうどが外れない（案内どおりの秒で置ける）', () => {
+    // (0.1 + 0.2) - 0.1 は 0.20000000000000004＝長さ 0.2 を超える。式を変えないと右端が外れる。
+    const clip = doc({ startSec: 0.1, durationSec: 0.2 }).clips[0];
+    expect(volumePointTimeAt(clip, 0.1 + 0.2)).not.toBeNull();
+    expect(volumePointTimeAt(clip, 0.1 + 0.2)!).toBeLessThanOrEqual(0.2);
+  });
+
+  it('部品を動かしても同じ点は同じ秒になる（置き直しが点を増やさない）', () => {
+    const before = doc({ startSec: 0, durationSec: 100 }).clips[0];
+    const moved = doc({ startSec: 81.242, durationSec: 100 }).clips[0];
+    const local = volumePointTimeAt(before, 5.765)!;
+    expect(volumePointTimeAt(moved, 81.242 + local)).toBe(local);
+  });
+});

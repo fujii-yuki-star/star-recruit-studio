@@ -16,16 +16,15 @@ import { useTimelineAudio } from "../hooks/useTimelineAudio";
 import type { CropMode, TrackKind } from "../../domain/enums";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
-import { clipIsLiveAt, layoutTimelineAt } from "../../renderer/timelineLayout";
+import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
-import { animationOriginSec } from "../../domain/timeline/keyframeEdit";
+import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
 import { groupElementIds } from "../../domain/project/groupOps";
 import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
-import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
@@ -303,9 +302,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const selectedKeyframes =
     doc && selected ? doc.animations?.find((a) => a.targetId === selected.id)?.keyframes ?? [] : [];
   // 再生位置が部品の中にあるか＋その時刻に置いてあるキーフレーム（あれば値を読み込める）。
+  // 置ける位置か＝**終わりちょうどを含む**（`keyframeTimeAt`＝domain と同じ規則）。音量の変化と同じ扱いに
+  // そろえる（ADR-0026②＝同じ概念は同じ挙動。描画の生存判定＝半開を流用すると終端に置けない）。
+  const keyframeLocalSec = doc && selected ? keyframeTimeAt(doc, selected.id, playheadSec) : null;
   const keyframeAtPlayhead = {
-    live: selected != null && clipIsLiveAt(selected, playheadSec),
-    keyframe: selectedKeyframes.find((k) => k.timeSec === playheadSec - selectedOrigin),
+    live: keyframeLocalSec != null,
+    keyframe: selectedKeyframes.find((k) => k.timeSec === keyframeLocalSec),
   };
   // 選んだ部品の音量の変化（#512 段4）。時刻は部品の先頭からの秒なので、表示は開始秒を足す。
   // 読むときも保存と同じ正規化を通す＝並び・重複・値域が画面と鳴る音で食い違わない。
@@ -424,7 +426,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           label: menuTrack.locked ? "固定を外す" : "動かせないように固定する",
           onSelect: () => setTrackFlag(menuTrack.id, "locked", !menuTrack.locked),
         },
-        { label: "この列を消す", danger: true, onSelect: () => setRemovingTrackId(menuTrack.id) },
+        {
+          label: "この列を消す",
+          danger: true,
+          // 固定した列は消せない（`removeTrack` が断る＝ADR-0032）。押してから断られるのではなく、
+          // **押す前に理由を出す**（長い画面では上部の知らせを見落とす・§2-5）。
+          disabled: menuTrack.locked,
+          disabledHint: "この列は固定されています。消すには固定を外してください",
+          onSelect: () => setRemovingTrackId(menuTrack.id),
+        },
       ]
     : [];
   const svg = layout
@@ -1070,7 +1080,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       disabled={selectedLocked || isPlaying || volumeDraft === ""}
                       title={selectedLocked ? lockedHint : playingHint}
                       onClick={() => {
-                        setSelectedVolumePoint(volumePointLocalSec ?? 0, Number(volumeDraft));
+                        if (volumePointLocalSec == null) return; // 置けない位置なら何もしない（黙って先頭へ置かない）
+                        setSelectedVolumePoint(volumePointLocalSec, Number(volumeDraft));
                         // **置けたときだけ**空にする＝上限などで断られたときに、入力し直しをさせない（§2-5）。
                         if (!useTimelineStore.getState().editBlocked) setVolumeDraft("");
                       }}
@@ -1312,9 +1323,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               onPick={(id) => {
                 // id の頭で出どころを分ける＝**音の出どころは高々1つ**（`11 §8` V25）を渡す時点で守る。
                 const [kind, rest] = [id.slice(0, id.indexOf(":")), id.slice(id.indexOf(":") + 1)];
+                // 同梱BGMは**目録から実体を引く**（見た目パターン側と同じ流儀）＝画面の文字列を id の型へ
+                // 押し込まない。目録に無いものは置かない（存在しない曲を指す部品を作らない）。
+                const bgm = kind === "bgm" ? BGM_CATALOG.find((b) => b.id === rest) : undefined;
+                if (kind === "bgm" && !bgm) return;
                 addAudioClip(
-                  kind === "bgm"
-                    ? { bundledBgmId: rest as BundledBgmId, trackId: voiceTracks[0].id, startSec: playheadSec }
+                  bgm
+                    ? { bundledBgmId: bgm.id, trackId: voiceTracks[0].id, startSec: playheadSec }
                     : { assetId: rest, trackId: voiceTracks[0].id, startSec: playheadSec },
                 );
               }}

@@ -38,3 +38,20 @@ describe("ContextMenu", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });
+
+describe("ContextMenu: いまはできない操作（/canon-check の指摘）", () => {
+  it("押せないときは理由を添える（押してから断られる、を作らない）", () => {
+    const onSelect = vi.fn();
+    render(
+      <ContextMenu
+        x={10}
+        y={10}
+        items={[{ label: "この列を消す", disabled: true, disabledHint: "この列は固定されています。消すには固定を外してください", onSelect }]}
+        onClose={vi.fn()}
+      />,
+    );
+    const item = screen.getByRole("menuitem", { name: "この列を消す" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "この列は固定されています。消すには固定を外してください");
+  });
+});

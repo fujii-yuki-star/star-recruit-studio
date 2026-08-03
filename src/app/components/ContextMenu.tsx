@@ -12,6 +12,9 @@ export interface ContextMenuItem {
   label: string;
   /** 消す等の取り返しにくい操作（色を変える）。 */
   danger?: boolean;
+  /** いまはできない操作（押せなくする）。**理由を必ず添える**＝押せないのに理由が無い、を作らない（§2-5）。 */
+  disabled?: boolean;
+  disabledHint?: string;
   onSelect: () => void;
 }
 
@@ -87,6 +90,8 @@ export function ContextMenu({
               textAlign: "left",
               color: it.danger ? "var(--color-danger)" : undefined,
             }}
+            disabled={it.disabled}
+            title={it.disabled ? it.disabledHint : undefined}
             onClick={() => {
               it.onSelect();
               onClose();

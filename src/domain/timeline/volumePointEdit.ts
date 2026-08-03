@@ -8,6 +8,7 @@
 // 正規化を通るので、保存の形と読んだ形が食い違わない。
 import { VOLUME_POINTS_MAX } from '../constants';
 import { isAudioClip, normalizedVolumePoints } from './audio';
+import { clipEndSec } from './validateTimelineDoc';
 import { EDIT_BLOCKED } from './edit';
 import type { EditResult } from './edit';
 import type { TimelineClip, TimelineProject, VolumePoint } from './types';
@@ -95,6 +96,12 @@ function samePoints(a: readonly VolumePoint[], b: readonly VolumePoint[]): boole
  * （#512 の実機確認で判明）。
  */
 export function volumePointTimeAt(clip: TimelineClip, timeSec: number): number | null {
-  const local = timeSec - clip.startSec;
-  return local >= 0 && local <= clip.durationSec ? local : null;
+  // 終わりの判定は**画面が使うのと同じ式**（`clipEndSec`＝`startSec + durationSec`）で見る。
+  // `timeSec - startSec <= durationSec` で見ると、`(s+d)-s > d` になる組（例 s=0.1, d=0.2）で
+  // **右端ちょうどが外れる**＝案内どおりの秒を入れても置けない袋小路になる（浮動小数の丸め）。
+  if (timeSec < clip.startSec || timeSec > clipEndSec(clip)) return null;
+  // 返す秒は**必ず 0〜長さ**に収め、**マイクロ秒で丸める**。丸めないと、部品を動かすたびに
+  // `(新しい開始 + 点) - 新しい開始` が 1e-15 ずれ、同じ点が「別の時刻」になって
+  // 置き直しのつもりが**点をもう1つ増やす**（上限を静かに食う）。音の差は出ない桁（1/30 秒の3万分の1）。
+  return Math.round(Math.min(Math.max(0, timeSec - clip.startSec), clip.durationSec) * 1e6) / 1e6;
 }
