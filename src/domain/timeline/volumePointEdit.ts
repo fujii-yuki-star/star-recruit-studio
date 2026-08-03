@@ -82,3 +82,19 @@ function withPoints(
 function samePoints(a: readonly VolumePoint[], b: readonly VolumePoint[]): boolean {
   return a.length === b.length && a.every((p, i) => p.timeSec === b[i].timeSec && p.volume === b[i].volume);
 }
+
+/**
+ * 再生位置（動画の時刻）を、その部品に置ける「先頭からの秒」へ直す。置けない位置なら `null`。
+ *
+ * **終わりちょうども置ける**（区間は**閉じている**）＝`setVolumePoint` が受け付ける範囲（0〜部品の長さ）と
+ * 同じ規則を、画面と1か所で共有するための関数（§6）。
+ *
+ * ⚠️ **描画の生存判定（`clipIsLiveAt`＝半開 `[開始, 終了)`）を流用してはいけない**。あれは「その瞬間に
+ * 鳴っている／映っているか」で、終端は次の部品のものだから外す。音量の点は**その時刻の値**であって、
+ * 終端は「ここまでにこの音量へ到達する」という到達点＝**外すと「だんだん大きく」の行き先が置けない**
+ * （#512 の実機確認で判明）。
+ */
+export function volumePointTimeAt(clip: TimelineClip, timeSec: number): number | null {
+  const local = timeSec - clip.startSec;
+  return local >= 0 && local <= clip.durationSec ? local : null;
+}

@@ -8,6 +8,7 @@ import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { clipCountOnTrack } from "../../domain/timeline/edit";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
+import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
@@ -306,9 +307,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 欄を触れるままにすると「設定したのに音が変わらない」になる（ADR-0026①＝設定した意味どおり）。
   const hasVolumePoints = selectedVolumePoints.length > 0;
   const volumePointsHint = hasVolumePoints ? VOLUME_POINTS_OVERRIDE_HINT : undefined;
+  // 置ける位置か＝**終わりちょうどを含む**（`volumePointTimeAt`＝domain と同じ規則）。描画の生存判定
+  // （`clipIsLiveAt`＝半開）を使うと、**「だんだん大きく」の到達点**を終端に置けない（#512 実機確認）。
+  const volumePointLocalSec = selected ? volumePointTimeAt(selected, playheadSec) : null;
   const volumePointAtPlayhead = {
-    live: selected != null && clipIsLiveAt(selected, playheadSec),
-    point: selected ? selectedVolumePoints.find((p) => p.timeSec === playheadSec - selected.startSec) : undefined,
+    live: volumePointLocalSec != null,
+    point: selectedVolumePoints.find((p) => p.timeSec === volumePointLocalSec),
   };
   // この部品が入っている「まとまり」に付いた動き（画面では動いているのに「無い」と言わない）。
   const groupKeyframes =
@@ -1044,7 +1048,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       disabled={selectedLocked || isPlaying || volumeDraft === ""}
                       title={selectedLocked ? lockedHint : playingHint}
                       onClick={() => {
-                        setSelectedVolumePoint(playheadSec - selected.startSec, Number(volumeDraft));
+                        setSelectedVolumePoint(volumePointLocalSec ?? 0, Number(volumeDraft));
                         // **置けたときだけ**空にする＝上限などで断られたときに、入力し直しをさせない（§2-5）。
                         if (!useTimelineStore.getState().editBlocked) setVolumeDraft("");
                       }}

@@ -995,3 +995,21 @@ describe("TimelineProjectScreen: 音量の変化のレビュー指摘（/canon-c
     expect((screen.getByText("この位置の音量").parentElement?.querySelector("input") as HTMLInputElement).value).toBe("0.9");
   });
 });
+
+describe("TimelineProjectScreen: 音量の変化を部品の終わりに置く（#512 実機確認）", () => {
+  it("終わりちょうど（部品の最後）にも置ける＝「だんだん大きく」の到達点を置ける", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 10, bundledBgmId: "found-new-hope" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "10" } });
+    // 「部品の外です」ではなく、置く欄が出ている。
+    expect(screen.getByText("この位置に置く")).toBeInTheDocument();
+    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "1" } });
+    fireEvent.click(screen.getByText("この位置に置く"));
+    expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toEqual([{ timeSec: 10, volume: 1 }]);
+  });
+});
