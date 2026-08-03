@@ -307,7 +307,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       }
       const report = await exportVideo(built, fileName.trim() || "export", bgmRuns, pid || undefined, outputPath);
       setResultPath(report.outputPath);
-      // end-to-end 総待ち時間＝レンダリング（上の rendering ログ）＋書き出し（encode/join/telop/bgm＝Rust eprintln 内訳）。
+      // end-to-end 総待ち時間＝レンダリング（上の rendering ログ）＋書き出し（encode/join/bgm＝Rust eprintln 内訳）。
       // 代表ケースの Before/After はこの total と上の rendering 行で記録できる（#376 レビュー P2）。
       console.info(`[export] end-to-end (render→save): ${Math.round(performance.now() - startedAt)} ms / ${scenes.length} scenes`);
       setPhase("done");

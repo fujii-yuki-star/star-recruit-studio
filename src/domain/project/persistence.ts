@@ -152,11 +152,6 @@ export function createGroupId(existingIds: readonly string[]): string {
   return nextNumberedId('group', existingIds);
 }
 
-/** ovclip_NNN を発行する（§2.1・overlay クリップ id・project 内一意・ADR-0018）。 */
-export function createOverlayClipId(existingIds: readonly string[]): string {
-  return nextNumberedId('ovclip', existingIds);
-}
-
 /** clip_NNN を発行する（§2.1・**タイムライン形式**のクリップ id・project 内一意・ADR-0032）。場面形式の `ovclip_NNN` とは別物。 */
 export function createClipId(existingIds: readonly string[]): string {
   return nextNumberedId('clip', existingIds);

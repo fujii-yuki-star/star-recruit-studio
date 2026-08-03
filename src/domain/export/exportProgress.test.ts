@@ -16,12 +16,10 @@ describe('exportEncodePercent（#376）', () => {
     expect(exportEncodePercent({ phase: 'encode', step: 9, total: 4 })).toBe(92);
   });
 
-  it('後段は段階的に上がる（join<telop<bgm・いずれも<100）', () => {
+  it('後段は段階的に上がる（join<bgm・いずれも<100）', () => {
     const join = exportEncodePercent({ phase: 'join', step: 0, total: 0 });
-    const telop = exportEncodePercent({ phase: 'telop', step: 0, total: 0 });
     const bgm = exportEncodePercent({ phase: 'bgm', step: 0, total: 0 });
-    expect(join).toBeLessThan(telop);
-    expect(telop).toBeLessThan(bgm);
+    expect(join).toBeLessThan(bgm);
     expect(bgm).toBeLessThan(100);
     expect(join).toBeGreaterThanOrEqual(92);
   });
@@ -32,12 +30,11 @@ describe('exportPhaseLabel（§2-3：技術用語を出さない）', () => {
     expect(exportPhaseLabel({ phase: 'encode', step: 1, total: 1 })).toBe('映像を作成しています');
     expect(exportPhaseLabel({ phase: 'encode', step: 2, total: 4 })).toBe('映像を作成しています（2/4）');
     expect(exportPhaseLabel({ phase: 'join', step: 0, total: 0 })).toBe('つなぎ合わせています');
-    expect(exportPhaseLabel({ phase: 'telop', step: 0, total: 0 })).toBe('字幕を重ねています');
     expect(exportPhaseLabel({ phase: 'bgm', step: 0, total: 0 })).toBe('BGMを合わせています');
   });
 
-  it('encode 文言に技術用語（テロップ/エンコード/フレーム）を含まない', () => {
-    const s = exportPhaseLabel({ phase: 'telop', step: 0, total: 0 });
+  it('文言に技術用語（テロップ/エンコード/フレーム）を含まない', () => {
+    const s = exportPhaseLabel({ phase: 'join', step: 0, total: 0 });
     expect(s).not.toMatch(/テロップ|エンコード|フレーム|encode/);
   });
 });
@@ -71,7 +68,7 @@ describe('exportOverallPercent / exportProgressLabel（進捗の単一参照元�
     // 最後の場面を処理中でも総数を超えない。
     expect(exportProgressLabel({ phase: 'rendering', progress: { done: 8, total: 8 } })).toBe('場面 8 / 8 を処理中');
     expect(exportProgressLabel({ phase: 'encoding', progress: { done: 0, total: 0 } })).toBe('最後の仕上げ中です。そのままお待ちください。');
-    expect(exportProgressLabel({ phase: 'encoding', progress: { done: 0, total: 0 }, encode: { phase: 'telop', step: 0, total: 0 } })).toBe('字幕を重ねています');
+    expect(exportProgressLabel({ phase: 'encoding', progress: { done: 0, total: 0 }, encode: { phase: 'bgm', step: 0, total: 0 } })).toBe('BGMを合わせています');
     expect(exportProgressLabel({ phase: 'idle', progress: { done: 0, total: 0 } })).toBe(''); // 出すものが無い
     // 抽出時に足したガード：場面0で「場面 1 / 0 を処理中」と出さない（旧インライン実装はここが素通りだった）。
     expect(exportProgressLabel({ phase: 'rendering', progress: { done: 0, total: 0 } })).toBe('');

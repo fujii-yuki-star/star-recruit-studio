@@ -554,61 +554,6 @@ pub fn mix_bgm_runs_args(
     args
 }
 
-/// テロップ帯の overlay 入力（純粋引数用・ADR-0018）。png は一時PNGパス、区間はグローバル秒（front の compileTimeline と一致）。
-pub struct TelopOverlay<'a> {
-    pub png: &'a str,
-    pub start_sec: f64,
-    pub end_sec: f64,
-}
-
-/// 結合済み動画へテロップ帯PNG群を時刻指定で重ねる引数（純粋・ADR-0018 テロップ実描画）。
-/// 各PNGは透過・出力解像度と同サイズ（front が場面PNGと同じ SVG→PNG で焼く＝ADR-0004 パリティ）。
-/// 静止PNGは overlay の eof_action=repeat で唯一フレームが持続し、enable='between(t,S,E)' が表示区間を制御する
-/// （t は主入力＝結合済み動画のタイムスタンプ）。映像は再エンコード（コーデック/ビットレートは場面と同一）・音声は無変更コピー。
-/// BGM 合成の前に1回だけ実行する（再エンコード世代を最小に。xfade チェーンへの合流は将来最適化）。
-pub fn overlay_telops_args(
-    video: &str,
-    telops: &[TelopOverlay],
-    codec: VideoCodec,
-    bitrate: &str,
-    out: &str,
-) -> Vec<String> {
-    let mut args: Vec<String> = vec!["-y".into(), "-i".into(), video.into()];
-    for t in telops {
-        args.push("-i".into());
-        args.push(t.png.into());
-    }
-    let mut filters: Vec<String> = Vec::new();
-    let mut prev = "0:v".to_string();
-    for (i, t) in telops.iter().enumerate() {
-        let label = format!("v{}", i + 1);
-        filters.push(format!(
-            "[{prev}][{idx}:v]overlay=0:0:eof_action=repeat:enable='between(t,{s},{e})'[{label}]",
-            idx = i + 1,
-            s = t.start_sec,
-            e = t.end_sec
-        ));
-        prev = label;
-    }
-    args.push("-filter_complex".into());
-    args.push(filters.join(";"));
-    args.push("-map".into());
-    args.push(format!("[{prev}]"));
-    args.push("-map".into());
-    args.push("0:a".into());
-    args.push("-c:v".into());
-    args.push(codec.encoder().into());
-    args.extend(codec.quality_args(bitrate));
-    args.extend([
-        "-pix_fmt".into(),
-        "yuv420p".into(),
-        "-c:a".into(),
-        "copy".into(),
-        out.into(),
-    ]);
-    args
-}
-
 /// 動画スロットの収め方（11 §5 / asset.clip.fit）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fit {
@@ -1570,7 +1515,7 @@ fn validate_xfade_name(name: &str) -> Option<String> {
 }
 
 /// 書き出しの進捗イベント（#376）：フロントの ExportScreen が受けて encoding 段のバーを実進捗（80→100%）で描く。
-/// phase＝"encode"（場面ごとエンコード・step/total 有効）/"join"（結合）/"telop"（字幕合成）/"bgm"（BGM合成）。
+/// phase＝"encode"（場面ごとエンコード・step/total 有効）/"join"（結合）/"bgm"（BGM合成）。
 /// 出力（ffmpeg 引数）には一切影響しない＝パリティ不変（ADR-0001）。
 #[derive(Clone, serde::Serialize)]
 struct ExportProgressEvent {
@@ -2531,17 +2476,6 @@ fn default_true() -> bool {
     true
 }
 
-/// タイムラインのテロップ帯入力（ADR-0018）。透過PNG（base64/data URL）＋グローバル表示区間（compileTimeline の秒と一致）。
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TelopInput {
-    png_base64: String,
-    #[serde(default)]
-    start_sec: f64,
-    #[serde(default)]
-    end_sec: f64,
-}
-
 /// エクスポート結果の要約。
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2574,7 +2508,6 @@ pub async fn export_video(
     bgm_runs: Option<Vec<BgmRunInput>>,
     project_id: Option<String>,
     output_path: Option<String>,
-    telops: Option<Vec<TelopInput>>,
 ) -> Result<ExportReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         export_video_impl(
@@ -2584,7 +2517,6 @@ pub async fn export_video(
             bgm_runs,
             project_id,
             output_path,
-            telops,
         )
     })
     .await
@@ -2758,7 +2690,6 @@ fn export_video_impl(
     bgm_runs: Option<Vec<BgmRunInput>>,
     project_id: Option<String>,
     output_path: Option<String>,
-    telops: Option<Vec<TelopInput>>,
 ) -> Result<ExportReport, String> {
     // すでに別の書き出しが走っていれば弾く（二重実行での作業ディレクトリ相互破壊を防ぐ・#379）。
     // 取得できたら以降の全経路で RAII ガードが解除を保証する。
@@ -3251,12 +3182,10 @@ fn export_video_impl(
         .unwrap_or((DEFAULT_OUTPUT_WIDTH, DEFAULT_OUTPUT_HEIGHT));
     let bitrate = bitrate_arg(target_bitrate_bps(out_w, out_h, DEFAULT_FPS));
 
-    // パス構成：場面結合 →（テロップ overlay 合成・ADR-0018）→（場面ごとBGM 合成・ADR-0018 ③(7)）→ out。中間成果物は tmp。
-    let has_telops = telops.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
+    // パス構成：場面結合 →（場面ごとBGM 合成・ADR-0018 ③(7)）→ out。中間成果物は tmp。
+    // 旧・場面横断タイムラインのテロップ合成は #635 で退役（ADR-0032 決定11/12）＝この段そのものが無くなった。
     let has_bgm = bgm_runs.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
-    let joined_path = if has_telops {
-        tmp.join("joined.mp4")
-    } else if has_bgm {
+    let joined_path = if has_bgm {
         tmp.join("video.mp4")
     } else {
         out.clone()
@@ -3273,53 +3202,6 @@ fn export_video_impl(
         &joined_path,
         Some(&app),
     )?;
-
-    // タイムラインのテロップ帯を結合後の動画へ overlay（区間はグローバル秒＝xfade 重なり込みの実効時間軸）。
-    let video_path = if has_telops {
-        emit_export_progress(Some(&app), "telop", 0, 0); // 字幕合成中（#376）
-        let telop_start = Instant::now();
-        let list = telops.unwrap_or_default();
-        let target = if has_bgm {
-            tmp.join("video.mp4")
-        } else {
-            out.clone()
-        };
-        let mut png_paths: Vec<String> = Vec::with_capacity(list.len());
-        for (i, t) in list.iter().enumerate() {
-            let p = tmp.join(format!("telop_{i:03}.png"));
-            decode_b64_to_file(&t.png_base64, &p, &format!("telop {}", i + 1))?;
-            png_paths.push(p.to_string_lossy().into_owned());
-        }
-        let overlays: Vec<TelopOverlay> = list
-            .iter()
-            .zip(png_paths.iter())
-            .map(|(t, p)| TelopOverlay {
-                png: p,
-                start_sec: t.start_sec,
-                end_sec: t.end_sec,
-            })
-            .collect();
-        let args = overlay_telops_args(
-            &joined_path.to_string_lossy(),
-            &overlays,
-            codec,
-            &bitrate,
-            &target.to_string_lossy(),
-        );
-        run_export(&ffmpeg, &args).map_err(|e| {
-            export_failure(
-                format!("telop overlay: {e}"),
-                "テロップの合成に失敗しました。もう一度お試しください。",
-            )
-        })?;
-        eprintln!(
-            "[export] telop overlay: {} ms",
-            telop_start.elapsed().as_millis()
-        );
-        target
-    } else {
-        joined_path
-    };
 
     // 場面ごとBGM（ADR-0018 ③(7)）：各クリップを一時ファイルへ書き出し、planBgmMix の配置で結合後の動画へ amix。
     if has_bgm {
@@ -3369,7 +3251,7 @@ fn export_video_impl(
             })
             .collect();
         let args = mix_bgm_runs_args(
-            &video_path.to_string_lossy(),
+            &joined_path.to_string_lossy(),
             &placed,
             total,
             &out.to_string_lossy(),
@@ -3384,7 +3266,7 @@ fn export_video_impl(
     }
     // 書き出し全体（エンコード＋結合＋字幕＋BGM）の所要時間。代表ケースで Before/After を測るための計測ログ（#376）。
     eprintln!(
-        "[export] total (encode+join+telop+bgm): {} ms / {} scenes",
+        "[export] total (encode+join+bgm): {} ms / {} scenes",
         export_start.elapsed().as_millis(),
         scenes.len()
     );
@@ -3453,43 +3335,6 @@ mod tests {
     }
 
     // テロップ overlay（ADR-0018）：enable='between' 区間付きの overlay チェーンを組み、音声は無変更コピー。
-    #[test]
-    fn overlay_telops_args_builds_enable_chain() {
-        let telops = [
-            TelopOverlay {
-                png: "t0.png",
-                start_sec: 1.5,
-                end_sec: 3.0,
-            },
-            TelopOverlay {
-                png: "t1.png",
-                start_sec: 8.0,
-                end_sec: 11.0,
-            },
-        ];
-        let a = overlay_telops_args(
-            "in.mp4",
-            &telops,
-            VideoCodec::MediaFoundation,
-            "12000k",
-            "out.mp4",
-        );
-        let fc = a.iter().position(|s| s == "-filter_complex").unwrap();
-        assert_eq!(
-            a[fc + 1],
-            "[0:v][1:v]overlay=0:0:eof_action=repeat:enable='between(t,1.5,3)'[v1];[v1][2:v]overlay=0:0:eof_action=repeat:enable='between(t,8,11)'[v2]"
-        );
-        // 最終映像ラベルを map、音声は元動画から無変更コピー。MF は -b:v（品質）を伴う。yuv420p で互換維持。
-        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[v2]"));
-        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "0:a"));
-        assert!(a.windows(2).any(|w| w[0] == "-c:a" && w[1] == "copy"));
-        assert!(a.windows(2).any(|w| w[0] == "-b:v" && w[1] == "12000k"));
-        assert!(a
-            .windows(2)
-            .any(|w| w[0] == "-pix_fmt" && w[1] == "yuv420p"));
-        // 入力は 動画1本＋テロップPNG2枚。
-        assert_eq!(a.iter().filter(|s| *s == "-i").count(), 3);
-    }
 
     #[test]
     fn parse_video_meta_audio_resolution_duration() {

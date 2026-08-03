@@ -37,7 +37,7 @@
 | freeLayout 要素 | `free_{NNN}` | `free_001` | **scene 内一意**・3桁（ADR-0008・FREE テンプレの自由配置要素） |
 | セリフ行 | `line_{NNN}` | `line_001` | **scene 内一意**・3桁以上（ADR-0015・掛け合いのセリフ列 `scene.lines`・#180） |
 | グループ | `group_{NNN}` | `group_001` | **scene/template 内一意**・3桁以上（ADR-0022・要素のグループ化 `scene.groups`/`template.groups`・空き番号を埋める gap-fill） |
-| overlay クリップ | `ovclip_{NNN}` | `ovclip_001` | **project 内一意**・3桁以上（ADR-0018・タイムラインの `timelineOverlay.clips`・gap-fill） |
+| overlay クリップ | `ovclip_{NNN}` | `ovclip_001` | 〜〜**新規に発行しない**（#635 で退役）〜〜 既存データに残っている id の形（ADR-0018・`timelineOverlay.clips`） |
 | トラック | `track_{NNN}` | `track_001` | **タイムライン形式のみ**（ADR-0032）。project 内一意・3桁以上・gap-fill。**配列の順が重ね順**（後ろほど手前）＝id の大小は重ね順と無関係 |
 | タイムラインのクリップ | `clip_{NNN}` | `clip_001` | **タイムライン形式のみ**（ADR-0032）。project 内一意・3桁以上・gap-fill。場面形式の `ovclip_NNN` とは**別物**（混在しない＝形式が違う） |
 | アニメーション | `anim_{NNN}` | `anim_001` | **project 内一意**・3桁以上（ADR-0019 の `timelineOverlay.animations` ／ ADR-0032 の `animations`。両形式で同じ形式・gap-fill） |
