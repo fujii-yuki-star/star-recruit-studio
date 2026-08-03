@@ -444,3 +444,27 @@ function parseNode(raw: unknown): PanelNode | null {
   const dir = raw.dir === SPLIT_DIR.row ? SPLIT_DIR.row : SPLIT_DIR.column;
   return makeSplit(dir, pairs.map((p) => ({ node: p.node, size: p.size > 0 ? p.size : 1 / Math.max(1, pairs.length) })));
 }
+
+/** 落とす場所を決めるための箱（画面の座標・`getBoundingClientRect` と同じ形）。 */
+export interface DropBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 欄の上のどこを指しているかから、**どの辺に差すか**を決める（段階3＝見出しをつかむドラッグ）。
+ *
+ * **中心からの距離を縦横で比べる**（箱の形に依らず、指した側の辺になる）。真ん中はどちらでもよいので
+ * 縦横で近いほうへ倒す＝迷って何も起きない、を作らない。箱が潰れている（幅か高さが 0）ときは
+ * **上**として扱う（`0 で割らない`）。
+ */
+export function dropSideAt(box: DropBox, clientX: number, clientY: number): DropSide {
+  const w = box.width > 0 ? box.width : 1;
+  const h = box.height > 0 ? box.height : 1;
+  const dx = (clientX - (box.left + w / 2)) / w;
+  const dy = (clientY - (box.top + h / 2)) / h;
+  if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? DROP_SIDE.left : DROP_SIDE.right;
+  return dy < 0 ? DROP_SIDE.top : DROP_SIDE.bottom;
+}

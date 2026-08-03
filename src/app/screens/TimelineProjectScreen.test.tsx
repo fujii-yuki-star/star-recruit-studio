@@ -1106,3 +1106,28 @@ describe("TimelineProjectScreen: 欄の配置（ADR-0033 段階2）", () => {
     expect(screen.getByLabelText("左の欄の幅")).toBeInTheDocument();
   });
 });
+
+describe("TimelineProjectScreen: 欄をつかんで動かす（ADR-0033 段階3）", () => {
+  it("見出しをつかんでほかの欄へ落とすと移り、覚えている", () => {
+    open();
+    const first = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // jsdom は大きさを持たないので、欄の箱を置く（当たり判定はこの箱で決まる）。
+    const box = (id: string, left: number) => {
+      const el = document.querySelector(`[data-panel-id="${id}"]`) as HTMLElement;
+      el.getBoundingClientRect = () =>
+        ({ left, top: 0, width: 100, height: 100, right: left + 100, bottom: 100, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+    };
+    box("selected", 0);
+    box("preview", 200);
+    fireEvent.pointerDown(screen.getByRole("heading", { name: "選んだ部品" }).parentElement!, { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { clientX: 250, clientY: 95 }); // 「仕上がり確認」の下寄り
+    fireEvent.pointerUp(window, { clientX: 250, clientY: 95 });
+    // 移しても中身は消えない。
+    expect(screen.getByRole("heading", { name: "選んだ部品" })).toBeInTheDocument();
+    first.unmount();
+    // 覚えている（開き直しても同じ）。
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "選んだ部品" })).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("app.panelLayout.timeline")!).nodes.right).toBeNull();
+  });
+});

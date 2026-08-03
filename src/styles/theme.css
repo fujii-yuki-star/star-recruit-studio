@@ -1159,3 +1159,19 @@ button.badge {
   overflow: auto;
   padding: 8px;
 }
+
+/* 欄をつかんで動かしている間（段階3）。落とし先は**線で示す**＝どこに入るか分からないまま落とさせない。 */
+.panel-frame { position: relative; }
+.panel-frame--dragging { opacity: 0.6; }
+.panel-frame-head { cursor: grab; }
+.panel-frame-head:active { cursor: grabbing; }
+.panel-drop-line {
+  position: absolute;
+  background: var(--color-primary, #3b82f6);
+  z-index: 2;
+  pointer-events: none;
+}
+.panel-drop-line--top { top: 0; left: 0; right: 0; height: 4px; }
+.panel-drop-line--bottom { bottom: 0; left: 0; right: 0; height: 4px; }
+.panel-drop-line--left { top: 0; bottom: 0; left: 0; width: 4px; }
+.panel-drop-line--right { top: 0; bottom: 0; right: 0; width: 4px; }

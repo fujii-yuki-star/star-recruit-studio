@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_REGION_SIZES,
   DROP_SIDE,
+  dropSideAt,
   MAX_REGION_RATIO,
   MAX_SIDE_TOTAL_RATIO,
   MIN_PANEL_RATIO,
@@ -351,5 +352,27 @@ describe('外枠の大きさ（決定2・段階2 で追加）', () => {
     const got = parsePanelLayout({ left: { panelId: 'a' } });
     expect(got?.regionSizes).toEqual(DEFAULT_REGION_SIZES);
     expect(got && placedPanelIds(got)).toEqual(['a']);
+  });
+});
+
+describe('dropSideAt（つかんだ欄をどの辺へ差すか・段階3）', () => {
+  const box = { left: 100, top: 100, width: 200, height: 100 };
+
+  it('指した側の辺になる', () => {
+    expect(dropSideAt(box, 110, 150)).toBe(DROP_SIDE.left);
+    expect(dropSideAt(box, 290, 150)).toBe(DROP_SIDE.right);
+    expect(dropSideAt(box, 200, 105)).toBe(DROP_SIDE.top);
+    expect(dropSideAt(box, 200, 195)).toBe(DROP_SIDE.bottom);
+  });
+
+  it('箱の形に依らず、中心からの近さで決める（横長の欄で上下が取りにくくならない）', () => {
+    // 横長（200×100）の左上角付近：横 45%・縦 45% ＝ 割合で比べるので「上」ではなく「左」。
+    expect(dropSideAt(box, 105, 105)).toBe(DROP_SIDE.left);
+    // 縦長にすると同じ位置関係でも「上」になる。
+    expect(dropSideAt({ left: 100, top: 100, width: 100, height: 200 }, 105, 105)).toBe(DROP_SIDE.top);
+  });
+
+  it('潰れた箱でも決まる（0 で割らない・迷って何も起きない、を作らない）', () => {
+    expect(dropSideAt({ left: 0, top: 0, width: 0, height: 0 }, 0, 0)).toBe(DROP_SIDE.top);
   });
 });
