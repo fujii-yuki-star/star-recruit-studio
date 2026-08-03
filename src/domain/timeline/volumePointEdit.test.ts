@@ -6,6 +6,7 @@ import { VOLUME_POINTS_MAX } from '../constants';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { EDIT_BLOCKED } from './edit';
 import { clearVolumePoints, removeVolumePoint, setVolumePoint } from './volumePointEdit';
+import { TIMELINE_EXPORT_BLOCK, timelineExportBlockers } from './export';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 
@@ -124,5 +125,23 @@ describe('removeVolumePoint / clearVolumePoints（外す）', () => {
   it('固定した列の部品は外せない', () => {
     const base = doc({ volumePoints: [{ timeSec: 1, volume: 0.2 }] }, { locked: true });
     expect(clearVolumePoints(base, 'clip_001')).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+  });
+});
+
+describe('書き出しの停止と数え方をそろえる（/canon-check の指摘）', () => {
+  it('絵の部品に点が入っていても書き出しは止めない（式は組まれない＝出せるものを断らない）', () => {
+    const many = Array.from({ length: VOLUME_POINTS_MAX + 5 }, (_, i) => ({ timeSec: i * 0.05, volume: 0.5 }));
+    const d = doc();
+    const withPointsOnText: TimelineProject = {
+      ...d,
+      clips: d.clips.map((c) => (c.id === 'clip_002' ? { ...c, volumePoints: many } : c)),
+    };
+    expect(timelineExportBlockers(withPointsOnText)).toEqual([]);
+  });
+
+  it('音の部品なら同じ数で止める（置ける数と数え方が一致する）', () => {
+    const many = Array.from({ length: VOLUME_POINTS_MAX + 5 }, (_, i) => ({ timeSec: i * 0.05, volume: 0.5 }));
+    expect(timelineExportBlockers(doc({ volumePoints: many })).map((b) => b.code))
+      .toEqual([TIMELINE_EXPORT_BLOCK.volumePointsTooMany]);
   });
 });

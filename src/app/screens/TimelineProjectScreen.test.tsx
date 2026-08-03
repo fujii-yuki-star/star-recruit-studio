@@ -959,3 +959,39 @@ describe("TimelineProjectScreen: 音量の変化（#512 段4）", () => {
     expect(screen.queryByText("音量の変化")).not.toBeInTheDocument();
   });
 });
+
+describe("TimelineProjectScreen: 音量の変化のレビュー指摘（/canon-check）", () => {
+  const withPoints = (points: { timeSec: number; volume: number }[]) => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 8,
+        bundledBgmId: "found-new-hope", volume: 0.25, volumePoints: points,
+      }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("点があるときは「音量」欄を押せなくして理由を出す（設定したのに音が変わらない、を作らない）", () => {
+    withPoints([{ timeSec: 1, volume: 0.8 }]);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("音量").parentElement?.querySelector("input")).toBeDisabled();
+    expect(screen.getByText(/その点が音量を決めます/)).toBeInTheDocument();
+  });
+
+  it("点が無ければ「音量」欄は使える（従来どおり一定の音量を決められる）", () => {
+    withPoints([]);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("音量").parentElement?.querySelector("input")).not.toBeDisabled();
+  });
+
+  it("置けなかったときは入力した値を消さない（打ち直しにさせない）", () => {
+    withPoints(Array.from({ length: VOLUME_POINTS_MAX }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 })));
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "7" } });
+    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "0.9" } });
+    fireEvent.click(screen.getByText("この位置に置く"));
+    expect((screen.getByText("この位置の音量").parentElement?.querySelector("input") as HTMLInputElement).value).toBe("0.9");
+  });
+});

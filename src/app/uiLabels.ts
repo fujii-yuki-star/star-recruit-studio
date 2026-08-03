@@ -394,6 +394,14 @@ export function clipLabel(clip: { kind: TimelineClipKind; name?: string; text?: 
  * 理由が増えたらコンパイルエラーで気づく（無言で操作が効かない状態を作らない）。
  * どれも「なぜ置けないか」でなく**次にどうすれば置けるか**を言う（§2-5）。
  */
+/**
+ * 音量の変化を置いている間の案内（#512 段4）。点があるとその点が音量を決めるので、部品の「音量」欄
+ * （一定の音量）は使われない＝**設定したのに音が変わらない**を作らないため、欄を押せなくして理由を出す
+ * （ADR-0026①・§2-5）。
+ */
+export const VOLUME_POINTS_OVERRIDE_HINT =
+  "音量の変化を置いている間は、その点が音量を決めます。一定の音量に戻すには「音量の変化をすべて外す」を押してください";
+
 export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_OVERLAP: "その場所には先に置いてある部品があります。ずらすか、列を足して重ねてください",
   TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",
@@ -405,7 +413,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_LINKED_SUBTITLE: "連動している字幕を置ける場所がありません。字幕をほかの列へ移すか、連動をやめてください",
   TIMELINE_EDIT_LINKED_SUBTITLE_TIME: "連動している字幕の時間は読み上げに合わせています。連動をやめると自分で動かせます",
   TIMELINE_EDIT_VOLUME_POINTS_FULL: `音量の変化は1つの部品に${VOLUME_POINTS_MAX}か所までです。ほかの点を外してから置いてください`,
-  TIMELINE_EDIT_VOLUME_POINTS_KIND: "音量の変化を置けるのは、音や読み上げの部品だけです",
+  TIMELINE_EDIT_VOLUME_POINTS_KIND: "音量の変化を置けるのは、音や読み上げの部品だけです。音の部品を選び直してください",
 };
 
 /**

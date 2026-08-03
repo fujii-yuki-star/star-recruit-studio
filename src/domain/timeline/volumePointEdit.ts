@@ -7,22 +7,17 @@
 // 保存するのは**正規化した後**の点列（`normalizedVolumePoints`＝並び・重複・値域）。読むときも同じ
 // 正規化を通るので、保存の形と読んだ形が食い違わない。
 import { VOLUME_POINTS_MAX } from '../constants';
-import { TIMELINE_CLIP_KIND } from '../enums';
-import { normalizedVolumePoints } from './audio';
+import { isAudioClip, normalizedVolumePoints } from './audio';
 import { EDIT_BLOCKED } from './edit';
 import type { EditResult } from './edit';
 import type { TimelineClip, TimelineProject, VolumePoint } from './types';
-
-/** 音量の変化を置ける部品か（音・読み上げだけ＝絵の部品には鳴らす音が無い）。 */
-function hasVolume(clip: TimelineClip): boolean {
-  return clip.kind === TIMELINE_CLIP_KIND.audio || clip.kind === TIMELINE_CLIP_KIND.voice;
-}
 
 /** 編集の前提（部品がある・音を持つ・固定されていない）を1か所で見る。 */
 function target(doc: TimelineProject, clipId: string): TimelineClip | { reason: EditResult & { ok: false } } {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return { reason: { ok: false, reason: EDIT_BLOCKED.notFound } };
-  if (!hasVolume(clip)) return { reason: { ok: false, reason: EDIT_BLOCKED.volumePointsKind } };
+  // 「鳴る音を持つ部品か」は再生・書き出しと同じ述語で見る（§6＝判定を写さない）。
+  if (!isAudioClip(clip)) return { reason: { ok: false, reason: EDIT_BLOCKED.volumePointsKind } };
   const locked = doc.tracks.some((t) => t.id === clip.trackId && t.locked);
   if (locked) return { reason: { ok: false, reason: EDIT_BLOCKED.locked } };
   return clip;
