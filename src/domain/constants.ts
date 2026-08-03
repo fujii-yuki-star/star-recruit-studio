@@ -85,6 +85,14 @@ export const BGM_CROSSFADE_SEC = 1.0;
 // 音量の値域（§4：0.0〜1.5、1.0=原音）。
 export const VOLUME_MIN = 0.0;
 export const VOLUME_MAX = 1.5;
+/**
+ * 音量の変化（#512）で1つの部品に置ける点の上限。**FFmpeg の式の解析に上限があるため**の実装上の天井で、
+ * 好みで決めた数ではない（ADR-0032 追補）。同梱 ffmpeg で実測すると、この形の式は
+ * **区間 94 個までは通り 95 個で解析に失敗する**（`[Eval] Missing ')' or too many args`＝式の組み立てごと
+ * 落ちて「もう一度お試しください」しか出せなくなる）。**十分な余裕を取ってここで断る**＝置く前・
+ * 書き出す前に「次の行動」を出す（§2-5・ADR-0026④）。単一の参照元（§2-7）。
+ */
+export const VOLUME_POINTS_MAX = 60;
 // 原音量（100%・等倍）。プレビュー再生で「これ以下は HTMLMediaElement.volume で厳密／超過は Web Audio GainNode で増幅」
 // を分ける境界であり、要素の .volume 物理上限でもある（単一の参照元＝§2-7・直書き禁止）。
 export const UNITY_VOLUME = 1.0;

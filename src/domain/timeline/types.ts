@@ -66,6 +66,16 @@ export interface TimelineVoice {
   status: NarrationStatus;
 }
 
+/**
+ * 音量の変化（#512）の点1つ＝**クリップ先頭からの秒**と音量（0〜1.5）。絵のキーフレーム（`Keyframe`）
+ * とは別に持つ＝音は変形の対象と合わず、場面形式と共有している `$defs` へ意味の無い語彙を足さない
+ * （ADR-0032 追補）。
+ */
+export interface VolumePoint {
+  timeSec: number;
+  volume: number;
+}
+
 /** クリップ＝「FREE 要素 ＋ 時間（trackId/startSec/durationSec）」（11 §7.6）。 */
 export interface TimelineClip extends ClipSpatial {
   /** `clip_NNN`（11 §2.1）。場面形式の `ovclip_NNN` とは別物。 */
@@ -137,8 +147,9 @@ export interface TimelineClip extends ClipSpatial {
    * **音量の変化**（#512・ADR-0032 追補）。クリップ先頭からの秒と音量（0〜1.5）の点列。
    * 未指定＝`volume` の一定値。**フェードはこの上に掛かる**（「基準×フェード係数」の形は変えない）。
    * 点の間は線形に変える（`volumeAt`）。**書き出しも同じ点列**から式を組む（`volumeExpr`・ADR-0032 追補＝案A）。
+   * 読む前に**両者が同じ正規化**（`normalizedVolumePoints`）を通す＝並び・重複・値域で食い違わない。
    */
-  volumePoints?: { timeSec: number; volume: number }[];
+  volumePoints?: VolumePoint[];
   fadeInSec?: number;
   fadeOutSec?: number;
 
