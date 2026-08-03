@@ -4,12 +4,6 @@ import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
 import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
 import type { ScreenId } from "../data/mockData";
-
-/**
- * この画面が持つ欄（ADR-0033 段階4 後半）。**値集合にする**＝綴り違いで「知らない欄」として落ちない（§2-7）。
- */
-const PANEL_ID = { preview: "preview", edit: "edit" } as const;
-const PANEL_IDS = Object.values(PANEL_ID);
 import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
@@ -43,6 +37,12 @@ import { ArrowLeftIcon } from "../components/icons";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { FIT_FIELD_LABEL, fitLabel, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { layerLabel, buildSampleScene } from "./looksShared";
+
+/**
+ * この画面が持つ欄（ADR-0033 段階4 後半）。**値集合にする**＝綴り違いで「知らない欄」として落ちない（§2-7）。
+ */
+const PANEL_ID = { preview: "preview", edit: "edit" } as const;
+const PANEL_IDS = Object.values(PANEL_ID);
 
 // 型別コントロールのユーザー向けラベル（#214 ④・§2-3）。全値必須＝enum 追加漏れをコンパイルで検知。
 const layerShapeLabel: Record<LayerShapeType, string> = { rect: "四角", ellipse: "丸", line: "線" };
@@ -618,7 +618,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       </>
     ) },
     { id: PANEL_ID.edit, title: '見た目パターンの編集', content: (
-      <>
+      // `col gap-sm` は装飾ではなく**間隔そのもの**（中の欄は `margin:0` で潰してあり、親の gap が間隔を作る）。
+      <div className="col gap-sm">
           {/* 名前 */}
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>名前</label>
@@ -699,7 +700,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               )}
             </>
           )}
-      </>
+      </div>
     ) },
   ];
 
@@ -738,18 +739,16 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         <div className="notice notice-warn mb" role="alert"><span>{templateError}</span></div>
       )}
 
-      {/* 本体：左＝キャンバス（広く）／右＝編集パネル */}
       {/* フォーカス中の連続入力を1つの取り消しに合成する（#547 P2-3）。onFocus/onBlur は子孫から伝播するので、
           数値欄・名前欄・色欄をここ1か所で束ねる（欄ごとに書き分けない）。未変更のフォーカスは記録しない（遅延記録）。 */}
       {/* 本体は**欄**（ADR-0033）＝利用者が配置を組み替えられる。フォーカスの束ね（#547 P2-3）は
           欄の外側に置く＝どの欄で入力しても1つの取り消しにまとまる。 */}
       <div
-        style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
         onFocus={(e) => { if (isTextEntryTarget(e.target)) textGroup.onFocus(); }}
         onBlur={(e) => { if (isTextEntryTarget(e.target)) textGroup.onBlur(); }}
       >
         <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
-        <div className="row gap-sm" style={{ flexShrink: 0, flexWrap: "wrap" }}>
+        <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
           {closedPanels.map((id) => (
             <button key={id} className="btn btn-secondary" onClick={() => changeLayout(addPanelToRegion(panelLayout, id, PANEL_REGION.left))}>
               「{panels.find((p) => p.id === id)?.title}」を表示する

@@ -48,12 +48,25 @@ describe("LooksEditScreen: 欄の配置（ADR-0033 段階4 後半）", () => {
     expect(screen.queryByRole("heading", { name: "プレビュー" })).not.toBeInTheDocument();
   });
 
-  it("「配置を既定に戻す」で戻る", () => {
-    render(<LooksEditScreen onNavigate={vi.fn()} />);
+  it("「配置を既定に戻す」で戻り、覚えていたものも消える（次に開いても既定）", () => {
+    const first = render(<LooksEditScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByLabelText("プレビューの欄の操作"));
     fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
     fireEvent.click(screen.getByRole("button", { name: "配置を既定に戻す" }));
     expect(screen.getByRole("heading", { name: "プレビュー" })).toBeInTheDocument();
+    first.unmount();
+    expect(localStorage.getItem("app.panelLayout.looks")).toBeNull();
+  });
+
+  it("境界を掴んで大きさを変えられる（右の欄の幅）", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    expect(screen.getByLabelText("右の欄の幅")).toBeInTheDocument();
+  });
+
+  it("欄の中身の間隔が潰れていない（`col gap-sm` は装飾ではなく間隔そのもの）", () => {
+    const { container } = render(<LooksEditScreen onNavigate={vi.fn()} />);
+    // 中の欄は `margin:0` で潰してあるので、**親の gap が無いと密着する**。
+    expect(container.querySelector(".panel-frame-body > .col.gap-sm")).not.toBeNull();
   });
 
   it("配置を触らずに開いているだけでは、既定を焼き付けない（あとで既定を良くしたときに届く）", () => {
