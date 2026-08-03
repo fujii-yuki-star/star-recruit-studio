@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createOverlayClipId, createPartId,
+  PROJECT_SCHEMA_VERSION, assembleProject, createAssetId, createBgmId, createFreeElementId, createGroupId, createLineId, createPartId,
   createProjectId, createSceneId, defaultVideoSettings, defaultVoiceSettings,
   isSupportedSchemaVersion, parseProjectDoc, projectHeaderFromProject, ProjectLoadError, validateProjectDoc,
 } from './persistence';
@@ -137,19 +137,6 @@ describe('createGroupId (§2.1 group_{NNN}・scene/template 内一意・ADR-0022
   });
   it('既存と衝突しない最小番号を採る（歯抜けを埋める）', () => {
     expect(createGroupId(['group_001', 'group_003'])).toBe('group_002');
-  });
-});
-
-describe('createOverlayClipId (§2.1 ovclip_{NNN}・project 内一意・ADR-0018)', () => {
-  it('既存が無ければ ovclip_001', () => {
-    expect(createOverlayClipId([])).toBe('ovclip_001');
-  });
-  it('既存と衝突しない最小番号を採る（歯抜けを埋める）', () => {
-    expect(createOverlayClipId(['ovclip_001', 'ovclip_003'])).toBe('ovclip_002');
-  });
-  it('999 を超えると4桁になる（pattern ^ovclip_[0-9]{3,}$）', () => {
-    const existing = Array.from({ length: 999 }, (_, i) => `ovclip_${String(i + 1).padStart(3, '0')}`);
-    expect(createOverlayClipId(existing)).toBe('ovclip_1000');
   });
 });
 

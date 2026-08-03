@@ -104,14 +104,6 @@ export interface BgmRunInput {
   speed?: number;
 }
 
-/** タイムラインのテロップ帯（ADR-0018）。透過PNG（出力解像度）を結合後の動画へ enable='between(t,S,E)' で重ねる。 */
-export interface TelopOverlayInput {
-  pngBase64: string;
-  /** 表示区間（グローバル秒＝xfade 重なり込みの実効時間軸・compileTimeline と一致）。 */
-  startSec: number;
-  endSec: number;
-}
-
 /** 書き出し結果の要約。codec は使用エンコーダ（例: libx264 / libopenh264）。 */
 export interface ExportReport {
   outputPath: string;
@@ -141,12 +133,10 @@ export async function exportVideo(
     bgmRuns: bgmRuns && bgmRuns.length > 0 ? bgmRuns : null,
     projectId: projectId ?? null,
     outputPath: outputPath ?? null,
-    // 旧タイムラインのテロップは送らない（#635＝機能を引き取ったのはタイムライン形式）。
-    telops: null,
   });
 }
 
-/** 書き出しの進捗イベント（#376）を購読する。Rust の export_video が段階（映像/結合/字幕/BGM）ごとに emit する。
+/** 書き出しの進捗イベント（#376）を購読する。Rust の export_video が段階（映像/結合/BGM）ごとに emit する。
  *  戻り値は購読解除関数。Tauri 非検出時は no-op を返す（ブラウザ開発/テストで安全）。 */
 export async function listenExportProgress(cb: (e: ExportProgressEvent) => void): Promise<() => void> {
   if (!canExport()) return () => {};

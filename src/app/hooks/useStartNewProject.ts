@@ -3,6 +3,7 @@
 // **タイムラインで作る**（#635・ADR-0032 決定7/15＝別形式の完全新規）を、同じ破棄ガードで扱う。
 import { useCallback, useState } from "react";
 import type { ScreenId } from "../data/mockData";
+import type { Orientation } from "../../domain/enums";
 import { useProjectStore } from "../store/projectStore";
 import { useTimelineStore } from "../store/timelineStore";
 import { hasUnsavedChanges } from "./newProjectGuard";
@@ -31,13 +32,13 @@ export function useStartNewProject(navigate: (screen: ScreenId) => void) {
   const createTimelineProject = useTimelineStore((s) => s.createTimelineProject);
 
   const run = useCallback(
-    (kind: NewProjectKind) => {
+    (kind: NewProjectKind, aspectRatio?: Orientation) => {
       if (kind === "timeline") {
         // タイムライン形式は**別の文書**＝場面形式の store は触らず、作って開く（ADR-0032 決定7/15）。
         // 作れなかったときは黙って画面を変えず、その場に理由を出す（§2-5）。
         setCreateFailed(false);
         setCreating(true);
-        void createTimelineProject(NEW_TIMELINE_PROJECT_NAME)
+        void createTimelineProject(NEW_TIMELINE_PROJECT_NAME, aspectRatio)
           .then(() => {
             navigate("timeline-project");
           })
@@ -61,11 +62,11 @@ export function useStartNewProject(navigate: (screen: ScreenId) => void) {
 
   // 破棄ガード：未保存があれば確認、無ければ即実行。
   const begin = useCallback(
-    (kind: NewProjectKind) => {
+    (kind: NewProjectKind, aspectRatio?: Orientation) => {
       // タイムライン形式は**別の文書**を作るだけ＝場面形式の作業は失われない。ここで
       // 「保存していない素材や場面は失われます」と聞くと、**しないことを言う**ことになる（ADR-0026①）。
       if (kind === "timeline") {
-        run(kind);
+        run(kind, aspectRatio);
         return;
       }
       if (hasWork) {
@@ -79,7 +80,7 @@ export function useStartNewProject(navigate: (screen: ScreenId) => void) {
 
   const start = useCallback(() => begin("wizard"), [begin]);
   const startBlank = useCallback(() => begin("blank"), [begin]);
-  const startTimeline = useCallback(() => begin("timeline"), [begin]);
+  const startTimeline = useCallback((aspectRatio: Orientation) => begin("timeline", aspectRatio), [begin]);
   const confirm = useCallback(() => {
     const kind = pending;
     setPending(null);
