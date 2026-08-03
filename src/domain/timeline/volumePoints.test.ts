@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { validateTimelineProject } from '../validation/generated/validators.js';
-import { audioCuesAt, volumeAt } from './audio';
+import { audioCuesAt, volumeAt, volumeExpr } from './audio';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 
@@ -73,5 +73,25 @@ describe('再生への効き方（#512）', () => {
 
   it('点が無ければ従来どおりクリップ一定の音量', () => {
     expect(audioCuesAt(doc({ volume: 0.3 }), 2)[0].volume).toBeCloseTo(0.3, 6);
+  });
+});
+
+describe('volumeExpr（書き出しの式・#512 段3）', () => {
+  it('点が無ければ undefined（従来どおり一定値の音量で出す）', () => {
+    expect(volumeExpr(undefined)).toBeUndefined();
+    expect(volumeExpr([])).toBeUndefined();
+  });
+
+  it('点列から線形の式を組む（先頭・末尾は端の値で伸ばす＝volumeAt と同じ規則）', () => {
+    expect(volumeExpr(POINTS)).toBe('if(lt(t,0),0.2,if(lt(t,4),0.2+(1-0.2)*(t-0)/4,1))');
+  });
+
+  it('同じ時刻が2つ並んでも 0 で割らない', () => {
+    const e = volumeExpr([{ timeSec: 1, volume: 0.1 }, { timeSec: 1, volume: 0.9 }]);
+    expect(e).not.toContain('/0');
+  });
+
+  it('並びが崩れていても同じ式になる（保存の並びに依存しない）', () => {
+    expect(volumeExpr([...POINTS].reverse())).toBe(volumeExpr(POINTS));
   });
 });

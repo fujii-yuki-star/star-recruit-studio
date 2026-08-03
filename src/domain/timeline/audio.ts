@@ -178,3 +178,30 @@ export function audioSourceKeyOfClip(clip: TimelineClip): string | null {
 export function audioLoops(clip: TimelineClip): boolean {
   return clip.kind === TIMELINE_CLIP_KIND.audio;
 }
+
+/**
+ * 音量の変化（#512）を **FFmpeg の `volume` フィルタの式**にする（ADR-0032 追補＝案A）。
+ *
+ * **`volumeAt` と同じ点列・同じ規則**（点の間は線形・点の外は端の値で伸ばす）を式にしただけ＝
+ * ずれうるとしたら「式の書き方」だけに閉じ込める。時刻 `t` はフィルタ入力の秒（クリップの先頭が 0）。
+ * 点が無ければ `undefined`＝呼び出し側が従来どおり一定値の `volume=<数>` を使う。
+ */
+export function volumeExpr(points: readonly { timeSec: number; volume: number }[] | undefined): string | undefined {
+  if (!points || points.length === 0) return undefined;
+  const sorted = [...points].sort((a, b) => a.timeSec - b.timeSec);
+  const v = (x: number): string => String(clampVolume(x));
+  // 末尾（最後の点より後）は最後の値で伸ばす＝`volumeAt` と同じ。内側から外へ if を重ねる。
+  let expr = v(sorted[sorted.length - 1].volume);
+  for (let i = sorted.length - 1; i >= 1; i -= 1) {
+    const a = sorted[i - 1];
+    const b = sorted[i];
+    const span = b.timeSec - a.timeSec;
+    // 同じ時刻が2つ並んでも 0 で割らない（`volumeAt` と同じ扱い＝手前の値のまま）。
+    const seg = span > 0
+      ? `${v(a.volume)}+(${v(b.volume)}-${v(a.volume)})*(t-${a.timeSec})/${span}`
+      : v(a.volume);
+    expr = `if(lt(t,${b.timeSec}),${seg},${expr})`;
+  }
+  // 先頭（最初の点より前）も最初の値で伸ばす。
+  return `if(lt(t,${sorted[0].timeSec}),${v(sorted[0].volume)},${expr})`;
+}
