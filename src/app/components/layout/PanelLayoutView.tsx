@@ -3,7 +3,7 @@
 //
 // 画面は左・中央・右・下の4つの領域に分かれ、**領域の中は入れ子で分割**できる（決定11）。
 // 境界（分かれ目・領域の外枠）は**ドラッグで動かせる**（決定2）。欄の中身は使う側から渡す。
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { ContextMenu } from "../ContextMenu";
 import type { ContextMenuItem } from "../ContextMenu";
@@ -20,7 +20,7 @@ import {
   resizeRegion,
   resizeSplit,
 } from "../../../domain/layout/panelLayout";
-import type { PanelId, PanelLayout, PanelNode, PanelRegion, RegionSizes } from "../../../domain/layout/panelLayout";
+import type { PanelId, PanelLayout, PanelNode, PanelRegion, PanelSplit, RegionSizes } from "../../../domain/layout/panelLayout";
 
 /** 欄1つ＝見出しと中身（中身は使う側が作る）。 */
 export interface PanelSpec {
@@ -52,13 +52,43 @@ export function PanelLayoutView({
   const byId = new Map(panels.map((p) => [p.id, p]));
   const rootRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ panelId: PanelId; x: number; y: number } | null>(null);
+  // いま張っているドラッグの後始末。**画面外で離した・別の指・画面を離れた**でも必ず外す＝
+  // 押していないのに掴んだままになり、動かすたびに配置が書き換わる、を作らない（§2-5）。
+  const stopDragRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => stopDragRef.current?.(), []);
+
+  /** ドラッグの購読を1か所で張る（外し忘れ・二重購読を作らない）。 */
+  const listenDrag = (move: (ev: PointerEvent) => void): void => {
+    stopDragRef.current?.();
+    const stop = (): void => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      stopDragRef.current = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    stopDragRef.current = stop;
+  };
+
+  /** 並べ替え1つぶん。**動かせない向きは押せなくして理由を出す**（押しても何も起きない、を作らない・§2-5）。 */
+  const stepItem = (panelId: PanelId, side: (typeof DROP_SIDE)[keyof typeof DROP_SIDE], label: string): ContextMenuItem => {
+    const next = movePanelStep(layout, panelId, side);
+    return {
+      label,
+      disabled: next === layout,
+      disabledHint: `${label}動かせる欄がありません。同じ向きに並んでいる欄の中で入れ替えられます`,
+      onSelect: () => onChange(next),
+    };
+  };
 
   const menuItems = (panelId: PanelId): ContextMenuItem[] => [
     // 並べ替えはドラッグとメニューの両方（決定12）＝ドラッグが使えないときの逃げ道。
-    { label: "上へ", onSelect: () => onChange(movePanelStep(layout, panelId, DROP_SIDE.top)) },
-    { label: "下へ", onSelect: () => onChange(movePanelStep(layout, panelId, DROP_SIDE.bottom)) },
-    { label: "左へ", onSelect: () => onChange(movePanelStep(layout, panelId, DROP_SIDE.left)) },
-    { label: "右へ", onSelect: () => onChange(movePanelStep(layout, panelId, DROP_SIDE.right)) },
+    stepItem(panelId, DROP_SIDE.top, "上へ"),
+    stepItem(panelId, DROP_SIDE.bottom, "下へ"),
+    stepItem(panelId, DROP_SIDE.left, "左へ"),
+    stepItem(panelId, DROP_SIDE.right, "右へ"),
     ...PANEL_REGIONS.map((region) => ({
       label: `${REGION_LABEL[region]}へ移す`,
       onSelect: () => onChange(addPanelToRegion(layout, panelId, region)),
@@ -71,7 +101,7 @@ export function PanelLayoutView({
     e: ReactPointerEvent,
     region: PanelRegion,
     path: number[],
-    node: { dir: string; sizes: number[] },
+    node: PanelSplit,
     index: number,
     box: DOMRect,
   ): void => {
@@ -91,12 +121,7 @@ export function PanelLayoutView({
       sizes[index + 1] = a0 + b0 - a;
       onChange(resizeSplit(layout, region, path, sizes));
     };
-    const up = (): void => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    listenDrag(move);
   };
 
   /** 領域の外枠をドラッグ（左右の幅・下の高さ）。 */
@@ -106,19 +131,14 @@ export function PanelLayoutView({
     if (!box || box.width <= 0 || box.height <= 0) return;
     const move = (ev: PointerEvent): void => {
       const ratio =
-        region === "left"
+        region === PANEL_REGION.left
           ? (ev.clientX - box.left) / box.width
-          : region === "right"
+          : region === PANEL_REGION.right
             ? (box.right - ev.clientX) / box.width
             : (box.bottom - ev.clientY) / box.height;
       onChange(resizeRegion(layout, region, ratio));
     };
-    const up = (): void => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    listenDrag(move);
   };
 
   const renderNode = (node: PanelNode, region: PanelRegion, path: number[]): ReactNode => {
@@ -177,26 +197,29 @@ export function PanelLayoutView({
   const hasRight = layout.nodes.right != null;
   const hasBottom = layout.nodes.bottom != null;
 
+  // 下の欄があるときの子は「本体・境界・下の欄」の**3つ**。境界ぶんの行を書かないと、境界が下の欄の行を取り、
+  // **下の境界をドラッグしても空の帯が伸びるだけ**になる（下の欄は中身なりの高さのまま）。
+  const rows = hasBottom ? `1fr auto ${bottom * 100}%` : "1fr";
   return (
-    <div className="panel-layout" ref={rootRef} style={{ gridTemplateRows: hasBottom ? `1fr ${bottom * 100}%` : "1fr" }}>
+    <div className="panel-layout" ref={rootRef} style={{ gridTemplateRows: rows }}>
       <div className="panel-layout-main">
         {hasLeft && (
           <>
             <div className="panel-layout-region" style={{ width: `${left * 100}%` }}>{regionNode(PANEL_REGION.left)}</div>
-            <Divider vertical onPointerDown={(e) => beginRegionDrag(e, "left")} label="左の欄の幅" />
+            <Divider vertical onPointerDown={(e) => beginRegionDrag(e, PANEL_REGION.left)} label="左の欄の幅" />
           </>
         )}
         <div className="panel-layout-region panel-layout-region--center">{regionNode(PANEL_REGION.center)}</div>
         {hasRight && (
           <>
-            <Divider vertical onPointerDown={(e) => beginRegionDrag(e, "right")} label="右の欄の幅" />
+            <Divider vertical onPointerDown={(e) => beginRegionDrag(e, PANEL_REGION.right)} label="右の欄の幅" />
             <div className="panel-layout-region" style={{ width: `${right * 100}%` }}>{regionNode(PANEL_REGION.right)}</div>
           </>
         )}
       </div>
       {hasBottom && (
         <>
-          <Divider onPointerDown={(e) => beginRegionDrag(e, "bottom")} label="下の欄の高さ" />
+          <Divider onPointerDown={(e) => beginRegionDrag(e, PANEL_REGION.bottom)} label="下の欄の高さ" />
           <div className="panel-layout-region">{regionNode(PANEL_REGION.bottom)}</div>
         </>
       )}

@@ -46,8 +46,22 @@ import {
 import type { PanelLayout } from "../../domain/layout/panelLayout";
 import { clearPanelLayout, getPanelLayout, setPanelLayout } from "../../infrastructure/appSettings";
 
-/** この画面が持つ欄（配置に出てくる id の集合＝知らない欄を落とす基準）。 */
-const PANEL_IDS = ["preview", "arrange", "selected", "templates", "audio", "voice"] as const;
+/** 配置を覚えるまでの待ち（ms）。境界のドラッグ中に書き続けない。 */
+const LAYOUT_SAVE_DELAY_MS = 300;
+
+/**
+ * この画面が持つ欄（配置に出てくる id の集合＝知らない欄を落とす基準）。**値集合にする**＝
+ * 綴り違いで `normalizeLayout` に落とされ、**欄が黙って消える**のを防ぐ（§2-7）。
+ */
+const PANEL_ID = {
+  preview: "preview",
+  arrange: "arrange",
+  selected: "selected",
+  templates: "templates",
+  audio: "audio",
+  voice: "voice",
+} as const;
+const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
 import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
@@ -258,13 +272,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // ＝#512 の実機確認で露呈した「1点置くごとに上下スクロール」を、設定を変えないままでも起こさない。
   const defaultLayout = useMemo(() => {
     const l = emptyLayout();
-    l.nodes.center = { panelId: "preview" };
-    l.nodes.right = { panelId: "selected" };
-    l.nodes.bottom = { panelId: "arrange" };
+    l.nodes.center = { panelId: PANEL_ID.preview };
+    l.nodes.right = { panelId: PANEL_ID.selected };
+    l.nodes.bottom = { panelId: PANEL_ID.arrange };
     l.nodes.left = {
       dir: SPLIT_DIR.column,
       sizes: [1 / 3, 1 / 3, 1 / 3],
-      children: [{ panelId: "templates" }, { panelId: "audio" }, { panelId: "voice" }],
+      children: [{ panelId: PANEL_ID.templates }, { panelId: PANEL_ID.audio }, { panelId: PANEL_ID.voice }],
     };
     return l;
   }, []);
@@ -274,10 +288,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   );
   // 変えたらすぐ覚える（**画面ごとに1つ**＝別の動画を開いても同じ配置・ADR-0033 決定4）。
   const changeLayout = (next: PanelLayout): void => {
-    const normalized = normalizeLayout(next, PANEL_IDS);
-    setPanelLayoutState(normalized);
-    setPanelLayout(PANEL_SCREEN.timeline, normalized);
+    setPanelLayoutState(normalizeLayout(next, PANEL_IDS));
   };
+  // 保存は**少し待ってから**（境界のドラッグは1秒に何十回も変わるので、動くたびに書かない）。
+  useEffect(() => {
+    const t = setTimeout(() => setPanelLayout(PANEL_SCREEN.timeline, panelLayout), LAYOUT_SAVE_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [panelLayout]);
+  // **画面を離れるときは待たずに書く**＝待っている間に離れると、組み替えたことが覚えられない。
+  const panelLayoutRef = useRef(panelLayout);
+  useEffect(() => {
+    panelLayoutRef.current = panelLayout;
+  }, [panelLayout]);
+  useEffect(() => () => setPanelLayout(PANEL_SCREEN.timeline, panelLayoutRef.current), []);
   const resetLayout = (): void => {
     clearPanelLayout(PANEL_SCREEN.timeline);
     setPanelLayoutState(normalizeLayout(defaultLayout, PANEL_IDS));
@@ -501,7 +524,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 欄（ADR-0033 段階2）＝いまのカードをそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
   const panels: PanelSpec[] = [
-    { id: 'preview', title: '仕上がり確認', content: (
+    { id: PANEL_ID.preview, title: '仕上がり確認', content: (
       <>
         <div className="preview-stage" dangerouslySetInnerHTML={{ __html: svg }} />
         <div className="row gap-sm">
@@ -568,7 +591,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </p>
       </>
     ) },
-    { id: 'arrange', title: '並び', content: (
+    { id: PANEL_ID.arrange, title: '並び', content: (
       <>
         {doc.clips.length === 0 ? (
           <p className="text-muted">まだ何も置かれていません。</p>
@@ -629,7 +652,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
       </>
     ) },
-    { id: 'selected', title: '選んだ部品', content: (
+    { id: PANEL_ID.selected, title: '選んだ部品', content: (
       <>
         {selected ? (
           <>
@@ -1246,7 +1269,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
       </>
     ) },
-    { id: 'templates', title: '見た目パターンを置く', content: (
+    { id: PANEL_ID.templates, title: '見た目パターンを置く', content: (
       <>
         {placeableTemplates.length === 0 ? (
           <p className="text-muted">この向きの動画に置ける見た目パターンがありません。見た目パターンを読み込んでからお試しください。</p>
@@ -1284,7 +1307,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
       </>
     ) },
-    { id: 'audio', title: '音を置く', content: (
+    { id: PANEL_ID.audio, title: '音を置く', content: (
       <>
         {voiceTracks.length === 0 ? (
           <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定を外してください。</p>
@@ -1317,7 +1340,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
       </>
     ) },
-    { id: 'voice', title: '読み上げを置く', content: (
+    { id: PANEL_ID.voice, title: '読み上げを置く', content: (
       <>
         {voiceTracks.length === 0 ? (
           <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定を外してください。</p>

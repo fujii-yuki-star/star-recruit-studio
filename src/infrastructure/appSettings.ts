@@ -71,7 +71,8 @@ export function setPanelLayout(screenId: PanelScreenId, layout: PanelLayout): vo
     write(`${PANEL_LAYOUT_KEY}.${screenId}`, JSON.stringify(layout));
   } catch {
     // 保存できなくても**その場の操作は続ける**（境界のドラッグごとに走るので、投げると掴んだまま画面が固まる）。
-    // 次に開いたときに既定へ戻るだけ＝作りかけの動画は失わない。見せ方は段階2 で決める（ADR-0033）。
+    // 次に開いたときに既定へ戻るだけ＝作りかけの動画は失わない。**いまは無言**で、見せ方は段階3 で決める
+    // （ADR-0033 未解決6）。
   }
 }
 

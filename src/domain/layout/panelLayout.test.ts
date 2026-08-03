@@ -2,8 +2,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_REGION_SIZES,
   DROP_SIDE,
+  MAX_REGION_RATIO,
+  MAX_SIDE_TOTAL_RATIO,
   MIN_PANEL_RATIO,
+  MIN_REGION_RATIO,
+  normalizeRegionSizes,
+  resizeRegion,
   PANEL_REGION,
   SPLIT_DIR,
   addPanelToRegion,
@@ -306,5 +312,44 @@ describe('割合の対応がずれない（/canon-check の指摘）', () => {
     expect(got.reduce((x, y) => x + y, 0)).toBeCloseTo(1, 9);
     // 0.8 と 0.19 から**比例して**引く＝大きいほうが多く引かれる（等分に削らない）。
     expect(0.8 - got[0]).toBeGreaterThan(0.19 - got[1]);
+  });
+});
+
+describe('外枠の大きさ（決定2・段階2 で追加）', () => {
+  it('壊れた値は既定へ戻す（設定のせいで画面が壊れない）', () => {
+    expect(normalizeRegionSizes({ left: Number.NaN, right: undefined, bottom: -5 })).toEqual({
+      left: DEFAULT_REGION_SIZES.left,
+      right: DEFAULT_REGION_SIZES.right,
+      bottom: MIN_REGION_RATIO,
+    });
+    expect(normalizeRegionSizes(undefined)).toEqual(DEFAULT_REGION_SIZES);
+  });
+
+  it('下限と上限で押さえる（潰れた領域・画面を食い尽くす領域を作らない）', () => {
+    const got = normalizeRegionSizes({ left: 0.01, right: 0.9, bottom: 0.9 });
+    expect(got.left).toBe(MIN_REGION_RATIO);
+    expect(got.bottom).toBe(MAX_REGION_RATIO);
+  });
+
+  it('左右を合わせても中央が残る（両方を広げても画面を食い尽くさない）', () => {
+    const got = normalizeRegionSizes({ left: 0.5, right: 0.5, bottom: 0.3 });
+    expect(got.left + got.right).toBeLessThanOrEqual(MAX_SIDE_TOTAL_RATIO + 1e-9);
+  });
+
+  it('境界のドラッグで変えられる（収まらない値は収める）', () => {
+    const got = resizeRegion(emptyLayout(), 'left', 0.4);
+    expect(got.regionSizes.left).toBeCloseTo(0.4, 9);
+    expect(resizeRegion(emptyLayout(), 'left', 99).regionSizes.left).toBe(MAX_REGION_RATIO);
+  });
+
+  it('何も変わらなければ同じ配置を返す（履歴・保存を汚さない）', () => {
+    const base = emptyLayout();
+    expect(resizeRegion(base, 'left', base.regionSizes.left)).toBe(base);
+  });
+
+  it('保存から読むとき、外枠が無い古い形でも既定で読める（版が上がっただけで配置を捨てない）', () => {
+    const got = parsePanelLayout({ left: { panelId: 'a' } });
+    expect(got?.regionSizes).toEqual(DEFAULT_REGION_SIZES);
+    expect(got && placedPanelIds(got)).toEqual(['a']);
   });
 });

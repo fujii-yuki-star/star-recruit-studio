@@ -1087,8 +1087,10 @@ button.badge {
 .panel-layout {
   display: grid;
   gap: 0;
-  /* 画面の高さいっぱいではなく、上の知らせを残した残り。低すぎると欄が潰れるので下限を置く。 */
-  min-height: 60vh;
+  /* **高さを決める**＝決まっていないと行の割合（下の欄の高さ）が効かず、中身なりに伸びて
+     `.panel-frame-body` のスクロールも発動しない（ページ側がスクロールしてしまう＝ADR-0033 決定10）。 */
+  height: 76vh;
+  min-height: 420px;
   margin-bottom: var(--space-lg, 16px);
 }
 .panel-layout-main {
