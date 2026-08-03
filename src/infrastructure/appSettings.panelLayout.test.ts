@@ -3,6 +3,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { clearPanelLayout, getPanelLayout, setPanelLayout } from './appSettings';
 import { emptyLayout } from '../domain/layout/panelLayout';
+import type { PanelLayout } from '../domain/layout/panelLayout';
+
+/** 左に欄が1つだけある配置（保存の往復を見るための最小の中身）。 */
+function layoutWithLeft(): PanelLayout {
+  const l = emptyLayout();
+  l.nodes.left = { panelId: 'a' };
+  return l;
+}
 
 beforeEach(() => {
   localStorage.clear();
@@ -10,12 +18,12 @@ beforeEach(() => {
 
 describe('欄の配置の保存', () => {
   it('保存したものを読み戻せる', () => {
-    setPanelLayout('timeline', { ...emptyLayout(), left: { panelId: 'a' } });
-    expect(getPanelLayout('timeline')).toEqual({ ...emptyLayout(), left: { panelId: 'a' } });
+    setPanelLayout('timeline', layoutWithLeft());
+    expect(getPanelLayout('timeline')).toEqual(layoutWithLeft());
   });
 
   it('画面ごとに分けて持つ（別の画面の配置を読まない）', () => {
-    setPanelLayout('timeline', { ...emptyLayout(), left: { panelId: 'a' } });
+    setPanelLayout('timeline', layoutWithLeft());
     expect(getPanelLayout('scene')).toBeNull();
   });
 
@@ -36,11 +44,11 @@ describe('欄の配置の保存', () => {
     }
     // `sizes` が無いだけなら、等分として読めるので中身は残る（黙って捨てない）。
     localStorage.setItem('app.panelLayout.timeline', '{"left":{"dir":"column","children":[{"panelId":"a"},{"panelId":"b"}]}}');
-    expect(getPanelLayout('timeline')?.left).not.toBeNull();
+    expect(getPanelLayout('timeline')?.nodes.left).not.toBeNull();
   });
 
   it('「配置を既定に戻す」＝保存を消す（次に開くと既定が使われる）', () => {
-    setPanelLayout('timeline', { ...emptyLayout(), left: { panelId: 'a' } });
+    setPanelLayout('timeline', layoutWithLeft());
     clearPanelLayout('timeline');
     expect(getPanelLayout('timeline')).toBeNull();
   });

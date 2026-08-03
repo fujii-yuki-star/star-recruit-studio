@@ -38,6 +38,16 @@ import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
 import type { ContextMenuItem } from "../components/ContextMenu";
 import { PickerList } from "../components/PickerList";
+import { PanelLayoutView } from "../components/layout/PanelLayoutView";
+import type { PanelSpec } from "../components/layout/PanelLayoutView";
+import {
+  PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, closedPanelIds, emptyLayout, normalizeLayout,
+} from "../../domain/layout/panelLayout";
+import type { PanelLayout } from "../../domain/layout/panelLayout";
+import { clearPanelLayout, getPanelLayout, setPanelLayout } from "../../infrastructure/appSettings";
+
+/** この画面が持つ欄（配置に出てくる id の集合＝知らない欄を落とす基準）。 */
+const PANEL_IDS = ["preview", "arrange", "selected", "templates", "audio", "voice"] as const;
 import { ArrowLeftIcon } from "../components/icons";
 import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
@@ -243,6 +253,37 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [volumeDraft, setVolumeDraft] = useState("");
   // 右クリック（または「⋮」）で開く列の操作メニュー（ADR-0033）。
   const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
+
+  // 欄の配置（ADR-0033 段階2）。**既定は「再生位置と『選んだ部品』が同時に見える」形**にする
+  // ＝#512 の実機確認で露呈した「1点置くごとに上下スクロール」を、設定を変えないままでも起こさない。
+  const defaultLayout = useMemo(() => {
+    const l = emptyLayout();
+    l.nodes.center = { panelId: "preview" };
+    l.nodes.right = { panelId: "selected" };
+    l.nodes.bottom = { panelId: "arrange" };
+    l.nodes.left = {
+      dir: SPLIT_DIR.column,
+      sizes: [1 / 3, 1 / 3, 1 / 3],
+      children: [{ panelId: "templates" }, { panelId: "audio" }, { panelId: "voice" }],
+    };
+    return l;
+  }, []);
+  // 既存の `layout`（仕上がり確認の並べ方）と名前がぶつからないよう、欄の配置は `panelLayout` と呼ぶ。
+  const [panelLayout, setPanelLayoutState] = useState<PanelLayout>(() =>
+    normalizeLayout(getPanelLayout(PANEL_SCREEN.timeline) ?? defaultLayout, PANEL_IDS),
+  );
+  // 変えたらすぐ覚える（**画面ごとに1つ**＝別の動画を開いても同じ配置・ADR-0033 決定4）。
+  const changeLayout = (next: PanelLayout): void => {
+    const normalized = normalizeLayout(next, PANEL_IDS);
+    setPanelLayoutState(normalized);
+    setPanelLayout(PANEL_SCREEN.timeline, normalized);
+  };
+  const resetLayout = (): void => {
+    clearPanelLayout(PANEL_SCREEN.timeline);
+    setPanelLayoutState(normalizeLayout(defaultLayout, PANEL_IDS));
+  };
+  const closed = closedPanelIds(panelLayout, PANEL_IDS);
+
   // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
   const [explodingClipId, setExplodingClipId] = useState<string | null>(null);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
@@ -458,39 +499,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const pxPerSec = totalSec > 0 ? Math.max(MIN_LANE_WIDTH_PX / totalSec, PX_PER_SEC) : PX_PER_SEC;
   const laneWidthPx = Math.max(totalSec * pxPerSec, MIN_LANE_WIDTH_PX);
 
-  return (
-    <div className="main-scroll">
-      <PageHead title={doc.projectName} desc="時間の流れを自由に組み替えて動画を作ります。" />
-
-      {missingTemplateCount > 0 && (
-        <p className="notice notice-warn" role="alert">
-          見た目パターンが見つからない部品が{missingTemplateCount}個あります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください。
-        </p>
-      )}
-      {emptySlotCount > 0 && (
-        <p className="notice notice-warn" role="alert">
-          素材が入っていない差し込み口が{emptySlotCount}個あります。そのままだと灰色の枠が動画に出ます。部品を選んで素材を入れてください。
-        </p>
-      )}
-      {danglingLinkCount > 0 && (
-        <p className="notice notice-warn" role="alert">
-          連動する読み上げが見つからない字幕が{danglingLinkCount}個あります。連動先を選び直すか、連動をやめてください。
-        </p>
-      )}
-      {missingAudioCount > 0 && (
-        <p className="notice notice-warn" role="alert">
-          音が見つからない部品が{missingAudioCount}個あります。その部品は鳴りません。読み上げを作り直すか、音を選び直してください。
-        </p>
-      )}
-      {warnings.length > 0 && (
-        <ul className="notice notice-warn" role="alert">
-          {warnings.map((w) => (
-            <li key={`${w.code}/${w.field}`}>{w.message}</li>
-          ))}
-        </ul>
-      )}
-
-      <div className="card">
+  // 欄（ADR-0033 段階2）＝いまのカードをそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
+  const panels: PanelSpec[] = [
+    { id: 'preview', title: '仕上がり確認', content: (
+      <>
         <div className="preview-stage" dangerouslySetInnerHTML={{ __html: svg }} />
         <div className="row gap-sm">
           <button
@@ -554,34 +566,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         <p className="text-muted">
           {playheadSec.toFixed(1)} 秒 / 全体 {totalSec.toFixed(1)} 秒
         </p>
-      </div>
-
-      {explodingClipId && selectedTemplate && (
-        <DeleteConfirm
-          message={`「${selectedTemplate.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
-          confirmLabel="バラす"
-          busyLabel="バラしています…"
-          onCancel={() => setExplodingClipId(null)}
-          onConfirm={() => {
-            explodeClip(explodingClipId, selectedTemplate);
-            setExplodingClipId(null);
-          }}
-        />
-      )}
-
-      {removingTrackId && doc.tracks.some((t) => t.id === removingTrackId) && (
-        <DeleteConfirm
-          message={`「${trackLabel(doc.tracks, removingTrackId)}」を消しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
-          onCancel={() => setRemovingTrackId(null)}
-          onConfirm={() => {
-            removeTrack(removingTrackId);
-            setRemovingTrackId(null);
-          }}
-        />
-      )}
-
-      <div className="card">
-        <h3>並び</h3>
+      </>
+    ) },
+    { id: 'arrange', title: '並び', content: (
+      <>
         {doc.clips.length === 0 ? (
           <p className="text-muted">まだ何も置かれていません。</p>
         ) : (
@@ -639,17 +627,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
           </div>
         )}
-      </div>
-
-      {voiceError && (
-        <p className="notice notice-warn" role="alert">{voiceError}</p>
-      )}
-      {editBlocked && (
-        <p className="notice notice-warn" role="alert">{editBlockedMessage[editBlocked]}</p>
-      )}
-
-      <div className="card">
-        <h3>選んだ部品</h3>
+      </>
+    ) },
+    { id: 'selected', title: '選んだ部品', content: (
+      <>
         {selected ? (
           <>
             <p className="text-muted">
@@ -1263,11 +1244,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         {selectedClipIds.length > 1 && (
           <button className="btn btn-danger" onClick={removeSelectedClips}>選んだ{selectedClipIds.length}個を消す</button>
         )}
-      </div>
-
-      {/* 見た目パターンは「楽をするための素材」＝一覧からそのまま置ける（ADR-0032 決定6）。 */}
-      <div className="card">
-        <h3>見た目パターンを置く</h3>
+      </>
+    ) },
+    { id: 'templates', title: '見た目パターンを置く', content: (
+      <>
         {placeableTemplates.length === 0 ? (
           <p className="text-muted">この向きの動画に置ける見た目パターンがありません。見た目パターンを読み込んでからお試しください。</p>
         ) : placeableTracks.length === 0 ? (
@@ -1302,11 +1282,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             />
           </>
         )}
-      </div>
-
-      {/* 音（同梱BGM）を置く（#634）。素材の音は素材画面で取り込んだものから選ぶ。 */}
-      <div className="card">
-        <h3>音を置く</h3>
+      </>
+    ) },
+    { id: 'audio', title: '音を置く', content: (
+      <>
         {voiceTracks.length === 0 ? (
           <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定を外してください。</p>
         ) : (
@@ -1336,11 +1315,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             />
           </>
         )}
-      </div>
-
-      {/* 「ここに一言足したい」をこの画面で完結させる（ADR-0032 決定7）。 */}
-      <div className="card">
-        <h3>読み上げを置く</h3>
+      </>
+    ) },
+    { id: 'voice', title: '読み上げを置く', content: (
+      <>
         {voiceTracks.length === 0 ? (
           <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定を外してください。</p>
         ) : (
@@ -1358,6 +1336,92 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
           </>
         )}
+      </>
+    ) },
+  ];
+
+  return (
+    <div className="main-scroll">
+      <PageHead title={doc.projectName} desc="時間の流れを自由に組み替えて動画を作ります。" />
+
+      {missingTemplateCount > 0 && (
+        <p className="notice notice-warn" role="alert">
+          見た目パターンが見つからない部品が{missingTemplateCount}個あります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください。
+        </p>
+      )}
+      {emptySlotCount > 0 && (
+        <p className="notice notice-warn" role="alert">
+          素材が入っていない差し込み口が{emptySlotCount}個あります。そのままだと灰色の枠が動画に出ます。部品を選んで素材を入れてください。
+        </p>
+      )}
+      {danglingLinkCount > 0 && (
+        <p className="notice notice-warn" role="alert">
+          連動する読み上げが見つからない字幕が{danglingLinkCount}個あります。連動先を選び直すか、連動をやめてください。
+        </p>
+      )}
+      {missingAudioCount > 0 && (
+        <p className="notice notice-warn" role="alert">
+          音が見つからない部品が{missingAudioCount}個あります。その部品は鳴りません。読み上げを作り直すか、音を選び直してください。
+        </p>
+      )}
+      {warnings.length > 0 && (
+        <ul className="notice notice-warn" role="alert">
+          {warnings.map((w) => (
+            <li key={`${w.code}/${w.field}`}>{w.message}</li>
+          ))}
+        </ul>
+      )}
+
+
+      {explodingClipId && selectedTemplate && (
+        <DeleteConfirm
+          message={`「${selectedTemplate.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
+          confirmLabel="バラす"
+          busyLabel="バラしています…"
+          onCancel={() => setExplodingClipId(null)}
+          onConfirm={() => {
+            explodeClip(explodingClipId, selectedTemplate);
+            setExplodingClipId(null);
+          }}
+        />
+      )}
+
+      {removingTrackId && doc.tracks.some((t) => t.id === removingTrackId) && (
+        <DeleteConfirm
+          message={`「${trackLabel(doc.tracks, removingTrackId)}」を消しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
+          onCancel={() => setRemovingTrackId(null)}
+          onConfirm={() => {
+            removeTrack(removingTrackId);
+            setRemovingTrackId(null);
+          }}
+        />
+      )}
+
+
+      {voiceError && (
+        <p className="notice notice-warn" role="alert">{voiceError}</p>
+      )}
+      {editBlocked && (
+        <p className="notice notice-warn" role="alert">{editBlockedMessage[editBlocked]}</p>
+      )}
+
+
+      {/* 見た目パターンは「楽をするための素材」＝一覧からそのまま置ける（ADR-0032 決定6）。 */}
+
+      {/* 音（同梱BGM）を置く（#634）。素材の音は素材画面で取り込んだものから選ぶ。 */}
+
+      {/* 「ここに一言足したい」をこの画面で完結させる（ADR-0032 決定7）。 */}
+
+      <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
+
+      <div className="row gap-sm mt-lg">
+        {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8＝戻れない状態を作らない）。 */}
+        {closed.map((id) => (
+          <button key={id} className="btn btn-secondary" onClick={() => changeLayout(addPanelToRegion(panelLayout, id, PANEL_REGION.left))}>
+            「{panels.find((p) => p.id === id)?.title}」を表示する
+          </button>
+        ))}
+        <button className="btn btn-ghost" onClick={resetLayout}>配置を既定に戻す</button>
       </div>
 
       <div className="row gap-sm mt-lg">
