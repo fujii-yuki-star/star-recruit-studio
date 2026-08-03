@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ContextMenu } from "./ContextMenu";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
@@ -846,38 +847,14 @@ export function FreeLayoutOverlay({
         </div>
       )}
 
+      {/* メニューの見た目・閉じ方は共有部品（`ContextMenu`）＝画面ごとに作り方が割れない（§6・ADR-0033）。 */}
       {menu && menuEl && (
-        <>
-          {/* 外側のクリック/右クリックで閉じる透明バックドロップ。 */}
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 50 }}
-            onPointerDown={() => setMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
-          />
-          <div
-            role="menu"
-            style={{
-              position: "fixed", left: menu.x, top: menu.y, zIndex: 51,
-              background: "#fff", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 8,
-              boxShadow: "0 6px 24px rgba(0,0,0,0.18)", padding: 4, minWidth: 140,
-            }}
-          >
-            {menuItems.map((it) => (
-              <button
-                key={it.label}
-                role="menuitem"
-                className="btn btn-ghost text-sm"
-                style={{
-                  display: "block", width: "100%", textAlign: "left",
-                  color: it.danger ? "var(--color-danger)" : undefined,
-                }}
-                onClick={() => { it.run(menu.id); setMenu(null); }}
-              >
-                {it.label}
-              </button>
-            ))}
-          </div>
-        </>
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems.map((it) => ({ label: it.label, danger: it.danger, onSelect: () => it.run(menu.id) }))}
+          onClose={() => setMenu(null)}
+        />
       )}
     </div>
   );
