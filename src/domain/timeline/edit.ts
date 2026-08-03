@@ -51,6 +51,13 @@ export const EDIT_BLOCKED = {
   linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
   /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
   linkedSubtitleTime: 'TIMELINE_EDIT_LINKED_SUBTITLE_TIME',
+  /**
+   * 音量の変化の点が上限（`VOLUME_POINTS_MAX`）に達している（#512）。**書き出せる範囲でしか置かせない**
+   * ＝置けたのに書き出しで断られる、を作らない（`11 §7.6.5`）。
+   */
+  volumePointsFull: 'TIMELINE_EDIT_VOLUME_POINTS_FULL',
+  /** 音量の変化を、鳴る音を持たない部品へ置こうとした（#512）。 */
+  volumePointsKind: 'TIMELINE_EDIT_VOLUME_POINTS_KIND',
 } as const;
 
 export type EditBlockedReason = (typeof EDIT_BLOCKED)[keyof typeof EDIT_BLOCKED];
