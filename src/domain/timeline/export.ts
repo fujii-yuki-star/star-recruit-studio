@@ -217,7 +217,7 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   if (brokenSubtitles.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.subtitleLinkBroken, clipIds: brokenSubtitles });
   }
-  // 音量の変化（#512）は点の数だけ式の項が増え、**約100項で FFmpeg が式を解析できなくなる**（実測）。
+  // 音量の変化（#512）は点の数だけ式の項が増え、**点 95 個までは通り 96 個で FFmpeg が式を解析できなくなる**（実測）。
   // そのまま渡すとフィルタの組み立てごと失敗し、出せるのは「もう一度お試しください」＝**何度やっても
   // 成功しない案内**になる。押す前にここで断る（§2-5・#631 の流儀）。数えるのは**正規化した後**＝
   // 同じ時刻の重複は式に出ないので、それで上限に当てない。
