@@ -119,5 +119,5 @@ clipTimeAtSceneTime(t, { startDelaySec: d, clipStartSec: c, speed: s }) = c + ma
 
 - **初回スコープ**：モード明示保存なので「まず `withAnim`/`afterAnim` の2モード→後で `delay`＋`delaySec` を**additive に追加**」が**ドリフトなしで**成立する（P1 の懸念は保存形式で解消済み）。**3モード全部を初回で出す**（#444 要望どおり・推奨）か、2モード先行かは**利用者確認**。
 - **`clipAudio.delaySec` の Rust 実装詳細**（`build_window_audio` の `adelay` 合成順）。IPC 入力拡張のみ（schema 不変）。
-- **掛け合い×動画×アニメ**：現状 `sceneAnimationActive`（`sceneAnimation.ts:27`）が `hasVideoSlot && lines>0` を preview/export/UI の3面で静止に倒しており（#469）、**この組み合わせは現在存在しない**＝本 ADR の対象外。**#469 が解除されるときに**、行区間×窓の `d` 基準を別途決める。
+- **掛け合い×動画×アニメ**：現状 `sceneAnimationActive`（`sceneAnimation.ts:27`）が `hasVideoSlot && lines>0` を preview/export/UI の3面で静止に倒しており（#469）、**この組み合わせは現在存在しない**＝本 ADR の対象外。**#469 は **ADR-0019 決定11（2026-08-03）で当面解除しない**（場面形式は凍結）。将来もし解除するときに**、行区間×窓の `d` 基準を別途決める。
 - 将来 ADR-0024 `scene.slotClips` 導入時に `slotVideoStart` を統合するか（移行方針は `slotClips` PR で）。アニメ削除時のエントリ落とし（D4）で再追加時に再設定が要る点のUXは実装で確認。
