@@ -60,8 +60,9 @@ export function clipFadeSec(clip: TimelineClip): { fadeInSec: number; fadeOutSec
 /**
  * **音量の変化**（#512）＝点列を線形に補間する。点の外は端の値で伸ばす（最初の点より前＝最初の値・
  * 最後の点より後＝最後の値）＝区間外で黙って 0 や 1 に化けない。点が無ければ `undefined`＝
- * 呼び出し側がクリップ一定の音量へ落ちる。**再生と書き出しがこの1つを共有する**（書き出しは同じ点列から
- * 式を組む＝ずれうるのは式の書き方だけ・ADR-0032 追補）。
+ * 呼び出し側がクリップ一定の音量へ落ちる。**いまは再生だけが使う**。書き出しは段3（未着手）で
+ * 同じ点列から FFmpeg の式を組んで共有する予定＝**現時点の書き出しは点列を見ず一定音量で出る**
+ * （ADR-0032 追補の段取り3）。
  */
 export function volumeAt(
   points: readonly { timeSec: number; volume: number }[] | undefined,

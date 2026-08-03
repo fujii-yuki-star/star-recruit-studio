@@ -360,6 +360,10 @@ schemaVersion ●（現行 `"1.7"`・場面形式とは独立に進む） / form
 - `kind='template'`（**テンプレを素材として置く**・差し込み口が生きている）: templateId ● / assetRefs ○ / texts ○ / textStyles ○ / slotFits ○ / textFontIds ○（テキスト種別ごとのフォント・枠全体は `fontId`） / character ○（立ち絵の表示と表情・`$ref` 共有） / slotClips ○（差し込み口ごとの動画の範囲/速度/元音声・`$ref` 共有・ADR-0028）
 - `kind='audio'`: bundledBgmId ○（同梱BGM一覧は `$ref` 共有・`assetId` と排他） / volume ○ / fadeInSec ○ / fadeOutSec ○
 - `kind='voice'`（**読み上げ**・ADR-0032 決定7）: voice ●（`TimelineVoice`・**schema の if/then で必須**＝中身の無い声を作らせない） / volume ○
+- **音量の変化**（#512・タイムライン形式だけの語彙）: `volumePoints` ○（`{timeSec, volume}[]`＝クリップ先頭からの秒と音量）。
+  **点があればそれが基準の音量**（`clip.volume` の一定値を置き換える）・**フェードはその上に掛かる**（「基準×フェード係数」の形は不変）。
+  点の間は線形（`volumeAt`＝`domain/timeline/audio.ts`・純粋）・**点の外は端の値で伸ばす**（区間外で 0 や 1 に化けない）・
+  **保存の並びに依存しない**（読み込んでから並べ替える）。**いまは再生だけが使う**＝書き出しは段3 で同じ点列から式を組む（ADR-0032 追補）。
 - **切り抜きの効かせ方**（#634・タイムライン形式だけの語彙）: `cropMode` ○（`mask`＝既定＝箱の辺を隠す／`fill`＝**残った素材を枠いっぱいに映し直す**）。
   `fill` が効くのは **`kind:'slot'`（素材の差し込み口）で切り抜きがあり、素材の実寸が分かるとき**だけ。
   - **テンプレのクリップには効かせない**＝絵が複数入るので「どの素材を枠いっぱいにするか」が決まらない。
