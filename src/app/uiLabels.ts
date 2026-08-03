@@ -1,5 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
-import { AI_ASSET_SEND_MAX } from "../domain/constants";
+import { AI_ASSET_SEND_MAX, VOLUME_POINTS_MAX } from "../domain/constants";
 import { FREE_ELEMENT_KINDS, LAYER_TYPE, SUBTITLE_SOURCE_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
@@ -419,6 +419,7 @@ export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
     "見た目パターンが見つからない部品があります。そのままでは動画に出ません。見た目パターンを読み込み直すか、その部品を置き直してください",
   TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN:
     "連動する読み上げが見つからない字幕があります。そのままでは動画に出ません。連動先を選び直すか、字幕の文を入れてください",
+  TIMELINE_EXPORT_VOLUME_POINTS_TOO_MANY: `音量の変化の点が多すぎる部品があります。1つの部品に置けるのは${VOLUME_POINTS_MAX}個までです。点を減らすか、部品を分けてください`,
 };
 
 // ── 差し込み口（素材を入れる場所）の名前（§2-3：`layer.id` の生表示を防ぐ）。 ──

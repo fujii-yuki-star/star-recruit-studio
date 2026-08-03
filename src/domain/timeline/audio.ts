@@ -8,7 +8,7 @@ import { TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { clampVolume } from '../voice/audioMix';
 import { clipTimeAtSceneTime } from '../project/videoStartTiming';
 import { clipEndSec } from './validateTimelineDoc';
-import type { TimelineClip, TimelineProject } from './types';
+import type { TimelineClip, TimelineProject, VolumePoint } from './types';
 
 /**
  * クリップの**フェードを掛ける前**の実効音量（`11 §6` の null=継承と同じ流儀）。
@@ -58,32 +58,50 @@ export function clipFadeSec(clip: TimelineClip): { fadeInSec: number; fadeOutSec
 }
 
 /**
+ * **音量の変化**（#512）の点列を、読む前に整える。**再生（`volumeAt`）と書き出し（`volumeExpr`）が
+ * この1つを共有する**＝並び・重複・値域の扱いで両者が食い違わない（ADR-0032 追補＝案A の「同じ点列・
+ * 同じ規則」を、規則の側でも1か所にする）。
+ *
+ * - **保存の並びに依存しない**（時刻→音量の順に並べる＝**中身だけで結果が決まる**）。
+ * - **同じ時刻は1つだけ**（編集層も1つしか置かせない＝キーフレームと同じ規則・`11 §7.6.3.1`）。
+ *   落とさないと、時刻ちょうどの値を再生は手前の点・式は次の点から採り、**同じデータで音が違う**。
+ * - **値域は入口で収める**（`clampVolume`）。補間してから収めるか、収めてから補間するかで**中間の値が
+ *   変わる**ので、両者が同じ側に立つようにする（両端が範囲内なら線形補間の途中も範囲内）。
+ */
+export function normalizedVolumePoints(points: readonly VolumePoint[] | undefined): VolumePoint[] {
+  if (!points || points.length === 0) return [];
+  const sorted = [...points].sort((a, b) => a.timeSec - b.timeSec || a.volume - b.volume);
+  const out: VolumePoint[] = [];
+  for (const p of sorted) {
+    if (out.length > 0 && out[out.length - 1].timeSec === p.timeSec) continue;
+    out.push({ timeSec: p.timeSec, volume: clampVolume(p.volume) });
+  }
+  return out;
+}
+
+/**
  * **音量の変化**（#512）＝点列を線形に補間する。点の外は端の値で伸ばす（最初の点より前＝最初の値・
  * 最後の点より後＝最後の値）＝区間外で黙って 0 や 1 に化けない。点が無ければ `undefined`＝
  * 呼び出し側がクリップ一定の音量へ落ちる。**書き出しは同じ点列から `volumeExpr` で式を組む**
- * ＝規則（線形・端で伸ばす・並びに依存しない）はこの関数と式の**両方が同じ点列**から出る
+ * ＝規則（線形・端で伸ばす・並びに依存しない）はこの関数と式の**両方が同じ正規化**から出る
  * （ADR-0032 追補＝案A）。
  */
-export function volumeAt(
-  points: readonly { timeSec: number; volume: number }[] | undefined,
-  localSec: number,
-): number | undefined {
-  if (!points || points.length === 0) return undefined;
-  const sorted = [...points].sort((a, b) => a.timeSec - b.timeSec);
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-  if (localSec <= first.timeSec) return clampVolume(first.volume);
-  if (localSec >= last.timeSec) return clampVolume(last.volume);
-  for (let i = 1; i < sorted.length; i += 1) {
-    const b = sorted[i];
+export function volumeAt(points: readonly VolumePoint[] | undefined, localSec: number): number | undefined {
+  const pts = normalizedVolumePoints(points);
+  if (pts.length === 0) return undefined;
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  if (localSec <= first.timeSec) return first.volume;
+  if (localSec >= last.timeSec) return last.volume;
+  for (let i = 1; i < pts.length; i += 1) {
+    const b = pts[i];
     if (localSec < b.timeSec) {
-      const a = sorted[i - 1];
-      const span = b.timeSec - a.timeSec;
-      const r = span > 0 ? (localSec - a.timeSec) / span : 0;
-      return clampVolume(a.volume + (b.volume - a.volume) * r);
+      const a = pts[i - 1];
+      // 同じ時刻は正規化で落ちているので、ここの間隔は必ず正（0 で割らない）。
+      return a.volume + (b.volume - a.volume) * ((localSec - a.timeSec) / (b.timeSec - a.timeSec));
     }
   }
-  return clampVolume(last.volume);
+  return last.volume;
 }
 
 function fadedVolume(clip: TimelineClip, doc: TimelineProject, localSec: number): number {
@@ -182,26 +200,46 @@ export function audioLoops(clip: TimelineClip): boolean {
 /**
  * 音量の変化（#512）を **FFmpeg の `volume` フィルタの式**にする（ADR-0032 追補＝案A）。
  *
- * **`volumeAt` と同じ点列・同じ規則**（点の間は線形・点の外は端の値で伸ばす）を式にしただけ＝
+ * **`volumeAt` と同じ正規化・同じ規則**（点の間は線形・点の外は端の値で伸ばす）を式にしただけ＝
  * ずれうるとしたら「式の書き方」だけに閉じ込める。時刻 `t` はフィルタ入力の秒（クリップの先頭が 0）。
  * 点が無ければ `undefined`＝呼び出し側が従来どおり一定値の `volume=<数>` を使う。
+ *
+ * **形は「区間ごとの項の足し算」**（`if()` の入れ子ではない）。入れ子にすると点1つにつき括弧が1段深くなり、
+ * **同梱 ffmpeg では点 100 個で式の解析が落ちる**（98 個は通る＝実測 2026-08-03）。落ちるとフィルタの
+ * 組み立てごと失敗し、利用者には「もう一度お試しください」＝**何度やっても成功しない案内**しか出せない
+ * （§2-5・ADR-0026④）。足し算は深さが増えないので、点をいくつ置いても同じ形で通る。
+ *
+ * 各時刻でちょうど1つの項だけが 1 倍になり、残りは 0 倍で消える（区間は**半開** `gte`〜`lt`＝
+ * 境界の時刻を2つの項が取り合わない）。同じ時刻の重複は正規化で落ちているので、区間の幅は必ず正。
+ *
+ * ⚠️ **点の数には上限がある**（`VOLUME_POINTS_MAX`）。足し算にしても解析の上限は消えない（実測＝**点 95 個までは
+ * 通り 96 個で失敗**）ので、
+ * ここでは切り詰めず、**`timelineExportBlockers` が書き出しの手前で断る**（黙って一部の点を捨てた音を
+ * 出さない＝ADR-0026④）。
  */
-export function volumeExpr(points: readonly { timeSec: number; volume: number }[] | undefined): string | undefined {
-  if (!points || points.length === 0) return undefined;
-  const sorted = [...points].sort((a, b) => a.timeSec - b.timeSec);
-  const v = (x: number): string => String(clampVolume(x));
-  // 末尾（最後の点より後）は最後の値で伸ばす＝`volumeAt` と同じ。内側から外へ if を重ねる。
-  let expr = v(sorted[sorted.length - 1].volume);
-  for (let i = sorted.length - 1; i >= 1; i -= 1) {
-    const a = sorted[i - 1];
-    const b = sorted[i];
-    const span = b.timeSec - a.timeSec;
-    // 同じ時刻が2つ並んでも 0 で割らない（`volumeAt` と同じ扱い＝手前の値のまま）。
-    const seg = span > 0
-      ? `${v(a.volume)}+(${v(b.volume)}-${v(a.volume)})*(t-${a.timeSec})/${span}`
-      : v(a.volume);
-    expr = `if(lt(t,${b.timeSec}),${seg},${expr})`;
+export function volumeExpr(points: readonly VolumePoint[] | undefined): string | undefined {
+  const pts = normalizedVolumePoints(points);
+  if (pts.length === 0) return undefined;
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  // 先頭（最初の点より前）・末尾（最後の点より後）は端の値で伸ばす＝`volumeAt` と同じ。
+  const terms: string[] = [`lt(t,${num(first.timeSec)})*${num(first.volume)}`];
+  for (let i = 1; i < pts.length; i += 1) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    terms.push(
+      `gte(t,${num(a.timeSec)})*lt(t,${num(b.timeSec)})*(${num(a.volume)}+(${num(b.volume)}-${num(a.volume)})*(t-${num(a.timeSec)})/${num(b.timeSec - a.timeSec)})`,
+    );
   }
-  // 先頭（最初の点より前）も最初の値で伸ばす。
-  return `if(lt(t,${sorted[0].timeSec}),${v(sorted[0].volume)},${expr})`;
+  terms.push(`gte(t,${num(last.timeSec)})*${num(last.volume)}`);
+  return terms.join('+');
+}
+
+/**
+ * 式へ書く数（**短い10進**）。`0.3-0.1` のような引き算で出る `0.19999999999999998` をそのまま書くと
+ * 式の長さが倍近くになり、**渡せるコマンドラインの長さ**（Windows で約32000文字・音の本数ぶん積み上がる）に
+ * 早く当たる。12桁で丸める＝秒にも音量にも**聞き分けられない差**（1e-12）しか動かない。
+ */
+function num(x: number): string {
+  return String(Number(x.toPrecision(12)));
 }
