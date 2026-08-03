@@ -39,8 +39,12 @@ export interface AudioCue {
   speed: number;
 }
 
-/** 音のクリップか（絵は `layoutTimelineAt` が見る）。 */
-function isAudioClip(clip: TimelineClip): boolean {
+/**
+ * 音のクリップか（絵は `layoutTimelineAt` が見る）＝**鳴る音を持つ部品**の唯一の判定（§6）。
+ * 再生・書き出し・編集（音量の変化を置けるか）・画面（パネルを出すか）が**同じ述語**を通す＝
+ * 種別が増えたときに「置けるのにパネルが出ない」「出るのに断られる」が起きない。
+ */
+export function isAudioClip(clip: TimelineClip): boolean {
   return clip.kind === TIMELINE_CLIP_KIND.audio || clip.kind === TIMELINE_CLIP_KIND.voice;
 }
 

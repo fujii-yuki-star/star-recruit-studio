@@ -7,7 +7,7 @@
 //   ② 判定条件（重なり・アニメ・速度・クロップの有無）を増やすほど、**プレビューと書き出しで別経路**が
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
-import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, normalizedVolumePoints, volumeExpr } from './audio';
+import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { ASSET_TYPE, TIMELINE_CLIP_KIND } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
@@ -221,8 +221,10 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // そのまま渡すとフィルタの組み立てごと失敗し、出せるのは「もう一度お試しください」＝**何度やっても
   // 成功しない案内**になる。押す前にここで断る（§2-5・#631 の流儀）。数えるのは**正規化した後**＝
   // 同じ時刻の重複は式に出ないので、それで上限に当てない。
+  // 見るのは**鳴る音を持つ部品だけ**（`isAudioClip`＝再生・編集と同じ述語）。絵の部品に点が入っていても
+  // 式は組まれない（`timelineAudioRuns` に出ない）ので、数えると**書き出せるものを断る**ことになる。
   const tooManyPoints = doc.clips
-    .filter((c) => normalizedVolumePoints(c.volumePoints).length > VOLUME_POINTS_MAX)
+    .filter((c) => isAudioClip(c) && normalizedVolumePoints(c.volumePoints).length > VOLUME_POINTS_MAX)
     .map((c) => c.id);
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });

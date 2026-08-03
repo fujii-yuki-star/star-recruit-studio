@@ -26,6 +26,7 @@ import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
 import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { animationOriginSec, clearKeyframes, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
+import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../domain/timeline/volumePointEdit";
 import type { KeyframeInput } from "../../domain/timeline/keyframeEdit";
 import { resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import { characterForSpeaker } from "../../domain/voice/voiceCatalog";
@@ -182,6 +183,15 @@ export interface TimelineState {
   setSelectedClipCrop: (edge: "top" | "right" | "bottom" | "left", value: number) => void;
   /** 選んでいる音の前後のフェード（#634）。 */
   setSelectedClipFade: (edge: "in" | "out", sec: number) => void;
+  /**
+   * 選んでいる音の**音量の変化**（#512 段4）＝再生位置に点を置く／直す。時刻は部品の先頭からの秒で渡す
+   * （画面は再生位置から引く＝動きのキーフレームと同じ流儀）。
+   */
+  setSelectedVolumePoint: (timeSec: number, volume: number) => void;
+  /** 選んでいる音の音量の点を外す（#512 段4）。 */
+  removeSelectedVolumePoint: (timeSec: number) => void;
+  /** 選んでいる音の音量の変化をすべて外す（一定の音量へ戻る・#512 段4）。 */
+  clearSelectedVolumePoints: () => void;
   /** 読み上げを置く（#633＝タイムライン側でも声を作れる）。 */
   addVoiceClip: (input: { text: string; trackId: string; startSec: number }) => void;
   /** 選んでいる読み上げの文を書き換える（作成済みの音声は外れる・#633）。 */
@@ -459,6 +469,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipSourceStart: (sec) => applyEdit(set, get, (d, id) => setClipSourceStart(d, id, sec)),
   setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
   setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
+  setSelectedVolumePoint: (timeSec, volume) =>
+    applyEdit(set, get, (d, id) => setVolumePoint(d, id, timeSec, volume)),
+  removeSelectedVolumePoint: (timeSec) => applyEdit(set, get, (d, id) => removeVolumePoint(d, id, timeSec)),
+  clearSelectedVolumePoints: () => applyEdit(set, get, (d, id) => clearVolumePoints(d, id)),
   setSelectedClipCrop: (edge, value) => applyEdit(set, get, (d, id) => setClipCrop(d, id, edge, value)),
   setSelectedClipCropAlign: (patch) => applyEdit(set, get, (d, id) => setClipCropAlign(d, id, patch)),
   setSelectedClipCropMode: (mode) => applyEdit(set, get, (d, id) => setClipCropMode(d, id, mode)),

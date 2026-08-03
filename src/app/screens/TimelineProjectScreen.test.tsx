@@ -7,6 +7,7 @@ import { useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
+import { VOLUME_POINTS_MAX } from "../../domain/constants";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 
@@ -885,5 +886,112 @@ describe("TimelineProjectScreen: 切り抜き（#634）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText("上を隠す（%）")).not.toBeInTheDocument();
+  });
+});
+
+describe("TimelineProjectScreen: 音量の変化（#512 段4）", () => {
+  const withAudio = (over: Partial<TimelineProject> = {}) => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 8, bundledBgmId: "found-new-hope" }],
+      ...over,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("再生位置に点を置ける（保存するのは部品の先頭からの秒＝動画の時刻ではない）", () => {
+    withAudio({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 1, durationSec: 8, bundledBgmId: "found-new-hope" }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 動画の 3 秒＝部品（1 秒から）の 2 秒目。
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "3" } });
+    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "0.4" } });
+    fireEvent.click(screen.getByText("この位置に置く"));
+    expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toEqual([{ timeSec: 2, volume: 0.4 }]);
+  });
+
+  it("置いた点は一覧に出て、外せる", () => {
+    withAudio({
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 1, durationSec: 8,
+        bundledBgmId: "found-new-hope", volumePoints: [{ timeSec: 2, volume: 0.4 }],
+      }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 表示は動画の時刻（部品の開始 1 秒 ＋ 点の 2 秒）＝画面の目盛りと同じ物差し。
+    expect(screen.getByText(/3\.00秒：音量 0\.4/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("外す"));
+    expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toBeUndefined();
+  });
+
+  it("上限に達したら置かずに「次の行動」を出す（§2-5）", () => {
+    const full = Array.from({ length: VOLUME_POINTS_MAX }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 }));
+    withAudio({
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 8,
+        bundledBgmId: "found-new-hope", volumePoints: full,
+      }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "7" } });
+    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "0.9" } });
+    fireEvent.click(screen.getByText("この位置に置く"));
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("ほかの点を外してから置いてください"))).toBe(true);
+    expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toHaveLength(VOLUME_POINTS_MAX);
+  });
+
+  it("再生位置が部品の外なら、置く前に動かし方を案内する（§2-5）", () => {
+    withAudio({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 5, durationSec: 3, bundledBgmId: "found-new-hope" }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("部品が鳴っている時間"))).toBe(true);
+    expect(screen.queryByText("この位置に置く")).not.toBeInTheDocument();
+  });
+
+  it("絵の部品には出さない（鳴る音が無いので効かない）", () => {
+    open();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); // 文字クリップ
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText("音量の変化")).not.toBeInTheDocument();
+  });
+});
+
+describe("TimelineProjectScreen: 音量の変化のレビュー指摘（/canon-check）", () => {
+  const withPoints = (points: { timeSec: number; volume: number }[]) => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 8,
+        bundledBgmId: "found-new-hope", volume: 0.25, volumePoints: points,
+      }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("点があるときは「音量」欄を押せなくして理由を出す（設定したのに音が変わらない、を作らない）", () => {
+    withPoints([{ timeSec: 1, volume: 0.8 }]);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("音量").parentElement?.querySelector("input")).toBeDisabled();
+    expect(screen.getByText(/その点が音量を決めます/)).toBeInTheDocument();
+  });
+
+  it("点が無ければ「音量」欄は使える（従来どおり一定の音量を決められる）", () => {
+    withPoints([]);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("音量").parentElement?.querySelector("input")).not.toBeDisabled();
+  });
+
+  it("置けなかったときは入力した値を消さない（打ち直しにさせない）", () => {
+    withPoints(Array.from({ length: VOLUME_POINTS_MAX }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 })));
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "7" } });
+    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "0.9" } });
+    fireEvent.click(screen.getByText("この位置に置く"));
+    expect((screen.getByText("この位置の音量").parentElement?.querySelector("input") as HTMLInputElement).value).toBe("0.9");
   });
 });

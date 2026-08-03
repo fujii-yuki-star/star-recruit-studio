@@ -7,7 +7,7 @@ import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } 
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { clipCountOnTrack } from "../../domain/timeline/edit";
-import { audioSourceKeyOfClip } from "../../domain/timeline/audio";
+import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
@@ -23,7 +23,7 @@ import { groupElementIds } from "../../domain/project/groupOps";
 import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, VOLUME_MAX } from "../../domain/constants";
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { creditSpeakerAt } from "../../domain/timeline/credit";
@@ -34,7 +34,7 @@ import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, trackLabel } from "../uiLabels";
+import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, SLOT_TYPE } from "../../domain/enums";
@@ -201,6 +201,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedKeyframe, setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
     addAudioClip, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
+    setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -233,6 +234,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [placeTrackId, setPlaceTrackId] = useState<string>("");
   // 「動き」の入力欄（文字列で持つ＝空欄＝その項目は動かさない）。
   const [kfDraft, setKfDraft] = useState<Partial<Record<KeyframeProp, string>>>({});
+  // 音量の変化（#512 段4）の入力欄。**空欄のままでは置かない**（0 と空欄を取り違えない）。
+  const [volumeDraft, setVolumeDraft] = useState("");
   // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
   const [explodingClipId, setExplodingClipId] = useState<string | null>(null);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
@@ -295,6 +298,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const keyframeAtPlayhead = {
     live: selected != null && clipIsLiveAt(selected, playheadSec),
     keyframe: selectedKeyframes.find((k) => k.timeSec === playheadSec - selectedOrigin),
+  };
+  // 選んだ部品の音量の変化（#512 段4）。時刻は部品の先頭からの秒なので、表示は開始秒を足す。
+  // 読むときも保存と同じ正規化を通す＝並び・重複・値域が画面と鳴る音で食い違わない。
+  const selectedVolumePoints = selected ? normalizedVolumePoints(selected.volumePoints) : [];
+  // 点があるときは**一定の音量（この部品の「音量」欄）は使われない**（`volumeAt(points) ?? clipBaseVolume`）。
+  // 欄を触れるままにすると「設定したのに音が変わらない」になる（ADR-0026①＝設定した意味どおり）。
+  const hasVolumePoints = selectedVolumePoints.length > 0;
+  const volumePointsHint = hasVolumePoints ? VOLUME_POINTS_OVERRIDE_HINT : undefined;
+  const volumePointAtPlayhead = {
+    live: selected != null && clipIsLiveAt(selected, playheadSec),
+    point: selected ? selectedVolumePoints.find((p) => p.timeSec === playheadSec - selected.startSec) : undefined,
   };
   // この部品が入っている「まとまり」に付いた動き（画面では動いているのに「無い」と言わない）。
   const groupKeyframes =
@@ -899,16 +913,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <span>音量</span>
                   <input
                     type="number"
-                    step={0.05}
-                    min={0}
+                    step={VOLUME_STEP}
+                    min={VOLUME_MIN}
                     max={VOLUME_MAX}
                     value={selected.volume ?? ""}
                     placeholder="動画全体に合わせる"
-                    disabled={selectedLocked}
-                    title={lockedHint}
+                    disabled={selectedLocked || hasVolumePoints}
+                    title={selectedLocked ? lockedHint : volumePointsHint}
                     onChange={(e) => setSelectedClipVolume(e.target.value === "" ? null : Number(e.target.value))}
                   />
                 </label>
+                {hasVolumePoints && <p className="text-muted">{VOLUME_POINTS_OVERRIDE_HINT}</p>}
                 <div className="row gap-sm">
                   <label className="field">
                     <span>だんだん大きく（秒）</span>
@@ -992,6 +1007,104 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       ? "声を作れませんでした。もう一度お試しください。"
                       : "文を書いて「声を作る」を押すと、長さが声に合います。"}
                 </p>
+              </div>
+            )}
+
+            {/* 音量の変化（#512 段4）＝置いた時刻の音量を並べると、その間はなめらかに変わる。
+                音・読み上げのどちらにも置ける（鳴る音を持つ部品だけ）。 */}
+            {isAudioClip(selected) && (
+              <div className="mt-lg">
+                <h4>音量の変化</h4>
+                <p className="text-muted">
+                  再生位置（{playheadSec.toFixed(1)}秒）にその時の音量を置きます。違う値を2か所に置くと、
+                  その間はなめらかに変わります。前後のフェードは、この変化の上に掛かります。
+                </p>
+                {!volumePointAtPlayhead.live ? (
+                  <p className="notice notice-warn" role="alert">
+                    再生位置がこの部品の外にあります。部品が鳴っている時間（
+                    {selected.startSec.toFixed(1)}〜{clipEndSec(selected).toFixed(1)}秒）へ動かしてから置いてください。
+                  </p>
+                ) : (
+                  <div className="row gap-sm">
+                    <label className="field">
+                      <span>この位置の音量</span>
+                      <input
+                        type="number"
+                        step={VOLUME_STEP}
+                        min={VOLUME_MIN}
+                        max={VOLUME_MAX}
+                        value={volumeDraft}
+                        disabled={selectedLocked}
+                        title={lockedHint}
+                        onChange={(e) => setVolumeDraft(e.target.value)}
+                      />
+                    </label>
+                    <button
+                      className="btn btn-secondary"
+                      disabled={selectedLocked || isPlaying || volumeDraft === ""}
+                      title={selectedLocked ? lockedHint : playingHint}
+                      onClick={() => {
+                        setSelectedVolumePoint(playheadSec - selected.startSec, Number(volumeDraft));
+                        // **置けたときだけ**空にする＝上限などで断られたときに、入力し直しをさせない（§2-5）。
+                        if (!useTimelineStore.getState().editBlocked) setVolumeDraft("");
+                      }}
+                    >
+                      この位置に置く
+                    </button>
+                    {volumePointAtPlayhead.point && (
+                      <button
+                        className="btn btn-ghost"
+                        disabled={selectedLocked}
+                        title={lockedHint}
+                        onClick={() => setVolumeDraft(String(volumePointAtPlayhead.point?.volume ?? ""))}
+                      >
+                        この位置の値を読み込む
+                      </button>
+                    )}
+                  </div>
+                )}
+                {selectedVolumePoints.length === 0 ? (
+                  <p className="text-muted">
+                    まだ音量の変化は付いていません（この部品の間ずっと同じ音量で鳴ります）。
+                  </p>
+                ) : (
+                  <ul className="notice">
+                    {selectedVolumePoints.map((p) => (
+                      <li key={p.timeSec}>
+                        {(selected.startSec + p.timeSec).toFixed(2)}秒：音量 {p.volume}
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setPlayhead(selected.startSec + p.timeSec)}
+                        >
+                          この位置へ
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          disabled={selectedLocked}
+                          title={lockedHint}
+                          onClick={() => removeSelectedVolumePoint(p.timeSec)}
+                        >
+                          外す
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {selectedVolumePoints.length > 0 && (
+                  <>
+                    <p className="text-muted">
+                      置ける点は{VOLUME_POINTS_MAX}か所までです（いま{selectedVolumePoints.length}か所）。
+                    </p>
+                    <button
+                      className="btn btn-ghost"
+                      disabled={selectedLocked}
+                      title={lockedHint}
+                      onClick={clearSelectedVolumePoints}
+                    >
+                      音量の変化をすべて外す
+                    </button>
+                  </>
+                )}
               </div>
             )}
 
