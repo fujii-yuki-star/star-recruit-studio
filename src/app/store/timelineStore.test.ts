@@ -108,6 +108,15 @@ describe('createTimelineProject（完全新規・#635）', () => {
     expect(useTimelineStore.getState().doc).toBeNull();
   });
 
+  it('選んだ向きで作る（縦向きが保存内容に入る・#664）', async () => {
+    vi.spyOn(fsMod, 'listProjectSummaries').mockResolvedValue([]);
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    await useTimelineStore.getState().createTimelineProject('縦の動画', '9:16');
+    const saved = save.mock.calls.map((c) => JSON.parse(c[1] as string)).find((d) => d.format === PROJECT_FORMAT.timeline);
+    expect(saved.videoSettings.aspectRatio).toBe('9:16');
+    expect(useTimelineStore.getState().doc?.videoSettings.aspectRatio).toBe('9:16');
+  });
+
   it('前に開いていた文書の取り消し履歴・選択を持ち越さない（別の動画を書き戻さない）', async () => {
     // 先にタイムライン A を開いて履歴を積む。
     vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));

@@ -4,6 +4,7 @@
 // どちらも出来上がりは同じ形（`TimelineProject`）で、**id の発行と時計は呼び出し側**が渡す（この関数に
 // 時計を持ち込まない＝`bake.ts` と同じ流儀）。
 import { PROJECT_FORMAT, TRACK_KIND } from '../enums';
+import type { Orientation } from '../enums';
 import { defaultVideoSettings, defaultVoiceSettings } from '../project/persistence';
 import { addTrack } from './edit';
 import { TIMELINE_SCHEMA_VERSION } from './types';
@@ -16,13 +17,14 @@ export interface CreateTimelineProjectInput {
   projectName: string;
   /** 作成時刻（ISO 文字列・`createdAt`/`updatedAt` に入る）。 */
   now: string;
+  /** 画面の向き（#664）。未指定は既定（横向き）＝場面形式の新規作成と同じ既定。 */
+  aspectRatio?: Orientation;
 }
 
 /**
- * 空のタイムラインプロジェクト。**向きは既定（横型）固定**＝完全新規で縦型を作る導線がまだ無いので、
- * 引数だけ先に生やして「選べる」ように見せない（縦型は縦型の場面形式から焼き出す・#664）。
- ***最初から列を1本ずつ持たせる**（映像と音）＝置く前に「列を足す」から
+ * 空のタイムラインプロジェクト。**最初から列を1本ずつ持たせる**（映像と音）＝置く前に「列を足す」から
  * 始めさせない。中身（クリップ）は無いので、開いた直後の書き出しは `timelineExportBlockers` が止める。
+ * 向き（#664）は画面で選ばせる＝未指定は既定（横向き）。
  */
 export function createEmptyTimelineProject(input: CreateTimelineProjectInput): TimelineProject {
   const videoSettings = defaultVideoSettings();
@@ -33,7 +35,7 @@ export function createEmptyTimelineProject(input: CreateTimelineProjectInput): T
     projectName: input.projectName,
     createdAt: input.now,
     updatedAt: input.now,
-    videoSettings,
+    videoSettings: input.aspectRatio ? { ...videoSettings, aspectRatio: input.aspectRatio } : videoSettings,
     voiceSettings: defaultVoiceSettings(),
     assets: [],
     tracks: [],

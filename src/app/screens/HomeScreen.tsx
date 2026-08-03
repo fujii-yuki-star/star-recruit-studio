@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
+import { ORIENTATION } from "../../domain/enums";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { useStartNewProject } from "../hooks/useStartNewProject";
 import { hasUnsavedChanges } from "../hooks/newProjectGuard";
@@ -60,6 +61,8 @@ export function HomeScreen({ onNavigate }: HomeProps) {
     confirm: confirmStartNew, cancel: cancelNew,
   } = useStartNewProject(onNavigate);
   // プロジェクトを開けなかったときのユーザー向け表示（§2-5）。
+  // タイムライン形式の新規作成で向きを選んでいる最中か（#664）。
+  const [choosingTimeline, setChoosingTimeline] = useState(false);
   const [openError, setOpenError] = useState(false);
   // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -279,13 +282,34 @@ export function HomeScreen({ onNavigate }: HomeProps) {
                     素材を並べる別の作り方。場面形式とは別の動画になる（あとから行き来はしない）。 */}
                 <button
                   className="btn btn-secondary btn-lg"
-                  onClick={startTimeline}
+                  onClick={() => setChoosingTimeline((v) => !v)}
                   disabled={isExporting || pendingOpenId !== null || creatingTimeline}
                   title={isExporting ? "書き出しが終わるまでお待ちください" : pendingOpenId !== null ? "確認に答えてから操作できます" : "場面に区切らず、時間の流れの上に自分で並べます"}
                 >
                   {creatingTimeline ? "作っています…" : "タイムラインで作る"}
                 </button>
               </div>
+              {/* 向きは作るときにしか選べない（あとから変える導線が無い）ので、押した瞬間に作らず先に聞く（#664）。 */}
+              {choosingTimeline && !creatingTimeline && (
+                <div className="notice notice-info mt" role="group" aria-label="動画の向きを選ぶ">
+                  <p>どちらの向きで作りますか？（あとから変えられません）</p>
+                  <div className="row gap-sm">
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => { setChoosingTimeline(false); startTimeline(ORIENTATION.landscape); }}
+                    >
+                      横向き（パソコン・テレビ向き）
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => { setChoosingTimeline(false); startTimeline(ORIENTATION.portrait); }}
+                    >
+                      縦向き（スマホ向き）
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => setChoosingTimeline(false)}>やめる</button>
+                  </div>
+                </div>
+              )}
               {timelineCreateFailed && (
                 <p className="text-warn mt">
                   新しいタイムラインの動画を作れませんでした。少し待ってからもう一度お試しください。

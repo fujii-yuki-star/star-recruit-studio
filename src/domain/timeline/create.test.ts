@@ -35,7 +35,11 @@ describe('createEmptyTimelineProject（完全新規・#635）', () => {
     expect(createEmptyTimelineProject(input).sourceProjectId).toBeUndefined();
   });
 
-  it('向きは既定（横型）に固定＝完全新規で縦型を選べるように見せない（#664）', () => {
+  it('向きを選べる（縦向きも保存できる形になる・#664）', () => {
+    const portrait = createEmptyTimelineProject({ ...input, aspectRatio: '9:16' });
+    expect(portrait.videoSettings.aspectRatio).toBe('9:16');
+    expect(validateTimelineProject(portrait)).toBe(true);
+    // 未指定は既定（横向き）＝場面形式の新規作成と同じ既定。
     expect(createEmptyTimelineProject(input).videoSettings.aspectRatio).toBe('16:9');
   });
 

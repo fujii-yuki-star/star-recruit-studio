@@ -14,7 +14,7 @@ import { ASSET_TYPE } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
-import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from "../../domain/enums";
+import type { CropAlignX, CropAlignY, CropMode, Orientation, TextKey, TrackKind } from "../../domain/enums";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
   addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip,
@@ -128,7 +128,7 @@ export interface TimelineState {
    * **完全新規のタイムラインプロジェクトを作って開く**（ADR-0032 決定7/15・#635）。
    * 作った id を返す（呼び出し側が画面を切り替える）。**未適合なら保存しない**＝開けない動画を一覧に作らない。
    */
-  createTimelineProject: (projectName: string) => Promise<string>;
+  createTimelineProject: (projectName: string, aspectRatio?: Orientation) => Promise<string>;
   openTimelineProject: (projectId: string) => Promise<void>;
   closeTimelineProject: () => void;
   setPlayhead: (sec: number) => void;
@@ -294,7 +294,7 @@ function emptyState() {
 export const useTimelineStore = create<TimelineState>((set, get) => ({
   ...emptyState(),
 
-  createTimelineProject: async (projectName) => {
+  createTimelineProject: async (projectName, aspectRatio) => {
     // 書き出し中は作らない（開く・閉じると同じ扱い＝走っている間は入力を固定・ADR-0032）。
     // 断る理由は store 側に置く（画面ごとに条件を書き分けない）。
     if (isTimelineExportBusy(get().exportRun.phase)) {
@@ -308,7 +308,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const existing = await listProjectSummaries();
     const projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
     const now = new Date().toISOString();
-    const doc = createEmptyTimelineProject({ projectId, projectName, now });
+    const doc = createEmptyTimelineProject({ projectId, projectName, now, aspectRatio });
     // 焼き出しと同じ流儀＝**未適合なら保存しない**（一覧に出るのに開けない動画を作らない・ADR-0026④）。
     if (!validateTimelineProject(doc)) {
       console.warn("[timeline] 新規作成した内容がスキーマに未適合:", validateTimelineProject.errors);
