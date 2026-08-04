@@ -278,7 +278,7 @@ const EXPORT_OWNER = "timeline" as const;
 
 /**
  * 進行中の保存（#693）。**同時に2本走らせない**ための単一の見張り。書き込みは上書き（truncate）なので、
- * 古い文書を持つ側が後着すると**ディスク上の編集が巻き戻る**。
+ * 古い文書を持つ側が後着すると**ディスク上の変更が巻き戻る**。
  */
 let saveInFlight: Promise<void> | null = null;
 /**
@@ -287,6 +287,17 @@ let saveInFlight: Promise<void> | null = null;
  * 並べて走らせず、**終わってからもう一度**書くことで、最後の内容が必ずディスクへ行く。
  */
 let saveAgain = false;
+
+/**
+ * **開いている文書が入れ替わるときに見張りを手放す**（#693 レビュー）。前の動画の保存が返ってこないと、
+ * 次に開いた動画の保存が「進行中」と誤解されて**永久に書かれない**。
+ * 走っている書き込み自体は止められないが、それが**次の動画の保存状態を書き換えない**ことは
+ * `doSaveTimelineProject` 側（`projectId` の照合）で担保する。
+ */
+function releaseSaveGuard(): void {
+  saveInFlight = null;
+  saveAgain = false;
+}
 
 /**
  * 開いていない状態（閉じる・開き直しの初期値）。**毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、
@@ -337,6 +348,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       throw new Error("new timeline project failed schema validation");
     }
     await saveProjectDoc(projectId, JSON.stringify(doc, null, 2));
+    releaseSaveGuard(); // 開くときと同じ＝前の動画の保存を引きずらない
     // 保存できたものをそのまま開く（読み直さない＝ディスクと同じ内容を持っている）。
     // **必ず `emptyState()` から作る**＝前に開いていた文書の取り消し履歴・選択・作成中の声を持ち越さない
     // （持ち越すと「新しい動画で取り消す」が**別の動画の内容**を書き戻し、自動保存がそちらを上書きする）。
@@ -351,6 +363,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       return;
     }
     if (get().isLoading) return;
+    // **ここが本番で文書が入れ替わる場所**（一覧からは `closeTimelineProject` を経由せず直接開く）。
+    releaseSaveGuard();
     set({ ...emptyState(), isLoading: true });
     try {
       const doc = parseTimelineProjectDoc(await loadProjectDoc(projectId));
@@ -391,10 +405,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   closeTimelineProject: () => {
     // 開くときと同じ理由で、走行中は閉じない（`exportRun` ごと初期化されると書き出し中の締めが外れる）。
     if (isTimelineExportBusy(get().exportRun.phase)) return;
-    // 見張りは**いま開いている文書の保存**を指す。閉じたら手放す＝前の文書の保存が返ってこないときに、
-    // 次に開いた文書の保存が「進行中」と誤解されて**永久に書かれない**状態を作らない（#693）。
-    saveInFlight = null;
-    saveAgain = false;
+    releaseSaveGuard();
     set({ ...emptyState() });
   },
 
@@ -921,17 +932,22 @@ async function doSaveTimelineProject(set: SetState, get: GetState): Promise<void
   if (!doc) return;
   set({ saveStatus: "saving" });
   const next = withUpdatedAt(doc, new Date().toISOString());
+  // **書いている相手がまだ開いているか**。書き込みは時間がかかるので、その間に別の動画へ移れる。
+  // 移ったあとに前の動画の結果でいまの動画の保存状態を書き換えると、**触ってもいない動画に**
+  // 「保存できませんでした」が出たり、保存済みが未保存へ化けたりする（#693 レビュー・ADR-0026①）。
+  const stillOpen = () => get().doc?.projectId === doc.projectId;
   if (!validateTimelineProject(next)) {
     console.warn("[timeline] 保存内容がスキーマに未適合:", validateTimelineProject.errors);
-    set({ saveStatus: "error" });
+    if (stillOpen()) set({ saveStatus: "error" });
     return;
   }
   try {
     await saveProjectDoc(next.projectId, JSON.stringify(next, null, 2));
+    if (!stillOpen()) return;
     // 保存中に更に編集されていたら「保存しました」にしない（未保存を保存済みに見せない）。
     set(get().doc === doc ? { doc: next, saveStatus: "saved" } : { saveStatus: "idle" });
   } catch {
-    set({ saveStatus: "error" });
+    if (stillOpen()) set({ saveStatus: "error" });
   }
 }
 

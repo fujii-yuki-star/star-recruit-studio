@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
@@ -262,8 +262,33 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
 
   const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
-  // 保存できていないまま一覧へ戻ろうとしているか（#693）。戻ると編集は失われるので、黙って捨てずに聞く。
+  // 保存できていないまま一覧へ戻ろうとしているか（#693）。戻ると変更は失われるので、黙って捨てずに聞く。
   const [confirmLeave, setConfirmLeave] = useState(false);
+  // 戻る前の保存を待っているか（#693 レビュー）。待っている間は二重に押せないようにする。
+  const [leaving, setLeaving] = useState(false);
+  /**
+   * 一覧へ戻る（#693）。**保存が済むまで待ってから**離れる＝書いている途中（`saving`）に離れると、
+   * そのあと失敗しても利用者はもう別の画面にいて気づけない（確認も出ない）。
+   * 失敗していたら離れずに確認を出す＝「保存し直す」を押しに戻れる。
+   */
+  const leaveToHome = useCallback(async () => {
+    const status = useTimelineStore.getState().saveStatus;
+    // 待つのは**まだ書けていないとき**だけ（`saved` は書き終わっている＝待つと無駄に書き直す）。
+    if (status === "idle" || status === "saving") {
+      setLeaving(true);
+      // `idle`＝待っている保存を今書く／`saving`＝走っている保存に合流する（どちらも同じ入口）。
+      try {
+        await useTimelineStore.getState().saveTimelineProject();
+      } finally {
+        setLeaving(false);
+      }
+    }
+    if (useTimelineStore.getState().saveStatus === "error") {
+      setConfirmLeave(true);
+      return;
+    }
+    onNavigate("home");
+  }, [onNavigate]);
   // 見た目パターンを置く先の列（消された/固定されたときは置くときに実在するものへ落とす）。
   const [placeTrackId, setPlaceTrackId] = useState<string>("");
   // 「動き」の入力欄（文字列で持つ＝空欄＝その項目は動かさない）。
@@ -1483,12 +1508,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         {/* 書き出し中に別の動画へ移ると、描いている途中の素材や音が入れ替わる（混ざった動画が出る）。 */}
         <button
           className="btn btn-ghost btn-icon"
-          onClick={() => (saveStatus === "error" ? setConfirmLeave(true) : onNavigate("home"))}
-          disabled={exporting}
+          onClick={() => void leaveToHome()}
+          disabled={exporting || leaving}
           title={exporting ? "書き出しが終わってから戻れます" : undefined}
         >
           <ArrowLeftIcon size={16} />
-          動画の一覧へ
+          {/* 実行中はラベルを変えて押せなくする（`06 §2` の統一規約4）。 */}
+          {leaving ? "保存しています…" : "動画の一覧へ"}
         </button>
       </div>
 

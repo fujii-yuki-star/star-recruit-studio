@@ -319,6 +319,37 @@ describe('自動保存（編集した内容が消えない）', () => {
     expect(fsMod.saveProjectDoc).not.toHaveBeenCalled();
   });
 
+  it('別の動画へ移ったあとに前の動画の保存が終わっても、いまの動画の保存状態を書き換えない', async () => {
+    // 書き込みを止めたまま別の動画を開く。前の動画の結果が**触ってもいない動画**の状態を動かすと、
+    // 「保存できませんでした」が出たり保存済みが未保存へ化けたりする（ADR-0026①）。
+    let fail!: (e: Error) => void;
+    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>((_r, j) => { fail = j; }));
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    void useTimelineStore.getState().saveTimelineProject();
+    expect(useTimelineStore.getState().saveStatus).toBe('saving');
+    // 別の動画を開く（一覧からの経路＝閉じるを経由しない）。
+    vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    expect(useTimelineStore.getState().saveStatus).toBe('saved');
+    fail(new Error('disk full'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(useTimelineStore.getState().saveStatus).toBe('saved'); // 前の動画の失敗を持ち込まない
+    expect(useTimelineStore.getState().doc?.projectId).toBe('proj_20260728_002');
+  });
+
+  it('別の動画を開いたら見張りを手放す（前の保存が返らなくても新しい動画は保存できる）', async () => {
+    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>(() => {})); // 返らない
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    void useTimelineStore.getState().saveTimelineProject();
+    vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    vi.mocked(fsMod.saveProjectDoc).mockResolvedValue('path');
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    await useTimelineStore.getState().saveTimelineProject();
+    expect(useTimelineStore.getState().saveStatus).toBe('saved');
+  });
+
   it('保存は同時に2本走らせない（古い内容が後着してディスクの編集を巻き戻さない）', async () => {
     // 書き込みを止めたまま2本目を頼む。走らせずに待たせ、**終わってからもう一度**書く（最後の内容が必ず載る）。
     let release!: () => void;

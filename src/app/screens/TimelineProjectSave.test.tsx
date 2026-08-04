@@ -127,6 +127,37 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     expect(screen.queryByText(/このまま一覧へ戻ると、その変更は失われます/)).not.toBeInTheDocument();
   });
 
+  it("書いている途中に戻ろうとしたら、書き終わるまで待つ（あとで失敗しても気づけない、を作らない）", async () => {
+    open();
+    let release!: () => void;
+    let calls = 0;
+    vi.spyOn(fsMod, "saveProjectDoc").mockImplementation(() => {
+      calls += 1;
+      return calls === 1 ? new Promise<string>((r) => { release = () => r("x"); }) : Promise.resolve("x");
+    });
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    act(() => { void useTimelineStore.getState().saveTimelineProject(); }); // 書き込み中にする
+    expect(useTimelineStore.getState().saveStatus).toBe("saving");
+    fireEvent.click(screen.getByRole("button", { name: /動画の一覧へ/ }));
+    expect(onNavigate).not.toHaveBeenCalled(); // 書き終わるまで離れない
+    // 実行中はラベルを変えて押せなくする（`06 §2` 統一規約4）。
+    await waitFor(() => expect(screen.getByRole("button", { name: /保存しています/ })).toBeDisabled());
+    await act(async () => { release(); });
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("home"));
+  });
+
+  it("書いている途中に戻ろうとして失敗したら、離れずに聞く（気づけないまま消さない）", async () => {
+    open();
+    vi.spyOn(fsMod, "saveProjectDoc").mockRejectedValue(new Error("disk full"));
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    act(() => { useTimelineStore.setState({ saveStatus: "idle" }); });
+    fireEvent.click(screen.getByRole("button", { name: /動画の一覧へ/ }));
+    await waitFor(() => expect(screen.getByText(/このまま一覧へ戻ると、その変更は失われます/)).toBeInTheDocument());
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
   it("保存できているときは聞かずに戻る（毎回の確認で邪魔しない）", () => {
     open();
     useTimelineStore.setState({ saveStatus: "saved" });
