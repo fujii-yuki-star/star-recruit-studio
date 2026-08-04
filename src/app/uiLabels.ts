@@ -402,6 +402,25 @@ export function clipLabel(clip: { kind: TimelineClipKind; name?: string; text?: 
 export const VOLUME_POINTS_OVERRIDE_HINT =
   "音量の変化を置いている間は、その点が音量を決めます。一定の音量に戻すには「音量の変化をすべて外す」を押してください";
 
+/**
+ * 自動保存に失敗したときの案内（`15 §6` の `TIMELINE_SAVE_FAILED`・#693）。タイムライン編集は**自動保存**
+ * （`06 §12.1`）で、共通トップバーの保存ボタンは出さない（ADR-0032＝押すと場面形式の文書を保存してしまう）
+ * ＝**失敗を伝える担い手はこの画面しかいない**。黙って落とすと「閉じても消えない」の前提が破れる
+ * （ADR-0026④）ので、次の行動（もう一度保存する）を添えて出す（§2-5）。
+ */
+export const TIMELINE_SAVE_FAILED_MESSAGE =
+  "変更を保存できませんでした。もう一度「保存し直す」を押してください。押しても直らないときは、直前の操作を取り消してからお試しください";
+
+/**
+ * 保存の状態の控えめな表示（#693）。**場面形式と同じ言い方**にする（`saveButtonLabel`／`SaveStatusBadge` が
+ * 「保存中…」「保存しました」を使っている＝同じ概念を別の言い方にしない・ADR-0026②）。
+ * 失敗は文言でなく `TIMELINE_SAVE_FAILED_MESSAGE`＋再試行の導線として出すのでここでは扱わない。
+ * `idle`（保存待ち）は出さない＝**画面を離れるときに書き切る**ので、数百ミリ秒だけ「未保存」を点滅させない。
+ */
+export function timelineSaveStatusLabel(saveStatus: "idle" | "saving" | "saved" | "error"): string {
+  return saveStatus === "saving" ? "保存中…" : saveStatus === "saved" ? "保存しました" : "";
+}
+
 export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_OVERLAP: "その場所には先に置いてある部品があります。ずらすか、列を足して重ねてください",
   TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",

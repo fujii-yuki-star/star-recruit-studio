@@ -319,6 +319,32 @@ describe('自動保存（編集した内容が消えない）', () => {
     expect(fsMod.saveProjectDoc).not.toHaveBeenCalled();
   });
 
+  it('保存は同時に2本走らせない（古い内容が後着してディスクの編集を巻き戻さない）', async () => {
+    // 書き込みを止めたまま2本目を頼む。走らせずに待たせ、**終わってからもう一度**書く（最後の内容が必ず載る）。
+    let release!: () => void;
+    let calls = 0;
+    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => {
+      calls += 1;
+      // 1本目だけ止める（2本目まで止めると、後ろに回した保存が終わらずテストが待ち続ける）。
+      return calls === 1 ? new Promise<string>((r) => { release = () => r('path'); }) : Promise.resolve('path');
+    });
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    const first = useTimelineStore.getState().saveTimelineProject();
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(1);
+    useTimelineStore.getState().addTrack(TRACK_KIND.visual); // 保存中の編集
+    void useTimelineStore.getState().saveTimelineProject();
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(1); // 並べて走らせない
+    release();
+    await first;
+    // 走っていた保存に入らなかった編集は、後ろに回して書き切る（「保存しました」と言ったまま消さない）。
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(2);
+    // 2本目に書かれたのは**いまの内容**（保存中に足した列が入っている）。
+    const last = JSON.parse(vi.mocked(fsMod.saveProjectDoc).mock.calls[1][1]);
+    expect(last.tracks.map((t: { id: string }) => t.id)).toEqual(useTimelineStore.getState().doc!.tracks.map((t) => t.id));
+    const first1 = JSON.parse(vi.mocked(fsMod.saveProjectDoc).mock.calls[0][1]);
+    expect(first1.tracks.length).toBeLessThan(last.tracks.length); // 1本目は古い内容＝上書きで巻き戻らないこと
+  });
+
   it('書けなかったら「保存できていない」と分かる状態にする（成功に見せない）', async () => {
     vi.mocked(fsMod.saveProjectDoc).mockRejectedValue(new Error('disk full'));
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);

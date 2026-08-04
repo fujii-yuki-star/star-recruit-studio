@@ -277,6 +277,18 @@ const P = EXPORT_RUN_PHASE;
 const EXPORT_OWNER = "timeline" as const;
 
 /**
+ * 進行中の保存（#693）。**同時に2本走らせない**ための単一の見張り。書き込みは上書き（truncate）なので、
+ * 古い文書を持つ側が後着すると**ディスク上の編集が巻き戻る**。
+ */
+let saveInFlight: Promise<void> | null = null;
+/**
+ * 走っている保存の**後にもう一度書く必要があるか**。待たせるだけだと、保存中に足した編集が
+ * 「保存しました」と言われたまま**一度も書かれない**（進行中の約束を返すので、呼んだ側は保存できたと思う）。
+ * 並べて走らせず、**終わってからもう一度**書くことで、最後の内容が必ずディスクへ行く。
+ */
+let saveAgain = false;
+
+/**
  * 開いていない状態（閉じる・開き直しの初期値）。**毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、
  * 将来その場書き換えが入ったときに別の文書へ選択が漏れる（構造で防ぐ）。
  */
@@ -379,6 +391,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   closeTimelineProject: () => {
     // 開くときと同じ理由で、走行中は閉じない（`exportRun` ごと初期化されると書き出し中の締めが外れる）。
     if (isTimelineExportBusy(get().exportRun.phase)) return;
+    // 見張りは**いま開いている文書の保存**を指す。閉じたら手放す＝前の文書の保存が返ってこないときに、
+    // 次に開いた文書の保存が「進行中」と誤解されて**永久に書かれない**状態を作らない（#693）。
+    saveInFlight = null;
+    saveAgain = false;
     set({ ...emptyState() });
   },
 
@@ -647,24 +663,25 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (doc) set({ playheadSec: clampTimelinePlayheadSec(doc, sec) });
   },
 
+  // 保存の入口。**進行中の保存があればそれを待って戻る**（場面形式 `projectStore.saveProject` と同じ形）。
+  // 無いと、保存中の編集で張り直された自動保存タイマと「保存し直す」から**2本目が並走**し、
+  // 古い文書を持つ側が後着してディスク上の編集が巻き戻る（書き込みは truncate＝上書き）。
   saveTimelineProject: async () => {
-    const doc = get().doc;
-    if (!doc) return;
-    set({ saveStatus: "saving" });
-    const next = withUpdatedAt(doc, new Date().toISOString());
-    // **適合しないものは書かない**＝一覧に出るのに開けない動画を作らない（焼き出しと同じ判断・読込側は適合を要求する）。
-    if (!validateTimelineProject(next)) {
-      console.warn("[timeline] 保存内容がスキーマに未適合:", validateTimelineProject.errors);
-      set({ saveStatus: "error" });
-      return;
+    if (saveInFlight) {
+      saveAgain = true; // いま走っている保存には入らない内容なので、終わったらもう一度書く
+      return saveInFlight;
     }
-    try {
-      await saveProjectDoc(next.projectId, JSON.stringify(next, null, 2));
-      // 保存中に更に編集されていたら「保存しました」にしない（未保存を保存済みに見せない）。
-      set(get().doc === doc ? { doc: next, saveStatus: "saved" } : { saveStatus: "idle" });
-    } catch {
-      set({ saveStatus: "error" });
-    }
+    saveInFlight = (async () => {
+      try {
+        do {
+          saveAgain = false;
+          await doSaveTimelineProject(set, get);
+        } while (saveAgain);
+      } finally {
+        saveInFlight = null;
+      }
+    })();
+    return saveInFlight;
   },
 
   exportTimelineVideo: async (deps) => {
@@ -889,7 +906,33 @@ function setVoiceStatus(set: SetState, get: GetState, clipId: string, status: Na
       ...doc,
       clips: doc.clips.map((c) => (c.id === clipId && c.voice ? { ...c, voice: { ...c.voice, status } } : c)),
     },
+    // **文書が変わったら未保存にする**（`commit` と同じ）。ここだけ立てないと、声を作れなかった印が
+    // 付いたのに画面は「保存しました」のままになり、自動保存も次の編集まで走らない。
+    saveStatus: "idle",
   });
+}
+
+/**
+ * 実際の保存処理（**必ず `saveTimelineProject` 経由で呼ぶ**＝並走させない）。
+ * 適合しないものは書かない＝一覧に出るのに開けない動画を作らない（焼き出しと同じ判断・読込側は適合を要求する）。
+ */
+async function doSaveTimelineProject(set: SetState, get: GetState): Promise<void> {
+  const doc = get().doc;
+  if (!doc) return;
+  set({ saveStatus: "saving" });
+  const next = withUpdatedAt(doc, new Date().toISOString());
+  if (!validateTimelineProject(next)) {
+    console.warn("[timeline] 保存内容がスキーマに未適合:", validateTimelineProject.errors);
+    set({ saveStatus: "error" });
+    return;
+  }
+  try {
+    await saveProjectDoc(next.projectId, JSON.stringify(next, null, 2));
+    // 保存中に更に編集されていたら「保存しました」にしない（未保存を保存済みに見せない）。
+    set(get().doc === doc ? { doc: next, saveStatus: "saved" } : { saveStatus: "idle" });
+  } catch {
+    set({ saveStatus: "error" });
+  }
 }
 
 /**
