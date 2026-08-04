@@ -40,6 +40,9 @@ const open = (over: Partial<TimelineProject> = {}) =>
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  // **書き出しの状態を先に戻す**＝`closeTimelineProject` は書き出し中だと何もしない（走行中に文書を
+  // 差し替えないため）。戻さないと、書き出し中にしたテストの状態が以降のテスト全部に残る。
+  useTimelineStore.setState({ exportRun: { phase: "idle", percent: 0, message: null, cancelling: false } });
   useTimelineStore.getState().closeTimelineProject();
   useProjectStore.setState({ templates: [] });
   // 欄の配置は**アプリの設定に残る**（ADR-0033）＝テスト間で持ち越さない（前のテストの配置で描かない）。
@@ -695,6 +698,57 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     typeAndPlace("濃さ（0〜1）", "0.5");
     expect(useTimelineStore.getState().doc?.animations?.[0].keyframes).toEqual([{ timeSec: 1, opacity: 0.5 }]);
+  });
+
+  it("端数の出る位置でも置き直しは増えない（時刻を丸めて渡す・#702）", () => {
+    // 0.3 − 0.1 は 0.19999999999999998 になる＝丸めずに渡すと、画面の照合が外れて置き直しが1つ増える。
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0.1, durationSec: 4, x: 0, y: 0, w: 10, h: 10, text: "うごく" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 0.3 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    typeAndPlace("横のずれ（px）", "200");
+    expect(useTimelineStore.getState().doc?.animations?.[0].keyframes).toEqual([{ timeSec: 0.2, x: 200 }]);
+    // 置いた値を読み込める＝画面の照合と、保存した時刻が一致している。
+    expect(screen.getByRole("button", { name: "この位置の値を読み込む" })).toBeInTheDocument();
+    typeAndPlace("横のずれ（px）", "300");
+    expect(useTimelineStore.getState().doc?.animations?.[0].keyframes).toEqual([{ timeSec: 0.2, x: 300 }]); // 増えない
+  });
+
+  it("置けたときは入れた値を空にする（次の1点をそのまま入れられる）", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    typeAndPlace("横のずれ（px）", "200");
+    expect((screen.getByText("横のずれ（px）").parentElement?.querySelector("input") as HTMLInputElement).value).toBe("");
+  });
+
+  it("書き出し中は置けない（押してから断らない・理由を出す）", () => {
+    withClip();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: "この位置に置く" });
+    expect(btn).toBeDisabled();
+    expect(btn.title).toBe("書き出しが終わってから編集できます");
+  });
+
+  it("断られたときは入れた値を消さない（音量の変化と同じ規準）", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByText("横のずれ（px）").parentElement?.querySelector("input");
+    fireEvent.change(input!, { target: { value: "200" } });
+    // 置く直前に書き出しが始まった＝store が断る経路（ボタンの disabled をすり抜けた場合）。
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    fireEvent.click(screen.getByRole("button", { name: "この位置に置く" }));
+    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_EXPORTING");
+    expect((screen.getByText("横のずれ（px）").parentElement?.querySelector("input") as HTMLInputElement).value).toBe("200");
+  });
+
+  it("説明文に記号がそのまま出ない（Markdown は効かない）", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/本来の見た目からのずれ/).textContent).not.toContain("**");
   });
 
   it("置いた動きを一覧に出し、外せる", () => {

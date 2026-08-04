@@ -221,7 +221,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
-    setSelectedKeyframe, setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
+    setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
     addAudioClip, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
@@ -480,6 +480,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 再生中に押せない操作の理由（§2-5：押せない理由を無言にしない）。
   const playingHint = isPlaying ? "再生を止めてから使えます" : undefined;
+  // 書き出し中の編集は store が断る（`TIMELINE_EDIT_EXPORTING`）。**押してから断るのではなく、押す前に理由を出す**
+  // （#694・監査 §2.2-11＝事前 disabled の流儀に統一）。押せてしまうと、断られた入力を消さない配慮も要らぬ手戻りになる。
+  const exportingHint = exporting ? "書き出しが終わってから編集できます" : undefined;
 
   // 列の操作（順番・出す出さない・固定・消す）は**右クリックのメニュー**へ畳む（ADR-0033・利用者指摘 2026-08-03）。
   // 行にボタンを並べると帯より文字のほうが目立ち、並びが読めなくなる。項目名は**いまの状態で意味が通る言い方**にする。
@@ -785,7 +788,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <div className="mt-lg">
                 <h4>動き</h4>
                 <p className="text-muted">
-                  再生位置（{playheadSec.toFixed(1)}秒）に「**本来の見た目からのずれ**」を置きます。
+                  再生位置（{playheadSec.toFixed(1)}秒）に「<strong>本来の見た目からのずれ</strong>」を置きます。
                   2か所に違う値を置くと、その間はなめらかに変わります。空欄の項目は動かしません。
                 </p>
                 {!keyframeAtPlayhead.live ? (
@@ -814,11 +817,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <div className="row gap-sm">
                       <button
                         className="btn btn-secondary"
-                        disabled={selectedLocked || isPlaying}
-                        title={selectedLocked ? lockedHint : playingHint}
+                        disabled={selectedLocked || isPlaying || exporting}
+                        title={selectedLocked ? lockedHint : (playingHint ?? exportingHint)}
                         onClick={() => {
-                          setSelectedKeyframe(keyframeInputFromDraft(kfDraft));
-                          setKfDraft({});
+                          if (keyframeLocalSec == null) return; // 置けない位置なら何もしない（音量の変化と同じ）
+                          // **丸めた秒を渡す**（#702）。再生位置から起点を引いた生の値を渡すと
+                          // `0.3-0.1=0.19999999999999998` のような端数になり、画面の照合（`keyframeTimeAt`）と
+                          // 食い違って「置き直したのに1つ増える」「置いた値を読み込めない」が起きる。
+                          setSelectedKeyframeAt(keyframeLocalSec, keyframeInputFromDraft(kfDraft));
+                          // **置けたときだけ**空にする＝断られたときに入力し直しをさせない（`06 §12.1`・§2-5）。
+                          // 音量の変化と同じ規準にする（同じ画面で規準を割らない＝ADR-0026②）。
+                          if (!useTimelineStore.getState().editBlocked) setKfDraft({});
                         }}
                       >
                         この位置に置く
@@ -1091,8 +1100,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     </label>
                     <button
                       className="btn btn-secondary"
-                      disabled={selectedLocked || isPlaying || volumeDraft === ""}
-                      title={selectedLocked ? lockedHint : playingHint}
+                      disabled={selectedLocked || isPlaying || exporting || volumeDraft === ""}
+                      title={selectedLocked ? lockedHint : (playingHint ?? exportingHint ?? (volumeDraft === "" ? "この位置の音量を入れてください" : undefined))}
                       onClick={() => {
                         if (volumePointLocalSec == null) return; // 置けない位置なら何もしない（黙って先頭へ置かない）
                         setSelectedVolumePoint(volumePointLocalSec, Number(volumeDraft));
