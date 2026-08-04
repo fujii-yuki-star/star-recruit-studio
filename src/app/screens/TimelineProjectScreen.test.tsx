@@ -1132,3 +1132,50 @@ describe("TimelineProjectScreen: 欄をつかんで動かす（ADR-0033 段階3�
     expect(JSON.parse(localStorage.getItem("app.panelLayout.timeline")!).nodes.right).toBeNull();
   });
 });
+
+describe("TimelineProjectScreen: 編集の場所を上から圧迫しない（利用者指摘 2026-08-04）", () => {
+  it("説明文は出さない（名前だけ＝どの動画かは分かる）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText("焼いた動画")).toBeInTheDocument();
+    expect(screen.queryByText("時間の流れを自由に組み替えて動画を作ります。")).not.toBeInTheDocument();
+  });
+
+  it("置けなかった理由は**編集の下**に出て、恒常の警告より前に来る（返事が画面外へ落ちない）", () => {
+    // **恒常の警告（見た目パターンが見つからない）を出したうえで**置けない操作をする＝
+    // 「返事が警告に押し流されない」を実際に確かめる（警告が無いと順序の確認が空振りする）。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_missing" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 6, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あと" },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あと" }));
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    fireEvent.click(screen.getByText("再生位置へ")); // clip_001（0〜5秒）と重なる＝置けない
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes("ずらすか、列を足して重ねて"));
+    expect(notice).toBeDefined();
+    const layoutArea = container.querySelector(".panel-layout")!;
+    // DOM の並びで**欄の後ろ**にあること＝上に積まれていない。
+    expect(layoutArea.compareDocumentPosition(notice!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // **その場の返事は貼り付けて常に見える**（下へ流すと恒常の警告に押されて画面外に落ちる）。
+    expect(notice!.classList.contains("timeline-flash")).toBe(true);
+    // 欄の後ろに並ぶ知らせのうち**先頭**であること（恒常の警告はその後ろ）。
+    const afterLayout = container.querySelectorAll(".panel-layout ~ .notice-warn");
+    expect(afterLayout.length).toBeGreaterThan(1); // 恒常の警告も出ている＝順序の確認が空振りしない
+    expect(afterLayout[0]).toBe(notice);
+  });
+
+  it("見た目パターンが見つからない知らせも編集の下に出る", () => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_missing" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes("見た目パターンが見つからない部品が"));
+    expect(notice).toBeDefined();
+    const layoutArea = container.querySelector(".panel-layout")!;
+    expect(layoutArea.compareDocumentPosition(notice!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
