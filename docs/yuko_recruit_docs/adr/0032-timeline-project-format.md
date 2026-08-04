@@ -151,6 +151,14 @@ ADR-0029（FREE 字幕の `subtitleSource`）で作った「字幕は対象か�
   **場面形式で凍結のまま**／残る未実装は**音量KF**と**タイムライン形式の動画素材**の2つ。
 - **新規起票が要る**：文書モデル／焼き出し／編集画面／書き出し／新規作成の入口／既存データの扱い。
 
+## 操作モデルの調査（2026-08-04）
+
+実機で「操作感がつかめない・窮屈」という指摘を受け、他社エディタ（Premiere / Final Cut / DaVinci / Clipchamp /
+Canva / FlexClip / CapCut / **nizima ACTION!!** / ゆっくりMovieMaker4 / Vrew）の作りと利用者の声を調べた。
+**本形式が約束している「空間の自由」が未実装**であることも判明している（#683）。
+→ [`research/2026-08-timeline-editing-ux.md`](../research/2026-08-timeline-editing-ux.md)・EPIC #683。
+操作モデルは **ADR-0034** で決める（本ADRは文書モデルと形式の話に留める）。
+
 ## 未解決の論点
 
 1. ~~**文書モデルの具体形**~~ → **決定（#627）**。`11 §7.6` 参照。**クリップ＝「FREE 要素 ＋ 時間（trackId/startSec/durationSec）」**
