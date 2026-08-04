@@ -25,7 +25,7 @@ import {
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
 import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
-import { animationOriginSec, clearKeyframes, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
+import { clearKeyframes, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
 import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../domain/timeline/volumePointEdit";
 import type { KeyframeInput } from "../../domain/timeline/keyframeEdit";
 import { resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -147,11 +147,11 @@ export interface TimelineState {
   /** 選んでいる見た目パターンの差し込み口に素材を入れる／外す（#632）。 */
   setSelectedClipAssetRef: (layerId: string, assetId: string | null) => void;
   /**
-   * 選んでいる部品に、いまの再生位置へ**動き（キーフレーム）を置く／直す**（#634）。
-   * 時刻はクリップの先頭からの秒に直して渡す＝画面は再生位置しか知らなくてよい。
+   * 選んでいる部品の、**指定した時刻**のキーフレームを置く／直す（#634・#262）。
+   * 時刻は**対象の先頭からの秒**で、**呼ぶ側が丸めてから渡す**（#702）＝再生位置から起点を引いた生の値だと
+   * `0.3-0.1=0.19999999999999998` のような端数になり、画面の照合（`keyframeTimeAt`）と食い違って
+   * 「置き直したのに1つ増える」が起きる。入口はこれ1つ（素通しの入口を作らない＝音量の変化と同じ形）。
    */
-  setSelectedKeyframe: (input: KeyframeInput) => void;
-  /** 選んでいる部品の、**指定した時刻**のキーフレームを直す（#262＝一覧から動き方を変える）。 */
   setSelectedKeyframeAt: (timeSec: number, input: KeyframeInput) => void;
   /** 選んでいる部品の、その時刻のキーフレームを外す（#634）。 */
   removeSelectedKeyframe: (timeSec: number) => void;
@@ -447,12 +447,6 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
   setSelectedClipAssetRef: (layerId, assetId) => applyEdit(set, get, (d, id) => setClipAssetRef(d, id, layerId, assetId)),
   setSelectedClipText: (textKey, text) => applyEdit(set, get, (d, id) => setClipText(d, id, textKey, text)),
-  setSelectedKeyframe: (input) =>
-    applyEdit(set, get, (d, id) => {
-      // 再生位置は**動画の先頭からの秒**。キーフレームは**対象の先頭からの秒**なので引き算して渡す。
-      const origin = animationOriginSec(d, id) ?? 0;
-      return setKeyframe(d, id, get().playheadSec - origin, input);
-    }),
   setSelectedKeyframeAt: (timeSec, input) => applyEdit(set, get, (d, id) => setKeyframe(d, id, timeSec, input)),
   removeSelectedKeyframe: (timeSec) => applyEdit(set, get, (d, id) => removeKeyframe(d, id, timeSec)),
   clearSelectedKeyframes: () => applyEdit(set, get, (d, id) => clearKeyframes(d, id)),

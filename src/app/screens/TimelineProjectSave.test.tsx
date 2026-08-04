@@ -38,6 +38,9 @@ const open = () =>
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  // **書き出しの状態を先に戻す**＝`closeTimelineProject` は書き出し中だと何もしない（走行中に文書を
+  // 差し替えないため）。戻さないと、書き出し中にしたテストの状態が以降のテスト全部に残る。
+  useTimelineStore.setState({ exportRun: { phase: "idle", percent: 0, message: null, cancelling: false } });
   useTimelineStore.getState().closeTimelineProject();
   useProjectStore.setState({ templates: [] });
   localStorage.clear();
