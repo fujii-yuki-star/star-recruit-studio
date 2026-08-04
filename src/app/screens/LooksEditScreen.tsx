@@ -522,7 +522,6 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     return null;
   }
 
-
   // 欄（ADR-0033 段階4 後半）＝いまの2列をそのまま欄にする。**中身は変えない**。
   const panels: PanelSpec[] = [
     { id: PANEL_ID.preview, title: 'プレビュー', content: (
