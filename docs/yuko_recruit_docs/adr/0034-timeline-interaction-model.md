@@ -1,6 +1,6 @@
 # ADR-0034: タイムライン編集の操作モデル（置く・動かす・掴む）
 
-- **状態**: Proposed（2026-08-04・**利用者判断3件**（決定2・決定8・決定21）は確定／実装は承認後）
+- **状態**: Accepted（2026-08-04・利用者承認／**利用者判断3件**（決定2・決定8・決定21）は下表に経緯を記録／実装は #697 の順＝段階0 から）
 - **日付**: 2026-08-04
 - **関連**: [`adr/0032`](0032-timeline-project-format.md)（タイムライン形式＝**本ADRはその操作面を決める**）/ [`adr/0033`](0033-editor-panel-layout.md)（欄の配置＝ドラッグの作法を共有）/ [`adr/0026`](0026-alpha4-behavior-consistency.md)（同概念同挙動）/ `CLAUDE.md §2-3`（技術用語）・`§2-5`（次の行動）/ `06_UI_SPEC §2`（操作の統一規約）・`§3`（用語置き換え）・`§12.1` / `11 §8`（V23/V24）/ #683（EPIC）・#684〜#687
 - **調査資料**: [`research/2026-08-timeline-editing-ux.md`](../research/2026-08-timeline-editing-ux.md)（他社の作り）/ [`research/2026-08-timeline-editing-ux-audit.md`](../research/2026-08-timeline-editing-ux-audit.md)（監査・不足観点・実装の落とし穴）/ [`research/2026-08-video-editor-user-reviews.md`](../research/2026-08-video-editor-user-reviews.md)（褒められる型・不満の型）
@@ -51,7 +51,7 @@
 
 ---
 
-## 決定（Proposed）
+## 決定
 
 > **タイムライン編集の操作を、一般的な動画エディタの型へそろえる。素材・文字・図形を「ドラッグでもボタンでも」置け、
 > 置いたものはキャンバスで掴んで動かせ（数値でも触れ）、帯は掴んで動かす・端でトリムする。
