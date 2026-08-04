@@ -705,9 +705,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               </select>
             </label>
 
-            {/* 切り抜き（#634）＝箱の各辺を割合で隠す。中身は動かない（隠れるだけ）。 */}
+            {/* 切り抜き（#634）＝箱の各辺を割合で隠す。中身は動かない（隠れるだけ）。
+                節の `key`＝**部品を切り替えたら既定を見直す**。付けないと、同じ種類の部品を行き来する間は
+                React が作り直さず、開閉が最初に選んだ部品のままになる（設定が入っていても畳まれたまま）。
+                利用者が明示的に開閉した記憶は localStorage にあるので、作り直しても引き継がれる。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
-              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="crop" title="切り抜き" defaultOpen={cropIsSet}>
+              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="crop" title="切り抜き" defaultOpen={cropIsSet}>
                 <div className="row gap-sm">
                   {CROP_EDGES.map((e) => (
                     <label className="field" key={e.edge}>
@@ -788,7 +791,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
             {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
-              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>
+              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>
                 <p className="text-muted">
                   再生位置（{playheadSec.toFixed(1)}秒）に「<strong>本来の見た目からのずれ</strong>」を置きます。
                   2か所に違う値を置くと、その間はなめらかに変わります。空欄の項目は動かしません。
@@ -923,23 +926,27 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     動きをすべて外す
                   </button>
                 )}
-                {/* まとまり（グループ）に付いた動きも見せる＝画面では動いているのに「動きは付いていません」と
-                    言わない（焼き出しは自由配置の場面の切り替えをまとまりへ付ける・ADR-0032 決定19）。 */}
-                {groupKeyframes.map((g) => (
-                  <div className="notice" key={g.groupId}>
-                    <p>この部品が入っている「まとまり」にも動きが付いています（{g.keyframes.length}か所）。</p>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      disabled={selectedLocked}
-                      title={lockedHint}
-                      onClick={() => clearKeyframesOf(g.groupId)}
-                    >
-                      まとまりの動きを外す
-                    </button>
-                  </div>
-                ))}
               </CollapsibleSection>
             )}
+            {/* まとまり（グループ）に付いた動きも見せる＝画面では動いているのに「動きは付いていません」と
+                言わない（焼き出しは自由配置の場面の切り替えをまとまりへ付ける・ADR-0032 決定19）。
+                **これは節の外に出す**（#705 レビュー）＝中に置くと、利用者が一度「動き」を畳んでいると
+                その記憶が既定より優先され、**知らせが二度と見えない**。畳める場所に置いてよい知らせではない。
+                出す条件は「動き」の節と同じ（絵の無い部品では、まとまりに動きがあっても効かない）。 */}
+            {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice
+              && groupKeyframes.map((g) => (
+              <div className="notice" key={g.groupId}>
+                <p>この部品が入っている「まとまり」にも動きが付いています（{g.keyframes.length}か所）。</p>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled={selectedLocked}
+                  title={lockedHint}
+                  onClick={() => clearKeyframesOf(g.groupId)}
+                >
+                  まとまりの動きを外す
+                </button>
+              </div>
+            ))}
 
             {/* 音の部品は、速さ・使い始め・音量・フェードを変えられる（#634＝中位の編集）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.audio && (
@@ -1072,7 +1079,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {/* 音量の変化（#512 段4）＝置いた時刻の音量を並べると、その間はなめらかに変わる。
                 音・読み上げのどちらにも置ける（鳴る音を持つ部品だけ）。 */}
             {isAudioClip(selected) && (
-              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="volumePoints" title="音量の変化" defaultOpen={selectedVolumePoints.length > 0}>
+              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="volumePoints" title="音量の変化" defaultOpen={selectedVolumePoints.length > 0}>
                 <p className="text-muted">
                   再生位置（{playheadSec.toFixed(1)}秒）にその時の音量を置きます。違う値を2か所に置くと、
                   その間はなめらかに変わります。前後のフェードは、この変化の上に掛かります。
