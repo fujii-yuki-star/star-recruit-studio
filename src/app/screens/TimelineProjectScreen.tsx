@@ -1243,6 +1243,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
       </>
     ) },
+    // 見た目パターンは「楽をするための素材」＝一覧からそのまま置ける（ADR-0032 決定6）。
     { id: PANEL_ID.templates, title: '見た目パターンを置く', content: (
       <>
         {placeableTemplates.length === 0 ? (
@@ -1339,8 +1340,57 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   return (
     <div className="main-scroll">
-      <PageHead title={doc.projectName} desc="時間の流れを自由に組み替えて動画を作ります。" />
+      {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
+          編集しているか」なので残す。 */}
+      <PageHead title={doc.projectName} />
 
+      {explodingClipId && selectedTemplate && (
+        <DeleteConfirm
+          message={`「${selectedTemplate.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
+          confirmLabel="バラす"
+          busyLabel="バラしています…"
+          onCancel={() => setExplodingClipId(null)}
+          onConfirm={() => {
+            explodeClip(explodingClipId, selectedTemplate);
+            setExplodingClipId(null);
+          }}
+        />
+      )}
+
+      {removingTrackId && doc.tracks.some((t) => t.id === removingTrackId) && (
+        <DeleteConfirm
+          message={`「${trackLabel(doc.tracks, removingTrackId)}」を消しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
+          onCancel={() => setRemovingTrackId(null)}
+          onConfirm={() => {
+            removeTrack(removingTrackId);
+            setRemovingTrackId(null);
+          }}
+        />
+      )}
+
+
+      {/*
+        **その場の返事は「欄と同じ囲い」の中に入れる**（レビュー指摘）。貼り付け（sticky）は
+        **囲いの中でだけ動く**ので、囲いを欄＋返事で閉じておけば、下にある操作の行
+        （取り消す・列を足す・**動画の一覧へ**）の上に乗ることが構造的に起こらない。
+        囲わないと、貼り付いた知らせが戻る導線を覆って押せなくなる（§2-5＝戻れない状態を作らない）。
+      */}
+      <div className="timeline-flash-zone">
+        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
+
+        {/* **操作したその場の返事**（置けなかった理由・声を作れなかった）は**欄のすぐ下に貼り付ける**。
+            下へ流すと、恒常の警告が出ているときに画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。
+            上に積まない（編集の場所を狭めない）と、必ず気づける、を両立させるための置き方。
+            ※ **その場の返事を「操作した欄の中」に出すのが本筋**（ADR-0034 決定10）＝段階0 で寄せる。 */}
+        {(voiceError || editBlocked) && (
+          <div className="notice notice-warn timeline-flash" role="alert">
+            {voiceError && <p>{voiceError}</p>}
+            {editBlocked && <p>{editBlockedMessage[editBlocked]}</p>}
+          </div>
+        )}
+      </div>
+
+      {/* 直せば良くなる警告は、その下（出たままでも編集の邪魔をしない位置）。 */}
       {missingTemplateCount > 0 && (
         <p className="notice notice-warn" role="alert">
           見た目パターンが見つからない部品が{missingTemplateCount}個あります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください。
@@ -1368,48 +1418,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           ))}
         </ul>
       )}
-
-
-      {explodingClipId && selectedTemplate && (
-        <DeleteConfirm
-          message={`「${selectedTemplate.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
-          confirmLabel="バラす"
-          busyLabel="バラしています…"
-          onCancel={() => setExplodingClipId(null)}
-          onConfirm={() => {
-            explodeClip(explodingClipId, selectedTemplate);
-            setExplodingClipId(null);
-          }}
-        />
-      )}
-
-      {removingTrackId && doc.tracks.some((t) => t.id === removingTrackId) && (
-        <DeleteConfirm
-          message={`「${trackLabel(doc.tracks, removingTrackId)}」を消しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
-          onCancel={() => setRemovingTrackId(null)}
-          onConfirm={() => {
-            removeTrack(removingTrackId);
-            setRemovingTrackId(null);
-          }}
-        />
-      )}
-
-
-      {voiceError && (
-        <p className="notice notice-warn" role="alert">{voiceError}</p>
-      )}
-      {editBlocked && (
-        <p className="notice notice-warn" role="alert">{editBlockedMessage[editBlocked]}</p>
-      )}
-
-
-      {/* 見た目パターンは「楽をするための素材」＝一覧からそのまま置ける（ADR-0032 決定6）。 */}
-
-      {/* 音（同梱BGM）を置く（#634）。素材の音は素材画面で取り込んだものから選ぶ。 */}
-
-      {/* 「ここに一言足したい」をこの画面で完結させる（ADR-0032 決定7）。 */}
-
-      <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
 
       <div className="row gap-sm mt-lg">
         {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8＝戻れない状態を作らない）。 */}
