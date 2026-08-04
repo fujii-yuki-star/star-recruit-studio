@@ -24,11 +24,21 @@ export function CollapsibleSection({ scope, title, storageKey, defaultOpen = tru
    * 2キーに割れて「上書き中に開いた記憶」が非上書き時に引かれない（記憶が当てにならなくなる）。
    */
   storageKey?: string;
+  /**
+   * 開いて出すか。**選んでいるものによって変わる値を渡すときは、呼び出し側で `key` を必ず付ける**
+   * （例 `key={selected.id}`・#705 レビュー）。開閉は下の lazy init で**作られたとき1回だけ**決まるので、
+   * `key` が無いと同じ種類のものを選び直しても React が作り直さず、**最初に選んだものの開閉のまま固まる**
+   * （設定が入っていても畳まれたまま＝入れた設定を見失う）。
+   *
+   * ⚠️ **`key` を付けても、利用者が明示的に開閉した記憶は既定より優先される**（それが「覚える」の意味）。
+   * だから**「黙って消さないための知らせ」は節の中に置かない**＝一度畳まれたら二度と見えなくなる。
+   */
   defaultOpen?: boolean;
   children: ReactNode;
 }) {
   const memoKey = storageKey ?? title;
-  // 記憶があればそれを、無ければ既定（#550 ①＝主編集の節だけ開く）。lazy init＝初回描画時に1度だけ読む。
+  // 記憶があればそれを、無ければ既定（#550 ①＝主編集の節だけ開く）。lazy init＝初回描画時に1度だけ読む
+  // （＝`defaultOpen` の変化は追わない。追わせたい節は呼び出し側が `key` を付ける＝上の注記）。
   const [open, setOpen] = useState(() => loadSectionOpen(scope)[memoKey] ?? defaultOpen);
   const onToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
     const next = e.currentTarget.open;
