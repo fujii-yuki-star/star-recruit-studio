@@ -277,26 +277,30 @@ const P = EXPORT_RUN_PHASE;
 const EXPORT_OWNER = "timeline" as const;
 
 /**
- * 進行中の保存（#693）。**同時に2本走らせない**ための単一の見張り。書き込みは上書き（truncate）なので、
+ * 進行中の保存の1回ぶん（#693）。**同時に2本走らせない**ための見張り。書き込みは上書き（truncate）なので、
  * 古い文書を持つ側が後着すると**ディスク上の変更が巻き戻る**。
+ *
+ * `again` を**この回ごとに持つ**理由＝走っている保存の「後にもう一度書く」印は、その回のものでなければ
+ * ならない。1つの変数を共有すると、動画を切り替えた前後で走る2回ぶんが互いの印を消し合う。
+ * （待たせるだけで「もう一度」を持たないと、保存中に足した変更が「保存しました」と言われたまま
+ * **一度も書かれない**＝呼んだ側は進行中の約束を受け取って保存できたと思う。）
  */
-let saveInFlight: Promise<void> | null = null;
-/**
- * 走っている保存の**後にもう一度書く必要があるか**。待たせるだけだと、保存中に足した編集が
- * 「保存しました」と言われたまま**一度も書かれない**（進行中の約束を返すので、呼んだ側は保存できたと思う）。
- * 並べて走らせず、**終わってからもう一度**書くことで、最後の内容が必ずディスクへ行く。
- */
-let saveAgain = false;
+interface SaveRun {
+  promise: Promise<void>;
+  again: boolean;
+}
+/** いま走っている保存（`null`＝走っていない）。 */
+let currentSave: SaveRun | null = null;
 
 /**
  * **開いている文書が入れ替わるときに見張りを手放す**（#693 レビュー）。前の動画の保存が返ってこないと、
  * 次に開いた動画の保存が「進行中」と誤解されて**永久に書かれない**。
- * 走っている書き込み自体は止められないが、それが**次の動画の保存状態を書き換えない**ことは
- * `doSaveTimelineProject` 側（`projectId` の照合）で担保する。
+ * 走っている書き込み自体は止められないが、
+ * - それが**次の動画の保存状態を書き換えない**ことは `doSaveTimelineProject`（`projectId` の照合）が、
+ * - それの**後始末が次の保存の見張りを外さない**ことは `currentSave === run` の照合が担保する。
  */
 function releaseSaveGuard(): void {
-  saveInFlight = null;
-  saveAgain = false;
+  currentSave = null;
 }
 
 /**
@@ -678,21 +682,28 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   // 無いと、保存中の編集で張り直された自動保存タイマと「保存し直す」から**2本目が並走**し、
   // 古い文書を持つ側が後着してディスク上の編集が巻き戻る（書き込みは truncate＝上書き）。
   saveTimelineProject: async () => {
-    if (saveInFlight) {
-      saveAgain = true; // いま走っている保存には入らない内容なので、終わったらもう一度書く
-      return saveInFlight;
+    const running = currentSave;
+    if (running) {
+      running.again = true; // いま走っている保存には入らない内容なので、終わったらもう一度書く
+      return running.promise;
     }
-    saveInFlight = (async () => {
+    // 約束を入れる器を先に作る＝下の処理から**自分の回**を指せる（走っている途中で置き換わらない）。
+    const run: SaveRun = { promise: Promise.resolve(), again: false };
+    currentSave = run;
+    run.promise = (async () => {
       try {
         do {
-          saveAgain = false;
+          run.again = false;
           await doSaveTimelineProject(set, get);
-        } while (saveAgain);
+        } while (run.again);
       } finally {
-        saveInFlight = null;
+        // **自分が置いた見張りのときだけ外す**。動画を切り替えたあとは新しい保存が走っているので、
+        // 無条件に外すとその保存が「走っていない」ことにされ、次の依頼が**並走**する（＝上書きで
+        // 変更が巻き戻る・このPRが潰したはずの事故が同じ動画の中で再発する）。
+        if (currentSave === run) currentSave = null;
       }
     })();
-    return saveInFlight;
+    return run.promise;
   },
 
   exportTimelineVideo: async (deps) => {

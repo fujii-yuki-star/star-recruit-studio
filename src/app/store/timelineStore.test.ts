@@ -350,6 +350,30 @@ describe('自動保存（編集した内容が消えない）', () => {
     expect(useTimelineStore.getState().saveStatus).toBe('saved');
   });
 
+  it('前の動画の保存が終わっても、いま走っている保存の見張りを外さない（同じ動画で並走させない）', async () => {
+    // 動画を切り替えたあと、**前の保存の後始末**が新しい保存の見張りを外してしまうと、次の依頼が
+    // 並走して上書きが起き、このPRが潰したはずの巻き戻りが同じ動画の中で再発する（#700 レビュー）。
+    const pending: Array<(v: string) => void> = [];
+    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>((r) => { pending.push(r); }));
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    void useTimelineStore.getState().saveTimelineProject(); // 前の動画（A）の書き込みが始まる
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(1);
+
+    vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002'); // 見張りを手放す
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    void useTimelineStore.getState().saveTimelineProject(); // 新しい動画（B）の書き込みが始まる
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(2);
+
+    pending[0]('path'); // A の書き込みだけ完了＝A の後始末が走る
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    void useTimelineStore.getState().saveTimelineProject(); // B へさらに依頼
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(2); // B に合流する（3本目を始めない）
+  });
+
   it('保存は同時に2本走らせない（古い内容が後着してディスクの編集を巻き戻さない）', async () => {
     // 書き込みを止めたまま2本目を頼む。走らせずに待たせ、**終わってからもう一度**書く（最後の内容が必ず載る）。
     let release!: () => void;
