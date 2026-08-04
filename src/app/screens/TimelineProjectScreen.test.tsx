@@ -1163,9 +1163,18 @@ describe("TimelineProjectScreen: 編集の場所を上から圧迫しない（�
     // **その場の返事は貼り付けて常に見える**（下へ流すと恒常の警告に押されて画面外に落ちる）。
     expect(notice!.classList.contains("timeline-flash")).toBe(true);
     // 欄の後ろに並ぶ知らせのうち**先頭**であること（恒常の警告はその後ろ）。
-    const afterLayout = container.querySelectorAll(".panel-layout ~ .notice-warn");
+    // ※ 兄弟セレクタ（`~`）では見られない＝その場の返事は欄と同じ囲いの中、恒常の警告は囲いの外にある。
+    // **欄の中にある知らせは数えない**（欄の中身も notice を使う）。入れ子は「後ろ」とも判定されるため。
+    const afterLayout = [...container.querySelectorAll(".notice-warn")].filter(
+      (el) => !layoutArea.contains(el) && layoutArea.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     expect(afterLayout.length).toBeGreaterThan(1); // 恒常の警告も出ている＝順序の確認が空振りしない
     expect(afterLayout[0]).toBe(notice);
+    // **貼り付く知らせは欄と同じ囲いの中**＝下の操作の行を覆わない（覆うと戻る導線が押せなくなる）。
+    const zone = container.querySelector(".timeline-flash-zone")!;
+    expect(zone.contains(notice!)).toBe(true);
+    expect(zone.contains(screen.getByText("動画の一覧へ"))).toBe(false);
+    expect(zone.contains(screen.getByText("取り消す"))).toBe(false);
   });
 
   it("見た目パターンが見つからない知らせも編集の下に出る", () => {

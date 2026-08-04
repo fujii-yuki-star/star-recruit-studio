@@ -1369,17 +1369,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       )}
 
 
-      <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
+      {/*
+        **その場の返事は「欄と同じ囲い」の中に入れる**（レビュー指摘）。貼り付け（sticky）は
+        **囲いの中でだけ動く**ので、囲いを欄＋返事で閉じておけば、下にある操作の行
+        （取り消す・列を足す・**動画の一覧へ**）の上に乗ることが構造的に起こらない。
+        囲わないと、貼り付いた知らせが戻る導線を覆って押せなくなる（§2-5＝戻れない状態を作らない）。
+      */}
+      <div className="timeline-flash-zone">
+        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
 
-      {/* **操作したその場の返事**（置けなかった理由・声を作れなかった）は**欄のすぐ下に貼り付ける**。
-          下へ流すと、恒常の警告が出ているときに画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。
-          上に積まない（編集の場所を狭めない）と、必ず気づける、を両立させるための置き方。 */}
-      {(voiceError || editBlocked) && (
-        <div className="notice notice-warn timeline-flash" role="alert">
-          {voiceError && <p>{voiceError}</p>}
-          {editBlocked && <p>{editBlockedMessage[editBlocked]}</p>}
-        </div>
-      )}
+        {/* **操作したその場の返事**（置けなかった理由・声を作れなかった）は**欄のすぐ下に貼り付ける**。
+            下へ流すと、恒常の警告が出ているときに画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。
+            上に積まない（編集の場所を狭めない）と、必ず気づける、を両立させるための置き方。
+            ※ **その場の返事を「操作した欄の中」に出すのが本筋**（ADR-0034 決定10）＝段階0 で寄せる。 */}
+        {(voiceError || editBlocked) && (
+          <div className="notice notice-warn timeline-flash" role="alert">
+            {voiceError && <p>{voiceError}</p>}
+            {editBlocked && <p>{editBlockedMessage[editBlocked]}</p>}
+          </div>
+        )}
+      </div>
 
       {/* 直せば良くなる警告は、その下（出たままでも編集の邪魔をしない位置）。 */}
       {missingTemplateCount > 0 && (
