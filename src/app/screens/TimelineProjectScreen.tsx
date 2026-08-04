@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
@@ -57,7 +57,7 @@ const PANEL_ID = {
 } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, SLOT_TYPE } from "../../domain/enums";
@@ -238,6 +238,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // 編集したら少し待って自動保存する（場面形式と同じ「閉じても消えない」＝ADR-0026②）。
   // 連続操作のたびに書かないよう間を置く。保存中の再編集は `saveTimelineProject` 側で見る。
+  // **失敗（`error`）のときは自動で繰り返さない**＝同じ理由で失敗し続ける間ディスクを叩き続けても直らないので、
+  // 画面に理由と「保存し直す」を出して利用者に返す（#693・§2-5）。次の編集で `idle` に戻れば自動保存も再開する。
   const saveTimer = useRef<number | null>(null);
   useEffect(() => {
     if (saveStatus !== "idle") return;
@@ -247,12 +249,46 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
     };
   }, [saveStatus, saveTimelineProject]);
+  // **画面を離れるときは、待っている保存を書き切る**（#693）。自動保存のタイマはこの画面のものなので、
+  // 書くより前に離れると上の後始末でタイマごと消え、直前の編集が**無言で**失われていた（サイドバーからの
+  // 移動も同じ）。場面形式は自動保存が常時ある層に載っていてこの穴が無い＝形式で挙動を割らない（ADR-0026②）。
+  // 依存を持たない effect にして**アンマウントのときだけ**走らせる（張り直しのたびに保存しない）。
+  useEffect(() => () => {
+    if (useTimelineStore.getState().saveStatus === "idle") void useTimelineStore.getState().saveTimelineProject();
+  }, []);
   const templates = useProjectStore((s) => s.templates);
   // テンプレが持つ既定素材（ADR-0021）は全プロジェクト共通の置き場にある＝場面形式のプレビュー・書き出しと
   // 同じフォールバック（素材 → テンプレ既定素材）を通す。無いと同じ見た目が場面形式と違う絵になる（ADR-0026②）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
 
   const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
+  // 保存できていないまま一覧へ戻ろうとしているか（#693）。戻ると変更は失われるので、黙って捨てずに聞く。
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  // 戻る前の保存を待っているか（#693 レビュー）。待っている間は二重に押せないようにする。
+  const [leaving, setLeaving] = useState(false);
+  /**
+   * 一覧へ戻る（#693）。**保存が済むまで待ってから**離れる＝書いている途中（`saving`）に離れると、
+   * そのあと失敗しても利用者はもう別の画面にいて気づけない（確認も出ない）。
+   * 失敗していたら離れずに確認を出す＝「保存し直す」を押しに戻れる。
+   */
+  const leaveToHome = useCallback(async () => {
+    const status = useTimelineStore.getState().saveStatus;
+    // 待つのは**まだ書けていないとき**だけ（`saved` は書き終わっている＝待つと無駄に書き直す）。
+    if (status === "idle" || status === "saving") {
+      setLeaving(true);
+      // `idle`＝待っている保存を今書く／`saving`＝走っている保存に合流する（どちらも同じ入口）。
+      try {
+        await useTimelineStore.getState().saveTimelineProject();
+      } finally {
+        setLeaving(false);
+      }
+    }
+    if (useTimelineStore.getState().saveStatus === "error") {
+      setConfirmLeave(true);
+      return;
+    }
+    onNavigate("home");
+  }, [onNavigate]);
   // 見た目パターンを置く先の列（消された/固定されたときは置くときに実在するものへ落とす）。
   const [placeTrackId, setPlaceTrackId] = useState<string>("");
   // 「動き」の入力欄（文字列で持つ＝空欄＝その項目は動かさない）。
@@ -1368,6 +1404,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         />
       )}
 
+      {/*
+        保存できていないまま戻ると変更は消える（#693）。**答えを求める確認は上に出す**＝下だと見落として
+        そのまま進んでしまう（バラす・列を消すと同じ扱い）。「やめる」を選べば「保存し直す」を押しに戻れる。
+      */}
+      {confirmLeave && saveStatus === "error" && (
+        <DeleteConfirm
+          message="保存できていない変更があります。このまま一覧へ戻ると、その変更は失われます。戻る前に「保存し直す」を試せます。"
+          confirmLabel="保存しないで戻る"
+          onCancel={() => setConfirmLeave(false)}
+          onConfirm={() => {
+            setConfirmLeave(false);
+            // 出しっぱなしの確認から戻れると、書き出し中でも画面を離れられてしまう（ボタン側と同じ条件で見る）。
+            if (!exporting) onNavigate("home");
+          }}
+        />
+      )}
+
 
       {/*
         **その場の返事は「欄と同じ囲い」の中に入れる**（レビュー指摘）。貼り付け（sticky）は
@@ -1419,6 +1472,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         </ul>
       )}
 
+      {/*
+        自動保存の結果を**この画面が**出す（#693）。共通トップバーの保存ボタンは出さない決定（ADR-0032）なので、
+        ここが唯一の担い手＝黙って落とすと「閉じても消えない」（`06 §12.1`）が破れる。**恒常の警告と同じ段**
+        （欄の下）に置く＝編集の場所を上から圧迫しない。
+      */}
+      {saveStatus === "error" ? (
+        <div className="notice notice-warn row gap-sm" role="alert">
+          <span>{TIMELINE_SAVE_FAILED_MESSAGE}</span>
+          <button className="btn btn-secondary" onClick={() => void saveTimelineProject()}>保存し直す</button>
+        </div>
+      ) : (
+        // 保存できたことも控えめに出す（「勝手に保存されている」を信じられるようにする）。
+        <p className="text-muted" role="status">{timelineSaveStatusLabel(saveStatus)}</p>
+      )}
+
       <div className="row gap-sm mt-lg">
         {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8＝戻れない状態を作らない）。 */}
         {closed.map((id) => (
@@ -1440,12 +1508,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         {/* 書き出し中に別の動画へ移ると、描いている途中の素材や音が入れ替わる（混ざった動画が出る）。 */}
         <button
           className="btn btn-ghost btn-icon"
-          onClick={() => onNavigate("home")}
-          disabled={exporting}
+          onClick={() => void leaveToHome()}
+          disabled={exporting || leaving}
           title={exporting ? "書き出しが終わってから戻れます" : undefined}
         >
           <ArrowLeftIcon size={16} />
-          動画の一覧へ
+          {/* 実行中はラベルを変えて押せなくする（`06 §2` の統一規約4）。 */}
+          {leaving ? "保存しています…" : "動画の一覧へ"}
         </button>
       </div>
 

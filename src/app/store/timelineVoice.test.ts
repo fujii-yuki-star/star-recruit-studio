@@ -119,6 +119,9 @@ describe('generateSelectedVoice', () => {
     await useTimelineStore.getState().generateSelectedVoice();
     expect(useTimelineStore.getState().doc?.clips[0].voice?.status).toBe('failed');
     expect(useTimelineStore.getState().voiceError).toBe('声を作れませんでした。しばらくしてから、もう一度お試しください。');
+    // 失敗の印は文書に載る＝**未保存**にする（#693）。保存済みのままだと自動保存が次の編集まで走らず、
+    // 画面は「保存しました」と言ったままになる。
+    expect(useTimelineStore.getState().saveStatus).toBe('idle');
   });
 
   it('文が空のときは作りに行かない', async () => {

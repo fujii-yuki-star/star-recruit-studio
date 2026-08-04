@@ -319,6 +319,87 @@ describe('自動保存（編集した内容が消えない）', () => {
     expect(fsMod.saveProjectDoc).not.toHaveBeenCalled();
   });
 
+  it('別の動画へ移ったあとに前の動画の保存が終わっても、いまの動画の保存状態を書き換えない', async () => {
+    // 書き込みを止めたまま別の動画を開く。前の動画の結果が**触ってもいない動画**の状態を動かすと、
+    // 「保存できませんでした」が出たり保存済みが未保存へ化けたりする（ADR-0026①）。
+    let fail!: (e: Error) => void;
+    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>((_r, j) => { fail = j; }));
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    void useTimelineStore.getState().saveTimelineProject();
+    expect(useTimelineStore.getState().saveStatus).toBe('saving');
+    // 別の動画を開く（一覧からの経路＝閉じるを経由しない）。
+    vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    expect(useTimelineStore.getState().saveStatus).toBe('saved');
+    fail(new Error('disk full'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(useTimelineStore.getState().saveStatus).toBe('saved'); // 前の動画の失敗を持ち込まない
+    expect(useTimelineStore.getState().doc?.projectId).toBe('proj_20260728_002');
+  });
+
+  it('別の動画を開いたら見張りを手放す（前の保存が返らなくても新しい動画は保存できる）', async () => {
+    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>(() => {})); // 返らない
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    void useTimelineStore.getState().saveTimelineProject();
+    vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    vi.mocked(fsMod.saveProjectDoc).mockResolvedValue('path');
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    await useTimelineStore.getState().saveTimelineProject();
+    expect(useTimelineStore.getState().saveStatus).toBe('saved');
+  });
+
+  it('前の動画の保存が終わっても、いま走っている保存の見張りを外さない（同じ動画で並走させない）', async () => {
+    // 動画を切り替えたあと、**前の保存の後始末**が新しい保存の見張りを外してしまうと、次の依頼が
+    // 並走して上書きが起き、このPRが潰したはずの巻き戻りが同じ動画の中で再発する（#700 レビュー）。
+    const pending: Array<(v: string) => void> = [];
+    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>((r) => { pending.push(r); }));
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    void useTimelineStore.getState().saveTimelineProject(); // 前の動画（A）の書き込みが始まる
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(1);
+
+    vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002'); // 見張りを手放す
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    void useTimelineStore.getState().saveTimelineProject(); // 新しい動画（B）の書き込みが始まる
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(2);
+
+    pending[0]('path'); // A の書き込みだけ完了＝A の後始末が走る
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    void useTimelineStore.getState().saveTimelineProject(); // B へさらに依頼
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(2); // B に合流する（3本目を始めない）
+  });
+
+  it('保存は同時に2本走らせない（古い内容が後着してディスクの編集を巻き戻さない）', async () => {
+    // 書き込みを止めたまま2本目を頼む。走らせずに待たせ、**終わってからもう一度**書く（最後の内容が必ず載る）。
+    let release!: () => void;
+    let calls = 0;
+    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => {
+      calls += 1;
+      // 1本目だけ止める（2本目まで止めると、後ろに回した保存が終わらずテストが待ち続ける）。
+      return calls === 1 ? new Promise<string>((r) => { release = () => r('path'); }) : Promise.resolve('path');
+    });
+    useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+    const first = useTimelineStore.getState().saveTimelineProject();
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(1);
+    useTimelineStore.getState().addTrack(TRACK_KIND.visual); // 保存中の編集
+    void useTimelineStore.getState().saveTimelineProject();
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(1); // 並べて走らせない
+    release();
+    await first;
+    // 走っていた保存に入らなかった編集は、後ろに回して書き切る（「保存しました」と言ったまま消さない）。
+    expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(2);
+    // 2本目に書かれたのは**いまの内容**（保存中に足した列が入っている）。
+    const last = JSON.parse(vi.mocked(fsMod.saveProjectDoc).mock.calls[1][1]);
+    expect(last.tracks.map((t: { id: string }) => t.id)).toEqual(useTimelineStore.getState().doc!.tracks.map((t) => t.id));
+    const first1 = JSON.parse(vi.mocked(fsMod.saveProjectDoc).mock.calls[0][1]);
+    expect(first1.tracks.length).toBeLessThan(last.tracks.length); // 1本目は古い内容＝上書きで巻き戻らないこと
+  });
+
   it('書けなかったら「保存できていない」と分かる状態にする（成功に見せない）', async () => {
     vi.mocked(fsMod.saveProjectDoc).mockRejectedValue(new Error('disk full'));
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);
