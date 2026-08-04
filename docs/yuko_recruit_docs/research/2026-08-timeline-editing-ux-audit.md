@@ -312,3 +312,50 @@
 - [Filmora: Premiere Pro Timeline Zoom](https://filmora.wondershare.com/video-editing-tips/premiere-pro-how-to-zoom-in-on-timeline.html)／[Adobe Community: Alt+Scroll Zoom の不満スレッド](https://community.adobe.com/questions-729/alt-scroll-wheel-to-zoom-in-on-playhead-in-timeline-1427285)（ズームの錨点）
 - [MagicSlides: Canva の吸着設定](https://www.magicslides.app/blog/how-to-change-snap-options-on-canva)／[Trupeer: Canva の吸着を切る](https://www.trupeer.ai/tutorials/how-to-turn-off-snapping-in-canva)（Ctrl で一時解除の型）
 - コードの行番号はブランチ `docs/timeline-ux-research` HEAD `ee3c6c4` 時点。
+
+---
+
+## 11. 実装AIによる再検証（2026-08-04）
+
+監査（別セッション）の**検証可能な主張を、実装側でも独立に確かめた**結果。**確かめた22点はすべて監査のとおりだった**。
+
+| 主張 | 再検証の結果 |
+|---|---|
+| `PX_PER_SEC = 40` 固定（5分で 12000px） | ✅ `TimelineProjectScreen.tsx:79` |
+| 効くキーは Ctrl+Z / Y / Shift+Z だけ | ✅ `useUndoRedoShortcuts.ts` |
+| `clearSelection` は store にあるが画面から未配線 | ✅ store に定義・画面での参照 0 |
+| `NUDGE_SEC = 0.5` 固定（0.5秒未満に動かせない） | ✅ `:76` |
+| 音・読み上げの置き先が `voiceTracks[0]` 固定 | ✅ 3か所 |
+| 帯の CSS（ハンドル・ドラッグ中・再生ヘッド・シーク可能）は**定義済みで未参照** | ✅ `components/timeline.css` に実在・画面からの参照 0 |
+| `applyClipEdge` は domain に実在 | ✅ `domain/timeline/clipEdge.ts:41` |
+| `NumberField` をこの画面で使っていない | ✅ 参照 0 |
+| 履歴上限 50 | ✅ `HISTORY_LIMIT = 50` |
+| 帯の `min-width: 2px`・種別色（`--telop`/`--bgm`）は定義済み未使用 | ✅ `trackClipClass` は映像/音の2色だけ |
+| 場面形式の `TimelineView` にはズーム段階と帯の `title` がある | ✅ `ZOOM_LEVELS`（6段階）・`title={clipTitle(clip)}` |
+| 自動保存 800ms・編集で再生停止 | ✅ `AUTOSAVE_DELAY_MS = 800`・`timelineStore.ts:840` |
+| `useHistoryGroup` は場面形式の部品専用 | ✅ 参照は場面形式の4部品のみ |
+| 素材画面はタイムライン文書に取り込めない | ✅ `MaterialsScreen` は `projectStore`（場面形式）専用 |
+| 列名を変える UI が無い | ✅ 参照 0 |
+| 読み上げ文は1文字ごとに履歴へ積む | ✅ `onChange` ごとに `setSelectedVoiceText` → `commit` |
+| 開始秒・長さは表示のみ | ✅ `.toFixed(1)` の表示だけ |
+| #333 / #332 / #260 / #265 の重複整理（§4） | ✅ 4件とも OPEN・内容も記述どおり |
+
+> ⚠️ 実装AI側の初回確認では「帯の CSS は存在しない」と出したが、**探した先（`theme.css`）が違っただけ**で、
+> 再確認したところ `components/timeline.css` に実在した＝**監査が正しい**。
+
+### 実装側から足す5点（ADR-0034 の材料）
+
+1. **削除の確認は `06 §2` の統一規約と突き合わせる**。§5-J-3 の「消す＝確認なし＋Undo」は、統一規約1
+   （「編集キャンバス上の単体要素は即時＋取り消し／複数まとめて消すときだけ確認」）と**整合する**が、
+   ADR-0034 で**その条項を引いて**決めること（新しい規準を並立させない）。
+2. **ドラッグ中の「置けない」の見せ方は、直近の決定と噛み合わせる**。操作したその場の返事は
+   **欄のすぐ下に貼り付けて常に見える**ようにしたばかり（PR #682）。ドラッグ**中**はゴーストの色で示し、
+   **離したときだけ**その場所へ理由を出す、が自然（ドラッグのたびに文言が明滅しない）。
+3. **「覚える/覚えない」の規準を明文化する**。ADR-0033 は「配置は画面ごとに覚える」。監査の
+   「ズームは覚えない」（§5-C-6）と合わせて、**文書の中身に依存する状態は覚えない／画面の好みは覚える**
+   という線を ADR-0034 に書くと、次に迷わない。
+4. **キーボードだけで到達できるか**を論点に足す。ADR-0033 の未解決4（キーボードだけの配置操作）と同根で、
+   **ドラッグでしかできない操作を作らない**（置く・動かす・分割・列またぎに、それぞれキーかメニューの道を用意）。
+5. **帯のドラッグは ADR-0033 段階3 の実装をそのまま流用できる**。Pointer Events・しきい値・`Escape` 中止・
+   `pointercancel`・アンマウント時の後始末・**掴んだ指だけを見る**（`pointerId`）は `PanelLayoutView` に既にある。
+   §7-1（HTML5 DnD を使わない）は**実績として裏付け済み**＝新造せず、この規則を共有すること。
