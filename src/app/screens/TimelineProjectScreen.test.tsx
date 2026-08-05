@@ -160,7 +160,7 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     fireEvent.click(screen.getByRole("button", { name: "まえ" }));
     fireEvent.click(screen.getByText("後ろへ"));
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0.5);
-    fireEvent.click(screen.getByText("取り消す"));
+    fireEvent.click(screen.getByRole("button", { name: "取り消す" }));
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0);
   });
 
@@ -1240,7 +1240,7 @@ describe("TimelineProjectScreen: 編集の場所を上から圧迫しない（�
     const zone = container.querySelector(".timeline-flash-zone")!;
     expect(zone.contains(notice!)).toBe(true);
     expect(zone.contains(screen.getByText("動画の一覧へ"))).toBe(false);
-    expect(zone.contains(screen.getByText("取り消す"))).toBe(false);
+    expect(zone.contains(screen.getByRole("button", { name: "取り消す" }))).toBe(false);
   });
 
   it("見た目パターンが見つからない知らせも編集の下に出る", () => {
@@ -1621,5 +1621,69 @@ describe("TimelineProjectScreen: 数値欄と押せない理由（#706・#703）
     useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByLabelText("速さ（倍）").title).toBe("この列は固定されています。変えるには固定を外してください");
+  });
+});
+
+// レビューで見つかった「押してから断る」の残り（#703）と、下書き欄の扱い（#706）。
+describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レビュー指摘）", () => {
+  const withBgm = () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 10, bundledBgmId: "found-new-hope" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 2 });
+  };
+  const exporting = () =>
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+
+  it("音量の点は、打った値でそのまま置ける（確定を待たせない）", () => {
+    withBgm();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("この位置の音量"), { target: { value: "0.4" } });
+    // 打った直後に押せる＝下書きの欄は確定を待たない（待たせると1回目が必ず落ちる）。
+    const place = screen.getAllByRole("button", { name: "この位置に置く" })[0];
+    expect(place).not.toBeDisabled();
+    fireEvent.click(place);
+    expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toEqual([{ timeSec: 2, volume: 0.4 }]);
+  });
+
+  it("書き出し中は「置く列」も列の操作も押せない（押してから断らない）", () => {
+    withBgm();
+    exporting();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByLabelText("置く列")).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("音1の操作"));
+    const items = screen.getAllByRole("menuitem");
+    expect(items.every((el) => el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")).toBe(true);
+  });
+
+  it("書き出し中は取り消す／やり直すも押せない（場面形式と同じ）", () => {
+    withBgm();
+    useTimelineStore.getState().moveSelectedClip({ startSec: 1 }); // 履歴を作る
+    exporting();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "取り消す" })).toBeDisabled();
+  });
+
+  it("確認を出したあとに書き出しが始まったら、確認を閉じる（答えさせてから断らない）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("映像2の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この列を消す" }));
+    expect(screen.getByRole("button", { name: "削除する" })).toBeInTheDocument();
+    // 確認を出したまま「動画を書き出す」を押す＝答えを求める確認は閉じてから始める。
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }));
+    expect(screen.queryByRole("button", { name: "削除する" })).not.toBeInTheDocument(); // 答えさせない
+    expect(useTimelineStore.getState().doc!.tracks).toHaveLength(2);
   });
 });

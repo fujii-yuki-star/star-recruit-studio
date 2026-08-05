@@ -39,6 +39,7 @@ import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
+import { UndoRedoButtons } from "../components/UndoRedoButtons";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { SECTION_SCOPE } from "../components/sectionOpen";
@@ -534,6 +535,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 書き出し中の編集は store が断る（`TIMELINE_EDIT_EXPORTING`）。**押してから断るのではなく、押す前に理由を出す**
   // （#694・監査 §2.2-11＝事前 disabled の流儀に統一）。押せてしまうと、断られた入力を消さない配慮も要らぬ手戻りになる。
   const exportingHint = exporting ? "書き出しが終わってから編集できます" : undefined;
+
   /**
    * **編集の入口の「押せない」と理由を1か所から配る**（#703・監査 §2.2-11）。
    *
@@ -548,6 +550,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     disabled: selectedLocked || exporting || !!extra?.disabled,
     title: selectedLocked ? lockedHint : exporting ? exportingHint : extra?.hint,
   });
+  /**
+   * **選んだ部品に関わらない編集の入口**（置く・列を足す・取り消す…）。`editGuard` は「選んだ部品が固定か」を
+   * 含むので、選択に依らない入口では使えず、条件の手書きへ戻ってしまう（＝#703 が消したかった数え上げの再発）。
+   * 2段に割って、どちらの入口も**同じ仕組み**で塞ぐ。
+   */
+  const busyGuard = (extra?: { disabled?: boolean; hint?: string }): { disabled: boolean; title: string | undefined } => ({
+    disabled: exporting || !!extra?.disabled,
+    title: exporting ? exportingHint : extra?.hint,
+  });
 
   // 列の操作（順番・出す出さない・固定・消す）は**右クリックのメニュー**へ畳む（ADR-0033・利用者指摘 2026-08-03）。
   // 行にボタンを並べると帯より文字のほうが目立ち、並びが読めなくなる。項目名は**いまの状態で意味が通る言い方**にする。
@@ -556,16 +567,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setTrackMenu({ trackId, x: e.clientX, y: e.clientY });
   };
   const menuTrack = trackMenu ? doc?.tracks.find((t) => t.id === trackMenu.trackId) : undefined;
+  // 列の操作も編集＝**書き出し中は押す前に断る**（#703 レビュー）。項目ごとに書かず、組み立てで一括して配る。
+  const trackMenuGuard = exporting ? { disabled: true, disabledHint: exportingHint } : {};
   const trackMenuItems: ContextMenuItem[] = menuTrack
     ? [
-        { label: "手前へ", onSelect: () => moveTrackOrder(menuTrack.id, "front") },
-        { label: "奥へ", onSelect: () => moveTrackOrder(menuTrack.id, "back") },
+        { label: "手前へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "front") },
+        { label: "奥へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "back") },
         {
           label: menuTrack.hidden ? "動画に出す" : "動画に出さない",
+          ...trackMenuGuard,
           onSelect: () => setTrackFlag(menuTrack.id, "hidden", !menuTrack.hidden),
         },
         {
           label: menuTrack.locked ? "固定を外す" : "動かせないように固定する",
+          ...trackMenuGuard,
           onSelect: () => setTrackFlag(menuTrack.id, "locked", !menuTrack.locked),
         },
         {
@@ -625,7 +640,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           ) : (
             <button
               className="btn btn-primary"
-              onClick={() => void exportTimelineVideo({ templates, templateAssetSrcById })}
+              onClick={() => {
+                // **答えを求める確認は閉じてから始める**（#703 レビュー）。開いたまま走らせると、答えたのに
+                // 断られる＝取り返しのつかなさを聞いた意味が無くなる（黙って何もしない、も作らない）。
+                setExploding(null);
+                setRemovingTrackId(null);
+                void exportTimelineVideo({ templates, templateAssetSrcById });
+              }}
               disabled={exportBlockers.length > 0 || isPlaying}
               title={exportBlockers.length > 0 ? exportBlockedMessage[exportBlockers[0].code] : playingHint}
             >
@@ -775,7 +796,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
             <label className="field">
               <span>置く列</span>
-              <select className="select" value={selected.trackId} onChange={(e) => moveSelectedClip({ trackId: e.target.value })}>
+              <select className="select" value={selected.trackId} {...editGuard()} onChange={(e) => moveSelectedClip({ trackId: e.target.value })}>
                 {doc.tracks.map((t) => (
                   <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
                 ))}
@@ -876,23 +897,33 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <>
                     <div className="row gap-sm">
                       {KEYFRAME_FIELDS.map((f) => (
-                        <NumberField
-                          key={f.prop}
-                          label={f.label}
-                          step={f.step}
-                          value={kfDraft[f.prop] === undefined || kfDraft[f.prop] === "" ? null : Number(kfDraft[f.prop])}
-                          placeholder={String(f.neutral)}
-                          {...editGuard()}
-                          onChange={(v) => setKfDraft({ ...kfDraft, [f.prop]: String(v) })}
-                          // 空にしたら**その項目は動かさない**（下書きから落とす）＝0 と「触っていない」を混同しない。
-                          onClear={() => setKfDraft(Object.fromEntries(Object.entries(kfDraft).filter(([k]) => k !== f.prop)))}
-                        />
+                        <label className="field" key={f.prop}>
+                          <span>{f.label}</span>
+                          {/* **ここは確定式にしない**（#706 レビュー）＝この欄は文書ではなく**画面の下書き**で、
+                              打っても履歴は積まれない。確定式にすると「打ってすぐ『置く』を押す」が
+                              1回目に効かず（押せない状態のボタンはフォーカスを奪わない＝確定が走らない）、
+                              欄が消える場面（再生位置が部品の外へ出る）で打ちかけが失われる。 */}
+                          <input
+                            className="input"
+                            type="number"
+                            step={f.step}
+                            value={kfDraft[f.prop] ?? ""}
+                            placeholder={String(f.neutral)}
+                            {...editGuard()}
+                            onChange={(e) => setKfDraft((d) => ({ ...d, [f.prop]: e.target.value }))}
+                          />
+                        </label>
                       ))}
                     </div>
                     <div className="row gap-sm">
                       <button
                         className="btn btn-secondary"
-                        {...editGuard({ disabled: isPlaying, hint: playingHint })}
+                        {...editGuard({
+                          // 何も入っていないと押しても**何も起きず返事も出ない**＝音量の点と同じく、
+                          // 押せなくして理由を出す（同じ画面で規準を割らない・#706 レビュー）。
+                          disabled: isPlaying || Object.values(kfDraft).every((v) => (v ?? "") === ""),
+                          hint: playingHint ?? (Object.values(kfDraft).every((v) => (v ?? "") === "") ? "動かしたい項目に値を入れてください" : undefined),
+                        })}
                         onClick={() => {
                           if (keyframeLocalSec == null) return; // 置けない位置なら何もしない（音量の変化と同じ）
                           // **丸めた秒を渡す**（#702）。再生位置から起点を引いた生の値を渡すと
@@ -1013,8 +1044,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {/* 音の部品は、速さ・使い始め・音量・フェードを変えられる（#634＝中位の編集）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.audio && (
               <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="audio" title="音" defaultOpen={true}>
-                <label className="field">
-                  <NumberField
+                                  <NumberField
                     label="速さ（倍）"
                     step={0.1}
                     min={CLIP_SPEED_MIN}
@@ -1023,9 +1053,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {...editGuard()}
                     onChange={(v) => setSelectedClipSpeed(v)}
                   />
-                </label>
-                <label className="field">
-                  <NumberField
+
+                                  <NumberField
                     label="素材の使い始め（秒）"
                     step={0.5}
                     min={0}
@@ -1033,9 +1062,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {...editGuard()}
                     onChange={(v) => setSelectedClipSourceStart(v)}
                   />
-                </label>
-                <label className="field">
-                  <NumberField
+
+                                  <NumberField
                     label="音量"
                     step={VOLUME_STEP}
                     min={VOLUME_MIN}
@@ -1046,11 +1074,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     onChange={(v) => setSelectedClipVolume(v)}
                     onClear={() => setSelectedClipVolume(null)}
                   />
-                </label>
+
                 {hasVolumePoints && <p className="text-muted">{VOLUME_POINTS_OVERRIDE_HINT}</p>}
                 <div className="row gap-sm">
-                  <label className="field">
-                    <NumberField
+                                      <NumberField
                       label="だんだん大きく（秒）"
                       step={0.5}
                       min={0}
@@ -1058,9 +1085,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {...editGuard()}
                       onChange={(v) => setSelectedClipFade("in", v)}
                     />
-                  </label>
-                  <label className="field">
-                    <NumberField
+
+                                      <NumberField
                       label="だんだん小さく（秒）"
                       step={0.5}
                       min={0}
@@ -1068,7 +1094,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {...editGuard()}
                       onChange={(v) => setSelectedClipFade("out", v)}
                     />
-                  </label>
+
                 </div>
                 <p className="text-muted">
                   速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
@@ -1120,7 +1146,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   >
                     {generatingVoiceClipId === selected.id ? "作成中…" : "声を作る"}
                   </button>
-                  <button className="btn btn-secondary" onClick={addLinkedSubtitleClip}>
+                  <button className="btn btn-secondary" onClick={addLinkedSubtitleClip} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
                     この読み上げの字幕を置く
                   </button>
                 </div>
@@ -1149,16 +1175,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   </p>
                 ) : (
                   <div className="row gap-sm">
-                    <NumberField
-                      label="この位置の音量"
-                      step={VOLUME_STEP}
-                      min={VOLUME_MIN}
-                      max={VOLUME_MAX}
-                      value={volumeDraft === "" ? null : Number(volumeDraft)}
-                      {...editGuard()}
-                      onChange={(v) => setVolumeDraft(String(v))}
-                      onClear={() => setVolumeDraft("")}
-                    />
+                    <label className="field">
+                      <span>この位置の音量</span>
+                      {/* 上と同じ理由で**確定式にしない**（画面の下書き＝履歴に積まない・#706 レビュー）。 */}
+                      <input
+                        className="input"
+                        type="number"
+                        step={VOLUME_STEP}
+                        min={VOLUME_MIN}
+                        max={VOLUME_MAX}
+                        value={volumeDraft}
+                        {...editGuard()}
+                        onChange={(e) => setVolumeDraft(e.target.value)}
+                      />
+                    </label>
                     <button
                       className="btn btn-secondary"
                       {...editGuard({
@@ -1363,8 +1393,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </label>
             <PickerList
               items={placeableTemplates.map((t) => ({ id: t.templateId, label: t.name }))}
-              disabled={isPlaying}
-              disabledHint={playingHint}
+              disabled={isPlaying || exporting}
+              disabledHint={exporting ? exportingHint : playingHint}
               searchLabel="見た目パターンの絞り込み"
               onPick={(templateId) => {
                 const t = placeableTemplates.find((x) => x.templateId === templateId);
@@ -1392,8 +1422,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 ...BGM_CATALOG.map((b) => ({ id: `bgm:${b.id}`, label: b.label, note: b.note })),
                 ...audioAssets.map((a) => ({ id: `asset:${a.assetId}`, label: a.displayName })),
               ]}
-              disabled={isPlaying}
-              disabledHint={playingHint}
+              disabled={isPlaying || exporting}
+              disabledHint={exporting ? exportingHint : playingHint}
               searchLabel="音の絞り込み"
               onPick={(id) => {
                 // id の頭で出どころを分ける＝**音の出どころは高々1つ**（`11 §8` V25）を渡す時点で守る。
@@ -1423,8 +1453,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             <div className="row gap-sm">
               <button
                 className="btn btn-secondary"
-                disabled={isPlaying}
-                title={playingHint}
+                {...busyGuard({ disabled: isPlaying, hint: playingHint })}
                 onClick={() => addVoiceClip({ text: "", trackId: voiceTracks[0].id, startSec: playheadSec })}
               >
                 読み上げを置く
@@ -1560,10 +1589,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       </div>
 
       <div className="row gap-sm mt-lg">
-        <button className="btn btn-ghost" onClick={undo} disabled={history.past.length === 0}>取り消す</button>
-        <button className="btn btn-ghost" onClick={redo} disabled={history.future.length === 0}>やり直す</button>
-        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} disabled={exporting} title={exportingHint}>映像の列を足す</button>
-        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} disabled={exporting} title={exportingHint}>音の列を足す</button>
+        <UndoRedoButtons
+          canUndo={history.past.length > 0}
+          canRedo={history.future.length > 0}
+          onUndo={undo}
+          onRedo={redo}
+          disabled={exporting}
+        />
+        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
+        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
       </div>
 
       <div className="row gap-sm mt-lg">
