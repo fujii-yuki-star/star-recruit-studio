@@ -161,6 +161,24 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
+  it("文字を打っている間は自動保存を待つ（打つたびに全部書き直さない）", async () => {
+    open();
+    const write = vi.spyOn(fsMod, "saveProjectDoc").mockResolvedValue("x/project.json");
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(useTimelineStore.getState().saveStatus).not.toBe("saving"));
+    act(() => {
+      useTimelineStore.getState().beginHistoryGroup();
+      useTimelineStore.setState({ saveStatus: "idle" }); // 打っている＝未保存
+    });
+    write.mockClear();
+    // **自動保存の待ち時間（800ms）より長く待つ**＝短く待つと、保留しているのか
+    // まだ時間が来ていないのか区別できない（区別できないテストは穴を守れない）。
+    await new Promise((r) => setTimeout(r, 900));
+    expect(write).not.toHaveBeenCalled(); // 打っている間は書かない
+    act(() => useTimelineStore.getState().endHistoryGroup());
+    await waitFor(() => expect(write).toHaveBeenCalled()); // 離れたら書く
+  });
+
   it("保存できているときは聞かずに戻る（毎回の確認で邪魔しない）", () => {
     open();
     useTimelineStore.setState({ saveStatus: "saved" });

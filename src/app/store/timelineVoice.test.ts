@@ -113,6 +113,20 @@ describe('generateSelectedVoice', () => {
     expect(clip?.voice).toMatchObject({ text: '書き換えた文', status: 'none' });
   });
 
+  it('声ができたときの記録は、打っている文字のまとめに混ざらない（一緒に消えない）', async () => {
+    await open(doc());
+    // 文を打ち始めた状態（まとめを開いたが、まだ何も打っていない）。
+    useTimelineStore.getState().beginHistoryGroup();
+    const before = useTimelineStore.getState().history.past.length;
+    await useTimelineStore.getState().generateSelectedVoice();
+    // 声の完了は**自分で1つ積む**（まとめの「最初の1回」を食べない）。
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+    // まとめはまだ「未記録」のまま＝このあと打った文字はちゃんと1つ積まれる。
+    useTimelineStore.getState().setSelectedVoiceText('あ');
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 2);
+    useTimelineStore.getState().endHistoryGroup();
+  });
+
   it('作れなかったら「次にどうするか」を出す（生のエラーを見せない）', async () => {
     vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue(new Error('voicevox: connection refused'));
     await open(doc());
