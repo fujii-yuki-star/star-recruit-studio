@@ -78,6 +78,14 @@ describe("AssetImportButton（取り込みの入口）", () => {
     expect(p.onFile).not.toHaveBeenCalled();
   });
 
+  it("置き場所ごとの見た目を落とさない（置き換えで幅や余白が黙って変わらない）", () => {
+    vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
+    render(<AssetImportButton {...props()} variant="secondary" className="btn-block mt" />);
+    const btn = screen.getByRole("button", { name: /素材を追加/ });
+    // `.btn` は inline-flex なので、`btn-block` が落ちるとボタンが中身の幅に縮む。
+    expect(btn).toHaveClass("btn", "btn-secondary", "btn-block", "mt");
+  });
+
   it("押せない理由は指したときに出す（黙って効かないボタンにしない・§2-5）", () => {
     vi.spyOn(assetFsMod, "isTauri").mockReturnValue(true);
     render(<AssetImportButton {...props()} disabledReason="書き出しが終わるまでお待ちください" />);

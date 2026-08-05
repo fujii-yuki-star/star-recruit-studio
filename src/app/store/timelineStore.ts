@@ -5,7 +5,7 @@ import { assetDisplayUrl, fileToDataUrl, importAssetByPath, importAssetBytes, im
 import { exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
-import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
+import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
@@ -1071,7 +1071,7 @@ async function runImport(
     // 待っている間に書き出しが始まっていたら、`commit` は足さずに戻る。**そこで気づけるように**先に断る
     // ＝「終わってから編集してください」だけ出して取り込みが消えた、を作らない（§2-5・#570 P1 と同じ流儀）。
     if (isTimelineExportBusy(get().exportRun.phase)) {
-      set({ importError: "いま動画を書き出しているので、取り込めませんでした。書き出しが終わってからもう一度お試しください。" });
+      set({ importError: IMPORT_BLOCKED_EXPORTING_MESSAGE });
       return;
     }
     const full: Asset = { ...asset, filePath: relPath, ...(enrich?.metadata ? { metadata: enrich.metadata } : {}), ...(enrich?.thumbnailPath ? { thumbnailPath: enrich.thumbnailPath } : {}) };

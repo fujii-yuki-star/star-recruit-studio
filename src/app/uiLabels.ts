@@ -462,6 +462,13 @@ export function assetTooLargeMessage(nextAction: string): string {
 }
 
 /**
+ * 取り込みを待っている間に書き出しが始まっていたときの案内（#712）。**逆向き**の
+ * `EXPORT_BLOCKED_IMPORTING_MESSAGE` と対で、どちらが先でも「消えた理由」が分かるようにする。
+ */
+export const IMPORT_BLOCKED_EXPORTING_MESSAGE =
+  "いま動画を書き出しているので、取り込めませんでした。書き出しが終わってからもう一度お試しください。";
+
+/**
  * 素材を取り込んでいる最中に書き出しを始めようとしたときの案内（#570 P1）。
  * **両形式で同じ文言**（同じ状況で同じことを言う＝ADR-0026②・§6）。
  */

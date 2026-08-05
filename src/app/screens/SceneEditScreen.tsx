@@ -1342,6 +1342,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               onPath={addAssetByPath}
               isImporting={isImporting}
               variant="secondary"
+              className="btn-block mt"
             />
 
             {importError && (

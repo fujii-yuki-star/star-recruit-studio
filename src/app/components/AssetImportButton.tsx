@@ -16,9 +16,14 @@ type Props = {
   variant?: "primary" | "secondary" | "ghost";
   /** 表示する文言（既定＝「素材を追加」）。 */
   label?: string;
+  /**
+   * 置き場所ごとの見た目（`btn-block`＝全幅・`mt`＝上の余白など）。**足すだけ**で `btn` は消さない
+   * ＝置き換えで**幅や余白が黙って変わる**のを防ぐ（#712 レビュー）。
+   */
+  className?: string;
 };
 
-export function AssetImportButton({ onFile, onPath, isImporting, disabledReason, variant = "primary", label = "素材を追加" }: Props) {
+export function AssetImportButton({ onFile, onPath, isImporting, disabledReason, variant = "primary", label = "素材を追加", className }: Props) {
   const disabled = isImporting || !!disabledReason;
   const { picking, labelProps, inputProps } = useAssetPicker({ onFile, onPath, disabled });
   const off = disabled || picking;
@@ -26,7 +31,7 @@ export function AssetImportButton({ onFile, onPath, isImporting, disabledReason,
   return (
     <label
       {...labelProps}
-      className={`btn btn-${variant}`}
+      className={`btn btn-${variant}${className ? ` ${className}` : ""}`}
       style={{ cursor: off ? "default" : "pointer", opacity: off ? 0.6 : 1 }}
       title={disabledReason ?? undefined}
     >
