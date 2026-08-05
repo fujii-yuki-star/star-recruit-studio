@@ -322,10 +322,13 @@ describe('addVisualClip（写真・文字・図形を置く・#684）', () => {
     const d = placed.ok ? placed.doc : base();
     const id = d.clips[0].id;
     // 文字の部品に図形の色は書けない（`TimelineClip` は平らな形なので、型ではなく関数が断る）。
-    expectBlocked(setVisualClipContent(d, id, { fillColor: '#ff0000' }), EDIT_BLOCKED.trackKind);
+    // **列の種別違いとは別の理由**（#684 レビュー）＝「列に置き直してください」は項目違いには当たらない案内。
+    expectBlocked(setVisualClipContent(d, id, { fillColor: '#ff0000' }), EDIT_BLOCKED.contentField);
     // 音の部品には中身の項目そのものが無い。
     const audio = doc({ clips: [{ id: 'clip_009', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, bundledBgmId: 'found-new-hope' }] });
-    expectBlocked(setVisualClipContent(audio, 'clip_009', { text: 'あ' }), EDIT_BLOCKED.trackKind);
+    expectBlocked(setVisualClipContent(audio, 'clip_009', { text: 'あ' }), EDIT_BLOCKED.contentField);
+    // 直せる項目は通る（断りすぎていない）。
+    expect(setVisualClipContent(d, id, { text: 'こんにちは' }).ok).toBe(true);
   });
 
   it('音の列には置けない・固定した列にも置けない・重なる場所にも置けない', () => {

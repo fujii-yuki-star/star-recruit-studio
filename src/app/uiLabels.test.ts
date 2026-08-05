@@ -214,5 +214,12 @@ describe('editBlockedMessage（置けなかった理由の案内）', () => {
   it('「なぜ置けないか」でなく「次にどうすれば置けるか」を言う（§2-5）', () => {
     expect(editBlockedMessage.TIMELINE_EDIT_OVERLAP).toContain('ずらすか、列を足して');
     expect(editBlockedMessage.TIMELINE_EDIT_LOCKED).toContain('固定を外して');
+    expect(editBlockedMessage.TIMELINE_EDIT_CONTENT_FIELD).toContain('選び直して');
+  });
+
+  it('項目違いを「列に置き直して」と案内しない（別の失敗に別の理由・#684 レビュー）', () => {
+    // 列の種別違い（V23）専用の案内を、中身の項目違いへ流用すると**無関係な次の行動**を出す。
+    expect(editBlockedMessage.TIMELINE_EDIT_CONTENT_FIELD).not.toBe(editBlockedMessage.TIMELINE_EDIT_TRACK_KIND);
+    expect(editBlockedMessage.TIMELINE_EDIT_CONTENT_FIELD).not.toContain('列');
   });
 });

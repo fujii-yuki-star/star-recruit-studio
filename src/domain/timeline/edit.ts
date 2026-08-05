@@ -61,6 +61,12 @@ export const EDIT_BLOCKED = {
   volumePointsFull: 'TIMELINE_EDIT_VOLUME_POINTS_FULL',
   /** 音量の変化を、鳴る音を持たない部品へ置こうとした（#512）。 */
   volumePointsKind: 'TIMELINE_EDIT_VOLUME_POINTS_KIND',
+  /**
+   * その部品が持たない中身の項目を直そうとした（#684 レビュー）。**列の種別違い（V23）とは別**
+   * ＝「列に置き直してください」は無関係な案内になる（§2-5）。`volumePointsKind` と同じ流儀で、
+   * **その項目を持たない部品に意味の無いデータを書かない**。
+   */
+  contentField: 'TIMELINE_EDIT_CONTENT_FIELD',
 } as const;
 
 export type EditBlockedReason = (typeof EDIT_BLOCKED)[keyof typeof EDIT_BLOCKED];
@@ -652,10 +658,11 @@ export function setVisualClipContent(
   // **その種類が持つ項目だけを受ける**（`TimelineClip` は全種別の項目を任意で持つ平らな形なので、
   // 型では縛れない＝ここで断る）。音の部品に図形の色を書く、のような意味の無いデータを作らない
   // （`11 §7.6.3.2` の「鳴る音を持たない部品には置けない」と同じ流儀）。
-  if (!VISUAL_CONTENT_KEYS[clip.kind as keyof typeof VISUAL_CONTENT_KEYS]) return blocked(EDIT_BLOCKED.trackKind);
+  // **列の種別違い（V23）と混ぜない**＝「列に置き直してください」は項目違いには当たらない案内になる（§2-5）。
   const allowed = VISUAL_CONTENT_KEYS[clip.kind as keyof typeof VISUAL_CONTENT_KEYS];
+  if (!allowed) return blocked(EDIT_BLOCKED.contentField);
   if (!Object.keys(patch).every((k) => (allowed as readonly string[]).includes(k))) {
-    return blocked(EDIT_BLOCKED.trackKind);
+    return blocked(EDIT_BLOCKED.contentField);
   }
   const track = doc.tracks.find((t) => t.id === clip.trackId);
   if (track?.locked) return blocked(EDIT_BLOCKED.locked);

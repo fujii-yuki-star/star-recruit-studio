@@ -463,6 +463,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_LINKED_SUBTITLE_TIME: "連動している字幕の時間は読み上げに合わせています。連動をやめると自分で動かせます",
   TIMELINE_EDIT_VOLUME_POINTS_FULL: `音量の変化は1つの部品に${VOLUME_POINTS_MAX}か所までです。ほかの点を外してから置いてください`,
   TIMELINE_EDIT_VOLUME_POINTS_KIND: "音量の変化を置けるのは、音や読み上げの部品だけです。音の部品を選び直してください",
+  TIMELINE_EDIT_CONTENT_FIELD: "この部品にはその項目がありません。直したい部品を選び直してください",
 };
 
 /**
