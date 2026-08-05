@@ -1409,3 +1409,105 @@ describe("TimelineProjectScreen: 選択の作法（#701）", () => {
     expect(field().value).toBe(""); // 打った覚えのない値が別の部品に入らない
   });
 });
+
+// レビューで見つかった経路（#701 /canon-check）。取り返しのつかない操作と、打ちかけの値を守る。
+describe("TimelineProjectScreen: 選択の作法（レビュー指摘）", () => {
+  const withTemplateClips = (templates: Template[]) => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_a" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.template, trackId: "track_003", startSec: 0, durationSec: 5, templateId: "tmpl_a" },
+      ],
+    });
+    useProjectStore.setState({ templates });
+  };
+
+  it("「バラす」の確認は、聞いた時点の部品を相手にする（選び直しで別の部品が犠牲にならない）", () => {
+    const tmpl = { templateId: "tmpl_a", name: "型A", category: "opening", orientation: "16:9", canvas: { w: 1920, h: 1080 }, layers: [] } as unknown as Template;
+    withTemplateClips([tmpl]);
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "中身をバラす" }));
+    // 選び直しても確認は残り、相手は変わらない（消えたように見えて状態だけ残る、を作らない）。
+    act(() => useTimelineStore.getState().selectClip("clip_002"));
+    expect(screen.getByText(/中身を1つ1つの部品に分けますか/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "バラす" }));
+    // バラされたのは**聞いた時点の** clip_001（選び直した clip_002 は見た目パターンのまま）。
+    const kinds = useTimelineStore.getState().doc!.clips.filter((c) => c.id === "clip_002");
+    expect(kinds[0].kind).toBe(TIMELINE_CLIP_KIND.template);
+    expect(useTimelineStore.getState().doc!.clips.some((c) => c.id === "clip_001")).toBe(false);
+  });
+
+  it("確認が開いている間は Escape で選択を解かない（打ちかけの値を消さない）", () => {
+    const tmpl = { templateId: "tmpl_a", name: "型A", category: "opening", orientation: "16:9", canvas: { w: 1920, h: 1080 }, layers: [] } as unknown as Template;
+    withTemplateClips([tmpl]);
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "中身をバラす" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+  });
+
+  it("固定した列の部品は消せない（全部選んでから消す、で固定が意味を失わない）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true });
+    act(() => useTimelineStore.getState().removeSelectedClips());
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1); // 消えない
+    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED"); // 理由を出す
+  });
+
+  it("選ぶと、前の部品で出た理由は消える（いまの部品の返事に見せない）", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    useTimelineStore.setState({ editBlocked: "TIMELINE_EDIT_OVERLAP", voiceError: "声を作れませんでした。" });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あ" }));
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
+    expect(useTimelineStore.getState().voiceError).toBeNull();
+  });
+
+  it("列のメニューが開いている間は Escape で選択を解かない（閉じただけで選択まで消さない）", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あ" }));
+    fireEvent.click(screen.getByLabelText("映像1の操作")); // 列のメニューを開く
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+  });
+
+  it("Mac の Cmd+A でも全部選べる", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "a", metaKey: true });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+  });
+
+  it("部品が無くても Ctrl+A は画面の文字を選ばせない", () => {
+    open({ clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const e = new KeyboardEvent("keydown", { key: "a", ctrlKey: true, cancelable: true, bubbles: true });
+    window.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+  });
+});

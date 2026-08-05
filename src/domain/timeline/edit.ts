@@ -179,6 +179,21 @@ function pruneGroups(groups: readonly Group[], removed: ReadonlySet<string>): Gr
  * クリップを消す。**参照も一緒に片づける**＝グループのメンバーとキーフレームの対象から落とす
  * （残すと「消したのに動きだけ残る」参照切れになる・11 §8 V26）。
  */
+/**
+ * 選んだ部品を消す（**固定した列のものが混ざっていたら断る**・#701 レビュー）。
+ *
+ * `removeClips` は列ごと消すとき（`removeTrack`）にも使う内部の道具で、そちらは列そのものを消すので
+ * 固定の判定を通してはいけない。**利用者が「消す」を押す入口はこちら**＝ほかの編集（動かす・複製する）が
+ * 固定列を断るのと同じ扱いにする（`Ctrl+A` で全部選んでから消す、で固定が意味を失わない）。
+ */
+export function removeSelectedClipsChecked(doc: TimelineProject, clipIds: readonly string[]): EditResult {
+  const lockedTrackIds = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id));
+  const targets = doc.clips.filter((c) => clipIds.includes(c.id));
+  if (targets.length === 0) return blocked(EDIT_BLOCKED.notFound);
+  if (targets.some((c) => lockedTrackIds.has(c.trackId))) return blocked(EDIT_BLOCKED.locked);
+  return { ok: true, doc: removeClips(doc, clipIds) };
+}
+
 export function removeClips(doc: TimelineProject, clipIds: readonly string[]): TimelineProject {
   const removed = new Set(clipIds);
   const clips = doc.clips.filter((c) => !removed.has(c.id));

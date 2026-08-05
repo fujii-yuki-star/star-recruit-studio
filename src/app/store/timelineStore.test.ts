@@ -374,6 +374,24 @@ describe('自動保存（編集した内容が消えない）', () => {
     expect(fsMod.saveProjectDoc).toHaveBeenCalledTimes(2); // B に合流する（3本目を始めない）
   });
 
+  it('まとめて選ぶときは、実在しない id と重複を落とす（消えたものを選んだままにしない）', () => {
+    // いま置いてある部品から取る（前のテストで顔ぶれが変わっていても、規則そのものを見られる）。
+    const ids = useTimelineStore.getState().doc!.clips.map((c) => c.id);
+    expect(ids.length).toBeGreaterThan(0);
+    useTimelineStore.getState().selectClips([ids[0], 'no_such_id', ids[0], ...ids.slice(1)]);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(ids);
+  });
+
+  it('選び直すと、前の操作の返事は落ちる（いまの部品の返事に見せない）', () => {
+    useTimelineStore.setState({ editBlocked: 'TIMELINE_EDIT_OVERLAP', voiceError: '声を作れませんでした。' });
+    useTimelineStore.getState().selectClip('clip_001');
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
+    expect(useTimelineStore.getState().voiceError).toBeNull();
+    useTimelineStore.setState({ editBlocked: 'TIMELINE_EDIT_OVERLAP' });
+    useTimelineStore.getState().clearSelection();
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
+  });
+
   it('保存は同時に2本走らせない（古い内容が後着してディスクの編集を巻き戻さない）', async () => {
     // 書き込みを止めたまま2本目を頼む。走らせずに待たせ、**終わってからもう一度**書く（最後の内容が必ず載る）。
     let release!: () => void;

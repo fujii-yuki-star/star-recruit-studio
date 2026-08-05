@@ -12,6 +12,7 @@ import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../..
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
+import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
 import type { CropMode, TrackKind } from "../../domain/enums";
@@ -239,25 +240,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 見えていない文書を戻して自動保存が永続化する事故を作らない・#547 P1-1 と同じ筋）。
   useUndoRedoShortcuts(true, { undo, redo });
 
-  // 選択のキー操作（ADR-0034 決定15/18）。**入力欄と日本語の変換中は奪わない**（共有の判定を通す）。
-  // `Escape`＝選択を解く／`Ctrl+A`＝全部選ぶ。**ドラッグ専用の操作を作らない**（決定19）ための土台でもある。
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (shouldIgnoreShortcut(e)) return;
-      if (e.key === "Escape") {
-        clearSelection();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-        const ids = useTimelineStore.getState().doc?.clips.map((c) => c.id) ?? [];
-        if (ids.length === 0) return;
-        e.preventDefault();
-        selectClips(ids);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [clearSelection, selectClips]);
 
   // 編集したら少し待って自動保存する（場面形式と同じ「閉じても消えない」＝ADR-0026②）。
   // 連続操作のたびに書かないよう間を置く。保存中の再編集は `saveTimelineProject` 側で見る。
@@ -351,7 +333,36 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     usePanelLayout(PANEL_SCREEN.timeline, defaultLayout, PANEL_IDS);
 
   // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
-  const [explodingClipId, setExplodingClipId] = useState<string | null>(null);
+  // **聞いた時点の相手を組で持つ**（#701 レビュー）。id だけだと、確認の表示条件が「いま選んでいる部品」に
+  // 依存してしまい、選択が変わると**確認が消えたように見えて状態だけ残る**。同じ見た目パターンの別の部品を
+  // 選ぶと確認が復活し、押すと**画面で選んでいない方**がバラされる（バラすは取り消しでしか戻らない）。
+  const [exploding, setExploding] = useState<{ clipId: string; template: Template } | null>(null);
+  // `Escape` の順番を決める材料（#701 レビュー）。**答えを求める確認とメニュー**が開いている間は選択を解かない。
+  const overlayOpen = trackMenu !== null || exploding !== null || removingTrackId !== null || confirmLeave;
+
+  // 選択のキー操作（ADR-0034 決定15/18）。**入力欄と日本語の変換中は奪わない**（共有の判定を通す）。
+  // `Escape`＝選択を解く／`Ctrl+A`＝全部選ぶ。**ドラッグ専用の操作を作らない**（決定19）ための土台でもある。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (shouldIgnoreShortcut(e)) return;
+      if (e.key === "Escape") {
+        // **開いているものを先に閉じる**（#701 レビュー）＝`Escape` は「いちばん手前のものを1段はがす」。
+        // 一緒に選択まで解くと、メニューを閉じただけで**打ちかけの値が消える**（選択が変わると下書きを片づけるため）。
+        // ほかの `Escape` の受け手（列メニュー・欄のドラッグ中止）は自前で閉じるので、ここでは**開いていたら何もしない**。
+        if (overlayOpen) return;
+        clearSelection();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        // 対象が無くても**既定の全選択には落とさない**（同じキーの結果が2通りになる＝画面の文字が反転する）。
+        e.preventDefault();
+        const ids = useTimelineStore.getState().doc?.clips.map((c) => c.id) ?? [];
+        if (ids.length > 0) selectClips(ids);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clearSelection, selectClips, overlayOpen]);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
   // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
   const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
@@ -658,9 +669,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     ))}
                   </div>
                 </div>
-                {/* 表示は**手前が上**（配列は後ろほど手前なので逆順に並べる）＝重なりの見え方と一致させる。 */}
+                {/* 表示は**手前が上**（配列は後ろほど手前なので逆順に並べる）＝重なりの見え方と一致させる。
+                    行にも解除を付けるのは、列の幅より画面が広いとき**右側にできる余白**を押しても解けるようにするため
+                    ＝「何もない所を押すと解ける」の当たり判定を見た目どおりにする（#701 レビュー）。 */}
                 {[...doc.tracks].reverse().map((track) => (
-                  <div className="timeline-row" key={track.id}>
+                  <div
+                    className="timeline-row"
+                    key={track.id}
+                    onClick={(e) => { if (e.target === e.currentTarget) clearSelection(); }}
+                  >
                     {/* 操作は右クリックのメニューへ畳む＝行に文字を並べない（帯が読めなくなる・利用者指摘 2026-08-03）。
                         行に残すのは**名前と状態**だけ。右クリックできると分かるよう、同じメニューを開く小さなボタンも置く
                         （右クリックを知らない・使えない場合の逃げ道＝§2-5）。 */}
@@ -1307,7 +1324,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     className="btn btn-secondary"
                     disabled={selectedLocked}
                     title={lockedHint}
-                    onClick={() => setExplodingClipId(selected.id)}
+                    onClick={() => setExploding({ clipId: selected.id, template: selectedTemplate })}
                   >
                     中身をバラす
                   </button>
@@ -1432,15 +1449,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           編集しているか」なので残す。 */}
       <PageHead title={doc.projectName} />
 
-      {explodingClipId && selectedTemplate && (
+      {exploding && (
         <DeleteConfirm
-          message={`「${selectedTemplate.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
+          message={`「${exploding.template.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
           confirmLabel="バラす"
           busyLabel="バラしています…"
-          onCancel={() => setExplodingClipId(null)}
+          onCancel={() => setExploding(null)}
           onConfirm={() => {
-            explodeClip(explodingClipId, selectedTemplate);
-            setExplodingClipId(null);
+            explodeClip(exploding.clipId, exploding.template);
+            setExploding(null);
           }}
         />
       )}

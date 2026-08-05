@@ -7,11 +7,22 @@
  * 文字入力中の要素か（input/textarea/contentEditable）。
  * 「標準の文字 Undo を奪わない」判定と、履歴グループの「連続入力だけを1履歴に合成する」判定に使う。
  */
+/**
+ * **文字を打つ入力**の種類（#701 レビュー）。`<input>` は種類で意味が全く違う＝スライダー（`range`）や
+ * チェックボックスは「文字を打つ場所」ではないので、そこにフォーカスがあるだけでキー操作が
+ * **黙って効かなくなる**のを避ける（再生位置のスライダーを触った直後に `Escape` が死ぬ、が実際に起きる）。
+ * 種類が空／未知のときは `type` の既定＝`text` なので、打てる側に倒す（安全側）。
+ */
+const NON_TEXT_INPUT_TYPES = new Set(["range", "checkbox", "radio", "button", "submit", "reset", "file", "image", "color"]);
+
 export function isTextEntryTarget(target: EventTarget | null): boolean {
   const t = target as HTMLElement | null;
+  if (!t) return false;
+  if (t.tagName === "TEXTAREA") return true;
+  if (t.tagName === "INPUT") return !NON_TEXT_INPUT_TYPES.has(((t as HTMLInputElement).type || "text").toLowerCase());
   // `isContentEditable` は要素以外（や欠けている相手）では `undefined` になりうるので、真偽値に落として返す
   // ＝呼び出し側が `boolean` として扱えることを型どおり保証する。
-  return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable === true);
+  return t.isContentEditable === true;
 }
 
 /**

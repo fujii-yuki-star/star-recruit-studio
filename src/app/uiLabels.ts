@@ -421,6 +421,22 @@ export function timelineSaveStatusLabel(saveStatus: "idle" | "saving" | "saved" 
   return saveStatus === "saving" ? "保存中…" : saveStatus === "saved" ? "保存しました" : "";
 }
 
+/**
+ * 秒を「m:ss」表記へ。**場面形式の見わたす画面とタイムライン編集で同じ書き方にする**ための単一の参照元
+ * （§6・ADR-0026②＝同じ概念を同じ見せ方に）。短い動画でも "0:05" と読める。
+ */
+export function clockLabel(sec: number): string {
+  const whole = Math.round(sec);
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** 帯（クリップ）のツールチップ＝名前と時間帯。両方の画面で同じ形にする。 */
+export function clipRangeTitle(label: string, startSec: number, endSec: number): string {
+  return `${label}（${clockLabel(startSec)}〜${clockLabel(endSec)}）`;
+}
+
 export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_OVERLAP: "その場所には先に置いてある部品があります。ずらすか、列を足して重ねてください",
   TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",
