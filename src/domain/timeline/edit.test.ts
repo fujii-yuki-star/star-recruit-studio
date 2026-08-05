@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, moveClip, moveTrackOrder, removeClips, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
+  addTemplateClip, moveClip, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
@@ -165,6 +165,48 @@ describe('removeClips', () => {
     const next = removeClips(d, ['clip_001']);
     expect(next.groups).toBeUndefined();
     expect(next.animations).toBeUndefined(); // 対象が消えた動きも残らない
+  });
+});
+
+describe('removeSelectedClipsChecked（利用者が「消す」を押す入口・#701）', () => {
+  it('固定した列の部品が混ざっていたら断る（全部選んでから消す、で固定が意味を失わない）', () => {
+    const d = doc({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual, locked: true },
+        { id: 'track_002', kind: TRACK_KIND.visual },
+      ],
+      clips: [clip('clip_001'), clip('clip_002', { trackId: 'track_002' })],
+    });
+    // 固定列のものだけ／固定でないものと混ぜた場合、どちらも断る（黙って一部だけ消さない・ADR-0026④）。
+    expect(removeSelectedClipsChecked(d, ['clip_001'])).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+    expect(removeSelectedClipsChecked(d, ['clip_001', 'clip_002'])).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+  });
+
+  it('固定でない列だけなら、消した結果は removeClips と同じ', () => {
+    const d = doc({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual, locked: true },
+        { id: 'track_002', kind: TRACK_KIND.visual },
+      ],
+      clips: [clip('clip_001'), clip('clip_002', { trackId: 'track_002' })],
+    });
+    const r = removeSelectedClipsChecked(d, ['clip_002']);
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.doc).toEqual(removeClips(d, ['clip_002']));
+  });
+
+  it('実在しない id だけなら「見つからない」で断る（何も起きない、を作らない）', () => {
+    const d = doc({ clips: [clip('clip_001')] });
+    expect(removeSelectedClipsChecked(d, ['no_such_id'])).toEqual({ ok: false, reason: EDIT_BLOCKED.notFound });
+  });
+
+  it('列ごと消すときは固定の判定を通さない（removeClips は内部の道具のまま）', () => {
+    // `removeTrack` は列そのものの固定を見る＝クリップ側でもう一度断ると、外した固定が二重にかかる。
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }],
+      clips: [clip('clip_001')],
+    });
+    expect(removeClips(d, ['clip_001']).clips).toEqual([]);
   });
 });
 

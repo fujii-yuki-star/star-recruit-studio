@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { clipRangeTitle, clockLabel } from "../uiLabels";
 import { TRANSITION_TYPE } from "../../domain/enums";
 import type { TransitionType } from "../../domain/enums";
 import type { Timeline, TimelineClip, TimelineTrackKind } from "../../domain/project/compileTimeline";
@@ -33,13 +34,7 @@ function transitionLabel(type: TransitionType): string {
   return type === TRANSITION_TYPE.fade ? "フェード" : "スライド";
 }
 
-/** 秒を「m:ss」表記へ（ルーラー用・短い動画は "0:05" のように読める）。 */
-function clockLabel(sec: number): string {
-  const whole = Math.round(sec);
-  const m = Math.floor(whole / 60);
-  const s = whole % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
+
 
 /** ズームに応じた目盛り間隔（秒）。px/秒が小さいほど粗く。 */
 function tickStepSec(pxPerSec: number): number {
@@ -50,7 +45,7 @@ function tickStepSec(pxPerSec: number): number {
 }
 
 function clipTitle(clip: TimelineClip): string {
-  return `${clip.label}（${clockLabel(clip.startSec)}〜${clockLabel(clip.endSec)}）`;
+  return clipRangeTitle(clip.label, clip.startSec, clip.endSec);
 }
 
 

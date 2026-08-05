@@ -18,7 +18,8 @@ import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants
 import { DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR, defaultStrokeColor } from "../../domain/template/textStyle";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDraftHistory } from "../hooks/useDraftHistory";
-import { isTextEntryTarget, useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { isTextEntryTarget } from "../hooks/keyboardShortcut";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";

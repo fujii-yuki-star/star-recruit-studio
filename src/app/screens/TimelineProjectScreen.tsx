@@ -11,6 +11,9 @@ import { clipCountOnTrack } from "../../domain/timeline/edit";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
+import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
+import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
 import type { CropMode, TrackKind } from "../../domain/enums";
@@ -59,7 +62,7 @@ const PANEL_ID = {
 } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { clipLabel, clipRangeTitle, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, SLOT_TYPE } from "../../domain/enums";
@@ -218,7 +221,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -237,6 +240,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 取り消し/やり直しのキー操作は**この画面の store** へ繋ぐ（既定は場面形式を巻き戻すので渡さない＝
   // 見えていない文書を戻して自動保存が永続化する事故を作らない・#547 P1-1 と同じ筋）。
   useUndoRedoShortcuts(true, { undo, redo });
+
 
   // 編集したら少し待って自動保存する（場面形式と同じ「閉じても消えない」＝ADR-0026②）。
   // 連続操作のたびに書かないよう間を置く。保存中の再編集は `saveTimelineProject` 側で見る。
@@ -297,6 +301,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [kfDraft, setKfDraft] = useState<Partial<Record<KeyframeProp, string>>>({});
   // 音量の変化（#512 段4）の入力欄。**空欄のままでは置かない**（0 と空欄を取り違えない）。
   const [volumeDraft, setVolumeDraft] = useState("");
+  // **選ぶ部品が変わったら下書きを片づける**（#701・監査 §2.2-9）＝別の部品に前の入力が残っていると、
+  // 「置く」を押した瞬間に**打った覚えのない値**が入る。選択の id そのものを見る（並び替えでは消さない）。
+  const selectedKey = selectedClipIds.join(",");
+  const lastSelectedKey = useRef(selectedKey);
+  useEffect(() => {
+    if (lastSelectedKey.current === selectedKey) return;
+    lastSelectedKey.current = selectedKey;
+    setKfDraft({});
+    setVolumeDraft("");
+  }, [selectedKey]);
   // 右クリック（または「⋮」）で開く列の操作メニュー（ADR-0033）。
   const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
 
@@ -320,7 +334,39 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     usePanelLayout(PANEL_SCREEN.timeline, defaultLayout, PANEL_IDS);
 
   // 「バラす」は戻せない（取り消しでだけ戻る）＝押す前に断る（ADR-0032 未解決6 の決着・§2-5）。
-  const [explodingClipId, setExplodingClipId] = useState<string | null>(null);
+  // **聞いた時点の相手を組で持つ**（#701 レビュー）。id だけだと、確認の表示条件が「いま選んでいる部品」に
+  // 依存してしまい、選択が変わると**確認が消えたように見えて状態だけ残る**。同じ見た目パターンの別の部品を
+  // 選ぶと確認が復活し、押すと**画面で選んでいない方**がバラされる（バラすは取り消しでしか戻らない）。
+  const [exploding, setExploding] = useState<{ clipId: string; template: Template } | null>(null);
+  // `Escape` の順番を決める材料（#701 レビュー）。**答えを求める確認とメニュー**が開いている間は選択を解かない。
+  // 答えを求める確認は**自分では `Escape` を処理しない**（答えるまで残す）ので、ここで名乗る側に回る。
+  const overlayOpen = exploding !== null || removingTrackId !== null || confirmLeave;
+  useEscapeOwner(overlayOpen);
+
+  // 選択のキー操作（ADR-0034 決定15/18）。**入力欄と日本語の変換中は奪わない**（共有の判定を通す）。
+  // `Escape`＝選択を解く／`Ctrl+A`＝全部選ぶ。**ドラッグ専用の操作を作らない**（決定19）ための土台でもある。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (shouldIgnoreShortcut(e)) return;
+      if (e.key === "Escape") {
+        // **手前のものから1段ずつはがす**（#701 レビュー）＝`Escape` を自分で受け持っているものがある間は、
+        // いちばん外側の後始末（選択を解く）を走らせない。一緒に解くと、メニューを閉じただけで
+        // **打ちかけの値が消える**（選択が変わると下書きを片づけるため）。
+        // 受け手は**自分で名乗る**（`escapeOwners`）＝画面が数え上げると、受け手が増えるたびに数え漏れる。
+        if (overlayOpen || hasEscapeOwner()) return;
+        clearSelection();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        // 対象が無くても**既定の全選択には落とさない**（同じキーの結果が2通りになる＝画面の文字が反転する）。
+        e.preventDefault();
+        const ids = useTimelineStore.getState().doc?.clips.map((c) => c.id) ?? [];
+        if (ids.length > 0) selectClips(ids);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clearSelection, selectClips, overlayOpen]);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
   // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
   const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
@@ -627,9 +673,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     ))}
                   </div>
                 </div>
-                {/* 表示は**手前が上**（配列は後ろほど手前なので逆順に並べる）＝重なりの見え方と一致させる。 */}
+                {/* 表示は**手前が上**（配列は後ろほど手前なので逆順に並べる）＝重なりの見え方と一致させる。
+                    行にも解除を付けるのは、列の幅より画面が広いとき**右側にできる余白**を押しても解けるようにするため
+                    ＝「何もない所を押すと解ける」の当たり判定を見た目どおりにする（#701 レビュー）。 */}
                 {[...doc.tracks].reverse().map((track) => (
-                  <div className="timeline-row" key={track.id}>
+                  <div
+                    className="timeline-row"
+                    key={track.id}
+                    onClick={(e) => { if (e.target === e.currentTarget) clearSelection(); }}
+                  >
                     {/* 操作は右クリックのメニューへ畳む＝行に文字を並べない（帯が読めなくなる・利用者指摘 2026-08-03）。
                         行に残すのは**名前と状態**だけ。右クリックできると分かるよう、同じメニューを開く小さなボタンも置く
                         （右クリックを知らない・使えない場合の逃げ道＝§2-5）。 */}
@@ -646,7 +698,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         ⋮
                       </button>
                     </div>
-                    <div className="timeline-track timeline-lane" style={{ width: laneWidthPx }}>
+                    {/* **何もない所を押したら選択を解く**（ADR-0034 決定15）。帯を押したときは帯側が受けるので、
+                        ここでは**この箱そのものを押したとき**だけ効かせる（帯から上がってきた分では解かない）。 */}
+                    <div
+                      className="timeline-track timeline-lane"
+                      style={{ width: laneWidthPx }}
+                      onClick={(e) => { if (e.target === e.currentTarget) clearSelection(); }}
+                    >
                       {doc.clips
                         .filter((c) => c.trackId === track.id)
                         .map((c) => (
@@ -655,6 +713,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             type="button"
                             className={`timeline-clip ${trackClipClass(track.kind)}${selectedClipIds.includes(c.id) ? " timeline-clip--selected" : ""}`}
                             style={{ left: `${pxPerSec * c.startSec}px`, width: `${pxPerSec * (clipEndSec(c) - c.startSec)}px` }}
+                            // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
+                            // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
+                            title={clipRangeTitle(clipLabel(c), c.startSec, clipEndSec(c))}
                             onClick={(e) => selectClip(c.id, e.shiftKey)}
                           >
                             {clipLabel(c)}
@@ -710,7 +771,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 React が作り直さず、開閉が最初に選んだ部品のままになる（設定が入っていても畳まれたまま）。
                 利用者が明示的に開閉した記憶は localStorage にあるので、作り直しても引き継がれる。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
-              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="crop" title="切り抜き" defaultOpen={cropIsSet}>
+              <CollapsibleSection key={`crop-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="crop" title="切り抜き" defaultOpen={cropIsSet}>
                 <div className="row gap-sm">
                   {CROP_EDGES.map((e) => (
                     <label className="field" key={e.edge}>
@@ -791,7 +852,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
             {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
-              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>
+              <CollapsibleSection key={`anim-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>
                 <p className="text-muted">
                   再生位置（{playheadSec.toFixed(1)}秒）に「<strong>本来の見た目からのずれ</strong>」を置きます。
                   2か所に違う値を置くと、その間はなめらかに変わります。空欄の項目は動かしません。
@@ -1079,7 +1140,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {/* 音量の変化（#512 段4）＝置いた時刻の音量を並べると、その間はなめらかに変わる。
                 音・読み上げのどちらにも置ける（鳴る音を持つ部品だけ）。 */}
             {isAudioClip(selected) && (
-              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="volumePoints" title="音量の変化" defaultOpen={selectedVolumePoints.length > 0}>
+              <CollapsibleSection key={`volumePoints-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="volumePoints" title="音量の変化" defaultOpen={selectedVolumePoints.length > 0}>
                 <p className="text-muted">
                   再生位置（{playheadSec.toFixed(1)}秒）にその時の音量を置きます。違う値を2か所に置くと、
                   その間はなめらかに変わります。前後のフェードは、この変化の上に掛かります。
@@ -1268,7 +1329,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     className="btn btn-secondary"
                     disabled={selectedLocked}
                     title={lockedHint}
-                    onClick={() => setExplodingClipId(selected.id)}
+                    onClick={() => setExploding({ clipId: selected.id, template: selectedTemplate })}
                   >
                     中身をバラす
                   </button>
@@ -1393,15 +1454,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           編集しているか」なので残す。 */}
       <PageHead title={doc.projectName} />
 
-      {explodingClipId && selectedTemplate && (
+      {exploding && (
         <DeleteConfirm
-          message={`「${selectedTemplate.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
+          message={`「${exploding.template.name}」の中身を1つ1つの部品に分けますか？動画の見た目は変わりませんが、写真や文字を入れる場所は無くなります（分けたあとは部品ごとに差し替えます）。元に戻すときは「取り消す」を押してください。`}
           confirmLabel="バラす"
           busyLabel="バラしています…"
-          onCancel={() => setExplodingClipId(null)}
+          onCancel={() => setExploding(null)}
           onConfirm={() => {
-            explodeClip(explodingClipId, selectedTemplate);
-            setExplodingClipId(null);
+            explodeClip(exploding.clipId, exploding.template);
+            setExploding(null);
           }}
         />
       )}

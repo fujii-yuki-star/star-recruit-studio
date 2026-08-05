@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { claimEscape } from "../hooks/escapeOwners";
 import { FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, type FontId } from "../../domain/font/fontCatalog";
 
 // 動画フォントの選択（プルダウン）。各選択肢を「そのフォントの字形」で表示して直感的に選べるようにする。
@@ -31,8 +32,12 @@ export function FontPicker({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
+    const release = claimEscape(); // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      release();
+    };
   }, [open]);
 
   const optionStyle = (active: boolean, family?: string) => ({

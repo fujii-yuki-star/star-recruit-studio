@@ -18,7 +18,7 @@ import type { CropAlignX, CropAlignY, CropMode, Orientation, TextKey, TrackKind 
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
   addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip,
-  moveTrackOrder, removeClips, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
+  moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
   setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
@@ -134,6 +134,8 @@ export interface TimelineState {
   closeTimelineProject: () => void;
   setPlayhead: (sec: number) => void;
   selectClip: (clipId: string, additive?: boolean) => void;
+  /** まとめて選ぶ（`Ctrl+A` の全選択など）。存在しない id は落とす＝消えたものを選んだままにしない。 */
+  selectClips: (clipIds: string[]) => void;
   clearSelection: () => void;
 
   /** 選んでいるクリップを動かす（列を替える／時間をずらす）。置けなければ何も変えず理由を持つ。 */
@@ -275,6 +277,12 @@ const P = EXPORT_RUN_PHASE;
 
 /** 書き出しの持ち主（`exportLock`）。場面形式と一時ファイルの置き場を取り合わないために使う。 */
 const EXPORT_OWNER = "timeline" as const;
+
+/**
+ * 選び直したときに落とす「直前の操作の返事」（#701 レビュー）。前の部品で出た理由が残っていると、
+ * **いま選んでいる部品の返事**に見える（`06 §12.1`＝その場の返事）。落とす先を1か所にして取りこぼさない。
+ */
+const CLEARED_NOTICES = { editBlocked: null, voiceError: null } as const;
 
 /**
  * 進行中の保存の1回ぶん（#693）。**同時に2本走らせない**ための見張り。書き込みは上書き（truncate）なので、
@@ -421,18 +429,28 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     set({ playheadSec: clampTimelinePlayheadSec(doc, sec), seekNonce: get().seekNonce + 1 });
   },
 
+  // 選ぶのも「次の操作」＝**前の操作の返事は落とす**（#701 レビュー）。残すと、置けなかった理由や
+  // 声を作れなかった案内が**いま選んでいる部品の返事**に見える。
   selectClip: (clipId, additive = false) =>
     set((s) => {
-      if (!additive) return { selectedClipIds: [clipId] };
+      if (!additive) return { ...CLEARED_NOTICES, selectedClipIds: [clipId] };
       // 追加選択は「入っていれば外す」＝同じ操作で付け外しできる（複数選択の通例）。
       return {
+        ...CLEARED_NOTICES,
         selectedClipIds: s.selectedClipIds.includes(clipId)
           ? s.selectedClipIds.filter((id) => id !== clipId)
           : [...s.selectedClipIds, clipId],
       };
     }),
 
-  clearSelection: () => set({ selectedClipIds: [] }),
+  selectClips: (clipIds) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const exists = new Set(doc.clips.map((c) => c.id));
+    // **重複も落とす**＝「選んだN個」の数え方が呼び出し側の作り方で変わらない（不変条件を store で閉じる）。
+    set({ ...CLEARED_NOTICES, selectedClipIds: [...new Set(clipIds.filter((id) => exists.has(id)))] });
+  },
+  clearSelection: () => set({ ...CLEARED_NOTICES, selectedClipIds: [] }),
 
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
   trimSelectedClip: (edge, sec) => applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec)),
@@ -441,8 +459,15 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   removeSelectedClips: () => {
     const { doc, selectedClipIds } = get();
     if (!doc || selectedClipIds.length === 0) return;
+    // **固定した列の部品が混ざっていたら断る**（#701 レビュー）＝`Ctrl+A` で全部選んでから消せてしまうと、
+    // 固定が意味を失う。ほかの編集（動かす・複製する）が固定列を断るのと同じ扱い。
+    const checked = removeSelectedClipsChecked(doc, selectedClipIds);
+    if (!checked.ok) {
+      set({ editBlocked: checked.reason });
+      return;
+    }
     // 消した後は選択を空にする（消えたものを選んだままにしない）。
-    commit(set, get, removeClips(doc, selectedClipIds), { selectedClipIds: [] });
+    commit(set, get, checked.doc, { selectedClipIds: [] });
   },
 
   setSelectedClipAssetRef: (layerId, assetId) => applyEdit(set, get, (d, id) => setClipAssetRef(d, id, layerId, assetId)),
