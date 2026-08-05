@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, setVisualClipContent, moveClip, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
+  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
@@ -208,6 +208,54 @@ describe('removeSelectedClipsChecked（利用者が「消す」を押す入口�
       clips: [clip('clip_001')],
     });
     expect(removeClips(d, ['clip_001']).clips).toEqual([]);
+  });
+});
+
+describe('firstFreeStart（次に空いている時刻・#684 レビュー）', () => {
+  const withSpans = (spans: [number, number][]) => doc({
+    tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }],
+    clips: spans.map(([st, en], i) => clip(`clip_${String(i + 1).padStart(3, '0')}`, { startSec: st, durationSec: en - st })),
+  }).clips;
+
+  it('**間の空きを飛び越さない**（いちばん後ろの終わりではない）', () => {
+    // [0,3) と [10,15)。5秒ぶんは [3,10) の空きに収まるので 3（15 ではない）。
+    expect(firstFreeStart(withSpans([[0, 3], [10, 15]]), 'track_001', 0, 5)).toBe(3);
+  });
+
+  it('ちょうど収まる空きは使う（端が接するのは可＝11 §8 V24）', () => {
+    // [0,3) と [8,10)。空き [3,8) は5秒ちょうど＝そこへ置く。
+    expect(firstFreeStart(withSpans([[0, 3], [8, 10]]), 'track_001', 0, 5)).toBe(3);
+  });
+
+  it('その空きに収まらなければ、次の空きを見る', () => {
+    // [0,3) と [6,10)。5秒は [3,6) に収まらないので 10。
+    expect(firstFreeStart(withSpans([[0, 3], [6, 10]]), 'track_001', 0, 5)).toBe(10);
+  });
+
+  it('その時刻が空いていれば、後ろに部品があってもそのまま置く', () => {
+    // [10,15) だけ。再生位置0は [0,10) が空いているので 0（15 へ飛ばさない）。
+    expect(firstFreeStart(withSpans([[10, 15]]), 'track_001', 0, 5)).toBe(0);
+  });
+
+  it('並び順に関わらず同じ答えになる（保存の順に依存しない）', () => {
+    // 同じ [0,3)+[10,15) を後ろから並べても 3。
+    const reversed = [...withSpans([[0, 3], [10, 15]])].reverse();
+    expect(firstFreeStart(reversed, 'track_001', 0, 5)).toBe(3);
+    // 収まらない空きが先にある形も。[0,3)+[4,6)+[10,20) を混ぜて並べても 6。
+    const shuffled = withSpans([[4, 6], [10, 20], [0, 3]]);
+    expect(firstFreeStart(shuffled, 'track_001', 0, 4)).toBe(6);
+  });
+
+  it('空いていればその時刻のまま・後ろに何も無ければ最後の終わり', () => {
+    expect(firstFreeStart(withSpans([]), 'track_001', 2, 5)).toBe(2);
+    expect(firstFreeStart(withSpans([[0, 4]]), 'track_001', 0, 5)).toBe(4);
+    // 探し始めより前に終わる部品は関係ない。
+    expect(firstFreeStart(withSpans([[0, 1]]), 'track_001', 5, 5)).toBe(5);
+  });
+
+  it('ほかの列の部品は見ない', () => {
+    const clips = [...withSpans([[0, 20]])].map((c) => ({ ...c, trackId: 'track_009' }));
+    expect(firstFreeStart(clips, 'track_001', 0, 5)).toBe(0);
   });
 });
 

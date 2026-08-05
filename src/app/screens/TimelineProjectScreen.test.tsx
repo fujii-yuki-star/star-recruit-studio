@@ -1904,6 +1904,21 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(useTimelineStore.getState().editBlocked).toBeNull();
   });
 
+  it("間の空きを飛び越さない（いちばん後ろの部品の終わりへ飛ばさない・#684 レビュー）", () => {
+    // [0,3) と [10,15)。5秒ぶんは [3,10) の空きに収まるので、そこへ置く（15 ではない）。
+    withAsset({
+      clips: [
+        { id: "clip_001", trackId: "track_001", kind: TIMELINE_CLIP_KIND.text, startSec: 0, durationSec: 3, text: "あ" },
+        { id: "clip_002", trackId: "track_001", kind: TIMELINE_CLIP_KIND.text, startSec: 10, durationSec: 5, text: "い" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    const clips = useTimelineStore.getState().doc!.clips;
+    expect(clips).toHaveLength(3);
+    expect(clips[2]).toMatchObject({ startSec: 3, durationSec: 5 });
+  });
+
   it("置ける列が固定・非表示だけなら置かない（動画に出ない部品を黙って作らない）", () => {
     withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);

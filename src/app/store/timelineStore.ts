@@ -13,13 +13,13 @@ import { validateTimelineProject } from "../../domain/validation/generated/valid
 import { ASSET_TYPE } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
-import { clipEndSec } from "../../domain/timeline/validateTimelineDoc";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, Orientation, TextAlign, TextKey, TrackKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, moveClip,
+  VISUAL_CLIP_DURATION_SEC, addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip,
+  firstFreeStart, moveClip,
   setVisualClipContent,
   moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
   setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
@@ -575,9 +575,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // （勝手に寄せない＝ADR-0034 決定10 は**利用者が位置を指した**ドラッグの規準で、ここには当たらない）。
     if (placeable.length > 0) {
       const t = placeable[0];
-      const after = doc.clips
-        .filter((c) => c.trackId === t.id && clipEndSec(c) > startSec)
-        .reduce((acc, c) => Math.max(acc, clipEndSec(c)), startSec);
+      // **間の空きを飛び越さない**（#684 レビュー）＝「いちばん後ろの部品の終わり」ではなく、
+      // まるごと収まる最初の空きを探す。規則は domain に置く（画面で数え直さない）。
+      const after = firstFreeStart(doc.clips, t.id, startSec, VISUAL_CLIP_DURATION_SEC);
       const r = addVisualClip(doc, { ...input, trackId: t.id, startSec: after });
       if (r.ok) {
         const placed = r.doc.clips[r.doc.clips.length - 1];

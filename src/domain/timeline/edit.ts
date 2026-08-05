@@ -91,6 +91,36 @@ export function isFreeSpan(
   );
 }
 
+/** 置いた部品の仮の長さ（#684）。**下限を割らない**＝置ける長さと探す長さを別々に書かない（§2-7）。 */
+export const VISUAL_CLIP_DURATION_SEC = Math.max(TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC);
+
+/**
+ * その列で、`fromSec` 以降に **`durationSec` がまるごと収まる最初の時刻**（#684 レビュー）。
+ *
+ * 「いちばん後ろの部品の終わり」ではない＝**間の空きを飛び越さない**。
+ * 例：`[0,3)` と `[10,15)` があるとき、5秒ぶんは `[3,10)` の空きに収まるので 3 を返す（15 ではない）。
+ * 置き場所をアプリが決める経路（ボタンで置く）で、見えている空きを使わずに最後尾へ飛ばさないための規則。
+ *
+ * **「空いている」の判定は `isFreeSpan` に委ねる**（ここで重なりを数え直さない）＝探した結果が
+ * 置ける条件（V24）と食い違わない。候補は **`fromSec` と、各部品の終わり**だけでよい
+ * （最初に収まる時刻は必ずそのどれか）。いちばん後ろの終わりは必ず空くので、答えは必ず返る。
+ */
+export function firstFreeStart(
+  clips: readonly TimelineClip[],
+  trackId: string,
+  fromSec: number,
+  durationSec: number,
+): number {
+  const candidates = [fromSec, ...clips
+    .filter((c) => c.trackId === trackId && clipEndSec(c) > fromSec)
+    .map((c) => clipEndSec(c))]
+    .sort((a, b) => a - b);
+  const found = candidates.find((t) => isFreeSpan(clips, trackId, t, durationSec));
+  // いちばん後ろの候補は必ず空くのでここは通らないが、通っても**空いている時刻**を返す
+  // （`fromSec` に落とすと塞がった時刻を返し、呼び出し側が置けずに終わる）。
+  return found ?? candidates[candidates.length - 1];
+}
+
 /** 置き先として成り立つか（列の実在・種別の一致・固定・重なり）を1か所で見る。 */
 function placementIssue(
   doc: TimelineProject,
@@ -534,7 +564,7 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
  *
  * - **箱は真ん中に置く**（`PLACED_BOX_RATIO`）＝置いた瞬間に画面で見える。座標を指定されたら
  *   そこを**箱の中心**として置く（キャンバスへ落としたとき＝落とした場所に置く）。画面外へは出さない。
- * - 長さは仮（`VISUAL_PLACEHOLDER_SEC`）＝掴んで伸ばせる程度。
+ * - 長さは仮（`VISUAL_CLIP_DURATION_SEC`＝`VISUAL_PLACEHOLDER_SEC` を下限で丸めたもの）＝掴んで伸ばせる程度。
  * - 素材は**この動画が持っているものだけ**（`doc.assets`）＝存在しない素材の枠を作らない。
  */
 export function addVisualClip(
@@ -559,7 +589,7 @@ export function addVisualClip(
     }
   }
   const startSec = Math.max(0, input.startSec);
-  const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC);
+  const durationSec = VISUAL_CLIP_DURATION_SEC;
   if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
   const ratio = PLACED_BOX_RATIO[input.kind];
