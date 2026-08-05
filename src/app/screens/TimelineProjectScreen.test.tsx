@@ -1795,6 +1795,30 @@ describe("TimelineProjectScreen: 文字を打つ間は1つの取り消しにま�
     expect(useTimelineStore.getState().history.past.length).toBe(before);
   });
 
+  it("欄がフォーカス中に消えても、まとめは開きっぱなしにならない（以後の取り消しが積まれる）", () => {
+    open({
+      tracks: [
+        { id: "track_002", kind: TRACK_KIND.audio },
+        { id: "track_004", kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 5, voice: { text: "", status: "none" } },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_004", startSec: 0, durationSec: 5, voice: { text: "", status: "none" } },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByLabelText("読み上げる文");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "あ" } }); // ここで「編集前」を1回記録＝まとめは記録済みになる
+    // 別の部品を選ぶ＝欄が入れ替わる。`blur` は来ないので、ここで畳まないと**開きっぱなし**になり、
+    // 記録済みのまま以後の編集が1つも積まれなくなる。
+    act(() => useTimelineStore.getState().selectClip("clip_002"));
+    const before = useTimelineStore.getState().history.past.length;
+    act(() => useTimelineStore.getState().moveSelectedClip({ startSec: 2 }));
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1); // 以後の取り消しが積まれる
+  });
+
   it("打っている間もプレビューは追いつく（見えているものがそのまま出る）", () => {
     // 連動する字幕は、自分の文が無ければ読み上げの文をそのまま描く（ADR-0032 決定24）。
     // 下書きに溜める形にすると、打っている間プレビューが古いままになる。

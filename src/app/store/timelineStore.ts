@@ -124,6 +124,8 @@ export interface TimelineState {
   beginHistoryGroup: () => void;
   /** 連続入力の終了（blur・pointerup）。**必ず呼ぶ**＝開きっぱなしだと以後の取り消しが積まれない。 */
   endHistoryGroup: () => void;
+  /** まとめを強制的に畳む（欄がフォーカス中に消えたときの保険＝`blur` が来ない）。 */
+  resetHistoryGroup: () => void;
   /** 保存の状態（場面形式の `saveStatus` と同じ語彙＝同じ概念を同じ言葉で扱う）。 */
   saveStatus: "idle" | "saving" | "saved" | "error";
   /** 再生中か。時計は画面側（`useTimelinePlayback`）が回し、位置は `setPlayhead` で入る。 */
@@ -472,6 +474,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       ? { _historyGroupDepth: 1, _historyGroupPending: true }
       : { _historyGroupDepth: s._historyGroupDepth + 1 })),
   endHistoryGroup: () => set((s) => ({ _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) })),
+  /**
+   * まとめを**強制的に畳む**（#708 レビュー）。文字欄は `blur` で閉じるが、**フォーカス中に欄が消えると
+   * `blur` は来ない**（仕様）＝開きっぱなしになり、以後の取り消しが一切積まれなくなる。
+   * ドラッグ側が `window` で終了を拾っているのと同じ役割を、こちらは「欄が消えうる場面」で呼んで担う。
+   */
+  resetHistoryGroup: () => set({ _historyGroupDepth: 0, _historyGroupPending: false }),
 
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
   trimSelectedClip: (edge, sec) => applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec)),
@@ -635,7 +643,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       commit(set, get, sized?.ok ? sized.doc : withVoice, {
         audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
         ...(sized && !sized.ok ? { editBlocked: sized.reason } : {}),
-      });
+      }, { outsideGroup: true });
       set({
         generatingVoiceClipId: null,
         // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
@@ -899,7 +907,18 @@ type GetState = () => TimelineState;
  * 文書が変わっていないとき（端で何も起きない操作など）は履歴を汚さない＝取り消しが空振りしない
  * （各操作は「変わらないなら同一参照」を返すので、参照比較で足りる）。
  */
-function commit(set: SetState, get: GetState, next: TimelineProject, extra: Partial<TimelineState> = {}): void {
+/**
+ * @param opts.outsideGroup **利用者が打っている最中のまとめに混ぜない**（#708 レビュー）。
+ *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
+ *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
+ */
+function commit(
+  set: SetState,
+  get: GetState,
+  next: TimelineProject,
+  extra: Partial<TimelineState> = {},
+  opts: { outsideGroup?: boolean } = {},
+): void {
   // 書き出しは**始めた時点の文書**を焼く。途中の編集は動画に入らないので、黙って受け付けない（§2-5）。
   if (isTimelineExportBusy(get().exportRun.phase)) {
     set({ editBlocked: EDIT_BLOCKED.exporting });
@@ -912,12 +931,13 @@ function commit(set: SetState, get: GetState, next: TimelineProject, extra: Part
   }
   // グループ中は**最初の実変更だけ**積む（1文字ごとに積むと、上限 50 を文字入力だけで食い潰し、
   // それ以前の編集＝「バラす」などが取り消せなくなる・#708）。
-  const inGroup = get()._historyGroupDepth > 0;
+  const inGroup = get()._historyGroupDepth > 0 && !opts.outsideGroup;
   const record = !inGroup || get()._historyGroupPending;
   set({
     doc: next,
     history: record ? recordSnapshot(get().history, current) : get().history,
-    _historyGroupPending: false,
+    // まとめに参加した分だけ「記録済み」にする（参加していない完了で他人のまとめを消費しない）。
+    ...(inGroup ? { _historyGroupPending: false } : {}),
     editBlocked: null,
     saveStatus: "idle",
     // 編集したら再生を止める＝「再生位置へ」のような操作が**動いている的**を狙うのを防ぐ（結果が毎回変わる）。

@@ -255,19 +255,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **失敗（`error`）のときは自動で繰り返さない**＝同じ理由で失敗し続ける間ディスクを叩き続けても直らないので、
   // 画面に理由と「保存し直す」を出して利用者に返す（#693・§2-5）。次の編集で `idle` に戻れば自動保存も再開する。
   const saveTimer = useRef<number | null>(null);
+  const historyDepth = useTimelineStore((s) => s._historyGroupDepth);
   useEffect(() => {
-    if (saveStatus !== "idle") return;
+    // **連続入力の最中は保留する**（#708 レビュー・場面形式の `useAutoSave` と同じ）。
+    // 打っている間は1文字ごとに未保存へ戻るので、これが無いと**打っている間ずっと**全文書を
+    // 書き直し続ける（デバウンスのつもりが約800msごとの繰り返しになる）。
+    if (saveStatus !== "idle" || historyDepth > 0) return;
     if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => void saveTimelineProject(), AUTOSAVE_DELAY_MS);
     return () => {
       if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
     };
-  }, [saveStatus, saveTimelineProject]);
+  }, [saveStatus, historyDepth, saveTimelineProject]);
   // **画面を離れるときは、待っている保存を書き切る**（#693）。自動保存のタイマはこの画面のものなので、
   // 書くより前に離れると上の後始末でタイマごと消え、直前の編集が**無言で**失われていた（サイドバーからの
   // 移動も同じ）。場面形式は自動保存が常時ある層に載っていてこの穴が無い＝形式で挙動を割らない（ADR-0026②）。
   // 依存を持たない effect にして**アンマウントのときだけ**走らせる（張り直しのたびに保存しない）。
   useEffect(() => () => {
+    // 画面を離れるときも畳む（開いたまま離れると、次に開いた文書で取り消しが積まれない）。
+    useTimelineStore.getState().resetHistoryGroup();
     if (useTimelineStore.getState().saveStatus === "idle") void useTimelineStore.getState().saveTimelineProject();
   }, []);
   const templates = useProjectStore((s) => s.templates);
@@ -318,6 +324,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     lastSelectedKey.current = selectedKey;
     setKfDraft({});
     setVolumeDraft("");
+    // 文字欄はフォーカス中に消えると `blur` が来ない＝まとめが開きっぱなしになる（#708 レビュー）。
+    // 欄が入れ替わるここで必ず畳む（ドラッグが `window` で終了を拾うのと同じ役割）。
+    useTimelineStore.getState().resetHistoryGroup();
   }, [selectedKey]);
   // 右クリック（または「⋮」）で開く列の操作メニュー（ADR-0033）。
   const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
