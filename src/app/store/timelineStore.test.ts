@@ -1,11 +1,14 @@
 // タイムライン編集プロジェクトの編集状態（ADR-0032・#629）。開く・再生ヘッド・選択の不変条件を固定する。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTimelineStore } from './timelineStore';
+import { resetAssetIdReservations } from './assetImport';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import * as voiceFsMod from '../../infrastructure/voiceFs';
 import * as bgmMod from '../../infrastructure/bundledBgm';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
+import { EXPORT_RUN_PHASE } from '../../domain/export/exportProgress';
+import { MAX_INLINE_ASSET_BYTES } from '../../domain/constants';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
 import type { TimelineProject } from '../../domain/timeline/types';
 
@@ -533,5 +536,218 @@ describe('音源の用意（#630 後半）', () => {
     const s = useTimelineStore.getState();
     expect(s.doc).not.toBeNull(); // 開ける
     expect(s.audioSrcByKey).toEqual({}); // その部品は鳴らない
+  });
+});
+
+describe('素材の取り込み（#712）', () => {
+  // 素材番号の予約は**アプリ起動中ずっと**残る（取り消し・開き直しをまたいで効かせるため）。
+  // テストは1本ずつが別の起動なので、毎回捨てる。
+  beforeEach(() => {
+    resetAssetIdReservations();
+    // 書き出し中は**開くことも閉じることもしない**のが仕様（走行中の締めを外さない）。
+    // 走行を残したまま次へ行くと `open()` が黙って何もせず、前のテストの文書を見てしまう。
+    useTimelineStore.setState({ exportRun: { phase: EXPORT_RUN_PHASE.idle, percent: 0, message: null, cancelling: false } });
+  });
+
+  const open = async (over: Partial<TimelineProject> = {}) => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({ assets: [], ...over })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('saved');
+  };
+  // ブラウザ経路（`addAsset`）は File を読むので、パス経路（`addAssetByPath`）で手順を固定する。
+  const importPath = (p = 'C:/pics/会社の外観.png') => useTimelineStore.getState().addAssetByPath(p);
+
+  it('取り込むと一覧に増え、表示先も付く', async () => {
+    await open();
+    const copy = vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.png');
+    await importPath();
+    const s = useTimelineStore.getState();
+    expect(copy).toHaveBeenCalledWith('proj_20260728_001', 'asset_001.png', 'C:/pics/会社の外観.png');
+    expect(s.doc!.assets).toEqual([
+      { assetId: 'asset_001', assetType: 'image', displayName: '会社の外観', filePath: 'assets/asset_001.png' },
+    ]);
+    expect(s.assetSrcById.asset_001).toBe('asset://a.png');
+    expect(s.importError).toBeNull();
+    expect(s.isImporting).toBe(false);
+  });
+
+  it('取り消せる（この形式の履歴は文書まるごと・#712 決定）', async () => {
+    await open();
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.png');
+    await importPath();
+    expect(useTimelineStore.getState().doc!.assets).toHaveLength(1);
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().doc!.assets).toHaveLength(0);
+    useTimelineStore.getState().redo();
+    expect(useTimelineStore.getState().doc!.assets).toHaveLength(1);
+  });
+
+  it('取り込めなかったら一覧に足さない（幽霊を作らない）＋次の行動を出す', async () => {
+    await open();
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockRejectedValue(new Error('書き込めませんでした。空き容量をご確認ください。'));
+    await importPath();
+    const s = useTimelineStore.getState();
+    expect(s.doc!.assets).toEqual([]);
+    expect(s.importError).toContain('空き容量');
+    expect(s.isImporting).toBe(false);
+    expect(s.history.past).toHaveLength(0); // 失敗だけで取り消しが増えない
+  });
+
+  it('取り込んでいる間の編集を巻き戻さない', async () => {
+    await open();
+    let release: (v: string) => void = () => {};
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockReturnValue(new Promise<string>((r) => { release = r; }));
+    const running = importPath();
+    // 取り込みの最中に別の編集が入る（自動保存の非同期と同じ型のハザード）。
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    release('assets/asset_001.png');
+    await running;
+    const s = useTimelineStore.getState();
+    expect(s.doc!.assets).toHaveLength(1);   // 素材は足される
+    expect(s.doc!.clips).toHaveLength(2);    // 途中の編集も残る
+  });
+
+  it('取り込んでいる間に別の動画へ移ったら、そちらへ足さない', async () => {
+    await open();
+    let release: (v: string) => void = () => {};
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockReturnValue(new Promise<string>((r) => { release = r; }));
+    const running = importPath();
+    // 取り込んでいる間に別の動画を開く（一覧へ戻って開き直す）。
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002', assets: [] })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    release('assets/asset_001.png');
+    await running;
+    const s = useTimelineStore.getState();
+    expect(s.doc!.projectId).toBe('proj_20260728_002');
+    expect(s.doc!.assets).toEqual([]);       // 別の動画を汚さない
+    expect(s.assetSrcById.asset_001).toBeUndefined();
+  });
+
+  it('別の動画へ移ったあとの失敗は、そちらへ出さない（触っていない動画に案内が出る）', async () => {
+    await open();
+    let fail: (e: unknown) => void = () => {};
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockReturnValue(new Promise<string>((_r, j) => { fail = j; }));
+    const running = importPath();
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002', assets: [] })));
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    fail(new Error('書き込めませんでした。'));
+    await running;
+    const st = useTimelineStore.getState();
+    expect(st.doc!.projectId).toBe('proj_20260728_002');
+    expect(st.importError).toBeNull();  // 触っていない動画に案内を出さない
+    expect(st.isImporting).toBe(false); // そちらの取り込みは止めない
+  });
+
+  it('二重には取り込まない（同じ番号の素材が2つできる）', async () => {
+    await open();
+    let release: (v: string) => void = () => {};
+    const copy = vi.spyOn(assetFsMod, 'importAssetByPath').mockReturnValue(new Promise<string>((r) => { release = r; }));
+    const first = importPath();
+    await importPath(); // 走っている間の2回目は素通りする
+    expect(copy).toHaveBeenCalledTimes(1);
+    release('assets/asset_001.png');
+    await first;
+    expect(useTimelineStore.getState().doc!.assets).toHaveLength(1);
+  });
+
+  it('動画は長さ・代表フレームまで揃える', async () => {
+    await open();
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.mp4');
+    vi.spyOn(assetFsMod, 'probeVideo').mockResolvedValue({ durationSec: 12.5, hasAudio: true, width: 1920, height: 1080 });
+    vi.spyOn(assetFsMod, 'extractVideoThumbnail').mockResolvedValue('assets/thumb_001.png');
+    await importPath('C:/pics/紹介ムービー.mp4');
+    const a = useTimelineStore.getState().doc!.assets[0];
+    expect(a.assetType).toBe('video');
+    expect(a.metadata?.durationSec).toBe(12.5);
+    expect(a.thumbnailPath).toBe('assets/thumb_001.png');
+    expect(useTimelineStore.getState().assetSrcById.asset_001).toBe('asset://a.png'); // 代表フレームを見せる
+  });
+
+  it('大きすぎるファイルは、この画面で実行できる次の行動を出す', async () => {
+    await open();
+    const copy = vi.spyOn(assetFsMod, 'importAssetByPath');
+    // 50MB 超（`MAX_INLINE_ASSET_BYTES`）。File は size だけ見るのでダミーで足りる。
+    await useTimelineStore.getState().addAsset({ name: '大きい.mp4', size: MAX_INLINE_ASSET_BYTES + 1 } as File);
+    const msg = useTimelineStore.getState().importError ?? '';
+    expect(msg).toContain('大きすぎます');
+    // 場面形式の案内（「『写真・動画を選ぶ』から取り込んでください」）はこの画面に無いボタンを指す
+    // ＝**実行できない案内**にしない（ADR-0034 決定5）。
+    expect(msg).not.toContain('写真・動画を選ぶ');
+    expect(copy).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().doc!.assets).toEqual([]);
+  });
+
+  it('取り消したあとの取り込みは、番号を使い回さない（前の写真を上書きしない）', async () => {
+    await open();
+    const copy = vi.spyOn(assetFsMod, 'importAssetByPath').mockImplementation(async (_p, f) => `assets/${f}`);
+    await importPath('C:/pics/1枚目.png');
+    useTimelineStore.getState().undo();                 // 一覧からは消えるが、ファイルは残っている
+    await importPath('C:/pics/2枚目.png');
+    // 空き番号を埋めると `asset_001.png` を上書きし、やり直しで戻った1枚目が2枚目の写真になる。
+    expect(copy.mock.calls.map((c) => c[1])).toEqual(['asset_001.png', 'asset_002.png']);
+    expect(useTimelineStore.getState().doc!.assets[0].assetId).toBe('asset_002');
+  });
+
+  it('文字を打っているまとめに、あとから着地した取り込みを混ぜない', async () => {
+    await open();
+    let release: (v: string) => void = () => {};
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockReturnValue(new Promise<string>((r) => { release = r; }));
+    const running = importPath();
+    // 取り込みを待っている間に、利用者が文字欄を触ってまとめが開く。
+    useTimelineStore.getState().beginHistoryGroup();
+    release('assets/asset_001.png');
+    await running;
+    const before = useTimelineStore.getState().history.past.length;
+    // まとめの「最初の1回」を取り込みが食べていないので、この編集はちゃんと積まれる。
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+    useTimelineStore.getState().endHistoryGroup();
+  });
+
+  it('待っている間に書き出しが始まったら、取り込めなかったと伝える（黙って捨てない）', async () => {
+    await open();
+    let release: (v: string) => void = () => {};
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockReturnValue(new Promise<string>((r) => { release = r; }));
+    const running = importPath();
+    useTimelineStore.setState({ exportRun: { phase: EXPORT_RUN_PHASE.rendering, percent: 50, message: null, cancelling: false } });
+    release('assets/asset_001.png');
+    await running;
+    const st = useTimelineStore.getState();
+    expect(st.doc!.assets).toEqual([]);
+    expect(st.importError).toContain('書き出しが終わってから');
+    expect(st.assetSrcById.asset_001).toBeUndefined(); // 文書に無い素材の絵を残さない
+  });
+
+  it('取り込み先が分からないときも、保存できる置き場所を持つ', async () => {
+    await open();
+    // ブラウザでは実体を保存できず null が返る。`filePath` が欠けると保存そのものが通らない。
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue(null);
+    await importPath();
+    expect(useTimelineStore.getState().doc!.assets[0].filePath).toBe('assets/asset_001.png');
+  });
+
+  it('書き出し中は取り込まない（始めた時点の文書を焼くので入らない）', async () => {
+    await open();
+    useTimelineStore.setState({ exportRun: { phase: EXPORT_RUN_PHASE.rendering, percent: 50, message: null, cancelling: false } });
+    const copy = vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.png');
+    await importPath();
+    expect(copy).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_EXPORTING');
+  });
+
+  it('ファイルから取り込むとき、動画と写真で経路を分ける', async () => {
+    await open();
+    const bytes = vi.spyOn(assetFsMod, 'importAssetBytes').mockResolvedValue('assets/asset_001.mp4');
+    const asFile = vi.spyOn(assetFsMod, 'importAssetFile').mockResolvedValue('assets/asset_002.png');
+    vi.spyOn(assetFsMod, 'fileToDataUrl').mockResolvedValue('data:image/png;base64,AA');
+    // 動画は生バイト（大容量でもメモリを食わない）。
+    await useTimelineStore.getState().addAsset({ name: '紹介.mp4', size: 10, arrayBuffer: async () => new ArrayBuffer(4) } as unknown as File);
+    expect(bytes).toHaveBeenCalledTimes(1);
+    expect(asFile).not.toHaveBeenCalled();
+    // 写真は data URL 経由。
+    await useTimelineStore.getState().addAsset({ name: '外観.png', size: 10 } as File);
+    expect(asFile).toHaveBeenCalledTimes(1);
+    expect(bytes).toHaveBeenCalledTimes(1);
+    expect(useTimelineStore.getState().doc!.assets.map((a) => a.assetType)).toEqual(['video', 'image']);
   });
 });

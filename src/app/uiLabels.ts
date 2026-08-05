@@ -1,5 +1,5 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
-import { AI_ASSET_SEND_MAX, VOLUME_POINTS_MAX } from "../domain/constants";
+import { AI_ASSET_SEND_MAX, MAX_INLINE_ASSET_BYTES, VOLUME_POINTS_MAX } from "../domain/constants";
 import { FREE_ELEMENT_KINDS, LAYER_TYPE, SUBTITLE_SOURCE_KIND } from "../domain/enums";
 import type { AssetType, Fit, FreeElementKind, FreeShapeType, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
@@ -449,6 +449,37 @@ export function clockLabel(sec: number): string {
 /** 帯（クリップ）のツールチップ＝名前と時間帯。両方の画面で同じ形にする。 */
 export function clipRangeTitle(label: string, startSec: number, endSec: number): string {
   return `${label}（${clockLabel(startSec)}〜${clockLabel(endSec)}）`;
+}
+
+/**
+ * 素材が大きすぎるときの案内（#712＝両形式で共有）。**次の行動は画面ごとに違う**ので受け取る
+ * （場面形式には大きいファイル用のボタンがあり、タイムライン編集には無い＝実行できない案内にしない）。
+ * MB への換算もここ1か所（`Math.round` を画面ごとに書かない）。
+ */
+export function assetTooLargeMessage(nextAction: string): string {
+  const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
+  return `このファイルは大きすぎます（上限${limitMb}MB）。${nextAction}`;
+}
+
+/**
+ * 素材を取り込んでいる最中に書き出しを始めようとしたときの案内（#570 P1）。
+ * **両形式で同じ文言**（同じ状況で同じことを言う＝ADR-0026②・§6）。
+ */
+export const EXPORT_BLOCKED_IMPORTING_MESSAGE = "素材の取り込み中です。取り込みが終わってから書き出してください。";
+
+/** 大きいファイルを取り込む道がある画面（はじめの入力・素材の画面）の次の行動。 */
+export const ASSET_TOO_LARGE_USE_PICKER = "大きいファイルは「写真・動画を選ぶ」から取り込んでください。";
+/** その道が無い画面（タイムライン編集）の次の行動。 */
+export const ASSET_TOO_LARGE_PICK_SMALLER = "もっと小さいファイルをお選びください。";
+
+/**
+ * 素材を取り込めなかったときの案内（#712＝両形式で共有）。アプリの中の取り込みは文字列で失敗を返す
+ * （Rust 側が §2-5 準拠で整えた文言）のでそのまま出し、それ以外は定型文へ落とす。生の例外は見せない。
+ */
+export function importErrorMessage(e: unknown): string {
+  if (typeof e === "string" && e.trim()) return e;
+  if (e instanceof Error && e.message) return e.message;
+  return "素材を取り込めませんでした。もう一度お選びください。";
 }
 
 export const editBlockedMessage: Record<EditBlockedReason, string> = {

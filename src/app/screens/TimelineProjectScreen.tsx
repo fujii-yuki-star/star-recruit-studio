@@ -46,6 +46,7 @@ import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { SECTION_SCOPE } from "../components/sectionOpen";
 import type { ContextMenuItem } from "../components/ContextMenu";
+import { AssetImportButton } from "../components/AssetImportButton";
 import { PickerList } from "../components/PickerList";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
@@ -245,6 +246,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
+    addAsset, addAssetByPath, importError, clearImportError, isImporting,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -1557,6 +1559,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // **写真・文字・図形を置く**（#684・ADR-0034 段階1）＝置く手段がこれまで無かった。
     { id: PANEL_ID.place, title: '素材・文字・図形を置く', content: (
       <>
+        {/* **取り込みは列と関係ない**（#712）＝置ける列が無いときも取り込めるようにしておく。
+            ここを列の有無で隠すと、列を足すまで素材を用意できない＝行き止まり（ADR-0034 決定5）。 */}
+        <div className="row gap-sm mb-sm">
+          <AssetImportButton
+            onFile={addAsset}
+            onPath={addAssetByPath}
+            isImporting={isImporting}
+            disabledReason={exporting ? exportingHint : null}
+            variant="secondary"
+            label="写真・動画を取り込む"
+          />
+        </div>
+        {importError && (
+          <div className="notice notice-warn row-between mb-sm" role="alert">
+            <span>{importError}</span>
+            <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+          </div>
+        )}
         {placeableTracks.length === 0 ? (
           <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
         ) : (
@@ -1579,7 +1599,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               </button>
             </div>
             {visualAssets.length === 0 ? (
-              <p className="field-hint">この動画にはまだ写真がありません。文字と図形は置けます。（写真の取り込みは準備中です）</p>
+              <p className="field-hint">この動画にはまだ写真がありません。「写真・動画を取り込む」で足せます。文字と図形はいま置けます。</p>
             ) : (
               <PickerList
                 items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}

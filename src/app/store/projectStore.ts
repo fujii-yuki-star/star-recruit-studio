@@ -16,7 +16,7 @@ import { buildTemplateSummaries, buildYukoPoseTags, resolveTargetAudience } from
 import type { GenerateVideoPlanInput } from "../../domain/ai/aiProvider";
 import type { AiVideoPlan } from "../../domain/ai/types";
 import {
-  assembleProject, createAnimationId, createAssetId, createBgmId, createPartId, createProjectId, createSceneId,
+  assembleProject, createAnimationId, createBgmId, createPartId, createProjectId, createSceneId,
   defaultVideoSettings, defaultVoiceSettings, parseProjectDoc, projectHeaderFromProject, validateProjectDoc,
 } from "../../domain/project/persistence";
 import type { ProjectHeader } from "../../domain/project/persistence";
@@ -39,8 +39,10 @@ import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, probeVideo, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
-import { detectAssetType, exceedsInlineAssetLimit, fileExtension } from "../../domain/asset/assetFile";
+import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
+import { exceedsInlineAssetLimit, fileExtension, newAssetFrom } from "../../domain/asset/assetFile";
+import { probeAndThumbVideo } from "./assetImport";
+import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
@@ -408,36 +410,6 @@ async function generateVideoPlan(input: GenerateVideoPlanInput): Promise<AiVideo
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const voiceProvider: VoiceProvider = hasTauri ? new VoicevoxProvider() : new MockVoiceProvider();
 
-// 取り込んだ動画の付加情報（メタ＝長さ/音声有無/解像度、代表フレーム＝サムネ）を取得する純IO。
-// store は更新せず結果のみ返す。各取得は独立に失敗を握り、部分結果で続行する（取り込みの成否とは独立）。
-async function probeAndThumbVideo(
-  projectId: string,
-  relPath: string,
-): Promise<{ metadata?: AssetMetadata; thumbnailPath?: string; thumbUrl?: string }> {
-  const out: { metadata?: AssetMetadata; thumbnailPath?: string; thumbUrl?: string } = {};
-  try {
-    const meta = await probeVideo(projectId, relPath);
-    if (meta) out.metadata = meta;
-    else if (hasTauri) console.warn("[asset] 動画メタの取得に失敗しました（既定値で続行）");
-  } catch (e) {
-    console.warn("[asset] 動画メタ取得で例外:", e);
-  }
-  try {
-    // 代表フレームを生成し、表示用 src（小さなPNG）として読み戻す＝確認画面/一覧に動画フレーム表示。
-    const thumbPath = await extractVideoThumbnail(projectId, relPath);
-    if (thumbPath) {
-      out.thumbnailPath = thumbPath;
-      const url = await assetDisplayUrl(projectId, thumbPath);
-      if (url) out.thumbUrl = url;
-    } else if (hasTauri) {
-      console.warn("[asset] 動画サムネの生成に失敗しました（アイコン表示にフォールバック）");
-    }
-  } catch (e) {
-    console.warn("[asset] 動画サムネ生成で例外:", e);
-  }
-  return out;
-}
-
 // probeAndThumbVideo の結果を該当素材へ反映する set 更新関数を返す（addAsset/addAssetByPath 共通）。
 function applyEnrichment(
   assetId: string,
@@ -455,14 +427,6 @@ function applyEnrichment(
       ? { ...s.assetSrcById, [assetId]: enrich.thumbUrl }
       : s.assetSrcById,
   });
-}
-
-// 取り込み失敗時のユーザー向け文言を取り出す。Tauri コマンドは文字列で reject される
-// （Rust が §2-5 準拠で整えた文言）のでそのまま使い、それ以外は定型文にフォールバックする。
-function importErrorMessage(e: unknown): string {
-  if (typeof e === "string" && e.trim()) return e;
-  if (e instanceof Error && e.message) return e.message;
-  return "素材を取り込めませんでした。もう一度お選びください。";
 }
 
 /** record から keep に含まれるキーだけ残した新しい record を返す（音声/素材キャッシュの剪定・#390）。 */
@@ -1497,23 +1461,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
     // 大容量はメモリへ展開せず、ネイティブ「開く」のパス0コピー取り込み（addAssetByPath）へ誘導する（#48・A3）。
     if (exceedsInlineAssetLimit(file.size)) {
-      const limitMb = Math.round(MAX_INLINE_ASSET_BYTES / (1024 * 1024));
-      set({ importError: `このファイルは大きすぎます（上限${limitMb}MB）。大きいファイルは「写真・動画を選ぶ」から取り込んでください。` });
+      set({ importError: assetTooLargeMessage(ASSET_TOO_LARGE_USE_PICKER) });
       return;
     }
-    const assetId = createAssetId(get().assets.map((a) => a.assetId));
-    // 拡張子から素材種別を判別（動画/画像）。詳細メタ(長さ・音声有無)・クリップ設定は follow-up。
-    const assetType = detectAssetType(file.name);
-    const parts = file.name.split(".");
-    const ext = fileExtension(file.name) || (assetType === ASSET_TYPE.video ? "mp4" : "png");
-    const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : file.name;
-    const fileName = `${assetId}.${ext}`;
-    const asset: Asset = {
-      assetId,
-      assetType,
-      displayName: baseName.trim() || "新しい素材",
-      filePath: `assets/${fileName}`,
-    };
+    // 素材1つぶんの導出は domain に1つ（#712・§2-7）。詳細メタ(長さ・音声有無)・クリップ設定は follow-up。
+    const { asset, fileName } = newAssetFrom(file.name, get().assets.map((a) => a.assetId));
+    const { assetId, assetType } = asset;
     // 最初の await の前に取り込みロック(isImporting)を取得＝書き出し開始と相互排他（#570 P1）。以降の離脱は isImporting を戻す。
     set({ isImporting: true });
     // 画像は表示＋書き出し(ADR-0004)で data URL が要る。動画は表示用srcを持たない
@@ -1552,7 +1505,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           new Uint8Array(await file.arrayBuffer()),
         );
         // savedPath は楽観設定した filePath と一致する（assetId.ext は sanitize で不変）。?? は保険。
-        const relPath = savedPath ?? `assets/${fileName}`;
+        const relPath = savedPath ?? asset.filePath;
         // メタ・サムネは取り込みの成否と独立（失敗してもロールバックしない）。
         const enrich = await probeAndThumbVideo(projectId, relPath);
         set(applyEnrichment(assetId, enrich));
@@ -1580,20 +1533,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   addAssetByPath: async (path) => {
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; } // 書き出し中は固定（#547 P2-1）
     if (get().isImporting) return; // 取り込み中の多重実行を防ぐ
-    const assetId = createAssetId(get().assets.map((a) => a.assetId));
-    // パス末尾（ファイル名部分。/ と \ の両方に対応）から種別・拡張子・表示名を決める。
-    const namePart = path.split(/[/\\]/).pop() ?? path;
-    const assetType = detectAssetType(namePart);
-    const parts = namePart.split(".");
-    const ext = fileExtension(namePart) || (assetType === ASSET_TYPE.video ? "mp4" : "png");
-    const baseName = parts.length > 1 ? parts.slice(0, -1).join(".") : namePart;
-    const fileName = `${assetId}.${ext}`;
-    const asset: Asset = {
-      assetId,
-      assetType,
-      displayName: baseName.trim() || "新しい素材",
-      filePath: `assets/${fileName}`,
-    };
+    // パス末尾から種別・拡張子・表示名を決める（導出は domain に1つ＝#712・§2-7）。
+    const { asset, fileName } = newAssetFrom(path, get().assets.map((a) => a.assetId));
+    const { assetId, assetType } = asset;
     // 即時：一覧へ追加（表示用 src は取り込み後に読み戻す）。素材追加で未保存に戻す。
     set((s) => ({ assets: [...s.assets, asset], saveStatus: "idle", importError: null }));
     set({ isImporting: true });
@@ -1606,7 +1548,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       // 元ファイルを Rust が直接コピー（バイトは JS を経由しない）。
       const savedPath = await importAssetByPath(projectId, fileName, path);
-      const relPath = savedPath ?? `assets/${fileName}`;
+      const relPath = savedPath ?? asset.filePath;
       if (assetType === ASSET_TYPE.video) {
         // メタ・サムネは取り込みの成否と独立（失敗してもロールバックしない）。
         const enrich = await probeAndThumbVideo(projectId, relPath);

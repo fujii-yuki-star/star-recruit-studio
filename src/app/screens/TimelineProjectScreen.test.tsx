@@ -1882,14 +1882,22 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(screen.queryByRole("button", { name: "文字を置く" })).not.toBeInTheDocument();
   });
 
-  it("写真がまだ無いときは、いまできることだけを言う（実行できない案内をしない）", () => {
-    // ⚠️ タイムライン形式の文書へ素材を取り込む経路はまだ無い（素材の画面は場面形式専用）。
-    // 「素材の画面で取り込んでください」と書くと**行き止まりの案内**になる（ADR-0034 決定5 が名指しした型）。
+  it("写真がまだ無いときは、この画面で取り込める道を出す（行き止まりにしない）", () => {
+    // 場面形式の素材画面はこの形式を見ないので、そこを指すと**行き止まりの案内**（ADR-0034 決定5）。
+    // #712 でこの画面に取り込みが付いたので、案内はここの導線を指す。
     withAsset({ assets: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByText(/この動画にはまだ写真がありません/)).toBeInTheDocument();
     expect(screen.queryByText(/素材の画面で取り込む/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /写真・動画を取り込む/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "文字を置く" })).toBeInTheDocument(); // できることは残る
+  });
+
+  it("置ける列が無くても取り込める（列を足すまで素材を用意できない、を作らない・#712）", () => {
+    withAsset({ tracks: [{ id: "track_002", kind: TRACK_KIND.audio }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/置ける映像の列がありません/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /写真・動画を取り込む/ })).toBeInTheDocument();
   });
 
   it("続けて置くと、次に空いている時刻へ置く（押しても置けない、を続けない）", () => {

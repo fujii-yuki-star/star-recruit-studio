@@ -1,7 +1,12 @@
 // タイムライン編集プロジェクト（ADR-0032・#629）の編集状態。**場面形式とは別の文書**なので store も分ける
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
-import { assetDisplayUrl, readAssetDataUrl } from "../../infrastructure/assetFs";
+import { assetDisplayUrl, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
+import { exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
+import { createAssetId } from "../../domain/project/persistence";
+import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
+import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
+import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 import { audioSourceKey, audioSourcesOf } from "../../domain/timeline/audio";
@@ -11,6 +16,7 @@ import { useProjectStore } from "./projectStore";
 import { createEmptyTimelineProject } from "../../domain/timeline/create";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { ASSET_TYPE } from "../../domain/enums";
+import type { AssetType } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
@@ -111,6 +117,19 @@ export interface TimelineState {
   editBlocked: EditBlockedReason | null;
   /** 声を作れなかったときの案内（§2-5）。次に作り始めたら消す。 */
   voiceError: string | null;
+  /** 素材を取り込めなかったときの案内（#712・§2-5）。閉じるまで残す。 */
+  importError: string | null;
+  /** 素材を取り込んでいる最中（#712）。**二重に取り込まない**＝同じ番号の素材が2つできる。 */
+  isImporting: boolean;
+  /**
+   * 素材（写真・動画）をこの動画へ取り込む（#712）。**ファイルを取り込んでから一覧へ足す**
+   * ＝失敗した素材の行を残さない。取り消しできる（文書まるごとの履歴に載る）。
+   */
+  addAsset: (file: File) => Promise<void>;
+  /** ネイティブの「開く」で選んだパスから取り込む（バイトを JS に載せない・#712）。 */
+  addAssetByPath: (path: string) => Promise<void>;
+  /** 取り込みの案内を閉じる。 */
+  clearImportError: () => void;
   /**
    * いま声を作っている部品（`null`＝作っていない）。**文書には持たない**＝自動保存で「作成中」が
    * 残ると、開き直しても作り直せない状態が固定される（履歴にも積まない）。
@@ -359,6 +378,8 @@ function emptyState() {
     history: emptyHistory<TimelineProject>(),
     editBlocked: null as EditBlockedReason | null,
     voiceError: null as string | null,
+    importError: null as string | null,
+    isImporting: false,
     generatingVoiceClipId: null as string | null,
     _historyGroupDepth: 0,
     _historyGroupPending: false,
@@ -619,6 +640,32 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     set({ assetSizes: { ...get().assetSizes, [assetId]: size } });
   },
 
+  clearImportError: () => set({ importError: null }),
+
+  addAsset: async (file) => {
+    // 順番は場面形式と同じ（開いているか→書き出し中→取り込み中→大きさ）＝同じ状況で同じ案内が出る（ADR-0026②）。
+    if (!canStartImport(set, get)) return;
+    // 大容量はメモリへ展開しない（#48・A3）。**アプリの中ではここへ来ない**＝取り込みボタンが
+    // ネイティブの「開く」へ回し、パスだけを受け取る経路（`addAssetByPath`）に上限は無い。
+    // 次の行動は場面形式と別（この画面に「写真・動画を選ぶ」は無い＝**実行できない案内**にしない・ADR-0034 決定5）。
+    if (exceedsInlineAssetLimit(file.size)) {
+      set({ importError: assetTooLargeMessage(ASSET_TOO_LARGE_PICK_SMALLER) });
+      return;
+    }
+    await runImport(set, get, file.name, async (fileName, assetType) => {
+      if (assetType === ASSET_TYPE.video) {
+        // 動画は base64 を経由せず生バイトで取り込む（大容量でもメモリを食わない）。
+        return await importAssetBytes(get().doc!.projectId, fileName, new Uint8Array(await file.arrayBuffer()));
+      }
+      return await importAssetFile(get().doc!.projectId, fileName, await fileToDataUrl(file));
+    });
+  },
+
+  addAssetByPath: async (path) => {
+    await runImport(set, get, path, async (fileName) =>
+      await importAssetByPath(get().doc!.projectId, fileName, path));
+  },
+
   addVoiceClip: (input) => {
     const doc = get().doc;
     if (!doc) return;
@@ -815,6 +862,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   exportTimelineVideo: async (deps) => {
     const doc = get().doc;
     if (!doc || isTimelineExportBusy(get().exportRun.phase)) return;
+    // 素材を取り込んでいる最中は始めない（場面形式と同じ＝ADR-0026②）。始めると、着地した素材が
+    // **この書き出しには入らないのに文書へ足される**＝入っていないものが入ったように見える（#570 P1）。
+    if (get().isImporting) {
+      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: EXPORT_BLOCKED_IMPORTING_MESSAGE } });
+      return;
+    }
     // 場面形式の書き出しが走っていたら始めない（一時ファイルの置き場を取り合って壊れた動画が出る）。
     if (isOtherExportRunning(EXPORT_OWNER)) {
       set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: OTHER_EXPORT_RUNNING_MESSAGE } });
@@ -970,6 +1023,74 @@ type GetState = () => TimelineState;
  *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
  *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
  */
+/**
+ * 素材を取り込み始めてよいか（#712）。**2つの入口で同じ順に見る**（場面形式と同じ並び＝ADR-0026②）。
+ * `false` のときは理由を出し終えている（黙って何もしない、を作らない）。
+ */
+function canStartImport(set: SetState, get: GetState): boolean {
+  if (!get().doc) return false;
+  // 書き出しは**始めた時点の文書**を焼くので、増やしても動画に入らない（`commit` と同じ規準・§2-5）。
+  if (isTimelineExportBusy(get().exportRun.phase)) { set({ editBlocked: EDIT_BLOCKED.exporting }); return false; }
+  if (get().isImporting) return false; // 二重に取り込むと同じ番号の素材が2つできる
+  return true;
+}
+
+/**
+ * 素材の取り込み（#712）。**2つの入口（ファイル／パス）で同じ手順を踏む**ための1か所。
+ *
+ * 場面形式は「先に一覧へ足して、失敗したら戻す」（楽観追加＋ロールバック）だが、こちらは
+ * **取り込めてから足す**。理由＝この形式の取り消しは**文書まるごと**なので、楽観追加とロールバックが
+ * それぞれ履歴に積まれ、失敗しただけで取り消しが2つ増える（`setBgm` の「先に取り込み＝ゴースト防止」と同じ流儀）。
+ */
+async function runImport(
+  set: SetState,
+  get: GetState,
+  sourceName: string,
+  copy: (fileName: string, assetType: AssetType) => Promise<string | null>,
+): Promise<void> {
+  const doc = get().doc;
+  if (!doc || !canStartImport(set, get)) return;
+  // **番号は使い回さない**（`reserveAssetId`）＝取り消し・開き直しで文書から消えても、その番号のファイルは
+  // ディスクに残っている。空き番号を埋めると**同じ名前のファイルを上書きして前の写真が消える**。
+  const assetId = reserveAssetId(doc.projectId, doc.assets.map((a) => a.assetId), createAssetId);
+  const { asset, fileName } = newAssetFrom(sourceName, [], assetId);
+  set({ isImporting: true, importError: null });
+  try {
+    const savedPath = await copy(fileName, asset.assetType);
+    const relPath = savedPath ?? asset.filePath;
+    // 動画は長さ・代表フレームまで揃える（取れなくても素材そのものは使える）。
+    const enrich = asset.assetType === ASSET_TYPE.video
+      ? await probeAndThumbVideo(doc.projectId, relPath)
+      : null;
+    const src = enrich ? enrich.thumbUrl : (await assetDisplayUrl(doc.projectId, relPath)) ?? undefined;
+    // **待っている間に文書が入れ替わっていたら、そちらへは何も書かない**。判定はここ1か所＝最後の await の後
+    // （2か所に置くと、片方を消しても、もう片方が拾ってしまい**壊れていることに気づけない**）。
+    // 表示先だけ書くのも駄目（文書に無い素材の絵が残り、次に同じ番号が来たときそれが出る）。
+    const cur = get().doc;
+    if (!cur || cur.projectId !== doc.projectId) return;
+    // 待っている間に書き出しが始まっていたら、`commit` は足さずに戻る。**そこで気づけるように**先に断る
+    // ＝「終わってから編集してください」だけ出して取り込みが消えた、を作らない（§2-5・#570 P1 と同じ流儀）。
+    if (isTimelineExportBusy(get().exportRun.phase)) {
+      set({ importError: "いま動画を書き出しているので、取り込めませんでした。書き出しが終わってからもう一度お試しください。" });
+      return;
+    }
+    const full: Asset = { ...asset, filePath: relPath, ...(enrich?.metadata ? { metadata: enrich.metadata } : {}), ...(enrich?.thumbnailPath ? { thumbnailPath: enrich.thumbnailPath } : {}) };
+    // **いまの文書へ足す**（取り込んでいる間の編集を巻き戻さない）。取り消しできる＝文書まるごとの履歴に載る。
+    // `outsideGroup`＝**非同期の着地は利用者のまとめに混ぜない**（文字を打っている最中に着地すると、
+    // その1回ぶんを食べて以後の入力が記録されない・声の完成と同じ流儀）。
+    commit(set, get, { ...cur, assets: [...cur.assets, full] }, {}, { outsideGroup: true });
+    if (src) set({ assetSrcById: { ...get().assetSrcById, [asset.assetId]: src } });
+    // 自動保存は**画面**が持っているので、離れた後に着地したぶんは誰も書かない＝ここで自分から保存する。
+    void get().saveTimelineProject();
+  } catch (e) {
+    // 足す前に断るので、戻すものは無い（一覧に幽霊を作らない）。触っていない動画へは出さない。
+    if (get().doc?.projectId === doc.projectId) set({ importError: importErrorMessage(e) });
+  } finally {
+    // 取り込みの鍵は**始めた動画のもの**＝別の動画を開いた後に外さない（そちらの取り込みを止めてしまう）。
+    if (get().doc?.projectId === doc.projectId) set({ isImporting: false });
+  }
+}
+
 function commit(
   set: SetState,
   get: GetState,
