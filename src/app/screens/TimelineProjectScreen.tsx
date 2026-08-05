@@ -36,6 +36,8 @@ import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
+import { CollapsibleSection } from "../components/CollapsibleSection";
+import { SECTION_SCOPE } from "../components/sectionOpen";
 import type { ContextMenuItem } from "../components/ContextMenu";
 import { PickerList } from "../components/PickerList";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
@@ -97,7 +99,7 @@ function tickStepSec(totalSec: number): number {
  * 選べるのに使えない選択肢を並べない（§2-5）。すでに入っている動画は「なし」で外せる。
  */
 /**
- * いま入っているのに選択肢に出せない素材（＝動画）。`<select>` の value に合う option が無いと**空欄**になり
+ * いま入っているのに選択肢に出せない素材（＝動画）。`<select className="select">` の value に合う option が無いと**空欄**になり
  * 「なし」と見分けが付かないので、名前だけ出す（選び直しはできない＝`disabled`）。
  */
 function unselectableCurrent(assets: readonly Asset[], assetId: string | null | undefined, layer: Layer): Asset | undefined {
@@ -386,6 +388,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 選んだ部品の音量の変化（#512 段4）。時刻は部品の先頭からの秒なので、表示は開始秒を足す。
   // 読むときも保存と同じ正規化を通す＝並び・重複・値域が画面と鳴る音で食い違わない。
   const selectedVolumePoints = selected ? normalizedVolumePoints(selected.volumePoints) : [];
+  // 切り抜きが入っているか（節を開いて出すかの判断に使う）。0 は「隠していない」＝入っていない扱い。
+  const cropIsSet = !!selected?.crop && Object.values(selected.crop).some((v) => typeof v === "number" && v > 0);
   // 点があるときは**一定の音量（この部品の「音量」欄）は使われない**（`volumeAt(points) ?? clipBaseVolume`）。
   // 欄を触れるままにすると「設定したのに音が変わらない」になる（ADR-0026①＝設定した意味どおり）。
   const hasVolumePoints = selectedVolumePoints.length > 0;
@@ -694,17 +698,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
             <label className="field">
               <span>置く列</span>
-              <select value={selected.trackId} onChange={(e) => moveSelectedClip({ trackId: e.target.value })}>
+              <select className="select" value={selected.trackId} onChange={(e) => moveSelectedClip({ trackId: e.target.value })}>
                 {doc.tracks.map((t) => (
                   <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
                 ))}
               </select>
             </label>
 
-            {/* 切り抜き（#634）＝箱の各辺を割合で隠す。中身は動かない（隠れるだけ）。 */}
+            {/* 切り抜き（#634）＝箱の各辺を割合で隠す。中身は動かない（隠れるだけ）。
+                節の `key`＝**部品を切り替えたら既定を見直す**。付けないと、同じ種類の部品を行き来する間は
+                React が作り直さず、開閉が最初に選んだ部品のままになる（設定が入っていても畳まれたまま）。
+                利用者が明示的に開閉した記憶は localStorage にあるので、作り直しても引き継がれる。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
-              <div className="mt-lg">
-                <h4>切り抜き</h4>
+              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="crop" title="切り抜き" defaultOpen={cropIsSet}>
                 <div className="row gap-sm">
                   {CROP_EDGES.map((e) => (
                     <label className="field" key={e.edge}>
@@ -730,7 +736,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <>
                     <label className="field">
                       <span>切り抜いたあと</span>
-                      <select
+                      <select className="select"
                         value={selected.cropMode ?? CROP_MODE_DEFAULT}
                         disabled={selectedLocked}
                         title={lockedHint}
@@ -752,7 +758,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 <div className="row gap-sm">
                   <label className="field">
                     <span>素材の寄せ（横）</span>
-                    <select
+                    <select className="select"
                       value={selected.cropAlign?.x ?? ""}
                       disabled={selectedLocked}
                       title={lockedHint}
@@ -765,7 +771,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   </label>
                   <label className="field">
                     <span>素材の寄せ（縦）</span>
-                    <select
+                    <select className="select"
                       value={selected.cropAlign?.y ?? ""}
                       disabled={selectedLocked}
                       title={lockedHint}
@@ -780,13 +786,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 <p className="text-muted">
                   寄せは「枠いっぱいに表示」で枠に収まらない側をどこで切るかです（全体を表示のときは余白の寄せになります）。
                 </p>
-              </div>
+              </CollapsibleSection>
             )}
 
             {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
-              <div className="mt-lg">
-                <h4>動き</h4>
+              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>
                 <p className="text-muted">
                   再生位置（{playheadSec.toFixed(1)}秒）に「<strong>本来の見た目からのずれ</strong>」を置きます。
                   2か所に違う値を置くと、その間はなめらかに変わります。空欄の項目は動かしません。
@@ -855,7 +860,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         {/* 動き方は「1つ前のキーフレームからここまで」に効く（#262）。 */}
                         <label className="field field-inline">
                           <span>ここまでの動き方</span>
-                          <select
+                          <select className="select"
                             value={easingChoiceOf(k.easing)}
                             disabled={selectedLocked}
                             title={lockedHint}
@@ -921,28 +926,31 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     動きをすべて外す
                   </button>
                 )}
-                {/* まとまり（グループ）に付いた動きも見せる＝画面では動いているのに「動きは付いていません」と
-                    言わない（焼き出しは自由配置の場面の切り替えをまとまりへ付ける・ADR-0032 決定19）。 */}
-                {groupKeyframes.map((g) => (
-                  <div className="notice" key={g.groupId}>
-                    <p>この部品が入っている「まとまり」にも動きが付いています（{g.keyframes.length}か所）。</p>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      disabled={selectedLocked}
-                      title={lockedHint}
-                      onClick={() => clearKeyframesOf(g.groupId)}
-                    >
-                      まとまりの動きを外す
-                    </button>
-                  </div>
-                ))}
-              </div>
+              </CollapsibleSection>
             )}
+            {/* まとまり（グループ）に付いた動きも見せる＝画面では動いているのに「動きは付いていません」と
+                言わない（焼き出しは自由配置の場面の切り替えをまとまりへ付ける・ADR-0032 決定19）。
+                **これは節の外に出す**（#705 レビュー）＝中に置くと、利用者が一度「動き」を畳んでいると
+                その記憶が既定より優先され、**知らせが二度と見えない**。畳める場所に置いてよい知らせではない。
+                出す条件は「動き」の節と同じ（絵の無い部品では、まとまりに動きがあっても効かない）。 */}
+            {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice
+              && groupKeyframes.map((g) => (
+              <div className="notice" key={g.groupId}>
+                <p>この部品が入っている「まとまり」にも動きが付いています（{g.keyframes.length}か所）。</p>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled={selectedLocked}
+                  title={lockedHint}
+                  onClick={() => clearKeyframesOf(g.groupId)}
+                >
+                  まとまりの動きを外す
+                </button>
+              </div>
+            ))}
 
             {/* 音の部品は、速さ・使い始め・音量・フェードを変えられる（#634＝中位の編集）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.audio && (
-              <div className="mt-lg">
-                <h4>音</h4>
+              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="audio" title="音" defaultOpen={true}>
                 <label className="field">
                   <span>速さ（倍）</span>
                   <input
@@ -1013,17 +1021,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
                   素材が置き場所より短いときは繰り返して埋まります。
                 </p>
-              </div>
+              </CollapsibleSection>
             )}
 
             {/* 読み上げは、この画面で文を書いて声を作れる（ADR-0032 決定7）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.voice && (
-              <div className="mt-lg">
-                <h4>読み上げ</h4>
+              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="voice" title="読み上げ" defaultOpen={true}>
                 <label className="field">
                   <span>読み上げる文</span>
                   <input
-                    type="text"
+                    className="input" type="text"
                     value={selected.voice?.text ?? ""}
                     disabled={selectedLocked}
                     title={lockedHint}
@@ -1032,7 +1039,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 </label>
                 <label className="field">
                   <span>声</span>
-                  <select
+                  <select className="select"
                     value={selected.voice?.speaker ?? ""}
                     disabled={selectedLocked}
                     title={lockedHint}
@@ -1066,14 +1073,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       ? "声を作れませんでした。もう一度お試しください。"
                       : "文を書いて「声を作る」を押すと、長さが声に合います。"}
                 </p>
-              </div>
+              </CollapsibleSection>
             )}
 
             {/* 音量の変化（#512 段4）＝置いた時刻の音量を並べると、その間はなめらかに変わる。
                 音・読み上げのどちらにも置ける（鳴る音を持つ部品だけ）。 */}
             {isAudioClip(selected) && (
-              <div className="mt-lg">
-                <h4>音量の変化</h4>
+              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="volumePoints" title="音量の変化" defaultOpen={selectedVolumePoints.length > 0}>
                 <p className="text-muted">
                   再生位置（{playheadSec.toFixed(1)}秒）にその時の音量を置きます。違う値を2か所に置くと、
                   その間はなめらかに変わります。前後のフェードは、この変化の上に掛かります。
@@ -1165,19 +1171,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     </button>
                   </>
                 )}
-              </div>
+              </CollapsibleSection>
             )}
 
             {/* 字幕は読み上げと連動できる（ADR-0032 決定24）＝文言と時間が付いてくる。 */}
             {selected.kind === TIMELINE_CLIP_KIND.subtitle && (
-              <div className="mt-lg">
-                <h4>連動する読み上げ</h4>
+              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="subtitleLink" title="連動する読み上げ" defaultOpen={true}>
                 {voiceClips.length === 0 ? (
                   <p className="text-muted">連動できる読み上げの部品がまだありません。</p>
                 ) : (
                   <label className="field">
                     <span>連動先</span>
-                    <select
+                    <select className="select"
                       value={selected.voiceClipId ?? ""}
                       disabled={selectedLocked}
                       title={lockedHint}
@@ -1193,7 +1198,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 <label className="field">
                   <span>{SUBTITLE_TEXT_FIELD_LABEL}</span>
                   <input
-                    type="text"
+                    className="input" type="text"
                     value={selected.text ?? ""}
                     disabled={selectedLocked}
                     title={lockedHint}
@@ -1206,21 +1211,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     ? `いま出る文：「${subtitleTextOf(doc, selected) ?? ""}」${selected.text ? "（この部品の文が優先されています）" : "（連動先の読み上げ文）"}`
                     : "連動すると、読み上げの文と時間に合わせて字幕が出ます。"}
                 </p>
-              </div>
+              </CollapsibleSection>
             )}
 
             {/* 見た目パターンの部品は、置いたあとも中身を差し替えられる（ADR-0032 決定5）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.template && (
               selectedTemplate ? (
-                <div className="mt-lg">
-                  <h4>この見た目パターンの中身</h4>
+                <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="templateContent" title="この見た目パターンの中身" defaultOpen={true}>
                   {slotLayers.length === 0 && textKeys.length === 0 && (
                     <p className="text-muted">この見た目パターンに入れ替えられる中身はありません。</p>
                   )}
                   {slotLayers.map((layer, i) => (
                     <label className="field" key={layer.id}>
                       <span>{slotNames[i]}</span>
-                      <select
+                      <select className="select"
                         value={selected.assetRefs?.[layer.id] ?? ""}
                         disabled={selectedLocked}
                         title={lockedHint}
@@ -1252,7 +1256,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <label className="field" key={key}>
                       <span>{textKeyLabel[key]}</span>
                       <input
-                        type="text"
+                        className="input" type="text"
                         value={selected.texts?.[key] ?? ""}
                         disabled={selectedLocked}
                         title={lockedHint}
@@ -1268,7 +1272,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   >
                     中身をバラす
                   </button>
-                </div>
+                </CollapsibleSection>
               ) : (
                 <p className="notice notice-warn" role="alert">
                   この部品の見た目パターンが見つかりません。見た目パターンを読み込み直すか、この部品を置き直してください。
@@ -1302,7 +1306,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </p>
             <label className="field">
               <span>置く列</span>
-              <select value={placeTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
+              <select className="select" value={placeTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
                 {placeableTracks.map((t) => (
                   <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
                 ))}

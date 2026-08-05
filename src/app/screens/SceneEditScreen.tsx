@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
@@ -60,6 +60,8 @@ import { DEFAULT_TEXT_COLOR, defaultStrokeColor, resolveTextStyle } from "../../
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { FitSelect } from "../components/FitSelect";
 import { NumberField } from "../components/NumberField";
+import { CollapsibleSection } from "../components/CollapsibleSection";
+import { SECTION_SCOPE } from "../components/sectionOpen";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { saveButtonLabel } from "../components/saveButtonLabel";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
@@ -97,21 +99,6 @@ type AssetFilter = "all" | "image" | "video" | "bgm";
  */
 const PANEL_ID = { assets: "assets", preview: "preview", scenes: "scenes", edit: "edit" } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
-const LS_SECTION_OPEN = "sceneEdit.sectionOpen";
-/**
- * 節の開閉の記憶（#550 ③）。**場面をまたぐだけなら元から保たれる**（節は再マウントされない）が、
- * 台本表/仕上がり確認へ行って戻ると画面ごと作り直されて忘れる＝毎回開き直す手間になっていた。
- * 右パネルの幅・左パネルの折りたたみ（#276）と同じ「場面編集パネルのレイアウト設定」なので、同じく localStorage に置く。
- * キーは節の見出し（安定・少数）。壊れた値・保存不可（プライベートモード等）は既定へ倒す＝編集を止めない。
- */
-type SectionOpenMap = Record<string, boolean>;
-function loadSectionOpen(): SectionOpenMap {
-  try {
-    const v: unknown = JSON.parse(localStorage.getItem(LS_SECTION_OPEN) ?? "{}");
-    if (typeof v !== "object" || v === null || Array.isArray(v)) return {};
-    return Object.fromEntries(Object.entries(v).filter(([, b]) => typeof b === "boolean")) as SectionOpenMap;
-  } catch { return {}; }
-}
 /**
  * 「選択した要素だけ編集」（#179）の記憶（#550 ②）。既定 ON。節の開閉（③）と同じ理由で覚える＝
  * 既定を変えたぶん「毎回 OFF にし直す」手間を作らない。
@@ -127,45 +114,6 @@ function saveFocusSelectedFree(on: boolean): void {
   try { localStorage.setItem(LS_FOCUS_FREE, on ? "1" : "0"); } catch { /* 保存できなくても編集は続けられる */ }
 }
 
-function saveSectionOpen(title: string, open: boolean): void {
-  try {
-    localStorage.setItem(LS_SECTION_OPEN, JSON.stringify({ ...loadSectionOpen(), [title]: open }));
-  } catch { /* 保存できなくても編集は続けられる（次回は既定で開く/畳む） */ }
-}
-
-// 場面編集の右欄の節を開閉できるアコーディオン（#276）。details/summary ベース。
-// 内部 state を持つので親（SceneEditScreen）の再描画でも開閉が保たれる（モジュール定義＝再マウントしない）。
-// さらに開閉を localStorage へ覚える（#550 ③）＝画面を往復しても開き直さなくてよい。
-function CollapsibleSection({ title, storageKey, defaultOpen = true, children }: {
-  title: string;
-  /**
-   * 記憶のキー（#550 レビュー P3）。既定は見出しそのもの。**見出しが状態で変わる節は必ず渡す**＝
-   * 例「〜の見た目（この場面だけ変更中）」（#555）は上書きの有無で見出しが変わるため、素で使うと記憶が
-   * 2キーに割れて「上書き中に開いた記憶」が非上書き時に引かれない（記憶が当てにならなくなる）。
-   */
-  storageKey?: string;
-  defaultOpen?: boolean;
-  children: ReactNode;
-}) {
-  const memoKey = storageKey ?? title;
-  // 記憶があればそれを、無ければ既定（#550 ①＝主編集の節だけ開く）。lazy init＝初回描画時に1度だけ読む。
-  const [open, setOpen] = useState(() => loadSectionOpen()[memoKey] ?? defaultOpen);
-  const onToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
-    const next = e.currentTarget.open;
-    // **既定のままなら保存しない**：`<details open>` は描画しただけで（非同期に）toggle を発火するため、
-    // 素通しにすると「触ってもいない節の既定値」が保存され、**将来 既定を変えても既存利用者に届かなくなる**
-    // （記憶が既定を上書きし続ける）。利用者が実際に開閉したときだけ覚える。
-    if (next === open) return;
-    setOpen(next);
-    saveSectionOpen(memoKey, next);
-  };
-  return (
-    <details className="accordion" open={open} onToggle={onToggle}>
-      <summary className="accordion-summary">{title}</summary>
-      <div className="accordion-body">{children}</div>
-    </details>
-  );
-}
 
 // FREE 要素の表示名（#525-12）：任意 name ＞ 種類＋連番（index は freeLayout の並び順で安定）。
 // 見分けやすさのため一覧/チップ/詳細見出しで共有する（グループ名＝#9 と同じ「オブジェクトに名前」UX）。
@@ -845,7 +793,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     const overridden = ov != null && Object.keys(ov).length > 0;
     const set = (p: Partial<TextStyleOverride>) => setSceneTextStyle(key, p);
     return (
-      <CollapsibleSection
+      <CollapsibleSection scope={SECTION_SCOPE.sceneEdit}
         title={`${textKeyLabel[key]}の見た目${overridden ? "（この場面だけ変更中）" : ""}`}
         storageKey={`textStyle:${key}`}
         defaultOpen={false}
@@ -1651,7 +1599,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
             {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
             {!isFree && (
-              <CollapsibleSection title="文字">
+              <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="文字">
               {sceneTextKeys.length === 0 && (
                 <div>
                   <p className="field-hint" style={{ marginTop: 0 }}>この見た目パターンは文字を表示しません。</p>
@@ -1706,7 +1654,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
             {/* 二次的な節は既定で畳む（#550 ①）＝場面ごとに毎回いじる所ではない（種類/見た目/フォント/BGM は
                 だいたい最初に決めて以後は触らない）。一度開けば記憶される（③）ので、よく使う人の手間は増えない。 */}
-            <CollapsibleSection title="見た目・フォント" defaultOpen={false}>
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="見た目・フォント" defaultOpen={false}>
             {/* 場面の種類（カテゴリ）を直接変える導線（#528）。変えるとその種類の見た目へ切り替わる＝オープニング固定を解く。 */}
             <div className="field">
               <label className="field-label" htmlFor="scene-kind">種類</label>
@@ -1837,7 +1785,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </div>
             </CollapsibleSection>
 
-            <CollapsibleSection title="使用素材" defaultOpen={false}>
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="使用素材" defaultOpen={false}>
             <div className="field">
               {slotLayers.length === 0 ? (
                 <p className="text-sm text-muted">この見た目パターンに素材を入れる場所はありません。</p>
@@ -1894,7 +1842,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
 
             {/* FREE 場面：自由配置エディタ（素材/文字/図形を追加・数値で位置/大きさ・重ね順・削除）。Phase 4a-3b。 */}
             {isFree && (
-              <CollapsibleSection title="自由配置">
+              <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="自由配置">
               <div className="field">
                 <p className="field-hint" style={{ marginTop: 0 }}>
                   素材・文字・図形を追加し、プレビュー上でドラッグして動かす・角をつまんで大きさを変える、または数字で調整できます。
@@ -2242,7 +2190,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </CollapsibleSection>
             )}
 
-            <CollapsibleSection title="掛け合い・セリフ">
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="掛け合い・セリフ">
             <div className="field">
               <div className="toggle-row">
                 <span className="field-label" style={{ margin: 0 }}>掛け合い（複数のセリフ）</span>
@@ -2549,7 +2497,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             {/* 場面ごとの声の大きさ（全体設定を継承 or この場面だけ上書き。§6/§2.2） */}
             {/* 既定は畳む。ただし「この場面で上書き設定済み」なら開く＝設定を見失わない（PR#286レビュー）。
                 key を場面 id にして場面切替ごとに評価し直す（SceneEditScreen は場面切替で再マウントしないため）。 */}
-            <CollapsibleSection key={selected.sceneId} title="この場面だけ声の大きさ" defaultOpen={sceneNarrationVolume != null}>
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} key={selected.sceneId} title="この場面だけ声の大きさ" defaultOpen={sceneNarrationVolume != null}>
             <div className="field">
               <div className="toggle-row">
                 <span className="field-label" style={{ margin: 0 }}>この場面だけ声の大きさを変える</span>
@@ -2602,7 +2550,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             </CollapsibleSection>
 
 
-            <CollapsibleSection title="表示時間" defaultOpen={false}>
+            <CollapsibleSection scope={SECTION_SCOPE.sceneEdit} title="表示時間" defaultOpen={false}>
             <div className="field">
               <label className="field-label" htmlFor="duration">表示時間（秒）</label>
               <input

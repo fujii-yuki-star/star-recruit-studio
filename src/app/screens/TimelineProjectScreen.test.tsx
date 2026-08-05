@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。開けないときの案内と、並び・選択の見せ方を固定する。
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent } from "@testing-library/react";
 import { pointerDownAt } from "../../test/pointer";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
@@ -1240,5 +1240,99 @@ describe("TimelineProjectScreen: 編集の場所を上から圧迫しない（�
     expect(notice).toBeDefined();
     const layoutArea = container.querySelector(".panel-layout")!;
     expect(layoutArea.compareDocumentPosition(notice!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+// 「選んだ部品」の欄は縦に長く、横にも切れていた（実機の指摘 2026-08-04）＝節を畳めるようにし、
+// たまにしか触らない節は最初から畳んで出す（#687）。
+describe("TimelineProjectScreen: 選んだ部品の欄を整える（#687）", () => {
+  // 見出しは列の名前（「音1」など）と字が重なるので、**節の見出し**に限って探す。
+  const section = (title: string): HTMLDetailsElement =>
+    screen.getAllByText(title).find((el) => el.tagName === "SUMMARY")!.closest("details") as HTMLDetailsElement;
+
+  it("節を畳める＝よく触る節は開き、細かい節は畳んで出す", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(section("動き").open).toBe(false); // 細かい調整＝畳む
+    expect(section("切り抜き").open).toBe(false);
+  });
+
+  it("設定が入っている節は開いて出す（入れた設定を見失わせない）", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+      animations: [{ id: "anim_001", targetId: "clip_001", keyframes: [{ timeSec: 1, x: 20 }] }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(section("動き").open).toBe(true); // 動きが付いている＝畳んで隠さない
+  });
+
+  it("まとまりに付いた動きの知らせも、畳んだ中に隠さない", () => {
+    open({
+      groups: [{ id: "group_001", members: ["clip_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+      animations: [{ id: "anim_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 「画面では動いているのに『動きは付いていません』と言わない」ための知らせ＝見えていないと意味がない。
+    expect(section("動き").open).toBe(true);
+    expect(screen.getByText(/「まとまり」にも動きが付いています/)).toBeInTheDocument();
+  });
+
+  it("部品を切り替えたら節の既定を見直す（最初に選んだ部品のままにしない）", () => {
+    // 同じ種類の部品を行き来する間は React が作り直さないので、`key` を付けないと開閉が固まる。
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 6, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+      animations: [{ id: "anim_001", targetId: "clip_002", keyframes: [{ timeSec: 1, x: 20 }] }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); // 動きの付いていない部品
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(section("動き").open).toBe(false);
+    act(() => useTimelineStore.getState().selectClip("clip_002")); // 動きの付いた部品へ
+    expect(section("動き").open).toBe(true);
+  });
+
+  it("まとまりの動きの知らせは、節を畳んでいても見える（畳める場所に置かない）", () => {
+    // 一度畳んだ記憶は既定より優先されるので、知らせを節の中に置くと二度と見えなくなる。
+    localStorage.setItem("timeline.sectionOpen", JSON.stringify({ anim: false }));
+    open({
+      groups: [{ id: "group_001", members: ["clip_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+      animations: [{ id: "anim_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(section("動き").open).toBe(false); // 畳んだ記憶どおり
+    const notice = screen.getByText(/「まとまり」にも動きが付いています/);
+    expect(notice.closest("details")).toBeNull(); // どの節の中にも入っていない
+    expect(container.contains(notice)).toBe(true);
+  });
+
+  it("音の部品では、よく触る節を開いて出す", () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 5, bundledBgmId: "found-new-hope" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(section("音").open).toBe(true);
+    expect(section("音量の変化").open).toBe(false);
   });
 });
