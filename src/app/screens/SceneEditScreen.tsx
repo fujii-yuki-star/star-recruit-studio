@@ -10,7 +10,7 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, Vi
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, isFreeSlotAssetType, NARRATION_STATUS, SLOT_TYPE, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP } from "../../domain/constants";
@@ -52,7 +52,7 @@ import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
-import { FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
+import { freeShapeLabel, FIT_FIELD_LABEL, freeKindLabel, freeSwitchConfirmMessage, LINE_SUBTITLE_TOGGLE_LABEL, SCENE_SUBTITLE_TOGGLE_LABEL, silentSubtitleMessage, slotLabelsFor, subtitleOverflowMessage, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
 import { fontFamilyForId, resolveFontId, type FontId } from "../../domain/font/fontCatalog";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import { ColorPicker } from "../components/ColorPicker";
@@ -957,13 +957,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
             <div className="field" style={{ flex: 1, margin: 0 }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>形</label>
               <select className="select" value={el.shapeType ?? FREE_SHAPE_TYPE.rect} onChange={(e) => patchFreeEl(el.id, { shapeType: e.target.value as FreeShapeType })}>
-                <option value={FREE_SHAPE_TYPE.rect}>四角</option>
-                <option value={FREE_SHAPE_TYPE.rounded_rect}>角丸四角</option>
-                <option value={FREE_SHAPE_TYPE.ellipse}>丸</option>
-                <option value={FREE_SHAPE_TYPE.triangle}>三角</option>
-                <option value={FREE_SHAPE_TYPE.star}>星</option>
-                <option value={FREE_SHAPE_TYPE.arrow}>矢印</option>
-                <option value={FREE_SHAPE_TYPE.speech_bubble}>吹き出し</option>
+                {/* 形の名前は共有（#684）＝同じ形を画面によって別の名で呼ばない（§6）。 */}
+                {FREE_SHAPE_TYPES.map((t) => (
+                  <option key={t} value={t}>{freeShapeLabel[t]}</option>
+                ))}
               </select>
             </div>
             <div className="field" style={{ margin: 0 }}>

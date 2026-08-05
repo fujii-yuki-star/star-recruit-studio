@@ -61,15 +61,20 @@ const PANEL_ID = {
   arrange: "arrange",
   selected: "selected",
   templates: "templates",
+  place: "place",
   audio: "audio",
   voice: "voice",
 } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, clipRangeTitle, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
-import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, SLOT_TYPE } from "../../domain/enums";
+import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
+import type { FreeShapeType } from "../../domain/enums";
+import { DEFAULT_FIT } from "../../domain/constants";
+import { ColorPicker } from "../components/ColorPicker";
+import { FitSelect } from "../components/FitSelect";
 import type { CropAlignX, CropAlignY } from "../../domain/enums";
 import type { Asset } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
@@ -231,7 +236,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
-    addAudioClip, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
+    addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
   } = useTimelineStore();
@@ -340,8 +345,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     l.nodes.bottom = { panelId: PANEL_ID.arrange };
     l.nodes.left = {
       dir: SPLIT_DIR.column,
-      sizes: [1 / 3, 1 / 3, 1 / 3],
-      children: [{ panelId: PANEL_ID.templates }, { panelId: PANEL_ID.audio }, { panelId: PANEL_ID.voice }],
+      sizes: [1 / 4, 1 / 4, 1 / 4, 1 / 4],
+      // **置くものは上から**（写真・文字・図形 → 見た目パターン → 音 → 読み上げ）＝#684。
+      // 素材を置くのがいちばん多い操作なので先頭に出す（他社も素材の欄が最上位＝#683 の調査）。
+      children: [
+        { panelId: PANEL_ID.place },
+        { panelId: PANEL_ID.templates },
+        { panelId: PANEL_ID.audio },
+        { panelId: PANEL_ID.voice },
+      ],
     };
     return l;
   }, []);
@@ -511,6 +523,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 読み上げを置ける列（音の列）。
   // この動画が持っている音の素材（焼き出しで運ばれたものなど）。
   const audioAssets = doc?.assets.filter((a) => a.assetType === ASSET_TYPE.bgm) ?? [];
+  // 置ける絵の素材（#684）。**音・声は除く**（絵として置くと何も映らない）。
+  const visualAssets = doc?.assets.filter((a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice) ?? [];
+  // 置ける映像の列があるか（無ければ「列を足してください」と出す＝押しても何も起きない、を作らない）。
+  const hasVisualTrack = (doc?.tracks.some((t) => t.kind === TRACK_KIND.visual) ?? false);
   // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
   const voiceTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.audio && !t.locked && !t.hidden) ?? [];
   // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
@@ -827,6 +843,95 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 ))}
               </select>
             </label>
+
+            {/* **置いた部品の中身**（#684）＝写真の差し替え・文字・図形の色や形。
+                「置けるのに直せない」を作らない。場所と大きさは別（#685 のキャンバス操作）。 */}
+            {(selected.kind === TIMELINE_CLIP_KIND.slot
+              || selected.kind === TIMELINE_CLIP_KIND.text
+              || selected.kind === TIMELINE_CLIP_KIND.shape) && (
+              <CollapsibleSection key={`content-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="content" title="中身" defaultOpen>
+                {selected.kind === TIMELINE_CLIP_KIND.text && (
+                  <>
+                    <label className="field">
+                      <span>文字</span>
+                      <input
+                        className="input" type="text"
+                        value={selected.text ?? ""}
+                        {...editGuard()}
+                        {...textGroup}
+                        onChange={(e) => setSelectedVisualContent({ text: e.target.value })}
+                      />
+                    </label>
+                    <div className="row gap-sm">
+                      <NumberField
+                        label="文字の大きさ"
+                        min={1}
+                        step={4}
+                        value={selected.fontSize ?? null}
+                        placeholder="見た目にまかせる"
+                        {...editGuard()}
+                        onChange={(v) => setSelectedVisualContent({ fontSize: v })}
+                      />
+                      <label className="field">
+                        <span>文字の色</span>
+                        <ColorPicker
+                          value={selected.color ?? "#ffffff"}
+                          ariaLabel="文字の色"
+                          onChange={(v) => setSelectedVisualContent({ color: v })}
+                        />
+                      </label>
+                    </div>
+                  </>
+                )}
+                {selected.kind === TIMELINE_CLIP_KIND.shape && (
+                  <div className="row gap-sm">
+                    <label className="field">
+                      <span>形</span>
+                      <select
+                        className="select"
+                        value={selected.shapeType ?? FREE_SHAPE_TYPE.rect}
+                        {...editGuard()}
+                        onChange={(e) => setSelectedVisualContent({ shapeType: e.target.value as FreeShapeType })}
+                      >
+                        {FREE_SHAPE_TYPES.map((t) => (
+                          <option key={t} value={t}>{freeShapeLabel[t]}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>色</span>
+                      <ColorPicker
+                        value={selected.fillColor ?? "#cccccc"}
+                        ariaLabel="図形の色"
+                        onChange={(v) => setSelectedVisualContent({ fillColor: v })}
+                      />
+                    </label>
+                  </div>
+                )}
+                {selected.kind === TIMELINE_CLIP_KIND.slot && (
+                  <>
+                    <label className="field">
+                      <span>素材</span>
+                      <select
+                        className="select"
+                        value={selected.assetId ?? ""}
+                        {...editGuard()}
+                        onChange={(e) => setSelectedVisualContent({ assetId: e.target.value })}
+                      >
+                        {visualAssets.map((a) => (
+                          <option key={a.assetId} value={a.assetId}>{a.displayName}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <FitSelect
+                      value={selected.fit ?? DEFAULT_FIT}
+                      {...editGuard()}
+                      onChange={(v) => setSelectedVisualContent({ fit: v })}
+                    />
+                  </>
+                )}
+              </CollapsibleSection>
+            )}
 
             {/* 切り抜き（#634）＝箱の各辺を割合で隠す。中身は動かない（隠れるだけ）。
                 節の `key`＝**部品を切り替えたら既定を見直す**。付けないと、同じ種類の部品を行き来する間は
@@ -1404,6 +1509,45 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         )}
         {selectedClipIds.length > 1 && (
           <button className="btn btn-danger" onClick={removeSelectedClips} {...editGuard({ disabled: selectionHasLocked, hint: lockedSelectionHint })}>選んだ{selectedClipIds.length}個を消す</button>
+        )}
+      </>
+    ) },
+    // **写真・文字・図形を置く**（#684・ADR-0034 段階1）＝置く手段がこれまで無かった。
+    { id: PANEL_ID.place, title: '素材・文字・図形を置く', content: (
+      <>
+        {!hasVisualTrack ? (
+          <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足してください。</p>
+        ) : (
+          <>
+            <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに場所と大きさを変えられます。</p>
+            <div className="row gap-sm">
+              <button
+                className="btn btn-secondary"
+                {...busyGuard({ disabled: isPlaying, hint: playingHint })}
+                onClick={() => addVisualClip({ kind: TIMELINE_CLIP_KIND.text })}
+              >
+                文字を置く
+              </button>
+              <button
+                className="btn btn-secondary"
+                {...busyGuard({ disabled: isPlaying, hint: playingHint })}
+                onClick={() => addVisualClip({ kind: TIMELINE_CLIP_KIND.shape })}
+              >
+                図形を置く
+              </button>
+            </div>
+            {visualAssets.length === 0 ? (
+              <p className="field-hint">置ける写真がまだありません。素材の画面で取り込むと、ここに出ます。</p>
+            ) : (
+              <PickerList
+                items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}
+                disabled={isPlaying || exporting}
+                disabledHint={exporting ? exportingHint : playingHint}
+                searchLabel="素材の絞り込み"
+                onPick={(assetId) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId })}
+              />
+            )}
+          </>
         )}
       </>
     ) },

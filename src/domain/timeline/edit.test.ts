@@ -5,10 +5,11 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, moveClip, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
+  addTemplateClip, addVisualClip, moveClip, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
+import { DEFAULT_SHAPE_COLOR } from '../project/freeLayoutOps';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
   return { id, kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: 'あ', ...over };
@@ -207,6 +208,71 @@ describe('removeSelectedClipsChecked（利用者が「消す」を押す入口�
       clips: [clip('clip_001')],
     });
     expect(removeClips(d, ['clip_001']).clips).toEqual([]);
+  });
+});
+
+describe('addVisualClip（写真・文字・図形を置く・#684）', () => {
+  const base = () => doc({
+    tracks: [
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.audio },
+    ],
+    clips: [],
+    assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'a.png' }],
+  });
+
+  it('画面の真ん中に置く（置いた瞬間に見える）', () => {
+    const r = addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0 });
+    expect(r.ok).toBe(true);
+    const c = r.ok ? r.doc.clips[0] : undefined;
+    // 16:9＝1920×1080。文字は横長の帯（0.8×0.14）を真ん中へ。
+    expect(c).toMatchObject({ kind: 'text', x: 192, y: 465, w: 1536, h: 151, text: '' });
+  });
+
+  it('落とした場所は**箱の中心**として扱い、画面の外へは出さない', () => {
+    const r = addVisualClip(base(), {
+      kind: TIMELINE_CLIP_KIND.shape, trackId: 'track_001', startSec: 0, center: { x: 0, y: 0 },
+    });
+    expect(r.ok).toBe(true);
+    // 左上に落としても、箱ごと画面の中へ収める（負の座標を作らない）。
+    expect(r.ok && r.doc.clips[0]).toMatchObject({ x: 0, y: 0 });
+    const far = addVisualClip(base(), {
+      kind: TIMELINE_CLIP_KIND.shape, trackId: 'track_001', startSec: 0, center: { x: 9999, y: 9999 },
+    });
+    expect(far.ok && far.doc.clips[0]).toMatchObject({ x: 1920 - 576, y: 1080 - 324 });
+  });
+
+  it('図形の既定は場面形式の「図形を足す」と同じ（形式で色が変わらない）', () => {
+    const r = addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.shape, trackId: 'track_001', startSec: 0 });
+    expect(r.ok && r.doc.clips[0]).toMatchObject({ shapeType: 'rect', fillColor: DEFAULT_SHAPE_COLOR, opacity: 1 });
+  });
+
+  it('この動画が持っていない素材は置かない（存在しない枠を作らない）', () => {
+    expectBlocked(
+      addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, assetId: 'no_such' }),
+      EDIT_BLOCKED.notFound,
+    );
+    expectBlocked(
+      addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0 }),
+      EDIT_BLOCKED.notFound,
+    );
+  });
+
+  it('音の列には置けない・固定した列にも置けない・重なる場所にも置けない', () => {
+    expectBlocked(
+      addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 0 }),
+      EDIT_BLOCKED.trackKind,
+    );
+    const locked = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }], clips: [] });
+    expectBlocked(
+      addVisualClip(locked, { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0 }),
+      EDIT_BLOCKED.locked,
+    );
+    const busy = addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0 });
+    expectBlocked(
+      addVisualClip(busy.ok ? busy.doc : base(), { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 1 }),
+      EDIT_BLOCKED.overlap,
+    );
   });
 });
 

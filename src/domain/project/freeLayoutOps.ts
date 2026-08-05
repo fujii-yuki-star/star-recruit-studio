@@ -22,7 +22,12 @@ const DEFAULT_TEXT_FONT_SIZE = 48;
 const DEFAULT_SHAPE_W = 600;
 const DEFAULT_SHAPE_H = 400;
 const DEFAULT_TEXT = 'テキスト';
-const DEFAULT_SHAPE_COLOR = '#cccccc';
+/**
+ * 図形を**新しく足したとき**の塗り。タイムライン形式の「図形を置く」（#684）も同じ値を使う
+ * ＝同じ物を足すのに形式で色が違う、を作らない（ADR-0026②）。
+ * ※未指定データを**描く**ときのフォールバック（`SHAPE_FILL_FALLBACK_COLOR`）とは別物。
+ */
+export const DEFAULT_SHAPE_COLOR = '#cccccc';
 // 字幕要素（ADR-0029）：画面下寄りの字幕バー。表示文言は subtitleSource（対象）から解決＝el.text は持たない。
 const DEFAULT_SUBTITLE_X = 240;
 const DEFAULT_SUBTITLE_Y = 900;

@@ -3,10 +3,12 @@
 // **置けない操作は黙って別の結果にしない**（§2-5・ADR-0026④）＝重なる位置へ動かそうとしたら、勝手に
 // 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
 import {
-  AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX,
+  AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, PLACED_BOX_RATIO,
+  TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation,
 } from '../constants';
-import { FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { DEFAULT_SHAPE_COLOR } from '../project/freeLayoutOps';
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
@@ -525,6 +527,91 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
  * 長さは指定（無ければ仮の既定）。素材より長い置き場所は**繰り返して埋まる**（BGM の流儀＝`11 §7.6.5`）ので、
  * 尺が分からなくても置ける。トリム（`sourceStartSec`）と速さ（`speed`）は置いたあとに変えられる。
  */
+/**
+ * **絵のもの（写真・文字・図形）を置く**（#684・ADR-0034 段階1）。`addAudioClip` と同じ流儀＝
+ * 置けない場所は理由を返し、黙って別の場所へ寄せない。
+ *
+ * - **箱は真ん中に置く**（`PLACED_BOX_RATIO`）＝置いた瞬間に画面で見える。座標を指定されたら
+ *   そこを**箱の中心**として置く（キャンバスへ落としたとき＝落とした場所に置く）。画面外へは出さない。
+ * - 長さは仮（`VISUAL_PLACEHOLDER_SEC`）＝掴んで伸ばせる程度。
+ * - 素材は**この動画が持っているものだけ**（`doc.assets`）＝存在しない素材の枠を作らない。
+ */
+export function addVisualClip(
+  doc: TimelineProject,
+  input: {
+    kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
+    trackId: string;
+    startSec: number;
+    /** kind='slot' のとき入れる素材。 */
+    assetId?: string;
+    /** 箱の中心（未指定＝画面の真ん中）。キャンバスへ落としたときに使う。 */
+    center?: { x: number; y: number };
+  },
+): EditResult {
+  const track = doc.tracks.find((t) => t.id === input.trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  if (track.locked) return blocked(EDIT_BLOCKED.locked);
+  if (track.kind !== trackKindForClip(input.kind)) return blocked(EDIT_BLOCKED.trackKind);
+  if (input.kind === TIMELINE_CLIP_KIND.slot) {
+    if (input.assetId == null || !doc.assets.some((a) => a.assetId === input.assetId)) {
+      return blocked(EDIT_BLOCKED.notFound);
+    }
+  }
+  const startSec = Math.max(0, input.startSec);
+  const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC);
+  if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
+  const ratio = PLACED_BOX_RATIO[input.kind];
+  const w = Math.round(canvas.width * ratio.w);
+  const h = Math.round(canvas.height * ratio.h);
+  const center = input.center ?? { x: canvas.width / 2, y: canvas.height / 2 };
+  // **画面の外へは置かない**（落とした先が端でも、箱ごと見える位置へ収める）。
+  const x = Math.round(Math.min(Math.max(0, center.x - w / 2), Math.max(0, canvas.width - w)));
+  const y = Math.round(Math.min(Math.max(0, center.y - h / 2), Math.max(0, canvas.height - h)));
+  const clip: TimelineClip = {
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: input.kind,
+    trackId: input.trackId,
+    startSec,
+    durationSec,
+    x, y, w, h,
+    ...(input.kind === TIMELINE_CLIP_KIND.slot ? { assetId: input.assetId } : {}),
+    // 置いた直後から**中身を直せる**ように、初期値を入れておく（#684＝置けるのに直せない、を作らない）。
+    ...(input.kind === TIMELINE_CLIP_KIND.text ? { text: "" } : {}),
+    // 図形の既定は**場面形式の「図形を足す」と同じ**（同じ物を足すのに別の色が出ない・ADR-0026②）。
+    ...(input.kind === TIMELINE_CLIP_KIND.shape
+      ? { shapeType: FREE_SHAPE_TYPE.rect, fillColor: DEFAULT_SHAPE_COLOR, opacity: 1 }
+      : {}),
+  };
+  return ok({ ...doc, clips: [...doc.clips, clip] });
+}
+
+/**
+ * **置いた部品の中身を直す**（#684）＝写真の差し替え・文字・図形の色や形。
+ * 「置けるのに直せない」を作らないための入口で、幾何（場所・大きさ）は別の操作（#685）。
+ *
+ * 渡された分だけを変える（未指定は触らない）。**その種類が持たない項目は受け取らない**（型で縛る）。
+ */
+export function setVisualClipContent(
+  doc: TimelineProject,
+  clipId: string,
+  patch: Partial<Pick<TimelineClip, 'text' | 'fontSize' | 'color' | 'shapeType' | 'fillColor' | 'assetId' | 'fit'>>,
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  const track = doc.tracks.find((t) => t.id === clip.trackId);
+  if (track?.locked) return blocked(EDIT_BLOCKED.locked);
+  // 素材は**この動画が持っているものだけ**（存在しない素材を指させない）。
+  if (patch.assetId != null && !doc.assets.some((a) => a.assetId === patch.assetId)) {
+    return blocked(EDIT_BLOCKED.notFound);
+  }
+  const next = { ...clip, ...patch };
+  // **何も変わらないなら同じ文書を返す**（空振りの取り消しを積まない・`11 §7.6.3`）。
+  const same = (Object.keys(patch) as (keyof typeof patch)[]).every((k) => clip[k] === patch[k]);
+  if (same) return ok(doc);
+  return ok(withClip(doc, next));
+}
+
 export function addAudioClip(
   doc: TimelineProject,
   input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number; durationSec?: number },

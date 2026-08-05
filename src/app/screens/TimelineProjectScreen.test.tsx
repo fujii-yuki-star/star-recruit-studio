@@ -1830,3 +1830,67 @@ describe("TimelineProjectScreen: 文字を打つ間は1つの取り消しにま�
     expect(useTimelineStore.getState().doc?.clips[0].voice?.text).toBe("とちゅう"); // 確定を待たない
   });
 });
+
+// 写真1枚すら置けなかった（#684・ADR-0034 段階1）。置く手段と、置いた直後に直せることを固定する。
+describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", () => {
+  const withAsset = (over: Record<string, unknown> = {}) => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+      clips: [],
+      assets: [
+        { assetId: "asset_001", assetType: "image", displayName: "会社の外観", filePath: "a.png" },
+        { assetId: "asset_002", assetType: "bgm", displayName: "曲", filePath: "b.mp3" },
+      ],
+      ...over,
+    });
+  };
+
+  it("文字を置ける（置いたら選ばれていて、すぐ直せる）", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    const doc = useTimelineStore.getState().doc!;
+    expect(doc.clips).toHaveLength(1);
+    expect(doc.clips[0].kind).toBe(TIMELINE_CLIP_KIND.text);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([doc.clips[0].id]); // 置いたら選ぶ
+    // 選ばれているので、そのまま中身（文字）を直せる＝「置けるのに直せない」を作らない。
+    expect(screen.getByLabelText("文字")).toBeInTheDocument();
+  });
+
+  it("図形も置ける", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "図形を置く" }));
+    expect(useTimelineStore.getState().doc!.clips[0].kind).toBe(TIMELINE_CLIP_KIND.shape);
+  });
+
+  it("写真を置ける（音の素材は絵として出さない）", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText("曲")).not.toBeInTheDocument(); // 音は絵の一覧に出さない
+    fireEvent.click(screen.getByText("会社の外観"));
+    expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ kind: "slot", assetId: "asset_001" });
+  });
+
+  it("置ける列が無いときは、何をすれば置けるか出す", () => {
+    withAsset({ tracks: [{ id: "track_002", kind: TRACK_KIND.audio }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/置ける映像の列がありません/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "文字を置く" })).not.toBeInTheDocument();
+  });
+
+  it("素材がまだ無いときは、どこで取り込むか出す（行き止まりにしない）", () => {
+    withAsset({ assets: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/素材の画面で取り込む/)).toBeInTheDocument();
+  });
+
+  it("同じ場所に重なるときは、理由を出して置かない", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" })); // 同じ再生位置＝重なる
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_OVERLAP");
+  });
+});

@@ -14,10 +14,11 @@ import { ASSET_TYPE } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
-import type { CropAlignX, CropAlignY, CropMode, Orientation, TextKey, TrackKind } from "../../domain/enums";
+import type { CropAlignX, CropAlignY, CropMode, Fit, FreeShapeType, Orientation, TextKey, TrackKind } from "../../domain/enums";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip,
+  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, moveClip,
+  setVisualClipContent,
   moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
   setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
@@ -34,7 +35,7 @@ import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 import { importVoiceFile } from "../../infrastructure/voiceFs";
-import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from "../../domain/enums";
+import { NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { NarrationStatus } from "../../domain/enums";
 import type { TimelineVoice } from "../../domain/timeline/types";
 import type { VoiceSettings } from "../../domain/project/types";
@@ -182,6 +183,20 @@ export interface TimelineState {
   setSelectedClipText: (textKey: TextKey, text: string) => void;
   /** 見た目パターンの部品をバラす（中身ぶんの部品へ展開・#632）。**戻せない**（取り消しでだけ戻る）。 */
   explodeClip: (clipId: string, template: Template) => void;
+  /**
+   * **写真・文字・図形を置く**（#684）。置いたものは**そのまま選ぶ**＝続けて中身を直せる。
+   * 置ける列が無ければ理由を出す（黙って何もしない、を作らない）。
+   */
+  addVisualClip: (input: {
+    kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
+    assetId?: string;
+    center?: { x: number; y: number };
+  }) => void;
+  /** 置いた部品の中身を直す（#684）＝写真の差し替え・文字・図形の色や形。 */
+  setSelectedVisualContent: (patch: {
+    text?: string; fontSize?: number; color?: string;
+    shapeType?: FreeShapeType; fillColor?: string; assetId?: string; fit?: Fit;
+  }) => void;
   /** 音（同梱BGM／持ち込んだ音）を置く（#634）。 */
   addAudioClip: (input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number }) => void;
   /** 選んでいる音・動画の素材の再生速度（#634）。 */
@@ -531,6 +546,26 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     commit(set, get, r.doc, { selectedClipIds: r.doc.clips.filter((c) => !before.has(c.id)).map((c) => c.id) });
   },
 
+  setSelectedVisualContent: (patch) => applyEdit(set, get, (d, id) => setVisualClipContent(d, id, patch)),
+  addVisualClip: (input) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // 置き先は**空いている映像の列**を上から探す（固定した列・重なる場所は避ける）。
+    // 見つからないときは黙って何もしないのではなく、理由を出す（§2-5）。
+    const startSec = get().playheadSec;
+    let last: EditResult | null = null;
+    for (const track of doc.tracks.filter((t) => t.kind === TRACK_KIND.visual)) {
+      const r = addVisualClip(doc, { ...input, trackId: track.id, startSec });
+      if (r.ok) {
+        const placed = r.doc.clips[r.doc.clips.length - 1];
+        commit(set, get, r.doc, { selectedClipIds: [placed.id] });
+        return;
+      }
+      last = r;
+    }
+    // 映像の列が1本も無いときも、理由を出す（押しても何も起きない、を作らない）。
+    set({ editBlocked: last && !last.ok ? last.reason : EDIT_BLOCKED.notFound });
+  },
   addAudioClip: (input) => {
     const doc = get().doc;
     if (!doc) return;
