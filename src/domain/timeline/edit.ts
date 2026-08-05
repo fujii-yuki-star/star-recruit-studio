@@ -4,11 +4,12 @@
 // 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
 import {
   AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, PLACED_BOX_RATIO,
-  TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX,
+  TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation,
 } from '../constants';
 import { FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
-import { DEFAULT_SHAPE_COLOR } from '../project/freeLayoutOps';
+import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
+import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
@@ -576,8 +577,16 @@ export function addVisualClip(
     durationSec,
     x, y, w, h,
     ...(input.kind === TIMELINE_CLIP_KIND.slot ? { assetId: input.assetId } : {}),
-    // 置いた直後から**中身を直せる**ように、初期値を入れておく（#684＝置けるのに直せない、を作らない）。
-    ...(input.kind === TIMELINE_CLIP_KIND.text ? { text: "" } : {}),
+    // 置いた直後から**見えて・直せる**ように、初期値を入れておく（#684）。
+    // **文字は空にしない**＝空文字は描かれず「置いたのに見えない」になる。既定は場面形式の「文字を足す」と同じ
+    // （同じ物を足すのに形式で見た目が違う、を作らない・ADR-0026②）。大きさは画面の広さに合わせて伸ばす。
+    ...(input.kind === TIMELINE_CLIP_KIND.text
+      ? {
+        text: DEFAULT_TEXT,
+        fontSize: Math.round(DEFAULT_TEXT_FONT_SIZE * (canvas.width / WIDTH)),
+        color: DEFAULT_TEXT_COLOR,
+      }
+      : {}),
     // 図形の既定は**場面形式の「図形を足す」と同じ**（同じ物を足すのに別の色が出ない・ADR-0026②）。
     ...(input.kind === TIMELINE_CLIP_KIND.shape
       ? { shapeType: FREE_SHAPE_TYPE.rect, fillColor: DEFAULT_SHAPE_COLOR, opacity: 1 }
@@ -590,15 +599,34 @@ export function addVisualClip(
  * **置いた部品の中身を直す**（#684）＝写真の差し替え・文字・図形の色や形。
  * 「置けるのに直せない」を作らないための入口で、幾何（場所・大きさ）は別の操作（#685）。
  *
- * 渡された分だけを変える（未指定は触らない）。**その種類が持たない項目は受け取らない**（型で縛る）。
+ * 渡された分だけを変える（未指定は触らない）。**その種類が持たない項目は断る**。
  */
+/**
+ * 種類ごとに直せる項目（#684）。`TimelineClip` は全種別の項目を任意で持つ平らな形なので、
+ * **どの種類が何を持つか**はここが単一の参照元（型では縛れない）。
+ */
+const VISUAL_CONTENT_KEYS = {
+  [TIMELINE_CLIP_KIND.slot]: ['assetId', 'fit'],
+  [TIMELINE_CLIP_KIND.text]: ['text', 'fontSize', 'color', 'fontId', 'fontWeight', 'textAlign'],
+  [TIMELINE_CLIP_KIND.shape]: ['shapeType', 'fillColor'],
+} as const;
+
 export function setVisualClipContent(
   doc: TimelineProject,
   clipId: string,
-  patch: Partial<Pick<TimelineClip, 'text' | 'fontSize' | 'color' | 'shapeType' | 'fillColor' | 'assetId' | 'fit'>>,
+  patch: Partial<Pick<TimelineClip,
+    'text' | 'fontSize' | 'color' | 'fontId' | 'fontWeight' | 'textAlign' | 'shapeType' | 'fillColor' | 'assetId' | 'fit'>>,
 ): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // **その種類が持つ項目だけを受ける**（`TimelineClip` は全種別の項目を任意で持つ平らな形なので、
+  // 型では縛れない＝ここで断る）。音の部品に図形の色を書く、のような意味の無いデータを作らない
+  // （`11 §7.6.3.2` の「鳴る音を持たない部品には置けない」と同じ流儀）。
+  if (!VISUAL_CONTENT_KEYS[clip.kind as keyof typeof VISUAL_CONTENT_KEYS]) return blocked(EDIT_BLOCKED.trackKind);
+  const allowed = VISUAL_CONTENT_KEYS[clip.kind as keyof typeof VISUAL_CONTENT_KEYS];
+  if (!Object.keys(patch).every((k) => (allowed as readonly string[]).includes(k))) {
+    return blocked(EDIT_BLOCKED.trackKind);
+  }
   const track = doc.tracks.find((t) => t.id === clip.trackId);
   if (track?.locked) return blocked(EDIT_BLOCKED.locked);
   // 素材は**この動画が持っているものだけ**（存在しない素材を指させない）。

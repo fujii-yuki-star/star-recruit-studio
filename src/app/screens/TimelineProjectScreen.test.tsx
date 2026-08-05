@@ -1840,6 +1840,8 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
       assets: [
         { assetId: "asset_001", assetType: "image", displayName: "会社の外観", filePath: "a.png" },
         { assetId: "asset_002", assetType: "bgm", displayName: "曲", filePath: "b.mp3" },
+        // 動画は置けても書き出しの手前で断られる＝選べるのに使えない選択肢を並べない（ADR-0032 決定23）。
+        { assetId: "asset_003", assetType: "video", displayName: "紹介ムービー", filePath: "c.mp4" },
       ],
       ...over,
     });
@@ -1868,6 +1870,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText("曲")).not.toBeInTheDocument(); // 音は絵の一覧に出さない
+    expect(screen.queryByText("紹介ムービー")).not.toBeInTheDocument(); // 動画も出さない（使えない選択肢を並べない）
     fireEvent.click(screen.getByText("会社の外観"));
     expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ kind: "slot", assetId: "asset_001" });
   });
@@ -1879,18 +1882,44 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(screen.queryByRole("button", { name: "文字を置く" })).not.toBeInTheDocument();
   });
 
-  it("素材がまだ無いときは、どこで取り込むか出す（行き止まりにしない）", () => {
+  it("写真がまだ無いときは、いまできることだけを言う（実行できない案内をしない）", () => {
+    // ⚠️ タイムライン形式の文書へ素材を取り込む経路はまだ無い（素材の画面は場面形式専用）。
+    // 「素材の画面で取り込んでください」と書くと**行き止まりの案内**になる（ADR-0034 決定5 が名指しした型）。
     withAsset({ assets: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/素材の画面で取り込む/)).toBeInTheDocument();
+    expect(screen.getByText(/この動画にはまだ写真がありません/)).toBeInTheDocument();
+    expect(screen.queryByText(/素材の画面で取り込む/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "文字を置く" })).toBeInTheDocument(); // できることは残る
   });
 
-  it("同じ場所に重なるときは、理由を出して置かない", () => {
+  it("続けて置くと、次に空いている時刻へ置く（押しても置けない、を続けない）", () => {
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
-    fireEvent.click(screen.getByRole("button", { name: "文字を置く" })); // 同じ再生位置＝重なる
-    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
-    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_OVERLAP");
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" })); // 同じ再生位置＝塞がっている
+    const clips = useTimelineStore.getState().doc!.clips;
+    expect(clips).toHaveLength(2);
+    // 1つ目の終わりから続けて置く（重ねない・黙って何もしない、もしない）。
+    expect(clips[1].startSec).toBe(clips[0].startSec + clips[0].durationSec);
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
+  });
+
+  it("置ける列が固定・非表示だけなら置かない（動画に出ない部品を黙って作らない）", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/置ける映像の列がありません/)).toBeInTheDocument();
+  });
+
+  it("隠した列は置き先に選ばない（見えている列へ置く）", () => {
+    withAsset({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },          // 奥・見えている
+        { id: "track_003", kind: TRACK_KIND.visual, hidden: true }, // 手前だが隠してある
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    // 手前から探すが、隠した列は飛ばす（置いても動画に出ないため）。
+    expect(useTimelineStore.getState().doc!.clips[0].trackId).toBe("track_001");
   });
 });

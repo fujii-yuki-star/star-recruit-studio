@@ -73,6 +73,12 @@ import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
 import type { FreeShapeType } from "../../domain/enums";
 import { DEFAULT_FIT } from "../../domain/constants";
+import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
+import type { FontWeight, TextAlign } from "../../domain/enums";
+import { FontPicker } from "../components/FontPicker";
+import { DEFAULT_SHAPE_COLOR } from "../../domain/project/freeLayoutOps";
+import { DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR } from "../../domain/template/textStyle";
+import { isFreeSlotAssetType } from "../../domain/enums";
 import { ColorPicker } from "../components/ColorPicker";
 import { FitSelect } from "../components/FitSelect";
 import type { CropAlignX, CropAlignY } from "../../domain/enums";
@@ -523,10 +529,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 読み上げを置ける列（音の列）。
   // この動画が持っている音の素材（焼き出しで運ばれたものなど）。
   const audioAssets = doc?.assets.filter((a) => a.assetType === ASSET_TYPE.bgm) ?? [];
-  // 置ける絵の素材（#684）。**音・声は除く**（絵として置くと何も映らない）。
-  const visualAssets = doc?.assets.filter((a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice) ?? [];
-  // 置ける映像の列があるか（無ければ「列を足してください」と出す＝押しても何も起きない、を作らない）。
-  const hasVisualTrack = (doc?.tracks.some((t) => t.kind === TRACK_KIND.visual) ?? false);
+  // 置ける絵の素材（#684）。判定は**自由配置の差し込み口と同じ関数**（ADR-0030 追補＝一本化）。
+  // **動画は出さない**＝置けても書き出しの手前で断られる（選べるのに使えない選択肢を並べない・`06 §12.1`）。
+  const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType) && a.assetType !== ASSET_TYPE.video) ?? [];
   // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
   const voiceTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.audio && !t.locked && !t.hidden) ?? [];
   // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
@@ -867,20 +872,55 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         label="文字の大きさ"
                         min={1}
                         step={4}
-                        value={selected.fontSize ?? null}
-                        placeholder="見た目にまかせる"
+                        value={selected.fontSize ?? DEFAULT_FONT_SIZE}
                         {...editGuard()}
                         onChange={(v) => setSelectedVisualContent({ fontSize: v })}
                       />
                       <label className="field">
                         <span>文字の色</span>
                         <ColorPicker
-                          value={selected.color ?? "#ffffff"}
+                          value={selected.color ?? DEFAULT_TEXT_COLOR}
                           ariaLabel="文字の色"
                           onChange={(v) => setSelectedVisualContent({ color: v })}
                         />
                       </label>
                     </div>
+                    {/* 太さ・フォント・揃えも直せる（ADR-0034 決定4 が名指し・場面編集と同じ顔ぶれ）。
+                        バラした文字はテンプレ由来の太字・中央揃えを持つので、これが無いと直せない。 */}
+                    <div className="row gap-sm">
+                      <label className="field">
+                        <span>太さ</span>
+                        <select
+                          className="select"
+                          value={selected.fontWeight ?? FONT_WEIGHT.normal}
+                          {...editGuard()}
+                          onChange={(e) => setSelectedVisualContent({ fontWeight: e.target.value as FontWeight })}
+                        >
+                          <option value={FONT_WEIGHT.normal}>ふつう</option>
+                          <option value={FONT_WEIGHT.bold}>太字</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>揃え</span>
+                        <select
+                          className="select"
+                          value={selected.textAlign ?? TEXT_ALIGN.left}
+                          {...editGuard()}
+                          onChange={(e) => setSelectedVisualContent({ textAlign: e.target.value as TextAlign })}
+                        >
+                          <option value={TEXT_ALIGN.left}>左</option>
+                          <option value={TEXT_ALIGN.center}>中央</option>
+                          <option value={TEXT_ALIGN.right}>右</option>
+                        </select>
+                      </label>
+                    </div>
+                    <label className="field">
+                      <span>フォント</span>
+                      <FontPicker
+                        value={selected.fontId ?? null}
+                        onChange={(id) => setSelectedVisualContent({ fontId: id })}
+                      />
+                    </label>
                   </>
                 )}
                 {selected.kind === TIMELINE_CLIP_KIND.shape && (
@@ -901,7 +941,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <label className="field">
                       <span>色</span>
                       <ColorPicker
-                        value={selected.fillColor ?? "#cccccc"}
+                        value={selected.fillColor ?? DEFAULT_SHAPE_COLOR}
                         ariaLabel="図形の色"
                         onChange={(v) => setSelectedVisualContent({ fillColor: v })}
                       />
@@ -916,8 +956,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         className="select"
                         value={selected.assetId ?? ""}
                         {...editGuard()}
-                        onChange={(e) => setSelectedVisualContent({ assetId: e.target.value })}
+                        onChange={(e) => setSelectedVisualContent({ assetId: e.target.value === "" ? null : e.target.value })}
                       >
+                        {/* 空の枠（バラすと生まれる）も表せるようにする＝いまの状態が読めない、を作らない。 */}
+                        <option value="">なし（空の枠）</option>
                         {visualAssets.map((a) => (
                           <option key={a.assetId} value={a.assetId}>{a.displayName}</option>
                         ))}
@@ -1515,11 +1557,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // **写真・文字・図形を置く**（#684・ADR-0034 段階1）＝置く手段がこれまで無かった。
     { id: PANEL_ID.place, title: '素材・文字・図形を置く', content: (
       <>
-        {!hasVisualTrack ? (
-          <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足してください。</p>
+        {placeableTracks.length === 0 ? (
+          <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
         ) : (
           <>
-            <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに場所と大きさを変えられます。</p>
+            <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。塞がっているときは、その次に空いている時刻へ置きます。</p>
             <div className="row gap-sm">
               <button
                 className="btn btn-secondary"
@@ -1537,7 +1579,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               </button>
             </div>
             {visualAssets.length === 0 ? (
-              <p className="field-hint">置ける写真がまだありません。素材の画面で取り込むと、ここに出ます。</p>
+              <p className="field-hint">この動画にはまだ写真がありません。文字と図形は置けます。（写真の取り込みは準備中です）</p>
             ) : (
               <PickerList
                 items={visualAssets.map((a) => ({ id: a.assetId, label: a.displayName }))}

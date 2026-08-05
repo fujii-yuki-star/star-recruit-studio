@@ -13,8 +13,10 @@ import { validateTimelineProject } from "../../domain/validation/generated/valid
 import { ASSET_TYPE } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
+import { clipEndSec } from "../../domain/timeline/validateTimelineDoc";
 import type { TimelineProject } from "../../domain/timeline/types";
-import type { CropAlignX, CropAlignY, CropMode, Fit, FreeShapeType, Orientation, TextKey, TrackKind } from "../../domain/enums";
+import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, Orientation, TextAlign, TextKey, TrackKind } from "../../domain/enums";
+import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
   addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, moveClip,
@@ -195,7 +197,8 @@ export interface TimelineState {
   /** 置いた部品の中身を直す（#684）＝写真の差し替え・文字・図形の色や形。 */
   setSelectedVisualContent: (patch: {
     text?: string; fontSize?: number; color?: string;
-    shapeType?: FreeShapeType; fillColor?: string; assetId?: string; fit?: Fit;
+    fontId?: FontId | null; fontWeight?: FontWeight; textAlign?: TextAlign;
+    shapeType?: FreeShapeType; fillColor?: string; assetId?: string | null; fit?: Fit;
   }) => void;
   /** 音（同梱BGM／持ち込んだ音）を置く（#634）。 */
   addAudioClip: (input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number }) => void;
@@ -554,7 +557,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 見つからないときは黙って何もしないのではなく、理由を出す（§2-5）。
     const startSec = get().playheadSec;
     let last: EditResult | null = null;
-    for (const track of doc.tracks.filter((t) => t.kind === TRACK_KIND.visual)) {
+    // **隠した列・固定した列は選ばない**（`11 §7.6.2.4`）＝置けても動画に出ない部品が黙って生まれる。
+    // 画面の「置ける列」（`placeableTracks`）と同じ規則（同じ判断を2通りに書かない）。
+    // **手前（配列の末尾）から**探す＝新しく置いたものが既にあるものの後ろに隠れない（表示も手前が上）。
+    const placeable = doc.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.locked && !t.hidden).reverse();
+    for (const track of placeable) {
       const r = addVisualClip(doc, { ...input, trackId: track.id, startSec });
       if (r.ok) {
         const placed = r.doc.clips[r.doc.clips.length - 1];
@@ -563,7 +570,23 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       }
       last = r;
     }
-    // 映像の列が1本も無いときも、理由を出す（押しても何も起きない、を作らない）。
+    // **どの列も再生位置が塞がっているときは、いちばん手前の列の「次に空いている時刻」へ置く**（#684 レビュー）。
+    // ボタンは置き場所をアプリが決める経路なので、置かずに断ると「押しても置けない」が続く
+    // （勝手に寄せない＝ADR-0034 決定10 は**利用者が位置を指した**ドラッグの規準で、ここには当たらない）。
+    if (placeable.length > 0) {
+      const t = placeable[0];
+      const after = doc.clips
+        .filter((c) => c.trackId === t.id && clipEndSec(c) > startSec)
+        .reduce((acc, c) => Math.max(acc, clipEndSec(c)), startSec);
+      const r = addVisualClip(doc, { ...input, trackId: t.id, startSec: after });
+      if (r.ok) {
+        const placed = r.doc.clips[r.doc.clips.length - 1];
+        commit(set, get, r.doc, { selectedClipIds: [placed.id] });
+        return;
+      }
+      last = r;
+    }
+    // 置ける列が1本も無いときも、理由を出す（押しても何も起きない、を作らない）。
     set({ editBlocked: last && !last.ok ? last.reason : EDIT_BLOCKED.notFound });
   },
   addAudioClip: (input) => {

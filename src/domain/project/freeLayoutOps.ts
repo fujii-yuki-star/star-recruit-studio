@@ -18,10 +18,12 @@ const DEFAULT_SLOT_W = 800;
 const DEFAULT_SLOT_H = 540;
 const DEFAULT_TEXT_W = 800;
 const DEFAULT_TEXT_H = 160;
-const DEFAULT_TEXT_FONT_SIZE = 48;
+/** 文字を新しく足したときの大きさ（1920×1080 基準）。タイムライン形式の「文字を置く」（#684）も同じ値を使う。 */
+export const DEFAULT_TEXT_FONT_SIZE = 48;
 const DEFAULT_SHAPE_W = 600;
 const DEFAULT_SHAPE_H = 400;
-const DEFAULT_TEXT = 'テキスト';
+/** 文字を新しく足したときの文言。**空にしない**＝空文字は描かれず「置いたのに見えない」になる（#684）。 */
+export const DEFAULT_TEXT = 'テキスト';
 /**
  * 図形を**新しく足したとき**の塗り。タイムライン形式の「図形を置く」（#684）も同じ値を使う
  * ＝同じ物を足すのに形式で色が違う、を作らない（ADR-0026②）。
