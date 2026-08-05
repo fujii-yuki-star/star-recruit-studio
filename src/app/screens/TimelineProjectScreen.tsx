@@ -39,6 +39,7 @@ import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
+import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { SECTION_SCOPE } from "../components/sectionOpen";
 import type { ContextMenuItem } from "../components/ContextMenu";
@@ -533,6 +534,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 書き出し中の編集は store が断る（`TIMELINE_EDIT_EXPORTING`）。**押してから断るのではなく、押す前に理由を出す**
   // （#694・監査 §2.2-11＝事前 disabled の流儀に統一）。押せてしまうと、断られた入力を消さない配慮も要らぬ手戻りになる。
   const exportingHint = exporting ? "書き出しが終わってから編集できます" : undefined;
+  /**
+   * **編集の入口の「押せない」と理由を1か所から配る**（#703・監査 §2.2-11）。
+   *
+   * 以前は入口ごとに条件を書き並べていたので、`selectedLocked` は塞いであるのに `exporting` は塞いでいない、
+   * という取りこぼしが大量に残っていた（押してから `commit` が断る＝**打った文字が消えて理由だけ出る**）。
+   * 数え上げをやめ、**入口はこれを展開するだけ**にする＝新しい入口を足しても条件を書き忘れない。
+   *
+   * `extra` はその入口だけの追加条件（再生中・値が空・作成中など）。理由の優先順は
+   * 固定 → 書き出し中 → その入口の事情（先に直せるものから出す）。
+   */
+  const editGuard = (extra?: { disabled?: boolean; hint?: string }): { disabled: boolean; title: string | undefined } => ({
+    disabled: selectedLocked || exporting || !!extra?.disabled,
+    title: selectedLocked ? lockedHint : exporting ? exportingHint : extra?.hint,
+  });
 
   // 列の操作（順番・出す出さない・固定・消す）は**右クリックのメニュー**へ畳む（ADR-0033・利用者指摘 2026-08-03）。
   // 行にボタンを並べると帯より文字のほうが目立ち、並びが読めなくなる。項目名は**いまの状態で意味が通る言い方**にする。
@@ -558,8 +573,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           danger: true,
           // 固定した列は消せない（`removeTrack` が断る＝ADR-0032）。押してから断られるのではなく、
           // **押す前に理由を出す**（長い画面では上部の知らせを見落とす・§2-5）。
-          disabled: menuTrack.locked,
-          disabledHint: "この列は固定されています。消すには固定を外してください",
+          // 書き出し中も**開く前に**断る（答えてから断ると、取り返しのつかなさを聞いた意味が無くなる・#703）。
+          disabled: menuTrack.locked || exporting,
+          disabledHint: menuTrack.locked ? "この列は固定されています。消すには固定を外してください" : exportingHint,
           onSelect: () => setRemovingTrackId(menuTrack.id),
         },
       ]
@@ -738,24 +754,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               {clipLabel(selected)}（{selected.startSec.toFixed(1)}秒から{selected.durationSec.toFixed(1)}秒間）
             </p>
             <div className="row gap-sm">
-              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec - NUDGE_SEC })}>
+              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec - NUDGE_SEC })} {...editGuard()}>
                 前へ
               </button>
-              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec + NUDGE_SEC })}>
+              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec + NUDGE_SEC })} {...editGuard()}>
                 後ろへ
               </button>
               {/* 再生位置を使う操作は**再生中に押させない**＝走っている位置を掴むと結果が毎回変わる（§2-5）。 */}
-              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: playheadSec })} disabled={isPlaying} title={playingHint}>
+              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: playheadSec })} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
                 再生位置へ
               </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClip("start", playheadSec)} disabled={isPlaying} title={playingHint}>
+              <button className="btn btn-secondary" onClick={() => trimSelectedClip("start", playheadSec)} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
                 ここから始める
               </button>
-              <button className="btn btn-secondary" onClick={() => trimSelectedClip("end", playheadSec)} disabled={isPlaying} title={playingHint}>
+              <button className="btn btn-secondary" onClick={() => trimSelectedClip("end", playheadSec)} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
                 ここで終わる
               </button>
-              <button className="btn btn-secondary" onClick={duplicateSelectedClip}>同じものを足す</button>
-              <button className="btn btn-danger" onClick={removeSelectedClips}>消す</button>
+              <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard()}>同じものを足す</button>
+              <button className="btn btn-danger" onClick={removeSelectedClips} {...editGuard()}>消す</button>
             </div>
             <label className="field">
               <span>置く列</span>
@@ -774,19 +790,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <CollapsibleSection key={`crop-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="crop" title="切り抜き" defaultOpen={cropIsSet}>
                 <div className="row gap-sm">
                   {CROP_EDGES.map((e) => (
-                    <label className="field" key={e.edge}>
-                      <span>{e.label}</span>
-                      <input
-                        type="number"
-                        step={5}
-                        min={0}
-                        max={99}
-                        value={Math.round((selected.crop?.[e.edge] ?? 0) * 100)}
-                        disabled={selectedLocked}
-                        title={lockedHint}
-                        onChange={(ev) => setSelectedClipCrop(e.edge, Number(ev.target.value) / 100)}
-                      />
-                    </label>
+                    <NumberField
+                      key={e.edge}
+                      label={e.label}
+                      step={5}
+                      min={0}
+                      max={99}
+                      value={Math.round((selected.crop?.[e.edge] ?? 0) * 100)}
+                      {...editGuard()}
+                      onChange={(v) => setSelectedClipCrop(e.edge, v / 100)}
+                    />
                   ))}
                 </div>
                 <p className="text-muted">
@@ -799,8 +812,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       <span>切り抜いたあと</span>
                       <select className="select"
                         value={selected.cropMode ?? CROP_MODE_DEFAULT}
-                        disabled={selectedLocked}
-                        title={lockedHint}
+                        {...editGuard()}
                         onChange={(e) => setSelectedClipCropMode(e.target.value as CropMode)}
                       >
                         <option value={CROP_MODE.mask}>隠したままにする（中身は動かない）</option>
@@ -821,8 +833,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <span>素材の寄せ（横）</span>
                     <select className="select"
                       value={selected.cropAlign?.x ?? ""}
-                      disabled={selectedLocked}
-                      title={lockedHint}
+                      {...editGuard()}
                       onChange={(e) => setSelectedClipCropAlign({ x: (e.target.value || null) as CropAlignX | null })}
                     >
                       <option value="">中央</option>
@@ -834,8 +845,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <span>素材の寄せ（縦）</span>
                     <select className="select"
                       value={selected.cropAlign?.y ?? ""}
-                      disabled={selectedLocked}
-                      title={lockedHint}
+                      {...editGuard()}
                       onChange={(e) => setSelectedClipCropAlign({ y: (e.target.value || null) as CropAlignY | null })}
                     >
                       <option value="">中央</option>
@@ -866,25 +876,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <>
                     <div className="row gap-sm">
                       {KEYFRAME_FIELDS.map((f) => (
-                        <label className="field" key={f.prop}>
-                          <span>{f.label}</span>
-                          <input
-                            type="number"
-                            step={f.step}
-                            value={kfDraft[f.prop] ?? ""}
-                            placeholder={String(f.neutral)}
-                            disabled={selectedLocked}
-                            title={lockedHint}
-                            onChange={(e) => setKfDraft({ ...kfDraft, [f.prop]: e.target.value })}
-                          />
-                        </label>
+                        <NumberField
+                          key={f.prop}
+                          label={f.label}
+                          step={f.step}
+                          value={kfDraft[f.prop] === undefined || kfDraft[f.prop] === "" ? null : Number(kfDraft[f.prop])}
+                          placeholder={String(f.neutral)}
+                          {...editGuard()}
+                          onChange={(v) => setKfDraft({ ...kfDraft, [f.prop]: String(v) })}
+                          // 空にしたら**その項目は動かさない**（下書きから落とす）＝0 と「触っていない」を混同しない。
+                          onClear={() => setKfDraft(Object.fromEntries(Object.entries(kfDraft).filter(([k]) => k !== f.prop)))}
+                        />
                       ))}
                     </div>
                     <div className="row gap-sm">
                       <button
                         className="btn btn-secondary"
-                        disabled={selectedLocked || isPlaying || exporting}
-                        title={selectedLocked ? lockedHint : (playingHint ?? exportingHint)}
+                        {...editGuard({ disabled: isPlaying, hint: playingHint })}
                         onClick={() => {
                           if (keyframeLocalSec == null) return; // 置けない位置なら何もしない（音量の変化と同じ）
                           // **丸めた秒を渡す**（#702）。再生位置から起点を引いた生の値を渡すと
@@ -901,8 +909,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {keyframeAtPlayhead.keyframe && (
                         <button
                           className="btn btn-ghost"
-                          disabled={selectedLocked}
-                          title={lockedHint}
+                          {...editGuard()}
                           onClick={() => setKfDraft(draftFromKeyframe(keyframeAtPlayhead.keyframe))}
                         >
                           この位置の値を読み込む
@@ -923,8 +930,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           <span>ここまでの動き方</span>
                           <select className="select"
                             value={easingChoiceOf(k.easing)}
-                            disabled={selectedLocked}
-                            title={lockedHint}
+                            {...editGuard()}
                             onChange={(e) =>
                               setSelectedKeyframeAt(k.timeSec, {
                                 easing:
@@ -948,22 +954,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         {k.easing != null && typeof k.easing !== 'string' && (
                           <div className="row gap-sm">
                             {CURVE_FIELDS.map((f, i) => (
-                              <label className="field" key={f.label}>
-                                <span>{f.label}</span>
-                                <input
-                                  type="number"
-                                  step={0.05}
-                                  {...(f.clamped ? { min: 0, max: 1 } : {})}
-                                  value={curveValue(k.easing, i)}
-                                  disabled={selectedLocked}
-                                  title={lockedHint}
-                                  onChange={(e) =>
-                                    setSelectedKeyframeAt(k.timeSec, {
-                                      easing: withCurveValue(k.easing, i, Number(e.target.value)),
-                                    })
-                                  }
-                                />
-                              </label>
+                              <NumberField
+                                key={f.label}
+                                label={f.label}
+                                step={0.05}
+                                {...(f.clamped ? { min: 0, max: 1 } : {})}
+                                value={curveValue(k.easing, i)}
+                                {...editGuard()}
+                                onChange={(v) =>
+                                  setSelectedKeyframeAt(k.timeSec, {
+                                    easing: withCurveValue(k.easing, i, v),
+                                  })
+                                }
+                              />
                             ))}
                           </div>
                         )}
@@ -972,8 +975,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         </button>
                         <button
                           className="btn btn-ghost btn-sm"
-                          disabled={selectedLocked}
-                          title={lockedHint}
+                          {...editGuard()}
                           onClick={() => removeSelectedKeyframe(k.timeSec)}
                         >
                           外す
@@ -983,7 +985,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   </ul>
                 )}
                 {selectedKeyframes.length > 0 && (
-                  <button className="btn btn-ghost" disabled={selectedLocked} title={lockedHint} onClick={clearSelectedKeyframes}>
+                  <button className="btn btn-ghost" {...editGuard()} onClick={clearSelectedKeyframes}>
                     動きをすべて外す
                   </button>
                 )}
@@ -1000,8 +1002,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 <p>この部品が入っている「まとまり」にも動きが付いています（{g.keyframes.length}か所）。</p>
                 <button
                   className="btn btn-ghost btn-sm"
-                  disabled={selectedLocked}
-                  title={lockedHint}
+                  {...editGuard()}
                   onClick={() => clearKeyframesOf(g.groupId)}
                 >
                   まとまりの動きを外す
@@ -1013,68 +1014,59 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {selected.kind === TIMELINE_CLIP_KIND.audio && (
               <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="audio" title="音" defaultOpen={true}>
                 <label className="field">
-                  <span>速さ（倍）</span>
-                  <input
-                    type="number"
+                  <NumberField
+                    label="速さ（倍）"
                     step={0.1}
                     min={CLIP_SPEED_MIN}
                     max={CLIP_SPEED_MAX}
                     value={selected.speed ?? 1}
-                    disabled={selectedLocked}
-                    title={lockedHint}
-                    onChange={(e) => setSelectedClipSpeed(Number(e.target.value))}
+                    {...editGuard()}
+                    onChange={(v) => setSelectedClipSpeed(v)}
                   />
                 </label>
                 <label className="field">
-                  <span>素材の使い始め（秒）</span>
-                  <input
-                    type="number"
+                  <NumberField
+                    label="素材の使い始め（秒）"
                     step={0.5}
                     min={0}
                     value={selected.sourceStartSec ?? 0}
-                    disabled={selectedLocked}
-                    title={lockedHint}
-                    onChange={(e) => setSelectedClipSourceStart(Number(e.target.value))}
+                    {...editGuard()}
+                    onChange={(v) => setSelectedClipSourceStart(v)}
                   />
                 </label>
                 <label className="field">
-                  <span>音量</span>
-                  <input
-                    type="number"
+                  <NumberField
+                    label="音量"
                     step={VOLUME_STEP}
                     min={VOLUME_MIN}
                     max={VOLUME_MAX}
-                    value={selected.volume ?? ""}
+                    value={selected.volume ?? null}
                     placeholder="動画全体に合わせる"
-                    disabled={selectedLocked || hasVolumePoints}
-                    title={selectedLocked ? lockedHint : volumePointsHint}
-                    onChange={(e) => setSelectedClipVolume(e.target.value === "" ? null : Number(e.target.value))}
+                    {...editGuard({ disabled: hasVolumePoints, hint: volumePointsHint })}
+                    onChange={(v) => setSelectedClipVolume(v)}
+                    onClear={() => setSelectedClipVolume(null)}
                   />
                 </label>
                 {hasVolumePoints && <p className="text-muted">{VOLUME_POINTS_OVERRIDE_HINT}</p>}
                 <div className="row gap-sm">
                   <label className="field">
-                    <span>だんだん大きく（秒）</span>
-                    <input
-                      type="number"
+                    <NumberField
+                      label="だんだん大きく（秒）"
                       step={0.5}
                       min={0}
                       value={selected.fadeInSec ?? 0}
-                      disabled={selectedLocked}
-                      title={lockedHint}
-                      onChange={(e) => setSelectedClipFade("in", Number(e.target.value))}
+                      {...editGuard()}
+                      onChange={(v) => setSelectedClipFade("in", v)}
                     />
                   </label>
                   <label className="field">
-                    <span>だんだん小さく（秒）</span>
-                    <input
-                      type="number"
+                    <NumberField
+                      label="だんだん小さく（秒）"
                       step={0.5}
                       min={0}
                       value={selected.fadeOutSec ?? 0}
-                      disabled={selectedLocked}
-                      title={lockedHint}
-                      onChange={(e) => setSelectedClipFade("out", Number(e.target.value))}
+                      {...editGuard()}
+                      onChange={(v) => setSelectedClipFade("out", v)}
                     />
                   </label>
                 </div>
@@ -1093,8 +1085,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <input
                     className="input" type="text"
                     value={selected.voice?.text ?? ""}
-                    disabled={selectedLocked}
-                    title={lockedHint}
+                    {...editGuard()}
                     onChange={(e) => setSelectedVoiceText(e.target.value)}
                   />
                 </label>
@@ -1102,8 +1093,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <span>声</span>
                   <select className="select"
                     value={selected.voice?.speaker ?? ""}
-                    disabled={selectedLocked}
-                    title={lockedHint}
+                    {...editGuard()}
                     onChange={(e) => setSelectedVoiceSpeaker(e.target.value === "" ? null : Number(e.target.value))}
                   >
                     <option value="">動画全体に合わせる</option>
@@ -1117,8 +1107,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 <div className="row gap-sm">
                   <button
                     className="btn btn-primary"
-                    disabled={selectedLocked || !selected.voice?.text.trim() || generatingVoiceClipId != null}
-                    title={selectedLocked ? lockedHint : !selected.voice?.text.trim() ? "読み上げる文を入れてください" : undefined}
+                    {...editGuard({
+                      disabled: !selected.voice?.text.trim() || generatingVoiceClipId != null,
+                      // 押せない理由を無言にしない（作成中も含める＝#701 レビュー ℹ️）。
+                      hint: !selected.voice?.text.trim()
+                        ? "読み上げる文を入れてください"
+                        : generatingVoiceClipId != null
+                          ? "いま声を作っています。終わってからもう一度お試しください"
+                          : undefined,
+                    })}
                     onClick={() => void generateSelectedVoice()}
                   >
                     {generatingVoiceClipId === selected.id ? "作成中…" : "声を作る"}
@@ -1152,23 +1149,22 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   </p>
                 ) : (
                   <div className="row gap-sm">
-                    <label className="field">
-                      <span>この位置の音量</span>
-                      <input
-                        type="number"
-                        step={VOLUME_STEP}
-                        min={VOLUME_MIN}
-                        max={VOLUME_MAX}
-                        value={volumeDraft}
-                        disabled={selectedLocked}
-                        title={lockedHint}
-                        onChange={(e) => setVolumeDraft(e.target.value)}
-                      />
-                    </label>
+                    <NumberField
+                      label="この位置の音量"
+                      step={VOLUME_STEP}
+                      min={VOLUME_MIN}
+                      max={VOLUME_MAX}
+                      value={volumeDraft === "" ? null : Number(volumeDraft)}
+                      {...editGuard()}
+                      onChange={(v) => setVolumeDraft(String(v))}
+                      onClear={() => setVolumeDraft("")}
+                    />
                     <button
                       className="btn btn-secondary"
-                      disabled={selectedLocked || isPlaying || exporting || volumeDraft === ""}
-                      title={selectedLocked ? lockedHint : (playingHint ?? exportingHint ?? (volumeDraft === "" ? "この位置の音量を入れてください" : undefined))}
+                      {...editGuard({
+                        disabled: isPlaying || volumeDraft === "",
+                        hint: playingHint ?? (volumeDraft === "" ? "この位置の音量を入れてください" : undefined),
+                      })}
                       onClick={() => {
                         if (volumePointLocalSec == null) return; // 置けない位置なら何もしない（黙って先頭へ置かない）
                         setSelectedVolumePoint(volumePointLocalSec, Number(volumeDraft));
@@ -1181,8 +1177,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {volumePointAtPlayhead.point && (
                       <button
                         className="btn btn-ghost"
-                        disabled={selectedLocked}
-                        title={lockedHint}
+                        {...editGuard()}
                         onClick={() => setVolumeDraft(String(volumePointAtPlayhead.point?.volume ?? ""))}
                       >
                         この位置の値を読み込む
@@ -1207,8 +1202,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         </button>
                         <button
                           className="btn btn-ghost btn-sm"
-                          disabled={selectedLocked}
-                          title={lockedHint}
+                          {...editGuard()}
                           onClick={() => removeSelectedVolumePoint(p.timeSec)}
                         >
                           外す
@@ -1224,8 +1218,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     </p>
                     <button
                       className="btn btn-ghost"
-                      disabled={selectedLocked}
-                      title={lockedHint}
+                      {...editGuard()}
                       onClick={clearSelectedVolumePoints}
                     >
                       音量の変化をすべて外す
@@ -1245,8 +1238,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <span>連動先</span>
                     <select className="select"
                       value={selected.voiceClipId ?? ""}
-                      disabled={selectedLocked}
-                      title={lockedHint}
+                      {...editGuard()}
                       onChange={(e) => setSelectedSubtitleVoiceLink(e.target.value || null)}
                     >
                       <option value="">連動しない</option>
@@ -1261,8 +1253,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <input
                     className="input" type="text"
                     value={selected.text ?? ""}
-                    disabled={selectedLocked}
-                    title={lockedHint}
+                    {...editGuard()}
                     placeholder={selected.voiceClipId ? "空にすると読み上げの文に合わせます" : ""}
                     onChange={(e) => setSelectedSubtitleText(e.target.value)}
                   />
@@ -1287,8 +1278,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       <span>{slotNames[i]}</span>
                       <select className="select"
                         value={selected.assetRefs?.[layer.id] ?? ""}
-                        disabled={selectedLocked}
-                        title={lockedHint}
+                        {...editGuard()}
                         onChange={(e) => setSelectedClipAssetRef(layer.id, e.target.value || null)}
                       >
                         <option value="">なし</option>
@@ -1319,16 +1309,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       <input
                         className="input" type="text"
                         value={selected.texts?.[key] ?? ""}
-                        disabled={selectedLocked}
-                        title={lockedHint}
+                        {...editGuard()}
                         onChange={(e) => setSelectedClipText(key, e.target.value)}
                       />
                     </label>
                   ))}
                   <button
                     className="btn btn-secondary"
-                    disabled={selectedLocked}
-                    title={lockedHint}
+                    {...editGuard()}
                     onClick={() => setExploding({ clipId: selected.id, template: selectedTemplate })}
                   >
                     中身をバラす
@@ -1349,7 +1337,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </p>
         )}
         {selectedClipIds.length > 1 && (
-          <button className="btn btn-danger" onClick={removeSelectedClips}>選んだ{selectedClipIds.length}個を消す</button>
+          <button className="btn btn-danger" onClick={removeSelectedClips} {...editGuard()}>選んだ{selectedClipIds.length}個を消す</button>
         )}
       </>
     ) },
@@ -1574,8 +1562,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       <div className="row gap-sm mt-lg">
         <button className="btn btn-ghost" onClick={undo} disabled={history.past.length === 0}>取り消す</button>
         <button className="btn btn-ghost" onClick={redo} disabled={history.future.length === 0}>やり直す</button>
-        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)}>映像の列を足す</button>
-        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)}>音の列を足す</button>
+        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} disabled={exporting} title={exportingHint}>映像の列を足す</button>
+        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} disabled={exporting} title={exportingHint}>音の列を足す</button>
       </div>
 
       <div className="row gap-sm mt-lg">
