@@ -5,9 +5,8 @@ import { ASSET_TYPE } from "../../domain/enums";
 import { pickPanelAsset } from "./materialsSelection";
 import { scenesUsingAsset } from "../../domain/project/assetUsage";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
-import { isTauri } from "../../infrastructure/assetFs";
-import { showOpenAssetDialog } from "../../infrastructure/dialog";
 import { PageHead, Switch } from "../components/ui";
+import { AssetImportButton } from "../components/AssetImportButton";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { EmptyState } from "../components/states";
 import { ClipDetailControls } from "../components/ClipDetailControls";
@@ -111,55 +110,18 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     e.target.value = "";
   }
 
-  function onAddAsset(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    void addAsset(file);
-    e.target.value = "";
-  }
-
-  // Tauri ではネイティブの「開く」ダイアログでパスを取り込む（JSが素材バイトを読まない）。ブラウザは下の input にフォールバック。
-  async function onPickAsset() {
-    const path = await showOpenAssetDialog();
-    if (path) await addAssetByPath(path);
-  }
-
   return (
     <div className="main-scroll">
       <PageHead
         title="素材を管理"
         desc="動画に使う写真・動画・音・ゆうこの素材を管理します。説明やタグを付けると、ゆうこが使いどころを判断しやすくなります。"
         actions={
-          <label
-            className="btn btn-primary"
-            style={{ cursor: addDisabled ? "default" : "pointer", opacity: addDisabled ? 0.6 : 1 }}
-            role="button"
-            tabIndex={0}
-            aria-disabled={addDisabled}
-            title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}
-            onClick={(e) => {
-              if (addDisabled) { e.preventDefault(); return; }
-              if (isTauri()) {
-                e.preventDefault();
-                void onPickAsset();
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                if (addDisabled) return;
-                if (isTauri()) {
-                  void onPickAsset();
-                } else {
-                  e.currentTarget.querySelector("input")?.click();
-                }
-              }
-            }}
-          >
-            <UploadIcon size={18} />
-            {isImporting ? "取り込み中…" : "素材を追加"}
-            <input type="file" accept="image/*,video/*" onChange={onAddAsset} disabled={addDisabled} style={{ display: "none" }} />
-          </label>
+          <AssetImportButton
+            onFile={addAsset}
+            onPath={addAssetByPath}
+            isImporting={isImporting}
+            disabledReason={addDisabled ? (isExporting ? "書き出しが終わるまでお待ちください" : "いま取り込んでいます") : null}
+          />
         }
       />
 

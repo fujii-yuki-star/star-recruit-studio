@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
@@ -47,8 +47,7 @@ import { hasSimultaneousLines, motionSubtitleAt } from "../../domain/project/lin
 import { useDragReorder } from "../hooks/useDragReorder";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
-import { isTauri } from "../../infrastructure/assetFs";
-import { showOpenAssetDialog } from "../../infrastructure/dialog";
+import { AssetImportButton } from "../components/AssetImportButton";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
@@ -74,7 +73,6 @@ import {
   PhotoIcon,
   VideoIcon,
   MusicIcon,
-  UploadIcon,
   PlusIcon,
   SaveIcon,
   TrashIcon,
@@ -232,7 +230,7 @@ function assetThumbClass(type: Asset["assetType"]): string {
 
 export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const {
-    status, scenes, templates, assets, autoGenerateIfSafe, updateScene, addAsset, addAssetByPath, importError, clearImportError,
+    status, scenes, templates, assets, autoGenerateIfSafe, updateScene, addAsset, addAssetByPath, importError, clearImportError, isImporting,
     addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus,
     generateNarration, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
@@ -1286,18 +1284,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setNarrationPlayError(false); // 前の場面の再生失敗表示を持ち越さない
   };
 
-  function onUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    void addAsset(file);
-    e.target.value = "";
-  }
-
-  // Tauri ではネイティブの「開く」ダイアログでパスを取り込む（JSが素材バイトを読まない）。ブラウザは下の input にフォールバック。
-  async function onPickAsset() {
-    const path = await showOpenAssetDialog();
-    if (path) await addAssetByPath(path);
-  }
 
   // 欄（ADR-0033 段階4）＝いまの3列をそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
   const panels: PanelSpec[] = [
@@ -1351,32 +1337,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               ))}
             </div>
 
-            <label
-              className="btn btn-secondary btn-block mt"
-              style={{ cursor: "pointer" }}
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                if (isTauri()) {
-                  e.preventDefault();
-                  void onPickAsset();
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  if (isTauri()) {
-                    void onPickAsset();
-                  } else {
-                    e.currentTarget.querySelector("input")?.click();
-                  }
-                }
-              }}
-            >
-              <UploadIcon size={16} />
-              素材を追加
-              <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
-            </label>
+            <AssetImportButton
+              onFile={addAsset}
+              onPath={addAssetByPath}
+              isImporting={isImporting}
+              variant="secondary"
+              className="btn-block mt"
+            />
 
             {importError && (
               <div className="notice notice-warn row-between mt" role="alert">

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { generalPurposeOptions, purposeOptions } from "../data/mockData";
 import { ASSET_TYPE, ORIENTATION, VIDEO_KIND, type Orientation, type Purpose, type VideoKind } from "../../domain/enums";
@@ -8,8 +8,7 @@ import {
 } from "../../domain/constants";
 import { VOICE_STYLE_PRESETS, matchVoiceStyleId, voiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { useProjectStore } from "../store/projectStore";
-import { isTauri } from "../../infrastructure/assetFs";
-import { showOpenAssetDialog } from "../../infrastructure/dialog";
+import { useAssetPicker } from "../hooks/useAssetPicker";
 import { YukoPanel } from "../components/YukoPanel";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { saveButtonLabel } from "../components/saveButtonLabel";
@@ -173,18 +172,9 @@ export function WizardScreen({ onNavigate }: WizardProps) {
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
   );
 
-  function onUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    void addAsset(file);
-    e.target.value = "";
-  }
-
-  // Tauri ではネイティブの「開く」ダイアログでパスを取り込む（JSが素材バイトを読まない）。ブラウザは下の input にフォールバック。
-  async function onPickAsset() {
-    const path = await showOpenAssetDialog();
-    if (path) await addAssetByPath(path);
-  }
+  // 素材の選び方（アプリ＝ネイティブの「開く」／ブラウザ＝隠し input）は共有する（#712）。
+  // ここは見た目が「大きな枠」なので部品は使えないが、**分岐だけは1か所**（`useAssetPicker`）。
+  const assetPicker = useAssetPicker({ onFile: addAsset, onPath: addAssetByPath });
 
   // 箇条書き（強み・章立て・要点）共通の追加ロジック。
   function addItem(raw: string, list: string[], setList: (v: string[]) => void, clear: () => void) {
@@ -606,25 +596,8 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                   会社の写真や動画を追加すると、動画がより魅力的になります。
                 </p>
                 <label
+                  {...assetPicker.labelProps}
                   className="card-tight text-center"
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    if (isTauri()) {
-                      e.preventDefault();
-                      void onPickAsset();
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      if (isTauri()) {
-                        void onPickAsset();
-                      } else {
-                        e.currentTarget.querySelector("input")?.click();
-                      }
-                    }
-                  }}
                   style={{
                     border: "2px dashed var(--color-border-strong)",
                     background: "var(--color-surface-alt)",
@@ -639,7 +612,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
                     <UploadIcon size={18} />
                     写真・動画を選ぶ
                   </span>
-                  <input type="file" accept="image/*,video/*" onChange={onUpload} style={{ display: "none" }} />
+                  <input {...assetPicker.inputProps} />
                 </label>
 
                 {importError && (

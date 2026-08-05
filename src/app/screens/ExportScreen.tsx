@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { EXPORT_BLOCKED_IMPORTING_MESSAGE } from "../uiLabels";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { NoScenesState } from "../components/NoScenesState";
@@ -166,7 +167,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     // なる（#547 P2-6）。取り込みは最初の await 前に isImporting を、生成は pending 行/フラグを立てるので、ここで見れば排他になる。
     const startBlockedMessage = (): string | null => {
       const st = useProjectStore.getState();
-      if (st.isImporting) return "素材の取り込み中です。取り込みが終わってから書き出してください。";
+      if (st.isImporting) return EXPORT_BLOCKED_IMPORTING_MESSAGE;
       if (st.isTemplateMutating) return "見た目パターンの変更中です。変更が終わってから書き出してください。";
       if (st.status === "generating") return "動画案を作成中です。作成が終わってから書き出してください。";
       if (st.isGeneratingNarration || isNarrationGenerating(st.scenes)) return "声を作成中です。作成が終わってから書き出してください。";
