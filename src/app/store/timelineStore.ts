@@ -14,10 +14,13 @@ import { ASSET_TYPE } from "../../domain/enums";
 import { parseTimelineProjectDoc, TimelineLoadError, timelineDurationSec, withUpdatedAt } from "../../domain/timeline/persistence";
 import { clampTimelinePlayheadSec, playbackStartSec } from "../../domain/timeline/playback";
 import type { TimelineProject } from "../../domain/timeline/types";
-import type { CropAlignX, CropAlignY, CropMode, Orientation, TextKey, TrackKind } from "../../domain/enums";
+import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, Orientation, TextAlign, TextKey, TrackKind } from "../../domain/enums";
+import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVoiceClip, duplicateClip, moveClip,
+  VISUAL_CLIP_DURATION_SEC, addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip,
+  firstFreeStart, moveClip,
+  setVisualClipContent,
   moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
   setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
@@ -34,7 +37,7 @@ import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 import { importVoiceFile } from "../../infrastructure/voiceFs";
-import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from "../../domain/enums";
+import { NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { NarrationStatus } from "../../domain/enums";
 import type { TimelineVoice } from "../../domain/timeline/types";
 import type { VoiceSettings } from "../../domain/project/types";
@@ -182,6 +185,21 @@ export interface TimelineState {
   setSelectedClipText: (textKey: TextKey, text: string) => void;
   /** 見た目パターンの部品をバラす（中身ぶんの部品へ展開・#632）。**戻せない**（取り消しでだけ戻る）。 */
   explodeClip: (clipId: string, template: Template) => void;
+  /**
+   * **写真・文字・図形を置く**（#684）。置いたものは**そのまま選ぶ**＝続けて中身を直せる。
+   * 置ける列が無ければ理由を出す（黙って何もしない、を作らない）。
+   */
+  addVisualClip: (input: {
+    kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
+    assetId?: string;
+    center?: { x: number; y: number };
+  }) => void;
+  /** 置いた部品の中身を直す（#684）＝写真の差し替え・文字・図形の色や形。 */
+  setSelectedVisualContent: (patch: {
+    text?: string; fontSize?: number; color?: string;
+    fontId?: FontId | null; fontWeight?: FontWeight; textAlign?: TextAlign;
+    shapeType?: FreeShapeType; fillColor?: string; assetId?: string | null; fit?: Fit;
+  }) => void;
   /** 音（同梱BGM／持ち込んだ音）を置く（#634）。 */
   addAudioClip: (input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number }) => void;
   /** 選んでいる音・動画の素材の再生速度（#634）。 */
@@ -531,6 +549,46 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     commit(set, get, r.doc, { selectedClipIds: r.doc.clips.filter((c) => !before.has(c.id)).map((c) => c.id) });
   },
 
+  setSelectedVisualContent: (patch) => applyEdit(set, get, (d, id) => setVisualClipContent(d, id, patch)),
+  addVisualClip: (input) => {
+    const doc = get().doc;
+    if (!doc) return;
+    // 置き先は**空いている映像の列**を上から探す（固定した列・重なる場所は避ける）。
+    // 見つからないときは黙って何もしないのではなく、理由を出す（§2-5）。
+    const startSec = get().playheadSec;
+    let last: EditResult | null = null;
+    // **隠した列・固定した列は選ばない**（`11 §7.6.2.4`）＝置けても動画に出ない部品が黙って生まれる。
+    // 画面の「置ける列」（`placeableTracks`）と同じ規則（同じ判断を2通りに書かない）。
+    // **手前（配列の末尾）から**探す＝新しく置いたものが既にあるものの後ろに隠れない（表示も手前が上）。
+    const placeable = doc.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.locked && !t.hidden).reverse();
+    for (const track of placeable) {
+      const r = addVisualClip(doc, { ...input, trackId: track.id, startSec });
+      if (r.ok) {
+        const placed = r.doc.clips[r.doc.clips.length - 1];
+        commit(set, get, r.doc, { selectedClipIds: [placed.id] });
+        return;
+      }
+      last = r;
+    }
+    // **どの列も再生位置が塞がっているときは、いちばん手前の列の「次に空いている時刻」へ置く**（#684 レビュー）。
+    // ボタンは置き場所をアプリが決める経路なので、置かずに断ると「押しても置けない」が続く
+    // （勝手に寄せない＝ADR-0034 決定10 は**利用者が位置を指した**ドラッグの規準で、ここには当たらない）。
+    if (placeable.length > 0) {
+      const t = placeable[0];
+      // **間の空きを飛び越さない**（#684 レビュー）＝「いちばん後ろの部品の終わり」ではなく、
+      // まるごと収まる最初の空きを探す。規則は domain に置く（画面で数え直さない）。
+      const after = firstFreeStart(doc.clips, t.id, startSec, VISUAL_CLIP_DURATION_SEC);
+      const r = addVisualClip(doc, { ...input, trackId: t.id, startSec: after });
+      if (r.ok) {
+        const placed = r.doc.clips[r.doc.clips.length - 1];
+        commit(set, get, r.doc, { selectedClipIds: [placed.id] });
+        return;
+      }
+      last = r;
+    }
+    // 置ける列が1本も無いときも、理由を出す（押しても何も起きない、を作らない）。
+    set({ editBlocked: last && !last.ok ? last.reason : EDIT_BLOCKED.notFound });
+  },
   addAudioClip: (input) => {
     const doc = get().doc;
     if (!doc) return;

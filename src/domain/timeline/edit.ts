@@ -3,10 +3,13 @@
 // **置けない操作は黙って別の結果にしない**（§2-5・ADR-0026④）＝重なる位置へ動かそうとしたら、勝手に
 // 近くへ寄せたり上書きしたりせず「置けなかった理由」を返す。理由の文言は `15 §6`、出すのは呼び出し側。
 import {
-  AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX,
+  AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, PLACED_BOX_RATIO,
+  TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation,
 } from '../constants';
-import { FREE_ELEMENT_KIND, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
+import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
@@ -58,6 +61,12 @@ export const EDIT_BLOCKED = {
   volumePointsFull: 'TIMELINE_EDIT_VOLUME_POINTS_FULL',
   /** 音量の変化を、鳴る音を持たない部品へ置こうとした（#512）。 */
   volumePointsKind: 'TIMELINE_EDIT_VOLUME_POINTS_KIND',
+  /**
+   * その部品が持たない中身の項目を直そうとした（#684 レビュー）。**列の種別違い（V23）とは別**
+   * ＝「列に置き直してください」は無関係な案内になる（§2-5）。`volumePointsKind` と同じ流儀で、
+   * **その項目を持たない部品に意味の無いデータを書かない**。
+   */
+  contentField: 'TIMELINE_EDIT_CONTENT_FIELD',
 } as const;
 
 export type EditBlockedReason = (typeof EDIT_BLOCKED)[keyof typeof EDIT_BLOCKED];
@@ -86,6 +95,36 @@ export function isFreeSpan(
       c.id !== exceptClipId &&
       spansOverlap(c.startSec, clipEndSec(c), startSec, startSec + durationSec),
   );
+}
+
+/** 置いた部品の仮の長さ（#684）。**下限を割らない**＝置ける長さと探す長さを別々に書かない（§2-7）。 */
+export const VISUAL_CLIP_DURATION_SEC = Math.max(TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC);
+
+/**
+ * その列で、`fromSec` 以降に **`durationSec` がまるごと収まる最初の時刻**（#684 レビュー）。
+ *
+ * 「いちばん後ろの部品の終わり」ではない＝**間の空きを飛び越さない**。
+ * 例：`[0,3)` と `[10,15)` があるとき、5秒ぶんは `[3,10)` の空きに収まるので 3 を返す（15 ではない）。
+ * 置き場所をアプリが決める経路（ボタンで置く）で、見えている空きを使わずに最後尾へ飛ばさないための規則。
+ *
+ * **「空いている」の判定は `isFreeSpan` に委ねる**（ここで重なりを数え直さない）＝探した結果が
+ * 置ける条件（V24）と食い違わない。候補は **`fromSec` と、各部品の終わり**だけでよい
+ * （最初に収まる時刻は必ずそのどれか）。いちばん後ろの終わりは必ず空くので、答えは必ず返る。
+ */
+export function firstFreeStart(
+  clips: readonly TimelineClip[],
+  trackId: string,
+  fromSec: number,
+  durationSec: number,
+): number {
+  const candidates = [fromSec, ...clips
+    .filter((c) => c.trackId === trackId && clipEndSec(c) > fromSec)
+    .map((c) => clipEndSec(c))]
+    .sort((a, b) => a - b);
+  const found = candidates.find((t) => isFreeSpan(clips, trackId, t, durationSec));
+  // いちばん後ろの候補は必ず空くのでここは通らないが、通っても**空いている時刻**を返す
+  // （`fromSec` に落とすと塞がった時刻を返し、呼び出し側が置けずに終わる）。
+  return found ?? candidates[candidates.length - 1];
 }
 
 /** 置き先として成り立つか（列の実在・種別の一致・固定・重なり）を1か所で見る。 */
@@ -525,6 +564,119 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
  * 長さは指定（無ければ仮の既定）。素材より長い置き場所は**繰り返して埋まる**（BGM の流儀＝`11 §7.6.5`）ので、
  * 尺が分からなくても置ける。トリム（`sourceStartSec`）と速さ（`speed`）は置いたあとに変えられる。
  */
+/**
+ * **絵のもの（写真・文字・図形）を置く**（#684・ADR-0034 段階1）。`addAudioClip` と同じ流儀＝
+ * 置けない場所は理由を返し、黙って別の場所へ寄せない。
+ *
+ * - **箱は真ん中に置く**（`PLACED_BOX_RATIO`）＝置いた瞬間に画面で見える。座標を指定されたら
+ *   そこを**箱の中心**として置く（キャンバスへ落としたとき＝落とした場所に置く）。画面外へは出さない。
+ * - 長さは仮（`VISUAL_CLIP_DURATION_SEC`＝`VISUAL_PLACEHOLDER_SEC` を下限で丸めたもの）＝掴んで伸ばせる程度。
+ * - 素材は**この動画が持っているものだけ**（`doc.assets`）＝存在しない素材の枠を作らない。
+ */
+export function addVisualClip(
+  doc: TimelineProject,
+  input: {
+    kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
+    trackId: string;
+    startSec: number;
+    /** kind='slot' のとき入れる素材。 */
+    assetId?: string;
+    /** 箱の中心（未指定＝画面の真ん中）。キャンバスへ落としたときに使う。 */
+    center?: { x: number; y: number };
+  },
+): EditResult {
+  const track = doc.tracks.find((t) => t.id === input.trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  if (track.locked) return blocked(EDIT_BLOCKED.locked);
+  if (track.kind !== trackKindForClip(input.kind)) return blocked(EDIT_BLOCKED.trackKind);
+  if (input.kind === TIMELINE_CLIP_KIND.slot) {
+    if (input.assetId == null || !doc.assets.some((a) => a.assetId === input.assetId)) {
+      return blocked(EDIT_BLOCKED.notFound);
+    }
+  }
+  const startSec = Math.max(0, input.startSec);
+  const durationSec = VISUAL_CLIP_DURATION_SEC;
+  if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
+  const ratio = PLACED_BOX_RATIO[input.kind];
+  const w = Math.round(canvas.width * ratio.w);
+  const h = Math.round(canvas.height * ratio.h);
+  const center = input.center ?? { x: canvas.width / 2, y: canvas.height / 2 };
+  // **画面の外へは置かない**（落とした先が端でも、箱ごと見える位置へ収める）。
+  const x = Math.round(Math.min(Math.max(0, center.x - w / 2), Math.max(0, canvas.width - w)));
+  const y = Math.round(Math.min(Math.max(0, center.y - h / 2), Math.max(0, canvas.height - h)));
+  const clip: TimelineClip = {
+    id: createClipId(doc.clips.map((c) => c.id)),
+    kind: input.kind,
+    trackId: input.trackId,
+    startSec,
+    durationSec,
+    x, y, w, h,
+    ...(input.kind === TIMELINE_CLIP_KIND.slot ? { assetId: input.assetId } : {}),
+    // 置いた直後から**見えて・直せる**ように、初期値を入れておく（#684）。
+    // **文字は空にしない**＝空文字は描かれず「置いたのに見えない」になる。既定は場面形式の「文字を足す」と同じ
+    // （同じ物を足すのに形式で見た目が違う、を作らない・ADR-0026②）。大きさは画面の広さに合わせて伸ばす。
+    ...(input.kind === TIMELINE_CLIP_KIND.text
+      ? {
+        text: DEFAULT_TEXT,
+        fontSize: Math.round(DEFAULT_TEXT_FONT_SIZE * (canvas.width / WIDTH)),
+        color: DEFAULT_TEXT_COLOR,
+      }
+      : {}),
+    // 図形の既定は**場面形式の「図形を足す」と同じ**（同じ物を足すのに別の色が出ない・ADR-0026②）。
+    ...(input.kind === TIMELINE_CLIP_KIND.shape
+      ? { shapeType: FREE_SHAPE_TYPE.rect, fillColor: DEFAULT_SHAPE_COLOR, opacity: 1 }
+      : {}),
+  };
+  return ok({ ...doc, clips: [...doc.clips, clip] });
+}
+
+/**
+ * **置いた部品の中身を直す**（#684）＝写真の差し替え・文字・図形の色や形。
+ * 「置けるのに直せない」を作らないための入口で、幾何（場所・大きさ）は別の操作（#685）。
+ *
+ * 渡された分だけを変える（未指定は触らない）。**その種類が持たない項目は断る**。
+ */
+/**
+ * 種類ごとに直せる項目（#684）。`TimelineClip` は全種別の項目を任意で持つ平らな形なので、
+ * **どの種類が何を持つか**はここが単一の参照元（型では縛れない）。
+ */
+const VISUAL_CONTENT_KEYS = {
+  [TIMELINE_CLIP_KIND.slot]: ['assetId', 'fit'],
+  [TIMELINE_CLIP_KIND.text]: ['text', 'fontSize', 'color', 'fontId', 'fontWeight', 'textAlign'],
+  [TIMELINE_CLIP_KIND.shape]: ['shapeType', 'fillColor'],
+} as const;
+
+export function setVisualClipContent(
+  doc: TimelineProject,
+  clipId: string,
+  patch: Partial<Pick<TimelineClip,
+    'text' | 'fontSize' | 'color' | 'fontId' | 'fontWeight' | 'textAlign' | 'shapeType' | 'fillColor' | 'assetId' | 'fit'>>,
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // **その種類が持つ項目だけを受ける**（`TimelineClip` は全種別の項目を任意で持つ平らな形なので、
+  // 型では縛れない＝ここで断る）。音の部品に図形の色を書く、のような意味の無いデータを作らない
+  // （`11 §7.6.3.2` の「鳴る音を持たない部品には置けない」と同じ流儀）。
+  // **列の種別違い（V23）と混ぜない**＝「列に置き直してください」は項目違いには当たらない案内になる（§2-5）。
+  const allowed = VISUAL_CONTENT_KEYS[clip.kind as keyof typeof VISUAL_CONTENT_KEYS];
+  if (!allowed) return blocked(EDIT_BLOCKED.contentField);
+  if (!Object.keys(patch).every((k) => (allowed as readonly string[]).includes(k))) {
+    return blocked(EDIT_BLOCKED.contentField);
+  }
+  const track = doc.tracks.find((t) => t.id === clip.trackId);
+  if (track?.locked) return blocked(EDIT_BLOCKED.locked);
+  // 素材は**この動画が持っているものだけ**（存在しない素材を指させない）。
+  if (patch.assetId != null && !doc.assets.some((a) => a.assetId === patch.assetId)) {
+    return blocked(EDIT_BLOCKED.notFound);
+  }
+  const next = { ...clip, ...patch };
+  // **何も変わらないなら同じ文書を返す**（空振りの取り消しを積まない・`11 §7.6.3`）。
+  const same = (Object.keys(patch) as (keyof typeof patch)[]).every((k) => clip[k] === patch[k]);
+  if (same) return ok(doc);
+  return ok(withClip(doc, next));
+}
+
 export function addAudioClip(
   doc: TimelineProject,
   input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number; durationSec?: number },

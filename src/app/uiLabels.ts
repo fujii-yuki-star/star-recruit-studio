@@ -1,7 +1,7 @@
 // 複数画面で共有するユーザー向けラベル（§6：文言は1か所に集約／§2-3：技術用語を出さない）。
 import { AI_ASSET_SEND_MAX, VOLUME_POINTS_MAX } from "../domain/constants";
 import { FREE_ELEMENT_KINDS, LAYER_TYPE, SUBTITLE_SOURCE_KIND } from "../domain/enums";
-import type { AssetType, Fit, FreeElementKind, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind } from "../domain/enums";
+import type { AssetType, Fit, FreeElementKind, FreeShapeType, SubtitleSourceKind, TextKey, TimelineClipKind, TrackKind } from "../domain/enums";
 import type { FreeContentHidden } from "../domain/project/sceneOps";
 import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
 import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
@@ -32,6 +32,20 @@ export const fitLabel: Record<Fit, string> = {
   cover: "枠いっぱいに表示（はみ出しは切り取り）",
   contain: "全体を表示（余白が入る）",
   stretch: "枠に合わせて伸縮",
+};
+
+/**
+ * 図形の形のユーザー向け名称（#684）。**全値必須**＝形が増えたら名前の決め漏れをコンパイル検知。
+ * 場面編集（自由配置）とタイムライン編集が**同じ形を同じ名で呼ぶ**ための単一の参照元（§6・ADR-0026②）。
+ */
+export const freeShapeLabel: Record<FreeShapeType, string> = {
+  rect: "四角",
+  rounded_rect: "角丸四角",
+  ellipse: "丸",
+  triangle: "三角",
+  star: "星",
+  arrow: "矢印",
+  speech_bubble: "吹き出し",
 };
 
 /** 重ね順（要素の前後関係）のユーザー向け見出し。正典は「重ね順」（`06_UI_SPEC §3`＝layer→要素・並び順）。#547 P2-11。 */
@@ -449,6 +463,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_LINKED_SUBTITLE_TIME: "連動している字幕の時間は読み上げに合わせています。連動をやめると自分で動かせます",
   TIMELINE_EDIT_VOLUME_POINTS_FULL: `音量の変化は1つの部品に${VOLUME_POINTS_MAX}か所までです。ほかの点を外してから置いてください`,
   TIMELINE_EDIT_VOLUME_POINTS_KIND: "音量の変化を置けるのは、音や読み上げの部品だけです。音の部品を選び直してください",
+  TIMELINE_EDIT_CONTENT_FIELD: "この部品にはその項目がありません。直したい部品を選び直してください",
 };
 
 /**

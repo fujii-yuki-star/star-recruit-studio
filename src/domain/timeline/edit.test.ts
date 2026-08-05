@@ -5,10 +5,11 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, moveClip, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
+  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
+import { DEFAULT_SHAPE_COLOR } from '../project/freeLayoutOps';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
   return { id, kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: 'あ', ...over };
@@ -207,6 +208,144 @@ describe('removeSelectedClipsChecked（利用者が「消す」を押す入口�
       clips: [clip('clip_001')],
     });
     expect(removeClips(d, ['clip_001']).clips).toEqual([]);
+  });
+});
+
+describe('firstFreeStart（次に空いている時刻・#684 レビュー）', () => {
+  const withSpans = (spans: [number, number][]) => doc({
+    tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }],
+    clips: spans.map(([st, en], i) => clip(`clip_${String(i + 1).padStart(3, '0')}`, { startSec: st, durationSec: en - st })),
+  }).clips;
+
+  it('**間の空きを飛び越さない**（いちばん後ろの終わりではない）', () => {
+    // [0,3) と [10,15)。5秒ぶんは [3,10) の空きに収まるので 3（15 ではない）。
+    expect(firstFreeStart(withSpans([[0, 3], [10, 15]]), 'track_001', 0, 5)).toBe(3);
+  });
+
+  it('ちょうど収まる空きは使う（端が接するのは可＝11 §8 V24）', () => {
+    // [0,3) と [8,10)。空き [3,8) は5秒ちょうど＝そこへ置く。
+    expect(firstFreeStart(withSpans([[0, 3], [8, 10]]), 'track_001', 0, 5)).toBe(3);
+  });
+
+  it('その空きに収まらなければ、次の空きを見る', () => {
+    // [0,3) と [6,10)。5秒は [3,6) に収まらないので 10。
+    expect(firstFreeStart(withSpans([[0, 3], [6, 10]]), 'track_001', 0, 5)).toBe(10);
+  });
+
+  it('その時刻が空いていれば、後ろに部品があってもそのまま置く', () => {
+    // [10,15) だけ。再生位置0は [0,10) が空いているので 0（15 へ飛ばさない）。
+    expect(firstFreeStart(withSpans([[10, 15]]), 'track_001', 0, 5)).toBe(0);
+  });
+
+  it('並び順に関わらず同じ答えになる（保存の順に依存しない）', () => {
+    // 同じ [0,3)+[10,15) を後ろから並べても 3。
+    const reversed = [...withSpans([[0, 3], [10, 15]])].reverse();
+    expect(firstFreeStart(reversed, 'track_001', 0, 5)).toBe(3);
+    // 収まらない空きが先にある形も。[0,3)+[4,6)+[10,20) を混ぜて並べても 6。
+    const shuffled = withSpans([[4, 6], [10, 20], [0, 3]]);
+    expect(firstFreeStart(shuffled, 'track_001', 0, 4)).toBe(6);
+  });
+
+  it('空いていればその時刻のまま・後ろに何も無ければ最後の終わり', () => {
+    expect(firstFreeStart(withSpans([]), 'track_001', 2, 5)).toBe(2);
+    expect(firstFreeStart(withSpans([[0, 4]]), 'track_001', 0, 5)).toBe(4);
+    // 探し始めより前に終わる部品は関係ない。
+    expect(firstFreeStart(withSpans([[0, 1]]), 'track_001', 5, 5)).toBe(5);
+  });
+
+  it('ほかの列の部品は見ない', () => {
+    const clips = [...withSpans([[0, 20]])].map((c) => ({ ...c, trackId: 'track_009' }));
+    expect(firstFreeStart(clips, 'track_001', 0, 5)).toBe(0);
+  });
+});
+
+describe('addVisualClip（写真・文字・図形を置く・#684）', () => {
+  const base = () => doc({
+    tracks: [
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.audio },
+    ],
+    clips: [],
+    assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'a.png' }],
+  });
+
+  it('画面の真ん中に置く（置いた瞬間に見える）', () => {
+    const r = addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0 });
+    expect(r.ok).toBe(true);
+    const c = r.ok ? r.doc.clips[0] : undefined;
+    // 16:9＝1920×1080。文字は横長の帯（0.8×0.14）を真ん中へ。
+    expect(c).toMatchObject({ kind: 'text', x: 192, y: 465, w: 1536, h: 151, text: 'テキスト' });
+  });
+
+  it('落とした場所は**箱の中心**として扱い、画面の外へは出さない', () => {
+    const r = addVisualClip(base(), {
+      kind: TIMELINE_CLIP_KIND.shape, trackId: 'track_001', startSec: 0, center: { x: 0, y: 0 },
+    });
+    expect(r.ok).toBe(true);
+    // 左上に落としても、箱ごと画面の中へ収める（負の座標を作らない）。
+    expect(r.ok && r.doc.clips[0]).toMatchObject({ x: 0, y: 0 });
+    const far = addVisualClip(base(), {
+      kind: TIMELINE_CLIP_KIND.shape, trackId: 'track_001', startSec: 0, center: { x: 9999, y: 9999 },
+    });
+    expect(far.ok && far.doc.clips[0]).toMatchObject({ x: 1920 - 576, y: 1080 - 324 });
+  });
+
+  it('図形の既定は場面形式の「図形を足す」と同じ（形式で色が変わらない）', () => {
+    const r = addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.shape, trackId: 'track_001', startSec: 0 });
+    expect(r.ok && r.doc.clips[0]).toMatchObject({ shapeType: 'rect', fillColor: DEFAULT_SHAPE_COLOR, opacity: 1 });
+  });
+
+  it('この動画が持っていない素材は置かない（存在しない枠を作らない）', () => {
+    expectBlocked(
+      addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, assetId: 'no_such' }),
+      EDIT_BLOCKED.notFound,
+    );
+    expectBlocked(
+      addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0 }),
+      EDIT_BLOCKED.notFound,
+    );
+  });
+
+  it('置いた部品はスキーマに適合する（一覧に出るのに開けない動画を作らない）', () => {
+    for (const kind of [TIMELINE_CLIP_KIND.text, TIMELINE_CLIP_KIND.shape] as const) {
+      const r = addVisualClip(base(), { kind, trackId: 'track_001', startSec: 0 });
+      expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
+    }
+    const slot = addVisualClip(base(), {
+      kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, assetId: 'asset_001',
+    });
+    expect(slot.ok && validateTimelineProject(slot.doc)).toBe(true);
+  });
+
+  it('その種類が持たない項目は断る（意味の無いデータを書かない）', () => {
+    const placed = addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0 });
+    const d = placed.ok ? placed.doc : base();
+    const id = d.clips[0].id;
+    // 文字の部品に図形の色は書けない（`TimelineClip` は平らな形なので、型ではなく関数が断る）。
+    // **列の種別違いとは別の理由**（#684 レビュー）＝「列に置き直してください」は項目違いには当たらない案内。
+    expectBlocked(setVisualClipContent(d, id, { fillColor: '#ff0000' }), EDIT_BLOCKED.contentField);
+    // 音の部品には中身の項目そのものが無い。
+    const audio = doc({ clips: [{ id: 'clip_009', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, bundledBgmId: 'found-new-hope' }] });
+    expectBlocked(setVisualClipContent(audio, 'clip_009', { text: 'あ' }), EDIT_BLOCKED.contentField);
+    // 直せる項目は通る（断りすぎていない）。
+    expect(setVisualClipContent(d, id, { text: 'こんにちは' }).ok).toBe(true);
+  });
+
+  it('音の列には置けない・固定した列にも置けない・重なる場所にも置けない', () => {
+    expectBlocked(
+      addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 0 }),
+      EDIT_BLOCKED.trackKind,
+    );
+    const locked = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }], clips: [] });
+    expectBlocked(
+      addVisualClip(locked, { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0 }),
+      EDIT_BLOCKED.locked,
+    );
+    const busy = addVisualClip(base(), { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0 });
+    expectBlocked(
+      addVisualClip(busy.ok ? busy.doc : base(), { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 1 }),
+      EDIT_BLOCKED.overlap,
+    );
   });
 });
 
