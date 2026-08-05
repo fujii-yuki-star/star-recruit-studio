@@ -4,6 +4,7 @@
 // 画面は左・中央・右・下の4つの領域に分かれ、**領域の中は入れ子で分割**できる（決定11）。
 // 境界（分かれ目・領域の外枠）は**ドラッグで動かせる**（決定2）。欄の中身は使う側から渡す。
 import { useEffect, useRef, useState } from "react";
+import { claimEscape } from "../../hooks/escapeOwners";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { ContextMenu } from "../ContextMenu";
 import type { ContextMenuItem } from "../ContextMenu";
@@ -118,6 +119,7 @@ export function PanelLayoutView({
     onCancel?: () => void,
   ): void => {
     stopDragRef.current?.();
+    let releaseEscape: (() => void) | null = null;
     // **掴んだ指だけ**を見る（別の指の up でその座標へ落ちる、を作らない）。
     const mine = (ev: PointerEvent): boolean => ev.pointerId === pointerId;
     const stop = (ev?: PointerEvent): void => {
@@ -125,6 +127,8 @@ export function PanelLayoutView({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", cancel);
       window.removeEventListener("keydown", onKey);
+      releaseEscape?.(); // 名乗りを外す（外し忘れると `Escape` が永久に効かなくなる）
+      releaseEscape = null;
       stopDragRef.current = null;
       if (ev) onEnd?.(ev);
     };
@@ -145,6 +149,9 @@ export function PanelLayoutView({
     const onKey = (ev: KeyboardEvent): void => {
       if (ev.key === "Escape") cancel();
     };
+    // 掴んでいる間は **`Escape` を受け持っている**と名乗る（#701 レビュー）＝中止しただけで、
+    // 外側（画面）の `Escape` まで走って選択や打ちかけの値が消えるのを防ぐ。
+    releaseEscape = claimEscape();
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);

@@ -7,6 +7,7 @@
 // 自由配置エディタ（`FreeLayoutOverlay`）が持っていた同じ作りをここへ出して**1つにする**（§6）＝
 // 画面ごとに閉じ方や見た目が割れない。
 import { useEffect } from "react";
+import { useEscapeOwner } from "../hooks/escapeOwners";
 
 export interface ContextMenuItem {
   label: string;
@@ -38,6 +39,9 @@ export function ContextMenu({
   items: ContextMenuItem[];
   onClose: () => void;
 }): React.ReactElement | null {
+  // **`Escape` を受け持っている間は名乗る**（#701 レビュー）＝外側（画面）の `Escape` が同時に走って
+  // 「メニューを閉じただけなのに選択も解ける」を作らない。
+  useEscapeOwner(true);
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") onClose();

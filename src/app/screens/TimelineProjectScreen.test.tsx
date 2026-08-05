@@ -1395,7 +1395,7 @@ describe("TimelineProjectScreen: 選択の作法（#701）", () => {
   it("帯には名前と時間帯を添える（短い帯でも何か分かる）", () => {
     twoClips();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "あ" }).title).toBe("あ（0.0〜5.0秒）");
+    expect(screen.getByRole("button", { name: "あ" }).title).toBe("あ（0:00〜0:05）"); // 場面形式と同じ書き方
   });
 
   it("選ぶ部品を切り替えたら、前の部品への入力は残さない", () => {
@@ -1488,6 +1488,38 @@ describe("TimelineProjectScreen: 選択の作法（レビュー指摘）", () =>
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "あ" }));
     fireEvent.click(screen.getByLabelText("映像1の操作")); // 列のメニューを開く
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+  });
+
+  it("欄の境界を掴んでいる間は Escape で選択を解かない（中止しただけで消さない）", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あ" }));
+    // 欄の境界を掴む（ADR-0033）。掴んでいる間は欄の側が Escape を受け持つ。
+    // jsdom は大きさを持たないので、割合を決める親の箱を置く（置かないと掴み始めない）。
+    const divider = screen.getAllByLabelText("欄の境目")[0];
+    (divider.parentElement as HTMLElement).getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    pointerDownAt(divider, 1000, { clientX: 0, clientY: 50 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    fireEvent.pointerUp(window, { pointerId: 1 });
+  });
+
+  it("欄のメニューが開いている間も Escape で選択を解かない", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あ" }));
+    fireEvent.click(screen.getByLabelText("選んだ部品の欄の操作")); // 欄（ADR-0033）のメニュー
     fireEvent.keyDown(window, { key: "Escape" });
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
   });

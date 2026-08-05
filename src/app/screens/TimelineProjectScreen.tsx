@@ -12,6 +12,7 @@ import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../..
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
+import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
@@ -61,7 +62,7 @@ const PANEL_ID = {
 } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { clipLabel, clipRangeTitle, editBlockedMessage, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, SLOT_TYPE } from "../../domain/enums";
@@ -338,7 +339,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 選ぶと確認が復活し、押すと**画面で選んでいない方**がバラされる（バラすは取り消しでしか戻らない）。
   const [exploding, setExploding] = useState<{ clipId: string; template: Template } | null>(null);
   // `Escape` の順番を決める材料（#701 レビュー）。**答えを求める確認とメニュー**が開いている間は選択を解かない。
-  const overlayOpen = trackMenu !== null || exploding !== null || removingTrackId !== null || confirmLeave;
+  // 答えを求める確認は**自分では `Escape` を処理しない**（答えるまで残す）ので、ここで名乗る側に回る。
+  const overlayOpen = exploding !== null || removingTrackId !== null || confirmLeave;
+  useEscapeOwner(overlayOpen);
 
   // 選択のキー操作（ADR-0034 決定15/18）。**入力欄と日本語の変換中は奪わない**（共有の判定を通す）。
   // `Escape`＝選択を解く／`Ctrl+A`＝全部選ぶ。**ドラッグ専用の操作を作らない**（決定19）ための土台でもある。
@@ -346,10 +349,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     const onKey = (e: KeyboardEvent) => {
       if (shouldIgnoreShortcut(e)) return;
       if (e.key === "Escape") {
-        // **開いているものを先に閉じる**（#701 レビュー）＝`Escape` は「いちばん手前のものを1段はがす」。
-        // 一緒に選択まで解くと、メニューを閉じただけで**打ちかけの値が消える**（選択が変わると下書きを片づけるため）。
-        // ほかの `Escape` の受け手（列メニュー・欄のドラッグ中止）は自前で閉じるので、ここでは**開いていたら何もしない**。
-        if (overlayOpen) return;
+        // **手前のものから1段ずつはがす**（#701 レビュー）＝`Escape` を自分で受け持っているものがある間は、
+        // いちばん外側の後始末（選択を解く）を走らせない。一緒に解くと、メニューを閉じただけで
+        // **打ちかけの値が消える**（選択が変わると下書きを片づけるため）。
+        // 受け手は**自分で名乗る**（`escapeOwners`）＝画面が数え上げると、受け手が増えるたびに数え漏れる。
+        if (overlayOpen || hasEscapeOwner()) return;
         clearSelection();
         return;
       }
@@ -709,8 +713,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             type="button"
                             className={`timeline-clip ${trackClipClass(track.kind)}${selectedClipIds.includes(c.id) ? " timeline-clip--selected" : ""}`}
                             style={{ left: `${pxPerSec * c.startSec}px`, width: `${pxPerSec * (clipEndSec(c) - c.startSec)}px` }}
-                            // 帯は短いと文字が読めない＝**名前と時間帯を添える**（場面形式の見わたす画面と同じ・ADR-0026②）。
-                            title={`${clipLabel(c)}（${c.startSec.toFixed(1)}〜${clipEndSec(c).toFixed(1)}秒）`}
+                            // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
+                            // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
+                            title={clipRangeTitle(clipLabel(c), c.startSec, clipEndSec(c))}
                             onClick={(e) => selectClip(c.id, e.shiftKey)}
                           >
                             {clipLabel(c)}
