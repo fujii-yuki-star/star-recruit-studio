@@ -160,7 +160,7 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     fireEvent.click(screen.getByRole("button", { name: "まえ" }));
     fireEvent.click(screen.getByText("後ろへ"));
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0.5);
-    fireEvent.click(screen.getByText("取り消す"));
+    fireEvent.click(screen.getByRole("button", { name: "取り消す" }));
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0);
   });
 
@@ -401,7 +401,7 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
   it("文字を書き換えられる", () => {
     openWithTemplateClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const input = screen.getByText("見出し").parentElement?.querySelector("input");
+    const input = screen.getByLabelText("見出し");
     fireEvent.change(input!, { target: { value: "会社紹介" } });
     expect(useTimelineStore.getState().doc?.clips[0].texts).toEqual({ title: "会社紹介" });
   });
@@ -636,7 +636,7 @@ describe("TimelineProjectScreen: 読み上げを置く・声を作る（#633）"
   it("文を書き換えられる", () => {
     withVoice();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const input = screen.getByText("読み上げる文").parentElement?.querySelector("input");
+    const input = screen.getByLabelText("読み上げる文");
     fireEvent.change(input!, { target: { value: "べつの文" } });
     expect(useTimelineStore.getState().doc?.clips[0].voice?.text).toBe("べつの文");
   });
@@ -679,9 +679,12 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 3 });
   };
 
+  // 数値欄は**確定（欄から離れる／Enter）で1回だけ**反映する（#706）。実ブラウザではボタンを押した時点で
+  // 欄からフォーカスが外れて確定するが、jsdom は勝手にフォーカスを動かさないので、その1歩を書く。
   const typeAndPlace = (label: string, value: string) => {
-    const input = screen.getByText(label).parentElement?.querySelector("input");
+    const input = screen.getByLabelText(label);
     fireEvent.change(input!, { target: { value } });
+    fireEvent.blur(input!);
     fireEvent.click(screen.getByRole("button", { name: "この位置に置く" }));
   };
 
@@ -721,7 +724,7 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     withClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     typeAndPlace("横のずれ（px）", "200");
-    expect((screen.getByText("横のずれ（px）").parentElement?.querySelector("input") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("横のずれ（px）") as HTMLInputElement).value).toBe("");
   });
 
   it("書き出し中は置けない（押してから断らない・理由を出す）", () => {
@@ -736,13 +739,13 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
   it("断られたときは入れた値を消さない（音量の変化と同じ規準）", () => {
     withClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const input = screen.getByText("横のずれ（px）").parentElement?.querySelector("input");
+    const input = screen.getByLabelText("横のずれ（px）");
     fireEvent.change(input!, { target: { value: "200" } });
     // 置く直前に書き出しが始まった＝store が断る経路（ボタンの disabled をすり抜けた場合）。
     useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
     fireEvent.click(screen.getByRole("button", { name: "この位置に置く" }));
     expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_EXPORTING");
-    expect((screen.getByText("横のずれ（px）").parentElement?.querySelector("input") as HTMLInputElement).value).toBe("200");
+    expect((screen.getByLabelText("横のずれ（px）") as HTMLInputElement).value).toBe("200");
   });
 
   it("説明文に記号がそのまま出ない（Markdown は効かない）", () => {
@@ -765,9 +768,10 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     typeAndPlace("横のずれ（px）", "200");
     fireEvent.click(screen.getByRole("button", { name: "この位置の値を読み込む" }));
-    const input = screen.getByText("横のずれ（px）").parentElement?.querySelector("input");
+    const input = screen.getByLabelText("横のずれ（px）");
     expect((input as HTMLInputElement).value).toBe("200");
     fireEvent.change(input!, { target: { value: "300" } });
+    fireEvent.blur(input!);
     fireEvent.click(screen.getByRole("button", { name: "この位置に置く" }));
     expect(useTimelineStore.getState().doc?.animations?.[0].keyframes).toEqual([{ timeSec: 1, x: 300 }]);
   });
@@ -791,7 +795,7 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
   it("固定した列の部品には置けない（欄を押せなくする）", () => {
     withClip({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText("横のずれ（px）").parentElement?.querySelector("input")).toBeDisabled();
+    expect(screen.getByLabelText("横のずれ（px）")).toBeDisabled();
   });
 
   it("音の部品には動きの欄を出さない（絵が無いので効かない）", () => {
@@ -830,9 +834,11 @@ describe("TimelineProjectScreen: 音の部品（速さ・使い始め・音量�
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
   };
+  // 数値欄は**確定（欄から離れる／Enter）で1回だけ**反映する（#706）＝1文字ごとに履歴を積まない。
   const setField = (label: string, value: string) => {
-    const input = screen.getByText(label).parentElement?.querySelector("input");
+    const input = screen.getByLabelText(label);
     fireEvent.change(input!, { target: { value } });
+    fireEvent.blur(input!);
   };
 
   it("速さを変えられる（部品の長さは変わらない）", () => {
@@ -869,7 +875,7 @@ describe("TimelineProjectScreen: 音の部品（速さ・使い始め・音量�
   it("固定した列では変えられない（欄を押せなくする）", () => {
     withBgm({ tracks: [{ id: "track_002", kind: TRACK_KIND.audio, locked: true }] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText("速さ（倍）").parentElement?.querySelector("input")).toBeDisabled();
+    expect(screen.getByLabelText("速さ（倍）")).toBeDisabled();
   });
 
   it("同梱BGMを再生位置から置ける", () => {
@@ -926,15 +932,17 @@ describe("TimelineProjectScreen: 切り抜き（#634）", () => {
   it("%で隠せる（保存は割合）", () => {
     withShape();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const input = screen.getByText("下を隠す（%）").parentElement?.querySelector("input");
+    const input = screen.getByLabelText("下を隠す（%）");
     fireEvent.change(input!, { target: { value: "25" } });
+    fireEvent.blur(input!); // 確定で1回だけ反映（#706）
+
     expect(useTimelineStore.getState().doc?.clips[0].crop).toEqual({ bottom: 0.25 });
   });
 
   it("固定した列では変えられない", () => {
     withShape({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText("上を隠す（%）").parentElement?.querySelector("input")).toBeDisabled();
+    expect(screen.getByLabelText("上を隠す（%）")).toBeDisabled();
   });
 
   it("音の部品には出さない（絵が無いので効かない）", () => {
@@ -965,8 +973,9 @@ describe("TimelineProjectScreen: 音量の変化（#512 段4）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     // 動画の 3 秒＝部品（1 秒から）の 2 秒目。
     fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "3" } });
-    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    const input = screen.getByLabelText("この位置の音量");
     fireEvent.change(input!, { target: { value: "0.4" } });
+    fireEvent.blur(input!);
     fireEvent.click(screen.getByText("この位置に置く"));
     expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toEqual([{ timeSec: 2, volume: 0.4 }]);
   });
@@ -995,8 +1004,9 @@ describe("TimelineProjectScreen: 音量の変化（#512 段4）", () => {
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "7" } });
-    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    const input = screen.getByLabelText("この位置の音量");
     fireEvent.change(input!, { target: { value: "0.9" } });
+    fireEvent.blur(input!);
     fireEvent.click(screen.getByText("この位置に置く"));
     expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("ほかの点を外してから置いてください"))).toBe(true);
     expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toHaveLength(VOLUME_POINTS_MAX);
@@ -1034,24 +1044,25 @@ describe("TimelineProjectScreen: 音量の変化のレビュー指摘（/canon-c
   it("点があるときは「音量」欄を押せなくして理由を出す（設定したのに音が変わらない、を作らない）", () => {
     withPoints([{ timeSec: 1, volume: 0.8 }]);
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText("音量").parentElement?.querySelector("input")).toBeDisabled();
+    expect(screen.getByLabelText("音量")).toBeDisabled();
     expect(screen.getByText(/その点が音量を決めます/)).toBeInTheDocument();
   });
 
   it("点が無ければ「音量」欄は使える（従来どおり一定の音量を決められる）", () => {
     withPoints([]);
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText("音量").parentElement?.querySelector("input")).not.toBeDisabled();
+    expect(screen.getByLabelText("音量")).not.toBeDisabled();
   });
 
   it("置けなかったときは入力した値を消さない（打ち直しにさせない）", () => {
     withPoints(Array.from({ length: VOLUME_POINTS_MAX }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 })));
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "7" } });
-    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    const input = screen.getByLabelText("この位置の音量");
     fireEvent.change(input!, { target: { value: "0.9" } });
+    fireEvent.blur(input!);
     fireEvent.click(screen.getByText("この位置に置く"));
-    expect((screen.getByText("この位置の音量").parentElement?.querySelector("input") as HTMLInputElement).value).toBe("0.9");
+    expect((screen.getByLabelText("この位置の音量") as HTMLInputElement).value).toBe("0.9");
   });
 });
 
@@ -1066,8 +1077,9 @@ describe("TimelineProjectScreen: 音量の変化を部品の終わりに置く�
     fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "10" } });
     // 「部品の外です」ではなく、置く欄が出ている。
     expect(screen.getByText("この位置に置く")).toBeInTheDocument();
-    const input = screen.getByText("この位置の音量").parentElement?.querySelector("input");
+    const input = screen.getByLabelText("この位置の音量");
     fireEvent.change(input!, { target: { value: "1" } });
+    fireEvent.blur(input!);
     fireEvent.click(screen.getByText("この位置に置く"));
     expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toEqual([{ timeSec: 10, volume: 1 }]);
   });
@@ -1228,7 +1240,7 @@ describe("TimelineProjectScreen: 編集の場所を上から圧迫しない（�
     const zone = container.querySelector(".timeline-flash-zone")!;
     expect(zone.contains(notice!)).toBe(true);
     expect(zone.contains(screen.getByText("動画の一覧へ"))).toBe(false);
-    expect(zone.contains(screen.getByText("取り消す"))).toBe(false);
+    expect(zone.contains(screen.getByRole("button", { name: "取り消す" }))).toBe(false);
   });
 
   it("見た目パターンが見つからない知らせも編集の下に出る", () => {
@@ -1402,7 +1414,7 @@ describe("TimelineProjectScreen: 選択の作法（#701）", () => {
     twoClips();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "あ" }));
-    const field = () => screen.getByText("横のずれ（px）").parentElement?.querySelector("input") as HTMLInputElement;
+    const field = () => screen.getByLabelText("横のずれ（px）") as HTMLInputElement;
     fireEvent.change(field(), { target: { value: "200" } });
     expect(field().value).toBe("200");
     act(() => useTimelineStore.getState().selectClip("clip_002"));
@@ -1541,5 +1553,192 @@ describe("TimelineProjectScreen: 選択の作法（レビュー指摘）", () =>
     const e = new KeyboardEvent("keydown", { key: "a", ctrlKey: true, cancelable: true, bubbles: true });
     window.dispatchEvent(e);
     expect(e.defaultPrevented).toBe(true);
+  });
+});
+
+// 数値欄の確定タイミングと、押せない理由の出し方（#706・#703）。
+describe("TimelineProjectScreen: 数値欄と押せない理由（#706・#703）", () => {
+  const withBgmClip = (over: Record<string, unknown> = {}) => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 10, bundledBgmId: "found-new-hope" },
+      ],
+      ...over,
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("打っている途中は履歴を積まない（確定して初めて1回）", () => {
+    withBgmClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    const input = screen.getByLabelText("速さ（倍）");
+    fireEvent.change(input, { target: { value: "1" } });
+    fireEvent.change(input, { target: { value: "1." } });
+    fireEvent.change(input, { target: { value: "1.5" } });
+    expect(useTimelineStore.getState().history.past.length).toBe(before); // 打っている間は積まない
+    fireEvent.blur(input);
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1); // 確定で1回だけ
+    expect(useTimelineStore.getState().doc?.clips[0].speed).toBe(1.5);
+  });
+
+  it("Enter でも確定する（欄から離れずに決められる）", () => {
+    withBgmClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByLabelText("速さ（倍）");
+    fireEvent.change(input, { target: { value: "2" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(useTimelineStore.getState().doc?.clips[0].speed).toBe(2);
+  });
+
+  it("範囲の外は範囲へ収める（打っている途中では直さない）", () => {
+    withBgmClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByLabelText("速さ（倍）") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "99" } });
+    expect(input.value).toBe("99"); // 打っている間は触らない（桁を打ち切る前に直さない）
+    fireEvent.blur(input);
+    expect(useTimelineStore.getState().doc?.clips[0].speed).toBe(4); // CLIP_SPEED_MAX
+  });
+
+  it("書き出し中は編集の入口を押せなくして理由を出す（押してから断らない）", () => {
+    withBgmClip();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const speed = screen.getByLabelText("速さ（倍）");
+    expect(speed).toBeDisabled();
+    expect(speed.title).toBe("書き出しが終わってから編集できます");
+    const del = screen.getByRole("button", { name: "消す" });
+    expect(del).toBeDisabled();
+    expect(del.title).toBe("書き出しが終わってから編集できます");
+    expect(screen.getByRole("button", { name: "同じものを足す" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "映像の列を足す" })).toBeDisabled();
+  });
+
+  it("固定した列のほうを先に出す（直せる順に理由を出す）", () => {
+    withBgmClip({ tracks: [{ id: "track_002", kind: TRACK_KIND.audio, locked: true }] });
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByLabelText("速さ（倍）").title).toBe("この列は固定されています。変えるには固定を外してください");
+  });
+});
+
+// レビューで見つかった「押してから断る」の残り（#703）と、下書き欄の扱い（#706）。
+describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レビュー指摘）", () => {
+  const withBgm = () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 10, bundledBgmId: "found-new-hope" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 2 });
+  };
+  const exporting = () =>
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+
+  it("音量の点は、打った値でそのまま置ける（確定を待たせない）", () => {
+    withBgm();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("この位置の音量"), { target: { value: "0.4" } });
+    // 打った直後に押せる＝下書きの欄は確定を待たない（待たせると1回目が必ず落ちる）。
+    const place = screen.getAllByRole("button", { name: "この位置に置く" })[0];
+    expect(place).not.toBeDisabled();
+    fireEvent.click(place);
+    expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toEqual([{ timeSec: 2, volume: 0.4 }]);
+  });
+
+  it("書き出し中は「置く列」も列の操作も押せない（押してから断らない）", () => {
+    withBgm();
+    exporting();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByLabelText("置く列")).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("音1の操作"));
+    const items = screen.getAllByRole("menuitem");
+    expect(items.every((el) => el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")).toBe(true);
+  });
+
+  it("書き出し中は取り消す／やり直すも押せない（場面形式と同じ）", () => {
+    withBgm();
+    useTimelineStore.getState().moveSelectedClip({ startSec: 1 }); // 履歴を作る
+    exporting();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "取り消す" })).toBeDisabled();
+  });
+
+  it("確認を出したあとに書き出しが始まったら、確認を閉じる（答えさせてから断らない）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("映像2の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この列を消す" }));
+    expect(screen.getByRole("button", { name: "削除する" })).toBeInTheDocument();
+    // 確認を出したまま「動画を書き出す」を押す＝答えを求める確認は閉じてから始める。
+    fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }));
+    expect(screen.queryByRole("button", { name: "削除する" })).not.toBeInTheDocument(); // 答えさせない
+    expect(useTimelineStore.getState().doc!.tracks).toHaveLength(2);
+  });
+});
+
+// レビューで見つかった「押してから断る」の取りこぼし（#709）。選択に依る／依らないの取り違え。
+describe("TimelineProjectScreen: 固定の見方（#709 レビュー）", () => {
+  it("まとめて消すも、固定した列の部品が混ざっていたら押せない", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual, locked: true },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_003", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true }); // 全部選ぶ＝固定列のものが混ざる
+    const del = screen.getByRole("button", { name: "選んだ2個を消す" });
+    expect(del).toBeDisabled(); // 1つだけ選んだときだけ見る、では取りこぼす
+    expect(del.title).toBe("固定された列の部品が選ばれています。固定を外すか、選び直してください");
+  });
+
+  it("字幕を置くのは、選んだ読み上げの列が固定でも押せる（別の列へ置くので関係ない）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.audio, locked: true },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 5, voice: { text: "よろしく", status: "none" } },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "この読み上げの字幕を置く" })).not.toBeDisabled();
+  });
+
+  it("まとまりの動きは、別のメンバーの列が固定でも押せない（domain と同じ見方をする）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual, locked: true },
+      ],
+      groups: [{ id: "group_001", members: ["clip_001", "clip_002"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_003", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+      animations: [{ id: "anim_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
+    });
+    // 選んでいるのは**固定していない列**の部品（選んだ部品だけを見ると押せてしまう）。
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "まとまりの動きを外す" })).toBeDisabled();
   });
 });
