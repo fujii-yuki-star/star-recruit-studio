@@ -1336,3 +1336,76 @@ describe("TimelineProjectScreen: 選んだ部品の欄を整える（#687）", (
     expect(section("音量の変化").open).toBe(false);
   });
 });
+
+// 選択は1つのモデルに統一する（ADR-0034 決定15・#701）。#685/#686 が繋ぐ先を先に固める。
+describe("TimelineProjectScreen: 選択の作法（#701）", () => {
+  // **どちらも再生位置（0秒）に掛かる**ようにする＝切り替えても「動き」の欄が出たままになり、
+  // 下書きが残るかどうかを見られる（同じ列には重ねられないので列を分ける＝`11 §8` V24）。
+  const twoClips = () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_003", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+    });
+  };
+
+  it("何もない所を押すと選択が解ける", () => {
+    twoClips();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あ" }));
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    fireEvent.click(container.querySelector(".timeline-lane")!);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
+  });
+
+  it("帯を押したときは解けない（上がってきた分で解かない）", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あ" }));
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+  });
+
+  it("Escape で解ける・Ctrl+A で全部選べる", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
+  });
+
+  it("文字を打っている間と、日本語の変換中は奪わない", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あ" }));
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: "Escape" }); // 入力欄の中
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    fireEvent.keyDown(window, { key: "Escape", isComposing: true }); // 変換中＝「変換をやめる」
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    input.remove();
+  });
+
+  it("帯には名前と時間帯を添える（短い帯でも何か分かる）", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "あ" }).title).toBe("あ（0.0〜5.0秒）");
+  });
+
+  it("選ぶ部品を切り替えたら、前の部品への入力は残さない", () => {
+    twoClips();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あ" }));
+    const field = () => screen.getByText("横のずれ（px）").parentElement?.querySelector("input") as HTMLInputElement;
+    fireEvent.change(field(), { target: { value: "200" } });
+    expect(field().value).toBe("200");
+    act(() => useTimelineStore.getState().selectClip("clip_002"));
+    expect(field().value).toBe(""); // 打った覚えのない値が別の部品に入らない
+  });
+});

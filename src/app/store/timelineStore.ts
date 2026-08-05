@@ -134,6 +134,8 @@ export interface TimelineState {
   closeTimelineProject: () => void;
   setPlayhead: (sec: number) => void;
   selectClip: (clipId: string, additive?: boolean) => void;
+  /** まとめて選ぶ（`Ctrl+A` の全選択など）。存在しない id は落とす＝消えたものを選んだままにしない。 */
+  selectClips: (clipIds: string[]) => void;
   clearSelection: () => void;
 
   /** 選んでいるクリップを動かす（列を替える／時間をずらす）。置けなければ何も変えず理由を持つ。 */
@@ -432,6 +434,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       };
     }),
 
+  selectClips: (clipIds) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const exists = new Set(doc.clips.map((c) => c.id));
+    set({ selectedClipIds: clipIds.filter((id) => exists.has(id)) });
+  },
   clearSelection: () => set({ selectedClipIds: [] }),
 
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),

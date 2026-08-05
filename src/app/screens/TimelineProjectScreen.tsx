@@ -11,6 +11,7 @@ import { clipCountOnTrack } from "../../domain/timeline/edit";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
 import type { CropMode, TrackKind } from "../../domain/enums";
@@ -218,7 +219,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -237,6 +238,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 取り消し/やり直しのキー操作は**この画面の store** へ繋ぐ（既定は場面形式を巻き戻すので渡さない＝
   // 見えていない文書を戻して自動保存が永続化する事故を作らない・#547 P1-1 と同じ筋）。
   useUndoRedoShortcuts(true, { undo, redo });
+
+  // 選択のキー操作（ADR-0034 決定15/18）。**入力欄と日本語の変換中は奪わない**（共有の判定を通す）。
+  // `Escape`＝選択を解く／`Ctrl+A`＝全部選ぶ。**ドラッグ専用の操作を作らない**（決定19）ための土台でもある。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (shouldIgnoreShortcut(e)) return;
+      if (e.key === "Escape") {
+        clearSelection();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        const ids = useTimelineStore.getState().doc?.clips.map((c) => c.id) ?? [];
+        if (ids.length === 0) return;
+        e.preventDefault();
+        selectClips(ids);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clearSelection, selectClips]);
 
   // 編集したら少し待って自動保存する（場面形式と同じ「閉じても消えない」＝ADR-0026②）。
   // 連続操作のたびに書かないよう間を置く。保存中の再編集は `saveTimelineProject` 側で見る。
@@ -297,6 +318,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [kfDraft, setKfDraft] = useState<Partial<Record<KeyframeProp, string>>>({});
   // 音量の変化（#512 段4）の入力欄。**空欄のままでは置かない**（0 と空欄を取り違えない）。
   const [volumeDraft, setVolumeDraft] = useState("");
+  // **選ぶ部品が変わったら下書きを片づける**（#701・監査 §2.2-9）＝別の部品に前の入力が残っていると、
+  // 「置く」を押した瞬間に**打った覚えのない値**が入る。選択の id そのものを見る（並び替えでは消さない）。
+  const selectedKey = selectedClipIds.join(",");
+  const lastSelectedKey = useRef(selectedKey);
+  useEffect(() => {
+    if (lastSelectedKey.current === selectedKey) return;
+    lastSelectedKey.current = selectedKey;
+    setKfDraft({});
+    setVolumeDraft("");
+  }, [selectedKey]);
   // 右クリック（または「⋮」）で開く列の操作メニュー（ADR-0033）。
   const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
 
@@ -646,7 +677,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         ⋮
                       </button>
                     </div>
-                    <div className="timeline-track timeline-lane" style={{ width: laneWidthPx }}>
+                    {/* **何もない所を押したら選択を解く**（ADR-0034 決定15）。帯を押したときは帯側が受けるので、
+                        ここでは**この箱そのものを押したとき**だけ効かせる（帯から上がってきた分では解かない）。 */}
+                    <div
+                      className="timeline-track timeline-lane"
+                      style={{ width: laneWidthPx }}
+                      onClick={(e) => { if (e.target === e.currentTarget) clearSelection(); }}
+                    >
                       {doc.clips
                         .filter((c) => c.trackId === track.id)
                         .map((c) => (
@@ -655,6 +692,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             type="button"
                             className={`timeline-clip ${trackClipClass(track.kind)}${selectedClipIds.includes(c.id) ? " timeline-clip--selected" : ""}`}
                             style={{ left: `${pxPerSec * c.startSec}px`, width: `${pxPerSec * (clipEndSec(c) - c.startSec)}px` }}
+                            // 帯は短いと文字が読めない＝**名前と時間帯を添える**（場面形式の見わたす画面と同じ・ADR-0026②）。
+                            title={`${clipLabel(c)}（${c.startSec.toFixed(1)}〜${clipEndSec(c).toFixed(1)}秒）`}
                             onClick={(e) => selectClip(c.id, e.shiftKey)}
                           >
                             {clipLabel(c)}
@@ -710,7 +749,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 React が作り直さず、開閉が最初に選んだ部品のままになる（設定が入っていても畳まれたまま）。
                 利用者が明示的に開閉した記憶は localStorage にあるので、作り直しても引き継がれる。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
-              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="crop" title="切り抜き" defaultOpen={cropIsSet}>
+              <CollapsibleSection key={`crop-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="crop" title="切り抜き" defaultOpen={cropIsSet}>
                 <div className="row gap-sm">
                   {CROP_EDGES.map((e) => (
                     <label className="field" key={e.edge}>
@@ -791,7 +830,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
             {/* 動き（キーフレーム）＝置いた時刻の値を並べると、その間はなめらかに変わる（ADR-0019・#634）。 */}
             {selected.kind !== TIMELINE_CLIP_KIND.audio && selected.kind !== TIMELINE_CLIP_KIND.voice && (
-              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>
+              <CollapsibleSection key={`anim-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="anim" title="動き" defaultOpen={selectedKeyframes.length > 0 || groupKeyframes.length > 0}>
                 <p className="text-muted">
                   再生位置（{playheadSec.toFixed(1)}秒）に「<strong>本来の見た目からのずれ</strong>」を置きます。
                   2か所に違う値を置くと、その間はなめらかに変わります。空欄の項目は動かしません。
@@ -1079,7 +1118,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {/* 音量の変化（#512 段4）＝置いた時刻の音量を並べると、その間はなめらかに変わる。
                 音・読み上げのどちらにも置ける（鳴る音を持つ部品だけ）。 */}
             {isAudioClip(selected) && (
-              <CollapsibleSection key={selected.id} scope={SECTION_SCOPE.timeline} storageKey="volumePoints" title="音量の変化" defaultOpen={selectedVolumePoints.length > 0}>
+              <CollapsibleSection key={`volumePoints-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="volumePoints" title="音量の変化" defaultOpen={selectedVolumePoints.length > 0}>
                 <p className="text-muted">
                   再生位置（{playheadSec.toFixed(1)}秒）にその時の音量を置きます。違う値を2か所に置くと、
                   その間はなめらかに変わります。前後のフェードは、この変化の上に掛かります。

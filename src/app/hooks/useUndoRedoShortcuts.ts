@@ -2,6 +2,7 @@
 // テキスト入力中（input/textarea/contentEditable）は標準の文字 Undo に任せ、ここでは奪わない。
 // App 一箇所で登録する（画面ごとの二重登録＝二重 Undo を防ぐ・#413）が、**有効にする画面は enabled で絞る**（下記）。
 import { useEffect } from "react";
+import { shouldIgnoreShortcut } from "./keyboardShortcut";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import type { ExportPhase } from "../store/projectStore";
@@ -38,16 +39,6 @@ export function isUndoRedoEnabledFor(screen: ScreenId, exportPhase: ExportPhase)
 }
 
 /**
- * 文字入力中の要素か（input/textarea/contentEditable）。
- * ここでは「標準の文字 Undo を奪わない」判定に、履歴グループでは「連続入力だけを1履歴に合成する（ボタンは対象外）」
- * 判定に使う＝同じ規則を1か所に置く（§6）。
- */
-export function isTextEntryTarget(target: EventTarget | null): boolean {
-  const t = target as HTMLElement | null;
-  return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-}
-
-/**
  * @param enabled この画面で Ctrl/⌘+Z・Y を有効にするか（App から {@link isUndoRedoEnabledFor} を渡す）。
  * @param handlers 取り消し/やり直しの実体。既定は store の Undo（ADR-0020）。
  *   **画面ローカル下書きを持つ画面**（テンプレ作成＝`LooksEditScreen`）は、store ではなく自前の履歴
@@ -65,7 +56,7 @@ export function useUndoRedoShortcuts(enabled: boolean, handlers?: { undo: () => 
       if (!(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
       if (key !== "z" && key !== "y") return;
-      if (isTextEntryTarget(e.target)) return; // 入力中は標準の文字 Undo に任せる
+      if (shouldIgnoreShortcut(e)) return; // 入力中は標準の文字 Undo に任せる／変換中は奪わない
       e.preventDefault();
       if (key === "y" || e.shiftKey) redo();
       else undo();
