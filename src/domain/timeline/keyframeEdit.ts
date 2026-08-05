@@ -71,8 +71,13 @@ export function keyframeTimeAt(doc: TimelineProject, targetId: string, timeSec: 
   return Math.round(Math.min(Math.max(0, timeSec - origin), span) * 1e6) / 1e6;
 }
 
-/** その対象が固定された列に乗っているか（グループはメンバーのどれかが固定なら固定扱い）。 */
-function isLocked(doc: TimelineProject, targetId: string): boolean {
+/**
+ * その対象が固定された列に乗っているか（グループは**メンバーのどれかが固定なら固定**扱い）。
+ *
+ * **画面からも同じ判定を使う**（#709 レビュー）＝画面が「選んだ部品の列だけ」を見て押せる／押せないを
+ * 決めると、別のメンバーの列が固定されている場合に**押せてしまい、押してから断られる**。
+ */
+export function isTargetLocked(doc: TimelineProject, targetId: string): boolean {
   const lockedTracks = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id));
   const clip = doc.clips.find((c) => c.id === targetId);
   if (clip) return lockedTracks.has(clip.trackId);
@@ -115,7 +120,7 @@ export function setKeyframe(
 ): EditResult {
   const span = spanSec(doc, targetId);
   if (span == null) return { ok: false, reason: EDIT_BLOCKED.notFound };
-  if (isLocked(doc, targetId)) return { ok: false, reason: EDIT_BLOCKED.locked };
+  if (isTargetLocked(doc, targetId)) return { ok: false, reason: EDIT_BLOCKED.locked };
   const at = Math.min(Math.max(0, timeSec), span);
 
   const anims = doc.animations ?? [];
@@ -143,7 +148,7 @@ export function setKeyframe(
 /** 指定時刻のキーフレームを外す（無ければ何も変えない）。 */
 export function removeKeyframe(doc: TimelineProject, targetId: string, timeSec: number): EditResult {
   if (spanSec(doc, targetId) == null) return { ok: false, reason: EDIT_BLOCKED.notFound };
-  if (isLocked(doc, targetId)) return { ok: false, reason: EDIT_BLOCKED.locked };
+  if (isTargetLocked(doc, targetId)) return { ok: false, reason: EDIT_BLOCKED.locked };
   const existing = (doc.animations ?? []).find((a) => a.targetId === targetId);
   if (!existing || !existing.keyframes.some((k) => k.timeSec === timeSec)) return { ok: true, doc };
   const keyframes = existing.keyframes.filter((k) => k.timeSec !== timeSec);
@@ -153,7 +158,7 @@ export function removeKeyframe(doc: TimelineProject, targetId: string, timeSec: 
 /** その対象の動きをすべて外す（キーフレームを1つずつ消させない）。 */
 export function clearKeyframes(doc: TimelineProject, targetId: string): EditResult {
   if (spanSec(doc, targetId) == null) return { ok: false, reason: EDIT_BLOCKED.notFound };
-  if (isLocked(doc, targetId)) return { ok: false, reason: EDIT_BLOCKED.locked };
+  if (isTargetLocked(doc, targetId)) return { ok: false, reason: EDIT_BLOCKED.locked };
   const existing = (doc.animations ?? []).find((a) => a.targetId === targetId);
   if (!existing) return { ok: true, doc };
   return { ok: true, doc: withAnimation(doc, targetId, [], existing) };

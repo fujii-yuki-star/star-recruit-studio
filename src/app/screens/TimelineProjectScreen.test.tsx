@@ -1687,3 +1687,58 @@ describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レ�
     expect(useTimelineStore.getState().doc!.tracks).toHaveLength(2);
   });
 });
+
+// レビューで見つかった「押してから断る」の取りこぼし（#709）。選択に依る／依らないの取り違え。
+describe("TimelineProjectScreen: 固定の見方（#709 レビュー）", () => {
+  it("まとめて消すも、固定した列の部品が混ざっていたら押せない", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual, locked: true },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_003", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "a", ctrlKey: true }); // 全部選ぶ＝固定列のものが混ざる
+    const del = screen.getByRole("button", { name: "選んだ2個を消す" });
+    expect(del).toBeDisabled(); // 1つだけ選んだときだけ見る、では取りこぼす
+    expect(del.title).toBe("固定された列の部品が選ばれています。固定を外すか、選び直してください");
+  });
+
+  it("字幕を置くのは、選んだ読み上げの列が固定でも押せる（別の列へ置くので関係ない）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.audio, locked: true },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 5, voice: { text: "よろしく", status: "none" } },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "この読み上げの字幕を置く" })).not.toBeDisabled();
+  });
+
+  it("まとまりの動きは、別のメンバーの列が固定でも押せない（domain と同じ見方をする）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual, locked: true },
+      ],
+      groups: [{ id: "group_001", members: ["clip_001", "clip_002"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_003", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+      animations: [{ id: "anim_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] }],
+    });
+    // 選んでいるのは**固定していない列**の部品（選んだ部品だけを見ると押せてしまう）。
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "まとまりの動きを外す" })).toBeDisabled();
+  });
+});

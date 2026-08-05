@@ -40,6 +40,7 @@ import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
 import { UndoRedoButtons } from "../components/UndoRedoButtons";
+import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { SECTION_SCOPE } from "../components/sectionOpen";
@@ -419,6 +420,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const selectedSourceSize =
     selected?.kind === TIMELINE_CLIP_KIND.slot && selected.assetId ? assetSizes[selected.assetId] : undefined;
   const selectedLocked = !!selected && !!doc?.tracks.find((t) => t.id === selected.trackId)?.locked;
+  /**
+   * **選んでいるものの中に、固定した列のものがあるか**（#709 レビュー）。`selectedLocked` は
+   * 「1つだけ選んでいるとき」しか立たないので、**まとめて消す**にはこちらを見る＝`Ctrl+A` で全部選んでから
+   * 押すと、固定列の部品が混ざっていても押せてしまい「押してから断られる」に戻る。
+   */
+  const selectionHasLocked = selectedClipIds.some((id) => {
+    const c = doc?.clips.find((x) => x.id === id);
+    return !!c && !!doc?.tracks.find((t) => t.id === c.trackId)?.locked;
+  });
+  const lockedSelectionHint = "固定された列の部品が選ばれています。固定を外すか、選び直してください";
   const lockedHint = selectedLocked ? "この列は固定されています。変えるには固定を外してください" : undefined;
   const textKeys = selectedTemplate ? usedTextKeys(selectedTemplate.layers) : [];
   // 選んだ部品に付いている動き（キーフレーム）。時刻は対象の先頭からの秒なので、表示は起点を足す。
@@ -1033,7 +1044,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 <p>この部品が入っている「まとまり」にも動きが付いています（{g.keyframes.length}か所）。</p>
                 <button
                   className="btn btn-ghost btn-sm"
-                  {...editGuard()}
+                  {...busyGuard({
+                    // **まとまりは「メンバーのどれかが固定なら固定」**（#709 レビュー）＝選んだ部品の列だけを
+                    // 見ると、別のメンバーの列が固定されているときに押せてしまい、押してから断られる。
+                    // 判定は domain と同じ関数を通す（画面で作り直さない）。
+                    disabled: !!doc && isTargetLocked(doc, g.groupId),
+                    hint: !!doc && isTargetLocked(doc, g.groupId) ? lockedSelectionHint : undefined,
+                  })}
                   onClick={() => clearKeyframesOf(g.groupId)}
                 >
                   まとまりの動きを外す
@@ -1146,7 +1163,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   >
                     {generatingVoiceClipId === selected.id ? "作成中…" : "声を作る"}
                   </button>
-                  <button className="btn btn-secondary" onClick={addLinkedSubtitleClip} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
+                  {/* **選んだ読み上げの列の固定は関係ない**（#709 レビュー）＝置くのは別の（固定していない）列なので、
+                      「固定を外してください」は実態と合わない案内になる。選択に依らない入口として扱う。 */}
+                  <button className="btn btn-secondary" onClick={addLinkedSubtitleClip} {...busyGuard({ disabled: isPlaying, hint: playingHint })}>
                     この読み上げの字幕を置く
                   </button>
                 </div>
@@ -1367,7 +1386,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </p>
         )}
         {selectedClipIds.length > 1 && (
-          <button className="btn btn-danger" onClick={removeSelectedClips} {...editGuard()}>選んだ{selectedClipIds.length}個を消す</button>
+          <button className="btn btn-danger" onClick={removeSelectedClips} {...editGuard({ disabled: selectionHasLocked, hint: lockedSelectionHint })}>選んだ{selectedClipIds.length}個を消す</button>
         )}
       </>
     ) },
