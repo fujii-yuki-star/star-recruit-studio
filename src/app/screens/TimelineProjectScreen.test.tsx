@@ -1742,3 +1742,67 @@ describe("TimelineProjectScreen: 固定の見方（#709 レビュー）", () => 
     expect(screen.getByRole("button", { name: "まとまりの動きを外す" })).toBeDisabled();
   });
 });
+
+// 文字を打つ欄は「1文字＝1履歴」になっていた（#708）。上限（50）を文字入力で食い潰すと、
+// それ以前の編集（バラすなど＝取り消しでしか戻らない）が戻せなくなる。
+describe("TimelineProjectScreen: 文字を打つ間は1つの取り消しにまとめる（#708）", () => {
+  const withVoice = () => {
+    open({
+      tracks: [{ id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 5, voice: { text: "", status: "none" } },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("打っている間は1つ、離れたら次は別の1つ", () => {
+    withVoice();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByLabelText("読み上げる文");
+    const before = useTimelineStore.getState().history.past.length;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "こ" } });
+    fireEvent.change(input, { target: { value: "こん" } });
+    fireEvent.change(input, { target: { value: "こんにちは" } });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1); // 5文字でも1つ
+    expect(useTimelineStore.getState().doc?.clips[0].voice?.text).toBe("こんにちは"); // 文書は毎回追いつく
+    fireEvent.blur(input);
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "こんにちは。" } });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 2); // 入り直したら別の1つ
+  });
+
+  it("取り消すと、打つ前まで一度に戻る（1文字ずつ戻らない）", () => {
+    withVoice();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByLabelText("読み上げる文");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "あ" } });
+    fireEvent.change(input, { target: { value: "あい" } });
+    fireEvent.blur(input);
+    act(() => useTimelineStore.getState().undo());
+    expect(useTimelineStore.getState().doc?.clips[0].voice?.text).toBe("");
+  });
+
+  it("欄に入っただけでは取り消しを消費しない（触っただけで履歴が減らない）", () => {
+    withVoice();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByLabelText("読み上げる文");
+    const before = useTimelineStore.getState().history.past.length;
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+    expect(useTimelineStore.getState().history.past.length).toBe(before);
+  });
+
+  it("打っている間もプレビューは追いつく（見えているものがそのまま出る）", () => {
+    // 連動する字幕は、自分の文が無ければ読み上げの文をそのまま描く（ADR-0032 決定24）。
+    // 下書きに溜める形にすると、打っている間プレビューが古いままになる。
+    withVoice();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const input = screen.getByLabelText("読み上げる文");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "とちゅう" } });
+    expect(useTimelineStore.getState().doc?.clips[0].voice?.text).toBe("とちゅう"); // 確定を待たない
+  });
+});

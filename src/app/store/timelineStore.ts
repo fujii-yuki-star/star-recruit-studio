@@ -113,6 +113,17 @@ export interface TimelineState {
    * 残ると、開き直しても作り直せない状態が固定される（履歴にも積まない）。
    */
   generatingVoiceClipId: string | null;
+  /**
+   * 連続入力を1つの取り消しにまとめている深さ（#708）。**保存しない**（画面の都合であって動画の中身ではない）。
+   * 場面形式の `_historyGroupDepth` と同じ仕組み＝同じ概念を同じ挙動にする（ADR-0026②）。
+   */
+  _historyGroupDepth: number;
+  /** グループ中でまだ「編集前」を記録していないか（**遅延記録**＝欄に入っただけでは履歴を消費しない）。 */
+  _historyGroupPending: boolean;
+  /** 連続入力の開始（文字欄の focus・ドラッグの pointerdown）。 */
+  beginHistoryGroup: () => void;
+  /** 連続入力の終了（blur・pointerup）。**必ず呼ぶ**＝開きっぱなしだと以後の取り消しが積まれない。 */
+  endHistoryGroup: () => void;
   /** 保存の状態（場面形式の `saveStatus` と同じ語彙＝同じ概念を同じ言葉で扱う）。 */
   saveStatus: "idle" | "saving" | "saved" | "error";
   /** 再生中か。時計は画面側（`useTimelinePlayback`）が回し、位置は `setPlayhead` で入る。 */
@@ -329,6 +340,8 @@ function emptyState() {
     editBlocked: null as EditBlockedReason | null,
     voiceError: null as string | null,
     generatingVoiceClipId: null as string | null,
+    _historyGroupDepth: 0,
+    _historyGroupPending: false,
     saveStatus: "saved" as TimelineState["saveStatus"],
     isPlaying: false,
     seekNonce: 0,
@@ -451,6 +464,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     set({ ...CLEARED_NOTICES, selectedClipIds: [...new Set(clipIds.filter((id) => exists.has(id)))] });
   },
   clearSelection: () => set({ ...CLEARED_NOTICES, selectedClipIds: [] }),
+
+  // 連続入力を1つの取り消しにまとめる（#708）。**開始では記録しない**＝欄に入っただけ・掴んだだけでは
+  // 履歴を消費しない。最初の実変更で1回だけ「編集前」を積む（場面形式と同じ遅延記録）。
+  beginHistoryGroup: () =>
+    set((s) => (s._historyGroupDepth === 0
+      ? { _historyGroupDepth: 1, _historyGroupPending: true }
+      : { _historyGroupDepth: s._historyGroupDepth + 1 })),
+  endHistoryGroup: () => set((s) => ({ _historyGroupDepth: Math.max(0, s._historyGroupDepth - 1) })),
 
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
   trimSelectedClip: (edge, sec) => applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec)),
@@ -889,9 +910,14 @@ function commit(set: SetState, get: GetState, next: TimelineProject, extra: Part
     set({ editBlocked: null, ...extra });
     return;
   }
+  // グループ中は**最初の実変更だけ**積む（1文字ごとに積むと、上限 50 を文字入力だけで食い潰し、
+  // それ以前の編集＝「バラす」などが取り消せなくなる・#708）。
+  const inGroup = get()._historyGroupDepth > 0;
+  const record = !inGroup || get()._historyGroupPending;
   set({
     doc: next,
-    history: recordSnapshot(get().history, current),
+    history: record ? recordSnapshot(get().history, current) : get().history,
+    _historyGroupPending: false,
     editBlocked: null,
     saveStatus: "idle",
     // 編集したら再生を止める＝「再生位置へ」のような操作が**動いている的**を狙うのを防ぐ（結果が毎回変わる）。

@@ -11,6 +11,7 @@ import { clipCountOnTrack } from "../../domain/timeline/edit";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
+import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
 import { shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
 import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
@@ -243,6 +244,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 取り消し/やり直しのキー操作は**この画面の store** へ繋ぐ（既定は場面形式を巻き戻すので渡さない＝
   // 見えていない文書を戻して自動保存が永続化する事故を作らない・#547 P1-1 と同じ筋）。
   useUndoRedoShortcuts(true, { undo, redo });
+
+  // **文字を打っている間は1つの取り消しにまとめる**（#708）。1文字ごとに積むと、上限まで文字入力で
+  // 埋まり、それ以前の編集（バラすなど）が取り消せなくなる。場面形式と同じ仕組み（ADR-0026②）。
+  const { textGroup } = useTimelineHistoryGroup();
 
 
   // 編集したら少し待って自動保存する（場面形式と同じ「閉じても消えない」＝ADR-0026②）。
@@ -1129,6 +1134,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     className="input" type="text"
                     value={selected.voice?.text ?? ""}
                     {...editGuard()}
+                    {...textGroup}
                     onChange={(e) => setSelectedVoiceText(e.target.value)}
                   />
                 </label>
@@ -1304,6 +1310,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     value={selected.text ?? ""}
                     {...editGuard()}
                     placeholder={selected.voiceClipId ? "空にすると読み上げの文に合わせます" : ""}
+                    {...textGroup}
                     onChange={(e) => setSelectedSubtitleText(e.target.value)}
                   />
                 </label>
@@ -1359,6 +1366,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         className="input" type="text"
                         value={selected.texts?.[key] ?? ""}
                         {...editGuard()}
+                        {...textGroup}
                         onChange={(e) => setSelectedClipText(key, e.target.value)}
                       />
                     </label>
