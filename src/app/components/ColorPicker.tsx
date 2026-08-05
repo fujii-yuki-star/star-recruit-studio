@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { claimEscape } from "../hooks/escapeOwners";
 import { createPortal } from "react-dom";
 import { hexToHsv, hsvToHex, normalizeHex, type Hsv } from "../../domain/format/color";
 
@@ -125,11 +126,13 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const release = claimEscape(); // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）
     window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("keydown", onKey);
+      release();
     };
   }, [open]);
 
