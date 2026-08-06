@@ -326,7 +326,7 @@ describe('正典との照合（ドリフト検知）', () => {
   });
 });
 
-describe('V26b：同じ対象に動きは1本まで（#717）', () => {
+describe('V31：同じ対象に動きは1本まで（#717）', () => {
   const anim = (id: string, targetId: string) => ({ id, targetId, keyframes: [{ timeSec: 0, opacity: 1 }] });
 
   it('同じ対象に2本あると知らせる（片方が黙って無視されるため）', () => {
