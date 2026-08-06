@@ -54,6 +54,24 @@ describe('exportStartBlock（書き出しを始められるか）', () => {
     expect(exportStartBlock({ ...base, generatingVoiceClipId: 'c', otherExportRunning: true })?.message).toContain('声を作成中');
   });
 
+  it('理由の**出どころ**を返す（画面が二重に出さないための拠り所・#729 レビュー）', () => {
+    // 画面は中身の理由を一覧で全件並べ、いまの事情は一段の知らせで出す。どちらに属するかを
+    // 画面側が数え上げ直す（例：一覧が空かどうかで判定する）と、この関数の判定順を推測することになり、
+    // 順を入れ替えた瞬間に**同じ文が二重に出る**。属性として返し、画面はそれに従う。
+    expect(exportStartBlock({ ...base, isImporting: true })?.source).toBe('situation');
+    expect(exportStartBlock({ ...base, generatingVoiceClipId: 'c' })?.source).toBe('situation');
+    expect(exportStartBlock({ ...base, otherExportRunning: true })?.source).toBe('situation');
+    expect(exportStartBlock({ ...base, canExportHere: false })?.source).toBe('situation');
+    expect(exportStartBlock({ ...base, doc: doc({ clips: [] }) })?.source).toBe('content');
+  });
+
+  it('中身の理由のときは、返す文言が**一覧の1件目と同じ**（画面が重複に気づける形）', () => {
+    // ここが食い違うと「一覧に無い文が知らせにだけ出る」＝どちらが本当か分からなくなる。
+    const r = exportStartBlock({ ...base, doc: doc({ clips: [] }) });
+    expect(r?.source).toBe('content');
+    expect(r?.message).toContain('まだ何も置かれていない');
+  });
+
   it('**直せる理由は、直せない理由（この端末では書き出せない）より先**', () => {
     // 逆にすると「この環境では書き出せません」だけが出て、直せば書き出せることに気づけない。
     const r = exportStartBlock({ ...base, doc: doc({ clips: [] }), canExportHere: false });

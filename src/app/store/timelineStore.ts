@@ -85,8 +85,26 @@ const EXPORT_FAILED_MESSAGE = "動画を書き出せませんでした。しば�
 const EXPORT_CANCELLED_MESSAGE = "書き出しを中止しました。もう一度書き出せます。";
 const EXPORT_UNSUPPORTED_MESSAGE = "この環境では動画を書き出せません。アプリから起動し直してお試しください。";
 
+/**
+ * 理由の**出どころ**（#729 レビュー）。画面は理由を2か所に出す＝**中身の理由は一覧**（`timelineExportBlockers`
+ * を全件並べる）、**いまの事情は一段の知らせ**。どちらに属するかを画面側で数え上げ直すと
+ * （例：`exportBlockers.length === 0` で判定する）**この関数の判定順を推測する**ことになり、
+ * 順番を入れ替えた瞬間に黙って同じ文が二重に出る。**属性として返して、画面はそれに従う**。
+ */
+export const EXPORT_BLOCK_SOURCE = {
+  /** 文書の中身が理由＝**下の一覧にも同じ文が並ぶ**（画面は重ねて出さない）。 */
+  content: "content",
+  /** いま始められない事情（取り込み中・声の作成中・別形式の書き出し中・この端末では書き出せない）。 */
+  situation: "situation",
+} as const;
+export type ExportBlockSource = (typeof EXPORT_BLOCK_SOURCE)[keyof typeof EXPORT_BLOCK_SOURCE];
+
 /** 書き出しを始められない理由（`null`＝始められる）。`phase` は場面形式と同じ扱い分け（`11 §3.5`）。 */
-export type ExportStartBlock = { message: string; phase: typeof P.error | typeof P.unsupported };
+export type ExportStartBlock = {
+  message: string;
+  phase: typeof P.error | typeof P.unsupported;
+  source: ExportBlockSource;
+};
 
 /**
  * **書き出しを始められるか**を1か所で見る（#718）。
@@ -107,14 +125,15 @@ export function exportStartBlock(input: {
   otherExportRunning: boolean;
   canExportHere: boolean;
 }): ExportStartBlock | null {
+  const S = EXPORT_BLOCK_SOURCE;
   if (!input.doc) return null; // 開いていないときはボタン自体が無い
-  if (input.isImporting) return { message: EXPORT_BLOCKED_IMPORTING_MESSAGE, phase: P.error };
-  if (input.generatingVoiceClipId != null) return { message: VOICE_BUSY_EXPORT_MESSAGE, phase: P.error };
-  if (input.otherExportRunning) return { message: OTHER_EXPORT_RUNNING_MESSAGE, phase: P.error };
+  if (input.isImporting) return { message: EXPORT_BLOCKED_IMPORTING_MESSAGE, phase: P.error, source: S.situation };
+  if (input.generatingVoiceClipId != null) return { message: VOICE_BUSY_EXPORT_MESSAGE, phase: P.error, source: S.situation };
+  if (input.otherExportRunning) return { message: OTHER_EXPORT_RUNNING_MESSAGE, phase: P.error, source: S.situation };
   const blockers = timelineExportBlockers(input.doc, { knownTemplateIds: input.knownTemplateIds });
-  if (blockers.length > 0) return { message: exportBlockedMessage[blockers[0].code], phase: P.error };
+  if (blockers.length > 0) return { message: exportBlockedMessage[blockers[0].code], phase: P.error, source: S.content };
   // 「この端末では書き出せない」は失敗と別（場面形式と同じ扱い＝`11 §3.5` の `unsupported`）。
-  if (!input.canExportHere) return { message: EXPORT_UNSUPPORTED_MESSAGE, phase: P.unsupported };
+  if (!input.canExportHere) return { message: EXPORT_UNSUPPORTED_MESSAGE, phase: P.unsupported, source: S.situation };
   return null;
 }
 

@@ -286,6 +286,34 @@ describe("TimelineProjectScreen: 書き出しを始められない理由（#718�
     expect(exportBtn().getAttribute("title")).toContain("声を作成中です");
   });
 
+  it("中身が理由のときは、同じ文を二重に出さない（#729 レビュー）", () => {
+    // 一覧（全件）と一段の知らせ（1件目）が両方出ると、**まったく同じ文が2つの知らせとして続く**
+    //（読み上げも2回になる）。理由の出どころで出し分ける。
+    open({ clips: [] }); // 「まだ何も置かれていない」＝文書の中身の理由
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const hits = screen.getAllByRole("alert").filter((el) => el.textContent?.includes("まだ何も置かれていない"));
+    expect(hits).toHaveLength(1);
+    // 押す前に断ることは変わらない（理由はボタンにも出す）。
+    expect(exportBtn()).toBeDisabled();
+    expect(exportBtn().getAttribute("title")).toContain("まだ何も置かれていない");
+  });
+
+  it("いまの事情が理由のときは、知らせの段にも出す（無効なボタンの説明はホバーで出ないことがある）", () => {
+    ready();
+    useTimelineStore.setState({ isImporting: true });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").filter((el) => el.textContent?.includes("取り込み中"))).toHaveLength(1);
+  });
+
+  it("いまの事情と中身の理由が重なったら、両方出す（片方だけ直して堂々巡りにしない）", () => {
+    open({ clips: [] });
+    useTimelineStore.setState({ isImporting: true });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts.some((el) => el.textContent?.includes("取り込み中"))).toBe(true);
+    expect(alerts.some((el) => el.textContent?.includes("まだ何も置かれていない"))).toBe(true);
+  });
+
   it("素材を取り込んでいる最中は押せない", () => {
     ready();
     useTimelineStore.setState({ isImporting: true });

@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 import { isKeyboardActivation, usePointerDrag } from "../hooks/usePointerDrag";
 import { canvasPointAt, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
-import { EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
+import { EXPORT_BLOCK_SOURCE, EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { useExportLockStore } from "../store/exportLock";
 import { canExport } from "../../infrastructure/ffmpegExport";
 import { useNavigationGuard } from "../hooks/navigationGuard";
@@ -339,6 +339,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 確認に「はい」と答えた1回だけ通す目印（答えた直後もまだ保存は失敗のままなので、
   // これが無いと同じ確認が出続けて**永久に離れられない**）。
   const leaveConfirmedRef = useRef(false);
+  // 走っている「離れる流れ」の行き先（`null`＝走っていない）。押し直されたら**行き先だけ**差し替える。
+  const leavingToRef = useRef<ScreenId | null>(null);
   // 離れられない理由（書き出し中）。**黙って止めない**＝押しても何も起きない画面にしない（§2-5）。
   const [leaveBlocked, setLeaveBlocked] = useState<string | null>(null);
   // 画面を離れた後に、終わった保存が遷移を撃たないようにする（行き先が勝手にすり替わる・#719 レビュー）。
@@ -359,24 +361,42 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       setLeaveBlocked(LEAVE_BLOCKED_EXPORTING_MESSAGE);
       return;
     }
-    const status = useTimelineStore.getState().saveStatus;
-    // 待つのは**まだ書けていないとき**だけ（`saved` は書き終わっている＝待つと無駄に書き直す）。
-    if (status === "idle" || status === "saving") {
-      setLeaving(true);
-      // `idle`＝待っている保存を今書く／`saving`＝走っている保存に合流する（どちらも同じ入口）。
-      try {
-        await useTimelineStore.getState().saveTimelineProject();
-      } finally {
-        setLeaving(false);
+    // **離れる流れは同時に1つだけ**（#729 レビュー）。保存を待っている間（~1秒）に別の行き先を押すと、
+    // 待ちが明けたとき2つの流れが**それぞれ `onNavigate` を撃つ**＝一瞬だけ先の行き先を描いてから
+    // 次へ飛ぶ（確認が要る場合は行き先だけが後から上書きされる）。走っている流れがあれば
+    // **行き先を最後に押したものへ差し替えて託す**＝遷移は1回、着地は最後に押した所（§2-5）。
+    const running = leavingToRef.current != null;
+    leavingToRef.current = to;
+    // ⚠️ この `return` を外しても着地は変わらない（先に着いた流れが下で目印を落とすので、後続は
+    // 行き先が `null` になって黙って降りる）。**外さない**のは、2つ目の流れが走っている保存へ
+    // 合流しようとして**もう一度書きに行く**のと、「保存しています」の立て下げが二重になるため。
+    // ＝不変条件（離れる流れは同時に1つ）を**暗黙の後片づけ任せにせず、ここで明示する**。
+    if (running) return;
+    try {
+      const status = useTimelineStore.getState().saveStatus;
+      // 待つのは**まだ書けていないとき**だけ（`saved` は書き終わっている＝待つと無駄に書き直す）。
+      if (status === "idle" || status === "saving") {
+        setLeaving(true);
+        // `idle`＝待っている保存を今書く／`saving`＝走っている保存に合流する（どちらも同じ入口）。
+        try {
+          await useTimelineStore.getState().saveTimelineProject();
+        } finally {
+          setLeaving(false);
+        }
       }
+      if (!aliveRef.current) return; // 待っている間に画面を離れていたら、勝手に行き先を変えない
+      const dest = leavingToRef.current; // 待っている間に押し直された行き先を採る
+      if (dest == null) return;
+      if (useTimelineStore.getState().saveStatus === "error") {
+        setConfirmLeave(dest);
+        return;
+      }
+      leaveConfirmedRef.current = true;
+      onNavigate(dest);
+    } finally {
+      // 断られて画面に残るとき（保存失敗の確認）に次の操作を塞がない＝押しても何も起きない画面にしない。
+      leavingToRef.current = null;
     }
-    if (!aliveRef.current) return; // 待っている間に画面を離れていたら、勝手に行き先を変えない
-    if (useTimelineStore.getState().saveStatus === "error") {
-      setConfirmLeave(to);
-      return;
-    }
-    leaveConfirmedRef.current = true;
-    onNavigate(to);
   }, [onNavigate]);
 
   /**
@@ -891,8 +911,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </button>
           )}
         </div>
-        {exportBlocked && !exporting && (
+        {exportBlocked && exportBlocked.source === EXPORT_BLOCK_SOURCE.situation && !exporting && (
           // 無効にしたボタンの `title` はホバーで出ないことがあるので、**知らせの段にも出す**（#719 レビュー）。
+          // 出すのは**いまの事情だけ**（#729 レビュー）＝中身の理由は下の一覧が全件並べるので、
+          // ここにも出すと**同じ文が2つの知らせとして続き**、読み上げも2回になる。
           <p className="notice notice-warn" role="alert">{exportBlocked.message}</p>
         )}
         {exportBlockers.length > 0 && !exporting && (

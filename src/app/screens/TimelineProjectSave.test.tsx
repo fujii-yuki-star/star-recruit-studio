@@ -199,6 +199,43 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     await waitFor(() => expect(write).toHaveBeenCalled());
   });
 
+  it("保存を待つ間に別の行き先を押したら、移るのは1回だけ・着地は最後に押した所（#729 レビュー）", async () => {
+    open();
+    let release!: () => void;
+    let calls = 0;
+    vi.spyOn(fsMod, "saveProjectDoc").mockImplementation(() => {
+      calls += 1;
+      return calls === 1 ? new Promise<string>((r) => { release = () => r("x"); }) : Promise.resolve("x");
+    });
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    act(() => { void useTimelineStore.getState().saveTimelineProject(); }); // 書き込み中にする
+    // 待っている間に2か所を続けて押す（サイドバーの素早い2クリック）。
+    act(() => { canNavigate("materials" as ScreenId); });
+    act(() => { canNavigate("settings" as ScreenId); });
+    expect(onNavigate).not.toHaveBeenCalled(); // 書き終わるまでどちらも離れない
+    await act(async () => { release(); });
+    // 流れが2つ走ると、それぞれが `onNavigate` を撃つ＝一瞬だけ先の行き先を描いてから次へ飛ぶ。
+    await waitFor(() => expect(onNavigate).toHaveBeenCalled());
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith("settings"); // 最後に押した所
+    // ⚠️ 2つ目の流れが起こす**余分な保存**（`if (running) return;` が消している1回）はここでは測らない
+    // ＝自動保存も同じメソッドを呼ぶので、絶対数で見ると自動保存の都合で壊れるテストになる。
+  });
+
+  it("保存に失敗して断ったあとも、次の行き先を押せる（押しても何も起きない画面にしない）", async () => {
+    open();
+    useTimelineStore.setState({ saveStatus: "idle" });
+    vi.spyOn(fsMod, "saveProjectDoc").mockRejectedValue(new Error("書けない"));
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    await act(async () => { canNavigate("materials" as ScreenId); });
+    expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument();
+    // 走っていた流れの目印を片づけていないと、ここから先は**何を押しても無反応**になる。
+    await act(async () => { canNavigate("settings" as ScreenId); });
+    expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument();
+  });
+
   it("保存済みで離れるときは書き直さない（同じ内容を無駄に書かない）", () => {
     open();
     useTimelineStore.setState({ saveStatus: "saved" });
