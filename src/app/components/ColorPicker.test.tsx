@@ -119,6 +119,35 @@ describe("ColorPicker", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("掴んだまま Escape で閉じ、開き直したら**押していない移動**では色が変わらない（#720 レビュー）", () => {
+    const onChange = vi.fn();
+    const onDragStart = vi.fn();
+    const onDragEnd = vi.fn();
+    render(<ColorPicker value="#ff0000" onChange={onChange} onDragStart={onDragStart} onDragEnd={onDragEnd} />);
+    const svRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv1 = screen.getByTestId("cp-sv");
+    sv1.getBoundingClientRect = svRect;
+    fireEvent.pointerDown(sv1, { clientX: 50, clientY: 0, pointerId: 1 });
+    // 掴んだまま Escape。面の `pointerup` は来ない（ポップオーバーごと消えるため）。
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(onDragEnd).toHaveBeenCalledTimes(1); // 取り消しの区切りは閉じている
+
+    onChange.mockClear();
+    onDragStart.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv2 = screen.getByTestId("cp-sv");
+    sv2.getBoundingClientRect = svRect;
+    // 掴んでいない＝ただ指した状態。掴んだ印が残っていると、ここで色が変わり、
+    // しかも区切りの外なので移動1回ごとに取り消しが積まれる（＝#720 の症状の再発）。
+    fireEvent.pointerMove(sv2, { clientX: 10, clientY: 90, buttons: 0, pointerId: 2 });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onDragStart).not.toHaveBeenCalled();
+  });
+
   it("読み上げラベルを渡せる", () => {
     render(<ColorPicker value="#000000" onChange={vi.fn()} ariaLabel="文字の色を選ぶ" />);
     expect(screen.getByRole("button", { name: "文字の色を選ぶ" })).toBeInTheDocument();

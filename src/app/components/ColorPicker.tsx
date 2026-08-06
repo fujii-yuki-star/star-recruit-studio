@@ -37,9 +37,16 @@ interface Props {
    */
   onDragStart?: () => void;
   onDragEnd?: () => void;
+  /**
+   * 押せないとき（書き出し中・固定した列など・#720）。**受け口が無いと、渡された `disabled` は
+   * 黙って捨てられる**＝触れてしまい、あとから断られる（打った値が消えて理由だけ出る）。
+   */
+  disabled?: boolean;
+  /** 押せない理由（指したときに出す）。 */
+  title?: string;
 }
 
-export function ColorPicker({ value, onChange, className, ariaLabel = "色を選ぶ", onDragStart, onDragEnd }: Props) {
+export function ColorPicker({ value, onChange, className, ariaLabel = "色を選ぶ", onDragStart, onDragEnd, disabled, title }: Props) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   // 開いている間の作業用 HSV（value からの往復で色相が飛ばないよう保持）。開くたびに現在値へ同期する。
@@ -54,6 +61,13 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   // 取り消しの合成境界（#547 P2-3 レビュー）。SV面・色相バーで共有し、開始したものだけを閉じる（冪等）。
   const boundaryRef = useRef(false);
   const endDragBoundary = useCallback(() => {
+    // **掴んだ印も一緒に降ろす**（#720 レビュー）。境界を閉じる経路は「掴むのをやめる」経路でもある。
+    // ここで戻さないと、掴んだまま Escape で閉じたとき（面の `pointerup` は来ない）真のまま残り、
+    // 開き直したあと**押していないただの移動**で色が変わる。しかも境界の外なので移動1回ごとに
+    // 取り消しが積まれる＝#720 で塞いだ症状がそのまま再発する。冪等の判定より前に置く
+    //（境界が既に閉じていても掴んだ印は必ず戻す）。
+    draggingSv.current = false;
+    draggingHue.current = false;
     if (!boundaryRef.current) return;
     boundaryRef.current = false;
     onDragEnd?.();
@@ -176,6 +190,8 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
         type="button"
         className={className}
         aria-label={ariaLabel}
+        disabled={disabled}
+        title={title}
         onClick={() => (open ? setOpen(false) : openPicker())}
         style={{
           width: 40, height: 26, padding: 0, borderRadius: 6, cursor: "pointer",
