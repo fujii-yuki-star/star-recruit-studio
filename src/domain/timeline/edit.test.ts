@@ -4,6 +4,7 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
+  placeableVisualTracks,
   addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
   addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
 } from './edit';
@@ -572,5 +573,42 @@ describe('見た目パターンのクリップ（差し込み口が生きてい�
       const r = addTemplateClip(doc({ clips: [] }), { template: tmpl, trackId: 'track_001', startSec: 0 });
       expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
     });
+  });
+});
+
+describe('placeableVisualTracks（置ける列・#722）', () => {
+  const d = (tracks: TimelineProject['tracks']): TimelineProject => doc({ tracks, clips: [] });
+
+  it('手前が先で返す（配列の末尾が手前＝重ね順）', () => {
+    const r = placeableVisualTracks(d([
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.visual },
+      { id: 'track_003', kind: TRACK_KIND.visual },
+    ]));
+    expect(r.map((t) => t.id)).toEqual(['track_003', 'track_002', 'track_001']);
+  });
+
+  it('音の列・固定した列・隠した列は外す（置けても動画に出ない部品を作らない）', () => {
+    const r = placeableVisualTracks(d([
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.audio },
+      { id: 'track_003', kind: TRACK_KIND.visual, locked: true },
+      { id: 'track_004', kind: TRACK_KIND.visual, hidden: true },
+      { id: 'track_005', kind: TRACK_KIND.visual },
+    ]));
+    expect(r.map((t) => t.id)).toEqual(['track_005', 'track_001']);
+  });
+
+  it('置ける列が無ければ空（呼ぶ側が理由を出せる）', () => {
+    expect(placeableVisualTracks(d([{ id: 'track_001', kind: TRACK_KIND.audio }]))).toEqual([]);
+  });
+
+  it('元の並びを壊さない（`reverse` が文書の列を並べ替えない）', () => {
+    const doc = d([
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.visual },
+    ]);
+    placeableVisualTracks(doc);
+    expect(doc.tracks.map((t) => t.id)).toEqual(['track_001', 'track_002']);
   });
 });

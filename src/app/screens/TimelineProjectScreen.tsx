@@ -13,7 +13,7 @@ import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, visualPlacementIssue } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, placeableVisualTracks, visualPlacementIssue } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation } from "../../domain/constants";
@@ -683,7 +683,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 置ける見た目パターンは**この動画と同じ向き**だけ（向き違いは置いても画面外へ出る＝domain も断る）。
   const placeableTemplates = doc ? templatesForOrientation(templates, doc.videoSettings.aspectRatio) : [];
   // 置ける列（映像の列だけ・固定した列は除く）＝押せるのに置けない選択肢を出さない（§2-5）。
-  const placeableTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.locked && !t.hidden) ?? [];
+  // 置ける列（映像・固定していない・出す設定）は **domain の1つ**を見る（#722）＝画面・store・
+  // 置ける判定で条件を書き分けない。**並びは手前が先**なので、欄の一覧は元の並び順へ戻して出す。
+  const placeableTracks = doc ? [...placeableVisualTracks(doc)].reverse() : [];
   // 読み上げを置ける列（音の列）。
   // この動画が持っている音の素材（焼き出しで運ばれたものなど）。
   const audioAssets = doc?.assets.filter((a) => a.assetType === ASSET_TYPE.bgm) ?? [];
