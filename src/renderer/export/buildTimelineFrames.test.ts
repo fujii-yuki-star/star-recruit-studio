@@ -68,6 +68,22 @@ beforeEach(() => {
 });
 
 describe('buildTimelineFrames', () => {
+  it('置いた写真が実際に絵として焼かれる（#716＝解いた src が SVG まで届く）', async () => {
+    // 立ち絵を落として動画から消えた（#716 レビュー）のと同型＝**運ぶ経路のどこかが切れると絵だけ消える**。
+    // 渡した src が `<image>` の中身になるところまでを通しで見る。
+    const slot = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 1,
+      x: 0, y: 0, w: 1920, h: 1080, assetId: 'asset_001',
+    } as unknown as TimelineClip;
+    await buildTimelineFrames(doc({ clips: [slot] }), {
+      ...baseOpts,
+      assetSrc: (id) => (id === 'asset_001' ? 'data:image/png;base64,PHOTO' : undefined),
+    });
+    const svg = vi.mocked(svgToPngDataUrl).mock.calls[0][0];
+    expect(svg).toContain('data:image/png;base64,PHOTO');
+    expect(svg).toContain('<image');
+  });
+
   it('尺ぶんのフレームを描き、書き出しに渡す形で返す', async () => {
     const r = await buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 1 })] }), baseOpts);
     expect(r.fps).toBe(FPS);

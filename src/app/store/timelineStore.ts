@@ -5,6 +5,7 @@ import { assetDisplayUrl, fileToDataUrl, importAssetByPath, importAssetBytes, im
 import { exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
+import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
 import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
@@ -49,7 +50,7 @@ import type { TimelineVoice } from "../../domain/timeline/types";
 import type { VoiceSettings } from "../../domain/project/types";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { explodeTemplateClip } from "../../domain/timeline/explode";
-import { timelineAudioRuns, timelineExportBlockers } from "../../domain/timeline/export";
+import { TIMELINE_EXPORT_BLOCK, timelineAudioRuns, timelineExportBlockers, timelineImageAssetIds } from "../../domain/timeline/export";
 import { buildTimelineFrames } from "../../renderer/export/buildTimelineFrames";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { fontFamilyForId } from "../../domain/font/fontCatalog";
@@ -917,6 +918,22 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     useExportLockStore.getState().acquire(EXPORT_OWNER);
     let unlisten: (() => void) | undefined;
     try {
+      // **表示用の URL（`asset://`）は書き出しでは読めない**（#716）＝ここで data URL へ解き直す。
+      // 解き方は場面形式と共有（`createExportSrcResolver`）＝形式によって焼ける絵が割れない。
+      // 使っている素材だけをまとめて持つ（全フレームで同じ絵を引くので都度読み直さない）。
+      // ⚠️ **保存先を聞く前**にやる（#726 レビュー）＝ほかの断る理由と同じ順番で返す。ディスクを読むので
+      // `timelineExportBlockers`（同期）には入れられないが、**聞いてから断る**のは避ける。
+      // ⚠️ 走行中に数え始めた**後**でやる＝ここで待つ間に押し直されて二重に走るのを防ぐ。
+      const exportSrcById = await resolveExportSrcMap(
+        timelineImageAssetIds(doc),
+        createExportSrcResolver({ projectId: doc.projectId, assets: doc.assets, templateAssetSrcById: deps.templateAssetSrcById }),
+      );
+      // 読めなかった素材があれば断る。そのまま焼くとその部品だけ灰色の枠になり、プレビューでは
+      // （開いた時点の表示先で）写真が出たままなので**見えていたものと違う動画**が成功として出る（ADR-0026④）。
+      if (timelineImageAssetIds(doc).some((id) => !exportSrcById[id] && !deps.templateAssetSrcById[id])) {
+        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.assetUnreadable] } });
+        return;
+      }
       // 保存先を聞くのも try の中（失敗しても `preparing` のまま固まらない＝画面が戻らなくなる）。
       const outputPath = await showSaveVideoDialog(doc.projectName || "movie");
       if (!outputPath) {
@@ -929,7 +946,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       get().pause();
       // **描くのに使うものは、始めた時点のものを取っておく**（数分かかる処理の途中で別の動画を開かれても、
       // 別プロジェクトの絵や音が混ざらない＝場面形式が #379/#570 で潰したのと同じ事故）。
-      const { assetSrcById, audioSrcByKey, assetSizes } = get();
+      const { audioSrcByKey, assetSizes } = get();
       set({ exportRun: { phase: P.rendering, percent: 0, message: null, cancelling: false } });
       await beginExport();
       unlisten = await listenExportProgress((ev) => {
@@ -947,8 +964,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       const templateById = new Map(deps.templates.map((t) => [t.templateId, t]));
       const frames = await buildTimelineFrames(doc, {
         templateOf: (id) => templateById.get(id),
-        // プレビュー（`TimelineProjectScreen`）と**同じ引き方**＝同じ絵になる。
-        assetSrc: (id) => (id ? assetSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
+        assetSrc: (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
         // 素材の実寸（#634）＝プレビューと同じものを渡す（渡さないと「枠いっぱい」だけ書き出しで戻る）。
         assetSizeOf: (id) => assetSizes[id],
         // 動画全体のフォント（`videoSettings.fontId`）は、部品ごとの指定が無いときの受け皿（11 §6 継承）。

@@ -9,7 +9,7 @@
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
-import { ASSET_TYPE, TIMELINE_CLIP_KIND } from '../enums';
+import { ASSET_TYPE, TIMELINE_CLIP_KIND, isFreeSlotAssetType } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
@@ -171,6 +171,12 @@ export const TIMELINE_EXPORT_BLOCK = {
   subtitleLinkBroken: 'TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN',
   /** 音量の変化の点が多すぎる＝FFmpeg が式を解析できない（#512）ので、書き出さずに断る。 */
   volumePointsTooMany: 'TIMELINE_EXPORT_VOLUME_POINTS_TOO_MANY',
+  /**
+   * 使っている素材のファイルが読めない（#716 レビュー）＝そこだけ**灰色の枠**が焼き込まれる。
+   * プレビューでは（開いた時点の表示先で）写真が出たままなので、**見えていたものと違う動画**が
+   * 成功として出る。描く前に断る（ADR-0026④・見た目未解決と同じ流儀）。
+   */
+  assetUnreadable: 'TIMELINE_EXPORT_ASSET_UNREADABLE',
 } as const;
 
 export type TimelineExportBlockCode = (typeof TIMELINE_EXPORT_BLOCK)[keyof typeof TIMELINE_EXPORT_BLOCK];
@@ -237,10 +243,43 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   return blockers;
 }
 
-/** そのクリップが対象の素材を使っているか（直接置いた素材・枠の差し込み口・立ち絵のいずれか）。 */
+/**
+ * 書き出しで**絵として描く素材**の id（#716）。
+ *
+ * 全部の素材ではなく**実際に使っているものだけ**を返す＝呼び出し側は data URL をまとめて持つので、
+ * 使っていない素材まで載せると記憶を無駄に食う。音だけの素材は絵として描かないので含めない。
+ * 出どころは `clipImageAssetIds` に1つ（**書き出しを断るかを数える側**と同じものを見る）。
+ */
+export function timelineImageAssetIds(doc: TimelineProject): string[] {
+  const ids = new Set<string>();
+  // 絵として置ける種別かは `isFreeSlotAssetType` に1つ（ADR-0030 追補で一本化）＝音の種別を数え直さない。
+  const audioIds = new Set(doc.assets.filter((a) => !isFreeSlotAssetType(a.assetType)).map((a) => a.assetId));
+  for (const c of doc.clips) for (const id of clipImageAssetIds(c)) ids.add(id);
+  // 音の部品が指す素材は絵にしない（`kind='audio'` の `assetId` はここへ来ない）。
+  return [...ids].filter((id) => !audioIds.has(id));
+}
+
+/**
+ * その部品が**絵として使う素材**の id（#716 レビュー）。
+ *
+ * 出どころは3つ＝**直接置いた素材**（`kind='slot'`）／**枠の差し込み口**（`assetRefs`）／**立ち絵**
+ * （`character.poseAssetId`）。**部品に書かれている**絵の素材はこれで尽きる＝1つ漏らすと、その絵だけ
+ * 動画から消える（実際に立ち絵を落としていた）。
+ * ⚠️ 描画（`renderer/layout.ts`）はもう1つ、**見た目パターンの既定素材**（層の `assetId`・ADR-0021）も引く。
+ * それは部品ではなく見た目パターン側の持ち物なので**ここでは返さず**、呼び出し側が `templateAssetSrcById`
+ * で受ける（受け口を外すと、テンプレ既定素材が同じ形で消える）。
+ * **数える側（書き出しを断るか）と、読む側（data URL を用意するか）が同じものを見る**ための単一の参照元。
+ */
+export function clipImageAssetIds(clip: TimelineClip): string[] {
+  const ids: string[] = [];
+  if (clip.assetId) ids.push(clip.assetId);
+  if (clip.character?.poseAssetId) ids.push(clip.character.poseAssetId);
+  for (const id of Object.values(clip.assetRefs ?? {})) if (typeof id === 'string') ids.push(id);
+  return ids;
+}
+
+/** そのクリップが対象の素材を使っているか（絵として使う素材のいずれかが当たるか）。 */
 function clipUsesAsset(clip: TimelineClip, assetIds: ReadonlySet<string>): boolean {
-  if (clip.assetId && assetIds.has(clip.assetId)) return true;
-  if (clip.character?.poseAssetId && assetIds.has(clip.character.poseAssetId)) return true;
-  return Object.values(clip.assetRefs ?? {}).some((id) => typeof id === 'string' && assetIds.has(id));
+  return clipImageAssetIds(clip).some((id) => assetIds.has(id));
 }
 

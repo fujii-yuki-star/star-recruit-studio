@@ -10,6 +10,7 @@ import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } 
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, visualPlacementIssue } from "../../domain/timeline/edit";
+import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation } from "../../domain/constants";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
@@ -578,6 +579,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       return !key || !audioSrcByKey[key];
     }).length;
   }, [doc, audioSrcByKey]);
+  /**
+   * **絵が出せない素材を使っている部品**の数（#726 レビュー・監査）。音（`missingAudioCount`）と同じ形で
+   * 知らせる＝同じ状況なのに絵だけ無言、を作らない（ADR-0026②）。
+   * 開いたときに表示先を用意できなかった素材＝ファイルが読めない見込みなので、書き出しでも同じ理由で断られる
+   * （断りそのものは書き出しの入口が出す＝`TIMELINE_EXPORT_ASSET_UNREADABLE`。ここは**押す前の知らせ**）。
+   */
+  const missingImageCount = useMemo(() => {
+    if (!doc) return 0;
+    const unresolved = new Set(
+      timelineImageAssetIds(doc).filter((id) => !assetSrcById[id] && !templateAssetSrcById[id]),
+    );
+    if (unresolved.size === 0) return 0;
+    return doc.clips.filter((c) => clipImageAssetIds(c).some((id) => unresolved.has(id))).length;
+  }, [doc, assetSrcById, templateAssetSrcById]);
 
   // **つかんで置く**（#684）の道具。⚠️ フックは**早期 return より前**で呼ぶ（下の「読み込み中」「開けない」で
   // 抜ける回と抜けない回で呼ぶ数が変わると、React が状態を取り違える）。使うのは下の `resolveDrop` ほか。
@@ -1925,6 +1940,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       {danglingLinkCount > 0 && (
         <p className="notice notice-warn" role="alert">
           連動する読み上げが見つからない字幕が{danglingLinkCount}個あります。連動先を選び直すか、連動をやめてください。
+        </p>
+      )}
+      {missingImageCount > 0 && (
+        <p className="notice notice-warn" role="alert">
+          絵が出せない素材を使っている部品が{missingImageCount}個あります。そのままでは動画にその絵が出ません。素材を取り込み直すか、その部品を置き直してください。
         </p>
       )}
       {missingAudioCount > 0 && (

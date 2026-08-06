@@ -4,7 +4,7 @@ import { FPS } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan } from './export';
+import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds } from './export';
 import { frameTimeSec } from './persistence';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
@@ -262,5 +262,73 @@ describe('見た目が見つからない部品（書き出しを止める）', (
   it('判定材料が無いときは見ない（嘘の理由を出さない）', () => {
     const d = doc({ clips: [tmplClip('clip_001', 'tmpl_missing')] });
     expect(timelineExportBlockers(d)).toEqual([]);
+  });
+});
+
+describe('timelineImageAssetIds（書き出しで絵として描く素材・#716）', () => {
+  const assets = [
+    { assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'a.png' },
+    { assetId: 'asset_002', assetType: 'bgm', displayName: '曲', filePath: 'b.mp3' },
+    { assetId: 'asset_003', assetType: 'image', displayName: '使わない写真', filePath: 'c.png' },
+  ] as TimelineProject['assets'];
+
+  it('部品が使っている素材と、差し込み口に入れた素材を集める', () => {
+    const d = doc({
+      assets,
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_001' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', startSec: 6, durationSec: 5, templateId: 't1', assetRefs: { slot1: 'tmpl_asset_009', slot2: null } },
+      ] as TimelineClip[],
+    });
+    expect(timelineImageAssetIds(d).sort()).toEqual(['asset_001', 'tmpl_asset_009']);
+  });
+
+  it('立ち絵も集める（描画が引く出どころと同じ数だけ集める）', () => {
+    // 落とすと、その絵だけ動画から消える（#716 レビュー）。
+    const d = doc({
+      assets,
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', startSec: 0, durationSec: 5,
+        templateId: 't1', character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_003' },
+      }] as TimelineClip[],
+    });
+    expect(timelineImageAssetIds(d)).toEqual(['asset_003']);
+  });
+
+  it('使っていない素材は含めない（読まなくてよいものを読ませない）', () => {
+    const d = doc({ assets, clips: [] });
+    expect(timelineImageAssetIds(d)).toEqual([]);
+  });
+
+  it('音だけの素材は含めない（音のファイルを絵として読ませない）', () => {
+    // 音の部品が指す素材は、そもそも集めない。
+    const audioClip = doc({
+      assets,
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_002' }] as TimelineClip[],
+    });
+    expect(timelineImageAssetIds(audioClip)).toEqual([]);
+    // 手で直した文書などで**絵の部品が音の素材を指していても**、絵としては読まない。
+    const oddSlot = doc({
+      assets,
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_002' }] as TimelineClip[],
+    });
+    expect(timelineImageAssetIds(oddSlot)).toEqual([]);
+    // 読み上げの素材（`voice`）も音＝BGM だけを見て判定しない。
+    const voiceAsset = doc({
+      assets: [{ assetId: 'asset_009', assetType: 'voice', displayName: '声', filePath: 'v.wav' }] as TimelineProject['assets'],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_009' }] as TimelineClip[],
+    });
+    expect(timelineImageAssetIds(voiceAsset)).toEqual([]);
+  });
+
+  it('同じ素材を何度使っても1つ', () => {
+    const d = doc({
+      assets,
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_001' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 6, durationSec: 5, assetId: 'asset_001' },
+      ] as TimelineClip[],
+    });
+    expect(timelineImageAssetIds(d)).toEqual(['asset_001']);
   });
 });
