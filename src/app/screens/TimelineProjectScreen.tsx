@@ -9,7 +9,7 @@ import { canExport } from "../../infrastructure/ffmpegExport";
 import { useNavigationGuard } from "../hooks/navigationGuard";
 import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
-import { effectiveFps } from "../../domain/timeline/playback";
+import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
@@ -21,7 +21,7 @@ import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../..
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
-import { activatesOnSpace, shouldIgnoreShortcut } from "../hooks/keyboardShortcut";
+import { activatesOnSpace, shouldIgnoreShortcut, usesArrowKeys } from "../hooks/keyboardShortcut";
 import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
@@ -266,7 +266,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -329,9 +329,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
 
   const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
-  // **まとめて消すときの確認**（`06 §2` 統一規約1・ADR-0034 決定20）。数だけ持つ＝選び直されたら
-  // 中身が変わるので、確認を出したときの数を文言に使い、消すのは押した時点の選択（下で見直す）。
-  const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
+  // **まとめて消すときの確認**（`06 §2` 統一規約1・ADR-0034 決定20）。**聞いた時点の相手を持つ**
+  // （#721 レビュー）＝この確認は覆いではなく知らせの段なので、出したまま帯を押したり `Ctrl+A` したりできる。
+  // 数だけ持つと「3個消しますか」と聞いて1個だけ消える／全部消える、が起きる（`exploding` と同じ流儀）。
+  const [confirmRemove, setConfirmRemove] = useState<string[] | null>(null);
   // 保存できていないまま一覧へ戻ろうとしているか（#693）。戻ると変更は失われるので、黙って捨てずに聞く。
   /**
    * 離れてよいか聞いている最中の**行き先**（`null`＝聞いていない・#719）。
@@ -492,7 +493,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * キー操作が見る**いまの値**（#721）。依存に足すと、再生位置が1フレーム進むたびに `keydown` を
    * 登録し直すことになる（毎フレームの付け外し）。閉じ込めた古い値を見ないよう、下の効果で入れ替える。
    */
-  const playRef = useRef({ playing: false, playhead: 0, total: 0, frameSec: 1 / FPS, play, pause, seek: setPlayhead });
+  const playRef = useRef({ playing: false, total: 0, fps: FPS, play, pause, seekFrames: (_frames: number) => {} });
   const removeRef = useRef<() => void>(() => {});
 
   // `Escape`＝選択を解く／`Ctrl+A`＝全部選ぶ／`Space`・`Delete`・`←→`（#721・決定18）。
@@ -509,6 +510,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         clearSelection();
         return;
       }
+      // **答えを求める確認・メニュー・ポップアップが出ている間は、ここから先を通さない**（#721 レビュー）。
+      // `Ctrl+A` より**前**に置く＝「3個消しますか」の表示中に全選択できると、聞いた数と消える数がずれる。
+      // 見る材料は `Escape` と同じ（`overlayOpen` だけだと、名乗っているだけのメニュー・色の面を素通りする）。
+      if (overlayOpen || hasEscapeOwner()) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         // 対象が無くても**既定の全選択には落とさない**（同じキーの結果が2通りになる＝画面の文字が反転する）。
         e.preventDefault();
@@ -518,8 +523,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       }
       // ここから下は**修飾キーの付いていない単独キー**だけ（`Ctrl+←` 等は OS/ブラウザのものを奪わない）。
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      // 確認を出している間はキーで先に進めない（答えを求めている最中に別の操作を差し込ませない）。
-      if (overlayOpen) return;
       if (e.key === " ") {
         // **押した要素が `Space` で反応するなら、そちらに譲る**（消すボタンを押したら消えたうえに再生が
         // 始まる、を作らない）。一律で奪うと画面じゅうのボタンがキーボードで押せなくなる。
@@ -536,21 +539,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         return;
       }
       if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        // **矢印を使う要素に手がかかっているなら譲る**（`Space` と同じ理由・同じ形＝ADR-0026②）。
+        // 譲らないと、セレクトやスライダーにフォーカスしたまま押したとき**その欄の値が変わらず
+        // 再生位置だけ動く**（この画面はセレクトが多い）。
+        if (usesArrowKeys(e.target)) return;
         // **1フレームずつ・`Shift` で1秒**（決定18）。⚠️ 部品を選んでいる間のナッジはキャンバス操作
         // （#685）が入ってから＝いま足すと、動かす手段が無いのに矢印だけ意味を変えることになる。
         e.preventDefault();
         const p = playRef.current;
         if (p.total <= 0) return;
-        const step = e.shiftKey ? 1 : p.frameSec;
-        p.seek(p.playhead + (e.key === "ArrowLeft" ? -step : step));
+        // **フレーム番号で動かす**（秒を足し込むと誤差が積もって同じ絵に留まる／飛ぶ・#721 レビュー）。
+        // `Shift` の「1秒」も同じ格子の上で数える（1秒 = fps フレーム）。
+        const frames = (e.shiftKey ? p.fps : 1) * (e.key === "ArrowLeft" ? -1 : 1);
+        p.seekFrames(frames);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [clearSelection, selectClips, overlayOpen]);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
-  // 数値欄の刻み＝**1フレーム**（出力の格子と同じ・#721）。小数の見た目が長くならないよう丸めて渡す。
-  const frameStepSec = doc ? Number((1 / effectiveFps(doc)).toFixed(3)) : Number((1 / FPS).toFixed(3));
+  // 数値欄の刻み＝**1フレーム**（出力の格子と同じ・#721）。⚠️ **丸めない**＝`0.033` にすると格子から外れ、
+  // 30回刻んで 0.99 秒にしかならない（「格子と同じ」という約束が嘘になる・#721 レビュー）。
+  const frameStepSec = 1 / (doc ? effectiveFps(doc) : FPS);
   // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
   const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
   const layout = useMemo(() => {
@@ -780,15 +790,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const requestRemoveSelected = useCallback(() => {
     if (removeBlocked) return;
-    if (selectedClipIds.length > 1) setConfirmRemove(selectedClipIds.length);
+    if (selectedClipIds.length > 1) setConfirmRemove(selectedClipIds);
     else removeSelectedClips();
-  }, [removeBlocked, selectedClipIds.length, removeSelectedClips]);
+  }, [removeBlocked, selectedClipIds, removeSelectedClips]);
   // キー操作の入れ物を毎レンダー最新にする（描き終わってから差し替える＝レンダー中に ref を書かない）。
   useEffect(() => {
     playRef.current = {
-      playing: isPlaying, playhead: playheadSec, total: totalSec,
-      frameSec: doc ? 1 / effectiveFps(doc) : 1 / FPS,
-      play, pause, seek: setPlayhead,
+      playing: isPlaying, total: totalSec,
+      fps: doc ? Math.round(effectiveFps(doc)) : FPS,
+      play, pause,
+      seekFrames: (frames) => { if (doc) setPlayhead(seekByFrames(doc, playheadSec, frames)); },
     };
     removeRef.current = requestRemoveSelected;
   });
@@ -2091,14 +2102,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
       {confirmRemove !== null && (
         <DeleteConfirm
-          message={`選んだ${confirmRemove}個の部品を消しますか？`}
+          message={`選んだ${confirmRemove.length}個の部品を消しますか？`}
           onCancel={() => setConfirmRemove(null)}
           onConfirm={() => {
+            const ids = confirmRemove;
             setConfirmRemove(null);
-            // **押した時点の条件でもう一度見る**＝確認を出している間に固定されたり書き出しが始まったりしうる
-            //（出しっぱなしの確認から抜け道を作らない＝「動画の一覧へ」の確認と同じ流儀）。
-            if (removeBlocked) return;
-            removeSelectedClips();
+            // 書き出しが始まっていたら消さない（出しっぱなしの確認から抜け道を作らない＝「動画の一覧へ」と同じ）。
+            // 固定・存在の判定は **id を渡す先**（`removeClipsByIds`）が見る＝聞いた相手が消えていたら理由が出る。
+            if (exporting) return;
+            removeClipsByIds(ids);
           }}
         />
       )}

@@ -38,6 +38,21 @@ export interface ClipSpan {
  * @param minStartSec 開始の下限（グローバル秒で呼ぶならアンカー場面の開始／アンカー相対で呼ぶなら 0）
  * @param minClipSec  最小の長さ
  */
+/**
+ * 二進小数の**残差だけ**を落とす（#721）。`0.1 + 0.2` が `0.30000000000000004` になる類の、
+ * 引き算で生まれる末尾のごみを消すためのもの。
+ *
+ * ⚠️ **格子への量子化ではない**（上の「0.1 秒格子へ量子化しない」とは別の話）＝3.25 は 3.25 のまま残る。
+ * 落とすのは 1マイクロ秒より細かい桁だけで、吸着先やフレーム境界の値は動かさない。
+ * これが無いと、`終わり − 開始` の引き算が **`4.999999999999998` のような17桁**を作り、そのまま
+ * 「長さ（秒）」の欄に出る（#561 の冒頭が記録している症状。あちらは差分の往復を消して直したが、
+ * **開始秒が端数のクリップでは端そのものを渡しても引き算の残差が残る**）。
+ */
+const SEC_PRECISION = 6;
+function withoutFloatResidue(sec: number): number {
+  return Number(sec.toFixed(SEC_PRECISION));
+}
+
 export function applyClipEdge(
   clip: ClipSpan,
   mode: ClipDragMode,
@@ -53,7 +68,7 @@ export function applyClipEdge(
     // **下限との比較は端どうしで行う**（長さを引き算してから `Math.max` すると、`開始 + 最小長` を渡し直したときに
     // `(開始+最小長) - 開始 !== 最小長` で下限をわずかに超える＝同じ入力を2度通すと結果が動く）。
     const minEnd = clip.startSec + minClipSec;
-    return { startSec: clip.startSec, durationSec: edgeSec <= minEnd ? minClipSec : edgeSec - clip.startSec };
+    return { startSec: clip.startSec, durationSec: edgeSec <= minEnd ? minClipSec : withoutFloatResidue(edgeSec - clip.startSec) };
   }
   // trim-start：右端を固定して左端を動かす。開始は [minStartSec, end−最小長] に収める。
   // **開始の下限が最後に効く**＝極端に短いクリップ（end < minStartSec + minClipSec・壊れた/古いデータ）で
@@ -63,5 +78,5 @@ export function applyClipEdge(
   const maxStart = end - minClipSec;
   const startSec = Math.max(minStartSec, Math.min(edgeSec, maxStart));
   // 最小長で止まったときの長さは**定数そのもの**にする（`end - startSec` の端数を出さない）。
-  return { startSec, durationSec: startSec === maxStart ? minClipSec : end - startSec };
+  return { startSec: withoutFloatResidue(startSec), durationSec: startSec === maxStart ? minClipSec : withoutFloatResidue(end - startSec) };
 }

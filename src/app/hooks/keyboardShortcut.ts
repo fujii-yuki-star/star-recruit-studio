@@ -60,6 +60,27 @@ export function activatesOnSpace(target: EventTarget | null): boolean {
 }
 
 /**
+ * **矢印キーを押すと、それ自身が反応する要素**か（#721 レビュー）。
+ *
+ * `Space` を譲るのに矢印を無条件で奪うと、**同じ理由の判断が入口で割れる**（ADR-0026②）。
+ * 閉じた `<select>` の ←/→ は選択肢を変える・スライダーは値を動かす・ラジオは選択を移すので、
+ * ここで譲らないと**フォーカスした欄の値が変わらず再生位置だけ動く**。
+ *
+ * 文字入力は `isTextEntryTarget` の担当（そちらが先に弾く）。
+ */
+const ARROW_INPUT_TYPES = new Set(["range", "radio", "number", "date", "time", "month", "week", "datetime-local"]);
+const ARROW_ROLES = new Set(["slider", "spinbutton", "radio", "listbox", "option", "menu", "menuitem", "tab", "tablist", "tree", "treeitem", "combobox"]);
+
+export function usesArrowKeys(target: EventTarget | null): boolean {
+  const t = target as HTMLElement | null;
+  if (!t || typeof t.tagName !== "string") return false;
+  if (t.tagName === "SELECT") return true;
+  if (t.tagName === "INPUT") return ARROW_INPUT_TYPES.has(((t as HTMLInputElement).type || "text").toLowerCase());
+  const role = t.getAttribute?.("role");
+  return role != null && ARROW_ROLES.has(role);
+}
+
+/**
  * このキー操作を**アプリが横取りしてはいけない**か（文字を打っている最中＝入力欄／日本語の変換中）。
  * 画面のキー操作はまずこれを通す。
  */
