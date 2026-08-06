@@ -62,6 +62,11 @@ export const EDIT_BLOCKED = {
   /** 音量の変化を、鳴る音を持たない部品へ置こうとした（#512）。 */
   volumePointsKind: 'TIMELINE_EDIT_VOLUME_POINTS_KIND',
   /**
+   * 出さない設定の列へ置こうとした（#684）。置けても**動画に出ない部品**が黙って生まれる。
+   * 列の固定（`locked`）とは別＝「動かせない」ではなく「映らない」。
+   */
+  hiddenTrack: 'TIMELINE_EDIT_HIDDEN_TRACK',
+  /**
    * その部品が持たない中身の項目を直そうとした（#684 レビュー）。**列の種別違い（V23）とは別**
    * ＝「列に置き直してください」は無関係な案内になる（§2-5）。`volumePointsKind` と同じ流儀で、
    * **その項目を持たない部品に意味の無いデータを書かない**。
@@ -573,30 +578,50 @@ export function addLinkedSubtitleClip(doc: TimelineProject, voiceClipId: string)
  * - 長さは仮（`VISUAL_CLIP_DURATION_SEC`＝`VISUAL_PLACEHOLDER_SEC` を下限で丸めたもの）＝掴んで伸ばせる程度。
  * - 素材は**この動画が持っているものだけ**（`doc.assets`）＝存在しない素材の枠を作らない。
  */
+/** 置く先の指定（置けるかどうかを見るのに要る分だけ）。 */
+export type VisualPlacement = {
+  kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
+  trackId: string;
+  startSec: number;
+  /** kind='slot' のとき入れる素材。 */
+  assetId?: string;
+};
+
+/**
+ * その場所へ置けるか（置けないなら理由・#684）。
+ *
+ * **ドラッグ中のゴーストと、実際に置く判定が同じものを見る**ための単一の参照元＝
+ * 「置けそうに見えたのに離したら断られる」「置けないはずの所へ置けた」を作らない（ADR-0034 決定10）。
+ * **出さない設定の列も断る**＝置けても動画に出ない部品が黙って生まれる（ボタンで置くときも避けている）。
+ */
+export function visualPlacementIssue(doc: TimelineProject, input: VisualPlacement): EditBlockedReason | null {
+  const track = doc.tracks.find((t) => t.id === input.trackId);
+  if (!track) return EDIT_BLOCKED.notFound;
+  if (track.locked) return EDIT_BLOCKED.locked;
+  if (track.hidden) return EDIT_BLOCKED.hiddenTrack;
+  if (track.kind !== trackKindForClip(input.kind)) return EDIT_BLOCKED.trackKind;
+  if (input.kind === TIMELINE_CLIP_KIND.slot) {
+    if (input.assetId == null || !doc.assets.some((a) => a.assetId === input.assetId)) {
+      return EDIT_BLOCKED.notFound;
+    }
+  }
+  if (!isFreeSpan(doc.clips, input.trackId, Math.max(0, input.startSec), VISUAL_CLIP_DURATION_SEC)) {
+    return EDIT_BLOCKED.overlap;
+  }
+  return null;
+}
+
 export function addVisualClip(
   doc: TimelineProject,
-  input: {
-    kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
-    trackId: string;
-    startSec: number;
-    /** kind='slot' のとき入れる素材。 */
-    assetId?: string;
+  input: VisualPlacement & {
     /** 箱の中心（未指定＝画面の真ん中）。キャンバスへ落としたときに使う。 */
     center?: { x: number; y: number };
   },
 ): EditResult {
-  const track = doc.tracks.find((t) => t.id === input.trackId);
-  if (!track) return blocked(EDIT_BLOCKED.notFound);
-  if (track.locked) return blocked(EDIT_BLOCKED.locked);
-  if (track.kind !== trackKindForClip(input.kind)) return blocked(EDIT_BLOCKED.trackKind);
-  if (input.kind === TIMELINE_CLIP_KIND.slot) {
-    if (input.assetId == null || !doc.assets.some((a) => a.assetId === input.assetId)) {
-      return blocked(EDIT_BLOCKED.notFound);
-    }
-  }
+  const issue = visualPlacementIssue(doc, input);
+  if (issue) return blocked(issue);
   const startSec = Math.max(0, input.startSec);
   const durationSec = VISUAL_CLIP_DURATION_SEC;
-  if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
   const ratio = PLACED_BOX_RATIO[input.kind];
   const w = Math.round(canvas.width * ratio.w);

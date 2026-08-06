@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import { isKeyboardActivation, usePointerDrag } from "../hooks/usePointerDrag";
+import { canvasPointAt, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
 import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
@@ -7,7 +9,9 @@ import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persist
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { clipCountOnTrack } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, visualPlacementIssue } from "../../domain/timeline/edit";
+import type { EditBlockedReason } from "../../domain/timeline/edit";
+import { dimsForOrientation } from "../../domain/constants";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
@@ -57,6 +61,26 @@ import { PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, emptyLayout } 
  * この画面が持つ欄（配置に出てくる id の集合＝知らない欄を落とす基準）。**値集合にする**＝
  * 綴り違いで `normalizeLayout` に落とされ、**欄が黙って消える**のを防ぐ（§2-7）。
  */
+/** 置ける部品の種類（素材・文字・図形）。 */
+type VisualKind = typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
+
+/** つかんで運んでいる最中の状態（#684）。`drop` が null＝落とし先の外。 */
+type DragPlace = {
+  kind: VisualKind;
+  assetId?: string;
+  /** いまのポインタ位置（ゴーストを出す場所）。 */
+  x: number;
+  y: number;
+  drop: {
+    /** 列へ落としたとき（時刻と列を指した）。 */
+    at?: { trackId: string; startSec: number };
+    /** 仕上がり確認へ落としたとき（動画の中の場所を指した）。 */
+    center?: { x: number; y: number };
+    /** 置けない理由（null＝置ける）。**ゴーストの色に使う**＝離したときの結果と同じ判定から採る。 */
+    issue: EditBlockedReason | null;
+  } | null;
+};
+
 const PANEL_ID = {
   preview: "preview",
   arrange: "arrange",
@@ -555,6 +579,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     }).length;
   }, [doc, audioSrcByKey]);
 
+  // **つかんで置く**（#684）の道具。⚠️ フックは**早期 return より前**で呼ぶ（下の「読み込み中」「開けない」で
+  // 抜ける回と抜けない回で呼ぶ数が変わると、React が状態を取り違える）。使うのは下の `resolveDrop` ほか。
+  // ドラッグの作法は共有（掴む場所ごとに書き分けない・ADR-0034 決定9）。
+  const beginDrag = usePointerDrag();
+  const stageRef = useRef<HTMLDivElement>(null);
+  const laneRefs = useRef(new Map<string, HTMLElement>());
+  const [drag, setDrag] = useState<DragPlace | null>(null);
+
   if (isLoading) {
     return (
       <div className="main-scroll">
@@ -607,6 +639,60 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     disabled: exporting || !!extra?.disabled,
     title: exporting ? exportingHint : extra?.hint,
   });
+
+  /**
+   * **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
+   *
+   * 落とし先は2つ＝**仕上がり確認**（動画の中の場所を決める）と**列**（時刻と列を決める）。
+   * 置けるかどうかは domain の `visualPlacementIssue` で見る＝**ゴーストの色と、離したときの結果が同じ判定**
+   * （置けそうに見えたのに断られる、を作らない）。置けないまま離したら**元へ戻す**＝寄せない（決定10）。
+   */
+
+  /** 落とした点から「どこへ置くか」を決める。**列が先**（下の並びは仕上がり確認に重ならない）。 */
+  const resolveDrop = (kind: VisualKind, assetId: string | undefined, x: number, y: number): DragPlace["drop"] => {
+    if (!doc) return null;
+    for (const [trackId, el] of laneRefs.current) {
+      // **見えている分だけ**を落とし先にする（スクロールで欄の外へ出ている列へ落とさない）。
+      // 時刻は**列そのものの左端**から測る（切った矩形の左端は列の 0 秒ではない）。
+      if (!pointInRect(visibleRectOf(el) ?? { left: 0, top: 0, right: -1, bottom: -1 }, x, y)) continue;
+      const startSec = laneTimeAt(el.getBoundingClientRect(), pxPerSec, x);
+      return { at: { trackId, startSec }, issue: visualPlacementIssue(doc, { kind, assetId, trackId, startSec }) };
+    }
+    const stage = stageRef.current?.getBoundingClientRect();
+    const stageVisible = stageRef.current ? visibleRectOf(stageRef.current) : null;
+    if (stage && stageVisible && pointInRect(stageVisible, x, y)) {
+      // 仕上がり確認は**動画の中の場所**だけを決める。列と時刻はボタンと同じ規則でアプリが選ぶ
+      // （決定10 の「寄せない」は**利用者が指した軸**＝ここでは位置の話。時間は指していない）。
+      const center = canvasPointAt(stage, dimsForOrientation(doc.videoSettings.aspectRatio), x, y);
+      return { center, issue: placeableTracks.length === 0 ? EDIT_BLOCKED.notFound : null };
+    }
+    return null;
+  };
+
+  /** 一覧・ボタンから掴む。**動かさずに離したときは何もしない**（そのまま `click` が走って再生位置へ置く）。 */
+  const grabToPlace = (e: ReactPointerEvent, kind: VisualKind, assetId?: string): void => {
+    if (exporting || isPlaying) return; // 押せない状況では掴ませない（押してから断らない）
+    beginDrag(e, {
+      onStart: (ev) => setDrag({ kind, assetId, x: ev.clientX, y: ev.clientY, drop: resolveDrop(kind, assetId, ev.clientX, ev.clientY) }),
+      onMove: (ev) => setDrag({ kind, assetId, x: ev.clientX, y: ev.clientY, drop: resolveDrop(kind, assetId, ev.clientX, ev.clientY) }),
+      onEnd: (ev, started) => {
+        setDrag(null);
+        // **動かさずに離した＝押しただけ**。ここで置く（`click` を待たない＝指の経路はここで完結する）。
+        if (!started) { addVisualClip({ kind, assetId }); return; }
+        const drop = resolveDrop(kind, assetId, ev.clientX, ev.clientY);
+        // 落とし先の外・置けない所で離したら**何も置かない**（寄せない）。理由は離したときだけ出す（決定10）。
+        if (!drop) return;
+        // 置けないときも**同じ入口**へ渡す＝断る理由は store（domain）が出す（判定を2か所に持たない）。
+        addVisualClip({ kind, assetId, center: drop.center, at: drop.at });
+      },
+      onCancel: () => setDrag(null),
+    });
+  };
+
+  /** キーボードで実行したときだけ走らせる（指の経路は `onEnd` で完結・`isKeyboardActivation`）。 */
+  const onKeyActivate = (e: ReactMouseEvent, run: () => void): void => {
+    if (isKeyboardActivation(e)) run();
+  };
 
   // 列の操作（順番・出す出さない・固定・消す）は**右クリックのメニュー**へ畳む（ADR-0033・利用者指摘 2026-08-03）。
   // 行にボタンを並べると帯より文字のほうが目立ち、並びが読めなくなる。項目名は**いまの状態で意味が通る言い方**にする。
@@ -668,7 +754,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const panels: PanelSpec[] = [
     { id: PANEL_ID.preview, title: '仕上がり確認', content: (
       <>
-        <div className="preview-stage" dangerouslySetInnerHTML={{ __html: svg }} />
+        <div
+          ref={stageRef}
+          className={`preview-stage${drag?.drop?.center ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
         <div className="row gap-sm">
           <button
             className="btn btn-primary"
@@ -741,8 +831,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ) },
     { id: PANEL_ID.arrange, title: '並び', content: (
       <>
-        {doc.clips.length === 0 ? (
-          <p className="text-muted">まだ何も置かれていません。</p>
+        {/* **部品が無くても列は描く**（#684 レビュー）。新しい動画は最初から映像と音の列を1本ずつ持っているのに、
+            空のときだけ列を消していたので**最初の1個をここへ運べなかった**（3手順の1歩目がドラッグで通らない）。
+            空のときは「次の一歩」を添える＝置き方が2通りあることを、置く前に知らせる（§2-5・ADR-0034 決定22）。 */}
+        {doc.clips.length === 0 && (
+          <p className="text-muted">
+            まだ何も置かれていません。左の欄からつかんで運ぶか、「置く」を押すと再生位置へ置けます。
+          </p>
+        )}
+        {doc.tracks.length === 0 ? (
+          <p className="text-muted">列がありません。「映像の列を足す」で作ってください。</p>
         ) : (
           // 見た目は読み取り専用タイムライン（ADR-0018 ③(2)）と同じ CSS を使う＝2つの一覧で見え方が割れない（§6）。
           <div className="timeline">
@@ -786,10 +884,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {/* **何もない所を押したら選択を解く**（ADR-0034 決定15）。帯を押したときは帯側が受けるので、
                         ここでは**この箱そのものを押したとき**だけ効かせる（帯から上がってきた分では解かない）。 */}
                     <div
-                      className="timeline-track timeline-lane"
+                      // 落とし先は**自分が描いた箱**で当てる（上に何か重なっていても見失わない）。
+                      ref={(el) => { if (el) laneRefs.current.set(track.id, el); else laneRefs.current.delete(track.id); }}
+                      className={`timeline-track timeline-lane${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
                       onClick={(e) => { if (e.target === e.currentTarget) clearSelection(); }}
                     >
+                      {/* **入る場所を実寸で見せる**（#684 レビュー）＝欄のドラッグが線で示すのと同じ流儀。
+                          「その列のどこに・何秒ぶん」が見えないまま落とさせない。 */}
+                      {drag?.drop?.at?.trackId === track.id && (
+                        <div
+                          className={`timeline-drop-preview${drag.drop.issue ? " timeline-drop-preview--blocked" : ""}`}
+                          style={{ left: `${pxPerSec * drag.drop.at.startSec}px`, width: `${pxPerSec * VISUAL_CLIP_DURATION_SEC}px` }}
+                          aria-hidden="true"
+                        />
+                      )}
                       {doc.clips
                         .filter((c) => c.trackId === track.id)
                         .map((c) => (
@@ -1512,7 +1621,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         <span className="field-hint">
                           {layer.slotType === SLOT_TYPE.video
                             ? "ここは動画を入れる場所ですが、この形式ではまだ動画を使えません。別の見た目パターンを選んでください。"
-                            : "入れられる写真がありません。素材の画面で写真を取り込んでください。"}
+                            : "入れられる写真がありません。「素材・文字・図形を置く」の欄で写真を取り込んでください。"}
                         </span>
                       )}
                     </label>
@@ -1581,19 +1690,26 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <p className="text-muted">置ける映像の列がありません。「映像の列を足す」で足すか、固定・非表示を外してください。</p>
         ) : (
           <>
-            <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。塞がっているときは、その次に空いている時刻へ置きます。</p>
+            <p className="text-muted">
+              押すと再生位置（{playheadSec.toFixed(1)}秒）から置きます。塞がっているときは、その次に空いている時刻へ置きます。
+              つかんで運ぶと、落とした所（仕上がり確認の中／列の中）へ置けます。
+            </p>
             <div className="row gap-sm">
+              {/* **押すと再生位置へ・つかんで運ぶと落とした所へ**（ADR-0034 決定2＝両方）。
+                  掴めない環境・人のために、押すだけの道は必ず残す（決定19）。 */}
               <button
-                className="btn btn-secondary"
+                className="btn btn-secondary grabbable"
                 {...busyGuard({ disabled: isPlaying, hint: playingHint })}
-                onClick={() => addVisualClip({ kind: TIMELINE_CLIP_KIND.text })}
+                onPointerDown={(e) => grabToPlace(e, TIMELINE_CLIP_KIND.text)}
+                onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.text }))}
               >
                 文字を置く
               </button>
               <button
-                className="btn btn-secondary"
+                className="btn btn-secondary grabbable"
                 {...busyGuard({ disabled: isPlaying, hint: playingHint })}
-                onClick={() => addVisualClip({ kind: TIMELINE_CLIP_KIND.shape })}
+                onPointerDown={(e) => grabToPlace(e, TIMELINE_CLIP_KIND.shape)}
+                onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.shape }))}
               >
                 図形を置く
               </button>
@@ -1606,6 +1722,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 disabled={isPlaying || exporting}
                 disabledHint={exporting ? exportingHint : playingHint}
                 searchLabel="素材の絞り込み"
+                onGrab={(e, assetId) => grabToPlace(e, TIMELINE_CLIP_KIND.slot, assetId)}
                 onPick={(assetId) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId })}
               />
             )}
@@ -1763,6 +1880,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       */}
       <div className="timeline-flash-zone">
         <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
+
+        {/* 運んでいるものの影（#684）。**指の先に付いて回る**＝いま何を運んでいるかが分かる。
+            置けない所では色を変える＝**理由の文言はドラッグ中に出さない**（明滅させない・ADR-0034 決定10）。
+            当たり判定は持たない（`pointer-events: none`）＝影が落とし先を隠さない。 */}
+        {drag && (
+          <div
+            // 落とし先の**外**は中立（運んでいる道中はほぼ外＝ずっと赤だと「置けない」の意味が薄れる）。
+            // 赤は**落とし先の中で置けないとき**だけ（ADR-0034 決定10）。
+            className={`drag-ghost${drag.drop?.issue ? " drag-ghost--blocked" : ""}`}
+            style={{ left: drag.x, top: drag.y }}
+            aria-hidden="true"
+          >
+            {/* 名前は帯と同じ関数から採る（同じ物を画面内で別の名で呼ばない）。 */}
+            {drag.kind === TIMELINE_CLIP_KIND.slot
+              ? doc.assets.find((a) => a.assetId === drag.assetId)?.displayName ?? clipLabel({ kind: drag.kind })
+              : clipLabel({ kind: drag.kind })}
+          </div>
+        )}
 
         {/* **操作したその場の返事**（置けなかった理由・声を作れなかった）は**欄のすぐ下に貼り付ける**。
             下へ流すと、恒常の警告が出ているときに画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。

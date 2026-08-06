@@ -93,7 +93,7 @@ describe("TimelineProjectScreen", () => {
   it("何も置いていない動画でも壊れず、その旨を出す", () => {
     open({ clips: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText("まだ何も置かれていません。")).toBeInTheDocument();
+    expect(screen.getByText(/まだ何も置かれていません/)).toBeInTheDocument();
   });
 });
 
@@ -1187,7 +1187,7 @@ describe("TimelineProjectScreen: 欄をつかんで動かす（ADR-0033 段階3�
     box("selected", 0);
     box("preview", 200);
     pointerDownAt(screen.getByRole("heading", { name: "選んだ部品" }).parentElement!, 1000, { clientX: 0, clientY: 0 });
-    fireEvent.pointerMove(window, { clientX: 250, clientY: 95, pointerId: 1 }); // 「仕上がり確認」の下寄り
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 250, clientY: 95, pointerId: 1 }); // 「仕上がり確認」の下寄り
     fireEvent.pointerUp(window, { clientX: 250, clientY: 95, pointerId: 1 });
     // 移しても中身は消えない。
     expect(screen.getByRole("heading", { name: "選んだ部品" })).toBeInTheDocument();
@@ -1910,6 +1910,231 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     // 1つ目の終わりから続けて置く（重ねない・黙って何もしない、もしない）。
     expect(clips[1].startSec).toBe(clips[0].startSec + clips[0].durationSec);
     expect(useTimelineStore.getState().editBlocked).toBeNull();
+  });
+
+  // ── つかんで置く（#684・ADR-0034 決定2） ────────────────────────────────
+  // jsdom は要素の大きさを持たないので、落とし先の箱だけ与える（当て方＝`pointInRect` は純粋関数で別途固定）。
+  const stubRect = (el: Element, r: { left: number; top: number; width: number; height: number }) => {
+    (el as HTMLElement).getBoundingClientRect = () =>
+      ({ left: r.left, top: r.top, width: r.width, height: r.height, right: r.left + r.width, bottom: r.top + r.height, x: r.left, y: r.top, toJSON: () => ({}) }) as DOMRect;
+  };
+  const grab = (el: Element) => fireEvent.pointerDown(el, { pointerId: 1, button: 0, clientX: 0, clientY: 0 });
+  const moveTo = (x: number, y: number) => fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: x, clientY: y });
+  const dropAt = (x: number, y: number) => fireEvent.pointerUp(window, { pointerId: 1, clientX: x, clientY: y });
+
+  it("つかんで列へ落とすと、その列のその時刻へ置く（探さない・寄せない）", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_003", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 先に1つ置いて並びを出す（列は部品が無いと描かれない）。
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    const lanes = container.querySelectorAll(".timeline-lane");
+    stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 手前＝track_003
+    stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 奥＝track_001
+    // 尺 5秒＝`pxPerSec` は 640/5 = 128（下限 40 より大きい方を採る）。左端 200 から 5秒＝840px。
+    grab(screen.getByRole("button", { name: "図形を置く" }));
+    moveTo(840, 460); // 奥の列の 5秒
+    dropAt(840, 460);
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.shape)!;
+    expect(placed).toMatchObject({ trackId: "track_001", startSec: 5 });
+  });
+
+  it("つかんで仕上がり確認へ落とすと、落とした場所へ置く", () => {
+    withAsset();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
+    grab(screen.getByText("会社の外観"));
+    moveTo(160, 90); // 枠の左上寄り＝動画の (480, 270)
+    dropAt(160, 90);
+    const c = useTimelineStore.getState().doc!.clips[0];
+    // 箱の**中心**が落とした場所（1920x1080 の 1/4 の位置）。箱は画面いっぱいなので端で収められる。
+    expect(c.kind).toBe(TIMELINE_CLIP_KIND.slot);
+    expect(c.assetId).toBe("asset_001");
+  });
+
+  it("置けない所で離したら置かない（寄せない）＋理由を出す", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_003", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" })); // track_003 へ1つ
+    const lanes = container.querySelectorAll(".timeline-lane");
+    stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // track_003
+    stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // track_001（固定）
+    const before = useTimelineStore.getState().doc!.clips.length;
+    grab(screen.getByRole("button", { name: "図形を置く" }));
+    moveTo(840, 460);
+    dropAt(840, 460);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(before); // 置かない
+    expect(screen.getByText(/この列は固定されています/)).toBeInTheDocument(); // 離したときに理由
+  });
+
+  it("落とし先の外で離したら何もしない（黙って再生位置へ置かない）", () => {
+    withAsset();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
+    grab(screen.getByRole("button", { name: "文字を置く" }));
+    moveTo(2000, 2000);
+    dropAt(2000, 2000);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(0);
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
+  });
+
+  it("「出さない」列へは落とせない（置いても動画に出ない部品を黙って作らない）", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_003", kind: TRACK_KIND.visual, hidden: true }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" })); // 見えている列へ1つ
+    const lanes = container.querySelectorAll(".timeline-lane");
+    stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 手前＝track_003（出さない）
+    stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 奥＝track_001
+    const before = useTimelineStore.getState().doc!.clips.length;
+    grab(screen.getByRole("button", { name: "図形を置く" }));
+    moveTo(840, 420);
+    dropAt(840, 420);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(before);
+    expect(screen.getByText(/「出さない」設定なので/)).toBeInTheDocument();
+  });
+
+  it("スクロールで欄の外へ出ている列へは落とせない（見えていない所へ入らない）", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }), { detail: 0 });
+    const lane = container.querySelectorAll(".timeline-lane")[0];
+    stubRect(lane, { left: 200, top: 400, width: 800, height: 40 });
+    // 列を囲う箱が中身を切っていて、列はその外（＝画面では見えていない）。
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    scroll.style.overflow = "auto";
+    stubRect(scroll, { left: 200, top: 1000, width: 800, height: 40 });
+    const before = useTimelineStore.getState().doc!.clips.length;
+    grab(screen.getByRole("button", { name: "図形を置く" }));
+    moveTo(840, 420);
+    expect(container.querySelector(".timeline-drop-preview")).toBeNull(); // 落とし先として出さない
+    dropAt(840, 420);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(before); // 置かない
+  });
+
+  it("列の上では「どこに・何秒ぶん」入るかを実寸で出す（落とす前に結果が分かる）", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }), { detail: 0 });
+    stubRect(container.querySelectorAll(".timeline-lane")[0], { left: 200, top: 400, width: 800, height: 40 });
+    grab(screen.getByRole("button", { name: "図形を置く" }));
+    moveTo(840, 420); // 5秒（pxPerSec=128）
+    const preview = container.querySelector(".timeline-drop-preview") as HTMLElement;
+    expect(preview).not.toBeNull();
+    expect(preview.style.left).toBe(`${128 * 5}px`);
+    expect(preview.style.width).toBe(`${128 * 5}px`); // 置かれる長さ（5秒ぶん）
+    dropAt(840, 420);
+    expect(container.querySelector(".timeline-drop-preview")).toBeNull(); // 離したら消える
+  });
+
+  it("置いた所へ再生位置が動く（置いたのに何も見えない、を作らない）", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }), { detail: 0 });
+    stubRect(container.querySelectorAll(".timeline-lane")[0], { left: 200, top: 400, width: 800, height: 40 });
+    grab(screen.getByRole("button", { name: "図形を置く" }));
+    moveTo(840, 420);
+    dropAt(840, 420);
+    expect(useTimelineStore.getState().playheadSec).toBe(5);
+  });
+
+  it("読み込み中から開けた後も、つかんで置ける（フックの数が回ごとに変わらない）", () => {
+    // 早期 return（読み込み中）を通る回と通らない回でフックの数が変われば、React が状態を取り違える。
+    // 同じ画面を張ったまま状態を切り替えて、続けて操作できることを見る。
+    useTimelineStore.setState({ doc: null, loadError: null, isLoading: true });
+    const { container, rerender } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/動画を開いています/)).toBeInTheDocument();
+    withAsset(); // 開けた
+    rerender(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
+    grab(screen.getByRole("button", { name: "文字を置く" }));
+    moveTo(300, 180);
+    expect(container.querySelector(".drag-ghost")).not.toBeNull();
+    dropAt(300, 180);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+  });
+
+  it("掴めるものは、手を出す前に分かる（欄の見出し・帯と同じ見た目）", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "文字を置く" })).toHaveClass("grabbable");
+    expect(screen.getByText("会社の外観")).toHaveClass("grabbable");
+  });
+
+  it("落とし先の外では、置けない色にしない（赤の意味を薄めない）", () => {
+    withAsset();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
+    grab(screen.getByRole("button", { name: "文字を置く" }));
+    moveTo(2000, 2000); // 落とし先の外
+    expect(container.querySelector(".drag-ghost")?.className).not.toContain("blocked");
+  });
+
+  it("Escape で運ぶのをやめられる（掴んだまま戻れない、を作らない）", () => {
+    withAsset();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
+    grab(screen.getByRole("button", { name: "文字を置く" }));
+    moveTo(300, 180);
+    expect(container.querySelector(".drag-ghost")).not.toBeNull(); // 運んでいる影が出ている
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(container.querySelector(".drag-ghost")).toBeNull();
+    dropAt(300, 180);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(0); // 置かれない
+  });
+
+  it("押しただけ（動かさずに離す）でも置ける＝運べない人の逃げ道", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: "文字を置く" });
+    grab(btn);
+    dropAt(0, 0); // 動かしていないので、離した場所は関係ない
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+  });
+
+  it("キーボードでも置ける（ドラッグ専用の操作を作らない・決定19）", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // キーボードで起こした `click` は押した回数が 0（マウスは 1 以上）。
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }), { detail: 0 });
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+  });
+
+  it("運んで置いたあと、マウスの click が来ても二重に置かない", () => {
+    withAsset();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
+    const btn = screen.getByRole("button", { name: "文字を置く" });
+    grab(btn);
+    moveTo(300, 180);
+    dropAt(300, 180);
+    fireEvent.click(btn, { detail: 1 }); // 掴んだ指がボタンの上へ戻って離れた場合に来る
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+  });
+
+  it("Escape で中止した直後に click が来ても置かない", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: "文字を置く" });
+    grab(btn);
+    moveTo(300, 180);
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(btn, { detail: 1 }); // 中止しても、指を離せば click は来る
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(0);
+  });
+
+  it("運んで置いた次も、押す・キーボードのどちらでも置ける（1回効かない、を作らない）", () => {
+    withAsset();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
+    const btn = screen.getByRole("button", { name: "文字を置く" });
+    // 運んで仕上がり確認へ落とす＝ボタンの上では離していないので `click` は来ない。
+    grab(btn);
+    moveTo(300, 180);
+    dropAt(300, 180);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+    grab(btn); dropAt(0, 0); // 押しただけ
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(2);
+    fireEvent.click(btn, { detail: 0 }); // キーボード
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(3);
   });
 
   it("間の空きを飛び越さない（いちばん後ろの部品の終わりへ飛ばさない・#684 レビュー）", () => {

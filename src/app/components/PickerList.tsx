@@ -5,7 +5,8 @@
 // 既定 5 件**にする。多いときは**絞り込み**を出して、目当てのものへ数文字で辿り着けるようにする。
 //
 // 「しまう」だけにしないのが要点＝スクロールと絞り込みで**全部に手が届く**（隠れて選べないものを作らない）。
-import { useMemo, useState } from "react";
+import { useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { isKeyboardActivation } from "../hooks/usePointerDrag";
 
 export interface PickerItem {
   id: string;
@@ -22,6 +23,7 @@ const ROW_H = 40;
 export function PickerList({
   items,
   onPick,
+  onGrab,
   disabled,
   disabledHint,
   searchLabel = "絞り込み",
@@ -33,6 +35,12 @@ export function PickerList({
   disabledHint?: string;
   searchLabel?: string;
   maxVisible?: number;
+  /**
+   * つかんで運べる一覧にする（#684）。押した時点で呼ぶ＝**掴むかどうかは受け取った側が決める**
+   * （少し動かすまで掴まない・ADR-0034 決定9）。**動かさずに離したときは `onPick` が走る**ので、
+   * 押しただけ・キーボードで選んだだけの経路は変わらない（ドラッグ専用の操作を作らない＝決定19）。
+   */
+  onGrab?: (e: ReactPointerEvent, id: string) => void;
 }): React.ReactElement {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
@@ -63,11 +71,15 @@ export function PickerList({
           {shown.map((it) => (
             <button
               key={it.id}
-              className="btn btn-secondary"
+              // 掴めるものは**手を出す前に分かる**ようにする（欄の見出し・帯と同じ流儀・#684 レビュー）。
+              className={`btn btn-secondary${onGrab ? " grabbable" : ""}`}
               style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 4 }}
               disabled={disabled}
               title={disabled ? disabledHint : it.note}
-              onClick={() => onPick(it.id)}
+              onPointerDown={onGrab && !disabled ? (e) => onGrab(e, it.id) : undefined}
+              // 掴める一覧では、指の経路は掴んだ側（`onEnd`）で完結している＝`click` はキーボードのぶんだけ拾う
+              // （拾わないと二重に実行する・#684 レビュー）。掴めない一覧はこれまでどおり全部拾う。
+              onClick={(e) => { if (!onGrab || isKeyboardActivation(e)) onPick(it.id); }}
             >
               {it.label}
             </button>

@@ -3,8 +3,8 @@
 //
 // 画面は左・中央・右・下の4つの領域に分かれ、**領域の中は入れ子で分割**できる（決定11）。
 // 境界（分かれ目・領域の外枠）は**ドラッグで動かせる**（決定2）。欄の中身は使う側から渡す。
-import { useEffect, useRef, useState } from "react";
-import { claimEscape } from "../../hooks/escapeOwners";
+import { useRef, useState } from "react";
+import { usePointerDrag } from "../../hooks/usePointerDrag";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { ContextMenu } from "../ContextMenu";
 import type { ContextMenuItem } from "../ContextMenu";
@@ -43,7 +43,6 @@ const REGION_LABEL: Record<PanelRegion, string> = {
 /** 境界をつかむ帯の太さ（px）。細すぎると掴めない・太すぎると中身を食う。 */
 const DIVIDER_PX = 6;
 /** ここまで動かしたら「つかんだ」とみなす（px）。見出しを押しただけで動かし始めない。 */
-const DRAG_START_PX = 4;
 
 export function PanelLayoutView({
   layout,
@@ -60,10 +59,8 @@ export function PanelLayoutView({
   const byId = new Map(panels.map((p) => [p.id, p]));
   const rootRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ panelId: PanelId; x: number; y: number } | null>(null);
-  // いま張っているドラッグの後始末。**画面外で離した・別の指・画面を離れた**でも必ず外す＝
-  // 押していないのに掴んだままになり、動かすたびに配置が書き換わる、を作らない（§2-5）。
-  const stopDragRef = useRef<(() => void) | null>(null);
-  useEffect(() => () => stopDragRef.current?.(), []);
+  // ドラッグの作法は共有（`usePointerDrag`）＝掴む場所ごとに書き分けない（ADR-0034 決定9）。
+  const beginDrag = usePointerDrag();
   // 欄の箱（落とし先を当てるのに使う）。`elementFromPoint` ではなく**自分が描いた欄の箱**で当てる＝
   // 上に何か重なっていても（メニュー・知らせ）落とし先を見失わない。
   const frameRefs = useRef(new Map<PanelId, HTMLElement>());
@@ -87,76 +84,17 @@ export function PanelLayoutView({
    * 掴んだ状態にしない。`Escape` でやめられる（掴んだまま戻れない、を作らない・§2-5）。
    */
   const beginPanelDrag = (e: ReactPointerEvent, panelId: PanelId): void => {
-    // 主ボタン（左）以外では掴まない＝**右クリックでメニューを開いたまま配置が書き換わる**を作らない。
-    // 指の取り違え（2本目で別の欄を掴む）は `listenDrag` が pointerId で見る＝ここでは見ない。
-    if (e.button !== 0) return;
-    e.preventDefault(); // 見出しの文字を選択させない（選択が走るとドラッグが途中で切れる）
-    const startX = e.clientX;
-    const startY = e.clientY;
-    let started = false;
-    const move = (ev: PointerEvent): void => {
-      if (!started && Math.hypot(ev.clientX - startX, ev.clientY - startY) < DRAG_START_PX) return;
-      if (!started) {
-        started = true;
-        setDragging(panelId);
-      }
-      setDropAt(findDrop(panelId, ev.clientX, ev.clientY));
-    };
-    const finish = (ev: PointerEvent): void => {
-      const target = started ? findDrop(panelId, ev.clientX, ev.clientY) : null;
-      setDragging(null);
-      setDropAt(null);
-      if (target) onChange(dropPanelBeside(layout, panelId, target.panelId, target.side));
-    };
-    listenDrag(e.pointerId, move, finish);
-  };
-
-  /** ドラッグの購読を1か所で張る（外し忘れ・二重購読を作らない）。 */
-  const listenDrag = (
-    pointerId: number,
-    move: (ev: PointerEvent) => void,
-    onEnd?: (ev: PointerEvent) => void,
-    onCancel?: () => void,
-  ): void => {
-    stopDragRef.current?.();
-    let releaseEscape: (() => void) | null = null;
-    // **掴んだ指だけ**を見る（別の指の up でその座標へ落ちる、を作らない）。
-    const mine = (ev: PointerEvent): boolean => ev.pointerId === pointerId;
-    const stop = (ev?: PointerEvent): void => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", cancel);
-      window.removeEventListener("keydown", onKey);
-      releaseEscape?.(); // 名乗りを外す（外し忘れると `Escape` が永久に効かなくなる）
-      releaseEscape = null;
-      stopDragRef.current = null;
-      if (ev) onEnd?.(ev);
-    };
-    const onMove = (ev: PointerEvent): void => {
-      if (mine(ev)) move(ev);
-    };
-    const up = (ev: PointerEvent): void => {
-      if (mine(ev)) stop(ev);
-    };
-    // 途中でやめたときは**元へ戻す**（`pointercancel`・`Escape`）＝置くつもりが無いのに動かさない。
-    // 境界のドラッグは動かすたびに適用しているので、**始めた時点の配置へ戻す**（欄のドラッグと同じ意味にする）。
-    const cancel = (): void => {
-      setDragging(null);
-      setDropAt(null);
-      stop();
-      onCancel?.();
-    };
-    const onKey = (ev: KeyboardEvent): void => {
-      if (ev.key === "Escape") cancel();
-    };
-    // 掴んでいる間は **`Escape` を受け持っている**と名乗る（#701 レビュー）＝中止しただけで、
-    // 外側（画面）の `Escape` まで走って選択や打ちかけの値が消えるのを防ぐ。
-    releaseEscape = claimEscape();
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", cancel);
-    window.addEventListener("keydown", onKey);
-    stopDragRef.current = cancel;
+    beginDrag(e, {
+      onStart: () => setDragging(panelId),
+      onMove: (ev) => setDropAt(findDrop(panelId, ev.clientX, ev.clientY)),
+      onEnd: (ev, started) => {
+        const target = started ? findDrop(panelId, ev.clientX, ev.clientY) : null;
+        setDragging(null);
+        setDropAt(null);
+        if (target) onChange(dropPanelBeside(layout, panelId, target.panelId, target.side));
+      },
+      onCancel: () => { setDragging(null); setDropAt(null); },
+    });
   };
 
   /** 並べ替え1つぶん。**動かせない向きは押せなくして理由を出す**（押しても何も起きない、を作らない・§2-5）。 */
@@ -209,7 +147,8 @@ export function PanelLayoutView({
       onChange(resizeSplit(layout, region, path, sizes));
     };
     const startLayout = layout;
-    listenDrag(e.pointerId, move, undefined, () => onChange(startLayout));
+    // 境界は**押した瞬間から追従**させる（`startPx: 0`）＝掴んだのに動かない遊びを作らない。
+    beginDrag(e, { startPx: 0, onMove: move, onCancel: () => onChange(startLayout) });
   };
 
   /** 領域の外枠をドラッグ（左右の幅・下の高さ）。 */
@@ -227,7 +166,8 @@ export function PanelLayoutView({
       onChange(resizeRegion(layout, region, ratio));
     };
     const startLayout = layout;
-    listenDrag(e.pointerId, move, undefined, () => onChange(startLayout));
+    // 境界は**押した瞬間から追従**させる（`startPx: 0`）＝掴んだのに動かない遊びを作らない。
+    beginDrag(e, { startPx: 0, onMove: move, onCancel: () => onChange(startLayout) });
   };
 
   const renderNode = (node: PanelNode, region: PanelRegion, path: number[]): ReactNode => {
