@@ -7,6 +7,7 @@ import { sampleTemplates } from "./infrastructure/sampleData";
 import * as fsMod from "./infrastructure/projectFs";
 import { TIMELINE_SCHEMA_VERSION } from "./domain/timeline/types";
 import type { Scene } from "./domain/project/types";
+import { registerNavigationGuardForTest } from "./app/hooks/navigationGuard";
 
 // #547 P3-7 レビュー：navigation.ts の単体テストと Sidebar の props テストの"接着"＝App 側の配線
 // （navigate が projectReturnTo を更新 → Sidebar の currentProjectTarget → 実クリック遷移）を統合で固定する。
@@ -158,5 +159,42 @@ describe("タイムライン編集の画面には場面形式の保存バーを�
     expect(container.querySelector(".topbar")).not.toBeNull(); // 一覧では出ている
     fireEvent.click(await findByText("焼いた動画"));
     await waitFor(() => expect(container.querySelector(".topbar")).toBeNull());
+  });
+});
+
+// #719：離れる前の関門（`navigationGuard`）が **App の `navigate` に繋がっている**ことを固定する。
+// これが無いと、関門そのものの単体テストと画面側のテストが両方緑でも、**繋がっていなければ素通し**になる
+// （実際、サイドバーからの離脱がその状態だった）。
+describe("App の遷移が離れる前の関門を通る（#719 統合）", () => {
+  beforeEach(() => {
+    useProjectStore.getState().setExportRun({ phase: "idle" });
+    useProjectStore.getState().newProject();
+    useProjectStore.setState({ templates: sampleTemplates, status: "ready", saveStatus: "saved" });
+  });
+
+  it("関門が断ったら、サイドバーを押しても画面が変わらない", () => {
+    const seen: string[] = [];
+    // 「離れないでほしい」と名乗っている状態を作る（実際に名乗るのはタイムライン編集画面）。
+    const release = registerNavigationGuardForTest((to) => { seen.push(to); return false; });
+    try {
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(seen).toEqual(["materials"]); // 行き先は関門へ渡る
+      // 断られたので画面は変わらない（素材画面の見出しが出ていない）。
+      expect(container.textContent).not.toContain("素材を管理");
+    } finally {
+      release();
+    }
+  });
+
+  it("関門が許せば、これまでどおり移れる", () => {
+    const release = registerNavigationGuardForTest(() => true);
+    try {
+      const { container } = render(<App />);
+      clickSidebar(container, "素材");
+      expect(container.textContent).toContain("素材を管理");
+    } finally {
+      release();
+    }
   });
 });

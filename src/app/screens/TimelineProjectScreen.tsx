@@ -3,7 +3,10 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 import { isKeyboardActivation, usePointerDrag } from "../hooks/usePointerDrag";
 import { canvasPointAt, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
-import { isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
+import { EXPORT_BLOCK_SOURCE, EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
+import { useExportLockStore } from "../store/exportLock";
+import { canExport } from "../../infrastructure/ffmpegExport";
+import { useNavigationGuard } from "../hooks/navigationGuard";
 import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -93,7 +96,7 @@ const PANEL_ID = {
 } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
-import { clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { LEAVE_BLOCKED_EXPORTING_MESSAGE, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
@@ -321,7 +324,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   const [removingTrackId, setRemovingTrackId] = useState<string | null>(null);
   // 保存できていないまま一覧へ戻ろうとしているか（#693）。戻ると変更は失われるので、黙って捨てずに聞く。
-  const [confirmLeave, setConfirmLeave] = useState(false);
+  /**
+   * 離れてよいか聞いている最中の**行き先**（`null`＝聞いていない・#719）。
+   * 行き先を持たないと、サイドバーから離れようとしたときに「一覧へ」しか戻れない。
+   */
+  const [confirmLeave, setConfirmLeave] = useState<ScreenId | null>(null);
   // 戻る前の保存を待っているか（#693 レビュー）。待っている間は二重に押せないようにする。
   const [leaving, setLeaving] = useState(false);
   /**
@@ -329,24 +336,86 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * そのあと失敗しても利用者はもう別の画面にいて気づけない（確認も出ない）。
    * 失敗していたら離れずに確認を出す＝「保存し直す」を押しに戻れる。
    */
-  const leaveToHome = useCallback(async () => {
-    const status = useTimelineStore.getState().saveStatus;
-    // 待つのは**まだ書けていないとき**だけ（`saved` は書き終わっている＝待つと無駄に書き直す）。
-    if (status === "idle" || status === "saving") {
-      setLeaving(true);
-      // `idle`＝待っている保存を今書く／`saving`＝走っている保存に合流する（どちらも同じ入口）。
-      try {
-        await useTimelineStore.getState().saveTimelineProject();
-      } finally {
-        setLeaving(false);
-      }
-    }
-    if (useTimelineStore.getState().saveStatus === "error") {
-      setConfirmLeave(true);
+  // 確認に「はい」と答えた1回だけ通す目印（答えた直後もまだ保存は失敗のままなので、
+  // これが無いと同じ確認が出続けて**永久に離れられない**）。
+  const leaveConfirmedRef = useRef(false);
+  // 走っている「離れる流れ」の行き先（`null`＝走っていない）。押し直されたら**行き先だけ**差し替える。
+  const leavingToRef = useRef<ScreenId | null>(null);
+  // 離れられない理由（書き出し中）。**黙って止めない**＝押しても何も起きない画面にしない（§2-5）。
+  const [leaveBlocked, setLeaveBlocked] = useState<string | null>(null);
+  // 画面を離れた後に、終わった保存が遷移を撃たないようにする（行き先が勝手にすり替わる・#719 レビュー）。
+  const aliveRef = useRef(true);
+  useEffect(() => () => { aliveRef.current = false; }, []);
+
+  /**
+   * **画面を離れる（どの入口からでも同じ流れ）**（#693・#719）。
+   *
+   * `leaveToHome` と関門で規則が割れていたのが #719 の穴だった＝画面内ボタンは「書き切ってから離れる／
+   * 失敗したら聞く」なのに、サイドバーは `error` のときしか止まらず、**保存待ち・保存中は素通し**していた。
+   * 抜けた後はアンマウントの投げっぱなし保存だけが頼りで、それが失敗しても告知の担い手が居ない
+   * （この画面は自動保存＋共通トップバーの保存ボタンを出さない＝ADR-0032）。**規則をここ1か所から配る**。
+   */
+  const requestLeave = useCallback(async (to: ScreenId) => {
+    // 書き出し中は離れない（進捗も中止も画面の中にしかない）。確認ではなく**理由**で断る。
+    if (isTimelineExportBusy(useTimelineStore.getState().exportRun.phase)) {
+      setLeaveBlocked(LEAVE_BLOCKED_EXPORTING_MESSAGE);
       return;
     }
-    onNavigate("home");
+    // **離れる流れは同時に1つだけ**（#729 レビュー）。保存を待っている間（~1秒）に別の行き先を押すと、
+    // 待ちが明けたとき2つの流れが**それぞれ `onNavigate` を撃つ**＝一瞬だけ先の行き先を描いてから
+    // 次へ飛ぶ（確認が要る場合は行き先だけが後から上書きされる）。走っている流れがあれば
+    // **行き先を最後に押したものへ差し替えて託す**＝遷移は1回、着地は最後に押した所（§2-5）。
+    const running = leavingToRef.current != null;
+    leavingToRef.current = to;
+    // ⚠️ この `return` を外しても着地は変わらない（先に着いた流れが下で目印を落とすので、後続は
+    // 行き先が `null` になって黙って降りる）。**外さない**のは、2つ目の流れが走っている保存へ
+    // 合流しようとして**もう一度書きに行く**のと、「保存しています」の立て下げが二重になるため。
+    // ＝不変条件（離れる流れは同時に1つ）を**暗黙の後片づけ任せにせず、ここで明示する**。
+    if (running) return;
+    try {
+      const status = useTimelineStore.getState().saveStatus;
+      // 待つのは**まだ書けていないとき**だけ（`saved` は書き終わっている＝待つと無駄に書き直す）。
+      if (status === "idle" || status === "saving") {
+        setLeaving(true);
+        // `idle`＝待っている保存を今書く／`saving`＝走っている保存に合流する（どちらも同じ入口）。
+        try {
+          await useTimelineStore.getState().saveTimelineProject();
+        } finally {
+          setLeaving(false);
+        }
+      }
+      if (!aliveRef.current) return; // 待っている間に画面を離れていたら、勝手に行き先を変えない
+      const dest = leavingToRef.current; // 待っている間に押し直された行き先を採る
+      if (dest == null) return;
+      if (useTimelineStore.getState().saveStatus === "error") {
+        setConfirmLeave(dest);
+        return;
+      }
+      leaveConfirmedRef.current = true;
+      onNavigate(dest);
+    } finally {
+      // 断られて画面に残るとき（保存失敗の確認）に次の操作を塞がない＝押しても何も起きない画面にしない。
+      leavingToRef.current = null;
+    }
   }, [onNavigate]);
+
+  /**
+   * **どの入口から離れようとしても、同じ関門を通す**（#719）。
+   *
+   * 名乗りは**常に**出す（`error` のときだけにすると、保存待ち・保存中の離脱が素通しになる＝#719 レビュー）。
+   * 通してよいかは `requestLeave` が決め、通すときだけ目印を立てて自分で遷移する。
+   */
+  useNavigationGuard((to) => {
+    if (leaveConfirmedRef.current) {
+      leaveConfirmedRef.current = false;
+      return true;
+    }
+    void requestLeave(to);
+    return false;
+  });
+
+  /** 「動画の一覧へ」。入口が違うだけで**規則は関門と同じ**（`requestLeave`）。 */
+  const leaveToHome = useCallback(() => { void requestLeave("home"); }, [requestLeave]);
   // 見た目パターンを置く先の列（消された/固定されたときは置くときに実在するものへ落とす）。
   const [placeTrackId, setPlaceTrackId] = useState<string>("");
   // 「動き」の入力欄（文字列で持つ＝空欄＝その項目は動かさない）。
@@ -402,7 +471,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [exploding, setExploding] = useState<{ clipId: string; template: Template } | null>(null);
   // `Escape` の順番を決める材料（#701 レビュー）。**答えを求める確認とメニュー**が開いている間は選択を解かない。
   // 答えを求める確認は**自分では `Escape` を処理しない**（答えるまで残す）ので、ここで名乗る側に回る。
-  const overlayOpen = exploding !== null || removingTrackId !== null || confirmLeave;
+  const overlayOpen = exploding !== null || removingTrackId !== null || confirmLeave !== null;
   useEscapeOwner(overlayOpen);
 
   // 選択のキー操作（ADR-0034 決定15/18）。**入力欄と日本語の変換中は奪わない**（共有の判定を通す）。
@@ -564,12 +633,47 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
   const warnings = useMemo(() => (doc ? validateTimelineDoc(doc) : []), [doc]);
   // 書き出せない理由（`timelineExportBlockers`）は**押す前に**見せる＝押しても断られるだけ、を作らない（§2-5）。
+  // 別形式の書き出しが走っていないか（締めの持ち主）。store の開始チェックと同じものを見る。
+  const exportLockOwner = useExportLockStore((s) => s.owner);
   const exportBlockers = useMemo(
     // 見た目の未解決も理由になる（描かれないものを黙って落とした動画を成功にしない・ADR-0026④）。
+    // 一覧で並べるのは**文書の中身の理由**だけ（下の `exportBlocked` は「いま始められない事情」も含む）。
     () => (doc ? timelineExportBlockers(doc, { knownTemplateIds: new Set(templates.map((t) => t.templateId)) }) : []),
     [doc, templates],
   );
+  /**
+   * **押す前に断る理由**（#718）。store の開始チェックと**同じ述語**を通す＝画面が塞いでいない理由で
+   * 押せてしまい、押してから断られる（打った操作が消えて理由だけ出る）を作らない。
+   */
+  const exportBlocked = useMemo(
+    () =>
+      exportStartBlock({
+        doc,
+        isImporting,
+        generatingVoiceClipId,
+        knownTemplateIds: new Set(templates.map((t) => t.templateId)),
+        otherExportRunning: exportLockOwner != null && exportLockOwner !== EXPORT_OWNER,
+        canExportHere: canExport(),
+      }),
+    [doc, isImporting, generatingVoiceClipId, templates, exportLockOwner],
+  );
   const exporting = isTimelineExportBusy(exportRun.phase);
+  // 書き出しが終わったら「離れられない」理由も出しっぱなしにしない（出ている条件から導く）。
+  const leaveBlockedMessage = exporting ? leaveBlocked : null;
+  /**
+   * **保存が直ったら、離脱の確認は行き先ごと忘れる**（#719 レビュー）。
+   *
+   * 出したまま「保存し直す」が成功すると、確認は消えるのに**行き先が残る**。あとで別の保存が失敗した
+   * 瞬間に、押していない確認が**古い行き先で蘇る**（押すとそこへ移ってしまう）。
+   * 表示条件で隠すだけでは忘れないので、**保存の状態が変わったところで落とす**。
+   */
+  useEffect(
+    () =>
+      useTimelineStore.subscribe((now, prev) => {
+        if (prev.saveStatus === "error" && now.saveStatus !== "error") setConfirmLeave(null);
+      }),
+    [],
+  );
   // 音が見つからない部品は**鳴らない**（読み上げ未作成・音源の読み込み失敗）。黙って無音にしない（§2-5）。
   const missingAudioCount = useMemo(() => {
     if (!doc) return 0;
@@ -800,13 +904,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 setRemovingTrackId(null);
                 void exportTimelineVideo({ templates, templateAssetSrcById });
               }}
-              disabled={exportBlockers.length > 0 || isPlaying}
-              title={exportBlockers.length > 0 ? exportBlockedMessage[exportBlockers[0].code] : playingHint}
+              disabled={exportBlocked != null || isPlaying}
+              title={exportBlocked?.message ?? playingHint}
             >
               動画を書き出す
             </button>
           )}
         </div>
+        {exportBlocked && exportBlocked.source === EXPORT_BLOCK_SOURCE.situation && !exporting && (
+          // 無効にしたボタンの `title` はホバーで出ないことがあるので、**知らせの段にも出す**（#719 レビュー）。
+          // 出すのは**いまの事情だけ**（#729 レビュー）＝中身の理由は下の一覧が全件並べるので、
+          // ここにも出すと**同じ文が2つの知らせとして続き**、読み上げも2回になる。
+          <p className="notice notice-warn" role="alert">{exportBlocked.message}</p>
+        )}
         {exportBlockers.length > 0 && !exporting && (
           <ul className="notice notice-warn" role="alert">
             {exportBlockers.map((b) => (
@@ -1873,15 +1983,24 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         保存できていないまま戻ると変更は消える（#693）。**答えを求める確認は上に出す**＝下だと見落として
         そのまま進んでしまう（バラす・列を消すと同じ扱い）。「やめる」を選べば「保存し直す」を押しに戻れる。
       */}
-      {confirmLeave && saveStatus === "error" && (
+      {confirmLeave !== null && (
         <DeleteConfirm
-          message="保存できていない変更があります。このまま一覧へ戻ると、その変更は失われます。戻る前に「保存し直す」を試せます。"
-          confirmLabel="保存しないで戻る"
-          onCancel={() => setConfirmLeave(false)}
+          message="保存できていない変更があります。このまま画面を移ると、その変更は失われます。移る前に「保存し直す」を試せます。"
+          confirmLabel="保存しないで移る"
+          onCancel={() => setConfirmLeave(null)}
           onConfirm={() => {
-            setConfirmLeave(false);
+            const to = confirmLeave;
+            setConfirmLeave(null);
             // 出しっぱなしの確認から戻れると、書き出し中でも画面を離れられてしまう（ボタン側と同じ条件で見る）。
-            if (!exporting) onNavigate("home");
+            // 行き先は**聞いたときのもの**へ（サイドバーから離れようとしたなら、その画面へ）。
+            if (exporting) {
+              // 出しっぱなしの確認から抜けられると、書き出し中でも画面を離れられてしまう。
+              // 黙って閉じずに理由を出す（押しても何も起きない、を作らない・§2-5）。
+              setLeaveBlocked(LEAVE_BLOCKED_EXPORTING_MESSAGE);
+              return;
+            }
+            leaveConfirmedRef.current = true;
+            onNavigate(to);
           }}
         />
       )}
@@ -1918,10 +2037,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             下へ流すと、恒常の警告が出ているときに画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。
             上に積まない（編集の場所を狭めない）と、必ず気づける、を両立させるための置き方。
             ※ **その場の返事を「操作した欄の中」に出すのが本筋**（ADR-0034 決定10）＝段階0 で寄せる。 */}
-        {(voiceError || editBlocked) && (
+        {(voiceError || editBlocked || leaveBlockedMessage) && (
           <div className="notice notice-warn timeline-flash" role="alert">
             {voiceError && <p>{voiceError}</p>}
             {editBlocked && <p>{editBlockedMessage[editBlocked]}</p>}
+            {leaveBlockedMessage && <p>{leaveBlockedMessage}</p>}
           </div>
         )}
       </div>

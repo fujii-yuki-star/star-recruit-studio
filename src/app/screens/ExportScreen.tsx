@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { EXPORT_BLOCKED_IMPORTING_MESSAGE } from "../uiLabels";
+import { EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE } from "../uiLabels";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
 import { NoScenesState } from "../components/NoScenesState";
@@ -169,7 +169,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       if (st.isImporting) return EXPORT_BLOCKED_IMPORTING_MESSAGE;
       if (st.isTemplateMutating) return "見た目パターンの変更中です。変更が終わってから書き出してください。";
       if (st.status === "generating") return "動画案を作成中です。作成が終わってから書き出してください。";
-      if (st.isGeneratingNarration || isNarrationGenerating(st.scenes)) return "声を作成中です。作成が終わってから書き出してください。";
+      if (st.isGeneratingNarration || isNarrationGenerating(st.scenes)) return VOICE_BUSY_EXPORT_MESSAGE;
       // 残っていると書き出しが必ず失敗する項目（#547 P2-5）。公開前チェックの主ボタンと**同じ述語**で、
       // サイドバーからこの画面へ直行した経路も止める＝保存先を選ばせた後に落とさない（ADR-0026④）。
       if (capabilityBlocked && capability) return EXPORT_CAPABILITY_NOTICE[capability].detail;

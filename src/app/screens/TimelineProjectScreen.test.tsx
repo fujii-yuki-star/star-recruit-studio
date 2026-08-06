@@ -6,11 +6,13 @@ import { pointerDownAt } from "../../test/pointer";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
+import { useExportLockStore } from "../store/exportLock";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
 import { VOLUME_POINTS_MAX } from "../../domain/constants";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
+import * as ffmpegMod from "../../infrastructure/ffmpegExport";
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -40,6 +42,11 @@ const open = (over: Partial<TimelineProject> = {}) =>
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  // 書き出せる端末として振る舞わせる（ブラウザでは `canExport()` が false ＝ボタンが正しく無効になる）。
+  // ⚠️ `restoreAllMocks` の**後**に張る（前に張ると、その場で外される）。
+  vi.spyOn(ffmpegMod, "canExport").mockReturnValue(true);
+  // 書き出しの締めはテスト間で持ち越さない（漏れると次のテストが別の理由で落ちて切り分けにくい）。
+  useExportLockStore.setState({ owner: null });
   // **書き出しの状態を先に戻す**＝`closeTimelineProject` は書き出し中だと何もしない（走行中に文書を
   // 差し替えないため）。戻さないと、書き出し中にしたテストの状態が以降のテスト全部に残る。
   useTimelineStore.setState({ exportRun: { phase: "idle", percent: 0, message: null, cancelling: false } });
@@ -264,6 +271,76 @@ describe("TimelineProjectScreen: 再生まわりのレビュー指摘（/canon-c
     open({ clips: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByText("再生").getAttribute("title")).toContain("まだ部品を置いていない");
+  });
+});
+
+describe("TimelineProjectScreen: 書き出しを始められない理由（#718）", () => {
+  const ready = () => open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }] });
+  const exportBtn = () => screen.getByRole("button", { name: "動画を書き出す" });
+
+  it("声を作っている最中は押せない（押してから断ると、作った声が捨てられる）", () => {
+    ready();
+    useTimelineStore.setState({ generatingVoiceClipId: "clip_009" });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(exportBtn()).toBeDisabled();
+    expect(exportBtn().getAttribute("title")).toContain("声を作成中です");
+  });
+
+  it("中身が理由のときは、同じ文を二重に出さない（#729 レビュー）", () => {
+    // 一覧（全件）と一段の知らせ（1件目）が両方出ると、**まったく同じ文が2つの知らせとして続く**
+    //（読み上げも2回になる）。理由の出どころで出し分ける。
+    open({ clips: [] }); // 「まだ何も置かれていない」＝文書の中身の理由
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const hits = screen.getAllByRole("alert").filter((el) => el.textContent?.includes("まだ何も置かれていない"));
+    expect(hits).toHaveLength(1);
+    // 押す前に断ることは変わらない（理由はボタンにも出す）。
+    expect(exportBtn()).toBeDisabled();
+    expect(exportBtn().getAttribute("title")).toContain("まだ何も置かれていない");
+  });
+
+  it("いまの事情が理由のときは、知らせの段にも出す（無効なボタンの説明はホバーで出ないことがある）", () => {
+    ready();
+    useTimelineStore.setState({ isImporting: true });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").filter((el) => el.textContent?.includes("取り込み中"))).toHaveLength(1);
+  });
+
+  it("いまの事情と中身の理由が重なったら、両方出す（片方だけ直して堂々巡りにしない）", () => {
+    open({ clips: [] });
+    useTimelineStore.setState({ isImporting: true });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts.some((el) => el.textContent?.includes("取り込み中"))).toBe(true);
+    expect(alerts.some((el) => el.textContent?.includes("まだ何も置かれていない"))).toBe(true);
+  });
+
+  it("素材を取り込んでいる最中は押せない", () => {
+    ready();
+    useTimelineStore.setState({ isImporting: true });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(exportBtn()).toBeDisabled();
+    expect(exportBtn().getAttribute("title")).toContain("取り込み中");
+  });
+
+  it("別の形式の書き出しが走っている間は押せない", () => {
+    ready();
+    useExportLockStore.setState({ owner: "scene" });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(exportBtn()).toBeDisabled();
+  });
+
+  it("この端末で書き出せないときも押せない（押してから断らない）", () => {
+    vi.spyOn(ffmpegMod, "canExport").mockReturnValue(false);
+    ready();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(exportBtn()).toBeDisabled();
+    expect(exportBtn().getAttribute("title")).toContain("この環境では");
+  });
+
+  it("どれも当てはまらなければ押せる", () => {
+    ready();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(exportBtn()).not.toBeDisabled();
   });
 });
 

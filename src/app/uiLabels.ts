@@ -474,6 +474,15 @@ export const IMPORT_BLOCKED_EXPORTING_MESSAGE =
  */
 export const EXPORT_BLOCKED_IMPORTING_MESSAGE = "素材の取り込み中です。取り込みが終わってから書き出してください。";
 
+/**
+ * 声を作っている最中に書き出しを始めようとしたときの案内（#718）。
+ * **両形式で同じ文言**（場面形式は `ExportScreen` の `startBlockedMessage` が出す・ADR-0026②・§6）。
+ */
+export const VOICE_BUSY_EXPORT_MESSAGE = "声を作成中です。作成が終わってから書き出してください。";
+
+/** 書き出し中に画面を離れようとしたときの案内（#719）。進み具合も中止もこの画面の中にしかない。 */
+export const LEAVE_BLOCKED_EXPORTING_MESSAGE = "いま動画を書き出しています。終わってから画面を移ってください。";
+
 /** 大きいファイルを取り込む道がある画面（はじめの入力・素材の画面）の次の行動。 */
 export const ASSET_TOO_LARGE_USE_PICKER = "大きいファイルは「写真・動画を選ぶ」から取り込んでください。";
 /** その道が無い画面（タイムライン編集）の次の行動。 */
