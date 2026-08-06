@@ -137,6 +137,14 @@ describe('exportTimelineVideo', () => {
     expect(useTimelineStore.getState().exportRun.phase).toBe('cancelled');
   });
 
+  it('声を作っている最中は始めない（作った声が捨てられる・#718）', async () => {
+    await open(doc());
+    useTimelineStore.setState({ generatingVoiceClipId: 'clip_009' });
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(dialogMod.showSaveVideoDialog)).not.toHaveBeenCalled();
+    expect(useTimelineStore.getState().exportRun.message).toContain('声を作成中です');
+  });
+
   it('書き出し中は二重に始めない（保存先を選んでいる間も含む）', async () => {
     let release = (): void => undefined;
     // **保存先ダイアログを開いたまま**にする＝「聞いている最中に押し直す」を実際に再現する

@@ -6,7 +6,7 @@ import { exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetF
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
-import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
+import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
@@ -84,6 +84,39 @@ const EXPORT_DONE_MESSAGE = "動画を保存しました。";
 const EXPORT_FAILED_MESSAGE = "動画を書き出せませんでした。しばらくしてから、もう一度お試しください。";
 const EXPORT_CANCELLED_MESSAGE = "書き出しを中止しました。もう一度書き出せます。";
 const EXPORT_UNSUPPORTED_MESSAGE = "この環境では動画を書き出せません。アプリから起動し直してお試しください。";
+
+/** 書き出しを始められない理由（`null`＝始められる）。`phase` は場面形式と同じ扱い分け（`11 §3.5`）。 */
+export type ExportStartBlock = { message: string; phase: typeof P.error | typeof P.unsupported };
+
+/**
+ * **書き出しを始められるか**を1か所で見る（#718）。
+ *
+ * これまで store の開始チェックと画面のボタンで**条件が別々に書かれ**、画面は `timelineExportBlockers` と
+ * 再生中しか見ていなかった＝取り込み中・別形式の書き出し中・この端末では書き出せない・**声を作っている最中**は
+ * **押せてしまって、押してから断られていた**（#703 が場面編集で消した「押してから断る」の残り）。
+ *
+ * 特に**声を作っている最中**は実害が大きい＝合成が着地したときには書き出しが始まっていて `commit` が撥ねるので、
+ * **作った声はファイルだけ残って文書に入らず**、その読み上げが無いままの動画が「保存しました」で終わる
+ * （ADR-0026④）。場面形式は同じ入口で両方向を塞いでいる（`ExportScreen` の `startBlockedMessage`）。
+ */
+export function exportStartBlock(input: {
+  doc: TimelineProject | null;
+  isImporting: boolean;
+  generatingVoiceClipId: string | null;
+  knownTemplateIds: Set<string>;
+  otherExportRunning: boolean;
+  canExportHere: boolean;
+}): ExportStartBlock | null {
+  if (!input.doc) return null; // 開いていないときはボタン自体が無い
+  if (input.isImporting) return { message: EXPORT_BLOCKED_IMPORTING_MESSAGE, phase: P.error };
+  if (input.generatingVoiceClipId != null) return { message: VOICE_BUSY_EXPORT_MESSAGE, phase: P.error };
+  if (input.otherExportRunning) return { message: OTHER_EXPORT_RUNNING_MESSAGE, phase: P.error };
+  const blockers = timelineExportBlockers(input.doc, { knownTemplateIds: input.knownTemplateIds });
+  if (blockers.length > 0) return { message: exportBlockedMessage[blockers[0].code], phase: P.error };
+  // 「この端末では書き出せない」は失敗と別（場面形式と同じ扱い＝`11 §3.5` の `unsupported`）。
+  if (!input.canExportHere) return { message: EXPORT_UNSUPPORTED_MESSAGE, phase: P.unsupported };
+  return null;
+}
 
 export interface TimelineState {
   /** 開いている文書（未オープンは null）。 */
@@ -333,7 +366,8 @@ const IDLE_EXPORT: TimelineExportRun = { phase: EXPORT_RUN_PHASE.idle, percent: 
 const P = EXPORT_RUN_PHASE;
 
 /** 書き出しの持ち主（`exportLock`）。場面形式と一時ファイルの置き場を取り合わないために使う。 */
-const EXPORT_OWNER = "timeline" as const;
+/** 書き出しの締めの持ち主（画面も同じものを見る＝#718）。 */
+export const EXPORT_OWNER = "timeline" as const;
 
 /**
  * 選び直したときに落とす「直前の操作の返事」（#701 レビュー）。前の部品で出た理由が残っていると、
@@ -887,29 +921,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   exportTimelineVideo: async (deps) => {
     const doc = get().doc;
     if (!doc || isTimelineExportBusy(get().exportRun.phase)) return;
-    // 素材を取り込んでいる最中は始めない（場面形式と同じ＝ADR-0026②）。始めると、着地した素材が
-    // **この書き出しには入らないのに文書へ足される**＝入っていないものが入ったように見える（#570 P1）。
-    if (get().isImporting) {
-      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: EXPORT_BLOCKED_IMPORTING_MESSAGE } });
-      return;
-    }
-    // 場面形式の書き出しが走っていたら始めない（一時ファイルの置き場を取り合って壊れた動画が出る）。
-    if (isOtherExportRunning(EXPORT_OWNER)) {
-      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: OTHER_EXPORT_RUNNING_MESSAGE } });
-      return;
-    }
-    // 書き出せない理由があれば**作る前に**断る（静止画＋無音の動画を成功として出さない・ADR-0026④）。
+    // **始められない理由は1か所で見る**（`exportStartBlock`・#718）＝画面のボタンが押す前に出す理由と
+    // 同じものを、ここでも使う。条件を2か所に書くと、画面が塞いでいない理由で押してから断る（#703 の型）。
     // 判定材料（読み込めている見た目）は描くときと**同じもの**を渡す＝断る条件と描く条件がずれない。
-    const blockers = timelineExportBlockers(doc, {
+    const blocked = exportStartBlock({
+      doc,
+      isImporting: get().isImporting,
+      generatingVoiceClipId: get().generatingVoiceClipId,
       knownTemplateIds: new Set(deps.templates.map((t) => t.templateId)),
+      otherExportRunning: isOtherExportRunning(EXPORT_OWNER),
+      canExportHere: canExport(),
     });
-    if (blockers.length > 0) {
-      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[blockers[0].code] } });
-      return;
-    }
-    if (!canExport()) {
-      // 「この端末では書き出せない」は失敗と別（場面形式と同じ扱い＝`11 §3.5` の `unsupported`）。
-      set({ exportRun: { ...IDLE_EXPORT, phase: P.unsupported, message: EXPORT_UNSUPPORTED_MESSAGE } });
+    if (blocked) {
+      set({ exportRun: { ...IDLE_EXPORT, phase: blocked.phase, message: blocked.message } });
       return;
     }
     // 保存先を先に決める（重い処理をしてから「やっぱりやめる」を選ばせない）。ここから走行中に数える

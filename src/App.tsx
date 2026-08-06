@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { canNavigate } from "./app/hooks/navigationGuard";
 import "./styles/theme.css";
 import "./styles/fonts.css";
 import type { ScreenId } from "./app/data/mockData";
@@ -56,6 +57,10 @@ function App() {
   // 画面遷移は必ずこの navigate を通す（直接 setScreen を配らない）＝遷移のたびに戻り先を同時更新する。
   // effect で screen を後追いすると setState 連鎖になる（React の警告）ため、遷移時に1回で確定する（純粋関数で判定）。
   const navigate = useCallback((next: ScreenId) => {
+    // 離れる前に聞きたい画面があれば、ここで一度だけ聞く（#719）。断られたら**遷移しない**
+    // ＝確認を出すのは断った側の責任（黙って止めない・§2-5）。サイドバーもこの入口を通るので、
+    // 画面内のボタンだけに確認が付いていて素通しできる、という穴が構造的に塞がる。
+    if (!canNavigate(next)) return;
     setProjectReturnTo((prev) => stickyProjectScreen(prev, next));
     setScreen(next);
   }, []);

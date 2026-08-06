@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import * as fsMod from "../../infrastructure/projectFs";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
+import { canNavigate } from "../hooks/navigationGuard";
+import type { ScreenId } from "../data/mockData";
 import { useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -88,12 +90,99 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     render(<TimelineProjectScreen onNavigate={onNavigate} />);
     fireEvent.click(screen.getByText("動画の一覧へ"));
     expect(onNavigate).not.toHaveBeenCalled(); // 押しただけでは戻らない
-    expect(screen.getByText(/このまま一覧へ戻ると、その変更は失われます/)).toBeInTheDocument();
+    expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "やめる" }));
     expect(onNavigate).not.toHaveBeenCalled(); // 「やめる」なら残る＝保存し直しに戻れる
     fireEvent.click(screen.getByText("動画の一覧へ"));
-    fireEvent.click(screen.getByRole("button", { name: "保存しないで戻る" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存しないで移る" }));
     expect(onNavigate).toHaveBeenCalledWith("home");
+  });
+
+  it("サイドバーなど別の入口から離れようとしても聞く（画面内のボタンだけに確認を付けない・#719）", () => {
+    // 実際の遷移は `App` の `navigate` ひとつを通るので、そこが関門に聞く。ここでは関門そのものを叩く。
+    open();
+    useTimelineStore.setState({ saveStatus: "error" });
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    // 「素材」画面へ移ろうとした＝画面内のボタンではない入口。
+    act(() => { expect(canNavigate("materials" as ScreenId)).toBe(false); });
+    expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument();
+    // 「はい」と答えたら、**聞いたときの行き先**へ移る（一覧に固定しない）。
+    fireEvent.click(screen.getByRole("button", { name: "保存しないで移る" }));
+    expect(onNavigate).toHaveBeenCalledWith("materials");
+  });
+
+  it("画面を出したあとに保存が失敗しても、その時点から関門が効く（#719 レビュー）", () => {
+    // 実際の引き金は「編集を続けている最中に自動保存が失敗する」＝**開いた後に**条件が変わる経路。
+    open();
+    useTimelineStore.setState({ saveStatus: "saved" });
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    act(() => { useTimelineStore.setState({ saveStatus: "error" }); });
+    act(() => { canNavigate("materials" as ScreenId); });
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(screen.getByText(/このまま画面を移ると/)).toBeInTheDocument();
+  });
+
+  it("確認を出したまま保存し直せたら、確認ごと片づける（古い行き先で蘇らせない）", () => {
+    open();
+    useTimelineStore.setState({ saveStatus: "error" });
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    act(() => { canNavigate("materials" as ScreenId); });
+    expect(screen.getByText(/このまま画面を移ると/)).toBeInTheDocument();
+    act(() => { useTimelineStore.setState({ saveStatus: "saved" }); });
+    // 直ったので確認は消える。ここで**また失敗しても**、押していない確認が蘇らない。
+    act(() => { useTimelineStore.setState({ saveStatus: "error" }); });
+    expect(screen.queryByText(/このまま画面を移ると/)).not.toBeInTheDocument();
+  });
+
+  it("答えたあとは同じ確認を出し続けない（永久に離れられない、を作らない・#719）", () => {
+    open();
+    useTimelineStore.setState({ saveStatus: "error" });
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    act(() => { canNavigate("materials" as ScreenId); });
+    fireEvent.click(screen.getByRole("button", { name: "保存しないで移る" }));
+    // 答えた直後もまだ保存は失敗のまま。その1回は通す（通さないと画面から出られない）。
+    expect(canNavigate("materials" as ScreenId)).toBe(true);
+    // ただし通すのは1回だけ＝次はまた聞く。
+    expect(canNavigate("materials" as ScreenId)).toBe(false);
+  });
+
+  it("保存できているときは聞かずに移る（無用に足止めしない）", () => {
+    open();
+    useTimelineStore.setState({ saveStatus: "saved" });
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    // 関門は常に名乗り、通してよいかは画面が決めて**自分で遷移する**（その場で true を返す形ではない）。
+    act(() => { canNavigate("materials" as ScreenId); });
+    expect(onNavigate).toHaveBeenCalledWith("materials");
+    expect(screen.queryByText(/このまま画面を移ると/)).not.toBeInTheDocument();
+  });
+
+  it("書き出し中は離れられない（サイドバーからも・理由を出す）", () => {
+    open();
+    useTimelineStore.setState({ saveStatus: "saved", exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    act(() => { canNavigate("materials" as ScreenId); });
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(screen.getByText(/終わってから画面を移ってください/)).toBeInTheDocument(); // 黙って止めない
+    // 書き出しが終わったら理由は下げる（終わっているのに「書き出しています」を残さない）。
+    act(() => { useTimelineStore.setState({ exportRun: { phase: "idle", percent: 0, message: null, cancelling: false } }); });
+    expect(screen.queryByText(/終わってから画面を移ってください/)).not.toBeInTheDocument();
+  });
+
+  it("保存を待っている最中に離れようとしたら、書き切ってから移る（素通しさせない）", async () => {
+    open();
+    useTimelineStore.setState({ saveStatus: "idle" });
+    const save = vi.spyOn(useTimelineStore.getState(), "saveTimelineProject");
+    const onNavigate = vi.fn();
+    render(<TimelineProjectScreen onNavigate={onNavigate} />);
+    await act(async () => { canNavigate("materials" as ScreenId); });
+    expect(save).toHaveBeenCalled(); // 待っている保存を書いてから
+    expect(onNavigate).toHaveBeenCalledWith("materials");
   });
 
   it("画面を離れるときは、待っている保存を書き切る（無言で消さない）", async () => {
@@ -125,9 +214,9 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     useTimelineStore.setState({ saveStatus: "error" });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByText("動画の一覧へ"));
-    expect(screen.getByText(/このまま一覧へ戻ると、その変更は失われます/)).toBeInTheDocument();
+    expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument();
     act(() => useTimelineStore.setState({ saveStatus: "saved" }));
-    expect(screen.queryByText(/このまま一覧へ戻ると、その変更は失われます/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/このまま画面を移ると、その変更は失われます/)).not.toBeInTheDocument();
   });
 
   it("書いている途中に戻ろうとしたら、書き終わるまで待つ（あとで失敗しても気づけない、を作らない）", async () => {
@@ -157,7 +246,7 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     render(<TimelineProjectScreen onNavigate={onNavigate} />);
     act(() => { useTimelineStore.setState({ saveStatus: "idle" }); });
     fireEvent.click(screen.getByRole("button", { name: /動画の一覧へ/ }));
-    await waitFor(() => expect(screen.getByText(/このまま一覧へ戻ると、その変更は失われます/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument());
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
