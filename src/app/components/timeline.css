@@ -206,3 +206,19 @@
 .timeline-ruler--seekable {
   cursor: pointer;
 }
+
+/* 運んでいるものが**どこに・何秒ぶん**入るか（#684 レビュー）。実寸で出す＝落とす前に結果が分かる。 */
+.timeline-drop-preview {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border: 2px dashed var(--color-accent);
+  border-radius: 4px;
+  background: rgb(74 163 223 / 18%);
+  pointer-events: none;
+}
+
+.timeline-drop-preview--blocked {
+  border-color: var(--color-danger);
+  background: rgb(214 104 95 / 18%);
+}

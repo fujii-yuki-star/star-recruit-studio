@@ -493,6 +493,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_OVERLAP: "その場所には先に置いてある部品があります。ずらすか、列を足して重ねてください",
   TIMELINE_EDIT_TRACK_KIND: "音の部品は音の列に、絵や文字の部品は映像の列に置いてください",
   TIMELINE_EDIT_LOCKED: "この列は固定されています。動かすには固定を外してください",
+  TIMELINE_EDIT_HIDDEN_TRACK: "この列は「出さない」設定なので、置いても動画に出ません。ほかの列へ置くか、列の「⋮」から「動画に出す」を選んでください",
   TIMELINE_EDIT_NOT_FOUND: "その部品は見つかりませんでした。選び直してください",
   TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
   TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",

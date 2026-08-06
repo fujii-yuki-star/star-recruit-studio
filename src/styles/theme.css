@@ -1194,3 +1194,41 @@ button.badge {
   z-index: 3;
   margin-bottom: 0;
 }
+
+/* つかんで運んでいるものの影（#684）。指の先に付いて回る。**当たり判定は持たない**＝落とし先を隠さない。 */
+.drag-ghost {
+  position: fixed;
+  transform: translate(12px, 12px);
+  pointer-events: none;
+  z-index: 1000;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 13px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 25%);
+}
+
+/* 置けない所（理由の文言は離したときだけ出す＝ドラッグ中に明滅させない・ADR-0034 決定10）。 */
+.drag-ghost--blocked {
+  background: var(--color-danger);
+}
+
+/* 落とし先（いまここへ置ける／置けない）。 */
+.drop-target {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.drop-target--blocked {
+  outline: 2px solid var(--color-danger);
+  outline-offset: -2px;
+}
+
+/* 掴めるもの（#684 レビュー）。欄の見出し・帯と同じ見た目にする＝手を出す前に「掴める」と分かる。 */
+.grabbable { cursor: grab; }
+.grabbable:active { cursor: grabbing; }

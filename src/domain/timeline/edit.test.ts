@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
+  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
@@ -256,6 +256,49 @@ describe('firstFreeStart（次に空いている時刻・#684 レビュー）', 
   it('ほかの列の部品は見ない', () => {
     const clips = [...withSpans([[0, 20]])].map((c) => ({ ...c, trackId: 'track_009' }));
     expect(firstFreeStart(clips, 'track_001', 0, 5)).toBe(0);
+  });
+});
+
+describe('visualPlacementIssue（そこへ置けるか・#684）', () => {
+  const base = () => doc({
+    tracks: [
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.audio },
+      { id: 'track_004', kind: TRACK_KIND.visual, locked: true },
+      { id: 'track_005', kind: TRACK_KIND.visual, hidden: true },
+    ],
+    clips: [clip('clip_001', { trackId: 'track_001', startSec: 0, durationSec: 5 })],
+    assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/a.png' }],
+  });
+  const at = (trackId: string, startSec = 10) => ({ kind: TIMELINE_CLIP_KIND.text, trackId, startSec });
+
+  it('置ける所は理由なし', () => {
+    expect(visualPlacementIssue(base(), at('track_001'))).toBeNull();
+  });
+
+  it('無い列・音の列・固定した列・**出さない列**・重なる場所は、それぞれの理由で断る', () => {
+    expect(visualPlacementIssue(base(), at('track_999'))).toBe(EDIT_BLOCKED.notFound);
+    expect(visualPlacementIssue(base(), at('track_002'))).toBe(EDIT_BLOCKED.trackKind);
+    expect(visualPlacementIssue(base(), at('track_004'))).toBe(EDIT_BLOCKED.locked);
+    // 「出さない」は固定とは別＝動かせないのではなく**映らない**。
+    expect(visualPlacementIssue(base(), at('track_005'))).toBe(EDIT_BLOCKED.hiddenTrack);
+    expect(visualPlacementIssue(base(), at('track_001', 0))).toBe(EDIT_BLOCKED.overlap);
+  });
+
+  it('素材の部品は、この動画が持っている素材でなければ断る', () => {
+    const slot = (assetId?: string) => ({ kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 10, assetId });
+    expect(visualPlacementIssue(base(), slot('asset_001'))).toBeNull();
+    expect(visualPlacementIssue(base(), slot('asset_999'))).toBe(EDIT_BLOCKED.notFound);
+    expect(visualPlacementIssue(base(), slot(undefined))).toBe(EDIT_BLOCKED.notFound);
+  });
+
+  it('置く判定と同じものを見る（ゴーストと結果が食い違わない）', () => {
+    // 断る所は `addVisualClip` も同じ理由で断り、置ける所は置ける。
+    for (const t of ['track_001', 'track_002', 'track_004', 'track_005', 'track_999']) {
+      const issue = visualPlacementIssue(base(), at(t));
+      const r = addVisualClip(base(), at(t));
+      expect(r.ok ? null : r.reason).toBe(issue);
+    }
   });
 });
 

@@ -32,7 +32,8 @@ function stubBoxes(boxes: Record<string, { left: number; top: number; width: num
 
 const drag = (from: HTMLElement, to: { x: number; y: number }): void => {
   pointerDownAt(from, 1000, { clientX: 0, clientY: 0 });
-  fireEvent.pointerMove(window, { clientX: to.x, clientY: to.y, pointerId: 1 });
+  // `buttons: 1`＝押したまま動かしている（実際のイベントと同じ。0 は「もう離している」の意味）。
+  fireEvent.pointerMove(window, { buttons: 1, clientX: to.x, clientY: to.y, pointerId: 1 });
   fireEvent.pointerUp(window, { clientX: to.x, clientY: to.y, pointerId: 1 });
 };
 
@@ -62,7 +63,7 @@ describe("PanelLayoutView", () => {
     stubBoxes({ a: { left: 0, top: 0, width: 100, height: 100 }, b: { left: 100, top: 0, width: 100, height: 100 } });
     const head = screen.getByRole("heading", { name: "あ" }).parentElement!;
     pointerDownAt(head, 1000, { clientX: 10, clientY: 10 });
-    fireEvent.pointerMove(window, { clientX: 11, clientY: 11, pointerId: 1 }); // 1px＝掴まない
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 11, clientY: 11, pointerId: 1 }); // 1px＝掴まない
     fireEvent.pointerUp(window, { clientX: 11, clientY: 11, pointerId: 1 });
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -81,7 +82,7 @@ describe("PanelLayoutView", () => {
     stubBoxes({ a: { left: 0, top: 0, width: 100, height: 100 }, b: { left: 100, top: 0, width: 100, height: 100 } });
     const head = screen.getByRole("heading", { name: "あ" }).parentElement!;
     pointerDownAt(head, 1000, { clientX: 0, clientY: 0 });
-    fireEvent.pointerMove(window, { clientX: 150, clientY: 95, pointerId: 1 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 150, clientY: 95, pointerId: 1 });
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.pointerUp(window, { clientX: 150, clientY: 95, pointerId: 1 });
     expect(onChange).not.toHaveBeenCalled();
@@ -99,8 +100,46 @@ describe("PanelLayoutView", () => {
     const { container } = render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={vi.fn()} />);
     stubBoxes({ a: { left: 0, top: 0, width: 100, height: 100 }, b: { left: 100, top: 0, width: 100, height: 100 } });
     pointerDownAt(screen.getByRole("heading", { name: "あ" }).parentElement!, 1000, { clientX: 0, clientY: 0 });
-    fireEvent.pointerMove(window, { clientX: 150, clientY: 95, pointerId: 1 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 150, clientY: 95, pointerId: 1 });
     expect(container.querySelector(".panel-drop-line--bottom")).not.toBeNull();
+  });
+
+  it("境界は押した瞬間から追従する（掴んだのに動かない遊びを作らない）", () => {
+    const onChange = vi.fn();
+    const l = emptyLayout();
+    l.nodes.left = { dir: SPLIT_DIR.column, sizes: [0.5, 0.5], children: [{ panelId: "a" }, { panelId: "b" }] };
+    render(<PanelLayoutView layout={l} panels={panels} onChange={onChange} />);
+    const divider = screen.getAllByLabelText("欄の境目")[0];
+    (divider.parentElement as HTMLElement).getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    pointerDownAt(divider, 1000, { clientX: 0, clientY: 50 });
+    // 1px＝欄の見出しなら「掴まない」距離。境界は**この 1px でも動く**（`startPx: 0`）。
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 0, clientY: 51, pointerId: 1 });
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it("領域の外枠も掴んで動かせる（左右の幅・下の高さ）", () => {
+    const onChange = vi.fn();
+    const l = emptyLayout();
+    l.nodes.left = { panelId: "a" };
+    const { container } = render(<PanelLayoutView layout={l} panels={panels} onChange={onChange} />);
+    (container.firstElementChild as HTMLElement).getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 1000, height: 800, right: 1000, bottom: 800, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const edge = screen.getByLabelText("左の欄の幅");
+    pointerDownAt(edge, 1000, { clientX: 200, clientY: 400 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 300, clientY: 400, pointerId: 1 });
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it("右ボタンでは境界も掴まない（左ボタンのみ）", () => {
+    const onChange = vi.fn();
+    const l = emptyLayout();
+    l.nodes.left = { dir: SPLIT_DIR.column, sizes: [0.5, 0.5], children: [{ panelId: "a" }, { panelId: "b" }] };
+    render(<PanelLayoutView layout={l} panels={panels} onChange={onChange} />);
+    const divider = screen.getAllByLabelText("欄の境目")[0];
+    fireEvent.pointerDown(divider, { pointerId: 1, button: 2, clientX: 0, clientY: 50 });
+    fireEvent.pointerMove(window, { buttons: 2, clientX: 0, clientY: 70, pointerId: 1 });
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("境界を掴んで大きさを変えられる（段階2）", () => {
@@ -113,7 +152,7 @@ describe("PanelLayoutView", () => {
     (divider.parentElement as HTMLElement).getBoundingClientRect = () =>
       ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     pointerDownAt(divider, 1000, { clientX: 0, clientY: 50 });
-    fireEvent.pointerMove(window, { clientX: 0, clientY: 70, pointerId: 1 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 0, clientY: 70, pointerId: 1 });
     expect(onChange).toHaveBeenCalled();
     const next = onChange.mock.calls[onChange.mock.calls.length - 1][0] as PanelLayout;
     const node = next.nodes.left;
@@ -132,7 +171,7 @@ describe("PanelLayoutView: 途中でやめる・片づけ（/canon-check の指�
   it("指が外れた（pointercancel）ときは動かさない", () => {
     const { onChange, head } = setup();
     pointerDownAt(head, 1000, { clientX: 0, clientY: 0 });
-    fireEvent.pointerMove(window, { clientX: 150, clientY: 95, pointerId: 1 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 150, clientY: 95, pointerId: 1 });
     fireEvent.pointerCancel(window, { clientX: 150, clientY: 95, pointerId: 1 });
     fireEvent.pointerUp(window, { clientX: 150, clientY: 95, pointerId: 1 });
     expect(onChange).not.toHaveBeenCalled();
@@ -141,9 +180,9 @@ describe("PanelLayoutView: 途中でやめる・片づけ（/canon-check の指�
   it("掴んだまま画面を離れても、あとから動かない（掴みっぱなしを残さない）", () => {
     const { onChange, unmount, head } = setup();
     pointerDownAt(head, 1000, { clientX: 0, clientY: 0 });
-    fireEvent.pointerMove(window, { clientX: 150, clientY: 95, pointerId: 1 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 150, clientY: 95, pointerId: 1 });
     unmount();
-    fireEvent.pointerMove(window, { clientX: 150, clientY: 50, pointerId: 1 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 150, clientY: 50, pointerId: 1 });
     fireEvent.pointerUp(window, { clientX: 150, clientY: 50, pointerId: 1 });
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -151,7 +190,7 @@ describe("PanelLayoutView: 途中でやめる・片づけ（/canon-check の指�
   it("右クリックでは掴まない（メニューを開く操作と食い合わない）", () => {
     const { onChange, head } = setup();
     pointerDownAt(head, 1000, { clientX: 0, clientY: 0, button: 2 });
-    fireEvent.pointerMove(window, { clientX: 150, clientY: 95, pointerId: 1 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 150, clientY: 95, pointerId: 1 });
     fireEvent.pointerUp(window, { clientX: 150, clientY: 95, pointerId: 1 });
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -159,7 +198,7 @@ describe("PanelLayoutView: 途中でやめる・片づけ（/canon-check の指�
   it("別の指の動きでは落ちない（掴んだ指だけを見る）", () => {
     const { onChange, head } = setup();
     pointerDownAt(head, 1000, { clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(window, { clientX: 150, clientY: 95, pointerId: 1 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 150, clientY: 95, pointerId: 1 });
     fireEvent.pointerUp(window, { clientX: 10, clientY: 10, pointerId: 2 }); // 別の指
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.pointerUp(window, { clientX: 150, clientY: 95, pointerId: 1 });
@@ -175,7 +214,7 @@ describe("PanelLayoutView: 途中でやめる・片づけ（/canon-check の指�
     (divider.parentElement as HTMLElement).getBoundingClientRect = () =>
       ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     pointerDownAt(divider, 1000, { clientX: 0, clientY: 50 });
-    fireEvent.pointerMove(window, { clientX: 0, clientY: 70, pointerId: 1 });
+    fireEvent.pointerMove(window, { buttons: 1, clientX: 0, clientY: 70, pointerId: 1 });
     fireEvent.keyDown(window, { key: "Escape" });
     // 最後に渡されるのは**掴む前の配置そのもの**（同じ参照）。
     expect(onChange.mock.calls[onChange.mock.calls.length - 1][0]).toBe(l);

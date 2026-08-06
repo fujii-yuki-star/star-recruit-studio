@@ -212,6 +212,12 @@ export interface TimelineState {
     kind: typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
     assetId?: string;
     center?: { x: number; y: number };
+    /**
+     * **利用者が置き場所を指したとき**（ドラッグで落とした・#684）。ここが入っていたら
+     * その列・その時刻へ置き、置けなければ**断る**（寄せない・別の列へ移さない＝ADR-0034 決定10）。
+     * 未指定＝アプリが決める（ボタン）＝空いている列と時刻を探す。
+     */
+    at?: { trackId: string; startSec: number };
   }) => void;
   /** 置いた部品の中身を直す（#684）＝写真の差し替え・文字・図形の色や形。 */
   setSelectedVisualContent: (patch: {
@@ -574,6 +580,20 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addVisualClip: (input) => {
     const doc = get().doc;
     if (!doc) return;
+    // **指された場所へ置く**（ドラッグ）＝探さない・寄せない。置けなければ理由を出して終わり
+    // （ADR-0034 決定10＝利用者が位置を指したときは勝手に別の場所へ動かさない）。
+    if (input.at) {
+      const r = addVisualClip(doc, { ...input, trackId: input.at.trackId, startSec: input.at.startSec });
+      if (r.ok) {
+        const placed = r.doc.clips[r.doc.clips.length - 1];
+        // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
+        // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
+        commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
+      } else {
+        set({ editBlocked: r.reason });
+      }
+      return;
+    }
     // 置き先は**空いている映像の列**を上から探す（固定した列・重なる場所は避ける）。
     // 見つからないときは黙って何もしないのではなく、理由を出す（§2-5）。
     const startSec = get().playheadSec;
@@ -586,7 +606,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       const r = addVisualClip(doc, { ...input, trackId: track.id, startSec });
       if (r.ok) {
         const placed = r.doc.clips[r.doc.clips.length - 1];
-        commit(set, get, r.doc, { selectedClipIds: [placed.id] });
+        // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
+        // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
+        commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
         return;
       }
       last = r;
@@ -602,7 +624,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       const r = addVisualClip(doc, { ...input, trackId: t.id, startSec: after });
       if (r.ok) {
         const placed = r.doc.clips[r.doc.clips.length - 1];
-        commit(set, get, r.doc, { selectedClipIds: [placed.id] });
+        // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
+        // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
+        commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
         return;
       }
       last = r;
