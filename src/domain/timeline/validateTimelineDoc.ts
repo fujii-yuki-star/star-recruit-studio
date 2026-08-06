@@ -1,4 +1,4 @@
-// タイムライン形式（ADR-0032）の意味検証（11 §8 V22–V30）。純粋関数（副作用なし）。
+// タイムライン形式（ADR-0032）の意味検証（11 §8 V22–V31）。純粋関数（副作用なし）。
 // スキーマ適合（型/必須/enum/範囲＝V1,V2）は ajv 済み前提で、ここは schema で表せない
 // 相互参照・横断条件だけを見て Warning[] を返す。
 // エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。文言は §2-5「次の行動」を示す。
@@ -84,6 +84,7 @@ export function overlappingClipPairs(clips: TimelineClip[]): Array<[TimelineClip
  * V22 trackId 実在／V23 クリップ種別とトラック種別の一致／V24 同一トラック内の時間の重なり／
  * V25 素材の実在・音の出どころの排他／V26 グループ members・アニメ targetId の実在／
  * V29 字幕の連動先の実在（ADR-0032 決定24）／V30 切り抜きで丸ごと隠れていないか（#634）。
+ * V31 **同じ対象に動きは1本まで**（#717・読む側が1本しか見ない）。
  */
 export function validateTimelineDoc(doc: TimelineProject): Warning[] {
   const warnings: Warning[] = [];
@@ -161,6 +162,17 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
   const overlapped = new Set(overlappingClipPairs(doc.clips).map(([, later]) => later.id));
   for (const id of overlapped) {
     warnings.push(warn('TIMELINE_CLIP_OVERLAP', '同じ列で時間が重なっています。ずらすか、列を増やして重ねてください', `clips.${id}`));
+  }
+
+  // V31: **同じ対象に動きは1本まで**（#717）。読む側（描画・キーフレーム編集・バラす）は `targetId` で
+  // `find` して1本しか見ないので、2本あると**片方が黙って無視される**（焼き出しが切り替えを2本作って
+  // ハードカットになっていた）。実装だけが持っていた前提を、検証で守る。
+  const seenTargets = new Set<string>();
+  for (const a of doc.animations ?? []) {
+    if (seenTargets.has(a.targetId)) {
+      warnings.push(warn('TIMELINE_ANIMATION_DUPLICATE', 'ひとつの部品に動きが2つ以上あります。あとの1つは動画に出ないので、動きを付け直してください', `animations.${a.id}`));
+    }
+    seenTargets.add(a.targetId);
   }
 
   return warnings;

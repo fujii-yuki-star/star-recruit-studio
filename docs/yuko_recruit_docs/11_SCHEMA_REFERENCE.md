@@ -388,7 +388,7 @@ schemaVersion ●（現行 `"1.7"`・場面形式とは独立に進む） / form
 - **入れ子にしている理由**＝クリップ直下の `text`（表示する文字）・`speed`（素材の再生速度）と**語が衝突する**ため。読み上げ文と話速は別概念なので、同じ名前で違う意味を持たせない（ADR-0026②）。
 - **`audio` と `voice` を種別で分ける理由**＝音の出どころが違う。`audio` は素材/同梱BGM（`assetId`/`bundledBgmId`）、`voice` は**中身**（読み上げ文＋話者）。重ねて指定すると §8 V25 で警告。
 
-**ClipAnimation**: id ●（`anim_NNN`） / targetId ●（クリップ id またはグループ id） / keyframes ●（`Keyframe[]`・`$ref` 共有）。**`timeSec` は「クリップの先頭からの秒」**＝場面形式の `ElementAnimation`（場面ローカル秒）と**そこだけ意味が違う**。補間の規則（設定したプロパティのみ独立補間・絶対上書き・区間外はクランプ）は §7.4 の `Keyframe` と共通。 **グループを対象にしたときの起点は「所属クリップのうち最も早い開始秒」**（#629）＝焼き出しは1場面のクリップをまとめてグループにするので、どのメンバーも同じ開始秒になり、クリップ対象と起点が揃う。
+**ClipAnimation**: id ●（`anim_NNN`） / targetId ●（クリップ id またはグループ id・**対象ごとに1本**＝`§8` V31） / keyframes ●（`Keyframe[]`・`$ref` 共有）。**`timeSec` は「クリップの先頭からの秒」**＝場面形式の `ElementAnimation`（場面ローカル秒）と**そこだけ意味が違う**。補間の規則（設定したプロパティのみ独立補間・絶対上書き・区間外はクランプ）は §7.4 の `Keyframe` と共通。 **グループを対象にしたときの起点は「所属クリップのうち最も早い開始秒」**（#629）＝焼き出しは1場面のクリップをまとめてグループにするので、どのメンバーも同じ開始秒になり、クリップ対象と起点が揃う。
 
 #### 7.6.1 焼き出し（場面形式 → 本形式・片道・ADR-0032 決定16/17・#628）
 
@@ -878,8 +878,9 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 | V29 | `clips[].voiceClipId`（字幕の連動先）が実在する**読み上げ**クリップを指す／連動先を持てるのは字幕だけ | 警告（`TIMELINE_SUBTITLE_LINK_NOT_FOUND` / `TIMELINE_SUBTITLE_LINK_ON_NON_SUBTITLE`）＝字幕は自分の文へ落ちて描かれ続けるので、黙って連動が切れたことに気づけない |
 
 | V30 | `clips[].crop` の同じ軸の合計が 1 未満（上下・左右それぞれ） | 警告（`TIMELINE_CROP_HIDES_ALL`）＝描画は **1px 残す**（丸ごと消えたことに気づけるようにする） |
+| V31 | **`animations[].targetId` は重複しない**（同じ対象に動きは1本まで・V26 と対） | 警告（`TIMELINE_ANIMATION_DUPLICATE`）＝読む側（描画・キーフレーム編集・バラす）は `targetId` で `find` して**1本しか見ない**ので、2本あると片方が黙って無視される（焼き出しが入場と退場を2本作り、切り替えがハードカットになっていた・#717） |
 
-> V22–V30 は **タイムライン形式（ADR-0032・#627／読み上げは #628／連動は #633／切り抜きは #634）**。domain の純粋関数 **`validateTimelineDoc`（`src/domain/timeline/validateTimelineDoc.ts`）** が `Warning[]` を返す。**V24 が本形式の要**＝同一トラックで時間が重ならないので、**重ね順は tracks の並び順だけで一意に決まる**（クリップごとの zIndex を持たない）。ID 一意（`clip_NNN`/`track_NNN`/`anim_NNN`）は V16 と同じ扱いで再採番。番号は §8 の続き。
+> V22–V31 は **タイムライン形式（ADR-0032・#627／読み上げは #628／連動は #633／切り抜きは #634）**。domain の純粋関数 **`validateTimelineDoc`（`src/domain/timeline/validateTimelineDoc.ts`）** が `Warning[]` を返す。**V24 が本形式の要**＝同一トラックで時間が重ならないので、**重ね順は tracks の並び順だけで一意に決まる**（クリップごとの zIndex を持たない）。ID 一意（`clip_NNN`/`track_NNN`/`anim_NNN`）は V16 と同じ扱いで再採番。番号は §8 の続き。
 
 > V12–V15 は ADR-0008 §8。FREE テンプレ場面（`sceneType=free`）の `freeLayout` を対象とし、domain の純粋関数 `validateFreeLayout`（`src/domain/project/freeLayout.ts`）で実装。`free_NNN` 要素ごとに `Warning.field=freeLayout.<id>` を付す。V13 が不正なら矩形が確定しないため V14 はスキップ（二重警告を避ける）。
 > kind 別の構造的「必須」（`slot` の `fit` が assetId 非null時・`shape` の `shapeType`）は **Schema（`exclusiveMinimum`/enum）＋ renderer 既定（fit 未指定=cover・shapeType 未指定=rect）で担保＝V2 相当**とし、上記 domain 検証（意味検証）の対象外。`fit` は §2-3 の技術用語のため UI 警告に出さない。

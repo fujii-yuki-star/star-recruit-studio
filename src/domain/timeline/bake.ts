@@ -224,6 +224,29 @@ interface TransitionKeyframes {
   outgoing: Keyframe[];
 }
 
+/** 対象ごとにキーフレームを溜める（#717）。 */
+function addKeyframes(pending: Map<string, Keyframe[]>, targetId: string, keyframes: readonly Keyframe[]): void {
+  const cur = pending.get(targetId);
+  if (cur) cur.push(...keyframes);
+  else pending.set(targetId, [...keyframes]);
+}
+
+/**
+ * 時刻の昇順に並べ、**同じ時刻には1つ**にする（`11 §7.6.3.1` と同じ規則）。
+ * ⚠️ **溜まる順は昇順とは限らない**（短い場面が続くと、退場の開始が入場の終わりより前に来る）ので、
+ * 並べ直しも実際に効いている。
+ *
+ * ⚠️ **同じ時刻はプロパティ単位で重ねる**（丸ごと後勝ちにしない）。場面が短いと入場と退場は**時間が重なり**、
+ * 種別が違う（`fade` と `slide` など）と同じ時刻に別のプロパティが来る。
+ * 丸ごと置き換えると片方のプロパティが消え、たとえば `opacity` が 0 のままになって**その場面が一度も
+ * 映らない**。正典（`11 §7.6.3.1`）の「すでにあれば渡したプロパティだけ差し替え」と同じにする。
+ */
+function sortedKeyframes(keyframes: readonly Keyframe[]): Keyframe[] {
+  const byTime = new Map<number, Keyframe>();
+  for (const k of keyframes) byTime.set(k.timeSec, { ...byTime.get(k.timeSec), ...k });
+  return [...byTime.values()].sort((a, b) => a.timeSec - b.timeSec);
+}
+
 /**
  * 実効の切り替え（`resolveTransition` の結果）をキーフレームへ分解する（ADR-0032 決定19）。純粋関数。
  *
@@ -540,6 +563,9 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
   const clips: TimelineClip[] = [];
   const groups: Group[] = [];
   const animations: ClipAnimation[] = [];
+  // 動きは**対象ごとに溜めてから1本にする**（#717）＝読む側（描画・キーフレーム編集・バラす）は
+  // `targetId` で `find` して1本しか見ないので、2本あると片方が黙って無視される（V31）。
+  const pending = new Map<string, Keyframe[]>();
   const notes: BakeNote[] = [];
 
   const newClipId = (): string => createClipId(clips.map((c) => c.id));
@@ -724,7 +750,10 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
         if (anim.sceneId !== scene.sceneId) continue;
         const targetId = elementClipId.get(anim.targetId) ?? oldToNewGroupId.get(anim.targetId);
         if (targetId == null) continue; // 参照切れは持ち込まない（V26 と同じ扱い）
-        animations.push({ id: newAnimId(), targetId, keyframes: anim.keyframes });
+        // **こちらも同じ入れ物へ溜める**（#717 レビュー）＝元データに同じ対象が2件あっても、
+        // 焼き上がりは必ず「1対象に1本」（V31）になる。切り替えと当たることは無いはずだが、
+        // 直接 push すると「焼き出しは V31 を満たす」が元データ任せになる。
+        addKeyframes(pending, targetId, anim.keyframes);
       }
       sceneTargetId.push(sceneGroupId);
     }
@@ -742,6 +771,10 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
   });
 
   // 切り替え（決定19）。実効の切り替え＝`resolveTransition` の結果を、入る側／出ていく側のキーフレームへ落とす。
+  // ⚠️ **場面が短いと入場と退場は時間が重なる**（クランプは片方ずつの上限しか見ない＝`sceneTransitions`）。
+  // そのとき1本にまとめると**その場面の切り替えだけ短くなり**、相手側の場面は元の長さのままなので
+  // 動きがずれる。まとめる前（2本）はそもそも片方が丸ごと無視されていたので改善ではあるが、
+  // **重なり自体は残っている**＝#727 で扱う。
   for (let i = 1; i < scenes.length; i += 1) {
     const step = steps[i - 1];
     if (step.durationSec <= 0) continue;
@@ -757,8 +790,15 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
       // 場面ごとの列は連続した並びなので、片方が丸ごともう片方より手前になる（互い違いに挟まらない）。
       sceneBlock[i].base >= sceneBlock[i - 1].base + sceneBlock[i - 1].count,
     );
-    if (kf.incoming.length > 0) animations.push({ id: newAnimId(), targetId: incomingTarget, keyframes: kf.incoming });
-    if (kf.outgoing.length > 0) animations.push({ id: newAnimId(), targetId: outgoingTarget, keyframes: kf.outgoing });
+    // **同じ対象には1本にまとめる**（#717）。中間の場面は「入る側」と「出ていく側」の両方になるが、
+    // 読む側（描画・キーフレーム編集・バラす）は `targetId` で `find` して**1本しか見ない**ので、
+    // 2本に分けると退場が丸ごと無視される（＝切り替えがハードカットになる）。
+    if (kf.incoming.length > 0) addKeyframes(pending, incomingTarget, kf.incoming);
+    if (kf.outgoing.length > 0) addKeyframes(pending, outgoingTarget, kf.outgoing);
+  }
+  // まとめた結果を**時刻の昇順**で1本ずつ出す（`11 §7.4` の `Keyframe` は昇順）。
+  for (const [targetId, keyframes] of pending) {
+    animations.push({ id: newAnimId(), targetId, keyframes: sortedKeyframes(keyframes) });
   }
 
   // BGM：鳴っている区間ごとに1クリップ（実効BGM＝場面 ?? プロジェクトの解決は場面形式と共有）。

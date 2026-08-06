@@ -268,13 +268,75 @@ describe('bakeTimelineProject: 切り替えはキーフレームで表す（ADR-
     const visualTracks = doc.tracks.filter((t) => t.kind === TRACK_KIND.visual).map((t) => t.id);
     expect(visualTracks).toHaveLength(2); // 切り替えが続いても列は増えない
     expect(doc.clips[2].trackId).toBe(doc.clips[0].trackId);
-    // 2つ目→3つ目の切り替えは、手前にある2つ目を 1→0 で薄くする（開始は自身の先頭から 4 秒）。
-    const outAnim = doc.animations!.find((a) => a.targetId === doc.clips[1].id && a.keyframes[0].opacity === 1)!;
-    expect(outAnim.keyframes).toEqual([
-      { timeSec: 4, opacity: 1 },
+    // 2つ目は「入る側」と「出ていく側」の両方になる＝**1本にまとめる**（#717）。
+    // 読む側（描画・キーフレーム編集）は `targetId` で1本しか見ないので、分けると退場が無視される。
+    const mid = doc.animations!.filter((a) => a.targetId === doc.clips[1].id);
+    expect(mid).toHaveLength(1);
+    expect(mid[0].keyframes).toEqual([
+      { timeSec: 0, opacity: 0 }, // 入場（1つ目→2つ目）
+      { timeSec: 1, opacity: 1 },
+      { timeSec: 4, opacity: 1 }, // 退場（2つ目→3つ目・自身の先頭から4秒）
       { timeSec: 5, opacity: 0 },
     ]);
     expectSound(doc);
+  });
+
+  it('同じ対象への切り替えは1本にまとまる（読む側は1本しか見ない・#717）', () => {
+    // 3場面すべてに切り替えを付けると、中間の場面は入場と退場の両方を持つ。
+    const fade = { in: TRANSITION_TYPE.fade, durationSec: 1 } as const;
+    const { doc } = bakeTimelineProject(project({
+      scenes: [
+        scene('scene_001', { durationSec: 5 }),
+        scene('scene_002', { durationSec: 5, transition: fade }),
+        scene('scene_003', { durationSec: 5, transition: fade }),
+      ],
+    }), opts());
+    // **どの対象にも動きは高々1本**（2本あると片方が黙って無視される）。
+    const counts = new Map<string, number>();
+    for (const a of doc.animations ?? []) counts.set(a.targetId, (counts.get(a.targetId) ?? 0) + 1);
+    expect([...counts.values()].every((n) => n === 1)).toBe(true);
+    // 時刻は昇順（`11 §7.4`）。**溜めた順ではなく並べ直した結果**であることを、
+    // 退場（遅い時刻）が先に溜まる場面で見る＝下の「奥の列」ケースがそれに当たる。
+    for (const a of doc.animations ?? []) {
+      const times = a.keyframes.map((k) => k.timeSec);
+      expect(times).toEqual([...times].sort((x, y) => x - y));
+    }
+  });
+
+  it('溜まる順が時刻の順とは限らない（並べ直しは効いている・#717 レビュー）', () => {
+    // 短い場面が続くと、退場の開始が入場の終わりより**前**に来る＝溜まる順は昇順にならない。
+    // 並べ直しを外すと、キーフレームの時刻が行ったり来たりする文書が焼き上がる（`11 §7.4` 違反）。
+    const { doc } = bakeTimelineProject(project({
+      scenes: [
+        scene('scene_001', { durationSec: 0.5 }),
+        scene('scene_002', { durationSec: 0.5, transition: { in: TRANSITION_TYPE.fade, durationSec: 0.5 } }),
+        scene('scene_003', { durationSec: 0.5, transition: { in: TRANSITION_TYPE.slide, direction: TRANSITION_DIRECTION.left, durationSec: 0.5 } }),
+      ],
+    }), opts());
+    for (const a of doc.animations ?? []) {
+      const times = a.keyframes.map((k) => k.timeSec);
+      expect(times).toEqual([...times].sort((x, y) => x - y));
+    }
+  });
+
+  it('入場と退場が同じ時刻で当たっても、両方の効果が残る（#717 レビュー）', () => {
+    // 場面の尺が「入りの切り替え＋出の切り替え」ちょうどで**種別が違う**とき、同じ時刻に2つ来る。
+    // 丸ごと後勝ちにすると片方のプロパティ（ここでは `opacity`）が消え、**その場面が一度も映らない**。
+    const { doc } = bakeTimelineProject(project({
+      scenes: [
+        scene('scene_001', { durationSec: 5 }),
+        scene('scene_002', { durationSec: 1, transition: { in: TRANSITION_TYPE.fade, durationSec: 0.5 } }),
+        scene('scene_003', { durationSec: 5, transition: { in: TRANSITION_TYPE.slide, direction: TRANSITION_DIRECTION.left, durationSec: 0.5 } }),
+      ],
+    }), opts());
+    const mid = (doc.animations ?? []).filter((a) => a.targetId === doc.clips[1].id);
+    expect(mid).toHaveLength(1);
+    const times = mid[0].keyframes.map((k) => k.timeSec);
+    expect(new Set(times).size).toBe(times.length); // 同じ時刻に2つ置かない
+    expect(times).toEqual([...times].sort((x, y) => x - y)); // 昇順（11 §7.4）
+    // 入場（不透明度）が生き残っている＝この場面はちゃんと映る。
+    const opacities = mid[0].keyframes.filter((k) => k.opacity != null).map((k) => k.opacity);
+    expect(opacities).toContain(1);
   });
 
   it('スライド＝両方が一緒に動く（FFmpeg の slideleft 等と同じ絵）', () => {
@@ -386,6 +448,23 @@ describe('bakeTimelineProject: FREE の場面＝要素ごとのクリップ＋1�
     expect(doc.animations![0].targetId).toBe(doc.clips[2].id); // free_002 → text クリップ
     expect(doc.animations![0].keyframes).toEqual([{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }]);
     expectSound(doc);
+  });
+
+  it('元データに同じ対象の動きが2件あっても、焼き上がりは1本（#717 レビュー）', () => {
+    // 元（場面形式）の一意性は誰も担保していないので、焼き出し側で必ず1本にする＝
+    // 焼いた文書が V31 を満たすことが、元データ任せにならない。
+    const p = freeProject({
+      timelineOverlay: {
+        animations: [
+          { id: 'anim_001', sceneId: 'scene_001', targetId: 'free_002', keyframes: [{ timeSec: 0, opacity: 0 }] },
+          { id: 'anim_002', sceneId: 'scene_001', targetId: 'free_002', keyframes: [{ timeSec: 1, opacity: 1 }] },
+        ],
+      },
+    });
+    const { doc } = bakeTimelineProject(p, opts());
+    expect(doc.animations).toHaveLength(1);
+    expect(doc.animations![0].keyframes).toEqual([{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }]);
+    expect(validateTimelineDoc(doc).map((w) => w.code)).not.toContain('TIMELINE_ANIMATION_DUPLICATE');
   });
 
   // #266（プリセット→自由キーフレームへの変換）＝**変換は要らない**。場面形式のプリセットは最初から
