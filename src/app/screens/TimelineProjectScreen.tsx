@@ -288,7 +288,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   // **文字を打っている間は1つの取り消しにまとめる**（#708）。1文字ごとに積むと、上限まで文字入力で
   // 埋まり、それ以前の編集（バラすなど）が取り消せなくなる。場面形式と同じ仕組み（ADR-0026②）。
+  // 文字欄（`textGroup`）と、**面をドラッグする色選び**（`beginHistoryGroup`/`endHistoryGroup`）。
+  // 色の面は `pointermove` ごとに値を返すので、区切りが無いと**ひと撫でで数十〜百件**の履歴が積まれ、
+  // この形式は**文書まるごとのスナップショット**なので上限（50）を一撫でで食い潰す（#720）。
   const { textGroup } = useTimelineHistoryGroup();
+  const beginHistoryGroup = useTimelineStore((s) => s.beginHistoryGroup);
+  const endHistoryGroup = useTimelineStore((s) => s.endHistoryGroup);
 
 
   // 編集したら少し待って自動保存する（場面形式と同じ「閉じても消えない」＝ADR-0026②）。
@@ -1118,6 +1123,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           value={selected.color ?? DEFAULT_TEXT_COLOR}
                           ariaLabel="文字の色"
                           onChange={(v) => setSelectedVisualContent({ color: v })}
+                          onDragStart={beginHistoryGroup}
+                          onDragEnd={endHistoryGroup}
+                          {...editGuard()}
                         />
                       </label>
                     </div>
@@ -1154,6 +1162,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       <span>フォント</span>
                       <FontPicker
                         value={selected.fontId ?? null}
+                        {...editGuard()}
                         onChange={(id) => setSelectedVisualContent({ fontId: id })}
                       />
                     </label>
@@ -1180,6 +1189,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         value={selected.fillColor ?? DEFAULT_SHAPE_COLOR}
                         ariaLabel="図形の色"
                         onChange={(v) => setSelectedVisualContent({ fillColor: v })}
+                        onDragStart={beginHistoryGroup}
+                        onDragEnd={endHistoryGroup}
+                        {...editGuard()}
                       />
                     </label>
                   </div>

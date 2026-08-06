@@ -13,11 +13,20 @@ export function FontPicker({
   value,
   onChange,
   allowInherit,
+  disabled,
+  title,
 }: {
   value: FontId | null | undefined;
   /** null は「継承（動画全体に合わせる）」。allowInherit=false のときは null を返さない。 */
   onChange: (id: FontId | null) => void;
   allowInherit?: boolean;
+  /**
+   * 押せないとき（書き出し中・固定した列など・#720）。**受け口が無いと、渡された `disabled` は
+   * 黙って捨てられる**＝触れてしまい、あとから断られる。
+   */
+  disabled?: boolean;
+  /** 押せない理由（指したときに出す）。 */
+  title?: string;
 }) {
   const [open, setOpen] = useState(false);
   const known = value && FONT_CATALOG.some((f) => f.id === value) ? (value as FontId) : null;
@@ -25,6 +34,12 @@ export function FontPicker({
   const isInherit = allowInherit ? known === null : false;
   const currentId: FontId = known ?? DEFAULT_FONT_ID;
   const current = FONT_CATALOG.find((f) => f.id === currentId) ?? FONT_CATALOG[0];
+
+  // **開いている最中に押せなくなったら閉じる**（#730 レビュー・`ColorPicker` と同じ理由＝同概念同挙動）。
+  // `disabled` は見本のボタンにしか効かないので、開いたままだと一覧は選べてしまい、選んでから断られる。
+  // 閉じる仕掛け（覆いの `onClick`）はクリック待ちなので、**キーボードで開いて別のボタンを押した**ときは働かない。
+  // effect ではなく**レンダー中の調整**にする理由は `ColorPicker` と同じ。
+  if (disabled && open) setOpen(false);
 
   // 開いている間は Esc で閉じる（キーボードのみのユーザーがフォーカスを外さず閉じられるように）。
   useEffect(() => {
@@ -53,6 +68,8 @@ export function FontPicker({
       <button
         type="button"
         className="select"
+        disabled={disabled}
+        title={title}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="true"
         aria-expanded={open}

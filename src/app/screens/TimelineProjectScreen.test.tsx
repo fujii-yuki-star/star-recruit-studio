@@ -2273,3 +2273,107 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(useTimelineStore.getState().doc!.clips[0].trackId).toBe("track_001");
   });
 });
+
+// 中身を直す欄の関門と履歴（#720）。共有部品は props を受け取れなければ**黙って捨てる**ので、
+// 「渡している」ことではなく「効いている」ことを画面ごしに固定する。
+describe("TimelineProjectScreen: 中身を直す欄（#720）", () => {
+  const withText = () => {
+    open();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+  const withShape = () => {
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 400, h: 300, fillColor: "#ff0000" }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("書き出しの最中は色を触れない（押してから断らない）", () => {
+    withText();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "文字の色" })).toBeDisabled();
+    // 理由も一緒に届いていること（押せないのに理由が無い＝なぜ触れないか分からない）。
+    expect(screen.getByRole("button", { name: "文字の色" })).toHaveAttribute("title", "書き出しが終わってから編集できます");
+    expect(screen.getByText("フォント").parentElement?.querySelector("button")).toBeDisabled();
+  });
+
+  it("枠への収め方も、書き出しの最中は触れない", () => {
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50 }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const fit = [...document.querySelectorAll("select")].find((el) => el.querySelector('option[value="cover"]'));
+    expect(fit).toBeDisabled();
+  });
+
+  it("固定した列の部品は色を触れない（動かせないのに中身は変えられる、を作らない）", () => {
+    open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.audio }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "文字の色" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "文字の色" })).toHaveAttribute("title", "この列は固定されています。変えるには固定を外してください");
+  });
+
+  // 図形の色は**別の JSX 箇所**に同じ3行を書いている（共有関数の中身ではない）ので、
+  // 文字の色のテストでは「図形側だけ落ちた」退行を拾えない＝同じ観点をこちらにも置く。
+  it("図形の色も、書き出しの最中は触れない", () => {
+    withShape();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "図形の色" })).toBeDisabled();
+  });
+
+  it("図形の色も、ひと撫での取り消しは1回ぶん", () => {
+    withShape();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    fireEvent.click(screen.getByRole("button", { name: "図形の色" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerDown(sv, { pointerId: 1, button: 0, buttons: 1, clientX: 10, clientY: 90 });
+    for (const x of [20, 30, 40, 50, 60]) fireEvent.pointerMove(sv, { pointerId: 1, buttons: 1, clientX: x, clientY: 90 });
+    fireEvent.pointerUp(sv, { pointerId: 1, clientX: 60, clientY: 90 });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+  });
+
+  it("開いている最中に書き出しが始まったら、色の面ごと閉じる（#730 レビュー）", () => {
+    withText();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // キーボードで開く（`Enter`＝`detail:0` の click）。**外側の pointerdown が起きない**ので、
+    // 外側クリックで閉じる仕掛けは働かない。
+    fireEvent.click(screen.getByRole("button", { name: "文字の色" }));
+    expect(screen.getByTestId("cp-sv")).toBeInTheDocument();
+    // 同じくキーボードで「動画を書き出す」を押した、に相当する状態変化。
+    act(() => {
+      useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false } });
+    });
+    // 開いたままだと、面・色相バー・パレット・色コード欄は触れてしまい（`disabled` は見本のボタンにしか
+    // 効かない）、撫でるとピッカーの見た目だけ追従して部品は変わらず、あとから断り文が出る。
+    expect(screen.queryByTestId("cp-sv")).not.toBeInTheDocument();
+  });
+
+  it("フォントの一覧も、開いている最中に書き出しが始まったら閉じる（同概念同挙動）", () => {
+    withText();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const trigger = screen.getByText("フォント").parentElement?.querySelector("button") as HTMLElement;
+    fireEvent.click(trigger);
+    expect(screen.getByText("怪盗予告ゴシック")).toBeInTheDocument(); // 一覧が開いている
+    act(() => {
+      useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false } });
+    });
+    expect(screen.queryByText("怪盗予告ゴシック")).not.toBeInTheDocument();
+  });
+
+  it("色の面をひと撫でしても取り消しは1回ぶん（履歴を流し切らない）", () => {
+    withText();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    fireEvent.click(screen.getByRole("button", { name: "文字の色" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerDown(sv, { pointerId: 1, button: 0, buttons: 1, clientX: 10, clientY: 90 });
+    // 面のドラッグは `pointermove` ごとに値が返る。区切りが無いと1回ごとに履歴が積まれる。
+    for (const x of [20, 30, 40, 50, 60]) fireEvent.pointerMove(sv, { pointerId: 1, buttons: 1, clientX: x, clientY: 90 });
+    fireEvent.pointerUp(sv, { pointerId: 1, clientX: 60, clientY: 90 });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+    expect((useTimelineStore.getState().doc?.clips[0].color ?? "").toLowerCase()).not.toBe("");
+  });
+});
