@@ -24,10 +24,9 @@ import { isNarrationGenerating } from "../../domain/voice/narrationProgress";
 import { lineAudioKey } from "../../domain/project/narrationLines";
 import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { readAssetDataUrl } from "../../infrastructure/assetFs";
+import { createExportSrcResolver } from "../store/assetExportSrc";
 import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
-import { ASSET_TYPE } from "../../domain/enums";
-import { isTemplateAsset } from "../../domain/template/templateAsset";
 import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
 import { OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, useExportLockStore } from "../store/exportLock";
@@ -214,24 +213,14 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       await saveProject();
       // saveProject 後の projectId（新規時はここで採番済み）。動画クリップのパス解決に使う。
       const pid = useProjectStore.getState().meta.projectId;
-      // 表示用 assetSrcById（asset://）ではなく、書き出し時に各場面の画像をディスクから data URL 化する。
+      // 表示用 assetSrcById（asset://）ではなく、書き出し時に画像をディスクから data URL 化する。
       // buildExportScenes が場面ごとに解決→破棄するので、ここでは id→data URL のリゾルバを渡すだけ（#143・ADR-0004）。
-      const assetById = new Map(snapAssets.map((a) => [a.assetId, a] as const));
-      const resolveExportSrc = async (id: string): Promise<string | undefined> => {
-        // テンプレ既定素材（tmpl_asset_*）は既に data URL（templateAssetSrcById）＝そのまま返す（ADR-0021・書き出しも data URL でプレビューと一致）。
-        if (isTemplateAsset(id)) return snap.templateAssetSrcById[id];
-        const a = assetById.get(id);
-        if (!pid || !a) return undefined;
-        // 動画本体（大容量）は clipRelPath 経路で合成（ADR-0006）＝インライン不要。ただし動画スロット本体アニメの
-        // 窓フレーム（#442）はプレビュー同様スロットを代表フレーム（サムネ）で焼くため、thumbnailPath を data URL で返す
-        //（通常の下/上分割ではスロットは穴として除外されるため描かれない＝既存経路に影響なし）。
-        if (a.assetType === ASSET_TYPE.video) {
-          return a.thumbnailPath ? ((await readAssetDataUrl(pid, a.thumbnailPath)) ?? undefined) : undefined;
-        }
-        // 画像のみ本体を data URL 化。
-        if (!a.filePath) return undefined;
-        return (await readAssetDataUrl(pid, a.filePath)) ?? undefined;
-      };
+      // **解き方はタイムライン形式と共有**（`createExportSrcResolver`・#716）＝形式によって焼ける絵が割れない。
+      const resolveExportSrc = createExportSrcResolver({
+        projectId: pid,
+        assets: snapAssets,
+        templateAssetSrcById: snap.templateAssetSrcById,
+      });
       // アニメ場面のフレームはステージング（逐次ディスク書き出し）に載せる＝巨大な base64 を1回の IPC に
       // まとめず、JSON.stringify の文字列上限超過（RangeError）を避ける（#書き出しRangeError）。前回の残りを掃除。
       await clearExportFramesStage();

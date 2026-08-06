@@ -20,7 +20,12 @@ export const TIMELINE_FRAMES_DIR = 'timeline_frames';
 export interface BuildTimelineFramesOptions {
   /** 見た目パターンの解決（未解決のクリップは描かれない＝画面が先に知らせる）。 */
   templateOf: (templateId: string) => Template | undefined;
-  /** 素材の表示用 src（プレビューと同じものを渡す＝同じ絵になる）。 */
+  /**
+   * 素材の絵。**書き出しで描ける形（data URL）に解いたものを渡す**（`11 §7.6.5`・#716）。
+   * ⚠️ プレビューが使う**表示用の URL（`asset://`）を渡してはいけない**＝ここは SVG を Blob → `<img>` →
+   * canvas で焼くので外部参照は**取りに行かずに黙って落ちる**（`rasterize.ts` の前提）。
+   * プレビューと同じ絵になる根拠は「同じ id 集合・同じ元ファイル」であって、同じ URL ではない。
+   */
   assetSrc: (assetId: string | null) => string | undefined;
   /** 素材の実寸（#634）。プレビューと同じものを渡す＝「枠いっぱいに映す」が書き出しでも同じ絵になる。 */
   assetSizeOf?: (assetId: string) => SourceSize | undefined;

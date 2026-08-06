@@ -194,17 +194,61 @@ describe('exportTimelineVideo', () => {
     expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_EXPORTING');
   });
 
-  it('描くのに使う素材は始めた時点のものを使う（途中で入れ替えても混ざらない）', async () => {
+  it('素材は**書き出しで描ける形**（data URL）へ解き直す（表示用のURLを渡さない）', async () => {
+    // ⚠️ 書き出しは SVG を Blob → <img> → canvas で焼くので、**表示用の `asset://` は取りに行かずに黙って落ちる**
+    //（canvas は汚れず `toDataURL` は成功する＝素材が抜けた動画が「成功」として出る・#716）。
     let seen: string | undefined;
+    const read = vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue('data:image/png;base64,AAAA');
     vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async (_d, o) => {
-      useTimelineStore.setState({ assetSrcById: { asset_001: 'asset://別の動画.png' } });
       seen = o.assetSrc('asset_001');
       return { framesDir: 'd', fps: 30, durationSec: 5 };
     });
-    await open(doc());
-    useTimelineStore.setState({ assetSrcById: { asset_001: 'asset://はじめの.png' } });
+    await open(doc({
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_001' }],
+    }));
+    // 表示用の URL が入っていても、そちらは渡さない。
+    useTimelineStore.setState({ assetSrcById: { asset_001: 'asset://表示用.png' } });
     await useTimelineStore.getState().exportTimelineVideo(deps);
-    expect(seen).toBe('asset://はじめの.png');
+    expect(seen).toBe('data:image/png;base64,AAAA');
+    expect(read).toHaveBeenCalledWith('proj_20260729_001', 'assets/asset_001.png');
+  });
+
+  it('素材のファイルを読めなかったら、描く前に断る（枠だけの動画を成功として出さない）', async () => {
+    vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue(null); // 読めない
+    await open(doc({
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_001' }],
+    }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(framesMod.buildTimelineFrames)).not.toHaveBeenCalled(); // 描き始めない
+    expect(useTimelineStore.getState().exportRun.phase).toBe('error');
+    expect(useTimelineStore.getState().exportRun.message).toContain('素材のファイルを読めませんでした');
+  });
+
+  it('使っていない素材は読まない（記憶に載せない）', async () => {
+    const read = vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue('data:image/png;base64,AAAA');
+    // 素材はあるが、どの部品も使っていない。
+    await open(doc({ assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }] }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('描くのに使う素材は始めた時点のものを使う（途中で入れ替えても混ざらない）', async () => {
+    let seen: string | undefined;
+    vi.spyOn(assetFsMod, 'readAssetDataUrl').mockResolvedValue('data:image/png;base64,AAAA');
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(async (_d, o) => {
+      // 走っている最中に文書を入れ替えても、渡すものは始めた時点のまま。
+      useTimelineStore.setState({ doc: null });
+      seen = o.assetSrc('asset_001');
+      return { framesDir: 'd', fps: 30, durationSec: 5 };
+    });
+    await open(doc({
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+      clips: [{ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, assetId: 'asset_001' }],
+    }));
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(seen).toBe('data:image/png;base64,AAAA');
   });
 
   it('同梱フォントをそろえてから描く（プレビューと違う字で焼かない）', async () => {
