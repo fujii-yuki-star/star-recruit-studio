@@ -325,3 +325,26 @@ describe('正典との照合（ドリフト検知）', () => {
     expect(danglingTimelineRefs(sample)).toEqual({ groupMembers: [], animationTargets: [] });
   });
 });
+
+describe('V26b：同じ対象に動きは1本まで（#717）', () => {
+  const anim = (id: string, targetId: string) => ({ id, targetId, keyframes: [{ timeSec: 0, opacity: 1 }] });
+
+  it('同じ対象に2本あると知らせる（片方が黙って無視されるため）', () => {
+    // 読む側（描画・キーフレーム編集・バラす）は `targetId` で `find` して1本しか見ない。
+    const w = validateTimelineDoc(doc({
+      clips: [clip({ id: 'clip_001' })],
+      animations: [anim('anim_001', 'clip_001'), anim('anim_002', 'clip_001')],
+    }));
+    expect(w.map((x) => x.code)).toContain('TIMELINE_ANIMATION_DUPLICATE');
+    // 知らせるのは2本目だけ（同じ話を何度も出さない）。
+    expect(w.filter((x) => x.code === 'TIMELINE_ANIMATION_DUPLICATE')).toHaveLength(1);
+  });
+
+  it('対象が違えば何も言わない', () => {
+    const w = validateTimelineDoc(doc({
+      clips: [clip({ id: 'clip_001' }), clip({ id: 'clip_002', startSec: 10 })],
+      animations: [anim('anim_001', 'clip_001'), anim('anim_002', 'clip_002')],
+    }));
+    expect(w.map((x) => x.code)).not.toContain('TIMELINE_ANIMATION_DUPLICATE');
+  });
+});
