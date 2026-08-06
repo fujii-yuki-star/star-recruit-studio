@@ -37,6 +37,29 @@ export function isImeComposing(e: KeyboardEvent): boolean {
 }
 
 /**
+ * **`Space` を押すと、それ自身が反応する要素**か（#721）。ボタン・セレクト・チェックの類。
+ *
+ * `Space` を「再生／停止」に使う画面では、これを見ないと**押した要素と再生の両方が動く**
+ * （「消す」ボタンにフォーカスしたまま `Space` を押すと、消えたうえに再生が始まる）。
+ * かといって一律で `preventDefault` すると、**画面じゅうのボタンがキーボードで押せなくなる**。
+ * ＝奪ってよいのは「`Space` に意味を持たない場所」だけ。
+ *
+ * 文字入力は `isTextEntryTarget` の担当（そちらが先に弾く）ので、ここでは見ない。
+ */
+const SPACE_ACTIVATED_INPUT_TYPES = new Set(["button", "submit", "reset", "checkbox", "radio", "file"]);
+const SPACE_ACTIVATED_ROLES = new Set(["button", "checkbox", "radio", "switch", "menuitem", "option", "tab"]);
+
+export function activatesOnSpace(target: EventTarget | null): boolean {
+  const t = target as HTMLElement | null;
+  if (!t || typeof t.tagName !== "string") return false;
+  if (t.tagName === "BUTTON" || t.tagName === "SELECT" || t.tagName === "SUMMARY") return true;
+  if (t.tagName === "INPUT") return SPACE_ACTIVATED_INPUT_TYPES.has(((t as HTMLInputElement).type || "text").toLowerCase());
+  // 素の要素に役割だけ付けたもの（`role="button"` ＋ `tabindex`）も、押せば反応する＝同じ扱い。
+  const role = t.getAttribute?.("role");
+  return role != null && SPACE_ACTIVATED_ROLES.has(role);
+}
+
+/**
  * このキー操作を**アプリが横取りしてはいけない**か（文字を打っている最中＝入力欄／日本語の変換中）。
  * 画面のキー操作はまずこれを通す。
  */
