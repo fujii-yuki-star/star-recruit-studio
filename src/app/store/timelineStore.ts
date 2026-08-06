@@ -918,6 +918,22 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     useExportLockStore.getState().acquire(EXPORT_OWNER);
     let unlisten: (() => void) | undefined;
     try {
+      // **表示用の URL（`asset://`）は書き出しでは読めない**（#716）＝ここで data URL へ解き直す。
+      // 解き方は場面形式と共有（`createExportSrcResolver`）＝形式によって焼ける絵が割れない。
+      // 使っている素材だけをまとめて持つ（全フレームで同じ絵を引くので都度読み直さない）。
+      // ⚠️ **保存先を聞く前**にやる（#726 レビュー）＝ほかの断る理由と同じ順番で返す。ディスクを読むので
+      // `timelineExportBlockers`（同期）には入れられないが、**聞いてから断る**のは避ける。
+      // ⚠️ 走行中に数え始めた**後**でやる＝ここで待つ間に押し直されて二重に走るのを防ぐ。
+      const exportSrcById = await resolveExportSrcMap(
+        timelineImageAssetIds(doc),
+        createExportSrcResolver({ projectId: doc.projectId, assets: doc.assets, templateAssetSrcById: deps.templateAssetSrcById }),
+      );
+      // 読めなかった素材があれば断る。そのまま焼くとその部品だけ灰色の枠になり、プレビューでは
+      // （開いた時点の表示先で）写真が出たままなので**見えていたものと違う動画**が成功として出る（ADR-0026④）。
+      if (timelineImageAssetIds(doc).some((id) => !exportSrcById[id] && !deps.templateAssetSrcById[id])) {
+        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.assetUnreadable] } });
+        return;
+      }
       // 保存先を聞くのも try の中（失敗しても `preparing` のまま固まらない＝画面が戻らなくなる）。
       const outputPath = await showSaveVideoDialog(doc.projectName || "movie");
       if (!outputPath) {
@@ -946,21 +962,6 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 同梱フォントを先にそろえる（読み込み済みの字体しか焼けない＝プレビューと違う字にしない）。
       await loadExportFonts();
       const templateById = new Map(deps.templates.map((t) => [t.templateId, t]));
-      // **表示用の URL（`asset://`）は書き出しでは読めない**（#716）＝ここで data URL へ解き直す。
-      // 解き方は場面形式と共有（`createExportSrcResolver`）＝形式によって焼ける絵が割れない。
-      // 使っている素材だけをまとめて持つ（全フレームで同じ絵を引くので都度読み直さない）。
-      const exportSrcById = await resolveExportSrcMap(
-        timelineImageAssetIds(doc),
-        createExportSrcResolver({ projectId: doc.projectId, assets: doc.assets, templateAssetSrcById: deps.templateAssetSrcById }),
-      );
-      // **読めなかった素材があれば、描く前に断る**（#716 レビュー）。そのまま焼くと、その部品だけ
-      // 灰色の枠になる＝プレビューでは（開いた時点の表示先で）写真が出たままなので、
-      // **見えていたものと違う動画**が成功として出る（ADR-0026④）。
-      const unreadable = timelineImageAssetIds(doc).filter((id) => !exportSrcById[id] && !deps.templateAssetSrcById[id]);
-      if (unreadable.length > 0) {
-        set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.assetUnreadable] } });
-        return;
-      }
       const frames = await buildTimelineFrames(doc, {
         templateOf: (id) => templateById.get(id),
         assetSrc: (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),

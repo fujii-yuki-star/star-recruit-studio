@@ -139,18 +139,21 @@ describe('exportTimelineVideo', () => {
 
   it('書き出し中は二重に始めない（保存先を選んでいる間も含む）', async () => {
     let release = (): void => undefined;
-    let started = (): void => undefined;
-    const drawing = new Promise<void>((resolve) => { started = resolve; });
-    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(() => {
-      started();
-      return new Promise((resolve) => { release = () => resolve({ framesDir: 'd', fps: 30, durationSec: 5 }); });
-    });
+    // **保存先ダイアログを開いたまま**にする＝「聞いている最中に押し直す」を実際に再現する
+    //（すぐ解決するモックだと、押し直しの時点で1本目がどこまで進んでいるかに結果が左右される）。
+    let answerDialog: (p: string) => void = () => {};
+    vi.mocked(dialogMod.showSaveVideoDialog).mockReturnValue(new Promise<string>((r) => { answerDialog = r; }));
+    vi.mocked(framesMod.buildTimelineFrames).mockImplementation(
+      () => new Promise((resolve) => { release = () => resolve({ framesDir: 'd', fps: 30, durationSec: 5 }); }),
+    );
     await open(doc());
     const first = useTimelineStore.getState().exportTimelineVideo(deps);
-    // 保存先ダイアログを開いている最中に押し直す＝ここで走行中に数えていないと2本走る。
+    await vi.waitFor(() => expect(vi.mocked(dialogMod.showSaveVideoDialog)).toHaveBeenCalledTimes(1));
+    // 保存先を聞いている最中に押し直す＝ここで走行中に数えていないと2本走る。
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(vi.mocked(dialogMod.showSaveVideoDialog)).toHaveBeenCalledTimes(1);
-    await drawing;
+    answerDialog('/out/movie.mp4');
+    await vi.waitFor(() => expect(vi.mocked(framesMod.buildTimelineFrames)).toHaveBeenCalled());
     release();
     await first;
     expect(vi.mocked(framesMod.buildTimelineFrames)).toHaveBeenCalledTimes(1);

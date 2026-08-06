@@ -267,6 +267,31 @@ describe("TimelineProjectScreen: 再生まわりのレビュー指摘（/canon-c
   });
 });
 
+describe("TimelineProjectScreen: 絵が出せない素材（#726 レビュー）", () => {
+  const withPhoto = (srcById: Record<string, string>) => {
+    useTimelineStore.setState({
+      doc: doc({
+        assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真", filePath: "assets/asset_001.png" }],
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, assetId: "asset_001" }],
+      }),
+      loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: srcById,
+    });
+  };
+
+  it("表示先を用意できなかった素材があることを知らせる（音と同じ形・黙って絵を欠かさない）", () => {
+    withPhoto({}); // 開いたときに表示先を作れなかった
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("絵が出せない素材を使っている部品が1個"))).toBe(true);
+  });
+
+  it("表示先がある素材では知らせない", () => {
+    withPhoto({ asset_001: "asset://a.png" });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryAllByRole("alert").some((el) => el.textContent?.includes("絵が出せない素材"))).toBe(false);
+  });
+});
+
 describe("TimelineProjectScreen: 音（#630 後半）", () => {
   it("音が見つからない部品があることを知らせる（黙って無音にしない）", () => {
     open({
