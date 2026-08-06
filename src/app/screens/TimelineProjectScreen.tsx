@@ -579,6 +579,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     }).length;
   }, [doc, audioSrcByKey]);
 
+  // **つかんで置く**（#684）の道具。⚠️ フックは**早期 return より前**で呼ぶ（下の「読み込み中」「開けない」で
+  // 抜ける回と抜けない回で呼ぶ数が変わると、React が状態を取り違える）。使うのは下の `resolveDrop` ほか。
+  // ドラッグの作法は共有（掴む場所ごとに書き分けない・ADR-0034 決定9）。
+  const beginDrag = usePointerDrag();
+  const stageRef = useRef<HTMLDivElement>(null);
+  const laneRefs = useRef(new Map<string, HTMLElement>());
+  const [drag, setDrag] = useState<DragPlace | null>(null);
+
   if (isLoading) {
     return (
       <div className="main-scroll">
@@ -639,11 +647,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 置けるかどうかは domain の `visualPlacementIssue` で見る＝**ゴーストの色と、離したときの結果が同じ判定**
    * （置けそうに見えたのに断られる、を作らない）。置けないまま離したら**元へ戻す**＝寄せない（決定10）。
    */
-  // ドラッグの作法は共有（掴む場所ごとに書き分けない・ADR-0034 決定9）。
-  const beginDrag = usePointerDrag();
-  const stageRef = useRef<HTMLDivElement>(null);
-  const laneRefs = useRef(new Map<string, HTMLElement>());
-  const [drag, setDrag] = useState<DragPlace | null>(null);
 
   /** 落とした点から「どこへ置くか」を決める。**列が先**（下の並びは仕上がり確認に重ならない）。 */
   const resolveDrop = (kind: VisualKind, assetId: string | undefined, x: number, y: number): DragPlace["drop"] => {

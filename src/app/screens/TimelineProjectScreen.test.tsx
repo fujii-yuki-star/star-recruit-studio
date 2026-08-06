@@ -2036,6 +2036,22 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(useTimelineStore.getState().playheadSec).toBe(5);
   });
 
+  it("読み込み中から開けた後も、つかんで置ける（フックの数が回ごとに変わらない）", () => {
+    // 早期 return（読み込み中）を通る回と通らない回でフックの数が変われば、React が状態を取り違える。
+    // 同じ画面を張ったまま状態を切り替えて、続けて操作できることを見る。
+    useTimelineStore.setState({ doc: null, loadError: null, isLoading: true });
+    const { container, rerender } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/動画を開いています/)).toBeInTheDocument();
+    withAsset(); // 開けた
+    rerender(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
+    grab(screen.getByRole("button", { name: "文字を置く" }));
+    moveTo(300, 180);
+    expect(container.querySelector(".drag-ghost")).not.toBeNull();
+    dropAt(300, 180);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+  });
+
   it("掴めるものは、手を出す前に分かる（欄の見出し・帯と同じ見た目）", () => {
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
