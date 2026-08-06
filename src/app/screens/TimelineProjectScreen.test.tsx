@@ -2257,6 +2257,34 @@ describe("TimelineProjectScreen: 中身を直す欄（#720）", () => {
     expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
   });
 
+  it("開いている最中に書き出しが始まったら、色の面ごと閉じる（#730 レビュー）", () => {
+    withText();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // キーボードで開く（`Enter`＝`detail:0` の click）。**外側の pointerdown が起きない**ので、
+    // 外側クリックで閉じる仕掛けは働かない。
+    fireEvent.click(screen.getByRole("button", { name: "文字の色" }));
+    expect(screen.getByTestId("cp-sv")).toBeInTheDocument();
+    // 同じくキーボードで「動画を書き出す」を押した、に相当する状態変化。
+    act(() => {
+      useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false } });
+    });
+    // 開いたままだと、面・色相バー・パレット・色コード欄は触れてしまい（`disabled` は見本のボタンにしか
+    // 効かない）、撫でるとピッカーの見た目だけ追従して部品は変わらず、あとから断り文が出る。
+    expect(screen.queryByTestId("cp-sv")).not.toBeInTheDocument();
+  });
+
+  it("フォントの一覧も、開いている最中に書き出しが始まったら閉じる（同概念同挙動）", () => {
+    withText();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const trigger = screen.getByText("フォント").parentElement?.querySelector("button") as HTMLElement;
+    fireEvent.click(trigger);
+    expect(screen.getByText("怪盗予告ゴシック")).toBeInTheDocument(); // 一覧が開いている
+    act(() => {
+      useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false } });
+    });
+    expect(screen.queryByText("怪盗予告ゴシック")).not.toBeInTheDocument();
+  });
+
   it("色の面をひと撫でしても取り消しは1回ぶん（履歴を流し切らない）", () => {
     withText();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);

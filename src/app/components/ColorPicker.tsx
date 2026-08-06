@@ -88,6 +88,15 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   }, [onDragStart, endDragBoundary]);
   // ポップオーバーが閉じた（Escape・外側クリック）／アンマウントしたときも取り残さない。
   useEffect(() => { if (!open) endDragBoundary(); }, [open, endDragBoundary]);
+  // **開いている最中に押せなくなったら閉じる**（#730 レビュー）。`disabled` は見本のボタンにしか効かない＝
+  // 開いたままだと面・色相バー・パレット・色コード欄は触れてしまい、撫でると**ここの見た目だけ追従して
+  // 中身は変わらず、あとから断り文が出る**（この部品が消したかった「押してから断る」そのもの）。
+  // 外側クリックで閉じる仕掛けは `pointerdown` を見るので、**キーボードで開いて別のボタンを押した**ときは
+  // 働かない（`Enter` は `pointerdown` を起こさない）＝到達する。
+  // ⚠️ effect ではなく**レンダー中の調整**（React が prop の変化への追従に認めている書き方）。effect だと
+  // 開いた姿を一度描いてから閉じる＝ちらつくうえ、その1フレームは触れてしまう。`open` を見ているので
+  // 繰り返さず、`disabled` が戻っても**勝手に開き直さない**（`open` は false のまま）。
+  if (disabled && open) setOpen(false);
   useEffect(() => () => endDragBoundary(), [endDragBoundary]);
 
   const openPicker = () => {

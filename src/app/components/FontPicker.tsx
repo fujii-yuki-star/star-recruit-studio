@@ -35,6 +35,12 @@ export function FontPicker({
   const currentId: FontId = known ?? DEFAULT_FONT_ID;
   const current = FONT_CATALOG.find((f) => f.id === currentId) ?? FONT_CATALOG[0];
 
+  // **開いている最中に押せなくなったら閉じる**（#730 レビュー・`ColorPicker` と同じ理由＝同概念同挙動）。
+  // `disabled` は見本のボタンにしか効かないので、開いたままだと一覧は選べてしまい、選んでから断られる。
+  // 閉じる仕掛け（覆いの `onClick`）はクリック待ちなので、**キーボードで開いて別のボタンを押した**ときは働かない。
+  // effect ではなく**レンダー中の調整**にする理由は `ColorPicker` と同じ。
+  if (disabled && open) setOpen(false);
+
   // 開いている間は Esc で閉じる（キーボードのみのユーザーがフォーカスを外さず閉じられるように）。
   useEffect(() => {
     if (!open) return;
