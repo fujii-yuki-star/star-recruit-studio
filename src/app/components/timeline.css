@@ -89,6 +89,7 @@
 
 /* クリップ */
 .timeline-clip {
+  --clip-menu-w: 14px;
   position: absolute;
   top: 4px;
   bottom: 4px;
@@ -111,6 +112,42 @@
 .timeline-clip--telop {
   background: var(--color-yellow);
   border-color: var(--color-yellow-strong);
+}
+/*
+ * 帯の操作を開く「⋮」（#701）。
+ *
+ * ⚠️ **選んだ帯の内側**に置く。帯の外（すぐ右）に置くと：
+ *   - 「同じものを足す」で作った帯は**必ず隣接する**（`duplicateClip` は前の終わりから置く）ので、
+ *     次の帯の左端を常に覆う＝別の帯が選ばれて**狙っていない帯が消える**
+ *   - 短い帯は丸ごと覆われて押せない
+ *   - いちばん最後の帯の「⋮」は**列の枠の外**に出る
+ *   - 見た目は空白なのに押すと帯が選ばれる＝「何もない所を押すと解除」（決定15）と逆になる
+ * 常時ではなく**選んだ帯だけ**に出すのも同じ理由（隣の当たり判定を常時は食わない）。
+ */
+.timeline-clip-menu {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: var(--clip-menu-w);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 11px;
+  line-height: 30px;
+  cursor: pointer;
+  /* 選んだ帯（`z-index: 3`）より上に置く＝選んだ帯の上に出すため。 */
+  z-index: 4;
+}
+.timeline-clip-menu:hover,
+.timeline-clip-menu:focus-visible {
+  opacity: 1;
+}
+.timeline-clip--shape {
+  /* 図形。⚠️ **既にある色から採る**（存在しない変数を書くと、フォールバックで別の種類と同じ色になり
+     「種類ごとに分ける」が達成されないのにテストは class 名しか見ないので緑のまま通る・#701 レビュー）。 */
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
 }
 .timeline-clip--audio {
   background: var(--color-accent-soft);
