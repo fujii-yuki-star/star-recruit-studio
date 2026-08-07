@@ -46,6 +46,15 @@ export const TRANSITION_MIN_TAIL_SEC = 1 / FPS;
  * ＝同じ概念を画面ごとに別の刻みにしない。ここを単一の参照元にして両画面が読む（§2-7）。
  */
 export const TIMELINE_ZOOM_LEVELS = [16, 24, 36, 54, 80, 120] as const;
+
+/**
+ * タイムラインの「列の名前」の欄の幅（px・#686）。**両方のタイムライン画面が同じ値を見る**
+ * （タイムライン編集と、場面形式の見わたす画面）。CSS へは画面が `--timeline-label-w` として流し込む。
+ *
+ * ⚠️ 全体表示の計算（`fitZoomIndex`）と錨点の位置合わせ（`zoomScrollLeft`）が**この値を引く**ので、
+ * CSS 側とずれると**見た目だけ黙って合わなくなる**（気づけない）。だから TS を単一の参照元にする。
+ */
+export const TIMELINE_LABEL_W_PX = 84;
 export const WIDTH = 1920;
 export const HEIGHT = 1080;
 // 縦型（9:16・ADR-0012）。SoT は videoSettings.aspectRatio で、寸法はここから導出する。

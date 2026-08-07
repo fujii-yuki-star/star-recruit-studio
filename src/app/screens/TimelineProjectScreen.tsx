@@ -40,7 +40,7 @@ import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, TIMELINE_LABEL_W_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { creditSpeakerAt } from "../../domain/timeline/credit";
@@ -129,11 +129,8 @@ const NUDGE_SEC = 0.5;
 
 /** 1秒あたりの表示幅（px）と、レーンの最小幅。読み取り専用タイムラインと同じ見え方に寄せる。 */
 const MIN_LANE_WIDTH_PX = 640;
-/**
- * 列の名前の欄の幅（px）。**ここが単一の参照元**（#686 レビュー）＝CSS へは下で流し込む。
- * 写すと、片方だけ変えたときに全体表示と錨点だけ黙ってずれる（気づけない）。
- */
-const LANE_LABEL_PX = 84;
+/** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
+const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
 
 /** 列の種別ごとの色分け（読み取り専用タイムラインの既存クラスを使い回す＝見え方を揃える）。 */
 /**

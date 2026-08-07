@@ -11,7 +11,7 @@ import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
-import { VOLUME_POINTS_MAX } from "../../domain/constants";
+import { TIMELINE_LABEL_W_PX, VOLUME_POINTS_MAX } from "../../domain/constants";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
@@ -2954,6 +2954,15 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const left = (screen.getByRole("button", { name: "文字の操作" }) as HTMLElement).style.left;
     expect(left).toContain("- var(--clip-menu-w)"); // 帯の終わりから幅ぶん内側へ
+  });
+
+  it("列の名前の欄の幅は**両方のタイムライン画面が同じ値**を流し込む（#742 レビュー）", () => {
+    // ⚠️ 片方だけ CSS の既定に頼ると、値を変えたときに**見た目だけ黙ってずれる**
+    //（全体表示と錨点の計算はこの値を引くので、計算と描画が食い違う）。
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const timeline = container.querySelector(".timeline") as HTMLElement;
+    expect(timeline.style.getPropertyValue("--timeline-label-w")).toBe(`${TIMELINE_LABEL_W_PX}px`);
   });
 
   it("`--clip-menu-w` は**「⋮」から見える所**で宣言する（帯で宣言すると届かない）", () => {
