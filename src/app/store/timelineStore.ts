@@ -29,7 +29,7 @@ import {
   firstFreeStart, moveClip,
   setVisualClipContent,
   moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
-  setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
+  setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
@@ -292,6 +292,12 @@ export interface TimelineState {
   setSelectedClipSourceStart: (sec: number) => void;
   /** 選んでいる音の音量（`null`＝動画全体に合わせる・#634）。 */
   setSelectedClipVolume: (volume: number | null) => void;
+  /**
+   * 選んでいる音の**音源を選び直す**（#695・#723）。素材が見つからないときの案内
+   * 「音を選び直してください」に対応する操作＝これが無いと行き止まり（ADR-0034 決定5）。
+   * 消して置き直すと速さ・音量・フェードが全部消えるので、差し替えの道を残す。
+   */
+  setSelectedClipAudioSource: (source: { bundledBgmId: BundledBgmId } | { assetId: string }) => void;
   /** 選んでいる部品の切り抜きの効かせ方（#634）。 */
   setSelectedClipCropMode: (mode: CropMode | null) => void;
   /** 選んでいる部品の素材の寄せ（#634）。 */
@@ -712,6 +718,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipSpeed: (speed) => applyEdit(set, get, (d, id) => setClipSpeed(d, id, speed)),
   setSelectedClipSourceStart: (sec) => applyEdit(set, get, (d, id) => setClipSourceStart(d, id, sec)),
   setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
+  setSelectedClipAudioSource: (source) => applyEdit(set, get, (d, id) => setClipAudioSource(d, id, source)),
   setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
   setSelectedVolumePoint: (timeSec, volume) =>
     applyEdit(set, get, (d, id) => setVolumePoint(d, id, timeSec, volume)),

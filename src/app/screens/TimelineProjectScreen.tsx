@@ -38,6 +38,7 @@ import { groupElementIds } from "../../domain/project/groupOps";
 import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
+import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
@@ -272,7 +273,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
-    addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipFade,
+    addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
     addAsset, addAssetByPath, importError, clearImportError, isImporting,
@@ -983,7 +984,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             className="btn btn-primary"
             onClick={isPlaying ? pause : play}
             disabled={totalSec <= 0}
-            title={totalSec <= 0 ? "まだ部品を置いていないので再生できません" : undefined}
+            title={totalSec <= 0 ? "まだ何も置かれていません。部品を置くと再生できます" : undefined}
           >
             {isPlaying ? "停止" : "再生"}
           </button>
@@ -1061,7 +1062,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             空のときは「次の一歩」を添える＝置き方が2通りあることを、置く前に知らせる（§2-5・ADR-0034 決定22）。 */}
         {doc.clips.length === 0 && (
           <p className="text-muted">
-            まだ何も置かれていません。左の欄からつかんで運ぶか、「置く」を押すと再生位置へ置けます。
+            まだ何も置かれていません。「素材・文字・図形を置く」の欄から運んでくるか、「文字を置く」を押すと再生位置へ置けます。
           </p>
         )}
         {doc.tracks.length === 0 ? (
@@ -1590,6 +1591,31 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {/* 音の部品は、速さ・使い始め・音量・フェードを変えられる（#634＝中位の編集）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.audio && (
               <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="audio" title="音" defaultOpen={true}>
+                {/* **鳴らす音を選び直せる**（#695・#723）。これが無いと「音を選び直してください」の案内に
+                    対応する操作が画面に無い＝行き止まり（ADR-0034 決定5）。消して置き直す道はあるが、
+                    それだと速さ・音量・フェード・音量の変化がすべて消える。 */}
+                <label className="field">
+                  <span>鳴らす音</span>
+                  <select
+                    className="select"
+                    value={selected.bundledBgmId ? `bgm:${selected.bundledBgmId}` : selected.assetId ? `asset:${selected.assetId}` : ""}
+                    {...editGuard()}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v.startsWith("bgm:")) setSelectedClipAudioSource({ bundledBgmId: v.slice(4) as BundledBgmId });
+                      else if (v.startsWith("asset:")) setSelectedClipAudioSource({ assetId: v.slice(6) });
+                    }}
+                  >
+                    {/* いまの状態が読めるように、選ばれていない状態も出す（空欄で固まって見えない）。 */}
+                    {!selected.bundledBgmId && !selected.assetId && <option value="">選ばれていません</option>}
+                    {BGM_CATALOG.map((b) => (
+                      <option key={b.id} value={`bgm:${b.id}`}>{b.title}</option>
+                    ))}
+                    {audioAssets.map((a) => (
+                      <option key={a.assetId} value={`asset:${a.assetId}`}>{a.displayName}</option>
+                    ))}
+                  </select>
+                </label>
                                   <NumberField
                     label="速さ（倍）"
                     step={0.1}
@@ -1811,7 +1837,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {selected.kind === TIMELINE_CLIP_KIND.subtitle && (
               <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="subtitleLink" title="連動する読み上げ" defaultOpen={true}>
                 {voiceClips.length === 0 ? (
-                  <p className="text-muted">連動できる読み上げの部品がまだありません。</p>
+                  <p className="text-muted">連動できる読み上げの部品がまだありません。「読み上げを置く」で置くと、ここで選べます。</p>
                 ) : (
                   <label className="field">
                     <span>連動先</span>
@@ -1877,7 +1903,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {assignableAssets(doc.assets, layer).length === 0 && (
                         <span className="field-hint">
                           {layer.slotType === SLOT_TYPE.video
-                            ? "ここは動画を入れる場所ですが、この形式ではまだ動画を使えません。別の見た目パターンを選んでください。"
+                            ? "ここは動画を入れる場所ですが、この形式ではまだ動画を使えません。この部品を「消す」で外し、「見た目パターンを置く」から動画を使わないものを置き直してください。"
                             : "入れられる写真がありません。「素材・文字・図形を置く」の欄で写真を取り込んでください。"}
                         </span>
                       )}
@@ -1991,9 +2017,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     { id: PANEL_ID.templates, title: '見た目パターンを置く', content: (
       <>
         {placeableTemplates.length === 0 ? (
-          <p className="text-muted">この向きの動画に置ける見た目パターンがありません。見た目パターンを読み込んでからお試しください。</p>
+          <p className="text-muted">この向きの動画に置ける見た目パターンがありません。左の「見た目パターン」の画面で、この向きのものを足してください。</p>
         ) : placeableTracks.length === 0 ? (
-          <p className="text-muted">置ける列がありません。「映像の列を足す」で列を作るか、列の固定を外してください。</p>
+          <p className="text-muted">置ける列がありません。「映像の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
         ) : (
           <>
             <p className="text-muted">
@@ -2029,7 +2055,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     { id: PANEL_ID.audio, title: '音を置く', content: (
       <>
         {voiceTracks.length === 0 ? (
-          <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定を外してください。</p>
+          <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
         ) : (
           <>
             <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに速さ・音量を変えられます。</p>
@@ -2062,7 +2088,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     { id: PANEL_ID.voice, title: '読み上げを置く', content: (
       <>
         {voiceTracks.length === 0 ? (
-          <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定を外してください。</p>
+          <p className="text-muted">置ける音の列がありません。「音の列を足す」で列を作るか、列の固定・非表示を外してください。</p>
         ) : (
           <>
             <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに文を書いて声を作ります。</p>
@@ -2216,7 +2242,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       )}
       {missingAudioCount > 0 && (
         <p className="notice notice-warn" role="alert">
-          音が見つからない部品が{missingAudioCount}個あります。その部品は鳴りません。読み上げを作り直すか、音を選び直してください。
+          音が見つからない部品が{missingAudioCount}個あります。その部品は鳴りません。その部品を選んで「音」の「鳴らす音」で選び直すか、読み上げなら「声を作る」でもう一度作ってください。
         </p>
       )}
       {warnings.length > 0 && (

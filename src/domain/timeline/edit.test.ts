@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
+  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
@@ -572,5 +572,56 @@ describe('見た目パターンのクリップ（差し込み口が生きてい�
       const r = addTemplateClip(doc({ clips: [] }), { template: tmpl, trackId: 'track_001', startSec: 0 });
       expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
     });
+  });
+});
+
+describe('setClipAudioSource（鳴らす音を選び直す・#695/#723）', () => {
+  const audioDoc = (over: Partial<TimelineClip> = {}) =>
+    doc({
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/asset_001.mp3' }],
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 5, bundledBgmId: 'summer-morning', volume: 0.5, ...over }],
+    });
+
+  it('同梱BGM から素材へ替えると、同梱BGM は落ちる（音の出どころは高々1つ＝V25）', () => {
+    const r = setClipAudioSource(audioDoc(), 'clip_001', { assetId: 'asset_001' });
+    expect(r.ok).toBe(true);
+    const c = (r as { ok: true; doc: TimelineProject }).doc.clips[0];
+    expect(c.assetId).toBe('asset_001');
+    expect('bundledBgmId' in c).toBe(false); // 残すと両方持つ部品ができる
+  });
+
+  it('素材から同梱BGM へ替えると、素材は落ちる', () => {
+    const r = setClipAudioSource(audioDoc({ bundledBgmId: undefined, assetId: 'asset_001' }), 'clip_001', { bundledBgmId: 'summer-morning' });
+    const c = (r as { ok: true; doc: TimelineProject }).doc.clips[0];
+    expect(c.bundledBgmId).toBe('summer-morning');
+    expect('assetId' in c).toBe(false);
+  });
+
+  it('速さ・音量・フェードは残る（消して置き直すのと違う点）', () => {
+    const r = setClipAudioSource(audioDoc({ speed: 1.5, fadeInSec: 1 }), 'clip_001', { assetId: 'asset_001' });
+    expect((r as { ok: true; doc: TimelineProject }).doc.clips[0]).toMatchObject({ volume: 0.5, speed: 1.5, fadeInSec: 1 });
+  });
+
+  it('同じ音を選び直したら文書はそのまま（取り消しが空振りしない）', () => {
+    const d = audioDoc();
+    const r = setClipAudioSource(d, 'clip_001', { bundledBgmId: 'summer-morning' });
+    expect((r as { ok: true; doc: TimelineProject }).doc).toBe(d);
+  });
+
+  it('この動画が持っていない素材は選べない', () => {
+    expect(setClipAudioSource(audioDoc(), 'clip_001', { assetId: 'asset_999' })).toEqual({ ok: false, reason: EDIT_BLOCKED.notFound });
+  });
+
+  it('固定した列では選び直せない（ほかの編集と同じ扱い）', () => {
+    const d = audioDoc();
+    d.tracks[1].locked = true;
+    expect(setClipAudioSource(d, 'clip_001', { assetId: 'asset_001' })).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+  });
+
+  it('音を持たない部品には置けない（読み上げ・絵の部品）', () => {
+    const d = audioDoc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.text, text: 'あ' };
+    expect(setClipAudioSource(d, 'clip_001', { assetId: 'asset_001' })).toEqual({ ok: false, reason: EDIT_BLOCKED.contentField });
   });
 });
