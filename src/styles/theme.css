@@ -32,6 +32,7 @@
   --color-danger: #d6685f;
   --color-danger-soft: #fbeae8;
   --color-success: #3fa46a;
+  --color-success-soft: #e6f5ec; /* 淡い緑の面。タイムラインの帯（図形）の色（#701） */
 
   /* 形状 */
   --radius-sm: 8px;

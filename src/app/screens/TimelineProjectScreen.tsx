@@ -26,7 +26,7 @@ import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
-import type { CropMode, TrackKind } from "../../domain/enums";
+import type { CropMode, TimelineClipKind } from "../../domain/enums";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
@@ -131,9 +131,23 @@ const PX_PER_SEC = 40;
 const MIN_LANE_WIDTH_PX = 640;
 
 /** 列の種別ごとの色分け（読み取り専用タイムラインの既存クラスを使い回す＝見え方を揃える）。 */
-function trackClipClass(kind: TrackKind): string {
-  return kind === TRACK_KIND.audio ? "timeline-clip--audio" : "timeline-clip--video";
-}
+/**
+ * 帯の色（#701）。**部品の種類ごと**に分ける＝列の種類（映像／音）の2色だけだと、
+ * 見た目パターン・写真・文字・図形・字幕が全部同じ色になり、並びを見ても何が置いてあるか読めない。
+ *
+ * ⚠️ **網羅で書く**（`satisfies` ＋ 添字）＝種類が増えたときに**コンパイルで気づく**。
+ * 既定へ落とすと、新しい種類が黙って別の何かと同じ色になる（`resolveTransition` の
+ * 「網羅 switch で書く」＝ADR-0032 決定19 と同じ流儀）。CSS の階級は既に用意されている。
+ */
+const CLIP_KIND_CLASS = {
+  [TIMELINE_CLIP_KIND.template]: "timeline-clip--video",
+  [TIMELINE_CLIP_KIND.slot]: "timeline-clip--video",
+  [TIMELINE_CLIP_KIND.text]: "timeline-clip--telop",
+  [TIMELINE_CLIP_KIND.subtitle]: "timeline-clip--telop",
+  [TIMELINE_CLIP_KIND.shape]: "timeline-clip--shape",
+  [TIMELINE_CLIP_KIND.audio]: "timeline-clip--bgm",
+  [TIMELINE_CLIP_KIND.voice]: "timeline-clip--audio",
+} as const satisfies Record<TimelineClipKind, string>;
 
 /** 目盛りの間隔（秒）。短い動画で目盛りが潰れないよう、尺に応じて粗くする。 */
 function tickStepSec(totalSec: number): number {
@@ -450,6 +464,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   }, [selectedKey]);
   // 右クリック（または「⋮」）で開く列の操作メニュー（ADR-0033）。
   const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
+  // 帯の右クリックメニュー（#701）。列の行と**同じ作法**（右クリック＋「⋮」の逃げ道）。
+  const [clipMenu, setClipMenu] = useState<{ clipId: string; x: number; y: number } | null>(null);
 
   // 欄の配置（ADR-0033 段階2）。**既定は「再生位置と『選んだ部品』が同時に見える」形**にする
   // ＝#512 の実機確認で露呈した「1点置くごとに上下スクロール」を、設定を変えないままでも起こさない。
@@ -982,6 +998,57 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     e.preventDefault();
     setTrackMenu({ trackId, x: e.clientX, y: e.clientY });
   };
+  /**
+   * 帯の操作（#701・ADR-0034 決定19「ドラッグ専用の操作を作らない」）。
+   *
+   * **右クリックで開いたときは、その帯を選ぶ**＝メニューの項目は「選んでいる部品」に効くので、
+   * 選ばずに開くと**別の部品が消える**。既に選んでいる中の1つなら選択を保つ（まとめて消せる）。
+   */
+  const openClipMenu = (e: ReactMouseEvent, clipId: string): void => {
+    e.preventDefault();
+    // ⚠️ いまはレーン自身に右クリックが無いので伝播先は無い（列のメニューは兄弟の行ラベルに付いている）。
+    // 将来レーンへ右クリックを足したときに食い合わないための保険として残す。
+    e.stopPropagation();
+    if (!selectedClipIds.includes(clipId)) selectClip(clipId);
+    setClipMenu({ clipId, x: e.clientX, y: e.clientY });
+  };
+  const menuClip = clipMenu ? doc?.clips.find((c) => c.id === clipMenu.clipId) : undefined;
+  const menuClipTemplate = menuClip?.kind === TIMELINE_CLIP_KIND.template
+    ? templates.find((t) => t.templateId === menuClip.templateId)
+    : undefined;
+  /** 1つの帯にだけ効く項目の関門（複製・バラす）。まとめて選んでいるときは押せなくして理由を出す。 */
+  const singleClipMenuGuard: { disabled?: boolean; disabledHint?: string } =
+    selectedClipIds.length > 1
+      ? { disabled: true, disabledHint: "1つだけ選ぶと使えます" }
+      : editGuard().disabled
+        ? { disabled: true, disabledHint: editGuard().title }
+        : {};
+  const clipMenuItems: ContextMenuItem[] = menuClip
+    ? [
+        // ⚠️ **1つのときだけ**（#701 レビュー）＝複製は store が「選択がちょうど1件」でないと**何もせず
+        // 理由も持たない**ので、押せる状態で出すと**押しても無反応**になる。理由の言い方は
+        // 「選んだ部品」の欄と同じ（`editGuard`）＝同じ状態を画面の場所で別の言い方にしない（ADR-0026②）。
+        {
+          label: "同じものを足す",
+          ...singleClipMenuGuard,
+          onSelect: duplicateSelectedClip,
+        },
+        ...(menuClipTemplate
+          ? [{
+              label: "中身をバラす",
+              ...singleClipMenuGuard,
+              // 戻せないので**押す前に断る**（ADR-0032 決定23）＝確認は共有の `DeleteConfirm`。
+              onSelect: () => setExploding({ clipId: menuClip.id, template: menuClipTemplate }),
+            }]
+          : []),
+        {
+          label: selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を消す` : "消す",
+          danger: true,
+          ...(removeBlocked ? { disabled: true, disabledHint: removeBlocked.title } : {}),
+          onSelect: requestRemoveSelected,
+        },
+      ]
+    : [];
   const menuTrack = trackMenu ? doc?.tracks.find((t) => t.id === trackMenu.trackId) : undefined;
   // 列の操作も編集＝**書き出し中は押す前に断る**（#703 レビュー）。項目ごとに書かず、組み立てで一括して配る。
   const trackMenuGuard = exporting ? { disabled: true, disabledHint: exportingHint } : {};
@@ -1193,14 +1260,46 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           <button
                             key={c.id}
                             type="button"
-                            className={`timeline-clip ${trackClipClass(track.kind)}${selectedClipIds.includes(c.id) ? " timeline-clip--selected" : ""}`}
+                            className={`timeline-clip ${CLIP_KIND_CLASS[c.kind]}${selectedClipIds.includes(c.id) ? " timeline-clip--selected" : ""}`}
                             style={{ left: `${pxPerSec * c.startSec}px`, width: `${pxPerSec * (clipEndSec(c) - c.startSec)}px` }}
                             // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
                             // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
                             title={clipRangeTitle(clipLabel(c), c.startSec, clipEndSec(c))}
                             onClick={(e) => selectClip(c.id, e.shiftKey)}
+                            // 右クリックのほか、キーボードの「メニューキー」「Shift+F10」でもここが呼ばれる
+                            // ＝ドラッグ専用の操作を作らない（ADR-0034 決定19）。
+                            onContextMenu={(e) => openClipMenu(e, c.id)}
                           >
                             {clipLabel(c)}
+                          </button>
+                        ))}
+                      {/* 帯の操作を開く「⋮」（#701）＝列の行と同じ逃げ道。
+                          ⚠️ **帯の中には入れない**＝`button` の入れ子は不正で、しかも帯の読み上げ名に
+                          「⋮」が混ざって「その帯を名前で掴む」ができなくなる。帯と同じ場所に**並べて**置く。 */}
+                      {doc.clips
+                        .filter((c) => c.trackId === track.id && selectedClipIds.includes(c.id))
+                        .map((c) => (
+                          <button
+                            key={`${c.id}-menu`}
+                            type="button"
+                            className="timeline-clip-menu"
+                            // 帯の**内側の右端**（外に置くと隣の帯の当たり判定を食う＝CSS の ⚠️）。
+                            style={{ left: `calc(${pxPerSec * clipEndSec(c)}px - var(--clip-menu-w))` }}
+                            aria-label={`${clipLabel(c)}の操作`}
+                            title="この部品の操作（右クリックでも開けます）"
+                            onClick={(e) => {
+                              // キーボード（Enter/Space）の click は座標を持たない＝そのまま渡すと
+                              // メニューが画面の左上に出る。押した要素の位置から開く。
+                              if (isKeyboardActivation(e)) {
+                                const r = e.currentTarget.getBoundingClientRect();
+                                if (!selectedClipIds.includes(c.id)) selectClip(c.id);
+                                setClipMenu({ clipId: c.id, x: r.left, y: r.bottom });
+                                return;
+                              }
+                              openClipMenu(e, c.id);
+                            }}
+                          >
+                            ⋮
                           </button>
                         ))}
                     </div>
@@ -2407,6 +2506,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
       {trackMenu && menuTrack && (
         <ContextMenu x={trackMenu.x} y={trackMenu.y} items={trackMenuItems} onClose={() => setTrackMenu(null)} />
+      )}
+      {clipMenu && menuClip && (
+        <ContextMenu x={clipMenu.x} y={clipMenu.y} items={clipMenuItems} onClose={() => setClipMenu(null)} />
       )}
     </div>
   );

@@ -2,6 +2,8 @@
 // タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。開けないときの案内と、並び・選択の見せ方を固定する。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
@@ -2893,5 +2895,120 @@ describe("TimelineProjectScreen: 実寸は素材1つにつき一度だけ測る�
     });
     // 増えたぶん（asset_002）＋失敗した asset_001 の測り直しで2つ増える。
     expect(made.map((m) => m.src)).toEqual(["blob:asset_001", "blob:asset_001", "blob:asset_002"]);
+  });
+});
+
+// 帯の作法（#701）＝右クリックのメニューと、種類ごとの色。列の行と**同じ作法**に揃える（ADR-0026②）。
+describe("TimelineProjectScreen: 帯の作法（#701）", () => {
+  const mixed = () =>
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "文字" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 3, durationSec: 2, x: 0, y: 0, w: 10, h: 10, shapeType: "rect" },
+        { id: "clip_003", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 2, voice: { text: "こえ", status: "none" } },
+      ],
+    });
+  const clipEl = (name: string) => screen.getByRole("button", { name }).className;
+
+  it("帯の色は**部品の種類ごと**（列の種類だけで決めない）", () => {
+    mixed();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 文字と図形は同じ列（映像）だが、種類が違うので色も違う＝並びを見て何が置いてあるか読める。
+    expect(clipEl("文字")).toContain("timeline-clip--telop");
+    expect(clipEl("図形")).toContain("timeline-clip--shape");
+    expect(clipEl("こえ")).toContain("timeline-clip--audio");
+  });
+
+  it("帯を右クリックすると操作のメニューが出る（列の行と同じ）", () => {
+    mixed();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "文字" }));
+    expect(screen.getByRole("menuitem", { name: "同じものを足す" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "消す" })).toBeInTheDocument();
+  });
+
+  it("「⋮」からも同じメニューが出る（右クリックが使えない人の逃げ道）", () => {
+    mixed();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字の操作" }));
+    expect(screen.getByRole("menuitem", { name: "同じものを足す" })).toBeInTheDocument();
+  });
+
+  it("「⋮」は**選んだ帯にだけ**出す（隣の帯の当たり判定を常時食わない）", () => {
+    mixed();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ 全部の帯に出すと、複製した帯（前の終わりから置かれる＝必ず隣接）の左端を覆い、
+    // **狙っていない帯が選ばれて消える**。最後の帯では列の枠の外にも出る。
+    expect(screen.getByRole("button", { name: "文字の操作" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "図形の操作" })).not.toBeInTheDocument();
+  });
+
+  it("「⋮」は帯の**内側**に置く（外に出すと隣を覆う・枠の外へ出る）", () => {
+    mixed();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const left = (screen.getByRole("button", { name: "文字の操作" }) as HTMLElement).style.left;
+    expect(left).toContain("- var(--clip-menu-w)"); // 帯の終わりから幅ぶん内側へ
+  });
+
+  it("`--clip-menu-w` は**「⋮」から見える所**で宣言する（帯で宣言すると届かない）", () => {
+    // ⚠️ カスタムプロパティは**子孫にしか継承しない**。「⋮」は帯の兄弟なので、帯（`.timeline-clip`）で
+    // 宣言すると `var()` が解決できず `left`/`width` の宣言ごと無効になり、**帯の左端に出る**
+    // （実機で確認＝computed left が 0px・幅が内容幅の 3.86px になっていた）。
+    // jsdom は CSS ファイルを読まないので、**宣言している側の階級**をここで固定する。
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8");
+    const laneBlock = css.slice(css.indexOf(".timeline-lane {"), css.indexOf("}", css.indexOf(".timeline-lane {")));
+    expect(laneBlock).toContain("--clip-menu-w");
+    // 帯そのもので宣言し直すと、また届かなくなる。
+    const clipStart = css.indexOf(["", ".timeline-clip {"].join(String.fromCharCode(10)));
+    const clipBlock = css.slice(clipStart, css.indexOf("}", clipStart));
+    expect(clipBlock).not.toContain("--clip-menu-w");
+  });
+
+  it("まとめて選んでいるときは「同じものを足す」を押せなくする（押しても無反応、を作らない）", () => {
+    mixed();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "文字" }));
+    // 複製は「選択がちょうど1件」でないと store が何もせず、理由も持たない＝黙って効かない。
+    const dup = screen.getByRole("menuitem", { name: "同じものを足す" });
+    expect(dup.hasAttribute("disabled") || dup.getAttribute("aria-disabled") === "true").toBe(true);
+    expect(dup.getAttribute("title")).toContain("1つだけ選ぶと");
+  });
+
+  it("右クリックした帯が選ばれる（別の部品に効かせない）", () => {
+    mixed();
+    useTimelineStore.setState({ selectedClipIds: ["clip_003"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "文字" }));
+    // 選ばずに開くと、メニューの項目が**別の部品**（読み上げ）に効いてしまう。
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+  });
+
+  it("まとめて選んでいる中の1つを右クリックしても、選択は保つ（まとめて消せる）", () => {
+    mixed();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "文字" }));
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
+    expect(screen.getByRole("menuitem", { name: "選んだ2個を消す" })).toBeInTheDocument();
+  });
+
+  it("固定した列の帯では、消す・複製を押せなくして理由を出す", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "文字" }],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "文字" }));
+    const del = screen.getByRole("menuitem", { name: "消す" });
+    expect(del.hasAttribute("disabled") || del.getAttribute("aria-disabled") === "true").toBe(true);
+    expect(del.getAttribute("title")).toContain("固定");
+    // 固定の理由は「選んだ部品」の欄と**同じ言い方**にする（同じ状態を場所で言い分けない）。
+    const dup = screen.getByRole("menuitem", { name: "同じものを足す" });
+    expect(dup.getAttribute("title")).toBe("この列は固定されています。変えるには固定を外してください");
   });
 });
