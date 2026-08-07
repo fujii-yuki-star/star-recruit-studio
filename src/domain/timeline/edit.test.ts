@@ -832,3 +832,34 @@ describe('moveClipIssue / trimClipIssue（掴んでいる間の判定・#686）'
     expect(trimClipIssue(d, 'clip_001', 'end', 2)).toBe(EDIT_BLOCKED.linkedSubtitleTime);
   });
 });
+
+// 掴んでいる間の色と、離したときの結果が割れないこと（#686 レビュー）。
+// ⚠️ 判定を**書き写して**いたときは `withBoundSubtitles`（連動する字幕の置き場）が抜けていて、
+// 読み上げの帯だけ「置ける色のまま断られる」状態だった。走らせて導く形なら構造的に割れない。
+describe("moveClipIssue／trimClipIssue は操作そのものから導く（#686 レビュー）", () => {
+  /** 読み上げ＋連動する字幕。字幕の隣を埋めて、字幕だけ置けない状況を作る。 */
+  const linked = (): TimelineProject => doc({
+    tracks: [
+      { id: "track_001", kind: TRACK_KIND.visual },
+      { id: "track_002", kind: TRACK_KIND.audio },
+    ],
+    clips: [
+      { id: "v1", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } },
+      { id: "s1", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: "v1" },
+      { id: "blk", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 3, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "邪魔" },
+    ],
+  });
+
+  it("連動する字幕の置き場が無いときは**掴んでいる間から**断る", () => {
+    const doc = linked();
+    // 読み上げを 4秒へ動かすと、連動する字幕が `blk`（3〜8秒）と重なる＝`moveClip` は断る。
+    expect(moveClip(doc, "v1", { startSec: 4 }).ok).toBe(false);
+    expect(moveClipIssue(doc, "v1", { startSec: 4 })).not.toBeNull(); // 色も同じ判断
+  });
+
+  it("端を縮めるときも同じ（結果と色が割れない）", () => {
+    const doc = linked();
+    const r = trimClip(doc, "v1", "end", 4);
+    expect(trimClipIssue(doc, "v1", "end", 4) === null).toBe(r.ok);
+  });
+});

@@ -50,6 +50,12 @@ export const EDIT_BLOCKED = {
    * 動きの支点が変わって**絵がずれる**ので、先に動きを外してもらう。
    */
   explodeAnchor: 'TIMELINE_EDIT_EXPLODE_ANCHOR',
+  /**
+   * 選んだ部品が複数ある（#686）。掴んだ1つだけ動かすと**残りは置き去り**になり、
+   * 選択を黙って1つへ潰すと「まとめて消す」と意味が食い違う（同じ選択で操作ごとに別の意味・決定15）。
+   * まとめて動かせるようになるのは段階4（列またぎ・吸着と同時）なので、それまでは断る。
+   */
+  multiSelection: 'TIMELINE_EDIT_MULTI_SELECTION',
   /** 連動している字幕を置ける場所が無い（読み上げを動かせない理由・#633）。 */
   linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
   /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
@@ -156,28 +162,25 @@ function withClip(doc: TimelineProject, next: TimelineClip): TimelineProject {
 /**
  * **その場所へ動かせるか**（動かせないなら理由・`null`＝動かせる・#686）。
  *
- * ドラッグ中のゴーストの色と、離したときの結果が**同じ規則**を見るための単一の参照元
- * （`visualPlacementIssue` と同じ流儀）＝「置けそうに見えたのに離したら断られる」を作らない。
- * `moveClip` もこれを通すので、条件が2通りにならない。
+ * ⚠️ **`moveClip` を実際に走らせて結果だけ見る**（判定を書き写さない）。
+ * 最初は同じ条件を並べ直していたが、`moveClip` だけが通る `withBoundSubtitles`
+ * （連動する字幕の置き場が無ければ全体を断る）が**こちらに無く**、読み上げの帯では
+ * **ゴーストが「置ける」色のまま離した瞬間に断られた**（#742→#686 レビュー）。
+ * 「同じ規則を見る」と書いても、2つ書けばいつか割れる。**走らせれば割れようがない**。
+ * 捨てる文書を1つ作るが、作るのは配列の浅い複製だけ（指を動かすたびに走らせても軽い）。
  */
 export function moveClipIssue(
   doc: TimelineProject,
   clipId: string,
   to: { trackId?: string; startSec?: number },
 ): EditBlockedReason | null {
-  const clip = doc.clips.find((c) => c.id === clipId);
-  if (!clip) return EDIT_BLOCKED.notFound;
-  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return EDIT_BLOCKED.locked;
-  // 連動している字幕の**時間**は読み上げが決める（列の移動だけは許す）。
-  if (clip.voiceClipId != null && to.startSec != null && to.startSec !== clip.startSec) {
-    return EDIT_BLOCKED.linkedSubtitleTime;
-  }
-  return placementIssue(doc, clip, to.trackId ?? clip.trackId, Math.max(0, to.startSec ?? clip.startSec), clip.durationSec);
+  const r = moveClip(doc, clipId, to);
+  return r.ok ? null : r.reason;
 }
 
 /**
  * **その端まで縮められるか**（縮められないなら理由・`null`＝できる・#686）。
- * 長さのクランプは `applyClipEdge` に委ねるので、ここは**置ける場所か**だけを見る。
+ * `moveClipIssue` と同じ理由で **`trimClip` を走らせて結果だけ見る**（上の ⚠️ を参照）。
  */
 export function trimClipIssue(
   doc: TimelineProject,
@@ -185,12 +188,8 @@ export function trimClipIssue(
   edge: 'start' | 'end',
   sec: number,
 ): EditBlockedReason | null {
-  const clip = doc.clips.find((c) => c.id === clipId);
-  if (!clip) return EDIT_BLOCKED.notFound;
-  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return EDIT_BLOCKED.locked;
-  if (clip.voiceClipId != null) return EDIT_BLOCKED.linkedSubtitleTime;
-  const span = applyClipEdge(clip, edge === 'start' ? 'trim-start' : 'trim-end', sec, 0, TIMELINE_MIN_CLIP_SEC);
-  return placementIssue(doc, clip, clip.trackId, span.startSec, span.durationSec);
+  const r = trimClip(doc, clipId, edge, sec);
+  return r.ok ? null : r.reason;
 }
 
 /**
@@ -212,7 +211,6 @@ export function moveClip(
   }
   const trackId = to.trackId ?? clip.trackId;
   const startSec = Math.max(0, to.startSec ?? clip.startSec);
-  // 判定は `moveClipIssue` と**同じもの**（ゴーストの色と結果を割らない・#686）。
   // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない（呼び出し側は同一参照で判定する）。
   if (trackId === clip.trackId && startSec === clip.startSec) return ok(doc);
   const issue = placementIssue(doc, clip, trackId, startSec, clip.durationSec);

@@ -86,7 +86,11 @@
      「⋮」は帯の**兄弟**なので、帯で宣言すると届かず（カスタムプロパティは子孫にしか継承しない）
      `var()` が解決できずに `left`/`width` の宣言ごと無効になり、**帯の左端に出る**（実測で確認）。
      同じファイルの `--timeline-label-w` が `.timeline` で宣言されているのと同じ流儀。 */
+  /* ⚠️ **単一の参照元は TS 側**（`CLIP_MENU_W_PX`／`CLIP_HANDLE_W_PX`）＝タイムライン編集が流し込む。
+     取っ手を出す最小の帯の幅がこの2つから導かれるので、ここだけ変えると下限が黙って合わなくなる。
+     ここは流し込みが無いとき（場面形式の見わたす画面）の保険。 */
   --clip-menu-w: 14px;
+  --clip-handle-w: 7px;
   height: 40px;
   border-bottom: 1px solid var(--color-border);
 }
@@ -181,7 +185,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 7px;
+  width: var(--clip-handle-w);
   cursor: ew-resize;
   z-index: 2;
 }
@@ -194,6 +198,19 @@
 .timeline-clip--selected .timeline-clip-handle {
   background: var(--color-primary);
   opacity: 0.4;
+}
+/**
+ * 置けない所（#686）。⚠️ **共有の `drop-target--blocked`（theme.css）だけでは赤くならない**。
+ * どちらも1クラス＝同じ強さで、timeline.css の方が後に載るので `--selected` の青が後勝ちする。
+ * 掴んだ帯は**必ず選ばれている**（掴むと選ぶ）ので、赤は一度も出ていなかった
+ * ＝ゴーストの色で知らせる（決定10）が丸ごと効いていない（#742→#686 レビュー・実機で確認）。
+ * class 名しか見ないテストは緑のまま通るので、下に**重なり順を実際に解く**テストを置いた。
+ * 枠の色を上書きするだけでなく**背景でも示す**＝選択の枠と競らない層を1つ増やす。
+ */
+.timeline-clip.drop-target--blocked {
+  outline-color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
 }
 .timeline-clip--selected {
   outline: 2px solid var(--color-primary);

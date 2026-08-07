@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { claimEscape } from "./escapeOwners";
+import { usePointerDrag } from "./usePointerDrag";
+import type { ReactElement } from "react";
 import { useProjectStore } from "../store/projectStore";
 import type { ExportPhase } from "../store/projectStore";
 import { isUndoRedoEnabledFor, UNDO_REDO_SCREENS, useUndoRedoShortcuts } from "./useUndoRedoShortcuts";
@@ -172,5 +175,38 @@ describe("handlers で実体を差し替えられる（#547 P2-3）", () => {
     expect(storeRedo).not.toHaveBeenCalled();
 
     useProjectStore.setState({ undo: origUndo, redo: origRedo });
+  });
+});
+
+// 掴んでいる間は巻き戻さない（#686 レビュー）。
+// ⚠️ 合図は **`usePointerDrag` が掴んだ最中だけ**立てる（`Escape` の名乗りで代用すると、右クリック
+// メニューや色の選択欄を開いている間じゅう全画面で `Ctrl+Z` が無言で効かなくなる）。
+describe("掴んでいる間の取り消し", () => {
+  function Grabber(): ReactElement {
+    const begin = usePointerDrag();
+    return <div data-testid="grab" onPointerDown={(e) => begin(e, { onMove: () => {} })} />;
+  }
+
+  it("帯などを掴んでいる間は効かせない（足元で文書が動くと結果が変わる）", () => {
+    const undo = vi.fn();
+    render(<Grabber />);
+    renderHook(() => useUndoRedoShortcuts(true, { undo, redo: vi.fn() }));
+    const el = screen.getByTestId("grab");
+    fireEvent.pointerDown(el, { pointerId: 1, button: 0, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 50, clientY: 0 }); // 掴んだ
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(undo).not.toHaveBeenCalled();
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 50, clientY: 0 }); // 離した
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(undo).toHaveBeenCalledTimes(1); // 離せば効く（塞ぎっぱなしにしない）
+  });
+
+  it("メニューや選択欄が開いているだけでは塞がない（掴む話より広く効かせない）", () => {
+    const undo = vi.fn();
+    const release = claimEscape(); // `Escape` は受け持っているが掴んではいない
+    renderHook(() => useUndoRedoShortcuts(true, { undo, redo: vi.fn() }));
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(undo).toHaveBeenCalledTimes(1);
+    release();
   });
 });

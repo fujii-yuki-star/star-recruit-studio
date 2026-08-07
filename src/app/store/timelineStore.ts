@@ -234,6 +234,15 @@ export interface TimelineState {
   moveSelectedClip: (to: { trackId?: string; startSec?: number }) => void;
   /** 選んでいるクリップの端を動かす（トリム）。 */
   trimSelectedClip: (edge: "start" | "end", sec: number) => void;
+  /**
+   * **id で受ける**移動とトリム（#686 レビュー）。掴んで動かす経路は、掴んだ相手が `clipId` で決まる
+   * のに `moveSelectedClip` は選択に効くので、**掴んでいる間に選択が変わると別の帯が動く**
+   * （左ドラッグ中の右クリック・取り消しで対象が消える）。`explodeClip`／`removeClipsByIds` と同じ流儀。
+   */
+  moveClipById: (clipId: string, to: { trackId?: string; startSec?: number }) => void;
+  trimClipById: (clipId: string, edge: "start" | "end", sec: number) => void;
+  /** 断り文をそのまま立てる（掴む前に断るとき＝押してから断らない・#686）。 */
+  setEditBlocked: (reason: EditBlockedReason) => void;
   /** 選んでいるクリップを複製する（同じ列の直後）。 */
   duplicateSelectedClip: () => void;
   /** 選んでいるクリップを消す。 */
@@ -609,6 +618,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
   trimSelectedClip: (edge, sec) => applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec)),
+  moveClipById: (clipId, to) => applyEditTo(set, get, clipId, (doc, id) => moveClip(doc, id, to)),
+  trimClipById: (clipId, edge, sec) => applyEditTo(set, get, clipId, (doc, id) => trimClip(doc, id, edge, sec)),
+  setEditBlocked: (reason) => set({ editBlocked: reason }),
   duplicateSelectedClip: () => applyEdit(set, get, (doc, id) => duplicateClip(doc, id)),
 
   removeSelectedClips: () => get().removeClipsByIds(get().selectedClipIds),
@@ -1257,9 +1269,21 @@ function restore(set: SetState, get: GetState, doc: TimelineProject, history: Hi
  * （§2-5＝画面が「その場所には置けません」を出す）。複数選択中は対象が決まらないので何もしない。
  */
 function applyEdit(set: SetState, get: GetState, run: (doc: TimelineProject, clipId: string) => EditResult): void {
-  const { doc, selectedClipIds } = get();
-  if (!doc || selectedClipIds.length !== 1) return;
-  const r = run(doc, selectedClipIds[0]);
+  const { selectedClipIds } = get();
+  if (selectedClipIds.length !== 1) return;
+  applyEditTo(set, get, selectedClipIds[0], run);
+}
+
+/** **相手を id で指す**編集（掴んで動かす経路。選択に依らない＝上と同じ後始末を通す）。 */
+function applyEditTo(
+  set: SetState,
+  get: GetState,
+  clipId: string,
+  run: (doc: TimelineProject, clipId: string) => EditResult,
+): void {
+  const doc = get().doc;
+  if (!doc) return;
+  const r = run(doc, clipId);
   if (r.ok) commit(set, get, r.doc);
   else set({ editBlocked: r.reason });
 }
