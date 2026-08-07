@@ -26,7 +26,7 @@ import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
   VISUAL_CLIP_DURATION_SEC, addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip,
-  firstFreeStart, moveClip,
+  firstFreeStart, moveClip, placeableVisualTracks,
   setVisualClipContent,
   moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
   setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
@@ -44,7 +44,7 @@ import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 import { importVoiceFile } from "../../infrastructure/voiceFs";
-import { NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from "../../domain/enums";
 import type { NarrationStatus } from "../../domain/enums";
 import type { TimelineVoice } from "../../domain/timeline/types";
 import type { VoiceSettings } from "../../domain/project/types";
@@ -656,45 +656,33 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       }
       return;
     }
-    // 置き先は**空いている映像の列**を上から探す（固定した列・重なる場所は避ける）。
-    // 見つからないときは黙って何もしないのではなく、理由を出す（§2-5）。
-    const startSec = get().playheadSec;
-    let last: EditResult | null = null;
+    // 置き先は**いちばん手前の置ける列**（`11 §7.6.3`・#722）。**列をまたいでは探さない**＝
+    // 奥の列の再生位置が空いていてもそちらへは置かない。手前に全画面の部品があると**その裏に入って
+    // 見えない**からで、`06 §12.1` の「押して置いたときも必ず仕上がり確認に現れる」が守れなくなる
+    //（再生位置を移すだけでは足りない）。代わりに時刻は後ろへずれることがある＝利用者判断で
+    // 「見える」を優先した（#722・案A）。
     // **隠した列・固定した列は選ばない**（`11 §7.6.2.4`）＝置けても動画に出ない部品が黙って生まれる。
-    // 画面の「置ける列」（`placeableTracks`）と同じ規則（同じ判断を2通りに書かない）。
-    // **手前（配列の末尾）から**探す＝新しく置いたものが既にあるものの後ろに隠れない（表示も手前が上）。
-    const placeable = doc.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.locked && !t.hidden).reverse();
-    for (const track of placeable) {
-      const r = addVisualClip(doc, { ...input, trackId: track.id, startSec });
-      if (r.ok) {
-        const placed = r.doc.clips[r.doc.clips.length - 1];
-        // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
-        // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
-        commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
-        return;
-      }
-      last = r;
+    // 条件は `placeableVisualTracks` を見る。その中身は `trackPlacementIssue`（列そのものの事情の
+    // 単一の参照元）から導かれるので、1か所を断る `visualPlacementIssue` とも規則が割れない（#722）。
+    const placeable = placeableVisualTracks(doc);
+    // 置ける列が1本も無いときは、理由を出す（押しても何も起きない、を作らない・§2-5）。
+    if (placeable.length === 0) {
+      set({ editBlocked: EDIT_BLOCKED.notFound });
+      return;
     }
-    // **どの列も再生位置が塞がっているときは、いちばん手前の列の「次に空いている時刻」へ置く**（#684 レビュー）。
-    // ボタンは置き場所をアプリが決める経路なので、置かずに断ると「押しても置けない」が続く
-    // （勝手に寄せない＝ADR-0034 決定10 は**利用者が位置を指した**ドラッグの規準で、ここには当たらない）。
-    if (placeable.length > 0) {
-      const t = placeable[0];
-      // **間の空きを飛び越さない**（#684 レビュー）＝「いちばん後ろの部品の終わり」ではなく、
-      // まるごと収まる最初の空きを探す。規則は domain に置く（画面で数え直さない）。
-      const after = firstFreeStart(doc.clips, t.id, startSec, VISUAL_CLIP_DURATION_SEC);
-      const r = addVisualClip(doc, { ...input, trackId: t.id, startSec: after });
-      if (r.ok) {
-        const placed = r.doc.clips[r.doc.clips.length - 1];
-        // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
-        // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
-        commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
-        return;
-      }
-      last = r;
+    const track = placeable[0];
+    // **間の空きを飛び越さない**（#684 レビュー）＝「いちばん後ろの部品の終わり」ではなく、
+    // まるごと収まる最初の空きを探す。規則は domain に置く（画面で数え直さない）。
+    const startSec = firstFreeStart(doc.clips, track.id, get().playheadSec, VISUAL_CLIP_DURATION_SEC);
+    const r = addVisualClip(doc, { ...input, trackId: track.id, startSec });
+    if (!r.ok) {
+      set({ editBlocked: r.reason });
+      return;
     }
-    // 置ける列が1本も無いときも、理由を出す（押しても何も起きない、を作らない）。
-    set({ editBlocked: last && !last.ok ? last.reason : EDIT_BLOCKED.notFound });
+    const placed = r.doc.clips[r.doc.clips.length - 1];
+    // **置いた瞬間に見える**（`06 §12.1`）＝置き先が再生位置と違うときは、そこへ再生位置を移す。
+    // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
+    commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
   },
   addAudioClip: (input) => {
     const doc = get().doc;

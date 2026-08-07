@@ -4,6 +4,7 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
+  placeableVisualTracks, trackPlacementIssue,
   addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
   addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipText, setTrackFlag, trimClip,
 } from './edit';
@@ -572,5 +573,70 @@ describe('見た目パターンのクリップ（差し込み口が生きてい�
       const r = addTemplateClip(doc({ clips: [] }), { template: tmpl, trackId: 'track_001', startSec: 0 });
       expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
     });
+  });
+});
+
+describe('placeableVisualTracks（置ける列・#722）', () => {
+  const d = (tracks: TimelineProject['tracks']): TimelineProject => doc({ tracks, clips: [] });
+
+  it('手前が先で返す（配列の末尾が手前＝重ね順）', () => {
+    const r = placeableVisualTracks(d([
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.visual },
+      { id: 'track_003', kind: TRACK_KIND.visual },
+    ]));
+    expect(r.map((t) => t.id)).toEqual(['track_003', 'track_002', 'track_001']);
+  });
+
+  it('音の列・固定した列・隠した列は外す（置けても動画に出ない部品を作らない）', () => {
+    const r = placeableVisualTracks(d([
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.audio },
+      { id: 'track_003', kind: TRACK_KIND.visual, locked: true },
+      { id: 'track_004', kind: TRACK_KIND.visual, hidden: true },
+      { id: 'track_005', kind: TRACK_KIND.visual },
+    ]));
+    expect(r.map((t) => t.id)).toEqual(['track_005', 'track_001']);
+  });
+
+  it('置ける列が無ければ空（呼ぶ側が理由を出せる）', () => {
+    expect(placeableVisualTracks(d([{ id: 'track_001', kind: TRACK_KIND.audio }]))).toEqual([]);
+  });
+
+  it('**`trackPlacementIssue` と食い違わない**（条件を片方だけ足せない）', () => {
+    // ⚠️ このテストは「同じ規則から導かれている」ことを固定する（#722 レビュー）。
+    // 条件を `trackPlacementIssue` に足せば両方へ効き、`placeableVisualTracks` 側だけ独自に
+    // 足すと**ここで食い違う**＝「同じ判断を2通りに書かない」を主張だけで終わらせない。
+    const doc2 = d([
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.audio },
+      { id: 'track_003', kind: TRACK_KIND.visual, locked: true },
+      { id: 'track_004', kind: TRACK_KIND.visual, hidden: true },
+      { id: 'track_005', kind: TRACK_KIND.visual },
+    ]);
+    const fromIssue = doc2.tracks.filter((t) => trackPlacementIssue(doc2, t.id, TRACK_KIND.visual) == null).map((t) => t.id);
+    const fromList = placeableVisualTracks(doc2).map((t) => t.id).reverse(); // 手前が先なので戻して比べる
+    expect(fromList).toEqual(fromIssue);
+  });
+
+  it('理由は種類ごとに違うものを返す（次の行動が違うので真偽値に畳まない）', () => {
+    const doc2 = d([
+      { id: 'track_001', kind: TRACK_KIND.visual, locked: true },
+      { id: 'track_002', kind: TRACK_KIND.visual, hidden: true },
+      { id: 'track_003', kind: TRACK_KIND.audio },
+    ]);
+    expect(trackPlacementIssue(doc2, 'track_001', TRACK_KIND.visual)).toBe(EDIT_BLOCKED.locked);
+    expect(trackPlacementIssue(doc2, 'track_002', TRACK_KIND.visual)).toBe(EDIT_BLOCKED.hiddenTrack);
+    expect(trackPlacementIssue(doc2, 'track_003', TRACK_KIND.visual)).toBe(EDIT_BLOCKED.trackKind);
+    expect(trackPlacementIssue(doc2, 'track_999', TRACK_KIND.visual)).toBe(EDIT_BLOCKED.notFound);
+  });
+
+  it('元の並びを壊さない（`reverse` が文書の列を並べ替えない）', () => {
+    const doc = d([
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_002', kind: TRACK_KIND.visual },
+    ]);
+    placeableVisualTracks(doc);
+    expect(doc.tracks.map((t) => t.id)).toEqual(['track_001', 'track_002']);
   });
 });
