@@ -2,6 +2,8 @@
 // タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。開けないときの案内と、並び・選択の見せ方を固定する。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
@@ -2950,6 +2952,20 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const left = (screen.getByRole("button", { name: "文字の操作" }) as HTMLElement).style.left;
     expect(left).toContain("- var(--clip-menu-w)"); // 帯の終わりから幅ぶん内側へ
+  });
+
+  it("`--clip-menu-w` は**「⋮」から見える所**で宣言する（帯で宣言すると届かない）", () => {
+    // ⚠️ カスタムプロパティは**子孫にしか継承しない**。「⋮」は帯の兄弟なので、帯（`.timeline-clip`）で
+    // 宣言すると `var()` が解決できず `left`/`width` の宣言ごと無効になり、**帯の左端に出る**
+    // （実機で確認＝computed left が 0px・幅が内容幅の 3.86px になっていた）。
+    // jsdom は CSS ファイルを読まないので、**宣言している側の階級**をここで固定する。
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8");
+    const laneBlock = css.slice(css.indexOf(".timeline-lane {"), css.indexOf("}", css.indexOf(".timeline-lane {")));
+    expect(laneBlock).toContain("--clip-menu-w");
+    // 帯そのもので宣言し直すと、また届かなくなる。
+    const clipStart = css.indexOf(["", ".timeline-clip {"].join(String.fromCharCode(10)));
+    const clipBlock = css.slice(clipStart, css.indexOf("}", clipStart));
+    expect(clipBlock).not.toContain("--clip-menu-w");
   });
 
   it("まとめて選んでいるときは「同じものを足す」を押せなくする（押しても無反応、を作らない）", () => {
