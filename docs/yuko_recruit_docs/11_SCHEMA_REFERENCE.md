@@ -473,6 +473,9 @@ domain の純粋関数 **`bakeTimelineProject`（`src/domain/timeline/bake.ts`�
   以前は書き出しが `ceil(尺×fps)`、プレビューが `尺 − 1/fps` を格子へ落とす、と**別々に導いて**いたので、
   尺 × fps が整数でないとき**書き出しの最終フレームがプレビューで到達できなかった**
   （尺 1.05 秒・30fps＝書き出しは 1.0333 秒まで描くのにプレビューは 1.0 秒で頭打ち＝ADR-0026③）。
+- **表示倍率の段は `domain/constants.ts` に1つ**（`TIMELINE_ZOOM_LEVELS`・#686）＝タイムライン編集と
+  場面形式の見わたす画面が**同じ刻み**を読む（ADR-0034 決定13。写すと片方だけ変わる）。
+  全体表示の段・段送り・錨点の位置合わせは `domain/timeline/zoom.ts`（純粋関数）。
 - **格子・実効 fps・位置のクランプは `domain/timeline/playback.ts` に1つずつ**（`quantizeToFrameSec` / `effectiveFps` / `clampTimelinePlayheadSec`）。描画（`frameTimeSec`）と再生が同じものを通る＝同じ規則を層をまたいで書かない（§6）。
   - **位置を1フレームずつ動かすのも同じ場所から**（`seekByFrames`・#721）＝**フレーム番号で足してから秒へ戻す**。
     `いまの位置 + 1/fps` を足し込むと二進小数の誤差が積もり、`floor(t*fps)` で見せるフレームが

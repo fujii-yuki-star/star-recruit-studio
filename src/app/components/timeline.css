@@ -5,6 +5,7 @@
   flex-direction: column;
   gap: var(--gap-sm);
   /* 左の固定ラベル幅。再生ヘッド（ADR-0023 (1)）の位置合わせもこれを見る＝単一の参照元（§2-7）。 */
+  /* 既定。タイムライン編集は TS 側（`LANE_LABEL_PX`）から流し込む＝全体表示・錨点と同じ値を見る。 */
   --timeline-label-w: 84px;
 }
 
