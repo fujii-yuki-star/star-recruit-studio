@@ -4,7 +4,7 @@
 import { PROJECT_FORMAT } from '../enums';
 import { isTimelineProjectDoc } from '../projectFormat';
 import { validateTimelineProject } from '../validation/generated/validators.js';
-import { effectiveFps, quantizeToFrameSec } from './playback';
+import { effectiveFps, lastFrameSec, quantizeToFrameSec } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
 import type { TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
@@ -85,12 +85,12 @@ export function timelineDurationSec(doc: TimelineProject): number {
  */
 export function frameTimeSec(doc: TimelineProject, playheadSec: number): number {
   const fps = effectiveFps(doc);
-  const total = timelineDurationSec(doc);
   if (!Number.isFinite(playheadSec)) return 0;
   // **格子へ落としてから**最後のフレームで頭打ちにする＝見せる時刻が必ず `k/fps` になる
   // （落とさずにクランプすると、尺が格子に乗っていないとき書き出しに存在しない時刻の絵を描く）。
-  const lastFrame = Math.max(0, quantizeToFrameSec(Math.max(0, total - 1 / fps), fps));
-  return Math.min(Math.max(0, quantizeToFrameSec(playheadSec, fps)), lastFrame);
+  // 頭打ちの位置は**書き出しと同じ導き方**（`lastFrameSec`・#724）＝`total − 1/fps` を自分で計算すると、
+  // 尺 × fps が整数でないときに**書き出しの最終フレームへ到達できない**（1.05秒・30fps で 1.0 止まり）。
+  return Math.min(Math.max(0, quantizeToFrameSec(playheadSec, fps)), lastFrameSec(doc));
 }
 
 /** 保存用に更新日時を差し替えた文書を返す（保存そのものは infrastructure）。 */

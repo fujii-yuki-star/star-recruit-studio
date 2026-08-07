@@ -36,6 +36,26 @@ export function clampTimelinePlayheadSec(doc: TimelineProject, sec: number): num
 }
 
 /**
+ * **何フレーム描くか**（#724）。尺 × fps の**切り上げ**＝置いたものが末尾で切れない。
+ * 四捨五入だと下へ丸まる尺（例 5.505 秒 → 165 フレーム＝5.5 秒）で末尾が黙って落ちる（語尾が切れる）。
+ *
+ * ⚠️ **書き出しとプレビューが同じものを見る**（`11 §7.6.2`＝格子の規則は1か所）。以前は書き出しが
+ * `ceil(total*fps)`、プレビューが `total − 1/fps` を格子へ落とす、と**別々に導いて**いたので、
+ * 尺 × fps が整数でないとき**書き出しの最終フレームがプレビューで到達できなかった**
+ * （尺 1.05 秒・30fps＝書き出しは 1.0333 秒まで描くのに、プレビューは 1.0 秒で頭打ち）。
+ */
+export function timelineFrameCount(doc: TimelineProject): number {
+  const total = timelineDurationSec(doc);
+  return total > 0 ? Math.max(1, Math.ceil(total * effectiveFps(doc))) : 0;
+}
+
+/** **最後のフレームの時刻**（#724）。描くフレーム数から導く＝書き出しの最終フレームへ必ず行ける。 */
+export function lastFrameSec(doc: TimelineProject): number {
+  const n = timelineFrameCount(doc);
+  return n > 0 ? (n - 1) / effectiveFps(doc) : 0;
+}
+
+/**
  * 再生位置を**フレーム単位**で動かす（#721・矢印キー）。
  *
  * ⚠️ **`いまの位置 + 1/fps` を足し込んではいけない**。二進小数の誤差が積もり、`floor(t*fps)` で

@@ -13,8 +13,7 @@ import { ASSET_TYPE, TIMELINE_CLIP_KIND, isFreeSlotAssetType } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
-import { timelineDurationSec } from './persistence';
-import { effectiveFps } from './playback';
+import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
 import type { TimelineClip, TimelineProject } from './types';
 
@@ -37,9 +36,8 @@ export interface TimelineFramePlan {
  */
 export function timelineFramePlan(doc: TimelineProject): TimelineFramePlan {
   const fps = effectiveFps(doc);
-  const total = timelineDurationSec(doc);
   // 尺 0（何も置いていない）は 0 フレーム＝呼び出し側が「書き出せない」と止める。
-  const frameCount = total > 0 ? Math.max(1, Math.ceil(total * fps)) : 0;
+  const frameCount = timelineFrameCount(doc); // 規則は `playback.ts` に1つ（プレビューと同じものを見る・#724）
   return { fps, frameCount, durationSec: frameCount / fps };
 }
 
