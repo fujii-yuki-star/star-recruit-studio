@@ -67,7 +67,13 @@ describe('moveClip', () => {
 
   it('何も変わらない移動は文書をそのまま返す（履歴を汚さない）', () => {
     const d = doc({ clips: [clip('clip_001', { startSec: 0 })] });
-    expect(moveClip(d, 'clip_001', { startSec: -5 }).ok && moveClip(d, 'clip_001', { startSec: -5 })).toMatchObject({ doc: d });
+    // ⚠️ **同一参照**で見る（#724）。`toMatchObject` は値が同じなら通るので、**新しい文書を作って返す**
+    // 変異が生き残る＝呼び出し側は同一参照で「積まない」を決めているので、値一致では守れていない。
+    // 兄弟（`trimClip`／`setClipAssetRef`／`setClipText`／`setClipSpeed`／crop 系）は `.toBe()` を使っており、
+    // ここだけが例外だった。
+    const r = moveClip(d, 'clip_001', { startSec: -5 });
+    expect(r.ok).toBe(true);
+    expect((r as { ok: true; doc: TimelineProject }).doc).toBe(d);
   });
 
   it('別の列へ移す', () => {

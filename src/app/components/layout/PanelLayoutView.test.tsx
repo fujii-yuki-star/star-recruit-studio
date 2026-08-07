@@ -220,3 +220,46 @@ describe("PanelLayoutView: 途中でやめる・片づけ（/canon-check の指�
     expect(onChange.mock.calls[onChange.mock.calls.length - 1][0]).toBe(l);
   });
 });
+
+// 並べ替えは**ドラッグとメニューの両方**（ADR-0033 決定12・#724）。ドラッグ経路だけ担保されていて、
+// メニュー経路はどこにもテストが無かった＝**ドラッグが使えない人の逃げ道**が黙って壊れうる。
+describe("PanelLayoutView: メニューからの並べ替え（決定12）", () => {
+  const openMenu = (name: string): void => {
+    fireEvent.click(screen.getByRole("button", { name: `${name}の欄の操作` }));
+  };
+
+  it("「右へ」で同じ向きの並びの中を入れ替えられる", () => {
+    const onChange = vi.fn();
+    // 中央に2つ横並び（あ・い）＝左右に入れ替えられる形。
+    const l = emptyLayout();
+    l.nodes.center = { dir: SPLIT_DIR.row, sizes: [0.5, 0.5], children: [{ panelId: "a" }, { panelId: "b" }] };
+    render(<PanelLayoutView layout={l} panels={panels} onChange={onChange} />);
+    openMenu("あ");
+    fireEvent.click(screen.getByRole("menuitem", { name: "右へ" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(placedPanelIds(onChange.mock.calls[0][0] as PanelLayout)).toEqual(["b", "a"]);
+  });
+
+  it("動かせない向きは押せなくして理由を出す（押しても何も起きない、を作らない）", () => {
+    const onChange = vi.fn();
+    const l = emptyLayout();
+    l.nodes.center = { dir: SPLIT_DIR.row, sizes: [0.5, 0.5], children: [{ panelId: "a" }, { panelId: "b" }] };
+    render(<PanelLayoutView layout={l} panels={panels} onChange={onChange} />);
+    openMenu("あ");
+    // 横並びなので「上へ」は動かせない＝押せないうえに理由が付く。
+    const up = screen.getByRole("menuitem", { name: "上へ" });
+    expect(up.hasAttribute("disabled") || up.getAttribute("aria-disabled") === "true").toBe(true);
+    expect(up.getAttribute("title")).toContain("同じ向きに並んでいる欄");
+  });
+
+  it("「左へ移す」で領域そのものを変えられる（ドラッグでは入れない空の領域への逃げ道）", () => {
+    const onChange = vi.fn();
+    render(<PanelLayoutView layout={sideBySide()} panels={panels} onChange={onChange} />);
+    openMenu("い");
+    fireEvent.click(screen.getByRole("menuitem", { name: "左へ移す" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0] as PanelLayout;
+    expect(next.nodes.left).not.toBeNull();
+    expect(placedPanelIds(next)).toContain("b");
+  });
+});

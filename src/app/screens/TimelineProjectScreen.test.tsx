@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。開けないときの案内と、並び・選択の見せ方を固定する。
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { pointerDownAt } from "../../test/pointer";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
@@ -2747,5 +2747,151 @@ describe("TimelineProjectScreen: フォントは動画全体に合わせられ�
     fireEvent.click(trigger());
     fireEvent.click(inheritOption());
     expect(useTimelineStore.getState().history.past.length).toBe(before);
+  });
+});
+
+// 素材の実寸を測る回数（#724）。効果が**自分の出力**（`assetSizes`）を依存に持つと、1件測れるたびに
+// 未計測の全素材を作り直す＝素材 N 件で最悪 O(N²)。「一度始めたものは二度始めない」を固定する。
+describe("TimelineProjectScreen: 実寸は素材1つにつき一度だけ測る（#724）", () => {
+  const originalImage = window.Image;
+  afterEach(() => { window.Image = originalImage; });
+
+  /** 生成された偽 `Image` を集める（`onload` は手で発火させる）。 */
+  function stubImage(): { made: { src: string; fire: () => void }[] } {
+    const made: { src: string; fire: () => void }[] = [];
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    (window as any).Image = function (this: any) {
+      const el: any = { naturalWidth: 100, naturalHeight: 50, onload: null, onerror: null };
+      const rec = { src: "", fire: () => el.onload?.() };
+      Object.defineProperty(el, "src", { set(v: string) { rec.src = v; }, get() { return rec.src; } });
+      made.push(rec);
+      return el;
+    } as unknown as typeof Image;
+    return { made };
+  }
+
+  const withAssets = (n: number) => {
+    const assets = Array.from({ length: n }, (_, i) => ({
+      assetId: `asset_${String(i + 1).padStart(3, "0")}`,
+      assetType: "image" as const,
+      displayName: `写真${i + 1}`,
+      filePath: `assets/a${i}.png`,
+    }));
+    open({ assets, clips: [] });
+    useTimelineStore.setState({
+      assetSrcById: Object.fromEntries(assets.map((a) => [a.assetId, `blob:${a.assetId}`])),
+      assetSizes: {},
+    });
+    return assets;
+  };
+
+  it("素材の数だけ測る（1件測れるたびに全部作り直さない）", () => {
+    const { made } = stubImage();
+    withAssets(4);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(made).toHaveLength(4);
+    // 1件ずつ着地させる。印を持たず「済みかどうか」だけで判定していると、依存に自分の出力が入っている
+    // 版では**未計測ぶんが毎回作り直される**（4件なら 4→3→2→1 で合計10個）。
+    act(() => { made[0].fire(); });
+    act(() => { made[1].fire(); });
+    act(() => { made[2].fire(); });
+    act(() => { made[3].fire(); });
+    expect(made).toHaveLength(4);
+    expect(Object.keys(useTimelineStore.getState().assetSizes)).toHaveLength(4);
+  });
+
+  it("**測り終わっていない素材があるまま**別の素材が増えても、測り直さない（#724 レビュー）", () => {
+    // ⚠️ ここが「印」の本当の役目。済みの判定（`assetSizes`）だけでは**まだ着地していない素材**を
+    // 弾けないので、効果が別の理由（素材の追加）で走り直すと、その素材ぶんを作り直してしまう。
+    const { made } = stubImage();
+    withAssets(2);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => { made[0].fire(); }); // asset_001 だけ着地。asset_002 は測っている最中。
+    act(() => {
+      useTimelineStore.setState({
+        assetSrcById: { ...useTimelineStore.getState().assetSrcById, asset_003: "blob:asset_003" },
+      });
+    });
+    // 増えたぶんの1つだけ（asset_002 を作り直さない）。
+    expect(made).toHaveLength(3);
+    expect(made[2].src).toBe("blob:asset_003");
+    // 着地していなかったぶんも、後から着地すれば入る（途中で無効化しない）。
+    act(() => { made[1].fire(); });
+    expect(Object.keys(useTimelineStore.getState().assetSizes).sort()).toEqual(["asset_001", "asset_002"]);
+  });
+
+  it("素材が増えたら、その1つだけ測る（既に測ったものを測り直さない）", () => {
+    const { made } = stubImage();
+    withAssets(2);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => { made[0].fire(); made[1].fire(); });
+    act(() => {
+      useTimelineStore.setState({
+        assetSrcById: { ...useTimelineStore.getState().assetSrcById, asset_003: "blob:asset_003" },
+      });
+    });
+    expect(made).toHaveLength(3);
+    expect(made[2].src).toBe("blob:asset_003");
+  });
+
+  it("読めたのに大きさが取れなかったものも、印を残さない（失敗と同じ扱い）", () => {
+    const made: { src: string; fire: () => void }[] = [];
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    (window as any).Image = function (this: any) {
+      const el: any = { naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null }; // 0×0＝測れていない
+      const rec = { src: "", fire: () => el.onload?.() };
+      Object.defineProperty(el, "src", { set(v: string) { rec.src = v; }, get() { return rec.src; } });
+      made.push(rec);
+      return el;
+    } as unknown as typeof Image;
+    withAssets(1);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => { made[0].fire(); }); // `onload` は来たが 0×0＝入れられない
+    expect(useTimelineStore.getState().assetSizes).toEqual({});
+    act(() => {
+      useTimelineStore.setState({
+        assetSrcById: { ...useTimelineStore.getState().assetSrcById, asset_002: "blob:asset_002" },
+      });
+    });
+    // 印が残っていると asset_001 は二度と測られない（＝「枠いっぱいに映す」が黙って効かなくなる）。
+    expect(made.map((m) => m.src)).toEqual(["blob:asset_001", "blob:asset_001", "blob:asset_002"]);
+  });
+
+  it("**同じ動画を開き直しても**測り直す（印を残して二度と測らない、を作らない）", () => {
+    const { made } = stubImage();
+    withAssets(1);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => { made[0].fire(); });
+    // 開き直すと `assetSizes` は空へ戻る。「始めた」を覚える作りだと**同じ動画では印が残り**、
+    // 二度と測らない＝「枠いっぱいに映す」が黙って効かなくなる（素材の実寸が要るため）。
+    act(() => {
+      useTimelineStore.setState({ assetSizes: {}, assetSrcById: { asset_001: "blob:asset_001_reopened" } });
+    });
+    expect(made).toHaveLength(2);
+    expect(made[1].src).toBe("blob:asset_001_reopened");
+  });
+
+  it("測れなかった素材は、次に効果が走ったときもう一度試す（一度の失敗を永久に固定しない）", () => {
+    const made: { src: string; fireError: () => void }[] = [];
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    (window as any).Image = function (this: any) {
+      const el: any = { naturalWidth: 0, naturalHeight: 0, onload: null, onerror: null };
+      const rec = { src: "", fireError: () => el.onerror?.() };
+      Object.defineProperty(el, "src", { set(v: string) { rec.src = v; }, get() { return rec.src; } });
+      made.push(rec);
+      return el;
+    } as unknown as typeof Image;
+    withAssets(1);
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => { made[0].fireError(); });
+    // ⚠️ 取り込み直しでは救えない（取り込みは毎回**新しい素材番号**を出すので別のキーになる）。
+    // 救えるのは「別の素材が増えた／画面へ戻った」で効果が走り直したとき。
+    act(() => {
+      useTimelineStore.setState({
+        assetSrcById: { ...useTimelineStore.getState().assetSrcById, asset_002: "blob:asset_002" },
+      });
+    });
+    // 増えたぶん（asset_002）＋失敗した asset_001 の測り直しで2つ増える。
+    expect(made.map((m) => m.src)).toEqual(["blob:asset_001", "blob:asset_001", "blob:asset_002"]);
   });
 });
