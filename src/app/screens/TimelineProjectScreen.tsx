@@ -857,6 +857,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 以前は尺から自動で決めていた（`max(640/尺, 40)`）ので、長い動画ほど潰れて手が出せなかった。
    */
   const [zoomIndex, setZoomIndex] = useState<number | null>(null); // null＝まだ全体表示を決めていない
+  /**
+   * **利用者が倍率を変える唯一の入口**（#743 レビュー）。ホイールにだけ関門を置いていたので、
+   * `−`／`＋`／`全体を表示` は掴んでいる間も効いた（別のポインタや画面なら届く）＝秒は掴んだ時点の
+   * 倍率で出しているので、**帯が指から離れる**。入口を1つにして、関門も1つにする。
+   */
+  const changeZoomRef = useRef<(next: number | ((i: number | null) => number)) => boolean>(() => false);
+  const changeZoom = (next: number | ((i: number | null) => number)): boolean => {
+    if (clipDragRef.current) return false;
+    zoomTouchedRef.current = true; // 明示的に合わせた＝以後は勝手に動かさない
+    setZoomIndex((i) => (typeof next === "function" ? next(i) : next));
+    return true;
+  };
   const scrollRef = useRef<HTMLDivElement>(null);
   /**
    * **開いた直後は全体表示**（決定13）。列の幅を実測してから決めるので効果でやる。
@@ -897,18 +909,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     if (!el) return;
     const onWheel = (e: WheelEvent): void => {
       if (!e.ctrlKey) return; // 素のホイールは横スクロールのまま＝奪わない
-      // 帯を掴んでいる間は倍率を変えない（#686 レビュー）＝秒は掴んだ時点の倍率で出しているので、
-      // 途中で変えると**帯が指から離れる**（見えている位置と落ちる位置が食い違う）。
-      if (clipDragRef.current) return;
       e.preventDefault();
       const from = ZOOM_LEVELS[zoomIndexRef.current ?? DEFAULT_ZOOM_INDEX];
       const nextIndex = stepZoomIndex(zoomIndexRef.current ?? DEFAULT_ZOOM_INDEX, e.deltaY < 0 ? 1 : -1);
       if (ZOOM_LEVELS[nextIndex] === from) return;
       // 位置合わせは**描き直した後**（下の効果）。ここで合わせるとまだ古い幅なのでスクロールの
       // 上限で切り詰められ、錨点が流れる（実機で確認）。
-      pendingZoomRef.current = { scrollLeft: el.scrollLeft, anchorPx: e.clientX - el.getBoundingClientRect().left, fromPxPerSec: from };
-      zoomTouchedRef.current = true;
-      setZoomIndex(nextIndex);
+      // ⚠️ **効いたときだけ**錨点を控える（断られたのに控えると、次の1回が古い錨点で流れる）。
+      const anchor = { scrollLeft: el.scrollLeft, anchorPx: e.clientX - el.getBoundingClientRect().left, fromPxPerSec: from };
+      if (changeZoomRef.current(nextIndex)) pendingZoomRef.current = anchor;
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -965,6 +974,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       seekFrames: (frames) => { if (doc) setPlayhead(seekByFrames(doc, playheadSec, frames)); },
     };
     removeRef.current = requestRemoveSelected;
+    changeZoomRef.current = changeZoom; // ホイールの実リスナーは張り替えないので写し越しに呼ぶ
   });
   /**
    * **帯を掴んでいる間**（#686・ADR-0034 決定9/10）。作法は欄のドラッグ（ADR-0033 段階3）と同じ。
@@ -984,6 +994,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ときは**動かした帯の選択が外れる**（取っ手も消える）。
    */
   const skipClickRef = useRef(false);
+  /**
+   * 何もない所を押して選択を解く（#701）。**掴んだ直後の `click` では解かない**（#743 レビュー）＝
+   * 帯の外で離すと `click` の相手はこの余白になるので、ここが印を見ないと**断ったそばから
+   * 選択が丸ごと消える**（帯の上で離したときだけ守られる、という当たり外れを作らない）。
+   */
+  const clearSelectionByClick = (): void => {
+    if (skipClickRef.current) { skipClickRef.current = false; return; }
+    clearSelection();
+  };
 
   // **つかんで置く**（#684）の道具。使うのは下の `resolveDrop` ほか。
   // ドラッグの作法は共有（掴む場所ごとに書き分けない・ADR-0034 決定9）。
@@ -1097,7 +1116,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 押せてしまうと、離してから `commit` が断る＝**押してから断る**になる（#703 で消した形の再発）。
    */
   const beginClipDrag = (e: ReactPointerEvent, clipId: string, mode: "move" | "trim-start" | "trim-end"): void => {
-    if (exporting || trackOf(doc?.clips.find((c) => c.id === clipId)?.trackId ?? "")?.locked) return;
+    // ⚠️ 前の `click` の取りこぼしをここで捨てる（#743 レビュー）。下の断る道は `usePointerDrag` に
+    // 乗らないので、離した先が帯の外だと `click` が来ず印が残り、**次の無関係な1回を飲み込む**。
+    // 新しく掴み始めた時点で流す＝残っても「次の pointerdown まで」に必ず縮む。
+    skipClickRef.current = false;
+    const doc0 = useTimelineStore.getState().doc;
+    const clip0 = doc0?.clips.find((c) => c.id === clipId);
+    if (!doc0 || !clip0) return;
+    // 掴めるかは **`grabbableClip` だけが決める**（見た目の `cursor` と同じものを見る・#743 レビュー）。
+    // 条件を書き写すと、片方だけ増えたときに「掴めそうなのに掴めない」の非対称が戻る。
+    if (!grabbableClip(clip0)) return;
     // 複数選んでいるうちの1つを掴んだ＝まとめて動かすのは段階4。**選択を黙って潰さない**（決定15）。
     if (selectedClipIds.length > 1 && selectedClipIds.includes(clipId)) {
       setEditBlocked(EDIT_BLOCKED.multiSelection);
@@ -1107,9 +1135,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       skipClickRef.current = true;
       return;
     }
-    const doc0 = useTimelineStore.getState().doc;
-    const clip0 = doc0?.clips.find((c) => c.id === clipId);
-    if (!doc0 || !clip0) return;
     const startX = e.clientX;
     const origin = mode === "trim-end" ? clipEndSec(clip0) : clip0.startSec;
     // ⚠️ **`pxPerSec` は掴んだ時点の値**（下でホイールの倍率変更を止めているので、途中で変わらない）。
@@ -1422,7 +1447,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 className="btn btn-ghost btn-icon"
                 aria-label="表示を縮める"
                 disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) <= 0}
-                onClick={() => { zoomTouchedRef.current = true; setZoomIndex((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, -1)); }}
+                onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, -1))}
               >
                 −
               </button>
@@ -1430,17 +1455,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 className="btn btn-ghost btn-icon"
                 aria-label="表示を広げる"
                 disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) >= ZOOM_LEVELS.length - 1}
-                onClick={() => { zoomTouchedRef.current = true; setZoomIndex((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, 1)); }}
+                onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, 1))}
               >
                 ＋
               </button>
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  zoomTouchedRef.current = true; // 明示的に合わせた＝以後も勝手に動かさない
-                  const px = (scrollRef.current?.clientWidth ?? 0) - LANE_LABEL_PX;
-                  setZoomIndex(fitZoomIndex(totalSec, px));
-                }}
+                onClick={() => changeZoom(fitZoomIndex(totalSec, (scrollRef.current?.clientWidth ?? 0) - LANE_LABEL_PX))}
               >
                 全体を表示
               </button>
@@ -1507,7 +1528,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <div
                     className="timeline-row"
                     key={track.id}
-                    onClick={(e) => { if (e.target === e.currentTarget) clearSelection(); }}
+                    onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(); }}
                   >
                     {/* 操作は右クリックのメニューへ畳む＝行に文字を並べない（帯が読めなくなる・利用者指摘 2026-08-03）。
                         行に残すのは**名前と状態**だけ。右クリックできると分かるよう、同じメニューを開く小さなボタンも置く
@@ -1532,7 +1553,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       ref={(el) => { if (el) laneRefs.current.set(track.id, el); else laneRefs.current.delete(track.id); }}
                       className={`timeline-track timeline-lane${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
-                      onClick={(e) => { if (e.target === e.currentTarget) clearSelection(); }}
+                      onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(); }}
                     >
                       {/* **入る場所を実寸で見せる**（#684 レビュー）＝欄のドラッグが線で示すのと同じ流儀。
                           「その列のどこに・何秒ぶん」が見えないまま落とさせない。 */}

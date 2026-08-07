@@ -3343,6 +3343,52 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
   });
 
+  it("断った後に**帯の外で離しても**選択は消えない（当たり外れを作らない）", () => {
+    // ⚠️ 帯の上で離したときだけ守られる形だと、少し外れただけで選択が丸ごと消える。
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const clip = container.querySelectorAll(".timeline-clip")[0] as HTMLElement;
+    drag(clip, 36 * 8);
+    const lane = container.querySelector(".timeline-lane") as HTMLElement;
+    fireEvent.click(lane); // 列の余白で離した＝「何もない所を押した」経路
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
+  });
+
+  it("掴んでいる間は**ボタンでも**倍率を変えられない（帯が指から離れる）", () => {
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = (band("い") as HTMLElement).style.left;
+    drag(band("あ"), 36 * 1, { drop: false }); // 掴んだまま
+    fireEvent.click(screen.getByLabelText("表示を広げる"));
+    expect((band("い") as HTMLElement).style.left).toBe(before); // 掴んでいない帯＝倍率が変われば動く
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36, clientY: 0 });
+    fireEvent.click(screen.getByLabelText("表示を広げる"));
+    expect((band("い") as HTMLElement).style.left).not.toBe(before); // 離せば効く（塞ぎっぱなしにしない）
+  });
+
+  it("倍率を断ったときは**錨点を控えない**（次の1回が古い錨点で流れる）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    drag(band("あ"), 36 * 1, { drop: false }); // 掴んだまま＝倍率は断られる
+    fireEvent.wheel(scroll, { ctrlKey: true, deltaY: -1, clientX: 500 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36, clientY: 0 });
+    // 断られたのに錨点を控えていると、**錨点を持たないボタン**の1回がその古い値で位置合わせされる。
+    fireEvent.click(screen.getByLabelText("表示を広げる"));
+    expect(scroll.scrollLeft).toBe(0);
+  });
+
+  it("掴む前の関門は**見た目と同じもの**を見る（書き写さない）", () => {
+    // `cursor: grab` を出す条件と、掴む処理を始める条件が割れると「掴めそうなのに掴めない」が戻る。
+    two();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(band("あ").className).not.toContain("timeline-clip--editable"); // 見た目も掴めない
+    drag(band("あ"), 36 * 8, { drop: false });
+    expect(band("あ").className).not.toContain("timeline-clip--dragging"); // 処理も始まらない
+  });
+
   it("Escape でやめたら元のまま（掴んだ位置に置かない）", () => {
     two();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
