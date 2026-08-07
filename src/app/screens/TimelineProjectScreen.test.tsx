@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。開けないときの案内と、並び・選択の見せ方を固定する。
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, fireEvent } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { pointerDownAt } from "../../test/pointer";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
@@ -75,7 +75,11 @@ describe("TimelineProjectScreen", () => {
   it("列は手前が上（配列の後ろほど手前）＝重なりの見え方と一致させる", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const names = screen.getAllByText(/^(映像|音)\d$/).map((el) => el.textContent);
+    // ⚠️ **列の見出しだけ**を見る（`置く列` の選択肢にも同じ名前が並ぶので、画面全体から拾うと混ざる）。
+    const names = screen
+      .getAllByText(/^(映像|音)\d$/)
+      .filter((el) => el.tagName !== "OPTION")
+      .map((el) => el.textContent);
     // 連番は**種別ごと**（並び全体の通し番号にすると「音1」が存在しない動画ができる）。
     expect(names).toEqual(["音1", "映像1"]);
   });
@@ -1759,7 +1763,13 @@ describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レ�
     withBgm();
     exporting();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByLabelText("置く列")).toBeDisabled();
+    // 「置く列」は欄ごとにあるので**どの欄のものか**で絞る（#724 で音・読み上げにも増えた）。
+    // ⚠️ 塞ぐのは**文書を変える**方だけ＝「選んだ部品」の置く列は `moveSelectedClip` を撃つので押せなくする。
+    // 置く側（見た目パターン／音／読み上げ）の置く列は**次にどこへ置くかの下書き**で、変えても文書は
+    // 動かない＝押せなくすると「触っても何も起きないのに押せない」になる（§2-5 は押してから断るのを禁じる
+    // のであって、断られようのない操作まで塞げとは言っていない）。
+    const inSelected = document.querySelector('[data-panel-id="selected"]') as HTMLElement;
+    expect(within(inSelected).getByLabelText("置く列")).toBeDisabled();
     fireEvent.click(screen.getByLabelText("音1の操作"));
     const items = screen.getAllByRole("menuitem");
     expect(items.every((el) => el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")).toBe(true);
@@ -2423,7 +2433,9 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     one();
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const select = screen.getByText("置く列").closest("label")?.querySelector("select") as HTMLElement;
+    // 「選んだ部品」の欄の「置く列」（同じ名前の欄が置く側にもあるので、欄で絞る）。
+    const panel = document.querySelector('[data-panel-id="selected"]') as HTMLElement;
+    const select = within(panel).getByLabelText("置く列");
     fireEvent.keyDown(select, { key: "ArrowRight" });
     expect(useTimelineStore.getState().playheadSec).toBe(0);
   });
@@ -2626,5 +2638,75 @@ describe("TimelineProjectScreen: 案内が行き止まりでない（#723）", (
     for (const el of screen.getAllByText(/置ける.*列がありません/)) {
       expect(el.textContent).toContain("固定・非表示");
     }
+  });
+});
+
+// 置く先の見せ方（#724）。**欄に出ている列＝実際に置く列**で、既定はどの種別も「いちばん手前」。
+describe("TimelineProjectScreen: どこへ置くかを見せる（#724）", () => {
+  // 見た目パターンの欄は「置ける見た目パターンが1つもない」と列の欄ごと出ないので、1つ用意する。
+  const aTemplate: Template = {
+    schemaVersion: "1.0", templateId: "tmpl_001", name: "見本", category: "photo_intro",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080 }],
+    defaults: { durationSec: 5 },
+  } as unknown as Template;
+  const twoEach = () => {
+    useProjectStore.setState({ templates: [aTemplate] });
+    return open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual }, // 奥
+        { id: "track_002", kind: TRACK_KIND.visual }, // 手前
+        { id: "track_003", kind: TRACK_KIND.audio },  // 奥
+        { id: "track_004", kind: TRACK_KIND.audio },  // 手前
+      ],
+      clips: [],
+    });
+  };
+  const placeSelect = (panelId: string) =>
+    (document.querySelector(`[data-panel-id="${panelId}"]`) as HTMLElement)
+      .querySelector("select") as HTMLSelectElement;
+
+  it("音・読み上げにも「置く列」が出る（無言で1本に固定しない）", () => {
+    twoEach();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(placeSelect("audio")).not.toBeNull();
+    expect(placeSelect("voice")).not.toBeNull();
+  });
+
+  it("既定はどの種別も**いちばん手前**の置ける列（種別で割らない）", () => {
+    twoEach();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 手前＝配列の末尾（`11 §7.6` の重ね順）。奥を既定にすると、手前の部品の裏に隠れる（#722 と同じ理由）。
+    expect(placeSelect("audio").value).toBe("track_004");
+    expect(placeSelect("templates").value).toBe("track_002");
+  });
+
+  it("見た目パターンの「置く列」が空欄で固まらない（どこへ入るか読めない、を作らない）", () => {
+    twoEach();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(placeSelect("templates").value).not.toBe("");
+  });
+
+  it("読み上げは選んだ列へ置く（欄に出ている列＝実際の置き先）", () => {
+    twoEach();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(placeSelect("voice"), { target: { value: "track_003" } });
+    fireEvent.click(screen.getByRole("button", { name: "読み上げを置く" }));
+    expect(useTimelineStore.getState().doc!.clips[0].trackId).toBe("track_003");
+  });
+
+  it("音量とフェードは読み上げにも出る（点は置けるのに基準は直せない、を作らない）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "あ", status: "none" } }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 「音量」は節の見出しと入力欄の両方にあるので、**入力欄がある**ことで見る。
+    expect(screen.getAllByText("音量").some((el) => el.closest("label")?.querySelector("input"))).toBe(true);
+    expect(screen.getByText("だんだん大きく（秒）")).toBeInTheDocument();
+    // 素材の話（速さ・使い始め）は出さない＝声の長さは実尺で合わせてあるので、変えると区間とずれる。
+    expect(screen.queryByText("速さ（倍）")).not.toBeInTheDocument();
+    expect(screen.queryByText("素材の使い始め（秒）")).not.toBeInTheDocument();
   });
 });

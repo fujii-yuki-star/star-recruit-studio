@@ -478,10 +478,10 @@ export function addVoiceClip(
   doc: TimelineProject,
   input: { text: string; trackId: string; startSec: number; durationSec?: number },
 ): EditResult {
-  const track = doc.tracks.find((t) => t.id === input.trackId);
-  if (!track) return blocked(EDIT_BLOCKED.notFound);
-  if (track.locked) return blocked(EDIT_BLOCKED.locked);
-  if (track.kind !== trackKindForClip(TIMELINE_CLIP_KIND.voice)) return blocked(EDIT_BLOCKED.trackKind);
+  // 列そのものの事情は `trackPlacementIssue`（「置ける列」を数える側と同じ規則・#724 レビュー）。
+  // 手書きだと**隠した列を見落とす**（実際に落ちていた＝置けても動画に出ない部品が黙って生まれる）。
+  const trackIssue = trackPlacementIssue(doc, input.trackId, trackKindForClip(TIMELINE_CLIP_KIND.voice));
+  if (trackIssue) return blocked(trackIssue);
   const startSec = Math.max(0, input.startSec);
   const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, input.durationSec ?? VOICE_PLACEHOLDER_SEC);
   if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
@@ -622,7 +622,16 @@ export function trackPlacementIssue(
  * 新しく置いた部品が既にあるものの後ろに隠れない（`06 §12.1`「必ず仕上がり確認に現れる」）。
  */
 export function placeableVisualTracks(doc: TimelineProject): Track[] {
-  return doc.tracks.filter((t) => trackPlacementIssue(doc, t.id, TRACK_KIND.visual) == null).reverse();
+  return placeableTracksOfKind(doc, TRACK_KIND.visual);
+}
+
+/** **音の部品を置ける列**（#724）。映像側と**同じ規則・同じ向き**で返す（片方だけ奥から、を作らない）。 */
+export function placeableAudioTracks(doc: TimelineProject): Track[] {
+  return placeableTracksOfKind(doc, TRACK_KIND.audio);
+}
+
+function placeableTracksOfKind(doc: TimelineProject, kind: TrackKind): Track[] {
+  return doc.tracks.filter((t) => trackPlacementIssue(doc, t.id, kind) == null).reverse();
 }
 
 /**
@@ -742,10 +751,10 @@ export function addAudioClip(
   doc: TimelineProject,
   input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number; durationSec?: number },
 ): EditResult {
-  const track = doc.tracks.find((t) => t.id === input.trackId);
-  if (!track) return blocked(EDIT_BLOCKED.notFound);
-  if (track.locked) return blocked(EDIT_BLOCKED.locked);
-  if (track.kind !== trackKindForClip(TIMELINE_CLIP_KIND.audio)) return blocked(EDIT_BLOCKED.trackKind);
+  // 列そのものの事情は `trackPlacementIssue`（「置ける列」を数える側と同じ規則・#724 レビュー）。
+  // 手書きだと**隠した列を見落とす**（実際に落ちていた＝置けても動画に出ない部品が黙って生まれる）。
+  const trackIssue = trackPlacementIssue(doc, input.trackId, trackKindForClip(TIMELINE_CLIP_KIND.audio));
+  if (trackIssue) return blocked(trackIssue);
   // 音の出どころは高々1つ（`11 §8` V25）＝どちらも渡されたら置かない（黙って一方を選ばない）。
   if ((input.bundledBgmId == null) === (input.assetId == null)) return blocked(EDIT_BLOCKED.notFound);
   if (input.assetId != null && !doc.assets.some((a) => a.assetId === input.assetId)) {
