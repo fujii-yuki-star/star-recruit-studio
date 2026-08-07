@@ -35,6 +35,22 @@ export function clampTimelinePlayheadSec(doc: TimelineProject, sec: number): num
   return Math.min(Math.max(0, sec), Math.max(0, timelineDurationSec(doc)));
 }
 
+/**
+ * 再生位置を**フレーム単位**で動かす（#721・矢印キー）。
+ *
+ * ⚠️ **`いまの位置 + 1/fps` を足し込んではいけない**。二進小数の誤差が積もり、`floor(t*fps)` で
+ * 見せるフレーム（`quantizeToFrameSec`・書き出しと同じ格子）が**同じ所に留まったり飛んだり**する
+ * （fps=30 で 0 から6回進めると5フレーム目のまま、8回目は7を飛ばして8へ）。
+ * **フレーム番号で足してから秒へ戻す**＝押した回数と進んだ絵が一致する。
+ *
+ * 格子・実効 fps・クランプはこのモジュールの既存関数を通す（`11 §7.6.2`＝規則を層をまたいで書かない）。
+ */
+export function seekByFrames(doc: TimelineProject, fromSec: number, frames: number): number {
+  const fps = effectiveFps(doc);
+  const at = Math.round(quantizeToFrameSec(fromSec, fps) * fps);
+  return clampTimelinePlayheadSec(doc, (at + frames) / fps);
+}
+
 /** 再生位置を進めた結果。`ended` は動画の終わりに達したか（再生を止める合図）。 */
 export interface PlaybackTick {
   sec: number;

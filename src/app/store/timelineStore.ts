@@ -234,6 +234,12 @@ export interface TimelineState {
   duplicateSelectedClip: () => void;
   /** 選んでいるクリップを消す。 */
   removeSelectedClips: () => void;
+  /**
+   * **id を名指しで消す**（#721 レビュー）。まとめて消すときの確認は「聞いた時点の相手」を持つので、
+   * 確認を出している間に選択が変わっても**聞いた数と消える数がずれない**（`exploding` が相手を組で
+   * 持つのと同じ流儀）。`removeSelectedClips` はこれに選択を渡すだけ＝規則は1つ。
+   */
+  removeClipsByIds: (clipIds: readonly string[]) => void;
   /** 選んでいる見た目パターンの差し込み口に素材を入れる／外す（#632）。 */
   setSelectedClipAssetRef: (layerId: string, assetId: string | null) => void;
   /**
@@ -584,12 +590,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   trimSelectedClip: (edge, sec) => applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec)),
   duplicateSelectedClip: () => applyEdit(set, get, (doc, id) => duplicateClip(doc, id)),
 
-  removeSelectedClips: () => {
-    const { doc, selectedClipIds } = get();
-    if (!doc || selectedClipIds.length === 0) return;
+  removeSelectedClips: () => get().removeClipsByIds(get().selectedClipIds),
+
+  removeClipsByIds: (clipIds) => {
+    const doc = get().doc;
+    if (!doc || clipIds.length === 0) return;
     // **固定した列の部品が混ざっていたら断る**（#701 レビュー）＝`Ctrl+A` で全部選んでから消せてしまうと、
     // 固定が意味を失う。ほかの編集（動かす・複製する）が固定列を断るのと同じ扱い。
-    const checked = removeSelectedClipsChecked(doc, selectedClipIds);
+    const checked = removeSelectedClipsChecked(doc, clipIds);
     if (!checked.ok) {
       set({ editBlocked: checked.reason });
       return;

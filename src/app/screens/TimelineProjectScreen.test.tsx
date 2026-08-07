@@ -199,6 +199,9 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     fireEvent.click(screen.getByRole("button", { name: "あと" }), { shiftKey: true });
     expect(screen.queryByText("後ろへ")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("選んだ2個を消す"));
+    // まとめて消すのは**確認を挟む**（`06 §2` 統一規約1・ADR-0034 決定20・#721）。
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(2); // 押しただけでは消えない
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
     expect(useTimelineStore.getState().doc!.clips).toEqual([]);
   });
 
@@ -2375,5 +2378,188 @@ describe("TimelineProjectScreen: 中身を直す欄（#720）", () => {
     fireEvent.pointerUp(sv, { pointerId: 1, clientX: 60, clientY: 90 });
     expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
     expect((useTimelineStore.getState().doc?.clips[0].color ?? "").toLowerCase()).not.toBe("");
+  });
+});
+
+// キーボードと、開始秒・長さの数値欄（#721・ADR-0034 決定18/決定6）。
+// **どの入口からでも同じ結果**になることを画面ごしに固定する（キーだけ関門を素通りする、を作らない）。
+describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
+  const one = () =>
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 1, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }] });
+  const key = (k: string, init: Record<string, unknown> = {}) => fireEvent.keyDown(window, { key: k, ...init });
+  // ⚠️ `parentElement` で辿ると**行**に当たり、隣の欄の input を掴む（開始と長さは同じ行に並ぶ）。
+  // ラベル要素そのものを基準にする（`NumberField` は `<label>` が input を包む）。
+  const field = (name: string) =>
+    (screen.getByText(name).closest("label") as HTMLElement).querySelector("input") as HTMLInputElement;
+
+  it("Space で再生・停止する（押した要素が Space で反応するときは譲る）", () => {
+    one();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key(" ");
+    expect(useTimelineStore.getState().isPlaying).toBe(true);
+    key(" ");
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+    // ボタンにフォーカスがあるときは奪わない（消えたうえに再生が始まる、を作らない）。
+    fireEvent.keyDown(screen.getByRole("button", { name: "先頭へ" }), { key: " " });
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+
+  it("←→ で1フレームずつ、Shift で1秒ずつ動く", () => {
+    one();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("ArrowRight");
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(1 / 30, 5);
+    key("ArrowRight", { shiftKey: true });
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(1 + 1 / 30, 5);
+    key("ArrowLeft", { shiftKey: true });
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(1 / 30, 5);
+    // 先頭より前へは行かない（尺の外に位置を作らない）。
+    key("ArrowLeft", { shiftKey: true });
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+  });
+
+  it("セレクトに手がかかっているときは矢印を奪わない（その欄の値が変わらず位置だけ動く、を作らない）", () => {
+    one();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("置く列").closest("label")?.querySelector("select") as HTMLElement;
+    fireEvent.keyDown(select, { key: "ArrowRight" });
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+  });
+
+  it("Delete で消す（1つなら即時・取り消しで戻る）", () => {
+    one();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("Delete");
+    expect(useTimelineStore.getState().doc!.clips).toEqual([]);
+    act(() => { useTimelineStore.getState().undo(); });
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1); // 取り消しで戻る
+  });
+
+  it("Delete でまとめて消すときも確認を通す（キーだけ確認なし、を作らない）", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 3, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("Delete");
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    expect(useTimelineStore.getState().doc!.clips).toEqual([]);
+  });
+
+  it("確認を出している間は、キーで背後を触らせない（答えたのに何も起きない、を作らない）", () => {
+    // ⚠️ 3つ置く＝2つだと `Ctrl+A` が通っても選択数が変わらず、**関門の位置を確かめられない**。
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 3, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "い" },
+        { id: "clip_003", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 6, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "う" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("Delete");
+    expect(screen.getByText("選んだ2個の部品を消しますか？")).toBeInTheDocument();
+    // 確認は答えるまで残る。ここで背後の選択が解けると、「削除する」を押しても**何も消えない**。
+    key("Escape");
+    expect(useTimelineStore.getState().selectedClipIds).toHaveLength(2);
+    // 再生位置も動かさない（答えを求めている最中に別の操作を通さない）。
+    key("ArrowRight");
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+    // **全選択も通さない**＝通ると「2個」と聞いて全部消える（関門は `Ctrl+A` より前に無いといけない）。
+    key("a", { ctrlKey: true });
+    expect(useTimelineStore.getState().selectedClipIds).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    expect(useTimelineStore.getState().doc!.clips.map((c) => c.id)).toEqual(["clip_003"]);
+  });
+
+  it("色の面など、開いているものがある間もキーで背後を触らせない", () => {
+    one();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 色の面は自分で `Escape` を受け持つ（名乗る）だけで、画面の `overlayOpen` には出ない。
+    // 材料を `Escape` と揃えていないと、開いたまま `Delete` で背後の部品が消える。
+    fireEvent.click(screen.getByRole("button", { name: "文字の色" }));
+    key("Delete");
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+  });
+
+  it("確認は**聞いた相手**を消す（出したまま選び直しても、聞いた数と消える数がずれない）", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 3, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "い" },
+        { id: "clip_003", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 6, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "う" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("Delete");
+    expect(screen.getByText("選んだ2個の部品を消しますか？")).toBeInTheDocument();
+    // この確認は覆いではなく知らせの段なので、背後の選択は**プログラム上は**変えられる
+    //（帯を押す・別の入口から選び直す）。数だけ持っていると「2個」と聞いて1個/3個が消える。
+    act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_003"] }); });
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+    expect(useTimelineStore.getState().doc!.clips.map((c) => c.id)).toEqual(["clip_003"]);
+  });
+
+  it("長さを入れ直しても、欄に17桁が出ない（引き算の残差を残さない）", () => {
+    // 開始秒が端数のクリップ（つかんで置く・「再生位置へ」で普通に起きる）。
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0.32, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const len = field("長さ（秒）");
+    fireEvent.change(len, { target: { value: "2" } });
+    fireEvent.blur(len);
+    // `(0.32 + 2) - 0.32 = 1.9999999999999998` がそのまま欄に出ていた（#561 が消したはずの症状）。
+    expect(useTimelineStore.getState().doc!.clips[0].durationSec).toBe(2);
+  });
+
+  it("Delete も固定した列の部品は消せない（ボタンと同じ関門を通る）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("Delete");
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+    // **押してから断られる、にもしない**＝画面側の関門で止まるので、断り文は出ない
+    //（store の二重防御まで届くと `TIMELINE_EDIT_LOCKED` が立ち、消えないうえに理由だけ出る）。
+    expect(useTimelineStore.getState().editBlocked).toBeNull();
+    // 理由はボタンの側に、押す前から出ている（押せないことも一緒に見る）。
+    expect(screen.getByRole("button", { name: "消す" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "消す" }).getAttribute("title")).toContain("固定を外すか");
+  });
+
+  it("開始・長さを数値で揃えられる（ボタンだけでは「3.0秒から」に合わせられない）", () => {
+    one();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const start = field("開始（秒）");
+    fireEvent.change(start, { target: { value: "3" } });
+    fireEvent.blur(start);
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(3);
+    const len = field("長さ（秒）");
+    fireEvent.change(len, { target: { value: "2" } });
+    fireEvent.blur(len);
+    // 長さは**終わりの端**を動かす＝始まりは動かない。
+    expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ startSec: 3, durationSec: 2 });
+  });
+
+  it("数値欄も固定した列では触れない", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(field("開始（秒）")).toBeDisabled();
+    expect(field("長さ（秒）")).toBeDisabled();
   });
 });
