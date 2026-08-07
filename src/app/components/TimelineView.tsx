@@ -1,4 +1,4 @@
-import { TIMELINE_ZOOM_LEVELS } from '../../domain/constants';
+import { TIMELINE_LABEL_W_PX, TIMELINE_ZOOM_LEVELS } from '../../domain/constants';
 // 目盛りの粗さ・既定の段は**タイムライン編集と共有**（同名の規則を2つ持たない・#686 レビュー）。
 import { DEFAULT_ZOOM_INDEX, tickStepSec } from '../../domain/timeline/zoom';
 import { useState } from "react";
@@ -66,7 +66,8 @@ export function TimelineView({ timeline, playheadSec, onSeek }: TimelineViewProp
   const canZoomIn = zoomIndex < ZOOM_LEVELS.length - 1;
 
   return (
-    <div className="timeline" data-testid="timeline-view">
+    // 列名の欄の幅は**タイムライン編集と同じ値**を流し込む（CSS の既定に頼ると片方だけ変わる・#742 レビュー）。
+    <div className="timeline" data-testid="timeline-view" style={{ ["--timeline-label-w" as string]: `${TIMELINE_LABEL_W_PX}px` }}>
       <div className="timeline-toolbar">
         <span className="text-sm text-muted">
           合計 {clockLabel(timeline.totalSec)}・場面 {timeline.scenes.length}個

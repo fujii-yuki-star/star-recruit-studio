@@ -476,6 +476,9 @@ domain の純粋関数 **`bakeTimelineProject`（`src/domain/timeline/bake.ts`�
 - **表示倍率の段は `domain/constants.ts` に1つ**（`TIMELINE_ZOOM_LEVELS`・#686）＝タイムライン編集と
   場面形式の見わたす画面が**同じ刻み**を読む（ADR-0034 決定13。写すと片方だけ変わる）。
   全体表示の段・段送り・錨点の位置合わせは `domain/timeline/zoom.ts`（純粋関数）。
+  **列の名前の欄の幅も同じ扱い**（`TIMELINE_LABEL_W_PX`・#742 レビュー）＝**両方の画面が流し込む**。
+  CSS の既定に片方だけ頼ると、値を変えたときに見た目が黙ってずれる（全体表示と錨点の計算はこの値を
+  引くので、計算と描画が食い違う）。
 - **格子・実効 fps・位置のクランプは `domain/timeline/playback.ts` に1つずつ**（`quantizeToFrameSec` / `effectiveFps` / `clampTimelinePlayheadSec`）。描画（`frameTimeSec`）と再生が同じものを通る＝同じ規則を層をまたいで書かない（§6）。
   - **位置を1フレームずつ動かすのも同じ場所から**（`seekByFrames`・#721）＝**フレーム番号で足してから秒へ戻す**。
     `いまの位置 + 1/fps` を足し込むと二進小数の誤差が積もり、`floor(t*fps)` で見せるフレームが
