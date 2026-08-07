@@ -14,7 +14,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, placeableAudioTracks, placeableVisualTracks, visualPlacementIssue } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, moveClipIssue, placeableAudioTracks, placeableVisualTracks, trimClipIssue, visualPlacementIssue } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation } from "../../domain/constants";
@@ -28,6 +28,7 @@ import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
 import type { CropMode, TimelineClipKind } from "../../domain/enums";
+import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
@@ -951,6 +952,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     };
     removeRef.current = requestRemoveSelected;
   });
+  /**
+   * **帯を掴んでいる間**（#686・ADR-0034 決定9/10）。作法は欄のドラッグ（ADR-0033 段階3）と同じ。
+   *
+   * 置けない所では**寄せない**＝ゴーストの色で知らせ、離したら**元の位置へ戻す**（決定10）。
+   * 判定は domain の `moveClipIssue`／`trimClipIssue`＝**ゴーストの色と離した結果が同じ規則**。
+   */
+  const [clipDrag, setClipDrag] = useState<
+    { clipId: string; mode: "move" | "trim-start" | "trim-end"; sec: number; issue: EditBlockedReason | null } | null
+  >(null);
+
   // **つかんで置く**（#684）の道具。使うのは下の `resolveDrop` ほか。
   // ドラッグの作法は共有（掴む場所ごとに書き分けない・ADR-0034 決定9）。
   const beginDrag = usePointerDrag();
@@ -1014,6 +1025,56 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 置けるかどうかは domain の `visualPlacementIssue` で見る＝**ゴーストの色と、離したときの結果が同じ判定**
    * （置けそうに見えたのに断られる、を作らない）。置けないまま離したら**元へ戻す**＝寄せない（決定10）。
    */
+
+  const trackOf = (trackId: string) => doc?.tracks.find((t) => t.id === trackId);
+  /**
+   * 掴んでいる間の帯の位置と長さ（#686）。**離すまで文書は変えない**ので、見せかけだけを動かす。
+   * 端の縮めは `applyClipEdge` と同じ下限に当たるので、見た目も同じ所で止まる。
+   */
+  const dragStyleOf = (c: TimelineClip): { left: string; width: string } => {
+    const d = clipDrag?.clipId === c.id ? clipDrag : null;
+    let startSec = c.startSec;
+    let endSec = clipEndSec(c);
+    if (d?.mode === "move") { const len = endSec - startSec; startSec = d.sec; endSec = d.sec + len; }
+    else if (d?.mode === "trim-start") startSec = Math.min(d.sec, endSec - TIMELINE_MIN_CLIP_SEC);
+    else if (d?.mode === "trim-end") endSec = Math.max(d.sec, startSec + TIMELINE_MIN_CLIP_SEC);
+    return { left: `${pxPerSec * startSec}px`, width: `${pxPerSec * (endSec - startSec)}px` };
+  };
+
+  /**
+   * 帯を掴む（#686）。`mode` で本体（動かす）と端（縮める）を分ける。
+   *
+   * ⚠️ **`pxPerSec` と選択は掴んだ時点の値**を閉じ込めず、動かすたびに store の今の値を読む
+   * （倍率が変わっても、取り消しが走っても、掴んでいる相手を見失わない）。
+   */
+  const beginClipDrag = (e: ReactPointerEvent, clipId: string, mode: "move" | "trim-start" | "trim-end"): void => {
+    const doc0 = useTimelineStore.getState().doc;
+    const clip0 = doc0?.clips.find((c) => c.id === clipId);
+    if (!doc0 || !clip0) return;
+    const startX = e.clientX;
+    const origin = mode === "trim-end" ? clipEndSec(clip0) : clip0.startSec;
+    const at = (ev: PointerEvent): number => Math.max(0, origin + (ev.clientX - startX) / pxPerSec);
+    const issueOf = (sec: number): EditBlockedReason | null =>
+      mode === "move"
+        ? moveClipIssue(doc0, clipId, { startSec: sec })
+        : trimClipIssue(doc0, clipId, mode === "trim-start" ? "start" : "end", sec);
+    beginDrag(e, {
+      onStart: () => selectClip(clipId), // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する
+      onMove: (ev) => {
+        const sec = at(ev);
+        setClipDrag({ clipId, mode, sec, issue: issueOf(sec) });
+      },
+      onEnd: (ev, started) => {
+        if (!started) return; // 動かしていない＝ただのクリック（選択は `onClick` が受ける）
+        const sec = at(ev);
+        setClipDrag(null);
+        if (issueOf(sec)) return; // 置けない所では**何もしない**＝元の位置のまま（寄せない・決定10）
+        if (mode === "move") moveSelectedClip({ startSec: sec });
+        else trimSelectedClip(mode === "trim-start" ? "start" : "end", sec);
+      },
+      onCancel: () => setClipDrag(null), // `Escape` でやめたら元のまま
+    });
+  };
 
   /** 落とした点から「どこへ置くか」を決める。**列が先**（下の並びは仕上がり確認に重ならない）。 */
   const resolveDrop = (kind: VisualKind, assetId: string | undefined, x: number, y: number): DragPlace["drop"] => {
@@ -1405,8 +1466,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           <button
                             key={c.id}
                             type="button"
-                            className={`timeline-clip ${CLIP_KIND_CLASS[c.kind]}${selectedClipIds.includes(c.id) ? " timeline-clip--selected" : ""}`}
-                            style={{ left: `${pxPerSec * c.startSec}px`, width: `${pxPerSec * (clipEndSec(c) - c.startSec)}px` }}
+                            className={[
+                              "timeline-clip",
+                              CLIP_KIND_CLASS[c.kind],
+                              selectedClipIds.includes(c.id) ? "timeline-clip--selected" : "",
+                              // 掴めることを見た目で示す（`cursor: grab`・CSS は用意済みだった）。
+                              trackOf(c.trackId)?.locked ? "" : "timeline-clip--editable",
+                              clipDrag?.clipId === c.id ? "timeline-clip--dragging" : "",
+                              clipDrag?.clipId === c.id && clipDrag.issue ? "drop-target--blocked" : "",
+                            ].filter(Boolean).join(" ")}
+                            // 掴んでいる間は**その場で動かして見せる**（離すまで文書は変えない）。
+                            style={dragStyleOf(c)}
+                            onPointerDown={(e) => { if (!trackOf(c.trackId)?.locked) beginClipDrag(e, c.id, "move"); }}
                             // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
                             // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
                             title={clipRangeTitle(clipLabel(c), c.startSec, clipEndSec(c))}
@@ -1416,6 +1487,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             onContextMenu={(e) => openClipMenu(e, c.id)}
                           >
                             {clipLabel(c)}
+                            {/* 端を掴んで縮める（決定9）。選んだ帯にだけ出す＝隣の当たり判定を常時食わない。 */}
+                            {selectedClipIds.includes(c.id) && !trackOf(c.trackId)?.locked && (
+                              <>
+                                <span
+                                  className="timeline-clip-handle timeline-clip-handle--left"
+                                  onPointerDown={(e) => { e.stopPropagation(); beginClipDrag(e, c.id, "trim-start"); }}
+                                />
+                                <span
+                                  className="timeline-clip-handle timeline-clip-handle--right"
+                                  onPointerDown={(e) => { e.stopPropagation(); beginClipDrag(e, c.id, "trim-end"); }}
+                                />
+                              </>
+                            )}
                           </button>
                         ))}
                       {/* 帯の操作を開く「⋮」（#701）＝列の行と同じ逃げ道。
