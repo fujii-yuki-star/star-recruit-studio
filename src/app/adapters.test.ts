@@ -645,3 +645,45 @@ describe("buildPrecheckItems（はみ出しの説明を原因で出し分ける�
     expect(detail([mk("scene_001", 1, true)])).toContain(subtitleOverflowMessage(true).split("。")[1]);
   });
 });
+
+// 切り替えと表示時間（#727）。**短くなったことを黙らせない**（ADR-0026④・§2-5）。
+describe("buildPrecheckItems：切り替えが表示時間に収まらない（#727）", () => {
+  const sceneOf = (durationSec: number, fadeSec?: number): Scene => ({
+    ...freeScene(undefined),
+    sceneId: `scene_${durationSec}_${fadeSec ?? 0}`,
+    durationSec,
+    ...(fadeSec != null ? { transition: { in: "fade", durationSec: fadeSec } } : {}),
+  } as Scene);
+  const ids = (items: ReturnType<typeof buildPrecheckItems>) => items.map((i) => i.id);
+
+  it("両側の合計だけが尺を超える帯を知らせる（飲み込まれる警告では拾えない範囲）", () => {
+    // 0.8秒の場面に両側 0.5 秒＝合計 1.0 秒。切り替え単体は尺未満なので `transitionSwallow` は出ない。
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(0.8, 0.5), sceneOf(5, 0.5)], assets, [freeTemplate]);
+    expect(ids(items)).toContain("transitionShortened");
+    expect(ids(items)).not.toContain("transitionSwallow");
+    const item = items.find((i) => i.id === "transitionShortened")!;
+    expect(item.detail).toContain("短くしています");
+    expect(item.detail).toContain("表示時間を長くする"); // 次の行動（§2-5）
+  });
+
+  it("収まっているときは出さない（余計な警告を出さない）", () => {
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(5, 0.5), sceneOf(5, 0.5)], assets, [freeTemplate]);
+    expect(ids(items)).not.toContain("transitionShortened");
+  });
+
+  it("飲み込まれるだけのときは、こちらの警告を出さない（同じ話を2行並べない）", () => {
+    // 0.3秒の場面に 0.5 秒＝切り替えが尺以上＝`transitionSwallow` の担当。
+    // 予算（両側で分け合う上限）は握っていないので、こちらは黙る。
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(0.3, 0.5)], assets, [freeTemplate]);
+    expect(ids(items)).toContain("transitionSwallow");
+    expect(ids(items)).not.toContain("transitionShortened");
+  });
+
+  it("該当の場面へ飛べる（理由を出して終わりにしない）", () => {
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(0.8, 0.5), sceneOf(5, 0.5)], assets, [freeTemplate]);
+    const item = items.find((i) => i.id === "transitionShortened")!;
+    // `warning` だと操作列が「—」になり `sceneId` が読まれない＝飛べない（隣の項目と同じ理由で `action`）。
+    expect(item.severity).toBe("action");
+    expect(item.sceneId).toBe("scene_0.8_0.5"); // 上限を握っている場面
+  });
+});

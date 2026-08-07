@@ -7,7 +7,7 @@ import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/projec
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
-import { swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
+import { shortenedTransitionSceneNumbers, swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
 import { subtitleOverflowsCanvas } from "../renderer/layout";
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
@@ -287,6 +287,26 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       severity: "action",
       action: "直す",
       sceneId: scenes[swallowed[0] - 1]?.sceneId,
+    });
+  }
+
+  // 切り替えが場面の長さに入らず**短くなった**場面（#727・ADR-0026④）。上の「飲み込まれる」は
+  // 「切り替え ≥ 場面尺」しか見ないので、**両側の合計だけが尺を超える帯**（既定なら 0.5〜1.0 秒の場面）は
+  // 拾えず**無言**だった。黙って縮めない（§2-5）＝縮めたことと、直し方を出す。
+  const shortened = shortenedTransitionSceneNumbers(scenes);
+  // 飲み込まれる場面は上で言っているので、そちらに出た番号はここでは繰り返さない（同じ場面に2つ出さない）。
+  const shortenedOnly = shortened.filter((n) => !swallowed.includes(n));
+  if (shortenedOnly.length > 0) {
+    items.push({
+      id: "transitionShortened",
+      label: "切り替えと表示時間",
+      detail: `${fmtScenes(shortenedOnly)}は、入るときと出るときの切り替えが表示時間に収まらないので短くしています。設定どおりの長さにするには、表示時間を長くするか、切り替えを短く（または「なし」に）してください。`,
+      // `warning` だと PrecheckScreen は操作列に「—」を出すだけで `sceneId` が読まれず、
+      // **該当場面へ飛べない**（`transitionSwallow` が同じ理由で `action` を選んでいる）。
+      // 書き出しは止めない（`blocksExport` を付けない）＝「直せば良くなる」警告（`15 §…`）。
+      severity: "action",
+      action: "直す",
+      sceneId: scenes[shortenedOnly[0] - 1]?.sceneId,
     });
   }
 
