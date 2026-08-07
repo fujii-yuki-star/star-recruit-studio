@@ -856,3 +856,53 @@ describe('取り込み中は文書を入れ替えない（#724）', () => {
     expect(useTimelineStore.getState().doc?.projectId).toBe('proj_20260728_001');
   });
 });
+
+// 見た目パターンを置く経路（#724）。**成功する経路のテストが store・画面のどちらにも無かった**
+//（あったのは「書き出し中は選べない」という断りだけ）＝置けなくなっても気づけない状態だった。
+describe('見た目パターンを置く（#724）', () => {
+  const tmpl = {
+    schemaVersion: '1.0', templateId: 'tmpl_001', name: '見本', category: 'photo_intro',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+    layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 }],
+    defaults: { durationSec: 7 },
+  } as unknown as Parameters<ReturnType<typeof useTimelineStore.getState>['addTemplateClip']>[0]['template'];
+
+  beforeEach(() => {
+    useTimelineStore.setState({
+      doc: doc({ clips: [], tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }] }),
+      selectedClipIds: [], playheadSec: 0, editBlocked: null,
+      exportRun: { phase: EXPORT_RUN_PHASE.idle, percent: 0, message: null, cancelling: false },
+    });
+  });
+
+  it('置ける（長さは見た目パターンが決める＝場面形式と同じ関数）', () => {
+    useTimelineStore.getState().addTemplateClip({ template: tmpl, trackId: 'track_001', startSec: 2 });
+    const clips = useTimelineStore.getState().doc!.clips;
+    expect(clips).toHaveLength(1);
+    expect(clips[0]).toMatchObject({ kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_001', trackId: 'track_001', startSec: 2, durationSec: 7 });
+  });
+
+  it('置いたらそのまま選ばれる（続けて中身を直せる）', () => {
+    useTimelineStore.getState().addTemplateClip({ template: tmpl, trackId: 'track_001', startSec: 0 });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([useTimelineStore.getState().doc!.clips[0].id]);
+  });
+
+  it('取り消しで戻る（置いたことが履歴に積まれている）', () => {
+    useTimelineStore.getState().addTemplateClip({ template: tmpl, trackId: 'track_001', startSec: 0 });
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(0);
+  });
+
+  it('塞がっているところへは置かず、理由を出す（寄せない）', () => {
+    useTimelineStore.getState().addTemplateClip({ template: tmpl, trackId: 'track_001', startSec: 0 });
+    useTimelineStore.getState().addTemplateClip({ template: tmpl, trackId: 'track_001', startSec: 3 });
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_OVERLAP');
+  });
+
+  it('音の列へは置かない（置いても映らない部品を作らない）', () => {
+    useTimelineStore.getState().addTemplateClip({ template: tmpl, trackId: 'track_002', startSec: 0 });
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(0);
+    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_TRACK_KIND');
+  });
+});

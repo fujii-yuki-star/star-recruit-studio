@@ -571,26 +571,50 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return layoutTimelineAt(doc, frameTimeSec(doc, playheadSec), { templateOf: (id) => byId.get(id), assetSizeOf: (id) => assetSizes[id] });
   }, [doc, playheadSec, templates, assetSizes]);
 
+  /**
+   * **いま測っている最中**の素材（#724）。**依存から `assetSizes` を外すため**に持つ。
+   *
+   * ⚠️ 以前は `assetSizes` を依存に入れており、この効果は**自分の出力**を依存にしていた＝1件測れるたびに
+   * 後片づけが走って進行中の計測を全部無効化し、**未計測の素材ぶん `new Image()` を作り直していた**
+   * （素材 N 件で最悪 O(N²)。実測＝4件で10回）。
+   *
+   * 持つのは「始めた」ではなく**「測っている最中」**（着地したら必ず外す）。「始めた」を残す形にすると、
+   * **同じ動画を開き直したとき**（`assetSizes` は空へ戻るのに印は残る）**二度と測らず**、
+   * 「枠いっぱいに映す」が黙って効かなくなる。済みかどうかは `assetSizes` が持ち、ここは重複起動だけを防ぐ
+   * ＝2つの記録が食い違わない。
+   */
+  const measuringRef = useRef<Set<string>>(new Set());
+
   // 素材の**実寸**を測る（#634）。「枠いっぱいに映す」は素材の縦横比が要るが、保存データには
   // 絵の大きさが無い（動画だけ持っている）ので、表示に使っている src をブラウザで測って store へ入れる。
   // 測れたら描き直す＝プレビューと書き出しが同じ値を見る（ADR-0001）。
   useEffect(() => {
-    let alive = true;
+    const docId = doc?.projectId;
+    if (!docId) return;
+    const measuring = measuringRef.current;
     for (const [assetId, src] of Object.entries(assetSrcById)) {
-      if (assetSizes[assetId] || !src) continue;
+      if (!src || measuring.has(assetId)) continue;
+      // 済みの判定は**依存に足さずに今の値を見る**（上の ⚠️ の理由）。
+      if (useTimelineStore.getState().assetSizes[assetId]) continue;
+      measuring.add(assetId);
       const img = new Image();
+      // **着地したら必ず外す**（成否によらず）＝残すと開き直しても測り直せない。
       img.onload = () => {
-        if (alive && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        measuring.delete(assetId);
+        // 待っている間に別の動画になっていたら書かない（そちらの素材に古い大きさが混ざる）。
+        if (useTimelineStore.getState().doc?.projectId !== docId) return;
+        // 読めたのに大きさが取れなかった（0×0）ときは入れない＝失敗と同じ扱い。
+        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
           setAssetSize(assetId, { w: img.naturalWidth, h: img.naturalHeight });
         }
       };
       // 測れないもの（動画など）は入れない＝そのクリップは「辺を隠す」表示のまま（画面が理由を出す）。
+      // 外しておけば、この効果が次に走ったとき（別の素材が増えた・画面へ戻った）もう一度試す
+      // ＝一度の失敗を永久に固定しない。
+      img.onerror = () => { measuring.delete(assetId); };
       img.src = src;
     }
-    return () => {
-      alive = false;
-    };
-  }, [assetSrcById, assetSizes, setAssetSize]);
+  }, [assetSrcById, doc?.projectId, setAssetSize]);
 
   // 見た目が見つからないクリップは**描かれない**（`layoutTimelineAt`）。黙って絵だけ消さずに知らせる（§2-5・#547 と同じ筋）。
   const missingTemplateCount = useMemo(() => {
