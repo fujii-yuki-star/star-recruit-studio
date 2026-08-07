@@ -273,7 +273,8 @@ describe("TimelineProjectScreen: 再生まわりのレビュー指摘（/canon-c
   it("何も置いていないときは、再生を押せない理由を出す（無言にしない）", () => {
     open({ clips: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText("再生").getAttribute("title")).toContain("まだ部品を置いていない");
+    // 理由だけでなく**次の行動**まで言う（§2-5・#723）。
+    expect(screen.getByText("再生").getAttribute("title")).toContain("部品を置くと再生できます");
   });
 });
 
@@ -2561,5 +2562,69 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(field("開始（秒）")).toBeDisabled();
     expect(field("長さ（秒）")).toBeDisabled();
+  });
+});
+
+// 案内の指す先が実在するか（#723・ADR-0034 決定5）。**文言の中で名指ししたものが、この画面にある**ことを固定する。
+// 文言だけ直しても、指す先が消えれば元の行き止まりへ戻る＝両方を1つのテストで見る。
+describe("TimelineProjectScreen: 案内が行き止まりでない（#723）", () => {
+  it("音が見つからないときの案内が指す「鳴らす音」の欄が実在する", () => {
+    open({
+      assets: [],
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 5, assetId: "asset_missing" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("「鳴らす音」で選び直す"))).toBe(true);
+    expect(screen.getByText("鳴らす音")).toBeInTheDocument(); // 指した先が同じ画面にある
+  });
+
+  it("鳴らす音を選び直せる（同梱BGM と、この動画が持っている音）", () => {
+    open({
+      assets: [{ assetId: "asset_001", assetType: "bgm", displayName: "曲", filePath: "assets/asset_001.mp3" }],
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 5, assetId: "asset_missing", volume: 0.5 }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("鳴らす音").closest("label")?.querySelector("select") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "asset:asset_001" } });
+    // 消して置き直すのと違い、**音量などの設定は残る**（この欄がある理由）。
+    expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ assetId: "asset_001", volume: 0.5 });
+  });
+
+  it("音が見つからない部品では、別の曲が選ばれているように見せない（#734 レビュー）", () => {
+    open({
+      assets: [],
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 5, assetId: "asset_missing" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("鳴らす音").closest("label")?.querySelector("select") as HTMLSelectElement;
+    // ⚠️ `value` に合う `option` が無いと、ブラウザは**先頭の候補を選択済みに見せる**＝
+    // 「見つかりません」と警告しているのに、欄では別の曲が入っているように読める（§2-5）。
+    expect(select.selectedOptions[0]?.textContent).toContain("見つかりません");
+    expect(select.value).toBe("asset:asset_missing"); // いまの値が保たれている（別の音に化けない）
+  });
+
+  it("何も置いていないときの案内が指すボタンが実在する", () => {
+    open({ clips: [] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/「文字を置く」を押すと再生位置へ置けます/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "文字を置く" })).toBeInTheDocument();
+  });
+
+  it("置ける列が無いときの案内は、固定だけでなく非表示も言う（絞り込みが両方を除いている）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }, { id: "track_002", kind: TRACK_KIND.audio, hidden: true }],
+      clips: [],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 「固定を外してください」だけだと、言われたとおりにしても直らない。
+    for (const el of screen.getAllByText(/置ける.*列がありません/)) {
+      expect(el.textContent).toContain("固定・非表示");
+    }
   });
 });

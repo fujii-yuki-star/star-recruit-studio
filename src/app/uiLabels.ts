@@ -527,7 +527,9 @@ export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
     "見た目パターンが見つからない部品があります。そのままでは動画に出ません。見た目パターンを読み込み直すか、その部品を置き直してください",
   TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN:
     "連動する読み上げが見つからない字幕があります。そのままでは動画に出ません。連動先を選び直すか、字幕の文を入れてください",
-  TIMELINE_EXPORT_VOLUME_POINTS_TOO_MANY: `音量の変化の点が多すぎる部品があります。1つの部品に置けるのは${VOLUME_POINTS_MAX}個までです。点を減らすか、部品を分けてください`,
+  // ⚠️ 「部品を分けてください」は書かない（#723）＝**分割はまだ実装していない**（ADR-0034 段階4）。
+  // 実在しない操作を案内すると行き止まりになる（決定5）。分割が入ったらここへ足す。
+  TIMELINE_EXPORT_VOLUME_POINTS_TOO_MANY: `音量の変化の点が多すぎる部品があります。1つの部品に置けるのは${VOLUME_POINTS_MAX}個までです。いらない点を外してください`,
   TIMELINE_EXPORT_ASSET_UNREADABLE:
     "素材のファイルを読めませんでした。そのままでは動画にその絵が出ません。素材を取り込み直すか、その部品を置き直してください",
 };

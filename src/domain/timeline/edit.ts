@@ -798,6 +798,41 @@ export function setClipSourceStart(doc: TimelineProject, clipId: string, sec: nu
   return ok(withClip(doc, patched));
 }
 
+/**
+ * **音の部品の音源を選び直す**（#695・#723）。同梱BGM か、持ち込んだ音の素材のどちらか。
+ *
+ * これが無いと、素材が見つからない部品に対して「音を選び直してください」と案内しながら**選び直す手段が
+ * 無い**＝行き止まり（ADR-0034 決定5）。読み上げは「声を作る」で作り直せるので非対称でもあった。
+ * 消して置き直す道はあるが、それだと**速さ・音量・フェード・音量の変化がすべて消える**。
+ *
+ * **音の出どころは高々1つ**（`§8` V25）＝入れ替えるときは**もう一方を必ず落とす**（両方持つ部品を作らない）。
+ * 素材は**この動画が持っているもの**だけ（存在しない参照を作らない）。
+ */
+export function setClipAudioSource(
+  doc: TimelineProject,
+  clipId: string,
+  source: { bundledBgmId: BundledBgmId } | { assetId: string },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // **種別を先に見る**（#734 レビュー）＝そもそも音を持たない部品に対して「固定を外してください」と
+  // 返すと、外しても直らない案内になる（§2-5）。兄弟の `setVisualClipContent` も項目違いが先。
+  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = { ...clip };
+  if ('bundledBgmId' in source) {
+    if (clip.bundledBgmId === source.bundledBgmId) return ok(doc); // 何も変わらない＝取り消しが空振りしない
+    next.bundledBgmId = source.bundledBgmId;
+    delete next.assetId; // V25＝両方は持たせない
+  } else {
+    if (!doc.assets.some((a) => a.assetId === source.assetId)) return blocked(EDIT_BLOCKED.notFound);
+    if (clip.assetId === source.assetId) return ok(doc);
+    next.assetId = source.assetId;
+    delete next.bundledBgmId;
+  }
+  return ok(withClip(doc, next));
+}
+
 /** 音量（0〜1.5・`null` で「動画全体に合わせる」＝継承へ戻す・`11 §6`）。 */
 export function setClipVolume(doc: TimelineProject, clipId: string, volume: number | null): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
