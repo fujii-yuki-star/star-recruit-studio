@@ -815,9 +815,10 @@ export function setClipAudioSource(
 ): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
-  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
-  // 種別で断る（読み上げ・絵の部品には音源が無い＝`11 §7.6.3.2` の「鳴る音を持たない部品には置けない」）。
+  // **種別を先に見る**（#734 レビュー）＝そもそも音を持たない部品に対して「固定を外してください」と
+  // 返すと、外しても直らない案内になる（§2-5）。兄弟の `setVisualClipContent` も項目違いが先。
   if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.contentField);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   const next = { ...clip };
   if ('bundledBgmId' in source) {
     if (clip.bundledBgmId === source.bundledBgmId) return ok(doc); // 何も変わらない＝取り消しが空振りしない

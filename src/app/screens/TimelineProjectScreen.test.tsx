@@ -2594,6 +2594,21 @@ describe("TimelineProjectScreen: 案内が行き止まりでない（#723）", (
     expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ assetId: "asset_001", volume: 0.5 });
   });
 
+  it("音が見つからない部品では、別の曲が選ばれているように見せない（#734 レビュー）", () => {
+    open({
+      assets: [],
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 5, assetId: "asset_missing" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const select = screen.getByText("鳴らす音").closest("label")?.querySelector("select") as HTMLSelectElement;
+    // ⚠️ `value` に合う `option` が無いと、ブラウザは**先頭の候補を選択済みに見せる**＝
+    // 「見つかりません」と警告しているのに、欄では別の曲が入っているように読める（§2-5）。
+    expect(select.selectedOptions[0]?.textContent).toContain("見つかりません");
+    expect(select.value).toBe("asset:asset_missing"); // いまの値が保たれている（別の音に化けない）
+  });
+
   it("何も置いていないときの案内が指すボタンが実在する", () => {
     open({ clips: [] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);

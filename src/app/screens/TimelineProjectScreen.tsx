@@ -690,6 +690,22 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 読み上げを置ける列（音の列）。
   // この動画が持っている音の素材（焼き出しで運ばれたものなど）。
   const audioAssets = doc?.assets.filter((a) => a.assetType === ASSET_TYPE.bgm) ?? [];
+  /**
+   * 「鳴らす音」の欄が指す値と、それが**候補に無い**か（#734 レビュー）。
+   *
+   * 候補に無い値をそのまま `<select value>` へ渡すと、ブラウザは**先頭の候補を選択済みに見せる**＝
+   * 「音が見つかりません」と警告しているのに、欄では別の曲が入っているように読める。
+   * 素材の差し込み口の `unselectableCurrent` と同じ扱い（名前だけ出して選び直せる）。
+   */
+  const audioSourceValue = selected?.bundledBgmId
+    ? `bgm:${selected.bundledBgmId}`
+    : selected?.assetId
+      ? `asset:${selected.assetId}`
+      : "";
+  const audioSourceMissing =
+    audioSourceValue !== "" &&
+    !BGM_CATALOG.some((b) => `bgm:${b.id}` === audioSourceValue) &&
+    !audioAssets.some((a) => `asset:${a.assetId}` === audioSourceValue);
   // 置ける絵の素材（#684）。判定は**自由配置の差し込み口と同じ関数**（ADR-0030 追補＝一本化）。
   // **動画は出さない**＝置けても書き出しの手前で断られる（選べるのに使えない選択肢を並べない・`06 §12.1`）。
   const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType) && a.assetType !== ASSET_TYPE.video) ?? [];
@@ -1600,7 +1616,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <span>鳴らす音</span>
                   <select
                     className="select"
-                    value={selected.bundledBgmId ? `bgm:${selected.bundledBgmId}` : selected.assetId ? `asset:${selected.assetId}` : ""}
+                    value={audioSourceValue}
                     {...editGuard()}
                     onChange={(e) => {
                       const v = e.target.value;
@@ -1609,7 +1625,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     }}
                   >
                     {/* いまの状態が読めるように、選ばれていない状態も出す（空欄で固まって見えない）。 */}
-                    {!selected.bundledBgmId && !selected.assetId && <option value="">選ばれていません</option>}
+                    {audioSourceValue === "" && <option value="">選ばれていません</option>}
+                    {/* ⚠️ **いま指している音が候補に無いとき**（＝この欄が救おうとしている「音が見つからない」
+                        状態そのもの）は、その値の option を出す。無いと `<select>` は**先頭の候補を選択済みに
+                        見せる**ので、「見つかりません」と警告しているのに欄では別の曲が入っているように読める
+                        （§2-5・黙って別のものに差し替えない）。素材の差し込み口と同じ流儀（`unselectableCurrent`）。 */}
+                    {audioSourceMissing && (
+                      <option value={audioSourceValue} disabled>元の音が見つかりません</option>
+                    )}
                     {BGM_CATALOG.map((b) => (
                       <option key={b.id} value={`bgm:${b.id}`}>{b.title}</option>
                     ))}

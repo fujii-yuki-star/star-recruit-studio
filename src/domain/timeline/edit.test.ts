@@ -623,7 +623,13 @@ describe('setClipAudioSource（鳴らす音を選び直す・#695/#723）', () =
     const d = audioDoc();
     d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.text, text: 'あ' };
     expect(setClipAudioSource(d, 'clip_001', { assetId: 'asset_001' })).toEqual({ ok: false, reason: EDIT_BLOCKED.contentField });
+  });
 
+  it('**種別違いは固定より先に断る**（外しても直らない案内を出さない・#734 レビュー）', () => {
+    const d = audioDoc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.text, text: 'あ' };
+    d.tracks[1].locked = true; // 両方当てはまる状態
+    expect(setClipAudioSource(d, 'clip_001', { assetId: 'asset_001' })).toEqual({ ok: false, reason: EDIT_BLOCKED.contentField });
   });
 });
 
