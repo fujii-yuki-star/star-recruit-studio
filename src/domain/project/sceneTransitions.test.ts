@@ -277,6 +277,15 @@ describe('切り替えは場面の長さに収まる（#727）', () => {
     expect(shortenedTransitionSceneNumbers([sc(10), sc(0.8, fadeT(0.5)), sc(5, fadeT(0.5))])).toEqual([2]);
   });
 
+  it('**動画の頭が短くて切られたとき**も知らせる（上限は予算だけではない・#727 レビュー）', () => {
+    // `[0.4, 0.8, 5]`＝1つ目の境界は「それまでの結合結果（0.4秒）」で頭打ちになり、
+    // 予算（`(0.8−ε)/2`）とは一致しない＝予算だけを見ていると**この短縮を誰も知らせない**。
+    const scenes = [sc(0.4), sc(0.8, fadeT(0.5)), sc(5, fadeT(0.5))];
+    const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), wants(scenes));
+    expect(steps[0].durationSec).toBeCloseTo(0.4 - EPS, 10); // 結合結果で頭打ち
+    expect(shortenedTransitionSceneNumbers(scenes)).toContain(1); // 伸ばす先＝それまでの場面
+  });
+
   it('飲み込まれるだけの場面はここでは挙げない（そちらの警告の担当）', () => {
     // `[5, 0.3(fade 0.5)]`＝切り替えが尺以上。予算は握っていない（片側だけなので `Infinity`）。
     expect(shortenedTransitionSceneNumbers([sc(5), sc(0.3, fadeT(0.5))])).toEqual([]);

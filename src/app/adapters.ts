@@ -299,7 +299,9 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   if (shortenedOnly.length > 0) {
     items.push({
       id: "transitionShortened",
-      label: "切り替えと表示時間",
+      // 見出しは隣（飲み込まれる＝`transitionSwallow`）と**変える**＝両方同時に立ちうるので、
+      // 同じ見出しの行が2つ並ぶと原因の違いが読めない（#727 レビュー）。
+      label: "切り替えの長さ",
       detail: `${fmtScenes(shortenedOnly)}は、入るときと出るときの切り替えが表示時間に収まらないので短くしています。設定どおりの長さにするには、表示時間を長くするか、切り替えを短く（または「なし」に）してください。`,
       // `warning` だと PrecheckScreen は操作列に「—」を出すだけで `sceneId` が読まれず、
       // **該当場面へ飛べない**（`transitionSwallow` が同じ理由で `action` を選んでいる）。

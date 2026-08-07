@@ -30,7 +30,7 @@ import { groupBgmRuns } from '../project/compileTimeline';
 import { lineSegments, resolveLineSubtitle } from '../project/lineTimeline';
 import { sceneLines } from '../project/narrationLines';
 import { createAnimationId, createClipId, createGroupId, createTrackId } from '../project/persistence';
-import { resolveTransition, transitionTimeline } from '../project/sceneTransitions';
+import { resolveTransition, transitionBoundaryDs, transitionTimeline } from '../project/sceneTransitions';
 import type { DrawnTransitionType } from '../project/sceneTransitions';
 import { defaultSubtitleSource, freeSubtitleElementTexts } from '../project/subtitleBinding';
 import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
@@ -595,7 +595,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
   // 範囲の**先頭場面の入場切り替えは落とす**（切り替え元が範囲の外＝`compileTimeline` と同じ boundaryDs[0]=0）。
   const durations = scenes.map((s) => s.durationSec);
   const resolved = scenes.map((s) => resolveTransition(s.transition));
-  const boundaryDs = resolved.map((r, i) => (i === 0 || r.type === TRANSITION_TYPE.none ? 0 : r.durationSec));
+  const boundaryDs = transitionBoundaryDs(scenes); // 組み方は共有（写さない・#727 レビュー）
   const { steps } = transitionTimeline(durations, boundaryDs);
   const starts = scenes.map((_s, i) => (i === 0 ? 0 : steps[i - 1].offsetSec));
   const ends = starts.map((start, i) => start + durations[i]);

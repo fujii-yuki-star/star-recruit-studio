@@ -81,7 +81,7 @@ export interface BoundaryTransition {
  * だったので写しても割れなかったが、**#727 で後ろの場面にも依存する**ようになったため、
  * **入力を1つでも欠けた形で渡すと値が割れる**（実際にプレビューが割れた＝下の ⚠️）。
  */
-export function transitionBoundaryDs(scenes: Scene[]): number[] {
+export function transitionBoundaryDs(scenes: readonly { transition?: Transition }[]): number[] {
   return scenes.map((s, i) => {
     if (i === 0) return 0; // 先頭に入場の切り替えは無い
     const r = resolveTransition(s.transition);
@@ -208,14 +208,22 @@ export function shortenedTransitionSceneNumbers(scenes: Scene[]): number[] {
   const budget = sceneTransitionBudgets(durations, boundaryDs);
   const { steps } = transitionTimeline(durations, boundaryDs);
   const out = new Set<number>();
+  // それまでの結合結果（`acc`）＝`transitionTimeline` と同じ進み方で数える（式を2通り持たない）。
+  let acc = durations[0] ?? 0;
   steps.forEach((step, k) => {
     const i = k + 1; // steps[k] は場面 i（0始まり）への入場
+    const accBefore = acc;
+    acc = acc + durations[i] - step.durationSec;
     if (step.durationSec >= (boundaryDs[i] ?? 0) - 1e-9) return; // 希望どおり取れている
     // ⚠️ **実際に上限を握った場面だけ**を挙げる（#727 レビュー）。両隣を機械的に出すと、
     // **伸ばしても効かない場面**（先頭場面＝切り替えの欄すら無い／上限を握っていない側）を
     // 「表示時間を長くしてください」の対象にしてしまい、言われたとおりにしても直らない（§2-5）。
     if (budget[i - 1] <= step.durationSec + 1e-9) out.add(i); // 場面 i-1 の1始まり番号
     if (budget[i] <= step.durationSec + 1e-9) out.add(i + 1); // 場面 i の1始まり番号
+    // ⚠️ **それまでの結合結果で頭打ちになった場合も挙げる**（#727 レビュー）＝上限は予算だけではない。
+    // 動画の頭が短いと入場がそこで切られる（`[0.4, 0.8, 5]` の1つ目の境界）。伸ばす先は
+    // **それまでの場面**なので、直前の場面を挙げる（そこを長くすれば結合結果も伸びる）。
+    if (accBefore - TRANSITION_MIN_TAIL_SEC <= step.durationSec + 1e-9) out.add(i);
   });
   return [...out].sort((a, b) => a - b);
 }
