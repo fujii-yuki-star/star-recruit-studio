@@ -1,9 +1,8 @@
 // 場面ごとBGMの書き出しミックス計画（ADR-0018 ③(7) PR-B）。純粋関数（§7 テスト対象）。
 // 実効BGM（場面 ?? プロジェクト）が同じソースの連続場面を1区間にまとめ（compileTimeline と同じ groupBgmRuns を共有）、
 // 曲が変わる境界を短いクロスフェードで繋ぐ「置き場所＋フェード」の計画を出す。実際の FFmpeg フィルタ組み立ては Rust。
-import { TRANSITION_TYPE } from '../enums';
 import { resolveBgmVolume } from '../voice/audioMix';
-import { resolveTransition, transitionTimeline } from './sceneTransitions';
+import { transitionBoundaryDs, transitionTimeline } from './sceneTransitions';
 import { groupBgmRuns } from './compileTimeline';
 import type { Project } from './types';
 
@@ -36,10 +35,7 @@ export function resolveBgmExportRuns(project: Project): BgmExportRun[] {
   const scenes = project.scenes;
   if (scenes.length === 0) return [];
   const durations = scenes.map((s) => s.durationSec);
-  const boundaryDs = scenes.map((s, i) => {
-    const r = resolveTransition(s.transition);
-    return i === 0 || r.type === TRANSITION_TYPE.none ? 0 : r.durationSec;
-  });
+  const boundaryDs = transitionBoundaryDs(scenes); // 組み方は共有（写さない・#727 レビュー）
   const { steps } = transitionTimeline(durations, boundaryDs);
   const starts = scenes.map((_s, i) => (i === 0 ? 0 : steps[i - 1].offsetSec));
   const ends = starts.map((start, i) => start + durations[i]);

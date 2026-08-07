@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveTransitionSelectValue, resolveBoundaryTransition, resolveTransition, transitionTimeline, swallowedByTransitionSceneNumbers } from './sceneTransitions';
+import { deriveTransitionSelectValue, resolveBoundaryTransition, resolveTransition, shortenedTransitionSceneNumbers, transitionTimeline, swallowedByTransitionSceneNumbers } from './sceneTransitions';
 import { FPS } from '../constants';
 import type { Scene, Transition } from './types';
 
@@ -201,5 +201,101 @@ describe('swallowedByTransitionSceneNumbers（切り替えに飲み込まれる�
   it('切り替えなし・先頭の場面は対象外（先頭に入場の切り替えは無い）', () => {
     expect(swallowedByTransitionSceneNumbers([sc(0.2), sc(5)])).toEqual([]); // 先頭が短くても飲まれない
     expect(swallowedByTransitionSceneNumbers([sc(8), sc(0.2, { in: 'none', out: 'none', durationSec: 0.5 })])).toEqual([]);
+  });
+});
+
+// 入場と退場が時間で重ならない（#727）。片方ずつの上限しか見ていなかったので、
+// `d_in + d_out ≤ 場面の尺` が保証されず、**既定の 0.5 秒のままでも尺 1.0 秒未満の場面すべて**で重なっていた。
+describe('切り替えは場面の長さに収まる（#727）', () => {
+  const EPS = 1 / FPS;
+  const fadeT = (durationSec: number): Transition => ({ in: 'fade', durationSec });
+  /**
+   * 場面 i への入場の**希望**（先頭は 0）。⚠️ `resolveBoundaryTransition` は**クランプ後**を返すので
+   * ここでは使えない（希望として渡し直すと、縮んだ値を希望とみなしてしまう）。
+   */
+  const wants = (scenes: Scene[]): number[] =>
+    scenes.map((s, i) => {
+      if (i === 0) return 0;
+      const r = resolveTransition(s.transition);
+      // ⚠️ 切り替え無しは **0 に落とす**（`resolveTransition` は種別が none でも既定の秒数を返す）。
+      // 本番（`resolveBoundaryTransition`／`buildExportScenes`）と同じ組み方にしないと、
+      // 切り替えの無い場面まで「両側にある」と数えてしまう。
+      return r.type === 'none' ? 0 : r.durationSec;
+    });
+
+  it('両側に切り替えがある場面は、入場＋退場が尺に収まる', () => {
+    const scenes = [sc(5), sc(0.8, fadeT(0.5)), sc(5, fadeT(0.5))];
+    const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), wants(scenes));
+    const [inStep, outStep] = steps;
+    // 以前は 0.5 + 0.5 = 1.0 秒で、0.8 秒の場面に入らず重なっていた（その場面は一度も完全に出ない）。
+    expect(inStep.durationSec + outStep.durationSec).toBeLessThanOrEqual(0.8 - EPS + 1e-9);
+    // **両側が同じ長さ**＝焼き出しても相手側とずれない（窓を共有しているため）。
+    expect(inStep.durationSec).toBeCloseTo(outStep.durationSec, 10);
+  });
+
+  it('退場は入場の終わりより後から始まる（時間で重ならない）', () => {
+    const scenes = [sc(5), sc(0.8, fadeT(0.5)), sc(5, fadeT(0.5))];
+    const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), wants(scenes));
+    const inEnd = steps[0].offsetSec + steps[0].durationSec;
+    expect(steps[1].offsetSec).toBeGreaterThanOrEqual(inEnd - 1e-9);
+  });
+
+  it('普通の長さの場面は今までどおり（希望どおりの切り替え）', () => {
+    const scenes = [sc(5), sc(5, fadeT(0.5)), sc(5, fadeT(0.5))];
+    const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), wants(scenes));
+    expect(steps.map((s) => s.durationSec)).toEqual([0.5, 0.5]);
+  });
+
+  it('片側だけの場面は縛らない（結合結果が長ければ1場面より長い切り替えも許す＝既存の意図）', () => {
+    // `[5,4,6]` の3境界目に 5 秒＝場面2（尺4）は入場が無いので、その尺では縛らない。
+    const scenes = [sc(5), sc(4), sc(6, fadeT(5))];
+    const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), wants(scenes));
+    expect(steps[1].durationSec).toBe(5);
+  });
+
+  it('**プレビューと書き出しが同じ値**（対象場面の後ろにも切り替えがあるとき・#727 レビュー）', () => {
+    // ⚠️ 既存のパリティのテストは**対象場面が常に末尾**だったので、この破れを構造的に素通りしていた。
+    // 切り替えの上限が「その場面に退場があるか」にも依るので、後ろを切り落として回すと
+    // プレビューだけ上限が効かない（実測＝書き出し 0.383 秒・プレビュー 0.5 秒）。
+    const scenes = [sc(5), sc(0.8, fadeT(0.5)), sc(5, fadeT(0.5))];
+    const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), wants(scenes));
+    scenes.forEach((_, i) => {
+      if (i === 0) return;
+      expect(resolveBoundaryTransition(scenes, i).durationSec).toBeCloseTo(steps[i - 1].durationSec, 10);
+    });
+  });
+
+  it('短くなった場面を知らせる（挙げるのは**伸ばせば効く場面**だけ）', () => {
+    const scenes = [sc(5), sc(0.8, fadeT(0.5)), sc(5, fadeT(0.5))];
+    // 上限を握っているのは 0.8 秒の場面だけ＝そこを伸ばせば直る。両隣を機械的に出すと、
+    // **伸ばしても効かない場面**（切り替えの欄すら無い先頭場面）まで案内の対象にしてしまう。
+    expect(shortenedTransitionSceneNumbers(scenes)).toEqual([2]);
+  });
+
+  it('上限を握っていない側は挙げない（言われたとおりにしても直らない案内を出さない）', () => {
+    // 場面1を 5→10 秒にしても、握っているのは場面2（0.8秒）の予算なので値は変わらない。
+    expect(shortenedTransitionSceneNumbers([sc(10), sc(0.8, fadeT(0.5)), sc(5, fadeT(0.5))])).toEqual([2]);
+  });
+
+  it('**動画の頭が短くて切られたとき**も知らせる（上限は予算だけではない・#727 レビュー）', () => {
+    // `[0.4, 0.8, 5]`＝1つ目の境界は「それまでの結合結果（0.4秒）」で頭打ちになり、
+    // 予算（`(0.8−ε)/2`）とは一致しない＝予算だけを見ていると**この短縮を誰も知らせない**。
+    const scenes = [sc(0.4), sc(0.8, fadeT(0.5)), sc(5, fadeT(0.5))];
+    const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), wants(scenes));
+    expect(steps[0].durationSec).toBeCloseTo(0.4 - EPS, 10); // 結合結果で頭打ち
+    expect(shortenedTransitionSceneNumbers(scenes)).toContain(1); // 伸ばす先＝それまでの場面
+  });
+
+  it('飲み込まれるだけの場面はここでは挙げない（そちらの警告の担当）', () => {
+    // `[5, 0.3(fade 0.5)]`＝切り替えが尺以上。予算は握っていない（片側だけなので `Infinity`）。
+    expect(shortenedTransitionSceneNumbers([sc(5), sc(0.3, fadeT(0.5))])).toEqual([]);
+  });
+
+  it('収まっているときは知らせない（余計な警告を出さない）', () => {
+    expect(shortenedTransitionSceneNumbers([sc(5), sc(5, fadeT(0.5)), sc(5, fadeT(0.5))])).toEqual([]);
+  });
+
+  it('切り替えが無ければ何も言わない', () => {
+    expect(shortenedTransitionSceneNumbers([sc(0.3), sc(0.3), sc(0.3)])).toEqual([]);
   });
 });

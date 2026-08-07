@@ -30,7 +30,7 @@ import { groupBgmRuns } from '../project/compileTimeline';
 import { lineSegments, resolveLineSubtitle } from '../project/lineTimeline';
 import { sceneLines } from '../project/narrationLines';
 import { createAnimationId, createClipId, createGroupId, createTrackId } from '../project/persistence';
-import { resolveTransition, transitionTimeline } from '../project/sceneTransitions';
+import { resolveTransition, transitionBoundaryDs, transitionTimeline } from '../project/sceneTransitions';
 import type { DrawnTransitionType } from '../project/sceneTransitions';
 import { defaultSubtitleSource, freeSubtitleElementTexts } from '../project/subtitleBinding';
 import { boxHeightForLines, DEFAULT_TEMPLATE_MAX_LINES, resolveTextStyle } from '../template/textStyle';
@@ -595,7 +595,7 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
   // 範囲の**先頭場面の入場切り替えは落とす**（切り替え元が範囲の外＝`compileTimeline` と同じ boundaryDs[0]=0）。
   const durations = scenes.map((s) => s.durationSec);
   const resolved = scenes.map((s) => resolveTransition(s.transition));
-  const boundaryDs = resolved.map((r, i) => (i === 0 || r.type === TRANSITION_TYPE.none ? 0 : r.durationSec));
+  const boundaryDs = transitionBoundaryDs(scenes); // 組み方は共有（写さない・#727 レビュー）
   const { steps } = transitionTimeline(durations, boundaryDs);
   const starts = scenes.map((_s, i) => (i === 0 ? 0 : steps[i - 1].offsetSec));
   const ends = starts.map((start, i) => start + durations[i]);
@@ -771,10 +771,12 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
   });
 
   // 切り替え（決定19）。実効の切り替え＝`resolveTransition` の結果を、入る側／出ていく側のキーフレームへ落とす。
-  // ⚠️ **場面が短いと入場と退場は時間が重なる**（クランプは片方ずつの上限しか見ない＝`sceneTransitions`）。
-  // そのとき1本にまとめると**その場面の切り替えだけ短くなり**、相手側の場面は元の長さのままなので
-  // 動きがずれる。まとめる前（2本）はそもそも片方が丸ごと無視されていたので改善ではあるが、
-  // **重なり自体は残っている**＝#727 で扱う。
+  // 入場と退場は**時間で重ならない**（#727）＝`transitionTimeline` が、両側に切り替えがある場面では
+  // 使える尺を2つで分け合わせる。以前は片方ずつの上限しか見ておらず重なっており、1本にまとめると
+  // **その場面の切り替えだけ短くなって相手側とずれて**いた（窓を共有しているので、上流で縮めれば揃う）。
+  // ⚠️ **範囲を選んで焼くと、範囲の先頭場面の入場が落ちる**ぶん、その場面の予算は半分にならない
+  // ＝同じ境界でも全体を焼いたときと長さが変わる。焼いた文書の中では「先頭に入場は無い」が正しいので
+  // 意図どおり（`§7.6.1` の追補）。全体を焼いたときは場面形式の書き出しと一致する。
   for (let i = 1; i < scenes.length; i += 1) {
     const step = steps[i - 1];
     if (step.durationSec <= 0) continue;

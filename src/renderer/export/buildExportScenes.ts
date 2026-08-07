@@ -4,7 +4,7 @@ import { TRANSITION_DIRECTION, TRANSITION_TYPE, type Fit } from '../../domain/en
 import { FPS } from '../../domain/constants';
 import type { ElementAnimation, Scene } from '../../domain/project/types';
 import type { Template } from '../../domain/template/types';
-import { resolveTransition, transitionTimeline } from '../../domain/project/sceneTransitions';
+import { resolveTransition, transitionBoundaryDs, transitionTimeline } from '../../domain/project/sceneTransitions';
 import type { ResolvedTransition } from '../../domain/project/sceneTransitions';
 import { sceneSegmentSpecs, segmentLineIds } from '../../domain/project/lineTimeline';
 import { animationsEndSec, sceneAnimationActive, slotIsAnimated } from '../../domain/project/sceneAnimation';
@@ -734,9 +734,7 @@ export async function buildExportScenes(
     return d;
   });
   const sceneResolved = sceneFirst.map((first) => resolveTransition(included[first].transition));
-  const sceneBoundaryDs = sceneResolved.map((r, k) =>
-    k === 0 || r.type === TRANSITION_TYPE.none ? 0 : r.durationSec,
-  );
+  const sceneBoundaryDs = transitionBoundaryDs(sceneFirst.map((first) => included[first])); // 組み方は共有
   const { steps } = transitionTimeline(sceneDurations, sceneBoundaryDs);
   for (let k = 1; k < sceneFirst.length; k += 1) {
     if (sceneResolved[k].type === TRANSITION_TYPE.none) continue;
