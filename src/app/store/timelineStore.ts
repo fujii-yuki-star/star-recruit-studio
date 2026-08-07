@@ -80,6 +80,10 @@ const VOICE_DURATION_UNKNOWN_MESSAGE = "声の長さを測れませんでした�
 
 // 書き出しの結果の文言（§2-5＝次の行動／§2-3＝技術用語を出さない）。
 const EXPORT_BUSY_OPEN_MESSAGE = "いま動画を書き出しています。終わってから、別の動画を開いてください。";
+// 取り込みの最中に文書を入れ替えると、着地したときには別の動画なので**取り込んだ素材が入らない**
+// （ファイルだけディスクに残る）。書き出し中と同じ形で、開く前に断る（#724・§2-5）。
+const IMPORTING_OPEN_MESSAGE = "いま素材を取り込んでいます。終わってから、別の動画を開いてください。";
+const IMPORTING_CREATE_MESSAGE = "いま素材を取り込んでいます。終わってから、新しい動画を作ってください。";
 const EXPORT_DONE_MESSAGE = "動画を保存しました。";
 const EXPORT_FAILED_MESSAGE = "動画を書き出せませんでした。しばらくしてから、もう一度お試しください。";
 const EXPORT_CANCELLED_MESSAGE = "書き出しを中止しました。もう一度書き出せます。";
@@ -472,6 +476,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ exportRun: { ...get().exportRun, message: EXPORT_BUSY_OPEN_MESSAGE } });
       throw new Error("timeline export busy");
     }
+    // **取り込みの最中も作らない**（#724）＝着地したときには別の文書なので、取り込んだ素材は
+    // `projectId` 違いで黙って捨てられる（ファイルだけ残る）。書き出し中と同じ扱い。
+    if (get().isImporting) {
+      set({ exportRun: { ...get().exportRun, message: IMPORTING_CREATE_MESSAGE } });
+      throw new Error("timeline import busy");
+    }
     // **採番の前に場面形式の保存を待つ**（`bakeToTimeline` と同じ流儀）。場面形式の id は保存時に初めて
     // 発行されディスクへ現れるまで一覧に出ないので、待たないと**同じ番号を二重に発行**して
     // 片方の project.json をもう片方が上書きしうる（11 §2.1）。
@@ -498,6 +508,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 開かずに理由を出す（§2-5）。画面側も一覧へ戻る導線を押せなくしているが、規則はここに置く。
     if (isTimelineExportBusy(get().exportRun.phase)) {
       set({ exportRun: { ...get().exportRun, message: EXPORT_BUSY_OPEN_MESSAGE } });
+      return;
+    }
+    // **取り込みの最中も開かない**（#724）＝理由は上と同じ（着地しても入らない素材を作らない）。
+    if (get().isImporting) {
+      set({ exportRun: { ...get().exportRun, message: IMPORTING_OPEN_MESSAGE } });
       return;
     }
     if (get().isLoading) return;

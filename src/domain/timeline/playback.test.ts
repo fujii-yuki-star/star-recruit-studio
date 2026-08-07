@@ -1,7 +1,8 @@
 // タイムラインの再生位置（ADR-0032・#630）。フレーム格子・終端・退化ケースを固定する。
 import { describe, expect, it } from 'vitest';
 import { FPS } from '../constants';
-import { playbackStartSec, playbackTick, quantizeToFrameSec, seekByFrames } from './playback';
+import { lastFrameSec, playbackStartSec, playbackTick, quantizeToFrameSec, seekByFrames, timelineFrameCount } from './playback';
+import { frameTimeSec } from './persistence';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineProject } from './types';
@@ -104,5 +105,51 @@ describe('seekByFrames（矢印キー・#721）', () => {
   it('fps が違う動画では、その動画の格子で動く', () => {
     expect(seekByFrames(doc(60), 0, 1)).toBeCloseTo(1 / 60, 10);
     expect(seekByFrames(doc(60), 0, 60)).toBe(1); // 60 フレーム＝1秒
+  });
+});
+
+describe('フレーム数と最後のフレーム（#724）', () => {
+  const withDuration = (durationSec: number, fps = 30): TimelineProject => ({
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: PROJECT_FORMAT.timeline,
+    projectId: 'proj_1', projectName: 't',
+    createdAt: '2026-08-07T00:00:00.000Z', updatedAt: '2026-08-07T00:00:00.000Z',
+    videoSettings: { aspectRatio: '16:9', fps, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+    assets: [], tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }],
+    clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec, x: 0, y: 0, w: 10, h: 10, text: 'あ' }],
+  });
+
+  it('**書き出しの最後のフレームへプレビューで行ける**（尺×fps が整数でなくても）', () => {
+    // 1.05 秒・30fps＝書き出しは 32 フレーム（最後は 31/30 = 1.0333…）。
+    // 以前はプレビューが `尺 − 1/fps` を格子へ落としていたので 1.0 で頭打ちだった。
+    const d = withDuration(1.05);
+    expect(timelineFrameCount(d)).toBe(32);
+    expect(lastFrameSec(d)).toBeCloseTo(31 / 30, 10);
+    expect(frameTimeSec(d, 999)).toBeCloseTo(lastFrameSec(d), 10); // 末尾を掴んでも到達する
+  });
+
+  it('尺が格子に乗っているときは今までどおり', () => {
+    const d = withDuration(1); // 30 フレーム（0〜29）
+    expect(timelineFrameCount(d)).toBe(30);
+    expect(lastFrameSec(d)).toBeCloseTo(29 / 30, 10);
+  });
+
+  it('端数は切り上げる（末尾が黙って落ちない）', () => {
+    expect(timelineFrameCount(withDuration(5.505))).toBe(166); // 四捨五入だと 165＝5.5秒で語尾が切れる
+  });
+
+  it('何も置いていなければ 0 フレーム・最後の時刻も 0', () => {
+    const d = withDuration(1);
+    d.clips = [];
+    expect(timelineFrameCount(d)).toBe(0);
+    expect(lastFrameSec(d)).toBe(0);
+    expect(frameTimeSec(d, 5)).toBe(0);
+  });
+
+  it('fps が違う動画でも同じ規則', () => {
+    const d = withDuration(1.05, 60);
+    expect(timelineFrameCount(d)).toBe(63);
+    expect(frameTimeSec(d, 999)).toBeCloseTo(62 / 60, 10);
   });
 });

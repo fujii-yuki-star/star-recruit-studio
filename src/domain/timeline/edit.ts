@@ -740,10 +740,16 @@ export function setVisualClipContent(
   if (patch.assetId != null && !doc.assets.some((a) => a.assetId === patch.assetId)) {
     return blocked(EDIT_BLOCKED.notFound);
   }
-  const next = { ...clip, ...patch };
   // **何も変わらないなら同じ文書を返す**（空振りの取り消しを積まない・`11 §7.6.3`）。
-  const same = (Object.keys(patch) as (keyof typeof patch)[]).every((k) => clip[k] === patch[k]);
-  if (same) return ok(doc);
+  // ⚠️ 比べるのは**解決した値**（#731）＝`null` と未指定は解決が同じ（どちらも継承／「なし」）。
+  // 素の `===` だと `undefined === null` が false になり、**絵は変わらないのに文書だけ変わる**
+  // ＝取り消しが1段空振りする。`setClipAssetRef` が既にこの流儀（`11 §7.6.3`）。
+  const keys = Object.keys(patch) as (keyof typeof patch)[];
+  if (keys.every((k) => (clip[k] ?? null) === (patch[k] ?? null))) return ok(doc);
+  const next = { ...clip, ...patch };
+  // **`null` はキーごと落とす**（同上）＝未指定との違いを文書に残さない。残すと、同じ絵の文書が
+  // 2通りできて「取り消しても見た目が変わらない」段が生まれる。
+  for (const k of keys) if (patch[k] === null) delete next[k];
   return ok(withClip(doc, next));
 }
 

@@ -3,7 +3,7 @@
 // 決まるので、途中から再生してもシークしても同じ結果になる（絵の `playbackTick` と同じ考え方）。
 import { useEffect, useRef } from "react";
 import { audioCuesAt, audioLoops, audioSourceKeyOfClip } from "../../domain/timeline/audio";
-import { UNITY_VOLUME } from "../../domain/constants";
+import { attachVolume, closeAudioContext, type AudioCtxRef, type VolumeControl } from "../screens/previewAudioVolume";
 import { useTimelineStore } from "../store/timelineStore";
 
 /** 頭出しをやり直す閾値（秒）。これ未満のズレは直さない＝毎フレーム `currentTime` を触って音が途切れるのを防ぐ。 */
@@ -27,12 +27,23 @@ export function useTimelineAudio(): void {
   const playingRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   // 鳴らせなかったクリップ（端末/ブラウザの制限）。再試行しない。
   const failedRef = useRef<Set<string>>(new Set());
+  /**
+   * 音量の効かせ方（#724）。**100%超は要素の `.volume` では上がらない**（0〜1 が上限）ので、
+   * 場面形式と同じ共有経路（`attachVolume`＝100%超で GainNode へ載せ替え）を通す。
+   * ここを通さないと、**再生では 100% 止まりなのに書き出しだけ 150% で出る**＝聞いて確かめられない
+   * （正典 `11 §7.6.2.2` が「書き出しを作るときに揃える」と書いていた宿題。書き出しは #631 で land 済み）。
+   */
+  const ctxRef = useRef<AudioContext | null>(null) as AudioCtxRef;
+  const volumeRef = useRef<Map<string, VolumeControl>>(new Map());
 
   useEffect(() => {
     const playing = playingRef.current;
+    const vols = volumeRef.current;
     const stopAll = (): void => {
       for (const el of playing.values()) el.pause();
+      for (const v of vols.values()) v.dispose();
       playing.clear();
+      vols.clear();
     };
     if (!isPlaying || !doc) {
       stopAll();
@@ -44,6 +55,8 @@ export function useTimelineAudio(): void {
     for (const [clipId, el] of playing) {
       if (!live.has(clipId)) {
         el.pause();
+        vols.get(clipId)?.dispose();
+        vols.delete(clipId);
         playing.delete(clipId);
       }
     }
@@ -72,9 +85,15 @@ export function useTimelineAudio(): void {
         el.currentTime = cue.offsetSec; // シーク・コマ落ちで離れたときだけ合わせ直す
       }
       el.playbackRate = cue.speed; // 頭出しだけ合わせても、速度が違えばずれ続ける
-      // HTMLAudioElement は 0〜1。100%超（schema は 1.5 まで）は**上げずに据え置く**＝
-      // 場面形式は GainNode で増幅しており、ここは未対応（`11 §7.6.2.2` に明記）。
-      el.volume = Math.min(UNITY_VOLUME, Math.max(0, cue.volume));
+      // **100%超も書き出しと同じだけ上げる**（#724）＝場面形式と同じ共有経路。要素の `.volume` は
+      // 0〜1 が上限なので、そのまま入れると再生だけ 100% 止まりになり、書き出しと聞き比べられない。
+      let vol = vols.get(cue.clipId);
+      if (!vol) {
+        vol = attachVolume(ctxRef, el, cue.volume, false);
+        vols.set(cue.clipId, vol);
+      } else {
+        vol.setVolume(cue.volume);
+      }
     }
   }, [isPlaying, playheadSec, doc, audioSrcByKey]);
 
@@ -87,12 +106,18 @@ export function useTimelineAudio(): void {
     return () => document.removeEventListener("visibilitychange", onHidden);
   }, []);
 
-  // 画面を離れたら全部止める（鳴らしっぱなしにしない）。
+  // 画面を離れたら全部止める（鳴らしっぱなしにしない）。音量の経路と AudioContext も畳む
+  // （開きっぱなしにすると端末の音声資源を掴んだままになる＝場面形式と同じ後始末）。
   useEffect(() => {
     const playing = playingRef.current;
+    const vols = volumeRef.current;
+    const ctx = ctxRef;
     return () => {
       for (const el of playing.values()) el.pause();
+      for (const v of vols.values()) v.dispose();
       playing.clear();
+      vols.clear();
+      closeAudioContext(ctx);
     };
   }, []);
 }

@@ -607,20 +607,19 @@ describe('素材の取り込み（#712）', () => {
     expect(s.doc!.clips).toHaveLength(2);    // 途中の編集も残る
   });
 
-  it('取り込んでいる間に別の動画へ移ったら、そちらへ足さない', async () => {
+  it('取り込んでいる間に文書が変わったら、そちらへ足さない', async () => {
     await open();
     let release: (v: string) => void = () => {};
     vi.spyOn(assetFsMod, 'importAssetByPath').mockReturnValue(new Promise<string>((r) => { release = r; }));
     const running = importPath();
-    // 取り込んでいる間に別の動画を開く（一覧へ戻って開き直す）。
-    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002', assets: [] })));
-    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    // ⚠️ **開く・作るの入口は #724 で塞いだ**（取り込み中は文書を入れ替えない）ので、ここで見るのは
+    // **着地の二重防御**＝残っている経路（閉じる）で文書が消えても、あとから何も書かない。
+    useTimelineStore.getState().closeTimelineProject();
     release('assets/asset_001.png');
     await running;
     const s = useTimelineStore.getState();
-    expect(s.doc!.projectId).toBe('proj_20260728_002');
-    expect(s.doc!.assets).toEqual([]);       // 別の動画を汚さない
-    expect(s.assetSrcById.asset_001).toBeUndefined();
+    expect(s.doc).toBeNull();
+    expect(s.assetSrcById.asset_001).toBeUndefined(); // 文書に無い素材の絵を残さない
   });
 
   it('別の動画へ移ったあとの失敗は、そちらへ出さない（触っていない動画に案内が出る）', async () => {
@@ -628,14 +627,14 @@ describe('素材の取り込み（#712）', () => {
     let fail: (e: unknown) => void = () => {};
     vi.spyOn(assetFsMod, 'importAssetByPath').mockReturnValue(new Promise<string>((_r, j) => { fail = j; }));
     const running = importPath();
-    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002', assets: [] })));
-    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    // 入口は塞いだので、ここも**着地の二重防御**を見る（上と同じ理由）。
+    useTimelineStore.getState().closeTimelineProject();
     fail(new Error('書き込めませんでした。'));
     await running;
     const st = useTimelineStore.getState();
-    expect(st.doc!.projectId).toBe('proj_20260728_002');
+    expect(st.doc).toBeNull();
     expect(st.importError).toBeNull();  // 触っていない動画に案内を出さない
-    expect(st.isImporting).toBe(false); // そちらの取り込みは止めない
+    expect(st.isImporting).toBe(false); // 閉じたときに畳まれている（取り込みの札が残らない）
   });
 
   it('二重には取り込まない（同じ番号の素材が2つできる）', async () => {
@@ -814,5 +813,46 @@ describe('置く先の探し方（#722）', () => {
     useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text, at: { trackId: 'track_002', startSec: 0 } });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
     expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_OVERLAP');
+  });
+});
+
+// 取り込みの最中に文書を入れ替えない（#724）。着地したときには別の動画なので、取り込んだ素材は
+// `projectId` 違いで黙って捨てられる（ファイルだけディスクに残る）。書き出し中と同じ形で先に断る。
+describe('取り込み中は文書を入れ替えない（#724）', () => {
+  beforeEach(() => {
+    resetAssetIdReservations();
+    useTimelineStore.setState({
+      exportRun: { phase: EXPORT_RUN_PHASE.idle, percent: 0, message: null, cancelling: false },
+      isImporting: false,
+    });
+  });
+
+  it('取り込みの最中は別の動画を開かない（理由を出す）', async () => {
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    useTimelineStore.setState({ isImporting: true });
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
+    expect(load).not.toHaveBeenCalled(); // 読みに行かない＝走っている取り込みの着地先が変わらない
+    expect(useTimelineStore.getState().exportRun.message).toContain('取り込んでいます');
+  });
+
+  it('取り込みの最中は新しい動画も作らない（理由を出す）', async () => {
+    useTimelineStore.setState({ isImporting: true });
+    await expect(useTimelineStore.getState().createTimelineProject('新規', '16:9')).rejects.toThrow();
+    expect(useTimelineStore.getState().exportRun.message).toContain('取り込んでいます');
+  });
+
+  it('閉じれば取り込みの札は畳まれる（開けなくなったまま固まらない）', () => {
+    useTimelineStore.setState({ isImporting: true });
+    useTimelineStore.getState().closeTimelineProject();
+    // ⚠️ 取り込みの `finally` は「始めた動画のまま」のときしか札を外さないので、閉じる側が
+    // 畳まないと `isImporting` が残り、**このガードのせいで二度と開けなくなる**。
+    expect(useTimelineStore.getState().isImporting).toBe(false);
+  });
+
+  it('取り込みが終わっていれば今までどおり開ける', async () => {
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc()));
+    useTimelineStore.setState({ isImporting: false });
+    await useTimelineStore.getState().openTimelineProject('proj_20260728_001');
+    expect(useTimelineStore.getState().doc?.projectId).toBe('proj_20260728_001');
   });
 });
