@@ -13,7 +13,7 @@ import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, placeableVisualTracks, visualPlacementIssue } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, placeableAudioTracks, placeableVisualTracks, visualPlacementIssue } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation } from "../../domain/constants";
@@ -429,6 +429,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const leaveToHome = useCallback(() => { void requestLeave("home"); }, [requestLeave]);
   // 見た目パターンを置く先の列（消された/固定されたときは置くときに実在するものへ落とす）。
   const [placeTrackId, setPlaceTrackId] = useState<string>("");
+  // 音・読み上げの置く先（見た目パターンと同じ流儀＝#724。空＝いちばん手前の置ける列）。
+  const [placeAudioTrackId, setPlaceAudioTrackId] = useState<string>("");
   // 「動き」の入力欄（文字列で持つ＝空欄＝その項目は動かさない）。
   const [kfDraft, setKfDraft] = useState<Partial<Record<KeyframeProp, string>>>({});
   // 音量の変化（#512 段4）の入力欄。**空欄のままでは置かない**（0 と空欄を取り違えない）。
@@ -734,7 +736,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **動画は出さない**＝置けても書き出しの手前で断られる（選べるのに使えない選択肢を並べない・`06 §12.1`）。
   const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType) && a.assetType !== ASSET_TYPE.video) ?? [];
   // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
-  const voiceTracks = doc?.tracks.filter((t) => t.kind === TRACK_KIND.audio && !t.locked && !t.hidden) ?? [];
+  // 音・読み上げを置ける列（#724）。**映像側と同じ規則・同じ向き**（`placeableAudioTracks`）＝
+  // 以前はここだけ絞り込みを手書きし、しかも並びを**戻していなかった**ので、映像は手前・音は奥、と
+  // 同じ「置く先」の概念が向きごと割れていた。欄の一覧は元の並び順へ戻して出す（映像側と同じ扱い）。
+  const voiceTracks = doc ? [...placeableAudioTracks(doc)].reverse() : [];
+  /**
+   * 置く先の列（既定＝**いちばん手前の置ける列**・#724）。**どこへ入るかを見せる**。
+   *
+   * ⚠️ 既定を手前にするのは #722 と同じ理由＝奥へ入れると、手前に画面いっぱいの部品があるとき
+   * **その裏に隠れて見えない**（`06 §12.1`「押して置いたときも必ず仕上がり確認に現れる」）。
+   * 音は重ね順に意味が無いが、**同じ概念を種別で割らない**（ADR-0026②）。
+   * 選んでいた列が消えた／固定された／隠されたときは既定へ戻す＝**表示と実際の置き先が必ず一致する**
+   * （黙って別の列へ置かない）。
+   */
+  const audioTrackId = voiceTracks.some((t) => t.id === placeAudioTrackId)
+    ? placeAudioTrackId
+    : (doc ? (placeableAudioTracks(doc)[0]?.id ?? "") : "");
+  const visualTrackId = placeableTracks.some((t) => t.id === placeTrackId)
+    ? placeTrackId
+    : (doc ? (placeableVisualTracks(doc)[0]?.id ?? "") : "");
   // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
   const warnings = useMemo(() => (doc ? validateTimelineDoc(doc) : []), [doc]);
   // 書き出せない理由（`timelineExportBlockers`）は**押す前に**見せる＝押しても断られるだけ、を作らない（§2-5）。
@@ -1690,43 +1710,49 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     onChange={(v) => setSelectedClipSourceStart(v)}
                   />
 
-                                  <NumberField
-                    label="音量"
-                    step={VOLUME_STEP}
-                    min={VOLUME_MIN}
-                    max={VOLUME_MAX}
-                    value={selected.volume ?? null}
-                    placeholder="動画全体に合わせる"
-                    {...editGuard({ disabled: hasVolumePoints, hint: volumePointsHint })}
-                    onChange={(v) => setSelectedClipVolume(v)}
-                    onClear={() => setSelectedClipVolume(null)}
-                  />
-
-                {hasVolumePoints && <p className="text-muted">{VOLUME_POINTS_OVERRIDE_HINT}</p>}
-                <div className="row gap-sm">
-                                      <NumberField
-                      label="だんだん大きく（秒）"
-                      step={0.5}
-                      min={0}
-                      value={selected.fadeInSec ?? 0}
-                      {...editGuard()}
-                      onChange={(v) => setSelectedClipFade("in", v)}
-                    />
-
-                                      <NumberField
-                      label="だんだん小さく（秒）"
-                      step={0.5}
-                      min={0}
-                      value={selected.fadeOutSec ?? 0}
-                      {...editGuard()}
-                      onChange={(v) => setSelectedClipFade("out", v)}
-                    />
-
-                </div>
                 <p className="text-muted">
                   速さを変えても部品の長さは変わりません（置いた長さぶんに、素材のどれだけを流すかが変わります）。
                   素材が置き場所より短いときは繰り返して埋まります。
                 </p>
+              </CollapsibleSection>
+            )}
+
+            {/* **音量と前後のフェードは、鳴る音を持つ部品すべてに出す**（#724）＝読み上げにも。
+                下の「音量の変化」（点）は既に読み上げにも出ているので、**点は置けるのに基準の音量は
+                直せない**という逆さまの状態だった（ADR-0026②）。描画側（`clipBaseVolume`／`clipFadeSec`）は
+                どちらの種別も同じように読んでいるので、出していなかったのは画面だけ。 */}
+            {isAudioClip(selected) && (
+              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="volume" title="音量" defaultOpen={true}>
+                <NumberField
+                  label="音量"
+                  step={VOLUME_STEP}
+                  min={VOLUME_MIN}
+                  max={VOLUME_MAX}
+                  value={selected.volume ?? null}
+                  placeholder="動画全体に合わせる"
+                  {...editGuard({ disabled: hasVolumePoints, hint: volumePointsHint })}
+                  onChange={(v) => setSelectedClipVolume(v)}
+                  onClear={() => setSelectedClipVolume(null)}
+                />
+                {hasVolumePoints && <p className="text-muted">{VOLUME_POINTS_OVERRIDE_HINT}</p>}
+                <div className="row gap-sm">
+                  <NumberField
+                    label="だんだん大きく（秒）"
+                    step={0.5}
+                    min={0}
+                    value={selected.fadeInSec ?? 0}
+                    {...editGuard()}
+                    onChange={(v) => setSelectedClipFade("in", v)}
+                  />
+                  <NumberField
+                    label="だんだん小さく（秒）"
+                    step={0.5}
+                    min={0}
+                    value={selected.fadeOutSec ?? 0}
+                    {...editGuard()}
+                    onChange={(v) => setSelectedClipFade("out", v)}
+                  />
+                </div>
               </CollapsibleSection>
             )}
 
@@ -2082,7 +2108,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </p>
             <label className="field">
               <span>置く列</span>
-              <select className="select" value={placeTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
+              <select className="select" value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
                 {placeableTracks.map((t) => (
                   <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
                 ))}
@@ -2098,7 +2124,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 if (!t) return;
                 addTemplateClip({
                   template: t,
-                  trackId: placeableTracks.some((x) => x.id === placeTrackId) ? placeTrackId : placeableTracks[0].id,
+                  trackId: visualTrackId, // 欄に出ている列＝実際に置く列（表示と結果を割らない）
                   startSec: playheadSec,
                 });
               }}
@@ -2114,6 +2140,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ) : (
           <>
             <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに速さ・音量を変えられます。</p>
+            {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
+                列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
+            <label className="field">
+              <span>置く列</span>
+              <select className="select" value={audioTrackId} onChange={(e) => setPlaceAudioTrackId(e.target.value)}>
+                {voiceTracks.map((t) => (
+                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                ))}
+              </select>
+            </label>
             <PickerList
               items={[
                 ...BGM_CATALOG.map((b) => ({ id: `bgm:${b.id}`, label: b.label, note: b.note })),
@@ -2131,8 +2167,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 if (kind === "bgm" && !bgm) return;
                 addAudioClip(
                   bgm
-                    ? { bundledBgmId: bgm.id, trackId: voiceTracks[0].id, startSec: playheadSec }
-                    : { assetId: rest, trackId: voiceTracks[0].id, startSec: playheadSec },
+                    ? { bundledBgmId: bgm.id, trackId: audioTrackId, startSec: playheadSec }
+                    : { assetId: rest, trackId: audioTrackId, startSec: playheadSec },
                 );
               }}
             />
@@ -2147,11 +2183,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ) : (
           <>
             <p className="text-muted">再生位置（{playheadSec.toFixed(1)}秒）から置きます。置いたあとに文を書いて声を作ります。</p>
+            {/* **どこへ入るかを見せる**（#724）＝以前は無言でいちばん奥の列に固定していたので、
+                列が2本以上あると「なぜここに入ったのか」が読めなかった。見た目パターンの欄と同じ流儀。 */}
+            <label className="field">
+              <span>置く列</span>
+              <select className="select" value={audioTrackId} onChange={(e) => setPlaceAudioTrackId(e.target.value)}>
+                {voiceTracks.map((t) => (
+                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                ))}
+              </select>
+            </label>
             <div className="row gap-sm">
               <button
                 className="btn btn-secondary"
                 {...busyGuard({ disabled: isPlaying, hint: playingHint })}
-                onClick={() => addVoiceClip({ text: "", trackId: voiceTracks[0].id, startSec: playheadSec })}
+                onClick={() => addVoiceClip({ text: "", trackId: audioTrackId, startSec: playheadSec })}
               >
                 読み上げを置く
               </button>

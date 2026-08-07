@@ -4,8 +4,8 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
-  addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
+  addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
+  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
@@ -692,6 +692,33 @@ describe('placeableVisualTracks（置ける列・#722）', () => {
     expect(trackPlacementIssue(doc2, 'track_002', TRACK_KIND.visual)).toBe(EDIT_BLOCKED.hiddenTrack);
     expect(trackPlacementIssue(doc2, 'track_003', TRACK_KIND.visual)).toBe(EDIT_BLOCKED.trackKind);
     expect(trackPlacementIssue(doc2, 'track_999', TRACK_KIND.visual)).toBe(EDIT_BLOCKED.notFound);
+  });
+
+  it('音の列も**同じ規則・同じ向き**（種別で割らない・#724）', () => {
+    const doc2 = d([
+      { id: 'track_001', kind: TRACK_KIND.audio },
+      { id: 'track_002', kind: TRACK_KIND.visual },
+      { id: 'track_003', kind: TRACK_KIND.audio, locked: true },
+      { id: 'track_004', kind: TRACK_KIND.audio, hidden: true },
+      { id: 'track_005', kind: TRACK_KIND.audio },
+    ]);
+    expect(placeableAudioTracks(doc2).map((t) => t.id)).toEqual(['track_005', 'track_001']); // 手前が先
+    // 導出も映像側と同じ（条件を片方だけ足せない）。
+    const fromIssue = doc2.tracks.filter((t) => trackPlacementIssue(doc2, t.id, TRACK_KIND.audio) == null).map((t) => t.id);
+    expect(placeableAudioTracks(doc2).map((t) => t.id).reverse()).toEqual(fromIssue);
+  });
+
+  it('音・読み上げを置く側も**隠した列は断る**（数える側と断る側で規則が割れない・#724）', () => {
+    const doc2 = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio, hidden: true }],
+      clips: [],
+      assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'a.mp3' }],
+    });
+    // 手書きの判定だと `hidden` を見落とし、**置けても動画に出ない部品**が黙って生まれていた。
+    expect(addAudioClip(doc2, { assetId: 'asset_001', trackId: 'track_002', startSec: 0 }))
+      .toEqual({ ok: false, reason: EDIT_BLOCKED.hiddenTrack });
+    expect(addVoiceClip(doc2, { text: '', trackId: 'track_002', startSec: 0 }))
+      .toEqual({ ok: false, reason: EDIT_BLOCKED.hiddenTrack });
   });
 
   it('元の並びを壊さない（`reverse` が文書の列を並べ替えない）', () => {
