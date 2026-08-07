@@ -588,16 +588,41 @@ export type VisualPlacement = {
 };
 
 /**
+ * **その列が部品を受けられるか**（受けられないなら理由・`null`＝受けられる・#722）。
+ *
+ * 見るのは**列そのものの事情だけ**（実在する・固定していない・出す設定・種別が合う）。
+ * 時刻の重なりと素材の実在は**置く場所ごとの話**なので `visualPlacementIssue` の担当。
+ *
+ * ⚠️ **ここが「置ける列」の単一の参照元**（#722 レビュー）。同じ条件が
+ * `placeableVisualTracks`（候補を数える側）と `visualPlacementIssue`（1か所を断る側）に
+ * **別々に書かれていた**＝条件を1つ足すと片方だけ直す事故が起きる。両方をここから導く。
+ *
+ * **真偽値ではなく理由を返す**のは、`locked`／`hiddenTrack`／`trackKind` で**次の行動が違う**ため
+ * （固定を外す／表示に戻す／別の列へ置き直す＝§2-5）。ここを boolean に畳むと案内が痩せる。
+ */
+export function trackPlacementIssue(
+  doc: TimelineProject,
+  trackId: string,
+  wantKind: TrackKind,
+): EditBlockedReason | null {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track) return EDIT_BLOCKED.notFound;
+  if (track.locked) return EDIT_BLOCKED.locked;
+  if (track.hidden) return EDIT_BLOCKED.hiddenTrack;
+  if (track.kind !== wantKind) return EDIT_BLOCKED.trackKind;
+  return null;
+}
+
+/**
  * **絵の部品を置ける列**を「手前が先」の順で返す（#722）。
  *
- * 条件（映像の列・固定していない・出す設定）を**画面・store・置ける判定の3か所に書いていた**のが
- * #722 の一つ目の指摘＝「同じ判断を2通りに書かない」と主張しながら共有していなかった。ここ1つを見る。
+ * 条件は `trackPlacementIssue` から導く＝候補を数える側と1か所を断る側で規則が割れない。
  *
  * **順は手前から**（配列の末尾が手前＝`11 §7.6` の重ね順）。ボタンで置くときは**先頭を使う**ので、
  * 新しく置いた部品が既にあるものの後ろに隠れない（`06 §12.1`「必ず仕上がり確認に現れる」）。
  */
 export function placeableVisualTracks(doc: TimelineProject): Track[] {
-  return doc.tracks.filter((t) => t.kind === TRACK_KIND.visual && !t.locked && !t.hidden).reverse();
+  return doc.tracks.filter((t) => trackPlacementIssue(doc, t.id, TRACK_KIND.visual) == null).reverse();
 }
 
 /**
@@ -608,11 +633,9 @@ export function placeableVisualTracks(doc: TimelineProject): Track[] {
  * **出さない設定の列も断る**＝置けても動画に出ない部品が黙って生まれる（ボタンで置くときも避けている）。
  */
 export function visualPlacementIssue(doc: TimelineProject, input: VisualPlacement): EditBlockedReason | null {
-  const track = doc.tracks.find((t) => t.id === input.trackId);
-  if (!track) return EDIT_BLOCKED.notFound;
-  if (track.locked) return EDIT_BLOCKED.locked;
-  if (track.hidden) return EDIT_BLOCKED.hiddenTrack;
-  if (track.kind !== trackKindForClip(input.kind)) return EDIT_BLOCKED.trackKind;
+  // 列そのものの事情は `trackPlacementIssue`（「置ける列」を数える側と同じ規則・#722 レビュー）。
+  const trackIssue = trackPlacementIssue(doc, input.trackId, trackKindForClip(input.kind));
+  if (trackIssue) return trackIssue;
   if (input.kind === TIMELINE_CLIP_KIND.slot) {
     if (input.assetId == null || !doc.assets.some((a) => a.assetId === input.assetId)) {
       return EDIT_BLOCKED.notFound;

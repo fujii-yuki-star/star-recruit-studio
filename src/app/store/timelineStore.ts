@@ -662,7 +662,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     //（再生位置を移すだけでは足りない）。代わりに時刻は後ろへずれることがある＝利用者判断で
     // 「見える」を優先した（#722・案A）。
     // **隠した列・固定した列は選ばない**（`11 §7.6.2.4`）＝置けても動画に出ない部品が黙って生まれる。
-    // 条件は `placeableVisualTracks` 1つを見る（画面・置ける判定と同じ関数＝#722 の2つ目の指摘）。
+    // 条件は `placeableVisualTracks` を見る。その中身は `trackPlacementIssue`（列そのものの事情の
+    // 単一の参照元）から導かれるので、1か所を断る `visualPlacementIssue` とも規則が割れない（#722）。
     const placeable = placeableVisualTracks(doc);
     // 置ける列が1本も無いときは、理由を出す（押しても何も起きない、を作らない・§2-5）。
     if (placeable.length === 0) {
