@@ -11,7 +11,7 @@ import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
-import { VOLUME_POINTS_MAX } from "../../domain/constants";
+import { TIMELINE_LABEL_W_PX, VOLUME_POINTS_MAX } from "../../domain/constants";
 import type { TimelineProject } from "../../domain/timeline/types";
 import type { Template } from "../../domain/template/types";
 import * as ffmpegMod from "../../infrastructure/ffmpegExport";
@@ -2048,10 +2048,12 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     const lanes = container.querySelectorAll(".timeline-lane");
     stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 手前＝track_003
     stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 奥＝track_001
-    // 尺 5秒＝`pxPerSec` は 640/5 = 128（下限 40 より大きい方を採る）。左端 200 から 5秒＝840px。
+    // ⚠️ 倍率は**段の既定**（36 px/秒・#686）＝以前の「尺から自動」は表示倍率の導入で無くなった。
+    // 幅を測れない環境（jsdom）では全体表示に合わせられないので、ここに落ち着く。
+    // 左端 200 から 5秒＝200 + 5×36 = 380px。
     grab(screen.getByRole("button", { name: "図形を置く" }));
-    moveTo(840, 460); // 奥の列の 5秒
-    dropAt(840, 460);
+    moveTo(380, 460); // 奥の列の 5秒
+    dropAt(380, 460);
     const placed = useTimelineStore.getState().doc!.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.shape)!;
     expect(placed).toMatchObject({ trackId: "track_001", startSec: 5 });
   });
@@ -2134,12 +2136,12 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     fireEvent.click(screen.getByRole("button", { name: "文字を置く" }), { detail: 0 });
     stubRect(container.querySelectorAll(".timeline-lane")[0], { left: 200, top: 400, width: 800, height: 40 });
     grab(screen.getByRole("button", { name: "図形を置く" }));
-    moveTo(840, 420); // 5秒（pxPerSec=128）
+    moveTo(380, 420); // 5秒（段の既定 36 px/秒）
     const preview = container.querySelector(".timeline-drop-preview") as HTMLElement;
     expect(preview).not.toBeNull();
-    expect(preview.style.left).toBe(`${128 * 5}px`);
-    expect(preview.style.width).toBe(`${128 * 5}px`); // 置かれる長さ（5秒ぶん）
-    dropAt(840, 420);
+    expect(preview.style.left).toBe(`${36 * 5}px`);
+    expect(preview.style.width).toBe(`${36 * 5}px`); // 置かれる長さ（5秒ぶん）
+    dropAt(380, 420);
     expect(container.querySelector(".timeline-drop-preview")).toBeNull(); // 離したら消える
   });
 
@@ -2149,8 +2151,8 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     fireEvent.click(screen.getByRole("button", { name: "文字を置く" }), { detail: 0 });
     stubRect(container.querySelectorAll(".timeline-lane")[0], { left: 200, top: 400, width: 800, height: 40 });
     grab(screen.getByRole("button", { name: "図形を置く" }));
-    moveTo(840, 420);
-    dropAt(840, 420);
+    moveTo(380, 420); // 5秒（段の既定 36 px/秒）
+    dropAt(380, 420);
     expect(useTimelineStore.getState().playheadSec).toBe(5);
   });
 
@@ -2954,6 +2956,15 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(left).toContain("- var(--clip-menu-w)"); // 帯の終わりから幅ぶん内側へ
   });
 
+  it("列の名前の欄の幅は**両方のタイムライン画面が同じ値**を流し込む（#742 レビュー）", () => {
+    // ⚠️ 片方だけ CSS の既定に頼ると、値を変えたときに**見た目だけ黙ってずれる**
+    //（全体表示と錨点の計算はこの値を引くので、計算と描画が食い違う）。
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const timeline = container.querySelector(".timeline") as HTMLElement;
+    expect(timeline.style.getPropertyValue("--timeline-label-w")).toBe(`${TIMELINE_LABEL_W_PX}px`);
+  });
+
   it("`--clip-menu-w` は**「⋮」から見える所**で宣言する（帯で宣言すると届かない）", () => {
     // ⚠️ カスタムプロパティは**子孫にしか継承しない**。「⋮」は帯の兄弟なので、帯（`.timeline-clip`）で
     // 宣言すると `var()` が解決できず `left`/`width` の宣言ごと無効になり、**帯の左端に出る**
@@ -3010,5 +3021,133 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     // 固定の理由は「選んだ部品」の欄と**同じ言い方**にする（同じ状態を場所で言い分けない）。
     const dup = screen.getByRole("menuitem", { name: "同じものを足す" });
     expect(dup.getAttribute("title")).toBe("この列は固定されています。変えるには固定を外してください");
+  });
+});
+
+// 表示倍率・目盛りのシーク・再生位置の線（#686 段階2・ADR-0034 決定13）。
+describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", () => {
+  const withClip = (durationSec = 5) =>
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec, x: 0, y: 0, w: 10, h: 10, text: "あ" }] });
+  const lane = (c: HTMLElement) => c.querySelector(".timeline-lane") as HTMLElement;
+
+  it("広げる・縮める・全体を表示 が出ている", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "表示を広げる" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "表示を縮める" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全体を表示" })).toBeInTheDocument();
+  });
+
+  it("広げると帯も目盛りも同じだけ伸びる（段は場面形式と同じ型）", () => {
+    withClip();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = (screen.getByRole("button", { name: "あ" }) as HTMLElement).style.width;
+    fireEvent.click(screen.getByRole("button", { name: "表示を広げる" }));
+    const after = (screen.getByRole("button", { name: "あ" }) as HTMLElement).style.width;
+    // 36 → 54（段の次）＝5秒の帯は 180px → 270px。
+    expect(before).toBe("180px");
+    expect(after).toBe("270px");
+    expect(lane(container).style.width).toBe("640px"); // 列は下限（640px）まで縮まない
+  });
+
+  it("端では押せなくする（押せるのに何も起きない、を作らない）", () => {
+    withClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    for (let i = 0; i < 5; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を広げる" }));
+    expect(screen.getByRole("button", { name: "表示を広げる" })).toBeDisabled();
+    for (let i = 0; i < 10; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を縮める" }));
+    expect(screen.getByRole("button", { name: "表示を縮める" })).toBeDisabled();
+  });
+
+  it("目盛りを押すとその時刻へ再生位置が動く（列で受けると帯の選択と取り合う）", () => {
+    withClip(20);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const ruler = container.querySelector(".timeline-ruler") as HTMLElement;
+    ruler.getBoundingClientRect = () => ({ left: 100, top: 0, width: 800, height: 24, right: 900, bottom: 24, x: 100, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.click(ruler, { clientX: 100 + 36 * 4 }); // 4秒の所（段の既定 36 px/秒）
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(4, 5);
+  });
+
+  it("目盛りにフォーカスがあるとき ←→ が効く（両方が手を引いて無反応、を作らない）", () => {
+    withClip(20);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const ruler = container.querySelector(".timeline-ruler") as HTMLElement;
+    // ⚠️ 画面のキー操作は「矢印を使う要素」（`role="slider"` を含む）に譲るので、目盛り側が
+    // 受けないと**どちらも動かず**、既定の横スクロールだけが起きる。
+    fireEvent.keyDown(ruler, { key: "ArrowRight" });
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(1 / 30, 5); // 画面と同じフレーム送り
+    fireEvent.keyDown(ruler, { key: "ArrowRight", shiftKey: true });
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(1 + 1 / 30, 5); // Shift で1秒
+  });
+
+  it("目盛りの間隔は**倍率**で決める（縮めても文字が重ならない）", () => {
+    withClip(20);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const gapAt = () => {
+      const ticks = [...container.querySelectorAll(".timeline-tick")] as HTMLElement[];
+      return parseFloat(ticks[1].style.left) - parseFloat(ticks[0].style.left);
+    };
+    // 尺で決めていると、縮めたときに間隔が px で潰れる（16px 間隔に「0秒/1秒/…」が並ぶ）。
+    for (let i = 0; i < 5; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を縮める" }));
+    expect(gapAt()).toBeGreaterThanOrEqual(40);
+    for (let i = 0; i < 10; i += 1) fireEvent.click(screen.getByRole("button", { name: "表示を広げる" }));
+    expect(gapAt()).toBeLessThanOrEqual(600);
+  });
+
+  it("自分で倍率を変えたあとは、部品を置いても勝手に戻さない", () => {
+    open({ clips: [] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ 幅を差し込む＝jsdom は `clientWidth` が 0 なので、そのままだと**自動の合わせ自体が走らず**
+    // このテストが何も見ないことになる（実際に変異が生き残った）。
+    Object.defineProperty(container.querySelector(".timeline-scroll")!, "clientWidth", { value: 900, configurable: true });
+    fireEvent.click(screen.getByRole("button", { name: "表示を広げる" }));
+    fireEvent.click(screen.getByRole("button", { name: "表示を広げる" }));
+    const clip = () => (screen.queryByRole("button", { name: "テキスト" }) as HTMLElement | null)?.style.width;
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    // 36 → 54 → 80。5秒の帯は 400px。全体表示へ飛ぶと 5秒×120（幅に収まる最大段）＝600px になる。
+    expect(clip()).toBe("400px");
+  });
+
+  it("まだ触っていなければ、幅が測れた時点で全体表示に合わせる", () => {
+    open({ clips: [] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    Object.defineProperty(container.querySelector(".timeline-scroll")!, "clientWidth", { value: 900, configurable: true });
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    // 5秒・幅 900-84=816 → 全部入る最大段は 120。5×120＝600px。
+    expect((screen.getByRole("button", { name: "テキスト" }) as HTMLElement).style.width).toBe("600px");
+  });
+
+  it("目盛りは位置を持つ操作として読み上げに伝わる（Home/End で端へ）", () => {
+    withClip(20);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const ruler = container.querySelector(".timeline-ruler") as HTMLElement;
+    expect(ruler.getAttribute("role")).toBe("slider");
+    expect(ruler.getAttribute("aria-valuemax")).toBe("20");
+    fireEvent.keyDown(ruler, { key: "End" });
+    expect(useTimelineStore.getState().playheadSec).toBe(20);
+    fireEvent.keyDown(ruler, { key: "Home" });
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+  });
+
+  it("目盛りの名前は「再生位置」の欄と分ける（同じ名前の操作を2つ作らない）", () => {
+    withClip();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((container.querySelector(".timeline-ruler") as HTMLElement).getAttribute("aria-label")).toBe("時間の目盛り");
+    expect(screen.getByLabelText("再生位置")).toBeInTheDocument(); // 既存の欄は1つのまま
+  });
+
+  it("再生位置の線が並びの上に出る（いま何が出ているか分かる）", () => {
+    withClip(20);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => { useTimelineStore.getState().setPlayhead(5); });
+    const head = container.querySelector(".timeline-playhead") as HTMLElement;
+    expect(head).not.toBeNull();
+    expect(head.style.left).toBe("calc(var(--timeline-label-w) + 180px)"); // 5秒 × 36
+  });
+
+  it("何も置いていないときは線を出さない（指す先が無い）", () => {
+    open({ clips: [] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(container.querySelector(".timeline-playhead")).toBeNull();
   });
 });

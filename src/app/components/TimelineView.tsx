@@ -1,3 +1,6 @@
+import { TIMELINE_LABEL_W_PX, TIMELINE_ZOOM_LEVELS } from '../../domain/constants';
+// 目盛りの粗さ・既定の段は**タイムライン編集と共有**（同名の規則を2つ持たない・#686 レビュー）。
+import { DEFAULT_ZOOM_INDEX, tickStepSec } from '../../domain/timeline/zoom';
 import { useState } from "react";
 import { clipRangeTitle, clockLabel } from "../uiLabels";
 import { TRANSITION_TYPE } from "../../domain/enums";
@@ -23,8 +26,8 @@ const LANES: { kind: TimelineTrackKind; label: string; sub: string }[] = [
   { kind: "bgm", label: "BGM", sub: "音楽" },
 ];
 
-const ZOOM_LEVELS = [16, 24, 36, 54, 80, 120] as const;
-const DEFAULT_ZOOM_INDEX = 2; // 36 px/秒
+// 段は**共有**（`TIMELINE_ZOOM_LEVELS`・#686）＝タイムライン編集と同じ刻みにする（ADR-0034 決定13）。
+const ZOOM_LEVELS = TIMELINE_ZOOM_LEVELS;
 // 矢印キーでヘッドを動かす幅（秒）。**秒の入力刻み（SEC_STEP）とは用途が違う**＝あちらは尺を打ち込む刻み、
 // こちらは「見たい瞬間を探す」操作の粒度（0.1秒だと十数秒の動画でも端まで百回以上かかる）。
 const SEEK_KEY_STEP_SEC = 1;
@@ -36,13 +39,6 @@ function transitionLabel(type: TransitionType): string {
 
 
 
-/** ズームに応じた目盛り間隔（秒）。px/秒が小さいほど粗く。 */
-function tickStepSec(pxPerSec: number): number {
-  if (pxPerSec >= 80) return 1;
-  if (pxPerSec >= 36) return 2;
-  if (pxPerSec >= 24) return 5;
-  return 10;
-}
 
 function clipTitle(clip: TimelineClip): string {
   return clipRangeTitle(clip.label, clip.startSec, clip.endSec);
@@ -70,7 +66,8 @@ export function TimelineView({ timeline, playheadSec, onSeek }: TimelineViewProp
   const canZoomIn = zoomIndex < ZOOM_LEVELS.length - 1;
 
   return (
-    <div className="timeline" data-testid="timeline-view">
+    // 列名の欄の幅は**タイムライン編集と同じ値**を流し込む（CSS の既定に頼ると片方だけ変わる・#742 レビュー）。
+    <div className="timeline" data-testid="timeline-view" style={{ ["--timeline-label-w" as string]: `${TIMELINE_LABEL_W_PX}px` }}>
       <div className="timeline-toolbar">
         <span className="text-sm text-muted">
           合計 {clockLabel(timeline.totalSec)}・場面 {timeline.scenes.length}個

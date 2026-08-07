@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { TRANSITION_DIRECTION, TRANSITION_TYPE } from "../../domain/enums";
 import type { Timeline } from "../../domain/project/compileTimeline";
 import { TimelineView } from "./TimelineView";
+import { TIMELINE_LABEL_W_PX } from "../../domain/constants";
 
 function sampleTimeline(): Timeline {
   return {
@@ -66,4 +67,14 @@ describe("TimelineView", () => {
   // ここが担保するのは「渡すのは吸着だけ済ませた生の端」と「見えている位置は確定後と同じ＝スナップバックしない」の2点。
   // 保存値がアンカー開始で止まることは TimelineEditScreen.test（実 store）で見る。
 
+});
+
+// 列の名前の欄の幅は**タイムライン編集と同じ値**を流し込む（#742 レビュー）。
+// 片方だけ CSS の既定に頼ると、値を変えたときに2つの画面で見た目が黙ってずれる。
+describe("TimelineView: 列の名前の欄の幅（#686）", () => {
+  it("共有の値を流し込む（CSS の既定に頼らない）", () => {
+    const { container } = render(<TimelineView timeline={sampleTimeline()} />);
+    const el = container.querySelector(".timeline") as HTMLElement;
+    expect(el.style.getPropertyValue("--timeline-label-w")).toBe(`${TIMELINE_LABEL_W_PX}px`);
+  });
 });

@@ -10,6 +10,7 @@ import { useNavigationGuard } from "../hooks/navigationGuard";
 import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
+import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepSec, zoomScrollLeft } from "../../domain/timeline/zoom";
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
@@ -39,7 +40,7 @@ import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, TIMELINE_LABEL_W_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { creditSpeakerAt } from "../../domain/timeline/credit";
@@ -127,8 +128,9 @@ const AUTOSAVE_DELAY_MS = 800;
 const NUDGE_SEC = 0.5;
 
 /** 1秒あたりの表示幅（px）と、レーンの最小幅。読み取り専用タイムラインと同じ見え方に寄せる。 */
-const PX_PER_SEC = 40;
 const MIN_LANE_WIDTH_PX = 640;
+/** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
+const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
 
 /** 列の種別ごとの色分け（読み取り専用タイムラインの既存クラスを使い回す＝見え方を揃える）。 */
 /**
@@ -149,12 +151,6 @@ const CLIP_KIND_CLASS = {
   [TIMELINE_CLIP_KIND.voice]: "timeline-clip--audio",
 } as const satisfies Record<TimelineClipKind, string>;
 
-/** 目盛りの間隔（秒）。短い動画で目盛りが潰れないよう、尺に応じて粗くする。 */
-function tickStepSec(totalSec: number): number {
-  if (totalSec <= 10) return 1;
-  if (totalSec <= 60) return 5;
-  return 30;
-}
 
 /**
  * その差し込み口に入れられる素材（場面編集の `assignableFor` と同じ規則）。
@@ -839,6 +835,76 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return doc.clips.filter((c) => clipImageAssetIds(c).some((id) => unresolved.has(id))).length;
   }, [doc, assetSrcById, templateAssetSrcById]);
 
+  /**
+   * 表示倍率（#686・ADR-0034 決定13）。段は場面形式の見わたす画面と**同じ型**（`ZOOM_LEVELS`）。
+   *
+   * ⚠️ **覚えない**（決定14＝文書の中身に依存する状態は覚えない）＝開くたびに「全体表示」から始める。
+   * 以前は尺から自動で決めていた（`max(640/尺, 40)`）ので、長い動画ほど潰れて手が出せなかった。
+   */
+  const [zoomIndex, setZoomIndex] = useState<number | null>(null); // null＝まだ全体表示を決めていない
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /**
+   * **開いた直後は全体表示**（決定13）。列の幅を実測してから決めるので効果でやる。
+   * 文書が変わったら決め直す＝別の動画を開いたときに前の倍率が残らない（覚えない・決定14）。
+   */
+  const fitDocIdRef = useRef<string | undefined>(undefined);
+  /** `Ctrl`+ホイールで掴んだ錨点（倍率を変えた**後**に位置を合わせるために持ち越す）。 */
+  const pendingZoomRef = useRef<{ scrollLeft: number; anchorPx: number; fromPxPerSec: number } | null>(null);
+  /** 利用者が自分で倍率を触ったか（触ったら**自動の合わせをやめる**＝勝手に戻さない）。 */
+  const zoomTouchedRef = useRef(false);
+  /** ホイールの実リスナーから読む今の段（リスナーは張り直さないので ref で渡す）。 */
+  const zoomIndexRef = useRef<number | null>(null);
+  useEffect(() => {
+    zoomIndexRef.current = zoomIndex;
+    const docId = doc?.projectId;
+    if (!docId) return;
+    if (fitDocIdRef.current !== docId) { fitDocIdRef.current = docId; zoomTouchedRef.current = false; } // 別の動画＝やり直す
+    // ⚠️ **利用者が触ったらもう合わせない**（#686 レビュー）＝以前は「一度でも合わせたか」で見ていたので、
+    // まだ幅を測れていない間（部品が無い・欄を閉じている）に倍率を変えると、最初の部品を置いた瞬間に
+    // 全体表示へ飛んで**自分で決めた倍率を奪われた**。
+    if (zoomTouchedRef.current || totalSec <= 0) return;
+    const px = scrollRef.current?.clientWidth ?? 0;
+    if (px <= 0) return; // まだ測れない（次に尺か文書が変わったときに試す）
+    setZoomIndex(fitZoomIndex(totalSec, px - LANE_LABEL_PX));
+    // 依存は「どの動画か」と「尺」だけ＝**あとで欄の幅が変わっても合わせ直さない**
+    // （利用者が自分で広げた倍率を、欄をドラッグしただけで奪わない）。
+  }, [doc?.projectId, totalSec, zoomIndex]);
+
+  /**
+   * `Ctrl`+ホイールで段を動かす（決定13）。
+   *
+   * ⚠️ **React の `onWheel` では既定を止められない**（#686 レビュー）＝React は root の `wheel` を
+   * `passive: true` で登録するので `preventDefault()` が無効になり、画面ごと拡大される端末では
+   * **二重に効く**。自分で `{ passive: false }` の実リスナーを張る。
+   */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent): void => {
+      if (!e.ctrlKey) return; // 素のホイールは横スクロールのまま＝奪わない
+      e.preventDefault();
+      const from = ZOOM_LEVELS[zoomIndexRef.current ?? DEFAULT_ZOOM_INDEX];
+      const nextIndex = stepZoomIndex(zoomIndexRef.current ?? DEFAULT_ZOOM_INDEX, e.deltaY < 0 ? 1 : -1);
+      if (ZOOM_LEVELS[nextIndex] === from) return;
+      // 位置合わせは**描き直した後**（下の効果）。ここで合わせるとまだ古い幅なのでスクロールの
+      // 上限で切り詰められ、錨点が流れる（実機で確認）。
+      pendingZoomRef.current = { scrollLeft: el.scrollLeft, anchorPx: e.clientX - el.getBoundingClientRect().left, fromPxPerSec: from };
+      zoomTouchedRef.current = true;
+      setZoomIndex(nextIndex);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  /** 倍率が変わったら、掴んだ錨点が同じ場所に来るようスクロール位置を合わせる（決定13）。 */
+  useEffect(() => {
+    const p = pendingZoomRef.current;
+    if (!p) return;
+    pendingZoomRef.current = null;
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = zoomScrollLeft({ ...p, labelPx: LANE_LABEL_PX, toPxPerSec: ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX] });
+  }, [zoomIndex]);
+
   // ⚠️ ここから下のフックは**早期 return より前**で呼ぶ（下の「読み込み中」「開けない」で抜ける回と
   // 抜けない回で呼ぶ数が変わると、React が状態を取り違える）。
   // 書き出し中の編集は store が断る（`TIMELINE_EDIT_EXPORTING`）。**押してから断るのではなく、押す前に理由を出す**
@@ -1093,11 +1159,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         responsive: true,
       })
     : "";
-  const step = tickStepSec(totalSec);
-  const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
   // 時間 → 画面上の長さ。短い動画でも列が潰れないよう下限を置く（横スクロールは既存 CSS が持つ）。
-  const pxPerSec = totalSec > 0 ? Math.max(MIN_LANE_WIDTH_PX / totalSec, PX_PER_SEC) : PX_PER_SEC;
+  // ⚠️ まだ全体表示を決めていない間も**段の上の値**を使う（段に無い値を混ぜると、そこから
+  // 段を動かしたときに飛ぶ）。幅が測れない環境（テスト）でもここに落ち着く。
+  const pxPerSec = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
   const laneWidthPx = Math.max(totalSec * pxPerSec, MIN_LANE_WIDTH_PX);
+  const step = tickStepSec(pxPerSec); // 目盛りは**倍率**で決める（共有関数・#686 レビュー）
+  const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
 
   // 欄（ADR-0033 段階2）＝いまのカードをそのまま欄にする。**中身は変えない**（配置の仕組みだけを外から被せる）。
   const panels: PanelSpec[] = [
@@ -1198,12 +1266,76 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <p className="text-muted">列がありません。「映像の列を足す」で作ってください。</p>
         ) : (
           // 見た目は読み取り専用タイムライン（ADR-0018 ③(2)）と同じ CSS を使う＝2つの一覧で見え方が割れない（§6）。
-          <div className="timeline">
-            <div className="timeline-scroll">
+          <div className="timeline" style={{ ["--timeline-label-w" as string]: `${LANE_LABEL_PX}px` }}>
+            {/* 表示倍率（#686・決定13）＝**全体を表示**から始め、段で広げ縮めできる。
+                `Ctrl`+ホイールでも同じ段を動かし、**錨点はマウスの位置**（見ていた所が流れない）。 */}
+            <div className="timeline-toolbar">
+              <span className="text-sm text-muted">表示倍率</span>
+              <button
+                className="btn btn-ghost btn-icon"
+                aria-label="表示を縮める"
+                disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) <= 0}
+                onClick={() => { zoomTouchedRef.current = true; setZoomIndex((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, -1)); }}
+              >
+                −
+              </button>
+              <button
+                className="btn btn-ghost btn-icon"
+                aria-label="表示を広げる"
+                disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) >= ZOOM_LEVELS.length - 1}
+                onClick={() => { zoomTouchedRef.current = true; setZoomIndex((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, 1)); }}
+              >
+                ＋
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  zoomTouchedRef.current = true; // 明示的に合わせた＝以後も勝手に動かさない
+                  const px = (scrollRef.current?.clientWidth ?? 0) - LANE_LABEL_PX;
+                  setZoomIndex(fitZoomIndex(totalSec, px));
+                }}
+              >
+                全体を表示
+              </button>
+            </div>
+            <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
                 <div className="timeline-row">
                   <div className="timeline-row-label" />
-                  <div className="timeline-track timeline-ruler" style={{ width: laneWidthPx }}>
+                  {/* シークは**ルーラーが受ける**（ADR-0023 段階(1)・読み取り専用の見わたす画面と同じ流儀）。
+                      列で受けると帯の選択・ドラッグと取り合いになる。役割は button ではなく **slider**＝
+                      位置を持つ操作なので読み上げに現在位置が伝わり、矢印キーで動かせる。 */}
+                  <div
+                    className="timeline-track timeline-ruler timeline-ruler--seekable"
+                    style={{ width: laneWidthPx }}
+                    role="slider"
+                    tabIndex={0}
+                    // 名前は下の「再生位置」の欄と**分ける**＝同じ名前の操作が2つあると、読み上げでも
+                    // テストでもどちらを指しているか決まらない。役割（何を触る所か）で呼び分ける。
+                    aria-label="時間の目盛り"
+                    aria-valuemin={0}
+                    aria-valuemax={totalSec}
+                    aria-valuenow={playheadSec}
+                    aria-valuetext={`${playheadSec.toFixed(1)}秒`}
+                    onClick={(e) => {
+                      // 押した所に線が来る（ヘッドの位置＝秒×倍率 の逆）。範囲へ収めるのは store。
+                      const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
+                      setPlayhead(x / pxPerSec);
+                    }}
+                    onKeyDown={(e) => {
+                      // ⚠️ **←→ はここで受ける**（#686 レビュー）。画面のキー操作は「矢印を使う要素」
+                      // （`role="slider"` を含む）に譲るので、ここで受けないと**両方が手を引いて何も起きず**、
+                      // 既定の横スクロールだけが起きる。動かす量は画面と**同じ入口**（フレーム送り・#721）。
+                      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                        e.preventDefault();
+                        playRef.current.seekFrames((e.shiftKey ? playRef.current.fps : 1) * (e.key === "ArrowLeft" ? -1 : 1));
+                        return;
+                      }
+                      // Home/End で先頭・末尾へ。画面が横スクロールしてヘッドを見失わないよう既定を止める。
+                      if (e.key === "Home") { e.preventDefault(); setPlayhead(0); return; }
+                      if (e.key === "End") { e.preventDefault(); setPlayhead(totalSec); return; }
+                    }}
+                  >
                     {ticks.map((t) => (
                       <span key={t} className="timeline-tick" style={{ left: `${pxPerSec * t}px` }}>
                         {t}秒
@@ -1211,6 +1343,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     ))}
                   </div>
                 </div>
+                {/* 再生位置の線（#686）＝**いま何が出ているか**を並びの上で見せる。読み取り専用の
+                    見わたす画面と同じ CSS（`timeline-playhead`）＝2つの一覧で見え方が割れない。
+                    押せる相手ではないので `pointer-events` は CSS で切る（帯やルーラーを覆わない）。 */}
+                {totalSec > 0 && (
+                  <div
+                    className="timeline-playhead"
+                    style={{ left: `calc(var(--timeline-label-w) + ${pxPerSec * playheadSec}px)` }}
+                    aria-hidden
+                  />
+                )}
                 {/* 表示は**手前が上**（配列は後ろほど手前なので逆順に並べる）＝重なりの見え方と一致させる。
                     行にも解除を付けるのは、列の幅より画面が広いとき**右側にできる余白**を押しても解けるようにするため
                     ＝「何もない所を押すと解ける」の当たり判定を見た目どおりにする（#701 レビュー）。 */}
