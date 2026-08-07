@@ -1299,8 +1299,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     </div>
                     <label className="field">
                       <span>フォント</span>
+                      {/* **「動画全体に合わせる」へ戻せる**（#731）＝`clip.fontId` の `null` は継承で、
+                          描画も動画全体の指定を受け皿にしている（§5）。`allowInherit` が無いと、
+                          継承中でも**既定フォントの名前を現在値として表示**し（動画全体を別の字体に
+                          していると表示と実際が食い違う）、一度選ぶと戻せない。場面編集は既に付いている
+                          ので、無いままだと形式の間で非対称でもあった（ADR-0026②）。 */}
                       <FontPicker
                         value={selected.fontId ?? null}
+                        allowInherit
                         {...editGuard()}
                         onChange={(id) => setSelectedVisualContent({ fontId: id })}
                       />

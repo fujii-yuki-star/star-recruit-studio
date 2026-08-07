@@ -697,3 +697,42 @@ describe('placeableVisualTracks（置ける列・#722）', () => {
     expect(doc.tracks.map((t) => t.id)).toEqual(['track_001', 'track_002']);
   });
 });
+
+// `null` = 継承（#731）。**`null` と未指定は解決が同じ**（CLAUDE.md §5）なので、
+// 片方をもう片方へ書き換えても**絵は変わらないのに文書だけ変わる**＝取り消しが1段空振りする。
+// `setClipAssetRef`（`11 §7.6.3`）が既にこの流儀なので、こちらも揃える。
+describe('setVisualClipContent の null（継承）の扱い（#731）', () => {
+  const textClip = (over: Partial<TimelineClip> = {}) =>
+    doc({ clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: 'あ', ...over }] });
+
+  it('未指定のフォントに「動画全体に合わせる」を選んでも、文書はそのまま（空振りしない）', () => {
+    const d = textClip(); // fontId は未指定＝継承
+    const r = setVisualClipContent(d, 'clip_001', { fontId: null });
+    expect((r as { ok: true; doc: TimelineProject }).doc).toBe(d);
+  });
+
+  it('選んでいたフォントを「動画全体に合わせる」へ戻すと、キーごと落ちる（null を残さない）', () => {
+    const d = textClip({ fontId: 'gen-interface-jp-display' });
+    const r = setVisualClipContent(d, 'clip_001', { fontId: null });
+    const c = (r as { ok: true; doc: TimelineProject }).doc.clips[0];
+    expect('fontId' in c).toBe(false); // `null` を保存すると、未指定との違いが文書に残る
+  });
+
+  it('素材の「なし」も同じ扱い（未指定へ戻す・空振りしない）', () => {
+    const withAsset = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/asset_001.png' }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, assetId: 'asset_001' }],
+    });
+    const r = setVisualClipContent(withAsset, 'clip_001', { assetId: null });
+    expect('assetId' in (r as { ok: true; doc: TimelineProject }).doc.clips[0]).toBe(false);
+    // すでに「なし」のものへもう一度「なし」を選んでも、文書は動かない。
+    const empty = doc({ clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10 }] });
+    expect((setVisualClipContent(empty, 'clip_001', { assetId: null }) as { ok: true; doc: TimelineProject }).doc).toBe(empty);
+  });
+
+  it('値を入れる側は今までどおり（継承から実際のフォントへ）', () => {
+    const d = textClip();
+    const r = setVisualClipContent(d, 'clip_001', { fontId: 'gen-interface-jp-display' });
+    expect((r as { ok: true; doc: TimelineProject }).doc.clips[0].fontId).toBe('gen-interface-jp-display');
+  });
+});

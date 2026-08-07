@@ -2628,3 +2628,42 @@ describe("TimelineProjectScreen: 案内が行き止まりでない（#723）", (
     }
   });
 });
+
+// フォントの継承（#731）。`null` = 動画全体に合わせる、を**画面が表せる**ことを固定する。
+describe("TimelineProjectScreen: フォントは動画全体に合わせられる（#731）", () => {
+  const textClip = (over: Record<string, unknown> = {}) => {
+    open({
+      videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600, fontId: "kaitou-yokoku-gothic" },
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ", ...over }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+  const trigger = () => screen.getByText("フォント").closest("label")?.querySelector("button") as HTMLElement;
+  // ⚠️ 引き金のボタンも継承中は同じ文字を出すので、**一覧の中の項目**に絞る（`li` の中にある方）。
+  const inheritOption = () =>
+    screen.getAllByText("動画全体に合わせる").find((el) => el.closest("li"))?.closest("button") as HTMLElement;
+
+  it("指定が無いときは「動画全体に合わせる」と出す（既定の字体名を現在値に見せない）", () => {
+    textClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 動画全体は「怪盗予告ゴシック」なので、既定の字体名を出すと**表示と実際が食い違う**。
+    expect(trigger().textContent).toContain("動画全体に合わせる");
+  });
+
+  it("選んだあと「動画全体に合わせる」へ戻せる（戻したらキーごと落ちる）", () => {
+    textClip({ fontId: "gen-interface-jp-display" });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(trigger());
+    fireEvent.click(inheritOption());
+    expect("fontId" in useTimelineStore.getState().doc!.clips[0]).toBe(false);
+  });
+
+  it("すでに「動画全体に合わせる」のときに選び直しても、取り消しは増えない（空振りしない）", () => {
+    textClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    fireEvent.click(trigger());
+    fireEvent.click(inheritOption());
+    expect(useTimelineStore.getState().history.past.length).toBe(before);
+  });
+});
