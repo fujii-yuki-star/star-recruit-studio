@@ -751,3 +751,68 @@ describe('素材の取り込み（#712）', () => {
     expect(useTimelineStore.getState().doc!.assets.map((a) => a.assetType)).toEqual(['video', 'image']);
   });
 });
+
+// ボタンで置く経路の置き先（#722）。**列をまたいでは探さない**＝奥の列が空いていてもそちらへは置かない。
+// 置いた部品が手前の全画面の部品の裏に入ると、`06 §12.1` の「押して置いたときも必ず仕上がり確認に
+// 現れる」が守れない（再生位置を移すだけでは足りない）。代わりに時刻は後ろへずれる（利用者判断・案A）。
+describe('置く先の探し方（#722）', () => {
+  // 列は**配列の末尾が手前**（`11 §7.6` 重ね順）＝track_002 が手前。
+  const twoLanes = (over: Partial<TimelineProject> = {}) =>
+    doc({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual }, // 奥
+        { id: 'track_002', kind: TRACK_KIND.visual }, // 手前
+      ],
+      clips: [
+        // 手前の列だけ 0〜5 秒が塞がっている。奥の列は空。
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: 'あ' },
+      ],
+      ...over,
+    });
+
+  it('手前の列が塞がっていても、奥の列へは逃がさない（裏に隠れる部品を作らない）', () => {
+    useTimelineStore.setState({ doc: twoLanes(), playheadSec: 0, selectedClipIds: [] });
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.id !== 'clip_001')!;
+    expect(placed.trackId).toBe('track_002'); // 手前の列
+    expect(placed.startSec).toBe(5); // まるごと収まる最初の空き（再生位置 0 は塞がっている）
+  });
+
+  it('置いた所へ再生位置も移る（押したのに何も現れない、を作らない）', () => {
+    useTimelineStore.setState({ doc: twoLanes(), playheadSec: 0, selectedClipIds: [] });
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    expect(useTimelineStore.getState().playheadSec).toBe(5);
+  });
+
+  it('手前の列が固定・非表示なら、その次に手前の列へ置く', () => {
+    useTimelineStore.setState({
+      doc: twoLanes({ tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual },
+        { id: 'track_002', kind: TRACK_KIND.visual, locked: true },
+      ] }),
+      playheadSec: 0, selectedClipIds: [],
+    });
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.id !== 'clip_001')!;
+    expect(placed.trackId).toBe('track_001');
+    expect(placed.startSec).toBe(0); // その列は空いているので再生位置のまま
+  });
+
+  it('置ける列が1本も無いときは理由を出す（押しても何も起きない、を作らない）', () => {
+    useTimelineStore.setState({
+      doc: doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.audio }], clips: [] }),
+      playheadSec: 0, selectedClipIds: [], editBlocked: null,
+    });
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(0);
+    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_NOT_FOUND');
+  });
+
+  it('落とした場所が指されているときは探さない（寄せない・ADR-0034 決定10）', () => {
+    useTimelineStore.setState({ doc: twoLanes(), playheadSec: 0, selectedClipIds: [], editBlocked: null });
+    // 手前の列の 0 秒＝塞がっている所へ落とす。空きへ寄せずに断る。
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text, at: { trackId: 'track_002', startSec: 0 } });
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
+    expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_OVERLAP');
+  });
+});
