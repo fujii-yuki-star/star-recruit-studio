@@ -2,6 +2,7 @@
 // テキスト入力中（input/textarea/contentEditable）は標準の文字 Undo に任せ、ここでは奪わない。
 // App 一箇所で登録する（画面ごとの二重登録＝二重 Undo を防ぐ・#413）が、**有効にする画面は enabled で絞る**（下記）。
 import { useEffect } from "react";
+import { isPointerDragging } from "./usePointerDrag";
 import { shouldIgnoreShortcut } from "./keyboardShortcut";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
@@ -57,6 +58,10 @@ export function useUndoRedoShortcuts(enabled: boolean, handlers?: { undo: () => 
       const key = e.key.toLowerCase();
       if (key !== "z" && key !== "y") return;
       if (shouldIgnoreShortcut(e)) return; // 入力中は標準の文字 Undo に任せる／変換中は奪わない
+      // 掴んでいる間は巻き戻さない（#686 レビュー）。掴んだ帯が足元で動くと、離したときに
+      // **掴んだときと違う結果**になる（起点だけ古い）。他のキーは `Escape` の名乗りで塞いであるのに
+      // 取り消しだけ効く、という非対称も消える。
+      if (isPointerDragging()) return;
       e.preventDefault();
       if (key === "y" || e.shiftKey) redo();
       else undo();

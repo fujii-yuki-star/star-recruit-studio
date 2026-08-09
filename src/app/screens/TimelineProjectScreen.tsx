@@ -14,7 +14,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, placeableAudioTracks, placeableVisualTracks, visualPlacementIssue } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, moveClipIssue, placeableAudioTracks, placeableVisualTracks, trimClipIssue, visualPlacementIssue } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation } from "../../domain/constants";
@@ -28,6 +28,7 @@ import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import { useTimelineAudio } from "../hooks/useTimelineAudio";
 import type { CropMode, TimelineClipKind } from "../../domain/enums";
+import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
@@ -129,6 +130,20 @@ const NUDGE_SEC = 0.5;
 
 /** 1秒あたりの表示幅（px）と、レーンの最小幅。読み取り専用タイムラインと同じ見え方に寄せる。 */
 const MIN_LANE_WIDTH_PX = 640;
+/**
+ * 取っ手を出す最小の帯の幅（px・#686 レビュー）。左右の取っ手（7px×2）と「⋮」（14px）で 28px を食うので、
+ * 短い帯／低い倍率では**本体を掴む所が無くなる**（動かせなくなる）。狭いときは取っ手を出さず、
+ * 長さは数値の欄で変えてもらう＝**ドラッグ専用の操作を作らない**（決定19）ので行き止まりにならない。
+ */
+const CLIP_HANDLE_W_PX = 7;
+const CLIP_MENU_W_PX = 14;
+/**
+ * 取っ手を出す最小の帯の幅（px）。左右の取っ手と「⋮」が食うぶん＋本体を掴む余地。
+ * ⚠️ **幅は TS 側が単一の参照元**（`--timeline-label-w` と同じ流儀＝CSS へ流し込む）。
+ * CSS にだけ書くと、値を変えたときにこの下限が黙って合わなくなる（計算と描画が食い違う）。
+ */
+const CLIP_HANDLES_MIN_W_PX = CLIP_HANDLE_W_PX * 2 + CLIP_MENU_W_PX + 16;
+
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
 
@@ -277,7 +292,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, trimClipById, setEditBlocked, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -842,6 +857,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 以前は尺から自動で決めていた（`max(640/尺, 40)`）ので、長い動画ほど潰れて手が出せなかった。
    */
   const [zoomIndex, setZoomIndex] = useState<number | null>(null); // null＝まだ全体表示を決めていない
+  /**
+   * **利用者が倍率を変える唯一の入口**（#743 レビュー）。ホイールにだけ関門を置いていたので、
+   * `−`／`＋`／`全体を表示` は掴んでいる間も効いた（別のポインタや画面なら届く）＝秒は掴んだ時点の
+   * 倍率で出しているので、**帯が指から離れる**。入口を1つにして、関門も1つにする。
+   */
+  const changeZoomRef = useRef<(next: number | ((i: number | null) => number)) => boolean>(() => false);
+  const changeZoom = (next: number | ((i: number | null) => number)): boolean => {
+    if (clipDragRef.current) return false;
+    zoomTouchedRef.current = true; // 明示的に合わせた＝以後は勝手に動かさない
+    setZoomIndex((i) => (typeof next === "function" ? next(i) : next));
+    return true;
+  };
   const scrollRef = useRef<HTMLDivElement>(null);
   /**
    * **開いた直後は全体表示**（決定13）。列の幅を実測してから決めるので効果でやる。
@@ -888,9 +915,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       if (ZOOM_LEVELS[nextIndex] === from) return;
       // 位置合わせは**描き直した後**（下の効果）。ここで合わせるとまだ古い幅なのでスクロールの
       // 上限で切り詰められ、錨点が流れる（実機で確認）。
-      pendingZoomRef.current = { scrollLeft: el.scrollLeft, anchorPx: e.clientX - el.getBoundingClientRect().left, fromPxPerSec: from };
-      zoomTouchedRef.current = true;
-      setZoomIndex(nextIndex);
+      // ⚠️ **効いたときだけ**錨点を控える（断られたのに控えると、次の1回が古い錨点で流れる）。
+      const anchor = { scrollLeft: el.scrollLeft, anchorPx: e.clientX - el.getBoundingClientRect().left, fromPxPerSec: from };
+      if (changeZoomRef.current(nextIndex)) pendingZoomRef.current = anchor;
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -947,7 +974,36 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       seekFrames: (frames) => { if (doc) setPlayhead(seekByFrames(doc, playheadSec, frames)); },
     };
     removeRef.current = requestRemoveSelected;
+    changeZoomRef.current = changeZoom; // ホイールの実リスナーは張り替えないので写し越しに呼ぶ
   });
+  /**
+   * **帯を掴んでいる間**（#686・ADR-0034 決定9/10）。作法は欄のドラッグ（ADR-0033 段階3）と同じ。
+   *
+   * 置けない所では**寄せない**＝ゴーストの色で知らせ、離したら**元の位置へ戻す**（決定10）。
+   * 判定は domain の `moveClipIssue`／`trimClipIssue`＝**ゴーストの色と離した結果が同じ規則**。
+   */
+  /** 実リスナー（`wheel`）から掴んでいる最中かを見るための写し（張り替えないので ref 越し）。 */
+  const clipDragRef = useRef(false);
+  const [clipDrag, setClipDrag] = useState<
+    { clipId: string; mode: "move" | "trim-start" | "trim-end"; sec: number; issue: EditBlockedReason | null } | null
+  >(null);
+
+  /**
+   * 掴んだ直後の `click` を1回だけ捨てる（#686 レビュー）。`pointerdown` の `preventDefault` は
+   * `click` を止めないので、離した後に選び直しが走り**断り文がその場で消える**／`Shift` を押していた
+   * ときは**動かした帯の選択が外れる**（取っ手も消える）。
+   */
+  const skipClickRef = useRef(false);
+  /**
+   * 何もない所を押して選択を解く（#701）。**掴んだ直後の `click` では解かない**（#743 レビュー）＝
+   * 帯の外で離すと `click` の相手はこの余白になるので、ここが印を見ないと**断ったそばから
+   * 選択が丸ごと消える**（帯の上で離したときだけ守られる、という当たり外れを作らない）。
+   */
+  const clearSelectionByClick = (): void => {
+    if (skipClickRef.current) { skipClickRef.current = false; return; }
+    clearSelection();
+  };
+
   // **つかんで置く**（#684）の道具。使うのは下の `resolveDrop` ほか。
   // ドラッグの作法は共有（掴む場所ごとに書き分けない・ADR-0034 決定9）。
   const beginDrag = usePointerDrag();
@@ -1011,6 +1067,114 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 置けるかどうかは domain の `visualPlacementIssue` で見る＝**ゴーストの色と、離したときの結果が同じ判定**
    * （置けそうに見えたのに断られる、を作らない）。置けないまま離したら**元へ戻す**＝寄せない（決定10）。
    */
+
+  const trackOf = (trackId: string) => doc?.tracks.find((t) => t.id === trackId);
+  /** 掴めるか（#686 レビュー）。**見た目（`cursor`）と、掴む処理を始めるかが同じものを見る**。 */
+  const grabbableClip = (c: TimelineClip): boolean => !exporting && !trackOf(c.trackId)?.locked;
+  /**
+   * 端の取っ手を出すか。**細い帯では出さない**＝左右の取っ手と「⋮」で**本体を掴む所が無くなる**。
+   * 長さは数値の欄で変えられる（ドラッグ専用の操作を作らない・決定19）ので行き止まりにならない。
+   */
+  const showHandles = (c: TimelineClip): boolean =>
+    grabbableClip(c) && pxPerSec * c.durationSec >= CLIP_HANDLES_MIN_W_PX;
+  /**
+   * 掴んでいる間の帯の位置と長さ（#686）。**離すまで文書は変えない**ので、見せかけだけを動かす。
+   * 端の縮めは `applyClipEdge` と同じ下限に当たるので、見た目も同じ所で止まる。
+   */
+  const dragSpanOf = (c: TimelineClip): { startSec: number; endSec: number } => {
+    const d = clipDrag?.clipId === c.id ? clipDrag : null;
+    let startSec = c.startSec;
+    let endSec = clipEndSec(c);
+    if (d?.mode === "move") { const len = endSec - startSec; startSec = d.sec; endSec = d.sec + len; }
+    else if (d?.mode === "trim-start") startSec = Math.min(d.sec, endSec - TIMELINE_MIN_CLIP_SEC);
+    else if (d?.mode === "trim-end") endSec = Math.max(d.sec, startSec + TIMELINE_MIN_CLIP_SEC);
+    return { startSec, endSec };
+  };
+  const dragStyleOf = (c: TimelineClip): { left: string; width: string } => {
+    const { startSec, endSec } = dragSpanOf(c);
+    return { left: `${pxPerSec * startSec}px`, width: `${pxPerSec * (endSec - startSec)}px` };
+  };
+
+  /**
+   * 掴んでいる間に**別の所から文書が変わった**か（#686 レビュー）。
+   *
+   * 掴んだ時点の帯を起点に秒を出しているので、途中で当人が動くと**起点だけ古い**まま離すことになる
+   * （例：取り消しで開始が戻った後に離すと、戻る前の起点から作った時刻で上書きする）。
+   * 変わっていたら**掴み直してもらう**＝掴んだときに見ていたものと違う結果を出さない。
+   * `Ctrl+Z` は下の名乗りで塞いだので、ここに来るのは声の完成のように**自分では押していない**変化。
+   */
+  const clipChanged = (before: TimelineClip): boolean => {
+    const now = useTimelineStore.getState().doc?.clips.find((c) => c.id === before.id);
+    return !now || now.trackId !== before.trackId || now.startSec !== before.startSec
+      || now.durationSec !== before.durationSec;
+  };
+
+  /**
+   * 帯を掴む（#686）。`mode` で本体（動かす）と端（縮める）を分ける。
+   *
+   * ⚠️ **掴む前に断る**（`editGuard` と同じ流儀）＝固定した列・書き出し中は掴む処理そのものを始めない。
+   * 押せてしまうと、離してから `commit` が断る＝**押してから断る**になる（#703 で消した形の再発）。
+   */
+  const beginClipDrag = (e: ReactPointerEvent, clipId: string, mode: "move" | "trim-start" | "trim-end"): void => {
+    // ⚠️ 前の `click` の取りこぼしをここで捨てる（#743 レビュー）。下の断る道は `usePointerDrag` に
+    // 乗らないので、離した先が帯の外だと `click` が来ず印が残り、**次の無関係な1回を飲み込む**。
+    // 新しく掴み始めた時点で流す＝残っても「次の pointerdown まで」に必ず縮む。
+    skipClickRef.current = false;
+    const doc0 = useTimelineStore.getState().doc;
+    const clip0 = doc0?.clips.find((c) => c.id === clipId);
+    if (!doc0 || !clip0) return;
+    // 掴めるかは **`grabbableClip` だけが決める**（見た目の `cursor` と同じものを見る・#743 レビュー）。
+    // 条件を書き写すと、片方だけ増えたときに「掴めそうなのに掴めない」の非対称が戻る。
+    if (!grabbableClip(clip0)) return;
+    // 複数選んでいるうちの1つを掴んだ＝まとめて動かすのは段階4。**選択を黙って潰さない**（決定15）。
+    if (selectedClipIds.length > 1 && selectedClipIds.includes(clipId)) {
+      setEditBlocked(EDIT_BLOCKED.multiSelection);
+      // ⚠️ **断って戻る道でも `click` を捨てる**（#686 レビュー）。捨てないと離した後の `click` が
+      // 素通しで走り、①帯の上なら `selectClip` で**選択が1つへ潰れて理由も消える**
+      // ②列の余白なら `clearSelection` で**選択が丸ごと消える**＝断った意味が無くなる。
+      skipClickRef.current = true;
+      return;
+    }
+    const startX = e.clientX;
+    const origin = mode === "trim-end" ? clipEndSec(clip0) : clip0.startSec;
+    // ⚠️ **`pxPerSec` は掴んだ時点の値**（下でホイールの倍率変更を止めているので、途中で変わらない）。
+    const at = (ev: PointerEvent): number => Math.max(0, origin + (ev.clientX - startX) / pxPerSec);
+    // 判定は**今の文書**で引く（掴んだ時点の写しで見ると、途中で変わったとき色と結果が食い違う）。
+    const issueOf = (sec: number): EditBlockedReason | null => {
+      const now = useTimelineStore.getState().doc ?? doc0;
+      return mode === "move"
+        ? moveClipIssue(now, clipId, { startSec: sec })
+        : trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec);
+    };
+    beginDrag(e, {
+      onStart: () => selectClip(clipId), // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する
+      onMove: (ev) => {
+        if (clipChanged(clip0)) { clipDragRef.current = false; setClipDrag(null); return; }
+        const sec = at(ev);
+        setClipDrag({ clipId, mode, sec, issue: issueOf(sec) });
+        clipDragRef.current = true;
+      },
+      onEnd: (ev, started) => {
+        clipDragRef.current = false;
+        if (!started) return; // 動かしていない＝ただのクリック（選択は `onClick` が受ける）
+        setClipDrag(null);
+        // 離した後に来る `click` を捨てる＝**選び直しで理由が消える**のと、`Shift` を押していたときに
+        // 動かした帯の選択が外れるのを防ぐ（`pointerdown` の `preventDefault` は `click` を止めない）。
+        skipClickRef.current = true;
+        if (clipChanged(clip0)) return;
+        const sec = at(ev);
+        // ⚠️ **ここで置けるかを見ない**＝`moveClipById` が同じ `moveClip` を走らせ、置けなければ
+        // **文書を変えずに理由だけ立てる**（＝寄せない＋離したときに出す・決定10）。
+        // 手前で1回断る形にしていたが、結果は同じで**判定する場所が2つ**になるだけだった
+        // （ゴーストの色も同じ関数を見ている＝決めるのは1か所）。
+        // 掴んだ相手は `clipId`。**選択に効かせない**＝掴んでいる間に選択が変わっても（左ドラッグ中の
+        // 右クリック・取り消しで対象が消える等）**掴んでいない帯**が動く、を作らない。
+        if (mode === "move") moveClipById(clipId, { startSec: sec });
+        else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
+      },
+      onCancel: (started) => { clipDragRef.current = false; setClipDrag(null); if (started) skipClickRef.current = true; },
+    });
+  };
 
   /** 落とした点から「どこへ置くか」を決める。**列が先**（下の並びは仕上がり確認に重ならない）。 */
   const resolveDrop = (kind: VisualKind, assetId: string | undefined, x: number, y: number): DragPlace["drop"] => {
@@ -1266,7 +1430,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <p className="text-muted">列がありません。「映像の列を足す」で作ってください。</p>
         ) : (
           // 見た目は読み取り専用タイムライン（ADR-0018 ③(2)）と同じ CSS を使う＝2つの一覧で見え方が割れない（§6）。
-          <div className="timeline" style={{ ["--timeline-label-w" as string]: `${LANE_LABEL_PX}px` }}>
+          <div
+            className="timeline"
+            // 幅は**TS が単一の参照元**（下限の計算がこの値を引くので、CSS の既定に頼ると黙ってずれる）。
+            style={{
+              ["--timeline-label-w" as string]: `${LANE_LABEL_PX}px`,
+              ["--clip-handle-w" as string]: `${CLIP_HANDLE_W_PX}px`,
+              ["--clip-menu-w" as string]: `${CLIP_MENU_W_PX}px`,
+            }}
+          >
             {/* 表示倍率（#686・決定13）＝**全体を表示**から始め、段で広げ縮めできる。
                 `Ctrl`+ホイールでも同じ段を動かし、**錨点はマウスの位置**（見ていた所が流れない）。 */}
             <div className="timeline-toolbar">
@@ -1275,7 +1447,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 className="btn btn-ghost btn-icon"
                 aria-label="表示を縮める"
                 disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) <= 0}
-                onClick={() => { zoomTouchedRef.current = true; setZoomIndex((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, -1)); }}
+                onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, -1))}
               >
                 −
               </button>
@@ -1283,17 +1455,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 className="btn btn-ghost btn-icon"
                 aria-label="表示を広げる"
                 disabled={(zoomIndex ?? DEFAULT_ZOOM_INDEX) >= ZOOM_LEVELS.length - 1}
-                onClick={() => { zoomTouchedRef.current = true; setZoomIndex((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, 1)); }}
+                onClick={() => changeZoom((i) => stepZoomIndex(i ?? DEFAULT_ZOOM_INDEX, 1))}
               >
                 ＋
               </button>
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  zoomTouchedRef.current = true; // 明示的に合わせた＝以後も勝手に動かさない
-                  const px = (scrollRef.current?.clientWidth ?? 0) - LANE_LABEL_PX;
-                  setZoomIndex(fitZoomIndex(totalSec, px));
-                }}
+                onClick={() => changeZoom(fitZoomIndex(totalSec, (scrollRef.current?.clientWidth ?? 0) - LANE_LABEL_PX))}
               >
                 全体を表示
               </button>
@@ -1360,7 +1528,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <div
                     className="timeline-row"
                     key={track.id}
-                    onClick={(e) => { if (e.target === e.currentTarget) clearSelection(); }}
+                    onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(); }}
                   >
                     {/* 操作は右クリックのメニューへ畳む＝行に文字を並べない（帯が読めなくなる・利用者指摘 2026-08-03）。
                         行に残すのは**名前と状態**だけ。右クリックできると分かるよう、同じメニューを開く小さなボタンも置く
@@ -1385,7 +1553,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       ref={(el) => { if (el) laneRefs.current.set(track.id, el); else laneRefs.current.delete(track.id); }}
                       className={`timeline-track timeline-lane${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
-                      onClick={(e) => { if (e.target === e.currentTarget) clearSelection(); }}
+                      onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(); }}
                     >
                       {/* **入る場所を実寸で見せる**（#684 レビュー）＝欄のドラッグが線で示すのと同じ流儀。
                           「その列のどこに・何秒ぶん」が見えないまま落とさせない。 */}
@@ -1402,17 +1570,41 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           <button
                             key={c.id}
                             type="button"
-                            className={`timeline-clip ${CLIP_KIND_CLASS[c.kind]}${selectedClipIds.includes(c.id) ? " timeline-clip--selected" : ""}`}
-                            style={{ left: `${pxPerSec * c.startSec}px`, width: `${pxPerSec * (clipEndSec(c) - c.startSec)}px` }}
+                            className={[
+                              "timeline-clip",
+                              CLIP_KIND_CLASS[c.kind],
+                              selectedClipIds.includes(c.id) ? "timeline-clip--selected" : "",
+                              // 掴めることを見た目で示す（`cursor: grab`・CSS は用意済みだった）。
+                              // 掴めないときは `cursor: grab` も出さない（掴めそうに見せない・#686 レビュー）。
+                              grabbableClip(c) ? "timeline-clip--editable" : "",
+                              clipDrag?.clipId === c.id ? "timeline-clip--dragging" : "",
+                              clipDrag?.clipId === c.id && clipDrag.issue ? "drop-target--blocked" : "",
+                            ].filter(Boolean).join(" ")}
+                            // 掴んでいる間は**その場で動かして見せる**（離すまで文書は変えない）。
+                            style={dragStyleOf(c)}
+                            onPointerDown={(e) => beginClipDrag(e, c.id, "move")}
                             // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
                             // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
                             title={clipRangeTitle(clipLabel(c), c.startSec, clipEndSec(c))}
-                            onClick={(e) => selectClip(c.id, e.shiftKey)}
+                            onClick={(e) => { if (skipClickRef.current) { skipClickRef.current = false; return; } selectClip(c.id, e.shiftKey); }}
                             // 右クリックのほか、キーボードの「メニューキー」「Shift+F10」でもここが呼ばれる
                             // ＝ドラッグ専用の操作を作らない（ADR-0034 決定19）。
                             onContextMenu={(e) => openClipMenu(e, c.id)}
                           >
                             {clipLabel(c)}
+                            {/* 端を掴んで縮める（決定9）。選んだ帯にだけ出す＝隣の当たり判定を常時食わない。 */}
+                            {selectedClipIds.includes(c.id) && showHandles(c) && (
+                              <>
+                                <span
+                                  className="timeline-clip-handle timeline-clip-handle--left"
+                                  onPointerDown={(e) => { e.stopPropagation(); beginClipDrag(e, c.id, "trim-start"); }}
+                                />
+                                <span
+                                  className="timeline-clip-handle timeline-clip-handle--right"
+                                  onPointerDown={(e) => { e.stopPropagation(); beginClipDrag(e, c.id, "trim-end"); }}
+                                />
+                              </>
+                            )}
                           </button>
                         ))}
                       {/* 帯の操作を開く「⋮」（#701）＝列の行と同じ逃げ道。
@@ -1426,7 +1618,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             type="button"
                             className="timeline-clip-menu"
                             // 帯の**内側の右端**（外に置くと隣の帯の当たり判定を食う＝CSS の ⚠️）。
-                            style={{ left: `calc(${pxPerSec * clipEndSec(c)}px - var(--clip-menu-w))` }}
+                            // ⚠️ **右の取っ手のぶんだけ内側へ寄せる**（#742→#686 レビュー・実機で確認）。
+                            // 「⋮」は帯の兄弟で `z-index` が上なので、右端に置くと**取っ手を丸ごと覆う**
+                            // ＝左端は掴めるのに右端だけメニューが開く（左右非対称に壊れる）。
+                            // 掴んでいる間は帯と**一緒に動く**（元の位置に取り残さない）。
+                            // ⚠️ 取っ手を**出していないとき**まで避けると、細い帯では「⋮」が左の外へはみ出す
+                            // （隣の帯の当たり判定を食う）。避ける条件は取っ手を出す条件と**同じものを見る**。
+                            style={{
+                              left: `calc(${pxPerSec * dragSpanOf(c).endSec}px - var(--clip-menu-w)${
+                                showHandles(c) ? " - var(--clip-handle-w)" : ""
+                              })`,
+                            }}
                             aria-label={`${clipLabel(c)}の操作`}
                             title="この部品の操作（右クリックでも開けます）"
                             onClick={(e) => {

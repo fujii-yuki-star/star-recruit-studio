@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
+  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC } from '../constants';
@@ -767,5 +767,99 @@ describe('setVisualClipContent の null（継承）の扱い（#731）', () => {
     const d = textClip();
     const r = setVisualClipContent(d, 'clip_001', { fontId: 'gen-interface-jp-display' });
     expect((r as { ok: true; doc: TimelineProject }).doc.clips[0].fontId).toBe('gen-interface-jp-display');
+  });
+});
+
+// ドラッグ中のゴーストと、離したときの結果が**同じ規則**を見る（#686・ADR-0034 決定10）。
+describe('moveClipIssue / trimClipIssue（掴んでいる間の判定・#686）', () => {
+  const twoClips = (over: Partial<TimelineProject> = {}) =>
+    doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [
+        clip('clip_001', { startSec: 0, durationSec: 3 }),
+        clip('clip_002', { startSec: 5, durationSec: 3 }),
+      ],
+      ...over,
+    });
+
+  it('空いている所へは動かせる', () => {
+    expect(moveClipIssue(twoClips(), 'clip_001', { startSec: 10 })).toBeNull();
+  });
+
+  it('自分の元の場所とは重ならない扱い（自分を避けて数える）', () => {
+    expect(moveClipIssue(twoClips(), 'clip_001', { startSec: 0 })).toBeNull();
+    expect(moveClipIssue(twoClips(), 'clip_001', { startSec: 1 })).toBeNull();
+  });
+
+  it('ほかの帯と重なる所は断る（寄せない＝決定10 の材料）', () => {
+    expect(moveClipIssue(twoClips(), 'clip_001', { startSec: 4 })).toBe(EDIT_BLOCKED.overlap);
+  });
+
+  it('**離したときの結果と一致する**（見えていた色と違う結果にしない）', () => {
+    const d = twoClips();
+    for (const startSec of [0, 1, 4, 5, 10]) {
+      const issue = moveClipIssue(d, 'clip_001', { startSec });
+      const r = moveClip(d, 'clip_001', { startSec });
+      expect(r.ok).toBe(issue === null);
+      if (!r.ok) expect(r.reason).toBe(issue);
+    }
+  });
+
+  it('固定した列の帯は動かせない', () => {
+    const d = twoClips();
+    d.tracks[0].locked = true;
+    expect(moveClipIssue(d, 'clip_001', { startSec: 10 })).toBe(EDIT_BLOCKED.locked);
+  });
+
+  it('種別の合わない列へは動かせない（映像の部品を音の列へ）', () => {
+    expect(moveClipIssue(twoClips(), 'clip_001', { trackId: 'track_002' })).toBe(EDIT_BLOCKED.trackKind);
+  });
+
+  it('端を縮めるのも同じ流儀（結果と一致する）', () => {
+    const d = twoClips();
+    for (const sec of [1, 2, 6]) {
+      const issue = trimClipIssue(d, 'clip_001', 'end', sec);
+      const r = trimClip(d, 'clip_001', 'end', sec);
+      expect(r.ok).toBe(issue === null);
+      if (!r.ok) expect(r.reason).toBe(issue);
+    }
+  });
+
+  it('連動している字幕は時間を動かせない（列は変えられる）', () => {
+    const d = twoClips();
+    d.clips[0] = { ...d.clips[0], voiceClipId: 'clip_002' };
+    expect(moveClipIssue(d, 'clip_001', { startSec: 10 })).toBe(EDIT_BLOCKED.linkedSubtitleTime);
+    expect(trimClipIssue(d, 'clip_001', 'end', 2)).toBe(EDIT_BLOCKED.linkedSubtitleTime);
+  });
+});
+
+// 掴んでいる間の色と、離したときの結果が割れないこと（#686 レビュー）。
+// ⚠️ 判定を**書き写して**いたときは `withBoundSubtitles`（連動する字幕の置き場）が抜けていて、
+// 読み上げの帯だけ「置ける色のまま断られる」状態だった。走らせて導く形なら構造的に割れない。
+describe("moveClipIssue／trimClipIssue は操作そのものから導く（#686 レビュー）", () => {
+  /** 読み上げ＋連動する字幕。字幕の隣を埋めて、字幕だけ置けない状況を作る。 */
+  const linked = (): TimelineProject => doc({
+    tracks: [
+      { id: "track_001", kind: TRACK_KIND.visual },
+      { id: "track_002", kind: TRACK_KIND.audio },
+    ],
+    clips: [
+      { id: "v1", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } },
+      { id: "s1", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: "v1" },
+      { id: "blk", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 3, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "邪魔" },
+    ],
+  });
+
+  it("連動する字幕の置き場が無いときは**掴んでいる間から**断る", () => {
+    const doc = linked();
+    // 読み上げを 4秒へ動かすと、連動する字幕が `blk`（3〜8秒）と重なる＝`moveClip` は断る。
+    expect(moveClip(doc, "v1", { startSec: 4 }).ok).toBe(false);
+    expect(moveClipIssue(doc, "v1", { startSec: 4 })).not.toBeNull(); // 色も同じ判断
+  });
+
+  it("端を縮めるときも同じ（結果と色が割れない）", () => {
+    const doc = linked();
+    const r = trimClip(doc, "v1", "end", 4);
+    expect(trimClipIssue(doc, "v1", "end", 4) === null).toBe(r.ok);
   });
 });

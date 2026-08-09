@@ -19,6 +19,17 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { claimEscape } from "./escapeOwners";
 
+let dragging = 0;
+/**
+ * **いま何かを掴んでいるか**（#686 レビュー）。掴んでいる間だけ止めたい外側の操作（取り消し）が見る。
+ *
+ * ⚠️ `hasEscapeOwner()` で代用しない＝あちらは右クリックメニュー・色や書体の選択欄も名乗るので、
+ * それらを開いている間じゅう `Ctrl+Z` が**全画面で**無言で効かなくなる（掴む話より広く効いてしまう）。
+ */
+export function isPointerDragging(): boolean {
+  return dragging > 0;
+}
+
 /** ここまで動いたら「掴んだ」とみなす（px）。 */
 export const DRAG_START_PX = 4;
 
@@ -75,6 +86,7 @@ export function usePointerDrag() {
 
     const mine = (ev: PointerEvent): boolean => ev.pointerId === pointerId;
     const detach = (): void => {
+      if (started) dragging -= 1; // 掴んだぶんだけ戻す（しきい値未満で終わったときは増やしていない）
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
@@ -91,6 +103,7 @@ export function usePointerDrag() {
       if (!started) {
         if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < (h.startPx ?? DRAG_START_PX)) return;
         started = true;
+        dragging += 1;
         h.onStart?.(ev);
       }
       h.onMove(ev);
