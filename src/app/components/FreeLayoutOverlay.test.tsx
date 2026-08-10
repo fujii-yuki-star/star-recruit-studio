@@ -6,6 +6,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { FreeLayoutOverlay } from "./FreeLayoutOverlay";
 import type { FreeElement } from "../../domain/project/types";
 import { FREE_ELEMENT_KIND } from "../../domain/enums";
+import { isPointerDragging } from "../hooks/usePointerDrag";
+import { hasEscapeOwner } from "../hooks/escapeOwners";
 
 // FreeLayoutOverlay の「対話」をブラウザ非依存で自動検証するサンプル（ADR-0014）。
 // 各要素ボックスの中身（テキスト等）は重ねる ScenePreview 側が描くため overlay のボックスは
@@ -733,5 +735,98 @@ describe("FreeLayoutOverlay: 非表示/ロック（#210）", () => {
     fireEvent.pointerMove(box, { clientX: 50, clientY: 50, pointerId: 1 });
     expect(onMoveMany).not.toHaveBeenCalled(); // ロック中は移動しない
     expect(box.children).toHaveLength(0); // リサイズハンドルも出さない
+  });
+});
+
+// 掴む作法を画面ぜんぶで揃える（#685 レビュー 🔴）。帯（`usePointerDrag`）は `Escape` でやめられ、
+// 掴んでいる間は取り消しを止める。キャンバスだけ持っていなかったので、共有部品の側へ入れた。
+describe("掴む作法（`Escape` と取り消し・#685 レビュー）", () => {
+  const el = (over: Partial<FreeElement> = {}): FreeElement =>
+    ({ id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 200, h: 100, ...over }) as FreeElement;
+
+  function mount(over: Partial<Parameters<typeof FreeLayoutOverlay>[0]> = {}) {
+    const onMoveMany = vi.fn();
+    const onInteractionEnd = vi.fn();
+    const r = render(
+      <FreeLayoutOverlay
+        freeLayout={[el()]} canvasW={1920} canvasH={1080} selectedIds={["free_001"]}
+        onSelect={vi.fn()} onSelectMany={vi.fn()} onChange={vi.fn()} onResizeMany={vi.fn()}
+        onRotate={vi.fn()} onMoveMany={onMoveMany}
+        onInteractionStart={vi.fn()} onInteractionEnd={onInteractionEnd}
+        {...over}
+      />,
+    );
+    const root = r.container.firstElementChild as HTMLElement;
+    Object.defineProperty(root, "clientWidth", { value: 960, configurable: true });
+    root.getBoundingClientRect = () => ({ left: 0, top: 0, right: 960, bottom: 540, width: 960, height: 540, x: 0, y: 0, toJSON: () => ({}) });
+    return { root, onMoveMany, onInteractionEnd, ...r };
+  }
+
+  it("掴んでいる間は**取り消しを止める**（足元で文書が動くと結果が変わる）", () => {
+    const { root, container } = mount();
+    expect(isPointerDragging()).toBe(false);
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { pointerId: 1, clientX: 140, clientY: 100 });
+    expect(isPointerDragging()).toBe(true); // 帯と同じ合図に載る
+    fireEvent.pointerUp(root, { pointerId: 1, clientX: 140, clientY: 100 });
+    expect(isPointerDragging()).toBe(false); // 離したら外す（塞ぎっぱなしにしない）
+  });
+
+  it("`Escape` でやめたら**元の位置へ戻す**（掴んだ所に置かない）", () => {
+    const { root, container, onMoveMany, onInteractionEnd } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { pointerId: 1, clientX: 300, clientY: 200 });
+    onMoveMany.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onMoveMany).toHaveBeenCalledWith([{ id: "free_001", x: 100, y: 100 }]); // 開始時の値へ
+    expect(onInteractionEnd).toHaveBeenCalled(); // 履歴グループも閉じる（開けっぱなしにしない）
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("やめる合図は**掴んでいる間に1度だけ**張る（動かすたびに張り直さない）", () => {
+    // ⚠️ 依存を書かない／`drag` を依存に入れる、のどちらでも `pointermove` のたびに張り直しになる。
+    const add = vi.spyOn(window, "addEventListener");
+    try {
+      const { root, container } = mount();
+      fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+      const before = add.mock.calls.filter((c) => c[0] === "keydown").length;
+      for (let i = 0; i < 5; i++) fireEvent.pointerMove(root, { pointerId: 1, clientX: 100 + i * 10, clientY: 100 });
+      expect(add.mock.calls.filter((c) => c[0] === "keydown").length).toBe(before); // 増えない
+      fireEvent.keyDown(window, { key: "Escape" }); // それでも効く（鮮度を落としていない）
+      expect(isPointerDragging()).toBe(false);
+    } finally {
+      add.mockRestore();
+    }
+  });
+
+  it("やめるときは**そのとき渡されている**受け口を呼ぶ（古いものを掴まない）", () => {
+    // ⚠️ 張り直しを減らすために closure を固定すると、掴んでいる最中に親が渡し直した受け口を
+    // **古いまま**呼ぶ（呼び出し側はインラインの関数を渡している）。速さのために鮮度を落とさない。
+    const first = vi.fn();
+    const later = vi.fn();
+    const { root, container, rerender } = mount({ onMoveMany: first });
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { pointerId: 1, clientX: 300, clientY: 200 });
+    rerender(
+      <FreeLayoutOverlay
+        freeLayout={[el()]} canvasW={1920} canvasH={1080} selectedIds={["free_001"]}
+        onSelect={vi.fn()} onSelectMany={vi.fn()} onChange={vi.fn()} onResizeMany={vi.fn()}
+        onRotate={vi.fn()} onMoveMany={later}
+        onInteractionStart={vi.fn()} onInteractionEnd={vi.fn()}
+      />,
+    );
+    first.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(later).toHaveBeenCalledWith([{ id: "free_001", x: 100, y: 100 }]);
+    expect(first).not.toHaveBeenCalled();
+  });
+
+  it("画面を離れても名乗りを外す（以後 `Escape` も取り消しも効かなくなるのを防ぐ）", () => {
+    const { root, container, unmount } = mount();
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { pointerId: 1, clientX: 140, clientY: 100 });
+    unmount();
+    expect(isPointerDragging()).toBe(false);
+    expect(hasEscapeOwner()).toBe(false);
   });
 });

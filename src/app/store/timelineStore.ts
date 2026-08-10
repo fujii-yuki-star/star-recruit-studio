@@ -29,7 +29,7 @@ import {
   VISUAL_CLIP_DURATION_SEC, addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip,
   firstFreeStart, moveClip, placeableVisualTracks,
   setVisualClipContent,
-  moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipFade, setClipSourceStart, setClipSpeed,
+  moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
@@ -246,6 +246,13 @@ export interface TimelineState {
   setEditBlocked: (reason: EditBlockedReason) => void;
   /** 置いた部品の位置・大きさ・向き（#685）。触った時点で箱ぜんぶを書き込む＝見えている値を編集する。 */
   setSelectedClipBox: (patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }) => void;
+  /**
+   * **id で受ける**箱の編集（#685 後半）。キャンバスは掴んだ相手が id で決まるので、選択に効かせると
+   * まとめて動かすときに別の部品が動く（`moveClipById` と同じ流儀）。
+   */
+  setClipBoxFor: (clipId: string, patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }) => void;
+  /** **まとめて**箱を変える（1つでも置けなければ全体を断る＝ADR-0034 決定15）。 */
+  setClipBoxesFor: (updates: readonly { id: string; patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number } }[]) => void;
   /** 選んでいるクリップを複製する（同じ列の直後）。 */
   duplicateSelectedClip: () => void;
   /** 選んでいるクリップを消す。 */
@@ -626,6 +633,15 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setEditBlocked: (reason) => set({ editBlocked: reason }),
   setSelectedClipBox: (patch) =>
     applyEdit(set, get, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
+  setClipBoxFor: (clipId, patch) =>
+    applyEditTo(set, get, clipId, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
+  setClipBoxesFor: (updates) => {
+    const doc = get().doc;
+    if (!doc || updates.length === 0) return;
+    const r = setClipBoxes(doc, dimsForOrientation(doc.videoSettings.aspectRatio), updates);
+    if (r.ok) commit(set, get, r.doc);
+    else set({ editBlocked: r.reason });
+  },
   duplicateSelectedClip: () => applyEdit(set, get, (doc, id) => duplicateClip(doc, id)),
 
   removeSelectedClips: () => get().removeClipsByIds(get().selectedClipIds),
