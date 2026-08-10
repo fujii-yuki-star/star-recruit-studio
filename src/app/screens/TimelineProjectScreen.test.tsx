@@ -3509,6 +3509,10 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.queryByLabelText("横位置")).toBeNull();
   });
 
+  /** その帯が居る列の名前（列の並びは「手前が上」なので添字で決め打ちしない）。 */
+  const lanesLabel = (el: Element): string | undefined =>
+    el.closest(".timeline-track")?.parentElement?.querySelector(".timeline-row-label span")?.textContent ?? undefined;
+
   // キャンバスで掴んで動かす（#685 後半・ADR-0034 決定6/7/15/17）。
   // ⚠️ **場面編集と同じ部品**（`FreeLayoutOverlay`）を流用する＝2つの画面で操作感を割らない。
   const canvasEls = (container: HTMLElement) => {
@@ -3583,6 +3587,83 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     open({ videoSettings: { aspectRatio: "9:16", fps: 30, targetDurationSec: 60, maxDurationSec: 600 } });
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect((container.querySelector(".preview-stage") as HTMLElement).style.aspectRatio).toBe("1080 / 1920");
+  });
+
+  it("**別の列へ運べる**（#686 段階4）", () => {
+    two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_005", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const lanes = [...container.querySelectorAll(".timeline-lane")] as HTMLElement[];
+    // 「置く」と同じ規則（`laneAt`）で列を採るので、列の矩形を持たせる。
+    lanes.forEach((el, i) => {
+      el.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) });
+    });
+    // 表示は**手前が上**＝配列を逆順に描くので、下の行が `track_001`（掴む相手が居る列）。
+    const from = lanes.findIndex((el) => el.querySelector(".timeline-clip"));
+    const to = from === 0 ? 1 : 0;
+    pointerDownAt(band("あ"), 1, { clientX: 0, clientY: from * 40 + 20 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 36 * 8, clientY: to * 40 + 20 });
+    // ⚠️ **運んでいる間から運び先の列に描く**＝指と一緒に列をまたぐ（元の列に置いたまま
+    // 行き先だけ光らせる、にしない）。ここを見ないと「離すまで動かない」実装でも通る。
+    // ⚠️ 列には他の帯も居るので、**掴んだ帯そのもの**がどちらに居るかで見る。
+    expect(lanes[to].contains(band("あ"))).toBe(true);
+    expect(lanes[from].contains(band("あ"))).toBe(false);
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 8, clientY: to * 40 + 20 });
+    const moved = useTimelineStore.getState().doc!.clips[0];
+    expect(moved.trackId).not.toBe("track_001"); // 列が変わった
+    expect(moved.startSec).toBeCloseTo(8, 5); // 時刻も同時に動く
+  });
+
+  it("列の外で離したら**掴んだ列のまま**（勝手に別の列へ飛ばさない）", () => {
+    two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_005", kind: TRACK_KIND.visual }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 列の矩形を与えない＝どの列にも当たらない（欄の余白の上で離した状態）。
+    void container;
+    drag(band("あ"), 36 * 8);
+    const moved = useTimelineStore.getState().doc!.clips[0];
+    expect(moved.trackId).toBe("track_001");
+    expect(moved.startSec).toBeCloseTo(8, 5); // 時刻だけ動く
+  });
+
+  it("連動している字幕は**横に動かず列だけ運べる**（指のぶれで通ったり断られたりしない）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_005", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "あ", status: "none" } },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, voiceClipId: "clip_001" },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const lanes = [...container.querySelectorAll(".timeline-lane")] as HTMLElement[];
+    lanes.forEach((el, i) => {
+      el.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) });
+    });
+    const sub = [...container.querySelectorAll(".timeline-clip")].find((el) => lanesLabel(el) !== "音1") as HTMLElement;
+    const from = lanes.findIndex((el) => el.contains(sub));
+    // ⚠️ 「字幕を置ける列」を選ぶ＝音の列を選ぶと種別違いで断られ、見たいことが見えない。
+    const to = lanes.findIndex((el) => el.parentElement?.textContent?.includes("映像2"));
+    // **横にもぶらして**運ぶ（実際の指はまっすぐ縦には動かない）。
+    pointerDownAt(sub, 1, { clientX: 0, clientY: from * 40 + 20 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 36 * 3, clientY: to * 40 + 20 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 3, clientY: to * 40 + 20 });
+    const moved = useTimelineStore.getState().doc!.clips.find((c) => c.id === "clip_002")!;
+    expect(moved.startSec).toBe(0); // 時間は読み上げが決める＝動かない
+    expect(useTimelineStore.getState().editBlocked).toBeNull(); // 断られない
+  });
+
+  it("捨てる印は**その順番の終わりで落とす**（次の解除を食わない）", async () => {
+    // ⚠️ 列をまたいで離すと帯の DOM は親ごと作り直され、**その帯の `onClick` は走らない**＝
+    // 印を消費する相手が居ない。残ると次の「何もない所を押して選択を解く」1回を飲み込む。
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    drag(band("あ"), 36 * 8);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); // 順番の終わり
+    fireEvent.click(container.querySelector(".timeline-lane") as HTMLElement);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // 解除が効く
   });
 
   it("Escape でやめたら元のまま（掴んだ位置に置かない）", () => {
