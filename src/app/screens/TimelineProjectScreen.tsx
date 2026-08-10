@@ -991,7 +991,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   /** 実リスナー（`wheel`）から掴んでいる最中かを見るための写し（張り替えないので ref 越し）。 */
   const clipDragRef = useRef(false);
   const [clipDrag, setClipDrag] = useState<
-    { clipId: string; mode: "move" | "trim-start" | "trim-end"; sec: number; issue: EditBlockedReason | null } | null
+    {
+      clipId: string;
+      mode: "move" | "trim-start" | "trim-end";
+      sec: number;
+      /** 運び先の列（#686 段階4）。**掴んだ列と同じなら持たない**＝端のトリムは列を変えない。 */
+      trackId?: string;
+      issue: EditBlockedReason | null;
+    } | null
   >(null);
 
   /**
@@ -1000,6 +1007,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ときは**動かした帯の選択が外れる**（取っ手も消える）。
    */
   const skipClickRef = useRef(false);
+  /**
+   * 印を**この順番の終わりで落とす**（#686 段階4 レビュー）。列をまたいで離すと帯の DOM は親ごと
+   * 作り直されるので、**その帯の `onClick` は走らない**＝印を消費する相手が誰も居ない。
+   * 残ると次の「何もない所を押して選択を解く」1回を飲み込む。離した直後の `click` は同じ順番で
+   * 来るので、`setTimeout(0)` はその**後**に走る＝消費すべき1回は守りつつ、持ち越さない。
+   */
+  const dropSkipClickSoon = (): void => {
+    skipClickRef.current = true;
+    setTimeout(() => { skipClickRef.current = false; }, 0);
+  };
   /**
    * 何もない所を押して選択を解く（#701）。**掴んだ直後の `click` では解かない**（#743 レビュー）＝
    * 帯の外で離すと `click` の相手はこの余白になるので、ここが印を見ないと**断ったそばから
@@ -1123,6 +1140,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 掴んでいる間の帯の位置と長さ（#686）。**離すまで文書は変えない**ので、見せかけだけを動かす。
    * 端の縮めは `applyClipEdge` と同じ下限に当たるので、見た目も同じ所で止まる。
    */
+  /**
+   * その帯を**いまどの列に描くか**（#686 段階4）。運んでいる間は**運び先の列**へ描く
+   * ＝指と一緒に列をまたぐ（元の列に置いたまま行き先だけ光らせる、にしない）。
+   * ⚠️ 描く親が変わるので帯の DOM は作り直されるが、掴む処理は `window` で受けているので切れない。
+   */
+  const laneOf = (c: TimelineClip): string =>
+    clipDrag?.clipId === c.id && clipDrag.trackId ? clipDrag.trackId : c.trackId;
+
   const dragSpanOf = (c: TimelineClip): { startSec: number; endSec: number } => {
     const d = clipDrag?.clipId === c.id ? clipDrag : null;
     let startSec = c.startSec;
@@ -1174,7 +1199,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // ⚠️ **断って戻る道でも `click` を捨てる**（#686 レビュー）。捨てないと離した後の `click` が
       // 素通しで走り、①帯の上なら `selectClip` で**選択が1つへ潰れて理由も消える**
       // ②列の余白なら `clearSelection` で**選択が丸ごと消える**＝断った意味が無くなる。
-      skipClickRef.current = true;
+      dropSkipClickSoon();
       return;
     }
     const startX = e.clientX;
@@ -1183,31 +1208,47 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // ⚠️ **`pxPerSec` は掴んだ時点の値**（下で倍率の変更を止めているので、途中で変わらない）。
     // ⚠️ **端送り（#714）の分も足す**＝指が止まっていても枠が動けば指の下の時刻は変わる。
     // 足さないと「送られてはいるが、離すと送る前の時刻に落ちる」＝見えているものと結果が食い違う。
+    /**
+     * ⚠️ **連動している字幕は時間を持たない**（読み上げが決める・ADR-0032 決定24）。横にも動かすと
+     * `moveClip` が `linkedSubtitleTime` で断るので、**縦にだけ動かしたときしか列を変えられない**
+     * （1px 横にぶれると赤くなる）＝同じ操作が指のぶれで通ったり断られたりする（#686 段階4 レビュー）。
+     * 時間を動かさない相手は**横に追従させない**＝「動かしたのに変わらない」も作らず、列だけ運べる。
+     */
+    const timeFixed = mode === "move" && clip0.voiceClipId != null;
     const at = (ev: PointerEvent): number => {
+      if (timeFixed) return origin;
       const scrolled = (scrollRef.current?.scrollLeft ?? startScroll) - startScroll;
       return Math.max(0, origin + (ev.clientX - startX + scrolled) / pxPerSec);
     };
     // 判定は**今の文書**で引く（掴んだ時点の写しで見ると、途中で変わったとき色と結果が食い違う）。
-    const issueOf = (sec: number): EditBlockedReason | null => {
+    const issueOf = (sec: number, trackId?: string): EditBlockedReason | null => {
       const now = useTimelineStore.getState().doc ?? doc0;
       return mode === "move"
-        ? moveClipIssue(now, clipId, { startSec: sec })
+        ? moveClipIssue(now, clipId, { startSec: sec, ...(trackId ? { trackId } : {}) })
         : trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec);
     };
+    /**
+     * 運び先の列（`move` のときだけ）。**指の下の列**を「置く」と同じ規則（`laneAt`）で採る。
+     * 列の外（欄の余白・仕上がり確認の上）へ出たら `undefined`＝**掴んだ列のまま**
+     * （`moveClip` も `laneOf` も「指定が無ければ元の列」を見るので、勝手に別の列へ飛ばさない）。
+     */
+    const trackAt = (ev: PointerEvent): string | undefined =>
+      mode === "move" ? laneAt(ev.clientX, ev.clientY)?.trackId : undefined;
     beginDrag(e, {
       onStart: () => selectClip(clipId), // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する
       onMove: (ev) => {
         // ⚠️ 掴み直してもらう道でも**送りを止める**（#714 レビュー）。止めないと rAF が回り続け、
         // 毎フレーム下の `replay` が走って**消したはずのゴーストが復活**し、枠も流れ続ける。
         if (clipChanged(clip0)) { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); return; }
-        const sec = at(ev);
-        setClipDrag({ clipId, mode, sec, issue: issueOf(sec) });
+        const show = (e2: PointerEvent): void => {
+          const sec = at(e2);
+          const trackId = trackAt(e2);
+          setClipDrag({ clipId, mode, sec, trackId, issue: issueOf(sec, trackId) });
+        };
+        show(ev);
         clipDragRef.current = true;
         // 端まで来たら送る。送った各フレームで**この処理をやり直す**（上の `at` が枠の動きも見る）。
-        autoScroll.track(scrollRef.current, ev, (last: PointerEvent) => {
-          const s2 = at(last);
-          setClipDrag({ clipId, mode, sec: s2, issue: issueOf(s2) });
-        });
+        autoScroll.track(scrollRef.current, ev, show);
       },
       onEnd: (ev, started) => {
         clipDragRef.current = false;
@@ -1216,7 +1257,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         setClipDrag(null);
         // 離した後に来る `click` を捨てる＝**選び直しで理由が消える**のと、`Shift` を押していたときに
         // 動かした帯の選択が外れるのを防ぐ（`pointerdown` の `preventDefault` は `click` を止めない）。
-        skipClickRef.current = true;
+        dropSkipClickSoon();
         if (clipChanged(clip0)) return;
         const sec = at(ev);
         // ⚠️ **ここで置けるかを見ない**＝`moveClipById` が同じ `moveClip` を走らせ、置けなければ
@@ -1225,21 +1266,34 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // （ゴーストの色も同じ関数を見ている＝決めるのは1か所）。
         // 掴んだ相手は `clipId`。**選択に効かせない**＝掴んでいる間に選択が変わっても（左ドラッグ中の
         // 右クリック・取り消しで対象が消える等）**掴んでいない帯**が動く、を作らない。
-        if (mode === "move") moveClipById(clipId, { startSec: sec });
+        if (mode === "move") moveClipById(clipId, { startSec: sec, trackId: trackAt(ev) });
         else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
       },
-      onCancel: (started) => { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); if (started) skipClickRef.current = true; },
+      onCancel: (started) => { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); if (started) dropSkipClickSoon(); },
     });
+  };
+
+  /**
+   * その点の下にある**列と時刻**（#686 段階4）。**置く**（#684）と**帯を運ぶ**が同じ規則を見る
+   * ＝どちらか片方だけ「見えている分だけ」を忘れる、を作らない。
+   *
+   * **見えている分だけ**を落とし先にする（スクロールで欄の外へ出ている列へ落とさない）。
+   * 時刻は**列そのものの左端**から測る（切った矩形の左端は列の 0 秒ではない）。
+   */
+  const laneAt = (x: number, y: number): { trackId: string; startSec: number } | null => {
+    for (const [trackId, el] of laneRefs.current) {
+      if (!pointInRect(visibleRectOf(el) ?? { left: 0, top: 0, right: -1, bottom: -1 }, x, y)) continue;
+      return { trackId, startSec: laneTimeAt(el.getBoundingClientRect(), pxPerSec, x) };
+    }
+    return null;
   };
 
   /** 落とした点から「どこへ置くか」を決める。**列が先**（下の並びは仕上がり確認に重ならない）。 */
   const resolveDrop = (kind: VisualKind, assetId: string | undefined, x: number, y: number): DragPlace["drop"] => {
     if (!doc) return null;
-    for (const [trackId, el] of laneRefs.current) {
-      // **見えている分だけ**を落とし先にする（スクロールで欄の外へ出ている列へ落とさない）。
-      // 時刻は**列そのものの左端**から測る（切った矩形の左端は列の 0 秒ではない）。
-      if (!pointInRect(visibleRectOf(el) ?? { left: 0, top: 0, right: -1, bottom: -1 }, x, y)) continue;
-      const startSec = laneTimeAt(el.getBoundingClientRect(), pxPerSec, x);
+    const lane = laneAt(x, y);
+    if (lane) {
+      const { trackId, startSec } = lane;
       return { at: { trackId, startSec }, issue: visualPlacementIssue(doc, { kind, assetId, trackId, startSec }) };
     }
     const stage = stageRef.current?.getBoundingClientRect();
@@ -1670,7 +1724,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         />
                       )}
                       {doc.clips
-                        .filter((c) => c.trackId === track.id)
+                        .filter((c) => laneOf(c) === track.id)
                         .map((c) => (
                           <button
                             key={c.id}
@@ -1716,7 +1770,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           ⚠️ **帯の中には入れない**＝`button` の入れ子は不正で、しかも帯の読み上げ名に
                           「⋮」が混ざって「その帯を名前で掴む」ができなくなる。帯と同じ場所に**並べて**置く。 */}
                       {doc.clips
-                        .filter((c) => c.trackId === track.id && selectedClipIds.includes(c.id))
+                        .filter((c) => laneOf(c) === track.id && selectedClipIds.includes(c.id))
                         .map((c) => (
                           <button
                             key={`${c.id}-menu`}
