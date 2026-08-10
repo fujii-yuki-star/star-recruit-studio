@@ -69,6 +69,8 @@ import type { Template } from "../../domain/template/types";
 import { exportBlockedMessage } from "../uiLabels";
 import { OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, useExportLockStore } from "./exportLock";
 import type { HistoryStacks } from "../../domain/project/history";
+import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
+import { volumeAt } from "../../domain/timeline/audio";
 
 /** 読み込めなかったときの文言（§2-5：原因でなく次の行動）。想定外も生のエラーを見せない。 */
 const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧から選び直してください。";
@@ -251,6 +253,11 @@ export interface TimelineState {
    * まとめて動かすときに別の部品が動く（`moveClipById` と同じ流儀）。
    */
   setClipBoxFor: (clipId: string, patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }) => void;
+  /**
+   * 選んだ帯を再生位置で分ける（#686 段階4・ADR-0034 決定16）。
+   * 分けたら**後半を選び直す**（他社の型＝続きを触りたい手が自然に繋がる）。
+   */
+  splitSelectedClip: (atSec: number) => void;
   /** **まとめて**箱を変える（1つでも置けなければ全体を断る＝ADR-0034 決定15）。 */
   setClipBoxesFor: (updates: readonly { id: string; patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number } }[]) => void;
   /** 選んでいるクリップを複製する（同じ列の直後）。 */
@@ -635,6 +642,16 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     applyEdit(set, get, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
   setClipBoxFor: (clipId, patch) =>
     applyEditTo(set, get, clipId, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
+  splitSelectedClip: (atSec) => {
+    const { doc, selectedClipIds } = get();
+    if (!doc || selectedClipIds.length !== 1) return;
+    const r = splitClip(doc, selectedClipIds[0], atSec, volumeAt);
+    if (!r.ok) { set({ editBlocked: SPLIT_BLOCKED_REASON[r.reason] }); return; }
+    // ⚠️ 選択の差し替えは **`commit` に載せる**（#750 レビュー）。別に `set` すると、`commit` が
+    // 断ったとき（書き出し中）でも**存在しない id が選択に残り**、以後の操作が「見つかりません」で
+    // 空振りする（嘘の理由）。`explodeClip` と同じ形。
+    commit(set, get, r.doc, { selectedClipIds: [r.newClipId] });
+  },
   setClipBoxesFor: (updates) => {
     const doc = get().doc;
     if (!doc || updates.length === 0) return;
