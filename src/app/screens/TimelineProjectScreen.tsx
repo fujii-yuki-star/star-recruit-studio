@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
 import { isKeyboardActivation, usePointerDrag } from "../hooks/usePointerDrag";
 import { canvasPointAt, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
@@ -1007,6 +1008,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **つかんで置く**（#684）の道具。使うのは下の `resolveDrop` ほか。
   // ドラッグの作法は共有（掴む場所ごとに書き分けない・ADR-0034 決定9）。
   const beginDrag = usePointerDrag();
+  // 掴んだまま端まで来たら送る（#714-1）＝**置く側と帯側で同じ部品**（送り方を2つ作らない）。
+  // 左の送る帯は**列の名前の欄の内側**から測る（欄の下に隠れると、どこへ入るか見ながら送れない）。
+  const autoScroll = useEdgeAutoScroll(LANE_LABEL_PX);
   const stageRef = useRef<HTMLDivElement>(null);
   const laneRefs = useRef(new Map<string, HTMLElement>());
   const [drag, setDrag] = useState<DragPlace | null>(null);
@@ -1136,9 +1140,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       return;
     }
     const startX = e.clientX;
+    const startScroll = scrollRef.current?.scrollLeft ?? 0;
     const origin = mode === "trim-end" ? clipEndSec(clip0) : clip0.startSec;
-    // ⚠️ **`pxPerSec` は掴んだ時点の値**（下でホイールの倍率変更を止めているので、途中で変わらない）。
-    const at = (ev: PointerEvent): number => Math.max(0, origin + (ev.clientX - startX) / pxPerSec);
+    // ⚠️ **`pxPerSec` は掴んだ時点の値**（下で倍率の変更を止めているので、途中で変わらない）。
+    // ⚠️ **端送り（#714）の分も足す**＝指が止まっていても枠が動けば指の下の時刻は変わる。
+    // 足さないと「送られてはいるが、離すと送る前の時刻に落ちる」＝見えているものと結果が食い違う。
+    const at = (ev: PointerEvent): number => {
+      const scrolled = (scrollRef.current?.scrollLeft ?? startScroll) - startScroll;
+      return Math.max(0, origin + (ev.clientX - startX + scrolled) / pxPerSec);
+    };
     // 判定は**今の文書**で引く（掴んだ時点の写しで見ると、途中で変わったとき色と結果が食い違う）。
     const issueOf = (sec: number): EditBlockedReason | null => {
       const now = useTimelineStore.getState().doc ?? doc0;
@@ -1149,13 +1159,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     beginDrag(e, {
       onStart: () => selectClip(clipId), // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する
       onMove: (ev) => {
-        if (clipChanged(clip0)) { clipDragRef.current = false; setClipDrag(null); return; }
+        // ⚠️ 掴み直してもらう道でも**送りを止める**（#714 レビュー）。止めないと rAF が回り続け、
+        // 毎フレーム下の `replay` が走って**消したはずのゴーストが復活**し、枠も流れ続ける。
+        if (clipChanged(clip0)) { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); return; }
         const sec = at(ev);
         setClipDrag({ clipId, mode, sec, issue: issueOf(sec) });
         clipDragRef.current = true;
+        // 端まで来たら送る。送った各フレームで**この処理をやり直す**（上の `at` が枠の動きも見る）。
+        autoScroll.track(scrollRef.current, ev, (last: PointerEvent) => {
+          const s2 = at(last);
+          setClipDrag({ clipId, mode, sec: s2, issue: issueOf(s2) });
+        });
       },
       onEnd: (ev, started) => {
         clipDragRef.current = false;
+        autoScroll.stop();
         if (!started) return; // 動かしていない＝ただのクリック（選択は `onClick` が受ける）
         setClipDrag(null);
         // 離した後に来る `click` を捨てる＝**選び直しで理由が消える**のと、`Shift` を押していたときに
@@ -1172,7 +1190,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         if (mode === "move") moveClipById(clipId, { startSec: sec });
         else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
       },
-      onCancel: (started) => { clipDragRef.current = false; setClipDrag(null); if (started) skipClickRef.current = true; },
+      onCancel: (started) => { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); if (started) skipClickRef.current = true; },
     });
   };
 
@@ -1202,9 +1220,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     if (exporting || isPlaying) return; // 押せない状況では掴ませない（押してから断らない）
     beginDrag(e, {
       onStart: (ev) => setDrag({ kind, assetId, x: ev.clientX, y: ev.clientY, drop: resolveDrop(kind, assetId, ev.clientX, ev.clientY) }),
-      onMove: (ev) => setDrag({ kind, assetId, x: ev.clientX, y: ev.clientY, drop: resolveDrop(kind, assetId, ev.clientX, ev.clientY) }),
+      onMove: (ev) => {
+        const show = (e2: PointerEvent): void =>
+          setDrag({ kind, assetId, x: e2.clientX, y: e2.clientY, drop: resolveDrop(kind, assetId, e2.clientX, e2.clientY) });
+        show(ev);
+        // 端まで運んだら送る（#714）。落とし先は列の位置から測り直すので、送った分だけ時刻も動く。
+        autoScroll.track(scrollRef.current, ev, show);
+      },
       onEnd: (ev, started) => {
         setDrag(null);
+        autoScroll.stop();
         // **動かさずに離した＝押しただけ**。ここで置く（`click` を待たない＝指の経路はここで完結する）。
         if (!started) { addVisualClip({ kind, assetId }); return; }
         const drop = resolveDrop(kind, assetId, ev.clientX, ev.clientY);
@@ -1213,7 +1238,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // 置けないときも**同じ入口**へ渡す＝断る理由は store（domain）が出す（判定を2か所に持たない）。
         addVisualClip({ kind, assetId, center: drop.center, at: drop.at });
       },
-      onCancel: () => setDrag(null),
+      onCancel: () => { autoScroll.stop(); setDrag(null); },
     });
   };
 
@@ -1709,10 +1734,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
             <label className="field">
               <span>置く列</span>
+              {/* ⚠️ **移せる列だけ**出す（#714 レビュー）。全部並べると、隠した列・種別違いの列を選べて
+                  **選べたのに事後に断られる**（同じ画面の置く側は `placeableTracks` で絞っている＝流儀が割れる）。
+                  **いま載っている列は必ず残す**＝隠した列にある帯もその列に留まれる（動かす側の規則と同じ）。 */}
               <select className="select" value={selected.trackId} {...editGuard()} onChange={(e) => moveSelectedClip({ trackId: e.target.value })}>
-                {doc.tracks.map((t) => (
-                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
-                ))}
+                {doc.tracks
+                  .filter((t) => t.id === selected.trackId || moveClipIssue(doc, selected.id, { trackId: t.id }) == null)
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                  ))}
               </select>
             </label>
 

@@ -863,3 +863,53 @@ describe("moveClipIssue／trimClipIssue は操作そのものから導く（#686
     expect(trimClipIssue(doc, "v1", "end", 4) === null).toBe(r.ok);
   });
 });
+
+// 「出さない」列の扱いを、置くときと動かすときで揃える（#714-3）。
+describe('隠した列（#714-3）', () => {
+  const hidden = (): TimelineProject => doc({
+    tracks: [
+      { id: 'track_001', kind: TRACK_KIND.visual },
+      { id: 'track_009', kind: TRACK_KIND.visual, hidden: true },
+    ],
+    clips: [
+      { id: 'a', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: 'あ' },
+      { id: 'h', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_009', startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: 'い' },
+    ],
+  });
+
+  it('隠した列へは**動かせない**（置くときは断るのに黙って移せた）', () => {
+    const r = moveClip(hidden(), 'a', { trackId: 'track_009' });
+    expect(r.ok).toBe(false);
+    expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.hiddenTrack);
+  });
+
+  it('置くときと同じ理由を返す（同じ状況で言うことが変わらない）', () => {
+    const d = hidden();
+    expect(visualPlacementIssue(d, { kind: TIMELINE_CLIP_KIND.text, trackId: 'track_009', startSec: 5 }))
+      .toBe(moveClipIssue(d, 'a', { trackId: 'track_009' }));
+  });
+
+  it('見た目パターンは隠した列へ**置けない**（新しく入れる側なので断る）', () => {
+    // ⚠️ 3条件を手書きで並べていて `hidden` だけ抜けていた（画面が一覧を絞るので届いていなかっただけ）。
+    const t = { templateId: 'tmpl_001', aspectRatio: '16:9' } as const;
+    const r = addTemplateClip(hidden(), { trackId: 'track_009', startSec: 30, template: t });
+    expect(r.ok).toBe(false);
+    expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.hiddenTrack);
+  });
+
+  it('複製も列の事情を見る（種別の違う列に載った帯を増やさない）', () => {
+    // `locked` しか見ていなかったので、種別違いの列に載った帯は素通しで増えていた。
+    const broken = doc({
+      tracks: [{ id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [{ id: 't', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_002', startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: 'あ' }],
+    });
+    const r = duplicateClip(broken, 't');
+    expect(r.ok).toBe(false);
+    expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.trackKind);
+  });
+
+  it('もともと隠した列にある帯は**その列の中でなら動かせる**（行き止まりにしない）', () => {
+    expect(moveClip(hidden(), 'h', { startSec: 5 }).ok).toBe(true);
+    expect(trimClip(hidden(), 'h', 'end', 1).ok).toBe(true);
+  });
+});

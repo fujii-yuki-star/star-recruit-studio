@@ -138,7 +138,7 @@ export function firstFreeStart(
   return found ?? candidates[candidates.length - 1];
 }
 
-/** 置き先として成り立つか（列の実在・種別の一致・固定・重なり）を1か所で見る。 */
+/** 置き先として成り立つか（列の実在・種別の一致・固定・隠し・重なり）を1か所で見る。 */
 function placementIssue(
   doc: TimelineProject,
   clip: TimelineClip,
@@ -146,10 +146,13 @@ function placementIssue(
   startSec: number,
   durationSec: number,
 ): EditBlockedReason | null {
-  const track = doc.tracks.find((t) => t.id === trackId);
-  if (!track) return EDIT_BLOCKED.notFound;
-  if (track.locked) return EDIT_BLOCKED.locked;
-  if (track.kind !== trackKindForClip(clip.kind)) return EDIT_BLOCKED.trackKind;
+  // 列そのものの事情は **`trackPlacementIssue`**（置く側と同じ規則・#714-3）。
+  // ⚠️ ここに条件を書き写していたので**隠した列だけ抜けて**いた＝置くときは断るのに、
+  // 既にある帯は**隠した列へ黙って移せた**（動画に出ない部品を作らない、を置くときだけ守っていた）。
+  const issue = trackPlacementIssue(doc, trackId, trackKindForClip(clip.kind));
+  // ただし**隠した列は「新しく入れる」ときだけ**断る。もともとその列にある帯を動かす・縮めるのは通す
+  // ＝見えないものが増えるわけではないし、断ると**隠した列の中身が二度と動かせない**（行き止まり・決定5）。
+  if (issue && !(issue === EDIT_BLOCKED.hiddenTrack && trackId === clip.trackId)) return issue;
   if (!isFreeSpan(doc.clips, trackId, startSec, durationSec, clip.id)) return EDIT_BLOCKED.overlap;
   return null;
 }
@@ -351,9 +354,11 @@ export function setTrackFlag(doc: TimelineProject, trackId: string, flag: 'hidde
 export function duplicateClip(doc: TimelineProject, clipId: string): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
-  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   const startSec = clipEndSec(clip);
-  if (!isFreeSpan(doc.clips, clip.trackId, startSec, clip.durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  // 列の事情は `placementIssue`（**同じ列**なので隠しは免除＝動かすときと同じ規則・#714 レビュー）。
+  // 手書きで並べていたので `locked` しか見ておらず、種別違いの列に載った帯は素通しだった。
+  const issue = placementIssue(doc, clip, clip.trackId, startSec, clip.durationSec);
+  if (issue) return blocked(issue);
   const next: TimelineClip = { ...clip, id: createClipId(doc.clips.map((c) => c.id)), startSec };
   // 読み上げは**作成済みの音声を引き継がない**（場面形式の場面複製と同じ＝「作成済みに見えるのに
   // 別の部品の音声を指す」を作らない）。文と話者は残るので作り直せる。
@@ -422,10 +427,10 @@ export function addTemplateClip(
   // 向きが違うテンプレは層の座標がそのまま使われる（箱＝画面いっぱいなので縮まない）＝画面外へ出る。
   // 画面が一覧を絞っていても、ここで断る＝別の導線からも同じ壊れ方を作れないようにする（ADR-0026④）。
   if (input.template.aspectRatio !== doc.videoSettings.aspectRatio) return blocked(EDIT_BLOCKED.orientation);
-  const track = doc.tracks.find((t) => t.id === input.trackId);
-  if (!track) return blocked(EDIT_BLOCKED.notFound);
-  if (track.locked) return blocked(EDIT_BLOCKED.locked);
-  if (track.kind !== trackKindForClip(TIMELINE_CLIP_KIND.template)) return blocked(EDIT_BLOCKED.trackKind);
+  // 列の事情は `trackPlacementIssue`（置く側は**隠した列も断る**＝動画に出ない部品を新しく作らない）。
+  // 手書きで並べていたので `hidden` だけ抜けていた（画面が一覧を絞るので届いていなかっただけ・#714 レビュー）。
+  const trackIssue = trackPlacementIssue(doc, input.trackId, trackKindForClip(TIMELINE_CLIP_KIND.template));
+  if (trackIssue) return blocked(trackIssue);
   const startSec = Math.max(0, input.startSec);
   const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, defaultDurationForTemplate(input.template));
   if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
