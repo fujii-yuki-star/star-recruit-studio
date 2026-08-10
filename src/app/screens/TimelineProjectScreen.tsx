@@ -123,6 +123,7 @@ import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import type { FreeElement } from "../../domain/project/types";
 import type { FreeElementKind } from "../../domain/enums";
 import { clipIsLiveAt } from "../../renderer/timelineLayout";
+import { SNAP_THRESHOLD_PX, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -988,6 +989,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 置けない所では**寄せない**＝ゴーストの色で知らせ、離したら**元の位置へ戻す**（決定10）。
    * 判定は domain の `moveClipIssue`／`trimClipIssue`＝**ゴーストの色と離した結果が同じ規則**。
    */
+  /** 吸着した先（#686 段階4）＝縦の点線を出す位置。吸着していなければ `null`。 */
+  const [snapGuideSec, setSnapGuideSec] = useState<number | null>(null);
   /** 実リスナー（`wheel`）から掴んでいる最中かを見るための写し（張り替えないので ref 越し）。 */
   const clipDragRef = useRef(false);
   const [clipDrag, setClipDrag] = useState<
@@ -1215,6 +1218,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
      * 時間を動かさない相手は**横に追従させない**＝「動かしたのに変わらない」も作らず、列だけ運べる。
      */
     const timeFixed = mode === "move" && clip0.voiceClipId != null;
+    const clipLen = clipEndSec(clip0) - clip0.startSec;
+    /**
+     * 吸着（決定12）＝**他の帯の端・再生位置・0秒**へ寄せる。**`Ctrl` を押している間は切れる**。
+     * 寄せ先は**画面内に見えているものだけ**（見えていない所へ吸い付くと理由が読めない）。
+     * しきい値は px で決めて倍率で秒へ換算する＝**倍率が変わっても指の感覚が同じ**。
+     */
+    // ⚠️ **計算だけ**にする（線を出すのは呼び出し側）。ここで state を触ると、離すときに
+    // 「消してから計算する」順になって**線が消えない**（実際に踏んだ）。
+    const applySnap = (sec: number, ev: PointerEvent): { sec: number; guideSec: number | null } => {
+      if (ev.ctrlKey || ev.metaKey || timeFixed) return { sec, guideSec: null };
+      const el = scrollRef.current;
+      const now = useTimelineStore.getState().doc;
+      if (!el || !now || pxPerSec <= 0) return { sec, guideSec: null };
+      const visible = visibleTimeRange({
+        scrollLeft: el.scrollLeft, clientWidth: el.clientWidth, labelPx: LANE_LABEL_PX, pxPerSec,
+      });
+      const targets = timeSnapTargets({ clips: now.clips, exceptId: clipId, playheadSec, visible });
+      // 運ぶときは開始と終わりの両方・端を縮めるときは**動かしている端だけ**を見る。
+      const edges = mode === "move" ? [sec, sec + clipLen] : [sec];
+      const r = snapTime({ edges, targets, thresholdSec: SNAP_THRESHOLD_PX / pxPerSec });
+      return { sec: Math.max(0, sec + r.deltaSec), guideSec: r.guide?.sec ?? null };
+    };
     const at = (ev: PointerEvent): number => {
       if (timeFixed) return origin;
       const scrolled = (scrollRef.current?.scrollLeft ?? startScroll) - startScroll;
@@ -1234,6 +1259,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
      */
     const trackAt = (ev: PointerEvent): string | undefined =>
       mode === "move" ? laneAt(ev.clientX, ev.clientY)?.trackId : undefined;
+    /**
+     * **最後に見せた時刻**（#686 段階4 レビュー）。確定はこれを使う＝見えていたものと違う所へ落とさない。
+     * ⚠️ state（`clipDrag`）は**掴んだ時点の render の値**しか見えない（この関数の closure）ので使えない。
+     *
+     * 初期値は `origin`＝**まだ何も見せていないなら動かさない**。`null` を入れて確定側で
+     * 「無ければ計算し直す」と書くと、**到達しない道**が残る（掴んだと見なす前に必ず1回見せるため）
+     * ＝読み手に「本当に起きるのか」を追わせる（#749 レビュー）。
+     */
+    let lastShownSec = origin;
     beginDrag(e, {
       onStart: () => selectClip(clipId), // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する
       onMove: (ev) => {
@@ -1241,9 +1275,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // 毎フレーム下の `replay` が走って**消したはずのゴーストが復活**し、枠も流れ続ける。
         if (clipChanged(clip0)) { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); return; }
         const show = (e2: PointerEvent): void => {
-          const sec = at(e2);
+          const { sec, guideSec } = applySnap(at(e2), e2);
+          lastShownSec = sec;
           const trackId = trackAt(e2);
           setClipDrag({ clipId, mode, sec, trackId, issue: issueOf(sec, trackId) });
+          setSnapGuideSec(guideSec);
         };
         show(ev);
         clipDragRef.current = true;
@@ -1253,13 +1289,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       onEnd: (ev, started) => {
         clipDragRef.current = false;
         autoScroll.stop();
+        setSnapGuideSec(null);
         if (!started) return; // 動かしていない＝ただのクリック（選択は `onClick` が受ける）
         setClipDrag(null);
         // 離した後に来る `click` を捨てる＝**選び直しで理由が消える**のと、`Shift` を押していたときに
         // 動かした帯の選択が外れるのを防ぐ（`pointerdown` の `preventDefault` は `click` を止めない）。
         dropSkipClickSoon();
         if (clipChanged(clip0)) return;
-        const sec = at(ev);
+        // ⚠️ 確定は**最後に見せた値そのもの**（#686 段階4 レビュー）。ここで計算し直すと、
+        // `Ctrl` を先に離してからボタンを離したときに**点線が出ていなかったのに落ちた瞬間に寄る**
+        // （逆順なら寄っていたのに寄らない）＝見えていたものと違う所へ落ちる。
+        const sec = lastShownSec;
         // ⚠️ **ここで置けるかを見ない**＝`moveClipById` が同じ `moveClip` を走らせ、置けなければ
         // **文書を変えずに理由だけ立てる**（＝寄せない＋離したときに出す・決定10）。
         // 手前で1回断る形にしていたが、結果は同じで**判定する場所が2つ**になるだけだった
@@ -1269,7 +1309,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         if (mode === "move") moveClipById(clipId, { startSec: sec, trackId: trackAt(ev) });
         else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
       },
-      onCancel: (started) => { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); if (started) dropSkipClickSoon(); },
+      onCancel: (started) => { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) dropSkipClickSoon(); },
     });
   };
 
@@ -1677,6 +1717,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <div
                     className="timeline-playhead"
                     style={{ left: `calc(var(--timeline-label-w) + ${pxPerSec * playheadSec}px)` }}
+                    aria-hidden
+                  />
+                )}
+                {/* 吸着した先の**縦の点線**（#686 段階4・決定12）＝「なぜそこで止まったか」を見せる。
+                    再生位置の線と同じ場所・同じ測り方（列の名前の欄ぶん右から）＝2本の線がずれない。 */}
+                {snapGuideSec != null && (
+                  <div
+                    className="timeline-snapline"
+                    style={{ left: `calc(var(--timeline-label-w) + ${pxPerSec * snapGuideSec}px)` }}
                     aria-hidden
                   />
                 )}

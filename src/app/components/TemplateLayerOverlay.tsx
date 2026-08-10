@@ -313,10 +313,13 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     if (drag.mode === "move") {
       // 移動＝純粋 moveFreeElement、さらに他レイヤーへ吸着（純粋 snapToTargets）。差分を選択全体へ適用＝一括移動。
       const moved = moveFreeElement(drag.start, dx, dy, 0);
+      // ⚠️ **`Ctrl` を押している間は吸着を切る**（ADR-0034 決定12・`FreeLayoutOverlay` と同じ式）。
+      // 3つのキャンバス（場面の自由配置・タイムライン・見た目パターン）で**切り方を揃える**
+      // ＝同じ概念を画面によって切れたり切れなかったりさせない（ADR-0026②）。
       const snap = snapToTargets(
         { x: moved.x, y: moved.y, w: drag.start.w, h: drag.start.h },
         drag.otherEdges,
-        SNAP_THRESHOLD_PX / drag.scale,
+        e.ctrlKey || e.metaKey ? 0 : SNAP_THRESHOLD_PX / drag.scale,
       );
       const ddx = snap.x - drag.start.x;
       const ddy = snap.y - drag.start.y;

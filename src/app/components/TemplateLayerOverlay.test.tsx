@@ -66,6 +66,21 @@ describe("TemplateLayerOverlay", () => {
     expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "title", x: 230, y: 240 }]);
   });
 
+  it("`Ctrl` を押している間は吸着しない（#686 段階4・決定12）", () => {
+    // ⚠️ 3つのキャンバス（場面の自由配置・タイムライン・見た目パターン）で**切り方を揃える**。
+    // ここだけ切れないと、同じ概念が画面によって切れたり切れなかったりする。
+    const { root, boxes, onMoveMany } = renderOverlay({ selectedIds: ["title"] });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    fireEvent.pointerDown(boxes[1], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    // 背景（全面）の左辺 0 へ吸い付く距離まで戻す＝title の左辺 200 を 0 の近くへ。
+    fireEvent.pointerMove(boxes[1], { clientX: -197, clientY: 0, pointerId: 1 });
+    const snapped = onMoveMany.mock.calls[onMoveMany.mock.calls.length - 1][0][0].x;
+    fireEvent.pointerMove(boxes[1], { clientX: -197, clientY: 0, pointerId: 1, ctrlKey: true });
+    const raw = onMoveMany.mock.calls[onMoveMany.mock.calls.length - 1][0][0].x;
+    expect(snapped).toBe(0); // 吸着すると背景の左辺へ
+    expect(raw).toBe(3); // 押している間は指の位置のまま
+  });
+
   it("角ハンドルをドラッグすると onChange に新しいサイズが渡る（純粋 resizeFreeElement 流用）", () => {
     const { root, boxes, onChange } = renderOverlay({ selectedIds: ["title"] });
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });

@@ -821,6 +821,26 @@ describe("掴む作法（`Escape` と取り消し・#685 レビュー）", () =>
     expect(first).not.toHaveBeenCalled();
   });
 
+  it("`Ctrl` を押している間は吸着しない（#746-3・決定12）", () => {
+    // ⚠️ 切れないと「あと少しだけずらす」ができない＝寄せたくない所でも寄ってしまう。
+    const onMoveMany = vi.fn();
+    // ⚠️ **ちょうど揃う位置に置かない**（寄せても寄せなくても同じ値になり、違いが見えない）。
+    // 動かした先の右辺は 340＝そこから 5 ずれた 345 に置く（しきい値 12 の中）。
+    const near = { ...el({ id: "free_002" }), x: 345, y: 100 } as FreeElement;
+    const { root, container } = mount({ freeLayout: [el(), near], onMoveMany });
+    const target = container.querySelector("[style*='cursor: move']") as HTMLElement;
+    fireEvent.pointerDown(target, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    // 吸着が効く距離（画面 6px ＝ canvas 12px 以内）まで動かす。
+    fireEvent.pointerMove(root, { pointerId: 1, clientX: 120, clientY: 100, ctrlKey: true });
+    const lastX = (): number => onMoveMany.mock.calls[onMoveMany.mock.calls.length - 1][0][0].x;
+    const withCtrl = lastX();
+    onMoveMany.mockClear();
+    fireEvent.pointerMove(root, { pointerId: 1, clientX: 120, clientY: 100 });
+    const without = lastX();
+    expect(withCtrl).not.toBe(without); // 押している間は寄らない
+    fireEvent.pointerUp(root, { pointerId: 1, clientX: 120, clientY: 100 });
+  });
+
   it("画面を離れても名乗りを外す（以後 `Escape` も取り消しも効かなくなるのを防ぐ）", () => {
     const { root, container, unmount } = mount();
     fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });

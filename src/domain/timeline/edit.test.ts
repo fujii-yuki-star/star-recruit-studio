@@ -999,3 +999,33 @@ describe('setClipBox（置いた部品を動かす）', () => {
     expect(again.ok && again.doc).toBe(once.doc);
   });
 });
+
+// 吸着で「ぴったり隣」にしたときに断られない（#686 段階4 レビュー 🔴）。
+describe('接している端は重なりとみなさない', () => {
+  it('丸めで数十兆分の1秒はみ出しても置ける（吸着が使い物にならなくなる）', () => {
+    // ⚠️ 指の位置から出た時刻は15桁あるのに、長さは 1µs へ丸めて保存する（`applyClipEdge`）。
+    // 隣の開始 4.166666666666667 へ終わりを吸着すると、丸めた長さは 4.166667 ＝
+    // 終わりが 3.3e-7 秒だけはみ出す。許容が無いと**隣へ寄せるトリムの 44.5% が断られた**（実測）。
+    const nbStart = 150 / 36;
+    const d = doc({
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 1, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: nbStart, durationSec: 2, text: 'い' },
+      ],
+    });
+    const r = trimClip(d, 'clip_001', 'end', nbStart);
+    expect(r.ok).toBe(true);
+    // 保存される長さは丸めたもの＝終わりは隣の開始をわずかに超えるが、**接していると見る**。
+    expect(r.ok && r.doc.clips[0].durationSec).toBe(4.166667);
+  });
+
+  it('本当に重なるときは断る（許容を口実に重ねない）', () => {
+    const d = doc({
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 1, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 5, durationSec: 2, text: 'い' },
+      ],
+    });
+    expectBlocked(trimClip(d, 'clip_001', 'end', 5.001), EDIT_BLOCKED.overlap); // 1ミリ秒でも重なれば断る
+  });
+});
