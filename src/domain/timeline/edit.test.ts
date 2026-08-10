@@ -358,8 +358,7 @@ describe('addVisualClip（写真・文字・図形を置く・#684）', () => {
   it('置いた部品はスキーマに適合する（一覧に出るのに開けない動画を作らない）', () => {
     for (const kind of [TIMELINE_CLIP_KIND.text, TIMELINE_CLIP_KIND.shape] as const) {
       const r = addVisualClip(base(), { kind, trackId: 'track_001', startSec: 0 });
-      if (r.ok && !validateTimelineProject(r.doc)) throw new Error(JSON.stringify((validateTimelineProject as unknown as { errors: unknown }).errors));
-    expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
+      expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
     }
     const slot = addVisualClip(base(), {
       kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, assetId: 'asset_001',
