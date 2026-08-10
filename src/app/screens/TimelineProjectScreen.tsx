@@ -1272,6 +1272,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ? templates.find((t) => t.templateId === menuClip.templateId)
     : undefined;
   /** 1つの帯にだけ効く項目の関門（複製・バラす）。まとめて選んでいるときは押せなくして理由を出す。 */
+  /**
+   * **複製だけ**の追加条件（#744 レビュー）＝隠した列では新しく作れない。
+   * ⚠️ `editGuard` に入れてはいけない＝動かす・縮めるは隠した列でも通る規則なので、
+   * まとめて塞ぐと**その列の中身が二度と動かせなく**なる（行き止まり・決定5）。
+   */
+  const duplicateExtra = (): { disabled?: boolean; hint?: string } =>
+    selected && trackOf(selected.trackId)?.hidden
+      ? { disabled: true, hint: "動画に出さない列では増やせません。列の「⋮」から「動画に出す」を選んでください" }
+      : {};
+
   const singleClipMenuGuard: { disabled?: boolean; disabledHint?: string } =
     selectedClipIds.length > 1
       ? { disabled: true, disabledHint: "1つだけ選ぶと使えます" }
@@ -1286,6 +1296,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         {
           label: "同じものを足す",
           ...singleClipMenuGuard,
+          ...(duplicateExtra().disabled ? { disabled: true, disabledHint: duplicateExtra().hint } : {}),
           onSelect: duplicateSelectedClip,
         },
         ...(menuClipTemplate
@@ -1704,7 +1715,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button className="btn btn-secondary" onClick={() => trimSelectedClip("end", playheadSec)} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
                 ここで終わる
               </button>
-              <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard()}>同じものを足す</button>
+              <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>同じものを足す</button>
               <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeBlocked ?? {})} title={removeBlocked?.title ?? "選んだ部品を消します（Delete）"}>消す</button>
             </div>
             {/* **数値でも同じ値を触れる**（#721・ADR-0034 決定6）。ボタンの「前へ／後ろへ」（0.5秒ずつ）と

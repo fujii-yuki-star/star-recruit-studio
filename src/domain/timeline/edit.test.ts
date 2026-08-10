@@ -908,6 +908,14 @@ describe('隠した列（#714-3）', () => {
     expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.trackKind);
   });
 
+  it('隠した列では**複製できない**（動画に出ない部品を新しく作らない）', () => {
+    // ⚠️ `placementIssue` を通していたときは、免除が「行き先が元の列と同じ」しか見ないので
+    // **複製は必ず免除**され、隠した列に黙って増えていた（自分で書いた規則と矛盾していた）。
+    const r = duplicateClip(hidden(), 'h');
+    expect(r.ok).toBe(false);
+    expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.hiddenTrack);
+  });
+
   it('もともと隠した列にある帯は**その列の中でなら動かせる**（行き止まりにしない）', () => {
     expect(moveClip(hidden(), 'h', { startSec: 5 }).ok).toBe(true);
     expect(trimClip(hidden(), 'h', 'end', 1).ok).toBe(true);

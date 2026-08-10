@@ -3455,6 +3455,15 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     }
   });
 
+  it("隠した列では「同じものを足す」を**押す前に**塞ぐ（動かす・縮めるは通す）", () => {
+    two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "同じものを足す" })).toBeDisabled();
+    // ⚠️ まとめて塞ぐと**その列の中身が二度と動かせない**（行き止まり）。動かす側は通ること。
+    expect(screen.getByRole("button", { name: "後ろへ" })).not.toBeDisabled();
+  });
+
   it("Escape でやめたら元のまま（掴んだ位置に置かない）", () => {
     two();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);

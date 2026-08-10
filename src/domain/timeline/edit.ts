@@ -355,10 +355,13 @@ export function duplicateClip(doc: TimelineProject, clipId: string): EditResult 
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   const startSec = clipEndSec(clip);
-  // 列の事情は `placementIssue`（**同じ列**なので隠しは免除＝動かすときと同じ規則・#714 レビュー）。
-  // 手書きで並べていたので `locked` しか見ておらず、種別違いの列に載った帯は素通しだった。
-  const issue = placementIssue(doc, clip, clip.trackId, startSec, clip.durationSec);
-  if (issue) return blocked(issue);
+  // 列の事情は `trackPlacementIssue`（**新しく作る側**なので隠しも断る・#744 レビュー）。
+  // ⚠️ 最初は `placementIssue` を通していたが、あれの隠し免除は「渡された行き先が元の列と同じ」だけを
+  // 見るので、**複製は必ず免除されて隠した列に増えて**いた＝自分で書いた「見えないものが増える
+  // わけではない」と矛盾する。**既にあるものを動かす・縮める＝通す／新しく作る＝断る**が規則。
+  const trackIssue = trackPlacementIssue(doc, clip.trackId, trackKindForClip(clip.kind));
+  if (trackIssue) return blocked(trackIssue);
+  if (!isFreeSpan(doc.clips, clip.trackId, startSec, clip.durationSec)) return blocked(EDIT_BLOCKED.overlap);
   const next: TimelineClip = { ...clip, id: createClipId(doc.clips.map((c) => c.id)), startSec };
   // 読み上げは**作成済みの音声を引き継がない**（場面形式の場面複製と同じ＝「作成済みに見えるのに
   // 別の部品の音声を指す」を作らない）。文と話者は残るので作り直せる。
