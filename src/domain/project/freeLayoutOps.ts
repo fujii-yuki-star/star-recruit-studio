@@ -1,7 +1,7 @@
 // FREE テンプレ場面の自由配置（scene.freeLayout）への要素の追加・更新・削除（ADR-0008・Phase 4a-3b）。
 // 純粋関数（副作用なし）。store は updateScene 経由でこれらを呼び、結果の配列で freeLayout を差し替える。
 // ID 採番は createFreeElementId（§2.1・scene 内一意）に委譲する。
-import { DEFAULT_FIT, GEOM_MIN_SIZE } from '../constants';
+import { DEFAULT_FIT, GEOM_MIN_SIZE, normalizeDeg } from '../constants';
 import { FONT_WEIGHT, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, TEXT_ALIGN } from '../enums';
 import type { FreeElementKind } from '../enums';
 import { composeGroupGeometry } from '../group/compose';
@@ -309,13 +309,13 @@ export function rotationFromPointer(
   center: { x: number; y: number }, pointer: { x: number; y: number },
 ): number {
   const deg = (Math.atan2(pointer.y - center.y, pointer.x - center.x) * 180) / Math.PI + 90;
-  return (((Math.round(deg) % 360) + 360) % 360);
+  return normalizeDeg(Math.round(deg));
 }
 
 /** 角度を step 度きざみにスナップして 0≤r<360 に正規化（#279・Shift で 15° 吸着など）。step<=0 は正規化のみ。 */
 export function snapAngle(deg: number, step: number): number {
   const snapped = step > 0 ? Math.round(deg / step) * step : deg;
-  return (((snapped % 360) + 360) % 360);
+  return normalizeDeg(snapped);
 }
 
 /** 複数 id の要素をまとめて削除する（複数選択の一括削除）。空なら同一参照を返す。 */

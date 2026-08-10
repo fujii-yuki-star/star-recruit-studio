@@ -5,8 +5,7 @@
 import {
   AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, PLACED_BOX_RATIO,
   TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
-  VOICE_PLACEHOLDER_SEC, dimsForOrientation,
-} from '../constants';
+  VOICE_PLACEHOLDER_SEC, dimsForOrientation, MIN_BOX_SIZE_PX, normalizeDeg } from '../constants';
 import { FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
 import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
@@ -24,6 +23,7 @@ import type { Texts } from '../project/types';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import { defaultDurationForTemplate } from '../template/layerOps';
 import type { Template } from '../template/types';
+import { canHaveBox, resolveClipBox } from './box';
 
 /** 置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。永続データではないので schema には持ち込まない。 */
 export const EDIT_BLOCKED = {
@@ -834,6 +834,47 @@ export function addAudioClip(
  * （2倍速なら倍の長さぶんの素材が入る）。再生（`audioCuesAt`）と書き出し（`timelineAudioRuns`）は
  * どちらもこの値を読むので、聞いた音と書き出した音が一致する。
  */
+/**
+ * **置いた部品の位置・大きさ・向きを決める**（#685・`11 §7.6.3`）。
+ *
+ * ⚠️ **触った時点で箱ぜんぶを書き込む**（渡された項目だけを足さない）。箱は**未指定＝画面いっぱい**
+ * なので、`x` だけ書くと幅は画面いっぱいのままで**そこから右へはみ出す**＝画面に出ている数値
+ * （解決した箱）と保存する値が食い違う。**見えている値を編集している**状態を保つ。
+ *
+ * 向きは schema が 0〜360 未満（`ROTATION_DEG_MAX`）しか受けないので、**回り込ませて**収める
+ * （はみ出した値で保存できない＝自動保存が黙って止まる、を作らない）。大きさは 0 より大きい。
+ */
+export function setClipBox(
+  doc: TimelineProject,
+  clipId: string,
+  canvas: { width: number; height: number },
+  patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // **箱を持てる部品だけ**（音・読み上げに位置は無い／見た目パターンのクリップは枠そのもの＝
+  // 幾何を持たない・`11 §7.6.3`）。列の種別違い（V23）とは別の話なので `contentField` で断る。
+  if (!canHaveBox(clip.kind)) return blocked(EDIT_BLOCKED.contentField);
+  const track = doc.tracks.find((t) => t.id === clip.trackId);
+  if (track?.locked) return blocked(EDIT_BLOCKED.locked);
+  const from = resolveClipBox(clip, canvas);
+  const rot = patch.rotation ?? from.rotation ?? 0;
+  const next = {
+    x: patch.x ?? from.x,
+    y: patch.y ?? from.y,
+    w: Math.max(MIN_BOX_SIZE_PX, patch.w ?? from.w),
+    h: Math.max(MIN_BOX_SIZE_PX, patch.h ?? from.h),
+    // 負の角も 360 以上も**回り込ませる**（共有の `normalizeDeg`）。
+    // ⚠️ **数値の欄は先に 0〜359 へ丸める**ので、いま到達するのは後半（#685 のキャンバス回転）だけ。
+    // それでもここで受けるのは、指で回すと 360 を跨ぐのが普通だから（保存できない値で止めない）。
+    rotation: normalizeDeg(rot),
+  };
+  // **何も変わらないなら同じ文書を返す**（空振りの取り消しを積まない・`11 §7.6.3`）。
+  if (clip.x === next.x && clip.y === next.y && clip.w === next.w && clip.h === next.h
+    && (clip.rotation ?? 0) === next.rotation) return ok(doc);
+  return ok(withClip(doc, { ...clip, ...next }));
+}
+
 export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);

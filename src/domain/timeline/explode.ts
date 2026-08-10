@@ -21,6 +21,7 @@ import type { EditResult } from './edit';
 import { staticSubtitleText } from './bake';
 import { sceneFromClip } from './sceneFromClip';
 import type { TimelineClip, TimelineProject, Track } from './types';
+import { resolveClipBox } from './box';
 
 /**
  * 見た目パターンのクリップを、中身ぶんの部品へ展開する。
@@ -46,16 +47,17 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   const { elements } = freeLayoutFromPlacedContent(scene, template, { faithful: true });
   // 下地（`template.defaults.backgroundColor`）は層ではなくクリップの塗り（`layoutTimelineAt`）なので、
   // **最背面の図形として自分で足す**＝背景の層を持たない見た目でもバラした後に白く抜けない。
-  // 箱は描画（`clipBox`）と同じ解決＝未指定は画面いっぱい。
+  // 箱は描画と**同じ関数**で解決する（`resolveClipBox`＝未指定は画面いっぱい・#685）。
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
+  const box = resolveClipBox(clip, canvas);
   const background: FreeElement = {
     // この id はクリップへ写すときに捨てる（保存しない一時的な目印）。
     id: 'background',
     kind: FREE_ELEMENT_KIND.shape,
-    x: clip.x ?? 0,
-    y: clip.y ?? 0,
-    w: clip.w ?? canvas.width,
-    h: clip.h ?? canvas.height,
+    x: box.x,
+    y: box.y,
+    w: box.w,
+    h: box.h,
     fillColor: template.defaults?.backgroundColor ?? DEFAULT_BACKGROUND_COLOR,
     opacity: 1,
     radius: 0,

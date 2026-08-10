@@ -3464,6 +3464,51 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.getByRole("button", { name: "後ろへ" })).not.toBeDisabled();
   });
 
+  it("置いた部品の位置・大きさ・向きを数値で触れる（#685）", () => {
+    // ⚠️ **箱を持っていない**部品で見る＝値は**解決した箱**（画面いっぱい）。持っている値だけ出すと
+    // 空欄になり「動かせない」に見える。
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, text: "あ" }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((screen.getByLabelText("横位置") as HTMLInputElement).value).toBe("0");
+    expect((screen.getByLabelText("幅") as HTMLInputElement).value).toBe("1920");
+    // `NumberField` は**離れたとき**に確定する（打っている途中で確定しない＝他の数値欄と同じ）。
+    fireEvent.change(screen.getByLabelText("横位置"), { target: { value: "300" } });
+    fireEvent.blur(screen.getByLabelText("横位置"));
+    // 触った時点で箱ぜんぶを書き込む＝以後の見た目と数値が食い違わない。
+    expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ x: 300, y: 0, w: 1920, h: 1080 });
+  });
+
+  it("重ね順の欄は出さない（この形式の重ね順は列の並びだけ・決定17）", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ 「前へ／後ろへ」はこの画面では**時間**を動かすボタン（重ね順ではない）＝名前で判定しない。
+    expect(screen.queryByLabelText("重ね順")).toBeNull();
+    expect(screen.queryByLabelText("奥行き")).toBeNull();
+  });
+
+  it("見た目パターンの部品では**次の行動を出す**（欄が消えるだけにしない）", () => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 3, templateId: "tmpl_001" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByLabelText("横位置")).toBeNull();
+    expect(screen.getByText(/中身をバラす/)).toBeInTheDocument(); // 行き先を名指しする
+  });
+
+  it("箱を持てない部品には出さない（音・読み上げ・見た目パターン）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_009", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 3, assetId: "asset_001" }],
+      assets: [{ assetId: "asset_001", assetType: "bgm", displayName: "曲", filePath: "assets/asset_001.mp3" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_009"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByLabelText("横位置")).toBeNull();
+  });
+
   it("Escape でやめたら元のまま（掴んだ位置に置かない）", () => {
     two();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);

@@ -1,6 +1,7 @@
 // タイムライン編集プロジェクト（ADR-0032・#629）の編集状態。**場面形式とは別の文書**なので store も分ける
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
+import { dimsForOrientation } from "../../domain/constants";
 import { assetDisplayUrl, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
 import { exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
 import { createAssetId } from "../../domain/project/persistence";
@@ -28,7 +29,7 @@ import {
   VISUAL_CLIP_DURATION_SEC, addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip,
   firstFreeStart, moveClip, placeableVisualTracks,
   setVisualClipContent,
-  moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipFade, setClipSourceStart, setClipSpeed,
+  moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
@@ -243,6 +244,8 @@ export interface TimelineState {
   trimClipById: (clipId: string, edge: "start" | "end", sec: number) => void;
   /** 断り文をそのまま立てる（掴む前に断るとき＝押してから断らない・#686）。 */
   setEditBlocked: (reason: EditBlockedReason) => void;
+  /** 置いた部品の位置・大きさ・向き（#685）。触った時点で箱ぜんぶを書き込む＝見えている値を編集する。 */
+  setSelectedClipBox: (patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }) => void;
   /** 選んでいるクリップを複製する（同じ列の直後）。 */
   duplicateSelectedClip: () => void;
   /** 選んでいるクリップを消す。 */
@@ -621,6 +624,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   moveClipById: (clipId, to) => applyEditTo(set, get, clipId, (doc, id) => moveClip(doc, id, to)),
   trimClipById: (clipId, edge, sec) => applyEditTo(set, get, clipId, (doc, id) => trimClip(doc, id, edge, sec)),
   setEditBlocked: (reason) => set({ editBlocked: reason }),
+  setSelectedClipBox: (patch) =>
+    applyEdit(set, get, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
   duplicateSelectedClip: () => applyEdit(set, get, (doc, id) => duplicateClip(doc, id)),
 
   removeSelectedClips: () => get().removeClipsByIds(get().selectedClipIds),

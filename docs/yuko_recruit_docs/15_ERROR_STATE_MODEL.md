@@ -193,7 +193,7 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `TIMELINE_EDIT_LINKED_SUBTITLE_TIME` | warning | — | 連動している字幕の時間は読み上げに合わせています。連動をやめると自分で動かせます | `ADR-0032` 決定24（区間の一致を保つ） |
 | `TIMELINE_EDIT_VOLUME_POINTS_FULL` | warning | — | 音量の変化は1つの部品に60か所までです。ほかの点を外してから置いてください | `ADR-0032` 追補・`11 §7.6.3.2`（上限は `VOLUME_POINTS_MAX`＝FFmpeg の式の解析上限。**置けたのに書き出しで断られる、を作らない**＝`§7.6.5` と対） |
 | `TIMELINE_EDIT_VOLUME_POINTS_KIND` | warning | — | 音量の変化を置けるのは、音や読み上げの部品だけです。音の部品を選び直してください | `ADR-0032` 追補・`11 §7.6.3.2`（鳴る音を持たない部品に意味の無いデータを書かない） |
-| `TIMELINE_EDIT_CONTENT_FIELD` | warning | — | この部品にはその項目がありません。直したい部品を選び直してください | `#684` レビュー・`11 §7.6.3`（`setVisualClipContent`。**列の種別違い〔V23〕とは別**＝「列に置き直してください」は項目違いには当たらない案内になる。`VOLUME_POINTS_KIND` と同じ流儀） |
+| `TIMELINE_EDIT_CONTENT_FIELD` | warning | — | この部品にはその項目がありません。直したい部品を選び直してください | `#684` レビュー・`11 §7.6.3`（`setVisualClipContent`＝その種類が持たない項目／`setClipBox`＝箱を持てない部品〔見た目パターン・音・読み上げ〕・#685。**列の種別違い〔V23〕とは別**＝「列に置き直してください」は項目違いには当たらない案内になる。`VOLUME_POINTS_KIND` と同じ流儀） |
 | `TIMELINE_AUDIO_SOURCE_MISSING` | warning | — | 音が見つからない部品があります。その部品は鳴りません。読み上げを作り直すか、音を選び直してください | `ADR-0032`・`11 §7.6.2.2` |
 | `TIMELINE_TEMPLATE_NOT_FOUND` | warning | — | 見た目パターンが見つからない部品があります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください | `ADR-0032`・`11 §7.6.4`（描かれないものを黙らせない） |
 | `TIMELINE_EXPORT_EMPTY` | warning | — | まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください | `ADR-0032`・`11 §7.6.5`（尺 0＝呼び出し側で止める） |

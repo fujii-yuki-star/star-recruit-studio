@@ -24,6 +24,7 @@ import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import { applyInterpolatedTransform, layoutScene } from './layout';
 import type { LayoutItem, SceneLayout } from './layout';
 import type { Orientation } from '../domain/enums';
+import { resolveClipBox } from '../domain/timeline/box';
 
 /** クリップが時刻 t に生きているか。区間は `[startSec, startSec+durationSec)`（V24 と同じ半開区間）。 */
 export function clipIsLiveAt(clip: TimelineClip, timeSec: number): boolean {
@@ -142,22 +143,12 @@ function applySimilarity(item: LayoutItem, sim: Similarity): void {
   if (sim.rotationDeg !== 0) item.rotation = (item.rotation ?? 0) + sim.rotationDeg;
 }
 
-/** クリップが占める矩形。テンプレのクリップは画面いっぱい（枠そのもの）＝幾何を持たない。 */
-function clipBox(clip: TimelineClip, canvas: { width: number; height: number }): Box {
-  return {
-    x: clip.x ?? 0,
-    y: clip.y ?? 0,
-    w: clip.w ?? canvas.width,
-    h: clip.h ?? canvas.height,
-    ...(clip.rotation != null ? { rotation: clip.rotation } : {}),
-  };
-}
 
 /** 自由配置のクリップ（slot/text/shape/subtitle）を FREE 要素へ写す。空間の語彙は同じもの（11 §7.6）。 */
 function freeElementFromClip(clip: TimelineClip, canvas: { width: number; height: number }): FreeElement {
   // **持っていくものを名指しする**（要らないものを除外する形にしない）＝`TimelineClip` に時間や音の
   // フィールドが増えたとき、rest 経由で FreeElement へ黙って流れ込まない。空間の語彙は 11 §7.6。
-  const el: FreeElement = { ...clipBox(clip, canvas), id: clip.id, kind: clip.kind as FreeElementKind };
+  const el: FreeElement = { ...resolveClipBox(clip, canvas), id: clip.id, kind: clip.kind as FreeElementKind };
   const spatial = [
     'name', 'assetId', 'fit', 'text', 'fontSize', 'color', 'fontWeight', 'fontId', 'lineHeight',
     'textAlign', 'shapeType', 'fillColor', 'opacity', 'radius', 'strokeColor', 'strokeWidth',
@@ -248,7 +239,7 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
   }
 
   // グループ変形を実効の矩形へ合成する（通常描画と同じ関数）。差分をクリップの中身へ重ねる。
-  const boxes = doc.clips.filter(isVisualClip).map((c) => ({ id: c.id, ...clipBox(c, canvas) }));
+  const boxes = doc.clips.filter(isVisualClip).map((c) => ({ id: c.id, ...resolveClipBox(c, canvas) }));
   const composed = composeGroupGeometry(boxes, effectiveGroups);
 
   // グループの不透明度は、メンバー（推移的）へ効く。**どのグループ由来か**も覚える＝
@@ -282,7 +273,7 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
     // まず「クリップの箱」に効かせ、その **箱の動き（相似変換）を中身へそのまま持ち込む**。
     // 中身ごとに `applyInterpolatedTransform` を掛けると、拡大・回転が**各アイテム自身の中心**まわりに
     // なってしまい、テンプレのクリップ（層が複数）でグループ中心まわりの剛体変形とずれる（#642 レビュー 🔴）。
-    const box = clipBox(clip, canvas);
+    const box = resolveClipBox(clip, canvas);
     // 順序は場面形式（`layoutScene`）と同じ＝グループを先に合成し、その上へ自身のキーフレームを重ねる。
     const grouped = composed.get(clip.id) ?? box;
     const own = (doc.animations ?? []).find((a) => a.targetId === clip.id);

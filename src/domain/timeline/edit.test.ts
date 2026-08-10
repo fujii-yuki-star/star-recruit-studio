@@ -5,10 +5,10 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
+  addTemplateClip, addVisualClip, setClipBox, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
-import { TIMELINE_MIN_CLIP_SEC } from '../constants';
+import { TIMELINE_MIN_CLIP_SEC, MIN_BOX_SIZE_PX } from '../constants';
 import { DEFAULT_SHAPE_COLOR } from '../project/freeLayoutOps';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
@@ -358,7 +358,8 @@ describe('addVisualClip（写真・文字・図形を置く・#684）', () => {
   it('置いた部品はスキーマに適合する（一覧に出るのに開けない動画を作らない）', () => {
     for (const kind of [TIMELINE_CLIP_KIND.text, TIMELINE_CLIP_KIND.shape] as const) {
       const r = addVisualClip(base(), { kind, trackId: 'track_001', startSec: 0 });
-      expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
+      if (r.ok && !validateTimelineProject(r.doc)) throw new Error(JSON.stringify((validateTimelineProject as unknown as { errors: unknown }).errors));
+    expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
     }
     const slot = addVisualClip(base(), {
       kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, assetId: 'asset_001',
@@ -919,5 +920,63 @@ describe('隠した列（#714-3）', () => {
   it('もともと隠した列にある帯は**その列の中でなら動かせる**（行き止まりにしない）', () => {
     expect(moveClip(hidden(), 'h', { startSec: 5 }).ok).toBe(true);
     expect(trimClip(hidden(), 'h', 'end', 1).ok).toBe(true);
+  });
+});
+
+// 置いた部品の位置・大きさ・向き（#685）。
+describe('setClipBox（置いた部品を動かす）', () => {
+  const canvas = { width: 1920, height: 1080 };
+  const d = () => doc({ clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 2, text: 'あ' }] });
+
+  it('**触った時点で箱ぜんぶ**を書き込む（見えている値を編集している状態を保つ）', () => {
+    // ⚠️ `x` だけ足すと幅は画面いっぱいのままで右へはみ出す＝画面の数値と保存する値が食い違う。
+    const r = setClipBox(d(), 'clip_001', canvas, { x: 100 });
+    expect(r.ok && r.doc.clips[0]).toMatchObject({ x: 100, y: 0, w: 1920, h: 1080, rotation: 0 });
+  });
+
+  it('大きさは 0 にできない（保存はできるが画面から消えて掴めなくなる）', () => {
+    const r = setClipBox(d(), 'clip_001', canvas, { w: 0, h: -5 });
+    expect(r.ok && r.doc.clips[0]).toMatchObject({ w: MIN_BOX_SIZE_PX, h: MIN_BOX_SIZE_PX });
+    // ⚠️ **schema にも通す**＝手書きの期待値だけだと、schema 側の下限と食い違っても気づけない
+    // （適合しない文書は保存されない＝自動保存が黙って止まる）。
+    expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
+  });
+
+  it('向きは 0〜360 未満へ**回り込ませる**（schema が拒むと自動保存が止まる）', () => {
+    expect(setClipBox(d(), 'clip_001', canvas, { rotation: -10 })).toMatchObject({ doc: { clips: [{ rotation: 350 }] } });
+    expect(setClipBox(d(), 'clip_001', canvas, { rotation: 360 })).toMatchObject({ doc: { clips: [{ rotation: 0 }] } });
+    expect(setClipBox(d(), 'clip_001', canvas, { rotation: 725 })).toMatchObject({ doc: { clips: [{ rotation: 5 }] } });
+    const back = setClipBox(d(), 'clip_001', canvas, { rotation: -10 });
+    expect(back.ok && validateTimelineProject(back.doc)).toBe(true);
+  });
+
+  it('見た目パターンのクリップは断る（枠そのもの＝幾何は「バラす」で触る）', () => {
+    const t = doc({ clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', startSec: 0, durationSec: 2, templateId: 'tmpl_001' }] });
+    expectBlocked(setClipBox(t, 'clip_001', canvas, { x: 10 }), EDIT_BLOCKED.contentField);
+  });
+
+  it('音の部品は断る（画面に出ないので位置が無い）', () => {
+    const a = doc({
+      tracks: [{ id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 2, assetId: 'asset_001' }],
+    });
+    expectBlocked(setClipBox(a, 'clip_001', canvas, { x: 10 }), EDIT_BLOCKED.contentField);
+  });
+
+  it('固定した列では変えられない', () => {
+    const l = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 2, text: 'あ' }],
+    });
+    expectBlocked(setClipBox(l, 'clip_001', canvas, { x: 10 }), EDIT_BLOCKED.locked);
+  });
+
+  it('何も変わらないなら**同じ文書**を返す（空振りの取り消しを積まない）', () => {
+    const once = setClipBox(d(), 'clip_001', canvas, { x: 100 });
+    expect(once.ok).toBe(true);
+    if (!once.ok) return;
+    const again = setClipBox(once.doc, 'clip_001', canvas, { x: 100 });
+    // ⚠️ **同一参照**で見る（中身の一致では、新しい文書を作っても通ってしまう＝取り消しが空振りする）。
+    expect(again.ok && again.doc).toBe(once.doc);
   });
 });
