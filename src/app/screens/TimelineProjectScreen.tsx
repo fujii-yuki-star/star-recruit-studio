@@ -1262,8 +1262,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     /**
      * **最後に見せた時刻**（#686 段階4 レビュー）。確定はこれを使う＝見えていたものと違う所へ落とさない。
      * ⚠️ state（`clipDrag`）は**掴んだ時点の render の値**しか見えない（この関数の closure）ので使えない。
+     *
+     * 初期値は `origin`＝**まだ何も見せていないなら動かさない**。`null` を入れて確定側で
+     * 「無ければ計算し直す」と書くと、**到達しない道**が残る（掴んだと見なす前に必ず1回見せるため）
+     * ＝読み手に「本当に起きるのか」を追わせる（#749 レビュー）。
      */
-    let lastShownSec: number | null = null;
+    let lastShownSec = origin;
     beginDrag(e, {
       onStart: () => selectClip(clipId), // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する
       onMove: (ev) => {
@@ -1295,7 +1299,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // ⚠️ 確定は**最後に見せた値そのもの**（#686 段階4 レビュー）。ここで計算し直すと、
         // `Ctrl` を先に離してからボタンを離したときに**点線が出ていなかったのに落ちた瞬間に寄る**
         // （逆順なら寄っていたのに寄らない）＝見えていたものと違う所へ落ちる。
-        const sec = lastShownSec ?? applySnap(at(ev), ev).sec;
+        const sec = lastShownSec;
         // ⚠️ **ここで置けるかを見ない**＝`moveClipById` が同じ `moveClip` を走らせ、置けなければ
         // **文書を変えずに理由だけ立てる**（＝寄せない＋離したときに出す・決定10）。
         // 手前で1回断る形にしていたが、結果は同じで**判定する場所が2つ**になるだけだった
