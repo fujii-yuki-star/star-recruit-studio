@@ -251,49 +251,56 @@ export function moveClips(
   updates: readonly { id: string; startSec?: number; trackId?: string }[],
 ): EditResult {
   if (updates.length === 0) return ok(doc);
-  const moved = new Map<string, { startSec: number; trackId: string }>();
+  /** 動かす先（直接動かす帯＋連動で付いてくる字幕）。**1枚の地図にしてから**一度だけ確かめる。 */
+  const to = new Map<string, { startSec: number; trackId: string }>();
   for (const u of updates) {
     const clip = doc.clips.find((c) => c.id === u.id);
     if (!clip) return blocked(EDIT_BLOCKED.notFound);
     if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
-    // 連動している字幕は時間を持たない＝**動かさずに素通しする**（断らない）。
-    if (clip.voiceClipId != null) continue;
-    moved.set(u.id, {
-      startSec: Math.max(0, u.startSec ?? clip.startSec),
+    // ⚠️ **連動している字幕は時間だけ据え置く**（読み上げが決める）。**列は動かせる**
+    // ＝単体で動かすとき（`moveClip`）は列だけ許すので、まとめたときだけ落とすと
+    // 選択の件数で同じ操作の意味が変わる（ADR-0026②）。
+    to.set(u.id, {
+      startSec: clip.voiceClipId != null ? clip.startSec : Math.max(0, u.startSec ?? clip.startSec),
       trackId: u.trackId ?? clip.trackId,
     });
   }
-  if (moved.size === 0) return ok(doc);
-  const nextClips = doc.clips.map((c) => {
-    const m = moved.get(c.id);
-    // ⚠️ **変わらないなら同じものを返す**（作り直すと「何も変わらない」の判定が効かず、
-    // 空振りの取り消しを積む）。
-    if (!m || (m.startSec === c.startSec && m.trackId === c.trackId)) return c;
-    return { ...c, startSec: m.startSec, trackId: m.trackId };
-  });
-  // **最後の並び**で、動かした帯それぞれを確かめる（列の事情は置くときと同じ述語）。
-  for (const [id] of moved) {
-    const c = nextClips.find((x) => x.id === id) as TimelineClip;
-    const trackIssue = trackPlacementIssue(doc, c.trackId, trackKindForClip(c.kind));
-    // 隠した列は「新しく入れる」ときだけ断る（元の列に留まるなら通す＝`placementIssue` と同じ規則）。
-    const original = doc.clips.find((x) => x.id === id) as TimelineClip;
-    if (trackIssue && !(trackIssue === EDIT_BLOCKED.hiddenTrack && c.trackId === original.trackId)) {
-      return blocked(trackIssue);
+  // ⚠️ **連動で付いてくる字幕も同じ地図へ畳む**（#686 段階4・`/canon-check`）。
+  // ここを畳まずに後から1件ずつ当てると、**まだ動いていない別の字幕の旧位置**と衝突して
+  // 断られる＝「全部動かした後の並びで見る」が半分しか成立せず、**選択の順で結果が変わる**。
+  for (const [id, m] of [...to]) {
+    const clip = doc.clips.find((c) => c.id === id) as TimelineClip;
+    if (clip.kind !== TIMELINE_CLIP_KIND.voice) continue;
+    for (const sub of subtitlesBoundTo(doc, id)) {
+      // 字幕は**読み上げと同じ区間**へ（列は据え置き＝`withBoundSubtitles` と同じ約束）。
+      to.set(sub.id, { startSec: m.startSec, trackId: sub.trackId });
     }
-    if (!isFreeSpan(nextClips, c.trackId, c.startSec, c.durationSec, c.id)) return blocked(EDIT_BLOCKED.overlap);
   }
-  // 何も変わらないなら同じ文書を返す（空振りの取り消しを積まない）。
+  const nextClips = doc.clips.map((c) => {
+    const m = to.get(c.id);
+    // ⚠️ **変わらないなら同じものを返す**（作り直すと「何も変わらない」の判定が効かず、
+    // 空振りの取り消しを積む）。連動する字幕は長さも読み上げに合わせる。
+    if (!m) return c;
+    const durationSec = c.voiceClipId != null
+      ? (doc.clips.find((v) => v.id === c.voiceClipId)?.durationSec ?? c.durationSec)
+      : c.durationSec;
+    if (m.startSec === c.startSec && m.trackId === c.trackId && durationSec === c.durationSec) return c;
+    return { ...c, startSec: m.startSec, trackId: m.trackId, durationSec };
+  });
   if (nextClips.every((c, i) => c === doc.clips[i])) return ok(doc);
-  // 連動している字幕は読み上げに合わせて動く（`withBoundSubtitles` と同じ約束）。
-  let out: TimelineProject = { ...doc, clips: nextClips };
-  for (const [id] of moved) {
+  const next: TimelineProject = { ...doc, clips: nextClips };
+  // **最後の並びで、動いた帯それぞれを確かめる**。列の事情も重なりも `placementIssue` が1か所で見る
+  // （⚠️ 隠した列の免除を書き写さない＝`placementIssue` の ⚠️ が記録している再発をしない）。
+  for (const [id] of to) {
     const before = doc.clips.find((c) => c.id === id) as TimelineClip;
-    const after = out.clips.find((c) => c.id === id) as TimelineClip;
-    const r = withBoundSubtitles(out, doc, before, { startSec: after.startSec, durationSec: after.durationSec });
-    if (!r.ok) return r;
-    out = r.doc;
+    const after = nextClips.find((c) => c.id === id) as TimelineClip;
+    if (after === before) continue;
+    const issue = placementIssue(next, before, after.trackId, after.startSec, after.durationSec);
+    if (!issue) continue;
+    // 置けない理由は**字幕側**のもの＝連動のせいで置けないと分かる形にまとめる（`withBoundSubtitles` と同じ）。
+    return blocked(before.voiceClipId != null ? EDIT_BLOCKED.linkedSubtitle : issue);
   }
-  return ok(out);
+  return ok(next);
 }
 
 /**

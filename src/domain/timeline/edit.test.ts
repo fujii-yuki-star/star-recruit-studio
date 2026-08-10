@@ -1080,6 +1080,43 @@ describe('moveClips（まとめて動かす）', () => {
     expect(r.doc.clips.find((c) => c.id === 'clip_003')!.startSec).toBe(0); // 時間は読み上げが決める
   });
 
+  it('**連動する字幕も同じ地図へ畳む**＝選択の順で結果が変わらない（`/canon-check`）', () => {
+    // ⚠️ 後から1件ずつ当てると、**まだ動いていない別の字幕の旧位置**と衝突して断られる。
+    // 読み上げ2本を選んで動かすのは、声を作る導線が字幕を自動で置く以上ふつうの操作。
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 3, durationSec: 2, voice: { text: 'い', status: 'none' } },
+        { id: 'clip_003', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_001' },
+        { id: 'clip_004', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 3, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_002' },
+      ],
+    });
+    const up = [{ id: 'clip_001', startSec: 3 }, { id: 'clip_002', startSec: 6 }];
+    const a = moveClips(d, up);
+    const b = moveClips(d, [...up].reverse()); // **順を変えても同じ結果**
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(a.doc.clips.map((c) => c.startSec)).toEqual([3, 6, 3, 6]); // 字幕も付いてくる
+    expect(b.doc.clips.map((c) => c.startSec)).toEqual(a.doc.clips.map((c) => c.startSec));
+  });
+
+  it('連動している字幕は**列だけ動かせる**（まとめても単体と同じ意味）', () => {
+    const d = doc({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_005', kind: TRACK_KIND.visual },
+        { id: 'track_002', kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_001' },
+      ],
+    });
+    const r = moveClips(d, [{ id: 'clip_002', startSec: 10, trackId: 'track_005' }]);
+    expect(r.ok && r.doc.clips[1]).toMatchObject({ trackId: 'track_005', startSec: 0 }); // 列は動く・時間は据え置き
+  });
+
   it('何も変わらないなら**同じ文書**を返す（空振りの取り消しを積まない）', () => {
     const d = three();
     const r = moveClips(d, [{ id: 'clip_001', startSec: 0 }]);

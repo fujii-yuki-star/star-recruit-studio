@@ -1023,6 +1023,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       sec: number;
       /** 運び先の列（#686 段階4）。**掴んだ列と同じなら持たない**＝端のトリムは列を変えない。 */
       trackId?: string;
+      /**
+       * まとめて動かしている相手と、そのずれ（秒）。**掴んだ時点で固めたものを見せかけも確定も読む**
+       * ＝ドラッグ中に選択が変わっても、動いて見える帯と動く帯がずれない（#686 段階4・`/canon-check`）。
+       */
+      groupIds?: readonly string[];
+      shiftSec?: number;
       issue: EditBlockedReason | null;
     } | null
   >(null);
@@ -1181,12 +1187,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ＝見えている群の形と、離したときの結果を割らない（#686 段階4）。
    */
   const dragShiftSec = (c: TimelineClip): number => {
-    if (!clipDrag || clipDrag.mode !== "move" || !doc) return 0;
+    if (!clipDrag || clipDrag.mode !== "move" || !clipDrag.groupIds || clipDrag.shiftSec == null) return 0;
     if (clipDrag.clipId === c.id) return 0; // 掴んだ相手は `dragSpanOf` が直に持つ
-    if (!selectedClipIds.includes(c.id) || !selectedClipIds.includes(clipDrag.clipId)) return 0;
-    if (c.voiceClipId != null) return 0; // 連動している字幕は時間を持たない
-    const grabbed = doc.clips.find((x) => x.id === clipDrag.clipId);
-    return grabbed ? clipDrag.sec - grabbed.startSec : 0;
+    // ⚠️ 見るのは**掴んだ時点で固めた群**（`selectedClipIds` を見ると、ドラッグ中に選択が変わったとき
+    // 動いて見える帯と動く帯がずれる＝右クリックで選択が潰れる道がある・`/canon-check`）。
+    if (clipDrag.groupIds.includes(c.id)) return c.voiceClipId != null ? 0 : clipDrag.shiftSec;
+    // ⚠️ **連動している字幕は読み上げに付いてくる**（`withBoundSubtitles`）＝群にその読み上げが
+    // 入っているなら、見せかけも一緒にずらす（据え置いて見せると**離した瞬間に飛ぶ**）。
+    if (c.voiceClipId != null && clipDrag.groupIds.includes(c.voiceClipId)) return clipDrag.shiftSec;
+    return 0;
   };
 
   const dragSpanOf = (c: TimelineClip): { startSec: number; endSec: number } => {
@@ -1287,13 +1296,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
      * 掴んだ相手の動いた量を、選択ぶんへ同じだけ。**列が変わるのは掴んだ相手だけ**
      * （まとめて別の列へ移すと、他の帯が知らない列へ飛ぶ＝見ていない所が動く）。
      */
-    const updatesFor = (sec: number, trackId?: string) => {
+    /**
+     * ⚠️ **ずれは群ぜんぶで丸める**（`/canon-check`）。帯ごとに `Math.max(0, …)` で切ると、
+     * 先頭側だけ 0 に張り付いて**間隔が消える**（別の列どうしなら成功として確定してしまう）。
+     * 群のいちばん早い帯が 0 に着いたら、そこで**群ごと止まる**。
+     */
+    const shiftFor = (sec: number): number => {
       const dt = sec - clip0.startSec;
-      return (groupIds ?? []).map((id) => {
-        const c = doc0.clips.find((x) => x.id === id);
-        return { id, startSec: Math.max(0, (c?.startSec ?? 0) + dt), ...(id === clipId && trackId ? { trackId } : {}) };
-      });
+      const starts = (groupIds ?? []).map((id) => doc0.clips.find((x) => x.id === id)?.startSec ?? 0);
+      return starts.length > 0 ? Math.max(dt, -Math.min(...starts)) : dt;
     };
+    const updatesFor = (dt: number, trackId?: string) =>
+      (groupIds ?? []).map((id) => {
+        const c = doc0.clips.find((x) => x.id === id);
+        return { id, startSec: (c?.startSec ?? 0) + dt, ...(id === clipId && trackId ? { trackId } : {}) };
+      });
     const issueOf = (sec: number, trackId?: string): EditBlockedReason | null => {
       const now = useTimelineStore.getState().doc ?? doc0;
       if (mode !== "move") return trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec);
@@ -1301,7 +1318,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // **一緒に動く相手と重なる**判定になって赤くなるのに、離すと（正しく）置ける＝
       // 見えている色と結果が割れる（実機で踏んだ）。確定と同じ `moveClips` を通す。
       if (groupIds) {
-        const r = moveClips(now, updatesFor(sec, trackId));
+        const r = moveClips(now, updatesFor(shiftFor(sec), trackId));
         return r.ok ? null : r.reason;
       }
       return moveClipIssue(now, clipId, { startSec: sec, ...(trackId ? { trackId } : {}) });
@@ -1332,10 +1349,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // 毎フレーム下の `replay` が走って**消したはずのゴーストが復活**し、枠も流れ続ける。
         if (clipChanged(clip0)) { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); return; }
         const show = (e2: PointerEvent): void => {
-          const { sec, guideSec } = applySnap(at(e2), e2);
+          const { sec: raw, guideSec } = applySnap(at(e2), e2);
+          // 群ごと丸めたずれから、掴んだ相手の位置も出す（見せかけと確定が同じ値を見る）。
+          const shiftSec = groupIds ? shiftFor(raw) : undefined;
+          const sec = groupIds ? clip0.startSec + (shiftSec ?? 0) : raw;
           lastShownSec = sec;
           const trackId = trackAt(e2);
-          setClipDrag({ clipId, mode, sec, trackId, issue: issueOf(sec, trackId) });
+          setClipDrag({ clipId, mode, sec, trackId, groupIds: groupIds ?? undefined, shiftSec, issue: issueOf(sec, trackId) });
           setSnapGuideSec(guideSec);
         };
         show(ev);
@@ -1365,7 +1385,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // 右クリック・取り消しで対象が消える等）**掴んでいない帯**が動く、を作らない。
         if (mode === "move") {
           const trackId = trackAt(ev);
-          if (groupIds) moveClipsBy(updatesFor(sec, trackId));
+          if (groupIds) moveClipsBy(updatesFor(shiftFor(sec), trackId));
           else moveClipById(clipId, { startSec: sec, trackId });
         }
         else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
