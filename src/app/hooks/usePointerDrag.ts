@@ -30,6 +30,23 @@ export function isPointerDragging(): boolean {
   return dragging > 0;
 }
 
+/**
+ * **この作法の外で組んだドラッグ**を数えに入れる（#685 レビュー）。返す関数で必ず外すこと。
+ *
+ * ⚠️ `FreeLayoutOverlay`（キャンバスの直接操作）は `setPointerCapture` で別に組んであり、
+ * ここを通らないと `isPointerDragging()` が常に `false`＝**掴んでいる最中に `Ctrl+Z` が通る**。
+ * 帯では塞いだ穴が、キャンバスでは開いたままになる（同じ画面で作法が2つ）。
+ */
+export function registerExternalDrag(): () => void {
+  dragging += 1;
+  let released = false;
+  return () => {
+    if (released) return; // 二重に外しても数がずれない
+    released = true;
+    dragging -= 1;
+  };
+}
+
 /** ここまで動いたら「掴んだ」とみなす（px）。 */
 export const DRAG_START_PX = 4;
 

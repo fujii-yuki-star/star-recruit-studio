@@ -702,6 +702,16 @@ button.badge {
   overflow: hidden;
 }
 
+/**
+ * 仕上がり確認と**キャンバスの操作レイヤ**を重ねる入れ物（#685 後半）。
+ * ⚠️ 操作レイヤは `position:absolute; inset:0` なので、**基準になる箱**が要る。
+ * 縦横比は中の `.preview-stage` が決めるので、ここは大きさを持たず**重ねるだけ**にする
+ * （ここで比を持つと、縦型に切り替えたときに枠と絵がずれる＝掴む位置が実際とずれる）。
+ */
+.preview-stage-wrap {
+  position: relative;
+}
+
 .preview-stage-label {
   font-size: 13px;
 }

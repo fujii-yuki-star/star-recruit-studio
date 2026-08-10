@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, setClipBox, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
+  addTemplateClip, addVisualClip, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC, MIN_BOX_SIZE_PX } from '../constants';
@@ -968,6 +968,26 @@ describe('setClipBox（置いた部品を動かす）', () => {
       clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 2, text: 'あ' }],
     });
     expectBlocked(setClipBox(l, 'clip_001', canvas, { x: 10 }), EDIT_BLOCKED.locked);
+  });
+
+  it('まとめて変えるときは**1つでも置けなければ何もしない**（決定15）', () => {
+    // ⚠️ 1件ずつ流すと、固定した列の部品だけ黙って取り残されて**群の形が崩れる**（理由も最後の1件ぶんだけ）。
+    const two = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_009', kind: TRACK_KIND.visual, locked: true }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 2, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_009', startSec: 0, durationSec: 2, text: 'い' },
+      ],
+    });
+    const r = setClipBoxes(two, canvas, [{ id: 'clip_001', patch: { x: 50 } }, { id: 'clip_002', patch: { x: 50 } }]);
+    expect(r.ok).toBe(false);
+    expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.locked);
+    expect(two.clips[0].x).toBeUndefined(); // 途中まで動いた文書を返さない
+  });
+
+  it('全部通るならまとめて変える', () => {
+    const r = setClipBoxes(d(), canvas, [{ id: 'clip_001', patch: { x: 50, y: 60 } }]);
+    expect(r.ok && r.doc.clips[0]).toMatchObject({ x: 50, y: 60 });
   });
 
   it('何も変わらないなら**同じ文書**を返す（空振りの取り消しを積まない）', () => {

@@ -875,6 +875,26 @@ export function setClipBox(
   return ok(withClip(doc, { ...clip, ...next }));
 }
 
+/**
+ * **まとめて箱を変える**（#685 レビュー）。ADR-0034 決定15 の「**1つでも置けなければ全体を断る**」。
+ *
+ * ⚠️ 1件ずつ `setClipBox` を呼ぶと、**固定した列の部品だけ黙って取り残される**（群の形が崩れる）。
+ * しかも理由は最後の1件ぶんしか残らない。**全部通るか、何もしないか**にする（`removeClipsByIds` と同じ流儀）。
+ */
+export function setClipBoxes(
+  doc: TimelineProject,
+  canvas: { width: number; height: number },
+  updates: readonly { id: string; patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number } }[],
+): EditResult {
+  let next = doc;
+  for (const u of updates) {
+    const r = setClipBox(next, u.id, canvas, u.patch);
+    if (!r.ok) return r; // 1つでも駄目なら**何もしない**（途中まで動いた文書を返さない）
+    next = r.doc;
+  }
+  return ok(next);
+}
+
 export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);

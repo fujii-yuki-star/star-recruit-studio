@@ -119,6 +119,10 @@ import type { CropAlignX, CropAlignY } from "../../domain/enums";
 import type { Asset } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
+import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
+import type { FreeElement } from "../../domain/project/types";
+import type { FreeElementKind } from "../../domain/enums";
+import { clipIsLiveAt } from "../../renderer/timelineLayout";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -294,7 +298,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, trimClipById, setEditBlocked, setSelectedClipBox, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipBoxesFor, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -1078,6 +1082,32 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 選んだ部品の**箱**（#685）。**箱を持てる部品だけ**（音・読み上げに位置は無い／見た目パターンの
    * クリップは枠そのもの＝幾何を持たない）＝出す条件は domain の `setClipBox` が断る条件と同じもの。
    */
+  /**
+   * **キャンバスで触れる部品**（#685 後半）＝いま画面に出ていて、箱を自分で持てるもの。
+   *
+   * 空間の語彙は同じもの（`ClipSpatial`＝`FreeElement` から時間を除いたもの・`11 §7.6`）なので、
+   * **箱を解決して id と種類を付け直すだけ**で場面編集の部品へ渡せる。
+   * ⚠️ **見た目パターンのクリップは渡さない**＝枠そのもの（決定8）。渡すと画面いっぱいの箱が
+   * 全面を覆い、その下の部品を掴めなくなる（掴めるのに掴めない、を作る）。
+   */
+  const canvasDims = doc ? dimsForOrientation(doc.videoSettings.aspectRatio) : { width: 0, height: 0 };
+  const canvasEls: FreeElement[] = doc
+    ? doc.clips
+        .filter((c) => canHaveBox(c.kind) && clipIsLiveAt(c, frameTimeSec(doc, playheadSec)) && !trackOf(c.trackId)?.hidden)
+        .map((c) => ({
+          ...resolveClipBox(c, canvasDims),
+          id: c.id,
+          kind: c.kind as FreeElementKind,
+          // 固定した列の部品は**掴めない**（帯と同じ＝同じ状態を場所で変えない・ADR-0026②）。
+          ...(trackOf(c.trackId)?.locked ? { locked: true } : {}),
+        }))
+    : [];
+  /** キャンバスからの編集は **`setClipBox` と同じ入口**（数値欄と置けない条件を割らない）。 */
+  const setClipBoxById = (clipId: string, patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }): void => {
+    if (!doc) return;
+    setClipBoxFor(clipId, patch);
+  };
+
   const selectedBox = selected && canHaveBox(selected.kind) && doc
     ? resolveClipBox(selected, dimsForOrientation(doc.videoSettings.aspectRatio))
     : null;
@@ -1379,11 +1409,42 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const panels: PanelSpec[] = [
     { id: PANEL_ID.preview, title: '仕上がり確認', content: (
       <>
-        <div
-          ref={stageRef}
-          className={`preview-stage${drag?.drop?.center ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
+        <div className="preview-stage-wrap">
+          {/* ⚠️ **比を動画の向きに合わせる**（#685 レビュー 🔴）。CSS の既定は 16:9 固定なので、縦型では
+              SVG が中で letterbox され、上に重ねる操作レイヤ（`inset: 0`）と**実際に描かれている矩形が
+              ずれる**（枠が約3倍の幅になり、動かす量も同じだけずれる）。場面形式のプレビューも
+              「比をキャンバスに合わせて SVG を充填する＝余白を作らない」で同じ問題を解いている。 */}
+          <div
+            ref={stageRef}
+            className={`preview-stage${drag?.drop?.center ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
+            style={{ aspectRatio: `${canvasDims.width} / ${canvasDims.height}` }}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+          {/* **キャンバスで掴んで動かす**（#685 後半・ADR-0034 決定6）＝場面編集の自由配置と**同じ部品**
+              （`FreeLayoutOverlay`）を流用する＝2つの画面で操作感を割らない。ハンドルは**選んだら常に**（決定7）。
+              ⚠️ **再生中・書き出し中は出さない**＝動いている絵と設計位置のハンドルがずれて見える／
+              書き出し中の編集は動画に入らない（決定22・`TIMELINE_EDIT_EXPORTING` と同じ理由）。 */}
+          {!isPlaying && !exporting && canvasEls.length > 0 && (
+            <FreeLayoutOverlay
+              key={doc.projectId}
+              freeLayout={canvasEls}
+              canvasW={canvasDims.width}
+              canvasH={canvasDims.height}
+              selectedIds={selectedClipIds}
+              // 空白を押したら解除（決定15＝選択モデルは1つ）。
+              onSelect={(id: string | null, additive?: boolean) => (id == null ? clearSelection() : selectClip(id, additive))}
+              onSelectMany={(ids: string[]) => selectClips(ids)}
+              onChange={(id: string, g: { x: number; y: number; w?: number; h?: number }) => setClipBoxById(id, g)}
+              onRotate={(id: string, rotation: number) => setClipBoxById(id, { rotation })}
+              // ⚠️ **まとめては全か無か**（決定15）＝1件ずつ流すと固定した列の部品だけ黙って取り残される。
+              onMoveMany={(moves: { id: string; x: number; y: number }[]) => setClipBoxesFor(moves.map((m) => ({ id: m.id, patch: { x: m.x, y: m.y } })))}
+              onResizeMany={(geoms: { id: string; x: number; y: number; w: number; h: number }[]) => setClipBoxesFor(geoms.map((g) => ({ id: g.id, patch: { x: g.x, y: g.y, w: g.w, h: g.h } })))}
+              // **1回のドラッグ＝1回の取り消し**（決定20）。動かすたびに履歴を積まない。
+              onInteractionStart={beginHistoryGroup}
+              onInteractionEnd={endHistoryGroup}
+            />
+          )}
+        </div>
         <div className="row gap-sm">
           <button
             className="btn btn-primary"

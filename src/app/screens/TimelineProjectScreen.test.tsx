@@ -3509,6 +3509,82 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.queryByLabelText("横位置")).toBeNull();
   });
 
+  // キャンバスで掴んで動かす（#685 後半・ADR-0034 決定6/7/15/17）。
+  // ⚠️ **場面編集と同じ部品**（`FreeLayoutOverlay`）を流用する＝2つの画面で操作感を割らない。
+  const canvasEls = (container: HTMLElement) => {
+    const wrap = container.querySelector(".preview-stage-wrap") as HTMLElement;
+    const stage = wrap?.querySelector(".preview-stage");
+    const ov = wrap && wrap.lastElementChild !== stage ? (wrap.lastElementChild as HTMLElement) : null;
+    return { wrap, ov };
+  };
+
+  it("キャンバスに操作レイヤを重ねる（箱を持てる部品だけ）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      assets: [{ assetId: "asset_001", assetType: "bgm", displayName: "曲", filePath: "assets/asset_001.mp3" }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "あ" },
+        // 見た目パターンは**枠そのもの**なので渡さない（渡すと全面を覆って下を掴めない・決定8）。
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 5, durationSec: 3, templateId: "tmpl_001" },
+        // 音は画面に出ない。
+        { id: "clip_003", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 3, assetId: "asset_001" },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const { ov } = canvasEls(container);
+    expect(ov).not.toBeNull();
+    expect(ov!.children.length).toBe(1); // 文字だけ
+  });
+
+  it("**いま出ていない部品**は触れない（時間の外のものを掴ませない）", () => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 10, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 再生位置は 0＝この部品は出ていない。
+    expect(canvasEls(container).ov).toBeNull();
+  });
+
+  it("再生中は操作レイヤを出さない（動く絵と設計位置のハンドルがずれる）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(canvasEls(container).ov).not.toBeNull();
+    act(() => { useTimelineStore.setState({ isPlaying: true }); });
+    expect(canvasEls(container).ov).toBeNull();
+  });
+
+  it("書き出し中も出さない（入らない編集を受け付けない）", () => {
+    two();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false } });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(canvasEls(container).ov).toBeNull();
+  });
+
+  it("固定した列の部品は**掴めない**（帯と同じ＝場所で挙動を変えない）", () => {
+    two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = canvasEls(container).ov!.children[0] as HTMLElement;
+    // ロックされた要素は `cursor: default`（掴めそうに見せない）。
+    expect(el.style.cursor).toBe("default");
+  });
+
+  it("重ね順の項目はキャンバスのメニューに出さない（列の並びだけ・決定17）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = canvasEls(container).ov!.children[0] as HTMLElement;
+    fireEvent.contextMenu(el);
+    expect(screen.queryByText("前面")).toBeNull();
+    expect(screen.queryByText("背面")).toBeNull();
+  });
+
+  it("縦型では**比を動画に合わせる**（枠と絵がずれない）", () => {
+    // ⚠️ CSS の既定は 16:9 固定。縦型で letterbox が入ると、上に重ねる操作レイヤと実際に描かれている
+    // 矩形がずれ、**掴む位置も動かす量も約3倍ずれる**（縦型は新規作成から到達できる）。
+    open({ videoSettings: { aspectRatio: "9:16", fps: 30, targetDurationSec: 60, maxDurationSec: 600 } });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((container.querySelector(".preview-stage") as HTMLElement).style.aspectRatio).toBe("1080 / 1920");
+  });
+
   it("Escape でやめたら元のまま（掴んだ位置に置かない）", () => {
     two();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
