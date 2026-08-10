@@ -479,17 +479,26 @@ export function FreeLayoutOverlay({
   };
 
   // `Escape` と `pointercancel` でやめる（作法は画面ぜんぶで同じ・`usePointerDrag` の ⚠️ を参照）。
+  //
+  // ⚠️ **張るのは掴んでいる間に1度だけ**（#747 レビュー）。依存を書かないと `pointermove` のたびに
+  // 外して張り直す。かといって `drag` を依存に入れても**毎回変わる**ので同じこと。
+  // 「掴んでいるか」の真偽だけを依存にし、**中身は ref 越しに最新を読む**（この file の `dragRef` と同じ形）。
+  // ⚠️ ref を挟まず closure を固定すると、掴んでいる最中に親が渡し直した `onMoveMany` 等を**古いまま**
+  // 呼ぶ（呼び出し側はインラインの関数を渡している）。速さのために鮮度を落とさない。
+  const dragging = drag != null || marquee != null;
+  const cancelRef = useRef(cancelDrag);
+  useEffect(() => { cancelRef.current = cancelDrag; });
   useEffect(() => {
-    if (!drag && !marquee) return;
-    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.stopPropagation(); cancelDrag(); } };
-    const onCancel = () => cancelDrag();
+    if (!dragging) return;
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.stopPropagation(); cancelRef.current(); } };
+    const onCancel = (): void => cancelRef.current();
     window.addEventListener('keydown', onKey, true); // 外側の `Escape` より先に受ける
     window.addEventListener('pointercancel', onCancel);
     return () => {
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('pointercancel', onCancel);
     };
-  });
+  }, [dragging]);
 
   const endDrag = (e: ReactPointerEvent) => {
     // 範囲選択（マーキー）の終了：矩形を消す（選択は move 中に確定済み・#274）。

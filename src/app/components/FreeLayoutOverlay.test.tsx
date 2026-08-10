@@ -783,6 +783,44 @@ describe("掴む作法（`Escape` と取り消し・#685 レビュー）", () =>
     expect(isPointerDragging()).toBe(false);
   });
 
+  it("やめる合図は**掴んでいる間に1度だけ**張る（動かすたびに張り直さない）", () => {
+    // ⚠️ 依存を書かない／`drag` を依存に入れる、のどちらでも `pointermove` のたびに張り直しになる。
+    const add = vi.spyOn(window, "addEventListener");
+    try {
+      const { root, container } = mount();
+      fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+      const before = add.mock.calls.filter((c) => c[0] === "keydown").length;
+      for (let i = 0; i < 5; i++) fireEvent.pointerMove(root, { pointerId: 1, clientX: 100 + i * 10, clientY: 100 });
+      expect(add.mock.calls.filter((c) => c[0] === "keydown").length).toBe(before); // 増えない
+      fireEvent.keyDown(window, { key: "Escape" }); // それでも効く（鮮度を落としていない）
+      expect(isPointerDragging()).toBe(false);
+    } finally {
+      add.mockRestore();
+    }
+  });
+
+  it("やめるときは**そのとき渡されている**受け口を呼ぶ（古いものを掴まない）", () => {
+    // ⚠️ 張り直しを減らすために closure を固定すると、掴んでいる最中に親が渡し直した受け口を
+    // **古いまま**呼ぶ（呼び出し側はインラインの関数を渡している）。速さのために鮮度を落とさない。
+    const first = vi.fn();
+    const later = vi.fn();
+    const { root, container, rerender } = mount({ onMoveMany: first });
+    fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(root, { pointerId: 1, clientX: 300, clientY: 200 });
+    rerender(
+      <FreeLayoutOverlay
+        freeLayout={[el()]} canvasW={1920} canvasH={1080} selectedIds={["free_001"]}
+        onSelect={vi.fn()} onSelectMany={vi.fn()} onChange={vi.fn()} onResizeMany={vi.fn()}
+        onRotate={vi.fn()} onMoveMany={later}
+        onInteractionStart={vi.fn()} onInteractionEnd={vi.fn()}
+      />,
+    );
+    first.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(later).toHaveBeenCalledWith([{ id: "free_001", x: 100, y: 100 }]);
+    expect(first).not.toHaveBeenCalled();
+  });
+
   it("画面を離れても名乗りを外す（以後 `Escape` も取り消しも効かなくなるのを防ぐ）", () => {
     const { root, container, unmount } = mount();
     fireEvent.pointerDown(container.querySelector("[style*='cursor: move']")!, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
