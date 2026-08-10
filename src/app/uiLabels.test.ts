@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
-import { bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL } from "./uiLabels";
+import { bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -222,4 +222,37 @@ describe('editBlockedMessage（置けなかった理由の案内）', () => {
     expect(editBlockedMessage.TIMELINE_EDIT_CONTENT_FIELD).not.toBe(editBlockedMessage.TIMELINE_EDIT_TRACK_KIND);
     expect(editBlockedMessage.TIMELINE_EDIT_CONTENT_FIELD).not.toContain('列');
   });
+});
+
+// §2-3（通常UIに技術用語を出さない）を**機械で**守る（#750 再レビュー）。
+//
+// ⚠️ この漏れは目視レビューで繰り返し見つかっている。文言を1つ直すだけでは次が漏れるので、
+// **一覧をまとめて走査する**。ここに載っている表は、そのまま画面に出る（断りのバナー・
+// ボタンの理由・焼き出しの注意）。
+describe("利用者に出す文言に技術用語を混ぜない（§2-3）", () => {
+  // CLAUDE.md §2-3 の禁止語。置換語は `06_UI_SPEC.md §3`。
+  // ⚠️ 「動画編集の一般語」（分割・ズーム・吸着・トリム）は対象外＝ADR-0034 決定21 で整理済み。
+  const BANNED = [
+    "キーフレーム", "JSON", "FFmpeg", "LLM", "Provider", "templateId", "assetId", "clipId",
+    "レンダリング", "バリデーション", "スキーマ", "プロパティ", "オブジェクト", "パース",
+    "null", "undefined", "boolean", "enum",
+  ];
+
+  const MAPS: Record<string, Record<string, string>> = {
+    editBlockedMessage,
+    exportBlockedMessage,
+    bakeNoteMessage,
+  };
+
+  for (const [name, map] of Object.entries(MAPS)) {
+    it(`${name} は禁止語を含まない`, () => {
+      const bad: string[] = [];
+      for (const [key, text] of Object.entries(map)) {
+        for (const word of BANNED) {
+          if (text.includes(word)) bad.push(`${key}: 「${word}」← ${text}`);
+        }
+      }
+      expect(bad).toEqual([]);
+    });
+  }
 });
