@@ -124,6 +124,7 @@ import type { FreeElement } from "../../domain/project/types";
 import type { FreeElementKind } from "../../domain/enums";
 import { clipIsLiveAt } from "../../renderer/timelineLayout";
 import { SNAP_THRESHOLD_PX, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
+import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -299,7 +300,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipBoxesFor, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -531,6 +532,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 登録し直すことになる（毎フレームの付け外し）。閉じ込めた古い値を見ないよう、下の効果で入れ替える。
    */
   const playRef = useRef({ playing: false, total: 0, fps: FPS, play, pause, seekFrames: (_frames: number) => {} });
+  /** `Ctrl+K` の受け皿（毎レンダー最新にする＝`playRef`/`removeRef` と同じ形）。 */
+  const splitRef = useRef<() => void>(() => {});
   const removeRef = useRef<() => void>(() => {});
 
   // `Escape`＝選択を解く／`Ctrl+A`＝全部選ぶ／`Space`・`Delete`・`←→`（#721・決定18）。
@@ -556,6 +559,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         e.preventDefault();
         const ids = useTimelineStore.getState().doc?.clips.map((c) => c.id) ?? [];
         if (ids.length > 0) selectClips(ids);
+        return;
+      }
+      // **`Ctrl+K`＝ここで分ける**（決定18）。押せる条件も断り文もボタンと同じ入口が決める
+      // ＝キーだけ通って理由が出ない、を作らない。
+      // ⚠️ **修飾キーを弾く行より前**に置く（後ろだと届かない＝実際にそこへ置いて動かなかった）。
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        splitRef.current();
         return;
       }
       // ここから下は**修飾キーの付いていない単独キー**だけ（`Ctrl+←` 等は OS/ブラウザのものを奪わない）。
@@ -981,6 +992,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       seekFrames: (frames) => { if (doc) setPlayhead(seekByFrames(doc, playheadSec, frames)); },
     };
     removeRef.current = requestRemoveSelected;
+    // ⚠️ 分けるは**押せる条件を先に見る**（キーには「押せない見た目」が無いので、ここで断りを立てる）。
+    // 見る条件はボタンと同じもの（`splitClipIssue`＋再生中）＝キーだけ通る道を作らない。
+    splitRef.current = () => {
+      if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing); return; } // 位置を使う操作＝再生中は断る（決定21）
+      if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.notFound); return; }
+      const issue = splitClipIssue(doc, selected.id, playheadSec);
+      if (issue) { setEditBlocked(SPLIT_BLOCKED_REASON[issue]); return; }
+      splitSelectedClip(playheadSec);
+    };
     changeZoomRef.current = changeZoom; // ホイールの実リスナーは張り替えないので写し越しに呼ぶ
   });
   /**
@@ -1064,7 +1084,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   }
 
   // 再生中に押せない操作の理由（§2-5：押せない理由を無言にしない）。
-  const playingHint = isPlaying ? "再生を止めてから使えます" : undefined;
+  // ⚠️ 文言は**断り文と同じ所**から採る（`TIMELINE_EDIT_PLAYING`）＝ボタンの手前とキーの後で
+  // 同じ状況の言い方が変わらない（ADR-0026②）。
+  const playingHint = isPlaying ? editBlockedMessage[EDIT_BLOCKED.playing] : undefined;
 
   /**
    * **編集の入口の「押せない」と理由を1か所から配る**（#703・監査 §2.2-11）。
@@ -1414,6 +1436,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       ? { disabled: true, hint: "動画に出さない列では増やせません。列の「⋮」から「動画に出す」を選んでください" }
       : {};
 
+  /**
+   * **いま分けられるか**（#686 段階4・決定16）。`splitClipIssue` を見る＝押す前に断るのと、
+   * 実際に分けるときの規則が同じもの（押せるのに何も起きない、を作らない）。
+   */
+  const splitExtra = (): { disabled?: boolean; hint?: string } => {
+    if (!doc || !selected) return { disabled: true, hint: "分ける部品を選んでください" };
+    const issue = splitClipIssue(doc, selected.id, playheadSec);
+    return issue ? { disabled: true, hint: editBlockedMessage[SPLIT_BLOCKED_REASON[issue]] } : {};
+  };
+
   const singleClipMenuGuard: { disabled?: boolean; disabledHint?: string } =
     selectedClipIds.length > 1
       ? { disabled: true, disabledHint: "1つだけ選ぶと使えます" }
@@ -1430,6 +1462,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           ...singleClipMenuGuard,
           ...(duplicateExtra().disabled ? { disabled: true, disabledHint: duplicateExtra().hint } : {}),
           onSelect: duplicateSelectedClip,
+        },
+        {
+          label: "ここで分ける",
+          ...singleClipMenuGuard,
+          ...(splitExtra().disabled ? { disabled: true, disabledHint: splitExtra().hint } : {}),
+          onSelect: () => splitSelectedClip(playheadSec),
         },
         ...(menuClipTemplate
           ? [{
@@ -1886,6 +1924,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               </button>
               <button className="btn btn-secondary" onClick={() => trimSelectedClip("end", playheadSec)} {...editGuard({ disabled: isPlaying, hint: playingHint })}>
                 ここで終わる
+              </button>
+              {/* **ここで分ける**（決定16）＝再生位置×選んだ帯。`Ctrl+K` と同じ入口（決定19＝キーだけにしない）。 */}
+              <button
+                className="btn btn-secondary"
+                onClick={() => splitSelectedClip(playheadSec)}
+                {...editGuard({ ...splitExtra(), disabled: splitExtra().disabled || isPlaying, hint: isPlaying ? playingHint : splitExtra().hint })}
+              >
+                ここで分ける
               </button>
               <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>同じものを足す</button>
               <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeBlocked ?? {})} title={removeBlocked?.title ?? "選んだ部品を消します（Delete）"}>消す</button>
