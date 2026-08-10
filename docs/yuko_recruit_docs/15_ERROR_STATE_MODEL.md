@@ -199,7 +199,6 @@ idle ─(開始)─▶ running[ scene 1..N を順次レンダ → 結合 → 音
 | `TIMELINE_EDIT_PLAYING` | warning | — | 再生を止めてから使えます | `ADR-0032` 決定21（位置を使う操作は再生中に押させない・理由を出す） |
 | `TIMELINE_EDIT_UNSPLITTABLE` | warning | — | 読み上げと、それに合わせている字幕は分けられません（文と音がずれるため）。字幕だけ分けたいときは「連動する読み上げ」で連動をやめてください | `ADR-0034` 決定16 |
 | `TIMELINE_EDIT_SPLIT_OUTSIDE` | warning | — | その位置では分けられません。再生位置を部品の中（両側が0.1秒以上残る所）へ動かしてください | `ADR-0034` 決定16 |
-| `TIMELINE_EDIT_MULTI_SELECTION` | warning | — | まとめて動かすことはまだできません。1つだけ選んでから動かしてください | `ADR-0034` 決定15（同時移動は段階4・それまでは掴ませない） |
 | `TIMELINE_EDIT_LINKED_SUBTITLE_TIME` | warning | — | 連動している字幕の時間は読み上げに合わせています。連動をやめると自分で動かせます | `ADR-0032` 決定24（区間の一致を保つ） |
 | `TIMELINE_EDIT_VOLUME_POINTS_FULL` | warning | — | 音量の変化は1つの部品に60か所までです。ほかの点を外してから置いてください | `ADR-0032` 追補・`11 §7.6.3.2`（上限は `VOLUME_POINTS_MAX`＝FFmpeg の式の解析上限。**置けたのに書き出しで断られる、を作らない**＝`§7.6.5` と対） |
 | `TIMELINE_EDIT_VOLUME_POINTS_KIND` | warning | — | 音量の変化を置けるのは、音や読み上げの部品だけです。音の部品を選び直してください | `ADR-0032` 追補・`11 §7.6.3.2`（鳴る音を持たない部品に意味の無いデータを書かない） |

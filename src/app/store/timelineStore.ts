@@ -29,7 +29,7 @@ import {
   VISUAL_CLIP_DURATION_SEC, addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip,
   firstFreeStart, moveClip, placeableVisualTracks,
   setVisualClipContent,
-  moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
+  moveClips, moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
@@ -243,6 +243,8 @@ export interface TimelineState {
    * （左ドラッグ中の右クリック・取り消しで対象が消える）。`explodeClip`／`removeClipsByIds` と同じ流儀。
    */
   moveClipById: (clipId: string, to: { trackId?: string; startSec?: number }) => void;
+  /** **まとめて動かす**（#686 段階4・1つでも置けなければ全体を断る＝決定15）。 */
+  moveClipsBy: (updates: readonly { id: string; startSec?: number; trackId?: string }[]) => void;
   trimClipById: (clipId: string, edge: "start" | "end", sec: number) => void;
   /** 断り文をそのまま立てる（掴む前に断るとき＝押してから断らない・#686）。 */
   setEditBlocked: (reason: EditBlockedReason) => void;
@@ -636,6 +638,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
   trimSelectedClip: (edge, sec) => applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec)),
   moveClipById: (clipId, to) => applyEditTo(set, get, clipId, (doc, id) => moveClip(doc, id, to)),
+  moveClipsBy: (updates) => {
+    const doc = get().doc;
+    if (!doc || updates.length === 0) return;
+    const r = moveClips(doc, updates);
+    if (r.ok) commit(set, get, r.doc);
+    else set({ editBlocked: r.reason });
+  },
   trimClipById: (clipId, edge, sec) => applyEditTo(set, get, clipId, (doc, id) => trimClip(doc, id, edge, sec)),
   setEditBlocked: (reason) => set({ editBlocked: reason }),
   setSelectedClipBox: (patch) =>

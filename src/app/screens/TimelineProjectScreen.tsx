@@ -15,7 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, moveClipIssue, placeableAudioTracks, placeableVisualTracks, trimClipIssue, visualPlacementIssue } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, moveClipIssue, placeableAudioTracks, placeableVisualTracks, trimClipIssue, visualPlacementIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
@@ -300,7 +300,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -1176,6 +1176,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const laneOf = (c: TimelineClip): string =>
     clipDrag?.clipId === c.id && clipDrag.trackId ? clipDrag.trackId : c.trackId;
 
+  /**
+   * 掴んでいる間の**ずれ**（秒）。まとめて動かすとき、掴んでいない帯にも同じだけ効かせる
+   * ＝見えている群の形と、離したときの結果を割らない（#686 段階4）。
+   */
+  const dragShiftSec = (c: TimelineClip): number => {
+    if (!clipDrag || clipDrag.mode !== "move" || !doc) return 0;
+    if (clipDrag.clipId === c.id) return 0; // 掴んだ相手は `dragSpanOf` が直に持つ
+    if (!selectedClipIds.includes(c.id) || !selectedClipIds.includes(clipDrag.clipId)) return 0;
+    if (c.voiceClipId != null) return 0; // 連動している字幕は時間を持たない
+    const grabbed = doc.clips.find((x) => x.id === clipDrag.clipId);
+    return grabbed ? clipDrag.sec - grabbed.startSec : 0;
+  };
+
   const dragSpanOf = (c: TimelineClip): { startSec: number; endSec: number } => {
     const d = clipDrag?.clipId === c.id ? clipDrag : null;
     let startSec = c.startSec;
@@ -1186,7 +1199,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return { startSec, endSec };
   };
   const dragStyleOf = (c: TimelineClip): { left: string; width: string } => {
-    const { startSec, endSec } = dragSpanOf(c);
+    const shift = dragShiftSec(c);
+    const { startSec: s0, endSec: e0 } = dragSpanOf(c);
+    const startSec = Math.max(0, s0 + shift);
+    const endSec = e0 + shift;
     return { left: `${pxPerSec * startSec}px`, width: `${pxPerSec * (endSec - startSec)}px` };
   };
 
@@ -1221,15 +1237,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 掴めるかは **`grabbableClip` だけが決める**（見た目の `cursor` と同じものを見る・#743 レビュー）。
     // 条件を書き写すと、片方だけ増えたときに「掴めそうなのに掴めない」の非対称が戻る。
     if (!grabbableClip(clip0)) return;
-    // 複数選んでいるうちの1つを掴んだ＝まとめて動かすのは段階4。**選択を黙って潰さない**（決定15）。
-    if (selectedClipIds.length > 1 && selectedClipIds.includes(clipId)) {
-      setEditBlocked(EDIT_BLOCKED.multiSelection);
-      // ⚠️ **断って戻る道でも `click` を捨てる**（#686 レビュー）。捨てないと離した後の `click` が
-      // 素通しで走り、①帯の上なら `selectClip` で**選択が1つへ潰れて理由も消える**
-      // ②列の余白なら `clearSelection` で**選択が丸ごと消える**＝断った意味が無くなる。
-      dropSkipClickSoon();
-      return;
-    }
+    // ⚠️ **複数選んでいるうちの1つを掴んだら、まとめて動かす**（#686 段階4・決定15）。
+    // 掴んだ相手の動いた量を、選択ぶんへ**同じだけ**当てる（群の形を崩さない）。
+    // 置けるかは `moveClips` が**全か無か**で見る（1つでも置けなければ何も動かさない）。
+    const groupIds = selectedClipIds.length > 1 && selectedClipIds.includes(clipId) ? [...selectedClipIds] : null;
     const startX = e.clientX;
     const startScroll = scrollRef.current?.scrollLeft ?? 0;
     const origin = mode === "trim-end" ? clipEndSec(clip0) : clip0.startSec;
@@ -1271,11 +1282,29 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       return Math.max(0, origin + (ev.clientX - startX + scrolled) / pxPerSec);
     };
     // 判定は**今の文書**で引く（掴んだ時点の写しで見ると、途中で変わったとき色と結果が食い違う）。
+    /**
+     * まとめて動かすときの**行き先ぜんぶ**（#686 段階4）。ゴーストの色と確定が**同じもの**を見る。
+     * 掴んだ相手の動いた量を、選択ぶんへ同じだけ。**列が変わるのは掴んだ相手だけ**
+     * （まとめて別の列へ移すと、他の帯が知らない列へ飛ぶ＝見ていない所が動く）。
+     */
+    const updatesFor = (sec: number, trackId?: string) => {
+      const dt = sec - clip0.startSec;
+      return (groupIds ?? []).map((id) => {
+        const c = doc0.clips.find((x) => x.id === id);
+        return { id, startSec: Math.max(0, (c?.startSec ?? 0) + dt), ...(id === clipId && trackId ? { trackId } : {}) };
+      });
+    };
     const issueOf = (sec: number, trackId?: string): EditBlockedReason | null => {
       const now = useTimelineStore.getState().doc ?? doc0;
-      return mode === "move"
-        ? moveClipIssue(now, clipId, { startSec: sec, ...(trackId ? { trackId } : {}) })
-        : trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec);
+      if (mode !== "move") return trimClipIssue(now, clipId, mode === "trim-start" ? "start" : "end", sec);
+      // ⚠️ **まとめて動かすときは群ぜんぶで見る**（#686 段階4）。掴んだ相手だけを見ると、
+      // **一緒に動く相手と重なる**判定になって赤くなるのに、離すと（正しく）置ける＝
+      // 見えている色と結果が割れる（実機で踏んだ）。確定と同じ `moveClips` を通す。
+      if (groupIds) {
+        const r = moveClips(now, updatesFor(sec, trackId));
+        return r.ok ? null : r.reason;
+      }
+      return moveClipIssue(now, clipId, { startSec: sec, ...(trackId ? { trackId } : {}) });
     };
     /**
      * 運び先の列（`move` のときだけ）。**指の下の列**を「置く」と同じ規則（`laneAt`）で採る。
@@ -1294,7 +1323,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
      */
     let lastShownSec = origin;
     beginDrag(e, {
-      onStart: () => selectClip(clipId), // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する
+      // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する。
+      // ⚠️ **まとめて掴んだときは潰さない**（#686 段階4）＝潰すと選択が1つになり、
+      // 一緒に動かすはずの相手が置き去りになる（見えている群と結果が割れる）。
+      onStart: () => { if (!groupIds) selectClip(clipId); },
       onMove: (ev) => {
         // ⚠️ 掴み直してもらう道でも**送りを止める**（#714 レビュー）。止めないと rAF が回り続け、
         // 毎フレーム下の `replay` が走って**消したはずのゴーストが復活**し、枠も流れ続ける。
@@ -1331,7 +1363,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // （ゴーストの色も同じ関数を見ている＝決めるのは1か所）。
         // 掴んだ相手は `clipId`。**選択に効かせない**＝掴んでいる間に選択が変わっても（左ドラッグ中の
         // 右クリック・取り消しで対象が消える等）**掴んでいない帯**が動く、を作らない。
-        if (mode === "move") moveClipById(clipId, { startSec: sec, trackId: trackAt(ev) });
+        if (mode === "move") {
+          const trackId = trackAt(ev);
+          if (groupIds) moveClipsBy(updatesFor(sec, trackId));
+          else moveClipById(clipId, { startSec: sec, trackId });
+        }
         else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
       },
       onCancel: (started) => { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) dropSkipClickSoon(); },

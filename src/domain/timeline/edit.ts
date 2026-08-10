@@ -65,13 +65,6 @@ export const EDIT_BLOCKED = {
    * 動きの支点が変わって**絵がずれる**ので、先に動きを外してもらう。
    */
   explodeAnchor: 'TIMELINE_EDIT_EXPLODE_ANCHOR',
-  /**
-   * 選んだ部品が複数ある（#686）。掴んだ1つだけ動かすと**残りは置き去り**になり、
-   * 選択を黙って1つへ潰すと「まとめて消す」と意味が食い違う（同じ選択で操作ごとに別の意味・決定15）。
-   * まとめて動かせるようになるのは段階4 の残り（吸着・分割と同じ組）なので、それまでは断る。
-   * ⚠️ **列またぎは先に land した**（#686 段階4 の一部）＝この説明を実装より広く書かない。
-   */
-  multiSelection: 'TIMELINE_EDIT_MULTI_SELECTION',
   /** 連動している字幕を置ける場所が無い（読み上げを動かせない理由・#633）。 */
   linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
   /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
@@ -240,6 +233,67 @@ export function moveClip(
     startSec,
     durationSec: clip.durationSec,
   });
+}
+
+/**
+ * **まとめて動かす**（#686 段階4・ADR-0034 決定15＝「1つでも置けなければ全体を断る」）。
+ *
+ * ⚠️ **全部動かした後の並びで見る**（1件ずつ `moveClip` を通さない）。順に適用すると、
+ * 入れ替え（A を B の場所へ・B を A の場所へ）が**途中で重なって**断られる＝まとめて動かせば
+ * 収まる形を、順番のせいで拒む。まず全部動かしてから、動かした帯だけを最後の並びで確かめる。
+ *
+ * ⚠️ **連動している字幕の時間は動かさない**（読み上げが決める）＝まとめて動かす対象からも外す。
+ * 外さずに断ると、選択に字幕が1つ混ざっただけで**全体が動かせなくなる**（決定15 の「全か無か」は
+ * *置けるかどうか*の話であって、そもそも時間を持たない相手まで巻き込む意味ではない）。
+ */
+export function moveClips(
+  doc: TimelineProject,
+  updates: readonly { id: string; startSec?: number; trackId?: string }[],
+): EditResult {
+  if (updates.length === 0) return ok(doc);
+  const moved = new Map<string, { startSec: number; trackId: string }>();
+  for (const u of updates) {
+    const clip = doc.clips.find((c) => c.id === u.id);
+    if (!clip) return blocked(EDIT_BLOCKED.notFound);
+    if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+    // 連動している字幕は時間を持たない＝**動かさずに素通しする**（断らない）。
+    if (clip.voiceClipId != null) continue;
+    moved.set(u.id, {
+      startSec: Math.max(0, u.startSec ?? clip.startSec),
+      trackId: u.trackId ?? clip.trackId,
+    });
+  }
+  if (moved.size === 0) return ok(doc);
+  const nextClips = doc.clips.map((c) => {
+    const m = moved.get(c.id);
+    // ⚠️ **変わらないなら同じものを返す**（作り直すと「何も変わらない」の判定が効かず、
+    // 空振りの取り消しを積む）。
+    if (!m || (m.startSec === c.startSec && m.trackId === c.trackId)) return c;
+    return { ...c, startSec: m.startSec, trackId: m.trackId };
+  });
+  // **最後の並び**で、動かした帯それぞれを確かめる（列の事情は置くときと同じ述語）。
+  for (const [id] of moved) {
+    const c = nextClips.find((x) => x.id === id) as TimelineClip;
+    const trackIssue = trackPlacementIssue(doc, c.trackId, trackKindForClip(c.kind));
+    // 隠した列は「新しく入れる」ときだけ断る（元の列に留まるなら通す＝`placementIssue` と同じ規則）。
+    const original = doc.clips.find((x) => x.id === id) as TimelineClip;
+    if (trackIssue && !(trackIssue === EDIT_BLOCKED.hiddenTrack && c.trackId === original.trackId)) {
+      return blocked(trackIssue);
+    }
+    if (!isFreeSpan(nextClips, c.trackId, c.startSec, c.durationSec, c.id)) return blocked(EDIT_BLOCKED.overlap);
+  }
+  // 何も変わらないなら同じ文書を返す（空振りの取り消しを積まない）。
+  if (nextClips.every((c, i) => c === doc.clips[i])) return ok(doc);
+  // 連動している字幕は読み上げに合わせて動く（`withBoundSubtitles` と同じ約束）。
+  let out: TimelineProject = { ...doc, clips: nextClips };
+  for (const [id] of moved) {
+    const before = doc.clips.find((c) => c.id === id) as TimelineClip;
+    const after = out.clips.find((c) => c.id === id) as TimelineClip;
+    const r = withBoundSubtitles(out, doc, before, { startSec: after.startSec, durationSec: after.durationSec });
+    if (!r.ok) return r;
+    out = r.doc;
+  }
+  return ok(out);
 }
 
 /**
