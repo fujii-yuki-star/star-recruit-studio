@@ -41,6 +41,7 @@ import type { Group } from '../group/types';
 import type { Template } from '../template/types';
 import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
+import { normalizeDeg } from '../constants';
 
 /** 焼き出す範囲の種別（ADR-0032 決定17）。文字列直書きを避ける（§2-7）。 */
 export const BAKE_RANGE_KIND = {
@@ -535,10 +536,6 @@ function rotationShift(deg: number, dy: number): { dx: number; dy: number } {
   return { dx: Math.sin(rad) * dy, dy: (1 - Math.cos(rad)) * dy };
 }
 
-/** 角度を 0〜360 未満へ（グループの回転は加算されるだけなので合成値が 360 以上になりうる＝schema が拒む）。 */
-function normalizeDeg(deg: number): number {
-  return ((deg % 360) + 360) % 360;
-}
 
 /**
  * 場面形式プロジェクトからタイムラインプロジェクトを焼き出す（片道・ADR-0032）。純粋関数。

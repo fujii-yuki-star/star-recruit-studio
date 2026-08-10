@@ -18,7 +18,7 @@ import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/ke
 import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, moveClipIssue, placeableAudioTracks, placeableVisualTracks, trimClipIssue, visualPlacementIssue } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { EditBlockedReason } from "../../domain/timeline/edit";
-import { dimsForOrientation } from "../../domain/constants";
+import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
@@ -118,6 +118,7 @@ import { FitSelect } from "../components/FitSelect";
 import type { CropAlignX, CropAlignY } from "../../domain/enums";
 import type { Asset } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
+import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
 
 interface TimelineProjectScreenProps {
   onNavigate: (screen: ScreenId) => void;
@@ -293,7 +294,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, trimClipById, setEditBlocked, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, trimClipById, setEditBlocked, setSelectedClipBox, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -1073,6 +1074,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
 
   const trackOf = (trackId: string) => doc?.tracks.find((t) => t.id === trackId);
+  /**
+   * 選んだ部品の**箱**（#685）。**箱を持てる部品だけ**（音・読み上げに位置は無い／見た目パターンの
+   * クリップは枠そのもの＝幾何を持たない）＝出す条件は domain の `setClipBox` が断る条件と同じもの。
+   */
+  const selectedBox = selected && canHaveBox(selected.kind) && doc
+    ? resolveClipBox(selected, dimsForOrientation(doc.videoSettings.aspectRatio))
+    : null;
   /** 掴めるか（#686 レビュー）。**見た目（`cursor`）と、掴む処理を始めるかが同じものを見る**。 */
   const grabbableClip = (c: TimelineClip): boolean => !exporting && !trackOf(c.trackId)?.locked;
   /**
@@ -1743,6 +1751,36 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 inputStyle={{ width: 90 }}
               />
             </div>
+            {/* **置いた部品の位置・大きさ・向き**（#685・ADR-0034 決定6）。
+                ⚠️ 出す値は**解決した箱**（`resolveClipBox`）＝箱は未指定だと画面いっぱいなので、
+                持っている値だけ出すと空欄になり「動かせない」に見える。編集すると箱ぜんぶを書き込む。
+                言い方と並びは**場面編集の自由配置と同じ**（同じ概念を画面で別の言い方にしない・ADR-0026②）。
+                ⚠️ **重ね順（前へ／奥へ）は出さない**＝この形式の重ね順は**列の並びだけ**（決定17）。 */}
+            {/* ⚠️ **節にする**（#685 レビュー）＝時間の欄（開始・長さ）とひと続きに並べると、
+                「長さ（秒）」の下に「幅」が来て**どれが秒でどれが画面の座標か読み取れない**。
+                同じ空間の話である「切り抜き」は既に節なので、揃えないと同じ画面で流儀が割れる。 */}
+            {selectedBox && (
+              <CollapsibleSection key={`box-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="box" title="位置・大きさ" defaultOpen>
+                <div className="row gap-sm">
+                  <NumberField label="横位置" value={selectedBox.x} {...editGuard()} onChange={(v) => setSelectedClipBox({ x: v })} inputStyle={{ width: 90 }} />
+                  <NumberField label="縦位置" value={selectedBox.y} {...editGuard()} onChange={(v) => setSelectedClipBox({ y: v })} inputStyle={{ width: 90 }} />
+                </div>
+                <div className="row gap-sm">
+                  <NumberField label="幅" value={selectedBox.w} min={MIN_BOX_SIZE_PX} {...editGuard()} onChange={(v) => setSelectedClipBox({ w: v })} inputStyle={{ width: 90 }} />
+                  <NumberField label="高さ" value={selectedBox.h} min={MIN_BOX_SIZE_PX} {...editGuard()} onChange={(v) => setSelectedClipBox({ h: v })} inputStyle={{ width: 90 }} />
+                  <NumberField label="角度" value={selectedBox.rotation ?? 0} min={ROTATION_DEG_MIN} max={ROTATION_DEG_MAX} {...editGuard()} onChange={(v) => setSelectedClipBox({ rotation: v })} inputStyle={{ width: 90 }} />
+                </div>
+              </CollapsibleSection>
+            )}
+            {/* ⚠️ **欄が消えるだけにしない**（#685 レビュー）＝見た目パターンの部品は枠そのものなので
+                位置の欄を出さないが、黙って消すと「壊れている／見つけられない」に見える。
+                行き先（「中身をバラす」）は実在するので、次の行動として名指しする（§2-5・決定8）。 */}
+            {selected.kind === TIMELINE_CLIP_KIND.template && (
+              <p className="text-sm text-muted">
+                この部品は見た目パターンの枠そのものです。中の位置や大きさを変えるには「中身をバラす」を使ってください。
+              </p>
+            )}
+
             <label className="field">
               <span>置く列</span>
               {/* ⚠️ **移せる列だけ**出す（#714 レビュー）。全部並べると、隠した列・種別違いの列を選べて

@@ -4,11 +4,10 @@
 import { composeGroupGeometry } from '../group/compose';
 import type { Group, GroupTransform } from '../group/types';
 import { createGroupId } from './persistence';
+import { normalizeDeg } from '../constants';
 
 /** identity 変形（新規グループの初期値）。 */
 export const IDENTITY_TRANSFORM: GroupTransform = { x: 0, y: 0, rotation: 0, scale: 1 };
-
-const normalizeDeg = (d: number): number => ((d % 360) + 360) % 360;
 
 /** 選択中の id をメンバーにした新しいグループ（identity transform）を末尾に追加し、新 group id を返す。 */
 export function createGroupFromSelection(
