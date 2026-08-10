@@ -3389,6 +3389,81 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(band("あ").className).not.toContain("timeline-clip--dragging"); // 処理も始まらない
   });
 
+  it("端送りで枠が動いた分も**落ちる時刻に足す**（#714）", () => {
+    // ⚠️ 足さないと「送られてはいるが、離すと送る前の時刻に落ちる」＝見えているものと結果が食い違う。
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    pointerDownAt(band("あ"), 1, { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 36 * 1, clientY: 0 });
+    scroll.scrollLeft = 36 * 1; // 端送りが枠を1秒ぶん動かした（指は動いていない）
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 1, clientY: 0 });
+    // 指の 1秒 ＋ 枠の 1秒 ＝ 2秒。枠の分を落とすと 1秒になる（どちらも置ける場所＝差だけを見る）。
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(2, 5);
+  });
+
+  it("「置く列」は**移せる列だけ**出す（選べたのに事後に断らない・#714 レビュー）", () => {
+    two({ tracks: [
+      { id: "track_001", kind: TRACK_KIND.visual },
+      { id: "track_002", kind: TRACK_KIND.audio },          // 種別違い
+      { id: "track_003", kind: TRACK_KIND.visual, hidden: true }, // 隠している
+      { id: "track_004", kind: TRACK_KIND.visual },          // これだけ移せる
+    ] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ 「置く列」は置く欄にもあるので、**選んだ部品の欄のもの**を取る（同名を取り違えない）。
+    const sel = [...screen.getAllByLabelText("置く列")].find(
+      (el) => (el as HTMLSelectElement).value === "track_001",
+    ) as HTMLSelectElement;
+    const ids = [...sel.options].map((o) => o.value);
+    expect(ids).toContain("track_001"); // いま載っている列は必ず残す
+    expect(ids).toContain("track_004");
+    expect(ids).not.toContain("track_002");
+    expect(ids).not.toContain("track_003");
+  });
+
+  it("掴み直してもらうときは**送りも止める**（消したゴーストが復活しない・#714 レビュー）", () => {
+    // ⚠️ 止めないと rAF が回り続け、毎フレーム「送った分でやり直す」が走って**ゴーストが戻る**＋枠も流れる。
+    const frames: Array<(t: number) => void> = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => { frames.push(cb); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", () => { frames.length = 0; });
+    try {
+      two();
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+      // jsdom は実寸を持たないので、**送れる枠**として必要な値だけ差し込む。
+      Object.defineProperty(scroll, "clientWidth", { value: 600, configurable: true });
+      Object.defineProperty(scroll, "scrollWidth", { value: 3000, configurable: true });
+      // ⚠️ jsdom は**貼り付いた要素の `scrollLeft` を動かさない**（常に 0 を返す）ので、
+      // そのままだと「送っても値が変わらない」＝止め忘れても症状が出ず**通るだけのテスト**になる。
+      let sl = 0;
+      Object.defineProperty(scroll, "scrollLeft", { get: () => sl, set: (v: number) => { sl = v; }, configurable: true });
+      scroll.getBoundingClientRect = () => ({ left: 0, top: 0, right: 600, bottom: 100, width: 600, height: 100, x: 0, y: 0, toJSON: () => ({}) });
+      pointerDownAt(band("あ"), 1, { clientX: 0, clientY: 10 });
+      fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 590, clientY: 10 }); // 右端の送る帯へ
+      expect(frames.length).toBeGreaterThan(0); // 送りが走っている
+      act(() => { useTimelineStore.getState().trimClipById("clip_001", "end", 1); }); // 外から文書が変わった
+      fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 591, clientY: 10 });
+      expect(band("あ").className).not.toContain("timeline-clip--dragging"); // ゴーストを消した
+      const before = scroll.scrollLeft;
+      act(() => { frames.splice(0).forEach((cb) => cb(1000)); }); // 次のフレームが来ても…
+      act(() => { frames.splice(0).forEach((cb) => cb(2000)); }); // （1フレーム目は dt=0 になりうる）
+      expect(scroll.scrollLeft).toBe(before); // 流れない
+      expect(band("あ").className).not.toContain("timeline-clip--dragging"); // 復活しない
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("隠した列では「同じものを足す」を**押す前に**塞ぐ（動かす・縮めるは通す）", () => {
+    two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "同じものを足す" })).toBeDisabled();
+    // ⚠️ まとめて塞ぐと**その列の中身が二度と動かせない**（行き止まり）。動かす側は通ること。
+    expect(screen.getByRole("button", { name: "後ろへ" })).not.toBeDisabled();
+  });
+
   it("Escape でやめたら元のまま（掴んだ位置に置かない）", () => {
     two();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
