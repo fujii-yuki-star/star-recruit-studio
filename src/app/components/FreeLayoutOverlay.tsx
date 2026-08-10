@@ -416,10 +416,13 @@ export function FreeLayoutOverlay({
       // 主の位置をグリッド吸着で確定し、さらに他要素の辺/中心へ吸着（要素スナップが近ければ優先）。
       const moved = moveFreeElement(drag.start, dx, dy, gridSize);
       const others = drag.otherEdges ?? [];
+      // ⚠️ **`Ctrl` を押している間は吸着を切る**（ADR-0034 決定12・Canva の型／#746-3）。
+      // 切れないと「あと少しだけずらす」ができない＝寄せたくない所でも寄ってしまう。
+      // しきい値を 0 にして**同じ関数を通す**＝切ったときだけ別の道を作らない（ガイド線も自然に消える）。
       const snap = snapToTargets(
         { x: moved.x, y: moved.y, w: drag.start.w, h: drag.start.h },
         others,
-        SNAP_THRESHOLD_PX / drag.scale, // 画面px→canvas px
+        e.ctrlKey || e.metaKey ? 0 : SNAP_THRESHOLD_PX / drag.scale, // 画面px→canvas px
       );
       // その差分を選択中の全要素へ同じだけ適用（群を崩さず一括移動）。
       const ddx = snap.x - drag.start.x;

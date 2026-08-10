@@ -3396,7 +3396,10 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
     pointerDownAt(band("あ"), 1, { clientX: 0, clientY: 0 });
     fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 36 * 1, clientY: 0 });
-    scroll.scrollLeft = 36 * 1; // 端送りが枠を1秒ぶん動かした（指は動いていない）
+    scroll.scrollLeft = 36 * 1; // 端送りが枠を1秒ぶん動かした（指は止まっている）
+    // ⚠️ 端送りは**送った各フレームで見せ直す**（`useEdgeAutoScroll` の `replay`）。ここでも再現する
+    // ＝確定は「最後に見せた値」なので、見せ直しを省くと実装より弱い筋書きになる。
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 36 * 1, clientY: 0 });
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 1, clientY: 0 });
     // 指の 1秒 ＋ 枠の 1秒 ＝ 2秒。枠の分を落とすと 1秒になる（どちらも置ける場所＝差だけを見る）。
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(2, 5);
@@ -3664,6 +3667,60 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); // 順番の終わり
     fireEvent.click(container.querySelector(".timeline-lane") as HTMLElement);
     expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // 解除が効く
+  });
+
+  /** 吸着を見るための枠（jsdom は実寸を持たないので、見えている時間帯が出るようにする）。 */
+  const withVisibleWidth = (container: HTMLElement) => {
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    Object.defineProperty(scroll, "clientWidth", { value: 900, configurable: true });
+    return scroll;
+  };
+
+  it("**他の帯の端へ吸着する**（#686 段階4・決定12）", () => {
+    two(); // clip_001=[0,3) / clip_002=[5,8)
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    withVisibleWidth(container);
+    // clip_001（長さ3）の**終わり**が clip_002 の始まり（5秒）へ寄る＝開始は 2秒ちょうどになる。
+    drag(band("あ"), 36 * 2 - 3);
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(2, 5);
+  });
+
+  it("`Ctrl` を押している間は吸着しない（あと少しだけずらせる）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    withVisibleWidth(container);
+    // ⚠️ **吸着してもしなくても置ける所**で見る（重なる所だと「断られて動かない」と区別できない）。
+    // clip_001 は長さ3。終わりが clip_002 の始まり（5秒）へ寄る手前＝開始 2秒のわずか手前。
+    const px = 36 * 2 - 3;
+    pointerDownAt(band("あ"), 1, { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: px, clientY: 0, ctrlKey: true });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: px, clientY: 0, ctrlKey: true });
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(px / 36, 5); // 吸わない
+  });
+
+  it("`Ctrl` を先に離しても**見えていた位置**に落ちる（離す順で結果を変えない）", () => {
+    // ⚠️ 離した瞬間に計算し直すと、点線が出ていなかったのに落ちた瞬間に寄る（逆順なら寄らない）。
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    withVisibleWidth(container);
+    const px = 36 * 2 - 3;
+    pointerDownAt(band("あ"), 1, { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: px, clientY: 0, ctrlKey: true }); // 吸着なし
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: px, clientY: 0 }); // ここで Ctrl を離している
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(px / 36, 5); // 見えていた位置のまま
+  });
+
+  it("吸着した先に**縦の点線**を出す（なぜ止まったかを見せる）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    withVisibleWidth(container);
+    expect(container.querySelector(".timeline-snapline")).toBeNull(); // 掴む前は出さない
+    drag(band("あ"), 36 * 2 - 3, { drop: false });
+    const line = container.querySelector(".timeline-snapline") as HTMLElement;
+    expect(line).not.toBeNull();
+    expect(line.style.left).toBe(`calc(var(--timeline-label-w) + ${36 * 5}px)`); // 寄せ先＝clip_002 の始まり
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 2 - 3, clientY: 0 });
+    expect(container.querySelector(".timeline-snapline")).toBeNull(); // 離したら消す
   });
 
   it("Escape でやめたら元のまま（掴んだ位置に置かない）", () => {

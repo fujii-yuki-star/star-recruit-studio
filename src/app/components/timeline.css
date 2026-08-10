@@ -254,6 +254,21 @@
   z-index: 3; /* クリップ（1）・行ラベル（2）より前面＝どのレーンでも見える */
   pointer-events: none; /* 線でクリックを奪わない（シークはルーラーが受ける） */
 }
+/**
+ * 吸着した先の線（#686 段階4・決定12）。**点線**にするのは再生位置の実線と**役割が違う**から
+ * （あちらは「いまの時刻」・こちらは「そこへ揃えた」）＝同じ見た目にすると2本の意味が混ざる。
+ * 掴んでいる間しか出ないので、頭のつまみ（`::before`）は持たない。
+ */
+.timeline-snapline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--color-accent);
+  z-index: 4; /* 掴んでいる帯（4）と同じ段＝運んでいる帯に隠れない */
+  pointer-events: none;
+}
+
 .timeline-playhead::before {
   content: "";
   position: absolute;

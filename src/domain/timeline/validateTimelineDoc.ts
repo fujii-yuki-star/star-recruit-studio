@@ -34,11 +34,23 @@ export function trackKindForClip(kind: TimelineClipKind): TrackKind {
 }
 
 /**
+ * 「接している」とみなす幅（秒）。**文書が保持している精度そのもの**＝端の編集は 1マイクロ秒より
+ * 細かい桁を落とす（`applyClipEdge` の `SEC_PRECISION`）ので、それより細かいずれは**書き分けられない**。
+ * 30fps の 1/33000 フレーム＝どの絵にも音にも影響しない。
+ */
+const TOUCHING_EPSILON_SEC = 1e-6;
+
+/**
  * 2つの時間の区間が重なるか（11 §8 V24）。区間は半開 `[start, end)`＝**端が接するのは重ならない**。
  * 検証（重なりの警告）と編集（置けるかの判定）が**同じ述語**を使う（境界の扱いを2か所に書かない）。
+ *
+ * ⚠️ **1マイクロ秒までは「接している」とみなす**（#686 段階4）。指の位置から出た時刻は15桁あるのに
+ * 長さは 1µs へ丸めて保存するので、**ぴったり隣へ寄せたはずの端が数十兆分の1秒だけはみ出す**。
+ * 許容が無いと、吸着で隣にくっつけるトリムの **44.5%** が「同じ列で時間が重なります」で断られた
+ * （px を総当たりして実測）。⚠️ 見た目も出力も同じなのに操作だけ断られる、を作らない（ADR-0026④）。
  */
 export function spansOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
-  return aStart < bEnd && bStart < aEnd;
+  return aStart < bEnd - TOUCHING_EPSILON_SEC && bStart < aEnd - TOUCHING_EPSILON_SEC;
 }
 
 /** 読み上げクリップか（音の出どころが「中身」＝素材でも同梱BGMでもない・#628）。 */
