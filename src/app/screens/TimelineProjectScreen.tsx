@@ -995,6 +995,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // ⚠️ 分けるは**押せる条件を先に見る**（キーには「押せない見た目」が無いので、ここで断りを立てる）。
     // 見る条件はボタンと同じもの（`splitClipIssue`＋再生中）＝キーだけ通る道を作らない。
     splitRef.current = () => {
+      // 断る順は**ボタンの `editGuard` と同じ**（固定 → 書き出し中 → その入口の事情）。
+      if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked); return; }
+      if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting); return; }
       if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing); return; } // 位置を使う操作＝再生中は断る（決定21）
       if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.notFound); return; }
       const issue = splitClipIssue(doc, selected.id, playheadSec);
@@ -1442,6 +1445,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const splitExtra = (): { disabled?: boolean; hint?: string } => {
     if (!doc || !selected) return { disabled: true, hint: "分ける部品を選んでください" };
+    // ⚠️ **再生中もここで断る**（#750 レビュー）＝ボタン・`Ctrl+K` は断るのに右クリックだけ通ると、
+    // **走っている再生位置で分割が確定**する（同じ操作の結果が毎回変わる・ADR-0032 決定21）。
+    if (isPlaying) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.playing] };
     const issue = splitClipIssue(doc, selected.id, playheadSec);
     return issue ? { disabled: true, hint: editBlockedMessage[SPLIT_BLOCKED_REASON[issue]] } : {};
   };
@@ -1929,7 +1935,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button
                 className="btn btn-secondary"
                 onClick={() => splitSelectedClip(playheadSec)}
-                {...editGuard({ ...splitExtra(), disabled: splitExtra().disabled || isPlaying, hint: isPlaying ? playingHint : splitExtra().hint })}
+                {...editGuard(splitExtra())}
               >
                 ここで分ける
               </button>

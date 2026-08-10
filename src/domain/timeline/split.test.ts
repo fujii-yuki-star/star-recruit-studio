@@ -1,6 +1,7 @@
 // 帯を再生位置で分ける（#686 段階4・ADR-0034 決定16）。
 import { describe, expect, it } from 'vitest';
 import { splitClip, splitClipIssue, splitKeyframes, splitVolumePoints, SPLIT_BLOCKED } from './split';
+import { VOLUME_POINTS_MAX } from '../constants';
 import { volumeAt } from './audio';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
@@ -149,5 +150,82 @@ describe('splitVolumePoints（音量の変化を分ける）', () => {
 
   it('点が無ければ何も持たせない（空の入れ物を作らない）', () => {
     expect(splitVolumePoints(undefined, 4, undefined)).toEqual({});
+  });
+});
+
+// #750 レビューで出た穴（2名のレビュアが独立に指摘したものを含む）。
+describe('分けたときに持ち越すもの（#750 レビュー）', () => {
+  const audio = (over: Partial<TimelineClip> = {}): TimelineClip =>
+    ({ id: 'clip_001', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 10, assetId: 'asset_001', ...over }) as TimelineClip;
+  const withAudio = (clip: TimelineClip, over: Partial<TimelineProject> = {}) => doc({
+    assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'assets/a.mp3' }],
+    clips: [clip],
+    ...over,
+  });
+
+  it('🔴 **置いたばかりの音**でも後半は続きから鳴る（曲の頭へ戻らない）', () => {
+    // ⚠️ 「`sourceStartSec` か `speed` を持っていたら」という条件だと、既定の音（両方とも持たない）が
+    // 漏れて**後半が曲の頭から鳴り直す**。持っているかどうかでなく**種類**で決める。
+    const r = split(withAudio(audio()), 'clip_001', 4);
+    expect(r.ok && r.doc.clips[1].sourceStartSec).toBeCloseTo(4, 6);
+  });
+
+  it('素材の時間を持たない種類には書かない（意味の無い項目を増やさない）', () => {
+    const r = split(doc({ clips: [text()] }), 'clip_001', 4);
+    expect(r.ok && 'sourceStartSec' in r.doc.clips[1]).toBe(false);
+  });
+
+  it('🔴 **後半もまとまりに入る**（分割点から先だけフェードや変形が外れない）', () => {
+    const d = doc({
+      clips: [text(), text({ id: 'clip_002', startSec: 0, durationSec: 10 })],
+      groups: [{ id: 'group_001', members: ['clip_001', 'clip_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+    });
+    const r = split(d, 'clip_001', 4);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.doc.groups?.[0].members).toContain(r.newClipId);
+    expect(r.doc.groups?.[0].members).toContain('clip_001'); // 前半も残る
+  });
+
+  it('まとまりに入っていない帯は、まとまりを増やさない', () => {
+    const d = doc({
+      clips: [text(), text({ id: 'clip_002', startSec: 20, durationSec: 5 })],
+      groups: [{ id: 'group_001', members: ['clip_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+    });
+    const r = split(d, 'clip_001', 4);
+    expect(r.ok && r.doc.groups?.[0].members).toEqual(['clip_002']);
+  });
+
+  it('🟡 音量の点が上限を超えるなら断る（置けたのに書き出しで断られる、を作らない）', () => {
+    const pts = Array.from({ length: VOLUME_POINTS_MAX }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 }));
+    const d = withAudio(audio({ volumePoints: pts }));
+    // 全部が前半側＝境界の点を足すと上限+1。
+    expect(splitClipIssue(d, 'clip_001', 9)).toBe(SPLIT_BLOCKED.volumePointsFull);
+  });
+
+  it('🟡 **直線でない動きの区間の中**では断る（軌跡が黙って変わる）', () => {
+    const d = doc({
+      clips: [text()],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [
+        { timeSec: 0, x: 0, easing: 'ease-in' },
+        { timeSec: 10, x: 100 },
+      ] }],
+    });
+    expect(splitClipIssue(d, 'clip_001', 4)).toBe(SPLIT_BLOCKED.curvedEasing);
+  });
+
+  it('直線の動き・キーフレームちょうどなら通す（切っても軌跡が変わらない）', () => {
+    const straight = doc({
+      clips: [text()],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [
+        { timeSec: 0, x: 0 }, { timeSec: 4, x: 40, easing: 'ease-in' }, { timeSec: 10, x: 100 },
+      ] }],
+    });
+    expect(splitClipIssue(straight, 'clip_001', 4)).toBeNull(); // 区間の境目
+    const linear = doc({
+      clips: [text()],
+      animations: [{ id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, x: 0 }, { timeSec: 10, x: 100 }] }],
+    });
+    expect(splitClipIssue(linear, 'clip_001', 4)).toBeNull();
   });
 });

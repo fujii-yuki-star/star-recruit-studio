@@ -4,19 +4,27 @@
 // - 絵（見た目パターン・素材・文字・図形・字幕）＝**時間を切るだけ**。
 //   ⚠️ ただし**動き（キーフレーム）は再基準化し、分割点の値を両端に焼く**
 //   （後半の時刻は自分の先頭からの秒なので、そのまま持ち越すと動きが飛ぶ）。
+//   ⚠️ **焼けるのは「そのときの値」だけで、カーブの形は持ち越せない**ので、**直線でない動きの
+//   区間の中では分けない**（断る）。値だけ合っていて軌跡が別物、を黙って作らない（#753 で本筋を実装）。
 // - 音＝**`sourceStartSec` を進める**（素材のどこから鳴らすかが後半でずれる）。
 //   **フェードは前後に残す**（入りは前半・抜けは後半＝真ん中に切れ目の音を作らない）。
 // - **読み上げは切れない**（文と音がずれる）。**連動している字幕も切れない**（読み上げが時間を決める）。
 //
 // 全列いっせいのブレード分割は**入れない**（決定16）＝対象は「選んでいる1つ」だけ。
 import { createAnimationId, createClipId } from '../project/persistence';
-import { interpolateKeyframes } from '../project/keyframes';
+import { easingCurveOf, interpolateKeyframes } from '../project/keyframes';
 import { TIMELINE_CLIP_KIND } from '../enums';
-import { TIMELINE_MIN_CLIP_SEC } from '../constants';
+import { TIMELINE_MIN_CLIP_SEC, VOLUME_POINTS_MAX } from '../constants';
 import type { Keyframe } from '../project/types';
 import type { ClipAnimation, TimelineClip, TimelineProject } from './types';
 import { EDIT_BLOCKED } from './edit';
 import type { EditBlockedReason } from './edit';
+
+/**
+ * **素材の時間を持つ種類**（分けたら頭出しを進める相手）。文字・図形・字幕・見た目パターンは
+ * 素材の時間を持たないので進めない（意味の無い項目を書かない）。
+ */
+const USES_SOURCE_TIME = new Set<string>([TIMELINE_CLIP_KIND.audio, TIMELINE_CLIP_KIND.slot]);
 
 /** 分けられない理由（`null`＝分けられる）。 */
 export const SPLIT_BLOCKED = {
@@ -28,6 +36,10 @@ export const SPLIT_BLOCKED = {
   unsplittable: 'unsplittable',
   /** 切れ目が帯の外／どちらかが短くなりすぎる。 */
   outside: 'outside',
+  /** 音量の変化の点が上限に達している（境界の点を焼くと超える）。 */
+  volumePointsFull: 'volumePointsFull',
+  /** 直線でない動きの**区間の途中**（カーブの形を持ち越せない）。 */
+  curvedEasing: 'curvedEasing',
 } as const;
 export type SplitBlockedReason = (typeof SPLIT_BLOCKED)[keyof typeof SPLIT_BLOCKED];
 
@@ -45,7 +57,38 @@ export function splitClipIssue(doc: TimelineProject, clipId: string, atSec: numb
   const tail = clip.startSec + clip.durationSec - atSec;
   // **どちらも最小の長さを満たすときだけ**（片方が潰れる切り方をさせない）。
   if (head < TIMELINE_MIN_CLIP_SEC || tail < TIMELINE_MIN_CLIP_SEC) return SPLIT_BLOCKED.outside;
+  // ⚠️ **音量の点は上限を超えない**（#750 レビュー）＝境界の点を両端に焼くので、上限まで置いた帯を
+  // 分けると片側が1つ超える。編集の入口（`volumePointEdit`）は「置けたのに書き出しで断られる」を
+  // 作らないよう上限で断っているので、**分けるときだけ破らない**。
+  const pts = clip.volumePoints ?? [];
+  if (pts.length > 0) {
+    const before = pts.filter((p) => p.timeSec < head).length + 1;
+    const after = pts.filter((p) => p.timeSec > head).length + 1;
+    if (before > VOLUME_POINTS_MAX || after > VOLUME_POINTS_MAX) return SPLIT_BLOCKED.volumePointsFull;
+  }
+  // ⚠️ **直線でない動きの途中では分けない**（#750 レビュー）。境界に焼くのは「そのときの値」だけで、
+  // **カーブの形は持ち越せない**（部分曲線を焼き直す必要がある＝#753）。断らずに切ると
+  // **速さの変わり方が黙って変わる**（値だけ合っていて軌跡が別物）。直線の区間・キーフレームの上は通す。
+  const own = (doc.animations ?? []).find((a) => a.targetId === clipId);
+  if (own && crossesCurvedSegment(own.keyframes, head)) return SPLIT_BLOCKED.curvedEasing;
   return null;
+}
+
+/**
+ * その時刻が**直線でない動きの区間の中**を通るか（#750 レビュー）。
+ * 区間の境目（キーフレームちょうど）や、直線の区間なら `false`＝分けても軌跡が変わらない。
+ */
+export function crossesCurvedSegment(keyframes: readonly Keyframe[], atSec: number): boolean {
+  const sorted = [...keyframes].sort((a, b) => a.timeSec - b.timeSec);
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const from = sorted[i];
+    const to = sorted[i + 1];
+    if (!(atSec > from.timeSec && atSec < to.timeSec)) continue;
+    const curve = easingCurveOf(from.easing);
+    // `null`＝3次ベジェで表せない（`ease-in-out`）／直線 `[0,0,1,1]` 以外＝カーブ。
+    return curve == null || !(curve[0] === 0 && curve[1] === 0 && curve[2] === 1 && curve[3] === 1);
+  }
+  return false;
 }
 
 /**
@@ -129,7 +172,9 @@ export function splitClip(
     ...(vol.tail ? { volumePoints: vol.tail } : {}),
     // **素材のどこから鳴らすか／映すか**を進める。速度が掛かっているぶんも進む
     // （置いた長さ × 速度 ＝ 使う素材の長さ・`11 §7.6.3.2`）。
-    ...(clip.sourceStartSec != null || clip.speed != null
+    // ⚠️ **持っているかどうかで決めない**（#750 レビュー 🔴）＝置いたばかりの音は両方とも持たないので、
+    // 条件にすると**後半が曲の頭から鳴り直す**。素材の時間を持つ種類なら**必ず書く**。
+    ...(USES_SOURCE_TIME.has(clip.kind)
       ? { sourceStartSec: (clip.sourceStartSec ?? 0) + headSec * (clip.speed ?? 1) }
       : {}),
   };
@@ -147,7 +192,19 @@ export function splitClip(
     animations = nextAnims;
   }
 
-  return { ok: true, doc: { ...doc, clips, ...(animations ? { animations } : {}) }, newClipId: newId };
+  // ⚠️ **後半もまとまりに入れる**（#750 レビュー・3観点が独立に指摘）。描画はメンバーの id で
+  // グループの変形・不透明度・**合成の単位**を解くので、入れないと**分割点から先だけ**
+  // フェードや変形が外れる＝「切っただけで絵が変わる」（決定16 の核心）。
+  // 消す側（`removeClips`）は参照を片づけるのに、分ける側が足さないのは非対称でもあった。
+  const groups = doc.groups?.map((g) =>
+    g.members.includes(clipId) ? { ...g, members: [...g.members, newId] } : g,
+  );
+
+  return {
+    ok: true,
+    doc: { ...doc, clips, ...(groups ? { groups } : {}), ...(animations ? { animations } : {}) },
+    newClipId: newId,
+  };
 }
 
 /** `undefined` の項目を落とす（schema は `additionalProperties:false`＝未定義の項目を書かない）。 */
@@ -166,4 +223,6 @@ export const SPLIT_BLOCKED_REASON: Record<SplitBlockedReason, EditBlockedReason>
   [SPLIT_BLOCKED.locked]: EDIT_BLOCKED.locked,
   [SPLIT_BLOCKED.unsplittable]: EDIT_BLOCKED.unsplittable,
   [SPLIT_BLOCKED.outside]: EDIT_BLOCKED.splitOutside,
+  [SPLIT_BLOCKED.volumePointsFull]: EDIT_BLOCKED.volumePointsFull,
+  [SPLIT_BLOCKED.curvedEasing]: EDIT_BLOCKED.curvedEasing,
 };

@@ -647,8 +647,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc || selectedClipIds.length !== 1) return;
     const r = splitClip(doc, selectedClipIds[0], atSec, volumeAt);
     if (!r.ok) { set({ editBlocked: SPLIT_BLOCKED_REASON[r.reason] }); return; }
-    commit(set, get, r.doc);
-    set({ selectedClipIds: [r.newClipId] }); // 続きを触れる状態にして返す
+    // ⚠️ 選択の差し替えは **`commit` に載せる**（#750 レビュー）。別に `set` すると、`commit` が
+    // 断ったとき（書き出し中）でも**存在しない id が選択に残り**、以後の操作が「見つかりません」で
+    // 空振りする（嘘の理由）。`explodeClip` と同じ形。
+    commit(set, get, r.doc, { selectedClipIds: [r.newClipId] });
   },
   setClipBoxesFor: (updates) => {
     const doc = get().doc;

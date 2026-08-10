@@ -3756,11 +3756,31 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
   it("再生中は分けられない（位置を使う操作＝結果が毎回変わる・決定21）", () => {
     two();
     useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 2, isPlaying: true });
-    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByRole("button", { name: "ここで分ける" })).toBeDisabled();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(2);
     expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.playing);
+    // ⚠️ **右クリックの道も塞ぐ**（#750 レビュー）＝ここだけ素通しだと、走っている再生位置で
+    // 分割が確定する。3つの入口が同じ材料を見ていることを、実際にメニューを開いて確かめる。
+    fireEvent.contextMenu(container.querySelector(".timeline-clip") as HTMLElement);
+    const item = screen.getByRole("menuitem", { name: "ここで分ける" });
+    expect(item).toBeDisabled();
+  });
+
+  it("書き出し中は `Ctrl+K` でも分けない（存在しない部品を選んだ状態にしない）", () => {
+    two();
+    useTimelineStore.setState({
+      selectedClipIds: ["clip_001"], playheadSec: 2,
+      exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false },
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(2); // 増えない
+    // ⚠️ 断られたのに選択だけ差し替わると、**存在しない id** が残って以後の操作が
+    // 「見つかりません」（嘘の理由）で空振りする。
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.exporting);
   });
 
   it("Escape でやめたら元のまま（掴んだ位置に置かない）", () => {

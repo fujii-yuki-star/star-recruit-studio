@@ -906,3 +906,32 @@ describe('見た目パターンを置く（#724）', () => {
     expect(useTimelineStore.getState().editBlocked).toBe('TIMELINE_EDIT_TRACK_KIND');
   });
 });
+
+// 分ける（#686 段階4）。断られたのに選択だけ差し替わる、を作らない（#750 レビュー）。
+describe('分ける（#750 レビュー）', () => {
+  const one = () => doc({
+    clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 10, x: 0, y: 0, w: 10, h: 10, text: 'あ' }],
+  });
+
+  it('書き出し中は**選択も差し替えない**（存在しない部品を選んだ状態にしない）', () => {
+    useTimelineStore.setState({
+      doc: one(), selectedClipIds: ['clip_001'], playheadSec: 4,
+      exportRun: { phase: 'rendering', percent: 0, message: null, cancelling: false },
+    });
+    useTimelineStore.getState().splitSelectedClip(4);
+    const st = useTimelineStore.getState();
+    expect(st.doc!.clips).toHaveLength(1); // 分かれない
+    // ⚠️ 選択を `commit` の外で差し替えると、断られたときに**存在しない id** が残り、
+    // 以後の操作が「見つかりません」（嘘の理由）で空振りする。
+    expect(st.selectedClipIds).toEqual(['clip_001']);
+    useTimelineStore.setState({ exportRun: { ...st.exportRun, phase: 'idle' } });
+  });
+
+  it('通ったときは後半を選ぶ（続きを触れる状態にして返す）', () => {
+    useTimelineStore.setState({ doc: one(), selectedClipIds: ['clip_001'], playheadSec: 4 });
+    useTimelineStore.getState().splitSelectedClip(4);
+    const st = useTimelineStore.getState();
+    expect(st.doc!.clips).toHaveLength(2);
+    expect(st.selectedClipIds).toEqual([st.doc!.clips[1].id]);
+  });
+});
