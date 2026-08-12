@@ -15,6 +15,7 @@ import { audioSourceKey, audioSourcesOf } from "../../domain/timeline/audio";
 import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infrastructure/projectFs";
 import { createProjectId } from "../../domain/project/persistence";
 import { useProjectStore } from "./projectStore";
+import { onProjectDeleted } from "./projectDeletion";
 import { createEmptyTimelineProject } from "../../domain/timeline/create";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -127,7 +128,8 @@ export type ExportStartBlock = {
 export function exportStartBlock(input: {
   doc: TimelineProject | null;
   isImporting: boolean;
-  generatingVoiceClipId: string | null;
+  /** 声を作る回が走っているか（#755）。⚠️ **印ではなく回**＝印は開き直しで消える。 */
+  voiceRunning: boolean;
   knownTemplateIds: Set<string>;
   otherExportRunning: boolean;
   canExportHere: boolean;
@@ -135,7 +137,9 @@ export function exportStartBlock(input: {
   const S = EXPORT_BLOCK_SOURCE;
   if (!input.doc) return null; // 開いていないときはボタン自体が無い
   if (input.isImporting) return { message: EXPORT_BLOCKED_IMPORTING_MESSAGE, phase: P.error, source: S.situation };
-  if (input.generatingVoiceClipId != null) return { message: VOICE_BUSY_EXPORT_MESSAGE, phase: P.error, source: S.situation };
+  // ⚠️ 見るのは**走っている回**（`voiceRunning`）＝印（`generatingVoiceClipId`）は開き直しで消えるので、
+  // それだけを見ると**合成が走ったまま書き出しを始められる**（`/canon-check`）。
+  if (input.voiceRunning) return { message: VOICE_BUSY_EXPORT_MESSAGE, phase: P.error, source: S.situation };
   if (input.otherExportRunning) return { message: OTHER_EXPORT_RUNNING_MESSAGE, phase: P.error, source: S.situation };
   const blockers = timelineExportBlockers(input.doc, { knownTemplateIds: input.knownTemplateIds });
   if (blockers.length > 0) return { message: exportBlockedMessage[blockers[0].code], phase: P.error, source: S.content };
@@ -196,6 +200,12 @@ export interface TimelineState {
    */
   generatingVoiceClipId: string | null;
   /**
+   * いま走っている「声を作る」回の番号（#755・内部）。**自分の回のときだけ**印を下ろす
+   * ＝前の回が着地して、**走っている今の回の印を横取りする**のを防ぐ（横取りされると
+   * 書き出しの締めが外れ、次の着地は `commit` に断られて作った声が消える）。
+   */
+  _voiceRun: number | null;
+  /**
    * 連続入力を1つの取り消しにまとめている深さ（#708）。**保存しない**（画面の都合であって動画の中身ではない）。
    * 場面形式の `_historyGroupDepth` と同じ仕組み＝同じ概念を同じ挙動にする（ADR-0026②）。
    */
@@ -227,6 +237,8 @@ export interface TimelineState {
   createTimelineProject: (projectName: string, aspectRatio?: Orientation) => Promise<string>;
   openTimelineProject: (projectId: string) => Promise<void>;
   closeTimelineProject: () => void;
+  /** 消された動画を手放す（#755）＝以後どこからも書かない。走行中の印は残す。 */
+  discardDeletedProject: (projectId: string) => void;
   setPlayhead: (sec: number) => void;
   selectClip: (clipId: string, additive?: boolean) => void;
   /** まとめて選ぶ（`Ctrl+A` の全選択など）。存在しない id は落とす＝消えたものを選んだままにしない。 */
@@ -469,6 +481,12 @@ function releaseSaveGuard(): void {
  * 開いていない状態（閉じる・開き直しの初期値）。**毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、
  * 将来その場書き換えが入ったときに別の文書へ選択が漏れる（構造で防ぐ）。
  */
+/**
+ * 声を作る**回**の番号（#755）。⚠️ `emptyState` には入れない＝開き直しで 0 に戻ると、
+ * まだ走っている前の回と**同じ番号**になり、印を横取りする。store の生きている間ずっと増える。
+ */
+let voiceRunSeq = 0;
+
 function emptyState() {
   return {
     doc: null,
@@ -496,6 +514,10 @@ function emptyState() {
 
 export const useTimelineStore = create<TimelineState>((set, get) => ({
   ...emptyState(),
+  // ⚠️ **開き直しでも消さない**（`/canon-check`）＝`emptyState` に入れると、走っている合成が
+  // 見えなくなって**書き出しを始められる**。着地は `commit` に断られ、その直後の保存が
+  // **声の入っていない文書**を書く＝作った声が wav だけ残って消える。
+  _voiceRun: null,
 
   createTimelineProject: async (projectName, aspectRatio) => {
     // 書き出し中は作らない（開く・閉じると同じ扱い＝走っている間は入力を固定・ADR-0032）。
@@ -581,6 +603,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 読込の失敗理由は文書側（TimelineLoadError）が「次の行動」つきで持っている。それ以外は既定文言。
       set({ ...emptyState(), loadError: e instanceof TimelineLoadError ? e.message : LOAD_FAILED_MESSAGE });
     }
+  },
+
+  /**
+   * **消された動画を手放す**（#755）。持ったままだと、非同期の着地（声の完成・素材の取り込み）が
+   * 保存して**フォルダごと作り直し、一覧へ復活する**（素材と声は消えているので開いても壊れている）。
+   *
+   * ⚠️ **走行中の印（`exportRun`）は残す**＝ここで初期化すると書き出し中の締めが外れ、
+   * 二重に始められる。書き出しの入力は始めた時点で退避済みなので、文書を手放しても走り切る。
+   */
+  discardDeletedProject: (projectId) => {
+    if (get().doc?.projectId !== projectId) return; // 別の動画を消しただけ＝触らない
+    releaseSaveGuard();
+    set({ ...emptyState(), exportRun: get().exportRun });
   },
 
   closeTimelineProject: () => {
@@ -857,13 +892,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const clip = doc.clips.find((c) => c.id === clipId);
     if (!clip || clip.kind !== TIMELINE_CLIP_KIND.voice || !clip.voice) return;
     if (clip.voice.text.trim().length === 0) return; // 空の文では鳴らない（V28 が案内済み）
-    if (get().generatingVoiceClipId != null) return; // 連打・再入で二重に作らない
+    if (get()._voiceRun != null) return; // 連打・再入で二重に作らない（開き直しても走っている回は続く）
     // 書き出し中は始めない＝作れても文書へ入れられず（`commit` が断る）、作った声を捨てることになる。
     if (isTimelineExportBusy(get().exportRun.phase)) {
       set({ voiceError: VOICE_EXPORTING_MESSAGE });
       return;
     }
-    set({ voiceError: null, generatingVoiceClipId: clipId });
+    voiceRunSeq += 1;
+    const myRun = voiceRunSeq;
+    /** 自分の回のときだけ印を下ろす（前の回が今の回の印を横取りしない・#755）。 */
+    const clearIfMine = (extra: Partial<TimelineState> = {}): void => {
+      set(get()._voiceRun === myRun ? { ...extra, generatingVoiceClipId: null, _voiceRun: null } : extra);
+    };
+    set({ voiceError: null, generatingVoiceClipId: clipId, _voiceRun: myRun });
     // 合成に渡した設定。**完了時にこれと今の設定を比べる**＝作っている間に文・声・話し方を変えたら
     // その結果は使わない（鳴っている声と表示が食い違う状態を作らない）。
     const input = { text: clip.voice.text, ...resolveTimelineVoice(clip.voice, doc.voiceSettings) };
@@ -879,12 +920,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         !current?.voice ||
         !sameSynthInput(input, { text: current.voice.text, ...resolveTimelineVoice(current.voice, now.voiceSettings) })
       ) {
-        set({ generatingVoiceClipId: null });
+        clearIfMine();
         return;
       }
       if (!voicePath) {
         setVoiceStatus(set, get, clipId, NARRATION_STATUS.failed);
-        set({ voiceError: VOICE_SAVE_FAILED_MESSAGE, generatingVoiceClipId: null });
+        clearIfMine({ voiceError: VOICE_SAVE_FAILED_MESSAGE });
         void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
         return;
       }
@@ -905,11 +946,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
         ...(sized && !sized.ok ? { editBlocked: sized.reason } : {}),
       }, { outsideGroup: true });
-      set({
-        generatingVoiceClipId: null,
-        // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
-        ...(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE }),
-      });
+      // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
+      clearIfMine(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE });
       // ⚠️ **自分から保存する**（#751）。自動保存は**画面**が持っているので、作っている最中に
       // 画面を離れると、着地したぶんを**誰も書かない**＝開き直すと作った声と合わせた長さが
       // 黙って消える（音声ファイルだけ残る）。取り込み（`runImport`）が同じ穴を同じ形で塞いでいる。
@@ -922,7 +960,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         set({ voiceError: VOICE_FAILED_MESSAGE });
         void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
       }
-      set({ generatingVoiceClipId: null });
+      clearIfMine();
     }
   },
 
@@ -1029,7 +1067,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const blocked = exportStartBlock({
       doc,
       isImporting: get().isImporting,
-      generatingVoiceClipId: get().generatingVoiceClipId,
+      voiceRunning: get()._voiceRun != null,
       knownTemplateIds: new Set(deps.templates.map((t) => t.templateId)),
       otherExportRunning: isOtherExportRunning(EXPORT_OWNER),
       canExportHere: canExport(),
@@ -1397,3 +1435,7 @@ function resolveTimelineVoice(voice: TimelineVoice, settings: VoiceSettings) {
   const speaker = voice.speaker != null && characterForSpeaker(voice.speaker) != null ? voice.speaker : null;
   return { ...resolved, speaker };
 }
+
+// 動画が消えたら、その文書を持っている間は手放す（#755）。**画面ではなく store で受ける**＝
+// 画面を離れていても効く（本番の導線は `closeTimelineProject` を通らない）。
+onProjectDeleted((projectId) => useTimelineStore.getState().discardDeletedProject(projectId));

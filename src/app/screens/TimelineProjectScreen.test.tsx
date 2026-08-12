@@ -54,6 +54,9 @@ beforeEach(() => {
   // **書き出しの状態を先に戻す**＝`closeTimelineProject` は書き出し中だと何もしない（走行中に文書を
   // 差し替えないため）。戻さないと、書き出し中にしたテストの状態が以降のテスト全部に残る。
   useTimelineStore.setState({ exportRun: { phase: "idle", percent: 0, message: null, cancelling: false } });
+  // ⚠️ **走っている「声を作る」回もテスト間で持ち越さない**（#755）。この印は文書を閉じても
+  // 消えない（合成はアプリの中で走り続けるため）＝戻さないと、以降のテスト全部で書き出しが塞がる。
+  useTimelineStore.setState({ _voiceRun: null, generatingVoiceClipId: null });
   useTimelineStore.getState().closeTimelineProject();
   useProjectStore.setState({ templates: [] });
   // 欄の配置は**アプリの設定に残る**（ADR-0033）＝テスト間で持ち越さない（前のテストの配置で描かない）。
@@ -292,7 +295,17 @@ describe("TimelineProjectScreen: 書き出しを始められない理由（#718�
 
   it("声を作っている最中は押せない（押してから断ると、作った声が捨てられる）", () => {
     ready();
-    useTimelineStore.setState({ generatingVoiceClipId: "clip_009" });
+    useTimelineStore.setState({ generatingVoiceClipId: "clip_009", _voiceRun: 1 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(exportBtn()).toBeDisabled();
+    expect(exportBtn().getAttribute("title")).toContain("声を作成中です");
+  });
+
+  it("開き直して印が消えても、**走っている回**があれば押せない（#755）", () => {
+    // ⚠️ 印（`generatingVoiceClipId`）は開き直しで消える。それだけを見ていると
+    // **合成が走ったまま書き出しを始められ**、着地は断られて作った声が wav だけ残って消える。
+    ready();
+    useTimelineStore.setState({ generatingVoiceClipId: null, _voiceRun: 1 });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(exportBtn()).toBeDisabled();
     expect(exportBtn().getAttribute("title")).toContain("声を作成中です");

@@ -240,3 +240,49 @@ describe('generateSelectedVoice', () => {
     expect(vi.mocked(MockVoiceProvider.prototype.synthesize).mock.calls[0][0]).toMatchObject({ text: 'あ', speaker: 2 });
   });
 });
+
+// 「作っている最中」の印を、前の回が横取りしない（#755）。
+describe('声を作る回の番号（#755）', () => {
+  it('前の回が着地しても、走っている今の回の印を下ろさない', async () => {
+    await open(doc());
+    // 1本目：着地を止めておく。
+    let landFirst = (): void => {};
+    vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockImplementationOnce(
+      () => new Promise((resolve) => {
+        landFirst = (): void => resolve({ audioDataUrl: 'data:audio/wav;base64,AAA', durationSec: 5 });
+      }),
+    );
+    const first = useTimelineStore.getState().generateSelectedVoice();
+    expect(useTimelineStore.getState().generatingVoiceClipId).toBe('clip_001');
+
+    // ⚠️ **本番の開き直し**を通す（`openTimelineProject`＝`emptyState`）。印は消えるが、
+    // **走っている回は消えない**（合成はアプリの中で走り続ける）。
+    await open(doc());
+    expect(useTimelineStore.getState().generatingVoiceClipId).toBeNull(); // 印は消える
+    // 走っている回が見えていれば、**2本目は始まらない**（連打・再入の関門）。
+    const before = vi.mocked(MockVoiceProvider.prototype.synthesize).mock.calls.length;
+    await useTimelineStore.getState().generateSelectedVoice();
+    expect(vi.mocked(MockVoiceProvider.prototype.synthesize).mock.calls.length).toBe(before);
+
+    // ここから先は「印を手で戻して2本目を始める」筋書き（印の横取りだけを見る）。
+    useTimelineStore.setState({ generatingVoiceClipId: null, _voiceRun: null });
+    let landSecond = (): void => {};
+    vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockImplementationOnce(
+      () => new Promise((resolve) => {
+        landSecond = (): void => resolve({ audioDataUrl: 'data:audio/wav;base64,BBB', durationSec: 4 });
+      }),
+    );
+    const second = useTimelineStore.getState().generateSelectedVoice();
+    expect(useTimelineStore.getState().generatingVoiceClipId).toBe('clip_001');
+
+    // ⚠️ 1本目が着地しても、**2本目が走っている印は残る**。下ろすと書き出しの締めが外れ、
+    // 2本目の着地は `commit` に断られて**作った声が wav だけ残って消える**。
+    landFirst();
+    await first;
+    expect(useTimelineStore.getState().generatingVoiceClipId).toBe('clip_001');
+
+    landSecond();
+    await second;
+    expect(useTimelineStore.getState().generatingVoiceClipId).toBeNull(); // 自分の回なので下ろす
+  });
+});

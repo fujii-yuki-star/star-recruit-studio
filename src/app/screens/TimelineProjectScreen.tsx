@@ -327,6 +327,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 色の面は `pointermove` ごとに値を返すので、区切りが無いと**ひと撫でで数十〜百件**の履歴が積まれ、
   // この形式は**文書まるごとのスナップショット**なので上限（50）を一撫でで食い潰す（#720）。
   const { textGroup } = useTimelineHistoryGroup();
+  /** 声を作る回が走っているか（#755）＝印は開き直しで消えるので、書き出しの締めはこちらを見る。 */
+  const voiceRunning = useTimelineStore((s) => s._voiceRun != null);
   const beginHistoryGroup = useTimelineStore((s) => s.beginHistoryGroup);
   const endHistoryGroup = useTimelineStore((s) => s.endHistoryGroup);
 
@@ -820,12 +822,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       exportStartBlock({
         doc,
         isImporting,
-        generatingVoiceClipId,
+        voiceRunning: voiceRunning,
         knownTemplateIds: new Set(templates.map((t) => t.templateId)),
         otherExportRunning: exportLockOwner != null && exportLockOwner !== EXPORT_OWNER,
         canExportHere: canExport(),
       }),
-    [doc, isImporting, generatingVoiceClipId, templates, exportLockOwner],
+    [doc, isImporting, voiceRunning, templates, exportLockOwner],
   );
   const exporting = isTimelineExportBusy(exportRun.phase);
   // 書き出しが終わったら「離れられない」理由も出しっぱなしにしない（出ている条件から導く）。
