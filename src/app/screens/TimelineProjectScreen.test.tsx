@@ -3324,6 +3324,26 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(useTimelineStore.getState().doc!.clips.find((c) => c.id === "clip_002")!.startSec).toBeCloseTo(5, 5);
   });
 
+  it("**動かない字幕**は 0秒の壁の計算に数えない（群が左へ動けなくならない）", () => {
+    // ⚠️ 連動している字幕は**連動先の読み上げが群に居るときだけ**動く。居ない字幕の位置を
+    // 床に数えると、それが 0秒に居るだけで**群ぜんぶが左へ動けなくなる**（断り文も出ない）。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 2, voice: { text: "こえ", status: "none" } },
+        // 連動先（clip_001）は**選ばない**＝この字幕は動かない。
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: "clip_001" },
+        { id: "clip_003", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 20, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_002", "clip_003"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    drag(band("あ"), -36 * 15); // 15秒ぶん左へ（20秒に居るので動ける）
+    const clips = useTimelineStore.getState().doc!.clips;
+    expect(clips.find((c) => c.id === "clip_003")!.startSec).toBeCloseTo(5, 5);
+    expect(clips.find((c) => c.id === "clip_002")!.startSec).toBe(0); // 字幕は据え置き
+  });
+
   it("まとめて動かして1つでも置けなければ**全体を動かさない**（全か無か）", () => {
     two({ clips: [
       { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" },

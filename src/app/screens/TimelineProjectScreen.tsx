@@ -1303,7 +1303,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
      */
     const shiftFor = (sec: number): number => {
       const dt = sec - clip0.startSec;
-      const starts = (groupIds ?? []).map((id) => doc0.clips.find((x) => x.id === id)?.startSec ?? 0);
+      // ⚠️ 床に数えるのは**実際に動く帯だけ**（#754 レビュー 🔴）。連動している字幕は
+      // **連動先の読み上げが群に居るときだけ**動く（居なければ時間は据え置き＝`moveClips`）。
+      // 据え置く帯の位置を数えると、その帯が 0秒に居るだけで**群ぜんぶが左へ動けなくなる**
+      // （しかも断り文も出ないので「なぜ動かないか」が分からない）。
+      const starts = (groupIds ?? [])
+        .map((id) => doc0.clips.find((x) => x.id === id))
+        .filter((c): c is TimelineClip => c != null && c.voiceClipId == null)
+        .map((c) => c.startSec);
       return starts.length > 0 ? Math.max(dt, -Math.min(...starts)) : dt;
     };
     const updatesFor = (dt: number, trackId?: string) =>
