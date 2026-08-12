@@ -121,6 +121,11 @@ interface OverlayProps {
   onBringToFront?: (id: string) => void;
   onSendToBack?: (id: string) => void;
   onDelete?: (id: string) => void;
+  /**
+   * メニューの項目ごとの**押せない理由**（#746-1）。渡さなければ押せる。
+   * ⚠️ 押せないときも**項目は出す**（消すと「同じ操作が場所によって在ったり無かったり」になる）。
+   */
+  menuGuards?: { duplicate?: { disabled?: boolean; disabledHint?: string }; delete?: { disabled?: boolean; disabledHint?: string } };
   /** テキストのインライン編集の確定（patch 相当）。**省くとインライン編集に入らない**。 */
   onChangeText?: (id: string, text: string) => void;
   /** 右クリック「編集」：その要素の kind 別エディタを開く（id とビューポート座標を渡す）。 */
@@ -147,7 +152,7 @@ interface OverlayProps {
 
 export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
-  onDuplicate, onBringToFront, onSendToBack, onDelete, onChangeText, onRequestEdit,
+  onDuplicate, onBringToFront, onSendToBack, onDelete, menuGuards, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
   groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onEditingIdChange, textFontFamily,
 }: OverlayProps) {
@@ -240,6 +245,35 @@ export function FreeLayoutOverlay({
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   // インライン編集中のテキスト要素 id。
   const [editingId, setEditingId] = useState<string | null>(null);
+  /**
+   * 文字を直している間の**取り消しのまとめ**（#746 レビュー）。打鍵ごとに積むと、履歴の上限を
+   * 文字入力で食い潰し、それ以前の編集（**取り消しでしか戻らない操作**）が戻せなくなる。
+   *
+   * ⚠️ 開け閉めは**編集中かどうか**に結ぶ（`focus`/`blur` に結ばない）＝欄がフォーカス中に消えると
+   * `blur` は来ない（開けっぱなし＝以後の取り消しが積まれない）。効果の後始末なら、画面を離れても
+   * 相手が変わっても必ず閉じる。鮮度は latest-ref で保つ（この file の他の受け口と同じ形）。
+   */
+  const interactionStartRef = useRef(onInteractionStart);
+  const textGroupOpenRef = useRef(false);
+  useEffect(() => { interactionStartRef.current = onInteractionStart; });
+  useEffect(() => {
+    if (editingId == null) return;
+    return () => {
+      if (!textGroupOpenRef.current) return;
+      textGroupOpenRef.current = false;
+      interactionEndRef.current?.();
+    };
+  }, [editingId]);
+  /**
+   * まとめを開く（**最初の1打で**）。⚠️ 編集に入った時点では開けない＝二度押しは**選び直しでもある**ので、
+   * 呼び出し側が「選ぶ相手が変わったらまとめを畳む」を持っていると、開けた直後に畳まれる（実測）。
+   * 打ち始めてからなら選択はもう動かない。
+   */
+  const openTextGroup = (): void => {
+    if (textGroupOpenRef.current) return;
+    textGroupOpenRef.current = true;
+    interactionStartRef.current?.();
+  };
   // 編集中の要素を親へ通知＝親が ScenePreview の hideItemIds に渡し、SVG 側の同じ文字を伏せる（二重表示回避・#549）。
   useEffect(() => { onEditingIdChange?.(editingId); }, [editingId, onEditingIdChange]);
   // アンマウント時は必ず「編集していない」へ戻す（#549 レビュー ℹ️）。free_NNN は**場面内一意**なので、伏せたまま
@@ -614,7 +648,9 @@ export function FreeLayoutOverlay({
     //  ・グループのメンバー（まだ個別選択していない）＝そのメンバーへドリルイン選択（#525-5）
     const button0 = e.button === 0 && !e.shiftKey;
     // ⚠️ 文字の直接編集は **`onChangeText` を渡したときだけ**（渡さない形式では二度押しで編集に入らない）。
-    const dtEdit = button0 && onChangeText != null && el.kind === FREE_ELEMENT_KIND.text && elGroup == null;
+    // ⚠️ **固定したものは編集欄に入れない**（#746 レビュー）＝入れても domain が打鍵ごとに断るので、
+    // **文字が入らない欄**と断り文の連発になる（「中身」の欄は最初から押せない＝場所で割れる）。
+    const dtEdit = button0 && onChangeText != null && !el.locked && el.kind === FREE_ELEMENT_KIND.text && elGroup == null;
     const dtDrill = button0 && elGroup != null && !selectedIds.includes(el.id);
     if (dtEdit || dtDrill) {
       const prev = lastTapRef.current;
@@ -694,13 +730,13 @@ export function FreeLayoutOverlay({
   // メニュー項目。「編集」は全 kind で kind 別エディタ（onRequestEdit）を開く＝素材選択/文字書式/図形書式。
   // テキストはダブルクリックでもインライン編集できる（別経路）。複製/前面/背面/削除は #172 のハンドラ。
   // ⚠️ **渡された操作だけ**を並べる（省いた＝その形式には無い操作）。押しても何も起きない項目を作らない。
-  const menuItems: { label: string; danger?: boolean; run: (id: string) => void }[] = menu && menuEl
+  const menuItems: { label: string; danger?: boolean; disabled?: boolean; disabledHint?: string; run: (id: string) => void }[] = menu && menuEl
     ? [
         ...(onRequestEdit ? [{ label: "編集", run: (id: string) => onRequestEdit(id, menu.x, menu.y) }] : []),
-        ...(onDuplicate ? [{ label: "複製", run: onDuplicate }] : []),
+        ...(onDuplicate ? [{ label: "複製", run: onDuplicate, ...menuGuards?.duplicate }] : []),
         ...(onBringToFront ? [{ label: "前面", run: onBringToFront }] : []),
         ...(onSendToBack ? [{ label: "背面", run: onSendToBack }] : []),
-        ...(onDelete ? [{ label: "削除", danger: true, run: onDelete }] : []),
+        ...(onDelete ? [{ label: "削除", danger: true, run: onDelete, ...menuGuards?.delete }] : []),
       ]
     : [];
 
@@ -775,7 +811,9 @@ export function FreeLayoutOverlay({
                 onSelect(el.id);
                 return;
               }
-              if (el.kind !== FREE_ELEMENT_KIND.text || elGroup != null) return;
+              // ⚠️ **押下の経路と同じ関門**（#746-2）＝`onChangeText` を渡さない形式では編集に入らない。
+              // ここが抜けていると、互換 `dblclick` が来る環境で**打てない編集欄**に入る。
+              if (onChangeText == null || el.locked || el.kind !== FREE_ELEMENT_KIND.text || elGroup != null) return;
               e.preventDefault();
               e.stopPropagation();
               setMenu(null);
@@ -801,7 +839,7 @@ export function FreeLayoutOverlay({
               <textarea
                 autoFocus
                 value={el.text ?? ""}
-                onChange={(e) => onChangeText?.(el.id, e.target.value)}
+                onChange={(e) => { openTextGroup(); onChangeText?.(el.id, e.target.value); }}
                 onPointerDown={(e) => e.stopPropagation()} // textarea 内の操作でドラッグを始めない
                 onDoubleClick={(e) => e.stopPropagation()}
                 onContextMenu={(e) => e.stopPropagation()} // 編集中はブラウザ標準の右クリックを使う
@@ -1004,7 +1042,12 @@ export function FreeLayoutOverlay({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          items={menuItems.map((it) => ({ label: it.label, danger: it.danger, onSelect: () => it.run(menu.id) }))}
+          items={menuItems.map((it) => ({
+            label: it.label, danger: it.danger,
+            // 押せない理由は**項目に添える**（消さずに理由を出す・#746-1）。
+            disabled: it.disabled, disabledHint: it.disabledHint,
+            onSelect: () => it.run(menu.id),
+          }))}
           onClose={() => setMenu(null)}
         />
       )}

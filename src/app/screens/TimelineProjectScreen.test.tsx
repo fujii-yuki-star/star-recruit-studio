@@ -3960,6 +3960,121 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(el.style.cursor).toBe("default");
   });
 
+  it("**右クリックで黙らない**（帯と同じ「同じものを足す／消す」を出す・#746-1）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = canvasEls(container).ov!.children[0] as HTMLElement;
+    fireEvent.contextMenu(el);
+    expect(screen.getByText("複製")).toBeInTheDocument();
+    expect(screen.getByText("削除")).toBeInTheDocument();
+  });
+
+  it("キャンバスのメニューから消せる（帯と同じ入口を通る・#746-1）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = canvasEls(container).ov!.children[0] as HTMLElement;
+    fireEvent.contextMenu(el); // 右クリックでその部品を選ぶ
+    fireEvent.click(screen.getByText("削除"));
+    expect(useTimelineStore.getState().doc!.clips.map((c) => c.id)).toEqual(["clip_002"]);
+  });
+
+  it("押せない項目は**消さずに理由を出す**（場所によって在ったり無かったり、を作らない・#746-1）", () => {
+    two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = canvasEls(container).ov!.children[0] as HTMLElement;
+    fireEvent.contextMenu(el);
+    const del = screen.getByText("削除").closest("button") as HTMLButtonElement;
+    expect(del).toBeDisabled();
+    expect(del.getAttribute("title")).toContain("固定");
+  });
+
+  it("**文字は二度押しで直せる**（他社の型・#746-2）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const el = canvasEls(container).ov!.children[0] as HTMLElement;
+    fireEvent.doubleClick(el);
+    const ta = within(canvasEls(container).ov!).getByRole("textbox") as HTMLTextAreaElement;
+    expect(ta.value).toBe("あ"); // いまの文言が入っている（描画と同じ変換を通っている）
+    fireEvent.change(ta, { target: { value: "あい" } });
+    expect(useTimelineStore.getState().doc!.clips[0].text).toBe("あい");
+  });
+
+  it("**打っている間の取り消しは1回ぶん**（履歴を文字入力で食い潰さない・#746 レビュー）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    const el = canvasEls(container).ov!.children[0] as HTMLElement;
+    fireEvent.doubleClick(el);
+    const ta = within(canvasEls(container).ov!).getByRole("textbox") as HTMLTextAreaElement;
+    for (const v of ["あい", "あいう", "あいうえ"]) fireEvent.change(ta, { target: { value: v } });
+    fireEvent.blur(ta);
+    expect(useTimelineStore.getState().doc!.clips[0].text).toBe("あいうえ");
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+  });
+
+  it("固定した列の文字は**編集欄に入らない**（打てない欄を開かない・#746 レビュー）", () => {
+    two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.doubleClick(canvasEls(container).ov!.children[0] as HTMLElement);
+    expect(within(canvasEls(container).ov!).queryByRole("textbox")).toBeNull();
+  });
+
+  it("**まとめて選んでいるとキャンバスの「複製」も押せない**（押しても無反応を作らない・#746 レビュー）", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.contextMenu(canvasEls(container).ov!.children[0] as HTMLElement);
+    const dup = screen.getByText("複製").closest("button") as HTMLButtonElement;
+    expect(dup).toBeDisabled();
+    expect(dup.getAttribute("title")).toContain("1つだけ選ぶと使えます");
+  });
+
+  it("**音の列に載った映像部品は触れない**（描かれないのに掴める、を作らない・#746 レビュー）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 60, w: 100, h: 50, text: "い" },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(canvasEls(container).ov!.children.length).toBe(1); // 映像の列のものだけ
+  });
+
+  it("直している間は**下の絵を伏せる**（二重に見えない・#746-2）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const stage = () => container.querySelector(".preview-stage") as HTMLElement;
+    expect(stage().innerHTML).toContain("あ");
+    fireEvent.doubleClick(canvasEls(container).ov!.children[0] as HTMLElement);
+    expect(stage().innerHTML).not.toContain(">あ<");
+  });
+
+  it("**隠したまとまりの部品は触れない**（描かれていないものの枠を出さない・#746-6）", () => {
+    // ⚠️ 部品そのものの `hidden` は共通部品の側でも伏せられるが、**隠したまとまり**は
+    // こちら（`isOnCanvas`）でしか見ていない＝ここが抜けると枠だけ出て掴める。
+    open({
+      groups: [{ id: "group_001", members: ["clip_001"], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, hidden: true }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 60, w: 100, h: 50, text: "い" },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(canvasEls(container).ov!.children.length).toBe(1); // 隠したまとまりのものは出さない
+  });
+
+  it("隠した部品は**矢印でも動かない**（出ていないものは操作の対象にしない・#746-6）", () => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "あ", hidden: true }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(useTimelineStore.getState().doc!.clips[0].x).toBe(0); // 動かさない
+    expect(useTimelineStore.getState().playheadSec).toBeGreaterThan(0); // 再生位置は送る
+  });
+
   it("重ね順の項目はキャンバスのメニューに出さない（列の並びだけ・決定17）", () => {
     two();
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
