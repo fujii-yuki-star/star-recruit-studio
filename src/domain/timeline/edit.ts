@@ -272,8 +272,11 @@ export function moveClips(
     const clip = doc.clips.find((c) => c.id === id) as TimelineClip;
     if (clip.kind !== TIMELINE_CLIP_KIND.voice) continue;
     for (const sub of subtitlesBoundTo(doc, id)) {
-      // 字幕は**読み上げと同じ区間**へ（列は据え置き＝`withBoundSubtitles` と同じ約束）。
-      to.set(sub.id, { startSec: m.startSec, trackId: sub.trackId });
+      // 字幕は**読み上げと同じ区間**へ。⚠️ **列は上書きしない**（#754 再レビュー 🔴）＝
+      // その字幕自身も選ばれていて**列を変えようとしている**とき、ここで元の列へ戻すと
+      // 「置ける色のまま離せるのに何も起きず、理由も出ない」になる（§2-5）。
+      // 時間は読み上げが決める／列は利用者が決める、を混ぜない。
+      to.set(sub.id, { startSec: m.startSec, trackId: to.get(sub.id)?.trackId ?? sub.trackId });
     }
   }
   const nextClips = doc.clips.map((c) => {

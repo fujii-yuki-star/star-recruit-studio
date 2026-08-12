@@ -1117,6 +1117,31 @@ describe('moveClips（まとめて動かす）', () => {
     expect(r.ok && r.doc.clips[1]).toMatchObject({ trackId: 'track_005', startSec: 0 }); // 列は動く・時間は据え置き
   });
 
+  it('字幕と**その連動先**を一緒に選んでも、字幕の列は変えられる（#754 再レビュー）', () => {
+    // ⚠️ 連動の畳み込みで列まで上書きすると、**直接指定した列が元へ戻り**、
+    // 「置ける色のまま離せるのに何も起きず、理由も出ない」になる。
+    // 単体で選んだときは通るので、**選択の件数で同じ操作の意味が変わる**（ADR-0026②）。
+    const d = doc({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_005', kind: TRACK_KIND.visual },
+        { id: 'track_002', kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_001' },
+      ],
+    });
+    const r = moveClips(d, [
+      { id: 'clip_002', startSec: 10, trackId: 'track_005' }, // 字幕を別の列へ
+      { id: 'clip_001', startSec: 0 },                        // 連動先も選択に入っている
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const sub = r.doc.clips.find((c) => c.id === 'clip_002')!;
+    expect(sub.trackId).toBe('track_005'); // 列は利用者が決める
+    expect(sub.startSec).toBe(0);          // 時間は読み上げが決める
+  });
+
   it('何も変わらないなら**同じ文書**を返す（空振りの取り消しを積まない）', () => {
     const d = three();
     const r = moveClips(d, [{ id: 'clip_001', startSec: 0 }]);
