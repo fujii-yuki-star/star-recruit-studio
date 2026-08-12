@@ -65,6 +65,28 @@ describe('generateSelectedVoice', () => {
     expect(useTimelineStore.getState().audioSrcByKey['voice:voices/clip_001.wav']).toBe('data:audio/wav;base64,AAA');
   });
 
+  it('**着地したら自分から保存する**（画面を離れていても消えない・#751）', async () => {
+    // ⚠️ 自動保存は**画面**が持っているので、作っている最中に画面を離れると着地したぶんを
+    // **誰も書かない**＝開き直すと作った声と合わせた長さが黙って消える（音声ファイルだけ残る）。
+    // 取り込み（`runImport`）は同じ穴を同じ形で塞いでいるのに、声の経路だけ欠けていた。
+    await open(doc());
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    await useTimelineStore.getState().generateSelectedVoice();
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    // 書いた中身が「作成済み＋実尺」であること（呼んだだけで中身が古い、を通さない）。
+    const written = JSON.parse(save.mock.calls[save.mock.calls.length - 1][1] as string) as TimelineProject;
+    expect(written.clips[0]).toMatchObject({ durationSec: 5 });
+    expect(written.clips[0].voice).toMatchObject({ status: 'generated', voicePath: 'voices/clip_001.wav' });
+  });
+
+  it('作れなかった印も自分から保存する（開き直して「作成済み」に見せない）', async () => {
+    await open(doc());
+    vi.spyOn(voiceFsMod, 'importVoiceFile').mockResolvedValue(null); // 保存に失敗
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    await useTimelineStore.getState().generateSelectedVoice();
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+  });
+
   it('長さを声の実尺に合わせる（仮の長さのままにしない）', async () => {
     await open(doc());
     await useTimelineStore.getState().generateSelectedVoice();
@@ -130,12 +152,16 @@ describe('generateSelectedVoice', () => {
   it('作れなかったら「次にどうするか」を出す（生のエラーを見せない）', async () => {
     vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue(new Error('voicevox: connection refused'));
     await open(doc());
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
     await useTimelineStore.getState().generateSelectedVoice();
     expect(useTimelineStore.getState().doc?.clips[0].voice?.status).toBe('failed');
     expect(useTimelineStore.getState().voiceError).toBe('声を作れませんでした。しばらくしてから、もう一度お試しください。');
-    // 失敗の印は文書に載る＝**未保存**にする（#693）。保存済みのままだと自動保存が次の編集まで走らず、
-    // 画面は「保存しました」と言ったままになる。
-    expect(useTimelineStore.getState().saveStatus).toBe('idle');
+    // 失敗の印は文書に載る（#693）。⚠️ 以前は「**未保存にする**」までを固定していたが、
+    // 自動保存は**画面**が持っているので、離れていると誰も書かない（#751）。いまは**すぐ書く**＝
+    // 開き直したときに「作成済み」に見えない。
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    const written = JSON.parse(save.mock.calls[save.mock.calls.length - 1][1] as string) as TimelineProject;
+    expect(written.clips[0].voice).toMatchObject({ status: 'failed' });
   });
 
   it('文が空のときは作りに行かない', async () => {
