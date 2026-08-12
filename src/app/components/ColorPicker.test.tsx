@@ -80,6 +80,25 @@ describe("ColorPicker", () => {
     expect(onChange).toHaveBeenLastCalledWith("#00ff00");
   });
 
+  it("**外側を押して閉じるときは、その押下が選び直すより先に**確定する（#758 レビュー）", () => {
+    // ⚠️ 閉じた後（描き直しの後）に確定すると、**その同じ押下が選び直しでもあった**とき、
+    // 打った色が**新しく選ばれた相手**へ入る（色の受け口は「いま選ばれているもの」を見る）。
+    // 外側の受け手は bubble、この確定は capture＝必ず先に走ることを固定する。
+    const order: string[] = [];
+    const onChange = vi.fn(() => { order.push("確定"); });
+    render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    const onOutside = (): void => { order.push("選び直し"); };
+    document.body.addEventListener("pointerdown", onOutside);
+    try {
+      fireEvent.pointerDown(document.body);
+    } finally {
+      document.body.removeEventListener("pointerdown", onOutside);
+    }
+    expect(order).toEqual(["確定", "選び直し"]);
+  });
+
   it("`Escape` で閉じたときも打った色は入る（閉じ方で結果を変えない）", () => {
     const onChange = vi.fn();
     render(<ColorPicker value="#000000" onChange={onChange} />);
@@ -130,6 +149,29 @@ describe("ColorPicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
     fireEvent.click(screen.getByRole("button", { name: "色 #22c55e" }));
     expect(onChange).toHaveBeenCalledWith("#22c55e");
+  });
+
+  it("押せなくなって閉じたあと画面から外れても送らない（#758 レビュー）", () => {
+    // ⚠️ 「押せないから確定しない」で止めても、打ちかけの印が立ったままだと**そのあと外れた回に
+    // 後始末が送る**＝受け取れない状況で書き込まない、を経路によって破る。
+    const onChange = vi.fn();
+    const { rerender, unmount } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    rerender(<ColorPicker value="#000000" onChange={onChange} disabled title="いま動画を書き出しています" />);
+    unmount();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("押せなくなって捨てた打ちかけは、押せるように戻っても復活しない（#758 レビュー）", () => {
+    const onChange = vi.fn();
+    const { rerender, unmount } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.change(screen.getByLabelText("色コード"), { target: { value: "#00ff00" } });
+    rerender(<ColorPicker value="#000000" onChange={onChange} disabled />); // 捨てる
+    rerender(<ColorPicker value="#000000" onChange={onChange} />); // 押せるように戻る（開き直しはしない）
+    unmount();
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("同じ色を打ち直しても通知しない（空振りの取り消しを積まない）", () => {

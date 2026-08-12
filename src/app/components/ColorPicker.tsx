@@ -133,6 +133,10 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     endBoundaryRef.current();
     // 開いたまま外れた回も `blur` は来ない（DOM ごと消える）＝打ちかけを黙って捨てない。
     // ここでは画面の状態は触らず（もう無い）、親へ渡すだけ。
+    // 押せなくなって閉じた回は、その時点で印を降ろしてある（下の `[open, disabled]` の効果）
+    // ＝ここに来る打ちかけは、**最後に描いた時点では受け取れる状況だった**もの。
+    // （押せなくなるのと同じ更新で外れた回だけは通り抜けうるが、その先で保存の側が断る。）
+    // ここへ写しを足しても値は同じになるので、二重に見張らない（到達しない道を作らない）。
     if (!codeDirtyRef.current) return;
     const n = normalizeHex(codeTextRef.current);
     if (n && n !== normalizeHex(valueRef.current)) onChangeRef.current(n);
@@ -180,32 +184,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     };
   }, [open, reposition]);
 
-  // 外側クリック / Escape で閉じる（capture でトリガー自身の再クリックと二重発火しない）。
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (popRef.current?.contains(t) || triggerRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    const release = claimEscape(); // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey);
-      release();
-    };
-  }, [open]);
-
-  const applyHsv = (next: Hsv) => {
-    codeDirtyRef.current = false; // 面・バーで書き替えた＝打ちかけではない
-    setHsv(next);
-    const hex = hsvToHex(next);
-    setCodeText(hex);
-    onChange(hex);
-  };
+  const currentHex = hsvToHex(hsv);
   /** 作業色とコード欄を `hex` にそろえる（**親へは通知しない**）。 */
   const syncTo = (n: string) => {
     codeDirtyRef.current = false; // 自分で書き替えた＝打ちかけではない
@@ -234,8 +213,6 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     applyHsv({ h: clamp((clientX - r.left) / r.width, 0, 1) * 360, s: hsv.s, v: hsv.v });
   };
 
-  const hueColor = `hsl(${hsv.h}, 100%, 50%)`;
-  const currentHex = hsvToHex(hsv);
   /**
    * 色コード欄の**確定**（`Enter`／欄を出たとき・#752-1）。
    *
@@ -274,12 +251,50 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
    */
   const commitCodeRef = useRef(commitCode);
   useEffect(() => { commitCodeRef.current = commitCode; });
+
+  // 外側クリック / Escape で閉じる（capture でトリガー自身の再クリックと二重発火しない）。
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (popRef.current?.contains(t) || triggerRef.current?.contains(t)) return;
+      // ⚠️ **閉じる前に、この場で確定する**（#758 レビュー）。閉じたあと（描き直しの後）に確定すると、
+      // **その同じ押下が選び直しでもあった**とき、打った色が**新しく選ばれた相手**へ入る
+      //（この画面の色の受け口は「いま選ばれているもの」を見るため）。ここは capture＝
+      // 選び直す受け手（キャンバス）より**先**に走るので、まだ相手が変わっていない。
+      if (!disabled && codeDirtyRef.current) commitCodeRef.current();
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const release = claimEscape(); // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+      release();
+    };
+  }, [open, disabled]);
+
+  const applyHsv = (next: Hsv) => {
+    codeDirtyRef.current = false; // 面・バーで書き替えた＝打ちかけではない
+    setHsv(next);
+    const hex = hsvToHex(next);
+    setCodeText(hex);
+    onChange(hex);
+  };
+  const hueColor = `hsl(${hsv.h}, 100%, 50%)`;
   const wasOpenRef = useRef(false);
   useEffect(() => {
     if (open) { wasOpenRef.current = true; return; }
     if (!wasOpenRef.current) return;
     wasOpenRef.current = false;
-    if (!disabled && codeDirtyRef.current) commitCodeRef.current();
+    // ⚠️ 押せなくなって閉じたときは**確定しないだけでなく、打ちかけも降ろす**（#758 レビュー）。
+    // 印を立てたままにすると、そのあと画面から外れた回に**下の後始末が送ってしまう**
+    // ＝「受け取れない状況で書き込まない」を経路によって破る（開き直せば欄は現在色へ戻るので、
+    // 画面の見え方とも一致する）。
+    if (disabled) { codeDirtyRef.current = false; return; }
+    if (codeDirtyRef.current) commitCodeRef.current();
   }, [open, disabled]);
 
   return (
