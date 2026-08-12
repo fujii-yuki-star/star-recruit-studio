@@ -885,6 +885,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       if (!voicePath) {
         setVoiceStatus(set, get, clipId, NARRATION_STATUS.failed);
         set({ voiceError: VOICE_SAVE_FAILED_MESSAGE, generatingVoiceClipId: null });
+        void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
         return;
       }
       // **長さを実際の尺へ合わせる**（`trimClip` を通す＝連動している字幕も一緒に動く・ADR-0032 決定24）。
@@ -909,12 +910,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
         ...(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE }),
       });
+      // ⚠️ **自分から保存する**（#751）。自動保存は**画面**が持っているので、作っている最中に
+      // 画面を離れると、着地したぶんを**誰も書かない**＝開き直すと作った声と合わせた長さが
+      // 黙って消える（音声ファイルだけ残る）。取り込み（`runImport`）が同じ穴を同じ形で塞いでいる。
+      void get().saveTimelineProject();
     } catch {
       // 失敗も成功と同じく**別の文書の部品を巻き込まない**（id は文書ごとに採番＝同じ id が別文書にもある）。
       const now = get().doc;
       if (now && now.projectId === doc.projectId && now.clips.some((c) => c.id === clipId)) {
         setVoiceStatus(set, get, clipId, NARRATION_STATUS.failed);
         set({ voiceError: VOICE_FAILED_MESSAGE });
+        void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
       }
       set({ generatingVoiceClipId: null });
     }
