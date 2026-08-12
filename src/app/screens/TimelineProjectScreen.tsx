@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
-import { isKeyboardActivation, usePointerDrag } from "../hooks/usePointerDrag";
+import { isKeyboardActivation, isPointerDragging, usePointerDrag } from "../hooks/usePointerDrag";
 import { canvasPointAt, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
 import { EXPORT_BLOCK_SOURCE, EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
@@ -881,10 +881,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * **利用者が倍率を変える唯一の入口**（#743 レビュー）。ホイールにだけ関門を置いていたので、
    * `−`／`＋`／`全体を表示` は掴んでいる間も効いた（別のポインタや画面なら届く）＝秒は掴んだ時点の
    * 倍率で出しているので、**帯が指から離れる**。入口を1つにして、関門も1つにする。
+   *
+   * ⚠️ 見るのは**画面ぜんぶで共通の「いま掴んでいる」**（`isPointerDragging`・#752-5）。帯だけの
+   * 写しを見ていたので、**部品を運んでいる最中**（`grabToPlace`）は素通りし、`Ctrl`+ホイールで
+   * 倍率が変わって**古い倍率で落とし先を計算**していた（掴んだものが指から離れるのは帯と同じ）。
+   * 掴む場所が増えるたびに写しを足す形にしない＝合図は1つ。
    */
   const changeZoomRef = useRef<(next: number | ((i: number | null) => number)) => boolean>(() => false);
   const changeZoom = (next: number | ((i: number | null) => number)): boolean => {
-    if (clipDragRef.current) return false;
+    if (isPointerDragging()) return false;
     zoomTouchedRef.current = true; // 明示的に合わせた＝以後は勝手に動かさない
     setZoomIndex((i) => (typeof next === "function" ? next(i) : next));
     return true;
@@ -1016,8 +1021,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   /** 吸着した先（#686 段階4）＝縦の点線を出す位置。吸着していなければ `null`。 */
   const [snapGuideSec, setSnapGuideSec] = useState<number | null>(null);
-  /** 実リスナー（`wheel`）から掴んでいる最中かを見るための写し（張り替えないので ref 越し）。 */
-  const clipDragRef = useRef(false);
   const [clipDrag, setClipDrag] = useState<
     {
       clipId: string;
@@ -1356,7 +1359,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       onMove: (ev) => {
         // ⚠️ 掴み直してもらう道でも**送りを止める**（#714 レビュー）。止めないと rAF が回り続け、
         // 毎フレーム下の `replay` が走って**消したはずのゴーストが復活**し、枠も流れ続ける。
-        if (clipChanged(clip0)) { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); return; }
+        if (clipChanged(clip0)) { autoScroll.stop(); setClipDrag(null); return; }
         const show = (e2: PointerEvent): void => {
           const { sec: raw, guideSec } = applySnap(at(e2), e2);
           // 群ごと丸めたずれから、掴んだ相手の位置も出す（見せかけと確定が同じ値を見る）。
@@ -1368,12 +1371,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           setSnapGuideSec(guideSec);
         };
         show(ev);
-        clipDragRef.current = true;
         // 端まで来たら送る。送った各フレームで**この処理をやり直す**（上の `at` が枠の動きも見る）。
         autoScroll.track(scrollRef.current, ev, show);
       },
       onEnd: (ev, started) => {
-        clipDragRef.current = false;
         autoScroll.stop();
         setSnapGuideSec(null);
         if (!started) return; // 動かしていない＝ただのクリック（選択は `onClick` が受ける）
@@ -1399,7 +1400,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         }
         else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
       },
-      onCancel: (started) => { clipDragRef.current = false; autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) dropSkipClickSoon(); },
+      onCancel: (started) => { autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) dropSkipClickSoon(); },
     });
   };
 

@@ -2382,6 +2382,25 @@ describe("TimelineProjectScreen: 中身を直す欄（#720）", () => {
     expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
   });
 
+  it("**色の面を撫でている間も倍率を変えられない**（合図が1つで配線が切れていない・#752-2）", () => {
+    // ⚠️ 部品どうしの配線を見る＝`ColorPicker` が「掴んでいる」に入れる側と、`changeZoom` が
+    // それを読む側は別々に固めてあるが、この画面でつながっているかは**ここでしか分からない**。
+    withShape();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 幅で測る（この部品は0秒に置かれるので `left` は倍率で変わらない）。
+    const bandWidth = () => (container.querySelectorAll(".timeline-clip")[0] as HTMLElement).style.width;
+    const before = bandWidth();
+    fireEvent.click(screen.getByRole("button", { name: "図形の色" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerDown(sv, { pointerId: 1, button: 0, buttons: 1, clientX: 10, clientY: 90 });
+    fireEvent.click(screen.getByLabelText("表示を広げる"));
+    expect(bandWidth()).toBe(before); // 撫でている間は効かない
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 60, clientY: 90 });
+    fireEvent.click(screen.getByLabelText("表示を広げる"));
+    expect(bandWidth()).not.toBe(before); // 離せば効く（塞ぎっぱなしにしない）
+  });
+
   it("開いている最中に書き出しが始まったら、色の面ごと閉じる（#730 レビュー）", () => {
     withText();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
@@ -3258,6 +3277,34 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(8, 5);
   });
 
+  it("何度動かしても**取り消しは1回ぶん**（動かした回数だけ積まない・#752-12）", () => {
+    // ⚠️ 影は毎回の動きで描き替わるが、文書を書き換えるのは離したときの1回だけ。
+    // ここが崩れると、ひと運びで履歴上限を流し切って「戻したかった直前の誤操作」が追い出される。
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    pointerDownAt(band("あ"), 1, { clientX: 0, clientY: 0 });
+    for (const dx of [36, 108, 216, 288, 360]) fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: dx, clientY: 0 });
+    expect(useTimelineStore.getState().history.past.length).toBe(before); // 動かしている間は積まない
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 360, clientY: 0 });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1); // 5回動かしても1つ
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(10, 5);
+  });
+
+  it("端を縮めるときも**取り消しは1回ぶん**（#752-12）", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); // 端の取っ手は選んだ帯にだけ出る
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    const handle = container.querySelector(".timeline-clip-handle--right") as HTMLElement;
+    pointerDownAt(handle, 1, { clientX: 0, clientY: 0 });
+    for (const dx of [-18, -36, -54]) fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: dx, clientY: 0 });
+    expect(useTimelineStore.getState().history.past.length).toBe(before);
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: -54, clientY: 0 });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+    expect(useTimelineStore.getState().doc!.clips[0].durationSec).toBeCloseTo(1.5, 5);
+  });
+
   it("重なる所へ落としても**寄せずに元のまま**＋離したときに理由を出す（決定10）", async () => {
     // ⚠️ 黙って戻すと「勝手に戻った」としか見えない。同じ画面の「つかんで置く」（#684）と作法を揃える。
     two();
@@ -3474,6 +3521,23 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     fireEvent.click(screen.getByLabelText("表示を広げる"));
     expect((band("い") as HTMLElement).style.left).toBe(before); // 掴んでいない帯＝倍率が変われば動く
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 36, clientY: 0 });
+    fireEvent.click(screen.getByLabelText("表示を広げる"));
+    expect((band("い") as HTMLElement).style.left).not.toBe(before); // 離せば効く（塞ぎっぱなしにしない）
+  });
+
+  it("**部品を運んでいる最中も**倍率を変えられない（#752-5）", () => {
+    // ⚠️ 帯を掴んでいるときだけ塞いでいたので、部品を運んでいる最中（`grabToPlace`）は素通りした。
+    // 落とし先の時刻は**掴んだ時点の倍率**で秒に直しているので（受け口は掴んだ時の写し）、
+    // 途中で倍率が変わると**指の下と違う所へ置かれる**。掴む場所が増えるたびに関門を足さない
+    // ＝合図は「いま何かを掴んでいる」1つ。
+    two();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = (band("い") as HTMLElement).style.left; // 5秒の帯＝倍率が変われば動く
+    fireEvent.pointerDown(screen.getByRole("button", { name: "図形を置く" }), { pointerId: 1, button: 0, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 40, clientY: 0 }); // 運んでいる
+    fireEvent.click(screen.getByLabelText("表示を広げる"));
+    expect((band("い") as HTMLElement).style.left).toBe(before);
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 40, clientY: 0 }); // 列の外＝何も置かない
     fireEvent.click(screen.getByLabelText("表示を広げる"));
     expect((band("い") as HTMLElement).style.left).not.toBe(before); // 離せば効く（塞ぎっぱなしにしない）
   });

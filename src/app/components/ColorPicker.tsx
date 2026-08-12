@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { claimEscape } from "../hooks/escapeOwners";
+import { registerExternalDrag } from "../hooks/usePointerDrag";
 import { createPortal } from "react-dom";
 import { hexToHsv, hsvToHex, normalizeHex, type Hsv } from "../../domain/format/color";
 
@@ -23,7 +24,11 @@ const POPOVER_H = 300;
 interface Props {
   /** 現在の色（#rrggbb）。 */
   value: string;
-  /** 色が変わるたびに #rrggbb で通知（標準 input と同じく随時発火）。 */
+  /**
+   * 色が変わるたびに #rrggbb で通知（面・色相バーは撫でている間じゅう随時発火）。
+   * ⚠️ **色コード欄だけは確定（`Enter`／欄を出たとき）で1回**（#752-1）＝打っている途中の
+   * 3桁でも有効な色になるので、随時だと**打ち方で取り消しの件数が変わる**。
+   */
   onChange: (hex: string) => void;
   /** トリガー（見本）の追加クラス。 */
   className?: string;
@@ -52,6 +57,8 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   // 開いている間の作業用 HSV（value からの往復で色相が飛ばないよう保持）。開くたびに現在値へ同期する。
   const [hsv, setHsv] = useState<Hsv>(() => hexToHsv(value) ?? { h: 0, s: 0, v: 0 });
   const [codeText, setCodeText] = useState(value);
+  /** 色コード欄に**打たれて、まだ確定していない**か（閉じるときに確定するかの判断・#752 レビュー）。 */
+  const codeDirtyRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const svRef = useRef<HTMLDivElement>(null);
@@ -60,6 +67,8 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   const draggingHue = useRef(false);
   // 取り消しの合成境界（#547 P2-3 レビュー）。SV面・色相バーで共有し、開始したものだけを閉じる（冪等）。
   const boundaryRef = useRef(false);
+  // 掴んでいる数から外す関数（`registerExternalDrag` の戻り）。掴んでいない間は `null`。
+  const releaseExternal = useRef<(() => void) | null>(null);
   const endDragBoundary = useCallback(() => {
     // **掴んだ印も一緒に降ろす**（#720 レビュー）。境界を閉じる経路は「掴むのをやめる」経路でもある。
     // ここで戻さないと、掴んだまま Escape で閉じたとき（面の `pointerup` は来ない）真のまま残り、
@@ -68,6 +77,10 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     //（境界が既に閉じていても掴んだ印は必ず戻す）。
     draggingSv.current = false;
     draggingHue.current = false;
+    // **掴んでいる数からも外す**（#752-2）。掴んだ印と同じく、閉じ方に依らず必ず戻す
+    //（外し忘れると以後ずっと「掴んでいる」ことになり、取り消しが全画面で無言で効かなくなる）。
+    releaseExternal.current?.();
+    releaseExternal.current = null;
     if (!boundaryRef.current) return;
     boundaryRef.current = false;
     onDragEnd?.();
@@ -75,6 +88,10 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   const startDragBoundary = useCallback(() => {
     if (boundaryRef.current) return;
     boundaryRef.current = true;
+    // ⚠️ **掴んでいる数に入れる**（#752-2）＝この面は `pointermove` ごとに色を書く。入れないと
+    // 撫でている最中の `Ctrl+Z` が通り、**取り消しで戻した文書の上に続きの動きが色を書く**
+    //（＝取り消しが黙って上書きされる）。画面ぜんぶで共通の作法（`usePointerDrag`）へ寄せる。
+    releaseExternal.current = registerExternalDrag();
     onDragStart?.();
     // pointer capture は best-effort（try/catch）。面の外で離しても必ず閉じるよう **window でも**拾う（one-shot）。
     // 閉じ漏れると以後の編集が全て同じ履歴に合成され、取り消しが効かなくなる（オーバーレイと同機構）。
@@ -97,9 +114,36 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   // 開いた姿を一度描いてから閉じる＝ちらつくうえ、その1フレームは触れてしまう。`open` を見ているので
   // 繰り返さず、`disabled` が戻っても**勝手に開き直さない**（`open` は false のまま）。
   if (disabled && open) setOpen(false);
-  useEffect(() => () => endDragBoundary(), [endDragBoundary]);
+  // ⚠️ **後始末は画面を離れるときだけ**（#752 レビュー）。`endDragBoundary` を依存に書くと、
+  // 渡された `onDragEnd` の中身が変わるたびに走る＝**撫でている最中に合成境界が閉じ**、
+  // 一緒に掴んだ名乗りまで外れる（取り消しが1色ごとに積まれる #547 P2-3 の再発）。
+  // いまの呼び出し元は安定した関数を渡しているが、**それは呼ぶ側の都合**なので依存で意図を書く。
+  const endBoundaryRef = useRef(endDragBoundary);
+  // 画面から外れた後に読む写し（そのときには state も props も取れない）。
+  const codeTextRef = useRef(value);
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    endBoundaryRef.current = endDragBoundary;
+    codeTextRef.current = codeText;
+    valueRef.current = value;
+    onChangeRef.current = onChange;
+  });
+  useEffect(() => () => {
+    endBoundaryRef.current();
+    // 開いたまま外れた回も `blur` は来ない（DOM ごと消える）＝打ちかけを黙って捨てない。
+    // ここでは画面の状態は触らず（もう無い）、親へ渡すだけ。
+    // 押せなくなって閉じた回は、その時点で印を降ろしてある（下の `[open, disabled]` の効果）
+    // ＝ここに来る打ちかけは、**最後に描いた時点では受け取れる状況だった**もの。
+    // （押せなくなるのと同じ更新で外れた回だけは通り抜けうるが、その先で保存の側が断る。）
+    // ここへ写しを足しても値は同じになるので、二重に見張らない（到達しない道を作らない）。
+    if (!codeDirtyRef.current) return;
+    const n = normalizeHex(codeTextRef.current);
+    if (n && n !== normalizeHex(valueRef.current)) onChangeRef.current(n);
+  }, []);
 
   const openPicker = () => {
+    codeDirtyRef.current = false;
     setHsv(hexToHsv(value) ?? { h: 0, s: 0, v: 0 }); // 開いた瞬間の値を取り込む
     setCodeText(value);
     setPos(null); // 位置は開いた後に実測して確定（下の layout effect）
@@ -140,40 +184,20 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     };
   }, [open, reposition]);
 
-  // 外側クリック / Escape で閉じる（capture でトリガー自身の再クリックと二重発火しない）。
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (popRef.current?.contains(t) || triggerRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    const release = claimEscape(); // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey);
-      release();
-    };
-  }, [open]);
-
-  const applyHsv = (next: Hsv) => {
-    setHsv(next);
-    const hex = hsvToHex(next);
-    setCodeText(hex);
-    onChange(hex);
+  const currentHex = hsvToHex(hsv);
+  /** 作業色とコード欄を `hex` にそろえる（**親へは通知しない**）。 */
+  const syncTo = (n: string) => {
+    codeDirtyRef.current = false; // 自分で書き替えた＝打ちかけではない
+    setHsv(hexToHsv(n) ?? { h: 0, s: 0, v: 0 });
+    setCodeText(n);
   };
   // パレット等・外部からの確定：作業値・コード欄・親をすべてそろえる（コード欄も新色に同期する）。
   const commitHex = (hex: string) => {
     const n = normalizeHex(hex);
     if (!n) return;
-    setHsv(hexToHsv(n) ?? { h: 0, s: 0, v: 0 });
-    setCodeText(n);
+    syncTo(n);
     onChange(n);
   };
-
   // 鮮やかさ×明るさの面：横=鮮やかさ(0..1)、縦=明るさ(1..0)。
   const applySvAt = (clientX: number, clientY: number) => {
     const r = svRef.current?.getBoundingClientRect();
@@ -189,8 +213,89 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     applyHsv({ h: clamp((clientX - r.left) / r.width, 0, 1) * 360, s: hsv.s, v: hsv.v });
   };
 
+  /**
+   * 色コード欄の**確定**（`Enter`／欄を出たとき・#752-1）。
+   *
+   * ⚠️ **打っている途中では確定しない**＝`normalizeHex` は3桁も受けるので、「1a2b3c」を1文字ずつ
+   * 打つと途中の3桁（`#1a2`）で1件・完成でもう1件と**取り消しが二重に積まれる**（打ち方で件数が
+   * 変わる＝戻す回数が読めない）。数値欄（`NumberField`）と同じ作法へそろえる
+   * ＝**打ちかけは自由・確定で1件**。
+   *
+   * 打ちかけ／無効／**同じ色**のときは通知せず、現在色の表記へそろえるだけ
+   *（`NumberField` の「変わらないなら `onChange` を呼ばない」と同じ＝空振りの履歴を出さない）。
+   */
+  const commitCode = () => {
+    codeDirtyRef.current = false;
+    const n = normalizeHex(codeText);
+    if (!n) { setCodeText(currentHex); return; } // 打ちかけ／無効＝いまの色の表記へそろえる
+    // ⚠️ **変わらないなら通知しない**（`NumberField` と同じ）＝空振りの取り消しを積まない。
+    // 比べる相手は**親が持っている色**（`value`）＝ここの作業色は開いている間に外から色が変わっても
+    // 追わないので、それと比べると「親と同じ色を打ったのに通知する」が起きる。
+    // ⚠️ この判定は**この欄だけ**（パレットは押した色をそのまま送る）＝「いまと同じ色で固定する」
+    // という指定を潰さない（`value` が既定値の解決結果である呼び出しがある）。
+    if (n === normalizeHex(value)) { syncTo(n); return; }
+    commitHex(n);
+  };
+  /**
+   * **閉じ方に依らず、打った色を捨てない**（#752-1 レビュー）。
+   *
+   * ⚠️ 外側を押して閉じたときは**欄が DOM ごと外れるので `blur` が来ない**（実機で確認）。
+   * 随時反映だった頃は打った時点で入っていたので消えなかった＝確定へ寄せた副作用として
+   * **打った値が黙って消える**を作らないよう、閉じるときにも確定する。
+   * **押せなくなって閉じたとき**（`disabled`）は確定しない＝受け取れない状況で書き込まない。
+   *
+   * ⚠️ 送るのは**この欄で打たれて、まだ確定していないとき**だけ（#752 レビュー）。
+   * コード欄の文字は面を撫でてもパレットを押しても書き替わるので、無条件に送り直すと
+   * 「色を選ぶ → `Ctrl+Z` で戻す → 閉じる」で**戻したはずの色を送り直す**
+   *（取り消しが無かったことになり、`future` も捨てられる＝ADR-0026④）。
+   */
+  const commitCodeRef = useRef(commitCode);
+  useEffect(() => { commitCodeRef.current = commitCode; });
+
+  // 外側クリック / Escape で閉じる（capture でトリガー自身の再クリックと二重発火しない）。
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (popRef.current?.contains(t) || triggerRef.current?.contains(t)) return;
+      // ⚠️ **閉じる前に、この場で確定する**（#758 レビュー）。閉じたあと（描き直しの後）に確定すると、
+      // **その同じ押下が選び直しでもあった**とき、打った色が**新しく選ばれた相手**へ入る
+      //（この画面の色の受け口は「いま選ばれているもの」を見るため）。ここは capture＝
+      // 選び直す受け手（キャンバス）より**先**に走るので、まだ相手が変わっていない。
+      if (!disabled && codeDirtyRef.current) commitCodeRef.current();
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const release = claimEscape(); // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+      release();
+    };
+  }, [open, disabled]);
+
+  const applyHsv = (next: Hsv) => {
+    codeDirtyRef.current = false; // 面・バーで書き替えた＝打ちかけではない
+    setHsv(next);
+    const hex = hsvToHex(next);
+    setCodeText(hex);
+    onChange(hex);
+  };
   const hueColor = `hsl(${hsv.h}, 100%, 50%)`;
-  const currentHex = hsvToHex(hsv);
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (open) { wasOpenRef.current = true; return; }
+    if (!wasOpenRef.current) return;
+    wasOpenRef.current = false;
+    // ⚠️ 押せなくなって閉じたときは**確定しないだけでなく、打ちかけも降ろす**（#758 レビュー）。
+    // 印を立てたままにすると、そのあと画面から外れた回に**下の後始末が送ってしまう**
+    // ＝「受け取れない状況で書き込まない」を経路によって破る（開き直せば欄は現在色へ戻るので、
+    // 画面の見え方とも一致する）。
+    if (disabled) { codeDirtyRef.current = false; return; }
+    if (codeDirtyRef.current) commitCodeRef.current();
+  }, [open, disabled]);
 
   return (
     <>
@@ -314,13 +419,11 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
               value={codeText}
               aria-label="色コード"
               spellCheck={false}
-              onChange={(e) => {
-                const raw = e.target.value;
-                setCodeText(raw); // 入力中は生の文字を保持（3桁など打ちかけを壊さない）
-                const n = normalizeHex(raw);
-                if (n) { setHsv(hexToHsv(n) ?? { h: 0, s: 0, v: 0 }); onChange(n); } // 有効ならコード欄以外を更新
-              }}
-              onBlur={() => setCodeText(currentHex)} // 打ちかけ/無効のまま抜けたら現在色の表記へそろえる
+              onChange={(e) => { codeDirtyRef.current = true; setCodeText(e.target.value); }} // 入力中は生の文字を保持（3桁など打ちかけを壊さない）
+              // 確定は `Enter` と**欄を出たとき**だけ（#752-1・`NumberField` と同じ作法）。
+              // **変換中は奪わない**（`06 §12.1`）＝変換の確定に使った `Enter` で色まで確定しない。
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) commitCode(); }}
+              onBlur={commitCode} // 打ちかけ/無効のまま抜けたら現在色の表記へそろえる
               style={{ width: "100%", boxSizing: "border-box", fontFamily: "monospace" }}
             />
           </label>
