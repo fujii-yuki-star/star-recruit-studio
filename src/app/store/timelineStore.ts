@@ -1020,6 +1020,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   play: () => {
     const doc = get().doc;
     if (!doc) return;
+    // ⚠️ **書き出し中は始めない**（#752-6）。成果物は壊れないが、音が鳴り出す入口だけ開いていた
+    //（編集も声の作成も塞いであるのに再生だけ通る＝同じ「走っている間」で挙動が割れる・ADR-0026②）。
+    // 押せない見た目はボタン側が出す（キーは見た目を持たないので、ここでも止める）。
+    if (isTimelineExportBusy(get().exportRun.phase)) return;
     const total = timelineDurationSec(doc);
     if (total <= 0) return; // 何も置いていない動画では始めない（押しても動かない状態を作らない）
     set({ isPlaying: true, playheadSec: playbackStartSec(get().playheadSec, total), seekNonce: get().seekNonce + 1 });

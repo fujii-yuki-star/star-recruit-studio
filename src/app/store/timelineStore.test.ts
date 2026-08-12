@@ -478,6 +478,21 @@ describe('再生（#630）', () => {
     expect(useTimelineStore.getState().isPlaying).toBe(false);
   });
 
+  it('書き出し中は再生を始めない（#752-6）', () => {
+    // ⚠️ 成果物は壊れないが、走っている間だけ音が鳴り出す入口が開くのは、編集も声の作成も
+    // 塞いであるのと揃わない（ADR-0026②）。画面の押せない見た目とここの関門は同じ理由を見る。
+    const before = useTimelineStore.getState().exportRun;
+    try {
+      useTimelineStore.setState({ exportRun: { phase: 'rendering', percent: 0, message: null, cancelling: false } });
+      useTimelineStore.getState().play();
+      expect(useTimelineStore.getState().isPlaying).toBe(false);
+    } finally {
+      // ⚠️ **走っている印を残さない**＝この file の後のテストが「書き出し中」のまま走り、
+      // 別の理由で落ちる（実際に2件落ちた）。
+      useTimelineStore.setState({ exportRun: before });
+    }
+  });
+
   it('編集したら再生を止める（動いている的を狙わせない）', () => {
     useTimelineStore.getState().play();
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);

@@ -5,11 +5,11 @@ import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
-import { TimelineProjectScreen } from "./TimelineProjectScreen";
+import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
-import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import { TIMELINE_MIN_CLIP_SEC } from "../../domain/constants";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import { TIMELINE_SCHEMA_VERSION } from "../../domain/timeline/types";
@@ -875,7 +875,7 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const btn = screen.getByRole("button", { name: "この位置に置く" });
     expect(btn).toBeDisabled();
-    expect(btn.title).toBe("書き出しが終わってから編集できます");
+    expect(btn.title).toBe("いま動画を書き出しています。終わってから編集してください");
   });
 
   it("断られたときは入れた値を消さない（音量の変化と同じ規準）", () => {
@@ -1617,7 +1617,9 @@ describe("TimelineProjectScreen: 選択の作法（レビュー指摘）", () =>
     fireEvent.keyDown(window, { key: "a", ctrlKey: true });
     act(() => useTimelineStore.getState().removeSelectedClips());
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(1); // 消えない
-    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED"); // 理由を出す
+    // ⚠️ 断る語彙は**画面と同じ**（#752 レビュー）＝「選んだ中に固定列のものが混ざる」という同じ
+    // 述語に2つの言い方を持たない（次の行動も「選び直す」で進める）。
+    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
   });
 
   it("選ぶと、前の部品で出た理由は消える（いまの部品の返事に見せない）", () => {
@@ -1750,10 +1752,10 @@ describe("TimelineProjectScreen: 数値欄と押せない理由（#706・#703）
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const speed = screen.getByLabelText("速さ（倍）");
     expect(speed).toBeDisabled();
-    expect(speed.title).toBe("書き出しが終わってから編集できます");
+    expect(speed.title).toBe("いま動画を書き出しています。終わってから編集してください");
     const del = screen.getByRole("button", { name: "消す" });
     expect(del).toBeDisabled();
-    expect(del.title).toBe("書き出しが終わってから編集できます");
+    expect(del.title).toBe("いま動画を書き出しています。終わってから編集してください");
     expect(screen.getByRole("button", { name: "同じものを足す" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "映像の列を足す" })).toBeDisabled();
   });
@@ -2340,7 +2342,7 @@ describe("TimelineProjectScreen: 中身を直す欄（#720）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByRole("button", { name: "文字の色" })).toBeDisabled();
     // 理由も一緒に届いていること（押せないのに理由が無い＝なぜ触れないか分からない）。
-    expect(screen.getByRole("button", { name: "文字の色" })).toHaveAttribute("title", "書き出しが終わってから編集できます");
+    expect(screen.getByRole("button", { name: "文字の色" })).toHaveAttribute("title", "いま動画を書き出しています。終わってから編集してください");
     expect(screen.getByText("フォント").parentElement?.querySelector("button")).toBeDisabled();
   });
 
@@ -2449,7 +2451,7 @@ describe("TimelineProjectScreen: 中身を直す欄（#720）", () => {
 // **どの入口からでも同じ結果**になることを画面ごしに固定する（キーだけ関門を素通りする、を作らない）。
 describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
   const one = () =>
-    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 1, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }] });
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }] });
   const key = (k: string, init: Record<string, unknown> = {}) => fireEvent.keyDown(window, { key: k, ...init });
   // ⚠️ `parentElement` で辿ると**行**に当たり、隣の欄の input を掴む（開始と長さは同じ行に並ぶ）。
   // ラベル要素そのものを基準にする（`NumberField` は `<label>` が input を包む）。
@@ -2586,6 +2588,124 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     expect(useTimelineStore.getState().doc!.clips[0].durationSec).toBe(2);
   });
 
+  it("**箱を持つ部品を1つ選んでいる間は、矢印で少しだけ動かす**（決定18・#752-9）", () => {
+    one();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().playheadSec;
+    key("ArrowRight");
+    expect(useTimelineStore.getState().doc!.clips[0].x).toBe(1); // 1px 動く
+    key("ArrowDown", { shiftKey: true });
+    expect(useTimelineStore.getState().doc!.clips[0].y).toBe(10); // Shift は 10px
+    expect(useTimelineStore.getState().playheadSec).toBe(before); // 再生位置は動かさない
+    // ⚠️ **逆向きも見る**（#752 レビュー）＝正の向きだけ固定すると、左と上の符号を取り違えても
+    // 誰も気づかない（4方向のうち2方向が「テストの外」になる）。
+    key("ArrowLeft");
+    expect(useTimelineStore.getState().doc!.clips[0].x).toBe(0);
+    key("ArrowUp", { shiftKey: true });
+    expect(useTimelineStore.getState().doc!.clips[0].y).toBe(0);
+  });
+
+  it("**まとめて選んでいるときも一緒に動かす**（個数で意味を変えない・#752 レビュー）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 3, x: 40, y: 20, w: 100, h: 50, text: "い" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("ArrowRight", { shiftKey: true });
+    const cs = useTimelineStore.getState().doc!.clips;
+    expect(cs[0].x).toBe(10);
+    expect(cs[1].x).toBe(50); // 相対の位置は崩れない
+  });
+
+  it("箱を持たない相手が混ざっていても、箱を持つものだけ動かす（#752 レビュー）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "い", status: NARRATION_STATUS.none } },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("ArrowRight");
+    expect(useTimelineStore.getState().doc!.clips[0].x).toBe(1);
+    // ⚠️ **混ざっていた相手に箱を生やさない**（読み上げに位置は無い＝保存も通らない）。
+    expect(useTimelineStore.getState().doc!.clips[1]).not.toHaveProperty("x");
+  });
+
+  it("**選んでいても見えていなければ奪わない**（画面が変わらないのに文書だけ動く、を作らない・#752 レビュー）", () => {
+    // ⚠️ 再生位置の外にある部品はキャンバスに出ていない＝動かしても**どこも変わらない**。
+    // そのまま自動保存されるので、あとから見ると理由の分からないずれになる。
+    open({ clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 5, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "あ" }] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 0 }); // 部品は 5秒から＝いま出ていない
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("ArrowRight");
+    expect(useTimelineStore.getState().doc!.clips[0].x).toBe(0); // 動かさない
+    expect(useTimelineStore.getState().playheadSec).toBeGreaterThan(0); // 再生位置は送る
+  });
+
+  it("**押し続けても取り消しは1回ぶん**（履歴の上限を数秒で流し切らない・#752 レビュー）", () => {
+    one();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    for (let i = 0; i < 8; i++) key("ArrowRight");
+    expect(useTimelineStore.getState().doc!.clips[0].x).toBe(8); // 8px 動く
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1); // 取り消しは1つ
+  });
+
+  it("選んでいないときは矢印で再生位置を送る（文脈で分かれる・#752-9）", () => {
+    one();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("ArrowRight");
+    expect(useTimelineStore.getState().playheadSec).toBeGreaterThan(0);
+    expect(useTimelineStore.getState().doc!.clips[0].x).toBe(0); // 部品は動かない
+  });
+
+  it("**動かせない部品では矢印を奪わない**（行き止まりを作らない・#752-9）", () => {
+    // ⚠️ 固定した列の部品を選んだまま奪うと、部品も動かず再生位置も送れない。
+    // ⚠️ **部品はキャンバスに出ている状態にする**（`startSec: 0`・#759 レビュー）＝出ていないと
+    // その時点で対象から外れ、**固定の判定まで届かない**（テストの名前と、実際に通る道が食い違う）。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("ArrowRight");
+    expect(useTimelineStore.getState().doc!.clips[0].x).toBe(0);
+    expect(useTimelineStore.getState().playheadSec).toBeGreaterThan(0); // 再生位置は動く
+  });
+
+  it("箱を持たない部品（読み上げ・音）では矢印を奪わない（#752-9）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 1, durationSec: 5, voice: { text: "あ", status: NARRATION_STATUS.none } }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    key("ArrowRight");
+    expect(useTimelineStore.getState().playheadSec).toBeGreaterThan(0);
+  });
+
+  it("断る理由は**画面の内側だけ**で使う（描画結果に出さない・#752-3 レビュー）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const del = screen.getByRole("button", { name: "消す" });
+    // ⚠️ 押せない理由の**組**をそのままボタンへ流すと、内部の合図が属性として描かれる
+    //（React は知らない小文字の属性を素通しする＝§2-3 の「技術用語を出さない」に触れる）。
+    expect(del.getAttribute("reason")).toBeNull();
+  });
+
   it("Delete も固定した列の部品は消せない（ボタンと同じ関門を通る）", () => {
     open({
       tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.audio }],
@@ -2595,10 +2715,12 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     key("Delete");
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(1);
-    // **押してから断られる、にもしない**＝画面側の関門で止まるので、断り文は出ない
-    //（store の二重防御まで届くと `TIMELINE_EDIT_LOCKED` が立ち、消えないうえに理由だけ出る）。
-    expect(useTimelineStore.getState().editBlocked).toBeNull();
-    // 理由はボタンの側に、押す前から出ている（押せないことも一緒に見る）。
+    // ⚠️ **キーには理由を出す**（#752-3）。以前はここで「断り文は出ない」を固定していたが、
+    // それはボタンの説明が見えている前提の書き方だった＝**キーを押した人はボタンを指していない**。
+    // 分ける `Ctrl+K` は理由を立てるのに消すだけ黙る、という非対称も消える（ADR-0026②）。
+    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
+    expect(screen.getByText(/固定を外すか、選び直してください/)).toBeInTheDocument();
+    // 理由はボタンの側にも、押す前から出ている（押せないことも一緒に見る）。
     expect(screen.getByRole("button", { name: "消す" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "消す" }).getAttribute("title")).toContain("固定を外すか");
   });
@@ -3035,7 +3157,36 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const left = (screen.getByRole("button", { name: "文字の操作" }) as HTMLElement).style.left;
-    expect(left).toContain("- var(--clip-menu-w) - var(--clip-handle-w)");
+    // ⚠️ **避ける幅は、取っ手が実際に取っている幅と同じもの**を見る（#752-7）。
+    // 見た目の幅を書き写すと、当たり判定を広げたときに**「⋮」が取っ手を覆う**（#742/#743 の裏返し）。
+    // どちらを見ているかは CSS から引く＝書き写しをテスト側でも作らない。
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8");
+    const handleStart = css.indexOf(".timeline-clip-handle {");
+    const handleBlock = css.slice(handleStart, css.indexOf("}", handleStart));
+    const widthVar = /width:\s*var\((--[\w-]+)\)/.exec(handleBlock)?.[1];
+    expect(widthVar).toBeTruthy();
+    expect(left).toContain(`- var(--clip-menu-w) - var(${widthVar})`);
+  });
+
+  it("CSS の既定は**TS の値と一致する**（片方だけ変えて黙ってずれない・#752 レビュー）", () => {
+    // ⚠️ 流し込みは必ず行われるので既定は普通は使われないが、**書き写しである以上ずれ得る**。
+    // ずれると、この file を単独で読んだときの見え方と計算が食い違う（`--timeline-label-w` と同じ流儀）。
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8");
+    const decl = (name: string): string | undefined => new RegExp(`${name}:([^;]+);`).exec(css)?.[1].trim();
+    expect(decl("--timeline-label-w")).toBe(`${TIMELINE_LABEL_W_PX}px`);
+    expect(decl("--clip-menu-w")).toBe(`${CLIP_MENU_W_PX}px`);
+    expect(decl("--clip-handle-w")).toBe(`${CLIP_HANDLE_W_PX}px`);
+    expect(decl("--clip-handle-hit-w")).toBe(`${CLIP_HANDLE_HIT_W_PX}px`);
+  });
+
+  it("取っ手の**当たり判定は見た目より広い**（指が乗る前に本体を掴まない・#752-7）", () => {
+    // 型＝「見た目の2倍以上」。見た目は擬似要素で外側の端に出すので、**太く見せずに**掴みやすくする。
+    const css = readFileSync(resolve(__dirname, "../components/timeline.css"), "utf8");
+    const laneBlock = css.slice(css.indexOf(".timeline-lane {"), css.indexOf("}", css.indexOf(".timeline-lane {")));
+    const px = (name: string): number => Number(new RegExp(`${name}:\\s*(\\d+)px`).exec(laneBlock)?.[1]);
+    expect(px("--clip-handle-hit-w")).toBeGreaterThanOrEqual(px("--clip-handle-w") * 2);
+    // 見た目の帯は擬似要素で描く＝本体（当たり判定）そのものを塗ると太く見える。
+    expect(css).toContain(".timeline-clip--selected .timeline-clip-handle::after");
   });
 
   it("置けないときの赤は**選択の青に勝つ**（同じ強さだと後に載る青が残る）", () => {
@@ -3511,6 +3662,65 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     const lane = container.querySelector(".timeline-lane") as HTMLElement;
     fireEvent.click(lane); // 列の余白で離した＝「何もない所を押した」経路
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
+  });
+
+  it("**書き出し中は再生を始めない**（押しても何も起きない、を作らない・#752-6）", () => {
+    // ⚠️ 成果物は壊れないが、音が鳴り出す入口だけ開いていた（編集も声の作成も塞いであるのに）。
+    two();
+    useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false } });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const play = screen.getByRole("button", { name: "再生" });
+    expect(play).toBeDisabled();
+    expect(play.getAttribute("title")).toContain("終わってから再生できます"); // 押せない理由を出す
+    fireEvent.keyDown(window, { key: " " }); // キーからも始まらない（見た目を持たない入口）
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+    // ⚠️ **キーで断るなら理由を出す**（#752 レビュー）＝`Delete`・`Ctrl+K` は喋るのに `Space` だけ
+    // 黙ると、押せない見た目を持たない入口で挙動が割れる。
+    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_PLAY_EXPORTING");
+    expect(screen.getByText(/終わってから再生できます/)).toBeInTheDocument();
+  });
+
+  it("走っている最中の「停止」は塞がない（止められないまま音が流れる、を作らない・#752 レビュー）", () => {
+    two();
+    useTimelineStore.setState({
+      isPlaying: true,
+      exportRun: { phase: "rendering", percent: 0, message: null, cancelling: false },
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const stop = screen.getByRole("button", { name: "停止" });
+    expect(stop).not.toBeDisabled();
+    fireEvent.click(stop);
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+
+  it("「⋮」の位置は**幅の条件だけ**で決める（再生の開始・停止で跳ばない・#752 レビュー）", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { rerender } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const menuLeft = () => (screen.getByRole("button", { name: "あの操作" }) as HTMLElement).style.left;
+    const before = menuLeft();
+    act(() => { useTimelineStore.setState({ isPlaying: true }); });
+    rerender(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText("", { selector: ".timeline-clip-handle" })).toBeNull(); // 取っ手は消える（意図どおり）
+    expect(menuLeft()).toBe(before); // 位置は動かない
+  });
+
+  it("押せるときはキーの割り当てを添える（あることを知らせる・#752-10）", () => {
+    two();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 1 }); // 描く前に選んでおく
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "再生" }).getAttribute("title")).toContain("（Space）");
+    expect(screen.getByRole("button", { name: "ここで分ける" }).getAttribute("title")).toContain("（Ctrl+K）");
+  });
+
+  it("**再生中は帯を掴めない**（吸着の寄り先が掴んだ時点で止まる・#752-4）", () => {
+    // ⚠️ 置く操作は既に塞いであるのに掴む方だけ通っていた（同じ理由なら同じ挙動・ADR-0026②）。
+    two();
+    useTimelineStore.setState({ isPlaying: true });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(band("あ").className).not.toContain("timeline-clip--editable"); // 見た目も掴めない
+    drag(band("あ"), 36 * 8);
+    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0); // 動かない
   });
 
   it("掴んでいる間は**ボタンでも**倍率を変えられない（帯が指から離れる）", () => {
