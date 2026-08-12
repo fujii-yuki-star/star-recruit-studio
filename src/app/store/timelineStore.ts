@@ -268,6 +268,12 @@ export interface TimelineState {
    */
   setClipBoxFor: (clipId: string, patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }) => void;
   /**
+   * **id で受ける**文字の書き換え（#746-2）。キャンバスの二度押し編集は**押した相手が id で決まる**ので、
+   * 選択に効かせると（打っている最中に選択が変わったとき）**別の部品の文字が書き換わる**
+   *（`setClipBoxFor` と同じ流儀）。
+   */
+  setClipTextFor: (clipId: string, text: string) => void;
+  /**
    * 選んだ帯を再生位置で分ける（#686 段階4・ADR-0034 決定16）。
    * 分けたら**後半を選び直す**（他社の型＝続きを触りたい手が自然に繋がる）。
    */
@@ -686,6 +692,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     applyEdit(set, get, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
   setClipBoxFor: (clipId, patch) =>
     applyEditTo(set, get, clipId, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
+  setClipTextFor: (clipId, text) => applyEditTo(set, get, clipId, (d, id) => setVisualClipContent(d, id, { text })),
   splitSelectedClip: (atSec) => {
     const { doc, selectedClipIds } = get();
     if (!doc || selectedClipIds.length !== 1) return;

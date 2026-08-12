@@ -119,10 +119,10 @@ import type { CropAlignX, CropAlignY } from "../../domain/enums";
 import type { Asset } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
+import { isHiddenByGroup } from "../../domain/group/compose";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import type { FreeElement } from "../../domain/project/types";
-import type { FreeElementKind } from "../../domain/enums";
-import { clipIsLiveAt } from "../../renderer/timelineLayout";
+import { clipIsLiveAt, freeElementFromClip, isItemOfClip } from "../../renderer/timelineLayout";
 import { SNAP_THRESHOLD_PX, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
 import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 
@@ -316,7 +316,7 @@ function keyframeSummary(k: Keyframe): string {
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
-    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
+    setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
@@ -1045,8 +1045,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 矢印で動かす相手が**同じ規則**を見る＝選んでいるだけで見えていない部品（再生位置の外・
    * 出さない列）を、画面のどこも変わらないまま動かして保存する、を作らない。
    */
-  const isOnCanvas = (c: TimelineClip): boolean =>
-    !!doc && canHaveBox(c.kind) && clipIsLiveAt(c, frameTimeSec(doc, playheadSec)) && !trackOf(c.trackId)?.hidden;
+  const isOnCanvas = (c: TimelineClip): boolean => {
+    if (!doc || !canHaveBox(c.kind) || !clipIsLiveAt(c, frameTimeSec(doc, playheadSec))) return false;
+    // ⚠️ **列の条件は描画と同じ形で見る**（#746 レビュー）＝`layoutTimelineAt` は「映像の列を、実在する
+    // ものだけ、隠れていないものだけ」回している。隠れているかだけ見ていると、**音の列に載った映像部品**や
+    // **消えた列を指したままの部品**が、描かれないのに枠だけ出て掴める（V22/V23 は読込を止めない）。
+    const track = trackOf(c.trackId);
+    if (!track || track.kind !== TRACK_KIND.visual || track.hidden) return false;
+    // ⚠️ **隠した部品・隠したまとまりも除く**（#746-6）＝描画は除いているので、ここで見ないと
+    // **描かれていないものの枠が出て掴める**（触れるのに動画には出ない）。
+    return !c.hidden && !isHiddenByGroup(c.id, doc.groups ?? []);
+  };
   /**
    * 掴めるか（#686 レビュー）。**見た目（`cursor`）と、掴む処理を始めるかが同じものを見る**。
    *
@@ -1138,6 +1147,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 置けない所では**寄せない**＝ゴーストの色で知らせ、離したら**元の位置へ戻す**（決定10）。
    * 判定は domain の `moveClipIssue`／`trimClipIssue`＝**ゴーストの色と離した結果が同じ規則**。
    */
+  /** キャンバスで**文字を直している**部品の id（#746-2）。SVG 側の同じ文字を伏せる（二重表示回避）。 */
+  const [editingCanvasId, setEditingCanvasId] = useState<string | null>(null);
   /** 吸着した先（#686 段階4）＝縦の点線を出す位置。吸着していなければ `null`。 */
   const [snapGuideSec, setSnapGuideSec] = useState<number | null>(null);
   const [clipDrag, setClipDrag] = useState<
@@ -1285,11 +1296,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ? doc.clips
         .filter((c) => isOnCanvas(c))
         .map((c) => ({
-          ...resolveClipBox(c, canvasDims),
-          id: c.id,
-          kind: c.kind as FreeElementKind,
+          // ⚠️ **描画と同じ変換を通す**（#746-2）＝手で作り直すと文字・書体・帯が抜け、
+          // インライン編集の見た目だけ実描画と割れる（`freeElementFromClip` は描画の入口と同じもの）。
+          ...freeElementFromClip(c, canvasDims),
           // 固定した列の部品は**掴めない**（帯と同じ＝同じ状態を場所で変えない・ADR-0026②）。
-          ...(trackOf(c.trackId)?.locked ? { locked: true } : {}),
+          // ⚠️ 見るのは**列の固定だけ**＝domain の関門（動かす・中身を変える・消す）も列だけを見るので、
+          // 部品自身の `locked` をここでだけ効かせると、キャンバスだけ理由なく掴めない、になる。
+          locked: trackOf(c.trackId)?.locked ?? false,
         }))
     : [];
   /** キャンバスからの編集は **`setClipBox` と同じ入口**（数値欄と置けない条件を割らない）。 */
@@ -1656,13 +1669,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   };
   /** ボタンの見た目（説明はここで作る＝押せるときはキーの割り当てを添える・#752-10）。 */
   const splitGuard = editGuard(splitExtra());
-
   const singleClipMenuGuard: { disabled?: boolean; disabledHint?: string } =
     selectedClipIds.length > 1
       ? { disabled: true, disabledHint: "1つだけ選ぶと使えます" }
       : editGuard().disabled
         ? { disabled: true, disabledHint: editGuard().title }
         : {};
+  /**
+   * メニューの「同じものを足す」の関門（#746-1）。**帯とキャンバスが同じ式を見る**
+   * ＝多重選択の条件を片方で落とすと、押せる見た目のまま**押しても無反応**になる
+   *（複製は選択がちょうど1件でないと store が何もせず理由も持たない）。
+   */
+  const duplicateMenuGuard: { disabled?: boolean; disabledHint?: string } = {
+    ...singleClipMenuGuard,
+    ...(duplicateExtra().disabled ? { disabled: true, disabledHint: duplicateExtra().hint } : {}),
+  };
   const clipMenuItems: ContextMenuItem[] = menuClip
     ? [
         // ⚠️ **1つのときだけ**（#701 レビュー）＝複製は store が「選択がちょうど1件」でないと**何もせず
@@ -1670,8 +1691,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // 「選んだ部品」の欄と同じ（`editGuard`）＝同じ状態を画面の場所で別の言い方にしない（ADR-0026②）。
         {
           label: "同じものを足す",
-          ...singleClipMenuGuard,
-          ...(duplicateExtra().disabled ? { disabled: true, disabledHint: duplicateExtra().hint } : {}),
+          ...duplicateMenuGuard,
           onSelect: duplicateSelectedClip,
         },
         {
@@ -1725,8 +1745,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         },
       ]
     : [];
-  const svg = layout
-    ? layoutToSvg(layout, {
+  // インライン編集中の部品は**SVG から伏せる**（#746-2）＝編集欄が同じ体裁・同じ位置に文字を出すので、
+  // 伏せないと二重に見える（場面形式の `hideItemIds` と同じ後段の間引き＝正準の結果は変えない）。
+  const shownLayout = layout && editingCanvasId
+    ? { ...layout, items: layout.items.filter((i) => !isItemOfClip(i.id, editingCanvasId)) }
+    : layout;
+  const svg = shownLayout
+    ? layoutToSvg(shownLayout, {
         assetSrc: (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined),
         // クレジット（ADR-0003）は書き出しで**焼き込まれる**ので、プレビューにも同じものを出す
         // ＝見えていたものと違う動画が出てこない（ADR-0001）。その時刻にしゃべっている声のキャラ。
@@ -1785,6 +1810,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               // **1回のドラッグ＝1回の取り消し**（決定20）。動かすたびに履歴を積まない。
               onInteractionStart={beginHistoryGroup}
               onInteractionEnd={endHistoryGroup}
+              // ⚠️ **右クリックで黙らない**（#746-1）＝帯には「同じものを足す／消す」があるのに、
+              // キャンバスだけ何も出ないと**同じ操作が場所によって在ったり無かったり**になる。
+              // 関門も文言も帯と同じもの（決定17 が禁じるのは「前へ／奥へ」だけ＝そちらは渡さない）。
+              onDuplicate={() => duplicateSelectedClip()}
+              onDelete={() => requestRemoveSelected()}
+              menuGuards={{
+                duplicate: duplicateMenuGuard,
+                delete: { disabled: removeGuard?.disabled, disabledHint: removeGuard?.title },
+              }}
+              // ⚠️ **文字は二度押しで直せる**（#746-2）＝他社の型。値は「中身」の欄でも触れるが、
+              // 同じ部品で画面ごとに手が変わる（ADR-0026②）。編集中は下の SVG を伏せる（二重表示回避）。
+              onChangeText={(id: string, text: string) => setClipTextFor(id, text)}
+              onEditingIdChange={setEditingCanvasId}
+              textFontFamily={fontFamilyForId(doc.videoSettings.fontId)}
             />
           )}
         </div>

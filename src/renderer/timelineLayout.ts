@@ -145,7 +145,11 @@ function applySimilarity(item: LayoutItem, sim: Similarity): void {
 
 
 /** 自由配置のクリップ（slot/text/shape/subtitle）を FREE 要素へ写す。空間の語彙は同じもの（11 §7.6）。 */
-function freeElementFromClip(clip: TimelineClip, canvas: { width: number; height: number }): FreeElement {
+/**
+ * クリップを**自由配置の要素**として見る（描画とキャンバスの操作レイヤが同じ変換を通る・#746-2）。
+ * 手で作り直すと、文字・書体・帯が抜けて**編集中だけ見た目が変わる**（インライン編集が実描画と割れる）。
+ */
+export function freeElementFromClip(clip: TimelineClip, canvas: { width: number; height: number }): FreeElement {
   // **持っていくものを名指しする**（要らないものを除外する形にしない）＝`TimelineClip` に時間や音の
   // フィールドが増えたとき、rest 経由で FreeElement へ黙って流れ込まない。空間の語彙は 11 §7.6。
   const el: FreeElement = { ...resolveClipBox(clip, canvas), id: clip.id, kind: clip.kind as FreeElementKind };
@@ -203,6 +207,15 @@ export interface TimelineLayoutOptions {
  *   α の出どころがグループなら**グループ全体**が1枚＝FREE 場面のフェードで要素どうしが透けない。
  * - 隠したトラック・隠したグループのメンバーは描かない（音のトラックは絵を持たないので対象外）。
  */
+/**
+ * 描いたアイテムの id から**どの部品のものか**を見分ける（#746-2）。
+ * ⚠️ **前置きの作り方はこの file の中で1つ**（下でアイテムに付けている前置きと対）＝
+ * 呼び出し側で組み立て直すと、付け方を変えたときに黙って外れる（伏せたい絵が伏せられない）。
+ */
+export function isItemOfClip(itemId: string, clipId: string): boolean {
+  return itemId === `${clipId}__bg` || itemId.startsWith(`${clipId}/`);
+}
+
 export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: TimelineLayoutOptions): SceneLayout {
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
   const groups = doc.groups ?? [];
