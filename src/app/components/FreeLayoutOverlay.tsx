@@ -15,7 +15,7 @@ import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
 import { hexToRgb } from "../../domain/format/color";
 import { FONT_WEIGHT, TEXT_ALIGN } from "../../domain/enums";
 import { claimEscape } from "../hooks/escapeOwners";
-import { registerExternalDrag } from "../hooks/usePointerDrag";
+import { DRAG_START_PX, registerExternalDrag } from "../hooks/usePointerDrag";
 
 // 仕上がり確認（ScenePreview）に重ねる自由配置の操作レイヤ（Phase 4b / 直接編集 #174）。
 // ScenePreview は width:100% / aspect-ratio をテンプレ canvas（向き）に合わせて SVG を充填するため
@@ -162,14 +162,64 @@ export function FreeLayoutOverlay({
   // 編集へ入る。座標も見るのはブラウザの dblclick 同様（間にドラッグを挟んだ二度押しを編集と誤認しない）。
   const lastTapRef = useRef<{ id: string; t: number; x: number; y: number } | null>(null);
   const claimRef = useRef<(() => void)[]>([]);
-  const claimDrag = (): void => {
+  /**
+   * **しきい値を越えたか**（#752-8）＝越えるまでは「押しただけ」で、まだ何も動かさない。
+   * 掴んだ位置は押した点（`begin*` と範囲選択の両方が入れる）。
+   */
+  const startedRef = useRef(false);
+  const startPointRef = useRef({ x: 0, y: 0 });
+  /**
+   * **掴んだ指**（#752-8）。別の指の動き・離しをこの掴みに混ぜない
+   *（混ぜると、2本目の指を離した所へ落ちる＝正典が名指しで禁じている挙動）。
+   */
+  const pointerIdRef = useRef<number | null>(null);
+  /** その催しが**掴んだ指のもの**か（掴んでいなければ素通しでよい）。 */
+  const minePointer = (e: { pointerId: number }): boolean =>
+    pointerIdRef.current == null || e.pointerId === pointerIdRef.current;
+  /** 掴んでいる最中か（`claimDrag`〜`releaseDrag`）。**同じ後始末を二度走らせない**ための印。 */
+  const activeRef = useRef(false);
+  const claimDrag = (e: { clientX: number; clientY: number; pointerId: number }): void => {
+    // ⚠️ **前の掴みが残っていたら先に閉じる**（`usePointerDrag` の「走っているものがあればやめる」と同じ・
+    // #752-8）。離したのを取り逃がした直後にもう一度掴むと、名乗りを**外さずに上書き**していた
+    // ＝`Escape` と取り消しが以後ずっと効かなくなり、履歴のまとめも開いたままになる
+    //（以後の編集が全部ひとつながりになり、取り消しが1回で全部戻る）。
+    if (activeRef.current) cancelDrag(); // 「掴んでいるか」を聞く相手は1つ（`activeRef`）
+    startedRef.current = false;
+    startPointRef.current = { x: e.clientX, y: e.clientY };
+    pointerIdRef.current = e.pointerId;
+    activeRef.current = true;
+    // ⚠️ **`Escape` の受け持ちも「掴んでいる」も、押した時点から**（#752 レビュー）。
+    // `usePointerDrag` は数に入れるのをしきい値の後にしているが、こちらは **`begin*` が押した時点で
+    // 履歴のまとめ（`onInteractionStart`）を開ける**ので、そこをずらすと**まとめが開いている間だけ
+    // `Ctrl+Z` が通る**穴になる＝戻した文書の上に、押した時点（戻す前）の控えを起点にした位置が
+    // 書き戻る（しかも `future` を捨てるので「やり直す」でも戻せない）。
+    // **しきい値の役目は「まだ位置を書かない」ことだけ**（`handleMove` 側で足りる）。
     claimRef.current = [claimEscape(), registerExternalDrag()];
   };
+  /** **少し動かした＝ここから実際に動かす**（#752-8）。名乗りは押した時点で済んでいる。 */
+  const markStarted = (): void => {
+    startedRef.current = true;
+  };
+  /**
+   * 名乗りを**すべて外す**（#685 レビュー）。外し忘れると `Escape` も取り消しも効かなくなるので、
+   * **やめる・離す・画面を離れる**のすべてで通す。
+   */
   const releaseDrag = (): void => {
     claimRef.current.forEach((r) => r());
     claimRef.current = [];
+    startedRef.current = false;
+    pointerIdRef.current = null;
+    activeRef.current = false;
   };
-  useEffect(() => () => { if (dragRef.current) onInteractionEnd?.(); releaseDrag(); }, [onInteractionEnd]);
+  // ⚠️ **後始末は画面を離れるときだけ**（#752-8）。`onInteractionEnd` を依存に書くと、**渡された関数の
+  // 中身が変わるたび**に後始末が走る＝掴んでいる最中に走れば名乗りが落ち、`Escape` も取り消しの停止も
+  // 効かなくなる。いまの呼び出し3か所は安定した関数を渡しているので起きていないが、**それは呼ぶ側の
+  // 都合**（1か所がインラインに変わるだけで黙って壊れる）＝この効果が言いたいのは「画面を離れるとき」
+  // なので、依存でそう書く。鮮度は latest-ref で保つ（この file の `editingNotifyRef` と同じ形）。
+  // `releaseDrag` は ref しか触らないので、初回の実体を掴んだままで正しく動く。
+  const interactionEndRef = useRef(onInteractionEnd);
+  useEffect(() => { interactionEndRef.current = onInteractionEnd; });
+  useEffect(() => () => { if (dragRef.current) interactionEndRef.current?.(); releaseDrag(); }, []);
   // 主＝最後に選択した要素（リサイズハンドルはこれだけに出す。複数同時リサイズは曖昧なので非対応）。
   const primaryId = selectedIds.length > 0 ? selectedIds[selectedIds.length - 1] : null;
   // 複数同時リサイズ（#274）：選択中の非ロック・非表示要素のグループ bbox を出し、その角ハンドルで一括拡縮する。
@@ -257,7 +307,7 @@ export function FreeLayoutOverlay({
     const width = ref.current?.clientWidth ?? canvasW;
     // capture は best-effort（環境により失敗しうる）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
-    claimDrag();
+    claimDrag(e);
     onInteractionStart?.(); // 連続移動/リサイズを Undo の1ステップに合成する境界（開始・#211）
     setDrag({
       id: el.id, mode, corner,
@@ -282,7 +332,7 @@ export function FreeLayoutOverlay({
     setEditingId(null);
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
-    claimDrag();
+    claimDrag(e);
     onInteractionStart?.(); // 連続リサイズを Undo の1ステップに合成（#211）
     setDrag({
       id: "__group__", mode: "group-resize", corner,
@@ -302,7 +352,7 @@ export function FreeLayoutOverlay({
     setMenu(null);
     setEditingId(null);
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
-    claimDrag();
+    claimDrag(e);
     onInteractionStart?.(); // 連続回転を Undo の1ステップに合成（#211）
     setDrag({
       id: el.id, mode: "rotate",
@@ -324,7 +374,7 @@ export function FreeLayoutOverlay({
     if (group.locked) return; // ロック中は選択のみ
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
-    claimDrag();
+    claimDrag(e);
     onInteractionStart?.();
     setDrag({
       id: "__group__", mode: "group-move", groupId: group.id,
@@ -345,7 +395,7 @@ export function FreeLayoutOverlay({
     setMenu(null);
     setEditingId(null);
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
-    claimDrag();
+    claimDrag(e);
     onInteractionStart?.();
     const p = toCanvas(e.clientX, e.clientY);
     const dist = Math.hypot(p.x - frame.cx, p.y - frame.cy) || 1; // 0 除算防止
@@ -366,7 +416,7 @@ export function FreeLayoutOverlay({
     setMenu(null);
     setEditingId(null);
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
-    claimDrag();
+    claimDrag(e);
     onInteractionStart?.();
     setDrag({
       id: "__group__", mode: "group-rotate", groupId: group.id, groupCenter: { x: frame.cx, y: frame.cy },
@@ -376,6 +426,18 @@ export function FreeLayoutOverlay({
   };
 
   const handleMove = (e: ReactPointerEvent) => {
+    if (!drag && !marquee) return; // 掴んでいないときの素通り（この関数はただの移動でも呼ばれる）
+    if (!minePointer(e)) return; // **掴んだ指だけ見る**（別の指の動きで一緒に動かさない）
+    // ⚠️ **押していないのに動いている**＝どこかで `pointerup` を取り逃がした（画面の外で離した・
+    // 別の操作に取られた）。放っておくと影が指に付いたままになり、**次に無関係な所で離した瞬間**に
+    // そこへ置かれる。画面ぜんぶで共通の作法（`usePointerDrag`）と同じ救済を入れる（#752-8）。
+    if (e.buttons === 0) { cancelDrag(); return; }
+    // ⚠️ **少し動かすまで掴まない**（同・`DRAG_START_PX`）＝押しただけ・手の震えの1px で
+    // 位置を書き換えて取り消しを積まない。越えるまでは何もしない（選択は `pointerdown` で済んでいる）。
+    if (!startedRef.current) {
+      if (Math.hypot(e.clientX - startPointRef.current.x, e.clientY - startPointRef.current.y) < DRAG_START_PX) return;
+      markStarted();
+    }
     // 範囲選択（マーキー）中：矩形を広げ、交差する要素を選択集合に反映（#274）。
     if (marquee) {
       e.preventDefault();
@@ -454,19 +516,20 @@ export function FreeLayoutOverlay({
   };
 
   /**
-   * 掴んでいる間だけ立てる名乗り（#685 レビュー）。**画面ぜんぶで共通の作法**（`usePointerDrag`）に
-   * 合わせる＝`Escape` を受け持っている（外側の解除まで走らせない）・「いま掴んでいる」を数えに入れる
-   * （掴んでいる最中の取り消しを止める）。外し忘れると `Escape` も取り消しも効かなくなるので、
-   * **やめる・離す・画面を離れる**のすべてで外す。
-   */
-  /**
    * 掴むのを**やめる**（`Escape`／`pointercancel`）＝**開始時の形へ戻す**（決定10・`usePointerDrag` の作法）。
    * 戻す先はドラッグ開始時に控えた値そのもの（`start`／`starts`／`groupStarts`／`startTransform`）。
    */
   const cancelDrag = (): void => {
+    if (!activeRef.current) return; // 同じやめるを二度走らせない（root と window の両方から来る）
     const d = dragRef.current;
+    // ⚠️ **掴む前にやめたときは書き戻さない**（#752-8）＝しきい値を越えていない＝まだ1度も
+    // 動かしていないので、戻すと「何も変わらない更新」を1件流すだけになる（`releaseDrag` が
+    // 下でこの印を落とすので**先に読む**）。合成境界の終わり（`onInteractionEnd`）は越え方に
+    // 依らず必ず呼ぶ＝`begin*` が押した時点で開けているので、閉じないと以後の編集が全部つながる。
+    const started = startedRef.current;
     setMarquee(null);
     if (d) {
+      if (!started) { setDrag(null); setGuides({ x: null, y: null }); onInteractionEnd?.(); releaseDrag(); return; }
       if (d.mode === 'move') onMoveMany((d.starts ?? [{ id: d.id, x: d.start.x, y: d.start.y }]).map((s) => ({ ...s })));
       else if (d.mode === 'group-move' || d.mode === 'group-scale' || d.mode === 'group-rotate') {
         if (d.groupId && d.startTransform) onGroupTransform?.(d.groupId, d.startTransform);
@@ -489,34 +552,50 @@ export function FreeLayoutOverlay({
   // ⚠️ ref を挟まず closure を固定すると、掴んでいる最中に親が渡し直した `onMoveMany` 等を**古いまま**
   // 呼ぶ（呼び出し側はインラインの関数を渡している）。速さのために鮮度を落とさない。
   const dragging = drag != null || marquee != null;
-  const cancelRef = useRef(cancelDrag);
-  useEffect(() => { cancelRef.current = cancelDrag; });
+  // ⚠️ 初期値に関数そのものを入れない＝`endDrag` はこの下で定義するので、参照すると読み込めない。
+  // 中身は下の効果で毎レンダー入れ替える（鮮度は落とさない）。
+  const cancelRef = useRef<() => void>(() => {});
+  const endRef = useRef<(e: { pointerId: number }) => void>(() => {});
+  const mineRef = useRef<(e: { pointerId: number }) => boolean>(() => true);
   useEffect(() => {
     if (!dragging) return;
     const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.stopPropagation(); cancelRef.current(); } };
-    const onCancel = (): void => cancelRef.current();
+    const onCancel = (ev: PointerEvent): void => { if (mineRef.current(ev)) cancelRef.current(); };
+    // ⚠️ **離しは window でも拾う**（#752 レビュー）＝指を捕まえる仕掛け（`setPointerCapture`）は
+    // 落ちることがあり、その回に枠の外で離すと `pointerup` がこの枠へ来ない。放っておくと名乗りが
+    // **次に掴むまで残り**、`Escape`・取り消し・倍率の変更が黙って効かなくなる。
+    // 枠の上で離した回は先に枠の受け口が閉じるので、こちらは何もしない（掴んでいる印で二度走らない）。
+    const onUp = (ev: PointerEvent): void => { if (mineRef.current(ev)) endRef.current(ev); };
     window.addEventListener('keydown', onKey, true); // 外側の `Escape` より先に受ける
     window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('pointerup', onUp);
     return () => {
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('pointerup', onUp);
     };
   }, [dragging]);
 
-  const endDrag = (e: ReactPointerEvent) => {
+  const endDrag = (e: { pointerId: number }) => {
+    if (!activeRef.current || !minePointer(e)) return; // 掴んだ指の1回だけ（別の指でそこへ落とさない）
     // 範囲選択（マーキー）の終了：矩形を消す（選択は move 中に確定済み・#274）。
     if (marquee) {
       setMarquee(null);
       try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      releaseDrag(); // 名乗り（`Escape`・掴んでいる数）を必ず外す＝外し忘れると以後ずっと効かない
       return;
     }
-    if (!drag) return;
+    // ⚠️ ここも名乗りを外して抜ける＝**外さずに戻る出口を作らない**（#752 レビュー）。
+    if (!drag) { releaseDrag(); return; }
     try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
     setDrag(null);
     setGuides({ x: null, y: null }); // ドラッグ終了でガイド線を消す
     releaseDrag();
     onInteractionEnd?.(); // 連続移動/リサイズの合成境界（終了・#211）
   };
+
+  // 上の window 側の受け口が呼ぶ中身を毎レンダー入れ替える（`endDrag` を定義した後に置く）。
+  useEffect(() => { cancelRef.current = cancelDrag; endRef.current = endDrag; mineRef.current = minePointer; });
 
   // 右クリック：対象を選択しカーソル位置にメニューを開く（画面端でクランプ）。
   // 要素押下のルーティング（#525-4 二度押し編集／#525-5 ドリルイン／通常ドラッグ）。要素 div と**グループ枠**
@@ -643,7 +722,9 @@ export function FreeLayoutOverlay({
       }}
       onPointerMove={handleMove}
       onPointerUp={endDrag}
-      onPointerCancel={endDrag}
+      // ⚠️ **`pointercancel` は「やめる」**＝元の形へ戻す（#752 レビュー）。確定（`endDrag`）へ繋ぐと、
+      // 「やめた」のに掴んだ所へ置かれる（この関数の doc と決定10 に反する）。
+      onPointerCancel={(e) => { if (minePointer(e)) cancelDrag(); }}
       // 何もない所を押したら選択解除＋編集/メニューを閉じ、範囲選択（マーキー）を開始（要素/ハンドルの onPointerDown は stopPropagation 済み）。
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
@@ -653,6 +734,7 @@ export function FreeLayoutOverlay({
         // 範囲選択（マーキー）開始：空白ドラッグで矩形を引き交差要素を選択（#274）。
         const p = toCanvas(e.clientX, e.clientY);
         try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+        claimDrag(e); // 範囲選択も**同じ作法**（しきい値・取り逃がしの救済・`Escape` の受け持ち）
         setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
       }}
       // 空白部分の右クリックはブラウザ既定メニューだけ抑止する。
