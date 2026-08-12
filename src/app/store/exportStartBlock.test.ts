@@ -24,7 +24,7 @@ const doc = (over: Partial<TimelineProject> = {}): TimelineProject => ({
 const base = {
   doc: doc(),
   isImporting: false,
-  generatingVoiceClipId: null,
+  voiceRunning: false,
   knownTemplateIds: new Set<string>(),
   otherExportRunning: false,
   canExportHere: true,
@@ -41,7 +41,7 @@ describe('exportStartBlock（書き出しを始められるか）', () => {
 
   it('理由をそれぞれ返す', () => {
     expect(exportStartBlock({ ...base, isImporting: true })?.message).toContain('取り込み中');
-    expect(exportStartBlock({ ...base, generatingVoiceClipId: 'clip_009' })?.message).toContain('声を作成中');
+    expect(exportStartBlock({ ...base, voiceRunning: true })?.message).toContain('声を作成中');
     expect(exportStartBlock({ ...base, otherExportRunning: true })?.message).toBeTruthy();
     expect(exportStartBlock({ ...base, canExportHere: false })).toMatchObject({ phase: 'unsupported' });
     // 文書の中身の理由（何も置いていない）。
@@ -50,8 +50,8 @@ describe('exportStartBlock（書き出しを始められるか）', () => {
 
   it('**直せる理由を先に出す**（取り込み中 → 声の作成中 → ほかの書き出し）', () => {
     // 同時に当てはまるとき、先に片づけられるものから出す＝直しても次の理由が出て堂々巡り、を避ける。
-    expect(exportStartBlock({ ...base, isImporting: true, generatingVoiceClipId: 'c' })?.message).toContain('取り込み中');
-    expect(exportStartBlock({ ...base, generatingVoiceClipId: 'c', otherExportRunning: true })?.message).toContain('声を作成中');
+    expect(exportStartBlock({ ...base, isImporting: true, voiceRunning: true })?.message).toContain('取り込み中');
+    expect(exportStartBlock({ ...base, voiceRunning: true, otherExportRunning: true })?.message).toContain('声を作成中');
   });
 
   it('理由の**出どころ**を返す（画面が二重に出さないための拠り所・#729 レビュー）', () => {
@@ -59,7 +59,7 @@ describe('exportStartBlock（書き出しを始められるか）', () => {
     // 画面側が数え上げ直す（例：一覧が空かどうかで判定する）と、この関数の判定順を推測することになり、
     // 順を入れ替えた瞬間に**同じ文が二重に出る**。属性として返し、画面はそれに従う。
     expect(exportStartBlock({ ...base, isImporting: true })?.source).toBe('situation');
-    expect(exportStartBlock({ ...base, generatingVoiceClipId: 'c' })?.source).toBe('situation');
+    expect(exportStartBlock({ ...base, voiceRunning: true })?.source).toBe('situation');
     expect(exportStartBlock({ ...base, otherExportRunning: true })?.source).toBe('situation');
     expect(exportStartBlock({ ...base, canExportHere: false })?.source).toBe('situation');
     expect(exportStartBlock({ ...base, doc: doc({ clips: [] }) })?.source).toBe('content');

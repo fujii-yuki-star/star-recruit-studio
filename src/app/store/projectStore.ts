@@ -53,6 +53,7 @@ import { bakeSizeBytes, copyBakedFiles } from "../../infrastructure/bakeFs";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
+import { emitProjectDeleted } from "./projectDeletion";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
@@ -887,12 +888,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 書き出し中に当該（開いている）プロジェクトを消すと、素材ファイルが読取り中に消えて
     // 写真の抜けた MP4 が正常完了してしまう（#379）。開いていない別プロジェクトの削除は安全なので許可。
     if (isExportBusy(get().exportRun.phase) && get().meta.projectId === projectId) return;
+    // ⚠️ **消す前に知らせる**（#755 の `/canon-check`）。消し終わってから知らせると、
+    // **削除している最中**に非同期の着地（声の完成・素材の取り込み）が保存でき、
+    // `save_project` がフォルダごと作り直して**素材と声だけ消えた動画が一覧へ戻る**。
+    // 消せなかったときは開き直してもらう（壊れた動画を一覧に残すより軽い）。
+    emitProjectDeleted(projectId);
     await deleteProjectDoc(projectId);
     // 削除したのが最後に開いたプロジェクトなら、次回起動の自動復元対象から外す（消えたものを開こうとしない）。
     if (getLastProjectId() === projectId) clearLastProjectId();
     // 開いているプロジェクトを消したら編集状態も新規化する（#383）。そのままだと自動保存（useAutoSave）が
     // 同じ projectId を書き戻し、「元に戻せません」の説明に反して一覧へ復活してしまう。書き出し中は上でブロック済み。
     if (get().meta.projectId === projectId) get().newProject();
+
   },
   estimateBake: async (range) => {
     const { doc, notes } = get()._bake(range, get().meta.projectName);

@@ -1,6 +1,8 @@
 // タイムライン編集プロジェクトの編集状態（ADR-0032・#629）。開く・再生ヘッド・選択の不変条件を固定する。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useTimelineStore } from './timelineStore';
+import { emitProjectDeleted } from './projectDeletion';
+import { useProjectStore } from './projectStore';
 import { resetAssetIdReservations } from './assetImport';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
@@ -933,5 +935,61 @@ describe('分ける（#750 レビュー）', () => {
     const st = useTimelineStore.getState();
     expect(st.doc!.clips).toHaveLength(2);
     expect(st.selectedClipIds).toEqual([st.doc!.clips[1].id]);
+  });
+});
+
+// 消した動画を持ったままにしない（#755）。持っていると、非同期の着地が保存して一覧へ復活する。
+describe('消した動画を手放す（#755）', () => {
+  const one = () => doc({
+    clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: 'あ' }],
+  });
+
+  it('その動画が消えたら文書を手放す＝以後どこからも書かない', async () => {
+    useTimelineStore.setState({ doc: one(), selectedClipIds: ['clip_001'] });
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    useTimelineStore.getState().discardDeletedProject(one().projectId);
+    expect(useTimelineStore.getState().doc).toBeNull();
+    await useTimelineStore.getState().saveTimelineProject();
+    // ⚠️ 書くと `save_project` がフォルダごと作り直す＝**消したはずの動画が一覧へ戻る**
+    //（素材と声のファイルは消えているので、開いても壊れている）。
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('別の動画を消しただけなら触らない', () => {
+    const d = one();
+    useTimelineStore.setState({ doc: d, selectedClipIds: ['clip_001'] });
+    useTimelineStore.getState().discardDeletedProject('proj_99999999_999');
+    expect(useTimelineStore.getState().doc).toBe(d);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(['clip_001']);
+  });
+
+  it('**走行中の印は残す**（書き出し中の締めが外れて二重に始められる、を作らない）', () => {
+    const running = { phase: 'rendering' as const, percent: 40, message: null, cancelling: false };
+    useTimelineStore.setState({ doc: one(), exportRun: running });
+    useTimelineStore.getState().discardDeletedProject(one().projectId);
+    expect(useTimelineStore.getState().doc).toBeNull();
+    expect(useTimelineStore.getState().exportRun).toEqual(running);
+    useTimelineStore.setState({ exportRun: { phase: 'idle', percent: 0, message: null, cancelling: false } });
+  });
+
+  it('削除の知らせが store まで届く（画面を離れていても効く）', () => {
+    useTimelineStore.setState({ doc: one() });
+    // ⚠️ 画面ではなく **store で受ける**＝本番の導線は `closeTimelineProject` を通らない。
+    emitProjectDeleted(one().projectId);
+    expect(useTimelineStore.getState().doc).toBeNull();
+  });
+
+  it('**本番の削除**から届く（知らせを出す側の配線も見る）', async () => {
+    // ⚠️ 受け手だけを直に叩くテストでは、**出す側を外しても気づけない**（実際に変異が生き残った）。
+    // ⚠️ **消している最中**にはもう手放していること＝そこで着地が保存すると、
+    // フォルダごと作り直されて**素材と声だけ消えた動画が一覧へ戻る**。
+    let heldWhileDeleting: unknown = 'not-called';
+    vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => {
+      heldWhileDeleting = useTimelineStore.getState().doc;
+    });
+    useTimelineStore.setState({ doc: one() });
+    await useProjectStore.getState().deleteProject(one().projectId);
+    expect(heldWhileDeleting).toBeNull();
+    expect(useTimelineStore.getState().doc).toBeNull();
   });
 });

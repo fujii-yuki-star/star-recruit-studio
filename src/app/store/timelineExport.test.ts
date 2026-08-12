@@ -43,6 +43,8 @@ async function open(d: TimelineProject): Promise<void> {
 }
 
 beforeEach(() => {
+  // 走っている「声を作る」回は持ち越さない（#755＝文書を閉じても消えない印）。
+  useTimelineStore.setState({ _voiceRun: null, generatingVoiceClipId: null });
   vi.restoreAllMocks();
   // 走行中は閉じられない（本番の締め）ので、テスト間は先に走行状態を落としてから閉じる。
   useTimelineStore.setState({ exportRun: { phase: 'idle', percent: 0, message: null, cancelling: false } });
@@ -139,7 +141,8 @@ describe('exportTimelineVideo', () => {
 
   it('声を作っている最中は始めない（作った声が捨てられる・#718）', async () => {
     await open(doc());
-    useTimelineStore.setState({ generatingVoiceClipId: 'clip_009' });
+    // ⚠️ 見るのは**走っている回**（#755）＝印は開き直しで消えるので、それだけだと締めが外れる。
+    useTimelineStore.setState({ generatingVoiceClipId: 'clip_009', _voiceRun: 1 });
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(vi.mocked(dialogMod.showSaveVideoDialog)).not.toHaveBeenCalled();
     expect(useTimelineStore.getState().exportRun.message).toContain('声を作成中です');
