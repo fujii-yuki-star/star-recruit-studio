@@ -135,22 +135,38 @@ const AUTOSAVE_DELAY_MS = 800;
 
 /** 「前へ／後ろへ」1回で動かす秒。細かすぎず粗すぎない刻み（再生位置へ寄せる操作と併用する前提）。 */
 const NUDGE_SEC = 0.5;
+/**
+ * キャンバスで部品を**少しだけ動かす**量（px・ADR-0034 決定18・#752-9）。
+ * `Shift` を押している間は `NUDGE_BOX_FAST_PX`（他社の型＝細かい詰めと大きな移動を1つのキーで分ける）。
+ */
+const NUDGE_BOX_PX = 1;
+const NUDGE_BOX_FAST_PX = 10;
+/** 矢印で動かす手が止まったとみなすまで（ms）。ここを過ぎたら取り消しのまとめを閉じる。 */
+const NUDGE_GROUP_IDLE_MS = 600;
 
 /** 1秒あたりの表示幅（px）と、レーンの最小幅。読み取り専用タイムラインと同じ見え方に寄せる。 */
 const MIN_LANE_WIDTH_PX = 640;
 /**
- * 取っ手を出す最小の帯の幅（px・#686 レビュー）。左右の取っ手（7px×2）と「⋮」（14px）で 28px を食うので、
- * 短い帯／低い倍率では**本体を掴む所が無くなる**（動かせなくなる）。狭いときは取っ手を出さず、
- * 長さは数値の欄で変えてもらう＝**ドラッグ専用の操作を作らない**（決定19）ので行き止まりにならない。
+ * 端の取っ手の**見た目**の幅（px）。当たり判定はこれより広い（下の `CLIP_HANDLE_HIT_W_PX`）。
  */
-const CLIP_HANDLE_W_PX = 7;
-const CLIP_MENU_W_PX = 14;
+export const CLIP_HANDLE_W_PX = 7;
 /**
- * 取っ手を出す最小の帯の幅（px）。左右の取っ手と「⋮」が食うぶん＋本体を掴む余地。
+ * 取っ手の**当たり判定**の幅（px・#752-7）。見た目（`CLIP_HANDLE_W_PX`）の**2倍**＝業界の型
+ *（見た目どおり 7px だと、指が乗る前に本体を掴む）。広げるのは**帯の内側だけ**（外へ広げると
+ * 隣の帯を食う）。⚠️ **「⋮」を避ける幅も取っ手を出す下限もこの値から導く**＝見た目の幅を
+ * 流用すると、広げた当たり判定が「⋮」を覆う（#742/#743 で直した事故の裏返し）。
+ */
+export const CLIP_HANDLE_HIT_W_PX = CLIP_HANDLE_W_PX * 2;
+export const CLIP_MENU_W_PX = 14;
+/**
+ * 取っ手を出す最小の帯の幅（px・#686 レビュー）。左右の取っ手と「⋮」が食うぶん＋本体を掴む余地。
+ * 短い帯／低い倍率では**本体を掴む所が無くなる**（動かせなくなる）ので、狭いときは取っ手を出さず、
+ * 長さは数値の欄で変えてもらう＝**ドラッグ専用の操作を作らない**（決定19）ので行き止まりにならない。
+ * ⚠️ 食う幅は**当たり判定**で数える（見た目で数えると、広げたぶんだけ本体が掴めなくなる）。
  * ⚠️ **幅は TS 側が単一の参照元**（`--timeline-label-w` と同じ流儀＝CSS へ流し込む）。
  * CSS にだけ書くと、値を変えたときにこの下限が黙って合わなくなる（計算と描画が食い違う）。
  */
-const CLIP_HANDLES_MIN_W_PX = CLIP_HANDLE_W_PX * 2 + CLIP_MENU_W_PX + 16;
+const CLIP_HANDLES_MIN_W_PX = CLIP_HANDLE_HIT_W_PX * 2 + CLIP_MENU_W_PX + 16;
 
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
@@ -533,9 +549,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * キー操作が見る**いまの値**（#721）。依存に足すと、再生位置が1フレーム進むたびに `keydown` を
    * 登録し直すことになる（毎フレームの付け外し）。閉じ込めた古い値を見ないよう、下の効果で入れ替える。
    */
-  const playRef = useRef({ playing: false, total: 0, fps: FPS, play, pause, seekFrames: (_frames: number) => {} });
+  const playRef = useRef({ playing: false, total: 0, exporting: false, fps: FPS, play, pause, seekFrames: (_frames: number) => {} });
   /** `Ctrl+K` の受け皿（毎レンダー最新にする＝`playRef`/`removeRef` と同じ形）。 */
   const splitRef = useRef<() => void>(() => {});
+  /**
+   * 矢印で**少しだけ動かす**受け皿（#752-9）。`null`＝いまは動かす相手がいない（＝再生位置を送る）。
+   * 毎レンダー入れ替える（`playRef` と同じ形＝実リスナーは張り替えない）。
+   */
+  const nudgeBoxRef = useRef<((dx: number, dy: number, fast: boolean) => void) | null>(null);
+  /**
+   * 矢印で動かしている間の**取り消しのまとめ**（#752 レビュー）。押すたびに開き直さず、
+   * **手が止まったら閉じる**（掴んで動かすのと同じ「1回の操作＝1回の取り消し」）。
+   * ⚠️ `keyup` だけに頼らない＝押したまま画面が変わると閉じる合図が来ず、以後の編集が全部つながる。
+   */
+  const nudgeGroupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nudgeGroupOpenRef = useRef(false);
   const removeRef = useRef<() => void>(() => {});
 
   // `Escape`＝選択を解く／`Ctrl+A`＝全部選ぶ／`Space`・`Delete`・`←→`（#721・決定18）。
@@ -578,9 +606,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // 始まる、を作らない）。一律で奪うと画面じゅうのボタンがキーボードで押せなくなる。
         if (activatesOnSpace(e.target)) return;
         e.preventDefault(); // 既定の「画面を下へ送る」を止める
+        if (playRef.current.playing) { playRef.current.pause(); return; } // 止めるのはいつでも通す
         if (playRef.current.total <= 0) return; // 置いていないときは再生できない（ボタンと同じ条件）
-        if (playRef.current.playing) playRef.current.pause();
-        else playRef.current.play();
+        // ⚠️ **キーで断るなら理由を出す**（#752 レビュー）＝`Delete`・`Ctrl+K` は喋るのに
+        // `Space` だけ黙ると、押せない見た目を持たない入口で挙動が割れる（ADR-0026②）。
+        if (playRef.current.exporting) { setEditBlocked(EDIT_BLOCKED.playExporting); return; }
+        playRef.current.play();
         return;
       }
       if (e.key === "Delete") {
@@ -588,25 +619,30 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         removeRef.current(); // 押せる条件・確認の有無はボタンと同じ入口が決める
         return;
       }
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      const arrowX = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+      const arrowY = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+      if (arrowX !== 0 || arrowY !== 0) {
         // **矢印を使う要素に手がかかっているなら譲る**（`Space` と同じ理由・同じ形＝ADR-0026②）。
         // 譲らないと、セレクトやスライダーにフォーカスしたまま押したとき**その欄の値が変わらず
         // 再生位置だけ動く**（この画面はセレクトが多い）。
         if (usesArrowKeys(e.target)) return;
-        // **1フレームずつ・`Shift` で1秒**（決定18）。⚠️ 部品を選んでいる間のナッジはキャンバス操作
-        // （#685）が入ってから＝いま足すと、動かす手段が無いのに矢印だけ意味を変えることになる。
+        // **キャンバスで箱を持つ部品を1つだけ選んでいる間は「少しだけ動かす」**（決定18・#752-9）。
+        // ⚠️ 上下は**この文脈のときだけ**奪う（それ以外は画面送りに返す＝奪って何も起きない、を作らない）。
+        const nudge = nudgeBoxRef.current;
+        if (nudge) { e.preventDefault(); nudge(arrowX, arrowY, e.shiftKey); return; }
+        if (arrowX === 0) return; // 上下は再生位置を動かす意味を持たない
+        // **1フレームずつ・`Shift` で1秒**（決定18）。
         e.preventDefault();
         const p = playRef.current;
         if (p.total <= 0) return;
         // **フレーム番号で動かす**（秒を足し込むと誤差が積もって同じ絵に留まる／飛ぶ・#721 レビュー）。
         // `Shift` の「1秒」も同じ格子の上で数える（1秒 = fps フレーム）。
-        const frames = (e.shiftKey ? p.fps : 1) * (e.key === "ArrowLeft" ? -1 : 1);
-        p.seekFrames(frames);
+        p.seekFrames((e.shiftKey ? p.fps : 1) * arrowX);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clearSelection, selectClips, overlayOpen]);
+  }, [clearSelection, selectClips, overlayOpen, setEditBlocked]);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
   // 数値欄の刻み＝**1フレーム**（出力の格子と同じ・#721）。⚠️ **丸めない**＝`0.033` にすると格子から外れ、
   // 30回刻んで 0.99 秒にしかならない（「格子と同じ」という約束が嘘になる・#721 レビュー）。
@@ -693,7 +729,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     const c = doc?.clips.find((x) => x.id === id);
     return !!c && !!doc?.tracks.find((t) => t.id === c.trackId)?.locked;
   });
-  const lockedSelectionHint = "固定された列の部品が選ばれています。固定を外すか、選び直してください";
+  const lockedSelectionHint = editBlockedMessage[EDIT_BLOCKED.lockedSelection];
   const lockedHint = selectedLocked ? "この列は固定されています。変えるには固定を外してください" : undefined;
   const textKeys = selectedTemplate ? usedTextKeys(selectedTemplate.layers) : [];
   // 選んだ部品に付いている動き（キーフレーム）。時刻は対象の先頭からの秒なので、表示は起点を足す。
@@ -961,24 +997,33 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 抜けない回で呼ぶ数が変わると、React が状態を取り違える）。
   // 書き出し中の編集は store が断る（`TIMELINE_EDIT_EXPORTING`）。**押してから断るのではなく、押す前に理由を出す**
   // （#694・監査 §2.2-11＝事前 disabled の流儀に統一）。押せてしまうと、断られた入力を消さない配慮も要らぬ手戻りになる。
-  const exportingHint = exporting ? "書き出しが終わってから編集できます" : undefined;
+  const exportingHint = exporting ? editBlockedMessage[EDIT_BLOCKED.exporting] : undefined;
   /**
    * **消せない理由**（`null`＝消せる・#721）。1つのときのボタン・まとめて消すボタン・`Delete` キーが
    * **同じものを見る**＝入口ごとに条件を書き分けると、キーだけ固定した列の部品を消せる、が起きる
    * （`exportStartBlock` と同じ流儀）。`selectionHasLocked` は選んでいる全部を見るので、
    * 1つだけのときも `selectedLocked` と同じ答えになる（片方だけ直す事故を作らないよう、こちらに寄せる）。
    */
-  const removeBlocked = useMemo<{ disabled: boolean; title: string | undefined } | null>(
+  /**
+   * ⚠️ **理由の組はボタンへそのまま流さない**（#752 レビュー）。React は知らない小文字の属性を
+   * 素通しするので、`reason` を混ぜたままスプレッドすると `<button reason="TIMELINE_EDIT_...">`
+   * として**内部の合図が描画結果に出る**（§2-3）。ボタンへ渡すのは `removeGuard`（`{disabled,title}`）、
+   * `reason` は断る側だけが読む。
+   */
+  const removeBlocked = useMemo<{ disabled: boolean; title: string | undefined; reason: EditBlockedReason | null } | null>(
     () =>
       selectedClipIds.length === 0
-        ? { disabled: true, title: undefined } // 選んでいなければ、そもそも消す対象が無い
+        ? { disabled: true, title: undefined, reason: null } // 選んでいなければ、そもそも消す対象が無い
         : selectionHasLocked
-          ? { disabled: true, title: lockedSelectionHint }
+          ? { disabled: true, title: lockedSelectionHint, reason: EDIT_BLOCKED.lockedSelection }
           : exporting
-            ? { disabled: true, title: exportingHint }
+            ? { disabled: true, title: exportingHint, reason: EDIT_BLOCKED.exporting }
             : null,
-    [selectedClipIds.length, selectionHasLocked, exporting, exportingHint],
+    [selectedClipIds.length, selectionHasLocked, exporting, exportingHint, lockedSelectionHint],
   );
+  /** ボタンへ渡す分（`editGuard`／`busyGuard` と同じ形＝`{disabled,title}` だけ）。 */
+  const removeGuard: { disabled: boolean; title: string | undefined } | null =
+    removeBlocked ? { disabled: removeBlocked.disabled, title: removeBlocked.title } : null;
   /**
    * **消す（どの入口からでも同じ流れ）**（#721）。単体は**即時＋取り消し**、**まとめては確認**
    * ＝`06 §2` 統一規約1／ADR-0034 決定20。ここを通さずに `removeSelectedClips` を直に呼ぶと、
@@ -986,19 +1031,93 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ⚠️ **early return より前**に置く（抜ける回と抜けない回でフックの数が変わらない＝下の土台と同じ理由）。
    */
   const requestRemoveSelected = useCallback(() => {
-    if (removeBlocked) return;
+    // ⚠️ **断るなら理由を出す**（#752-3・§2-5）。ボタンは押せない見た目と説明で伝わるが、
+    // **キーには押せない見た目が無い**ので、ここで理由を立てないと `Delete` が無言で何も起きない
+    //（分ける `Ctrl+K` は理由を立てているのに、消すだけ黙る＝入口で挙動が割れる・ADR-0026②）。
+    // 選んでいないときだけ黙る（消す相手がそもそも無い＝他社の型でも何も出ない）。
+    if (removeBlocked) { if (removeBlocked.reason) setEditBlocked(removeBlocked.reason); return; }
     if (selectedClipIds.length > 1) setConfirmRemove(selectedClipIds);
     else removeSelectedClips();
-  }, [removeBlocked, selectedClipIds, removeSelectedClips]);
+  }, [removeBlocked, selectedClipIds, removeSelectedClips, setEditBlocked]);
+  const trackOf = (trackId: string) => doc?.tracks.find((t) => t.id === trackId);
+  /**
+   * **いまキャンバスに出ているか**（#752 レビュー）。キャンバスの顔ぶれ（`canvasEls`）と、
+   * 矢印で動かす相手が**同じ規則**を見る＝選んでいるだけで見えていない部品（再生位置の外・
+   * 出さない列）を、画面のどこも変わらないまま動かして保存する、を作らない。
+   */
+  const isOnCanvas = (c: TimelineClip): boolean =>
+    !!doc && canHaveBox(c.kind) && clipIsLiveAt(c, frameTimeSec(doc, playheadSec)) && !trackOf(c.trackId)?.hidden;
+  /**
+   * 掴めるか（#686 レビュー）。**見た目（`cursor`）と、掴む処理を始めるかが同じものを見る**。
+   *
+   * ⚠️ **再生中も掴ませない**（#752-4）＝吸着の寄り先に**再生位置**が入っているので、掴んだ時点の
+   * 値で止まったまま流れ続ける（見えている線と寄る先がずれる）。置く操作は既に塞いであるのに
+   * 掴む方だけ通っていた＝同じ理由なら同じ挙動（ADR-0026②）。
+   */
+  const grabbableClip = (c: TimelineClip): boolean => !exporting && !isPlaying && !trackOf(c.trackId)?.locked;
+  /** 矢印のまとめを開く（開いていれば延長するだけ）。手が止まったら閉じる。 */
+  const openNudgeGroup = useCallback((): void => {
+    if (!nudgeGroupOpenRef.current) {
+      nudgeGroupOpenRef.current = true;
+      beginHistoryGroup();
+    }
+    if (nudgeGroupTimerRef.current) clearTimeout(nudgeGroupTimerRef.current);
+    nudgeGroupTimerRef.current = setTimeout(() => {
+      nudgeGroupTimerRef.current = null;
+      nudgeGroupOpenRef.current = false;
+      endHistoryGroup();
+    }, NUDGE_GROUP_IDLE_MS);
+  }, [beginHistoryGroup, endHistoryGroup]);
+  // 画面を離れるときは**必ず閉じる**（開けっぱなしだと以後の編集が全部ひとつながりになる）。
+  const closeNudgeGroupRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    closeNudgeGroupRef.current = () => {
+      if (nudgeGroupTimerRef.current) clearTimeout(nudgeGroupTimerRef.current);
+      nudgeGroupTimerRef.current = null;
+      if (!nudgeGroupOpenRef.current) return;
+      nudgeGroupOpenRef.current = false;
+      endHistoryGroup();
+    };
+  });
+  useEffect(() => () => closeNudgeGroupRef.current(), []);
+
   // キー操作の入れ物を毎レンダー最新にする（描き終わってから差し替える＝レンダー中に ref を書かない）。
   useEffect(() => {
     playRef.current = {
-      playing: isPlaying, total: totalSec,
+      playing: isPlaying, total: totalSec, exporting,
       fps: doc ? Math.round(effectiveFps(doc)) : FPS,
       play, pause,
       seekFrames: (frames) => { if (doc) setPlayhead(seekByFrames(doc, playheadSec, frames)); },
     };
     removeRef.current = requestRemoveSelected;
+    // ⚠️ **矢印は文脈で分かれる**（決定18・#752-9）＝キャンバスで箱を持つ部品を選んでいる間は
+    // 「少しだけ動かす」、それ以外は再生位置を送る。#685（キャンバスで動かす）が入るまで保留して
+    // いたが、着地したので繋ぐ。
+    // **まとめて選んでいるときも一緒に動かす**（掴んで動かすのと同じ・決定15／#752 レビュー）
+    // ＝個数で意味を変えない。箱を持たない相手（読み上げ・音）は混ざっていても動かさない
+    //（キャンバスに出ていないものは、キャンバスの操作の対象ではない）。
+    // **動かせないときは矢印を奪わない**（固定した列・書き出し中・再生中＝掴めないのと同じ条件）。
+    // 奪ったうえで断ると、再生位置も動かせず部品も動かない＝行き止まり（決定5）。
+    // ⚠️ 対象は**キャンバスに出ているもの**（`canvasEls` と同じ絞り＝#752 レビュー）。
+    // 選んでいるだけで見えていない部品（再生位置の外・出さない列）まで動かすと、
+    // **画面のどこも変わらないのに文書だけ動いて保存される**（矢印を奪って何も起きないのと同じ）。
+    const nudgeTargets = doc ? doc.clips.filter((c) => selectedClipIds.includes(c.id) && isOnCanvas(c)) : [];
+    nudgeBoxRef.current =
+      doc && nudgeTargets.length > 0 && nudgeTargets.every((c) => grabbableClip(c))
+        ? (dx, dy, fast) => {
+            const dims = dimsForOrientation(doc.videoSettings.aspectRatio);
+            const step = fast ? NUDGE_BOX_FAST_PX : NUDGE_BOX_PX;
+            // ⚠️ **押し続けても取り消しは1回ぶん**（決定20・掴んで動かすのと同じ）。畳まないと、
+            // キーの連続で履歴の上限（50）を数秒で流し切り、**「バラす」の唯一の戻り道**まで消える。
+            openNudgeGroup();
+            setClipBoxesFor(
+              nudgeTargets.map((c) => {
+                const box = resolveClipBox(c, dims);
+                return { id: c.id, patch: { x: box.x + dx * step, y: box.y + dy * step } };
+              }),
+            );
+          }
+        : null;
     // ⚠️ 分けるは**押せる条件を先に見る**（キーには「押せない見た目」が無いので、ここで断りを立てる）。
     // 見る条件はボタンと同じもの（`splitClipIssue`＋再生中）＝キーだけ通る道を作らない。
     splitRef.current = () => {
@@ -1101,6 +1220,22 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // ⚠️ 文言は**断り文と同じ所**から採る（`TIMELINE_EDIT_PLAYING`）＝ボタンの手前とキーの後で
   // 同じ状況の言い方が変わらない（ADR-0026②）。
   const playingHint = isPlaying ? editBlockedMessage[EDIT_BLOCKED.playing] : undefined;
+  /**
+   * 再生ボタンの見た目（#752-6/10）。**押せない理由は押す前に出す**（§2-5）。
+   * ⚠️ 書き出し中は store の `play` も断るので、ここで押せなくしないと**押しても何も起きない**
+   *（成果物は壊れないが、音が鳴り出す入口だけ開いていた＝走っている間の扱いが割れる）。
+   * 押せるときは**キーの割り当てを添える**（決定18＝キーだけの操作を作らない＝あることを知らせる）。
+   */
+  const playGuard: { disabled: boolean; title: string | undefined } =
+    // ⚠️ **走っている最中の「停止」は塞がない**（#752 レビュー）＝止められないまま音だけ流れる
+    // 行き止まりを作らない。塞ぐのは「始める」方だけ。
+    isPlaying
+      ? { disabled: false, title: "再生を止めます（Space）" }
+      : totalSec <= 0
+        ? { disabled: true, title: "まだ何も置かれていません。部品を置くと再生できます" }
+        : exporting
+          ? { disabled: true, title: editBlockedMessage[EDIT_BLOCKED.playExporting] }
+          : { disabled: false, title: "再生位置から流します（Space）" };
 
   /**
    * **編集の入口の「押せない」と理由を1か所から配る**（#703・監査 §2.2-11）。
@@ -1133,7 +1268,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * （置けそうに見えたのに断られる、を作らない）。置けないまま離したら**元へ戻す**＝寄せない（決定10）。
    */
 
-  const trackOf = (trackId: string) => doc?.tracks.find((t) => t.id === trackId);
   /**
    * 選んだ部品の**箱**（#685）。**箱を持てる部品だけ**（音・読み上げに位置は無い／見た目パターンの
    * クリップは枠そのもの＝幾何を持たない）＝出す条件は domain の `setClipBox` が断る条件と同じもの。
@@ -1149,7 +1283,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const canvasDims = doc ? dimsForOrientation(doc.videoSettings.aspectRatio) : { width: 0, height: 0 };
   const canvasEls: FreeElement[] = doc
     ? doc.clips
-        .filter((c) => canHaveBox(c.kind) && clipIsLiveAt(c, frameTimeSec(doc, playheadSec)) && !trackOf(c.trackId)?.hidden)
+        .filter((c) => isOnCanvas(c))
         .map((c) => ({
           ...resolveClipBox(c, canvasDims),
           id: c.id,
@@ -1167,14 +1301,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const selectedBox = selected && canHaveBox(selected.kind) && doc
     ? resolveClipBox(selected, dimsForOrientation(doc.videoSettings.aspectRatio))
     : null;
-  /** 掴めるか（#686 レビュー）。**見た目（`cursor`）と、掴む処理を始めるかが同じものを見る**。 */
-  const grabbableClip = (c: TimelineClip): boolean => !exporting && !trackOf(c.trackId)?.locked;
   /**
    * 端の取っ手を出すか。**細い帯では出さない**＝左右の取っ手と「⋮」で**本体を掴む所が無くなる**。
    * 長さは数値の欄で変えられる（ドラッグ専用の操作を作らない・決定19）ので行き止まりにならない。
    */
-  const showHandles = (c: TimelineClip): boolean =>
-    grabbableClip(c) && pxPerSec * c.durationSec >= CLIP_HANDLES_MIN_W_PX;
+  /**
+   * 取っ手を置く**幅があるか**。⚠️ 「⋮」の位置はこちらだけを見る（#752 レビュー）＝掴めるかまで
+   * 見ると、**再生の開始・停止のたびに「⋮」が 14px 跳ぶ**（取っ手が消えるのは意図どおりでも、
+   * 位置まで動かす理由は無い）。
+   */
+  const wideEnoughForHandles = (c: TimelineClip): boolean => pxPerSec * c.durationSec >= CLIP_HANDLES_MIN_W_PX;
+  const showHandles = (c: TimelineClip): boolean => grabbableClip(c) && wideEnoughForHandles(c);
   /**
    * 掴んでいる間の帯の位置と長さ（#686）。**離すまで文書は変えない**ので、見せかけだけを動かす。
    * 端の縮めは `applyClipEdge` と同じ下限に当たるので、見た目も同じ所で止まる。
@@ -1517,6 +1654,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     const issue = splitClipIssue(doc, selected.id, playheadSec);
     return issue ? { disabled: true, hint: editBlockedMessage[SPLIT_BLOCKED_REASON[issue]] } : {};
   };
+  /** ボタンの見た目（説明はここで作る＝押せるときはキーの割り当てを添える・#752-10）。 */
+  const splitGuard = editGuard(splitExtra());
 
   const singleClipMenuGuard: { disabled?: boolean; disabledHint?: string } =
     selectedClipIds.length > 1
@@ -1653,8 +1792,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <button
             className="btn btn-primary"
             onClick={isPlaying ? pause : play}
-            disabled={totalSec <= 0}
-            title={totalSec <= 0 ? "まだ何も置かれていません。部品を置くと再生できます" : undefined}
+            {...playGuard}
           >
             {isPlaying ? "停止" : "再生"}
           </button>
@@ -1745,6 +1883,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             style={{
               ["--timeline-label-w" as string]: `${LANE_LABEL_PX}px`,
               ["--clip-handle-w" as string]: `${CLIP_HANDLE_W_PX}px`,
+              ["--clip-handle-hit-w" as string]: `${CLIP_HANDLE_HIT_W_PX}px`,
               ["--clip-menu-w" as string]: `${CLIP_MENU_W_PX}px`,
             }}
           >
@@ -1944,7 +2083,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             // （隣の帯の当たり判定を食う）。避ける条件は取っ手を出す条件と**同じものを見る**。
                             style={{
                               left: `calc(${pxPerSec * dragSpanOf(c).endSec}px - var(--clip-menu-w)${
-                                showHandles(c) ? " - var(--clip-handle-w)" : ""
+                                wideEnoughForHandles(c) ? " - var(--clip-handle-hit-w)" : ""
                               })`,
                             }}
                             aria-label={`${clipLabel(c)}の操作`}
@@ -2001,12 +2140,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button
                 className="btn btn-secondary"
                 onClick={() => splitSelectedClip(playheadSec)}
-                {...editGuard(splitExtra())}
+                {...splitGuard}
+                title={splitGuard.title ?? "選んだ部品を再生位置で分けます（Ctrl+K）"}
               >
                 ここで分ける
               </button>
               <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>同じものを足す</button>
-              <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeBlocked ?? {})} title={removeBlocked?.title ?? "選んだ部品を消します（Delete）"}>消す</button>
+              <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を消します（Delete）"}>消す</button>
             </div>
             {/* **数値でも同じ値を触れる**（#721・ADR-0034 決定6）。ボタンの「前へ／後ろへ」（0.5秒ずつ）と
                 「ここで終わる」（再生位置を使う）だけでは、「3.0秒から」「5.0秒間」に**揃える手段が無い**。
@@ -2831,7 +2971,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </p>
         )}
         {selectedClipIds.length > 1 && (
-          <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeBlocked ?? {})} title={removeBlocked?.title ?? "選んだ部品をまとめて消します（Delete）"}>選んだ{selectedClipIds.length}個を消す</button>
+          <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて消します（Delete）"}>選んだ{selectedClipIds.length}個を消す</button>
         )}
       </>
     ) },

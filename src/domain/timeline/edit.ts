@@ -33,6 +33,12 @@ export const EDIT_BLOCKED = {
   trackKind: 'TIMELINE_EDIT_TRACK_KIND',
   /** 列が固定されている（`track.locked`）。 */
   locked: 'TIMELINE_EDIT_LOCKED',
+  /**
+   * **選んだものの中に**固定された列の部品がある（#752-3）。`locked` と分けるのは、次の行動が
+   * 違うから＝こちらは「固定を外す」だけでなく「選び直す」でも進める。まとめて消す・まとめて
+   * 動かすときに出る。
+   */
+  lockedSelection: 'TIMELINE_EDIT_LOCKED_SELECTION',
   /** 対象が見つからない（消された直後の操作など）。 */
   notFound: 'TIMELINE_EDIT_NOT_FOUND',
   /**
@@ -48,6 +54,11 @@ export const EDIT_BLOCKED = {
    * 理由をここから出す（§2-5）。
    */
   playing: 'TIMELINE_EDIT_PLAYING',
+  /**
+   * 書き出し中で**再生**できない（#752-6）。`exporting` と分けるのは、次の行動が「編集」ではなく
+   * 「再生」だから＝流用すると押せない理由が噛み合わない（§2-5）。
+   */
+  playExporting: 'TIMELINE_PLAY_EXPORTING',
   /** 直線でない動きの区間の途中では分けられない（#686 段階4＝カーブの形を持ち越せない・#753）。 */
   curvedEasing: 'TIMELINE_EDIT_CURVED_EASING',
   /**
@@ -356,7 +367,9 @@ export function removeSelectedClipsChecked(doc: TimelineProject, clipIds: readon
   const lockedTrackIds = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id));
   const targets = doc.clips.filter((c) => clipIds.includes(c.id));
   if (targets.length === 0) return blocked(EDIT_BLOCKED.notFound);
-  if (targets.some((c) => lockedTrackIds.has(c.trackId))) return blocked(EDIT_BLOCKED.locked);
+  // ⚠️ 断る語彙は**画面と同じもの**（#752 レビュー）＝同じ述語（選んだ中に固定列のものが混ざる）に
+  // 2つの言い方を持たない。次の行動も「固定を外す」だけでなく「選び直す」で進める。
+  if (targets.some((c) => lockedTrackIds.has(c.trackId))) return blocked(EDIT_BLOCKED.lockedSelection);
   return { ok: true, doc: removeClips(doc, clipIds) };
 }
 

@@ -49,6 +49,21 @@ describe('snapTime（いちばん近い1つへ寄せる）', () => {
     expect(r.guide).toEqual({ sec: 5, kind: TIME_SNAP_KIND.clipEdge });
   });
 
+  it('**しきい値ちょうど**は寄せる（境界をどちら側に倒すか固定・#752-11）', () => {
+    // ⚠️ 実装は `dist > threshold` で捨てる＝ちょうどは寄せる。どちらでも実害は小さいが、
+    // 決めていないと後から `>=` に変わったとき**指の感覚が黙って変わる**（誰も気づかない）。
+    // ⚠️ **2進数でぴったり表せる値**で書く（0.2 のような値では「ちょうど」を作れない＝
+    // `5 - 4.8` が 0.2 をわずかに超え、境界ではなく外側を試すことになる）。
+    const r = snapTime({ edges: [4.75], targets: [...targets], thresholdSec: 0.25 });
+    expect(r.deltaSec).toBeCloseTo(0.25, 6);
+    expect(r.guide?.sec).toBe(5);
+  });
+
+  it('しきい値をわずかに超えたら動かさない（境界の外側）', () => {
+    expect(snapTime({ edges: [4.75], targets: [...targets], thresholdSec: 0.25 - 1e-9 }))
+      .toEqual({ deltaSec: 0, guide: null });
+  });
+
   it('しきい値の外なら動かさない', () => {
     expect(snapTime({ edges: [4.5], targets: [...targets], thresholdSec: 0.2 }))
       .toEqual({ deltaSec: 0, guide: null });

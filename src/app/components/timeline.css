@@ -86,11 +86,15 @@
      「⋮」は帯の**兄弟**なので、帯で宣言すると届かず（カスタムプロパティは子孫にしか継承しない）
      `var()` が解決できずに `left`/`width` の宣言ごと無効になり、**帯の左端に出る**（実測で確認）。
      同じファイルの `--timeline-label-w` が `.timeline` で宣言されているのと同じ流儀。 */
-  /* ⚠️ **単一の参照元は TS 側**（`CLIP_MENU_W_PX`／`CLIP_HANDLE_W_PX`）＝タイムライン編集が流し込む。
-     取っ手を出す最小の帯の幅がこの2つから導かれるので、ここだけ変えると下限が黙って合わなくなる。
-     ここは流し込みが無いとき（場面形式の見わたす画面）の保険。 */
+  /* ⚠️ **単一の参照元は TS 側**（`CLIP_MENU_W_PX`／`CLIP_HANDLE_W_PX`／`CLIP_HANDLE_HIT_W_PX`）
+     ＝タイムライン編集が必ず流し込む。取っ手を出す最小の帯の幅と「⋮」の位置がそこから導かれるので、
+     ここだけ変えると下限や重なりが黙って合わなくなる。ここは**この file を単独で読んだときの既定**で、
+     値がずれないよう TS 側との一致をテストで固定している（#752 レビュー）。
+     ※取っ手と「⋮」を描くのはタイムライン編集の画面だけ（見わたす画面は描かない）。 */
   --clip-menu-w: 14px;
   --clip-handle-w: 7px;
+  /* 取っ手の**当たり判定**（見た目の2倍以上＝業界の型・#752-7）。見た目は `--clip-handle-w` のまま。 */
+  --clip-handle-hit-w: 14px;
   height: 40px;
   border-bottom: 1px solid var(--color-border);
 }
@@ -181,24 +185,35 @@
   z-index: 4;
 }
 /* トリミングハンドル（左右端）。選択中は掴みやすいよう縁を強調。 */
+/* ⚠️ **当たり判定は見た目より広い**（#752-7）＝見た目と同じ 7px だと、実機で指が乗る前に本体を掴む
+   （業界の型は「見た目の2倍以上」）。広げるのは**帯の内側だけ**（外へ広げると隣の帯を食う）。
+   見た目の帯は擬似要素で外側の端に出す＝**太く見せずに掴みやすくする**。 */
 .timeline-clip-handle {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: var(--clip-handle-w);
+  width: var(--clip-handle-hit-w);
   cursor: ew-resize;
   z-index: 2;
 }
+.timeline-clip--selected .timeline-clip-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--clip-handle-w);
+  background: var(--color-primary);
+  opacity: 0.4;
+}
+.timeline-clip-handle--left::after { left: 0; }
+.timeline-clip-handle--right::after { right: 0; }
 .timeline-clip-handle--left {
   left: 0;
 }
 .timeline-clip-handle--right {
   right: 0;
 }
-.timeline-clip--selected .timeline-clip-handle {
-  background: var(--color-primary);
-  opacity: 0.4;
-}
+
 /**
  * 置けない所（#686）。⚠️ **共有の `drop-target--blocked`（theme.css）だけでは赤くならない**。
  * どちらも1クラス＝同じ強さで、timeline.css の方が後に載るので `--selected` の青が後勝ちする。

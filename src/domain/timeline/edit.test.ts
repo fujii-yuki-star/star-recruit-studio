@@ -185,8 +185,9 @@ describe('removeSelectedClipsChecked（利用者が「消す」を押す入口�
       clips: [clip('clip_001'), clip('clip_002', { trackId: 'track_002' })],
     });
     // 固定列のものだけ／固定でないものと混ぜた場合、どちらも断る（黙って一部だけ消さない・ADR-0026④）。
-    expect(removeSelectedClipsChecked(d, ['clip_001'])).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
-    expect(removeSelectedClipsChecked(d, ['clip_001', 'clip_002'])).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+    // ⚠️ 断る語彙は**画面と同じ**（#752 レビュー）＝同じ述語に2つの言い方を持たない。
+    expect(removeSelectedClipsChecked(d, ['clip_001'])).toEqual({ ok: false, reason: EDIT_BLOCKED.lockedSelection });
+    expect(removeSelectedClipsChecked(d, ['clip_001', 'clip_002'])).toEqual({ ok: false, reason: EDIT_BLOCKED.lockedSelection });
   });
 
   it('固定でない列だけなら、消した結果は removeClips と同じ', () => {
