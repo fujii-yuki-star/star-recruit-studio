@@ -3260,20 +3260,103 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0);
   });
 
-  it("まとめて選んでいるうちの1つは掴めない（選択を黙って潰さない・決定15）", () => {
+  it("**まとめて選んでいると一緒に動く**（#686 段階4・決定15）", () => {
     two();
     useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    // 同じ理由で**掴んでいる最中**も見る（`moveClipById` は id で効くので、断らなくても動いてしまう）。
-    drag(band("あ"), 36 * 8, { drop: false });
-    expect(band("あ").className).not.toContain("timeline-clip--dragging");
-    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 8, clientY: 0 });
-    expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0);
-    // ⚠️ **離した後に来る実際の `click` まで撃つ**（#686 レビュー）。`fireEvent.pointerUp` は `click` を
-    // 合成しないので、ここを撃たないと「選択が潰れて理由も消える」穴を素通しする（実際に素通ししていた）。
-    fireEvent.click(band("あ"));
-    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]); // 潰さない
-    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.multiSelection); // 理由は出す
+    const before = useTimelineStore.getState().doc!.clips.map((c) => c.startSec);
+    drag(band("あ"), 36 * 10); // 10秒ぶん右へ
+    const after = useTimelineStore.getState().doc!.clips.map((c) => c.startSec);
+    // 掴んでいない相手にも**同じだけ**効く（群の形を崩さない）。
+    expect(after[0] - before[0]).toBeCloseTo(10, 5);
+    expect(after[1] - before[1]).toBeCloseTo(10, 5);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]); // 選択は保つ
+  });
+
+  it("まとめて動かす間、**一緒に動く相手とは重ならない**（赤いのに置ける、を作らない）", () => {
+    // ⚠️ 掴んだ相手だけで見ると、**一緒に動く隣**と重なる判定になって赤くなるのに、
+    // 離すと（正しく）置ける＝見えている色と結果が割れる（実機で踏んだ）。
+    two(); // clip_001=[0,3) / clip_002=[5,8)
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // +4秒＝clip_001 は 4〜7秒（元の clip_002 と重なる位置）だが、clip_002 も 9〜12秒へ動く。
+    drag(band("あ"), 36 * 4, { drop: false });
+    expect(band("あ").className).not.toContain("drop-target--blocked");
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 4, clientY: 0 });
+    expect(useTimelineStore.getState().doc!.clips.map((c) => c.startSec)).toEqual([4, 9]);
+  });
+
+  it("0秒の壁で**群ごと止まる**（先頭だけ張り付いて間隔が消えない）", () => {
+    // ⚠️ 帯ごとに 0 で切ると、先頭側だけ 0 に張り付いて**間隔が消える**（別の列どうしなら
+    // 成功として確定してしまう）。群のいちばん早い帯が 0 に着いたら、そこで群ごと止まる。
+    two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_005", kind: TRACK_KIND.visual }], clips: [
+      { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 2, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_005", startSec: 10, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "い" },
+    ] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ **後ろの帯を掴む**（先頭を掴むと `at()` の 0 クランプだけで同じ結果になり、群で丸めているか
+    // 区別できない＝実際にそれで変異が生き残った）。
+    drag(band("い"), -36 * 15); // 15秒ぶん左へ（群の先頭は 2秒しかない）
+    const after = useTimelineStore.getState().doc!.clips.map((c) => c.startSec);
+    expect(after[0]).toBe(0);
+    expect(after[1]).toBe(8); // 8秒の間隔が保たれる（10 - 2）
+  });
+
+  it("連動している字幕は**掴んでいる間から読み上げに付いてくる**（離した瞬間に飛ばない）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 2, voice: { text: "あ", status: "none" } },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: "clip_001" },
+        { id: "clip_003", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 20, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_003"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const subLeft = () => (([...container.querySelectorAll(".timeline-clip")]
+      .find((el) => el.textContent?.includes("字幕")) as HTMLElement | undefined)?.style.left);
+    const before = subLeft();
+    drag(band("あ"), 36 * 5, { drop: false }); // 読み上げを掴んで5秒ぶん右へ
+    // ⚠️ 据え置いて見せると、離した瞬間に字幕だけ飛ぶ（確定は `withBoundSubtitles` が動かす）。
+    expect(subLeft()).not.toBe(before);
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 36 * 5, clientY: 0 });
+    expect(useTimelineStore.getState().doc!.clips.find((c) => c.id === "clip_002")!.startSec).toBeCloseTo(5, 5);
+  });
+
+  it("**動かない字幕**は 0秒の壁の計算に数えない（群が左へ動けなくならない）", () => {
+    // ⚠️ 連動している字幕は**連動先の読み上げが群に居るときだけ**動く。居ない字幕の位置を
+    // 床に数えると、それが 0秒に居るだけで**群ぜんぶが左へ動けなくなる**（断り文も出ない）。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 2, voice: { text: "こえ", status: "none" } },
+        // 連動先（clip_001）は**選ばない**＝この字幕は動かない。
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.subtitle, trackId: "track_001", startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: "clip_001" },
+        { id: "clip_003", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 20, durationSec: 2, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_002", "clip_003"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    drag(band("あ"), -36 * 15); // 15秒ぶん左へ（20秒に居るので動ける）
+    const clips = useTimelineStore.getState().doc!.clips;
+    expect(clips.find((c) => c.id === "clip_003")!.startSec).toBeCloseTo(5, 5);
+    expect(clips.find((c) => c.id === "clip_002")!.startSec).toBe(0); // 字幕は据え置き
+  });
+
+  it("まとめて動かして1つでも置けなければ**全体を動かさない**（全か無か）", () => {
+    two({ clips: [
+      { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 5, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      { id: "clip_003", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 20, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "う" },
+    ] });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // +15秒＝clip_002 が clip_003（20〜23秒）と重なる。clip_001 は空いているが**動かさない**。
+    drag(band("あ"), 36 * 15);
+    const after = useTimelineStore.getState().doc!.clips.map((c) => c.startSec);
+    expect(after).toEqual([0, 5, 20]);
+    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.overlap);
   });
 
   it("掴んだ直後の `click` で選び直さない（理由が消える・Shift で選択が外れる）", () => {
@@ -3349,7 +3432,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const clip = container.querySelectorAll(".timeline-clip")[0] as HTMLElement;
-    drag(clip, 36 * 8);
+    drag(clip, 36 * 10); // まとめて動かして、指が帯の外で離れた
     const lane = container.querySelector(".timeline-lane") as HTMLElement;
     fireEvent.click(lane); // 列の余白で離した＝「何もない所を押した」経路
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);

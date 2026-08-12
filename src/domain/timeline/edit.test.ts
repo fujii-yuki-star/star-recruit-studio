@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
+  addTemplateClip, addVisualClip, moveClips, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC, MIN_BOX_SIZE_PX } from '../constants';
@@ -1027,5 +1027,129 @@ describe('接している端は重なりとみなさない', () => {
       ],
     });
     expectBlocked(trimClip(d, 'clip_001', 'end', 5.001), EDIT_BLOCKED.overlap); // 1ミリ秒でも重なれば断る
+  });
+});
+
+// まとめて動かす（#686 段階4・ADR-0034 決定15）。
+describe('moveClips（まとめて動かす）', () => {
+  const three = (over: Partial<TimelineProject> = {}) => doc({
+    clips: [
+      { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 3, text: 'あ' },
+      { id: 'clip_002', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 5, durationSec: 3, text: 'い' },
+      { id: 'clip_003', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 20, durationSec: 3, text: 'う' },
+    ],
+    ...over,
+  });
+
+  it('全部通るならまとめて動かす', () => {
+    const r = moveClips(three(), [{ id: 'clip_001', startSec: 10 }, { id: 'clip_002', startSec: 15 }]);
+    expect(r.ok && r.doc.clips.map((c) => c.startSec)).toEqual([10, 15, 20]);
+  });
+
+  it('**1つでも置けなければ全体を動かさない**（決定15）', () => {
+    const r = moveClips(three(), [{ id: 'clip_001', startSec: 10 }, { id: 'clip_002', startSec: 20 }]);
+    expect(r.ok).toBe(false);
+    expect(r.ok ? null : r.reason).toBe(EDIT_BLOCKED.overlap);
+  });
+
+  it('**入れ替え**も通る（順に見ると途中で重なって断られる）', () => {
+    // ⚠️ 1件ずつ `moveClip` を通すと、clip_001 を 5秒へ動かした時点で clip_002 と重なって断られる。
+    // まとめて動かせば収まる形を、順番のせいで拒まない。
+    const r = moveClips(three(), [{ id: 'clip_001', startSec: 5 }, { id: 'clip_002', startSec: 0 }]);
+    expect(r.ok && r.doc.clips.map((c) => c.startSec)).toEqual([5, 0, 20]);
+  });
+
+  it('固定した列が混ざったら全体を断る（一部だけ動かさない）', () => {
+    const d = three({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] });
+    expect(moveClips(d, [{ id: 'clip_001', startSec: 10 }]).ok).toBe(false);
+  });
+
+  it('**連動している字幕は対象から外す**（混ざっただけで全体が動かせなくならない）', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.text, trackId: 'track_001', startSec: 0, durationSec: 3, text: 'あ' },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3, voice: { text: 'あ', status: 'none' } },
+        { id: 'clip_003', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_002' },
+      ],
+    });
+    const r = moveClips(d, [{ id: 'clip_001', startSec: 10 }, { id: 'clip_003', startSec: 10 }]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.doc.clips.find((c) => c.id === 'clip_001')!.startSec).toBe(10);
+    expect(r.doc.clips.find((c) => c.id === 'clip_003')!.startSec).toBe(0); // 時間は読み上げが決める
+  });
+
+  it('**連動する字幕も同じ地図へ畳む**＝選択の順で結果が変わらない（`/canon-check`）', () => {
+    // ⚠️ 後から1件ずつ当てると、**まだ動いていない別の字幕の旧位置**と衝突して断られる。
+    // 読み上げ2本を選んで動かすのは、声を作る導線が字幕を自動で置く以上ふつうの操作。
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 3, durationSec: 2, voice: { text: 'い', status: 'none' } },
+        { id: 'clip_003', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_001' },
+        { id: 'clip_004', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 3, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_002' },
+      ],
+    });
+    const up = [{ id: 'clip_001', startSec: 3 }, { id: 'clip_002', startSec: 6 }];
+    const a = moveClips(d, up);
+    const b = moveClips(d, [...up].reverse()); // **順を変えても同じ結果**
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(a.doc.clips.map((c) => c.startSec)).toEqual([3, 6, 3, 6]); // 字幕も付いてくる
+    expect(b.doc.clips.map((c) => c.startSec)).toEqual(a.doc.clips.map((c) => c.startSec));
+  });
+
+  it('連動している字幕は**列だけ動かせる**（まとめても単体と同じ意味）', () => {
+    const d = doc({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_005', kind: TRACK_KIND.visual },
+        { id: 'track_002', kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_001' },
+      ],
+    });
+    const r = moveClips(d, [{ id: 'clip_002', startSec: 10, trackId: 'track_005' }]);
+    expect(r.ok && r.doc.clips[1]).toMatchObject({ trackId: 'track_005', startSec: 0 }); // 列は動く・時間は据え置き
+  });
+
+  it('字幕と**その連動先**を一緒に選んでも、字幕の列は変えられる（#754 再レビュー）', () => {
+    // ⚠️ 連動の畳み込みで列まで上書きすると、**直接指定した列が元へ戻り**、
+    // 「置ける色のまま離せるのに何も起きず、理由も出ない」になる。
+    // 単体で選んだときは通るので、**選択の件数で同じ操作の意味が変わる**（ADR-0026②）。
+    const d = doc({
+      tracks: [
+        { id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_005', kind: TRACK_KIND.visual },
+        { id: 'track_002', kind: TRACK_KIND.audio },
+      ],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 2, voice: { text: 'あ', status: 'none' } },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 2, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_001' },
+      ],
+    });
+    const r = moveClips(d, [
+      { id: 'clip_002', startSec: 10, trackId: 'track_005' }, // 字幕を別の列へ
+      { id: 'clip_001', startSec: 0 },                        // 連動先も選択に入っている
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const sub = r.doc.clips.find((c) => c.id === 'clip_002')!;
+    expect(sub.trackId).toBe('track_005'); // 列は利用者が決める
+    expect(sub.startSec).toBe(0);          // 時間は読み上げが決める
+  });
+
+  it('何も変わらないなら**同じ文書**を返す（空振りの取り消しを積まない）', () => {
+    const d = three();
+    const r = moveClips(d, [{ id: 'clip_001', startSec: 0 }]);
+    expect(r.ok && r.doc).toBe(d);
+  });
+
+  it('空なら何もしない', () => {
+    const d = three();
+    expect(moveClips(d, []).ok && moveClips(d, []) as { doc: TimelineProject }).toMatchObject({ doc: d });
   });
 });
