@@ -2634,6 +2634,8 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     key("ArrowRight");
     expect(useTimelineStore.getState().doc!.clips[0].x).toBe(1);
+    // ⚠️ **混ざっていた相手に箱を生やさない**（読み上げに位置は無い＝保存も通らない）。
+    expect(useTimelineStore.getState().doc!.clips[1]).not.toHaveProperty("x");
   });
 
   it("**選んでいても見えていなければ奪わない**（画面が変わらないのに文書だけ動く、を作らない・#752 レビュー）", () => {
@@ -2667,9 +2669,11 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
 
   it("**動かせない部品では矢印を奪わない**（行き止まりを作らない・#752-9）", () => {
     // ⚠️ 固定した列の部品を選んだまま奪うと、部品も動かず再生位置も送れない。
+    // ⚠️ **部品はキャンバスに出ている状態にする**（`startSec: 0`・#759 レビュー）＝出ていないと
+    // その時点で対象から外れ、**固定の判定まで届かない**（テストの名前と、実際に通る道が食い違う）。
     open({
       tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.audio }],
-      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 1, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, text: "あ" }],
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
