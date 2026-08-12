@@ -301,6 +301,21 @@ describe("TimelineProjectScreen: 書き出しを始められない理由（#718�
     expect(exportBtn().getAttribute("title")).toContain("声を作成中です");
   });
 
+  it("開き直して印が消えても、「声を作る」は押せない（無言の空振りを作らない・#757 レビュー）", () => {
+    // ⚠️ 関門は**走っている回**を見て即 return するので、印だけを見た見た目のままだと
+    // **押せるのに何も起きず理由も出ない**（§2-5）。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.voice, trackId: "track_002", startSec: 0, durationSec: 3, voice: { text: "あ", status: "none" } }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], generatingVoiceClipId: null, _voiceRun: 1 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: "声を作る" });
+    expect(btn).toBeDisabled();
+    expect(btn.getAttribute("title")).toContain("いま声を作っています");
+    useTimelineStore.setState({ _voiceRun: null });
+  });
+
   it("開き直して印が消えても、**走っている回**があれば押せない（#755）", () => {
     // ⚠️ 印（`generatingVoiceClipId`）は開き直しで消える。それだけを見ていると
     // **合成が走ったまま書き出しを始められ**、着地は断られて作った声が wav だけ残って消える。

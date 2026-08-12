@@ -2591,11 +2591,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <button
                     className="btn btn-primary"
                     {...editGuard({
-                      disabled: !selected.voice?.text.trim() || generatingVoiceClipId != null,
-                      // 押せない理由を無言にしない（作成中も含める＝#701 レビュー ℹ️）。
+                      // ⚠️ 見るのは**走っている回**（`voiceRunning`）＝印（`generatingVoiceClipId`）は
+                      // 開き直しで消えるので、それだけだと**押せる見た目なのに無反応**になる
+                      // （関門は回を見て即 return する・#757 レビュー）。押せない理由を無言にしない（§2-5）。
+                      disabled: !selected.voice?.text.trim() || voiceRunning,
                       hint: !selected.voice?.text.trim()
                         ? "読み上げる文を入れてください"
-                        : generatingVoiceClipId != null
+                        : voiceRunning
                           ? "いま声を作っています。終わってからもう一度お試しください"
                           : undefined,
                     })}
