@@ -3960,6 +3960,96 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(el.style.cursor).toBe("default");
   });
 
+  it("**重なりは描く順で拾う**（奥の部品が掴まれない・#746-5）", () => {
+    // ⚠️ 描く重ね順は**列の並び**だが、操作レイヤが文書の並びで積むと、後ろに書かれた奥の部品が
+    // 手前に来る＝重なった所で**奥が掴まれる**（右クリックの「削除」も奥に当たる）。
+    open({
+      // 列の並び＝奥（track_001）→ 手前（track_002）。文書の並びは**わざと逆**にする。
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_front", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "手前" },
+        { id: "clip_back", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 50, text: "奥" },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const boxes = [...canvasEls(container).ov!.children] as HTMLElement[];
+    // 当たりは**配列の後ろが勝つ**（DOM の後ろほど手前）＝最後が手前の列の部品であること。
+    fireEvent.pointerDown(boxes[boxes.length - 1], { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_front"]);
+  });
+
+  it("**動きが効いている間は、枠を描かれている場所に出す**（#746-4）", () => {
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "あ" }],
+      animations: [{ id: "anim_001", targetId: "clip_001", keyframes: [{ timeSec: 0, x: 400 }, { timeSec: 4, x: 400 }] }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const box = canvasEls(container).ov!.children[0] as HTMLElement;
+    // 素の箱は x=0。動きで +400 されているので、枠もそこへ（1920 幅の 20.83%）。
+    expect(box.style.left).toBe(`${(400 / 1920) * 100}%`);
+  });
+
+  it("動きが効いている間は**掴ませない**＋理由と触れる先を出す（#746-4）", () => {
+    // ⚠️ 掴んだ量は**素の箱**へ書き戻るので、動きのぶんだけ絵が飛ぶ。行き止まりにしないため、
+    // 数値で変えられることを添える（決定5）。
+    open({
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "あ" }],
+      animations: [{ id: "anim_001", targetId: "clip_001", keyframes: [{ timeSec: 0, x: 400 }, { timeSec: 4, x: 400 }] }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((canvasEls(container).ov!.children[0] as HTMLElement).style.cursor).toBe("default");
+    expect(screen.getByText(/仕上がり確認の上では動かせません/)).toBeInTheDocument();
+    expect(screen.getByLabelText("横位置")).toBeInTheDocument(); // 触れる先は残る
+  });
+
+  it("**動いている部品はまとめて動かすときも混ざらない**（絵が飛ばない・#746 レビュー 🔴）", () => {
+    // ⚠️ 掴み始めるのを塞いでも、**まとめて選んで別の1つを動かす**と混ざって動いていた。
+    // 枠は「描かれている場所」に出しているので、混ざるとその場所が**素の箱として保存**され、
+    // 動きのぶんだけ絵が飛ぶ（`Escape` の戻しも同じ値を書く）。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_still", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "とまる" },
+        { id: "clip_moving", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 4, x: 0, y: 200, w: 100, h: 50, text: "うごく" },
+      ],
+      animations: [{ id: "anim_001", targetId: "clip_moving", keyframes: [{ timeSec: 0, x: 400 }, { timeSec: 4, x: 400 }] }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_still", "clip_moving"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const ov = canvasEls(container).ov!;
+    // ⚠️ 枠の実寸を与える（jsdom は幅を持たない＝縮尺 0 で**そもそも動かない**＝空振りのテストになる）。
+    Object.defineProperty(ov, "clientWidth", { value: 960, configurable: true });
+    ov.getBoundingClientRect = () => ({ left: 0, top: 0, right: 960, bottom: 540, width: 960, height: 540, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const still = ov.children[0] as HTMLElement;
+    fireEvent.pointerDown(still, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(ov, { buttons: 1, pointerId: 1, clientX: 40, clientY: 0 });
+    fireEvent.pointerUp(ov, { pointerId: 1, clientX: 40, clientY: 0 });
+    const clips = useTimelineStore.getState().doc!.clips;
+    // 掴んだ方は動いている（＝ドラッグが実際に走った・空振りでない）。
+    expect(clips.find((c) => c.id === "clip_still")!.x).toBeGreaterThan(0);
+    // 動いている方は混ざらない（描かれている 400 を素の箱として書き戻さない）。
+    expect(clips.find((c) => c.id === "clip_moving")!.x).toBe(0);
+  });
+
+  it("まとまりの変形で動いているときは、**動きとは別の言い方**で断る（#746 レビュー）", () => {
+    // ⚠️ 「動き」の欄では外せないものを「動きで調整して」と案内すると、言われたとおりにしても直らない。
+    open({
+      groups: [{ id: "group_001", members: ["clip_001"], transform: { x: 300, y: 0, scale: 1, rotation: 0 } }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "あ" }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/まとまりの変形が効いているので/)).toBeInTheDocument();
+    expect(screen.queryByText(/「動き」で調整してください/)).toBeNull();
+  });
+
+  it("動きが無ければ従来どおり掴める（#746-4）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect((canvasEls(container).ov!.children[0] as HTMLElement).style.cursor).toBe("move");
+  });
+
   it("**右クリックで黙らない**（帯と同じ「同じものを足す／消す」を出す・#746-1）", () => {
     two();
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);

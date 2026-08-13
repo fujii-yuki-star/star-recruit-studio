@@ -119,10 +119,9 @@ import type { CropAlignX, CropAlignY } from "../../domain/enums";
 import type { Asset } from "../../domain/project/types";
 import type { Layer } from "../../domain/template/types";
 import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
-import { isHiddenByGroup } from "../../domain/group/compose";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import type { FreeElement } from "../../domain/project/types";
-import { clipIsLiveAt, freeElementFromClip, isItemOfClip } from "../../renderer/timelineLayout";
+import { freeElementFromClip, isItemOfClip, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
 import { SNAP_THRESHOLD_PX, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
 import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 
@@ -1045,17 +1044,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 矢印で動かす相手が**同じ規則**を見る＝選んでいるだけで見えていない部品（再生位置の外・
    * 出さない列）を、画面のどこも変わらないまま動かして保存する、を作らない。
    */
-  const isOnCanvas = (c: TimelineClip): boolean => {
-    if (!doc || !canHaveBox(c.kind) || !clipIsLiveAt(c, frameTimeSec(doc, playheadSec))) return false;
-    // ⚠️ **列の条件は描画と同じ形で見る**（#746 レビュー）＝`layoutTimelineAt` は「映像の列を、実在する
-    // ものだけ、隠れていないものだけ」回している。隠れているかだけ見ていると、**音の列に載った映像部品**や
-    // **消えた列を指したままの部品**が、描かれないのに枠だけ出て掴める（V22/V23 は読込を止めない）。
-    const track = trackOf(c.trackId);
-    if (!track || track.kind !== TRACK_KIND.visual || track.hidden) return false;
-    // ⚠️ **隠した部品・隠したまとまりも除く**（#746-6）＝描画は除いているので、ここで見ないと
-    // **描かれていないものの枠が出て掴める**（触れるのに動画には出ない）。
-    return !c.hidden && !isHiddenByGroup(c.id, doc.groups ?? []);
-  };
+  /**
+   * その時刻に**描かれる部品**（描く順・実効の箱つき）＝**描画と同じ関数**から採る（#746-4/5）。
+   * 自前で並べたり隠す条件を書いたりしない＝重なった所で奥が掴まれる／描かれていないものが掴める、
+   * を構造で防ぐ。
+   */
+  const canvasClips = doc ? timelineCanvasClipsAt(doc, frameTimeSec(doc, playheadSec)) : [];
+  const onCanvasIds = new Set(canvasClips.map((cc) => cc.clip.id));
+  /** いまキャンバスに出ていて、**箱を自分で持てる**部品か（見た目パターンは枠そのものなので外す）。 */
+  const isOnCanvas = (c: TimelineClip): boolean => canHaveBox(c.kind) && onCanvasIds.has(c.id);
   /**
    * 掴めるか（#686 レビュー）。**見た目（`cursor`）と、掴む処理を始めるかが同じものを見る**。
    *
@@ -1292,19 +1289,48 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 全面を覆い、その下の部品を掴めなくなる（掴めるのに掴めない、を作る）。
    */
   const canvasDims = doc ? dimsForOrientation(doc.videoSettings.aspectRatio) : { width: 0, height: 0 };
-  const canvasEls: FreeElement[] = doc
-    ? doc.clips
-        .filter((c) => isOnCanvas(c))
-        .map((c) => ({
-          // ⚠️ **描画と同じ変換を通す**（#746-2）＝手で作り直すと文字・書体・帯が抜け、
-          // インライン編集の見た目だけ実描画と割れる（`freeElementFromClip` は描画の入口と同じもの）。
-          ...freeElementFromClip(c, canvasDims),
-          // 固定した列の部品は**掴めない**（帯と同じ＝同じ状態を場所で変えない・ADR-0026②）。
-          // ⚠️ 見るのは**列の固定だけ**＝domain の関門（動かす・中身を変える・消す）も列だけを見るので、
-          // 部品自身の `locked` をここでだけ効かせると、キャンバスだけ理由なく掴めない、になる。
-          locked: trackOf(c.trackId)?.locked ?? false,
-        }))
-    : [];
+  /**
+   * 2つの箱が**違う場所**か（#746-4）。⚠️ しきい値は**極小**にする＝「ほぼ同じなら掴ませる」にすると、
+   * その差が確定のたびに素の箱へ書き戻り、**1回動かすごとにわずかにずれていく**。
+   */
+  const boxDiffers = (a: Box, b: Box): boolean =>
+    Math.abs(a.x - b.x) > 1e-6 || Math.abs(a.y - b.y) > 1e-6
+    || Math.abs(a.w - b.w) > 1e-6 || Math.abs(a.h - b.h) > 1e-6
+    || Math.abs((a.rotation ?? 0) - (b.rotation ?? 0)) > 1e-6;
+  /**
+   * キャンバスで掴めない理由（#746-4）。`null`＝掴める。
+   *
+   * 枠は**描かれている場所**に出すので、そこを掴んだ量は**素の箱**へ書き戻る＝動き・まとまりの変形の
+   * ぶんだけ絵が飛ぶ。⚠️ **理由は原因ごとに分ける**＝「動き」で解けないものを「動きで調整して」と
+   * 案内すると、言われたとおりにしても直らない（まとまりの変形は動きの欄では外せない）。
+   */
+  const canvasHoldReason = (cc: TimelineCanvasClip): "animation" | "group" | null => {
+    if (boxDiffers(cc.groupedBox, cc.finalBox)) return "animation";
+    if (boxDiffers(cc.box, cc.groupedBox)) return "group";
+    return null;
+  };
+  /** 選んでいる部品をキャンバスで掴めない理由（出す先＝「位置・大きさ」の欄）。 */
+  const selectedOnCanvas = canvasClips.find((cc) => cc.clip.id === selected?.id);
+  const selectedHoldReason = selectedOnCanvas ? canvasHoldReason(selectedOnCanvas) : null;
+  const canvasEls: FreeElement[] = canvasClips
+    .filter((cc) => canHaveBox(cc.clip.kind))
+    .map((cc, i) => ({
+      // ⚠️ **描画と同じ変換を通す**（#746-2）＝手で作り直すと文字・書体・帯が抜け、
+      // インライン編集の見た目だけ実描画と割れる（`freeElementFromClip` は描画の入口と同じもの）。
+      ...freeElementFromClip(cc.clip, canvasDims),
+      // ⚠️ **枠は「いま描かれている場所」に出す**（#746-4）＝動きが効いている間、素の箱に出すと
+      // **掴もうとした所に部品が無い**。
+      ...cc.finalBox,
+      // ⚠️ **重ね順は描く順**（#746-5）＝配列の順で当てるので、後ろほど手前。列の並びと同じにしないと、
+      // 重なった所で**奥の部品が掴まれる**（右クリックの「削除」も奥に当たる）。
+      zIndex: i,
+      // 固定した列の部品は**掴めない**（帯と同じ＝同じ状態を場所で変えない・ADR-0026②）。
+      // ⚠️ 見るのは**列の固定だけ**＝domain の関門（動かす・中身を変える・消す）も列だけを見るので、
+      // 部品自身の `locked` をここでだけ効かせると、キャンバスだけ理由なく掴めない、になる。
+      // ⚠️ **動きが効いている間も掴ませない**（#746-4）＝掴んだ量は**素の箱**へ書き戻るので、
+      // 動きのぶんだけ絵が飛ぶ。値は数値の欄で変えられる（行き止まりにしない・決定5）。
+      locked: (trackOf(cc.clip.trackId)?.locked ?? false) || canvasHoldReason(cc) != null,
+    }));
   /** キャンバスからの編集は **`setClipBox` と同じ入口**（数値欄と置けない条件を割らない）。 */
   const setClipBoxById = (clipId: string, patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }): void => {
     if (!doc) return;
@@ -2222,6 +2248,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 同じ空間の話である「切り抜き」は既に節なので、揃えないと同じ画面で流儀が割れる。 */}
             {selectedBox && (
               <CollapsibleSection key={`box-${selected.id}`} scope={SECTION_SCOPE.timeline} storageKey="box" title="位置・大きさ" defaultOpen>
+                {/* ⚠️ **掴めない理由をここで出す**（#746-4）＝キャンバスでは動きの効いている部品を掴ませない
+                    （掴んだ量は下の数値へ書き戻るので、動きのぶんだけ絵が飛ぶ）。**触れる先を必ず示す**
+                    ＝理由だけ出して行き止まりにしない（決定5）。 */}
+                {selectedHoldReason && (
+                  <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+                    {selectedHoldReason === "animation"
+                      ? "いまは動きが効いているので、仕上がり確認の上では動かせません。下の数値で変えるか、「動き」で調整してください。"
+                      : "まとまりの変形が効いているので、仕上がり確認の上では動かせません。下の数値で変えてください。"}
+                    {selected.kind === TIMELINE_CLIP_KIND.text ? "（文言は「中身」で直せます）" : ""}
+                  </p>
+                )}
                 <div className="row gap-sm">
                   <NumberField label="横位置" value={selectedBox.x} {...editGuard()} onChange={(v) => setSelectedClipBox({ x: v })} inputStyle={{ width: 90 }} />
                   <NumberField label="縦位置" value={selectedBox.y} {...editGuard()} onChange={(v) => setSelectedClipBox({ y: v })} inputStyle={{ width: 90 }} />

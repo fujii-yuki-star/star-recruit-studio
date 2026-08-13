@@ -331,7 +331,11 @@ export function FreeLayoutOverlay({
     const moveTargets = mode === "move" && alreadySelected ? selectedIds : [el.id];
     const starts = moveTargets
       .map((id) => freeLayout.find((m) => m.id === id))
-      .filter((m): m is FreeElement => m != null)
+      // ⚠️ **固定したものは一緒に動かさない**（#746 レビュー 🔴）＝掴み始めるのは塞いであっても、
+      // **まとめて選んで別の1つを動かす**と混ざって動いていた（固定が意味を失う）。
+      // タイムライン形式では枠を「描かれている場所」に出しているので、混ざると**その場所が素の箱として
+      // 保存され、動きのぶんだけ絵が飛ぶ**（`Escape` の戻しも同じ値を書く）。
+      .filter((m): m is FreeElement => m != null && !m.locked)
       .map((m) => ({ id: m.id, x: m.x, y: m.y }));
     // 吸着先＝移動しない他要素の辺・中心。ドラッグ中は他要素が動かないのでここで一度だけ確定する。
     // 吸着は move のときだけ使う（resize では参照しないので計算もしない）。

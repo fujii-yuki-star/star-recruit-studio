@@ -70,7 +70,7 @@ function groupStartSec(groups: Group[], groupId: string, clipById: Map<string, T
 }
 
 /** 矩形（クリップの箱）。回転は中心まわりの度数。 */
-interface Box {
+export interface Box {
   x: number;
   y: number;
   w: number;
@@ -207,6 +207,86 @@ export interface TimelineLayoutOptions {
  *   α の出どころがグループなら**グループ全体**が1枚＝FREE 場面のフェードで要素どうしが透けない。
  * - 隠したトラック・隠したグループのメンバーは描かない（音のトラックは絵を持たないので対象外）。
  */
+/** その時刻に**描かれる部品**（描く順＝背面から前面へ）と、その**実効の箱**。 */
+export interface TimelineCanvasClip {
+  clip: TimelineClip;
+  /** 部品そのものの箱（動きを当てる前）。書き戻す先はこちら。 */
+  box: Box;
+  /** まとまりの変形まで当てた箱（自身の動きはまだ）。 */
+  groupedBox: Box;
+  /** まとまりの変形 → 自身の動き まで当てた箱＝**いま描かれている場所**。 */
+  finalBox: Box;
+  /** その部品自身の動き（不透明度は箱に乗らないので、描画側がそのまま使う）。 */
+  ownTr: InterpolatedTransform;
+}
+
+/**
+ * その時刻の**実効のまとまり**（まとまりに付いた動きを transform へ前合成したもの）。
+ * 不透明度は別途返す（描画だけが使う）。
+ */
+export interface EffectiveGroups {
+  groups: Group[];
+  opacity: Map<string, number>;
+}
+
+function effectiveGroupsAt(doc: TimelineProject, timeSec: number): EffectiveGroups {
+  const groups = doc.groups ?? [];
+  const clipById = new Map(doc.clips.map((c) => [c.id, c]));
+  const opacity = new Map<string, number>();
+  const out: Group[] = groups.map((g) => {
+    const anim = (doc.animations ?? []).find((a) => a.targetId === g.id);
+    if (!anim) return g;
+    const tr = interpolateKeyframes(anim.keyframes, timeSec - groupStartSec(groups, g.id, clipById));
+    if (tr.opacity != null) opacity.set(g.id, tr.opacity);
+    return {
+      ...g,
+      transform: {
+        x: g.transform.x + (tr.x ?? 0),
+        y: g.transform.y + (tr.y ?? 0),
+        scale: g.transform.scale * (tr.scale ?? 1),
+        rotation: g.transform.rotation + (tr.rotation ?? 0),
+      },
+    };
+  });
+  return { groups: out, opacity };
+}
+
+/**
+ * その時刻に**キャンバスへ描かれる部品**を、**描く順**（列の並び → 列の中の並び）で返す（#746-4/5）。
+ *
+ * ⚠️ **描画と操作レイヤが同じものを見るための入口**＝並び順も、隠す条件も、動きを当てた後の箱も、
+ * ここ1か所で決める。操作レイヤが自前で並べると、重なった所で**奥の部品が掴まれる**（列の順と
+ * 配列の順が違う）／動いている間は**掴もうとした所に無い**（箱が素のまま）。
+ */
+export function timelineCanvasClipsAt(
+  doc: TimelineProject,
+  timeSec: number,
+  // ⚠️ 受けるのは**実効のまとまり**（動きを前合成したもの）だけ＝素の `doc.groups` を渡せる形にすると、
+  // 渡した回だけ箱が描画とずれる（型で防ぐ）。同じ時刻で2度解かないための持ち回し。
+  precomputed?: EffectiveGroups,
+): TimelineCanvasClip[] {
+  const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
+  const groups = (precomputed ?? effectiveGroupsAt(doc, timeSec)).groups;
+  const boxes = doc.clips.filter(isVisualClip).map((c) => ({ id: c.id, ...resolveClipBox(c, canvas) }));
+  const composed = composeGroupGeometry(boxes, groups);
+  const out: TimelineCanvasClip[] = [];
+  // 重ね順は**列の並び順だけ**（ADR-0032）＝後の列ほど手前。列の中は文書の並び。
+  for (const track of doc.tracks) {
+    if (track.kind !== TRACK_KIND.visual || track.hidden) continue;
+    for (const clip of doc.clips) {
+      if (clip.trackId !== track.id || clip.hidden) continue;
+      if (!isVisualClip(clip) || !clipIsLiveAt(clip, timeSec)) continue;
+      if (isHiddenByGroup(clip.id, groups)) continue;
+      const box = resolveClipBox(clip, canvas);
+      const own = (doc.animations ?? []).find((a) => a.targetId === clip.id);
+      const ownTr: InterpolatedTransform = own ? interpolateKeyframes(own.keyframes, timeSec - clip.startSec) : {};
+      const groupedBox = composed.get(clip.id) ?? box;
+      out.push({ clip, box, groupedBox, finalBox: boxWithTransform(groupedBox, ownTr), ownTr });
+    }
+  }
+  return out;
+}
+
 /**
  * 描いたアイテムの id から**どの部品のものか**を見分ける（#746-2）。
  * ⚠️ **前置きの作り方はこの file の中で1つ**（下でアイテムに付けている前置きと対）＝
@@ -218,42 +298,14 @@ export function isItemOfClip(itemId: string, clipId: string): boolean {
 
 export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: TimelineLayoutOptions): SceneLayout {
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
-  const groups = doc.groups ?? [];
-  const clipById = new Map(doc.clips.map((c) => [c.id, c]));
-
   // グループのアニメを transform へ前合成する（場面形式の layoutScene と同じ手順）。不透明度は後段で乗算。
-  const groupOpacity = new Map<string, number>();
-  const effectiveGroups: Group[] = groups.map((g) => {
-    const anim = (doc.animations ?? []).find((a) => a.targetId === g.id);
-    if (!anim) return g;
-    const tr = interpolateKeyframes(anim.keyframes, timeSec - groupStartSec(groups, g.id, clipById));
-    if (tr.opacity != null) groupOpacity.set(g.id, tr.opacity);
-    return {
-      ...g,
-      transform: {
-        x: g.transform.x + (tr.x ?? 0),
-        y: g.transform.y + (tr.y ?? 0),
-        scale: g.transform.scale * (tr.scale ?? 1),
-        rotation: g.transform.rotation + (tr.rotation ?? 0),
-      },
-    };
-  });
+  const effective = effectiveGroupsAt(doc, timeSec);
+  const { groups: effectiveGroups, opacity: groupOpacity } = effective;
 
-  // 描くクリップ（隠したトラック・隠したグループのメンバーを除く）をトラックの並び順に集める。
-  const live: TimelineClip[] = [];
-  for (const track of doc.tracks) {
-    if (track.kind !== TRACK_KIND.visual || track.hidden) continue;
-    for (const clip of doc.clips) {
-      if (clip.trackId !== track.id || clip.hidden) continue;
-      if (!isVisualClip(clip) || !clipIsLiveAt(clip, timeSec)) continue;
-      if (isHiddenByGroup(clip.id, effectiveGroups)) continue;
-      live.push(clip);
-    }
-  }
-
-  // グループ変形を実効の矩形へ合成する（通常描画と同じ関数）。差分をクリップの中身へ重ねる。
-  const boxes = doc.clips.filter(isVisualClip).map((c) => ({ id: c.id, ...resolveClipBox(c, canvas) }));
-  const composed = composeGroupGeometry(boxes, effectiveGroups);
+  // 描くクリップ（隠したトラック・隠したグループのメンバーを除く）を**トラックの並び順**に集め、
+  // まとまりの変形と自身の動きを当てた箱まで出す。⚠️ **操作レイヤと同じ関数**（#746-4/5）＝
+  // 並び順・隠す条件・動きを当てた箱を2か所に書かない。
+  const live = timelineCanvasClipsAt(doc, timeSec, effective);
 
   // グループの不透明度は、メンバー（推移的）へ効く。**どのグループ由来か**も覚える＝
   // 合成の単位をそのグループにできる（FREE 場面のフェードが場面まるごと1枚になる・ADR-0026②）。
@@ -267,7 +319,7 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
   }
 
   const items: LayoutItem[] = [];
-  for (const clip of live) {
+  for (const { clip, box, finalBox, ownTr } of live) {
     const template =
       clip.kind === TIMELINE_CLIP_KIND.template
         ? opts.templateOf(clip.templateId ?? '')
@@ -286,12 +338,7 @@ export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: Ti
     // まず「クリップの箱」に効かせ、その **箱の動き（相似変換）を中身へそのまま持ち込む**。
     // 中身ごとに `applyInterpolatedTransform` を掛けると、拡大・回転が**各アイテム自身の中心**まわりに
     // なってしまい、テンプレのクリップ（層が複数）でグループ中心まわりの剛体変形とずれる（#642 レビュー 🔴）。
-    const box = resolveClipBox(clip, canvas);
-    // 順序は場面形式（`layoutScene`）と同じ＝グループを先に合成し、その上へ自身のキーフレームを重ねる。
-    const grouped = composed.get(clip.id) ?? box;
-    const own = (doc.animations ?? []).find((a) => a.targetId === clip.id);
-    const ownTr: InterpolatedTransform = own ? interpolateKeyframes(own.keyframes, timeSec - clip.startSec) : {};
-    const finalBox = boxWithTransform(grouped, ownTr);
+    // 箱は上でまとめて出してある（順序は場面形式＝グループを先に合成し、その上へ自身の動きを重ねる）。
     const sim = similarityBetween(box, finalBox);
     const groupO = opacityForClip.get(clip.id);
 
