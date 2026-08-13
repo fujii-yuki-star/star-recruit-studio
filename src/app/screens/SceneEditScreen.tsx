@@ -19,7 +19,10 @@ import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
 import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSilentReason, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
-import { prunePerUseMaps } from "../../domain/project/perUseMaps";
+import { perUseEntriesFor, prunePerUseMaps, withPerUseEntries } from "../../domain/project/perUseMaps";
+import type { PerUseEntries } from "../../domain/project/perUseMaps";
+import { animationsForElement } from "../../domain/project/animationOps";
+import type { ElementAnimation } from "../../domain/project/types";
 import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { GroupList } from "../components/GroupList";
@@ -234,7 +237,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     addScene, removeScene, duplicateScene, splitScene, splitSceneAtLine, moveScene, moveSceneToIndex, saveProject, saveStatus,
     generateNarration, isGeneratingNarration, narrationAudioById, narrationError,
     undo, redo, beginHistoryGroup, endHistoryGroup,
-    addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements,
+    addAnimation, updateAnimation, removeAnimation, removeAnimationsForElements, addAnimationsForElement,
   } = useProjectStore();
   // 要素アニメーション（④・ADR-0019）：この場面の FREE 要素に付いた簡易アニメ（timelineOverlay.animations）。
   const timelineOverlay = useProjectStore((s) => s.meta.timelineOverlay);
@@ -332,7 +335,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     setActiveGroupId(groupId);
   };
   // FREE 要素のコピー&ペースト用クリップボード。SceneEditScreen は場面切替で再マウントしないため場面をまたいで貼れる（#207）。
-  const [freeClipboard, setFreeClipboard] = useState<FreeElement | null>(null);
+  /**
+   * 写した要素と、その**中身**（#770）。per-use と動きは**写した場面**に紐づくので、貼るときに
+   * 元をたどれるよう一緒に控える（別の場面へ貼ることがある）。
+   */
+  const [freeClipboard, setFreeClipboard] = useState<{ el: FreeElement; perUse: PerUseEntries; animations: ElementAnimation[] } | null>(null);
   // インライン編集中の FREE テキスト要素 id（#549）。オーバーレイから通知され、ScenePreview の hideItemIds へ渡して
   // SVG 側の同じ文字を伏せる＝textarea と二重表示にしない（入力は即 store 反映＝SVG も毎打鍵更新されるため）。
   const [editingFreeId, setEditingFreeId] = useState<string | null>(null);
@@ -672,28 +679,54 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 他ヘルパーと同様に updater 内の最新 s.freeLayout から計算する（前回レンダーの snapshot 参照を避ける）。
   // updateScene→set は同期実行のため、newId は下の setSelectedFreeIds より前に確実に代入される。
   const duplicateFreeEl = (id: string) => {
+    // ⚠️ **中身ごと複製する**（#770）＝形だけ写すと、**動く要素を複製したのに動かない複製**ができる
+    // （動画の使う範囲・速度・再生の開始タイミング・収め方も既定へ戻る）。消す側（`removeFreeEl`）は
+    // per-use と動きを対で片づけているのに、複製側だけ欠けていた（ADR-0026②）。
+    // 場面（`freeLayout`／per-use）と動画全体（`animations`）の更新を**履歴のまとめで1手**に
+    // （取り消し1回で全部戻る＝消す側と同じ流儀）。
+    beginHistoryGroup();
     let newId: string | null = null;
     patch((s) => {
       const result = duplicateFreeElement(s.freeLayout ?? [], id);
       newId = result.newId;
-      return { ...s, freeLayout: result.freeLayout };
+      if (!result.newId) return s; // 元が見つからない＝変化なし
+      return { ...s, freeLayout: result.freeLayout, ...withPerUseEntries(s, result.newId, perUseEntriesFor(s, id)) };
     });
+    if (newId) addAnimationsForElement(selected.sceneId, newId, animationsForElement(timelineOverlay?.animations ?? [], selected.sceneId, id));
+    endHistoryGroup();
     if (newId) setSelectedFreeIds([newId]);
   };
   // コピー：選んだ要素をクリップボードへ（場面をまたいで貼れる・#207）。
   const copyFreeEl = (id: string) => {
     const el = (selected.freeLayout ?? []).find((e) => e.id === id);
-    if (el) setFreeClipboard(el);
+    // ⚠️ **写す時点で「中身」も一緒に控える**（#770）＝貼る先が別の場面のことがあるので、貼るときに
+    // 元をたどれない。控えないと、貼った複製だけ動かない・設定が落ちる。
+    if (el) setFreeClipboard({
+      el,
+      perUse: perUseEntriesFor(selected, id),
+      animations: animationsForElement(timelineOverlay?.animations ?? [], selected.sceneId, id),
+    });
   };
   // 貼り付け：クリップボードの要素を現在の場面へ（新 id 採番＝場面間も可）。貼付直後を選択。
   const pasteFreeEl = () => {
     if (!freeClipboard) return;
+    const clip = freeClipboard;
+    // ⚠️ **中身も一緒に貼る**（#770）＝形だけだと、貼った複製は動かず設定も既定へ戻る。
+    // 場面（`freeLayout`／per-use）と動画全体（`animations`）の更新を**履歴のまとめで1手**に。
+    beginHistoryGroup();
     let newId: string | null = null;
     patch((s) => {
-      const result = pasteFreeElement(s.freeLayout ?? [], freeClipboard);
+      const result = pasteFreeElement(s.freeLayout ?? [], clip.el);
       newId = result.newId;
-      return { ...s, freeLayout: result.freeLayout };
+      return { ...s, freeLayout: result.freeLayout, ...withPerUseEntries(s, result.newId, clip.perUse) };
     });
+    // 動きは**貼った場面**へ宛て直す（別の場面へ貼っても、その場面の要素として動く）。
+    // ⚠️ 貼り先が「掛け合い＋動画」の場面だと**場面ぐるみで静止**する（`sceneAnimationActive` の関門・#469）。
+    // それでも動きは**運ぶ**＝運ばないと、後で掛け合いか動画を外したときに**元だけ動いて複製は動かない**＝
+    // #770 の症状が戻る（ADR-0026②）。関門そのもの（動きが見えず消せない・「再生の開始」欄だけ出る）は
+    // この場面に元から在る穴で、複製とは別（貼っても元と同じ状態にしかならない）。
+    if (newId) addAnimationsForElement(selected.sceneId, newId, clip.animations);
+    endHistoryGroup();
     if (newId) setSelectedFreeIds([newId]);
   };
   const bringFreeElForward = (id: string) =>
@@ -1829,10 +1862,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                     onClick={pasteFreeEl}
                     disabled={!freeClipboard}
                     title={freeClipboard
-                      ? `「${freeKindLabel[freeClipboard.kind]}」を貼り付け（別の場面からでも貼れます）`
+                      ? `「${freeKindLabel[freeClipboard.el.kind]}」を貼り付け（別の場面からでも貼れます）`
                       : "先に配置を「コピー」すると貼り付けられます"}
                   >
-                    {freeClipboard ? `貼り付け（${freeKindLabel[freeClipboard.kind]}）` : "貼り付け"}
+                    {freeClipboard ? `貼り付け（${freeKindLabel[freeClipboard.el.kind]}）` : "貼り付け"}
                   </button>
                 </div>
                 <div className="field" style={{ marginBottom: 8 }}>

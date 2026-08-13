@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { duplicateSceneAnimations, removeAnimationsForTargets } from './animationOps';
+import { animationsForElement, duplicateSceneAnimations, removeAnimationsForTargets, retargetAnimations } from './animationOps';
 import type { ElementAnimation } from './types';
 
 const anim = (id: string, sceneId: string, targetId: string): ElementAnimation =>
@@ -49,5 +49,42 @@ describe('removeAnimationsForTargets（要素削除の孤児掃除・④）', ()
   it('複数 target をまとめて掃除できる', () => {
     const anims = [anim('anim_001', 'scene_001', 'free_001'), anim('anim_002', 'scene_001', 'free_002')];
     expect(removeAnimationsForTargets(anims, 'scene_001', ['free_001', 'free_002'])).toEqual([]);
+  });
+});
+
+describe('animationsForElement / retargetAnimations（要素ひとつの複製・貼り付け・#770）', () => {
+  const anims = [
+    anim('anim_001', 'scene_001', 'free_001'),
+    anim('anim_002', 'scene_001', 'free_002'),
+    anim('anim_003', 'scene_002', 'free_001'),
+  ];
+
+  it('その要素の動きだけを取り出す（他要素・他場面は混ぜない）', () => {
+    expect(animationsForElement(anims, 'scene_001', 'free_001').map((a) => a.id)).toEqual(['anim_001']);
+  });
+
+  it('同じ場面の複製は targetId を宛て直す（動く要素を複製したのに動かない、を作らない）', () => {
+    const src = animationsForElement(anims, 'scene_001', 'free_001');
+    const added = retargetAnimations(src, anims, 'scene_001', 'free_009', makeId);
+    expect(added).toHaveLength(1);
+    expect(added[0]).toMatchObject({ id: 'anim_004', sceneId: 'scene_001', targetId: 'free_009' });
+    expect(added[0].keyframes).toEqual(anims[0].keyframes);
+    expect(added[0].keyframes).not.toBe(anims[0].keyframes); // 参照は別（深いコピー）
+  });
+
+  it('別の場面へ貼るときは場面も宛て直す（貼った場面の要素として動く）', () => {
+    const src = animationsForElement(anims, 'scene_001', 'free_001');
+    const added = retargetAnimations(src, anims, 'scene_002', 'free_009', makeId);
+    expect(added[0]).toMatchObject({ sceneId: 'scene_002', targetId: 'free_009' });
+  });
+
+  it('複数の動きでも id を一度に採る（同じ番号を2度出さない）', () => {
+    const two = [anim('anim_001', 'scene_001', 'free_001'), anim('anim_002', 'scene_001', 'free_001')];
+    const added = retargetAnimations(two, two, 'scene_001', 'free_009', makeId);
+    expect(added.map((a) => a.id)).toEqual(['anim_003', 'anim_004']);
+  });
+
+  it('元に動きが無ければ空配列（呼び出し側は足すものが無いと分かる）', () => {
+    expect(retargetAnimations([], anims, 'scene_001', 'free_009', makeId)).toEqual([]);
   });
 });
