@@ -22,7 +22,7 @@ import {
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from "../../domain/project/sceneOps";
 import { substituteDeletedTemplateInScenes } from "../../domain/project/templateUsage";
-import { duplicateSceneAnimations, removeAnimationsForTargets } from "../../domain/project/animationOps";
+import { duplicateSceneAnimations, removeAnimationsForTargets, retargetAnimations } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
@@ -242,6 +242,11 @@ interface ProjectState {
   removeAnimation: (animId: string) => void;
   /** 指定場面の指定要素(targetIds)に紐づくアニメを取り除く（要素削除時の孤児掃除・④）。対象なしなら何もしない。 */
   removeAnimationsForElements: (sceneId: string, targetIds: string[]) => void;
+  /**
+   * 取り出しておいた動きを、複製先の場面・要素へ宛て直して足す（要素の複製・貼り付け・#770）。
+   * 引き継がないと**動く要素を複製したのに動かない複製**ができる（消す側は対で片づけている）。
+   */
+  addAnimationsForElement: (sceneId: string, targetId: string, source: readonly ElementAnimation[]) => void;
   /** 場面を複製して直後に挿入し、新しい sceneId を返す（セリフは引き継ぎ・音声は作り直し）。 */
   duplicateScene: (sceneId: string) => string;
   /** 場面のセリフを splitIndex（カーソル位置）で分け、1場面を2場面にする。新しい sceneId を返す。 */
@@ -1136,6 +1141,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 後半場面（newId）は前半と同じ freeLayout を持つ＝元場面のアニメを後半にも引き継ぐ（splitScene と同じ・④）。
     set({ ...next, meta: metaWithDuplicatedAnimations(s.meta, sceneId, newId), saveStatus: "idle" });
     return newId;
+  },
+  addAnimationsForElement: (sceneId, targetId, source) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（他の動き操作と同じ関門）
+    const anims = get().meta.timelineOverlay?.animations ?? [];
+    const added = retargetAnimations(source, anims, sceneId, targetId, createAnimationId);
+    if (added.length === 0) return; // 元に動きが無い＝変化なし（未保存/履歴にしない）
+    get().pushHistory();
+    set((s) => ({
+      meta: { ...s.meta, timelineOverlay: { ...s.meta.timelineOverlay, animations: [...(s.meta.timelineOverlay?.animations ?? []), ...added] } },
+      saveStatus: "idle",
+    }));
   },
   removeAnimationsForElements: (sceneId, targetIds) => {
     if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④＝設定した意味どおりMP4へ）
