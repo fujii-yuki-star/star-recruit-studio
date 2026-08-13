@@ -236,13 +236,17 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     expect(screen.getByText(/このまま画面を移ると、その変更は失われます/)).toBeInTheDocument();
   });
 
-  it("保存済みで離れるときは書き直さない（同じ内容を無駄に書かない）", () => {
+  it("保存済みで離れるときは書き直さない（同じ内容を無駄に書かない）", async () => {
     open();
     useTimelineStore.setState({ saveStatus: "saved" });
     const write = vi.spyOn(fsMod, "saveProjectDoc").mockResolvedValue("x/project.json");
     const view = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     write.mockClear();
     view.unmount();
+    // ⚠️ **離れたあと1周待ってから見る**（#763-3）＝書き切るかどうかの判断は、欄の後始末より後に
+    // 回している。`unmount()` の直後に見ると「まだ判断していない」だけを見ることになり、
+    // **常に書く形へ退行しても気づけない**（＝空振りするテストになる）。
+    await Promise.resolve();
     expect(write).not.toHaveBeenCalled();
   });
 
