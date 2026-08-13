@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useCanvasDrag } from "../hooks/useCanvasDrag";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Layer } from "../../domain/template/types";
 import { effectiveLayerZ } from "../../domain/template/layerOrder";
@@ -91,6 +92,9 @@ interface Props {
 export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onRotate, groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, label, onInteractionStart, onInteractionEnd }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // `drag` の最新値（やめるときに開始時の値を読む＝window の受け口から見える形にする）。
+  const dragRef = useRef<DragState | null>(null);
+  useEffect(() => { dragRef.current = drag; }, [drag]);
   // 取り消しの合成境界（#547 P2-3）。開始したものだけを終了させる＝深さが釣り合う（多重 end で履歴が壊れない）。
   const interactingRef = useRef(false);
   const finishInteraction = (): void => {
@@ -116,6 +120,15 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
   // ドラッグ中にアンマウントしても閉じる（開きっぱなしだと以後の編集が全て同じ履歴に合成される・FreeLayoutOverlay と同機構）。
   // ref も戻す＝将来インライン関数を渡されて cleanup が繰り返し走っても、外側のグループまで閉じない。
   useEffect(() => () => { if (interactingRef.current) { interactingRef.current = false; onInteractionEnd?.(); } }, [onInteractionEnd]);
+  // 掴む作法（`Escape` の受け持ち・掴んでいる数・しきい値・掴んだ指）は**画面ぜんぶで1つ**（#769）。
+  // ⚠️ ここだけ古い組み方のままだった＝**同じ画面の中で作法が2つ**（ADR-0026②）。とくに
+  // **掴んでいる最中の `Ctrl+Z` が通っていた**＝取り消しで戻した下書きの上に、続きの動きが
+  // 古い開始値から書き戻す（取り消しが黙って打ち消される・#758 で他の2つに塞いだ穴）。
+  const canvasDrag = useCanvasDrag();
+  const claimDrag = (e: { clientX: number; clientY: number; pointerId: number }): void => {
+    if (canvasDrag.isActive()) cancelDrag(); // 前の掴みが残っていたら先に閉じる
+    canvasDrag.claim(e);
+  };
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   // 範囲選択（マーキー）の矩形（canvas 座標・null=非アクティブ）。空白ドラッグで矩形を引き交差レイヤーを選択。
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -153,6 +166,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     const width = ref.current?.clientWidth ?? canvasW;
     // pointer capture は best-effort（一部環境で例外）。失敗してもルートの onPointerMove で追従する。
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: layer.id, mode, corner,
@@ -173,6 +187,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     e.stopPropagation();
     if (!selectedIds.includes(layer.id)) onSelect(layer.id);
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: layer.id, mode: "rotate",
@@ -192,6 +207,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     if (group.locked) return; // ロック中は選択のみ
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-move", groupId: group.id,
@@ -248,6 +264,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     const p = toCanvas(e.clientX, e.clientY);
     const dist = Math.hypot(p.x - frame.cx, p.y - frame.cy) || 1; // 0 除算防止
+    claimDrag(e);
     startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-scale", groupId: group.id,
@@ -264,9 +281,13 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     e.preventDefault();
     e.stopPropagation();
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    claimDrag(e);
     startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-rotate", groupId: group.id, groupCenter: { x: frame.cx, y: frame.cy },
+      // ⚠️ **やめたときに戻す先**を控える（#777 レビュー）＝控えていないと `Escape` を押しても
+      // 回転が戻らない（戻す側だけ直しても、戻す値が無い）。拡縮・移動と同じ持ち方にする。
+      startTransform: { ...group.transform },
       startClientX: e.clientX, startClientY: e.clientY, start: { x: 0, y: 0, w: 0, h: 0 },
       starts: [], otherEdges: [],
       scale: (ref.current?.clientWidth ?? canvasW) / canvasW,
@@ -274,6 +295,13 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
   };
 
   const handleMove = (e: ReactPointerEvent) => {
+    if (!drag && !marquee) return; // 掴んでいないときの素通り（この関数はただの移動でも呼ばれる）
+    if (!canvasDrag.mine(e)) return; // **掴んだ指だけ見る**（別の指の動きで一緒に動かさない）
+    // ⚠️ **押していないのに動いている**＝どこかで `pointerup` を取り逃がした（画面の外で離した）。
+    // 放っておくと影が指に付いたままになり、**次に無関係な所で離した瞬間**にそこへ置かれる。
+    if (e.buttons === 0) { cancelDrag(); return; }
+    // ⚠️ **少し動かすまで掴まない**＝押しただけ・手の震えの1px で位置を書き換えて取り消しを積まない。
+    if (!canvasDrag.passedThreshold(e)) return;
     // 範囲選択（マーキー）中：矩形を広げ、交差するレイヤーを選択集合に反映。
     if (marquee) {
       e.preventDefault();
@@ -345,7 +373,9 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     }
   };
 
-  const endDrag = (e: ReactPointerEvent) => {
+  const endDrag = (e: { pointerId: number }) => {
+    if (!canvasDrag.isActive() || !canvasDrag.mine(e)) return; // 掴んだ指の1回だけ
+    canvasDrag.release();
     if (marquee) {
       setMarquee(null);
       try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
@@ -358,13 +388,64 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     setGuides({ x: null, y: null });
   };
 
+  /**
+   * 掴むのを**やめる**（`Escape`／`pointercancel`）＝**開始時の形へ戻す**（#769・ADR-0034 決定9）。
+   * ここだけ中止できない画面だった＝掴んだまま戻れない（§2-5）。戻す先は開始時に控えた値そのもの。
+   */
+  const cancelDrag = (): void => {
+    if (!canvasDrag.isActive()) return; // 同じやめるを二度走らせない
+    const d = dragRef.current;
+    const started = canvasDrag.isStarted();
+    setMarquee(null);
+    if (d) {
+      // **掴む前にやめたときは書き戻さない**（まだ1度も動かしていない＝変わらない更新を流すだけ）。
+      if (started) {
+        if (d.mode === "move") onMoveMany((d.starts ?? []).map((sPos) => ({ ...sPos })));
+        // ⚠️ **まとまりの3つを一緒に扱う**（#777 レビュー 🔴）＝`group-move` だけを見ていたので、
+        // 拡縮・回転は最後の `else` へ落ち、居ない id（`__group__`）へ空の箱を書いて**何も戻らなかった**
+        //（`updateLayer` は該当が無いと黙って何もしない＝失敗が見えない）。同じ画面で
+        // 「操作によって `Escape` が効いたり効かなかったり」に見える。
+        else if (d.mode === "group-move" || d.mode === "group-scale" || d.mode === "group-rotate") {
+          if (d.groupId && d.startTransform) onGroupTransform?.(d.groupId, d.startTransform);
+        } else if (d.mode === "rotate") onRotate(d.id, d.rotation ?? 0);
+        else onChange(d.id, { x: d.start.x, y: d.start.y, w: d.start.w, h: d.start.h });
+      }
+      setDrag(null);
+      setGuides({ x: null, y: null });
+      finishInteraction();
+    }
+    canvasDrag.release();
+  };
+
+  // `Escape` と `pointercancel` でやめる／離しは **window でも**拾う（指を捕まえる仕掛けは落ちることがある）。
+  // ⚠️ 張るのは掴んでいる間に1度だけ（依存は真偽だけ・中身は latest-ref で最新を読む＝`FreeLayoutOverlay` と同じ形）。
+  const dragging = drag != null || marquee != null;
+  const cancelRef = useRef<() => void>(() => {});
+  const endRef = useRef<(e: { pointerId: number }) => void>(() => {});
+  const mineRef = useRef<(e: { pointerId: number }) => boolean>(() => true);
+  useEffect(() => { cancelRef.current = cancelDrag; endRef.current = endDrag; mineRef.current = canvasDrag.mine; });
+  useEffect(() => {
+    if (!dragging) return;
+    const onKey = (ev: KeyboardEvent): void => { if (ev.key === "Escape") { ev.stopPropagation(); cancelRef.current(); } };
+    const onCancel = (ev: PointerEvent): void => { if (mineRef.current(ev)) cancelRef.current(); };
+    const onUp = (ev: PointerEvent): void => { if (mineRef.current(ev)) endRef.current(ev); };
+    window.addEventListener("keydown", onKey, true); // 外側の `Escape` より先に受ける
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dragging]);
+
   return (
     <div
       ref={ref}
       style={{ position: "absolute", inset: 0, touchAction: "none" }}
       onPointerMove={handleMove}
       onPointerUp={endDrag}
-      onPointerCancel={endDrag}
+      onPointerCancel={(e) => { if (canvasDrag.mine(e)) cancelDrag(); }}
       // 何もない所を押したら選択解除＋範囲選択（マーキー）を開始（レイヤー/ハンドルの onPointerDown は stopPropagation 済み）。
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
@@ -372,6 +453,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
         if (e.button !== 0) return;
         const p = toCanvas(e.clientX, e.clientY);
         try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
+        claimDrag(e); // 範囲選択も**同じ作法**（しきい値・取り逃がしの救済・`Escape` の受け持ち）
         setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
       }}
     >
