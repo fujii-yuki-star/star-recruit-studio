@@ -142,8 +142,32 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     if (n && n !== normalizeHex(valueRef.current)) onChangeRef.current(n);
   }, []);
 
+  /**
+   * **外から色が変わったら、開いている枠も追う**（実機で発覚）。取り消し（`Ctrl+Z`）や別の欄からの変更で
+   * 親の色が変わっても、開きっぱなしの面・バー・コード欄が**古い色のまま**残り、**いまの色を偽って見せる**
+   *（そのまま撫でると、戻したはずの色を起点に書き直してしまう）。
+   *
+   * ⚠️ **自分が送った色では追わない**（撫でている最中に自分の変更で同期し直すと、指と競り合う）。
+   * 送った色を控えておき、それと違う値が来たときだけ取り込む。
+   */
+  const lastEmittedRef = useRef(value);
+  /** 作業色とコード欄を `hex` にそろえる（**親へは通知しない**）。 */
+  const syncTo = useCallback((n: string) => {
+    codeDirtyRef.current = false; // 自分で書き替えた＝打ちかけではない
+    setHsv(hexToHsv(n) ?? { h: 0, s: 0, v: 0 });
+    setCodeText(n);
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const n = normalizeHex(value);
+    if (!n || n === normalizeHex(lastEmittedRef.current)) return;
+    lastEmittedRef.current = value;
+    syncTo(n);
+  }, [value, open, syncTo]);
+
   const openPicker = () => {
     codeDirtyRef.current = false;
+    lastEmittedRef.current = value; // 開いた時点の色を基準にする
     setHsv(hexToHsv(value) ?? { h: 0, s: 0, v: 0 }); // 開いた瞬間の値を取り込む
     setCodeText(value);
     setPos(null); // 位置は開いた後に実測して確定（下の layout effect）
@@ -185,17 +209,12 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   }, [open, reposition]);
 
   const currentHex = hsvToHex(hsv);
-  /** 作業色とコード欄を `hex` にそろえる（**親へは通知しない**）。 */
-  const syncTo = (n: string) => {
-    codeDirtyRef.current = false; // 自分で書き替えた＝打ちかけではない
-    setHsv(hexToHsv(n) ?? { h: 0, s: 0, v: 0 });
-    setCodeText(n);
-  };
   // パレット等・外部からの確定：作業値・コード欄・親をすべてそろえる（コード欄も新色に同期する）。
   const commitHex = (hex: string) => {
     const n = normalizeHex(hex);
     if (!n) return;
     syncTo(n);
+    lastEmittedRef.current = n; // 自分が送った色＝外から来た変更と区別する
     onChange(n);
   };
   // 鮮やかさ×明るさの面：横=鮮やかさ(0..1)、縦=明るさ(1..0)。
@@ -281,6 +300,7 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     setHsv(next);
     const hex = hsvToHex(next);
     setCodeText(hex);
+    lastEmittedRef.current = hex; // 自分が送った色＝外から来た変更と区別する
     onChange(hex);
   };
   const hueColor = `hsl(${hsv.h}, 100%, 50%)`;

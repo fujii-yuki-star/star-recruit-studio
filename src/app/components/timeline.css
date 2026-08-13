@@ -40,7 +40,11 @@
 .timeline-row-label {
   position: sticky;
   left: 0;
-  z-index: 2;
+  /* ⚠️ **どの帯よりも前面**（実機で発覚）。選んだ帯（3）・掴んでいる帯と「⋮」（4）より下だと、
+     横へ送ったときに帯が**名前の欄を突き抜けて**見える（欄は貼り付いたまま動かないので重なる）。
+     この file の重なりの段：1=帯／2=端の取っ手／3=選んだ帯・再生位置の線／
+     4=掴んでいる帯・「⋮」・吸着の線／**5=列の名前の欄（いちばん前）**。 */
+  z-index: 5;
   flex: 0 0 auto;
   width: var(--timeline-label-w);
   display: flex;
@@ -227,9 +231,12 @@
   background: var(--color-danger-soft);
   border-color: var(--color-danger);
 }
+/* ⚠️ 選んだ枠は**帯の内側**に描く（実機で発覚）。外側（`outline-offset: 1px`）だと枠が上下 3px はみ出し、
+   40px の列の中で**隣の列へ食い込んで見える**（帯の高さは 32px なので余白 4px を超える）。
+   左は列の名前の欄（`--timeline-label-w` の固定列）へ食い込む。内側なら太さを変えずに収まる。 */
 .timeline-clip--selected {
   outline: 2px solid var(--color-primary);
-  outline-offset: 1px;
+  outline-offset: -2px;
   box-shadow: var(--shadow-sm);
   z-index: 3;
 }
@@ -266,7 +273,7 @@
   bottom: 0;
   width: 0;
   border-left: 2px solid var(--color-danger);
-  z-index: 3; /* クリップ（1）・行ラベル（2）より前面＝どのレーンでも見える */
+  z-index: 3; /* 帯（1）より前面＝どの列でも見える。列の名前の欄（5）には隠れる＝送ったとき欄を突き抜けない */
   pointer-events: none; /* 線でクリックを奪わない（シークはルーラーが受ける） */
 }
 /**
