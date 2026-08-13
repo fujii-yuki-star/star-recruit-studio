@@ -495,12 +495,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **選ぶ部品が変わったら下書きを片づける**（#701・監査 §2.2-9）＝別の部品に前の入力が残っていると、
   // 「置く」を押した瞬間に**打った覚えのない値**が入る。選択の id そのものを見る（並び替えでは消さない）。
   const selectedKey = selectedClipIds.join(",");
+  /**
+   * **固定を除外して動かしたことの知らせ**（#773・ADR-0034 未解決7 の決着 (a)）。
+   * 空間の移動は「除外して動かす」＝黙って一部だけ動かさない。
+   *
+   * ⚠️ **一度だけ出す**（利用者決定）＝見れば分かることなので、動かすたびに出すとうるさい。
+   * **選んだ組み合わせが変わったら出し直す**（別の組み合わせなら、また知らせる意味がある）。
+   */
+  const [lockedSkipNotice, setLockedSkipNotice] = useState<string | null>(null);
+  const noticedForRef = useRef<string | null>(null);
+  const noticeLockedSkip = useCallback((count: number, key: string): void => {
+    if (noticedForRef.current === key) return;
+    noticedForRef.current = key;
+    setLockedSkipNotice(`固定された列の部品${count}個は動かしていません。動かすには固定を外してください`);
+  }, []);
   const lastSelectedKey = useRef(selectedKey);
   useEffect(() => {
     if (lastSelectedKey.current === selectedKey) return;
     lastSelectedKey.current = selectedKey;
     setKfDraft({});
     setVolumeDraft("");
+    // 前の選択について出した知らせを、いまの選択の返事に見せない（断り文と同じ扱い）。
+    setLockedSkipNotice(null);
     // 文字欄はフォーカス中に消えると `blur` が来ない＝まとめが開きっぱなしになる（#708 レビュー）。
     // 欄が入れ替わるここで必ず畳む（ドラッグが `window` で終了を拾うのと同じ役割）。
     useTimelineStore.getState().resetHistoryGroup();
@@ -1114,10 +1130,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // ⚠️ 対象は**キャンバスに出ているもの**（`canvasEls` と同じ絞り＝#752 レビュー）。
     // 選んでいるだけで見えていない部品（再生位置の外・出さない列）まで動かすと、
     // **画面のどこも変わらないのに文書だけ動いて保存される**（矢印を奪って何も起きないのと同じ）。
-    const nudgeTargets = doc ? doc.clips.filter((c) => selectedClipIds.includes(c.id) && isOnCanvas(c)) : [];
+    // ⚠️ **固定は混ぜず、残りを動かす**（#773・決定 (a)＝空間の移動は「除外」）。
+    // 以前は「1つでも固定が混ざったら何も動かさない」（＝時間の移動と同じ全か無か）だったが、
+    // キャンバスは要素が独立なので、固定した背景が残っても寄せた結果はそのまま使える。
+    // **全部が固定なら矢印を奪わない**（奪って何も起きない＝行き止まり・決定5）。
+    const onCanvasSelected = doc ? doc.clips.filter((c) => selectedClipIds.includes(c.id) && isOnCanvas(c)) : [];
+    const nudgeTargets = onCanvasSelected.filter((c) => grabbableClip(c));
+    const nudgeSkipped = onCanvasSelected.length - nudgeTargets.length;
     nudgeBoxRef.current =
-      doc && nudgeTargets.length > 0 && nudgeTargets.every((c) => grabbableClip(c))
+      doc && nudgeTargets.length > 0
         ? (dx, dy, fast) => {
+            if (nudgeSkipped > 0) noticeLockedSkip(nudgeSkipped, [...selectedClipIds].sort().join(","));
             const dims = dimsForOrientation(doc.videoSettings.aspectRatio);
             const step = fast ? NUDGE_BOX_FAST_PX : NUDGE_BOX_PX;
             // ⚠️ **押し続けても取り消しは1回ぶん**（決定20・掴んで動かすのと同じ）。畳まないと、
@@ -1896,6 +1919,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               // **1回のドラッグ＝1回の取り消し**（決定20）。動かすたびに履歴を積まない。
               onInteractionStart={beginHistoryGroup}
               onInteractionEnd={endHistoryGroup}
+              onSkippedLocked={(count) => noticeLockedSkip(count, [...selectedClipIds].sort().join(","))}
               // ⚠️ **右クリックで黙らない**（#746-1）＝帯には「同じものを足す／消す」があるのに、
               // キャンバスだけ何も出ないと**同じ操作が場所によって在ったり無かったり**になる。
               // 関門も文言も帯と同じもの（決定17 が禁じるのは「前へ／奥へ」だけ＝そちらは渡さない）。
@@ -3418,10 +3442,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             下へ流すと、恒常の警告が出ているときに画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。
             上に積まない（編集の場所を狭めない）と、必ず気づける、を両立させるための置き方。
             ※ **その場の返事を「操作した欄の中」に出すのが本筋**（ADR-0034 決定10）＝段階0 で寄せる。 */}
-        {(voiceError || editBlocked || leaveBlockedMessage) && (
+        {(voiceError || editBlocked || leaveBlockedMessage || lockedSkipNotice) && (
           <div className="notice notice-warn timeline-flash" role="alert">
             {voiceError && <p>{voiceError}</p>}
             {editBlocked && <p>{editBlockedMessage[editBlocked]}</p>}
+            {lockedSkipNotice && <p>{lockedSkipNotice}</p>}
             {leaveBlockedMessage && <p>{leaveBlockedMessage}</p>}
           </div>
         )}

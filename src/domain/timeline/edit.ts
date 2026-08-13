@@ -273,7 +273,12 @@ export function moveClips(
   for (const u of updates) {
     const clip = doc.clips.find((c) => c.id === u.id);
     if (!clip) return blocked(EDIT_BLOCKED.notFound);
-    if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+    // ⚠️ **まとめて動かすときは「選んだ中に固定がある」と言う**（#773・ADR-0034 未解決7 の決着）。
+    // `locked`（「**この**列は固定されています」）だと、まとめて動かしている場面で**指す先が外れる**
+    // ＝どの列の話か分からない。次の行動も「固定を外す」だけでなく「選び直す」で進める。
+    if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) {
+      return blocked(updates.length > 1 ? EDIT_BLOCKED.lockedSelection : EDIT_BLOCKED.locked);
+    }
     // ⚠️ **連動している字幕は時間だけ据え置く**（読み上げが決める）。**列は動かせる**
     // ＝単体で動かすとき（`moveClip`）は列だけ許すので、まとめたときだけ落とすと
     // 選択の件数で同じ操作の意味が変わる（ADR-0026②）。

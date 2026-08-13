@@ -148,13 +148,19 @@ interface OverlayProps {
   textFontFamily?: string;
   /** グループの transform を更新（移動/拡縮/回転＝中心まわり）。 */
   onGroupTransform?: (groupId: string, patch: Partial<GroupTransform>) => void;
+  /**
+   * まとめて動かすときに**固定を除外した**ことを知らせる（#773・ADR-0034 未解決7 の決着 (a)）。
+   * 空間の移動は「除外して動かす」＝黙って一部だけ動かさないよう、**画面側が一言出す**
+   *（文言と出し方は画面が決める＝共有部品が2つの画面へ同じ文言を押し付けない）。
+   */
+  onSkippedLocked?: (count: number) => void;
 }
 
 export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, menuGuards, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
-  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onEditingIdChange, textFontFamily,
+  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onSkippedLocked, onEditingIdChange, textFontFamily,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -329,13 +335,18 @@ export function FreeLayoutOverlay({
     if (!alreadySelected) onSelect(el.id);
     // 一括移動の対象：選択済み要素のドラッグ＝全選択を動かす／未選択のドラッグ＝その要素だけ（リサイズも単独）。
     const moveTargets = mode === "move" && alreadySelected ? selectedIds : [el.id];
-    const starts = moveTargets
+    const found = moveTargets
       .map((id) => freeLayout.find((m) => m.id === id))
+      .filter((m): m is FreeElement => m != null);
+    // **除外した数**を知らせる（黙って一部だけ動かさない・#773）。掴んだ時点で1度だけ。
+    const skipped = found.filter((m) => m.locked).length;
+    if (skipped > 0) onSkippedLocked?.(skipped);
+    const starts = found
       // ⚠️ **固定したものは一緒に動かさない**（#746 レビュー 🔴）＝掴み始めるのは塞いであっても、
       // **まとめて選んで別の1つを動かす**と混ざって動いていた（固定が意味を失う）。
       // タイムライン形式では枠を「描かれている場所」に出しているので、混ざると**その場所が素の箱として
       // 保存され、動きのぶんだけ絵が飛ぶ**（`Escape` の戻しも同じ値を書く）。
-      .filter((m): m is FreeElement => m != null && !m.locked)
+      .filter((m) => !m.locked)
       .map((m) => ({ id: m.id, x: m.x, y: m.y }));
     // 吸着先＝移動しない他要素の辺・中心。ドラッグ中は他要素が動かないのでここで一度だけ確定する。
     // 吸着は move のときだけ使う（resize では参照しないので計算もしない）。

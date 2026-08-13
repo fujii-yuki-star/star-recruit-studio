@@ -4157,6 +4157,67 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.getByLabelText("横位置")).toBeInTheDocument(); // 触れる先は残る
   });
 
+  it("**固定を除外して動かしたら一言知らせる（ただし一度だけ）**（#773・決定 (a)）", () => {
+    // ⚠️ 黙って一部だけ動かさない（ADR-0026④）。ただし**見れば分かる**ので、動かすたびには出さない
+    //（利用者決定）。選んだ組み合わせが変わったら出し直す。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_locked", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "固定" },
+        { id: "clip_free", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 4, x: 0, y: 200, w: 100, h: 50, text: "自由" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_locked", "clip_free"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    // 固定は動かず、残りは動く（＝空間の移動は「除外」・全か無かにしない）。
+    const clips = () => useTimelineStore.getState().doc!.clips;
+    expect(clips().find((c) => c.id === "clip_locked")!.x).toBe(0);
+    expect(clips().find((c) => c.id === "clip_free")!.x).toBe(1);
+    expect(screen.getByText(/固定された列の部品1個は動かしていません/)).toBeInTheDocument();
+  });
+
+  it("**同じ組み合わせでは二度と出さない**（見れば分かることを繰り返さない・#773・利用者決定）", () => {
+    // ⚠️ 「一度だけ」が効いているかは、**知らせが消えたあとに同じ組み合わせで動かす**と分かる
+    //（1本の知らせを出し直すだけでは、毎回出す形と見た目が変わらない＝そこを見ても確かめられない）。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_locked", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "固定" },
+        { id: "clip_free", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 4, x: 0, y: 200, w: 100, h: 50, text: "自由" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_locked", "clip_free"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(screen.getByText(/動かしていません/)).toBeInTheDocument();
+    // 選び直すと知らせは消える（前の選択の返事に見せない）。
+    act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_free"] }); });
+    expect(screen.queryByText(/動かしていません/)).toBeNull();
+    // **同じ組み合わせへ戻して動かしても、もう出さない**。
+    act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_locked", "clip_free"] }); });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(screen.queryByText(/動かしていません/)).toBeNull();
+    expect(useTimelineStore.getState().doc!.clips.find((c) => c.id === "clip_free")!.x).toBe(2); // 動きは続く
+  });
+
+  it("帯の一括移動は**全か無かで断る**＋語彙は「選んだ中に固定がある」（#773-3）", () => {
+    // ⚠️ 時間の移動は一部だけ動くと間隔・並びが壊れる＝断るのが親切（決定 (a)）。
+    // 断り文が `locked`（「**この**列は…」）だと、まとめて動かしている場面で指す先が外れる。
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_locked", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "固定" },
+        { id: "clip_free", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "自由" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_locked", "clip_free"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => { useTimelineStore.getState().moveClipsBy([{ id: "clip_free", startSec: 5 }, { id: "clip_locked", startSec: 5 }]); });
+    expect(useTimelineStore.getState().doc!.clips.every((c) => c.startSec === 0)).toBe(true); // 全か無か
+    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
+  });
+
   it("**動いている部品はまとめて動かすときも混ざらない**（絵が飛ばない・#746 レビュー 🔴）", () => {
     // ⚠️ 掴み始めるのを塞いでも、**まとめて選んで別の1つを動かす**と混ざって動いていた。
     // 枠は「描かれている場所」に出しているので、混ざるとその場所が**素の箱として保存**され、
