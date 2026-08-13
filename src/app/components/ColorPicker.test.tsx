@@ -108,6 +108,34 @@ describe("ColorPicker", () => {
     expect(onChange).toHaveBeenLastCalledWith("#00ff00");
   });
 
+  it("**開いている最中に外から色が変わったら、面もコード欄も追う**（実機で発覚）", () => {
+    // ⚠️ 取り消し（`Ctrl+Z`）で親の色が戻っても、開きっぱなしの枠が古い色のままだと
+    // **いまの色を偽って見せる**（そのまま撫でると、戻したはずの色を起点に書き直す）。
+    const onChange = vi.fn();
+    const { rerender } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    fireEvent.click(screen.getByRole("button", { name: "色 #22c55e" })); // 選ぶ
+    expect(screen.getByLabelText("色コード")).toHaveValue("#22c55e");
+    rerender(<ColorPicker value="#22c55e" onChange={onChange} />); // 親が受け取って反映（自分が送った色）
+    expect(screen.getByLabelText("色コード")).toHaveValue("#22c55e"); // 同期し直さない
+    rerender(<ColorPicker value="#000000" onChange={onChange} />); // 外で取り消された
+    expect(screen.getByLabelText("色コード")).toHaveValue("#000000"); // 枠も戻る
+  });
+
+  it("自分が送った色では同期し直さない（撫でている指と競らない）", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<ColorPicker value="#000000" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    const shown = (screen.getByLabelText("色コード") as HTMLInputElement).value;
+    rerender(<ColorPicker value={shown} onChange={onChange} />); // 親が自分の色を返してきただけ
+    expect(screen.getByLabelText("色コード")).toHaveValue(shown); // 撫でた色のまま
+    fireEvent.pointerUp(window, { pointerId: 1 });
+  });
+
   it("**自分で書き替えた色は閉じても送り直さない**（取り消しを無かったことにしない・#752 レビュー）", () => {
     // ⚠️ コード欄の文字は面を撫でてもパレットを押しても書き替わる。閉じるときに無条件で送り直すと
     // 「色を選ぶ → `Ctrl+Z` で戻す → 閉じる」で**戻したはずの色が復活**する（やり直しでも戻せない）。

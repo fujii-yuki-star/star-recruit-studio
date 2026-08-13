@@ -406,7 +406,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [leaveBlocked, setLeaveBlocked] = useState<string | null>(null);
   // 画面を離れた後に、終わった保存が遷移を撃たないようにする（行き先が勝手にすり替わる・#719 レビュー）。
   const aliveRef = useRef(true);
-  useEffect(() => () => { aliveRef.current = false; }, []);
+  // ⚠️ **マウントで真へ戻す**（実機で発覚）。開発ビルドは effect を「張る→外す→張り直す」で2度走らせるので、
+  // 外した回で偽になったまま**張り直しでは戻らず**、以後この画面から**どの入口でも離れられなくなる**
+  //（下の関門が「もう画面に居ない」と判断して黙って降りる＝押しても何も起きない・§2-5）。
+  // 後始末だけを書く形は、**画面が生き返る**ことを想定していない。`HomeScreen` の `mountedRef` と同じ形にする。
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
 
   /**
    * **画面を離れる（どの入口からでも同じ流れ）**（#693・#719）。
