@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { fireEvent, render } from "@testing-library/react";
 import { TemplateLayerOverlay } from "./TemplateLayerOverlay";
+import { isPointerDragging } from "../hooks/usePointerDrag";
+import { hasEscapeOwner } from "../hooks/escapeOwners";
 import type { Layer } from "../../domain/template/types";
 
 // テンプレ作成エディタのレイヤー操作オーバーレイ（#214 ③c）。①の純粋 ops 流用をブラウザ非依存で検証（ADR-0014）。
@@ -61,9 +63,77 @@ describe("TemplateLayerOverlay", () => {
     // jsdom は実レイアウトを持たず clientWidth=0（→scale=0）になるため明示して scale=1 に。
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
     fireEvent.pointerDown(boxes[1], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(boxes[1], { clientX: 30, clientY: 40, pointerId: 1 });
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 30, clientY: 40, pointerId: 1 });
     // title start (200,200) + (30,40) = (230,240)。背景全面への吸着は閾値外で発生しない。
     expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "title", x: 230, y: 240 }]);
+  });
+
+  /** 掴んで動かす（しきい値を越えるだけ動かす）。実寸を与えないと縮尺 0 で**そもそも動かない**。 */
+  const grabbed = () => {
+    const r = renderOverlay({ selectedIds: ["title"] });
+    Object.defineProperty(r.root, "clientWidth", { value: CANVAS_W, configurable: true });
+    fireEvent.pointerDown(r.boxes[1], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    return r;
+  };
+
+  it("**掴んでいる間は取り消しを止める**（3つのキャンバスで同じ作法・#769）", () => {
+    // ⚠️ ここだけ数に入れていなかった＝掴んでいる最中の `Ctrl+Z` が通り、**取り消しで戻した下書きの上に
+    // 続きの動きが古い開始値から書き戻す**（取り消しが黙って打ち消される）。
+    expect(isPointerDragging()).toBe(false);
+    const { root } = grabbed();
+    expect(isPointerDragging()).toBe(true);
+    fireEvent.pointerUp(root, { clientX: 0, clientY: 0, pointerId: 1 });
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("**`Escape` でやめると元の位置へ戻す**（掴んだまま戻れない、を作らない・#769）", () => {
+    const { boxes, onMoveMany } = grabbed();
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 30, clientY: 40, pointerId: 1 });
+    onMoveMany.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "title", x: 200, y: 200 }]); // 開始時の値へ
+    expect(isPointerDragging()).toBe(false);
+    expect(hasEscapeOwner()).toBe(false);
+  });
+
+  it("**少し動かすまで動かさない**（押しただけでは位置を書かない・#769）", () => {
+    const { boxes, onMoveMany } = grabbed();
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 2, clientY: 1, pointerId: 1 }); // しきい値の内
+    expect(onMoveMany).not.toHaveBeenCalled();
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 30, clientY: 0, pointerId: 1 });
+    expect(onMoveMany).toHaveBeenCalled();
+  });
+
+  it("**離すのを取り逃がしたら元へ戻して終わる**（影が指に付いたままにしない・#769）", () => {
+    const { boxes, onMoveMany } = grabbed();
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 30, clientY: 40, pointerId: 1 });
+    onMoveMany.mockClear();
+    fireEvent.pointerMove(boxes[1], { buttons: 0, clientX: 60, clientY: 40, pointerId: 1 }); // 押していない
+    expect(onMoveMany).toHaveBeenLastCalledWith([{ id: "title", x: 200, y: 200 }]);
+    expect(isPointerDragging()).toBe(false);
+    onMoveMany.mockClear();
+    fireEvent.pointerMove(boxes[1], { buttons: 0, clientX: 90, clientY: 40, pointerId: 1 });
+    expect(onMoveMany).not.toHaveBeenCalled(); // もう指に付いてこない
+  });
+
+  it("**枠の外で離しても名乗りを外す**（指を捕まえ損ねた回に塞ぎっぱなしにしない・#769）", () => {
+    const { boxes } = grabbed();
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 30, clientY: 40, pointerId: 1 });
+    fireEvent.pointerUp(window, { clientX: 900, clientY: 900, pointerId: 1 });
+    expect(isPointerDragging()).toBe(false);
+    expect(hasEscapeOwner()).toBe(false);
+  });
+
+  it("**別の指を離してもそこへ落とさない**（掴んだ指だけ見る・#769）", () => {
+    const { boxes, onMoveMany } = grabbed();
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 30, clientY: 40, pointerId: 1 });
+    onMoveMany.mockClear();
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 300, clientY: 300, pointerId: 2 }); // 別の指
+    expect(onMoveMany).not.toHaveBeenCalled();
+    fireEvent.pointerUp(window, { clientX: 300, clientY: 300, pointerId: 2 });
+    expect(isPointerDragging()).toBe(true); // まだ掴んでいる
+    fireEvent.pointerUp(window, { clientX: 30, clientY: 40, pointerId: 1 });
+    expect(isPointerDragging()).toBe(false);
   });
 
   it("`Ctrl` を押している間は吸着しない（#686 段階4・決定12）", () => {
@@ -73,9 +143,9 @@ describe("TemplateLayerOverlay", () => {
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
     fireEvent.pointerDown(boxes[1], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     // 背景（全面）の左辺 0 へ吸い付く距離まで戻す＝title の左辺 200 を 0 の近くへ。
-    fireEvent.pointerMove(boxes[1], { clientX: -197, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: -197, clientY: 0, pointerId: 1 });
     const snapped = onMoveMany.mock.calls[onMoveMany.mock.calls.length - 1][0][0].x;
-    fireEvent.pointerMove(boxes[1], { clientX: -197, clientY: 0, pointerId: 1, ctrlKey: true });
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: -197, clientY: 0, pointerId: 1, ctrlKey: true });
     const raw = onMoveMany.mock.calls[onMoveMany.mock.calls.length - 1][0][0].x;
     expect(snapped).toBe(0); // 吸着すると背景の左辺へ
     expect(raw).toBe(3); // 押している間は指の位置のまま
@@ -86,7 +156,7 @@ describe("TemplateLayerOverlay", () => {
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
     const seHandle = boxes[1].querySelectorAll("div")[3]; // [nw,ne,sw,se] の se
     fireEvent.pointerDown(seHandle, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(seHandle, { clientX: 20, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(seHandle, { buttons: 1, clientX: 20, clientY: 10, pointerId: 1 });
     // se を (+20,+10)：左上 (200,200) 固定で w=400+20=420・h=120+10=130。
     expect(onChange).toHaveBeenLastCalledWith("title", expect.objectContaining({ x: 200, y: 200, w: 420, h: 130 }));
   });
@@ -95,7 +165,7 @@ describe("TemplateLayerOverlay", () => {
     const { boxes, onSelect, onMoveMany } = renderOverlay({ selectedIds: ["title"] });
     fireEvent.pointerDown(boxes[0], { button: 0, shiftKey: true, clientX: 0, clientY: 0, pointerId: 1 });
     expect(onSelect).toHaveBeenCalledWith("background", true); // additive＝トグル
-    fireEvent.pointerMove(boxes[0], { clientX: 30, clientY: 40, pointerId: 1 });
+    fireEvent.pointerMove(boxes[0], { buttons: 1, clientX: 30, clientY: 40, pointerId: 1 });
     expect(onMoveMany).not.toHaveBeenCalled(); // Shift＋クリックは選択のみ
   });
 
@@ -105,7 +175,7 @@ describe("TemplateLayerOverlay", () => {
     root.getBoundingClientRect = () =>
       ({ left: 0, top: 0, width: CANVAS_W, height: CANVAS_H, right: CANVAS_W, bottom: CANVAS_H, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
     fireEvent.pointerDown(root, { button: 0, clientX: 100, clientY: 100, pointerId: 1 }); // 空白＝root 自身
-    fireEvent.pointerMove(root, { clientX: 700, clientY: 400, pointerId: 1 }); // (100,100)-(700,400) に title が交差
+    fireEvent.pointerMove(root, { buttons: 1, clientX: 700, clientY: 400, pointerId: 1 }); // (100,100)-(700,400) に title が交差
     expect(onSelectMany).toHaveBeenLastCalledWith(["background", "title"]);
   });
 
@@ -116,7 +186,7 @@ describe("TemplateLayerOverlay", () => {
     const knob = boxes[1].querySelector('[data-testid="tmpl-rotate-handle"]') as HTMLElement;
     // title (200,200,400,120) 中心=(400,260)。右(600,260)＝3時方向＝90°。
     fireEvent.pointerDown(knob, { button: 0, clientX: 400, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(knob, { clientX: 600, clientY: 260, pointerId: 1 });
+    fireEvent.pointerMove(knob, { buttons: 1, clientX: 600, clientY: 260, pointerId: 1 });
     const calls = onRotate.mock.calls;
     expect(calls[calls.length - 1][0]).toBe("title");
     expect(calls[calls.length - 1][1]).toBeCloseTo(90, 1);
@@ -159,7 +229,7 @@ describe("TemplateLayerOverlay", () => {
     const frame = root.querySelector('[data-testid="tmpl-group-frame"]') as HTMLElement;
     // 枠内かつ**メンバー**（title＝200,200,400,120）の上を押す＝まとまり移動（従来どおり）。
     fireEvent.pointerDown(frame, { button: 0, clientX: 300, clientY: 250, pointerId: 1 });
-    fireEvent.pointerMove(frame, { clientX: 330, clientY: 290, pointerId: 1 });
+    fireEvent.pointerMove(frame, { buttons: 1, clientX: 330, clientY: 290, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 });
   });
 
@@ -203,7 +273,7 @@ describe("TemplateLayerOverlay", () => {
     const frame = root.querySelector('[data-testid="tmpl-group-frame"]') as HTMLElement;
     // 枠 AABB(200,200)-(1600,320) の (900,250)＝title と logo の隙間。見えているのは background だが枠の内部。
     fireEvent.pointerDown(frame, { button: 0, clientX: 900, clientY: 250, pointerId: 1 });
-    fireEvent.pointerMove(frame, { clientX: 930, clientY: 290, pointerId: 1 });
+    fireEvent.pointerMove(frame, { buttons: 1, clientX: 930, clientY: 290, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { x: 30, y: 40 }); // まとまりが動く
     expect(onSelect).not.toHaveBeenCalledWith("background"); // 奥の背景を掴まない
     expect(onMoveMany).not.toHaveBeenCalled();
@@ -227,7 +297,7 @@ describe("TemplateLayerOverlay", () => {
     const se = root.querySelector('[data-testid="tmpl-group-scale-se"]') as HTMLElement;
     // title(200,200,400,120) → 枠中心(400,260)。開始(600,260)=距離200、移動先(800,260)=距離400 ⇒ scale 2。
     fireEvent.pointerDown(se, { button: 0, clientX: 600, clientY: 260, pointerId: 1 });
-    fireEvent.pointerMove(se, { clientX: 800, clientY: 260, pointerId: 1 });
+    fireEvent.pointerMove(se, { buttons: 1, clientX: 800, clientY: 260, pointerId: 1 });
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { scale: 2 });
   });
 
@@ -238,7 +308,7 @@ describe("TemplateLayerOverlay", () => {
     const knob = root.querySelector('[data-testid="tmpl-group-rotate-handle"]') as HTMLElement;
     // 枠中心(400,260) の右(600,260)＝3時方向＝90°。
     fireEvent.pointerDown(knob, { button: 0, clientX: 400, clientY: 0, pointerId: 1 });
-    fireEvent.pointerMove(knob, { clientX: 600, clientY: 260, pointerId: 1 });
+    fireEvent.pointerMove(knob, { buttons: 1, clientX: 600, clientY: 260, pointerId: 1 });
     const calls = onGroupTransform.mock.calls;
     expect(calls[calls.length - 1][0]).toBe("group_001");
     expect(calls[calls.length - 1][1].rotation).toBeCloseTo(90, 1);
@@ -264,8 +334,8 @@ describe("TemplateLayerOverlay: 取り消しの合成境界（#547 P2-3）", () 
     Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true }); // scale=1
     fireEvent.pointerDown(boxes[1], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
     expect(onInteractionStart).toHaveBeenCalledTimes(1);
-    fireEvent.pointerMove(root, { clientX: 40, clientY: 20, pointerId: 1 });
-    fireEvent.pointerMove(root, { clientX: 80, clientY: 40, pointerId: 1 });
+    fireEvent.pointerMove(root, { buttons: 1, clientX: 40, clientY: 20, pointerId: 1 });
+    fireEvent.pointerMove(root, { buttons: 1, clientX: 80, clientY: 40, pointerId: 1 });
     expect(onInteractionStart).toHaveBeenCalledTimes(1); // 移動中は増やさない
     expect(onInteractionEnd).not.toHaveBeenCalled(); // まだ閉じない
     fireEvent.pointerUp(root, { pointerId: 1 });
