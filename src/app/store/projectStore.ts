@@ -185,6 +185,12 @@ interface ProjectState {
   fail: () => void;
   reset: () => void;
   /** 新規プロジェクト（作業状態を初期化）。 */
+  /**
+   * **いま開いている文書の世代**（#762）。開き直す・新規にする・消すたびに1つ進む。
+   * ⚠️ 照合に `projectId` を使わない＝**新規の動画は id を持たない**（保存で初めて採番する）ので、
+   * 保存中に別の新規を作ると「どちらも id 無し」で同じものに見え、**採番した id が別の文書へ乗る**。
+   */
+  _docEpoch: number;
   newProject: () => void;
   /** 白紙から作る（ウィザード/AI を通らない・#393）。空プロジェクトにし status を "ready" にして自動生成（§2-6）を発火させない。 */
   newBlankProject: () => void;
@@ -463,6 +469,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   draftFromAi: false,
   hasRetiredTimelineEdits: false,
   saveStatus: "idle",
+  _docEpoch: 0,
   importError: null,
   past: [],
   future: [],
@@ -594,6 +601,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       draftFromAi: false,
       hasRetiredTimelineEdits: false, // 別の動画に前の案内を持ち越さない（#635）
       saveStatus: "idle",
+      _docEpoch: s._docEpoch + 1, // 別の文書になった（走っている保存の着地を受け取らない・#762）
       meta: defaultHeader(),
       parts: [],
       scenes: [],
@@ -649,6 +657,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // 実際の保存処理（saveProject 経由でのみ呼ぶ）。saveStatus を saving→saved/error に更新。
   _doSave: async () => {
     set({ saveStatus: "saving" });
+    // ⚠️ **着地は「まだ同じ文書を開いているか」で括る**（#762）。書き終えるまでの間に別の動画を開けるので
+    //（保存中は「未保存あり」と見なさない＝ホームは確認なしで開ける）、括らないと**完了の set が新しい方の
+    // meta へ古い projectId を書き込み**、以後その動画の自動保存が**古い方の `project.json` を上書きする**
+    //（作業がディスクごと消える・取り消し不能）。タイムライン側は #693 で同じ照合を入れてある。
+    const epoch = get()._docEpoch;
+    const stillOpen = (): boolean => get()._docEpoch === epoch;
     try {
       const s = get();
       let projectId = s.meta.projectId;
@@ -720,7 +734,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const pv = validateProjectDoc(project);
       if (!pv.valid) console.warn("[project] 保存内容がスキーマに未適合（要修正・#416）:", pv.errors);
       await saveProjectDoc(projectId, JSON.stringify(project, null, 2));
-      setLastProjectId(projectId);
+      // ここから先は**いまの状態**へ書き戻す＝別の動画へ移っていたら何もしない（書けたファイルはそのまま
+      // ディスクに残る＝内容は正しい。持ち帰らないのは「いまの画面の状態」への反映だけ）。
+      if (!stillOpen()) return;
+      setLastProjectId(projectId); // 次に開くのはこの動画（移っていたら書かない＝いまの画面と食い違わせない）
       // 保存完了時は「スナップショットを丸ごと戻す」のではなく、書けた voicePath だけを **live state** へマージする。
       // これで保存中の削除・編集・同一キー再生成を巻き戻さない（#390 レビュー・P1）：
       //  - 書けた voicePath は、対象の場面/行がまだ存在し、かつ音声が書き出し時と同じ（＝保存中に再生成されていない）ときだけ反映。
@@ -779,7 +796,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         };
       });
     } catch {
-      set({ saveStatus: "error" });
+      // 別の動画へ移っていたら、その動画へ**別の文書の失敗**を出さない（誤って帰属させない）。
+      if (stillOpen()) set({ saveStatus: "error" });
     }
   },
   dismissRetiredTimelineNotice: () => set({ hasRetiredTimelineEdits: false }),
@@ -848,6 +866,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     set((s) => ({
       status: "ready",
+      _docEpoch: s._docEpoch + 1, // 別の文書になった（走っている保存の着地を受け取らない・#762）
       hasRetiredTimelineEdits,
       draftFromAi: false, // 読込済みプロジェクトは「生成直後」ではない＝AI作成文言は出さない（#467）
       saveStatus: "saved", // 読み込み直後はディスクと一致＝保存済み扱い（未保存検知の基準・#256）
