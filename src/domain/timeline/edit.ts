@@ -12,13 +12,13 @@ import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
-import { removeMembersFromGroups } from '../project/groupOps';
+import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from './clipEdge';
 import { createFreeElement } from '../project/freeLayoutOps';
-import { createClipId, createTrackId } from '../project/persistence';
+import { createAnimationId, createClipId, createGroupId, createTrackId } from '../project/persistence';
 import { subtitlesBoundTo } from './subtitleLink';
 import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
-import type { TimelineClip, TimelineProject, Track } from './types';
+import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
 import type { Texts } from '../project/types';
 import type { BundledBgmId } from '../bgm/bgmCatalog';
 import { defaultDurationForTemplate } from '../template/layerOps';
@@ -39,6 +39,12 @@ export const EDIT_BLOCKED = {
    * 動かすときに出る。
    */
   lockedSelection: 'TIMELINE_EDIT_LOCKED_SELECTION',
+  /**
+   * 列を複製しようとしたが、その列の部品が**ほかの列の部品とまとまりになっている**（#767）。
+   * まとまりは変形を持つので、片側だけ複製すると**複製した方だけ見た目が変わる**
+   *（複製をまとまりへ入れれば、今度は元の絵まで動く）。黙って違う絵を作らない（ADR-0026④）。
+   */
+  groupAcrossTracks: 'TIMELINE_EDIT_GROUP_ACROSS_TRACKS',
   /** 対象が見つからない（消された直後の操作など）。 */
   notFound: 'TIMELINE_EDIT_NOT_FOUND',
   /**
@@ -423,13 +429,126 @@ export function clipCountOnTrack(doc: TimelineProject, trackId: string): number 
  * 列の重ね順を1つ動かす（`direction='front'` で手前＝配列の後ろへ）。端では何も起きない。
  * **重ね順は配列の並びだけで決まる**（11 §7.6）ので、並べ替えがそのまま前後関係になる。
  */
-export function moveTrackOrder(doc: TimelineProject, trackId: string, direction: 'front' | 'back'): TimelineProject {
+export function moveTrackOrder(doc: TimelineProject, trackId: string, direction: 'front' | 'back'): EditResult {
   const i = doc.tracks.findIndex((t) => t.id === trackId);
+  if (i < 0) return blocked(EDIT_BLOCKED.notFound);
   const j = direction === 'front' ? i + 1 : i - 1;
-  if (i < 0 || j < 0 || j >= doc.tracks.length) return doc;
+  if (j < 0 || j >= doc.tracks.length) return ok(doc); // 端では何も起きない（寄せない）
+  // ⚠️ **落とし先へ動かすのと同じ関数**を通す（#767）＝1段ずつと掴んで運ぶで規則を2つ持たない
+  //（固定した列を断るのも、この1か所で決まる）。
+  return moveTrackTo(doc, trackId, j);
+}
+
+/**
+ * 列を**中身ごと**複製して、元の**すぐ手前**へ入れる（#767・利用者決定）。
+ * 空の列だけ増やすなら「列を足す」と同じなので、**中の部品も一緒に**運ぶ。
+ *
+ * - 読み上げは**作成済みの音声を引き継がない**（部品ひとつの複製と**同じ規則**＝作成済みに見えるのに
+ *   別の部品の音声を指す、を作らない）
+ * - 連動している字幕は、**連動先も一緒に複製されるときだけ**複製どうしで結び直す
+ *   （⚠️ 部品ひとつの複製は連動を**必ず**落とす＝相手が来ないので必ず重なるため。列ごとなら相手も来る）
+ * - まとまり・動きは**複製した部品を指すように張り替える**（⚠️ こちらも列ごとの複製だけの規則＝
+ *   部品ひとつの複製は引き継がない。参照切れは作らない・11 §8 V26）
+ *
+ * ⚠️ **まとまりが列をまたぐときは断る**＝片側だけ複製すると、まとまりの変形が乗らない複製が
+ * **元と違う絵**になる（まとまりへ入れれば元の絵まで動く）。次の行動は「まとまりを外す」。
+ * 名前は引き継がない＝同じ名前の列が2つ並ぶと区別できない（自動名は種別ごとの連番）。
+ * ⚠️ **「出さない」は引き継ぐ**（`duplicateClip` は隠した列へ**新しく作る**のを断るが、こちらは
+ * その列そのものを写す操作＝行に「出さない」と出るので黙って増やしたことにならない）。
+ */
+export function duplicateTrack(doc: TimelineProject, trackId: string): EditResult {
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track) return blocked(EDIT_BLOCKED.notFound);
+  const sources = doc.clips.filter((c) => c.trackId === trackId);
+  const sourceIds = new Set(sources.map((c) => c.id));
+  const groups = doc.groups ?? [];
+  // まとまりは「全部この列の中」か「1つも入っていない」かのどちらかでないと運べない。
+  // ⚠️ **葉の部品まで展開して数える**（レビュー）＝`members` には**入れ子のまとまり id** が入りうるので、
+  // そのまま数えると (a) 子だけ複製されて**親の変形が乗らない**（この関門が防ぐはずの絵の違い）
+  // (b) 列をまたいでいないのに「またいでいる」と断る、のどちらも起きる。
+  const leavesOf = (g: Group): string[] => groupElementIds(groups, g.id);
+  const partial = groups.filter((g) => {
+    const leaves = leavesOf(g);
+    const inside = leaves.filter((m) => sourceIds.has(m)).length;
+    return inside > 0 && inside < leaves.length;
+  });
+  if (partial.length > 0) return blocked(EDIT_BLOCKED.groupAcrossTracks);
+
+  // id は**全部まとめて**先に採る（1つずつ採ると、同じ番号を2度出す）。
+  const newTrack: Track = { ...track, id: createTrackId(doc.tracks.map((t) => t.id)) };
+  delete newTrack.name;
+  const clipIds = doc.clips.map((c) => c.id);
+  const idOf = new Map<string, string>();
+  for (const c of sources) idOf.set(c.id, createClipId([...clipIds, ...idOf.values()]));
+  const clips: TimelineClip[] = sources.map((c) => {
+    const next: TimelineClip = { ...c, id: idOf.get(c.id)!, trackId: newTrack.id };
+    if (next.voice) next.voice = { ...next.voice, voicePath: null, status: NARRATION_STATUS.none };
+    // 連動先も一緒に来るなら複製どうしで結ぶ。来ないなら連動をやめる（外を指したままにしない）。
+    if (next.voiceClipId) {
+      const to = idOf.get(next.voiceClipId);
+      if (to) next.voiceClipId = to;
+      else delete next.voiceClipId;
+    }
+    return next;
+  });
+
+  // まとまり（この列で完結しているものだけ）を複製し、メンバーを複製した部品へ張り替える。
+  const groupIds = groups.map((g) => g.id);
+  const groupIdOf = new Map<string, string>();
+  const newGroups: Group[] = [];
+  for (const g of groups) {
+    if (!leavesOf(g).some((m) => sourceIds.has(m))) continue; // 葉で見る（入れ子の親も拾う）
+    groupIdOf.set(g.id, createGroupId([...groupIds, ...groupIdOf.values()]));
+  }
+  for (const g of groups) {
+    const id = groupIdOf.get(g.id);
+    if (!id) continue;
+    // メンバーは部品・入れ子のまとまりの**どちらも**複製先へ張り替える（参照切れを作らない・V26）。
+    newGroups.push({ ...g, id, members: g.members.map((m) => idOf.get(m) ?? groupIdOf.get(m) ?? m) });
+  }
+
+  // 動き（キーフレーム）も、複製した部品・まとまりを指すものだけ張り替えて足す。
+  const animations = doc.animations ?? [];
+  const animIds = animations.map((a) => a.id);
+  const newAnimations: ClipAnimation[] = [];
+  for (const a of animations) {
+    const target = idOf.get(a.targetId) ?? groupIdOf.get(a.targetId);
+    if (!target) continue;
+    newAnimations.push({
+      ...a,
+      id: createAnimationId([...animIds, ...newAnimations.map((n) => n.id)]),
+      targetId: target,
+    });
+  }
+
+  const i = doc.tracks.findIndex((t) => t.id === trackId);
   const tracks = [...doc.tracks];
-  [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
-  return { ...doc, tracks };
+  tracks.splice(i + 1, 0, newTrack); // 元の**すぐ手前**（配列の後ろほど手前・11 §7.6）
+  const next: TimelineProject = { ...doc, tracks, clips: [...doc.clips, ...clips] };
+  if (newGroups.length > 0) next.groups = [...groups, ...newGroups];
+  if (newAnimations.length > 0) next.animations = [...animations, ...newAnimations];
+  return ok(next);
+}
+
+/**
+ * 列を**指した位置へ**動かす（#767・掴んで並べ替える）。`toIndex` は**動かす前の並び**での落とし先。
+ * 端を越える指定は端で止める（寄せない・置けないを作らない＝並べ替えは必ずどこかへ着く）。
+ *
+ * ⚠️ **重ね順は配列の並びだけ**（11 §7.6）＝並べ替えると**絵の重なりがその場で変わる**。
+ * 1段ずつの「手前へ／奥へ」（`moveTrackOrder`）と**同じ関数**を通す（規則を2つ持たない）。
+ */
+export function moveTrackTo(doc: TimelineProject, trackId: string, toIndex: number): EditResult {
+  const from = doc.tracks.findIndex((t) => t.id === trackId);
+  if (from < 0) return blocked(EDIT_BLOCKED.notFound);
+  // ⚠️ **固定した列は並べ替えない**（レビュー）＝並べ替えは**重ね順＝絵そのもの**を変える操作。
+  // 「動かせないように固定する」と言いながら絵が変わる、を作らない（消せないのと同じ扱い・ADR-0026②）。
+  if (doc.tracks[from].locked) return blocked(EDIT_BLOCKED.locked);
+  const to = Math.max(0, Math.min(doc.tracks.length - 1, toIndex));
+  if (to === from) return ok(doc); // 変わらないなら**同じ文書を返す**（空振りの取り消しを積まない）
+  const tracks = [...doc.tracks];
+  const [moved] = tracks.splice(from, 1);
+  tracks.splice(to, 0, moved);
+  return ok({ ...doc, tracks });
 }
 
 /** 列の表示/非表示・固定を切り替える（描画・書き出しから外す／移動とトリムを禁じる）。 */

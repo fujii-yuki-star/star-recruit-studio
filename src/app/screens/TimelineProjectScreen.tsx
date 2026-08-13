@@ -316,7 +316,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const {
     doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
-    addTrack, removeTrack, moveTrackOrder, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
+    addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
     setSelectedClipAssetRef, setSelectedClipText, addTemplateClip, explodeClip, setSelectedSubtitleVoiceLink, setSelectedSubtitleText,
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
@@ -1206,6 +1206,56 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const autoScroll = useEdgeAutoScroll(LANE_LABEL_PX);
   const stageRef = useRef<HTMLDivElement>(null);
   const laneRefs = useRef(new Map<string, HTMLElement>());
+  /** 行（列の見出しを含む1行）の実体。掴んで並べ替えるとき、落ちる先を**実寸**で決める。 */
+  const rowRefs = useRef(new Map<string, HTMLElement>());
+  /**
+   * 列の並べ替え（#767）。掴んでいる列と、いま落ちる先（**表示上**の位置＝上が手前）。
+   * ⚠️ 表示は配列の逆順（後ろほど手前）なので、確定のときに**並びの位置へ直す**。
+   */
+  const [trackDrag, setTrackDrag] = useState<{ trackId: string; gap: number } | null>(null);
+  /**
+   * その高さに来る**すき間**（表示上・0＝いちばん上の行の上／`n`＝いちばん下の行の下）。
+   *
+   * ⚠️ **「行」ではなく「すき間」で持つ**（レビュー 🔴）＝行で持つと、線は「その行の上」を指すのに
+   * 確定は**抜いた後の位置**として効くので、**下向きに運んだときだけ1つ余計に下がる**
+   *（線を引いた所と違う絵が黙って確定する＝重ね順は絵そのもの）。
+   */
+  const displayGapAt = (clientY: number): number => {
+    const rows = [...(doc?.tracks ?? [])].reverse().map((t) => rowRefs.current.get(t.id));
+    for (let i = 0; i < rows.length; i += 1) {
+      const el = rows[i];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return i;
+    }
+    return rows.length;
+  };
+  /**
+   * 表示上のすき間 → **並びの位置**（後ろほど手前なので裏返す）＋**抜いた後の位置**へ直す。
+   * 抜いた場所より後ろへ入れるときは1つ手前へずれる（`splice` は抜いてから入れるため）。
+   */
+  const arrayIndexForGap = (gap: number, from: number, count: number): number => {
+    const arrayGap = count - gap;
+    return arrayGap > from ? arrayGap - 1 : arrayGap;
+  };
+  /** 掴んで並べ替える（作法は画面ぜんぶで同じ＝`usePointerDrag`）。 */
+  const beginTrackDrag = (e: ReactPointerEvent, trackId: string): void => {
+    if (exporting || !doc) return; // 押せない状況では掴ませない（押してから断らない）
+    const tracks = doc.tracks;
+    const from = tracks.findIndex((t) => t.id === trackId);
+    const gapOf = (id: string): number => [...tracks].reverse().findIndex((t) => t.id === id);
+    beginDrag(e, {
+      onStart: () => setTrackDrag({ trackId, gap: gapOf(trackId) }),
+      onMove: (ev) => setTrackDrag({ trackId, gap: displayGapAt(ev.clientY) }),
+      onEnd: (ev, started) => {
+        setTrackDrag(null);
+        if (!started) return; // 動かしていない＝ただのクリック
+        // **確定は最後に見せた所**（見えていた線のすき間）。
+        moveTrackTo(trackId, arrayIndexForGap(displayGapAt(ev.clientY), from, tracks.length));
+      },
+      onCancel: () => setTrackDrag(null),
+    });
+  };
   const [drag, setDrag] = useState<DragPlace | null>(null);
 
   if (isLoading) {
@@ -1756,6 +1806,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ? [
         { label: "手前へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "front") },
         { label: "奥へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "back") },
+        // **中身ごと複製**（#767・利用者決定）＝空の列だけ増やすなら「列を足す」と同じ。
+        // 言い方は帯の複製（「同じものを足す」）と揃える＝同じ操作を場所で別の語にしない。
+        { label: "この列を同じものごと足す", ...trackMenuGuard, onSelect: () => duplicateTrack(menuTrack.id) },
         {
           label: menuTrack.hidden ? "動画に出す" : "動画に出さない",
           ...trackMenuGuard,
@@ -2053,21 +2106,39 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 {/* 表示は**手前が上**（配列は後ろほど手前なので逆順に並べる）＝重なりの見え方と一致させる。
                     行にも解除を付けるのは、列の幅より画面が広いとき**右側にできる余白**を押しても解けるようにするため
                     ＝「何もない所を押すと解ける」の当たり判定を見た目どおりにする（#701 レビュー）。 */}
-                {[...doc.tracks].reverse().map((track) => (
+                {[...doc.tracks].reverse().map((track, displayIndex) => (
                   <div
-                    className="timeline-row"
+                    className={`timeline-row${trackDrag?.trackId === track.id ? " timeline-row--dragging" : ""}${
+                      trackDrag?.gap === displayIndex ? " timeline-row--drop-above" : ""
+                    }${
+                      // いちばん下のすき間は「最後の行の下」に引く（行の上端だけだと表せない）。
+                      trackDrag?.gap === doc.tracks.length && displayIndex === doc.tracks.length - 1
+                        ? " timeline-row--drop-below"
+                        : ""
+                    }`}
                     key={track.id}
+                    ref={(el) => { if (el) rowRefs.current.set(track.id, el); else rowRefs.current.delete(track.id); }}
                     onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(); }}
                   >
                     {/* 操作は右クリックのメニューへ畳む＝行に文字を並べない（帯が読めなくなる・利用者指摘 2026-08-03）。
                         行に残すのは**名前と状態**だけ。右クリックできると分かるよう、同じメニューを開く小さなボタンも置く
                         （右クリックを知らない・使えない場合の逃げ道＝§2-5）。 */}
-                    <div className="timeline-row-label" onContextMenu={(e) => openTrackMenu(e, track.id)}>
+                    {/* ⚠️ **掴んで並べ替えられる**（#767・利用者要望）＝帯は掴めるのに列だけメニューの
+                        「手前へ／奥へ」しか無い、を解消する。作法は画面ぜんぶで同じ（`usePointerDrag`）。
+                        **ドラッグ専用にしない**（決定19）＝「⋮」の「手前へ／奥へ」は残す。 */}
+                    <div
+                      className={`timeline-row-label${exporting ? "" : " grabbable"}`}
+                      onContextMenu={(e) => openTrackMenu(e, track.id)}
+                      onPointerDown={(e) => beginTrackDrag(e, track.id)}
+                    >
                       <span>{trackLabel(doc.tracks, track.id)}</span>
                       {track.hidden && <span className="sub">出さない</span>}
                       {track.locked && <span className="sub">固定中</span>}
                       <button
                         className="btn btn-ghost btn-sm"
+                        // ⚠️ **親（掴んで並べ替える面）へ渡さない**（レビュー）＝押してから少し動かすと
+                        // 列が並べ替わる（帯の端の取っ手が本体のドラッグを兼ねないのと同じ理由）。
+                        onPointerDown={(e) => e.stopPropagation()}
                         aria-label={`${trackLabel(doc.tracks, track.id)}の操作`}
                         title="この列の操作（右クリックでも開けます）"
                         onClick={(e) => openTrackMenu(e, track.id)}
@@ -2182,6 +2253,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </div>
           </div>
         )}
+        {/* ⚠️ **列を足すのは「並び」の欄の中で**（#767・利用者要望）＝欄だけを見ていると列を足せず、
+            欄の外を探しに行くことになっていた。**同じ操作を2か所に置かない**ので画面下部からは外す
+            （`06 §2` 統一規約5 の流儀）。 */}
+        <div className="row gap-sm mt-md">
+          <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
+          <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
+        </div>
       </>
     ) },
     { id: PANEL_ID.selected, title: '選んだ部品', content: (
@@ -3416,8 +3494,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           onRedo={redo}
           disabled={exporting}
         />
-        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.visual)} {...busyGuard()}>映像の列を足す</button>
-        <button className="btn btn-secondary" onClick={() => addTrack(TRACK_KIND.audio)} {...busyGuard()}>音の列を足す</button>
       </div>
 
       <div className="row gap-sm mt-lg">

@@ -1,11 +1,11 @@
 // タイムライン形式の編集操作（ADR-0032・#629）。置けないときに黙って別の結果にしないことを固定する。
 import { describe, expect, it } from 'vitest';
-import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND, NARRATION_STATUS } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, moveClips, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
+  addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { TIMELINE_MIN_CLIP_SEC, MIN_BOX_SIZE_PX } from '../constants';
@@ -418,10 +418,123 @@ describe('トラック（列）', () => {
     expectBlocked(removeTrack(d, 'track_001'), EDIT_BLOCKED.locked);
   });
 
+  const tracksOf = (r: ReturnType<typeof moveTrackTo>): string[] => (r.ok ? r.doc.tracks.map((t) => t.id) : []);
+
   it('重ね順を1つ動かす（端では何も起きない）', () => {
     const d = doc();
-    expect(moveTrackOrder(d, 'track_001', 'front').tracks.map((t) => t.id)).toEqual(['track_002', 'track_001', 'track_003']);
-    expect(moveTrackOrder(d, 'track_001', 'back').tracks.map((t) => t.id)).toEqual(['track_001', 'track_002', 'track_003']);
+    expect(tracksOf(moveTrackOrder(d, 'track_001', 'front'))).toEqual(['track_002', 'track_001', 'track_003']);
+    expect(tracksOf(moveTrackOrder(d, 'track_001', 'back'))).toEqual(['track_001', 'track_002', 'track_003']);
+  });
+
+  it('**中身ごと複製して、元のすぐ手前へ入る**（空の列だけ増やすなら「足す」と同じ・#767）', () => {
+    const d = doc({
+      clips: [
+        clip('clip_001', { startSec: 0 }),
+        clip('clip_002', { startSec: 6 }),
+        clip('clip_003', { trackId: 'track_002' }), // 別の列＝運ばれない
+      ],
+    });
+    const r = duplicateTrack(d, 'track_001');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.doc.tracks.map((t) => t.id)).toEqual(['track_001', 'track_004', 'track_002', 'track_003']);
+    const copied = r.doc.clips.filter((c) => c.trackId === 'track_004');
+    expect(copied.map((c) => c.id)).toEqual(['clip_004', 'clip_005']); // 番号を飛ばさず、二度出さない
+    expect(copied.map((c) => c.startSec)).toEqual([0, 6]); // 時間はそのまま
+    expect(r.doc.clips.filter((c) => c.trackId === 'track_001')).toHaveLength(2); // 元は減らない
+  });
+
+  it('名前は引き継がない（同じ名前の列が2つ並ぶと区別できない）', () => {
+    const d = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, name: '見出し', hidden: true, locked: true }] });
+    const r = duplicateTrack(d, 'track_001');
+    expect(r.ok && r.doc.tracks[1]).toMatchObject({ kind: TRACK_KIND.visual, hidden: true, locked: true });
+    expect(r.ok && r.doc.tracks[1].name).toBeUndefined(); // 設定は引き継ぐが、名前は引き継がない
+  });
+
+  it('読み上げは**作成済みの音声を引き継がない**（部品ひとつの複製と同じ規則・#767）', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_001', startSec: 0, durationSec: 3, voice: { text: 'あ', status: NARRATION_STATUS.generated, voicePath: 'a.wav' } }],
+    });
+    const r = duplicateTrack(d, 'track_001');
+    const copied = r.ok ? r.doc.clips.find((c) => c.trackId !== 'track_001') : undefined;
+    expect(copied?.voice).toMatchObject({ text: 'あ', status: NARRATION_STATUS.none, voicePath: null });
+  });
+
+  it('連動は**一緒に複製されるときだけ**複製どうしで結び直す（外を指したままにしない・#767）', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3, voice: { text: 'あ', status: NARRATION_STATUS.none } },
+        clip('clip_002', { kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', durationSec: 3, voiceClipId: 'clip_001' }),
+      ],
+    });
+    // 字幕だけの列を複製＝連動先（別の列の読み上げ）は来ない → 連動をやめる。
+    const r1 = duplicateTrack(d, 'track_001');
+    expect(r1.ok && r1.doc.clips.find((c) => c.id === 'clip_003')?.voiceClipId).toBeUndefined();
+    // 同じ列に両方あるなら、複製どうしで結び直す。
+    const same = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.audio }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_001', startSec: 0, durationSec: 3, voice: { text: 'あ', status: NARRATION_STATUS.none } },
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_001' },
+      ],
+    });
+    const r2 = duplicateTrack(same, 'track_001');
+    expect(r2.ok && r2.doc.clips.find((c) => c.id === 'clip_004')?.voiceClipId).toBe('clip_003');
+  });
+
+  it('まとまりと動きは**複製した部品を指すように張り替える**（参照切れを作らない・#767）', () => {
+    const d = doc({
+      clips: [clip('clip_001'), clip('clip_002', { startSec: 6 })],
+      groups: [{ id: 'group_001', members: ['clip_001', 'clip_002'], transform: { x: 10, y: 0, scale: 1, rotation: 0 } }],
+      animations: [
+        { id: 'anim_001', targetId: 'clip_001', keyframes: [{ timeSec: 0, x: 5 }] },
+        { id: 'anim_002', targetId: 'group_001', keyframes: [{ timeSec: 0, x: 7 }] },
+      ],
+    });
+    const r = duplicateTrack(d, 'track_001');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const g = r.doc.groups!.find((x) => x.id === 'group_002')!;
+    expect(g.members).toEqual(['clip_003', 'clip_004']); // 複製した部品を指す
+    expect(g.transform).toEqual({ x: 10, y: 0, scale: 1, rotation: 0 }); // 見た目は同じ
+    const anims = r.doc.animations!;
+    expect(anims.map((a) => a.targetId)).toEqual(['clip_001', 'group_001', 'clip_003', 'group_002']);
+    expect(anims.map((a) => a.id)).toEqual(['anim_001', 'anim_002', 'anim_003', 'anim_004']); // 番号を二度出さない
+  });
+
+  it('**まとまりが列をまたぐときは断る**（片側だけ複製すると絵が変わる・#767）', () => {
+    const d = doc({
+      clips: [clip('clip_001'), clip('clip_002', { trackId: 'track_002' })],
+      groups: [{ id: 'group_001', members: ['clip_001', 'clip_002'], transform: { x: 10, y: 0, scale: 1, rotation: 0 } }],
+    });
+    expectBlocked(duplicateTrack(d, 'track_001'), EDIT_BLOCKED.groupAcrossTracks);
+  });
+
+  it('無い列は複製できない', () => {
+    expectBlocked(duplicateTrack(doc(), 'track_999'), EDIT_BLOCKED.notFound);
+  });
+
+  it('**指した位置へ動かす**（端は端で止める・変わらないなら同じ文書・#767）', () => {
+    const d = doc();
+    expect(tracksOf(moveTrackTo(d, 'track_001', 2))).toEqual(['track_002', 'track_003', 'track_001']);
+    expect(tracksOf(moveTrackTo(d, 'track_003', 0))).toEqual(['track_003', 'track_001', 'track_002']);
+    expect(tracksOf(moveTrackTo(d, 'track_001', 99))).toEqual(['track_002', 'track_003', 'track_001']); // 端で止める
+    const same = moveTrackTo(d, 'track_001', 0);
+    expect(same.ok && same.doc).toBe(d); // 変わらない＝同じ文書（空振りの取り消しを積まない）
+    expectBlocked(moveTrackTo(d, 'track_999', 1), EDIT_BLOCKED.notFound);
+  });
+
+  it('**固定した列は並べ替えられない**（消せないのと揃える・#767 レビュー）', () => {
+    const d = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }, { id: 'track_002', kind: TRACK_KIND.visual }] });
+    expectBlocked(moveTrackTo(d, 'track_001', 1), EDIT_BLOCKED.locked);
+    expectBlocked(moveTrackOrder(d, 'track_001', 'front'), EDIT_BLOCKED.locked); // 1段ずつも同じ
+  });
+
+  it('1段ずつの移動と、指した位置への移動は**同じ規則**を通る（#767）', () => {
+    const d = doc();
+    expect(tracksOf(moveTrackOrder(d, 'track_001', 'front'))).toEqual(tracksOf(moveTrackTo(d, 'track_001', 1)));
   });
 
   it('表示/固定を切り替える', () => {

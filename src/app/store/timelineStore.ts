@@ -27,10 +27,10 @@ import type { CropAlignX, CropAlignY, CropMode, Fit, FontWeight, FreeShapeType, 
 import type { FontId } from "../../domain/font/fontCatalog";
 import type { SourceSize } from "../../domain/timeline/cropFill";
 import {
-  VISUAL_CLIP_DURATION_SEC, addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip,
+  VISUAL_CLIP_DURATION_SEC, addAudioClip, addLinkedSubtitleClip, addTemplateClip, addTrack, addVisualClip, addVoiceClip, duplicateClip, duplicateTrack,
   firstFreeStart, moveClip, placeableVisualTracks,
   setVisualClipContent,
-  moveClips, moveTrackOrder, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
+  moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
   setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
@@ -379,7 +379,14 @@ export interface TimelineState {
   addTemplateClip: (input: { template: Template; trackId: string; startSec: number }) => void;
   addTrack: (kind: TrackKind) => void;
   removeTrack: (trackId: string) => void;
+  /**
+   * 列を**中身ごと**複製する（#767）。空の列だけ増やすなら「列を足す」と同じなので、
+   * 中の部品も一緒に運ぶ（置けない事情は domain が理由で返す＝黙って別の結果にしない）。
+   */
+  duplicateTrack: (trackId: string) => void;
   moveTrackOrder: (trackId: string, direction: "front" | "back") => void;
+  /** 列を**指した位置へ**動かす（#767・掴んで並べ替える）。`toIndex` は動かす前の並びでの落とし先。 */
+  moveTrackTo: (trackId: string, toIndex: number) => void;
   setTrackFlag: (trackId: string, flag: "hidden" | "locked", value: boolean) => void;
   undo: () => void;
   redo: () => void;
@@ -990,6 +997,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (doc) commit(set, get, addTrack(doc, kind));
   },
+  duplicateTrack: (trackId) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = duplicateTrack(doc, trackId);
+    if (!r.ok) { set({ editBlocked: r.reason }); return; }
+    commit(set, get, r.doc);
+  },
   removeTrack: (trackId) => {
     const doc = get().doc;
     if (!doc) return;
@@ -1002,9 +1016,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const gone = new Set(doc.clips.filter((c) => c.trackId === trackId).map((c) => c.id));
     commit(set, get, r.doc, { selectedClipIds: get().selectedClipIds.filter((id) => !gone.has(id)) });
   },
+  moveTrackTo: (trackId, toIndex) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const r = moveTrackTo(doc, trackId, toIndex);
+    if (!r.ok) { set({ editBlocked: r.reason }); return; }
+    commit(set, get, r.doc);
+  },
   moveTrackOrder: (trackId, direction) => {
     const doc = get().doc;
-    if (doc) commit(set, get, moveTrackOrder(doc, trackId, direction));
+    if (!doc) return;
+    const r = moveTrackOrder(doc, trackId, direction);
+    if (!r.ok) { set({ editBlocked: r.reason }); return; }
+    commit(set, get, r.doc);
   },
   setTrackFlag: (trackId, flag, value) => {
     const doc = get().doc;

@@ -3150,6 +3150,160 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(clipBlock).not.toContain("--clip-menu-w");
   });
 
+  it("**列を足すのは「並び」の欄の中**（欄の外を探しに行かせない・#767）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 5, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const arrange = [...container.querySelectorAll("section,div")].find(
+      (el) => el.querySelector(".timeline") != null && (el.textContent || "").includes("映像の列を足す"),
+    );
+    expect(arrange).toBeTruthy(); // 並びの一覧と同じ入れ物の中にある
+    // ⚠️ **同じ操作を2か所に置かない**（`06 §2`）＝画面下部の同じボタンは残さない。
+    expect(screen.getAllByRole("button", { name: "映像の列を足す" })).toHaveLength(1);
+  });
+
+  it("**列を中身ごと複製できる**（空の列だけ増やすなら「足す」と同じ・#767）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 5, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "い" },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ 目盛りの行にも**名前の空欄**があるので、名前の付いた行だけを採る（空欄を掴んでも何も起きない）。
+    const labels = [...container.querySelectorAll(".timeline-row-label")].filter((el) => (el.textContent || "").trim() !== "") as HTMLElement[];
+    const label = labels[labels.length - 1];
+    fireEvent.contextMenu(label);
+    fireEvent.click(screen.getByText("この列を同じものごと足す"));
+    const st = useTimelineStore.getState().doc!;
+    expect(st.tracks).toHaveLength(3); // 1本増える
+    expect(st.clips).toHaveLength(4); // 中身も増える（元の2つ＋複製の2つ）
+  });
+
+  it("**掴んで並べ替えられる**（帯は掴めるのに列だけメニューだけ、を作らない・#767）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ 目盛りの行を数に入れない（名前の付いた行だけが列）。表示は**手前が上**＝上から track_002・track_001。
+    const rows = ([...container.querySelectorAll(".timeline-row")] as HTMLElement[])
+      .filter((r) => (r.querySelector(".timeline-row-label")?.textContent || "").trim() !== "");
+    rows.forEach((row, i) => {
+      row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+    });
+    const label = rows[1].querySelector(".timeline-row-label") as HTMLElement; // 奥（track_001）を掴む
+    pointerDownAt(label, 1, { clientX: 10, clientY: 50 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 10, clientY: 5 }); // いちばん上へ
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 5 });
+    // 上＝手前＝配列の後ろ。track_001 が手前へ来る。
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_002", "track_001"]);
+  });
+
+  it("**下向きに運んでも、線を引いた所へ入る**（1つずれない・#767 レビュー 🔴）", () => {
+    // ⚠️ 落とし先を「行」で持つと、線は「その行の上」を指すのに確定は**抜いた後の位置**として効くので、
+    // **下向きだけ1つ余計に下がる**（重ね順＝絵そのものなので、見せた線と違う絵が黙って確定する）。
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 表示は上から track_003・track_002・track_001（後ろほど手前）。
+    const rows = ([...container.querySelectorAll(".timeline-row")] as HTMLElement[])
+      .filter((r) => (r.querySelector(".timeline-row-label")?.textContent || "").trim() !== "");
+    rows.forEach((row, i) => {
+      row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+    });
+    // いちばん上（track_003）を掴んで、**2行目（track_002）の上半分**で離す＝線は「track_002 の上」。
+    const label = rows[0].querySelector(".timeline-row-label") as HTMLElement;
+    pointerDownAt(label, 1, { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 10, clientY: 55 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 55 });
+    // 線の位置＝track_002 の上＝いまと同じ並び（track_003 は既に track_002 の上）。
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_001", "track_002", "track_003"]);
+  });
+
+  it("下向きに**いちばん下まで**運ぶと最背面へ入る（#767）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const rows = ([...container.querySelectorAll(".timeline-row")] as HTMLElement[])
+      .filter((r) => (r.querySelector(".timeline-row-label")?.textContent || "").trim() !== "");
+    rows.forEach((row, i) => {
+      row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+    });
+    const label = rows[0].querySelector(".timeline-row-label") as HTMLElement; // track_003
+    pointerDownAt(label, 1, { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 10, clientY: 115 }); // 最下行の下半分
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 115 });
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_003", "track_001", "track_002"]);
+  });
+
+  it("**固定した列は掴んで並べ替えられない**（消せないのと揃える・#767 レビュー）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const rows = ([...container.querySelectorAll(".timeline-row")] as HTMLElement[])
+      .filter((r) => (r.querySelector(".timeline-row-label")?.textContent || "").trim() !== "");
+    rows.forEach((row, i) => {
+      row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+    });
+    const label = rows[1].querySelector(".timeline-row-label") as HTMLElement; // 固定した track_001
+    pointerDownAt(label, 1, { clientX: 10, clientY: 50 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 10, clientY: 5 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 5 });
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_001", "track_002"]); // 動かない
+    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED"); // 理由を出す
+  });
+
+  it("「⋮」を押して動かしても列は並べ替わらない（入れ子の掴み口・#767 レビュー）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const rows = ([...container.querySelectorAll(".timeline-row")] as HTMLElement[])
+      .filter((r) => (r.querySelector(".timeline-row-label")?.textContent || "").trim() !== "");
+    rows.forEach((row, i) => {
+      row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+    });
+    const dots = rows[1].querySelector(".timeline-row-label button") as HTMLElement;
+    pointerDownAt(dots, 1, { clientX: 10, clientY: 50 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 10, clientY: 5 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 5 });
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_001", "track_002"]);
+  });
+
+  it("並べ替えは**少し動かすまで起きない**（押しただけで順番が変わらない・#767）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const label = [...container.querySelectorAll(".timeline-row-label")].find((el) => (el.textContent || "").trim() !== "") as HTMLElement;
+    pointerDownAt(label, 1, { clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 10 }); // 動かさず離す
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_001", "track_002"]);
+  });
+
   it("「⋮」は**右の取っ手を避けて**置く（覆うと右端だけ掴めない）", () => {
     // ⚠️ 実機で確認＝「⋮」は帯の兄弟で `z-index` が上なので、帯の右端に置くと取っ手を丸ごと覆い、
     // 右端の中心で最前面に来るのが `timeline-clip-menu` になっていた（左端は掴めるので**左右非対称**）。
