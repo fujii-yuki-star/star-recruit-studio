@@ -901,6 +901,22 @@ describe("掴む作法（`Escape` と取り消し・#685 レビュー）", () =>
     expect(hasEscapeOwner()).toBe(false);
   });
 
+  it("**まとまりの回転を `Escape` でやめても戻す**（戻す値を控えていなかった・#777 レビュー）", () => {
+    // ⚠️ 戻す側（`cancelDrag`）は3つのまとまりを扱っていたのに、**回転だけ戻す値を控えていなかった**
+    // ＝押しても何も起きない。テンプレ編集で見つかった穴が、こちらにも同じ形であった。
+    const onGroupTransform = vi.fn();
+    const g = { id: "group_001", members: ["free_001"], transform: { x: 0, y: 0, scale: 1, rotation: 0 } };
+    const { root, container } = mount({ groups: [g], activeGroupId: "group_001", onGroupTransform });
+    const knob = container.querySelector("[data-testid='group-rotate-handle']") as HTMLElement;
+    expect(knob).toBeTruthy();
+    fireEvent.pointerDown(knob, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    // ⚠️ 動きを受けるのは**枠**（`root`）＝window へ送っても届かず、しきい値を越えないまま終わる。
+    fireEvent.pointerMove(root, { buttons: 1, pointerId: 1, clientX: 300, clientY: 200 });
+    onGroupTransform.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", g.transform);
+  });
+
   it("`pointercancel` は**やめる**（掴んだ所に置かない・#752 レビュー）", () => {
     // ⚠️ 確定へ繋ぐと「やめた」のに掴んだ所へ置かれる（決定10・この関数の doc に反する）。
     const { root, container, onMoveMany, onInteractionEnd } = mount();

@@ -429,6 +429,9 @@ export function FreeLayoutOverlay({
     onInteractionStart?.();
     setDrag({
       id: "__group__", mode: "group-rotate", groupId: group.id, groupCenter: { x: frame.cx, y: frame.cy },
+      // ⚠️ **やめたときに戻す先**を控える（#777 レビュー）＝控えていないと `Escape` を押しても
+      // 回転が戻らない（戻す側だけ直しても、戻す値が無い）。拡縮・移動と同じ持ち方にする。
+      startTransform: { ...group.transform },
       startClientX: e.clientX, startClientY: e.clientY, start: { x: 0, y: 0, w: 0, h: 0 },
       scale: (ref.current?.clientWidth ?? canvasW) / canvasW,
     });

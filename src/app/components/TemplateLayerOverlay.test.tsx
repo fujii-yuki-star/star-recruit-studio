@@ -301,6 +301,44 @@ describe("TemplateLayerOverlay", () => {
     expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", { scale: 2 });
   });
 
+  it("**まとまりの拡縮を `Escape` でやめると、掴む前の形へ戻す**（#777 レビュー 🔴）", () => {
+    // ⚠️ `group-move` だけを戻していたので、拡縮・回転は**何も戻らなかった**（居ない id へ書いて
+    // 黙って何も起きない）＝同じ画面で「操作によって `Escape` が効いたり効かなかったり」に見える。
+    const onGroupTransform = vi.fn();
+    const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    mockRect(root);
+    const se = root.querySelector('[data-testid="tmpl-group-scale-se"]') as HTMLElement;
+    fireEvent.pointerDown(se, { button: 0, clientX: 600, clientY: 260, pointerId: 1 });
+    fireEvent.pointerMove(se, { buttons: 1, clientX: 800, clientY: 260, pointerId: 1 });
+    onGroupTransform.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", grp.transform); // 掴む前の形へ
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("**まとまりの回転を `Escape` でやめても戻す**（#777 レビュー 🔴）", () => {
+    const onGroupTransform = vi.fn();
+    const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    mockRect(root);
+    const knob = root.querySelector('[data-testid="tmpl-group-rotate-handle"]') as HTMLElement;
+    fireEvent.pointerDown(knob, { button: 0, clientX: 400, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(knob, { buttons: 1, clientX: 600, clientY: 260, pointerId: 1 });
+    onGroupTransform.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", grp.transform);
+  });
+
+  it("**まとまりの移動も同じく戻す**（3つのモードが同じ扱い・#777 レビュー）", () => {
+    const onGroupTransform = vi.fn();
+    const { root, boxes } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });
+    mockRect(root);
+    fireEvent.pointerDown(boxes[1], { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(boxes[1], { buttons: 1, clientX: 40, clientY: 40, pointerId: 1 });
+    onGroupTransform.mockClear();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onGroupTransform).toHaveBeenLastCalledWith("group_001", grp.transform);
+  });
+
   it("グループ枠の回転ハンドルで transform.rotation が更新される（#307）", () => {
     const onGroupTransform = vi.fn();
     const { root } = renderOverlay({ groups: [grp], activeGroupId: "group_001", onGroupTransform });

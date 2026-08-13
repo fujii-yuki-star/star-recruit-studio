@@ -285,6 +285,9 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
     startInteraction(); // 1ドラッグ＝1取り消し（#547 P2-3）
     setDrag({
       id: "__group__", mode: "group-rotate", groupId: group.id, groupCenter: { x: frame.cx, y: frame.cy },
+      // ⚠️ **やめたときに戻す先**を控える（#777 レビュー）＝控えていないと `Escape` を押しても
+      // 回転が戻らない（戻す側だけ直しても、戻す値が無い）。拡縮・移動と同じ持ち方にする。
+      startTransform: { ...group.transform },
       startClientX: e.clientX, startClientY: e.clientY, start: { x: 0, y: 0, w: 0, h: 0 },
       starts: [], otherEdges: [],
       scale: (ref.current?.clientWidth ?? canvasW) / canvasW,
@@ -398,8 +401,13 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       // **掴む前にやめたときは書き戻さない**（まだ1度も動かしていない＝変わらない更新を流すだけ）。
       if (started) {
         if (d.mode === "move") onMoveMany((d.starts ?? []).map((sPos) => ({ ...sPos })));
-        else if (d.mode === "group-move" && d.groupId && d.startTransform) onGroupTransform?.(d.groupId, d.startTransform);
-        else if (d.mode === "rotate") onRotate(d.id, d.rotation ?? 0);
+        // ⚠️ **まとまりの3つを一緒に扱う**（#777 レビュー 🔴）＝`group-move` だけを見ていたので、
+        // 拡縮・回転は最後の `else` へ落ち、居ない id（`__group__`）へ空の箱を書いて**何も戻らなかった**
+        //（`updateLayer` は該当が無いと黙って何もしない＝失敗が見えない）。同じ画面で
+        // 「操作によって `Escape` が効いたり効かなかったり」に見える。
+        else if (d.mode === "group-move" || d.mode === "group-scale" || d.mode === "group-rotate") {
+          if (d.groupId && d.startTransform) onGroupTransform?.(d.groupId, d.startTransform);
+        } else if (d.mode === "rotate") onRotate(d.id, d.rotation ?? 0);
         else onChange(d.id, { x: d.start.x, y: d.start.y, w: d.start.w, h: d.start.h });
       }
       setDrag(null);
@@ -414,12 +422,13 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
   const dragging = drag != null || marquee != null;
   const cancelRef = useRef<() => void>(() => {});
   const endRef = useRef<(e: { pointerId: number }) => void>(() => {});
-  useEffect(() => { cancelRef.current = cancelDrag; endRef.current = endDrag; });
+  const mineRef = useRef<(e: { pointerId: number }) => boolean>(() => true);
+  useEffect(() => { cancelRef.current = cancelDrag; endRef.current = endDrag; mineRef.current = canvasDrag.mine; });
   useEffect(() => {
     if (!dragging) return;
     const onKey = (ev: KeyboardEvent): void => { if (ev.key === "Escape") { ev.stopPropagation(); cancelRef.current(); } };
-    const onCancel = (ev: PointerEvent): void => { if (canvasDrag.mine(ev)) cancelRef.current(); };
-    const onUp = (ev: PointerEvent): void => { if (canvasDrag.mine(ev)) endRef.current(ev); };
+    const onCancel = (ev: PointerEvent): void => { if (mineRef.current(ev)) cancelRef.current(); };
+    const onUp = (ev: PointerEvent): void => { if (mineRef.current(ev)) endRef.current(ev); };
     window.addEventListener("keydown", onKey, true); // 外側の `Escape` より先に受ける
     window.addEventListener("pointercancel", onCancel);
     window.addEventListener("pointerup", onUp);
@@ -428,7 +437,7 @@ export function TemplateLayerOverlay({ layers, canvasW, canvasH, selectedIds, on
       window.removeEventListener("pointercancel", onCancel);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [dragging, canvasDrag]);
+  }, [dragging]);
 
   return (
     <div
