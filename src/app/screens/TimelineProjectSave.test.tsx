@@ -6,7 +6,7 @@
 // **別ファイルにしてある**＝保存は画面の寿命（アンマウント）と時間（自動保存の待ち）に関わるので、
 // 同じファイルに 100 件の他のテストがあると、前のテストが張ったタイマや走りかけの保存に結果が左右される。
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import * as fsMod from "../../infrastructure/projectFs";
 import { TimelineProjectScreen } from "./TimelineProjectScreen";
 import { canNavigate } from "../hooks/navigationGuard";
@@ -312,5 +312,28 @@ describe("TimelineProjectScreen: 自動保存の結果を伝える（#693）", (
     render(<TimelineProjectScreen onNavigate={onNavigate} />);
     fireEvent.click(screen.getByText("動画の一覧へ"));
     expect(onNavigate).toHaveBeenCalledWith("home");
+  });
+
+  // #763-3：**画面を離れるときの「書き切る」は、子の後始末より後で判断する**。
+  // React の後始末は**親→子**の順に走るので、画面が「保存済み」を見て降りた**後**に、子（色の欄）が
+  // 打ちかけを確定して未保存へ戻す。そのときこの画面はもう無いので**誰も書かない**＝開き直すと
+  // 確定したはずの色が消える（#751 と同型・自動保存が常時ある場面形式には無い穴＝ADR-0026②）。
+  it("開いた色の欄に打ちかけたまま画面を離れても、その色が書き切られる（#763-3）", async () => {
+    open();
+    // 「保存済み」で離れる＝この状態でこそ、画面は「書くものは無い」と判断して降りる。
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], saveStatus: "saved" });
+    const { unmount } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+
+    // 文字の色の欄を開いて、色コードを打つ（確定はしない＝打ちかけのまま離れる）。
+    fireEvent.click(screen.getByRole("button", { name: "文字の色" }));
+    const code = within(screen.getByRole("dialog")).getByRole("textbox");
+    fireEvent.change(code, { target: { value: "#123456" } });
+    expect(fsMod.saveProjectDoc).not.toHaveBeenCalled(); // 打っただけでは書かない
+
+    unmount();
+    // 子の後始末が打ちかけを確定する → その未保存を拾って書く。
+    await waitFor(() => expect(fsMod.saveProjectDoc).toHaveBeenCalled());
+    const written = JSON.parse(vi.mocked(fsMod.saveProjectDoc).mock.calls[0][1]) as { clips: { color?: string }[] };
+    expect(written.clips[0].color).toBe("#123456"); // 打った色が入っている（黙って捨てない）
   });
 });

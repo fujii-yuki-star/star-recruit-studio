@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ColorPicker } from "./ColorPicker";
@@ -326,7 +327,7 @@ describe("ColorPicker", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("掴んだまま Escape で閉じ、開き直したら**押していない移動**では色が変わらない（#720 レビュー）", () => {
+  it("掴んだまま Escape → もう一度 Escape で閉じ、開き直したら**押していない移動**では色が変わらない（#720 レビュー）", () => {
     const onChange = vi.fn();
     const onDragStart = vi.fn();
     const onDragEnd = vi.fn();
@@ -338,10 +339,11 @@ describe("ColorPicker", () => {
     const sv1 = screen.getByTestId("cp-sv");
     sv1.getBoundingClientRect = svRect;
     fireEvent.pointerDown(sv1, { clientX: 50, clientY: 0, pointerId: 1 });
-    // 掴んだまま Escape。面の `pointerup` は来ない（ポップオーバーごと消えるため）。
+    // 掴んだまま Escape＝**撫でるのをやめる**（#763-2）。1度目では枠は閉じない。
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.pointerUp(window, { pointerId: 1 });
     expect(onDragEnd).toHaveBeenCalledTimes(1); // 取り消しの区切りは閉じている
+    fireEvent.keyDown(window, { key: "Escape" }); // 2度目で枠を閉じる
 
     onChange.mockClear();
     onDragStart.mockClear();
@@ -353,6 +355,113 @@ describe("ColorPicker", () => {
     fireEvent.pointerMove(sv2, { clientX: 10, clientY: 90, buttons: 0, pointerId: 2 });
     expect(onChange).not.toHaveBeenCalled();
     expect(onDragStart).not.toHaveBeenCalled();
+  });
+
+  // ⚠️ **色を実際に持つ入れ物**（#763-2）＝親が `value` を更新しないと「戻した」ことを見られない
+  // （撫でて色が変わる→やめて元へ戻る、の往復が起きない）。
+  function Controlled({ onChange }: { onChange?: (hex: string) => void }) {
+    const [v, setV] = useState("#ff0000");
+    return <ColorPicker value={v} onChange={(hex) => { setV(hex); onChange?.(hex); }} />;
+  }
+
+  const openSv = (): HTMLElement => {
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const sv = screen.getByTestId("cp-sv");
+    sv.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    return sv;
+  };
+
+  it("**押していない移動は「やめる」**（離したのを取り逃がしたら撫で始めの色へ戻す・#763-1）", () => {
+    // `pointerup`／`pointercancel` を両方取り逃がすと（面の外で離す・別窓へ移る 等）掴んだ印が
+    // 残り、ただの移動で色が書かれ続けるうえ、掴んでいる数も戻らず **`Ctrl+Z` が全画面で無言死**する。
+    // ⚠️ 戻す先まで確かめる＝**「やめる」の意味は画面ぜんぶで1つ**（`usePointerDrag`／
+    // `FreeLayoutOverlay`／`TemplateLayerOverlay` も `buttons===0` で元へ戻す）。
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 }); // #ff0000 → #ff8080
+    expect(onChange).toHaveBeenLastCalledWith("#ff8080");
+    expect(isPointerDragging()).toBe(true);
+
+    // 離したのを取り逃がした後の移動＝ボタンが1つも押されていない。
+    fireEvent.pointerMove(sv, { clientX: 10, clientY: 90, buttons: 0, pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff0000"); // 撫で始めの色へ戻る
+    expect(isPointerDragging()).toBe(false); // 掴んでいる数からも外れる
+
+    // その後の移動では何も書かない（掴んだ印が落ちている）。
+    onChange.mockClear();
+    fireEvent.pointerMove(sv, { clientX: 90, clientY: 10, buttons: 0, pointerId: 1 });
+    fireEvent.pointerMove(sv, { clientX: 20, clientY: 20, buttons: 1, pointerId: 1 });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("色相バーでも同じ（押していない移動は「やめる」・#763-1）", () => {
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "色を選ぶ" }));
+    const hue = screen.getByTestId("cp-hue");
+    hue.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 360, height: 12, right: 360, bottom: 12, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    fireEvent.pointerDown(hue, { clientX: 120, clientY: 6, pointerId: 1 });
+    expect(onChange).toHaveBeenCalled(); // 色相が変わった
+    fireEvent.pointerMove(hue, { clientX: 240, clientY: 6, buttons: 0, pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff0000"); // 撫で始めの色へ戻る
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("**取り上げられたときも「やめる」**（`pointercancel`＝撫で始めの色へ戻す・#763-1）", () => {
+    // 離した（`pointerup`）＝自分で選んだ色で確定／取り上げられた（`pointercancel`）＝やめる。
+    // 同じ「閉じる」でも結末が違う（`usePointerDrag` の作法）。
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff8080");
+    fireEvent.pointerCancel(window, { pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff0000");
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("離したときは選んだ色のまま（`pointerup` は「やめる」ではない）", () => {
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(onChange).toHaveBeenLastCalledWith("#ff8080"); // 戻さない
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  it("**撫でている最中の `Escape` は撫で始めの色へ戻す**（掴む作法と同じ・#763-2）", () => {
+    const onChange = vi.fn();
+    render(<Controlled onChange={onChange} />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 }); // #ff0000 → #ff8080
+    expect(onChange).toHaveBeenLastCalledWith("#ff8080");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onChange).toHaveBeenLastCalledWith("#ff0000"); // 撫で始めの色へ戻る
+    expect(isPointerDragging()).toBe(false);
+    // 面の印（コード欄）も戻る＝色だけ戻して印が撫でた場所に残ると、いまの色を偽って見せる。
+    expect(screen.getByRole("textbox")).toHaveValue("#ff0000");
+  });
+
+  it("**その `Escape` では枠を閉じない**（一度に2段はがさない・2度目で閉じる・#763-2）", () => {
+    render(<Controlled />);
+    const sv = openSv();
+    fireEvent.pointerDown(sv, { clientX: 50, clientY: 0, pointerId: 1 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeInTheDocument(); // 掴みだけをやめる
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); // 2度目で閉じる
+  });
+
+  it("撫でていないときの `Escape` は今までどおり閉じる（作法を変えるのは掴んでいる間だけ）", () => {
+    render(<Controlled />);
+    openSv();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("読み上げラベルを渡せる", () => {

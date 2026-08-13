@@ -372,7 +372,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   useEffect(() => () => {
     // 画面を離れるときも畳む（開いたまま離れると、次に開いた文書で取り消しが積まれない）。
     useTimelineStore.getState().resetHistoryGroup();
-    if (useTimelineStore.getState().saveStatus === "idle") void useTimelineStore.getState().saveTimelineProject();
+    // ⚠️ **書き切るかどうかは、子の後始末より後で見る**（#763-3）。React の後始末は**親→子**の順に走る
+    // ＝ここで「保存済み」を見て降りた**後**に、子（色の欄）が打ちかけを確定して未保存へ戻すことがある。
+    // そのときこの画面はもう無いので**誰も書かない**＝開き直すと、確定したはずの色が消える（#751 と同型）。
+    // マイクロタスクへ回すと、その回の後始末が全部終わってから状態を見られる。
+    // 別の動画へ移っていたときの心配は要らない＝**書く側が「いま開いている文書」を読み直し**、
+    // 書き終えてからも「まだ同じ動画か」で括る（`doSaveTimelineProject` の `stillOpen`・#762）。
+    // ここで id を控えて弾いても結果は変わらない（文書が消えていれば書く側が先に降りる）ので、
+    // 確かめようのない枝を増やさない。
+    queueMicrotask(() => {
+      const s = useTimelineStore.getState();
+      if (s.saveStatus === "idle") void s.saveTimelineProject();
+    });
   }, []);
   const templates = useProjectStore((s) => s.templates);
   // テンプレが持つ既定素材（ADR-0021）は全プロジェクト共通の置き場にある＝場面形式のプレビュー・書き出しと
