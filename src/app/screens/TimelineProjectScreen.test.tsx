@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
 import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
+import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -197,7 +198,7 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     // 操作は右クリックのメニューへ畳んだ（ADR-0033）＝行のボタンではなくメニューから消す。
     fireEvent.click(screen.getByLabelText("映像1の操作")); // 映像1（クリップ2個）
-    fireEvent.click(screen.getByRole("menuitem", { name: "この列を消す" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この列を削除" }));
     expect(screen.getByRole("alert").textContent).toContain("2個の部品も一緒に消えます");
     fireEvent.click(screen.getByText("削除する"));
     expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_002"]);
@@ -209,7 +210,7 @@ describe("TimelineProjectScreen: 編集操作（#629 後半）", () => {
     fireEvent.click(screen.getByRole("button", { name: "まえ" }));
     fireEvent.click(screen.getByRole("button", { name: "あと" }), { shiftKey: true });
     expect(screen.queryByText("後ろへ")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("選んだ2個を消す"));
+    fireEvent.click(screen.getByText("選んだ2個を削除"));
     // まとめて消すのは**確認を挟む**（`06 §2` 統一規約1・ADR-0034 決定20・#721）。
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(2); // 押しただけでは消えない
     fireEvent.click(screen.getByRole("button", { name: "削除する" }));
@@ -1241,7 +1242,7 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(screen.getByText("映像1"));
     expect(screen.getByRole("menuitem", { name: "動画に出さない" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "この列を消す" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "この列を削除" })).toBeInTheDocument();
   });
 
   it("メニューから操作でき、選ぶと閉じる", () => {
@@ -1753,10 +1754,10 @@ describe("TimelineProjectScreen: 数値欄と押せない理由（#706・#703）
     const speed = screen.getByLabelText("速さ（倍）");
     expect(speed).toBeDisabled();
     expect(speed.title).toBe("いま動画を書き出しています。終わってから編集してください");
-    const del = screen.getByRole("button", { name: "消す" });
+    const del = screen.getByRole("button", { name: "削除" });
     expect(del).toBeDisabled();
     expect(del.title).toBe("いま動画を書き出しています。終わってから編集してください");
-    expect(screen.getByRole("button", { name: "同じものを足す" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "複製" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "映像の列を足す" })).toBeDisabled();
   });
 
@@ -1829,7 +1830,7 @@ describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レ�
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByLabelText("映像2の操作"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "この列を消す" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この列を削除" }));
     expect(screen.getByRole("button", { name: "削除する" })).toBeInTheDocument();
     // 確認を出したまま「動画を書き出す」を押す＝答えを求める確認は閉じてから始める。
     fireEvent.click(screen.getByRole("button", { name: "動画を書き出す" }));
@@ -1853,7 +1854,7 @@ describe("TimelineProjectScreen: 固定の見方（#709 レビュー）", () => 
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.keyDown(window, { key: "a", ctrlKey: true }); // 全部選ぶ＝固定列のものが混ざる
-    const del = screen.getByRole("button", { name: "選んだ2個を消す" });
+    const del = screen.getByRole("button", { name: "選んだ2個を削除" });
     expect(del).toBeDisabled(); // 1つだけ選んだときだけ見る、では取りこぼす
     expect(del.title).toBe("固定された列の部品が選ばれています。固定を外すか、選び直してください");
   });
@@ -2532,7 +2533,7 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     key("Delete");
-    expect(screen.getByText("選んだ2個の部品を消しますか？")).toBeInTheDocument();
+    expect(screen.getByText("選んだ2個の部品を削除しますか？")).toBeInTheDocument();
     // 確認は答えるまで残る。ここで背後の選択が解けると、「削除する」を押しても**何も消えない**。
     key("Escape");
     expect(useTimelineStore.getState().selectedClipIds).toHaveLength(2);
@@ -2568,7 +2569,7 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     key("Delete");
-    expect(screen.getByText("選んだ2個の部品を消しますか？")).toBeInTheDocument();
+    expect(screen.getByText("選んだ2個の部品を削除しますか？")).toBeInTheDocument();
     // この確認は覆いではなく知らせの段なので、背後の選択は**プログラム上は**変えられる
     //（帯を押す・別の入口から選び直す）。数だけ持っていると「2個」と聞いて1個/3個が消える。
     act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_003"] }); });
@@ -2700,7 +2701,7 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    const del = screen.getByRole("button", { name: "消す" });
+    const del = screen.getByRole("button", { name: "削除" });
     // ⚠️ 押せない理由の**組**をそのままボタンへ流すと、内部の合図が属性として描かれる
     //（React は知らない小文字の属性を素通しする＝§2-3 の「技術用語を出さない」に触れる）。
     expect(del.getAttribute("reason")).toBeNull();
@@ -2721,8 +2722,8 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
     expect(screen.getByText(/固定を外すか、選び直してください/)).toBeInTheDocument();
     // 理由はボタンの側にも、押す前から出ている（押せないことも一緒に見る）。
-    expect(screen.getByRole("button", { name: "消す" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "消す" }).getAttribute("title")).toContain("固定を外すか");
+    expect(screen.getByRole("button", { name: "削除" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "削除" }).getAttribute("title")).toContain("固定を外すか");
   });
 
   it("開始・長さを数値で揃えられる（ボタンだけでは「3.0秒から」に合わせられない）", () => {
@@ -3097,8 +3098,8 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     mixed();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(screen.getByRole("button", { name: "文字" }));
-    expect(screen.getByRole("menuitem", { name: "同じものを足す" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "消す" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "複製" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "削除" })).toBeInTheDocument();
   });
 
   it("「⋮」からも同じメニューが出る（右クリックが使えない人の逃げ道）", () => {
@@ -3106,7 +3107,7 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "文字の操作" }));
-    expect(screen.getByRole("menuitem", { name: "同じものを足す" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "複製" })).toBeInTheDocument();
   });
 
   it("「⋮」は**選んだ帯にだけ**出す（隣の帯の当たり判定を常時食わない）", () => {
@@ -3180,7 +3181,7 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     const labels = [...container.querySelectorAll(".timeline-row-label")].filter((el) => (el.textContent || "").trim() !== "") as HTMLElement[];
     const label = labels[labels.length - 1];
     fireEvent.contextMenu(label);
-    fireEvent.click(screen.getByText("この列を同じものごと足す"));
+    fireEvent.click(screen.getByText("この列を中身ごと複製"));
     const st = useTimelineStore.getState().doc!;
     expect(st.tracks).toHaveLength(3); // 1本増える
     expect(st.clips).toHaveLength(4); // 中身も増える（元の2つ＋複製の2つ）
@@ -3383,13 +3384,13 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(container.querySelectorAll(".timeline-clip-handle").length).toBe(0);
   });
 
-  it("まとめて選んでいるときは「同じものを足す」を押せなくする（押しても無反応、を作らない）", () => {
+  it("まとめて選んでいるときは「複製」を押せなくする（押しても無反応、を作らない）", () => {
     mixed();
     useTimelineStore.setState({ selectedClipIds: ["clip_001", "clip_002"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(screen.getByRole("button", { name: "文字" }));
     // 複製は「選択がちょうど1件」でないと store が何もせず、理由も持たない＝黙って効かない。
-    const dup = screen.getByRole("menuitem", { name: "同じものを足す" });
+    const dup = screen.getByRole("menuitem", { name: "複製" });
     expect(dup.hasAttribute("disabled") || dup.getAttribute("aria-disabled") === "true").toBe(true);
     expect(dup.getAttribute("title")).toContain("1つだけ選ぶと");
   });
@@ -3409,7 +3410,7 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(screen.getByRole("button", { name: "文字" }));
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
-    expect(screen.getByRole("menuitem", { name: "選んだ2個を消す" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "選んだ2個を削除" })).toBeInTheDocument();
   });
 
   it("固定した列の帯では、消す・複製を押せなくして理由を出す", () => {
@@ -3419,11 +3420,11 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.contextMenu(screen.getByRole("button", { name: "文字" }));
-    const del = screen.getByRole("menuitem", { name: "消す" });
+    const del = screen.getByRole("menuitem", { name: "削除" });
     expect(del.hasAttribute("disabled") || del.getAttribute("aria-disabled") === "true").toBe(true);
     expect(del.getAttribute("title")).toContain("固定");
     // 固定の理由は「選んだ部品」の欄と**同じ言い方**にする（同じ状態を場所で言い分けない）。
-    const dup = screen.getByRole("menuitem", { name: "同じものを足す" });
+    const dup = screen.getByRole("menuitem", { name: "複製" });
     expect(dup.getAttribute("title")).toBe("この列は固定されています。変えるには固定を外してください");
   });
 });
@@ -3997,11 +3998,11 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     }
   });
 
-  it("隠した列では「同じものを足す」を**押す前に**塞ぐ（動かす・縮めるは通す）", () => {
+  it("隠した列では「複製」を**押す前に**塞ぐ（動かす・縮めるは通す）", () => {
     two({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }] });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "同じものを足す" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "複製" })).toBeDisabled();
     // ⚠️ まとめて塞ぐと**その列の中身が二度と動かせない**（行き止まり）。動かす側は通ること。
     expect(screen.getByRole("button", { name: "後ろへ" })).not.toBeDisabled();
   });
@@ -4265,13 +4266,16 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect((canvasEls(container).ov!.children[0] as HTMLElement).style.cursor).toBe("move");
   });
 
-  it("**右クリックで黙らない**（帯と同じ「同じものを足す／消す」を出す・#746-1）", () => {
+  it("**右クリックで黙らない**（帯と同じ「複製／削除」を出す・#746-1／語は #763-6 で統一）", () => {
     two();
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const el = canvasEls(container).ov!.children[0] as HTMLElement;
     fireEvent.contextMenu(el);
-    expect(screen.getByText("複製")).toBeInTheDocument();
-    expect(screen.getByText("削除")).toBeInTheDocument();
+    // ⚠️ **メニューの項目として**引く＝語を統一した（#763-6）ので、欄のボタンとも同じ文字になる。
+    // ⚠️ **共有の語（`uiLabels`）で引く**＝キャンバスと帯が同じ出どころを見ていることをテストでも辿る
+    //（リテラルを書き写すと、片方が独自の語へ戻っても気づけない）。
+    expect(screen.getByRole("menuitem", { name: DUPLICATE_LABEL })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: DELETE_LABEL })).toBeInTheDocument();
   });
 
   it("キャンバスのメニューから消せる（帯と同じ入口を通る・#746-1）", () => {
@@ -4279,7 +4283,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const el = canvasEls(container).ov!.children[0] as HTMLElement;
     fireEvent.contextMenu(el); // 右クリックでその部品を選ぶ
-    fireEvent.click(screen.getByText("削除"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "削除" }));
     expect(useTimelineStore.getState().doc!.clips.map((c) => c.id)).toEqual(["clip_002"]);
   });
 
@@ -4288,7 +4292,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const el = canvasEls(container).ov!.children[0] as HTMLElement;
     fireEvent.contextMenu(el);
-    const del = screen.getByText("削除").closest("button") as HTMLButtonElement;
+    const del = screen.getByRole("menuitem", { name: "削除" }) as HTMLButtonElement;
     expect(del).toBeDisabled();
     expect(del.getAttribute("title")).toContain("固定");
   });

@@ -9,6 +9,7 @@ import { GROUP_MIN_SCALE } from "../../domain/constants";
 import { composeGroupGeometry, isGroupHidden, isHiddenByGroup, orientedGroupFrame } from "../../domain/group/compose";
 import type { Group, GroupTransform } from "../../domain/group/types";
 import { groupElementIds, topGroupOfMember } from "../../domain/project/groupOps";
+import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
 // インライン編集（#549）を実描画に合わせるため、描画側の既定値/帯解決/フォント解決を共有する（体裁のドリフト防止）。
 import { bandBackground, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_TEXT_COLOR } from "../../renderer/layout";
 import { fontFamilyForId, isKnownFontId } from "../../domain/font/fontCatalog";
@@ -708,10 +709,10 @@ export function FreeLayoutOverlay({
   const menuItems: { label: string; danger?: boolean; disabled?: boolean; disabledHint?: string; run: (id: string) => void }[] = menu && menuEl
     ? [
         ...(onRequestEdit ? [{ label: "編集", run: (id: string) => onRequestEdit(id, menu.x, menu.y) }] : []),
-        ...(onDuplicate ? [{ label: "複製", run: onDuplicate, ...menuGuards?.duplicate }] : []),
+        ...(onDuplicate ? [{ label: DUPLICATE_LABEL, run: onDuplicate, ...menuGuards?.duplicate }] : []),
         ...(onBringToFront ? [{ label: "前面", run: onBringToFront }] : []),
         ...(onSendToBack ? [{ label: "背面", run: onSendToBack }] : []),
-        ...(onDelete ? [{ label: "削除", danger: true, run: onDelete, ...menuGuards?.delete }] : []),
+        ...(onDelete ? [{ label: DELETE_LABEL, danger: true, run: onDelete, ...menuGuards?.delete }] : []),
       ]
     : [];
 

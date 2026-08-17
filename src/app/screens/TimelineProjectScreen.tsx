@@ -15,6 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
+import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
 import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, moveClipIssue, placeableAudioTracks, placeableVisualTracks, trimClipIssue, visualPlacementIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { EditBlockedReason } from "../../domain/timeline/edit";
@@ -1793,7 +1794,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ? { disabled: true, disabledHint: editGuard().title }
         : {};
   /**
-   * メニューの「同じものを足す」の関門（#746-1）。**帯とキャンバスが同じ式を見る**
+   * メニューの「複製」の関門（#746-1）。**帯とキャンバスが同じ式を見る**
    * ＝多重選択の条件を片方で落とすと、押せる見た目のまま**押しても無反応**になる
    *（複製は選択がちょうど1件でないと store が何もせず理由も持たない）。
    */
@@ -1807,7 +1808,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // 理由も持たない**ので、押せる状態で出すと**押しても無反応**になる。理由の言い方は
         // 「選んだ部品」の欄と同じ（`editGuard`）＝同じ状態を画面の場所で別の言い方にしない（ADR-0026②）。
         {
-          label: "同じものを足す",
+          label: DUPLICATE_LABEL,
           ...duplicateMenuGuard,
           onSelect: duplicateSelectedClip,
         },
@@ -1826,7 +1827,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             }]
           : []),
         {
-          label: selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を消す` : "消す",
+          label: selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を${DELETE_LABEL}` : DELETE_LABEL,
           danger: true,
           ...(removeBlocked ? { disabled: true, disabledHint: removeBlocked.title } : {}),
           onSelect: requestRemoveSelected,
@@ -1841,8 +1842,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         { label: "手前へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "front") },
         { label: "奥へ", ...trackMenuGuard, onSelect: () => moveTrackOrder(menuTrack.id, "back") },
         // **中身ごと複製**（#767・利用者決定）＝空の列だけ増やすなら「列を足す」と同じ。
-        // 言い方は帯の複製（「同じものを足す」）と揃える＝同じ操作を場所で別の語にしない。
-        { label: "この列を同じものごと足す", ...trackMenuGuard, onSelect: () => duplicateTrack(menuTrack.id) },
+        // 言い方は共有の語（`uiLabels`）から採る＝同じ操作を場所で別の語にしない（#763-6）。
+        { label: `この列を中身ごと${DUPLICATE_LABEL}`, ...trackMenuGuard, onSelect: () => duplicateTrack(menuTrack.id) },
         {
           label: menuTrack.hidden ? "動画に出す" : "動画に出さない",
           ...trackMenuGuard,
@@ -1854,13 +1855,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           onSelect: () => setTrackFlag(menuTrack.id, "locked", !menuTrack.locked),
         },
         {
-          label: "この列を消す",
+          label: `この列を${DELETE_LABEL}`,
           danger: true,
           // 固定した列は消せない（`removeTrack` が断る＝ADR-0032）。押してから断られるのではなく、
           // **押す前に理由を出す**（長い画面では上部の知らせを見落とす・§2-5）。
           // 書き出し中も**開く前に**断る（答えてから断ると、取り返しのつかなさを聞いた意味が無くなる・#703）。
           disabled: menuTrack.locked || exporting,
-          disabledHint: menuTrack.locked ? "この列は固定されています。消すには固定を外してください" : exportingHint,
+          disabledHint: menuTrack.locked ? "この列は固定されています。削除するには固定を外してください" : exportingHint,
           onSelect: () => setRemovingTrackId(menuTrack.id),
         },
       ]
@@ -1931,7 +1932,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               onInteractionStart={beginHistoryGroup}
               onInteractionEnd={endHistoryGroup}
               onSkippedLocked={(count) => noticeLockedSkip(count, [...selectedClipIds].sort().join(","))}
-              // ⚠️ **右クリックで黙らない**（#746-1）＝帯には「同じものを足す／消す」があるのに、
+              // ⚠️ **右クリックで黙らない**（#746-1）＝帯には「複製／削除」があるのに、
               // キャンバスだけ何も出ないと**同じ操作が場所によって在ったり無かったり**になる。
               // 関門も文言も帯と同じもの（決定17 が禁じるのは「前へ／奥へ」だけ＝そちらは渡さない）。
               onDuplicate={() => duplicateSelectedClip()}
@@ -2330,8 +2331,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               >
                 ここで分ける
               </button>
-              <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>同じものを足す</button>
-              <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を消します（Delete）"}>消す</button>
+              <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>{DUPLICATE_LABEL}</button>
+              <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を削除します（Delete）"}>{DELETE_LABEL}</button>
             </div>
             {/* **数値でも同じ値を触れる**（#721・ADR-0034 決定6）。ボタンの「前へ／後ろへ」（0.5秒ずつ）と
                 「ここで終わる」（再生位置を使う）だけでは、「3.0秒から」「5.0秒間」に**揃える手段が無い**。
@@ -3126,7 +3127,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {assignableAssets(doc.assets, layer).length === 0 && (
                         <span className="field-hint">
                           {layer.slotType === SLOT_TYPE.video
-                            ? "ここは動画を入れる場所ですが、この形式ではまだ動画を使えません。この部品を「消す」で外し、「見た目パターンを置く」から動画を使わないものを置き直してください。"
+                            ? "ここは動画を入れる場所ですが、この形式ではまだ動画を使えません。この部品を「削除」で外し、「見た目パターンを置く」から動画を使わないものを置き直してください。"
                             : "入れられる写真がありません。「素材・文字・図形を置く」の欄で写真を取り込んでください。"}
                         </span>
                       )}
@@ -3162,12 +3163,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ) : (
           <p className="text-muted">
             {selectedClipIds.length > 1
-              ? "1つだけ選ぶと、位置や長さを変えられます（まとめて消すことはできます）。"
+              ? "1つだけ選ぶと、位置や長さを変えられます（まとめて削除することはできます）。"
               : "下の並びから部品を選ぶと、位置や長さを変えられます。"}
           </p>
         )}
         {selectedClipIds.length > 1 && (
-          <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて消します（Delete）"}>選んだ{selectedClipIds.length}個を消す</button>
+          <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて削除します（Delete）"}>選んだ{selectedClipIds.length}個を{DELETE_LABEL}</button>
         )}
       </>
     ) },
@@ -3371,7 +3372,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
       {confirmRemove !== null && (
         <DeleteConfirm
-          message={`選んだ${confirmRemove.length}個の部品を消しますか？`}
+          message={`選んだ${confirmRemove.length}個の部品を削除しますか？`}
           onCancel={() => setConfirmRemove(null)}
           onConfirm={() => {
             const ids = confirmRemove;
@@ -3386,7 +3387,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
       {removingTrackId && doc.tracks.some((t) => t.id === removingTrackId) && (
         <DeleteConfirm
-          message={`「${trackLabel(doc.tracks, removingTrackId)}」を消しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
+          message={`「${trackLabel(doc.tracks, removingTrackId)}」を削除しますか？この列に置いてある${clipCountOnTrack(doc, removingTrackId)}個の部品も一緒に消えます。`}
           onCancel={() => setRemovingTrackId(null)}
           onConfirm={() => {
             removeTrack(removingTrackId);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
-import { bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage } from "./uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -106,6 +106,13 @@ describe("収め方・重ね順の表記（#547 P2-10/P2-11）", () => {
 
   it("重ね順の見出しは正典語「重ね順」（「重なり順」にしない）", () => {
     expect(Z_ORDER_LABEL).toBe("重ね順");
+  });
+
+  // #763-6：同じ操作は同じ言い方。以前はキャンバス「複製／削除」・帯「同じものを足す／消す」と
+  // 割れていた。一般的な動画編集用語をそのまま使う（ADR-0034 決定21）。
+  it("複製・削除は一般語のまま（言い換えへ戻さない）", () => {
+    expect(DUPLICATE_LABEL).toBe("複製");
+    expect(DELETE_LABEL).toBe("削除");
   });
 });
 
