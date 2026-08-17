@@ -977,9 +977,12 @@ describe('消した動画を手放す（#755）', () => {
     const save = vi.spyOn(fsMod, 'saveProjectDoc').mockImplementation(
       () => new Promise<string>((resolve) => { land = (): void => { resolve('x/project.json'); }; }),
     );
+    // ⚠️ **走らせた仕事は `finally` でも待つ**＝途中で落ちたとき、見張りを外した後も裏で走り続け、
+    // 次のテストの数え上げに紛れ込む。
+    let saving: Promise<void> | undefined;
     try {
       useTimelineStore.setState({ doc: one(), selectedClipIds: [] });
-      const saving = useTimelineStore.getState().saveTimelineProject(); // 書き込みを飛ばしたまま
+      saving = useTimelineStore.getState().saveTimelineProject(); // 書き込みを飛ばしたまま
       await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
 
       const pending = useTimelineStore.getState().discardDeletedProject(one().projectId);
@@ -995,7 +998,9 @@ describe('消した動画を手放す（#755）', () => {
       await pending;
       expect(landed).toBe(true);
     } finally {
-      land(); save.mockRestore();
+      land();
+      await Promise.allSettled([saving]);
+      save.mockRestore();
     }
   });
 
@@ -1005,10 +1010,11 @@ describe('消した動画を手放す（#755）', () => {
     const save = vi.spyOn(fsMod, 'saveProjectDoc').mockImplementation(
       () => new Promise<string>((resolve) => { land = (): void => { resolve('x/project.json'); }; }),
     );
+    let saving: Promise<void> | undefined;
     try {
       const a = one();
       useTimelineStore.setState({ doc: a, selectedClipIds: [] });
-      const saving = useTimelineStore.getState().saveTimelineProject(); // A への書き込みが飛ぶ
+      saving = useTimelineStore.getState().saveTimelineProject(); // A への書き込みが飛ぶ
       await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
 
       // 別の動画へ移る＝**実際に見張りを手放す道を通す**（`closeTimelineProject` が `releaseSaveGuard`）。
@@ -1021,7 +1027,9 @@ describe('消した動画を手放す（#755）', () => {
       await saving;
       await pending;
     } finally {
-      land(); save.mockRestore();
+      land();
+      await Promise.allSettled([saving]);
+      save.mockRestore();
     }
   });
 

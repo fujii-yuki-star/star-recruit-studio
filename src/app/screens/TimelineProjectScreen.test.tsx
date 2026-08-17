@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
 import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
+import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -4271,8 +4272,10 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     const el = canvasEls(container).ov!.children[0] as HTMLElement;
     fireEvent.contextMenu(el);
     // ⚠️ **メニューの項目として**引く＝語を統一した（#763-6）ので、欄のボタンとも同じ文字になる。
-    expect(screen.getByRole("menuitem", { name: "複製" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "削除" })).toBeInTheDocument();
+    // ⚠️ **共有の語（`uiLabels`）で引く**＝キャンバスと帯が同じ出どころを見ていることをテストでも辿る
+    //（リテラルを書き写すと、片方が独自の語へ戻っても気づけない）。
+    expect(screen.getByRole("menuitem", { name: DUPLICATE_LABEL })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: DELETE_LABEL })).toBeInTheDocument();
   });
 
   it("キャンバスのメニューから消せる（帯と同じ入口を通る・#746-1）", () => {

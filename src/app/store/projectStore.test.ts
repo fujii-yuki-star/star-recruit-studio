@@ -580,13 +580,17 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     const order: string[] = [];
     const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => { order.push('delete'); });
 
+    // ⚠️ **走らせた仕事は `finally` でも待つ**＝途中で落ちたとき、見張りを外した後も裏で走り続け、
+    // **次のテストの数え上げに紛れ込む**（`mockRestore` 済みなので本物が動く）。
+    let saving: Promise<void> | undefined;
+    let deleting: Promise<void> | undefined;
     try {
       // 保存を1件「飛ばしたまま」にする（着地はこちらで決める）。
       // ⚠️ `_doSave` は書き込みの前に素材の収集などで何度か待つので、**実際に書き始めるまで**待つ。
-      const saving = useProjectStore.getState().saveProject();
+      saving = useProjectStore.getState().saveProject();
       await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
 
-      const deleting = useProjectStore.getState().deleteProject('proj_open');
+      deleting = useProjectStore.getState().deleteProject('proj_open');
       await new Promise((r) => setTimeout(r, 0));
       expect(order).toEqual([]); // ⚠️ まだ消していない＝書き込みの着地を待っている
 
@@ -598,6 +602,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
       expect(order).toEqual(['save-landed', 'delete']); // 書き込みが着地してから消す
     } finally {
       landSave(); // 落ちても約束を残さない（次のテストを止めない）
+      await Promise.allSettled([saving, deleting]);
       save.mockRestore(); del.mockRestore();
     }
   });
@@ -609,8 +614,9 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     const off = onProjectDeleted(() => new Promise<void>((resolve) => { land = (): void => resolve(); }));
     const order: string[] = [];
     const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => { order.push('delete'); });
+    let deleting: Promise<void> | undefined;
     try {
-      const deleting = useProjectStore.getState().deleteProject('proj_other'); // 開いていない＝自分の保存は絡まない
+      deleting = useProjectStore.getState().deleteProject('proj_other'); // 開いていない＝自分の保存は絡まない
       await new Promise((r) => setTimeout(r, 0));
       expect(order).toEqual([]); // ⚠️ 受け手の着地を待っている
 
@@ -619,7 +625,9 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
       await deleting;
       expect(order).toEqual(['listener-landed', 'delete']);
     } finally {
-      land(); off(); del.mockRestore();
+      land();
+      await Promise.allSettled([deleting]); // 途中で落ちても裏で走らせたままにしない
+      off(); del.mockRestore();
     }
   });
 
