@@ -51,6 +51,19 @@ interface Props {
   title?: string;
 }
 
+/**
+ * ⚠️ **なぜ `useCanvasDrag`（キャンバス3つの共通作法）へ寄せていないか**（#763）
+ *
+ * 寄せられない違いが3つある：
+ * - **`Escape` を受け持つ長さが違う**＝ここは**枠を開いている間ずっと**名乗る（打っている最中の
+ *   `Escape` も受け取る）。共通のほうは**掴んでいる間だけ**なので、そのまま使うと二重に名乗る。
+ * - **少し動かすまで待たない**＝押した所の色をその場で入れるのがこの面の作法（しきい値があると
+ *   「押したのに色が変わらない」になる）。
+ * - **捕捉を面に張る**＝要素ごとに掴む共通のほうとは張り先が違う。
+ *
+ * そのぶん**結末だけは必ず合わせる**＝「やめる」は3経路（`Escape`／`pointercancel`／押していない移動）とも
+ * **撫で始めの色へ戻す**（`06 §12.1`・`11 §7.6.3`）。作法が割れたら、まずここを疑うこと。
+ */
 export function ColorPicker({ value, onChange, className, ariaLabel = "色を選ぶ", onDragStart, onDragEnd, disabled, title }: Props) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -65,10 +78,19 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
   const hueRef = useRef<HTMLDivElement>(null);
   const draggingSv = useRef(false);
   const draggingHue = useRef(false);
+  /** 撫で始めた時点の色（`Escape` でここへ戻す・#763-2）。掴んでいない間は `null`。 */
+  const dragStartColor = useRef<string | null>(null);
   // 取り消しの合成境界（#547 P2-3 レビュー）。SV面・色相バーで共有し、開始したものだけを閉じる（冪等）。
   const boundaryRef = useRef(false);
   // 掴んでいる数から外す関数（`registerExternalDrag` の戻り）。掴んでいない間は `null`。
   const releaseExternal = useRef<(() => void) | null>(null);
+  /** 掴んでいる間だけ張る窓の購読を外す関数（掴んでいない間は `null`）。 */
+  const detachWindow = useRef<(() => void) | null>(null);
+  /**
+   * **やめる**（撫で始めの色へ戻す）本体。中身は下で入れる＝ここより後に置く関数を、
+   * ここより前で使う経路（窓の `pointercancel`・押していない移動の救済）から呼ぶための器。
+   */
+  const cancelDragRef = useRef<() => void>(() => {});
   const endDragBoundary = useCallback(() => {
     // **掴んだ印も一緒に降ろす**（#720 レビュー）。境界を閉じる経路は「掴むのをやめる」経路でもある。
     // ここで戻さないと、掴んだまま Escape で閉じたとき（面の `pointerup` は来ない）真のまま残り、
@@ -77,10 +99,15 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     //（境界が既に閉じていても掴んだ印は必ず戻す）。
     draggingSv.current = false;
     draggingHue.current = false;
+    dragStartColor.current = null; // 戻す先も一緒に降ろす（次の撫でが前回の色へ戻さない）
     // **掴んでいる数からも外す**（#752-2）。掴んだ印と同じく、閉じ方に依らず必ず戻す
     //（外し忘れると以後ずっと「掴んでいる」ことになり、取り消しが全画面で無言で効かなくなる）。
     releaseExternal.current?.();
     releaseExternal.current = null;
+    // **窓の購読もここで外す**＝閉じる経路は複数ある（離した・取り上げられた・`Escape`・
+    // 押していない移動の救済）。外すのを1か所にしないと、経路によって購読が残る。
+    detachWindow.current?.();
+    detachWindow.current = null;
     if (!boundaryRef.current) return;
     boundaryRef.current = false;
     onDragEnd?.();
@@ -95,13 +122,16 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     onDragStart?.();
     // pointer capture は best-effort（try/catch）。面の外で離しても必ず閉じるよう **window でも**拾う（one-shot）。
     // 閉じ漏れると以後の編集が全て同じ履歴に合成され、取り消しが効かなくなる（オーバーレイと同機構）。
-    const finish = (): void => {
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
-      endDragBoundary();
+    // ⚠️ **離した**と**取り上げられた**で結末が違う（`usePointerDrag` の作法）。
+    // 離した＝自分で選んだ色で確定。取り上げられた（`pointercancel`）＝**やめる**＝撫で始めの色へ戻す。
+    const onUp = (): void => endDragBoundary();
+    const onCancel = (): void => cancelDragRef.current();
+    detachWindow.current = () => {
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
     };
-    window.addEventListener("pointerup", finish);
-    window.addEventListener("pointercancel", finish);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
   }, [onDragStart, endDragBoundary]);
   // ポップオーバーが閉じた（Escape・外側クリック）／アンマウントしたときも取り残さない。
   useEffect(() => { if (!open) endDragBoundary(); }, [open, endDragBoundary]);
@@ -208,6 +238,27 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
     };
   }, [open, reposition]);
 
+  /**
+   * **押していないのに動いているか**（#763-1）。`pointerup`／`pointercancel` を**両方**取り逃がすと
+   * （面の外で離す・別窓へ移る・WebView が捨てる 等）掴んだ印が真のまま残り、**ただの移動で色が
+   * 書かれ続ける**うえ、掴んでいる数も戻らないので **`Ctrl+Z` が全画面で無言で効かなくなる**。
+   * ボタンが1つも押されていない移動を見たら、その場で**やめる**＝撫で始めの色へ戻す。
+   *
+   * ⚠️ **「やめる」の意味は画面ぜんぶで1つ**（`usePointerDrag`／`FreeLayoutOverlay`／`TemplateLayerOverlay`
+   * のいずれも `buttons===0` で**元へ戻す**）。ここだけ「撫でた色を残す」にすると、同じ部品の中で
+   * `Escape`＝戻す／取り逃がし＝残す の2義ができる（ADR-0026②）。**どこで離したかは分からない**
+   *（取り逃がしているので最後に見えた位置は離した位置とは限らない）＝当てずっぽうの色を残さない。
+   */
+  const releasedOutside = (e: { buttons: number; pointerId: number }, el: HTMLElement | null): boolean => {
+    if (e.buttons !== 0) return false;
+    // **捕まえたままにしない**＝離したのを取り逃がした以上、暗黙の解放も起きていない
+    //（外にいる指の移動がこの面へ届いている＝捕捉が生きている証拠）。残すと、次にどこを押しても
+    // この面へ回されて**押した覚えのない色が入る**。
+    try { el?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    cancelDragRef.current();
+    return true;
+  };
+
   const currentHex = hsvToHex(hsv);
   // パレット等・外部からの確定：作業値・コード欄・親をすべてそろえる（コード欄も新色に同期する）。
   const commitHex = (hex: string) => {
@@ -268,8 +319,28 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
    * 「色を選ぶ → `Ctrl+Z` で戻す → 閉じる」で**戻したはずの色を送り直す**
    *（取り消しが無かったことになり、`future` も捨てられる＝ADR-0026④）。
    */
+  /**
+   * **撫でるのをやめて、撫で始めの色へ戻す**（#763-2）。`Escape` から呼ぶ。
+   *
+   * 面の印も一緒に戻す＝色だけ戻して印が撫でた場所に残ると、**いまの色を偽って見せる**
+   *（この欄は「自分が送った色」を外から来た変更として追わない作りなので、ここで自分でそろえる）。
+   * 変わっていないなら送らない（何も変わらない更新を1件流さない＝`FreeLayoutOverlay` の中止と同じ流儀）。
+   * **戻してから境界を閉じる**＝開始と戻すが同じ束に入り、取り消しが1回で済む。
+   */
+  const cancelDragToStart = () => {
+    const back = dragStartColor.current;
+    if (back != null) {
+      syncTo(back);
+      lastEmittedRef.current = back;
+      if (normalizeHex(back) !== normalizeHex(value)) onChange(back);
+    }
+    endDragBoundary();
+  };
   const commitCodeRef = useRef(commitCode);
-  useEffect(() => { commitCodeRef.current = commitCode; });
+  useEffect(() => {
+    commitCodeRef.current = commitCode;
+    cancelDragRef.current = cancelDragToStart;
+  });
 
   // 外側クリック / Escape で閉じる（capture でトリガー自身の再クリックと二重発火しない）。
   useEffect(() => {
@@ -284,7 +355,15 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
       if (!disabled && codeDirtyRef.current) commitCodeRef.current();
       setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // ⚠️ **撫でている最中の `Escape` は「やめる」**（#763-2）＝撫で始めの色へ戻して掴むのをやめる。
+      // ポップオーバーは**閉じない**（2度目の `Escape` で閉じる）。理由は2つ：
+      // ①掴む作法（`usePointerDrag`）は「`Escape` は開始値へ戻す」＝同じ画面で作法を割らない。
+      // ②`escapeOwners` は「1段はがす」ための仕組みなので、掴みと開きを**一度に2段**はがさない。
+      if (draggingSv.current || draggingHue.current) { cancelDragRef.current(); return; }
+      setOpen(false);
+    };
     const release = claimEscape(); // 開いている間は `Escape` を受け持つ（外側の後始末を同時に走らせない・#701）
     window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey);
@@ -354,11 +433,16 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
             onPointerDown={(e) => {
               e.preventDefault();
               draggingSv.current = true;
+              dragStartColor.current = value; // やめたときに戻す先（#763-2）
               startDragBoundary(); // 1ドラッグ＝1取り消し（#547 P2-3 レビュー）
               try { svRef.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
               applySvAt(e.clientX, e.clientY);
             }}
-            onPointerMove={(e) => { if (draggingSv.current) applySvAt(e.clientX, e.clientY); }}
+            onPointerMove={(e) => {
+              if (!draggingSv.current) return;
+              if (releasedOutside(e, svRef.current)) return; // 押していない移動は「やめる」（#763-1）
+              applySvAt(e.clientX, e.clientY);
+            }}
             onPointerUp={(e) => {
               draggingSv.current = false;
               try { svRef.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
@@ -387,11 +471,16 @@ export function ColorPicker({ value, onChange, className, ariaLabel = "色を選
             onPointerDown={(e) => {
               e.preventDefault();
               draggingHue.current = true;
+              dragStartColor.current = value; // 同上（#763-2）
               startDragBoundary(); // 同上
               try { hueRef.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
               applyHueAt(e.clientX);
             }}
-            onPointerMove={(e) => { if (draggingHue.current) applyHueAt(e.clientX); }}
+            onPointerMove={(e) => {
+              if (!draggingHue.current) return;
+              if (releasedOutside(e, hueRef.current)) return; // 同上（#763-1）
+              applyHueAt(e.clientX);
+            }}
             onPointerUp={(e) => {
               draggingHue.current = false;
               try { hueRef.current?.releasePointerCapture(e.pointerId); } catch { /* noop */ }
