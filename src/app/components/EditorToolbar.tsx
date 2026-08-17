@@ -14,6 +14,16 @@
 import type { ReactNode } from "react";
 import { UndoRedoButtons } from "./UndoRedoButtons";
 
+/**
+ * 共通ツールバーを載せた**見出しの行**に付ける印（単一の参照元）。
+ *
+ * ⚠️ スクロールする側（`.main-scroll`）の中に見出しがある画面は、これを付けないと
+ * **下へスクロールした時点でツールバーごと消える**＝置き場を移した意味がなくなる。
+ * 場面編集はスクロールの外（`.topbar`）に見出しがあるので付けない（付ける必要がない）。
+ * 見た目は `src/styles/theme.css` の `.editor-header`。
+ */
+export const EDITOR_HEADER_CLASS = "editor-header";
+
 export interface EditorToolbarProps {
   /** 取り消す／やり直す（3画面とも出す）。 */
   undo: {

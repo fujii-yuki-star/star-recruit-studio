@@ -3412,9 +3412,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           編集しているか」なので残す。 */}
       <PageHead
         title={doc.projectName}
+        // 見出しごと貼り付ける（#774）＝この画面の見出しはスクロールする側の中にあるので、
+        // 印を付けないと欄を伸ばして下へ動かした時点でツールバーごと消える（＝直した意味がなくなる）。
+        sticky
         actions={(
           <EditorToolbar
             undo={{ canUndo: history.past.length > 0, canRedo: history.future.length > 0, onUndo: undo, onRedo: redo, disabled: exporting }}
+            // 自動保存の結果を**この画面が**出す（#693）。共通トップバーの保存ボタンは出さない決定
+            // （ADR-0032）なので、ここが唯一の担い手＝黙って落とすと「閉じても消えない」（`06 §12.1`）が破れる。
+            // ⚠️ 以前は**欄の下**だった（#774 で移設）＝欄が画面の高さを超えるとスクロールしないと見えず、
+            // 失敗したまま気づけなかった。同じものを2か所に置かない（`06 §2` 統一規約5）。
             status={saveStatus === "error" ? (
               // 失敗は**いつも見える所**で知らせ、その場に次の行動を置く（`15 §6` TIMELINE_SAVE_FAILED）。
               <span className="row gap-sm" role="alert" style={{ alignItems: "center" }}>
@@ -3505,8 +3512,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       {/*
         **その場の返事は「欄と同じ囲い」の中に入れる**（レビュー指摘）。貼り付け（sticky）は
         **囲いの中でだけ動く**ので、囲いを欄＋返事で閉じておけば、下にある操作の行
-        （取り消す・列を足す・**動画の一覧へ**）の上に乗ることが構造的に起こらない。
-        囲わないと、貼り付いた知らせが戻る導線を覆って押せなくなる（§2-5＝戻れない状態を作らない）。
+        （「〈欄〉を表示する」「配置を既定に戻す」）の上に乗ることが構造的に起こらない。
+        囲わないと、貼り付いた知らせがそれらを覆って押せなくなる（§2-5＝戻れない状態を作らない）。
+        ※ 取り消す・動画の一覧へは**見出しの行**へ移した（#774）ので、ここの列挙からは外れている。
       */}
       <div className="timeline-flash-zone">
         <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
@@ -3576,13 +3584,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           ))}
         </ul>
       )}
-
-      {/*
-        自動保存の結果を**この画面が**出す（#693）。共通トップバーの保存ボタンは出さない決定（ADR-0032）なので、
-        ここが唯一の担い手＝黙って落とすと「閉じても消えない」（`06 §12.1`）が破れる。
-        ⚠️ **置き場は見出しの横（共通ツールバー）へ移した**（#774）＝欄の下だと、欄が画面の高さを超えたとき
-        **スクロールしないと見えない**＝失敗したまま気づけない。同じものを2か所に置かない（`06 §2` 統一規約5）。
-      */}
 
       <div className="row gap-sm mt-lg">
         {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8＝戻れない状態を作らない）。 */}

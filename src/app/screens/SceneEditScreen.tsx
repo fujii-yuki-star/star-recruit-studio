@@ -2653,14 +2653,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </button>
             )}
 
-            <button
-              className="btn btn-primary btn-block"
-              onClick={() => void saveProject()}
-              disabled={saveStatus === "saving"}
-            >
-              <SaveIcon size={18} />
-              {saveButtonLabel(saveStatus)}
-            </button>
       </>
     ) },
   ];
@@ -2688,6 +2680,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <EditorToolbar
             undo={{ canUndo, canRedo, onUndo: undo, onRedo: redo, disabled: isExporting }}
             status={<SaveStatusBadge />}
+            // ⚠️ **保存も知らせと同じ行に置く**（#774 レビュー）＝知らせだけを上へ移し、保存ボタンを
+            // 「選択中の場面を編集」の欄に残すと、**欄を閉じた状態で保存に失敗したとき**
+            // 「もう一度お試しください」と言われるのに押せるものが画面から消える（この画面は共通トップバーの
+            // 保存を出さず・`saveProject` の入口もここだけ＝§2-5「次の行動」が行き止まりになる）。
+            // 他の2画面も知らせの隣に押せるものがある（見た目パターン編集＝保存／タイムライン＝保存し直す）＝ADR-0026②。
+            extra={(
+              <button className="btn btn-primary" onClick={() => void saveProject()} disabled={saveStatus === "saving"}>
+                <SaveIcon size={18} />
+                {saveButtonLabel(saveStatus)}
+              </button>
+            )}
             back={{ label: <><ArrowLeftIcon size={16} />台本表へ戻る</>, onClick: () => onNavigate("draft") }}
           />
           {/* 仕上がり確認から「場面編集へ戻る」で“いま編集中の場面”に戻れるよう、現在の場面を editingSceneId に
