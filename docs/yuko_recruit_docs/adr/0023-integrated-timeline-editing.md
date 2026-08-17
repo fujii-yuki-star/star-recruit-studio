@@ -1,12 +1,13 @@
 # ADR-0023: 統合タイムライン編集（再生ヘッド＋同期プレビュー・グローバル時間の再生エンジン）
 
-- **状態**: Proposed（2026-07-02・α-4 中の設計 ADR・**実装は α-5 の主軸**＝利用者決定 2026-07-02・EPIC #329）
-  > ⚠️ **[`adr/0032`](0032-timeline-project-format.md)（Proposed・2026-07-28）が本ADRを置き換える方向**。
+- **状態**: **一部 Superseded by [`adr/0032`](0032-timeline-project-format.md)**（2026-08-17・ADR-0032 の Accepted 化に伴い、本ADRが宣言していた遷移を実施）／もとは Proposed（2026-07-02・α-4 中の設計 ADR）。**本ADRの姿では実装しない**＝α-5 はタイムライン形式（別プロジェクト形式）で作り直し、EPIC #329 は 2026-08-17 に 9/9 でクローズ済み。
+  > ⚠️ **[`adr/0032`](0032-timeline-project-format.md)（Accepted・2026-08-17）が本ADRを置き換えた**。
   > タイムライン編集は**別プロジェクト形式**（場面形式から片道で焼き出し・時間軸ネイティブ）として作り直す。
   > **本ADRの段階(2)以降には着手しないこと**（段階(1)(3) は実装済みだがタイムライン側で作り直す）。
-  > ADR-0032 が Accepted になった時点で、本ADRの状態を **Superseded by ADR-0032（一部）** へ改める。
+  > **実施済み（2026-08-17）**。⚠️ **「再生しながら編集」は本形式では採らない**＝編集・取り消しで再生を止める
+  > （再生位置を使う操作の結果が毎回変わるため・ADR-0032 追補）。時刻解決の純粋関数はタイムライン側へ流用済み。
 - **日付**: 2026-07-02
-- **関連**: [`adr/0024`](0024-non-destructive-editing-model.md)（非破壊編集モデル＝Asset/使用単位・素材解析キャッシュ・将来の VoiceClip 方向）/ [`adr/0015`](0015-dialogue-timeline-model.md)（`scene.lines`＝簡易編集の正準・本ADRは射影＋導線で接続）/ [`adr/0018`](0018-cross-scene-timeline-model.md)（2モデル方式・`compileTimeline`・`timelineOverlay`＝本ADRの土台）/ [`adr/0019`](0019-keyframe-animation-model.md)（④ per-frame・`layoutScene(t)`・**未解決2＝プレビューのパリティ戦略を本ADRが方向づけ**）/ [`adr/0001`](0001-rendering-parity.md)（パリティ）/ [`adr/0004`](0004-rasterization-method.md)（ラスタライズ）/ `CLAUDE.md §2-4`（時間軸編集は専用画面に隔離）・`§10`（本格タイムライン編集の段階解除）/ α-5 issues #257（ダッキング）・#258（SE配置）・#259（ノーマライズ）＝本EPICの部品/兄弟
+- **関連**: [`adr/0024`](0024-non-destructive-editing-model.md)（非破壊編集モデル＝Asset/使用単位・素材解析キャッシュ・将来の VoiceClip 方向）/ [`adr/0015`](0015-dialogue-timeline-model.md)（`scene.lines`＝簡易編集の正準・本ADRは射影＋導線で接続）/ [`adr/0018`](0018-cross-scene-timeline-model.md)（2モデル方式・`compileTimeline`・`timelineOverlay`＝本ADRの土台）/ [`adr/0019`](0019-keyframe-animation-model.md)（④ per-frame・`layoutScene(t)`・**未解決2＝プレビューのパリティ戦略を本ADRが方向づけ**）/ [`adr/0001`](0001-rendering-parity.md)（パリティ）/ [`adr/0004`](0004-rasterization-method.md)（ラスタライズ）/ `CLAUDE.md §2-4`（テンプレ駆動＝**場面形式に限る**。時間軸を編集するならタイムライン形式へ焼き出す＝2026-08-17 改訂）・`§10`（本格タイムライン編集の段階解除）/ α-5 issues #257（ダッキング）・#258（SE配置）・#259（ノーマライズ）＝本EPICの部品/兄弟
 
 ---
 
