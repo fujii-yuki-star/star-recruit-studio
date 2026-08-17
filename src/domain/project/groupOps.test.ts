@@ -182,8 +182,7 @@ describe('removeGroupWithMembers（グループを丸ごと削除・#551）', ()
     const groups = [grp('group_001', ['free_001', 'group_002']), grp('group_002', ['free_002', 'free_003'])];
     const r = removeGroupWithMembers(groups, 'group_001');
     expect(r.elementIds.sort()).toEqual(['free_001', 'free_002', 'free_003']);
-    expect(r.groups).toEqual([]); // 親・子とも消える
-    expect(r.groupIds.sort()).toEqual(['group_001', 'group_002']); // グループ自体もアニメ対象＝掃除に要る（④(3)）
+    expect(r.groups).toEqual([]); // 親・子とも消える（消えた id は返さない＝掃除は前後差が持つ・#779）
   });
 
   it('子グループだけを消すと、親からその参照が外れる（orphan を残さない）', () => {
@@ -198,14 +197,12 @@ describe('removeGroupWithMembers（グループを丸ごと削除・#551）', ()
     const r = removeGroupWithMembers(groups, 'group_002');
     expect(r.elementIds).toEqual(['free_001']);
     expect(r.groups).toEqual([]); // 空になった親も消える
-    expect(r.groupIds.sort()).toEqual(['group_001', 'group_002']); // 落ちた親も掃除対象に含める
   });
 
   it('存在しない id は何もしない（同一参照を返す＝未保存/履歴にしない）', () => {
     const groups = [grp('group_001', ['free_001'])];
     const r = removeGroupWithMembers(groups, 'group_999');
     expect(r.elementIds).toEqual([]);
-    expect(r.groupIds).toEqual([]);
     expect(r.groups).toBe(groups);
   });
 
