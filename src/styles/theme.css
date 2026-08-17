@@ -1203,7 +1203,7 @@ button.badge {
 .panel-drop-line--top { top: 0; left: 0; right: 0; height: var(--drop-line-w); }
 .panel-drop-line--bottom { bottom: 0; left: 0; right: 0; height: var(--drop-line-w); }
 .panel-drop-line--left { top: 0; bottom: 0; left: 0; width: var(--drop-line-w); }
-.panel-drop-line--right { top: 0; bottom: 0; right: 0; width: 4px; }
+.panel-drop-line--right { top: 0; bottom: 0; right: 0; width: var(--drop-line-w); }
 
 /* 操作したその場の返事（置けなかった理由など）。**欄の下に置いたまま常に見える**ようにする
    （ADR-0033＝上に積むと編集の場所が狭まる／下へ流すと画面外に落ちて気づけない）。 */
