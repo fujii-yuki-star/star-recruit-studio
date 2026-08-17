@@ -77,6 +77,34 @@ describe('projectStore addScene / removeScene', () => {
     expect(useProjectStore.getState().scenes.map((s) => s.order)).toEqual([1, 2]);
   });
 
+  // #779：場面ごと消える経路も掃除の対象。`scene_NNN` は歯抜けの最小番号を再利用し（上のテスト）、
+  // 新しい場面は**直前の見た目を引き継ぐ**（`addScene`）ので、残すと自由配置の要素 id まで揃い、
+  // **置いた覚えのない動きで新しい場面の図形が動く**（要素・まとまりの「憑依」の場面版）。
+  it('removeScene はその場面の動きも落とす（消した場面の動きが新しい場面へ憑依しない）', () => {
+    const st = useProjectStore.getState();
+    useProjectStore.setState({
+      meta: {
+        ...st.meta,
+        timelineOverlay: {
+          animations: [
+            { id: 'anim_001', sceneId: 'scene_001', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }] },
+            { id: 'anim_002', sceneId: 'scene_002', targetId: 'free_001', keyframes: [{ timeSec: 0, opacity: 0 }] },
+          ],
+        },
+      } as never,
+      past: [], future: [],
+    });
+    useProjectStore.getState().removeScene('scene_001');
+
+    const anims = useProjectStore.getState().meta.timelineOverlay?.animations ?? [];
+    expect(anims.map((a) => a.id)).toEqual(['anim_002']); // 消した場面のぶんだけ落ちる（他場面は残る）
+
+    // 取り消しは1回で戻る（場面と動きを別々に戻させない＝同じ pushHistory の中）。
+    useProjectStore.getState().undo();
+    expect(useProjectStore.getState().scenes.map((x) => x.sceneId)).toEqual(['scene_001', 'scene_002']);
+    expect((useProjectStore.getState().meta.timelineOverlay?.animations ?? []).map((a) => a.id)).toEqual(['anim_001', 'anim_002']);
+  });
+
   it('編集系アクションは saveStatus を "idle" に戻す（編集＝未保存）', () => {
     const reset = (fn: () => void) => {
       useProjectStore.setState({ saveStatus: 'saved' });

@@ -22,7 +22,7 @@ import {
 import type { ProjectHeader } from "../../domain/project/persistence";
 import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSceneInList, splitSceneLinesInList, switchSceneTemplate } from "../../domain/project/sceneOps";
 import { substituteDeletedTemplateInScenes } from "../../domain/project/templateUsage";
-import { duplicateSceneAnimations, removeAnimationsForTargets, retargetAnimations } from "../../domain/project/animationOps";
+import { duplicateSceneAnimations, removeAnimationsForScene, removeAnimationsForTargets, retargetAnimations } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
@@ -1090,6 +1090,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 音声キャッシュを復元しない（DocSnapshot=meta/parts/scenes・ADR-0020）。ここで消すと「生成→削除→取り消し」で
       // 復元場面の音声が失われる（保存前は voicePath も無く復旧不能＝#390 レビュー🔴）。剪定は _doSave が「現在＋Undo/Redo
       // 履歴で到達可能な場面」を除いて行う（履歴から落ちて初めて解放＝到達不能なら Undo でも戻せず安全）。
+      // ⚠️ **その場面の動きも一緒に落とす**（#779）＝`scene_NNN` は歯抜けの最小番号を再利用し、
+      // 新しい場面は**直前の見た目を引き継ぐ**ので、残すと**置いた覚えのない動きで新しい場面が動く**
+      //（要素・まとまりの「憑依」の場面版）。⚠️ 音声キャッシュ（上）と違い `animations` は `meta`
+      // ＝**履歴のスナップショットに入る**（ADR-0020）ので、ここで落としても取り消しで戻る。
+      // 同じ `pushHistory()` の中なので**取り消しは1回**（場面と動きを別々に戻させない）。
+      meta: s.meta.timelineOverlay?.animations
+        ? { ...s.meta, timelineOverlay: { ...s.meta.timelineOverlay, animations: removeAnimationsForScene(s.meta.timelineOverlay.animations, sceneId) } }
+        : s.meta,
       saveStatus: "idle",
     }));
   },
