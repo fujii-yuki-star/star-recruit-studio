@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
+import { pointerDownAt } from "../../test/pointer";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Scene } from "../../domain/project/types";
 import { DraftScreen } from "./DraftScreen";
@@ -29,19 +30,53 @@ describe("DraftScreen 台本表の並び替え（Pointer Events・#398 再対応
     });
   });
 
-  it("先頭行の持ち手を3行目へドラッグすると store の並びが [002,003,001] になる", () => {
+  /** その要素の「手前半分／後ろ半分」を指せるようにする（jsdom は実寸を持たない）。 */
+  const halves = (el: Element) => {
+    (el as HTMLElement).getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    return { front: { clientX: 20, clientY: 20 }, back: { clientX: 80, clientY: 80 } };
+  };
+
+  it("先頭行の持ち手を3行目の**下半分**へドラッグすると [002,003,001] になる", () => {
     render(<DraftScreen onNavigate={vi.fn()} />);
     const gripRows = [...document.querySelectorAll("tbody tr")];
     expect(gripRows).toHaveLength(3);
     const grip = [...gripRows[0].querySelectorAll("span")].find((s) => s.textContent === "⠿");
     expect(grip).toBeTruthy();
 
+    // ⚠️ **どちら半分かで結果が変わる**（#771(c)）＝落とし先は「重なった行」ではなく**すき間**。
+    const at = halves(gripRows[2]);
     fireEvent.pointerDown(grip as HTMLElement, { button: 0 });
-    fireEvent.pointerMove(gripRows[2]); // 3行目（index 2）へ重ねる
+    fireEvent.pointerMove(gripRows[2], at.back); // 3行目の下半分＝末尾のすき間
     fireEvent.pointerUp(window);
 
     expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual([
       "scene_002", "scene_003", "scene_001",
     ]);
+  });
+
+  // #771(c)：**同じすき間なら、どちらから来ても同じ結果**（以前は「重なった行」で決めていたので、
+  // 前へ動かすとその手前・後ろへ動かすとその後ろ＝同じ手つきが向きで1つずれた）。
+  it("**同じすき間なら向きに依らず同じ結果**（1つズレを作らない）", () => {
+    render(<DraftScreen onNavigate={vi.fn()} />);
+    const rows = () => [...document.querySelectorAll("tbody tr")];
+    const gripOf = (el: Element) => [...el.querySelectorAll("span")].find((s) => s.textContent === "⠿") as HTMLElement;
+
+    // ⚠️ **時刻を固定して送る**（`src/test/pointer.ts`）＝1つのテストで2回掴むので、素の `fireEvent` だと
+    // 実時刻が乗り、間の再描画しだいで二度押しと見なされうる（`doubleTapGuard`）。
+    // 先頭（001）を「2行目の下半分」＝002 と 003 の間へ。
+    const at1 = halves(rows()[1]);
+    pointerDownAt(gripOf(rows()[0]), 1000, { button: 0 });
+    fireEvent.pointerMove(rows()[1], at1.back);
+    fireEvent.pointerUp(window);
+    expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual(["scene_002", "scene_001", "scene_003"]);
+
+    // 末尾（003）を「同じすき間」＝いまの 002 と 001 の間へ。手前から来ても後ろから来ても、
+    // 「指した2つの間」に入る。
+    const at2 = halves(rows()[0]);
+    pointerDownAt(gripOf(rows()[2]), 9000, { button: 0 }); // 別の操作＝十分離れた時刻
+    fireEvent.pointerMove(rows()[0], at2.back);
+    fireEvent.pointerUp(window);
+    expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual(["scene_002", "scene_003", "scene_001"]);
   });
 });

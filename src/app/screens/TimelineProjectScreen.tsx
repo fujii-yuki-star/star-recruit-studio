@@ -16,6 +16,7 @@ import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } 
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
+import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, moveClipIssue, placeableAudioTracks, placeableVisualTracks, trimClipIssue, visualPlacementIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
 import type { EditBlockedReason } from "../../domain/timeline/edit";
@@ -88,6 +89,8 @@ type DragPlace = {
     center?: { x: number; y: number };
     /** 置けない理由（null＝置ける）。**ゴーストの色に使う**＝離したときの結果と同じ判定から採る。 */
     issue: EditBlockedReason | null;
+    /** 寄せた先（点線を出す秒・`null`＝寄せていない）。帯を運ぶときと同じ線を使う（#771(a)）。 */
+    guideSec?: number | null;
   } | null;
 };
 
@@ -1269,10 +1272,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 表示上のすき間 → **並びの位置**（後ろほど手前なので裏返す）＋**抜いた後の位置**へ直す。
    * 抜いた場所より後ろへ入れるときは1つ手前へずれる（`splice` は抜いてから入れるため）。
    */
-  const arrayIndexForGap = (gap: number, from: number, count: number): number => {
-    const arrayGap = count - gap;
-    return arrayGap > from ? arrayGap - 1 : arrayGap;
-  };
+  const arrayIndexForGap = (gap: number, from: number, count: number): number =>
+    // 裏返す（後ろほど手前）のはこの画面の事情。**すき間 → 入れる位置**の直しは domain の1か所
+    // （`insertIndexForGap`・#771(c)）＝場面カード・台本表の行と同じ計算を見る。
+    insertIndexForGap(count - gap, from);
   /** 掴んで並べ替える（作法は画面ぜんぶで同じ＝`usePointerDrag`）。 */
   const beginTrackDrag = (e: ReactPointerEvent, trackId: string): void => {
     if (exporting || !doc) return; // 押せない状況では掴ませない（押してから断らない）
@@ -1544,20 +1547,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
      */
     // ⚠️ **計算だけ**にする（線を出すのは呼び出し側）。ここで state を触ると、離すときに
     // 「消してから計算する」順になって**線が消えない**（実際に踏んだ）。
-    const applySnap = (sec: number, ev: PointerEvent): { sec: number; guideSec: number | null } => {
-      if (ev.ctrlKey || ev.metaKey || timeFixed) return { sec, guideSec: null };
-      const el = scrollRef.current;
-      const now = useTimelineStore.getState().doc;
-      if (!el || !now || pxPerSec <= 0) return { sec, guideSec: null };
-      const visible = visibleTimeRange({
-        scrollLeft: el.scrollLeft, clientWidth: el.clientWidth, labelPx: LANE_LABEL_PX, pxPerSec,
-      });
-      const targets = timeSnapTargets({ clips: now.clips, exceptId: clipId, playheadSec, visible });
+    const applySnap = (sec: number, ev: PointerEvent): { sec: number; guideSec: number | null } =>
       // 運ぶときは開始と終わりの両方・端を縮めるときは**動かしている端だけ**を見る。
-      const edges = mode === "move" ? [sec, sec + clipLen] : [sec];
-      const r = snapTime({ edges, targets, thresholdSec: SNAP_THRESHOLD_PX / pxPerSec });
-      return { sec: Math.max(0, sec + r.deltaSec), guideSec: r.guide?.sec ?? null };
-    };
+      snapPlacement(sec, (t) => (mode === "move" ? [t, t + clipLen] : [t]), {
+        exceptId: clipId,
+        off: ev.ctrlKey || ev.metaKey || timeFixed,
+      });
     const at = (ev: PointerEvent): number => {
       if (timeFixed) return origin;
       const scrolled = (scrollRef.current?.scrollLeft ?? startScroll) - startScroll;
@@ -1687,19 +1682,57 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return null;
   };
 
+  /**
+   * **時刻を吸着させる**（決定12）＝他の帯の端・再生位置・0秒へ寄せる。**`Ctrl` で切れる**。
+   * 寄せ先は**画面内に見えているものだけ**（見えていない所へ吸い付くと理由が読めない）。
+   * しきい値は px で決めて倍率で秒へ換算する＝**倍率が変わっても指の感覚が同じ**。
+   *
+   * ⚠️ **帯を運ぶときも、新しく置くときも同じ式を通す**（#771(a)）＝同じ「時間を決める操作」なのに
+   * 片方だけ吸着が無いと、置いた直後に必ず微妙にずれる（置いてから運び直す羽目になる）。
+   * ⚠️ **計算だけ**にする（線を出すのは呼び出し側）。ここで state を触ると、離すときに
+   * 「消してから計算する」順になって**線が消えない**（実際に踏んだ）。
+   */
+  const snapPlacement = (
+    sec: number,
+    edgesOf: (sec: number) => number[],
+    opts: { exceptId?: string; off?: boolean },
+  ): { sec: number; guideSec: number | null } => {
+    if (opts.off) return { sec, guideSec: null };
+    const el = scrollRef.current;
+    const now = useTimelineStore.getState().doc;
+    if (!el || !now || pxPerSec <= 0) return { sec, guideSec: null };
+    const visible = visibleTimeRange({
+      scrollLeft: el.scrollLeft, clientWidth: el.clientWidth, labelPx: LANE_LABEL_PX, pxPerSec,
+    });
+    const targets = timeSnapTargets({ clips: now.clips, exceptId: opts.exceptId, playheadSec, visible });
+    const r = snapTime({ edges: edgesOf(sec), targets, thresholdSec: SNAP_THRESHOLD_PX / pxPerSec });
+    return { sec: Math.max(0, sec + r.deltaSec), guideSec: r.guide?.sec ?? null };
+  };
+
   /** 落とした点から「どこへ置くか」を決める。**列が先**（下の並びは仕上がり確認に重ならない）。 */
-  const resolveDrop = (kind: VisualKind, assetId: string | undefined, x: number, y: number): DragPlace["drop"] => {
+  const resolveDrop = (
+    kind: VisualKind, assetId: string | undefined, x: number, y: number, noSnap = false,
+  ): DragPlace["drop"] => {
     if (!doc) return null;
     const lane = laneAt(x, y);
     if (lane) {
-      const { trackId, startSec } = lane;
-      return { at: { trackId, startSec }, issue: visualPlacementIssue(doc, { kind, assetId, trackId, startSec }) };
+      // ⚠️ **置くときも帯を運ぶときと同じ吸着**（#771(a)）＝同じ「時間を決める操作」で作法を割らない。
+      // 置く部品の長さは決まっている（`VISUAL_CLIP_DURATION_SEC`）ので、開始と終わりの両方で寄せる。
+      const { sec: startSec, guideSec } = snapPlacement(
+        lane.startSec, (t) => [t, t + VISUAL_CLIP_DURATION_SEC], { off: noSnap },
+      );
+      const { trackId } = lane;
+      return {
+        at: { trackId, startSec }, guideSec,
+        issue: visualPlacementIssue(doc, { kind, assetId, trackId, startSec }),
+      };
     }
     const stage = stageRef.current?.getBoundingClientRect();
     const stageVisible = stageRef.current ? visibleRectOf(stageRef.current) : null;
     if (stage && stageVisible && pointInRect(stageVisible, x, y)) {
-      // 仕上がり確認は**動画の中の場所**だけを決める。列と時刻はボタンと同じ規則でアプリが選ぶ
-      // （決定10 の「寄せない」は**利用者が指した軸**＝ここでは位置の話。時間は指していない）。
+      // 仕上がり確認は**動画の中の場所**だけを決める。列は**欄に出ている「置く列」**・時刻はボタンと
+      // 同じ規則でアプリが選ぶ（決定10 の「寄せない」は**利用者が指した軸**＝ここでは位置の話。
+      // 列と時間は指していない）。
       const center = canvasPointAt(stage, dimsForOrientation(doc.videoSettings.aspectRatio), x, y);
       return { center, issue: placeableTracks.length === 0 ? EDIT_BLOCKED.notFound : null };
     }
@@ -1710,10 +1743,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const grabToPlace = (e: ReactPointerEvent, kind: VisualKind, assetId?: string): void => {
     if (exporting || isPlaying) return; // 押せない状況では掴ませない（押してから断らない）
     beginDrag(e, {
-      onStart: (ev) => setDrag({ kind, assetId, x: ev.clientX, y: ev.clientY, drop: resolveDrop(kind, assetId, ev.clientX, ev.clientY) }),
+      onStart: (ev) => setDrag({ kind, assetId, x: ev.clientX, y: ev.clientY, drop: resolveDrop(kind, assetId, ev.clientX, ev.clientY, ev.ctrlKey || ev.metaKey) }),
       onMove: (ev) => {
-        const show = (e2: PointerEvent): void =>
-          setDrag({ kind, assetId, x: e2.clientX, y: e2.clientY, drop: resolveDrop(kind, assetId, e2.clientX, e2.clientY) });
+        const show = (e2: PointerEvent): void => {
+          const drop = resolveDrop(kind, assetId, e2.clientX, e2.clientY, e2.ctrlKey || e2.metaKey);
+          setDrag({ kind, assetId, x: e2.clientX, y: e2.clientY, drop });
+          // 寄せ先の点線は帯を運ぶときと同じもの（同じ state を使う＝画面に2本出ない）。
+          setSnapGuideSec(drop?.guideSec ?? null);
+        };
         show(ev);
         // 端まで運んだら送る（#714）。落とし先は列の位置から測り直すので、送った分だけ時刻も動く。
         autoScroll.track(scrollRef.current, ev, show);
@@ -1722,14 +1759,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         setDrag(null);
         autoScroll.stop();
         // **動かさずに離した＝押しただけ**。ここで置く（`click` を待たない＝指の経路はここで完結する）。
-        if (!started) { addVisualClip({ kind, assetId }); return; }
-        const drop = resolveDrop(kind, assetId, ev.clientX, ev.clientY);
+        // 動かさずに離した＝押しただけ＝**欄に出ている列**へ置く（ボタンと同じ・#771(b)）。
+        if (!started) { addVisualClip({ kind, assetId, trackId: visualTrackId }); return; }
+        const drop = resolveDrop(kind, assetId, ev.clientX, ev.clientY, ev.ctrlKey || ev.metaKey);
+        setSnapGuideSec(null); // 離したら線を消す（帯を運ぶときと同じ）
         // 落とし先の外・置けない所で離したら**何も置かない**（寄せない）。理由は離したときだけ出す（決定10）。
         if (!drop) return;
         // 置けないときも**同じ入口**へ渡す＝断る理由は store（domain）が出す（判定を2か所に持たない）。
-        addVisualClip({ kind, assetId, center: drop.center, at: drop.at });
+        // ⚠️ **仕上がり確認へ落としたときも「置く列」へ入れる**（#771(b) レビュー🔴）＝あちらは
+        // **動画の中の場所**だけを指しており、列は指していない。欄に出ている列を使わないと
+        // 「表示と結果を割らない」（`11 §7.6.3`）が破れる（ボタンは同じ列へ入るのに、運ぶと別の列へ入る）。
+        addVisualClip({ kind, assetId, center: drop.center, at: drop.at, trackId: visualTrackId });
       },
-      onCancel: () => { autoScroll.stop(); setDrag(null); },
+      // 中止しても**点線を消す**（#771(a) レビュー）＝ゴーストは消えるのに線だけ残ると、
+      // 「いま何かが吸着している」という嘘が次の操作まで居座る（帯を運ぶ側は消している）。
+      onCancel: () => { autoScroll.stop(); setDrag(null); setSnapGuideSec(null); },
     });
   };
 
@@ -3201,6 +3245,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               押すと再生位置（{playheadSec.toFixed(1)}秒）から置きます。塞がっているときは、その次に空いている時刻へ置きます。
               つかんで運ぶと、落とした所（仕上がり確認の中／列の中）へ置けます。
             </p>
+            {/* ⚠️ **どこへ入るかを見せる**（#771(b)）＝見た目パターン・音・読み上げの欄には在るのに
+                ここだけ無く、**暗黙にどこかの列**へ入っていた（なぜそこに入ったのか読めない）。
+                既定は「いちばん手前の置ける列」＝欄に出ている列が実際に置く列（表示と結果を割らない）。 */}
+            <label className="field">
+              <span>置く列</span>
+              <select className="select" value={visualTrackId} onChange={(e) => setPlaceTrackId(e.target.value)}>
+                {placeableTracks.map((t) => (
+                  <option key={t.id} value={t.id}>{trackLabel(doc.tracks, t.id)}</option>
+                ))}
+              </select>
+            </label>
             <div className="row gap-sm">
               {/* **押すと再生位置へ・つかんで運ぶと落とした所へ**（ADR-0034 決定2＝両方）。
                   掴めない環境・人のために、押すだけの道は必ず残す（決定19）。 */}
@@ -3208,7 +3263,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 className="btn btn-secondary grabbable"
                 {...busyGuard({ disabled: isPlaying, hint: playingHint })}
                 onPointerDown={(e) => grabToPlace(e, TIMELINE_CLIP_KIND.text)}
-                onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.text }))}
+                onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.text, trackId: visualTrackId }))}
               >
                 文字を置く
               </button>
@@ -3216,7 +3271,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 className="btn btn-secondary grabbable"
                 {...busyGuard({ disabled: isPlaying, hint: playingHint })}
                 onPointerDown={(e) => grabToPlace(e, TIMELINE_CLIP_KIND.shape)}
-                onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.shape }))}
+                onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.shape, trackId: visualTrackId }))}
               >
                 図形を置く
               </button>
@@ -3230,7 +3285,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 disabledHint={exporting ? exportingHint : playingHint}
                 searchLabel="素材の絞り込み"
                 onGrab={(e, assetId) => grabToPlace(e, TIMELINE_CLIP_KIND.slot, assetId)}
-                onPick={(assetId) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId })}
+                onPick={(assetId) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId, trackId: visualTrackId })}
               />
             )}
           </>

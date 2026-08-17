@@ -332,6 +332,12 @@ export interface TimelineState {
      * 未指定＝アプリが決める（ボタン）＝空いている列と時刻を探す。
      */
     at?: { trackId: string; startSec: number };
+    /**
+     * **置く列だけを指したとき**（欄の「置く列」・#771(b)）。時刻はアプリが探す
+     *（＝ボタンの約束「塞がっているときは、その次に空いている時刻へ」を保つ）。
+     * 未指定＝いちばん手前の置ける列。`at` があるときは使わない（あちらが列も時刻も指している）。
+     */
+    trackId?: string;
   }) => void;
   /** 置いた部品の中身を直す（#684）＝写真の差し替え・文字・図形の色や形。 */
   setSelectedVisualContent: (patch: {
@@ -853,7 +859,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ editBlocked: EDIT_BLOCKED.notFound });
       return;
     }
-    const track = placeable[0];
+    // 欄で選んだ列があればそれを使う（表示と結果を割らない）。無い／置けない列なら手前へ落とす
+    // ＝**選び直しを強いない**（列を消した直後でも押せる・§2-5 の行き止まりを作らない）。
+    const track = placeable.find((t) => t.id === input.trackId) ?? placeable[0];
     // **間の空きを飛び越さない**（#684 レビュー）＝「いちばん後ろの部品の終わり」ではなく、
     // まるごと収まる最初の空きを探す。規則は domain に置く（画面で数え直さない）。
     const startSec = firstFreeStart(doc.clips, track.id, get().playheadSec, VISUAL_CLIP_DURATION_SEC);

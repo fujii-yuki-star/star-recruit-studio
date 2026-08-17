@@ -195,10 +195,13 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                     key={row.id}
                     {...dnd.dropProps(i)}
                     style={{
-                      opacity: dnd.draggingId === row.id ? 0.4 : undefined,
-                      background:
-                        dnd.overIndex === i && dnd.draggingId && dnd.draggingId !== row.id
-                          ? "var(--color-primary-soft)"
+                      opacity: dnd.draggingId === row.id ? "var(--drag-source-opacity)" : undefined,
+                      // **落ちる場所を線で見せる**（#771(c)）＝行を塗ると「その前か後ろか」が読めない。
+                      // 表は枠を畳んでいる（`border-collapse: collapse`）ので、境目の線がそのまま「すき間」になる。
+                      borderTop: dnd.draggingId && dnd.overGap === i ? "var(--drop-line-w) solid var(--drop-line-color)" : undefined,
+                      borderBottom:
+                        dnd.draggingId && dnd.overGap === rows.length && i === rows.length - 1
+                          ? "var(--drop-line-w) solid var(--drop-line-color)"
                           : undefined,
                     }}
                   >
@@ -207,7 +210,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
                         {/* ドラッグの持ち手（装飾＝aria-hidden）。ネイティブ DnD はキー操作不可のため、アクセシブルな並び替えは
                             右の ↑/↓ ボタンが担う（見せかけのボタンにしない・#398 レビュー）。 */}
                         <span
-                          {...dnd.handleProps(row.id)}
+                          {...dnd.handleProps(row.id, i)}
                           aria-hidden="true"
                           title="ドラッグして並び替え"
                           style={{ cursor: "grab", touchAction: "none", userSelect: "none", color: "var(--color-text-muted)", lineHeight: 1 }}
