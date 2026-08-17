@@ -55,6 +55,17 @@ const animsOf = (): { targetId: string }[] =>
 const sceneNow = (): Scene => useProjectStore.getState().scenes[0];
 
 /**
+ * キャンバスで Shift＋クリックして**要素そのもの**を選択に足す。
+ * ⚠️ 素のクリックだと**まとまり**が選ばれる（メンバーは束ねて扱う）ので、まとまりの中の要素を
+ * 個別に複数選ぶ道はこれだけ。
+ */
+const shiftPickOnCanvas = (freeId: string, x: number): void => {
+  const el = document.querySelector(`[data-free-id="${freeId}"]`) as HTMLElement;
+  fireEvent.pointerDown(el, { button: 0, clientX: x, clientY: 150, pointerId: 1, shiftKey: true });
+  fireEvent.pointerUp(el, { pointerId: 1 });
+};
+
+/**
  * 一覧の先頭の要素を選んで消す（キャンバスを押すと「まとまり」が選ばれてしまうので一覧から選ぶ）。
  * 名前で指さないのは、1つ消すと**自動名が振り直される**ため。
  */
@@ -110,15 +121,37 @@ describe("SceneEditScreen まとまりが消えたら動きも落とす（#779�
     expect(animsOf()).toHaveLength(0); // 要素ぶんもまとまりぶんも残さない
   });
 
-  it("消していない編集では動きを落とさない（掃除が効きすぎない）", () => {
+  it("**まだ残っているまとまりの動きは落とさない**（掃除が効きすぎない）", () => {
+    // ⚠️ **消す経路の途中で見る**＝別のアクションを直接叩くと `patchSceneWithCleanup` を通らず、
+    // 実装をどう壊しても緑になる（＝空振りするテストになる）。1つ目を消した時点では
+    // まとまりはまだ生きているので、その動きは残っていなければならない。
     setup([group001], [groupAnim]);
-    selectGroup();
-    // まとまりを動かすだけ（消えていない）。
-    useProjectStore.getState().updateScene("scene_001", (s) => ({
-      ...s,
-      groups: (s.groups ?? []).map((g) => ({ ...g, transform: { ...g.transform, x: 50 } })),
-    }));
+    deleteFirstInList();
+    expect(sceneNow().freeLayout).toHaveLength(1);
+    expect(sceneNow().groups ?? []).toHaveLength(1); // メンバーが1つ残る＝まとまりは生きている
     expect(animsOf().filter((a) => a.targetId === "group_001")).toHaveLength(1);
+
+    deleteFirstInList(); // ここで空になって初めて落ちる
+    expect(sceneNow().groups ?? []).toHaveLength(0);
+    expect(animsOf().filter((a) => a.targetId === "group_001")).toHaveLength(0);
+  });
+
+  it("**まとめて削除**でも消えた要素の動きが落ちる（4経路のうち一括も通す）", () => {
+    // ⚠️ **まとまりに入っている要素は一括削除の対象にならない**＝キャンバスの Shift＋クリックは
+    // メンバーだと「まとまりを選ぶ」へ回り（`routeElementPointerDown`）、範囲選択も所属要素を
+    // 除くため（`selectFreeMany`）、**一括削除でまとまりが空になる筋は UI から到達しない**
+    //（まとまりを消すなら「まとまりごと削除」）。ここでは一括の配線そのものを見る。
+    setup([], [
+      { ...groupAnim, id: "anim_001", targetId: "free_001" },
+      { ...groupAnim, id: "anim_002", targetId: "free_002" },
+    ]);
+    shiftPickOnCanvas("free_001", 150);
+    shiftPickOnCanvas("free_002", 450);
+    fireEvent.click(screen.getByRole("button", { name: "選択をまとめて削除" }));
+    fireEvent.click(screen.getByRole("button", { name: "削除する" }));
+
+    expect(sceneNow().freeLayout).toHaveLength(0);
+    expect(animsOf()).toHaveLength(0); // 2件とも落ちる
   });
 
   it("取り消しは1回で戻る（場面と動きを別々に戻させない）", () => {

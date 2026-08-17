@@ -112,7 +112,9 @@ describe('vanishedAnimationTargets（消えた動きの対象を拾う・#779）
     expect(vanishedAnimationTargets(before, after).sort()).toEqual(['free_001', 'group_001']);
   });
 
-  it('入れ子のまとまりが連鎖して消えても、消えたぶんだけ挙がる', () => {
+  it('複数のまとまりが同時に消えても、消えたぶんだけ挙がる（入れ子の親子でも同じ）', () => {
+    // ⚠️ ここが見ているのは**前後差**であって「入れ子の解決」ではない（実装は id 集合の差分＝
+    // `members` は辿らない）。入れ子を畳むのは消す側（`removeMembersFromGroups` ほか）の仕事。
     const before = {
       freeLayout: [el('free_001')],
       groups: [grp('group_001', ['free_001']), grp('group_002', ['group_001'])],
