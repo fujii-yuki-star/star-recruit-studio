@@ -21,7 +21,7 @@ import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSilentReaso
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { perUseEntriesFor, prunePerUseMaps, withPerUseEntries } from "../../domain/project/perUseMaps";
 import type { PerUseEntries } from "../../domain/project/perUseMaps";
-import { animationsForElement } from "../../domain/project/animationOps";
+import { animationsForElement, vanishedAnimationTargets } from "../../domain/project/animationOps";
 import type { ElementAnimation } from "../../domain/project/types";
 import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
@@ -552,14 +552,40 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     updateAnimation(anim.id, withEndOpacity(anim.keyframes, opacity));
     endHistoryGroup();
   };
+  /**
+   * **場面を書き換え、消えたものの動きを対で片づける**（#779）。要素・まとまりが消える経路は
+   * ここ1本に通す（単体削除／一括削除／まとまりごと削除／**まとまりの解除**／**メンバーが消えて
+   * 空になったまとまり**）。
+   *
+   * ⚠️ **呼び出し側に「何が消えるか」を書かせない**＝経路ごとに列挙すると必ずどれかが漏れる
+   *（#779 では解除と空になったまとまりの2経路が漏れ、`group_NNN` の番号再利用で
+   * **後から作った別のまとまりが勝手に動いた**）。更新の前後を突き合わせて消えたものを拾う。
+   *
+   * ⚠️ **`update` は純粋であること**＝消えるものを確定するために**patch の前に1度**適用する
+   *（updater の中で外の変数へ書くと、updater が再実行されたときに壊れる＝`deleteGroupWithMembers`
+   * が既に採っている流儀）。採番を伴う操作（足す・複製する）はここを通さない。
+   * 場面（scene）と動画全体（meta）の更新は履歴のまとめで1手にする（取り消し1回で両方戻る）。
+   *
+   * ⚠️ **場面そのものが消える経路はここではない**＝`removeScene`（store）が同じ履歴の1手で
+   * その場面の動きを落とす（`removeAnimationsForScene`）。ここは**場面の中**の話。
+   */
+  const patchSceneWithCleanup = (update: (s: Scene) => Scene) => {
+    // ⚠️ **前後差は「押した時点のストア」から採る**（レンダー時の写しではない）＝1つの操作で複数回
+    // 呼ぶと、2回目の写しが古くなり「最後のメンバーが消えて空になったまとまり」を取りこぼす
+    //（#779 と同じ型の穴を、呼び方の違いで作り直さない）。`patch` が当たる相手と同じものを見る。
+    const before = useProjectStore.getState().scenes.find((x) => x.sceneId === selected.sceneId) ?? selected;
+    const gone = vanishedAnimationTargets(before, update(before));
+    beginHistoryGroup();
+    patch(update);
+    if (gone.length > 0) removeAnimationsForElements(selected.sceneId, gone);
+    endHistoryGroup();
+  };
+
   const removeFreeEl = (id: string) => {
     // freeLayout から消すと同時に groups からも除去し、空グループは落とす（orphan 参照防止・#311 レビュー）。
-    // 要素アニメ（④）と per-use マップ（ADR-0028 D6）も孤児にならないよう掃除する。scene（freeLayout/groups/
-    // per-use）＋meta（animations）の更新を履歴グループで1手にまとめる（Undo は1回で全部戻る）。
-    beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]), ...prunePerUseMaps(s, [id]) }));
-    removeAnimationsForElements(selected.sceneId, [id]);
-    endHistoryGroup();
+    // per-use マップ（ADR-0028 D6）も孤児にしない。**動きの掃除は `patchSceneWithCleanup` が持つ**
+    // ＝消えた要素だけでなく、**メンバーが消えて空になったまとまり**の動きも一緒に落ちる（#779）。
+    patchSceneWithCleanup((s) => ({ ...s, freeLayout: removeFreeElement(s.freeLayout ?? [], id), groups: removeMembersFromGroups(s.groups ?? [], [id]), ...prunePerUseMaps(s, [id]) }));
     setSelectedFreeIds((cur) => cur.filter((x) => x !== id)); // 選択中を消したら選択から外す（詳細モードは案内へ）
   };
   // 一括移動：複数選択の全要素の位置を1回の更新でまとめて反映（オーバーレイのドラッグから・#206）。
@@ -570,11 +596,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     patch((s) => ({ ...s, freeLayout: applyFreeElementGeoms(s.freeLayout ?? [], updates) }));
   // 一括削除：選択中の全要素を削除し選択を解除（#206）。開いている編集ポップオーバーも閉じる（削除済み要素に残らないように）。
   const removeFreeMany = (ids: string[]) => {
-    // 一括削除でも要素アニメ（④）と per-use マップ（ADR-0028 D6）を孤児にしないよう掃除する（scene＋meta を履歴グループで1手に）。
-    beginHistoryGroup();
-    patch((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids), ...prunePerUseMaps(s, ids) }));
-    removeAnimationsForElements(selected.sceneId, ids);
-    endHistoryGroup();
+    // 一括削除でも per-use マップ（ADR-0028 D6）を孤児にしない。動きは `patchSceneWithCleanup` が持つ（#779）。
+    patchSceneWithCleanup((s) => ({ ...s, freeLayout: removeFreeElements(s.freeLayout ?? [], ids), groups: removeMembersFromGroups(s.groups ?? [], ids), ...prunePerUseMaps(s, ids) }));
     setSelectedFreeIds([]);
     setEditPopover(null);
   };
@@ -598,7 +621,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     if (!activeGroupId) return;
     if (activeGroup?.locked) return; // ロック中は解除も抑止（UI disabled に加えた多重防御・#319 レビュー）
     const memberIds = groupElementIds(sceneGroups, activeGroupId);
-    patch((s) => {
+    // ⚠️ **解除でもまとまりは消える**＝その動きを落とさないと孤児になり、`group_NNN` の番号再利用で
+    // **後から作った別のまとまりが勝手に動く**（#779）。`patchSceneWithCleanup` が前後の差から拾う。
+    patchSceneWithCleanup((s) => {
       const r = ungroupGroup(s.groups ?? [], s.freeLayout ?? [], activeGroupId);
       return { ...s, groups: r.groups, freeLayout: r.elements };
     });
@@ -609,11 +634,13 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   // 1手（履歴グループ）で落とす＝Undo 1回で丸ごと戻る。ロック中は解除/重ね順と揃えて抑止（多重防御・#319）。
   const deleteGroupWithMembers = (groupId: string) => {
     if (sceneGroups.find((g) => g.id === groupId)?.locked) return;
-    // 消す対象は現在の groups から先に決める（`ungroupActive` と同じ流儀）。updater の中で外の変数へ書くと
-    // updater が再実行されたときに壊れるため、ここで確定させてから patch/アニメ掃除の両方に渡す。
-    const { elementIds, groupIds } = removeGroupWithMembers(sceneGroups, groupId);
-    beginHistoryGroup();
-    patch((s) => ({
+    // 消す対象は現在の groups から先に決める。updater の中で外の変数へ書くと、updater が
+    // 再実行されたときに壊れるため、ここで確定させてから updater へ渡す。
+    const { elementIds } = removeGroupWithMembers(sceneGroups, groupId);
+    // 動きの掃除は `patchSceneWithCleanup` が持つ＝**要素もまとまりも**前後の差から拾う（#779）。
+    // 以前はここで `[...elementIds, ...groupIds]` を自分で並べていたが、**同じ列挙を経路ごとに書く形**が
+    // 解除と空になったまとまりの取りこぼしを生んでいた。
+    patchSceneWithCleanup((s) => ({
       ...s,
       freeLayout: removeFreeElements(s.freeLayout ?? [], elementIds),
       groups: removeGroupWithMembers(s.groups ?? [], groupId).groups,
@@ -621,9 +648,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
       // free_NNN は歯抜けを再利用するので、残すと将来の別要素に憑依する（「設定していないのに効く」）。
       ...prunePerUseMaps(s, elementIds),
     }));
-    // グループ自体もアニメの対象になりうる（④(3)・ADR-0019）ので、要素とグループの両方を掃除して孤児を残さない。
-    removeAnimationsForElements(selected.sceneId, [...elementIds, ...groupIds]);
-    endHistoryGroup();
     setActiveGroupId(null);
     setSelectedFreeIds([]);
   };
