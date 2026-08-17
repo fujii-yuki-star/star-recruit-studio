@@ -1240,7 +1240,7 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
   it("行を右クリックすると、その列の操作が出る", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.contextMenu(screen.getByText("映像1"));
+    fireEvent.contextMenu(trackRowLabel("映像1"));
     expect(screen.getByRole("menuitem", { name: "動画に出さない" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "この列を削除" })).toBeInTheDocument();
   });
@@ -1248,7 +1248,7 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
   it("メニューから操作でき、選ぶと閉じる", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.contextMenu(screen.getByText("映像1"));
+    fireEvent.contextMenu(trackRowLabel("映像1"));
     fireEvent.click(screen.getByRole("menuitem", { name: "動画に出さない" }));
     expect(useTimelineStore.getState().doc?.tracks.find((t) => t.id === "track_001")?.hidden).toBe(true);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
@@ -1257,10 +1257,25 @@ describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（AD
   it("いまの状態で意味が通る言い方にする（出していない列は「動画に出す」）", () => {
     open({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, hidden: true }, { id: "track_002", kind: TRACK_KIND.audio }] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    fireEvent.contextMenu(screen.getByText("映像1"));
+    fireEvent.contextMenu(trackRowLabel("映像1"));
     expect(screen.getByRole("menuitem", { name: "動画に出す" })).toBeInTheDocument();
   });
 });
+
+/** 最後に置いた部品（`.at(-1)` は lib の対象外なので添字で取る）。 */
+const lastClip = () => {
+  const cs = useTimelineStore.getState().doc!.clips;
+  return cs[cs.length - 1];
+};
+
+/**
+ * 列の行の見出しを引く。⚠️ **名前だけでは引けない**＝「置く列」の選択肢にも同じ名前が出る（#771(b)）。
+ * 行の見出しは並べ替えのために掴める要素（`timeline-row-label`）の中にある。
+ */
+const trackRowLabel = (name: string): HTMLElement => {
+  const found = screen.getAllByText(name).find((el) => el.closest(".timeline-row-label"));
+  return found!;
+};
 
 describe("TimelineProjectScreen: 欄の配置（ADR-0033 段階2）", () => {
   it("既定で「再生位置」と「選んだ部品」が同時に出ている（1点置くごとに上下スクロール、を起こさない）", () => {
@@ -1792,6 +1807,30 @@ describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レ�
     expect(place).not.toBeDisabled();
     fireEvent.click(place);
     expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toEqual([{ timeSec: 2, volume: 0.4 }]);
+  });
+
+  // #771(b)：素材・文字・図形の欄だけ「置く列」が無く、**暗黙にどこかの列**へ入っていた
+  //（なぜそこに入ったのか読めない）。他の欄（見た目パターン・音・読み上げ）には元から在った。
+  it("素材・文字・図形の欄でも「置く列」を選べる（暗黙にどこかへ入れない・#771(b)）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.visual },
+      ],
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const place = document.querySelector('[data-panel-id="place"]') as HTMLElement;
+    const select = within(place).getByLabelText("置く列") as HTMLSelectElement;
+
+    // 既定は**いちばん手前の置ける列**＝欄に出ている列が実際に置く列（表示と結果を割らない）。
+    fireEvent.click(within(place).getByRole("button", { name: "文字を置く" }));
+    expect(lastClip().trackId).toBe(select.value);
+
+    // 選び直すと、その列へ入る。
+    const other = [...select.options].map((o) => o.value).find((v) => v !== select.value)!;
+    fireEvent.change(select, { target: { value: other } });
+    fireEvent.click(within(place).getByRole("button", { name: "図形を置く" }));
+    expect(lastClip().trackId).toBe(other);
   });
 
   it("書き出し中は「置く列」も列の操作も押せない（押してから断らない）", () => {
@@ -3256,6 +3295,68 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_003", "track_001", "track_002"]);
   });
 
+  // #771(c)：**すき間 → 入れる位置**の計算は場面カード・台本表の行と同じ1か所（`insertIndexForGap`）。
+  // ⚠️ 列の並べ替えは「落ちない／固定は動かない」しか見ておらず、**実際にどこへ入るか**が
+  // 無検査だった＝共有だけしても、こちら側が壊れても気づけない。
+  it("掴んで並べ替えると、線を出したすき間へ入る（列は手前が上＝並びは裏返る）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const rows = ([...container.querySelectorAll(".timeline-row")] as HTMLElement[])
+      .filter((r) => (r.querySelector(".timeline-row-label")?.textContent || "").trim() !== "");
+    rows.forEach((row, i) => {
+      row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+    });
+    // 行は**手前が上**＝上から track_003 / track_002 / track_001。いちばん上（track_003）を掴んで
+    // いちばん下のすき間（3行目の下半分＝表示上のすき間3）へ落とす＝並びのいちばん奥へ。
+    const label = rows[0].querySelector(".timeline-row-label") as HTMLElement;
+    pointerDownAt(label, 1, { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 10, clientY: 115 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 115 });
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_003", "track_001", "track_002"]);
+  });
+
+  // #771(c) の本題：**同じすき間なら、どちらから来ても同じ結果**（列でも）。
+  it("反対の向きから同じすき間へ運んでも、同じ並びになる（1つズレを作らない）", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const rowsOf = () => {
+      const rs = ([...container.querySelectorAll(".timeline-row")] as HTMLElement[])
+        .filter((r) => (r.querySelector(".timeline-row-label")?.textContent || "").trim() !== "");
+      rs.forEach((row, i) => {
+        row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+      });
+      return rs;
+    };
+    // 行は**手前が上**＝上から 003 / 002 / 001。
+    // ① いちばん上（003）を「2行目の下半分」＝002 と 001 の間へ運ぶ。
+    let rows = rowsOf();
+    pointerDownAt(rows[0].querySelector(".timeline-row-label") as HTMLElement, 1000, { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 10, clientY: 75 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 75 });
+    // 表示は 002 / 003 / 001 ＝並びは裏返して [001, 003, 002]。
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_001", "track_003", "track_002"]);
+
+    // ② いちばん下（001）を「1行目の下半分」＝002 と 003 の間へ運ぶ＝**反対の向き**から同じ考え方。
+    rows = rowsOf();
+    pointerDownAt(rows[2].querySelector(".timeline-row-label") as HTMLElement, 9000, { clientX: 10, clientY: 90 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 10, clientY: 35 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 35 });
+    // 表示は 002 / 001 / 003 ＝並びは [003, 001, 002]。指した2つの間に入っている。
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_003", "track_001", "track_002"]);
+  });
+
   it("**固定した列は掴んで並べ替えられない**（消せないのと揃える・#767 レビュー）", () => {
     open({
       tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.visual }],
@@ -4517,6 +4618,45 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: px, clientY: 0, ctrlKey: true }); // 吸着なし
     fireEvent.pointerUp(window, { pointerId: 1, clientX: px, clientY: 0 }); // ここで Ctrl を離している
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBeCloseTo(px / 36, 5); // 見えていた位置のまま
+  });
+
+  // #771(a)：**新しく置くときも同じ吸着**。帯を運ぶときだけ吸着があって、置くときは生値のままだと、
+  // 同じ「時間を決める操作」で作法が割れる（置いた直後に必ず微妙にずれる）。
+  const dropOnLane = (container: HTMLElement, px: number, opts?: { ctrl?: boolean }) => {
+    // ⚠️ **列を名指しで選ぶ**＝行は「手前が上」で並ぶので、先頭の `.timeline-lane` は音の列のことがある
+    //（種別が合わずに断られて、置かれない＝何を見ているか分からないテストになる）。
+    const row = trackRowLabel("映像1").closest(".timeline-row") ?? container;
+    const lane = row.querySelector(".timeline-lane") as HTMLElement;
+    lane.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 2000, height: 40, right: 2000, bottom: 40, x: 0, y: 0, toJSON: () => undefined }) as DOMRect;
+    Object.defineProperty(lane, "clientWidth", { value: 2000, configurable: true });
+    const place = document.querySelector('[data-panel-id="place"]') as HTMLElement;
+    const btn = within(place).getByRole("button", { name: "文字を置く" });
+    const ctrl = opts?.ctrl ?? false;
+    pointerDownAt(btn, 1, { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: px, clientY: 20, ctrlKey: ctrl });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: px, clientY: 20, ctrlKey: ctrl });
+  };
+
+  it("**置くときも他の帯の端へ吸着する**（帯を運ぶときと同じ作法・#771(a)）", () => {
+    two(); // clip_001=[0,3) / clip_002=[5,8)
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    withVisibleWidth(container);
+    // ⚠️ **吸着してもしなくても置ける所**で見る（重なる所だと「断られて置かれない」と区別できない）
+    // ＝clip_002 の終わり（8秒）の**わずか後ろ**（手前だと重なって断られる）。8秒ちょうどへ寄る。
+    dropOnLane(container, 36 * 8 + 3);
+    const placed = lastClip();
+    expect(placed.startSec).toBeCloseTo(8, 5);
+  });
+
+  it("置くときも `Ctrl` で吸着を切れる（帯を運ぶときと同じ）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    withVisibleWidth(container);
+    const px = 36 * 8 + 3;
+    dropOnLane(container, px, { ctrl: true });
+    const placed = lastClip();
+    expect(placed.startSec).toBeCloseTo(px / 36, 5); // 吸わない
   });
 
   it("吸着した先に**縦の点線**を出す（なぜ止まったかを見せる）", () => {

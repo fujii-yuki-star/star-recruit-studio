@@ -71,7 +71,8 @@ export function snapTime(input: {
  */
 export function timeSnapTargets(input: {
   clips: readonly { id: string; startSec: number; durationSec: number }[];
-  exceptId: string;
+  /** 除く部品（動かしている本人）。**新しく置くときは無い**ので省略できる（#771(a)）。 */
+  exceptId?: string;
   playheadSec: number;
   visible: { fromSec: number; toSec: number };
 }): TimeSnapTarget[] {

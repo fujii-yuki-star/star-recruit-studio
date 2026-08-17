@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
@@ -251,7 +251,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中はキャンバス/フォームを止める（#570 P2）
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
   // 場面カード列のドラッグ&ドロップ並び替え（#398）。カード自身を持ち手＋落下先にする（クリックで選択・ドラッグで並び替え）。
-  const sceneDnd = useDragReorder(moveSceneToIndex);
+  const sceneDnd = useDragReorder(moveSceneToIndex, { axis: "x" }); // 場面カードは横並び
   // 連続編集を1履歴にまとめる（#389）：テキスト欄は focus/blur、スライダーは pointerdown 開始＋window で終了（取りこぼし防止）。
   const { textGroup, dragGroup } = useHistoryGroup();
   // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
@@ -1546,25 +1546,23 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </div>
               <div className="scene-strip">
                 {scenes.map((s, i) => (
-                  <div key={s.sceneId} style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
+                  <Fragment key={s.sceneId}>
+                    {/* **落ちる場所を線で見せる**（#771(c)）＝カードを囲むと「その前か後ろか」が読めない。
+                        線はすき間そのものなので、指したとおりの場所に入る。 */}
+                    {sceneDnd.draggingId && sceneDnd.overGap === i && <span className="drop-line" aria-hidden />}
+                  <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
                     <button
                       className={`scene-card${selected.sceneId === s.sceneId ? " selected" : ""}`}
                       onClick={() => selectScene(s.sceneId)}
                       {...sceneDnd.dropProps(i)}
                       title="クリックで選択"
-                      style={{
-                        opacity: sceneDnd.draggingId === s.sceneId ? 0.4 : undefined,
-                        outline:
-                          sceneDnd.overIndex === i && sceneDnd.draggingId && sceneDnd.draggingId !== s.sceneId
-                            ? "2px solid var(--color-primary)"
-                            : undefined,
-                      }}
+                      style={{ opacity: sceneDnd.draggingId === s.sceneId ? "var(--drag-source-opacity)" : undefined }}
                     >
                       {/* ドラッグの持ち手（⠿）。Pointer Events で並び替え（#398 再対応＝button 直掛けだと DnD が発火しなかった）。
                           キーボードでの並び替えは下の ←/→ が担う＝持ち手は aria-hidden の見た目。 */}
                       <div style={{ textAlign: "center", lineHeight: 1, marginBottom: 4 }}>
                         <span
-                          {...sceneDnd.handleProps(s.sceneId)}
+                          {...sceneDnd.handleProps(s.sceneId, i)}
                           aria-hidden="true"
                           title="つまんで並び替え"
                           style={{ cursor: "grab", touchAction: "none", userSelect: "none", color: "var(--color-text-faint)" }}
@@ -1599,7 +1597,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       <button className="btn btn-ghost btn-icon text-sm" title="後ろへ" aria-label={`場面${s.order}を後ろへ移動`} disabled={i === scenes.length - 1} onClick={() => moveScene(s.sceneId, "down")}>→</button>
                     </div>
                   </div>
+                  </Fragment>
                 ))}
+                {/* 末尾の後ろへ落とすときの線（すき間は 0〜n＝カードの数だけ「間」がある）。 */}
+                {sceneDnd.draggingId && sceneDnd.overGap === scenes.length && <span className="drop-line" aria-hidden />}
               </div>
       </>
     ) },

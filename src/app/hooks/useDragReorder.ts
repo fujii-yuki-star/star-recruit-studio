@@ -6,34 +6,49 @@
 // アクセシブルな並び替えは呼び出し側の ↑/↓（←/→）ボタンが担う（handle は aria-hidden の見た目・#398 レビュー）。
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { insertIndexForGap } from "../../domain/reorder";
 
 export interface DragReorder {
   /** ドラッグ中の項目 id（無ければ null）。ドラッグ元を薄く見せる等に使う。 */
   draggingId: string | null;
-  /** ドラッグが今重なっている項目の index（無ければ null）。落下位置の目印表示に使う。 */
-  overIndex: number | null;
+  /**
+   * 落とすと入る**すき間**（0〜n・無ければ null）。**挿入線をここへ出す**（#771(c)）。
+   *
+   * ⚠️ 以前は「重なっている項目の index」を返していたが、それだと**同じ手つきが向きで別の意味**に
+   * なる（前へ動かすとその手前・後ろへ動かすとその後ろに入る＝1つずれる）。**間**で決めれば
+   * 「どこに入るか」が指したとおりになり、線でそのまま見せられる。
+   */
+  overGap: number | null;
   /** 掴む部分（把持部）に付ける props。ここで pointerdown するとドラッグが始まる。 */
-  handleProps: (id: string) => { onPointerDown: (e: ReactPointerEvent) => void };
-  /** 並びの各要素（落下先）に付ける props。ドラッグ中に重なると index を保持する。 */
+  handleProps: (id: string, index: number) => { onPointerDown: (e: ReactPointerEvent) => void };
+  /** 並びの各要素（落下先）に付ける props。ドラッグ中は**半分より手前か後ろか**ですき間を決める。 */
   dropProps: (index: number) => { onPointerMove: (e: ReactPointerEvent) => void };
 }
 
 /**
- * @param onReorder ドロップ（pointerup）時に呼ぶ。fromId（掴んだ項目 id）を toIndex（重なっていた index）へ動かす。
+ * @param onReorder ドロップ（pointerup）時に呼ぶ。fromId（掴んだ項目 id）を **toIndex＝すき間から直した
+ *   挿入位置**（`insertIndexForGap`）へ動かす。「重なっていた項目の index」ではない（#771(c)）。
  *   安定した参照（store アクション等）を渡すこと（ドラッグ中に window リスナを張り替えないため）。
  */
-export function useDragReorder(onReorder: (fromId: string, toIndex: number) => void): DragReorder {
+export function useDragReorder(
+  onReorder: (fromId: string, toIndex: number) => void,
+  /** 並びの向き（既定＝縦）。**半分より手前か後ろか**を測る軸に使う。 */
+  opts: { axis?: "x" | "y" } = {},
+): DragReorder {
+  const axis = opts.axis ?? "y";
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [overGap, setOverGap] = useState<number | null>(null);
   // window の pointerup（要素外で離しても拾う）で最新値を読むための ref（state のクロージャ陳腐化を避ける）。
   const draggingIdRef = useRef<string | null>(null);
-  const overIndexRef = useRef<number | null>(null);
+  const fromIndexRef = useRef<number | null>(null);
+  const overGapRef = useRef<number | null>(null);
 
   const reset = (): void => {
     setDraggingId(null);
-    setOverIndex(null);
+    setOverGap(null);
     draggingIdRef.current = null;
-    overIndexRef.current = null;
+    fromIndexRef.current = null;
+    overGapRef.current = null;
   };
 
   // ドラッグ中だけ window を監視：pointerup=確定（どこで離しても拾う）、pointercancel=中断（並べ替えず後始末）。
@@ -41,10 +56,12 @@ export function useDragReorder(onReorder: (fromId: string, toIndex: number) => v
     if (draggingId == null) return;
     const drop = (): void => {
       const from = draggingIdRef.current;
-      const to = overIndexRef.current;
+      const fromIndex = fromIndexRef.current;
+      const gap = overGapRef.current;
       reset();
       // 位置不変（同じ場所へ戻す）は onReorder 側が no-op（projectStore.moveSceneToIndex は変化なしなら履歴に積まない）。
-      if (from != null && to != null) onReorder(from, to);
+      // すき間 → 入れる位置の直しは domain の1か所（`insertIndexForGap`）＝画面で数え直さない。
+      if (from != null && gap != null && fromIndex != null) onReorder(from, insertIndexForGap(gap, fromIndex));
     };
     const cancel = (): void => reset(); // 中断（システムジェスチャ等）は並べ替えず状態だけ戻す
     window.addEventListener("pointerup", drop);
@@ -57,8 +74,8 @@ export function useDragReorder(onReorder: (fromId: string, toIndex: number) => v
 
   return {
     draggingId,
-    overIndex,
-    handleProps: (id) => ({
+    overGap,
+    handleProps: (id, index) => ({
       onPointerDown: (e) => {
         if (e.button != null && e.button > 0) return; // 主ボタン以外（右クリック等）は無視
         e.preventDefault(); // ドラッグ中のテキスト選択・既定操作を抑止
@@ -72,17 +89,24 @@ export function useDragReorder(onReorder: (fromId: string, toIndex: number) => v
           /* 未対応/未キャプチャは無視 */
         }
         draggingIdRef.current = id;
-        overIndexRef.current = null;
+        fromIndexRef.current = index;
+        overGapRef.current = null;
         setDraggingId(id);
-        setOverIndex(null);
+        setOverGap(null);
       },
     }),
     dropProps: (index) => ({
-      onPointerMove: () => {
+      onPointerMove: (e) => {
         if (draggingIdRef.current == null) return; // ドラッグ中でなければ無視（通常のマウス移動）
-        if (overIndexRef.current !== index) {
-          overIndexRef.current = index;
-          setOverIndex(index);
+        // **半分より手前ならその手前のすき間・後ろなら後ろのすき間**（#771(c)）。
+        // 実寸が取れない環境（jsdom の既定）は手前側に倒す＝どちらかに決まっていれば線は出せる。
+        const r = e.currentTarget.getBoundingClientRect();
+        const mid = axis === "x" ? r.left + r.width / 2 : r.top + r.height / 2;
+        const p = axis === "x" ? e.clientX : e.clientY;
+        const gap = p >= mid && (axis === "x" ? r.width : r.height) > 0 ? index + 1 : index;
+        if (overGapRef.current !== gap) {
+          overGapRef.current = gap;
+          setOverGap(gap);
         }
       },
     }),

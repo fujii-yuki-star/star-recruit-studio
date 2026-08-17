@@ -3,6 +3,12 @@
    クリーンでフラット、やさしい業務アプリ */
 
 :root {
+  /* 掴んで並べ替えるときの見え方（#771(c)）＝**画面ぜんぶで同じ**。列・場面カード・台本表の行・欄で
+     太さと色がばらばらだと、同じ操作なのに別物に見える（線の置き方だけは器の事情で違ってよい）。 */
+  --drop-line-w: 3px;
+  --drop-line-color: var(--color-primary);
+  --drag-source-opacity: 0.5;
+
   /* カラートークン */
   --color-bg: #f3f8fb;          /* 全体背景: ごく薄い水色 */
   --color-surface: #ffffff;     /* カード・面 */
@@ -1003,6 +1009,15 @@ button.badge {
   background: var(--color-surface-alt);
 }
 
+/* 落とし先の挿入線（#771(c)）＝カードを囲むと「その前か後ろか」が読めないので、すき間そのものを見せる。
+   幅を持つ要素として並びに割り込ませる＝線の分だけカードが送られ、入る場所が実寸で分かる。 */
+.drop-line {
+  flex: 0 0 var(--drop-line-w);
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--drop-line-color);
+}
+
 /* 場面カード */
 .scene-card {
   border: 2px solid var(--color-border);
@@ -1171,7 +1186,7 @@ button.badge {
 
 /* 欄をつかんで動かしている間（段階3）。落とし先は**線で示す**＝どこに入るか分からないまま落とさせない。 */
 .panel-frame { position: relative; }
-.panel-frame--dragging { opacity: 0.6; }
+.panel-frame--dragging { opacity: var(--drag-source-opacity); }
 .panel-frame-head {
   cursor: grab;
   /* 掴んでいる間に文字が選択される／タッチでスクロール判定に取られると、ドラッグが途中で切れる。 */
@@ -1181,14 +1196,14 @@ button.badge {
 .panel-frame-head:active { cursor: grabbing; }
 .panel-drop-line {
   position: absolute;
-  background: var(--color-primary, #3b82f6);
+  background: var(--drop-line-color);
   z-index: 2;
   pointer-events: none;
 }
-.panel-drop-line--top { top: 0; left: 0; right: 0; height: 4px; }
-.panel-drop-line--bottom { bottom: 0; left: 0; right: 0; height: 4px; }
-.panel-drop-line--left { top: 0; bottom: 0; left: 0; width: 4px; }
-.panel-drop-line--right { top: 0; bottom: 0; right: 0; width: 4px; }
+.panel-drop-line--top { top: 0; left: 0; right: 0; height: var(--drop-line-w); }
+.panel-drop-line--bottom { bottom: 0; left: 0; right: 0; height: var(--drop-line-w); }
+.panel-drop-line--left { top: 0; bottom: 0; left: 0; width: var(--drop-line-w); }
+.panel-drop-line--right { top: 0; bottom: 0; right: 0; width: var(--drop-line-w); }
 
 /* 操作したその場の返事（置けなかった理由など）。**欄の下に置いたまま常に見える**ようにする
    （ADR-0033＝上に積むと編集の場所が狭まる／下へ流すと画面外に落ちて気づけない）。 */

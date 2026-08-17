@@ -40,13 +40,13 @@
 /* 列の並べ替え（#767）。**掴んでいる行**は薄く、**落ちる先**はその行の上端に線を引く
    ＝どこに入るか分からないまま落とさせない（ADR-0033 の欄の並べ替えと同じ流儀）。 */
 .timeline-row--dragging {
-  opacity: 0.6;
+  opacity: var(--drag-source-opacity);
 }
 .timeline-row--drop-above {
-  box-shadow: inset 0 2px 0 0 var(--color-accent);
+  box-shadow: inset 0 var(--drop-line-w) 0 0 var(--drop-line-color);
 }
 .timeline-row--drop-below {
-  box-shadow: inset 0 -2px 0 0 var(--color-accent);
+  box-shadow: inset 0 calc(-1 * var(--drop-line-w)) 0 0 var(--drop-line-color);
 }
 
 .timeline-row-label {
