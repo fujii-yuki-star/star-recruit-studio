@@ -8,7 +8,7 @@ import { emitProjectDeleted, onProjectDeleted } from './projectDeletion';
 describe('emitProjectDeleted（消える前に全員が手放し、書き込みの着地を待つ・#763-4）', () => {
   it('受け手が返した「進行中の書き込み」の着地を待つ', async () => {
     let land = (): void => { /* 着地させる前は何もしない */ };
-    const off = onProjectDeleted(() => new Promise<void>((resolve) => { land = (): void => resolve(); }));
+    const off = onProjectDeleted(() => ({ pending: new Promise<void>((resolve) => { land = (): void => resolve(); }) }));
     try {
       let done = false;
       const emitting = emitProjectDeleted('proj_20260101_001').then(() => { done = true; });
@@ -27,17 +27,18 @@ describe('emitProjectDeleted（消える前に全員が手放し、書き込み�
   it('何も返さない受け手は待たない（待つものが無ければすぐ戻る）', async () => {
     const off = onProjectDeleted(() => { /* 同期で片づけるだけ */ });
     try {
-      await expect(emitProjectDeleted('proj_20260101_001')).resolves.toBeUndefined();
+      // 戻り値は「消せなかったときに元へ戻す手」＝待つものが無くても必ず返る。
+      await expect(emitProjectDeleted('proj_20260101_001')).resolves.toBeInstanceOf(Function);
     } finally {
       off();
     }
   });
 
   it('**失敗した書き込みも待つ**（着地したことだけが要る＝消す側を止めない）', async () => {
-    const off = onProjectDeleted(() => Promise.reject(new Error('書けなかった')));
+    const off = onProjectDeleted(() => ({ pending: Promise.reject(new Error('書けなかった')) }));
     try {
       // 失敗を投げ返すと消す側が止まり、**消せないまま壊れた動画が一覧に残る**。
-      await expect(emitProjectDeleted('proj_20260101_001')).resolves.toBeUndefined();
+      await expect(emitProjectDeleted('proj_20260101_001')).resolves.toBeInstanceOf(Function);
     } finally {
       off();
     }
@@ -57,7 +58,7 @@ describe('emitProjectDeleted（消える前に全員が手放し、書き込み�
 
   it('複数の受け手の着地を**すべて**待つ（片方だけ待って消さない）', async () => {
     const lands: (() => void)[] = [];
-    const make = () => onProjectDeleted(() => new Promise<void>((resolve) => { lands.push((): void => resolve()); }));
+    const make = () => onProjectDeleted(() => ({ pending: new Promise<void>((resolve) => { lands.push((): void => resolve()); }) }));
     const offs = [make(), make()];
     try {
       let done = false;

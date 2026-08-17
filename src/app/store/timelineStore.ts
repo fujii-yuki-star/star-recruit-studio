@@ -16,6 +16,7 @@ import { listProjectSummaries, loadProjectDoc, saveProjectDoc } from "../../infr
 import { createProjectId } from "../../domain/project/persistence";
 import { useProjectStore } from "./projectStore";
 import { onProjectDeleted } from "./projectDeletion";
+import type { DeletionHandoff } from "./projectDeletion";
 import { createEmptyTimelineProject } from "../../domain/timeline/create";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -242,7 +243,7 @@ export interface TimelineState {
    * 消された動画を手放す。**進行中の書き込みがあればその約束を返す**（#763-4）＝消す側が
    * 着地を待てるようにする（手放しても、すでに発行済みの書き込みは止まらない）。
    */
-  discardDeletedProject: (projectId: string) => void | Promise<void>;
+  discardDeletedProject: (projectId: string) => DeletionHandoff;
   setPlayhead: (sec: number) => void;
   selectClip: (clipId: string, additive?: boolean) => void;
   /** まとめて選ぶ（`Ctrl+A` の全選択など）。存在しない id は落とす＝消えたものを選んだままにしない。 */
@@ -495,12 +496,34 @@ function releaseSaveGuard(): void {
 }
 
 /**
- * **最後に発行した書き込み**（#763-4）。⚠️ `currentSave`（並走を防ぐ見張り）とは別に持つ＝あちらは
- * 文書を切り替えるたびに手放す（`releaseSaveGuard`）ので、**手放した後も走り続けている書き込み**を
- * 誰も待てなくなる。消すときは「その動画の書き込みが着地したか」だけが要るので、こちらは
- * **手放しでは消さず**、書き終わったときにだけ落とす。
+ * **飛んでいる書き込み**（動画ごと・#763-4）。⚠️ `currentSave`（並走を防ぐ見張り）とは別に持つ＝
+ * あちらは文書を切り替えるたびに手放す（`releaseSaveGuard`）ので、**手放した後も走り続けている
+ * 書き込み**を誰も待てなくなる。消すときは「その動画の書き込みが着地したか」だけが要る。
+ *
+ * ⚠️ **1件だけ覚える形にしない**（#763-4 レビュー）＝この形式は文書を切り替えると**新しい書き込みを
+ * すぐ許す**（見張りを外すため）ので、**2つの動画の書き込みが同時に飛びうる**。1件だけだと
+ * 「A が飛んでいる最中に B の保存が始まる」で A を見失い、A を消すときに待てない
+ *（場面形式は `saveInFlight` が完全に直列なのでこの非対称が無い）。
  */
-let lastWrite: { projectId: string; promise: Promise<void> } | null = null;
+const inFlightWrites = new Map<string, Set<Promise<void>>>();
+
+/** 書き込みを「飛んでいる」に入れ、着地したら（成否を問わず）外す。 */
+function trackWrite(projectId: string, promise: Promise<void>): void {
+  const flying = inFlightWrites.get(projectId) ?? new Set<Promise<void>>();
+  flying.add(promise);
+  inFlightWrites.set(projectId, flying);
+  void promise.then(
+    () => { flying.delete(promise); if (flying.size === 0) inFlightWrites.delete(projectId); },
+    () => { flying.delete(promise); if (flying.size === 0) inFlightWrites.delete(projectId); },
+  );
+}
+
+/** その動画へ飛んでいる書き込みの**すべて**の着地（無ければ `undefined`）。 */
+function writesFor(projectId: string): Promise<void> | undefined {
+  const flying = inFlightWrites.get(projectId);
+  if (!flying || flying.size === 0) return undefined;
+  return Promise.all([...flying]).then(() => undefined);
+}
 
 /**
  * 開いていない状態（閉じる・開き直しの初期値）。**毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、
@@ -645,12 +668,15 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // ⚠️ **`currentSave` を見てはいけない**＝`releaseSaveGuard()` がそれを捨てるので、手放した後に
     // 読むと必ず空になる（待ちが丸ごと空振りする）。**いま開いていない動画の書き込み**（別の動画へ
     // 移った後も走っている）も待てるよう、手放しで消えない `lastWrite` を見る。
-    const running = lastWrite?.projectId === projectId ? lastWrite.promise : undefined;
-    if (get().doc?.projectId !== projectId) return running; // 開いてはいないが、書き込みは待たせる
+    const pending = writesFor(projectId);
+    if (get().doc?.projectId !== projectId) return { pending }; // 開いてはいないが、書き込みは待たせる
     releaseSaveGuard();
     set({ ...emptyState(), exportRun: get().exportRun });
     // 文書はもう手放しているので、この保存は最後の `set` を `stillOpen` で見送る（#693）。
-    return running;
+    // ⚠️ **戻す手も返す**（#763-4 レビュー🔴）＝消す前に手放すので、**消せなかったとき**に戻せないと、
+    // 一覧には動画が残るのにこの画面だけ空になる（場面形式では開き直しているのに、こちらだけ
+    // 取り残されていた＝同じ症状の片側だけ直した形）。
+    return { pending, restore: () => get().openTimelineProject(projectId) };
   },
 
   closeTimelineProject: () => {
@@ -1114,10 +1140,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         // 無条件に外すとその保存が「走っていない」ことにされ、次の依頼が**並走**する（＝上書きで
         // 変更が巻き戻る・このPRが潰したはずの事故が同じ動画の中で再発する）。
         if (currentSave === run) currentSave = null;
-        if (lastWrite?.promise === run.promise) lastWrite = null; // 自分の控えのときだけ落とす
       }
     })();
-    if (writingId) lastWrite = { projectId: writingId, promise: run.promise };
+    if (writingId) trackWrite(writingId, run.promise);
     return run.promise;
   },
 

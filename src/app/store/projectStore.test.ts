@@ -611,7 +611,7 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     // タイムライン形式の store も同じ動画を持ちうる（`discardDeletedProject` が受け手）。
     // 受け手が「もう書かない」になっても、発行済みの書き込みは走っているので待つ必要がある。
     let land = (): void => { /* 着地させる前は何もしない */ };
-    const off = onProjectDeleted(() => new Promise<void>((resolve) => { land = (): void => resolve(); }));
+    const off = onProjectDeleted(() => ({ pending: new Promise<void>((resolve) => { land = (): void => resolve(); }) }));
     const order: string[] = [];
     const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => { order.push('delete'); });
     let deleting: Promise<void> | undefined;

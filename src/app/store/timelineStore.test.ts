@@ -344,15 +344,21 @@ describe('自動保存（編集した内容が消えない）', () => {
   });
 
   it('別の動画を開いたら見張りを手放す（前の保存が返らなくても新しい動画は保存できる）', async () => {
-    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>(() => {})); // 返らない
+    // ⚠️ **返らない書き込みは、テストの最後に必ず着地させる**（#763-4 レビュー）＝飛んでいる書き込みは
+    // 動画ごとに覚えていて（`inFlightWrites`・消すときに待つため）、永久に返らないものを残すと
+    // **後のテストがその動画を消せずに固まる**（実際に固まった）。「返らない」のは検査したい間だけでよい。
+    let land = (): void => { /* 着地させる前は何もしない */ };
+    vi.mocked(fsMod.saveProjectDoc).mockImplementation(() => new Promise<string>((resolve) => { land = (): void => { resolve('path'); }; }));
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);
-    void useTimelineStore.getState().saveTimelineProject();
+    const stuck = useTimelineStore.getState().saveTimelineProject();
     vi.mocked(fsMod.loadProjectDoc).mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_002' })));
     await useTimelineStore.getState().openTimelineProject('proj_20260728_002');
     vi.mocked(fsMod.saveProjectDoc).mockResolvedValue('path');
     useTimelineStore.getState().addTrack(TRACK_KIND.audio);
     await useTimelineStore.getState().saveTimelineProject();
     expect(useTimelineStore.getState().saveStatus).toBe('saved');
+    land();
+    await stuck; // 飛ばしっぱなしにしない
   });
 
   it('前の動画の保存が終わっても、いま走っている保存の見張りを外さない（同じ動画で並走させない）', async () => {
@@ -985,7 +991,7 @@ describe('消した動画を手放す（#755）', () => {
       saving = useTimelineStore.getState().saveTimelineProject(); // 書き込みを飛ばしたまま
       await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
 
-      const pending = useTimelineStore.getState().discardDeletedProject(one().projectId);
+      const { pending } = useTimelineStore.getState().discardDeletedProject(one().projectId);
       expect(pending).toBeInstanceOf(Promise); // ⚠️ ここが undefined だと待ちが空振りする
 
       let landed = false;
@@ -1021,7 +1027,7 @@ describe('消した動画を手放す（#755）', () => {
       // ⚠️ `setState` で文書だけ差し替えると手放しの道を通らず、この検査が空振りする。
       useTimelineStore.getState().closeTimelineProject();
 
-      const pending = useTimelineStore.getState().discardDeletedProject(a.projectId);
+      const { pending } = useTimelineStore.getState().discardDeletedProject(a.projectId);
       expect(pending).toBeInstanceOf(Promise); // 開いていなくても待たせる
       land();
       await saving;
@@ -1029,6 +1035,60 @@ describe('消した動画を手放す（#755）', () => {
     } finally {
       land();
       await Promise.allSettled([saving]);
+      save.mockRestore();
+    }
+  });
+
+  // #763-4 レビュー🔴：**消せなかったら、こちらも開き直す**。`deleteProject` は両形式の共通の入口だが、
+  // 開き直しは場面形式の判定（`meta.projectId`）でしか動いておらず、**タイムライン形式を消し損ねた
+  // ときだけ空のまま**残っていた（一覧には動画が残るのに画面だけ空＝場面形式で直したのと同じ症状）。
+  it('**消せなかったら開き直す**（一覧に残っているのに画面だけ空、を作らない・#763-4）', async () => {
+    const target = 'proj_20260728_777';
+    const mine = doc({ projectId: target });
+    useTimelineStore.setState({ doc: mine });
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockRejectedValue(new Error('消せなかった'));
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(mine));
+    try {
+      await expect(useProjectStore.getState().deleteProject(target)).rejects.toThrow();
+      // 消す最中は手放している（着地が保存してフォルダを作り直さない）が、失敗したので戻す。
+      await vi.waitFor(() => expect(useTimelineStore.getState().doc?.projectId).toBe(target));
+      expect(load).toHaveBeenCalledWith(target);
+    } finally {
+      del.mockRestore(); load.mockRestore();
+    }
+  });
+
+  // #763-4 レビュー🟡：飛んでいる書き込みは**動画ごと**に覚える。1件だけ覚える形だと、
+  // A が飛んでいる最中に B の保存が始まった時点で A を見失い、A を消すときに待てない
+  //（この形式は文書を切り替えると新しい書き込みをすぐ許すので、2つが同時に飛びうる）。
+  it('**2つの動画の書き込みが同時に飛んでいても**、消す相手のものを待つ', async () => {
+    const landers: Array<() => void> = [];
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockImplementation(
+      () => new Promise<string>((resolve) => { landers.push(() => { resolve('path'); }); }),
+    );
+    const a = doc({ projectId: 'proj_20260728_801' });
+    let saveA: Promise<void> | undefined;
+    let saveB: Promise<void> | undefined;
+    try {
+      useTimelineStore.setState({ doc: a });
+      saveA = useTimelineStore.getState().saveTimelineProject(); // A の書き込みが飛ぶ
+      await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+
+      // B へ移って B の保存も始める＝**1件だけ覚える形だとここで A を見失う**。
+      const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260728_802' })));
+      await useTimelineStore.getState().openTimelineProject('proj_20260728_802');
+      load.mockRestore();
+      useTimelineStore.getState().addTrack(TRACK_KIND.audio);
+      saveB = useTimelineStore.getState().saveTimelineProject();
+      await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+
+      const { pending } = useTimelineStore.getState().discardDeletedProject('proj_20260728_801');
+      expect(pending).toBeInstanceOf(Promise); // A の書き込みを待たせる
+      landers.forEach((l) => l());
+      await pending;
+    } finally {
+      landers.forEach((l) => l());
+      await Promise.allSettled([saveA, saveB]);
       save.mockRestore();
     }
   });

@@ -924,15 +924,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ⚠️ **手放すだけでは足りない**（#763-4）＝「これ以上書かない」にはできるが、**すでに発行済みの
     // 書き込み**はバックエンドで走っており、消した**後**に着地しうる。自分と受け手の**進行中の
     // 書き込みが着地するまで待ってから**消す。失敗した書き込みも待つ（着地したことだけが要る）。
-    await emitProjectDeleted(projectId);
+    const restoreOthers = await emitProjectDeleted(projectId);
     await saveInFlight?.catch(() => { /* 着地したことだけが要る（結果は問わない） */ });
     // ⚠️ **消せなかったら開き直す**（#763-4 レビュー）＝手放しを削除の前へ動かした結果、失敗すると
     // 一覧には動画が残るのに編集画面だけ空になる（利用者から見ると作業が消えたように見える）。
     // 最後に保存した状態へ戻す＝空の画面に置き去りにしない。理由は呼び出し側（一覧）が出す。
+    //
+    // ⚠️ **戻すのは自分の店だけではない**（#763-4 レビュー🔴）＝`deleteProject` は**両方の形式の
+    // 共通の入口**なので、`hadOpen`（場面形式の判定）だけ見ると、**タイムライン形式を消し損ねた
+    // ときにあちらが空のまま**残る。手放した受け手それぞれが自分で戻す（`restoreOthers`）
+    // ＝ここから相手の store を直接触らない（輪を作らない・`projectDeletion.ts` の理由）。
     try {
       await deleteProjectDoc(projectId);
     } catch (e) {
       if (hadOpen) await get().loadProject(projectId);
+      await restoreOthers();
       throw e;
     }
     // 削除したのが最後に開いたプロジェクトなら、次回起動の自動復元対象から外す（消えたものを開こうとしない）。
