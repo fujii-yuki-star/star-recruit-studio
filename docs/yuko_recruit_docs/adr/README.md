@@ -24,12 +24,12 @@
 | [0015](0015-dialogue-timeline-model.md) | 掛け合い＝場面のセリフ列（ミニタイムライン）モデル | **Accepted** |
 | [0016](0016-detailed-editing-completion-roadmap.md) | 詳細編集の完全化（ロードマップ／アンブレラ・α-3〜） | **Proposed** |
 | [0017](0017-template-authoring-editor.md) | テンプレ作成・編集エディタ（ユーザーテンプレート） | **Accepted** |
-| [0018](0018-cross-scene-timeline-model.md) | 場面横断タイムライン／複数トラックのモデル（③・2モデル方式・α-4 実装中） | **Accepted** |
+| [0018](0018-cross-scene-timeline-model.md) | 場面横断タイムライン／複数トラックのモデル（③・2モデル方式）＝**残るのは読み取り射影のみ** | **一部 Superseded by 0032**（2026-08-17） |
 | [0019](0019-keyframe-animation-model.md) | キーフレーム／場面内アニメ（④・per-frame・FREE要素＋グループ・実装時に ADR-0001 を部分 supersede） | **Accepted** |
 | [0020](0020-undo-redo-model.md) | 取り消し/やり直し（Undo/Redo）モデル | **Accepted** |
 | [0021](0021-template-owned-assets.md) | テンプレ既定素材（template-owned default assets・場面素材優先のフォールバック） | **Accepted** |
 | [0022](0022-element-grouping.md) | 要素のグループ化（groups＋独自transform・FREE/テンプレ両エディタ） | **Accepted** |
-| [0023](0023-integrated-timeline-editing.md) | 統合タイムライン編集（再生ヘッド＋同期プレビュー・上位仕上げ編集面・α-5 主軸） | **Proposed** |
+| [0023](0023-integrated-timeline-editing.md) | 統合タイムライン編集（再生ヘッド＋同期プレビュー）＝**この姿では実装しない**（α-5 は別形式で作り直した） | **一部 Superseded by 0032**（2026-08-17） |
 | [0024](0024-non-destructive-editing-model.md) | 非破壊編集モデル（Asset＝源泉／使用単位＝非破壊の範囲参照・解析キャッシュ・VoiceClip 方向） | **Proposed** |
 | [0025](0025-credit-display-modes.md) | クレジット表示方式（常時/最初/最後/両方/非表示・既定=最初と最後・About 必須維持・α-6） | **Accepted**（0003 を一部 supersede） |
 | [0026](0026-alpha4-behavior-consistency.md) | α-4 挙動一致の原則（設定どおり・経路間統一・プレビュー=書き出し。間×遷移=切替尺優先／複数動画スロット／動画実再生／collapse撤去／分割失敗の表面化／動画×アニメ解除） | **Accepted**（0006 の2枚固定を一部改め・0019 の動画スロット除外を解除方向） |
@@ -38,7 +38,7 @@
 | [0029](0029-free-subtitle-multi-and-binding.md) | FREE 字幕要素＝複数配置＋対象（読み上げ／話者）への紐づけ（#518 再スコープ・単一制約は固めない・0.4.2） | **Accepted**（PR-A+B 済＝#521・PR-C 済＝UI・(2b) は α-5） |
 | [0030](0030-normal-free-switch-migration.md) | 通常↔FREE 切替の非破壊コンテンツ移送（通常→FREE は `freeLayout` へ seed／FREE→通常は休眠保持＋**出なくなる中身があれば確認**・precheck を category ゲート・#524 P1/P2／#547 P2-9 で確認条件を改定） | **Accepted** |
 | [0031](0031-simultaneous-dual-voice.md) | 同時2ボイス（並行音声・α-4 最小形＝同時開始＋amix＋字幕2行・0.4.2・`startWithPrevious` フラグ・N人） | **Accepted** |
-| [0032](0032-timeline-project-format.md) | タイムライン編集を「別プロジェクト形式」として新設（場面形式から片道で焼き出し・AI は上流のみ・時間軸ネイティブ・トラック自由・テンプレは素材）＝ADR-0018/0023 を一部 supersede | **Proposed**（α-5 再定義・実装は承認後） |
+| [0032](0032-timeline-project-format.md) | タイムライン編集を「別プロジェクト形式」として新設（場面形式から片道で焼き出し・AI は上流のみ・時間軸ネイティブ・トラック自由・テンプレは素材）＝ADR-0018/0023 を一部 supersede | **Accepted**（2026-08-17・実装完了後の追認＝#627〜#635 land 済み） |
 | [0033](0033-editor-panel-layout.md) | 編集画面のパネル配置を利用者が変えられるようにする（ドッキング方式＝欄の移動＋境界のドラッグでサイズ変更・**画面ごとに1つ**記憶（動画ごとには持たない）・**プロジェクトの schema には入れない**・まずタイムライン編集へ適用／#276・#550 の再発を受けて） | **Accepted**（2026-08-03・段階1〜4 実装済み） |
 | [0034](0034-timeline-interaction-model.md) | タイムライン編集の操作モデル（置く・動かす・掴む＝他社の型にそろえる／ドラッグ＋ボタンの二重導線／キャンバスは掴んで動かす＋数値／帯はドラッグとトリム／テンプレの中はドリルイン＋明示バラし／言葉は一般語） | **Accepted**（2026-08-04・利用者承認・実装は #697 の順＝段階0 から） |
 
