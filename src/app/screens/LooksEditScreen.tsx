@@ -33,7 +33,7 @@ import { Switch } from "../components/ui";
 import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { UnsavedMark } from "../components/SaveStatusBadge";
-import { UndoRedoButtons } from "../components/UndoRedoButtons";
+import { EDITOR_HEADER_CLASS, EditorToolbar } from "../components/EditorToolbar";
 import { ArrowLeftIcon } from "../components/icons";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { FIT_FIELD_LABEL, fitLabel, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
@@ -707,22 +707,27 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   return (
     <div className="main-scroll">
       <ExportLockBanner onNavigate={onNavigate} />
-      {/* ヘッダ：戻る・タイトル・保存（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ） */}
-      <div className="row-between" style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
-        <div className="row gap-sm" style={{ alignItems: "center" }}>
-          <button className="btn btn-ghost btn-icon" disabled={busyAction !== null} onClick={onBack}><ArrowLeftIcon size={16} />一覧へ戻る</button>
-          <span className="topbar-title">見た目パターンを編集</span>
-        </div>
-        <div className="row gap-sm" style={{ alignItems: "center" }}>
-          {/* 取り消す/やり直す（#547 P2-3）。見た目・語彙は共有コンポーネントで他画面と一致（ADR-0026②）。
-              対象は**この画面の下書き**＝保存前の編集だけを戻す（store の履歴には触れない・#547 P1-1）。
-              保存/削除の実行中は他の操作と揃えて止める。 */}
-          <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undoDraft} onRedo={redoDraft} disabled={busyAction !== null} />
-          {dirty && <UnsavedMark />}
-          <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
-            {busyAction === "save" ? "保存中…" : "保存"}
-          </button>
-        </div>
+      {/* ヘッダ：タイトル・共通ツールバー（共通トップバーは App.tsx で非表示にしている＝保存ボタンの混同を防ぐ）。
+          ⚠️ **取り消す／保存の状態／戻るは3画面で同じ場所**（#774）＝この画面は元からここに在ったので、
+          他の2画面をここへそろえた形。 */}
+      {/* 見出しの目印（`page-head`）は3画面で同じ＝共通ツールバーの居場所が「見出しの行」だと
+          コードからも読める（#774）。余白は元の見た目を保つため据え置き。
+          ⚠️ `EDITOR_HEADER_CLASS` で**貼り付ける**＝この見出しはスクロールする側（`.main-scroll`）の
+          中にあるので、印が無いと下へスクロールした時点でツールバーごと消える。 */}
+      <div className={`row-between page-head ${EDITOR_HEADER_CLASS}`} style={{ alignItems: "center", marginBottom: "var(--gap)" }}>
+        <span className="topbar-title">見た目パターンを編集</span>
+        <EditorToolbar
+          // 対象は**この画面の下書き**＝保存前の編集だけを戻す（store の履歴には触れない・#547 P1-1）。
+          // 保存/削除の実行中は他の操作と揃えて止める。
+          undo={{ canUndo, canRedo, onUndo: undoDraft, onRedo: redoDraft, disabled: busyAction !== null }}
+          status={dirty ? <UnsavedMark /> : null}
+          extra={(
+            <button className="btn btn-primary" disabled={!dirty || busyAction !== null || isExporting} onClick={() => void onSave()}>
+              {busyAction === "save" ? "保存中…" : "保存"}
+            </button>
+          )}
+          back={{ label: <><ArrowLeftIcon size={16} />一覧へ戻る</>, onClick: onBack, disabled: busyAction !== null }}
+        />
       </div>
 
       {confirmDiscard && (

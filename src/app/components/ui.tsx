@@ -1,14 +1,21 @@
 import type { ReactNode } from "react";
+import { EDITOR_HEADER_CLASS } from "./EditorToolbar";
 
 interface PageHeadProps {
   title: string;
   desc?: string;
   actions?: ReactNode;
+  /**
+   * 見出しの行を**貼り付ける**（スクロールしても消えない）。
+   * 共通ツールバー（#774）を載せる画面だけ立てる＝下へスクロールした時点で
+   * 取り消す・保存の状態・戻るが視界から出るなら、置き場を移した意味がない。
+   */
+  sticky?: boolean;
 }
 
-export function PageHead({ title, desc, actions }: PageHeadProps) {
+export function PageHead({ title, desc, actions, sticky = false }: PageHeadProps) {
   return (
-    <div className="row-between page-head">
+    <div className={sticky ? `row-between page-head ${EDITOR_HEADER_CLASS}` : "row-between page-head"}>
       <div>
         <h1 className="page-title text-balance">{title}</h1>
         {desc && <p className="page-desc text-pretty">{desc}</p>}
