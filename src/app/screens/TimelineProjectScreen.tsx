@@ -55,7 +55,7 @@ import { layoutToSvg } from "../../renderer/sceneSvg";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
-import { UndoRedoButtons } from "../components/UndoRedoButtons";
+import { EditorToolbar } from "../components/EditorToolbar";
 import { isTargetLocked } from "../../domain/timeline/keyframeEdit";
 import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -3410,7 +3410,31 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     <div className="main-scroll">
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
           編集しているか」なので残す。 */}
-      <PageHead title={doc.projectName} />
+      <PageHead
+        title={doc.projectName}
+        actions={(
+          <EditorToolbar
+            undo={{ canUndo: history.past.length > 0, canRedo: history.future.length > 0, onUndo: undo, onRedo: redo, disabled: exporting }}
+            status={saveStatus === "error" ? (
+              // 失敗は**いつも見える所**で知らせ、その場に次の行動を置く（`15 §6` TIMELINE_SAVE_FAILED）。
+              <span className="row gap-sm" role="alert" style={{ alignItems: "center" }}>
+                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{TIMELINE_SAVE_FAILED_MESSAGE}</span>
+                <button className="btn btn-secondary btn-sm" onClick={() => void saveTimelineProject()}>保存し直す</button>
+              </span>
+            ) : (
+              // 保存できたことも控えめに出す（「勝手に保存されている」を信じられるようにする）。
+              <span className="text-sm text-muted" role="status">{timelineSaveStatusLabel(saveStatus)}</span>
+            )}
+            back={{
+              // 書き出し中に別の動画へ移ると、描いている途中の素材や音が入れ替わる（混ざった動画が出る）。
+              label: <><ArrowLeftIcon size={16} />{leaving ? "保存しています…" : "動画の一覧へ"}</>,
+              onClick: () => void leaveToHome(),
+              disabled: exporting || leaving,
+              title: exporting ? "書き出しが終わってから戻れます" : undefined,
+            }}
+          />
+        )}
+      />
 
       {exploding && (
         <DeleteConfirm
@@ -3555,18 +3579,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
       {/*
         自動保存の結果を**この画面が**出す（#693）。共通トップバーの保存ボタンは出さない決定（ADR-0032）なので、
-        ここが唯一の担い手＝黙って落とすと「閉じても消えない」（`06 §12.1`）が破れる。**恒常の警告と同じ段**
-        （欄の下）に置く＝編集の場所を上から圧迫しない。
+        ここが唯一の担い手＝黙って落とすと「閉じても消えない」（`06 §12.1`）が破れる。
+        ⚠️ **置き場は見出しの横（共通ツールバー）へ移した**（#774）＝欄の下だと、欄が画面の高さを超えたとき
+        **スクロールしないと見えない**＝失敗したまま気づけない。同じものを2か所に置かない（`06 §2` 統一規約5）。
       */}
-      {saveStatus === "error" ? (
-        <div className="notice notice-warn row gap-sm" role="alert">
-          <span>{TIMELINE_SAVE_FAILED_MESSAGE}</span>
-          <button className="btn btn-secondary" onClick={() => void saveTimelineProject()}>保存し直す</button>
-        </div>
-      ) : (
-        // 保存できたことも控えめに出す（「勝手に保存されている」を信じられるようにする）。
-        <p className="text-muted" role="status">{timelineSaveStatusLabel(saveStatus)}</p>
-      )}
 
       <div className="row gap-sm mt-lg">
         {/* 閉じた欄は**必ず戻せる**・配置は**いつでも既定に戻せる**（ADR-0033 決定6/8＝戻れない状態を作らない）。 */}
@@ -3576,30 +3592,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </button>
         ))}
         <button className="btn btn-ghost" onClick={resetLayout}>配置を既定に戻す</button>
-      </div>
-
-      <div className="row gap-sm mt-lg">
-        <UndoRedoButtons
-          canUndo={history.past.length > 0}
-          canRedo={history.future.length > 0}
-          onUndo={undo}
-          onRedo={redo}
-          disabled={exporting}
-        />
-      </div>
-
-      <div className="row gap-sm mt-lg">
-        {/* 書き出し中に別の動画へ移ると、描いている途中の素材や音が入れ替わる（混ざった動画が出る）。 */}
-        <button
-          className="btn btn-ghost btn-icon"
-          onClick={() => void leaveToHome()}
-          disabled={exporting || leaving}
-          title={exporting ? "書き出しが終わってから戻れます" : undefined}
-        >
-          <ArrowLeftIcon size={16} />
-          {/* 実行中はラベルを変えて押せなくする（`06 §2` の統一規約4）。 */}
-          {leaving ? "保存しています…" : "動画の一覧へ"}
-        </button>
       </div>
 
       {trackMenu && menuTrack && (

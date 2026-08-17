@@ -26,7 +26,7 @@ import type { ElementAnimation } from "../../domain/project/types";
 import { createGroupFromSelection, groupElementIds, removeGroupWithMembers, removeMembersFromGroups, reorderGroupZ, toggleGroupFlag, topGroupOfMember, ungroupGroup, updateGroupMeta, updateGroupTransform } from "../../domain/project/groupOps";
 import { BulkVoiceControls } from "../components/BulkVoiceControls";
 import { GroupList } from "../components/GroupList";
-import { UndoRedoButtons } from "../components/UndoRedoButtons";
+import { EditorToolbar } from "../components/EditorToolbar";
 import { GroupTransformFields } from "../components/GroupTransformFields";
 import type { GroupTransform } from "../../domain/group/types";
 import { addFreeComponentAsGroup, FREE_COMPONENTS } from "../../domain/project/freeComponents";
@@ -1606,17 +1606,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     ) },
     { id: PANEL_ID.edit, title: '選択中の場面を編集', content: (
       <>
-            <div className="row-between" style={{ alignItems: "center" }}>
-              {/* 見出しは欄の側（`PanelSpec.title`）が出すので、両端に寄せるための片方を空けておく
-                  ＝`space-between` は子が2つ揃って初めて右へ寄る（ほかの2つの欄と同じ手当て）。 */}
-              <span />
-              {/* 取り消し/やり直し（#211・ADR-0020）。Ctrl/⌘+Z・Ctrl+Y でも操作可。 */}
-              <div className="row gap-sm">
-                {/* 書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも disabled にして誤認を防ぐ（ADR-0026④・#547 P3-12）。 */}
-                <UndoRedoButtons canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo} disabled={isExporting} />
-              </div>
-            </div>
-
             {/* FREE 場面は文字を「自由配置」で置くため、ここのテキスト欄は出さない（§2-4）。 */}
             {/* 非FREEのテキスト欄は、選択テンプレが実際に使うテキスト種別だけ生成する（#214 ④b）。 */}
             {/* 文字レイヤーを持たないテンプレ（画像・動画中心など）では欄ゼロになるため、その旨を明示する（ℹ️ PR#235）。 */}
@@ -2664,9 +2653,6 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               </button>
             )}
 
-            <div className="mt" style={{ textAlign: "center" }}>
-              <SaveStatusBadge />
-            </div>
             <button
               className="btn btn-primary btn-block"
               onClick={() => void saveProject()}
@@ -2694,10 +2680,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           {/* 進捗・作成・中止は共通操作（3画面で同じ見え方・同じ挙動＝#547 P2-6・ADR-0026②）。
               以前はここだけ「準備中…」と表示していた。 */}
           <BulkVoiceControls buttonClassName="btn btn-ghost" />
-          <button className="btn btn-ghost btn-icon" onClick={() => onNavigate("draft")}>
-            <ArrowLeftIcon size={16} />
-            台本表へ戻る
-          </button>
+          {/* ⚠️ **取り消す／保存の状態／戻るは3画面で同じ場所**（#774）＝以前は取り消すが「編集」の欄の中、
+              保存の状態が別の欄の下にあり、**欄を閉じたり配置を変えると見えなくなった**（ADR-0033 で
+              配置を動かせるようにしたので、欄の中に置くほど見失いやすい）。
+              書き出し中は store の undo/redo が無言 no-op（#379）＝ボタンも押せなくして誤認を防ぐ
+              （ADR-0026④・#547 P3-12）。 */}
+          <EditorToolbar
+            undo={{ canUndo, canRedo, onUndo: undo, onRedo: redo, disabled: isExporting }}
+            status={<SaveStatusBadge />}
+            back={{ label: <><ArrowLeftIcon size={16} />台本表へ戻る</>, onClick: () => onNavigate("draft") }}
+          />
           {/* 仕上がり確認から「場面編集へ戻る」で“いま編集中の場面”に戻れるよう、現在の場面を editingSceneId に
               預けてから遷移する（#410 sub3 レビュー）。これが無いと再マウントで先頭場面に戻り作業位置を失う。 */}
           <button className="btn btn-primary" onClick={() => { setEditingSceneId(selected?.sceneId ?? null); setPreviewReturnTo("scene-edit"); onNavigate("preview"); }}>
