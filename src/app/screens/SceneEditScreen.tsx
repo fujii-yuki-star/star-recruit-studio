@@ -48,6 +48,7 @@ import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
 import { hasSimultaneousLines, motionSubtitleAt } from "../../domain/project/lineTimeline";
 import { useDragReorder } from "../hooks/useDragReorder";
+import { isPointerDragging } from "../hooks/usePointerDrag";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { AssetImportButton } from "../components/AssetImportButton";
@@ -362,9 +363,12 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   }, [status, autoGenerateIfSafe]);
 
   // Escape で kind 別エディタのポップオーバーを閉じる。
+  // ⚠️ **掴んでいる間は閉じない**（#714-4 レビュー）＝`Escape` は**手前のものから1段ずつはがす**
+  // （`06 §12.1`）。並べ替えも `Escape` でやめられるようになったので、見ないと**運ぶのをやめただけで
+  // 打ちかけの欄まで畳まれる**（1回のキーで2段はがれる）。
   useEffect(() => {
     if (!editPopover) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setEditPopover(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !isPointerDragging()) setEditPopover(null); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [editPopover]);

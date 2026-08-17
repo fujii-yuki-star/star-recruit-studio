@@ -31,6 +31,23 @@ export function pointerDownAt(el: Element, timeStamp: number, init: PointerInit 
 }
 
 /**
+ * 掴んだまま動かす（落とし先の要素の上で）。
+ *
+ * ⚠️ **`buttons: 1` を必ず載せる**＝実際に押している間の `pointermove` は 1。0 のままだと共通の作法
+ * （`usePointerDrag`）が「どこかで離したのを取り逃がした」と見なして**やめてしまう**（#714-4）。
+ * ⚠️ **`pointerId` を押したときと合わせる**＝合わないと「別の指」として無視される。
+ * ⚠️ 押した位置から**しきい値（`DRAG_START_PX`）より遠くへ**動かすこと＝近いと「まだ掴んでいない」。
+ */
+export function dragOver(el: Element, point: { clientX: number; clientY: number }, pointerId = 1): void {
+  fireEvent.pointerMove(el, { pointerId, buttons: 1, ...point });
+}
+
+/** 掴んだ指で離す（`pointerId` を合わせないと「別の指」と見なされて確定しない）。 */
+export function dragEnd(pointerId = 1): void {
+  fireEvent.pointerUp(window, { pointerId });
+}
+
+/**
  * 二度押し（インライン編集・グループのドリルイン）。**2回の押下を同じ時刻で送る**ので、
  * 間の再描画がどれだけ遅くても二度押しとして扱われる。
  */
