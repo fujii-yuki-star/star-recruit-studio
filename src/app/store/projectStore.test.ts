@@ -650,6 +650,47 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     }
   });
 
+  // #763-4 再レビュー🟡：待ちを意図的に長くしたので、その間に別の動画を開ける。捕まえた時点の id で
+  // 無条件に開き直すと、**いま開いている方を黙って上書き**する（未保存の編集が消える・§2-5）。
+  it('待っている間に別の動画を開かれていたら、開き直さない（開いている方を上書きしない）', async () => {
+    const other = assembleProject(
+      { ...useProjectStore.getState().meta, projectId: 'proj_other' },
+      [], useProjectStore.getState().parts, useProjectStore.getState().scenes,
+    );
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(other));
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => {
+      // 消している最中に別の動画を開く（手放した後の窓）。
+      await useProjectStore.getState().loadProject('proj_other');
+      throw new Error('消せなかった');
+    });
+    try {
+      await expect(useProjectStore.getState().deleteProject('proj_open')).rejects.toThrow();
+      // 開いた方（proj_other）が残る＝消した方で上書きしない。
+      expect(useProjectStore.getState().meta.projectId).toBe('proj_other');
+      expect(load).not.toHaveBeenCalledWith('proj_open');
+    } finally {
+      del.mockRestore(); load.mockRestore();
+    }
+  });
+
+  // 同上。**新しく作り始めていた**ときも上書きしない（新規は projectId が空のままなので、
+  // id だけでは「手放したまま」と見分けられない＝作業中の内容も見る）。
+  it('待っている間に新しく作り始めていたら、開き直さない', async () => {
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue('{}');
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => {
+      // 手放した後の空の新規に、場面を作り始めた状態（projectId は空のまま）。
+      useProjectStore.setState({ scenes: [{ sceneId: 'scene_001' } as never] });
+      throw new Error('消せなかった');
+    });
+    try {
+      await expect(useProjectStore.getState().deleteProject('proj_open')).rejects.toThrow();
+      expect(load).not.toHaveBeenCalled(); // 作りかけを消した動画で上書きしない
+      expect(useProjectStore.getState().scenes).toHaveLength(1);
+    } finally {
+      del.mockRestore(); load.mockRestore();
+    }
+  });
+
   it('開いていない別プロジェクトの削除では編集状態を触らない（#383）', async () => {
     const delSpy = vi.spyOn(fsMod, 'deleteProjectDoc').mockResolvedValue();
     await useProjectStore.getState().deleteProject('proj_other'); // 開いているのは proj_open

@@ -1058,6 +1058,29 @@ describe('消した動画を手放す（#755）', () => {
     }
   });
 
+  // #763-4 再レビュー🟡：**待っている間に別の動画を開かれていたら戻さない**。この待ちは意図的に
+  // 長くしたので、その間に一覧から別の動画を開ける＝無条件に開き直すと**いま開いている方を黙って
+  // 上書き**する（未保存の編集が消える・§2-5）。
+  it('待っている間に別の動画を開かれていたら、開き直さない（開いている方を上書きしない）', async () => {
+    const target = 'proj_20260728_778';
+    const other = doc({ projectId: 'proj_20260728_779' });
+    useTimelineStore.setState({ doc: doc({ projectId: target }) });
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => {
+      // 消している最中に別の動画を開く（手放した後の窓）。
+      useTimelineStore.setState({ doc: other });
+      throw new Error('消せなかった');
+    });
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({ projectId: target })));
+    try {
+      await expect(useProjectStore.getState().deleteProject(target)).rejects.toThrow();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(useTimelineStore.getState().doc?.projectId).toBe('proj_20260728_779'); // 開いた方が残る
+      expect(load).not.toHaveBeenCalledWith(target); // 消した方を開き直さない
+    } finally {
+      del.mockRestore(); load.mockRestore();
+    }
+  });
+
   // #763-4 レビュー🟡：飛んでいる書き込みは**動画ごと**に覚える。1件だけ覚える形だと、
   // A が飛んでいる最中に B の保存が始まった時点で A を見失い、A を消すときに待てない
   //（この形式は文書を切り替えると新しい書き込みをすぐ許すので、2つが同時に飛びうる）。

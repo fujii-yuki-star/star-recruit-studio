@@ -667,7 +667,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     //
     // ⚠️ **`currentSave` を見てはいけない**＝`releaseSaveGuard()` がそれを捨てるので、手放した後に
     // 読むと必ず空になる（待ちが丸ごと空振りする）。**いま開いていない動画の書き込み**（別の動画へ
-    // 移った後も走っている）も待てるよう、手放しで消えない `lastWrite` を見る。
+    // 移った後も走っている）も待てるよう、手放しで消えない `inFlightWrites`（`writesFor`）を見る。
     const pending = writesFor(projectId);
     if (get().doc?.projectId !== projectId) return { pending }; // 開いてはいないが、書き込みは待たせる
     releaseSaveGuard();
@@ -676,7 +676,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // ⚠️ **戻す手も返す**（#763-4 レビュー🔴）＝消す前に手放すので、**消せなかったとき**に戻せないと、
     // 一覧には動画が残るのにこの画面だけ空になる（場面形式では開き直しているのに、こちらだけ
     // 取り残されていた＝同じ症状の片側だけ直した形）。
-    return { pending, restore: () => get().openTimelineProject(projectId) };
+    return {
+      pending,
+      // ⚠️ **待っている間に別の動画を開かれていたら戻さない**（#763-4 レビュー）＝消す側の待ちは
+      // このPRで意図的に長くしたので、その間に別の動画を開ける。無条件に開き直すと、
+      // **いま開いている方を黙って上書きする**（§2-5）。手放したまま（空）のときだけ戻す。
+      restore: () => (get().doc == null ? get().openTimelineProject(projectId) : undefined),
+    };
   },
 
   closeTimelineProject: () => {

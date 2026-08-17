@@ -24,6 +24,7 @@ import { duplicateSceneInList, moveSceneInList, moveSceneToIndexInList, splitSce
 import { substituteDeletedTemplateInScenes } from "../../domain/project/templateUsage";
 import { duplicateSceneAnimations, removeAnimationsForScene, removeAnimationsForTargets, retargetAnimations } from "../../domain/project/animationOps";
 import { recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
+import { hasWorkInProgress } from "../hooks/newProjectGuard";
 import { changeScenesOrientation } from "../../domain/project/orientationOps";
 import { MockAiProvider } from "../../infrastructure/aiProviders/mockAiProvider";
 import { GeminiProvider } from "../../infrastructure/aiProviders/geminiProvider";
@@ -937,7 +938,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       await deleteProjectDoc(projectId);
     } catch (e) {
-      if (hadOpen) await get().loadProject(projectId);
+      // ⚠️ **待っている間に別の動画を開かれていたら戻さない**（#763-4 レビュー）＝この待ちは
+      // このPRで**意図的に長くした**ので、その間に一覧から別の動画を開ける。捕まえた時点の id で
+      // 無条件に開き直すと、**いま開いている方を黙って上書きする**（§2-5）。手放したときのまま
+      //（空の新規で、作業中の内容も無い）ときだけ戻す。
+      const now = get();
+      const untouched = now.meta.projectId === "" && !hasWorkInProgress(now.scenes.length, now.assets, now.meta);
+      if (hadOpen && untouched) await get().loadProject(projectId);
       await restoreOthers();
       throw e;
     }
