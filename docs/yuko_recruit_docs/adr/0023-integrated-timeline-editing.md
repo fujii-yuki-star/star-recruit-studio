@@ -7,7 +7,7 @@
   > **実施済み（2026-08-17）**。⚠️ **「再生しながら編集」は本形式では採らない**＝編集・取り消しで再生を止める
   > （再生位置を使う操作の結果が毎回変わるため・ADR-0032 追補）。時刻解決の純粋関数はタイムライン側へ流用済み。
 - **日付**: 2026-07-02
-- **関連**: [`adr/0024`](0024-non-destructive-editing-model.md)（非破壊編集モデル＝Asset/使用単位・素材解析キャッシュ・将来の VoiceClip 方向）/ [`adr/0015`](0015-dialogue-timeline-model.md)（`scene.lines`＝簡易編集の正準・本ADRは射影＋導線で接続）/ [`adr/0018`](0018-cross-scene-timeline-model.md)（2モデル方式・`compileTimeline`・`timelineOverlay`＝本ADRの土台）/ [`adr/0019`](0019-keyframe-animation-model.md)（④ per-frame・`layoutScene(t)`・**未解決2＝プレビューのパリティ戦略を本ADRが方向づけ**）/ [`adr/0001`](0001-rendering-parity.md)（パリティ）/ [`adr/0004`](0004-rasterization-method.md)（ラスタライズ）/ `CLAUDE.md §2-4`（時間軸編集は専用画面に隔離）・`§10`（本格タイムライン編集の段階解除）/ α-5 issues #257（ダッキング）・#258（SE配置）・#259（ノーマライズ）＝本EPICの部品/兄弟
+- **関連**: [`adr/0024`](0024-non-destructive-editing-model.md)（非破壊編集モデル＝Asset/使用単位・素材解析キャッシュ・将来の VoiceClip 方向）/ [`adr/0015`](0015-dialogue-timeline-model.md)（`scene.lines`＝簡易編集の正準・本ADRは射影＋導線で接続）/ [`adr/0018`](0018-cross-scene-timeline-model.md)（2モデル方式・`compileTimeline`・`timelineOverlay`＝本ADRの土台）/ [`adr/0019`](0019-keyframe-animation-model.md)（④ per-frame・`layoutScene(t)`・**未解決2＝プレビューのパリティ戦略を本ADRが方向づけ**）/ [`adr/0001`](0001-rendering-parity.md)（パリティ）/ [`adr/0004`](0004-rasterization-method.md)（ラスタライズ）/ `CLAUDE.md §2-4`（テンプレ駆動＝**場面形式に限る**。時間軸を編集するならタイムライン形式へ焼き出す＝2026-08-17 改訂）・`§10`（本格タイムライン編集の段階解除）/ α-5 issues #257（ダッキング）・#258（SE配置）・#259（ノーマライズ）＝本EPICの部品/兄弟
 
 ---
 
