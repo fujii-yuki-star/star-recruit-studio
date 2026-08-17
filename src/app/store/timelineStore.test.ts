@@ -970,6 +970,61 @@ describe('消した動画を手放す（#755）', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  // #763-4 レビュー🔴：**手放す前に掴む**。`releaseSaveGuard()` が見張り（`currentSave`）を捨てるので、
+  // 手放した後に読むと必ず空になり、**消す側の待ちが丸ごと空振り**していた（＝この修正の意味が消える）。
+  it('**飛行中の書き込みの約束を返す**（消す側が着地を待てる・#763-4）', async () => {
+    let land = (): void => { /* 着地させる前は何もしない */ };
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockImplementation(
+      () => new Promise<string>((resolve) => { land = (): void => { resolve('x/project.json'); }; }),
+    );
+    try {
+      useTimelineStore.setState({ doc: one(), selectedClipIds: [] });
+      const saving = useTimelineStore.getState().saveTimelineProject(); // 書き込みを飛ばしたまま
+      await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+
+      const pending = useTimelineStore.getState().discardDeletedProject(one().projectId);
+      expect(pending).toBeInstanceOf(Promise); // ⚠️ ここが undefined だと待ちが空振りする
+
+      let landed = false;
+      void pending!.then(() => { landed = true; });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(landed).toBe(false); // まだ着地していない＝この間に消してはいけない
+
+      land();
+      await saving;
+      await pending;
+      expect(landed).toBe(true);
+    } finally {
+      land(); save.mockRestore();
+    }
+  });
+
+  // #763-4 レビュー🟡：**別の動画へ移った後も走っている書き込み**も待てないと、同じ復活が起きる。
+  it('開いていない動画でも、その書き込みが飛んでいれば約束を返す', async () => {
+    let land = (): void => { /* 同上 */ };
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockImplementation(
+      () => new Promise<string>((resolve) => { land = (): void => { resolve('x/project.json'); }; }),
+    );
+    try {
+      const a = one();
+      useTimelineStore.setState({ doc: a, selectedClipIds: [] });
+      const saving = useTimelineStore.getState().saveTimelineProject(); // A への書き込みが飛ぶ
+      await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+
+      // 別の動画へ移る＝**実際に見張りを手放す道を通す**（`closeTimelineProject` が `releaseSaveGuard`）。
+      // ⚠️ `setState` で文書だけ差し替えると手放しの道を通らず、この検査が空振りする。
+      useTimelineStore.getState().closeTimelineProject();
+
+      const pending = useTimelineStore.getState().discardDeletedProject(a.projectId);
+      expect(pending).toBeInstanceOf(Promise); // 開いていなくても待たせる
+      land();
+      await saving;
+      await pending;
+    } finally {
+      land(); save.mockRestore();
+    }
+  });
+
   it('別の動画を消しただけなら触らない', () => {
     const d = one();
     useTimelineStore.setState({ doc: d, selectedClipIds: ['clip_001'] });

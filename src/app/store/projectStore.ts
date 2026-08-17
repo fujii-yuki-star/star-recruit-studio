@@ -912,18 +912,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 書き出し中に当該（開いている）プロジェクトを消すと、素材ファイルが読取り中に消えて
     // 写真の抜けた MP4 が正常完了してしまう（#379）。開いていない別プロジェクトの削除は安全なので許可。
     if (isExportBusy(get().exportRun.phase) && get().meta.projectId === projectId) return;
-    // ⚠️ **消す前に知らせる**（#755 の `/canon-check`）。消し終わってから知らせると、
+    // ⚠️ **消す前に、まず全員が手放す**（#755 の `/canon-check`）。消し終わってから知らせると、
     // **削除している最中**に非同期の着地（声の完成・素材の取り込み）が保存でき、
     // `save_project` がフォルダごと作り直して**素材と声だけ消えた動画が一覧へ戻る**。
-    // 消せなかったときは開き直してもらう（壊れた動画を一覧に残すより軽い）。
-    emitProjectDeleted(projectId);
-    await deleteProjectDoc(projectId);
+    //
+    // ⚠️ **自分の店も、消す前に手放す**（#763-4）＝以前は `newProject()` が削除の**後**だったので、
+    // 削除している最中の自動保存（`useAutoSave`）が同じ projectId を書き戻せた。開いていない動画の
+    // 削除では何も起きない（`newProject` は開いているときだけ）。
+    const hadOpen = get().meta.projectId === projectId;
+    if (hadOpen) get().newProject();
+    // ⚠️ **手放すだけでは足りない**（#763-4）＝「これ以上書かない」にはできるが、**すでに発行済みの
+    // 書き込み**はバックエンドで走っており、消した**後**に着地しうる。自分と受け手の**進行中の
+    // 書き込みが着地するまで待ってから**消す。失敗した書き込みも待つ（着地したことだけが要る）。
+    await emitProjectDeleted(projectId);
+    await saveInFlight?.catch(() => { /* 着地したことだけが要る（結果は問わない） */ });
+    // ⚠️ **消せなかったら開き直す**（#763-4 レビュー）＝手放しを削除の前へ動かした結果、失敗すると
+    // 一覧には動画が残るのに編集画面だけ空になる（利用者から見ると作業が消えたように見える）。
+    // 最後に保存した状態へ戻す＝空の画面に置き去りにしない。理由は呼び出し側（一覧）が出す。
+    try {
+      await deleteProjectDoc(projectId);
+    } catch (e) {
+      if (hadOpen) await get().loadProject(projectId);
+      throw e;
+    }
     // 削除したのが最後に開いたプロジェクトなら、次回起動の自動復元対象から外す（消えたものを開こうとしない）。
     if (getLastProjectId() === projectId) clearLastProjectId();
-    // 開いているプロジェクトを消したら編集状態も新規化する（#383）。そのままだと自動保存（useAutoSave）が
-    // 同じ projectId を書き戻し、「元に戻せません」の説明に反して一覧へ復活してしまう。書き出し中は上でブロック済み。
-    if (get().meta.projectId === projectId) get().newProject();
-
   },
   estimateBake: async (range) => {
     const { doc, notes } = get()._bake(range, get().meta.projectName);

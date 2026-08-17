@@ -238,7 +238,11 @@ export interface TimelineState {
   openTimelineProject: (projectId: string) => Promise<void>;
   closeTimelineProject: () => void;
   /** 消された動画を手放す（#755）＝以後どこからも書かない。走行中の印は残す。 */
-  discardDeletedProject: (projectId: string) => void;
+  /**
+   * 消された動画を手放す。**進行中の書き込みがあればその約束を返す**（#763-4）＝消す側が
+   * 着地を待てるようにする（手放しても、すでに発行済みの書き込みは止まらない）。
+   */
+  discardDeletedProject: (projectId: string) => void | Promise<void>;
   setPlayhead: (sec: number) => void;
   selectClip: (clipId: string, additive?: boolean) => void;
   /** まとめて選ぶ（`Ctrl+A` の全選択など）。存在しない id は落とす＝消えたものを選んだままにしない。 */
@@ -491,6 +495,14 @@ function releaseSaveGuard(): void {
 }
 
 /**
+ * **最後に発行した書き込み**（#763-4）。⚠️ `currentSave`（並走を防ぐ見張り）とは別に持つ＝あちらは
+ * 文書を切り替えるたびに手放す（`releaseSaveGuard`）ので、**手放した後も走り続けている書き込み**を
+ * 誰も待てなくなる。消すときは「その動画の書き込みが着地したか」だけが要るので、こちらは
+ * **手放しでは消さず**、書き終わったときにだけ落とす。
+ */
+let lastWrite: { projectId: string; promise: Promise<void> } | null = null;
+
+/**
  * 開いていない状態（閉じる・開き直しの初期値）。**毎回新しい実体を返す**＝配列/オブジェクトを使い回すと、
  * 将来その場書き換えが入ったときに別の文書へ選択が漏れる（構造で防ぐ）。
  */
@@ -626,9 +638,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
    * 二重に始められる。書き出しの入力は始めた時点で退避済みなので、文書を手放しても走り切る。
    */
   discardDeletedProject: (projectId) => {
-    if (get().doc?.projectId !== projectId) return; // 別の動画を消しただけ＝触らない
+    // ⚠️ **手放しても、すでに発行済みの書き込みは止まらない**（#763-4）＝その動画への書き込みが
+    // 走っていれば約束を返し、消す側に着地まで待たせる。待たないと、消した**後**に `save_project` が
+    // 着地して**フォルダごと作り直し**、素材と声だけ消えた動画が一覧へ戻る。
+    //
+    // ⚠️ **`currentSave` を見てはいけない**＝`releaseSaveGuard()` がそれを捨てるので、手放した後に
+    // 読むと必ず空になる（待ちが丸ごと空振りする）。**いま開いていない動画の書き込み**（別の動画へ
+    // 移った後も走っている）も待てるよう、手放しで消えない `lastWrite` を見る。
+    const running = lastWrite?.projectId === projectId ? lastWrite.promise : undefined;
+    if (get().doc?.projectId !== projectId) return running; // 開いてはいないが、書き込みは待たせる
     releaseSaveGuard();
     set({ ...emptyState(), exportRun: get().exportRun });
+    // 文書はもう手放しているので、この保存は最後の `set` を `stillOpen` で見送る（#693）。
+    return running;
   },
 
   closeTimelineProject: () => {
@@ -1077,6 +1099,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 約束を入れる器を先に作る＝下の処理から**自分の回**を指せる（走っている途中で置き換わらない）。
     const run: SaveRun = { promise: Promise.resolve(), again: false };
     currentSave = run;
+    // どの動画への書き込みかを控える（消すときに着地を待たせる・#763-4）。
+    // ⚠️ ループの途中で文書が入れ替わると書く相手は変わるが、**待つ側に要るのは「着地したか」だけ**
+    // なので安全側（待ちすぎることはあっても、待たなさすぎることはない）。
+    const writingId = get().doc?.projectId ?? null;
     run.promise = (async () => {
       try {
         do {
@@ -1088,8 +1114,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         // 無条件に外すとその保存が「走っていない」ことにされ、次の依頼が**並走**する（＝上書きで
         // 変更が巻き戻る・このPRが潰したはずの事故が同じ動画の中で再発する）。
         if (currentSave === run) currentSave = null;
+        if (lastWrite?.promise === run.promise) lastWrite = null; // 自分の控えのときだけ落とす
       }
     })();
+    if (writingId) lastWrite = { projectId: writingId, promise: run.promise };
     return run.promise;
   },
 

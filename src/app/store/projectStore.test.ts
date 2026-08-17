@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isExportBusy, useProjectStore } from './projectStore';
+import { onProjectDeleted } from './projectDeletion';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import * as userTemplateFsMod from '../../infrastructure/userTemplateFs';
@@ -566,6 +567,79 @@ describe('projectStore 書き出し中の破壊操作ガード（#379）', () =>
     expect(useProjectStore.getState().meta.projectId).toBe('');
     expect(useProjectStore.getState().scenes).toHaveLength(0);
     delSpy.mockRestore();
+  });
+
+  // #763-4：**発行済みの書き込みが着地するまで消さない**。手放す（`newProject`）だけでは
+  // 「これ以上書かない」にしかならず、**すでに走っている保存**は消した後に着地しうる＝
+  // `save_project` がフォルダごと作り直して**素材と声だけ消えた動画が一覧へ戻る**。
+  it('飛行中の保存が着地してから消す（消した後に書き戻されない・#763-4）', async () => {
+    let landSave = (): void => { /* 同上 */ };
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockImplementation(
+      () => new Promise<string>((resolve) => { landSave = (): void => { resolve('x/project.json'); }; }),
+    );
+    const order: string[] = [];
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => { order.push('delete'); });
+
+    try {
+      // 保存を1件「飛ばしたまま」にする（着地はこちらで決める）。
+      // ⚠️ `_doSave` は書き込みの前に素材の収集などで何度か待つので、**実際に書き始めるまで**待つ。
+      const saving = useProjectStore.getState().saveProject();
+      await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+
+      const deleting = useProjectStore.getState().deleteProject('proj_open');
+      await new Promise((r) => setTimeout(r, 0));
+      expect(order).toEqual([]); // ⚠️ まだ消していない＝書き込みの着地を待っている
+
+      order.push('save-landed');
+      landSave();
+      await deleting;
+      await saving;
+
+      expect(order).toEqual(['save-landed', 'delete']); // 書き込みが着地してから消す
+    } finally {
+      landSave(); // 落ちても約束を残さない（次のテストを止めない）
+      save.mockRestore(); del.mockRestore();
+    }
+  });
+
+  it('**受け手**の飛行中の書き込みが着地してから消す（別 store の保存に轢かれない・#763-4）', async () => {
+    // タイムライン形式の store も同じ動画を持ちうる（`discardDeletedProject` が受け手）。
+    // 受け手が「もう書かない」になっても、発行済みの書き込みは走っているので待つ必要がある。
+    let land = (): void => { /* 着地させる前は何もしない */ };
+    const off = onProjectDeleted(() => new Promise<void>((resolve) => { land = (): void => resolve(); }));
+    const order: string[] = [];
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockImplementation(async () => { order.push('delete'); });
+    try {
+      const deleting = useProjectStore.getState().deleteProject('proj_other'); // 開いていない＝自分の保存は絡まない
+      await new Promise((r) => setTimeout(r, 0));
+      expect(order).toEqual([]); // ⚠️ 受け手の着地を待っている
+
+      order.push('listener-landed');
+      land();
+      await deleting;
+      expect(order).toEqual(['listener-landed', 'delete']);
+    } finally {
+      land(); off(); del.mockRestore();
+    }
+  });
+
+  // #763-4 レビュー🟡：手放しを削除の**前**へ動かした副作用。失敗すると一覧には動画が残るのに
+  // 編集画面だけ空＝利用者から見ると作業が消えたように見える。開き直して空の画面に置き去りにしない。
+  it('消せなかったら開き直す（一覧に残っているのに編集画面が空、を作らない・#763-4）', async () => {
+    // 開き直しの中身は読込側の担当なので、ここで見るのは**開き直しに行くこと**だけ。
+    const before = useProjectStore.getState();
+    const del = vi.spyOn(fsMod, 'deleteProjectDoc').mockRejectedValue(new Error('消せなかった'));
+    const load = vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(
+      JSON.stringify(assembleProject(before.meta, [], before.parts, before.scenes)),
+    );
+    try {
+      await expect(useProjectStore.getState().deleteProject('proj_open')).rejects.toThrow();
+      // 消せなかった＝開き直しに行く（空の画面に置き去りにしない）。失敗はそのまま投げ返す
+      // ＝一覧が理由を出す担い手なので、ここで握りつぶさない。
+      expect(load).toHaveBeenCalledWith('proj_open');
+    } finally {
+      del.mockRestore(); load.mockRestore();
+    }
   });
 
   it('開いていない別プロジェクトの削除では編集状態を触らない（#383）', async () => {

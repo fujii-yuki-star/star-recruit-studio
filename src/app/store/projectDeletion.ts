@@ -10,7 +10,12 @@
 // 消えているので、開いても壊れている）。場面形式は同じ事故（#383）を `deleteProject` の中で
 // 塞いでいるが、別 store には届かない。
 
-type Listener = (projectId: string) => void;
+/**
+ * 受け手。**進行中の書き込みがあれば、その約束を返す**（#763-4）＝知らせた時点で
+ * 「これ以上書かない」にはできるが、**すでに発行済みの書き込み**は止められないので、
+ * 消す側がそれを待てるようにする。待つものが無ければ何も返さなくてよい。
+ */
+type Listener = (projectId: string) => void | Promise<void>;
 
 const listeners = new Set<Listener>();
 
@@ -21,16 +26,25 @@ export function onProjectDeleted(fn: Listener): () => void {
 }
 
 /**
- * 消えたことを知らせる。⚠️ **消す前に**呼ぶ（`/canon-check`）＝消している最中に非同期の着地が
- * 保存すると、**素材と声だけ消えた動画が一覧へ戻る**。受け手は「もう無いもの」として片づける。
+ * 消えたことを知らせ、**受け手の進行中の書き込みが着地するまで待つ**。
+ *
+ * ⚠️ **消す前に呼ぶ**（`/canon-check`）＝消している最中に非同期の着地が保存すると、
+ * **素材と声だけ消えた動画が一覧へ戻る**（`save_project` がフォルダごと作り直すため）。
+ * ⚠️ **知らせるだけでは足りない**（#763-4）＝受け手が「もう書かない」状態になっても、
+ * **すでに発行済みの書き込み**はバックエンドで走っており、消した**後**に着地しうる。
+ * だから受け手の約束を集めて待つ。**失敗した書き込みも待つ対象**（着地したかどうかだけが要る）。
+ *
  * 受け手が投げても他の受け手へ伝える＝1つの失敗で残りが片づかない、を作らない。
  */
-export function emitProjectDeleted(projectId: string): void {
+export async function emitProjectDeleted(projectId: string): Promise<void> {
+  const landing: Promise<void>[] = [];
   for (const fn of [...listeners]) {
     try {
-      fn(projectId);
+      const pending = fn(projectId);
+      if (pending) landing.push(pending.catch(() => { /* 着地したことだけが要る */ }));
     } catch {
       /* 受け手の都合で他を止めない */
     }
   }
+  await Promise.all(landing);
 }
