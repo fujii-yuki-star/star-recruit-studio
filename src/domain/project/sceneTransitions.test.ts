@@ -202,6 +202,39 @@ describe('swallowedByTransitionSceneNumbers（切り替えに飲み込まれる�
     expect(swallowedByTransitionSceneNumbers([sc(0.2), sc(5)])).toEqual([]); // 先頭が短くても飲まれない
     expect(swallowedByTransitionSceneNumbers([sc(8), sc(0.2, { in: 'none', out: 'none', durationSec: 0.5 })])).toEqual([]);
   });
+
+  // ⚠️ #740：覆われる側は「自分の入場」だけではない。**次の場面の入場**にも潰される。
+  // 以前は「自分の入場 ≥ 自分の尺」しか見ておらず、この形は**どの警告も知らせなかった**
+  //（`shortenedTransitionSceneNumbers` も希望どおり取れているので黙る）。
+  it('次の場面の入場に潰される場面も知らせる（自分は切り替えを持たない・#740）', () => {
+    // 尺 [5, 4, 6]・3番目に 5 秒のフェード＝場面2（4秒）は丸ごと覆われる（ADR-0009 の例そのもの）。
+    const scenes = [sc(5), sc(4), sc(6, { in: 'fade', out: 'fade', durationSec: 5 })];
+    expect(swallowedByTransitionSceneNumbers(scenes)).toEqual([2]);
+    // ⚠️ **出力は変えていない**＝片側だけの場面に上限を効かせない carve-out（#727・ADR-0009）はそのまま。
+    // 左の clamp は「それまでの結合結果」（9秒）に効くので、希望の 5 秒がそのまま採られる
+    // ＝**場面2は1フレームも残らず丸ごと消える**（だからこそ黙っていてはいけない）。
+    expect(transitionTimeline([5, 4, 6], [0, 0, 5]).steps[1].durationSec).toBeCloseTo(5, 6);
+  });
+
+  // ⚠️ **両側に切り替えがある場面は「飲み込まれる」ではない**＝予算（#727）が必ず1フレーム残すので、
+  // 担当は `shortenedTransitionSceneNumbers`（「短くしています」）。希望の合計だけで数えると、
+  // この場面まで「飲み込まれる」に化けて #727 の警告が消える（実際に一度そうしてしまった）。
+  it('両側に切り替えがある場面は予算が救うので、こちらでは知らせない（#727 の担当）', () => {
+    const scenes = [
+      sc(5),
+      sc(1, { in: 'fade', out: 'fade', durationSec: 0.6 }),
+      sc(5, { in: 'fade', out: 'fade', durationSec: 0.6 }),
+    ];
+    expect(swallowedByTransitionSceneNumbers(scenes)).toEqual([]);
+    expect(shortenedTransitionSceneNumbers(scenes)).toContain(2); // そちらが知らせる
+    // 実際に1フレームは残る（丸ごと消えてはいない）。
+    const { steps } = transitionTimeline([5, 1, 5], [0, 0.6, 0.6]);
+    expect(1 - steps[0].durationSec - steps[1].durationSec).toBeGreaterThan(0);
+  });
+
+  it('次の場面の切り替えが短ければ知らせない（ノイズを出さない）', () => {
+    expect(swallowedByTransitionSceneNumbers([sc(5), sc(4), sc(6, { in: 'fade', out: 'fade', durationSec: 0.5 })])).toEqual([]);
+  });
 });
 
 // 入場と退場が時間で重ならない（#727）。片方ずつの上限しか見ていなかったので、

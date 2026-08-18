@@ -117,14 +117,33 @@ export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number):
  * 下限撤廃で「0.3秒の場面＋フェード」が普通に作れるようになったため到達性が上がった。
  *
  * 判定は書き出し（buildExportScenes）と同じ `resolveTransition` 由来の want と場面尺の比較＝経路を共有する。
+ *
+ * ⚠️ **覆われる側は「自分の入場」だけではない**（#740）＝**次の場面の入場**にも潰される。
+ * 例＝尺 `[5, 4, 6]` の3番目に 5 秒のフェードを付けると、場面2（4秒）は**自分の切り替えを持たない**まま
+ * 丸ごと覆われるが、以前は「自分の入場 ≥ 自分の尺」しか見ておらず**何も知らせなかった**
+ *（`shortenedTransitionSceneNumbers` も、希望どおりの長さが取れているので黙る）。
+ * 片側だけの場面に上限を効かせない carve-out（#727）は ADR-0009 の意図どおり**そのまま**なので、
+ * **出力は変えず**、残る重なりを知らせるだけにする（§2-5・ADR-0026④）。
+ * ⚠️ 見るのは**適用後の `d` ではなく希望（want）**＝既存の判定と同じ材料で揃える。
+ * 自分の入場で覆われる場合、適用後は strict clamp で必ず1フレーム残るので `d ≥ 尺` は決して立たない
+ *（それでも実質見えない）。次の場面の入場で覆われる場合は、左の clamp が「それまでの結合結果」に効くので
+ * **1フレームも残らず丸ごと消える**（`[5,4,6]` の場面2）＝どちらも知らせる必要がある。
  */
 export function swallowedByTransitionSceneNumbers(scenes: Scene[]): number[] {
+  const ds = transitionBoundaryDs(scenes);
+  const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), ds);
   const nums: number[] = [];
   scenes.forEach((s, i) => {
-    if (i === 0) return; // 先頭に入場の切り替えは無い（boundaryDs[0]=0）
-    const r = resolveTransition(s.transition);
-    if (r.type === TRANSITION_TYPE.none || r.durationSec <= 0) return;
-    if (r.durationSec >= s.durationSec) nums.push(i + 1); // 切り替えが場面尺以上＝丸ごと飲まれる
+    // ① **自分の入場が自分の尺を覆う意図**（従来の判定）＝適用後は strict clamp で1フレーム残るが実質見えない。
+    const ownWant = i === 0 ? 0 : (ds[i] ?? 0);
+    if (ownWant > 0 && ownWant >= s.durationSec) { nums.push(i + 1); return; }
+    // ② **実際に何も残らない**＝次の場面の入場に潰される形（#740）。左の clamp は「それまでの結合結果」に
+    // 効くので、**自分より長い切り替え**が通ってしまい1フレームも残らない（`[5,4,6]` の場面2）。
+    // ⚠️ ①と分けるのは、**両側に切り替えがある場面は予算（#727）が救う**から＝そちらは必ず1フレーム残り、
+    // 「短くしています」（`shortenedTransitionSceneNumbers`）の担当になる。希望の合計だけで数えると
+    // その場面まで「飲み込まれる」に化け、#727 の警告が消える。
+    const remaining = s.durationSec - (steps[i - 1]?.durationSec ?? 0) - (steps[i]?.durationSec ?? 0);
+    if (remaining <= 0) nums.push(i + 1);
   });
   return nums;
 }
