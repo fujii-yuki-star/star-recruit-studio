@@ -87,3 +87,11 @@ export function usesArrowKeys(target: EventTarget | null): boolean {
 export function shouldIgnoreShortcut(e: KeyboardEvent): boolean {
   return isTextEntryTarget(e.target) || isImeComposing(e);
 }
+
+/**
+ * 矢印キーの連打を**1回の取り消し**へ畳むときの、手が止まったとみなす間合い（ミリ秒）。
+ *
+ * ⚠️ **画面ごとに持たない**（#788 レビュー）＝タイムライン編集と見た目パターン編集で間合いが違うと、
+ * 「押しっぱなしのあと何回戻るか」が画面で変わる（ADR-0026②）。決定20＝押し続けても取り消しは1回ぶん。
+ */
+export const NUDGE_GROUP_IDLE_MS = 600;

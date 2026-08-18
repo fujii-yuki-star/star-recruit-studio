@@ -25,7 +25,7 @@ import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../..
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
-import { activatesOnSpace, shouldIgnoreShortcut, usesArrowKeys } from "../hooks/keyboardShortcut";
+import { activatesOnSpace, NUDGE_GROUP_IDLE_MS, shouldIgnoreShortcut, usesArrowKeys } from "../hooks/keyboardShortcut";
 import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
@@ -105,7 +105,7 @@ const PANEL_ID = {
 } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
-import { LEAVE_BLOCKED_EXPORTING_MESSAGE, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
@@ -145,7 +145,7 @@ const NUDGE_SEC = 0.5;
 const NUDGE_BOX_PX = 1;
 const NUDGE_BOX_FAST_PX = 10;
 /** 矢印で動かす手が止まったとみなすまで（ms）。ここを過ぎたら取り消しのまとめを閉じる。 */
-const NUDGE_GROUP_IDLE_MS = 600;
+
 
 /** 1秒あたりの表示幅（px）と、レーンの最小幅。読み取り専用タイムラインと同じ見え方に寄せる。 */
 const MIN_LANE_WIDTH_PX = 640;
@@ -519,10 +519,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const [lockedSkipNotice, setLockedSkipNotice] = useState<string | null>(null);
   const noticedForRef = useRef<string | null>(null);
-  const noticeLockedSkip = useCallback((count: number, key: string): void => {
-    if (noticedForRef.current === key) return;
+  /**
+   * 一緒に動かさなかったものを**理由別に**知らせる（#788-1）。
+   *
+   * ⚠️ 以前は数だけ受け取り、常に「固定された列の部品N個は…**固定を外してください**」と出していた。
+   * ところがキャンバスで掴めない理由は**固定した列だけではない**（動きが効いている／まとまりの変形も
+   * 掴ませない＝#746-4）ので、動き起因のときは**従っても直らない案内**になっていた。
+   * 単体選択のときは既に理由別に出していたので、その規準へ揃える（言い方は `canvasHoldMessage` に1か所）。
+   */
+  const noticeSkipped = useCallback((reasons: readonly CanvasHoldReason[], key: string): void => {
+    if (reasons.length === 0 || noticedForRef.current === key) return;
     noticedForRef.current = key;
-    setLockedSkipNotice(`固定された列の部品${count}個は動かしていません。動かすには固定を外してください`);
+    // 理由が混ざることもある（固定した列の部品と、動きの効いた部品を一緒に選んだ）。
+    // **数えた理由をすべて出す**＝1つにまとめると、残りの部品が動かない訳が分からない。
+    const order: CanvasHoldReason[] = ["track", "animation", "group"];
+    const counts = new Map<CanvasHoldReason, number>();
+    for (const r of reasons) counts.set(r, (counts.get(r) ?? 0) + 1);
+    setLockedSkipNotice(order.filter((r) => counts.has(r)).map((r) => canvasHoldMessage(r, counts.get(r))).join(" "));
   }, []);
   const lastSelectedKey = useRef(selectedKey);
   useEffect(() => {
@@ -1155,7 +1168,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     nudgeBoxRef.current =
       doc && nudgeTargets.length > 0
         ? (dx, dy, fast) => {
-            if (nudgeSkipped > 0) noticeLockedSkip(nudgeSkipped, [...selectedClipIds].sort().join(","));
+            // 矢印は**列の固定しか見ない**（`grabbableClip`）ので、除外の理由は必ず「固定した列」。
+            if (nudgeSkipped > 0) noticeSkipped(Array<CanvasHoldReason>(nudgeSkipped).fill("track"), [...selectedClipIds].sort().join(","));
             const dims = dimsForOrientation(doc.videoSettings.aspectRatio);
             const step = fast ? NUDGE_BOX_FAST_PX : NUDGE_BOX_PX;
             // ⚠️ **押し続けても取り消しは1回ぶん**（決定20・掴んで動かすのと同じ）。畳まないと、
@@ -1403,6 +1417,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     if (boxDiffers(cc.groupedBox, cc.finalBox)) return "animation";
     if (boxDiffers(cc.box, cc.groupedBox)) return "group";
     return null;
+  };
+  /**
+   * 一緒に動かさなかった部品の**理由**（#788-1）。キャンバスの `locked` を立てているのと**同じ材料**を
+   * 見る＝判定を書き写さない（片方だけ直る割れを作らない）。
+   *
+   * ⚠️ **列の固定を先に見る**（レビュー指摘）＝固定した列の上に動きの効いた部品があると、両方が理由に
+   * なりうる。動きを先に見ると「下の数値（または矢印キー）で…」と案内するが、**その部品は数値の欄が
+   * 固定で押せず、矢印も列の固定で外れる**＝示した行き先が2つとも塞がっている。固定を先に言えば
+   * 「固定を外してください」＝実際に効く1手になる（§2-5）。
+   * 見つからない部品も列の固定で外れたものとして扱う（`grabbableClip` と同じ既定）。
+   */
+  const skippedReasonOf = (id: string): CanvasHoldReason => {
+    const cc = canvasClips.find((x) => x.clip.id === id);
+    if (!cc || trackOf(cc.clip.trackId)?.locked) return "track";
+    return canvasHoldReason(cc) ?? "track";
   };
   /** 選んでいる部品をキャンバスで掴めない理由（出す先＝「位置・大きさ」の欄）。 */
   const selectedOnCanvas = canvasClips.find((cc) => cc.clip.id === selected?.id);
@@ -1975,7 +2004,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               // **1回のドラッグ＝1回の取り消し**（決定20）。動かすたびに履歴を積まない。
               onInteractionStart={beginHistoryGroup}
               onInteractionEnd={endHistoryGroup}
-              onSkippedLocked={(count) => noticeLockedSkip(count, [...selectedClipIds].sort().join(","))}
+              onSkippedLocked={(ids) => noticeSkipped(ids.map(skippedReasonOf), [...selectedClipIds].sort().join(","))}
               // ⚠️ **右クリックで黙らない**（#746-1）＝帯には「複製／削除」があるのに、
               // キャンバスだけ何も出ないと**同じ操作が場所によって在ったり無かったり**になる。
               // 関門も文言も帯と同じもの（決定17 が禁じるのは「前へ／奥へ」だけ＝そちらは渡さない）。
@@ -2418,9 +2447,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     ＝理由だけ出して行き止まりにしない（決定5）。 */}
                 {selectedHoldReason && (
                   <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-                    {selectedHoldReason === "animation"
-                      ? "いまは動きが効いているので、仕上がり確認の上では動かせません。下の数値で変えるか、「動き」で調整してください。"
-                      : "まとまりの変形が効いているので、仕上がり確認の上では動かせません。下の数値で変えてください。"}
+                    {/* ⚠️ 言い方は**まとめて動かしたときと同じ関数**から採る（#788-1）＝2か所に持つと片方だけ直る。 */}
+                    {canvasHoldMessage(selectedHoldReason)}
                     {selected.kind === TIMELINE_CLIP_KIND.text ? "（文言は「中身」で直せます）" : ""}
                   </p>
                 )}

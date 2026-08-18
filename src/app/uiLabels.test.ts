@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
-import { DELETE_LABEL, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage } from "./uiLabels";
+import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -236,6 +236,39 @@ describe('editBlockedMessage（置けなかった理由の案内）', () => {
 // ⚠️ この漏れは目視レビューで繰り返し見つかっている。文言を1つ直すだけでは次が漏れるので、
 // **一覧をまとめて走査する**。ここに載っている表は、そのまま画面に出る（断りのバナー・
 // ボタンの理由・焼き出しの注意）。
+describe("canvasHoldMessage（キャンバスで掴めない理由・#788-1）", () => {
+  // ⚠️ **単体とまとめてで示す行き先が違う**＝まとめて（2つ以上選んでいる）ときは「位置・大きさ」の欄が
+  // 画面から消えるので、数値や「動き」を案内すると**探しても見つからない**（§2-5 の行き止まり）。
+  it("単体は目の前にある行き先（下の数値・「動き」）を示す", () => {
+    expect(canvasHoldMessage("animation")).toContain("下の数値（または矢印キー）");
+    expect(canvasHoldMessage("animation")).toContain("「動き」で調整してください");
+    expect(canvasHoldMessage("group")).toContain("下の数値（または矢印キー）");
+    expect(canvasHoldMessage("group")).not.toContain("「動き」"); // まとまりの変形は「動き」では外せない
+  });
+
+  it("まとめては、その場面で本当に押せるもの（矢印キー）だけを示す", () => {
+    for (const reason of ["animation", "group"] as const) {
+      const m = canvasHoldMessage(reason, 2);
+      expect(m).toContain("矢印キーで動かせます");
+      expect(m).toContain("1つだけ選ぶと数値でも変えられます");
+      expect(m).not.toContain("下の数値（または矢印キー）"); // 画面に無いものを指さない
+      expect(m).not.toContain("「動き」で調整");
+    }
+  });
+
+  // ⚠️ 固定した列は**矢印も効かない**ので、まとめてでも矢印を案内しない（効かない道を示さない）。
+  it("固定した列は、単体でもまとめても「固定を外す」だけを示す", () => {
+    expect(canvasHoldMessage("track")).toBe("固定された列の部品は仕上がり確認の上では動かせません。動かすには固定を外してください。");
+    expect(canvasHoldMessage("track", 3)).toBe("固定された列の部品3個は動かしていません。動かすには固定を外してください。");
+  });
+
+  it("個数はそのまま出る（1個に固定されない）", () => {
+    expect(canvasHoldMessage("animation", 1)).toContain("部品1個は");
+    expect(canvasHoldMessage("animation", 5)).toContain("部品5個は");
+    expect(canvasHoldMessage("animation")).not.toContain("個は"); // 単体は個数を言わない
+  });
+});
+
 describe("利用者に出す文言に技術用語を混ぜない（§2-3）", () => {
   // CLAUDE.md §2-3 の禁止語。置換語は `06_UI_SPEC.md §3`。
   // ⚠️ 「動画編集の一般語」（分割・ズーム・吸着・トリム）は対象外＝ADR-0034 決定21 で整理済み。

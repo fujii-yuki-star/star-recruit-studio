@@ -19,7 +19,7 @@ import { DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR, defaultStrokeColor } from "../..
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDraftHistory } from "../hooks/useDraftHistory";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
-import { isTextEntryTarget } from "../hooks/keyboardShortcut";
+import { isTextEntryTarget, NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
@@ -34,6 +34,7 @@ import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { UnsavedMark } from "../components/SaveStatusBadge";
 import { EDITOR_HEADER_CLASS, EditorToolbar } from "../components/EditorToolbar";
+import { KeyboardNudge } from "../components/KeyboardNudge";
 import { ArrowLeftIcon } from "../components/icons";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { FIT_FIELD_LABEL, fitLabel, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
@@ -82,6 +83,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const yukoPoseTags = buildYukoPoseTags(assets);
   // レイヤーごとの既定素材 file input（レイヤー単位で複数あるため id 単一の useRef でなく id→要素のマップ・#412）。
   const defaultAssetInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  // 矢印の連打を1回の取り消しへ畳むための控え（実体は下の `openNudgeGroup`）。
+  // ⚠️ **フックは早期 return より前**＝下のブロックへ置くと呼ぶ順が変わる（`react-hooks/rules-of-hooks`）。
+  const nudgeGroupOpenRef = useRef(false);
+  const nudgeGroupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 下書きは画面ローカル（store 履歴の対象外＝#547 P1-1）。そのため取り消し/やり直しも専用の局所履歴で用意する
   // （#547 P2-3）。これが無いと復旧手段が「破棄して戻る」だけになり、1回の誤ドラッグで全編集の破棄を迫られる。
@@ -202,6 +207,56 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const activeGroupStillExists = activeGroupId != null && tplGroups.some((g) => g.id === activeGroupId);
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
   const activeGroup = tplGroups.find((g) => g.id === effectiveActiveGroupId) ?? null;
+
+  /**
+   * 矢印キーで少しずつ動かす（#788-3）。**掴んで動かすのと同じ入口**（`onMoveLayers`／`transformGroup`）を
+   * 通す＝置ける条件をキーとドラッグで割らない。
+   * ⚠️ **まとまりを選んでいるときはまとまりごと**（場面編集の自由配置と同じ規準・ADR-0026②）。
+   * ⚠️ **固定したまとまりの中身は動かさない**（レビュー指摘）＝キャンバスのドラッグは固定なら選ぶだけで
+   * 止まるのに、キーだけ通ると「掴めないのにキーでは動く」になる（同じ理由で入口ごとに結果が変わる）。
+   * ⚠️ **押しっぱなしでも取り消しは1回ぶん**（`06 §12.1` 決定20＝タイムラインと同じ）＝1打鍵ごとに積むと、
+   * キーリピートで履歴の上限を数秒で流し切り、**この画面唯一の戻り道**（局所履歴）が消える。
+   */
+  /**
+   * 矢印・`Delete` を**この画面が受け持つか**（レビュー指摘）。
+   * ⚠️ **選んでいないときは奪わない**（`06 §12.1`＝奪って何も起きない＝行き止まりを作らない）。
+   * ⚠️ **答えを求める確認が出ている間も奪わない**＝消すかどうかを聞いている最中にキーで別のものが動く、を作らない。
+   * 場面編集の `canvasKbdActive` と同じ規準（ADR-0026②）。
+   */
+  const openNudgeGroup = (): void => {
+    if (!nudgeGroupOpenRef.current) { nudgeGroupOpenRef.current = true; beginGroup(); }
+    if (nudgeGroupTimerRef.current) clearTimeout(nudgeGroupTimerRef.current);
+    nudgeGroupTimerRef.current = setTimeout(() => {
+      nudgeGroupTimerRef.current = null;
+      nudgeGroupOpenRef.current = false;
+      endGroup();
+    }, NUDGE_GROUP_IDLE_MS);
+  };
+  /** そのまとまりが固定されているか（入れ子の親も見る＝親を固定したら中身も動かさない）。 */
+  const inLockedGroup = (layerId: string): boolean => topGroupOfMember(tplGroups, layerId)?.locked === true;
+  const onCanvasNudge = (dx: number, dy: number): void => {
+    if (effectiveActiveGroupId != null && activeGroup) {
+      if (activeGroup.locked) return; // 固定＝ドラッグでも動かない
+      openNudgeGroup();
+      transformGroup(activeGroup.id, { x: activeGroup.transform.x + dx, y: activeGroup.transform.y + dy });
+      return;
+    }
+    const targets = draft.layers.filter((l) => selectedLayerIds.includes(l.id) && !inLockedGroup(l.id));
+    if (targets.length === 0) return;
+    openNudgeGroup();
+    onMoveLayers(targets.map((l) => ({ id: l.id, x: l.x + dx, y: l.y + dy })));
+  };
+  /**
+   * `Delete` で消す（#788-3）。**一覧の削除ボタンと同じ条件・同じ入口**＝最後の1枚は消さない
+   *（`template.schema` の `layers.minItems:1`）。消せないときは**渡さない**＝押しても何も起きない、を作らない。
+   */
+  const canDeleteSelected = selectedLayerId != null && draft.layers.length > 1 && !inLockedGroup(selectedLayerId);
+  const canvasKbdActive =
+    !isExporting
+    && busyAction === null
+    && !confirmDelete && !confirmDiscard && confirmDeleteGroupId == null
+    && (selectedLayerIds.length > 0 || (effectiveActiveGroupId != null && activeGroup?.locked !== true));
+  const onCanvasDelete = (): void => { if (selectedLayerId) onRemoveLayer(selectedLayerId); };
   // グループ削除の確認を出すか（#551 レビュー P2）。**削除できる状態のときだけ**出す＝確認を開いたまま
   // 別の場所でロック/レイヤー削除が起きたら確認を引っ込め、理由つきの無効ボタンへ戻す（サイレント失敗を作らない）。
   const showGroupDeleteConfirm =
@@ -527,6 +582,14 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const panels: PanelSpec[] = [
     { id: PANEL_ID.preview, title: 'プレビュー', content: (
       <>
+          {/* ⚠️ **キーでも動かせる／消せる**（#788-3・ADR-0034 決定19＝ドラッグ専用の操作を作らない）。
+              購読だけの部品で、場面編集の自由配置と**同じもの**を使う（入力欄・変換中の除外も共通）。
+              書き出し中は他の操作と揃えて止める。 */}
+          <KeyboardNudge
+            active={canvasKbdActive}
+            onArrow={onCanvasNudge}
+            onDelete={canDeleteSelected ? onCanvasDelete : undefined}
+          />
           <ScenePreview scene={sampleScene} template={draft}>
             <TemplateLayerOverlay
               layers={draft.layers}
