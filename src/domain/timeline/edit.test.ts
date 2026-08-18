@@ -630,9 +630,58 @@ describe('音の設定は鳴る音を持つ部品だけ（#724）', () => {
     }
   });
 
+  // ⚠️ **速さ・使い始めは音だけ**（`11 §7.6.3.2` の既存の決定）＝読み上げの長さは声の実尺で `trimClip`
+  // してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の区間も意味を失う**（決定24）。
+  it('読み上げには速さ・使い始めを書けない（音量とフェードは書ける）', () => {
+    const v = doc({
+      tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 0, durationSec: 5, voice: { text: 'あ', status: NARRATION_STATUS.none } }],
+    });
+    expect(setClipSpeed(v, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipSourceStart(v, 'clip_001', 1)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipVolume(v, 'clip_001', 0.5).ok).toBe(true);
+    expect(setClipFade(v, 'clip_001', 'in', 1).ok).toBe(true);
+  });
+
+  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（`11 §7.6.3.2`・#734 レビュー）＝逆だと
+  // 「固定を外してください」と言われて外しても直らない（§2-5）。
+  it('固定した列の文字部品でも、理由は「固定」ではなく「音を持っていない」', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }],
+      clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })],
+    });
+    expect(setClipVolume(d, 'clip_001', 0.5)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipSpeed(d, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+  });
+
   // ⚠️ **「見つかりません」で断らない**＝選び直しても直らない案内になる（§2-5）。
   it('理由は「音を持っていない」＝見つからないではない', () => {
     expect(EDIT_BLOCKED.notAudio).not.toBe(EDIT_BLOCKED.notFound);
+  });
+
+  // ⚠️ **速さ・使い始めは音だけ**（`11 §7.6.3.2` の**既存の**決定）＝読み上げの長さは声の実尺で `trimClip`
+  // してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の区間も意味を失う**（決定24）。
+  // レビューで判明＝追記した節に既に書いてあった決定を読まずに `isAudioClip` へ広げていた。
+  it('読み上げには速さ・使い始めを書けない（音量とフェードは書ける）', () => {
+    const v = doc({
+      tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 0, durationSec: 5, voice: { text: 'あ', status: NARRATION_STATUS.none } }],
+    });
+    expect(setClipSpeed(v, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipSourceStart(v, 'clip_001', 1)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipVolume(v, 'clip_001', 0.5).ok).toBe(true);
+    expect(setClipFade(v, 'clip_001', 'in', 1).ok).toBe(true);
+  });
+
+  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）＝逆だと
+  // 「固定を外してください」と言われて外しても直らない（§2-5）。
+  it('固定した列の文字部品でも、理由は「固定」ではなく「音を持っていない」', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }],
+      clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })],
+    });
+    expect(setClipVolume(d, 'clip_001', 0.5)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipSpeed(d, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
   });
 
   it('音・読み上げには従来どおり書ける', () => {
@@ -680,7 +729,7 @@ describe('見た目パターンのクリップ（差し込み口が生きてい�
    * 材料にも置いておく。以前は無い素材で通っており、**この穴をテストが隠していた**。
    */
   const withAsset = (over: Partial<TimelineProject> = {}): TimelineProject =>
-    doc({ assets: [{ assetId: 'asset_001', assetType: 'image', filePath: 'assets/a.png' }] as never, ...over });
+    doc({ assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/a.png' }], ...over });
 
   describe('setClipAssetRef', () => {
     it('差し込み口に素材を入れる', () => {

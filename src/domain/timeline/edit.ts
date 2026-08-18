@@ -1136,10 +1136,13 @@ export function setClipBoxes(
 export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // ⚠️ **速さ・素材の使い始めは音（`audio`）だけ**（`11 §7.6.3.2` の既存の決定・#724）＝読み上げの長さは
+  // 声を作ったときの**実尺**で `trimClip` してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の
+  // 区間も意味を失う**（決定24「連動している＝区間が一致している」）。
+  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）＝逆にすると
+  // 「固定を外してください」と言われて外しても直らない（§2-5）。
+  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.notAudio);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
-  // **鳴る音を持つ部品だけ**（#724）＝文字や図形へ書いても誰も読まない値が文書に残るだけ
-  // （再生・書き出しは `isAudioClip` で選ぶ）。置けない操作は黙って別の結果にしない（`11 §7.6.3`）。
-  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
   // schema は `exclusiveMinimum: 0`＝0 以下は保存できない文書になる。範囲へ収める（§2-7 の下限を共有）。
   const next = Math.min(Math.max(CLIP_SPEED_MIN, speed), CLIP_SPEED_MAX);
   if ((clip.speed ?? 1) === next) return ok(doc);
@@ -1153,10 +1156,13 @@ export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number
 export function setClipSourceStart(doc: TimelineProject, clipId: string, sec: number): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // ⚠️ **速さ・素材の使い始めは音（`audio`）だけ**（`11 §7.6.3.2` の既存の決定・#724）＝読み上げの長さは
+  // 声を作ったときの**実尺**で `trimClip` してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の
+  // 区間も意味を失う**（決定24「連動している＝区間が一致している」）。
+  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）＝逆にすると
+  // 「固定を外してください」と言われて外しても直らない（§2-5）。
+  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.notAudio);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
-  // **鳴る音を持つ部品だけ**（#724）＝文字や図形へ書いても誰も読まない値が文書に残るだけ
-  // （再生・書き出しは `isAudioClip` で選ぶ）。置けない操作は黙って別の結果にしない（`11 §7.6.3`）。
-  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
   const next = Math.max(0, sec);
   if ((clip.sourceStartSec ?? 0) === next) return ok(doc);
   const patched = { ...clip };
@@ -1204,10 +1210,11 @@ export function setClipAudioSource(
 export function setClipVolume(doc: TimelineProject, clipId: string, volume: number | null): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
-  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
-  // **鳴る音を持つ部品だけ**（#724）＝文字や図形へ書いても誰も読まない値が文書に残るだけ
-  // （再生・書き出しは `isAudioClip` で選ぶ）。置けない操作は黙って別の結果にしない（`11 §7.6.3`）。
+  // **音量とフェードは鳴る音を持つ部品すべて**（`11 §7.6.3.2`・#724）＝音と読み上げ。文字や図形へ書いても
+  // 誰も読まない値が文書に残るだけ（再生・書き出しは `isAudioClip` で選ぶ）。
+  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）。
   if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   const next = volume == null ? null : Math.min(Math.max(0, volume), VOLUME_MAX);
   if ((clip.volume ?? null) === next) return ok(doc);
   const patched = { ...clip };
@@ -1220,10 +1227,11 @@ export function setClipVolume(doc: TimelineProject, clipId: string, volume: numb
 export function setClipFade(doc: TimelineProject, clipId: string, edge: 'in' | 'out', sec: number): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
-  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
-  // **鳴る音を持つ部品だけ**（#724）＝文字や図形へ書いても誰も読まない値が文書に残るだけ
-  // （再生・書き出しは `isAudioClip` で選ぶ）。置けない操作は黙って別の結果にしない（`11 §7.6.3`）。
+  // **音量とフェードは鳴る音を持つ部品すべて**（`11 §7.6.3.2`・#724）＝音と読み上げ。文字や図形へ書いても
+  // 誰も読まない値が文書に残るだけ（再生・書き出しは `isAudioClip` で選ぶ）。
+  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）。
   if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   const key = edge === 'in' ? 'fadeInSec' : 'fadeOutSec';
   const next = Math.max(0, sec);
   if ((clip[key] ?? 0) === next) return ok(doc);
