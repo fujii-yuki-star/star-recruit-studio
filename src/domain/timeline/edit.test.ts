@@ -741,9 +741,13 @@ describe('見た目パターンのクリップ（差し込み口が生きてい�
       expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notFound });
     });
 
-    it('「なし」は素材が無くても通る（外すのは常にできる）', () => {
-      const d = withAsset({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
-      expect(setClipAssetRef(d, 'clip_001', 'layer_bg', null).ok).toBe(true);
+    // ⚠️ **主張どおりの状態で確かめる**（レビュー指摘）＝正典（`§7.6.3`）の「**素材が消えた後でも空にできる**」は、
+    // **参照先が既に無い文書**でしか確かめられない。材料に素材を置いたままだと、実在確認を
+    // 「参照先が壊れている部品は触らせない」まで広げても（＝**外す道を塞いでも**）気づけない。
+    it('参照先の素材が消えていても「なし」で外せる（外す道を塞がない）', () => {
+      const d = withAsset({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_999' } })] }); // 既に消えた素材を指している
+      const r = setClipAssetRef(d, 'clip_001', 'layer_bg', null);
+      expect(r.ok && r.doc.clips[0].assetRefs).toEqual({});
     });
 
     it('「なし」はキーごと落とす（null と未指定は解決が同じ＝形も揃える）', () => {
