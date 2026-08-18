@@ -154,9 +154,16 @@ function easingSplitPlan(keyframes: readonly Keyframe[], headSec: number): Easin
   for (const c of crossings) {
     const cut = splitEasingCurve(c.easing, c.frac);
     if (cut == null) return null; // 表せない形（`ease-in-out` 等）
-    // ⚠️ **`easing` はキーフレームに1つ**なので、1か所に2つ以上の形が要るなら**分けない**
-    // （どれかを優先すると、優先しなかった側の動きが黙って変わる）。引き継ぐ形とも突き合わせる。
+    // ⚠️ **前半は必ず1つ**＝切れ目のキーフレームは分割で新しく作る**1つの入れ物**なので、そこへ
+    // 2つ以上の形が要るなら**分けない**（どれかを優先すると、優先しなかった側の動きが黙って変わる）。
+    // 引き継ぐ形（切れ目ちょうどのキーフレーム）とも突き合わせる。
     if (head != null && !sameEasingCurve(head, cut.head)) return null;
+    // ⚠️ **後半の突き合わせは、構造上の制約より広い**（レビュー指摘・#753）。書き直す相手は
+    // またぐ区間ごとに**別のキーフレーム**なので、本当は別々の形を書いても矛盾しない。
+    // それでも1つに揃えているのは、**前半が一致していて後半だけ食い違う組を作れなかった**ため
+    // （12,280 通りの部分曲線を総当たりして、前半が 1e-9 まで一致する組は0件）。挙動が変わらない
+    // 書き換えはその分岐を区別するテストが書けないので、**広いことを明記して残す**。
+    // 緩めるときは `tail` を「行き先ごとの表」にする（書き込み側も行き先ごとに引く）。
     if (tail != null && !sameEasingCurve(tail, cut.tail)) return null;
     head = cut.head;
     tail = cut.tail;
