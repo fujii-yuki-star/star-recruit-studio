@@ -117,14 +117,80 @@ export function resolveBoundaryTransition(scenes: Scene[], targetIndex: number):
  * 下限撤廃で「0.3秒の場面＋フェード」が普通に作れるようになったため到達性が上がった。
  *
  * 判定は書き出し（buildExportScenes）と同じ `resolveTransition` 由来の want と場面尺の比較＝経路を共有する。
+ *
+ * ⚠️ **覆われる側は「自分の入場」だけではない**（#740）＝**次の場面の入場**にも潰される。
+ * 例＝尺 `[5, 4, 6]` の3番目に 5 秒のフェードを付けると、場面2（4秒）は**自分の切り替えを持たない**まま
+ * 丸ごと覆われるが、以前は「自分の入場 ≥ 自分の尺」しか見ておらず**何も知らせなかった**
+ *（`shortenedTransitionSceneNumbers` も、希望どおりの長さが取れているので黙る）。
+ * 片側だけの場面に上限を効かせない carve-out（#727）は ADR-0009 の意図どおり**そのまま**なので、
+ * **出力は変えず**、残る重なりを知らせるだけにする（§2-5・ADR-0026④）。
+ * ⚠️ 見るのは**適用後の `d` ではなく希望（want）**＝既存の判定と同じ材料で揃える。
+ * 自分の入場で覆われる場合、適用後は strict clamp で必ず1フレーム残るので `d ≥ 尺` は決して立たない
+ *（それでも実質見えない）。次の場面の入場で覆われる場合は、左の clamp が「それまでの結合結果」に効くので
+ * **1フレームも残らず丸ごと消える**（`[5,4,6]` の場面2）＝どちらも知らせる必要がある。
  */
+/** 浮動小数の丸めを吸収する許容差（比較のためだけの値＝尺の意味は持たない）。 */
+const FLOAT_EPS = 1e-9;
+
 export function swallowedByTransitionSceneNumbers(scenes: Scene[]): number[] {
+  const own = swallowedByOwnTransitionSceneNumbers(scenes);
+  const next = swallowedByNextTransitionSceneNumbers(scenes);
+  return [...own, ...next].sort((a, b) => a - b);
+}
+
+/**
+ * ①**自分の入場が自分の尺を覆う意図**（従来の判定・#553/#554）。
+ * 適用後は strict clamp で1フレーム残るが実質見えない＝「設定した切り替えが場面を覆い尽くす意図」で数える。
+ * **直す場所はその場面自身**（表示時間を長くする／自分の切り替えを短くする）。
+ */
+export function swallowedByOwnTransitionSceneNumbers(scenes: Scene[]): number[] {
+  const ds = transitionBoundaryDs(scenes);
   const nums: number[] = [];
   scenes.forEach((s, i) => {
-    if (i === 0) return; // 先頭に入場の切り替えは無い（boundaryDs[0]=0）
-    const r = resolveTransition(s.transition);
-    if (r.type === TRANSITION_TYPE.none || r.durationSec <= 0) return;
-    if (r.durationSec >= s.durationSec) nums.push(i + 1); // 切り替えが場面尺以上＝丸ごと飲まれる
+    if (i === 0) return; // 先頭に入場の切り替えは無い
+    const want = ds[i] ?? 0;
+    if (want > 0 && want >= s.durationSec) nums.push(i + 1);
+  });
+  return nums;
+}
+
+/**
+ * ②**次の場面の入場に覆われて、単独で映る時間が残らない**場面（#740）。
+ *
+ * 左の clamp は「それまでの結合結果」に効くので、**自分より長い切り替え**が通ってしまう
+ * （`[5,4,6]` の場面2＝切り替え 5 秒が場面2の 4 秒を超える）。
+ * ⚠️ **「動画から消える」ではない**（レビュー指摘・実測）＝場面2は連結後 [5,9) に置かれ、切り替えの窓
+ * [4,9) に**丸ごと含まれる**ので**一度も単独では映らない**が、重なっている間は見えているし、総尺にも
+ * 約4秒ぶん効いている（10.0 秒／場面2を抜くと 6.033 秒）。**前の場面の単独区間まで削る**のも同じ理由。
+ * ⚠️ **直す場所は自分だけではない**＝切り替えを持っているのは**次の場面**なので、案内は
+ * 「表示時間を長くする」か「**次の場面**の切り替えを短くする」の2つになる（§2-5・`adapters` が出し分ける）。
+ * ⚠️ ①と分けるのは、**両側に切り替えがある場面は予算（#727）が救う**から＝そちらは残りが必ず 0 より
+ * 大きく、「短くしています」（`shortenedTransitionSceneNumbers`）の担当。希望の合計だけで数えると
+ * その場面まで「飲み込まれる」に化け、#727 の警告が消える。
+ *
+ * ⚠️ **残る穴**（意図して残す）＝**隣の境界だけ**を見るので、2つ以上前の場面まで覆う長い切り替え
+ * （`[5, 0.4, 0.4, 6(5秒)]` の場面2）は拾わない。
+ */
+export function swallowedByNextTransitionSceneNumbers(scenes: Scene[]): number[] {
+  const ds = transitionBoundaryDs(scenes);
+  const { steps } = transitionTimeline(scenes.map((s) => s.durationSec), ds);
+  const own = new Set(swallowedByOwnTransitionSceneNumbers(scenes));
+  const nums: number[] = [];
+  scenes.forEach((s, i) => {
+    if (own.has(i + 1)) return; // ①で言っている場面は繰り返さない
+    // **覆っているのが実際の切り替えのときだけ**（レビュー指摘）＝尺 0 秒の場面は切り替えが無くても
+    // 残りが 0 になるので、そのまま数えると**存在しない切り替えを短くしてください**と案内してしまう。
+    const byNext = steps[i]?.durationSec ?? 0;
+    if (byNext <= 0) return;
+    // ⚠️ **自分の入場も引く**（式としての正しさ）。ただし②が立つとき `steps[i-1]` は必ず 0＝両側に
+    // 切り替えがある場面は予算（#727）が救うので、ここには来ない。**書き違いを守るのはテスト**
+    // （「次の入場が尺の一部しか覆わないとき」＝二重に数えると誤検出になる）。
+    const remaining = s.durationSec - (steps[i - 1]?.durationSec ?? 0) - byNext;
+    // ⚠️ **1フレーム未満も「残っていない」**（レビュー指摘）＝①は ε だけ残る形まで拾うのに、ここを
+    // `<= 0` にすると半フレーム残る場面が無言になる（既定 0.5 秒の切り替えだけで到達する）。
+    // ⚠️ **許容差を入れる**＝両側予算の場面は `尺 − 2·((尺−ε)/2)` が浮動小数で ε をわずかに下回り、
+    // 素の `< ε` だと #727 の「短くしています」をまた食う（一度踏んだ罠）。
+    if (remaining < TRANSITION_MIN_TAIL_SEC - FLOAT_EPS) nums.push(i + 1);
   });
   return nums;
 }
