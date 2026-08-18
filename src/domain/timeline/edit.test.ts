@@ -630,30 +630,6 @@ describe('音の設定は鳴る音を持つ部品だけ（#724）', () => {
     }
   });
 
-  // ⚠️ **速さ・使い始めは音だけ**（`11 §7.6.3.2` の既存の決定）＝読み上げの長さは声の実尺で `trimClip`
-  // してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の区間も意味を失う**（決定24）。
-  it('読み上げには速さ・使い始めを書けない（音量とフェードは書ける）', () => {
-    const v = doc({
-      tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
-      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 0, durationSec: 5, voice: { text: 'あ', status: NARRATION_STATUS.none } }],
-    });
-    expect(setClipSpeed(v, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
-    expect(setClipSourceStart(v, 'clip_001', 1)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
-    expect(setClipVolume(v, 'clip_001', 0.5).ok).toBe(true);
-    expect(setClipFade(v, 'clip_001', 'in', 1).ok).toBe(true);
-  });
-
-  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（`11 §7.6.3.2`・#734 レビュー）＝逆だと
-  // 「固定を外してください」と言われて外しても直らない（§2-5）。
-  it('固定した列の文字部品でも、理由は「固定」ではなく「音を持っていない」', () => {
-    const d = doc({
-      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }],
-      clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })],
-    });
-    expect(setClipVolume(d, 'clip_001', 0.5)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
-    expect(setClipSpeed(d, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
-  });
-
   // ⚠️ **「見つかりません」で断らない**＝選び直しても直らない案内になる（§2-5）。
   it('理由は「音を持っていない」＝見つからないではない', () => {
     expect(EDIT_BLOCKED.notAudio).not.toBe(EDIT_BLOCKED.notFound);
@@ -680,8 +656,14 @@ describe('音の設定は鳴る音を持つ部品だけ（#724）', () => {
       tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }],
       clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })],
     });
-    expect(setClipVolume(d, 'clip_001', 0.5)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
-    expect(setClipSpeed(d, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    for (const r of [
+      setClipVolume(d, 'clip_001', 0.5),
+      setClipSpeed(d, 'clip_001', 2),
+      setClipSourceStart(d, 'clip_001', 1), // レビュー指摘＝4つとも固定する（2つだけだと順序の書き違いが残る）
+      setClipFade(d, 'clip_001', 'in', 1),
+    ]) {
+      expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    }
   });
 
   it('音・読み上げには従来どおり書ける', () => {
@@ -729,12 +711,27 @@ describe('見た目パターンのクリップ（差し込み口が生きてい�
    * 材料にも置いておく。以前は無い素材で通っており、**この穴をテストが隠していた**。
    */
   const withAsset = (over: Partial<TimelineProject> = {}): TimelineProject =>
-    doc({ assets: [{ assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'assets/a.png' }], ...over });
+    doc({
+      // ⚠️ **2件以上置く**（レビュー指摘）＝1件だけだと `.some` と `.every` が同じ結果になり、
+      // 「どれか1つでも一致すれば良い」を「全部一致しないと駄目」に書き違えても**変異が生き残る**。
+      assets: [
+        { assetId: 'asset_001', assetType: 'image', displayName: '写真1', filePath: 'assets/a.png' },
+        { assetId: 'asset_002', assetType: 'image', displayName: '写真2', filePath: 'assets/b.png' },
+      ],
+      ...over,
+    });
 
   describe('setClipAssetRef', () => {
     it('差し込み口に素材を入れる', () => {
       const r = setClipAssetRef(withAsset({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_001');
       expect(r.ok && r.doc.clips[0].assetRefs).toEqual({ layer_bg: 'asset_001' });
+    });
+
+    // ⚠️ **先頭でない素材も入れられる**（レビュー指摘）＝「どれか1つでも一致すれば良い」を書き違えると、
+    // 2件目以降を選んだときだけ「見つかりません」になる（材料が1件では気づけない）。
+    it('先頭でない素材も入れられる', () => {
+      const r = setClipAssetRef(withAsset({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_002');
+      expect(r.ok && r.doc.clips[0].assetRefs).toEqual({ layer_bg: 'asset_002' });
     });
 
     // ⚠️ #724（利用者判断＝操作側で塞ぐ）＝兄弟は全部持っている確認がここだけ無く、**無い素材を指したまま
