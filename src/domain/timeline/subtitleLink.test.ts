@@ -250,6 +250,14 @@ describe('書き出しの手前で断る', () => {
     expect(timelineExportBlockers(d).map((b) => b.code)).toContain('TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN');
   });
 
+  // ⚠️ **ここを「何も描かれない字幕」全部へ広げない**（#787 で試して取り下げ）＝文も連動先も無い字幕は
+  // **焼き出しが普通に作る**（場面側で字幕 OFF・文が空・隠してある箱＝元から出ていない）ので、止めると
+  // **焼いた直後の動画が書き出せなくなる**。関門が見るのは「**指しているのに見つからない**」だけ。
+  it('文も連動先も無い字幕は止めない（焼き出しが普通に作るため）', () => {
+    const d = doc({ clips: [subtitle('clip_002')] });
+    expect(timelineExportBlockers(d).map((b) => b.code)).not.toContain('TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN');
+  });
+
   it('自分の文があれば止めない（その文で描かれる）', () => {
     const d = doc({ clips: [subtitle('clip_002', { voiceClipId: 'clip_999', text: '残る文' })] });
     expect(timelineExportBlockers(d).map((b) => b.code)).not.toContain('TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN');

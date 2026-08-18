@@ -31,7 +31,16 @@ export function subtitleTextOf(doc: TimelineProject, clip: TimelineClip): string
   return boundVoiceClip(doc, clip)?.voice?.text || undefined;
 }
 
-/** 連動先を指しているのに見つからない字幕クリップ（黙って消さないための材料）。 */
+/**
+ * 連動先を指しているのに見つからない字幕クリップ（黙って消さないための材料）。
+ *
+ * ⚠️ **「何も描かれない字幕」まで広げてはいけない**（#787 で一度広げて取り下げた）＝**指している**という
+ * 事実だけが「出すつもりだった」を表す。文も連動先も無い字幕は、**焼き出しが普通に作る**
+ * （場面側で字幕 OFF・文が空の箱＝`bake.ts` の `staticSubtitleText`＝元から出ていないので落ちてもいない）ので、
+ * そこまで止めると**焼いた直後の動画が書き出せなくなる**。空の文字の部品を止めないのと同じ扱い（ADR-0026②）。
+ * **連動が黙って落ちること自体を作らない**のが本筋＝`duplicateTrack` は元を指したまま運び、
+ * `duplicateClip` は落とす前に文を焼き付ける（`edit.ts`）。
+ */
 export function danglingSubtitleLinks(doc: TimelineProject): TimelineClip[] {
   return doc.clips.filter(
     (c) => c.kind === TIMELINE_CLIP_KIND.subtitle && !!c.voiceClipId && !boundVoiceClip(doc, c),

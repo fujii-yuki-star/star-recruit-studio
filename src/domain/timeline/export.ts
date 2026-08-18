@@ -217,6 +217,8 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   }
   // 連動先が見つからない字幕は、自分の文があればそれで描かれる。**文も無いものは何も出ない**＝
   // 置いたはずの字幕が消えた動画を成功として出さない（`11 §8` V29 の警告より一段強い＝ADR-0026④）。
+  // ⚠️ **「何も描かれない字幕」全部には広げない**（#787 で試して取り下げ）＝焼き出しが普通に作る
+  // 「元から空の字幕の箱」まで止めてしまい、焼いた直後の動画が書き出せなくなる（`subtitleLink.ts` に理由）。
   const brokenSubtitles = danglingSubtitleLinks(doc).filter((c) => !c.text).map((c) => c.id);
   if (brokenSubtitles.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.subtitleLinkBroken, clipIds: brokenSubtitles });

@@ -16,7 +16,7 @@ import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from './clipEdge';
 import { createFreeElement } from '../project/freeLayoutOps';
 import { createAnimationId, createClipId, createGroupId, createTrackId } from '../project/persistence';
-import { subtitlesBoundTo } from './subtitleLink';
+import { subtitleTextOf, subtitlesBoundTo } from './subtitleLink';
 import { clipEndSec, spansOverlap, trackKindForClip } from './validateTimelineDoc';
 import type { ClipAnimation, TimelineClip, TimelineProject, Track } from './types';
 import type { Texts } from '../project/types';
@@ -450,8 +450,12 @@ export function moveTrackOrder(doc: TimelineProject, trackId: string, direction:
  *
  * - 読み上げは**作成済みの音声を引き継がない**（部品ひとつの複製と**同じ規則**＝作成済みに見えるのに
  *   別の部品の音声を指す、を作らない）
- * - 連動している字幕は、**連動先も一緒に複製されるときだけ**複製どうしで結び直す
- *   （⚠️ 部品ひとつの複製は連動を**必ず**落とす＝相手が来ないので必ず重なるため。列ごとなら相手も来る）
+ * - 連動している字幕は、**元の読み上げを指したまま**運ぶ（#787）。⚠️ 以前は「連動先も一緒に複製される
+ *   ときだけ結び直す」と書いていたが、**編集操作からはそういう文書を作れない**（`trackPlacementIssue` が
+ *   `trackKindForClip` で断る＝字幕は映像の列・読み上げは音の列）＝その分岐は一度も通らず、実際には**連動が必ず落ちて**
+ *   「文も連動先も無い＝何も出ない字幕」ができていた。元の読み上げは複製しても必ず残るので、指したままで
+ *   時間も文言も追従する。**別の列・同じ区間**なので重なり（V24）にも当たらない
+ *   （⚠️ 部品ひとつの複製は落とす＝あちらは**同じ列の直後**に置くので区間が合わず、必ず重なるため）
  * - まとまり・動きは**複製した部品を指すように張り替える**（⚠️ こちらも列ごとの複製だけの規則＝
  *   部品ひとつの複製は引き継がない。参照切れは作らない・11 §8 V26）
  *
@@ -488,12 +492,7 @@ export function duplicateTrack(doc: TimelineProject, trackId: string): EditResul
   const clips: TimelineClip[] = sources.map((c) => {
     const next: TimelineClip = { ...c, id: idOf.get(c.id)!, trackId: newTrack.id };
     if (next.voice) next.voice = { ...next.voice, voicePath: null, status: NARRATION_STATUS.none };
-    // 連動先も一緒に来るなら複製どうしで結ぶ。来ないなら連動をやめる（外を指したままにしない）。
-    if (next.voiceClipId) {
-      const to = idOf.get(next.voiceClipId);
-      if (to) next.voiceClipId = to;
-      else delete next.voiceClipId;
-    }
+    // 連動（`voiceClipId`）は**そのまま**＝元の読み上げを指し続ける（上記のとおり相手はこの列に居ない）。
     return next;
   });
 
@@ -585,7 +584,14 @@ export function duplicateClip(doc: TimelineProject, clipId: string): EditResult 
   if (next.voice) next.voice = { ...next.voice, voicePath: null, status: NARRATION_STATUS.none };
   // **連動は引き継がない**（読み上げと同じ区間になるので、複製した瞬間に必ず重なる＝以後その読み上げを
   // 動かすたびに断られる）。連動したい場合は複製後に選び直す。
-  delete next.voiceClipId;
+  // ⚠️ **落とす前に、いま出ている文を焼き付ける**（#787）＝自分の文を持たない連動字幕をそのまま落とすと
+  // **文も連動先も無い＝何も出ない帯**になる（黙って中身が消えたのと同じ・§2-5／ADR-0026④）。
+  // 焼き付けたあとは普通の字幕なので、書き換えも消すこともできる。
+  if (next.voiceClipId) {
+    const baked = subtitleTextOf(doc, clip);
+    if (baked) next.text = baked;
+    delete next.voiceClipId;
+  }
   return ok({ ...doc, clips: [...doc.clips, next] });
 }
 

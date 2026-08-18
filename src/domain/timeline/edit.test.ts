@@ -8,6 +8,8 @@ import {
   addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
+import { validateTimelineDoc } from './validateTimelineDoc';
+import { subtitleTextOf } from './subtitleLink';
 import { TIMELINE_MIN_CLIP_SEC, MIN_BOX_SIZE_PX } from '../constants';
 import { DEFAULT_SHAPE_COLOR } from '../project/freeLayoutOps';
 
@@ -461,18 +463,57 @@ describe('トラック（列）', () => {
     expect(copied?.voice).toMatchObject({ text: 'あ', status: NARRATION_STATUS.none, voicePath: null });
   });
 
-  it('連動は**一緒に複製されるときだけ**複製どうしで結び直す（外を指したままにしない・#767）', () => {
-    const d = doc({
-      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }],
-      clips: [
-        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3, voice: { text: 'あ', status: NARRATION_STATUS.none } },
-        clip('clip_002', { kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', durationSec: 3, voiceClipId: 'clip_001' }),
-      ],
-    });
-    // 字幕だけの列を複製＝連動先（別の列の読み上げ）は来ない → 連動をやめる。
-    const r1 = duplicateTrack(d, 'track_001');
-    expect(r1.ok && r1.doc.clips.find((c) => c.id === 'clip_003')?.voiceClipId).toBeUndefined();
-    // 同じ列に両方あるなら、複製どうしで結び直す。
+  // ⚠️ #787：以前ここは「連動先も一緒に複製されるときだけ結び直す」を見ていたが、その分岐は
+  // **列の種別の決まり（V23）により一度も通らない**。しかも試験は**その決まりを破った文書**を作って
+  // 到達不能な枝を通しており、**実際に起きること（連動が必ず落ちて見えない帯になる）を隠していた**。
+  const linkedDoc = () => doc({
+    tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.audio }],
+    clips: [
+      { id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3, voice: { text: 'あ', status: NARRATION_STATUS.none } },
+      // ⚠️ **自分の文を持たない**連動字幕＝`addLinkedSubtitleClip`／掛け合いの焼き出しが作る典型形で、
+      // #787 が起きるのはこの形だけ（自分の文があると、連動が落ちてもその文で描かれるので露見しない）。
+      { id: 'clip_002', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_001' },
+    ],
+  });
+
+  it('連動している字幕は列を複製しても**元の読み上げを指したまま**（#787）', () => {
+    const r = duplicateTrack(linkedDoc(), 'track_001');
+    const copied = r.ok ? r.doc.clips.find((c) => c.id === 'clip_003') : undefined;
+    expect(copied?.voiceClipId).toBe('clip_001'); // 元は複製しても必ず残るので、指したままで追従する
+  });
+
+  // ⚠️ 見るのは**描かれるかどうか**（`subtitleTextOf`）＝書き出しの関門は「指しているのに見つからない」
+  // ものしか数えないので、連動ごと落ちた字幕は関門をすり抜ける（そこが #787 の「最悪の点」だった）。
+  it('複製した字幕は「何も出ない帯」にならない（#787）', () => {
+    const r = duplicateTrack(linkedDoc(), 'track_001');
+    const copied = r.ok ? r.doc.clips.find((c) => c.id === 'clip_003') : undefined;
+    expect(r.ok && copied && subtitleTextOf(r.doc, copied)).toBe('あ');
+  });
+
+  // ⚠️ この変更で**1つの読み上げに複数の字幕**が普通の操作から作れるようになった（レビュー指摘）。
+  // 決定24「連動している＝区間が一致している」は**全部**について保たれる必要があるので、
+  // 元と複製の**両方**が追従することを固定する（片方だけ動くと、連動と言いながら合っていない状態になる）。
+  it('1つの読み上げに複数の字幕が付いても、動かすと**全部**が同じ区間になる（#787）', () => {
+    const dup = duplicateTrack(linkedDoc(), 'track_001');
+    expect(dup.ok).toBe(true);
+    if (!dup.ok) return;
+    const moved = moveClip(dup.doc, 'clip_001', { startSec: 10 }); // 読み上げを動かす
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    const subs = moved.doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle);
+    expect(subs).toHaveLength(2);
+    expect(subs.map((c) => c.startSec)).toEqual([10, 10]);
+
+    const trimmed = trimClip(moved.doc, 'clip_001', 'end', 16); // 読み上げを伸ばす
+    expect(trimmed.ok).toBe(true);
+    if (!trimmed.ok) return;
+    const after = trimmed.doc.clips.filter((c) => c.kind === TIMELINE_CLIP_KIND.subtitle);
+    expect(after.map((c) => c.durationSec)).toEqual([6, 6]);
+  });
+
+  // ⚠️ **前提そのものを固定する**＝「同じ列に字幕と読み上げが同居する文書」は作れない。
+  // ここが崩れたら上の2件の理由づけも崩れるので、到達不能な枝を書き足す前に気づけるようにする。
+  it('字幕と読み上げが同じ列に居る文書は V23 が知らせる（編集からは作れない・前提の裏取り）', () => {
     const same = doc({
       tracks: [{ id: 'track_001', kind: TRACK_KIND.audio }],
       clips: [
@@ -480,8 +521,17 @@ describe('トラック（列）', () => {
         { id: 'clip_002', kind: TIMELINE_CLIP_KIND.subtitle, trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 10, h: 10, voiceClipId: 'clip_001' },
       ],
     });
-    const r2 = duplicateTrack(same, 'track_001');
-    expect(r2.ok && r2.doc.clips.find((c) => c.id === 'clip_004')?.voiceClipId).toBe('clip_003');
+    expect(validateTimelineDoc(same).map((w) => w.code)).toContain('TIMELINE_CLIP_TRACK_KIND');
+  });
+
+  // #787 の同型（部品ひとつの複製）＝連動は落とすのが正しいが、落とす前に**いま出ている文を焼き付ける**。
+  // 焼き付けないと「文も連動先も無い＝何も出ない帯」ができ、黙って中身が消えたのと同じになる。
+  it('部品ひとつの複製は、連動を落とす前に**いま出ている文を焼き付ける**（#787）', () => {
+    const r = duplicateClip(linkedDoc(), 'clip_002');
+    const copied = r.ok ? r.doc.clips.find((c) => c.id === 'clip_003') : undefined;
+    expect(copied?.voiceClipId).toBeUndefined(); // 連動は引き継がない（同じ列・直後＝必ず重なる）
+    expect(copied?.text).toBe('あ');             // 連動先の文が焼き付いている
+    expect(r.ok && copied && subtitleTextOf(r.doc, copied)).toBe('あ'); // 描かれる
   });
 
   it('まとまりと動きは**複製した部品を指すように張り替える**（参照切れを作らない・#767）', () => {
@@ -1158,6 +1208,16 @@ describe('moveClips（まとめて動かす）', () => {
   it('全部通るならまとめて動かす', () => {
     const r = moveClips(three(), [{ id: 'clip_001', startSec: 10 }, { id: 'clip_002', startSec: 15 }]);
     expect(r.ok && r.doc.clips.map((c) => c.startSec)).toEqual([10, 15, 20]);
+  });
+
+  // ⚠️ #787 レビュー（tests）＝**件数で理由が変わる境界**が未検証だった。1つなら「この列は固定」、
+  // まとめてなら「選んだ中に固定がある」＝次の行動が違う（固定を外す／選び直す・#773）。
+  it('固定した列の部品は、1つなら「この列」・まとめてなら「選んだ中」と言い分ける', () => {
+    const d = three({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] });
+    expect(moveClips(d, [{ id: 'clip_001', startSec: 10 }]))
+      .toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
+    expect(moveClips(d, [{ id: 'clip_001', startSec: 10 }, { id: 'clip_002', startSec: 15 }]))
+      .toEqual({ ok: false, reason: EDIT_BLOCKED.lockedSelection });
   });
 
   it('**1つでも置けなければ全体を動かさない**（決定15）', () => {
