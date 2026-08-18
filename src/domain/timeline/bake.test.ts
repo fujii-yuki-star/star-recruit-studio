@@ -6,6 +6,7 @@ import { transitionTimeline } from '../project/sceneTransitions';
 import { setKeyframe } from './keyframeEdit';
 import type { Project, Scene } from '../project/types';
 import type { Template } from '../template/types';
+import { timelineExportBlockers } from './export';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { BAKE_NOTE_CODE, BAKE_RANGE_KIND, bakeTimelineProject, bakedFilePaths, sceneIdsBetween, scenesForBakeRange } from './bake';
 import type { BakeOptions } from './bake';
@@ -91,6 +92,12 @@ function expectSound(doc: ReturnType<typeof bakeTimelineProject>['doc']): void {
   expect(validateTimelineProject.errors ?? []).toEqual([]);
   expect(ok).toBe(true);
   expect(validateTimelineDoc(doc)).toEqual([]);
+  // ⚠️ **焼いた動画はそのまま書き出せる**（#787 レビュー）＝適合しているだけでは足りない。
+  // 書き出しの関門を広げたときに**焼き出し直後の文書が書き出せなくなる**ことに、ここまで誰も
+  // 気づけなかった（適合と `validateTimelineDoc` しか見ていなかった）。焼いた結果は利用者が
+  // 何も足さずに書き出す前提のものなので、**押した先で断られない**ことを毎回見る。
+  // ⚠️ 中身のある文書だけ＝場面が1つも入らない範囲は「空」で断られるのが正しい（それ自体が守り）。
+  if (doc.clips.length > 0) expect(timelineExportBlockers(doc)).toEqual([]);
 }
 
 describe('scenesForBakeRange（焼き出す範囲・ADR-0032 決定17）', () => {
@@ -604,6 +611,9 @@ describe('bakeTimelineProject: FREE の字幕ボックス（ADR-0029 の「対�
     const { doc, notes } = bakeTimelineProject(p, opts());
     expect(doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!.text).toBeUndefined();
     expect(notes).toEqual([]);
+    // ⚠️ **文も連動先も無い字幕の箱ができる**（#787）＝ここで書き出しの関門まで見ておかないと、
+    // 関門を「何も描かれない字幕」へ広げたときに**焼いた直後の動画が書き出せなくなる**のを誰も検知できない。
+    expectSound(doc);
   });
 
   it('対象が行に追従する（全部/話者）なら焼けないので記録する', () => {
@@ -621,6 +631,7 @@ describe('bakeTimelineProject: FREE の字幕ボックス（ADR-0029 の「対�
     const { doc, notes } = bakeTimelineProject(p, opts());
     expect(doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.subtitle)!.text).toBeUndefined();
     expect(notes).toEqual([{ code: BAKE_NOTE_CODE.dialogueSubtitle, sceneNumbers: [1] }]);
+    expectSound(doc); // 焼けなかった字幕があっても、焼いた動画はそのまま書き出せる（#787）
   });
 
   it('隠してある字幕ボックスは記録しない（描かれていない＝落ちていない）', () => {
