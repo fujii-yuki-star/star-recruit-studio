@@ -58,6 +58,16 @@ describe("usePointerDrag（ドラッグの作法）", () => {
     expect(onMove).toHaveBeenCalledTimes(1);
   });
 
+  // ⚠️ **既定の動き（文字の選択）を止める**（レビュー指摘＝どこも検査していなかった）。止めないと運んでいる
+  // 途中で選択が走ってドラッグが切れる。右ボタンでは止めない＝メニューを妨げない。
+  it("掴む合図で文字の選択を止める（右ボタンでは止めない）", () => {
+    render(<Grabbable handlers={{}} />);
+    const btn = screen.getByRole("button");
+    expect(down(btn, 100, 100)).toBe(false); // `false`＝既定の動きを止めた
+    up(100, 100);
+    expect(down(btn, 100, 100, 2)).toBe(true);
+  });
+
   it("左ボタン以外では掴まない（右クリックで中身が書き換わらない）", () => {
     const onMove = vi.fn();
     render(<Grabbable handlers={{ onMove }} />);

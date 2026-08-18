@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
-import { pointerDownAt } from "../../test/pointer";
+import { dragEnd, dragOver, pointerDownAt } from "../../test/pointer";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Scene } from "../../domain/project/types";
 import { SceneEditScreen } from "./SceneEditScreen";
@@ -53,9 +53,9 @@ describe("SceneEditScreen 場面カードの並び替え（Pointer Events・#398
     // 先頭カードの持ち手を掴み → 3枚目カードの**後ろ半分**（＝末尾のすき間）へ → window で離す。
     // ⚠️ **どちら半分かで結果が変わる**（#771(c)）＝落とし先は「重なったカード」ではなく**すき間**。
     const at = halves(cards[2]);
-    fireEvent.pointerDown(grip as HTMLElement, { button: 0 });
-    fireEvent.pointerMove(cards[2], at.back);
-    fireEvent.pointerUp(window);
+    pointerDownAt(grip as HTMLElement, 1000, { button: 0 });
+    dragOver(cards[2], at.back);
+    dragEnd();
 
     // 先頭 scene_001 が末尾へ動いた（＝ドラッグが実際に並べ替えを起こした）。
     expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual([
@@ -63,12 +63,31 @@ describe("SceneEditScreen 場面カードの並び替え（Pointer Events・#398
     ]);
   });
 
-  it("持ち手を掴んで同じ場所で離す（他カードに重ねない）と並びは変わらない＝クリック相当", () => {
+  // ⚠️ **掴んだうえで**どのカードにも重ねずに離す＝「すき間が決まっていないなら並べ替えない」の経路。
+  // 掴む前に離すと別の枝（ただのクリック）に入ってしまい、この守りを見たことにならない。
+  it("掴んで運んでも、どのカードにも重ねずに離せば並びは変わらない", () => {
     render(<SceneEditScreen onNavigate={vi.fn()} />);
     const cards = [...document.querySelectorAll(".scene-card")];
     const grip = [...cards[0].querySelectorAll("span")].find((s) => s.textContent === "⠿");
-    fireEvent.pointerDown(grip as HTMLElement, { button: 0 });
-    fireEvent.pointerUp(window); // どのカードにも重ねずに離す
+    pointerDownAt(grip as HTMLElement, 1000, { button: 0 });
+    dragOver(document.body, { clientX: 400, clientY: 400 }); // カードの外まで運ぶ＝すき間が決まらない
+    dragEnd();
+    expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual([
+      "scene_001", "scene_002", "scene_003",
+    ]);
+  });
+
+  // ⚠️ #714-4 の配線確認：作法（`usePointerDrag`）は共通部品で試験済みなので、ここで見るのは
+  // **この画面まで届いているか**。以前は中止できず、掴んだら離すまで戻れなかった。
+  it("運んでいる途中に Escape でやめると並びは変わらない", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const cards = [...document.querySelectorAll(".scene-card")];
+    const grip = [...cards[0].querySelectorAll("span")].find((s) => s.textContent === "⠿");
+    const at = halves(cards[2]);
+    pointerDownAt(grip as HTMLElement, 1000, { button: 0 });
+    dragOver(cards[2], at.back);
+    fireEvent.keyDown(window, { key: "Escape" });
+    dragEnd(); // やめた後に離しても確定しない
     expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual([
       "scene_001", "scene_002", "scene_003",
     ]);
@@ -85,16 +104,16 @@ describe("SceneEditScreen 場面カードの並び替え（Pointer Events・#398
     // 先頭（001）を「2枚目の右半分」＝002 と 003 の間へ。
     const at1 = halves(cards()[1]);
     pointerDownAt(gripOf(cards()[0]), 1000, { button: 0 });
-    fireEvent.pointerMove(cards()[1], at1.back);
-    fireEvent.pointerUp(window);
+    dragOver(cards()[1], at1.back);
+    dragEnd();
     expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual(["scene_002", "scene_001", "scene_003"]);
 
     // 末尾（003）を「同じすき間」＝いまの 002 と 001 の間へ。手前から来ても後ろから来ても、
     // 「指した2枚の間」に入る。
     const at2 = halves(cards()[0]);
     pointerDownAt(gripOf(cards()[2]), 9000, { button: 0 });
-    fireEvent.pointerMove(cards()[0], at2.back);
-    fireEvent.pointerUp(window);
+    dragOver(cards()[0], at2.back);
+    dragEnd();
     expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual(["scene_002", "scene_003", "scene_001"]);
   });
 });

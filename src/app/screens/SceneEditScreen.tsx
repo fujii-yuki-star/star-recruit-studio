@@ -48,6 +48,7 @@ import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
 import { hasSimultaneousLines, motionSubtitleAt } from "../../domain/project/lineTimeline";
 import { useDragReorder } from "../hooks/useDragReorder";
+import { hasEscapeOwner } from "../hooks/escapeOwners";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { AssetImportButton } from "../components/AssetImportButton";
@@ -362,9 +363,14 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   }, [status, autoGenerateIfSafe]);
 
   // Escape で kind 別エディタのポップオーバーを閉じる。
+  // ⚠️ **手前で `Escape` を受け持っているものがある間は閉じない**（#714-4 レビュー）＝`Escape` は
+  // **手前のものから1段ずつはがす**（`06 §12.1`）。見ないと**1回のキーで2段はがれる**。
+  // 見るのは「掴んでいるか」ではなく**名簿**（`hasEscapeOwner`）＝この欄の中には色や書体を選ぶ面が
+  // 入れ子で開くが、それらは**撫でていなくても**開いている間ずっと受け持つ（`ColorPicker`/`FontPicker`）。
+  // 掴んでいる間も `usePointerDrag` が名乗るので、並べ替えの中止もこの1つで賄える（TimelineProjectScreen と同じ流儀）。
   useEffect(() => {
     if (!editPopover) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setEditPopover(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !hasEscapeOwner()) setEditPopover(null); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [editPopover]);

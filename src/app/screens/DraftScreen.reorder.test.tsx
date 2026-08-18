@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
-import { pointerDownAt } from "../../test/pointer";
+import { dragEnd, dragOver, pointerDownAt } from "../../test/pointer";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Scene } from "../../domain/project/types";
 import { DraftScreen } from "./DraftScreen";
@@ -46,12 +46,26 @@ describe("DraftScreen 台本表の並び替え（Pointer Events・#398 再対応
 
     // ⚠️ **どちら半分かで結果が変わる**（#771(c)）＝落とし先は「重なった行」ではなく**すき間**。
     const at = halves(gripRows[2]);
-    fireEvent.pointerDown(grip as HTMLElement, { button: 0 });
-    fireEvent.pointerMove(gripRows[2], at.back); // 3行目の下半分＝末尾のすき間
-    fireEvent.pointerUp(window);
+    pointerDownAt(grip as HTMLElement, 1000, { button: 0 });
+    dragOver(gripRows[2], at.back); // 3行目の下半分＝末尾のすき間
+    dragEnd();
 
     expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual([
       "scene_002", "scene_003", "scene_001",
+    ]);
+  });
+
+  // ⚠️ #714-4 の配線確認：以前は**押した瞬間に掴んだ扱い**で、1〜2px の震えで隣のすき間が確定した。
+  it("押した位置からほとんど動いていないときは並び替わらない（震えで確定しない）", () => {
+    render(<DraftScreen onNavigate={vi.fn()} />);
+    const rows = [...document.querySelectorAll("tbody tr")];
+    const grip = [...rows[0].querySelectorAll("span")].find((s) => s.textContent === "⠿");
+    halves(rows[2]);
+    pointerDownAt(grip as HTMLElement, 1000, { button: 0, clientX: 78, clientY: 78 });
+    dragOver(rows[2], { clientX: 80, clientY: 80 }); // 押した所から約 2.8px＝しきい値未満
+    dragEnd();
+    expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual([
+      "scene_001", "scene_002", "scene_003",
     ]);
   });
 
@@ -67,16 +81,16 @@ describe("DraftScreen 台本表の並び替え（Pointer Events・#398 再対応
     // 先頭（001）を「2行目の下半分」＝002 と 003 の間へ。
     const at1 = halves(rows()[1]);
     pointerDownAt(gripOf(rows()[0]), 1000, { button: 0 });
-    fireEvent.pointerMove(rows()[1], at1.back);
-    fireEvent.pointerUp(window);
+    dragOver(rows()[1], at1.back);
+    dragEnd();
     expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual(["scene_002", "scene_001", "scene_003"]);
 
     // 末尾（003）を「同じすき間」＝いまの 002 と 001 の間へ。手前から来ても後ろから来ても、
     // 「指した2つの間」に入る。
     const at2 = halves(rows()[0]);
     pointerDownAt(gripOf(rows()[2]), 9000, { button: 0 }); // 別の操作＝十分離れた時刻
-    fireEvent.pointerMove(rows()[0], at2.back);
-    fireEvent.pointerUp(window);
+    dragOver(rows()[0], at2.back);
+    dragEnd();
     expect(useProjectStore.getState().scenes.map((s) => s.sceneId)).toEqual(["scene_002", "scene_003", "scene_001"]);
   });
 });
