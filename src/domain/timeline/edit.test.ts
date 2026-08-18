@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
+  addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipFade, setClipSourceStart, setClipSpeed, setClipText, setClipVolume, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { validateTimelineDoc } from './validateTimelineDoc';
@@ -593,6 +593,95 @@ describe('トラック（列）', () => {
   });
 });
 
+// #724：兄弟は全部持っているのに `setTrackFlag` だけ同値チェックが無く、空振りの取り消しを積んでいた。
+describe('setTrackFlag（列の固定・非表示）', () => {
+  it('同じ値なら同じ文書を返す（取り消しが空振りしない）', () => {
+    const d = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] });
+    expect(setTrackFlag(d, 'track_001', 'locked', true)).toBe(d);
+    expect(setTrackFlag(d, 'track_001', 'hidden', false)).toBe(d); // 未指定＝false と同じ
+  });
+
+  it('値が変われば新しい文書を返す', () => {
+    const d = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }] });
+    const next = setTrackFlag(d, 'track_001', 'locked', true);
+    expect(next).not.toBe(d);
+    expect(next.tracks[0].locked).toBe(true);
+  });
+
+  it('無い列は何もしない（作らない）', () => {
+    const d = doc();
+    expect(setTrackFlag(d, 'track_999', 'locked', true)).toBe(d);
+  });
+});
+
+// #724：音の設定を**音を持たない部品**へ書けてしまい、誰も読まない値が文書に残っていた。
+describe('音の設定は鳴る音を持つ部品だけ（#724）', () => {
+  const withText = () => doc({ clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })] });
+
+  it('文字の部品には速さ・使い始め・音量・フェードを書けない', () => {
+    const d = withText();
+    for (const r of [
+      setClipSpeed(d, 'clip_001', 2),
+      setClipSourceStart(d, 'clip_001', 1),
+      setClipVolume(d, 'clip_001', 0.5),
+      setClipFade(d, 'clip_001', 'in', 1),
+    ]) {
+      expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    }
+  });
+
+  // ⚠️ **「見つかりません」で断らない**＝選び直しても直らない案内になる（§2-5）。
+  it('理由は「音を持っていない」＝見つからないではない', () => {
+    expect(EDIT_BLOCKED.notAudio).not.toBe(EDIT_BLOCKED.notFound);
+  });
+
+  // ⚠️ **速さ・使い始めは音だけ**（`11 §7.6.3.2` の**既存の**決定）＝読み上げの長さは声の実尺で `trimClip`
+  // してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の区間も意味を失う**（決定24）。
+  // レビューで判明＝追記した節に既に書いてあった決定を読まずに `isAudioClip` へ広げていた。
+  it('読み上げには速さ・使い始めを書けない（音量とフェードは書ける）', () => {
+    const v = doc({
+      tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 0, durationSec: 5, voice: { text: 'あ', status: NARRATION_STATUS.none } }],
+    });
+    expect(setClipSpeed(v, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipSourceStart(v, 'clip_001', 1)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipVolume(v, 'clip_001', 0.5).ok).toBe(true);
+    expect(setClipFade(v, 'clip_001', 'in', 1).ok).toBe(true);
+  });
+
+  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）＝逆だと
+  // 「固定を外してください」と言われて外しても直らない（§2-5）。
+  it('固定した列の文字部品でも、理由は「固定」ではなく「音を持っていない」', () => {
+    const d = doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }],
+      clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })],
+    });
+    for (const r of [
+      setClipVolume(d, 'clip_001', 0.5),
+      setClipSpeed(d, 'clip_001', 2),
+      setClipSourceStart(d, 'clip_001', 1), // レビュー指摘＝4つとも固定する（2つだけだと順序の書き違いが残る）
+      setClipFade(d, 'clip_001', 'in', 1),
+    ]) {
+      expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    }
+  });
+
+  it('音・読み上げには従来どおり書ける', () => {
+    const d = doc({
+      tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_003', startSec: 0, durationSec: 5, bundledBgmId: 'found-new-hope' }],
+    });
+    const r = setClipVolume(d, 'clip_001', 0.5);
+    expect(r.ok && r.doc.clips[0].volume).toBe(0.5);
+    const v = doc({
+      tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 0, durationSec: 5, voice: { text: 'あ', status: NARRATION_STATUS.none } }],
+    });
+    const rv = setClipVolume(v, 'clip_001', 0.25);
+    expect(rv.ok && rv.doc.clips[0].volume).toBe(0.25);
+  });
+});
+
 describe('duplicateClip', () => {
   it('同じ列の直後へ複製する（新しい id が付く）', () => {
     const r = duplicateClip(doc({ clips: [clip('clip_001', { startSec: 0, durationSec: 5 })] }), 'clip_001');
@@ -617,21 +706,58 @@ describe('duplicateClip', () => {
 describe('見た目パターンのクリップ（差し込み口が生きている・#632）', () => {
   const tmplClip = (over: Partial<TimelineClip> = {}): TimelineClip =>
     clip('clip_001', { kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_001', x: 0, y: 0, w: 1920, h: 1080, ...over });
+  /**
+   * ⚠️ **素材は文書に実在させる**（#724）＝入れる素材の実在を確かめるようになったので、
+   * 材料にも置いておく。以前は無い素材で通っており、**この穴をテストが隠していた**。
+   */
+  const withAsset = (over: Partial<TimelineProject> = {}): TimelineProject =>
+    doc({
+      // ⚠️ **2件以上置く**（レビュー指摘）＝1件だけだと `.some` と `.every` が同じ結果になり、
+      // 「どれか1つでも一致すれば良い」を「全部一致しないと駄目」に書き違えても**変異が生き残る**。
+      assets: [
+        { assetId: 'asset_001', assetType: 'image', displayName: '写真1', filePath: 'assets/a.png' },
+        { assetId: 'asset_002', assetType: 'image', displayName: '写真2', filePath: 'assets/b.png' },
+      ],
+      ...over,
+    });
 
   describe('setClipAssetRef', () => {
     it('差し込み口に素材を入れる', () => {
-      const r = setClipAssetRef(doc({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_001');
+      const r = setClipAssetRef(withAsset({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_001');
       expect(r.ok && r.doc.clips[0].assetRefs).toEqual({ layer_bg: 'asset_001' });
     });
 
+    // ⚠️ **先頭でない素材も入れられる**（レビュー指摘）＝「どれか1つでも一致すれば良い」を書き違えると、
+    // 2件目以降を選んだときだけ「見つかりません」になる（材料が1件では気づけない）。
+    it('先頭でない素材も入れられる', () => {
+      const r = setClipAssetRef(withAsset({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_002');
+      expect(r.ok && r.doc.clips[0].assetRefs).toEqual({ layer_bg: 'asset_002' });
+    });
+
+    // ⚠️ #724（利用者判断＝操作側で塞ぐ）＝兄弟は全部持っている確認がここだけ無く、**無い素材を指したまま
+    // 保存できた**（開き直すと灰色の枠が焼き込まれる）。V25 を広げるのは見送り＝ここで止める。
+    it('文書に無い素材は入れられない（灰色の枠を作らせない）', () => {
+      const r = setClipAssetRef(withAsset({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_999');
+      expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notFound });
+    });
+
+    // ⚠️ **主張どおりの状態で確かめる**（レビュー指摘）＝正典（`§7.6.3`）の「**素材が消えた後でも空にできる**」は、
+    // **参照先が既に無い文書**でしか確かめられない。材料に素材を置いたままだと、実在確認を
+    // 「参照先が壊れている部品は触らせない」まで広げても（＝**外す道を塞いでも**）気づけない。
+    it('参照先の素材が消えていても「なし」で外せる（外す道を塞がない）', () => {
+      const d = withAsset({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_999' } })] }); // 既に消えた素材を指している
+      const r = setClipAssetRef(d, 'clip_001', 'layer_bg', null);
+      expect(r.ok && r.doc.clips[0].assetRefs).toEqual({});
+    });
+
     it('「なし」はキーごと落とす（null と未指定は解決が同じ＝形も揃える）', () => {
-      const d = doc({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
+      const d = withAsset({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
       const r = setClipAssetRef(d, 'clip_001', 'layer_bg', null);
       expect(r.ok && r.doc.clips[0].assetRefs).toEqual({});
     });
 
     it('同じものを入れ直しても文書は変わらない（取り消しが空振りしない）', () => {
-      const d = doc({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
+      const d = withAsset({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
       const r = setClipAssetRef(d, 'clip_001', 'layer_bg', 'asset_001');
       expect(r.ok && r.doc).toBe(d);
     });
