@@ -5,7 +5,7 @@ import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
-import { ASSET_TYPE, NARRATION_STATUS, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
+import { ASSET_TYPE, NARRATION_STATUS, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
 import { isExportFinished } from "../../domain/export/exportProgress";
 import type { ExportProgressEvent, ExportRunPhase } from "../../domain/export/exportProgress";
@@ -55,6 +55,24 @@ import { validateTimelineProject } from "../../domain/validation/generated/valid
 import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
+import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
+import { KEPT_PREVIOUS_VOICE_SUFFIX } from "../uiLabels";
+
+/**
+ * 声を作れなかったときの知らせ（#755-3）。**前の声がそのまま使えるときだけ**その旨を添える。
+ *
+ * ⚠️ **判断は印と揃える**＝据え置いた（`generated` のまま）ときだけ言う。印は `failed` にするのに
+ * 「そのまま使えます」と言うと、**古い文の声を使ってよい**と誤解させる（文を変えた直後がこれ）。
+ * ⚠️ **鳴らす材料があることも見る**＝印が「作成済み」でも音声を読み込めていないことがある
+ *（そのときは鳴らないので「使えます」は嘘になる）。
+ * ⚠️ **区切りを入れる**＝合成側から来た生の文字列が句点で終わらないと1文に繋がって読めなくなる。
+ */
+function joinVoiceFailure(e: unknown, before: NarrationStatus, hasAudio: boolean): string {
+  const base = typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。";
+  const kept = statusAfterVoiceFailure(before) === NARRATION_STATUS.generated && hasAudio;
+  if (!kept) return base;
+  return `${base}${base.endsWith("。") ? "" : "。"}${KEPT_PREVIOUS_VOICE_SUFFIX}`;
+}
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
@@ -1741,6 +1759,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           // （clearPendingNarrations）。開始済みの合成は下の完了処理でそのまま反映＝作った音声を捨てない。
           if (get()._narrationRunSeq !== runSeq) break;
           const input = resolveLineVoice(line, base);
+          /** **作り始める前**の印（`pending` を書く前に控える）＝失敗時に据え置いてよいかを決める。 */
+          const statusBefore = line.status;
           const key = lineAudioKey(sceneId, line.lineId);
           const token = nextSynthSeq(key); // この合成要求の世代（後発が来たら先発の完了は無視される）
           try {
@@ -1796,9 +1816,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                   saveStatus: "idle",
                 };
               }
+              // ⚠️ **作り始める前が「作成済み」なら「作れなかった」にしない**（#755-3）＝その声は
+              // いまの文のものとして文書が既に言っていたので、そのまま鳴って動画にも入る。
+              // `failed` を書くと「作れませんでした」と出ながら声は鳴る、が**文書に残る**。
+              // ⚠️ **声のファイルの有無で決めない**＝場面の単独ナレーションは文を変えても `voicePath` を
+              // 落とさないので、ファイルで決めると**古い文の声が「作成済み」に復帰**する（新しい字幕に
+              // 古い声が乗った動画が成功として出る）。添え書きは**鳴らす材料**（保存済みの音声）で判断する。
               return {
-                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.failed) : s)),
-                narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, statusAfterVoiceFailure(statusBefore)) : s)),
+                narrationError: joinVoiceFailure(e, statusBefore, st.narrationAudioById[key] != null),
                 saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（sentinel が保存中の変化を取りこぼさない・#390 レビュー）
               };
             });
@@ -1810,6 +1836,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     if (scene.narration.text.trim().length === 0) return;
     if (scene.narration.status === NARRATION_STATUS.pending) return; // 多重起動防止（連打・再入）
+    /** **作り始める前**の印（`pending` を書く前に控える）＝失敗時に据え置いてよいかを決める。 */
+    const statusBefore = scene.narration.status;
     const setStatus = (status: Scene["narration"]["status"]) =>
       set((st) => ({
         scenes: st.scenes.map((s) =>
@@ -1872,9 +1900,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             saveStatus: "idle",
           };
         }
+        // 掛け合いの行と同じ理由（#755-3）＝作り始める前が「作成済み」なら据え置く。
         return {
-          scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.failed } } : s)),
-          narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+          scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: statusAfterVoiceFailure(statusBefore) } } : s)),
+          narrationError: joinVoiceFailure(e, statusBefore, st.narrationAudioById[sceneId] != null),
           saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（#390 レビュー）
         };
       });

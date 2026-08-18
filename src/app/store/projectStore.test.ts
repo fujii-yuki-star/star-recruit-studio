@@ -217,6 +217,94 @@ describe('projectStore generateNarration 掛け合い（行ごと・ADR-0015 PR-
     expect(useProjectStore.getState().narrationError).toBeTruthy();
     spy.mockRestore();
   });
+
+  // ⚠️ #755-3：印は**文書に残る**が、失敗のたびに `failed` を書くと「作れませんでした」と出ながら
+  // 前に作った声は鳴り続ける（開き直しても消えない）。判断材料は**作り始める前の印**。
+  it('前が「作成済み」なら、作り直しに失敗しても据え置く（#755-3）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        narration: { text: 'ひとこと', status: 'generated', voicePath: 'voices/scene_001.wav' },
+        warnings: [],
+      }] as never,
+      narrationAudioById: { scene_001: 'data:audio/wav;base64,AAAA' }, // 鳴らす材料がある
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('合成エラー');
+    await useProjectStore.getState().generateNarration('scene_001');
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].narration.status).toBe('generated');
+    expect(st.narrationError).toContain('前に作った声はそのまま使えます');
+    spy.mockRestore();
+  });
+
+  // ⚠️ **声のファイルの有無で決めない**（レビューで3観点が独立に指摘）＝場面の単独ナレーションは
+  // セリフを変えても `voicePath` を落とさない。ファイルで決めると**古い文の声が「作成済み」に復帰**し、
+  // 「全場面の声ができました」に化けて、**新しい字幕に古い声が乗った動画が成功として出る**。
+  it('セリフを変えた後（作成済みではない）なら、古い声が残っていても「作れなかった」を残す（#755-3）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        // セリフを書き換えた直後＝印は none だが、`voicePath` と古い音声は残っている。
+        narration: { text: 'あたらしい文', status: 'none', voicePath: 'voices/scene_001.wav' },
+        warnings: [],
+      }] as never,
+      narrationAudioById: { scene_001: 'data:audio/wav;base64,AAAA' },
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('合成エラー');
+    await useProjectStore.getState().generateNarration('scene_001');
+    expect(useProjectStore.getState().scenes[0].narration.status).toBe('failed'); // 古い声を「作成済み」に戻さない
+    // ⚠️ **「そのまま使えます」も言わない**＝印は「作れなかった」なのに使ってよいと言うと、
+    // 古い文の声で書き出してしまう。添え書きの判断は印と揃える。
+    expect(useProjectStore.getState().narrationError).not.toContain('前に作った声はそのまま使えます');
+    spy.mockRestore();
+  });
+
+  // ⚠️ 印が「作成済み」でも、**音声を読み込めていなければ鳴らない**＝「そのまま使えます」は嘘になる。
+  it('前が「作成済み」でも、鳴らす音声が無ければ「そのまま使えます」と言わない（#755-3）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        narration: { text: 'ひとこと', status: 'generated', voicePath: 'voices/scene_001.wav' },
+        warnings: [],
+      }] as never,
+      narrationAudioById: {}, // 読み込めていない
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('合成エラー');
+    await useProjectStore.getState().generateNarration('scene_001');
+    expect(useProjectStore.getState().narrationError).not.toContain('前に作った声はそのまま使えます');
+    spy.mockRestore();
+  });
+
+  // 掛け合いの行も同じ規則（片方だけ直すと同じ理由で挙動が割れる）。
+  it('掛け合いの行も、前が「作成済み」なら据え置く（#755-3）', async () => {
+    useProjectStore.setState({
+      scenes: [{
+        sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'photo_intro',
+        templateId: 'photo_left_text_right_yuko_v1', durationSec: 8, assetRefs: {},
+        character: { enabled: false, characterId: 'yuko' }, texts: {},
+        narration: { text: '', status: 'none' },
+        lines: [{ lineId: 'line_001', text: 'いち', status: 'generated', voicePath: 'voices/scene_001__line_001.wav' }],
+        warnings: [],
+      }] as never,
+      narrationAudioById: { 'scene_001/line_001': 'data:audio/wav;base64,AAAA' },
+      isGeneratingNarration: false,
+    });
+    const spy = vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue('合成エラー');
+    await useProjectStore.getState().generateNarration('scene_001');
+    const st = useProjectStore.getState();
+    expect(st.scenes[0].lines?.[0].status).toBe('generated');
+    expect(st.narrationError).toContain('前に作った声はそのまま使えます');
+    spy.mockRestore();
+  });
 });
 
 describe('projectStore 要素アニメーション（④・ADR-0019 (1c)）', () => {

@@ -48,6 +48,7 @@ import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoice
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
 import { importVoiceFile } from "../../infrastructure/voiceFs";
 import { NARRATION_STATUS, TIMELINE_CLIP_KIND } from "../../domain/enums";
+import { statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
 import type { NarrationStatus } from "../../domain/enums";
 import type { TimelineVoice } from "../../domain/timeline/types";
 import type { VoiceSettings } from "../../domain/project/types";
@@ -68,7 +69,7 @@ import {
 } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import type { Template } from "../../domain/template/types";
-import { exportBlockedMessage } from "../uiLabels";
+import { exportBlockedMessage, KEPT_PREVIOUS_VOICE_SUFFIX } from "../uiLabels";
 import { OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, useExportLockStore } from "./exportLock";
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
@@ -80,6 +81,16 @@ const LOAD_FAILED_MESSAGE = "この動画を開けませんでした。一覧か
 // 声を作れなかったときの文言（§2-5＝次の行動／§2-3＝技術用語を出さない）。
 const VOICE_FAILED_MESSAGE = "声を作れませんでした。しばらくしてから、もう一度お試しください。";
 const VOICE_SAVE_FAILED_MESSAGE = "作った声を保存できませんでした。もう一度お試しください。";
+/**
+ * 前に作った声が**そのまま使える**ときだけ、それを添える（#755-3＝消えたと思わせない）。
+ *
+ * ⚠️ **条件は2つ**（`projectStore` の `joinVoiceFailure` と同じ・`11 §7.6.3`）＝**印を据え置いた**
+ * かつ**鳴らす材料がある**。印を `failed` にするのに「そのまま使えます」と言うと、**古い文の声を
+ * 使ってよい**と誤解させる。⚠️ ファイルの有無だけで判断していた（PR #791 レビュー 🔴）＝旧バグで
+ * 作られた文書（`failed` なのに `voicePath` が残っている）を開いて再試行すると、まさにそれが出ていた。
+ */
+const keptVoiceSuffix = (before: NarrationStatus, voicePath: string | null | undefined): string =>
+  (statusAfterVoiceFailure(before) === NARRATION_STATUS.generated && voicePath ? KEPT_PREVIOUS_VOICE_SUFFIX : "");
 const VOICE_EXPORTING_MESSAGE = "いま動画を書き出しています。終わってから声を作ってください。";
 const VOICE_DURATION_UNKNOWN_MESSAGE = "声の長さを測れませんでした。部品の長さは手で合わせてください。";
 
@@ -976,6 +987,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
     voiceRunSeq += 1;
     const myRun = voiceRunSeq;
+    /** **作り始める前**の印。失敗したときに据え置いてよいか（＝いまの文の声が既にあるか）はこれで決まる。 */
+    const statusBefore = clip.voice.status;
     /** 自分の回のときだけ印を下ろす（前の回が今の回の印を横取りしない・#755）。 */
     const clearIfMine = (extra: Partial<TimelineState> = {}): void => {
       set(get()._voiceRun === myRun ? { ...extra, generatingVoiceClipId: null, _voiceRun: null } : extra);
@@ -1000,8 +1013,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         return;
       }
       if (!voicePath) {
-        setVoiceStatus(set, get, clipId, NARRATION_STATUS.failed);
-        clearIfMine({ voiceError: VOICE_SAVE_FAILED_MESSAGE });
+        // ⚠️ **作り始める前が「作成済み」なら印は据え置く**（#755-3）＝鳴る側は `voicePath` しか見ないので、
+        // `failed` を書くと「作れませんでした」と出ながら声は鳴る、が**文書に残る**。
+        setVoiceStatus(set, get, clipId, statusAfterVoiceFailure(statusBefore));
+        clearIfMine({ voiceError: `${VOICE_SAVE_FAILED_MESSAGE}${keptVoiceSuffix(statusBefore, current.voice.voicePath)}` });
         void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
         return;
       }
@@ -1031,9 +1046,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     } catch {
       // 失敗も成功と同じく**別の文書の部品を巻き込まない**（id は文書ごとに採番＝同じ id が別文書にもある）。
       const now = get().doc;
-      if (now && now.projectId === doc.projectId && now.clips.some((c) => c.id === clipId)) {
-        setVoiceStatus(set, get, clipId, NARRATION_STATUS.failed);
-        set({ voiceError: VOICE_FAILED_MESSAGE });
+      const failed = now?.clips.find((c) => c.id === clipId);
+      if (now && now.projectId === doc.projectId && failed) {
+        // 上と同じ理由＝**作り始める前が「作成済み」なら作れなかったことにしない**（#755-3）。
+        setVoiceStatus(set, get, clipId, statusAfterVoiceFailure(statusBefore));
+        set({ voiceError: `${VOICE_FAILED_MESSAGE}${keptVoiceSuffix(statusBefore, failed.voice?.voicePath)}` });
         void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
       }
       clearIfMine();

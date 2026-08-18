@@ -164,6 +164,64 @@ describe('generateSelectedVoice', () => {
     expect(written.clips[0].voice).toMatchObject({ status: 'failed' });
   });
 
+  // ⚠️ #755-3：印は**文書に残る**が、鳴らす側・書き出す側は `voicePath` しか見ない。前に作った声が
+  // 残っている状態で作り直しに失敗したとき `failed` を書くと、**声は鳴るのに「作れませんでした」**が
+  // 開き直しても消えない（文や声を変えたときは音声が外れるので、残っている声はいまの文のもの＝使える）。
+  it('前に作った声が残っているなら、作り直しに失敗しても「作れなかった」ことにしない（#755-3）', async () => {
+    await open(doc({
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 2, durationSec: 3, voice: { text: 'ひとこと', status: 'generated', voicePath: 'voices/old.wav' } }],
+    }));
+    vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue(new Error('つながらない'));
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    await useTimelineStore.getState().generateSelectedVoice();
+
+    const voice = useTimelineStore.getState().doc?.clips[0].voice;
+    expect(voice).toMatchObject({ status: 'generated', voicePath: 'voices/old.wav' }); // 鳴る声はそのまま
+    expect(useTimelineStore.getState().voiceError).toContain('前に作った声はそのまま使えます');
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    const written = JSON.parse(save.mock.calls[save.mock.calls.length - 1][1] as string) as TimelineProject;
+    expect(written.clips[0].voice).toMatchObject({ status: 'generated' }); // 文書にも嘘を書かない
+  });
+
+  // ⚠️ レビュー指摘＝**保存に失敗した経路**（合成は成功・取り込みが `null`）は未検証だった。
+  it('保存に失敗しても、前が「作成済み」なら据え置く（#755-3）', async () => {
+    await open(doc({
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 2, durationSec: 3, voice: { text: 'ひとこと', status: 'generated', voicePath: 'voices/old.wav' } }],
+    }));
+    vi.spyOn(voiceFsMod, 'importVoiceFile').mockResolvedValue(null); // 保存に失敗
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    await useTimelineStore.getState().generateSelectedVoice();
+
+    expect(useTimelineStore.getState().doc?.clips[0].voice).toMatchObject({ status: 'generated', voicePath: 'voices/old.wav' });
+    expect(useTimelineStore.getState().voiceError).toContain('前に作った声はそのまま使えます');
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    const written = JSON.parse(save.mock.calls[save.mock.calls.length - 1][1] as string) as TimelineProject;
+    expect(written.clips[0].voice).toMatchObject({ status: 'generated' });
+  });
+
+  // ⚠️ **文を変えた後は据え置かない**（判断材料は作り始める前の印）＝声のファイルで決めると
+  // 古い文の声が「作成済み」に戻る。タイムライン形式は文を変えると `voicePath` も落ちるが、
+  // **規則としてはどちらの形式でも同じ**（片方だけ別の判断にしない）。
+  it('前が「作成済み」でないなら、失敗は「作れなかった」を残す（#755-3）', async () => {
+    await open(doc({
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 2, durationSec: 3, voice: { text: 'ひとこと', status: 'none', voicePath: 'voices/old.wav' } }],
+    }));
+    vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue(new Error('つながらない'));
+    await useTimelineStore.getState().generateSelectedVoice();
+    expect(useTimelineStore.getState().doc?.clips[0].voice?.status).toBe('failed');
+    // ⚠️ **添え書きも出さない**（PR #791 レビュー 🔴）＝印は「作れなかった」なのに「そのまま使えます」と
+    // 言うと、古い文の声を使ってよいと誤解させる。印だけ見て通していたのでここで固定する。
+    expect(useTimelineStore.getState().voiceError).not.toContain('前に作った声');
+  });
+
+  it('声が無いまま失敗したときは「作れなかった」を残す（次に開いたときも分かる）', async () => {
+    await open(doc());
+    vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue(new Error('つながらない'));
+    await useTimelineStore.getState().generateSelectedVoice();
+    expect(useTimelineStore.getState().doc?.clips[0].voice?.status).toBe('failed');
+    expect(useTimelineStore.getState().voiceError).not.toContain('前に作った声');
+  });
+
   it('文が空のときは作りに行かない', async () => {
     await open(doc({ clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 0, durationSec: 3, voice: { text: '  ', status: 'none' } }] }));
     await useTimelineStore.getState().generateSelectedVoice();
