@@ -182,6 +182,9 @@ export function swallowedByNextTransitionSceneNumbers(scenes: Scene[]): number[]
     // 残りが 0 になるので、そのまま数えると**存在しない切り替えを短くしてください**と案内してしまう。
     const byNext = steps[i]?.durationSec ?? 0;
     if (byNext <= 0) return;
+    // ⚠️ **自分の入場も引く**（式としての正しさ）。ただし②が立つとき `steps[i-1]` は必ず 0＝両側に
+    // 切り替えがある場面は予算（#727）が救うので、ここには来ない。**書き違いを守るのはテスト**
+    // （「次の入場が尺の一部しか覆わないとき」＝二重に数えると誤検出になる）。
     const remaining = s.durationSec - (steps[i - 1]?.durationSec ?? 0) - byNext;
     // ⚠️ **1フレーム未満も「残っていない」**（レビュー指摘）＝①は ε だけ残る形まで拾うのに、ここを
     // `<= 0` にすると半フレーム残る場面が無言になる（既定 0.5 秒の切り替えだけで到達する）。

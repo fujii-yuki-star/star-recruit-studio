@@ -255,6 +255,17 @@ describe('swallowedByTransitionSceneNumbers（切り替えに飲み込まれる�
     expect(swallowedByTransitionSceneNumbers([sc(0)])).toEqual([]);
   });
 
+  // ⚠️ レビュー指摘＝②のテストが「尺を確実に超える／明らかに効かない」の両極端しかなく、**式そのもの**を
+  // 守れていなかった（次の入場を二重に数える書き違いを入れても全部緑のまま通った）。
+  // 覆う量が**尺の半分〜尺未満**という中間のときに知らせないことを固定する。
+  it('次の入場が尺の一部しか覆わないときは知らせない（式を二重に数えない）', () => {
+    // 場面2（4秒）は次の入場 3 秒だけを受ける＝1秒は単独で映る。
+    const scenes = [sc(10), sc(4), sc(10, { in: 'fade', out: 'fade', durationSec: 3 })];
+    expect(swallowedByTransitionSceneNumbers(scenes)).toEqual([]);
+    const { steps } = transitionTimeline([10, 4, 10], [0, 0, 3]);
+    expect(4 - steps[0].durationSec - steps[1].durationSec).toBeCloseTo(1, 6);
+  });
+
   // ⚠️ **残る穴**（意図して残す）＝隣の境界だけを見るので、2つ以上前まで覆う長い切り替えは拾わない。
   it('2つ以上前の場面までは見ない（隣の境界だけ・既知の穴）', () => {
     const scenes = [sc(5), sc(0.4), sc(0.4), sc(6, { in: 'fade', out: 'fade', durationSec: 5 })];
