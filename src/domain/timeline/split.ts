@@ -4,19 +4,28 @@
 // - 絵（見た目パターン・素材・文字・図形・字幕）＝**時間を切るだけ**。
 //   ⚠️ ただし**動き（キーフレーム）は再基準化し、分割点の値を両端に焼く**
 //   （後半の時刻は自分の先頭からの秒なので、そのまま持ち越すと動きが飛ぶ）。
-//   ⚠️ **焼けるのは「そのときの値」だけで、カーブの形は持ち越せない**ので、**直線でない動きの
-//   区間の中では分けない**（断る）。値だけ合っていて軌跡が別物、を黙って作らない（#753 で本筋を実装）。
+//   ⚠️ **動き方（カーブ）も前後へ切り分けて焼く**（#753）＝値だけ合っていて軌跡が別物、を作らない。
+//   **表せない形（「両端ゆっくり」など）のときだけ断る**（近い形で置き換えない＝#262 と同じ流儀）。
 // - 音＝**`sourceStartSec` を進める**（素材のどこから鳴らすかが後半でずれる）。
 //   **フェードは前後に残す**（入りは前半・抜けは後半＝真ん中に切れ目の音を作らない）。
 // - **読み上げは切れない**（文と音がずれる）。**連動している字幕も切れない**（読み上げが時間を決める）。
 //
 // 全列いっせいのブレード分割は**入れない**（決定16）＝対象は「選んでいる1つ」だけ。
 import { createAnimationId, createClipId } from '../project/persistence';
-import { easingCurveOf, interpolateKeyframes } from '../project/keyframes';
+import {
+  easingCurveOf,
+  interpolateKeyframes,
+  isLinearCurve,
+  KEYFRAME_PROPS,
+  sameEasingCurve,
+  splitEasingCurve,
+} from '../project/keyframes';
 import { TIMELINE_CLIP_KIND } from '../enums';
 import { TIMELINE_MIN_CLIP_SEC, VOLUME_POINTS_MAX } from '../constants';
+import type { BezierEasing, EasingSpec } from '../enums';
 import type { Keyframe } from '../project/types';
 import type { ClipAnimation, TimelineClip, TimelineProject } from './types';
+import { clampProp } from './keyframeEdit';
 import { EDIT_BLOCKED } from './edit';
 import type { EditBlockedReason } from './edit';
 
@@ -25,6 +34,12 @@ import type { EditBlockedReason } from './edit';
  * 素材の時間を持たないので進めない（意味の無い項目を書かない）。
  */
 const USES_SOURCE_TIME = new Set<string>([TIMELINE_CLIP_KIND.audio, TIMELINE_CLIP_KIND.slot]);
+
+/**
+ * 切れ目が「キーフレームちょうど」と言える幅（＝保存の丸めの単位。`keyframeTimeAt` がマイクロ秒へ丸める）。
+ * これより細かい差は同じ時刻とみなす＝丸めの都合で「区間の途中」に化けない。
+ */
+const KEYFRAME_SNAP_SEC = 1e-6;
 
 /** 分けられない理由（`null`＝分けられる）。 */
 export const SPLIT_BLOCKED = {
@@ -38,7 +53,7 @@ export const SPLIT_BLOCKED = {
   outside: 'outside',
   /** 音量の変化の点が上限に達している（境界の点を焼くと超える）。 */
   volumePointsFull: 'volumePointsFull',
-  /** 直線でない動きの**区間の途中**（カーブの形を持ち越せない）。 */
+  /** その動き方を前後へ切り分けられない（#753＝表せない形・置けない値になる。カーブ自体は焼ける）。 */
   curvedEasing: 'curvedEasing',
 } as const;
 export type SplitBlockedReason = (typeof SPLIT_BLOCKED)[keyof typeof SPLIT_BLOCKED];
@@ -66,29 +81,133 @@ export function splitClipIssue(doc: TimelineProject, clipId: string, atSec: numb
     const after = pts.filter((p) => p.timeSec > head).length + 1;
     if (before > VOLUME_POINTS_MAX || after > VOLUME_POINTS_MAX) return SPLIT_BLOCKED.volumePointsFull;
   }
-  // ⚠️ **直線でない動きの途中では分けない**（#750 レビュー）。境界に焼くのは「そのときの値」だけで、
-  // **カーブの形は持ち越せない**（部分曲線を焼き直す必要がある＝#753）。断らずに切ると
-  // **速さの変わり方が黙って変わる**（値だけ合っていて軌跡が別物）。直線の区間・キーフレームの上は通す。
+  // ⚠️ **動き方（カーブ）を前後へ焼けないときだけ断る**（#753）。**焼けるかどうかは焼く関数自身が決める**
+  // ＝`splitKeyframes` が `null` を返したときだけ断る（門と実物で規則が割れない・押せるのに何も起きない、も作らない）。
   const own = (doc.animations ?? []).find((a) => a.targetId === clipId);
-  if (own && crossesCurvedSegment(own.keyframes, head)) return SPLIT_BLOCKED.curvedEasing;
+  if (own && splitKeyframes(own.keyframes, head) == null) return SPLIT_BLOCKED.curvedEasing;
   return null;
 }
 
 /**
- * その時刻が**直線でない動きの区間の中**を通るか（#750 レビュー）。
- * 区間の境目（キーフレームちょうど）や、直線の区間なら `false`＝分けても軌跡が変わらない。
+ * キーフレームの時刻は**マイクロ秒へ丸めて**保存する（`keyframeTimeAt`）ので、それより細かい差は
+ * **同じ時刻**とみなす（#753 レビュー 🟡）。
+ *
+ * ⚠️ これが無いと、**開始秒しだいで結果が変わる**＝`headSec = atSec − clip.startSec` の引き算で
+ * 1e-16 のずれが出るだけで「区間の途中」と見なされ、**幅ゼロの区間**として断られる。
+ * 断り文言は「『動き』の欄に出ている秒数の位置で分けてください」と**まさにその操作を薦めている**ので、
+ * 案内した次の行動へ到達できなくなる（§2-5・ADR-0026①）。再生位置のコマ量子化（1/30 秒）と
+ * マイクロ秒丸めのずれ（3e-7 秒）も同じ理由でここへ落ちる。
  */
-export function crossesCurvedSegment(keyframes: readonly Keyframe[], atSec: number): boolean {
-  const sorted = [...keyframes].sort((a, b) => a.timeSec - b.timeSec);
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const from = sorted[i];
-    const to = sorted[i + 1];
-    if (!(atSec > from.timeSec && atSec < to.timeSec)) continue;
-    const curve = easingCurveOf(from.easing);
-    // `null`＝3次ベジェで表せない（`ease-in-out`）／直線 `[0,0,1,1]` 以外＝カーブ。
-    return curve == null || !(curve[0] === 0 && curve[1] === 0 && curve[2] === 1 && curve[3] === 1);
+function snapToKeyframe(keyframes: readonly Keyframe[], atSec: number): number {
+  const near = keyframes.find((k) => Math.abs(k.timeSec - atSec) <= KEYFRAME_SNAP_SEC);
+  return near ? near.timeSec : atSec;
+}
+
+/**
+ * 切れ目をまたぐ区間の**動き方をどう振り分けるか**（`null`＝振り分けられない＝分けない・#753）。
+ *
+ * ⚠️ **区間はプロパティごとに違う**（補間は「そのプロパティを持つKFだけ」で区間を作る）。
+ * ⚠️ **区間 [前KF, 当KF] の動き方は「当KF」が持つ**（正典 `11 §7.6`）＝**出る側ではなく入る側**。
+ */
+interface EasingSplitPlan {
+  /** 前半の切れ目のキーフレーム（＝前半の最後）に書く動き方。未指定＝直線。 */
+  head?: EasingSpec;
+  /** 後半で**またいだ区間の行き先**に書き直す動き方。未指定＝直線。 */
+  tail?: EasingSpec;
+  /** 書き直す相手（元の並びでの位置）。 */
+  tailTargets: Set<number>;
+}
+
+function easingSplitPlan(keyframes: readonly Keyframe[], headSec: number): EasingSplitPlan | null {
+  const crossings: { toIndex: number; frac: number; easing: EasingSpec | undefined }[] = [];
+  for (const prop of KEYFRAME_PROPS) {
+    const idx = keyframes
+      .map((_, i) => i)
+      .filter((i) => keyframes[i][prop] != null)
+      .sort((a, b) => keyframes[a].timeSec - keyframes[b].timeSec);
+    for (let j = 1; j < idx.length; j += 1) {
+      const from = keyframes[idx[j - 1]];
+      const to = keyframes[idx[j]];
+      if (!(headSec > from.timeSec && headSec < to.timeSec)) continue;
+      crossings.push({
+        toIndex: idx[j],
+        frac: (headSec - from.timeSec) / (to.timeSec - from.timeSec),
+        easing: to.easing,
+      });
+      break; // 1つのプロパティが2つの区間をまたぐことはない
+    }
   }
-  return false;
+
+  // **切れ目ちょうど**にキーフレームがあるなら、そこへ入る区間の動き方は**切らずにそのまま**引き継ぐ
+  // （そのキーフレームは境界へ置き換わるので、引き継がないと**手前の区間が直線に化ける**）。
+  // ⚠️ **同じ時刻のキーフレームは1つ**（`11 §7.6.3.1`）＝引き継ぐ形も高々1つ。
+  let head: BezierEasing['bezier'] | null = null;
+  const atCut = keyframes.findIndex((k) => k.timeSec === headSec);
+  if (atCut >= 0 && entersFromBefore(keyframes, atCut, headSec)) {
+    head = easingCurveOf(keyframes[atCut].easing);
+    if (head == null) return null; // 表せない形（「両端ゆっくり」）は引き継げない
+  }
+  if (crossings.length === 0 && head == null) return { tailTargets: new Set() };
+
+  let tail: BezierEasing['bezier'] | null = null;
+  const tailTargets = new Set<number>();
+  for (const c of crossings) {
+    const cut = splitEasingCurve(c.easing, c.frac);
+    if (cut == null) return null; // 表せない形（`ease-in-out` 等）
+    // ⚠️ **前半は必ず1つ**＝切れ目のキーフレームは分割で新しく作る**1つの入れ物**なので、そこへ
+    // 2つ以上の形が要るなら**分けない**（どれかを優先すると、優先しなかった側の動きが黙って変わる）。
+    // 引き継ぐ形（切れ目ちょうどのキーフレーム）とも突き合わせる。
+    if (head != null && !sameEasingCurve(head, cut.head)) return null;
+    // ⚠️ **後半の突き合わせは、構造上の制約より広い**（レビュー指摘・#753）。書き直す相手は
+    // またぐ区間ごとに**別のキーフレーム**なので、本当は別々の形を書いても矛盾しない。
+    // それでも1つに揃えているのは、**前半が一致していて後半だけ食い違う組を作れなかった**ため
+    // （12,280 通りの部分曲線を総当たりして、前半が 1e-9 まで一致する組は0件）。挙動が変わらない
+    // 書き換えはその分岐を区別するテストが書けないので、**広いことを明記して残す**。
+    // 緩めるときは `tail` を「行き先ごとの表」にする（書き込み側も行き先ごとに引く）。
+    if (tail != null && !sameEasingCurve(tail, cut.tail)) return null;
+    head = cut.head;
+    tail = cut.tail;
+    tailTargets.add(c.toIndex);
+  }
+  // ⚠️ **またいだ区間の行き先が、またがない区間の行き先でもある**とき、書き直すと**そちらの動きが変わる**。
+  // （例＝後半だけで完結する区間が同じキーフレームへ入っている）。同じ形でなければ分けない。
+  for (const i of tailTargets) {
+    if (!servesSegmentInsideTail(keyframes, i, headSec)) continue;
+    if (!sameEasingCurve(easingCurveOf(keyframes[i].easing), tail)) return null;
+  }
+  // 直線（＝進み具合を変えない）なら**書かない**（未指定＝直線＝いままでの形のまま）。
+  const plan: EasingSplitPlan = { tailTargets };
+  if (head != null && !isLinearCurve(head)) plan.head = { bezier: head };
+  if (tail != null && !isLinearCurve(tail)) plan.tail = { bezier: tail };
+  return plan;
+}
+
+/**
+ * そのキーフレームへ、**切れ目より前**から入る区間があるか（＝前半で完結する区間の行き先か）。
+ * その動き方は境界のキーフレームが引き継ぐ必要がある。
+ */
+function entersFromBefore(keyframes: readonly Keyframe[], index: number, headSec: number): boolean {
+  const target = keyframes[index];
+  return KEYFRAME_PROPS.some((prop) => {
+    if (target[prop] == null) return false;
+    return keyframes.some((k, i) => i !== index && k[prop] != null && k.timeSec < headSec);
+  });
+}
+
+/**
+ * そのキーフレームが、**切れ目より後ろだけで完結する区間**の行き先にもなっているか。
+ * 切れ目ちょうどのキーフレームは境界へ吸収されるので、そこから入る区間も「後ろだけ」に含める。
+ */
+function servesSegmentInsideTail(keyframes: readonly Keyframe[], index: number, headSec: number): boolean {
+  const target = keyframes[index];
+  return KEYFRAME_PROPS.some((prop) => {
+    if (target[prop] == null) return false;
+    const prev = keyframes
+      .filter((k, i) => i !== index && k[prop] != null && k.timeSec < target.timeSec)
+      .sort((a, b) => a.timeSec - b.timeSec)
+      .pop();
+    return prev != null && prev.timeSec >= headSec;
+  });
 }
 
 /**
@@ -102,20 +221,38 @@ export function crossesCurvedSegment(keyframes: readonly Keyframe[], atSec: numb
  */
 export function splitKeyframes(
   keyframes: readonly Keyframe[],
-  headSec: number,
-): { head: Keyframe[]; tail: Keyframe[] } {
+  atSec: number,
+): { head: Keyframe[]; tail: Keyframe[] } | null {
   if (keyframes.length === 0) return { head: [], tail: [] };
+  const headSec = snapToKeyframe(keyframes, atSec);
+  const plan = easingSplitPlan(keyframes, headSec);
+  if (plan == null) return null;
   const at = interpolateKeyframes(keyframes, headSec);
+  // ⚠️ **置けない値は焼かない**（切れ目の値が `Keyframe` として保存できる範囲を外れるなら分けない）。
+  // 行き過ぎて戻るカーブは区間の**途中で端を越える**ので、そこで切ると濃さ 1.09・大きさ −0.07 のような
+  // 値を焼くことになる＝schema が拒み、**分かれて見えるのに保存されない**文書になる（#753 レビュー 🔴）。
+  // 収めて焼くと軌跡が変わるので、**断る側に倒す**（置ける値の規則は `keyframeEdit` と1つ）。
+  for (const prop of KEYFRAME_PROPS) {
+    const v = at[prop];
+    if (v != null && clampProp(prop, v) !== v) return null;
+  }
   // 補間は「指定の無いプロパティ」を返さない＝**元の並びが持っている項目だけ**を焼く
   // （持っていない項目を足すと、切っただけで動きの対象が増える）。
   const boundary: Keyframe = { timeSec: 0, ...at };
   const head = keyframes.filter((k) => k.timeSec < headSec).map((k) => ({ ...k }));
-  head.push({ ...boundary, timeSec: headSec });
+  // 前半の最後＝またいだ区間の**前半ぶんの動き方**が入る（区間の動き方は入る側が持つ）。
+  head.push({ ...boundary, timeSec: headSec, ...(plan.head ? { easing: plan.head } : {}) });
+  // 後半の先頭は**いちばん最初のキーフレーム**＝手前に区間が無いので動き方は持たない。
   const tail: Keyframe[] = [{ ...boundary }];
-  for (const k of keyframes) {
-    if (k.timeSec <= headSec) continue;
-    tail.push({ ...k, timeSec: k.timeSec - headSec });
-  }
+  keyframes.forEach((k, i) => {
+    if (k.timeSec <= headSec) return;
+    const moved: Keyframe = { ...k, timeSec: k.timeSec - headSec };
+    if (plan.tailTargets.has(i)) {
+      if (plan.tail) moved.easing = plan.tail;
+      else delete moved.easing; // 後半ぶんが直線＝**元のカーブを残さない**（残すと動きが変わる）
+    }
+    tail.push(moved);
+  });
   return { head, tail };
 }
 
@@ -186,7 +323,11 @@ export function splitClip(
   const own = anims.find((a) => a.targetId === clipId);
   let animations: ClipAnimation[] | undefined = doc.animations;
   if (own) {
-    const { head: kfHead, tail: kfTail } = splitKeyframes(own.keyframes, headSec);
+    const cut = splitKeyframes(own.keyframes, headSec);
+    // 門（`splitClipIssue`）が同じ関数を通しているのでここへは来ないが、**黙って焼かずに進めない**
+    // ＝動きが消えた帯を成功として返さない（§2-5）。
+    if (cut == null) return { ok: false, reason: SPLIT_BLOCKED.curvedEasing };
+    const { head: kfHead, tail: kfTail } = cut;
     const nextAnims = anims.map((a) => (a.id === own.id ? { ...a, keyframes: kfHead } : a));
     nextAnims.push({ id: createAnimationId(anims.map((a) => a.id)), targetId: newId, keyframes: kfTail });
     animations = nextAnims;
