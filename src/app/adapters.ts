@@ -7,12 +7,12 @@ import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/projec
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
-import { shortenedTransitionSceneNumbers, swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
+import { shortenedTransitionSceneNumbers, swallowedByNextTransitionSceneNumbers, swallowedByOwnTransitionSceneNumbers, swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
 import { subtitleOverflowsCanvas } from "../renderer/layout";
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
 //（以前は uiLabels → adapters で `formatSceneNumbers` を借りており逆向きだった・#563 レビュー）。
-import { formatSceneNumbers, subtitleOverflowPrecheckDetail } from "./uiLabels";
+import { formatSceneNumbers, subtitleOverflowPrecheckDetail, swallowedByNextPrecheckDetail } from "./uiLabels";
 import type { Asset, ElementAnimation, Part, Scene, Warning } from "../domain/project/types";
 import type { Template } from "../domain/template/types";
 import type { DraftRow, DraftWarning, PrecheckItem } from "./data/mockData";
@@ -272,13 +272,28 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   }
 
   // 切り替えに飲み込まれる場面（#553/#554・ADR-0026④）：切り替えが場面尺以上だと、その場面は総尺に寄与せず
-  // ⚠️ **覆うのは自分の入場だけではない**（#740）＝**次の場面の入場**にも潰される（`[5,4,6]` の場面2）。
-  // その形は1フレームも残らず丸ごと消えるのに、以前はどの警告も出していなかった。
   // ⚠️ **両側に切り替えがある場面はこちらではない**＝予算（#727）が救うので、下の「短くしています」の担当。
+  // ⚠️ ここ（①）は**自分の入場が自分の尺を覆う意図**だけ。**次の場面の入場に覆われる形（②）は上の項目**
+  // ＝触る先が違う（自分には切り替えが無い）ので、案内を分けている（#740 レビュー）。
   // **プレビューには出るのに書き出しでは独立した尺を持たない**（preview≠export）。#553 で場面尺の下限を撤廃する
   // までは構造的に到達不能だった（最短3秒 > 切り替え既定0.5秒）が、「0.3秒の場面＋フェード」が作れるように
   // なったため**黙って壊さず警告で見せる**。原因＋次の行動を示す（§2-5）。クランプの strict 化は #554。
-  const swallowed = swallowedByTransitionSceneNumbers(scenes);
+  // ⚠️ **原因で分ける**（#740 レビュー）＝②（次の場面の切り替えに覆われる）は、その場面自身に切り替えが
+  // 無いので「切り替えを短く」だけ言うと飛んだ先が行き止まりになる。触る先まで含めて言い分ける。
+  const swallowedByNext = swallowedByNextTransitionSceneNumbers(scenes);
+  if (swallowedByNext.length > 0) {
+    // 触るのは**次の場面**なので、番号もそちらを出す（1始まり＝`n + 1`）。
+    items.push({
+      id: "transitionSwallowByNext",
+      label: "切り替えと表示時間",
+      detail: swallowedByNextPrecheckDetail(fmtScenes(swallowedByNext), fmtScenes(swallowedByNext.map((n) => n + 1))),
+      severity: "action",
+      action: "直す",
+      // 飛び先は**覆われている場面**＝そこで「表示時間を長くする」がすぐ押せる（もう一方の直し方は文言が示す）。
+      sceneId: scenes[swallowedByNext[0] - 1]?.sceneId,
+    });
+  }
+  const swallowed = swallowedByOwnTransitionSceneNumbers(scenes);
   if (swallowed.length > 0) {
     items.push({
       id: "transitionSwallow",
@@ -297,8 +312,11 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
   // 「切り替え ≥ 場面尺」しか見ないので、**両側の合計だけが尺を超える帯**（既定なら 0.5〜1.0 秒の場面）は
   // 拾えず**無言**だった。黙って縮めない（§2-5）＝縮めたことと、直し方を出す。
   const shortened = shortenedTransitionSceneNumbers(scenes);
-  // 飲み込まれる場面は上で言っているので、そちらに出た番号はここでは繰り返さない（同じ場面に2つ出さない）。
-  const shortenedOnly = shortened.filter((n) => !swallowed.includes(n));
+  // 飲み込まれる場面（①②とも）は上で言っているので、そちらに出た番号はここでは繰り返さない
+  // （同じ場面に2つ出さない）。⚠️ #740 で②が加わったぶん、**これまで「短くしています」だった場面が
+  // 「単独では映りません」へ入れ替わる**ことがある（直し方の案内は同じ＝表示時間を長く／切り替えを短く）。
+  const allSwallowed = swallowedByTransitionSceneNumbers(scenes);
+  const shortenedOnly = shortened.filter((n) => !allSwallowed.includes(n));
   if (shortenedOnly.length > 0) {
     items.push({
       id: "transitionShortened",

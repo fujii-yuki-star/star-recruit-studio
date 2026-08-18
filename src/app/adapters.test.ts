@@ -656,6 +656,26 @@ describe("buildPrecheckItems：切り替えが表示時間に収まらない（#
   } as Scene);
   const ids = (items: ReturnType<typeof buildPrecheckItems>) => items.map((i) => i.id);
 
+  // ⚠️ #740 レビュー＝②（次の場面の切り替えに覆われる）の**文言と飛び先**を見るテストが無かった。
+  // その場面自身は切り替えを持たないので、「切り替えを短く」だけ言うと飛んだ先が行き止まりになる。
+  it("次の場面の切り替えに覆われる形は、触る先（次の場面）まで示す（#740）", () => {
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(4), sceneOf(6, 5)], assets, [freeTemplate]);
+    expect(ids(items)).toContain("transitionSwallowByNext");
+    const item = items.find((i) => i.id === "transitionSwallowByNext")!;
+    expect(item.detail).toContain("単独では映りません"); // 「動画に出ません」とは言わない（重なって見えている）
+    expect(item.detail).toContain("表示時間を長くする");
+    expect(item.detail).toContain("場面3の切り替えを短く"); // 触るのは次の場面
+    expect(item.sceneId).toBe("scene_4_0"); // 飛び先は覆われている場面（表示時間をすぐ伸ばせる）
+    // ①の項目（自分の切り替えが覆う）とは別物＝同じ場面に2つ出さない。
+    expect(ids(items)).not.toContain("transitionSwallow");
+  });
+
+  it("自分の切り替えが覆う形は従来どおり（原因が違えば案内も違う）", () => {
+    const items = buildPrecheckItems([sceneOf(5), sceneOf(0.3, 0.5)], assets, [freeTemplate]);
+    expect(ids(items)).toContain("transitionSwallow");
+    expect(ids(items)).not.toContain("transitionSwallowByNext");
+  });
+
   it("両側の合計だけが尺を超える帯を知らせる（飲み込まれる警告では拾えない範囲）", () => {
     // 0.8秒の場面に両側 0.5 秒＝合計 1.0 秒。切り替え単体は尺未満なので `transitionSwallow` は出ない。
     const items = buildPrecheckItems([sceneOf(5), sceneOf(0.8, 0.5), sceneOf(5, 0.5)], assets, [freeTemplate]);

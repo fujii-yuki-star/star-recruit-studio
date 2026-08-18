@@ -235,6 +235,31 @@ describe('swallowedByTransitionSceneNumbers（切り替えに飲み込まれる�
   it('次の場面の切り替えが短ければ知らせない（ノイズを出さない）', () => {
     expect(swallowedByTransitionSceneNumbers([sc(5), sc(4), sc(6, { in: 'fade', out: 'fade', durationSec: 0.5 })])).toEqual([]);
   });
+
+  // ⚠️ レビュー指摘＝①は ε（1フレーム）だけ残る形まで拾うのに、②を `残り <= 0` にすると
+  // **半フレームしか残らない場面が無言**になる（既定 0.5 秒の切り替えだけで到達する）。
+  it('1フレーム未満しか残らない場面も知らせる（①と同じ重さで扱う）', () => {
+    const scenes = [
+      sc(6),
+      sc(0.5),
+      sc(1, { in: 'fade', out: 'fade', durationSec: 0.5 }),
+      sc(5, { in: 'fade', out: 'fade', durationSec: 0.5 }),
+    ];
+    expect(swallowedByTransitionSceneNumbers(scenes)).toContain(2);
+  });
+
+  // ⚠️ レビュー指摘＝尺 0 秒の場面は切り替えが無くても残りが 0 になる。そのまま数えると
+  // **存在しない切り替えを短くしてください**と案内してしまう（場面が1つでも出ていた）。
+  it('尺が 0 の場面は、切り替えが無ければ知らせない（無い設定を直せと言わない）', () => {
+    expect(swallowedByTransitionSceneNumbers([sc(8), sc(0), sc(8)])).toEqual([]);
+    expect(swallowedByTransitionSceneNumbers([sc(0)])).toEqual([]);
+  });
+
+  // ⚠️ **残る穴**（意図して残す）＝隣の境界だけを見るので、2つ以上前まで覆う長い切り替えは拾わない。
+  it('2つ以上前の場面までは見ない（隣の境界だけ・既知の穴）', () => {
+    const scenes = [sc(5), sc(0.4), sc(0.4), sc(6, { in: 'fade', out: 'fade', durationSec: 5 })];
+    expect(swallowedByTransitionSceneNumbers(scenes)).toEqual([3]); // 場面2は無言のまま
+  });
 });
 
 // 入場と退場が時間で重ならない（#727）。片方ずつの上限しか見ていなかったので、
