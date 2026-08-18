@@ -15,12 +15,17 @@ import type { EasingSpec } from '../enums';
 import { groupElementIds } from '../project/groupOps';
 import { createAnimationId } from '../project/persistence';
 import type { Keyframe } from '../project/types';
+import { KEYFRAME_PROPS } from '../project/keyframes';
 import { EDIT_BLOCKED } from './edit';
 import type { EditResult } from './edit';
 import type { ClipAnimation, TimelineProject } from './types';
 
-/** キーフレームで動かせるプロパティ（`Keyframe` の可変分＝`interpolateKeyframes` の対象）。 */
-export const KEYFRAME_PROPS = ['x', 'y', 'scale', 'rotation', 'opacity'] as const;
+/**
+ * キーフレームで動かせるプロパティ（`Keyframe` の可変分＝`interpolateKeyframes` の対象）。
+ * ⚠️ **持ち主は補間側**（`domain/project/keyframes`）＝ここは再エクスポート。二重に定義すると、
+ * 項目が増えたとき片方だけ直る（置ける項目と、補間・分割が見る項目がずれる）。
+ */
+export { KEYFRAME_PROPS };
 export type KeyframeProp = (typeof KEYFRAME_PROPS)[number];
 
 /** 置く／直す値（渡したプロパティだけを触る＝`null` で「このプロパティは動かさない」に戻す）。 */
@@ -96,7 +101,7 @@ export function isTargetLocked(doc: TimelineProject, targetId: string): boolean 
  * - `rotation` は**丸めない**＝値は「足す度」なので負や 360 以上に意味がある（逆回転・複数回転。
  *   正典の動きプリセットも `-180` を使う）。schema にも上下限は無い。
  */
-function clampProp(prop: KeyframeProp, v: number): number {
+export function clampProp(prop: KeyframeProp, v: number): number {
   if (prop === 'opacity') return Math.min(Math.max(0, v), 1);
   if (prop === 'scale') return Math.max(GROUP_MIN_SCALE, v);
   return v;

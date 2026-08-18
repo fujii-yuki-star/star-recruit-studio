@@ -535,7 +535,7 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
   TIMELINE_EDIT_EXPLODE_ANCHOR: "動き（拡大・回転）が付いた部品は、そのままバラすと絵がずれます。動きを外してからバラしてください",
   TIMELINE_EDIT_LINKED_SUBTITLE: "連動している字幕を置ける場所がありません。字幕をほかの列へ移すか、連動をやめてください",
-  TIMELINE_EDIT_CURVED_EASING: "動きの途中では分けられません。「動き」の欄に出ている秒数の位置か、動きの付いていない所で分けてください",
+  TIMELINE_EDIT_CURVED_EASING: "この動き方は途中で分けられません。「動き」の欄に出ている秒数の位置か、動きの付いていない所で分けてください",
   TIMELINE_EDIT_PLAYING: "再生を止めてから使えます",
   TIMELINE_PLAY_EXPORTING: "いま動画を書き出しています。終わってから再生できます",
   TIMELINE_EDIT_UNSPLITTABLE: "読み上げと、それに合わせている字幕は分けられません（文と音がずれるため）。字幕だけ分けたいときは「連動する読み上げ」で連動をやめてください",
