@@ -4256,6 +4256,9 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect((canvasEls(container).ov!.children[0] as HTMLElement).style.cursor).toBe("default");
     expect(screen.getByText(/仕上がり確認の上では動かせません/)).toBeInTheDocument();
+    // ⚠️ **次の行動まで見る**（§2-5）＝理由だけ出して行き止まりにしない。ここを見ていなかったので、
+    // 案内から「動き」で調整する道が消えても誰も気づけなかった（#788-1 の変異チェックで判明）。
+    expect(screen.getByText(/「動き」で調整してください/)).toBeInTheDocument();
     expect(screen.getByLabelText("横位置")).toBeInTheDocument(); // 触れる先は残る
   });
 
@@ -4277,6 +4280,26 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(clips().find((c) => c.id === "clip_locked")!.x).toBe(0);
     expect(clips().find((c) => c.id === "clip_free")!.x).toBe(1);
     expect(screen.getByText(/固定された列の部品1個は動かしていません/)).toBeInTheDocument();
+  });
+
+  // ⚠️ #788-1：キャンバスで掴めない理由は**固定した列だけではない**（動きが効いている／まとまりの変形）。
+  // 以前は除外の一言が常に「固定を外してください」で、**動き起因では従っても直らない**案内だった。
+  it("動きが理由で外したときは、固定ではなく**動きの直し方**を案内する（#788-1）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_anim", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "動く" },
+        { id: "clip_free", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 4, x: 0, y: 200, w: 100, h: 50, text: "自由" },
+      ],
+      animations: [{ id: "anim_001", targetId: "clip_anim", keyframes: [{ timeSec: 0, x: 400 }, { timeSec: 4, x: 400 }] }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_anim", "clip_free"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 動かせる方を掴む＝動きの効いている方は一緒に動かさない（その理由を出す）。
+    const els = canvasEls(container).ov!.children;
+    fireEvent.pointerDown(els[1] as HTMLElement, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+    expect(screen.getByText(/動きが効いている部品1個は動かしていません/)).toBeInTheDocument();
+    expect(screen.queryByText(/固定を外してください/)).toBeNull(); // 従っても直らない案内は出さない
   });
 
   it("**同じ組み合わせでは二度と出さない**（見れば分かることを繰り返さない・#773・利用者決定）", () => {
@@ -4357,7 +4380,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/まとまりの変形が効いているので/)).toBeInTheDocument();
+    expect(screen.getByText(/まとまりの変形が効いている部品は/)).toBeInTheDocument();
     expect(screen.queryByText(/「動き」で調整してください/)).toBeNull();
   });
 

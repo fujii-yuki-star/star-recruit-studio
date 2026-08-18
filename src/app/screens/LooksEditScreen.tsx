@@ -34,6 +34,7 @@ import { NumberField } from "../components/NumberField";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { UnsavedMark } from "../components/SaveStatusBadge";
 import { EDITOR_HEADER_CLASS, EditorToolbar } from "../components/EditorToolbar";
+import { KeyboardNudge } from "../components/KeyboardNudge";
 import { ArrowLeftIcon } from "../components/icons";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { FIT_FIELD_LABEL, fitLabel, textKeyLabel, Z_ORDER_LABEL } from "../uiLabels";
@@ -197,6 +198,25 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       return { ...d, layers: d.layers.map((l) => { const m = byId.get(l.id); return m ? { ...l, x: m.x, y: m.y } : l; }) };
     });
   }
+  /**
+   * 矢印キーで少しずつ動かす（#788-3）。**掴んで動かすのと同じ入口**（`onMoveLayers`）を通す＝
+   * 置ける条件や履歴のまとめ方をキーとドラッグで割らない。
+   * ⚠️ **まとまりを選んでいるときはまとまりごと**（場面編集の自由配置と同じ規準・ADR-0026②）。
+   */
+  const onCanvasNudge = (dx: number, dy: number): void => {
+    if (effectiveActiveGroupId != null && activeGroup && !activeGroup.locked) {
+      transformGroup(activeGroup.id, { x: activeGroup.transform.x + dx, y: activeGroup.transform.y + dy });
+      return;
+    }
+    const targets = draft.layers.filter((l) => selectedLayerIds.includes(l.id));
+    if (targets.length > 0) onMoveLayers(targets.map((l) => ({ id: l.id, x: l.x + dx, y: l.y + dy })));
+  };
+  /**
+   * `Delete` で消す（#788-3）。**一覧の削除ボタンと同じ条件・同じ入口**＝最後の1枚は消さない
+   *（`template.schema` の `layers.minItems:1`）。消せないときは**渡さない**＝押しても何も起きない、を作らない。
+   */
+  const canDeleteSelected = selectedLayerId != null && draft.layers.length > 1;
+  const onCanvasDelete = (): void => { if (selectedLayerId) onRemoveLayer(selectedLayerId); };
   // グループ（ADR-0022・#307）。tplGroups は draft 由来（早期 return 後＝非 null）。stale な activeGroup は描画に出さない。
   const tplGroups = draft.groups ?? [];
   const activeGroupStillExists = activeGroupId != null && tplGroups.some((g) => g.id === activeGroupId);
@@ -527,6 +547,14 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const panels: PanelSpec[] = [
     { id: PANEL_ID.preview, title: 'プレビュー', content: (
       <>
+          {/* ⚠️ **キーでも動かせる／消せる**（#788-3・ADR-0034 決定19＝ドラッグ専用の操作を作らない）。
+              購読だけの部品で、場面編集の自由配置と**同じもの**を使う（入力欄・変換中の除外も共通）。
+              書き出し中は他の操作と揃えて止める。 */}
+          <KeyboardNudge
+            active={!isExporting && busyAction === null}
+            onArrow={onCanvasNudge}
+            onDelete={canDeleteSelected ? onCanvasDelete : undefined}
+          />
           <ScenePreview scene={sampleScene} template={draft}>
             <TemplateLayerOverlay
               layers={draft.layers}

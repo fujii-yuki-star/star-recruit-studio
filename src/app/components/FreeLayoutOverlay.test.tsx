@@ -399,6 +399,35 @@ describe("FreeLayoutOverlay: 複数同時リサイズ（#274）", () => {
     );
     expect(onResizeMany.mock.lastCall?.[0]).toHaveLength(2);
   });
+
+  // ⚠️ #788-2：一括移動は「一緒に動かさなかったもの」を知らせるのに、**一括拡縮だけ黙って取り残して**いた
+  // ＝同じ理由で同じ除外をするのに、操作によって知らせたり知らせなかったりする（ADR-0026②）。
+  it("一括拡縮でも、固定して外したものを知らせる（黙って取り残さない・#788-2）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 100, h: 100, zIndex: 2 },
+      { id: "free_003", kind: FREE_ELEMENT_KIND.shape, x: 200, y: 200, w: 100, h: 100, zIndex: 3, locked: true },
+    ];
+    const onSkippedLocked = vi.fn();
+    const { root } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002", "free_003"], onSkippedLocked });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    fireEvent.pointerDown(screen.getByTestId("group-handle-se"), { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    expect(onSkippedLocked).toHaveBeenCalledWith(["free_003"]);
+  });
+
+  // ⚠️ **数ではなく id を渡す**（#788-1）＝掴めない理由は呼び出し側だけが知っているので、
+  // ここで数にしてしまうと理由別の案内が作れない。
+  it("一括移動は、一緒に動かさなかったものを**id で**知らせる（#788-1）", () => {
+    const layout: FreeElement[] = [
+      { id: "free_001", kind: FREE_ELEMENT_KIND.shape, x: 0, y: 0, w: 100, h: 100, zIndex: 1 },
+      { id: "free_002", kind: FREE_ELEMENT_KIND.shape, x: 100, y: 100, w: 100, h: 100, zIndex: 2, locked: true },
+    ];
+    const onSkippedLocked = vi.fn();
+    const { root, boxes } = renderOverlay({ freeLayout: layout, selectedIds: ["free_001", "free_002"], onSkippedLocked });
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    fireEvent.pointerDown(boxes[0], { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+    expect(onSkippedLocked).toHaveBeenCalledWith(["free_002"]);
+  });
 });
 
 describe("FreeLayoutOverlay: 回転ハンドル（#279）", () => {

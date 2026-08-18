@@ -16,7 +16,7 @@ import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, MIN_BOX_SIZE_PX } from "../../domain/constants";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, keyboardNudgeDelta, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
+import { addFreeElement, applyFreeElementGeoms, applyFreeElementPositions, bringFreeElementToFront, duplicateFreeElement, type FreeElementGeom, FREE_GRID_SIZE, moveFreeElementZ, nudgeFreeElements, pasteFreeElement, removeFreeElement, removeFreeElements, sendFreeElementToBack, updateFreeElement } from "../../domain/project/freeLayoutOps";
 import { defaultSubtitleSource, sceneSubtitleSpeakerOptions, subtitleSilentReason, subtitleSourceFromValue, subtitleSourceToValue } from "../../domain/project/subtitleBinding";
 import { alignFreeElements, distributeFreeElements, FREE_ALIGN, FREE_DISTRIBUTE, type FreeAlign, type FreeDistribute } from "../../domain/project/freeAlign";
 import { perUseEntriesFor, prunePerUseMaps, withPerUseEntries } from "../../domain/project/perUseMaps";
@@ -47,6 +47,7 @@ import { useSceneMotionPreview } from "../hooks/useSceneMotionPreview";
 import { useSceneTransitionPreview } from "../hooks/useSceneTransitionPreview";
 import { TransitionPreview } from "../components/TransitionPreview";
 import { hasSimultaneousLines, motionSubtitleAt } from "../../domain/project/lineTimeline";
+import { KeyboardNudge } from "../components/KeyboardNudge";
 import { useDragReorder } from "../hooks/useDragReorder";
 import { hasEscapeOwner } from "../hooks/escapeOwners";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
@@ -149,26 +150,6 @@ function freeStrokeSwatch(el: FreeElement): string {
 
 // キーボード微調整/削除の window 購読（#525-11）。SceneEditScreen は early return を持つため hooks を含む購読は子へ切り出す
 // （親 JSX 内で描画＝マウント時に一貫して hooks を呼ぶ・rules-of-hooks を満たす）。入力欄フォーカス中は無視。描画なし。
-function KeyboardNudge({ active, onArrow, onDelete }: {
-  active: boolean;
-  onArrow: (dx: number, dy: number) => void;
-  onDelete: () => void;
-}) {
-  useEffect(() => {
-    if (!active) return;
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
-      const d = keyboardNudgeDelta(e.key, e.shiftKey);
-      if (d) { e.preventDefault(); onArrow(d.dx, d.dy); return; }
-      if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); onDelete(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [active, onArrow, onDelete]);
-  return null;
-}
-
 // 自由配置の位置・サイズ等の数値入力（キーボードで調整＝a11y。ドラッグ操作は Phase 4b）。
 // 既定 step=1＝座標/サイズ/重なり順は整数 px（非整数を renderer に渡さない）。
 // 掛け合いの行ごとの声パラメータ（話す速さ/声の高さ/抑揚）。設定画面と同じ voiceParams スライダーを流用（#242）。

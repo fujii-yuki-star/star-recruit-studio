@@ -153,7 +153,13 @@ interface OverlayProps {
    * 空間の移動は「除外して動かす」＝黙って一部だけ動かさないよう、**画面側が一言出す**
    *（文言と出し方は画面が決める＝共有部品が2つの画面へ同じ文言を押し付けない）。
    */
-  onSkippedLocked?: (count: number) => void;
+  /**
+   * **一緒に動かさなかったもの**を知らせる（黙って一部だけ動かさない・#773）。
+   * ⚠️ **数ではなく id を渡す**（#788-1）＝掴めない理由（固定した列／動きが効いている／まとまりの変形）は
+   * **呼び出し側だけが知っている**ので、ここで数にしてしまうと理由別の案内を出せない
+   *（「固定を外してください」は動き起因では従っても直らない）。
+   */
+  onSkippedLocked?: (ids: string[]) => void;
 }
 
 export function FreeLayoutOverlay({
@@ -299,9 +305,9 @@ export function FreeLayoutOverlay({
     const found = moveTargets
       .map((id) => freeLayout.find((m) => m.id === id))
       .filter((m): m is FreeElement => m != null);
-    // **除外した数**を知らせる（黙って一部だけ動かさない・#773）。掴んだ時点で1度だけ。
-    const skipped = found.filter((m) => m.locked).length;
-    if (skipped > 0) onSkippedLocked?.(skipped);
+    // **除外したもの**を知らせる（黙って一部だけ動かさない・#773）。掴んだ時点で1度だけ。
+    const skipped = found.filter((m) => m.locked).map((m) => m.id);
+    if (skipped.length > 0) onSkippedLocked?.(skipped);
     const starts = found
       // ⚠️ **固定したものは一緒に動かさない**（#746 レビュー 🔴）＝掴み始めるのは塞いであっても、
       // **まとめて選んで別の1つを動かす**と混ざって動いていた（固定が意味を失う）。
@@ -340,6 +346,11 @@ export function FreeLayoutOverlay({
     e.stopPropagation(); // ルートのマーキー開始を兼ねない
     setMenu(null);
     setEditingId(null);
+    // ⚠️ **拡縮でも除外を知らせる**（#788-2）＝`groupEls` は固定したものを外して作るので、
+    // 知らせないと**一括移動は一言が出るのに拡縮は黙って取り残す**（同じ操作の同じ理由で挙動が割れる
+    // ＝ADR-0026②）。隠したものは元から見えていないので数えない（移動側と同じ扱い）。
+    const skipped = freeLayout.filter((el) => selectedIds.includes(el.id) && el.locked && !el.hidden).map((el) => el.id);
+    if (skipped.length > 0) onSkippedLocked?.(skipped);
     const width = ref.current?.clientWidth ?? canvasW;
     try { ref.current?.setPointerCapture(e.pointerId); } catch { /* noop */ }
     claimDrag(e);

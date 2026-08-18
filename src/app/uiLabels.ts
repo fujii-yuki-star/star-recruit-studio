@@ -564,6 +564,32 @@ const SLOT_LABEL_BY_ID: Record<string, string> = {
 };
 
 /** 差し込み口1つの表示名。未登録 id は種別から日本語化する。 */
+/**
+ * キャンバスで**掴めない理由**（タイムライン編集）。`count` を渡すとまとめて動かしたときの言い方になる。
+ *
+ * ⚠️ **1か所にまとめる**（#788-1）＝以前は単体選択のときだけ理由別に出し分け、まとめて動かしたときは
+ * 常に「**固定を外してください**」だった＝**動きが原因のときは従っても直らない**案内になっていた。
+ * 言い方が2か所にあると、片方だけ直す（＝今回の割れそのもの）ので、単体もまとめても同じ文からつくる。
+ * ⚠️ **必ず「次にどこを触れば変えられるか」で終える**（§2-5＝理由だけ出して行き止まりにしない・決定5）。
+ */
+export type CanvasHoldReason = "track" | "animation" | "group";
+
+export function canvasHoldMessage(reason: CanvasHoldReason, count?: number): string {
+  const n = count == null ? "" : `${count}個`;
+  // 単体＝いま触ろうとしている／まとめて＝もう動かした後、なので締めの言い方だけ変える。
+  const tail = count == null ? "仕上がり確認の上では動かせません。" : "動かしていません。";
+  switch (reason) {
+    // 固定は**外せば直る**＝行き先が固定の切り替えなので、数値の案内は添えない。
+    case "track":
+      return `固定された列の部品${n}は${tail}動かすには固定を外してください`;
+    // 動き・まとまりは**矢印キーでも変えられる**（そちらは列の固定しか見ない）＝行き止まりにしない。
+    case "animation":
+      return `動きが効いている部品${n}は${tail}下の数値（または矢印キー）で変えるか、「動き」で調整してください`;
+    case "group":
+      return `まとまりの変形が効いている部品${n}は${tail}下の数値（または矢印キー）で変えてください`;
+  }
+}
+
 export function slotLabelFor(layer: Pick<Layer, "id" | "type">): string {
   if (SLOT_LABEL_BY_ID[layer.id]) return SLOT_LABEL_BY_ID[layer.id];
   if (layer.type === LAYER_TYPE.background) return "背景";
