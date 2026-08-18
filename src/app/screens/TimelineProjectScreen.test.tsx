@@ -4302,6 +4302,43 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.queryByText(/固定を外してください/)).toBeNull(); // 従っても直らない案内は出さない
   });
 
+  // ⚠️ **まとまりの変形が理由のときも知らせる**（レビュー指摘＝一括経路で `group` を通すテストが無かった）。
+  // 理由の並びからこの値が落ちると `join` が空文字になり、**知らせ自体が描かれない**まま一部だけ動く。
+  it("まとまりの変形が理由のときも、その言い方で知らせる（#788-1）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      groups: [{ id: "group_001", members: ["clip_grp"], transform: { x: 300, y: 0, scale: 1, rotation: 0 } }],
+      clips: [
+        { id: "clip_grp", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "まとまり" },
+        { id: "clip_free", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 4, x: 0, y: 200, w: 100, h: 50, text: "自由" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_grp", "clip_free"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const els = canvasEls(container).ov!.children;
+    fireEvent.pointerDown(els[1] as HTMLElement, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+    expect(screen.getByText(/まとまりの変形が効いている部品1個は動かしていません/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **固定した列は「動き」より先**（レビュー指摘）＝両方が理由になりうるとき、動きを先に言うと
+  // 「下の数値／矢印キーで」と案内するが、その部品は数値の欄も矢印も列の固定で塞がっている。
+  it("固定した列の上に動きがあるときは、固定の方を知らせる（塞がった行き先を示さない）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_anim", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50, text: "動く" },
+        { id: "clip_free", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 4, x: 0, y: 200, w: 100, h: 50, text: "自由" },
+      ],
+      animations: [{ id: "anim_001", targetId: "clip_anim", keyframes: [{ timeSec: 0, x: 400 }, { timeSec: 4, x: 400 }] }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_anim", "clip_free"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const els = canvasEls(container).ov!.children;
+    fireEvent.pointerDown(els[1] as HTMLElement, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+    expect(screen.getByText(/固定された列の部品1個は動かしていません/)).toBeInTheDocument();
+    expect(screen.queryByText(/動きが効いている部品/)).toBeNull();
+  });
+
   it("**同じ組み合わせでは二度と出さない**（見れば分かることを繰り返さない・#773・利用者決定）", () => {
     // ⚠️ 「一度だけ」が効いているかは、**知らせが消えたあとに同じ組み合わせで動かす**と分かる
     //（1本の知らせを出し直すだけでは、毎回出す形と見た目が変わらない＝そこを見ても確かめられない）。

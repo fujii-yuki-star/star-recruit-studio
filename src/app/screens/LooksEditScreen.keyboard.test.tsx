@@ -83,6 +83,57 @@ describe("見た目パターン編集：キーでも動かせる・消せる（#
     expect(layerOf("layer_a")).toMatchObject({ x: 100 });
   });
 
+  // ⚠️ レビュー指摘＝このPRのコメントが明示した仕様（まとまりごと動く）が丸ごと無テストだった。
+  it("まとまりを選んでいるときは、まとまりごと動く（中の層の座標は変えない）", () => {
+    useProjectStore.setState({
+      templates: [{ ...userTemplate, groups: [{ id: "group_001", members: ["layer_a"], transform: { x: 0, y: 0, scale: 1, rotation: 0 } }] } as never, ...sampleTemplates],
+    } as never);
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    act(() => (captured.props as unknown as { onSelectGroup: (id: string) => void }).onSelectGroup("group_001"));
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    const groups = (captured.props as unknown as { groups: { id: string; transform: { x: number; y: number } }[] }).groups;
+    expect(groups[0].transform).toMatchObject({ x: 1, y: 0 }); // まとまりが動く
+    expect(layerOf("layer_a")).toMatchObject({ x: 100 });      // 中の層の座標はそのまま
+  });
+
+  // ⚠️ **固定したまとまりは動かさない**＝掴んで動かす方は固定なら選ぶだけで止まる。
+  // キーだけ通ると「掴めないのにキーでは動く」になる（同じ理由で入口ごとに結果が変わる）。
+  it("固定したまとまりは矢印でも動かない", () => {
+    useProjectStore.setState({
+      templates: [{ ...userTemplate, groups: [{ id: "group_001", members: ["layer_a"], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, locked: true }] } as never, ...sampleTemplates],
+    } as never);
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    act(() => (captured.props as unknown as { onSelectGroup: (id: string) => void }).onSelectGroup("group_001"));
+    expect(fireEvent.keyDown(window, { key: "ArrowRight" })).toBe(true); // 奪わない
+    const groups = (captured.props as unknown as { groups: { transform: { x: number } }[] }).groups;
+    expect(groups[0].transform.x).toBe(0);
+  });
+
+  // ⚠️ **固定したまとまりの中の層も動かさない**（一覧から個別に選べてしまうため）。
+  it("固定したまとまりの中の層は、個別に選んでも矢印で動かない", () => {
+    useProjectStore.setState({
+      templates: [{ ...userTemplate, groups: [{ id: "group_001", members: ["layer_a"], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, locked: true }] } as never, ...sampleTemplates],
+    } as never);
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    select("layer_a");
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(layerOf("layer_a")).toMatchObject({ x: 100 });
+  });
+
+  // ⚠️ 何も選んでいないときに奪うと、欄のスクロールが効かないのに何も起きない（行き止まり）。
+  it("何も選んでいないときは矢印を奪わない", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    expect(fireEvent.keyDown(window, { key: "ArrowRight" })).toBe(true);
+  });
+
+  // ⚠️ **変換中は奪わない**の配線（レビュー指摘＝共通判定は単体試験済みだが、繋がっているかは未検証だった）。
+  it("日本語を変換している最中は矢印を奪わない", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    select("layer_a");
+    fireEvent.keyDown(window, { key: "ArrowRight", isComposing: true });
+    expect(layerOf("layer_a")).toMatchObject({ x: 100 });
+  });
+
   it("取り消しで戻せる（キーで動かした結果も履歴に載る）", () => {
     render(<LooksEditScreen onNavigate={vi.fn()} />);
     select("layer_a");
@@ -90,5 +141,18 @@ describe("見た目パターン編集：キーでも動かせる・消せる（#
     expect(layerOf("layer_a")).toMatchObject({ x: 101 });
     fireEvent.click(screen.getByLabelText("取り消す").closest("button") as HTMLButtonElement);
     expect(layerOf("layer_a")).toMatchObject({ x: 100 });
+  });
+
+  // ⚠️ **押しっぱなしでも取り消しは1回ぶん**（`06 §12.1` 決定20＝タイムラインと同じ）。
+  // 1打鍵ごとに積むと、キーリピートで履歴の上限を数秒で流し切り、**この画面唯一の戻り道**が消える。
+  it("続けて押したぶんは1回の取り消しでまとめて戻る", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    select("layer_a");
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(layerOf("layer_a")).toMatchObject({ x: 103 });
+    fireEvent.click(screen.getByLabelText("取り消す").closest("button") as HTMLButtonElement);
+    expect(layerOf("layer_a")).toMatchObject({ x: 100 }); // 3回ぶんが1回で戻る
   });
 });

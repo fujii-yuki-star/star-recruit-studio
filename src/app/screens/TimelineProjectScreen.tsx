@@ -25,7 +25,7 @@ import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../..
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { useTimelineHistoryGroup } from "../hooks/useHistoryGroup";
-import { activatesOnSpace, shouldIgnoreShortcut, usesArrowKeys } from "../hooks/keyboardShortcut";
+import { activatesOnSpace, NUDGE_GROUP_IDLE_MS, shouldIgnoreShortcut, usesArrowKeys } from "../hooks/keyboardShortcut";
 import { hasEscapeOwner, useEscapeOwner } from "../hooks/escapeOwners";
 import type { Template } from "../../domain/template/types";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
@@ -145,7 +145,7 @@ const NUDGE_SEC = 0.5;
 const NUDGE_BOX_PX = 1;
 const NUDGE_BOX_FAST_PX = 10;
 /** 矢印で動かす手が止まったとみなすまで（ms）。ここを過ぎたら取り消しのまとめを閉じる。 */
-const NUDGE_GROUP_IDLE_MS = 600;
+
 
 /** 1秒あたりの表示幅（px）と、レーンの最小幅。読み取り専用タイムラインと同じ見え方に寄せる。 */
 const MIN_LANE_WIDTH_PX = 640;
@@ -1421,10 +1421,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   /**
    * 一緒に動かさなかった部品の**理由**（#788-1）。キャンバスの `locked` を立てているのと**同じ材料**を
    * 見る＝判定を書き写さない（片方だけ直る割れを作らない）。
-   * 見つからない部品は、列の固定で外れたものとして扱う（`grabbableClip` と同じ既定）。
+   *
+   * ⚠️ **列の固定を先に見る**（レビュー指摘）＝固定した列の上に動きの効いた部品があると、両方が理由に
+   * なりうる。動きを先に見ると「下の数値（または矢印キー）で…」と案内するが、**その部品は数値の欄が
+   * 固定で押せず、矢印も列の固定で外れる**＝示した行き先が2つとも塞がっている。固定を先に言えば
+   * 「固定を外してください」＝実際に効く1手になる（§2-5）。
+   * 見つからない部品も列の固定で外れたものとして扱う（`grabbableClip` と同じ既定）。
    */
-  const skippedReasonOf = (id: string): CanvasHoldReason =>
-    canvasHoldReason(canvasClips.find((cc) => cc.clip.id === id) ?? ({} as TimelineCanvasClip)) ?? "track";
+  const skippedReasonOf = (id: string): CanvasHoldReason => {
+    const cc = canvasClips.find((x) => x.clip.id === id);
+    if (!cc || trackOf(cc.clip.trackId)?.locked) return "track";
+    return canvasHoldReason(cc) ?? "track";
+  };
   /** 選んでいる部品をキャンバスで掴めない理由（出す先＝「位置・大きさ」の欄）。 */
   const selectedOnCanvas = canvasClips.find((cc) => cc.clip.id === selected?.id);
   const selectedHoldReason = selectedOnCanvas ? canvasHoldReason(selectedOnCanvas) : null;
