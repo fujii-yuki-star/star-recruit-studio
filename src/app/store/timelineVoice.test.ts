@@ -209,6 +209,9 @@ describe('generateSelectedVoice', () => {
     vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue(new Error('つながらない'));
     await useTimelineStore.getState().generateSelectedVoice();
     expect(useTimelineStore.getState().doc?.clips[0].voice?.status).toBe('failed');
+    // ⚠️ **添え書きも出さない**（PR #791 レビュー 🔴）＝印は「作れなかった」なのに「そのまま使えます」と
+    // 言うと、古い文の声を使ってよいと誤解させる。印だけ見て通していたのでここで固定する。
+    expect(useTimelineStore.getState().voiceError).not.toContain('前に作った声');
   });
 
   it('声が無いまま失敗したときは「作れなかった」を残す（次に開いたときも分かる）', async () => {
