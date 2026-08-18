@@ -210,6 +210,38 @@ describe("useDragReorder（Pointer Events 並び替え・#398）", () => {
     expect(onReorder).toHaveBeenCalledWith("s2", 2);
   });
 
+  // ⚠️ 利用者レビュー（PR #786）で確認を求められた2点。どちらも `usePointerDrag` に載せたことで
+  // 自動的に満たされるはずのものだが、**満たされていることをここで固定する**（載せ替えを戻したら赤くなる）。
+
+  // ① 掴んでいる間の `Ctrl+Z` 遮断。旧実装は素通しで、**取り消しで並びが変わった後に古い位置で確定**
+  // ＝線と違う所へ落ちる筋があった。共通の合図（`isPointerDragging`）に数えられていれば止まる。
+  it("掴んでいる間は取り消しの合図が立つ（並びが動いた後に古い位置で確定しない）", () => {
+    const { result } = renderHook(() => useDragReorder(vi.fn()));
+    act(() => result.current.handleProps("s1", 0).onPointerDown(mkDown()));
+    expect(isPointerDragging()).toBe(false); // 押しただけでは止めない
+    move(20);
+    expect(isPointerDragging()).toBe(true);  // 掴んでいる間だけ止める
+    up();
+    expect(isPointerDragging()).toBe(false);
+  });
+
+  // ② 画面の外で離して `pointerup` を取り逃がしたとき＝押していないのに動きだけが届く（`buttons: 0`）。
+  // 救済が無いと影が指に付いたままになり、**次に無関係な所で離した瞬間**にそこへ並べ替わる。
+  it("画面の外で離したのを取り逃がしたら、次の離しで並べ替えない", () => {
+    const onReorder = vi.fn();
+    const { result } = renderHook(() => useDragReorder(onReorder));
+    grab(result);
+    act(() => result.current.dropProps(2).onPointerMove(mkMove()));
+    expect(result.current.overGap).toBe(2);
+    // 押していない状態で動きだけが届く＝どこかで離していた。
+    act(() => { fireEvent.pointerMove(window, { pointerId: 1, buttons: 0, clientX: 300, clientY: 100 }); });
+    expect(result.current.draggingId).toBeNull(); // その場でやめる
+    expect(result.current.overGap).toBeNull();
+    up();
+    expect(onReorder).not.toHaveBeenCalled(); // 次の離しでそこへ落ちない
+    expect(isPointerDragging()).toBe(false);  // 取り消しも塞ぎっぱなしにしない
+  });
+
   it("横並びのときは左右で決める（縦の位置では変わらない）", () => {
     const { result } = renderHook(() => useDragReorder(vi.fn(), { axis: "x" }));
     grab(result);

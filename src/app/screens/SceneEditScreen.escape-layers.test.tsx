@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { dragEnd, dragOver, pointerDownAt } from "../../test/pointer";
 import type { Scene } from "../../domain/project/types";
@@ -71,6 +71,25 @@ describe("Escape は手前のものから1段ずつはがす（#714-4 レビュ�
     expect(order()).toEqual(["scene_001", "scene_002"]); // 運ぶのはやめた
     expect(screen.getByRole("dialog", { name: /を編集/ })).toBeInTheDocument(); // 欄は開いたまま
     dragEnd();
+  });
+
+  // ⚠️ レビュー指摘（PR #786）：**「掴んでいるか」だけを見ると穴が残る**。この欄の中には色を選ぶ面が
+  // 入れ子で開き、それは**撫でていなくても**開いている間ずっと `Escape` を受け持つ（`ColorPicker`）。
+  // 掴む話に限定した判定だと、色の面が閉じるのと**同時に**この欄まで畳まれる（1回のキーで2段）。
+  it("欄の中で色を選ぶ面が開いているときの Escape は、その面だけを閉じる", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    openEditPopover();
+    // ⚠️ 同じ「色を選ぶ」は欄の外（詳細の欄）にも出るので、**この欄の中**に絞る。
+    const popover = screen.getByRole("dialog", { name: /を編集/ });
+    fireEvent.click(within(popover).getByRole("button", { name: "色を選ぶ" })); // 図形の塗り
+    expect(screen.getByLabelText("色コード")).toBeInTheDocument(); // 面が開いた
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByLabelText("色コード")).toBeNull(); // 色の面は閉じた
+    expect(screen.getByRole("dialog", { name: /を編集/ })).toBeInTheDocument(); // 欄は残る
+
+    fireEvent.keyDown(window, { key: "Escape" }); // 2度目でこの欄が閉じる
+    expect(screen.queryByRole("dialog", { name: /を編集/ })).toBeNull();
   });
 
   it("掴んでいないときの Escape はいままでどおり欄を閉じる（塞ぎっぱなしにしない）", () => {
