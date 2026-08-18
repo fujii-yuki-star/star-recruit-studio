@@ -55,6 +55,7 @@ import { validateTimelineProject } from "../../domain/validation/generated/valid
 import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
+import { keptPreviousVoice, statusAfterVoiceFailure } from "../../domain/project/narrationStatus";
 import type { VoiceStyleParams } from "../../domain/voice/voiceStylePresets";
 import { MockVoiceProvider } from "../../infrastructure/voiceProviders/mockVoiceProvider";
 import { VoicevoxProvider } from "../../infrastructure/voiceProviders/voicevoxProvider";
@@ -1796,9 +1797,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                   saveStatus: "idle",
                 };
               }
+              // ⚠️ **前に作った声が残っていれば「作れなかった」にしない**（#755-3）＝鳴らす側・書き出す側は
+              // `voicePath` しか見ないので、`failed` を書くと「作れませんでした」と出ながら声は鳴る、が
+              // **文書に残る**（開き直しても消えない）。文や声を変えたときは音声が外れるので、残っている
+              // 声は**いまの文のもの**＝そのまま使える。失敗は**その場の知らせ**で伝える。
+              const kept = keptPreviousVoice(cur.voicePath);
               return {
-                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, NARRATION_STATUS.failed) : s)),
-                narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+                scenes: st.scenes.map((s) => (s.sceneId === sceneId ? withLineStatus(s, line.lineId, statusAfterVoiceFailure(cur.voicePath)) : s)),
+                narrationError: (typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。")
+                  + (kept ? "前に作った声はそのまま使えます。" : ""),
                 saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（sentinel が保存中の変化を取りこぼさない・#390 レビュー）
               };
             });
@@ -1872,9 +1879,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             saveStatus: "idle",
           };
         }
+        // 掛け合いの行と同じ理由（#755-3）＝残っている声は使えるので「作れなかった」にしない。
+        const kept = keptPreviousVoice(sc.narration.voicePath);
         return {
-          scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: NARRATION_STATUS.failed } } : s)),
-          narrationError: typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。",
+          scenes: st.scenes.map((s) => (s.sceneId === sceneId ? { ...s, narration: { ...s.narration, status: statusAfterVoiceFailure(sc.narration.voicePath) } } : s)),
+          narrationError: (typeof e === "string" ? e : "音声の作成に失敗しました。もう一度お試しください。")
+            + (kept ? "前に作った声はそのまま使えます。" : ""),
           saveStatus: "idle", // 失敗も終端状態＝未保存にして永続化（#390 レビュー）
         };
       });
