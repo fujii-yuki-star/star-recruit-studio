@@ -624,6 +624,11 @@ export function setClipAssetRef(
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // **入れる素材は文書にあるものだけ**（#724・利用者判断＝操作側で塞ぐ）。兄弟（`addVisualClip`／
+  // `setVisualClipContent`／`setClipAudioSource`）は全部これを持っており、ここだけ抜けていた＝
+  // 無い素材を指したまま保存でき、開き直すと**灰色の枠が焼き込まれる**（描画は知らせるが、
+  // そもそも作らせない方が早い）。⚠️ V25 を `assetRefs` まで広げるのは見送り（正典は動かさない）。
+  if (assetId != null && !doc.assets.some((a) => a.assetId === assetId)) return blocked(EDIT_BLOCKED.notFound);
   // 何も変わらないなら文書をそのまま返す＝取り消しが空振りする履歴を積ませない。
   // 比べるのは**解決した値**（`null` と未指定は同じ意味）。
   if ((clip.assetRefs?.[layerId] ?? null) === assetId) return ok(doc);

@@ -675,21 +675,39 @@ describe('duplicateClip', () => {
 describe('見た目パターンのクリップ（差し込み口が生きている・#632）', () => {
   const tmplClip = (over: Partial<TimelineClip> = {}): TimelineClip =>
     clip('clip_001', { kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_001', x: 0, y: 0, w: 1920, h: 1080, ...over });
+  /**
+   * ⚠️ **素材は文書に実在させる**（#724）＝入れる素材の実在を確かめるようになったので、
+   * 材料にも置いておく。以前は無い素材で通っており、**この穴をテストが隠していた**。
+   */
+  const withAsset = (over: Partial<TimelineProject> = {}): TimelineProject =>
+    doc({ assets: [{ assetId: 'asset_001', assetType: 'image', filePath: 'assets/a.png' }] as never, ...over });
 
   describe('setClipAssetRef', () => {
     it('差し込み口に素材を入れる', () => {
-      const r = setClipAssetRef(doc({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_001');
+      const r = setClipAssetRef(withAsset({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_001');
       expect(r.ok && r.doc.clips[0].assetRefs).toEqual({ layer_bg: 'asset_001' });
     });
 
+    // ⚠️ #724（利用者判断＝操作側で塞ぐ）＝兄弟は全部持っている確認がここだけ無く、**無い素材を指したまま
+    // 保存できた**（開き直すと灰色の枠が焼き込まれる）。V25 を広げるのは見送り＝ここで止める。
+    it('文書に無い素材は入れられない（灰色の枠を作らせない）', () => {
+      const r = setClipAssetRef(withAsset({ clips: [tmplClip()] }), 'clip_001', 'layer_bg', 'asset_999');
+      expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notFound });
+    });
+
+    it('「なし」は素材が無くても通る（外すのは常にできる）', () => {
+      const d = withAsset({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
+      expect(setClipAssetRef(d, 'clip_001', 'layer_bg', null).ok).toBe(true);
+    });
+
     it('「なし」はキーごと落とす（null と未指定は解決が同じ＝形も揃える）', () => {
-      const d = doc({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
+      const d = withAsset({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
       const r = setClipAssetRef(d, 'clip_001', 'layer_bg', null);
       expect(r.ok && r.doc.clips[0].assetRefs).toEqual({});
     });
 
     it('同じものを入れ直しても文書は変わらない（取り消しが空振りしない）', () => {
-      const d = doc({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
+      const d = withAsset({ clips: [tmplClip({ assetRefs: { layer_bg: 'asset_001' } })] });
       const r = setClipAssetRef(d, 'clip_001', 'layer_bg', 'asset_001');
       expect(r.ok && r.doc).toBe(d);
     });
