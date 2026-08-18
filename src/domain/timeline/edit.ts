@@ -12,6 +12,7 @@ import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
+import { isAudioClip } from './audio';
 import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from './clipEdge';
 import { createFreeElement } from '../project/freeLayoutOps';
@@ -47,6 +48,11 @@ export const EDIT_BLOCKED = {
   groupAcrossTracks: 'TIMELINE_EDIT_GROUP_ACROSS_TRACKS',
   /** 対象が見つからない（消された直後の操作など）。 */
   notFound: 'TIMELINE_EDIT_NOT_FOUND',
+  /**
+   * 音の設定（速さ・使い始め・音量・フェード）を**音を持たない部品**へ書こうとした（#724）。
+   * ⚠️ `notFound` で断らない＝「その部品は見つかりませんでした」は嘘になり、選び直しても直らない。
+   */
+  notAudio: 'TIMELINE_EDIT_NOT_AUDIO',
   /**
    * その部品は分けられない（#686 段階4・決定16）。読み上げは**文と音がずれる**／連動している
    * 字幕は**時間を読み上げが決めている**ので、切ると持ち主のいない区間ができる。
@@ -557,6 +563,10 @@ export function moveTrackTo(doc: TimelineProject, trackId: string, toIndex: numb
 
 /** 列の表示/非表示・固定を切り替える（描画・書き出しから外す／移動とトリムを禁じる）。 */
 export function setTrackFlag(doc: TimelineProject, trackId: string, flag: 'hidden' | 'locked', value: boolean): TimelineProject {
+  // **何も変わらないなら同じ文書を返す**（#724）＝取り消しが空振りする履歴を積ませない。
+  // 兄弟（`setClipSpeed`／`setClipVolume`／`setClipAssetRef` …）は全部これを持っており、ここだけ抜けていた。
+  const track = doc.tracks.find((t) => t.id === trackId);
+  if (!track || (track[flag] ?? false) === value) return doc;
   return {
     ...doc,
     tracks: doc.tracks.map((t) => (t.id === trackId ? { ...t, [flag]: value } : t)),
@@ -1122,6 +1132,9 @@ export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // **鳴る音を持つ部品だけ**（#724）＝文字や図形へ書いても誰も読まない値が文書に残るだけ
+  // （再生・書き出しは `isAudioClip` で選ぶ）。置けない操作は黙って別の結果にしない（`11 §7.6.3`）。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
   // schema は `exclusiveMinimum: 0`＝0 以下は保存できない文書になる。範囲へ収める（§2-7 の下限を共有）。
   const next = Math.min(Math.max(CLIP_SPEED_MIN, speed), CLIP_SPEED_MAX);
   if ((clip.speed ?? 1) === next) return ok(doc);
@@ -1136,6 +1149,9 @@ export function setClipSourceStart(doc: TimelineProject, clipId: string, sec: nu
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // **鳴る音を持つ部品だけ**（#724）＝文字や図形へ書いても誰も読まない値が文書に残るだけ
+  // （再生・書き出しは `isAudioClip` で選ぶ）。置けない操作は黙って別の結果にしない（`11 §7.6.3`）。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
   const next = Math.max(0, sec);
   if ((clip.sourceStartSec ?? 0) === next) return ok(doc);
   const patched = { ...clip };
@@ -1184,6 +1200,9 @@ export function setClipVolume(doc: TimelineProject, clipId: string, volume: numb
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // **鳴る音を持つ部品だけ**（#724）＝文字や図形へ書いても誰も読まない値が文書に残るだけ
+  // （再生・書き出しは `isAudioClip` で選ぶ）。置けない操作は黙って別の結果にしない（`11 §7.6.3`）。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
   const next = volume == null ? null : Math.min(Math.max(0, volume), VOLUME_MAX);
   if ((clip.volume ?? null) === next) return ok(doc);
   const patched = { ...clip };
@@ -1197,6 +1216,9 @@ export function setClipFade(doc: TimelineProject, clipId: string, edge: 'in' | '
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  // **鳴る音を持つ部品だけ**（#724）＝文字や図形へ書いても誰も読まない値が文書に残るだけ
+  // （再生・書き出しは `isAudioClip` で選ぶ）。置けない操作は黙って別の結果にしない（`11 §7.6.3`）。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
   const key = edge === 'in' ? 'fadeInSec' : 'fadeOutSec';
   const next = Math.max(0, sec);
   if ((clip[key] ?? 0) === next) return ok(doc);

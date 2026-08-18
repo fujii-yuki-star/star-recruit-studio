@@ -5,7 +5,7 @@ import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
   addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
-  addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipText, setTrackFlag, trackPlacementIssue, trimClip,
+  addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipFade, setClipSourceStart, setClipSpeed, setClipText, setClipVolume, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { validateTimelineDoc } from './validateTimelineDoc';
@@ -590,6 +590,64 @@ describe('トラック（列）', () => {
   it('表示/固定を切り替える', () => {
     expect(setTrackFlag(doc(), 'track_001', 'hidden', true).tracks[0].hidden).toBe(true);
     expect(setTrackFlag(doc(), 'track_001', 'locked', true).tracks[0].locked).toBe(true);
+  });
+});
+
+// #724：兄弟は全部持っているのに `setTrackFlag` だけ同値チェックが無く、空振りの取り消しを積んでいた。
+describe('setTrackFlag（列の固定・非表示）', () => {
+  it('同じ値なら同じ文書を返す（取り消しが空振りしない）', () => {
+    const d = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] });
+    expect(setTrackFlag(d, 'track_001', 'locked', true)).toBe(d);
+    expect(setTrackFlag(d, 'track_001', 'hidden', false)).toBe(d); // 未指定＝false と同じ
+  });
+
+  it('値が変われば新しい文書を返す', () => {
+    const d = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }] });
+    const next = setTrackFlag(d, 'track_001', 'locked', true);
+    expect(next).not.toBe(d);
+    expect(next.tracks[0].locked).toBe(true);
+  });
+
+  it('無い列は何もしない（作らない）', () => {
+    const d = doc();
+    expect(setTrackFlag(d, 'track_999', 'locked', true)).toBe(d);
+  });
+});
+
+// #724：音の設定を**音を持たない部品**へ書けてしまい、誰も読まない値が文書に残っていた。
+describe('音の設定は鳴る音を持つ部品だけ（#724）', () => {
+  const withText = () => doc({ clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })] });
+
+  it('文字の部品には速さ・使い始め・音量・フェードを書けない', () => {
+    const d = withText();
+    for (const r of [
+      setClipSpeed(d, 'clip_001', 2),
+      setClipSourceStart(d, 'clip_001', 1),
+      setClipVolume(d, 'clip_001', 0.5),
+      setClipFade(d, 'clip_001', 'in', 1),
+    ]) {
+      expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    }
+  });
+
+  // ⚠️ **「見つかりません」で断らない**＝選び直しても直らない案内になる（§2-5）。
+  it('理由は「音を持っていない」＝見つからないではない', () => {
+    expect(EDIT_BLOCKED.notAudio).not.toBe(EDIT_BLOCKED.notFound);
+  });
+
+  it('音・読み上げには従来どおり書ける', () => {
+    const d = doc({
+      tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_003', startSec: 0, durationSec: 5, bundledBgmId: 'found-new-hope' }],
+    });
+    const r = setClipVolume(d, 'clip_001', 0.5);
+    expect(r.ok && r.doc.clips[0].volume).toBe(0.5);
+    const v = doc({
+      tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 0, durationSec: 5, voice: { text: 'あ', status: NARRATION_STATUS.none } }],
+    });
+    const rv = setClipVolume(v, 'clip_001', 0.25);
+    expect(rv.ok && rv.doc.clips[0].volume).toBe(0.25);
   });
 });
 
