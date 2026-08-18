@@ -2484,7 +2484,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                 </button>
               </div>
               <p className="field-hint">起動直後は読み上げ音声の準備に少し時間がかかることがあります。うまくいかないときは、少し待ってからもう一度お試しください。</p>
-              {selected.narration.status === NARRATION_STATUS.failed && narrationError && (
+              {/* ⚠️ **印に紐づけない**（#755-3 レビュー）＝失敗しても前の声が残っていれば印は「作成済み」の
+                  ままにするので、`failed` を条件にすると**押しても何も起きなかったように見える**（無言の失敗）。
+                  掛け合い（上）とタイムライン編集も無条件で出す＝同じ操作の返事を場所で変えない（ADR-0026②）。 */}
+              {narrationError && (
                 <div className="notice notice-warn" role="alert" style={{ marginTop: 6 }}>
                   <span>{narrationError}</span>
                 </div>

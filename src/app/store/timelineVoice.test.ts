@@ -183,6 +183,34 @@ describe('generateSelectedVoice', () => {
     expect(written.clips[0].voice).toMatchObject({ status: 'generated' }); // 文書にも嘘を書かない
   });
 
+  // ⚠️ レビュー指摘＝**保存に失敗した経路**（合成は成功・取り込みが `null`）は未検証だった。
+  it('保存に失敗しても、前が「作成済み」なら据え置く（#755-3）', async () => {
+    await open(doc({
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 2, durationSec: 3, voice: { text: 'ひとこと', status: 'generated', voicePath: 'voices/old.wav' } }],
+    }));
+    vi.spyOn(voiceFsMod, 'importVoiceFile').mockResolvedValue(null); // 保存に失敗
+    const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+    await useTimelineStore.getState().generateSelectedVoice();
+
+    expect(useTimelineStore.getState().doc?.clips[0].voice).toMatchObject({ status: 'generated', voicePath: 'voices/old.wav' });
+    expect(useTimelineStore.getState().voiceError).toContain('前に作った声はそのまま使えます');
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    const written = JSON.parse(save.mock.calls[save.mock.calls.length - 1][1] as string) as TimelineProject;
+    expect(written.clips[0].voice).toMatchObject({ status: 'generated' });
+  });
+
+  // ⚠️ **文を変えた後は据え置かない**（判断材料は作り始める前の印）＝声のファイルで決めると
+  // 古い文の声が「作成済み」に戻る。タイムライン形式は文を変えると `voicePath` も落ちるが、
+  // **規則としてはどちらの形式でも同じ**（片方だけ別の判断にしない）。
+  it('前が「作成済み」でないなら、失敗は「作れなかった」を残す（#755-3）', async () => {
+    await open(doc({
+      clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 2, durationSec: 3, voice: { text: 'ひとこと', status: 'none', voicePath: 'voices/old.wav' } }],
+    }));
+    vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue(new Error('つながらない'));
+    await useTimelineStore.getState().generateSelectedVoice();
+    expect(useTimelineStore.getState().doc?.clips[0].voice?.status).toBe('failed');
+  });
+
   it('声が無いまま失敗したときは「作れなかった」を残す（次に開いたときも分かる）', async () => {
     await open(doc());
     vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockRejectedValue(new Error('つながらない'));

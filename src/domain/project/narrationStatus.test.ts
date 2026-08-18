@@ -1,23 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { NARRATION_STATUS } from '../enums';
-import { keptPreviousVoice, statusAfterVoiceFailure } from './narrationStatus';
+import { statusAfterVoiceFailure } from './narrationStatus';
 
-// #755-3：一時的な失敗を文書へ書くと、開き直しても「作れませんでした」のまま。
-// ところが鳴らす側は `voicePath` しか見ないので、**声は鳴るのに作れていないと出る**状態が残っていた。
+// #755-3：一時的な失敗を文書へ書くと、開き直しても「作れませんでした」のまま。前に作った声は
+// そのまま鳴るので、「作れませんでした」と言いながら声は鳴る状態が残っていた。
 
 describe('statusAfterVoiceFailure（声を作れなかったときの印・#755-3）', () => {
-  it('使える声が残っていれば印は変えない（鳴っているのに「作れませんでした」を残さない）', () => {
-    expect(statusAfterVoiceFailure('voices/clip_001.wav')).toBe(NARRATION_STATUS.generated);
+  it('作り始める前が「作成済み」なら据え置く（鳴っているのに「作れませんでした」を残さない）', () => {
+    expect(statusAfterVoiceFailure(NARRATION_STATUS.generated)).toBe(NARRATION_STATUS.generated);
   });
 
-  it('声が無ければ「作れなかった」を残す（次に開いたときも分かる）', () => {
-    expect(statusAfterVoiceFailure(null)).toBe(NARRATION_STATUS.failed);
-    expect(statusAfterVoiceFailure(undefined)).toBe(NARRATION_STATUS.failed);
-    expect(statusAfterVoiceFailure('')).toBe(NARRATION_STATUS.failed); // 空は「無い」と同じ
+  // ⚠️ **声のファイルの有無で決めない**（レビューで3観点が独立に指摘）＝場面形式の単独ナレーションは
+  // セリフを変えても `voicePath` を落とさないので、ファイルで決めると**古い文の声が「作成済み」に復帰**し、
+  // 新しい字幕に古い声が乗った動画が成功として出る。
+  it('まだ作っていない／文を変えた（none）なら「作れなかった」を残す', () => {
+    expect(statusAfterVoiceFailure(NARRATION_STATUS.none)).toBe(NARRATION_STATUS.failed);
   });
 
-  it('前の声が残っているときだけ、その旨を添えられる', () => {
-    expect(keptPreviousVoice('voices/clip_001.wav')).toBe(true);
-    expect(keptPreviousVoice(null)).toBe(false);
+  it('前も失敗していた・作っている最中だったときも「作れなかった」を残す', () => {
+    expect(statusAfterVoiceFailure(NARRATION_STATUS.failed)).toBe(NARRATION_STATUS.failed);
+    expect(statusAfterVoiceFailure(NARRATION_STATUS.pending)).toBe(NARRATION_STATUS.failed);
   });
 });
