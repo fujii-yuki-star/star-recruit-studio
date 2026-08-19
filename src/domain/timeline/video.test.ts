@@ -45,6 +45,15 @@ describe('動画を映す部品を見分ける（#512 段1）', () => {
     expect(videoAssetIdOfClip(tmpl, ids)).toBeNull();
   });
 
+  // ⚠️ **種類を見ないと素通りする**（変異チェックで判明）＝上の材料は `assetId` を持たないので、
+  // 種類の判定を外しても落ちなかった。**動画のファイルを音として置いた部品**は `assetId` を持つので、
+  // ここで「絵として映る部品」と取り違えると、音の列に絵を出そうとする。
+  it('動画のファイルを音として置いた部品は、絵の対象にしない', () => {
+    const ids = videoAssetIds(doc());
+    const audio = { ...slot(), kind: TIMELINE_CLIP_KIND.audio, assetId: 'asset_001' } as TimelineClip;
+    expect(videoAssetIdOfClip(audio, ids)).toBeNull();
+  });
+
   it('文書から動画の部品だけを集める', () => {
     const d = doc({ clips: [slot(), slot({ id: 'clip_002', assetId: 'asset_002' })] });
     expect(videoClipsOf(d).map((c) => c.id)).toEqual(['clip_001']);

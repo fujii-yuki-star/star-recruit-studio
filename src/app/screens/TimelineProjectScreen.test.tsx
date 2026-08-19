@@ -2143,6 +2143,52 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(c.assetId).toBe("asset_001");
   });
 
+  // #512 段1＝**直接置いた動画は絵が映る**（書き出しと同じ分割で `video` 要素を挟む）。
+  // ⚠️ 元の音はまだ流れないので、選んだときにその場で知らせる（黙って無音にしない・§2-5）。
+  describe("動画の素材（#512 段1）", () => {
+    const withVideo = () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        assets: [{ assetId: "asset_v", assetType: "video", displayName: "紹介ムービー", filePath: "v.mp4" }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001",
+          startSec: 0, durationSec: 5, x: 0, y: 0, w: 1920, h: 1080, assetId: "asset_v",
+        }],
+      });
+      // 素材の表示用 src（実物は取り込み時に作る）＝これが無いと絵として描けない。
+      act(() => { useTimelineStore.setState({ assetSrcById: { asset_v: "blob:asset_v" } }); });
+    };
+
+    it("仕上がり確認に実映像（video 要素）が出る", () => {
+      withVideo();
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      expect(container.querySelector(".preview-stage video")).not.toBeNull();
+    });
+
+    it("選ぶと「元の音はまだ出せない」を知らせる（黙って無音にしない）", () => {
+      withVideo();
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
+      expect(screen.getByText(/元の音はまだ出せません/)).toBeInTheDocument();
+    });
+
+    // ⚠️ 写真では出さない（動画のときだけ＝いつも出ていると読まれなくなる）。
+    it("写真の部品では知らせない", () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        assets: [{ assetId: "asset_p", assetType: "image", displayName: "写真", filePath: "p.png" }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001",
+          startSec: 0, durationSec: 5, x: 0, y: 0, w: 1920, h: 1080, assetId: "asset_p",
+        }],
+      });
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
+      expect(screen.queryByText(/元の音はまだ出せません/)).toBeNull();
+      expect(document.querySelector(".preview-stage video")).toBeNull();
+    });
+  });
+
   // #714 項目2＝**見た目パターン・音・読み上げも掴んで運べる**（以前はボタンだけで、同じ画面の中で
   // 置き方の流儀が割れていた＝ADR-0026②）。落とし先・断り方は絵の部品と同じ道を通る。
   it("読み上げをつかんで音の列へ落とすと、その列のその時刻へ置く", () => {

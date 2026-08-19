@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
 import { isKeyboardActivation, isPointerDragging, usePointerDrag } from "../hooks/usePointerDrag";
@@ -15,7 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_PENDING } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
@@ -34,6 +34,10 @@ import type { CropMode, TimelineClipKind } from "../../domain/enums";
 import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
+import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
+import { videoAssetIds, videoClipsOf } from "../../domain/timeline/video";
+import { clipTimeAtSceneTime } from "../../domain/project/videoStartTiming";
+import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
@@ -52,6 +56,7 @@ import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCred
 import { fontFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { layoutToSvg } from "../../renderer/sceneSvg";
+import type { LayoutItem } from "../../renderer/layout";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
@@ -2024,6 +2029,46 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         responsive: true,
       })
     : "";
+  // 動画の素材の id（選んだ部品の知らせに使う＝描画のたびに作り直さない）。
+  const videoAssetIdSet = videoAssetIds(doc);
+  // **動画の実映像**（#512 段1）＝書き出しで実フレームが出るので、プレビューにも同じ絵を出す
+  // （出さないと「見えていたものと違う動画が出る」＝ADR-0001 が破れる）。分割は書き出しと**同じ関数**
+  // （`splitVideoSceneSvgMulti`）＝穴を開けて `video` 要素で埋める。⚠️ **段1 は消音**（音は段2）。
+  const videoPlay = shownLayout
+    ? videoClipsOf(doc)
+        .map((clip) => {
+          const item = shownLayout.items.find(
+            (it) => it.kind === "image" && it.role === "slot" && isItemOfClip(it.id, clip.id),
+          ) as (LayoutItem & { kind: "image" }) | undefined;
+          const src = clip.assetId ? assetSrcById[clip.assetId] : undefined;
+          if (!item || !src) return null;
+          // 素材のどこを映すか＝**書き出しと同じ式**（トリム＋速さ）。
+          const speed = clip.speed != null && clip.speed > 0 ? clip.speed : 1;
+          const sourceSec = clipTimeAtSceneTime(playheadSec - clip.startSec, {
+            startDelaySec: 0,
+            clipStartSec: clip.sourceStartSec ?? 0,
+            speed,
+          });
+          return { clip, itemId: item.id, src, sourceSec, speed, fit: item.fit };
+        })
+        .filter((v): v is NonNullable<typeof v> => v != null)
+    : [];
+  const videoSplit =
+    shownLayout && videoPlay.length > 0
+      ? splitVideoSceneSvgMulti(
+          shownLayout,
+          videoPlay.map((v) => v.itemId),
+          (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined),
+          undefined,
+          fontFamilyForId(doc.videoSettings.fontId),
+          creditForLine(
+            { speaker: creditSpeakerAt(doc, frameTimeSec(doc, playheadSec)) },
+            creditForSpeaker(getVoicevoxSpeaker()),
+          ),
+          true,
+        )
+      : null;
+
   // 時間 → 画面上の長さ。短い動画でも列が潰れないよう下限を置く（横スクロールは既存 CSS が持つ）。
   // ⚠️ まだ全体表示を決めていない間も**段の上の値**を使う（段に無い値を混ぜると、そこから
   // 段を動かしたときに飛ぶ）。幅が測れない環境（テスト）でもここに落ち着く。
@@ -2044,9 +2089,45 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <div
             ref={stageRef}
             className={`preview-stage${drag?.drop?.center ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
-            style={{ aspectRatio: `${canvasDims.width} / ${canvasDims.height}` }}
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
+            style={{ aspectRatio: `${canvasDims.width} / ${canvasDims.height}`, position: "relative" }}
+            {...(videoSplit ? {} : { dangerouslySetInnerHTML: { __html: svg } })}
+          >
+            {/* 動画があるときは**下の静止層 →（実映像 → 間の静止層）* → 上の静止層**の順に重ねる
+                （#512 段1・書き出しと同じ分割）。無いときは1枚の SVG のまま＝出力の差分を作らない。 */}
+            {videoSplit && (
+              <>
+                <div style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: videoSplit.belowSvg }} />
+                {videoSplit.slots.map((slot, k) => {
+                  const v = videoPlay.find((x) => x.itemId === slot.layerId);
+                  return (
+                    <Fragment key={slot.layerId}>
+                      {v && (
+                        <TimelineSlotVideo
+                          src={v.src}
+                          rectPct={{
+                            left: `${(slot.rect.x / canvasDims.width) * 100}%`,
+                            top: `${(slot.rect.y / canvasDims.height) * 100}%`,
+                            width: `${(slot.rect.w / canvasDims.width) * 100}%`,
+                            height: `${(slot.rect.h / canvasDims.height) * 100}%`,
+                          }}
+                          rotation={slot.rotation}
+                          opacity={slot.opacity}
+                          fit={v.fit}
+                          sourceSec={v.sourceSec}
+                          speed={v.speed}
+                          playing={isPlaying}
+                        />
+                      )}
+                      {k < videoSplit.midSvgs.length && (
+                        <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }} dangerouslySetInnerHTML={{ __html: videoSplit.midSvgs[k] }} />
+                      )}
+                    </Fragment>
+                  );
+                })}
+                <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }} dangerouslySetInnerHTML={{ __html: videoSplit.aboveSvg }} />
+              </>
+            )}
+          </div>
           {/* **キャンバスで掴んで動かす**（#685 後半・ADR-0034 決定6）＝場面編集の自由配置と**同じ部品**
               （`FreeLayoutOverlay`）を流用する＝2つの画面で操作感を割らない。ハンドルは**選んだら常に**（決定7）。
               ⚠️ **再生中・書き出し中は出さない**＝動いている絵と設計位置のハンドルがずれて見える／
@@ -2665,6 +2746,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 )}
                 {selected.kind === TIMELINE_CLIP_KIND.slot && (
                   <>
+                    {/* ⚠️ **黙って無音にしない**（#512 段1・§2-5）＝絵は映るが元の音はまだ流れない。
+                        置いた本人がその場で分かるように、選んだときに出す。 */}
+                    {selected.assetId != null && videoAssetIdSet.has(selected.assetId) && (
+                      <p className="field-hint">{TIMELINE_VIDEO_AUDIO_PENDING}</p>
+                    )}
                     <label className="field">
                       <span>素材</span>
                       <select

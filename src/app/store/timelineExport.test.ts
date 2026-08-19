@@ -110,7 +110,7 @@ describe('exportTimelineVideo', () => {
     } as unknown as typeof deps;
     await useTimelineStore.getState().exportTimelineVideo(withTemplate);
     expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled();
-    expect(useTimelineStore.getState().exportRun.message).toContain('動画の素材はまだ書き出せません');
+    expect(useTimelineStore.getState().exportRun.message).toContain('差し込み口に入れた動画');
   });
 
   it('保存先を選ばなければ何もしない（勝手に書き出さない）', async () => {

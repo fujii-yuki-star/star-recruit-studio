@@ -551,10 +551,17 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
  * **全コードに文言が要る**＝理由が増えたら気づく。動画の素材は「まだ動かせず音も鳴らない」ので、
  * 静止画＋無音の動画を成功として出さずに断る（ADR-0026④）。
  */
+/**
+ * 動画の部品を選んだときの知らせ（#512 段1）。**絵は映るが元の音はまだ流れない**。
+ * ⚠️ 黙って無音にしない（§2-5）＝置いた本人がその場で分かるようにする。段2 で元音声を入れたら消す。
+ */
+export const TIMELINE_VIDEO_AUDIO_PENDING =
+  "この動画は映像だけが流れます。元の音はまだ出せません（音を付けるなら、音の列に音を置いてください）";
+
 export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
   TIMELINE_EXPORT_EMPTY: "まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください",
   TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED:
-    "動画の素材はまだ書き出せません。その部品を外すか、写真に置き換えてから書き出してください",
+    "見た目パターンの差し込み口に入れた動画は、まだ書き出せません。動画は列へ直接置いてください",
   TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
     "見た目パターンが見つからない部品があります。そのままでは動画に出ません。見た目パターンを読み込み直すか、その部品を置き直してください",
   TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN:

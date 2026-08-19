@@ -166,3 +166,47 @@ describe('buildTimelineFrames', () => {
     expect(seen[seen.length - 1]).toEqual([15, 15]);
   });
 });
+
+// #512 段1＝**動画は実フレームを差し込む**。素材 id ではなく**部品ごと**に差し替えるので、
+// 同じ動画を別の時刻へ2つ置いても**それぞれのコマ**が出る。
+describe('動画の実フレーム（#512 段1）', () => {
+  const videoDoc = (): TimelineProject =>
+    doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+      clips: [
+        { id: 'clip_a', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 1, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_v' } as TimelineClip,
+        { id: 'clip_b', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_002', startSec: 0, durationSec: 1, x: 200, y: 0, w: 100, h: 100, assetId: 'asset_v', sourceStartSec: 5 } as TimelineClip,
+      ],
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_002', kind: TRACK_KIND.visual }],
+    });
+
+  it('部品ごとに別のコマ列へ焼き出し、フレームごとに差し替える', async () => {
+    const staged: string[] = [];
+    await buildTimelineFrames(videoDoc(), {
+      templateOf: () => undefined,
+      assetSrc: () => 'data:image/png;base64,SRC',
+      fallbackCredit: 'クレジット',
+      stageVideo: async (v) => { staged.push(`${v.clipId}@${v.sourceStartSec}->${v.dirName}`); return 30; },
+      readVideoFrame: async (dirName, frameIndex) => `data:frame:${dirName}#${frameIndex}`,
+    });
+    // ⚠️ **トリムを渡す**＋**置き場を部品ごとに分ける**（同じ動画を2つ置いても混ざらない）。
+    expect(staged).toEqual([
+      'clip_a@0->timeline_frames_v_clip_a',
+      'clip_b@5->timeline_frames_v_clip_b',
+    ]);
+    // 1フレーム目の SVG に、**それぞれの部品のコマ**が入っている（素材の src ではない）。
+    const first = vi.mocked(svgToPngDataUrl).mock.calls[0][0];
+    expect(first).toContain('data:frame:');
+    expect(first).not.toContain('base64,SRC');
+  });
+
+  // ⚠️ 焼き出す口を渡さない環境では**静止のまま**（落ちない）＝画面が先に断る。
+  it('焼き出す口が無ければ静止のまま（例外にしない）', async () => {
+    const r = await buildTimelineFrames(videoDoc(), {
+      templateOf: () => undefined,
+      assetSrc: () => 'data:image/png;base64,SRC',
+      fallbackCredit: 'クレジット',
+    });
+    expect(r.fps).toBe(FPS);
+  });
+});
