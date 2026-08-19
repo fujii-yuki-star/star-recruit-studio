@@ -175,6 +175,11 @@ export interface TimelineState {
   /** 素材の表示用 src（assetId → URL）。場面形式の `assetSrcById` と同じ役割。 */
   assetSrcById: Record<string, string>;
   /**
+   * **動画の本体**の URL（assetId → URL・#512 段1）。`assetSrcById` は動画に**代表フレーム**を入れる
+   * （絵として描く用）ので、実映像を流すにはこちらを使う。無い＝流せない＝静止のまま（穴を開けない）。
+   */
+  videoSrcById: Record<string, string>;
+  /**
    * 素材の**実寸**（assetId → px・#634）。絵を測らないと分からないので**画面が測って入れる**。
    * プレビューと書き出しが同じ値を見る＝同じ絵になる（ADR-0001）。測れていない素材は入らない。
    */
@@ -561,6 +566,7 @@ function emptyState() {
     playheadSec: 0,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
+    videoSrcById: {} as Record<string, string>,
     assetSizes: {} as Record<string, SourceSize>,
     audioSrcByKey: {} as Record<string, string>,
     history: emptyHistory<TimelineProject>(),
@@ -648,6 +654,20 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       );
       const assetSrcById: Record<string, string> = {};
       for (const e of entries) if (e) assetSrcById[e[0]] = e[1];
+      // ⚠️ **動画は本体の URL も要る**（#512 段1）＝上の `assetSrcById` は動画に**代表フレーム**を入れる
+      // （絵として描く用）。仕上がり確認で実映像を流すには本体を指す必要がある＝場面形式の
+      // `PreviewScreen`（`assetDisplayUrl(pid, clipRelPath)`）と同じ解き方。混ぜると
+      // **穴だけ開いて何も映らない**（分割で開けた穴に静止画の URL を置くことになる）。
+      const videoEntries = await Promise.all(
+        doc.assets
+          .filter((a) => a.assetType === ASSET_TYPE.video)
+          .map(async (a): Promise<[string, string] | null> => {
+            const url = await assetDisplayUrl(doc.projectId, a.filePath);
+            return url ? [a.assetId, url] : null;
+          }),
+      );
+      const videoSrcById: Record<string, string> = {};
+      for (const e of videoEntries) if (e) videoSrcById[e[0]] = e[1];
       // 音源も**先に**用意する（鳴らす瞬間に読みに行くと頭が欠ける）。読めないものは黙って飛ばし、
       // その部品は鳴らない（読み込み失敗で動画全体を開けなくしない）。
       const audioEntries = await Promise.all(
@@ -664,7 +684,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       );
       const audioSrcByKey: Record<string, string> = {};
       for (const e of audioEntries) if (e) audioSrcByKey[e[0]] = e[1];
-      set({ doc, assetSrcById, audioSrcByKey, assetSizes: {}, isLoading: false });
+      set({ doc, assetSrcById, videoSrcById, audioSrcByKey, assetSizes: {}, isLoading: false });
     } catch (e) {
       // 読込の失敗理由は文書側（TimelineLoadError）が「次の行動」つきで持っている。それ以外は既定文言。
       set({ ...emptyState(), loadError: e instanceof TimelineLoadError ? e.message : LOAD_FAILED_MESSAGE });
@@ -1425,6 +1445,15 @@ async function runImport(
     // その1回ぶんを食べて以後の入力が記録されない・声の完成と同じ流儀）。
     commit(set, get, { ...cur, assets: [...cur.assets, full] }, {}, { outsideGroup: true });
     if (src) set({ assetSrcById: { ...get().assetSrcById, [asset.assetId]: src } });
+    // ⚠️ **取り込んだ動画にも本体の URL を用意する**（#512 段1）＝読込時と同じ扱い。
+    // 忘れると「開き直すと映るのに、取り込んだ直後は映らない」という入口ごとの割れになる。
+    if (asset.assetType === ASSET_TYPE.video) {
+      const bodyUrl = await assetDisplayUrl(doc.projectId, relPath);
+      const now = get().doc;
+      if (bodyUrl && now && now.projectId === doc.projectId) {
+        set({ videoSrcById: { ...get().videoSrcById, [asset.assetId]: bodyUrl } });
+      }
+    }
     // 自動保存は**画面**が持っているので、離れた後に着地したぶんは誰も書かない＝ここで自分から保存する。
     void get().saveTimelineProject();
   } catch (e) {

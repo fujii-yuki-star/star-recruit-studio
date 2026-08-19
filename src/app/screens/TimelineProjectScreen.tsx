@@ -35,8 +35,7 @@ import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
-import { videoAssetIds, videoClipsOf } from "../../domain/timeline/video";
-import { clipTimeAtSceneTime } from "../../domain/project/videoStartTiming";
+import { videoAssetIds, videoClipsOf, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
@@ -341,7 +340,7 @@ function keyframeSummary(k: Keyframe): string {
  */
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
-    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
+    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
@@ -2040,16 +2039,22 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           const item = shownLayout.items.find(
             (it) => it.kind === "image" && it.role === "slot" && isItemOfClip(it.id, clip.id),
           ) as (LayoutItem & { kind: "image" }) | undefined;
-          const src = clip.assetId ? assetSrcById[clip.assetId] : undefined;
+          // ⚠️ **動画の本体**の URL（`assetSrcById` は代表フレーム＝静止画）。無ければ**穴を開けない**
+          // ＝何も映らない窓を作るより、いままでどおり代表フレームで見せる（#512 段1 レビュー 🔴）。
+          const src = clip.assetId ? videoSrcById[clip.assetId] : undefined;
           if (!item || !src) return null;
-          // 素材のどこを映すか＝**書き出しと同じ式**（トリム＋速さ）。
-          const speed = clip.speed != null && clip.speed > 0 ? clip.speed : 1;
-          const sourceSec = clipTimeAtSceneTime(playheadSec - clip.startSec, {
-            startDelaySec: 0,
-            clipStartSec: clip.sourceStartSec ?? 0,
-            speed,
-          });
-          return { clip, itemId: item.id, src, sourceSec, speed, fit: item.fit };
+          // ⚠️ **書き出しと同じ関数で、同じ格子**（`frameTimeSec`）から出す＝置いた位置が格子に
+          // 乗っていなくても、プレビューと書き出しが同じコマになる。
+          const sourceSec = videoSourceSecAt(clip, frameTimeSec(doc, playheadSec), doc.videoSettings.fps ?? FPS);
+          if (sourceSec == null) return null;
+          const speed = videoStagePlan(clip, doc.videoSettings.fps ?? FPS).speed;
+          return {
+            clip, itemId: item.id, src, sourceSec, speed,
+            fit: item.fit, align: item.align,
+            // 合成の不透明度・切り抜きは**書き出しが `<g>` で掛けているもの**＝実映像にも同じだけ効かせる。
+            opacity: item.composite?.opacity ?? item.opacity,
+            clipRect: item.clipRect,
+          };
         })
         .filter((v): v is NonNullable<typeof v> => v != null)
     : [];
@@ -2111,8 +2116,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             height: `${(slot.rect.h / canvasDims.height) * 100}%`,
                           }}
                           rotation={slot.rotation}
-                          opacity={slot.opacity}
+                          opacity={v.opacity}
                           fit={v.fit}
+                          align={v.align}
+                          clipRect={v.clipRect}
+                          canvas={canvasDims}
                           sourceSec={v.sourceSec}
                           speed={v.speed}
                           playing={isPlaying}

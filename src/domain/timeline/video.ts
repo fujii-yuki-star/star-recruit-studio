@@ -59,6 +59,16 @@ export function videoFrameIndexAt(
   stagedCount: number,
 ): number | null {
   if (stagedCount <= 0) return null;
+  const local = stagedFrameIndexAt(clip, frameIndex, fps);
+  if (local == null) return null;
+  return Math.min(stagedCount - 1, local);
+}
+
+/**
+ * その出力フレームが、その部品の**何コマ目**か（`null`＝映っていない）。
+ * ⚠️ **プレビューと書き出しはここだけを見る**（#512 段1 レビュー 🔴）＝別々に時刻を出すとずれる。
+ */
+function stagedFrameIndexAt(clip: TimelineClip, frameIndex: number, fps: number): number | null {
   const t = frameIndex / fps;
   // 生きている区間は半開（`11 §7.6.4`＝終わりの瞬間はもう映らない）＝描く側と同じ規則。
   if (t < clip.startSec || t >= clip.startSec + clip.durationSec) return null;
@@ -67,6 +77,20 @@ export function videoFrameIndexAt(
   // ⚠️ **トリムと速さはここで掛けない**＝焼いたコマ自体が織り込み済み（`stage_clip_frames` が
   // `sourceStartSec` から `setpts=PTS/speed` で並べる）。二重に掛けると倍速が二乗になる。
   const local = frameIndex - Math.round(clip.startSec * fps);
-  if (local < 0) return null;
-  return Math.min(stagedCount - 1, local);
+  return local < 0 ? null : local;
+}
+
+/**
+ * その時刻に映すべき**素材の中の秒**（`null`＝映っていない・#512 段1）。
+ * プレビューはこれを `video.currentTime` に入れる。
+ *
+ * ⚠️ **書き出しと同じコマ番号から導く**＝別々の式で出すと、置いた位置が格子（1/fps）に乗っていないとき
+ * プレビューと書き出しで**別のコマ**になる（実測で最大1.5コマ×速さのずれ）。ここで
+ * 「何コマ目か」を先に決め、そのコマが指す素材の秒へ直す（トリム＋速さはこの1回だけ掛ける）。
+ */
+export function videoSourceSecAt(clip: TimelineClip, timeSec: number, fps: number): number | null {
+  const local = stagedFrameIndexAt(clip, Math.round(timeSec * fps), fps);
+  if (local == null) return null;
+  const speed = clip.speed != null && clip.speed > 0 ? clip.speed : 1;
+  return (clip.sourceStartSec ?? 0) + (local / fps) * speed;
 }

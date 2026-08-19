@@ -2155,14 +2155,31 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
           startSec: 0, durationSec: 5, x: 0, y: 0, w: 1920, h: 1080, assetId: "asset_v",
         }],
       });
-      // 素材の表示用 src（実物は取り込み時に作る）＝これが無いと絵として描けない。
-      act(() => { useTimelineStore.setState({ assetSrcById: { asset_v: "blob:asset_v" } }); });
+      // ⚠️ **動画は本体の URL（`videoSrcById`）を見る**（`assetSrcById` は代表フレーム＝静止画）。
+      // ここを取り違えると「穴だけ開いて何も映らない」＝レビューで見つかった 🔴 そのもの。
+      act(() => {
+        useTimelineStore.setState({
+          assetSrcById: { asset_v: "blob:thumb_v" },
+          videoSrcById: { asset_v: "blob:body_v" },
+        });
+      });
     };
 
-    it("仕上がり確認に実映像（video 要素）が出る", () => {
+    it("仕上がり確認に実映像（video 要素）が出る＝**本体**を指す（代表フレームではない）", () => {
       withVideo();
       const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-      expect(container.querySelector(".preview-stage video")).not.toBeNull();
+      const v = container.querySelector(".preview-stage video") as HTMLVideoElement | null;
+      expect(v).not.toBeNull();
+      expect(v?.getAttribute("src")).toBe("blob:body_v"); // 静止画を指していたら穴が空くだけ
+      expect(v?.muted).toBe(true); // 段1 は消音（元の音は段2）
+    });
+
+    // ⚠️ **本体の URL が無ければ穴を開けない**（何も映らない窓を作るより、代表フレームのまま見せる）。
+    it("本体の URL が無いときは実映像にしない（静止のまま）", () => {
+      withVideo();
+      act(() => { useTimelineStore.setState({ videoSrcById: {} }); });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      expect(container.querySelector(".preview-stage video")).toBeNull();
     });
 
     it("選ぶと「元の音はまだ出せない」を知らせる（黙って無音にしない）", () => {
@@ -2182,6 +2199,9 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
           startSec: 0, durationSec: 5, x: 0, y: 0, w: 1920, h: 1080, assetId: "asset_p",
         }],
       });
+      // ⚠️ **写真にも src を与える**＝与えないと「src が無いから出ない」で通ってしまい、
+      // 種類の判定（動画かどうか）が壊れても落ちない（レビュー指摘）。
+      act(() => { useTimelineStore.setState({ assetSrcById: { asset_p: "blob:p" }, videoSrcById: { asset_p: "blob:p" } }); });
       render(<TimelineProjectScreen onNavigate={vi.fn()} />);
       act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
       expect(screen.queryByText(/元の音はまだ出せません/)).toBeNull();

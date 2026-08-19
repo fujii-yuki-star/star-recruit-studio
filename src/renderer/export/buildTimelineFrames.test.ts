@@ -195,8 +195,11 @@ describe('動画の実フレーム（#512 段1）', () => {
       'clip_b@5->timeline_frames_v_clip_b',
     ]);
     // 1フレーム目の SVG に、**それぞれの部品のコマ**が入っている（素材の src ではない）。
+    // ⚠️ **それぞれのコマが別々に入っている**ことまで見る（レビュー指摘）＝1件目を両方へ返す
+    // 取り違えでも `data:frame:` は含まれてしまい、変異が生き残る。
     const first = vi.mocked(svgToPngDataUrl).mock.calls[0][0];
-    expect(first).toContain('data:frame:');
+    expect(first).toContain('timeline_frames_v_clip_a#0');
+    expect(first).toContain('timeline_frames_v_clip_b#0');
     expect(first).not.toContain('base64,SRC');
   });
 

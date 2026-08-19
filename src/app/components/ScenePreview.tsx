@@ -8,6 +8,7 @@ import { isSubtitleItem, layoutScene } from "../../renderer/layout";
 import type { LayoutItem } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
+import { fitToObjectFit } from "./fitToObjectFit";
 import { resolveLineSubtitle, type BoundaryFrame, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
 import { containBox, fallbackWidthCss } from "./previewFit";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
@@ -28,10 +29,6 @@ export interface VideoSlotPlayback {
   fit: Fit;
   useOriginalAudio: boolean;
   originalVolume?: number;
-}
-
-function fitToObjectFit(fit: Fit): "cover" | "contain" | "fill" {
-  return fit === "contain" ? "contain" : fit === "stretch" ? "fill" : "cover";
 }
 
 /**

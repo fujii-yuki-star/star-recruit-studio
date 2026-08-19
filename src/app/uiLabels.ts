@@ -547,17 +547,19 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
 };
 
 /**
- * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で
- * **全コードに文言が要る**＝理由が増えたら気づく。動画の素材は「まだ動かせず音も鳴らない」ので、
- * 静止画＋無音の動画を成功として出さずに断る（ADR-0026④）。
- */
-/**
- * 動画の部品を選んだときの知らせ（#512 段1）。**絵は映るが元の音はまだ流れない**。
- * ⚠️ 黙って無音にしない（§2-5）＝置いた本人がその場で分かるようにする。段2 で元音声を入れたら消す。
+ * 動画の部品を選んだときの知らせ（#512 段1・`15 §6`）。**絵は映るが元の音はまだ流れない**。
+ * ⚠️ **黙って無音にしない**（§2-5）＝置いた本人がその場で分かるようにする。段2 で元音声（`useOriginalAudio`）を
+ * 入れたら消す。断りではなく知らせなので `exportBlockedMessage` には入れない。
  */
 export const TIMELINE_VIDEO_AUDIO_PENDING =
   "この動画は映像だけが流れます。元の音はまだ出せません（音を付けるなら、音の列に音を置いてください）";
 
+/**
+ * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で
+ * **全コードに文言が要る**＝理由が増えたら気づく。
+ * ⚠️ 動画は **#512 段1 で直接置いたぶんが映るようになった**＝断るのは**まだ映らない使い方**
+ * （見た目パターンの差し込み口・立ち絵）だけ。静止画で出すのを成功にしない（ADR-0026④）。
+ */
 export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
   TIMELINE_EXPORT_EMPTY: "まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください",
   TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED:

@@ -7,19 +7,30 @@
 // ⚠️ **段1 は絵だけ**＝元の音はまだ流れないので**常に消音**（画面がその場で断る＝§2-5）。音は段2。
 import { useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
-import type { Fit } from "../../domain/enums";
+import type { CropAlignX, CropAlignY, Fit } from "../../domain/enums";
+import { fitToObjectFit } from "./fitToObjectFit";
+
+/** 寄せ → CSS の `object-position`（書き出しの `preserveAspectRatio` の前半と対＝`05 §8`）。 */
+const ALIGN_X_PCT: Record<CropAlignX, string> = { left: "0%", center: "50%", right: "100%" };
+const ALIGN_Y_PCT: Record<CropAlignY, string> = { top: "0%", middle: "50%", bottom: "100%" };
 
 /** 再生中に「ずれた」とみなす幅（秒）。これ以内なら**掛け直さない**＝毎フレーム seek してカクつかせない。 */
 const DRIFT_TOLERANCE_SEC = 0.25;
 
 export function TimelineSlotVideo({
-  src, rectPct, rotation, opacity, fit, sourceSec, speed, playing,
+  src, rectPct, rotation, opacity, fit, align, clipRect, canvas, sourceSec, speed, playing,
 }: {
   src: string;
   rectPct: { left: string; top: string; width: string; height: string };
   rotation?: number;
   opacity?: number;
   fit: Fit;
+  /** 寄せ（`cropAlign`）＝`cover` で切る側をどこに寄せるか。書き出しの `preserveAspectRatio` と対。 */
+  align?: { x?: CropAlignX; y?: CropAlignY };
+  /** 切り抜き（`11 §7.6.4.1`）。書き出しは `<g clip-path>` で包むので、実映像にも同じだけ効かせる。 */
+  clipRect?: { x: number; y: number; w: number; h: number };
+  /** 動画の実寸（切り抜きの矩形を割合へ直すのに使う）。 */
+  canvas: { width: number; height: number };
   /** いまの再生位置に対応する**素材の中の秒**（トリム・速さ込み＝書き出しと同じ式から採る）。 */
   sourceSec: number;
   speed: number;
@@ -58,10 +69,23 @@ export function TimelineSlotVideo({
   const style: CSSProperties = {
     position: "absolute",
     ...rectPct,
-    // 収め方は SVG の `preserveAspectRatio` と同じ意味に写す（`cover`＝切って埋める／`contain`＝収める）。
-    objectFit: fit === "cover" ? "cover" : fit === "contain" ? "contain" : "fill",
+    // 収め方・寄せは SVG の `preserveAspectRatio` と**同じ意味**に写す（`fitToObjectFit`＝共有）。
+    objectFit: fitToObjectFit(fit),
+    ...(align?.x != null || align?.y != null
+      ? { objectPosition: `${ALIGN_X_PCT[align.x ?? "center"]} ${ALIGN_Y_PCT[align.y ?? "middle"]}` }
+      : {}),
     ...(rotation ? { transform: `rotate(${rotation}deg)` } : {}),
     ...(opacity != null && opacity < 1 ? { opacity } : {}),
+    // 切り抜きは書き出しが `<g clip-path>` で包むので、こちらも同じ矩形で切る（割合へ直す）。
+    ...(clipRect
+      ? {
+          clipPath: `inset(${(clipRect.y / canvas.height) * 100}% ${
+            ((canvas.width - clipRect.x - clipRect.w) / canvas.width) * 100
+          }% ${((canvas.height - clipRect.y - clipRect.h) / canvas.height) * 100}% ${
+            (clipRect.x / canvas.width) * 100
+          }%)`,
+        }
+      : {}),
     pointerEvents: "none",
   };
   // ⚠️ **常に消音**（段1）＝元の音はまだ流れない。`muted` を外すのは段2（`useOriginalAudio`）。
