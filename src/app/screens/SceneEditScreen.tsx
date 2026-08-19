@@ -233,7 +233,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase)); // 書き出し中はキャンバス/フォームを止める（#570 P2）
   const projectBgm = useProjectStore((s) => s.meta.bgmSettings);
   // 場面カード列のドラッグ&ドロップ並び替え（#398）。カード自身を持ち手＋落下先にする（クリックで選択・ドラッグで並び替え）。
-  const sceneDnd = useDragReorder(moveSceneToIndex, { axis: "x" }); // 場面カードは横並び
+  // 場面カードは横並び。端まで運んだら送る（#714 項目5）＝帯からはみ出したカードへも1回で運べる。
+  const sceneStripRef = useRef<HTMLDivElement | null>(null);
+  const sceneDnd = useDragReorder(moveSceneToIndex, { axis: "x", scroller: () => sceneStripRef.current });
   // 連続編集を1履歴にまとめる（#389）：テキスト欄は focus/blur、スライダーは pointerdown 開始＋window で終了（取りこぼし防止）。
   const { textGroup, dragGroup } = useHistoryGroup();
   // Undo/Redo の可否（#211・ADR-0020）。past/future の有無から導出（派生＝余分な state を持たない）。
@@ -1531,7 +1533,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   場面を追加
                 </button>
               </div>
-              <div className="scene-strip">
+              <div className="scene-strip" ref={sceneStripRef}>
                 {scenes.map((s, i) => (
                   <Fragment key={s.sceneId}>
                     {/* **落ちる場所を線で見せる**（#771(c)）＝カードを囲むと「その前か後ろか」が読めない。

@@ -250,3 +250,96 @@ describe("useDragReorder（Pointer Events 並び替え・#398）", () => {
     expect(result.current.overGap).toBe(2);
   });
 });
+
+// #714 項目5＝端まで運ぶと送る。⚠️ **送っている間は指が止まったまま**なので、落とし先の要素からは
+// `pointermove` が来ない。位置から引き直せないと線は止まったままで、離すと**送る前の場所**へ落ちる。
+describe("端まで運んだら送る（#714 項目5）", () => {
+  /** 縦に送れる枠。 */
+  function scroller(): HTMLElement {
+    const el = document.createElement("div");
+    Object.defineProperty(el, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(el, "scrollHeight", { value: 3000, configurable: true });
+    Object.defineProperty(el, "clientWidth", { value: 400, configurable: true });
+    el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 600, width: 400, height: 600, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    return el;
+  }
+
+  /**
+   * 並びの項目。⚠️ **送った分だけ動く**（実物と同じ＝`scrollTop` が増えるとカードは上へ動く）。
+   * 固定の矩形にすると「送る前からその位置を指していた」だけになり、**本題（送った分だけ線が追いつく）を
+   * 落とせない**（レビュー指摘）。
+   */
+  function item(box: HTMLElement, topInContent: number, height = 100): HTMLElement {
+    const el = document.createElement("div");
+    el.getBoundingClientRect = () => {
+      const top = topInContent - box.scrollTop;
+      return ({ left: 0, top, right: 400, bottom: top + height, width: 400, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    };
+    return el;
+  }
+
+  it("枠を渡さなければ送らない（いままでどおり）", () => {
+    const { result } = renderHook(() => useDragReorder(vi.fn()));
+    grab(result);
+    // 端の座標で動かしても、送る相手がいないので何も起きない（例外にもならない）。
+    act(() => { fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 200, clientY: 599 }); });
+    expect(result.current.draggingId).toBe("s1");
+  });
+
+  it("送った分だけ線が追いつく（指は止まったまま・すき間が変わる）", () => {
+    let raf: ((t: number) => void) | null = null;
+    vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => { raf = cb; return 1; });
+    vi.stubGlobal("cancelAnimationFrame", () => { raf = null; });
+    vi.stubGlobal("performance", { now: () => 0 });
+    try {
+      const box = scroller();
+      const { result } = renderHook(() => useDragReorder(vi.fn(), { scroller: () => box }));
+      // 中身は 0/100/900 の位置に3つ。指は下端（599）に置く。
+      act(() => {
+        result.current.dropProps(0).ref(item(box, 0));
+        result.current.dropProps(1).ref(item(box, 100));
+        result.current.dropProps(2).ref(item(box, 900));
+      });
+      grab(result);
+      // 送る前＝3つ目はまだ画面の外（900〜1000）。指の 599 は 2つ目の後ろの余白＝決められない。
+      act(() => { fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 200, clientY: 599 }); });
+      const gapBefore = result.current.overGap;
+      expect(gapBefore).toBeNull();
+      // 1フレームで進める量は上限がある（戻ってきた直後に跳ばない規則）ので、何フレームか送る。
+      for (let i = 1; i <= 15; i += 1) act(() => { if (raf) raf(i * 50); });
+      expect(box.scrollTop).toBeGreaterThan(400); // 3つ目が見える所まで来る
+      // ⚠️ **指は動いていない**のに、送った分だけ落とし先が変わる＝これが引き直しの本題。
+      expect(result.current.overGap).toBe(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // ⚠️ **切り取られて見えていない所では決めない**（レビュー指摘）＝送る向きに指がはみ出しても、
+  // 見えている範囲へ丸めてから当てる（置く側と同じ規則）。丸めないと画面外の位置で線が決まり、
+  // 離すとそこへ落ちる。
+  it("枠の外へ指がはみ出しても、見えている範囲で決める", () => {
+    let raf: ((t: number) => void) | null = null;
+    vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => { raf = cb; return 1; });
+    vi.stubGlobal("cancelAnimationFrame", () => { raf = null; });
+    vi.stubGlobal("performance", { now: () => 0 });
+    try {
+      const box = scroller();
+      const { result } = renderHook(() => useDragReorder(vi.fn(), { scroller: () => box }));
+      // 3つ目は枠（0〜600）より下まで続く長い項目（300〜1000）。
+      act(() => {
+        result.current.dropProps(0).ref(item(box, 0));
+        result.current.dropProps(1).ref(item(box, 100));
+        result.current.dropProps(2).ref(item(box, 300, 700));
+      });
+      grab(result);
+      // 指を枠の下端よりさらに下（950）へ。丸めなければ 3つ目の後ろ半分＝すき間3 になる。
+      act(() => { fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 200, clientY: 950 }); });
+      act(() => { if (raf) raf(16) });
+      // 丸めた位置（600）は 3つ目の**前半分**＝その手前のすき間。
+      expect(result.current.overGap).toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

@@ -129,3 +129,42 @@ describe("useEdgeAutoScroll（掴んだまま端まで来たら送る・#714）"
     expect(raf.pending).toBe(0);
   });
 });
+
+// #714 項目5＝並べ替え（台本表は縦・場面カードの帯は横）でも同じ部品を使う。
+// 縦は `scrollTop` を動かし、当たり判定の直交側（横）も入れ替わる。
+describe("縦にも送れる（並べ替えの端送り・#714 項目5）", () => {
+  /** 縦に送れる枠。 */
+  function tallBox(): HTMLElement {
+    const el = document.createElement("div");
+    Object.defineProperty(el, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(el, "scrollHeight", { value: 3000, configurable: true });
+    Object.defineProperty(el, "clientWidth", { value: 400, configurable: true });
+    el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 600, width: 400, height: 600, x: 0, y: 0, toJSON: () => ({}) });
+    return el;
+  }
+
+  it("下の端まで来たら `scrollTop` を送り、送った分でやり直す", () => {
+    const { result } = renderHook(() => useEdgeAutoScroll(0, "y"));
+    const el = tallBox();
+    const replay = vi.fn();
+    act(() => { result.current.track(el, { clientX: 200, clientY: 599 } as PointerEvent, replay); });
+    raf.tick(100);
+    expect(el.scrollTop).toBeGreaterThan(0);
+    expect(el.scrollLeft).toBe(0); // 横は動かさない
+    expect(replay).toHaveBeenCalled();
+  });
+
+  it("真ん中では回さない", () => {
+    const { result } = renderHook(() => useEdgeAutoScroll(0, "y"));
+    act(() => { result.current.track(tallBox(), { clientX: 200, clientY: 300 } as PointerEvent, vi.fn()); });
+    expect(raf.pending).toBe(0);
+  });
+
+  // ⚠️ **直交する側（横）が枠の外なら効かない**＝横の枠と縦の枠が同じ上端から始まっていても、
+  // 別の欄の上で指を動かしただけで頁が飛ばない（横向きのときの縦と同じ守り）。
+  it("枠の横幅の外では送らない", () => {
+    const { result } = renderHook(() => useEdgeAutoScroll(0, "y"));
+    act(() => { result.current.track(tallBox(), { clientX: 900, clientY: 599 } as PointerEvent, vi.fn()); });
+    expect(raf.pending).toBe(0);
+  });
+});
