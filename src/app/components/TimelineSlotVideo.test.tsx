@@ -162,6 +162,32 @@ describe("流す・止めるの呼ばれ方（#512 段1 レビュー 🔴）", (
     }
   });
 
+  // ⚠️ **読み込みを待っている間に流す・止めるが変わっても、古い合図が積み残らない**
+  // （PR #800 レビューの懸念＝後始末が無いと、待っている間の分だけ合図が溜まり、
+  //  読み込み完了の瞬間に**古い状態のまま**まとめて走る）。後始末は入っているが、テストで固定する。
+  it("読み込み中に流す・止めるを切り替えても、読み込み完了で走るのは最後の1つだけ", () => {
+    const { play, pause } = spyMedia();
+    try {
+      const { container, rerender } = render(
+        <TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing />,
+      );
+      const v = container.querySelector("video") as HTMLVideoElement;
+      // まだ読めていない＝`loadedmetadata` を待っている状態。
+      Object.defineProperty(v, "readyState", { value: 0, configurable: true });
+      rerender(<TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing={false} />);
+      rerender(<TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing />);
+      expect(play).not.toHaveBeenCalled(); // まだ読めていないので何も起きない
+      expect(pause).not.toHaveBeenCalled();
+      // 読み込み完了。古い合図が残っていれば、その分だけ流す・止めるが交互に走る。
+      Object.defineProperty(v, "readyState", { value: 1, configurable: true });
+      fireEvent(v, new Event("loadedmetadata"));
+      expect(play).toHaveBeenCalledTimes(1); // 走るのは**最後の1つ**だけ
+      expect(pause).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("画面から消えるときは止める（掴んだまま別の絵へ行っても鳴り続けない）", () => {
     const { pause } = spyMedia();
     try {
