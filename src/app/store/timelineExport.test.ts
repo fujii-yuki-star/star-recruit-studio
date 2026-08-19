@@ -114,7 +114,7 @@ describe('exportTimelineVideo', () => {
     } as unknown as typeof deps;
     await useTimelineStore.getState().exportTimelineVideo(withTemplate);
     expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled();
-    expect(useTimelineStore.getState().exportRun.message).toContain('差し込み口に入れた動画');
+    expect(useTimelineStore.getState().exportRun.message).toContain('差し込み口や立ち絵に入れた動画');
   });
 
   // ⚠️ **位置引数の並びは型で守れない**（`speed`/`fps`/`width` はどれも number＝取り違えても通る）。
@@ -153,6 +153,16 @@ describe('exportTimelineVideo', () => {
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(vi.mocked(framesMod.buildTimelineFrames)).not.toHaveBeenCalled();
     expect(useTimelineStore.getState().exportRun.phase).toBe('idle');
+  });
+
+  // ⚠️ **Rust が整えた文言はそのまま出す**（#512 段1 レビュー 🟡）＝コマの焼き出しが本走行に入り、
+  // 「動画が見つかりませんでした。もう一度取り込んでください」等が届くようになった。丸めると
+  // **何度やっても成功しない案内**になる。Tauri は**文字列で** reject するので、そこで見分ける。
+  it('Rust が整えた案内はそのまま出す（丸めない）', async () => {
+    vi.mocked(ffmpegMod.exportVideo).mockRejectedValue('動画が見つかりませんでした。もう一度取り込んでください');
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.message).toBe('動画が見つかりませんでした。もう一度取り込んでください');
   });
 
   it('失敗したら「次にどうするか」を知らせる（生のエラーを見せない）', async () => {

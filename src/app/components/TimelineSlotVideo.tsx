@@ -34,7 +34,7 @@ function insetOf(
 }
 
 export function TimelineSlotVideo({
-  src, rect, rotation, opacity, fit, align, clipRect, canvas, sourceSec, speed, playing,
+  src, rect, rotation, opacity, fit, align, clipRect, canvas, sourceSec, speed, playing, onUnplayable,
 }: {
   src: string;
   /** 置き場所（**動画の座標**＝キャンバス基準）。割合への直しはここで行う（呼び出し側で作らない）。 */
@@ -52,36 +52,65 @@ export function TimelineSlotVideo({
   sourceSec: number;
   speed: number;
   playing: boolean;
+  /**
+   * その素材を**この画面では読めなかった**（#512 段1 レビュー 🟡）。
+   * ⚠️ 取り込みは変換せずに写すので、**画面が再生できない形式**（HEVC 等）が入りうる。
+   * 何も映らない窓を黙って出さないよう、呼び出し側へ知らせて**代表フレームへ戻してもらう**
+   * （書き出しは ffmpeg が描くので出る＝「壊れて見える」のは画面だけ）。
+   */
+  onUnplayable?: () => void;
 }): React.JSX.Element {
   const ref = useRef<HTMLVideoElement>(null);
 
+  // ⚠️ **合わせるのと、流す・止めるは分ける**（レビュー 🔴・2つのレビューが独立に検出）。
+  // 一緒にすると、`sourceSec` は**毎フレーム変わる**（再生位置が動くため）ので effect が張り直され、
+  // **後始末の `pause()` → 次の `play()` が毎フレーム**走る＝`play()` の約束が中断され続け、
+  // 実機では**映像が進まない／カクつく**（jsdom は `play/pause` を実装しないのでテストに出ない）。
+
+  // (1) 素材の位置を合わせる（流す・止めるはしない）。
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    // 自動再生不可（ポリシー）や非実装（jsdom）でも throw させない＝静止画で見える（§2-5）。
-    const seek = (): void => {
+    const sync = (): void => {
       // ⚠️ **再生中は大きくずれたときだけ掛け直す**＝毎回入れると映像が跳ねる。
       const drift = Math.abs(v.currentTime - sourceSec);
       if (!playing || drift > DRIFT_TOLERANCE_SEC) {
         try { v.currentTime = sourceSec; } catch { /* seek 不可なら loadedmetadata で再設定 */ }
       }
       v.playbackRate = speed > 0 ? speed : 1;
-      if (playing) {
+    };
+    v.addEventListener("loadedmetadata", sync);
+    if (v.readyState >= 1) sync();
+    return () => v.removeEventListener("loadedmetadata", sync);
+  }, [src, sourceSec, speed, playing]);
+
+  // (2) 流す・止める。**いまの状態と違うときだけ**触る（同じ命令を毎回投げない）。
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    // 自動再生不可（ポリシー）や非実装（jsdom）でも throw させない＝静止画で見える（§2-5）。
+    const apply = (): void => {
+      if (playing && v.paused) {
         try {
           const p = v.play();
           if (p && typeof p.catch === "function") p.catch(() => {});
         } catch { /* noop */ }
-      } else {
+      } else if (!playing && !v.paused) {
         try { v.pause(); } catch { /* noop */ }
       }
     };
-    v.addEventListener("loadedmetadata", seek);
-    if (v.readyState >= 1) seek();
+    v.addEventListener("loadedmetadata", apply);
+    if (v.readyState >= 1) apply();
+    return () => v.removeEventListener("loadedmetadata", apply);
+  }, [src, playing]);
+
+  // (3) 画面から消えるときだけ止める（**張り直しでは止めない**＝上の毎フレーム pause を作らない）。
+  useEffect(() => {
+    const v = ref.current;
     return () => {
-      v.removeEventListener("loadedmetadata", seek);
-      try { v.pause(); } catch { /* 非実装(jsdom)/停止不可でも無害 */ }
+      try { v?.pause(); } catch { /* 非実装(jsdom)/停止不可でも無害 */ }
     };
-  }, [src, sourceSec, speed, playing]);
+  }, []);
 
   const style: CSSProperties = {
     position: "absolute",
@@ -105,5 +134,16 @@ export function TimelineSlotVideo({
     pointerEvents: "none",
   };
   // ⚠️ **常に消音**（段1）＝元の音はまだ流れない。`muted` を外すのは段2（`useOriginalAudio`）。
-  return <video ref={ref} src={src} style={style} muted playsInline preload="auto" />;
+  return (
+    <video
+      ref={ref}
+      src={src}
+      style={style}
+      muted
+      playsInline
+      preload="auto"
+      // 読めなかったら実映像をやめる（穴だけ開いた窓を残さない）。
+      onError={onUnplayable}
+    />
+  );
 }

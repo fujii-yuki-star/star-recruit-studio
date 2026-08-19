@@ -580,7 +580,7 @@ export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
 export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
   TIMELINE_EXPORT_EMPTY: "まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください",
   TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED:
-    "見た目パターンの差し込み口に入れた動画は、まだ書き出せません。動画は列へ直接置いてください",
+    "見た目パターンの差し込み口や立ち絵に入れた動画は、まだ書き出せません。動画は列へ直接置いてください",
   TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
     "見た目パターンが見つからない部品があります。そのままでは動画に出ません。見た目パターンを読み込み直すか、その部品を置き直してください",
   TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN:

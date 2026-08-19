@@ -242,8 +242,13 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // ⚠️ **元の音はまだ流れない**（段2）＝これは断りではなく画面がその場で知らせる（`15 §6`）。
   const videoIds = videoAssetIds(doc);
   if (videoIds.size > 0) {
+    // ⚠️ **描かれないものは数えない**（レビュー ❓・焼き出し／静止画の要求と揃える）＝隠した部品は
+    // 静止画で出ることも無いので、断る理由が無い（隠したのに書き出せない、を作らない）。
     const clipIds = doc.clips
-      .filter((clip) => clipUsesAsset(clip, videoIds) && videoAssetIdOfClip(clip, videoIds) == null)
+      .filter(
+        (clip) =>
+          clipUsesAsset(clip, videoIds) && videoAssetIdOfClip(clip, videoIds) == null && isDrawnClip(doc, clip),
+      )
       .map((clip) => clip.id);
     if (clipIds.length > 0) blockers.push({ code: TIMELINE_EXPORT_BLOCK.videoAsset, clipIds });
   }

@@ -2060,9 +2060,17 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText("曲")).not.toBeInTheDocument(); // 音は絵の一覧に出さない
-    expect(screen.queryByText("紹介ムービー")).not.toBeInTheDocument(); // 動画も出さない（使えない選択肢を並べない）
     fireEvent.click(screen.getByText("会社の外観"));
     expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ kind: "slot", assetId: "asset_001" });
+  });
+
+  // ⚠️ **動画も置ける**（#512 段1・利用者判断 2026-08-19）＝以前は「置けても書き出しの手前で断られる」
+  // ので一覧から外していたが、直接置いた動画は映るようになった＝外す理由が消えた。
+  it("動画も置ける（映るようになったので一覧に出す）", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("紹介ムービー"));
+    expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ kind: "slot", assetId: "asset_003" });
   });
 
   it("置ける列が無いときは、何をすれば置けるか出す", () => {

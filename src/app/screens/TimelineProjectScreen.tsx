@@ -888,8 +888,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     !BGM_CATALOG.some((b) => `bgm:${b.id}` === audioSourceValue) &&
     !audioAssets.some((a) => `asset:${a.assetId}` === audioSourceValue);
   // 置ける絵の素材（#684）。判定は**自由配置の差し込み口と同じ関数**（ADR-0030 追補＝一本化）。
-  // **動画は出さない**＝置けても書き出しの手前で断られる（選べるのに使えない選択肢を並べない・`06 §12.1`）。
-  const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType) && a.assetType !== ASSET_TYPE.video) ?? [];
+  // ⚠️ **動画も出す**（#512 段1・利用者判断 2026-08-19）＝以前は「置けても書き出しの手前で断られる」ので
+  // 外していたが、**直接置いた動画は映るようになった**ので理由が消えた。元の音はまだ流れないが、
+  // それは選んだときに知らせる（黙って無音にしない・`15 §6`）。
+  const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType)) ?? [];
   // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
   // 音・読み上げを置ける列（#724）。**映像側と同じ規則・同じ向き**（`placeableAudioTracks`）＝
   // 以前はここだけ絞り込みを手書きし、しかも並びを**戻していなかった**ので、映像は手前・音は奥、と
@@ -1331,6 +1333,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     });
   };
   const [drag, setDrag] = useState<DragPlace | null>(null);
+  /** この画面で読めなかった動画の素材（#512 段1・実映像をやめて代表フレームへ戻す相手）。 */
+  const [unplayableVideoIds, setUnplayableVideoIds] = useState<ReadonlySet<string>>(new Set());
 
   if (isLoading) {
     return (
@@ -2041,7 +2045,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           ) as (LayoutItem & { kind: "image" }) | undefined;
           // ⚠️ **動画の本体**の URL（`assetSrcById` は代表フレーム＝静止画）。無ければ**穴を開けない**
           // ＝何も映らない窓を作るより、いままでどおり代表フレームで見せる（#512 段1 レビュー 🔴）。
-          const src = clip.assetId ? videoSrcById[clip.assetId] : undefined;
+          // ⚠️ **この画面で読めなかった素材は実映像にしない**（レビュー 🟡）＝取り込みは変換しないので
+          // 画面が再生できない形式が入りうる。穴だけ開いた窓を残さず、代表フレームへ戻す。
+          const src = clip.assetId && !unplayableVideoIds.has(clip.assetId) ? videoSrcById[clip.assetId] : undefined;
           if (!item || !src) return null;
           // ⚠️ **書き出しと同じ関数で、同じ格子**（`frameTimeSec`）から出す＝置いた位置が格子に
           // 乗っていなくても、プレビューと書き出しが同じコマになる。
@@ -2134,6 +2140,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           sourceSec={v.sourceSec}
                           speed={v.speed}
                           playing={isPlaying}
+                          onUnplayable={() =>
+                            setUnplayableVideoIds((prev) =>
+                              v.clip.assetId != null && !prev.has(v.clip.assetId)
+                                ? new Set([...prev, v.clip.assetId])
+                                : prev,
+                            )
+                          }
                         />
                       )}
                       {k < videoSplit.midSvgs.length && (
@@ -2542,6 +2555,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             <p className="text-muted">
               {clipLabel(selected)}（{selected.startSec.toFixed(1)}秒から{selected.durationSec.toFixed(1)}秒間）
             </p>
+            {/* ⚠️ **知らせは節の外に出す**（レビュー 🟡・#705 と同じ理由）＝節を畳んだ記憶は既定より
+                優先されるので、中に置くと**一度畳んだ人には二度と見えない**。
+                ・元の音はまだ流れない（段1）＝黙って無音にしない（§2-5）
+                ・実映像にできないとき（まとまりのフェード中・回した切り抜き）＝黙って静止画に見せない */}
+            {selected.assetId != null && videoAssetIdSet.has(selected.assetId) && (
+              <>
+                <p className="field-hint">{TIMELINE_VIDEO_AUDIO_PENDING}</p>
+                {videoPlay.find((v) => v.clip.id === selected.id)?.held === "groupFade" && (
+                  <p className="field-hint">{TIMELINE_VIDEO_STILL_IN_GROUP_FADE}</p>
+                )}
+                {videoPlay.find((v) => v.clip.id === selected.id)?.held === "rotatedCrop" && (
+                  <p className="field-hint">{TIMELINE_VIDEO_STILL_ROTATED_CROP}</p>
+                )}
+              </>
+            )}
             <div className="row gap-sm">
               <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec - NUDGE_SEC })} {...editGuard()}>
                 前へ
@@ -2764,21 +2792,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 )}
                 {selected.kind === TIMELINE_CLIP_KIND.slot && (
                   <>
-                    {/* ⚠️ **黙って無音にしない**（#512 段1・§2-5）＝絵は映るが元の音はまだ流れない。
-                        置いた本人がその場で分かるように、選んだときに出す。 */}
-                    {selected.assetId != null && videoAssetIdSet.has(selected.assetId) && (
-                      <>
-                        <p className="field-hint">{TIMELINE_VIDEO_AUDIO_PENDING}</p>
-                        {/* まとまり全体を薄くする動きが掛かっている間は実映像を出さない（`11 §7.6.4`）。
-                            黙って静止画に見せず、**書き出しには出る**ことまで言う（§2-5）。 */}
-                        {videoPlay.find((v) => v.clip.id === selected.id)?.held === "groupFade" && (
-                          <p className="field-hint">{TIMELINE_VIDEO_STILL_IN_GROUP_FADE}</p>
-                        )}
-                        {videoPlay.find((v) => v.clip.id === selected.id)?.held === "rotatedCrop" && (
-                          <p className="field-hint">{TIMELINE_VIDEO_STILL_ROTATED_CROP}</p>
-                        )}
-                      </>
-                    )}
                     <label className="field">
                       <span>素材</span>
                       <select

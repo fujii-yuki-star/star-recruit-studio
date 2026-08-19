@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // タイムライン形式の実映像（#512 段1）。jsdom は `play()/pause()` を実装しないので、
 // **見られるもの**（消音・掛け直す時刻・再生速度・切り抜き・寄せ）を固定する。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { TimelineSlotVideo } from "./TimelineSlotVideo";
 
@@ -108,5 +108,71 @@ describe("TimelineSlotVideo（#512 段1）", () => {
       />,
     );
     expect((container.querySelector("video") as HTMLVideoElement).style.objectPosition).toBe("100% 0%");
+  });
+});
+
+// ⚠️ **このPRの心臓部**（レビュー 🔴・2つのレビューが独立に検出）。`sourceSec` は再生中**毎フレーム**変わるので、
+// 合わせるのと流す・止めるを同じ effect に入れると **後始末の `pause()` → 次の `play()`** が毎フレーム走り、
+// `play()` の約束が中断され続けて**映像が進まない**。jsdom は `play/pause` を実装しないので、
+// **呼ばれ方そのもの**を見て固定する。
+describe("流す・止めるの呼ばれ方（#512 段1 レビュー 🔴）", () => {
+  /** jsdom の未実装を差し替え、`paused` も本物らしく動かす。 */
+  function spyMedia(): { play: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> } {
+    let paused = true;
+    const play = vi.fn(() => { paused = false; return Promise.resolve(); });
+    const pause = vi.fn(() => { paused = true; });
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(play);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(pause);
+    vi.spyOn(HTMLMediaElement.prototype, "paused", "get").mockImplementation(() => paused);
+    return { play, pause };
+  }
+
+  it("再生位置が動いても、流す・止めるを繰り返さない", () => {
+    const { play, pause } = spyMedia();
+    try {
+      const { container, rerender } = render(
+        <TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing />,
+      );
+      ready(container.querySelector("video") as HTMLVideoElement);
+      expect(play).toHaveBeenCalledTimes(1);
+      // 再生中に位置だけが進む（実機の毎フレーム）。
+      for (let i = 1; i <= 5; i += 1) {
+        rerender(<TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={i / 30} speed={1} playing />);
+      }
+      expect(pause).not.toHaveBeenCalled(); // ⚠️ ここが本題＝止めない
+      expect(play).toHaveBeenCalledTimes(1); // 流し直しもしない
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("止めたら止まり、また流すと流れる（状態が変わったときだけ触る）", () => {
+    const { play, pause } = spyMedia();
+    try {
+      const { container, rerender } = render(
+        <TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing />,
+      );
+      ready(container.querySelector("video") as HTMLVideoElement);
+      rerender(<TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing={false} />);
+      expect(pause).toHaveBeenCalledTimes(1);
+      rerender(<TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing />);
+      expect(play).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("画面から消えるときは止める（掴んだまま別の絵へ行っても鳴り続けない）", () => {
+    const { pause } = spyMedia();
+    try {
+      const { container, unmount } = render(
+        <TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing />,
+      );
+      ready(container.querySelector("video") as HTMLVideoElement);
+      unmount();
+      expect(pause).toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

@@ -1312,11 +1312,19 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false } });
     } catch (e) {
       const cancelled = e instanceof ExportCancelledError || get().exportRun.cancelling;
+      // ⚠️ **Rust が整えた「次の行動」つきの文言は丸めない**（レビュー 🟡・場面形式の `ExportScreen` と同じ規則）。
+      // Tauri のコマンドは**文字列で**失敗を返す（`Error` ではない）。#512 段1 でコマの焼き出しが本走行に
+      // 入り、「動画が見つかりませんでした。もう一度取り込んでください」等が新たに届くようになったのに、
+      // 常に「もう一度お試しください」へ潰すと**何度やっても成功しない案内**になる。
+      // ⚠️ **文字列で返ったものだけ**を出す＝Tauri のコマンドは**文字列で** reject し、それは Rust が
+      // 利用者向けに整えた「次の行動」つきの文言（技術詳細は stderr へ）。`Error` は中の失敗
+      // （`ffmpeg exited with code 1` 等）なので**見せない**（§2-5・既存テストが守っている規則）。
+      const detail = typeof e === "string" ? e : "";
       set({
         exportRun: {
           ...IDLE_EXPORT,
           phase: cancelled ? P.cancelled : P.error,
-          message: cancelled ? EXPORT_CANCELLED_MESSAGE : EXPORT_FAILED_MESSAGE,
+          message: cancelled ? EXPORT_CANCELLED_MESSAGE : detail || EXPORT_FAILED_MESSAGE,
         },
       });
     } finally {
