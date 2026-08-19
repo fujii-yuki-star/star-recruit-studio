@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
 import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
 import { useTimelineStore } from "../store/timelineStore";
+import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
@@ -3028,6 +3029,11 @@ describe("TimelineProjectScreen: 案内が行き止まりでない（#723）", (
     fireEvent.change(select, { target: { value: "asset:asset_001" } });
     // 消して置き直すのと違い、**音量などの設定は残る**（この欄がある理由）。
     expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ assetId: "asset_001", volume: 0.5 });
+    // ⚠️ **曲の名前は画面で使う言い方**（#802-2）＝目録は「`label`/`note` は選択UI・`title`/`artist` は
+    // クレジット専用」と定めており、置く欄・帯の名前も `label`。ここだけ原題に戻ると**同じ物が
+    // 画面内で別の名**になる（ADR-0026②）ので、先祖返りを止める。
+    expect(select.textContent).toContain(BGM_CATALOG[0].label);
+    expect(select.textContent).not.toContain(BGM_CATALOG[0].title);
   });
 
   it("音が見つからない部品では、別の曲が選ばれているように見せない（#734 レビュー）", () => {

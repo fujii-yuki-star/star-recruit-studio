@@ -141,13 +141,31 @@ function easingSplitPlan(keyframes: readonly Keyframe[], headSec: number): Easin
   // **切れ目ちょうど**にキーフレームがあるなら、そこへ入る区間の動き方は**切らずにそのまま**引き継ぐ
   // （そのキーフレームは境界へ置き換わるので、引き継がないと**手前の区間が直線に化ける**）。
   // ⚠️ **同じ時刻のキーフレームは1つ**（`11 §7.6.3.1`）＝引き継ぐ形も高々1つ。
-  let head: BezierEasing['bezier'] | null = null;
   const atCut = keyframes.findIndex((k) => k.timeSec === headSec);
-  if (atCut >= 0 && entersFromBefore(keyframes, atCut, headSec)) {
-    head = easingCurveOf(keyframes[atCut].easing);
-    if (head == null) return null; // 表せない形（「両端ゆっくり」）は引き継げない
+  const carries = atCut >= 0 && entersFromBefore(keyframes, atCut, headSec);
+
+  // ⚠️ **またぐ区間が無いなら、そのまま引き継ぐ**（#802-1）＝曲線を切る必要が無いので、
+  // 3次ベジェで表せない形（「両端ゆっくり」）でも**軌跡は厳密に変わらない**。
+  // 以前はここでも表せるかを見て断っていたので、**焼き出したプリセット付きの部品**
+  // （場面形式の既定が「両端ゆっくり」）は、キーフレームちょうどの位置ですら分けられなかった。
+  // しかも断り文言は「『動き』の欄に出ている秒数の位置で分けてください」＝**まさにその操作**を
+  // 薦めており、従うとまた断られる堂々巡りになっていた（§2-5）。
+  if (crossings.length === 0) {
+    const spec = carries ? keyframes[atCut].easing : undefined;
+    // ⚠️ **直線は書かない**（レビュー ℹ️）＝未指定＝直線なので、書くと文書に余計な値が残る。
+    // またぐ区間があるときの `isLinearCurve` 判定と揃える（「直線＝未指定」を片方だけ崩さない）。
+    // ⚠️ 表せない形（`easingCurveOf` が `null`）は**そのまま持ち越す**＝ここが本題（#802-1）。
+    const curve = spec !== undefined ? easingCurveOf(spec) : null;
+    const keep = spec !== undefined && !(curve != null && isLinearCurve(curve));
+    return { ...(keep ? { head: spec } : {}), tailTargets: new Set() };
   }
-  if (crossings.length === 0 && head == null) return { tailTargets: new Set() };
+
+  // ここから先は**曲線を切る**ので、引き継ぐ形も「同じ形か」を比べられる必要がある。
+  let head: BezierEasing['bezier'] | null = null;
+  if (carries) {
+    head = easingCurveOf(keyframes[atCut].easing);
+    if (head == null) return null; // 表せない形は、切った部分曲線と突き合わせられない
+  }
 
   let tail: BezierEasing['bezier'] | null = null;
   const tailTargets = new Set<number>();

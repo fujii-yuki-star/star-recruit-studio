@@ -3088,8 +3088,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {audioSourceMissing && (
                       <option value={audioSourceValue} disabled>元の音が見つかりません</option>
                     )}
+                    {/* ⚠️ **選ぶ欄も `label`**（#802-2）＝目録自身が「`label`/`note` は選択UI・
+                        `title`/`artist` は About 専用」と定めている。置く欄・帯の名前も `label` なので、
+                        ここだけ原題だと**同じ物が画面内で別の名**になる（ADR-0026②）。 */}
                     {BGM_CATALOG.map((b) => (
-                      <option key={b.id} value={`bgm:${b.id}`}>{b.title}</option>
+                      <option key={b.id} value={`bgm:${b.id}`}>{b.label}</option>
                     ))}
                     {audioAssets.map((a) => (
                       <option key={a.assetId} value={`asset:${a.assetId}`}>{a.displayName}</option>
