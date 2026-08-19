@@ -152,7 +152,12 @@ function easingSplitPlan(keyframes: readonly Keyframe[], headSec: number): Easin
   // 薦めており、従うとまた断られる堂々巡りになっていた（§2-5）。
   if (crossings.length === 0) {
     const spec = carries ? keyframes[atCut].easing : undefined;
-    return { ...(spec !== undefined ? { head: spec } : {}), tailTargets: new Set() };
+    // ⚠️ **直線は書かない**（レビュー ℹ️）＝未指定＝直線なので、書くと文書に余計な値が残る。
+    // またぐ区間があるときの `isLinearCurve` 判定と揃える（「直線＝未指定」を片方だけ崩さない）。
+    // ⚠️ 表せない形（`easingCurveOf` が `null`）は**そのまま持ち越す**＝ここが本題（#802-1）。
+    const curve = spec !== undefined ? easingCurveOf(spec) : null;
+    const keep = spec !== undefined && !(curve != null && isLinearCurve(curve));
+    return { ...(keep ? { head: spec } : {}), tailTargets: new Set() };
   }
 
   // ここから先は**曲線を切る**ので、引き継ぐ形も「同じ形か」を比べられる必要がある。

@@ -280,6 +280,18 @@ describe('動き方（カーブ）を前後へ焼く（#753）', () => {
       expectSameMotion(kfs, 4, 10);
     });
 
+    // ⚠️ **直線は書かない**（レビュー ℹ️）＝未指定＝直線。持ち越しでも「直線＝未指定」を崩さない。
+    it('引き継ぐ形が実は直線なら、動き方を書かない', () => {
+      const kfs: Keyframe[] = [
+        { timeSec: 0, x: 0 },
+        { timeSec: 4, x: 40, easing: { bezier: [0, 0, 1, 1] } }, // 見た目は指定つきだが直線
+        { timeSec: 10, x: 100 },
+      ];
+      const r = cut(kfs, 4);
+      expect(r.head[r.head.length - 1].easing).toBeUndefined();
+      expectSameMotion(kfs, 4, 10);
+    });
+
     // ⚠️ **またぐ区間があるときは従来どおり断る**（切った部分曲線と突き合わせられないため）。
     it('またぐ区間があるときは、表せない動き方だと断る', () => {
       const kfs: Keyframe[] = [
