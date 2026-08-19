@@ -65,7 +65,8 @@ import { creditForSpeaker } from "../../domain/voice/narratorCredit";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { showSaveVideoDialog } from "../../infrastructure/dialog";
 import {
-  beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress, stageExportFrame,
+  beginExport, canExport, cancelExport, clearExportFramesStage, exportVideo, listenExportProgress,
+  readExportFrame, stageClipFrames, stageExportFrame,
 } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import type { Template } from "../../domain/template/types";
@@ -1263,6 +1264,18 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         fontFamily: fontFamilyForId(doc.videoSettings.fontId),
         fallbackCredit: creditForSpeaker(getVoicevoxSpeaker()),
         stageFrame: stageExportFrame,
+        // 動画の実フレーム（#512 段1）＝場面形式（#442）と**同じ Rust の口**を通す。
+        // ⚠️ 素材は**プロジェクトからの相対パス**で渡す（`stage_clip_frames` がそう解決する）。
+        // 動画の id が解けない・プロジェクト id が無いときは渡さない＝静止のまま（画面が先に断る）。
+        stageVideo: async (v) => {
+          const asset = doc.assets.find((a) => a.assetId === v.assetId);
+          if (!asset) return 0; // 素材が見つからない＝静止のまま（描画側の知らせが受け止める）
+          return stageClipFrames(
+            doc.projectId, asset.filePath, v.sourceStartSec, v.durationSec, v.speed, v.fps,
+            dimsForOrientation(doc.videoSettings.aspectRatio).width, v.dirName,
+          );
+        },
+        readVideoFrame: (dirName, frameIndex) => readExportFrame(dirName, frameIndex),
         onProgress: (done, total) =>
           set({
             exportRun: {

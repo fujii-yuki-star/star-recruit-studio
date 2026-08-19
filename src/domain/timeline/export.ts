@@ -9,12 +9,13 @@
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
-import { ASSET_TYPE, TIMELINE_CLIP_KIND, isFreeSlotAssetType } from '../enums';
+import { TIMELINE_CLIP_KIND, isFreeSlotAssetType } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
 import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
+import { videoAssetIdOfClip, videoAssetIds } from './video';
 import type { TimelineClip, TimelineProject } from './types';
 
 /** 書き出す絵の計画（全フレーム描画）。 */
@@ -235,9 +236,15 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });
   }
-  const videoAssetIds = new Set(doc.assets.filter((a) => a.assetType === ASSET_TYPE.video).map((a) => a.assetId));
-  if (videoAssetIds.size > 0) {
-    const clipIds = doc.clips.filter((clip) => clipUsesAsset(clip, videoAssetIds)).map((clip) => clip.id);
+  // ⚠️ **直接置いた動画は映るようになった**（#512 段1）＝断るのは**まだ映らない使い方**だけ。
+  // 差し込み口（`assetRefs`）・立ち絵に入れた動画は段3 まで静止のままなので、従来どおり手前で断る
+  // （置いたのに静止画で出る、を成功として出さない＝ADR-0026④）。
+  // ⚠️ **元の音はまだ流れない**（段2）＝これは断りではなく画面がその場で知らせる（`15 §6`）。
+  const videoIds = videoAssetIds(doc);
+  if (videoIds.size > 0) {
+    const clipIds = doc.clips
+      .filter((clip) => clipUsesAsset(clip, videoIds) && videoAssetIdOfClip(clip, videoIds) == null)
+      .map((clip) => clip.id);
     if (clipIds.length > 0) blockers.push({ code: TIMELINE_EXPORT_BLOCK.videoAsset, clipIds });
   }
   return blockers;

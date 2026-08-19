@@ -187,14 +187,14 @@ describe('timelineExportBlockers（書き出す前に止める理由）', () => 
     expect(timelineExportBlockers(doc())).toEqual([{ code: TIMELINE_EXPORT_BLOCK.empty, clipIds: [] }]);
   });
 
-  it('動画の素材を置いていたら止める（静止画＋無音の動画を成功として出さない）', () => {
+  // ⚠️ #512 段1 で**直接置いた動画は映るようになった**＝ここは止めない。
+  // （止め続けると、映るのに書き出せないという逆の食い違いになる。元の音は段2＝画面が知らせる。）
+  it('直接置いた動画は止めない（段1 で映るようになった）', () => {
     const d = doc({
       assets: [videoAsset],
       clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_video_001' })],
     });
-    expect(timelineExportBlockers(d)).toEqual([
-      { code: TIMELINE_EXPORT_BLOCK.videoAsset, clipIds: ['clip_001'] },
-    ]);
+    expect(timelineExportBlockers(d)).toEqual([]);
   });
 
   it('枠の差し込み口に入れた動画・立ち絵として入れた動画も見つける', () => {

@@ -63,6 +63,13 @@ function textToSvg(item: TextItem, fontFamily: string): string {
 /** SVG生成オプション。assetSrc は assetId→表示用src(data URL)。未解決ならプレースホルダ枠。 */
 export interface LayoutToSvgOptions {
   assetSrc?: (assetId: string | null) => string | undefined;
+  /**
+   * **その部品だけの絵**（#512 段1）。返せば `assetSrc` より優先する。
+   *
+   * ⚠️ 動画は**フレームごとに絵が変わる**ので、素材 id を鍵にする `assetSrc` では足りない
+   * （同じ動画を別の時刻に2つ置くと、両方が同じコマになる）。部品ごとに解く口をここに持つ。
+   */
+  itemSrc?: (item: LayoutItem) => string | undefined;
   /** true なら背景の全面塗りを描かない（透過PNG用＝動画スロットより上のレイヤー。ADR-0006）。 */
   transparent?: boolean;
   /** 描画するアイテムを絞る（動画ありシーンの下/上分割用）。未指定なら全件。 */
@@ -113,7 +120,11 @@ function renderItemInner(item: LayoutItem, opts: LayoutToSvgOptions, fontFamily:
     case 'fill':
       return freeShapeSvg(item);
     case 'image':
-      return imageToSvg(item, item.assetId ? opts.assetSrc?.(item.assetId) : undefined, fontFamily);
+      return imageToSvg(
+        item,
+        opts.itemSrc?.(item) ?? (item.assetId ? opts.assetSrc?.(item.assetId) : undefined),
+        fontFamily,
+      );
     case 'text':
       return textToSvg(item, fontFamily);
   }
