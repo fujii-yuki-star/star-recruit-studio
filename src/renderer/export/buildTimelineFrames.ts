@@ -97,7 +97,7 @@ export async function buildTimelineFrames(
   if (opts.stageVideo && opts.readVideoFrame) {
     for (const clip of videoClipsOf(doc)) {
       bail();
-      const spec = videoStagePlan(clip, plan.fps);
+      const spec = videoStagePlan(clip);
       const dirName = videoFramesDirOf(clip.id);
       const count = await opts.stageVideo({
         clipId: clip.id,

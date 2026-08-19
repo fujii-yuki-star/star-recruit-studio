@@ -15,7 +15,7 @@ import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
 import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
-import { videoAssetIdOfClip, videoAssetIds } from './video';
+import { videoAssetIdOfClip, videoAssetIds, videoClipsOf } from './video';
 import type { TimelineClip, TimelineProject } from './types';
 
 /** 書き出す絵の計画（全フレーム描画）。 */
@@ -162,7 +162,7 @@ const DEFAULT_AUDIO_FILE_EXT = 'mp3';
 export const TIMELINE_EXPORT_BLOCK = {
   /** 動画に出るものが1つも無い（尺 0）。 */
   empty: 'TIMELINE_EXPORT_EMPTY',
-  /** 動画の素材を置いている＝いまは静止画になり音も鳴らないので、書き出さずに断る。 */
+  /** 見た目パターンの差し込み口・立ち絵に入れた動画＝いまも静止画になるので、書き出さずに断る（直接置きは #512 段1 で映る）。 */
   videoAsset: 'TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED',
   /** 見た目パターンが見つからない部品がある＝そこが丸ごと絵から消えるので、書き出さずに断る。 */
   templateUnresolved: 'TIMELINE_EXPORT_TEMPLATE_UNRESOLVED',
@@ -199,7 +199,7 @@ export interface TimelineExportBlocker {
  *
  * **動画の素材は、まだ動かせず音も鳴らせない**（`layoutTimelineAt` は1枚の絵として描き、
  * `timelineAudioRuns` は元音声を返さない）。黙って静止画＋無音の動画を成功として出さないため、
- * 置いてあるだけで書き出しを止める（ADR-0026④・場面形式の `videoSlotUnplaceable` と同じ流儀）。
+ * まだ映らない使い方（差し込み口・立ち絵）のときだけ書き出しを止める（ADR-0026④・場面形式の `videoSlotUnplaceable` と同じ流儀）。
  */
 export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExportCheckOptions = {}): TimelineExportBlocker[] {
   const blockers: TimelineExportBlocker[] = [];
@@ -262,8 +262,17 @@ export function timelineImageAssetIds(doc: TimelineProject): string[] {
   // 絵として置ける種別かは `isFreeSlotAssetType` に1つ（ADR-0030 追補で一本化）＝音の種別を数え直さない。
   const audioIds = new Set(doc.assets.filter((a) => !isFreeSlotAssetType(a.assetType)).map((a) => a.assetId));
   for (const c of doc.clips) for (const id of clipImageAssetIds(c)) ids.add(id);
-  // 音の部品が指す素材は絵にしない（`kind='audio'` の `assetId` はここへ来ない）。
-  return [...ids].filter((id) => !audioIds.has(id));
+  // ⚠️ **直接置いた動画は静止画を要らない**（#512 段1・レビュー 🟡）＝実フレームを焼いて描くので、
+  // 代表フレームが読めなくても書き出せる。ここへ入れると「実フレームで描けるのに
+  // **素材が読めませんで永久に書き出せない**」組み合わせができる（代表フレームの生成は失敗しうる）。
+  // ⚠️ ほかの使い方（差し込み口・立ち絵）で同じ素材を使っていれば、そちらは静止画で描くので残す。
+  const drawnAsVideo = new Set(videoClipsOf(doc).map((c) => c.assetId as string));
+  const stillOnly = new Set<string>();
+  for (const c of doc.clips) {
+    if (videoAssetIdOfClip(c, videoAssetIds(doc)) != null) continue; // 実フレームで描く部品は数えない
+    for (const id of clipImageAssetIds(c)) stillOnly.add(id);
+  }
+  return [...ids].filter((id) => !audioIds.has(id) && (!drawnAsVideo.has(id) || stillOnly.has(id)));
 }
 
 /**

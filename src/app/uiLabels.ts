@@ -551,6 +551,14 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
  * ⚠️ **黙って無音にしない**（§2-5）＝置いた本人がその場で分かるようにする。段2 で元音声（`useOriginalAudio`）を
  * 入れたら消す。断りではなく知らせなので `exportBlockedMessage` には入れない。
  */
+/**
+ * まとまり全体を薄くする動きが掛かっている間、仕上がり確認では実映像を出さない（#512 段1・`11 §7.6.4`）。
+ * ⚠️ 層ごとに薄さを掛けると**重なった所で下が透ける**＝書き出し（1枚にしてから掛ける）と別の絵になるため。
+ * 黙って静止画に見せず、**書き出しには出る**ことまで言う（§2-5）。
+ */
+export const TIMELINE_VIDEO_STILL_IN_GROUP_FADE =
+  "まとまり全体を薄くしている間は、ここでは動かずに見えます（書き出した動画では動きます）";
+
 export const TIMELINE_VIDEO_AUDIO_PENDING =
   "この動画は映像だけが流れます。元の音はまだ出せません（音を付けるなら、音の列に音を置いてください）";
 

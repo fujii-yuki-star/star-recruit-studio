@@ -15,7 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_PENDING } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_PENDING, TIMELINE_VIDEO_STILL_IN_GROUP_FADE } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
@@ -35,7 +35,7 @@ import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
-import { videoAssetIds, videoClipsOf, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
+import { compositeSpansOthers, videoAssetIds, videoClipsOf, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
@@ -2045,14 +2045,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           if (!item || !src) return null;
           // ⚠️ **書き出しと同じ関数で、同じ格子**（`frameTimeSec`）から出す＝置いた位置が格子に
           // 乗っていなくても、プレビューと書き出しが同じコマになる。
-          const sourceSec = videoSourceSecAt(clip, frameTimeSec(doc, playheadSec), doc.videoSettings.fps ?? FPS);
+          const sourceSec = videoSourceSecAt(clip, frameTimeSec(doc, playheadSec), effectiveFps(doc));
           if (sourceSec == null) return null;
-          const speed = videoStagePlan(clip, doc.videoSettings.fps ?? FPS).speed;
+          const speed = videoStagePlan(clip).speed;
+          // ⚠️ **合成の単位がこの部品だけに閉じていないなら、実映像にしない**（レビュー 🔴・`11 §7.6.4`
+          // ＝「帯分割は合成の単位を跨いで切る…跨ぐときは分割を拒否して理由を返すこと」）。
+          // まとまり全体のフェードは複数の部品へ同じ単位で掛かるので、層ごとに掛けると
+          // **重なった所で下が透ける**＝書き出し（1枚にしてから掛ける）と別の絵になる。
+          if (compositeSpansOthers(shownLayout.items, item.id)) return null;
           return {
             clip, itemId: item.id, src, sourceSec, speed,
             fit: item.fit, align: item.align,
             // 合成の不透明度・切り抜きは**書き出しが `<g>` で掛けているもの**＝実映像にも同じだけ効かせる。
-            opacity: item.composite?.opacity ?? item.opacity,
+            // ⚠️ 書き出しは**入れ子で掛かる**（合成の単位の α × 要素の α）＝置き換えない（レビュー 🟡）。
+            opacity: (item.composite?.opacity ?? 1) * (item.opacity ?? 1),
             clipRect: item.clipRect,
           };
         })
@@ -2109,12 +2115,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {v && (
                         <TimelineSlotVideo
                           src={v.src}
-                          rectPct={{
-                            left: `${(slot.rect.x / canvasDims.width) * 100}%`,
-                            top: `${(slot.rect.y / canvasDims.height) * 100}%`,
-                            width: `${(slot.rect.w / canvasDims.width) * 100}%`,
-                            height: `${(slot.rect.h / canvasDims.height) * 100}%`,
-                          }}
+                          rect={slot.rect}
                           rotation={slot.rotation}
                           opacity={v.opacity}
                           fit={v.fit}
@@ -2757,7 +2758,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     {/* ⚠️ **黙って無音にしない**（#512 段1・§2-5）＝絵は映るが元の音はまだ流れない。
                         置いた本人がその場で分かるように、選んだときに出す。 */}
                     {selected.assetId != null && videoAssetIdSet.has(selected.assetId) && (
-                      <p className="field-hint">{TIMELINE_VIDEO_AUDIO_PENDING}</p>
+                      <>
+                        <p className="field-hint">{TIMELINE_VIDEO_AUDIO_PENDING}</p>
+                        {/* まとまり全体を薄くする動きが掛かっている間は実映像を出さない（`11 §7.6.4`）。
+                            黙って静止画に見せず、**書き出しには出る**ことまで言う（§2-5）。 */}
+                        {videoPlay.every((v) => v.clip.id !== selected.id) && (
+                          <p className="field-hint">{TIMELINE_VIDEO_STILL_IN_GROUP_FADE}</p>
+                        )}
+                      </>
                     )}
                     <label className="field">
                       <span>素材</span>

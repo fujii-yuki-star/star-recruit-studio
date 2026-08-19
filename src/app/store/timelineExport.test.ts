@@ -1,5 +1,9 @@
 // タイムライン形式の書き出し（ADR-0032 決定22・#631）。作る前に断る／描いて渡す／中止・片づけを固定する。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// ラスタライズ（canvas）は環境依存＝ここでは差し替える（`buildTimelineFrames.test.ts` と同じ扱い）。
+// 実物の描画経路を1件だけ通したいテスト（動画のコマの焼き出し）があるので、丸ごとの差し替えでは足りない。
+vi.mock('../../renderer/export/rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,X') }));
 import { useTimelineStore, timelineBgmRunInputs } from './timelineStore';
 import { useExportLockStore } from './exportLock';
 import * as fsMod from '../../infrastructure/projectFs';
@@ -111,6 +115,35 @@ describe('exportTimelineVideo', () => {
     await useTimelineStore.getState().exportTimelineVideo(withTemplate);
     expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled();
     expect(useTimelineStore.getState().exportRun.message).toContain('差し込み口に入れた動画');
+  });
+
+  // ⚠️ **位置引数の並びは型で守れない**（`speed`/`fps`/`width` はどれも number＝取り違えても通る）。
+  // 実映像が壊れた速さ・解像度で焼かれるので、**実際に渡る値**を1件だけ固定する（#512 段1 レビュー 🟡）。
+  it('動画のコマの焼き出しに、正しい順で値を渡す', async () => {
+    vi.mocked(framesMod.buildTimelineFrames).mockRestore();
+    const stage = vi.spyOn(ffmpegMod, 'stageClipFrames').mockResolvedValue(30);
+    vi.spyOn(ffmpegMod, 'readExportFrame').mockResolvedValue('data:frame');
+    await open(
+      doc({
+        assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/a.mp4', thumbnailPath: 'assets/a_thumb.png' }],
+        clips: [{
+          id: 'clip_002', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+          startSec: 0, durationSec: 2, x: 0, y: 0, w: 100, h: 50,
+          assetId: 'asset_v', sourceStartSec: 3, speed: 2,
+        } as TimelineClip],
+      }),
+    );
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(stage).toHaveBeenCalledWith(
+      'proj_20260729_001', // どの動画の
+      'assets/a.mp4', // **本体**（代表フレームではない）
+      3, // トリム
+      2, // 置いた長さ
+      2, // 速さ
+      30, // fps
+      1920, // 横幅（向きから）
+      'timeline_frames_v_clip_002', // 部品ごとの置き場
+    );
   });
 
   it('保存先を選ばなければ何もしない（勝手に書き出さない）', async () => {

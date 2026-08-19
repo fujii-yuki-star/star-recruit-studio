@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
-import { videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoStagePlan } from './video';
+import { compositeSpansOthers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
 
 const doc = (over: Partial<TimelineProject> = {}): TimelineProject =>
   ({
@@ -62,20 +62,18 @@ describe('動画を映す部品を見分ける（#512 段1）', () => {
 
 describe('焼き出す区間（videoStagePlan）', () => {
   it('トリムから、置いた長さぶん、速さ込みで焼く', () => {
-    expect(videoStagePlan(slot({ sourceStartSec: 4, durationSec: 6, speed: 2 }), 30)).toEqual({
-      sourceStartSec: 4, durationSec: 6, speed: 2, frameCount: 180,
+    expect(videoStagePlan(slot({ sourceStartSec: 4, durationSec: 6, speed: 2 }))).toEqual({
+      sourceStartSec: 4, durationSec: 6, speed: 2,
     });
   });
 
   it('速さの未指定・0以下は等速として扱う（0 で割らない）', () => {
-    expect(videoStagePlan(slot(), 30).speed).toBe(1);
-    expect(videoStagePlan(slot({ speed: 0 }), 30).speed).toBe(1);
+    expect(videoStagePlan(slot()).speed).toBe(1);
+    expect(videoStagePlan(slot({ speed: 0 })).speed).toBe(1);
   });
 
-  // ⚠️ 端数は**切り上げ**（`timelineFramePlan` と同じ＝末尾のコマが黙って落ちない）。
-  it('端数のコマ数は切り上げる', () => {
-    expect(videoStagePlan(slot({ durationSec: 1.01 }), 30).frameCount).toBe(31);
-  });
+  // ⚠️ **焼ける枚数はここで決めない**（レビュー 🟡）＝実際に焼くのは Rust（`stage_clip_frames`）で、
+  // その戻り値（`stagedCount`）が正。ここで別の式を持つと、後でそれを頭打ちに使ったとき**末尾が早く止まる**。
 });
 
 describe('出力フレーム → 出すコマ（videoFrameIndexAt）', () => {
@@ -96,5 +94,68 @@ describe('出力フレーム → 出すコマ（videoFrameIndexAt）', () => {
   it('焼けた枚数を超えたら最後のコマで止まる', () => {
     expect(videoFrameIndexAt(clip, 179, 30, 10)).toBe(9);
     expect(videoFrameIndexAt(clip, 60, 30, 0)).toBeNull(); // 1枚も焼けていない
+  });
+});
+
+// ⚠️ **プレビューが見る唯一の式**（#512 段1 レビュー 🔴＝直接のテストが無く、値を +5 ずらしても
+// 420件が全部通ってしまった）。書き出しと同じコマ番号から導くので、ここがずれると preview≠export。
+describe('その時刻に映す素材の秒（videoSourceSecAt）', () => {
+  const clip = slot({ startSec: 2, durationSec: 4, sourceStartSec: 10 });
+
+  it('トリムから始まり、置いた先頭からの経過ぶん進む', () => {
+    expect(videoSourceSecAt(clip, 2, 30)).toBeCloseTo(10, 6); // 置いた先頭＝素材の 10 秒
+    expect(videoSourceSecAt(clip, 3, 30)).toBeCloseTo(11, 6);
+  });
+
+  it('速さのぶんだけ素材を多く使う', () => {
+    expect(videoSourceSecAt(slot({ startSec: 0, durationSec: 4, sourceStartSec: 0, speed: 2 }), 1, 30))
+      .toBeCloseTo(2, 6);
+  });
+
+  it('生きている区間の外では映らない（終わりの瞬間は含まない）', () => {
+    expect(videoSourceSecAt(clip, 1.9, 30)).toBeNull();
+    expect(videoSourceSecAt(clip, 6, 30)).toBeNull(); // ちょうど終わり
+    expect(videoSourceSecAt(clip, 5.9, 30)).not.toBeNull();
+  });
+
+  // ⚠️ **書き出しと同じコマ**を出すことが本質＝置いた位置が格子（1/fps）に乗っていなくても割れない。
+  it('置いた位置が格子に乗っていなくても、書き出しと同じコマを指す', () => {
+    const odd = slot({ startSec: 0.51, durationSec: 3, sourceStartSec: 0, speed: 1 });
+    for (let f = 16; f < 100; f += 7) {
+      const t = f / 30;
+      const idx = videoFrameIndexAt(odd, f, 30, 999); // 書き出しが読むコマ番号
+      const sec = videoSourceSecAt(odd, t, 30); // プレビューが合わせる素材の秒
+      if (idx == null) { expect(sec).toBeNull(); continue; }
+      expect(sec).toBeCloseTo(idx / 30, 6); // 同じコマを指している
+    }
+  });
+});
+
+// ⚠️ **合成の単位が跨るときは実映像を出さない**（`11 §7.6.4`＝帯分割は単位を跨いで切る）。
+// 出してしまうと、まとまり全体のフェード中に**重なった所で下が透ける**＝書き出しと別の絵。
+describe('合成の単位が跨っているか（compositeSpansOthers）', () => {
+  it('自分だけの単位なら跨っていない（実映像を出せる）', () => {
+    const items = [{ id: 'a', composite: { key: 'a', opacity: 0.5 } }, { id: 'b' }];
+    expect(compositeSpansOthers(items, 'a')).toBe(false);
+  });
+
+  it('同じ単位がほかの部品にも付いていれば跨っている', () => {
+    const items = [
+      { id: 'a', composite: { key: 'group_001', opacity: 0.5 } },
+      { id: 'b', composite: { key: 'group_001', opacity: 0.5 } },
+    ];
+    expect(compositeSpansOthers(items, 'a')).toBe(true);
+  });
+
+  it('単位が無ければ跨っていない（薄くしていない＝そのまま出せる）', () => {
+    expect(compositeSpansOthers([{ id: 'a' }, { id: 'b' }], 'a')).toBe(false);
+  });
+
+  it('別の単位が付いているだけなら跨っていない', () => {
+    const items = [
+      { id: 'a', composite: { key: 'group_001', opacity: 0.5 } },
+      { id: 'b', composite: { key: 'group_002', opacity: 0.5 } },
+    ];
+    expect(compositeSpansOthers(items, 'a')).toBe(false);
   });
 });

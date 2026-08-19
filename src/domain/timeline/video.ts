@@ -34,15 +34,12 @@ export function videoClipsOf(doc: TimelineProject): TimelineClip[] {
  */
 export function videoStagePlan(
   clip: TimelineClip,
-  fps: number,
-): { sourceStartSec: number; durationSec: number; speed: number; frameCount: number } {
+): { sourceStartSec: number; durationSec: number; speed: number } {
   const speed = clip.speed != null && clip.speed > 0 ? clip.speed : 1;
   return {
     sourceStartSec: clip.sourceStartSec ?? 0,
     durationSec: clip.durationSec,
     speed,
-    // 端数は切り上げ（`timelineFramePlan` と同じ＝末尾のコマが黙って落ちない）。
-    frameCount: Math.max(1, Math.ceil(clip.durationSec * fps)),
   };
 }
 
@@ -93,4 +90,21 @@ export function videoSourceSecAt(clip: TimelineClip, timeSec: number, fps: numbe
   if (local == null) return null;
   const speed = clip.speed != null && clip.speed > 0 ? clip.speed : 1;
   return (clip.sourceStartSec ?? 0) + (local / fps) * speed;
+}
+
+/**
+ * その部品の**合成の単位**が、ほかの部品にも跨っているか（#512 段1・`11 §7.6.4`）。
+ *
+ * ⚠️ **跨っているときは実映像を出さない**＝プレビューは帯（zIndex）で層に割って `video` を挟むので、
+ * 層ごとに薄さを掛けることになり、**重なった所で下が透ける**（書き出しは1枚にしてから掛ける＝決定19）。
+ * 正典は「per-frame の全描画へ倒すか、**跨ぐときは分割を拒否して理由を返すこと**」としているので、
+ * 断る側に倒し、画面が理由を出す。
+ */
+export function compositeSpansOthers(
+  items: readonly { id: string; composite?: { key: string; opacity: number } }[],
+  itemId: string,
+): boolean {
+  const key = items.find((it) => it.id === itemId)?.composite?.key;
+  if (key == null) return false;
+  return items.some((it) => it.id !== itemId && it.composite?.key === key);
 }

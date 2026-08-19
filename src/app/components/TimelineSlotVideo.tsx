@@ -8,6 +8,7 @@
 import { useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
 import type { CropAlignX, CropAlignY, Fit } from "../../domain/enums";
+import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y } from "../../domain/enums";
 import { fitToObjectFit } from "./fitToObjectFit";
 
 /** 寄せ → CSS の `object-position`（書き出しの `preserveAspectRatio` の前半と対＝`05 §8`）。 */
@@ -17,11 +18,27 @@ const ALIGN_Y_PCT: Record<CropAlignY, string> = { top: "0%", middle: "50%", bott
 /** 再生中に「ずれた」とみなす幅（秒）。これ以内なら**掛け直さない**＝毎フレーム seek してカクつかせない。 */
 const DRIFT_TOLERANCE_SEC = 0.25;
 
+/**
+ * 切り抜きの矩形（**動画の座標**）を、その要素の箱に対する `inset()` へ直す（#512 段1 レビュー 🔴）。
+ * 外へはみ出す指定は 0 で止める（負の `inset` は「広げる」意味になり、切り抜きが効かなくなる）。
+ */
+function insetOf(
+  rect: { x: number; y: number; w: number; h: number },
+  crop: { x: number; y: number; w: number; h: number },
+): string {
+  const pct = (v: number, base: number): string => `${Math.max(0, (v / base) * 100)}%`;
+  return `inset(${pct(crop.y - rect.y, rect.h)} ${pct(rect.x + rect.w - (crop.x + crop.w), rect.w)} ${pct(
+    rect.y + rect.h - (crop.y + crop.h),
+    rect.h,
+  )} ${pct(crop.x - rect.x, rect.w)})`;
+}
+
 export function TimelineSlotVideo({
-  src, rectPct, rotation, opacity, fit, align, clipRect, canvas, sourceSec, speed, playing,
+  src, rect, rotation, opacity, fit, align, clipRect, canvas, sourceSec, speed, playing,
 }: {
   src: string;
-  rectPct: { left: string; top: string; width: string; height: string };
+  /** 置き場所（**動画の座標**＝キャンバス基準）。割合への直しはここで行う（呼び出し側で作らない）。 */
+  rect: { x: number; y: number; w: number; h: number };
   rotation?: number;
   opacity?: number;
   fit: Fit;
@@ -68,24 +85,23 @@ export function TimelineSlotVideo({
 
   const style: CSSProperties = {
     position: "absolute",
-    ...rectPct,
+    left: `${(rect.x / canvas.width) * 100}%`,
+    top: `${(rect.y / canvas.height) * 100}%`,
+    width: `${(rect.w / canvas.width) * 100}%`,
+    height: `${(rect.h / canvas.height) * 100}%`,
     // 収め方・寄せは SVG の `preserveAspectRatio` と**同じ意味**に写す（`fitToObjectFit`＝共有）。
     objectFit: fitToObjectFit(fit),
     ...(align?.x != null || align?.y != null
-      ? { objectPosition: `${ALIGN_X_PCT[align.x ?? "center"]} ${ALIGN_Y_PCT[align.y ?? "middle"]}` }
+      ? { objectPosition: `${ALIGN_X_PCT[align.x ?? CROP_ALIGN_DEFAULT_X]} ${ALIGN_Y_PCT[align.y ?? CROP_ALIGN_DEFAULT_Y]}` }
       : {}),
     ...(rotation ? { transform: `rotate(${rotation}deg)` } : {}),
     ...(opacity != null && opacity < 1 ? { opacity } : {}),
-    // 切り抜きは書き出しが `<g clip-path>` で包むので、こちらも同じ矩形で切る（割合へ直す）。
-    ...(clipRect
-      ? {
-          clipPath: `inset(${(clipRect.y / canvas.height) * 100}% ${
-            ((canvas.width - clipRect.x - clipRect.w) / canvas.width) * 100
-          }% ${((canvas.height - clipRect.y - clipRect.h) / canvas.height) * 100}% ${
-            (clipRect.x / canvas.width) * 100
-          }%)`,
-        }
-      : {}),
+    // 切り抜きは書き出しが `<g clip-path>` で包むので、こちらも同じ所で切る。
+    // ⚠️ **割合の基準は「この要素の箱」**（レビュー 🔴・2観点が同じ例で指摘）＝CSS の `inset()` は
+    // 要素のボーダーボックスに対して解ける。切り抜きの矩形は**動画の座標**で来るので、
+    // ここで**要素基準へ直す**。キャンバス基準のまま渡すと、部品が画面いっぱいでない限り
+    // **別の場所が切れる**（画面いっぱいのときだけ偶然一致するので気づきにくい）。
+    ...(clipRect ? { clipPath: insetOf(rect, clipRect) } : {}),
     pointerEvents: "none",
   };
   // ⚠️ **常に消音**（段1）＝元の音はまだ流れない。`muted` を外すのは段2（`useOriginalAudio`）。
