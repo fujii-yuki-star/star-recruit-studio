@@ -551,11 +551,17 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
  * ⚠️ **黙って無音にしない**（§2-5）＝置いた本人がその場で分かるようにする。段2 で元音声（`useOriginalAudio`）を
  * 入れたら消す。断りではなく知らせなので `exportBlockedMessage` には入れない。
  */
+export const TIMELINE_VIDEO_AUDIO_PENDING =
+  "この動画は映像だけが流れます。元の音はまだ出せません（音を付けるなら、音の列に音を置いてください）";
+
 /**
  * まとまり全体を薄くする動きが掛かっている間、仕上がり確認では実映像を出さない（#512 段1・`11 §7.6.4`）。
  * ⚠️ 層ごとに薄さを掛けると**重なった所で下が透ける**＝書き出し（1枚にしてから掛ける）と別の絵になるため。
  * 黙って静止画に見せず、**書き出しには出る**ことまで言う（§2-5）。
  */
+export const TIMELINE_VIDEO_STILL_IN_GROUP_FADE =
+  "まとまり全体を薄くしている間は、ここでは動かずに見えます（書き出した動画では動きます）";
+
 /**
  * 回した部品を左右非対称に切り抜いているとき、仕上がり確認では実映像を出さない（#512 段1・`11 §7.6.4.1`）。
  * ⚠️ 書き出しは切り抜きの矩形を**矩形自身の中心**で回すが、画面の実映像は**部品の中心**で回るため
@@ -564,11 +570,6 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
 export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
   "回した部品を切り抜いている間は、ここでは動かずに見えます（書き出した動画では動きます）";
 
-export const TIMELINE_VIDEO_STILL_IN_GROUP_FADE =
-  "まとまり全体を薄くしている間は、ここでは動かずに見えます（書き出した動画では動きます）";
-
-export const TIMELINE_VIDEO_AUDIO_PENDING =
-  "この動画は映像だけが流れます。元の音はまだ出せません（音を付けるなら、音の列に音を置いてください）";
 
 /**
  * 書き出せない理由の案内（`15 §6` の `TIMELINE_EXPORT_*`・ADR-0032・#631）。`editBlockedMessage` と同じ流儀で

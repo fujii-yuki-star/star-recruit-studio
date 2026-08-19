@@ -128,7 +128,8 @@ describe('exportTimelineVideo', () => {
         assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/a.mp4', thumbnailPath: 'assets/a_thumb.png' }],
         clips: [{
           id: 'clip_002', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
-          startSec: 0, durationSec: 2, x: 0, y: 0, w: 100, h: 50,
+          // ⚠️ **長さと速さを別の値にする**（同値だと入れ替えても通る＝テストが空振りする）。
+          startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50,
           assetId: 'asset_v', sourceStartSec: 3, speed: 2,
         } as TimelineClip],
       }),
@@ -138,7 +139,7 @@ describe('exportTimelineVideo', () => {
       'proj_20260729_001', // どの動画の
       'assets/a.mp4', // **本体**（代表フレームではない）
       3, // トリム
-      2, // 置いた長さ
+      4, // 置いた長さ
       2, // 速さ
       30, // fps
       1920, // 横幅（向きから）

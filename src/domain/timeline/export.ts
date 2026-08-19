@@ -15,7 +15,7 @@ import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
 import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
-import { videoAssetIdOfClip, videoAssetIds, videoClipsOf } from './video';
+import { isDrawnClip, videoAssetIdOfClip, videoAssetIds, videoClipsOf } from './video';
 import type { TimelineClip, TimelineProject } from './types';
 
 /** 書き出す絵の計画（全フレーム描画）。 */
@@ -266,13 +266,18 @@ export function timelineImageAssetIds(doc: TimelineProject): string[] {
   // 代表フレームが読めなくても書き出せる。ここへ入れると「実フレームで描けるのに
   // **素材が読めませんで永久に書き出せない**」組み合わせができる（代表フレームの生成は失敗しうる）。
   // ⚠️ ほかの使い方（差し込み口・立ち絵）で同じ素材を使っていれば、そちらは静止画で描くので残す。
-  const drawnAsVideo = new Set(videoClipsOf(doc).map((c) => c.assetId as string));
+  // ⚠️ **動画の素材を要求するのは「静止画として描く部品」があるときだけ**（レビュー 🔴）。
+  // 実フレームで描く部品（直接置き）と、**そもそも描かれない部品**（隠した部品・列・まとまり）は
+  // 代表フレームを要らない＝要求すると、代表フレームが作れなかった動画で**書き出し全体が止まる**
+  // （描かれもしないものを理由に断る）。⚠️ 動画以外の素材はこの引き算の対象にしない。
+  const videoIds = videoAssetIds(doc);
+  const drawnAsVideoClipIds = new Set(videoClipsOf(doc).map((c) => c.id));
   const stillOnly = new Set<string>();
   for (const c of doc.clips) {
-    if (videoAssetIdOfClip(c, videoAssetIds(doc)) != null) continue; // 実フレームで描く部品は数えない
+    if (drawnAsVideoClipIds.has(c.id) || !isDrawnClip(doc, c)) continue;
     for (const id of clipImageAssetIds(c)) stillOnly.add(id);
   }
-  return [...ids].filter((id) => !audioIds.has(id) && (!drawnAsVideo.has(id) || stillOnly.has(id)));
+  return [...ids].filter((id) => !audioIds.has(id) && (!videoIds.has(id) || stillOnly.has(id)));
 }
 
 /**

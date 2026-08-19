@@ -200,7 +200,9 @@ describe('切り抜きの回す中心が食い違うか（cropPivotDiffers）', 
   });
 
   it('回していて、切り抜きが中心からずれていれば食い違う', () => {
-    expect(cropPivotDiffers(rect, { x: 0, y: 0, w: 50, h: 100 }, 30)).toBe(true);
+    expect(cropPivotDiffers(rect, { x: 0, y: 0, w: 50, h: 100 }, 30)).toBe(true); // 横だけずれる
+    // ⚠️ **縦だけずれる場合も見る**（横しか見ていない実装が素通りする＝変異チェックで判明）。
+    expect(cropPivotDiffers(rect, { x: 0, y: 0, w: 100, h: 50 }, 30)).toBe(true);
   });
 
   // ⚠️ **中心が同じなら回しても同じ窓**（左右対称に切り抜いた場合）＝過剰に断らない。

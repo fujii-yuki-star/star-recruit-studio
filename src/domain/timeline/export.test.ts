@@ -278,6 +278,27 @@ describe('timelineImageAssetIds：動画の扱い（#512 段1）', () => {
     expect(timelineImageAssetIds(d)).toEqual([]);
   });
 
+  // ⚠️ **隠した動画も静止画を要求しない**（レビュー 🔴）＝「実フレームで描く部品」を数える述語が
+  // 片方だけ隠しを見ていると、**隠した瞬間に代表フレームが必須へ戻り**、それが作れていない動画で
+  // 書き出し全体が止まる（描かれもしない部品を理由に断る）。
+  it('隠した動画も静止画を要求しない', () => {
+    const d = doc({
+      assets: [videoAssetDef],
+      clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_v', hidden: true })],
+    });
+    expect(timelineImageAssetIds(d)).toEqual([]);
+  });
+
+  // ⚠️ **変更は動画だけに閉じる**＝隠した写真の扱いは従来どおり（この PR で広げない）。
+  // 広げると「隠した素材は読めなくてよい」という別の判断を黙って持ち込むことになる。
+  it('隠した写真は従来どおり静止画を要求する（変更は動画だけ）', () => {
+    const d = doc({
+      assets: [{ assetId: 'asset_p', assetType: 'image' as const, displayName: '写真', filePath: 'p.png' }],
+      clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_p', hidden: true })],
+    });
+    expect(timelineImageAssetIds(d)).toEqual(['asset_p']);
+  });
+
   // ⚠️ **ほかの使い方でも使っていれば残す**＝差し込み口・立ち絵は静止画で描くので、
   // 外すとその層だけ絵が出ない（変異チェックで生き残った穴）。
   it('同じ動画を差し込み口でも使っていれば、静止画は要る', () => {

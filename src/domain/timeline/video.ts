@@ -31,14 +31,17 @@ export function videoAssetIds(doc: TimelineProject): Set<string> {
  */
 export function videoClipsOf(doc: TimelineProject): TimelineClip[] {
   const ids = videoAssetIds(doc);
-  const hiddenTracks = new Set(doc.tracks.filter((t) => t.hidden).map((t) => t.id));
-  return doc.clips.filter(
-    (c) =>
-      videoAssetIdOfClip(c, ids) != null &&
-      !c.hidden &&
-      !hiddenTracks.has(c.trackId) &&
-      !isHiddenByGroup(c.id, doc.groups ?? []),
-  );
+  return doc.clips.filter((c) => videoAssetIdOfClip(c, ids) != null && isDrawnClip(doc, c));
+}
+
+/**
+ * その部品が**描かれるか**（隠した部品・隠した列・隠したまとまりは描かれない）。
+ * ⚠️ 描く側（`layoutTimelineAt`）と同じ条件＝「描かれるか」を2か所で数えない。
+ */
+export function isDrawnClip(doc: TimelineProject, clip: TimelineClip): boolean {
+  if (clip.hidden) return false;
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.hidden) return false;
+  return !isHiddenByGroup(clip.id, doc.groups ?? []);
 }
 
 /** 速さの既定（未指定・0以下は等速）。⚠️ **焼き出しと再生が同じ値を見る**ための単一の参照元。 */

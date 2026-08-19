@@ -203,13 +203,18 @@ describe('動画の実フレーム（#512 段1）', () => {
     expect(first).not.toContain('base64,SRC');
   });
 
-  // ⚠️ 焼き出す口を渡さない環境では**静止のまま**（落ちない）＝画面が先に断る。
-  it('焼き出す口が無ければ静止のまま（例外にしない）', async () => {
+  // ⚠️ **焼き出す口を渡さないと灰色の枠が焼き込まれる**（レビュー 🟡＝以前は「静止のまま」と書いていたが、
+  // 直置き動画は静止画〔代表フレーム〕を要求しないので `assetSrc` でも解けない＝**成り立たない安全性**を
+  // 固定していた）。落ちはしないが**絵は出ない**＝書き出しの入口は必ず両方を渡すこと。
+  it('焼き出す口が無ければ灰色の枠になる（黙って良い絵にはならない）', async () => {
     const r = await buildTimelineFrames(videoDoc(), {
       templateOf: () => undefined,
-      assetSrc: () => 'data:image/png;base64,SRC',
+      // 本番と同じ＝直置き動画の id は解けない（`timelineImageAssetIds` から外れている）。
+      assetSrc: () => undefined,
       fallbackCredit: 'クレジット',
     });
     expect(r.fps).toBe(FPS);
+    const first = vi.mocked(svgToPngDataUrl).mock.calls[0][0];
+    expect(first).not.toContain('data:frame:'); // 実フレームは入らない
   });
 });

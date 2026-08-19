@@ -74,6 +74,21 @@ describe("TimelineSlotVideo（#512 段1）", () => {
     expect((container.querySelector("video") as HTMLVideoElement).style.clipPath).toBe("inset(0% 0% 0% 50%)");
   });
 
+  // ⚠️ **箱が原点に無いときも正しく引く**（`rect.x`/`rect.y` を引く項を落としても、
+  // 原点の材料・丸まる材料では素通りする＝変異チェックで判明）。
+  it("箱が原点に無くても、要素の箱からの割合で切る", () => {
+    const { container } = render(
+      <TimelineSlotVideo
+        src="blob:v" rect={{ x: 120, y: 80, w: 960, h: 540 }} fit="cover" canvas={canvas}
+        sourceSec={0} speed={1} playing={false}
+        // 箱 (120,80,960,540) の中を、左 96px・上 54px・右 192px・下 108px 残して切る。
+        clipRect={{ x: 216, y: 134, w: 672, h: 378 }}
+      />,
+    );
+    // 左 96/960=10%・上 54/540=10%・右 192/960=20%・下 108/540=20%。
+    expect((container.querySelector("video") as HTMLVideoElement).style.clipPath).toBe("inset(10% 20% 20% 10%)");
+  });
+
   it("箱の外へはみ出す切り抜きは 0 で止める（負の指定で広げない）", () => {
     const { container } = render(
       <TimelineSlotVideo
