@@ -1074,7 +1074,17 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 失敗も成功と同じく**別の文書の部品を巻き込まない**（id は文書ごとに採番＝同じ id が別文書にもある）。
       const now = get().doc;
       const failed = now?.clips.find((c) => c.id === clipId);
-      if (now && now.projectId === doc.projectId && failed) {
+      // ⚠️ **作っている間に入力が変わっていたら、印に触れない**（#801）＝この失敗は**古い入力のもの**。
+      // 触ると「作り始める前の印」を無検査で書き戻すことになり、
+      // ・文を書き換えた後に失敗＝**音声の無い「作成済み」**が文書に残る（鳴る側は `voicePath` しか
+      //   見ないので、その読み上げが**黙って欠けた動画**が「保存しました」で出る＝ADR-0026④）
+      // ・取り消しで作成済みへ戻した後に失敗＝**鳴るのに「作れませんでした」**（#755-3 の再発）
+      // 成功側（上）と場面形式の失敗側（`projectStore`）は同じ照合を持っており、ここだけ抜けていた。
+      const sameInput =
+        failed?.voice != null &&
+        now != null &&
+        sameSynthInput(input, { text: failed.voice.text, ...resolveTimelineVoice(failed.voice, now.voiceSettings) });
+      if (now && now.projectId === doc.projectId && failed && sameInput) {
         // 上と同じ理由＝**作り始める前が「作成済み」なら作れなかったことにしない**（#755-3）。
         setVoiceStatus(set, get, clipId, statusAfterVoiceFailure(statusBefore));
         set({ voiceError: `${VOICE_FAILED_MESSAGE}${keptVoiceSuffix(statusBefore, failed.voice?.voicePath)}` });

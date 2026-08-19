@@ -199,6 +199,53 @@ describe('generateSelectedVoice', () => {
     expect(written.clips[0].voice).toMatchObject({ status: 'generated' });
   });
 
+  // ⚠️ #801（🔴）＝**作っている間に入力が変わったら、失敗の後始末で印に触れない**。
+  // 触ると「作り始める前の印」を無検査で書き戻すことになる。成功側と場面形式の失敗側は同じ照合を
+  // 持っており、ここだけ抜けていた。
+  describe('作っている間に入力が変わったときの失敗（#801）', () => {
+    /** 合成が走っている最中に割り込む（`synthesize` の中で文書を触る）。 */
+    const failAfter = (during: () => void) =>
+      vi.spyOn(MockVoiceProvider.prototype, 'synthesize').mockImplementation(async () => {
+        during();
+        throw new Error('つながらない');
+      });
+
+    // 経路A＝**音声の無い「作成済み」が永続化**＝その読み上げが黙って欠けた動画が「成功」として出る。
+    it('文を書き換えた後に失敗しても、「作成済み」に戻さない', async () => {
+      await open(doc({
+        clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 2, durationSec: 3, voice: { text: 'ひとこと', status: 'generated', voicePath: 'voices/old.wav' } }],
+      }));
+      // 作っている間に文を変える＝`voicePath` も落ちる（作成済みの声は別の文のものだから）。
+      failAfter(() => useTimelineStore.getState().setSelectedVoiceText('別のことば'));
+      const save = vi.spyOn(fsMod, 'saveProjectDoc').mockResolvedValue('x/project.json');
+      await useTimelineStore.getState().generateSelectedVoice();
+
+      const voice = useTimelineStore.getState().doc?.clips[0].voice;
+      expect(voice?.text).toBe('別のことば');
+      expect(voice?.status).not.toBe('generated'); // ⚠️ ここが本題＝音声の無い「作成済み」を作らない
+      expect(voice?.voicePath ?? null).toBeNull();
+      // 文書にも書かない（開き直しても「作成済み」に見えない）。
+      const written = save.mock.calls.length > 0
+        ? (JSON.parse(save.mock.calls[save.mock.calls.length - 1][1] as string) as TimelineProject)
+        : null;
+      if (written) expect(written.clips[0].voice?.status).not.toBe('generated');
+    });
+
+    // 経路B＝取り消しで作成済みへ戻した後に失敗＝**鳴るのに「作れませんでした」**（#755-3 の再発）。
+    it('取り消しで前の状態へ戻した後に失敗しても、「作れなかった」を書かない', async () => {
+      await open(doc({
+        clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_002', startSec: 2, durationSec: 3, voice: { text: 'ひとこと', status: 'generated', voicePath: 'voices/old.wav' } }],
+      }));
+      // 文を変えてから作り始め、作っている間に取り消して作成済みの状態へ戻す。
+      useTimelineStore.getState().setSelectedVoiceText('別のことば');
+      failAfter(() => useTimelineStore.getState().undo());
+      await useTimelineStore.getState().generateSelectedVoice();
+
+      const voice = useTimelineStore.getState().doc?.clips[0].voice;
+      expect(voice).toMatchObject({ text: 'ひとこと', status: 'generated', voicePath: 'voices/old.wav' });
+    });
+  });
+
   // ⚠️ **文を変えた後は据え置かない**（判断材料は作り始める前の印）＝声のファイルで決めると
   // 古い文の声が「作成済み」に戻る。タイムライン形式は文を変えると `voicePath` も落ちるが、
   // **規則としてはどちらの形式でも同じ**（片方だけ別の判断にしない）。
