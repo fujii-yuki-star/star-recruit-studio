@@ -17,9 +17,9 @@ import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
-import { EDIT_BLOCKED, VISUAL_CLIP_DURATION_SEC, clipCountOnTrack, moveClipIssue, placeableAudioTracks, placeableVisualTracks, trimClipIssue, visualPlacementIssue, moveClips } from "../../domain/timeline/edit";
+import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
-import type { EditBlockedReason } from "../../domain/timeline/edit";
+import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
 import { volumePointTimeAt } from "../../domain/timeline/volumePointEdit";
@@ -75,10 +75,28 @@ import { PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, emptyLayout } 
 /** 置ける部品の種類（素材・文字・図形）。 */
 type VisualKind = typeof TIMELINE_CLIP_KIND.slot | typeof TIMELINE_CLIP_KIND.text | typeof TIMELINE_CLIP_KIND.shape;
 
-/** つかんで運んでいる最中の状態（#684）。`drop` が null＝落とし先の外。 */
+/**
+ * その部品が**動画の中の場所を持つ**か（＝仕上がり確認へ落とせるか・#714）。
+ * 見た目パターン・音・読み上げは箱を持たないので、キャンバスは落とし先にならない。
+ */
+function isVisualSpec(spec: ClipPlacement): spec is { kind: VisualKind; assetId?: string } {
+  return (
+    spec.kind === TIMELINE_CLIP_KIND.slot ||
+    spec.kind === TIMELINE_CLIP_KIND.text ||
+    spec.kind === TIMELINE_CLIP_KIND.shape
+  );
+}
+
+/**
+ * つかんで運んでいる最中の状態（#684）。`drop` が null＝落とし先の外。
+ *
+ * ⚠️ **何を置こうとしているかは `spec` が持つ**（#714）＝絵の部品だけでなく、見た目パターン・音・
+ * 読み上げも同じ道で運べる（置き方＝ボタン／掴んで運ぶ、で流儀を割らない・ADR-0026②）。
+ */
 type DragPlace = {
-  kind: VisualKind;
-  assetId?: string;
+  spec: ClipPlacement;
+  /** ゴーストに出す名前（素材名・曲名など＝一覧に出ているものと同じ言い方）。 */
+  label: string;
   /** いまのポインタ位置（ゴーストを出す場所）。 */
   x: number;
   y: number;
@@ -1381,7 +1399,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * **つかんで置く**（#684・ADR-0034 決定2）。ボタンで置く道は残したまま、**運んで落とす**道を足す。
    *
    * 落とし先は2つ＝**仕上がり確認**（動画の中の場所を決める）と**列**（時刻と列を決める）。
-   * 置けるかどうかは domain の `visualPlacementIssue` で見る＝**ゴーストの色と、離したときの結果が同じ判定**
+   * 置けるかどうかは domain の `clipPlacementIssue` で見る＝**ゴーストの色と、離したときの結果が同じ判定**
    * （置けそうに見えたのに断られる、を作らない）。置けないまま離したら**元へ戻す**＝寄せない（決定10）。
    */
 
@@ -1740,22 +1758,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
   /** 落とした点から「どこへ置くか」を決める。**列が先**（下の並びは仕上がり確認に重ならない）。 */
   const resolveDrop = (
-    kind: VisualKind, assetId: string | undefined, x: number, y: number, noSnap = false,
+    spec: ClipPlacement, x: number, y: number, noSnap = false,
   ): DragPlace["drop"] => {
     if (!doc) return null;
     const lane = laneAt(x, y);
     if (lane) {
       // ⚠️ **置くときも帯を運ぶときと同じ吸着**（#771(a)）＝同じ「時間を決める操作」で作法を割らない。
-      // 置く部品の長さは決まっている（`VISUAL_CLIP_DURATION_SEC`）ので、開始と終わりの両方で寄せる。
+      // 置く部品の長さは種類ごとに決まっている（`placedDurationSec`）ので、開始と終わりの両方で寄せる。
+      const durationSec = placedDurationSec(spec);
       const { sec: startSec, guideSec } = snapPlacement(
-        lane.startSec, (t) => [t, t + VISUAL_CLIP_DURATION_SEC], { off: noSnap },
+        lane.startSec, (t) => [t, t + durationSec], { off: noSnap },
       );
       const { trackId } = lane;
-      return {
-        at: { trackId, startSec }, guideSec,
-        issue: visualPlacementIssue(doc, { kind, assetId, trackId, startSec }),
-      };
+      return { at: { trackId, startSec }, guideSec, issue: clipPlacementIssue(doc, spec, trackId, startSec) };
     }
+    // ⚠️ **仕上がり確認へ落とせるのは絵の部品だけ**（#714）＝見た目パターン・音・読み上げは
+    // 「動画の中の場所」を持たない。落とせない所として扱う（勝手に別の場所へ置かない・決定10）。
+    if (!isVisualSpec(spec)) return null;
     const stage = stageRef.current?.getBoundingClientRect();
     const stageVisible = stageRef.current ? visibleRectOf(stageRef.current) : null;
     if (stage && stageVisible && pointInRect(stageVisible, x, y)) {
@@ -1769,14 +1788,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   };
 
   /** 一覧・ボタンから掴む。**動かさずに離したときは何もしない**（そのまま `click` が走って再生位置へ置く）。 */
-  const grabToPlace = (e: ReactPointerEvent, kind: VisualKind, assetId?: string): void => {
+  /**
+   * 一覧・ボタンから掴んで置く（#684・#714）。
+   *
+   * `place` は**実際に置く**手（ボタンで押したときと同じもの）＝置き先が決まっていなければ
+   * 欄に出ている列と再生位置へ置く。**種類ごとの違いは呼ぶ側に残す**（掴む作法はここで1つ）。
+   */
+  const grabToPlace = (
+    e: ReactPointerEvent,
+    spec: ClipPlacement,
+    label: string,
+    place: (at?: { trackId: string; startSec: number }, center?: { x: number; y: number }) => void,
+  ): void => {
     if (exporting || isPlaying) return; // 押せない状況では掴ませない（押してから断らない）
     beginDrag(e, {
-      onStart: (ev) => setDrag({ kind, assetId, x: ev.clientX, y: ev.clientY, drop: resolveDrop(kind, assetId, ev.clientX, ev.clientY, ev.ctrlKey || ev.metaKey) }),
+      onStart: (ev) => setDrag({ spec, label, x: ev.clientX, y: ev.clientY, drop: resolveDrop(spec, ev.clientX, ev.clientY, ev.ctrlKey || ev.metaKey) }),
       onMove: (ev) => {
         const show = (e2: PointerEvent): void => {
-          const drop = resolveDrop(kind, assetId, e2.clientX, e2.clientY, e2.ctrlKey || e2.metaKey);
-          setDrag({ kind, assetId, x: e2.clientX, y: e2.clientY, drop });
+          const drop = resolveDrop(spec, e2.clientX, e2.clientY, e2.ctrlKey || e2.metaKey);
+          setDrag({ spec, label, x: e2.clientX, y: e2.clientY, drop });
           // 寄せ先の点線は帯を運ぶときと同じもの（同じ state を使う＝画面に2本出ない）。
           setSnapGuideSec(drop?.guideSec ?? null);
         };
@@ -1789,8 +1819,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         autoScroll.stop();
         // **動かさずに離した＝押しただけ**。ここで置く（`click` を待たない＝指の経路はここで完結する）。
         // 動かさずに離した＝押しただけ＝**欄に出ている列**へ置く（ボタンと同じ・#771(b)）。
-        if (!started) { addVisualClip({ kind, assetId, trackId: visualTrackId }); return; }
-        const drop = resolveDrop(kind, assetId, ev.clientX, ev.clientY, ev.ctrlKey || ev.metaKey);
+        if (!started) { place(); return; }
+        const drop = resolveDrop(spec, ev.clientX, ev.clientY, ev.ctrlKey || ev.metaKey);
         setSnapGuideSec(null); // 離したら線を消す（帯を運ぶときと同じ）
         // 落とし先の外・置けない所で離したら**何も置かない**（寄せない）。理由は離したときだけ出す（決定10）。
         if (!drop) return;
@@ -1798,12 +1828,47 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         // ⚠️ **仕上がり確認へ落としたときも「置く列」へ入れる**（#771(b) レビュー🔴）＝あちらは
         // **動画の中の場所**だけを指しており、列は指していない。欄に出ている列を使わないと
         // 「表示と結果を割らない」（`11 §7.6.3`）が破れる（ボタンは同じ列へ入るのに、運ぶと別の列へ入る）。
-        addVisualClip({ kind, assetId, center: drop.center, at: drop.at, trackId: visualTrackId });
+        place(drop.at, drop.center);
       },
       // 中止しても**点線を消す**（#771(a) レビュー）＝ゴーストは消えるのに線だけ残ると、
       // 「いま何かが吸着している」という嘘が次の操作まで居座る（帯を運ぶ側は消している）。
       onCancel: () => { autoScroll.stop(); setDrag(null); setSnapGuideSec(null); },
     });
+  };
+
+  /**
+   * 見た目パターンを置く（#714）。**押した＝欄に出ている列と再生位置／運んだ＝落とした所**。
+   * どちらもこの1か所を通る＝置き方で入る場所の規則が割れない。
+   */
+  const placeTemplate = (t: Template, at?: { trackId: string; startSec: number }): void => {
+    addTemplateClip({ template: t, trackId: at?.trackId ?? visualTrackId, startSec: at?.startSec ?? playheadSec });
+  };
+
+  /**
+   * 一覧の id から**音の出どころ**を引く（`bgm:` / `asset:`）。
+   * ⚠️ **目録・素材に無いものは返さない**＝存在しない曲や写真を指す部品を作らない。
+   * 出どころは**高々1つ**（`11 §8` V25）なので、ここで片方だけを持つ形にして渡す。
+   */
+  const audioSourceOf = (id: string): { spec: { bundledBgmId?: BundledBgmId; assetId?: string }; label: string } | null => {
+    const sep = id.indexOf(":");
+    const [kind, rest] = [id.slice(0, sep), id.slice(sep + 1)];
+    if (kind === "bgm") {
+      const bgm = BGM_CATALOG.find((b) => b.id === rest);
+      return bgm ? { spec: { bundledBgmId: bgm.id }, label: bgm.label } : null;
+    }
+    const asset = doc?.assets.find((a) => a.assetId === rest);
+    // ⚠️ 無いものは `null`＝**無言で終わる**が、一覧の項目と here の照合は**同じ描画の `doc`** から
+    // 作っているので到達しない（押した瞬間に消えている素材、が作れない）。理由を出す道は
+    // 置く関数側（`clipPlacementIssue` の `notFound`）に残っている。
+    return asset ? { spec: { assetId: asset.assetId }, label: asset.displayName } : null;
+  };
+
+  /** 音を置く（見た目パターンと同じく、押した／運んだのどちらもここを通る）。 */
+  const placeAudio = (
+    spec: { bundledBgmId?: BundledBgmId; assetId?: string },
+    at?: { trackId: string; startSec: number },
+  ): void => {
+    addAudioClip({ ...spec, trackId: at?.trackId ?? audioTrackId, startSec: at?.startSec ?? playheadSec });
   };
 
   /** キーボードで実行したときだけ走らせる（指の経路は `onEnd` で完結・`isKeyboardActivation`）。 */
@@ -2269,7 +2334,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {drag?.drop?.at?.trackId === track.id && (
                         <div
                           className={`timeline-drop-preview${drag.drop.issue ? " timeline-drop-preview--blocked" : ""}`}
-                          style={{ left: `${pxPerSec * drag.drop.at.startSec}px`, width: `${pxPerSec * VISUAL_CLIP_DURATION_SEC}px` }}
+                          style={{ left: `${pxPerSec * drag.drop.at.startSec}px`, width: `${pxPerSec * placedDurationSec(drag.spec)}px` }}
                           aria-hidden="true"
                         />
                       )}
@@ -3290,7 +3355,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button
                 className="btn btn-secondary grabbable"
                 {...busyGuard({ disabled: isPlaying, hint: playingHint })}
-                onPointerDown={(e) => grabToPlace(e, TIMELINE_CLIP_KIND.text)}
+                onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.text }, clipLabel({ kind: TIMELINE_CLIP_KIND.text }), (at, center) =>
+                  addVisualClip({ kind: TIMELINE_CLIP_KIND.text, at, center, trackId: visualTrackId }))}
                 onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.text, trackId: visualTrackId }))}
               >
                 文字を置く
@@ -3298,7 +3364,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <button
                 className="btn btn-secondary grabbable"
                 {...busyGuard({ disabled: isPlaying, hint: playingHint })}
-                onPointerDown={(e) => grabToPlace(e, TIMELINE_CLIP_KIND.shape)}
+                onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.shape }, clipLabel({ kind: TIMELINE_CLIP_KIND.shape }), (at, center) =>
+                  addVisualClip({ kind: TIMELINE_CLIP_KIND.shape, at, center, trackId: visualTrackId }))}
                 onClick={(e) => onKeyActivate(e, () => addVisualClip({ kind: TIMELINE_CLIP_KIND.shape, trackId: visualTrackId }))}
               >
                 図形を置く
@@ -3312,7 +3379,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 disabled={isPlaying || exporting}
                 disabledHint={exporting ? exportingHint : playingHint}
                 searchLabel="素材の絞り込み"
-                onGrab={(e, assetId) => grabToPlace(e, TIMELINE_CLIP_KIND.slot, assetId)}
+                onGrab={(e, assetId) => grabToPlace(
+                  e,
+                  { kind: TIMELINE_CLIP_KIND.slot, assetId },
+                  doc.assets.find((a) => a.assetId === assetId)?.displayName ?? clipLabel({ kind: TIMELINE_CLIP_KIND.slot }),
+                  (at, center) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId, at, center, trackId: visualTrackId }),
+                )}
                 onPick={(assetId) => addVisualClip({ kind: TIMELINE_CLIP_KIND.slot, assetId, trackId: visualTrackId })}
               />
             )}
@@ -3345,14 +3417,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               disabled={isPlaying || exporting}
               disabledHint={exporting ? exportingHint : playingHint}
               searchLabel="見た目パターンの絞り込み"
+              onGrab={(e, templateId) => {
+                const t = placeableTemplates.find((x) => x.templateId === templateId);
+                if (!t) return;
+                grabToPlace(e, { kind: TIMELINE_CLIP_KIND.template, template: t }, t.name, (at) =>
+                  placeTemplate(t, at));
+              }}
               onPick={(templateId) => {
                 const t = placeableTemplates.find((x) => x.templateId === templateId);
                 if (!t) return;
-                addTemplateClip({
-                  template: t,
-                  trackId: visualTrackId, // 欄に出ている列＝実際に置く列（表示と結果を割らない）
-                  startSec: playheadSec,
-                });
+                placeTemplate(t);
               }}
             />
           </>
@@ -3384,18 +3458,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               disabled={isPlaying || exporting}
               disabledHint={exporting ? exportingHint : playingHint}
               searchLabel="音の絞り込み"
+              onGrab={(e, id) => {
+                const src = audioSourceOf(id);
+                if (!src) return;
+                grabToPlace(e, { kind: TIMELINE_CLIP_KIND.audio, ...src.spec }, src.label, (at) =>
+                  placeAudio(src.spec, at));
+              }}
               onPick={(id) => {
-                // id の頭で出どころを分ける＝**音の出どころは高々1つ**（`11 §8` V25）を渡す時点で守る。
-                const [kind, rest] = [id.slice(0, id.indexOf(":")), id.slice(id.indexOf(":") + 1)];
-                // 同梱BGMは**目録から実体を引く**（見た目パターン側と同じ流儀）＝画面の文字列を id の型へ
-                // 押し込まない。目録に無いものは置かない（存在しない曲を指す部品を作らない）。
-                const bgm = kind === "bgm" ? BGM_CATALOG.find((b) => b.id === rest) : undefined;
-                if (kind === "bgm" && !bgm) return;
-                addAudioClip(
-                  bgm
-                    ? { bundledBgmId: bgm.id, trackId: audioTrackId, startSec: playheadSec }
-                    : { assetId: rest, trackId: audioTrackId, startSec: playheadSec },
-                );
+                const src = audioSourceOf(id);
+                if (!src) return;
+                placeAudio(src.spec);
               }}
             />
           </>
@@ -3420,10 +3492,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               </select>
             </label>
             <div className="row gap-sm">
+              {/* 掴めるものは手を出す前に分かる（`grabbable`＝文字・図形のボタンや帯と同じ見た目・#714）。 */}
               <button
-                className="btn btn-secondary"
+                className="btn btn-secondary grabbable"
                 {...busyGuard({ disabled: isPlaying, hint: playingHint })}
-                onClick={() => addVoiceClip({ text: "", trackId: audioTrackId, startSec: playheadSec })}
+                onPointerDown={(e) => grabToPlace(e, { kind: TIMELINE_CLIP_KIND.voice }, clipLabel({ kind: TIMELINE_CLIP_KIND.voice }), (at) =>
+                  addVoiceClip({ text: "", trackId: at?.trackId ?? audioTrackId, startSec: at?.startSec ?? playheadSec }))}
+                onClick={(e) => onKeyActivate(e, () => addVoiceClip({ text: "", trackId: audioTrackId, startSec: playheadSec }))}
               >
                 読み上げを置く
               </button>
@@ -3558,10 +3633,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             style={{ left: drag.x, top: drag.y }}
             aria-hidden="true"
           >
-            {/* 名前は帯と同じ関数から採る（同じ物を画面内で別の名で呼ばない）。 */}
-            {drag.kind === TIMELINE_CLIP_KIND.slot
-              ? doc.assets.find((a) => a.assetId === drag.assetId)?.displayName ?? clipLabel({ kind: drag.kind })
-              : clipLabel({ kind: drag.kind })}
+            {/* 名前は掴んだ一覧に出ていたものと同じ（同じ物を画面内で別の名で呼ばない）。 */}
+            {drag.label}
           </div>
         )}
 

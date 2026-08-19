@@ -2143,6 +2143,103 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     expect(c.assetId).toBe("asset_001");
   });
 
+  // #714 項目2＝**見た目パターン・音・読み上げも掴んで運べる**（以前はボタンだけで、同じ画面の中で
+  // 置き方の流儀が割れていた＝ADR-0026②）。落とし先・断り方は絵の部品と同じ道を通る。
+  it("読み上げをつかんで音の列へ落とすと、その列のその時刻へ置く", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" })); // 列を描かせる
+    const lanes = container.querySelectorAll(".timeline-lane");
+    // ⚠️ 列は**手前が上**＝`lanes[0]` は並びの後ろ（track_002＝音の列）。
+    stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 音の列
+    stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 絵の列
+    grab(screen.getByRole("button", { name: "読み上げを置く" }));
+    moveTo(380, 420); // 200 + 5×36 ＝ 5秒
+    dropAt(380, 420);
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.voice)!;
+    expect(placed).toMatchObject({ trackId: "track_002", startSec: 5 });
+  });
+
+  // ⚠️ **この PR の本題**＝見た目パターンも掴んで運べる。掴む系のテストが音・読み上げだけだと、
+  // 見出しの機能そのものが未検証のまま残る（レビュー指摘）。
+  it("見た目パターンをつかんで落とすと、その時刻へ置く（置いた所へ再生位置も動く）", () => {
+    useProjectStore.setState({
+      templates: [{
+        schemaVersion: "1.0", templateId: "tmpl_001", name: "よこ型テンプレ", category: "photo_intro",
+        aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+        layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080 }],
+      } as Template],
+    });
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    const lanes = container.querySelectorAll(".timeline-lane");
+    stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 音の列（手前が上）
+    stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 絵の列
+    grab(screen.getByText("よこ型テンプレ"));
+    moveTo(560, 460); // 200 + 10×36 ＝ 10秒
+    dropAt(560, 460);
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.template)!;
+    expect(placed).toMatchObject({ trackId: "track_001", startSec: 10 });
+    // **置いた瞬間に見える**（`06 §12.1`）＝運んだ先へ再生位置も動く（絵の部品と同じ）。
+    expect(useTimelineStore.getState().playheadSec).toBe(10);
+  });
+
+  it("音（曲）をつかんで落とすと、その時刻へ置く", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    const lanes = container.querySelectorAll(".timeline-lane");
+    stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 音の列（手前が上）
+    stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 絵の列
+    grab(screen.getByText("曲")); // 素材の音（一覧の名前で掴む）
+    moveTo(272, 420); // 200 + 2×36 ＝ 2秒
+    dropAt(272, 420);
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.audio)!;
+    expect(placed).toMatchObject({ trackId: "track_002", startSec: 2, assetId: "asset_002" });
+  });
+
+  // ⚠️ **列の種別違いは断る**＝音を絵の列へ落としても置かない（理由を出す）。
+  it("音を絵の列へ落としたら置かない（理由を出す）", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "文字を置く" }));
+    const lanes = container.querySelectorAll(".timeline-lane");
+    stubRect(lanes[0], { left: 200, top: 400, width: 800, height: 40 }); // 音の列
+    stubRect(lanes[1], { left: 200, top: 440, width: 800, height: 40 }); // 絵の列
+    const before = useTimelineStore.getState().doc!.clips.length;
+    grab(screen.getByText("曲"));
+    moveTo(380, 460); // 絵の列の上
+    dropAt(380, 460);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(before);
+    // ⚠️ **理由まで見る**（レビュー指摘）＝件数だけだと「落とし先の外だった（何も起きない）」と
+    // 見分けが付かず、断りを出さなくなる変異も素通りする。
+    expect(screen.getByText(/音の部品は音の列に/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **仕上がり確認へ落とせるのは絵の部品だけ**＝音・読み上げは動画の中の場所を持たない。
+  // 落とし先の外と同じ扱い＝**何も置かない**（勝手に再生位置へ置かない）。
+  it("音を仕上がり確認へ落としても置かない（場所を持たない部品）", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    stubRect(container.querySelector(".preview-stage")!, { left: 0, top: 0, width: 640, height: 360 });
+    const before = useTimelineStore.getState().doc!.clips.length;
+    grab(screen.getByText("曲"));
+    moveTo(160, 90);
+    dropAt(160, 90);
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(before);
+  });
+
+  // ⚠️ **動かさずに離したら、ボタンと同じ結果**（掴めるようにしても押すだけの道を壊さない・決定19）。
+  it("読み上げを押しただけ（動かさず離す）なら、欄の列と再生位置へ置く", () => {
+    withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.audio }] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    grab(screen.getByRole("button", { name: "読み上げを置く" }));
+    dropAt(0, 0); // 動かしていない
+    const placed = useTimelineStore.getState().doc!.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.voice)!;
+    expect(placed).toMatchObject({ trackId: "track_002", startSec: 0 });
+  });
+
   it("置けない所で離したら置かない（寄せない）＋理由を出す", () => {
     withAsset({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }, { id: "track_003", kind: TRACK_KIND.visual }] });
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);

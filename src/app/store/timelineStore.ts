@@ -896,7 +896,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
     const before = new Set(doc.clips.map((c) => c.id));
     const added = r.doc.clips.find((c) => !before.has(c.id));
-    commit(set, get, r.doc, added ? { selectedClipIds: [added.id] } : {});
+    // **置いた瞬間に見える**（`06 §12.1`）＝運んで置いた先が再生位置と違うなら、そこへ移す。
+    // ⚠️ 押して置くときは再生位置そのものなので何も変わらないが、**掴んで運べるようになった**ので
+    // 置き先が離れうる（#714）。絵の部品は既にこうしており、揃えないと種類で流儀が割れる（ADR-0026②）。
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id], playheadSec: added.startSec } : {});
   },
 
   setSelectedClipSpeed: (speed) => applyEdit(set, get, (d, id) => setClipSpeed(d, id, speed)),
@@ -953,7 +956,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     }
     const before = new Set(doc.clips.map((c) => c.id));
     const added = r.doc.clips.find((c) => !before.has(c.id));
-    commit(set, get, r.doc, added ? { selectedClipIds: [added.id] } : {});
+    // **置いた瞬間に見える**（`06 §12.1`）＝運んで置いた先が再生位置と違うなら、そこへ移す。
+    // ⚠️ 押して置くときは再生位置そのものなので何も変わらないが、**掴んで運べるようになった**ので
+    // 置き先が離れうる（#714）。絵の部品は既にこうしており、揃えないと種類で流儀が割れる（ADR-0026②）。
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id], playheadSec: added.startSec } : {});
   },
 
   setSelectedVoiceText: (text) => applyEdit(set, get, (d, id) => setVoiceText(d, id, text)),
@@ -1069,7 +1075,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 「末尾に足す」という実装の都合に画面が寄りかからない。
     const before = new Set(doc.clips.map((c) => c.id));
     const added = r.doc.clips.find((c) => !before.has(c.id));
-    commit(set, get, r.doc, added ? { selectedClipIds: [added.id] } : {});
+    // **置いた瞬間に見える**（`06 §12.1`）＝運んで置いた先が再生位置と違うなら、そこへ移す。
+    // ⚠️ 押して置くときは再生位置そのものなので何も変わらないが、**掴んで運べるようになった**ので
+    // 置き先が離れうる（#714）。絵の部品は既にこうしており、揃えないと種類で流儀が割れる（ADR-0026②）。
+    commit(set, get, r.doc, added ? { selectedClipIds: [added.id], playheadSec: added.startSec } : {});
   },
 
   addTrack: (kind) => {

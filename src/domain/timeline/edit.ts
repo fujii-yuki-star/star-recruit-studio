@@ -665,16 +665,13 @@ export function addTemplateClip(
   doc: TimelineProject,
   input: { template: Pick<Template, 'templateId' | 'defaults' | 'aspectRatio'>; trackId: string; startSec: number },
 ): EditResult {
-  // 向きが違うテンプレは層の座標がそのまま使われる（箱＝画面いっぱいなので縮まない）＝画面外へ出る。
-  // 画面が一覧を絞っていても、ここで断る＝別の導線からも同じ壊れ方を作れないようにする（ADR-0026④）。
-  if (input.template.aspectRatio !== doc.videoSettings.aspectRatio) return blocked(EDIT_BLOCKED.orientation);
-  // 列の事情は `trackPlacementIssue`（置く側は**隠した列も断る**＝動画に出ない部品を新しく作らない）。
-  // 手書きで並べていたので `hidden` だけ抜けていた（画面が一覧を絞るので届いていなかっただけ・#714 レビュー）。
-  const trackIssue = trackPlacementIssue(doc, input.trackId, trackKindForClip(TIMELINE_CLIP_KIND.template));
-  if (trackIssue) return blocked(trackIssue);
+  // 置ける条件は `clipPlacementIssue`（#714）＝**押す前の見た目と同じ規則**を通る（向きの違い・列の
+  // 事情〔固定・非表示・種別〕・重なりを1か所で見る）。手書きで並べていた頃は `hidden` だけ抜けていた。
+  const spec = { kind: TIMELINE_CLIP_KIND.template, template: input.template } as const;
+  const issue = clipPlacementIssue(doc, spec, input.trackId, input.startSec);
+  if (issue) return blocked(issue);
   const startSec = Math.max(0, input.startSec);
-  const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, defaultDurationForTemplate(input.template));
-  if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  const durationSec = placedDurationSec(spec);
   // **箱は持たない**＝未指定は画面いっぱい（`clipBox`）。焼き出し（`bake.ts`）も同じく持たないので、
   // 見た目パターンのクリップの箱の持ち方が2通りにならない（向きを変えたときに片方だけ古い大きさで残る）。
   const clip: TimelineClip = {
@@ -763,13 +760,12 @@ export function addVoiceClip(
   doc: TimelineProject,
   input: { text: string; trackId: string; startSec: number; durationSec?: number },
 ): EditResult {
-  // 列そのものの事情は `trackPlacementIssue`（「置ける列」を数える側と同じ規則・#724 レビュー）。
-  // 手書きだと**隠した列を見落とす**（実際に落ちていた＝置けても動画に出ない部品が黙って生まれる）。
-  const trackIssue = trackPlacementIssue(doc, input.trackId, trackKindForClip(TIMELINE_CLIP_KIND.voice));
-  if (trackIssue) return blocked(trackIssue);
+  // 置ける条件は `clipPlacementIssue`（#714）＝押す前の見た目と同じ規則（列の事情・重なり）。
+  const spec = { kind: TIMELINE_CLIP_KIND.voice, durationSec: input.durationSec } as const;
+  const issue = clipPlacementIssue(doc, spec, input.trackId, input.startSec);
+  if (issue) return blocked(issue);
   const startSec = Math.max(0, input.startSec);
-  const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, input.durationSec ?? VOICE_PLACEHOLDER_SEC);
-  if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  const durationSec = placedDurationSec(spec);
   const clip: TimelineClip = {
     id: createClipId(doc.clips.map((c) => c.id)),
     kind: TIMELINE_CLIP_KIND.voice,
@@ -873,6 +869,85 @@ export type VisualPlacement = {
 };
 
 /**
+ * **置こうとしている部品**（置く前の姿・#714）。「どこへ」（列・時刻）は**別に渡す**＝同じ部品を
+ * 別の場所へ何度も試せる（掴んで運んでいる間、指が動くたびに測り直す）。
+ *
+ * ⚠️ **置き方（ボタン／掴んで運ぶ）で分けない**＝同じ部品を同じ規則で見る（ADR-0026②）。
+ */
+export type ClipPlacement =
+  | { kind: VisualPlacement['kind']; assetId?: string }
+  | {
+      kind: typeof TIMELINE_CLIP_KIND.template;
+      template: Pick<Template, 'templateId' | 'defaults' | 'aspectRatio'>;
+    }
+  | { kind: typeof TIMELINE_CLIP_KIND.audio; bundledBgmId?: BundledBgmId; assetId?: string; durationSec?: number }
+  | { kind: typeof TIMELINE_CLIP_KIND.voice; durationSec?: number };
+
+/**
+ * **置いたときの長さ**（種類ごとの既定・#714）。
+ *
+ * ⚠️ **単一の参照元**＝運んでいる最中の枠の幅・重なりの判定・実際に置く関数が**同じ値**を見る
+ * （別々に持つと「枠は入るのに置くと断られる」が起きる）。
+ */
+export function placedDurationSec(spec: ClipPlacement): number {
+  switch (spec.kind) {
+    case TIMELINE_CLIP_KIND.template:
+      return Math.max(TIMELINE_MIN_CLIP_SEC, defaultDurationForTemplate(spec.template));
+    case TIMELINE_CLIP_KIND.audio:
+      return Math.max(TIMELINE_MIN_CLIP_SEC, spec.durationSec ?? AUDIO_PLACEHOLDER_SEC);
+    case TIMELINE_CLIP_KIND.voice:
+      return Math.max(TIMELINE_MIN_CLIP_SEC, spec.durationSec ?? VOICE_PLACEHOLDER_SEC);
+    case TIMELINE_CLIP_KIND.slot:
+    case TIMELINE_CLIP_KIND.text:
+    case TIMELINE_CLIP_KIND.shape:
+      return VISUAL_CLIP_DURATION_SEC;
+    default: {
+      // 種類が増えたらここがコンパイルエラーになる＝**黙って絵の部品の長さで測らない**
+      // （ADR-0032 決定19 の流儀。長さがずれると枠の幅も重なりの判定も別物になる）。
+      const exhaustive: never = spec;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * **そこへ置けるか**（置けないなら理由・`null`＝置ける・#714）。
+ *
+ * ⚠️ **押す前の見た目と、実際に置く関数が同じ規則を通る**（`add*` はこれを呼ぶ）＝
+ * 「置けそうに見えたのに断られる」「断られる色なのに置けてしまう」を作らない。
+ *
+ * ⚠️ **列より先に見るのは向きだけ**（見た目パターンの向き違いは**どの列へ置いても直らない**ので、
+ * 「別の列へ置き直してください」を先に出さない）。素材の実在・音の出どころ（V25）は**列の後**＝
+ * 委譲前（`addAudioClip` ほか）の順をそのまま保っている（断る理由を変えない）。
+ */
+export function clipPlacementIssue(
+  doc: TimelineProject,
+  spec: ClipPlacement,
+  trackId: string,
+  startSec: number,
+): EditBlockedReason | null {
+  // 向きが違う見た目パターンは層の座標がそのまま使われる＝画面外へ出る（列を変えても直らない）。
+  if (spec.kind === TIMELINE_CLIP_KIND.template && spec.template.aspectRatio !== doc.videoSettings.aspectRatio) {
+    return EDIT_BLOCKED.orientation;
+  }
+  const trackIssue = trackPlacementIssue(doc, trackId, trackKindForClip(spec.kind));
+  if (trackIssue) return trackIssue;
+  if (spec.kind === TIMELINE_CLIP_KIND.audio) {
+    // 音の出どころは高々1つ（`11 §8` V25）＝どちらも／どちらも無しは置かない（黙って一方を選ばない）。
+    if ((spec.bundledBgmId == null) === (spec.assetId == null)) return EDIT_BLOCKED.notFound;
+  }
+  if (spec.kind === TIMELINE_CLIP_KIND.slot || spec.kind === TIMELINE_CLIP_KIND.audio) {
+    if (spec.assetId != null && !doc.assets.some((a) => a.assetId === spec.assetId)) return EDIT_BLOCKED.notFound;
+  }
+  // 素材の差し込み口は**素材がないと置けない**（空の枠を作らない）。
+  if (spec.kind === TIMELINE_CLIP_KIND.slot && spec.assetId == null) return EDIT_BLOCKED.notFound;
+  if (!isFreeSpan(doc.clips, trackId, Math.max(0, startSec), placedDurationSec(spec))) {
+    return EDIT_BLOCKED.overlap;
+  }
+  return null;
+}
+
+/**
  * **その列が部品を受けられるか**（受けられないなら理由・`null`＝受けられる・#722）。
  *
  * 見るのは**列そのものの事情だけ**（実在する・固定していない・出す設定・種別が合う）。
@@ -927,18 +1002,9 @@ function placeableTracksOfKind(doc: TimelineProject, kind: TrackKind): Track[] {
  * **出さない設定の列も断る**＝置けても動画に出ない部品が黙って生まれる（ボタンで置くときも避けている）。
  */
 export function visualPlacementIssue(doc: TimelineProject, input: VisualPlacement): EditBlockedReason | null {
-  // 列そのものの事情は `trackPlacementIssue`（「置ける列」を数える側と同じ規則・#722 レビュー）。
-  const trackIssue = trackPlacementIssue(doc, input.trackId, trackKindForClip(input.kind));
-  if (trackIssue) return trackIssue;
-  if (input.kind === TIMELINE_CLIP_KIND.slot) {
-    if (input.assetId == null || !doc.assets.some((a) => a.assetId === input.assetId)) {
-      return EDIT_BLOCKED.notFound;
-    }
-  }
-  if (!isFreeSpan(doc.clips, input.trackId, Math.max(0, input.startSec), VISUAL_CLIP_DURATION_SEC)) {
-    return EDIT_BLOCKED.overlap;
-  }
-  return null;
+  // ⚠️ 規則そのものは `clipPlacementIssue` が持つ（#714）＝見た目パターン・音・読み上げと**同じ道**を通る。
+  // ここは「絵の部品の呼び方」を残すためだけの入口（呼び出し側が多いので名前は据え置き）。
+  return clipPlacementIssue(doc, { kind: input.kind, assetId: input.assetId }, input.trackId, input.startSec);
 }
 
 export function addVisualClip(
@@ -951,7 +1017,8 @@ export function addVisualClip(
   const issue = visualPlacementIssue(doc, input);
   if (issue) return blocked(issue);
   const startSec = Math.max(0, input.startSec);
-  const durationSec = VISUAL_CLIP_DURATION_SEC;
+  // 長さも**置く前の姿から採る**＝運んでいる最中の枠の幅・重なりの判定と同じ値（#714 レビュー ℹ️）。
+  const durationSec = placedDurationSec({ kind: input.kind, assetId: input.assetId });
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
   const ratio = PLACED_BOX_RATIO[input.kind];
   const w = Math.round(canvas.width * ratio.w);
@@ -1042,18 +1109,18 @@ export function addAudioClip(
   doc: TimelineProject,
   input: { bundledBgmId?: BundledBgmId; assetId?: string; trackId: string; startSec: number; durationSec?: number },
 ): EditResult {
-  // 列そのものの事情は `trackPlacementIssue`（「置ける列」を数える側と同じ規則・#724 レビュー）。
-  // 手書きだと**隠した列を見落とす**（実際に落ちていた＝置けても動画に出ない部品が黙って生まれる）。
-  const trackIssue = trackPlacementIssue(doc, input.trackId, trackKindForClip(TIMELINE_CLIP_KIND.audio));
-  if (trackIssue) return blocked(trackIssue);
-  // 音の出どころは高々1つ（`11 §8` V25）＝どちらも渡されたら置かない（黙って一方を選ばない）。
-  if ((input.bundledBgmId == null) === (input.assetId == null)) return blocked(EDIT_BLOCKED.notFound);
-  if (input.assetId != null && !doc.assets.some((a) => a.assetId === input.assetId)) {
-    return blocked(EDIT_BLOCKED.notFound);
-  }
+  // 置ける条件は `clipPlacementIssue`（#714）＝押す前の見た目と同じ規則（列の事情・出どころが高々1つ
+  // 〔`11 §8` V25〕・素材の実在・重なり）。
+  const spec = {
+    kind: TIMELINE_CLIP_KIND.audio,
+    bundledBgmId: input.bundledBgmId,
+    assetId: input.assetId,
+    durationSec: input.durationSec,
+  } as const;
+  const issue = clipPlacementIssue(doc, spec, input.trackId, input.startSec);
+  if (issue) return blocked(issue);
   const startSec = Math.max(0, input.startSec);
-  const durationSec = Math.max(TIMELINE_MIN_CLIP_SEC, input.durationSec ?? AUDIO_PLACEHOLDER_SEC);
-  if (!isFreeSpan(doc.clips, input.trackId, startSec, durationSec)) return blocked(EDIT_BLOCKED.overlap);
+  const durationSec = placedDurationSec(spec);
   const clip: TimelineClip = {
     id: createClipId(doc.clips.map((c) => c.id)),
     kind: TIMELINE_CLIP_KIND.audio,
