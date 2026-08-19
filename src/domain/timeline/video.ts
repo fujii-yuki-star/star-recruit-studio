@@ -3,8 +3,10 @@
 // ⚠️ **段1 は絵だけ**＝元の音はまだ流れない（画面がその場で断る＝§2-5）。音は段2（`useOriginalAudio`）。
 //
 // 絵の作り方は場面形式（#442）と同じ道具立て：素材の区間を**出力 fps・速度込み**でコマへ焼き出し
-// （Rust `stage_clip_frames`）、フレームごとにその1枚を差し込む。ここが決めるのは
-// **どの部品が動画か／どの区間を焼くか／出力フレーム f でどのコマを出すか**の3つだけ。
+// （Rust `stage_clip_frames`）、フレームごとにその1枚を差し込む。
+// ⚠️ **動画にまつわる規則はここへ集約する**（どの部品が動画か／どの区間を焼くか／どのコマを出すか／
+// 実映像を出せるか）＝プレビューと書き出しが同じものを見る（別々に持つと preview≠export になる）。
+import { isHiddenByGroup } from '../group/compose';
 import { ASSET_TYPE, TIMELINE_CLIP_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 
@@ -20,10 +22,48 @@ export function videoAssetIds(doc: TimelineProject): Set<string> {
   return new Set(doc.assets.filter((a) => a.assetType === ASSET_TYPE.video).map((a) => a.assetId));
 }
 
-/** 動画を映す部品（描く順は問わない＝呼び出し側が並べる）。 */
+/**
+ * 動画を映す部品（描く順は問わない＝呼び出し側が並べる）。
+ *
+ * ⚠️ **描かれないものは含めない**（レビュー 🟡）＝隠した部品・隠した列・隠したまとまりは動画に出ないので、
+ * コマを焼く必要も無い。含めると**動画に出ない素材のファイルが欠けているだけで書き出し全体が失敗する**
+ * （Rust の焼き出しは入力が無いと失敗する）＝出ないものを理由に断ることになる。
+ */
 export function videoClipsOf(doc: TimelineProject): TimelineClip[] {
   const ids = videoAssetIds(doc);
-  return doc.clips.filter((c) => videoAssetIdOfClip(c, ids) != null);
+  const hiddenTracks = new Set(doc.tracks.filter((t) => t.hidden).map((t) => t.id));
+  return doc.clips.filter(
+    (c) =>
+      videoAssetIdOfClip(c, ids) != null &&
+      !c.hidden &&
+      !hiddenTracks.has(c.trackId) &&
+      !isHiddenByGroup(c.id, doc.groups ?? []),
+  );
+}
+
+/** 速さの既定（未指定・0以下は等速）。⚠️ **焼き出しと再生が同じ値を見る**ための単一の参照元。 */
+export function effectiveSpeed(clip: TimelineClip): number {
+  return clip.speed != null && clip.speed > 0 ? clip.speed : 1;
+}
+
+/**
+ * 切り抜きの**回す中心**が、書き出しとプレビューで食い違うか（#512 段1 レビュー 🔴）。
+ *
+ * 書き出しは切り抜きの矩形を**矩形自身の中心**で回す（`sceneSvg.wrapClipRect`）が、CSS の `clip-path` は
+ * 要素と一緒に**要素の中心**で回る。左右非対称に切り抜いた部品を回すと**別の窓**になる（実測で百数十 px）。
+ * 直せるまでは実映像を出さない側へ倒す（`11 §7.6.4` の「跨ぐときは分割を拒否」と同じ流儀）。
+ */
+export function cropPivotDiffers(
+  rect: { x: number; y: number; w: number; h: number },
+  crop: { x: number; y: number; w: number; h: number } | undefined,
+  rotation: number | undefined,
+): boolean {
+  if (crop == null || !rotation) return false;
+  const EPS = 1e-6;
+  return (
+    Math.abs(crop.x + crop.w / 2 - (rect.x + rect.w / 2)) > EPS ||
+    Math.abs(crop.y + crop.h / 2 - (rect.y + rect.h / 2)) > EPS
+  );
 }
 
 /**
@@ -35,7 +75,7 @@ export function videoClipsOf(doc: TimelineProject): TimelineClip[] {
 export function videoStagePlan(
   clip: TimelineClip,
 ): { sourceStartSec: number; durationSec: number; speed: number } {
-  const speed = clip.speed != null && clip.speed > 0 ? clip.speed : 1;
+  const speed = effectiveSpeed(clip);
   return {
     sourceStartSec: clip.sourceStartSec ?? 0,
     durationSec: clip.durationSec,
@@ -88,8 +128,7 @@ function stagedFrameIndexAt(clip: TimelineClip, frameIndex: number, fps: number)
 export function videoSourceSecAt(clip: TimelineClip, timeSec: number, fps: number): number | null {
   const local = stagedFrameIndexAt(clip, Math.round(timeSec * fps), fps);
   if (local == null) return null;
-  const speed = clip.speed != null && clip.speed > 0 ? clip.speed : 1;
-  return (clip.sourceStartSec ?? 0) + (local / fps) * speed;
+  return (clip.sourceStartSec ?? 0) + (local / fps) * effectiveSpeed(clip);
 }
 
 /**

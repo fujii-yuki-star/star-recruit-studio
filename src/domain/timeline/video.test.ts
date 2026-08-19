@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
-import { compositeSpansOthers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
+import { compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
 
 const doc = (over: Partial<TimelineProject> = {}): TimelineProject =>
   ({
@@ -58,6 +58,23 @@ describe('動画を映す部品を見分ける（#512 段1）', () => {
     const d = doc({ clips: [slot(), slot({ id: 'clip_002', assetId: 'asset_002' })] });
     expect(videoClipsOf(d).map((c) => c.id)).toEqual(['clip_001']);
   });
+
+  // ⚠️ **描かれないものは含めない**＝動画に出ない素材のコマまで焼くと、そのファイルが欠けているだけで
+  // **書き出し全体が失敗する**（出ないものを理由に断ることになる）。
+  it('隠した部品・隠した列・隠したまとまりは含めない', () => {
+    expect(videoClipsOf(doc({ clips: [slot({ hidden: true })] }))).toEqual([]);
+    expect(
+      videoClipsOf(doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, hidden: true }], clips: [slot()] })),
+    ).toEqual([]);
+    expect(
+      videoClipsOf(
+        doc({
+          clips: [slot()],
+          groups: [{ id: 'group_001', members: ['clip_001'], hidden: true, transform: { x: 0, y: 0, scale: 1, rotation: 0 } }],
+        }),
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe('焼き出す区間（videoStagePlan）', () => {
@@ -78,6 +95,14 @@ describe('焼き出す区間（videoStagePlan）', () => {
 
 describe('出力フレーム → 出すコマ（videoFrameIndexAt）', () => {
   const clip = slot({ startSec: 2, durationSec: 4 });
+
+  // ⚠️ **丸め方向を独立に固定する**（レビュー 🟡＝端数 0.3 の材料では round と floor が同じ結果）。
+  it('置いた位置の端数は四捨五入で格子へ寄せる（切り捨てない）', () => {
+    // 0.517 秒 × 30 = 15.51 → 16 コマ目が先頭。切り捨てだと 15 になり1コマずれる。
+    const odd = slot({ startSec: 0.517, durationSec: 3 });
+    expect(videoFrameIndexAt(odd, 16, 30, 999)).toBe(0);
+    expect(videoFrameIndexAt(odd, 17, 30, 999)).toBe(1);
+  });
 
   it('置いた先頭からのコマ数で出す', () => {
     expect(videoFrameIndexAt(clip, 60, 30, 120)).toBe(0); // 2.0秒＝先頭
@@ -157,5 +182,29 @@ describe('合成の単位が跨っているか（compositeSpansOthers）', () =>
       { id: 'b', composite: { key: 'group_002', opacity: 0.5 } },
     ];
     expect(compositeSpansOthers(items, 'a')).toBe(false);
+  });
+});
+
+// ⚠️ 回した部品を左右非対称に切り抜くと、書き出し（矩形自身の中心で回す）と画面（部品の中心で回る）で
+// **別の窓**になる。出さない側へ倒すための判定（#512 段1 レビュー 🔴）。
+describe('切り抜きの回す中心が食い違うか（cropPivotDiffers）', () => {
+  const rect = { x: 0, y: 0, w: 100, h: 100 };
+
+  it('回していなければ食い違わない', () => {
+    expect(cropPivotDiffers(rect, { x: 0, y: 0, w: 50, h: 100 }, 0)).toBe(false);
+    expect(cropPivotDiffers(rect, { x: 0, y: 0, w: 50, h: 100 }, undefined)).toBe(false);
+  });
+
+  it('切り抜いていなければ食い違わない', () => {
+    expect(cropPivotDiffers(rect, undefined, 30)).toBe(false);
+  });
+
+  it('回していて、切り抜きが中心からずれていれば食い違う', () => {
+    expect(cropPivotDiffers(rect, { x: 0, y: 0, w: 50, h: 100 }, 30)).toBe(true);
+  });
+
+  // ⚠️ **中心が同じなら回しても同じ窓**（左右対称に切り抜いた場合）＝過剰に断らない。
+  it('回していても、切り抜きが中心対称なら食い違わない', () => {
+    expect(cropPivotDiffers(rect, { x: 25, y: 25, w: 50, h: 50 }, 30)).toBe(false);
   });
 });

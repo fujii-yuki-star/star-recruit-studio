@@ -265,6 +265,33 @@ describe('見た目が見つからない部品（書き出しを止める）', (
   });
 });
 
+// #512 段1＝**直接置いた動画は実フレームで描く**ので、代表フレーム（静止画）を要求しない。
+// 要求すると「実フレームで描けるのに**素材が読めませんで永久に書き出せない**」組み合わせができる。
+describe('timelineImageAssetIds：動画の扱い（#512 段1）', () => {
+  const videoAssetDef = { assetId: 'asset_v', assetType: 'video' as const, displayName: '動画', filePath: 'v.mp4' };
+
+  it('直接置いた動画は静止画を要求しない', () => {
+    const d = doc({
+      assets: [videoAssetDef],
+      clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_v' })],
+    });
+    expect(timelineImageAssetIds(d)).toEqual([]);
+  });
+
+  // ⚠️ **ほかの使い方でも使っていれば残す**＝差し込み口・立ち絵は静止画で描くので、
+  // 外すとその層だけ絵が出ない（変異チェックで生き残った穴）。
+  it('同じ動画を差し込み口でも使っていれば、静止画は要る', () => {
+    const d = doc({
+      assets: [videoAssetDef],
+      clips: [
+        textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_v' }),
+        textClip('clip_002', { kind: TIMELINE_CLIP_KIND.template, assetRefs: { background: 'asset_v' } }),
+      ],
+    });
+    expect(timelineImageAssetIds(d)).toEqual(['asset_v']);
+  });
+});
+
 describe('timelineImageAssetIds（書き出しで絵として描く素材・#716）', () => {
   const assets = [
     { assetId: 'asset_001', assetType: 'image', displayName: '写真', filePath: 'a.png' },

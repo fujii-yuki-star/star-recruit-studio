@@ -15,7 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_PENDING, TIMELINE_VIDEO_STILL_IN_GROUP_FADE } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_PENDING, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
@@ -35,7 +35,7 @@ import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
-import { compositeSpansOthers, videoAssetIds, videoClipsOf, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
+import { compositeSpansOthers, cropPivotDiffers, videoAssetIds, videoClipsOf, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
@@ -2052,9 +2052,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           // ＝「帯分割は合成の単位を跨いで切る…跨ぐときは分割を拒否して理由を返すこと」）。
           // まとまり全体のフェードは複数の部品へ同じ単位で掛かるので、層ごとに掛けると
           // **重なった所で下が透ける**＝書き出し（1枚にしてから掛ける）と別の絵になる。
-          if (compositeSpansOthers(shownLayout.items, item.id)) return null;
+          // ⚠️ **出せない理由を持ち帰る**（レビュー 🔴）＝「実映像になっていない」全部を同じ文言で説明すると、
+          // 区間の外・本体が無い・編集中でも「まとまりを薄くしている間は…」と**嘘の理由**が出る。
+          const held = compositeSpansOthers(shownLayout.items, item.id)
+            ? "groupFade"
+            : cropPivotDiffers(item, item.clipRect, item.rotation)
+              ? "rotatedCrop"
+              : null;
+          if (held) return { clip, held } as const;
           return {
-            clip, itemId: item.id, src, sourceSec, speed,
+            clip, held: null, itemId: item.id, src, sourceSec, speed,
             fit: item.fit, align: item.align,
             // 合成の不透明度・切り抜きは**書き出しが `<g>` で掛けているもの**＝実映像にも同じだけ効かせる。
             // ⚠️ 書き出しは**入れ子で掛かる**（合成の単位の α × 要素の α）＝置き換えない（レビュー 🟡）。
@@ -2064,11 +2071,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         })
         .filter((v): v is NonNullable<typeof v> => v != null)
     : [];
+  /** 実際に実映像として出すもの（出せない理由が付いたものは静止のまま）。 */
+  const videoShown = videoPlay.filter((v): v is Extract<typeof v, { held: null }> => v.held == null);
   const videoSplit =
-    shownLayout && videoPlay.length > 0
+    shownLayout && videoShown.length > 0
       ? splitVideoSceneSvgMulti(
           shownLayout,
-          videoPlay.map((v) => v.itemId),
+          videoShown.map((v) => v.itemId),
           (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined),
           undefined,
           fontFamilyForId(doc.videoSettings.fontId),
@@ -2109,7 +2118,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               <>
                 <div style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: videoSplit.belowSvg }} />
                 {videoSplit.slots.map((slot, k) => {
-                  const v = videoPlay.find((x) => x.itemId === slot.layerId);
+                  const v = videoShown.find((x) => x.itemId === slot.layerId);
                   return (
                     <Fragment key={slot.layerId}>
                       {v && (
@@ -2762,8 +2771,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         <p className="field-hint">{TIMELINE_VIDEO_AUDIO_PENDING}</p>
                         {/* まとまり全体を薄くする動きが掛かっている間は実映像を出さない（`11 §7.6.4`）。
                             黙って静止画に見せず、**書き出しには出る**ことまで言う（§2-5）。 */}
-                        {videoPlay.every((v) => v.clip.id !== selected.id) && (
+                        {videoPlay.find((v) => v.clip.id === selected.id)?.held === "groupFade" && (
                           <p className="field-hint">{TIMELINE_VIDEO_STILL_IN_GROUP_FADE}</p>
+                        )}
+                        {videoPlay.find((v) => v.clip.id === selected.id)?.held === "rotatedCrop" && (
+                          <p className="field-hint">{TIMELINE_VIDEO_STILL_ROTATED_CROP}</p>
                         )}
                       </>
                     )}

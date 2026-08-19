@@ -2189,6 +2189,26 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
       expect(screen.getByText(/元の音はまだ出せません/)).toBeInTheDocument();
     });
 
+    // ⚠️ **合成の単位が跨るときは実映像を出さない**（`11 §7.6.4`）＝層ごとに薄さを掛けると
+    // 重なった所で下が透け、書き出し（1枚にしてから掛ける）と別の絵になる。理由もその場に出す。
+    it("まとまり全体を薄くしている間は実映像にせず、理由を出す", () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        assets: [{ assetId: "asset_v", assetType: "video", displayName: "紹介ムービー", filePath: "v.mp4" }],
+        clips: [
+          { id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 960, h: 540, assetId: "asset_v" },
+          { id: "clip_002", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 0, durationSec: 5, x: 960, y: 0, w: 960, h: 540 },
+        ],
+        groups: [{ id: "group_001", members: ["clip_001", "clip_002"], transform: { x: 0, y: 0, scale: 1, rotation: 0 } }],
+        // まとまり全体を薄くする動き（焼き出した自由配置の場面が持つ形）。
+        animations: [{ id: "anim_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0.2 }, { timeSec: 5, opacity: 1 }] }],
+      });
+      act(() => { useTimelineStore.setState({ assetSrcById: { asset_v: "blob:thumb_v" }, videoSrcById: { asset_v: "blob:body_v" }, selectedClipIds: ["clip_001"] }); });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      expect(container.querySelector(".preview-stage video")).toBeNull(); // 実映像にしない
+      expect(screen.getByText(/まとまり全体を薄くしている間/)).toBeInTheDocument(); // 理由を出す
+    });
+
     // ⚠️ 写真では出さない（動画のときだけ＝いつも出ていると読まれなくなる）。
     it("写真の部品では知らせない", () => {
       open({

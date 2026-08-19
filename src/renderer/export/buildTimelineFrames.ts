@@ -45,7 +45,8 @@ export interface BuildTimelineFramesOptions {
   shouldCancel?: () => boolean;
   /**
    * 動画の部品を**コマへ焼き出す**（#512 段1）。返すのは実際に焼けた枚数。
-   * 未指定＝動画は静止のまま（呼び出し側が対応していない環境＝画面が先に断る）。
+   * ⚠️ **渡さないと灰色の枠が焼き込まれる**（#512 段1）＝直接置いた動画は静止画（代表フレーム）を
+   * 要求しないので、`assetSrc` でも解けない。書き出しの入口は必ず両方を渡すこと（片方だけでも同じ）。
    */
   stageVideo?: (input: {
     clipId: string;
