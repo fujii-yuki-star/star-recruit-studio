@@ -4,6 +4,8 @@
 // 描くのは `layoutTimelineAt`＝**プレビューと同じ関数**（ADR-0001 パリティ）。ここは
 // 「どの時刻を何枚描くか」を `timelineFramePlan`/`frameTimeAt` に委ね、SVG→PNG→ステージングを回すだけ。
 import { frameTimeAt, timelineFramePlan } from '../../domain/timeline/export';
+import { isItemOfClip } from '../timelineLayout';
+import { videoClipsOf, videoFrameIndexAt, videoStagePlan } from '../../domain/timeline/video';
 import { creditSpeakerAt } from '../../domain/timeline/credit';
 import { creditForLine } from '../../domain/voice/narratorCredit';
 import type { TimelineProject } from '../../domain/timeline/types';
@@ -41,6 +43,27 @@ export interface BuildTimelineFramesOptions {
   onProgress?: (done: number, total: number) => void;
   /** 中止要求。フレームごとに見る＝長い動画でも押した中止がすぐ効く。 */
   shouldCancel?: () => boolean;
+  /**
+   * 動画の部品を**コマへ焼き出す**（#512 段1）。返すのは実際に焼けた枚数。
+   * ⚠️ **渡さないと灰色の枠が焼き込まれる**（#512 段1）＝直接置いた動画は静止画（代表フレーム）を
+   * 要求しないので、`assetSrc` でも解けない。書き出しの入口は必ず両方を渡すこと（片方だけでも同じ）。
+   */
+  stageVideo?: (input: {
+    clipId: string;
+    assetId: string;
+    dirName: string;
+    sourceStartSec: number;
+    durationSec: number;
+    speed: number;
+    fps: number;
+  }) => Promise<number>;
+  /** 焼き出したコマを1枚読む（data URL）。`stageVideo` と対で渡す。 */
+  readVideoFrame?: (dirName: string, frameIndex: number) => Promise<string>;
+}
+
+/** その部品のコマを置く場所（部品ごとに分ける＝同じ動画を2つ置いても混ざらない）。 */
+export function videoFramesDirOf(clipId: string): string {
+  return `${TIMELINE_FRAMES_DIR}_v_${clipId}`;
 }
 
 /** 書き出しに渡す1本ぶん（`ExportSceneInput` と同じ形）。 */
@@ -68,12 +91,50 @@ export async function buildTimelineFrames(
   };
   const framesBase64: string[] = [];
   const framesDir = opts.stageFrame ? TIMELINE_FRAMES_DIR : undefined;
+
+  // **動画は先にコマへ焼き出す**（#512 段1）＝1フレームずつ切り出すと同じ素材を何度も開くことになる。
+  // 焼けた枚数を覚えておき、置いた長さより素材が短いときは**最後のコマで止める**（無い番号を読まない）。
+  const staged: { clip: (typeof doc.clips)[number]; dirName: string; count: number }[] = [];
+  if (opts.stageVideo && opts.readVideoFrame) {
+    for (const clip of videoClipsOf(doc)) {
+      bail();
+      const spec = videoStagePlan(clip);
+      const dirName = videoFramesDirOf(clip.id);
+      const count = await opts.stageVideo({
+        clipId: clip.id,
+        assetId: clip.assetId as string,
+        dirName,
+        sourceStartSec: spec.sourceStartSec,
+        durationSec: spec.durationSec,
+        speed: spec.speed,
+        fps: plan.fps,
+      });
+      staged.push({ clip, dirName, count });
+    }
+  }
+
   for (let f = 0; f < plan.frameCount; f += 1) {
     bail();
     const timeSec = frameTimeAt(f, plan.fps);
     const layout = layoutTimelineAt(doc, timeSec, { templateOf: opts.templateOf, assetSizeOf: opts.assetSizeOf });
+    // そのフレームで映る動画のコマを読み、**その部品のアイテムだけ**差し替える
+    // （素材 id で引くと、同じ動画を別の時刻に置いた2つが同じコマになる）。
+    const frameSrc = new Map<string, string>();
+    for (const s of staged) {
+      const idx = videoFrameIndexAt(s.clip, f, plan.fps, s.count);
+      if (idx == null) continue;
+      frameSrc.set(s.clip.id, await opts.readVideoFrame!(s.dirName, idx));
+    }
     const svg = layoutToSvg(layout, {
       assetSrc: opts.assetSrc,
+      ...(frameSrc.size > 0
+        ? {
+            itemSrc: (item) => {
+              for (const [clipId, src] of frameSrc) if (isItemOfClip(item.id, clipId)) return src;
+              return undefined;
+            },
+          }
+        : {}),
       credit: creditForLine({ speaker: creditSpeakerAt(doc, timeSec) }, opts.fallbackCredit),
       ...(opts.fontFamily ? { fontFamily: opts.fontFamily } : {}),
     });

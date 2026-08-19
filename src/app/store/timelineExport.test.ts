@@ -1,5 +1,9 @@
 // タイムライン形式の書き出し（ADR-0032 決定22・#631）。作る前に断る／描いて渡す／中止・片づけを固定する。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// ラスタライズ（canvas）は環境依存＝ここでは差し替える（`buildTimelineFrames.test.ts` と同じ扱い）。
+// 実物の描画経路を1件だけ通したいテスト（動画のコマの焼き出し）があるので、丸ごとの差し替えでは足りない。
+vi.mock('../../renderer/export/rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,X') }));
 import { useTimelineStore, timelineBgmRunInputs } from './timelineStore';
 import { useExportLockStore } from './exportLock';
 import * as fsMod from '../../infrastructure/projectFs';
@@ -85,20 +89,62 @@ describe('exportTimelineVideo', () => {
     expect(useTimelineStore.getState().exportRun.message).toContain('まだ何も置かれていない');
   });
 
-  it('動画の素材を置いていたら断る（静止画＋無音の動画を成功として出さない）', async () => {
+  // ⚠️ #512 段1＝**直接置いた動画は映る**ようになったので、断るのは**まだ映らない使い方**だけ
+  // （見た目パターンの差し込み口に入れた動画＝段3 まで静止のまま）。
+  it('見た目パターンの差し込み口に入れた動画は断る（静止画で出さない）', async () => {
     const clip: TimelineClip = {
-      id: 'clip_002', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
-      startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, assetId: 'asset_v',
-    };
+      id: 'clip_002', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, templateId: 'tmpl_001',
+      assetRefs: { background: 'asset_v' },
+    } as TimelineClip;
     await open(
       doc({
         assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/a.mp4' }],
         clips: [clip],
       }),
     );
-    await useTimelineStore.getState().exportTimelineVideo(deps);
+    // 見た目パターンは解決できる状態にする（未解決の断りが先に出ると、動画の話を見られない）。
+    const withTemplate = {
+      templates: [{
+        schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+        aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+        layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 }],
+      }],
+      templateAssetSrcById: {},
+    } as unknown as typeof deps;
+    await useTimelineStore.getState().exportTimelineVideo(withTemplate);
     expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled();
-    expect(useTimelineStore.getState().exportRun.message).toContain('動画の素材はまだ書き出せません');
+    expect(useTimelineStore.getState().exportRun.message).toContain('差し込み口や立ち絵に入れた動画');
+  });
+
+  // ⚠️ **位置引数の並びは型で守れない**（`speed`/`fps`/`width` はどれも number＝取り違えても通る）。
+  // 実映像が壊れた速さ・解像度で焼かれるので、**実際に渡る値**を1件だけ固定する（#512 段1 レビュー 🟡）。
+  it('動画のコマの焼き出しに、正しい順で値を渡す', async () => {
+    vi.mocked(framesMod.buildTimelineFrames).mockRestore();
+    const stage = vi.spyOn(ffmpegMod, 'stageClipFrames').mockResolvedValue(30);
+    vi.spyOn(ffmpegMod, 'readExportFrame').mockResolvedValue('data:frame');
+    await open(
+      doc({
+        assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/a.mp4', thumbnailPath: 'assets/a_thumb.png' }],
+        clips: [{
+          id: 'clip_002', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+          // ⚠️ **長さと速さを別の値にする**（同値だと入れ替えても通る＝テストが空振りする）。
+          startSec: 0, durationSec: 4, x: 0, y: 0, w: 100, h: 50,
+          assetId: 'asset_v', sourceStartSec: 3, speed: 2,
+        } as TimelineClip],
+      }),
+    );
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(stage).toHaveBeenCalledWith(
+      'proj_20260729_001', // どの動画の
+      'assets/a.mp4', // **本体**（代表フレームではない）
+      3, // トリム
+      4, // 置いた長さ
+      2, // 速さ
+      30, // fps
+      1920, // 横幅（向きから）
+      'timeline_frames_v_clip_002', // 部品ごとの置き場
+    );
   });
 
   it('保存先を選ばなければ何もしない（勝手に書き出さない）', async () => {
@@ -107,6 +153,16 @@ describe('exportTimelineVideo', () => {
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(vi.mocked(framesMod.buildTimelineFrames)).not.toHaveBeenCalled();
     expect(useTimelineStore.getState().exportRun.phase).toBe('idle');
+  });
+
+  // ⚠️ **Rust が整えた文言はそのまま出す**（#512 段1 レビュー 🟡）＝コマの焼き出しが本走行に入り、
+  // 「動画が見つかりませんでした。もう一度取り込んでください」等が届くようになった。丸めると
+  // **何度やっても成功しない案内**になる。Tauri は**文字列で** reject するので、そこで見分ける。
+  it('Rust が整えた案内はそのまま出す（丸めない）', async () => {
+    vi.mocked(ffmpegMod.exportVideo).mockRejectedValue('動画が見つかりませんでした。もう一度取り込んでください');
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(useTimelineStore.getState().exportRun.message).toBe('動画が見つかりませんでした。もう一度取り込んでください');
   });
 
   it('失敗したら「次にどうするか」を知らせる（生のエラーを見せない）', async () => {

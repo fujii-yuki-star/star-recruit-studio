@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
 import { isKeyboardActivation, isPointerDragging, usePointerDrag } from "../hooks/usePointerDrag";
@@ -15,7 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_PENDING, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
@@ -34,6 +34,9 @@ import type { CropMode, TimelineClipKind } from "../../domain/enums";
 import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
+import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
+import { compositeSpansOthers, cropPivotDiffers, videoAssetIds, videoClipsOf, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
+import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
@@ -52,6 +55,7 @@ import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCred
 import { fontFamilyForId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { layoutToSvg } from "../../renderer/sceneSvg";
+import type { LayoutItem } from "../../renderer/layout";
 import { PageHead } from "../components/ui";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { ContextMenu } from "../components/ContextMenu";
@@ -336,7 +340,7 @@ function keyframeSummary(k: Keyframe): string {
  */
 export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps) {
   const {
-    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
+    doc, loadError, isLoading, playheadSec, selectedClipIds, assetSrcById, videoSrcById, audioSrcByKey, assetSizes, setAssetSize, editBlocked, history, exportRun,
     setPlayhead, selectClip, selectClips, clearSelection, moveSelectedClip, trimSelectedClip, moveClipById, moveClipsBy, trimClipById, setEditBlocked, setSelectedClipBox, setClipBoxFor, setClipTextFor, setClipBoxesFor, splitSelectedClip, duplicateSelectedClip, removeSelectedClips, removeClipsByIds,
     addTrack, duplicateTrack, removeTrack, moveTrackOrder, moveTrackTo, setTrackFlag, undo, redo, saveTimelineProject, saveStatus,
     isPlaying, play, pause, exportTimelineVideo, cancelTimelineExport, dismissTimelineExport,
@@ -884,8 +888,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     !BGM_CATALOG.some((b) => `bgm:${b.id}` === audioSourceValue) &&
     !audioAssets.some((a) => `asset:${a.assetId}` === audioSourceValue);
   // 置ける絵の素材（#684）。判定は**自由配置の差し込み口と同じ関数**（ADR-0030 追補＝一本化）。
-  // **動画は出さない**＝置けても書き出しの手前で断られる（選べるのに使えない選択肢を並べない・`06 §12.1`）。
-  const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType) && a.assetType !== ASSET_TYPE.video) ?? [];
+  // ⚠️ **動画も出す**（#512 段1・利用者判断 2026-08-19）＝以前は「置けても書き出しの手前で断られる」ので
+  // 外していたが、**直接置いた動画は映るようになった**ので理由が消えた。元の音はまだ流れないが、
+  // それは選んだときに知らせる（黙って無音にしない・`15 §6`）。
+  const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType)) ?? [];
   // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
   // 音・読み上げを置ける列（#724）。**映像側と同じ規則・同じ向き**（`placeableAudioTracks`）＝
   // 以前はここだけ絞り込みを手書きし、しかも並びを**戻していなかった**ので、映像は手前・音は奥、と
@@ -1327,6 +1333,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     });
   };
   const [drag, setDrag] = useState<DragPlace | null>(null);
+  /** この画面で読めなかった動画の素材（#512 段1・実映像をやめて代表フレームへ戻す相手）。 */
+  const [unplayableVideoIds, setUnplayableVideoIds] = useState<ReadonlySet<string>>(new Set());
 
   if (isLoading) {
     return (
@@ -2024,6 +2032,69 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         responsive: true,
       })
     : "";
+  // 動画の素材の id（選んだ部品の知らせに使う＝描画のたびに作り直さない）。
+  const videoAssetIdSet = videoAssetIds(doc);
+  // **動画の実映像**（#512 段1）＝書き出しで実フレームが出るので、プレビューにも同じ絵を出す
+  // （出さないと「見えていたものと違う動画が出る」＝ADR-0001 が破れる）。分割は書き出しと**同じ関数**
+  // （`splitVideoSceneSvgMulti`）＝穴を開けて `video` 要素で埋める。⚠️ **段1 は消音**（音は段2）。
+  const videoPlay = shownLayout
+    ? videoClipsOf(doc)
+        .map((clip) => {
+          const item = shownLayout.items.find(
+            (it) => it.kind === "image" && it.role === "slot" && isItemOfClip(it.id, clip.id),
+          ) as (LayoutItem & { kind: "image" }) | undefined;
+          // ⚠️ **動画の本体**の URL（`assetSrcById` は代表フレーム＝静止画）。無ければ**穴を開けない**
+          // ＝何も映らない窓を作るより、いままでどおり代表フレームで見せる（#512 段1 レビュー 🔴）。
+          // ⚠️ **この画面で読めなかった素材は実映像にしない**（レビュー 🟡）＝取り込みは変換しないので
+          // 画面が再生できない形式が入りうる。穴だけ開いた窓を残さず、代表フレームへ戻す。
+          const src = clip.assetId && !unplayableVideoIds.has(clip.assetId) ? videoSrcById[clip.assetId] : undefined;
+          if (!item || !src) return null;
+          // ⚠️ **書き出しと同じ関数で、同じ格子**（`frameTimeSec`）から出す＝置いた位置が格子に
+          // 乗っていなくても、プレビューと書き出しが同じコマになる。
+          const sourceSec = videoSourceSecAt(clip, frameTimeSec(doc, playheadSec), effectiveFps(doc));
+          if (sourceSec == null) return null;
+          const speed = videoStagePlan(clip).speed;
+          // ⚠️ **合成の単位がこの部品だけに閉じていないなら、実映像にしない**（レビュー 🔴・`11 §7.6.4`
+          // ＝「帯分割は合成の単位を跨いで切る…跨ぐときは分割を拒否して理由を返すこと」）。
+          // まとまり全体のフェードは複数の部品へ同じ単位で掛かるので、層ごとに掛けると
+          // **重なった所で下が透ける**＝書き出し（1枚にしてから掛ける）と別の絵になる。
+          // ⚠️ **出せない理由を持ち帰る**（レビュー 🔴）＝「実映像になっていない」全部を同じ文言で説明すると、
+          // 区間の外・本体が無い・編集中でも「まとまりを薄くしている間は…」と**嘘の理由**が出る。
+          const held = compositeSpansOthers(shownLayout.items, item.id)
+            ? "groupFade"
+            : cropPivotDiffers(item, item.clipRect, item.rotation)
+              ? "rotatedCrop"
+              : null;
+          if (held) return { clip, held } as const;
+          return {
+            clip, held: null, itemId: item.id, src, sourceSec, speed,
+            fit: item.fit, align: item.align,
+            // 合成の不透明度・切り抜きは**書き出しが `<g>` で掛けているもの**＝実映像にも同じだけ効かせる。
+            // ⚠️ 書き出しは**入れ子で掛かる**（合成の単位の α × 要素の α）＝置き換えない（レビュー 🟡）。
+            opacity: (item.composite?.opacity ?? 1) * (item.opacity ?? 1),
+            clipRect: item.clipRect,
+          };
+        })
+        .filter((v): v is NonNullable<typeof v> => v != null)
+    : [];
+  /** 実際に実映像として出すもの（出せない理由が付いたものは静止のまま）。 */
+  const videoShown = videoPlay.filter((v): v is Extract<typeof v, { held: null }> => v.held == null);
+  const videoSplit =
+    shownLayout && videoShown.length > 0
+      ? splitVideoSceneSvgMulti(
+          shownLayout,
+          videoShown.map((v) => v.itemId),
+          (id) => (id ? assetSrcById[id] ?? templateAssetSrcById[id] : undefined),
+          undefined,
+          fontFamilyForId(doc.videoSettings.fontId),
+          creditForLine(
+            { speaker: creditSpeakerAt(doc, frameTimeSec(doc, playheadSec)) },
+            creditForSpeaker(getVoicevoxSpeaker()),
+          ),
+          true,
+        )
+      : null;
+
   // 時間 → 画面上の長さ。短い動画でも列が潰れないよう下限を置く（横スクロールは既存 CSS が持つ）。
   // ⚠️ まだ全体表示を決めていない間も**段の上の値**を使う（段に無い値を混ぜると、そこから
   // 段を動かしたときに飛ぶ）。幅が測れない環境（テスト）でもここに落ち着く。
@@ -2044,9 +2115,50 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           <div
             ref={stageRef}
             className={`preview-stage${drag?.drop?.center ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
-            style={{ aspectRatio: `${canvasDims.width} / ${canvasDims.height}` }}
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
+            style={{ aspectRatio: `${canvasDims.width} / ${canvasDims.height}`, position: "relative" }}
+            {...(videoSplit ? {} : { dangerouslySetInnerHTML: { __html: svg } })}
+          >
+            {/* 動画があるときは**下の静止層 →（実映像 → 間の静止層）* → 上の静止層**の順に重ねる
+                （#512 段1・書き出しと同じ分割）。無いときは1枚の SVG のまま＝出力の差分を作らない。 */}
+            {videoSplit && (
+              <>
+                <div style={{ position: "absolute", inset: 0 }} dangerouslySetInnerHTML={{ __html: videoSplit.belowSvg }} />
+                {videoSplit.slots.map((slot, k) => {
+                  const v = videoShown.find((x) => x.itemId === slot.layerId);
+                  return (
+                    <Fragment key={slot.layerId}>
+                      {v && (
+                        <TimelineSlotVideo
+                          src={v.src}
+                          rect={slot.rect}
+                          rotation={slot.rotation}
+                          opacity={v.opacity}
+                          fit={v.fit}
+                          align={v.align}
+                          clipRect={v.clipRect}
+                          canvas={canvasDims}
+                          sourceSec={v.sourceSec}
+                          speed={v.speed}
+                          playing={isPlaying}
+                          onUnplayable={() =>
+                            setUnplayableVideoIds((prev) =>
+                              v.clip.assetId != null && !prev.has(v.clip.assetId)
+                                ? new Set([...prev, v.clip.assetId])
+                                : prev,
+                            )
+                          }
+                        />
+                      )}
+                      {k < videoSplit.midSvgs.length && (
+                        <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }} dangerouslySetInnerHTML={{ __html: videoSplit.midSvgs[k] }} />
+                      )}
+                    </Fragment>
+                  );
+                })}
+                <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }} dangerouslySetInnerHTML={{ __html: videoSplit.aboveSvg }} />
+              </>
+            )}
+          </div>
           {/* **キャンバスで掴んで動かす**（#685 後半・ADR-0034 決定6）＝場面編集の自由配置と**同じ部品**
               （`FreeLayoutOverlay`）を流用する＝2つの画面で操作感を割らない。ハンドルは**選んだら常に**（決定7）。
               ⚠️ **再生中・書き出し中は出さない**＝動いている絵と設計位置のハンドルがずれて見える／
@@ -2443,6 +2555,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             <p className="text-muted">
               {clipLabel(selected)}（{selected.startSec.toFixed(1)}秒から{selected.durationSec.toFixed(1)}秒間）
             </p>
+            {/* ⚠️ **知らせは節の外に出す**（レビュー 🟡・#705 と同じ理由）＝節を畳んだ記憶は既定より
+                優先されるので、中に置くと**一度畳んだ人には二度と見えない**。
+                ・元の音はまだ流れない（段1）＝黙って無音にしない（§2-5）
+                ・実映像にできないとき（まとまりのフェード中・回した切り抜き）＝黙って静止画に見せない */}
+            {selected.assetId != null && videoAssetIdSet.has(selected.assetId) && (
+              <>
+                <p className="field-hint">{TIMELINE_VIDEO_AUDIO_PENDING}</p>
+                {videoPlay.find((v) => v.clip.id === selected.id)?.held === "groupFade" && (
+                  <p className="field-hint">{TIMELINE_VIDEO_STILL_IN_GROUP_FADE}</p>
+                )}
+                {videoPlay.find((v) => v.clip.id === selected.id)?.held === "rotatedCrop" && (
+                  <p className="field-hint">{TIMELINE_VIDEO_STILL_ROTATED_CROP}</p>
+                )}
+              </>
+            )}
             <div className="row gap-sm">
               <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec - NUDGE_SEC })} {...editGuard()}>
                 前へ

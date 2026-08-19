@@ -9,12 +9,13 @@
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
-import { ASSET_TYPE, TIMELINE_CLIP_KIND, isFreeSlotAssetType } from '../enums';
+import { TIMELINE_CLIP_KIND, isFreeSlotAssetType } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
 import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
+import { isDrawnClip, videoAssetIdOfClip, videoAssetIds, videoClipsOf } from './video';
 import type { TimelineClip, TimelineProject } from './types';
 
 /** 書き出す絵の計画（全フレーム描画）。 */
@@ -161,7 +162,7 @@ const DEFAULT_AUDIO_FILE_EXT = 'mp3';
 export const TIMELINE_EXPORT_BLOCK = {
   /** 動画に出るものが1つも無い（尺 0）。 */
   empty: 'TIMELINE_EXPORT_EMPTY',
-  /** 動画の素材を置いている＝いまは静止画になり音も鳴らないので、書き出さずに断る。 */
+  /** 見た目パターンの差し込み口・立ち絵に入れた動画＝いまも静止画になるので、書き出さずに断る（直接置きは #512 段1 で映る）。 */
   videoAsset: 'TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED',
   /** 見た目パターンが見つからない部品がある＝そこが丸ごと絵から消えるので、書き出さずに断る。 */
   templateUnresolved: 'TIMELINE_EXPORT_TEMPLATE_UNRESOLVED',
@@ -196,9 +197,9 @@ export interface TimelineExportBlocker {
 /**
  * 書き出す前に止める理由を返す（空なら書き出せる）。**§2-5**＝画面はここから「次の行動」を出す。
  *
- * **動画の素材は、まだ動かせず音も鳴らせない**（`layoutTimelineAt` は1枚の絵として描き、
+ * **見た目パターンの差し込み口・立ち絵に入れた動画は、まだ動かせない（直接置きは #512 段1 で映る）**（`layoutTimelineAt` は1枚の絵として描き、
  * `timelineAudioRuns` は元音声を返さない）。黙って静止画＋無音の動画を成功として出さないため、
- * 置いてあるだけで書き出しを止める（ADR-0026④・場面形式の `videoSlotUnplaceable` と同じ流儀）。
+ * まだ映らない使い方（差し込み口・立ち絵）のときだけ書き出しを止める（ADR-0026④・場面形式の `videoSlotUnplaceable` と同じ流儀）。
  */
 export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExportCheckOptions = {}): TimelineExportBlocker[] {
   const blockers: TimelineExportBlocker[] = [];
@@ -235,9 +236,20 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });
   }
-  const videoAssetIds = new Set(doc.assets.filter((a) => a.assetType === ASSET_TYPE.video).map((a) => a.assetId));
-  if (videoAssetIds.size > 0) {
-    const clipIds = doc.clips.filter((clip) => clipUsesAsset(clip, videoAssetIds)).map((clip) => clip.id);
+  // ⚠️ **直接置いた動画は映るようになった**（#512 段1）＝断るのは**まだ映らない使い方**だけ。
+  // 差し込み口（`assetRefs`）・立ち絵に入れた動画は段3 まで静止のままなので、従来どおり手前で断る
+  // （置いたのに静止画で出る、を成功として出さない＝ADR-0026④）。
+  // ⚠️ **元の音はまだ流れない**（段2）＝これは断りではなく画面がその場で知らせる（`15 §6`）。
+  const videoIds = videoAssetIds(doc);
+  if (videoIds.size > 0) {
+    // ⚠️ **描かれないものは数えない**（レビュー ❓・焼き出し／静止画の要求と揃える）＝隠した部品は
+    // 静止画で出ることも無いので、断る理由が無い（隠したのに書き出せない、を作らない）。
+    const clipIds = doc.clips
+      .filter(
+        (clip) =>
+          clipUsesAsset(clip, videoIds) && videoAssetIdOfClip(clip, videoIds) == null && isDrawnClip(doc, clip),
+      )
+      .map((clip) => clip.id);
     if (clipIds.length > 0) blockers.push({ code: TIMELINE_EXPORT_BLOCK.videoAsset, clipIds });
   }
   return blockers;
@@ -255,8 +267,22 @@ export function timelineImageAssetIds(doc: TimelineProject): string[] {
   // 絵として置ける種別かは `isFreeSlotAssetType` に1つ（ADR-0030 追補で一本化）＝音の種別を数え直さない。
   const audioIds = new Set(doc.assets.filter((a) => !isFreeSlotAssetType(a.assetType)).map((a) => a.assetId));
   for (const c of doc.clips) for (const id of clipImageAssetIds(c)) ids.add(id);
-  // 音の部品が指す素材は絵にしない（`kind='audio'` の `assetId` はここへ来ない）。
-  return [...ids].filter((id) => !audioIds.has(id));
+  // ⚠️ **直接置いた動画は静止画を要らない**（#512 段1・レビュー 🟡）＝実フレームを焼いて描くので、
+  // 代表フレームが読めなくても書き出せる。ここへ入れると「実フレームで描けるのに
+  // **素材が読めませんで永久に書き出せない**」組み合わせができる（代表フレームの生成は失敗しうる）。
+  // ⚠️ ほかの使い方（差し込み口・立ち絵）で同じ素材を使っていれば、そちらは静止画で描くので残す。
+  // ⚠️ **動画の素材を要求するのは「静止画として描く部品」があるときだけ**（レビュー 🔴）。
+  // 実フレームで描く部品（直接置き）と、**そもそも描かれない部品**（隠した部品・列・まとまり）は
+  // 代表フレームを要らない＝要求すると、代表フレームが作れなかった動画で**書き出し全体が止まる**
+  // （描かれもしないものを理由に断る）。⚠️ 動画以外の素材はこの引き算の対象にしない。
+  const videoIds = videoAssetIds(doc);
+  const drawnAsVideoClipIds = new Set(videoClipsOf(doc).map((c) => c.id));
+  const stillOnly = new Set<string>();
+  for (const c of doc.clips) {
+    if (drawnAsVideoClipIds.has(c.id) || !isDrawnClip(doc, c)) continue;
+    for (const id of clipImageAssetIds(c)) stillOnly.add(id);
+  }
+  return [...ids].filter((id) => !audioIds.has(id) && (!videoIds.has(id) || stillOnly.has(id)));
 }
 
 /**

@@ -2060,9 +2060,17 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     withAsset();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByText("曲")).not.toBeInTheDocument(); // 音は絵の一覧に出さない
-    expect(screen.queryByText("紹介ムービー")).not.toBeInTheDocument(); // 動画も出さない（使えない選択肢を並べない）
     fireEvent.click(screen.getByText("会社の外観"));
     expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ kind: "slot", assetId: "asset_001" });
+  });
+
+  // ⚠️ **動画も置ける**（#512 段1・利用者判断 2026-08-19）＝以前は「置けても書き出しの手前で断られる」
+  // ので一覧から外していたが、直接置いた動画は映るようになった＝外す理由が消えた。
+  it("動画も置ける（映るようになったので一覧に出す）", () => {
+    withAsset();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("紹介ムービー"));
+    expect(useTimelineStore.getState().doc!.clips[0]).toMatchObject({ kind: "slot", assetId: "asset_003" });
   });
 
   it("置ける列が無いときは、何をすれば置けるか出す", () => {
@@ -2141,6 +2149,110 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
     // 箱の**中心**が落とした場所（1920x1080 の 1/4 の位置）。箱は画面いっぱいなので端で収められる。
     expect(c.kind).toBe(TIMELINE_CLIP_KIND.slot);
     expect(c.assetId).toBe("asset_001");
+  });
+
+  // #512 段1＝**直接置いた動画は絵が映る**（書き出しと同じ分割で `video` 要素を挟む）。
+  // ⚠️ 元の音はまだ流れないので、選んだときにその場で知らせる（黙って無音にしない・§2-5）。
+  describe("動画の素材（#512 段1）", () => {
+    const withVideo = () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        assets: [{ assetId: "asset_v", assetType: "video", displayName: "紹介ムービー", filePath: "v.mp4" }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001",
+          startSec: 0, durationSec: 5, x: 0, y: 0, w: 1920, h: 1080, assetId: "asset_v",
+        }],
+      });
+      // ⚠️ **動画は本体の URL（`videoSrcById`）を見る**（`assetSrcById` は代表フレーム＝静止画）。
+      // ここを取り違えると「穴だけ開いて何も映らない」＝レビューで見つかった 🔴 そのもの。
+      act(() => {
+        useTimelineStore.setState({
+          assetSrcById: { asset_v: "blob:thumb_v" },
+          videoSrcById: { asset_v: "blob:body_v" },
+        });
+      });
+    };
+
+    it("仕上がり確認に実映像（video 要素）が出る＝**本体**を指す（代表フレームではない）", () => {
+      withVideo();
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const v = container.querySelector(".preview-stage video") as HTMLVideoElement | null;
+      expect(v).not.toBeNull();
+      expect(v?.getAttribute("src")).toBe("blob:body_v"); // 静止画を指していたら穴が空くだけ
+      expect(v?.muted).toBe(true); // 段1 は消音（元の音は段2）
+    });
+
+    // ⚠️ **本体の URL が無ければ穴を開けない**（何も映らない窓を作るより、代表フレームのまま見せる）。
+    it("本体の URL が無いときは実映像にしない（静止のまま）", () => {
+      withVideo();
+      act(() => { useTimelineStore.setState({ videoSrcById: {} }); });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      expect(container.querySelector(".preview-stage video")).toBeNull();
+    });
+
+    it("選ぶと「元の音はまだ出せない」を知らせる（黙って無音にしない）", () => {
+      withVideo();
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
+      expect(screen.getByText(/元の音はまだ出せません/)).toBeInTheDocument();
+    });
+
+    // ⚠️ **合成の単位が跨るときは実映像を出さない**（`11 §7.6.4`）＝層ごとに薄さを掛けると
+    // 重なった所で下が透け、書き出し（1枚にしてから掛ける）と別の絵になる。理由もその場に出す。
+    it("まとまり全体を薄くしている間は実映像にせず、理由を出す", () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        assets: [{ assetId: "asset_v", assetType: "video", displayName: "紹介ムービー", filePath: "v.mp4" }],
+        clips: [
+          { id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 960, h: 540, assetId: "asset_v" },
+          { id: "clip_002", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 0, durationSec: 5, x: 960, y: 0, w: 960, h: 540 },
+        ],
+        groups: [{ id: "group_001", members: ["clip_001", "clip_002"], transform: { x: 0, y: 0, scale: 1, rotation: 0 } }],
+        // まとまり全体を薄くする動き（焼き出した自由配置の場面が持つ形）。
+        animations: [{ id: "anim_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0.2 }, { timeSec: 5, opacity: 1 }] }],
+      });
+      act(() => { useTimelineStore.setState({ assetSrcById: { asset_v: "blob:thumb_v" }, videoSrcById: { asset_v: "blob:body_v" }, selectedClipIds: ["clip_001"] }); });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      expect(container.querySelector(".preview-stage video")).toBeNull(); // 実映像にしない
+      expect(screen.getByText(/まとまり全体を薄くしている間/)).toBeInTheDocument(); // 理由を出す
+    });
+
+    // ⚠️ **回した部品を左右非対称に切り抜いているときも実映像を出さない**（`11 §7.6.4.1`）＝
+    // 書き出しは矩形自身の中心、画面は部品の中心で回るので**別の窓**になる。理由もその場に出す。
+    it("回した部品を切り抜いている間は実映像にせず、理由を出す", () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        assets: [{ assetId: "asset_v", assetType: "video", displayName: "紹介ムービー", filePath: "v.mp4" }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001",
+          startSec: 0, durationSec: 5, x: 0, y: 0, w: 960, h: 540, assetId: "asset_v",
+          rotation: 30, crop: { left: 0.5 }, // 左半分を落とす＝切り抜きの中心が箱の中心とずれる
+        }],
+      });
+      act(() => { useTimelineStore.setState({ assetSrcById: { asset_v: "blob:thumb_v" }, videoSrcById: { asset_v: "blob:body_v" }, selectedClipIds: ["clip_001"] }); });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      expect(container.querySelector(".preview-stage video")).toBeNull();
+      expect(screen.getByText(/回した部品を切り抜いている間/)).toBeInTheDocument();
+    });
+
+    // ⚠️ 写真では出さない（動画のときだけ＝いつも出ていると読まれなくなる）。
+    it("写真の部品では知らせない", () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        assets: [{ assetId: "asset_p", assetType: "image", displayName: "写真", filePath: "p.png" }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001",
+          startSec: 0, durationSec: 5, x: 0, y: 0, w: 1920, h: 1080, assetId: "asset_p",
+        }],
+      });
+      // ⚠️ **写真にも src を与える**＝与えないと「src が無いから出ない」で通ってしまい、
+      // 種類の判定（動画かどうか）が壊れても落ちない（レビュー指摘）。
+      act(() => { useTimelineStore.setState({ assetSrcById: { asset_p: "blob:p" }, videoSrcById: { asset_p: "blob:p" } }); });
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
+      expect(screen.queryByText(/元の音はまだ出せません/)).toBeNull();
+      expect(document.querySelector(".preview-stage video")).toBeNull();
+    });
   });
 
   // #714 項目2＝**見た目パターン・音・読み上げも掴んで運べる**（以前はボタンだけで、同じ画面の中で
