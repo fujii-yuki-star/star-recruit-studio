@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { useDragReorder } from "../hooks/useDragReorder";
@@ -43,7 +43,10 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   // 行の「セリフ/素材/見た目」から場面編集を開くとき、その場面を指定してから遷移（#400）。
   const editScene = (sceneId: string) => { setEditingSceneId(sceneId); onNavigate("scene-edit"); };
   // 場面のドラッグ&ドロップ並び替え（#398）。持ち手（順番セルのグリップ）を掴んで任意の行へ落とす。↑/↓ も併存（下記・キーボード用）。
-  const dnd = useDragReorder(moveSceneToIndex);
+  // 端まで運んだら送る（#714 項目5）＝画面の外にある行へも1回のドラッグで運べる。
+  // ⚠️ 送る枠は**この画面のスクロールする器**（`.main-scroll`）＝頁ぜんぶが動く。
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const dnd = useDragReorder(moveSceneToIndex, { scroller: () => scrollRef.current });
   const aspectRatio = meta.videoSettings.aspectRatio;
   // 行ごと削除の二段確認（誤操作防止）。確認中の行 id。
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -108,7 +111,7 @@ export function DraftScreen({ onNavigate }: DraftProps) {
   }
 
   return (
-    <div className="main-scroll">
+    <div className="main-scroll" ref={scrollRef}>
       <ExportLockBanner onNavigate={onNavigate} />
       <div className="content-with-yuko" inert={isExporting}>
         <div>
