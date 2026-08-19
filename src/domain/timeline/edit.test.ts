@@ -4,13 +4,14 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND, NARRATION_STATUS } from
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import {
-  addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, duplicateClip, EDIT_BLOCKED, isFreeSpan,
+  addAudioClip, addVoiceClip, addTrack, clipCountOnTrack, clipPlacementIssue, duplicateClip, EDIT_BLOCKED, isFreeSpan, placedDurationSec, VISUAL_CLIP_DURATION_SEC,
   addTemplateClip, addVisualClip, duplicateTrack, moveClips, moveTrackTo, setClipBox, setClipBoxes, firstFreeStart, setVisualClipContent, moveClip, visualPlacementIssue, moveTrackOrder, removeClips, removeSelectedClipsChecked, moveClipIssue, trimClipIssue, removeTrack, placeableAudioTracks, placeableVisualTracks, setClipAssetRef, setClipAudioSource, setClipFade, setClipSourceStart, setClipSpeed, setClipText, setClipVolume, setTrackFlag, trackPlacementIssue, trimClip,
 } from './edit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { validateTimelineDoc } from './validateTimelineDoc';
 import { subtitleTextOf } from './subtitleLink';
-import { TIMELINE_MIN_CLIP_SEC, MIN_BOX_SIZE_PX } from '../constants';
+import { AUDIO_PLACEHOLDER_SEC, TIMELINE_MIN_CLIP_SEC, MIN_BOX_SIZE_PX, VOICE_PLACEHOLDER_SEC } from '../constants';
+import { BGM_CATALOG } from '../bgm/bgmCatalog';
 import { DEFAULT_SHAPE_COLOR } from '../project/freeLayoutOps';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
@@ -700,6 +701,64 @@ describe('duplicateClip', () => {
   it('直後が空いていなければ置けない（勝手に別の場所へ置かない）', () => {
     const d = doc({ clips: [clip('clip_001', { startSec: 0, durationSec: 5 }), clip('clip_002', { startSec: 5, durationSec: 5 })] });
     expectBlocked(duplicateClip(d, 'clip_001'), EDIT_BLOCKED.overlap);
+  });
+});
+
+// #714＝**置き方（ボタン／掴んで運ぶ）で流儀を割らない**ために、置ける条件と置いたときの長さを
+// 1か所へ寄せた。運んでいる最中の枠・色と、実際に置く関数が同じものを見る。
+describe('clipPlacementIssue / placedDurationSec（置く前の姿・#714）', () => {
+  const tmpl = { templateId: 'tmpl_001', defaults: {}, aspectRatio: '16:9' } as Parameters<typeof addTemplateClip>[1]['template'];
+  const base = () => doc({ assets: [{ assetId: 'asset_001', assetType: 'bgm', displayName: '曲', filePath: 'a.mp3' }] });
+
+  it('置いたときの長さは種類ごとに違う（枠の幅と重なりの判定が同じ値を見る）', () => {
+    expect(placedDurationSec({ kind: TIMELINE_CLIP_KIND.text })).toBe(VISUAL_CLIP_DURATION_SEC);
+    expect(placedDurationSec({ kind: TIMELINE_CLIP_KIND.audio })).toBe(AUDIO_PLACEHOLDER_SEC);
+    expect(placedDurationSec({ kind: TIMELINE_CLIP_KIND.voice })).toBe(VOICE_PLACEHOLDER_SEC);
+    // 見た目パターンは場面形式と同じ既定（`defaultDurationForTemplate`）。
+    expect(placedDurationSec({ kind: TIMELINE_CLIP_KIND.template, template: tmpl })).toBeGreaterThan(0);
+  });
+
+  it('長さの違いは重なりの判定に効く（短い部品は入るが、長い部品は入らない）', () => {
+    // 0〜4秒に部品があり、その後ろ 4〜9秒が空いている（9秒から別の部品）。
+    const d = doc({
+      tracks: [{ id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: [
+        { id: 'clip_001', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 0, durationSec: 4, bundledBgmId: BGM_CATALOG[0].id } as TimelineClip,
+        { id: 'clip_002', kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002', startSec: 9, durationSec: 5, bundledBgmId: BGM_CATALOG[0].id } as TimelineClip,
+      ],
+    });
+    // 読み上げ（3秒）は入るが、音（10秒）は入らない＝長さを1か所から採っている証拠。
+    expect(clipPlacementIssue(d, { kind: TIMELINE_CLIP_KIND.voice }, 'track_002', 4)).toBeNull();
+    expect(clipPlacementIssue(d, { kind: TIMELINE_CLIP_KIND.audio, bundledBgmId: BGM_CATALOG[0].id }, 'track_002', 4))
+      .toBe(EDIT_BLOCKED.overlap);
+  });
+
+  it('列の種別が合わなければ断る（音を絵の列へ置かせない）', () => {
+    expect(clipPlacementIssue(base(), { kind: TIMELINE_CLIP_KIND.voice }, 'track_001', 0)).toBe(EDIT_BLOCKED.trackKind);
+    expect(clipPlacementIssue(base(), { kind: TIMELINE_CLIP_KIND.text }, 'track_003', 0)).toBe(EDIT_BLOCKED.trackKind);
+  });
+
+  // ⚠️ 断る順＝**部品そのもの → 列**（§2-5）。向きの違う見た目パターンはどの列へ置いても直らないので、
+  // 「別の列へ置き直してください」を先に出さない。
+  it('向きの違う見た目パターンは、置けない列を指していても「向き」で断る', () => {
+    const portrait = { ...tmpl, aspectRatio: '9:16' } as typeof tmpl;
+    const d = doc({ tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, locked: true }] });
+    expect(clipPlacementIssue(d, { kind: TIMELINE_CLIP_KIND.template, template: portrait }, 'track_001', 0))
+      .toBe(EDIT_BLOCKED.orientation);
+  });
+
+  it('音の出どころは高々1つ（両方・どちらも無しは置かない）', () => {
+    const d = base();
+    expect(clipPlacementIssue(d, { kind: TIMELINE_CLIP_KIND.audio }, 'track_003', 0)).toBe(EDIT_BLOCKED.notFound);
+    expect(clipPlacementIssue(d, { kind: TIMELINE_CLIP_KIND.audio, bundledBgmId: BGM_CATALOG[0].id, assetId: 'asset_001' }, 'track_003', 0))
+      .toBe(EDIT_BLOCKED.notFound);
+    expect(clipPlacementIssue(d, { kind: TIMELINE_CLIP_KIND.audio, assetId: 'asset_001' }, 'track_003', 0)).toBeNull();
+  });
+
+  it('文書に無い素材は置けない（差し込み口も音も）', () => {
+    const d = base();
+    expect(clipPlacementIssue(d, { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_999' }, 'track_001', 0)).toBe(EDIT_BLOCKED.notFound);
+    expect(clipPlacementIssue(d, { kind: TIMELINE_CLIP_KIND.audio, assetId: 'asset_999' }, 'track_003', 0)).toBe(EDIT_BLOCKED.notFound);
   });
 });
 
