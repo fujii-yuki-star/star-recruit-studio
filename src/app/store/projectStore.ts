@@ -48,10 +48,19 @@ import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs"
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
 import { lineAudioKey, lineDurationsFromAudio, lineVoiceStem, liveNarrationAudioKeys, sceneNeedsVoice, withLineStatus, withLineVoicePath } from "../../domain/project/narrationLines";
-import { bakeTimelineProject, bakedFilePaths } from "../../domain/timeline/bake";
+import { BakeError, bakeTimelineProject, bakedFilePaths } from "../../domain/timeline/bake";
 import type { BakeNote, BakeRange, BakeResult } from "../../domain/timeline/bake";
 import { bakeSizeBytes, copyBakedFiles } from "../../infrastructure/bakeFs";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
+import { duplicateIdsIn } from "../../domain/timeline/validateTimelineDoc";
+
+/**
+ * 焼き出しの結果が壊れていたときの案内（適合しない／id が重なる）。**空き容量の話ではない**ので、
+ * 入出力の失敗（コピー・保存）とは別の「次の行動」を出す（§2-5・ADR-0026④）。
+ */
+const BAKE_BROKEN_RESULT_MESSAGE =
+  "作れませんでした。元の動画の中身に問題があるようです。作る範囲を狭めるか、元の動画を直してからお試しください。";
+
 import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
@@ -985,7 +994,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 失敗は呼び出し側（入口 UI）が「作れませんでした…」として見せる（§2-5）。
     if (!validateTimelineProject(doc)) {
       console.warn("[timeline] 焼き出した内容がスキーマに未適合:", validateTimelineProject.errors);
-      throw new Error("baked timeline project failed schema validation");
+      throw new BakeError(BAKE_BROKEN_RESULT_MESSAGE);
+    }
+    // ⚠️ **id の重なりは適合チェックを素通りする**（配列をまたいだ id の一意は JSON Schema の語彙に無い）。
+    // 重なると読む側の引き当てが別のものに効き、**焼く前と絵が変わる**（#811・ADR-0032 決定23）。
+    // 採番の穴は `bake.ts` 側で塞いだが、**門をここにも置く**＝壊れた文書をディスクへ書かない。
+    const dup = duplicateIdsIn(doc);
+    if (dup.length > 0) {
+      console.warn("[timeline] 焼き出した内容に id の重なり:", dup);
+      throw new BakeError(BAKE_BROKEN_RESULT_MESSAGE);
     }
     // 先にファイルを運んでから文書を保存する＝途中で失敗しても「素材の無いプロジェクト」が一覧に残らない。
     await copyBakedFiles(srcProjectId, projectId, bakedFilePaths(doc));

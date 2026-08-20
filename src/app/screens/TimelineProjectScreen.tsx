@@ -912,7 +912,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const visualTrackId = placeableTracks.some((t) => t.id === placeTrackId)
     ? placeTrackId
     : (doc ? (placeableVisualTracks(doc)[0]?.id ?? "") : "");
-  // 置き場所や音の出どころの取り違え（11 §8 V22–V28）。描画から外れるものもあるので必ず見せる。
+  // 置き場所や音の出どころの取り違え（11 §8 V22–V32）。描画から外れるものもあるので必ず見せる。
   const warnings = useMemo(() => (doc ? validateTimelineDoc(doc) : []), [doc]);
   // 書き出せない理由（`timelineExportBlockers`）は**押す前に**見せる＝押しても断られるだけ、を作らない（§2-5）。
   // 別形式の書き出しが走っていないか（締めの持ち主）。store の開始チェックと同じものを見る。

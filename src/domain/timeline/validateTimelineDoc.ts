@@ -1,4 +1,4 @@
-// タイムライン形式（ADR-0032）の意味検証（11 §8 V22–V31）。純粋関数（副作用なし）。
+// タイムライン形式（ADR-0032）の意味検証（11 §8 V22–V32）。純粋関数（副作用なし）。
 // スキーマ適合（型/必須/enum/範囲＝V1,V2）は ajv 済み前提で、ここは schema で表せない
 // 相互参照・横断条件だけを見て Warning[] を返す。
 // エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。文言は §2-5「次の行動」を示す。
@@ -92,11 +92,39 @@ export function overlappingClipPairs(clips: TimelineClip[]): Array<[TimelineClip
 }
 
 /**
+ * **重なっている id**（V32・#811）。重なった2つ目以降を `<入れ物>.<id>` の形で返す（空なら重複なし）。
+ *
+ * 見るのは**入れ物ごと**（`clips`/`tracks`/`groups`/`animations` のそれぞれ）＝入れ物をまたいだ衝突
+ *（クリップ id ＝グループ id。読む側は `targetId` を両方から引く）は**接頭辞が違うので採番から起きない**。
+ *
+ * ⚠️ **保存の門と共有する**（`bakeToTimeline`）＝この検証は「知らせる」だけなので、**壊れた文書を
+ * ディスクへ書かない**のは門の側の仕事。schema では表せない（配列をまたいだ id の一意は JSON Schema
+ * の語彙に無い）ので、適合チェックだけでは素通りする。
+ */
+export function duplicateIdsIn(doc: TimelineProject): string[] {
+  const found: string[] = [];
+  for (const [ids, field] of [
+    [doc.clips.map((c) => c.id), 'clips'],
+    [doc.tracks.map((t) => t.id), 'tracks'],
+    [(doc.groups ?? []).map((g) => g.id), 'groups'],
+    [(doc.animations ?? []).map((a) => a.id), 'animations'],
+  ] as const) {
+    const seen = new Set<string>();
+    for (const id of ids) {
+      if (seen.has(id)) found.push(`${field}.${id}`);
+      seen.add(id);
+    }
+  }
+  return found;
+}
+
+/**
  * タイムライン文書を検証して警告を返す（警告＝行動は止めない）。
  * V22 trackId 実在／V23 クリップ種別とトラック種別の一致／V24 同一トラック内の時間の重なり／
  * V25 素材の実在・音の出どころの排他／V26 グループ members・アニメ targetId の実在／
  * V29 字幕の連動先の実在（ADR-0032 決定24）／V30 切り抜きで丸ごと隠れていないか（#634）。
- * V31 **同じ対象に動きは1本まで**（#717・読む側が1本しか見ない）。
+ * V31 **同じ対象に動きは1本まで**（#717・読む側が1本しか見ない）／
+ * V32 **id は文書の中で一意**（#811・読む側が id で引き当てるので、重なると別のものに効く）。
  */
 export function validateTimelineDoc(doc: TimelineProject): Warning[] {
   const warnings: Warning[] = [];
@@ -185,6 +213,18 @@ export function validateTimelineDoc(doc: TimelineProject): Warning[] {
       warnings.push(warn('TIMELINE_ANIMATION_DUPLICATE', 'ひとつの部品に動きが2つ以上あります。あとの1つは動画に出ないので、動きを付け直してください', `animations.${a.id}`));
     }
     seenTargets.add(a.targetId);
+  }
+
+  // V32: **id は文書の中で一意**（#811・`11 §2.1`）。読む側は id で引き当てるので、重なると
+  // **後勝ち／先勝ちが混ざって別のものに効く**（実測＝焼き出しでグループ id が重なり、片方の変形が
+  // もう片方のメンバーに掛かって要素が画面外へ飛んだ）。しかも動きは `targetId` で合流して1本に混ざる。
+  // ⚠️ **採番の穴は「作る側」で塞ぐのが本筋だが、ここでも見る**＝画面で知らせるため。
+  // 保存を止めるのは門の側（`bakeToTimeline` が `duplicateIdsIn` を見る）＝**この検証は保存に
+  // 効いていない**（自動保存が通すのは schema の適合だけ）。
+  // 文言は種別で変えない（`15` の表と一字一句そろえる）＝どれが重なっても利用者の次の行動は同じ。
+  // どこが重なったかは `field` が持つ。
+  for (const field of duplicateIdsIn(doc)) {
+    warnings.push(warn('TIMELINE_DUPLICATE_ID', '同じ部品が二重に入っていて、正しく表示できません。その部品を消して置き直すか、元の動画の「タイムラインで編集する形にする」から作り直してください', field));
   }
 
   return warnings;

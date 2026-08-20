@@ -107,6 +107,15 @@ export interface BakeResult {
 }
 
 /**
+ * 焼き出しに失敗したことを UI へ伝える例外（読込の `TimelineLoadError` と同じ役割）。
+ *
+ * **`message` はそのまま画面に出す「次の行動」**（§2-5）。⚠️ 分けているのは、**作れない理由が
+ * 「置き場所が足りない」だけではない**ため＝作った中身の問題（適合しない・id が重なる）を
+ * 「空き容量を確かめて」と案内すると、言われたとおりにしても直らない（ADR-0026④）。
+ */
+export class BakeError extends Error {}
+
+/**
  * 焼く対象の場面を範囲から解決する（再生順＝`project.scenes` の配列順を保つ）。純粋関数。
  * 範囲指定でも並べ替えない＝「この部分だけ」を切り出すだけで、順番は場面形式のまま。
  */
@@ -622,7 +631,8 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
     // category を問わず描かれる（`layoutScene`）ので、外すと FREE テンプレの字幕層が黙って消える。
     const lineSubtitles = bakeLineSubtitles(scene, template, allWindows);
     // この場面で、見た目パターンのクリップ以外に作ったクリップ（切り替えの付け先＝場面グループに入れる）。
-    // **id は先に採る**＝グループのメンバーを決めるのが、クリップを作るより先に来るため。
+    // 採った id を**場面グループのメンバー用に控えるだけ**（クリップ自体はその場で `clips` へ積む）。
+    // ⚠️ 採番は積んである分から次を決めるので、**採ってから積むまでを空けない**（#811）。
     const extraClipIds: string[] = [];
 
     // 見た目パターンのクリップは**どの場面にも置く**（最背面）。FREE テンプレも `background` 層などを持ち、
@@ -720,15 +730,30 @@ export function bakeTimelineProject(project: Project, options: BakeOptions): Bak
         });
       });
       // 1場面=1グループ（まとめて動かせるようにする）。既存グループは入れ子で残す（メンバー id を差し替え）。
-      const nested = (scene.groups ?? []).map((g) => ({
-        ...g,
-        id: newGroupId(),
-        members: g.members.map((m) => elementClipId.get(m) ?? m),
-      }));
+      // ⚠️ **採ったらその場で積む**（#811）＝`newGroupId()` は積んである id から次を決めるので、
+      // まとめて作ってから後で積むと**同じ番号を何度も返す**（場面がグループを2つ持つと全部同じ id）。
+      // 重なると `composeGroupGeometry` の引き当てが後勝ち／親の引き当てが先勝ちで食い違い、
+      // **片方の変形がもう片方のメンバーに掛かる**（焼く前と絵が変わる＝ADR-0032 決定23）。
+      // 動きも `oldToNewGroupId` が同じ id を指して1本に合流する。`edit.ts` の複製が同じ形で解いている。
+      // 1パス目＝id だけ採って積む（メンバーは後で張り替える）。
+      const nested: Group[] = [];
+      const oldToNewGroupId = new Map<string, string>();
+      for (const g of scene.groups ?? []) {
+        const baked: Group = { ...g, id: newGroupId(), members: g.members };
+        groups.push(baked); // ← 次の `newGroupId()` がこの id を見る
+        nested.push(baked);
+        oldToNewGroupId.set(g.id, baked.id);
+      }
+      // 2パス目＝メンバーを新しい id へ。**要素だけでなく入れ子の親が持つグループ id も張り替える**
+      //（`Group.members` は入れ子でグループ id も持てる＝ADR-0022）。張り替え漏れがあると、旧
+      // `group_NNN` が**別の場面の焼き上がり**と実在一致して V26・V32 を素通りし、場面をまたいだ
+      // 親子ができる（支点が別の場面の箱を含んで動く＝焼く前と絵が変わる・ADR-0032 決定23）。
+      // 2パスにするのは**前方参照**（先に現れる親が後ろの子を指す）も解くため。`edit.ts` の複製と同じ形。
+      for (const g of nested) {
+        g.members = g.members.map((m) => elementClipId.get(m) ?? oldToNewGroupId.get(m) ?? m);
+      }
       // 入れ子グループのメンバーは場面グループの直接メンバーにしない（二重所属を作らない）。
       const nestedMembers = new Set(nested.flatMap((g) => g.members));
-      const oldToNewGroupId = new Map((scene.groups ?? []).map((g, k) => [g.id, nested[k].id]));
-      for (const g of nested) groups.push(g);
       const sceneGroupId = newGroupId();
       groups.push({
         id: sceneGroupId,

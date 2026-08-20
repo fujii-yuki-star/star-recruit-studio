@@ -595,3 +595,60 @@ describe('焼いた掛け合い字幕の位置が場面形式と一致する', (
     expect(after.y).toBeCloseTo(before.y, 3);
   });
 });
+
+// 焼き出しの側の絵の一致（#811）＝**場面内のグループが2つ以上ある FREE の場面**を焼いても、
+// 焼く前と同じ場所に描かれる。グループ id が重なると `composeGroupGeometry` の引き当てが
+// 後勝ち／親は先勝ちで食い違い、**片方の変形がもう片方のメンバーに掛かる**（実測で要素が
+// 2倍になり画面外へ飛んだ）。id の一意性ではなく**描いた結果**で守る（ADR-0032 決定23 の流儀）。
+describe('焼き出し：場面内のグループが2つ以上でも絵が変わらない（#811）', () => {
+  const freeTemplate: Template = {
+    schemaVersion: '1.0', templateId: 'tmpl_free', name: '自由配置', category: 'free',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+    layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080, fillColor: '#ffffff' }],
+  };
+  const freeSceneWithTwoGroups: Scene = {
+    sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'free', templateId: 'tmpl_free',
+    durationSec: 5, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+    texts: {}, narration: { text: '', status: 'none' }, warnings: [],
+    freeLayout: [
+      { id: 'free_001', kind: 'text', x: 100, y: 200, w: 400, h: 90, text: 'ひだり', fontSize: 40, zIndex: 1 },
+      { id: 'free_002', kind: 'text', x: 100, y: 500, w: 400, h: 90, text: 'みぎ', fontSize: 40, zIndex: 2 },
+    ],
+    // 別々の変形＝取り違えると位置も大きさも変わる。
+    groups: [
+      { id: 'group_001', members: ['free_001'], transform: { x: 60, y: 10, rotation: 0, scale: 1 } },
+      { id: 'group_002', members: ['free_002'], transform: { x: 800, y: 0, rotation: 0, scale: 2 } },
+    ],
+  } as Scene;
+
+  /** 文言 → 描かれた位置と大きさ（どちらの描画経路でも同じ形で採る）。 */
+  const drawnText = (layout: { items: readonly { kind: string }[] }): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const it of layout.items as readonly Record<string, unknown>[]) {
+      if (it.kind !== 'text') continue;
+      out[String(it.text)] = { x: it.x, y: it.y, w: it.w, h: it.h, fontSize: it.fontSize };
+    }
+    return out;
+  };
+
+  it('焼く前後で、それぞれの文字が同じ場所・同じ大きさで描かれる', () => {
+    const before = drawnText(layoutScene(freeSceneWithTwoGroups, freeTemplate));
+    expect(Object.keys(before).sort()).toEqual(['ひだり', 'みぎ']); // 材料が効いていることの確認
+    const baked = bakeTimelineProject(
+      {
+        schemaVersion: '1.0', projectId: 'proj_20260820_001', projectName: 'x',
+        createdAt: '2026-08-20T00:00:00.000Z', updatedAt: '2026-08-20T00:00:00.000Z',
+        videoKind: 'recruit', purpose: 'company_intro',
+        videoSettings: { aspectRatio: '16:9', fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+        voiceSettings: { defaultVoiceId: 'voicevox_zundamon' },
+        assets: [], parts: [{ partId: 'part_001', title: 'p', order: 1, sceneIds: ['scene_001'] }],
+        scenes: [freeSceneWithTwoGroups],
+      },
+      {
+        range: { kind: 'whole' }, projectId: 'proj_20260820_002', projectName: 'y',
+        nowIso: '2026-08-20T00:00:00.000Z', templateOf: () => freeTemplate, lineDurationsFor: () => ({}),
+      },
+    ).doc;
+    expect(drawnText(layoutTimelineAt(baked, 0, { templateOf: () => freeTemplate }))).toEqual(before);
+  });
+});

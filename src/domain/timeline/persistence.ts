@@ -38,7 +38,7 @@ export class TimelineLoadError extends Error {}
  *
  * **場面形式のファイルをここへ渡さない**（呼び出し側が `resolveProjectFormat` で振り分ける前提だが、
  * 取り違えても「形式が違う」と言えるように見る）。スキーマ適合は ajv（`11 §8` V1/V2）に委ねる。
- * 相互参照の検証（V22–V28）は**ここでは見ない**＝`validateTimelineDoc` を画面が呼んで `Warning[]` を
+ * 相互参照の検証（V22–V32）は**ここでは見ない**＝`validateTimelineDoc` を画面が呼んで `Warning[]` を
  * 出す（読込は止めない）。焼き出し側もスキーマ未適合なら保存しないので、開けない文書は作られない。
  */
 export function parseTimelineProjectDoc(text: string): TimelineProject {

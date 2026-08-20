@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useProjectStore } from "../store/projectStore";
+import { BakeError } from "../../domain/timeline/bake";
 import { BAKE_RANGE_KIND, sceneIdsBetween } from "../../domain/timeline/bake";
 import type { BakeNote, BakeRange } from "../../domain/timeline/bake";
 import { bakeNoteText, formatDiskSize } from "../uiLabels";
@@ -67,8 +68,11 @@ export function BakeToTimelinePanel() {
       // 出し分けが要るとしたら「確認と作成の間に中身が変わりうる」設計にしたときで、そのときは
       // ここで結果の `notes` を出す（いまは同じものを2度見せない＝完了だけを伝える）。
       setDone(name.trim() || meta.projectName);
-    } catch {
-      setError("作れませんでした。空き容量を確かめて、もう一度お試しください。");
+    } catch (e) {
+      // 作れない理由を持っている例外（`BakeError`）はその文言を出す＝**中身の問題を「空き容量」と
+      // 案内しない**（言われたとおりにしても直らない・§2-5／ADR-0026④）。読込の `TimelineLoadError`
+      // と同じ流儀。ファイルのコピー・保存の失敗はここに理由が無いので、置き場所の話に倒す。
+      setError(e instanceof BakeError ? e.message : "作れませんでした。空き容量を確かめて、もう一度お試しください。");
     } finally {
       setBusy(false);
     }

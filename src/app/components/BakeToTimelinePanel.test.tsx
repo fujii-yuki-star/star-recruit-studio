@@ -2,6 +2,7 @@
 // 焼き出しの導線（ADR-0032 決定16/17・#628）。押した瞬間に作らない／範囲を変えたら確認をやり直す、を固定する。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { BakeError } from "../../domain/timeline/bake";
 import { BakeToTimelinePanel } from "./BakeToTimelinePanel";
 import { useProjectStore } from "../store/projectStore";
 import type { Scene } from "../../domain/project/types";
@@ -116,5 +117,18 @@ describe("BakeToTimelinePanel", () => {
     await waitFor(() => expect(screen.getByText("この内容で作る")).toBeInTheDocument());
     fireEvent.click(screen.getByText("この内容で作る"));
     await waitFor(() => expect(screen.getByText(/空き容量を確かめて、もう一度お試しください/)).toBeInTheDocument());
+  });
+
+  // ⚠️ **作れない理由は「置き場所が足りない」だけではない**（PR #820 レビュー・ℹ️）＝作った中身の
+  // 問題（適合しない・id が重なる）を「空き容量を確かめて」と案内すると、言われたとおりにしても
+  // 直らない（§2-5／ADR-0026④）。理由を持っている例外はその文言を出す。
+  it("中身の問題で作れなかったときは、空き容量の話にしない", async () => {
+    bakeToTimeline.mockRejectedValue(new BakeError("作れませんでした。元の動画の中身に問題があるようです。作る範囲を狭めるか、元の動画を直してからお試しください。"));
+    render(<BakeToTimelinePanel />);
+    fireEvent.click(screen.getByText("作る内容を確かめる"));
+    await waitFor(() => expect(screen.getByText("この内容で作る")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("この内容で作る"));
+    await waitFor(() => expect(screen.getByText(/元の動画の中身に問題があるようです/)).toBeInTheDocument());
+    expect(screen.queryByText(/空き容量/)).not.toBeInTheDocument();
   });
 });
