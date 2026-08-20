@@ -207,6 +207,15 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     return (draft?.layers ?? []).filter((l) => ids.includes(l.id) && !inLockedGroup(l.id)).map((l) => l.id);
   }
   /**
+   * その選択のうち**ロックのせいで消せない層**（レビュー 🟡）。
+   * ⚠️ `removableLayerIds` は「ロック中」と「もう無い」を**同じ条件で落とす**ので、件数の差だけを見て
+   * ロックの理由を出すと、取り消しで消えた id が残っているだけのときにも**事実と違う理由**が出る
+   *（消える結果は正しいのに、ロックされていないものを探させる＝§2-5）。理由はここから採る。
+   */
+  function lockedLayerIdsIn(ids: readonly string[]): string[] {
+    return (draft?.layers ?? []).filter((l) => ids.includes(l.id) && inLockedGroup(l.id)).map((l) => l.id);
+  }
+  /**
    * まとめて消せない理由（`undefined`＝**出す理由が無い**＝消せるか、そもそも入口で押せない）。
    * **グループ削除の断り方（`groupDeleteBlockedReason`）と同型**＝確認を出しておいて黙って
    * 何も起きない、を作らない（§2-5）。可否そのものは `canBulkDelete` が持つ。
@@ -733,8 +742,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>
               <span className="text-sm">
                 {removableLayerIds(confirmBulkDeleteIds).length}件をまとめて削除しますか？
-                {/* ⚠️ ロック中の分は消せない＝**件数が減った理由をその場に出す**（黙って数を減らさない）。 */}
-                {removableLayerIds(confirmBulkDeleteIds).length < confirmBulkDeleteIds.length
+                {/* ⚠️ ロック中の分は消せない＝**件数が減った理由をその場に出す**（黙って数を減らさない）。
+                    ⚠️ 出すのは**本当にロックがあるときだけ**＝もう無い層で数が減っただけのときに
+                    ロックの話をしない（探しても見つからない理由を出さない・§2-5）。 */}
+                {lockedLayerIdsIn(confirmBulkDeleteIds).length > 0
                   && "（ロック中のまとまりに入っている分は残ります）"}
               </span>
               <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDeleteIds(null)}>やめる</button>

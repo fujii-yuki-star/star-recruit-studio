@@ -221,6 +221,9 @@ describe("見た目パターン編集：キーでも動かせる・消せる（#
     selectMany(["layer_a", "layer_b", "layer_gone"]); // layer_gone はもう下書きに無い
     fireEvent.keyDown(window, { key: "Delete" });
     expect(screen.getByText(/2件をまとめて削除しますか/)).toBeInTheDocument(); // 3件ではない・断られない
+    // ⚠️ **事実と違う理由を出さない**（レビュー 🟡）＝ロックが1つも無いのに「ロック中の…」と言わない
+    //（言われた利用者は、存在しないロックを探すことになる）。
+    expect(screen.queryByText(/ロック中のまとまりに入っている分は残ります/)).toBeNull();
     fireEvent.click(screen.getByText("削除する"));
     expect(overlay().layers.map((l) => l.id)).toEqual(["layer_c"]);
   });
