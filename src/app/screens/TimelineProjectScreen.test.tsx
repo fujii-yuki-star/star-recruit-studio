@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
 import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProjectScreen } from "./TimelineProjectScreen";
+import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
@@ -3513,6 +3514,93 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
   // #771(c)：**すき間 → 入れる位置**の計算は場面カード・台本表の行と同じ1か所（`insertIndexForGap`）。
   // ⚠️ 列の並べ替えは「落ちない／固定は動かない」しか見ておらず、**実際にどこへ入るか**が
   // 無検査だった＝共有だけしても、こちら側が壊れても気づけない。
+  // ⚠️ #802-3＝**列の並べ替えにも端送りと可視域丸めを入れた**（置く・運ぶ・並べ替えと同じ部品）。
+  // 丸めが無いと、欄からはみ出した位置で**見えていない列のすき間**に線が決まり、そこで確定してしまう。
+  it("欄の外へ指がはみ出しても、見えている範囲で並べ替え先を決める", () => {
+    open({
+      tracks: [
+        { id: "track_001", kind: TRACK_KIND.visual },
+        { id: "track_002", kind: TRACK_KIND.visual },
+        { id: "track_003", kind: TRACK_KIND.visual },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const rows = ([...container.querySelectorAll(".timeline-row")] as HTMLElement[])
+      .filter((r) => (r.querySelector(".timeline-row-label")?.textContent || "").trim() !== "");
+    rows.forEach((row, i) => {
+      row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+    });
+    // 列を並べている器（欄）は 0〜100 しか見えていない＝3行目（80〜120）は下半分が隠れている。
+    const body = rows[0].closest(`.${PANEL_BODY_CLASS}`) as HTMLElement | null;
+    if (body) {
+      body.getBoundingClientRect = () => ({ left: 0, top: 0, right: 900, bottom: 70, width: 900, height: 70, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    }
+    const grip = rows[0].querySelector('[aria-label*="順番"], .grabbable') ?? rows[0];
+    fireEvent.pointerDown(grip, { pointerId: 1, button: 0, clientX: 0, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 0, clientY: 500 }); // 欄のずっと下
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 0, clientY: 500 });
+    // 見えているのは 0〜70＝3行目（80〜120）は隠れている。丸めれば「見えている最後のすき間」で決まり、
+    // 丸めなければ**画面外のすき間**（最背面）まで飛ぶ＝結果が別物になる。
+    expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(['track_001', 'track_003', 'track_002']);
+  });
+
+  // ⚠️ #802-3＝**列の並べ替えの端送りが実際に走り、離したら止まる**（配線の検査）。
+  // 速さの規則（domain）と時計まわり（フック）は別に見ているが、**この画面が繋いだか**は無検査だった
+  // ＝`track`/`stop` の呼び忘れや欄の取り違えがあっても、どのテストも赤くならない。
+  it("欄の下端まで運ぶと送りが走り、離すと止まる", () => {
+    const rafQueue: Array<(t: number) => void> = [];
+    const realRaf = globalThis.requestAnimationFrame;
+    const realCancel = globalThis.cancelAnimationFrame;
+    const realPerf = globalThis.performance;
+    let nowMs = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => { rafQueue.push(cb); return rafQueue.length; });
+    vi.stubGlobal("cancelAnimationFrame", () => { rafQueue.length = 0; });
+    vi.stubGlobal("performance", { now: () => nowMs });
+    const tick = (ms: number) => {
+      nowMs += ms;
+      const run = [...rafQueue];
+      rafQueue.length = 0;
+      run.forEach((cb) => cb(nowMs));
+    };
+    try {
+      open({
+        tracks: [
+          { id: "track_001", kind: TRACK_KIND.visual },
+          { id: "track_002", kind: TRACK_KIND.visual },
+          { id: "track_003", kind: TRACK_KIND.visual },
+        ],
+      });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const rows = ([...container.querySelectorAll(".timeline-row")] as HTMLElement[])
+        .filter((r) => (r.querySelector(".timeline-row-label")?.textContent || "").trim() !== "");
+      rows.forEach((row, i) => {
+        row.getBoundingClientRect = () => ({ left: 0, top: i * 40, right: 900, bottom: i * 40 + 40, width: 900, height: 40, x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+      });
+      const body = rows[0].closest(`.${PANEL_BODY_CLASS}`) as HTMLElement;
+      expect(body).not.toBeNull(); // 欄が見つからなければ送り先が無い＝この検査自体が空振りする
+      body.getBoundingClientRect = () => ({ left: 0, top: 0, right: 900, bottom: 200, width: 900, height: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(body, "clientHeight", { value: 200, configurable: true });
+      Object.defineProperty(body, "scrollHeight", { value: 1000, configurable: true });
+      let top = 0; // jsdom は実寸を持たない＝送り先を自前で持たせる
+      Object.defineProperty(body, "scrollTop", { get: () => top, set: (v: number) => { top = v; }, configurable: true });
+
+      const grip = rows[0].querySelector('[aria-label*="順番"], .grabbable') ?? rows[0];
+      fireEvent.pointerDown(grip, { pointerId: 1, button: 0, clientX: 100, clientY: 10 });
+      fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 100, clientY: 195 }); // 下端の帯
+      tick(100);
+      expect(body.scrollTop).toBeGreaterThan(0); // 走っている
+
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 100, clientY: 195 });
+      const stopped = body.scrollTop;
+      tick(100);
+      expect(body.scrollTop).toBe(stopped); // 離したら止まる（掴んでいないのに送り続けない）
+    } finally {
+      vi.stubGlobal("requestAnimationFrame", realRaf);
+      vi.stubGlobal("cancelAnimationFrame", realCancel);
+      vi.stubGlobal("performance", realPerf);
+    }
+  });
+
   it("掴んで並べ替えると、線を出したすき間へ入る（列は手前が上＝並びは裏返る）", () => {
     open({
       tracks: [

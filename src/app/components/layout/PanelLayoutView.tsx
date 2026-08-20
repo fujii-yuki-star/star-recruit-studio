@@ -44,6 +44,13 @@ const REGION_LABEL: Record<PanelRegion, string> = {
 const DIVIDER_PX = 6;
 /** ここまで動かしたら「つかんだ」とみなす（px）。見出しを押しただけで動かし始めない。 */
 
+/**
+ * 欄の中身を入れる箱のクラス名。**縦にスクロールするのはここ**（ADR-0033）。
+ * ⚠️ 運ぶ最中に「見えている範囲」を測る側（`TimelineProjectScreen` の列の並べ替え）も
+ * このクラスで探すので、**綴りの持ち主を1つにする**（片方だけ変えると黙って丸めが効かなくなる）。
+ */
+export const PANEL_BODY_CLASS = "panel-frame-body";
+
 export function PanelLayoutView({
   layout,
   panels,
@@ -211,7 +218,7 @@ export function PanelLayoutView({
               ⋮
             </button>
           </header>
-          <div className="panel-frame-body">{spec.content}</div>
+          <div className={PANEL_BODY_CLASS}>{spec.content}</div>
         </section>
       );
     }

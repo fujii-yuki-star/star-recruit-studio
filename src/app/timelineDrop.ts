@@ -51,6 +51,25 @@ export function pointInRect(
 
 /** 画面上の矩形（`getBoundingClientRect` と同じ意味）。 */
 export type Rect = { left: number; top: number; right: number; bottom: number };
+/** 運ぶ・送るの向き（横並びの一覧＝`"x"`／縦積みの列＝`"y"`）。 */
+export type DragAxis = "x" | "y";
+
+/**
+ * 位置を**見えている範囲へ丸める**（`view` が `null`＝丸めない）。
+ * 送る向きのはみ出しは許す設計なので、生の位置で当てると**切り取られて見えていない項目**が
+ * 落とし先になり、離すと画面外へ置かれる（#714 項目5・#802-3）。
+ *
+ * ⚠️ **測れないときは丸めない**＝幅/高さの無い矩形（実寸を持たない環境・まだ描かれていない）で丸めると、
+ * すべての位置が端へ潰れて**どこへ運んでも先頭のすき間**になる。丸めは情報がある時だけ効かせる。
+ * ⚠️ 運ぶ側（`useDragReorder`）と列の並べ替え（`TimelineProjectScreen`）は**この関数を共有**する
+ * ＝同じ規則を2か所に書かない（`06 §12.1`）。
+ */
+export function clampToVisible(view: Rect | null, pos: number, axis: DragAxis): number {
+  const lo = axis === "x" ? view?.left : view?.top;
+  const hi = axis === "x" ? view?.right : view?.bottom;
+  if (lo == null || hi == null || hi <= lo) return pos;
+  return Math.min(hi, Math.max(lo, pos));
+}
 
 /** 2つの矩形の重なり（重なりが無ければ `null`）。 */
 export function intersectRects(a: Rect, b: Rect): Rect | null {

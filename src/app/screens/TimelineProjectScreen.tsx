@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "rea
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
 import { isKeyboardActivation, isPointerDragging, usePointerDrag } from "../hooks/usePointerDrag";
-import { canvasPointAt, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
+import { canvasPointAt, clampToVisible, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
 import { EXPORT_BLOCK_SOURCE, EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
 import { useExportLockStore } from "../store/exportLock";
@@ -67,7 +67,7 @@ import { SECTION_SCOPE } from "../components/sectionOpen";
 import type { ContextMenuItem } from "../components/ContextMenu";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { PickerList } from "../components/PickerList";
-import { PanelLayoutView } from "../components/layout/PanelLayoutView";
+import { PANEL_BODY_CLASS, PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
 import { PANEL_REGION, PANEL_SCREEN, SPLIT_DIR, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
@@ -1280,6 +1280,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 掴んだまま端まで来たら送る（#714-1）＝**置く側と帯側で同じ部品**（送り方を2つ作らない）。
   // 左の送る帯は**列の名前の欄の内側**から測る（欄の下に隠れると、どこへ入るか見ながら送れない）。
   const autoScroll = useEdgeAutoScroll(LANE_LABEL_PX);
+  // 列の並べ替えは**縦**に送る（置く・運ぶは横）。速さ・行き止まりの規則は同じ部品から。
+  const trackAutoScroll = useEdgeAutoScroll(0, "y");
   const stageRef = useRef<HTMLDivElement>(null);
   const laneRefs = useRef(new Map<string, HTMLElement>());
   /** 行（列の見出しを含む1行）の実体。掴んで並べ替えるとき、落ちる先を**実寸**で決める。 */
@@ -1296,13 +1298,27 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 確定は**抜いた後の位置**として効くので、**下向きに運んだときだけ1つ余計に下がる**
    *（線を引いた所と違う絵が黙って確定する＝重ね順は絵そのもの）。
    */
+  /**
+   * 列を並べている枠（縦にスクロールする器）。端まで運んだときの送り先・可視域の基準にする。
+   * ⚠️ 列そのものの枠（`.timeline-scroll`）は**横だけ**（`overflow-y: hidden`）なので、縦は欄の器が持つ。
+   */
+  const trackScroller = (): HTMLElement | null => {
+    for (const el of rowRefs.current.values()) return el.closest<HTMLElement>(`.${PANEL_BODY_CLASS}`);
+    return null;
+  };
   const displayGapAt = (clientY: number): number => {
     const rows = [...(doc?.tracks ?? [])].reverse().map((t) => rowRefs.current.get(t.id));
+    // ⚠️ **見えている範囲へ丸めてから当てる**（#802-3）＝置く・運ぶ側（#714 項目5）と同じ規則。
+    // 丸めないと、欄からはみ出した位置で**見えていない列のすき間**に線が決まり、そこで確定してしまう。
+    const box = trackScroller();
+    const y = clampToVisible(box ? visibleRectOf(box) : null, clientY, "y");
+    // ⚠️ ここは `gapAtPosition` へ委ねない＝列の行は**隙間なく並ぶ**ので「どちらとも決めない（余白）」が
+    // 要らず、素朴な走査で足りる（並べ替えの一覧は余白があるので domain 側の規則が要る）。
     for (let i = 0; i < rows.length; i += 1) {
       const el = rows[i];
       if (!el) continue;
       const r = el.getBoundingClientRect();
-      if (clientY < r.top + r.height / 2) return i;
+      if (y < r.top + r.height / 2) return i;
     }
     return rows.length;
   };
@@ -1322,14 +1338,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     const gapOf = (id: string): number => [...tracks].reverse().findIndex((t) => t.id === id);
     beginDrag(e, {
       onStart: () => setTrackDrag({ trackId, gap: gapOf(trackId) }),
-      onMove: (ev) => setTrackDrag({ trackId, gap: displayGapAt(ev.clientY) }),
+      onMove: (ev) => {
+        const show = (e2: PointerEvent): void => setTrackDrag({ trackId, gap: displayGapAt(e2.clientY) });
+        show(ev);
+        // ⚠️ **端まで運んだら送る**（#802-3）＝置く・運ぶ・並べ替えと**同じ部品**。
+        // 送っている間は指が止まるので、毎フレーム最後の位置で見せ直す（線が追いつく）。
+        trackAutoScroll.track(trackScroller(), ev, show);
+      },
       onEnd: (ev, started) => {
+        trackAutoScroll.stop();
         setTrackDrag(null);
         if (!started) return; // 動かしていない＝ただのクリック
         // **確定は最後に見せた所**（見えていた線のすき間）。
         moveTrackTo(trackId, arrayIndexForGap(displayGapAt(ev.clientY), from, tracks.length));
       },
-      onCancel: () => setTrackDrag(null),
+      onCancel: () => { trackAutoScroll.stop(); setTrackDrag(null); },
     });
   };
   const [drag, setDrag] = useState<DragPlace | null>(null);
