@@ -89,13 +89,13 @@ describe('exportTimelineVideo', () => {
     expect(useTimelineStore.getState().exportRun.message).toContain('まだ何も置かれていない');
   });
 
-  // ⚠️ #512 段1＝**直接置いた動画は映る**ようになったので、断るのは**まだ映らない使い方**だけ
-  // （見た目パターンの差し込み口に入れた動画＝段3 まで静止のまま）。
-  it('見た目パターンの差し込み口に入れた動画は断る（静止画で出さない）', async () => {
+  // ⚠️ #512 段1＝直接置いた動画／段3＝差し込み口の動画は**映る**ようになったので、断るのは
+  // **まだ映らない使い方**だけ＝**立ち絵に入れた動画**。
+  it('立ち絵に入れた動画は断る（静止画で出さない）', async () => {
     const clip: TimelineClip = {
       id: 'clip_002', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
       startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, templateId: 'tmpl_001',
-      assetRefs: { background: 'asset_v' },
+      character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' },
     } as TimelineClip;
     await open(
       doc({
@@ -114,7 +114,7 @@ describe('exportTimelineVideo', () => {
     } as unknown as typeof deps;
     await useTimelineStore.getState().exportTimelineVideo(withTemplate);
     expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled();
-    expect(useTimelineStore.getState().exportRun.message).toContain('差し込み口や立ち絵に入れた動画');
+    expect(useTimelineStore.getState().exportRun.message).toContain('立ち絵として入れた動画');
   });
 
   // ⚠️ **位置引数の並びは型で守れない**（`speed`/`fps`/`width` はどれも number＝取り違えても通る）。

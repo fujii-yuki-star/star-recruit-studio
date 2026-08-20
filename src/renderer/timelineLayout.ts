@@ -296,6 +296,21 @@ export function isItemOfClip(itemId: string, clipId: string): boolean {
   return itemId === `${clipId}__bg` || itemId.startsWith(`${clipId}/`);
 }
 
+/**
+ * そのアイテムが、その**動画の置き場所**のものか（#512 段3）。
+ * ⚠️ 差し込み口は**部品の中の1つ**なので、部品 id だけでは足りない（同じ部品の別の枠まで
+ * 動画のコマで塗ってしまう）。層 id まで見る。直接置きは部品に1つだけなので従来どおり。
+ * ⚠️ 前置きの作り方は**この file の中で1つ**（`isItemOfClip` と同じ理由）。
+ */
+export function isItemOfPlacement(
+  itemId: string,
+  placement: { clip: { id: string }; layerId: string | null },
+): boolean {
+  return placement.layerId == null
+    ? isItemOfClip(itemId, placement.clip.id)
+    : itemId === `${placement.clip.id}/${placement.layerId}`;
+}
+
 export function layoutTimelineAt(doc: TimelineProject, timeSec: number, opts: TimelineLayoutOptions): SceneLayout {
   const canvas = dimsForOrientation(doc.videoSettings.aspectRatio);
   // グループのアニメを transform へ前合成する（場面形式の layoutScene と同じ手順）。不透明度は後段で乗算。

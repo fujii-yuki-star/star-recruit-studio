@@ -3,7 +3,9 @@ import { ORIGINAL_AUDIO_VOLUME } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
-import { canUseOriginalAudio, clipOriginalAudio, videoAudioState, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
+import type { VideoPlacement } from './video';
+import type { Template } from '../template/types';
+import { canUseOriginalAudio, clipOriginalAudio, videoAudioState, videoPlacementsOf, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
 
 const doc = (over: Partial<TimelineProject> = {}): TimelineProject =>
   ({
@@ -23,6 +25,27 @@ const doc = (over: Partial<TimelineProject> = {}): TimelineProject =>
     clips: [],
     ...over,
   }) as TimelineProject;
+
+/** 直接置いた動画の**置き場所**（#512 段3＝コマ・時刻の計算は置き場所単位）。 */
+const place = (clip: TimelineClip): VideoPlacement => ({
+  clip, use: 'direct', layerId: null, assetId: clip.assetId as string,
+  sourceStartSec: clip.sourceStartSec ?? 0,
+  durationSec: clip.durationSec,
+  speed: clip.speed != null && clip.speed > 0 ? clip.speed : 1,
+});
+
+/** 差し込み口を2つ持つ見た目パターン（片方は写真だけの枠）。背景の層も混ぜる。 */
+const template = () =>
+  ({
+    schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+    layers: [
+      { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+      { id: 'main', type: 'slot', x: 0, y: 0, w: 960, h: 1080 },
+      { id: 'photoOnly', type: 'slot', slotType: 'image', x: 960, y: 0, w: 960, h: 1080 },
+    ],
+  }) as unknown as Template;
+const templateOf = () => template();
 
 const slot = (over: Partial<TimelineClip> = {}): TimelineClip =>
   ({
@@ -78,16 +101,100 @@ describe('動画を映す部品を見分ける（#512 段1）', () => {
   });
 });
 
+// 動画の**置き場所**（#512 段3）＝直接置き＋見た目パターンの差し込み口。
+describe('videoPlacementsOf（動画の置き場所）', () => {
+  const tmplDoc = (over: Partial<TimelineClip> = {}, docOver: Partial<TimelineProject> = {}) =>
+    doc({
+      assets: [
+        { assetId: 'asset_001', assetType: 'video', displayName: '動画A', filePath: 'a.mp4' },
+        { assetId: 'asset_002', assetType: 'image', displayName: '写真', filePath: 'b.png' },
+        { assetId: 'asset_003', assetType: 'video', displayName: '動画B', filePath: 'c.mp4' },
+      ],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 0, durationSec: 10, templateId: 'tmpl_001', ...over,
+      } as TimelineClip],
+      ...docOver,
+    } as Partial<TimelineProject>);
+
+  // ⚠️ **どの枠が動画を受けるかは見た目パターンが決める**（レビュー 🔴）＝場面形式と同じ規則。
+  // 背景の層・写真だけの枠に入れた動画は**静止画で描かれる**ので、置き場所にしない
+  //（しないと、プレビューは静止画・書き出しは実映像という食い違いになる）。
+  it('差し込み口の層だけを置き場所にする（背景の層・写真だけの枠は含めない）', () => {
+    const d = tmplDoc({ assetRefs: { background: 'asset_001', main: 'asset_003', photoOnly: 'asset_001' } });
+    expect(videoPlacementsOf(d, templateOf).map((p) => [p.layerId, p.assetId])).toEqual([['main', 'asset_003']]);
+  });
+
+  it('見た目パターンが解けないときは置き場所にしない（静止画の側へ倒す）', () => {
+    expect(videoPlacementsOf(tmplDoc({ assetRefs: { main: 'asset_003' } }))).toEqual([]);
+  });
+
+  it('直接置いた動画は層を持たない置き場所になる', () => {
+    const d = doc({ clips: [slot()] });
+    expect(videoPlacementsOf(d).map((p) => [p.use, p.layerId, p.assetId])).toEqual([['direct', null, 'asset_001']]);
+  });
+
+  // ⚠️ **差し込み口の使い方は場面形式と同じ解決**（`slotClips` を素材既定に重ねる＝ADR-0028）。
+  it('差し込み口のトリム・速さは per-use → 素材既定の順で解く', () => {
+    const d = tmplDoc({ assetRefs: { main: 'asset_001' }, slotClips: { main: { startSec: 3, speed: 2 } } });
+    expect(videoPlacementsOf(d, templateOf)[0]).toMatchObject({ sourceStartSec: 3, speed: 2 });
+    const inherited = tmplDoc({ assetRefs: { main: 'asset_001' } }, {
+      assets: [{ assetId: 'asset_001', assetType: 'video', displayName: '動画A', filePath: 'a.mp4', clip: { startSec: 5, speed: 0.5 } }],
+    } as Partial<TimelineProject>);
+    expect(videoPlacementsOf(inherited, templateOf)[0]).toMatchObject({ sourceStartSec: 5, speed: 0.5 });
+  });
+
+  // ⚠️ **速さは場面形式と同じクランプ**（schema の 0.5〜2.0）を通す＝同じ値を2つの規則で読まない。
+  it('速さは保存できる範囲へ収める（場面形式と同じ）', () => {
+    const fast = tmplDoc({ assetRefs: { main: 'asset_001' }, slotClips: { main: { speed: 9 } } });
+    expect(videoPlacementsOf(fast, templateOf)[0].speed).toBe(2);
+    // ⚠️ 0 は `??` を素通りするので**下限へ寄る**（場面形式の `clampSpeed(speed ?? 既定)` と同じ結果）。
+    // 直接置き（`effectiveSpeed`）は等速へ倒すが、あちらは上限の無い別の語彙＝規則も別で正しい。
+    const zero = tmplDoc({ assetRefs: { main: 'asset_001' }, slotClips: { main: { speed: 0 } } });
+    expect(videoPlacementsOf(zero, templateOf)[0].speed).toBe(0.5);
+  });
+
+  // ⚠️ **「ここまで」も持ち込む**（レビュー 🟡）＝場面で切った終わりを黙って無視すると、
+  // 焼き出した先ではその先まで流れる（ADR-0026①）。使える長さで頭打ちにする。
+  it('差し込み口の「ここまで」で、焼く長さを頭打ちにする', () => {
+    const d = tmplDoc({ assetRefs: { main: 'asset_001' }, slotClips: { main: { startSec: 2, endSec: 5 } } });
+    expect(videoPlacementsOf(d, templateOf)[0].durationSec).toBe(3);
+    const fast = tmplDoc({ assetRefs: { main: 'asset_001' }, slotClips: { main: { startSec: 2, endSec: 5, speed: 2 } } });
+    expect(videoPlacementsOf(fast, templateOf)[0].durationSec).toBe(1.5);
+    const open = tmplDoc({ assetRefs: { main: 'asset_001' } });
+    expect(videoPlacementsOf(open, templateOf)[0].durationSec).toBe(10);
+  });
+
+  // ⚠️ **描かれないものは含めない**＝コマを焼く必要が無い（焼けないファイルで書き出し全体が落ちない）。
+  it('隠した部品・隠した列・隠したまとまりの置き場所は含めない', () => {
+    expect(videoPlacementsOf(tmplDoc({ assetRefs: { main: 'asset_001' }, hidden: true }), templateOf)).toEqual([]);
+    const hiddenTrack = tmplDoc({ assetRefs: { main: 'asset_001' } }, {
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, hidden: true }],
+    } as Partial<TimelineProject>);
+    expect(videoPlacementsOf(hiddenTrack, templateOf)).toEqual([]);
+    const hiddenGroup = tmplDoc({ assetRefs: { main: 'asset_001' } }, {
+      groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, hidden: true }],
+    } as Partial<TimelineProject>);
+    expect(videoPlacementsOf(hiddenGroup, templateOf)).toEqual([]);
+  });
+
+  // ⚠️ **立ち絵はまだ対象外**（書き出しの手前で断る側が受け持つ）。
+  it('立ち絵に入れた動画は置き場所にしない', () => {
+    const d = tmplDoc({ character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_001' } });
+    expect(videoPlacementsOf(d, templateOf)).toEqual([]);
+  });
+});
+
 describe('焼き出す区間（videoStagePlan）', () => {
   it('トリムから、置いた長さぶん、速さ込みで焼く', () => {
-    expect(videoStagePlan(slot({ sourceStartSec: 4, durationSec: 6, speed: 2 }))).toEqual({
+    expect(videoStagePlan(place(slot({ sourceStartSec: 4, durationSec: 6, speed: 2 })))).toEqual({
       sourceStartSec: 4, durationSec: 6, speed: 2,
     });
   });
 
   it('速さの未指定・0以下は等速として扱う（0 で割らない）', () => {
-    expect(videoStagePlan(slot()).speed).toBe(1);
-    expect(videoStagePlan(slot({ speed: 0 })).speed).toBe(1);
+    expect(videoStagePlan(place(slot())).speed).toBe(1);
+    expect(videoStagePlan(place(slot({ speed: 0 }))).speed).toBe(1);
   });
 
   // ⚠️ **焼ける枚数はここで決めない**（レビュー 🟡）＝実際に焼くのは Rust（`stage_clip_frames`）で、
@@ -101,25 +208,25 @@ describe('出力フレーム → 出すコマ（videoFrameIndexAt）', () => {
   it('置いた位置の端数は四捨五入で格子へ寄せる（切り捨てない）', () => {
     // 0.517 秒 × 30 = 15.51 → 16 コマ目が先頭。切り捨てだと 15 になり1コマずれる。
     const odd = slot({ startSec: 0.517, durationSec: 3 });
-    expect(videoFrameIndexAt(odd, 16, 30, 999)).toBe(0);
-    expect(videoFrameIndexAt(odd, 17, 30, 999)).toBe(1);
+    expect(videoFrameIndexAt(place(odd), 16, 30, 999)).toBe(0);
+    expect(videoFrameIndexAt(place(odd), 17, 30, 999)).toBe(1);
   });
 
   it('置いた先頭からのコマ数で出す', () => {
-    expect(videoFrameIndexAt(clip, 60, 30, 120)).toBe(0); // 2.0秒＝先頭
-    expect(videoFrameIndexAt(clip, 75, 30, 120)).toBe(15); // 2.5秒
+    expect(videoFrameIndexAt(place(clip), 60, 30, 120)).toBe(0); // 2.0秒＝先頭
+    expect(videoFrameIndexAt(place(clip), 75, 30, 120)).toBe(15); // 2.5秒
   });
 
   it('生きている区間の外では映らない（終わりの瞬間は含まない）', () => {
-    expect(videoFrameIndexAt(clip, 59, 30, 120)).toBeNull(); // 手前
-    expect(videoFrameIndexAt(clip, 180, 30, 120)).toBeNull(); // 6.0秒＝ちょうど終わり
-    expect(videoFrameIndexAt(clip, 179, 30, 120)).not.toBeNull();
+    expect(videoFrameIndexAt(place(clip), 59, 30, 120)).toBeNull(); // 手前
+    expect(videoFrameIndexAt(place(clip), 180, 30, 120)).toBeNull(); // 6.0秒＝ちょうど終わり
+    expect(videoFrameIndexAt(place(clip), 179, 30, 120)).not.toBeNull();
   });
 
   // ⚠️ **焼けた枚数で頭打ち**＝素材が置いた長さより短くても、無い番号を読みに行かない（最後のコマで止まる）。
   it('焼けた枚数を超えたら最後のコマで止まる', () => {
-    expect(videoFrameIndexAt(clip, 179, 30, 10)).toBe(9);
-    expect(videoFrameIndexAt(clip, 60, 30, 0)).toBeNull(); // 1枚も焼けていない
+    expect(videoFrameIndexAt(place(clip), 179, 30, 10)).toBe(9);
+    expect(videoFrameIndexAt(place(clip), 60, 30, 0)).toBeNull(); // 1枚も焼けていない
   });
 });
 
@@ -129,19 +236,19 @@ describe('その時刻に映す素材の秒（videoSourceSecAt）', () => {
   const clip = slot({ startSec: 2, durationSec: 4, sourceStartSec: 10 });
 
   it('トリムから始まり、置いた先頭からの経過ぶん進む', () => {
-    expect(videoSourceSecAt(clip, 2, 30)).toBeCloseTo(10, 6); // 置いた先頭＝素材の 10 秒
-    expect(videoSourceSecAt(clip, 3, 30)).toBeCloseTo(11, 6);
+    expect(videoSourceSecAt(place(clip), 2, 30)).toBeCloseTo(10, 6); // 置いた先頭＝素材の 10 秒
+    expect(videoSourceSecAt(place(clip), 3, 30)).toBeCloseTo(11, 6);
   });
 
   it('速さのぶんだけ素材を多く使う', () => {
-    expect(videoSourceSecAt(slot({ startSec: 0, durationSec: 4, sourceStartSec: 0, speed: 2 }), 1, 30))
+    expect(videoSourceSecAt(place(slot({ startSec: 0, durationSec: 4, sourceStartSec: 0, speed: 2 })), 1, 30))
       .toBeCloseTo(2, 6);
   });
 
   it('生きている区間の外では映らない（終わりの瞬間は含まない）', () => {
-    expect(videoSourceSecAt(clip, 1.9, 30)).toBeNull();
-    expect(videoSourceSecAt(clip, 6, 30)).toBeNull(); // ちょうど終わり
-    expect(videoSourceSecAt(clip, 5.9, 30)).not.toBeNull();
+    expect(videoSourceSecAt(place(clip), 1.9, 30)).toBeNull();
+    expect(videoSourceSecAt(place(clip), 6, 30)).toBeNull(); // ちょうど終わり
+    expect(videoSourceSecAt(place(clip), 5.9, 30)).not.toBeNull();
   });
 
   // ⚠️ **書き出しと同じコマ**を出すことが本質＝置いた位置が格子（1/fps）に乗っていなくても割れない。
@@ -149,8 +256,8 @@ describe('その時刻に映す素材の秒（videoSourceSecAt）', () => {
     const odd = slot({ startSec: 0.51, durationSec: 3, sourceStartSec: 0, speed: 1 });
     for (let f = 16; f < 100; f += 7) {
       const t = f / 30;
-      const idx = videoFrameIndexAt(odd, f, 30, 999); // 書き出しが読むコマ番号
-      const sec = videoSourceSecAt(odd, t, 30); // プレビューが合わせる素材の秒
+      const idx = videoFrameIndexAt(place(odd), f, 30, 999); // 書き出しが読むコマ番号
+      const sec = videoSourceSecAt(place(odd), t, 30); // プレビューが合わせる素材の秒
       if (idx == null) { expect(sec).toBeNull(); continue; }
       expect(sec).toBeCloseTo(idx / 30, 6); // 同じコマを指している
     }

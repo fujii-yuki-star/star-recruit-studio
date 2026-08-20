@@ -15,7 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_SLOT_VIDEO_AUDIO_PENDING, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
@@ -35,7 +35,8 @@ import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
-import { canUseOriginalAudio, clipOriginalAudio, compositeSpansOthers, cropPivotDiffers, videoAssetIds, videoAudioState, videoClipsOf, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
+import { assignableAssetsFor } from "../../domain/template/slotAssign";
+import { canUseOriginalAudio, clipOriginalAudio, compositeSpansOthers, cropPivotDiffers, videoAssetIds, videoAudioState, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
@@ -147,7 +148,7 @@ import type { Layer } from "../../domain/template/types";
 import { canHaveBox, resolveClipBox } from "../../domain/timeline/box";
 import { FreeLayoutOverlay } from "../components/FreeLayoutOverlay";
 import type { FreeElement } from "../../domain/project/types";
-import { freeElementFromClip, isItemOfClip, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
+import { freeElementFromClip, isItemOfClip, isItemOfPlacement, timelineCanvasClipsAt, type Box, type TimelineCanvasClip } from "../../renderer/timelineLayout";
 import { SNAP_THRESHOLD_PX, snapTime, timeSnapTargets, visibleTimeRange } from "../../domain/timeline/snap";
 import { splitClipIssue, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 
@@ -217,13 +218,9 @@ const CLIP_KIND_CLASS = {
 
 
 /**
- * その差し込み口に入れられる素材（場面編集の `assignableFor` と同じ規則）。
- * **動画は出さない**＝タイムライン形式では動かず音も鳴らないので（書き出しも断る・#631）、
- * 選べるのに使えない選択肢を並べない（§2-5）。すでに入っている動画は「なし」で外せる。
- */
-/**
- * いま入っているのに選択肢に出せない素材（＝動画）。`<select className="select">` の value に合う option が無いと**空欄**になり
- * 「なし」と見分けが付かないので、名前だけ出す（選び直しはできない＝`disabled`）。
+ * いま入っているのに選択肢に出せない素材。`<select className="select">` の value に合う option が
+ * 無いと**空欄**になり「なし」と見分けが付かないので、名前だけ出す（選び直しはできない＝`disabled`）。
+ * ⚠️ **動画は段3 で選べるようになった**（差し込み口でも映る）＝残るのは種別の合わない素材だけ。
  */
 function unselectableCurrent(assets: readonly Asset[], assetId: string | null | undefined, layer: Layer): Asset | undefined {
   if (!assetId) return undefined;
@@ -232,12 +229,8 @@ function unselectableCurrent(assets: readonly Asset[], assetId: string | null | 
 }
 
 function assignableAssets(assets: readonly Asset[], layer: Layer): Asset[] {
-  return assets.filter((a) => {
-    if (a.assetType === ASSET_TYPE.video) return false;
-    if (layer.type === "logo") return a.assetType === ASSET_TYPE.logo || a.assetType === ASSET_TYPE.image;
-    if (layer.slotType === SLOT_TYPE.video) return false;
-    return a.assetType === ASSET_TYPE.image;
-  });
+  // 規則は domain に1つ（場面編集と共有＝同じ枠を画面によって別扱いしない）。
+  return assignableAssetsFor(assets, layer);
 }
 
 /** 切り抜きの4辺（#634）。%で入れる（保存は割合＝0〜1未満）。 */
@@ -722,12 +715,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const frameStepSec = 1 / (doc ? effectiveFps(doc) : FPS);
   // 1つだけ選んでいるときが「動かせる」状態（複数選択はまとめて消すだけ＝対象が決まらない）。
   const selected = doc && selectedClipIds.length === 1 ? doc.clips.find((c) => c.id === selectedClipIds[0]) : undefined;
+  // 見た目パターンの解決は**絵を並べる側と、どの枠が動画を受けるか（#512 段3）の両方**が要る＝1つにする。
+  const templateOf = useMemo(() => {
+    const byId = new Map(templates.map((t) => [t.templateId, t]));
+    return (id: string) => byId.get(id);
+  }, [templates]);
   const layout = useMemo(() => {
     if (!doc) return null;
-    const byId = new Map(templates.map((t) => [t.templateId, t]));
     // 末尾ちょうどは1フレーム手前へ寄せる（半開区間で画面が真っ白になるのを防ぐ・`frameTimeSec`）。
-    return layoutTimelineAt(doc, frameTimeSec(doc, playheadSec), { templateOf: (id) => byId.get(id), assetSizeOf: (id) => assetSizes[id] });
-  }, [doc, playheadSec, templates, assetSizes]);
+    return layoutTimelineAt(doc, frameTimeSec(doc, playheadSec), { templateOf, assetSizeOf: (id) => assetSizes[id] });
+  }, [doc, playheadSec, templateOf, assetSizes]);
 
   /**
    * **いま測っている最中**の素材（#724）。**依存から `assetSizes` を外すため**に持つ。
@@ -2061,22 +2058,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // （出さないと「見えていたものと違う動画が出る」＝ADR-0001 が破れる）。分割は書き出しと**同じ関数**
   // （`splitVideoSceneSvgMulti`）＝穴を開けて `video` 要素で埋める。元の音は段2（`clipOriginalAudio`）。
   const videoPlay = shownLayout
-    ? videoClipsOf(doc)
-        .map((clip) => {
+    ? videoPlacementsOf(doc, templateOf)
+        .map((placement) => {
+          const clip = placement.clip;
+          // ⚠️ **置き場所そのもののアイテム**を探す（#512 段3）＝部品 id だけで探すと、
+          // 見た目パターンの**別の枠**まで動画のコマで塗ってしまう。
           const item = shownLayout.items.find(
-            (it) => it.kind === "image" && it.role === "slot" && isItemOfClip(it.id, clip.id),
+            (it) => it.kind === "image" && it.role === "slot" && isItemOfPlacement(it.id, placement),
           ) as (LayoutItem & { kind: "image" }) | undefined;
           // ⚠️ **動画の本体**の URL（`assetSrcById` は代表フレーム＝静止画）。無ければ**穴を開けない**
           // ＝何も映らない窓を作るより、いままでどおり代表フレームで見せる（#512 段1 レビュー 🔴）。
           // ⚠️ **この画面で読めなかった素材は実映像にしない**（レビュー 🟡）＝取り込みは変換しないので
           // 画面が再生できない形式が入りうる。穴だけ開いた窓を残さず、代表フレームへ戻す。
-          const src = clip.assetId && !unplayableVideoIds.has(clip.assetId) ? videoSrcById[clip.assetId] : undefined;
+          const src = !unplayableVideoIds.has(placement.assetId) ? videoSrcById[placement.assetId] : undefined;
           if (!item || !src) return null;
           // ⚠️ **書き出しと同じ関数で、同じ格子**（`frameTimeSec`）から出す＝置いた位置が格子に
           // 乗っていなくても、プレビューと書き出しが同じコマになる。
-          const sourceSec = videoSourceSecAt(clip, frameTimeSec(doc, playheadSec), effectiveFps(doc));
+          const sourceSec = videoSourceSecAt(placement, frameTimeSec(doc, playheadSec), effectiveFps(doc));
           if (sourceSec == null) return null;
-          const speed = videoStagePlan(clip).speed;
+          const speed = videoStagePlan(placement).speed;
           // ⚠️ **合成の単位がこの部品だけに閉じていないなら、実映像にしない**（レビュー 🔴・`11 §7.6.4`
           // ＝「帯分割は合成の単位を跨いで切る…跨ぐときは分割を拒否して理由を返すこと」）。
           // まとまり全体のフェードは複数の部品へ同じ単位で掛かるので、層ごとに掛けると
@@ -2089,10 +2089,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               ? "rotatedCrop"
               : null;
           return {
-            clip, held, itemId: item.id, src, sourceSec, speed,
+            clip, placement, held, itemId: item.id, src, sourceSec, speed,
             fit: item.fit, align: item.align,
             // 元の音（#512 段2）。鳴るかどうか・音量は domain の1か所が決める（書き出しと同じ値）。
-            audioVolume: doc ? (clipOriginalAudio(doc, clip)?.volume ?? undefined) : undefined,
+            // ⚠️ **差し込み口の元の音は段3b**＝いまは鳴らない（画面がその場で知らせる）。
+            audioVolume:
+              doc && placement.layerId == null ? (clipOriginalAudio(doc, clip)?.volume ?? undefined) : undefined,
             // 合成の不透明度・切り抜きは**書き出しが `<g>` で掛けているもの**＝実映像にも同じだけ効かせる。
             // ⚠️ 書き出しは**入れ子で掛かる**（合成の単位の α × 要素の α）＝置き換えない（レビュー 🟡）。
             opacity: (item.composite?.opacity ?? 1) * (item.opacity ?? 1),
@@ -2195,9 +2197,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           audioVolume={v.audioVolume}
                           onUnplayable={() =>
                             setUnplayableVideoIds((prev) =>
-                              v.clip.assetId != null && !prev.has(v.clip.assetId)
-                                ? new Set([...prev, v.clip.assetId])
-                                : prev,
+                              // ⚠️ **置き場所の素材**を覚える（レビュー 🟡）＝差し込み口では部品に
+                              // `assetId` が無く、部品側で見ると穴だけ開いた窓が残る。
+                              prev.has(v.placement.assetId) ? prev : new Set([...prev, v.placement.assetId]),
                             )
                           }
                         />
@@ -2612,6 +2614,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 優先されるので、中に置くと**一度畳んだ人には二度と見えない**。
                 ・音が入っていない動画（#512 段2）＝欄を出さずにその場で理由を出す（§2-5）
                 ・実映像にできないとき（まとまりのフェード中・回した切り抜き）＝黙って静止画に見せない */}
+            {/* 差し込み口に入れた動画（#512 段3）＝絵は映るが元の音はまだ流れない。黙って無音にしない。 */}
+            {doc && videoPlacementsOfClip(doc, selected, { templateOf }).some((p) => p.use === "slot") && (
+              <p className="field-hint">{TIMELINE_SLOT_VIDEO_AUDIO_PENDING}</p>
+            )}
             {selected.assetId != null && videoAssetIdSet.has(selected.assetId) && (
               <>
                 {/* 元の音（#512 段2）＝**鳴らせない動画にはその場で理由を出す**（§2-5）。
@@ -2622,13 +2628,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 {doc && videoAudioState(doc, selected) === "unknown" && (
                   <p className="field-hint">{TIMELINE_VIDEO_AUDIO_UNKNOWN}</p>
                 )}
-                {videoPlay.find((v) => v.clip.id === selected.id)?.held === "groupFade" && (
-                  <p className="field-hint">{TIMELINE_VIDEO_STILL_IN_GROUP_FADE}</p>
-                )}
-                {videoPlay.find((v) => v.clip.id === selected.id)?.held === "rotatedCrop" && (
-                  <p className="field-hint">{TIMELINE_VIDEO_STILL_ROTATED_CROP}</p>
-                )}
               </>
+            )}
+            {/* ⚠️ **実映像にできない理由は、置き場所を問わず出す**（レビュー 🟡）＝差し込み口の動画でも
+                起きるので、直接置いた動画のときだけ出していると**理由なしで静止**する。 */}
+            {videoPlay.some((v) => v.clip.id === selected.id && v.held === "groupFade") && (
+              <p className="field-hint">{TIMELINE_VIDEO_STILL_IN_GROUP_FADE}</p>
+            )}
+            {videoPlay.some((v) => v.clip.id === selected.id && v.held === "rotatedCrop") && (
+              <p className="field-hint">{TIMELINE_VIDEO_STILL_ROTATED_CROP}</p>
             )}
             <div className="row gap-sm">
               <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec - NUDGE_SEC })} {...editGuard()}>
@@ -3468,7 +3476,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         {assignableAssets(doc.assets, layer).map((a) => (
                           <option key={a.assetId} value={a.assetId}>{a.displayName}</option>
                         ))}
-                        {/* いま入っているが選び直せないもの（動画）は、名前だけ出す＝「なし」と見分けが付く。 */}
+                        {/* いま入っているが選び直せないもの（種別の合わない素材）は、名前だけ出す＝「なし」と見分けが付く。 */}
                         {unselectableCurrent(doc.assets, selected.assetRefs?.[layer.id], layer) && (
                           <option value={selected.assetRefs?.[layer.id] ?? ""} disabled>
                             {unselectableCurrent(doc.assets, selected.assetRefs?.[layer.id], layer)?.displayName}（この形式では使えません）
@@ -3480,7 +3488,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       {assignableAssets(doc.assets, layer).length === 0 && (
                         <span className="field-hint">
                           {layer.slotType === SLOT_TYPE.video
-                            ? "ここは動画を入れる場所ですが、この形式ではまだ動画を使えません。この部品を「削除」で外し、「見た目パターンを置く」から動画を使わないものを置き直してください。"
+                            ? "入れられる動画がありません。「写真・動画を取り込む」で動画を取り込んでください。"
                             : "入れられる写真がありません。「素材・文字・図形を置く」の欄で写真を取り込んでください。"}
                         </span>
                       )}

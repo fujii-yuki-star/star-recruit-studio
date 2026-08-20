@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
 import { FPS } from '../../domain/constants';
 import type { TimelineClip, TimelineProject } from '../../domain/timeline/types';
+import type { Template } from '../../domain/template/types';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
 
 vi.mock('./rasterize', () => ({
@@ -201,6 +202,43 @@ describe('動画の実フレーム（#512 段1）', () => {
     expect(first).toContain('timeline_frames_v_clip_a#0');
     expect(first).toContain('timeline_frames_v_clip_b#0');
     expect(first).not.toContain('base64,SRC');
+  });
+
+  // ⚠️ **1つの部品に差し込み口ぶんの動画がありうる**（#512 段3）＝置き場所ごとに別のコマ列へ焼き、
+  // **その枠のアイテムだけ**差し替える。部品 id で差し替えると、隣の枠まで同じコマで塗ってしまう。
+  it('差し込み口ごとに別のコマ列へ焼き出し、その枠だけ差し替える', async () => {
+    const template = {
+      schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+      aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+      layers: [
+        { id: 'left', type: 'slot', x: 0, y: 0, w: 960, h: 1080 },
+        { id: 'right', type: 'slot', x: 960, y: 0, w: 960, h: 1080 },
+      ],
+    } as unknown as Template;
+    const d = doc({
+      assets: [
+        { assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' },
+        { assetId: 'asset_p', assetType: 'image', displayName: '写真', filePath: 'p.png' },
+      ],
+      clips: [{
+        id: 'clip_t', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 0, durationSec: 1, templateId: 'tmpl_001',
+        assetRefs: { left: 'asset_v', right: 'asset_p' },
+      } as TimelineClip],
+    });
+    const staged: string[] = [];
+    await buildTimelineFrames(d, {
+      templateOf: () => template,
+      assetSrc: () => 'data:image/png;base64,SRC',
+      fallbackCredit: 'クレジット',
+      stageVideo: async (v) => { staged.push(`${v.assetId}->${v.dirName}`); return 30; },
+      readVideoFrame: async (dirName, frameIndex) => `data:frame:${dirName}#${frameIndex}`,
+    });
+    // 動画の枠だけ焼き出す（写真の枠は焼かない）。
+    expect(staged).toEqual(['asset_v->timeline_frames_v_clip_t_left']);
+    const first = vi.mocked(svgToPngDataUrl).mock.calls[0][0];
+    expect(first).toContain('timeline_frames_v_clip_t_left#0'); // 動画の枠は実フレーム
+    expect(first).toContain('base64,SRC'); // ⚠️ 写真の枠はそのまま（コマで塗り潰さない）
   });
 
   // ⚠️ **焼き出す口を渡さないと灰色の枠が焼き込まれる**（レビュー 🟡＝以前は「静止のまま」と書いていたが、

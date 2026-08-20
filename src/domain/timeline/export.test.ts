@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { FPS } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
+import type { Template } from '../template/types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds } from './export';
 import { frameTimeSec } from './persistence';
@@ -250,12 +251,17 @@ describe('timelineExportBlockers（書き出す前に止める理由）', () => 
     expect(timelineExportBlockers(d)).toEqual([]);
   });
 
-  it('枠の差し込み口に入れた動画・立ち絵として入れた動画も見つける', () => {
+  // ⚠️ 差し込み口の動画も**段3 で映るようになった**＝止めない（止めると、映るのに書き出せない）。
+  it('枠の差し込み口に入れた動画は止めない（段3 で映るようになった）', () => {
     const inSlot = doc({
       assets: [videoAsset],
       clips: [textClip('clip_001', { kind: TIMELINE_CLIP_KIND.template, assetRefs: { bg: 'asset_video_001' } })],
     });
-    expect(timelineExportBlockers(inSlot)[0].clipIds).toEqual(['clip_001']);
+    expect(timelineExportBlockers(inSlot)).toEqual([]);
+  });
+
+  // ⚠️ **立ち絵に入れた動画はまだ静止画のまま**＝置いたのに静止画で出る、を成功として出さない。
+  it('立ち絵として入れた動画は止める（まだ静止画のまま）', () => {
     const asPose = doc({
       assets: [videoAsset],
       clips: [
@@ -352,19 +358,87 @@ describe('timelineImageAssetIds：動画の扱い（#512 段1）', () => {
     expect(timelineImageAssetIds(d)).toEqual(['asset_p']);
   });
 
-  // ⚠️ **ほかの使い方でも使っていれば残す**＝差し込み口・立ち絵は静止画で描くので、
-  // 外すとその層だけ絵が出ない（変異チェックで生き残った穴）。
-  it('同じ動画を差し込み口でも使っていれば、静止画は要る', () => {
+  // ⚠️ **立ち絵で使っていれば残す**＝立ち絵はまだ静止画で描くので、外すとその絵が出ない。
+  it('同じ動画を立ち絵でも使っていれば、静止画は要る', () => {
     const d = doc({
       assets: [videoAssetDef],
       clips: [
         textClip('clip_001', { kind: TIMELINE_CLIP_KIND.slot, assetId: 'asset_v' }),
-        textClip('clip_002', { kind: TIMELINE_CLIP_KIND.template, assetRefs: { background: 'asset_v' } }),
+        textClip('clip_002', { kind: TIMELINE_CLIP_KIND.template, character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' } }),
       ],
     });
     expect(timelineImageAssetIds(d)).toEqual(['asset_v']);
   });
+
+  // ⚠️ **差し込み口の動画は実フレームで描く**（段3）＝代表フレームは要らない。要求すると、
+  // 代表フレームが作れなかった動画で**書き出し全体が止まる**（描けるのに断る）。
+  it('差し込み口だけで使っている動画は、静止画を要らない（段3 で実フレーム）', () => {
+    const d = doc({
+      assets: [videoAssetDef],
+      clips: [textClip('clip_002', { kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' } })],
+    });
+    expect(timelineImageAssetIds(d, slotTemplateOf)).toEqual([]);
+  });
+
+  // ⚠️ **見た目パターンが解けなければ静止画の側へ倒す**＝実フレームで描けると決めつけない。
+  it('見た目パターンが解けないときは、差し込み口の動画も静止画として数える', () => {
+    const d = doc({
+      assets: [videoAssetDef],
+      clips: [textClip('clip_002', { kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' } })],
+    });
+    expect(timelineImageAssetIds(d)).toEqual(['asset_v']);
+  });
+
+  // ⚠️ **同じ部品でも枠ごとに要否が変わる**＝実フレームで描く枠と静止画で描く枠が混じる。
+  it('同じ部品で、動画の枠は実フレーム・写真の枠は静止画', () => {
+    const d = doc({
+      assets: [videoAssetDef, { assetId: 'asset_p', assetType: 'image', displayName: '写真', filePath: 'p.png' }],
+      clips: [textClip('clip_002', { kind: TIMELINE_CLIP_KIND.template, templateId: 'tmpl_001', assetRefs: { main: 'asset_v', sub: 'asset_p' } })],
+    });
+    expect(timelineImageAssetIds(d, slotTemplateOf)).toEqual(['asset_p']);
+  });
+
+  // ⚠️ **直接置きと立ち絵はどちらも層を持たない**＝層 id だけで突き合わせると別の使い方が同じ鍵になり、
+  // 立ち絵の代表フレームまで「要らない」扱いになる（灰色の枠が焼き込まれる）。使い方まで込みで見分ける。
+  // （部品の型は平らなので、この組み合わせは**保存しうる**＝守りとして固定する。）
+  it('直接置きの動画がある部品でも、立ち絵の静止画は要る', () => {
+    const d = doc({
+      assets: [videoAssetDef],
+      clips: [textClip('clip_001', {
+        kind: TIMELINE_CLIP_KIND.slot,
+        assetId: 'asset_v',
+        character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' },
+      })],
+    });
+    expect(timelineImageAssetIds(d)).toEqual(['asset_v']);
+  });
+
+  // ⚠️ **同じ部品の中で、同じ動画が実フレームと静止画の両方に使われうる**＝枠は実フレーム、
+  // 立ち絵はまだ静止画。部品まるごとで判じると立ち絵の絵が出ない（灰色の枠が焼き込まれる）。
+  it('同じ部品で、動画の枠は実フレーム・同じ動画の立ち絵は静止画', () => {
+    const d = doc({
+      assets: [videoAssetDef],
+      clips: [textClip('clip_002', {
+        kind: TIMELINE_CLIP_KIND.template,
+        templateId: 'tmpl_001',
+        assetRefs: { main: 'asset_v' },
+        character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' },
+      })],
+    });
+    expect(timelineImageAssetIds(d, slotTemplateOf)).toEqual(['asset_v']);
+  });
 });
+
+/** 差し込み口（`main`）と写真だけの枠（`sub`）を持つ見た目パターン。 */
+const slotTemplateOf = () =>
+  ({
+    schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+    layers: [
+      { id: 'main', type: 'slot', x: 0, y: 0, w: 960, h: 1080 },
+      { id: 'sub', type: 'slot', x: 960, y: 0, w: 960, h: 1080 },
+    ],
+  }) as unknown as Template;
 
 describe('timelineImageAssetIds（書き出しで絵として描く素材・#716）', () => {
   const assets = [

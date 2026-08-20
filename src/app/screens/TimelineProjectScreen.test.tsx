@@ -535,12 +535,89 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     expect(useTimelineStore.getState().doc?.clips[0].assetRefs).toEqual({ mainVisual: "asset_001" });
   });
 
-  it("動画は選べない（動かず音も鳴らないので、選べるのに使えない選択肢を出さない）", () => {
+  // ⚠️ **動画も選べる**（#512 段3）＝差し込み口でも映るようになったので、外す理由が消えた。
+  // 規則は場面編集と同じ関数（`assignableAssetsFor`）＝同じ枠を画面によって別扱いしない。
+  it("差し込み口には動画も選べる（段3 で映るようになった）", () => {
     openWithTemplateClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const select = screen.getByText("メイン素材").parentElement?.querySelector("select");
     expect(select?.textContent).toContain("写真A");
-    expect(select?.textContent).not.toContain("動画B");
+    expect(select?.textContent).toContain("動画B");
+    fireEvent.change(select!, { target: { value: "asset_002" } });
+    expect(useTimelineStore.getState().doc?.clips[0].assetRefs).toEqual({ mainVisual: "asset_002" });
+  });
+
+  // ⚠️ **その枠にだけ実映像を出す**（#512 段3）＝部品 id で差し替えると、隣の枠まで同じコマで塗る。
+  // 差し込み口が2つある見た目パターンで、動画の枠だけに `video` が出ることを見る。
+  it("差し込み口が複数あっても、動画の枠だけに実映像が出る", () => {
+    const twoSlots: Template = {
+      ...template,
+      layers: [
+        { id: "left", type: "slot", x: 0, y: 0, w: 960, h: 1080 },
+        { id: "right", type: "slot", x: 960, y: 0, w: 960, h: 1080 },
+      ],
+    };
+    useProjectStore.setState({ templates: [twoSlots], templateAssetSrcById: {} });
+    open({
+      assets: [
+        { assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" },
+        { assetId: "asset_002", assetType: "video", displayName: "動画B", filePath: "b.mp4" },
+      ],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+        startSec: 0, durationSec: 5, templateId: "tmpl_001",
+        assetRefs: { left: "asset_001", right: "asset_002" },
+      }],
+    });
+    act(() => {
+      useTimelineStore.setState({
+        assetSrcById: { asset_001: "blob:photo", asset_002: "blob:thumb_v" },
+        videoSrcById: { asset_002: "blob:body_v" },
+      });
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const videos = [...container.querySelectorAll(".preview-stage video")] as HTMLVideoElement[];
+    expect(videos).toHaveLength(1); // ⚠️ 隣の枠にも窓を開けない
+    expect(videos[0].getAttribute("src")).toBe("blob:body_v");
+    // ⚠️ **右の枠**に出る（部品 id だけで当てると、先に見つかる左＝写真の枠へ出てしまう）。
+    expect(videos[0].style.left).toBe("50%");
+    // 写真の枠はそのまま（静止画の層が担当＝コマで塗り潰さない）。
+    expect(container.innerHTML).toContain("blob:photo");
+  });
+
+  // ⚠️ **この画面で読めない動画は代表フレームへ戻す**＝差し込み口でも同じ（部品に素材 id が無いので、
+  // 部品側で覚えると差し込み口では効かず、穴だけ開いた窓が残る）。
+  it("差し込み口の動画が読めなかったら、窓を閉じて静止のまま見せる", () => {
+    const oneSlot: Template = {
+      ...template,
+      layers: [{ id: "left", type: "slot", x: 0, y: 0, w: 960, h: 1080 }],
+    };
+    useProjectStore.setState({ templates: [oneSlot], templateAssetSrcById: {} });
+    open({
+      assets: [{ assetId: "asset_002", assetType: "video", displayName: "動画B", filePath: "b.mp4" }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+        startSec: 0, durationSec: 5, templateId: "tmpl_001", assetRefs: { left: "asset_002" },
+      }],
+    });
+    act(() => {
+      useTimelineStore.setState({ assetSrcById: { asset_002: "blob:thumb_v" }, videoSrcById: { asset_002: "blob:body_v" } });
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const v = container.querySelector(".preview-stage video") as HTMLVideoElement;
+    expect(v).not.toBeNull();
+    act(() => { fireEvent(v, new Event("error")); });
+    expect(container.querySelector(".preview-stage video")).toBeNull();
+  });
+
+  // ⚠️ **元の音はまだ流れない**（段3b）＝黙って無音にせず、選んだときにその場で知らせる（§2-5）。
+  it("差し込み口に動画を入れると、元の音はまだ出せないと知らせる", () => {
+    openWithTemplateClip();
+    useTimelineStore.setState({
+      doc: { ...useTimelineStore.getState().doc!, clips: [{ ...useTimelineStore.getState().doc!.clips[0], assetRefs: { mainVisual: "asset_002" } }] },
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/差し込み口に入れた動画は、映像だけが流れます/)).toBeInTheDocument();
   });
 
   it("文字を書き換えられる", () => {
@@ -581,15 +658,22 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     expect(select?.getAttribute("title")).toContain("固定を外してください");
   });
 
-  it("入っている動画は名前を出す（「なし」と見分けが付く）", () => {
+  // ⚠️ **種別の合わない素材が入っていたら、名前だけ出す**（「なし」と見分けが付く・選び直せない）。
+  // 動画は段3 で普通の選択肢になったので、ここは写真だけの差し込み口へ動画が入っている場合。
+  it("その枠に入れられない素材が入っていたら、名前だけ出す（「なし」と見分けが付く）", () => {
     openWithTemplateClip();
+    const cur = useTimelineStore.getState().doc!;
     useTimelineStore.setState({
-      doc: { ...useTimelineStore.getState().doc!, clips: [{ ...useTimelineStore.getState().doc!.clips[0], assetRefs: { mainVisual: "asset_002" } }] },
+      doc: {
+        ...cur,
+        assets: [...cur.assets, { assetId: "asset_003", assetType: "bgm", displayName: "曲C", filePath: "c.mp3" }],
+        clips: [{ ...cur.clips[0], assetRefs: { mainVisual: "asset_003" } }],
+      } as typeof cur,
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const select = screen.getByText("メイン素材").parentElement?.querySelector("select");
-    expect(select?.textContent).toContain("動画B");
-    expect(select?.querySelector('option[value="asset_002"]')).toBeDisabled();
+    expect(select?.textContent).toContain("曲C");
+    expect(select?.querySelector('option[value="asset_003"]')).toBeDisabled();
   });
 
   it("素材が入っていない差し込み口を知らせる（灰色の枠が動画に出る）", () => {
@@ -607,6 +691,8 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     expect(screen.queryByRole("button", { name: "たて型" })).not.toBeInTheDocument();
   });
 
+  // ⚠️ **案内は「いま何をすれば埋まるか」**（#512 段3 で更新）＝動画は使えるようになったので、
+  // 動画専用の枠が埋まらない理由は「動画を1つも取り込んでいない」だけ。
   it("動画しか入れられない差し込み口には、どうすればよいかを出す（永久に埋まらない枠を黙らせない）", () => {
     const videoOnly: Template = {
       ...template,
@@ -620,7 +706,7 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/この形式ではまだ動画を使えません/)).toBeInTheDocument();
+    expect(screen.getByText(/入れられる動画がありません/)).toBeInTheDocument();
   });
 
   it("バラす前に断る（戻せないことを知らせる）", () => {

@@ -556,6 +556,13 @@ export const TIMELINE_VIDEO_NO_AUDIO =
   "この動画には音が入っていません（音を付けるなら、音の列に音を置いてください）";
 
 /**
+ * 見た目パターンの差し込み口に入れた動画を選んだときの知らせ（#512 段3・`15 §6`）。
+ * **絵は映るが元の音はまだ流れない**（段3b で扱う）＝黙って無音にしない（§2-5）。
+ */
+export const TIMELINE_SLOT_VIDEO_AUDIO_PENDING =
+  "差し込み口に入れた動画は、映像だけが流れます。元の音はまだ出せません（音を付けるなら、音の列に音を置いてください）";
+
+/**
  * 動画に音が入っているか**確かめられなかった**とき（#512 段2・`15 §6`）。
  * ⚠️ 「入っていません」と断定しない＝取り込みのときに調べられなかっただけかもしれないので、
  * 次の行動は「取り込み直す」（音の列に音を置く、ではない）。場面形式も同じ2文で分けている。
@@ -589,7 +596,7 @@ export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
 export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
   TIMELINE_EXPORT_EMPTY: "まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください",
   TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED:
-    "見た目パターンの差し込み口や立ち絵に入れた動画は、まだ書き出せません。動画は列へ直接置いてください",
+    "立ち絵として入れた動画は、まだ書き出せません。動画は列へ直接置くか、見た目パターンの差し込み口へ入れてください",
   TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
     "見た目パターンが見つからない部品があります。そのままでは動画に出ません。見た目パターンを読み込み直すか、その部品を置き直してください",
   TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN:
