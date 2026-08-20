@@ -52,6 +52,7 @@ import { bakeTimelineProject, bakedFilePaths } from "../../domain/timeline/bake"
 import type { BakeNote, BakeRange, BakeResult } from "../../domain/timeline/bake";
 import { bakeSizeBytes, copyBakedFiles } from "../../infrastructure/bakeFs";
 import { validateTimelineProject } from "../../domain/validation/generated/validators.js";
+import { duplicateIdsIn } from "../../domain/timeline/validateTimelineDoc";
 import { clearPendingNarrations } from "../../domain/voice/narrationProgress";
 import { runWithConcurrency } from "../../utils/concurrency";
 import { emitProjectDeleted } from "./projectDeletion";
@@ -986,6 +987,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!validateTimelineProject(doc)) {
       console.warn("[timeline] 焼き出した内容がスキーマに未適合:", validateTimelineProject.errors);
       throw new Error("baked timeline project failed schema validation");
+    }
+    // ⚠️ **id の重なりは適合チェックを素通りする**（配列をまたいだ id の一意は JSON Schema の語彙に無い）。
+    // 重なると読む側の引き当てが別のものに効き、**焼く前と絵が変わる**（#811・ADR-0032 決定23）。
+    // 採番の穴は `bake.ts` 側で塞いだが、**門をここにも置く**＝壊れた文書をディスクへ書かない。
+    const dup = duplicateIdsIn(doc);
+    if (dup.length > 0) {
+      console.warn("[timeline] 焼き出した内容に id の重なり:", dup);
+      throw new Error("baked timeline project has duplicate ids");
     }
     // 先にファイルを運んでから文書を保存する＝途中で失敗しても「素材の無いプロジェクト」が一覧に残らない。
     await copyBakedFiles(srcProjectId, projectId, bakedFilePaths(doc));

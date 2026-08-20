@@ -6,6 +6,7 @@ import * as bakeFsMod from '../../infrastructure/bakeFs';
 import { sampleTemplates } from '../../infrastructure/sampleData';
 import { BAKE_RANGE_KIND } from '../../domain/timeline/bake';
 import type { Scene } from '../../domain/project/types';
+import { validateTimelineProject } from '../../domain/validation/generated/validators.js';
 
 function scene(id: string, order: number, over: Partial<Scene> = {}): Scene {
   return {
@@ -91,6 +92,29 @@ describe('bakeToTimeline / estimateBake', () => {
     await expect(useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画')).rejects.toThrow();
     // 焼いた文書は保存されていない（走るのは元の保存だけ）。
     expect(vi.mocked(fsMod.saveProjectDoc).mock.calls.every((c) => c[0] === 'proj_20260701_001')).toBe(true);
+  });
+
+  // #811＝焼き出しの採番が壊れて id が重なったとき、**適合チェックは素通りする**（配列をまたいだ
+  // id の一意は JSON Schema の語彙に無い）。重なった文書は読む側の引き当てが別のものに効くので、
+  // 一覧に出るのに絵が変わる動画を作らない＝門をここにも置く。
+  it('id が重なった結果は保存しない（適合チェックは通ってしまうため）', async () => {
+    const real = useProjectStore.getState()._bake;
+    useProjectStore.setState({
+      _bake: (range, name, id) => {
+        const r = real(range, name, id);
+        return { ...r, doc: { ...r.doc, tracks: [...r.doc.tracks, { ...r.doc.tracks[0] }] } };
+      },
+    });
+    // ⚠️ **適合はしている**＝止めているのが重複の門であることを確かめる（schema の門で止まったのでは意味が違う）。
+    const broken = useProjectStore.getState()._bake({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画', 'proj_20260728_001').doc;
+    expect(validateTimelineProject(broken)).toBe(true);
+
+    try {
+      await expect(useProjectStore.getState().bakeToTimeline({ kind: BAKE_RANGE_KIND.whole }, '焼いた動画')).rejects.toThrow();
+      expect(vi.mocked(fsMod.saveProjectDoc).mock.calls.every((c) => c[0] === 'proj_20260701_001')).toBe(true);
+    } finally {
+      useProjectStore.setState({ _bake: real }); // 途中で落ちても差し替えを次のテストへ漏らさない
+    }
   });
 
   it('持っていけないものは見積りでも焼いた後でも同じ内容を返す（同じ変換を共有）', async () => {

@@ -86,7 +86,7 @@ function opts(over: Partial<BakeOptions> = {}): BakeOptions {
   };
 }
 
-/** 焼いた文書の共通の健全性＝スキーマ適合（V2）と意味検証の警告ゼロ（V22–V28。V24 の重なり禁止を含む）。 */
+/** 焼いた文書の共通の健全性＝スキーマ適合（V2）と意味検証の警告ゼロ（V22–V32。V24 の重なり禁止・V32 の id 一意を含む）。 */
 function expectSound(doc: ReturnType<typeof bakeTimelineProject>['doc']): void {
   const ok = validateTimelineProject(doc);
   expect(validateTimelineProject.errors ?? []).toEqual([]);
@@ -437,6 +437,88 @@ describe('bakeTimelineProject: FREE の場面＝要素ごとのクリップ＋1�
     // 場面グループは入れ子グループと、入れ子に入っていない見た目パターンのクリップだけを持つ（二重所属を作らない）
     const sceneGroup = doc.groups!.find((g) => g.id !== nested.id)!;
     expect(sceneGroup.members).toEqual([doc.clips[0].id, nested.id]);
+    expectSound(doc);
+  });
+
+  // ⚠️ **グループが2つ以上でも id が重ならない**（#811）＝採番は積んである id から次を決めるので、
+  // まとめて作ってから後で積むと**同じ番号を何度も返す**。重なると引き当てが後勝ち／親は先勝ちで
+  // 食い違い、**片方の変形がもう片方のメンバーに掛かる**（実測で要素が2倍・画面外へ飛んだ）。
+  it('場面内のグループが2つ以上でも、id が重ならない', () => {
+    const p = freeProject({
+      scenes: [{
+        ...freeScene(),
+        freeLayout: [
+          { id: 'free_001', kind: FREE_ELEMENT_KIND.slot, x: 0, y: 0, w: 960, h: 540, assetId: 'asset_001', fit: 'cover', zIndex: 1 },
+          { id: 'free_002', kind: FREE_ELEMENT_KIND.text, x: 10, y: 20, w: 300, h: 80, text: 'A', zIndex: 2 },
+          { id: 'free_003', kind: FREE_ELEMENT_KIND.text, x: 10, y: 120, w: 300, h: 80, text: 'B', zIndex: 3 },
+        ],
+        groups: [
+          { id: 'group_001', members: ['free_002'], transform: { x: 5, y: 0, rotation: 0, scale: 1 } },
+          { id: 'group_002', members: ['free_003'], transform: { x: 99, y: 0, rotation: 0, scale: 2 } },
+        ],
+      } as Scene],
+    });
+    const { doc } = bakeTimelineProject(p, opts());
+    const ids = doc.groups!.map((g) => g.id);
+    expect(new Set(ids).size).toBe(ids.length); // 重複なし
+    // ⚠️ **変形が取り違えられていない**＝それぞれの入れ子が自分のメンバーだけを持つ。
+    const g5 = doc.groups!.find((g) => g.transform.x === 5)!;
+    const g99 = doc.groups!.find((g) => g.transform.x === 99)!;
+    expect(g5.id).not.toBe(g99.id);
+    expect(g5.members).toHaveLength(1);
+    expect(g99.members).toHaveLength(1);
+    expect(g5.members[0]).not.toBe(g99.members[0]);
+    expectSound(doc);
+  });
+
+  // ⚠️ **入れ子の親が持つグループ id も張り替える**（要素 id しか見ていないと素通りする）＝
+  // 旧 `group_NNN` は**別の場面の焼き上がり**と実在一致しうるので、参照切れの検査もすり抜けて
+  // 場面をまたいだ親子ができる（支点が別の場面の箱を含む＝焼く前と絵が変わる）。
+  it('入れ子の親が持つグループ id も、新しい id へ張り替わる', () => {
+    const p = freeProject({
+      scenes: [{
+        ...freeScene(),
+        // ⚠️ 旧 id は**焼き上がりの採番と重ならない番号**にする＝張り替え漏れを、たまたま同じ番号が
+        // 採れただけの状態と見分けられるようにする（`group_001` のままだと見分けが付かない）。
+        groups: [
+          { id: 'group_010', members: ['free_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } },
+          { id: 'group_011', members: ['group_010', 'free_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } },
+        ],
+      } as Scene],
+    });
+    const { doc } = bakeTimelineProject(p, opts());
+    const parent = doc.groups!.find((g) => g.members.length === 2)!;
+    const child = doc.groups!.find((g) => g.members.length === 1)!;
+    expect(parent.members).toContain(child.id);
+    expect(child.id).not.toBe('group_010'); // 採り直されている（前提の確認）
+    // 旧 id が1つも残っていない（残ると別の場面の焼き上がりを指しうる）。
+    expect(doc.groups!.flatMap((g) => g.members)).not.toContain('group_010');
+    expectSound(doc);
+  });
+
+  // ⚠️ **動きも混ざらない**＝同じ id へ写すと `oldToNewGroupId` が合流し、別々のキーフレームが1本になる。
+  it('グループが2つあっても、それぞれの動きが別々に残る', () => {
+    const p = freeProject({
+      scenes: [{
+        ...freeScene(),
+        groups: [
+          { id: 'group_001', members: ['free_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } },
+          { id: 'group_002', members: ['free_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } },
+        ],
+      } as Scene],
+      timelineOverlay: {
+        animations: [
+          { id: 'anim_001', sceneId: 'scene_001', targetId: 'group_001', keyframes: [{ timeSec: 0, opacity: 0 }, { timeSec: 1, opacity: 1 }] },
+          { id: 'anim_002', sceneId: 'scene_001', targetId: 'group_002', keyframes: [{ timeSec: 0, x: 0 }, { timeSec: 1, x: 50 }] },
+        ],
+      },
+    } as Partial<Project>);
+    const { doc } = bakeTimelineProject(p, opts());
+    const targets = (doc.animations ?? []).map((a) => a.targetId);
+    expect(new Set(targets).size).toBe(targets.length); // 1本へ合流していない
+    // 濃さの動きと位置の動きが別々の対象に付いている（混ざると1本に両方が入る）。
+    const kinds = (doc.animations ?? []).map((a) => a.keyframes.some((k) => k.opacity != null) ? 'opacity' : 'x');
+    expect([...kinds].sort()).toEqual(['opacity', 'x']);
     expectSound(doc);
   });
 

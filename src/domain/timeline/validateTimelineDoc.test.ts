@@ -348,3 +348,41 @@ describe('V31：同じ対象に動きは1本まで（#717）', () => {
     expect(w.map((x) => x.code)).not.toContain('TIMELINE_ANIMATION_DUPLICATE');
   });
 });
+
+// V32（#811）＝**id は文書の中で一意**。読む側は id で引き当てるので、重なると引き当てが
+// 後勝ち／親は先勝ちで食い違い、**別のものに効く**（実測で要素が2倍・画面外へ飛んだ）。
+// ⚠️ 採番の穴は作る側で塞ぐのが本筋だが、**壊れた文書を保存しない門**を成り立たせるためここでも見る。
+describe('V32 id の重複', () => {
+  const anim = (id: string, targetId: string) => ({ id, targetId, keyframes: [{ timeSec: 0, opacity: 1 }] });
+
+  it('部品の id が重なると知らせる', () => {
+    const w = validateTimelineDoc(doc({ clips: [clip({ id: 'clip_001' }), clip({ id: 'clip_001', startSec: 10 })] }));
+    expect(w.map((x) => x.code)).toContain('TIMELINE_DUPLICATE_ID');
+  });
+
+  it('まとまりの id が重なると知らせる（焼き出しで実際に起きていた形）', () => {
+    const w = validateTimelineDoc(doc({
+      clips: [clip({ id: 'clip_001' })],
+      groups: [
+        { id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } },
+        { id: 'group_001', members: ['clip_001'], transform: { x: 99, y: 0, rotation: 0, scale: 2 } },
+      ],
+    }));
+    expect(w.filter((x) => x.code === 'TIMELINE_DUPLICATE_ID')).toHaveLength(1); // 2つ目だけ知らせる
+  });
+
+  it('列・動きの id が重なっても知らせる', () => {
+    const w = validateTimelineDoc(doc({
+      tracks: [{ id: 'track_001', kind: TRACK_KIND.visual }, { id: 'track_001', kind: TRACK_KIND.visual }],
+      clips: [clip({ id: 'clip_001' }), clip({ id: 'clip_002', startSec: 10 })],
+      animations: [anim('anim_001', 'clip_001'), anim('anim_001', 'clip_002')],
+    }));
+    const dup = w.filter((x) => x.code === 'TIMELINE_DUPLICATE_ID');
+    expect(dup.map((x) => x.field).sort()).toEqual(['animations.anim_001', 'tracks.track_001']);
+  });
+
+  it('重なっていなければ何も言わない', () => {
+    const w = validateTimelineDoc(doc({ clips: [clip({ id: 'clip_001' }), clip({ id: 'clip_002', startSec: 10 })] }));
+    expect(w.map((x) => x.code)).not.toContain('TIMELINE_DUPLICATE_ID');
+  });
+});

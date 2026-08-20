@@ -36,7 +36,7 @@
 | scene | `scene_{NNN}` | `scene_001` | プロジェクト内一意・3桁。作成順に採番（表示順は `order` が制御） |
 | freeLayout 要素 | `free_{NNN}` | `free_001` | **scene 内一意**・3桁（ADR-0008・FREE テンプレの自由配置要素） |
 | セリフ行 | `line_{NNN}` | `line_001` | **scene 内一意**・3桁以上（ADR-0015・掛け合いのセリフ列 `scene.lines`・#180） |
-| グループ | `group_{NNN}` | `group_001` | **scene/template 内一意**・3桁以上（ADR-0022・要素のグループ化 `scene.groups`/`template.groups`・空き番号を埋める gap-fill） |
+| グループ | `group_{NNN}` | `group_001` | **scene/template 内一意**・3桁以上（ADR-0022・要素のグループ化 `scene.groups`/`template.groups`・空き番号を埋める gap-fill）。**タイムライン形式（`doc.groups`）では文書内一意**＝場面の区切りが無いので範囲が広がる（`§8` V32・#811） |
 | overlay クリップ | `ovclip_{NNN}` | `ovclip_001` | 〜〜**新規に発行しない**（#635 で退役）〜〜 既存データに残っている id の形（ADR-0018・`timelineOverlay.clips`） |
 | トラック | `track_{NNN}` | `track_001` | **タイムライン形式のみ**（ADR-0032）。project 内一意・3桁以上・gap-fill。**配列の順が重ね順**（後ろほど手前）＝id の大小は重ね順と無関係 |
 | タイムラインのクリップ | `clip_{NNN}` | `clip_001` | **タイムライン形式のみ**（ADR-0032）。project 内一意・3桁以上・gap-fill。場面形式の `ovclip_NNN` とは**別物**（混在しない＝形式が違う） |
@@ -427,7 +427,7 @@ domain の純粋関数 **`bakeTimelineProject`（`src/domain/timeline/bake.ts`�
 - **列（トラック）の割り当て**：1場面ぶんの列は必ず**連続した並び**で取り、空いた列は下から詰め直す。これで（a）同一トラックの時間の重なりが起きない（§8 V24）、（b）切り替えで重なる2場面は**片方が丸ごともう片方より手前**になる（層が互い違いに挟まらない）＝切り替えを場面まるごとの不透明度で表せる。入る側を常に手前へ固定はしない（切り替えのたびに列が増えるため）。
 - **範囲の先頭場面の入場の切り替えは効かない**（切り替え元が範囲の外＝`compileTimeline` の `boundaryDs[0]=0` と同じ）。
 - **字幕**：本形式に「対象（`subtitleSource`・ADR-0029）」の語彙は無いので、**焼くときに文言を確定させる**＝(1) セリフ列（`scene.lines`）が無い場面のテンプレ字幕層は `texts` で出る、(2) FREE の字幕ボックスで対象＝読み上げのものは、いま出ている文を `text` に焼き付ける、(3) **テンプレ字幕層×`lines` あり（1行でも）は行ごとの字幕クリップへ焼き、読み上げへ連動させる**（§7.6.1.1・#633）。**まだ焼けないのは FREE の字幕ボックスで対象が行に追従するもの**（全部・話者）だけ＝`BakeNote` で知らせる。判定は**実際に表示されているものだけ**（非表示・OFF・空は失われるものが無い）。
-- **運ぶファイル**（`bakedFilePaths`）＝素材の本体（`filePath`）・動画の代表フレーム（`thumbnailPath`）・**作成済みの読み上げ音声**（`voice.voicePath`）。相対パスの構造（`assets/…`・`voices/…`）はそのまま保つので、焼いた文書のパスを書き換えない。実体のコピーと容量の計測は infrastructure（`copy_project_files` / `project_files_size`）。**焼く前に元を保存する**＝ディスクにあるファイルを運ぶので、保存していない声が抜け落ちない（元の中身は変えない＝片道）。
+- **運ぶファイル**（`bakedFilePaths`）＝素材の本体（`filePath`）・動画の代表フレーム（`thumbnailPath`）・**作成済みの読み上げ音声**（`voice.voicePath`）。相対パスの構造（`assets/…`・`voices/…`）はそのまま保つので、焼いた文書のパスを書き換えない。実体のコピーと容量の計測は infrastructure（`copy_project_files` / `project_files_size`）。**焼く前に元を保存する**＝ディスクにあるファイルを運ぶので、保存していない声が抜け落ちない（元の中身は変えない＝片道）。 **保存の門は「schema に適合」＋「id が重なっていない」の2つ**（#811）＝後者は `duplicateIdsIn`（`§8` V32）で見る。適合チェックだけでは id の重なりを素通りし、**一覧に出るのに焼く前と絵が変わる動画**ができる。
 - **形式の判別は読込の入口で**（§1）：`format:'timeline'` の文書は場面形式として読み込まず、**版の話にすり替えず**「形式が違う」と断る（`parseProjectDoc`・15 §6）。
 - **持っていけないもの**は黙って落とさず `BakeNote` で返す（§2-5）：**自由配置の字幕ボックスで対象が行に追従するもの**（要素の「対象」の語彙が本形式に無い）／**動画の差し込み口の再生開始タイミング**（ADR-0027 の `slotVideoStart`＝本形式に置き場が無い）。コード語彙は `15 §6`（`BAKE_*`）。
 
@@ -1259,8 +1259,9 @@ AI出力・テンプレ・プロジェクト読込時に実行。**JSON Schema �
 
 | V30 | `clips[].crop` の同じ軸の合計が 1 未満（上下・左右それぞれ） | 警告（`TIMELINE_CROP_HIDES_ALL`）＝描画は **1px 残す**（丸ごと消えたことに気づけるようにする） |
 | V31 | **`animations[].targetId` は重複しない**（同じ対象に動きは1本まで・V26 と対） | 警告（`TIMELINE_ANIMATION_DUPLICATE`）＝読む側（描画・キーフレーム編集・バラす）は `targetId` で `find` して**1本しか見ない**ので、2本あると片方が黙って無視される（焼き出しが入場と退場を2本作り、切り替えがハードカットになっていた・#717） |
+| V32 | **id は入れ物ごとに文書内で一意**（`clips`/`tracks`/`groups`/`animations` のそれぞれで重ならない。入れ物をまたいだ衝突〔クリップ id ＝グループ id〕は接頭辞が違うので採番から起きない＝見ない） | 警告（`TIMELINE_DUPLICATE_ID`）＝読む側は id で引き当てるので、重なると**後勝ち／先勝ちが混ざって別のものに効く**（焼き出しでグループ id が重なり、片方の変形がもう片方のメンバーに掛かって要素が画面外へ飛んだ・#811）。動きも `targetId` が合流して1本に混ざる。**採番の穴は作る側で塞ぐのが本筋**だが、知らせる側もここで持つ。⚠️ **保存の門は schema だけでは足りない**＝配列をまたいだ id の一意は JSON Schema の語彙に無いので適合チェックを素通りする。判定は `duplicateIdsIn`（本ファイルから export）を**焼き出しの保存（`bakeToTimeline`）と共有**する |
 
-> V22–V31 は **タイムライン形式（ADR-0032・#627／読み上げは #628／連動は #633／切り抜きは #634）**。domain の純粋関数 **`validateTimelineDoc`（`src/domain/timeline/validateTimelineDoc.ts`）** が `Warning[]` を返す。**V24 が本形式の要**＝同一トラックで時間が重ならないので、**重ね順は tracks の並び順だけで一意に決まる**（クリップごとの zIndex を持たない）。ID 一意（`clip_NNN`/`track_NNN`/`anim_NNN`）は V16 と同じ扱いで再採番。番号は §8 の続き。
+> V22–V32 は **タイムライン形式（ADR-0032・#627／読み上げは #628／連動は #633／切り抜きは #634）**。domain の純粋関数 **`validateTimelineDoc`（`src/domain/timeline/validateTimelineDoc.ts`）** が `Warning[]` を返す。**V24 が本形式の要**＝同一トラックで時間が重ならないので、**重ね順は tracks の並び順だけで一意に決まる**（クリップごとの zIndex を持たない）。ID 一意（`clip_NNN`/`track_NNN`/`anim_NNN`/`group_NNN`）の**検査が V32**（#811 まで規則だけあって見ていなかった）＝**警告のみで再採番はしない**（読込・移行に再採番の経路は無い。場面形式の `LINE_ID_DUPLICATE` と同じ「案内のみ」）。壊れた文書を作らないのは採番側と保存の門の仕事。番号は §8 の続き。
 
 > V12–V15 は ADR-0008 §8。FREE テンプレ場面（`sceneType=free`）の `freeLayout` を対象とし、domain の純粋関数 `validateFreeLayout`（`src/domain/project/freeLayout.ts`）で実装。`free_NNN` 要素ごとに `Warning.field=freeLayout.<id>` を付す。V13 が不正なら矩形が確定しないため V14 はスキップ（二重警告を避ける）。
 > kind 別の構造的「必須」（`slot` の `fit` が assetId 非null時・`shape` の `shapeType`）は **Schema（`exclusiveMinimum`/enum）＋ renderer 既定（fit 未指定=cover・shapeType 未指定=rect）で担保＝V2 相当**とし、上記 domain 検証（意味検証）の対象外。`fit` は §2-3 の技術用語のため UI 警告に出さない。
