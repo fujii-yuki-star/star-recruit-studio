@@ -59,8 +59,13 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // ⚠️ **持っていけないものは黙って落とさない**（ADR-0032）＝「切り出す終わり」は直接置きの語彙に
   // 無く、置いた長さを縮めると**絵が早く消える**・縮めないと**その先まで流れる**＝どちらも決定23 に
   // 反する。動きが付いた部品と同じ流儀で、バラす前に断る。
-  if ([...placementByLayer.values()].some((pl) => pl.durationSec < clip.durationSec)) {
-    return { ok: false, reason: EDIT_BLOCKED.explodeTrimEnd };
+  // ⚠️ **出どころで案内を分ける**（レビュー 🟡）＝「ここまで」は**その枠だけの設定**（`slotClips`）と
+  // **素材の既定**（`asset.clip`）のどちらからも来る（解決は per-use が優先＝`resolveSlotClip`）。
+  // 素材の画面で外せるのは後者だけなので、前者に同じ案内を出すと**従っても解除されない行き止まり**になる。
+  const shortened = [...placementByLayer.values()].filter((pl) => pl.durationSec < clip.durationSec);
+  if (shortened.length > 0) {
+    const perUse = shortened.some((pl) => pl.layerId != null && clip.slotClips?.[pl.layerId]?.endSec != null);
+    return { ok: false, reason: perUse ? EDIT_BLOCKED.explodeTrimEndPerUse : EDIT_BLOCKED.explodeTrimEnd };
   }
   const useByElement = new Map(
     Object.entries(slotLayerByElementId).map(([elId, layerId]) => [elId, placementByLayer.get(layerId)]),

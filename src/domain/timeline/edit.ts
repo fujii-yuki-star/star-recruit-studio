@@ -104,6 +104,12 @@ export const EDIT_BLOCKED = {
    * しないよう、動きが付いた部品（`explodeAnchor`）と同じ流儀で先に断る。
    */
   explodeTrimEnd: 'TIMELINE_EDIT_EXPLODE_TRIM_END',
+  /**
+   * 同上だが、「ここまで」が**その枠だけの設定**（`slotClips[layerId].endSec`）から来ている場合。
+   * ⚠️ **素材の画面では外せない**（解決は per-use が優先）＝同じ案内を出すと、従っても解除されない
+   * 行き止まりになる（ADR-0034 決定5・§2-5）。この枠の素材を入れ直せば落ちる（`setClipAssetRef`）。
+   */
+  explodeTrimEndPerUse: 'TIMELINE_EDIT_EXPLODE_TRIM_END_PER_USE',
   /** 連動している字幕を置ける場所が無い（読み上げを動かせない理由・#633）。 */
   linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
   /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
