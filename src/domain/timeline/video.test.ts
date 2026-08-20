@@ -201,6 +201,56 @@ describe('焼き出す区間（videoStagePlan）', () => {
   // その戻り値（`stagedCount`）が正。ここで別の式を持つと、後でそれを頭打ちに使ったとき**末尾が早く止まる**。
 });
 
+// 差し込み口の「ここまで」（`endSec`）で使える長さが部品の尺より短いとき（#512 段3 レビュー 🔴）。
+// ⚠️ **書き出しは焼けた枚数で最後のコマに凍る**ので、プレビューも同じところで止まらないと
+// **プレビューだけが素材の先へ進む**（`endSec` を越えた絵が見える＝preview≠export）。
+describe('使える長さの頭打ち（差し込み口の「ここまで」）', () => {
+  /** 10秒ぶん置いてあるが、素材は3秒ぶんしか使えない置き場所。 */
+  const short: VideoPlacement = {
+    clip: slot({ startSec: 0, durationSec: 10 }),
+    use: 'slot', layerId: 'main', assetId: 'asset_001',
+    sourceStartSec: 0, durationSec: 3, speed: 1,
+  };
+
+  it('プレビューは使える長さを越えて素材を進めない', () => {
+    expect(videoSourceSecAt(short, 2, 30)).toBeCloseTo(2); // まだ使える範囲
+    // ⚠️ 3秒より後は**最後のコマのまま**（頭打ちが無いと 5 が返り、切ったはずの先が見える）。
+    expect(videoSourceSecAt(short, 5, 30)).toBeCloseTo(3);
+    expect(videoSourceSecAt(short, 9, 30)).toBeCloseTo(3);
+  });
+
+  // ⚠️ **端数の長さで見る**＝コマ数が整数になる長さ（3秒×30）だと、切り上げ・切り捨てのどちらでも
+  // 同じ番号になり、数え方の取り違えが素通りする。
+  it('書き出しと同じところで止まる（同じコマ番号を指す）', () => {
+    const fps = 30;
+    const odd: VideoPlacement = { ...short, durationSec: 3.05 }; // 91.5 コマ＝切り上げ 92／切り捨て 91
+    const staged = Math.ceil(odd.durationSec * fps) + 1; // Rust が焼く枚数（`ceil(尺×fps)+1`）
+    expect(staged).toBe(93);
+    const exportIdx = videoFrameIndexAt(odd, 5 * fps, fps, staged);
+    const previewSec = videoSourceSecAt(odd, 5, fps);
+    expect(exportIdx).toBe(staged - 1); // 最後のコマ＝92
+    expect(previewSec).toBeCloseTo(odd.sourceStartSec + ((staged - 1) / fps) * odd.speed);
+  });
+
+  // ⚠️ 速さが掛かっていても、止まる位置は素材の時間で見る（置いた長さは速さで変わらない）。
+  it('速さが掛かっていても、使える長さで止まる', () => {
+    const fast: VideoPlacement = { ...short, durationSec: 1.5, speed: 2 };
+    expect(videoSourceSecAt(fast, 1, 30)).toBeCloseTo(2); // 1秒×2倍速＝素材の2秒
+    expect(videoSourceSecAt(fast, 5, 30)).toBeCloseTo(3); // 頭打ち後は素材の3秒（＝endSec）
+  });
+
+  // ⚠️ **直接置きでは頭打ちが効かない**（使える長さ＝置いた長さ）＝従来の出力を変えない。
+  it('直接置きでは、これまでどおり尺いっぱい進む', () => {
+    const direct = place(slot({ startSec: 0, durationSec: 10 }));
+    expect(videoSourceSecAt(direct, 9, 30)).toBeCloseTo(9);
+  });
+
+  // ⚠️ **部品の区間の外は映らない**（頭打ちを入れても、生きている区間の判定は変わらない）。
+  it('部品の区間の外では映らない', () => {
+    expect(videoSourceSecAt(short, 10, 30)).toBeNull();
+  });
+});
+
 describe('出力フレーム → 出すコマ（videoFrameIndexAt）', () => {
   const clip = slot({ startSec: 2, durationSec: 4 });
 

@@ -410,6 +410,32 @@ describe("TimelineProjectScreen: 絵が出せない素材（#726 レビュー）
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryAllByRole("alert").some((el) => el.textContent?.includes("絵が出せない素材"))).toBe(false);
   });
+
+  // ⚠️ **差し込み口の動画は実フレームで描く**（#512 段3）＝代表フレームが無くても絵は出るので、
+  // 「絵が出せない」と数えない。数えると**誤った理由**で警告が出る（見た目パターンを渡し忘れると起きる）。
+  it("差し込み口の動画は、代表フレームが無くても「絵が出せない」と数えない", () => {
+    useProjectStore.setState({
+      templates: [{
+        schemaVersion: "1.0", templateId: "tmpl_001", name: "テンプレ", category: "opening",
+        aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+        layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080 }],
+      } as unknown as Template],
+      templateAssetSrcById: {},
+    });
+    useTimelineStore.setState({
+      doc: doc({
+        assets: [{ assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "assets/v.mp4" }],
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+          startSec: 0, durationSec: 5, templateId: "tmpl_001", assetRefs: { main: "asset_v" },
+        }],
+      }),
+      loadError: null, isLoading: false, playheadSec: 0, selectedClipIds: [], assetSrcById: {},
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryAllByRole("alert").some((el) => el.textContent?.includes("絵が出せない素材"))).toBe(false);
+  });
 });
 
 describe("TimelineProjectScreen: 音（#630 後半）", () => {

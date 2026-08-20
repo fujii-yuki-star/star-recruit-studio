@@ -971,11 +971,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const missingImageCount = useMemo(() => {
     if (!doc) return 0;
     const unresolved = new Set(
-      timelineImageAssetIds(doc).filter((id) => !assetSrcById[id] && !templateAssetSrcById[id]),
+      // ⚠️ **見た目パターンを渡す**（レビュー 🟡）＝渡さないと差し込み口を解決できず、実映像で描く
+      // 枠まで代表フレームが要る扱いになり、**誤った理由**で「絵が出せない」と数える。
+      timelineImageAssetIds(doc, templateOf).filter((id) => !assetSrcById[id] && !templateAssetSrcById[id]),
     );
     if (unresolved.size === 0) return 0;
     return doc.clips.filter((c) => clipImageAssetIds(c).some((id) => unresolved.has(id))).length;
-  }, [doc, assetSrcById, templateAssetSrcById]);
+  }, [doc, assetSrcById, templateAssetSrcById, templateOf]);
 
   /**
    * 表示倍率（#686・ADR-0034 決定13）。段は場面形式の見わたす画面と**同じ型**（`ZOOM_LEVELS`）。

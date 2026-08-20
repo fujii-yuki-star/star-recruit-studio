@@ -266,7 +266,7 @@ export function videoFrameIndexAt(
   stagedCount: number,
 ): number | null {
   if (stagedCount <= 0) return null;
-  const local = stagedFrameIndexAt(p.clip, frameIndex, fps);
+  const local = stagedFrameIndexAt(p, frameIndex, fps);
   if (local == null) return null;
   return Math.min(stagedCount - 1, local);
 }
@@ -275,16 +275,22 @@ export function videoFrameIndexAt(
  * その出力フレームが、その部品の**何コマ目**か（`null`＝映っていない）。
  * ⚠️ **プレビューと書き出しはここだけを見る**（#512 段1 レビュー 🔴）＝別々に時刻を出すとずれる。
  */
-function stagedFrameIndexAt(clip: TimelineClip, frameIndex: number, fps: number): number | null {
+function stagedFrameIndexAt(p: VideoPlacement, frameIndex: number, fps: number): number | null {
   const t = frameIndex / fps;
   // 生きている区間は半開（`11 §7.6.4`＝終わりの瞬間はもう映らない）＝描く側と同じ規則。
-  if (t < clip.startSec || t >= clip.startSec + clip.durationSec) return null;
+  // ⚠️ **区間は部品の尺**（隠れる・隠れないは部品の置き場所で決まる）＝素材が尽きても枠は出たまま。
+  if (t < p.clip.startSec || t >= p.clip.startSec + p.clip.durationSec) return null;
   // ⚠️ **コマ数の引き算で出す**（秒へ直して掛け戻さない）＝掛け算の誤差で1つ手前へ落ちない
   // （`11 §7.6.5` の「格子点をもう一度量子化しない」と同じ理由）。
   // ⚠️ **トリムと速さはここで掛けない**＝焼いたコマ自体が織り込み済み（`stage_clip_frames` が
   // `sourceStartSec` から `setpts=PTS/speed` で並べる）。二重に掛けると倍速が二乗になる。
-  const local = frameIndex - Math.round(clip.startSec * fps);
-  return local < 0 ? null : local;
+  const local = frameIndex - Math.round(p.clip.startSec * fps);
+  if (local < 0) return null;
+  // ⚠️ **使える長さで頭打ちにする**（レビュー 🔴）＝差し込み口の「ここまで」（`endSec`）で焼く長さが
+  // 部品の尺より短いとき、書き出しは焼けた枚数で最後のコマに凍る。ここで同じだけ止めないと
+  // **プレビューだけが素材の先へ進む**（`endSec` を越えた絵が見える＝preview≠export・ADR-0001）。
+  // 上限は書き出しが焼く枚数と同じ数え方（Rust は `ceil(尺×fps)+1` 枚＝最後の番号は `ceil(尺×fps)`）。
+  return Math.min(local, Math.ceil(p.durationSec * fps));
 }
 
 /**
@@ -296,7 +302,7 @@ function stagedFrameIndexAt(clip: TimelineClip, frameIndex: number, fps: number)
  * 「何コマ目か」を先に決め、そのコマが指す素材の秒へ直す（トリム＋速さはこの1回だけ掛ける）。
  */
 export function videoSourceSecAt(p: VideoPlacement, timeSec: number, fps: number): number | null {
-  const local = stagedFrameIndexAt(p.clip, Math.round(timeSec * fps), fps);
+  const local = stagedFrameIndexAt(p, Math.round(timeSec * fps), fps);
   if (local == null) return null;
   return p.sourceStartSec + (local / fps) * p.speed;
 }
