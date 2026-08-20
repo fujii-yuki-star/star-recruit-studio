@@ -2102,7 +2102,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             // ⚠️ **使える長さを過ぎたら止める**（レビュー 🟡）＝素材の秒は頭打ちで一定になるが、
             // それだけでは `video` 要素が自分で先へ流れ続ける（絵も音も「ここまで」を越える）。
             // 書き出しは最後のコマで凍るので、ここでも止めて凍らせる（ADR-0001）。
-            held2: videoHoldsLastFrameAt(placement, frameTimeSec(doc, playheadSec)),
+            pastUsableLength: videoHoldsLastFrameAt(placement, frameTimeSec(doc, playheadSec)),
             // 合成の不透明度・切り抜きは**書き出しが `<g>` で掛けているもの**＝実映像にも同じだけ効かせる。
             // ⚠️ 書き出しは**入れ子で掛かる**（合成の単位の α × 要素の α）＝置き換えない（レビュー 🟡）。
             opacity: (item.composite?.opacity ?? 1) * (item.opacity ?? 1),
@@ -2163,7 +2163,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               canvas={canvasDims}
               sourceSec={v.sourceSec}
               speed={v.speed}
-              playing={isPlaying && !v.held2}
+              playing={isPlaying && !v.pastUsableLength}
               audioVolume={v.audioVolume}
               onUnplayable={() =>
                 setUnplayableVideoIds((prev) =>
@@ -2203,7 +2203,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           canvas={canvasDims}
                           sourceSec={v.sourceSec}
                           speed={v.speed}
-                          playing={isPlaying && !v.held2}
+                          playing={isPlaying && !v.pastUsableLength}
                           audioVolume={v.audioVolume}
                           onUnplayable={() =>
                             setUnplayableVideoIds((prev) =>

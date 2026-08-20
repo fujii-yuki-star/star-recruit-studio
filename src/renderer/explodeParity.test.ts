@@ -113,6 +113,60 @@ describe('バラしても枠の使い方が残る', () => {
     expect(slot).toMatchObject({ useOriginalAudio: true, originalAudioVolume: 0.8, sourceStartSec: 3, speed: 2 });
     expect(validateTimelineProject(r.doc)).toBe(true);
   });
+
+  // ⚠️ **素材既定だけに頼っている枠も持ち越す**（レビュー 🔴）＝per-use を書いていなくても、
+  // 描画・再生は `asset.clip` を継承して鳴らしている。**展開後は継承経路が無くなる**
+  //（直接置きは `asset.clip` を見ない）ので、ここで実効値を書き切らないと音が黙って消える。
+  it('素材の画面で決めた既定（per-use なし）も、実効値として持ち越す', () => {
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v', assetRefs: { main: 'asset_v' },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{
+        assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4',
+        metadata: { hasAudio: true },
+        clip: { useOriginalAudio: true, originalAudioVolume: 0.9, startSec: 2, speed: 0.5 },
+      }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    const r = explodeTemplateClip(d, 'clip_001', videoTemplate);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const slot = r.doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.slot && c.assetId === 'asset_v');
+    expect(slot).toMatchObject({ useOriginalAudio: true, originalAudioVolume: 0.9, sourceStartSec: 2, speed: 0.5 });
+  });
+
+  // ⚠️ **持っていけないものは黙って落とさない**＝「切り出す終わり」は直接置きの語彙に無いので、
+  // 縮めても縮めなくても絵が変わる。動きが付いた部品と同じ流儀で先に断る。
+  it('切り出す終わりを決めた動画が入っていたら、バラす前に断る', () => {
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v', assetRefs: { main: 'asset_v' },
+      slotClips: { main: { startSec: 1, endSec: 3 } },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { hasAudio: true } }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    const r = explodeTemplateClip(d, 'clip_001', videoTemplate);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_TRIM_END');
+  });
+
+  // 「ここまで」が置いた長さより長ければ、実質の切り詰めは無い＝断らない（過剰に止めない）。
+  it('切り出す終わりが置いた長さより先なら、そのままバラせる', () => {
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v', assetRefs: { main: 'asset_v' },
+      slotClips: { main: { startSec: 0, endSec: 20 } },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { hasAudio: true } }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    expect(explodeTemplateClip(d, 'clip_001', videoTemplate).ok).toBe(true);
+  });
 });
 
 describe('バラす前後で絵が変わらない', () => {

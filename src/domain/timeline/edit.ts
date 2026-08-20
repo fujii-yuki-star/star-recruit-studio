@@ -97,6 +97,13 @@ export const EDIT_BLOCKED = {
    * 動きの支点が変わって**絵がずれる**ので、先に動きを外してもらう。
    */
   explodeAnchor: 'TIMELINE_EDIT_EXPLODE_ANCHOR',
+  /**
+   * **切り出す終わりを決めた動画**が入っている部品はバラせない（#512 段3b レビュー 🔴）。
+   * ⚠️ 直接置きの語彙に「ここまで」が無い＝置いた長さを縮めると**絵が早く消え**、縮めないと
+   * **その先まで流れる**（どちらも決定23「前後で絵が変わらない」に反する）。黙って別の結果に
+   * しないよう、動きが付いた部品（`explodeAnchor`）と同じ流儀で先に断る。
+   */
+  explodeTrimEnd: 'TIMELINE_EDIT_EXPLODE_TRIM_END',
   /** 連動している字幕を置ける場所が無い（読み上げを動かせない理由・#633）。 */
   linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
   /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
