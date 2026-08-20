@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // 落とした位置の翻訳（#684）。ゴーストと実際の置き場所が同じ計算を通ることを、ここで固定する。
 import { describe, expect, it } from 'vitest';
-import { canvasPointAt, intersectRects, laneTimeAt, pointInRect, visibleRectOf } from './timelineDrop';
+import { canvasPointAt, clampToVisible, intersectRects, laneTimeAt, pointInRect, visibleRectOf } from './timelineDrop';
 
 const stage = { left: 100, top: 50, width: 640, height: 360 }; // 16:9 の枠
 
@@ -120,5 +120,43 @@ describe('visibleRectOf（スクロールで隠れた分を落とし先にしな
     rect(box, { left: 0, top: 0, width: 100, height: 50 });
     rect(inner, { left: 0, top: 0, width: 800, height: 50 });
     expect(visibleRectOf(inner)).toEqual({ left: 0, top: 0, right: 800, bottom: 50 });
+  });
+});
+
+// 運ぶ側（`useDragReorder`）と列の並べ替え（`TimelineProjectScreen`）が**共有する**丸めの規則。
+// 2か所に書いていたものを1つへ寄せた（#802-3 レビュー）＝ここが規則の持ち主。
+describe('clampToVisible（見えている範囲へ丸める）', () => {
+  const view = { left: 10, top: 20, right: 110, bottom: 220 };
+
+  it('外へ出た指を、その向きの端で止める', () => {
+    expect(clampToVisible(view, 500, 'y')).toBe(220);
+    expect(clampToVisible(view, -50, 'y')).toBe(20);
+    expect(clampToVisible(view, 500, 'x')).toBe(110);
+    expect(clampToVisible(view, -50, 'x')).toBe(10);
+  });
+
+  it('中にいる指はそのまま（丸めが位置を動かさない）', () => {
+    expect(clampToVisible(view, 100, 'y')).toBe(100);
+    expect(clampToVisible(view, 100, 'x')).toBe(100);
+  });
+
+  it('向きの取り違えで丸めない（縦の端で横を止めない）', () => {
+    // 横は 10〜110・縦は 20〜220＝同じ位置でも向きで結果が変わる。
+    expect(clampToVisible(view, 200, 'x')).toBe(110);
+    expect(clampToVisible(view, 200, 'y')).toBe(200);
+  });
+
+  // ⚠️ **測れないときは丸めない**＝潰れた矩形で丸めると、すべての位置が端へ潰れて
+  // 「どこへ運んでも先頭のすき間」になる（jsdom や、まだ描かれていない欄で実際に起きる）。
+  it('高さ・幅の無い箱では丸めない（全部が端へ潰れない）', () => {
+    const flat = { left: 10, top: 50, right: 110, bottom: 50 };
+    expect(clampToVisible(flat, 500, 'y')).toBe(500);
+    expect(clampToVisible(flat, 500, 'x')).toBe(110); // 横は測れている＝そちらは丸める
+    const thin = { left: 60, top: 20, right: 60, bottom: 220 };
+    expect(clampToVisible(thin, 500, 'x')).toBe(500);
+  });
+
+  it('測れる箱が無いとき（null）は丸めない', () => {
+    expect(clampToVisible(null, 500, 'y')).toBe(500);
   });
 });

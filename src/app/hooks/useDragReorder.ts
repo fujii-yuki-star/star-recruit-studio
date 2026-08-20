@@ -19,7 +19,7 @@
 import { useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { gapAtPosition, insertIndexForGap } from "../../domain/reorder";
-import { visibleRectOf } from "../timelineDrop";
+import { clampToVisible, visibleRectOf } from "../timelineDrop";
 import { useEdgeAutoScroll } from "./useEdgeAutoScroll";
 import type { ScrollAxis } from "./useEdgeAutoScroll";
 import { usePointerDrag } from "./usePointerDrag";
@@ -117,11 +117,8 @@ export function useDragReorder(
     // 生の位置で当てると**切り取られて見えていない項目**が落とし先になり、離すと画面外へ置かれる
     // （置く側は `visibleRectOf` で当てている＝2つの当たり判定を割らない）。
     const box = opts.scroller?.();
-    const view = box ? visibleRectOf(box) : null;
     const raw = axis === "x" ? ev.clientX : ev.clientY;
-    const lo = view ? (axis === "x" ? view.left : view.top) : -Infinity;
-    const hi = view ? (axis === "x" ? view.right : view.bottom) : Infinity;
-    const gap = gapAtPosition(bounds, Math.min(hi, Math.max(lo, raw)));
+    const gap = gapAtPosition(bounds, clampToVisible(box ? visibleRectOf(box) : null, raw, axis));
     if (gap != null) showGap(gap); // 決められないときは**いまの線を保つ**（余白でちらつかせない）
   };
 

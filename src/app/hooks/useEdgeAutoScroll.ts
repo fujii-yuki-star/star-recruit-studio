@@ -6,10 +6,13 @@
 // これをしないと「送られてはいるが、離すと送る前の時刻に落ちる」という食い違いになる。
 import { useCallback, useEffect, useRef } from "react";
 import { edgeScrollPxPerSec, nextScrollPos } from "../../domain/timeline/autoScroll";
-import { visibleRectOf } from "../timelineDrop";
+import { visibleRectOf, type DragAxis } from "../timelineDrop";
 
-/** 送る向き。`x`＝横スクロールの枠（タイムライン・場面カードの帯）／`y`＝縦（台本表の頁）。 */
-export type ScrollAxis = "x" | "y";
+/**
+ * 送る向き。`x`＝横スクロールの枠（タイムライン・場面カードの帯）／`y`＝縦（台本表の頁・列の並べ替え）。
+ * 型の持ち主は `timelineDrop`（丸めの規則と同じ場所）＝ここは呼び名の再輸出。
+ */
+export type ScrollAxis = DragAxis;
 
 /**
  * その指の位置で送る速さ。**送る向きと直交する側は、枠の中にいるときだけ**（#714 レビュー・2名が独立に指摘）。

@@ -92,15 +92,26 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // （#547 P2-3）。これが無いと復旧手段が「破棄して戻る」だけになり、1回の誤ドラッグで全編集の破棄を迫られる。
   const {
     value: draft,
-    set: setDraft,
-    undo: undoDraft,
-    redo: redoDraft,
+    set: setDraftRaw,
+    undo: undoDraftRaw,
+    redo: redoDraftRaw,
     canUndo,
     canRedo,
     beginGroup,
     endGroup,
     textGroup,
   } = useDraftHistory<Template | null>(() => (editing ? cloneTemplate(editing) : null));
+  /**
+   * ⚠️ **下書きが変わったら、出しっぱなしの確認はやり直す**（レビュー 🟡）。
+   * 出したまま中身が変わると、①消す相手がいなくなった確認が残る ②**取り消しで層が戻ると
+   * 押していないのに確認が生き返る**。確認は「いまの中身」への問いなので、変わったら聞き直す
+   * （焼き出しの確認が範囲や名前の変更でやり直しになるのと同じ流儀＝`06 §12`）。
+   * 取り消し・やり直しも下書きを変える入口なので**同じ扱い**（`setDraft` だけ塞いでも漏れる）。
+   */
+  const closeDraftConfirms = (): void => { setConfirmBulkDeleteIds(null); setBulkDeleteRefused(false); };
+  const setDraft: typeof setDraftRaw = (next) => { closeDraftConfirms(); setDraftRaw(next); };
+  const undoDraft = (): void => { closeDraftConfirms(); undoDraftRaw(); };
+  const redoDraft = (): void => { closeDraftConfirms(); redoDraftRaw(); };
   const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   // 主＝末尾選択（種別別エディタ・削除はこれを基準）。複数選択は一括移動／④[#307] グループ化の土台。
@@ -124,6 +135,18 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     usePanelLayout(PANEL_SCREEN.looks, defaultLayout, PANEL_IDS);
   // グループを中身ごと削除する確認（#551）。id で持つ＝選ぶグループが変わると確認が自動で解除される（#410 の流儀）。
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
+  /**
+   * まとめて消す確認（#802-4）。**boolean ではなく「確認した id」で持つ**（レビュー 🔴）＝
+   * boolean だと確認を出したまま別の層を選んだとき、**確認していないものを消す**。
+   * 同じ事故は隣の `confirmDeleteGroupId` で一度潰してある（そちらと同じ流儀）。
+   */
+  const [confirmBulkDeleteIds, setConfirmBulkDeleteIds] = useState<readonly string[] | null>(null);
+  /**
+   * まとめて消せないと断ったか（確認を出す前に断る＝押しても何も起きない、を作らない）。
+   * ⚠️ **理由の文を固めて持たない**＝毎回いまの選択から引き直すので、選び直したり層が増えて
+   * 消せるようになれば理由はひとりでに引っ込む（前の選択への断りが居座らない）。
+   */
+  const [bulkDeleteRefused, setBulkDeleteRefused] = useState(false);
   const [assetError, setAssetError] = useState<{ layerId: string; msg: string } | null>(null);
   // キーボード入口は全画面共通の判定（修飾キー・入力欄では奪わない）を共有し、実体だけ局所履歴に差し替える。
   // App の全体登録は UNDO_REDO_SCREENS で looks-edit を除外済み＝二重登録・二重 Undo にならない（#547 P1-1）。
@@ -167,6 +190,49 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setDraft({ ...draft!, layers: removeLayer(draft!.layers, id), groups: removeMembersFromGroups(draft!.groups ?? [], [id]) });
     setSelectedLayerIds((cur) => cur.filter((x) => x !== id));
   }
+  /**
+   * 選んでいる層を**まとめて消す**（#802-4）。場面編集の自由配置と同じ流儀＝
+   * 複数選んでいるときは**確認してから**まとめて消す（矢印は全部動くのに Delete だけ1枚、を作らない）。
+   *
+   * ⚠️ **最低1枚は残す**（`template.schema` の `layers.minItems:1`）＝全部選んで消そうとしても、
+   * 残せる枚数までにする…のではなく**何もしない**（どれが残るかを黙って決めない）。
+   * ⚠️ **固定したまとまりの層は消さない**（動かせないものは消せない＝ADR-0026②）。
+   */
+  /**
+   * その選択のうち**実際に消せる層**（レビュー ℹ️）。
+   * ⚠️ **いまの下書きに実在するものだけ**＝選択に残った古い id を数えると、件数が嘘になり
+   * 「最低1枚」の判定も過剰に効く（消せるはずの削除が黙って空振りする）。
+   */
+  function removableLayerIds(ids: readonly string[]): string[] {
+    return (draft?.layers ?? []).filter((l) => ids.includes(l.id) && !inLockedGroup(l.id)).map((l) => l.id);
+  }
+  /**
+   * まとめて消せない理由（`undefined`＝**出す理由が無い**＝消せるか、そもそも入口で押せない）。
+   * **グループ削除の断り方（`groupDeleteBlockedReason`）と同型**＝確認を出しておいて黙って
+   * 何も起きない、を作らない（§2-5）。可否そのものは `canBulkDelete` が持つ。
+   */
+  function bulkDeleteBlockedReason(ids: readonly string[]): string | undefined {
+    const removable = removableLayerIds(ids);
+    if (removable.length > 0 && (draft?.layers.length ?? 0) - removable.length < 1) {
+      return "この見た目パターンから全部が消えてしまうため削除できません（1つ残して選び直してください）";
+    }
+    return undefined; // ⚠️ 1つも消せない選択は**入口で押せなくする**（`canDeleteSelected`）＝到達しない文言を作らない
+  }
+  /** その選択でまとめて消せるか（＝`Delete` を渡してよいか）。 */
+  function canBulkDelete(ids: readonly string[]): boolean {
+    return removableLayerIds(ids).length > 0;
+  }
+  function onRemoveLayers(ids: readonly string[]) {
+    if (!draft) return;
+    const removable = removableLayerIds(ids);
+    if (!canBulkDelete(ids) || bulkDeleteBlockedReason(ids)) return;
+    setDraft({
+      ...draft,
+      layers: removable.reduce((acc, id) => removeLayer(acc, id), draft.layers),
+      groups: removeMembersFromGroups(draft.groups ?? [], [...removable]),
+    });
+    setSelectedLayerIds((cur) => cur.filter((x) => !removable.includes(x)));
+  }
   // 一覧の行名（#547 P2-4）。同じ種別が複数あると「文字」が2行並んで見分けられないので、
   // テキスト層は差し込み先（見出し／本文…）を併記する。場面編集の FREE 一覧が名前＋中身で区別できるのと揃える。
   const layerRowName = (l: Layer): string => {
@@ -187,11 +253,13 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
   // 複数選択（#306）：Shift+クリックでトグル・マーキーで集合置換・一括移動。
   function selectLayer(id: string | null, additive?: boolean) {
+    setBulkDeleteRefused(false); // 選び直したら断りは下ろす（場面編集の確認フラグと同じ流儀）
     setActiveGroupId(null); // レイヤー選択はグループ選択を解除（排他）
     if (id == null) { setSelectedLayerIds([]); return; }
     setSelectedLayerIds((cur) => (additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id]));
   }
   function selectLayerMany(ids: string[]) {
+    setBulkDeleteRefused(false);
     setActiveGroupId(null);
     setSelectedLayerIds(ids);
   }
@@ -250,19 +318,39 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
    * `Delete` で消す（#788-3）。**一覧の削除ボタンと同じ条件・同じ入口**＝最後の1枚は消さない
    *（`template.schema` の `layers.minItems:1`）。消せないときは**渡さない**＝押しても何も起きない、を作らない。
    */
-  const canDeleteSelected = selectedLayerId != null && draft.layers.length > 1 && !inLockedGroup(selectedLayerId);
-  const canvasKbdActive =
-    !isExporting
-    && busyAction === null
-    && !confirmDelete && !confirmDiscard && confirmDeleteGroupId == null
-    && (selectedLayerIds.length > 0 || (effectiveActiveGroupId != null && activeGroup?.locked !== true));
-  const onCanvasDelete = (): void => { if (selectedLayerId) onRemoveLayer(selectedLayerId); };
+  // ⚠️ **枚数で規則を割らない**（レビュー 🟡・ADR-0026②）＝1枚でも複数でも同じ関数から採る。
+  // 単数だけ「実在するか」を見ていないと、取り消しで消えた層が選択に残ったとき `Delete` を奪って
+  // 何も起きず、しかも**空の取り消しが1つ積まれる**（この画面唯一の戻り道を食う）。
+  const canDeleteSelected = draft.layers.length > 1 && canBulkDelete(selectedLayerIds);
   // グループ削除の確認を出すか（#551 レビュー P2）。**削除できる状態のときだけ**出す＝確認を開いたまま
   // 別の場所でロック/レイヤー削除が起きたら確認を引っ込め、理由つきの無効ボタンへ戻す（サイレント失敗を作らない）。
   const showGroupDeleteConfirm =
     !!effectiveActiveGroupId &&
     confirmDeleteGroupId === effectiveActiveGroupId &&
     !groupDeleteBlockedReason(effectiveActiveGroupId);
+  // ⚠️ **確認が出ていないなら奪わない**（レビュー 🟡）＝門は「持っている状態」ではなく**見えているか**を見る。
+  // 状態だけ見ると、確認が引っ込んだのに id が残っている間**矢印も `Delete` も死に、理由は何も出ない**。
+  const showBulkDeleteConfirm =
+    confirmBulkDeleteIds != null
+    && canBulkDelete(confirmBulkDeleteIds)
+    && !bulkDeleteBlockedReason(confirmBulkDeleteIds);
+  const canvasKbdActive =
+    !isExporting
+    && busyAction === null
+    && !confirmDelete && !confirmDiscard && !showGroupDeleteConfirm && !showBulkDeleteConfirm
+    && (selectedLayerIds.length > 0 || (effectiveActiveGroupId != null && activeGroup?.locked !== true));
+  // ⚠️ **複数選んでいるならまとめて消す**（#802-4）＝矢印は選択ぜんぶ動くのに Delete だけ主の1枚、
+  // という割れを作らない（同じ部品・同じキーで挙動を割らない・ADR-0026②）。確認は場面編集と同じ流儀。
+  const onCanvasDelete = (): void => {
+    if (selectedLayerIds.length >= 2) {
+      // ⚠️ **消せないなら確認を出さない**（レビュー 🔴）＝出しておいて何も起きないのが一番わるい。
+      if (bulkDeleteBlockedReason(selectedLayerIds)) { setBulkDeleteRefused(true); return; }
+      setBulkDeleteRefused(false);
+      setConfirmBulkDeleteIds([...selectedLayerIds]);
+      return;
+    }
+    if (selectedLayerId) onRemoveLayer(selectedLayerId);
+  };
   // グループ化できる件数（既に別グループのものは除外）。ボタンの活性判定に使う（サイレント no-op を防ぐ）。
   const groupableCount = selectedLayerIds.filter((id) => topGroupOfMember(tplGroups, id) == null).length;
   function selectGroup(groupId: string | null) {
@@ -633,6 +721,28 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               onCancel={() => setConfirmDeleteGroupId(null)}
               onConfirm={() => { deleteGroupWithMembers(effectiveActiveGroupId); setConfirmDeleteGroupId(null); }}
             />
+          )}
+          {/* まとめて消せなかった理由（#802-4）＝確認を出す前に断る（押しても何も起きない、を作らない）。 */}
+          {bulkDeleteRefused && bulkDeleteBlockedReason(selectedLayerIds) && (
+            <p className="field-hint mt" role="alert">{bulkDeleteBlockedReason(selectedLayerIds)}</p>
+          )}
+          {/* まとめて消す確認（#802-4）＝`Delete` で複数選んでいるときに出す。場面編集の一括削除と同じ流儀。
+              ⚠️ **消すのは「確認した集合」**（`confirmBulkDeleteIds`）＝確認中に選び直しても、
+              確認していないものは消さない。⚠️ 消せなくなったら**確認を引っ込める**（隣のグループ削除と同型）。 */}
+          {showBulkDeleteConfirm && confirmBulkDeleteIds && (
+            <div className="row gap-sm mt" style={{ alignItems: "center", flexWrap: "wrap" }}>
+              <span className="text-sm">
+                {removableLayerIds(confirmBulkDeleteIds).length}件をまとめて削除しますか？
+                {/* ⚠️ ロック中の分は消せない＝**件数が減った理由をその場に出す**（黙って数を減らさない）。 */}
+                {removableLayerIds(confirmBulkDeleteIds).length < confirmBulkDeleteIds.length
+                  && "（ロック中のまとまりに入っている分は残ります）"}
+              </span>
+              <button className="btn btn-ghost text-sm" onClick={() => setConfirmBulkDeleteIds(null)}>やめる</button>
+              <button
+                className="btn btn-danger text-sm"
+                onClick={() => { onRemoveLayers(confirmBulkDeleteIds); setConfirmBulkDeleteIds(null); }}
+              >削除する</button>
+            </div>
           )}
           {/* グループ（ADR-0022・#307）：2つ以上選択でグループ化／選択中グループは解除。拡縮・回転・非表示等は part2b。 */}
           {(selectedLayerIds.length >= 2 || effectiveActiveGroupId) && !showGroupDeleteConfirm && (
