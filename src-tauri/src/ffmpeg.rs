@@ -3235,8 +3235,17 @@ fn export_video_impl(
             // パス指定（#512 段2＝動画の元の音）は**そのまま入力にする**。中身を運ばないので、
             // 大きな動画でも文字列にならない。存在しなければ理由つきで断る（黙って無音にしない）。
             if let Some(rel) = r.audio_path.as_deref() {
-                let pid = project_id.clone().unwrap_or_default();
-                let src = resolve_project_file(&app, &pid, rel)?;
+                // ⚠️ **プロジェクトが判らないなら、その理由で断る**（レビュー 🟡・§2-5）。
+                // 空文字で流すと `is_safe_project_id` に落ちて「アプリを再起動して」という
+                // **的外れな案内**になる（本当に必要なのは保存）。同ファイルの動画ありシーン・
+                // クリップ元音声の2か所と**同じ断り方**に揃える（同じ事情に別の文言を出さない）。
+                let pid = project_id.as_deref().ok_or_else(|| {
+                    export_failure(
+                        "video clip audio without project_id",
+                        "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                    )
+                })?;
+                let src = resolve_project_file(&app, pid, rel)?;
                 if !src.exists() {
                     return Err(export_failure(
                         format!("bgm src missing: {}", src.display()),
