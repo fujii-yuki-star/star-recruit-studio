@@ -15,7 +15,7 @@ import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
 import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
-import { clipOriginalAudio, isDrawnClip, videoAssetIds, videoPlacementsOfClip } from './video';
+import { isDrawnClip, placementOriginalAudio, videoAssetIds, videoPlacementsOf, videoPlacementsOfClip } from './video';
 import type { Template } from '../template/types';
 import type { TimelineClip, TimelineProject } from './types';
 
@@ -59,11 +59,11 @@ export function frameTimeAt(index: number, fps: number): number {
  * 書き出しで置く音1本ぶん（FFmpeg の「配置＋切り出し＋音量＋フェード＋ミックス」に対応）。
  * 場面形式の BGM 区間（`BgmRunInput`）と**同じ形**＝混ぜる側を作り直さない。
  *
- * **直接置いた動画の元の音もここに出る**（#512 段2）＝鳴らす設定にした部品だけ（`clipOriginalAudio`）。
+ * **直接置いた動画の元の音もここに出る**（#512 段2）＝鳴らす設定にした部品だけ（`placementOriginalAudio`）。
  * 音源は**ファイルのパス**で渡す（`assetPath`）＝動画を base64 にしない。差し込み口の動画は段3。
  */
 export interface TimelineAudioRun {
-  /** どのクリップの音か（音源の解決に使う）。 */
+  /** どの置き場所の音か（**識別用**＝差し込み口は `<部品 id>/<層 id>`。音源は `sourceKey`/`assetPath` で引く）。 */
   clipId: string;
   /** 音源を見分けるキー（`audioSourceKey` と同じ規則）。 */
   sourceKey: string;
@@ -116,7 +116,10 @@ export interface TimelineAudioRun {
  * `afade` として掛けるので、ここでは**素の音量**と**フェードの秒数（切り詰め済み）**を渡す
  * ＝フェード込みの値から割り戻すような当て推量をしない。
  */
-export function timelineAudioRuns(doc: TimelineProject): TimelineAudioRun[] {
+export function timelineAudioRuns(
+  doc: TimelineProject,
+  templateOf?: (templateId: string) => Template | undefined,
+): TimelineAudioRun[] {
   const runs: TimelineAudioRun[] = [];
   for (const clip of doc.clips) {
     const sourceKey = audioSourceKeyOfClip(clip);
@@ -142,23 +145,28 @@ export function timelineAudioRuns(doc: TimelineProject): TimelineAudioRun[] {
       loop: audioLoops(clip),
     });
   }
-  // 直接置いた動画の**元の音**（#512 段2）。鳴るかどうかの判定は `clipOriginalAudio` の1か所
-  // ＝仕上がり確認で聞こえたものだけが書き出しに出る。
-  // ⚠️ **付けないものは渡さない**＝音量の変化・前後のフェードは段2 の対象外なので 0/未指定で送る
+  // 動画の**元の音**（#512 段2＝直接置き／段3b＝差し込み口）。鳴るかどうかの判定は
+  // `placementOriginalAudio` の1か所＝仕上がり確認で聞こえたものだけが書き出しに出る。
+  // ⚠️ **付けないものは渡さない**＝音量の変化・前後のフェードは対象外なので 0/未指定で送る
   //（受け側の既定と同じ＝欄が無いのに値だけ効く、を作らない）。
   // ⚠️ **繰り返さない**＝置いた長さより素材が短ければそこで終わる（絵も終わっている）。
-  for (const clip of doc.clips) {
-    const org = clipOriginalAudio(doc, clip);
+  for (const placement of videoPlacementsOf(doc, templateOf)) {
+    const org = placementOriginalAudio(doc, placement);
     if (!org) continue;
     const path = doc.assets.find((a) => a.assetId === org.assetId)?.filePath;
     if (!path) continue; // 保存先が判らない＝渡すものが無い（ファイルの欠けは Rust 側が理由つきで断る）
+    const clip = placement.clip;
     runs.push({
-      clipId: clip.id,
+      // ⚠️ **置き場所ごとに別の音**（段3b）＝1つの部品に差し込み口ぶんの動画がありうるので、
+      // 部品 id だけだと同じ id の run が並び、鳴らす側で見分けられない。
+      clipId: placement.layerId == null ? clip.id : `${clip.id}/${placement.layerId}`,
       sourceKey: audioSourceKey({ clipId: clip.id, assetId: org.assetId }),
       assetPath: path,
       fileExt: extOf(path),
       delaySec: clip.startSec,
-      playSec: clipEndSec(clip) - clip.startSec,
+      // ⚠️ **使える長さで頭打ち**＝「ここまで」で切った動画の音が、その先まで鳴り続けない
+      //（絵は最後のコマで凍るので、音だけ流れると食い違う）。
+      playSec: Math.min(clipEndSec(clip) - clip.startSec, placement.durationSec),
       sourceStartSec: org.sourceStartSec,
       speed: org.speed,
       volume: org.volume,

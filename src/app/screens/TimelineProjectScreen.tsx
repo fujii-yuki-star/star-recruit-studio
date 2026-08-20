@@ -15,7 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_SLOT_VIDEO_AUDIO_PENDING, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
@@ -36,7 +36,7 @@ import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { assignableAssetsFor } from "../../domain/template/slotAssign";
-import { canUseOriginalAudio, clipOriginalAudio, compositeSpansOthers, cropPivotDiffers, videoAssetIds, videoAudioState, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
+import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
@@ -342,6 +342,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
     addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
     setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume,
+    setSelectedClipSlotAudio,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
     addAsset, addAssetByPath, importError, clearImportError, isImporting,
@@ -783,6 +784,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ? templates.find((t) => t.templateId === selected.templateId)
     : undefined;
   const slotLayers = selectedTemplate?.layers.filter((l) => templateSlotIds(selectedTemplate.layers).has(l.id)) ?? [];
+  // その部品の差し込み口に入っている動画（#512 段3b）＝元の音の欄を出す先。判定は domain の1か所。
+  const slotPlacements = doc && selected ? videoPlacementsOfClip(doc, selected, { templateOf }).filter((p) => p.use === "slot") : [];
   const slotNames = slotLabelsFor(slotLayers);
   // 固定した列の部品は中身も変えられない（domain 側で止まる）＝欄を押せなくして理由を出す
   // ＝入力しても黙って元へ戻る、を作らない（§2-5）。
@@ -2058,7 +2061,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const videoAssetIdSet = videoAssetIds(doc);
   // **動画の実映像**（#512 段1）＝書き出しで実フレームが出るので、プレビューにも同じ絵を出す
   // （出さないと「見えていたものと違う動画が出る」＝ADR-0001 が破れる）。分割は書き出しと**同じ関数**
-  // （`splitVideoSceneSvgMulti`）＝穴を開けて `video` 要素で埋める。元の音は段2（`clipOriginalAudio`）。
+  // （`splitVideoSceneSvgMulti`）＝穴を開けて `video` 要素で埋める。元の音は段2（`placementOriginalAudio`）。
   const videoPlay = shownLayout
     ? videoPlacementsOf(doc, templateOf)
         .map((placement) => {
@@ -2093,10 +2096,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           return {
             clip, placement, held, itemId: item.id, src, sourceSec, speed,
             fit: item.fit, align: item.align,
-            // 元の音（#512 段2）。鳴るかどうか・音量は domain の1か所が決める（書き出しと同じ値）。
-            // ⚠️ **差し込み口の元の音は段3b**＝いまは鳴らない（画面がその場で知らせる）。
-            audioVolume:
-              doc && placement.layerId == null ? (clipOriginalAudio(doc, clip)?.volume ?? undefined) : undefined,
+            // 元の音（#512 段2・段3b）。鳴るかどうか・音量は domain の1か所が決める（書き出しと同じ値）。
+            // 直接置きも差し込み口も**同じ関数**を通る＝置き場所で挙動を割らない。
+            audioVolume: doc ? (placementOriginalAudio(doc, placement)?.volume ?? undefined) : undefined,
+            // ⚠️ **使える長さを過ぎたら止める**（レビュー 🟡）＝素材の秒は頭打ちで一定になるが、
+            // それだけでは `video` 要素が自分で先へ流れ続ける（絵も音も「ここまで」を越える）。
+            // 書き出しは最後のコマで凍るので、ここでも止めて凍らせる（ADR-0001）。
+            held2: videoHoldsLastFrameAt(placement, frameTimeSec(doc, playheadSec)),
             // 合成の不透明度・切り抜きは**書き出しが `<g>` で掛けているもの**＝実映像にも同じだけ効かせる。
             // ⚠️ 書き出しは**入れ子で掛かる**（合成の単位の α × 要素の α）＝置き換えない（レビュー 🟡）。
             opacity: (item.composite?.opacity ?? 1) * (item.opacity ?? 1),
@@ -2147,7 +2153,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               `dangerouslySetInnerHTML` を使うので、中に子を足せない。見えない・触れない姿で流す。 */}
           {videoHeldAudible.map((v) => (
             <TimelineSlotVideo
-              key={v.clip.id}
+              // ⚠️ **鍵も置き場所ごと**（レビュー 🟡）＝部品 id だと差し込み口が2つある部品で重なり、
+              // 取り違えて片方しか鳴らない（書き出しには2本入るので食い違う）。
+              key={v.itemId}
               audioOnly
               src={v.src}
               rect={{ x: 0, y: 0, w: 0, h: 0 }}
@@ -2155,11 +2163,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               canvas={canvasDims}
               sourceSec={v.sourceSec}
               speed={v.speed}
-              playing={isPlaying}
+              playing={isPlaying && !v.held2}
               audioVolume={v.audioVolume}
               onUnplayable={() =>
                 setUnplayableVideoIds((prev) =>
-                  v.clip.assetId != null && !prev.has(v.clip.assetId) ? new Set([...prev, v.clip.assetId]) : prev,
+                  prev.has(v.placement.assetId) ? prev : new Set([...prev, v.placement.assetId]),
                 )
               }
             />
@@ -2195,7 +2203,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           canvas={canvasDims}
                           sourceSec={v.sourceSec}
                           speed={v.speed}
-                          playing={isPlaying}
+                          playing={isPlaying && !v.held2}
                           audioVolume={v.audioVolume}
                           onUnplayable={() =>
                             setUnplayableVideoIds((prev) =>
@@ -2616,10 +2624,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 優先されるので、中に置くと**一度畳んだ人には二度と見えない**。
                 ・音が入っていない動画（#512 段2）＝欄を出さずにその場で理由を出す（§2-5）
                 ・実映像にできないとき（まとまりのフェード中・回した切り抜き）＝黙って静止画に見せない */}
-            {/* 差し込み口に入れた動画（#512 段3）＝絵は映るが元の音はまだ流れない。黙って無音にしない。 */}
-            {doc && videoPlacementsOfClip(doc, selected, { templateOf }).some((p) => p.use === "slot") && (
-              <p className="field-hint">{TIMELINE_SLOT_VIDEO_AUDIO_PENDING}</p>
-            )}
             {selected.assetId != null && videoAssetIdSet.has(selected.assetId) && (
               <>
                 {/* 元の音（#512 段2）＝**鳴らせない動画にはその場で理由を出す**（§2-5）。
@@ -3494,6 +3498,43 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             : "入れられる写真がありません。「素材・文字・図形を置く」の欄で写真を取り込んでください。"}
                         </span>
                       )}
+                      {/* その枠に入れた動画の**元の音**（#512 段3b）。直接置きの「この動画の音」と同じ形
+                          ＝同じ概念を枠によって別の言い方にしない（ADR-0026②）。
+                          ⚠️ **音の入った動画が入っている枠にだけ出す**＝押せない欄を並べない。
+                          音が無い／確かめられない枠には、直接置きと同じ2文で理由を出す（§2-5）。 */}
+                      {(() => {
+                        const p = slotPlacements.find((x) => x.layerId === layer.id);
+                        if (!p) return null;
+                        const state = placementAudioState(doc, p);
+                        if (state === "none") return <span className="field-hint">{TIMELINE_VIDEO_NO_AUDIO}</span>;
+                        if (state === "unknown") return <span className="field-hint">{TIMELINE_VIDEO_AUDIO_UNKNOWN}</span>;
+                        return (
+                          <>
+                            <label className="toggle-row">
+                              <input
+                                type="checkbox"
+                                checked={p.useOriginalAudio}
+                                {...editGuard()}
+                                onChange={(e) => setSelectedClipSlotAudio(layer.id, { useOriginalAudio: e.target.checked })}
+                              />
+                              <span>この動画に入っている音を流す</span>
+                            </label>
+                            <NumberField
+                              label="音量"
+                              step={VOLUME_STEP}
+                              min={VOLUME_MIN}
+                              max={VOLUME_MAX}
+                              value={selected.slotClips?.[layer.id]?.originalAudioVolume ?? null}
+                              // ⚠️ 空欄＝**継承**なので、継承したときに実際に鳴る音量を出す
+                              // （定数を出すと、素材側で決めた音量を隠して嘘の目安になる）。
+                              placeholder={`指定なし（${Math.round(p.originalAudioVolume * 100)}%）`}
+                              {...editGuard()}
+                              onChange={(v) => setSelectedClipSlotAudio(layer.id, { originalAudioVolume: v })}
+                              onClear={() => setSelectedClipSlotAudio(layer.id, { originalAudioVolume: null })}
+                            />
+                          </>
+                        );
+                      })()}
                     </label>
                   ))}
                   {textKeys.map((key) => (

@@ -46,6 +46,10 @@ export interface VideoPlacement {
   durationSec: number;
   /** 速さ（>0）＝同上。 */
   speed: number;
+  /** 元の音を鳴らす設定か（#512 段2・段3b）＝直接置きはクリップ自身、差し込み口は `slotClips` の解決値。 */
+  useOriginalAudio: boolean;
+  /** 元の音の音量（0〜1.5・既定は `ORIGINAL_AUDIO_VOLUME`）。 */
+  originalAudioVolume: number;
 }
 
 /**
@@ -65,6 +69,8 @@ export function videoPlacementsOfClip(
     return [{
       clip, use: 'direct', layerId: null, assetId: direct,
       sourceStartSec: clip.sourceStartSec ?? 0, durationSec: clip.durationSec, speed: effectiveSpeed(clip),
+      useOriginalAudio: clip.useOriginalAudio === true,
+      originalAudioVolume: clampVolume(clip.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME),
     }];
   }
   // ⚠️ **どの枠が動画を受けるかは見た目パターンが決める**（レビュー 🔴）＝場面形式と同じ規則
@@ -94,6 +100,9 @@ export function videoPlacementsOfClip(
       durationSec: placedDurationWithin(clip.durationSec, resolved.startSec, resolved.endSec, clampSpeed(resolved.speed ?? SPEED_DEFAULT)),
       // ⚠️ 速さも**場面形式と同じクランプ**（schema の 0.5〜2.0＝`slotClips.speed`）を通す。
       speed: clampSpeed(resolved.speed ?? SPEED_DEFAULT),
+      // 元の音（#512 段3b）＝差し込み口は `slotClips` の語彙（場面形式と同じ・`resolveSlotClip` 解決済み）。
+      useOriginalAudio: resolved.useOriginalAudio === true,
+      originalAudioVolume: clampVolume(resolved.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME),
     });
   }
   return out;
@@ -156,42 +165,43 @@ export function isDrawnClip(doc: TimelineProject, clip: TimelineClip): boolean {
 }
 
 /**
- * その部品の**元の音**（#512 段2）。`null`＝鳴らない。
+ * その**置き場所**の元の音（#512 段2・段3b）。`null`＝鳴らない。
  *
  * ⚠️ **場面形式と同じ規準**（ADR-0026②＝`findVideoSlot.toVideoSlotInfo`）：
  * - **既定は鳴らさない**（`useOriginalAudio` 未指定＝false）＝既に作った動画の音が黙って変わらない。
  * - **素材に音が入っているときだけ**（`metadata.hasAudio`）＝音の無いファイルへ音の取り出しを頼むと
  *   書き出しが失敗する（場面形式が同じ理由で同じ門を置いている）。
- * - 音量は `originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME`、値域は `clampVolume` を共有。
- * - ⚠️ **描かれない部品は鳴らない**（`isDrawnClip`）＝隠したのに聞こえる、を作らない
- *   （音のクリップで `audioCuesAt` が置いている規則と同じ）。
+ * - 音量・速さ・使い始めは**置き場所が解決済みの値**（直接置き＝クリップ自身／差し込み口＝`slotClips`）。
+ * - ⚠️ **描かれない置き場所は鳴らない**（`videoPlacementsOf` が既に除いている）＝隠したのに聞こえる、を
+ *   作らない（音のクリップで `audioCuesAt` が置いている規則と同じ）。
  *
  * 再生（仕上がり確認）・書き出し・画面の欄が**この1つ**を通る＝聞いた音と書き出した音が一致する。
  */
-export function clipOriginalAudio(
+export function placementOriginalAudio(
   doc: TimelineProject,
-  clip: TimelineClip,
+  p: VideoPlacement,
 ): { assetId: string; volume: number; speed: number; sourceStartSec: number } | null {
-  const assetId = videoAssetIdOfClip(clip, videoAssetIds(doc));
-  if (assetId == null || !isDrawnClip(doc, clip)) return null;
-  if (clip.useOriginalAudio !== true) return null;
-  if (doc.assets.find((a) => a.assetId === assetId)?.metadata?.hasAudio !== true) return null;
-  return {
-    assetId,
-    volume: clampVolume(clip.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME),
-    speed: effectiveSpeed(clip),
-    sourceStartSec: clip.sourceStartSec ?? 0,
-  };
+  if (!p.useOriginalAudio) return null;
+  if (doc.assets.find((a) => a.assetId === p.assetId)?.metadata?.hasAudio !== true) return null;
+  return { assetId: p.assetId, volume: p.originalAudioVolume, speed: p.speed, sourceStartSec: p.sourceStartSec };
 }
 
 /**
  * その部品で**元の音を選べるか**（#512 段2）＝素材に音が入っている動画の部品。
  * ⚠️ 画面（欄を出すか）・編集（値を置けるか）が**同じ述語**を通る＝
  * 「置けるのに欄が出ない」「出るのに断られる」を作らない（`isAudioClip` と同じ流儀）。
- * ⚠️ **隠しているかは見ない**＝隠した部品でも設定は変えられる（鳴るかどうかだけが `clipOriginalAudio`）。
+ * ⚠️ **隠しているかは見ない**＝隠した部品でも設定は変えられる（鳴るかどうかだけが `placementOriginalAudio`）。
  */
 export function canUseOriginalAudio(doc: TimelineProject, clip: TimelineClip): boolean {
   return videoAudioState(doc, clip) === 'available';
+}
+
+/**
+ * その**置き場所**で元の音を選べるか（#512 段3b）＝素材に音が入っている置き場所。
+ * ⚠️ 画面（欄を出すか）・編集（値を置けるか）が**同じ述語**を通る。
+ */
+export function placementAudioState(doc: TimelineProject, p: VideoPlacement): AudioState {
+  return audioStateOfAsset(doc, p.assetId);
 }
 
 /**
@@ -200,12 +210,16 @@ export function canUseOriginalAudio(doc: TimelineProject, clip: TimelineClip): b
  * 「音が入っていません」と断定すると**嘘の理由**になり、次の行動も誤る（実際は取り込み直し）。
  * 場面形式も同じ2文で出し分けている（`ClipDetailControls`＝ADR-0026②）。
  */
-export function videoAudioState(
-  doc: TimelineProject,
-  clip: TimelineClip,
-): 'available' | 'none' | 'unknown' | 'notVideo' {
+export function videoAudioState(doc: TimelineProject, clip: TimelineClip): AudioState | 'notVideo' {
   const assetId = videoAssetIdOfClip(clip, videoAssetIds(doc));
   if (assetId == null) return 'notVideo';
+  return audioStateOfAsset(doc, assetId);
+}
+
+/** 素材に音が入っているか（`unknown`＝取り込みのときに調べられなかった）。 */
+export type AudioState = 'available' | 'none' | 'unknown';
+
+function audioStateOfAsset(doc: TimelineProject, assetId: string): AudioState {
   const hasAudio = doc.assets.find((a) => a.assetId === assetId)?.metadata?.hasAudio;
   if (hasAudio === true) return 'available';
   return hasAudio === false ? 'none' : 'unknown';
@@ -291,6 +305,17 @@ function stagedFrameIndexAt(p: VideoPlacement, frameIndex: number, fps: number):
   // **プレビューだけが素材の先へ進む**（`endSec` を越えた絵が見える＝preview≠export・ADR-0001）。
   // 上限は書き出しが焼く枚数と同じ数え方（Rust は `ceil(尺×fps)+1` 枚＝最後の番号は `ceil(尺×fps)`）。
   return Math.min(local, Math.ceil(p.durationSec * fps));
+}
+
+/**
+ * その時刻に、その置き場所が**最後のコマで凍っているか**（#512 段3b レビュー 🟡）。
+ *
+ * 差し込み口の「ここまで」（`endSec`）で使える長さが部品の尺より短いとき、書き出しは焼けた枚数で
+ * 最後のコマに凍る。プレビューは素材の秒（`videoSourceSecAt`）が一定になるだけなので、
+ * **`video` 要素は自分で先へ流れ続ける**（絵も音も「ここまで」を越える）。ここが真の間は流すのをやめる。
+ */
+export function videoHoldsLastFrameAt(p: VideoPlacement, timeSec: number): boolean {
+  return timeSec - p.clip.startSec >= p.durationSec;
 }
 
 /**

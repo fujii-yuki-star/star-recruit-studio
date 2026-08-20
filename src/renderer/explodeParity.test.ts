@@ -86,6 +86,35 @@ function exploded(d: TimelineProject, clipId = 'clip_001'): TimelineProject {
   return r.doc;
 }
 
+// ⚠️ **絵だけでなく「枠の使い方」も持ち越す**（#512 段3b レビュー 🟡）＝差し込み口の元の音・
+// 切り出す先頭・速さを捨てると、バラした瞬間に**鳴っていた音が黙って消える**（決定23）。
+describe('バラしても枠の使い方が残る', () => {
+  const videoTemplate = {
+    schemaVersion: '1.0', templateId: 'tmpl_v', name: '動画枠', category: 'opening',
+    aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+    layers: [{ id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 }],
+  } as unknown as Template;
+
+  it('元の音・切り出す先頭・速さがクリップ自身の語彙へ移る', () => {
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v',
+      assetRefs: { main: 'asset_v' },
+      slotClips: { main: { useOriginalAudio: true, originalAudioVolume: 0.8, startSec: 3, speed: 2 } },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { hasAudio: true } }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    const r = explodeTemplateClip(d, 'clip_001', videoTemplate);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const slot = r.doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.slot && c.assetId === 'asset_v');
+    expect(slot).toMatchObject({ useOriginalAudio: true, originalAudioVolume: 0.8, sourceStartSec: 3, speed: 2 });
+    expect(validateTimelineProject(r.doc)).toBe(true);
+  });
+});
+
 describe('バラす前後で絵が変わらない', () => {
   it('置いた中身（背景・素材・ロゴ・文字・字幕・立ち絵・図形）がそのまま出る', () => {
     const before = doc();

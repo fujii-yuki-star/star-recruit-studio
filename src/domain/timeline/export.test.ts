@@ -111,6 +111,79 @@ const videoDoc = (over: Partial<TimelineClip> = {}, docOver: Partial<TimelinePro
   });
 
 // 元の音（#512 段2）＝**再生で聞こえたものが書き出しにも出る**（ADR-0001）。
+// 差し込み口の元の音（#512 段3b）＝直接置きと同じ関数を通る（置き場所で挙動を割らない）。
+describe('timelineAudioRuns（差し込み口の元の音）', () => {
+  const tmpl = () =>
+    ({
+      schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+      aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+      layers: [
+        { id: 'left', type: 'slot', x: 0, y: 0, w: 960, h: 1080 },
+        { id: 'right', type: 'slot', x: 960, y: 0, w: 960, h: 1080 },
+      ],
+    }) as unknown as Template;
+  const twoVideos = (slotClips: Record<string, Record<string, unknown>>) =>
+    doc({
+      assets: [
+        { assetId: 'asset_v1', assetType: 'video', displayName: '動画1', filePath: 'v1.mp4', metadata: { hasAudio: true } },
+        { assetId: 'asset_v2', assetType: 'video', displayName: '動画2', filePath: 'v2.mp4', metadata: { hasAudio: true } },
+      ],
+      clips: [clip('clip_t', {
+        kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001', startSec: 1, durationSec: 4,
+        templateId: 'tmpl_001', assetRefs: { left: 'asset_v1', right: 'asset_v2' },
+        slotClips: slotClips as never,
+      })],
+    });
+
+  it('鳴らす設定にした枠だけが出る（枠ごとに別の音）', () => {
+    const runs = timelineAudioRuns(twoVideos({ left: { useOriginalAudio: true } }), tmpl);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      clipId: 'clip_t/left', // ⚠️ 部品 id だけだと、同じ id の音が並んで見分けられない
+      assetPath: 'v1.mp4',
+      delaySec: 1,
+      playSec: 4,
+      volume: 0.2,
+      loop: false,
+    });
+  });
+
+  it('枠ごとに音量・速さ・使い始めを解く（場面形式と同じ語彙）', () => {
+    const runs = timelineAudioRuns(
+      twoVideos({ right: { useOriginalAudio: true, originalAudioVolume: 0.8, speed: 2, startSec: 3 } }),
+      tmpl,
+    );
+    expect(runs[0]).toMatchObject({ clipId: 'clip_t/right', speed: 2, sourceStartSec: 3, volume: 0.8 });
+  });
+
+  // ⚠️ **「ここまで」で切った動画の音は、その先まで鳴らさない**＝絵は最後のコマで凍るので、
+  // 音だけ流れると食い違う。
+  it('「ここまで」で切った枠は、音も同じところで終わる', () => {
+    const runs = timelineAudioRuns(twoVideos({ left: { useOriginalAudio: true, startSec: 2, endSec: 4 } }), tmpl);
+    expect(runs[0].playSec).toBe(2); // 置いたのは4秒だが、使える素材は2秒ぶん
+  });
+
+  it('見た目パターンを渡さなければ鳴らない（枠を解決できない）', () => {
+    expect(timelineAudioRuns(twoVideos({ left: { useOriginalAudio: true } }))).toEqual([]);
+  });
+
+  it('鳴らす設定でなければ出ない', () => {
+    expect(timelineAudioRuns(twoVideos({}), tmpl)).toEqual([]);
+  });
+
+  // ⚠️ **同じ部品の2つの枠が同時に鳴る**＝`clipId` を部品 id だけにすると衝突して見分けられない
+  //（この形が `<部品 id>/<層 id>` にした理由そのもの）。
+  it('同じ部品の2つの枠が同時に鳴っても、見分けられる', () => {
+    const runs = timelineAudioRuns(
+      twoVideos({ left: { useOriginalAudio: true }, right: { useOriginalAudio: true } }),
+      tmpl,
+    );
+    expect(runs.map((r) => r.clipId)).toEqual(['clip_t/left', 'clip_t/right']);
+    expect(new Set(runs.map((r) => r.clipId)).size).toBe(2);
+    expect(runs.map((r) => r.assetPath)).toEqual(['v1.mp4', 'v2.mp4']);
+  });
+});
+
 describe('timelineAudioRuns（動画の元の音）', () => {
   it('鳴らす設定なら、その動画をパスで渡す（中身は運ばない）', () => {
     expect(timelineAudioRuns(videoDoc({ useOriginalAudio: true }))).toEqual([

@@ -32,7 +32,7 @@ import {
   firstFreeStart, moveClip, placeableVisualTracks,
   setVisualClipContent,
   moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
-  setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipText,
+  setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipSlotAudio, setClipText,
   setClipUseOriginalAudio, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
@@ -375,6 +375,8 @@ export interface TimelineState {
   setSelectedClipUseOriginalAudio: (use: boolean) => void;
   /** 元の音の音量（`null`＝標準へ戻す）。 */
   setSelectedClipOriginalAudioVolume: (volume: number | null) => void;
+  /** 見た目パターンの**差し込み口ごと**の元の音（#512 段3b）。 */
+  setSelectedClipSlotAudio: (layerId: string, patch: { useOriginalAudio?: boolean; originalAudioVolume?: number | null }) => void;
   /**
    * 選んでいる音の**音源を選び直す**（#695・#723）。素材が見つからないときの案内
    * 「音を選び直してください」に対応する操作＝これが無いと行き止まり（ADR-0034 決定5）。
@@ -934,6 +936,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipUseOriginalAudio: (use) => applyEdit(set, get, (d, id) => setClipUseOriginalAudio(d, id, use)),
   setSelectedClipOriginalAudioVolume: (volume) =>
     applyEdit(set, get, (d, id) => setClipOriginalAudioVolume(d, id, volume)),
+  setSelectedClipSlotAudio: (layerId, patch) => applyEdit(set, get, (d, id) => setClipSlotAudio(d, id, layerId, patch)),
   setSelectedClipAudioSource: (source) => applyEdit(set, get, (d, id) => setClipAudioSource(d, id, source)),
   setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
   setSelectedVolumePoint: (timeSec, volume) =>
@@ -1328,7 +1331,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       });
       if (get().exportRun.cancelling) throw new ExportCancelledError();
       set({ exportRun: { ...get().exportRun, phase: P.encoding } });
-      const bgmRuns = timelineBgmRunInputs(doc, audioSrcByKey);
+      const bgmRuns = timelineBgmRunInputs(doc, audioSrcByKey, templateOf);
       await exportVideo([frames], doc.projectName || "movie", bgmRuns, doc.projectId, outputPath);
       set({ exportRun: { phase: P.done, percent: 100, message: EXPORT_DONE_MESSAGE, cancelling: false } });
     } catch (e) {
@@ -1375,9 +1378,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
  * 音の並べ方（domain）を、混ぜる側の入力へ写す。**音源は再生と同じもの**（`audioSrcByKey`）＝
  * 聞いた音と書き出した音が一致する。読めなかった音源は置かない（その部品は鳴らない）。
  */
-export function timelineBgmRunInputs(doc: TimelineProject, audioSrcByKey: Record<string, string>): BgmRunInput[] {
+export function timelineBgmRunInputs(
+  doc: TimelineProject,
+  audioSrcByKey: Record<string, string>,
+  templateOf?: (templateId: string) => Template | undefined,
+): BgmRunInput[] {
   const runs: BgmRunInput[] = [];
-  for (const run of timelineAudioRuns(doc)) {
+  // 見た目パターンは**差し込み口の元の音**（#512 段3b）を解くのに要る（渡さないと差し込み口は鳴らない）。
+  for (const run of timelineAudioRuns(doc, templateOf)) {
     // ⚠️ **動画の元の音はパスで渡す**（#512 段2）＝中身（base64）は要らない。
     // ここで `audioSrcByKey` を要求すると、動画を丸ごと文字列にしないと鳴らせなくなる。
     const audioBase64 = run.assetPath ? "" : audioSrcByKey[run.sourceKey];

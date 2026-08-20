@@ -117,6 +117,40 @@ describe('exportTimelineVideo', () => {
     expect(useTimelineStore.getState().exportRun.message).toContain('立ち絵として入れた動画');
   });
 
+  // ⚠️ **差し込み口の元の音が、実際に書き出しへ渡るところまで見る**（#512 段3b レビュー 🔴）。
+  // domain 側（`timelineAudioRuns`）は見た目パターンを渡して緑になるが、**本番の呼び出しが
+  // 渡し続けている保証にはならない**（この配線が外れると、差し込み口の音だけが黙って消える）。
+  it('差し込み口の元の音を、書き出しへ渡す', async () => {
+    const clip: TimelineClip = {
+      id: 'clip_002', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 1, durationSec: 5, x: 0, y: 0, w: 100, h: 50, templateId: 'tmpl_001',
+      assetRefs: { main: 'asset_v' },
+      slotClips: { main: { useOriginalAudio: true } },
+    } as TimelineClip;
+    await open(
+      doc({
+        assets: [{
+          assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'assets/a.mp4',
+          thumbnailPath: 'assets/a_thumb.png', metadata: { hasAudio: true },
+        }],
+        clips: [clip],
+      }),
+    );
+    const withTemplate = {
+      templates: [{
+        schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
+        aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+        layers: [{ id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 }],
+      }],
+      templateAssetSrcById: {},
+    } as unknown as typeof deps;
+    await useTimelineStore.getState().exportTimelineVideo(withTemplate);
+    const runs = vi.mocked(ffmpegMod.exportVideo).mock.calls[0][2];
+    expect(runs).toEqual([
+      expect.objectContaining({ audioPath: 'assets/a.mp4', delaySec: 1, playSec: 5, loopSource: false }),
+    ]);
+  });
+
   // ⚠️ **位置引数の並びは型で守れない**（`speed`/`fps`/`width` はどれも number＝取り違えても通る）。
   // 実映像が壊れた速さ・解像度で焼かれるので、**実際に渡る値**を1件だけ固定する（#512 段1 レビュー 🟡）。
   it('動画のコマの焼き出しに、正しい順で値を渡す', async () => {

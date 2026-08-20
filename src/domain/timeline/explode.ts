@@ -14,7 +14,7 @@ import type { Group } from '../group/types';
 import { createClipId, createGroupId, createTrackId } from '../project/persistence';
 import { IDENTITY_TRANSFORM } from '../project/groupOps';
 import { freeLayoutFromPlacedContent } from '../project/sceneOps';
-import type { FreeElement } from '../project/types';
+import type { FreeElement , SlotClipOverride } from '../project/types';
 import type { Template } from '../template/types';
 import { EDIT_BLOCKED } from './edit';
 import type { EditResult } from './edit';
@@ -44,7 +44,9 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
 
   // 描画と同じ材料で中身を取り出す（`faithful`＝**描かれるものすべて**＝落とすと見た目が変わる）。
   const scene = sceneFromClip(clip, template);
-  const { elements } = freeLayoutFromPlacedContent(scene, template, { faithful: true });
+  // ⚠️ **枠の使い方も受け取る**（#512 段3b レビュー 🟡）＝差し込み口の元の音・切り出す範囲・速さは
+  // 変換の戻り値に入っている。捨てると、鳴っていた音が黙って消え、切り出しも前と変わる（決定23）。
+  const { elements, slotClips: slotUse } = freeLayoutFromPlacedContent(scene, template, { faithful: true });
   // 下地（`template.defaults.backgroundColor`）は層ではなくクリップの塗り（`layoutTimelineAt`）なので、
   // **最背面の図形として自分で足す**＝背景の層を持たない見た目でもバラした後に白く抜けない。
   // 箱は描画と**同じ関数**で解決する（`resolveClipBox`＝未指定は画面いっぱい・#685）。
@@ -71,7 +73,7 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   if (movesAroundAnchor(doc, clip) && !fitsInBox(withSubtitleText, background)) {
     return { ok: false, reason: EDIT_BLOCKED.explodeAnchor };
   }
-  return { ok: true, doc: buildExploded(doc, clip, trackIndex, [background, ...sortedByZ(withSubtitleText)]) };
+  return { ok: true, doc: buildExploded(doc, clip, trackIndex, [background, ...sortedByZ(withSubtitleText)], slotUse) };
 }
 
 /** 拡大・回転の動きが付いているか（平行移動と不透明度は支点に依らないので数えない）。 */
@@ -97,6 +99,8 @@ function buildExploded(
   clip: TimelineClip,
   trackIndex: number,
   elements: readonly FreeElement[],
+  /** 新しい要素 id → その枠の使い方（切り出す範囲・速さ・元の音）。#512 段3b。 */
+  slotUse: Readonly<Record<string, SlotClipOverride>> = {},
 ): TimelineProject {
   const clipIds = doc.clips.map((c) => c.id);
   const trackIds = doc.tracks.map((t) => t.id);
@@ -121,7 +125,7 @@ function buildExploded(
     }
     const id = createClipId(clipIds);
     clipIds.push(id);
-    newClips.push(clipFromElement(el, id, trackId, clip));
+    newClips.push(clipFromElement(el, id, trackId, clip, slotUse[el.id]));
   });
 
   const tracks = [...doc.tracks];
@@ -153,7 +157,13 @@ function buildExploded(
  * `subtitleSource`（本形式に「対象」の語彙は無い）はクリップに置けない。名指しで落とさないと
  * スキーマに適合しない文書ができ、**自動保存が黙って書かれない**（型では止まらない＝spread の穴）。
  */
-function clipFromElement(el: FreeElement, id: string, trackId: string, from: TimelineClip): TimelineClip {
+function clipFromElement(
+  el: FreeElement,
+  id: string,
+  trackId: string,
+  from: TimelineClip,
+  use?: SlotClipOverride,
+): TimelineClip {
   const { id: _elId, kind, zIndex: _z, subtitleSource: _src, ...spatial } = el;
   void _elId;
   void _z;
@@ -165,6 +175,13 @@ function clipFromElement(el: FreeElement, id: string, trackId: string, from: Tim
     trackId,
     startSec: from.startSec,
     durationSec: from.durationSec,
+    // ⚠️ **枠の使い方はクリップ自身の語彙へ写す**（#512 段3b）＝直接置きの動画は `slotClips` を持たない。
+    // 写せるのは切り出す先頭・速さ・元の音（「ここまで」＝`endSec` はクリップ側に語彙が無いので、
+    // 置いた長さを縮めて表す＝絵も音も同じところで終わる）。
+    ...(use?.startSec != null ? { sourceStartSec: use.startSec } : {}),
+    ...(use?.speed != null ? { speed: use.speed } : {}),
+    ...(use?.useOriginalAudio != null ? { useOriginalAudio: use.useOriginalAudio } : {}),
+    ...(use?.originalAudioVolume != null ? { originalAudioVolume: use.originalAudioVolume } : {}),
     // 隠してある部品をバラしても表に出さない（前後で絵が変わらない・決定23）。
     ...(from.hidden ? { hidden: true } : {}),
   };

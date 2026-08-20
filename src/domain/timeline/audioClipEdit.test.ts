@@ -4,7 +4,7 @@ import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, VOLUME_MAX } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
-import { addAudioClip, EDIT_BLOCKED, setVisualClipContent, setClipFade, setClipOriginalAudioVolume, setClipSourceStart, setClipSpeed, setClipUseOriginalAudio, setClipVolume } from './edit';
+import { addAudioClip, EDIT_BLOCKED, setClipAssetRef, setClipSlotAudio, setVisualClipContent, setClipFade, setClipOriginalAudioVolume, setClipSourceStart, setClipSpeed, setClipUseOriginalAudio, setClipVolume } from './edit';
 import { timelineAudioRuns } from './export';
 import { audioCuesAt } from './audio';
 import { validateTimelineProject } from '../validation/generated/validators.js';
@@ -269,5 +269,159 @@ describe('setClipUseOriginalAudio / setClipOriginalAudioVolume', () => {
     expect(a.ok && a.doc).toBe(d);
     const b = setClipOriginalAudioVolume(d, 'clip_001', 0.5);
     expect(b.ok && b.doc).toBe(d);
+  });
+});
+
+// 差し込み口ごとの元の音（#512 段3b）＝値は `slotClips[layerId]` へ（場面形式と同じ語彙・schema 不変）。
+describe('setClipSlotAudio', () => {
+  // ⚠️ `null` で「調べられていない」を表す（`undefined` は既定引数に吸われて `true` になる）。
+  const tmplDoc = (over: Partial<TimelineClip> = {}, hasAudio: boolean | null = true): TimelineProject =>
+    doc({
+      assets: [{
+        assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4',
+        ...(hasAudio == null ? {} : { metadata: { hasAudio } }),
+      }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 0, durationSec: 10, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' }, ...over,
+      } as TimelineClip],
+    } as Partial<TimelineProject>);
+
+  it('その枠だけに置く（ほかの枠の設定を触らない）', () => {
+    const d = tmplDoc({ assetRefs: { main: 'asset_v', sub: 'asset_v' }, slotClips: { sub: { speed: 2 } } });
+    const r = setClipSlotAudio(d, 'clip_001', 'main', { useOriginalAudio: true });
+    expect(r.ok && r.doc.clips[0].slotClips).toEqual({ sub: { speed: 2 }, main: { useOriginalAudio: true } });
+  });
+
+  // ⚠️ **既定と同じ値は書かない**＝空の入れ物を文書に残さない（他の編集操作と同じ規則）。
+  it('鳴らすのをやめると、キーごと落ちる（空になった枠の項目も落とす）', () => {
+    const on = setClipSlotAudio(tmplDoc(), 'clip_001', 'main', { useOriginalAudio: true });
+    expect(on.ok).toBe(true);
+    if (!on.ok) return;
+    const off = setClipSlotAudio(on.doc, 'clip_001', 'main', { useOriginalAudio: false });
+    expect(off.ok && off.doc.clips[0].slotClips).toBeUndefined();
+  });
+
+  // ⚠️ **落とすのは対象の枠だけ**＝ほかの枠の設定が残っていれば、入れ物ごと消してはいけない。
+  it('ほかの枠の設定が残っていれば、入れ物は消さずにその枠だけ落とす', () => {
+    const d = tmplDoc({
+      assetRefs: { main: 'asset_v', sub: 'asset_v' },
+      slotClips: { main: { useOriginalAudio: true }, sub: { speed: 2 } },
+    });
+    const r = setClipSlotAudio(d, 'clip_001', 'main', { useOriginalAudio: false });
+    expect(r.ok && r.doc.clips[0].slotClips).toEqual({ sub: { speed: 2 } });
+  });
+
+  it('ほかの設定が残っていれば、枠の項目は残る', () => {
+    const d = tmplDoc({ slotClips: { main: { speed: 2, useOriginalAudio: true } } });
+    const r = setClipSlotAudio(d, 'clip_001', 'main', { useOriginalAudio: false });
+    expect(r.ok && r.doc.clips[0].slotClips).toEqual({ main: { speed: 2 } });
+  });
+
+  it('音量を置ける・null で標準へ戻せる・範囲へ収める', () => {
+    const a = setClipSlotAudio(tmplDoc(), 'clip_001', 'main', { originalAudioVolume: 0.9 });
+    expect(a.ok && a.doc.clips[0].slotClips).toEqual({ main: { originalAudioVolume: 0.9 } });
+    if (!a.ok) return;
+    const b = setClipSlotAudio(a.doc, 'clip_001', 'main', { originalAudioVolume: null });
+    expect(b.ok && b.doc.clips[0].slotClips).toBeUndefined();
+    const c = setClipSlotAudio(tmplDoc(), 'clip_001', 'main', { originalAudioVolume: 9 });
+    expect(c.ok && c.doc.clips[0].slotClips).toEqual({ main: { originalAudioVolume: VOLUME_MAX } });
+  });
+
+  // ⚠️ **音の入っていない動画・動画でない素材の枠では断る**（動画むけの理由で・§2-5）。
+  it('音の入っていない枠・写真の枠では断る', () => {
+    const noAudio = setClipSlotAudio(tmplDoc({}, false), 'clip_001', 'main', { useOriginalAudio: true });
+    expect(!noAudio.ok && noAudio.reason).toBe(EDIT_BLOCKED.noOriginalAudio);
+    const unknown = setClipSlotAudio(tmplDoc({}, null), 'clip_001', 'main', { useOriginalAudio: true });
+    expect(!unknown.ok && unknown.reason).toBe(EDIT_BLOCKED.noOriginalAudio);
+    const empty = setClipSlotAudio(tmplDoc({ assetRefs: {} }), 'clip_001', 'main', { useOriginalAudio: true });
+    expect(!empty.ok && empty.reason).toBe(EDIT_BLOCKED.noOriginalAudio);
+  });
+
+  it('固定した列では変えられない', () => {
+    const d = tmplDoc();
+    const locked = { ...d, tracks: d.tracks.map((t) => (t.id === 'track_001' ? { ...t, locked: true } : t)) };
+    const r = setClipSlotAudio(locked, 'clip_001', 'main', { useOriginalAudio: true });
+    expect(!r.ok && r.reason).toBe(EDIT_BLOCKED.locked);
+  });
+
+  it('同じ値を置き直しても文書は変わらない（空の取り消しを積まない）', () => {
+    const d = tmplDoc({ slotClips: { main: { useOriginalAudio: true } } });
+    const r = setClipSlotAudio(d, 'clip_001', 'main', { useOriginalAudio: true });
+    expect(r.ok && r.doc).toBe(d);
+  });
+
+  // ⚠️ **素材既定（`asset.clip`）を覆せる**（レビュー 🔴）＝解決は `slotClips ?? asset.clip ?? 既定`
+  // なので、素材側が「鳴らす」のときキーを消すだけでは止まらない（消すと継承へ戻って鳴り続ける）。
+  describe('素材既定を継承しているとき', () => {
+    /** 素材側で「元の音を使う」が ON になっている動画（焼き出した文書が持ちうる形）。 */
+    const inherited = (over: Partial<TimelineClip> = {}): TimelineProject =>
+      doc({
+        assets: [{
+          assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4',
+          metadata: { hasAudio: true }, clip: { useOriginalAudio: true, originalAudioVolume: 0.8 },
+        }],
+        clips: [{
+          id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+          startSec: 0, durationSec: 10, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' }, ...over,
+        } as TimelineClip],
+      } as Partial<TimelineProject>);
+
+    it('チェックを外すと、明示的に「鳴らさない」を保存する', () => {
+      const r = setClipSlotAudio(inherited(), 'clip_001', 'main', { useOriginalAudio: false });
+      expect(r.ok && r.doc.clips[0].slotClips).toEqual({ main: { useOriginalAudio: false } });
+    });
+
+    it('チェックを入れ直すと、継承へ戻す（同じ値は書かない）', () => {
+      const off = setClipSlotAudio(inherited(), 'clip_001', 'main', { useOriginalAudio: false });
+      expect(off.ok).toBe(true);
+      if (!off.ok) return;
+      const on = setClipSlotAudio(off.doc, 'clip_001', 'main', { useOriginalAudio: true });
+      expect(on.ok && on.doc.clips[0].slotClips).toBeUndefined();
+    });
+
+    // 素材側が OFF のときは、これまでどおり「鳴らす」だけを書く（既定と同じ値は書かない）。
+    it('素材既定が OFF なら、鳴らさないはキーごと落ちる', () => {
+      const d = tmplDoc();
+      const on = setClipSlotAudio(d, 'clip_001', 'main', { useOriginalAudio: true });
+      expect(on.ok).toBe(true);
+      if (!on.ok) return;
+      const off = setClipSlotAudio(on.doc, 'clip_001', 'main', { useOriginalAudio: false });
+      expect(off.ok && off.doc.clips[0].slotClips).toBeUndefined();
+    });
+  });
+});
+
+// 差し込み口の素材を差し替えたときの後始末（#512 段3b レビュー 🔴）。
+describe('setClipAssetRef の後始末', () => {
+  const withUse = (): TimelineProject =>
+    doc({
+      assets: [
+        { assetId: 'asset_v', assetType: 'video', displayName: '動画1', filePath: 'v.mp4', metadata: { hasAudio: true } },
+        { assetId: 'asset_w', assetType: 'video', displayName: '動画2', filePath: 'w.mp4', metadata: { hasAudio: true } },
+      ],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+        startSec: 0, durationSec: 10, templateId: 'tmpl_001',
+        assetRefs: { main: 'asset_v', sub: 'asset_v' },
+        slotClips: { main: { useOriginalAudio: true, startSec: 3, speed: 2 }, sub: { useOriginalAudio: true } },
+      } as TimelineClip],
+    } as Partial<TimelineProject>);
+
+  // ⚠️ **頼んでいない音が鳴り出さない**＝別の動画を入れた瞬間に前の設定が効く、を作らない。
+  it('素材を差し替えたら、その枠の使い方（元の音・範囲・速さ）は落とす', () => {
+    const r = setClipAssetRef(withUse(), 'clip_001', 'main', 'asset_w');
+    expect(r.ok && r.doc.clips[0].slotClips).toEqual({ sub: { useOriginalAudio: true } }); // 触っていない枠は残る
+  });
+
+  it('「なし」にしたときも落とす', () => {
+    const r = setClipAssetRef(withUse(), 'clip_001', 'main', null);
+    expect(r.ok && r.doc.clips[0].slotClips).toEqual({ sub: { useOriginalAudio: true } });
+  });
+
+  it('同じ素材を選び直しただけなら、何も変わらない', () => {
+    const d = withUse();
+    const r = setClipAssetRef(d, 'clip_001', 'main', 'asset_v');
+    expect(r.ok && r.doc).toBe(d);
   });
 });
