@@ -535,6 +535,9 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   TIMELINE_EDIT_EXPORTING: "いま動画を書き出しています。終わってから編集してください",
   TIMELINE_EDIT_ORIENTATION: "この見た目パターンは向き（横長・縦長）がこの動画と違うので置けません。同じ向きのものを選んでください",
   TIMELINE_EDIT_EXPLODE_ANCHOR: "動き（拡大・回転）が付いた部品は、そのままバラすと絵がずれます。動きを外してからバラしてください",
+  TIMELINE_EDIT_EXPLODE_TRIM_END: "切り出す終わりを決めた動画が入っています。そのままバラすと流れる長さが変わります。素材の画面で切り出す範囲を外してからバラしてください",
+  TIMELINE_EDIT_EXPLODE_TRIM_END_PER_USE:
+    "この枠だけ切り出す終わりを決めた動画が入っています。そのままバラすと流れる長さが変わります。その枠の動画をいったん「なし」にして入れ直してからバラしてください",
   TIMELINE_EDIT_LINKED_SUBTITLE: "連動している字幕を置ける場所がありません。字幕をほかの列へ移すか、連動をやめてください",
   TIMELINE_EDIT_CURVED_EASING: "この動き方は途中で分けられません。「動き」の欄に出ている秒数の位置か、動きの付いていない所で分けてください",
   TIMELINE_EDIT_PLAYING: "再生を止めてから使えます",
@@ -554,13 +557,6 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
  */
 export const TIMELINE_VIDEO_NO_AUDIO =
   "この動画には音が入っていません（音を付けるなら、音の列に音を置いてください）";
-
-/**
- * 見た目パターンの差し込み口に入れた動画を選んだときの知らせ（#512 段3・`15 §6`）。
- * **絵は映るが元の音はまだ流れない**（段3b で扱う）＝黙って無音にしない（§2-5）。
- */
-export const TIMELINE_SLOT_VIDEO_AUDIO_PENDING =
-  "差し込み口に入れた動画は、映像だけが流れます。元の音はまだ出せません（音を付けるなら、音の列に音を置いてください）";
 
 /**
  * 動画に音が入っているか**確かめられなかった**とき（#512 段2・`15 §6`）。

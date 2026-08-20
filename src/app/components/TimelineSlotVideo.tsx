@@ -55,7 +55,7 @@ export function TimelineSlotVideo({
   playing: boolean;
   /**
    * 元の音の音量（#512 段2・`undefined`＝**鳴らさない**）。鳴らすかどうかの判定は domain の
-   * `clipOriginalAudio` が持ち、ここは受け取った値を効かせるだけ（規則を画面へ写さない）。
+   * `placementOriginalAudio` が持ち、ここは受け取った値を効かせるだけ（規則を画面へ写さない）。
    */
   audioVolume?: number;
   /**

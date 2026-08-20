@@ -14,8 +14,11 @@ import type { Group } from '../group/types';
 import { createClipId, createGroupId, createTrackId } from '../project/persistence';
 import { IDENTITY_TRANSFORM } from '../project/groupOps';
 import { freeLayoutFromPlacedContent } from '../project/sceneOps';
-import type { FreeElement } from '../project/types';
 import type { Template } from '../template/types';
+import type { FreeElement } from '../project/types';
+import { videoPlacementsOfClip } from './video';
+import type { VideoPlacement } from './video';
+import { ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT } from '../constants';
 import { EDIT_BLOCKED } from './edit';
 import type { EditResult } from './edit';
 import { staticSubtitleText } from './bake';
@@ -44,7 +47,29 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
 
   // 描画と同じ材料で中身を取り出す（`faithful`＝**描かれるものすべて**＝落とすと見た目が変わる）。
   const scene = sceneFromClip(clip, template);
-  const { elements } = freeLayoutFromPlacedContent(scene, template, { faithful: true });
+  // ⚠️ **枠の使い方も持ち越す**（#512 段3b）＝差し込み口の元の音・切り出す先頭・速さを捨てると、
+  // 鳴っていた音が黙って消え、切り出しも前と変わる（決定23＝前後で絵が変わらない）。
+  // ⚠️ **引くのは per-use ではなく実効値**（レビュー 🔴）＝`slotClips` だけを見ると、素材既定
+  //（`asset.clip`）に頼っている枠が「設定なし」になり、バラした瞬間に音が消える。描画・再生と
+  // **同じ解決**（`videoPlacementsOfClip`）から採る＝展開後に継承経路が無くなっても値は残る。
+  const { elements, slotLayerByElementId } = freeLayoutFromPlacedContent(scene, template, { faithful: true });
+  const placementByLayer = new Map(
+    videoPlacementsOfClip(doc, clip, { templateOf: () => template }).map((pl) => [pl.layerId, pl]),
+  );
+  // ⚠️ **持っていけないものは黙って落とさない**（ADR-0032）＝「切り出す終わり」は直接置きの語彙に
+  // 無く、置いた長さを縮めると**絵が早く消える**・縮めないと**その先まで流れる**＝どちらも決定23 に
+  // 反する。動きが付いた部品と同じ流儀で、バラす前に断る。
+  // ⚠️ **出どころで案内を分ける**（レビュー 🟡）＝「ここまで」は**その枠だけの設定**（`slotClips`）と
+  // **素材の既定**（`asset.clip`）のどちらからも来る（解決は per-use が優先＝`resolveSlotClip`）。
+  // 素材の画面で外せるのは後者だけなので、前者に同じ案内を出すと**従っても解除されない行き止まり**になる。
+  const shortened = [...placementByLayer.values()].filter((pl) => pl.durationSec < clip.durationSec);
+  if (shortened.length > 0) {
+    const perUse = shortened.some((pl) => pl.layerId != null && clip.slotClips?.[pl.layerId]?.endSec != null);
+    return { ok: false, reason: perUse ? EDIT_BLOCKED.explodeTrimEndPerUse : EDIT_BLOCKED.explodeTrimEnd };
+  }
+  const useByElement = new Map(
+    Object.entries(slotLayerByElementId).map(([elId, layerId]) => [elId, placementByLayer.get(layerId)]),
+  );
   // 下地（`template.defaults.backgroundColor`）は層ではなくクリップの塗り（`layoutTimelineAt`）なので、
   // **最背面の図形として自分で足す**＝背景の層を持たない見た目でもバラした後に白く抜けない。
   // 箱は描画と**同じ関数**で解決する（`resolveClipBox`＝未指定は画面いっぱい・#685）。
@@ -71,7 +96,7 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   if (movesAroundAnchor(doc, clip) && !fitsInBox(withSubtitleText, background)) {
     return { ok: false, reason: EDIT_BLOCKED.explodeAnchor };
   }
-  return { ok: true, doc: buildExploded(doc, clip, trackIndex, [background, ...sortedByZ(withSubtitleText)]) };
+  return { ok: true, doc: buildExploded(doc, clip, trackIndex, [background, ...sortedByZ(withSubtitleText)], useByElement) };
 }
 
 /** 拡大・回転の動きが付いているか（平行移動と不透明度は支点に依らないので数えない）。 */
@@ -97,6 +122,8 @@ function buildExploded(
   clip: TimelineClip,
   trackIndex: number,
   elements: readonly FreeElement[],
+  /** 新しい要素 id → その枠の**実効の**使い方（切り出す先頭・速さ・元の音）。#512 段3b。 */
+  useByElement: ReadonlyMap<string, VideoPlacement | undefined> = new Map(),
 ): TimelineProject {
   const clipIds = doc.clips.map((c) => c.id);
   const trackIds = doc.tracks.map((t) => t.id);
@@ -121,7 +148,7 @@ function buildExploded(
     }
     const id = createClipId(clipIds);
     clipIds.push(id);
-    newClips.push(clipFromElement(el, id, trackId, clip));
+    newClips.push(clipFromElement(el, id, trackId, clip, useByElement.get(el.id)));
   });
 
   const tracks = [...doc.tracks];
@@ -153,7 +180,13 @@ function buildExploded(
  * `subtitleSource`（本形式に「対象」の語彙は無い）はクリップに置けない。名指しで落とさないと
  * スキーマに適合しない文書ができ、**自動保存が黙って書かれない**（型では止まらない＝spread の穴）。
  */
-function clipFromElement(el: FreeElement, id: string, trackId: string, from: TimelineClip): TimelineClip {
+function clipFromElement(
+  el: FreeElement,
+  id: string,
+  trackId: string,
+  from: TimelineClip,
+  use?: VideoPlacement,
+): TimelineClip {
   const { id: _elId, kind, zIndex: _z, subtitleSource: _src, ...spatial } = el;
   void _elId;
   void _z;
@@ -165,6 +198,16 @@ function clipFromElement(el: FreeElement, id: string, trackId: string, from: Tim
     trackId,
     startSec: from.startSec,
     durationSec: from.durationSec,
+    // ⚠️ **枠の使い方はクリップ自身の語彙へ写す**（#512 段3b）＝直接置きの動画は `slotClips` を
+    // 持たず、素材既定（`asset.clip`）も見ない。**実効値をここで書き切る**＝継承経路が無くなっても
+    // 前と同じに鳴る・同じところから流れる。既定と同じ値は書かない（他の操作と同じ規則）。
+    //（「切り出す終わり」は上で断っているのでここには来ない。）
+    ...(use && use.sourceStartSec !== 0 ? { sourceStartSec: use.sourceStartSec } : {}),
+    ...(use && use.speed !== SPEED_DEFAULT ? { speed: use.speed } : {}),
+    ...(use?.useOriginalAudio ? { useOriginalAudio: true } : {}),
+    ...(use && use.useOriginalAudio && use.originalAudioVolume !== ORIGINAL_AUDIO_VOLUME
+      ? { originalAudioVolume: use.originalAudioVolume }
+      : {}),
     // 隠してある部品をバラしても表に出さない（前後で絵が変わらない・決定23）。
     ...(from.hidden ? { hidden: true } : {}),
   };

@@ -6,13 +6,15 @@ import {
   AUDIO_PLACEHOLDER_SEC, CLIP_SPEED_MAX, CLIP_SPEED_MIN, CROP_MAX, PLACED_BOX_RATIO,
   TIMELINE_MIN_CLIP_SEC, VISUAL_PLACEHOLDER_SEC, VOLUME_MAX, WIDTH,
   VOICE_PLACEHOLDER_SEC, dimsForOrientation, MIN_BOX_SIZE_PX, normalizeDeg } from '../constants';
-import { FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { ASSET_TYPE, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, NARRATION_STATUS, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { DEFAULT_SHAPE_COLOR, DEFAULT_TEXT, DEFAULT_TEXT_FONT_SIZE } from '../project/freeLayoutOps';
 import { DEFAULT_TEXT_COLOR } from '../template/textStyle';
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '../enums';
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
+import type { SlotClipOverride } from '../project/types';
 import { isAudioClip } from './audio';
+import { clampVolume } from '../voice/audioMix';
 import { canUseOriginalAudio } from './video';
 import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from './clipEdge';
@@ -95,6 +97,19 @@ export const EDIT_BLOCKED = {
    * 動きの支点が変わって**絵がずれる**ので、先に動きを外してもらう。
    */
   explodeAnchor: 'TIMELINE_EDIT_EXPLODE_ANCHOR',
+  /**
+   * **切り出す終わりを決めた動画**が入っている部品はバラせない（#512 段3b レビュー 🔴）。
+   * ⚠️ 直接置きの語彙に「ここまで」が無い＝置いた長さを縮めると**絵が早く消え**、縮めないと
+   * **その先まで流れる**（どちらも決定23「前後で絵が変わらない」に反する）。黙って別の結果に
+   * しないよう、動きが付いた部品（`explodeAnchor`）と同じ流儀で先に断る。
+   */
+  explodeTrimEnd: 'TIMELINE_EDIT_EXPLODE_TRIM_END',
+  /**
+   * 同上だが、「ここまで」が**その枠だけの設定**（`slotClips[layerId].endSec`）から来ている場合。
+   * ⚠️ **素材の画面では外せない**（解決は per-use が優先）＝同じ案内を出すと、従っても解除されない
+   * 行き止まりになる（ADR-0034 決定5・§2-5）。この枠の素材を入れ直せば落ちる（`setClipAssetRef`）。
+   */
+  explodeTrimEndPerUse: 'TIMELINE_EDIT_EXPLODE_TRIM_END_PER_USE',
   /** 連動している字幕を置ける場所が無い（読み上げを動かせない理由・#633）。 */
   linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
   /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
@@ -642,7 +657,17 @@ export function setClipAssetRef(
   const assetRefs = { ...clip.assetRefs };
   if (assetId === null) delete assetRefs[layerId];
   else assetRefs[layerId] = assetId;
-  return ok(withClip(doc, { ...clip, assetRefs }));
+  // ⚠️ **素材を差し替えたら、その枠の使い方は落とす**（#512 段3b・レビュー 🔴／`11 §7.6.2.2`）＝
+  // 残すと**別の動画を入れた瞬間に、頼んでいない音が鳴り出す**（切り出す範囲・速さも前の素材のまま）。
+  // 直接置き（`setVisualClipContent`）が同じ後始末をしている＝置き場所で流儀を割らない（ADR-0026②）。
+  const patched: TimelineClip = { ...clip, assetRefs };
+  if (clip.slotClips?.[layerId]) {
+    const slotClips = { ...clip.slotClips };
+    delete slotClips[layerId];
+    if (Object.keys(slotClips).length === 0) delete patched.slotClips;
+    else patched.slotClips = slotClips;
+  }
+  return ok(withClip(doc, patched));
 }
 
 /**
@@ -1327,7 +1352,7 @@ export function setClipUseOriginalAudio(doc: TimelineProject, clipId: string, us
 /**
  * 元の音の**音量**（#512 段2・`null`＝標準へ戻す）。値域は音のクリップと同じ 0〜`VOLUME_MAX`。
  * ⚠️ **鳴らす設定になっていなくても置ける**＝先に音量を決めてから鳴らす、という順でも困らない
- *（鳴るかどうかは `clipOriginalAudio` が別に見る）。
+ *（鳴るかどうかは `placementOriginalAudio` が別に見る）。
  */
 export function setClipOriginalAudioVolume(doc: TimelineProject, clipId: string, volume: number | null): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
@@ -1339,6 +1364,56 @@ export function setClipOriginalAudioVolume(doc: TimelineProject, clipId: string,
   const patched = { ...clip };
   if (next == null) delete patched.originalAudioVolume;
   else patched.originalAudioVolume = next;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * 見た目パターンの**差し込み口ごと**の元の音（#512 段3b）。値は `slotClips[layerId]` へ置く
+ * ＝場面形式と同じ語彙（ADR-0028・`$ref` 共有）なので schema は変わらない。
+ *
+ * ⚠️ **ここで見るのは「その枠に音の入った動画が入っているか」まで**（レビュー 🟡）＝
+ * その層が動画を受ける差し込み口かどうかは**見た目パターンが決める**ので、ここでは判らない
+ *（画面は `videoPlacementsOfClip`＋`placementAudioState` で先に絞るので、そこへは到達しない。
+ * 万一書かれても**誰も読まない値が残るだけ**＝鳴りはしない）。
+ * ⚠️ **継承した値と同じなら書かない**＝素材既定（`asset.clip`）を覆すときだけ明示的に保存する。
+ * ⚠️ **空になった `slotClips` の項目も落とす**＝意味の無い空の入れ物を文書に残さない。
+ */
+export function setClipSlotAudio(
+  doc: TimelineProject,
+  clipId: string,
+  layerId: string,
+  patch: { useOriginalAudio?: boolean; originalAudioVolume?: number | null },
+): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  const assetId = clip.assetRefs?.[layerId];
+  const asset = assetId != null ? doc.assets.find((a) => a.assetId === assetId) : undefined;
+  if (asset?.assetType !== ASSET_TYPE.video) return blocked(EDIT_BLOCKED.noOriginalAudio);
+  if (asset.metadata?.hasAudio !== true) return blocked(EDIT_BLOCKED.noOriginalAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+
+  const cur: SlotClipOverride = clip.slotClips?.[layerId] ?? {};
+  const next: SlotClipOverride = { ...cur };
+  if (patch.useOriginalAudio !== undefined) {
+    // ⚠️ **素材既定を覆せるようにする**（レビュー 🔴）＝解決は `slotClips ?? asset.clip ?? 既定`（ADR-0028）
+    // なので、素材側が「鳴らす」のときに**キーを消すだけでは止められない**（消すと継承へ戻って鳴り続ける）。
+    // 継承した値と**違うときだけ書く**＝既定と同じ値は書かない、という他の操作と同じ規則を保ったまま
+    // 「明示的に鳴らさない」も表せる（schema は `boolean` なので `false` を保存できる）。
+    if (patch.useOriginalAudio === (asset.clip?.useOriginalAudio === true)) delete next.useOriginalAudio;
+    else next.useOriginalAudio = patch.useOriginalAudio;
+  }
+  if (patch.originalAudioVolume !== undefined) {
+    if (patch.originalAudioVolume == null) delete next.originalAudioVolume;
+    else next.originalAudioVolume = clampVolume(patch.originalAudioVolume);
+  }
+  if (JSON.stringify(next) === JSON.stringify(cur)) return ok(doc); // 何も変わらない＝空の取り消しを積まない
+
+  const slotClips = { ...(clip.slotClips ?? {}) };
+  if (Object.keys(next).length === 0) delete slotClips[layerId];
+  else slotClips[layerId] = next;
+  const patched = { ...clip };
+  if (Object.keys(slotClips).length === 0) delete patched.slotClips;
+  else patched.slotClips = slotClips;
   return ok(withClip(doc, patched));
 }
 

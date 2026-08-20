@@ -5,7 +5,7 @@ import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 import type { VideoPlacement } from './video';
 import type { Template } from '../template/types';
-import { canUseOriginalAudio, clipOriginalAudio, videoAudioState, videoPlacementsOf, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
+import { canUseOriginalAudio, placementOriginalAudio, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
 
 const doc = (over: Partial<TimelineProject> = {}): TimelineProject =>
   ({
@@ -32,6 +32,8 @@ const place = (clip: TimelineClip): VideoPlacement => ({
   sourceStartSec: clip.sourceStartSec ?? 0,
   durationSec: clip.durationSec,
   speed: clip.speed != null && clip.speed > 0 ? clip.speed : 1,
+  useOriginalAudio: clip.useOriginalAudio === true,
+  originalAudioVolume: clip.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME,
 });
 
 /** 差し込み口を2つ持つ見た目パターン（片方は写真だけの枠）。背景の層も混ぜる。 */
@@ -210,6 +212,7 @@ describe('使える長さの頭打ち（差し込み口の「ここまで」）'
     clip: slot({ startSec: 0, durationSec: 10 }),
     use: 'slot', layerId: 'main', assetId: 'asset_001',
     sourceStartSec: 0, durationSec: 3, speed: 1,
+    useOriginalAudio: false, originalAudioVolume: ORIGINAL_AUDIO_VOLUME,
   };
 
   it('プレビューは使える長さを越えて素材を進めない', () => {
@@ -248,6 +251,23 @@ describe('使える長さの頭打ち（差し込み口の「ここまで」）'
   // ⚠️ **部品の区間の外は映らない**（頭打ちを入れても、生きている区間の判定は変わらない）。
   it('部品の区間の外では映らない', () => {
     expect(videoSourceSecAt(short, 10, 30)).toBeNull();
+  });
+
+  // ⚠️ **頭打ちに達したら流すのをやめる**（レビュー 🟡）＝素材の秒が一定になるだけでは、
+  // `video` 要素が自分で先へ流れ続ける（絵も音も「ここまで」を越える）。
+  it('使える長さに達したかを知らせる（そこで流すのをやめる）', () => {
+    expect(videoHoldsLastFrameAt(short, 2.9)).toBe(false);
+    expect(videoHoldsLastFrameAt(short, 3)).toBe(true);
+    expect(videoHoldsLastFrameAt(short, 7)).toBe(true);
+    // 直接置き（使える長さ＝置いた長さ）では、尺いっぱいまで止まらない。
+    const direct = place(slot({ startSec: 0, durationSec: 10 }));
+    expect(videoHoldsLastFrameAt(direct, 9.9)).toBe(false);
+  });
+
+  it('置いた位置がずれていても、その部品の先頭から測る', () => {
+    const later: VideoPlacement = { ...short, clip: slot({ startSec: 4, durationSec: 10 }) };
+    expect(videoHoldsLastFrameAt(later, 6.9)).toBe(false); // 部品の先頭から 2.9 秒
+    expect(videoHoldsLastFrameAt(later, 7)).toBe(true);
   });
 });
 
@@ -370,7 +390,10 @@ describe('切り抜きの回す中心が食い違うか（cropPivotDiffers）', 
 });
 
 // 元の音（#512 段2）＝**再生・書き出し・画面が通る唯一の解決**。場面形式と同じ規準（ADR-0026②）。
-describe('clipOriginalAudio（動画の元の音）', () => {
+describe('placementOriginalAudio（動画の元の音）', () => {
+  /** その文書の唯一の置き場所（直接置き＝1つだけ返る前提で使う）。 */
+  const only = (d: TimelineProject): VideoPlacement => videoPlacementsOf(d)[0];
+
   /** 音の入っている動画を持つ文書（既定では鳴らさない）。 */
   const withAudio = (clipOver: Partial<TimelineClip> = {}, docOver: Partial<TimelineProject> = {}) =>
     doc({
@@ -384,19 +407,19 @@ describe('clipOriginalAudio（動画の元の音）', () => {
 
   // ⚠️ **既定は鳴らさない**＝既に作った動画の音が、この段で黙って変わらない。
   it('指定が無ければ鳴らない', () => {
-    expect(clipOriginalAudio(withAudio(), slot())).toBeNull();
+    expect(placementOriginalAudio(withAudio(), only(withAudio()))).toBeNull();
   });
 
   it('鳴らす設定なら、標準の音量で鳴る', () => {
-    const clip = slot({ useOriginalAudio: true });
-    expect(clipOriginalAudio(withAudio({ useOriginalAudio: true }), clip)).toEqual({
+    const d = withAudio({ useOriginalAudio: true });
+    expect(placementOriginalAudio(d, only(d))).toEqual({
       assetId: 'asset_001', volume: ORIGINAL_AUDIO_VOLUME, speed: 1, sourceStartSec: 0,
     });
   });
 
   it('音量・速さ・使い始めは、その部品の値から採る', () => {
-    const clip = slot({ useOriginalAudio: true, originalAudioVolume: 0.9, speed: 2, sourceStartSec: 3 });
-    expect(clipOriginalAudio(withAudio(clip), clip)).toEqual({
+    const clip: Partial<TimelineClip> = { useOriginalAudio: true, originalAudioVolume: 0.9, speed: 2, sourceStartSec: 3 };
+    expect(placementOriginalAudio(withAudio(clip), only(withAudio(clip)))).toEqual({
       assetId: 'asset_001', volume: 0.9, speed: 2, sourceStartSec: 3,
     });
   });
@@ -409,27 +432,26 @@ describe('clipOriginalAudio（動画の元の音）', () => {
       assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v', filePath: 'a.mp4', metadata: { hasAudio: false } }],
       clips: [clip],
     } as Partial<TimelineProject>);
-    expect(clipOriginalAudio(d, clip)).toBeNull();
+    expect(placementOriginalAudio(d, only(d))).toBeNull();
     expect(canUseOriginalAudio(d, clip)).toBe(false);
   });
 
   // ⚠️ **判らないもの（`hasAudio` 未取得）は鳴らさない**＝取り出せる保証が無いので断る側へ倒す。
   it('音が入っているか判らない素材では鳴らない', () => {
-    const clip = slot({ useOriginalAudio: true });
-    expect(clipOriginalAudio(doc({ clips: [clip] }), clip)).toBeNull();
+    const d = doc({ clips: [slot({ useOriginalAudio: true })] });
+    expect(placementOriginalAudio(d, only(d))).toBeNull();
   });
 
   // ⚠️ **隠したら音も止まる**（音のクリップと同じ規則＝見えないのに聞こえる、を作らない）。
   it('隠した部品・隠した列・隠したまとまりでは鳴らない', () => {
-    const hidden = slot({ useOriginalAudio: true, hidden: true });
-    expect(clipOriginalAudio(withAudio({ useOriginalAudio: true, hidden: true }), hidden)).toBeNull();
-    const clip = slot({ useOriginalAudio: true });
+    // 隠したものは**置き場所にならない**＝鳴らす対象に上がってこない（絵と同じ規則）。
+    expect(videoPlacementsOf(withAudio({ useOriginalAudio: true, hidden: true }))).toEqual([]);
     const hiddenTrack = withAudio({ useOriginalAudio: true }, { tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, hidden: true }] } as Partial<TimelineProject>);
-    expect(clipOriginalAudio(hiddenTrack, clip)).toBeNull();
+    expect(videoPlacementsOf(hiddenTrack)).toEqual([]);
     const hiddenGroup = withAudio({ useOriginalAudio: true }, {
       groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, hidden: true }],
     } as Partial<TimelineProject>);
-    expect(clipOriginalAudio(hiddenGroup, clip)).toBeNull();
+    expect(videoPlacementsOf(hiddenGroup)).toEqual([]);
   });
 
   // ⚠️ 画面が欄を出す条件は**隠しているかを見ない**＝隠した部品でも設定は変えられる。
@@ -454,7 +476,8 @@ describe('clipOriginalAudio（動画の元の音）', () => {
 
   it('動画でない部品では鳴らない・選べない', () => {
     const img = slot({ assetId: 'asset_002', useOriginalAudio: true });
-    expect(clipOriginalAudio(withAudio({ assetId: 'asset_002', useOriginalAudio: true }), img)).toBeNull();
+    // 写真の部品はそもそも**置き場所にならない**＝鳴らす対象に上がってこない。
+    expect(videoPlacementsOf(withAudio({ assetId: 'asset_002', useOriginalAudio: true }))).toEqual([]);
     expect(canUseOriginalAudio(withAudio({ assetId: 'asset_002' }), img)).toBe(false);
   });
 });

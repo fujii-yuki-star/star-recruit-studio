@@ -148,14 +148,17 @@ function showsSubtitle(scene: Scene, template: Template): boolean {
  * 既定のまま＝意匠は持ち込まない。
  * 字幕/文字の背景帯（`layer.background`）は FreeElement.background へ移送する（#529）。
  * 戻り値の `slotClips` は「新 FREE 要素 id → クリップ調整」（呼び出し側 `switchSceneTemplate` が既存 `slotClips` へマージ）。
+ * 戻り値の `slotLayerByElementId` は「新 FREE 要素 id → 元の差し込み口の層 id」＝**per-use が無い枠も含む**
+ * 対応表（呼び出し側が素材既定を含む実効値を引くのに使う・#512 段3b）。
  */
 export function freeLayoutFromPlacedContent(
   scene: Scene,
   template: Template,
   opts: { faithful?: boolean } = {},
-): { elements: FreeElement[]; slotClips: NonNullable<Scene['slotClips']> } {
+): { elements: FreeElement[]; slotClips: NonNullable<Scene['slotClips']>; slotLayerByElementId: Record<string, string> } {
   const elements: FreeElement[] = [];
   const slotClips: NonNullable<Scene['slotClips']> = {};
+  const slotLayerByElementId: Record<string, string> = {};
   const nextId = (): string => createFreeElementId(elements.map((e) => e.id));
   // 通常描画（layoutScene）と同じくグループ transform を前合成し、非表示グループのメンバーは持ち込まない（ADR-0022・#524 P1）。
   // これで生の layer.x/y/w/h ではなく「実効配置」を FREE 要素へ写す＝グループ利用テンプレでも FREE 化直後に崩れない。
@@ -206,6 +209,10 @@ export function freeLayoutFromPlacedContent(
       });
       const clip = scene.slotClips?.[layer.id];
       if (clip) slotClips[id] = clip; // 動画クリップ調整を新 id へ移送（#524 P1）
+      // ⚠️ **どの差し込み口から来たか**も返す（#512 段3b レビュー 🔴）＝per-use が無いときでも
+      // 素材既定（`asset.clip`）を含む**実効値**を引けるようにする（`slotClips` だけだと per-use が
+      // 無い枠は空になり、呼び出し側が「設定なし」と取り違える）。
+      slotLayerByElementId[id] = layer.id;
     } else if (layer.type === 'character') {
       const poseId = scene.character?.poseAssetId;
       if (!poseId) continue; // ポーズ未設定は持ち込まない
@@ -268,7 +275,7 @@ export function freeLayoutFromPlacedContent(
       });
     }
   }
-  return { elements, slotClips };
+  return { elements, slotClips, slotLayerByElementId };
 }
 
 /**

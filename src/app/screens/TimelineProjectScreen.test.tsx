@@ -636,14 +636,34 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     expect(container.querySelector(".preview-stage video")).toBeNull();
   });
 
-  // ⚠️ **元の音はまだ流れない**（段3b）＝黙って無音にせず、選んだときにその場で知らせる（§2-5）。
-  it("差し込み口に動画を入れると、元の音はまだ出せないと知らせる", () => {
+  // ⚠️ **差し込み口ごとに元の音の欄を出す**（#512 段3b）＝直接置きと同じ形・同じ言い方（ADR-0026②）。
+  // 音が入っているか判らない素材には断定せず、直接置きと同じ2文で理由を出す。
+  it("差し込み口に入れた動画には、その枠の「この動画の音」が出る", () => {
     openWithTemplateClip();
+    const cur = useTimelineStore.getState().doc!;
     useTimelineStore.setState({
-      doc: { ...useTimelineStore.getState().doc!, clips: [{ ...useTimelineStore.getState().doc!.clips[0], assetRefs: { mainVisual: "asset_002" } }] },
+      doc: {
+        ...cur,
+        assets: cur.assets.map((a) => (a.assetId === "asset_002" ? { ...a, metadata: { hasAudio: true } } : a)),
+        clips: [{ ...cur.clips[0], assetRefs: { mainVisual: "asset_002" } }],
+      } as typeof cur,
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByText(/差し込み口に入れた動画は、映像だけが流れます/)).toBeInTheDocument();
+    const toggle = screen.getByText("この動画に入っている音を流す");
+    expect(toggle).toBeInTheDocument();
+    fireEvent.click(toggle.previousElementSibling as HTMLInputElement);
+    expect(useTimelineStore.getState().doc?.clips[0].slotClips).toEqual({ mainVisual: { useOriginalAudio: true } });
+  });
+
+  it("音が入っているか判らない差し込み口には、欄を出さずに理由を出す", () => {
+    openWithTemplateClip();
+    const cur = useTimelineStore.getState().doc!;
+    useTimelineStore.setState({
+      doc: { ...cur, clips: [{ ...cur.clips[0], assetRefs: { mainVisual: "asset_002" } }] } as typeof cur,
+    });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/確かめられませんでした/)).toBeInTheDocument();
+    expect(screen.queryByText("この動画に入っている音を流す")).toBeNull();
   });
 
   it("文字を書き換えられる", () => {
