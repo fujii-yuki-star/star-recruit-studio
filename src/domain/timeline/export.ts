@@ -15,7 +15,8 @@ import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
 import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
-import { clipOriginalAudio, isDrawnClip, videoAssetIdOfClip, videoAssetIds, videoClipsOf } from './video';
+import { clipOriginalAudio, isDrawnClip, videoAssetIds, videoPlacementsOfClip } from './video';
+import type { Template } from '../template/types';
 import type { TimelineClip, TimelineProject } from './types';
 
 /** 書き出す絵の計画（全フレーム描画）。 */
@@ -267,17 +268,18 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });
   }
-  // ⚠️ **直接置いた動画は映り（#512 段1）、元の音も鳴る（段2）**＝断るのは**まだ映らない使い方**だけ。
-  // 差し込み口（`assetRefs`）・立ち絵に入れた動画は段3 まで静止のままなので、従来どおり手前で断る
-  // （置いたのに静止画で出る、を成功として出さない＝ADR-0026④）。
+  // ⚠️ **直接置いた動画（#512 段1・段2）と差し込み口の動画（段3）は映る**＝断るのは**まだ映らない
+  // 使い方**だけ＝**立ち絵に入れた動画**（`character.poseAssetId`）。置いたのに静止画で出る、を
+  // 成功として出さない（ADR-0026④）。
+  // ⚠️ **描かれないものは数えない**＝隠した部品は静止画で出ることも無いので、断る理由が無い
+  // （隠したのに書き出せない、を作らない）。
   const videoIds = videoAssetIds(doc);
   if (videoIds.size > 0) {
-    // ⚠️ **描かれないものは数えない**（レビュー ❓・焼き出し／静止画の要求と揃える）＝隠した部品は
-    // 静止画で出ることも無いので、断る理由が無い（隠したのに書き出せない、を作らない）。
     const clipIds = doc.clips
       .filter(
         (clip) =>
-          clipUsesAsset(clip, videoIds) && videoAssetIdOfClip(clip, videoIds) == null && isDrawnClip(doc, clip),
+          isDrawnClip(doc, clip) &&
+          clipImageAssetUses(clip).some((u) => u.kind === 'character' && videoIds.has(u.assetId)),
       )
       .map((clip) => clip.id);
     if (clipIds.length > 0) blockers.push({ code: TIMELINE_EXPORT_BLOCK.videoAsset, clipIds });
@@ -292,7 +294,10 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
  * 使っていない素材まで載せると記憶を無駄に食う。音だけの素材は絵として描かないので含めない。
  * 出どころは `clipImageAssetIds` に1つ（**書き出しを断るかを数える側**と同じものを見る）。
  */
-export function timelineImageAssetIds(doc: TimelineProject): string[] {
+export function timelineImageAssetIds(
+  doc: TimelineProject,
+  templateOf?: (templateId: string) => Template | undefined,
+): string[] {
   const ids = new Set<string>();
   // 絵として置ける種別かは `isFreeSlotAssetType` に1つ（ADR-0030 追補で一本化）＝音の種別を数え直さない。
   const audioIds = new Set(doc.assets.filter((a) => !isFreeSlotAssetType(a.assetType)).map((a) => a.assetId));
@@ -306,11 +311,21 @@ export function timelineImageAssetIds(doc: TimelineProject): string[] {
   // 代表フレームを要らない＝要求すると、代表フレームが作れなかった動画で**書き出し全体が止まる**
   // （描かれもしないものを理由に断る）。⚠️ 動画以外の素材はこの引き算の対象にしない。
   const videoIds = videoAssetIds(doc);
-  const drawnAsVideoClipIds = new Set(videoClipsOf(doc).map((c) => c.id));
+  // ⚠️ **要否は置き場所ごと**（#512 段3）＝1つの部品でも、実フレームで描く差し込み口と
+  // 静止画で描く差し込み口が混じる。部品まるごとで判じると、静止画で描く枠の代表フレームを
+  // 落としてしまう（灰色の枠が焼き込まれる）。
   const stillOnly = new Set<string>();
   for (const c of doc.clips) {
-    if (drawnAsVideoClipIds.has(c.id) || !isDrawnClip(doc, c)) continue;
-    for (const id of clipImageAssetIds(c)) stillOnly.add(id);
+    if (!isDrawnClip(doc, c)) continue;
+    // ⚠️ **使い方まで込みで見分ける**（レビュー由来の変異チェックで判明）＝直接置きと立ち絵はどちらも
+    // 層を持たないので、層 id だけで突き合わせると**別の使い方どうしが同じ鍵になる**
+    //（直接置きの動画がある部品では、立ち絵の代表フレームまで要らない扱いになり灰色の枠が焼き込まれる）。
+    const asVideo = new Set(videoPlacementsOfClip(doc, c, { ids: videoIds, ...(templateOf ? { templateOf } : {}) })
+      .map((p) => assetUseKey(p.use, p.layerId)));
+    for (const u of clipImageAssetUses(c)) {
+      if (asVideo.has(assetUseKey(u.kind, u.layerId))) continue; // 実フレームで描く＝代表フレームは要らない
+      stillOnly.add(u.assetId);
+    }
   }
   return [...ids].filter((id) => !audioIds.has(id) && (!videoIds.has(id) || stillOnly.has(id)));
 }
@@ -327,15 +342,32 @@ export function timelineImageAssetIds(doc: TimelineProject): string[] {
  * **数える側（書き出しを断るか）と、読む側（data URL を用意するか）が同じものを見る**ための単一の参照元。
  */
 export function clipImageAssetIds(clip: TimelineClip): string[] {
-  const ids: string[] = [];
-  if (clip.assetId) ids.push(clip.assetId);
-  if (clip.character?.poseAssetId) ids.push(clip.character.poseAssetId);
-  for (const id of Object.values(clip.assetRefs ?? {})) if (typeof id === 'string') ids.push(id);
-  return ids;
+  return clipImageAssetUses(clip).map((u) => u.assetId);
 }
 
-/** そのクリップが対象の素材を使っているか（絵として使う素材のいずれかが当たるか）。 */
-function clipUsesAsset(clip: TimelineClip, assetIds: ReadonlySet<string>): boolean {
-  return clipImageAssetIds(clip).some((id) => assetIds.has(id));
+/** 素材の使い方を見分ける鍵（種類＋層 id）。⚠️ 層 id だけでは足りない（直接置きと立ち絵が重なる）。 */
+function assetUseKey(kind: AssetUseKind, layerId: string | null): string {
+  return `${kind}:${layerId ?? ''}`;
 }
+
+/** 素材の使い方（`direct`＝直接置き／`slot`＝差し込み口／`character`＝立ち絵）。 */
+export type AssetUseKind = 'direct' | 'slot' | 'character';
+
+/**
+ * 同じものを**置き場所つき**で返す（#512 段3）。
+ * ⚠️ **列挙はここ1つ**＝「どの素材を使うか」と「その素材をどこで使うか」を別々に数え直すと、
+ * 片方だけ増えたときに黙ってずれる（実際に立ち絵を落としていた＝上の JSDoc の経緯）。
+ */
+export function clipImageAssetUses(
+  clip: TimelineClip,
+): { kind: AssetUseKind; layerId: string | null; assetId: string }[] {
+  const out: { kind: AssetUseKind; layerId: string | null; assetId: string }[] = [];
+  if (clip.assetId) out.push({ kind: 'direct', layerId: null, assetId: clip.assetId });
+  if (clip.character?.poseAssetId) out.push({ kind: 'character', layerId: null, assetId: clip.character.poseAssetId });
+  for (const [layerId, id] of Object.entries(clip.assetRefs ?? {})) {
+    if (typeof id === 'string') out.push({ kind: 'slot', layerId, assetId: id });
+  }
+  return out;
+}
+
 

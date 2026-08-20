@@ -4,8 +4,9 @@
 // 描くのは `layoutTimelineAt`＝**プレビューと同じ関数**（ADR-0001 パリティ）。ここは
 // 「どの時刻を何枚描くか」を `timelineFramePlan`/`frameTimeAt` に委ね、SVG→PNG→ステージングを回すだけ。
 import { frameTimeAt, timelineFramePlan } from '../../domain/timeline/export';
-import { isItemOfClip } from '../timelineLayout';
-import { videoClipsOf, videoFrameIndexAt, videoStagePlan } from '../../domain/timeline/video';
+import { isItemOfPlacement } from '../timelineLayout';
+import { videoPlacementsOf, videoFrameIndexAt, videoStagePlan } from '../../domain/timeline/video';
+import type { VideoPlacement } from '../../domain/timeline/video';
 import { creditSpeakerAt } from '../../domain/timeline/credit';
 import { creditForLine } from '../../domain/voice/narratorCredit';
 import type { TimelineProject } from '../../domain/timeline/types';
@@ -62,8 +63,12 @@ export interface BuildTimelineFramesOptions {
 }
 
 /** その部品のコマを置く場所（部品ごとに分ける＝同じ動画を2つ置いても混ざらない）。 */
-export function videoFramesDirOf(clipId: string): string {
-  return `${TIMELINE_FRAMES_DIR}_v_${clipId}`;
+export function videoFramesDirOf(clipId: string, layerId: string | null = null): string {
+  // ⚠️ **置き場所ごとに別のフォルダ**（#512 段3）＝1つの部品に差し込み口ぶんの動画がありうるので、
+  // 部品 id だけで名づけると**後の1つが前の1つを上書きする**（別の絵が同じコマで出る）。
+  return layerId == null
+    ? `${TIMELINE_FRAMES_DIR}_v_${clipId}`
+    : `${TIMELINE_FRAMES_DIR}_v_${clipId}_${layerId}`;
 }
 
 /** 書き出しに渡す1本ぶん（`ExportSceneInput` と同じ形）。 */
@@ -94,22 +99,22 @@ export async function buildTimelineFrames(
 
   // **動画は先にコマへ焼き出す**（#512 段1）＝1フレームずつ切り出すと同じ素材を何度も開くことになる。
   // 焼けた枚数を覚えておき、置いた長さより素材が短いときは**最後のコマで止める**（無い番号を読まない）。
-  const staged: { clip: (typeof doc.clips)[number]; dirName: string; count: number }[] = [];
+  const staged: { placement: VideoPlacement; dirName: string; count: number }[] = [];
   if (opts.stageVideo && opts.readVideoFrame) {
-    for (const clip of videoClipsOf(doc)) {
+    for (const placement of videoPlacementsOf(doc, opts.templateOf)) {
       bail();
-      const spec = videoStagePlan(clip);
-      const dirName = videoFramesDirOf(clip.id);
+      const spec = videoStagePlan(placement);
+      const dirName = videoFramesDirOf(placement.clip.id, placement.layerId);
       const count = await opts.stageVideo({
-        clipId: clip.id,
-        assetId: clip.assetId as string,
+        clipId: placement.clip.id,
+        assetId: placement.assetId,
         dirName,
         sourceStartSec: spec.sourceStartSec,
         durationSec: spec.durationSec,
         speed: spec.speed,
         fps: plan.fps,
       });
-      staged.push({ clip, dirName, count });
+      staged.push({ placement, dirName, count });
     }
   }
 
@@ -119,18 +124,18 @@ export async function buildTimelineFrames(
     const layout = layoutTimelineAt(doc, timeSec, { templateOf: opts.templateOf, assetSizeOf: opts.assetSizeOf });
     // そのフレームで映る動画のコマを読み、**その部品のアイテムだけ**差し替える
     // （素材 id で引くと、同じ動画を別の時刻に置いた2つが同じコマになる）。
-    const frameSrc = new Map<string, string>();
+    const frameSrc: { placement: VideoPlacement; src: string }[] = [];
     for (const s of staged) {
-      const idx = videoFrameIndexAt(s.clip, f, plan.fps, s.count);
+      const idx = videoFrameIndexAt(s.placement, f, plan.fps, s.count);
       if (idx == null) continue;
-      frameSrc.set(s.clip.id, await opts.readVideoFrame!(s.dirName, idx));
+      frameSrc.push({ placement: s.placement, src: await opts.readVideoFrame!(s.dirName, idx) });
     }
     const svg = layoutToSvg(layout, {
       assetSrc: opts.assetSrc,
-      ...(frameSrc.size > 0
+      ...(frameSrc.length > 0
         ? {
             itemSrc: (item) => {
-              for (const [clipId, src] of frameSrc) if (isItemOfClip(item.id, clipId)) return src;
+              for (const { placement, src } of frameSrc) if (isItemOfPlacement(item.id, placement)) return src;
               return undefined;
             },
           }

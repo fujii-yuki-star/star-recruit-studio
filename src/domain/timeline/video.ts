@@ -10,15 +10,105 @@
 // 実映像を出せるか）＝プレビューと書き出しが同じものを見る（別々に持つと preview≠export になる）。
 import { isHiddenByGroup } from '../group/compose';
 import { ORIGINAL_AUDIO_VOLUME } from '../constants';
-import { ASSET_TYPE, TIMELINE_CLIP_KIND } from '../enums';
+import { ASSET_TYPE, LAYER_TYPE, SLOT_TYPE, TIMELINE_CLIP_KIND } from '../enums';
+import { SPEED_DEFAULT } from '../constants';
+import { clampSpeed } from '../asset/clip';
+import type { Template } from '../template/types';
+import type { AssetUseKind } from './export';
 import { clampVolume } from '../voice/audioMix';
+import { resolveSlotClip } from '../asset/clip';
 import type { TimelineClip, TimelineProject } from './types';
 
-/** その部品が映す動画の素材 id（`null`＝動画ではない）。 */
+/** その部品が**直接置いた**動画の素材 id（`null`＝直接置いた動画ではない）。 */
 export function videoAssetIdOfClip(clip: TimelineClip, videoAssetIds: ReadonlySet<string>): string | null {
-  // 段1 の対象は**直接置いた素材**だけ（差し込み口＝`assetRefs` は段3）。
   if (clip.kind !== TIMELINE_CLIP_KIND.slot) return null;
   return clip.assetId != null && videoAssetIds.has(clip.assetId) ? clip.assetId : null;
+}
+
+/**
+ * 動画を映す**置き場所**1つ分（#512 段3）。
+ *
+ * ⚠️ **1つの部品に複数の動画がありうる**＝見た目パターンのクリップは差し込み口の数だけ持てる。
+ * だから「どの部品か」ではなく「**どの置き場所か**」を単位にする（コマの焼き出し先・差し替える
+ * アイテム・元の音が、置き場所ごとに別々になる）。
+ */
+export interface VideoPlacement {
+  clip: TimelineClip;
+  /** 使い方（`direct`＝直接置き／`slot`＝差し込み口）。⚠️ **層 id から導き直さない**（`null` は
+   *  立ち絵とも重なる＝別の使い方が同じ鍵になる）。種別は `AssetUseKind` と共有。 */
+  use: Extract<AssetUseKind, 'direct' | 'slot'>;
+  /** 見た目パターンの差し込み口の層 id（`null`＝クリップに直接置いた素材）。 */
+  layerId: string | null;
+  assetId: string;
+  /** 素材のどこから使うか（秒）＝直接置きはクリップ自身、差し込み口は `slotClips` の解決値。 */
+  sourceStartSec: number;
+  /** 焼き出す長さ（秒）＝置いた長さ。差し込み口で「ここまで」があれば、そこで頭打ち。 */
+  durationSec: number;
+  /** 速さ（>0）＝同上。 */
+  speed: number;
+}
+
+/**
+ * その部品が持つ**動画の置き場所**（直接置き＋差し込み口）。
+ *
+ * ⚠️ 差し込み口の使い方（トリム・速さ）は**場面形式と同じ解決**（`resolveSlotClip`＝per-use 上書きを
+ * 素材既定に重ねる・ADR-0028）＝同じ差し込み口を2つの形式で別々に読まない（§6）。
+ */
+export function videoPlacementsOfClip(
+  doc: TimelineProject,
+  clip: TimelineClip,
+  opts: { ids?: ReadonlySet<string>; templateOf?: (templateId: string) => Template | undefined } = {},
+): VideoPlacement[] {
+  const ids = opts.ids ?? videoAssetIds(doc);
+  const direct = videoAssetIdOfClip(clip, ids);
+  if (direct != null) {
+    return [{
+      clip, use: 'direct', layerId: null, assetId: direct,
+      sourceStartSec: clip.sourceStartSec ?? 0, durationSec: clip.durationSec, speed: effectiveSpeed(clip),
+    }];
+  }
+  // ⚠️ **どの枠が動画を受けるかは見た目パターンが決める**（レビュー 🔴）＝場面形式と同じ規則
+  // （`findVideoSlots`＝**差し込み口の層だけ**・写真だけの差し込み口は除く・`11 §3.4/§5`）。
+  // 見ずに `assetRefs` を全部数えると、**背景の層に入れた動画**まで置き場所になり、プレビューは
+  // 静止画（背景の層は差し込み口として描かれない）・書き出しは実映像、という食い違いになる（ADR-0001）。
+  // 見た目が解けないときは**置き場所にしない**＝静止画の側へ倒す（そもそも描かれないので焼く意味も無い）。
+  const template = clip.templateId != null ? opts.templateOf?.(clip.templateId) : undefined;
+  if (!template) return [];
+  const out: VideoPlacement[] = [];
+  for (const layer of template.layers) {
+    if (layer.type !== LAYER_TYPE.slot) continue;
+    if (layer.slotType === SLOT_TYPE.image) continue;
+    const assetId = clip.assetRefs?.[layer.id];
+    if (typeof assetId !== 'string' || !ids.has(assetId)) continue;
+    const asset = doc.assets.find((a) => a.assetId === assetId);
+    const resolved = resolveSlotClip(clip.slotClips?.[layer.id], asset?.clip);
+    out.push({
+      clip,
+      use: 'slot',
+      layerId: layer.id,
+      assetId,
+      sourceStartSec: resolved.startSec ?? 0,
+      // ⚠️ **「ここまで」も持ち込む**（レビュー 🟡）＝場面で切った終わりを黙って無視すると、
+      // 焼き出した先ではその先まで流れる（ADR-0026①）。使える長さで頭打ちにする＝素材が
+      // 短いときと同じく最後のコマで止まる。
+      durationSec: placedDurationWithin(clip.durationSec, resolved.startSec, resolved.endSec, clampSpeed(resolved.speed ?? SPEED_DEFAULT)),
+      // ⚠️ 速さも**場面形式と同じクランプ**（schema の 0.5〜2.0＝`slotClips.speed`）を通す。
+      speed: clampSpeed(resolved.speed ?? SPEED_DEFAULT),
+    });
+  }
+  return out;
+}
+
+/** 使える素材の長さで、置いた長さを頭打ちにする（`endSec` 未指定＝置いた長さのまま）。 */
+function placedDurationWithin(
+  placedSec: number,
+  startSec: number | undefined,
+  endSec: number | undefined,
+  speed: number,
+): number {
+  if (endSec == null) return placedSec;
+  const usableSec = Math.max(0, endSec - (startSec ?? 0)) / speed;
+  return Math.min(placedSec, usableSec);
 }
 
 /** 文書が持つ動画素材の id（`assetType` で見分ける＝画面の一覧と同じ規則）。 */
@@ -36,6 +126,23 @@ export function videoAssetIds(doc: TimelineProject): Set<string> {
 export function videoClipsOf(doc: TimelineProject): TimelineClip[] {
   const ids = videoAssetIds(doc);
   return doc.clips.filter((c) => videoAssetIdOfClip(c, ids) != null && isDrawnClip(doc, c));
+}
+
+/**
+ * 文書の中で**実際に動画として描かれる置き場所**（#512 段3）。
+ * ⚠️ 描かれないもの（隠した部品・列・まとまり）は含めない＝`videoClipsOf` と同じ理由。
+ */
+export function videoPlacementsOf(
+  doc: TimelineProject,
+  templateOf?: (templateId: string) => Template | undefined,
+): VideoPlacement[] {
+  const ids = videoAssetIds(doc);
+  const out: VideoPlacement[] = [];
+  for (const clip of doc.clips) {
+    if (!isDrawnClip(doc, clip)) continue;
+    out.push(...videoPlacementsOfClip(doc, clip, { ids, ...(templateOf ? { templateOf } : {}) }));
+  }
+  return out;
 }
 
 /**
@@ -136,12 +243,12 @@ export function cropPivotDiffers(
  * （`11 §7.6.3.2`＝置いた長さは速さで変わらない）。トリム（`sourceStartSec`）から始める。
  */
 export function videoStagePlan(
-  clip: TimelineClip,
+  p: VideoPlacement,
 ): { sourceStartSec: number; durationSec: number; speed: number } {
-  const speed = effectiveSpeed(clip);
+  const speed = p.speed;
   return {
-    sourceStartSec: clip.sourceStartSec ?? 0,
-    durationSec: clip.durationSec,
+    sourceStartSec: p.sourceStartSec,
+    durationSec: p.durationSec,
     speed,
   };
 }
@@ -153,13 +260,13 @@ export function videoStagePlan(
  * **無い番号を読みに行かない**（場面形式の `min(f, count-1)` と同じ・#442）。最後のコマで止まる。
  */
 export function videoFrameIndexAt(
-  clip: TimelineClip,
+  p: VideoPlacement,
   frameIndex: number,
   fps: number,
   stagedCount: number,
 ): number | null {
   if (stagedCount <= 0) return null;
-  const local = stagedFrameIndexAt(clip, frameIndex, fps);
+  const local = stagedFrameIndexAt(p, frameIndex, fps);
   if (local == null) return null;
   return Math.min(stagedCount - 1, local);
 }
@@ -168,16 +275,22 @@ export function videoFrameIndexAt(
  * その出力フレームが、その部品の**何コマ目**か（`null`＝映っていない）。
  * ⚠️ **プレビューと書き出しはここだけを見る**（#512 段1 レビュー 🔴）＝別々に時刻を出すとずれる。
  */
-function stagedFrameIndexAt(clip: TimelineClip, frameIndex: number, fps: number): number | null {
+function stagedFrameIndexAt(p: VideoPlacement, frameIndex: number, fps: number): number | null {
   const t = frameIndex / fps;
   // 生きている区間は半開（`11 §7.6.4`＝終わりの瞬間はもう映らない）＝描く側と同じ規則。
-  if (t < clip.startSec || t >= clip.startSec + clip.durationSec) return null;
+  // ⚠️ **区間は部品の尺**（隠れる・隠れないは部品の置き場所で決まる）＝素材が尽きても枠は出たまま。
+  if (t < p.clip.startSec || t >= p.clip.startSec + p.clip.durationSec) return null;
   // ⚠️ **コマ数の引き算で出す**（秒へ直して掛け戻さない）＝掛け算の誤差で1つ手前へ落ちない
   // （`11 §7.6.5` の「格子点をもう一度量子化しない」と同じ理由）。
   // ⚠️ **トリムと速さはここで掛けない**＝焼いたコマ自体が織り込み済み（`stage_clip_frames` が
   // `sourceStartSec` から `setpts=PTS/speed` で並べる）。二重に掛けると倍速が二乗になる。
-  const local = frameIndex - Math.round(clip.startSec * fps);
-  return local < 0 ? null : local;
+  const local = frameIndex - Math.round(p.clip.startSec * fps);
+  if (local < 0) return null;
+  // ⚠️ **使える長さで頭打ちにする**（レビュー 🔴）＝差し込み口の「ここまで」（`endSec`）で焼く長さが
+  // 部品の尺より短いとき、書き出しは焼けた枚数で最後のコマに凍る。ここで同じだけ止めないと
+  // **プレビューだけが素材の先へ進む**（`endSec` を越えた絵が見える＝preview≠export・ADR-0001）。
+  // 上限は書き出しが焼く枚数と同じ数え方（Rust は `ceil(尺×fps)+1` 枚＝最後の番号は `ceil(尺×fps)`）。
+  return Math.min(local, Math.ceil(p.durationSec * fps));
 }
 
 /**
@@ -188,10 +301,10 @@ function stagedFrameIndexAt(clip: TimelineClip, frameIndex: number, fps: number)
  * プレビューと書き出しで**別のコマ**になる（実測で最大1.5コマ×速さのずれ）。ここで
  * 「何コマ目か」を先に決め、そのコマが指す素材の秒へ直す（トリム＋速さはこの1回だけ掛ける）。
  */
-export function videoSourceSecAt(clip: TimelineClip, timeSec: number, fps: number): number | null {
-  const local = stagedFrameIndexAt(clip, Math.round(timeSec * fps), fps);
+export function videoSourceSecAt(p: VideoPlacement, timeSec: number, fps: number): number | null {
+  const local = stagedFrameIndexAt(p, Math.round(timeSec * fps), fps);
   if (local == null) return null;
-  return (clip.sourceStartSec ?? 0) + (local / fps) * effectiveSpeed(clip);
+  return p.sourceStartSec + (local / fps) * p.speed;
 }
 
 /**

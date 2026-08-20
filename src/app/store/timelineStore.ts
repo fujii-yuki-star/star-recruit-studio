@@ -1249,6 +1249,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     useExportLockStore.getState().acquire(EXPORT_OWNER);
     let unlisten: (() => void) | undefined;
     try {
+      // 見た目パターンの解決は**代表フレームの要否**（どの枠が実フレームで描かれるか＝#512 段3）にも
+      // 要るので、絵を描く手前ではなく**ここで**用意する（同じ表を2度作らない）。
+      const templateById = new Map(deps.templates.map((t) => [t.templateId, t]));
+      const templateOf = (id: string) => templateById.get(id);
       // **表示用の URL（`asset://`）は書き出しでは読めない**（#716）＝ここで data URL へ解き直す。
       // 解き方は場面形式と共有（`createExportSrcResolver`）＝形式によって焼ける絵が割れない。
       // 使っている素材だけをまとめて持つ（全フレームで同じ絵を引くので都度読み直さない）。
@@ -1256,12 +1260,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // `timelineExportBlockers`（同期）には入れられないが、**聞いてから断る**のは避ける。
       // ⚠️ 走行中に数え始めた**後**でやる＝ここで待つ間に押し直されて二重に走るのを防ぐ。
       const exportSrcById = await resolveExportSrcMap(
-        timelineImageAssetIds(doc),
+        timelineImageAssetIds(doc, templateOf),
         createExportSrcResolver({ projectId: doc.projectId, assets: doc.assets, templateAssetSrcById: deps.templateAssetSrcById }),
       );
       // 読めなかった素材があれば断る。そのまま焼くとその部品だけ灰色の枠になり、プレビューでは
       // （開いた時点の表示先で）写真が出たままなので**見えていたものと違う動画**が成功として出る（ADR-0026④）。
-      if (timelineImageAssetIds(doc).some((id) => !exportSrcById[id] && !deps.templateAssetSrcById[id])) {
+      if (timelineImageAssetIds(doc, templateOf).some((id) => !exportSrcById[id] && !deps.templateAssetSrcById[id])) {
         set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: exportBlockedMessage[TIMELINE_EXPORT_BLOCK.assetUnreadable] } });
         return;
       }
@@ -1292,9 +1296,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       await clearExportFramesStage();
       // 同梱フォントを先にそろえる（読み込み済みの字体しか焼けない＝プレビューと違う字にしない）。
       await loadExportFonts();
-      const templateById = new Map(deps.templates.map((t) => [t.templateId, t]));
       const frames = await buildTimelineFrames(doc, {
-        templateOf: (id) => templateById.get(id),
+        templateOf,
         assetSrc: (id) => (id ? exportSrcById[id] ?? deps.templateAssetSrcById[id] : undefined),
         // 素材の実寸（#634）＝プレビューと同じものを渡す（渡さないと「枠いっぱい」だけ書き出しで戻る）。
         assetSizeOf: (id) => assetSizes[id],
