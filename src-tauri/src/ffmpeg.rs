@@ -2455,7 +2455,13 @@ pub struct NarrationSegmentInput {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BgmRunInput {
+    /// 音源の中身（base64）。**`audio_path` を渡すときは空でよい**。
     audio_base64: String,
+    /// 音源のプロジェクト相対パス（#512 段2）。**動画の元の音**はここで渡す
+    /// ＝動画ファイルを base64 にすると数百MBの文字列を作ることになる（場面形式の動画スロットも
+    /// パスで渡している＝同じ流儀）。指定があれば base64 より優先し、一時ファイルも作らない。
+    #[serde(default)]
+    audio_path: Option<String>,
     /// 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。
     file_ext: String,
     volume: f64,
@@ -3226,6 +3232,20 @@ fn export_video_impl(
         let total: f64 = jobs.iter().map(|j| j.duration_sec()).sum::<f64>() - applied;
         let mut files: Vec<String> = Vec::with_capacity(list.len());
         for (i, r) in list.iter().enumerate() {
+            // パス指定（#512 段2＝動画の元の音）は**そのまま入力にする**。中身を運ばないので、
+            // 大きな動画でも文字列にならない。存在しなければ理由つきで断る（黙って無音にしない）。
+            if let Some(rel) = r.audio_path.as_deref() {
+                let pid = project_id.clone().unwrap_or_default();
+                let src = resolve_project_file(&app, &pid, rel)?;
+                if !src.exists() {
+                    return Err(export_failure(
+                        format!("bgm src missing: {}", src.display()),
+                        "動画が見つかりませんでした。もう一度取り込んでください。",
+                    ));
+                }
+                files.push(src.to_string_lossy().into_owned());
+                continue;
+            }
             let bg_bytes = base64::engine::general_purpose::STANDARD
                 .decode(strip_data_url(&r.audio_base64))
                 .map_err(|e| {

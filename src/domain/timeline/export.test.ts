@@ -98,6 +98,59 @@ describe('frameTimeAt', () => {
   });
 });
 
+/** 音の入っている動画を直接置いた文書（#512 段2）。 */
+const videoDoc = (over: Partial<TimelineClip> = {}, docOver: Partial<TimelineProject> = {}): TimelineProject =>
+  doc({
+    assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '紹介', filePath: 'media/v.mp4', metadata: { hasAudio: true } }],
+    clips: [clip('clip_001', {
+      kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', x: 0, y: 0, w: 1920, h: 1080,
+      assetId: 'asset_v', startSec: 2, durationSec: 3, ...over,
+    })],
+    ...docOver,
+  });
+
+// 元の音（#512 段2）＝**再生で聞こえたものが書き出しにも出る**（ADR-0001）。
+describe('timelineAudioRuns（動画の元の音）', () => {
+  it('鳴らす設定なら、その動画をパスで渡す（中身は運ばない）', () => {
+    expect(timelineAudioRuns(videoDoc({ useOriginalAudio: true }))).toEqual([
+      {
+        clipId: 'clip_001',
+        sourceKey: 'asset:asset_v',
+        assetPath: 'media/v.mp4', // ⚠️ base64 にしない（動画は数百MBになりうる）
+        fileExt: 'mp4',
+        delaySec: 2,
+        playSec: 3,
+        sourceStartSec: 0,
+        speed: 1,
+        volume: 0.2,
+        fadeInSec: 0,
+        fadeOutSec: 0,
+        loop: false, // ⚠️ 繰り返さない（素材が尽きたら終わる＝絵も終わっている）
+      },
+    ]);
+  });
+
+  it('鳴らす設定でなければ出さない', () => {
+    expect(timelineAudioRuns(videoDoc())).toEqual([]);
+  });
+
+  it('音の入っていない動画は出さない（設定が残っていても）', () => {
+    const d = videoDoc({ useOriginalAudio: true }, {
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '紹介', filePath: 'media/v.mp4', metadata: { hasAudio: false } }],
+    } as Partial<TimelineProject>);
+    expect(timelineAudioRuns(d)).toEqual([]);
+  });
+
+  it('速さ・使い始め・音量は、その部品の値で出る', () => {
+    const runs = timelineAudioRuns(videoDoc({ useOriginalAudio: true, speed: 2, sourceStartSec: 4, originalAudioVolume: 0.9 }));
+    expect(runs[0]).toMatchObject({ speed: 2, sourceStartSec: 4, volume: 0.9 });
+  });
+
+  it('隠した部品は書き出しにも出ない（聞こえないものを混ぜない）', () => {
+    expect(timelineAudioRuns(videoDoc({ useOriginalAudio: true, hidden: true }))).toEqual([]);
+  });
+});
+
 describe('timelineAudioRuns', () => {
   it('置く位置・長さ・音源を返す', () => {
     const d = doc({ clips: [voiceClip('clip_001', { startSec: 2, durationSec: 3 })] });

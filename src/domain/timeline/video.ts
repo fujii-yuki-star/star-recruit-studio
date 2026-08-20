@@ -1,13 +1,17 @@
 // タイムライン形式の**動画素材**（#512 段1＝絵）。純粋・副作用なし。
 //
-// ⚠️ **段1 は絵だけ**＝元の音はまだ流れない（画面がその場で断る＝§2-5）。音は段2（`useOriginalAudio`）。
+// 段1＝絵（実フレーム）／**段2＝元の音**（`useOriginalAudio`）。どちらも直接置いた素材が対象で、
+// 差し込み口（`assetRefs`）は段3。段2 で扱わないもの（音量の変化・前後のフェード）は付けない
+// ＝置ける欄を出しておいて効かない、を作らない。
 //
 // 絵の作り方は場面形式（#442）と同じ道具立て：素材の区間を**出力 fps・速度込み**でコマへ焼き出し
 // （Rust `stage_clip_frames`）、フレームごとにその1枚を差し込む。
 // ⚠️ **動画にまつわる規則はここへ集約する**（どの部品が動画か／どの区間を焼くか／どのコマを出すか／
 // 実映像を出せるか）＝プレビューと書き出しが同じものを見る（別々に持つと preview≠export になる）。
 import { isHiddenByGroup } from '../group/compose';
+import { ORIGINAL_AUDIO_VOLUME } from '../constants';
 import { ASSET_TYPE, TIMELINE_CLIP_KIND } from '../enums';
+import { clampVolume } from '../voice/audioMix';
 import type { TimelineClip, TimelineProject } from './types';
 
 /** その部品が映す動画の素材 id（`null`＝動画ではない）。 */
@@ -42,6 +46,62 @@ export function isDrawnClip(doc: TimelineProject, clip: TimelineClip): boolean {
   if (clip.hidden) return false;
   if (doc.tracks.find((t) => t.id === clip.trackId)?.hidden) return false;
   return !isHiddenByGroup(clip.id, doc.groups ?? []);
+}
+
+/**
+ * その部品の**元の音**（#512 段2）。`null`＝鳴らない。
+ *
+ * ⚠️ **場面形式と同じ規準**（ADR-0026②＝`findVideoSlot.toVideoSlotInfo`）：
+ * - **既定は鳴らさない**（`useOriginalAudio` 未指定＝false）＝既に作った動画の音が黙って変わらない。
+ * - **素材に音が入っているときだけ**（`metadata.hasAudio`）＝音の無いファイルへ音の取り出しを頼むと
+ *   書き出しが失敗する（場面形式が同じ理由で同じ門を置いている）。
+ * - 音量は `originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME`、値域は `clampVolume` を共有。
+ * - ⚠️ **描かれない部品は鳴らない**（`isDrawnClip`）＝隠したのに聞こえる、を作らない
+ *   （音のクリップで `audioCuesAt` が置いている規則と同じ）。
+ *
+ * 再生（仕上がり確認）・書き出し・画面の欄が**この1つ**を通る＝聞いた音と書き出した音が一致する。
+ */
+export function clipOriginalAudio(
+  doc: TimelineProject,
+  clip: TimelineClip,
+): { assetId: string; volume: number; speed: number; sourceStartSec: number } | null {
+  const assetId = videoAssetIdOfClip(clip, videoAssetIds(doc));
+  if (assetId == null || !isDrawnClip(doc, clip)) return null;
+  if (clip.useOriginalAudio !== true) return null;
+  if (doc.assets.find((a) => a.assetId === assetId)?.metadata?.hasAudio !== true) return null;
+  return {
+    assetId,
+    volume: clampVolume(clip.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME),
+    speed: effectiveSpeed(clip),
+    sourceStartSec: clip.sourceStartSec ?? 0,
+  };
+}
+
+/**
+ * その部品で**元の音を選べるか**（#512 段2）＝素材に音が入っている動画の部品。
+ * ⚠️ 画面（欄を出すか）・編集（値を置けるか）が**同じ述語**を通る＝
+ * 「置けるのに欄が出ない」「出るのに断られる」を作らない（`isAudioClip` と同じ流儀）。
+ * ⚠️ **隠しているかは見ない**＝隠した部品でも設定は変えられる（鳴るかどうかだけが `clipOriginalAudio`）。
+ */
+export function canUseOriginalAudio(doc: TimelineProject, clip: TimelineClip): boolean {
+  return videoAudioState(doc, clip) === 'available';
+}
+
+/**
+ * その部品の**元の音の状態**（#512 段2・レビュー 🟡）。
+ * ⚠️ **「音が無い」と「判らない」を分ける**＝取り込みのとき動画を調べられなかった素材（`metadata` 無し）に
+ * 「音が入っていません」と断定すると**嘘の理由**になり、次の行動も誤る（実際は取り込み直し）。
+ * 場面形式も同じ2文で出し分けている（`ClipDetailControls`＝ADR-0026②）。
+ */
+export function videoAudioState(
+  doc: TimelineProject,
+  clip: TimelineClip,
+): 'available' | 'none' | 'unknown' | 'notVideo' {
+  const assetId = videoAssetIdOfClip(clip, videoAssetIds(doc));
+  if (assetId == null) return 'notVideo';
+  const hasAudio = doc.assets.find((a) => a.assetId === assetId)?.metadata?.hasAudio;
+  if (hasAudio === true) return 'available';
+  return hasAudio === false ? 'none' : 'unknown';
 }
 
 /** 速さの既定（未指定・0以下は等速）。⚠️ **焼き出しと再生が同じ値を見る**ための単一の参照元。 */

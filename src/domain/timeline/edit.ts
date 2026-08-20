@@ -13,6 +13,7 @@ import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y, CROP_MODE_DEFAULT } from '.
 import type { CropAlignX, CropAlignY, CropMode, TextKey, TrackKind } from '../enums';
 import type { Group } from '../group/types';
 import { isAudioClip } from './audio';
+import { canUseOriginalAudio } from './video';
 import { groupElementIds, removeMembersFromGroups } from '../project/groupOps';
 import { applyClipEdge } from './clipEdge';
 import { createFreeElement } from '../project/freeLayoutOps';
@@ -53,6 +54,12 @@ export const EDIT_BLOCKED = {
    * ⚠️ `notFound` で断らない＝「その部品は見つかりませんでした」は嘘になり、選び直しても直らない。
    */
   notAudio: 'TIMELINE_EDIT_NOT_AUDIO',
+  /**
+   * 元の音（#512 段2）を、**動画ではない部品**か**音の入っていない動画**へ書こうとした。
+   * ⚠️ `notAudio` と分ける＝「音の部品で変えてください」は動画の話をしていないので、
+   * 従っても直らない（音の入っていないファイルを置き換える、が次の行動）。
+   */
+  noOriginalAudio: 'TIMELINE_EDIT_NO_ORIGINAL_AUDIO',
   /**
    * その部品は分けられない（#686 段階4・決定16）。読み上げは**文と音がずれる**／連動している
    * 字幕は**時間を読み上げが決めている**ので、切ると持ち主のいない区間ができる。
@@ -1102,6 +1109,13 @@ export function setVisualClipContent(
   // **`null` はキーごと落とす**（同上）＝未指定との違いを文書に残さない。残すと、同じ絵の文書が
   // 2通りできて「取り消しても見た目が変わらない」段が生まれる。
   for (const k of keys) if (patch[k] === null) delete next[k];
+  // ⚠️ **素材を差し替えたら、元の音の設定は落とす**（#512 段2・レビュー ℹ️）＝残すと、写真へ替えて
+  // 欄が消えている間に設定だけ生き残り、**別の音入り動画を入れた瞬間に、頼んでいない音が鳴り出す**。
+  // 意味を失った設定は落とす（ADR-0027／#469 と同じ流儀）。
+  if (patch.assetId !== undefined && (clip.assetId ?? null) !== (patch.assetId ?? null)) {
+    delete next.useOriginalAudio;
+    delete next.originalAudioVolume;
+  }
   return ok(withClip(doc, next));
 }
 
@@ -1287,6 +1301,44 @@ export function setClipVolume(doc: TimelineProject, clipId: string, volume: numb
   const patched = { ...clip };
   if (next == null) delete patched.volume;
   else patched.volume = next;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * 動画の**元の音を鳴らすか**（#512 段2）。
+ *
+ * ⚠️ **置ける条件は `canUseOriginalAudio` の1つ**（画面が欄を出す条件と同じ）＝
+ * 「押せるのに断られる」「置けるのに欄が出ない」を作らない。
+ * ⚠️ **断る順は「元の音を持たない部品か」→「固定した列か」**（音の設定と同じ流儀・`11 §7.6.3.2`）。
+ * 鳴らさない（`false`）は**キーごと落とす**＝既定と同じ値を書かない（他の編集操作と同じ規則）。
+ */
+export function setClipUseOriginalAudio(doc: TimelineProject, clipId: string, use: boolean): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!canUseOriginalAudio(doc, clip)) return blocked(EDIT_BLOCKED.noOriginalAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  if ((clip.useOriginalAudio ?? false) === use) return ok(doc);
+  const patched = { ...clip };
+  if (use) patched.useOriginalAudio = true;
+  else delete patched.useOriginalAudio;
+  return ok(withClip(doc, patched));
+}
+
+/**
+ * 元の音の**音量**（#512 段2・`null`＝標準へ戻す）。値域は音のクリップと同じ 0〜`VOLUME_MAX`。
+ * ⚠️ **鳴らす設定になっていなくても置ける**＝先に音量を決めてから鳴らす、という順でも困らない
+ *（鳴るかどうかは `clipOriginalAudio` が別に見る）。
+ */
+export function setClipOriginalAudioVolume(doc: TimelineProject, clipId: string, volume: number | null): EditResult {
+  const clip = doc.clips.find((c) => c.id === clipId);
+  if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  if (!canUseOriginalAudio(doc, clip)) return blocked(EDIT_BLOCKED.noOriginalAudio);
+  if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
+  const next = volume == null ? null : Math.min(Math.max(0, volume), VOLUME_MAX);
+  if ((clip.originalAudioVolume ?? null) === next) return ok(doc);
+  const patched = { ...clip };
+  if (next == null) delete patched.originalAudioVolume;
+  else patched.originalAudioVolume = next;
   return ok(withClip(doc, patched));
 }
 

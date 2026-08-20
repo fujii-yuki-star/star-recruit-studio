@@ -32,7 +32,8 @@ import {
   firstFreeStart, moveClip, placeableVisualTracks,
   setVisualClipContent,
   moveClips, moveTrackOrder, moveTrackTo, removeSelectedClipsChecked, removeTrack, setClipAssetRef, setClipBox, setClipBoxes, setClipFade, setClipSourceStart, setClipSpeed,
-  setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipText, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
+  setClipAudioSource, setClipCrop, setClipCropAlign, setClipCropMode, setClipOriginalAudioVolume, setClipText,
+  setClipUseOriginalAudio, setClipVolume, setSubtitleText, setSubtitleVoiceLink, setTrackFlag, setVoiceSpeaker,
   setVoiceText, trimClip,
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
@@ -370,6 +371,10 @@ export interface TimelineState {
   setSelectedClipSourceStart: (sec: number) => void;
   /** 選んでいる音の音量（`null`＝動画全体に合わせる・#634）。 */
   setSelectedClipVolume: (volume: number | null) => void;
+  /** 動画の**元の音を鳴らすか**（#512 段2）。 */
+  setSelectedClipUseOriginalAudio: (use: boolean) => void;
+  /** 元の音の音量（`null`＝標準へ戻す）。 */
+  setSelectedClipOriginalAudioVolume: (volume: number | null) => void;
   /**
    * 選んでいる音の**音源を選び直す**（#695・#723）。素材が見つからないときの案内
    * 「音を選び直してください」に対応する操作＝これが無いと行き止まり（ADR-0034 決定5）。
@@ -926,6 +931,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSelectedClipSpeed: (speed) => applyEdit(set, get, (d, id) => setClipSpeed(d, id, speed)),
   setSelectedClipSourceStart: (sec) => applyEdit(set, get, (d, id) => setClipSourceStart(d, id, sec)),
   setSelectedClipVolume: (volume) => applyEdit(set, get, (d, id) => setClipVolume(d, id, volume)),
+  setSelectedClipUseOriginalAudio: (use) => applyEdit(set, get, (d, id) => setClipUseOriginalAudio(d, id, use)),
+  setSelectedClipOriginalAudioVolume: (volume) =>
+    applyEdit(set, get, (d, id) => setClipOriginalAudioVolume(d, id, volume)),
   setSelectedClipAudioSource: (source) => applyEdit(set, get, (d, id) => setClipAudioSource(d, id, source)),
   setSelectedClipFade: (edge, sec) => applyEdit(set, get, (d, id) => setClipFade(d, id, edge, sec)),
   setSelectedVolumePoint: (timeSec, volume) =>
@@ -1367,10 +1375,13 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 export function timelineBgmRunInputs(doc: TimelineProject, audioSrcByKey: Record<string, string>): BgmRunInput[] {
   const runs: BgmRunInput[] = [];
   for (const run of timelineAudioRuns(doc)) {
-    const audioBase64 = audioSrcByKey[run.sourceKey];
-    if (!audioBase64) continue;
+    // ⚠️ **動画の元の音はパスで渡す**（#512 段2）＝中身（base64）は要らない。
+    // ここで `audioSrcByKey` を要求すると、動画を丸ごと文字列にしないと鳴らせなくなる。
+    const audioBase64 = run.assetPath ? "" : audioSrcByKey[run.sourceKey];
+    if (!run.assetPath && !audioBase64) continue;
     runs.push({
       audioBase64,
+      ...(run.assetPath ? { audioPath: run.assetPath } : {}),
       fileExt: run.fileExt,
       volume: run.volume,
       // 音量の変化（#512）＝点が無い部品ではキーごと落とす（未指定＝一定値の `volume` で出る）。

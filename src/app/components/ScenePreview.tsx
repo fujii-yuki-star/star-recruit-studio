@@ -4,6 +4,7 @@ import type { ElementAnimation, Scene } from "../../domain/project/types";
 import type { Template } from "../../domain/template/types";
 import type { Fit } from "../../domain/enums";
 import { ORIGINAL_AUDIO_VOLUME } from "../../domain/constants";
+import { useMediaVolume } from "../hooks/useMediaVolume";
 import { isSubtitleItem, layoutScene } from "../../renderer/layout";
 import type { LayoutItem } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
@@ -54,7 +55,6 @@ function SlotVideo({
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   // >1.0 増幅用の Web Audio グラフ（volume>1 のときだけ張る）。null＝素の video.volume で足りる（≤1.0）。
-  const audioRef = useRef<{ ctx: AudioContext; gain: GainNode } | null>(null);
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
@@ -97,51 +97,8 @@ function SlotVideo({
       safePause();
     };
   }, [src, clipStartSec, clipEndSec, speed, startDelaySec]);
-  // 元音声が 100% 超（最大 150%）のときは video.volume の上限(1.0)を超えられないため、Web Audio の GainNode で増幅して
-  // 書き出し（FFmpeg volume=1.5）と一致させる（#432 P2）。AudioContext が無い環境（jsdom/古ブラウザ）は video.volume に
-  // 1.0 クランプでフォールバック（≤1.0 は元から一致）。増幅の要否は場面内で不変（スロットの originalVolume）。
-  const needsAmp = volume > 1;
-  useEffect(() => {
-    const v = ref.current;
-    if (!v || !needsAmp || audioRef.current) return;
-    const AC =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return; // フォールバック（video.volume クランプ）
-    try {
-      const ctx = new AC();
-      const source = ctx.createMediaElementSource(v);
-      const gain = ctx.createGain();
-      source.connect(gain).connect(ctx.destination);
-      audioRef.current = { ctx, gain };
-      v.volume = 1; // 素の音量は最大＝最終音量は gain で作る
-    } catch { /* 生成失敗は video.volume フォールバック */ }
-    // 一度張ったグラフは **unmount まで畳まない**（下の cleanup effect で閉じる）。createMediaElementSource で
-    // 奪った要素の音声出力は仕様上 video.volume へ戻せないため、needsAmp が false に落ちても graph を維持し
-    // gain で音量を作り続ける（畳むと無音のまま復帰しない・レビュー P3・将来 ADR-0023 の同時表示対策）。
-  }, [needsAmp]);
-  // 要素の破棄（unmount）時にだけ AudioContext を閉じる。
-  useEffect(
-    () => () => {
-      void audioRef.current?.ctx.close().catch(() => {});
-      audioRef.current = null;
-    },
-    [],
-  );
-  // ミュート/音量の即時反映（再生を止めずに）。graph があれば gain（全音量を担当）、無ければ video.volume（1.0クランプ）。
-  useEffect(() => {
-    const v = ref.current;
-    if (!v) return;
-    const wa = audioRef.current;
-    if (wa) {
-      wa.gain.gain.value = muted ? 0 : Math.max(0, volume);
-      v.muted = false; // 音量は graph に一本化（要素側は素通し）
-      void wa.ctx.resume().catch(() => {});
-    } else {
-      v.muted = muted || volume <= 0;
-      v.volume = Math.min(1, Math.max(0, volume));
-    }
-  }, [muted, volume, needsAmp]);
+  // 音量（消音・100%超の増幅）は**タイムライン形式と共有**（#512 段2）＝同じ仕組みを2つ持たない。
+  useMediaVolume(ref, { volume, muted });
   return (
     <video
       ref={ref}

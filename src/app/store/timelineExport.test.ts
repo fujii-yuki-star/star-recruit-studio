@@ -433,4 +433,35 @@ describe('timelineBgmRunInputs', () => {
     const runs = timelineBgmRunInputs(doc({ clips: [audioClip] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
     expect(runs[0]).not.toHaveProperty('volumeExpr');
   });
+
+  // 動画の元の音（#512 段2）＝**中身ではなくパスで渡す唯一の変換点**。
+  // ⚠️ 中身（`audioSrcByKey`）を要求してしまうと、動画を丸ごと文字列にしない限り鳴らなくなる。
+  const videoDoc = () =>
+    doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '紹介', filePath: 'media/v.mp4', metadata: { hasAudio: true } }],
+      clips: [{
+        id: 'clip_v', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+        startSec: 1, durationSec: 4, x: 0, y: 0, w: 1920, h: 1080,
+        assetId: 'asset_v', useOriginalAudio: true, originalAudioVolume: 0.8,
+      } as TimelineClip],
+    });
+
+  it('動画の元の音は、音源の中身が無くてもパスで渡す（飛ばさない）', () => {
+    const runs = timelineBgmRunInputs(videoDoc(), {}); // ⚠️ 空の音源表＝中身は1つも無い
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      audioPath: 'media/v.mp4',
+      audioBase64: '', // 中身は運ばない
+      fileExt: 'mp4',
+      delaySec: 1,
+      playSec: 4,
+      volume: 0.8,
+      loopSource: false,
+    });
+  });
+
+  it('音の部品にはパスを付けない（中身で渡す従来の経路のまま）', () => {
+    const runs = timelineBgmRunInputs(doc({ clips: [audioClip] }), { 'bgm:found-new-hope': 'data:audio/mp3;base64,AAA' });
+    expect(runs[0]).not.toHaveProperty('audioPath');
+  });
 });

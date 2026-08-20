@@ -257,6 +257,7 @@ const tlAccept = [
   ['timeline: 読み上げクリップ（voice）を許容（1.1）', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: 3, status: 'none' } })],
   ['timeline: 読み上げは話者/速度なし（既定を継承）でも許容', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', status: 'none' } })],
   ['timeline: 読み上げの話者/話速/抑揚 null（継承）を許容', tlClips({ id: 'clip_001', kind: 'voice', trackId: 'track_004', startSec: 0, durationSec: 3, voice: { text: 'やあ', speaker: null, speed: null, intonation: null, status: 'generated' } })],
+  ['timeline: 動画の元の音（useOriginalAudio・originalAudioVolume）を許容（1.8・#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', useOriginalAudio: true, originalAudioVolume: 0.9 })],
   ['timeline: 音量の変化（volumePoints）を許容（1.7・#512）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001', volumePoints: [{ timeSec: 0, volume: 0.2 }, { timeSec: 5, volume: 1 }] })],
   ['timeline: 切り抜きの効かせ方（cropMode）を許容（1.5・#634）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', crop: { left: 0.1 }, cropMode: 'fill' })],
   ['timeline: 素材の寄せ（cropAlign）を許容（1.4・#634）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', cropAlign: { x: 'left', y: 'bottom' } })],
@@ -266,6 +267,8 @@ const tlAccept = [
   ['timeline: テンプレクリップの textFontIds/character/slotClips を許容（1.1）', tlClips({ id: 'clip_001', kind: 'template', trackId: 'track_001', startSec: 0, durationSec: 3, templateId: 'opening_yuko_right_v1', textFontIds: { title: 'kaitou-yokoku-gothic' }, character: { enabled: true, characterId: 'yuko', poseAssetId: 'yuko_smile_001' }, slotClips: { background: { startSec: 1, endSec: 5, speed: 1.5 } } })],
 ];
 const tlReject = [
+  ['timeline: 元の音の音量が範囲外(2.0)は拒否（値域は場面形式と共有＝$ref・#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', originalAudioVolume: 2.0 })],
+  ['timeline: 元の音を鳴らすかが真偽でないのは拒否（#512 段2）', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 100, assetId: 'asset_001', useOriginalAudio: 'yes' })],
   ['timeline: 音量の変化が空配列は拒否（#512）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001', volumePoints: [] })],
   ['timeline: 音量の変化の音量が範囲外は拒否（#512）', tlClips({ id: 'clip_001', kind: 'audio', trackId: 'track_002', startSec: 0, durationSec: 5, assetId: 'asset_001', volumePoints: [{ timeSec: 0, volume: 2 }] })],
   ['timeline: 未知の切り抜きの効かせ方は拒否', tlClips({ id: 'clip_001', kind: 'slot', trackId: 'track_001', startSec: 0, durationSec: 3, x: 0, y: 0, w: 100, h: 100, cropMode: 'stretch' })],

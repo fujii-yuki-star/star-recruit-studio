@@ -4,7 +4,7 @@ import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, VOLUME_MAX } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
-import { addAudioClip, EDIT_BLOCKED, setClipFade, setClipSourceStart, setClipSpeed, setClipVolume } from './edit';
+import { addAudioClip, EDIT_BLOCKED, setVisualClipContent, setClipFade, setClipOriginalAudioVolume, setClipSourceStart, setClipSpeed, setClipUseOriginalAudio, setClipVolume } from './edit';
 import { timelineAudioRuns } from './export';
 import { audioCuesAt } from './audio';
 import { validateTimelineProject } from '../validation/generated/validators.js';
@@ -176,5 +176,98 @@ describe('setClipVolume / setClipFade', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(timelineAudioRuns(r.doc)[0].fadeInSec).toBe(1);
+  });
+});
+
+// 動画の**元の音**（#512 段2）。音のクリップの設定とは別物なので、断り方も別に持つ。
+describe('setClipUseOriginalAudio / setClipOriginalAudioVolume', () => {
+  const videoDoc = (over: Partial<TimelineClip> = {}, hasAudio: boolean | undefined = true): TimelineProject =>
+    doc({
+      assets: [{
+        assetId: 'asset_v', assetType: 'video', displayName: '紹介', filePath: 'v.mp4',
+        ...(hasAudio == null ? {} : { metadata: { hasAudio } }),
+      }],
+      clips: [{
+        id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+        startSec: 0, durationSec: 10, x: 0, y: 0, w: 1920, h: 1080, assetId: 'asset_v', ...over,
+      } as TimelineClip],
+    } as Partial<TimelineProject>);
+
+  it('鳴らす・やめるを切り替えられる（やめたらキーごと落とす）', () => {
+    const on = setClipUseOriginalAudio(videoDoc(), 'clip_001', true);
+    expect(on.ok && on.doc.clips[0].useOriginalAudio).toBe(true);
+    expect(on.ok && validateTimelineProject(on.doc)).toBe(true);
+    if (!on.ok) return;
+    const off = setClipUseOriginalAudio(on.doc, 'clip_001', false);
+    // 既定と同じ値は書かない（他の編集操作と同じ規則）。
+    expect(off.ok && off.doc.clips[0].useOriginalAudio).toBeUndefined();
+  });
+
+  it('音量を変えられ、null で標準へ戻せる', () => {
+    const a = setClipOriginalAudioVolume(videoDoc(), 'clip_001', 0.9);
+    expect(a.ok && a.doc.clips[0].originalAudioVolume).toBe(0.9);
+    expect(a.ok && validateTimelineProject(a.doc)).toBe(true);
+    if (!a.ok) return;
+    const b = setClipOriginalAudioVolume(a.doc, 'clip_001', null);
+    expect(b.ok && b.doc.clips[0].originalAudioVolume).toBeUndefined();
+  });
+
+  it('音量は保存できる範囲へ収める（schema の上限と同じ）', () => {
+    const r = setClipOriginalAudioVolume(videoDoc(), 'clip_001', 9);
+    expect(r.ok && r.doc.clips[0].originalAudioVolume).toBe(VOLUME_MAX);
+    expect(r.ok && validateTimelineProject(r.doc)).toBe(true);
+  });
+
+  // ⚠️ **音の部品の断り（`notAudio`）を流用しない**＝「音や読み上げの部品で変えてください」は
+  // 動画の話をしていないので、従っても直らない（§2-5）。
+  it('音の入っていない動画では、動画むけの理由で断る', () => {
+    const r = setClipUseOriginalAudio(videoDoc({}, false), 'clip_001', true);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.reason).toBe(EDIT_BLOCKED.noOriginalAudio);
+    expect(!r.ok && r.reason).not.toBe(EDIT_BLOCKED.notAudio);
+  });
+
+  it('動画ではない部品でも、動画むけの理由で断る', () => {
+    const r = setClipUseOriginalAudio(doc(), 'clip_001', true); // 既定の文書は BGM
+    expect(!r.ok && r.reason).toBe(EDIT_BLOCKED.noOriginalAudio);
+  });
+
+  it('固定した列では変えられない', () => {
+    const d = videoDoc();
+    const locked = { ...d, tracks: d.tracks.map((t) => (t.id === 'track_001' ? { ...t, locked: true } : t)) };
+    expect(setClipUseOriginalAudio(locked, 'clip_001', true).ok).toBe(false);
+    const r = setClipOriginalAudioVolume(locked, 'clip_001', 0.5);
+    expect(!r.ok && r.reason).toBe(EDIT_BLOCKED.locked);
+  });
+
+  // ⚠️ **素材を差し替えたら設定は落とす**（レビュー ℹ️）＝残すと、写真へ替えて欄が消えている間に
+  // 設定だけ生き残り、別の音入り動画を入れた瞬間に**頼んでいない音が鳴り出す**。
+  it('素材を差し替えると、元の音の設定は落ちる', () => {
+    const d = {
+      ...videoDoc({ useOriginalAudio: true, originalAudioVolume: 0.9 }),
+      assets: [
+        { assetId: 'asset_v', assetType: 'video', displayName: '紹介', filePath: 'v.mp4', metadata: { hasAudio: true } },
+        { assetId: 'asset_w', assetType: 'video', displayName: '別の動画', filePath: 'w.mp4', metadata: { hasAudio: true } },
+      ],
+    } as TimelineProject;
+    const r = setVisualClipContent(d, 'clip_001', { assetId: 'asset_w' });
+    expect(r.ok && r.doc.clips[0].assetId).toBe('asset_w');
+    expect(r.ok && r.doc.clips[0].useOriginalAudio).toBeUndefined();
+    expect(r.ok && r.doc.clips[0].originalAudioVolume).toBeUndefined();
+  });
+
+  it('同じ素材を置き直しただけなら、元の音の設定は残る', () => {
+    const d = videoDoc({ useOriginalAudio: true });
+    const r = setVisualClipContent(d, 'clip_001', { assetId: 'asset_v', fit: 'contain' });
+    expect(r.ok && r.doc.clips[0].useOriginalAudio).toBe(true);
+  });
+
+  // ⚠️ **何も変わらない操作は同じ文書を返す**（取り消しに空の1手を積まない＝他の操作と同じ規則）。
+  it('同じ値を置き直しても文書は変わらない', () => {
+    const d = videoDoc({ useOriginalAudio: true, originalAudioVolume: 0.5 });
+    const a = setClipUseOriginalAudio(d, 'clip_001', true);
+    expect(a.ok && a.doc).toBe(d);
+    const b = setClipOriginalAudioVolume(d, 'clip_001', 0.5);
+    expect(b.ok && b.doc).toBe(d);
   });
 });
