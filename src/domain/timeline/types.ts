@@ -153,6 +153,15 @@ export interface TimelineClip extends ClipSpatial {
   fadeInSec?: number;
   fadeOutSec?: number;
 
+  /**
+   * 動画の素材を置いたクリップで、その動画に入っている**元の音を鳴らすか**（#512 段2）。
+   * 未指定＝鳴らさない。**素材に音が入っているときだけ**効く（場面形式と同じ規準＝ADR-0026②）。
+   * 解決は `domain/timeline/video.ts` の1か所（再生・書き出し・画面が共有）。
+   */
+  useOriginalAudio?: boolean;
+  /** 元の音の音量（0〜1.5）。未指定＝標準（`ORIGINAL_AUDIO_VOLUME`）。 */
+  originalAudioVolume?: number;
+
   /** 素材のどこから使うか（非破壊トリム・ADR-0024）。動画・音声クリップで有効。 */
   sourceStartSec?: number;
   /** 再生速度（>0）。 */
@@ -204,4 +213,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.7';
+export const TIMELINE_SCHEMA_VERSION = '1.8';

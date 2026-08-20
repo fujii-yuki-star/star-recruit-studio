@@ -4,8 +4,9 @@
 // 流し始める」で、こちらは**再生位置（グローバルな時刻）が正**＝つまみで飛ばせる。だから
 // 「いまの再生位置なら素材のどこか」を毎回もらい、止まっているときはそのコマで静止する。
 //
-// ⚠️ **段1 は絵だけ**＝元の音はまだ流れないので**常に消音**（画面がその場で断る＝§2-5）。音は段2。
+// 元の音（#512 段2）は**鳴らす設定のときだけ**流す＝音量は `useMediaVolume`（場面形式と共有）が効かせる。
 import { useEffect, useRef } from "react";
+import { useMediaVolume } from "../hooks/useMediaVolume";
 import type { CSSProperties } from "react";
 import type { CropAlignX, CropAlignY, Fit } from "../../domain/enums";
 import { CROP_ALIGN_DEFAULT_X, CROP_ALIGN_DEFAULT_Y } from "../../domain/enums";
@@ -34,7 +35,7 @@ function insetOf(
 }
 
 export function TimelineSlotVideo({
-  src, rect, rotation, opacity, fit, align, clipRect, canvas, sourceSec, speed, playing, onUnplayable,
+  src, rect, rotation, opacity, fit, align, clipRect, canvas, sourceSec, speed, playing, audioVolume, audioOnly, onUnplayable,
 }: {
   src: string;
   /** 置き場所（**動画の座標**＝キャンバス基準）。割合への直しはここで行う（呼び出し側で作らない）。 */
@@ -52,6 +53,18 @@ export function TimelineSlotVideo({
   sourceSec: number;
   speed: number;
   playing: boolean;
+  /**
+   * 元の音の音量（#512 段2・`undefined`＝**鳴らさない**）。鳴らすかどうかの判定は domain の
+   * `clipOriginalAudio` が持ち、ここは受け取った値を効かせるだけ（規則を画面へ写さない）。
+   */
+  audioVolume?: number;
+  /**
+   * **音だけ流す**（#512 段2・レビュー 🟡）＝絵は静止のまま出せない事情があるとき（まとまり全体の
+   * フェード中・回した部品の切り抜き）に、音まで黙って消さないための姿。
+   * ⚠️ 絵を出さない理由は**合成の仕方が書き出しと違う**ことなので、音には当てはまらない
+   *（音は合成しない）＝ここで消すと**聞こえないのに書き出しには入る**というズレになる（ADR-0001）。
+   */
+  audioOnly?: boolean;
   /**
    * その素材を**この画面では読めなかった**（#512 段1 レビュー 🟡）。
    * ⚠️ 取り込みは変換せずに写すので、**画面が再生できない形式**（HEVC 等）が入りうる。
@@ -104,7 +117,11 @@ export function TimelineSlotVideo({
     return () => v.removeEventListener("loadedmetadata", apply);
   }, [src, playing]);
 
-  // (3) 画面から消えるときだけ止める（**張り直しでは止めない**＝上の毎フレーム pause を作らない）。
+  // (3) 音量（#512 段2）＝**場面形式と同じ仕組み**（`useMediaVolume`）。100%超は Web Audio で作るので、
+  // 書き出し（FFmpeg の `volume`）と一致する。鳴らさない設定（`undefined`）は消音。
+  useMediaVolume(ref, { volume: audioVolume ?? 0, muted: audioVolume == null });
+
+  // (4) 画面から消えるときだけ止める（**張り直しでは止めない**＝上の毎フレーム pause を作らない）。
   useEffect(() => {
     const v = ref.current;
     return () => {
@@ -112,7 +129,10 @@ export function TimelineSlotVideo({
     };
   }, []);
 
-  const style: CSSProperties = {
+  // 音だけ流すときは**場所を取らない**（見えず・触れず・並びに影響しない）。絵は静止層が担当する。
+  const style: CSSProperties = audioOnly
+    ? { position: "absolute", width: 0, height: 0, opacity: 0, pointerEvents: "none" }
+    : {
     position: "absolute",
     left: `${(rect.x / canvas.width) * 100}%`,
     top: `${(rect.y / canvas.height) * 100}%`,
@@ -132,14 +152,14 @@ export function TimelineSlotVideo({
     // **別の場所が切れる**（画面いっぱいのときだけ偶然一致するので気づきにくい）。
     ...(clipRect ? { clipPath: insetOf(rect, clipRect) } : {}),
     pointerEvents: "none",
-  };
-  // ⚠️ **常に消音**（段1）＝元の音はまだ流れない。`muted` を外すのは段2（`useOriginalAudio`）。
+    };
+  // ⚠️ 消音・音量は `useMediaVolume` が要素へ直接効かせる（DOM のプロパティ＝React の属性では届かない）。
+  // ここで `muted` を書くと、増幅のために graph へ一本化した音量を要素側から上書きしてしまう。
   return (
     <video
       ref={ref}
       src={src}
       style={style}
-      muted
       playsInline
       preload="auto"
       // 読めなかったら実映像をやめる（穴だけ開いた窓を残さない）。

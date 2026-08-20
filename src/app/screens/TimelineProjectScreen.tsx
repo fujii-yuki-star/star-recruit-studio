@@ -15,7 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_PENDING, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
@@ -35,7 +35,7 @@ import type { TimelineClip } from "../../domain/timeline/types";
 import "../components/timeline.css";
 import { clipEndSec, validateTimelineDoc } from "../../domain/timeline/validateTimelineDoc";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
-import { compositeSpansOthers, cropPivotDiffers, videoAssetIds, videoClipsOf, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
+import { canUseOriginalAudio, clipOriginalAudio, compositeSpansOthers, cropPivotDiffers, videoAssetIds, videoAudioState, videoClipsOf, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
@@ -47,7 +47,7 @@ import type { Keyframe } from "../../domain/project/types";
 import { VOICE_CATALOG } from "../../domain/voice/voiceCatalog";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
-import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, TIMELINE_LABEL_W_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
+import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, FPS, ORIGINAL_AUDIO_VOLUME, TIMELINE_LABEL_W_PX, TIMELINE_MIN_CLIP_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_POINTS_MAX, VOLUME_STEP } from "../../domain/constants";
 import { NARRATION_STATUS } from "../../domain/enums";
 import { EXPORT_RUN_PHASE } from "../../domain/export/exportProgress";
 import { creditSpeakerAt } from "../../domain/timeline/credit";
@@ -348,6 +348,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     addVoiceClip, setSelectedVoiceText, setSelectedVoiceSpeaker, generateSelectedVoice, addLinkedSubtitleClip, voiceError, generatingVoiceClipId,
     setSelectedKeyframeAt, removeSelectedKeyframe, clearSelectedKeyframes, clearKeyframesOf,
     addAudioClip, addVisualClip, setSelectedVisualContent, setSelectedClipSpeed, setSelectedClipSourceStart, setSelectedClipVolume, setSelectedClipAudioSource, setSelectedClipFade,
+    setSelectedClipUseOriginalAudio, setSelectedClipOriginalAudioVolume,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
     addAsset, addAssetByPath, importError, clearImportError, isImporting,
@@ -888,9 +889,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     !BGM_CATALOG.some((b) => `bgm:${b.id}` === audioSourceValue) &&
     !audioAssets.some((a) => `asset:${a.assetId}` === audioSourceValue);
   // 置ける絵の素材（#684）。判定は**自由配置の差し込み口と同じ関数**（ADR-0030 追補＝一本化）。
-  // ⚠️ **動画も出す**（#512 段1・利用者判断 2026-08-19）＝以前は「置けても書き出しの手前で断られる」ので
-  // 外していたが、**直接置いた動画は映るようになった**ので理由が消えた。元の音はまだ流れないが、
-  // それは選んだときに知らせる（黙って無音にしない・`15 §6`）。
+  // ⚠️ **動画も出す**（#512・利用者判断 2026-08-19）＝以前は「置けても書き出しの手前で断られる」ので
+  // 外していたが、**直接置いた動画は映り（段1）、元の音も鳴る（段2）**ようになったので理由が消えた。
   const visualAssets = doc?.assets.filter((a) => isFreeSlotAssetType(a.assetType)) ?? [];
   // 隠した列は動画に出ない／鳴らないので、置き先の候補に出さない（置けるのに出ない、を作らない）。
   // 音・読み上げを置ける列（#724）。**映像側と同じ規則・同じ向き**（`placeableAudioTracks`）＝
@@ -2059,7 +2059,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const videoAssetIdSet = videoAssetIds(doc);
   // **動画の実映像**（#512 段1）＝書き出しで実フレームが出るので、プレビューにも同じ絵を出す
   // （出さないと「見えていたものと違う動画が出る」＝ADR-0001 が破れる）。分割は書き出しと**同じ関数**
-  // （`splitVideoSceneSvgMulti`）＝穴を開けて `video` 要素で埋める。⚠️ **段1 は消音**（音は段2）。
+  // （`splitVideoSceneSvgMulti`）＝穴を開けて `video` 要素で埋める。元の音は段2（`clipOriginalAudio`）。
   const videoPlay = shownLayout
     ? videoClipsOf(doc)
         .map((clip) => {
@@ -2088,10 +2088,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             : cropPivotDiffers(item, item.clipRect, item.rotation)
               ? "rotatedCrop"
               : null;
-          if (held) return { clip, held } as const;
           return {
-            clip, held: null, itemId: item.id, src, sourceSec, speed,
+            clip, held, itemId: item.id, src, sourceSec, speed,
             fit: item.fit, align: item.align,
+            // 元の音（#512 段2）。鳴るかどうか・音量は domain の1か所が決める（書き出しと同じ値）。
+            audioVolume: doc ? (clipOriginalAudio(doc, clip)?.volume ?? undefined) : undefined,
             // 合成の不透明度・切り抜きは**書き出しが `<g>` で掛けているもの**＝実映像にも同じだけ効かせる。
             // ⚠️ 書き出しは**入れ子で掛かる**（合成の単位の α × 要素の α）＝置き換えない（レビュー 🟡）。
             opacity: (item.composite?.opacity ?? 1) * (item.opacity ?? 1),
@@ -2101,7 +2102,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         .filter((v): v is NonNullable<typeof v> => v != null)
     : [];
   /** 実際に実映像として出すもの（出せない理由が付いたものは静止のまま）。 */
-  const videoShown = videoPlay.filter((v): v is Extract<typeof v, { held: null }> => v.held == null);
+  const videoShown = videoPlay.filter((v) => v.held == null);
+  /**
+   * **絵は出せないが、音は鳴らすもの**（#512 段2・レビュー 🟡）。
+   * ⚠️ 絵を出せない理由（合成の単位を跨ぐ・回した切り抜き）は**音には当てはまらない**（音は合成しない）
+   * ＝ここで消すと「仕上がり確認では聞こえないのに、書き出した動画には入っている」になる（ADR-0001）。
+   */
+  const videoHeldAudible = videoPlay.filter((v) => v.held != null && v.audioVolume != null);
   const videoSplit =
     shownLayout && videoShown.length > 0
       ? splitVideoSceneSvgMulti(
@@ -2131,6 +2138,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     { id: PANEL_ID.preview, title: '仕上がり確認', content: (
       <>
         <div className="preview-stage-wrap">
+          {/* 絵は静止のままでも**音は鳴らす**（#512 段2・レビュー 🟡）＝聞こえないのに書き出しには
+              入っている、を作らない（ADR-0001）。⚠️ **枠の外に置く**＝枠は絵が1枚のとき
+              `dangerouslySetInnerHTML` を使うので、中に子を足せない。見えない・触れない姿で流す。 */}
+          {videoHeldAudible.map((v) => (
+            <TimelineSlotVideo
+              key={v.clip.id}
+              audioOnly
+              src={v.src}
+              rect={{ x: 0, y: 0, w: 0, h: 0 }}
+              fit={v.fit}
+              canvas={canvasDims}
+              sourceSec={v.sourceSec}
+              speed={v.speed}
+              playing={isPlaying}
+              audioVolume={v.audioVolume}
+              onUnplayable={() =>
+                setUnplayableVideoIds((prev) =>
+                  v.clip.assetId != null && !prev.has(v.clip.assetId) ? new Set([...prev, v.clip.assetId]) : prev,
+                )
+              }
+            />
+          ))}
           {/* ⚠️ **比を動画の向きに合わせる**（#685 レビュー 🔴）。CSS の既定は 16:9 固定なので、縦型では
               SVG が中で letterbox され、上に重ねる操作レイヤ（`inset: 0`）と**実際に描かれている矩形が
               ずれる**（枠が約3倍の幅になり、動かす量も同じだけずれる）。場面形式のプレビューも
@@ -2163,6 +2192,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           sourceSec={v.sourceSec}
                           speed={v.speed}
                           playing={isPlaying}
+                          audioVolume={v.audioVolume}
                           onUnplayable={() =>
                             setUnplayableVideoIds((prev) =>
                               v.clip.assetId != null && !prev.has(v.clip.assetId)
@@ -2580,11 +2610,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             </p>
             {/* ⚠️ **知らせは節の外に出す**（レビュー 🟡・#705 と同じ理由）＝節を畳んだ記憶は既定より
                 優先されるので、中に置くと**一度畳んだ人には二度と見えない**。
-                ・元の音はまだ流れない（段1）＝黙って無音にしない（§2-5）
+                ・音が入っていない動画（#512 段2）＝欄を出さずにその場で理由を出す（§2-5）
                 ・実映像にできないとき（まとまりのフェード中・回した切り抜き）＝黙って静止画に見せない */}
             {selected.assetId != null && videoAssetIdSet.has(selected.assetId) && (
               <>
-                <p className="field-hint">{TIMELINE_VIDEO_AUDIO_PENDING}</p>
+                {/* 元の音（#512 段2）＝**鳴らせない動画にはその場で理由を出す**（§2-5）。
+                    欄を出す条件は domain の `canUseOriginalAudio` と同じ＝押せるのに断られる、を作らない。 */}
+                {doc && videoAudioState(doc, selected) === "none" && (
+                  <p className="field-hint">{TIMELINE_VIDEO_NO_AUDIO}</p>
+                )}
+                {doc && videoAudioState(doc, selected) === "unknown" && (
+                  <p className="field-hint">{TIMELINE_VIDEO_AUDIO_UNKNOWN}</p>
+                )}
                 {videoPlay.find((v) => v.clip.id === selected.id)?.held === "groupFade" && (
                   <p className="field-hint">{TIMELINE_VIDEO_STILL_IN_GROUP_FADE}</p>
                 )}
@@ -3152,6 +3189,32 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 下の「音量の変化」（点）は既に読み上げにも出ているので、**点は置けるのに基準の音量は
                 直せない**という逆さまの状態だった（ADR-0026②）。描画側（`clipBaseVolume`／`clipFadeSec`）は
                 どちらの種別も同じように読んでいるので、出していなかったのは画面だけ。 */}
+            {/* 動画の**元の音**（#512 段2）＝音のクリップとは別の欄（対象も値も別物なので混ぜない）。
+                音量の変化・前後のフェードは段2 の対象外＝**欄を出さない**（出しておいて効かない、を作らない）。 */}
+            {doc && canUseOriginalAudio(doc, selected) && (
+              <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="originalAudio" title="この動画の音" defaultOpen={true}>
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={selected.useOriginalAudio === true}
+                    {...editGuard()}
+                    onChange={(e) => setSelectedClipUseOriginalAudio(e.target.checked)}
+                  />
+                  <span>この動画に入っている音を流す</span>
+                </label>
+                <NumberField
+                  label="音量"
+                  step={VOLUME_STEP}
+                  min={VOLUME_MIN}
+                  max={VOLUME_MAX}
+                  value={selected.originalAudioVolume ?? null}
+                  placeholder={`標準（${Math.round(ORIGINAL_AUDIO_VOLUME * 100)}%）`}
+                  {...editGuard()}
+                  onChange={(v) => setSelectedClipOriginalAudioVolume(v)}
+                  onClear={() => setSelectedClipOriginalAudioVolume(null)}
+                />
+              </CollapsibleSection>
+            )}
             {isAudioClip(selected) && (
               <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="volume" title="音量" defaultOpen={true}>
                 <NumberField

@@ -15,8 +15,66 @@ function ready(v: HTMLVideoElement): void {
   fireEvent(v, new Event("loadedmetadata"));
 }
 
-describe("TimelineSlotVideo（#512 段1）", () => {
-  it("常に消音（段1 は絵だけ＝元の音はまだ流さない）", () => {
+describe("TimelineSlotVideo（#512 段1・段2）", () => {
+  // ⚠️ **音だけ流す姿は場所を取らない**（#512 段2・レビュー 🟡）＝絵は静止層が担当するので、
+  // ここで大きさを持つと**静止の絵の上に見えない窓**が重なり、押せる所や重なり順が変わる。
+  it("音だけ流すときは、見えず・触れず・場所も取らない", () => {
+    const { container } = render(
+      <TimelineSlotVideo
+        src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1}
+        playing={false} audioVolume={0.5} audioOnly
+      />,
+    );
+    const v = container.querySelector("video") as HTMLVideoElement;
+    expect(v.style.width).toBe("0px");
+    expect(v.style.height).toBe("0px");
+    expect(v.style.opacity).toBe("0");
+    expect(v.style.pointerEvents).toBe("none");
+    expect(v.muted).toBe(false); // それでも音は鳴る
+    expect(v.volume).toBeCloseTo(0.5, 5);
+  });
+
+  // ⚠️ **100%超は Web Audio の増幅で作る**（#512 段2・場面形式と共有した `useMediaVolume` の存在理由）
+  // ＝`video.volume` は 1.0 が上限なので、そのままだと**書き出し（FFmpeg の volume）と音量が違う**。
+  it("元の音が100%超なら、増幅で作る（書き出しと同じ音量）", () => {
+    let capturedGain: { gain: { value: number } } | null = null;
+    class MockAudioContext {
+      destination = {};
+      createGain() {
+        capturedGain = { gain: { value: 0 }, connect: (n: unknown) => n } as unknown as { gain: { value: number } };
+        return capturedGain;
+      }
+      createMediaElementSource() { return { connect: (n: unknown) => n }; }
+      resume() { return Promise.resolve(); }
+      close() { return Promise.resolve(); }
+    }
+    const win = window as unknown as { AudioContext?: unknown };
+    const prev = win.AudioContext;
+    win.AudioContext = MockAudioContext as unknown as typeof AudioContext;
+    try {
+      const { container } = render(
+        <TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing={false} audioVolume={1.5} />,
+      );
+      expect(capturedGain).not.toBeNull();
+      expect(capturedGain!.gain.value).toBe(1.5); // ⚠️ video.volume(上限1.0)へ丸めていない
+      expect((container.querySelector("video") as HTMLVideoElement).muted).toBe(false);
+    } finally {
+      win.AudioContext = prev;
+    }
+  });
+
+  // ⚠️ 100%以下は素の音量で足りる（増幅の仕掛けを張らない）。
+  it("元の音が100%以下なら、そのまま音量として効かせる", () => {
+    const { container } = render(
+      <TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing={false} audioVolume={0.35} />,
+    );
+    const v = container.querySelector("video") as HTMLVideoElement;
+    expect(v.muted).toBe(false);
+    expect(v.volume).toBeCloseTo(0.35, 5);
+  });
+
+  // ⚠️ **音量を渡さないときは消音**（#512 段2）＝鳴らす設定でない動画が黙って鳴り出さない。
+  it("音量を渡さなければ消音（鳴らす設定でない動画は鳴らない）", () => {
     const { container } = render(
       <TimelineSlotVideo src="blob:v" rect={rect} fit="cover" canvas={canvas} sourceSec={0} speed={1} playing={false} />,
     );

@@ -2455,7 +2455,13 @@ pub struct NarrationSegmentInput {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BgmRunInput {
+    /// 音源の中身（base64）。**`audio_path` を渡すときは空でよい**。
     audio_base64: String,
+    /// 音源のプロジェクト相対パス（#512 段2）。**動画の元の音**はここで渡す
+    /// ＝動画ファイルを base64 にすると数百MBの文字列を作ることになる（場面形式の動画スロットも
+    /// パスで渡している＝同じ流儀）。指定があれば base64 より優先し、一時ファイルも作らない。
+    #[serde(default)]
+    audio_path: Option<String>,
     /// 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。
     file_ext: String,
     volume: f64,
@@ -3226,6 +3232,29 @@ fn export_video_impl(
         let total: f64 = jobs.iter().map(|j| j.duration_sec()).sum::<f64>() - applied;
         let mut files: Vec<String> = Vec::with_capacity(list.len());
         for (i, r) in list.iter().enumerate() {
+            // パス指定（#512 段2＝動画の元の音）は**そのまま入力にする**。中身を運ばないので、
+            // 大きな動画でも文字列にならない。存在しなければ理由つきで断る（黙って無音にしない）。
+            if let Some(rel) = r.audio_path.as_deref() {
+                // ⚠️ **プロジェクトが判らないなら、その理由で断る**（レビュー 🟡・§2-5）。
+                // 空文字で流すと `is_safe_project_id` に落ちて「アプリを再起動して」という
+                // **的外れな案内**になる（本当に必要なのは保存）。同ファイルの動画ありシーン・
+                // クリップ元音声の2か所と**同じ断り方**に揃える（同じ事情に別の文言を出さない）。
+                let pid = project_id.as_deref().ok_or_else(|| {
+                    export_failure(
+                        "video clip audio without project_id",
+                        "動画を含む書き出しには、先にプロジェクトの保存が必要です。",
+                    )
+                })?;
+                let src = resolve_project_file(&app, pid, rel)?;
+                if !src.exists() {
+                    return Err(export_failure(
+                        format!("bgm src missing: {}", src.display()),
+                        "動画が見つかりませんでした。もう一度取り込んでください。",
+                    ));
+                }
+                files.push(src.to_string_lossy().into_owned());
+                continue;
+            }
             let bg_bytes = base64::engine::general_purpose::STANDARD
                 .decode(strip_data_url(&r.audio_base64))
                 .map_err(|e| {

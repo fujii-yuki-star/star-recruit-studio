@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { ORIGINAL_AUDIO_VOLUME } from '../constants';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
-import { compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
+import { canUseOriginalAudio, clipOriginalAudio, videoAudioState, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
 
 const doc = (over: Partial<TimelineProject> = {}): TimelineProject =>
   ({
@@ -208,5 +209,95 @@ describe('切り抜きの回す中心が食い違うか（cropPivotDiffers）', 
   // ⚠️ **中心が同じなら回しても同じ窓**（左右対称に切り抜いた場合）＝過剰に断らない。
   it('回していても、切り抜きが中心対称なら食い違わない', () => {
     expect(cropPivotDiffers(rect, { x: 25, y: 25, w: 50, h: 50 }, 30)).toBe(false);
+  });
+});
+
+// 元の音（#512 段2）＝**再生・書き出し・画面が通る唯一の解決**。場面形式と同じ規準（ADR-0026②）。
+describe('clipOriginalAudio（動画の元の音）', () => {
+  /** 音の入っている動画を持つ文書（既定では鳴らさない）。 */
+  const withAudio = (clipOver: Partial<TimelineClip> = {}, docOver: Partial<TimelineProject> = {}) =>
+    doc({
+      assets: [
+        { assetId: 'asset_001', assetType: 'video', displayName: '紹介ムービー', filePath: 'a.mp4', metadata: { hasAudio: true } },
+        { assetId: 'asset_002', assetType: 'image', displayName: '写真', filePath: 'b.png' },
+      ],
+      clips: [slot(clipOver)],
+      ...docOver,
+    } as Partial<TimelineProject>);
+
+  // ⚠️ **既定は鳴らさない**＝既に作った動画の音が、この段で黙って変わらない。
+  it('指定が無ければ鳴らない', () => {
+    expect(clipOriginalAudio(withAudio(), slot())).toBeNull();
+  });
+
+  it('鳴らす設定なら、標準の音量で鳴る', () => {
+    const clip = slot({ useOriginalAudio: true });
+    expect(clipOriginalAudio(withAudio({ useOriginalAudio: true }), clip)).toEqual({
+      assetId: 'asset_001', volume: ORIGINAL_AUDIO_VOLUME, speed: 1, sourceStartSec: 0,
+    });
+  });
+
+  it('音量・速さ・使い始めは、その部品の値から採る', () => {
+    const clip = slot({ useOriginalAudio: true, originalAudioVolume: 0.9, speed: 2, sourceStartSec: 3 });
+    expect(clipOriginalAudio(withAudio(clip), clip)).toEqual({
+      assetId: 'asset_001', volume: 0.9, speed: 2, sourceStartSec: 3,
+    });
+  });
+
+  // ⚠️ **音の入っていないファイルへ音の取り出しを頼まない**（場面形式が同じ門を置いている理由＝
+  // 頼むと書き出しが失敗する）。設定が残っていても鳴らさない。
+  it('素材に音が入っていなければ、設定があっても鳴らない', () => {
+    const clip = slot({ useOriginalAudio: true });
+    const d = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v', filePath: 'a.mp4', metadata: { hasAudio: false } }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    expect(clipOriginalAudio(d, clip)).toBeNull();
+    expect(canUseOriginalAudio(d, clip)).toBe(false);
+  });
+
+  // ⚠️ **判らないもの（`hasAudio` 未取得）は鳴らさない**＝取り出せる保証が無いので断る側へ倒す。
+  it('音が入っているか判らない素材では鳴らない', () => {
+    const clip = slot({ useOriginalAudio: true });
+    expect(clipOriginalAudio(doc({ clips: [clip] }), clip)).toBeNull();
+  });
+
+  // ⚠️ **隠したら音も止まる**（音のクリップと同じ規則＝見えないのに聞こえる、を作らない）。
+  it('隠した部品・隠した列・隠したまとまりでは鳴らない', () => {
+    const hidden = slot({ useOriginalAudio: true, hidden: true });
+    expect(clipOriginalAudio(withAudio({ useOriginalAudio: true, hidden: true }), hidden)).toBeNull();
+    const clip = slot({ useOriginalAudio: true });
+    const hiddenTrack = withAudio({ useOriginalAudio: true }, { tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, hidden: true }] } as Partial<TimelineProject>);
+    expect(clipOriginalAudio(hiddenTrack, clip)).toBeNull();
+    const hiddenGroup = withAudio({ useOriginalAudio: true }, {
+      groups: [{ id: 'group_001', members: ['clip_001'], transform: { x: 0, y: 0, scale: 1, rotation: 0 }, hidden: true }],
+    } as Partial<TimelineProject>);
+    expect(clipOriginalAudio(hiddenGroup, clip)).toBeNull();
+  });
+
+  // ⚠️ 画面が欄を出す条件は**隠しているかを見ない**＝隠した部品でも設定は変えられる。
+  it('隠していても、設定を変えられるかどうかは変わらない', () => {
+    const clip = slot({ hidden: true });
+    expect(canUseOriginalAudio(withAudio({ hidden: true }), clip)).toBe(true);
+  });
+
+  // ⚠️ **「音が無い」と「判らない」を分ける**（レビュー 🟡）＝調べられなかった素材に
+  // 「入っていません」と断定すると嘘の理由になり、次の行動（取り込み直す）も誤る。
+  it('音が無いことが判っているものと、判らないものを区別する', () => {
+    const clip = slot();
+    expect(videoAudioState(withAudio(), clip)).toBe('available');
+    const none = doc({
+      assets: [{ assetId: 'asset_001', assetType: 'video', displayName: 'v', filePath: 'a.mp4', metadata: { hasAudio: false } }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    expect(videoAudioState(none, clip)).toBe('none');
+    expect(videoAudioState(doc({ clips: [clip] }), clip)).toBe('unknown'); // metadata 無し＝調べられていない
+    expect(videoAudioState(withAudio(), slot({ assetId: 'asset_002' }))).toBe('notVideo');
+  });
+
+  it('動画でない部品では鳴らない・選べない', () => {
+    const img = slot({ assetId: 'asset_002', useOriginalAudio: true });
+    expect(clipOriginalAudio(withAudio({ assetId: 'asset_002', useOriginalAudio: true }), img)).toBeNull();
+    expect(canUseOriginalAudio(withAudio({ assetId: 'asset_002' }), img)).toBe(false);
   });
 });

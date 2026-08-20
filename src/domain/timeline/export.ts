@@ -7,7 +7,7 @@
 //   ② 判定条件（重なり・アニメ・速度・クロップの有無）を増やすほど、**プレビューと書き出しで別経路**が
 //      増えてパリティ（ADR-0001）の検査点が増える。
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
-import { audioCuesAt, audioLoops, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
+import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
 import { TIMELINE_CLIP_KIND, isFreeSlotAssetType } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
@@ -15,7 +15,7 @@ import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
 import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
-import { isDrawnClip, videoAssetIdOfClip, videoAssetIds, videoClipsOf } from './video';
+import { clipOriginalAudio, isDrawnClip, videoAssetIdOfClip, videoAssetIds, videoClipsOf } from './video';
 import type { TimelineClip, TimelineProject } from './types';
 
 /** 書き出す絵の計画（全フレーム描画）。 */
@@ -58,14 +58,19 @@ export function frameTimeAt(index: number, fps: number): number {
  * 書き出しで置く音1本ぶん（FFmpeg の「配置＋切り出し＋音量＋フェード＋ミックス」に対応）。
  * 場面形式の BGM 区間（`BgmRunInput`）と**同じ形**＝混ぜる側を作り直さない。
  *
- * **動画クリップの元音声はここに出ない**（`kind:'slot'` は音源を持たない）。持ち込んだ動画の音は
- * まだ鳴らせない＝黙って混ぜずに落とさないよう、書き出しの手前で断る（`11 §7.6.5`・#631 後続）。
+ * **直接置いた動画の元の音もここに出る**（#512 段2）＝鳴らす設定にした部品だけ（`clipOriginalAudio`）。
+ * 音源は**ファイルのパス**で渡す（`assetPath`）＝動画を base64 にしない。差し込み口の動画は段3。
  */
 export interface TimelineAudioRun {
   /** どのクリップの音か（音源の解決に使う）。 */
   clipId: string;
   /** 音源を見分けるキー（`audioSourceKey` と同じ規則）。 */
   sourceKey: string;
+  /**
+   * 音源のプロジェクト相対パス（#512 段2＝**動画の元の音**だけが持つ）。
+   * ⚠️ これがある run は `audioSrcByKey`（中身）を要らない＝動画を丸ごと文字列にしない。
+   */
+  assetPath?: string;
   /**
    * 音源ファイルの拡張子（`mp3` など・小文字）。FFmpeg が一時ファイルの形式を判定するのに要る。
    * **音源キーからは復元できない**（同梱BGMの id やクリップの保存先は拡張子を持たない）ので、
@@ -136,6 +141,31 @@ export function timelineAudioRuns(doc: TimelineProject): TimelineAudioRun[] {
       loop: audioLoops(clip),
     });
   }
+  // 直接置いた動画の**元の音**（#512 段2）。鳴るかどうかの判定は `clipOriginalAudio` の1か所
+  // ＝仕上がり確認で聞こえたものだけが書き出しに出る。
+  // ⚠️ **付けないものは渡さない**＝音量の変化・前後のフェードは段2 の対象外なので 0/未指定で送る
+  //（受け側の既定と同じ＝欄が無いのに値だけ効く、を作らない）。
+  // ⚠️ **繰り返さない**＝置いた長さより素材が短ければそこで終わる（絵も終わっている）。
+  for (const clip of doc.clips) {
+    const org = clipOriginalAudio(doc, clip);
+    if (!org) continue;
+    const path = doc.assets.find((a) => a.assetId === org.assetId)?.filePath;
+    if (!path) continue; // 保存先が判らない＝渡すものが無い（ファイルの欠けは Rust 側が理由つきで断る）
+    runs.push({
+      clipId: clip.id,
+      sourceKey: audioSourceKey({ clipId: clip.id, assetId: org.assetId }),
+      assetPath: path,
+      fileExt: extOf(path),
+      delaySec: clip.startSec,
+      playSec: clipEndSec(clip) - clip.startSec,
+      sourceStartSec: org.sourceStartSec,
+      speed: org.speed,
+      volume: org.volume,
+      fadeInSec: 0,
+      fadeOutSec: 0,
+      loop: false,
+    });
+  }
   return runs;
 }
 
@@ -197,9 +227,10 @@ export interface TimelineExportBlocker {
 /**
  * 書き出す前に止める理由を返す（空なら書き出せる）。**§2-5**＝画面はここから「次の行動」を出す。
  *
- * **見た目パターンの差し込み口・立ち絵に入れた動画は、まだ動かせない（直接置きは #512 段1 で映る）**（`layoutTimelineAt` は1枚の絵として描き、
- * `timelineAudioRuns` は元音声を返さない）。黙って静止画＋無音の動画を成功として出さないため、
- * まだ映らない使い方（差し込み口・立ち絵）のときだけ書き出しを止める（ADR-0026④・場面形式の `videoSlotUnplaceable` と同じ流儀）。
+ * **見た目パターンの差し込み口・立ち絵に入れた動画は、まだ動かせない**（`layoutTimelineAt` は1枚の絵として
+ * 描き、元の音も出ない）。黙って静止画＋無音の動画を成功として出さないため、まだ映らない使い方
+ * （差し込み口・立ち絵＝段3）のときだけ書き出しを止める（ADR-0026④・場面形式の `videoSlotUnplaceable` と同じ流儀）。
+ * **直接置いた動画は映り（#512 段1）、元の音も鳴る（段2）**ので止めない。
  */
 export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExportCheckOptions = {}): TimelineExportBlocker[] {
   const blockers: TimelineExportBlocker[] = [];
@@ -236,10 +267,9 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   if (tooManyPoints.length > 0) {
     blockers.push({ code: TIMELINE_EXPORT_BLOCK.volumePointsTooMany, clipIds: tooManyPoints });
   }
-  // ⚠️ **直接置いた動画は映るようになった**（#512 段1）＝断るのは**まだ映らない使い方**だけ。
+  // ⚠️ **直接置いた動画は映り（#512 段1）、元の音も鳴る（段2）**＝断るのは**まだ映らない使い方**だけ。
   // 差し込み口（`assetRefs`）・立ち絵に入れた動画は段3 まで静止のままなので、従来どおり手前で断る
   // （置いたのに静止画で出る、を成功として出さない＝ADR-0026④）。
-  // ⚠️ **元の音はまだ流れない**（段2）＝これは断りではなく画面がその場で知らせる（`15 §6`）。
   const videoIds = videoAssetIds(doc);
   if (videoIds.size > 0) {
     // ⚠️ **描かれないものは数えない**（レビュー ❓・焼き出し／静止画の要求と揃える）＝隠した部品は

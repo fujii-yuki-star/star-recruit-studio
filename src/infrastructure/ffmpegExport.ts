@@ -83,7 +83,14 @@ export interface ExportSceneInput {
 
 /** 場面ごとBGMの1クリップ入力（ADR-0018 ③(7)）。planBgmMix が配置(delaySec)・使う長さ(playSec)・前後フェードを算出済み。data URL 可・volume は §6 解決済み。 */
 export interface BgmRunInput {
+  /** 音源の中身（base64）。**`audioPath` を渡すときは空でよい**。 */
   audioBase64: string;
+  /**
+   * 音源のプロジェクト相対パス（#512 段2＝**動画の元の音**）。指定があれば中身より優先される。
+   * ⚠️ 動画を base64 にすると数百MBの文字列を作ることになるので、動画はパスで渡す
+   * （場面形式の動画スロットも `clipRelPath` を渡している＝同じ流儀）。
+   */
+  audioPath?: string;
   /** 一時ファイルの拡張子（例: "mp3"）。FFmpeg のフォーマット判定用。 */
   fileExt: string;
   volume: number;

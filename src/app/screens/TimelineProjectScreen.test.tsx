@@ -2154,15 +2154,21 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
   });
 
   // #512 段1＝**直接置いた動画は絵が映る**（書き出しと同じ分割で `video` 要素を挟む）。
-  // ⚠️ 元の音はまだ流れないので、選んだときにその場で知らせる（黙って無音にしない・§2-5）。
+  // ⚠️ 音が入っていない動画には元の音の欄を出さず、その場で理由を出す（#512 段2・§2-5）。
   describe("動画の素材（#512 段1）", () => {
-    const withVideo = () => {
+    /** @param opts.hasAudio 素材に音が入っているか（#512 段2 の門＝場面形式と同じ規準）。 */
+    const withVideo = (opts: { hasAudio?: boolean; useOriginalAudio?: boolean; originalAudioVolume?: number } = {}) => {
       open({
         tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
-        assets: [{ assetId: "asset_v", assetType: "video", displayName: "紹介ムービー", filePath: "v.mp4" }],
+        assets: [{
+          assetId: "asset_v", assetType: "video", displayName: "紹介ムービー", filePath: "v.mp4",
+          ...(opts.hasAudio == null ? {} : { metadata: { hasAudio: opts.hasAudio } }),
+        }],
         clips: [{
           id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001",
           startSec: 0, durationSec: 5, x: 0, y: 0, w: 1920, h: 1080, assetId: "asset_v",
+          ...(opts.useOriginalAudio ? { useOriginalAudio: true } : {}),
+          ...(opts.originalAudioVolume == null ? {} : { originalAudioVolume: opts.originalAudioVolume }),
         }],
       });
       // ⚠️ **動画は本体の URL（`videoSrcById`）を見る**（`assetSrcById` は代表フレーム＝静止画）。
@@ -2181,7 +2187,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
       const v = container.querySelector(".preview-stage video") as HTMLVideoElement | null;
       expect(v).not.toBeNull();
       expect(v?.getAttribute("src")).toBe("blob:body_v"); // 静止画を指していたら穴が空くだけ
-      expect(v?.muted).toBe(true); // 段1 は消音（元の音は段2）
+      expect(v?.muted).toBe(true); // 鳴らす設定にしていない動画は消音（#512 段2）
     });
 
     // ⚠️ **本体の URL が無ければ穴を開けない**（何も映らない窓を作るより、代表フレームのまま見せる）。
@@ -2192,11 +2198,67 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
       expect(container.querySelector(".preview-stage video")).toBeNull();
     });
 
-    it("選ぶと「元の音はまだ出せない」を知らせる（黙って無音にしない）", () => {
-      withVideo();
+    // ⚠️ **音の入っていない動画には、その場で理由を出す**（#512 段2・§2-5）＝欄だけ出して押せない、
+    // でも黙って無反応でもなく、「音を付けるなら音の列へ」という次の行動を出す。
+    it("音の入っていない動画では、元の音の欄を出さずに理由を出す", () => {
+      withVideo({ hasAudio: false });
       render(<TimelineProjectScreen onNavigate={vi.fn()} />);
       act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
-      expect(screen.getByText(/元の音はまだ出せません/)).toBeInTheDocument();
+      expect(screen.getByText(/この動画には音が入っていません/)).toBeInTheDocument();
+      expect(screen.queryByText("この動画に入っている音を流す")).toBeNull();
+    });
+
+    // ⚠️ **既定は鳴らさない**（場面形式と同じ規準＝ADR-0026②）＝既に作った動画の音が黙って変わらない。
+    it("音の入っている動画は欄が出るが、既定では鳴らさない", () => {
+      withVideo({ hasAudio: true });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
+      expect(screen.getByText("この動画に入っている音を流す")).toBeInTheDocument();
+      expect(screen.queryByText(/この動画には音が入っていません/)).toBeNull();
+      expect((container.querySelector(".preview-stage video") as HTMLVideoElement | null)?.muted).toBe(true);
+    });
+
+    // ⚠️ **音が入っているか判らない素材には、断定しない**（レビュー 🟡・§2-5）＝取り込みで調べられて
+    // いないだけかもしれないので、次の行動は「取り込み直す」（音の列に音を置く、ではない）。
+    it("音が入っているか判らない動画には、断定せず取り込み直しを案内する", () => {
+      withVideo(); // metadata 無し＝調べられていない
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
+      expect(screen.getByText(/確かめられませんでした/)).toBeInTheDocument();
+      expect(screen.queryByText(/この動画には音が入っていません/)).toBeNull();
+    });
+
+    // ⚠️ **絵を出せないときも音は鳴らす**（レビュー 🟡・ADR-0001）＝絵を止める理由（合成の仕方が
+    // 書き出しと違う）は音には当てはまらない。消すと「聞こえないのに書き出しには入る」になる。
+    it("まとまり全体を薄くしている間も、元の音は鳴る（書き出しと一致）", () => {
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+        assets: [{ assetId: "asset_v", assetType: "video", displayName: "紹介", filePath: "v.mp4", metadata: { hasAudio: true } }],
+        clips: [
+          { id: "clip_001", kind: TIMELINE_CLIP_KIND.slot, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 960, h: 540, assetId: "asset_v", useOriginalAudio: true, originalAudioVolume: 0.6 },
+          { id: "clip_002", kind: TIMELINE_CLIP_KIND.shape, trackId: "track_001", startSec: 0, durationSec: 5, x: 960, y: 0, w: 960, h: 540 },
+        ],
+        groups: [{ id: "group_001", members: ["clip_001", "clip_002"], transform: { x: 0, y: 0, scale: 1, rotation: 0 } }],
+        animations: [{ id: "anim_001", targetId: "group_001", keyframes: [{ timeSec: 0, opacity: 0.2 }, { timeSec: 5, opacity: 1 }] }],
+      });
+      act(() => { useTimelineStore.setState({ assetSrcById: { asset_v: "blob:thumb_v" }, videoSrcById: { asset_v: "blob:body_v" } }); });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      // 絵の窓（枠の中の video）は出さない＝静止のまま。
+      expect(container.querySelector(".preview-stage video")).toBeNull();
+      // 音だけの要素が枠の外に居て、指定した音量で鳴る。
+      const audible = container.querySelector(".preview-stage-wrap > video") as HTMLVideoElement | null;
+      expect(audible).not.toBeNull();
+      expect(audible!.muted).toBe(false);
+      expect(audible!.volume).toBeCloseTo(0.6, 5);
+    });
+
+    // ⚠️ **鳴らす設定にしたら消音が外れ、音量も効く**＝聞こえたものが書き出しにも出る（ADR-0001）。
+    it("鳴らす設定にすると消音が外れ、指定した音量が効く", () => {
+      withVideo({ hasAudio: true, useOriginalAudio: true, originalAudioVolume: 0.8 });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const v = container.querySelector(".preview-stage video") as HTMLVideoElement | null;
+      expect(v?.muted).toBe(false);
+      expect(v?.volume).toBeCloseTo(0.8, 5);
     });
 
     // ⚠️ **合成の単位が跨るときは実映像を出さない**（`11 §7.6.4`）＝層ごとに薄さを掛けると
@@ -2252,7 +2314,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
       act(() => { useTimelineStore.setState({ assetSrcById: { asset_p: "blob:p" }, videoSrcById: { asset_p: "blob:p" } }); });
       render(<TimelineProjectScreen onNavigate={vi.fn()} />);
       act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
-      expect(screen.queryByText(/元の音はまだ出せません/)).toBeNull();
+      expect(screen.queryByText(/この動画には音が入っていません/)).toBeNull();
       expect(document.querySelector(".preview-stage video")).toBeNull();
     });
   });
