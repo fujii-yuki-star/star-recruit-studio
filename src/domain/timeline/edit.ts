@@ -110,6 +110,21 @@ export const EDIT_BLOCKED = {
    * 行き止まりになる（ADR-0034 決定5・§2-5）。この枠の素材を入れ直せば落ちる（`setClipAssetRef`）。
    */
   explodeTrimEndPerUse: 'TIMELINE_EDIT_EXPLODE_TRIM_END_PER_USE',
+  /**
+   * **差し込み口でない層（背景など）に動画が入っている**部品はバラせない（#816-4）。
+   * ⚠️ その層の動画は**静止画として描かれる**（`videoPlacementsOfClip` は差し込み口の層しか
+   * 置き場所にしない）が、バラすと直接置きになり**実映像として動き出す**＝決定23「前後で絵が
+   * 変わらない」に反する（確認の文言も「動画の見た目は変わりません」と約束している）。
+   * 直接置きの語彙に「動かさない」が無いので、`explodeTrimEnd` と同じ流儀で先に断る。
+   */
+  explodeBackgroundVideo: 'TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO',
+  /**
+   * **素材を使い切った先**で分けようとした（#816 レビュー 🔴）。後半の頭出しがそこまで進むと、
+   * 切り出す終わりを追い越して**反転レンジ**になり、終端が「無し」へ正規化される＝
+   * **切り捨てたはずの先が流れ出す**（分ける前は最後のコマで凍っていた＝ADR-0026①）。
+   * 実尺を越える場合は書き出しが理由なく落ちるので、そちらも同じ門で止める。
+   */
+  splitPastSource: 'TIMELINE_EDIT_SPLIT_PAST_SOURCE',
   /** 連動している字幕を置ける場所が無い（読み上げを動かせない理由・#633）。 */
   linkedSubtitle: 'TIMELINE_EDIT_LINKED_SUBTITLE',
   /** 連動している字幕の時間を直接変えようとした（時間は読み上げが決める・#633）。 */
@@ -1134,12 +1149,18 @@ export function setVisualClipContent(
   // **`null` はキーごと落とす**（同上）＝未指定との違いを文書に残さない。残すと、同じ絵の文書が
   // 2通りできて「取り消しても見た目が変わらない」段が生まれる。
   for (const k of keys) if (patch[k] === null) delete next[k];
-  // ⚠️ **素材を差し替えたら、元の音の設定は落とす**（#512 段2・レビュー ℹ️）＝残すと、写真へ替えて
-  // 欄が消えている間に設定だけ生き残り、**別の音入り動画を入れた瞬間に、頼んでいない音が鳴り出す**。
+  // ⚠️ **素材を差し替えたら、その素材ぶんの使い方はすべて落とす**（#512 段2／#816-3）＝残すと、
+  // 写真へ替えて欄が消えている間に設定だけ生き残り、**別の音入り動画を入れた瞬間に、頼んでいない
+  // 音が鳴り出す**。切り出す位置・速さも同じで、**頼んでいない位置から・頼んでいない速さ**で流れる
+  //（分ける・バラすで付くので、置いた覚えが無くても付いている。しかも直す欄が画面に無い）。
   // 意味を失った設定は落とす（ADR-0027／#469 と同じ流儀）。
+  // ⚠️ **差し込み口（`setClipAssetRef`）と同じ範囲を落とす**＝あちらは `slotClips[layerId]` を丸ごと
+  // 落としており、こちらだけ音の2つに絞ると**同じ動画が置き場所で挙動を割る**（ADR-0026②）。
   if (patch.assetId !== undefined && (clip.assetId ?? null) !== (patch.assetId ?? null)) {
     delete next.useOriginalAudio;
     delete next.originalAudioVolume;
+    delete next.sourceStartSec;
+    delete next.speed;
   }
   return ok(withClip(doc, next));
 }

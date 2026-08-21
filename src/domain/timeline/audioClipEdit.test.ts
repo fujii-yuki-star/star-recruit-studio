@@ -256,6 +256,30 @@ describe('setClipUseOriginalAudio / setClipOriginalAudioVolume', () => {
     expect(r.ok && r.doc.clips[0].originalAudioVolume).toBeUndefined();
   });
 
+  // ⚠️ **切り出す位置・速さも落ちる**（#816-3）＝分ける・バラすで付くので、置いた覚えが無くても
+  // 付いている（しかも直す欄が画面に無い）。残すと新しい素材が**頼んでいない位置から・頼んでいない
+  // 速さ**で流れる。差し込み口（`setClipAssetRef`）は `slotClips[layerId]` を丸ごと落としており、
+  // こちらだけ音の2つに絞ると**同じ動画が置き場所で挙動を割る**（ADR-0026②）。
+  it('素材を差し替えると、切り出す位置と速さも落ちる', () => {
+    const d = {
+      ...videoDoc({ sourceStartSec: 5, speed: 2, useOriginalAudio: true }),
+      assets: [
+        { assetId: 'asset_v', assetType: 'video', displayName: '紹介', filePath: 'v.mp4', metadata: { hasAudio: true } },
+        { assetId: 'asset_w', assetType: 'video', displayName: '別の動画', filePath: 'w.mp4', metadata: { hasAudio: true } },
+      ],
+    } as TimelineProject;
+    const r = setVisualClipContent(d, 'clip_001', { assetId: 'asset_w' });
+    expect(r.ok && r.doc.clips[0].sourceStartSec).toBeUndefined();
+    expect(r.ok && r.doc.clips[0].speed).toBeUndefined();
+  });
+
+  it('同じ素材を置き直しただけなら、切り出す位置と速さは残る', () => {
+    const d = videoDoc({ sourceStartSec: 5, speed: 2 });
+    const r = setVisualClipContent(d, 'clip_001', { assetId: 'asset_v', fit: 'contain' });
+    expect(r.ok && r.doc.clips[0].sourceStartSec).toBe(5);
+    expect(r.ok && r.doc.clips[0].speed).toBe(2);
+  });
+
   it('同じ素材を置き直しただけなら、元の音の設定は残る', () => {
     const d = videoDoc({ useOriginalAudio: true });
     const r = setVisualClipContent(d, 'clip_001', { assetId: 'asset_v', fit: 'contain' });

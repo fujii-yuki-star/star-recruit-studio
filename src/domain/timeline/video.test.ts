@@ -5,7 +5,7 @@ import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 import type { VideoPlacement } from './video';
 import type { Template } from '../template/types';
-import { canUseOriginalAudio, placementOriginalAudio, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
+import { isDrawnClip, canUseOriginalAudio, placementOriginalAudio, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, compositeSpansOthers, cropPivotDiffers, videoAssetIdOfClip, videoAssetIds, videoClipsOf, videoFrameIndexAt, videoSourceSecAt, videoStagePlan } from './video';
 
 const doc = (over: Partial<TimelineProject> = {}): TimelineProject =>
   ({
@@ -479,5 +479,44 @@ describe('placementOriginalAudio（動画の元の音）', () => {
     // 写真の部品はそもそも**置き場所にならない**＝鳴らす対象に上がってこない。
     expect(videoPlacementsOf(withAudio({ assetId: 'asset_002', useOriginalAudio: true }))).toEqual([]);
     expect(canUseOriginalAudio(withAudio({ assetId: 'asset_002' }), img)).toBe(false);
+  });
+});
+
+// ⚠️ **描く側と同じ条件で数える**（#816-6）＝描く側は「映像の列の、絵を持つ種別」しか描かない。
+// ここで見ないと、音の列に置かれた動画（V23 に反する文書＝警告どまりで書き出しも止まらない）が
+// 「描かれる」と数えられ、**プレビューは無音・書き出しは有音**になる（ADR-0001）。
+describe('isDrawnClip（描かれるか＝鳴るか・#816-6）', () => {
+  const visual = { id: 'track_001', kind: TRACK_KIND.visual } as const;
+  const audio = { id: 'track_002', kind: TRACK_KIND.audio } as const;
+  const videoClip = (over: Partial<TimelineClip> = {}): TimelineClip =>
+    ({ id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001', startSec: 0, durationSec: 5,
+       x: 0, y: 0, w: 100, h: 50, assetId: 'asset_v', ...over }) as TimelineClip;
+  const d = (clip: TimelineClip, tracks: readonly { id: string; kind: string }[] = [visual, audio]): TimelineProject =>
+    ({ ...doc(), tracks, clips: [clip] }) as TimelineProject;
+
+  it('映像の列に置いた映像の部品は描かれる', () => {
+    expect(isDrawnClip(d(videoClip()), videoClip())).toBe(true);
+  });
+
+  it('音の列に置かれていたら描かれない（描く側は映像の列しか描かない）', () => {
+    const c = videoClip({ trackId: 'track_002' });
+    expect(isDrawnClip(d(c), c)).toBe(false);
+  });
+
+  it('絵を持たない種別は描かれない', () => {
+    const c = videoClip({ kind: TIMELINE_CLIP_KIND.audio });
+    expect(isDrawnClip(d(c), c)).toBe(false);
+  });
+
+  it('隠した部品・隠した列は描かれない（従来どおり）', () => {
+    const hidden = videoClip({ hidden: true });
+    expect(isDrawnClip(d(hidden), hidden)).toBe(false);
+    const c = videoClip();
+    expect(isDrawnClip(d(c, [{ ...visual, hidden: true } as never, audio]), c)).toBe(false);
+  });
+
+  it('列が見つからないときは描かれない（置き場所の無い部品を鳴らさない）', () => {
+    const c = videoClip({ trackId: 'track_999' });
+    expect(isDrawnClip(d(c), c)).toBe(false);
   });
 });

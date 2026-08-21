@@ -10,7 +10,7 @@ import type { FillPlacement, SourceSize } from '../domain/timeline/cropFill';
 import { sceneFromClip } from '../domain/timeline/sceneFromClip';
 import { subtitleTextOf } from '../domain/timeline/subtitleLink';
 import { CROP_MODE, FIT, FREE_CATEGORY, TIMELINE_CLIP_KIND, TRACK_KIND } from '../domain/enums';
-import type { FreeElementKind, TimelineClipKind } from '../domain/enums';
+import type { FreeElementKind } from '../domain/enums';
 import { composeGroupGeometry, isHiddenByGroup } from '../domain/group/compose';
 import { groupElementIds } from '../domain/project/groupOps';
 import type { Group } from '../domain/group/types';
@@ -25,35 +25,13 @@ import { applyInterpolatedTransform, layoutScene } from './layout';
 import type { LayoutItem, SceneLayout } from './layout';
 import type { Orientation } from '../domain/enums';
 import { resolveClipBox } from '../domain/timeline/box';
+import { isVisualClip } from '../domain/timeline/clipKind';
 
 /** クリップが時刻 t に生きているか。区間は `[startSec, startSec+durationSec)`（V24 と同じ半開区間）。 */
 export function clipIsLiveAt(clip: TimelineClip, timeSec: number): boolean {
   return timeSec >= clip.startSec && timeSec < clipEndSec(clip);
 }
 
-/**
- * 映像として描くクリップか（音だけのものは絵を持たない）。
- * **網羅 switch**（`never` チェック）で書くのは、`TimelineClipKind` に種別が増えたとき「映像扱いのまま
- * 描き方が無く黙って何も出ない」を型で止めるため（ADR-0032 決定19 の取りこぼし防止と同じ流儀）。
- */
-function isVisualClip(clip: TimelineClip): boolean {
-  const kind: TimelineClipKind = clip.kind;
-  switch (kind) {
-    case TIMELINE_CLIP_KIND.slot:
-    case TIMELINE_CLIP_KIND.text:
-    case TIMELINE_CLIP_KIND.shape:
-    case TIMELINE_CLIP_KIND.subtitle:
-    case TIMELINE_CLIP_KIND.template:
-      return true;
-    case TIMELINE_CLIP_KIND.audio:
-    case TIMELINE_CLIP_KIND.voice:
-      return false;
-    default: {
-      const _exhaustive: never = kind;
-      return _exhaustive;
-    }
-  }
-}
 
 /**
  * グループのアニメの起点（秒）＝**所属クリップのうち最も早い開始秒**。

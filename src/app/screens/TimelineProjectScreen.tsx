@@ -15,7 +15,7 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
 import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
@@ -2107,8 +2107,16 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           // ＝何も映らない窓を作るより、いままでどおり代表フレームで見せる（#512 段1 レビュー 🔴）。
           // ⚠️ **この画面で読めなかった素材は実映像にしない**（レビュー 🟡）＝取り込みは変換しないので
           // 画面が再生できない形式が入りうる。穴だけ開いた窓を残さず、代表フレームへ戻す。
-          const src = !unplayableVideoIds.has(placement.assetId) ? videoSrcById[placement.assetId] : undefined;
-          if (!item || !src) return null;
+          // ⚠️ **復号できない形式は「理由つきで静止」へ回す**（#816-1）＝ここで落とすと、絵が静止する
+          // だけでなく**音も落ち、理由も出ない**。書き出しは実映像＋元の音を出すので、黙っていると
+          // 「見えていたものと違う動画」が成功として出る（ADR-0001・ADR-0026④）。
+          // `.avi`/`.mkv` は取り込めるが復号できない＝**例外ではなく主要ケース**。
+          const unplayable = unplayableVideoIds.has(placement.assetId);
+          const src = !unplayable ? videoSrcById[placement.assetId] : undefined;
+          // 描かれていない部品は音も鳴らない（`item` が無い＝その時刻に出ていない・隠れている）。
+          if (!item) return null;
+          // まだ読めていないだけ（読み込み中）は理由を出さない＝一時的な状態を不具合のように見せない。
+          if (!src && !unplayable) return null;
           // ⚠️ **書き出しと同じ関数で、同じ格子**（`frameTimeSec`）から出す＝置いた位置が格子に
           // 乗っていなくても、プレビューと書き出しが同じコマになる。
           const sourceSec = videoSourceSecAt(placement, frameTimeSec(doc, playheadSec), effectiveFps(doc));
@@ -2120,11 +2128,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           // **重なった所で下が透ける**＝書き出し（1枚にしてから掛ける）と別の絵になる。
           // ⚠️ **出せない理由を持ち帰る**（レビュー 🔴）＝「実映像になっていない」全部を同じ文言で説明すると、
           // 区間の外・本体が無い・編集中でも「まとまりを薄くしている間は…」と**嘘の理由**が出る。
-          const held = compositeSpansOthers(shownLayout.items, item.id)
-            ? "groupFade"
-            : cropPivotDiffers(item, item.clipRect, item.rotation)
-              ? "rotatedCrop"
-              : null;
+          const held = unplayable
+            ? "unplayable"
+            : compositeSpansOthers(shownLayout.items, item.id)
+              ? "groupFade"
+              : cropPivotDiffers(item, item.clipRect, item.rotation)
+                ? "rotatedCrop"
+                : null;
           return {
             clip, placement, held, itemId: item.id, src, sourceSec, speed,
             fit: item.fit, align: item.align,
@@ -2144,13 +2154,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         .filter((v): v is NonNullable<typeof v> => v != null)
     : [];
   /** 実際に実映像として出すもの（出せない理由が付いたものは静止のまま）。 */
-  const videoShown = videoPlay.filter((v) => v.held == null);
+  // ⚠️ `src` は「読めなかった形式」で無い場合がある（#816-1）＝**型でも外す**（flatMap で絞る）。
+  const videoShown = videoPlay.flatMap((v) => (v.held == null && v.src ? [{ ...v, src: v.src }] : []));
   /**
    * **絵は出せないが、音は鳴らすもの**（#512 段2・レビュー 🟡）。
    * ⚠️ 絵を出せない理由（合成の単位を跨ぐ・回した切り抜き）は**音には当てはまらない**（音は合成しない）
    * ＝ここで消すと「仕上がり確認では聞こえないのに、書き出した動画には入っている」になる（ADR-0001）。
    */
-  const videoHeldAudible = videoPlay.filter((v) => v.held != null && v.audioVolume != null);
+  // ⚠️ **復号できない形式は音も出せない**（同じ復号器を通る）＝ここから外す。外さないと
+  // src の無い要素を作るだけで、鳴らない理由も伝わらない（理由は選んだ部品の欄に出す）。
+  const videoHeldAudible = videoPlay.flatMap((v) =>
+    v.held != null && v.held !== "unplayable" && v.audioVolume != null && v.src ? [{ ...v, src: v.src }] : [],
+  );
   const videoSplit =
     shownLayout && videoShown.length > 0
       ? splitVideoSceneSvgMulti(
@@ -2675,6 +2690,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             )}
             {videoPlay.some((v) => v.clip.id === selected.id && v.held === "rotatedCrop") && (
               <p className="field-hint">{TIMELINE_VIDEO_STILL_ROTATED_CROP}</p>
+            )}
+            {videoPlay.some((v) => v.clip.id === selected.id && v.held === "unplayable") && (
+              <p className="field-hint">{TIMELINE_VIDEO_STILL_UNPLAYABLE}</p>
             )}
             <div className="row gap-sm">
               <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec - NUDGE_SEC })} {...editGuard()}>

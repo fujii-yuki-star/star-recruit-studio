@@ -9,6 +9,7 @@ import { TIMELINE_SCHEMA_VERSION } from './types';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import type { Keyframe } from '../project/types';
 import type { TimelineClip, TimelineProject } from './types';
+import type { Template } from '../template/types';
 
 function doc(over: Partial<TimelineProject> = {}): TimelineProject {
   return {
@@ -437,6 +438,104 @@ describe('分けたときに持ち越すもの（#750 レビュー）', () => {
   it('素材の時間を持たない種類には書かない（意味の無い項目を増やさない）', () => {
     const r = split(doc({ clips: [text()] }), 'clip_001', 4);
     expect(r.ok && 'sourceStartSec' in r.doc.clips[1]).toBe(false);
+  });
+
+  // ⚠️ **差し込み口の動画も進む**（#816-2）＝見た目パターンの部品は素材の時間を置き場所ごと
+  //（`slotClips[layerId].startSec`）に持つので、`kind` だけで判定すると取り残され、**後半が
+  // 前半と同じところから流れ直す**。直接置きは進むので、放っておくと置き場所で挙動が割れる。
+  describe('差し込み口に入れた動画（#816-2）', () => {
+    const tmpl: Template = {
+      schemaVersion: '1.0', templateId: 'tmpl_001', name: 'ひとつ枠', category: 'opening',
+      aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
+      layers: [
+        { id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 },
+        { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+      ],
+    };
+    const templateOf = (id: string): Template | undefined => (id === 'tmpl_001' ? tmpl : undefined);
+    const withSlotVideo = (over: Partial<TimelineClip> = {}): TimelineProject =>
+      doc({
+        assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+        clips: [{
+          id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+          startSec: 0, durationSec: 10, templateId: 'tmpl_001', assetRefs: { main: 'asset_v' }, ...over,
+        } as TimelineClip],
+      });
+    const splitT = (d: TimelineProject, at: number) => splitClip(d, 'clip_001', at, volumeAt, { templateOf });
+
+    it('置いたばかりの枠でも、後半は続きから流れる（頭へ戻らない）', () => {
+      const r = splitT(withSlotVideo(), 4);
+      expect(r.ok && r.doc.clips[1].slotClips?.main.startSec).toBeCloseTo(4, 6);
+      expect(r.ok && r.doc.clips[0].slotClips?.main?.startSec).toBeUndefined(); // 前半はそのまま
+    });
+
+    it('すでに頭出し・速さがあるときは、その続きから（速さのぶんも進む）', () => {
+      const r = splitT(withSlotVideo({ slotClips: { main: { startSec: 3, speed: 2 } } }), 4);
+      expect(r.ok && r.doc.clips[1].slotClips?.main.startSec).toBeCloseTo(3 + 4 * 2, 6);
+      expect(r.ok && r.doc.clips[1].slotClips?.main.speed).toBe(2); // 他の設定は残す
+    });
+
+    it('動画の入っていない枠には書かない（意味の無い項目を増やさない）', () => {
+      const d = doc({
+        assets: [{ assetId: 'asset_p', assetType: 'image', displayName: '写真', filePath: 'p.png' }],
+        clips: [{
+          id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+          startSec: 0, durationSec: 10, templateId: 'tmpl_001', assetRefs: { main: 'asset_p' },
+        } as TimelineClip],
+      });
+      const r = splitT(d, 4);
+      expect(r.ok && r.doc.clips[1].slotClips).toBeUndefined();
+    });
+
+    // ⚠️ **使い切った先では分けない**（レビュー 🔴）＝頭出しを進めると切り出す終わりを追い越して
+    // 反転レンジになり、終端が「無し」へ正規化されて**切り捨てたはずの先が流れ出す**（元の音が
+    // 入っていれば鳴り出す）。分ける前は最後のコマで凍っていたので、切っただけで絵が変わる。
+    it('切り出す終わりを追い越す位置では分けられない', () => {
+      const d = withSlotVideo({ slotClips: { main: { startSec: 0, endSec: 3 } } });
+      const r = splitT(d, 5);
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.reason).toBe(SPLIT_BLOCKED.pastSource);
+    });
+
+    it('終わりの手前なら分けられる（過剰に止めない）', () => {
+      const d = withSlotVideo({ slotClips: { main: { startSec: 0, endSec: 3 } } });
+      const r = splitT(d, 2);
+      expect(r.ok).toBe(true);
+      expect(r.ok && r.doc.clips[1].slotClips?.main.endSec).toBe(3); // 終わりは残る
+      expect(r.ok && r.doc.clips[1].slotClips?.main.startSec).toBeCloseTo(2, 6);
+    });
+
+    it('素材の実尺を追い越す位置でも分けられない（書き出しが理由なく落ちるため）', () => {
+      const d = {
+        ...withSlotVideo(),
+        assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { durationSec: 4 } }],
+      } as TimelineProject;
+      expect(splitT(d, 6).ok).toBe(false);
+      expect(splitT(d, 3).ok).toBe(true); // 素材が残っている間は分けられる
+    });
+
+    it('終わりも実尺も判らなければ断らない（分からないことを理由にしない）', () => {
+      expect(splitT(withSlotVideo(), 6).ok).toBe(true);
+    });
+
+    // ⚠️ **直接置いた動画も同じ門を通る**＝置き場所で挙動を割らない（ADR-0026②）。実尺より後ろで
+    // 分けると、書き出しが「もう一度お試しください」で落ちる（何度やっても直らない案内）。
+    it('直接置いた動画でも、素材の実尺を追い越す位置では分けられない', () => {
+      const d = doc({
+        assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { durationSec: 4 } }],
+        clips: [{
+          id: 'clip_001', kind: TIMELINE_CLIP_KIND.slot, trackId: 'track_001',
+          startSec: 0, durationSec: 10, x: 0, y: 0, w: 100, h: 50, assetId: 'asset_v',
+        } as TimelineClip],
+      });
+      expect(splitClip(d, 'clip_001', 6, volumeAt).ok).toBe(false);
+      expect(splitClip(d, 'clip_001', 3, volumeAt).ok).toBe(true);
+    });
+
+    it('差し込み口でない層（背景）に入れた動画は進めない（描く側と同じ規則）', () => {
+      const r = splitT(withSlotVideo({ assetRefs: { background: 'asset_v' } }), 4);
+      expect(r.ok && r.doc.clips[1].slotClips).toBeUndefined();
+    });
   });
 
   it('🔴 **後半もまとまりに入る**（分割点から先だけフェードや変形が外れない）', () => {

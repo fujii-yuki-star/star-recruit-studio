@@ -8,9 +8,10 @@
 // （Rust `stage_clip_frames`）、フレームごとにその1枚を差し込む。
 // ⚠️ **動画にまつわる規則はここへ集約する**（どの部品が動画か／どの区間を焼くか／どのコマを出すか／
 // 実映像を出せるか）＝プレビューと書き出しが同じものを見る（別々に持つと preview≠export になる）。
+import { isVisualClip } from './clipKind';
 import { isHiddenByGroup } from '../group/compose';
 import { ORIGINAL_AUDIO_VOLUME } from '../constants';
-import { ASSET_TYPE, LAYER_TYPE, SLOT_TYPE, TIMELINE_CLIP_KIND } from '../enums';
+import { ASSET_TYPE, LAYER_TYPE, SLOT_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { SPEED_DEFAULT } from '../constants';
 import { clampSpeed } from '../asset/clip';
 import type { Template } from '../template/types';
@@ -156,11 +157,18 @@ export function videoPlacementsOf(
 
 /**
  * その部品が**描かれるか**（隠した部品・隠した列・隠したまとまりは描かれない）。
- * ⚠️ 描く側（`layoutTimelineAt`）と同じ条件＝「描かれるか」を2か所で数えない。
+ * ⚠️ 描く側（`timelineCanvasClipsAt`）と同じ条件＝「描かれるか」を2か所で数えない。
+ *
+ * ⚠️ **列の種別と、絵を持つ種別かも見る**（#816-6）＝描く側は映像の列の映像クリップしか描かないので、
+ * ここで見ないと**音の列に置かれた動画**（V23 に反する文書＝警告どまりで書き出しも止まらない）が
+ * 「描かれる」と数えられ、**プレビューは無音・書き出しは有音**になる（ADR-0001）。
+ * 判定は `isVisualClip`（domain の1か所）を描く側と共有する。
  */
 export function isDrawnClip(doc: TimelineProject, clip: TimelineClip): boolean {
   if (clip.hidden) return false;
-  if (doc.tracks.find((t) => t.id === clip.trackId)?.hidden) return false;
+  if (!isVisualClip(clip)) return false;
+  const track = doc.tracks.find((t) => t.id === clip.trackId);
+  if (!track || track.kind !== TRACK_KIND.visual || track.hidden) return false;
   return !isHiddenByGroup(clip.id, doc.groups ?? []);
 }
 
