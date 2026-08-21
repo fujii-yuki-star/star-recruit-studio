@@ -684,7 +684,10 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("この部品を置き直してください"))).toBe(true);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("この部品を消して、置き直してください"))).toBe(true);
+    // ⚠️ **できない行動を名指ししない**（#812）＝見た目パターンを読み直す操作は画面に無く、
+    // 自作のものを消した場合は読み直しても戻らない（§2-5）。
+    expect(screen.queryByText(/読み込み直/)).toBeNull();
   });
 
   it("固定した列の部品は中身も変えられない（押せない理由を出す）", () => {
@@ -4629,14 +4632,38 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.queryByLabelText("奥行き")).toBeNull();
   });
 
-  it("見た目パターンの部品では**次の行動を出す**（欄が消えるだけにしない）", () => {
+  const hintTemplate: Template = {
+    schemaVersion: "1.0", templateId: "tmpl_001", name: "シンプル", category: "opening",
+    aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+    layers: [{ id: "background", type: "background", x: 0, y: 0, w: 1920, h: 1080 }],
+  };
+  const openTemplateClip = (): void => {
     open({
       clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 3, templateId: "tmpl_001" }],
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("見た目パターンの部品では**次の行動を出す**（欄が消えるだけにしない）", () => {
+    // ⚠️ **見た目パターンを登録してから見る**（#812）＝以前はここが空のまま `/中身をバラす/` を
+    // 見ており、**未解決なのに案内だけ出る**壊れた挙動をテストが固定していた。
+    useProjectStore.setState({ templates: [hintTemplate] });
+    openTemplateClip();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.queryByLabelText("横位置")).toBeNull();
-    expect(screen.getByText(/中身をバラす/)).toBeInTheDocument(); // 行き先を名指しする
+    expect(screen.getByText(/中の位置や大きさを変えるには「中身をバラす」を使ってください/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "中身をバラす" })).toBeInTheDocument(); // 名指し先が実在する
+  });
+
+  // ⚠️ **無いボタンを名指ししない**（#812・§2-5）＝見た目パターンが見つからないと「中身をバラす」は
+  // 描かれないので、案内だけ残ると**どこにも無いボタンを探させる**うえ、「見つかりません」と食い違う
+  // 2つの案内が並ぶ。自作の見た目パターンを消すと踏む（タイムライン文書の参照は修復されない）。
+  it("見た目パターンが見つからないときは、無いボタンを名指ししない", () => {
+    openTemplateClip(); // 見た目パターンは登録しない＝未解決
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "中身をバラす" })).toBeNull(); // 前提＝ボタンは無い
+    expect(screen.queryByText(/中身をバラす/)).toBeNull();                     // その名前を出さない
+    expect(screen.getByText(/この部品の見た目パターンが見つかりません/)).toBeInTheDocument();
   });
 
   it("箱を持てない部品には出さない（音・読み上げ・見た目パターン）", () => {
