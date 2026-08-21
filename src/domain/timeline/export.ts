@@ -201,7 +201,7 @@ const DEFAULT_AUDIO_FILE_EXT = 'mp3';
 export const TIMELINE_EXPORT_BLOCK = {
   /** 動画に出るものが1つも無い（尺 0）。 */
   empty: 'TIMELINE_EXPORT_EMPTY',
-  /** 見た目パターンの差し込み口・立ち絵に入れた動画＝いまも静止画になるので、書き出さずに断る（直接置きは #512 段1 で映る）。 */
+  /** **立ち絵**に入れた動画＝いまも静止画になるので、書き出さずに断る（直接置きは #512 段1・差し込み口は段3 で映る＝断らない）。 */
   videoAsset: 'TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED',
   /** 見た目パターンが見つからない部品がある＝そこが丸ごと絵から消えるので、書き出さずに断る。 */
   templateUnresolved: 'TIMELINE_EXPORT_TEMPLATE_UNRESOLVED',
@@ -236,10 +236,10 @@ export interface TimelineExportBlocker {
 /**
  * 書き出す前に止める理由を返す（空なら書き出せる）。**§2-5**＝画面はここから「次の行動」を出す。
  *
- * **見た目パターンの差し込み口・立ち絵に入れた動画は、まだ動かせない**（`layoutTimelineAt` は1枚の絵として
- * 描き、元の音も出ない）。黙って静止画＋無音の動画を成功として出さないため、まだ映らない使い方
- * （差し込み口・立ち絵＝段3）のときだけ書き出しを止める（ADR-0026④・場面形式の `videoSlotUnplaceable` と同じ流儀）。
- * **直接置いた動画は映り（#512 段1）、元の音も鳴る（段2）**ので止めない。
+ * **立ち絵に入れた動画だけは、まだ動かせない**（`layoutTimelineAt` は1枚の絵として描き、元の音も出ない）。
+ * 黙って静止画の動画を成功として出さないため、**その使い方のときだけ**書き出しを止める
+ *（ADR-0026④・場面形式の `videoSlotUnplaceable` と同じ流儀）。
+ * **直接置いた動画は映り（#512 段1）、元の音も鳴る（段2）／差し込み口も映って鳴る（段3・段3b）**ので止めない。
  */
 export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExportCheckOptions = {}): TimelineExportBlocker[] {
   const blockers: TimelineExportBlocker[] = [];

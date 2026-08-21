@@ -2219,7 +2219,7 @@ describe("TimelineProjectScreen: 素材・文字・図形を置く（#684）", (
       assets: [
         { assetId: "asset_001", assetType: "image", displayName: "会社の外観", filePath: "a.png" },
         { assetId: "asset_002", assetType: "bgm", displayName: "曲", filePath: "b.mp3" },
-        // 動画は置けても書き出しの手前で断られる＝選べるのに使えない選択肢を並べない（ADR-0032 決定23）。
+        // 動画も一覧に出す＝直接置けば映り、元の音も鳴る（#512 段1・段2）。下の「動画も置ける」で見る。
         { assetId: "asset_003", assetType: "video", displayName: "紹介ムービー", filePath: "c.mp4" },
       ],
       ...over,
