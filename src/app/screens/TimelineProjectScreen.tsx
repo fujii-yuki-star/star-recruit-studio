@@ -2731,8 +2731,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             )}
             {/* ⚠️ **欄が消えるだけにしない**（#685 レビュー）＝見た目パターンの部品は枠そのものなので
                 位置の欄を出さないが、黙って消すと「壊れている／見つけられない」に見える。
-                行き先（「中身をバラす」）は実在するので、次の行動として名指しする（§2-5・決定8）。 */}
-            {selected.kind === TIMELINE_CLIP_KIND.template && (
+                行き先（「中身をバラす」）は実在するので、次の行動として名指しする（§2-5・決定8）。
+                ⚠️ **名指しできるのは、そのボタンが実在するときだけ**（#812）＝見た目パターンが
+                見つからないと「中身をバラす」は描かれない（下の節が代わりに理由を出す）ので、
+                ここで名指しすると**どこにも無いボタンを探させる**うえ、下の「見つかりません」と
+                食い違う2つの案内が並ぶ。未解決のときは下の案内だけに委ねる。 */}
+            {selected.kind === TIMELINE_CLIP_KIND.template && selectedTemplate && (
               <p className="text-sm text-muted">
                 この部品は見た目パターンの枠そのものです。中の位置や大きさを変えるには「中身をバラす」を使ってください。
               </p>
@@ -3558,8 +3562,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   </button>
                 </CollapsibleSection>
               ) : (
+                /* ⚠️ **「読み込み直す」は名指ししない**（#812）＝見た目パターンを読み直す操作は
+                   画面のどこにも無く（起動時に一度だけ）、自作のものを消した場合は読み直しても
+                   戻らない＝**実行できない／効果の無い行動**になる（§2-5）。消して置き直す側だけを出す
+                   （削除のボタンは選んでいれば必ず出る）。 */
                 <p className="notice notice-warn" role="alert">
-                  この部品の見た目パターンが見つかりません。見た目パターンを読み込み直すか、この部品を置き直してください。
+                  この部品の見た目パターンが見つかりません。この部品を消して、置き直してください。
                 </p>
               )
             )}
@@ -3922,7 +3930,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       {/* 直せば良くなる警告は、その下（出たままでも編集の邪魔をしない位置）。 */}
       {missingTemplateCount > 0 && (
         <p className="notice notice-warn" role="alert">
-          見た目パターンが見つからない部品が{missingTemplateCount}個あります。その部品は動画に出ません。見た目パターンを読み込み直すか、置き直してください。
+          見た目パターンが見つからない部品が{missingTemplateCount}個あります。その部品は動画に出ません。その部品を消して、置き直してください。
         </p>
       )}
       {emptySlotCount > 0 && (
