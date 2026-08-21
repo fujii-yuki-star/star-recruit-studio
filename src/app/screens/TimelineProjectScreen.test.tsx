@@ -636,6 +636,37 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     expect(container.querySelector(".preview-stage video")).toBeNull();
   });
 
+  // ⚠️ **黙って静止＋無音にしない**（#816-1）＝`.avi`/`.mkv` は取り込めるがこの画面では復号できず、
+  // 必ずこの状態になる（例外ではなく主要ケース）。書き出しは実映像＋元の音を出すので、理由を出さないと
+  // **見えていたものと違う動画**が成功として出る（ADR-0001・ADR-0026④）。
+  it("この画面で再生できない動画は、静止する理由をその場で出す", () => {
+    const oneSlot: Template = {
+      ...template,
+      layers: [{ id: "left", type: "slot", x: 0, y: 0, w: 960, h: 1080 }],
+    };
+    useProjectStore.setState({ templates: [oneSlot], templateAssetSrcById: {} });
+    open({
+      assets: [{ assetId: "asset_002", assetType: "video", displayName: "動画B", filePath: "b.avi", metadata: { hasAudio: true } }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+        startSec: 0, durationSec: 5, templateId: "tmpl_001", assetRefs: { left: "asset_002" },
+        slotClips: { left: { useOriginalAudio: true } },
+      }],
+    });
+    act(() => {
+      useTimelineStore.setState({ assetSrcById: { asset_002: "blob:thumb_v" }, videoSrcById: { asset_002: "blob:body_v" } });
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const v = container.querySelector(".preview-stage video") as HTMLVideoElement;
+    act(() => { fireEvent(v, new Event("error")); });
+    expect(container.querySelector(".preview-stage video")).toBeNull(); // 窓は閉じる（従来どおり）
+    // ⚠️ **音だけの要素も出さない**（レビュー ℹ️）＝同じ復号器を通るので鳴らせない。
+    // 音だけの要素は舞台の**外**（`.preview-stage-wrap` 直下）に置かれるので、そこを見る。
+    expect(container.querySelector(".preview-stage-wrap > video")).toBeNull();
+    expect(screen.getByText(/ここでは映像も音も出せません/)).toBeInTheDocument(); // 黙らない
+  });
+
   // ⚠️ **差し込み口ごとに元の音の欄を出す**（#512 段3b）＝直接置きと同じ形・同じ言い方（ADR-0026②）。
   // 音が入っているか判らない素材には断定せず、直接置きと同じ2文で理由を出す。
   it("差し込み口に入れた動画には、その枠の「この動画の音」が出る", () => {
@@ -5336,6 +5367,52 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(2); // 増えない
     expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.splitOutside); // 理由は出す
+  });
+
+  // ⚠️ **差し込み口の動画でも「押す前に」塞ぐ**（PR #825 レビュー 🟡）＝事前の判定に見た目パターンを
+  // 渡さないと、差し込み口の置き場所が1件も解けず「素材を使い切った先」の判定が**必ず偽**になる。
+  // 押せてしまい、押した先だけで断られる＝この節の趣旨（押せるのに何も起きない、を作らない）と逆。
+  it("差し込み口の動画を使い切った先でも、押す前に塞ぐ", () => {
+    const oneSlot: Template = {
+      schemaVersion: "1.0", templateId: "tmpl_001", name: "ひとつ枠", category: "opening",
+      aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+      layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080 }],
+    };
+    useProjectStore.setState({ templates: [oneSlot], templateAssetSrcById: {} });
+    open({
+      assets: [{ assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "v.mp4" }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+        startSec: 0, durationSec: 10, templateId: "tmpl_001", assetRefs: { main: "asset_v" },
+        slotClips: { main: { startSec: 0, endSec: 3 } },
+      }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 5 }); // 使い切った先
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "ここで分ける" })).toBeDisabled();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(1); // 増えない
+    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.splitPastSource);
+  });
+
+  it("差し込み口の動画でも、素材が残っている位置なら分けられる（過剰に塞がない）", () => {
+    const oneSlot: Template = {
+      schemaVersion: "1.0", templateId: "tmpl_001", name: "ひとつ枠", category: "opening",
+      aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+      layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080 }],
+    };
+    useProjectStore.setState({ templates: [oneSlot], templateAssetSrcById: {} });
+    open({
+      assets: [{ assetId: "asset_v", assetType: "video", displayName: "動画", filePath: "v.mp4" }],
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+        startSec: 0, durationSec: 10, templateId: "tmpl_001", assetRefs: { main: "asset_v" },
+        slotClips: { main: { startSec: 0, endSec: 3 } },
+      }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"], playheadSec: 2 });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "ここで分ける" })).toBeEnabled();
   });
 
   it("再生中は分けられない（位置を使う操作＝結果が毎回変わる・決定21）", () => {

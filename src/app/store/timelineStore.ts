@@ -802,7 +802,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   splitSelectedClip: (atSec) => {
     const { doc, selectedClipIds } = get();
     if (!doc || selectedClipIds.length !== 1) return;
-    const r = splitClip(doc, selectedClipIds[0], atSec, volumeAt);
+    // ⚠️ **見た目パターンを渡す**（#816-2）＝差し込み口に入れた動画の頭出しを進めるのに要る
+    // （どの枠が動画を受けるかは見た目パターンが決める＝描く側と同じ規則）。
+    const templateById = new Map(useProjectStore.getState().templates.map((t) => [t.templateId, t]));
+    const r = splitClip(doc, selectedClipIds[0], atSec, volumeAt, { templateOf: (id) => templateById.get(id) });
     if (!r.ok) { set({ editBlocked: SPLIT_BLOCKED_REASON[r.reason] }); return; }
     // ⚠️ 選択の差し替えは **`commit` に載せる**（#750 レビュー）。別に `set` すると、`commit` が
     // 断ったとき（書き出し中）でも**存在しない id が選択に残り**、以後の操作が「見つかりません」で

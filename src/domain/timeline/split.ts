@@ -25,6 +25,10 @@ import { TIMELINE_MIN_CLIP_SEC, VOLUME_POINTS_MAX } from '../constants';
 import type { BezierEasing, EasingSpec } from '../enums';
 import type { Keyframe } from '../project/types';
 import type { ClipAnimation, TimelineClip, TimelineProject } from './types';
+import type { SlotClipOverride } from '../project/types';
+import type { Template } from '../template/types';
+import { videoPlacementsOfClip } from './video';
+import { resolveSlotClip } from '../asset/clip';
 import { clampProp } from './keyframeEdit';
 import { EDIT_BLOCKED } from './edit';
 import type { EditBlockedReason } from './edit';
@@ -53,6 +57,12 @@ export const SPLIT_BLOCKED = {
   outside: 'outside',
   /** 音量の変化の点が上限に達している（境界の点を焼くと超える）。 */
   volumePointsFull: 'volumePointsFull',
+  /**
+   * **素材を使い切った先**で分けようとした（#816 レビュー 🔴）。後半の頭出しがそこまで進むと、
+   * 切り出す終わりを追い越して**反転レンジ**になり、終端が「無し」へ正規化されて
+   * **切り捨てたはずの先が流れ出す**（実尺を越える場合は書き出しが理由なく落ちる）。
+   */
+  pastSource: 'pastSource',
   /** その動き方を前後へ切り分けられない（#753＝表せない形・置けない値になる。カーブ自体は焼ける）。 */
   curvedEasing: 'curvedEasing',
 } as const;
@@ -62,7 +72,12 @@ export type SplitBlockedReason = (typeof SPLIT_BLOCKED)[keyof typeof SPLIT_BLOCK
  * **そこで分けられるか**（分けられないなら理由）。ドラッグの `moveClipIssue` と同じ流儀＝
  * 画面は押す前にこれを見て、`splitClip` も同じものを通す（押せるのに何も起きない、を作らない）。
  */
-export function splitClipIssue(doc: TimelineProject, clipId: string, atSec: number): SplitBlockedReason | null {
+export function splitClipIssue(
+  doc: TimelineProject,
+  clipId: string,
+  atSec: number,
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
+): SplitBlockedReason | null {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return SPLIT_BLOCKED.notFound;
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return SPLIT_BLOCKED.locked;
@@ -85,7 +100,41 @@ export function splitClipIssue(doc: TimelineProject, clipId: string, atSec: numb
   // ＝`splitKeyframes` が `null` を返したときだけ断る（門と実物で規則が割れない・押せるのに何も起きない、も作らない）。
   const own = (doc.animations ?? []).find((a) => a.targetId === clipId);
   if (own && splitKeyframes(own.keyframes, head) == null) return SPLIT_BLOCKED.curvedEasing;
+  // ⚠️ **素材を使い切った先では分けない**（#816 レビュー 🔴）＝後半の頭出しを進めると、
+  // 切り出す終わり（`endSec`）を追い越して**反転レンジ**になり、`resolveSlotClip` が終端を
+  // 「無し」へ正規化する＝**切り捨てたはずの先が後半で流れ出す**（元の音が入っていれば鳴り出す）。
+  // 分ける前は最後のコマで凍っていたので、切っただけで絵が変わる（ADR-0026①）。
+  // ⚠️ **素材の実尺も同じ**＝進めた先に絵が1枚も無いと、書き出しが「もう一度お試しください」で
+  // 落ちる（何度やっても直らない案内＝§2-5）。**判る範囲だけ**で断る（尺が判らない素材は通す）。
+  if (usesUpSource(doc, clip, head, opts.templateOf)) return SPLIT_BLOCKED.pastSource;
   return null;
+}
+
+/**
+ * その切り方だと、**素材を使い切った先**から後半が始まるか（#816 レビュー 🔴）。
+ *
+ * 見るのは**置き場所ごとの実効値**（直接置き／差し込み口とも `videoPlacementsOfClip` 経由）＝
+ * 継承（per-use → 素材既定）を解いた後の値で判断する（描画・再生と同じ材料）。
+ * 判る材料が無い（終端も実尺も未指定）ときは**断らない**＝分からないことを理由にしない。
+ */
+function usesUpSource(
+  doc: TimelineProject,
+  clip: TimelineClip,
+  headSec: number,
+  templateOf: ((templateId: string) => Template | undefined) | undefined,
+): boolean {
+  return videoPlacementsOfClip(doc, clip, { templateOf }).some((p) => {
+    const advanced = p.sourceStartSec + headSec * p.speed;
+    const asset = doc.assets.find((a) => a.assetId === p.assetId);
+    const endSec = resolveSlotClip(
+      p.layerId != null ? clip.slotClips?.[p.layerId] : { startSec: clip.sourceStartSec, speed: clip.speed },
+      p.layerId != null ? asset?.clip : undefined,
+    ).endSec;
+    const sourceEnd = asset?.metadata?.durationSec ?? undefined;
+    // 判る材料が無ければ限界は無限＝この比較は必ず偽になる（別に見張りを置かない＝守れない枝を作らない）。
+    const limit = Math.min(endSec ?? Infinity, sourceEnd ?? Infinity);
+    return advanced >= limit;
+  });
 }
 
 /**
@@ -298,13 +347,42 @@ export function splitVolumePoints(
  * `volumeAt` は音量の変化を解く関数（`domain/timeline/audio` の `volumeAt`）。**再生・書き出しと
  * 同じもの**を渡す＝切れ目の音量が画面と出力で食い違わない。
  */
+/**
+ * 差し込み口に入れた動画の**頭出しを進めた** `slotClips`（#816-2）。分ける対象が見た目パターンの
+ * 部品でないとき・進める枠が無いときは**何も足さない**（`{}` を返す＝スプレッドしても無害）。
+ *
+ * ⚠️ **どの枠が動画を受けるかは見た目パターンが決める**（`videoPlacementsOfClip` と同じ規則）＝
+ * `assetRefs` を全部数えると、背景の層に入れた動画まで進めてしまう。
+ * ⚠️ **持っているかどうかで決めない**（#750 レビュー 🔴 と同じ理由）＝置いたばかりの枠は
+ * `slotClips` を持たないので、条件にすると**後半が頭から流れ直す**。進める枠なら必ず書く。
+ * ⚠️ 見た目が解けないときは進めない＝そのときはその部品自体が描かれない（書き出しも断る）。
+ */
+function advancedSlotStarts(
+  doc: TimelineProject,
+  clip: TimelineClip,
+  headSec: number,
+  templateOf: ((templateId: string) => Template | undefined) | undefined,
+): { slotClips?: Record<string, SlotClipOverride> } {
+  if (clip.kind !== TIMELINE_CLIP_KIND.template) return {};
+  const slots = videoPlacementsOfClip(doc, clip, { templateOf }).filter((p) => p.use === 'slot');
+  if (slots.length === 0) return {};
+  const next: Record<string, SlotClipOverride> = { ...(clip.slotClips ?? {}) };
+  for (const p of slots) {
+    if (p.layerId == null) continue;
+    // 置いた長さ × 速度 ＝ 使う素材の長さ（`11 §7.6.3.2`）＝速さのぶんも進む。
+    next[p.layerId] = { ...(clip.slotClips?.[p.layerId] ?? {}), startSec: p.sourceStartSec + headSec * p.speed };
+  }
+  return { slotClips: next };
+}
+
 export function splitClip(
   doc: TimelineProject,
   clipId: string,
   atSec: number,
   volumeAt: (points: readonly { timeSec: number; volume: number }[] | undefined, localSec: number) => number | undefined,
+  opts: { templateOf?: (templateId: string) => Template | undefined } = {},
 ): { ok: true; doc: TimelineProject; newClipId: string } | { ok: false; reason: SplitBlockedReason } {
-  const issue = splitClipIssue(doc, clipId, atSec);
+  const issue = splitClipIssue(doc, clipId, atSec, opts);
   if (issue) return { ok: false, reason: issue };
   const clip = doc.clips.find((c) => c.id === clipId) as TimelineClip;
   const headSec = atSec - clip.startSec;
@@ -332,6 +410,11 @@ export function splitClip(
     ...(USES_SOURCE_TIME.has(clip.kind)
       ? { sourceStartSec: (clip.sourceStartSec ?? 0) + headSec * (clip.speed ?? 1) }
       : {}),
+    // ⚠️ **差し込み口に入れた動画も進める**（#816-2）＝見た目パターンの部品は素材の時間を
+    // クリップ自身でなく**置き場所ごと**（`slotClips[layerId].startSec`）に持つので、`kind` で
+    // 判定すると取り残される＝**後半が前半と同じところから流れ直す**（絵も音も）。
+    // 直接置いた動画は正しく進むので、放っておくと**同じ動画が置き場所で挙動が割れる**（ADR-0026②）。
+    ...advancedSlotStarts(doc, clip, headSec, opts.templateOf),
   };
   // 連動している字幕は切れない（上で断っている）ので、`voiceClipId` を持つ後半は生まれない。
 
@@ -384,4 +467,5 @@ export const SPLIT_BLOCKED_REASON: Record<SplitBlockedReason, EditBlockedReason>
   [SPLIT_BLOCKED.outside]: EDIT_BLOCKED.splitOutside,
   [SPLIT_BLOCKED.volumePointsFull]: EDIT_BLOCKED.volumePointsFull,
   [SPLIT_BLOCKED.curvedEasing]: EDIT_BLOCKED.curvedEasing,
+  [SPLIT_BLOCKED.pastSource]: EDIT_BLOCKED.splitPastSource,
 };

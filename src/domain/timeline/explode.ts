@@ -16,7 +16,7 @@ import { IDENTITY_TRANSFORM } from '../project/groupOps';
 import { freeLayoutFromPlacedContent } from '../project/sceneOps';
 import type { Template } from '../template/types';
 import type { FreeElement } from '../project/types';
-import { videoPlacementsOfClip } from './video';
+import { videoPlacementsOfClip, videoAssetIds } from './video';
 import type { VideoPlacement } from './video';
 import { ORIGINAL_AUDIO_VOLUME, SPEED_DEFAULT } from '../constants';
 import { EDIT_BLOCKED } from './edit';
@@ -62,6 +62,23 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // ⚠️ **出どころで案内を分ける**（レビュー 🟡）＝「ここまで」は**その枠だけの設定**（`slotClips`）と
   // **素材の既定**（`asset.clip`）のどちらからも来る（解決は per-use が優先＝`resolveSlotClip`）。
   // 素材の画面で外せるのは後者だけなので、前者に同じ案内を出すと**従っても解除されない行き止まり**になる。
+  // ⚠️ **差し込み口でない層に入れた動画は、バラすと動き出す**（#816-4）＝いまは静止画として描かれる
+  //（置き場所にするのは差し込み口の層だけ）が、バラすと直接置きになり実映像になる＝決定23 に反する。
+  // 「動かさない」を写す語彙が直接置きに無いので、切り出す終わりと同じ流儀で先に断る。
+  // ⚠️ **数えるのは「これから作る要素」**（レビュー 🟡／ℹ️）＝テンプレの層や `assetRefs` から数えると、
+  // **立ち絵**（`character.poseAssetId`＝変換は slot 要素にする）を取りこぼし、逆に**テンプレの
+  // まとまりで隠れた層**（持ち込まない）まで数えて過剰に断る。要素から数えれば両方そろう。
+  // バラすと直接置きの動画になり**動き出す**（バラす前は静止＋書き出しも断っていたのに、後は黙って通る）。
+  const videoIds = videoAssetIds(doc);
+  const movesAfterExplode = elements.some(
+    (el) =>
+      el.kind === FREE_ELEMENT_KIND.slot &&
+      typeof el.assetId === 'string' &&
+      videoIds.has(el.assetId) &&
+      !placementByLayer.has(slotLayerByElementId[el.id] ?? ''),
+  );
+  if (movesAfterExplode) return { ok: false, reason: EDIT_BLOCKED.explodeBackgroundVideo };
+
   const shortened = [...placementByLayer.values()].filter((pl) => pl.durationSec < clip.durationSec);
   if (shortened.length > 0) {
     const perUse = shortened.some((pl) => pl.layerId != null && clip.slotClips?.[pl.layerId]?.endSec != null);

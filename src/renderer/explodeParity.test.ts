@@ -138,6 +138,85 @@ describe('バラしても枠の使い方が残る', () => {
     expect(slot).toMatchObject({ useOriginalAudio: true, originalAudioVolume: 0.9, sourceStartSec: 2, speed: 0.5 });
   });
 
+  // ⚠️ **差し込み口でない層に入れた動画は、バラすと動き出す**（#816-4）＝いまは静止画として描かれる
+  // のに、バラすと直接置きになり実映像になる＝決定23「前後で絵が変わらない」に反する（確認の文言も
+  // 「動画の見た目は変わりません」と約束している）。UI から素直に踏める（背景の層は同梱テンプレにもある）。
+  it('背景の層に入れた動画があったら、バラす前に断る（バラすと動き出すため）', () => {
+    const withBg = {
+      ...videoTemplate,
+      layers: [
+        { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+        { id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 },
+      ],
+    } as unknown as Template;
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v', assetRefs: { background: 'asset_v' },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    const r = explodeTemplateClip(d, 'clip_001', withBg);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO');
+  });
+
+  it('差し込み口に入れた動画は、そのままバラせる（動き出すのは背景の層のとき）', () => {
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v', assetRefs: { main: 'asset_v' },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    expect(explodeTemplateClip(d, 'clip_001', videoTemplate).ok).toBe(true);
+  });
+
+  // ⚠️ **立ち絵に入れた動画も同じ**（レビュー 🟡）＝変換は立ち絵も要素にするので、`assetRefs` だけを
+  // 見ていると素通りして動き出す。しかも**バラす前は書き出しを断っていた**のに、バラした後は黙って通る。
+  it('立ち絵に入れた動画があったら、バラす前に断る', () => {
+    const withChar = {
+      ...videoTemplate,
+      layers: [
+        { id: 'character', type: 'character', x: 0, y: 0, w: 400, h: 800 },
+        { id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 },
+      ],
+    } as unknown as Template;
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v',
+      character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    const r = explodeTemplateClip(d, 'clip_001', withChar);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO');
+  });
+
+  it('背景の層でも、写真なら断らない（動画のときだけの話）', () => {
+    const withBg = {
+      ...videoTemplate,
+      layers: [
+        { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+        { id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 },
+      ],
+    } as unknown as Template;
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v', assetRefs: { background: 'asset_p' },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{ assetId: 'asset_p', assetType: 'image', displayName: '写真', filePath: 'p.png' }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    expect(explodeTemplateClip(d, 'clip_001', withBg).ok).toBe(true);
+  });
+
   // ⚠️ **持っていけないものは黙って落とさない**＝「切り出す終わり」は直接置きの語彙に無いので、
   // 縮めても縮めなくても絵が変わる。動きが付いた部品と同じ流儀で先に断る。
   it('その枠だけ切り出す終わりを決めた動画が入っていたら、バラす前に断る', () => {
