@@ -4,7 +4,7 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 import type { TimelineClip, TimelineProject } from './types';
 import { EDIT_BLOCKED } from './edit';
-import { animationOriginSec, clearKeyframes, removeKeyframe, setKeyframe } from './keyframeEdit';
+import { animationOriginSec, clearKeyframes, keyframeTimeAt, removeKeyframe, setKeyframe } from './keyframeEdit';
 import { validateTimelineProject } from '../validation/generated/validators.js';
 import { interpolateKeyframes } from '../project/keyframes';
 
@@ -230,5 +230,49 @@ describe('動き方（イージング・#262）', () => {
   it('縦の制御点は丸めない（行き過ぎて戻る動きを消さない）', () => {
     const r = setKeyframe(doc(), 'clip_001', 1, { x: 10, easing: { bezier: [0.3, 3, 0.7, -2] } });
     expect(r.ok && r.doc.animations?.[0].keyframes[0].easing).toEqual({ bezier: [0.3, 3, 0.7, -2] });
+  });
+});
+
+// 置ける位置か（`keyframeTimeAt`）。**音量の変化（`volumePointTimeAt`）と対の作り**にする（ADR-0026②）。
+// ⚠️ **終わりちょうども置ける**（区間は閉じている）＝描画の生存判定（半開）を流用すると終端に置けず、
+// 「ここまでに動き終わる」到達点が作れない。**同じ誤りを音量の変化で実機で踏んで直している**（#512）のに、
+// こちらは境界ちょうどを1つも突いておらず、`>` を `>=` に変えても全テストが緑だった（#814）。
+describe('keyframeTimeAt（置ける位置か・#814）', () => {
+  const d = doc(); // clip_001＝2秒から4秒間（2.0〜6.0）
+
+  it('終わりちょうども置ける（「ここまでに動き終わる」到達点を置けなくしない）', () => {
+    expect(keyframeTimeAt(d, 'clip_001', 6)).toBe(4);
+  });
+
+  it('始まりちょうども置ける', () => {
+    expect(keyframeTimeAt(d, 'clip_001', 2)).toBe(0);
+  });
+
+  it('部品の外は置けない', () => {
+    expect(keyframeTimeAt(d, 'clip_001', 1.9)).toBeNull();
+    expect(keyframeTimeAt(d, 'clip_001', 6.1)).toBeNull();
+  });
+
+  it('返す秒はそのまま setKeyframe に渡せる（切り詰められない＝同じ規則）', () => {
+    const r = setKeyframe(d, 'clip_001', keyframeTimeAt(d, 'clip_001', 6)!, { x: 100 });
+    expect(r.ok && kfs(r.doc)).toEqual([{ timeSec: 4, x: 100 }]);
+  });
+
+  // まとまりは**所属クリップの最後の終わり**まで＝起点も長さもクリップ1つとは違う。
+  it('まとまりでも終わりちょうどまで置ける（起点は最も早い開始秒）', () => {
+    const g = doc({
+      clips: [clip('clip_001'), clip('clip_002', { startSec: 5, durationSec: 3 })], // 2.0〜6.0 と 5.0〜8.0
+      groups: [{ id: 'group_001', members: ['clip_001', 'clip_002'], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
+    });
+    expect(keyframeTimeAt(g, 'group_001', 2)).toBe(0);   // 起点＝最も早い開始秒
+    expect(keyframeTimeAt(g, 'group_001', 8)).toBe(6);   // 終わり＝最後の終わり
+    expect(keyframeTimeAt(g, 'group_001', 8.1)).toBeNull();
+    expect(keyframeTimeAt(g, 'group_001', 1.9)).toBeNull();
+  });
+
+  it('丸めの都合で右端ちょうどが外れない（案内どおりの秒で置ける）', () => {
+    // (0.1 + 0.2) - 0.1 は 0.20000000000000004＝長さ 0.2 を超える。式を変えないと右端が外れる。
+    const tiny = doc({ clips: [clip('clip_001', { startSec: 0.1, durationSec: 0.2 })] });
+    expect(keyframeTimeAt(tiny, 'clip_001', 0.30000000000000004)).toBe(0.2);
   });
 });
