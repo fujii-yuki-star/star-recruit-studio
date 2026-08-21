@@ -3,7 +3,7 @@
 // あるので、規則をここで固定する＝場所ごとに書き分けて片方だけ直す、を防ぐ。
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { usePointerDrag } from "./usePointerDrag";
+import { registerExternalDrag, usePointerDrag, whenPointerDragEnds } from "./usePointerDrag";
 import { hasEscapeOwner } from "./escapeOwners";
 import type { DragHandlers } from "./usePointerDrag";
 
@@ -170,5 +170,65 @@ describe("usePointerDrag（ドラッグの作法）", () => {
     expect(hasEscapeOwner()).toBe(true);       // 名乗りは1つぶんだけ残る
     up(200, 200);
     expect(hasEscapeOwner()).toBe(false);
+  });
+});
+
+// 掴み終わりの知らせ（#813）＝**終わりの合図を経路ごとに数えない**ための1か所。
+// `Escape` での中止は `pointercancel` を出さずに直接止めるので、イベントを待ち受ける形だと
+// その回だけ静かに取り残される（履歴のまとめが開きっぱなし＝自動保存も止まる）。
+describe("whenPointerDragEnds（掴んでいるものが無くなったら知らせる）", () => {
+  it("掴んでいる間は待たせ、離したら1度だけ呼ぶ", () => {
+    const fn = vi.fn();
+    const release = registerExternalDrag();
+    whenPointerDragEnds(fn);
+    expect(fn).not.toHaveBeenCalled(); // まだ掴んでいる
+    release();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape でやめたときも呼ぶ（合図を出さずに止まる経路）", () => {
+    const fn = vi.fn();
+    render(<Grabbable handlers={{ onMove: () => {} }} />);
+    down(screen.getByRole("button"), 0, 0);
+    move(50, 50); // しきい値を越えて「掴んでいる」に入る
+    whenPointerDragEnds(fn);
+    expect(fn).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("2つ掴んでいたら、**全部**離れてから呼ぶ", () => {
+    const fn = vi.fn();
+    const a = registerExternalDrag();
+    const b = registerExternalDrag();
+    whenPointerDragEnds(fn);
+    a();
+    expect(fn).not.toHaveBeenCalled(); // まだ片方が掴んでいる
+    b();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("次のドラッグへ持ち越さない（一度きり）", () => {
+    const fn = vi.fn();
+    const a = registerExternalDrag();
+    whenPointerDragEnds(fn);
+    a();
+    const b = registerExternalDrag();
+    b();
+    expect(fn).toHaveBeenCalledTimes(1); // 2回目では呼ばれない
+  });
+
+  it("そもそも掴んでいなければ、その場で呼ぶ（待ちっぱなしを作らない）", () => {
+    const fn = vi.fn();
+    whenPointerDragEnds(fn);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("待つのをやめられる", () => {
+    const fn = vi.fn();
+    const release = registerExternalDrag();
+    whenPointerDragEnds(fn)();
+    release();
+    expect(fn).not.toHaveBeenCalled();
   });
 });

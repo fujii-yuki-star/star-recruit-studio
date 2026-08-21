@@ -5361,3 +5361,156 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
   });
 });
+
+// キャンバスで掴む × 履歴（#813・ADR-0020「1操作1履歴」）。
+// ⚠️ **未選択の部品を掴む経路が抜けていた**＝同じ pointerdown が「選ぶ」→「まとめを開く」の順に走り、
+// 選択が変わった後始末が**開いた直後のまとめを畳んで**いた。以後は動かすたびに1件ずつ積まれ、
+// 60回で上限50に達して**そのドラッグより前の編集が取り消せなくなる**（「バラす」のように取り消しで
+// しか戻せない操作が押し出される）。帯のドラッグしか見ていなかったので、ここで固定する。
+describe("TimelineProjectScreen: キャンバスで掴む × 履歴（#813）", () => {
+  const CANVAS_W = 1920;
+  const twoTexts = (): void => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5,
+          x: 100, y: 100, w: 400, h: 90, text: "ひとつめ" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 5,
+          x: 100, y: 300, w: 400, h: 90, text: "ふたつめ" },
+      ],
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+    });
+  };
+  /** キャンバス上のその部品の枠（`FreeLayoutOverlay` が `data-free-id` を付ける）。 */
+  const boxOf = (container: HTMLElement, id: string): HTMLElement => {
+    const el = container.querySelector(`[data-free-id="${id}"]`);
+    if (!el) throw new Error(`キャンバスに ${id} が無い`);
+    // jsdom は実レイアウトを持たず clientWidth=0（→ 縮尺 0）。canvas と等倍にして動かす。
+    const root = el.parentElement as HTMLElement;
+    Object.defineProperty(root, "clientWidth", { value: CANVAS_W, configurable: true });
+    return el as HTMLElement;
+  };
+  /** 掴んで3回動かして離す（1ジェスチャ）。 */
+  const dragBox = (el: HTMLElement): void => {
+    fireEvent.pointerDown(el, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+    for (const d of [10, 20, 30]) fireEvent.pointerMove(el, { buttons: 1, pointerId: 1, clientX: d, clientY: d });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+  };
+
+  it("まだ選んでいない部品を掴んで動かしても、履歴は1つ", () => {
+    twoTexts();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    dragBox(boxOf(container, "clip_001")); // 選ばずにいきなり掴む
+    expect(useTimelineStore.getState().doc?.clips[0].x).toBe(130); // 動いている（前提の確認）
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0); // 開きっぱなしにしない
+  });
+
+  it("選んである部品を掴んだときも1つ（経路で挙動を割らない）", () => {
+    twoTexts();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    dragBox(boxOf(container, "clip_001"));
+    expect(useTimelineStore.getState().doc?.clips[0].x).toBe(130);
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+
+  // ⚠️ **畳んでから開き直す**（素通りではない）＝文字欄はフォーカス中に欄が消えると `blur` が来ず、
+  // まとめが開いたまま残る（#708）。掴んだときに素通りすると、その古いまとめが閉じられないまま残り、
+  // 以後の編集がひとつながりになる（取り消しが効かない範囲が広がる）。
+  it("開きっぱなしの古いまとめが残っていても、掴んだぶんは1つで、古いほうも片づく", () => {
+    twoTexts();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => { useTimelineStore.getState().beginHistoryGroup(); }); // 閉じられなかったまとめ
+    const before = useTimelineStore.getState().history.past.length;
+    dragBox(boxOf(container, "clip_001"));
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0); // 古いまとめごと閉じている
+  });
+
+  // ⚠️ **開き直すのは掴んでいるときだけ**＝掴んでいない選び直しで開くと、そこから先の編集が
+  // ひとつながりになり、閉じる相手（ドラッグの終わり）も来ない。
+  it("掴んでいないときの選び直しでは、まとめを開かない", () => {
+    twoTexts();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => { useTimelineStore.getState().selectClip("clip_002"); });
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+
+  // ⚠️ **開いた側が閉じる**（#813 レビュー 🔴）＝閉じる合図を出すのは要素のドラッグだけで、
+  // 空白クリック・範囲選択・帯のドラッグは「掴んでいる」数だけ上げて終わりに何も出さない。
+  // 閉じ損ねると以後の編集が履歴に積まれず、**自動保存も止まる**（`historyDepth > 0` の間は保留）
+  // ＝そのままアプリを閉じると編集が消える。しかも `endHistoryGroup` は 0 で止めるので無言。
+  it("キャンバスの空白を押して離しても、まとめが残らない（選択解除は閉じる合図を出さない）", () => {
+    twoTexts();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const root = container.querySelector("[data-free-id]")!.parentElement as HTMLElement;
+    fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: 5, clientY: 5 }); // 空白＝選択解除＋範囲選択
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // 前提＝選択が変わっている
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+
+  it("帯を掴んで動かして離しても、まとめが残らない（帯も閉じる合図を出さない）", () => {
+    twoTexts();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const band = container.querySelectorAll(".timeline-clip")[0];
+    fireEvent.pointerDown(band, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 40, clientY: 0 }); // しきい値を越える＝選び直し
+    expect(useTimelineStore.getState().selectedClipIds).toHaveLength(1); // 前提＝選び直しが起きている
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 40, clientY: 0 });
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+
+  // ⚠️ **中止でも閉じる**＝枠外へ出た・別の指が割り込んだ等では `pointerup` が来ず
+  // `pointercancel` になる。片方しか拾わないと、その回だけ静かに開きっぱなしになる。
+  it("掴んだまま中止になっても、まとめが残らない", () => {
+    // ⚠️ 見るのは**掴み手が閉じてくれない経路**（範囲選択）＝要素のドラッグは中止でも自前で閉じるので、
+    // ここが効いているかを判別できない。
+    twoTexts();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const root = container.querySelector("[data-free-id]")!.parentElement as HTMLElement;
+    fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: 5, clientY: 5 });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // 前提＝選択が変わっている
+    fireEvent.pointerCancel(root, { pointerId: 1 });
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+
+  // ⚠️ **`Escape` での中止は合図（イベント）を出さない**（#813 再レビュー 🔴）＝帯もマーキーも
+  // 直接 `onCancel()` を呼ぶので、`pointerup`/`pointercancel` を待ち受ける形だと取り残される。
+  it("範囲選択を Escape でやめても、まとめが残らない", () => {
+    twoTexts();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const root = container.querySelector("[data-free-id]")!.parentElement as HTMLElement;
+    fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: 5, clientY: 5 });
+    expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // 前提＝選択が変わっている
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+
+  it("帯のドラッグを Escape でやめても、まとめが残らない", () => {
+    twoTexts();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const band = container.querySelectorAll(".timeline-clip")[0];
+    fireEvent.pointerDown(band, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 40, clientY: 0 });
+    expect(useTimelineStore.getState().selectedClipIds).toHaveLength(1); // 前提＝選び直しが起きている
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+
+  it("続けてもう1つ掴むと、それは別の1つになる（ひとつながりにしない）", () => {
+    twoTexts();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const before = useTimelineStore.getState().history.past.length;
+    dragBox(boxOf(container, "clip_001"));
+    dragBox(boxOf(container, "clip_002")); // 選択が変わる＝ここでも畳んで開き直す
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 2);
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+  });
+});
