@@ -1285,6 +1285,20 @@ describe('projectStore 履歴グループ（#389・連続編集を1履歴にま�
     expect(useProjectStore.getState()._historyGroupDepth).toBe(0); // グループは閉じている
   });
 
+  // ⚠️ **まとめが開いたまま取り消しても、次の1手は積まれる**（#817 レビュー 🟡＝タイムライン形式と
+  // 同じ扱い・ADR-0026②）。畳まないと戻した後の編集が「まとめの続き」とみなされて**1件も積まれず**、
+  // 自動保存も `historyDepth > 0` の間は走らないので**保存も止まる**。
+  it('まとめが開いたまま取り消しても、その後の編集は積まれる', () => {
+    const st = useProjectStore.getState();
+    st.pushHistory(); // 戻せる1手を作る
+    st.beginHistoryGroup(); // スライダーを掴んだまま…
+    st.undo();              // …`Ctrl+Z` が通る（掴んだ数に入らない）
+    expect(useProjectStore.getState()._historyGroupDepth).toBe(0); // 畳まれている
+    const before = useProjectStore.getState().past.length;
+    st.pushHistory();
+    expect(useProjectStore.getState().past).toHaveLength(before + 1);
+  });
+
   it('begin→（変更なし）→end では履歴を消費しない（未変更 focus/pointerdown で積まない・#389 レビュー）', () => {
     const st = useProjectStore.getState();
     st.beginHistoryGroup();

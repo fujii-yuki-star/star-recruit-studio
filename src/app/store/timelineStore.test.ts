@@ -726,6 +726,23 @@ describe('素材の取り込み（#712）', () => {
     useTimelineStore.getState().endHistoryGroup();
   });
 
+  // ⚠️ **まとめが開いたまま取り消しても、次の編集は積まれる**（#817-1）＝畳まないと、戻した後の編集が
+  // 「まとめの続き」とみなされて**履歴に積まれず**、やり直しの分（`future`）も捨てられない。
+  // 実際に踏むのは矢印での微調整（600ms のまとめが開いている間に `Ctrl+Z` を押すと入る）。
+  it('まとめが開いたまま取り消しても、その後の編集は取り消せる', async () => {
+    await open();
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text });
+    const base = useTimelineStore.getState().doc!.clips.length;
+    useTimelineStore.getState().beginHistoryGroup(); // 矢印のまとめが開いている
+    useTimelineStore.getState().undo();             // 閉じる前に取り消す
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(base - 1);
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0); // 畳まれている
+    useTimelineStore.getState().addVisualClip({ kind: TIMELINE_CLIP_KIND.text }); // 戻した後の編集
+    expect(useTimelineStore.getState().history.future).toHaveLength(0); // やり直しの分は捨てる
+    useTimelineStore.getState().undo();
+    expect(useTimelineStore.getState().doc!.clips).toHaveLength(base - 1); // ちゃんと戻る
+  });
+
   it('待っている間に書き出しが始まったら、取り込めなかったと伝える（黙って捨てない）', async () => {
     await open();
     let release: (v: string) => void = () => {};

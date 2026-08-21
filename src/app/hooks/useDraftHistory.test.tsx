@@ -75,6 +75,50 @@ describe("useDraftHistory（画面ローカル下書きの取り消し/やり直
     expect(result.current.canUndo).toBe(false);
   });
 
+  // ⚠️ **まとめが開いたまま取り消しても、次の編集は積まれる**（#817-1）＝畳まないと、戻した後の編集が
+  // 「まとめの続き」とみなされて**履歴に積まれず**、やり直しの分（`future`）も捨てられない。
+  // 実際に踏むのは矢印での微調整（待ち時間の内に取り消すと入る）。
+  it("まとめが開いたまま取り消しても、その後の編集は取り消せる", () => {
+    const { result } = renderHook(() => useDraftHistory({ n: 0 }));
+    act(() => result.current.beginGroup()); // 矢印のまとめが開いている
+    act(() => result.current.set({ n: 1 }));
+    act(() => result.current.undo()); // 閉じる前に取り消す
+    expect(result.current.value).toEqual({ n: 0 });
+    act(() => result.current.set({ n: 10 })); // 戻した後の編集
+    expect(result.current.canUndo).toBe(true); // 積まれている
+    act(() => result.current.undo());
+    expect(result.current.value).toEqual({ n: 0 }); // ちゃんと戻る
+  });
+
+  it("まとめが開いたまま取り消した後の編集は、やり直しの分を捨てる（黙って消えない）", () => {
+    const { result } = renderHook(() => useDraftHistory({ n: 0 }));
+    act(() => result.current.beginGroup());
+    act(() => result.current.set({ n: 1 }));
+    act(() => result.current.undo());
+    expect(result.current.canRedo).toBe(true); // ここまでは「やり直せる」
+    act(() => result.current.set({ n: 10 }));
+    expect(result.current.canRedo).toBe(false); // 新しい編集で分岐は捨てる
+    expect(result.current.value).toEqual({ n: 10 }); // やり直しで黙って消えない
+  });
+
+  // ⚠️ **畳んだことを持ち主へ伝える**（#817 レビュー 🔴）＝世代が上がらないと、持ち主（矢印のまとめ）は
+  // 「開いている」つもりのままで開き直さず、**1押下＝1履歴**になって上限を数秒で流し切る。
+  it("取り消しでまとめを畳むと、世代が上がる（持ち主が畳まれたと分かる）", () => {
+    const { result } = renderHook(() => useDraftHistory({ n: 0 }));
+    const before = result.current.groupGen;
+    act(() => result.current.beginGroup());
+    act(() => result.current.set({ n: 1 }));
+    act(() => result.current.undo());
+    expect(result.current.groupGen).not.toBe(before);
+  });
+
+  it("戻せないときは世代を上げない（畳んでいないのに畳んだと言わない）", () => {
+    const { result } = renderHook(() => useDraftHistory({ n: 0 }));
+    const before = result.current.groupGen;
+    act(() => result.current.undo()); // 戻す先が無い
+    expect(result.current.groupGen).toBe(before);
+  });
+
   it("グループを閉じた後の編集は別の履歴になる（境界が釣り合う）", () => {
     const { result } = renderHook(() => useDraftHistory({ n: 0 }));
     act(() => result.current.beginGroup());

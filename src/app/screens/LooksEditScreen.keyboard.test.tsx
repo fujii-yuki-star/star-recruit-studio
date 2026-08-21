@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import type { Layer } from "../../domain/template/types";
+import { NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
 
 // #788-3：見た目パターン編集のキャンバスは**掴んで動かせるのにキーでは動かせなかった**
 //（#769 で揃えたのは `Escape`／`Ctrl+Z` の遮断まで＝矢印と `Delete` は結線されていなかった）。
@@ -55,6 +56,47 @@ describe("見た目パターン編集：キーでも動かせる・消せる（#
     fireEvent.keyDown(window, { key: "ArrowDown", shiftKey: true });
     expect(layerOf("layer_a")).toMatchObject({ x: 101, y: 210 });
     expect(layerOf("layer_b")).toMatchObject({ x: 0, y: 0 }); // 選んでいない層は動かない
+  });
+
+  // ⚠️ **畳まれた後も、続けた矢印は1つの取り消しにまとまる**（#817 レビュー・PR #826 レビュー）＝
+  // 取り消しは持ち主（矢印のまとめ）の都合と無関係に畳むので、持ち主が自前の印だけを見ていると
+  // **1押下＝1履歴**になり、上限（50）を数秒で流し切る。この画面の履歴は**唯一の戻り道**なので、
+  // 流し切ると残るのは「破棄して戻る」だけになる。
+  // ⚠️ **実際のキーで再現する**＝フックを直に叩くと持ち主の印が立たず、この穴を再現できない
+  //（タイムライン形式の同じテストと同じ理由・ADR-0026②）。
+  it("取り消しでまとめが畳まれた後も、続けた矢印は1つの取り消しにまとまる", () => {
+    render(<LooksEditScreen onNavigate={vi.fn()} />);
+    select("layer_a");
+    fireEvent.keyDown(window, { key: "ArrowRight" }); // 矢印がまとめを開く
+    expect(layerOf("layer_a")).toMatchObject({ x: 101 });
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true }); // 閉じる前に取り消す（持ち主は知らない）
+    expect(layerOf("layer_a")).toMatchObject({ x: 100 });
+    // 畳まれた後に3回。まとめ直せていれば、1回の取り消しで押す前へ戻る（見ていないと1回で1px ぶん）。
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(layerOf("layer_a")).toMatchObject({ x: 103 });
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(layerOf("layer_a")).toMatchObject({ x: 100 });
+  });
+
+  // ⚠️ **開き直しは1回だけ**＝押すたびに開き直すと深さが増え続け、**手が止まっても閉じきらない**
+  //（後始末は1回ぶんしか閉じない）＝以後の編集が延々と同じ1手に混ざる。開いた時点の世代を控えて、
+  // 「もう開いている」と分かるようにする。
+  it("畳まれた後に開き直したまとめは、手が止まれば閉じる（以後は別の1手）", () => {
+    vi.useFakeTimers();
+    try {
+      render(<LooksEditScreen onNavigate={vi.fn()} />);
+      select("layer_a");
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      fireEvent.keyDown(window, { key: "z", ctrlKey: true }); // 畳まれる
+      for (let i = 0; i < 3; i++) fireEvent.keyDown(window, { key: "ArrowRight" });
+      act(() => { vi.advanceTimersByTime(NUDGE_GROUP_IDLE_MS + 10); }); // 手が止まる＝閉じる
+      fireEvent.keyDown(window, { key: "ArrowRight" }); // 別の1手
+      expect(layerOf("layer_a")).toMatchObject({ x: 104 });
+      fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+      expect(layerOf("layer_a")).toMatchObject({ x: 103 }); // 直前の1手だけ戻る（混ざっていない）
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("Delete で選んだ層を消す（一覧の削除ボタンと同じ入口）", () => {

@@ -180,22 +180,37 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     const blockedBefore = startBlockedMessage();
     if (blockedBefore) { setMessage(blockedBefore); setPhase("error"); return; }
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
-    useExportLockStore.getState().acquire(EXPORT_OWNER);
-    await beginExport();
-    // beginExport の IPC 往復中に取り込み/生成が起動していないか再確認する（#570 P1 レビュー）。相手は最初の await の前に
-    // isImporting/pending を立てるので、beginExport 窓で始まったものもこの時点で真＝確実に捕捉できる。setPhase("rendering")
-    //（busy 化）の前に弾く＝#380 のキャンセルスコープ不変条件を保ったまま、上の一度きりチェックが取りこぼす窓を閉じる。
-    const blockedAfter = startBlockedMessage();
-    if (blockedAfter) { setMessage(blockedAfter); setPhase("error"); return; }
-    setProgress({ done: 0, total: scenes.length });
-    setExportRun({ encode: undefined }); // 前回の encoding 進捗を持ち越さない（#376）
-    setPhase("rendering");
+    // ⚠️ **名乗れたかを見る**（レビュー ℹ️）＝走行中の判定（上の `isOtherExportRunning`）と名乗りの間に
+    // **保存先を選ぶダイアログの待ち**が挟まるので、その間に相手（タイムライン形式）が先に取りうる。
+    // 見ないで進むと、共有の一時置き場を片づける後始末が**相手のフレームを消す**（`11 §7.6.5`）。
+    if (!useExportLockStore.getState().acquire(EXPORT_OWNER)) {
+      setMessage(OTHER_EXPORT_RUNNING_MESSAGE);
+      setPhase("error");
+      return;
+    }
     // end-to-end 計測（#376 レビュー P2）：利用者の待ち時間全体は「レンダリング段（フレーム焼き/準備＝TS）＋
     // encoding 段（結合/字幕/BGM＝Rust）」。Rust の eprintln は後段のみなので、全体は開始〜完了を TS で測る。
     const startedAt = performance.now();
     // encoding 段（結合/字幕/BGM）の実進捗を Rust から受け取りバーを 80→100% で描く（#376）。Tauri 非検出時は no-op。
     let unlistenProgress: (() => void) | undefined;
+    // ⚠️ **名乗ったら、どの出口でも必ず返す**（#817-2）＝`try` は以前**名乗りより後**から始まっており、
+    // その間で抜けると `finally` の返却を通らなかった。すぐ下の「取り込みが始まっていないか」の再確認は
+    // **意図して作られた早期 return**（テストもある）＝必ず通る道で、抜けたあとは `owner="scene"` が残り
+    // **タイムライン形式の書き出しが「ほかの動画を書き出しています」で永久に押せなくなる**
+    //（走っていないので終わりようがない＝§2-5）。**名乗りの直後から囲む**ことで、出口を数え直さなくても
+    // 返る（`beginExport` の失敗も下の `catch` が理由つきで受ける）。
+    // ⚠️ タイムライン側（`timelineStore`）も名乗るのは `try` の**直前**＝間に行を足すと同じ穴が開く。
+    // 「名乗ったら囲む」を両方の入口で守ること（ADR-0026②）。
     try {
+      await beginExport();
+      // beginExport の IPC 往復中に取り込み/生成が起動していないか再確認する（#570 P1 レビュー）。相手は最初の await の前に
+      // isImporting/pending を立てるので、beginExport 窓で始まったものもこの時点で真＝確実に捕捉できる。setPhase("rendering")
+      //（busy 化）の前に弾く＝#380 のキャンセルスコープ不変条件を保ったまま、上の一度きりチェックが取りこぼす窓を閉じる。
+      const blockedAfter = startBlockedMessage();
+      if (blockedAfter) { setMessage(blockedAfter); setPhase("error"); return; }
+      setProgress({ done: 0, total: scenes.length });
+      setExportRun({ encode: undefined }); // 前回の encoding 進捗を持ち越さない（#376）
+      setPhase("rendering");
       unlistenProgress = await listenExportProgress((e) => setExportRun({ encode: e }));
       // 開始時点の完全スナップショット（#381）：映像・テロップ・BGM をすべてこの1つの内容から供給し、書き出し中の編集（#377）で
       // 「映像は旧・テロップ/BGMは新」の不整合MP4になるのを防ぐ。saveProject の前＝従来 closure と同一瞬間に確定し、projectId のみ保存後の採番値を使う。

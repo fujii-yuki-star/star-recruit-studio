@@ -1997,13 +1997,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (isExportBusy(s.exportRun.phase)) return {};
       const r = undoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // 戻せない
-      return { ...r.restored, scenes: clearPendingNarrations(r.restored.scenes), past: r.history.past, future: r.history.future, saveStatus: "idle" };
+      // ⚠️ **開いているまとめは畳む**（#817 レビュー 🟡＝タイムライン形式と同じ扱い・ADR-0026②）＝
+      // 畳まないと、戻した**後**の編集が「まとめの続き」とみなされて**履歴に1件も積まれず**、
+      // さらに自動保存が `historyDepth > 0` の間は走らないので**保存も止まる**。
+      // 到達はスライダーを掴んだまま `Ctrl+Z`（掴んだ数に入らないのでキーが通る）。
+      return { ...r.restored, scenes: clearPendingNarrations(r.restored.scenes), past: r.history.past, future: r.history.future, saveStatus: "idle", _historyGroupDepth: 0, _historyGroupPending: false };
     }),
   redo: () =>
     set((s) => {
       if (isExportBusy(s.exportRun.phase)) return {}; // 同上（書き出し中は redo も文書 slice を変えない・#379/#413）
       const r = redoSnapshot<DocSnapshot>({ past: s.past, future: s.future }, docSnapshot(s));
       if (!r) return {}; // やり直せない
-      return { ...r.restored, scenes: clearPendingNarrations(r.restored.scenes), past: r.history.past, future: r.history.future, saveStatus: "idle" };
+      return { ...r.restored, scenes: clearPendingNarrations(r.restored.scenes), past: r.history.past, future: r.history.future, saveStatus: "idle", _historyGroupDepth: 0, _historyGroupPending: false }; // まとめは畳む（上と同じ理由）
     }),
 }));

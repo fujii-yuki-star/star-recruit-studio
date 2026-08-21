@@ -231,6 +231,15 @@ export interface TimelineState {
   _historyGroupDepth: number;
   /** グループ中でまだ「編集前」を記録していないか（**遅延記録**＝欄に入っただけでは履歴を消費しない）。 */
   _historyGroupPending: boolean;
+  /**
+   * まとめの**世代**（#817 レビュー 🔴）。畳むたびに1つ上がる。
+   *
+   * ⚠️ **開いた側（持ち主）と、畳む側が別人になれる**ために要る＝取り消し・選び直しは持ち主の都合と
+   * 無関係に畳むので、持ち主が自前の「開いている」印だけを見ていると **(a)** 畳まれた後も「開いている」
+   * つもりで開き直さず**1押下＝1履歴**になり上限を流し切る **(b)** 遅れて走る後始末が**別人のまとめ**を
+   * 閉じる。持ち主はこの番号を控えておき、**変わっていたら自分のまとめはもう無い**と判断する。
+   */
+  _historyGroupGen: number;
   /** 連続入力の開始（文字欄の focus・ドラッグの pointerdown）。 */
   beginHistoryGroup: () => void;
   /** 連続入力の終了（blur・pointerup）。**必ず呼ぶ**＝開きっぱなしだと以後の取り消しが積まれない。 */
@@ -584,6 +593,7 @@ function emptyState() {
     generatingVoiceClipId: null as string | null,
     _historyGroupDepth: 0,
     _historyGroupPending: false,
+    _historyGroupGen: 0,
     saveStatus: "saved" as TimelineState["saveStatus"],
     isPlaying: false,
     seekNonce: 0,
@@ -780,7 +790,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
    * `blur` は来ない**（仕様）＝開きっぱなしになり、以後の取り消しが一切積まれなくなる。
    * ドラッグ側が `window` で終了を拾っているのと同じ役割を、こちらは「欄が消えうる場面」で呼んで担う。
    */
-  resetHistoryGroup: () => set({ _historyGroupDepth: 0, _historyGroupPending: false }),
+  resetHistoryGroup: () =>
+    set((s) => ({ _historyGroupDepth: 0, _historyGroupPending: false, _historyGroupGen: s._historyGroupGen + 1 })),
 
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
   trimSelectedClip: (edge, sec) => applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec)),
@@ -1560,6 +1571,17 @@ function restore(set: SetState, get: GetState, doc: TimelineProject, history: Hi
   set({
     doc,
     history,
+    // ⚠️ **開いているまとめを畳む**（#817-1）＝畳まないと、戻した**後**の編集が「まとめの続き」と
+    // みなされて**履歴に積まれず**（最初の1回しか記録しない）、`future` も捨てられない。
+    // 実測＝矢印で動かす→600ms 以内に `Ctrl+Z`→もう一度動かす、で**その移動が取り消せず**、
+    // やり直しを押すと**黙って消える**。取り消しの前後で「まとめの続き」は成り立たない
+    //（戻した文書はまとめを開いた時点のものではない）ので、ここで必ず切る。
+    // **世代も上げる**（レビュー 🔴）＝畳んだことを持ち主（矢印のまとめ等）へ伝える唯一の手段。
+    // 伝えないと、持ち主は「開いている」つもりのままで開き直さず**1押下＝1履歴**になり、
+    // 上限（50）を数秒で流し切って**取り消しでしか戻せない編集を押し出す**。
+    _historyGroupDepth: 0,
+    _historyGroupPending: false,
+    _historyGroupGen: get()._historyGroupGen + 1,
     editBlocked: null,
     saveStatus: "idle",
     isPlaying: false, // 取り消し/やり直しも編集と同じ扱い（動いている的を狙わせない）
