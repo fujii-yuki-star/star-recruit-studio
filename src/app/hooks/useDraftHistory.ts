@@ -19,6 +19,8 @@ interface DraftHistoryState<T> {
   groupDepth: number;
   /** グループ中でまだ「編集前」を記録していないか（遅延記録）。 */
   groupPending: boolean;
+  /** まとめの世代（畳むたびに+1・#817 レビュー）。 */
+  groupGen: number;
 }
 
 export interface DraftHistory<T> {
@@ -40,7 +42,16 @@ export interface DraftHistory<T> {
   endGroup: () => void;
   /** テキスト欄に spread：フォーカス中の連続入力を1履歴に。 */
   textGroup: { onFocus: () => void; onBlur: () => void };
+  /**
+   * まとめの**世代**（#817 レビュー 🔴）。取り消し・やり直しで畳むたびに1つ上がる。
+   * 持ち主（矢印のまとめ）は開いた時点の値を控え、**変わっていたら自分のまとめはもう無い**と判断する
+   *（見ないと、畳まれた後も開いているつもりで開き直さず**1押下＝1履歴**になり上限を流し切る）。
+   */
+  groupGen: number;
 }
+
+/** 取り消し・やり直しの後は、開いていたまとめを閉じた状態にする（#817-1）。 */
+const CLOSED_GROUP = { groupDepth: 0, groupPending: false } as const;
 
 /**
  * 画面ローカル下書きの取り消し/やり直し。
@@ -53,6 +64,7 @@ export function useDraftHistory<T>(initial: T | (() => T)): DraftHistory<T> {
     history: emptyHistory<T>(),
     groupDepth: 0,
     groupPending: false,
+    groupGen: 0,
   }));
 
   const set = useCallback((next: T | ((cur: T) => T)) => {
@@ -69,17 +81,22 @@ export function useDraftHistory<T>(initial: T | (() => T)): DraftHistory<T> {
     });
   }, []);
 
+  // ⚠️ **戻すときは開いているまとめを畳む**（#817-1）＝畳まないと、戻した**後**の編集が
+  // 「まとめの続き」とみなされて**履歴に積まれず**、`future` も捨てられない。実測＝矢印で動かす→
+  // 待ち時間の内に取り消す→もう一度動かす、で**その移動が取り消せず**、やり直しで**黙って消える**。
+  // 取り消しの前後で「まとめの続き」は成り立たない（戻した値はまとめを開いた時点のものではない）。
+  // タイムライン形式の `restore` と同じ扱い（同じ概念を同じ挙動に＝ADR-0026②）。
   const undo = useCallback(() => {
     setState((s) => {
       const r = undoSnapshot(s.history, s.value);
-      return r ? { ...s, value: r.restored, history: r.history } : s; // 戻せなければ何もしない
+      return r ? { ...s, ...CLOSED_GROUP, groupGen: s.groupGen + 1, value: r.restored, history: r.history } : s; // 戻せなければ何もしない
     });
   }, []);
 
   const redo = useCallback(() => {
     setState((s) => {
       const r = redoSnapshot(s.history, s.value);
-      return r ? { ...s, value: r.restored, history: r.history } : s; // やり直せなければ何もしない
+      return r ? { ...s, ...CLOSED_GROUP, groupGen: s.groupGen + 1, value: r.restored, history: r.history } : s; // やり直せなければ何もしない
     });
   }, []);
 
@@ -104,5 +121,6 @@ export function useDraftHistory<T>(initial: T | (() => T)): DraftHistory<T> {
     beginGroup,
     endGroup,
     textGroup,
+    groupGen: state.groupGen,
   };
 }

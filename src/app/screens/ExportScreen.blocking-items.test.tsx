@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
+import { useExportLockStore } from "../store/exportLock";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import * as ffmpeg from "../../infrastructure/ffmpegExport";
 import * as dialog from "../../infrastructure/dialog";
@@ -95,6 +96,43 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     resolveBegin();
     await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
     expect(screen.getByText(/動画を書き出せない項目があります/)).toBeTruthy();
+    // ⚠️ **走行中の締めを返す**（#817-2）＝この早期 return は `try/finally` の**手前**で抜けるので、
+    // 返さないと `owner="scene"` が残り、**タイムライン形式の書き出しが永久に押せなくなる**
+    //（「ほかの動画を書き出しています」＝走っていないので終わりようがない案内・§2-5）。
+    expect(useExportLockStore.getState().owner).toBeNull();
+  });
+
+  // ⚠️ **名乗れなければ始めない**（レビュー ℹ️）＝走行中の判定と名乗りの間に保存先ダイアログの待ちが
+  // 挟まるので、その間に相手（タイムライン形式）が先に取りうる。見ないで進むと、共有の一時置き場を
+  // 片づける後始末が**相手のフレームを消す**。
+  it("名乗れなかったら書き出しを始めない（相手のフレームを消さない）", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    const begin = vi.spyOn(ffmpeg, "beginExport").mockResolvedValue(undefined);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    // 保存先を選んでいる間に、相手が先に名乗る。
+    vi.spyOn(dialog, "showSaveVideoDialog").mockImplementation(async () => {
+      useExportLockStore.getState().acquire("timeline");
+      return "/out/movie.mp4";
+    });
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useProjectStore.getState().exportRun.phase).toBe("error"));
+    expect(begin).not.toHaveBeenCalled(); // 始めていない
+    expect(useExportLockStore.getState().owner).toBe("timeline"); // 相手の締めを奪っていない
+    useExportLockStore.getState().release("timeline");
+  });
+
+  // ⚠️ **失敗で抜けるときも返す**＝`beginExport` は IPC なので失敗しうる。返さないと
+  // 走っていないのに「ほかの動画を書き出しています」で押せなくなる（終わりようがない案内）。
+  it("beginExport が失敗しても、走行中の締めは返す", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    vi.spyOn(ffmpeg, "beginExport").mockRejectedValue(new Error("ipc failed"));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBeNull());
+    // 黙って終わらない＝理由も出す（失敗が投げっぱなしだと画面は押した直後のまま）。
+    expect(useProjectStore.getState().exportRun.phase).toBe("error");
   });
 });
 

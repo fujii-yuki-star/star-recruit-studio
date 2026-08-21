@@ -663,6 +663,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const nudgeGroupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nudgeGroupOpenRef = useRef(false);
+  /** 開いた時点の世代（畳まれたかを見分ける・#817 レビュー）。 */
+  const nudgeGroupGenRef = useRef(0);
   const removeRef = useRef<() => void>(() => {});
 
   // `Escape`＝選択を解く／`Ctrl+A`＝全部選ぶ／`Space`・`Delete`・`←→`（#721・決定18）。
@@ -1170,17 +1172,27 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 掴む方だけ通っていた＝同じ理由なら同じ挙動（ADR-0026②）。
    */
   const grabbableClip = (c: TimelineClip): boolean => !exporting && !isPlaying && !trackOf(c.trackId)?.locked;
-  /** 矢印のまとめを開く（開いていれば延長するだけ）。手が止まったら閉じる。 */
+  /**
+   * 矢印のまとめを開く（開いていれば延長するだけ）。手が止まったら閉じる。
+   *
+   * ⚠️ **自分のまとめがまだ生きているかは「世代」で見る**（#817 レビュー 🔴）＝取り消しや選び直しは
+   * 持ち主の都合と無関係に畳むので、自前の印だけを見ていると **(a)** 畳まれた後も開いているつもりで
+   * 開き直さず**1押下＝1履歴**になり上限を数秒で流し切る（取り消しでしか戻せない編集が押し出される）
+   * **(b)** 遅れて走るこのタイマが**別人のまとめ**（掴んでいる最中のもの等）を閉じてしまう。
+   */
   const openNudgeGroup = useCallback((): void => {
-    if (!nudgeGroupOpenRef.current) {
+    const genNow = (): number => useTimelineStore.getState()._historyGroupGen;
+    if (!nudgeGroupOpenRef.current || nudgeGroupGenRef.current !== genNow()) {
       nudgeGroupOpenRef.current = true;
       beginHistoryGroup();
+      nudgeGroupGenRef.current = genNow(); // 開いた時点の世代を控える
     }
     if (nudgeGroupTimerRef.current) clearTimeout(nudgeGroupTimerRef.current);
+    const gen = nudgeGroupGenRef.current;
     nudgeGroupTimerRef.current = setTimeout(() => {
       nudgeGroupTimerRef.current = null;
       nudgeGroupOpenRef.current = false;
-      endHistoryGroup();
+      if (gen === genNow()) endHistoryGroup(); // 自分のまとめが残っているときだけ閉じる
     }, NUDGE_GROUP_IDLE_MS);
   }, [beginHistoryGroup, endHistoryGroup]);
   // 画面を離れるときは**必ず閉じる**（開けっぱなしだと以後の編集が全部ひとつながりになる）。
@@ -1191,7 +1203,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       nudgeGroupTimerRef.current = null;
       if (!nudgeGroupOpenRef.current) return;
       nudgeGroupOpenRef.current = false;
-      endHistoryGroup();
+      // 画面を離れるときも**自分のまとめだけ**閉じる（畳まれた後なら閉じる相手がいない）。
+      if (nudgeGroupGenRef.current === useTimelineStore.getState()._historyGroupGen) endHistoryGroup();
     };
   });
   useEffect(() => () => closeNudgeGroupRef.current(), []);

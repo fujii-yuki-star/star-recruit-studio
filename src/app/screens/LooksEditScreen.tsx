@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useMemo, useRef, useState, type ChangeEvent, useEffect } from "react";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
@@ -86,6 +86,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // 矢印の連打を1回の取り消しへ畳むための控え（実体は下の `openNudgeGroup`）。
   // ⚠️ **フックは早期 return より前**＝下のブロックへ置くと呼ぶ順が変わる（`react-hooks/rules-of-hooks`）。
   const nudgeGroupOpenRef = useRef(false);
+  /** 開いた時点の世代（畳まれたかを見分ける・#817 レビュー）。 */
+  const nudgeGroupGenRef = useRef(0);
   const nudgeGroupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 下書きは画面ローカル（store 履歴の対象外＝#547 P1-1）。そのため取り消し/やり直しも専用の局所履歴で用意する
@@ -100,7 +102,11 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     beginGroup,
     endGroup,
     textGroup,
+    groupGen,
   } = useDraftHistory<Template | null>(() => (editing ? cloneTemplate(editing) : null));
+  // 遅れて走るタイマから**いまの世代**を読む（クロージャに閉じ込めると古い値を見る）。
+  const groupGenRef = useRef(groupGen);
+  useEffect(() => { groupGenRef.current = groupGen; }, [groupGen]);
   /**
    * ⚠️ **下書きが変わったら、出しっぱなしの確認はやり直す**（レビュー 🟡）。
    * 出したまま中身が変わると、①消す相手がいなくなった確認が残る ②**取り消しで層が戻ると
@@ -300,13 +306,22 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
    * ⚠️ **答えを求める確認が出ている間も奪わない**＝消すかどうかを聞いている最中にキーで別のものが動く、を作らない。
    * 場面編集の `canvasKbdActive` と同じ規準（ADR-0026②）。
    */
+  // ⚠️ **自分のまとめがまだ生きているかは「世代」で見る**（#817 レビュー 🔴）＝取り消しは持ち主の
+  // 都合と無関係に畳むので、自前の印だけを見ていると**畳まれた後も開いているつもり**で開き直さず、
+  // **1押下＝1履歴**になって上限を流し切る（この画面の履歴は**唯一の戻り道**＝押し出されると戻せない）。
+  // 遅れて走るタイマが別人のまとめを閉じるのも同じ理由で防ぐ。タイムライン形式と同じ形（ADR-0026②）。
   const openNudgeGroup = (): void => {
-    if (!nudgeGroupOpenRef.current) { nudgeGroupOpenRef.current = true; beginGroup(); }
+    if (!nudgeGroupOpenRef.current || nudgeGroupGenRef.current !== groupGen) {
+      nudgeGroupOpenRef.current = true;
+      beginGroup();
+      nudgeGroupGenRef.current = groupGen;
+    }
     if (nudgeGroupTimerRef.current) clearTimeout(nudgeGroupTimerRef.current);
+    const gen = nudgeGroupGenRef.current;
     nudgeGroupTimerRef.current = setTimeout(() => {
       nudgeGroupTimerRef.current = null;
       nudgeGroupOpenRef.current = false;
-      endGroup();
+      if (gen === groupGenRef.current) endGroup(); // 自分のまとめが残っているときだけ閉じる
     }, NUDGE_GROUP_IDLE_MS);
   };
   /** そのまとまりが固定されているか（入れ子の親も見る＝親を固定したら中身も動かさない）。 */

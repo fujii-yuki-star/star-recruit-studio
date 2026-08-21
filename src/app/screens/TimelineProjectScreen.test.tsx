@@ -2,6 +2,7 @@
 // タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。開けないときの案内と、並び・選択の見せ方を固定する。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import { NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pointerDownAt } from "../../test/pointer";
@@ -5561,6 +5562,44 @@ describe("TimelineProjectScreen: キャンバスで掴む × 履歴（#813）", 
 
   // ⚠️ **開き直すのは掴んでいるときだけ**＝掴んでいない選び直しで開くと、そこから先の編集が
   // ひとつながりになり、閉じる相手（ドラッグの終わり）も来ない。
+  // ⚠️ **畳まれた後は、矢印がまとめ直す**（#817 レビュー 🔴）＝持ち主が自前の印だけを見ていると、
+  // 畳まれた後も「開いている」つもりで開き直さず**1押下＝1履歴**になり、上限（50）を数秒で
+  // 流し切って**取り消しでしか戻せない編集（バラすなど）を押し出す**。
+  it("取り消しでまとめが畳まれた後も、続けた矢印は1つの取り消しにまとまる", () => {
+    twoTexts();
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // ⚠️ **まとめは実際の矢印で開く**＝store を直に叩くと持ち主の印が立たず、この穴を再現できない。
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(1); // 持ち主がまとめを開いた
+    act(() => { useTimelineStore.getState().undo(); }); // 取り消しで畳まれる（持ち主は知らない）
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(0);
+    // 畳まれた後に矢印を3回。まとめ直せていれば履歴は1つ（見ていないと3つ積まれる）。
+    const before = useTimelineStore.getState().history.past.length;
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(useTimelineStore.getState().history.past.length).toBe(before + 1);
+    expect(useTimelineStore.getState()._historyGroupDepth).toBe(1); // まとめが開き直っている
+  });
+
+  // ⚠️ **取り残されたタイマが、別人のまとめを閉じない**（#817 レビュー 🔴 の後半）＝畳まれた後も
+  // 矢印の後始末（600ms）は走るので、世代を見ないと**掴んでいる最中のまとめ**を閉じてしまい、
+  // 以後の動かすたびに履歴が1件ずつ積まれる（#813 で塞いだ穴が別経路から開く）。
+  it("畳まれた後に走る矢印の後始末は、別のまとめを閉じない", () => {
+    vi.useFakeTimers();
+    try {
+      twoTexts();
+      useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+      render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      fireEvent.keyDown(window, { key: "ArrowRight" });      // 矢印がまとめを開く（後始末が予約される）
+      act(() => { useTimelineStore.getState().undo(); });    // 取り消しで畳まれる（持ち主は知らない）
+      act(() => { useTimelineStore.getState().beginHistoryGroup(); }); // 別人（掴んでいる最中）が開く
+      act(() => { vi.advanceTimersByTime(NUDGE_GROUP_IDLE_MS + 10); }); // 取り残された後始末が走る
+      expect(useTimelineStore.getState()._historyGroupDepth).toBe(1); // 別人のまとめは開いたまま
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("掴んでいないときの選び直しでは、まとめを開かない", () => {
     twoTexts();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
