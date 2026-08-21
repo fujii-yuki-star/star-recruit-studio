@@ -1249,7 +1249,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting); return; }
       if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing); return; } // 位置を使う操作＝再生中は断る（決定21）
       if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.notFound); return; }
-      const issue = splitClipIssue(doc, selected.id, playheadSec);
+      // ⚠️ **見た目パターンも渡す**（PR #825 レビュー 🟡）＝渡さないと差し込み口の置き場所が
+      // 1件も解けず、「素材を使い切った先」の判定が**差し込み口では必ず偽**になる。
+      // ⚠️ ただし**このキーの道だけは、渡さなくても結果が変わらない**（この先の `splitSelectedClip` が
+      // 同じ判定を通し、同じ理由を出す）＝テストでは区別できない。ボタン・右クリックの `disabled` は
+      // ここを通らないので**そちらは実際に押せてしまう**（そこは固定してある）。3つの入口が同じ材料を
+      // 見ている、を保つために合わせる。
+      const issue = splitClipIssue(doc, selected.id, playheadSec, { templateOf });
       if (issue) { setEditBlocked(SPLIT_BLOCKED_REASON[issue]); return; }
       splitSelectedClip(playheadSec);
     };
@@ -1985,7 +1991,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // ⚠️ **再生中もここで断る**（#750 レビュー）＝ボタン・`Ctrl+K` は断るのに右クリックだけ通ると、
     // **走っている再生位置で分割が確定**する（同じ操作の結果が毎回変わる・ADR-0032 決定21）。
     if (isPlaying) return { disabled: true, hint: editBlockedMessage[EDIT_BLOCKED.playing] };
-    const issue = splitClipIssue(doc, selected.id, playheadSec);
+    // ⚠️ **見た目パターンも渡す**（PR #825 レビュー 🟡）＝実際に分ける側（store）と同じ材料で見る。
+    // 渡さないと差し込み口の置き場所が解けず、押せるのに押した先で断られる（この節の趣旨と逆）。
+    const issue = splitClipIssue(doc, selected.id, playheadSec, { templateOf });
     return issue ? { disabled: true, hint: editBlockedMessage[SPLIT_BLOCKED_REASON[issue]] } : {};
   };
   /** ボタンの見た目（説明はここで作る＝押せるときはキーの割り当てを添える・#752-10）。 */
