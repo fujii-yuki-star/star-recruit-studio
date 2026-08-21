@@ -1365,6 +1365,58 @@ describe("TimelineProjectScreen: 音量の変化を部品の終わりに置く�
   });
 });
 
+// ⚠️ **音量の変化（上）と対の作り**（#814・ADR-0026②＝同じ概念は同じ挙動）。動きの側だけ境界ちょうどを
+// 突いておらず、閉区間（`keyframeTimeAt` の `>`）を `>=` に変えても全テストが緑だった。変異が通ると
+// 終端で「この位置に置く」が消えて「部品の外にあります」が出る＝**「ここまでに動き終わる」動きが作れない**。
+// 再生位置は 0.1 刻みなので端にちょうど乗せられる（到達可能）。
+describe("TimelineProjectScreen: 動きを部品の終わりに置く（#814）", () => {
+  // ⚠️ 文言は要素で分かれている（秒の表示が挟まる）＝`getByText` では拾えない。
+  // **拾えないまま `queryByText(...).toBeNull()` を書くと、常に通る空振りの守り**になる。
+  const outsideNoticeShown = (): boolean =>
+    screen.queryAllByRole("alert").some((el) => el.textContent?.includes("再生位置がこの部品の外にあります") ?? false);
+  const openTextClip = (): void => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 2, durationSec: 4,
+          x: 0, y: 0, w: 400, h: 90, text: "あ" },
+        // ⚠️ **尺を伸ばす相方**＝再生位置は動画の尺で頭打ちになるので、これが無いと「部品の外」へ行けず
+        // 「外に出たら置けない」を確かめられない（置ける側だけ見て通ったつもりになる）。
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 8, durationSec: 2,
+          x: 0, y: 0, w: 400, h: 90, text: "い" },
+      ],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+  };
+
+  it("終わりちょうど（部品の最後）にも置ける＝「ここまでに動き終わる」到達点を置ける", () => {
+    openTextClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "6" } }); // 2.0〜6.0 の右端
+    expect(outsideNoticeShown()).toBe(false);
+    fireEvent.change(screen.getByLabelText("横のずれ（px）"), { target: { value: "100" } });
+    fireEvent.click(screen.getByText("この位置に置く"));
+    expect(useTimelineStore.getState().doc?.animations?.[0].keyframes).toEqual([{ timeSec: 4, x: 100 }]);
+  });
+
+  it("始まりちょうども置ける", () => {
+    openTextClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("横のずれ（px）"), { target: { value: "50" } });
+    fireEvent.click(screen.getByText("この位置に置く"));
+    expect(useTimelineStore.getState().doc?.animations?.[0].keyframes).toEqual([{ timeSec: 0, x: 50 }]);
+  });
+
+  it("部品の外では置く欄を出さず、行ける時間を示す", () => {
+    openTextClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "6.1" } });
+    expect(outsideNoticeShown()).toBe(true);
+    expect(screen.queryByLabelText("横のずれ（px）")).toBeNull();
+  });
+});
+
 describe("TimelineProjectScreen: 並びの操作を右クリックへ畳む（ADR-0033）", () => {
   it("行に操作の文字を常時出さない（帯が読めなくならない）", () => {
     open();
