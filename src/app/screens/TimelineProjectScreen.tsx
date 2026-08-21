@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
-import { isKeyboardActivation, isPointerDragging, usePointerDrag } from "../hooks/usePointerDrag";
+import { isKeyboardActivation, isPointerDragging, usePointerDrag, whenPointerDragEnds } from "../hooks/usePointerDrag";
 import { canvasPointAt, clampToVisible, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
 import { EXPORT_BLOCK_SOURCE, EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
@@ -554,6 +554,27 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     for (const r of reasons) counts.set(r, (counts.get(r) ?? 0) + 1);
     setLockedSkipNotice(order.filter((r) => counts.has(r)).map((r) => canvasHoldMessage(r, counts.get(r))).join(" "));
   }, []);
+  /**
+   * 掴んでいる最中に開いた「まとめ」を、**離した合図で必ず閉じる**（#813 レビュー 🔴）。
+   *
+   * ⚠️ **閉じるのを掴み手に頼れない**＝閉じる合図（`onInteractionEnd`）を出すのは
+   * `FreeLayoutOverlay` の**要素ドラッグだけ**。空白クリックでの選択解除・範囲選択（マーキー）は
+   * `claimDrag` で「掴んでいる」数だけ上げて終わりに何も出さず（`FreeLayoutOverlay` の `endDrag` は
+   * マーキーなら `releaseDrag` して戻る）、帯のドラッグも `usePointerDrag` が**しきい値を越えた時点で
+   * 数を上げてから** `onStart`（＝選び直し）を呼ぶので、どちらもここを通る。
+   * 閉じ損ねると **(a) 以後の編集が履歴に積まれない**（まとめ中は最初の1回しか記録しない）
+   * **(b) 自動保存が止まる**（`historyDepth > 0` の間は保留）＝そのままアプリを閉じると編集が消える。
+   * `endHistoryGroup` は 0 で止めるので**ずれても無言**＝気づけない。
+   *
+   * ⚠️ **終わりの合図を自分で数えない**（#813 再レビュー 🔴）＝`Escape` での中止は
+   * `pointercancel` を出さずに直接止める（帯もマーキーも `onCancel()` を直接呼ぶ）ので、
+   * `pointerup`/`pointercancel` を待ち受ける形では**その回だけ静かに取り残される**。
+   * **「掴んでいるものが無くなったか」の1か所**（`whenPointerDragEnds`）で閉じる。
+   */
+  const openDragHistoryGroup = useCallback((): void => {
+    useTimelineStore.getState().beginHistoryGroup();
+    whenPointerDragEnds(() => { useTimelineStore.getState().endHistoryGroup(); });
+  }, []);
   const lastSelectedKey = useRef(selectedKey);
   useEffect(() => {
     if (lastSelectedKey.current === selectedKey) return;
@@ -564,8 +585,19 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setLockedSkipNotice(null);
     // 文字欄はフォーカス中に消えると `blur` が来ない＝まとめが開きっぱなしになる（#708 レビュー）。
     // 欄が入れ替わるここで必ず畳む（ドラッグが `window` で終了を拾うのと同じ役割）。
+    // ⚠️ **掴んでいる最中なら開き直す**（#813）＝キャンバスで**まだ選んでいない**部品を掴むと、
+    // 同じ pointerdown が「選ぶ」→「まとめを開く」の順に走り、選択が変わったこの後始末が
+    // **開いた直後のまとめを畳んでしまう**。以後は動かすたびに1件ずつ積まれ（既定では吸着が無く
+    // 毎回別の値になるので間引きも効かない）、60回動かすと上限50に達して**そのドラッグより前の
+    // 編集が取り消せなくなる**（実測）。「バラす」のように取り消しでしか戻せない操作が押し出される。
+    // 畳んでから開き直すのは、**開きっぱなしの古いまとめ（消えた文字欄）も一緒に片づける**ため
+    //（畳まずに素通りすると、そちらが残って以後の編集がひとつながりになる）。
+    const dragging = isPointerDragging();
     useTimelineStore.getState().resetHistoryGroup();
-  }, [selectedKey]);
+    // ⚠️ 掴んでいないときに開いても**結果は同じ**（`whenPointerDragEnds` がその場で閉じる）＝
+    // この見張りはテストで固定できない。無駄に開け閉てしないためのもので、正しさは閉じ方が担う。
+    if (dragging) openDragHistoryGroup();
+  }, [selectedKey, openDragHistoryGroup]);
   // 右クリック（または「⋮」）で開く列の操作メニュー（ADR-0033）。
   const [trackMenu, setTrackMenu] = useState<{ trackId: string; x: number; y: number } | null>(null);
   // 帯の右クリックメニュー（#701）。列の行と**同じ作法**（右クリック＋「⋮」の逃げ道）。

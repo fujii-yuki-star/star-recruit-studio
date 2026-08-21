@@ -30,6 +30,36 @@ export function isPointerDragging(): boolean {
   return dragging > 0;
 }
 
+/** 掴んでいるものが無くなるのを待っている人たち（下の `whenPointerDragEnds`）。 */
+const dragEndWaiters = new Set<() => void>();
+
+/** 掴んだぶんを1つ返す。**0 になった瞬間に**待っている人へ知らせる（数の増減はここだけ）。 */
+function releaseOneDrag(): void {
+  dragging = Math.max(0, dragging - 1);
+  if (dragging > 0) return;
+  const waiters = [...dragEndWaiters];
+  dragEndWaiters.clear(); // 一度きり（同じ待ち手を次のドラッグへ持ち越さない）
+  for (const w of waiters) w();
+}
+
+/**
+ * **掴んでいるものが無くなったら1度だけ呼ぶ**（#813 レビュー 🔴）。返す関数で待つのをやめられる。
+ *
+ * ⚠️ `pointerup`/`pointercancel` を自前で待ち受けるのでは足りない＝**`Escape` での中止は
+ * 合図（イベント）を出さずに直接止める**（下の `onKey` も `FreeLayoutOverlay` も `onCancel()` を
+ * 直接呼ぶ）ので、イベントを数えていると**その回だけ静かに取り残される**。終わりの合図を
+ * 経路ごとに並べるのではなく、**「掴んでいる数が 0 になったか」の1か所**で見る。
+ * すでに掴んでいなければその場で呼ぶ（待ちっぱなしを作らない）。
+ */
+export function whenPointerDragEnds(fn: () => void): () => void {
+  if (dragging === 0) {
+    fn();
+    return () => { /* すでに呼んだ＝外すものは無い */ };
+  }
+  dragEndWaiters.add(fn);
+  return () => { dragEndWaiters.delete(fn); };
+}
+
 /**
  * **この作法の外で組んだドラッグ**を数えに入れる（#685 レビュー）。返す関数で必ず外すこと。
  *
@@ -43,7 +73,7 @@ export function registerExternalDrag(): () => void {
   return () => {
     if (released) return; // 二重に外しても数がずれない
     released = true;
-    dragging -= 1;
+    releaseOneDrag();
   };
 }
 
@@ -103,7 +133,7 @@ export function usePointerDrag() {
 
     const mine = (ev: PointerEvent): boolean => ev.pointerId === pointerId;
     const detach = (): void => {
-      if (started) dragging -= 1; // 掴んだぶんだけ戻す（しきい値未満で終わったときは増やしていない）
+      if (started) releaseOneDrag(); // 掴んだぶんだけ戻す（しきい値未満で終わったときは増やしていない）
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
