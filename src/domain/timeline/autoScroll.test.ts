@@ -1,6 +1,6 @@
 // 端送りの速さ（#714-1）。掴む操作が「見えている時間帯にしか置けない」を脱するための規則。
 import { describe, expect, it } from 'vitest';
-import { EDGE_MAX_PX_PER_SEC, EDGE_ZONE_PX, edgeScrollPxPerSec, nextScrollPos } from './autoScroll';
+import { EDGE_MAX_PX_PER_SEC, EDGE_ZONE_PX, edgeScrollPxPerSec, nextScrollPos, playbackScrollLeft } from './autoScroll';
 
 const at = (pointerPx: number, viewPx = 800) => edgeScrollPxPerSec({ pointerPx, viewPx });
 
@@ -63,5 +63,33 @@ describe('nextScrollPos（行き止まりで止まる）', () => {
 
   it('途中はそのまま足す', () => {
     expect(nextScrollPos(100, 30, 500)).toBe(130);
+  });
+});
+
+// 再生に合わせて見える範囲を送る（#819-1・ページ送り）。**常に追わない**＝ヘッドが見えている間は
+// 動かさず、枠の外へ出たときだけ送る（毎フレーム中央へ寄せると画面が流れ続けて位置関係が読めない）。
+describe('playbackScrollLeft（再生の追従）', () => {
+  const base = { scrollLeft: 0, viewPx: 600, contentPx: 3000, headPx: 100, insetStartPx: 100 };
+
+  it('見えている間は送らない', () => {
+    expect(playbackScrollLeft(base)).toBeNull();
+    expect(playbackScrollLeft({ ...base, headPx: 500 })).toBeNull(); // 右端ちょうど（600-100）
+  });
+
+  it('右へ出たら、ヘッドが左端に来るよう送る（続きがいちばん長く見える）', () => {
+    expect(playbackScrollLeft({ ...base, headPx: 501 })).toBe(501);
+  });
+
+  it('左へ出ても送る（前へ戻したのに画面だけ先のまま、を作らない）', () => {
+    expect(playbackScrollLeft({ ...base, scrollLeft: 1000, headPx: 200 })).toBe(200);
+  });
+
+  it('行き止まりでは動かない（同じ値は返さず null）', () => {
+    // 中身 3000・見える幅 500 → 最大 2500。それ以上は送れない。
+    expect(playbackScrollLeft({ ...base, scrollLeft: 2500, headPx: 2900 })).toBeNull();
+  });
+
+  it('中身が見える幅より短ければ送らない', () => {
+    expect(playbackScrollLeft({ ...base, contentPx: 300, headPx: 900 })).toBeNull();
   });
 });

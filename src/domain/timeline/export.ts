@@ -287,7 +287,7 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
       .filter(
         (clip) =>
           isDrawnClip(doc, clip) &&
-          clipImageAssetUses(clip).some((u) => u.kind === 'character' && videoIds.has(u.assetId)),
+          clipImageAssetUses(clip).some((u) => u.kind === ASSET_USE_KIND.character && videoIds.has(u.assetId)),
       )
       .map((clip) => clip.id);
     if (clipIds.length > 0) blockers.push({ code: TIMELINE_EXPORT_BLOCK.videoAsset, clipIds });
@@ -359,7 +359,14 @@ function assetUseKey(kind: AssetUseKind, layerId: string | null): string {
 }
 
 /** 素材の使い方（`direct`＝直接置き／`slot`＝差し込み口／`character`＝立ち絵）。 */
-export type AssetUseKind = 'direct' | 'slot' | 'character';
+/**
+ * 素材の**使い方**（#819-3）。値は1か所（§2-7）＝画面・domain が同じものを見る。
+ * ⚠️ 直書きにしていたので、画面（`p.use === "slot"`）と domain で綴りが**別々に生きて**いた
+ *（片方を変えても型が守らない）。
+ */
+export const ASSET_USE_KIND = { direct: 'direct', slot: 'slot', character: 'character' } as const;
+
+export type AssetUseKind = (typeof ASSET_USE_KIND)[keyof typeof ASSET_USE_KIND];
 
 /**
  * 同じものを**置き場所つき**で返す（#512 段3）。
@@ -370,10 +377,10 @@ export function clipImageAssetUses(
   clip: TimelineClip,
 ): { kind: AssetUseKind; layerId: string | null; assetId: string }[] {
   const out: { kind: AssetUseKind; layerId: string | null; assetId: string }[] = [];
-  if (clip.assetId) out.push({ kind: 'direct', layerId: null, assetId: clip.assetId });
-  if (clip.character?.poseAssetId) out.push({ kind: 'character', layerId: null, assetId: clip.character.poseAssetId });
+  if (clip.assetId) out.push({ kind: ASSET_USE_KIND.direct, layerId: null, assetId: clip.assetId });
+  if (clip.character?.poseAssetId) out.push({ kind: ASSET_USE_KIND.character, layerId: null, assetId: clip.character.poseAssetId });
   for (const [layerId, id] of Object.entries(clip.assetRefs ?? {})) {
-    if (typeof id === 'string') out.push({ kind: 'slot', layerId, assetId: id });
+    if (typeof id === 'string') out.push({ kind: ASSET_USE_KIND.slot, layerId, assetId: id });
   }
   return out;
 }

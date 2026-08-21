@@ -28,6 +28,7 @@ import type { ClipAnimation, TimelineClip, TimelineProject } from './types';
 import type { SlotClipOverride } from '../project/types';
 import type { Template } from '../template/types';
 import { videoPlacementsOfClip } from './video';
+import { ASSET_USE_KIND } from './export';
 import { resolveSlotClip } from '../asset/clip';
 import { clampProp } from './keyframeEdit';
 import { EDIT_BLOCKED } from './edit';
@@ -364,7 +365,7 @@ function advancedSlotStarts(
   templateOf: ((templateId: string) => Template | undefined) | undefined,
 ): { slotClips?: Record<string, SlotClipOverride> } {
   if (clip.kind !== TIMELINE_CLIP_KIND.template) return {};
-  const slots = videoPlacementsOfClip(doc, clip, { templateOf }).filter((p) => p.use === 'slot');
+  const slots = videoPlacementsOfClip(doc, clip, { templateOf }).filter((p) => p.use === ASSET_USE_KIND.slot);
   if (slots.length === 0) return {};
   const next: Record<string, SlotClipOverride> = { ...(clip.slotClips ?? {}) };
   for (const p of slots) {
