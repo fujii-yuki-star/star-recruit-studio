@@ -11,11 +11,12 @@
 import { isVisualClip } from './clipKind';
 import { isHiddenByGroup } from '../group/compose';
 import { ORIGINAL_AUDIO_VOLUME } from '../constants';
-import { ASSET_TYPE, LAYER_TYPE, SLOT_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { ASSET_TYPE, ASSET_USE_KIND, LAYER_TYPE, SLOT_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import type { AssetUseKind } from '../enums';
 import { SPEED_DEFAULT } from '../constants';
 import { clampSpeed } from '../asset/clip';
 import type { Template } from '../template/types';
-import type { AssetUseKind } from './export';
+
 import { clampVolume } from '../voice/audioMix';
 import { resolveSlotClip } from '../asset/clip';
 import type { TimelineClip, TimelineProject } from './types';
@@ -68,7 +69,7 @@ export function videoPlacementsOfClip(
   const direct = videoAssetIdOfClip(clip, ids);
   if (direct != null) {
     return [{
-      clip, use: 'direct', layerId: null, assetId: direct,
+      clip, use: ASSET_USE_KIND.direct, layerId: null, assetId: direct,
       sourceStartSec: clip.sourceStartSec ?? 0, durationSec: clip.durationSec, speed: effectiveSpeed(clip),
       useOriginalAudio: clip.useOriginalAudio === true,
       originalAudioVolume: clampVolume(clip.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME),
@@ -91,7 +92,7 @@ export function videoPlacementsOfClip(
     const resolved = resolveSlotClip(clip.slotClips?.[layer.id], asset?.clip);
     out.push({
       clip,
-      use: 'slot',
+      use: ASSET_USE_KIND.slot,
       layerId: layer.id,
       assetId,
       sourceStartSec: resolved.startSec ?? 0,

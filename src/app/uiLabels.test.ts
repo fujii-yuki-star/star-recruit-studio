@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
-import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage } from "./uiLabels";
+import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage } from "./uiLabels";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -282,6 +282,14 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
     editBlockedMessage,
     exportBlockedMessage,
     bakeNoteMessage,
+    // ⚠️ **共有関数が返す文も走査に入れる**（#819-2）＝この検査は Record しか見ないので、
+    // 関数で作る文は**そのままだと検査の外**に落ちる（画面直書きが見つからなかったのと同じ穴）。
+    sharedFunctions: {
+      lockedTrackContent: lockedTrackMessage("content"),
+      lockedTrackDelete: lockedTrackMessage("delete"),
+      lockedTrackDuplicate: lockedTrackMessage("duplicate"),
+      hiddenTrackDuplicate: hiddenTrackDuplicateMessage(),
+    },
   };
 
   for (const [name, map] of Object.entries(MAPS)) {
@@ -295,4 +303,29 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
       expect(bad).toEqual([]);
     });
   }
+});
+
+// 固定した列の断り（#819-2）。**画面で手書きしない**ために共有関数へ寄せたので、
+// 「何をしようとしたか」で締めが変わることと、禁止語が混ざらないことをここで見る
+//（画面側のテストは「共有関数を通っているか」を見るので、文そのものはここでしか守れない）。
+describe("lockedTrackMessage（固定した列でできないこと）", () => {
+  it("やろうとしたことで締めが変わる（全部同じ文にしない）", () => {
+    const texts = (["content", "delete", "duplicate"] as const).map((a) => lockedTrackMessage(a));
+    expect(new Set(texts).size).toBe(3);
+    expect(lockedTrackMessage("content")).toContain("中身を変える");
+    expect(lockedTrackMessage("delete")).toContain("削除する");
+  });
+
+  it("どれも次の行動（固定を外す）で終わる＝行き止まりにしない", () => {
+    for (const a of ["content", "delete", "duplicate"] as const) {
+      expect(lockedTrackMessage(a)).toContain("固定を外してください");
+    }
+  });
+
+  // ⚠️ **共有の `TIMELINE_EDIT_HIDDEN_TRACK` を使えない理由がここにある**＝あちらの次の行動
+  //（ほかの列へ置く）は、複製では効かない（複製は必ず元の列に作る）。**その列を出す**まで言う。
+  it("動画に出さない列の複製は、その列を出す道を示す（ほかの列へ、では効かない）", () => {
+    expect(hiddenTrackDuplicateMessage()).toContain("動画に出す");
+  });
+
 });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "rea
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
 import { isKeyboardActivation, isPointerDragging, usePointerDrag, whenPointerDragEnds } from "../hooks/usePointerDrag";
+import { playbackScrollLeft } from "../../domain/timeline/autoScroll";
 import { canvasPointAt, clampToVisible, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
 import { EXPORT_BLOCK_SOURCE, EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
@@ -15,10 +16,10 @@ import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepS
 import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
-import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
 import { insertIndexForGap } from "../../domain/reorder";
 import { EDIT_BLOCKED, clipCountOnTrack, clipPlacementIssue, moveClipIssue, placeableAudioTracks, placeableVisualTracks, placedDurationSec, trimClipIssue, moveClips } from "../../domain/timeline/edit";
-import { clipImageAssetIds, timelineImageAssetIds } from "../../domain/timeline/export";
+import { clipImageAssetIds, timelineImageAssetIds, ASSET_USE_KIND } from "../../domain/timeline/export";
 import type { ClipPlacement, EditBlockedReason } from "../../domain/timeline/edit";
 import { dimsForOrientation, MIN_BOX_SIZE_PX, ROTATION_DEG_MIN, ROTATION_DEG_MAX } from "../../domain/constants";
 import { audioSourceKeyOfClip, isAudioClip, normalizedVolumePoints } from "../../domain/timeline/audio";
@@ -819,7 +820,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     : undefined;
   const slotLayers = selectedTemplate?.layers.filter((l) => templateSlotIds(selectedTemplate.layers).has(l.id)) ?? [];
   // その部品の差し込み口に入っている動画（#512 段3b）＝元の音の欄を出す先。判定は domain の1か所。
-  const slotPlacements = doc && selected ? videoPlacementsOfClip(doc, selected, { templateOf }).filter((p) => p.use === "slot") : [];
+  const slotPlacements = doc && selected ? videoPlacementsOfClip(doc, selected, { templateOf }).filter((p) => p.use === ASSET_USE_KIND.slot) : [];
   const slotNames = slotLabelsFor(slotLayers);
   // 固定した列の部品は中身も変えられない（domain 側で止まる）＝欄を押せなくして理由を出す
   // ＝入力しても黙って元へ戻る、を作らない（§2-5）。
@@ -837,7 +838,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return !!c && !!doc?.tracks.find((t) => t.id === c.trackId)?.locked;
   });
   const lockedSelectionHint = editBlockedMessage[EDIT_BLOCKED.lockedSelection];
-  const lockedHint = selectedLocked ? "この列は固定されています。変えるには固定を外してください" : undefined;
+  // 断り文は共有の1か所から作る（#819-2）＝画面で手書きすると、同じ状況に2通りの文が出る。
+  const lockedHint = selectedLocked ? lockedTrackMessage("content") : undefined;
   const textKeys = selectedTemplate ? usedTextKeys(selectedTemplate.layers) : [];
   // 選んだ部品に付いている動き（キーフレーム）。時刻は対象の先頭からの秒なので、表示は起点を足す。
   const selectedOrigin = doc && selected ? animationOriginSec(doc, selected.id) ?? 0 : 0;
@@ -1051,6 +1053,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   /** 利用者が自分で倍率を触ったか（触ったら**自動の合わせをやめる**＝勝手に戻さない）。 */
   const zoomTouchedRef = useRef(false);
   /** ホイールの実リスナーから読む今の段（リスナーは張り直さないので ref で渡す）。 */
+  // ⚠️ **再生に合わせて見える範囲を送る**（#819-1）＝送らないと、再生ヘッドが枠の外へ出た時点で
+  // **いま何が出ているのかが画面から消える**（倍率を上げるほど早く外れる）。送り方は domain の
+  // 1か所（`playbackScrollLeft`）＝ヘッドが見えている間は動かさず、外へ出たときだけページ送り。
+  // ⚠️ 早い段階（画面を返す前）に置く＝フックの数を毎回そろえる。倍率と全長はここで解き直す。
+  useEffect(() => {
+    if (!isPlaying) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const px = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
+    const next = playbackScrollLeft({
+      scrollLeft: el.scrollLeft,
+      viewPx: el.clientWidth,
+      contentPx: Math.max(totalSec * px, MIN_LANE_WIDTH_PX),
+      headPx: playheadSec * px,
+      insetStartPx: LANE_LABEL_PX,
+    });
+    if (next != null) el.scrollLeft = next;
+  }, [isPlaying, playheadSec, zoomIndex, totalSec]);
+
   const zoomIndexRef = useRef<number | null>(null);
   useEffect(() => {
     zoomIndexRef.current = zoomIndex;
@@ -1992,7 +2013,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const duplicateExtra = (): { disabled?: boolean; hint?: string } =>
     selected && trackOf(selected.trackId)?.hidden
-      ? { disabled: true, hint: "動画に出さない列では増やせません。列の「⋮」から「動画に出す」を選んでください" }
+      ? { disabled: true, hint: hiddenTrackDuplicateMessage() }
       : {};
 
   /**
@@ -2085,7 +2106,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           // **押す前に理由を出す**（長い画面では上部の知らせを見落とす・§2-5）。
           // 書き出し中も**開く前に**断る（答えてから断ると、取り返しのつかなさを聞いた意味が無くなる・#703）。
           disabled: menuTrack.locked || exporting,
-          disabledHint: menuTrack.locked ? "この列は固定されています。削除するには固定を外してください" : exportingHint,
+          disabledHint: menuTrack.locked ? lockedTrackMessage("delete") : exportingHint,
           onSelect: () => setRemovingTrackId(menuTrack.id),
         },
       ]
@@ -2208,6 +2229,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 段を動かしたときに飛ぶ）。幅が測れない環境（テスト）でもここに落ち着く。
   const pxPerSec = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
   const laneWidthPx = Math.max(totalSec * pxPerSec, MIN_LANE_WIDTH_PX);
+
   const step = tickStepSec(pxPerSec); // 目盛りは**倍率**で決める（共有関数・#686 レビュー）
   const ticks = Array.from({ length: Math.floor(totalSec / step) + 1 }, (_, i) => i * step);
 
@@ -2458,6 +2480,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 全体を表示
               </button>
             </div>
+            {/* ⚠️ **吸着の外し方を画面に書く**（#819-3）＝掴むと勝手に隣へ寄るのに、切る方法が
+                どこにも書かれておらず「思った所へ置けない」ままになる（決定12 は切れると定めている）。 */}
+            <p className="text-muted text-sm">
+              帯を掴むと、ほかの帯の端・再生位置・0秒へ吸い寄せます。<kbd>Ctrl</kbd> を押しながら動かすと吸着しません。
+            </p>
             <div className="timeline-scroll" ref={scrollRef}>
               <div className="timeline-inner">
                 <div className="timeline-row">
@@ -2478,9 +2505,41 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     aria-valuenow={playheadSec}
                     aria-valuetext={`${playheadSec.toFixed(1)}秒`}
                     onClick={(e) => {
+                      // ⚠️ **掴んだ後の `click` は捨てる**（PR #827 レビュー 🟡）＝`pointerdown` の
+                      // `preventDefault` は `click` を止めないので、`Escape` で掴む前へ戻しても
+                      // **離した瞬間にここが走って離した位置で上書き**する（取り消しが効かない）。
+                      // 帯のドラッグと同じ印（`skipClickRef`）を見る＝掴む場所ごとに作法を割らない。
+                      if (skipClickRef.current) { skipClickRef.current = false; return; }
                       // 押した所に線が来る（ヘッドの位置＝秒×倍率 の逆）。範囲へ収めるのは store。
                       const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
                       setPlayhead(x / pxPerSec);
+                    }}
+                    // ⚠️ **掴んだまま動かせる**（#819-1・ADR-0034 決定1＝業界の型に合わせる）＝
+                    // 再生ヘッドには**掴み手の三角**を描いておきながら、押した所へ跳ぶだけで
+                    // **追従しなかった**（掴める合図を出して掴めない＝一番わかりにくい壊れ方）。
+                    // 作法は帯・欄と**同じもの**（`usePointerDrag`＝少し動かすまで掴まない・
+                    // `Escape` で戻す・左ボタンのみ・画面を離れても後始末が走る）。
+                    // ⚠️ **押した瞬間から追従させる**（`startPx: 0`）＝つまみを掴む操作なので遊びを作らない
+                    //（境界を掴んで広げるのと同じ扱い）。押しただけなら `onClick` が同じ所へ跳ばす。
+                    onPointerDown={(e) => {
+                      if (isPlaying) return; // 再生中は掴ませない（走っている的を狙わせない・決定21）
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const before = playheadSec;
+                      // ⚠️ **掴んでいる間に横スクロールされてもずれない**（PR #827 レビュー ℹ️）＝
+                      // 枠は掴んだ時点で1度だけ測るので、送られたぶんを足さないと指と線が離れる
+                      //（帯のドラッグが `scrolled` で補正しているのと同じ理由・同じ形）。
+                      const startScroll = scrollRef.current?.scrollLeft ?? 0;
+                      const secAt = (ev: PointerEvent): number => {
+                        const scrolled = (scrollRef.current?.scrollLeft ?? startScroll) - startScroll;
+                        return (ev.clientX - rect.left + scrolled) / pxPerSec;
+                      };
+                      beginDrag(e, {
+                        startPx: 0,
+                        onMove: (ev) => setPlayhead(secAt(ev)),
+                        // やめたら掴む前へ戻す（帯の移動と同じ＝中止は「無かったこと」にする）。
+                        // ⚠️ **戻した後の `click` を捨てる**＝捨てないと離した位置で上書きされる。
+                        onCancel: (started) => { setPlayhead(before); if (started) dropSkipClickSoon(); },
+                      });
                     }}
                     onKeyDown={(e) => {
                       // ⚠️ **←→ はここで受ける**（#686 レビュー）。画面のキー操作は「矢印を使う要素」
@@ -2496,9 +2555,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       if (e.key === "End") { e.preventDefault(); setPlayhead(totalSec); return; }
                     }}
                   >
+                    {/* ⚠️ **時刻の書き方は1つにそろえる**（#819-3・§6・ADR-0026②）＝同じ画面の帯の
+                        ツールチップ（`clipRangeTitle`）と見わたす画面が `m:ss` なのに、ここだけ「N秒」
+                        だった。刻みは常に整数秒（`tickStepSec`）なので丸めで潰れることはない。 */}
                     {ticks.map((t) => (
                       <span key={t} className="timeline-tick" style={{ left: `${pxPerSec * t}px` }}>
-                        {t}秒
+                        {clockLabel(t)}
                       </span>
                     ))}
                   </div>
@@ -2715,11 +2777,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {videoPlay.some((v) => v.clip.id === selected.id && v.held === "unplayable") && (
               <p className="field-hint">{TIMELINE_VIDEO_STILL_UNPLAYABLE}</p>
             )}
+            {/* ⚠️ **動く量を画面から分かるようにする**（#819-3）＝ボタンの名前だけでは 0.5秒 刻みだと
+                分からず、押してみるまで結果が読めない（数値の欄と併用する前提の操作なので、量が要る）。 */}
             <div className="row gap-sm">
-              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec - NUDGE_SEC })} {...editGuard()}>
+              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec - NUDGE_SEC })} {...editGuard({ hint: `${NUDGE_SEC}秒ずつ前へ動かします` })}>
                 前へ
               </button>
-              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec + NUDGE_SEC })} {...editGuard()}>
+              <button className="btn btn-secondary" onClick={() => moveSelectedClip({ startSec: selected.startSec + NUDGE_SEC })} {...editGuard({ hint: `${NUDGE_SEC}秒ずつ後ろへ動かします` })}>
                 後ろへ
               </button>
               {/* 再生位置を使う操作は**再生中に押させない**＝走っている位置を掴むと結果が毎回変わる（§2-5）。 */}
@@ -2813,8 +2877,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               </p>
             )}
 
+            {/* ⚠️ **名前を分ける**（#819-3）＝「置く列」は下の置く欄でも使っており、**次に置く先**と
+                **この部品が載っている列**の2つの意味で同じ言葉を使っていた（読むほうは区別できない）。 */}
             <label className="field">
-              <span>置く列</span>
+              <span>載っている列</span>
               {/* ⚠️ **移せる列だけ**出す（#714 レビュー）。全部並べると、隠した列・種別違いの列を選べて
                   **選べたのに事後に断られる**（同じ画面の置く側は `placeableTracks` で絞っている＝流儀が割れる）。
                   **いま載っている列は必ず残す**＝隠した列にある帯もその列に留まれる（動かす側の規則と同じ）。 */}

@@ -650,6 +650,34 @@ const SLOT_LABEL_BY_ID: Record<string, string> = {
 export const KEPT_PREVIOUS_VOICE_SUFFIX = "前に作った声はそのまま使えます。";
 
 /**
+ * 固定した列でできないことの断り（#819-2）。**やろうとしたこと**で締めだけ変える。
+ *
+ * ⚠️ **画面で手書きしない**（§9-3・`canvasHoldMessage` と同じ流儀）＝以前は「動かす」（共有の
+ * `TIMELINE_EDIT_LOCKED`）と「変える」「削除する」（画面直書き）が混ざり、**同じ状況に2通りの文**が
+ * 出ていた（`Ctrl+K` は共有・ボタンは手書き）。手書きは禁止語の検査（`uiLabels.test.ts`）の外にも
+ * 落ちる＝出したまま誰も気づかない。
+ * ⚠️ **「動かす」は共有コードのまま**（`TIMELINE_EDIT_LOCKED`）＝あちらは domain が返す断りで、
+ * 画面の外（`editBlocked`）からも出る。ここは**画面が先回りして押せなくするときの説明**。
+ */
+export type LockedTrackAction = "content" | "delete" | "duplicate";
+
+export function lockedTrackMessage(action: LockedTrackAction): string {
+  const what = action === "content" ? "中身を変える" : action === "delete" ? "削除する" : "複製する";
+  return `この列は固定されています。${what}には固定を外してください`;
+}
+
+/**
+ * 「動画に出さない」列では**複製できない**（#819-2）。
+ *
+ * ⚠️ **共有の `TIMELINE_EDIT_HIDDEN_TRACK` は使えない**＝あちらの次の行動は「ほかの列へ置く」だが、
+ * **複製は必ず元の列に作る**ので、言われたとおりにしても増やせない（行き止まり・§2-5）。
+ * 別の文が要るのは正しいが、**画面で手書きしない**＝ここに置いて1か所から出す。
+ */
+export function hiddenTrackDuplicateMessage(): string {
+  return "動画に出さない列では増やせません。列の「⋮」から「動画に出す」を選んでください";
+}
+
+/**
  * キャンバスで**掴めない理由**（タイムライン編集）。`count` を渡すとまとめて動かしたときの言い方になる。
  *
  * ⚠️ **1か所にまとめる**（#788-1）＝以前は単体選択のときだけ理由別に出し分け、まとめて動かしたときは

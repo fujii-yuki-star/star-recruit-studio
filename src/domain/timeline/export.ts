@@ -9,7 +9,7 @@
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
-import { TIMELINE_CLIP_KIND, isFreeSlotAssetType } from '../enums';
+import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
@@ -287,7 +287,7 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
       .filter(
         (clip) =>
           isDrawnClip(doc, clip) &&
-          clipImageAssetUses(clip).some((u) => u.kind === 'character' && videoIds.has(u.assetId)),
+          clipImageAssetUses(clip).some((u) => u.kind === ASSET_USE_KIND.character && videoIds.has(u.assetId)),
       )
       .map((clip) => clip.id);
     if (clipIds.length > 0) blockers.push({ code: TIMELINE_EXPORT_BLOCK.videoAsset, clipIds });
@@ -359,7 +359,12 @@ function assetUseKey(kind: AssetUseKind, layerId: string | null): string {
 }
 
 /** 素材の使い方（`direct`＝直接置き／`slot`＝差し込み口／`character`＝立ち絵）。 */
-export type AssetUseKind = 'direct' | 'slot' | 'character';
+// 素材の使い方（`ASSET_USE_KIND`）は**中立な置き場**（`domain/enums`）にある＝作る側（`video.ts`）が
+// 実行時に読める（ここに置くと `export.ts` → `video.ts` の import と循環する）。既存の読み手のために
+// ここからも出す（import 元を散らさない）。
+export { ASSET_USE_KIND } from '../enums';
+export type { AssetUseKind } from '../enums';
+import type { AssetUseKind } from '../enums';
 
 /**
  * 同じものを**置き場所つき**で返す（#512 段3）。
@@ -370,10 +375,10 @@ export function clipImageAssetUses(
   clip: TimelineClip,
 ): { kind: AssetUseKind; layerId: string | null; assetId: string }[] {
   const out: { kind: AssetUseKind; layerId: string | null; assetId: string }[] = [];
-  if (clip.assetId) out.push({ kind: 'direct', layerId: null, assetId: clip.assetId });
-  if (clip.character?.poseAssetId) out.push({ kind: 'character', layerId: null, assetId: clip.character.poseAssetId });
+  if (clip.assetId) out.push({ kind: ASSET_USE_KIND.direct, layerId: null, assetId: clip.assetId });
+  if (clip.character?.poseAssetId) out.push({ kind: ASSET_USE_KIND.character, layerId: null, assetId: clip.character.poseAssetId });
   for (const [layerId, id] of Object.entries(clip.assetRefs ?? {})) {
-    if (typeof id === 'string') out.push({ kind: 'slot', layerId, assetId: id });
+    if (typeof id === 'string') out.push({ kind: ASSET_USE_KIND.slot, layerId, assetId: id });
   }
   return out;
 }

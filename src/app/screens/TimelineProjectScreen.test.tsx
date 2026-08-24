@@ -10,7 +10,7 @@ import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProject
 import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
-import { DELETE_LABEL, DUPLICATE_LABEL } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, lockedTrackMessage, clockLabel } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -2001,7 +2001,7 @@ describe("TimelineProjectScreen: 数値欄と押せない理由（#706・#703）
     withBgmClip({ tracks: [{ id: "track_002", kind: TRACK_KIND.audio, locked: true }] });
     useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getByLabelText("速さ（倍）").title).toBe("この列は固定されています。変えるには固定を外してください");
+    expect(screen.getByLabelText("速さ（倍）").title).toBe(lockedTrackMessage("content"));
   });
 });
 
@@ -2064,7 +2064,7 @@ describe("TimelineProjectScreen: 押す前に断る・下書きは即時（レ�
     // 動かない＝押せなくすると「触っても何も起きないのに押せない」になる（§2-5 は押してから断るのを禁じる
     // のであって、断られようのない操作まで塞げとは言っていない）。
     const inSelected = document.querySelector('[data-panel-id="selected"]') as HTMLElement;
-    expect(within(inSelected).getByLabelText("置く列")).toBeDisabled();
+    expect(within(inSelected).getByLabelText("載っている列")).toBeDisabled();
     fireEvent.click(screen.getByLabelText("音1の操作"));
     const items = screen.getAllByRole("menuitem");
     expect(items.every((el) => el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")).toBe(true);
@@ -2891,7 +2891,7 @@ describe("TimelineProjectScreen: 中身を直す欄（#720）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     expect(screen.getByRole("button", { name: "文字の色" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "文字の色" })).toHaveAttribute("title", "この列は固定されています。変えるには固定を外してください");
+    expect(screen.getByRole("button", { name: "文字の色" })).toHaveAttribute("title", lockedTrackMessage("content"));
   });
 
   // 図形の色は**別の JSX 箇所**に同じ3行を書いている（共有関数の中身ではない）ので、
@@ -3020,9 +3020,9 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     one();
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    // 「選んだ部品」の欄の「置く列」（同じ名前の欄が置く側にもあるので、欄で絞る）。
+    // 「選んだ部品」の欄の「載っている列」（#819-3 で置く側の「置く列」と名前を分けた）。
     const panel = document.querySelector('[data-panel-id="selected"]') as HTMLElement;
-    const select = within(panel).getByLabelText("置く列");
+    const select = within(panel).getByLabelText("載っている列");
     fireEvent.keyDown(select, { key: "ArrowRight" });
     expect(useTimelineStore.getState().playheadSec).toBe(0);
   });
@@ -4110,7 +4110,7 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     expect(del.getAttribute("title")).toContain("固定");
     // 固定の理由は「選んだ部品」の欄と**同じ言い方**にする（同じ状態を場所で言い分けない）。
     const dup = screen.getByRole("menuitem", { name: "複製" });
-    expect(dup.getAttribute("title")).toBe("この列は固定されています。変えるには固定を外してください");
+    expect(dup.getAttribute("title")).toBe(lockedTrackMessage("content"));
   });
 });
 
@@ -4217,6 +4217,133 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
     expect(useTimelineStore.getState().playheadSec).toBe(20);
     fireEvent.keyDown(ruler, { key: "Home" });
     expect(useTimelineStore.getState().playheadSec).toBe(0);
+  });
+
+  // ⚠️ **掴んだまま動かせる**（#819-1・ADR-0034 決定1）＝再生ヘッドには掴み手の三角を描いておきながら、
+  // 押した所へ跳ぶだけで**追従しなかった**（掴める合図を出して掴めない）。作法は帯・欄と同じもの。
+  describe("目盛りを掴んで動かす（#819-1）", () => {
+    const rulerOf = (container: HTMLElement): HTMLElement => {
+      const ruler = container.querySelector(".timeline-ruler") as HTMLElement;
+      // jsdom は実レイアウトを持たないので、目盛りの左端を 0 として測れるようにする。
+      ruler.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1000, height: 24, right: 1000, bottom: 24, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      return ruler;
+    };
+
+    it("押したまま動かすと、再生位置が指に追いてくる", () => {
+      withClip(20);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const ruler = rulerOf(container);
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+      // ⚠️ **押した瞬間から追いてくる**（遊びを作らない）＝つまみを掴む操作なので、
+      // 帯を運ぶときのような「少し動かすまで掴まない」余白があると**動かないように見える**。
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 2, clientY: 0 });
+      expect(useTimelineStore.getState().playheadSec).toBeGreaterThan(0);
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 36, clientY: 0 }); // 36px＝1秒
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(1, 6);
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 180, clientY: 0 }); // 5秒
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(5, 6);
+      fireEvent.pointerUp(window, { pointerId: 1 });
+    });
+
+    it("Escape でやめると、掴む前の位置へ戻る（帯の移動と同じ）", () => {
+      withClip(20);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.getState().setPlayhead(3); });
+      const ruler = rulerOf(container);
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 108, clientY: 0 });
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 360, clientY: 0 });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(10, 6);
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(3, 6); // 掴む前へ
+    });
+
+    // ⚠️ **やめた後に離しても上書きされない**（PR #827 レビュー 🟡）＝`pointerdown` の
+    // `preventDefault` は `click` を止めないので、印を見ないと**離した位置で書き戻される**
+    //（`Escape` が効かなかったことになる）。帯のドラッグと同じ印を見る。
+    it("Escape でやめた後に指を離しても、戻した位置のまま", () => {
+      withClip(20);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.getState().setPlayhead(3); });
+      const ruler = rulerOf(container);
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 108, clientY: 0 });
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 360, clientY: 0 });
+      fireEvent.keyDown(window, { key: "Escape" });
+      // ここで実際にボタンを離す＝ブラウザは同じ要素に `click` を出す。
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 360, clientY: 0 });
+      fireEvent.click(ruler, { clientX: 360, clientY: 0 });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(3, 6);
+    });
+
+    // ⚠️ **掴んでいる間に横スクロールされてもずれない**（レビュー ℹ️）＝枠は掴んだ時点で1度だけ
+    // 測るので、送られたぶんを足さないと指と線が離れる（帯のドラッグと同じ補正）。
+    it("掴んでいる間に横スクロールされても、指の下の時刻を指す", () => {
+      withClip(60);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+      const ruler = rulerOf(container);
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+      scroll.scrollLeft = 360; // 掴んだまま 10秒ぶん送られる
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 36, clientY: 0 });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(11, 6); // 送りぶん＋1秒
+      fireEvent.pointerUp(window, { pointerId: 1 });
+    });
+
+    it("再生中は掴ませない（走っている的を狙わせない・決定21）", () => {
+      withClip(20);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.setState({ isPlaying: true }); });
+      const ruler = rulerOf(container);
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 360, clientY: 0 });
+      expect(useTimelineStore.getState().playheadSec).toBe(0); // 追従しない
+      act(() => { useTimelineStore.setState({ isPlaying: false }); });
+    });
+  });
+
+  // ⚠️ **再生に合わせて見える範囲を送る**（#819-1）＝送らないと、ヘッドが枠の外へ出た時点で
+  // **いま何が出ているのかが画面から消える**（倍率を上げるほど早く外れる）。
+  it("再生中にヘッドが枠の外へ出たら、見える範囲を送る", () => {
+    withClip(60);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
+    act(() => { useTimelineStore.setState({ isPlaying: true }); });
+    act(() => { useTimelineStore.getState().setPlayhead(5); }); // 5秒＝180px（まだ見えている）
+    expect(scroll.scrollLeft).toBe(0);
+    act(() => { useTimelineStore.getState().setPlayhead(20); }); // 720px＝枠の外
+    expect(scroll.scrollLeft).toBe(720); // ヘッドが左端に来るよう送る
+    act(() => { useTimelineStore.setState({ isPlaying: false }); });
+  });
+
+  it("止まっている間は送らない（勝手に画面が動かない）", () => {
+    withClip(60);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
+    act(() => { useTimelineStore.getState().setPlayhead(20) ; });
+    expect(scroll.scrollLeft).toBe(0);
+  });
+
+  // ⚠️ **時刻の書き方は1つにそろえる**（#819-3・§6）＝同じ画面の帯のツールチップと見わたす画面が
+  // `m:ss` なのに、目盛りだけ「N秒」だった（同じ時刻が2通りに読める）。
+  // ⚠️ **動く量が画面から分かる**（#819-3）＝名前だけでは 0.5秒 刻みだと分からず、押してみるまで
+  // 結果が読めない（数値の欄と併用する前提の操作なので、量が要る）。
+  it("「前へ／後ろへ」は動く量を添える", () => {
+    withClip(20);
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "前へ" }).getAttribute("title")).toContain("0.5秒");
+    expect(screen.getByRole("button", { name: "後ろへ" }).getAttribute("title")).toContain("0.5秒");
+  });
+
+  it("目盛りの時刻は、帯のツールチップと同じ書き方（m:ss）", () => {
+    withClip(120);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const ticks = [...container.querySelectorAll(".timeline-tick")].map((e) => e.textContent);
+    expect(ticks[0]).toBe("0:00");
+    expect(ticks).toContain(clockLabel(60)); // 1:00
+    expect(ticks.some((t) => t?.endsWith("秒"))).toBe(false);
   });
 
   it("目盛りの名前は「再生位置」の欄と分ける（同じ名前の操作を2つ作らない）", () => {
@@ -4639,10 +4766,8 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     ] });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    // ⚠️ 「置く列」は置く欄にもあるので、**選んだ部品の欄のもの**を取る（同名を取り違えない）。
-    const sel = [...screen.getAllByLabelText("置く列")].find(
-      (el) => (el as HTMLSelectElement).value === "track_001",
-    ) as HTMLSelectElement;
+    // ⚠️ **名前で1つに決まる**（#819-3）＝以前は置く欄にも同じ「置く列」があり、値で当てるしかなかった。
+    const sel = screen.getByLabelText("載っている列") as HTMLSelectElement;
     const ids = [...sel.options].map((o) => o.value);
     expect(ids).toContain("track_001"); // いま載っている列は必ず残す
     expect(ids).toContain("track_004");

@@ -52,3 +52,34 @@ export function edgeScrollPxPerSec(input: {
 export function nextScrollPos(from: number, deltaPx: number, maxScrollPx: number): number {
   return Math.max(0, Math.min(maxScrollPx, from + deltaPx));
 }
+
+/**
+ * **再生に合わせて見える範囲を送る**（#819-1・ページ送り）。次のスクロール位置（`null`＝送らない）。
+ *
+ * ⚠️ **常に追わない**（滑らせない）＝再生ヘッドが見えている間は動かさず、**枠の外へ出たときだけ**
+ * 送る。毎フレーム中央へ寄せると、画面全体が流れ続けて**帯の位置関係が読めない**（業界の型も
+ * ページ送りが基本）。
+ * ⚠️ **送った先はヘッドが左端**＝続きがいちばん長く見える（右端に置くと次の瞬間また送ることになる）。
+ * ⚠️ **戻る向きにも効く**（シークで前へ跳んだとき）＝前に戻したのに画面だけ先のままにしない。
+ * 行き止まりでは動かない（`nextScrollPos` と同じ考え方）。
+ */
+export function playbackScrollLeft(input: {
+  /** いまのスクロール位置（px）。 */
+  scrollLeft: number;
+  /** 見えている幅（px）。 */
+  viewPx: number;
+  /** 中身の全幅（px）。 */
+  contentPx: number;
+  /** 再生ヘッドの位置（px・中身の左端から）。 */
+  headPx: number;
+  /** 左端に固定されている列名の幅（px）＝そのぶんは見えていない。 */
+  insetStartPx?: number;
+}): number | null {
+  const inset = input.insetStartPx ?? 0;
+  const visibleFrom = input.scrollLeft;
+  const visibleTo = input.scrollLeft + Math.max(0, input.viewPx - inset);
+  if (input.headPx >= visibleFrom && input.headPx <= visibleTo) return null; // 見えている＝動かさない
+  const maxScroll = Math.max(0, input.contentPx - Math.max(0, input.viewPx - inset));
+  const next = Math.max(0, Math.min(maxScroll, input.headPx));
+  return next === input.scrollLeft ? null : next; // 行き止まり＝これ以上動かない
+}
