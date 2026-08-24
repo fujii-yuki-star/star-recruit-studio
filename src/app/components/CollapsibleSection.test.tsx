@@ -69,4 +69,61 @@ describe("CollapsibleSection（#687）", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(localStorage.getItem("timeline.sectionOpen")).toBeNull();
   });
+
+  // #832＝ドリルインで畳んだ節へ入っても、そのままでは欄が見えない（当て先が DOM に無い）。
+  // `forceOpen` は**保存しない**一時的な合図＝利用者の畳む設定（`defaultOpen`/記憶）を上書きしない。
+  describe("forceOpen（外から一時的に開かせる・#832）", () => {
+    it("マウント時から効く（畳む設定より優先して開く）", () => {
+      // ⚠️ **初期値に織り込む**（マウント後の変化だけを見ない）＝呼び出し側の別の事情で、この節を
+      // 含む祖先がしばしば作り直される（ドリルインの1回目のタップは選択を一度解く＝#818）ため、
+      // 「マウント後に変わった」だけを見る合図だと、たまたま作り直った回に効かない（#832 で実際に踏んだ）。
+      render(
+        <CollapsibleSection scope={SECTION_SCOPE.timeline} title="中身" defaultOpen={false} forceOpen>
+          <p>差し込み口</p>
+        </CollapsibleSection>,
+      );
+      expect(section("中身").open).toBe(true);
+    });
+
+    it("マウント後に true へ変わっても開く（既にマウント済みの節にも効く）", () => {
+      const view = render(
+        <CollapsibleSection scope={SECTION_SCOPE.timeline} title="中身" defaultOpen={false} forceOpen={false}>
+          <p>差し込み口</p>
+        </CollapsibleSection>,
+      );
+      expect(section("中身").open).toBe(false);
+      view.rerender(
+        <CollapsibleSection scope={SECTION_SCOPE.timeline} title="中身" defaultOpen={false} forceOpen={true}>
+          <p>差し込み口</p>
+        </CollapsibleSection>,
+      );
+      expect(section("中身").open).toBe(true);
+    });
+
+    it("false に戻っても畳まない（黙って閉じない＝開いたままにする）", () => {
+      const view = render(
+        <CollapsibleSection scope={SECTION_SCOPE.timeline} title="中身" defaultOpen={false} forceOpen={true}>
+          <p>差し込み口</p>
+        </CollapsibleSection>,
+      );
+      expect(section("中身").open).toBe(true);
+      view.rerender(
+        <CollapsibleSection scope={SECTION_SCOPE.timeline} title="中身" defaultOpen={false} forceOpen={false}>
+          <p>差し込み口</p>
+        </CollapsibleSection>,
+      );
+      expect(section("中身").open).toBe(true); // 抜けても開いたまま
+    });
+
+    it("記憶へは保存しない（次に新しく作られたときは利用者の設定＝畳んだまま）", async () => {
+      render(
+        <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="templateContent" title="中身" defaultOpen={false} forceOpen>
+          <p>差し込み口</p>
+        </CollapsibleSection>,
+      );
+      expect(section("中身").open).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(localStorage.getItem("timeline.sectionOpen")).toBeNull(); // 保存されていない
+    });
+  });
 });

@@ -8,7 +8,7 @@
 import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { loadSectionOpen, saveSectionOpen, type SectionScope } from "./sectionOpen";
 
-export function CollapsibleSection({ scope, title, storageKey, defaultOpen = true, children }: {
+export function CollapsibleSection({ scope, title, storageKey, defaultOpen = true, forceOpen, children }: {
   /** どの画面の記憶か（画面ごとに分ける＝別画面の同名の節と混ざらない）。 */
   scope: SectionScope;
   title: string;
@@ -34,12 +34,33 @@ export function CollapsibleSection({ scope, title, storageKey, defaultOpen = tru
    * だから**「黙って消さないための知らせ」は節の中に置かない**＝一度畳まれたら二度と見えなくなる。
    */
   defaultOpen?: boolean;
+  /**
+   * 外から「いまだけ開いていてほしい」と伝える（#832・ドリルイン）。**保存しない**＝`true` の間だけ
+   * 開き、`false` に戻っても畳まない（黙って閉じない＝利用者が自分で畳むまでそのまま）。次にこの節が
+   * 新しく作られたときは、いつもどおり記憶（`loadSectionOpen`）を読む＝この一時的な「開いて」は
+   * 利用者の畳む設定を上書きしない。
+   *
+   * ⚠️ **マウント時の値にも織り込む**＝下の「変わった回だけ開く」処理だけに任せると、初回描画は
+   * 「畳んだ記憶のまま」で出てから次の描画で開き直すので、一瞬だけ畳んだ見た目が入る（ちらつき）。
+   * 呼び出し側の別の事情で、この節を含む祖先が**まさに forceOpen が要る回に**作り直されやすい
+   * （例：ドリルインの1回目のタップは「空白を押した」ぶんとして選択を一度解く＝#818＝「選んだ部品」欄の
+   * 中身がアンマウント→再マウントする）ので、そのちらつきが実際に起きうる場面はここ。
+   */
+  forceOpen?: boolean;
   children: ReactNode;
 }) {
   const memoKey = storageKey ?? title;
   // 記憶があればそれを、無ければ既定（#550 ①＝主編集の節だけ開く）。lazy init＝初回描画時に1度だけ読む
   // （＝`defaultOpen` の変化は追わない。追わせたい節は呼び出し側が `key` を付ける＝上の注記）。
-  const [open, setOpen] = useState(() => loadSectionOpen(scope)[memoKey] ?? defaultOpen);
+  // `forceOpen` は初期値にも織り込む＝畳んだ記憶で出てから開き直す、というちらつきを避ける。
+  const [open, setOpen] = useState(() => forceOpen || (loadSectionOpen(scope)[memoKey] ?? defaultOpen));
+  // `forceOpen` が変わった回だけ開く（描画中に反映＝React 公式の「props の変化に合わせて state を
+  // 直す」形）。`useEffect` で `setState` すると再描画がもう1回余計に走る（lint `react-hooks/set-state-in-effect`）。
+  const [lastForceOpen, setLastForceOpen] = useState(forceOpen);
+  if (forceOpen !== lastForceOpen) {
+    setLastForceOpen(forceOpen);
+    if (forceOpen) setOpen(true); // 保存しない＝一時的に開くだけ（false に戻っても畳まない）
+  }
   const onToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
     const next = e.currentTarget.open;
     // **既定のままなら保存しない**：`<details open>` は描画しただけで（非同期に）toggle を発火するため、
