@@ -7,7 +7,9 @@ import type { SubtitleSilentReason } from "../domain/project/subtitleBinding";
 import type { BakeNote, BakeNoteCode } from "../domain/timeline/bake";
 import type { Layer } from "../domain/template/types";
 import type { EditBlockedReason } from "../domain/timeline/edit";
+import { TIMELINE_EXPORT_BLOCK, volumePointsTooManyHasSplittable } from "../domain/timeline/export";
 import type { TimelineExportBlockCode } from "../domain/timeline/export";
+import type { TimelineProject } from "../domain/timeline/types";
 // 型のみ（実行時 import なし＝store との循環を作らない）。空状態の文言が状態で変わるため（#590）。
 import type { GenerateStatus } from "./store/projectStore";
 /**
@@ -547,6 +549,11 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
     "そこは動画を使い切った後なので分けられません。動画が流れている間（映像が止まる前）の位置で分けてください",
   TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO:
     "差し込み口ではない場所（背景など）に動画が入っています。そのままバラすと動き出して見た目が変わります。その動画を差し込み口へ入れるか、写真に差し替えてからバラしてください",
+  // ⚠️ **書き出しの断り（`TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED`）と言い方を揃える**（#831）＝
+  // 「差し替えてから」ではなく「列へ直接置くか、差し込み口へ入れる」＝この部品ではなく**動画の置き方**を
+  // 変える案内。立ち絵を触る欄がここに無いので、それ以外に実在する行動が無い。
+  TIMELINE_EDIT_EXPLODE_CHARACTER_VIDEO:
+    "立ち絵として入れた動画は、まだバラせません。動画は列へ直接置くか、見た目パターンの差し込み口へ入れてください",
   TIMELINE_EDIT_LINKED_SUBTITLE: "連動している字幕を置ける場所がありません。字幕をほかの列へ移すか、連動をやめてください",
   TIMELINE_EDIT_CURVED_EASING: "この動き方は途中で分けられません。「動き」の欄に出ている秒数の位置か、動きの付いていない所で分けてください",
   TIMELINE_EDIT_PLAYING: "再生を止めてから使えます",
@@ -609,8 +616,11 @@ export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
  * **全コードに文言が要る**＝理由が増えたら気づく。
  * ⚠️ 動画は **#512 段1〜段3b で直接置きも差し込み口も映るようになった**＝断るのは**立ち絵に入れたぶん**
  * だけ（そこだけ静止画のまま）。静止画で出すのを成功にしない（ADR-0026④）。
+ * ⚠️ **`volumePointsTooMany` はここに無い**（#831）＝挙げる部品に読み上げが混ざりうる集計型の理由で、
+ * 「分けてください」を添えてよいかが**部品ごとに違う**。`lockedTrackMessage` と同じ流儀＝呼び出し側が
+ * 状況を渡して締めを変える {@link volumePointsTooManyMessage} を直接呼ぶ。
  */
-export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
+export const exportBlockedMessage: Record<Exclude<TimelineExportBlockCode, typeof TIMELINE_EXPORT_BLOCK.volumePointsTooMany>, string> = {
   TIMELINE_EXPORT_EMPTY: "まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください",
   TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED:
     "立ち絵として入れた動画は、まだ書き出せません。動画は列へ直接置くか、見た目パターンの差し込み口へ入れてください",
@@ -620,14 +630,30 @@ export const exportBlockedMessage: Record<TimelineExportBlockCode, string> = {
     "見た目パターンが見つからない部品があります。そのままでは動画に出ません。その部品を消して、置き直してください",
   TIMELINE_EXPORT_SUBTITLE_LINK_BROKEN:
     "連動する読み上げが見つからない字幕があります。そのままでは動画に出ません。連動先を選び直すか、字幕の文を入れてください",
-  // ⚠️ #723 の時点では「部品を分けてください」を書けなかった（分割が未実装＝実在しない操作を案内すると
-  // 行き止まりになる・決定5）。**分割は land 済み**（`splitClip`＝「ここで分ける」／`Ctrl+K`。音量の点も
-  // 分割点で振り分けられる）ので、いまは行き止まりにならない。それでも**先に出すのは「いらない点を外す」**
-  // ＝分けるのは上限を避けるための回り道で、利用者の目的（1つの部品の音量を変える）そのものではない。
-  TIMELINE_EXPORT_VOLUME_POINTS_TOO_MANY: `音量の変化の点が多すぎる部品があります。1つの部品に置けるのは${VOLUME_POINTS_MAX}個までです。いらない点を外すか、部品を分けてください`,
   TIMELINE_EXPORT_ASSET_UNREADABLE:
     "素材のファイルを読めませんでした。そのままでは動画にその絵が出ません。素材を取り込み直すか、その部品を置き直してください",
 };
+
+/**
+ * 音量の点が多すぎる、の案内（#831）。
+ *
+ * ⚠️ #723 の時点では「部品を分けてください」を書けなかった（分割が未実装＝実在しない操作を案内すると
+ * 行き止まりになる・決定5）。**分割は land 済み**（`splitClip`＝「ここで分ける」／`Ctrl+K`）だが、
+ * **読み上げは分けられない**（`isUnsplittableClipKind`）。挙げた部品が読み上げだけのとき「分けてください」
+ * を添えると、従っても分けられない＝実行できない行動を名指しすることになる（§2-5・#812 と同型）。
+ * @param hasSplittable 挙げた部品のうち分けられる種類が1つでもあるか（{@link volumePointsTooManyHasSplittable}）。
+ */
+export function volumePointsTooManyMessage(hasSplittable: boolean): string {
+  return hasSplittable
+    ? `音量の変化の点が多すぎる部品があります。1つの部品に置けるのは${VOLUME_POINTS_MAX}個までです。いらない点を外すか、部品を分けてください`
+    : `音量の変化の点が多すぎる部品があります。1つの部品に置けるのは${VOLUME_POINTS_MAX}個までです。いらない点を外してください`;
+}
+
+/** {@link exportBlockedMessage} と {@link volumePointsTooManyMessage} をコードで振り分けて1本にする。 */
+export function resolveExportBlockedMessage(code: TimelineExportBlockCode, doc: TimelineProject, clipIds: string[]): string {
+  if (code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany) return volumePointsTooManyMessage(volumePointsTooManyHasSplittable(doc, clipIds));
+  return exportBlockedMessage[code];
+}
 
 // ── 差し込み口（素材を入れる場所）の名前（§2-3：`layer.id` の生表示を防ぐ）。 ──
 // 場面編集（`SceneEditScreen`）とタイムライン編集（`TimelineProjectScreen`）が**同じ差し込み口を同じ名前で
@@ -658,11 +684,15 @@ export const KEPT_PREVIOUS_VOICE_SUFFIX = "前に作った声はそのまま使�
  * 落ちる＝出したまま誰も気づかない。
  * ⚠️ **「動かす」は共有コードのまま**（`TIMELINE_EDIT_LOCKED`）＝あちらは domain が返す断りで、
  * 画面の外（`editBlocked`）からも出る。ここは**画面が先回りして押せなくするときの説明**。
+ * ⚠️ **`"duplicate"` は持たない**（#831）＝複製ボタン・メニューはどちらも `editGuard` を通り、
+ * 固定は**選択の関門が先に締める**ので `"content"` が出る（`duplicateExtra` まで届かない）。
+ * 「複製するには」の文はどこからも呼ばれない定義だけが残っていた＝到達しない文言は持たない
+ * （§2-5・#812 と同型の後始末）。
  */
-export type LockedTrackAction = "content" | "delete" | "duplicate";
+export type LockedTrackAction = "content" | "delete";
 
 export function lockedTrackMessage(action: LockedTrackAction): string {
-  const what = action === "content" ? "中身を変える" : action === "delete" ? "削除する" : "複製する";
+  const what = action === "content" ? "中身を変える" : "削除する";
   return `この列は固定されています。${what}には固定を外してください`;
 }
 

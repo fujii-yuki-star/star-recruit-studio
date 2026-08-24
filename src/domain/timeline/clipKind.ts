@@ -30,3 +30,12 @@ export function isVisualClip(clip: TimelineClip): boolean {
     }
   }
 }
+
+/**
+ * その部品は**そもそも**分けられない種類か（位置に関わらず＝分割の入口 `splitClipIssue` と、
+ * 分けを案内してよいかの判定〔#831〕が同じものを見るための1か所）。
+ * 読み上げ＝文と音がずれる／連動している字幕＝時間は読み上げが決める（ADR-0032 決定24）。
+ */
+export function isUnsplittableClipKind(clip: TimelineClip): boolean {
+  return clip.kind === TIMELINE_CLIP_KIND.voice || clip.voiceClipId != null;
+}

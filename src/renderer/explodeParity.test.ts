@@ -174,9 +174,12 @@ describe('バラしても枠の使い方が残る', () => {
     expect(explodeTemplateClip(d, 'clip_001', videoTemplate).ok).toBe(true);
   });
 
-  // ⚠️ **立ち絵に入れた動画も同じ**（レビュー 🟡）＝変換は立ち絵も要素にするので、`assetRefs` だけを
-  // 見ていると素通りして動き出す。しかも**バラす前は書き出しを断っていた**のに、バラした後は黙って通る。
-  it('立ち絵に入れた動画があったら、バラす前に断る', () => {
+  // ⚠️ **立ち絵に入れた動画も同じく断るが、コードは別**（#831）＝変換は立ち絵も要素にするので、
+  // `assetRefs` だけを見ていると素通りして動き出す。しかも**バラす前は書き出しを断っていた**のに、
+  // バラした後は黙って通る。⚠️ **`explodeBackgroundVideo` と同じコードにしない**＝あちらの逃げ道
+  // 「差し込み口へ入れるか、写真に差し替えてから」は立ち絵を触る欄がこの画面に無く実行できない
+  // （§2-5・#812 と同型のバグだった＝差分再監査で発覚）。
+  it('立ち絵に入れた動画があったら、バラす前に断る（背景とは別コード＝#831）', () => {
     const withChar = {
       ...videoTemplate,
       layers: [
@@ -195,7 +198,34 @@ describe('バラしても枠の使い方が残る', () => {
     } as Partial<TimelineProject>);
     const r = explodeTemplateClip(d, 'clip_001', withChar);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO');
+    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_CHARACTER_VIDEO');
+  });
+
+  it('立ち絵と背景の両方に動画が入っていても、立ち絵のコードが優先される（背景側の逃げ道は無いため）', () => {
+    const withBoth = {
+      ...videoTemplate,
+      layers: [
+        { id: 'character', type: 'character', x: 0, y: 0, w: 400, h: 800 },
+        { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+        { id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 },
+      ],
+    } as unknown as Template;
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v',
+      character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' },
+      assetRefs: { background: 'asset_v2' },
+    } as TimelineClip;
+    const d = doc({
+      assets: [
+        { assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4' },
+        { assetId: 'asset_v2', assetType: 'video', displayName: '動画2', filePath: 'v2.mp4' },
+      ],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    const r = explodeTemplateClip(d, 'clip_001', withBoth);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_CHARACTER_VIDEO');
   });
 
   it('背景の層でも、写真なら断らない（動画のときだけの話）', () => {
