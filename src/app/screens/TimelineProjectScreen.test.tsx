@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // タイムライン編集プロジェクトの画面（ADR-0032・#629 骨格）。開けないときの案内と、並び・選択の見せ方を固定する。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -4883,6 +4883,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     };
     const tapAt = (root: HTMLElement, x: number, y: number, t: number): void => {
       fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
+      fireEvent.pointerUp(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
     };
 
     it("二度押しで中へ入り、その差し込み口の欄に手が移る", () => {
@@ -5048,7 +5049,11 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
       tapAt(root, 1400, 500, 1000);
       tapAt(root, 1400, 500, 1100);
       expect(document.querySelector(".timeline-drilled-part")).not.toBeNull();
-      (document.activeElement as HTMLElement).blur();
+      // ⚠️ **`act` で包む**＝ドリルインの欄は入った直後に自動でフォーカスされる（#832）ので、ここで
+      // 外す `blur()` は「名乗り」（`useEscapeOwner(drilledFieldFocused)`）を降ろす副作用を持つ。
+      // 素の DOM 呼び出しのままだと、その後始末（`owners -= 1`）が**まだ効いていない状態**で直後の
+      // `Escape` が飛び、名乗りが残ったまま扱われて`clearSelection` が動かない（実測＝変異チェックで発覚）。
+      act(() => { (document.activeElement as HTMLElement).blur(); });
       fireEvent.keyDown(window, { key: "Escape" });      // 選択を外す
       fireEvent.keyDown(window, { key: "a", ctrlKey: true }); // 全選択＝同じ部品が選ばれ直す
       expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // 選び直せている
@@ -5078,6 +5083,200 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
       tapAt(root, 1400, 500, 1000);
       expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
     });
+
+    // ⚠️ **同じ所へ入り直すと手が移らなかった**（#832 レビュー 🟡）＝「当てるのは一度だけ」を
+    // 当て先の**文字列キー**（`clipId/layerId`）で覚えていたので、抜けて同じ所へ入り直すとキーが
+    // 前回と同じになり、手が移らなかった（同じ操作の結果が2通り）。`drilled` **そのもの（同一性）**を
+    // 覚える形に直したので、入り直しは必ず手が移る。
+    it("同じ差し込み口へ入り直すと、もう一度手が移る", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("right");
+      (document.activeElement as HTMLElement).blur();
+      tapAt(root, 1400, 900, 3000); // 空白を単押し＝抜ける
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
+      // 同じ帯・同じ差し込み口へもう一度入り直す。
+      tapAt(root, 1400, 500, 5000);
+      tapAt(root, 1400, 500, 5100);
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("right"); // 手が移る
+    });
+  });
+
+  // ⚠️ **Escape の抜け方が層で割れていた**（#832・06_UI_SPEC.md「抜け方はどれでも抜ける」）＝
+  // 文字の層（`<input>`）は入力欄扱いで共有の window ハンドラに素通りされ、何も起きなかった。
+  // 差し込み口（`<select>`）は素通りされない代わりに、1段目（欄を抜ける）を持たず即座に選択解除まで
+  // 進んでいた。両方とも「1回目＝欄を抜ける・2回目＝選択解除」に揃える。
+  describe("ドリルインした欄の Escape（#832）", () => {
+    const drillTemplate: Template = {
+      schemaVersion: "1.0", templateId: "tmpl_001", name: "枠ふたつ", category: "opening",
+      aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+      layers: [
+        { id: "left", type: "slot", x: 0, y: 0, w: 960, h: 1080 },
+        { id: "right", type: "slot", x: 960, y: 0, w: 960, h: 1080 },
+        { id: "title", type: "text", textKey: "title", x: 0, y: 900, w: 1920, h: 120, fontSize: 60 },
+      ],
+    };
+    const openDrillable = (): HTMLElement => {
+      useProjectStore.setState({ templates: [drillTemplate], templateAssetSrcById: {} });
+      open({
+        assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+          startSec: 0, durationSec: 5, templateId: "tmpl_001", assetRefs: { left: "asset_001" }, texts: { title: "みだし" },
+        }],
+      });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const stage = container.querySelector(".preview-stage") as HTMLElement;
+      stage.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      const root = container.querySelector(".free-layout-overlay") as HTMLElement;
+      root.getBoundingClientRect = stage.getBoundingClientRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      return root;
+    };
+    // ⚠️ **離しも送る**＝1回目のタップは（まだ二度押しと分からないので）空白クリックとして扱われ、
+    // 範囲選択（マーキー）を始めた状態のまま止まる（`pointerDown` だけだと「掴んでいる最中」を抜けない）。
+    // 実機のクリックには必ず離しが来る＝離しが来ないと**掴んでいる最中の Escape の受け持ち**
+    // （`FreeLayoutOverlay` 側・#752）が居座り、この節が試したい「欄の Escape」より先に消費してしまう。
+    const tapAt = (root: HTMLElement, x: number, y: number, t: number): void => {
+      fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
+      fireEvent.pointerUp(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
+    };
+
+    it("文字の欄：1回目の Escape は欄を抜けるだけ・2回目で選択が解ける", () => {
+      const root = openDrillable();
+      tapAt(root, 900, 950, 1000);
+      tapAt(root, 900, 950, 1100);
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-text-field")).toBe("title");
+      fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-text-field") ?? null).toBeNull(); // 抜けた
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // まだ選択は残る
+      fireEvent.keyDown(window, { key: "Escape" }); // 2回目
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // 選択が解ける
+    });
+
+    it("差し込み口の欄：1回目の Escape は欄を抜けるだけ・2回目で選択が解ける", () => {
+      const root = openDrillable();
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("right");
+      fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field") ?? null).toBeNull(); // 抜けた
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // まだ選択は残る（以前は即座に解けていた）
+      fireEvent.keyDown(window, { key: "Escape" }); // 2回目
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
+    });
+  });
+
+  // ⚠️ **入れないときに飲み込んでいた**（#832）＝当て先が押せない／DOM に無いとき、`onDrillInAt` は
+  // `true` を返したまま印だけ出て手は移らず、単押しの解除も止まっていた。押せないときは理由を出して
+  // 従来の解除へ戻す／開けるものは開いて実際に入れる、のどちらかにする。
+  describe("入れないときは飲み込まない（#832）", () => {
+    const drillTemplate: Template = {
+      schemaVersion: "1.0", templateId: "tmpl_001", name: "枠ひとつ", category: "opening",
+      aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+      layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080 }],
+    };
+    const openDrillable = (over: Partial<TimelineProject> = {}): HTMLElement => {
+      useProjectStore.setState({ templates: [drillTemplate], templateAssetSrcById: {} });
+      open({
+        assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+          startSec: 0, durationSec: 5, templateId: "tmpl_001", assetRefs: { main: "asset_001" },
+        }],
+        ...over,
+      });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const stage = container.querySelector(".preview-stage") as HTMLElement;
+      stage.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      const root = container.querySelector(".free-layout-overlay") as HTMLElement;
+      root.getBoundingClientRect = stage.getBoundingClientRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      return root;
+    };
+    const tapAt = (root: HTMLElement, x: number, y: number, t: number): void => {
+      fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
+      fireEvent.pointerUp(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
+    };
+
+    // ⚠️ **理由は store の `editBlocked` では持てない**（#832 レビューで発覚）＝`onDrillInAt` が
+    // `false` を返すと `FreeLayoutOverlay` は続けて `onSelect(null)`（`clearSelection`）を呼び、
+    // それが `CLEARED_NOTICES` で `editBlocked` ごと**同じ押下の中で**消してしまう。画面ローカルの
+    // 知らせ（`drillBlockedNotice`）が実際に**描画されて残っている**ことまで見る。
+    it("固定した列の部品では入らず、理由を出して従来どおり選択が解ける", () => {
+      const root = openDrillable({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+      useTimelineStore.setState({ selectedClipIds: [] });
+      tapAt(root, 900, 500, 1000);
+      tapAt(root, 900, 500, 1100);
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // 選ばれない＝従来の解除
+      expect(screen.getByText(lockedTrackMessage("content"))).toBeInTheDocument(); // 理由を出す
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull(); // 印も出ない（入っていない）
+    });
+
+    // ⚠️ **書き出し中は試さない**＝`FreeLayoutOverlay`（ドリルインの入口そのもの）は `!exporting` でしか
+    // 描かれない（すぐ上の画面の描画条件）ので、書き出し中に二度押しでここへ来ること自体が無い。
+    // `onDrillInAt` 側にも `exporting` の関門は持たせていない（無い状況を確かめない＝実行できない
+    // 経路のテストを書かない）。
+
+    // ⚠️ **知らせは次の本当の選択変化まで残る**（#832）＝立てた回の「従来の解除」（selectedKey は
+    // 変わらず空のまま）では消えない。あとで別の部品を選ぶ、という**新しい**変化でだけ消える。
+    it("理由の知らせは、別の部品を選ぶまで残る", () => {
+      const root = openDrillable({ tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }] });
+      useTimelineStore.setState({ selectedClipIds: [] });
+      tapAt(root, 900, 500, 1000);
+      tapAt(root, 900, 500, 1100);
+      const msg = lockedTrackMessage("content");
+      expect(screen.getByText(msg)).toBeInTheDocument();
+      act(() => { useTimelineStore.getState().selectClips(["clip_001"]); }); // 別の（新しい）選択
+      expect(screen.queryByText(msg)).toBeNull(); // 消える
+    });
+
+    it("「選んだ部品」欄を閉じていても、二度押しで開いて入れる（節を開いても無理なときだけ戻す）", () => {
+      const root = openDrillable();
+      fireEvent.click(screen.getByLabelText("選んだ部品の欄の操作"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+      expect(screen.queryByRole("heading", { name: "選んだ部品" })).not.toBeInTheDocument(); // 前提＝閉じている
+      tapAt(root, 900, 500, 1000);
+      tapAt(root, 900, 500, 1100);
+      expect(screen.getByRole("heading", { name: "選んだ部品" })).toBeInTheDocument(); // 開けるものは開く
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // 飲み込まず、実際に入れた
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("main");
+    });
+
+    it("「この見た目パターンの中身」の節を畳んでいても、二度押しで開いて入れる", async () => {
+      const root = openDrillable();
+      // ⚠️ **先に選んで節を出してから畳む**＝節は「選んだ部品」の中にあるので、何も選んでいない
+      // 状態では存在しない（畳む操作そのものができない）。**`act` で包む**＝描画後の store 直更新を
+      // 次のクエリの前に必ず反映させる（他の直書きは `render` より前に置いて避けている・ここは
+      // 先に節を畳む必要があるので描画後にせざるを得ない）。
+      act(() => { useTimelineStore.setState({ selectedClipIds: ["clip_001"] }); });
+      // 節を畳む（画面ローカルの記憶＝#687）。
+      fireEvent.click(screen.getByText("この見た目パターンの中身"));
+      expect(screen.getByText("この見た目パターンの中身").closest("details")).toHaveProperty("open", false); // 前提＝畳んでいる
+      // ⚠️ **記憶への保存を待つ**＝`<details>` の `toggle` は非同期に発火する（`CollapsibleSection.test.tsx`
+      // と同じ流儀）。待たずに進むと「畳んだ」がまだ記憶に書かれておらず、末尾の
+      // 「ドリルインしても記憶は書き換わらない（畳んだまま）」の確認が**そもそも畳んだ記憶が
+      // 無かったから変わらなかっただけ**という空振りになる。ここで実際に書かれたことを確かめてから進む。
+      await waitFor(() => expect(localStorage.getItem("timeline.sectionOpen")).not.toBeNull());
+      expect(JSON.parse(localStorage.getItem("timeline.sectionOpen")!)).toMatchObject({ templateContent: false });
+      tapAt(root, 900, 500, 1000);
+      tapAt(root, 900, 500, 1100);
+      // ⚠️ **要素を取り直す**＝ドリルインの1回目のタップは「選択を一度解く」ぶんも兼ねる（#818）ので、
+      // 「選んだ部品」の中身（この節を含む）は一度アンマウントされ、選び直しで作り直される。
+      // 畳む前に控えた DOM 参照は**別の要素**になっている＝取り直さないと古い参照の状態を見てしまう。
+      expect(screen.getByText("この見た目パターンの中身").closest("details")).toHaveProperty("open", true); // 開けるものは開く
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("main");
+      // ⚠️ **記憶は上書きしない**＝`forceOpen` は一時的に開くだけ（`CollapsibleSection.tsx` の JSDoc）。
+      // 畳んだという利用者の設定はそのまま残る＝次にこの節が新しく作られる回（別の動画を開く等）は
+      // 畳んだまま出る。ドリルインのたびに「開いている」が既定へ書き換わってしまうことがない。
+      expect(JSON.parse(localStorage.getItem("timeline.sectionOpen")!)).toMatchObject({ templateContent: false });
+    });
   });
 
   it("見た目パターンの部品では**次の行動を出す**（欄が消えるだけにしない）", () => {
@@ -5089,6 +5288,32 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.queryByLabelText("横位置")).toBeNull();
     expect(screen.getByText(/中の位置や大きさを変えるには「中身をバラす」を使ってください/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "中身をバラす" })).toBeInTheDocument(); // 名指し先が実在する
+  });
+
+  // ⚠️ **二度押しできること自体の発見手段が無かった**（#832・06_UI_SPEC.md ①）＝印は入った**後**にしか
+  // 出ないので、印だけでは「二度押しできること」自体は見つからない。常時見える一文に足す。
+  it("差し込み口・文字がある見た目パターンでは、二度押しで直せる旨を先に知らせる", () => {
+    const drillable: Template = { ...hintTemplate, layers: [...hintTemplate.layers, { id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080 }] };
+    useProjectStore.setState({ templates: [drillable] });
+    openTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/中の写真や文字は、その場所を二度押しでも直せます/)).toBeInTheDocument();
+  });
+
+  // ⚠️ **実行できない行動を名指ししない**（§2-5）＝入れる差し込み口・文字が1つも無い見た目パターンで
+  // 「二度押しで直せる」と言うと、押しても何も起きない（`drillTargets` が空＝そもそも入れる層が無い）。
+  // ⚠️ **`background` 層は差し込み口に数える**（`templateSlotIds`＝写真を選び直せる）ので、
+  // 「入れる中身が無い」を作るには**それも持たない**層（立ち絵）だけの見た目パターンを使う。
+  it("差し込み口も文字も無い見た目パターンでは、二度押しの案内を出さない", () => {
+    const noDrillable: Template = {
+      ...hintTemplate,
+      layers: [{ id: "yuko", type: "character", x: 0, y: 0, w: 400, h: 800 }],
+    };
+    useProjectStore.setState({ templates: [noDrillable] });
+    openTemplateClip();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    expect(screen.getByText(/中の位置や大きさを変えるには「中身をバラす」を使ってください/)).toBeInTheDocument(); // 前提＝一文自体は出る
+    expect(screen.queryByText(/二度押しでも直せます/)).toBeNull();
   });
 
   // ⚠️ **無いボタンを名指ししない**（#812・§2-5）＝見た目パターンが見つからないと「中身をバラす」は

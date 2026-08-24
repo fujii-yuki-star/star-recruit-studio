@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEdgeAutoScroll } from "../hooks/useEdgeAutoScroll";
 import { isKeyboardActivation, isPointerDragging, usePointerDrag, whenPointerDragEnds } from "../hooks/usePointerDrag";
 import { playbackScrollLeft } from "../../domain/timeline/autoScroll";
@@ -553,6 +553,22 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const [lockedSkipNotice, setLockedSkipNotice] = useState<string | null>(null);
   const noticedForRef = useRef<string | null>(null);
   /**
+   * ドリルインが**押せなくて入れなかった**理由（#832）。
+   *
+   * ⚠️ **`editBlocked`（store）では持てない**＝`onDrillInAt` が `false` を返すと、`FreeLayoutOverlay`
+   * は続けて `onSelect(null)`（＝`clearSelection`）を呼ぶ。`clearSelection`/`selectClip` は
+   * `CLEARED_NOTICES`（`editBlocked: null` を含む）を巻き込むので、**同じ押下の中で自分がいま
+   * 立てた理由を自分で消してしまう**（実測＝`editBlocked` が即座に `null` に戻る）。store から独立した
+   * 画面ローカルの知らせにする。
+   *
+   * **`lockedSkipNotice` と同じ「選択が変わったら消す」共有の効果（下記）に素直に乗せてよい**＝
+   * 二度押しの1回目は（成功／失敗を問わず）**必ず** `onSelect(null)` を経る「空白を押した」扱い
+   * （`FreeLayoutOverlay` の唯一の呼び出し元＝#818 の型）なので、`onDrillInAt` が呼ばれる2回目の
+   * 時点で `selectedKey` は既に1回目の結果へ落ち着いている。2回目の `onSelect(null)` は同じ値
+   * （空のまま）へ戻すだけで**変化を起こさない**＝共有の効果はここでは再発火しない。
+   */
+  const [drillBlockedNotice, setDrillBlockedNotice] = useState<string | null>(null);
+  /**
    * 一緒に動かさなかったものを**理由別に**知らせる（#788-1）。
    *
    * ⚠️ 以前は数だけ受け取り、常に「固定された列の部品N個は…**固定を外してください**」と出していた。
@@ -599,6 +615,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setVolumeDraft("");
     // 前の選択について出した知らせを、いまの選択の返事に見せない（断り文と同じ扱い）。
     setLockedSkipNotice(null);
+    setDrillBlockedNotice(null); // ドリルインが入れなかった理由も同じ扱い（#832）。
     // 文字欄はフォーカス中に消えると `blur` が来ない＝まとめが開きっぱなしになる（#708 レビュー）。
     // 欄が入れ替わるここで必ず畳む（ドラッグが `window` で終了を拾うのと同じ役割）。
     // ⚠️ **掴んでいる最中なら開き直す**（#813）＝キャンバスで**まだ選んでいない**部品を掴むと、
@@ -782,18 +799,39 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 返すので、帯を選ぶだけで効果が走る）。
    */
   const [drilled, setDrilled] = useState<{ clipId: string; layerId: string; sel: readonly string[] } | null>(null);
-  const drilledAppliedRef = useRef<string | null>(null);
+  /**
+   * **その回の「入った」に手を移したか**（#832）＝ `drilled` **そのもの（同一性）**を覚える。
+   *
+   * ⚠️ **`clipId/layerId` の文字列キーでは覚えない**（レビュー 🟡）＝一度抜けて**同じ所へ入り直す**と
+   * キーが前回と同じになり、手が移らなくなる（同じ操作の結果が2通り）。`onDrillInAt` は入るたびに
+   * **新しい `drilled` オブジェクト**を作るので、参照の同一性で見れば「入り直し」を確実に拾える一方、
+   * `doc`/`templateOf` の変化だけで効果が再実行された回（同じ `drilled` のまま）は再度当てない。
+   */
+  const drilledAppliedRef = useRef<typeof drilled>(null);
+  /**
+   * ドリルインで入った欄（差し込み口・文字）に**いまフォーカスがあるか**（#832）。
+   *
+   * ⚠️ **`Escape` は共有の window ハンドラでは拾えない**＝入力欄は `shouldIgnoreShortcut` で素通りし、
+   * `<select>` は素通りしない代わりに**1段目を持たずに即座に選択解除まで進んでしまう**（差し込み口だけ
+   * 抜け方が変わる＝正典違反）。ここで**欄にいる間だけ名乗り**（`hasEscapeOwner`）、外側の選択解除を
+   * 1段止める＝「1段ずつはがす」の1段目（欄を抜ける＝blur）は各欄の `onKeyDown` が自分で持つ。
+   */
+  const [drilledFieldFocused, setDrilledFieldFocused] = useState(false);
+  useEscapeOwner(drilledFieldFocused);
+  /** 欄を抜けるだけ（選択は解かない）＝`Escape` の1段目（#832）。 */
+  const onDrilledFieldKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
+    if (e.key === "Escape") e.currentTarget.blur();
+  };
   // 入った直後にその欄へ手を移す（描き終わってから当てる＝欄はこの後の描画で出る）。
   useEffect(() => {
     if (!drilled) return;
-    const key = `${drilled.clipId}/${drilled.layerId}`;
-    if (drilledAppliedRef.current === key) return; // 同じ所へは一度だけ
+    if (drilledAppliedRef.current === drilled) return; // その「入った」には一度だけ
     if (!(selectedClipIds.length === 1 && selectedClipIds[0] === drilled.clipId)) return; // 別の部品を選んでいる間は当てない
     const clip = doc?.clips.find((c) => c.id === drilled.clipId);
     const tmpl = clip?.templateId != null ? templateOf(clip.templateId) : undefined;
     const target = tmpl ? drillFieldOf(tmpl, drilled.layerId) : null;
     if (!target) return;
-    drilledAppliedRef.current = key;
+    drilledAppliedRef.current = drilled;
     const [kind, name] = target.split(":");
     const el = document.querySelector<HTMLElement>(`[data-${kind === "slot" ? "slot" : "text"}-field="${CSS.escape(name)}"]`);
     el?.focus();
@@ -2452,9 +2490,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               // 届く＝ここで受けて、押した所にある**中の部分**（差し込み口・文字の層）を当てる。
               // 当たったら**その部品を選び**、その欄へ入る（幾何は触らせない＝触るなら「バラす」・決定8）。
               onDrillInAt={(pt) => {
-                if (!layout) return false;
+                if (!layout || !doc) return false;
                 const part = templatePartAt(layout, pt, (clipId, layerId) => drillTargets.get(clipId)?.has(layerId) ?? false);
                 if (!part) return false;
+                // ⚠️ **押せない（固定した列）なら、節を開いても意味が無い**（#832）＝当て先は disabled
+                // のまま DOM には残るので `document.querySelector` は見つけてしまうが `.focus()` は
+                // ブラウザが黙って無視する（disabled は焦点を持てない）。入ったふりをして印だけ出す・
+                // 単押しの解除も止める、という飲み込みを避け、**理由を出して従来の解除へ戻す**。
+                // ⚠️ **書き出し中は見ない**＝`FreeLayoutOverlay` 自体が `!exporting` でしか描かれない
+                // （すぐ上の描画条件）ので、ここに来た時点で書き出し中ではありえない。無い状況を確かめない。
+                const track = trackOf(doc.clips.find((c) => c.id === part.clipId)?.trackId ?? "");
+                if (track?.locked) {
+                  // ⚠️ **`lockedTrackMessage("content")` を使う**（レビュー ℹ️）＝試みたのは「動かす」では
+                  // なく「中へ入って中身を直す」。`lockedHint` と同じ「中身を変える」の言い方に揃える
+                  // （ADR-0026②・同概念は同じ言い方で）。
+                  setDrillBlockedNotice(lockedTrackMessage("content"));
+                  return false;
+                }
+                // **開けるものは開く**（#832）＝「選んだ部品」欄を閉じていれば戻す（下の「表示する」
+                // ボタンと同じ経路）。「この見た目パターンの中身」の節が畳まれていても開く方は
+                // `CollapsibleSection` の `forceOpen`（`drilledHere` に連動・下記）に任せる＝どちらも
+                // 「入れなかった」を作らない。
+                if (closed.includes(PANEL_ID.selected)) changeLayout(addPanelToRegion(panelLayout, PANEL_ID.selected, PANEL_REGION.left));
                 selectClip(part.clipId);
                 // **入った時点の選択そのもの**を控える（同一性で「まだ入っている」を判る）。
                 setDrilled({ ...part, sel: useTimelineStore.getState().selectedClipIds });
@@ -2983,6 +3040,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {selected.kind === TIMELINE_CLIP_KIND.template && selectedTemplate && (
               <p className="text-sm text-muted">
                 この部品は見た目パターンの枠そのものです。中の位置や大きさを変えるには「中身をバラす」を使ってください。
+                {/* ⚠️ **二度押しできること自体の発見手段**（#832）＝入った後に出る印だけでは、二度押しが
+                    できることそのものは見つからない（06_UI_SPEC.md の①）。ここに書いて先に知らせる。
+                    ⚠️ **入れる中身が無いときは書かない**＝下の「入れ替えられる中身はありません」と同じ
+                    条件（`slotLayers`/`textKeys`）＝実行できない行動を名指ししない（§2-5）。 */}
+                {(slotLayers.length > 0 || textKeys.length > 0) && " 中の写真や文字は、その場所を二度押しでも直せます。"}
               </p>
             )}
 
@@ -3716,7 +3778,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             {/* 見た目パターンの部品は、置いたあとも中身を差し替えられる（ADR-0032 決定5）。 */}
             {selected.kind === TIMELINE_CLIP_KIND.template && (
               selectedTemplate ? (
-                <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="templateContent" title="この見た目パターンの中身" defaultOpen={true}>
+                <CollapsibleSection scope={SECTION_SCOPE.timeline} storageKey="templateContent" title="この見た目パターンの中身" defaultOpen={true} forceOpen={drilledHere != null}>
                   {slotLayers.length === 0 && textKeys.length === 0 && (
                     <p className="text-muted">この見た目パターンに入れ替えられる中身はありません。</p>
                   )}
@@ -3724,11 +3786,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     <label className="field" key={layer.id}>
                       <span>{slotNames[i]}</span>
                       {/* ⚠️ **入った先が分かるようにする**（#818）＝二度押しで中へ入ったとき、
-                          その欄へ手を移す（どこを触っているのかが画面で分かる）。 */}
+                          その欄へ手を移す（どこを触っているのかが画面で分かる）。
+                          ⚠️ **Escape は欄を抜けるだけ**（#832）＝共有ハンドラへ即座に選択解除させない。 */}
                       <select className="select"
                         data-slot-field={layer.id}
                         value={selected.assetRefs?.[layer.id] ?? ""}
                         {...editGuard()}
+                        onFocus={() => setDrilledFieldFocused(true)}
+                        onBlur={() => setDrilledFieldFocused(false)}
+                        onKeyDown={onDrilledFieldKeyDown}
                         onChange={(e) => setSelectedClipAssetRef(layer.id, e.target.value || null)}
                       >
                         <option value="">なし</option>
@@ -3793,13 +3859,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   {textKeys.map((key) => (
                     <label className="field" key={key}>
                       <span>{textKeyLabel[key]}</span>
-                      {/* 入った先が分かるようにする（#818）＝差し込み口と同じく、二度押しで手が移る。 */}
+                      {/* 入った先が分かるようにする（#818）＝差し込み口と同じく、二度押しで手が移る。
+                          ⚠️ **Escape は欄を抜けるだけ**（#832）＝共有の window ハンドラは入力欄を素通り
+                          する（`shouldIgnoreShortcut`）ので、ここで自前に受けないと何も起きない。 */}
                       <input
                         className="input" type="text"
                         data-text-field={key}
                         value={selected.texts?.[key] ?? ""}
                         {...editGuard()}
-                        {...textGroup}
+                        onFocus={() => { textGroup.onFocus(); setDrilledFieldFocused(true); }}
+                        onBlur={() => { textGroup.onBlur(); setDrilledFieldFocused(false); }}
+                        onKeyDown={onDrilledFieldKeyDown}
                         onChange={(e) => setSelectedClipText(key, e.target.value)}
                       />
                     </label>
@@ -4168,11 +4238,12 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             下へ流すと、恒常の警告が出ているときに画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。
             上に積まない（編集の場所を狭めない）と、必ず気づける、を両立させるための置き方。
             ※ **その場の返事を「操作した欄の中」に出すのが本筋**（ADR-0034 決定10）＝段階0 で寄せる。 */}
-        {(voiceError || editBlocked || leaveBlockedMessage || lockedSkipNotice) && (
+        {(voiceError || editBlocked || leaveBlockedMessage || lockedSkipNotice || drillBlockedNotice) && (
           <div className="notice notice-warn timeline-flash" role="alert">
             {voiceError && <p>{voiceError}</p>}
             {editBlocked && <p>{editBlockedMessage[editBlocked]}</p>}
             {lockedSkipNotice && <p>{lockedSkipNotice}</p>}
+            {drillBlockedNotice && <p>{drillBlockedNotice}</p>}
             {leaveBlockedMessage && <p>{leaveBlockedMessage}</p>}
           </div>
         )}
