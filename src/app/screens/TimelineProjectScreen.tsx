@@ -13,7 +13,7 @@ import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepSec, zoomScrollLeft } from "../../domain/timeline/zoom";
-import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND, LAYER_TYPE } from "../../domain/enums";
+import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
@@ -130,7 +130,7 @@ const PANEL_ID = {
 const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
 import { LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
-import { templateSlotIds, usedTextKeys } from "../../domain/template/layerOps";
+import { templateSlotIds, usedTextKeys, textKeyOfLayer } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
 import type { FreeShapeType } from "../../domain/enums";
@@ -172,10 +172,9 @@ const NUDGE_SEC = 0.5;
 function drillFieldOf(template: Template, layerId: string): string | null {
   if (templateSlotIds(template.layers).has(layerId)) return `slot:${layerId}`;
   const layer = template.layers.find((l) => l.id === layerId);
-  if (layer && (layer.type === LAYER_TYPE.text || layer.type === LAYER_TYPE.subtitle) && layer.textKey) {
-    return `text:${layer.textKey}`;
-  }
-  return null;
+  // 文字の層の textKey は**解き方を1か所から**引く（`usedTextKeys` と同じ＝欄の一覧と食い違わない）。
+  const textKey = layer ? textKeyOfLayer(layer) : null;
+  return textKey ? `text:${textKey}` : null;
 }
 /**
  * キャンバスで部品を**少しだけ動かす**量（px・ADR-0034 決定18・#752-9）。
@@ -781,7 +780,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * ⚠️ **当てるのは一度だけ**＝残すと選び直しのたびに手が奪われる（`selectClip` は毎回新しい配列を
    * 返すので、帯を選ぶだけで効果が走る）。
    */
-  const [drilled, setDrilled] = useState<{ clipId: string; layerId: string } | null>(null);
+  const [drilled, setDrilled] = useState<{ clipId: string; layerId: string; sel: readonly string[] } | null>(null);
   const drilledAppliedRef = useRef<string | null>(null);
   // 入った直後にその欄へ手を移す（描き終わってから当てる＝欄はこの後の描画で出る）。
   useEffect(() => {
@@ -800,27 +799,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     el?.scrollIntoView?.({ block: "nearest" }); // 一部環境（jsdom）に無いので任意呼び出し（`PreviewScreen` と同じ）
   }, [drilled, selectedClipIds, doc, templateOf]);
   /**
-   * **選び直し**（#818）＝どこから選んでも**入った印を落とす**。落とさないと、帯を選び直しただけで
-   * 「前に入っていた層」の印が生き返る（いまの状態でないものを、いまのものとして見せる）。
-   * ⚠️ 効果の中で状態を書かない（描画が余分に走る）＝**選ぶ入口の側**で落とす。
+   * **いま効いている「入った先」**＝**入ったときの選択のまま**であるときだけ（#818 レビュー 🔴）。
+   *
+   * ⚠️ **選び直しの入口を数え上げない**＝以前は「選ぶ入口で印を落とす」形にしていたが、
+   * `Escape`・`Ctrl+A`・範囲選択・空白クリック、そして**取り消し／やり直しなど store 側の選択更新**が
+   * その入口を通らず、**触れていないのに入っている表示**が生き返った（入口を足すたびに漏れる形）。
+   * 選択は毎回**新しい配列**として作られるので、**同一性が保たれているか**を見れば、どの経路から
+   * 変わっても「もう入っていない」と判る（1か所で担保できる・ADR-0026②）。
    */
-  const clearSelectionFromUi = (): void => {
-    setDrilled(null);
-    drilledAppliedRef.current = null;
-    clearSelection();
-  };
-  const selectClipFromUi = (clipId: string, additive?: boolean): void => {
-    setDrilled(null);
-    drilledAppliedRef.current = null;
-    selectClip(clipId, additive);
-  };
-  /**
-   * **いま効いている「入った先」**＝選んでいる部品と一致するときだけ（レビュー 🔴）。
-   * ⚠️ 状態を書き戻して消さない＝効果の中で状態を書くと描画が余分に走る。**見るときに絞る**ことで、
-   * 別の部品を選んでいる間は「入っていない」扱いになる（前の部品の中に居ることにしない）。
-   */
-  const drilledHere =
-    drilled && selectedClipIds.length === 1 && selectedClipIds[0] === drilled.clipId ? drilled : null;
+  const drilledHere = drilled && drilled.sel === selectedClipIds ? drilled : null;
 
   const layout = useMemo(() => {
     if (!doc) return null;
@@ -1860,7 +1847,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する。
       // ⚠️ **まとめて掴んだときは潰さない**（#686 段階4）＝潰すと選択が1つになり、
       // 一緒に動かすはずの相手が置き去りになる（見えている群と結果が割れる）。
-      onStart: () => { if (!groupIds) selectClipFromUi(clipId); },
+      onStart: () => { if (!groupIds) selectClip(clipId); },
       onMove: (ev) => {
         // ⚠️ 掴み直してもらう道でも**送りを止める**（#714 レビュー）。止めないと rAF が回り続け、
         // 毎フレーム下の `replay` が走って**消したはずのゴーストが復活**し、枠も流れ続ける。
@@ -2088,7 +2075,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // ⚠️ いまはレーン自身に右クリックが無いので伝播先は無い（列のメニューは兄弟の行ラベルに付いている）。
     // 将来レーンへ右クリックを足したときに食い合わないための保険として残す。
     e.stopPropagation();
-    if (!selectedClipIds.includes(clipId)) selectClipFromUi(clipId);
+    if (!selectedClipIds.includes(clipId)) selectClip(clipId);
     setClipMenu({ clipId, x: e.clientX, y: e.clientY });
   };
   const menuClip = clipMenu ? doc?.clips.find((c) => c.id === clipMenu.clipId) : undefined;
@@ -2434,7 +2421,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               canvasH={canvasDims.height}
               selectedIds={selectedClipIds}
               // 空白を押したら解除（決定15＝選択モデルは1つ）。
-              onSelect={(id: string | null, additive?: boolean) => (id == null ? clearSelectionFromUi() : selectClipFromUi(id, additive))}
+              onSelect={(id: string | null, additive?: boolean) => (id == null ? clearSelection() : selectClip(id, additive))}
               onSelectMany={(ids: string[]) => selectClips(ids)}
               onChange={(id: string, g: { x: number; y: number; w?: number; h?: number }) => setClipBoxById(id, g)}
               onRotate={(id: string, rotation: number) => setClipBoxById(id, { rotation })}
@@ -2468,7 +2455,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                 const part = templatePartAt(layout, pt, (clipId, layerId) => drillTargets.get(clipId)?.has(layerId) ?? false);
                 if (!part) return false;
                 selectClip(part.clipId);
-                setDrilled(part);
+                // **入った時点の選択そのもの**を控える（同一性で「まだ入っている」を判る）。
+                setDrilled({ ...part, sel: useTimelineStore.getState().selectedClipIds });
                 return true;
               }}
             />
@@ -2787,7 +2775,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
                             // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
                             title={clipRangeTitle(clipLabel(c), c.startSec, clipEndSec(c))}
-                            onClick={(e) => { if (skipClickRef.current) { skipClickRef.current = false; return; } selectClipFromUi(c.id, e.shiftKey); }}
+                            onClick={(e) => { if (skipClickRef.current) { skipClickRef.current = false; return; } selectClip(c.id, e.shiftKey); }}
                             // 右クリックのほか、キーボードの「メニューキー」「Shift+F10」でもここが呼ばれる
                             // ＝ドラッグ専用の操作を作らない（ADR-0034 決定19）。
                             onContextMenu={(e) => openClipMenu(e, c.id)}
@@ -2837,7 +2825,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                               // メニューが画面の左上に出る。押した要素の位置から開く。
                               if (isKeyboardActivation(e)) {
                                 const r = e.currentTarget.getBoundingClientRect();
-                                if (!selectedClipIds.includes(c.id)) selectClipFromUi(c.id);
+                                if (!selectedClipIds.includes(c.id)) selectClip(c.id);
                                 setClipMenu({ clipId: c.id, x: r.left, y: r.bottom });
                                 return;
                               }

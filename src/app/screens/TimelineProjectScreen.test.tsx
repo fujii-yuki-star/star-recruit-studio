@@ -5037,6 +5037,38 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
       expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("left");
     });
 
+    // ⚠️ **どの経路で選び直しても生き返らない**（PR #828 レビュー 🔴）＝以前は「選ぶ入口で印を落とす」
+    // 形にしていたので、`Escape`・`Ctrl+A`・範囲選択・取り消しなど**入口を通らない選択更新**で
+    // 「触れていないのに入っている表示」が戻った。選択の**同一性**で見る形にして1か所で担保する。
+    it("Escape で外して Ctrl+A で選び直しても、入った印は戻らない", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      expect(document.querySelector(".timeline-drilled-part")).not.toBeNull();
+      (document.activeElement as HTMLElement).blur();
+      fireEvent.keyDown(window, { key: "Escape" });      // 選択を外す
+      fireEvent.keyDown(window, { key: "a", ctrlKey: true }); // 全選択＝同じ部品が選ばれ直す
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // 選び直せている
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull();       // それでも戻らない
+    });
+
+    // ⚠️ **取り消しなど store 側の選択更新でも戻らない**（入口を数え上げない形の要）。
+    it("取り消しで選択が入れ替わっても、入った印は戻らない", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      (document.activeElement as HTMLElement).blur();
+      act(() => { useTimelineStore.getState().selectClips(["clip_001"]); }); // store 側の選択更新
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull();
+    });
+
     it("単押しでは入らない（従来どおり選択が解ける）", () => {
       const root = openTemplateClip();
       root.getBoundingClientRect = () =>
