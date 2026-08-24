@@ -9,7 +9,7 @@
 // ここは「何フレーム描くか」と「音をどこへ置くか」だけを決め、描くのは renderer・混ぜるのは FFmpeg。
 import { audioCuesAt, audioLoops, audioSourceKey, audioSourceKeyOfClip, clipBaseVolume, clipFadeSec, isAudioClip, normalizedVolumePoints, volumeExpr } from './audio';
 import { FPS, VOLUME_POINTS_MAX } from '../constants';
-import { TIMELINE_CLIP_KIND, isFreeSlotAssetType } from '../enums';
+import { TIMELINE_CLIP_KIND, isFreeSlotAssetType, ASSET_USE_KIND } from '../enums';
 import { bgmById } from '../bgm/bgmCatalog';
 import { danglingSubtitleLinks } from './subtitleLink';
 import { fileExtension } from '../asset/assetFile';
@@ -359,14 +359,12 @@ function assetUseKey(kind: AssetUseKind, layerId: string | null): string {
 }
 
 /** 素材の使い方（`direct`＝直接置き／`slot`＝差し込み口／`character`＝立ち絵）。 */
-/**
- * 素材の**使い方**（#819-3）。値は1か所（§2-7）＝画面・domain が同じものを見る。
- * ⚠️ 直書きにしていたので、画面（`p.use === "slot"`）と domain で綴りが**別々に生きて**いた
- *（片方を変えても型が守らない）。
- */
-export const ASSET_USE_KIND = { direct: 'direct', slot: 'slot', character: 'character' } as const;
-
-export type AssetUseKind = (typeof ASSET_USE_KIND)[keyof typeof ASSET_USE_KIND];
+// 素材の使い方（`ASSET_USE_KIND`）は**中立な置き場**（`domain/enums`）にある＝作る側（`video.ts`）が
+// 実行時に読める（ここに置くと `export.ts` → `video.ts` の import と循環する）。既存の読み手のために
+// ここからも出す（import 元を散らさない）。
+export { ASSET_USE_KIND } from '../enums';
+export type { AssetUseKind } from '../enums';
+import type { AssetUseKind } from '../enums';
 
 /**
  * 同じものを**置き場所つき**で返す（#512 段3）。

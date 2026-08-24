@@ -85,8 +85,10 @@ describe('playbackScrollLeft（再生の追従）', () => {
   });
 
   it('行き止まりでは動かない（同じ値は返さず null）', () => {
-    // 中身 3000・見える幅 500 → 最大 2500。それ以上は送れない。
-    expect(playbackScrollLeft({ ...base, scrollLeft: 2500, headPx: 2900 })).toBeNull();
+    // ⚠️ **枠の外へ出したうえで**行き止まりを踏む（レビュー ℹ️）＝見える範囲の内側だと
+    // 「見えている＝動かさない」で先に返ってしまい、**狙った分岐を通らない**。
+    // 中身 3000・見える幅 500（600-100）→ 最大 2500。見えるのは [2500, 3000]。
+    expect(playbackScrollLeft({ ...base, scrollLeft: 2500, headPx: 3200 })).toBeNull();
   });
 
   it('中身が見える幅より短ければ送らない', () => {

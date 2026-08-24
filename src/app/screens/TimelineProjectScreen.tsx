@@ -2505,6 +2505,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     aria-valuenow={playheadSec}
                     aria-valuetext={`${playheadSec.toFixed(1)}秒`}
                     onClick={(e) => {
+                      // ⚠️ **掴んだ後の `click` は捨てる**（PR #827 レビュー 🟡）＝`pointerdown` の
+                      // `preventDefault` は `click` を止めないので、`Escape` で掴む前へ戻しても
+                      // **離した瞬間にここが走って離した位置で上書き**する（取り消しが効かない）。
+                      // 帯のドラッグと同じ印（`skipClickRef`）を見る＝掴む場所ごとに作法を割らない。
+                      if (skipClickRef.current) { skipClickRef.current = false; return; }
                       // 押した所に線が来る（ヘッドの位置＝秒×倍率 の逆）。範囲へ収めるのは store。
                       const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
                       setPlayhead(x / pxPerSec);
@@ -2520,11 +2525,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       if (isPlaying) return; // 再生中は掴ませない（走っている的を狙わせない・決定21）
                       const rect = e.currentTarget.getBoundingClientRect();
                       const before = playheadSec;
+                      // ⚠️ **掴んでいる間に横スクロールされてもずれない**（PR #827 レビュー ℹ️）＝
+                      // 枠は掴んだ時点で1度だけ測るので、送られたぶんを足さないと指と線が離れる
+                      //（帯のドラッグが `scrolled` で補正しているのと同じ理由・同じ形）。
+                      const startScroll = scrollRef.current?.scrollLeft ?? 0;
+                      const secAt = (ev: PointerEvent): number => {
+                        const scrolled = (scrollRef.current?.scrollLeft ?? startScroll) - startScroll;
+                        return (ev.clientX - rect.left + scrolled) / pxPerSec;
+                      };
                       beginDrag(e, {
                         startPx: 0,
-                        onMove: (ev) => setPlayhead((ev.clientX - rect.left) / pxPerSec),
+                        onMove: (ev) => setPlayhead(secAt(ev)),
                         // やめたら掴む前へ戻す（帯の移動と同じ＝中止は「無かったこと」にする）。
-                        onCancel: () => setPlayhead(before),
+                        // ⚠️ **戻した後の `click` を捨てる**＝捨てないと離した位置で上書きされる。
+                        onCancel: (started) => { setPlayhead(before); if (started) dropSkipClickSoon(); },
                       });
                     }}
                     onKeyDown={(e) => {

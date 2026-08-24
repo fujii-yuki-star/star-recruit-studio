@@ -367,3 +367,15 @@ export type WarningSeverity = (typeof WARNING_SEVERITIES)[number];
 export function isSceneCategory(value: string): value is SceneCategory {
   return (SCENE_CATEGORIES as readonly string[]).includes(value);
 }
+
+/**
+ * 素材の**使い方**（#819-3）。値は1か所（§2-7）＝作る側（`videoPlacementsOfClip`）と
+ * 数える側（`clipImageAssetUses`）と画面が同じものを見る。
+ *
+ * ⚠️ **中立な置き場に置く**（PR #827 レビュー 🟡）＝`export.ts` に置くと、値を作っている
+ * `video.ts` から実行時に読めない（`export.ts` → `video.ts` の実行時 import があるので**循環**する）。
+ * 比較側だけ定数にして**作る側が直書きのまま**では、綴りが別々に生きる状態が消えない。
+ */
+export const ASSET_USE_KIND = { direct: 'direct', slot: 'slot', character: 'character' } as const;
+
+export type AssetUseKind = (typeof ASSET_USE_KIND)[keyof typeof ASSET_USE_KIND];

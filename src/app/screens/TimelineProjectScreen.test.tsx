@@ -4258,6 +4258,37 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
       expect(useTimelineStore.getState().playheadSec).toBeCloseTo(3, 6); // 掴む前へ
     });
 
+    // ⚠️ **やめた後に離しても上書きされない**（PR #827 レビュー 🟡）＝`pointerdown` の
+    // `preventDefault` は `click` を止めないので、印を見ないと**離した位置で書き戻される**
+    //（`Escape` が効かなかったことになる）。帯のドラッグと同じ印を見る。
+    it("Escape でやめた後に指を離しても、戻した位置のまま", () => {
+      withClip(20);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.getState().setPlayhead(3); });
+      const ruler = rulerOf(container);
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 108, clientY: 0 });
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 360, clientY: 0 });
+      fireEvent.keyDown(window, { key: "Escape" });
+      // ここで実際にボタンを離す＝ブラウザは同じ要素に `click` を出す。
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 360, clientY: 0 });
+      fireEvent.click(ruler, { clientX: 360, clientY: 0 });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(3, 6);
+    });
+
+    // ⚠️ **掴んでいる間に横スクロールされてもずれない**（レビュー ℹ️）＝枠は掴んだ時点で1度だけ
+    // 測るので、送られたぶんを足さないと指と線が離れる（帯のドラッグと同じ補正）。
+    it("掴んでいる間に横スクロールされても、指の下の時刻を指す", () => {
+      withClip(60);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+      const ruler = rulerOf(container);
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+      scroll.scrollLeft = 360; // 掴んだまま 10秒ぶん送られる
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 36, clientY: 0 });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(11, 6); // 送りぶん＋1秒
+      fireEvent.pointerUp(window, { pointerId: 1 });
+    });
+
     it("再生中は掴ませない（走っている的を狙わせない・決定21）", () => {
       withClip(20);
       const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
