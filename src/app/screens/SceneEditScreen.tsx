@@ -1258,6 +1258,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               step={SEC_STEP}
               value={delaySec}
               onChange={(e) => setSpec({ mode: VIDEO_START_MODE.delay, delaySec: Number(e.target.value) })}
+              {...dragGroup}
               style={{ flex: 1 }}
               aria-label="再生を始めるまでの秒数"
             />
