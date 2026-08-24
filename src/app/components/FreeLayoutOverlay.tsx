@@ -87,6 +87,8 @@ function bandStyle(el: FreeElement): { background: string; borderRadius?: number
 }
 
 const DOUBLE_TAP_MS = 350;
+/** 空白（何も描かれていない所）を押したことを覚える印（要素 id と混ざらない・#818）。 */
+const EMPTY_TAP_ID = '';
 const DOUBLE_TAP_DIST = 12;
 
 interface OverlayProps {
@@ -160,13 +162,19 @@ interface OverlayProps {
    *（「固定を外してください」は動き起因では従っても直らない）。
    */
   onSkippedLocked?: (ids: string[]) => void;
+  /**
+   * **何も描かれていない所を二度押しした**（#818・ドリルイン）。中に入れたら `true` を返す。
+   * ⚠️ この部品は「何が入っているか」を知らない（箱を持たない部品は渡ってこない）ので、
+   * **判断は呼び出し側**。`true` のときは選択解除も範囲選択も始めない（入った直後に解かない）。
+   */
+  onDrillInAt?: (point: { x: number; y: number }) => boolean;
 }
 
 export function FreeLayoutOverlay({
   freeLayout, canvasW, canvasH, selectedIds, onSelect, onSelectMany, onChange, onMoveMany, onResizeMany, onRotate, gridSize = 0,
   onDuplicate, onBringToFront, onSendToBack, onDelete, menuGuards, onChangeText, onRequestEdit,
   onInteractionStart, onInteractionEnd,
-  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onSkippedLocked, onEditingIdChange, textFontFamily,
+  groups = [], activeGroupId = null, onSelectGroup, onGroupTransform, onSkippedLocked, onEditingIdChange, textFontFamily, onDrillInAt,
 }: OverlayProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -729,6 +737,9 @@ export function FreeLayoutOverlay({
 
   return (
     <div
+      // 触る層そのもの＝**名前を持たせる**（#818）。箱を持たない部品しか無い動画では中に要素が
+      // 1つも無く、それまでは「中の要素の親」としてしか掴めなかった（掴む手がかりが中身に依存していた）。
+      className="free-layout-overlay"
       ref={ref}
       style={{
         position: "absolute",
@@ -751,8 +762,26 @@ export function FreeLayoutOverlay({
       // 何もない所を押したら選択解除＋編集/メニューを閉じ、範囲選択（マーキー）を開始（要素/ハンドルの onPointerDown は stopPropagation 済み）。
       onPointerDown={(e) => {
         if (e.target !== e.currentTarget) return;
+        // ⚠️ **何も描かれていない所の二度押しを外へ渡す**（#818・ドリルイン）＝タイムライン形式の
+        // 見た目パターンは**箱を持たない**（枠そのもの）ので、その領域は「空白」として届く。
+        // 中に何があるかは**呼び出し側だけが知っている**（描いた結果を持っている）ので、判断を委ねる。
+        // 受け取り側が「入った」と答えたら、選択解除も範囲選択も**始めない**（入った直後に解かない）。
+        const nowTap = { id: EMPTY_TAP_ID, x: e.clientX, y: e.clientY, t: e.timeStamp };
+        const prevTap = lastTapRef.current;
+        const nearTap = prevTap != null && Math.hypot(e.clientX - prevTap.x, e.clientY - prevTap.y) < DOUBLE_TAP_DIST;
+        if (
+          onDrillInAt != null && e.button === 0 && !e.shiftKey &&
+          prevTap?.id === EMPTY_TAP_ID && e.timeStamp - prevTap.t < DOUBLE_TAP_MS && nearTap &&
+          onDrillInAt(toCanvas(e.clientX, e.clientY))
+        ) {
+          e.preventDefault();
+          lastTapRef.current = null;
+          setEditingId(null);
+          setMenu(null);
+          return;
+        }
         onSelect(null); setEditingId(null); setMenu(null); // 空白クリック＝選択解除（ドラッグせず離せば解除のまま）
-        lastTapRef.current = null; // 空白操作を挟んだら二度押し履歴を切る（#525-4 レビュー）
+        lastTapRef.current = nowTap; // 空白の二度押しを見分けるため、押した所を覚える（#818）
         if (e.button !== 0) return; // 左ボタンのみマーキー
         // 範囲選択（マーキー）開始：空白ドラッグで矩形を引き交差要素を選択（#274）。
         const p = toCanvas(e.clientX, e.clientY);

@@ -13,7 +13,7 @@ import { useProjectStore } from "../store/projectStore";
 import { frameTimeSec, timelineDurationSec } from "../../domain/timeline/persistence";
 import { effectiveFps, seekByFrames } from "../../domain/timeline/playback";
 import { DEFAULT_ZOOM_INDEX, ZOOM_LEVELS, fitZoomIndex, stepZoomIndex, tickStepSec, zoomScrollLeft } from "../../domain/timeline/zoom";
-import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
+import { CROP_MODE, CROP_MODE_DEFAULT, EASING, TIMELINE_CLIP_KIND, TRACK_KIND, LAYER_TYPE } from "../../domain/enums";
 import type { Easing, EasingSpec } from "../../domain/enums";
 import { EASE_IN_OUT_APPROX_CURVE, easingCurveOf } from "../../domain/project/keyframes";
 import { DELETE_LABEL, DUPLICATE_LABEL, TIMELINE_VIDEO_AUDIO_UNKNOWN, TIMELINE_VIDEO_NO_AUDIO, TIMELINE_VIDEO_STILL_IN_GROUP_FADE, TIMELINE_VIDEO_STILL_ROTATED_CROP, TIMELINE_VIDEO_STILL_UNPLAYABLE, lockedTrackMessage, hiddenTrackDuplicateMessage, clockLabel } from "../uiLabels";
@@ -39,7 +39,7 @@ import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { assignableAssetsFor } from "../../domain/template/slotAssign";
 import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, placementAudioState, placementOriginalAudio, videoAssetIds, videoAudioState, videoHoldsLastFrameAt, videoPlacementsOf, videoPlacementsOfClip, videoSourceSecAt, videoStagePlan } from "../../domain/timeline/video";
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
-import { layoutTimelineAt } from "../../renderer/timelineLayout";
+import { layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
 import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
@@ -162,6 +162,21 @@ const AUTOSAVE_DELAY_MS = 800;
 
 /** 「前へ／後ろへ」1回で動かす秒。細かすぎず粗すぎない刻み（再生位置へ寄せる操作と併用する前提）。 */
 const NUDGE_SEC = 0.5;
+
+/**
+ * その層の**手の移り先**（#818・ドリルイン）。`null`＝入れない層（下地・立ち絵など欄が無いもの）。
+ *
+ * ⚠️ **「下地でなければ入れる」にしない**＝欄を持たない層に入れると、二度押しが黙って飲み込まれる
+ *（入ったのに何も起きないうえ、単押しの解除まで止まる）。差し込み口は素材の欄・文字の層は文字の欄。
+ */
+function drillFieldOf(template: Template, layerId: string): string | null {
+  if (templateSlotIds(template.layers).has(layerId)) return `slot:${layerId}`;
+  const layer = template.layers.find((l) => l.id === layerId);
+  if (layer && (layer.type === LAYER_TYPE.text || layer.type === LAYER_TYPE.subtitle) && layer.textKey) {
+    return `text:${layer.textKey}`;
+  }
+  return null;
+}
 /**
  * キャンバスで部品を**少しだけ動かす**量（px・ADR-0034 決定18・#752-9）。
  * `Shift` を押している間は `NUDGE_BOX_FAST_PX`（他社の型＝細かい詰めと大きな移動を1つのキーで分ける）。
@@ -746,6 +761,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     return () => window.removeEventListener("keydown", onKey);
   }, [clearSelection, selectClips, overlayOpen, setEditBlocked]);
   const totalSec = doc ? timelineDurationSec(doc) : 0;
+
   // 数値欄の刻み＝**1フレーム**（出力の格子と同じ・#721）。⚠️ **丸めない**＝`0.033` にすると格子から外れ、
   // 30回刻んで 0.99 秒にしかならない（「格子と同じ」という約束が嘘になる・#721 レビュー）。
   const frameStepSec = 1 / (doc ? effectiveFps(doc) : FPS);
@@ -756,6 +772,56 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     const byId = new Map(templates.map((t) => [t.templateId, t]));
     return (id: string) => byId.get(id);
   }, [templates]);
+  /**
+   * **いま中へ入っている部分**（#818・ドリルイン）。`null`＝入っていない。
+   *
+   * ⚠️ **部品まで覚える**（レビュー 🔴）＝層 id は見た目パターンをまたいで重なる（`background`・
+   * `title` などは同梱の見本でも共通）。層 id だけで覚えると、**別の部品の帯を選んだだけで**
+   * 同じ id の欄へ手が飛び、そのまま矢印を押すと**再生位置を送るつもりで素材が変わる**。
+   * ⚠️ **当てるのは一度だけ**＝残すと選び直しのたびに手が奪われる（`selectClip` は毎回新しい配列を
+   * 返すので、帯を選ぶだけで効果が走る）。
+   */
+  const [drilled, setDrilled] = useState<{ clipId: string; layerId: string } | null>(null);
+  const drilledAppliedRef = useRef<string | null>(null);
+  // 入った直後にその欄へ手を移す（描き終わってから当てる＝欄はこの後の描画で出る）。
+  useEffect(() => {
+    if (!drilled) return;
+    const key = `${drilled.clipId}/${drilled.layerId}`;
+    if (drilledAppliedRef.current === key) return; // 同じ所へは一度だけ
+    if (!(selectedClipIds.length === 1 && selectedClipIds[0] === drilled.clipId)) return; // 別の部品を選んでいる間は当てない
+    const clip = doc?.clips.find((c) => c.id === drilled.clipId);
+    const tmpl = clip?.templateId != null ? templateOf(clip.templateId) : undefined;
+    const target = tmpl ? drillFieldOf(tmpl, drilled.layerId) : null;
+    if (!target) return;
+    drilledAppliedRef.current = key;
+    const [kind, name] = target.split(":");
+    const el = document.querySelector<HTMLElement>(`[data-${kind === "slot" ? "slot" : "text"}-field="${CSS.escape(name)}"]`);
+    el?.focus();
+    el?.scrollIntoView?.({ block: "nearest" }); // 一部環境（jsdom）に無いので任意呼び出し（`PreviewScreen` と同じ）
+  }, [drilled, selectedClipIds, doc, templateOf]);
+  /**
+   * **選び直し**（#818）＝どこから選んでも**入った印を落とす**。落とさないと、帯を選び直しただけで
+   * 「前に入っていた層」の印が生き返る（いまの状態でないものを、いまのものとして見せる）。
+   * ⚠️ 効果の中で状態を書かない（描画が余分に走る）＝**選ぶ入口の側**で落とす。
+   */
+  const clearSelectionFromUi = (): void => {
+    setDrilled(null);
+    drilledAppliedRef.current = null;
+    clearSelection();
+  };
+  const selectClipFromUi = (clipId: string, additive?: boolean): void => {
+    setDrilled(null);
+    drilledAppliedRef.current = null;
+    selectClip(clipId, additive);
+  };
+  /**
+   * **いま効いている「入った先」**＝選んでいる部品と一致するときだけ（レビュー 🔴）。
+   * ⚠️ 状態を書き戻して消さない＝効果の中で状態を書くと描画が余分に走る。**見るときに絞る**ことで、
+   * 別の部品を選んでいる間は「入っていない」扱いになる（前の部品の中に居ることにしない）。
+   */
+  const drilledHere =
+    drilled && selectedClipIds.length === 1 && selectedClipIds[0] === drilled.clipId ? drilled : null;
+
   const layout = useMemo(() => {
     if (!doc) return null;
     // 末尾ちょうどは1フレーム手前へ寄せる（半開区間で画面が真っ白になるのを防ぐ・`frameTimeSec`）。
@@ -1559,6 +1625,28 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   /** 選んでいる部品をキャンバスで掴めない理由（出す先＝「位置・大きさ」の欄）。 */
   const selectedOnCanvas = canvasClips.find((cc) => cc.clip.id === selected?.id);
   const selectedHoldReason = selectedOnCanvas ? canvasHoldReason(selectedOnCanvas) : null;
+  /**
+   * **中へ入れる層**（#818）＝いま描かれている見た目パターンの、**手の移り先がある**層だけ。
+   * `<部品 id>` → `<層 id>` → その欄を当てる印。
+   *
+   * ⚠️ **「下地でなければ入れる」にしない**（レビュー 🟡）＝クリップの塗り（`<部品 id>__bg`）や、
+   * 欄を持たない層まで当たると**二度押しが黙って飲み込まれる**（入ったのに何も起きないうえ、
+   * 単押しの解除まで止まる）。差し込み口は素材の欄・文字の層はその文字の欄へ移る。
+   * ⚠️ 操作の層を出すかどうかと、当て先で**同じものを見る**（触れないのに層だけ出る、を作らない）。
+   */
+  const drillTargets = new Map<string, Map<string, string>>();
+  for (const cc of canvasClips) {
+    if (cc.clip.kind !== TIMELINE_CLIP_KIND.template) continue;
+    const tmpl = cc.clip.templateId != null ? templateOf(cc.clip.templateId) : undefined;
+    if (!tmpl) continue;
+    const byLayer = new Map<string, string>();
+    for (const l of tmpl.layers) {
+      const field = drillFieldOf(tmpl, l.id);
+      if (field) byLayer.set(l.id, field);
+    }
+    if (byLayer.size > 0) drillTargets.set(cc.clip.id, byLayer);
+  }
+
   const canvasEls: FreeElement[] = canvasClips
     .filter((cc) => canHaveBox(cc.clip.kind))
     .map((cc, i) => ({
@@ -1578,6 +1666,8 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // 動きのぶんだけ絵が飛ぶ。値は数値の欄で変えられる（行き止まりにしない・決定5）。
       locked: (trackOf(cc.clip.trackId)?.locked ?? false) || canvasHoldReason(cc) != null,
     }));
+  /** 入った所の枠（描かれている場所＝当たり判定と同じ矩形）。`null`＝入っていない／もう描かれていない。 */
+  const drilledRect = layout && drilledHere ? templatePartRect(layout, drilledHere) : null;
   /** キャンバスからの編集は **`setClipBox` と同じ入口**（数値欄と置けない条件を割らない）。 */
   const setClipBoxById = (clipId: string, patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }): void => {
     if (!doc) return;
@@ -1770,7 +1860,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // 掴んだ相手を選ぶ＝「選んだ部品」の欄と一致する。
       // ⚠️ **まとめて掴んだときは潰さない**（#686 段階4）＝潰すと選択が1つになり、
       // 一緒に動かすはずの相手が置き去りになる（見えている群と結果が割れる）。
-      onStart: () => { if (!groupIds) selectClip(clipId); },
+      onStart: () => { if (!groupIds) selectClipFromUi(clipId); },
       onMove: (ev) => {
         // ⚠️ 掴み直してもらう道でも**送りを止める**（#714 レビュー）。止めないと rAF が回り続け、
         // 毎フレーム下の `replay` が走って**消したはずのゴーストが復活**し、枠も流れ続ける。
@@ -1998,7 +2088,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // ⚠️ いまはレーン自身に右クリックが無いので伝播先は無い（列のメニューは兄弟の行ラベルに付いている）。
     // 将来レーンへ右クリックを足したときに食い合わないための保険として残す。
     e.stopPropagation();
-    if (!selectedClipIds.includes(clipId)) selectClip(clipId);
+    if (!selectedClipIds.includes(clipId)) selectClipFromUi(clipId);
     setClipMenu({ clipId, x: e.clientX, y: e.clientY });
   };
   const menuClip = clipMenu ? doc?.clips.find((c) => c.id === clipMenu.clipId) : undefined;
@@ -2318,7 +2408,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               （`FreeLayoutOverlay`）を流用する＝2つの画面で操作感を割らない。ハンドルは**選んだら常に**（決定7）。
               ⚠️ **再生中・書き出し中は出さない**＝動いている絵と設計位置のハンドルがずれて見える／
               書き出し中の編集は動画に入らない（決定22・`TIMELINE_EDIT_EXPORTING` と同じ理由）。 */}
-          {!isPlaying && !exporting && canvasEls.length > 0 && (
+          {/* ⚠️ **見た目パターンだけの動画でも操作の層を出す**（#818）＝箱を持たない部品は
+              `canvasEls` に入らないので、以前は**触れる相手が1つも無い＝層ごと出していなかった**。
+              出さないと二度押しが届かず、**中へ入れない**（ドリルイン＝決定8 が成り立たない）。 */}
+          {/* ⚠️ **入った所に印を出す**（#818 レビュー 🔴・ADR-0026②＝場面編集のドリルインと同じ型）＝
+              印が無いと ①二度押しできること自体が発見できない ②どの層に入ったのか読めない
+              ③抜けたかどうかも読めない。**当たり判定と同じ矩形**を使う＝見た目と当て先がずれない。 */}
+          {!isPlaying && !exporting && drilledRect && (
+            <div
+              className="timeline-drilled-part"
+              style={{
+                left: `${(drilledRect.x / canvasDims.width) * 100}%`,
+                top: `${(drilledRect.y / canvasDims.height) * 100}%`,
+                width: `${(drilledRect.w / canvasDims.width) * 100}%`,
+                height: `${(drilledRect.h / canvasDims.height) * 100}%`,
+                ...(drilledRect.rotation ? { transform: `rotate(${drilledRect.rotation}deg)` } : {}),
+              }}
+            />
+          )}
+          {!isPlaying && !exporting && (canvasEls.length > 0 || drillTargets.size > 0) && (
             <FreeLayoutOverlay
               key={doc.projectId}
               freeLayout={canvasEls}
@@ -2326,7 +2434,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               canvasH={canvasDims.height}
               selectedIds={selectedClipIds}
               // 空白を押したら解除（決定15＝選択モデルは1つ）。
-              onSelect={(id: string | null, additive?: boolean) => (id == null ? clearSelection() : selectClip(id, additive))}
+              onSelect={(id: string | null, additive?: boolean) => (id == null ? clearSelectionFromUi() : selectClipFromUi(id, additive))}
               onSelectMany={(ids: string[]) => selectClips(ids)}
               onChange={(id: string, g: { x: number; y: number; w?: number; h?: number }) => setClipBoxById(id, g)}
               onRotate={(id: string, rotation: number) => setClipBoxById(id, { rotation })}
@@ -2351,6 +2459,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               onChangeText={(id: string, text: string) => setClipTextFor(id, text)}
               onEditingIdChange={setEditingCanvasId}
               textFontFamily={fontFamilyForId(doc.videoSettings.fontId)}
+              // ⚠️ **見た目パターンの中へ入る**（#818・ADR-0034 決定8＝二度押しで中へ）。
+              // 見た目パターンのクリップは**箱を持たない**（枠そのもの）ので、その領域は「空白」として
+              // 届く＝ここで受けて、押した所にある**中の部分**（差し込み口・文字の層）を当てる。
+              // 当たったら**その部品を選び**、その欄へ入る（幾何は触らせない＝触るなら「バラす」・決定8）。
+              onDrillInAt={(pt) => {
+                if (!layout) return false;
+                const part = templatePartAt(layout, pt, (clipId, layerId) => drillTargets.get(clipId)?.has(layerId) ?? false);
+                if (!part) return false;
+                selectClip(part.clipId);
+                setDrilled(part);
+                return true;
+              }}
             />
           )}
         </div>
@@ -2667,7 +2787,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
                             // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
                             title={clipRangeTitle(clipLabel(c), c.startSec, clipEndSec(c))}
-                            onClick={(e) => { if (skipClickRef.current) { skipClickRef.current = false; return; } selectClip(c.id, e.shiftKey); }}
+                            onClick={(e) => { if (skipClickRef.current) { skipClickRef.current = false; return; } selectClipFromUi(c.id, e.shiftKey); }}
                             // 右クリックのほか、キーボードの「メニューキー」「Shift+F10」でもここが呼ばれる
                             // ＝ドラッグ専用の操作を作らない（ADR-0034 決定19）。
                             onContextMenu={(e) => openClipMenu(e, c.id)}
@@ -2717,7 +2837,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                               // メニューが画面の左上に出る。押した要素の位置から開く。
                               if (isKeyboardActivation(e)) {
                                 const r = e.currentTarget.getBoundingClientRect();
-                                if (!selectedClipIds.includes(c.id)) selectClip(c.id);
+                                if (!selectedClipIds.includes(c.id)) selectClipFromUi(c.id);
                                 setClipMenu({ clipId: c.id, x: r.left, y: r.bottom });
                                 return;
                               }
@@ -3614,7 +3734,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   {slotLayers.map((layer, i) => (
                     <label className="field" key={layer.id}>
                       <span>{slotNames[i]}</span>
+                      {/* ⚠️ **入った先が分かるようにする**（#818）＝二度押しで中へ入ったとき、
+                          その欄へ手を移す（どこを触っているのかが画面で分かる）。 */}
                       <select className="select"
+                        data-slot-field={layer.id}
                         value={selected.assetRefs?.[layer.id] ?? ""}
                         {...editGuard()}
                         onChange={(e) => setSelectedClipAssetRef(layer.id, e.target.value || null)}
@@ -3681,8 +3804,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   {textKeys.map((key) => (
                     <label className="field" key={key}>
                       <span>{textKeyLabel[key]}</span>
+                      {/* 入った先が分かるようにする（#818）＝差し込み口と同じく、二度押しで手が移る。 */}
                       <input
                         className="input" type="text"
+                        data-text-field={key}
                         value={selected.texts?.[key] ?? ""}
                         {...editGuard()}
                         {...textGroup}

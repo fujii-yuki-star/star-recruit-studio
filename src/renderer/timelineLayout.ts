@@ -275,6 +275,61 @@ export function isItemOfClip(itemId: string, clipId: string): boolean {
 }
 
 /**
+ * その点にある**見た目パターンの中の部分**（差し込み口・文字の層）。`null`＝そこには無い（#818）。
+ *
+ * **ドリルイン**（ADR-0034 決定8＝二度押しで中へ入る）の当て先を出す。見た目パターンのクリップは
+ * 枠そのもの（箱を持たない）なので、キャンバスには**中の層しか描かれていない**＝どの層を指したかは
+ * 描いた結果から引くのが確実（テンプレの座標を画面で組み直すと、動き・まとまりの変形とずれる）。
+ *
+ * - **手前から探す**（`items` は背面→前面の順）＝重なっていたら上のものを指す（見えているものが当たる）。
+ * - **回した層は回転を戻して当てる**＝軸に沿った矩形で当てると、回した枠の外側を指しても当たる。
+ * - 見分けるのは id の作り（`<部品 id>/<層 id>`）＝**この file の中で1つ**（`isItemOfClip` と同じ理由）。
+ */
+export function templatePartAt(
+  layout: SceneLayout,
+  point: { x: number; y: number },
+  /**
+   * その部品の、その層に**入れるか**（呼び出し側だけが知っている）。
+   * ⚠️ **「入れる層」を渡してもらう**（レビュー 🟡）＝ここで「下地でなければ入れる」と決めると、
+   * クリップの塗り（id は `<部品 id>/<部品 id>__bg`）や、手を移す先の無い層まで当たってしまい、
+   * **二度押しが黙って飲み込まれる**（入ったのに何も起きない）。
+   */
+  canDrillInto: (clipId: string, layerId: string) => boolean,
+): { clipId: string; layerId: string } | null {
+  for (let i = layout.items.length - 1; i >= 0; i--) {
+    const item = layout.items[i];
+    const slash = item.id.indexOf('/');
+    if (slash <= 0) continue; // 自由配置の部品（前置きが無い）は対象外
+    const clipId = item.id.slice(0, slash);
+    const layerId = item.id.slice(slash + 1);
+    if (!canDrillInto(clipId, layerId)) continue;
+    if (hitsItem(item, point)) return { clipId, layerId };
+  }
+  return null;
+}
+
+/** 入った層の**描かれている枠**（印を出す先）。`null`＝いま描かれていない。 */
+export function templatePartRect(
+  layout: SceneLayout,
+  part: { clipId: string; layerId: string },
+): { x: number; y: number; w: number; h: number; rotation?: number } | null {
+  const item = layout.items.find((it) => it.id === `${part.clipId}/${part.layerId}`);
+  return item ? { x: item.x, y: item.y, w: item.w, h: item.h, ...(item.rotation != null ? { rotation: item.rotation } : {}) } : null;
+}
+
+/** その点がアイテムの中か（回っていれば回転を戻してから見る）。 */
+function hitsItem(item: { x: number; y: number; w: number; h: number; rotation?: number }, point: { x: number; y: number }): boolean {
+  const cx = item.x + item.w / 2;
+  const cy = item.y + item.h / 2;
+  const rad = ((item.rotation ?? 0) * Math.PI) / 180;
+  const dx = point.x - cx;
+  const dy = point.y - cy;
+  const px = cx + dx * Math.cos(-rad) - dy * Math.sin(-rad);
+  const py = cy + dx * Math.sin(-rad) + dy * Math.cos(-rad);
+  return px >= item.x && px <= item.x + item.w && py >= item.y && py <= item.y + item.h;
+}
+
+/**
  * そのアイテムが、その**動画の置き場所**のものか（#512 段3）。
  * ⚠️ 差し込み口は**部品の中の1つ**なので、部品 id だけでは足りない（同じ部品の別の枠まで
  * 動画のコマで塗ってしまう）。層 id まで見る。直接置きは部品に1つだけなので従来どおり。

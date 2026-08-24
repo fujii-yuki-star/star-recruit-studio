@@ -337,3 +337,16 @@
   border-color: var(--color-danger);
   background: rgb(214 104 95 / 18%);
 }
+
+/*
+ * **中へ入った所**（#818・ドリルイン）。場面編集のドリルインと**同じ色・同じ太さ**（`FreeLayoutOverlay`）
+ * ＝2つの画面で「いまここに入っている」の見え方を割らない（ADR-0026②）。
+ * ⚠️ **押せる相手ではない**（印だけ）＝下の操作の層を覆わない。
+ */
+.timeline-drilled-part {
+  position: absolute;
+  border: 2px solid var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.08);
+  pointer-events: none;
+  z-index: 6;
+}
