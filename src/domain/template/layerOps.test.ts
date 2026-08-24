@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Layer } from './types';
-import { addLayer, createLayerId, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys } from './layerOps';
+import { addLayer, createLayerId, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer } from './layerOps';
 
 const canvas = { width: 1920, height: 1080 };
 
@@ -92,5 +92,31 @@ describe('usedTextKeys', () => {
 
   it('テキスト層が無ければ空', () => {
     expect(usedTextKeys([g({ id: '1', type: 'slot' }), g({ id: '2', type: 'background' })])).toEqual([]);
+  });
+});
+
+// 文字の層の textKey は**解き方を1か所から**（#818 レビュー 🟡）＝呼び出し側で既定を書き直すと、
+// 欄はあるのに「無い」と判断される（ドリルインが字幕の層で空振りしていた）。
+describe('textKeyOfLayer（その層が使う textKey）', () => {
+  const layer = (over: Record<string, unknown>): Layer =>
+    ({ id: 'l1', x: 0, y: 0, w: 10, h: 10, ...over }) as Layer;
+
+  it('文字の層は持っている textKey', () => {
+    expect(textKeyOfLayer(layer({ type: 'text', textKey: 'title' }))).toBe('title');
+  });
+
+  it('字幕の層は**未指定なら subtitle**（描画の既定と同じ）', () => {
+    expect(textKeyOfLayer(layer({ type: 'subtitle' }))).toBe('subtitle');
+    expect(textKeyOfLayer(layer({ type: 'subtitle', textKey: 'body' }))).toBe('body');
+  });
+
+  it('文字を持たない層は null', () => {
+    expect(textKeyOfLayer(layer({ type: 'slot' }))).toBeNull();
+    expect(textKeyOfLayer(layer({ type: 'text' }))).toBeNull(); // 文字の層でも textKey が無ければ欄は無い
+  });
+
+  it('欄の一覧（usedTextKeys）と同じ解き方（既定が食い違わない）', () => {
+    const layers = [layer({ id: 'l1', type: 'subtitle' })];
+    expect(usedTextKeys(layers)).toEqual([textKeyOfLayer(layers[0])]);
   });
 });

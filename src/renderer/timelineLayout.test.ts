@@ -7,7 +7,7 @@ import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import { TIMELINE_SCHEMA_VERSION } from '../domain/timeline/types';
 import { layoutScene } from './layout';
 import { layoutToSvg } from './sceneSvg';
-import { clipIsLiveAt, layoutTimelineAt } from './timelineLayout';
+import { clipIsLiveAt, layoutTimelineAt, templatePartAt } from './timelineLayout';
 
 const NORMAL_TEMPLATE: Template = {
   schemaVersion: '1.0',
@@ -353,5 +353,53 @@ describe('layoutToSvg: 合成の単位はαの出どころで決まる（#631 �
     expect(items.map((i) => i.composite?.key)).toEqual(['group_001', 'group_001']);
     const svg = layoutToSvg(layoutTimelineAt(free, 0, opts));
     expect(svg.match(/<g opacity="0\.5">/g)).toHaveLength(1); // 包みは1つだけ
+  });
+});
+
+// ドリルインの当て先（#818・ADR-0034 決定8）。見た目パターンのクリップは**箱を持たない**ので、
+// キャンバスに描かれているのは中の層だけ＝どの層を指したかは**描いた結果**から引く
+//（テンプレの座標を画面で組み直すと、動き・まとまりの変形とずれる）。
+describe('templatePartAt（見た目パターンの中の部分を指す）', () => {
+  const item = (id: string, x: number, y: number, w: number, h: number, rotation?: number) =>
+    ({ id, zIndex: 0, x, y, w, h, ...(rotation != null ? { rotation } : {}), kind: 'fill', color: '#fff' }) as never;
+  const layout = (items: unknown[]) => ({ width: 1920, height: 1080, backgroundColor: '#000', items }) as never;
+  const isTemplate = (clipId: string): boolean => clipId === 'clip_001';
+
+  it('その層を指す', () => {
+    const l = layout([item('clip_001/main', 100, 100, 200, 200)]);
+    expect(templatePartAt(l, { x: 150, y: 150 }, isTemplate)).toEqual({ clipId: 'clip_001', layerId: 'main' });
+  });
+
+  it('外を指したら何も返さない', () => {
+    const l = layout([item('clip_001/main', 100, 100, 200, 200)]);
+    expect(templatePartAt(l, { x: 50, y: 50 }, isTemplate)).toBeNull();
+  });
+
+  it('重なっていたら手前のものを指す（見えているものが当たる）', () => {
+    const l = layout([item('clip_001/back', 0, 0, 500, 500), item('clip_001/front', 100, 100, 200, 200)]);
+    expect(templatePartAt(l, { x: 150, y: 150 }, isTemplate)?.layerId).toBe('front');
+  });
+
+  it('見た目パターンの部品でなければ返さない（自由配置の部品を巻き込まない）', () => {
+    const l = layout([item('clip_999/main', 100, 100, 200, 200)]);
+    expect(templatePartAt(l, { x: 150, y: 150 }, isTemplate)).toBeNull();
+  });
+
+  // ⚠️ **実際に出る id で見る**（レビュー 🟡）＝以前は `clip_001__bg` という**出ない id** を手で組んで
+  // いたので、「下地は対象にしない」が緑のまま**効いていなかった**（実際の id は `<部品>/<部品>__bg`）。
+  // 入れるかどうかは呼び出し側が決める＝下地は「入れる層」に入っていないので当たらない。
+  it('入れない層は当たらない（下地＝クリップの塗りを含む）', () => {
+    const l = layout([item('clip_001/clip_001__bg', 0, 0, 1920, 1080), item('clip_001/main', 100, 100, 200, 200)]);
+    const onlyMain = (clipId: string, layerId: string): boolean => clipId === 'clip_001' && layerId === 'main';
+    expect(templatePartAt(l, { x: 500, y: 500 }, onlyMain)).toBeNull(); // 下地の上だが入れない
+    expect(templatePartAt(l, { x: 150, y: 150 }, onlyMain)?.layerId).toBe('main');
+  });
+
+  // ⚠️ **回した層は回転を戻して当てる**＝軸に沿った矩形で当てると、回した枠の外側でも当たる。
+  it('回した層は、回した後の見た目で当たる', () => {
+    const l = layout([item('clip_001/main', 100, 100, 200, 100, 90)]);
+    // 90度回すと、見た目は中心(200,150)まわりに縦長 100×200＝x[150,250]・y[50,250]。
+    expect(templatePartAt(l, { x: 200, y: 60 }, isTemplate)?.layerId).toBe('main'); // 回した後は中
+    expect(templatePartAt(l, { x: 110, y: 150 }, isTemplate)).toBeNull();           // 素の矩形では中だが外
   });
 });

@@ -58,10 +58,23 @@ export function updateLayer(layers: Layer[], id: string, patch: Partial<Omit<Lay
 export function usedTextKeys(layers: Layer[]): TextKey[] {
   const used = new Set<TextKey>();
   for (const l of layers) {
-    if (l.type === 'text' && l.textKey) used.add(l.textKey);
-    else if (l.type === 'subtitle') used.add(l.textKey ?? TEXT_KEY.subtitle);
+    const key = textKeyOfLayer(l);
+    if (key) used.add(key);
   }
   return TEXT_KEYS.filter((k) => used.has(k));
+}
+
+/**
+ * その層が使う textKey（`null`＝文字を持たない層）。**既定の解き方はここだけ**（§2-7）。
+ *
+ * ⚠️ **字幕層は未指定なら `subtitle`**（`layoutScene` の既定束縛と同じ）＝この既定を呼び出し側で
+ * 書き直すと、**欄はあるのに「無い」と判断される**（#818 レビュー 🟡＝ドリルインが字幕の層で
+ * 空振りし、「文字の層にも入れる」が崩れていた）。
+ */
+export function textKeyOfLayer(layer: Layer): TextKey | null {
+  if (layer.type === 'text') return layer.textKey ?? null;
+  if (layer.type === 'subtitle') return layer.textKey ?? TEXT_KEY.subtitle;
+  return null;
 }
 
 /**

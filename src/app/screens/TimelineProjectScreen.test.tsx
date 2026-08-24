@@ -4853,6 +4853,233 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
   };
 
+  // ⚠️ **見た目パターンの中へ入れる**（#818・ADR-0034 決定8＝二度押しで中へ入り、差し込み口の中身は
+  // そのまま直せる）。決定8 は「(c) ドリルイン＋明示的にバラす」なのに、**バラす側しか実装されて
+  // いなかった**（#685 のクローズ時に無記録で読み替えられていた）。幾何は従来どおり「バラす」。
+  describe("見た目パターンの中へ入る（#818）", () => {
+    const drillTemplate: Template = {
+      schemaVersion: "1.0", templateId: "tmpl_001", name: "枠ふたつ", category: "opening",
+      aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+      layers: [
+        { id: "left", type: "slot", x: 0, y: 0, w: 960, h: 1080 },
+        { id: "right", type: "slot", x: 960, y: 0, w: 960, h: 1080 },
+      ],
+    };
+    const openTemplateClip = (): HTMLElement => {
+      useProjectStore.setState({ templates: [drillTemplate], templateAssetSrcById: {} });
+      open({
+        assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+          startSec: 0, durationSec: 5, templateId: "tmpl_001", assetRefs: { left: "asset_001" },
+        }],
+      });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const stage = container.querySelector(".preview-stage") as HTMLElement;
+      // jsdom は実レイアウトを持たないので、キャンバスの実寸を与える（1920×1080 と等倍）。
+      stage.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      return container.querySelector(".free-layout-overlay") as HTMLElement;
+    };
+    const tapAt = (root: HTMLElement, x: number, y: number, t: number): void => {
+      fireEvent.pointerDown(root, { button: 0, pointerId: 1, clientX: x, clientY: y, timeStamp: t });
+    };
+
+    it("二度押しで中へ入り、その差し込み口の欄に手が移る", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000); // 右の枠を1回目
+      tapAt(root, 1400, 500, 1100); // 二度押し
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // その部品が選ばれる
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("right");
+    });
+
+    // ⚠️ **入った所に印が出る**（レビュー 🔴）＝印が無いと、入ったかどうかも、どの層に入ったかも読めない。
+    it("入った所に印が出て、抜けると消える", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      const mark = document.querySelector(".timeline-drilled-part") as HTMLElement;
+      expect(mark).not.toBeNull();
+      expect(mark.style.left).toBe("50%"); // 右の枠（960/1920）
+      act(() => { useTimelineStore.getState().clearSelection(); }); // 空白を押して抜ける
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull();
+    });
+
+    // ⚠️ **文字の層にも入れる**（決定8＝「差し込み口の中身（素材・**文字**）はそのまま直せる」）。
+    it("文字の層に入ると、その文字の欄へ手が移る", () => {
+      const withText: Template = {
+        ...drillTemplate,
+        layers: [
+          ...drillTemplate.layers,
+          { id: "title", type: "text", textKey: "title", x: 0, y: 900, w: 1920, h: 120, fontSize: 60 },
+        ],
+      };
+      useProjectStore.setState({ templates: [withText], templateAssetSrcById: {} });
+      open({
+        assets: [],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+          startSec: 0, durationSec: 5, templateId: "tmpl_001", texts: { title: "みだし" },
+        }],
+      });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const root = container.querySelector(".free-layout-overlay") as HTMLElement;
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 900, 950, 1000);
+      tapAt(root, 900, 950, 1100);
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-text-field")).toBe("title");
+    });
+
+    // ⚠️ **入れない層では飲み込まない**（レビュー 🟡）＝欄の無い所で `true` を返すと、二度押しが
+    // 何も起きずに消え、**単押しの解除まで止まる**（画面が1ピクセルも変わらない）。
+    // ⚠️ 背景の層は**差し込み口に数える**（写真を入れられる）ので、入れて正しい。入れないのは
+    // 「欄を持たない所」＝ここでは**差し込み口の外**（クリップ自身の塗りしか無い所）。
+    it("欄の無い所では入らず、従来どおり選択が解ける", () => {
+      const smallSlot: Template = {
+        schemaVersion: "1.0", templateId: "tmpl_001", name: "小さい枠", category: "opening",
+        aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+        layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 400, h: 300 }],
+      };
+      useProjectStore.setState({ templates: [smallSlot], templateAssetSrcById: {} });
+      open({
+        assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+          startSec: 0, durationSec: 5, templateId: "tmpl_001", assetRefs: { main: "asset_001" },
+        }],
+      });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const root = container.querySelector(".free-layout-overlay") as HTMLElement;
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+      tapAt(root, 1400, 900, 1000); // 差し込み口の外（クリップの塗りだけの所）
+      tapAt(root, 1400, 900, 1100);
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // 飲み込まず、解除が効く
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull();
+    });
+
+    // ⚠️ **別の部品を選んだら手は飛ばない**（レビュー 🔴）＝層 id は見た目パターンをまたいで重なるので、
+    // 印を落とさないと**帯を選ぶだけで前に入った層の欄へ手が飛び**、矢印が素材を変えてしまう。
+    it("別の部品を選んでも、前に入った欄へ手が戻らない", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("right");
+      (document.activeElement as HTMLElement).blur();
+      // ⚠️ **画面の道を通す**＝store を直に叩くと、選び直しの入口（印を落とす所）を通らず再現できない。
+      tapAt(root, 1400, 900, 3000); // 空白を単押し＝抜ける
+      const band = document.querySelector(".timeline-clip") as HTMLElement;
+      fireEvent.click(band); // 帯から選び直しただけ
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field") ?? null).toBeNull();
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull(); // 印も戻らない
+    });
+
+    // ⚠️ **別の帯を挟んで戻っても、印は生き返らない**（レビュー 🔴）＝空白を押さずに帯だけで
+    // 行き来したときが本番（選び直しの入口が印を落としていないと、ここで生き返る）。
+    it("別の帯へ移ってから戻っても、前に入った所は生き返らない", () => {
+      useProjectStore.setState({ templates: [drillTemplate], templateAssetSrcById: {} });
+      open({
+        tracks: [{ id: "track_001", kind: TRACK_KIND.visual }, { id: "track_002", kind: TRACK_KIND.visual }],
+        assets: [{ assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" }],
+        clips: [
+          { id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5,
+            templateId: "tmpl_001", assetRefs: { left: "asset_001" } },
+          { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_002", startSec: 0, durationSec: 5,
+            x: 0, y: 0, w: 100, h: 50, text: "ほか" },
+        ],
+      });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const root = container.querySelector(".free-layout-overlay") as HTMLElement;
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      expect(document.querySelector(".timeline-drilled-part")).not.toBeNull();
+      (document.activeElement as HTMLElement).blur();
+      // 帯は**中身で見分ける**（並び順は列の順に依るので、位置で取ると取り違える）。
+      const bandOf = (text: string): HTMLElement =>
+        [...container.querySelectorAll(".timeline-clip")].find((b) => (b.textContent ?? "").includes(text)) as HTMLElement;
+      fireEvent.click(bandOf("ほか")); // 別の帯へ
+      fireEvent.click(bandOf("見た目パターン")); // 戻る（空白は押さない）
+      // ⚠️ **戻れていることを確かめる**＝戻れていないと「印が出ない」が当たり前になり、空振りする。
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull();
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field") ?? null).toBeNull();
+    });
+
+    // ⚠️ **当てるのは一度だけ**＝描き直しのたびに当てると、別の欄を触っている最中に手を奪われる。
+    it("入った後に別の欄を触っていても、描き直しで手を奪わない", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("right");
+      const other = document.querySelector('[data-slot-field="left"]') as HTMLElement;
+      other.focus(); // 利用者が別の欄へ移る
+      // ⚠️ **文書が変わる操作**で描き直す＝再生位置だけでは効果の材料が変わらず、この穴を突けない。
+      act(() => { useTimelineStore.getState().moveSelectedClip({ startSec: 1 }); });
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("left");
+    });
+
+    // ⚠️ **どの経路で選び直しても生き返らない**（PR #828 レビュー 🔴）＝以前は「選ぶ入口で印を落とす」
+    // 形にしていたので、`Escape`・`Ctrl+A`・範囲選択・取り消しなど**入口を通らない選択更新**で
+    // 「触れていないのに入っている表示」が戻った。選択の**同一性**で見る形にして1か所で担保する。
+    it("Escape で外して Ctrl+A で選び直しても、入った印は戻らない", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      expect(document.querySelector(".timeline-drilled-part")).not.toBeNull();
+      (document.activeElement as HTMLElement).blur();
+      fireEvent.keyDown(window, { key: "Escape" });      // 選択を外す
+      fireEvent.keyDown(window, { key: "a", ctrlKey: true }); // 全選択＝同じ部品が選ばれ直す
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // 選び直せている
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull();       // それでも戻らない
+    });
+
+    // ⚠️ **取り消しなど store 側の選択更新でも戻らない**（入口を数え上げない形の要）。
+    it("取り消しで選択が入れ替わっても、入った印は戻らない", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      (document.activeElement as HTMLElement).blur();
+      act(() => { useTimelineStore.getState().selectClips(["clip_001"]); }); // store 側の選択更新
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+      expect(document.querySelector(".timeline-drilled-part")).toBeNull();
+    });
+
+    it("単押しでは入らない（従来どおり選択が解ける）", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+      tapAt(root, 1400, 500, 1000);
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([]);
+    });
+  });
+
   it("見た目パターンの部品では**次の行動を出す**（欄が消えるだけにしない）", () => {
     // ⚠️ **見た目パターンを登録してから見る**（#812）＝以前はここが空のまま `/中身をバラす/` を
     // 見ており、**未解決なのに案内だけ出る**壊れた挙動をテストが固定していた。
