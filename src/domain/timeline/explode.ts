@@ -52,7 +52,7 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // ⚠️ **引くのは per-use ではなく実効値**（レビュー 🔴）＝`slotClips` だけを見ると、素材既定
   //（`asset.clip`）に頼っている枠が「設定なし」になり、バラした瞬間に音が消える。描画・再生と
   // **同じ解決**（`videoPlacementsOfClip`）から採る＝展開後に継承経路が無くなっても値は残る。
-  const { elements, slotLayerByElementId } = freeLayoutFromPlacedContent(scene, template, { faithful: true });
+  const { elements, slotLayerByElementId, characterElementIds } = freeLayoutFromPlacedContent(scene, template, { faithful: true });
   const placementByLayer = new Map(
     videoPlacementsOfClip(doc, clip, { templateOf: () => template }).map((pl) => [pl.layerId, pl]),
   );
@@ -70,14 +70,20 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // まとまりで隠れた層**（持ち込まない）まで数えて過剰に断る。要素から数えれば両方そろう。
   // バラすと直接置きの動画になり**動き出す**（バラす前は静止＋書き出しも断っていたのに、後は黙って通る）。
   const videoIds = videoAssetIds(doc);
-  const movesAfterExplode = elements.some(
-    (el) =>
-      el.kind === FREE_ELEMENT_KIND.slot &&
-      typeof el.assetId === 'string' &&
-      videoIds.has(el.assetId) &&
-      !placementByLayer.has(slotLayerByElementId[el.id] ?? ''),
-  );
-  if (movesAfterExplode) return { ok: false, reason: EDIT_BLOCKED.explodeBackgroundVideo };
+  const movesToVideo = (el: FreeElement): boolean =>
+    el.kind === FREE_ELEMENT_KIND.slot &&
+    typeof el.assetId === 'string' &&
+    videoIds.has(el.assetId) &&
+    !placementByLayer.has(slotLayerByElementId[el.id] ?? '');
+  // ⚠️ **立ち絵は別コードで断る**（#831）＝背景・ロゴなら「見た目パターンの中身」の欄で動画を
+  // 差し替えられる（案内どおりで解除できる）が、**立ち絵を触る欄はこの画面に無い**（`character` の
+  // 出現は話者の選択肢だけ）。同じ案内を出すと、従っても解除されない行き止まりになる（§2-5・#812 と同型）。
+  // 書き出しの断り（`TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED`）と同じ言い方＝「直接置くか差し込み口へ」
+  // が実在する行動になる（この部品を諦めて、動画は列かほかの差し込み口へ置き直す）。
+  if (elements.some((el) => characterElementIds.has(el.id) && movesToVideo(el))) {
+    return { ok: false, reason: EDIT_BLOCKED.explodeCharacterVideo };
+  }
+  if (elements.some(movesToVideo)) return { ok: false, reason: EDIT_BLOCKED.explodeBackgroundVideo };
 
   const shortened = [...placementByLayer.values()].filter((pl) => pl.durationSec < clip.durationSec);
   if (shortened.length > 0) {

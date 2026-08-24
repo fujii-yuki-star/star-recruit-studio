@@ -119,6 +119,17 @@ export const EDIT_BLOCKED = {
    */
   explodeBackgroundVideo: 'TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO',
   /**
+   * 同上だが、動くのが**立ち絵**（`character.poseAssetId`）の場合（#831）。
+   * ⚠️ **`explodeBackgroundVideo` とは別コードにする**＝あちらの逃げ道（「差し込み口へ入れるか、
+   * 写真に差し替えてから」）は「見た目パターンの中身」の欄で解決できるが、**立ち絵を触る欄は
+   * タイムライン編集画面に無い**（`character` の出現は話者の選択肢だけ）ので、同じ案内を出すと
+   * 従っても解除されない行き止まりになる（§2-5・#812 と同型）。書き出しの断り
+   * （`TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED`）と同じ言い方に揃え、「その動画は列へ直接置くか、
+   * 見た目パターンの差し込み口へ入れる」という**実在する行動**（この部品を諦めて別の置き方をする）
+   * を案内する。
+   */
+  explodeCharacterVideo: 'TIMELINE_EDIT_EXPLODE_CHARACTER_VIDEO',
+  /**
    * **素材を使い切った先**で分けようとした（#816 レビュー 🔴）。後半の頭出しがそこまで進むと、
    * 切り出す終わりを追い越して**反転レンジ**になり、終端が「無し」へ正規化される＝
    * **切り捨てたはずの先が流れ出す**（分ける前は最後のコマで凍っていた＝ADR-0026①）。

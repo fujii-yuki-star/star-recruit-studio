@@ -16,6 +16,7 @@ import { fileExtension } from '../asset/assetFile';
 import { effectiveFps, timelineFrameCount } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
 import { isDrawnClip, placementOriginalAudio, videoAssetIds, videoPlacementsOf, videoPlacementsOfClip } from './video';
+import { isUnsplittableClipKind } from './clipKind';
 import type { Template } from '../template/types';
 import type { TimelineClip, TimelineProject } from './types';
 
@@ -293,6 +294,22 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
     if (clipIds.length > 0) blockers.push({ code: TIMELINE_EXPORT_BLOCK.videoAsset, clipIds });
   }
   return blockers;
+}
+
+/**
+ * 音量の点が多すぎる部品のうち、**分けられる種類が1つでもあるか**（#831）。
+ *
+ * ⚠️ 「1つの部品に置けるのは…いらない点を外すか、部品を分けてください」は**読み上げの部品には
+ * できない**（`isUnsplittableClipKind`＝`splitClipIssue` と同じ関門）。挙げた部品が読み上げだけの
+ * ときに「分けてください」を添えると、従っても分けられない＝実行できない行動を名指しすることになる
+ * （§2-5・#812 と同型）。判定は**分割の関門と同じ関数**を通す＝ここだけ「分けられる」の定義を
+ * 書き直さない。
+ */
+export function volumePointsTooManyHasSplittable(doc: TimelineProject, clipIds: string[]): boolean {
+  return clipIds.some((id) => {
+    const clip = doc.clips.find((c) => c.id === id);
+    return clip != null && !isUnsplittableClipKind(clip);
+  });
 }
 
 /**

@@ -41,6 +41,7 @@ import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, placementA
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
+import { resolveExportBlockedMessage } from "../uiLabels";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
 import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
@@ -129,7 +130,7 @@ const PANEL_ID = {
 } as const;
 const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
-import { LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, exportBlockedMessage, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
+import { LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys, textKeyOfLayer } from "../../domain/template/layerOps";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
@@ -2503,7 +2504,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         {exportBlockers.length > 0 && !exporting && (
           <ul className="notice notice-warn" role="alert">
             {exportBlockers.map((b) => (
-              <li key={b.code}>{exportBlockedMessage[b.code]}</li>
+              <li key={b.code}>{doc && resolveExportBlockedMessage(b.code, doc, b.clipIds)}</li>
             ))}
           </ul>
         )}

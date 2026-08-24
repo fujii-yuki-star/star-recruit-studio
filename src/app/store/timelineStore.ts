@@ -71,7 +71,7 @@ import {
 } from "../../infrastructure/ffmpegExport";
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import type { Template } from "../../domain/template/types";
-import { exportBlockedMessage, KEPT_PREVIOUS_VOICE_SUFFIX } from "../uiLabels";
+import { exportBlockedMessage, resolveExportBlockedMessage, KEPT_PREVIOUS_VOICE_SUFFIX } from "../uiLabels";
 import { OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, useExportLockStore } from "./exportLock";
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
@@ -156,7 +156,7 @@ export function exportStartBlock(input: {
   if (input.voiceRunning) return { message: VOICE_BUSY_EXPORT_MESSAGE, phase: P.error, source: S.situation };
   if (input.otherExportRunning) return { message: OTHER_EXPORT_RUNNING_MESSAGE, phase: P.error, source: S.situation };
   const blockers = timelineExportBlockers(input.doc, { knownTemplateIds: input.knownTemplateIds });
-  if (blockers.length > 0) return { message: exportBlockedMessage[blockers[0].code], phase: P.error, source: S.content };
+  if (blockers.length > 0) return { message: resolveExportBlockedMessage(blockers[0].code, input.doc, blockers[0].clipIds), phase: P.error, source: S.content };
   // 「この端末では書き出せない」は失敗と別（場面形式と同じ扱い＝`11 §3.5` の `unsupported`）。
   if (!input.canExportHere) return { message: EXPORT_UNSUPPORTED_MESSAGE, phase: P.unsupported, source: S.situation };
   return null;

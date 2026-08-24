@@ -5,7 +5,7 @@ import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { TimelineClip, TimelineProject } from './types';
 import type { Template } from '../template/types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
-import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds } from './export';
+import { TIMELINE_EXPORT_BLOCK, frameTimeAt, timelineAudioRuns, timelineExportBlockers, timelineFramePlan, timelineImageAssetIds, volumePointsTooManyHasSplittable } from './export';
 import { frameTimeSec } from './persistence';
 
 function clip(id: string, over: Partial<TimelineClip> = {}): TimelineClip {
@@ -350,6 +350,30 @@ describe('timelineExportBlockers（書き出す前に止める理由）', () => 
   it('持っているだけで使っていない動画素材では止めない（消し忘れで書き出せなくならない）', () => {
     const d = doc({ assets: [videoAsset], clips: [textClip('clip_001')] });
     expect(timelineExportBlockers(d)).toEqual([]);
+  });
+});
+
+// #831＝「部品を分けてください」は読み上げには実行できない（読み上げは分けられない・`isUnsplittableClipKind`）。
+// 案内を出してよいかは**挙げた部品の種類**で決まるので、分割の関門と同じものを見て判定する。
+describe('volumePointsTooManyHasSplittable（分けを案内してよいか・#831）', () => {
+  it('音の部品（audio）は分けられる＝案内してよい', () => {
+    const d = doc({ clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.audio })] });
+    expect(volumePointsTooManyHasSplittable(d, ['clip_001'])).toBe(true);
+  });
+
+  it('読み上げ（voice）だけは分けられない＝案内してはいけない', () => {
+    const d = doc({ clips: [voiceClip('clip_001')] });
+    expect(volumePointsTooManyHasSplittable(d, ['clip_001'])).toBe(false);
+  });
+
+  it('読み上げと音が混ざっていれば、音の分だけ案内してよい', () => {
+    const d = doc({ clips: [voiceClip('clip_001'), clip('clip_002', { kind: TIMELINE_CLIP_KIND.audio })] });
+    expect(volumePointsTooManyHasSplittable(d, ['clip_001', 'clip_002'])).toBe(true);
+  });
+
+  it('見つからない id は分けられない扱い（無いものを分けてとは言わない）', () => {
+    const d = doc({ clips: [] });
+    expect(volumePointsTooManyHasSplittable(d, ['clip_missing'])).toBe(false);
   });
 });
 

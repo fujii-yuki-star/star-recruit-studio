@@ -150,15 +150,25 @@ function showsSubtitle(scene: Scene, template: Template): boolean {
  * 戻り値の `slotClips` は「新 FREE 要素 id → クリップ調整」（呼び出し側 `switchSceneTemplate` が既存 `slotClips` へマージ）。
  * 戻り値の `slotLayerByElementId` は「新 FREE 要素 id → 元の差し込み口の層 id」＝**per-use が無い枠も含む**
  * 対応表（呼び出し側が素材既定を含む実効値を引くのに使う・#512 段3b）。
+ * 戻り値の `characterElementIds` は「立ち絵層（character）から持ち込んだ要素の id」の集合（#831）＝
+ * `slotLayerByElementId` には**入らない**（差し込み口の層ではないため）が、呼び出し側が「差し込み口
+ * ではない層の動画」と「立ち絵に入れた動画」を**取り違えない**ために要る（前者は差し込み口へ入れ
+ * 直せるが、後者にその逃げ道は無い＝実行できる行動が違う）。
  */
 export function freeLayoutFromPlacedContent(
   scene: Scene,
   template: Template,
   opts: { faithful?: boolean } = {},
-): { elements: FreeElement[]; slotClips: NonNullable<Scene['slotClips']>; slotLayerByElementId: Record<string, string> } {
+): {
+  elements: FreeElement[];
+  slotClips: NonNullable<Scene['slotClips']>;
+  slotLayerByElementId: Record<string, string>;
+  characterElementIds: Set<string>;
+} {
   const elements: FreeElement[] = [];
   const slotClips: NonNullable<Scene['slotClips']> = {};
   const slotLayerByElementId: Record<string, string> = {};
+  const characterElementIds = new Set<string>();
   const nextId = (): string => createFreeElementId(elements.map((e) => e.id));
   // 通常描画（layoutScene）と同じくグループ transform を前合成し、非表示グループのメンバーは持ち込まない（ADR-0022・#524 P1）。
   // これで生の layer.x/y/w/h ではなく「実効配置」を FREE 要素へ写す＝グループ利用テンプレでも FREE 化直後に崩れない。
@@ -217,7 +227,9 @@ export function freeLayoutFromPlacedContent(
       const poseId = scene.character?.poseAssetId;
       if (!poseId) continue; // ポーズ未設定は持ち込まない
       // 立ち絵は slot 要素（画像）で持ち込む＝FREE で見えて自由に動かせる。scene.character は休眠保持（往復で戻る）。
-      elements.push({ id: nextId(), kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: poseId, fit: layer.fit ?? FIT.contain });
+      const id = nextId();
+      characterElementIds.add(id); // 差し込み口の層ではない＝slotLayerByElementId には入れない（#831）
+      elements.push({ id, kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: poseId, fit: layer.fit ?? FIT.contain });
     } else if (layer.type === 'text' && layer.textKey) {
       const text = scene.texts[layer.textKey];
       if (!text) continue; // 空文字は持ち込まない
@@ -275,7 +287,7 @@ export function freeLayoutFromPlacedContent(
       });
     }
   }
-  return { elements, slotClips, slotLayerByElementId };
+  return { elements, slotClips, slotLayerByElementId, characterElementIds };
 }
 
 /**

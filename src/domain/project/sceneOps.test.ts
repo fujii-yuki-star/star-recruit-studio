@@ -640,6 +640,33 @@ describe('switchSceneTemplate 通常↔FREE の非破壊移送（ADR-0030・#524
     expect(slotClips[mv.id]).toEqual({ speed: 2 });
   });
 
+  // #831＝バラす（explode.ts）が「立ち絵の動画」と「差し込み口でない層の動画」を取り違えないために、
+  // characterElementIds を直接見る。統合テスト（explodeParity.test.ts）だけに任せず、この関数自身の
+  // 戻り値としても固定する（§7・ほかのフィールドと同じ流儀）。
+  it('freeLayoutFromPlacedContent 単体：立ち絵の要素は characterElementIds に入る（差し込み口とは別扱い・#831）', () => {
+    const sc = { ...richScene(), character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_yuko' } } as Scene;
+    const { elements, slotLayerByElementId, characterElementIds } = freeLayoutFromPlacedContent(sc, prevTemplate());
+    const pose = elements.find((e) => e.assetId === 'asset_yuko')!;
+    expect(characterElementIds.has(pose.id)).toBe(true);
+    expect(slotLayerByElementId[pose.id]).toBeUndefined(); // 差し込み口の層ではない＝対応表には入らない（#512 段3b）
+  });
+
+  it('freeLayoutFromPlacedContent 単体：ポーズ未設定なら要素も characterElementIds も増えない', () => {
+    const sc = { ...richScene(), character: { enabled: false, characterId: 'yuko' } } as Scene; // poseAssetId なし
+    const { elements, characterElementIds } = freeLayoutFromPlacedContent(sc, prevTemplate());
+    expect(elements.some((e) => e.assetId === 'asset_yuko')).toBe(false);
+    expect(characterElementIds.size).toBe(0);
+  });
+
+  it('freeLayoutFromPlacedContent 単体：characterElementIds と slotLayerByElementId は互いに排他', () => {
+    const sc = { ...richScene(), character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_yuko' } } as Scene;
+    const { elements, slotLayerByElementId, characterElementIds } = freeLayoutFromPlacedContent(sc, prevTemplate());
+    const slotIds = new Set(Object.keys(slotLayerByElementId));
+    for (const id of characterElementIds) expect(slotIds.has(id)).toBe(false);
+    const mv = elements.find((e) => e.assetId === 'asset_v')!; // 差し込み口（mainVisual）の要素は逆に入らない
+    expect(characterElementIds.has(mv.id)).toBe(false);
+  });
+
   it('通常→FREE：グループ変形・非表示を実効配置で展開（生の座標でなく composeGroupGeometry・#524 P1）', () => {
     const grouped: Template = {
       ...prevTemplate(),

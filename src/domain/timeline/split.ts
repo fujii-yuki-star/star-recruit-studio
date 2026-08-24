@@ -28,6 +28,7 @@ import type { ClipAnimation, TimelineClip, TimelineProject } from './types';
 import type { SlotClipOverride } from '../project/types';
 import type { Template } from '../template/types';
 import { videoPlacementsOfClip } from './video';
+import { isUnsplittableClipKind } from './clipKind';
 import { ASSET_USE_KIND } from './export';
 import { resolveSlotClip } from '../asset/clip';
 import { clampProp } from './keyframeEdit';
@@ -83,7 +84,7 @@ export function splitClipIssue(
   if (!clip) return SPLIT_BLOCKED.notFound;
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return SPLIT_BLOCKED.locked;
   // 読み上げ＝文と音がずれる／連動している字幕＝時間は読み上げが決める（ADR-0032 決定24）。
-  if (clip.kind === TIMELINE_CLIP_KIND.voice || clip.voiceClipId != null) return SPLIT_BLOCKED.unsplittable;
+  if (isUnsplittableClipKind(clip)) return SPLIT_BLOCKED.unsplittable;
   const head = atSec - clip.startSec;
   const tail = clip.startSec + clip.durationSec - atSec;
   // **どちらも最小の長さを満たすときだけ**（片方が潰れる切り方をさせない）。

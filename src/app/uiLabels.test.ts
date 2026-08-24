@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
-import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage } from "./uiLabels";
+import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, resolveExportBlockedMessage } from "./uiLabels";
+import { TIMELINE_EXPORT_BLOCK } from "../domain/timeline/export";
+import { TIMELINE_CLIP_KIND, PROJECT_FORMAT } from "../domain/enums";
+import { TIMELINE_SCHEMA_VERSION } from "../domain/timeline/types";
+import type { TimelineClip, TimelineProject } from "../domain/timeline/types";
 
 // #547：一括操作は「押せない理由」と「やった結果」を言葉で出す（§2-5・15 §5「3件を自動調整、1件は確認が必要」）。
 describe("standardLookButtonReason（押せない理由・#547）", () => {
@@ -287,8 +291,9 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
     sharedFunctions: {
       lockedTrackContent: lockedTrackMessage("content"),
       lockedTrackDelete: lockedTrackMessage("delete"),
-      lockedTrackDuplicate: lockedTrackMessage("duplicate"),
       hiddenTrackDuplicate: hiddenTrackDuplicateMessage(),
+      volumePointsTooManySplittable: volumePointsTooManyMessage(true),
+      volumePointsTooManyUnsplittable: volumePointsTooManyMessage(false),
     },
   };
 
@@ -310,16 +315,24 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
 //（画面側のテストは「共有関数を通っているか」を見るので、文そのものはここでしか守れない）。
 describe("lockedTrackMessage（固定した列でできないこと）", () => {
   it("やろうとしたことで締めが変わる（全部同じ文にしない）", () => {
-    const texts = (["content", "delete", "duplicate"] as const).map((a) => lockedTrackMessage(a));
-    expect(new Set(texts).size).toBe(3);
+    const texts = (["content", "delete"] as const).map((a) => lockedTrackMessage(a));
+    expect(new Set(texts).size).toBe(2);
     expect(lockedTrackMessage("content")).toContain("中身を変える");
     expect(lockedTrackMessage("delete")).toContain("削除する");
   });
 
   it("どれも次の行動（固定を外す）で終わる＝行き止まりにしない", () => {
-    for (const a of ["content", "delete", "duplicate"] as const) {
+    for (const a of ["content", "delete"] as const) {
       expect(lockedTrackMessage(a)).toContain("固定を外してください");
     }
+  });
+
+  // #831＝複製は `editGuard` の選択の関門（"content"）が先に締めるので、複製専用の変種は
+  // どこからも呼ばれていなかった（テストだけが呼ぶ到達不能な定義）。型から `"duplicate"` を
+  // 落としたので、これ以上は `tsc` が守る（呼べば型エラー）＝ここでは残る2件の文言だけを見る。
+  it("「複製する」の文言は持たない", () => {
+    expect(lockedTrackMessage("content")).not.toContain("複製する");
+    expect(lockedTrackMessage("delete")).not.toContain("複製する");
   });
 
   // ⚠️ **共有の `TIMELINE_EDIT_HIDDEN_TRACK` を使えない理由がここにある**＝あちらの次の行動
@@ -328,4 +341,52 @@ describe("lockedTrackMessage（固定した列でできないこと）", () => {
     expect(hiddenTrackDuplicateMessage()).toContain("動画に出す");
   });
 
+});
+
+// #831＝「部品を分けてください」は読み上げには実行できない行動だった。分けられる部品が
+// 1つでもあるかで締めを変える（`lockedTrackMessage` と同じ流儀）。
+describe("volumePointsTooManyMessage（音量の点が多すぎる・分けを案内してよいか＝#831）", () => {
+  it("分けられる部品があるときだけ「部品を分けてください」を添える", () => {
+    expect(volumePointsTooManyMessage(true)).toContain("部品を分けてください");
+    expect(volumePointsTooManyMessage(false)).not.toContain("分けて");
+  });
+
+  it("読み上げだけのときも、行き止まりにしない（外すだけでも次の行動になる）", () => {
+    expect(volumePointsTooManyMessage(false)).toContain("いらない点を外してください");
+  });
+});
+
+function timelineDoc(clips: TimelineClip[]): TimelineProject {
+  return {
+    schemaVersion: TIMELINE_SCHEMA_VERSION,
+    format: PROJECT_FORMAT.timeline,
+    projectId: "proj_20260824_001",
+    projectName: "テスト",
+    createdAt: "2026-08-24T00:00:00.000Z",
+    updatedAt: "2026-08-24T00:00:00.000Z",
+    videoSettings: { aspectRatio: "16:9", fps: 30, targetDurationSec: 60, maxDurationSec: 600 },
+    voiceSettings: { defaultVoiceId: "voicevox_zundamon" },
+    assets: [],
+    tracks: [],
+    clips,
+  };
+}
+
+// `resolveExportBlockedMessage` は画面（`TimelineProjectScreen`）・`exportStartBlock` の両方が呼ぶ
+// 実際の窓口。ここが割り振りを誤ると、両方が同時に間違った文言を出す（#831）。
+describe("resolveExportBlockedMessage（コードで振り分け・#831）", () => {
+  it("volumePointsTooMany は部品の種類を見て振り分ける", () => {
+    const audio = { id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "t", startSec: 0, durationSec: 1 } as TimelineClip;
+    const voice = { id: "clip_002", kind: TIMELINE_CLIP_KIND.voice, trackId: "t", startSec: 0, durationSec: 1 } as TimelineClip;
+    expect(resolveExportBlockedMessage(TIMELINE_EXPORT_BLOCK.volumePointsTooMany, timelineDoc([audio]), ["clip_001"])).toBe(
+      volumePointsTooManyMessage(true),
+    );
+    expect(resolveExportBlockedMessage(TIMELINE_EXPORT_BLOCK.volumePointsTooMany, timelineDoc([voice]), ["clip_002"])).toBe(
+      volumePointsTooManyMessage(false),
+    );
+  });
+
+  it("ほかのコードは exportBlockedMessage をそのまま返す（doc/clipIds は見ない）", () => {
+    expect(resolveExportBlockedMessage(TIMELINE_EXPORT_BLOCK.empty, timelineDoc([]), [])).toBe(exportBlockedMessage.TIMELINE_EXPORT_EMPTY);
+  });
 });
