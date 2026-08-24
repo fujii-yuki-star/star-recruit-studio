@@ -1145,12 +1145,18 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   /** 利用者が自分で倍率を触ったか（触ったら**自動の合わせをやめる**＝勝手に戻さない）。 */
   const zoomTouchedRef = useRef(false);
   /** ホイールの実リスナーから読む今の段（リスナーは張り直さないので ref で渡す）。 */
-  // ⚠️ **再生に合わせて見える範囲を送る**（#819-1）＝送らないと、再生ヘッドが枠の外へ出た時点で
-  // **いま何が出ているのかが画面から消える**（倍率を上げるほど早く外れる）。送り方は domain の
-  // 1か所（`playbackScrollLeft`）＝ヘッドが見えている間は動かさず、外へ出たときだけページ送り。
-  // ⚠️ 早い段階（画面を返す前）に置く＝フックの数を毎回そろえる。倍率と全長はここで解き直す。
-  useEffect(() => {
-    if (!isPlaying) return;
+  /**
+   * **再生位置が枠の外にあれば、見える範囲を送る**（#819-1）＝送らないと、再生ヘッドが枠の外へ
+   * 出た時点で**いま何が出ているのかが画面から消える**（倍率を上げるほど早く外れる）。送り方は
+   * domain の1か所（`playbackScrollLeft`）＝ヘッドが見えている間は動かさず、外へ出たときだけページ送り。
+   *
+   * ⚠️ **再生中だけのものにしない**（#833-3）＝以前は再生の効果の中に閉じていたので、止まっている間に
+   * `End`・`Shift+→` で枠の外へ出しても**送らず、線を見失ったまま**だった。「勝手に動かない」は
+   * **利用者が枠を動かしたとき**の話であって、**利用者が位置を動かしたとき**は追うのが正しい。
+   * ⚠️ **位置は store から読む**＝キー操作は `setPlayhead` の直後にここを呼ぶので、描画時の
+   * `playheadSec` では1回ぶん古い（動かす**前**の位置を見て「見えている」と判断してしまう）。
+   */
+  const followPlayhead = useCallback((): void => {
     const el = scrollRef.current;
     if (!el) return;
     const px = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
@@ -1158,11 +1164,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       scrollLeft: el.scrollLeft,
       viewPx: el.clientWidth,
       contentPx: Math.max(totalSec * px, MIN_LANE_WIDTH_PX),
-      headPx: playheadSec * px,
+      headPx: useTimelineStore.getState().playheadSec * px,
       insetStartPx: LANE_LABEL_PX,
     });
     if (next != null) el.scrollLeft = next;
-  }, [isPlaying, playheadSec, zoomIndex, totalSec]);
+  }, [zoomIndex, totalSec]);
+  // ⚠️ 早い段階（画面を返す前）に置く＝フックの数を毎回そろえる。
+  useEffect(() => {
+    if (isPlaying) followPlayhead();
+  }, [isPlaying, playheadSec, followPlayhead]);
 
   const zoomIndexRef = useRef<number | null>(null);
   useEffect(() => {
@@ -1328,7 +1338,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       playing: isPlaying, total: totalSec, exporting,
       fps: doc ? Math.round(effectiveFps(doc)) : FPS,
       play, pause,
-      seekFrames: (frames) => { if (doc) setPlayhead(seekByFrames(doc, playheadSec, frames)); },
+      // 動かしたら**見える範囲も追う**（#833-3）＝ここは矢印の2つの入口（画面のキー操作・目盛り自身）が
+      // 共有する唯一の場所なので、送りもここに置けば片方だけ追わない、を作らない。
+      seekFrames: (frames) => { if (!doc) return; setPlayhead(seekByFrames(doc, playheadSec, frames)); followPlayhead(); },
     };
     removeRef.current = requestRemoveSelected;
     // ⚠️ **矢印は文脈で分かれる**（決定18・#752-9）＝キャンバスで箱を持つ部品を選んでいる間は
@@ -1421,22 +1433,49 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const skipClickRef = useRef(false);
   /**
-   * 印を**この順番の終わりで落とす**（#686 段階4 レビュー）。列をまたいで離すと帯の DOM は親ごと
-   * 作り直されるので、**その帯の `onClick` は走らない**＝印を消費する相手が誰も居ない。
-   * 残ると次の「何もない所を押して選択を解く」1回を飲み込む。離した直後の `click` は同じ順番で
-   * 来るので、`setTimeout(0)` はその**後**に走る＝消費すべき1回は守りつつ、持ち越さない。
+   * 次の `click` を1回だけ捨てる（#686 段階4 レビュー）。
+   *
+   * ⚠️ **時間で消さない**（#833-1）＝以前は `setTimeout(0)` で自分を落としていた。この形が成り立つのは
+   * 「離した順番の中で `click` が来る」`onEnd` の道**だけ**で、**`Escape` は指を離す前に走る**ため、
+   * 実機では**印が消えた後に `pointerup`→`click` が来て、離した位置で上書き**されていた
+   * （＝中止が効かなかったことになる＝PR #827 で直したはずの壊れ方がそのまま残っていた）。
+   * テストが緑だったのは `Escape` の直後に**同期で** `click` を撃っていたからで、実機の順序
+   * （やめる→時間が経つ→離す）を再現していなかった。
+   *
+   * 代わりに**次の `pointerdown` で落とす**（下の効果）＝列をまたいで離して帯の DOM が作り直され、
+   * `click` を消費する相手が誰も居ない回でも、印は**次に押し始めるまで**に必ず縮む
+   * （＝元の `setTimeout` が守っていた「持ち越さない」も同じだけ守れる）。
    */
-  const dropSkipClickSoon = (): void => {
-    skipClickRef.current = true;
-    setTimeout(() => { skipClickRef.current = false; }, 0);
-  };
+  const skipNextClick = (): void => { skipClickRef.current = true; };
+  // 持ち越さない（上記）＝**次に押し始めた時点**で落とす。`click` は必ず自分の `pointerdown` の
+  // 後に来るので、捨てるべき1回（前の操作の離し際）は守られる。捕捉段で受けるのは、画面のどの
+  // 受け口よりも先に落とすため＝掴む場所ごとに書き写さない（§6・1か所で持つ）。
+  useEffect(() => {
+    const drop = (): void => { skipClickRef.current = false; };
+    window.addEventListener("pointerdown", drop, true);
+    return () => window.removeEventListener("pointerdown", drop, true);
+  }, []);
+  /**
+   * その `click` を**掴んだ後の1回として捨てるか**（#686 段階4／#833-1 レビュー 🟡）。
+   *
+   * ⚠️ **キーボードで起こした `click` は捨てない**＝帯は `<button>` なので `Tab`→`Enter` でも `click` が
+   * 来るが、そこに `pointerdown` は**無い**。印が消費されずに残った回（列をまたいで離して DOM が
+   * 作り直された・枠の外で離した）のあと、次の操作がキーボードだけだと落とす合図が永久に来ず、
+   * **`Enter` の1回目が無言で飲み込まれる**（キーで到達できなくなる＝ADR-0034 決定19 違反）。
+   * 指の経路かどうかは `detail`（押した回数）で**状態を持たずに見分けられる**（`isKeyboardActivation`）。
+   */
   /**
    * 何もない所を押して選択を解く（#701）。**掴んだ直後の `click` では解かない**（#743 レビュー）＝
    * 帯の外で離すと `click` の相手はこの余白になるので、ここが印を見ないと**断ったそばから
    * 選択が丸ごと消える**（帯の上で離したときだけ守られる、という当たり外れを作らない）。
    */
-  const clearSelectionByClick = (): void => {
-    if (skipClickRef.current) { skipClickRef.current = false; return; }
+  const consumeSkipClick = (e: { detail: number }): boolean => {
+    if (isKeyboardActivation(e) || !skipClickRef.current) return false;
+    skipClickRef.current = false;
+    return true;
+  };
+  const clearSelectionByClick = (e: { detail: number }): void => {
+    if (consumeSkipClick(e)) return;
     clearSelection();
   };
 
@@ -1780,10 +1819,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 押せてしまうと、離してから `commit` が断る＝**押してから断る**になる（#703 で消した形の再発）。
    */
   const beginClipDrag = (e: ReactPointerEvent, clipId: string, mode: "move" | "trim-start" | "trim-end"): void => {
-    // ⚠️ 前の `click` の取りこぼしをここで捨てる（#743 レビュー）。下の断る道は `usePointerDrag` に
-    // 乗らないので、離した先が帯の外だと `click` が来ず印が残り、**次の無関係な1回を飲み込む**。
-    // 新しく掴み始めた時点で流す＝残っても「次の pointerdown まで」に必ず縮む。
-    skipClickRef.current = false;
+    // 前の `click` の取りこぼしは**共有の受け口**（`skipNextClick` の下の `pointerdown` 捕捉）が
+    // 既に落としている（#743 レビューでここに書いていた同じ処理は #833-1 で1か所へ寄せた）＝
+    // 掴む場所ごとに書き写すと、片方だけ直したときに「ここでは縮むのにあそこでは残る」が戻る。
     const doc0 = useTimelineStore.getState().doc;
     const clip0 = doc0?.clips.find((c) => c.id === clipId);
     if (!doc0 || !clip0) return;
@@ -1912,7 +1950,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         setClipDrag(null);
         // 離した後に来る `click` を捨てる＝**選び直しで理由が消える**のと、`Shift` を押していたときに
         // 動かした帯の選択が外れるのを防ぐ（`pointerdown` の `preventDefault` は `click` を止めない）。
-        dropSkipClickSoon();
+        skipNextClick();
         if (clipChanged(clip0)) return;
         // ⚠️ 確定は**最後に見せた値そのもの**（#686 段階4 レビュー）。ここで計算し直すと、
         // `Ctrl` を先に離してからボタンを離したときに**点線が出ていなかったのに落ちた瞬間に寄る**
@@ -1931,7 +1969,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         }
         else trimClipById(clipId, mode === "trim-start" ? "start" : "end", sec);
       },
-      onCancel: (started) => { autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) dropSkipClickSoon(); },
+      onCancel: (started) => { autoScroll.stop(); setClipDrag(null); setSnapGuideSec(null); if (started) skipNextClick(); },
     });
   };
 
@@ -2528,7 +2566,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           >
             {isPlaying ? "停止" : "再生"}
           </button>
-          <button className="btn btn-ghost" onClick={() => setPlayhead(0)} disabled={playheadSec === 0}>
+          <button className="btn btn-ghost" onClick={() => { setPlayhead(0); followPlayhead(); }} disabled={playheadSec === 0}>
             先頭へ
           </button>
           {exporting ? (
@@ -2587,7 +2625,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             max={Math.max(totalSec, 0.1)}
             step={0.1}
             value={playheadSec}
-            onChange={(e) => setPlayhead(Number(e.target.value))}
+            onChange={(e) => { setPlayhead(Number(e.target.value)); followPlayhead(); }}
           />
         </label>
         <p className="text-muted">
@@ -2675,7 +2713,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       // `preventDefault` は `click` を止めないので、`Escape` で掴む前へ戻しても
                       // **離した瞬間にここが走って離した位置で上書き**する（取り消しが効かない）。
                       // 帯のドラッグと同じ印（`skipClickRef`）を見る＝掴む場所ごとに作法を割らない。
-                      if (skipClickRef.current) { skipClickRef.current = false; return; }
+                      if (consumeSkipClick(e)) return;
                       // 押した所に線が来る（ヘッドの位置＝秒×倍率 の逆）。範囲へ収めるのは store。
                       const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
                       setPlayhead(x / pxPerSec);
@@ -2688,9 +2726,25 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     // ⚠️ **押した瞬間から追従させる**（`startPx: 0`）＝つまみを掴む操作なので遊びを作らない
                     //（境界を掴んで広げるのと同じ扱い）。押しただけなら `onClick` が同じ所へ跳ばす。
                     onPointerDown={(e) => {
-                      if (isPlaying) return; // 再生中は掴ませない（走っている的を狙わせない・決定21）
+                      // ⚠️ **再生中は「掴ませない」ではなく「掴んだら止まる」**（#833-2）＝
+                      // ADR-0032 決定21 が再生中に**断る**と定めるのは、再生ヘッドの**値を読む**操作
+                      //（「再生位置へ」「ここから始める」「ここで分ける」＝走っていると結果が毎回変わる）。
+                      // 目盛りは値を**書く**側なので結果は一意＝**断る理由が無い**（決定21 の対象外）。
+                      // そのうえで決定21-1 の趣旨（走らせながら位置を触らせない）に合わせ、押した時点で止める。
+                      // 以前は掴む処理だけを止めていたので、**掴める合図（`ew-resize`）は出たまま線は
+                      // 追いてこず、離した瞬間に `onClick` がそこへ跳ばす**＝#819 が直したはずの
+                      // 「掴める合図を出して掴めない」が再生中だけ残っていた。止めるのは `onPointerDown`
+                      // の1か所＝押すだけ（`onClick`）と掴む（ドラッグ）で挙動が割れない（ADR-0026②）。
+                      // ⚠️ **キーのシークは止めない**＝`11 §7.6.2.1`「再生中に位置を動かしたら時計を
+                      // 測り直す」が再生を続けたままのシークを想定している（掴みは指が離れるまで続く
+                      // 連続操作なので、走らせたままだと線と指が競合する＝そちらだけ止める）。
+                      // ⚠️ **再生中かどうかも位置も store から採る**（レビュー ℹ️）＝描画時の値は1コマぶん
+                      // 古く、`play()` の直後（まだ描き直していない）に押すと**止め損ねる**／`Escape` で
+                      // 「掴む前」ではなく1コマ前へ戻る。出どころを片方だけ store にしない。
+                      const at = useTimelineStore.getState();
+                      if (at.isPlaying) playRef.current.pause();
                       const rect = e.currentTarget.getBoundingClientRect();
-                      const before = playheadSec;
+                      const before = at.playheadSec;
                       // ⚠️ **掴んでいる間に横スクロールされてもずれない**（PR #827 レビュー ℹ️）＝
                       // 枠は掴んだ時点で1度だけ測るので、送られたぶんを足さないと指と線が離れる
                       //（帯のドラッグが `scrolled` で補正しているのと同じ理由・同じ形）。
@@ -2701,10 +2755,22 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       };
                       beginDrag(e, {
                         startPx: 0,
-                        onMove: (ev) => setPlayhead(secAt(ev)),
+                        onMove: (ev) => {
+                          const show = (e2: PointerEvent): void => setPlayhead(secAt(e2));
+                          show(ev);
+                          // ⚠️ **端まで運んだら送る**（#833-3）＝帯のドラッグは `autoScroll` を通すのに
+                          // 目盛りだけ通しておらず、**枠の外まで運んでも送りが無い**＝見えない所へ置いて
+                          // 離すことになっていた（同じ画面の掴む操作で流儀が割れていた）。入口は帯と同じ。
+                          // 送った各フレームで**指の位置をやり直す**＝送られたぶんも線が進む
+                          //（`secAt` が枠の動きを見ているので、指が止まっていても時刻は動く）。
+                          autoScroll.track(scrollRef.current, ev, show);
+                        },
+                        // ⚠️ **離したら送りを止める**＝止めないと rAF が回り続ける（帯と同じ後始末）。
+                        // 掴み終わりの `click` も捨てる＝離した位置で二度当てない（帯と同じ印）。
+                        onEnd: (_ev, started) => { autoScroll.stop(); if (started) skipNextClick(); },
                         // やめたら掴む前へ戻す（帯の移動と同じ＝中止は「無かったこと」にする）。
                         // ⚠️ **戻した後の `click` を捨てる**＝捨てないと離した位置で上書きされる。
-                        onCancel: (started) => { setPlayhead(before); if (started) dropSkipClickSoon(); },
+                        onCancel: (started) => { autoScroll.stop(); setPlayhead(before); if (started) skipNextClick(); },
                       });
                     }}
                     onKeyDown={(e) => {
@@ -2717,8 +2783,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         return;
                       }
                       // Home/End で先頭・末尾へ。画面が横スクロールしてヘッドを見失わないよう既定を止める。
-                      if (e.key === "Home") { e.preventDefault(); setPlayhead(0); return; }
-                      if (e.key === "End") { e.preventDefault(); setPlayhead(totalSec); return; }
+                      // 端へ跳んだら**見える範囲も追う**（#833-3・矢印と同じ＝`seekFrames` の中で追う）。
+                      if (e.key === "Home") { e.preventDefault(); setPlayhead(0); followPlayhead(); return; }
+                      if (e.key === "End") { e.preventDefault(); setPlayhead(totalSec); followPlayhead(); return; }
                     }}
                   >
                     {/* ⚠️ **時刻の書き方は1つにそろえる**（#819-3・§6・ADR-0026②）＝同じ画面の帯の
@@ -2765,7 +2832,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                     }`}
                     key={track.id}
                     ref={(el) => { if (el) rowRefs.current.set(track.id, el); else rowRefs.current.delete(track.id); }}
-                    onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(); }}
+                    onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(e); }}
                   >
                     {/* 操作は右クリックのメニューへ畳む＝行に文字を並べない（帯が読めなくなる・利用者指摘 2026-08-03）。
                         行に残すのは**名前と状態**だけ。右クリックできると分かるよう、同じメニューを開く小さなボタンも置く
@@ -2800,7 +2867,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       ref={(el) => { if (el) laneRefs.current.set(track.id, el); else laneRefs.current.delete(track.id); }}
                       className={`timeline-track timeline-lane${drag?.drop?.at?.trackId === track.id ? (drag.drop.issue ? " drop-target--blocked" : " drop-target") : ""}`}
                       style={{ width: laneWidthPx }}
-                      onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(); }}
+                      onClick={(e) => { if (e.target === e.currentTarget) clearSelectionByClick(e); }}
                     >
                       {/* **入る場所を実寸で見せる**（#684 レビュー）＝欄のドラッグが線で示すのと同じ流儀。
                           「その列のどこに・何秒ぶん」が見えないまま落とさせない。 */}
@@ -2833,7 +2900,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             // 帯は短いと文字が読めない＝**名前と時間帯を添える**。書式は場面形式の見わたす画面と
                             // **同じ関数**から採る（別々に書くと同じ概念が画面で違う見え方になる・ADR-0026②）。
                             title={clipRangeTitle(clipLabel(c), c.startSec, clipEndSec(c))}
-                            onClick={(e) => { if (skipClickRef.current) { skipClickRef.current = false; return; } selectClip(c.id, e.shiftKey); }}
+                            onClick={(e) => { if (consumeSkipClick(e)) return; selectClip(c.id, e.shiftKey); }}
                             // 右クリックのほか、キーボードの「メニューキー」「Shift+F10」でもここが呼ばれる
                             // ＝ドラッグ専用の操作を作らない（ADR-0034 決定19）。
                             onContextMenu={(e) => openClipMenu(e, c.id)}
@@ -3401,7 +3468,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             ))}
                           </div>
                         )}
-                        <button className="btn btn-ghost btn-sm" onClick={() => setPlayhead(selectedOrigin + k.timeSec)}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => { setPlayhead(selectedOrigin + k.timeSec); followPlayhead(); }}>
                           この位置へ
                         </button>
                         <button
@@ -3704,7 +3771,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                         {(selected.startSec + p.timeSec).toFixed(2)}秒：音量 {p.volume}
                         <button
                           className="btn btn-ghost btn-sm"
-                          onClick={() => setPlayhead(selected.startSec + p.timeSec)}
+                          onClick={() => { setPlayhead(selected.startSec + p.timeSec); followPlayhead(); }}
                         >
                           この位置へ
                         </button>

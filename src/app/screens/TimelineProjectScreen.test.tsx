@@ -1306,6 +1306,24 @@ describe("TimelineProjectScreen: 音量の変化（#512 段4）", () => {
     expect(useTimelineStore.getState().doc?.clips[0].volumePoints).toBeUndefined();
   });
 
+  // ⚠️ **跳んだ先が見えるところまで送る**（#833-3 レビュー 🟡）＝「この位置へ」は枠の外へ跳ぶ確率が
+  // いちばん高い（長い部品の後ろのほうに置いた点）。送らないと**跳んだのに何も見えない**＝#819-1 の症状そのもの。
+  it("「この位置へ」で枠の外の点へ跳んだら、見えるところまで送る", () => {
+    withAudio({
+      clips: [{
+        id: "clip_001", kind: TIMELINE_CLIP_KIND.audio, trackId: "track_002", startSec: 0, durationSec: 60,
+        bundledBgmId: "found-new-hope", volumePoints: [{ timeSec: 40, volume: 0.4 }],
+      }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
+    expect(scroll.scrollLeft).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "この位置へ" }));
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(40, 6);
+    expect(scroll.scrollLeft).toBe(40 * 36); // 跳んだ先が左端に来るよう送る
+  });
+
   it("上限に達したら置かずに「次の行動」を出す（§2-5）", () => {
     const full = Array.from({ length: VOLUME_POINTS_MAX }, (_, i) => ({ timeSec: i * 0.1, volume: 0.5 }));
     withAudio({
@@ -4261,7 +4279,7 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
     // ⚠️ **やめた後に離しても上書きされない**（PR #827 レビュー 🟡）＝`pointerdown` の
     // `preventDefault` は `click` を止めないので、印を見ないと**離した位置で書き戻される**
     //（`Escape` が効かなかったことになる）。帯のドラッグと同じ印を見る。
-    it("Escape でやめた後に指を離しても、戻した位置のまま", () => {
+    it("Escape でやめた後、時間が経ってから指を離しても戻した位置のまま", async () => {
       withClip(20);
       const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
       act(() => { useTimelineStore.getState().setPlayhead(3); });
@@ -4269,9 +4287,14 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
       fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 108, clientY: 0 });
       fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 360, clientY: 0 });
       fireEvent.keyDown(window, { key: "Escape" });
+      // ⚠️ **実機の順序を再現する**（#833-1）＝`Escape` は**指を離す前**に走るので、やめてから離すまでには
+      // 必ず時間が経つ。ここを飛ばして `Escape` の直後に同期で `click` を撃つと、**印を `setTimeout(0)`
+      // で自分から落とす実装でも緑になる**＝実機でだけ壊れているのを見逃す（それが #833-1 で起きたこと。
+      // PR #827 で直したはずの壊れ方が、テストに守られないまま残っていた）。
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
       // ここで実際にボタンを離す＝ブラウザは同じ要素に `click` を出す。
       fireEvent.pointerUp(window, { pointerId: 1, clientX: 360, clientY: 0 });
-      fireEvent.click(ruler, { clientX: 360, clientY: 0 });
+      fireEvent.click(ruler, { clientX: 360, clientY: 0, detail: 1 }); // 指の経路
       expect(useTimelineStore.getState().playheadSec).toBeCloseTo(3, 6);
     });
 
@@ -4289,15 +4312,73 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
       fireEvent.pointerUp(window, { pointerId: 1 });
     });
 
-    it("再生中は掴ませない（走っている的を狙わせない・決定21）", () => {
+    // ⚠️ **再生中は「掴ませない」ではなく「掴んだら止まる」**（#833-2・ADR-0032 決定21）＝
+    // 決定21 が再生中に押させないと定めるのは**位置を使う**操作（「ここで分ける」等＝走っていると
+    // 同じ操作の結果が毎回変わる）。目盛りは位置を**決める**側で結果は一意なので、決定21 の
+    // 「押せるが、押した時点で再生は止まる」に当たる。以前は掴む処理だけを止めており、
+    // **掴める合図（`ew-resize`）は出たまま線は追いてこず、離した瞬間に `onClick` がそこへ跳ばす**
+    // ＝#819 が直したはずの「掴める合図を出して掴めない」が再生中だけ残っていた。
+    it("再生中に掴むと再生が止まり、そのまま線が追いてくる", () => {
       withClip(20);
       const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
       act(() => { useTimelineStore.setState({ isPlaying: true }); });
       const ruler = rulerOf(container);
       fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+      expect(useTimelineStore.getState().isPlaying).toBe(false); // 掴んだ時点で止まる
       fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 360, clientY: 0 });
-      expect(useTimelineStore.getState().playheadSec).toBe(0); // 追従しない
-      act(() => { useTimelineStore.setState({ isPlaying: false }); });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(10, 6); // 追いてくる（掴めない、を作らない）
+      fireEvent.pointerUp(window, { pointerId: 1 });
+    });
+
+    // ⚠️ **戻す先は store のいまの値**（レビュー 🟡）＝再生中は描画時の `playheadSec` が1コマぶん古いので、
+    // クロージャの値で覚えると `Escape` が「掴む前」ではなく**1コマ前**へ戻す。ここでは再帰描画を挟まずに
+    // store だけを進めて（＝描画時の値と store の値をわざとずらして）、戻り先が store 側であることを見る。
+    it("再生中に掴んだときの戻し先は、描画時の値ではなくそのときの位置", () => {
+      withClip(20);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.setState({ isPlaying: true }); });
+      const ruler = rulerOf(container);
+      // 描き直しを挟まずに位置だけ進める＝この時点で「描画時の値」と store の値がずれる。
+      useTimelineStore.setState({ playheadSec: 7 });
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 252, clientY: 0 });
+      fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 540, clientY: 0 });
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(7, 6); // ずれた側ではなく、掴んだ時点の位置
+    });
+
+    // ⚠️ **掴んで枠の外へ運んだら送る**（#833-3）＝帯のドラッグは `autoScroll` を通すのに目盛りだけ
+    // 通しておらず、**枠の外まで運んでも送りが無い**＝見えない所へ置いて離すことになっていた
+    //（同じ画面の掴む操作で流儀が割れていた＝ADR-0026②）。入口は帯と同じ `useEdgeAutoScroll`。
+    it("掴んだまま端まで運ぶと送りが走り、離すと止まる", () => {
+      const frames: Array<(t: number) => void> = [];
+      vi.stubGlobal("requestAnimationFrame", (cb: (t: number) => void) => { frames.push(cb); return frames.length; });
+      vi.stubGlobal("cancelAnimationFrame", () => { frames.length = 0; });
+      try {
+        withClip(60);
+        const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+        const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+        // jsdom は実寸を持たないので、**送れる枠**として必要な値だけ差し込む。
+        Object.defineProperty(scroll, "clientWidth", { value: 600, configurable: true });
+        Object.defineProperty(scroll, "scrollWidth", { value: 3000, configurable: true });
+        // ⚠️ jsdom は**貼り付いた要素の `scrollLeft` を動かさない**（常に 0 を返す）ので、
+        // そのままだと「送っても値が変わらない」＝配線し忘れても症状が出ず**通るだけのテスト**になる。
+        let sl = 0;
+        Object.defineProperty(scroll, "scrollLeft", { get: () => sl, set: (v: number) => { sl = v; }, configurable: true });
+        scroll.getBoundingClientRect = () => ({ left: 0, top: 0, right: 600, bottom: 100, width: 600, height: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+        const ruler = rulerOf(container);
+        fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 0, clientY: 10 });
+        fireEvent.pointerMove(window, { buttons: 1, pointerId: 1, clientX: 590, clientY: 10 }); // 右端の送る帯へ
+        expect(frames.length).toBeGreaterThan(0); // 送りが走っている
+        act(() => { frames.splice(0).forEach((cb) => cb(1000)); });
+        act(() => { frames.splice(0).forEach((cb) => cb(2000)); }); // （1フレーム目は dt=0 になりうる）
+        expect(scroll.scrollLeft).toBeGreaterThan(0); // 実際に送られた＝見えない所へ置かせない
+        fireEvent.pointerUp(window, { pointerId: 1, clientX: 590, clientY: 10 });
+        const after = scroll.scrollLeft;
+        act(() => { frames.splice(0).forEach((cb) => cb(3000)); });
+        expect(scroll.scrollLeft).toBe(after); // 離したら止まる（rAF が回り続けない）
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
   });
 
@@ -4316,13 +4397,71 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
     act(() => { useTimelineStore.setState({ isPlaying: false }); });
   });
 
-  it("止まっている間は送らない（勝手に画面が動かない）", () => {
+  // ⚠️ **境界は「誰が動かしたか」**（#833-3）＝位置が変わっただけ（外から・取り消しなど）では送らない。
+  // 送るのは**利用者がその操作で位置を動かしたとき**だけ（下の2件）＝「勝手に画面が動かない」は保つ。
+  it("止まっている間、位置が変わっただけでは送らない（勝手に画面が動かない）", () => {
     withClip(60);
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
     Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
     act(() => { useTimelineStore.getState().setPlayhead(20) ; });
     expect(scroll.scrollLeft).toBe(0);
+  });
+
+  // ⚠️ **止まっていても、利用者が位置を動かしたら追う**（#833-3）＝以前は送りが**再生中だけ**だったので、
+  // 止まっている間に `End`・`Shift+→` で枠の外へ出すと**線を見失ったまま**だった。「勝手に動かない」は
+  // 利用者が**枠**を動かしたときの話であって、利用者が**位置**を動かしたときは追うのが正しい。
+  it("止まっていても、`End` で枠の外へ動かしたら送る", () => {
+    withClip(60);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
+    fireEvent.keyDown(container.querySelector(".timeline-ruler") as HTMLElement, { key: "End" });
+    expect(useTimelineStore.getState().playheadSec).toBe(60);
+    // 60秒＝2160px。見えている幅は 500−84（列の名前の欄）＝416px なので、行き止まりまで送る。
+    expect(scroll.scrollLeft).toBe(2160 - (500 - 84));
+  });
+
+  // ⚠️ **`End` と対称に固定する**（レビュー 🟡）＝同じ形（`setPlayhead` の直後に追う）なのに
+  // `Home` だけテストが無いと、片方を外しても緑のまま通る（実際に変異が素通りした）。
+  it("止まっていても、`Home` で先頭へ戻したら見えるところまで送り返す", () => {
+    withClip(60);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
+    const ruler = container.querySelector(".timeline-ruler") as HTMLElement;
+    fireEvent.keyDown(ruler, { key: "End" });    // まず末尾側へ送る
+    expect(scroll.scrollLeft).toBeGreaterThan(0);
+    fireEvent.keyDown(ruler, { key: "Home" });   // 先頭へ戻す
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+    expect(scroll.scrollLeft).toBe(0); // 先頭が見えるところまで戻る（線を見失わない）
+  });
+
+  // ⚠️ **同じ動作は入口で割れない**（#833-3 レビュー 🟡・ADR-0026②）＝「先頭へ」ボタンは `Home` キーと
+  // 同じ動作なのに、追う／追わないが入口で分かれていた（キーは追い、ボタンは追わない）。
+  // 「この位置へ」（キーフレーム／音量点）も同じ＝跳んだ先が枠の外だと**跳んだのに何も見えない**。
+  it("「先頭へ」ボタンでも送り返す（`Home` キーと同じ動作で割れない）", () => {
+    withClip(60);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
+    fireEvent.keyDown(container.querySelector(".timeline-ruler") as HTMLElement, { key: "End" });
+    expect(scroll.scrollLeft).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "先頭へ" }));
+    expect(useTimelineStore.getState().playheadSec).toBe(0);
+    expect(scroll.scrollLeft).toBe(0);
+  });
+
+  it("止まっていても、`Shift`+矢印で枠の外へ出たら送る（画面のキー操作も同じ入口）", () => {
+    withClip(60);
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
+    act(() => { useTimelineStore.getState().setPlayhead(11); }); // 396px＝まだ見えている（416px まで）
+    expect(scroll.scrollLeft).toBe(0);
+    fireEvent.keyDown(window, { key: "ArrowRight", shiftKey: true }); // 1秒進む＝432px＝枠の外
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(12, 6);
+    expect(scroll.scrollLeft).toBe(12 * 36); // ヘッドが左端に来るよう送る
   });
 
   // ⚠️ **時刻の書き方は1つにそろえる**（#819-3・§6）＝同じ画面の帯のツールチップと見わたす画面が
@@ -4556,7 +4695,10 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     two();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     drag(band("あ"), 36 * 4); // 重なる所＝理由が出る
-    fireEvent.click(band("あ"), { shiftKey: true }); // 離した後に来る click
+    // ⚠️ **指の経路として撃つ**（`detail: 1`）＝`fireEvent.click` の既定は `detail: 0`＝**キーボード起動**
+    // なので、そのままだと「捨てる印はキーの `click` には効かせない」（#833-1 レビュー 🟡）に当たって
+    // **この経路を通らなくなる**（テストが空振りする）。実機で離した後に来るのは指の `click`。
+    fireEvent.click(band("あ"), { shiftKey: true, detail: 1 }); // 離した後に来る click
     expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.overlap); // 消えない
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // 外れない
   });
@@ -4615,7 +4757,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     drag(band("あ"), 36 * 4, { escape: true }); // 掴んでからやめる＝`onCancel` の道
     // `Shift` 付きの `click` は選択の付け外し＝捨てないと**やめた帯の選択が外れる**（取っ手も消える）。
-    fireEvent.click(band("あ"), { shiftKey: true });
+    fireEvent.click(band("あ"), { shiftKey: true, detail: 1 }); // 指の経路（既定の `detail: 0` はキー起動）
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
   });
 
@@ -4627,8 +4769,26 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     const clip = container.querySelectorAll(".timeline-clip")[0] as HTMLElement;
     drag(clip, 36 * 10); // まとめて動かして、指が帯の外で離れた
     const lane = container.querySelector(".timeline-lane") as HTMLElement;
-    fireEvent.click(lane); // 列の余白で離した＝「何もない所を押した」経路
+    fireEvent.click(lane, { detail: 1 }); // 列の余白で離した＝「何もない所を押した」経路（指）
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001", "clip_002"]);
+  });
+
+  // ⚠️ **キーボードで起こした `click` は捨てない**（#833-1 レビュー 🟡）＝帯は `<button>` なので
+  // `Tab`→`Enter` でも `click` が来るが、そこに `pointerdown` は**無い**。印は「次に指で押し始めたとき」に
+  // 落とす形にしたので、印が消費されずに残った回（列をまたいで離して DOM が作り直された回）のあと
+  // 次の操作がキーだけだと落とす合図が永久に来ず、**`Enter` の1回目が無言で飲み込まれる**
+  //（キーで到達できなくなる＝ADR-0034 決定19）。指の経路かどうかは `detail` で見分ける。
+  it("印が残っていても、キーボードで選ぶ1回目は飲み込まない（キーで到達できる）", () => {
+    two();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    // 列をまたいで離す＝帯の DOM が作り直され、`click` を消費する相手が居ないまま印が残る回。
+    drag(band("あ"), 36 * 8);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
+    useTimelineStore.getState().clearSelection();
+    // ここで指を使わず**キーボードだけ**で別の帯を選ぶ（`detail: 0`＝キー起動の `click`）。
+    const other = [...container.querySelectorAll(".timeline-clip")].find((el) => (el.textContent ?? "").includes("い")) as HTMLElement;
+    fireEvent.click(other);
+    expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_002"]); // 1回目から効く
   });
 
   it("**書き出し中は再生を始めない**（押しても何も起きない、を作らない・#752-6）", () => {
@@ -5812,15 +5972,20 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(useTimelineStore.getState().editBlocked).toBeNull(); // 断られない
   });
 
-  it("捨てる印は**その順番の終わりで落とす**（次の解除を食わない）", async () => {
+  it("捨てる印は**次に押し始めたときに落とす**（次の解除を食わない）", () => {
     // ⚠️ 列をまたいで離すと帯の DOM は親ごと作り直され、**その帯の `onClick` は走らない**＝
     // 印を消費する相手が居ない。残ると次の「何もない所を押して選択を解く」1回を飲み込む。
+    // ⚠️ **時間では落とさない**（#833-1）＝`Escape` は指を**離す前**に走るので、時間で落とすと
+    // 実機では「やめたのに離した位置で上書きされる」（下の中止のテスト）。代わりに**次の
+    // `pointerdown`** で落とす＝実際の解除は必ず押し始めから始まるので、持ち越さないのは同じだけ守れる。
     two();
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     drag(band("あ"), 36 * 8);
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
-    await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); // 順番の終わり
-    fireEvent.click(container.querySelector(".timeline-lane") as HTMLElement);
+    const lane = container.querySelector(".timeline-lane") as HTMLElement;
+    // 実機の解除は `pointerdown`→`click` の順に来る（`click` だけは来ない）＝押し始めで印が落ちる。
+    fireEvent.pointerDown(lane, { button: 0, pointerId: 2, clientX: 0, clientY: 0 });
+    fireEvent.click(lane);
     expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // 解除が効く
   });
 

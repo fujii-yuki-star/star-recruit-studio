@@ -1205,6 +1205,11 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   },
   pause: () => set({ isPlaying: false }),
   _advancePlayhead: (sec) => {
+    // ⚠️ **止めた後に残ったフレームで書き戻さない**（#833 レビュー ℹ️）＝`pause()` は `isPlaying` を
+    // 倒すだけで、時計（rAF）は**画面側の後始末が走るまで**回っている。この入口は「再生の時計だけが
+    // 使う」ものなので、ここで見れば1か所で閉じる。見ないと、掴んだ瞬間に止めて動かした位置を
+    // **次の1フレームが再生位置で上書き**しうる（目盛りを掴むと止まる＝#833-2 で通る道になった）。
+    if (!get().isPlaying) return;
     const doc = get().doc;
     if (doc) set({ playheadSec: clampTimelinePlayheadSec(doc, sec) });
   },
