@@ -278,6 +278,30 @@ describe("TimelineProjectScreen: 再生まわりのレビュー指摘（/canon-c
     expect(useTimelineStore.getState().seekNonce).toBe(before + 1);
   });
 
+  // ⚠️ **掴んだら止める**（#844-6・ADR-0032 決定21 追補2）＝境界は「目盛りかどうか」ではなく
+  // **「掴んでいるか」**。止めないと握っている間つまみが**指と再生位置の間で往復**する
+  //（毎フレームの書き戻しが刻みの丸めに収まらない分だけ跳ねる）＝「掴めるのに言うことを聞かない」。
+  it("「再生位置」の欄を掴むと再生が止まる（目盛りと同じ扱い）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("再生"));
+    expect(useTimelineStore.getState().isPlaying).toBe(true);
+    fireEvent.pointerDown(screen.getByLabelText("再生位置"), { button: 0, pointerId: 1 });
+    expect(useTimelineStore.getState().isPlaying).toBe(false);
+  });
+
+  // ⚠️ **キーで動かすぶんは止めない**＝`11 §7.6.2.1` の「再生中に位置を動かしたら時計を測り直す」
+  // （再生を続けたままのシーク）はそのまま。上の「位置を動かしても戻らない」と対で、
+  // **掴む／掴まないで分かれている**ことを固定する。
+  it("「再生位置」の欄を掴まずに値だけ動かしても、再生は止まらない", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("再生"));
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "3" } });
+    expect(useTimelineStore.getState().isPlaying).toBe(true); // 走ったまま
+    expect(useTimelineStore.getState().playheadSec).toBe(3);
+  });
+
   it("再生中は「再生位置を使う操作」を押せない（走っている位置を掴ませない）", () => {
     open();
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
