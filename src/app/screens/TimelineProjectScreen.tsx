@@ -846,6 +846,23 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   const drilledFieldRef = useCallback((el: HTMLElement | null) => {
     if (el === null) setDrilledFieldFocused(false);
   }, []);
+  /**
+   * 文字の欄は**名乗り（#842）と履歴のまとめ（#847）の両方**が ref を要る＝1つにまとめて渡す。
+   *
+   * ⚠️ **後始末を返す以上、降ろすのも後始末でやる**（#847 レビュー 🔴）＝React は
+   * **ref が関数を返したら `ref(null)` を呼ばない**（`safelyDetachRef`＝
+   * `"function" === typeof refCleanup ? refCleanup() : ref(null)`）。ここで `drilledFieldRef(el)` を
+   * 呼ぶだけの形にすると、**`null` が来ないので #842 の降ろしが永久に走らない**
+   *（差し込み口の `<select>` が同時に消えて代わりに降ろしていたので気づきにくい＝
+   * **差し込み口の無い見た目パターン**〔文字だけ〕では名乗りが固着する）。
+   *
+   * ⚠️ **同一性を保つ**（`useCallback`）＝毎レンダー新しい関数だと、React が前の後始末を呼び直して
+   * **打っている最中にまとめが閉じる**（1文字ごとに1履歴＝上限を食い潰す）。`textGroup` は memo 済み。
+   */
+  const drilledTextFieldRef = useCallback((el: HTMLElement | null) => {
+    const closeGroup = textGroup.ref(el);
+    return () => { closeGroup(); setDrilledFieldFocused(false); };
+  }, [textGroup]);
   /** 欄を抜けるだけ（選択は解かない）＝`Escape` の1段目（#832）。 */
   const onDrilledFieldKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key === "Escape") e.currentTarget.blur();
@@ -3960,11 +3977,11 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           する（`shouldIgnoreShortcut`）ので、ここで自前に受けないと何も起きない。 */}
                       <input
                         className="input" type="text"
-                        ref={drilledFieldRef}
+                        ref={drilledTextFieldRef}
                         data-text-field={key}
                         value={selected.texts?.[key] ?? ""}
                         {...editGuard()}
-                        onFocus={() => { textGroup.onFocus(); setDrilledFieldFocused(true); }}
+                        onFocus={(e) => { textGroup.onFocus(e); setDrilledFieldFocused(true); }}
                         onBlur={() => { textGroup.onBlur(); setDrilledFieldFocused(false); }}
                         onKeyDown={onDrilledFieldKeyDown}
                         onChange={(e) => setSelectedClipText(key, e.target.value)}

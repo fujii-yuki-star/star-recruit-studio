@@ -89,9 +89,59 @@ describe("useHistoryGroup（連続編集を1履歴に・#389）", () => {
     const end = vi.fn();
     useProjectStore.setState({ beginHistoryGroup: begin, endHistoryGroup: end });
     const { result } = renderHook(() => useHistoryGroup());
-    result.current.textGroup.onFocus();
+    result.current.textGroup.onFocus({ currentTarget: document.createElement("input") });
     result.current.textGroup.onBlur();
     expect(begin).toHaveBeenCalledTimes(1);
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  // ⚠️ **`blur` が来ない道**（#847）＝フォーカス中に欄が消えると `blur` は来ない（React の仕様）。
+  // 閉じ損ねると **自動保存が止まり、以後の編集が履歴に1件も積まれない**（`Ctrl+Z` がまとめの前まで飛ぶ）。
+  // 実機で踏む道は**欄の配置の組み替え**（ADR-0033＝掴む処理が `pointerdown` を `preventDefault` するので
+  // フォーカスは欄に残ったまま、欄が別の親の下へ移る＝unmount）。降ろす合図を**欄の寿命に縛って**閉じる。
+  it("textGroup: 欄がフォーカス中に消えても閉じる（blur が来ない道）", () => {
+    const begin = vi.fn();
+    const end = vi.fn();
+    useProjectStore.setState({ beginHistoryGroup: begin, endHistoryGroup: end });
+    const { result } = renderHook(() => useHistoryGroup());
+    const el = document.createElement("input");
+    const cleanup = result.current.textGroup.ref(el);   // 欄がマウントされた
+    result.current.textGroup.onFocus({ currentTarget: el }); // その欄に手が入る＝まとめが開く
+    expect(begin).toHaveBeenCalledTimes(1);
+    cleanup();                                          // `blur` を通さずに欄が消える
+    expect(end).toHaveBeenCalledTimes(1);               // それでも閉じる
+  });
+
+  // ⚠️ **他人のまとめを閉じない**（#847）＝`end()` は数を1つ減らすだけなので、開けていない欄が消えた
+  // ときに閉じると**別の欄のまとめ**を早く畳んでしまう（そちらの編集が1操作ずつ積まれ始める）。
+  it("textGroup: 開けていない欄が消えても、他人のまとめは閉じない", () => {
+    const begin = vi.fn();
+    const end = vi.fn();
+    useProjectStore.setState({ beginHistoryGroup: begin, endHistoryGroup: end });
+    const { result } = renderHook(() => useHistoryGroup());
+    const focused = document.createElement("input");
+    const other = document.createElement("input");
+    const cleanupOther = result.current.textGroup.ref(other);
+    result.current.textGroup.ref(focused);
+    result.current.textGroup.onFocus({ currentTarget: focused }); // 開けたのは focused
+    cleanupOther();                                               // 手の乗っていない欄だけが消えた
+    expect(end).not.toHaveBeenCalled();                           // まだ開いたまま
+    result.current.textGroup.onBlur();
+    expect(end).toHaveBeenCalledTimes(1);                         // 本人の blur で1回だけ閉じる
+  });
+
+  // ⚠️ **二重に閉じない**＝寿命で閉じた後に（順序しだいで）`blur` が来ても、数を2回返さない
+  //（返しすぎると**他人のまとめ**まで畳む）。
+  it("textGroup: 寿命で閉じた後に blur が来ても、二度は閉じない", () => {
+    const begin = vi.fn();
+    const end = vi.fn();
+    useProjectStore.setState({ beginHistoryGroup: begin, endHistoryGroup: end });
+    const { result } = renderHook(() => useHistoryGroup());
+    const el = document.createElement("input");
+    const cleanup = result.current.textGroup.ref(el);
+    result.current.textGroup.onFocus({ currentTarget: el });
+    cleanup();
+    result.current.textGroup.onBlur();
     expect(end).toHaveBeenCalledTimes(1);
   });
 });
