@@ -109,6 +109,21 @@ export function useDraftHistory<T>(initial: T | (() => T)): DraftHistory<T> {
     setState((s) => ({ ...s, groupDepth: Math.max(0, s.groupDepth - 1) }));
   }, []);
 
+  /**
+   * ⚠️ **`blur` が来ない道は塞いでいない**（#847 で据え置いた・理由を残す）＝フォーカス中に欄が消えると
+   * `blur` は来ないので、まとめが開きっぱなしになる（実機の道＝ADR-0033 の欄の配置の組み替え）。
+   *
+   * `useHistoryGroup` 側は**後始末つき ref を欄へ配って寿命に縛った**が、この `textGroup` を使う
+   * `LooksEditScreen` は欄を**コンテナで委譲**して束ねており（`PanelLayoutView` の外側に1か所）、
+   * コンテナは組み替えでは unmount しない＝**同じ形では塞げない**。
+   *
+   * **据え置いた理由**＝ここの履歴は**この画面の中だけ**（`useState`）で、自動保存も無い。
+   * 固着しても波及するのは「取り消しが1段大きくまとまる」までで、`useHistoryGroup` 側のような
+   * **編集が保存されなくなる**実害には至らない（やり直しでも戻せる）。
+   * ⚠️ ただしこの画面は**取り消しが唯一の戻り道**なので、軽いのは実害の質であって、直さない約束ではない。
+   * 塞ぐなら (a) 同じ後始末つき `ref` を欄へ配る／(b) コンテナが開けた要素を控え、レンダーごとの効果で
+   * `!el.isConnected` なら畳む（組み替えの後は必ず1回レンダーが走る）。
+   */
   const textGroup = useMemo(() => ({ onFocus: beginGroup, onBlur: endGroup }), [beginGroup, endGroup]);
 
   return {

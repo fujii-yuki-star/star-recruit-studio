@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ScreenId } from "../data/mockData";
 import { sceneTypeLabel } from "../adapters";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
@@ -252,6 +252,19 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const [durationDraft, setDurationDraft] = useState<{ sceneId: string; value: string } | null>(null);
   // セリフ入力欄の参照（分割のカーソル位置を読む）。
   const lineRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * セリフ欄は**参照と履歴のまとめの両方**が ref を要る（#847）＝1つにまとめて渡す。
+   * ⚠️ **同一性を保つ**（`useCallback`）＝毎レンダー新しい関数だと、React が前の後始末を呼び直して
+   * **打っている最中にまとめが閉じる**（1文字ごとに1履歴＝上限を食い潰す）。`textGroup` は memo 済み。
+   */
+  const lineFieldRef = useCallback((el: HTMLTextAreaElement | null) => {
+    lineRef.current = el;
+    const closeGroup = textGroup.ref(el);
+    // ⚠️ **参照も後始末で外す**（#847 レビュー ℹ️）＝React は**後始末を返した ref を `null` で呼ばない**
+    // ので、外さないと**消えた欄を掴んだまま**になる。いまは分割ボタンと寿命が同じなので実害は無いが、
+    // 寿命が分かれた瞬間に**古いカーソル位置で場面が割れる**（黙って誤った分割＝§2-5）。
+    return () => { lineRef.current = null; closeGroup(); };
+  }, [textGroup]);
   // 欄の配置（ADR-0033 段階4）。**既定はいままでの並びと同じ**（左＝素材／中央＝仕上がり確認と場面の並び／
   // 右＝編集）＝配置を触っていない利用者には、これまでと同じ顔ぶれ・同じ並びが出る。
   // 出し入れ（読み込み・整え・保存・既定へ戻す）は**共通のフック**が持つ＝画面ごとに書き写さない（§6）。
@@ -2408,10 +2421,10 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <label className="field-label" htmlFor="line">セリフ</label>
               <textarea
                 id="line"
-                ref={lineRef}
                 className="textarea"
                 value={selected.narration.text}
                 {...textGroup}
+                ref={lineFieldRef}
                 onChange={(e) =>
                   patch((s) => ({
                     ...s,

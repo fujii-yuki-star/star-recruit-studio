@@ -5291,6 +5291,87 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
       expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // Escape が効く＝名乗りは降りている
     });
 
+    // ⚠️ **文字の欄でも名乗りは降りる**（#847 レビュー 🔴）＝React は**後始末を返した ref を `null` で
+    // 呼ばない**（`safelyDetachRef`）。文字の欄は #847 で `textGroup.ref`（後始末を返す）と合成したので、
+    // 降ろす処理を後始末の中に入れないと**`null` が来ず名乗りが固着する**。
+    // ⚠️ **差し込み口の無い見た目パターンで試す**のが要点＝差し込み口があると、同時に消える `<select>`
+    // （素の ref＝`null` で呼ばれる）が代わりに降ろしてしまい、この不具合が**隠れる**（実際に隠れていた）。
+    it("文字だけの見た目パターンでも、欄が消えれば名乗りは降りる", () => {
+      useProjectStore.setState({
+        templates: [{
+          schemaVersion: "1.0", templateId: "tmpl_text", name: "文字だけ", category: "opening",
+          aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+          layers: [{ id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 1920, h: 1080, fontSize: 80 }],
+        } as Template],
+        templateAssetSrcById: {},
+      });
+      open({
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+          startSec: 0, durationSec: 5, templateId: "tmpl_text", texts: { title: "みだし" },
+        }],
+      });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const stage = container.querySelector(".preview-stage") as HTMLElement;
+      stage.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      const root = container.querySelector(".free-layout-overlay") as HTMLElement;
+      root.getBoundingClientRect = stage.getBoundingClientRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 900, 500, 1000);
+      tapAt(root, 900, 500, 1100);
+      // 文字の欄へ手が移っている（差し込み口は1つも無い）。
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-text-field")).toBe("title");
+      expect(document.querySelector("[data-slot-field]")).toBeNull();
+      // **`blur()` を呼ばずに**欄を消す。
+      act(() => { useTimelineStore.getState().clearSelection(); });
+      expect(document.querySelector("[data-text-field]")).toBeNull();
+      act(() => { useTimelineStore.getState().selectClip("clip_001"); });
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // Escape が効く＝名乗りは降りている
+    });
+
+    // ⚠️ **履歴のまとめも欄の寿命で閉じる**（#847）＝閉じ損ねると**自動保存が止まり、以後の編集が
+    // 履歴に積まれない**。画面の配線（合成 ref）まで通して見る＝フックの単体テストでは、
+    // `ref` を渡し忘れても赤くならない。
+    it("欄が消えたら履歴のまとめも閉じる（自動保存が止まらない）", () => {
+      useProjectStore.setState({
+        templates: [{
+          schemaVersion: "1.0", templateId: "tmpl_text", name: "文字だけ", category: "opening",
+          aspectRatio: "16:9", canvas: { width: 1920, height: 1080 },
+          layers: [{ id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 1920, h: 1080, fontSize: 80 }],
+        } as Template],
+        templateAssetSrcById: {},
+      });
+      open({
+        clips: [{
+          id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001",
+          startSec: 0, durationSec: 5, templateId: "tmpl_text", texts: { title: "みだし" },
+        }],
+      });
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      const stage = container.querySelector(".preview-stage") as HTMLElement;
+      stage.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      const root = container.querySelector(".free-layout-overlay") as HTMLElement;
+      root.getBoundingClientRect = stage.getBoundingClientRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 900, 500, 1000);
+      tapAt(root, 900, 500, 1100);
+      // 入った時点で文字の欄へ手が移る＝まとめが開く。
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-text-field")).toBe("title");
+      expect(useTimelineStore.getState()._historyGroupDepth).toBeGreaterThan(0);
+      // ⚠️ **選択を変えて消してはいけない**＝選択が変わる道は `resetHistoryGroup()` が畳むので、
+      // 配線（`ref`）を外しても緑のまま通る（実測で空振りを確認）。**選択そのままで欄だけ消す**
+      // ＝欄を閉じる（実機の道は ADR-0033 の配置の組み替え）＝ここだけが ref の後始末に懸かる。
+      const before = useTimelineStore.getState().selectedClipIds;
+      fireEvent.click(screen.getByLabelText("選んだ部品の欄の操作"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+      expect(document.querySelector("[data-text-field]")).toBeNull();
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(before); // 選択は変えていない
+      expect(useTimelineStore.getState()._historyGroupDepth).toBe(0); // 閉じている＝自動保存が止まらない
+    });
+
     // ⚠️ **取り消しなど store 側の選択更新でも戻らない**（入口を数え上げない形の要）。
     it("取り消しで選択が入れ替わっても、入った印は戻らない", () => {
       const root = openTemplateClip();
