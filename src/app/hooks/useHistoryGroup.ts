@@ -100,11 +100,10 @@ function useHandlers(begin: () => void, end: () => void): HistoryGroupHandlers {
         // ⚠️ **`claimEscape()` とは対で名乗らない**（数に入れる他の入口＝`useCanvasDrag` は対で名乗る）。
         // native の `<input type="range">` は `Escape` で「やめる＝押す前へ戻す」ができないので、名乗ると
         // **外側の `Escape` が黙って死ぬ**だけになる（§2-5）。作法を揃える目的で足さないこと。
-        // ⚠️ **`pointermove` の `buttons===0` 救済（`usePointerDrag` の作法）も足していない**＝あちらは
-        // 掴んだ指を `pointerId` で見分けているが、ここは受け取っていないので、**別の指のホバー**で
-        // まとめを早く閉じてしまい**この不具合そのものを再現する**。`range` は暗黙のポインタ捕捉が効き
-        // 離しは必ず window まで来るので、いまはこの1経路で足りる。**捕捉の無い部品に付けるときは、
-        // まず `pointerId` を受け取れるようにしてから**救済を足すこと。
+        // ⚠️ **`pointermove` の `buttons===0` 救済（`usePointerDrag` の作法）は足していない**＝
+        // `range` は暗黙のポインタ捕捉が効き、離しは必ず window まで来るので、いまはこの1経路で足りる。
+        // **捕捉の無い部品に付けるときは足すこと**（掴んだ指は下の `pointerId` で見分けられるので、
+        // 救済を足しても「別の指のホバーで早く閉じる」にはならない）。
         const release = registerExternalDrag();
         const finish = (ev?: Event): void => {
           // **掴んだ指だけ見る**（`useCanvasDrag` の `mine()` と同じ）＝2本目の指で別のスライダーを掴むと、
