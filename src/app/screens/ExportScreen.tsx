@@ -108,6 +108,16 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   const EXPORT_OWNER = "scene" as const;
 
   const busy = isExportBusy(phase);
+  /**
+   * **名乗ってから走行中の表示になるまでの間**（#843 レビュー 🟡）。
+   *
+   * ⚠️ これが無いと、**書き出しを正当に始めた直後に「後片づけ中」と誤表示**する＝この画面は
+   * 名乗り（`acquire`）の**後**に `beginExport()` の往復を挟んでから `rendering` にするので、
+   * その間は「締めは自分・走行中ではない」＝`isOwnCleanupPending` の条件をそのまま満たしてしまう
+   *（タイムライン形式は名乗る**前**に `preparing` を立てるので起きない＝非対称だった）。
+   * 走行中の語彙（`isExportBusy`）は画面横断で編集の可否も決めるので広げず、**この画面の中だけ**で持つ。
+   */
+  const [starting, setStarting] = useState(false);
   // ⚠️ **直前の回の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
   // ボタンが戻っているのに `acquire` が失敗する（＝押しても断られるだけ・`06 §12.1`）。
   // 押す前に無効化して出す理由と、押したときに断る理由は**同じ述語**から採る（`isOwnCleanupPending`）。
@@ -115,7 +125,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // 「自分の後片づけ待ち」も**押した後**でしか見ておらず、**押せるボタンを押すと断られるだけ**だった。
   // どちらも到達する（相手の書き出しが終わると走行中の判定が落ちるので、その直後にこの画面へ来ると
   // 締めだけが残っている）。押す前の表示と押した瞬間の判定は**同じ述語**から採る（`06 §12.1`）。
-  const lockBlockedMessage = exportLockBlockedMessage(useExportLockStore((st) => st.owner), EXPORT_OWNER, busy);
+  const lockBlockedMessage = exportLockBlockedMessage(useExportLockStore((st) => st.owner), EXPORT_OWNER, busy || starting);
   // 「前回の結果」表示中か＝入った時点で終わっていて、かついま見えているのも終わった結果（走行中・未実行には出さない）。
   const showsPastResult = enteredFinished && isExportFinished(phase);
   // この画面には結果そのものが出ているので、他画面向けの終了通知（#589）は**既読**にする。
@@ -191,10 +201,13 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     const lockedNow = exportLockBlockedMessage(useExportLockStore.getState().owner, EXPORT_OWNER, busy);
     if (lockedNow) { setMessage(lockedNow); setPhase("error"); return; }
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
-    // ⚠️ **名乗れたかを見る**（レビュー ℹ️）＝走行中の判定（上の `isOtherExportRunning`）と名乗りの間に
-    // **保存先を選ぶダイアログの待ち**が挟まるので、その間に相手（タイムライン形式）が先に取りうる。
+    // ⚠️ **名乗れたかを見る**（レビュー ℹ️）＝締めの判定（上の `lockedNow`＝`exportLockBlockedMessage`）と
+    // 名乗りの間に**保存先を選ぶダイアログの待ち**が挟まるので、その間に相手（タイムライン形式）が先に取りうる。
     // 見ないで進むと、共有の一時置き場を片づける後始末が**相手のフレームを消す**（`11 §7.6.5`）。
+    // ⚠️ **名乗る前に立てる**＝名乗った瞬間に再描画が走るので、後で立てると「後片づけ中」が一瞬出る。
+    setStarting(true);
     if (!useExportLockStore.getState().acquire(EXPORT_OWNER)) {
+      setStarting(false);
       // ⚠️ **誰が持っているかで理由を分ける**（#843）＝自分の後片づけ待ちなら「ほかの動画」は嘘になる。
       const mine = useExportLockStore.getState().owner === EXPORT_OWNER;
       setMessage(mine ? EXPORT_CLEANUP_PENDING_MESSAGE : OTHER_EXPORT_RUNNING_MESSAGE);
@@ -343,6 +356,8 @@ export function ExportScreen({ onNavigate }: ExportProps) {
         console.error("[export] failed:", e);
       }
     } finally {
+      // ⚠️ **片づけに入る前に降ろす**＝ここから先は本当に「後片づけ中」なので、断りが出るのが正しい。
+      setStarting(false);
       unlistenProgress?.(); // 進捗購読を解除（#376）
       setExportRun({ cancelling: false }); // 中止フラグは1回の書き出しで完結（次回に持ち越さない・#380）
       // ステージングしたアニメフレームを掃除（成功/失敗いずれも）＝次回書き出しに残さない（#書き出しRangeError）。

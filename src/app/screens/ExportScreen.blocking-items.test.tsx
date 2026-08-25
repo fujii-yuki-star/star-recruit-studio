@@ -152,6 +152,43 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     expect(saveBtn()).not.toBeDisabled(); // 片づけが終われば戻る
   });
 
+  // ⚠️ **始めた直後に「後片づけ中」と誤表示しない**（#843 レビュー 🟡）＝この画面は名乗り（`acquire`）の
+  // **後**に `beginExport()` の往復を挟んでから走行中の表示になるので、その間は「締めは自分・走行中ではない」
+  // ＝後片づけ待ちの条件をそのまま満たしてしまう（タイムライン形式は名乗る**前**に走行中にするので起きない）。
+  // 正当に始めた直後に「前の書き出しの後片づけをしています」と出るのは、この PR が消そうとした
+  // 「実態と違う案内」そのもの＝**新しく持ち込んだ退行**なので、その窓を開けたまま固定する。
+  it("書き出しを始めた直後に「後片づけ中」と誤表示しない", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    // `beginExport` を**返さないまま**にして、名乗り〜走行中表示の窓を開けたままにする。
+    let resolveBegin: () => void = () => {};
+    vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBe("scene")); // 名乗った＝窓の中
+    expect(screen.queryByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeNull(); // 誤表示しない
+    resolveBegin();
+  });
+
+  // ⚠️ **本物の後片づけの窓では、ちゃんと断る**（#843）＝上のテストは締めを直に取って窓を模したものなので、
+  // 「始めた直後は出さない」ための `starting` を**降ろし忘れても**気づけない（実測で素通りした）。
+  // 実際に書き出しを走らせ、片づけを返さないまま止めて、その窓で理由が出ることを見る。
+  it("本物の後片づけの窓では、理由を出して押せなくする", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    // 失敗で `finally` まで確実に降りる（上の順序テストと同じ入口）。
+    vi.spyOn(ffmpeg, "beginExport").mockRejectedValue(new Error("ipc failed"));
+    // 片づけを**返さないまま**にして、締めが返る前の窓を開けたままにする。
+    let resolveClear: () => void = () => {};
+    vi.spyOn(ffmpeg, "clearExportFramesStage").mockReturnValue(new Promise<void>((r) => { resolveClear = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(screen.getByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeInTheDocument());
+    expect(saveBtn()).toBeDisabled();
+    resolveClear();
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBeNull());
+  });
+
   // ⚠️ **相手が走っている間も押させない**（#843 レビュー 🟡）＝以前はこちらも**押した後**でしか見ておらず、
   // 「押せるボタンを押すと断られるだけ」が残っていた。押す前の表示と押した瞬間の判定は同じ述語から採る。
   it("ほかの形式が書き出している間も押せない（理由も出す）", () => {
