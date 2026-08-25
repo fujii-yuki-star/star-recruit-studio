@@ -135,7 +135,15 @@ function usesUpSource(
     // ⚠️ **素材既定（`asset.clip`）を足さない**＝`videoPlacementsOfClip` の直接置きの枝は
     // **クリップの値だけ**を読む（素材既定を効かせない）。ここだけが見ると、**画面では流れている先を
     // 門だけが「使い切った」と断る**＝描画・再生と同じ材料で判断する、が崩れる。
-    const endSec = p.layerId != null ? resolveSlotClip(clip.slotClips?.[p.layerId], asset?.clip).endSec : undefined;
+    // ⚠️ **置き場所の種類は `use` で見る**（#844-1）＝`layerId` は種類の判別子ではない。
+    // `video.ts` の `VideoPlacement.use` が「**層 id から導き直さない**」と定めており、同じ file の
+    // `advancedSlotStarts` も `use` で見ている＝**使い方の単一の参照元は `use`**（§2-7）。
+    // いまは直接置き／差し込み口の2種しか無いので**挙動は同じ**。効いてくるのは、**層 id を持つ別の
+    // 使い方**が加わったとき＝旧式（`layerId != null`）はそれを差し込み口と取り違えて
+    // `slotClips[layerId]` を引くが、`use` で見れば取り違えない。
+    const endSec = p.use === ASSET_USE_KIND.slot && p.layerId != null
+      ? resolveSlotClip(clip.slotClips?.[p.layerId], asset?.clip).endSec
+      : undefined;
     const sourceEnd = asset?.metadata?.durationSec ?? undefined;
     // 判る材料が無ければ限界は無限＝この比較は必ず偽になる（別に見張りを置かない＝守れない枝を作らない）。
     const limit = Math.min(endSec ?? Infinity, sourceEnd ?? Infinity);

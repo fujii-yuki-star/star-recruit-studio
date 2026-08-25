@@ -302,8 +302,13 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
  * ⚠️ 「1つの部品に置けるのは…いらない点を外すか、部品を分けてください」は**読み上げの部品には
  * できない**（`isUnsplittableClipKind`＝`splitClipIssue` と同じ関門）。挙げた部品が読み上げだけの
  * ときに「分けてください」を添えると、従っても分けられない＝実行できない行動を名指しすることになる
- * （§2-5・#812 と同型）。判定は**分割の関門と同じ関数**を通す＝ここだけ「分けられる」の定義を
- * 書き直さない。
+ * （§2-5・#812 と同型）。「分けられる」の定義は**書き直さず**、分割の関門と同じ述語を通す。
+ *
+ * ⚠️ **共有しているのは「種類の関門」だけ**（#844-2）＝`splitClipIssue` はもう1つ「音量の点が
+ * 多すぎると切れない」（`volumePointsFull`）を持つので、`audio` でも点が概ね120個以上あると
+ * **どの位置でも切れず**、それでもここは `true` を返す＝「分けてください」が実行できない行動のまま残る。
+ * 到達は狭い（画面は上限60で止めるので**手編集・旧文書**でしか作れない）ため据え置くが、
+ * 「関門をまるごと共有している」と読める書き方はしないこと。
  */
 export function volumePointsTooManyHasSplittable(doc: TimelineProject, clipIds: string[]): boolean {
   return clipIds.some((id) => {
