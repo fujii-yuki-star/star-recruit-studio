@@ -1683,6 +1683,26 @@ describe("TimelineProjectScreen: 選んだ部品の欄を整える（#687）", (
     expect(section("動き").open).toBe(true); // 動きが付いている＝畳んで隠さない
   });
 
+  // ⚠️ **キーフレーム側の「この位置へ」も送る**（PR #839 レビュー ℹ️）＝音量点側と同じ形だが、
+  // 片方だけ `followPlayhead()` を外す変異が**素通りしていた**（実測）。跳んだ先が枠の外だと
+  // **跳んだのに何も見えない**＝#819-1 の症状そのものなので、両方を固定する。
+  it("動きの「この位置へ」で枠の外へ跳んだら、見えるところまで送る", () => {
+    open({
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 60, x: 0, y: 0, w: 10, h: 10, text: "あ" },
+      ],
+      animations: [{ id: "anim_001", targetId: "clip_001", keyframes: [{ timeSec: 40, x: 20 }] }],
+    });
+    useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    const scroll = container.querySelector(".timeline-scroll") as HTMLElement;
+    Object.defineProperty(scroll, "clientWidth", { value: 500, configurable: true });
+    expect(scroll.scrollLeft).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "この位置へ" }));
+    expect(useTimelineStore.getState().playheadSec).toBeCloseTo(40, 6);
+    expect(scroll.scrollLeft).toBe(40 * 36); // 跳んだ先が左端に来るよう送る
+  });
+
   it("まとまりに付いた動きの知らせも、畳んだ中に隠さない", () => {
     open({
       groups: [{ id: "group_001", members: ["clip_001"], transform: { x: 0, y: 0, rotation: 0, scale: 1 } }],
