@@ -471,6 +471,19 @@ describe('再生（#630）', () => {
     expect(useTimelineStore.getState()).toMatchObject({ isPlaying: false, playheadSec: 3 });
   });
 
+  // ⚠️ **止めた後に残ったフレームで位置を書き戻さない**（#833 レビュー ℹ️）＝`pause()` は `isPlaying` を
+  // 倒すだけで、時計（rAF）は**画面側の後始末が走るまで**1フレーム回りうる。この入口は「再生の時計だけが
+  // 使う」ものなので、ここで見れば1か所で閉じる。見ないと、掴んだ瞬間に止めて置いた位置を
+  // **次の1フレームが再生位置で上書き**する（目盛りを掴むと止まる＝#833-2 で通る道になった）。
+  it('止めた後に届いた再生フレームは、位置を書き戻さない', () => {
+    useTimelineStore.getState().setPlayhead(3);
+    useTimelineStore.getState().play();
+    useTimelineStore.getState().pause();       // 掴んだ瞬間に止めた
+    useTimelineStore.getState().setPlayhead(1); // 指が置いた位置
+    useTimelineStore.getState()._advancePlayhead(4.5); // 止める前に積まれていた1フレームが遅れて届く
+    expect(useTimelineStore.getState().playheadSec).toBe(1); // 置いた位置のまま
+  });
+
   it('終端にいるときは先頭から始める（押しても動かない、を作らない）', () => {
     useTimelineStore.getState().setPlayhead(99); // 尺（5秒）へクランプされる
     useTimelineStore.getState().play();
