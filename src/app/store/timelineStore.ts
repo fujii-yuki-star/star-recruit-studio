@@ -72,7 +72,7 @@ import {
 import type { BgmRunInput } from "../../infrastructure/ffmpegExport";
 import type { Template } from "../../domain/template/types";
 import { exportBlockedMessage, resolveExportBlockedMessage, KEPT_PREVIOUS_VOICE_SUFFIX } from "../uiLabels";
-import { OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, useExportLockStore } from "./exportLock";
+import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, isOwnCleanupPending, useExportLockStore } from "./exportLock";
 import type { HistoryStacks } from "../../domain/project/history";
 import { splitClip, SPLIT_BLOCKED_REASON } from "../../domain/timeline/split";
 import { volumeAt } from "../../domain/timeline/audio";
@@ -146,6 +146,8 @@ export function exportStartBlock(input: {
   voiceRunning: boolean;
   knownTemplateIds: Set<string>;
   otherExportRunning: boolean;
+  /** 直前の回の後片づけ待ちか（#843）＝`isOwnCleanupPending`。押せるのに押すと断られる、を作らない。 */
+  cleanupPending: boolean;
   canExportHere: boolean;
 }): ExportStartBlock | null {
   const S = EXPORT_BLOCK_SOURCE;
@@ -155,6 +157,9 @@ export function exportStartBlock(input: {
   // それだけを見ると**合成が走ったまま書き出しを始められる**（`/canon-check`）。
   if (input.voiceRunning) return { message: VOICE_BUSY_EXPORT_MESSAGE, phase: P.error, source: S.situation };
   if (input.otherExportRunning) return { message: OTHER_EXPORT_RUNNING_MESSAGE, phase: P.error, source: S.situation };
+  // ⚠️ **自分の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
+  // ボタンが戻っているのに `acquire` が失敗する。断り文は**別のもの**にする（走っている「ほかの動画」は無い）。
+  if (input.cleanupPending) return { message: EXPORT_CLEANUP_PENDING_MESSAGE, phase: P.error, source: S.situation };
   const blockers = timelineExportBlockers(input.doc, { knownTemplateIds: input.knownTemplateIds });
   if (blockers.length > 0) return { message: resolveExportBlockedMessage(blockers[0].code, input.doc, blockers[0].clipIds), phase: P.error, source: S.content };
   // 「この端末では書き出せない」は失敗と別（場面形式と同じ扱い＝`11 §3.5` の `unsupported`）。
@@ -1259,6 +1264,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       voiceRunning: get()._voiceRun != null,
       knownTemplateIds: new Set(deps.templates.map((t) => t.templateId)),
       otherExportRunning: isOtherExportRunning(EXPORT_OWNER),
+      // ここへ来た時点で走行中ではない（上の早期 return）＝締めが残っていれば後片づけ待ち（#843）。
+      cleanupPending: isOwnCleanupPending(useExportLockStore.getState().owner, EXPORT_OWNER, false),
       canExportHere: canExport(),
     });
     if (blocked) {
@@ -1274,7 +1281,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 押し直すと素通りする＝その回は締め無しで走り、掃除が終わって締めが返った後は**場面形式が
     // 同時に取れてしまう**（共有の一時置き場を互いに消す＝`11 §7.6.5`・ADR-0032 決定22）。
     if (!useExportLockStore.getState().acquire(EXPORT_OWNER)) {
-      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: OTHER_EXPORT_RUNNING_MESSAGE } });
+      // ⚠️ **誰が持っているかで理由を分ける**（#843）＝自分の後片づけ待ちなら「ほかの動画」は嘘になる。
+      const mine = useExportLockStore.getState().owner === EXPORT_OWNER;
+      const message = mine ? EXPORT_CLEANUP_PENDING_MESSAGE : OTHER_EXPORT_RUNNING_MESSAGE;
+      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message } });
       return; // 走行中のまま固まらせない（立てた `preparing` を戻す）
     }
     let unlisten: (() => void) | undefined;

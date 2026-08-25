@@ -29,7 +29,7 @@ import { openSavedFile, revealSavedFile } from "../../infrastructure/opener";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
 import { loadExportFonts } from "../../renderer/export/loadExportFonts";
-import { OTHER_EXPORT_RUNNING_MESSAGE, isOtherExportRunning, useExportLockStore } from "../store/exportLock";
+import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, exportLockBlockedMessage, useExportLockStore } from "../store/exportLock";
 import { bgmById } from "../../domain/bgm/bgmCatalog";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
 
@@ -104,7 +104,18 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // 選択済みBGMが読み込めなかったとき、完了画面で知らせる（§2-5・BGMなしで続行）。
   const setBgmWarning = (bgmWarning: "" | "partial" | "all") => setExportRun({ bgmWarning });
 
+  // 書き出しの持ち主（`exportLock`）。タイムライン形式と一時ファイルの置き場を取り合わないために使う。
+  const EXPORT_OWNER = "scene" as const;
+
   const busy = isExportBusy(phase);
+  // ⚠️ **直前の回の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
+  // ボタンが戻っているのに `acquire` が失敗する（＝押しても断られるだけ・`06 §12.1`）。
+  // 押す前に無効化して出す理由と、押したときに断る理由は**同じ述語**から採る（`isOwnCleanupPending`）。
+  // ⚠️ **締めが理由で始められないときは押させない**（#843 レビュー 🟡）＝以前は「相手が走っている」も
+  // 「自分の後片づけ待ち」も**押した後**でしか見ておらず、**押せるボタンを押すと断られるだけ**だった。
+  // どちらも到達する（相手の書き出しが終わると走行中の判定が落ちるので、その直後にこの画面へ来ると
+  // 締めだけが残っている）。押す前の表示と押した瞬間の判定は**同じ述語**から採る（`06 §12.1`）。
+  const lockBlockedMessage = exportLockBlockedMessage(useExportLockStore((st) => st.owner), EXPORT_OWNER, busy);
   // 「前回の結果」表示中か＝入った時点で終わっていて、かついま見えているのも終わった結果（走行中・未実行には出さない）。
   const showsPastResult = enteredFinished && isExportFinished(phase);
   // この画面には結果そのものが出ているので、他画面向けの終了通知（#589）は**既読**にする。
@@ -122,19 +133,10 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   // 標準BGM（同梱）が選ばれていれば、それを最優先で使う（assetId より優先）。
   const bundledBgm = bgmById(bgmSettings?.bundledBgmId);
 
-  // 書き出しの持ち主（`exportLock`）。タイムライン形式と一時ファイルの置き場を取り合わないために使う。
-  const EXPORT_OWNER = "scene" as const;
-
   async function startExport() {
     // 二重書き出しの入口ガード（#379）：ボタンは busy 中 disabled だが、他画面から戻って進捗表示が
     // 消えて見える等での再トリガを store の実状態で弾く（Rust 側にも実行中ガードあり＝多層防御）。
     if (busy) return;
-    // タイムライン形式の書き出しが走っていたら始めない（一時ファイルの置き場を取り合って壊れた動画が出る・#631）。
-    if (isOtherExportRunning(EXPORT_OWNER)) {
-      setMessage(OTHER_EXPORT_RUNNING_MESSAGE);
-      setPhase("error");
-      return;
-    }
     if (!canExport()) {
       setPhase("unsupported");
       return;
@@ -179,12 +181,23 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     };
     const blockedBefore = startBlockedMessage();
     if (blockedBefore) { setMessage(blockedBefore); setPhase("error"); return; }
+    // ⚠️ **自分の後片づけ待ちは押させない**（#843）＝書き出しの終わり（成功・中止・失敗）は片づけより
+    // **先**に立つので、この窓ではボタンが戻っているのに `acquire` が失敗する。走っている「ほかの動画」は
+    // 無いので、断り文も別のものにする（主語が実態と違う案内を出さない）。
+    // ⚠️ **`startBlockedMessage` の中には置かない**＝あの関数は `beginExport` の**後**の再確認にも使われ、
+    // そこでは自分が**正当に**締めを持っている（走行中の判定は phase を見るので窓と区別できない）。
+    // 名乗る前のここ1回だけで見る。
+    // ⚠️ **その時点の持ち主で見る**＝描いた後に相手が取ることがあるので、閉じ込めた値では遅い。
+    const lockedNow = exportLockBlockedMessage(useExportLockStore.getState().owner, EXPORT_OWNER, busy);
+    if (lockedNow) { setMessage(lockedNow); setPhase("error"); return; }
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
     // ⚠️ **名乗れたかを見る**（レビュー ℹ️）＝走行中の判定（上の `isOtherExportRunning`）と名乗りの間に
     // **保存先を選ぶダイアログの待ち**が挟まるので、その間に相手（タイムライン形式）が先に取りうる。
     // 見ないで進むと、共有の一時置き場を片づける後始末が**相手のフレームを消す**（`11 §7.6.5`）。
     if (!useExportLockStore.getState().acquire(EXPORT_OWNER)) {
-      setMessage(OTHER_EXPORT_RUNNING_MESSAGE);
+      // ⚠️ **誰が持っているかで理由を分ける**（#843）＝自分の後片づけ待ちなら「ほかの動画」は嘘になる。
+      const mine = useExportLockStore.getState().owner === EXPORT_OWNER;
+      setMessage(mine ? EXPORT_CLEANUP_PENDING_MESSAGE : OTHER_EXPORT_RUNNING_MESSAGE);
       setPhase("error");
       return;
     }
@@ -450,7 +463,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。
                 「動画を保存」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
             <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
-              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy || blockingItems.length > 0 || capabilityBlocked}>
+              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy || lockBlockedMessage != null || blockingItems.length > 0 || capabilityBlocked}>
                 <FilmIcon size={20} />
                 {busy ? "書き出し中…" : "動画を保存"}
               </button>
@@ -461,6 +474,12 @@ export function ExportScreen({ onNavigate }: ExportProps) {
                 <span className="text-sm" style={{ color: "var(--color-danger)" }}>{EXPORT_CAPABILITY_NOTICE[capability].detail}</span>
               ) : blockedMessage && !(phase === "error" && message === blockedMessage) ? (
                 <span className="text-sm" style={{ color: "var(--color-danger)" }}>{blockedMessage}</span>
+              ) : lockBlockedMessage ? (
+                /* ⚠️ **押せなくしたら、理由も出す**（#843 レビュー 🟡）＝押せないボタンは `onClick` が走らないので、
+                   断り文を `startExport` の中だけに置くと**画面に一度も出ない**（`06 §12.1`＝押す前に見せて
+                   押せなくする、の「見せて」が抜ける）。タイムライン形式は `exportBlocked.message` を
+                   同じように出しているので、ここでも出して揃える（ADR-0026②）。 */
+                <span className="text-sm" style={{ color: "var(--color-danger)" }}>{lockBlockedMessage}</span>
               ) : null}
             </div>
           </div>

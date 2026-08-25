@@ -2,6 +2,7 @@
 //（順を入れ替えると、直せない理由〔この端末では書き出せない〕が先に出て、直せる理由が隠れる）。
 import { describe, expect, it } from 'vitest';
 import { exportStartBlock } from './timelineStore';
+import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from './exportLock';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
 import type { TimelineProject } from '../../domain/timeline/types';
@@ -27,6 +28,7 @@ const base = {
   voiceRunning: false,
   knownTemplateIds: new Set<string>(),
   otherExportRunning: false,
+  cleanupPending: false,
   canExportHere: true,
 };
 
@@ -38,6 +40,18 @@ describe('exportStartBlock（書き出しを始められるか）', () => {
   it('開いていないときは何も言わない（ボタン自体が無い）', () => {
     expect(exportStartBlock({ ...base, doc: null, isImporting: true })).toBeNull();
   });
+
+  // ⚠️ **自分の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
+  // ボタンが戻っているのに `acquire` が失敗する（＝押しても断られるだけ・`06 §12.1`）。
+  it('自分の後片づけ待ちは、ほかの動画とは別の理由で断る', () => {
+    const r = exportStartBlock({ ...base, cleanupPending: true });
+    expect(r?.message).toBe(EXPORT_CLEANUP_PENDING_MESSAGE);
+    // 主語が違うので流用しない（走っている「ほかの動画」は無い）。
+    expect(r?.message).not.toBe(OTHER_EXPORT_RUNNING_MESSAGE);
+  });
+
+  // ⚠️ 「両方 true」のテストは**置かない**（レビュー ℹ️）＝2つは同じ `owner` から導く排他の条件で、
+  // 呼び出し側が同時に真にできない。作れない組み合わせを固定すると、順序で守っているかのように読める。
 
   it('理由をそれぞれ返す', () => {
     expect(exportStartBlock({ ...base, isImporting: true })?.message).toContain('取り込み中');
