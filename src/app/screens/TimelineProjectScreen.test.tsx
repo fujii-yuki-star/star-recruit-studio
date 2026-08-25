@@ -4388,6 +4388,25 @@ describe("TimelineProjectScreen: 拡大縮小と時間の目盛り（#686）", (
       fireEvent.pointerUp(window, { pointerId: 1 });
     });
 
+    // ⚠️ **掴むのは左ボタンだけ**（差分再監査② ℹ️3・PR #854 レビュー ℹ️）＝同じ関門を「再生位置」の
+    // 欄と目盛りの2か所に置いたが、留めていたのは欄だけだった。**同じ一行でも、片方だけ落ちれば
+    // 機械には見えない**。
+    // ⚠️ **2つの `expect` は別の関門を留めている**（変異チェックで確認）＝**止まらないこと**は
+    // この画面の関門（`e.button !== 0`）、**動かないこと**は掴む作法の単一の参照元
+    //（`usePointerDrag` の左ボタン限定）。線を動かす側は元から共有側で弾かれているので、
+    // この画面の関門が実際に足しているのは**止めないこと**だけ。両方見るのは、
+    // 「右クリックでは何も起きない」を画面の側から通しで留めるため。
+    it("右クリックでは止まらず、線も動かない（掴んだことにしない）", () => {
+      withClip(20);
+      const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+      act(() => { useTimelineStore.setState({ isPlaying: true, playheadSec: 3 }); });
+      const ruler = rulerOf(container);
+      fireEvent.pointerDown(ruler, { button: 2, pointerId: 1, clientX: 360, clientY: 0 });
+      expect(useTimelineStore.getState().isPlaying).toBe(true); // 走ったまま
+      fireEvent.pointerMove(window, { buttons: 2, pointerId: 1, clientX: 720, clientY: 0 });
+      expect(useTimelineStore.getState().playheadSec).toBeCloseTo(3, 6); // 追いてこない
+    });
+
     // ⚠️ **戻す先は store のいまの値**（レビュー 🟡）＝再生中は描画時の `playheadSec` が1コマぶん古いので、
     // クロージャの値で覚えると `Escape` が「掴む前」ではなく**1コマ前**へ戻す。ここでは再帰描画を挟まずに
     // store だけを進めて（＝描画時の値と store の値をわざとずらして）、戻り先が store 側であることを見る。
