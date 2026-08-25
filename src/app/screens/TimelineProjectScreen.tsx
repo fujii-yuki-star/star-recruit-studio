@@ -6,7 +6,7 @@ import { playbackScrollLeft } from "../../domain/timeline/autoScroll";
 import { canvasPointAt, clampToVisible, laneTimeAt, pointInRect, visibleRectOf } from "../timelineDrop";
 import type { ScreenId } from "../data/mockData";
 import { EXPORT_BLOCK_SOURCE, EXPORT_OWNER, exportStartBlock, isTimelineExportBusy, useTimelineStore } from "../store/timelineStore";
-import { useExportLockStore } from "../store/exportLock";
+import { isOwnCleanupPending, useExportLockStore } from "../store/exportLock";
 import { canExport } from "../../infrastructure/ffmpegExport";
 import { useNavigationGuard } from "../hooks/navigationGuard";
 import { useProjectStore } from "../store/projectStore";
@@ -1108,9 +1108,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         voiceRunning: voiceRunning,
         knownTemplateIds: new Set(templates.map((t) => t.templateId)),
         otherExportRunning: exportLockOwner != null && exportLockOwner !== EXPORT_OWNER,
+        cleanupPending: isOwnCleanupPending(exportLockOwner, EXPORT_OWNER, isTimelineExportBusy(exportRun.phase)),
         canExportHere: canExport(),
       }),
-    [doc, isImporting, voiceRunning, templates, exportLockOwner],
+    [doc, isImporting, voiceRunning, templates, exportLockOwner, exportRun.phase],
   );
   const exporting = isTimelineExportBusy(exportRun.phase);
   // 書き出しが終わったら「離れられない」理由も出しっぱなしにしない（出ている条件から導く）。

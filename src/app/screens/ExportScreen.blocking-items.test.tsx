@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useProjectStore } from "../store/projectStore";
-import { useExportLockStore } from "../store/exportLock";
+import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE, useExportLockStore } from "../store/exportLock";
 import { sampleTemplates } from "../../infrastructure/sampleData";
 import * as ffmpeg from "../../infrastructure/ffmpegExport";
 import * as dialog from "../../infrastructure/dialog";
@@ -133,6 +133,75 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     await waitFor(() => expect(useExportLockStore.getState().owner).toBeNull());
     // 黙って終わらない＝理由も出す（失敗が投げっぱなしだと画面は押した直後のまま）。
     expect(useProjectStore.getState().exportRun.phase).toBe("error");
+  });
+
+  // ⚠️ **自分の後片づけ待ちは押させない**（#843）＝終わりの合図（`done`/`cancelled`/`error`）は片づけより
+  // **先**に立つので、この窓ではボタンが戻っているのに `acquire` が失敗する＝**押しても断られるだけ**に
+  // なっていた（`06 §12.1`）。押す前に無効化して、走っている「ほかの動画」とは**別の理由**を出す。
+  it("後片づけが終わるまでは押せない（押しても断られるだけ、を作らない）", () => {
+    setup([scene()]);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(saveBtn()).not.toBeDisabled();
+    // 直前の回が終わって（＝走行中ではない）片づけを待っている状態＝締めだけが自分に残っている。
+    act(() => { useExportLockStore.getState().acquire("scene"); });
+    expect(saveBtn()).toBeDisabled();
+    // ⚠️ **押せなくしたら理由も出す**＝押せないボタンは `onClick` が走らないので、
+    // 断り文を押した後の処理だけに置くと画面に一度も出ない（`06 §12.1` の「見せて」が抜ける）。
+    expect(screen.getByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeInTheDocument();
+    act(() => { useExportLockStore.getState().release("scene"); });
+    expect(saveBtn()).not.toBeDisabled(); // 片づけが終われば戻る
+  });
+
+  // ⚠️ **始めた直後に「後片づけ中」と誤表示しない**（#843 レビュー 🟡）＝この画面は名乗り（`acquire`）の
+  // **後**に `beginExport()` の往復を挟んでから走行中の表示になるので、その間は「締めは自分・走行中ではない」
+  // ＝後片づけ待ちの条件をそのまま満たしてしまう（タイムライン形式は名乗る**前**に走行中にするので起きない）。
+  // 正当に始めた直後に「前の書き出しの後片づけをしています」と出るのは、この PR が消そうとした
+  // 「実態と違う案内」そのもの＝**新しく持ち込んだ退行**なので、その窓を開けたまま固定する。
+  it("書き出しを始めた直後に「後片づけ中」と誤表示しない", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    // `beginExport` を**返さないまま**にして、名乗り〜走行中表示の窓を開けたままにする。
+    let resolveBegin: () => void = () => {};
+    vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBe("scene")); // 名乗った＝窓の中
+    expect(screen.queryByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeNull(); // 誤表示しない
+    resolveBegin();
+  });
+
+  // ⚠️ **本物の後片づけの窓では、ちゃんと断る**（#843）＝上のテストは締めを直に取って窓を模したものなので、
+  // 「始めた直後は出さない」ための `starting` を**降ろし忘れても**気づけない（実測で素通りした）。
+  // 実際に書き出しを走らせ、片づけを返さないまま止めて、その窓で理由が出ることを見る。
+  it("本物の後片づけの窓では、理由を出して押せなくする", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    // 失敗で `finally` まで確実に降りる（上の順序テストと同じ入口）。
+    vi.spyOn(ffmpeg, "beginExport").mockRejectedValue(new Error("ipc failed"));
+    // 片づけを**返さないまま**にして、締めが返る前の窓を開けたままにする。
+    let resolveClear: () => void = () => {};
+    vi.spyOn(ffmpeg, "clearExportFramesStage").mockReturnValue(new Promise<void>((r) => { resolveClear = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(screen.getByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeInTheDocument());
+    expect(saveBtn()).toBeDisabled();
+    resolveClear();
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBeNull());
+  });
+
+  // ⚠️ **相手が走っている間も押させない**（#843 レビュー 🟡）＝以前はこちらも**押した後**でしか見ておらず、
+  // 「押せるボタンを押すと断られるだけ」が残っていた。押す前の表示と押した瞬間の判定は同じ述語から採る。
+  it("ほかの形式が書き出している間も押せない（理由も出す）", () => {
+    setup([scene()]);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(saveBtn()).not.toBeDisabled();
+    act(() => { useExportLockStore.getState().acquire("timeline"); });
+    expect(saveBtn()).toBeDisabled();
+    expect(screen.getByText(OTHER_EXPORT_RUNNING_MESSAGE)).toBeInTheDocument();
+    // 自分の後片づけ待ちとは**別の理由**（走っている相手が居るときはそちらが正確）。
+    expect(screen.queryByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeNull();
+    act(() => { useExportLockStore.getState().release("timeline"); });
+    expect(saveBtn()).not.toBeDisabled();
   });
 
   // ⚠️ **片づけてから締めを返す**（#834-3・タイムライン側と同じ順＝ADR-0026②）＝一時ファイルの

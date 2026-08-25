@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 実物の描画経路を1件だけ通したいテスト（動画のコマの焼き出し）があるので、丸ごとの差し替えでは足りない。
 vi.mock('../../renderer/export/rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,X') }));
 import { useTimelineStore, timelineBgmRunInputs } from './timelineStore';
-import { OTHER_EXPORT_RUNNING_MESSAGE, useExportLockStore } from './exportLock';
+import { EXPORT_CLEANUP_PENDING_MESSAGE, useExportLockStore } from './exportLock';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import * as dialogMod from '../../infrastructure/dialog';
@@ -246,7 +246,8 @@ describe('exportTimelineVideo', () => {
     expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled(); // 走らない
     const run = useTimelineStore.getState().exportRun;
     expect(run.phase).toBe('error');
-    expect(run.message).toBe(OTHER_EXPORT_RUNNING_MESSAGE);
+    // ⚠️ **「ほかの動画」ではない**（#843）＝片づけているのは**自分の直前の回**なので、主語の合う別の文言。
+    expect(run.message).toBe(EXPORT_CLEANUP_PENDING_MESSAGE);
     expect(useExportLockStore.getState().owner).toBe('timeline'); // 走っている回の締めを奪わない
   });
 
