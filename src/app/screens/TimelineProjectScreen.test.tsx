@@ -5243,6 +5243,54 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
       expect(document.querySelector(".timeline-drilled-part")).toBeNull();       // それでも戻らない
     });
 
+    // ⚠️ **欄がフォーカスされたまま消えても、名乗りは残らない**（#842・差分再監査の🔴）＝
+    // `drilledFieldFocused` は欄の `onBlur` でしか戻らないが、**フォーカス中の欄が消えると `blur` は
+    // 来ない**（React 19/jsdom で実測＝unmount 時の `onBlur` は 0回）。降ろし損ねると
+    // `hasEscapeOwner()` が真のまま固着し、画面のキー操作が**丸ごと素通り**する。
+    // ⚠️ **ここで `blur()` を呼ばない**のが要点＝上のテスト群は Escape の前に必ず明示的に `blur()` して
+    // いたので、この経路だけ**素通りしていた**（監査で発覚）。実機の道（取り消しで欄ごと消える）を再現する。
+    it("フォーカス中の欄が消えても、以後のキー操作が死なない", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      // 差し込み口の欄へ手が移っている（＝名乗っている状態）。
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("right");
+      // **`blur()` を呼ばずに**欄を消す＝選択が外れてパネルごと消える（取り消しで踏む道と同じ）。
+      act(() => { useTimelineStore.getState().clearSelection(); });
+      expect(document.querySelector("[data-slot-field]")).toBeNull(); // 欄は消えた
+      // 名乗りが残っていると、ここから先のキーが画面のハンドラで素通りする。
+      act(() => { useTimelineStore.getState().selectClip("clip_001"); });
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // Escape が効く＝名乗りは降りている
+    });
+
+    // ⚠️ **選択が変わらないまま欄だけ消えても、名乗りは残らない**（#842 レビュー 🟡）＝
+    // 実機で踏む道は**欄の配置の組み替え**（ADR-0033＝「選んだ部品」欄の見出しを掴んで別の場所へ
+    // 落とす）。掴む処理が `pointerdown` を `preventDefault` するので**手は欄に残ったまま**、欄は
+    // 別の親の下へ移る＝unmount する。`selectedKey` は変わらないので選択の後始末は走らない。
+    // ここでは同じ状態（フォーカス中の欄が、選択そのままで消える）を欄を閉じることで作る。
+    it("選択そのままで欄が消えても、以後のキー操作が死なない", () => {
+      const root = openTemplateClip();
+      root.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 1920, height: 1080, right: 1920, bottom: 1080, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(root, "clientWidth", { value: 1920, configurable: true });
+      tapAt(root, 1400, 500, 1000);
+      tapAt(root, 1400, 500, 1100);
+      expect((document.activeElement as HTMLElement)?.getAttribute("data-slot-field")).toBe("right");
+      const before = useTimelineStore.getState().selectedClipIds;
+      // **`blur()` を呼ばず・選択も変えずに**欄を消す（「選んだ部品」欄を閉じる）。
+      fireEvent.click(screen.getByLabelText("選んだ部品の欄の操作"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+      expect(document.querySelector("[data-slot-field]")).toBeNull();       // 欄は消えた
+      expect(useTimelineStore.getState().selectedClipIds).toEqual(before);  // 選択は変わっていない
+      // 名乗りが残っていると、ここから先のキーが画面のハンドラで素通りする。
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(useTimelineStore.getState().selectedClipIds).toEqual([]); // Escape が効く＝名乗りは降りている
+    });
+
     // ⚠️ **取り消しなど store 側の選択更新でも戻らない**（入口を数え上げない形の要）。
     it("取り消しで選択が入れ替わっても、入った印は戻らない", () => {
       const root = openTemplateClip();

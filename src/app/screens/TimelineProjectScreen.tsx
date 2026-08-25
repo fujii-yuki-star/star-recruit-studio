@@ -818,6 +818,34 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    */
   const [drilledFieldFocused, setDrilledFieldFocused] = useState(false);
   useEscapeOwner(drilledFieldFocused);
+  /**
+   * **欄の寿命に名乗りを縛る**（#842 レビュー 🟡）＝欄が消えたら必ず降ろす。
+   *
+   * ⚠️ **`onBlur` と選択の後始末だけでは足りない**＝フォーカス中の欄が消えても `blur` は来ず、
+   * **選択が変わらないまま欄だけ消える道**が実在する。いちばん現実的なのは**欄の配置の組み替え**
+   * （ADR-0033＝「選んだ部品」欄の見出しを掴んで別の場所へ落とす）で、掴む処理が `pointerdown` を
+   * `preventDefault` するので**手は欄に残ったまま**、欄は別の親の下へ移る＝unmount する。
+   * 入口を数え上げて後始末を足す形は採らない（`escapeOwners` が名乗り制へ移った理由と同じ＝
+   * 入口が増えるたびに数え漏れる）。**立てた側の寿命で降ろす**のが構造的な守り方
+   * （`ColorPicker`／`FontPicker` が `claimEscape` を効果の後始末で返しているのと同じ形）。
+   *
+   * ⚠️ **`useCallback` で同一性を保つ**＝毎レンダー新しい関数を渡すと、React が古い ref を `null` で
+   * 呼び直すので**描き直すたびに降ろして**しまう（欄にいるのに名乗りが消える）。
+   *
+   * ⚠️ **「消えたのが手の乗っていた欄か」を見て絞ってはいけない**（PR #848 レビュー ℹ️）＝
+   * この ref は差し込み口・文字の**すべての欄で共有**しており、`drilledFieldFocused` は
+   * 「どれかにフォーカスがあるか」の1つの真偽値。だから理屈のうえでは「手の乗っていない欄だけが
+   * 消えた」ときにも降りてしまう。ところが**絞る実装は作れない**＝React が `ref(null)` を呼ぶ時点で
+   * `document.activeElement` は**まだ消える当人のまま**（jsdom で実測）なので、
+   * 「手が残っているなら降ろさない」と書くと**消えた当人のときも降ろさなくなり #842 が再発する**。
+   * ⚠️ 早く降りる側の実害は軽い（`Escape` の1段目が飛んで即座に選択解除になるだけ）のに対し、
+   * 降り損ねる側は**画面のキー操作が丸ごと死ぬ**＝**安全側は無条件に降ろすこと**。
+   * なお現状この筋は**到達しない**（`slotLayers`／`textKeys` はどちらも `selectedTemplate` だけから
+   * 導かれ、欄は必ず一括で出入りする）。「欄を1つだけ閉じる」導線を足すときはここを読み直すこと。
+   */
+  const drilledFieldRef = useCallback((el: HTMLElement | null) => {
+    if (el === null) setDrilledFieldFocused(false);
+  }, []);
   /** 欄を抜けるだけ（選択は解かない）＝`Escape` の1段目（#832）。 */
   const onDrilledFieldKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key === "Escape") e.currentTarget.blur();
@@ -3856,6 +3884,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           その欄へ手を移す（どこを触っているのかが画面で分かる）。
                           ⚠️ **Escape は欄を抜けるだけ**（#832）＝共有ハンドラへ即座に選択解除させない。 */}
                       <select className="select"
+                        ref={drilledFieldRef}
                         data-slot-field={layer.id}
                         value={selected.assetRefs?.[layer.id] ?? ""}
                         {...editGuard()}
@@ -3931,6 +3960,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                           する（`shouldIgnoreShortcut`）ので、ここで自前に受けないと何も起きない。 */}
                       <input
                         className="input" type="text"
+                        ref={drilledFieldRef}
                         data-text-field={key}
                         value={selected.texts?.[key] ?? ""}
                         {...editGuard()}
