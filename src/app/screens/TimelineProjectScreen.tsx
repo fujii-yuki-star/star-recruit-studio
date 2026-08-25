@@ -831,6 +831,17 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    *
    * ⚠️ **`useCallback` で同一性を保つ**＝毎レンダー新しい関数を渡すと、React が古い ref を `null` で
    * 呼び直すので**描き直すたびに降ろして**しまう（欄にいるのに名乗りが消える）。
+   *
+   * ⚠️ **「消えたのが手の乗っていた欄か」を見て絞ってはいけない**（PR #848 レビュー ℹ️）＝
+   * この ref は差し込み口・文字の**すべての欄で共有**しており、`drilledFieldFocused` は
+   * 「どれかにフォーカスがあるか」の1つの真偽値。だから理屈のうえでは「手の乗っていない欄だけが
+   * 消えた」ときにも降りてしまう。ところが**絞る実装は作れない**＝React が `ref(null)` を呼ぶ時点で
+   * `document.activeElement` は**まだ消える当人のまま**（jsdom で実測）なので、
+   * 「手が残っているなら降ろさない」と書くと**消えた当人のときも降ろさなくなり #842 が再発する**。
+   * ⚠️ 早く降りる側の実害は軽い（`Escape` の1段目が飛んで即座に選択解除になるだけ）のに対し、
+   * 降り損ねる側は**画面のキー操作が丸ごと死ぬ**＝**安全側は無条件に降ろすこと**。
+   * なお現状この筋は**到達しない**（`slotLayers`／`textKeys` はどちらも `selectedTemplate` だけから
+   * 導かれ、欄は必ず一括で出入りする）。「欄を1つだけ閉じる」導線を足すときはここを読み直すこと。
    */
   const drilledFieldRef = useCallback((el: HTMLElement | null) => {
     if (el === null) setDrilledFieldFocused(false);
