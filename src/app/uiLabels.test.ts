@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
-import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, resolveExportBlockedMessage } from "./uiLabels";
+import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage } from "./uiLabels";
 import { TIMELINE_EXPORT_BLOCK } from "../domain/timeline/export";
 import { TIMELINE_CLIP_KIND, PROJECT_FORMAT } from "../domain/enums";
 import { TIMELINE_SCHEMA_VERSION } from "../domain/timeline/types";
@@ -294,6 +294,8 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
       hiddenTrackDuplicate: hiddenTrackDuplicateMessage(),
       volumePointsTooManySplittable: volumePointsTooManyMessage(true),
       volumePointsTooManyUnsplittable: volumePointsTooManyMessage(false),
+      missingTemplateOne: missingTemplateMessage(),
+      missingTemplateMany: missingTemplateMessage(3),
     },
   };
 
@@ -341,6 +343,35 @@ describe("lockedTrackMessage（固定した列でできないこと）", () => {
     expect(hiddenTrackDuplicateMessage()).toContain("動画に出す");
   });
 
+});
+
+// #834-2＝画面2か所に手書きされていた（`15 §6` の `TIMELINE_TEMPLATE_NOT_FOUND`）。手書きは上の
+// 禁止語の検査の走査対象の外に落ちるので、共有関数へ寄せたうえで**文そのものはここで守る**
+//（画面側のテストは「共有関数を通っているか」しか見られない＝`lockedTrackMessage` と同じ流儀）。
+describe("missingTemplateMessage（見た目パターンが見つからない・#834-2）", () => {
+  it("1つのときは件数を出さず、その部品の話にする", () => {
+    expect(missingTemplateMessage()).toContain("この部品");
+    expect(missingTemplateMessage()).not.toMatch(/\d+個/);
+  });
+
+  it("件数を渡すと件数と「どうなるか」を添える（後回しの判断ができる）", () => {
+    expect(missingTemplateMessage(3)).toContain("3個");
+    expect(missingTemplateMessage(3)).toContain("動画に出ません");
+  });
+
+  it("どちらも次の行動（消して置き直す）で終わる＝行き止まりにしない", () => {
+    for (const t of [missingTemplateMessage(), missingTemplateMessage(2)]) {
+      expect(t).toContain("置き直してください");
+    }
+  });
+
+  // ⚠️ **「読み込み直す」は名指ししない**（#812）＝読み直す操作は画面に無く、自作のものを消した
+  // 場合は読み直しても戻らない＝実行できない／効果の無い行動になる（§2-5）。
+  it("「読み込み直す」を薦めない（実行できない行動を出さない）", () => {
+    for (const t of [missingTemplateMessage(), missingTemplateMessage(2)]) {
+      expect(t).not.toContain("読み込み直");
+    }
+  });
 });
 
 // #831＝「部品を分けてください」は読み上げには実行できない行動だった。分けられる部品が

@@ -107,6 +107,18 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // 遅れて走るタイマから**いまの世代**を読む（クロージャに閉じ込めると古い値を見る）。
   const groupGenRef = useRef(groupGen);
   useEffect(() => { groupGenRef.current = groupGen; }, [groupGen]);
+  // 画面を離れるときは**待っているタイマを止める**（#834-3）＝残すと、離れた後に走って
+  // **消えた画面へ書き戻し**にいく（閉じる相手はもう居ない）。
+  // ⚠️ **タイムライン側と consequence が違う**＝あちらの履歴は store にあるので閉じ忘れると
+  // 以後の編集がひとつながりになるが、**この画面の履歴は `useDraftHistory`＝画面ローカル**なので、
+  // 離れた時点でまとめごと消える。だからここで要るのは**タイマの後始末だけ**（`endGroup` は呼ばない
+  // ＝呼ぶ相手がもう無い）。同じ形に見えて理由が違うので、揃えたつもりで `endGroup` を足さない。
+  // ⚠️ **早期 return より前に置く**＝この画面は下で「まだ選ばれていない」ときに別の画面を返すので、
+  // 後ろに置くとフックの数が回によって変わる（`react-hooks/rules-of-hooks`）。
+  useEffect(() => () => {
+    if (nudgeGroupTimerRef.current) clearTimeout(nudgeGroupTimerRef.current);
+    nudgeGroupTimerRef.current = null;
+  }, []);
   /**
    * ⚠️ **下書きが変わったら、出しっぱなしの確認はやり直す**（レビュー 🟡）。
    * 出したまま中身が変わると、①消す相手がいなくなった確認が残る ②**取り消しで層が戻ると
