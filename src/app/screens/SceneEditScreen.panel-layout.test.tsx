@@ -120,3 +120,23 @@ describe("SceneEditScreen: 見出しを欄へ移したあとの並び（/canon-c
     }
   });
 });
+
+// ⚠️ **欄がフォーカス中に消えても、履歴のまとめが取り残されない**（#847・差分再監査 🟡）＝
+// `textGroup` は `blur` でしか閉じないが、**フォーカス中に欄が消えると `blur` は来ない**。実機で踏む道は
+// **欄の配置の組み替え**（掴む処理が `pointerdown` を `preventDefault` するのでフォーカスは欄に残ったまま、
+// 欄が別の親の下へ移る＝unmount）。閉じ損ねると**自動保存が止まり、以後の編集が履歴に1件も積まれない**。
+// ⚠️ フックの単体テストでは**画面の配線**（合成 ref `lineFieldRef` の渡し忘れ）を検知できないので、
+// タイムライン形式と**同じ形**をこちらにも置く（#847 のコミットは両形式を対象と書いていた）。
+describe("SceneEditScreen: 欄が消えても履歴のまとめが取り残されない（#847）", () => {
+  it("セリフ欄に手が入ったまま欄を閉じても、まとめは閉じる", () => {
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const line = screen.getByLabelText("セリフ") as HTMLTextAreaElement;
+    fireEvent.focus(line);
+    expect(useProjectStore.getState()._historyGroupDepth).toBeGreaterThan(0);
+    // **`blur()` を呼ばずに**欄を消す（配置の組み替えと同じ＝フォーカスは残ったまま unmount）。
+    fireEvent.click(screen.getByLabelText("選択中の場面を編集の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    expect(screen.queryByLabelText("セリフ")).toBeNull();
+    expect(useProjectStore.getState()._historyGroupDepth).toBe(0); // 閉じている＝自動保存が止まらない
+  });
+});

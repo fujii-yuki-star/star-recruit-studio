@@ -290,6 +290,17 @@ describe("TimelineProjectScreen: 再生まわりのレビュー指摘（/canon-c
     expect(useTimelineStore.getState().isPlaying).toBe(false);
   });
 
+  // ⚠️ **掴むのは左ボタンだけ**（差分再監査 ℹ️）＝掴む作法の単一の参照元（`usePointerDrag`）に揃える。
+  // この画面は帯・列で「右クリックでも開けます」と案内しているので、右クリックしたときに
+  // **メニューは出ず再生だけ止まる**は到達する（掴んでいないのに止まる＝線引きから外れる）。
+  it("右クリックでは止まらない（掴んだことにしない）", () => {
+    open();
+    render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByText("再生"));
+    fireEvent.pointerDown(screen.getByLabelText("再生位置"), { button: 2, pointerId: 1 });
+    expect(useTimelineStore.getState().isPlaying).toBe(true); // 走ったまま
+  });
+
   // ⚠️ **キーで動かすぶんは止めない**＝`11 §7.6.2.1` の「再生中に位置を動かしたら時計を測り直す」
   // （再生を続けたままのシーク）はそのまま。上の「位置を動かしても戻らない」と対で、
   // **掴む／掴まないで分かれている**ことを固定する。

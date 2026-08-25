@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE } from "../uiLabels";
 import type { ScreenId } from "../data/mockData";
 import { PageHead, Switch } from "../components/ui";
@@ -118,6 +118,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
    * 走行中の語彙（`isExportBusy`）は画面横断で編集の可否も決めるので広げず、**この画面の中だけ**で持つ。
    */
   const [starting, setStarting] = useState(false);
+  /** 押した瞬間に**いまの値**で見るための控え（描画時のクロージャでは1回ぶん古い）。 */
+  const startingRef = useRef(false);
+  const markStarting = (on: boolean): void => { startingRef.current = on; setStarting(on); };
   // ⚠️ **直前の回の後片づけ待ちも押させない**（#843）＝終わりの合図は片づけより先に立つので、この窓では
   // ボタンが戻っているのに `acquire` が失敗する（＝押しても断られるだけ・`06 §12.1`）。
   // 押す前に無効化して出す理由と、押したときに断る理由は**同じ述語**から採る（`isOwnCleanupPending`）。
@@ -146,7 +149,9 @@ export function ExportScreen({ onNavigate }: ExportProps) {
   async function startExport() {
     // 二重書き出しの入口ガード（#379）：ボタンは busy 中 disabled だが、他画面から戻って進捗表示が
     // 消えて見える等での再トリガを store の実状態で弾く（Rust 側にも実行中ガードあり＝多層防御）。
-    if (busy) return;
+    // ⚠️ **いまの値で見る**（差分再監査 ℹ️）＝描画時のクロージャだと、`beginExport` の往復中
+    // （走行中の表示になる前）に押し直された回を素通りし、**始まっている回の表示を潰す**。
+    if (busy || startingRef.current) return;
     if (!canExport()) {
       setPhase("unsupported");
       return;
@@ -198,16 +203,19 @@ export function ExportScreen({ onNavigate }: ExportProps) {
     // そこでは自分が**正当に**締めを持っている（走行中の判定は phase を見るので窓と区別できない）。
     // 名乗る前のここ1回だけで見る。
     // ⚠️ **その時点の持ち主で見る**＝描いた後に相手が取ることがあるので、閉じ込めた値では遅い。
-    const lockedNow = exportLockBlockedMessage(useExportLockStore.getState().owner, EXPORT_OWNER, busy);
+    const lockedNow = exportLockBlockedMessage(useExportLockStore.getState().owner, EXPORT_OWNER, busy || startingRef.current);
     if (lockedNow) { setMessage(lockedNow); setPhase("error"); return; }
     // 準備（クリップ抽出）と本体を同一のキャンセルスコープにする（#380）。中止ボタンが出る前（busy 前）に宣言＝競合なし。
-    // ⚠️ **名乗れたかを見る**（レビュー ℹ️）＝締めの判定（上の `lockedNow`＝`exportLockBlockedMessage`）と
-    // 名乗りの間に**保存先を選ぶダイアログの待ち**が挟まるので、その間に相手（タイムライン形式）が先に取りうる。
-    // 見ないで進むと、共有の一時置き場を片づける後始末が**相手のフレームを消す**（`11 §7.6.5`）。
+    // ⚠️ **名乗れたかを見る**（レビュー ℹ️）＝取れないまま進むと、共有の一時置き場を片づける後始末が
+    // **相手のフレームを消す**（`11 §7.6.5`）。
+    // ⚠️ **いまは通常この分岐に入らない**（差分再監査 🟡）＝保存先を選ぶダイアログの待ちは**上の
+    // `lockedNow` より前**にあり、`lockedNow` と `acquire` の間に `await` は無い（以前は判定が
+    // ダイアログより前だったので本物のレースがあった＝#843 で判定を後ろへ移して閉じた）。
+    // **将来ここへ待ちを挟む形にしたときの備え**として残す（消すと、そのとき黙って穴が開く）。
     // ⚠️ **名乗る前に立てる**＝名乗った瞬間に再描画が走るので、後で立てると「後片づけ中」が一瞬出る。
-    setStarting(true);
+    markStarting(true);
     if (!useExportLockStore.getState().acquire(EXPORT_OWNER)) {
-      setStarting(false);
+      markStarting(false);
       // ⚠️ **誰が持っているかで理由を分ける**（#843）＝自分の後片づけ待ちなら「ほかの動画」は嘘になる。
       const mine = useExportLockStore.getState().owner === EXPORT_OWNER;
       setMessage(mine ? EXPORT_CLEANUP_PENDING_MESSAGE : OTHER_EXPORT_RUNNING_MESSAGE);
@@ -357,7 +365,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       }
     } finally {
       // ⚠️ **片づけに入る前に降ろす**＝ここから先は本当に「後片づけ中」なので、断りが出るのが正しい。
-      setStarting(false);
+      markStarting(false);
       unlistenProgress?.(); // 進捗購読を解除（#376）
       setExportRun({ cancelling: false }); // 中止フラグは1回の書き出しで完結（次回に持ち越さない・#380）
       // ステージングしたアニメフレームを掃除（成功/失敗いずれも）＝次回書き出しに残さない（#書き出しRangeError）。
@@ -478,7 +486,7 @@ export function ExportScreen({ onNavigate }: ExportProps) {
             {/* プロジェクト保存は共通トップバーの「保存」に一本化（#410 sub5・同一画面に保存2つを解消）。
                 「動画を保存」は startExport が内部で saveProject 済み（自動保存＝#256 もあり取りこぼさない）。 */}
             <div className="col gap-xs" style={{ alignItems: "flex-end" }}>
-              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy || lockBlockedMessage != null || blockingItems.length > 0 || capabilityBlocked}>
+              <button className="btn btn-primary btn-lg" onClick={() => void startExport()} disabled={busy || starting || lockBlockedMessage != null || blockingItems.length > 0 || capabilityBlocked}>
                 <FilmIcon size={20} />
                 {busy ? "書き出し中…" : "動画を保存"}
               </button>
