@@ -2671,6 +2671,13 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             max={Math.max(totalSec, 0.1)}
             step={0.1}
             value={playheadSec}
+            /* ⚠️ **掴んだら再生を止める**（#844-6・ADR-0032 決定21 追補の対象拡大＝利用者判断 2026-08-25）＝
+               目盛りと同じ扱いにする。止めないと、握っている間つまみが**指と再生位置の間で往復**する
+               （`_advancePlayhead` が毎フレーム書き戻し、`step` の丸めに収まらない分だけ跳ねる）＝
+               「掴めるのに言うことを聞かない」。掴む入口はここ1か所（`onPointerDown`）＝押すだけ・
+               キーで動かすぶんは**止めない**（`onChange` は触らない）＝`11 §7.6.2.1`「再生中に位置を
+               動かしたら時計を測り直す」の再生継続シークはそのまま。 */
+            onPointerDown={() => { if (useTimelineStore.getState().isPlaying) pause(); }}
             onChange={(e) => { setPlayhead(Number(e.target.value)); followPlayhead(); }}
           />
         </label>
