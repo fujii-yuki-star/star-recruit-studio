@@ -299,7 +299,12 @@ export function templatePartAt(
   for (let i = layout.items.length - 1; i >= 0; i--) {
     const item = layout.items[i];
     const slash = item.id.indexOf('/');
-    if (slash <= 0) continue; // 自由配置の部品（前置きが無い）は対象外
+    // ⚠️ **これは実際には通らない防御**（#834-6）＝下でアイテムに付ける前置きは**種類によらず一律**なので、
+    // 前置きの無い id は出てこない（クリップの下地も内側 id `<部品 id>__bg` に前置きが付いて
+    // `<部品 id>/<部品 id>__bg` になる＝上の JSDoc の書き方が正しい）。
+    // ⚠️ 以前ここには「自由配置の部品（前置きが無い）は対象外」と書いてあったが**事実と違う**
+    //（自由配置のクリップにも前置きは付く）。**下地や入れない層を弾いているのは下の `canDrillInto`**。
+    if (slash <= 0) continue;
     const clipId = item.id.slice(0, slash);
     const layerId = item.id.slice(slash + 1);
     if (!canDrillInto(clipId, layerId)) continue;

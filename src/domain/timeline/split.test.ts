@@ -505,6 +505,28 @@ describe('分けたときに持ち越すもの（#750 レビュー）', () => {
       expect(r.ok && r.doc.clips[1].slotClips?.main.startSec).toBeCloseTo(2, 6);
     });
 
+    // ⚠️ **ちょうど使い切る位置（境界）も断る**（#834-1）＝門は `advanced >= limit` で、`>` に変えても
+    // 上下の3件は**いずれも境界から離れた点**しか突いていないので全件緑のまま通る（実測で確認）。
+    // 境界そのものが実害の起点＝**30fps の格子点**であり、映像が凍って見える位置なので利用者が
+    // いちばん狙いやすい。ここで分けると後半が `{ startSec: 3, endSec: 3 }` になり、`resolveSlotClip` の
+    // 反転レンジ正規化で終端が落ちて**切り捨てたはずの先が流れ出す**（元の音が入っていれば鳴り出す）。
+    it('切り出す終わりを**ちょうど**使い切る位置でも分けられない（境界）', () => {
+      const d = withSlotVideo({ slotClips: { main: { startSec: 0, endSec: 3 } } });
+      const r = splitT(d, 3);
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.reason).toBe(SPLIT_BLOCKED.pastSource);
+    });
+
+    it('素材の実尺を**ちょうど**使い切る位置でも分けられない（境界）', () => {
+      const d = {
+        ...withSlotVideo(),
+        assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { durationSec: 4 } }],
+      } as TimelineProject;
+      const r = splitT(d, 4);
+      expect(r.ok).toBe(false);
+      expect(!r.ok && r.reason).toBe(SPLIT_BLOCKED.pastSource);
+    });
+
     it('素材の実尺を追い越す位置でも分けられない（書き出しが理由なく落ちるため）', () => {
       const d = {
         ...withSlotVideo(),

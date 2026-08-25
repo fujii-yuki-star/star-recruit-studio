@@ -128,10 +128,14 @@ function usesUpSource(
   return videoPlacementsOfClip(doc, clip, { templateOf }).some((p) => {
     const advanced = p.sourceStartSec + headSec * p.speed;
     const asset = doc.assets.find((a) => a.assetId === p.assetId);
-    const endSec = resolveSlotClip(
-      p.layerId != null ? clip.slotClips?.[p.layerId] : { startSec: clip.sourceStartSec, speed: clip.speed },
-      p.layerId != null ? asset?.clip : undefined,
-    ).endSec;
+    // ⚠️ **直接置きに「切り出す終わり」は無い**（#834-3）＝クリップが持つのは `sourceStartSec`/`speed` だけで
+    // `endSec` に当たる項目が無い（`timeline-project.schema` の `TimelineClip`）。以前はここも
+    // `resolveSlotClip` へ通していたが、上書きにも既定にも `endSec` が入らないので**必ず `undefined`**
+    // ＝実質デッドコードで、「継承が抜けている」と誤読される形だった。
+    // ⚠️ **素材既定（`asset.clip`）を足さない**＝`videoPlacementsOfClip` の直接置きの枝は
+    // **クリップの値だけ**を読む（素材既定を効かせない）。ここだけが見ると、**画面では流れている先を
+    // 門だけが「使い切った」と断る**＝描画・再生と同じ材料で判断する、が崩れる。
+    const endSec = p.layerId != null ? resolveSlotClip(clip.slotClips?.[p.layerId], asset?.clip).endSec : undefined;
     const sourceEnd = asset?.metadata?.durationSec ?? undefined;
     // 判る材料が無ければ限界は無限＝この比較は必ず偽になる（別に見張りを置かない＝守れない枝を作らない）。
     const limit = Math.min(endSec ?? Infinity, sourceEnd ?? Infinity);

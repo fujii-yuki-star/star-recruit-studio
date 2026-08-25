@@ -649,6 +649,30 @@ export function volumePointsTooManyMessage(hasSplittable: boolean): string {
     : `音量の変化の点が多すぎる部品があります。1つの部品に置けるのは${VOLUME_POINTS_MAX}個までです。いらない点を外してください`;
 }
 
+/**
+ * 見た目パターンが見つからない部品の案内（`15 §6` `TIMELINE_TEMPLATE_NOT_FOUND`・ADR-0032・#834-2）。
+ *
+ * ⚠️ **画面で手書きしない**＝{@link lockedTrackMessage} と同じ理由（#819-2）。手書きは
+ * `uiLabels.test.ts` の禁止語の検査が見る**走査対象（Record と共有関数）の外**に落ちるので、
+ * 混ざっても誰も気づかない。実際この文言は**画面2か所と `15 §6` を手でそろえて**成立していた
+ *（#812 の直しがそうなっていた）。
+ * ⚠️ **`TIMELINE_EXPORT_TEMPLATE_UNRESOLVED`（{@link exportBlockedMessage}）とは別物**＝あちらは
+ * 書き出しを断るコードで、締めも意図して違う（「そのままでは動画に出ません」）。ここへ寄せない。
+ *
+ * ⚠️ **「読み込み直す」は名指ししない**（#812）＝見た目パターンを読み直す操作は画面のどこにも無く
+ * （起動時に一度だけ）、自作のものを消した場合は読み直しても戻らない＝**実行できない／効果の無い
+ * 行動**になる（§2-5）。消して置き直す側だけを出す。
+ *
+ * @param count 件数。**省略＝選んでいるその部品1つ**の話（詳しい欄＝相手が画面に出ている）。
+ *   渡すと**全体の警告**になり、何が起きるか（動画に出ない）を添える＝一覧では消す相手が
+ *   画面に出ているとは限らず、「直さないとどうなるか」が分からないと後回しの判断ができない。
+ */
+export function missingTemplateMessage(count?: number): string {
+  return count == null
+    ? "この部品の見た目パターンが見つかりません。この部品を消して、置き直してください。"
+    : `見た目パターンが見つからない部品が${count}個あります。その部品は動画に出ません。その部品を消して、置き直してください。`;
+}
+
 /** {@link exportBlockedMessage} と {@link volumePointsTooManyMessage} をコードで振り分けて1本にする。 */
 export function resolveExportBlockedMessage(code: TimelineExportBlockCode, doc: TimelineProject, clipIds: string[]): string {
   if (code === TIMELINE_EXPORT_BLOCK.volumePointsTooMany) return volumePointsTooManyMessage(volumePointsTooManyHasSplittable(doc, clipIds));

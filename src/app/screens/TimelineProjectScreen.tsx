@@ -41,7 +41,7 @@ import { canUseOriginalAudio, compositeSpansOthers, cropPivotDiffers, placementA
 import { TimelineSlotVideo } from "../components/TimelineSlotVideo";
 import { layoutTimelineAt, templatePartAt, templatePartRect } from "../../renderer/timelineLayout";
 import { timelineExportBlockers } from "../../domain/timeline/export";
-import { resolveExportBlockedMessage } from "../uiLabels";
+import { missingTemplateMessage, resolveExportBlockedMessage } from "../uiLabels";
 import { danglingSubtitleLinks, subtitleTextOf } from "../../domain/timeline/subtitleLink";
 import { animationOriginSec, keyframeTimeAt } from "../../domain/timeline/keyframeEdit";
 import type { KeyframeInput, KeyframeProp } from "../../domain/timeline/keyframeEdit";
@@ -3954,9 +3954,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                    画面のどこにも無く（起動時に一度だけ）、自作のものを消した場合は読み直しても
                    戻らない＝**実行できない／効果の無い行動**になる（§2-5）。消して置き直す側だけを出す
                    （削除のボタンは選んでいれば必ず出る）。 */
-                <p className="notice notice-warn" role="alert">
-                  この部品の見た目パターンが見つかりません。この部品を消して、置き直してください。
-                </p>
+                <p className="notice notice-warn" role="alert">{missingTemplateMessage()}</p>
               )
             )}
           </>
@@ -4318,9 +4316,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
       {/* 直せば良くなる警告は、その下（出たままでも編集の邪魔をしない位置）。 */}
       {missingTemplateCount > 0 && (
-        <p className="notice notice-warn" role="alert">
-          見た目パターンが見つからない部品が{missingTemplateCount}個あります。その部品は動画に出ません。その部品を消して、置き直してください。
-        </p>
+        <p className="notice notice-warn" role="alert">{missingTemplateMessage(missingTemplateCount)}</p>
       )}
       {emptySlotCount > 0 && (
         <p className="notice notice-warn" role="alert">

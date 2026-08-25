@@ -1,11 +1,11 @@
 // テンプレ作成エディタのレイヤー操作（ADR-0017・#214 ③b）。Layer[] の追加/削除/更新の純粋関数（§7 テスト対象）。
-import { LAYER_TYPES, TEXT_KEY, TEXT_KEYS, type LayerType, type TextKey } from '../enums';
+import { LAYER_TYPE, LAYER_TYPES, TEXT_KEY, TEXT_KEYS, type LayerType, type TextKey } from '../enums';
 import { SCENE_DEFAULT_DURATION_SEC } from '../constants';
 import type { Layer, Template } from './types';
 import { effectiveLayerZ } from './layerOrder';
 
 /** エディタで追加できるレイヤー型（ADR-0017：decor は開放しない＝静的装飾は slot/shape で代替）。 */
-export const TEMPLATE_ADDABLE_LAYER_TYPES: LayerType[] = LAYER_TYPES.filter((t) => t !== 'decor');
+export const TEMPLATE_ADDABLE_LAYER_TYPES: LayerType[] = LAYER_TYPES.filter((t) => t !== LAYER_TYPE.decor);
 
 const LAYER_DEFAULT_W = 480;
 const LAYER_DEFAULT_H = 240;
@@ -24,9 +24,9 @@ export function addLayer(layers: Layer[], type: LayerType, canvas: { width: numb
   // 「最前面」は**実効 z**で測る（種別ごとの既定を持つ層より後ろに入らない＝追加したのに下に出る、を防ぐ）。
   const zIndex = layers.reduce((m, l) => Math.max(m, effectiveLayerZ(l)), 0) + 1;
   // 文字系は textKey 既定を入れて追加直後から場面テキストに紐づく（text→見出し / subtitle→字幕）。未設定だと描画で空になる。
-  const textKey = type === 'text' ? TEXT_KEY.title : type === 'subtitle' ? TEXT_KEY.subtitle : undefined;
+  const textKey = type === LAYER_TYPE.text ? TEXT_KEY.title : type === LAYER_TYPE.subtitle ? TEXT_KEY.subtitle : undefined;
   const layer: Layer =
-    type === 'background'
+    type === LAYER_TYPE.background
       ? { id, type, x: 0, y: 0, w: canvas.width, h: canvas.height, zIndex }
       : {
           id,
@@ -72,8 +72,8 @@ export function usedTextKeys(layers: Layer[]): TextKey[] {
  * 空振りし、「文字の層にも入れる」が崩れていた）。
  */
 export function textKeyOfLayer(layer: Layer): TextKey | null {
-  if (layer.type === 'text') return layer.textKey ?? null;
-  if (layer.type === 'subtitle') return layer.textKey ?? TEXT_KEY.subtitle;
+  if (layer.type === LAYER_TYPE.text) return layer.textKey ?? null;
+  if (layer.type === LAYER_TYPE.subtitle) return layer.textKey ?? TEXT_KEY.subtitle;
   return null;
 }
 
@@ -84,7 +84,7 @@ export function textKeyOfLayer(layer: Layer): TextKey | null {
  * （§2-7。別々に書くと「出なくならないと言って出なくなる」表示になる）。
  */
 export function templateSlotIds(layers: Layer[]): Set<string> {
-  return new Set(layers.filter((l) => l.type === 'background' || l.type === 'slot' || l.type === 'logo').map((l) => l.id));
+  return new Set(layers.filter((l) => l.type === LAYER_TYPE.background || l.type === LAYER_TYPE.slot || l.type === LAYER_TYPE.logo).map((l) => l.id));
 }
 
 /**

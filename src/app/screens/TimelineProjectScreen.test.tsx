@@ -10,7 +10,7 @@ import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProject
 import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
-import { DELETE_LABEL, DUPLICATE_LABEL, lockedTrackMessage, clockLabel } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -125,7 +125,10 @@ describe("TimelineProjectScreen: レビュー指摘の修正（/canon-check）",
       clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_missing" }],
     });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("見た目パターンが見つからない部品が1個あります"))).toBe(true);
+    // ⚠️ **文は共有関数から採る**（#834-2）＝画面で手書きすると禁止語の検査の外に落ちるので
+    // `missingTemplateMessage` へ寄せた。ここを文字列で書くと、文言を直したときに**画面側だけ
+    // 古いまま**でも気づけない＝共有関数を呼んで比べることで、片方だけ変わっていれば割れる。
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes(missingTemplateMessage(1)))).toBe(true);
     // 描かれないものが混ざったまま書き出させない（ADR-0026④）。
     expect(screen.getByRole("button", { name: "動画を書き出す" })).toBeDisabled();
   });
@@ -716,7 +719,7 @@ describe("TimelineProjectScreen: 見た目パターンの中身（#632）", () =
     });
     useTimelineStore.setState({ selectedClipIds: ["clip_001"] });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
-    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes("この部品を消して、置き直してください"))).toBe(true);
+    expect(screen.getAllByRole("alert").some((el) => el.textContent?.includes(missingTemplateMessage()))).toBe(true); // 文は共有関数から（#834-2）
     // ⚠️ **できない行動を名指ししない**（#812）＝見た目パターンを読み直す操作は画面に無く、
     // 自作のものを消した場合は読み直しても戻らない（§2-5）。
     expect(screen.queryByText(/読み込み直/)).toBeNull();

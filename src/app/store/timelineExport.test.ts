@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 実物の描画経路を1件だけ通したいテスト（動画のコマの焼き出し）があるので、丸ごとの差し替えでは足りない。
 vi.mock('../../renderer/export/rasterize', () => ({ svgToPngDataUrl: vi.fn(async () => 'data:image/png;base64,X') }));
 import { useTimelineStore, timelineBgmRunInputs } from './timelineStore';
-import { useExportLockStore } from './exportLock';
+import { OTHER_EXPORT_RUNNING_MESSAGE, useExportLockStore } from './exportLock';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import * as dialogMod from '../../infrastructure/dialog';
@@ -216,6 +216,46 @@ describe('exportTimelineVideo', () => {
     vi.mocked(ffmpegMod.exportVideo).mockRejectedValue(new Error('x'));
     await useTimelineStore.getState().exportTimelineVideo(deps);
     expect(vi.mocked(ffmpegMod.clearExportFramesStage)).toHaveBeenCalled();
+  });
+
+  // ⚠️ **掃除してから締めを返す**（#834-3）＝一時ファイルの置き場は**アプリで1つ**（ADR-0032 決定22・
+  // 場面形式とタイムライン形式が共有）。先に返すと、次の書き出しが**この掃除の最中に**フレームを
+  // 書き始め、掃除が**相手のフレームを消す**（締めはまさにそれを防ぐために在る）。
+  it('片づけ終わってから走行中の締めを返す（次の書き出しの絵を消さない）', async () => {
+    const order: string[] = [];
+    vi.mocked(ffmpegMod.clearExportFramesStage).mockImplementation(async () => { order.push('clear'); });
+    const release = useExportLockStore.getState().release;
+    vi.spyOn(useExportLockStore.getState(), 'release').mockImplementation((owner) => { order.push('release'); release(owner); });
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(order[order.length - 1]).toBe('release'); // 最後が締め返し＝掃除はその前に終わっている
+    expect(order).toContain('clear');
+  });
+
+  // ⚠️ **締めが取れなければ始めない**（#834 レビュー 🟡・場面形式と同じ形＝ADR-0026②）＝
+  // 取れないまま進むと**締めを持たないまま走る回**ができ、その最中に場面形式が締めを取って
+  // 同時に走れてしまう（共有の一時置き場を互いに消す＝`11 §7.6.5`）。押す前の関門
+  //（`otherExportRunning`）は**自分と同じ形式を数えない**ので、ここで見ないと素通りする。
+  it('締めがまだ返っていなければ始めない（走行中のまま固まらせない）', async () => {
+    await open(doc());
+    // ⚠️ **持ち主が「自分（タイムライン形式）」の状態を作る**＝前の回の後始末（一時ファイルの掃除）が
+    // まだ走っていて締めを返していない瞬間。押す前の関門は `isOtherExportRunning` で**自分を数えない**
+    // ので素通りし、`acquire` だけが false を返す＝ここを見ないと**締め無しで走る**。
+    useExportLockStore.getState().acquire('timeline');
+    await useTimelineStore.getState().exportTimelineVideo(deps);
+    expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled(); // 走らない
+    const run = useTimelineStore.getState().exportRun;
+    expect(run.phase).toBe('error');
+    expect(run.message).toBe(OTHER_EXPORT_RUNNING_MESSAGE);
+    expect(useExportLockStore.getState().owner).toBe('timeline'); // 走っている回の締めを奪わない
+  });
+
+  // ⚠️ **掃除が失敗しても締めは返す**＝返し損ねると、以後どの動画も書き出せなくなる（行き止まり）。
+  it('片づけに失敗しても締めは返す（以後書き出せなくならない）', async () => {
+    vi.mocked(ffmpegMod.clearExportFramesStage).mockRejectedValue(new Error('cleanup failed'));
+    await open(doc());
+    await useTimelineStore.getState().exportTimelineVideo(deps).catch(() => {});
+    expect(useExportLockStore.getState().owner).toBeNull();
   });
 
   it('中止したら書き出さず、中止として知らせる', async () => {

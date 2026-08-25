@@ -1268,7 +1268,15 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 保存先を先に決める（重い処理をしてから「やっぱりやめる」を選ばせない）。ここから走行中に数える
     // ＝ダイアログを開いている間に続けて押しても、書き出しが二重に走らない。
     set({ exportRun: { ...IDLE_EXPORT, phase: P.preparing } });
-    useExportLockStore.getState().acquire(EXPORT_OWNER);
+    // ⚠️ **取れたかを見る**（#834 レビュー 🟡・場面形式 `ExportScreen` と同じ形＝ADR-0026②）＝
+    // 取れないまま進むと、**締めを持たないまま走る回**ができる。上の `otherExportRunning` は
+    // **自分（同じ形式）を数えない**ので、直前の回の後始末（一時ファイルの掃除）がまだ走っている間に
+    // 押し直すと素通りする＝その回は締め無しで走り、掃除が終わって締めが返った後は**場面形式が
+    // 同時に取れてしまう**（共有の一時置き場を互いに消す＝`11 §7.6.5`・ADR-0032 決定22）。
+    if (!useExportLockStore.getState().acquire(EXPORT_OWNER)) {
+      set({ exportRun: { ...IDLE_EXPORT, phase: P.error, message: OTHER_EXPORT_RUNNING_MESSAGE } });
+      return; // 走行中のまま固まらせない（立てた `preparing` を戻す）
+    }
     let unlisten: (() => void) | undefined;
     try {
       // 見た目パターンの解決は**代表フレームの要否**（どの枠が実フレームで描かれるか＝#512 段3）にも
@@ -1372,9 +1380,16 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       });
     } finally {
       unlisten?.();
-      useExportLockStore.getState().release(EXPORT_OWNER);
       // 一時ファイルは成功でも失敗でも片づける（次の書き出しに古いフレームを混ぜない）。
-      await clearExportFramesStage();
+      // ⚠️ **掃除してから締めを返す**（#834-3）＝一時ファイルの置き場は**アプリで1つ**（ADR-0032 決定22）。
+      // 先に返すと、次の書き出しが**この掃除の最中に**フレームを書き始め、掃除が**相手のフレームを消す**
+      //（締めはまさにそれを防ぐために在る）。⚠️ **返すのは `finally` で**＝掃除が失敗しても締めは返す
+      // （返し損ねると、以後どの動画も書き出せなくなる＝行き止まり）。
+      try {
+        await clearExportFramesStage();
+      } finally {
+        useExportLockStore.getState().release(EXPORT_OWNER);
+      }
     }
   },
 

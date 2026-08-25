@@ -331,10 +331,13 @@ export function ExportScreen({ onNavigate }: ExportProps) {
       }
     } finally {
       unlistenProgress?.(); // 進捗購読を解除（#376）
-      useExportLockStore.getState().release(EXPORT_OWNER); // 走行中の締めを返す（#631）
       setExportRun({ cancelling: false }); // 中止フラグは1回の書き出しで完結（次回に持ち越さない・#380）
       // ステージングしたアニメフレームを掃除（成功/失敗いずれも）＝次回書き出しに残さない（#書き出しRangeError）。
+      // ⚠️ **掃除してから締めを返す**（#834-3・タイムライン側と同じ順）＝一時ファイルの置き場は
+      // **アプリで1つ**（ADR-0032 決定22）。先に返すと、次の書き出しが**この掃除の最中に**フレームを
+      // 書き始め、掃除が**相手のフレームを消す**（締めはまさにそれを防ぐために在る）。
       await clearExportFramesStage().catch(() => {});
+      useExportLockStore.getState().release(EXPORT_OWNER); // 走行中の締めを返す（#631）
     }
   }
 

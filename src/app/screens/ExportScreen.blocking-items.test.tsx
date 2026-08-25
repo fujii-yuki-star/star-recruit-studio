@@ -134,6 +134,25 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     // 黙って終わらない＝理由も出す（失敗が投げっぱなしだと画面は押した直後のまま）。
     expect(useProjectStore.getState().exportRun.phase).toBe("error");
   });
+
+  // ⚠️ **片づけてから締めを返す**（#834-3・タイムライン側と同じ順＝ADR-0026②）＝一時ファイルの
+  // 置き場は**アプリで1つ**（ADR-0032 決定22・`11 §7.6.5`）。先に返すと、次の書き出しが**この片づけの
+  // 最中に**フレームを書き始め、片づけが**相手のフレームを消す**（締めはまさにそれを防ぐために在る）。
+  it("片づけ終わってから走行中の締めを返す（次の書き出しの絵を消さない）", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    // 後始末（`finally`）へ確実に降りる道を使う＝上の「失敗しても締めは返す」と同じ入口。
+    vi.spyOn(ffmpeg, "beginExport").mockRejectedValue(new Error("ipc failed"));
+    const order: string[] = [];
+    vi.spyOn(ffmpeg, "clearExportFramesStage").mockImplementation(async () => { order.push("clear"); });
+    const release = useExportLockStore.getState().release;
+    vi.spyOn(useExportLockStore.getState(), "release").mockImplementation((owner) => { order.push("release"); release(owner); });
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBeNull());
+    expect(order[order.length - 1]).toBe("release");   // 最後が締め返し
+    expect(order[order.length - 2]).toBe("clear");     // その直前が片づけ＝順序が守られている
+  });
 });
 
 // #547 P2-1：% と説明を共有純粋関数へ委譲したので、**渡し間違え**（progress と encode の取り違え等）は
