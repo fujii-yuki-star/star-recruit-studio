@@ -269,9 +269,15 @@ export function timelineCanvasClipsAt(
  * 描いたアイテムの id から**どの部品のものか**を見分ける（#746-2）。
  * ⚠️ **前置きの作り方はこの file の中で1つ**（下でアイテムに付けている前置きと対）＝
  * 呼び出し側で組み立て直すと、付け方を変えたときに黙って外れる（伏せたい絵が伏せられない）。
+ *
+ * ⚠️ **見るのは前置きだけ**（#841）＝以前は `<部品 id>__bg` との直接比較も並べていたが、**その id は
+ * 出てこない**。下地は内側 id `<部品 id>__bg` で作られたあと、ほかのアイテムと**同じように**前置きが
+ * 付いて `<部品 id>/<部品 id>__bg` になる（前置きは種類によらず一律）。この file の別の場所と
+ * `timelineLayout.test.ts` は既に「`clip_001__bg` は**出ない id**」と書いており、ここだけが古い前提のまま
+ * だった＝読んだ人が「id には2つの形がある」と誤解する起点になる。
  */
 export function isItemOfClip(itemId: string, clipId: string): boolean {
-  return itemId === `${clipId}__bg` || itemId.startsWith(`${clipId}/`);
+  return itemId.startsWith(`${clipId}/`);
 }
 
 /**

@@ -7,7 +7,7 @@ import type { TimelineClip, TimelineProject } from '../domain/timeline/types';
 import { TIMELINE_SCHEMA_VERSION } from '../domain/timeline/types';
 import { layoutScene } from './layout';
 import { layoutToSvg } from './sceneSvg';
-import { clipIsLiveAt, layoutTimelineAt, templatePartAt } from './timelineLayout';
+import { clipIsLiveAt, isItemOfClip, layoutTimelineAt, templatePartAt } from './timelineLayout';
 
 const NORMAL_TEMPLATE: Template = {
   schemaVersion: '1.0',
@@ -401,5 +401,28 @@ describe('templatePartAt（見た目パターンの中の部分を指す）', ()
     // 90度回すと、見た目は中心(200,150)まわりに縦長 100×200＝x[150,250]・y[50,250]。
     expect(templatePartAt(l, { x: 200, y: 60 }, isTemplate)?.layerId).toBe('main'); // 回した後は中
     expect(templatePartAt(l, { x: 110, y: 150 }, isTemplate)).toBeNull();           // 素の矩形では中だが外
+  });
+});
+
+// ⚠️ **id の形はこの file の中で1つ**（#746-2）＝呼び出し側で組み立て直すと、付け方を変えたときに
+// 黙って外れる（伏せたい絵が伏せられない）。ここは**実際に出る id** で契約を固定する。
+describe('isItemOfClip（描いたアイテムがどの部品のものか・#746-2）', () => {
+  it('前置きで見分ける（下地も同じ形で当たる）', () => {
+    // 下地は内側 id `<部品>__bg` で作られたあと、ほかと**同じように**前置きが付く（#841）。
+    expect(isItemOfClip('clip_001/clip_001__bg', 'clip_001')).toBe(true);
+    expect(isItemOfClip('clip_001/main', 'clip_001')).toBe(true);
+  });
+
+  it('別の部品のものは当たらない', () => {
+    expect(isItemOfClip('clip_002/main', 'clip_001')).toBe(false);
+    // ⚠️ **前置きの区切りまで見る**＝前方一致だけだと `clip_0011` のような別の部品まで当たる。
+    expect(isItemOfClip('clip_0011/main', 'clip_001')).toBe(false);
+  });
+
+  // ⚠️ **前置きの無い id は出てこない**（#841）＝下地も前置きが付くので、この形と比べる枝は
+  // 到達しなかった（読んだ人が「id には2つの形がある」と誤解する起点だった）。
+  it('前置きの無い id は当たらない（そもそも出てこない形）', () => {
+    expect(isItemOfClip('clip_001__bg', 'clip_001')).toBe(false);
+    expect(isItemOfClip('clip_001', 'clip_001')).toBe(false);
   });
 });
