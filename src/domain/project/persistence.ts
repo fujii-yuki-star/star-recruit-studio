@@ -298,25 +298,24 @@ export function validateProjectDoc(data: unknown): { valid: boolean; errors: str
   return { valid: false, errors: formatProjectErrors(), structural };
 }
 
-/** 読込時に旧バージョン(1.0〜1.16)を現行(1.17)へ移行する。
- *  1.0→1.1: videoKind 既定 recruit・companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
- *  1.1→1.2: videoSettings.width/height を除去（aspectRatio を単一の真実に＝ADR-0012）。
- *  1.2→1.3: videoSettings.fontId を補完（同梱フォント選択・未指定は既定フォント）。
- *  1.3→1.4: bgmSettings.bundledBgmId を検証（未知の id は標準BGM未選択へ落とす・追加は任意フィールド）。
- *  1.4→1.5: 未知の scene.fontId を継承（未指定）へ落とす（場面ごとのフォント・追加は任意フィールド）。
- *  1.5→1.6: FREE 図形の種別追加（rounded_rect/triangle/star/arrow/speech_bubble）＋枠線（strokeColor/strokeWidth）。
- *          いずれも後方互換の任意追加のため、版番号の付け替え以外の変換は不要（#173）。
- *  1.6→1.7: テキストごとのフォント（FreeElement.fontId＋scene.textFontIds）。後方互換の任意追加＝変換不要（#178）。
- *  1.7→1.8: 掛け合い（scene.lines＝NarrationLine[]＋scene.subtitleEnabledDefault）。後方互換の任意追加＝変換不要（ADR-0015/#180）。
- *  1.8→1.9: FREE 要素の回転（FreeElement.rotation・度）。後方互換の任意追加＝変換不要（未指定=回転なし・#208）。
- *  1.9→1.10: FREE text の体裁（lineHeight＝行間・textAlign＝揃え）。後方互換の任意追加＝変換不要（未指定は既定＝行間1.3/左揃え・#209）。
- *  1.10→1.11: FREE 要素の hidden（非表示）/locked（ロック）。後方互換の任意追加＝変換不要（未指定＝表示・編集可・#210）。
- *  1.11→1.12: 掛け合いの行ごとの抑揚（NarrationLine.intonation）。後方互換の任意追加＝変換不要（未指定＝場面/動画の既定を継承・#242）。
- *  1.12→1.13: 場面ごと・スロット別の画像の収め方（scene.slotFits）。後方互換の任意追加＝変換不要（未指定＝テンプレ層の fit を使用・④）。
- *  1.13→1.14: 要素のグループ化（scene.groups）。後方互換の任意追加＝変換不要（未指定＝グループ無し・ADR-0022）。
- *  1.14→1.15: 場面横断タイムラインの上位編集（timelineOverlay）。後方互換の任意追加＝変換不要（未指定＝場面射影のみ・ADR-0018）。
- *  1.15→1.16: 場面ごとのBGM（scene.bgmSettings）。後方互換の任意追加＝変換不要（未指定＝プロジェクト既定を継承・ADR-0018 ③(7)）。
- *  1.16→1.17: 要素アニメーション（timelineOverlay.animations＝キーフレーム）。後方互換の任意追加＝変換不要（未指定＝アニメ無し・静止・ADR-0019 ④）。 */
+/** 読込時に旧バージョンを現行（`PROJECT_SCHEMA_VERSION`）へ移行する。
+ *
+ *  ⚠️ **版ごとの変更一覧はここに置かない**（ファイル冒頭の `PROJECT_SCHEMA_VERSION` の docstring が
+ *  単一の参照元）。同じ一覧を2か所に持ったので**実際にずれた**＝冒頭は最新なのに、ここは長らく
+ *  「1.0〜1.16 を 1.17 へ」のままだった（#513・**6版ぶん**開いていた）。**現行版の番号もここには書かない**
+ *  （3行離れた定数に書いてある）。
+ *
+ *  ここに書くのは**実際に変換が要る版だけ**。書いていない版は additive な任意追加で、
+ *  **版番号の付け替え以外の変換は不要**（読めなくならないので移行の手当ても要らない）。
+ *
+ *  1.0→1.1: companyInfo.additionalNotes をトップレベルへ移送（ADR-0011）。
+ *  1.1→1.2: videoSettings.width/height を除去（寸法は aspectRatio から導出＝ADR-0012）。
+ *  1.2→1.3: videoSettings.fontId を補完（未指定/不明は既定フォントへ）。
+ *  1.3→1.4: 未知の bgmSettings.bundledBgmId を標準BGM未選択へ落とす。
+ *  1.4→1.5: 未知の scene.fontId を継承（未指定）へ落とす。null は継承の明示なので保持。
+ *
+ *  ⚠️ 版に紐づかない正規化も1つある＝**同時開始**（ADR-0031）の休眠フラグ・`startWithPrevious`×`startSec`
+ *  の併存を読込時に解消する（実装が無視する状態を残さない・ADR-0026④）。版で分岐しないので上の一覧には無い。 */
 /** プレーンオブジェクト（配列・null 以外）か。移行を型不正な値で落とさず、壊れた値はそのまま validateProjectDoc に拾わせる（#416 P1）。 */
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);

@@ -1,6 +1,6 @@
 // 画面用のUIモデルとモックデータ。
 // 後から本物のデータ層（src/domain）に差し替えられるよう、UI専用の軽量な型で定義する。
-import type { Purpose } from "../../domain/enums";
+import { GENERAL_PURPOSES, PURPOSES, type Purpose } from "../../domain/enums";
 
 export type ScreenId =
   | "home"
@@ -289,21 +289,33 @@ export const precheckItems: PrecheckItem[] = [
   { id: "c8", label: "BGMの音量", detail: "声が聞き取りやすい音量です。", severity: "ok" },
 ];
 
-// 目的の選択肢（採用 recruit・videoKind=recruit のとき表示）。id は採用 Purpose 値。
-export const purposeOptions: PurposeOption[] = [
-  { id: "company_intro", label: "会社紹介", desc: "会社の雰囲気や事業を広く伝える" },
-  { id: "new_graduate", label: "新卒採用", desc: "新卒の学生に向けて魅力を伝える" },
-  { id: "mid_career", label: "中途採用", desc: "経験者の方に向けて職場を紹介する" },
-  { id: "inexperienced_welcome", label: "未経験歓迎", desc: "未経験の方も歓迎していることを伝える" },
-  { id: "engineer", label: "職種紹介（エンジニアなど）", desc: "特定の職種の仕事内容を伝える" },
-  { id: "info_session", label: "説明会で流す", desc: "会社説明会やイベントで上映する" },
-  { id: "sns_short", label: "SNS用ショート", desc: "短い時間でテンポよく見せる" },
-];
+// 目的の表示名（label/desc は UI 固有だが、**どの目的があるか**は正典側が決める＝§2-7・#513）。
+//
+// ⚠️ **id の一覧をここに書き写さない**＝`Record<…>` にすることで、`PURPOSES` へ目的を足したら
+// **ここが型エラーになる**（書き忘れたまま選択肢から抜け落ちる、を防ぐ）。逆に正典に無い id を
+// 書いても型エラー。並び順も `PURPOSES` から採るので、正典と画面の並びがずれない。
+type PurposeText = { label: string; desc: string };
 
-// 目的の選択肢（一般・社内発表 general・videoKind=general のとき表示）。表示名は正典 11§3.1 に対応。
-export const generalPurposeOptions: PurposeOption[] = [
-  { id: "general_announcement", label: "社内発表・全社共有", desc: "社内の発表や全社への共有を伝える" },
-  { id: "report", label: "業績・活動報告", desc: "業績や活動の状況を報告する" },
-  { id: "product_intro", label: "製品・サービス紹介", desc: "製品やサービスの魅力を紹介する" },
-  { id: "general_other", label: "汎用・その他", desc: "その他、自由な内容の動画を作る" },
-];
+const RECRUIT_PURPOSE_TEXT: Record<(typeof PURPOSES)[number], PurposeText> = {
+  company_intro: { label: "会社紹介", desc: "会社の雰囲気や事業を広く伝える" },
+  new_graduate: { label: "新卒採用", desc: "新卒の学生に向けて魅力を伝える" },
+  mid_career: { label: "中途採用", desc: "経験者の方に向けて職場を紹介する" },
+  inexperienced_welcome: { label: "未経験歓迎", desc: "未経験の方も歓迎していることを伝える" },
+  engineer: { label: "職種紹介（エンジニアなど）", desc: "特定の職種の仕事内容を伝える" },
+  info_session: { label: "説明会で流す", desc: "会社説明会やイベントで上映する" },
+  sns_short: { label: "SNS用ショート", desc: "短い時間でテンポよく見せる" },
+};
+
+// 表示名は正典 11§3.1 に対応。
+const GENERAL_PURPOSE_TEXT: Record<(typeof GENERAL_PURPOSES)[number], PurposeText> = {
+  general_announcement: { label: "社内発表・全社共有", desc: "社内の発表や全社への共有を伝える" },
+  report: { label: "業績・活動報告", desc: "業績や活動の状況を報告する" },
+  product_intro: { label: "製品・サービス紹介", desc: "製品やサービスの魅力を紹介する" },
+  general_other: { label: "汎用・その他", desc: "その他、自由な内容の動画を作る" },
+};
+
+/** 目的の選択肢（採用 recruit・`videoKind=recruit` のとき表示）。 */
+export const purposeOptions: PurposeOption[] = PURPOSES.map((id) => ({ id, ...RECRUIT_PURPOSE_TEXT[id] }));
+
+/** 目的の選択肢（一般・社内発表 general・`videoKind=general` のとき表示）。 */
+export const generalPurposeOptions: PurposeOption[] = GENERAL_PURPOSES.map((id) => ({ id, ...GENERAL_PURPOSE_TEXT[id] }));
