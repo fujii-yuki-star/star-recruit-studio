@@ -10,6 +10,18 @@ import { join } from "node:path";
 import { bakeNoteMessage, editBlockedMessage, exportBlockedMessage } from "./uiLabels";
 import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
 
+/**
+ * 表の行に**見える**すべての行（ゆるい判定）。
+ *
+ * ⚠️ `readErrorTable` の**厳密な**判定が取りこぼした行を炙り出すために使う（PR #862 レビュー ℹ️1）。
+ * 厳密な側は区切りの空白まで固定しているので、書き方が少しゆれた行を**黙って無視**しうる。
+ * 拾えていない行は**検査の外に落ちる**＝このテストの趣旨（何も黙って逃がさない）に反する。
+ */
+function looseErrorRows(): string[] {
+  const md = readFileSync(join(process.cwd(), "docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md"), "utf8");
+  return md.split("\n").filter((line) => /^\|\s*`[A-Z_]+`/.test(line));
+}
+
 /** `15 §6` の表：コード → 「ユーザー向け文言」の列（4列目）。 */
 function readErrorTable(): Map<string, string> {
   const md = readFileSync(join(process.cwd(), "docs/yuko_recruit_docs/15_ERROR_STATE_MODEL.md"), "utf8");
@@ -67,11 +79,25 @@ describe("15 §6 の表と実装の一致（#855）", () => {
     expect(missing).toEqual([]);
   });
 
+  it("表の行を1つも取りこぼしていない（拾えない行は検査の外に落ちる）", () => {
+    // ⚠️ **下限のしきい値だけでは足りない**（PR #862 レビュー ℹ️1）＝書き方のゆれた行を厳密な
+    // 判定が拾えなくても、件数が下限を割らなければ緑のまま通る。**行に見えるものは全部拾えている**
+    // ことを直接見る。
+    expect(readErrorTable().size).toBe(looseErrorRows().length);
+  });
+
+  it("どの行も列が5つ（セルの中に区切りが紛れると、読む列がずれる）", () => {
+    // ⚠️ 文言は**4列目**を位置で取っているので、セルの中に `|` が入ると**別の列を文言として読む**。
+    // 件数は減らないので上のテストでは気づけない＝ここで見る（`| a | b | c | d | e |` は区切り6本）。
+    const wrong = looseErrorRows()
+      .filter((line) => (line.match(/\|/g) ?? []).length !== 6)
+      .map((line) => line.slice(0, 60));
+    expect(wrong).toEqual([]);
+  });
+
   it("守れている件数が黙って減らない（対象の families を外すと落ちる）", () => {
-    // ⚠️ 件数そのものを固定したいのではなく、**上の2つが空振りする状態**（対象が消えた・
-    // 表の読み取りが壊れた）を検知したい。増えるぶんには構わないので下限で見る。
-    const rows = readErrorTable();
-    expect(rows.size).toBeGreaterThanOrEqual(80);
+    // 増えるぶんには構わないので下限で見る。
+    expect(readErrorTable().size).toBeGreaterThanOrEqual(80);
     expect(Object.keys(codeMessages()).length).toBeGreaterThanOrEqual(36);
   });
 });
