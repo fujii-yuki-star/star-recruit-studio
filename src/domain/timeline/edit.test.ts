@@ -793,6 +793,25 @@ describe('見た目パターンのクリップ（差し込み口が生きてい�
       expect(r.ok && r.doc.clips[0].assetRefs).toEqual({ layer_bg: 'asset_002' });
     });
 
+    // ⚠️ **差し込み口を持たない部品には書けない**（#795）＝ここだけ種別を見ていなかった。
+    // 画面は種別で欄を出し分けているので到達しないが、`clipImageAssetIds`（書き出しの関門）は
+    // **種別を問わず `assetRefs` を読む**ので、書けてしまうと**その素材の読めることを要求される**。
+    it('見た目パターン以外の部品には差し込み口の素材を入れられない', () => {
+      const d = withAsset({ clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })] });
+      const r = setClipAssetRef(d, 'clip_001', 'layer_bg', 'asset_001');
+      expect(r).toEqual({ ok: false, reason: EDIT_BLOCKED.contentField });
+    });
+
+    // ⚠️ **断る順は「種別 → 固定」**（#724 で揃えた流儀）＝固定を先に返すと、
+    // 外しても直らない案内になる（§2-5）。
+    it('固定された列でも、種別違いのほうを先に返す', () => {
+      const d = withAsset({
+        clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })],
+        tracks: [{ id: 'track_001', kind: TRACK_KIND.visual, name: '映像1', locked: true }],
+      });
+      expect(setClipAssetRef(d, 'clip_001', 'layer_bg', 'asset_001')).toEqual({ ok: false, reason: EDIT_BLOCKED.contentField });
+    });
+
     // ⚠️ #724（利用者判断＝操作側で塞ぐ）＝兄弟は全部持っている確認がここだけ無く、**無い素材を指したまま
     // 保存できた**（開き直すと灰色の枠が焼き込まれる）。V25 を広げるのは見送り＝ここで止める。
     it('文書に無い素材は入れられない（灰色の枠を作らせない）', () => {
@@ -974,9 +993,20 @@ describe('setClipAudioSource（鳴らす音を選び直す・#695/#723）', () =
     expect(setClipAudioSource(d, 'clip_001', { assetId: 'asset_001' })).toEqual({ ok: false, reason: EDIT_BLOCKED.locked });
   });
 
-  it('音を持たない部品には置けない（読み上げ・絵の部品）', () => {
+  // ⚠️ **音を持たない部品は `notAudio`**（#795）＝以前はここも `contentField` を返しており、
+  // **同じ文字の部品**に対して `setClipSpeed` は「音を持っていません」・こちらは「その項目がありません」と
+  // **案内が割れていた**（ADR-0026②）。`15 §6` の区別（`CONTENT_FIELD` は**音はあるが**項目が無い）へ実装を寄せた。
+  it('音を持たない部品には置けない（絵・文字の部品＝「音を持っていません」）', () => {
     const d = audioDoc();
     d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.text, text: 'あ' };
+    expect(setClipAudioSource(d, 'clip_001', { assetId: 'asset_001' })).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+  });
+
+  // ⚠️ **読み上げは音を持つが、音源は選べない**（文から作る）＝ここが本来の `contentField`。
+  // 上のテストと対で「2つの断り方が別のものを指している」ことを固定する（片方だけでは区別が守れない）。
+  it('読み上げの部品は「その項目がありません」（音は持っているが音源は選べない）', () => {
+    const d = audioDoc();
+    d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.voice, voice: { text: 'あ', status: NARRATION_STATUS.pending } };
     expect(setClipAudioSource(d, 'clip_001', { assetId: 'asset_001' })).toEqual({ ok: false, reason: EDIT_BLOCKED.contentField });
   });
 
@@ -984,7 +1014,7 @@ describe('setClipAudioSource（鳴らす音を選び直す・#695/#723）', () =
     const d = audioDoc();
     d.clips[0] = { ...d.clips[0], kind: TIMELINE_CLIP_KIND.text, text: 'あ' };
     d.tracks[1].locked = true; // 両方当てはまる状態
-    expect(setClipAudioSource(d, 'clip_001', { assetId: 'asset_001' })).toEqual({ ok: false, reason: EDIT_BLOCKED.contentField });
+    expect(setClipAudioSource(d, 'clip_001', { assetId: 'asset_001' })).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
   });
 });
 

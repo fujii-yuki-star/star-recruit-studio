@@ -671,6 +671,13 @@ export function setClipAssetRef(
 ): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // ⚠️ **差し込み口を持つのは見た目パターンの部品だけ**（#795）＝ここだけ種別を見ておらず、
+  // ほかの部品にも `assetRefs` を書けた。画面は種別で欄を出し分けているので**到達しない**が、
+  // **完全な死にデータではない**＝`clipImageAssetIds`（`domain/timeline/export.ts`）は種別を問わず
+  // `assetRefs` を読むので、万一書かれていれば**書き出しの関門がその素材の読めることを要求する**。
+  // 断り方は `contentField`（「この部品にはその項目がありません」＝差し込み口という項目が無い）。
+  // **種別 → 固定の順**は兄弟と揃える（#724）＝外しても直らない案内を先に出さない。
+  if (clip.kind !== TIMELINE_CLIP_KIND.template) return blocked(EDIT_BLOCKED.contentField);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   // **入れる素材は文書にあるものだけ**（#724・利用者判断＝操作側で塞ぐ）。兄弟（`addVisualClip`／
   // `setVisualClipContent`／`setClipAudioSource`）は全部これを持っており、ここだけ抜けていた＝
@@ -1328,6 +1335,14 @@ export function setClipAudioSource(
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   // **種別を先に見る**（#734 レビュー）＝そもそも音を持たない部品に対して「固定を外してください」と
   // 返すと、外しても直らない案内になる（§2-5）。兄弟の `setVisualClipContent` も項目違いが先。
+  //
+  // ⚠️ **2段に分ける**（#795）＝以前は `kind !== audio` の1段で `contentField` を返しており、
+  // **文字の部品**に対して `setClipSpeed` は「その部品は**音を持っていません**」・こちらは
+  // 「この部品には**その項目がありません**」と、**同じ部品・同じ音の話で案内が割れていた**
+  //（ADR-0026②）。`15 §6` は `CONTENT_FIELD` を「**音はあるが**その項目が無い」と定めているので、
+  // 実装をその区別へ合わせる（正典のほうが次の行動を正しく指している＝§2-5）。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
+  // 読み上げは音を持つが**音源は選べない**（文から作る）＝ここが本来の `contentField`。
   if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.contentField);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   const next = { ...clip };
