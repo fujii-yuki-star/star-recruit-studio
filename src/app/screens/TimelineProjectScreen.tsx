@@ -2677,7 +2677,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                「掴めるのに言うことを聞かない」。掴む入口はここ1か所（`onPointerDown`）＝押すだけ・
                キーで動かすぶんは**止めない**（`onChange` は触らない）＝`11 §7.6.2.1`「再生中に位置を
                動かしたら時計を測り直す」の再生継続シークはそのまま。 */
-            onPointerDown={() => { if (useTimelineStore.getState().isPlaying) pause(); }}
+            /* ⚠️ **左ボタンだけ**（差分再監査 ℹ️）＝掴む作法の単一の参照元（`usePointerDrag`）に揃える。
+               この画面は帯・列で「右クリックでも開けます」と案内しているので、右クリックで
+               **メニューは出ず再生だけ止まる**は到達する。目盛り側（下）も同じ関門を持つ。 */
+            onPointerDown={(e) => { if (e.button === 0 && useTimelineStore.getState().isPlaying) pause(); }}
             onChange={(e) => { setPlayhead(Number(e.target.value)); followPlayhead(); }}
           />
         </label>
@@ -2794,6 +2797,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                       // ⚠️ **再生中かどうかも位置も store から採る**（レビュー ℹ️）＝描画時の値は1コマぶん
                       // 古く、`play()` の直後（まだ描き直していない）に押すと**止め損ねる**／`Escape` で
                       // 「掴む前」ではなく1コマ前へ戻る。出どころを片方だけ store にしない。
+                      // ⚠️ **左ボタンだけ**（差分再監査 ℹ️・欄と同じ）＝掴む作法の単一の参照元
+                      //（`usePointerDrag`）に揃える。この画面は帯・列で「右クリックでも開けます」と
+                      // 案内しているので、右クリックで**メニューは出ず再生だけ止まる**は到達する。
+                      if (e.button !== 0) return;
                       const at = useTimelineStore.getState();
                       if (at.isPlaying) playRef.current.pause();
                       const rect = e.currentTarget.getBoundingClientRect();

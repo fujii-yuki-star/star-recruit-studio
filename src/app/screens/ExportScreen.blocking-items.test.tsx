@@ -155,7 +155,7 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
   // ⚠️ **始めた直後に「後片づけ中」と誤表示しない**（#843 レビュー 🟡）＝この画面は名乗り（`acquire`）の
   // **後**に `beginExport()` の往復を挟んでから走行中の表示になるので、その間は「締めは自分・走行中ではない」
   // ＝後片づけ待ちの条件をそのまま満たしてしまう（タイムライン形式は名乗る**前**に走行中にするので起きない）。
-  // 正当に始めた直後に「前の書き出しの後片づけをしています」と出るのは、この PR が消そうとした
+  // 正当に始めた直後に「前の書き出しの片づけをしています」と出るのは、#843 が消そうとした
   // 「実態と違う案内」そのもの＝**新しく持ち込んだ退行**なので、その窓を開けたまま固定する。
   it("書き出しを始めた直後に「後片づけ中」と誤表示しない", async () => {
     setup([scene()]);
@@ -167,6 +167,22 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     fireEvent.click(saveBtn());
     await waitFor(() => expect(useExportLockStore.getState().owner).toBe("scene")); // 名乗った＝窓の中
     expect(screen.queryByText(EXPORT_CLEANUP_PENDING_MESSAGE)).toBeNull(); // 誤表示しない
+    resolveBegin();
+  });
+
+  // ⚠️ **始めている最中は押せない**（差分再監査 ℹ️）＝この画面は名乗りの後に `beginExport` の往復を
+  // 挟むので、その窓は走行中の表示になっていない。押せるままだと、押し直しが**始まっている回の表示を潰す**
+  //（進捗と「中止」が消える＝中止の唯一の抜け道が消える）。押す前の無効化と押した瞬間の判定は同じ材料で見る。
+  it("始めている最中は押せない（走っている回の表示を潰さない）", async () => {
+    setup([scene()]);
+    vi.spyOn(dialog, "showSaveVideoDialog").mockResolvedValue("/out/movie.mp4");
+    let resolveBegin: () => void = () => {};
+    vi.spyOn(ffmpeg, "beginExport").mockReturnValue(new Promise<void>((r) => { resolveBegin = () => r(); }));
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    fireEvent.click(saveBtn());
+    await waitFor(() => expect(useExportLockStore.getState().owner).toBe("scene")); // 名乗った＝窓の中
+    expect(saveBtn()).toBeDisabled();                                   // 押せない
+    expect(useProjectStore.getState().exportRun.phase).not.toBe("error"); // 走っている回が潰れていない
     resolveBegin();
   });
 

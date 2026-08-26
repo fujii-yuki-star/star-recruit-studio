@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FITS } from "../domain/enums";
 import { EDIT_BLOCKED } from "../domain/timeline/edit";
+import { EXPORT_CLEANUP_PENDING_MESSAGE, OTHER_EXPORT_RUNNING_MESSAGE } from "./store/exportLock";
 import { DELETE_LABEL, canvasHoldMessage, DUPLICATE_LABEL, bakeNoteText, clipLabel, editBlockedMessage, deleteLookConfirmMessage, fitLabel, formatDiskSize, freeKindLabel, trackLabel, freeSwitchConfirmMessage, sentAssetTextSummary, standardLookButtonReason, standardLookResultMessage, Z_ORDER_LABEL, exportBlockedMessage, bakeNoteMessage, lockedTrackMessage, hiddenTrackDuplicateMessage, volumePointsTooManyMessage, missingTemplateMessage, resolveExportBlockedMessage } from "./uiLabels";
 import { TIMELINE_EXPORT_BLOCK } from "../domain/timeline/export";
 import { TIMELINE_CLIP_KIND, PROJECT_FORMAT } from "../domain/enums";
@@ -296,6 +297,11 @@ describe("利用者に出す文言に技術用語を混ぜない（§2-3）", ()
       volumePointsTooManyUnsplittable: volumePointsTooManyMessage(false),
       missingTemplateOne: missingTemplateMessage(),
       missingTemplateMany: missingTemplateMessage(3),
+      // ⚠️ **別 file の共有定数も載せる**（差分再監査 ℹ️）＝`exportLock.ts` は `uiLabels` の外だが、
+      // 画面に出る文言であることは同じ。載せないと `15 §6` 直下が約束する「機械で守る」の外に落ちる
+      //（`lockedTrackMessage`〔#819-2〕・`missingTemplateMessage`〔#834-2〕と同じ型の穴）。
+      otherExportRunning: OTHER_EXPORT_RUNNING_MESSAGE,
+      exportCleanupPending: EXPORT_CLEANUP_PENDING_MESSAGE,
     },
   };
 
