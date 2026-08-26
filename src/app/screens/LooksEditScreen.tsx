@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent, useEffect } from "react";
+import { Fragment, useMemo, useRef, useState, type ChangeEvent, useEffect } from "react";
 import { PanelLayoutView } from "../components/layout/PanelLayoutView";
 import type { PanelSpec } from "../components/layout/PanelLayoutView";
 import { usePanelLayout } from "../components/layout/usePanelLayout";
@@ -6,11 +6,13 @@ import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../..
 import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
 import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, LAYER_TYPE, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
-import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
+import { addLayer, duplicateLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, templateDeleteImpact } from "../../domain/project/templateUsage";
-import { deleteLookConfirmMessage } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, deleteLookConfirmMessage } from "../uiLabels";
 import { effectiveLayerZ, moveLayerZ } from "../../domain/template/layerOrder";
+import { moveToIndexByZ } from "../../domain/zOrder";
+import { useDragReorder } from "../hooks/useDragReorder";
 import { buildYukoPoseTags } from "../../domain/ai/videoPlanInput";
 import { exceedsInlineAssetLimit } from "../../domain/asset/assetFile";
 import { MAX_INLINE_ASSET_BYTES, STROKE_WIDTH_MAX } from "../../domain/constants";
@@ -178,6 +180,10 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     onNavigate("looks");
   }
 
+  // ⚠️ **フックは早期 return より前**（`rules-of-hooks`）＝下の「編集対象が無い」分岐を挟むと、
+  // 描画のたびに呼ぶ数が変わる。`onDropLayerAt` は下で宣言しているが、関数宣言は巻き上がるので参照できる。
+  const layerDnd = useDragReorder(onDropLayerAt);
+
   // 編集対象が無い（直接遷移／削除直後など）＝一覧へ戻す導線だけ出す。
   if (!editing || !draft) {
     return (
@@ -275,6 +281,32 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       if (!d) return d;
       const layers = moveLayerZ(d.layers, id, dir);
       return layers === d.layers ? d : { ...d, layers }; // 端＝変化なしなら下書きも据え置き＝空の取り消しを作らない
+    });
+  }
+
+  /**
+   * 一覧の**すき間へ落とした**ときの並び替え（#772 候補3）。↑↓ ボタンと**同じ意味**になるよう
+   * `moveToIndexByZ`（＝1段の繰り返し）へ委ねる＝2つの導線で結果が割れない。
+   *
+   * ⚠️ **画面は「上＝手前」で見せている**（描画順の反転）ので、**渡す前に位置を裏返す**。
+   * ここを忘れると、上へ落としたのに背面へ行く（見えている並びと逆に動く）。
+   */
+  function onDropLayerAt(id: string, visualIndex: number) {
+    setDraft((d) => {
+      if (!d) return d;
+      // 表示は降順（上が手前）。昇順（奥→手前）での位置に直す。
+      const ascending = d.layers.length - 1 - visualIndex;
+      const layers = moveToIndexByZ(d.layers, id, ascending, effectiveLayerZ);
+      return layers === d.layers ? d : { ...d, layers }; // 変わらないなら下書きも据え置き＝空の取り消しを作らない
+    });
+  }
+
+  /** レイヤーを中身ごと複製する（#772 候補4）＝元のすぐ手前へ、少しずらして置く。 */
+  function onDuplicateLayer(id: string) {
+    setDraft((d) => {
+      if (!d) return d;
+      const layers = duplicateLayer(d.layers, id, d.canvas);
+      return layers === d.layers ? d : { ...d, layers };
     });
   }
 
@@ -844,28 +876,47 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               {/* 並びは**描画順の反転**（上＝手前）。昇順で安定ソートしてから reverse する＝描画（renderer/layout の
                   昇順・安定ソート＝同 z は配列後方が手前）と同 z でも一致する。降順ソートだと同 z のとき前後が逆に出て、
                   ↑↓ が1段にならない（moveByZ 内部の昇順とも食い違う）。 */}
-              {[...draft.layers].sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b)).reverse().map((l) => (
-                <div
-                  key={l.id}
-                  className="row-between"
-                  style={{ padding: "2px 6px", borderRadius: 4, background: selectedLayerIds.includes(l.id) ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)" }}
-                >
-                  <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={(e) => selectLayer(l.id, e.shiftKey)}>
-                    {layerRowName(l)}
-                  </button>
-                  <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label={`${layerRowName(l)}を前面へ`} onClick={() => onMoveLayerZ(l.id, "up")}>↑</button>
-                  <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label={`${layerRowName(l)}を背面へ`} onClick={() => onMoveLayerZ(l.id, "down")}>↓</button>
-                  <button
-                    className="btn btn-ghost btn-icon text-sm"
-                    style={{ color: "var(--color-danger)" }}
-                    disabled={draft.layers.length <= 1}
-                    title={draft.layers.length <= 1 ? "最後の1つは消せません" : "この要素を削除"}
-                    onClick={() => onRemoveLayer(l.id)}
+              {[...draft.layers].sort((a, b) => effectiveLayerZ(a) - effectiveLayerZ(b)).reverse().map((l, i) => (
+                <Fragment key={l.id}>
+                  {/* 落とし先の線＝帯・場面カードと同じ見せ方（#772 候補3・すき間方式） */}
+                  {layerDnd.draggingId && layerDnd.overGap === i && <span className="drop-line" aria-hidden />}
+                  <div
+                    className="row-between"
+                    {...layerDnd.dropProps(i)}
+                    style={{
+                      padding: "2px 6px", borderRadius: 4,
+                      background: selectedLayerIds.includes(l.id) ? "rgba(var(--color-primary-rgb), 0.12)" : "var(--color-surface-alt)",
+                      opacity: layerDnd.draggingId === l.id ? "var(--drag-source-opacity)" : undefined,
+                    }}
                   >
-                    削除
-                  </button>
-                </div>
+                    {/* ⚠️ **持ち手は見た目だけ**（`aria-hidden`）＝並べ替えの読み上げ経路は ↑↓ ボタンが担う（#398 レビュー）。 */}
+                    <span className="drag-handle" aria-hidden {...layerDnd.handleProps(l.id, i)}>⠿</span>
+                    <button className="btn btn-ghost text-sm" style={{ flex: 1, textAlign: "left", minWidth: 0 }} onClick={(e) => selectLayer(l.id, e.shiftKey)}>
+                      {layerRowName(l)}
+                    </button>
+                    <button className="btn btn-ghost btn-icon text-sm" title="前面へ" aria-label={`${layerRowName(l)}を前面へ`} onClick={() => onMoveLayerZ(l.id, "up")}>↑</button>
+                    <button className="btn btn-ghost btn-icon text-sm" title="背面へ" aria-label={`${layerRowName(l)}を背面へ`} onClick={() => onMoveLayerZ(l.id, "down")}>↓</button>
+                    <button
+                      className="btn btn-ghost btn-icon text-sm"
+                      title="この要素を複製"
+                      aria-label={`${layerRowName(l)}を複製`}
+                      onClick={() => onDuplicateLayer(l.id)}
+                    >
+                      {DUPLICATE_LABEL}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-icon text-sm"
+                      style={{ color: "var(--color-danger)" }}
+                      disabled={draft.layers.length <= 1}
+                      title={draft.layers.length <= 1 ? "最後の1つは消せません" : "この要素を削除"}
+                      onClick={() => onRemoveLayer(l.id)}
+                    >
+                      {DELETE_LABEL}
+                    </button>
+                  </div>
+                </Fragment>
               ))}
+              {layerDnd.draggingId && layerDnd.overGap === draft.layers.length && <span className="drop-line" aria-hidden />}
             </div>
             <div className="row gap-sm mt">
               <select className="select" value={addType} onChange={(e) => setAddType(e.target.value as LayerType)}>

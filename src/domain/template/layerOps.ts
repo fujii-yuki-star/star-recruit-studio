@@ -11,11 +11,41 @@ const LAYER_DEFAULT_W = 480;
 const LAYER_DEFAULT_H = 240;
 
 /** 既存と衝突しない layer id（layer_NNN・テンプレ内一意・空き番号を埋める）。 */
+/** 複製をずらす量（px）＝真下に重なって「増えていない」ように見えるのを防ぐ。 */
+const DUPLICATE_OFFSET_PX = 24;
+
 export function createLayerId(layers: Layer[]): string {
   const used = new Set(layers.map((l) => l.id));
   let n = 1;
   while (used.has(`layer_${String(n).padStart(3, '0')}`)) n += 1;
   return `layer_${String(n).padStart(3, '0')}`;
+}
+
+/**
+ * レイヤーを**中身ごと**複製する（#772 候補4）。FREE 要素・帯は複製できるのにテンプレ層だけ不可だった。
+ *
+ * ⚠️ **「複製は中身ごと」**（#770 で FREE 要素に入れた流儀）＝体裁・既定素材・収め方まで写す。
+ * 変えるのは **id**（新しく採番）と**位置**（少しずらす＝真下に重なって「増えていない」ように見えるのを防ぐ）と
+ * **重ね順**（元のすぐ手前）だけ。
+ * ⚠️ **元の直後（手前）へ置く**＝一覧の見た目で元の隣に出る（最前面へ飛ばすと、どれが増えたのか探しに行くことになる）。
+ */
+export function duplicateLayer(layers: Layer[], id: string, canvas: { width: number; height: number }): Layer[] {
+  const src = layers.find((l) => l.id === id);
+  if (!src) return layers; // 居ない＝何もしない（同一参照＝空の取り消しを作らない）
+  const copy: Layer = {
+    ...src,
+    id: createLayerId(layers),
+    // 枠からはみ出さない範囲でずらす（元と同じ大きさのまま右下へ）。
+    x: Math.min(Math.max(0, canvas.width - src.w), src.x + DUPLICATE_OFFSET_PX),
+    y: Math.min(Math.max(0, canvas.height - src.h), src.y + DUPLICATE_OFFSET_PX),
+    zIndex: effectiveLayerZ(src) + 1,
+  };
+  // 元より手前の層は1つ押し上げる＝コピーが割り込む隙間を作る（同じ z が並ぶと「1段」が表せない）。
+  const shifted = layers.map((l) =>
+    l.id !== src.id && effectiveLayerZ(l) > effectiveLayerZ(src) ? { ...l, zIndex: effectiveLayerZ(l) + 1 } : l,
+  );
+  const at = shifted.findIndex((l) => l.id === src.id);
+  return [...shifted.slice(0, at + 1), copy, ...shifted.slice(at + 1)];
 }
 
 /** 指定 type のレイヤーを既定値で追加する（最前面）。background は全面、それ以外はキャンバス中央あたり。 */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Layer } from './types';
-import { addLayer, createLayerId, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer } from './layerOps';
+import { LAYER_TYPE, TEXT_KEY } from '../enums';
+import { addLayer, createLayerId, duplicateLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer, usedTextKeys, textKeyOfLayer } from './layerOps';
 
 const canvas = { width: 1920, height: 1080 };
 
@@ -118,5 +119,52 @@ describe('textKeyOfLayer（その層が使う textKey）', () => {
   it('欄の一覧（usedTextKeys）と同じ解き方（既定が食い違わない）', () => {
     const layers = [layer({ id: 'l1', type: 'subtitle' })];
     expect(usedTextKeys(layers)).toEqual([textKeyOfLayer(layers[0])]);
+  });
+});
+
+describe('duplicateLayer（中身ごと複製・#772 候補4）', () => {
+  const canvas = { width: 1920, height: 1080 };
+  const base: Layer[] = [
+    { id: 'layer_001', type: LAYER_TYPE.background, x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+    { id: 'layer_002', type: LAYER_TYPE.text, x: 100, y: 200, w: 400, h: 120, zIndex: 10, textKey: TEXT_KEY.title },
+    { id: 'layer_003', type: LAYER_TYPE.logo, x: 50, y: 50, w: 200, h: 100, zIndex: 20 },
+  ];
+
+  // ⚠️ **「複製は中身ごと」**（#770 で FREE 要素に入れた流儀）＝体裁や紐づけまで写す。
+  // ここが欠けると「複製したのに空の枠が増える」になる。
+  it('中身ごと写す（変えるのは id・位置・重ね順だけ）', () => {
+    const out = duplicateLayer(base, 'layer_002', canvas);
+    const copy = out.find((l) => l.id !== 'layer_002' && l.type === LAYER_TYPE.text && l.id !== 'layer_001');
+    expect(copy?.textKey).toBe(TEXT_KEY.title); // 紐づけを写している
+    expect(copy?.w).toBe(400);
+    expect(copy?.h).toBe(120);
+    expect(copy?.id).not.toBe('layer_002');
+  });
+
+  // ⚠️ **真下に重ねない**＝同じ位置に置くと「増えていない」ように見える。
+  it('少しずらして置く（枠の外へは出さない）', () => {
+    const out = duplicateLayer(base, 'layer_002', canvas);
+    const copy = out[out.findIndex((l) => l.id === 'layer_002') + 1];
+    expect(copy.x).toBeGreaterThan(100);
+    expect(copy.y).toBeGreaterThan(200);
+    const edge = duplicateLayer(
+      [{ id: 'layer_001', type: LAYER_TYPE.logo, x: 1900, y: 1070, w: 20, h: 10, zIndex: 0 }],
+      'layer_001', canvas,
+    );
+    expect(edge[1].x + edge[1].w).toBeLessThanOrEqual(canvas.width);
+    expect(edge[1].y + edge[1].h).toBeLessThanOrEqual(canvas.height);
+  });
+
+  // ⚠️ **元のすぐ手前へ**＝最前面へ飛ばすと「どれが増えたのか」を探しに行くことになる。
+  it('元のすぐ手前に入る（最前面へ飛ばさない）', () => {
+    const out = duplicateLayer(base, 'layer_002', canvas);
+    const byZ = [...out].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)).map((l) => l.id);
+    expect(byZ[1]).toBe('layer_002');
+    expect(byZ[2]).not.toBe('layer_003'); // コピーが間に入っている
+    expect(byZ[3]).toBe('layer_003');
+  });
+
+  it('居ない id は何もしない（同一参照＝空の取り消しを作らない）', () => {
+    expect(duplicateLayer(base, 'zzz', canvas)).toBe(base);
   });
 });
