@@ -2,7 +2,7 @@
 // - 時刻 t は直接受けず、書き出しと同じ sceneSegmentSpecs から作る「その瞬間のセグメント」（SubtitleMoment）を受ける（P1-1）。
 //   セグメントは domain/project/lineTimeline.ts の segmentAt(scene, lineDurations, t) で作る＝プレビュー＝書き出しで同一。
 // - 話者絞り込みは音声生成（resolveLineVoice）と同じ実効話者（effectiveSpeakerKey）で比較する（P1-2）。
-import { FREE_CATEGORY, FREE_ELEMENT_KIND, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
+import { FREE_CATEGORY, FREE_ELEMENT_KIND, LAYER_TYPE, SPEAKER_KEY_KIND, SUBTITLE_SOURCE_KIND, TEXT_KEY } from '../enums';
 import type { TextKey } from '../enums';
 import { isHiddenByGroup } from '../group/compose';
 import { characterForSpeaker } from '../voice/voiceCatalog';
@@ -189,7 +189,7 @@ export function sceneDisplayedSubtitleTexts(scene: Scene, template: Template | u
   //     描画と一致＝layout.ts:325・#547 P2 レビュー）。
   const templateGroups = template?.groups ?? [];
   const visibleSubtitleLayers = (template?.layers ?? []).filter(
-    (l) => l.type === 'subtitle' && !isHiddenByGroup(l.id, templateGroups),
+    (l) => l.type === LAYER_TYPE.subtitle && !isHiddenByGroup(l.id, templateGroups),
   );
   if (visibleSubtitleLayers.length > 0) {
     if (hasLines) out.push(...lineSubs(scene));

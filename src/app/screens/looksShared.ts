@@ -3,7 +3,7 @@
 import type { Asset, AssetRefs, FreeElement, Scene, Texts } from "../../domain/project/types";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import type { Template } from "../../domain/template/types";
-import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, NARRATION_STATUS, type LayerType } from "../../domain/enums";
+import { ASSET_TYPE, FREE_CATEGORY, FREE_SHAPE_TYPE, LAYER_TYPE, NARRATION_STATUS, type LayerType } from "../../domain/enums";
 import { DEFAULT_CHARACTER_ID } from "../../domain/constants";
 
 // レイヤー種別 → 「使用している要素」のユーザー向けラベル（全値必須＝enum 追加時に漏れをコンパイルエラーで検知。§2-3）。
@@ -25,7 +25,7 @@ export function buildSampleScene(template: Template, assets: Asset[]): Scene {
   // （layer.assetId・描画フォールバック）があれば表示、無ければプレースホルダ枠。ゆうこ（立ち絵）は持ち主の写真ではなく
   // 演者なので、character レイヤーがあれば既定ポーズで見せる。
   const assetRefs: AssetRefs = {};
-  const hasCharacter = template.layers.some((l) => l.type === "character");
+  const hasCharacter = template.layers.some((l) => l.type === LAYER_TYPE.character);
   const texts: Texts = {};
   for (const layer of template.layers) {
     if (layer.textKey === "title") texts.title = "見出しの例";

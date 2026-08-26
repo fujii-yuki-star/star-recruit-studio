@@ -10,7 +10,7 @@ import type { Asset, FreeElement, Scene, SlotClipOverride, TextStyleOverride, Vi
 import { resolveSlotClip } from "../../domain/asset/clip";
 import type { Layer } from "../../domain/template/types";
 import { usedTextKeys } from "../../domain/template/layerOps";
-import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, isFreeSlotAssetType, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
+import { ASSET_TYPE, EASING, FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, LAYER_TYPE, NARRATION_STATUS, SUBTITLE_SOURCE_KIND, TEXT_ALIGN, TEXT_KEY, TRANSITION_DIRECTION, TRANSITION_TYPE, VIDEO_START_MODE, isFreeSlotAssetType, type Easing, type EasingSpec, type Fit, type FontWeight, type FreeElementKind, type FreeShapeType, type SceneCategory, type TextAlign, type TextKey, type TransitionDirection, type TransitionType } from "../../domain/enums";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
 import { findVideoSlots } from "../../renderer/export/findVideoSlot";
 import { BGM_VOLUME, quantizeSec, ROTATION_DEG_MAX, ROTATION_DEG_MIN, SEC_STEP, SHAPE_FILL_FALLBACK_COLOR, STROKE_WIDTH_MAX, VIDEO_HARD_MAX_SEC, VOLUME_MAX, VOLUME_MIN, VOLUME_STEP, MIN_BOX_SIZE_PX } from "../../domain/constants";
@@ -412,7 +412,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   const effectiveActiveGroupId = activeGroupStillExists ? activeGroupId : null;
   // assetRefs を割り当てられるスロット層（背景/メイン/ロゴ）と、割当可能な素材。
   const slotLayers =
-    template?.layers.filter((l) => l.type === "background" || l.type === "slot" || l.type === "logo") ?? [];
+    template?.layers.filter((l) => l.type === LAYER_TYPE.background || l.type === LAYER_TYPE.slot || l.type === LAYER_TYPE.logo) ?? [];
   // 同じラベル（例「素材」）が複数あるスロットは連番で区別する（使用素材UIの区別性・実機FB）。
   // 付け方はタイムライン編集と**共有**（`slotLabelsFor`）＝同じ差し込み口を画面によって別の名で呼ばない。
   const slotLabels = slotLabelsFor(slotLayers);
@@ -832,7 +832,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   );
 
   const renderTextStyleControls = (key: TextKey) => {
-    const layer = template?.layers.find((l) => (l.type === "text" || l.type === "subtitle") && l.textKey === key);
+    const layer = template?.layers.find((l) => (l.type === LAYER_TYPE.text || l.type === LAYER_TYPE.subtitle) && l.textKey === key);
     if (!layer) return null;
     const ov = selected.textStyles?.[key];
     // 2つを使い分ける（#555 レビュー）：

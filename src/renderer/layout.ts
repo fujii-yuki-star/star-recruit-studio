@@ -1,7 +1,7 @@
 // シーン＋テンプレ → 各レイヤーの配置（矩形・zIndex・内容・スタイル）を解決する純粋ロジック。
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
-import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE } from '../domain/enums';
+import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, LAYER_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR, DEFAULT_BACKGROUND_COLOR } from '../domain/constants';
 import type { CropAlignX, CropAlignY } from '../domain/enums';
@@ -165,7 +165,7 @@ function subtitleItemOutOfCanvas(item: TextItem, canvasW: number, canvasH: numbe
 export function subtitleOverflowsCanvas(scene: Scene, template: Template): boolean {
   const { width, height } = template.canvas;
   // テンプレ字幕層の id（同時行の追加帯は `${id}__subN`）。FREE 字幕（free_NNN）と区別するのに使う。
-  const subtitleLayerIds = new Set(template.layers.filter((l) => l.type === 'subtitle').map((l) => l.id));
+  const subtitleLayerIds = new Set(template.layers.filter((l) => l.type === LAYER_TYPE.subtitle).map((l) => l.id));
   if (subtitleLayerIds.size === 0) return false;
   // 実描画（layoutScene）の結果からテンプレ字幕層由来の帯だけを全辺で検査する（回転・グループ transform・非表示は layout が反映済み）。
   const overflows = (layout: SceneLayout): boolean =>
@@ -271,7 +271,7 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
     if (cg.rotation) base.rotation = cg.rotation; // 0/未指定は付けない＝グループ未所属は従来どおり
 
     switch (layer.type) {
-      case 'background': {
+      case LAYER_TYPE.background: {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
           items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? DEFAULT_FIT, role: 'background', label: '背景' });
@@ -280,20 +280,20 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         }
         break;
       }
-      case 'slot': {
+      case LAYER_TYPE.slot: {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         // ラベルは未解決時のプレースホルダ表示に使う。生の layer.id は技術用語漏れ（§2-3）なので日本語に。
         items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? DEFAULT_FIT, role: 'slot', label: '素材' });
         break;
       }
-      case 'logo': {
+      case LAYER_TYPE.logo: {
         const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材を優先・無ければテンプレ既定素材（ADR-0021）
         if (assetId) {
           items.push({ ...base, kind: 'image', assetId, fit: scene.slotFits?.[layer.id] ?? layer.fit ?? FIT.contain, role: 'logo', label: 'ロゴ' });
         }
         break;
       }
-      case 'character': {
+      case LAYER_TYPE.character: {
         // ゆうこ表示はテンプレ依存（この case=character レイヤー有）。poseAssetId があれば表示する。
         // character.enabled（旧・場面ごと表示トグル）は廃止＝描画では参照しない（互換のため値は残す。req5・01§7.3）。
         if (scene.character.poseAssetId) {
@@ -301,22 +301,22 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
         }
         break;
       }
-      case 'shape':
-      case 'decor': {
+      case LAYER_TYPE.shape:
+      case LAYER_TYPE.decor: {
         // layer.shapeType は rect/ellipse/line。FillItem(=FreeShapeType: rect/ellipse)へ転送し、ellipse のみ楕円・他は rect。
         const shapeType: FreeShapeType =
           layer.shapeType === FREE_SHAPE_TYPE.ellipse ? FREE_SHAPE_TYPE.ellipse : FREE_SHAPE_TYPE.rect;
         items.push({ ...base, kind: 'fill', color: layer.fillColor ?? SHAPE_FILL_FALLBACK_COLOR, opacity: layer.opacity ?? 1, radius: layer.radius ?? 0, shapeType });
         break;
       }
-      case 'text':
-      case 'subtitle': {
+      case LAYER_TYPE.text:
+      case LAYER_TYPE.subtitle: {
         // 掛け合い：subtitle レイヤーのみ行の字幕で上書き（追加A/B）。null＝非表示・未指定＝従来。
-        const overrideSub = layer.type === 'subtitle' && opts != null && 'subtitleText' in opts;
+        const overrideSub = layer.type === LAYER_TYPE.subtitle && opts != null && 'subtitleText' in opts;
         // 単一ナレーション等の静的字幕（override 無し）は場面の字幕トグル subtitleEnabledDefault=false で出さない（#413）。
         // preview/export とも layoutScene 経由なのでここが単一の参照元。掛け合いは opts.subtitleText 側で primary 行を
         // 解決済み（resolveLineSubtitle が subtitleEnabledDefault を継承）。同時行は下の parallelLineIds から解決する。
-        const isSub = layer.type === 'subtitle';
+        const isSub = layer.type === LAYER_TYPE.subtitle;
         const staticSubtitleOff = isSub && !overrideSub && scene.subtitleEnabledDefault === false;
         const text = overrideSub
           ? opts.subtitleText ?? ''

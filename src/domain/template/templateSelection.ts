@@ -1,5 +1,5 @@
 // 見た目パターンの選択整合（ADR-0012・#415／FREE 全場面化・0.4.2 動確）。純粋関数（副作用なし・テスト容易）。
-import { FREE_CATEGORY, SCENE_CATEGORIES } from '../enums';
+import { FREE_CATEGORY, LAYER_TYPE, SCENE_CATEGORIES } from '../enums';
 import type { Orientation, SceneCategory, TextKey } from '../enums';
 import type { Template } from './types';
 import type { Scene } from '../project/types';
@@ -135,14 +135,14 @@ export function contentHiddenBySwitch(scene: Scene, next: Template, prev?: Templ
   // `prev` があれば「切替前に出ていたか」で絞る（休眠のままだったものは「消える」に数えない）。
   const shownSlots = prev ? templateSlotIds(prev.layers) : null;
   const shownTexts = prev ? textKeysOfTemplate(prev) : null;
-  const shownCharacter = prev ? prev.layers.some((l) => l.type === 'character') : true;
+  const shownCharacter = prev ? prev.layers.some((l) => l.type === LAYER_TYPE.character) : true;
   const shownFree = prev ? prev.category === FREE_CATEGORY : true;
   return {
     slotIds: Object.entries(scene.assetRefs ?? {})
       .filter(([id, assetId]) => assetId && !keepSlots.has(id) && (!shownSlots || shownSlots.has(id)))
       .map(([id]) => id),
     textKeys: filledTextKeys(scene).filter((k) => !keepTexts.has(k) && (!shownTexts || shownTexts.has(k))),
-    character: !!scene.character?.poseAssetId && shownCharacter && !next.layers.some((l) => l.type === 'character'),
+    character: !!scene.character?.poseAssetId && shownCharacter && !next.layers.some((l) => l.type === LAYER_TYPE.character),
     // 自由配置は FREE テンプレのときだけ描かれる（それ以外では休眠＝ADR-0030）。
     // 「中身が出なくなるか」の数え方は場面編集の切替確認と**同じ関数**に委ねる（§6・ADR-0026②）。
     // 別々に書くと、往復で見た目が保たれる場面に対して片方は「出なくなる」と言い片方は言わない、が起きる。
