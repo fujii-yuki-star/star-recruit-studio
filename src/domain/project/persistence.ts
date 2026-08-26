@@ -11,6 +11,7 @@ import { isKnownBundledBgmId } from '../bgm/bgmCatalog';
 import { validateProject } from '../validation/generated/validators.js';
 import { isTimelineProjectDoc } from '../projectFormat';
 import { normalizeDialogueTiming } from './narrationLines';
+import { isNewerSchemaVersion, PROJECT_NEWER_VERSION_MESSAGE } from '../schemaVersionCompare';
 import type {
   Asset, BgmSettings, CompanyInfo, GeneralBrief, Part, Project, Scene,
   TimelineOverlay, ToneSettings, VideoSettings, VoiceSettings,
@@ -246,6 +247,14 @@ export function parseProjectDoc(text: string): Project {
   const version = doc.schemaVersion;
   if (typeof version !== 'string' || !isSupportedSchemaVersion(version)) {
     throw new ProjectLoadError('このプロジェクトは新しい形式のため開けません。アプリを更新してください。');
+  }
+  // ⚠️ **アプリより新しい版は、引き上げる前に断る**（#793）＝上の関門は**メジャーしか見ない**ので、
+  // **同じメジャーの新しいマイナー**（1.26 等）はここまで通ってしまう。そのまま進むと
+  // `migrateProject` が版を**現行へ書き換え**（印が黙って下がる）、新しい語彙があれば ajv が落ちて
+  // 「プロジェクトの内容が正しくありません。**別のプロジェクトを選んでください**」＝**嘘**になる
+  //（壊れておらず、アプリを更新すれば開ける。別のを選んでも解決しない・§2-5）。
+  if (isNewerSchemaVersion(version, PROJECT_SCHEMA_VERSION)) {
+    throw new ProjectLoadError(PROJECT_NEWER_VERSION_MESSAGE);
   }
   for (const key of ['projectId', 'projectName', 'purpose'] as const) {
     if (typeof doc[key] !== 'string') {

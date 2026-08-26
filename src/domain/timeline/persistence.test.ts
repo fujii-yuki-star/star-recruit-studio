@@ -102,6 +102,24 @@ describe('isSupportedTimelineSchemaVersion / frameTimeSec（/canon-check 指摘�
     expect(loaded.projectName).toBe('テスト'); // 中身はそのまま
   });
 
+  // ⚠️ **アプリより新しいマイナー版は「壊れている」と言わない**（#793）＝メジャーの関門は通るので、
+  // 以前はここまで来て `migrateTimelineProject` が版を**現行へ書き下げ**、新しい語彙があれば ajv が
+  // 落ちて「この動画の内容が正しくありません」＝**嘘**（壊れておらず、更新すれば開ける）。
+  it('アプリより新しい版は「アプリを更新して」と案内する（壊れているとは言わない）', () => {
+    const msg = rejectMessage(JSON.stringify({ ...doc(), schemaVersion: '1.99' }));
+    expect(msg).toContain('アプリを更新');
+    expect(msg).not.toContain('正しくありません');
+  });
+
+  // ⚠️ **本当に壊れた文書は今までどおり**（2方向を対で固定する＝片方だけでは、全部を
+  // 「新しい版です」で流す実装でも緑になる）。
+  it('本当に壊れた文書は今までどおり「正しくありません」', () => {
+    const broken = { ...doc(), clips: [{ id: 'clip_001' }] }; // 必須が欠けている
+    const msg = rejectMessage(JSON.stringify(broken));
+    expect(msg).toContain('正しくありません');
+    expect(msg).not.toContain('アプリを更新');
+  });
+
   it('版の案内は「バージョン」と言う（「形式」は場面/タイムラインの別を指す語）', () => {
     const msg = rejectMessage(JSON.stringify({ ...doc(), schemaVersion: '2.0' }));
     expect(msg).toContain('対応していないバージョン');

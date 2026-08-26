@@ -11,6 +11,7 @@ import { YukoPanel } from "../components/YukoPanel";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { isTimelineProjectDoc } from "../../domain/projectFormat";
 import { useTimelineStore } from "../store/timelineStore";
+import { ProjectLoadError } from "../../domain/project/persistence";
 import {
   PlusIcon,
   LayoutIcon,
@@ -29,6 +30,15 @@ interface HomeProps {
 function formatDate(iso: string): string {
   return iso ? iso.slice(0, 10) : "—";
 }
+
+/**
+ * **理由が分からないとき**の案内（#793 レビュー）。読み込み側が理由を出せた場合はそちらを見せる。
+ *
+ * ⚠️ **「別のプロジェクトを選んでください」と書かない**＝以前の固定文はそう書いていたが、
+ * **別のを選んでも直らない**ことが多い（版が新しい・素材が欠けている等）＝§2-5 が禁じる
+ * 「実行しても直らない行動」。ここは**もう一度試す**を出す（一時的な読み取り失敗なら直る）。
+ */
+const OPEN_FAILED_MESSAGE = "このプロジェクトを開けませんでした。もう一度お試しください。";
 
 export function HomeScreen({ onNavigate }: HomeProps) {
   const listProjects = useProjectStore((s) => s.listProjects);
@@ -63,7 +73,12 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   // プロジェクトを開けなかったときのユーザー向け表示（§2-5）。
   // タイムライン形式の新規作成で向きを選んでいる最中か（#664）。
   const [choosingTimeline, setChoosingTimeline] = useState(false);
-  const [openError, setOpenError] = useState(false);
+  // ⚠️ **文言をそのまま持つ**（#793 レビュー）＝以前は真偽値で、`catch {}` が理由を捨てて
+  // **常に固定文**を出していた。そのため `parseProjectDoc` が返す「アプリを更新してから開き直して
+  // ください」も、**「素材が見つかりません」等も**利用者に届かず、代わりに出る固定文は
+  // 「一覧から**別のプロジェクトを選んでください**」＝**§2-5 が禁じる「実行しても直らない行動」**
+  // だった。タイムライン形式（`timelineStore`）は既に理由を運んでいる＝**非対称も解消する**。
+  const [openError, setOpenError] = useState<string | null>(null);
   // 削除：確認中のプロジェクトID・操作中（連打防止）・失敗表示（§2-5）。
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -174,7 +189,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
   }
   async function doOpenProject(projectId: string) {
     if (isExporting || openingId) return; // 確認中に書き出し開始/並走した場合の多重防御（requestOpenProject と同条件）
-    setOpenError(false);
+    setOpenError(null);
     setOpeningId(projectId);
     try {
       // 形式で開く先を分ける（ADR-0032・11 §1）＝開いてから「形式が違う」と断らない。
@@ -186,8 +201,10 @@ export function HomeScreen({ onNavigate }: HomeProps) {
       }
       await loadProject(projectId);
       onNavigate("draft"); // 成功で draft へ遷移＝HomeScreen アンマウント（openingId は解除不要）。
-    } catch {
-      setOpenError(true);
+    } catch (e) {
+      // 読み込み側が出した**理由**をそのまま見せる（次の行動がそこに書いてある）。
+      // それ以外（想定外）は従来の固定文へ倒す＝黙って何も出さない、を作らない。
+      setOpenError(e instanceof ProjectLoadError ? e.message : OPEN_FAILED_MESSAGE);
       setOpeningId(null); // 失敗時のみ解除して再度開けるように。
     }
   }
@@ -198,7 +215,7 @@ export function HomeScreen({ onNavigate }: HomeProps) {
         <div>
           {openError && (
             <div className="notice notice-warn mb" role="alert">
-              <span>プロジェクトを開けませんでした。一覧から別のプロジェクトを選んでください。</span>
+              <span>{openError}</span>
             </div>
           )}
 
