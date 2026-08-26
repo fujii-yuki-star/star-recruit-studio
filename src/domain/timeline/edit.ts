@@ -671,6 +671,13 @@ export function setClipAssetRef(
 ): EditResult {
   const clip = doc.clips.find((c) => c.id === clipId);
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
+  // ⚠️ **差し込み口を持つのは見た目パターンの部品だけ**（#795）＝ここだけ種別を見ておらず、
+  // ほかの部品にも `assetRefs` を書けた。画面は種別で欄を出し分けているので**到達しない**が、
+  // **完全な死にデータではない**＝`clipImageAssetIds`（`domain/timeline/export.ts`）は種別を問わず
+  // `assetRefs` を読むので、万一書かれていれば**書き出しの関門がその素材の読めることを要求する**。
+  // 断り方は `contentField`（「この部品にはその項目がありません」＝差し込み口という項目が無い）。
+  // **種別 → 固定の順**は兄弟と揃える（#724）＝外しても直らない案内を先に出さない。
+  if (clip.kind !== TIMELINE_CLIP_KIND.template) return blocked(EDIT_BLOCKED.contentField);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   // **入れる素材は文書にあるものだけ**（#724・利用者判断＝操作側で塞ぐ）。兄弟（`addVisualClip`／
   // `setVisualClipContent`／`setClipAudioSource`）は全部これを持っており、ここだけ抜けていた＝
@@ -1277,9 +1284,13 @@ export function setClipSpeed(doc: TimelineProject, clipId: string, speed: number
   // ⚠️ **速さ・素材の使い始めは音（`audio`）だけ**（`11 §7.6.3.2` の既存の決定・#724）＝読み上げの長さは
   // 声を作ったときの**実尺**で `trimClip` してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の
   // 区間も意味を失う**（決定24「連動している＝区間が一致している」）。
-  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）＝逆にすると
-  // 「固定を外してください」と言われて外しても直らない（§2-5）。
-  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.notAudio);
+  // ⚠️ **断る順は「音を持たない部品か」→「その項目が無いか」→「固定した列か」**（`§7.6.3`・#795）。
+  // 以前は `kind !== audio` の1段で `notAudio` に倒しており、**読み上げの部品にも**「その部品は音を
+  // 持っていません。音の設定は、音や**読み上げの部品で**変えてください」を返していた＝**読み上げを
+  // 操作しているのに読み上げでやれと言う**自己矛盾（PR #865 レビュー）。読み上げは音を持つので
+  // `contentField`（この項目が無い）が正しい。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
+  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.contentField);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   // schema は `exclusiveMinimum: 0`＝0 以下は保存できない文書になる。範囲へ収める（§2-7 の下限を共有）。
   const next = Math.min(Math.max(CLIP_SPEED_MIN, speed), CLIP_SPEED_MAX);
@@ -1297,9 +1308,13 @@ export function setClipSourceStart(doc: TimelineProject, clipId: string, sec: nu
   // ⚠️ **速さ・素材の使い始めは音（`audio`）だけ**（`11 §7.6.3.2` の既存の決定・#724）＝読み上げの長さは
   // 声を作ったときの**実尺**で `trimClip` してあるので、速さを変えると尺と実尺がずれ、**連動している字幕の
   // 区間も意味を失う**（決定24「連動している＝区間が一致している」）。
-  // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）＝逆にすると
-  // 「固定を外してください」と言われて外しても直らない（§2-5）。
-  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.notAudio);
+  // ⚠️ **断る順は「音を持たない部品か」→「その項目が無いか」→「固定した列か」**（`§7.6.3`・#795）。
+  // 以前は `kind !== audio` の1段で `notAudio` に倒しており、**読み上げの部品にも**「その部品は音を
+  // 持っていません。音の設定は、音や**読み上げの部品で**変えてください」を返していた＝**読み上げを
+  // 操作しているのに読み上げでやれと言う**自己矛盾（PR #865 レビュー）。読み上げは音を持つので
+  // `contentField`（この項目が無い）が正しい。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
+  if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.contentField);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   const next = Math.max(0, sec);
   if ((clip.sourceStartSec ?? 0) === next) return ok(doc);
@@ -1328,6 +1343,14 @@ export function setClipAudioSource(
   if (!clip) return blocked(EDIT_BLOCKED.notFound);
   // **種別を先に見る**（#734 レビュー）＝そもそも音を持たない部品に対して「固定を外してください」と
   // 返すと、外しても直らない案内になる（§2-5）。兄弟の `setVisualClipContent` も項目違いが先。
+  //
+  // ⚠️ **2段に分ける**（#795）＝以前は `kind !== audio` の1段で `contentField` を返しており、
+  // **文字の部品**に対して `setClipSpeed` は「その部品は**音を持っていません**」・こちらは
+  // 「この部品には**その項目がありません**」と、**同じ部品・同じ音の話で案内が割れていた**
+  //（ADR-0026②）。`15 §6` は `CONTENT_FIELD` を「**音はあるが**その項目が無い」と定めているので、
+  // 実装をその区別へ合わせる（正典のほうが次の行動を正しく指している＝§2-5）。
+  if (!isAudioClip(clip)) return blocked(EDIT_BLOCKED.notAudio);
+  // 読み上げは音を持つが**音源は選べない**（文から作る）＝ここが本来の `contentField`。
   if (clip.kind !== TIMELINE_CLIP_KIND.audio) return blocked(EDIT_BLOCKED.contentField);
   if (doc.tracks.find((t) => t.id === clip.trackId)?.locked) return blocked(EDIT_BLOCKED.locked);
   const next = { ...clip };
