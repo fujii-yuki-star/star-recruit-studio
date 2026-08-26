@@ -644,10 +644,19 @@ describe('音の設定は鳴る音を持つ部品だけ（#724）', () => {
       tracks: [{ id: 'track_003', kind: TRACK_KIND.audio }],
       clips: [{ id: 'clip_001', kind: TIMELINE_CLIP_KIND.voice, trackId: 'track_003', startSec: 0, durationSec: 5, voice: { text: 'あ', status: NARRATION_STATUS.none } }],
     });
-    expect(setClipSpeed(v, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
-    expect(setClipSourceStart(v, 'clip_001', 1)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    // ⚠️ **断りは `contentField`**（#795・PR #865 レビュー）＝読み上げは**音を持っている**ので、
+    // `notAudio`（「その部品は音を持っていません。音の設定は、音や**読み上げの部品で**変えてください」）は
+    // **読み上げを操作しているのに読み上げでやれと言う**自己矛盾になる。`§7.6.3` の規準どおり
+    // 「持ってはいるが、その項目が無い」＝3。
+    expect(setClipSpeed(v, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.contentField });
+    expect(setClipSourceStart(v, 'clip_001', 1)).toEqual({ ok: false, reason: EDIT_BLOCKED.contentField });
     expect(setClipVolume(v, 'clip_001', 0.5).ok).toBe(true);
     expect(setClipFade(v, 'clip_001', 'in', 1).ok).toBe(true);
+
+    // ⚠️ **音を持たない部品は `notAudio` のまま**（2と3が別のものを指していることを対で固定する）。
+    const t = doc({ clips: [clip('clip_001', { kind: TIMELINE_CLIP_KIND.text, text: 'あ' })] });
+    expect(setClipSpeed(t, 'clip_001', 2)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
+    expect(setClipSourceStart(t, 'clip_001', 1)).toEqual({ ok: false, reason: EDIT_BLOCKED.notAudio });
   });
 
   // ⚠️ **断る順は「音を持たない部品か」→「固定した列か」**（同節・#734 レビュー）＝逆だと
