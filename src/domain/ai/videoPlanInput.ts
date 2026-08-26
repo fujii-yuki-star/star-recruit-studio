@@ -2,7 +2,7 @@
 // - Template[] → AI へ渡すテンプレ要約（11§7.5 aiHint＋層構成）
 // - 利用可能なゆうこ表情タグ（yuko 素材の tags を集約）
 // プロンプト本文の組み立ては buildVideoPlanRequest.ts、検証は validateVideoPlan.ts が担う。
-import { ASSET_TYPE, FREE_CATEGORY, type Orientation } from '../enums';
+import { ASSET_TYPE, FREE_CATEGORY, LAYER_TYPE, type Orientation } from '../enums';
 import type { Asset, CompanyInfo, GeneralBrief } from '../project/types';
 import type { Template } from '../template/types';
 import { isUserTemplate } from '../template/userTemplate';
@@ -25,8 +25,8 @@ export function buildTemplateSummaries(templates: Template[], orientation: Orien
     templateId: t.templateId,
     category: t.category,
     useCase: t.aiHint?.useCase,
-    requiredSlots: t.layers.filter((l) => l.type === 'slot').map((l) => l.id),
-    hasYuko: t.layers.some((l) => l.type === 'character'),
+    requiredSlots: t.layers.filter((l) => l.type === LAYER_TYPE.slot).map((l) => l.id),
+    hasYuko: t.layers.some((l) => l.type === LAYER_TYPE.character),
     maxNarrationLength: t.aiHint?.maxNarrationLength,
     maxSubtitleLength: t.aiHint?.maxSubtitleLength,
     maxDurationSec: t.aiHint?.maxDurationSec,

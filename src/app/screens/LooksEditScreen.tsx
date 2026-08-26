@@ -5,7 +5,7 @@ import { usePanelLayout } from "../components/layout/usePanelLayout";
 import { PANEL_REGION, PANEL_SCREEN, addPanelToRegion, emptyLayout } from "../../domain/layout/panelLayout";
 import type { ScreenId } from "../data/mockData";
 import type { Layer, Template } from "../../domain/template/types";
-import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
+import { FIT, FITS, FONT_WEIGHT, FONT_WEIGHTS, LAYER_SHAPE_TYPE, LAYER_SHAPE_TYPES, LAYER_TYPE, SLOT_TYPE, SLOT_TYPES, TEXT_KEY, TEXT_KEYS, type Fit, type FontWeight, type LayerShapeType, type LayerType, type SlotType, type TextKey } from "../../domain/enums";
 import { addLayer, removeLayer, TEMPLATE_ADDABLE_LAYER_TYPES, updateLayer } from "../../domain/template/layerOps";
 import { isUserTemplate } from "../../domain/template/userTemplate";
 import { deleteImpactCounts, templateDeleteImpact } from "../../domain/project/templateUsage";
@@ -562,12 +562,12 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
 
   // 型別コントロール（#214 ④）：文字＝内容/大きさ/色/太さ、図形＝形/色、素材＝種類/収め方、立ち絵＝収め方/ポーズ 等。
   function renderLayerControls(l: Layer) {
-    if (l.type === "text" || l.type === "subtitle") {
+    if (l.type === LAYER_TYPE.text || l.type === LAYER_TYPE.subtitle) {
       return (
         <>
           <div className="field" style={{ margin: 0 }}>
             <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>表示するテキスト</label>
-            <select className="select" value={l.textKey ?? (l.type === "subtitle" ? TEXT_KEY.subtitle : TEXT_KEY.title)} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
+            <select className="select" value={l.textKey ?? (l.type === LAYER_TYPE.subtitle ? TEXT_KEY.subtitle : TEXT_KEY.title)} onChange={(e) => onUpdateLayer(l.id, { textKey: e.target.value as TextKey })}>
               {TEXT_KEYS.map((k) => (<option key={k} value={k}>{textKeyLabel[k]}</option>))}
             </select>
           </div>
@@ -599,7 +599,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           </div>
           {/* 字幕は背景帯（黒固定で実用性が低い＝#275）。付ける/色/濃さ/角丸を編集できるよう開放（描画は既存の layer.background を使用）。
               角丸は FREE 帯 UI（SceneEditScreen）と揃える＝同概念「字幕の背景帯」を編集画面で同じ編集性に（ADR-0026 観点6・#544 P3）。 */}
-          {l.type === "subtitle" && (
+          {l.type === LAYER_TYPE.subtitle && (
             <div className="col gap-sm" style={{ marginTop: 4 }}>
               <div className="toggle-row">
                 <label className="field-label text-sm" style={{ margin: 0 }}>字幕の背景帯を付ける</label>
@@ -620,7 +620,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         </>
       );
     }
-    if (l.type === "shape") {
+    if (l.type === LAYER_TYPE.shape) {
       return (
         <div className="row gap-sm" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="field" style={{ margin: 0 }}>
@@ -636,7 +636,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         </div>
       );
     }
-    if (l.type === "slot") {
+    if (l.type === LAYER_TYPE.slot) {
       return (
         <>
           <div className="row gap-sm" style={{ flexWrap: "wrap" }}>
@@ -657,7 +657,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         </>
       );
     }
-    if (l.type === "background") {
+    if (l.type === LAYER_TYPE.background) {
       return (
         <>
           {renderDefaultAssetControl(l)}
@@ -668,7 +668,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         </>
       );
     }
-    if (l.type === "logo" || l.type === "character") {
+    if (l.type === LAYER_TYPE.logo || l.type === LAYER_TYPE.character) {
       return (
         <>
           <div className="field" style={{ margin: 0 }}>
@@ -677,8 +677,8 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               {FITS.map((f) => (<option key={f} value={f}>{fitLabel[f]}</option>))}
             </select>
           </div>
-          {l.type === "logo" && renderDefaultAssetControl(l)}
-          {l.type === "character" && (
+          {l.type === LAYER_TYPE.logo && renderDefaultAssetControl(l)}
+          {l.type === LAYER_TYPE.character && (
             <div className="field" style={{ margin: "8px 0 0" }}>
               <label className="field-label text-sm" style={{ margin: "0 0 2px" }}>ポーズ（既定）</label>
               <select className="select" value={l.defaultPoseTag ?? ""} onChange={(e) => onUpdateLayer(l.id, { defaultPoseTag: e.target.value || undefined })}>
@@ -694,7 +694,7 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       );
     }
     // 装飾（decor）はテンプレからは内容非開放（ADR-0017）。選択時にパネルが空にならないよう理由を示す（位置・大きさは上の数値で調整可）。
-    if (l.type === "decor") {
+    if (l.type === LAYER_TYPE.decor) {
       return (
         <p className="field-hint" style={{ margin: 0 }}>装飾の見た目はここでは変更できません（位置・大きさは調整できます）。</p>
       );

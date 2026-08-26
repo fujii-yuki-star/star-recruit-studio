@@ -3,7 +3,7 @@
 // 実効表現だけを「使用中」と数える（ADR-0030）＝**その見た目が実際に描く分だけ**：自由配置要素は FREE テンプレのとき、
 // assetRefs は差し込み先の層があるキー、立ち絵は character 層があるとき。休眠側（通常場面に残った freeLayout／
 // 差し込み先を失った assetRefs）は描画されないので数えない＝切替後の誤カウント/誤表示を防ぐ。
-import { FREE_CATEGORY } from '../enums';
+import { FREE_CATEGORY, LAYER_TYPE } from '../enums';
 import { templateSlotIds } from '../template/layerOps';
 import type { Template } from '../template/types';
 import type { Scene } from './types';
@@ -26,7 +26,7 @@ import type { Scene } from './types';
  */
 export function sceneActiveAssetIds(scene: Scene, template: Template | undefined): string[] {
   const ids = sceneActivePlacedAssetIds(scene, template);
-  const hasCharacterLayer = template ? template.layers.some((l) => l.type === 'character') : true;
+  const hasCharacterLayer = template ? template.layers.some((l) => l.type === LAYER_TYPE.character) : true;
   if (scene.character?.poseAssetId && hasCharacterLayer) ids.push(scene.character.poseAssetId);
   return ids;
 }

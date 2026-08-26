@@ -186,7 +186,7 @@ export function freeLayoutFromPlacedContent(
       ...(cg.rotation ? { rotation: cg.rotation } : {}),
       zIndex: effectiveLayerZ(layer), // 実効 z（明示 zIndex 優先・無ければ種別既定）＝通常描画と重なり順が一致（#524 P2）
     };
-    if (layer.type === 'background' || layer.type === 'slot' || layer.type === 'logo') {
+    if (layer.type === LAYER_TYPE.background || layer.type === LAYER_TYPE.slot || layer.type === LAYER_TYPE.logo) {
       const assetId = scene.assetRefs[layer.id] ?? layer.assetId ?? null; // 場面素材→テンプレ既定素材（描画と同じ解決）
       if (!assetId) {
         if (!opts.faithful) continue; // 空スロットは持ち込まない（ADR-0030 の切替）
@@ -223,14 +223,14 @@ export function freeLayoutFromPlacedContent(
       // 素材既定（`asset.clip`）を含む**実効値**を引けるようにする（`slotClips` だけだと per-use が
       // 無い枠は空になり、呼び出し側が「設定なし」と取り違える）。
       slotLayerByElementId[id] = layer.id;
-    } else if (layer.type === 'character') {
+    } else if (layer.type === LAYER_TYPE.character) {
       const poseId = scene.character?.poseAssetId;
       if (!poseId) continue; // ポーズ未設定は持ち込まない
       // 立ち絵は slot 要素（画像）で持ち込む＝FREE で見えて自由に動かせる。scene.character は休眠保持（往復で戻る）。
       const id = nextId();
       characterElementIds.add(id); // 差し込み口の層ではない＝slotLayerByElementId には入れない（#831）
       elements.push({ id, kind: FREE_ELEMENT_KIND.slot, ...geom, assetId: poseId, fit: layer.fit ?? FIT.contain });
-    } else if (layer.type === 'text' && layer.textKey) {
+    } else if (layer.type === LAYER_TYPE.text && layer.textKey) {
       const text = scene.texts[layer.textKey];
       if (!text) continue; // 空文字は持ち込まない
       // 体裁は**場面の上書き（textStyles・#555）を解決した実効値**を写す。生の layer.* を写すと、場面で
@@ -266,7 +266,7 @@ export function freeLayoutFromPlacedContent(
         // 枠線（`strokeColor`/`strokeWidth`）は**通常テンプレの図形では描かれない**（`layoutScene`）。
         // 写すと元の絵に無い線が出る＝バラす前後で見た目が変わる。持ち物ではなく**描かれるもの**を写す。
       });
-    } else if (layer.type === 'subtitle') {
+    } else if (layer.type === LAYER_TYPE.subtitle) {
       if (!subtitleShown) continue; // 字幕が出ない場面は空の字幕要素を作らない
       // 表示文言は subtitleSource から解決＝el.text は持たない（ADR-0029）。単独→narration／掛け合い→allLines。
       const st = resolveTextStyle(layer, layer.textKey ? scene.textStyles?.[layer.textKey] : undefined);
@@ -351,10 +351,10 @@ export function freeContentHiddenBySwitch(scene: Scene, newTemplate: Template | 
   // 層の数だけ積む：`layoutScene` は character 層ごとに立ち絵を描くので、2層あるテンプレでは2つ受け皿がある
   // （1つしか数えないと、立ち絵を2つ置いた往復で「出なくなる」と過剰に言う）。
   const poseAssetId = scene.character?.poseAssetId;
-  if (poseAssetId) for (const l of shownLayers) if (l.type === 'character') add(assetBag, poseAssetId);
+  if (poseAssetId) for (const l of shownLayers) if (l.type === LAYER_TYPE.character) add(assetBag, poseAssetId);
   const textBag = new Map<string, number>();
   for (const layer of shownLayers) {
-    if (layer.type !== 'text' || !layer.textKey) continue;
+    if (layer.type !== LAYER_TYPE.text || !layer.textKey) continue;
     const text = scene.texts[layer.textKey];
     // 空文字だけを除く＝`layoutScene` が描く条件（`text.length > 0`）と同じ。空白だけの文字も**描かれる**
     // （背景帯つきなら帯が出る）ので、trim で落とすと受け皿を数え落とす。

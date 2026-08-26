@@ -1,7 +1,7 @@
 // AI出力(ai-video-plan) → 内部 Part[] / Scene[] への変換。正典は 12_AI_PROMPT_AND_MAPPING.md §8、
 // 検証/補正ルールは 11_SCHEMA_REFERENCE.md §8,§9、エラーコード語彙は 15_ERROR_STATE_MODEL.md §6。
 // 純粋関数（副作用なし）。Date/乱数に依存せず、ID採番は注入する（14 §4）。
-import { ASSET_TYPE, NARRATION_STATUS, isSceneCategory } from '../enums';
+import { ASSET_TYPE, LAYER_TYPE, NARRATION_STATUS, isSceneCategory } from '../enums';
 import type { Orientation, SceneCategory, WarningSeverity } from '../enums';
 import {
   DEFAULT_CHARACTER_ID,
@@ -96,7 +96,7 @@ function clampDuration(value: number, min: number, max: number): { value: number
 function resolveCharacter(
   template: Template | undefined, poseTag: string | null, yukoAssets: Asset[], warnings: Warning[],
 ): Character {
-  const charLayer = template?.layers.find((l) => l.type === 'character');
+  const charLayer = template?.layers.find((l) => l.type === LAYER_TYPE.character);
   if (!charLayer || !poseTag) {
     return { enabled: false, characterId: DEFAULT_CHARACTER_ID, poseAssetId: null };
   }
@@ -241,7 +241,7 @@ export function transformVideoPlan(plan: AiVideoPlan, ctx: TransformContext): Tr
       // 必須スロット未設定チェック（V6）
       if (template) {
         for (const layer of template.layers) {
-          const bearsAsset = layer.type === 'slot' || layer.type === 'background' || layer.type === 'logo';
+          const bearsAsset = layer.type === LAYER_TYPE.slot || layer.type === LAYER_TYPE.background || layer.type === LAYER_TYPE.logo;
           if (bearsAsset && layer.required && !assetRefs[layer.id]) {
             w.push(warn('REQUIRED_SLOT_EMPTY', 'この場面に必要な素材が未設定です', `assetRefs.${layer.id}`, 'warning', false));
           }
