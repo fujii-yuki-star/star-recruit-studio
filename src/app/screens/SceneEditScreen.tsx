@@ -287,6 +287,18 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
   /** 場面カードの右クリックメニュー（#772 候補6）＝開いた位置と対象。 */
   const [sceneMenu, setSceneMenu] = useState<{ sceneId: string; x: number; y: number } | null>(null);
   /**
+   * **場面を消せるか**（#772 候補6・PR #868 レビュー 🔴）。
+   *
+   * ⚠️ **両方の経路がこの1つを見る**＝欄の側とメニューで**条件を別々に書いたら実際に割れた**
+   *（メニューにだけガードを入れ、コメントには「欄の側と同じ条件」と書いていたが**欄の側には
+   * 無かった**）。ADR-0026② を掲げた PR 自身が、その原則を破っていた。
+   * ⚠️ **最後の1つは消せない**＝`scenes: []` になると選択の解決（`scenes[0]`）が `undefined` になり、
+   * その後の参照で落ちる。
+   */
+  const canDeleteScene = scenes.length > 1;
+  const deleteSceneHint = canDeleteScene ? undefined : "最後の1つは消せません";
+
+  /**
    * メニューから消すときの確認（#772 候補6・`06 §2-1`＝**破壊的な削除は確認を挟む**）。
    *
    * ⚠️ **欄の側の `confirmDelete`（真偽値）を使い回さない**＝あちらは欄の中に出るので、
@@ -2669,6 +2681,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               <button
                 className="btn btn-ghost btn-block mt"
                 style={{ color: "var(--color-danger)" }}
+                disabled={!canDeleteScene}
+                title={deleteSceneHint}
                 onClick={() => setConfirmDelete(true)}
               >
                 <TrashIcon size={16} />
@@ -2738,8 +2752,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           <button className="btn btn-ghost" onClick={resetLayout}>配置を既定に戻す</button>
         </div>
       </div>
-      </ExportLock>
-      {/* 場面カードの右クリックメニュー（#772 候補6）＝**その場**で複製・削除できる。
+            {/* 場面カードの右クリックメニュー（#772 候補6）＝**その場**で複製・削除できる。
           ⚠️ 欄の最下部にある同じ操作は**残す**＝右クリックを知らない人の道を塞がない
           （ADR-0034 決定18「ドラッグ専用の操作を作らない」の裏返し＝**メニュー専用にもしない**）。 */}
       {sceneMenu && (
@@ -2758,8 +2771,8 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               label: "この場面を削除",
               danger: true,
               // ⚠️ **最後の1つは消させない**＝場面が0枚の動画は作れない（欄の側の確認と同じ条件）。
-              disabled: scenes.length <= 1,
-              disabledHint: "最後の1つは消せません",
+              disabled: !canDeleteScene,
+              disabledHint: deleteSceneHint,
               onSelect: () => setConfirmDeleteSceneId(sceneMenu.sceneId),
             },
           ]}
@@ -2781,6 +2794,7 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
           />
         </div>
       )}
+      </ExportLock>
     </div>
   );
 }

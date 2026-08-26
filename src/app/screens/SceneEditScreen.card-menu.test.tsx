@@ -89,7 +89,25 @@ describe("SceneEditScreen 場面カードの右クリック（#772 候補6）", 
     expect(screen.queryByText("この場面を削除しますか？")).toBeNull();
   });
 
-  // ⚠️ **最後の1つは消せない**＝場面が0枚の動画は作れない。押せなくするだけでなく**理由を添える**（§2-5）。
+  /**
+   * ⚠️ **最後の1つは消せない**＝`scenes: []` になると選択の解決（`scenes[0]`）が `undefined` になり、
+   * その後の参照で落ちる。押せなくするだけでなく**理由を添える**（§2-5）。
+   *
+   * ⚠️ **両方の経路を見る**（PR #868 レビュー 🔴）＝最初はメニュー側だけにガードを入れ、
+   * コメントには「欄の側と同じ条件」と書いていたが**欄の側には無かった**（ADR-0026② を掲げた
+   * PR 自身が原則を破っていた）。**メニュー側だけのテストでは、この割れを検出できない。**
+   */
+  it("場面が1つだけのときは**欄の側も**削除を押せず、理由が出る", () => {
+    useProjectStore.setState({
+      scenes: [scene("scene_001", 1)],
+      parts: [{ partId: "part_001", title: "本編", order: 1, sceneIds: ["scene_001"] }],
+    });
+    render(<SceneEditScreen onNavigate={vi.fn()} />);
+    const panelDelete = screen.getByRole("button", { name: "この場面を削除" });
+    expect(panelDelete).toBeDisabled();
+    expect(panelDelete.getAttribute("title")).toContain("最後の1つ");
+  });
+
   it("場面が1つだけのときは削除を押せず、理由が出る", () => {
     useProjectStore.setState({
       scenes: [scene("scene_001", 1)],
