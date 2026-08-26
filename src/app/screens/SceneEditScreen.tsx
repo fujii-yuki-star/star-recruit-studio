@@ -68,6 +68,7 @@ import { NumberField } from "../components/NumberField";
 import { CollapsibleSection } from "../components/CollapsibleSection";
 import { SECTION_SCOPE } from "../components/sectionOpen";
 import { DeleteConfirm } from "../components/DeleteConfirm";
+import { ContextMenu } from "../components/ContextMenu";
 import { saveButtonLabel } from "../components/saveButtonLabel";
 import { opacityToPercent, percentToOpacity } from "../../domain/format/opacity";
 import { Switch } from "../components/ui";
@@ -283,6 +284,17 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
     usePanelLayout(PANEL_SCREEN.scene, defaultLayout, PANEL_IDS);
   // 場面削除の二段確認（誤操作防止）。選択場面が変わったら解除。
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** 場面カードの右クリックメニュー（#772 候補6）＝開いた位置と対象。 */
+  const [sceneMenu, setSceneMenu] = useState<{ sceneId: string; x: number; y: number } | null>(null);
+  /**
+   * メニューから消すときの確認（#772 候補6・`06 §2-1`＝**破壊的な削除は確認を挟む**）。
+   *
+   * ⚠️ **欄の側の `confirmDelete`（真偽値）を使い回さない**＝あちらは欄の中に出るので、
+   * その欄を閉じている／スクロールで見えていないときに**押した結果が見えない**（§2-5）。
+   * ここはメニューと同じ重なりに出す。id で持つのは `confirmDeleteGroupId` 等と同じ流儀
+   *（真偽値だと、確認を出したまま別の場面を選んだときに対象がずれる）。
+   */
+  const [confirmDeleteSceneId, setConfirmDeleteSceneId] = useState<string | null>(null);
   // 掛け合い解除（複数行が消える）の確認をインライン表示するか（window.confirm を使わずデザイン統一）。
   const [confirmDialogueOff, setConfirmDialogueOff] = useState(false);
   // FREE→通常テンプレへ戻すと素材が動画に出なくなる場合の確認（保留中の切替先テンプレ id・#524 P1・ADR-0030）。場面が変われば解除。
@@ -1554,7 +1566,16 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                       className={`scene-card${selected.sceneId === s.sceneId ? " selected" : ""}`}
                       onClick={() => selectScene(s.sceneId)}
                       {...sceneDnd.dropProps(i)}
-                      title="クリックで選択"
+                      /* ⚠️ **複製・削除は「そのカードの上」で出す**（#772 候補6）＝いまは別の欄の
+                          最下部にあり、**欄の外を探しに行く**ことになる（#768 が列で解いたのと同じ形）。
+                          右クリックしたカードを**選んでから**開く＝別のカードを右クリックしたのに
+                          選択中のカードが消える、を作らない。 */
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        selectScene(s.sceneId);
+                        setSceneMenu({ sceneId: s.sceneId, x: e.clientX, y: e.clientY });
+                      }}
+                      title="クリックで選択（右クリックで複製・削除）"
                       style={{ opacity: sceneDnd.draggingId === s.sceneId ? "var(--drag-source-opacity)" : undefined }}
                     >
                       {/* ドラッグの持ち手（⠿）。Pointer Events で並び替え（#398 再対応＝button 直掛けだと DnD が発火しなかった）。
@@ -2718,6 +2739,48 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
         </div>
       </div>
       </ExportLock>
+      {/* 場面カードの右クリックメニュー（#772 候補6）＝**その場**で複製・削除できる。
+          ⚠️ 欄の最下部にある同じ操作は**残す**＝右クリックを知らない人の道を塞がない
+          （ADR-0034 決定18「ドラッグ専用の操作を作らない」の裏返し＝**メニュー専用にもしない**）。 */}
+      {sceneMenu && (
+        <ContextMenu
+          x={sceneMenu.x}
+          y={sceneMenu.y}
+          items={[
+            {
+              label: "この場面を複製",
+              onSelect: () => {
+                const id = duplicateScene(sceneMenu.sceneId);
+                if (id) selectScene(id);
+              },
+            },
+            {
+              label: "この場面を削除",
+              danger: true,
+              // ⚠️ **最後の1つは消させない**＝場面が0枚の動画は作れない（欄の側の確認と同じ条件）。
+              disabled: scenes.length <= 1,
+              disabledHint: "最後の1つは消せません",
+              onSelect: () => setConfirmDeleteSceneId(sceneMenu.sceneId),
+            },
+          ]}
+          onClose={() => setSceneMenu(null)}
+        />
+      )}
+      {/* ⚠️ **確認はメニューと同じ重なりに出す**（`06 §2-1`）＝欄を閉じていても必ず見える。
+          並び・色・語（やめる／削除する）は共有部品が持つので画面ごとに割れない。 */}
+      {confirmDeleteSceneId && (
+        <div style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", zIndex: 60 }}>
+          <DeleteConfirm
+            message="この場面を削除しますか？"
+            onCancel={() => setConfirmDeleteSceneId(null)}
+            onConfirm={() => {
+              removeScene(confirmDeleteSceneId);
+              setConfirmDeleteSceneId(null);
+              selectScene(""); // 選択を外す＝消えた場面を指したままにしない
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
