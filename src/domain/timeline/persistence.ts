@@ -8,6 +8,7 @@ import { effectiveFps, lastFrameSec, quantizeToFrameSec } from './playback';
 import { clipEndSec } from './validateTimelineDoc';
 import type { TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
+import { isNewerSchemaVersion, PROJECT_NEWER_VERSION_MESSAGE } from '../schemaVersionCompare';
 
 /**
  * この版のアプリで開けるか（11 §1）。**場面形式と同じ流儀**＝メジャーが同じなら開き、
@@ -56,6 +57,13 @@ export function parseTimelineProjectDoc(text: string): TimelineProject {
     // **「バージョン」と言う**（「形式」は場面/タイムラインの別を指す確定語なので、すぐ上の行と同じ語を
     // 別の意味で使わない＝#640 で場面形式側に入れた「版と形式のすり替えをしない」の裏返し・15 §6）。
     throw new TimelineLoadError('この動画は対応していないバージョンで作成されています。アプリを更新してください。');
+  }
+  // ⚠️ **アプリより新しい版は、引き上げる前に断る**（#793）＝`migrateTimelineProject` は版を
+  // **現行へ書き換えるだけ**なので、未来の版を通すと**版の印が黙って下がる**（1.9 の文書が 1.8 に）。
+  // しかも新しい語彙が入っていれば ajv が落ちて「この動画の内容が正しくありません」＝**嘘**になる
+  //（壊れておらず、アプリを更新すれば開ける・§2-5）。
+  if (isNewerSchemaVersion(doc.schemaVersion, TIMELINE_SCHEMA_VERSION)) {
+    throw new TimelineLoadError(PROJECT_NEWER_VERSION_MESSAGE);
   }
   // 版を現行へ引き上げてから検証する（ajv は現行版だけを通すので、上げずに渡すと旧版が必ず落ちる）。
   const migrated = migrateTimelineProject(doc);

@@ -204,6 +204,38 @@ describe('parseProjectDoc', () => {
     expect(back.projectId).toBe(p.projectId);
     expect(back.scenes).toEqual([]);
   });
+  // ⚠️ **アプリより新しいマイナー版は「壊れている」と言わない**（#793）＝`isSupportedSchemaVersion` は
+  // **メジャーしか見ない**ので、1.99 のような文書はここまで通る。以前はそのまま `migrateProject` が
+  // 版を**現行へ書き下げ**、新しい語彙があれば ajv が落ちて「プロジェクトの内容が正しくありません。
+  // **別のプロジェクトを選んでください**」＝**嘘**（壊れておらず、別のを選んでも解決しない）。
+  it('アプリより新しい版は「アプリを更新して」と案内する（壊れているとは言わない）', () => {
+    const doc = { ...assembleProject(header(), [], [], []), schemaVersion: '1.99' };
+    try {
+      parseProjectDoc(JSON.stringify(doc));
+      throw new Error('断られるはず');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProjectLoadError);
+      expect((e as Error).message).toContain('アプリを更新');
+      expect((e as Error).message).not.toContain('正しくありません');
+      expect((e as Error).message).not.toContain('別のプロジェクト');
+    }
+  });
+
+  // ⚠️ **本当に壊れた文書は今までどおり**（2方向を対で固定＝片方だけだと、全部を
+  // 「新しい版です」で流す実装でも緑になる）。
+  it('本当に壊れた文書は今までどおり「正しくありません」', () => {
+    // ⚠️ **ajv まで届く壊れ方**にする＝`projectId` の型違いは手前の必須確認が
+    // 「必須情報が欠けています」で先に拾うので、**この2方向の対比にならない**。
+    const doc = { ...assembleProject(header(), [], [], []), videoSettings: { aspectRatio: 'とても横長' } };
+    try {
+      parseProjectDoc(JSON.stringify(doc));
+      throw new Error('断られるはず');
+    } catch (e) {
+      expect((e as Error).message).toContain('正しくありません');
+      expect((e as Error).message).not.toContain('アプリを更新');
+    }
+  });
+
   it('掛け合い：scene.lines を持つ project が往復で保持される（1.8・ADR-0015）', () => {
     const scene = {
       sceneId: 'scene_001', partId: 'part_001', order: 1, sceneType: 'opening', templateId: 'tpl',
