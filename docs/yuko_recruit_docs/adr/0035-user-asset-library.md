@@ -85,16 +85,18 @@ ADR-0017 はユーザーテンプレを **AI 入力から既定で除外**して
 
 ### コード
 
-- 新設＝`src/infrastructure/userAssetFs.ts`（`templateAssetFs.ts` と同型）＋ Rust コマンド（`is_safe_*` のパス検証・memory: `tauri-packaged-gotchas`）。
+- 新設＝`src/infrastructure/userAssetFs.ts`（`templateAssetFs.ts` と同型）＋ Rust コマンド。**パス検証は既存の流儀に揃える**＝`src-tauri/src/lib.rs` の `is_safe_template_id` 等と同型（ADR-0017 のパストラバーサル対策）。⚠️ **packaged では dev と挙動が違う**（`asset://` のキャッシュ・ビルド時のファイルロック・CSP）＝`13_DEPENDENCIES_AND_LICENSING.md` と #119/#120 の配布まわりの記録を実装前に確認する。
 - 取り込みは既存の `importAssetByPath` を再利用（**ライブラリ→プロジェクトは「ファイルパスからの取り込み」に還元できる**＝新しい経路を作らない）。
 - 画面＝素材画面に「ライブラリ」の導線（一覧・取り込み・削除・改名）。**技術用語を出さない**（§2-3）＝言い方は「素材の棚」等を UI 文言の一本化（`uiLabels`）で決める。
 
 ### 正典
 
-- **`project.schema` は不変**（決定3 の帰結）。`template.schema` も不変。
-- `11` に **`lib_asset_NNN` の採番**を追記（§2 の ID 採番表）。
-- `ADR-0024` 決定6 の**例外リストは増やさない**＝本 ADR は原則を追認する側。その旨を ADR-0024 側にも1行追記する。
-- `CLAUDE.md §11` に本 ADR を **Accepted** として1行追記（本 PR で実施）。
+> **すべて本 PR で実施済み**（レビュー 🟡2＝「宣言したのに含まれていない」の指摘を受けて完了させた）。
+
+- [x] **`project.schema` は不変**（決定3 の帰結）。`template.schema` も不変＝**変更なしを確認**。
+- [x] `11 §2.1` の ID 採番表へ **`lib_asset_NNN`** を追記（`tmpl_asset_NNN` の次行）。
+- [x] `ADR-0024` 決定6 に**追認の1行**を追記＝**例外リストは増やさない**（本 ADR は原則を追認する側）。
+- [x] `CLAUDE.md §11` に本 ADR を **Accepted** として1行追記。
 
 ### 他 Issue への影響（**#857 の段階順に関わる**）
 

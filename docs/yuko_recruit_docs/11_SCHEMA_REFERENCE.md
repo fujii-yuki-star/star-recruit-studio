@@ -46,6 +46,7 @@
 | bgm asset | `bgm_{slug}_{NNN}` | `bgm_bright_001` | asset の一種（`assetType=bgm`） |
 | user template | `user_tmpl_{NNN}` | `user_tmpl_001` | **ユーザー作成テンプレの `templateId`**。**グローバル一意**（全プロジェクト横断）・3桁（999超は桁上がり）。`^[a-z0-9_]+$` 適合（`template.schema` 不変）。同梱テンプレは記述的id（`corp_title` 等）で名前空間が別＝接頭辞 `user_tmpl_` で判定（ADR-0017） |
 | テンプレ所有素材 | `tmpl_asset_{NNN}` | `tmpl_asset_001` | **テンプレが持つ既定素材の id**（ADR-0021）。**グローバル一意**（`user_templates/assets/<id>.<ext>`）・3桁（999超は桁上がり）。`^tmpl_asset_[0-9]+$` 適合。`layer.assetId` から参照。**最大連番+1・番号再利用可**（テンプレ削除と同時に消える＝`user_tmpl_` の no-reuse とは別方針） |
+| ライブラリ素材 | `lib_asset_{NNN}` | `lib_asset_001` | **ユーザー素材ライブラリの素材 id**（ADR-0035）。**グローバル一意**（`user_assets/<id>.<ext>`）・3桁（999超は桁上がり）。`^lib_asset_[0-9]+$` 適合。⚠️ **`project.json` には現れない**＝取り込みは**コピー**で、プロジェクト側では `asset_NNN` を採番し直す（ADR-0024 決定6 の自己完結を守る＝`project.schema` 不変）。テンプレ所有素材（`tmpl_asset_`）とは**棚が別**（持ち主も寿命も違う） |
 
 - ID は不変。リネーム時も ID は変えず `displayName` を変える。
 - AI出力JSON が参照する `assetId`/`templateId` は**既存のもののみ**有効（存在検証 §8）。
