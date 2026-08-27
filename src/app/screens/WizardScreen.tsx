@@ -115,7 +115,7 @@ export function WizardScreen({ onNavigate }: WizardProps) {
   // フォーム入力の不足を伝えるユーザー向け文言（§2-5・次の行動を示す）。
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { assets, assetSrcById, addAsset, addAssetByPath, updateAsset, removeAsset, saveProject, saveStatus, applyProjectInfo, setWizardStep, importError, clearImportError } =
+  const { assets, assetSrcById, addAssets, isImporting, updateAsset, removeAsset, saveProject, saveStatus, applyProjectInfo, setWizardStep, importError, clearImportError } =
     useProjectStore();
 
   const steps = stepsFor(videoKind);
@@ -174,7 +174,10 @@ export function WizardScreen({ onNavigate }: WizardProps) {
 
   // 素材の選び方（アプリ＝ネイティブの「開く」／ブラウザ＝隠し input）は共有する（#712）。
   // ここは見た目が「大きな枠」なので部品は使えないが、**分岐だけは1か所**（`useAssetPicker`）。
-  const assetPicker = useAssetPicker({ onFile: addAsset, onPath: addAssetByPath });
+  // ⚠️ **取り込み中は押せなくする**（#858 レビュー）＝ここだけ `disabled` を渡しておらず、
+  //    取り込み中に選び直すと**まとめて渡した分がそっくり落ちていた**（歩き回って戻ると
+  //    「開く」を出している最中の印〔`picking`〕も消えるので、押せてしまう）。
+  const assetPicker = useAssetPicker({ onPick: addAssets, disabled: isImporting });
 
   // 箇条書き（強み・章立て・要点）共通の追加ロジック。
   function addItem(raw: string, list: string[], setList: (v: string[]) => void, clear: () => void) {

@@ -7,16 +7,20 @@
 import { useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { isTauri } from "../../infrastructure/assetFs";
 import { IMAGE_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS } from "../../domain/asset/assetFile";
-import { showOpenAssetDialog } from "../../infrastructure/dialog";
+import { showOpenAssetsDialog } from "../../infrastructure/dialog";
 
 /** ファイル選択の絞り込み（`.png,.jpg,…`）。拡張子の正典から作る。 */
 const ACCEPT_ATTR = [...IMAGE_FILE_EXTENSIONS, ...VIDEO_FILE_EXTENSIONS].map((e) => `.${e}`).join(",");
 
 type Options = {
-  /** ブラウザで選んだファイルを取り込む。 */
-  onFile: (file: File) => void | Promise<void>;
-  /** ネイティブの「開く」で選んだパスを取り込む。 */
-  onPath: (path: string) => void | Promise<void>;
+  /**
+   * 選んだものを**まとめて**取り込む（#858）。ブラウザは `File[]`、アプリの中は絶対パスの `string[]`。
+   *
+   * ⚠️ **1件ずつに割らない**＝進み具合・失敗の残し方・`asset_NNN` の採番は取り込み側（store の
+   * `addAssets`）が持つ。ここで回すと、失敗の案内が**画面が既に出しているもの**と二重になる
+   *（4画面とも `importError` を出している）。
+   */
+  onPick: (items: File[] | string[]) => void | Promise<void>;
   /** 押せないとき（取り込み中・書き出し中など）。 */
   disabled?: boolean;
 };
@@ -25,15 +29,24 @@ type Options = {
  * `<label>` に広げて使う（中に `<input type=file>` を1つ置くこと）。
  * 返す `picking` は**ネイティブの「開く」を出している最中**＝二重に開かせない。
  */
-export function useAssetPicker({ onFile, onPath, disabled = false }: Options) {
+export function useAssetPicker({ onPick, disabled = false }: Options) {
   const [picking, setPicking] = useState(false);
   const blocked = disabled || picking;
+
+  async function pick(items: File[] | string[]) {
+    setPicking(true);
+    try {
+      await onPick(items);
+    } finally {
+      setPicking(false);
+    }
+  }
 
   async function pickNative() {
     setPicking(true);
     try {
-      const path = await showOpenAssetDialog();
-      if (path) await onPath(path);
+      const paths = await showOpenAssetsDialog();
+      if (paths.length > 0) await onPick(paths);
     } finally {
       setPicking(false);
     }
@@ -65,12 +78,15 @@ export function useAssetPicker({ onFile, onPath, disabled = false }: Options) {
       // 取り込める形式の正典（`assetFile.ts`）から作る＝ネイティブの「開く」の絞り込み
       // （`infrastructure/dialog.ts`）と**同じ一覧**を見る（2つのふるいが食い違わない）。
       accept: ACCEPT_ATTR,
+      // ⚠️ **ブラウザ側も複数選べる**（#858）＝アプリの中（ネイティブの「開く」）だけ一括だと、
+      // 同じ画面の同じボタンで挙動が割れる（ADR-0026②）。
+      multiple: true,
       disabled: blocked,
       style: { display: "none" } as const,
       onChange: (e: ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) void onFile(file);
+        const files = [...(e.target.files ?? [])];
         e.target.value = ""; // 同じファイルを選び直しても change が発火するようにする
+        if (files.length > 0) void pick(files);
       },
     },
   };

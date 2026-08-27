@@ -4,12 +4,20 @@ import { UploadIcon } from "./icons";
 import { useAssetPicker } from "../hooks/useAssetPicker";
 
 type Props = {
-  /** ブラウザで選んだファイルを取り込む。 */
-  onFile: (file: File) => void | Promise<void>;
-  /** ネイティブの「開く」で選んだパスを取り込む。 */
-  onPath: (path: string) => void | Promise<void>;
+  /**
+   * 選んだものを**まとめて**取り込む（#858・store の `addAssets`）。
+   * ブラウザは `File[]`、アプリの中は絶対パスの `string[]`。
+   */
+  onPick: (items: File[] | string[]) => void | Promise<void>;
   /** 取り込み中（押せなくし、そう見せる）。 */
   isImporting: boolean;
+  /**
+   * まとめて取り込んでいるときの進み具合（store の `importProgress`）。`null`＝出さない。
+   *
+   * ⚠️ **失敗の案内はここに置かない**＝4画面とも `importError` を自分で出しているので、
+   * ここでも出すと**同じ失敗が二重に見える**（#858 のレビュー中に気づいて寄せた）。
+   */
+  progress?: { done: number; total: number } | null;
   /** 押せない理由（あれば押せなくし、指したときに出す）。 */
   disabledReason?: string | null;
   /** 見た目（既定＝目立つボタン）。 */
@@ -23,9 +31,9 @@ type Props = {
   className?: string;
 };
 
-export function AssetImportButton({ onFile, onPath, isImporting, disabledReason, variant = "primary", label = "素材を追加", className }: Props) {
+export function AssetImportButton({ onPick, isImporting, progress = null, disabledReason, variant = "primary", label = "素材を追加", className }: Props) {
   const disabled = isImporting || !!disabledReason;
-  const { picking, labelProps, inputProps } = useAssetPicker({ onFile, onPath, disabled });
+  const { picking, labelProps, inputProps } = useAssetPicker({ onPick, disabled });
   const off = disabled || picking;
 
   return (
@@ -36,7 +44,9 @@ export function AssetImportButton({ onFile, onPath, isImporting, disabledReason,
       title={disabledReason ?? undefined}
     >
       <UploadIcon size={18} />
-      {isImporting ? "取り込み中…" : label}
+      {/* ⚠️ **一括のときは何件目かを出す**（#858）＝10枚入れている間「取り込み中…」だけだと
+          進んでいるのか止まっているのか分からない。1件だけのときは出さない（一瞬の表示は雑音）。 */}
+      {progress ? `取り込み中… ${progress.done}/${progress.total}` : isImporting ? "取り込み中…" : label}
       <input {...inputProps} />
     </label>
   );

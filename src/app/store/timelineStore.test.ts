@@ -618,6 +618,114 @@ describe('素材の取り込み（#712）', () => {
     expect(useTimelineStore.getState().doc!.assets).toHaveLength(1);
   });
 
+  // ── まとめて取り込む（#858）──────────────────────────────────────
+  //
+  // ⚠️ **場面形式と同じ規則で回す**（ADR-0026②）＝`projectStore.addAssets` の姉妹実装。
+  // どちらか片方だけを直すと、同じ操作で挙動が割れる（`addAssets.test.ts` と同じ並びで押さえる）。
+
+  const somePaths = (n: number): string[] =>
+    Array.from({ length: n }, (_, i) => `C:/pics/photo${i + 1}.png`);
+
+  it('まとめて取り込むと、選んだ数だけ増える（番号が重ならない）', async () => {
+    await open();
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue(null);
+    await useTimelineStore.getState().addAssets(somePaths(3));
+    const ids = useTimelineStore.getState().doc!.assets.map((a) => a.assetId);
+    expect(ids).toEqual(['asset_001', 'asset_002', 'asset_003']);
+  });
+
+  // ⚠️ **失敗しても止めない**（§2-5）＝入った分は残す。
+  it('途中で失敗しても残りを続け、入った分は残る', async () => {
+    await open();
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockImplementation(async (_id, _f, src) => {
+      if (String(src).includes('photo2')) throw new Error('コピーできません');
+      return null;
+    });
+    await useTimelineStore.getState().addAssets(somePaths(3));
+    expect(useTimelineStore.getState().doc!.assets.map((a) => a.displayName)).toEqual(['photo1', 'photo3']);
+  });
+
+  it('取り込めなかったものの名前を出す（絶対パスを丸ごと出さない）', async () => {
+    await open();
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockImplementation(async (_id, _f, src) => {
+      if (String(src).includes('photo2')) return null;
+      throw new Error('だめ');
+    });
+    await useTimelineStore.getState().addAssets(somePaths(3));
+    const msg = useTimelineStore.getState().importError ?? '';
+    expect(msg).toContain('2件');
+    expect(msg).toContain('photo1.png');
+    expect(msg).toContain('photo3.png');
+    expect(msg).not.toContain('C:/pics');
+  });
+
+  // ⚠️ **1件だけ失敗したときは、その理由をそのまま出す**（ADR-0026②＝件数で案内が変わらない）。
+  it('1件だけ失敗したときは件数を足さず、単発と同じ文言を出す', async () => {
+    await open();
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockRejectedValue(new Error('空き容量をご確認ください。'));
+    await useTimelineStore.getState().addAssets(['C:/pics/one.png']);
+    const batch = useTimelineStore.getState().importError;
+
+    useTimelineStore.setState({ importError: null });
+    await useTimelineStore.getState().addAssetByPath('C:/pics/one.png');
+    expect(batch).toBe(useTimelineStore.getState().importError);
+    expect(batch).not.toContain('1件を取り込めませんでした');
+  });
+
+  /**
+   * ⚠️ **成功に古い失敗を残さない**。ただし**最後の枝を単独では捕まえられない**（変異チェックで確認）＝
+   * 案内は**各件の直前**で消しているので、最後にもう一度消す行は死んでいた（外した）。
+   * ここで固定しているのは「成功し終えたときに古い失敗が残っていない」という挙動そのもの。
+   */
+  it('全部入ったら前の失敗の案内を消す', async () => {
+    await open();
+    useTimelineStore.setState({ importError: '前の失敗' });
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue(null);
+    await useTimelineStore.getState().addAssets(somePaths(2));
+    expect(useTimelineStore.getState().importError).toBeNull();
+  });
+
+  it('書き出し中は1件も取り込まず、理由を出す', async () => {
+    await open();
+    useTimelineStore.setState({ exportRun: { phase: EXPORT_RUN_PHASE.rendering, percent: 0, message: null, cancelling: false } });
+    await useTimelineStore.getState().addAssets(somePaths(3));
+    expect(useTimelineStore.getState().doc!.assets).toEqual([]);
+    // この画面の断り方は `editBlocked`（単発の取り込みと同じ経路＝ADR-0026②）。
+    expect(useTimelineStore.getState().editBlocked).not.toBeNull();
+  });
+
+  it('取り込み中は受け付けない（同じ番号の素材を2つ作らない）', async () => {
+    await open();
+    useTimelineStore.setState({ isImporting: true });
+    await useTimelineStore.getState().addAssets(somePaths(3));
+    expect(useTimelineStore.getState().doc!.assets).toEqual([]);
+  });
+
+  // ⚠️ **1件だけのときは進み具合を出さない**＝一瞬出て消える表示は雑音になる。
+  it('複数のときだけ進み具合を出し、終わったら消す', async () => {
+    await open();
+    const seen: ({ done: number; total: number } | null)[] = [];
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockImplementation(async () => {
+      seen.push(useTimelineStore.getState().importProgress);
+      return null;
+    });
+    await useTimelineStore.getState().addAssets(somePaths(2));
+    expect(seen).toEqual([{ done: 0, total: 2 }, { done: 1, total: 2 }]);
+    expect(useTimelineStore.getState().importProgress).toBeNull();
+
+    seen.length = 0;
+    await useTimelineStore.getState().addAssets(['C:/pics/solo.png']);
+    expect(seen).toEqual([null]);
+  });
+
+  it('何も選ばれなければ何もしない', async () => {
+    await open();
+    useTimelineStore.setState({ importError: '前の失敗' });
+    await useTimelineStore.getState().addAssets([]);
+    expect(useTimelineStore.getState().doc!.assets).toEqual([]);
+    expect(useTimelineStore.getState().importError).toBe('前の失敗'); // 消しもしない
+  });
+
   it('取り込めなかったら一覧に足さない（幽霊を作らない）＋次の行動を出す', async () => {
     await open();
     vi.spyOn(assetFsMod, 'importAssetByPath').mockRejectedValue(new Error('書き込めませんでした。空き容量をご確認ください。'));
