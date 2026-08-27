@@ -182,6 +182,25 @@ describe("MaterialsScreen 使っていない素材（#348）", () => {
     expect(removeAssets).not.toHaveBeenCalled();
   });
 
+  /**
+   * ⚠️ **「絞り込みをやめる」も絞り込みの変更**（PR #875 レビュー 🟡）＝ここだけ確認を閉じておらず、
+   * 「絞り込みを変えたら確認を閉じる」という**このPRが徹底したはずの規則から1か所だけ漏れて**いた。
+   * 消える中身は正しいまま（控えた id を使う）だが、**一覧は全件に戻るのに確認だけ古い件数を出す**。
+   *
+   * ⚠️ **経路ごとにテストを持つ**＝規則を足したときに「効くべき場所を数え上げる」のを忘れると、
+   * こういう1か所漏れが素通りする（このPRで3度目の同じ形）。
+   */
+  it("「絞り込みをやめる」でも確認は閉じる", () => {
+    show();
+    fireEvent.click(toggle());
+    fireEvent.change(screen.getByRole("searchbox", { name: "名前やタグで探す" }), { target: { value: "余り" } });
+    fireEvent.click(screen.getByRole("button", { name: /まとめて消す/ }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "絞り込みをやめる" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(removeAssets).not.toHaveBeenCalled();
+  });
+
   it("種類のタブを変えても確認は閉じる", () => {
     show();
     fireEvent.click(toggle());

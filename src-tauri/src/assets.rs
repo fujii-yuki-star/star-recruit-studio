@@ -420,6 +420,34 @@ mod tests {
         assert!(!is_safe_rel_path(""));
     }
 
+    /// 消せる範囲が `assets/` に閉じているか（#348・PR #875 レビュー）。
+    ///
+    /// ⚠️ **`is_safe_rel_path` だけでは足りない**＝あれは「プロジェクトの外」を弾くだけで、
+    /// **中なら何でも**通る（`project.json` も `voices/*.wav` も）。破壊的なコマンドは
+    /// `delete_template_asset` の接頭辞と同じ流儀で**範囲を狭く**取る。
+    ///
+    /// ⚠️ **Windows のドライブ相対（`C:foo`＝バックスラッシュ無し）は `is_absolute()` が false** で
+    /// `is_safe_rel_path` を通り抜ける。`starts_with("assets/")` は Rust の `Path` 解釈を経由しない
+    /// **単純な文字列比較**なので、`C:assets/...` は `"C:"` から始まって弾かれる。
+    #[test]
+    fn delete_scope_is_assets_only() {
+        // この関数が実際に使う条件（`delete_project_files` の continue と同じ式）。
+        let deletable = |rel: &str| is_safe_rel_path(rel) && rel.starts_with("assets/");
+        // 通す：素材の実体と代表フレーム（`asset_dest` が書く先と同じ）。
+        assert!(deletable("assets/asset_001.png"));
+        assert!(deletable("assets/asset_001_thumb.png"));
+        // 弾く：プロジェクト配下でも素材ではないもの。
+        assert!(!deletable("project.json"));
+        assert!(!deletable("voices/scene_001.wav"));
+        assert!(!deletable("cache/asset_001_strip.png"));
+        // 弾く：ドライブ相対（`is_absolute()` が false なので `is_safe_rel_path` は通る）。
+        assert!(is_safe_rel_path("C:assets/evil.txt"));
+        assert!(!deletable("C:assets/evil.txt"));
+        // 弾く：親への相対参照（先に `is_safe_rel_path` が落とす）。
+        assert!(!deletable("assets/../project.json"));
+        assert!(!deletable("assets\\..\\project.json"));
+    }
+
     #[test]
     fn sanitize_and_strip() {
         assert_eq!(sanitize_file_name("a/b:c.png"), "a_b_c.png");

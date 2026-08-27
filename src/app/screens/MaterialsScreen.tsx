@@ -215,7 +215,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           onChange={(e) => { setQuery(e.target.value); setBulkConfirm(null); }}
         />
         {query !== "" && (
-          <button className="btn btn-ghost text-sm" onClick={() => setQuery("")}>
+          <button className="btn btn-ghost text-sm" onClick={() => { setQuery(""); setBulkConfirm(null); }}>
             絞り込みをやめる
           </button>
         )}
