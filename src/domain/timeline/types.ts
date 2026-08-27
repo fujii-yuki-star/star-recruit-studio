@@ -213,4 +213,4 @@ export interface TimelineProject {
  * 値の正典は `schemas/timeline-project.schema.json` の `properties.schemaVersion.const` で、
  * ここはその写し（ドリフトは validateTimelineDoc.test の照合テストが検知する）。
  */
-export const TIMELINE_SCHEMA_VERSION = '1.8';
+export const TIMELINE_SCHEMA_VERSION = '1.9';

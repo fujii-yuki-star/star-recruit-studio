@@ -7,7 +7,7 @@
 // renderer に置くと domain から呼べず（§4）、変換だけ別解決になって「FREE 化したら体裁が戻る」を招く（#555 レビュー）。
 import { FONT_WEIGHT } from '../enums';
 import type { FontWeight } from '../enums';
-import type { Layer } from './types';
+import type { Layer, LayerBackground, TextShadow } from './types';
 import type { TextStyleOverride } from '../project/types';
 
 /** テキストの既定色/既定サイズ。描画・インライン編集・体裁欄で共有する単一の参照元（§2-7・#549）。 */
@@ -58,10 +58,19 @@ export interface ResolvedTextStyle {
   fontWeight: FontWeight;
   strokeColor?: string;
   strokeWidth?: number;
+  /** 字間（em・#264）。未指定＝0（従来の出力は不変）。 */
+  letterSpacing?: number;
+  /** 文字の影（#264）。`enabled` でないものは `undefined` にして返す＝描く側が条件を持たない。 */
+  shadow?: TextShadow;
+  /** 背景帯（#264 で文字にも一般化）。`enabled` でないものは `undefined`（同上）。 */
+  background?: ResolvedBand;
 }
 
 /** 体裁を持ちうる層の部分型（Layer と FreeElement のどちらからも渡せる）。 */
-export type TextStyleSource = Pick<Layer, 'color' | 'fontSize' | 'fontWeight' | 'strokeColor' | 'strokeWidth'>;
+export type TextStyleSource = Pick<
+  Layer,
+  'color' | 'fontSize' | 'fontWeight' | 'strokeColor' | 'strokeWidth' | 'letterSpacing' | 'shadow'
+> & { background?: LayerBackground };
 
 /**
  * テンプレ層＋場面の上書き（`scene.textStyles`・#555）から、実際に描く文字の体裁を解決する。
@@ -80,8 +89,54 @@ export function resolveTextStyle(layer: TextStyleSource, ov?: TextStyleOverride)
     // **上書きを解決したあとの値で判定する**＝場面で太さだけ足しても縁取りが消えない。下地は解決後の文字色。
     strokeColor: resolveStrokeColor(strokeWidth, strokeColorRaw, color),
     strokeWidth,
+    letterSpacing: ov?.letterSpacing ?? layer.letterSpacing,
+    // ⚠️ **`enabled` の判定はここで済ませる**（#264）＝描く側に条件を持たせると、
+    // プレビューと書き出しで**別々に判定する場所**ができる（片方だけ直る形が生まれる）。
+    shadow: enabledShadow(ov?.shadow ?? layer.shadow),
+    background: bandBackground(ov?.background ?? layer.background),
   };
 }
+
+/** `enabled` の影だけを返す（既定は黒・濃さ 0.5）。`enabled` でなければ `undefined`。 */
+export function enabledShadow(shadow: TextShadow | undefined): TextShadow | undefined {
+  if (!shadow?.enabled) return undefined;
+  return {
+    enabled: true,
+    color: shadow.color ?? DEFAULT_SHADOW_COLOR,
+    opacity: shadow.opacity ?? DEFAULT_SHADOW_OPACITY,
+    blur: shadow.blur ?? 0,
+    dx: shadow.dx ?? 0,
+    dy: shadow.dy ?? 0,
+  };
+}
+
+/** 描くときの背景帯（既定を埋めた形）。 */
+export type ResolvedBand = { color: string; opacity: number; radius: number };
+
+/**
+ * `enabled` の背景帯だけを返す（既定は黒・濃さ 0.55・角丸 16）。`enabled` でなければ `undefined`。
+ *
+ * ⚠️ **定義は1つ**（§2-7）＝以前は `renderer/layout.ts` に `bandBackground` があったが、
+ * #264 で場面の上書き（`scene.textStyles`）も帯を持つようになったので、**解決の場所**である
+ * `resolveTextStyle` の隣へ移した（renderer は再輸出だけ＝既存の import 経路を保つ）。
+ * インライン編集（`FreeLayoutOverlay`）も同じ既定で帯を敷く＝編集中と描画結果がドリフトしない（#549）。
+ */
+export function bandBackground(bg: LayerBackground | undefined): ResolvedBand | undefined {
+  if (!bg?.enabled) return undefined;
+  return {
+    color: bg.color ?? DEFAULT_BAND_COLOR,
+    opacity: bg.opacity ?? DEFAULT_BAND_OPACITY,
+    radius: bg.radius ?? DEFAULT_BAND_RADIUS,
+  };
+}
+
+/** 影の既定（#264）。⚠️ **値の出どころは1か所**＝画面の初期値と描画がずれない（§2-7）。 */
+export const DEFAULT_SHADOW_COLOR = '#000000';
+export const DEFAULT_SHADOW_OPACITY = 0.5;
+/** 背景帯の既定（#529 から引き継ぎ・`bandBackground` と同じ値）。 */
+export const DEFAULT_BAND_COLOR = '#000000';
+export const DEFAULT_BAND_OPACITY = 0.55;
+export const DEFAULT_BAND_RADIUS = 16;
 
 /**
  * 縁取り/枠線の色の解決（**単一の参照元**）。太さ>0 で色が未指定なら下地と反対の既定色、そうでなければ指定値をそのまま。

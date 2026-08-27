@@ -51,10 +51,31 @@ function textToSvg(item: TextItem, fontFamily: string): string {
     ? ` stroke="${item.strokeColor}" stroke-width="${item.strokeWidth}" paint-order="stroke"`
     : '';
 
+  // 字間（#264）＝**em で持つ**ので px へ直す（文字サイズを変えても詰め具合が変わらない）。
+  // ⚠️ 0 のときは属性を出さない＝**従来の出力は1バイトも変わらない**（golden が動かない）。
+  const spacingPx = (item.letterSpacing ?? 0) * item.fontSize;
+  const spacing = spacingPx !== 0 ? ` letter-spacing="${spacingPx}"` : '';
+
+  // 影（#264）。⚠️ **プレビューと書き出しは同じ Blink で描く**（`rasterize.ts`）ので、
+  // `feDropShadow` はどちらでも同じ絵になる（パリティは構造で保たれる）。
+  // ⚠️ **id は要素ごとに一意**＝同じ場面に複数の影があると、同じ id の filter が混ざって
+  // **後の定義が前を上書き**する（全部が最後の影になる）。
+  let shadowAttr = '';
+  if (item.shadow) {
+    const filterId = `shadow-${item.id.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    parts.push(
+      `<defs><filter id="${filterId}" x="-50%" y="-50%" width="200%" height="200%">`
+      + `<feDropShadow dx="${item.shadow.dx ?? 0}" dy="${item.shadow.dy ?? 0}" stdDeviation="${(item.shadow.blur ?? 0) / 2}"`
+      + ` flood-color="${item.shadow.color ?? '#000000'}" flood-opacity="${item.shadow.opacity ?? 0.5}"/>`
+      + `</filter></defs>`,
+    );
+    shadowAttr = ` filter="url(#${filterId})"`;
+  }
+
   const baseY = item.y + item.fontSize - shiftUp;
   lines.forEach((line, i) => {
     parts.push(
-      `<text x="${textX}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}" text-anchor="${anchor}"${stroke}>${escapeXml(line)}</text>`,
+      `<text x="${textX}" y="${baseY + i * lineHeight}" font-family="${family}" font-size="${item.fontSize}" font-weight="${item.fontWeight}" fill="${item.color}" text-anchor="${anchor}"${stroke}${spacing}${shadowAttr}>${escapeXml(line)}</text>`,
     );
   });
   return parts.join('\n');

@@ -249,9 +249,11 @@ export function freeLayoutFromPlacedContent(
         fontId: scene.textFontIds?.[layer.textKey],
         ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
         ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
-        // 背景帯（可読性の下地）も移送（#529）。ただし**文字層の帯は通常テンプレでは描かれない**
-        // （`layoutScene` は字幕層だけ帯を出す）ので、`faithful`（バラす）では写さない＝元の絵に無い帯を足さない。
-        ...(!opts.faithful && layer.background != null ? { background: layer.background } : {}),
+        // 背景帯（可読性の下地）も移送（#529）。
+        // ⚠️ **`faithful` でも写すようになった**（#264）＝以前は「文字層の帯は通常テンプレでは
+        // 描かれない」ので写していなかったが、**#264 で文字層にも帯を出すようにした**ので、
+        // 写さないと**バラす前後で絵が変わる**（ADR-0032 決定23 に反する）。
+        ...(layer.background != null ? { background: layer.background } : {}),
       });
     } else if (opts.faithful && (layer.type === LAYER_TYPE.shape || layer.type === LAYER_TYPE.decor)) {
       // 図形・装飾＝描画（`layoutScene`）と同じ既定へ落とす（線は矩形として写す＝描画の扱いと同じ）。
