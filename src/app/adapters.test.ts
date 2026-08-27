@@ -707,3 +707,68 @@ describe("buildPrecheckItems：切り替えが表示時間に収まらない（#
     expect(item.sceneId).toBe("scene_0.8_0.5"); // 上限を握っている場面
   });
 });
+
+describe("buildPrecheckItems 見つからない素材（#347）", () => {
+  const photoTemplate: Template = {
+    ...freeTemplate,
+    templateId: "photo_v1",
+    category: "photo_intro",
+    layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+  };
+  const usingScene = (refs: Record<string, string>): Scene => ({
+    ...freeScene(undefined),
+    sceneType: "photo_intro",
+    templateId: "photo_v1",
+    assetRefs: refs,
+  });
+  const two: Asset[] = [
+    { assetId: "asset_001", assetType: "image", displayName: "写真A", filePath: "a.png" },
+    { assetId: "asset_002", assetType: "image", displayName: "写真B", filePath: "b.png" },
+  ];
+  const find = (items: ReturnType<typeof buildPrecheckItems>) => items.find((i) => i.id === "missingAsset");
+
+  /**
+   * ⚠️ **調べていないときは項目を出さない**（`undefined`）＝ブラウザやテストなど**調べられない場**で
+   * 「問題なし」と嘘をつかない（§2-5 の裏＝表示が事実と違う）。
+   */
+  it("調べていなければ項目を出さない", () => {
+    expect(find(buildPrecheckItems([usingScene({ main: "asset_001" })], two, [photoTemplate]))).toBeUndefined();
+  });
+
+  it("そろっていれば項目を出さない（問題なしの行で埋めない）", () => {
+    const items = buildPrecheckItems([usingScene({ main: "asset_001" })], two, [photoTemplate], undefined, []);
+    expect(find(items)).toBeUndefined();
+  });
+
+  // ⚠️ **黙って抜けた動画を成功として出さない**（ADR-0026④）＝要対応にする。
+  it("使っている素材が見つからなければ要対応にし、名前を出す", () => {
+    const items = buildPrecheckItems([usingScene({ main: "asset_001" })], two, [photoTemplate], undefined, ["asset_001"]);
+    const item = find(items);
+    expect(item?.severity).toBe("action");
+    expect(item?.detail).toContain("写真A");
+    expect(item?.detail).toContain("ファイルを選び直す"); // §2-5＝次の行動
+  });
+
+  /**
+   * ⚠️ **使っていない素材が消えていても要対応にしない**＝動画には入らないので実害が無い。
+   * 「使っていない素材」の警告（そのままでよい）と重さが違うので、混ぜない。
+   */
+  it("使っていない素材が見つからなくても要対応にしない", () => {
+    const items = buildPrecheckItems([usingScene({ main: "asset_001" })], two, [photoTemplate], undefined, ["asset_002"]);
+    expect(find(items)).toBeUndefined();
+  });
+
+  it("複数のときは先頭3つの名前と「ほかNつ」を出す", () => {
+    const many: Asset[] = ["A", "B", "C", "D"].map((n, i) => ({
+      assetId: `asset_00${i + 1}`, assetType: "image", displayName: `写真${n}`, filePath: `${n}.png`,
+    }));
+    const scene = usingScene({ main: "asset_001", b: "asset_002", c: "asset_003", d: "asset_004" });
+    const tmpl: Template = {
+      ...photoTemplate,
+      layers: ["main", "b", "c", "d"].map((id, i) => ({ id, type: "slot", x: 0, y: 0, w: 100, h: 100, zIndex: i })),
+    } as Template;
+    const items = buildPrecheckItems([scene], many, [tmpl], undefined, many.map((a) => a.assetId));
+    expect(find(items)?.detail).toContain("写真A、写真B、写真C");
+    expect(find(items)?.detail).toContain("ほか1つ");
+  });
+});

@@ -124,7 +124,17 @@ export function exportBlockedMessage(items: PrecheckItem[], from: "precheck" | "
 
 
 /** 公開前チェックの結果を、実際のシーン/素材から算出する（一部は自動チェック未対応の定型）。 */
-export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: Template[], overlayAnimations?: ElementAnimation[]): PrecheckItem[] {
+export function buildPrecheckItems(
+  scenes: Scene[],
+  assets: Asset[],
+  templates: Template[],
+  overlayAnimations?: ElementAnimation[],
+  /**
+   * 実体が見つからない素材の id（#347）。⚠️ **省略＝調べていない**（「全部そろっている」ではない）＝
+   * 調べられない場（ブラウザ・テスト）で**嘘の「問題なし」を出さない**ため、項目そのものを出さない。
+   */
+  missingAssetIds?: readonly string[],
+): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
   // 場面に紐づく項目は「どの場面か」を番号で列挙し（#403・どの場面が問題か示す）、action がある項目は最初の該当場面へ
@@ -180,6 +190,24 @@ export function buildPrecheckItems(scenes: Scene[], assets: Asset[], templates: 
       ? { id: "unused", label: "使っていない素材", detail: `使われていない素材が${unused}つあります。動画には入らないので、そのままでも問題ありません。`, severity: "warning" }
       : { id: "unused", label: "使っていない素材", detail: "すべての素材が使われています。", severity: "ok" },
   );
+
+  // ⚠️ **見つからない素材は書き出す前に知らせる**（#347・§2-5・ADR-0026④）＝そのまま書き出すと
+  // その場面が**黙って抜けた**動画になる。「使っていない素材」（そのままでよい警告）とは重さが違う
+  // ので別項目にし、**使われているものだけ**を要対応にする（使っていない素材が消えていても実害が無い）。
+  // 調べていない（`undefined`）ときは項目を出さない＝調べられない場で「問題なし」と嘘をつかない。
+  if (missingAssetIds) {
+    const missingInUse = assets.filter((a) => missingAssetIds.includes(a.assetId) && used.has(a.assetId));
+    if (missingInUse.length > 0) {
+      const names = missingInUse.slice(0, 3).map((a) => a.displayName).join("、");
+      const more = missingInUse.length > 3 ? `ほか${missingInUse.length - 3}つ` : "";
+      items.push({
+        id: "missingAsset",
+        label: "見つからない素材",
+        detail: `動画で使っている素材のファイルが見つかりません（${names}${more}）。素材の画面で「ファイルを選び直す」から入れ直してください。置いた場所や設定はそのまま使えます。`,
+        severity: "action",
+      });
+    }
+  }
 
   // 自由配置（FREE 場面）の確認：要素が画面外・素材未解決・サイズ不正などがないか（ADR-0008 §8）。
   // FREE 場面が無いプロジェクトでは項目を出さない（通常プロジェクトのノイズを避ける）。

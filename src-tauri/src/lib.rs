@@ -257,6 +257,7 @@ pub fn run() {
             assets::import_asset_path,
             assets::import_voice,
             assets::read_asset_data_url,
+            assets::missing_asset_files,
             assets::project_files_size,
             assets::copy_project_files,
             assets::import_template_asset,
