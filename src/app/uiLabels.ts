@@ -552,8 +552,6 @@ export const editBlockedMessage: Record<EditBlockedReason, string> = {
   // ⚠️ **書き出しの断り（`TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED`）と言い方を揃える**（#831）＝
   // 「差し替えてから」ではなく「列へ直接置くか、差し込み口へ入れる」＝この部品ではなく**動画の置き方**を
   // 変える案内。立ち絵を触る欄がここに無いので、それ以外に実在する行動が無い。
-  TIMELINE_EDIT_EXPLODE_CHARACTER_VIDEO:
-    "立ち絵として入れた動画は、まだバラせません。動画は列へ直接置くか、見た目パターンの差し込み口へ入れてください",
   TIMELINE_EDIT_LINKED_SUBTITLE: "連動している字幕を置ける場所がありません。字幕をほかの列へ移すか、連動をやめてください",
   TIMELINE_EDIT_CURVED_EASING: "この動き方は途中で分けられません。「動き」の欄に出ている秒数の位置か、動きの付いていない所で分けてください",
   TIMELINE_EDIT_PLAYING: "再生を止めてから使えます",
@@ -622,8 +620,6 @@ export const TIMELINE_VIDEO_STILL_ROTATED_CROP =
  */
 export const exportBlockedMessage: Record<Exclude<TimelineExportBlockCode, typeof TIMELINE_EXPORT_BLOCK.volumePointsTooMany>, string> = {
   TIMELINE_EXPORT_EMPTY: "まだ何も置かれていないので、動画を書き出せません。素材や文字を置いてから書き出してください",
-  TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED:
-    "立ち絵として入れた動画は、まだ書き出せません。動画は列へ直接置くか、見た目パターンの差し込み口へ入れてください",
   TIMELINE_EXPORT_TEMPLATE_UNRESOLVED:
     // ⚠️ 「読み込み直す」は書かない（#812）＝読み直す操作が画面に無く、自作のものを消した場合は
     // 読み直しても戻らない（実行できない／効果の無い行動を名指ししない・§2-5）。

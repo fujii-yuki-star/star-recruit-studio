@@ -179,7 +179,9 @@ describe('バラしても枠の使い方が残る', () => {
   // バラした後は黙って通る。⚠️ **`explodeBackgroundVideo` と同じコードにしない**＝あちらの逃げ道
   // 「差し込み口へ入れるか、写真に差し替えてから」は立ち絵を触る欄がこの画面に無く実行できない
   // （§2-5・#812 と同型のバグだった＝差分再監査で発覚）。
-  it('立ち絵に入れた動画があったら、バラす前に断る（背景とは別コード＝#831）', () => {
+  // ⚠️ **立ち絵の断りは退役した**（#809）＝かつては「バラすと動き出す」（前は静止）が理由だったが、
+  // **バラす前から動く**ようになったので前提が消えた。いまは**バラせる**（動きは変わらない）。
+  it('立ち絵に入れた動画はバラせる（#809 で映るようになった＝前後で動きが変わらない）', () => {
     const withChar = {
       ...videoTemplate,
       layers: [
@@ -197,11 +199,47 @@ describe('バラしても枠の使い方が残る', () => {
       clips: [clip],
     } as Partial<TimelineProject>);
     const r = explodeTemplateClip(d, 'clip_001', withChar);
-    expect(r.ok).toBe(false);
-    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_CHARACTER_VIDEO');
+    expect(r.ok).toBe(true);
   });
 
-  it('立ち絵と背景の両方に動画が入っていても、立ち絵のコードが優先される（背景側の逃げ道は無いため）', () => {
+  /**
+   * ⚠️ **立ち絵の per-use も持ち越す**（PR #871 レビュー 🔴）＝差し込み口の要素は
+   * `slotLayerByElementId` から使い方を引けるが、**立ち絵の要素はそこに入っていない**ので、
+   * 引き方を `layerOfElement` に揃え忘れると**キーごと落ちて既定へ戻る**
+   *（元の音が鳴らなくなる・等速になる・先頭から流れる）＝ADR-0032 決定23 に反する。
+   *
+   * ⚠️ **上の「バラせる」テストでは捕まらない**＝あちらは `slotClips` を置いていないので、
+   * 落ちても既定と同じ値になり差が出ない。**per-use を置いた状態**で見る必要がある。
+   */
+  it('立ち絵に入れた動画の使い方（元の音・速さ・使い始め）もバラした後に残る', () => {
+    const withChar = {
+      ...videoTemplate,
+      layers: [
+        { id: 'character', type: 'character', x: 0, y: 0, w: 400, h: 800 },
+        { id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 },
+      ],
+    } as unknown as Template;
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v',
+      character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' },
+      slotClips: { character: { useOriginalAudio: true, originalAudioVolume: 0.7, startSec: 4, speed: 1.5 } },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { hasAudio: true } }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    const r = explodeTemplateClip(d, 'clip_001', withChar);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const slot = r.doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.slot && c.assetId === 'asset_v');
+    expect(slot).toMatchObject({ useOriginalAudio: true, originalAudioVolume: 0.7, sourceStartSec: 4, speed: 1.5 });
+    expect(validateTimelineProject(r.doc)).toBe(true);
+  });
+
+  // ⚠️ **背景の動画はいまも断る**（立ち絵だけが退役した）＝背景の層は差し込み口として描かれず、
+  // バラすと直接置きの動画になって**動き出す**（前提が残っている）。
+  it('立ち絵は通るが、背景に入れた動画は今までどおり断る', () => {
     const withBoth = {
       ...videoTemplate,
       layers: [
@@ -225,7 +263,7 @@ describe('バラしても枠の使い方が残る', () => {
     } as Partial<TimelineProject>);
     const r = explodeTemplateClip(d, 'clip_001', withBoth);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_CHARACTER_VIDEO');
+    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO');
   });
 
   it('背景の層でも、写真なら断らない（動画のときだけの話）', () => {

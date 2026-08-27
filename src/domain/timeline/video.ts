@@ -36,9 +36,9 @@ export function videoAssetIdOfClip(clip: TimelineClip, videoAssetIds: ReadonlySe
  */
 export interface VideoPlacement {
   clip: TimelineClip;
-  /** 使い方（`direct`＝直接置き／`slot`＝差し込み口）。⚠️ **層 id から導き直さない**（`null` は
+  /** 使い方（`direct`＝直接置き／`slot`＝差し込み口／`character`＝立ち絵）。⚠️ **層 id から導き直さない**（`null` は
    *  立ち絵とも重なる＝別の使い方が同じ鍵になる）。種別は `AssetUseKind` と共有。 */
-  use: Extract<AssetUseKind, 'direct' | 'slot'>;
+  use: Extract<AssetUseKind, 'direct' | 'slot' | 'character'>;
   /** 見た目パターンの差し込み口の層 id（`null`＝クリップに直接置いた素材）。 */
   layerId: string | null;
   assetId: string;
@@ -83,6 +83,26 @@ export function videoPlacementsOfClip(
   const template = clip.templateId != null ? opts.templateOf?.(clip.templateId) : undefined;
   if (!template) return [];
   const out: VideoPlacement[] = [];
+  // ⚠️ **立ち絵も置き場所として数える**（#809）＝人物の差し込みに動画を入れたときも映って音が鳴る。
+  // 描画のアイテム id は**層 id**（`layout.ts` の `base.id = layer.id`）なので、差し込み口と
+  // **同じ形**（`` `${clipId}/${layerId}` ``）で穴を開けられる＝`isItemOfPlacement` は変更不要。
+  const charLayer = template.layers.find((l) => l.type === LAYER_TYPE.character);
+  const poseAssetId = clip.character?.poseAssetId;
+  if (charLayer && typeof poseAssetId === 'string' && ids.has(poseAssetId)) {
+    const asset = doc.assets.find((a) => a.assetId === poseAssetId);
+    const resolved = resolveSlotClip(clip.slotClips?.[charLayer.id], asset?.clip);
+    out.push({
+      clip,
+      use: ASSET_USE_KIND.character,
+      layerId: charLayer.id,
+      assetId: poseAssetId,
+      sourceStartSec: resolved.startSec ?? 0,
+      durationSec: placedDurationWithin(clip.durationSec, resolved.startSec, resolved.endSec, clampSpeed(resolved.speed ?? SPEED_DEFAULT)),
+      speed: clampSpeed(resolved.speed ?? SPEED_DEFAULT),
+      useOriginalAudio: resolved.useOriginalAudio === true,
+      originalAudioVolume: clampVolume(resolved.originalAudioVolume ?? ORIGINAL_AUDIO_VOLUME),
+    });
+  }
   for (const layer of template.layers) {
     if (layer.type !== LAYER_TYPE.slot) continue;
     if (layer.slotType === SLOT_TYPE.image) continue;

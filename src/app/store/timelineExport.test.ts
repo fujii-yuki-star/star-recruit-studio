@@ -91,7 +91,9 @@ describe('exportTimelineVideo', () => {
 
   // ⚠️ #512 段1＝直接置いた動画／段3＝差し込み口の動画は**映る**ようになったので、断るのは
   // **まだ映らない使い方**だけ＝**立ち絵に入れた動画**。
-  it('立ち絵に入れた動画は断る（静止画で出さない）', async () => {
+  // ⚠️ **立ち絵に入れた動画も書き出せるようになった**（#809）＝#512 の直接置き・差し込み口と
+  // 同じく置き場所として数える。断りは**外した**ので、ここで見るのは「止まらないこと」。
+  it('立ち絵に入れた動画は止めない（#809 で映るようになった）', async () => {
     const clip: TimelineClip = {
       id: 'clip_002', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
       startSec: 0, durationSec: 5, x: 0, y: 0, w: 100, h: 50, templateId: 'tmpl_001',
@@ -108,13 +110,17 @@ describe('exportTimelineVideo', () => {
       templates: [{
         schemaVersion: '1.0', templateId: 'tmpl_001', name: 'テンプレ', category: 'photo_intro',
         aspectRatio: '16:9', canvas: { width: 1920, height: 1080 },
-        layers: [{ id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 }],
+        // ⚠️ **立ち絵の層を持たせる**＝層が無ければそもそも描かれないので、置き場所にもならない
+        // （#809 の変更点は「層があるとき映る」＝層が無い状態では何も確かめられない）。
+        layers: [
+          { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
+          { id: 'chara', type: 'character', x: 100, y: 100, w: 400, h: 800 },
+        ],
       }],
       templateAssetSrcById: {},
     } as unknown as typeof deps;
     await useTimelineStore.getState().exportTimelineVideo(withTemplate);
-    expect(vi.mocked(ffmpegMod.exportVideo)).not.toHaveBeenCalled();
-    expect(useTimelineStore.getState().exportRun.message).toContain('立ち絵として入れた動画');
+    expect(useTimelineStore.getState().exportRun.message ?? '').not.toContain('立ち絵として入れた動画');
   });
 
   // ⚠️ **差し込み口の元の音が、実際に書き出しへ渡るところまで見る**（#512 段3b レビュー 🔴）。
