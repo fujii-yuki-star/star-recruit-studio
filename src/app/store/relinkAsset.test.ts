@@ -369,3 +369,45 @@ describe('removeAssets（まとめて消す・#348）', () => {
     expect(del).not.toHaveBeenCalled();
   });
 });
+
+describe('写真の大きさを測る（#346・「ぼやける素材」の材料）', () => {
+  beforeEach(() => {
+    useProjectStore.setState((st) => ({
+      assets: [], assetSrcById: {}, importError: null, isImporting: false,
+      meta: { ...st.meta, projectId: 'proj_20260827_0001' },
+    }));
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+    vi.spyOn(assetFsMod, 'importAssetByPath').mockResolvedValue('assets/asset_001.png');
+    vi.spyOn(assetFsMod, 'assetDisplayUrl').mockResolvedValue('asset://a');
+    vi.spyOn(assetFsMod, 'extractVideoThumbnail').mockResolvedValue(null);
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  /**
+   * ⚠️ **これが無いと「ぼやける素材」の注意が写真では一度も出ない**（#346 の実装中に判明）＝
+   * `metadata` を書いていたのは**動画の取り込みだけ**で、写真には `width`/`height` が入らず、
+   * 判定の材料が無いので黙って素通りしていた。
+   */
+  it('写真を取り込むと大きさが入る', async () => {
+    vi.spyOn(assetFsMod, 'probeVideo').mockResolvedValue({ width: 640, height: 360, durationSec: null, hasAudio: null });
+    await useProjectStore.getState().addAssetByPath('D:/pics/写真.png');
+    expect(useProjectStore.getState().assets[0].metadata).toEqual({ width: 640, height: 360 });
+  });
+
+  // ⚠️ **長さ・音の有無は捨てる**＝静止画には意味が無く、持たせると「0秒の動画」に見える。
+  it('写真に長さ・音の有無は持たせない', async () => {
+    vi.spyOn(assetFsMod, 'probeVideo').mockResolvedValue({ width: 640, height: 360, durationSec: 0, hasAudio: false });
+    await useProjectStore.getState().addAssetByPath('D:/pics/写真.png');
+    expect(useProjectStore.getState().assets[0].metadata).toEqual({ width: 640, height: 360 });
+  });
+
+  // ⚠️ **測れなくても取り込みは続ける**（注意が1つ出ないだけ＝§2-5）。
+  it('測れなくても取り込みは成功する', async () => {
+    vi.spyOn(assetFsMod, 'probeVideo').mockResolvedValue(null);
+    await useProjectStore.getState().addAssetByPath('D:/pics/写真.png');
+    const a = useProjectStore.getState().assets[0];
+    expect(a.filePath).toBe('assets/asset_001.png');
+    expect(a.metadata).toBeUndefined();
+    expect(useProjectStore.getState().importError).toBeNull();
+  });
+});

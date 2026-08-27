@@ -43,7 +43,7 @@ import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
-import { probeAndThumbVideo } from "./assetImport";
+import { probeAndThumbVideo, probeImageSize } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
@@ -1692,6 +1692,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const savedPath = await importAssetFile(projectId, fileName, dataUrl!);
         const displayUrl = savedPath ? await assetDisplayUrl(projectId, savedPath) : null;
         if (displayUrl) set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: displayUrl } }));
+        // ⚠️ **写真も大きさを測る**（#346・パス経路と同じ）＝取り込み方で片方だけ測ると、
+        // 「ぼやける素材」の注意が**入れ方によって出たり出なかったり**する（ADR-0026②）。
+        const size = savedPath ? await probeImageSize(projectId, savedPath) : null;
+        if (size) set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: size } : a)) }));
       }
     } catch (e) {
       // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。
@@ -1735,6 +1739,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // 画像の表示用 src を取り込んだ実体から解決（Tauri は asset://）。書き出しの data URL は書き出し時に別途読む（A3-2/ADR-0004）。
         const url = await assetDisplayUrl(projectId, relPath);
         if (url) set((s) => ({ assetSrcById: { ...s.assetSrcById, [assetId]: url } }));
+        // ⚠️ **写真も大きさを測る**（#346）＝測らないと「ぼやける素材」の注意が**写真では一度も
+        // 出ない**（判定の材料が無いので黙って素通り）。測れなくても取り込みは続ける。
+        const size = await probeImageSize(projectId, relPath);
+        if (size) set((s) => ({ assets: s.assets.map((a) => (a.assetId === assetId ? { ...a, metadata: size } : a)) }));
       }
     } catch (e) {
       // 取り込み失敗：楽観追加した素材をロールバックし、原因（Rust文言）を通知する（§2-5）。

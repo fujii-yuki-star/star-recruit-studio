@@ -807,3 +807,68 @@ describe("buildPrecheckItems 見つからない素材（#347）", () => {
     expect(find(items)?.detail).toContain("ほか1つ");
   });
 });
+
+describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
+  const photoTemplate: Template = {
+    ...freeTemplate, templateId: "photo_v1", category: "photo_intro",
+    layers: [
+      { id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 },
+      { id: "title", type: "text", textKey: "title", x: 0, y: 0, w: 400, h: 100, fontSize: 40, maxLines: 2, zIndex: 1 },
+    ],
+  } as unknown as Template;
+  const sc = (over: Partial<Scene> = {}): Scene =>
+    ({ ...freeScene(undefined), sceneType: "photo_intro", templateId: "photo_v1", ...over });
+  const find = (items: ReturnType<typeof buildPrecheckItems>, id: string) => items.find((i) => i.id === id);
+
+  /**
+   * ⚠️ **切り詰め（`…`）は「はみ出し」とは別の壊れ方**＝画面の中で完結するので、見ただけでは
+   * 「そう書いたのか」「切れたのか」が分からない。
+   */
+  it("枠に入りきらない文字を要対応にする", () => {
+    const ok = buildPrecheckItems([sc({ texts: { title: "短い題" } })], [], [photoTemplate]);
+    expect(find(ok, "truncatedText")).toBeUndefined();
+    const ng = buildPrecheckItems([sc({ texts: { title: "あ".repeat(200) } })], [], [photoTemplate]);
+    expect(find(ng, "truncatedText")?.severity).toBe("action");
+    expect(find(ng, "truncatedText")?.detail).toContain("短くする"); // §2-5＝次の行動
+  });
+
+  // ⚠️ **見た目が解決できない場面は見ない**＝そちらは「場面の見た目」の項目が受け持つ（二度言わない）。
+  it("見た目が分からない場面は見ない", () => {
+    const items = buildPrecheckItems([sc({ templateId: "unknown", texts: { title: "あ".repeat(200) } })], [], [photoTemplate]);
+    expect(find(items, "truncatedText")).toBeUndefined();
+  });
+
+  // ⚠️ **小さいこと自体は問題ではない**＝描かれる枠と比べる（ロゴのように小さく置く素材もある）。
+  it("引き伸ばしでぼやける素材を注意にする（そのままでも作れる）", () => {
+    const small: Asset[] = [{ assetId: "asset_001", assetType: "image", displayName: "小さい写真", filePath: "a.png", metadata: { width: 320, height: 180 } }];
+    const items = buildPrecheckItems([sc({ assetRefs: { main: "asset_001" } })], small, [photoTemplate]);
+    expect(find(items, "blurryAsset")?.severity).toBe("warning"); // 止めない
+  });
+
+  it("大きい素材なら出さない", () => {
+    const big: Asset[] = [{ assetId: "asset_001", assetType: "image", displayName: "写真", filePath: "a.png", metadata: { width: 3840, height: 2160 } }];
+    expect(find(buildPrecheckItems([sc({ assetRefs: { main: "asset_001" } })], big, [photoTemplate]), "blurryAsset")).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **「セリフの長さ」とは別の項目**＝あちらは文字数そのもの、こちらは**尺に対して**多いか。
+   * 両方出ることもあるので、混ぜずに別項目にする。
+   */
+  it("尺に対してセリフが多い場面を注意にする", () => {
+    const scene = sc({ durationSec: 2, narration: { text: "あ".repeat(60), status: "generated" } });
+    const items = buildPrecheckItems([scene], [], [photoTemplate]);
+    expect(find(items, "tooFast")?.severity).toBe("warning");
+    expect(find(items, "tooFast")?.detail).toContain("表示時間を延ばす"); // §2-5＝次の行動
+  });
+
+  it("ふつうの長さなら出さない", () => {
+    const scene = sc({ durationSec: 8, narration: { text: "こんにちは、よろしくお願いします。", status: "generated" } });
+    expect(find(buildPrecheckItems([scene], [], [photoTemplate]), "tooFast")).toBeUndefined();
+  });
+
+  // ⚠️ **問題が無ければ項目を出さない**＝「問題なし」の行で埋めない（読む気を削がない）。
+  it("何も無ければ3つとも出さない", () => {
+    const items = buildPrecheckItems([sc({ texts: { title: "題" }, durationSec: 8 })], [], [photoTemplate]);
+    for (const id of ["truncatedText", "blurryAsset", "tooFast"]) expect(find(items, id)).toBeUndefined();
+  });
+});
