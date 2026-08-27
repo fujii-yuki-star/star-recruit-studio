@@ -9,7 +9,7 @@
 // （どの部品がどの差し込み口だったかを持たないうえ、バラした後に自由に動かせる）。取り消し（Ctrl+Z）で
 // だけ戻る。だから**操作の前に断る**（`§2-5`＝画面が確認を出す）。
 import { DEFAULT_BACKGROUND_COLOR, dimsForOrientation } from '../constants';
-import { FREE_ELEMENT_KIND, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
+import { FREE_ELEMENT_KIND, LAYER_TYPE, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
 import type { Group } from '../group/types';
 import { createClipId, createGroupId, createTrackId } from '../project/persistence';
 import { IDENTITY_TRANSFORM } from '../project/groupOps';
@@ -70,19 +70,22 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
   // まとまりで隠れた層**（持ち込まない）まで数えて過剰に断る。要素から数えれば両方そろう。
   // バラすと直接置きの動画になり**動き出す**（バラす前は静止＋書き出しも断っていたのに、後は黙って通る）。
   const videoIds = videoAssetIds(doc);
+  // ⚠️ **立ち絵の要素も置き場所と結ぶ**（#809）＝`slotLayerByElementId` は差し込み口の層しか
+  // 持たないので、立ち絵の要素はそのままだと「置き場所ではない」＝**バラすと動き出す**と
+  // 誤判定される（実際に、断りが背景用のコードで出た）。立ち絵の層 id で引き直す。
+  const characterLayerId = template.layers.find((l) => l.type === LAYER_TYPE.character)?.id;
+  const layerOfElement = (el: FreeElement): string =>
+    (characterElementIds.has(el.id) ? characterLayerId : slotLayerByElementId[el.id]) ?? '';
   const movesToVideo = (el: FreeElement): boolean =>
     el.kind === FREE_ELEMENT_KIND.slot &&
     typeof el.assetId === 'string' &&
     videoIds.has(el.assetId) &&
-    !placementByLayer.has(slotLayerByElementId[el.id] ?? '');
-  // ⚠️ **立ち絵は別コードで断る**（#831）＝背景・ロゴなら「見た目パターンの中身」の欄で動画を
-  // 差し替えられる（案内どおりで解除できる）が、**立ち絵を触る欄はこの画面に無い**（`character` の
-  // 出現は話者の選択肢だけ）。同じ案内を出すと、従っても解除されない行き止まりになる（§2-5・#812 と同型）。
-  // 書き出しの断り（`TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED`）と同じ言い方＝「直接置くか差し込み口へ」
-  // が実在する行動になる（この部品を諦めて、動画は列かほかの差し込み口へ置き直す）。
-  if (elements.some((el) => characterElementIds.has(el.id) && movesToVideo(el))) {
-    return { ok: false, reason: EDIT_BLOCKED.explodeCharacterVideo };
-  }
+    !placementByLayer.has(layerOfElement(el));
+  // ⚠️ **立ち絵の別扱いは退役した**（#809）＝かつては「バラすと動き出す」（バラす前は静止で、
+  // 書き出しも断っていた）ので専用の断りを持っていたが、**立ち絵に入れた動画も映るようになった**
+  // ので前提が消えた。判定は `placementByLayer`（`videoPlacementsOfClip` 由来）を見ているので、
+  // 立ち絵が置き場所になった時点で `movesToVideo` が偽になり、**この分岐は到達しなくなった**＝
+  // 残すと「まだバラせません」という**嘘の理由**を持つ死んだコードになるので消した。
   if (elements.some(movesToVideo)) return { ok: false, reason: EDIT_BLOCKED.explodeBackgroundVideo };
 
   const shortened = [...placementByLayer.values()].filter((pl) => pl.durationSec < clip.durationSec);

@@ -334,7 +334,9 @@ describe('timelineExportBlockers（書き出す前に止める理由）', () => 
   });
 
   // ⚠️ **立ち絵に入れた動画はまだ静止画のまま**＝置いたのに静止画で出る、を成功として出さない。
-  it('立ち絵として入れた動画は止める（まだ静止画のまま）', () => {
+  // ⚠️ **立ち絵に入れた動画も書き出せるようになった**（#809）＝#512 の直接置き・差し込み口と
+  // 同じく置き場所として数えるので、**断る理由が無くなった**（静止画で出すのではなく映る）。
+  it('立ち絵として入れた動画は止めない（#809 で映るようになった）', () => {
     const asPose = doc({
       assets: [videoAsset],
       clips: [
@@ -344,7 +346,7 @@ describe('timelineExportBlockers（書き出す前に止める理由）', () => 
         }),
       ],
     });
-    expect(timelineExportBlockers(asPose)[0].clipIds).toEqual(['clip_001']);
+    expect(timelineExportBlockers(asPose)).toEqual([]);
   });
 
   it('持っているだけで使っていない動画素材では止めない（消し忘れで書き出せなくならない）', () => {

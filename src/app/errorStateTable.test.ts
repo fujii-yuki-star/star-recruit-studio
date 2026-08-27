@@ -98,6 +98,9 @@ describe("15 §6 の表と実装の一致（#855）", () => {
   it("守れている件数が黙って減らない（対象の families を外すと落ちる）", () => {
     // 増えるぶんには構わないので下限で見る。
     expect(readErrorTable().size).toBeGreaterThanOrEqual(80);
-    expect(Object.keys(codeMessages()).length).toBeGreaterThanOrEqual(36);
+    // ⚠️ **下限は減ることがある**＝断りが**退役**すると対象も減る（#809 で2件退役）。
+    // 「増えるぶんには構わない」の趣旨は変わらないので、退役のたびに下限を実態へ合わせる
+    //（合わせないと、**守れている件数が減っていないのに赤**になり、門番を信用しなくなる）。
+    expect(Object.keys(codeMessages()).length).toBeGreaterThanOrEqual(34);
   });
 });

@@ -179,7 +179,9 @@ describe('バラしても枠の使い方が残る', () => {
   // バラした後は黙って通る。⚠️ **`explodeBackgroundVideo` と同じコードにしない**＝あちらの逃げ道
   // 「差し込み口へ入れるか、写真に差し替えてから」は立ち絵を触る欄がこの画面に無く実行できない
   // （§2-5・#812 と同型のバグだった＝差分再監査で発覚）。
-  it('立ち絵に入れた動画があったら、バラす前に断る（背景とは別コード＝#831）', () => {
+  // ⚠️ **立ち絵の断りは退役した**（#809）＝かつては「バラすと動き出す」（前は静止）が理由だったが、
+  // **バラす前から動く**ようになったので前提が消えた。いまは**バラせる**（動きは変わらない）。
+  it('立ち絵に入れた動画はバラせる（#809 で映るようになった＝前後で動きが変わらない）', () => {
     const withChar = {
       ...videoTemplate,
       layers: [
@@ -197,11 +199,12 @@ describe('バラしても枠の使い方が残る', () => {
       clips: [clip],
     } as Partial<TimelineProject>);
     const r = explodeTemplateClip(d, 'clip_001', withChar);
-    expect(r.ok).toBe(false);
-    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_CHARACTER_VIDEO');
+    expect(r.ok).toBe(true);
   });
 
-  it('立ち絵と背景の両方に動画が入っていても、立ち絵のコードが優先される（背景側の逃げ道は無いため）', () => {
+  // ⚠️ **背景の動画はいまも断る**（立ち絵だけが退役した）＝背景の層は差し込み口として描かれず、
+  // バラすと直接置きの動画になって**動き出す**（前提が残っている）。
+  it('立ち絵は通るが、背景に入れた動画は今までどおり断る', () => {
     const withBoth = {
       ...videoTemplate,
       layers: [
@@ -225,7 +228,7 @@ describe('バラしても枠の使い方が残る', () => {
     } as Partial<TimelineProject>);
     const r = explodeTemplateClip(d, 'clip_001', withBoth);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_CHARACTER_VIDEO');
+    expect(!r.ok && r.reason).toBe('TIMELINE_EDIT_EXPLODE_BACKGROUND_VIDEO');
   });
 
   it('背景の層でも、写真なら断らない（動画のときだけの話）', () => {

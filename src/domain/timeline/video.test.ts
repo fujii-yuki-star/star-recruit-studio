@@ -45,6 +45,7 @@ const template = () =>
       { id: 'background', type: 'background', x: 0, y: 0, w: 1920, h: 1080 },
       { id: 'main', type: 'slot', x: 0, y: 0, w: 960, h: 1080 },
       { id: 'photoOnly', type: 'slot', slotType: 'image', x: 960, y: 0, w: 960, h: 1080 },
+      { id: 'chara', type: 'character', x: 1200, y: 200, w: 400, h: 800 },
     ],
   }) as unknown as Template;
 const templateOf = () => template();
@@ -127,6 +128,39 @@ describe('videoPlacementsOf（動画の置き場所）', () => {
     expect(videoPlacementsOf(d, templateOf).map((p) => [p.layerId, p.assetId])).toEqual([['main', 'asset_003']]);
   });
 
+  // ⚠️ **立ち絵も置き場所**（#809）＝#512 の直接置き・差し込み口と同じく映って音も鳴る。
+  // 以前は書き出しの手前で断っていた（静止画を成功として出さないため）。
+  it('立ち絵に入れた動画も置き場所になる', () => {
+    const d = tmplDoc({ character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_001' } } as Partial<TimelineClip>);
+    expect(videoPlacementsOf(d, templateOf).map((p) => [p.use, p.layerId, p.assetId]))
+      .toEqual([['character', 'chara', 'asset_001']]);
+  });
+
+  // ⚠️ **写真の立ち絵は置き場所にしない**＝ふつうの立ち絵（静止画）はいままでどおり。
+  it('写真を入れた立ち絵は置き場所にしない', () => {
+    const d = tmplDoc({ character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_002' } } as Partial<TimelineClip>);
+    expect(videoPlacementsOf(d, templateOf)).toEqual([]);
+  });
+
+  // ⚠️ **立ち絵の層が無ければ描かれない**＝置き場所にもしない（描かれないものを焼くと
+  // プレビューと書き出しが食い違う＝差し込み口と同じ規則）。
+  it('立ち絵の層を持たない見た目パターンでは置き場所にしない', () => {
+    const noChara = () => ({ ...template(), layers: template().layers.filter((l) => l.type !== 'character') }) as unknown as Template;
+    const d = tmplDoc({ character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_001' } } as Partial<TimelineClip>);
+    expect(videoPlacementsOf(d, noChara)).toEqual([]);
+  });
+
+  // ⚠️ **使い方の設定は差し込み口と同じ入れ物**（`slotClips[層 id]`）＝解決も同じ関数を通る。
+  it('立ち絵でも、使い方（元の音・速さ）は差し込み口と同じ入れ物から読む', () => {
+    const d = tmplDoc({
+      character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_001' },
+      slotClips: { chara: { useOriginalAudio: true, speed: 1.5 } },
+    } as Partial<TimelineClip>);
+    const p = videoPlacementsOf(d, templateOf)[0];
+    expect(p.useOriginalAudio).toBe(true);
+    expect(p.speed).toBe(1.5);
+  });
+
   it('見た目パターンが解けないときは置き場所にしない（静止画の側へ倒す）', () => {
     expect(videoPlacementsOf(tmplDoc({ assetRefs: { main: 'asset_003' } }))).toEqual([]);
   });
@@ -180,10 +214,14 @@ describe('videoPlacementsOf（動画の置き場所）', () => {
     expect(videoPlacementsOf(hiddenGroup, templateOf)).toEqual([]);
   });
 
-  // ⚠️ **立ち絵はまだ対象外**（書き出しの手前で断る側が受け持つ）。
-  it('立ち絵に入れた動画は置き場所にしない', () => {
-    const d = tmplDoc({ character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_001' } });
-    expect(videoPlacementsOf(d, templateOf)).toEqual([]);
+  // ⚠️ **隠した部品では立ち絵も置き場所にしない**（#809）＝描かれないものは焼かない。
+  // かつては「立ち絵はまだ対象外」だったが、いまは置き場所になる（上のテスト群）ので、
+  // **隠す条件のほうが効いていること**をここで見る。
+  it('隠した部品では立ち絵も置き場所にしない', () => {
+    const hidden = tmplDoc(
+      { character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_001' }, hidden: true } as Partial<TimelineClip>,
+    );
+    expect(videoPlacementsOf(hidden, templateOf)).toEqual([]);
   });
 });
 

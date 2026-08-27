@@ -202,8 +202,6 @@ const DEFAULT_AUDIO_FILE_EXT = 'mp3';
 export const TIMELINE_EXPORT_BLOCK = {
   /** 動画に出るものが1つも無い（尺 0）。 */
   empty: 'TIMELINE_EXPORT_EMPTY',
-  /** **立ち絵**に入れた動画＝いまも静止画になるので、書き出さずに断る（直接置きは #512 段1・差し込み口は段3 で映る＝断らない）。 */
-  videoAsset: 'TIMELINE_EXPORT_VIDEO_ASSET_UNSUPPORTED',
   /** 見た目パターンが見つからない部品がある＝そこが丸ごと絵から消えるので、書き出さずに断る。 */
   templateUnresolved: 'TIMELINE_EXPORT_TEMPLATE_UNRESOLVED',
   /** 連動先が見つからない字幕で、自分の文も無い＝**何も出ない**ので、書き出さずに断る（#633）。 */
@@ -282,17 +280,11 @@ export function timelineExportBlockers(doc: TimelineProject, opts: TimelineExpor
   // 成功として出さない（ADR-0026④）。
   // ⚠️ **描かれないものは数えない**＝隠した部品は静止画で出ることも無いので、断る理由が無い
   // （隠したのに書き出せない、を作らない）。
-  const videoIds = videoAssetIds(doc);
-  if (videoIds.size > 0) {
-    const clipIds = doc.clips
-      .filter(
-        (clip) =>
-          isDrawnClip(doc, clip) &&
-          clipImageAssetUses(clip).some((u) => u.kind === ASSET_USE_KIND.character && videoIds.has(u.assetId)),
-      )
-      .map((clip) => clip.id);
-    if (clipIds.length > 0) blockers.push({ code: TIMELINE_EXPORT_BLOCK.videoAsset, clipIds });
-  }
+  // ⚠️ **立ち絵に入れた動画も映って音が鳴るようになった**（#809）＝断る理由が無くなったので、
+  // ここでの関門は**外した**。#512 の段1〜段3b（直接置き・差し込み口）と同じく
+  // `videoPlacementsOfClip` が置き場所として数え、コマの焼き出しと元の音が通る。
+  // ⚠️ **見た目パターンが解けないときは置き場所にならない**（静止画の側へ倒れる）＝
+  // そのケースは `templateUnresolved` が別に断っているので、ここで二重に見ない。
   return blockers;
 }
 
