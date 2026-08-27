@@ -89,6 +89,24 @@ export async function assetDisplayUrl(projectId: string, relPath: string): Promi
   }
 }
 
+/**
+ * 渡した素材のうち、**実体が見つからないもの**の相対パスを返す（#347）。
+ *
+ * ⚠️ **見つからないものだけ**を返す（全件の真偽表だと素材が増えるほど無駄が増える）。
+ * ⚠️ **アプリの外（ブラウザ）では空を返す**＝そこにはプロジェクトフォルダが無いので、
+ * 「全部見つからない」と言うと**嘘の警告**になる（§2-5＝実行しても直らない案内を出さない）。
+ * 調べられなかったときも空（黙って「壊れている」と言わない）。
+ */
+export async function missingAssetFiles(projectId: string, relPaths: string[]): Promise<string[]> {
+  if (!isTauri() || relPaths.length === 0) return [];
+  try {
+    return await invoke<string[]>('missing_asset_files', { projectId, relPaths });
+  } catch (e) {
+    console.warn('[asset] missingAssetFiles 失敗:', e);
+    return [];
+  }
+}
+
 /** 動画素材のメタ情報（長さ・音声有無・解像度）を取得する。Tauri 非検出 or 失敗時は null。 */
 export async function probeVideo(projectId: string, relPath: string): Promise<AssetMetadata | null> {
   if (!isTauri()) return null;

@@ -37,6 +37,28 @@ export function exceedsInlineAssetLimit(bytes: number): boolean {
 }
 
 /**
+ * 「素材」一覧に出す種類か（#347）。音（BGM・読み上げ）は素材の一覧に出さない。
+ *
+ * ⚠️ **絞りの規則を1か所に**（§2-7）＝素材の画面と、見つからない素材を調べる側（`refreshMissingAssets`）が
+ * 別々に絞ると、**一覧に出ないものが「見つかりません」に数えられ、選んで直せない行き止まり**になる。
+ */
+export function isListedMaterial(assetType: AssetType): boolean {
+  return assetType !== ASSET_TYPE.bgm && assetType !== ASSET_TYPE.voice;
+}
+
+/**
+ * 差し替えて**種類が変わる**か（#347）。
+ *
+ * ⚠️ **「動画かどうか」で見る**＝`detectAssetType` は `image`/`video` しか返さないので、
+ * `assetType` と直接くらべると **`logo`/`yuko`/`qr`/`decor` が素通り**する（3人のレビューが揃って指摘）。
+ * それらは絵なので**動画でないこと**を確かめれば守れる。音（BGM・読み上げ）はここへ来ない。
+ */
+export function changesAssetKind(currentType: AssetType, newFileName: string): boolean {
+  const wasVideo = currentType === ASSET_TYPE.video;
+  return detectAssetType(newFileName) === ASSET_TYPE.video ? !wasVideo : wasVideo;
+}
+
+/**
  * 名前が取れなかったときに使う名前（#712・#858）。
  *
  * ⚠️ **一覧に載る名前と、取り込めなかったときに挙げる名前を同じにする**＝別々に決めると、

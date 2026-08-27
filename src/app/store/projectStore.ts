@@ -40,10 +40,11 @@ import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
-import { exceedsInlineAssetLimit, fileExtension, fileNameOf, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
+import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl, missingAssetFiles } from "../../infrastructure/assetFs";
+import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
+import { relinkAsset } from "../../domain/asset/relink";
 import { probeAndThumbVideo } from "./assetImport";
-import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
+import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
@@ -376,6 +377,22 @@ interface ProjectState {
   addAsset: (file: File) => Promise<void>;
   addAssetByPath: (path: string) => Promise<void>;
   /**
+   * 素材の**ファイルだけを差し替える**（#347）。`assetId` は変えない。
+   *
+   * ⚠️ **`assetId` を付け替えないのが肝**（ADR-0024＝Asset は元素材の源泉）＝配置・尺・
+   * キーフレーム・字幕の紐づけは**構造的に**そのまま残る（参照の書き換え漏れが起きない）。
+   * 使いどころは2つ＝**見つからなくなった素材の復旧**と、**使ったまま別のファイルへ差し替え**。
+   */
+  relinkAssetByPath: (assetId: string, srcPath: string) => Promise<void>;
+  /**
+   * 実体が見つからない素材の id（#347）。**素材の画面・公開前チェックを開いたとき**に調べ直す
+   *（素材は**アプリの外**で動かされるので、開くたびに確かめる）。文書を切り替えたら捨てる。
+   * 空＝全部そろっている（調べていない状態と区別しない＝**無いことを警告に使わない**）。
+   */
+  missingAssetIds: string[];
+  /** 見つからない素材を調べ直す（#347）。 */
+  refreshMissingAssets: () => Promise<void>;
+  /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に `addAsset`/`addAssetByPath` を通す。
    *
    * ⚠️ **失敗しても止めない**（§2-5）＝成功した分は残し、入らなかったものを名前で示す。
@@ -538,6 +555,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   _narrationRunSeq: 0,
   isImporting: false,
   importProgress: null,
+  missingAssetIds: [],
   isTemplateMutating: false,
   narrationError: null,
   bgmError: null,
@@ -661,6 +679,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _dirtyAudioKeys: new Set(),
       narrationError: null,
       narrationCancelled: false, // 新規＝前の文書の「中止しました」を持ち越さない
+      // ⚠️ **見つからない素材の印は文書ごと**（#347）＝`asset_001` はどの文書にもあるので、
+      // 持ち越すと**別の文書の健全な素材に「見つかりません」が付く**（§2-5＝嘘の警告）。
+      missingAssetIds: [],
       _narrationRunSeq: s._narrationRunSeq + 1, // in-flight の一括作成を打ち切る（新しい声を旧文書の勢いで作らない）
       // 打ち切った実行の finally は「もう現行でない」ので作成中フラグを下ろさない＝ここで下ろす
       // （下ろさないと新しい文書で「作成中…」のまま声を作れなくなる）。
@@ -937,6 +958,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _dirtyAudioKeys: new Set(), // 読込直後は全音声が voicePath 済み＝再書き出し不要（#390）
       narrationError: null,
       narrationCancelled: false, // 別文書＝前の文書の「中止しました」を持ち越さない
+      // ⚠️ **見つからない素材の印は文書ごと**（#347）＝`asset_001` はどの文書にもあるので、
+      // 持ち越すと**別の文書の健全な素材に「見つかりません」が付く**（§2-5＝嘘の警告）。
+      missingAssetIds: [],
       _narrationRunSeq: s._narrationRunSeq + 1, // 別文書へ切替＝in-flight の一括作成を打ち切る
       // 打ち切った実行の finally は作成中フラグを下ろさない（もう現行でない）ので、ここで下ろす。
       isGeneratingNarration: false,
@@ -1748,6 +1772,90 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (failedNames.length === 1) set({ importError: firstMessage });
     else if (failedNames.length > 1) set({ importError: importPartlyFailedMessage(failedNames, firstMessage) });
   },
+  relinkAssetByPath: async (assetId, srcPath) => {
+    // 断り方は取り込みと同じ経路（同じ状況で同じ案内＝ADR-0026②）。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; }
+    if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return; }
+    const target = get().assets.find((a) => a.assetId === assetId);
+    if (!target) return;
+    // ⚠️ **種類の違うファイルへは差し替えない**（§2-5・ADR-0026④）＝写真↔動画で入れ替えると、
+    // 種類を変えれば**置いた差し込み口が受け付けなくなって黙って消え**、種類を変えなければ
+    // **写真として動画を描く**ことになり何も映らない。どちらも黙って別の結果なので、断って手を示す。
+    // ⚠️ 判定は **`changesAssetKind`（動画かどうか）**＝`assetType` と直接くらべると
+    // `logo`/`yuko`/`qr`/`decor` が素通りして**無言で差し替わる**（この画面はそれらも一覧に出す）。
+    if (changesAssetKind(target.assetType, srcPath)) {
+      set({ importError: assetTypeMismatchMessage(target.assetType === ASSET_TYPE.video) });
+      return;
+    }
+
+    set({ isImporting: true, importError: null });
+    try {
+      let projectId = get().meta.projectId;
+      if (!projectId) {
+        const existing = await listProjectSummaries();
+        projectId = createProjectId(new Date(), existing.map((p) => p.projectId));
+        set((st) => ({ meta: { ...st.meta, projectId } }));
+      }
+      // ⚠️ **保存名の導出は `newAssetFrom` に1つ**（§2-7）＝拡張子の既定・`assets/` の付け方を
+      // ここへ写すと3つ目のコピーになる（取り込みと再リンクで保存名が黙ってずれる）。
+      // 採番済みの id をそのまま使う（`reservedId`）＝**同じ素材のファイルを入れ替える**だけ。
+      const { fileName, asset: shape } = newAssetFrom(srcPath, [], assetId);
+      const savedPath = await importAssetByPath(projectId, fileName, srcPath);
+      const relPath = savedPath ?? shape.filePath;
+      // ⚠️ **測り直す**＝前のファイルの長さで範囲を判断すると、実際には無い所を切り出す。
+      const enrich = target.assetType === ASSET_TYPE.video ? await probeAndThumbVideo(projectId, relPath) : null;
+      // 待っている間に書き出しが始まっていたら、書き換えずに戻る（#570 P1 と同じ流儀）。
+      if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; }
+
+      // ⚠️ **待つのは「いまの状態を読む」より前に全部済ませる**（PR #874 レビュー 🟢）＝
+      // 読んだ後にもう一度 await すると、その隙に入った編集を**古い写しで上書き**しうる
+      //（サムネが取れなかったときだけ通る細い経路だった）。await を前へ寄せれば窓ごと消える。
+      // ⚠️ **同じ名前へ上書きすると表示が古いまま**＝`asset://` の URL が変わらず webview が
+      // 前の絵をキャッシュする（#140）。変更時刻を付けて取り直させる（保存データには入れない）。
+      const displayUrl = enrich?.thumbUrl ?? (await assetDisplayUrl(projectId, relPath));
+      const freshUrl = displayUrl ? `${displayUrl}?t=${Date.now()}` : null;
+
+      const cur = get();
+      const curAsset = cur.assets.find((a) => a.assetId === assetId);
+      if (!curAsset) return; // 待っている間に消されていたら何も書かない
+      const r = relinkAsset(curAsset, cur.scenes, cur.templates, relPath, enrich?.metadata ?? null, enrich?.thumbnailPath ?? null);
+      // ⚠️ **収め直した場面だけを差し替える**（`projectstore-async-clobber` の再発防止）＝
+      // `r.scenes` には**触っていない場面も元の参照のまま**入っているので、丸ごと置き換えると
+      // 待っている間に着地した編集（声の一括作成など）を**古いスナップショットで巻き戻す**。
+      const clamped = new Map(
+        r.scenes.filter((n, i) => n !== cur.scenes[i]).map((n) => [n.sceneId, n] as const),
+      );
+      // ⚠️ **収め直しは取り消せるようにする**（ADR-0020）＝`scenes` は履歴 slice なので、
+      // 通さずに書き換えると**次の取り消しで収め直しだけが黙って消える**（古い範囲が復活する）。
+      if (clamped.size > 0) get().pushHistory();
+      set((st) => ({
+        assets: st.assets.map((a) => (a.assetId === assetId ? r.asset : a)),
+        scenes: clamped.size > 0 ? st.scenes.map((sc) => clamped.get(sc.sceneId) ?? sc) : st.scenes,
+        assetSrcById: freshUrl ? { ...st.assetSrcById, [assetId]: freshUrl } : st.assetSrcById,
+        // 見つからなかった素材なら、その印を外す（直したのに警告が残らない）。
+        missingAssetIds: st.missingAssetIds.filter((id) => id !== assetId),
+        saveStatus: "idle",
+        // ⚠️ **収め直したことは黙らない**（§2-5）＝どこが変わったか分かるようにする。
+        importError: r.clampedUses > 0 ? clipClampedMessage(r.clampedUses) : null,
+      }));
+    } catch (e) {
+      set({ importError: importErrorMessage(e) });
+    } finally {
+      set({ isImporting: false });
+    }
+  },
+
+  refreshMissingAssets: async () => {
+    const { meta, assets } = get();
+    // ⚠️ **一覧に出るものだけを調べる**（`isListedMaterial`＝§2-7 で規則は1か所）＝音（BGM・読み上げ）は
+    // 素材の一覧に出ないので、数えると「その素材を選んで直してください」と言われても**選べない行き止まり**
+    // になる（§2-5）。BGM は BGM の導線で直す。
+    const listed = assets.filter((a) => isListedMaterial(a.assetType));
+    if (!meta.projectId || listed.length === 0) { set({ missingAssetIds: [] }); return; }
+    const missing = new Set(await missingAssetFiles(meta.projectId, listed.map((a) => a.filePath)));
+    set({ missingAssetIds: listed.filter((a) => missing.has(a.filePath)).map((a) => a.assetId) });
+  },
+
   clearImportError: () => set({ importError: null }),
   clearBgmError: () => set({ bgmError: null }),
   setBgm: async (file) => {

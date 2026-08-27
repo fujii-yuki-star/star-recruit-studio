@@ -175,6 +175,24 @@ pub fn import_voice(
     Ok(format!("voices/{safe}"))
 }
 
+/// 渡したプロジェクト相対パスのうち、**実体が見つからないもの**を返す（#347）。
+///
+/// 素材が移動・削除された／別PCへプロジェクトだけ持ち込んだ、を検知するために使う。
+/// **見つからないものだけ**を返す（全件の真偽表を返すと、素材が増えるほど無駄が増える）。
+/// 安全でない相対パスは「見つからない」として返す（読めないので実質同じ・黙って通さない）。
+#[tauri::command]
+pub fn missing_asset_files(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let dir = project_dir(&app, &project_id)?;
+    Ok(rel_paths
+        .into_iter()
+        .filter(|rel| !is_safe_rel_path(rel) || !dir.join(rel).is_file())
+        .collect())
+}
+
 /// プロジェクト相対パスのファイル（素材・音声）を読み、data URL を返す。
 #[tauri::command]
 pub fn read_asset_data_url(
