@@ -430,6 +430,11 @@ domain の純粋関数 **`bakeTimelineProject`（`src/domain/timeline/bake.ts`�
 | BGM（`bgmSettings`・場面 ?? プロジェクト） | 鳴っている区間ごとに **`kind:'audio'` のクリップ**（`groupBgmRuns` を共有） |
 | `transition`（**実効の切り替え**＝`resolveTransition` の結果） | **キーフレーム**（決定19）。`fade`＝手前の場面の不透明度（入る側が手前なら 0→1／出ていく側が手前なら 1→0）、`slide`＝**両方が一緒に動く**（FFmpeg の `slideleft` 等と同じ）、`none`＝なし |
 | `timelineOverlay.animations`（FREE 場面のアニメ） | `ClipAnimation`（場面ローカル秒＝クリップローカル秒。要素クリップは場面の先頭から始まるため） |
+> ⚠️ **`projects/<id>/cache/` は運ばない**（#332）＝帯に敷く絵（音の波形・動画のコマ列）の作り置き。
+> **正準ではなく、作り直せる**ので `project.json` に持たず、焼き出しのコピー・見積りにも入れない。
+> 素材の片づけ（#348）でも消さない（`assets/` 限定）ので、**起動時に古いものから捨てる**
+> （`remove_stale_analysis_cache`＝書き出しの一時置き場と同じ基準）。
+
 | `assets` | **焼く範囲で実際に使うものだけ**（`sceneActiveAssetIds`＝休眠の割当は数えない）＋鳴っている BGM の音源。実ファイルは**コピー**（決定13＝自己完結・ADR-0024 (6)） |
 
 - **自由配置の場面かどうかの判定**（`isFreeScene`）：**見た目が解決できるならその `category` が正**（描画＝`layoutScene` と同じ規則ゆえ、通常テンプレに残った休眠 `freeLayout` は焼かない＝ADR-0030）。**解決できないときだけ `scene.sceneType`** へ落ちる＝見た目が見つからない場面でも `freeLayout`・グループ・場面内アニメを黙って落とさない（§2-5）。素材の絞り込み（`sceneActiveAssetIds`）は見た目未解決だと自由配置を数えないため、この場合だけ焼き出し側が要素の素材を足す（焼いたのに素材が無い状態にしない）。
