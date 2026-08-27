@@ -24,6 +24,7 @@ import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { isTextEntryTarget, NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import { SafeAreaToggle } from "../components/SafeAreaToggle";
 import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
@@ -755,6 +756,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           />
           {/* 拡大縮小（#142）＝プレビューのすぐ上に置く（操作する所の隣） */}
           <PreviewZoomControl zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
+          {/* 端で切られやすいところの目安（#265）。**編集する画面にだけ**置く＝仕上がり確認は
+              「出来上がり」を見る場所なので線を出さない。 */}
+          <SafeAreaToggle />
           <ScenePreview scene={sampleScene} template={draft} zoom={previewZoom} onFitPercent={setPreviewFitPct}>
             <TemplateLayerOverlay
               layers={draft.layers}

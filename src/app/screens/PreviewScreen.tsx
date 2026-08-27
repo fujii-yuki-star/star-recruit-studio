@@ -468,6 +468,9 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
           <ScenePreview
             zoom={previewZoom}
             onFitPercent={setPreviewFitPct}
+            // ⚠️ **仕上がり確認には線を出さない**（#265）＝ここは「出来上がり」を見る場所で、
+            // 編集の補助線が入ると**動画にも入るのか**が分からなくなる。記憶が「出す」でも出さない。
+            showSafeArea={false}
             scene={current}
             template={template}
             activeLineIndex={activeLine}

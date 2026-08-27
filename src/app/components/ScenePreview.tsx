@@ -11,6 +11,9 @@ import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { fitToObjectFit } from "./fitToObjectFit";
 import { fitPercentOf, zoomedBox, type PreviewZoom } from "../../domain/preview/previewZoom";
+import { safeAreaRect } from "../../domain/preview/safeArea";
+import { ORIENTATION } from "../../domain/enums";
+import { useSafeAreaPref } from "../hooks/useSafeAreaPref";
 import { resolveLineSubtitle, type BoundaryFrame, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
 import { containBox, fallbackWidthCss } from "./previewFit";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
@@ -121,7 +124,11 @@ function SlotVideo({
 }
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, zoom = 'fit', onFitPercent, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; /** 拡大率（#142）。省略＝領域に合わせる（従来どおり＝既存の呼び出しは無変更）。 */ zoom?: PreviewZoom; /** フィット時の実寸%を親へ返す（段を「いまの見え方」から数えるため）。 */ onFitPercent?: (percent: number) => void; children?: ReactNode }) {
+export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, zoom = 'fit', onFitPercent, showSafeArea, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; /** 拡大率（#142）。省略＝領域に合わせる（従来どおり＝既存の呼び出しは無変更）。 */ zoom?: PreviewZoom; /**
+   * 安全領域（セーフエリア）の枠を出すか（#265）。**編集を助けるためだけ**＝書き出しには焼かない。
+   * 省略＝利用者の記憶に従う。`false` を渡すと**記憶に関わらず出さない**（仕上がり確認など、
+   * 編集しない画面で線を出さないため）。`true` を渡しても記憶が「出さない」なら出さない。
+   */ showSafeArea?: boolean; /** フィット時の実寸%を親へ返す（段を「いまの見え方」から数えるため）。 */ onFitPercent?: (percent: number) => void; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
@@ -131,6 +138,13 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   // テンプレ向き（canvas）。未設定時は 16:9 を仮置き（プレースホルダ表示用）。
   const cw = template?.canvas.width ?? 16;
   const ch = template?.canvas.height ?? 9;
+  // 安全領域の枠（#265）。向きは**見た目パターンが持つもの**を見る（`aspectRatio`）＝
+  // 動画全体の設定ではなく、いま描いているキャンバスに合わせる（向き違いの見た目でもずれない）。
+  const safeRect = safeAreaRect({ width: cw, height: ch }, template?.aspectRatio ?? ORIENTATION.landscape);
+  // ⚠️ **記憶からも読む**（#265）＝画面ごとに渡し忘れると「場面編集では出るのに見た目パターン編集では
+  // 出ない」になる。明示の `showSafeArea` は**出さない側へ倒す上書き**（仕上がり確認では線を出さない）。
+  const [safeAreaPref] = useSafeAreaPref();
+  const drawSafeArea = showSafeArea !== false && safeAreaPref;
 
   /**
    * フィット時が実寸の何%か（#142）。**段を「いまの見え方」から数える**ために親へ返す
@@ -357,6 +371,22 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
           </div>
         ) : (
           <div role="img" aria-label="場面の仕上がり" style={boxStyle} dangerouslySetInnerHTML={{ __html: svg }} />
+        )}
+        {/* ⚠️ **安全領域の枠**（#265）＝端で切られやすいところを見せる**編集の補助**。
+            書き出しには焼かない（`layoutScene` を通らない＝プレビュー＝書き出しの一致に関わらない）。
+            ⚠️ **箱の子にする**＝拡大しても一緒に伸びる（`fit` 箱の実寸に追従＝#142・#273 と同じ理由）。
+            ⚠️ **割合で置く**＝`canvas` の大きさに依らず同じ見え方（`safeAreaRect` と同じ数字を使う）。 */}
+        {drawSafeArea && (
+          <div
+            aria-hidden="true"
+            className="safe-area-guide"
+            style={{
+              left: `${(safeRect.x / cw) * 100}%`,
+              top: `${(safeRect.y / ch) * 100}%`,
+              width: `${(safeRect.w / cw) * 100}%`,
+              height: `${(safeRect.h / ch) * 100}%`,
+            }}
+          />
         )}
         {/* 操作オーバーレイ（FREE/テンプレ編集）。fit 箱の子＝縦型でもプレビュー実寸と一致し、ドラッグ追従・配置が正確（#273）。 */}
         {children}
