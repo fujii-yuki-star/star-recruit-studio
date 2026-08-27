@@ -37,6 +37,26 @@ export function exceedsInlineAssetLimit(bytes: number): boolean {
 }
 
 /**
+ * 名前が取れなかったときに使う名前（#712・#858）。
+ *
+ * ⚠️ **一覧に載る名前と、取り込めなかったときに挙げる名前を同じにする**＝別々に決めると、
+ * 「入らなかった」と言われた名前が一覧のどれにも当たらない。
+ */
+export const UNNAMED_ASSET_NAME = '新しい素材';
+
+/**
+ * パスやファイル名から**末尾の名前だけ**を取る（`/` と `\` の両方で区切りとして見る）。
+ *
+ * ⚠️ **区切りを書くのはここだけ**（§2-7）＝`/` だけを見る写しを作ると、Windows の絶対パスが
+ * 丸ごと1語になり「取り込めませんでした（C:\…\写真.png）」のように出る（#858）。
+ */
+export function fileNameOf(name: string): string {
+  // 区切りで終わる文字列（`C:/pics/`）は末尾が空＝**名前が取れない**。呼び出し側が
+  // `|| UNNAMED_ASSET_NAME` で受ける（`newAssetFrom` の表示名と同じ扱いにする）。
+  return name.split(/[/\\]/).pop() ?? name;
+}
+
+/**
  * 取り込むファイルの名前から、素材1つぶんの中身と保存先のファイル名を決める（#712）。
  *
  * **同じ導出を取り込み経路ごとに書かない**（§2-7）。以前は `projectStore` の `addAsset` と
@@ -51,7 +71,7 @@ export function newAssetFrom(
   /** 採番済みの番号を使う（呼び出し側が「使い回さない」規則で採ったとき＝#712 レビュー）。 */
   reservedId?: string,
 ): { asset: Asset; fileName: string } {
-  const namePart = name.split(/[/\\]/).pop() ?? name;
+  const namePart = fileNameOf(name);
   const assetId = reservedId ?? createAssetId(existingIds);
   const assetType = detectAssetType(namePart);
   const ext = fileExtension(namePart) || (assetType === ASSET_TYPE.video ? 'mp4' : 'png');
@@ -63,7 +83,7 @@ export function newAssetFrom(
       assetId,
       assetType,
       // 名前が空/空白だけでも**一覧で選べる名前**にする（無名の行を作らない）。
-      displayName: baseName.trim() || '新しい素材',
+      displayName: baseName.trim() || UNNAMED_ASSET_NAME,
       filePath: `assets/${fileName}`,
     },
     fileName,

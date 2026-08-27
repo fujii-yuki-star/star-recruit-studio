@@ -488,6 +488,28 @@ export function assetTooLargeMessage(nextAction: string): string {
 }
 
 /**
+ * まとめて取り込んで**一部が入らなかった**ときの案内（#858・§2-5・§6）。
+ *
+ * ⚠️ **1件だけのときはこれを使わない**＝その1件の理由をそのまま出す（単発で取り込んだときと
+ * 同じ文言になる＝ADR-0026②「件数で案内が変わらない」）。呼び出し側が2件以上のときだけ通す。
+ * ⚠️ **名前で示す**＝何を入れ直せばよいかが分かる。置き場所（絶対パス）までは出さない（読みにくい）。
+ * **両形式で同じ文言**（§6）。
+ */
+export function importPartlyFailedMessage(failedNames: readonly string[], firstReason: string | null): string {
+  return `${failedNames.length}件を取り込めませんでした（${failedNames.join("、")}）。${firstReason ?? ""}`;
+}
+
+/**
+ * 取り込んでいる最中に、もう一度まとめて取り込もうとしたときの案内（#858・§2-5）。
+ *
+ * ⚠️ **黙って落とさない**＝単発の取り込みは取り込み中を**黙って return** する（1件が入らないだけ）が、
+ * まとめて渡すと**N件がそっくり消える**。入口で断り、いつやり直せばよいかを言う。
+ * **両形式で同じ文言**（同じ状況で同じことを言う＝ADR-0026②・§6）。
+ */
+export const IMPORT_BUSY_MESSAGE =
+  "いま素材を取り込んでいます。終わってからもう一度お試しください。";
+
+/**
  * 取り込みを待っている間に書き出しが始まっていたときの案内（#712）。**逆向き**の
  * `EXPORT_BLOCKED_IMPORTING_MESSAGE` と対で、どちらが先でも「消えた理由」が分かるようにする。
  */

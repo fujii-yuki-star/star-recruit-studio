@@ -12,17 +12,20 @@ export async function showSaveVideoDialog(defaultName: string): Promise<string |
 }
 
 /**
- * 写真・動画の素材をネイティブの「開く」ダイアログで1つ選び、その絶対パスを返す（キャンセル時は null）。
- * パスを Rust に渡してコピーすることで、JS は素材バイトを一切読まずに取り込める（メモリ最適化＝真の0コピー）。
+ * 写真・動画の素材を**複数まとめて**選ぶ（#858）。キャンセル時は空配列。
+ *
+ * ⚠️ **1つずつしか選べなかった**＝10枚取り込むのに10回ダイアログを開くことになっていた。
+ * パスを Rust に渡してコピーする点は変わらない（JS は素材バイトを読まない＝真の0コピー）。
  */
-export async function showOpenAssetDialog(): Promise<string | null> {
+export async function showOpenAssetsDialog(): Promise<string[]> {
   const picked = await open({
-    multiple: false,
+    multiple: true,
     directory: false,
     filters: [
       { name: '写真・動画', extensions: [...IMAGE_FILE_EXTENSIONS, ...VIDEO_FILE_EXTENSIONS] },
     ],
   });
-  // multiple:false のため string | null。型上の string[] は使わないので正規化する。
-  return typeof picked === 'string' ? picked : null;
+  // multiple:true でも 1件のときに string が返る実装があるため、どちらも配列へ正規化する。
+  if (Array.isArray(picked)) return picked.filter((p): p is string => typeof p === 'string');
+  return typeof picked === 'string' ? [picked] : [];
 }

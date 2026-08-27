@@ -3,11 +3,11 @@
 import { create } from "zustand";
 import { dimsForOrientation } from "../../domain/constants";
 import { assetDisplayUrl, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
-import { exceedsInlineAssetLimit, newAssetFrom } from "../../domain/asset/assetFile";
+import { exceedsInlineAssetLimit, fileNameOf, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
-import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
+import { ASSET_TOO_LARGE_PICK_SMALLER, EXPORT_BLOCKED_IMPORTING_MESSAGE, VOICE_BUSY_EXPORT_MESSAGE, IMPORT_BLOCKED_EXPORTING_MESSAGE, IMPORT_BUSY_MESSAGE, assetTooLargeMessage, importErrorMessage, importPartlyFailedMessage } from "../uiLabels";
 import type { Asset } from "../../domain/project/types";
 import { readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { readBundledBgmDataUrl } from "../../infrastructure/bundledBgm";
@@ -210,12 +210,24 @@ export interface TimelineState {
   /** 素材を取り込んでいる最中（#712）。**二重に取り込まない**＝同じ番号の素材が2つできる。 */
   isImporting: boolean;
   /**
+   * まとめて取り込んでいるときの進み具合（#858）。`null`＝出さない（1件だけ／取り込んでいない）。
+   * 文書には持たない（取り込み中だけの状態）。
+   */
+  importProgress: { done: number; total: number } | null;
+  /**
    * 素材（写真・動画）をこの動画へ取り込む（#712）。**ファイルを取り込んでから一覧へ足す**
    * ＝失敗した素材の行を残さない。取り消しできる（文書まるごとの履歴に載る）。
    */
   addAsset: (file: File) => Promise<void>;
   /** ネイティブの「開く」で選んだパスから取り込む（バイトを JS に載せない・#712）。 */
   addAssetByPath: (path: string) => Promise<void>;
+  /**
+   * 素材を**まとめて**取り込む（#858）。1件ずつ順に上の2つを通す。
+   *
+   * ⚠️ **失敗しても止めない**（§2-5）＝入った分は残し、入らなかったものを名前で示す。
+   * ⚠️ **必ず `await` で1件ずつ**＝番号は文書の素材一覧を見て採るので、並行に走らせると同じ番号を2つ採る。
+   */
+  addAssets: (items: File[] | string[]) => Promise<void>;
   /** 取り込みの案内を閉じる。 */
   clearImportError: () => void;
   /**
@@ -595,6 +607,7 @@ function emptyState() {
     voiceError: null as string | null,
     importError: null as string | null,
     isImporting: false,
+    importProgress: null as { done: number; total: number } | null,
     generatingVoiceClipId: null as string | null,
     _historyGroupDepth: 0,
     _historyGroupPending: false,
@@ -995,6 +1008,54 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   addAssetByPath: async (path) => {
     await runImport(set, get, path, async (fileName) =>
       await importAssetByPath(get().doc!.projectId, fileName, path));
+  },
+
+  addAssets: async (items) => {
+    // ⚠️ **入口で1回だけ断る**（§2-5）＝途中で `isImporting` に弾かれて**黙って落ちる**のを防ぐ
+    // （`canStartImport` は取り込み中を**黙って** false にする＝まとめて渡すと数件だけ消える）。
+    // 断り方は単発と同じ経路を通す＝同じ状況で同じ案内が出る（ADR-0026②）。
+    // ⚠️ **取り込み中は案内を出してから断る**（PR #872 レビュー 🟡・§2-5）＝単発は黙って return で
+    // よい（1件が入らないだけ）が、まとめて渡すと**N件がそっくり消える**。
+    // ⚠️ **見る順番は `canStartImport` に置いたまま**にする＝手前で1つだけ先に見ると、
+    // 書き出し中かつ取り込み中のときに**書き出しの案内が出なくなる**（順番が黙って入れ替わる）。
+    if (!canStartImport(set, get, { noticeWhenImporting: true })) return;
+    if (items.length === 0) return;
+
+    // ⚠️ **1件だけのときは進み具合を出さない**＝一瞬出て消える表示は雑音になる。
+    if (items.length > 1) set({ importProgress: { done: 0, total: items.length } });
+    const failedNames: string[] = [];
+    let firstMessage: string | null = null;
+    try {
+      for (const [i, item] of items.entries()) {
+        // ⚠️ **別の取り込みに横取りされていたら、そこで止める**（#858 レビュー ℹ️）＝
+        // 一括の**途中は無ロック**（各件が `finally` で下ろす）なので、隙に BGM 取り込み等が
+        // ロックを取ると、次の1件は取り込み側で**黙って return** し、`importError` も立たないため
+        // **成功として数えてしまう**。残りは入らないので、ここで打ち切って名前に挙げる。
+        if (get().isImporting) {
+          for (const rest of items.slice(i)) failedNames.push(fileNameOf(typeof rest === "string" ? rest : rest.name) || UNNAMED_ASSET_NAME);
+          firstMessage ??= IMPORT_BUSY_MESSAGE;
+          break;
+        }
+        // 1件ぶんの結果を見分けるため、直前に消してから通す（`runImport` は始めに null にする）。
+        set({ importError: null });
+        if (typeof item === "string") await get().addAssetByPath(item);
+        else await get().addAsset(item);
+        const message = get().importError;
+        if (message) {
+          failedNames.push(fileNameOf(typeof item === "string" ? item : item.name) || UNNAMED_ASSET_NAME);
+          firstMessage ??= message;
+        }
+        if (items.length > 1) set({ importProgress: { done: i + 1, total: items.length } });
+      }
+    } finally {
+      set({ importProgress: null });
+    }
+
+    // 1件だけ失敗したときは、その理由をそのまま出す（単発で取り込んだときと同じ文言＝ADR-0026②）。
+    // ⚠️ **全部入ったときにここで消し直さない**＝各件の**直前**で消しているので、最後の1件が成功した
+    // 時点で既に空（変異チェックで「消す」行を外しても挙動が変わらなかった＝死んだ枝だった）。
+    if (failedNames.length === 1) set({ importError: firstMessage });
+    else if (failedNames.length > 1) set({ importError: importPartlyFailedMessage(failedNames, firstMessage) });
   },
 
   addVoiceClip: (input) => {
@@ -1478,11 +1539,23 @@ type GetState = () => TimelineState;
  * 素材を取り込み始めてよいか（#712）。**2つの入口で同じ順に見る**（場面形式と同じ並び＝ADR-0026②）。
  * `false` のときは理由を出し終えている（黙って何もしない、を作らない）。
  */
-function canStartImport(set: SetState, get: GetState): boolean {
+function canStartImport(
+  set: SetState,
+  get: GetState,
+  /**
+   * `noticeWhenImporting`＝取り込み中に断るとき**案内も出す**（#858・まとめて取り込む入口だけ）。
+   * 単発は黙って return でよい（1件が入らないだけ）が、まとめて渡すと**N件がそっくり消える**。
+   */
+  opts?: { noticeWhenImporting?: boolean },
+): boolean {
   if (!get().doc) return false;
   // 書き出しは**始めた時点の文書**を焼くので、増やしても動画に入らない（`commit` と同じ規準・§2-5）。
   if (isTimelineExportBusy(get().exportRun.phase)) { set({ editBlocked: EDIT_BLOCKED.exporting }); return false; }
-  if (get().isImporting) return false; // 二重に取り込むと同じ番号の素材が2つできる
+  if (get().isImporting) {
+    // 二重に取り込むと同じ番号の素材が2つできる。
+    if (opts?.noticeWhenImporting) set({ importError: IMPORT_BUSY_MESSAGE });
+    return false;
+  }
   return true;
 }
 

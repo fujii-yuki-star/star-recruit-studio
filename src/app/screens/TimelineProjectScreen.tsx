@@ -361,7 +361,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedClipSlotAudio,
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
-    addAsset, addAssetByPath, importError, clearImportError, isImporting,
+    addAssets, importError, importProgress, clearImportError, isImporting,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -4039,9 +4039,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
             ここを列の有無で隠すと、列を足すまで素材を用意できない＝行き止まり（ADR-0034 決定5）。 */}
         <div className="row gap-sm mb-sm">
           <AssetImportButton
-            onFile={addAsset}
-            onPath={addAssetByPath}
+            onPick={addAssets}
             isImporting={isImporting}
+            progress={importProgress}
             disabledReason={exporting ? exportingHint : null}
             variant="secondary"
             label="写真・動画を取り込む"

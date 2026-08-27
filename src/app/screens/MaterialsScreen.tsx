@@ -12,6 +12,7 @@ import { EmptyState } from "../components/states";
 import { ClipDetailControls } from "../components/ClipDetailControls";
 import { UsedScenesRow } from "../components/UsedScenesRow";
 import { DeleteConfirm } from "../components/DeleteConfirm";
+import { assetTagCounts, matchesAssetQuery } from "../../domain/project/assetSearch";
 import {
   PhotoIcon,
   VideoIcon,
@@ -21,6 +22,12 @@ import {
   TrashIcon,
   CheckIcon,
 } from "../components/icons";
+
+/**
+ * 候補として見せるタグの数（#858）。多すぎると一覧が候補で埋まる。
+ * 見た目ピッカーの `DEFAULT_VISIBLE`（`PickerList`）と同じ「一度に見せる数」の考え方。
+ */
+const VISIBLE_TAG_CHOICES = 8;
 
 type Filter = "all" | "image" | "video" | "yuko";
 
@@ -64,12 +71,14 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
-  const { assets, scenes, templates, updateAsset, removeAsset, assetSrcById, setAssetImage, addAsset, addAssetByPath, importError, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
+  const { assets, scenes, templates, updateAsset, removeAsset, assetSrcById, setAssetImage, addAssets, importError, importProgress, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
   // 書き出し中は素材の追加/削除/編集を止める（store 側も #547 P2-1 でガード＝ここは無言 no-op を避ける表示側・ADR-0026④）。
   // 進行中の書き出しが読むファイル/データと競合するため（プロジェクト切替 loadProject 等は #379 で既にガード済み）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
   const addDisabled = isImporting || isExporting; // 「素材を追加」は取り込み中・書き出し中は押せない
   const [filter, setFilter] = useState<Filter>("all");
+  /** 名前・タグの絞り込み（#858）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定14）。 */
+  const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
   // 素材名は編集中だけドラフトで持ち、確定は blur。空/未変更は破棄して元の名前へ戻す＝素材名を空にできないようにする（#411 item7・ProjectNameField と同型）。
@@ -84,7 +93,13 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const materials = assets.filter(
     (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
   );
-  const visible = materials.filter((a) => filter === "all" || a.assetType === filter);
+  // ⚠️ **タグは付けられるのに探せなかった**（#858）＝付与UI も AI 利用も動いているのに、
+  // 一覧の絞り込みは**種類だけ**だった。名前とタグの両方で絞れるようにする。
+  // 規則は domain の1か所（`matchesAssetQuery`）＝画面で数え直さない。
+  const byType = materials.filter((a) => filter === "all" || a.assetType === filter);
+  const visible = byType.filter((a) => matchesAssetQuery(a, query));
+  // 候補のタグは**種類で絞った後**から集める＝押しても0件になる候補を出さない。
+  const tagChoices = assetTagCounts(byType);
   // 右パネルは「表示中（フィルタ後）」の中からだけ選ぶ＝フィルタ0件のとき別フィルタの素材を出さない（#413）。
   const selected = pickPanelAsset(visible, selectedId);
   // この素材を使っている場面（逆引き・#406）。削除確認の件数（#383）と「使用場面」バッジで共有する。
@@ -117,9 +132,9 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         desc="動画に使う写真・動画・音・ゆうこの素材を管理します。説明やタグを付けると、ゆうこが使いどころを判断しやすくなります。"
         actions={
           <AssetImportButton
-            onFile={addAsset}
-            onPath={addAssetByPath}
+            onPick={addAssets}
             isImporting={isImporting}
+            progress={importProgress}
             disabledReason={addDisabled ? (isExporting ? "書き出しが終わるまでお待ちください" : "いま取り込んでいます") : null}
           />
         }
@@ -137,13 +152,50 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           store の `EXPORT_BUSY_ASSET_MSG`（importError）が出す。 */}
       <ExportLockBanner onNavigate={onNavigate} />
 
-      <div className="segment mb" style={{ display: "inline-flex" }}>
-        {filters.map(([id, label]) => (
-          <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>
-            {label}
+      <div className="row gap-sm row-wrap mb" style={{ alignItems: "center" }}>
+        <div className="segment" style={{ display: "inline-flex" }}>
+          {filters.map(([id, label]) => (
+            <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* ⚠️ **名前とタグの両方で探せる**（#858）＝どちらで覚えているか分からないので片方だけにしない。
+            言い方は他の画面と揃える（場面編集の「素材を検索」・見た目ピッカーの「絞り込み」）＝
+            「検索」「絞り込み」は一般語なので §2-3 の対象外（ADR-0034 決定21）。 */}
+        <input
+          className="input"
+          style={{ maxWidth: 220 }}
+          type="search"
+          aria-label="名前やタグで探す"
+          placeholder="名前やタグで探す"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {query !== "" && (
+          <button className="btn btn-ghost text-sm" onClick={() => setQuery("")}>
+            絞り込みをやめる
           </button>
-        ))}
+        )}
       </div>
+
+      {/* ⚠️ **押して絞れる候補を出す**（#858）＝自由入力だけだと打ち間違いで見つからない。
+          候補は**種類で絞った後**から集める＝押しても0件になる候補を出さない。 */}
+      {tagChoices.length > 0 && (
+        <div className="row gap-sm row-wrap mb" style={{ alignItems: "center" }}>
+          <span className="text-sm text-muted">よく使うタグ：</span>
+          {tagChoices.slice(0, VISIBLE_TAG_CHOICES).map(({ tag, count }) => (
+            <button
+              key={tag}
+              className={`badge ${query === tag ? "badge-teal" : "badge-gray"}`}
+              // 押した候補をもう一度押したら解除＝同じ操作で戻れる（行き止まりを作らない）。
+              onClick={() => setQuery((q) => (q === tag ? "" : tag))}
+            >
+              {tag}（{count}）
+            </button>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 素材グリッド */}
@@ -176,10 +228,19 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             ))}
           </div>
         ) : (
-          <EmptyState
-            title="この種類の素材はまだありません"
-            message="「素材を追加」から、写真・動画・ゆうこの素材を登録できます。BGMは仕上がり確認で選べます。"
-          />
+          // ⚠️ **「元から無い」と「絞り込みで消えた」を分ける**（§2-5）＝絞り込みで0件のときに
+          // 「まだありません」と出すと、**追加しに行かせてしまう**（実際には持っている）。
+          query !== "" ? (
+            <EmptyState
+              title="その言葉の素材は見つかりません"
+              message="ほかの言葉で探すか、上の「絞り込みをやめる」で全部に戻せます。"
+            />
+          ) : (
+            <EmptyState
+              title="この種類の素材はまだありません"
+              message="「素材を追加」から、写真・動画・ゆうこの素材を登録できます。BGMは仕上がり確認で選べます。"
+            />
+          )
         )}
 
         {/* 右: 選択中の素材の情報 */}

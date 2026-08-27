@@ -41,9 +41,9 @@ import {
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl } from "../../infrastructure/assetFs";
-import { exceedsInlineAssetLimit, fileExtension, newAssetFrom } from "../../domain/asset/assetFile";
+import { exceedsInlineAssetLimit, fileExtension, fileNameOf, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { probeAndThumbVideo } from "./assetImport";
-import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, importErrorMessage } from "../uiLabels";
+import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
 import { importVoiceFile, readVoiceDataUrl } from "../../infrastructure/voiceFs";
 import { resolveLineVoice, resolveNarrationVoice, sameSynthInput } from "../../domain/voice/voiceProvider";
 import type { VoiceProvider } from "../../domain/voice/voiceProvider";
@@ -187,6 +187,13 @@ interface ProjectState {
   isGeneratingNarration: boolean;
   /** 素材/BGM の取り込み中フラグ（多重取り込み防止・取り込み中表示）。 */
   isImporting: boolean;
+  /**
+   * まとめて取り込んでいるときの進み具合（#858）。`null`＝出さない（1件だけ／取り込んでいない）。
+   *
+   * ⚠️ **1件だけのときは出さない**＝一瞬出て消える表示は雑音になる。
+   * project.json には入れず永続化しない（取り込み中だけの状態）。
+   */
+  importProgress: { done: number; total: number } | null;
   /** 見た目パターンの保存/削除/素材登録が非同期実行中か（#570 レビュー）。最初の await 前に立て、書き出し開始側が
    *  これを見て止まる＝isImporting と同じ「開始の相互排他」。書き出し中の見た目変更で MP4 とプレビュー/保存がずれるのを防ぐ。 */
   isTemplateMutating: boolean;
@@ -368,6 +375,14 @@ interface ProjectState {
   /** 新しい素材（画像/動画）を登録する。動画は生バイトで取り込み（メモリ節約）、画像は data URL。 */
   addAsset: (file: File) => Promise<void>;
   addAssetByPath: (path: string) => Promise<void>;
+  /**
+   * 素材を**まとめて**取り込む（#858）。1件ずつ順に `addAsset`/`addAssetByPath` を通す。
+   *
+   * ⚠️ **失敗しても止めない**（§2-5）＝成功した分は残し、入らなかったものを名前で示す。
+   * ⚠️ **必ず `await` で1件ずつ**（11.2）＝`asset_NNN` は `get().assets` を見て採る。
+   * 並行に走らせると、2件目以降が `isImporting` ガードに黙って弾かれる（入ったつもりで消える）。
+   */
+  addAssets: (items: File[] | string[]) => Promise<void>;
   clearImportError: () => void;
   /** BGM 取り込みエラー文言を消す（通知を閉じる）。 */
   clearBgmError: () => void;
@@ -522,6 +537,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   narrationCancelled: false,
   _narrationRunSeq: 0,
   isImporting: false,
+  importProgress: null,
   isTemplateMutating: false,
   narrationError: null,
   bgmError: null,
@@ -1681,6 +1697,56 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } finally {
       set({ isImporting: false });
     }
+  },
+  addAssets: async (items) => {
+    // ⚠️ **入口で1回だけ断る**（§2-5）＝途中で `isImporting` に弾かれて**黙って落ちる**のを防ぐ。
+    // 単発の取り込みは自分で同じ確認をするが、あちらは**黙って return** するので、まとめて渡すと
+    // 「入りました」の顔で数件だけ消える。ここで先に止めて理由を出す。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; }
+    if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return; }
+    if (items.length === 0) return;
+
+    // ⚠️ **1件だけのときは進み具合を出さない**＝一瞬出て消える表示は雑音になる。
+    if (items.length > 1) set({ importProgress: { done: 0, total: items.length } });
+    const failedNames: string[] = [];
+    let firstMessage: string | null = null;
+    try {
+      for (const [i, item] of items.entries()) {
+        // ⚠️ **別の取り込みに横取りされていたら、そこで止める**（#858 レビュー ℹ️）＝
+        // 一括の**途中は無ロック**（各件が `finally` で下ろす）なので、隙に BGM 取り込み等が
+        // ロックを取ると、次の1件は取り込み側で**黙って return** し、`importError` も立たないため
+        // **成功として数えてしまう**。残りは入らないので、ここで打ち切って名前に挙げる。
+        if (get().isImporting) {
+          for (const rest of items.slice(i)) failedNames.push(fileNameOf(typeof rest === "string" ? rest : rest.name) || UNNAMED_ASSET_NAME);
+          firstMessage ??= IMPORT_BUSY_MESSAGE;
+          break;
+        }
+        // 1件ぶんの結果を見分けるため、直前に消してから通す（成功時は取り込み側が null にする）。
+        set({ importError: null });
+        // ⚠️ **必ず `await` で1件ずつ**（11.2）＝`asset_NNN` は `get().assets` を見て採る。
+        // `Promise.all` にすると、まず**2件目以降が `isImporting` ガードに黙って弾かれ**
+        //（＝入ったつもりで消える）、そのガードを外すと**同じ番号を2つ採る**。
+        // どちらも「衝突しないから並列で安全」ではない。
+        if (typeof item === "string") await get().addAssetByPath(item);
+        else await get().addAsset(item);
+        const message = get().importError;
+        if (message) {
+          // ⚠️ **失敗しても止めない**＝成功した分は残す（§2-5）。
+          failedNames.push(fileNameOf(typeof item === "string" ? item : item.name) || UNNAMED_ASSET_NAME);
+          firstMessage ??= message;
+        }
+        if (items.length > 1) set({ importProgress: { done: i + 1, total: items.length } });
+      }
+    } finally {
+      set({ importProgress: null });
+    }
+
+    // ⚠️ **1件だけ失敗したときは、その理由をそのまま出す**＝単発で取り込んだときと同じ文言になる
+    // （ADR-0026②＝件数で案内が変わらない）。複数なら**何が入らなかったか**を名前で足す。
+    // ⚠️ **全部入ったときにここで消し直さない**＝各件の**直前**で消しているので、最後の1件が成功した
+    // 時点で既に空（変異チェックで「消す」行を外しても挙動が変わらなかった＝死んだ枝だった）。
+    if (failedNames.length === 1) set({ importError: firstMessage });
+    else if (failedNames.length > 1) set({ importError: importPartlyFailedMessage(failedNames, firstMessage) });
   },
   clearImportError: () => set({ importError: null }),
   clearBgmError: () => set({ bgmError: null }),
