@@ -9,7 +9,9 @@ import * as assetFsMod from '../../infrastructure/assetFs';
 import * as voiceFsMod from '../../infrastructure/voiceFs';
 import * as bgmMod from '../../infrastructure/bundledBgm';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
+import { EDIT_BLOCKED } from '../../domain/timeline/edit';
 import { EXPORT_RUN_PHASE } from '../../domain/export/exportProgress';
+import { IMPORT_BUSY_MESSAGE } from '../uiLabels';
 import { MAX_INLINE_ASSET_BYTES } from '../../domain/constants';
 import { TIMELINE_SCHEMA_VERSION } from '../../domain/timeline/types';
 import type { TimelineProject } from '../../domain/timeline/types';
@@ -694,11 +696,39 @@ describe('素材の取り込み（#712）', () => {
     expect(useTimelineStore.getState().editBlocked).not.toBeNull();
   });
 
-  it('取り込み中は受け付けない（同じ番号の素材を2つ作らない）', async () => {
+  it('取り込み中は受け付けず、いつやり直せばよいかを出す', async () => {
     await open();
     useTimelineStore.setState({ isImporting: true });
     await useTimelineStore.getState().addAssets(somePaths(3));
     expect(useTimelineStore.getState().doc!.assets).toEqual([]);
+    // ⚠️ **黙って落とさない**（§2-5・PR #872 レビュー 🟡）＝場面形式と同じ案内を出す。
+    expect(useTimelineStore.getState().importError).toBe(IMPORT_BUSY_MESSAGE);
+  });
+
+  /**
+   * ⚠️ **見る順番を変えない**＝取り込み中の案内を手前で1つだけ先に見ると、
+   * **書き出し中かつ取り込み中**のときに書き出しの案内が出なくなる（順番が黙って入れ替わる）。
+   */
+  it('書き出し中かつ取り込み中なら、書き出しの案内が出る（順番が入れ替わらない）', async () => {
+    await open();
+    useTimelineStore.setState({
+      isImporting: true,
+      exportRun: { phase: EXPORT_RUN_PHASE.rendering, percent: 0, message: null, cancelling: false },
+    });
+    await useTimelineStore.getState().addAssets(somePaths(2));
+    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.exporting);
+    expect(useTimelineStore.getState().importError).toBeNull();
+  });
+
+  /**
+   * ⚠️ **単発は黙って断ったまま**＝1件が入らないだけなので案内は要らない。
+   * まとめて取り込む入口だけ案内を足した、という線引きを固定する。
+   */
+  it('単発の取り込みは取り込み中でも案内を出さない（線引きを固定）', async () => {
+    await open();
+    useTimelineStore.setState({ isImporting: true, importError: null });
+    await useTimelineStore.getState().addAssetByPath('C:/pics/one.png');
+    expect(useTimelineStore.getState().importError).toBeNull();
   });
 
   // ⚠️ **1件だけのときは進み具合を出さない**＝一瞬出て消える表示は雑音になる。
