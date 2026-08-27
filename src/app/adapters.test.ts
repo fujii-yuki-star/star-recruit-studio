@@ -866,6 +866,50 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
     expect(find(buildPrecheckItems([scene], [], [photoTemplate]), "tooFast")).toBeUndefined();
   });
 
+  /**
+   * ⚠️ **掛け合いの場面では「実際に描かれる行の字幕」を見る**（レビュー 🔴・2エージェントが実測で指摘）＝
+   * `layoutScene` を opts なしで1回呼ぶと、行ごとの字幕が**一度も出てこず**、代わりに
+   * **動画に出ない静的字幕**（`texts.subtitle`）が載る。つまり**見落としと誤検出が同時**に起きる。
+   */
+  it("掛け合いは行の字幕を見る（休眠の静的字幕は見ない）", () => {
+    const subTemplate: Template = {
+      ...photoTemplate,
+      layers: [{ id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 }],
+    } as unknown as Template;
+    // ⚠️ **30字**にするのが肝＝60字（`MAX_SUBTITLE_LEN_DEFAULT`）を超えると「字幕の長さ」が先に
+    //    出て、こちらは重複として消される（＝dedupe が効いていて検査にならない）。
+    //    枠は 600px・40px・1行＝15字ぶんなので、30字なら**切り詰めだけ**が起きる。
+    const dialogue = sc({
+      lines: [{ lineId: "line_001", text: "あ", speaker: 1, subtitleText: "あ".repeat(30), subtitleEnabled: true }],
+      texts: { subtitle: "短い" },
+    } as unknown as Partial<Scene>);
+    expect(find(buildPrecheckItems([dialogue], [], [subTemplate]), "truncatedText")).toBeDefined();
+
+    // 休眠の静的字幕だけが長い＝動画には出ない → 出さない
+    const dormant = sc({
+      lines: [{ lineId: "line_001", text: "あ", speaker: 1, subtitleText: "短い", subtitleEnabled: true }],
+      texts: { subtitle: "あ".repeat(30) },
+    } as unknown as Partial<Scene>);
+    expect(find(buildPrecheckItems([dormant], [], [subTemplate]), "truncatedText")).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **同じ原因で2行出さない**（レビュー 🟡・`transitionShortened` の前例と同じ）＝
+   * 横型の標準テンプレは字幕の枠が広く、「字幕の長さ」で既に出ている場面は切り詰めも必ず重なる
+   *（原因も直し方も同じ）。
+   */
+  it("「字幕の長さ」で既に知らせた場面は、切れている文字を出さない", () => {
+    const subTemplate: Template = {
+      ...photoTemplate,
+      layers: [{ id: "sub", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 600, h: 80, fontSize: 40, maxLines: 1, zIndex: 0 }],
+    } as unknown as Template;
+    // 60字超（「字幕の長さ」が出る）かつ枠に入りきらない（切り詰めも起きる）
+    const scene = sc({ texts: { subtitle: "あ".repeat(120) } });
+    const items = buildPrecheckItems([scene], [], [subTemplate]);
+    expect(find(items, "subtitle")?.severity).toBe("action");
+    expect(find(items, "truncatedText")).toBeUndefined(); // 2行にしない
+  });
+
   // ⚠️ **問題が無ければ項目を出さない**＝「問題なし」の行で埋めない（読む気を削がない）。
   it("何も無ければ3つとも出さない", () => {
     const items = buildPrecheckItems([sc({ texts: { title: "題" }, durationSec: 8 })], [], [photoTemplate]);

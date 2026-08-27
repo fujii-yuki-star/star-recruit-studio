@@ -5,10 +5,11 @@ import { HEIGHT, MAX_NARRATION_LEN_DEFAULT, MAX_SUBTITLE_LEN_DEFAULT, WIDTH } fr
 import { validateFreeLayout } from "../domain/project/freeLayout";
 import { sceneActiveAssetIds, sceneActivePlacedAssetIds } from "../domain/project/assetUsage";
 import { sceneLines, sceneNeedsVoice } from "../domain/project/narrationLines";
+import { groupIndices } from "../domain/project/lineTimeline";
 import { sceneDisplayedSubtitleTexts, sceneSilentSubtitleCount } from "../domain/project/subtitleBinding";
 import { afterAnimNoSettledSceneNumbers, unplaceableVideoSceneNumbers } from "../renderer/export/videoSlotPlacement";
 import { shortenedTransitionSceneNumbers, swallowedByNextTransitionSceneNumbers, swallowedByOwnTransitionSceneNumbers, swallowedByTransitionSceneNumbers } from "../domain/project/sceneTransitions";
-import { layoutScene, subtitleOverflowsCanvas } from "../renderer/layout";
+import { sceneDrawnLayouts, subtitleOverflowsCanvas } from "../renderer/layout";
 import { blurryAssets, tooFastScenes, truncatedTexts } from "../domain/project/precheckExtras";
 import { hasSimultaneousLines } from "../domain/project/lineTimeline";
 // 利用者向けの文言は uiLabels に集約（§6）。依存は adapters → uiLabels の一方向
@@ -210,14 +211,24 @@ export function buildPrecheckItems(
   // ⚠️ **判定は描画と同じものを通す**＝`layoutScene` が作ったアイテムを見る（別に数え直すと
   // 「チェックは通ったのに動画では切れている」が起きる）。見た目が解決できない場面は見ない
   //（そちらは「場面の見た目」の項目が受け持つ＝同じことを二度言わない）。
+  // ⚠️ **数え上げは共有関数（`sceneDrawnLayouts`）を通す**（レビュー 🔴・2エージェントが実測で指摘）＝
+  // `layoutScene` を opts なしで1回呼ぶと、掛け合いの場面では**実際に描かれる行ごとの字幕を
+  // 一度も見ず**、代わりに**動画に出ない静的字幕**を見てしまう（見落としと誤検出が同時に起きる）。
   const laidOut = scenes
     .map((s) => ({ scene: s, template: templateOf(s) }))
     .filter((x): x is { scene: Scene; template: Template } => x.template != null)
-    .map((x) => ({ scene: x.scene, items: layoutScene(x.scene, x.template).items }));
+    .map((x) => ({ scene: x.scene, items: sceneDrawnLayouts(x.scene, x.template).flatMap((l) => l.items) }));
 
   // ⚠️ **切り詰め（`…`）は「はみ出し」とは別の壊れ方**＝画面の中で完結するので、見ただけでは
   // 「そう書いたのか」「切れたのか」が分からない。
+  // ⚠️ **同じ原因で2行出さない**（レビュー 🟡・`transitionShortened` の前例と同じ）＝
+  // 横型の標準テンプレは字幕の枠が 74 字ぶんあり、**60 字（`MAX_SUBTITLE_LEN_DEFAULT`）で
+  // 既に「字幕の長さ」が出ている**ので、切り詰めは必ずそれと重なる（原因も直し方も同じ）。
+  // ⚠️ **項目ごと消さない**＝縦型は枠が 44〜46 字ぶんなので、**45〜60 字は「字幕の長さ」を
+  // 素通りして切り詰めだけで拾える**（本物の穴を塞いでいる）。
+  const alreadyTold = new Set(scenes.filter((_, i) => subtitle.nums.includes(i + 1)).map((s) => s.sceneId));
   const truncated = offending((s) => {
+    if (alreadyTold.has(s.sceneId)) return false;
     const found = laidOut.find((x) => x.scene.sceneId === s.sceneId);
     return found != null && truncatedTexts(found.items).length > 0;
   });
@@ -249,7 +260,12 @@ export function buildPrecheckItems(
 
   // ⚠️ **「セリフの長さ」とは別**＝あちらは文字数そのもの、こちらは**尺に対して**多いか。
   // 短い場面に長いセリフを入れると、声は最後まで鳴るのに**場面が先に切り替わる**。
-  const tooFast = offending((s) => tooFastScenes(s, sceneLines(s).map((l) => l.text)));
+  // ⚠️ **同時に流す行はグループにまとめて渡す**（レビュー 🟡・ADR-0031）＝素朴に合算すると
+  // 2人同時が**人数ぶん二重計上**される。窓の分け方は `lineTimeline` と同じ `groupIndices`。
+  const tooFast = offending((s) => {
+    const lines = sceneLines(s);
+    return tooFastScenes(s, groupIndices(lines).map((g) => g.map((i) => lines[i].text)));
+  });
   if (tooFast.nums.length > 0) {
     items.push({
       id: "tooFast",

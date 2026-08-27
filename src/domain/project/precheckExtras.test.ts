@@ -19,6 +19,21 @@ describe('truncatedTexts（切れている文字・#346）', () => {
     expect(truncatedTexts([textItem({ text: '短い文' })])).toEqual([]);
   });
 
+  /**
+   * ⚠️ **利用者が自分で書いた `…` を要対応にしない**（レビュー 🟡）＝末尾の文字で見ると
+   * 「つづく…」のような**枠に収まっている**文字まで拾い、示した次の行動（短くする・小さくする）に
+   * 従っても**永久に消えない**（§2-5＝行き止まりの案内）。**切った事実**で見る。
+   */
+  it('自分で書いた「…」は切れているとしない', () => {
+    expect(truncatedTexts([textItem({ text: 'つづく…' })])).toEqual([]);
+  });
+
+  // ⚠️ **改行は折り返しが段落の区切りとして消費する**＝落として比べないと、改行つきの文が全部
+  // 「切れている」になる。
+  it('改行を含む文でも誤検知しない', () => {
+    expect(truncatedTexts([textItem({ text: 'いち\nに' })])).toEqual([]);
+  });
+
   // ⚠️ **文字以外は見ない**（写真の枠に「…」は無い）。
   it('文字以外のアイテムは見ない', () => {
     expect(truncatedTexts([{ kind: 'image', text: 'あ'.repeat(200), w: 10, fontSize: 40, maxLines: 1 }])).toEqual([]);
@@ -76,9 +91,22 @@ describe('blurryAssets（ぼやける素材・#346）', () => {
     expect(blurryAssets([img(), img()], [asset('asset_001', 100, 100)])).toEqual(['asset_001']);
   });
 
-  it('縦横のきつい側で見る', () => {
+  it('縦横のきつい側で見る（覆う収め方）', () => {
     // 横は足りるが縦が足りない
     expect(blurryAssets([img({ w: 100, h: 1080 })], [asset('asset_001', 1000, 100)])).toEqual(['asset_001']);
+  });
+
+  /**
+   * ⚠️ **収め方で式が違う**（レビュー 🟡）＝`cover` は枠を**覆う**のできつい側、`contain` は枠に
+   * **収める**のでゆるい側が実際の倍率。ロゴと立ち絵は `contain` が既定なので、きつい側で見ると
+   * **枠と縦横比が違うだけのロゴを「ぼやける」と誤検知**する。
+   */
+  it('収める収め方（contain）はゆるい側で見る', () => {
+    // 1920×300 の素材を 1920×1080 の枠へ「収める」＝実寸は等倍（横に合わせて縦が余る）。
+    const item = { kind: 'image', assetId: 'asset_001', w: 1920, h: 1080, fit: 'contain' };
+    expect(blurryAssets([item], [asset('asset_001', 1920, 300)])).toEqual([]);
+    // 同じ素材でも「覆う」なら引き伸ばす＝出す。
+    expect(blurryAssets([{ ...item, fit: 'cover' }], [asset('asset_001', 1920, 300)])).toEqual(['asset_001']);
   });
 });
 
@@ -90,22 +118,35 @@ describe('tooFastScenes（早口になる場面・#346）', () => {
    * 短い場面に長いセリフを入れると、声は最後まで鳴るのに**場面が先に切り替わる**。
    */
   it('尺に対してセリフが多ければ true', () => {
-    expect(tooFastScenes(scene(2), ['あ'.repeat(MAX_CHARS_PER_SEC * 2 + 1)])).toBe(true);
+    expect(tooFastScenes(scene(2), [['あ'.repeat(MAX_CHARS_PER_SEC * 2 + 1)]])).toBe(true);
   });
 
   it('ちょうどなら false（境界で出さない）', () => {
-    expect(tooFastScenes(scene(2), ['あ'.repeat(MAX_CHARS_PER_SEC * 2)])).toBe(false);
+    expect(tooFastScenes(scene(2), [['あ'.repeat(MAX_CHARS_PER_SEC * 2)]])).toBe(false);
   });
 
-  it('掛け合いは全部の行を足して見る', () => {
+  // ⚠️ **順番にしゃべる行は足す**＝それぞれが別の窓を占めるので、合わせた長さが尺に効く。
+  it('順番にしゃべる行は足して見る', () => {
     const half = 'あ'.repeat(MAX_CHARS_PER_SEC);
-    expect(tooFastScenes(scene(1), [half, half])).toBe(true); // 1行ずつなら収まるが、合わせると溢れる
+    expect(tooFastScenes(scene(1), [[half], [half]])).toBe(true);
+  });
+
+  /**
+   * ⚠️ **同時に流す行は足さない**（レビュー 🟡・ADR-0031）＝2人が**同じ窓**でしゃべるので、
+   * 素朴に合算すると**人数ぶん二重計上**する（40字×2人／8秒＝実効5字/秒なのに早口と言う）。
+   * 窓を占めるのは**そのグループでいちばん長い行**。
+   */
+  it('同時に流す行は足さず、いちばん長い行で見る', () => {
+    const each = 'あ'.repeat(MAX_CHARS_PER_SEC);
+    expect(tooFastScenes(scene(1), [[each, each]])).toBe(false); // 同時＝1つぶんの窓
+    expect(tooFastScenes(scene(1), [[each, 'あ'.repeat(MAX_CHARS_PER_SEC + 1)]])).toBe(true); // 長いほうで見る
   });
 
   // ⚠️ **セリフが無い場面・尺が無い場面は見ない**（0除算にしない・無音の場面に注意を出さない）。
   it('セリフが無い・尺が0なら false', () => {
     expect(tooFastScenes(scene(5), [])).toBe(false);
-    expect(tooFastScenes(scene(5), [''])).toBe(false);
-    expect(tooFastScenes(scene(0), ['あ'.repeat(100)])).toBe(false);
+    expect(tooFastScenes(scene(5), [['']])).toBe(false);
+    expect(tooFastScenes(scene(5), [[]])).toBe(false);
+    expect(tooFastScenes(scene(0), [['あ'.repeat(100)]])).toBe(false);
   });
 });

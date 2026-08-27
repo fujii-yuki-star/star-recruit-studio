@@ -5,10 +5,16 @@
 import { wrapText } from '../text/textWrap';
 import type { Asset, Scene } from './types';
 
-/** 文字が切り詰められたか（`wrapText` は入りきらない末尾を `…` にする）。 */
-function isTruncated(lines: readonly string[]): boolean {
-  const last = lines[lines.length - 1];
-  return typeof last === 'string' && last.endsWith('…');
+/**
+ * 文字が切り詰められたか（#346）。
+ *
+ * ⚠️ **「末尾が `…`」では見ない**（レビュー 🟡）＝利用者が自分で「つづく…」と書いて**枠に
+ * 収まっている**文字まで要対応になり、示した次の行動（短くする・小さくする）に従っても
+ * **永久に消えない**（§2-5＝行き止まりの案内）。**切った事実**＝折り返した結果を繋いだものが
+ * 元の文と違うか、で見る。改行は `wrapText` が段落の区切りとして消費するので落として比べる。
+ */
+function isTruncated(text: string, lines: readonly string[]): boolean {
+  return lines.join('') !== text.replace(/\n/g, '');
 }
 
 /**
@@ -28,7 +34,7 @@ export function truncatedTexts(
     if (it.kind !== 'text') continue;
     const { text, w, fontSize, maxLines } = it;
     if (!text || !w || !fontSize || !maxLines) continue;
-    if (isTruncated(wrapText(text, w, fontSize, maxLines))) out.push(text);
+    if (isTruncated(text, wrapText(text, w, fontSize, maxLines))) out.push(text);
   }
   return out;
 }
@@ -43,7 +49,7 @@ export function truncatedTexts(
 export const BLURRY_SCALE_THRESHOLD = 1.5;
 
 export function blurryAssets(
-  items: readonly { kind: string; assetId?: string | null; w?: number; h?: number }[],
+  items: readonly { kind: string; assetId?: string | null; w?: number; h?: number; fit?: string }[],
   assets: readonly Asset[],
 ): string[] {
   const out: string[] = [];
@@ -55,8 +61,12 @@ export function blurryAssets(
     // ⚠️ **測れていない素材は出さない**＝取り込み時に測れなかっただけで、ぼやけるとは限らない
     //（§2-5＝直しようが無い注意を出さない）。
     if (typeof srcW !== 'number' || typeof srcH !== 'number' || srcW <= 0 || srcH <= 0) continue;
-    // 枠を覆うのに要る倍率（縦横のきつい側）。
-    const need = Math.max(it.w / srcW, it.h / srcH);
+    // ⚠️ **収め方で式が違う**（レビュー 🟡）＝`cover` は枠を**覆う**ので縦横のきつい側、
+    // `contain` は枠に**収める**のでゆるい側が実際の倍率。ロゴと立ち絵は `contain` が既定なので、
+    // きつい側で見ると**枠と縦横比が違うだけのロゴを「ぼやける」と誤検知**する。
+    const need = it.fit === 'contain'
+      ? Math.min(it.w / srcW, it.h / srcH)
+      : Math.max(it.w / srcW, it.h / srcH);
     if (need >= BLURRY_SCALE_THRESHOLD && !out.includes(it.assetId)) out.push(it.assetId);
   }
   return out;
@@ -71,8 +81,11 @@ export function blurryAssets(
  */
 export const MAX_CHARS_PER_SEC = 9;
 
-export function tooFastScenes(scene: Scene, lineTexts: readonly string[]): boolean {
-  const chars = lineTexts.reduce((n, t) => n + t.length, 0);
+export function tooFastScenes(scene: Scene, lineGroups: readonly (readonly string[])[]): boolean {
+  // ⚠️ **同時に流す行は足さない**（レビュー 🟡・ADR-0031）＝2人が**同じ窓**でしゃべるので、
+  // 素朴に合算すると**人数ぶん二重計上**する（40字×2人／8秒＝実効5字/秒なのに早口と言う）。
+  // 窓を占めるのは**そのグループでいちばん長い行**なので、グループごとに最大を採って足す。
+  const chars = lineGroups.reduce((n, g) => n + Math.max(0, ...g.map((t) => t.length)), 0);
   if (chars === 0 || !(scene.durationSec > 0)) return false;
   return chars / scene.durationSec > MAX_CHARS_PER_SEC;
 }
