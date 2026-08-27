@@ -56,7 +56,7 @@ export function PrecheckScreen({ onNavigate }: PrecheckProps) {
     );
   }
 
-  const baseItems = buildPrecheckItems(scenes, assets, templates, meta.timelineOverlay?.animations, missingAssetIds);
+  const baseItems = buildPrecheckItems(scenes, assets, templates, meta.timelineOverlay?.animations, missingAssetIds, meta.bgmSettings?.assetId);
   // 書き出し能力チェックを先頭に差し込む（取得できた場合のみ・#120）。
   const capNotice = capability ? EXPORT_CAPABILITY_NOTICE[capability] : null;
   const items: PrecheckItem[] = capNotice

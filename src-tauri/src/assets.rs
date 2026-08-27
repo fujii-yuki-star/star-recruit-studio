@@ -175,6 +175,36 @@ pub fn import_voice(
     Ok(format!("voices/{safe}"))
 }
 
+/// 渡したプロジェクト相対パスのファイルを消す（#348）。消せた数を返す。
+///
+/// 素材を消したときに**プロジェクトフォルダにファイルだけ残る**のを防ぐ。
+/// **止まらない**＝消せないものがあっても残りを続ける（素材はもう文書から外れており、
+/// 残ったファイルは次の取り込みで上書きされるだけの無害な余りなので、ここで失敗にしない）。
+///
+/// ⚠️ **消せるのは `assets/` の下だけ**（`delete_template_asset` が `tmpl_asset_` 接頭辞で守るのと同じ流儀）。
+/// `is_safe_rel_path` はプロジェクトの外を弾くが、**中なら何でも**消せてしまう＝`project.json` や
+/// `voices/*.wav` まで届く。**破壊的なコマンドは範囲を狭く取る**（呼び出し側の間違いを型では防げない）。
+/// `asset_dest` が書き込む先と同じ場所に揃えてある。
+#[tauri::command]
+pub fn delete_project_files(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<usize, String> {
+    let dir = project_dir(&app, &project_id)?;
+    let mut removed = 0usize;
+    for rel in rel_paths {
+        if !is_safe_rel_path(&rel) || !rel.starts_with("assets/") {
+            continue;
+        }
+        let path = dir.join(&rel);
+        if path.is_file() && fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 /// 渡したプロジェクト相対パスのうち、**実体が見つからないもの**を返す（#347）。
 ///
 /// 素材が移動・削除された／別PCへプロジェクトだけ持ち込んだ、を検知するために使う。

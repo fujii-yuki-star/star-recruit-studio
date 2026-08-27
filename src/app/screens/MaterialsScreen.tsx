@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
 import type { ScreenId } from "../data/mockData";
 import { ASSET_TYPE } from "../../domain/enums";
+import { isListedMaterial } from "../../domain/asset/assetFile";
 import { pickPanelAsset } from "./materialsSelection";
-import { scenesUsingAsset } from "../../domain/project/assetUsage";
+import { scenesUsingAsset, unusedAssetIds } from "../../domain/project/assetUsage";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
 import { PageHead, Switch } from "../components/ui";
 import { AssetImportButton } from "../components/AssetImportButton";
@@ -73,7 +74,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
-  const { assets, scenes, templates, updateAsset, removeAsset, assetSrcById, setAssetImage, addAssets, relinkAssetByPath, missingAssetIds, refreshMissingAssets, importError, importProgress, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
+  const { assets, scenes, templates, meta, updateAsset, removeAsset, removeAssets, assetSrcById, setAssetImage, addAssets, relinkAssetByPath, missingAssetIds, refreshMissingAssets, importError, importProgress, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
   // 書き出し中は素材の追加/削除/編集を止める（store 側も #547 P2-1 でガード＝ここは無言 no-op を避ける表示側・ADR-0026④）。
   // 進行中の書き出しが読むファイル/データと競合するため（プロジェクト切替 loadProject 等は #379 で既にガード済み）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
@@ -81,6 +82,10 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const [filter, setFilter] = useState<Filter>("all");
   /** 名前・タグの絞り込み（#858）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定14）。 */
   const [query, setQuery] = useState("");
+  /** 使っていないものだけを見る（#348）。同じく覚えない。 */
+  const [unusedOnly, setUnusedOnly] = useState(false);
+  /** まとめて消す前の確認（#348）。`null`＝出していない。 */
+  const [bulkConfirm, setBulkConfirm] = useState<string[] | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [newTag, setNewTag] = useState("");
   // 素材名は編集中だけドラフトで持ち、確定は blur。空/未変更は破棄して元の名前へ戻す＝素材名を空にできないようにする（#411 item7・ProjectNameField と同型）。
@@ -92,16 +97,28 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   // 音声系（BGM/ナレーション）は「素材」一覧に出さない（BGMは仕上がり確認で選ぶ）。
-  const materials = assets.filter(
-    (a) => a.assetType !== ASSET_TYPE.bgm && a.assetType !== ASSET_TYPE.voice,
-  );
+  // ⚠️ **絞りの規則は1か所**（`isListedMaterial`・§2-7）＝ここに書き写すと、見つからない素材を
+  // 調べる側（`refreshMissingAssets`）とずれた瞬間に「一覧に出ないものが見つかりませんに数えられる」。
+  const materials = assets.filter((a) => isListedMaterial(a.assetType));
   // ⚠️ **タグは付けられるのに探せなかった**（#858）＝付与UI も AI 利用も動いているのに、
   // 一覧の絞り込みは**種類だけ**だった。名前とタグの両方で絞れるようにする。
   // 規則は domain の1か所（`matchesAssetQuery`）＝画面で数え直さない。
   const byType = materials.filter((a) => filter === "all" || a.assetType === filter);
-  const visible = byType.filter((a) => matchesAssetQuery(a, query));
-  // 候補のタグは**種類で絞った後**から集める＝押しても0件になる候補を出さない。
-  const tagChoices = assetTagCounts(byType);
+  // ⚠️ **種類とは別の軸**（#348）＝種類のタブに5つ目として混ぜると「どこにも置いていない動画だけ」が
+  // 見られなくなる。掛け合わせられるように独立させる。
+  // ⚠️ **判定は「どこからも指されていない」**（`unusedAssetIds`）＝公開前チェックの「使っていない素材」
+  //（＝動画に出るか）とは**別の規則**。あちらは「そのままでよい」警告だが、こちらは**消す判断**で、
+  // 間違えると取り消せない（`assets` は履歴の外＝ADR-0020/0028）。だから休眠も数えて**安全側**へ倒す。
+  const unusedIds = new Set(unusedAssetIds(materials, scenes, meta.bgmSettings?.assetId));
+  const byUse = unusedOnly ? byType.filter((a) => unusedIds.has(a.assetId)) : byType;
+  // ⚠️ **件数も種類で絞った後で数える**＝タブと掛け合わせたとき、チェックの数と下の
+  // 「いま出ているNつ」が食い違わない（レビュー 🟡）。
+  const unusedInView = byType.filter((a) => unusedIds.has(a.assetId)).length;
+  // 確認に出す中身は**押した瞬間に控えた id** から引き直す（絞り込みを変えても中身がずれない）。
+  const confirmTargets = bulkConfirm ? assets.filter((a) => bulkConfirm.includes(a.assetId)) : [];
+  const visible = byUse.filter((a) => matchesAssetQuery(a, query));
+  // 候補のタグは**絞り込んだ後**から集める＝押しても0件になる候補を出さない。
+  const tagChoices = assetTagCounts(byUse);
   // 右パネルは「表示中（フィルタ後）」の中からだけ選ぶ＝フィルタ0件のとき別フィルタの素材を出さない（#413）。
   const selected = pickPanelAsset(visible, selectedId);
   // この素材を使っている場面（逆引き・#406）。削除確認の件数（#383）と「使用場面」バッジで共有する。
@@ -180,7 +197,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
       <div className="row gap-sm row-wrap mb" style={{ alignItems: "center" }}>
         <div className="segment" style={{ display: "inline-flex" }}>
           {filters.map(([id, label]) => (
-            <button key={id} className={filter === id ? "active" : ""} onClick={() => setFilter(id)}>
+            <button key={id} className={filter === id ? "active" : ""} onClick={() => { setFilter(id); setBulkConfirm(null); }}>
               {label}
             </button>
           ))}
@@ -195,14 +212,65 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           aria-label="名前やタグで探す"
           placeholder="名前やタグで探す"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => { setQuery(e.target.value); setBulkConfirm(null); }}
         />
         {query !== "" && (
           <button className="btn btn-ghost text-sm" onClick={() => setQuery("")}>
             絞り込みをやめる
           </button>
         )}
+        {/* ⚠️ **種類とは別の軸**（#348）＝種類のタブに混ぜると「使っていない動画だけ」が見られない。
+            件数を出す＝押す前に「片づけるものがあるか」が分かる（空振りの操作を作らない）。 */}
+        <label className="row gap-sm text-sm" style={{ alignItems: "center", cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={unusedOnly}
+            onChange={(e) => { setUnusedOnly(e.target.checked); setBulkConfirm(null); }}
+          />
+          どこにも置いていないものだけ（{unusedInView}）
+        </label>
       </div>
+
+      {/* ⚠️ **まとめて消せるのは「いま見えているもの」だけ**（#348）＝絞り込みで隠れているものまで
+          消えると、押した本人にも何が消えたか分からない（§2-5）。件数と名前を先に見せてから消す。
+          ⚠️ **取り消せない**（`assets` は履歴の外＝ADR-0028）ので、他の削除と同じく確認を挟む（#383）。 */}
+      {/* ⚠️ **たたき台を作る前は出さない**（レビュー ℹ️）＝場面が無いと**全部が「どこにも置いていない」**に
+          なる。素材は**AI への入力**でもある（`12 §6` 利用可能な素材・`12 §8.3` poseTag）ので、
+          生成のために取り込んだ一式が1押しで消える。 */}
+      {unusedOnly && visible.length > 0 && scenes.length > 0 && (
+        <div className="row gap-sm row-wrap mb" style={{ alignItems: "center" }}>
+          {bulkConfirm === null ? (
+            <button
+              className="btn btn-secondary text-sm"
+              disabled={isExporting}
+              title={isExporting ? "書き出しが終わるまでお待ちください" : undefined}
+              onClick={() => setBulkConfirm(visible.map((a) => a.assetId))}
+            >
+              いま出ている{visible.length}つをまとめて消す
+            </button>
+          ) : (
+            <div className="notice notice-warn row-between" style={{ flex: 1 }} role="alert">
+              <span>
+                {/* ⚠️ **名前も「押した瞬間のもの」から引く**（レビュー 🔴）＝生きている一覧（`visible`）から
+                    作ると、確認を出したまま種類タブや言葉を変えたときに**見せている名前と実際に消えるもの**
+                    がずれる（件数は控えた id、名前は今の一覧、という食い違い）。 */}
+                {confirmTargets.length}つの素材を削除します（
+                {confirmTargets.slice(0, 3).map((a) => a.displayName).join("、")}
+                {confirmTargets.length > 3 ? ` ほか${confirmTargets.length - 3}つ` : ""}）。元に戻せません。
+              </span>
+              <span className="row gap-sm">
+                <button
+                  className="btn btn-danger text-sm"
+                  onClick={() => { removeAssets(bulkConfirm); setBulkConfirm(null); }}
+                >
+                  <TrashIcon size={16} /> 削除する
+                </button>
+                <button className="btn btn-ghost text-sm" onClick={() => setBulkConfirm(null)}>やめる</button>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ⚠️ **押して絞れる候補を出す**（#858）＝自由入力だけだと打ち間違いで見つからない。
           候補は**種類で絞った後**から集める＝押しても0件になる候補を出さない。 */}
@@ -214,7 +282,7 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
               key={tag}
               className={`badge ${query === tag ? "badge-teal" : "badge-gray"}`}
               // 押した候補をもう一度押したら解除＝同じ操作で戻れる（行き止まりを作らない）。
-              onClick={() => setQuery((q) => (q === tag ? "" : tag))}
+              onClick={() => { setQuery((q) => (q === tag ? "" : tag)); setBulkConfirm(null); }}
             >
               {tag}（{count}）
             </button>
@@ -261,6 +329,13 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             <EmptyState
               title="その言葉の素材は見つかりません"
               message="ほかの言葉で探すか、上の「絞り込みをやめる」で全部に戻せます。"
+            />
+          ) : unusedOnly ? (
+            // ⚠️ **これは良い知らせ**（#348）＝「無い」ではなく「全部置けている」と言う。
+            // 「まだありません」と出すと、片づけに来た人に**素材を追加しに行かせてしまう**。
+            <EmptyState
+              title="どこにも置いていない素材はありません"
+              message="いまある素材はすべて、どこかの場面に置かれています。上のチェックを外すと全部に戻せます。"
             />
           ) : (
             <EmptyState

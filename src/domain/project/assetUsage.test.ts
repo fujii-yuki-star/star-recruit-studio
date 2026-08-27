@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sceneActiveAssetIds, sceneActivePlacedAssetIds, scenesUsingAsset, sceneUsesAsset } from './assetUsage';
+import { sceneActiveAssetIds, sceneActivePlacedAssetIds, scenesUsingAsset, sceneUsesAsset, unusedAssetIds } from './assetUsage';
 import type { Scene } from './types';
 import type { Template } from '../template/types';
 
@@ -119,5 +119,70 @@ describe('assetUsage（実効使用・ADR-0030）', () => {
     const templateOf = (s: Scene): Template => (s.templateId === 'free_v1' ? freeTmpl : normalTmpl);
     expect(scenesUsingAsset(scenes, 'A', templateOf).map((s) => s.sceneId)).toEqual(['s1', 's3']);
     expect(scenesUsingAsset(scenes, 'Z', templateOf)).toEqual([]);
+  });
+});
+
+describe('unusedAssetIds（どこからも指されていない素材・#348）', () => {
+  const sc = (over: Partial<Scene>): Scene => ({
+    sceneId: 's1', partId: 'p1', order: 1, sceneType: 'photo_intro', templateId: 't1',
+    durationSec: 8, assetRefs: {}, character: { enabled: false, characterId: 'yuko' },
+    texts: {}, narration: { text: '', status: 'none' }, warnings: [], ...over,
+  } as Scene);
+  const a = (id: string) => ({ assetId: id });
+
+  it('どの場面にも置かれていないものを返す', () => {
+    const scenes = [sc({ assetRefs: { main: 'asset_001' } })];
+    expect(unusedAssetIds([a('asset_001'), a('asset_002')], scenes)).toEqual(['asset_002']);
+  });
+
+  it('場面がひとつも無ければ全部が未使用', () => {
+    expect(unusedAssetIds([a('asset_001'), a('asset_002')], [])).toEqual(['asset_001', 'asset_002']);
+  });
+
+  /**
+   * ⚠️ **休眠も「置いてある」と数える**（レビュー 🟡・`11 §5` の約束）＝差し込み先の層を失った割当は
+   * **見た目を戻せば再び描かれる**。消すと戻らない（`assets` は履歴の外）ので、**安全側へ倒す**。
+   * ここが公開前チェックの「使っていない素材」（＝動画に出るか）と**意図的に違う**ところ。
+   */
+  it('差し込み先の層が無いキー（休眠）も「置いてある」と数える', () => {
+    const scenes = [sc({ assetRefs: { nowhere: 'asset_001' } })];
+    expect(unusedAssetIds([a('asset_001')], scenes)).toEqual([]);
+  });
+
+  /**
+   * ⚠️ **通常テンプレに残った自由配置も数える**（レビュー 🔴）＝`sceneActiveAssetIds` は
+   * 見た目の category でゲートするので、**見た目が解決できない場面では自由配置が1つも数えられない**。
+   * 別PCへ持ち込んだ・テンプレを消した・起動直後で読み込みが着地していない、で踏む。
+   * そのまま消すと**ファイルごと**消えて #347 の選び直しも効かない。
+   */
+  it('自由配置に置いたものも数える（見た目が分からなくても）', () => {
+    const scenes = [sc({
+      templateId: 'unknown',
+      freeLayout: [{ id: 'free_001', kind: 'slot', assetId: 'asset_001', x: 0, y: 0, w: 1, h: 1, zIndex: 0 }],
+    } as unknown as Partial<Scene>)];
+    expect(unusedAssetIds([a('asset_001')], scenes)).toEqual([]);
+  });
+
+  it('立ち絵に入れたものも数える（層が無くても）', () => {
+    const scenes = [sc({ character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_001' } } as Partial<Scene>)];
+    expect(unusedAssetIds([a('asset_001')], scenes)).toEqual([]);
+  });
+
+  /**
+   * ⚠️ **BGM も数える**（レビュー 🟡）＝BGM は場面ではなく `bgmSettings` から使われるので、
+   * 場面だけを見ると**使っている BGM を「どこにも置いていない」と数える**。
+   */
+  it('動画全体のBGMも数える', () => {
+    expect(unusedAssetIds([a('bgm_001')], [], 'bgm_001')).toEqual([]);
+    expect(unusedAssetIds([a('bgm_001')], [], null)).toEqual(['bgm_001']);
+  });
+
+  it('場面ごとのBGMも数える', () => {
+    const scenes = [sc({ bgmSettings: { assetId: 'bgm_002' } } as unknown as Partial<Scene>)];
+    expect(unusedAssetIds([a('bgm_002')], scenes)).toEqual([]);
+  });
+
+  it('順番は素材一覧のまま（毎回同じ並び）', () => {
+    expect(unusedAssetIds([a('asset_003'), a('asset_001')], [])).toEqual(['asset_003', 'asset_001']);
   });
 });
