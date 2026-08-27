@@ -4,7 +4,9 @@
 // ここで固定するのは「**同じ素材に2回たのまない**」＝帯は再描画のたびに呼ばれるので、
 // 素通しにすると FFmpeg が何度も起動する。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetAnalysisQueue, useTimelineStore } from './timelineStore';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pumpAnalysisQueue, resetAnalysisQueue, useTimelineStore } from './timelineStore';
 import * as fsMod from '../../infrastructure/projectFs';
 import * as assetFsMod from '../../infrastructure/assetFs';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../../domain/enums';
@@ -55,6 +57,13 @@ describe('ensureClipAnalysis（帯に敷く絵・#332）', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   const st = () => useTimelineStore.getState();
+
+  /**
+   * ⚠️ **「増えないこと」は待ってから見る**＝`vi.waitFor` は**最初の確認で通れば成功**するので、
+   * 「増えていないはず」を `waitFor` で見ると、**増える前に通って**しまう（変異チェックで3件とも
+   * 生き残った）。落ち着くまで待ってから数える。
+   */
+  const settle = async (): Promise<void> => { await new Promise((r) => setTimeout(r, 20)); };
 
   it('音は波形をたのむ', async () => {
     const peaks = vi.spyOn(assetFsMod, 'audioPeaks').mockResolvedValue([0.1, 0.9]);
@@ -180,6 +189,99 @@ describe('ensureClipAnalysis（帯に敷く絵・#332）', () => {
     useTimelineStore.setState({ exportRun: { phase: EXPORT_RUN_PHASE.idle, percent: 0, message: null, cancelling: false } });
     st().ensureClipAnalysis('clip_001', 400);
     await vi.waitFor(() => expect(peaks).toHaveBeenCalledTimes(1));
+  });
+
+  /**
+   * ⚠️ **文書を手放す入口はすべて順番待ちを捨てる**（PR #876 レビュー 🔴）＝以前は
+   * `closeTimelineProject` にだけ置いていたが、**一覧から別の動画を開く**（`openTimelineProject`）は
+   * そこを通らないので、**実機の主要な遷移で一度も走らなかった**（テストが `close` を明示的に
+   * 呼んでいたので穴が見えなかった）。片づけを `emptyState()` の中へ移して構造で防ぐ。
+   */
+  it('別の動画を開いたら、前の動画の順番待ちは捨てる', async () => {
+    const release: (() => void)[] = [];
+    vi.spyOn(assetFsMod, 'audioPeaks').mockImplementation(
+      () => new Promise<number[]>((r) => { release.push(() => r([0.5])); }),
+    );
+    const many = doc({
+      assets: Array.from({ length: 5 }, (_, i) => ({
+        assetId: `asset_10${i}`, assetType: 'bgm' as const,
+        displayName: `曲${i}`, filePath: `assets/asset_10${i}.mp3`,
+      })),
+      tracks: [{ id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: Array.from({ length: 5 }, (_, i) => ({
+        id: `clip_10${i}`, kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002',
+        startSec: i * 5, durationSec: 5, assetId: `asset_10${i}`,
+      })),
+    } as Partial<TimelineProject>);
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(many));
+    await st().openTimelineProject(many.projectId);
+    useTimelineStore.setState({ analysisByPath: {} });
+    for (let i = 0; i < 5; i += 1) st().ensureClipAnalysis(`clip_10${i}`, 400);
+    await vi.waitFor(() => expect(release.length).toBe(2)); // 2本走り、3本が順番待ち
+
+    // ⚠️ **閉じずに、別の動画を開く**（実機の主要な遷移）。
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(doc({ projectId: 'proj_20260827_777' })));
+    await st().openTimelineProject('proj_20260827_777');
+
+    // 待たせていた3本は捨てる（走り出さない）。
+    release.splice(0).forEach((r) => r());
+    await settle();
+    expect(assetFsMod.audioPeaks).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * ⚠️ **積んだ後に書き出しが始まったぶんも止める**（PR #876 レビュー 🟡）＝関門を積むときだけに
+   * 置くと、帯が多い文書を開いた直後に書き出すと**そのまま走る**。⚠️ **捨てずに残し、終わったら流す**
+   *（`ensureClipAnalysis` は印を付けているので、次の描画では二度とたのまれない＝永久に空になる）。
+   */
+  it('積んだ後に書き出しが始まったら止め、終わったら流す', async () => {
+    const release: (() => void)[] = [];
+    vi.spyOn(assetFsMod, 'audioPeaks').mockImplementation(
+      () => new Promise<number[]>((r) => { release.push(() => r([0.5])); }),
+    );
+    const many = doc({
+      assets: Array.from({ length: 3 }, (_, i) => ({
+        assetId: `asset_20${i}`, assetType: 'bgm' as const,
+        displayName: `曲${i}`, filePath: `assets/asset_20${i}.mp3`,
+      })),
+      tracks: [{ id: 'track_002', kind: TRACK_KIND.audio }],
+      clips: Array.from({ length: 3 }, (_, i) => ({
+        id: `clip_20${i}`, kind: TIMELINE_CLIP_KIND.audio, trackId: 'track_002',
+        startSec: i * 5, durationSec: 5, assetId: `asset_20${i}`,
+      })),
+    } as Partial<TimelineProject>);
+    vi.spyOn(fsMod, 'loadProjectDoc').mockResolvedValue(JSON.stringify(many));
+    await st().openTimelineProject(many.projectId);
+    useTimelineStore.setState({ analysisByPath: {} });
+    for (let i = 0; i < 3; i += 1) st().ensureClipAnalysis(`clip_20${i}`, 400);
+    await vi.waitFor(() => expect(release.length).toBe(2));
+
+    // 書き出しが始まる → 走り終わったぶんの次が動かない
+    useTimelineStore.setState({ exportRun: { phase: EXPORT_RUN_PHASE.rendering, percent: 0, message: null, cancelling: false } });
+    release.splice(0).forEach((r) => r());
+    await settle();
+    expect(assetFsMod.audioPeaks).toHaveBeenCalledTimes(2);
+
+    // 書き出しが終わったら流す（永久に空にしない）
+    useTimelineStore.setState({ exportRun: { phase: EXPORT_RUN_PHASE.idle, percent: 0, message: null, cancelling: false } });
+    pumpAnalysisQueue();
+    await vi.waitFor(() => expect(assetFsMod.audioPeaks).toHaveBeenCalledTimes(3));
+    release.splice(0).forEach((r) => r());
+  });
+
+  /**
+   * ⚠️ **「書き出しが終わったら流す」の配線は、挙動のテストでは捕まえられない**
+   *（変異チェックで確認＝`finally` の1行を消しても上のテストは緑のまま）。
+   * 実際に書き出しを1本通すのは重すぎるので、**呼んでいること自体**を原文で留める
+   *（`layerTypeLiteralGuard.test.ts` と同じ流儀＝型では守れないものを門番で留める）。
+   *
+   * ⚠️ **これが外れると永久に空の帯が残る**＝`ensureClipAnalysis` は印を付けているので、
+   * 次の描画では二度とたのまれない。
+   */
+  it('書き出しの締めで、待たせていた仕事を流している（配線の門番）', () => {
+    const src = readFileSync(join(process.cwd(), 'src/app/store/timelineStore.ts'), 'utf8');
+    // 書き出しの `finally`（締めを返すところ）の直後に呼んでいること。
+    expect(src).toMatch(/release\(EXPORT_OWNER\);[\s\S]{0,400}?pumpAnalysisQueue\(\);/);
   });
 
   it('無い部品を指しても何もしない', () => {

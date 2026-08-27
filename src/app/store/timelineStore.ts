@@ -607,7 +607,102 @@ function writesFor(projectId: string): Promise<void> | undefined {
  */
 let voiceRunSeq = 0;
 
+// ── 帯に敷く絵（#332）の順番待ち ─────────────────────────────────
+// ⚠️ **`emptyState()` から呼ぶので、あちらより前に置く**＝後ろに置くと、store を組み上げる
+// 途中（`...emptyState()`）で**まだ初期化されていない**ものに触って落ちる（実際に踏んだ）。
+
+/**
+ * 帯に敷く絵を作るとき、**同時に走らせる数**（#332）。
+ *
+ * ⚠️ **一斉に立てない**＝帯が20本並んでいると FFmpeg が20本同時に立つ（書き出し中でも立つ）。
+ * CPU を取り合って、**いま焼いている動画まで遅くなる**。順番に流せば絵は同じで、
+ * 見え方も「手前から埋まる」だけ。
+ */
+const ANALYSIS_CONCURRENCY = 2;
+
+let analysisRunning = 0;
+/**
+ * いま書き出し中か（順番待ちから取り出すときに見る）。
+ *
+ * ⚠️ **store の外から見る**＝順番待ちはモジュールの持ち物で `get()` を持たないので、
+ * `useTimelineStore.getState()` を直に読む（走り出させないことが唯一の止め方なので、
+ * ここで見ないと止まらない）。
+ */
+function isExportBusyNow(): boolean {
+  try {
+    return isTimelineExportBusy(useTimelineStore.getState().exportRun.phase);
+  } catch {
+    return false; // まだ store が組み上がっていない（起動直後）＝止める理由が無い
+  }
+}
+const analysisQueue: (() => Promise<void>)[] = [];
+/** いまの世代（#332）。文書を手放したら上げる＝前の文書の仕事の結果を捨てる。 */
+let analysisGeneration = 0;
+/** いまの世代を読む（着地したときに「まだ同じ世代か」を見るため）。 */
+function currentAnalysisGeneration(): number { return analysisGeneration; }
+
+/**
+ * 順番待ちを空にする（#332・テスト用）。
+ *
+ * ⚠️ **順番待ちは**（素材番号の予約＝`resetAssetIdReservations` と同じく）**アプリ起動中ずっと残る**
+ *（画面をまたいで効かせるため）。テストは1本ずつが別の起動なので、毎回捨てる。
+ * 捨てないと、前のテストが止めたままの仕事で**次のテストのぶんが順番待ちで止まる**（実際に踏んだ）。
+ */
+export function resetAnalysisQueue(): void {
+  analysisQueue.length = 0;
+  // ⚠️ **世代を上げてから空きも戻す**（レビュー ℹ️）＝単に 0 へ戻すだけだと、走行中の仕事が後から
+  // `finally` で減らして**負になり、同時に走らせる数の上限が黙って上がる**。世代を見て
+  // 「前の世代の仕事は数を戻さない」ことにすれば、負にならずに空きだけ返せる。
+  analysisGeneration += 1;
+  analysisRunning = 0;
+}
+
+/** 順番待ちに並べて、空きが出たら走らせる（#332）。 */
+/**
+ * 待たせている仕事を動かす（#332）。
+ *
+ * ⚠️ **書き出しが終わったときに呼ぶ必要がある**（PR #876 レビュー 🟡）＝`ensureClipAnalysis` は
+ * 積んだ時点で印を付けるので、書き出し中に取り出しを止めたぶんは**次の描画でも二度と
+ * たのまれない**（呼ばないと永久に空の帯が残る）。
+ */
+export function pumpAnalysisQueue(): void {
+  // ⚠️ **取り出すときにも書き出し中を見る**（PR #876 レビュー 🟡）＝関門を積むときだけに
+  // 置くと、**積んだ後に書き出しが始まった**ぶんはそのまま走る（帯が多い文書を開いた直後に
+  // 書き出すと再現する）。`run`/`run_bytes` は `EXPORT_CHILD` に載らず中止でも殺せないので、
+  // 走り出させないことが唯一の止め方。⚠️ **捨てずに残す**＝書き出しが終わったら流す。
+  if (isExportBusyNow()) return;
+  while (analysisRunning < ANALYSIS_CONCURRENCY && analysisQueue.length > 0) {
+    const next = analysisQueue.shift();
+    if (!next) return;
+    analysisRunning += 1;
+    // 失敗しても順番待ちを止めない（絵が1つ出ないだけ）。
+    // 走り出した世代を控える＝捨てられた世代の仕事は**数を戻さない**（負にしない）。
+    // ⚠️ その副作用で、捨てた直後は**旧世代の残りと新世代**が一時的に上限を超えて並ぶことがある
+    //（走り終われば収まる＝自分で収束する）。負にして上限が黙って上がるよりは安全。
+    const born = analysisGeneration;
+    void next().catch(() => {}).finally(() => {
+      if (born === analysisGeneration) analysisRunning -= 1;
+      pumpAnalysisQueue();
+    });
+  }
+}
+
+/** 順番待ちに並べて、空きが出たら走らせる（#332）。 */
+function runAnalysis(job: () => Promise<void>): void {
+  analysisQueue.push(job);
+  pumpAnalysisQueue();
+}
+
+/**
+ * 開いていない状態。**文書を手放す入口はすべてここを通る**（開く・閉じる・読込失敗・手放す）。
+ *
+ * ⚠️ **帯に敷く絵の順番待ちもここで捨てる**（PR #876 レビュー 🔴）＝以前は
+ * `closeTimelineProject` にだけ置いていたが、**一覧から別の動画を開く**（`openTimelineProject`）は
+ * そこを通らないので、**実機の主要な遷移で一度も走らなかった**。手放した文書のために FFmpeg が
+ * 走り続ける（着地しても捨てるだけの仕事に CPU を使う）。**呼び忘れを構造で防ぐ**ためここへ移す。
+ */
 function emptyState() {
+  resetAnalysisQueue();
   return {
     doc: null,
     loadError: null,
@@ -779,9 +874,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 開くときと同じ理由で、走行中は閉じない（`exportRun` ごと初期化されると書き出し中の締めが外れる）。
     if (isTimelineExportBusy(get().exportRun.phase)) return;
     releaseSaveGuard();
-    // ⚠️ **帯に敷く絵の順番待ちも捨てる**（レビュー 🟡）＝手放した文書のために FFmpeg を
-    // 走らせ続けない（着地しても捨てるだけの仕事に CPU を使う）。
-    resetAnalysisQueue();
+    // 順番待ちの片づけは `emptyState()` の中（手放す入口すべてが通る）。
     set({ ...emptyState() });
   },
 
@@ -1524,6 +1617,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         await clearExportFramesStage();
       } finally {
         useExportLockStore.getState().release(EXPORT_OWNER);
+        // ⚠️ **書き出しが終わったら、待たせていた帯の絵を流す**（#332・PR #876 レビュー 🟡）＝
+        // 順番待ちは書き出し中に取り出しを止めるので、ここで動かさないと**永久に空の帯**が残る
+        //（`ensureClipAnalysis` は既に印を付けているので、次の描画では二度とたのまれない）。
+        pumpAnalysisQueue();
       }
     }
   },
@@ -1597,57 +1694,6 @@ type GetState = () => TimelineState;
  *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
  *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
  */
-/**
- * 帯に敷く絵を作るとき、**同時に走らせる数**（#332）。
- *
- * ⚠️ **一斉に立てない**＝帯が20本並んでいると FFmpeg が20本同時に立つ（書き出し中でも立つ）。
- * CPU を取り合って、**いま焼いている動画まで遅くなる**。順番に流せば絵は同じで、
- * 見え方も「手前から埋まる」だけ。
- */
-const ANALYSIS_CONCURRENCY = 2;
-
-let analysisRunning = 0;
-const analysisQueue: (() => Promise<void>)[] = [];
-/** いまの世代（#332）。文書を手放したら上げる＝前の文書の仕事の結果を捨てる。 */
-let analysisGeneration = 0;
-/** いまの世代を読む（着地したときに「まだ同じ世代か」を見るため）。 */
-function currentAnalysisGeneration(): number { return analysisGeneration; }
-
-/**
- * 順番待ちを空にする（#332・テスト用）。
- *
- * ⚠️ **順番待ちは**（素材番号の予約＝`resetAssetIdReservations` と同じく）**アプリ起動中ずっと残る**
- *（画面をまたいで効かせるため）。テストは1本ずつが別の起動なので、毎回捨てる。
- * 捨てないと、前のテストが止めたままの仕事で**次のテストのぶんが順番待ちで止まる**（実際に踏んだ）。
- */
-export function resetAnalysisQueue(): void {
-  analysisQueue.length = 0;
-  // ⚠️ **世代を上げてから空きも戻す**（レビュー ℹ️）＝単に 0 へ戻すだけだと、走行中の仕事が後から
-  // `finally` で減らして**負になり、同時に走らせる数の上限が黙って上がる**。世代を見て
-  // 「前の世代の仕事は数を戻さない」ことにすれば、負にならずに空きだけ返せる。
-  analysisGeneration += 1;
-  analysisRunning = 0;
-}
-
-/** 順番待ちに並べて、空きが出たら走らせる（#332）。 */
-function runAnalysis(job: () => Promise<void>): void {
-  analysisQueue.push(job);
-  const pump = (): void => {
-    while (analysisRunning < ANALYSIS_CONCURRENCY && analysisQueue.length > 0) {
-      const next = analysisQueue.shift();
-      if (!next) return;
-      analysisRunning += 1;
-      // 失敗しても順番待ちを止めない（絵が1つ出ないだけ）。
-      // 走り出した世代を控える＝捨てられた世代の仕事は**数を戻さない**（負にしない）。
-      const born = analysisGeneration;
-      void next().catch(() => {}).finally(() => {
-        if (born === analysisGeneration) analysisRunning -= 1;
-        pump();
-      });
-    }
-  };
-  pump();
-}
 
 /**
  * 素材を取り込み始めてよいか（#712）。**2つの入口で同じ順に見る**（場面形式と同じ並び＝ADR-0026②）。
