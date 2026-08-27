@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { defaultDurationForTemplate } from "../../domain/template/layerOps";
 import { standardLookFixesForUnresolved } from '../../domain/template/templateSelection';
 import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_TONE, MAX_INLINE_ASSET_BYTES, NARRATION_BULK_CONCURRENCY, PROJECT_NAME_MAX_LENGTH } from "../../domain/constants";
+import type { CreditDisplay } from "../../domain/voice/creditDisplay";
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
@@ -315,6 +316,11 @@ interface ProjectState {
   applyStandardLookToUnresolvedScenes: () => StandardLookApplyResult;
   /** 動画全体のフォントを切り替える（videoSettings.fontId・保存時に永続化）。 */
   setFontId: (fontId: FontId) => void;
+  /**
+   * クレジットの見せ方を変える（ADR-0025・#359）。
+   * ⚠️ **About 画面のクレジットは必須で不変**（`13 §4`）＝ここで変わるのは**動画に焼く側**だけ。
+   */
+  setCreditDisplay: (patch: Partial<CreditDisplay>) => void;
   /** 声設定（話速・高さ・抑揚など）を部分更新する（現在のプロジェクト・保存時に永続化）。defaultVoiceId は更新不可。 */
   updateVoiceSettings: (patch: VoiceParamPatch) => void;
   /** BGM設定（音量など）を部分更新する（現在のプロジェクト・保存時に永続化）。assetId は更新不可。 */
@@ -1357,6 +1363,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().pushHistory();
     set((s) => ({
       meta: { ...s.meta, videoSettings: { ...s.meta.videoSettings, fontId } },
+      saveStatus: "idle",
+    }));
+  },
+  setCreditDisplay: (patch) => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書編集を固定（#570 P1・15§4・ADR-0026④）
+    get().pushHistory();
+    set((s) => ({
+      meta: {
+        ...s.meta,
+        videoSettings: {
+          ...s.meta.videoSettings,
+          creditDisplay: { ...s.meta.videoSettings.creditDisplay, ...patch },
+        },
+      },
       saveStatus: "idle",
     }));
   },

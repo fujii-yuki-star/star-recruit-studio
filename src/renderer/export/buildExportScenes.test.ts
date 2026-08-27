@@ -477,6 +477,57 @@ describe('buildExportScenes：動画シーン（ADR-0006）', () => {
     expect(vi.mocked(splitVideoSceneSvgMulti).mock.calls[0]?.[5]).toBe('VOICEVOX:四国めたん');
   });
 
+  /**
+   * クレジットの見せ方（ADR-0025・#359）。
+   *
+   * ⚠️ **場面ごとにしか切り替えられない**＝静止の場面は1枚の絵なので、途中で消すには
+   * その場面だけ毎フレーム描き直すことになる。区間に少しでも重なれば**その場面いっぱい出す**＝
+   * ずれる向きを「多め」に固定する（規約で困るのは足りないときだけ＝`13 §4`）。
+   */
+  it('「最初と最後」なら、真ん中の場面にはクレジットを焼かない（#359）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
+    const three = [
+      { sceneId: 's1', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's2', templateId: 'tpl', durationSec: 8 },
+      { sceneId: 's3', templateId: 'tpl', durationSec: 8 },
+    ] as unknown as Scene[];
+    await buildExportScenes(
+      three, templateById, noAsset, undefined,
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      undefined,
+      { credit: 'VOICEVOX:ずんだもん', creditDisplay: { mode: 'both', seconds: 3 } },
+    );
+    const credits = vi.mocked(splitVideoSceneSvgMulti).mock.calls.map((c) => c[5]);
+    expect(credits[0]).toBe('VOICEVOX:ずんだもん'); // 最初の場面（[0,3] に重なる）
+    expect(credits[1]).toBeUndefined();            // 真ん中（どちらの区間にも重ならない）
+    expect(credits[2]).toBe('VOICEVOX:ずんだもん'); // 最後の場面（[21,24] に重なる）
+  });
+
+  it('「動画には出さない」ならどの場面にも焼かない（#359）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset, undefined,
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      undefined,
+      { credit: 'VOICEVOX:ずんだもん', creditDisplay: { mode: 'hidden' } },
+    );
+    expect(vi.mocked(splitVideoSceneSvgMulti).mock.calls[0]?.[5]).toBeUndefined();
+  });
+
+  // ⚠️ **設定していない動画の見え方を変えない**＝既定（最初と最後）でも1場面なら出る。
+  it('設定していなければ従来どおり焼く（#359）', async () => {
+    vi.mocked(splitVideoSceneSvgMulti).mockClear();
+    await buildExportScenes(
+      [{ sceneId: 's1', templateId: 'tpl', durationSec: 8 }] as unknown as Scene[],
+      templateById, noAsset, undefined,
+      () => [{ slotLayerId: 'mainVisual', clipRelPath: 'assets/v.mp4', fit: 'cover' as const, clipStartSec: 0, useOriginalAudio: false, speed: 1 }],
+      undefined,
+      { credit: 'VOICEVOX:ずんだもん' },
+    );
+    expect(vi.mocked(splitVideoSceneSvgMulti).mock.calls[0]?.[5]).toBe('VOICEVOX:ずんだもん');
+  });
+
   it('動画スロットがあるのに分割できない場面は静かに静止画化せず停止（§2-5 エラー・#434）', async () => {
     // 分割失敗（穴を切り出せない＝内部不整合やスロット/グループ非表示）を模す。黙って静止画化せず場面つきで停止。
     vi.mocked(splitVideoSceneSvgMulti).mockReturnValueOnce(null);

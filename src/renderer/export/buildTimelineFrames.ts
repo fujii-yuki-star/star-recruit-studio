@@ -9,6 +9,7 @@ import { videoPlacementsOf, videoFrameIndexAt, videoStagePlan } from '../../doma
 import type { VideoPlacement } from '../../domain/timeline/video';
 import { creditSpeakerAt } from '../../domain/timeline/credit';
 import { creditForLine } from '../../domain/voice/narratorCredit';
+import { creditVisibleAt } from '../../domain/voice/creditDisplay';
 import type { TimelineProject } from '../../domain/timeline/types';
 import type { Template } from '../../domain/template/types';
 import type { SourceSize } from '../../domain/timeline/cropFill';
@@ -140,7 +141,12 @@ export async function buildTimelineFrames(
             },
           }
         : {}),
-      credit: creditForLine({ speaker: creditSpeakerAt(doc, timeSec) }, opts.fallbackCredit),
+      // ⚠️ **見せ方の区間はプレビューと同じ関数で決める**（`creditVisibleAt`・ADR-0025・#359）＝
+      // 別々に書くと「プレビューでは出ているのに動画に入っていない」が起きる（ADR-0001）。
+      // 出さない時刻は `credit` を渡さない（`layoutToSvg` は未指定なら描かない）。
+      ...(creditVisibleAt(doc.videoSettings.creditDisplay, plan.durationSec, timeSec)
+        ? { credit: creditForLine({ speaker: creditSpeakerAt(doc, timeSec) }, opts.fallbackCredit) }
+        : {}),
       ...(opts.fontFamily ? { fontFamily: opts.fontFamily } : {}),
     });
     const dataUrl = await svgToPngDataUrl(

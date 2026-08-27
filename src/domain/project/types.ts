@@ -9,6 +9,7 @@ import type { Group } from '../group/types';
 // ⚠️ **文字の体裁の語彙は `template/types` に1つ**（§2-7）＝`Layer` と `FreeElement` が同じ形を持つ
 // （同じ概念は同じ制約）。片方に写すと、片方だけ制約が変わったときに気づけない。
 import type { LayerBackground, TextShadow } from '../template/types';
+import type { CreditDisplay } from '../voice/creditDisplay';
 
 export interface VideoSettings {
   /** 向き（SoT）。寸法は dimsForOrientation で導出する（width/height は保存しない＝ADR-0012）。 */
@@ -18,6 +19,12 @@ export interface VideoSettings {
   maxDurationSec: number;
   /** 動画全体のフォント（同梱フォントの id＝domain/font/fontCatalog）。未指定は既定フォント（schema 1.3 で追加・任意）。 */
   fontId?: FontId;
+  /**
+   * クレジット（VOICEVOX）の**動画側**の見せ方（ADR-0025・#359）。
+   * 未指定＝最初と最後・3秒（`resolveCreditDisplay` が埋める）。
+   * ⚠️ **About 画面のクレジットは必須で不変**（`13 §4`）＝ここで扱うのは動画に焼く側だけ。
+   */
+  creditDisplay?: CreditDisplay;
 }
 
 export interface CompanyInfo {

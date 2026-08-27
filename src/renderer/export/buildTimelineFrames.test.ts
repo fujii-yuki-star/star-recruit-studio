@@ -93,6 +93,39 @@ describe('buildTimelineFrames', () => {
     expect(vi.mocked(svgToPngDataUrl)).toHaveBeenCalledTimes(30);
   });
 
+  /**
+   * クレジットの見せ方（ADR-0025・#359）。
+   *
+   * ⚠️ **タイムライン形式は毎フレーム描くので秒どおり**＝場面形式（場面ごとにしか切り替えられない）
+   * とはずれ方が違う。この違いは `15 §3` に書いてある。
+   */
+  it('「最初と最後」なら、真ん中のコマにはクレジットを描かない（#359）', async () => {
+    const d = doc({ clips: [textClip('clip_001', { durationSec: 10 })] });
+    await buildTimelineFrames(
+      { ...d, videoSettings: { ...d.videoSettings, creditDisplay: { mode: 'both', seconds: 1 } } },
+      baseOpts,
+    );
+    const svgs = vi.mocked(svgToPngDataUrl).mock.calls.map((c) => c[0]);
+    expect(svgs[0]).toContain('VOICEVOX');                       // 先頭
+    expect(svgs[Math.floor(svgs.length / 2)]).not.toContain('VOICEVOX'); // 真ん中
+    expect(svgs[svgs.length - 1]).toContain('VOICEVOX');          // 末尾
+  });
+
+  it('「動画には出さない」ならどのコマにも描かない（#359）', async () => {
+    const d = doc({ clips: [textClip('clip_001', { durationSec: 1 })] });
+    await buildTimelineFrames(
+      { ...d, videoSettings: { ...d.videoSettings, creditDisplay: { mode: 'hidden' } } },
+      baseOpts,
+    );
+    for (const c of vi.mocked(svgToPngDataUrl).mock.calls) expect(c[0]).not.toContain('VOICEVOX');
+  });
+
+  // ⚠️ **設定していない動画の見え方を変えない**（既定＝最初と最後・3秒）。
+  it('設定していなければ従来どおり描く（#359）', async () => {
+    await buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 1 })] }), baseOpts);
+    expect(vi.mocked(svgToPngDataUrl).mock.calls[0][0]).toContain('VOICEVOX');
+  });
+
   it('実寸で焼く（プレビューの表示サイズではなく出力の大きさ）', async () => {
     await buildTimelineFrames(doc({ clips: [textClip('clip_001', { durationSec: 0.1 })] }), baseOpts);
     expect(vi.mocked(svgToPngDataUrl).mock.calls[0].slice(1)).toEqual([1920, 1080]);

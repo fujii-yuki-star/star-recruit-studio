@@ -19,7 +19,7 @@
     "scenes"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.26" },
+    "schemaVersion": { "const": "1.27" },
     "videoKind": { "enum": ["recruit", "general"] },
     "projectId": { "type": "string", "pattern": "^proj_[0-9]{8}_[0-9]{3}$" },
     "projectName": { "type": "string", "minLength": 1, "maxLength": 80 },
@@ -59,7 +59,16 @@
         "fps": { "type": "integer", "const": 30 },
         "targetDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 300 },
         "maxDurationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 },
-        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] }
+        "fontId": { "enum": ["gen-interface-jp", "gen-interface-jp-display", "kaitou-yokoku-gothic"] },
+        "creditDisplay": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "クレジット（VOICEVOX）の動画側の見せ方（ADR-0025・#359）。未指定＝最初と最後・3秒。About 画面のクレジットは必須で不変（13 §4）。",
+          "properties": {
+            "mode": { "enum": ["always", "head", "tail", "both", "hidden"] },
+            "seconds": { "type": "number", "minimum": 1, "maximum": 10 }
+          }
+        }
       }
     },
     "CompanyInfo": {
