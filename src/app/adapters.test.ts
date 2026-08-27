@@ -916,3 +916,46 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
     for (const id of ["truncatedText", "blurryAsset", "tooFast"]) expect(find(items, id)).toBeUndefined();
   });
 });
+
+describe("buildPrecheckItems 端に寄った文字（#265 の任意項目）", () => {
+  const at = (x: number, y: number): Template => ({
+    ...freeTemplate, templateId: "edge_v1", category: "photo_intro",
+    layers: [{ id: "t", type: "text", textKey: "title", x, y, w: 400, h: 100, fontSize: 40, maxLines: 1, zIndex: 0 }],
+  } as unknown as Template);
+  const sc = (): Scene => ({ ...freeScene(undefined), sceneType: "photo_intro", templateId: "edge_v1", texts: { title: "題" } });
+  const find = (t: Template) => buildPrecheckItems([sc()], [], [t]).find((i) => i.id === "nearEdge");
+
+  /**
+   * ⚠️ **画面の「外」へ出るもの（`subtitleOverflow`）とは別**＝画面の中だが端に近い。
+   * テレビ・SNS で**切られる媒体でだけ**問題になるので**注意止まり**（書き出しは止めない）。
+   */
+  it("端に寄っていれば注意にする（止めない）", () => {
+    expect(find(at(10, 10))?.severity).toBe("warning");
+  });
+
+  it("中に収まっていれば出さない", () => {
+    expect(find(at(500, 400))).toBeUndefined();
+  });
+
+  /**
+   * ⚠️ **文字だけを見る**＝写真・背景は**端まで敷くのが普通**なので、見ると**全場面に注意が付く**
+   *（読まれない注意ができる）。切れて困るのは文字。
+   */
+  it("画面いっぱいの背景・写真には注意を出さない", () => {
+    const withBg: Template = {
+      ...freeTemplate, templateId: "edge_v1", category: "photo_intro",
+      layers: [
+        { id: "bg", type: "background", x: 0, y: 0, w: 1920, h: 1080, fillColor: "#112233", zIndex: 0 },
+        { id: "t", type: "text", textKey: "title", x: 500, y: 400, w: 400, h: 100, fontSize: 40, maxLines: 1, zIndex: 1 },
+      ],
+    } as unknown as Template;
+    expect(find(withBg)).toBeUndefined(); // 背景は端まで敷いているが注意にしない
+  });
+
+  // ⚠️ **判定は編集画面の「端の目安」と同じ数字**＝線の内側なのに注意が出る／その逆、を作らない。
+  it("目安の線の内側なら出さない（同じ数字で見ている）", () => {
+    // 横型 1920×1080 の目安は四辺5%＝x:96..1824 / y:54..1026。
+    expect(find(at(96, 54))).toBeUndefined();   // ぴったり内側
+    expect(find(at(95, 54))).toBeDefined();     // 1px 外
+  });
+});

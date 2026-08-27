@@ -11,7 +11,13 @@
 import { useCallback, useEffect, useState } from "react";
 
 const LS_KEY = "preview.safeArea";
-/** 同じタブの他の使い手へ知らせる合図（`storage` は同じタブに届かない）。 */
+/**
+ * 同じタブの他の使い手へ知らせる合図（`storage` は同じタブに届かない）。
+ *
+ * ⚠️ **別のウィンドウとは揃えていない**（PR #878 レビュー ℹ️）＝`storage` イベントは登録していない。
+ * いまは1つのウィンドウしか開かないアプリなので実害は無いが、**複数ウィンドウを開ける導線ができたら
+ * ここに `storage` の受け口を足す**（片方で入れたのにもう片方で出ない、が起きる）。
+ */
 const EVENT = "stario:safe-area-changed";
 
 /**
