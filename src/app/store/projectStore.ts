@@ -1807,14 +1807,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 待っている間に書き出しが始まっていたら、書き換えずに戻る（#570 P1 と同じ流儀）。
       if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; }
 
-      const cur = get();
-      const curAsset = cur.assets.find((a) => a.assetId === assetId);
-      if (!curAsset) return; // 待っている間に消されていたら何も書かない
-      const r = relinkAsset(curAsset, cur.scenes, cur.templates, relPath, enrich?.metadata ?? null, enrich?.thumbnailPath ?? null);
+      // ⚠️ **待つのは「いまの状態を読む」より前に全部済ませる**（PR #874 レビュー 🟢）＝
+      // 読んだ後にもう一度 await すると、その隙に入った編集を**古い写しで上書き**しうる
+      //（サムネが取れなかったときだけ通る細い経路だった）。await を前へ寄せれば窓ごと消える。
       // ⚠️ **同じ名前へ上書きすると表示が古いまま**＝`asset://` の URL が変わらず webview が
       // 前の絵をキャッシュする（#140）。変更時刻を付けて取り直させる（保存データには入れない）。
       const displayUrl = enrich?.thumbUrl ?? (await assetDisplayUrl(projectId, relPath));
       const freshUrl = displayUrl ? `${displayUrl}?t=${Date.now()}` : null;
+
+      const cur = get();
+      const curAsset = cur.assets.find((a) => a.assetId === assetId);
+      if (!curAsset) return; // 待っている間に消されていたら何も書かない
+      const r = relinkAsset(curAsset, cur.scenes, cur.templates, relPath, enrich?.metadata ?? null, enrich?.thumbnailPath ?? null);
       // ⚠️ **収め直した場面だけを差し替える**（`projectstore-async-clobber` の再発防止）＝
       // `r.scenes` には**触っていない場面も元の参照のまま**入っているので、丸ごと置き換えると
       // 待っている間に着地した編集（声の一括作成など）を**古いスナップショットで巻き戻す**。

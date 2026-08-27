@@ -189,6 +189,26 @@ describe('relinkAsset（素材の再リンク・差し替え・#347）', () => {
       expect(r.scenes[0].slotClips).toEqual({ main: { endSec: 5 } });
     });
 
+    /**
+     * ⚠️ **見た目が分からない場面では、立ち絵だけ収め直しから漏れる**（層 id を引けないため・
+     * PR #874 レビュー 🟢）。`sceneActiveAssetIds` が同じ状況で「多めに数える」のと**逆向き**だが
+     * 意図的＝あちらは「消させない」ために多めに、こちらは**勝手に書き換えない**ために少なめに倒す。
+     * 見た目が解決できない場面はそもそも描画・書き出しの対象外（§2-5）。
+     *
+     * ⚠️ **この非対称をテストで固定しておく**＝将来「漏れているのはバグだ」と直されたとき、
+     * それが**意図を変える判断**だと分かるようにする（黙って変わらない）。
+     */
+    it('見た目が分からない場面の立ち絵は、収め直しから漏れる（意図どおり）', () => {
+      const s = scene({
+        templateId: 'unknown',
+        character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_001' },
+        slotClips: { character: { endSec: 90 } },
+      } as Partial<Scene>);
+      const r = relinkAsset(asset(), [s], [], 'assets/asset_001.mov', { durationSec: 5 });
+      expect(r.scenes[0].slotClips).toEqual({ character: { endSec: 90 } }); // そのまま
+      expect(r.clampedUses).toBe(0);
+    });
+
     it('直すところが無ければ場面はそのまま（同じ参照を返す）', () => {
       const s = scene({ assetRefs: { main: 'asset_001' }, slotClips: { main: { startSec: 1, endSec: 5 } } });
       const r = relinkAsset(asset(), [s], templates, 'assets/asset_001.mov', { durationSec: 30 });
