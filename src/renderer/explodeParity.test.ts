@@ -202,6 +202,41 @@ describe('バラしても枠の使い方が残る', () => {
     expect(r.ok).toBe(true);
   });
 
+  /**
+   * ⚠️ **立ち絵の per-use も持ち越す**（PR #871 レビュー 🔴）＝差し込み口の要素は
+   * `slotLayerByElementId` から使い方を引けるが、**立ち絵の要素はそこに入っていない**ので、
+   * 引き方を `layerOfElement` に揃え忘れると**キーごと落ちて既定へ戻る**
+   *（元の音が鳴らなくなる・等速になる・先頭から流れる）＝ADR-0032 決定23 に反する。
+   *
+   * ⚠️ **上の「バラせる」テストでは捕まらない**＝あちらは `slotClips` を置いていないので、
+   * 落ちても既定と同じ値になり差が出ない。**per-use を置いた状態**で見る必要がある。
+   */
+  it('立ち絵に入れた動画の使い方（元の音・速さ・使い始め）もバラした後に残る', () => {
+    const withChar = {
+      ...videoTemplate,
+      layers: [
+        { id: 'character', type: 'character', x: 0, y: 0, w: 400, h: 800 },
+        { id: 'main', type: 'slot', x: 0, y: 0, w: 1920, h: 1080 },
+      ],
+    } as unknown as Template;
+    const clip: TimelineClip = {
+      id: 'clip_001', kind: TIMELINE_CLIP_KIND.template, trackId: 'track_001',
+      startSec: 0, durationSec: 5, templateId: 'tmpl_v',
+      character: { enabled: true, characterId: 'yuko', poseAssetId: 'asset_v' },
+      slotClips: { character: { useOriginalAudio: true, originalAudioVolume: 0.7, startSec: 4, speed: 1.5 } },
+    } as TimelineClip;
+    const d = doc({
+      assets: [{ assetId: 'asset_v', assetType: 'video', displayName: '動画', filePath: 'v.mp4', metadata: { hasAudio: true } }],
+      clips: [clip],
+    } as Partial<TimelineProject>);
+    const r = explodeTemplateClip(d, 'clip_001', withChar);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const slot = r.doc.clips.find((c) => c.kind === TIMELINE_CLIP_KIND.slot && c.assetId === 'asset_v');
+    expect(slot).toMatchObject({ useOriginalAudio: true, originalAudioVolume: 0.7, sourceStartSec: 4, speed: 1.5 });
+    expect(validateTimelineProject(r.doc)).toBe(true);
+  });
+
   // ⚠️ **背景の動画はいまも断る**（立ち絵だけが退役した）＝背景の層は差し込み口として描かれず、
   // バラすと直接置きの動画になって**動き出す**（前提が残っている）。
   it('立ち絵は通るが、背景に入れた動画は今までどおり断る', () => {

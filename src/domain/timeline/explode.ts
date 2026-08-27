@@ -93,8 +93,12 @@ export function explodeTemplateClip(doc: TimelineProject, clipId: string, templa
     const perUse = shortened.some((pl) => pl.layerId != null && clip.slotClips?.[pl.layerId]?.endSec != null);
     return { ok: false, reason: perUse ? EDIT_BLOCKED.explodeTrimEndPerUse : EDIT_BLOCKED.explodeTrimEnd };
   }
+  // ⚠️ **ここも `layerOfElement` で引く**（#809・PR #871 レビュー 🔴）＝`slotLayerByElementId` は
+  // 差し込み口の層しか持たないので、**立ち絵の要素はキーごと落ちる**。落ちると `use` が渡らず、
+  // per-use の使い方（元の音・速さ・使い始め）が**バラした後に既定へ戻る**＝ADR-0032 決定23
+  //（バラす前後で変わらない）に反する。上の `movesToVideo` だけ直して**ここを直し忘れていた**。
   const useByElement = new Map(
-    Object.entries(slotLayerByElementId).map(([elId, layerId]) => [elId, placementByLayer.get(layerId)]),
+    elements.map((el) => [el.id, placementByLayer.get(layerOfElement(el))]),
   );
   // 下地（`template.defaults.backgroundColor`）は層ではなくクリップの塗り（`layoutTimelineAt`）なので、
   // **最背面の図形として自分で足す**＝背景の層を持たない見た目でもバラした後に白く抜けない。
