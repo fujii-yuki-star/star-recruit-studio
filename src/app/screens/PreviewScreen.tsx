@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { isExportBusy, useProjectStore } from "../store/projectStore";
+import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { PageHead, Switch } from "../components/ui";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -54,6 +56,11 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
   const previewBackTo: ScreenId = previewReturnTo && PREVIEW_BACK_LABEL[previewReturnTo] ? previewReturnTo : "draft";
   const [range, setRange] = useState<RangeMode>("all");
   const [idx, setIdx] = useState(0);
+
+  // 仕上がり確認の拡大縮小（#142）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定16）＝
+  // 画面を離れたら戻す。動画ごとに覚えると、別の動画で「なぜか拡大されている」になる。
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>("fit");
+  const [previewFitPct, setPreviewFitPct] = useState(100);
   const [playing, setPlaying] = useState(false);
   // 選択済みBGMが再生できなかったとき通知する（自分のBGMのURL解決/再生失敗・§2-5）。
   const [bgmPlayWarning, setBgmPlayWarning] = useState(false);
@@ -456,7 +463,11 @@ export function PreviewScreen({ onNavigate }: PreviewProps) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "var(--gap-lg)", alignItems: "start" }}>
         {/* 左: 大きな確認エリア */}
         <div className="card">
+          {/* 拡大縮小（#142）＝プレビューのすぐ上（操作する所の隣） */}
+          <PreviewZoomControl zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
           <ScenePreview
+            zoom={previewZoom}
+            onFitPercent={setPreviewFitPct}
             scene={current}
             template={template}
             activeLineIndex={activeLine}

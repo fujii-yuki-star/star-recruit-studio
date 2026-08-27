@@ -23,6 +23,8 @@ import { useDraftHistory } from "../hooks/useDraftHistory";
 import { useUndoRedoShortcuts } from "../hooks/useUndoRedoShortcuts";
 import { isTextEntryTarget, NUDGE_GROUP_IDLE_MS } from "../hooks/keyboardShortcut";
 import { ExportLockBanner } from "../components/ExportLockBanner";
+import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { TemplateLayerOverlay } from "../components/TemplateLayerOverlay";
 import type { FreeElementMove } from "../../domain/project/freeLayoutOps";
@@ -183,6 +185,11 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
   // ⚠️ **フックは早期 return より前**（`rules-of-hooks`）＝下の「編集対象が無い」分岐を挟むと、
   // 描画のたびに呼ぶ数が変わる。`onDropLayerAt` は下で宣言しているが、関数宣言は巻き上がるので参照できる。
   const layerDnd = useDragReorder(onDropLayerAt);
+  // 仕上がり確認の拡大縮小（#142）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定16）＝
+  // 画面を離れたら戻す。動画ごとに覚えると、別の動画で「なぜか拡大されている」になる。
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>("fit");
+  const [previewFitPct, setPreviewFitPct] = useState(100);
+
 
   // 編集対象が無い（直接遷移／削除直後など）＝一覧へ戻す導線だけ出す。
   if (!editing || !draft) {
@@ -746,7 +753,9 @@ export function LooksEditScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             onArrow={onCanvasNudge}
             onDelete={canDeleteSelected ? onCanvasDelete : undefined}
           />
-          <ScenePreview scene={sampleScene} template={draft}>
+          {/* 拡大縮小（#142）＝プレビューのすぐ上に置く（操作する所の隣） */}
+          <PreviewZoomControl zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
+          <ScenePreview scene={sampleScene} template={draft} zoom={previewZoom} onFitPercent={setPreviewFitPct}>
             <TemplateLayerOverlay
               layers={draft.layers}
               canvasW={draft.canvas.width}

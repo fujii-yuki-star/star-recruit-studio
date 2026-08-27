@@ -53,6 +53,8 @@ import { hasEscapeOwner } from "../hooks/escapeOwners";
 import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { AssetImportButton } from "../components/AssetImportButton";
+import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
 import { FontPicker } from "../components/FontPicker";
@@ -296,6 +298,11 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
    * その後の参照で落ちる。
    */
   const canDeleteScene = scenes.length > 1;
+  // 仕上がり確認の拡大縮小（#142）。⚠️ **文書に依存する状態は覚えない**（ADR-0034 決定16）＝
+  // 画面を離れたら戻す。動画ごとに覚えると、別の動画で「なぜか拡大されている」になる。
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>("fit");
+  const [previewFitPct, setPreviewFitPct] = useState(100);
+
   const deleteSceneHint = canDeleteScene ? undefined : "最後の1つは消せません";
 
   /**
@@ -1472,7 +1479,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
               {/* 動き再生中は timeSec/animations を渡して layoutScene(t) で毎フレーム描く（停止中は静止＝settled・#408 Part 1）。 */}
               {/* boundaryFrame（通常テンプレ字幕/クレジット）と subtitleSegment（FREE 字幕）は再生時刻の同一セグメント（motionSubtitleAt）。
                   停止中は t=0＝先頭（0 秒行除外・頭の間・全 0 秒フォールバックは sceneSegmentSpecs 準拠）、再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1）。 */}
-              <ScenePreview scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId && freeLayout.some((el) => el.id === editingFreeId && el.kind === FREE_ELEMENT_KIND.text) ? [editingFreeId] : undefined}>
+              {/* 拡大縮小（#142）＝プレビューのすぐ上（操作する所の隣） */}
+              <PreviewZoomControl zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
+              <ScenePreview zoom={previewZoom} onFitPercent={setPreviewFitPct} scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId && freeLayout.some((el) => el.id === editingFreeId && el.kind === FREE_ELEMENT_KIND.text) ? [editingFreeId] : undefined}>
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (
                   <TransitionPreview
