@@ -708,6 +708,41 @@ describe("buildPrecheckItems：切り替えが表示時間に収まらない（#
   });
 });
 
+describe("buildPrecheckItems 使っていない素材（#348 レビュー）", () => {
+  const photoTemplate: Template = {
+    ...freeTemplate, templateId: "photo_v1", category: "photo_intro",
+    layers: [{ id: "main", type: "slot", x: 0, y: 0, w: 1920, h: 1080, zIndex: 0 }],
+  } as unknown as Template;
+  const usingScene = (refs: Record<string, string>): Scene =>
+    ({ ...freeScene(undefined), sceneType: "photo_intro", templateId: "photo_v1", assetRefs: refs });
+  const unusedDetail = (items: ReturnType<typeof buildPrecheckItems>) =>
+    items.find((i) => i.id === "unused")?.detail ?? "";
+
+  /**
+   * ⚠️ **鳴っている BGM を「使われていない」に数えない**（レビュー 🟡）＝BGM は場面ではなく
+   * `bgmSettings` から使われる。数えないと文言「動画には入らないので」が**嘘**になる。
+   */
+  it("動画全体のBGMは使用中に数える", () => {
+    const list: Asset[] = [
+      { assetId: "asset_001", assetType: "image", displayName: "写真", filePath: "a.png" },
+      { assetId: "bgm_001", assetType: "bgm", displayName: "BGM", filePath: "b.mp3" },
+    ];
+    const scenes = [usingScene({ main: "asset_001" })];
+    expect(unusedDetail(buildPrecheckItems(scenes, list, [photoTemplate], undefined, undefined, "bgm_001")))
+      .toContain("すべての素材が使われています");
+    // 外したBGMは「使っていない」に出る（数えなくなったのではなく、指されているかで見る）
+    expect(unusedDetail(buildPrecheckItems(scenes, list, [photoTemplate], undefined, undefined, null)))
+      .toContain("1つあります");
+  });
+
+  it("場面ごとのBGMも使用中に数える", () => {
+    const list: Asset[] = [{ assetId: "bgm_002", assetType: "bgm", displayName: "BGM", filePath: "b.mp3" }];
+    const s = { ...usingScene({}), bgmSettings: { assetId: "bgm_002" } } as unknown as Scene;
+    expect(unusedDetail(buildPrecheckItems([s], list, [photoTemplate], undefined, undefined, null)))
+      .toContain("すべての素材が使われています");
+  });
+});
+
 describe("buildPrecheckItems 見つからない素材（#347）", () => {
   const photoTemplate: Template = {
     ...freeTemplate,

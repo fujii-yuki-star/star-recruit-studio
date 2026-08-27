@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProjectStore } from './projectStore';
 import * as assetFsMod from '../../infrastructure/assetFs';
+import { IMPORT_BUSY_MESSAGE } from '../uiLabels';
 import type { Asset, Scene } from '../../domain/project/types';
 
 const asset = (over: Partial<Asset> = {}): Asset => ({
@@ -260,6 +261,20 @@ describe('refreshMissingAssets（見つからない素材を調べ直す）', ()
     expect(probe).toHaveBeenCalledWith('proj_20260827_0001', ['assets/asset_001.mp4']);
   });
 
+  /**
+   * ⚠️ **調べている間に消された素材を「見つかりません」で復活させない**（`projectstore-async-clobber`）＝
+   * await 前の一覧から作った結果をそのまま書くと、**一覧に無いのにバナーだけ出る**（選べない行き止まり）。
+   */
+  it('調べている間に消された素材は、印に復活しない', async () => {
+    let release: (v: string[]) => void = () => {};
+    vi.spyOn(assetFsMod, 'missingAssetFiles').mockReturnValue(new Promise((r) => { release = r; }));
+    const p = useProjectStore.getState().refreshMissingAssets();
+    useProjectStore.setState({ assets: [] }); // 調べている間に全部消えた
+    release(['assets/asset_001.mp4']);
+    await p;
+    expect(useProjectStore.getState().missingAssetIds).toEqual([]);
+  });
+
   // ⚠️ **調べられないときに「全部見つからない」と言わない**（§2-5＝実行しても直らない案内を出さない）。
   it('素材が無い／動画が未採番なら調べに行かない', async () => {
     const probe = vi.spyOn(assetFsMod, 'missingAssetFiles').mockResolvedValue([]);
@@ -267,5 +282,90 @@ describe('refreshMissingAssets（見つからない素材を調べ直す）', ()
     await useProjectStore.getState().refreshMissingAssets();
     expect(probe).not.toHaveBeenCalled();
     expect(useProjectStore.getState().missingAssetIds).toEqual([]);
+  });
+});
+
+describe('removeAssets（まとめて消す・#348）', () => {
+  beforeEach(() => {
+    useProjectStore.setState((st) => ({
+      assets: [
+        asset({ assetId: 'asset_001', filePath: 'assets/asset_001.mp4', thumbnailPath: 'assets/thumb_001.png' }),
+        asset({ assetId: 'asset_002', assetType: 'image', filePath: 'assets/asset_002.png' }),
+      ],
+      assetSrcById: { asset_001: 'a', asset_002: 'b' },
+      missingAssetIds: [], saveStatus: 'saved',
+      meta: { ...st.meta, projectId: 'proj_20260827_0001' },
+    }));
+    useProjectStore.getState().setExportRun({ phase: 'idle' });
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('渡したものだけを消す', () => {
+    vi.spyOn(assetFsMod, 'deleteProjectFiles').mockResolvedValue(1);
+    useProjectStore.getState().removeAssets(['asset_002']);
+    expect(useProjectStore.getState().assets.map((a) => a.assetId)).toEqual(['asset_001']);
+    expect(useProjectStore.getState().assetSrcById).toEqual({ asset_001: 'a' });
+  });
+
+  /**
+   * ⚠️ **ファイルも片づける**（#348）＝一覧から消えてもプロジェクトフォルダに残ると容量だけ食い続ける
+   *（整理のための機能で片づかない、を作らない）。代表フレームも一緒に消す。
+   */
+  it('本体と代表フレームのファイルを片づける', () => {
+    const del = vi.spyOn(assetFsMod, 'deleteProjectFiles').mockResolvedValue(2);
+    useProjectStore.getState().removeAssets(['asset_001']);
+    expect(del).toHaveBeenCalledWith('proj_20260827_0001', ['assets/asset_001.mp4', 'assets/thumb_001.png']);
+  });
+
+  // ⚠️ **1件も複数も同じ道**（ADR-0026②）＝片方だけファイルを片づける、を作らない。
+  it('1件だけ消すときも同じ道を通る（ファイルを片づける）', () => {
+    const del = vi.spyOn(assetFsMod, 'deleteProjectFiles').mockResolvedValue(1);
+    useProjectStore.getState().removeAsset('asset_002');
+    expect(useProjectStore.getState().assets.map((a) => a.assetId)).toEqual(['asset_001']);
+    expect(del).toHaveBeenCalledWith('proj_20260827_0001', ['assets/asset_002.png']);
+  });
+
+  // ⚠️ **直しようが無い警告を残さない**（§2-5）＝消したものに「見つかりません」の印は要らない。
+  it('見つからない印も一緒に落とす', () => {
+    vi.spyOn(assetFsMod, 'deleteProjectFiles').mockResolvedValue(0);
+    useProjectStore.setState({ missingAssetIds: ['asset_001', 'asset_002'] });
+    useProjectStore.getState().removeAssets(['asset_002']);
+    expect(useProjectStore.getState().missingAssetIds).toEqual(['asset_001']);
+  });
+
+  it('未保存に戻す', () => {
+    vi.spyOn(assetFsMod, 'deleteProjectFiles').mockResolvedValue(0);
+    useProjectStore.getState().removeAssets(['asset_002']);
+    expect(useProjectStore.getState().saveStatus).toBe('idle');
+  });
+
+  it('書き出し中は消さず、理由を出す', () => {
+    const del = vi.spyOn(assetFsMod, 'deleteProjectFiles');
+    useProjectStore.getState().setExportRun({ phase: 'rendering' });
+    useProjectStore.getState().removeAssets(['asset_002']);
+    expect(useProjectStore.getState().assets).toHaveLength(2);
+    expect(del).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().importError).toMatch(/書き出し/);
+  });
+
+  /**
+   * ⚠️ **取り込み中は消さない**（レビュー 🟡）＝`asset_NNN` は**空き番号を埋める**採番なので、
+   * 消した番号を取り込み中のものが拾いうる。ファイルの片づけは待たない（`void`）ので、
+   * **後から着地した削除が、新しく取り込んだファイルを消す**窓ができる。
+   */
+  it('取り込み中は消さず、いつやり直せばよいかを出す', () => {
+    const del = vi.spyOn(assetFsMod, 'deleteProjectFiles');
+    useProjectStore.setState({ isImporting: true });
+    useProjectStore.getState().removeAssets(['asset_002']);
+    expect(useProjectStore.getState().assets).toHaveLength(2);
+    expect(del).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().importError).toBe(IMPORT_BUSY_MESSAGE);
+  });
+
+  it('空なら何もしない（空の未保存を作らない）', () => {
+    const del = vi.spyOn(assetFsMod, 'deleteProjectFiles');
+    useProjectStore.getState().removeAssets([]);
+    expect(useProjectStore.getState().saveStatus).toBe('saved');
+    expect(del).not.toHaveBeenCalled();
   });
 });

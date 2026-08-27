@@ -40,7 +40,7 @@ import {
   clearLastProjectId, deleteProjectDoc, getLastProjectId, listProjectSummaries, loadProjectDoc, saveProjectDoc, setLastProjectId,
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
-import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl, missingAssetFiles } from "../../infrastructure/assetFs";
+import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { probeAndThumbVideo } from "./assetImport";
@@ -325,6 +325,13 @@ interface ProjectState {
   updateAsset: (assetId: string, update: (asset: Asset) => Asset) => void;
   /** 素材を削除する。 */
   removeAsset: (assetId: string) => void;
+  /**
+   * 素材を**まとめて**消す（#348・使っていない素材の整理）。
+   *
+   * ⚠️ **ファイルも片づける**＝一覧から消えてもプロジェクトフォルダに残ると、容量だけ食い続ける
+   *（整理のための機能で片づかない、を作らない）。消せなくても失敗にしない（無害な余り）。
+   */
+  removeAssets: (assetIds: readonly string[]) => void;
   /** 見た目パターンのパックを取り込み、既存に統合する（templateId で重複排除・B2/ADR-0012）。 */
   addTemplatePack: (templates: Template[]) => void;
   /** ユーザー作成テンプレ（グローバル）を読み込み templates にマージする（起動時・ADR-0017）。 */
@@ -1408,13 +1415,33 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       saveStatus: "idle",
     }));
   },
-  removeAsset: (assetId) => {
+  // ⚠️ **1件も複数も同じ道を通す**（ADR-0026②）＝片方だけファイルを片づける、を作らない。
+  removeAsset: (assetId) => { get().removeAssets([assetId]); },
+  removeAssets: (assetIds) => {
     if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return; } // 書き出し中は固定（#547 P2-1）
-    set((s) => {
+    // ⚠️ **取り込み中は消さない**（レビュー 🟡）＝`asset_NNN` は**空き番号を埋める**採番なので、
+    // 消した番号を取り込み中のものが拾いうる。ファイルの片づけは待たない（`void`）ので、
+    // **後から着地した削除が、新しく取り込んだファイルを消す**窓ができる。
+    if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return; }
+    if (assetIds.length === 0) return;
+    const gone = new Set(assetIds);
+    const { assets, meta } = get();
+    // ⚠️ **消す前にファイルの場所を控える**＝`set` の後だと素材が居ないので、何を消すか分からなくなる。
+    // 代表フレーム（動画）も一緒に片づける（本体だけ消すとサムネが残る）。
+    const files = assets
+      .filter((a) => gone.has(a.assetId))
+      .flatMap((a) => [a.filePath, a.thumbnailPath].filter((p): p is string => typeof p === "string"));
+    set((s) => ({
+      assets: s.assets.filter((a) => !gone.has(a.assetId)),
       // 表示用 src（data URL）も即メモリから落とす（消した素材の src を残さない・#390）。
-      const { [assetId]: _removed, ...assetSrcById } = s.assetSrcById;
-      return { assets: s.assets.filter((a) => a.assetId !== assetId), assetSrcById, saveStatus: "idle" };
-    });
+      assetSrcById: Object.fromEntries(Object.entries(s.assetSrcById).filter(([id]) => !gone.has(id))),
+      // 消したものに「見つかりません」の印が残らない（直しようが無い警告を出さない・§2-5）。
+      missingAssetIds: s.missingAssetIds.filter((id) => !gone.has(id)),
+      saveStatus: "idle",
+    }));
+    // ⚠️ **ファイルの片づけは待たない**＝一覧からはもう消えており、片づけの成否で画面を止める理由が無い
+    //（消せなくても次の取り込みで上書きされるだけの無害な余り＝ADR-0021 の孤立掃除と同じ流儀）。
+    if (meta.projectId) void deleteProjectFiles(meta.projectId, files);
   },
   addTemplatePack: (incoming) => {
     // 書き出し中はパック取り込みも止める（同 id の使用中テンプレを上書きしうる＝save/delete と同じ固定・#570 レビュー・store 側の2層目）。
@@ -1853,7 +1880,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const listed = assets.filter((a) => isListedMaterial(a.assetType));
     if (!meta.projectId || listed.length === 0) { set({ missingAssetIds: [] }); return; }
     const missing = new Set(await missingAssetFiles(meta.projectId, listed.map((a) => a.filePath)));
-    set({ missingAssetIds: listed.filter((a) => missing.has(a.filePath)).map((a) => a.assetId) });
+    // ⚠️ **書き戻しは「いまの一覧」で絞る**（`projectstore-async-clobber`・レビュー 🟡）＝
+    // 調べている間に消された素材の id をそのまま書くと、**消したものが「見つかりません」で復活**する
+    //（一覧に無いのにバナーだけ出る＝選べない行き止まり）。
+    set((st) => ({
+      missingAssetIds: st.assets.filter((a) => isListedMaterial(a.assetType) && missing.has(a.filePath)).map((a) => a.assetId),
+    }));
   },
 
   clearImportError: () => set({ importError: null }),

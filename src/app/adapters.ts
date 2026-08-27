@@ -134,6 +134,8 @@ export function buildPrecheckItems(
    * 調べられない場（ブラウザ・テスト）で**嘘の「問題なし」を出さない**ため、項目そのものを出さない。
    */
   missingAssetIds?: readonly string[],
+  /** 動画全体の BGM の素材 id（`meta.bgmSettings.assetId`）。使用中に数える（#348 レビュー）。 */
+  projectBgmAssetId?: string | null,
 ): PrecheckItem[] {
   const items: PrecheckItem[] = [];
   const templateOf = (s: Scene): Template | undefined => templates.find((t) => t.templateId === s.templateId);
@@ -180,10 +182,21 @@ export function buildPrecheckItems(
   );
 
   const used = new Set<string>();
-  // 実効表現だけを「使用中」と数える（休眠は除外）＝逆引き（MaterialsScreen）・削除確認と同一規則（ADR-0030・sceneActiveAssetIds）。
+  // 実効表現だけを「使用中」と数える（休眠は除外）＝逆引き（MaterialsScreen の「使用場面」）と同一規則
+  //（ADR-0030・`sceneActiveAssetIds`）。
+  //
+  // ⚠️ **削除の対象選び（#348 `unusedAssetIds`）とは規則が違う**＝あちらは**休眠も「置いてある」**と
+  // 数える。目的が違うため＝ここは「動画に出るか」の警告（多少ずれても「そのままでよい」で済む）、
+  // あちらは「消してよいか」（間違えると**取り消せない**）。**片方に寄せない**（寄せると、警告が
+  // 出なくなるか、使っている素材を消させるかのどちらかになる）。
   for (const s of scenes) {
     for (const id of sceneActiveAssetIds(s, templateOf(s))) used.add(id);
+    // 場面ごとの BGM も使用中（場面だけを見ると、鳴っている BGM を「使っていない」と数える）。
+    if (s.bgmSettings?.assetId) used.add(s.bgmSettings.assetId);
   }
+  // ⚠️ **動画全体の BGM を数える**（レビュー 🟡）＝BGM は場面ではなく `bgmSettings` から使われるので、
+  // 数えないと**鳴っている BGM が「使われていない素材」に出る**（文言は「動画には入らないので」＝**嘘**）。
+  if (projectBgmAssetId) used.add(projectBgmAssetId);
   const unused = assets.filter((a) => !used.has(a.assetId)).length;
   items.push(
     unused > 0

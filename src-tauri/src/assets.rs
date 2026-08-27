@@ -175,6 +175,36 @@ pub fn import_voice(
     Ok(format!("voices/{safe}"))
 }
 
+/// 渡したプロジェクト相対パスのファイルを消す（#348）。消せた数を返す。
+///
+/// 素材を消したときに**プロジェクトフォルダにファイルだけ残る**のを防ぐ。
+/// **止まらない**＝消せないものがあっても残りを続ける（素材はもう文書から外れており、
+/// 残ったファイルは次の取り込みで上書きされるだけの無害な余りなので、ここで失敗にしない）。
+///
+/// ⚠️ **消せるのは `assets/` の下だけ**（`delete_template_asset` が `tmpl_asset_` 接頭辞で守るのと同じ流儀）。
+/// `is_safe_rel_path` はプロジェクトの外を弾くが、**中なら何でも**消せてしまう＝`project.json` や
+/// `voices/*.wav` まで届く。**破壊的なコマンドは範囲を狭く取る**（呼び出し側の間違いを型では防げない）。
+/// `asset_dest` が書き込む先と同じ場所に揃えてある。
+#[tauri::command]
+pub fn delete_project_files(
+    app: tauri::AppHandle,
+    project_id: String,
+    rel_paths: Vec<String>,
+) -> Result<usize, String> {
+    let dir = project_dir(&app, &project_id)?;
+    let mut removed = 0usize;
+    for rel in rel_paths {
+        if !is_safe_rel_path(&rel) || !rel.starts_with("assets/") {
+            continue;
+        }
+        let path = dir.join(&rel);
+        if path.is_file() && fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 /// 渡したプロジェクト相対パスのうち、**実体が見つからないもの**を返す（#347）。
 ///
 /// 素材が移動・削除された／別PCへプロジェクトだけ持ち込んだ、を検知するために使う。
@@ -388,6 +418,34 @@ mod tests {
         assert!(!is_safe_rel_path("\\\\server\\share\\a.png"));
         // 弾く：空（プロジェクトフォルダ自身を指す＝ファイルではない）。
         assert!(!is_safe_rel_path(""));
+    }
+
+    /// 消せる範囲が `assets/` に閉じているか（#348・PR #875 レビュー）。
+    ///
+    /// ⚠️ **`is_safe_rel_path` だけでは足りない**＝あれは「プロジェクトの外」を弾くだけで、
+    /// **中なら何でも**通る（`project.json` も `voices/*.wav` も）。破壊的なコマンドは
+    /// `delete_template_asset` の接頭辞と同じ流儀で**範囲を狭く**取る。
+    ///
+    /// ⚠️ **Windows のドライブ相対（`C:foo`＝バックスラッシュ無し）は `is_absolute()` が false** で
+    /// `is_safe_rel_path` を通り抜ける。`starts_with("assets/")` は Rust の `Path` 解釈を経由しない
+    /// **単純な文字列比較**なので、`C:assets/...` は `"C:"` から始まって弾かれる。
+    #[test]
+    fn delete_scope_is_assets_only() {
+        // この関数が実際に使う条件（`delete_project_files` の continue と同じ式）。
+        let deletable = |rel: &str| is_safe_rel_path(rel) && rel.starts_with("assets/");
+        // 通す：素材の実体と代表フレーム（`asset_dest` が書く先と同じ）。
+        assert!(deletable("assets/asset_001.png"));
+        assert!(deletable("assets/asset_001_thumb.png"));
+        // 弾く：プロジェクト配下でも素材ではないもの。
+        assert!(!deletable("project.json"));
+        assert!(!deletable("voices/scene_001.wav"));
+        assert!(!deletable("cache/asset_001_strip.png"));
+        // 弾く：ドライブ相対（`is_absolute()` が false なので `is_safe_rel_path` は通る）。
+        assert!(is_safe_rel_path("C:assets/evil.txt"));
+        assert!(!deletable("C:assets/evil.txt"));
+        // 弾く：親への相対参照（先に `is_safe_rel_path` が落とす）。
+        assert!(!deletable("assets/../project.json"));
+        assert!(!deletable("assets\\..\\project.json"));
     }
 
     #[test]

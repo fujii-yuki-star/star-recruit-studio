@@ -90,6 +90,23 @@ export async function assetDisplayUrl(projectId: string, relPath: string): Promi
 }
 
 /**
+ * 渡したプロジェクト相対パスのファイルを消す（#348）。消せた数を返す。
+ *
+ * ⚠️ **消せなくても失敗にしない**＝素材はもう文書から外れており、残ったファイルは次の取り込みで
+ * 上書きされるだけの無害な余り。ここで利用者に何か求めても**やることが無い**（§2-5）。
+ * テンプレ素材の孤立掃除（ADR-0021・`#299`）と同じ流儀。
+ */
+export async function deleteProjectFiles(projectId: string, relPaths: string[]): Promise<number> {
+  if (!isTauri() || relPaths.length === 0) return 0;
+  try {
+    return await invoke<number>('delete_project_files', { projectId, relPaths });
+  } catch (e) {
+    console.warn('[asset] deleteProjectFiles 失敗:', e);
+    return 0;
+  }
+}
+
+/**
  * 渡した素材のうち、**実体が見つからないもの**の相対パスを返す（#347）。
  *
  * ⚠️ **見つからないものだけ**を返す（全件の真偽表だと素材が増えるほど無駄が増える）。
