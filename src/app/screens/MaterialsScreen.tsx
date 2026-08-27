@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type { Asset } from "../../domain/project/types";
 import type { ScreenId } from "../data/mockData";
 import { ASSET_TYPE } from "../../domain/enums";
@@ -10,6 +10,8 @@ import { AssetImportButton } from "../components/AssetImportButton";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { EmptyState } from "../components/states";
 import { ClipDetailControls } from "../components/ClipDetailControls";
+import { showOpenAssetsDialog } from "../../infrastructure/dialog";
+import { isTauri } from "../../infrastructure/assetFs";
 import { UsedScenesRow } from "../components/UsedScenesRow";
 import { DeleteConfirm } from "../components/DeleteConfirm";
 import { assetTagCounts, matchesAssetQuery } from "../../domain/project/assetSearch";
@@ -71,7 +73,7 @@ function AssetThumb({ type, src, size = 20 }: { type: Asset["assetType"]; src?: 
 }
 
 export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => void }) {
-  const { assets, scenes, templates, updateAsset, removeAsset, assetSrcById, setAssetImage, addAssets, importError, importProgress, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
+  const { assets, scenes, templates, updateAsset, removeAsset, assetSrcById, setAssetImage, addAssets, relinkAssetByPath, missingAssetIds, refreshMissingAssets, importError, importProgress, clearImportError, isImporting, setEditingSceneId } = useProjectStore();
   // 書き出し中は素材の追加/削除/編集を止める（store 側も #547 P2-1 でガード＝ここは無言 no-op を避ける表示側・ADR-0026④）。
   // 進行中の書き出しが読むファイル/データと競合するため（プロジェクト切替 loadProject 等は #379 で既にガード済み）。
   const isExporting = useProjectStore((s) => isExportBusy(s.exportRun.phase));
@@ -117,6 +119,19 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
     setNewTag("");
   }
 
+  // ⚠️ **開いたときに調べ直す**（#347）＝素材は**アプリの外**で動かされる（移動・削除・別PCへ持ち込み）。
+  // 一度きり読み込み時に調べるだけだと、開きっぱなしのまま消されたときに気づけない。
+  useEffect(() => { void refreshMissingAssets(); }, [refreshMissingAssets, assets.length]);
+
+  /** ファイルが見つからない素材（#347）。 */
+  const missing = new Set(missingAssetIds);
+
+  /** 素材のファイルを選び直す（再リンク＝`assetId` は変わらないので配置も紐づけも残る）。 */
+  async function onRelink(assetId: string) {
+    const paths = await showOpenAssetsDialog();
+    if (paths[0]) await relinkAssetByPath(assetId, paths[0]);
+  }
+
   function onPickImage(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !selected) return;
@@ -144,6 +159,16 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
         <div className="notice notice-warn row-between mb" role="alert">
           <span>{importError}</span>
           <button className="btn btn-ghost text-sm" onClick={clearImportError}>閉じる</button>
+        </div>
+      )}
+
+      {/* ⚠️ **見つからない素材は書き出す前に知らせる**（#347・§2-5）＝黙って抜けた動画を成功として
+          出さない。次の行動は**そのファイルを選び直す**（`assetId` は変わらないので、置いた場所も
+          切り出す範囲も字幕の紐づけもそのまま戻る）。 */}
+      {missingAssetIds.length > 0 && (
+        <div className="notice notice-warn mb" role="alert">
+          {missingAssetIds.length}つの素材のファイルが見つかりません。動かしたか、消えている可能性があります。
+          その素材を選んで「ファイルを選び直す」から入れ直してください（置いた場所や設定はそのまま残ります）。
         </div>
       )}
 
@@ -216,6 +241,8 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                   {a.displayName}
                 </span>
                 <div className="row gap-sm row-wrap" style={{ justifyContent: "center" }}>
+                  {/* ⚠️ **どれが見つからないのか一覧で分かる**＝案内だけだと探し回ることになる。 */}
+                  {missing.has(a.assetId) && <span className="badge badge-yellow">見つかりません</span>}
                   {a.isPublicChecked ? (
                     <span className="badge badge-teal">
                       <CheckIcon size={12} /> 確認済み
@@ -250,6 +277,32 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
             <div style={{ maxWidth: 160, margin: "0 auto var(--gap)" }}>
               <AssetThumb type={selected.assetType} src={assetSrcById[selected.assetId]} size={28} />
             </div>
+
+            {/* ⚠️ **ファイルを選び直す**（#347）＝`assetId` は変えないので、置いた場所・切り出す範囲・
+                キーフレーム・字幕の紐づけは**そのまま残る**（ADR-0024＝Asset は元素材の源泉）。
+                見つからないときの復旧と、使ったまま別のファイルへ差し替える、の両方をこれ1つで賄う。
+                アプリの中だけに出す＝ブラウザにはネイティブの「開く」が無く、押しても何も起きない
+                （§2-5＝押せるのに何も起きない、を作らない）。 */}
+            {isTauri() && (
+              <div className="field">
+                {/* ⚠️ **上のバナーと同じ文を繰り返さない**（§6・この画面の既存の流儀）＝状況は上、
+                    どれかは一覧の印、直し方はこのボタン、と役割を分ける。見つからないときは
+                    ボタンを目立たせる（探し当てた先で「これを押せばいい」が分かる）。 */}
+                <button
+                  type="button"
+                  className={missing.has(selected.assetId) ? "btn btn-primary" : "btn btn-secondary"}
+                  disabled={isImporting || isExporting}
+                  title={isExporting ? "書き出しが終わるまでお待ちください" : isImporting ? "いま取り込んでいます" : undefined}
+                  onClick={() => void onRelink(selected.assetId)}
+                >
+                  <UploadIcon size={16} />
+                  ファイルを選び直す
+                </button>
+                <p className="text-sm text-muted" style={{ marginTop: 4 }}>
+                  置いた場所・切り出す範囲・字幕の結びつきはそのまま、中身のファイルだけを入れ替えます。
+                </p>
+              </div>
+            )}
 
             {isExporting && (
               <p className="text-sm text-muted" style={{ margin: "0 0 var(--gap)" }}>
