@@ -447,6 +447,32 @@ describe('バラす前後で絵が変わらない', () => {
    * このテストは「写す/写さない」の一覧ではなく、**バラす前後で絵が同じ**であることを見る
    *（だから何が描かれるかが変わっても、直すのは実装であってこのテストの主張ではない）。
    */
+  /**
+   * ⚠️ **影・字間もバラす前後で同じ**（PR #879 レビュー 🔴）＝`freeLayoutFromPlacedContent` は
+   * `strokeColor`/`strokeWidth` だけを運んでいたので、**新しい項目を足したときに落ちた**。
+   * 落ちると**影付きテンプレをバラすと影が消える**（ADR-0032 決定23 に反する）。
+   */
+  it('影と字間を持つ見た目でも、バラす前後で絵が同じ', () => {
+    const styled: Template = {
+      ...template,
+      layers: [
+        {
+          id: 'titleText', type: 'text', textKey: 'title', x: 100, y: 200, w: 900, h: 140, fontSize: 72,
+          letterSpacing: 0.1,
+          shadow: { enabled: true, color: '#112233', opacity: 0.6, blur: 8, dx: 3, dy: 4 },
+        },
+      ],
+    } as unknown as Template;
+    const before = doc();
+    const r = explodeTemplateClip(before, 'clip_001', styled);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const withStyled = { templateOf: () => styled };
+    const strip = (d: TimelineProject): string =>
+      layoutToSvg(layoutTimelineAt(d, 1, withStyled), { assetSrc: (id) => (id ? `asset://${id}` : undefined) });
+    expect(strip(r.doc)).toEqual(strip(before));
+  });
+
   it('バラす前後で絵が同じ（図形の枠線・文字の帯を持つ見た目でも）', () => {
     const decorated: Template = {
       ...template,

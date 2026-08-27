@@ -1,7 +1,7 @@
 // シーン＋テンプレ → 各レイヤーの配置（矩形・zIndex・内容・スタイル）を解決する純粋ロジック。
 // preview / export の双方が共有する（ADR-0001：方式A2ハイブリッド。描画一致の根拠）。
 // テキストの実描画（折返し・計測）は描画エンジンに委ねるが、配置はここで決定論的に決める。
-import { FIT, FONT_WEIGHT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, LAYER_TYPE } from '../domain/enums';
+import { FIT, FREE_CATEGORY, FREE_ELEMENT_KIND, FREE_SHAPE_TYPE, LAYER_TYPE } from '../domain/enums';
 import type { Fit, FreeShapeType, TextAlign } from '../domain/enums';
 import { DEFAULT_FIT, SHAPE_FILL_FALLBACK_COLOR, DEFAULT_BACKGROUND_COLOR } from '../domain/constants';
 import type { CropAlignX, CropAlignY } from '../domain/enums';
@@ -133,7 +133,6 @@ export { DEFAULT_TEXT_COLOR, DEFAULT_FONT_SIZE } from '../domain/template/textSt
 // 解決の場所（`resolveTextStyle`）の隣へ移した。ここからは再輸出だけ（既存の import 経路を保つ・
 // `DEFAULT_LINE_HEIGHT` と同じ流儀）。**インライン編集（FreeLayoutOverlay）も同じ既定で敷く**（#549）。
 export { bandBackground } from '../domain/template/textStyle';
-import { bandBackground } from '../domain/template/textStyle';
 // 既定行間も domain（template/textStyle）が正典＝FREE の行数導出・通常→FREE 変換・描画で共有（§2-7）。
 export { DEFAULT_LINE_HEIGHT } from '../domain/template/textStyle';
 import { SUBTITLE_BAND_PAD_EM, stackedSubtitleBands } from '../domain/text/subtitleBands';
@@ -454,8 +453,11 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
           const color = el.color ?? DEFAULT_TEXT_COLOR;
-          // 縁取りは通常テンプレ層と同じ規則で解決する（太さだけ入れても消えない・#565）。
-          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: resolveStrokeColor(el.strokeWidth, el.strokeColor, color), strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
+          // ⚠️ **体裁の解決は通常テンプレ層と同じ関数を通す**（`resolveTextStyle`・PR #879 レビュー 🔴）＝
+          // 手組みで並べていたので、**新しい項目（影・字間）を足したときに FREE 側だけ漏れた**。
+          // 通せば、以後この種の追加で同じ漏れが起きない（縁取りの解決も中に入っている・#565）。
+          const st = resolveTextStyle(el);
+          items.push({ ...base, kind: 'text', text, fontSize, fontWeight: st.fontWeight, color, maxLines, isSubtitle: false, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: st.strokeColor, strokeWidth: st.strokeWidth, background: st.background, letterSpacing: st.letterSpacing, shadow: st.shadow });
           break;
         }
         case 'shape': {
@@ -473,7 +475,9 @@ export function layoutScene(scene: Scene, template: Template, opts?: LayoutOptio
           const lineHeight = el.lineHeight ?? DEFAULT_LINE_HEIGHT;
           const maxLines = linesForBoxHeight(el.h, fontSize, lineHeight);
           const color = el.color ?? DEFAULT_TEXT_COLOR;
-          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: el.fontWeight ?? FONT_WEIGHT.normal, color, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: resolveStrokeColor(el.strokeWidth, el.strokeColor, color), strokeWidth: el.strokeWidth, background: bandBackground(el.background) });
+          // 体裁の解決は上の `text` と同じ関数（`resolveTextStyle`）を通す（漏れを構造で防ぐ）。
+          const subSt = resolveTextStyle(el);
+          items.push({ ...base, kind: 'text', text: subText, fontSize, fontWeight: subSt.fontWeight, color, maxLines, isSubtitle: true, fontId: el.fontId, lineHeight: el.lineHeight, textAlign: el.textAlign, strokeColor: subSt.strokeColor, strokeWidth: subSt.strokeWidth, background: subSt.background, letterSpacing: subSt.letterSpacing, shadow: subSt.shadow });
           break;
         }
       }

@@ -249,6 +249,11 @@ export function freeLayoutFromPlacedContent(
         fontId: scene.textFontIds?.[layer.textKey],
         ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
         ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
+        // ⚠️ **体裁は解決したものを全部運ぶ**（PR #879 レビュー 🔴）＝`strokeColor`/`strokeWidth` だけ
+        // 書いていたので、**新しい項目（影・字間）を足したときに落ちた**。落ちると
+        // **バラす前後で絵が変わる**（ADR-0032 決定23）・**切替で戻したときに消える**（ADR-0030）。
+        ...(st.letterSpacing != null ? { letterSpacing: st.letterSpacing } : {}),
+        ...(st.shadow != null ? { shadow: st.shadow } : {}),
         // 背景帯（可読性の下地）も移送（#529）。
         // ⚠️ **`faithful` でも写すようになった**（#264）＝以前は「文字層の帯は通常テンプレでは
         // 描かれない」ので写していなかったが、**#264 で文字層にも帯を出すようにした**ので、
@@ -285,6 +290,11 @@ export function freeLayoutFromPlacedContent(
         fontId: layer.textKey ? scene.textFontIds?.[layer.textKey] : undefined,
         ...(st.strokeColor != null ? { strokeColor: st.strokeColor } : {}),
         ...(st.strokeWidth != null ? { strokeWidth: st.strokeWidth } : {}),
+        // ⚠️ **体裁は解決したものを全部運ぶ**（PR #879 レビュー 🔴）＝`strokeColor`/`strokeWidth` だけ
+        // 書いていたので、**新しい項目（影・字間）を足したときに落ちた**。落ちると
+        // **バラす前後で絵が変わる**（ADR-0032 決定23）・**切替で戻したときに消える**（ADR-0030）。
+        ...(st.letterSpacing != null ? { letterSpacing: st.letterSpacing } : {}),
+        ...(st.shadow != null ? { shadow: st.shadow } : {}),
         ...(layer.background != null ? { background: layer.background } : {}), // 字幕の背景帯（可読性の下地）を移送（#529）
       });
     }
