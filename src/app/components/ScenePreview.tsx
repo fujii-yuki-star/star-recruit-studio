@@ -10,6 +10,7 @@ import type { LayoutItem } from "../../renderer/layout";
 import { layoutToSvg } from "../../renderer/sceneSvg";
 import { splitVideoSceneSvgMulti } from "../../renderer/export/videoSceneSplit";
 import { fitToObjectFit } from "./fitToObjectFit";
+import { fitPercentOf, zoomedBox, type PreviewZoom } from "../../domain/preview/previewZoom";
 import { resolveLineSubtitle, type BoundaryFrame, type SceneSegmentSpec } from "../../domain/project/lineTimeline";
 import { containBox, fallbackWidthCss } from "./previewFit";
 import { animationsEndSec, slotIsAnimated } from "../../domain/project/sceneAnimation";
@@ -120,7 +121,7 @@ function SlotVideo({
 }
 
 // スロットの画像は assetSrcById（表示用src＝Tauri は asset://／ブラウザ開発は data URL）で差し込む。未設定はプレースホルダ枠。
-export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; children?: ReactNode }) {
+export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, subtitleSegment, timeSec, animations, videoPlayback, hideItemIds, hideSubtitles, zoom = 'fit', onFitPercent, children }: { scene?: Scene; template?: Template; activeLineIndex?: number; boundaryFrame?: BoundaryFrame; subtitleSegment?: SceneSegmentSpec; timeSec?: number; animations?: ElementAnimation[]; videoPlayback?: { playing: boolean; muted: boolean; slots: VideoSlotPlayback[] }; hideItemIds?: readonly string[]; hideSubtitles?: boolean; /** 拡大率（#142）。省略＝領域に合わせる（従来どおり＝既存の呼び出しは無変更）。 */ zoom?: PreviewZoom; /** フィット時の実寸%を親へ返す（段を「いまの見え方」から数えるため）。 */ onFitPercent?: (percent: number) => void; children?: ReactNode }) {
   const assetSrcById = useProjectStore((s) => s.assetSrcById);
   // テンプレ既定素材（tmpl_asset_*）の表示用 src。場面素材（assetSrcById）に無い id をフォールバック解決（ADR-0021）。
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
@@ -130,6 +131,15 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   // テンプレ向き（canvas）。未設定時は 16:9 を仮置き（プレースホルダ表示用）。
   const cw = template?.canvas.width ?? 16;
   const ch = template?.canvas.height ?? 9;
+
+  /**
+   * フィット時が実寸の何%か（#142）。**段を「いまの見え方」から数える**ために親へ返す
+   *（フィットが 63% のときに拡大したら 75% へ＝100% へ飛ばすと**縮んで見える**ことがある）。
+   */
+  const fitPct = fitPercentOf(fit?.width ?? 0, cw);
+  useEffect(() => {
+    onFitPercent?.(fitPct);
+  }, [fitPct, onFitPercent]);
 
   // プレビューを「使える領域」に収める（縦型でもスクロールせず全体が見えるように）。
   // 高さの基準＝直近のスクロール領域（場面編集の確認エリア等）の下端（無ければ viewport 下端）までの、プレビュー上端からの実利用高。
@@ -310,16 +320,32 @@ export function ScenePreview({ scene, template, activeLineIndex, boundaryFrame, 
   };
 
   return (
-    <div ref={ref} style={{ width: "100%", display: "flex", justifyContent: "center" }}>
+    <div
+      ref={ref}
+      style={{
+        width: "100%",
+        display: "flex",
+        // ⚠️ **拡大したら送って見る**（#142）＝収まらない側をスクロールで見る。フィットのときは
+        // 中央寄せのまま（いままでの見え方を変えない）。
+        justifyContent: zoom === 'fit' ? "center" : "flex-start",
+        overflow: zoom === 'fit' ? undefined : "auto",
+      }}
+    >
       {/* fit 箱（プレビューの実寸＝canvas と同比）。操作オーバーレイ（children）はこの箱の子にして実寸と一致させる（#273）。 */}
       <div
         style={{
           position: "relative",
           // fit（JS 計測）があれば実寸。計測前/空振り時は fallbackWidthCss で「使える高さ×アスペクト比」に幅を絞り、
           // 縦型（9:16）でも箱高さ ≤ (100vh − 予備) に収める（従来の width:100% だと縦型が画面をはみ出していた）。
-          width: fit ? fit.width : fallbackWidthCss(cw, ch),
-          maxWidth: "100%",
-          height: fit?.height,
+          // ⚠️ **CSS の `transform: scale` ではなく実寸を変える**（#142）＝操作オーバーレイは
+          // `getBoundingClientRect()` から縮尺を導く（`scale = rect.width / canvas.width`）ので、
+          // **箱が実際に大きくなれば座標整合は自動で取れる**。`transform` だとレイアウトが
+          // 追従せず、**掴んだ場所と実際の位置がずれる**。
+          width: fit ? zoomedBox(fit, zoom, fitPct).width : fallbackWidthCss(cw, ch),
+          // ⚠️ **拡大時は「はみ出してよい」**＝`maxWidth:100%` のままだと**拡大しても縮められて
+          // 見た目が変わらない**（拡大の意味が消える）。外側が横スクロールで受ける。
+          maxWidth: zoom === 'fit' ? "100%" : undefined,
+          height: fit ? zoomedBox(fit, zoom, fitPct).height : undefined,
           flexShrink: 0,
           aspectRatio: `${cw} / ${ch}`,
         }}
