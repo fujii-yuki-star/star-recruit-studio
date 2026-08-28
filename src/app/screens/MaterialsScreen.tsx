@@ -11,6 +11,7 @@ import { AssetImportButton } from "../components/AssetImportButton";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { EmptyState } from "../components/states";
 import { ClipDetailControls } from "../components/ClipDetailControls";
+import { CaptureFrameControls } from "../components/CaptureFrameControls";
 import { showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { isTauri } from "../../infrastructure/assetFs";
 import { UsedScenesRow } from "../components/UsedScenesRow";
@@ -398,6 +399,9 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 patchClip={(p) => updateAsset(selected.assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }))}
               />
             )}
+
+            {/* 動画から静止画を切り出す（#349）。**普通の写真素材として増える**（ADR-0024＝Asset は源泉）。 */}
+            {selected.assetType === ASSET_TYPE.video && <CaptureFrameControls asset={selected} />}
 
             {isVisual(selected.assetType) && (
               <div className="field">
