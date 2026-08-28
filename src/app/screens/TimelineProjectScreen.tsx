@@ -119,19 +119,12 @@ type DragPlace = {
   } | null;
 };
 
-const PANEL_ID = {
-  preview: "preview",
-  arrange: "arrange",
-  selected: "selected",
-  templates: "templates",
-  place: "place",
-  audio: "audio",
-  voice: "voice",
-} as const;
-const PANEL_IDS = Object.values(PANEL_ID);
 import { ArrowLeftIcon } from "../components/icons";
+// ⚠️ **欄の名前は store と共有する**（#869）＝断りを「操作した欄の中」に返すため。
+import { PANEL_ID, PANEL_IDS, BLOCK_GLOBAL, type BlockTarget } from "../timelinePanels";
 import { LEAVE_BLOCKED_EXPORTING_MESSAGE, canvasHoldMessage, type CanvasHoldReason, clipLabel, clipRangeTitle, editBlockedMessage, freeShapeLabel, slotLabelsFor, SUBTITLE_TEXT_FIELD_LABEL, textKeyLabel, TIMELINE_SAVE_FAILED_MESSAGE, timelineSaveStatusLabel, trackLabel, VOLUME_POINTS_OVERRIDE_HINT } from "../uiLabels";
 import { templateSlotIds, usedTextKeys, textKeyOfLayer } from "../../domain/template/layerOps";
+import { clipAnalysisSource, waveformPoints } from "../../domain/asset/analysis";
 import { templatesForOrientation } from "../../infrastructure/templateFs";
 import { ASSET_TYPE, CROP_ALIGN_X, CROP_ALIGN_Y, FREE_SHAPE_TYPE, FREE_SHAPE_TYPES, SLOT_TYPE } from "../../domain/enums";
 import type { FreeShapeType } from "../../domain/enums";
@@ -209,6 +202,13 @@ export const CLIP_MENU_W_PX = 14;
  * CSS にだけ書くと、値を変えたときにこの下限が黙って合わなくなる（計算と描画が食い違う）。
  */
 const CLIP_HANDLES_MIN_W_PX = CLIP_HANDLE_HIT_W_PX * 2 + CLIP_MENU_W_PX + 16;
+/**
+ * 帯に絵（波形・コマ列）を敷く最小の幅（px・#332）。
+ *
+ * ⚠️ **細い帯には敷かない**＝潰れて読めないうえ、作る手間（FFmpeg の起動）だけかかる。
+ * 取っ手を出す幅（`CLIP_HANDLES_MIN_W_PX`）より少し広く取る＝取っ手で隠れる幅では敷く意味が無い。
+ */
+const CLIP_ANALYSIS_MIN_W_PX = 60;
 
 /** 列の名前の欄の幅。**単一の参照元は `TIMELINE_LABEL_W_PX`**（見わたす画面も同じ値を読む・#742 レビュー）。 */
 const LANE_LABEL_PX = TIMELINE_LABEL_W_PX;
@@ -362,6 +362,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     setSelectedClipCrop, setSelectedClipCropAlign, setSelectedClipCropMode,
     setSelectedVolumePoint, removeSelectedVolumePoint, clearSelectedVolumePoints,
     addAssets, importError, importProgress, clearImportError, isImporting,
+    analysisByPath, ensureClipAnalysis,
   } = useTimelineStore();
 
   // 連続再生の時計（再生中だけ回る）。見せる時刻の決め方は domain（`playbackTick`）に委ねる。
@@ -431,7 +432,9 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **まとめて消すときの確認**（`06 §2` 統一規約1・ADR-0034 決定20）。**聞いた時点の相手を持つ**
   // （#721 レビュー）＝この確認は覆いではなく知らせの段なので、出したまま帯を押したり `Ctrl+A` したりできる。
   // 数だけ持つと「3個消しますか」と聞いて1個だけ消える／全部消える、が起きる（`exploding` と同じ流儀）。
-  const [confirmRemove, setConfirmRemove] = useState<string[] | null>(null);
+  // ⚠️ **消す相手と「どこから始めたか」を組で持つ**（#869 レビュー 🟡・`exploding` と同じ流儀）
+  //＝確認の後で断られたとき、返す欄が押したボタンと合う。
+  const [confirmRemove, setConfirmRemove] = useState<{ ids: string[]; from: BlockTarget } | null>(null);
   // 保存できていないまま一覧へ戻ろうとしているか（#693）。戻ると変更は失われるので、黙って捨てずに聞く。
   /**
    * 離れてよいか聞いている最中の**行き先**（`null`＝聞いていない・#719）。
@@ -666,7 +669,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // **聞いた時点の相手を組で持つ**（#701 レビュー）。id だけだと、確認の表示条件が「いま選んでいる部品」に
   // 依存してしまい、選択が変わると**確認が消えたように見えて状態だけ残る**。同じ見た目パターンの別の部品を
   // 選ぶと確認が復活し、押すと**画面で選んでいない方**がバラされる（バラすは取り消しでしか戻らない）。
-  const [exploding, setExploding] = useState<{ clipId: string; template: Template } | null>(null);
+  const [exploding, setExploding] = useState<{ clipId: string; template: Template; from: BlockTarget } | null>(null);
   // `Escape` の順番を決める材料（#701 レビュー）。**答えを求める確認とメニュー**が開いている間は選択を解かない。
   // 答えを求める確認は**自分では `Escape` を処理しない**（答えるまで残す）ので、ここで名乗る側に回る。
   // ⚠️ **確認を足したらここへ必ず並べる**（#721 の実機確認で漏れが出た）＝入れ忘れると、確認を出したまま
@@ -744,7 +747,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         if (playRef.current.total <= 0) return; // 置いていないときは再生できない（ボタンと同じ条件）
         // ⚠️ **キーで断るなら理由を出す**（#752 レビュー）＝`Delete`・`Ctrl+K` は喋るのに
         // `Space` だけ黙ると、押せない見た目を持たない入口で挙動が割れる（ADR-0026②）。
-        if (playRef.current.exporting) { setEditBlocked(EDIT_BLOCKED.playExporting); return; }
+        if (playRef.current.exporting) { setEditBlocked(EDIT_BLOCKED.playExporting, PANEL_ID.arrange); return; }
         playRef.current.play();
         return;
       }
@@ -1220,6 +1223,30 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     if (isPlaying) followPlayhead();
   }, [isPlaying, playheadSec, followPlayhead]);
 
+  /**
+   * 1秒あたりの幅（px）。**倍率の決め方はここ1か所**（§2-7）＝帯を描く側と、帯に敷く絵を作る側が
+   * **同じ値**を見る。書き写すと「敷く幅の判定」と実際の帯の幅が黙ってずれる（#332 レビュー）。
+   * ⚠️ **早期 return より前**に置く＝下の `useEffect` から読むため（フックの数も毎回そろえる）。
+   */
+  const pxPerSec = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
+  /**
+   * 帯に敷く絵（#332）を、**必要になったものだけ**たのむ。
+   *
+   * ⚠️ **たのむのは描いた後**（`useEffect`）＝描いている最中に store を書くと、React が
+   * 「描画中に別の部品を更新した」と怒り、再描画のたびに書き直す形にもなる。
+   * ⚠️ **早い段階（画面を返す前）に置く**＝上と同じ理由でフックの数を毎回そろえる。
+   * ⚠️ **細い帯には敷かない**＝潰れて読めないうえ、作る手間（FFmpeg の起動）だけかかる。
+   */
+  const analysisNeeds = (doc?.clips ?? [])
+    .filter((c) => pxPerSec * c.durationSec >= CLIP_ANALYSIS_MIN_W_PX)
+    .map((c) => ({ clipId: c.id, widthPx: pxPerSec * c.durationSec }));
+  // 毎回新しい配列になるので、**中身から作った鍵**で見る（毎描画で走らせない）。
+  const analysisKey = analysisNeeds.map((n) => `${n.clipId}:${Math.round(n.widthPx)}`).join(",");
+  useEffect(() => {
+    for (const n of analysisNeeds) ensureClipAnalysis(n.clipId, n.widthPx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisKey, ensureClipAnalysis]);
+
   const zoomIndexRef = useRef<number | null>(null);
   useEffect(() => {
     zoomIndexRef.current = zoomIndex;
@@ -1309,14 +1336,20 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * まとめて消すのが確認なしになる（キーからも同じ道を使うので、片方だけ確認、も作らない）。
    * ⚠️ **early return より前**に置く（抜ける回と抜けない回でフックの数が変わらない＝下の土台と同じ理由）。
    */
-  const requestRemoveSelected = useCallback(() => {
+  const requestRemoveSelected = useCallback((at: BlockTarget = BLOCK_GLOBAL) => {
     // ⚠️ **断るなら理由を出す**（#752-3・§2-5）。ボタンは押せない見た目と説明で伝わるが、
     // **キーには押せない見た目が無い**ので、ここで理由を立てないと `Delete` が無言で何も起きない
     //（分ける `Ctrl+K` は理由を立てているのに、消すだけ黙る＝入口で挙動が割れる・ADR-0026②）。
     // 選んでいないときだけ黙る（消す相手がそもそも無い＝他社の型でも何も出ない）。
-    if (removeBlocked) { if (removeBlocked.reason) setEditBlocked(removeBlocked.reason); return; }
-    if (selectedClipIds.length > 1) setConfirmRemove(selectedClipIds);
-    else removeSelectedClips();
+    //
+    // ⚠️ **入口は4つある**（#869 レビュー 🟡）＝「選んだ部品」欄のボタン2つ・仕上がり確認の右クリック・
+    // 並びの右クリック。**始めた所を受け取る**（既定はキーの `Delete`＝欄を持たないので帯）。
+    // ⚠️ **書き出し中だけは常に帯**＝ほかの入口（`:1458` 等）と揃える（画面全体に効く断り）。
+    // 「書き出し中は帯」のような例外は `blockTargetFor`（`timelinePanels.ts`）が引き受けるので、
+    // ここは素直に**始めた欄**を渡す（入口ごとに例外を書かない＝片方だけ直る、を作らない）。
+    if (removeBlocked) { if (removeBlocked.reason) setEditBlocked(removeBlocked.reason, at); return; }
+    if (selectedClipIds.length > 1) setConfirmRemove({ ids: selectedClipIds, from: at });
+    else removeSelectedClips(at);
   }, [removeBlocked, selectedClipIds, removeSelectedClips, setEditBlocked]);
   const trackOf = (trackId: string) => doc?.tracks.find((t) => t.id === trackId);
   /**
@@ -1429,10 +1462,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     // 見る条件はボタンと同じもの（`splitClipIssue`＋再生中）＝キーだけ通る道を作らない。
     splitRef.current = () => {
       // 断る順は**ボタンの `editGuard` と同じ**（固定 → 書き出し中 → その入口の事情）。
-      if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked); return; }
-      if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting); return; }
-      if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing); return; } // 位置を使う操作＝再生中は断る（決定21）
-      if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.notFound); return; }
+      if (selectedLocked) { setEditBlocked(EDIT_BLOCKED.locked, PANEL_ID.arrange); return; }
+      if (exporting) { setEditBlocked(EDIT_BLOCKED.exporting, PANEL_ID.arrange); return; }
+      if (isPlaying) { setEditBlocked(EDIT_BLOCKED.playing, PANEL_ID.arrange); return; } // 位置を使う操作＝再生中は断る（決定21）
+      if (!doc || !selected) { setEditBlocked(EDIT_BLOCKED.notFound, PANEL_ID.arrange); return; }
       // ⚠️ **見た目パターンも渡す**（PR #825 レビュー 🟡）＝渡さないと差し込み口の置き場所が
       // 1件も解けず、「素材を使い切った先」の判定が**差し込み口では必ず偽**になる。
       // ⚠️ ただし**このキーの道だけは、渡さなくても結果が変わらない**（この先の `splitSelectedClip` が
@@ -1440,7 +1473,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
       // ここを通らないので**そちらは実際に押せてしまう**（そこは固定してある）。3つの入口が同じ材料を
       // 見ている、を保つために合わせる。
       const issue = splitClipIssue(doc, selected.id, playheadSec, { templateOf });
-      if (issue) { setEditBlocked(SPLIT_BLOCKED_REASON[issue]); return; }
+      if (issue) { setEditBlocked(SPLIT_BLOCKED_REASON[issue], PANEL_ID.arrange); return; }
       splitSelectedClip(playheadSec);
     };
     changeZoomRef.current = changeZoom; // ホイールの実リスナーは張り替えないので写し越しに呼ぶ
@@ -1798,6 +1831,37 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
    * 位置まで動かす理由は無い）。
    */
   const wideEnoughForHandles = (c: TimelineClip): boolean => pxPerSec * c.durationSec >= CLIP_HANDLES_MIN_W_PX;
+
+  /**
+   * 帯に敷く絵（#332）＝音の波形／動画のコマ列。**読むだけ**（作るのは上の `useEffect`）。
+   *
+   * ⚠️ **無くても編集はできる**＝作れなければ何も敷かない（欠けていることを知らせない・§2-5）。
+   */
+  const clipAnalysis = (c: TimelineClip): React.ReactNode => {
+    // ⚠️ **描く側でも幅を見る**（レビュー ℹ️）＝一度測った後に倍率を下げると、**細い帯にも敷かれる**
+    //（潰れて読めない絵が出る）。作る条件と同じものを見る。
+    if (pxPerSec * c.durationSec < CLIP_ANALYSIS_MIN_W_PX) return null;
+    const src = clipAnalysisSource(c, (id) => doc.assets.find((a) => a.assetId === id));
+    if (!src) return null;
+    const found = analysisByPath[src.key];
+    if (!found) return null;
+    if (found.stripUrl) {
+      return (
+        <span
+          className="timeline-clip-strip"
+          aria-hidden="true"
+          style={{ backgroundImage: `url("${found.stripUrl}")` }}
+        />
+      );
+    }
+    const points = waveformPoints(found.peaks ?? []);
+    if (!points) return null;
+    return (
+      <svg className="timeline-clip-wave" aria-hidden="true" viewBox="0 0 1 1" preserveAspectRatio="none">
+        <polyline points={points} />
+      </svg>
+    );
+  };
   const showHandles = (c: TimelineClip): boolean => grabbableClip(c) && wideEnoughForHandles(c);
   /**
    * 掴んでいる間の帯の位置と長さ（#686）。**離すまで文書は変えない**ので、見せかけだけを動かす。
@@ -2261,21 +2325,21 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           label: "ここで分ける",
           ...singleClipMenuGuard,
           ...(splitExtra().disabled ? { disabled: true, disabledHint: splitExtra().hint } : {}),
-          onSelect: () => splitSelectedClip(playheadSec),
+          onSelect: () => splitSelectedClip(playheadSec, PANEL_ID.arrange),
         },
         ...(menuClipTemplate
           ? [{
               label: "中身をバラす",
               ...singleClipMenuGuard,
               // 戻せないので**押す前に断る**（ADR-0032 決定23）＝確認は共有の `DeleteConfirm`。
-              onSelect: () => setExploding({ clipId: menuClip.id, template: menuClipTemplate }),
+              onSelect: () => setExploding({ clipId: menuClip.id, template: menuClipTemplate, from: PANEL_ID.arrange }),
             }]
           : []),
         {
           label: selectedClipIds.length > 1 ? `選んだ${selectedClipIds.length}個を${DELETE_LABEL}` : DELETE_LABEL,
           danger: true,
           ...(removeBlocked ? { disabled: true, disabledHint: removeBlocked.title } : {}),
-          onSelect: requestRemoveSelected,
+          onSelect: () => requestRemoveSelected(PANEL_ID.arrange),
         },
       ]
     : [];
@@ -2427,7 +2491,6 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
   // 時間 → 画面上の長さ。短い動画でも列が潰れないよう下限を置く（横スクロールは既存 CSS が持つ）。
   // ⚠️ まだ全体表示を決めていない間も**段の上の値**を使う（段に無い値を混ぜると、そこから
   // 段を動かしたときに飛ぶ）。幅が測れない環境（テスト）でもここに落ち着く。
-  const pxPerSec = ZOOM_LEVELS[zoomIndex ?? DEFAULT_ZOOM_INDEX];
   const laneWidthPx = Math.max(totalSec * pxPerSec, MIN_LANE_WIDTH_PX);
 
   const step = tickStepSec(pxPerSec); // 目盛りは**倍率**で決める（共有関数・#686 レビュー）
@@ -2559,7 +2622,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               // キャンバスだけ何も出ないと**同じ操作が場所によって在ったり無かったり**になる。
               // 関門も文言も帯と同じもの（決定17 が禁じるのは「前へ／奥へ」だけ＝そちらは渡さない）。
               onDuplicate={() => duplicateSelectedClip()}
-              onDelete={() => requestRemoveSelected()}
+              onDelete={() => requestRemoveSelected(PANEL_ID.preview)}
               menuGuards={{
                 duplicate: duplicateMenuGuard,
                 delete: { disabled: removeGuard?.disabled, disabledHint: removeGuard?.title },
@@ -2965,6 +3028,10 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                             // ＝ドラッグ専用の操作を作らない（ADR-0034 決定19）。
                             onContextMenu={(e) => openClipMenu(e, c.id)}
                           >
+                            {/* ⚠️ **帯の中身を見せる**（#332）＝音は波形、動画はコマ列。名前だけだと
+                                「どこで何が鳴っているか」が帯からは分からない。
+                                ⚠️ **文字より下に敷く**（`aria-hidden` ＋ 絶対配置）＝読み上げ名に混ざらない。 */}
+                            {clipAnalysis(c)}
                             {clipLabel(c)}
                             {/* 端を掴んで縮める（決定9）。選んだ帯にだけ出す＝隣の当たり判定を常時食わない。 */}
                             {selectedClipIds.includes(c.id) && showHandles(c) && (
@@ -3092,14 +3159,14 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
               {/* **ここで分ける**（決定16）＝再生位置×選んだ帯。`Ctrl+K` と同じ入口（決定19＝キーだけにしない）。 */}
               <button
                 className="btn btn-secondary"
-                onClick={() => splitSelectedClip(playheadSec)}
+                onClick={() => splitSelectedClip(playheadSec, PANEL_ID.selected)}
                 {...splitGuard}
                 title={splitGuard.title ?? "選んだ部品を再生位置で分けます（Ctrl+K）"}
               >
                 ここで分ける
               </button>
               <button className="btn btn-secondary" onClick={duplicateSelectedClip} {...editGuard(duplicateExtra())}>{DUPLICATE_LABEL}</button>
-              <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を削除します（Delete）"}>{DELETE_LABEL}</button>
+              <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品を削除します（Delete）"}>{DELETE_LABEL}</button>
             </div>
             {/* **数値でも同じ値を触れる**（#721・ADR-0034 決定6）。ボタンの「前へ／後ろへ」（0.5秒ずつ）と
                 「ここで終わる」（再生位置を使う）だけでは、「3.0秒から」「5.0秒間」に**揃える手段が無い**。
@@ -4006,7 +4073,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
                   <button
                     className="btn btn-secondary"
                     {...editGuard()}
-                    onClick={() => setExploding({ clipId: selected.id, template: selectedTemplate })}
+                    onClick={() => setExploding({ clipId: selected.id, template: selectedTemplate, from: PANEL_ID.selected })}
                   >
                     中身をバラす
                   </button>
@@ -4028,7 +4095,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </p>
         )}
         {selectedClipIds.length > 1 && (
-          <button className="btn btn-danger" onClick={requestRemoveSelected} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて削除します（Delete）"}>選んだ{selectedClipIds.length}個を{DELETE_LABEL}</button>
+          <button className="btn btn-danger" onClick={() => requestRemoveSelected(PANEL_ID.selected)} {...(removeGuard ?? {})} title={removeGuard?.title ?? "選んだ部品をまとめて削除します（Delete）"}>選んだ{selectedClipIds.length}個を{DELETE_LABEL}</button>
         )}
       </>
     ) },
@@ -4232,6 +4299,36 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
     ) },
   ];
 
+  /**
+   * その場の返事を出す欄（ADR-0034 決定10・#869）。**操作した所で返す**＝欄がいくつも並ぶ画面で、
+   * 帯の位置からは「どの操作が断られたのか」が読めなかった。
+   *
+   * ⚠️ **閉じている欄には出さない**（帯へ倒す）＝出しても見えないので、押した結果が**黙って消える**
+   *（§2-5）。⚠️ `global`（書き出し中・再生中・見つからない）も帯のまま＝どの欄にも属さない。
+   */
+  const blockedPanelId =
+    editBlocked && editBlocked.at !== BLOCK_GLOBAL && !closed.includes(editBlocked.at) ? editBlocked.at : null;
+  // ⚠️ **帯に出すかどうかの判定は1つ**＝出す条件と文言を別々に書くと、片方だけ直って
+  // **囲いだけ出て中身が空**／**欄と帯に同じ文が2つ**になる（#869）。
+  const flashBlockedMessage = editBlocked && !blockedPanelId ? editBlockedMessage[editBlocked.reason] : null;
+  const shownPanels: PanelSpec[] = panels.map((p) =>
+    editBlocked && p.id === blockedPanelId
+      ? {
+          ...p,
+          content: (
+            <>
+              {/* ⚠️ **恒常の警告と見分ける**＝その場の返事は `timeline-flash`（次の操作で消える）で、
+                  直すまで残る警告は欄の外のいつもの位置に出る。同じ見た目で並べない（#869）。 */}
+              <p className="notice notice-warn timeline-flash" role="alert">
+                {editBlockedMessage[editBlocked.reason]}
+              </p>
+              {p.content}
+            </>
+          ),
+        }
+      : p,
+  );
+
   return (
     <div className="main-scroll">
       {/* 説明文は出さない＝編集の場所を上から狭めない（利用者指摘 2026-08-04）。名前は「どの動画を
@@ -4276,7 +4373,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           busyLabel="バラしています…"
           onCancel={() => setExploding(null)}
           onConfirm={() => {
-            explodeClip(exploding.clipId, exploding.template);
+            explodeClip(exploding.clipId, exploding.template, exploding.from);
             setExploding(null);
           }}
         />
@@ -4284,15 +4381,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
 
       {confirmRemove !== null && (
         <DeleteConfirm
-          message={`選んだ${confirmRemove.length}個の部品を削除しますか？`}
+          message={`選んだ${confirmRemove.ids.length}個の部品を削除しますか？`}
           onCancel={() => setConfirmRemove(null)}
           onConfirm={() => {
-            const ids = confirmRemove;
+            const { ids, from } = confirmRemove;
             setConfirmRemove(null);
             // 書き出しが始まっていたら消さない（出しっぱなしの確認から抜け道を作らない＝「動画の一覧へ」と同じ）。
             // 固定・存在の判定は **id を渡す先**（`removeClipsByIds`）が見る＝聞いた相手が消えていたら理由が出る。
             if (exporting) return;
-            removeClipsByIds(ids);
+            removeClipsByIds(ids, from);
           }}
         />
       )}
@@ -4343,7 +4440,7 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
         ※ 取り消す・動画の一覧へは**見出しの行**へ移した（#774）ので、ここの列挙からは外れている。
       */}
       <div className="timeline-flash-zone">
-        <PanelLayoutView layout={panelLayout} panels={panels} onChange={changeLayout} />
+        <PanelLayoutView layout={panelLayout} panels={shownPanels} onChange={changeLayout} />
 
         {/* 運んでいるものの影（#684）。**指の先に付いて回る**＝いま何を運んでいるかが分かる。
             置けない所では色を変える＝**理由の文言はドラッグ中に出さない**（明滅させない・ADR-0034 決定10）。
@@ -4361,14 +4458,15 @@ export function TimelineProjectScreen({ onNavigate }: TimelineProjectScreenProps
           </div>
         )}
 
-        {/* **操作したその場の返事**（置けなかった理由・声を作れなかった）は**欄のすぐ下に貼り付ける**。
-            下へ流すと、恒常の警告が出ているときに画面外へ落ちて**同じ操作を繰り返す**（§2-5・ADR-0026④）。
-            上に積まない（編集の場所を狭めない）と、必ず気づける、を両立させるための置き方。
-            ※ **その場の返事を「操作した欄の中」に出すのが本筋**（ADR-0034 決定10）＝段階0 で寄せる。 */}
-        {(voiceError || editBlocked || leaveBlockedMessage || lockedSkipNotice || drillBlockedNotice) && (
+        {/* **操作したその場の返事**は**操作した欄の中**に出す（ADR-0034 決定10・#869）。
+            ここに残るのは**どの欄にも属さない返事**＝画面全体に効く断り（書き出し中・再生中・
+            対象が見つからない）と、**行き先の欄を閉じている**とき（出しても見えない＝§2-5）。
+            置き方は欄のすぐ下＝下へ流すと、恒常の警告が出ているときに画面外へ落ちて
+            **同じ操作を繰り返す**（§2-5・ADR-0026④）。上に積まない（編集の場所を狭めない）。 */}
+        {(voiceError || flashBlockedMessage || leaveBlockedMessage || lockedSkipNotice || drillBlockedNotice) && (
           <div className="notice notice-warn timeline-flash" role="alert">
             {voiceError && <p>{voiceError}</p>}
-            {editBlocked && <p>{editBlockedMessage[editBlocked]}</p>}
+            {flashBlockedMessage && <p>{flashBlockedMessage}</p>}
             {lockedSkipNotice && <p>{lockedSkipNotice}</p>}
             {drillBlockedNotice && <p>{drillBlockedNotice}</p>}
             {leaveBlockedMessage && <p>{leaveBlockedMessage}</p>}

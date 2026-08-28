@@ -55,6 +55,35 @@ describe("ExportScreen 書き出せない項目があるときは保存させな
     expect(note.textContent).toContain("公開前チェック"); // 次の行動（左の「公開前チェックへ戻る」が導線）
   });
 
+  /**
+   * ⚠️ **直行導線でもフォントの検査が効く**（#261・PR #886 レビュー 🔴）＝
+   * `exportBlockingItems` へ材料を渡していなかったので、**項目そのものが作られず**
+   * 別の字体に化けた動画がそのまま書き出せていた（§2-5・ADR-0026②）。
+   */
+  it("使っているフォントが見つからないと「動画を保存」を押せない（直行経路でも止まる）", async () => {
+    setup([scene({ fontId: "user_font_001" } as never)]);
+    // 「調べた結果、持っていない」＝空配列（`null` は「まだ調べていない」なので項目を出さない）。
+    useProjectStore.setState({ userFontIds: [] } as never);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(saveBtn().disabled).toBe(true));
+    expect(screen.getByText(/動画を書き出せない項目があります/).textContent).toContain("文字の形");
+  });
+
+  it("フォントを持っていれば止めない（誤検出しない）", async () => {
+    setup([scene({ fontId: "user_font_001" } as never)]);
+    useProjectStore.setState({ userFontIds: ["user_font_001"] } as never);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    await waitFor(() => expect(saveBtn().disabled).toBe(false));
+  });
+
+  /** ⚠️ **調べていないうちは止めない**＝嘘の「問題あり」で書き出しを塞がない（#347 と同じ流儀）。 */
+  it("まだ調べていない（null）うちは止めない", () => {
+    setup([scene({ fontId: "user_font_001" } as never)]);
+    useProjectStore.setState({ userFontIds: null } as never);
+    render(<ExportScreen onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/文字の形/)).toBeNull();
+  });
+
   it("問題が無ければ「動画を保存」は押せる（理由も出さない）", () => {
     setup([scene()]);
     render(<ExportScreen onNavigate={vi.fn()} />);

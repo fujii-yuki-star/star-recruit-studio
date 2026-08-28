@@ -232,6 +232,26 @@ const mustReject = [
   ['scene: slotVideoStart delaySec 負は拒否', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: -1 } } })],
   ['scene: slotVideoStart 未知フィールド(startSec)は拒否（additionalProperties:false）', withScene({ slotVideoStart: { mainVisual: { mode: 'delay', delaySec: 1, startSec: 2 } } })],
 ];
+// 持ち込みフォント（ADR-0038・#261・schema 1.26）。**enum ではなく形（pattern）で縛る**。
+const withFont = (prop) => ({ ...withBrief({}), videoSettings: { ...withBrief({}).videoSettings, ...prop } });
+mustAccept.push(
+  ['fontId: 同梱フォントを許容（従来どおり）', withFont({ fontId: 'gen-interface-jp' })],
+  ['fontId: 持ち込みフォント user_font_001 を許容（1.26）', withFont({ fontId: 'user_font_001' })],
+  ['fontId: 桁が増えても許容（user_font_1000）', withFont({ fontId: 'user_font_1000' })],
+  ['scene.fontId: 持ち込みフォントを許容', withScene({ fontId: 'user_font_002' })],
+  ['scene.fontId: null（継承）は従来どおり許容', withScene({ fontId: null })],
+  ['scene.textFontIds: 種別ごとに持ち込みフォントを許容', withScene({ textFontIds: { title: 'user_font_003', subtitle: 'gen-interface-jp' } })],
+  ['freeLayout の fontId も持ち込みフォントを許容', withScene({ freeLayout: [{ id: 'free_001', kind: 'text', x: 0, y: 0, w: 10, h: 10, text: 'あ', fontId: 'user_font_004' }] })],
+);
+mustReject.push(
+  ['fontId: 形の違う id は拒否（my-font）', withFont({ fontId: 'my-font' })],
+  ['fontId: 桁が足りない user_font_1 は拒否（3桁ゼロ詰め）', withFont({ fontId: 'user_font_1' })],
+  ['fontId: 前後に付いた文字は拒否（xuser_font_001）', withFont({ fontId: 'xuser_font_001' })],
+  ['fontId: パス区切りを含む id は拒否（user_font_001/../x）', withFont({ fontId: 'user_font_001/../x' })],
+  ['fontId: 空文字は拒否', withFont({ fontId: '' })],
+  ['videoSettings.fontId: null は拒否（動画全体は継承しない＝既定へ落とす）', withFont({ fontId: null })],
+);
+
 for (const [desc, data] of mustAccept) {
   if (vProject(data)) console.log(`PASS  must-accept  ${desc}`);
   else { ok = false; console.log(`FAIL  must-accept  ${desc}`); for (const e of vProject.errors ?? []) console.log(`   ${e.instancePath} ${e.message}`); }

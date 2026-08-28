@@ -11,6 +11,8 @@ import { AssetImportButton } from "../components/AssetImportButton";
 import { ExportLockBanner } from "../components/ExportLockBanner";
 import { EmptyState } from "../components/states";
 import { ClipDetailControls } from "../components/ClipDetailControls";
+import { AssetLibraryPanel } from "../components/AssetLibraryPanel";
+import { CaptureFrameControls } from "../components/CaptureFrameControls";
 import { showOpenAssetsDialog } from "../../infrastructure/dialog";
 import { isTauri } from "../../infrastructure/assetFs";
 import { UsedScenesRow } from "../components/UsedScenesRow";
@@ -193,6 +195,12 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
           ＝同じ状況なのに画面ごとに見え方が違う（§2-7・ADR-0026②）。素材操作を実際に試したときの個別案内は
           store の `EXPORT_BUSY_ASSET_MSG`（importError）が出す。 */}
       <ExportLockBanner onNavigate={onNavigate} />
+
+      {/* よく使う素材（ADR-0035・#260）＝動画をまたいで使い回す置き場。この動画の素材とは別の棚で、
+          取り込みは**コピー**（プロジェクトは自己完結・ADR-0024 決定6）。 */}
+      <div className="mb">
+        <AssetLibraryPanel />
+      </div>
 
       <div className="row gap-sm row-wrap mb" style={{ alignItems: "center" }}>
         <div className="segment" style={{ display: "inline-flex" }}>
@@ -398,6 +406,9 @@ export function MaterialsScreen({ onNavigate }: { onNavigate: (s: ScreenId) => v
                 patchClip={(p) => updateAsset(selected.assetId, (a) => ({ ...a, clip: { ...a.clip, ...p } }))}
               />
             )}
+
+            {/* 動画から静止画を切り出す（#349）。**普通の写真素材として増える**（ADR-0024＝Asset は源泉）。 */}
+            {selected.assetType === ASSET_TYPE.video && <CaptureFrameControls asset={selected} />}
 
             {isVisual(selected.assetType) && (
               <div className="field">

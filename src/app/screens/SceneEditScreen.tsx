@@ -54,6 +54,7 @@ import { useHistoryGroup } from "../hooks/useHistoryGroup";
 import { ProjectNameField } from "../components/ProjectNameField";
 import { AssetImportButton } from "../components/AssetImportButton";
 import { PreviewZoomControl } from "../components/PreviewZoomControl";
+import { SafeAreaToggle } from "../components/SafeAreaToggle";
 import type { PreviewZoom } from "../../domain/preview/previewZoom";
 import { ScenePreview } from "../components/ScenePreview";
 import { SaveStatusBadge } from "../components/SaveStatusBadge";
@@ -1481,6 +1482,9 @@ export function SceneEditScreen({ onNavigate }: SceneEditProps) {
                   停止中は t=0＝先頭（0 秒行除外・頭の間・全 0 秒フォールバックは sceneSegmentSpecs 準拠）、再生中は掛け合いの現在行へ追従＝書き出しと一致（#527 P1）。 */}
               {/* 拡大縮小（#142）＝プレビューのすぐ上（操作する所の隣） */}
               <PreviewZoomControl zoom={previewZoom} fitPercent={previewFitPct} onChange={setPreviewZoom} />
+              {/* 端で切られやすいところの目安（#265）。**編集する画面にだけ**置く＝仕上がり確認は
+                  「出来上がり」を見る場所なので線を出さない。 */}
+              <SafeAreaToggle />
               <ScenePreview zoom={previewZoom} onFitPercent={setPreviewFitPct} scene={selected} template={template} boundaryFrame={motionSubtitle?.boundary} subtitleSegment={motionSubtitle?.segment} timeSec={motionPreview.timeSec} animations={motionPreview.previewAnimations} hideItemIds={editingFreeId && freeLayout.some((el) => el.id === editingFreeId && el.kind === FREE_ELEMENT_KIND.text) ? [editingFreeId] : undefined}>
                 {/* 切替効果の再生中：fit 箱の子として前場面→この場面の合成を重ねる（#408 Part 2・書き出し xfade と同じ見え方）。 */}
                 {transitionPreview.playing && canPlayTransition && prevScene && prevTemplate && template && (

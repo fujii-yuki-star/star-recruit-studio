@@ -2,8 +2,9 @@
 // （projectStore に相乗りすると、片方にしか無い概念〔場面・パート〕が混ざって両形式の不変条件が曖昧になる）。
 import { create } from "zustand";
 import { dimsForOrientation } from "../../domain/constants";
-import { assetDisplayUrl, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, readAssetDataUrl } from "../../infrastructure/assetFs";
+import { assetDisplayUrl, audioPeaks, fileToDataUrl, importAssetByPath, importAssetBytes, importAssetFile, readAssetDataUrl, videoFilmstrip } from "../../infrastructure/assetFs";
 import { exceedsInlineAssetLimit, fileNameOf, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
+import { ANALYSIS_KIND, clipAnalysisSource, filmstripFrames, waveformBuckets, type AssetAnalysis } from "../../domain/asset/analysis";
 import { createAssetId } from "../../domain/project/persistence";
 import { probeAndThumbVideo, reserveAssetId } from "./assetImport";
 import { createExportSrcResolver, resolveExportSrcMap } from "./assetExportSrc";
@@ -38,6 +39,8 @@ import {
 } from "../../domain/timeline/edit";
 import { EDIT_BLOCKED } from "../../domain/timeline/edit";
 import type { EditBlockedReason, EditResult } from "../../domain/timeline/edit";
+// ⚠️ **欄の名前は画面と共有する**（#869）＝断りを「操作した欄の中」に返すため。
+import { BLOCK_GLOBAL, PANEL_ID, blockTargetFor, type BlockTarget } from "../timelinePanels";
 import { emptyHistory, recordSnapshot, redoSnapshot, undoSnapshot } from "../../domain/project/history";
 import { clearKeyframes, removeKeyframe, setKeyframe } from "../../domain/timeline/keyframeEdit";
 import { clearVolumePoints, removeVolumePoint, setVolumePoint } from "../../domain/timeline/volumePointEdit";
@@ -186,6 +189,21 @@ export interface TimelineState {
    */
   videoSrcById: Record<string, string>;
   /**
+   * 帯に敷く絵（#332）＝音の波形／動画のコマ列。assetId → 中身。
+   *
+   * ⚠️ **文書に持たない**（作り直せるもの＝Issue の指定・既存の代表フレームと同じ扱い）。
+   * `null`＝作ろうとして作れなかった（もう一度たのまない＝同じ失敗を繰り返さない）。
+   */
+  analysisByPath: Record<string, AssetAnalysis | null>;
+  /**
+   * 帯に敷く絵を**必要になったときだけ**作る（#332）。渡すのは部品そのもの。
+   *
+   * ⚠️ **同じものに2回たのまない**＝帯は再描画のたびに呼ばれるので、素通しにすると
+   * FFmpeg が何度も起動する。作った／作れなかった、のどちらも記録して打ち止めにする。
+   * ⚠️ **鍵はファイルの場所**＝素材の番号ではない（読み上げは素材を持たず、作成済みの音声を直に指す）。
+   */
+  ensureClipAnalysis: (clipId: string, barWidthPx: number) => void;
+  /**
    * 素材の**実寸**（assetId → px・#634）。絵を測らないと分からないので**画面が測って入れる**。
    * プレビューと書き出しが同じ値を見る＝同じ絵になる（ADR-0001）。測れていない素材は入らない。
    */
@@ -202,7 +220,15 @@ export interface TimelineState {
   /** 取り消し/やり直し（ADR-0020 と同じスナップショット方式・積むのは文書そのもの）。 */
   history: HistoryStacks<TimelineProject>;
   /** 直前の操作が置けなかった理由（`15 §6` の `TIMELINE_EDIT_*`）。次の操作で消す。 */
-  editBlocked: EditBlockedReason | null;
+  /**
+   * 置けなかった理由と、**どの欄の話か**（#869・ADR-0034 決定10）。
+   *
+   * ⚠️ **理由と場所は1つで運ぶ**＝別々に持つと片方だけ更新され、**前の操作の場所に
+   * 今の理由が出る**（押していない欄が赤くなる）。
+   * ⚠️ **場所は「操作」が決める**（理由ではない）＝同じ「重なっています」でも、置くボタンで
+   * 出たなら置く欄・帯を掴んで出たなら並びの欄が正しい。
+   */
+  editBlocked: { reason: EditBlockedReason; at: BlockTarget } | null;
   /** 声を作れなかったときの案内（§2-5）。次に作り始めたら消す。 */
   voiceError: string | null;
   /** 素材を取り込めなかったときの案内（#712・§2-5）。閉じるまで残す。 */
@@ -308,7 +334,7 @@ export interface TimelineState {
   moveClipsBy: (updates: readonly { id: string; startSec?: number; trackId?: string }[]) => void;
   trimClipById: (clipId: string, edge: "start" | "end", sec: number) => void;
   /** 断り文をそのまま立てる（掴む前に断るとき＝押してから断らない・#686）。 */
-  setEditBlocked: (reason: EditBlockedReason) => void;
+  setEditBlocked: (reason: EditBlockedReason, at: BlockTarget) => void;
   /** 置いた部品の位置・大きさ・向き（#685）。触った時点で箱ぜんぶを書き込む＝見えている値を編集する。 */
   setSelectedClipBox: (patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number }) => void;
   /**
@@ -326,19 +352,19 @@ export interface TimelineState {
    * 選んだ帯を再生位置で分ける（#686 段階4・ADR-0034 決定16）。
    * 分けたら**後半を選び直す**（他社の型＝続きを触りたい手が自然に繋がる）。
    */
-  splitSelectedClip: (atSec: number) => void;
+  splitSelectedClip: (atSec: number, at?: BlockTarget) => void;
   /** **まとめて**箱を変える（1つでも置けなければ全体を断る＝ADR-0034 決定15）。 */
   setClipBoxesFor: (updates: readonly { id: string; patch: { x?: number; y?: number; w?: number; h?: number; rotation?: number } }[]) => void;
   /** 選んでいるクリップを複製する（同じ列の直後）。 */
   duplicateSelectedClip: () => void;
   /** 選んでいるクリップを消す。 */
-  removeSelectedClips: () => void;
+  removeSelectedClips: (at?: BlockTarget) => void;
   /**
    * **id を名指しで消す**（#721 レビュー）。まとめて消すときの確認は「聞いた時点の相手」を持つので、
    * 確認を出している間に選択が変わっても**聞いた数と消える数がずれない**（`exploding` が相手を組で
    * 持つのと同じ流儀）。`removeSelectedClips` はこれに選択を渡すだけ＝規則は1つ。
    */
-  removeClipsByIds: (clipIds: readonly string[]) => void;
+  removeClipsByIds: (clipIds: readonly string[], at?: BlockTarget) => void;
   /** 選んでいる見た目パターンの差し込み口に素材を入れる／外す（#632）。 */
   setSelectedClipAssetRef: (layerId: string, assetId: string | null) => void;
   /**
@@ -361,7 +387,7 @@ export interface TimelineState {
   /** 選んでいる見た目パターンの文字を書き換える（#632）。 */
   setSelectedClipText: (textKey: TextKey, text: string) => void;
   /** 見た目パターンの部品をバラす（中身ぶんの部品へ展開・#632）。**戻せない**（取り消しでだけ戻る）。 */
-  explodeClip: (clipId: string, template: Template) => void;
+  explodeClip: (clipId: string, template: Template, at?: BlockTarget) => void;
   /**
    * **写真・文字・図形を置く**（#684）。置いたものは**そのまま選ぶ**＝続けて中身を直せる。
    * 置ける列が無ければ理由を出す（黙って何もしない、を作らない）。
@@ -591,7 +617,102 @@ function writesFor(projectId: string): Promise<void> | undefined {
  */
 let voiceRunSeq = 0;
 
+// ── 帯に敷く絵（#332）の順番待ち ─────────────────────────────────
+// ⚠️ **`emptyState()` から呼ぶので、あちらより前に置く**＝後ろに置くと、store を組み上げる
+// 途中（`...emptyState()`）で**まだ初期化されていない**ものに触って落ちる（実際に踏んだ）。
+
+/**
+ * 帯に敷く絵を作るとき、**同時に走らせる数**（#332）。
+ *
+ * ⚠️ **一斉に立てない**＝帯が20本並んでいると FFmpeg が20本同時に立つ（書き出し中でも立つ）。
+ * CPU を取り合って、**いま焼いている動画まで遅くなる**。順番に流せば絵は同じで、
+ * 見え方も「手前から埋まる」だけ。
+ */
+const ANALYSIS_CONCURRENCY = 2;
+
+let analysisRunning = 0;
+/**
+ * いま書き出し中か（順番待ちから取り出すときに見る）。
+ *
+ * ⚠️ **store の外から見る**＝順番待ちはモジュールの持ち物で `get()` を持たないので、
+ * `useTimelineStore.getState()` を直に読む（走り出させないことが唯一の止め方なので、
+ * ここで見ないと止まらない）。
+ */
+function isExportBusyNow(): boolean {
+  try {
+    return isTimelineExportBusy(useTimelineStore.getState().exportRun.phase);
+  } catch {
+    return false; // まだ store が組み上がっていない（起動直後）＝止める理由が無い
+  }
+}
+const analysisQueue: (() => Promise<void>)[] = [];
+/** いまの世代（#332）。文書を手放したら上げる＝前の文書の仕事の結果を捨てる。 */
+let analysisGeneration = 0;
+/** いまの世代を読む（着地したときに「まだ同じ世代か」を見るため）。 */
+function currentAnalysisGeneration(): number { return analysisGeneration; }
+
+/**
+ * 順番待ちを空にする（#332・テスト用）。
+ *
+ * ⚠️ **順番待ちは**（素材番号の予約＝`resetAssetIdReservations` と同じく）**アプリ起動中ずっと残る**
+ *（画面をまたいで効かせるため）。テストは1本ずつが別の起動なので、毎回捨てる。
+ * 捨てないと、前のテストが止めたままの仕事で**次のテストのぶんが順番待ちで止まる**（実際に踏んだ）。
+ */
+export function resetAnalysisQueue(): void {
+  analysisQueue.length = 0;
+  // ⚠️ **世代を上げてから空きも戻す**（レビュー ℹ️）＝単に 0 へ戻すだけだと、走行中の仕事が後から
+  // `finally` で減らして**負になり、同時に走らせる数の上限が黙って上がる**。世代を見て
+  // 「前の世代の仕事は数を戻さない」ことにすれば、負にならずに空きだけ返せる。
+  analysisGeneration += 1;
+  analysisRunning = 0;
+}
+
+/** 順番待ちに並べて、空きが出たら走らせる（#332）。 */
+/**
+ * 待たせている仕事を動かす（#332）。
+ *
+ * ⚠️ **書き出しが終わったときに呼ぶ必要がある**（PR #876 レビュー 🟡）＝`ensureClipAnalysis` は
+ * 積んだ時点で印を付けるので、書き出し中に取り出しを止めたぶんは**次の描画でも二度と
+ * たのまれない**（呼ばないと永久に空の帯が残る）。
+ */
+export function pumpAnalysisQueue(): void {
+  // ⚠️ **取り出すときにも書き出し中を見る**（PR #876 レビュー 🟡）＝関門を積むときだけに
+  // 置くと、**積んだ後に書き出しが始まった**ぶんはそのまま走る（帯が多い文書を開いた直後に
+  // 書き出すと再現する）。`run`/`run_bytes` は `EXPORT_CHILD` に載らず中止でも殺せないので、
+  // 走り出させないことが唯一の止め方。⚠️ **捨てずに残す**＝書き出しが終わったら流す。
+  if (isExportBusyNow()) return;
+  while (analysisRunning < ANALYSIS_CONCURRENCY && analysisQueue.length > 0) {
+    const next = analysisQueue.shift();
+    if (!next) return;
+    analysisRunning += 1;
+    // 失敗しても順番待ちを止めない（絵が1つ出ないだけ）。
+    // 走り出した世代を控える＝捨てられた世代の仕事は**数を戻さない**（負にしない）。
+    // ⚠️ その副作用で、捨てた直後は**旧世代の残りと新世代**が一時的に上限を超えて並ぶことがある
+    //（走り終われば収まる＝自分で収束する）。負にして上限が黙って上がるよりは安全。
+    const born = analysisGeneration;
+    void next().catch(() => {}).finally(() => {
+      if (born === analysisGeneration) analysisRunning -= 1;
+      pumpAnalysisQueue();
+    });
+  }
+}
+
+/** 順番待ちに並べて、空きが出たら走らせる（#332）。 */
+function runAnalysis(job: () => Promise<void>): void {
+  analysisQueue.push(job);
+  pumpAnalysisQueue();
+}
+
+/**
+ * 開いていない状態。**文書を手放す入口はすべてここを通る**（開く・閉じる・読込失敗・手放す）。
+ *
+ * ⚠️ **帯に敷く絵の順番待ちもここで捨てる**（PR #876 レビュー 🔴）＝以前は
+ * `closeTimelineProject` にだけ置いていたが、**一覧から別の動画を開く**（`openTimelineProject`）は
+ * そこを通らないので、**実機の主要な遷移で一度も走らなかった**。手放した文書のために FFmpeg が
+ * 走り続ける（着地しても捨てるだけの仕事に CPU を使う）。**呼び忘れを構造で防ぐ**ためここへ移す。
+ */
 function emptyState() {
+  resetAnalysisQueue();
   return {
     doc: null,
     loadError: null,
@@ -599,11 +720,12 @@ function emptyState() {
     playheadSec: 0,
     selectedClipIds: [] as string[],
     assetSrcById: {} as Record<string, string>,
+    analysisByPath: {} as Record<string, AssetAnalysis | null>,
     videoSrcById: {} as Record<string, string>,
     assetSizes: {} as Record<string, SourceSize>,
     audioSrcByKey: {} as Record<string, string>,
     history: emptyHistory<TimelineProject>(),
-    editBlocked: null as EditBlockedReason | null,
+    editBlocked: null as { reason: EditBlockedReason; at: BlockTarget } | null,
     voiceError: null as string | null,
     importError: null as string | null,
     isImporting: false,
@@ -762,6 +884,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     // 開くときと同じ理由で、走行中は閉じない（`exportRun` ごと初期化されると書き出し中の締めが外れる）。
     if (isTimelineExportBusy(get().exportRun.phase)) return;
     releaseSaveGuard();
+    // 順番待ちの片づけは `emptyState()` の中（手放す入口すべてが通る）。
     set({ ...emptyState() });
   },
 
@@ -813,29 +936,29 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
   moveSelectedClip: (to) => applyEdit(set, get, (doc, id) => moveClip(doc, id, to)),
   trimSelectedClip: (edge, sec) => applyEdit(set, get, (doc, id) => trimClip(doc, id, edge, sec)),
-  moveClipById: (clipId, to) => applyEditTo(set, get, clipId, (doc, id) => moveClip(doc, id, to)),
+  moveClipById: (clipId, to) => applyEditTo(set, get, clipId, (doc, id) => moveClip(doc, id, to), PANEL_ID.arrange),
   moveClipsBy: (updates) => {
     const doc = get().doc;
     if (!doc || updates.length === 0) return;
     const r = moveClips(doc, updates);
     if (r.ok) commit(set, get, r.doc);
-    else set({ editBlocked: r.reason });
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
   },
-  trimClipById: (clipId, edge, sec) => applyEditTo(set, get, clipId, (doc, id) => trimClip(doc, id, edge, sec)),
-  setEditBlocked: (reason) => set({ editBlocked: reason }),
+  trimClipById: (clipId, edge, sec) => applyEditTo(set, get, clipId, (doc, id) => trimClip(doc, id, edge, sec), PANEL_ID.arrange),
+  setEditBlocked: (reason, at) => set({ editBlocked: { reason, at: blockTargetFor(reason, at) } }),
   setSelectedClipBox: (patch) =>
     applyEdit(set, get, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
   setClipBoxFor: (clipId, patch) =>
-    applyEditTo(set, get, clipId, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch)),
+    applyEditTo(set, get, clipId, (d, id) => setClipBox(d, id, dimsForOrientation(d.videoSettings.aspectRatio), patch), PANEL_ID.preview),
   setClipTextFor: (clipId, text) => applyEditTo(set, get, clipId, (d, id) => setVisualClipContent(d, id, { text })),
-  splitSelectedClip: (atSec) => {
+  splitSelectedClip: (atSec, at = PANEL_ID.arrange) => {
     const { doc, selectedClipIds } = get();
     if (!doc || selectedClipIds.length !== 1) return;
     // ⚠️ **見た目パターンを渡す**（#816-2）＝差し込み口に入れた動画の頭出しを進めるのに要る
     // （どの枠が動画を受けるかは見た目パターンが決める＝描く側と同じ規則）。
     const templateById = new Map(useProjectStore.getState().templates.map((t) => [t.templateId, t]));
     const r = splitClip(doc, selectedClipIds[0], atSec, volumeAt, { templateOf: (id) => templateById.get(id) });
-    if (!r.ok) { set({ editBlocked: SPLIT_BLOCKED_REASON[r.reason] }); return; }
+    if (!r.ok) { set({ editBlocked: { reason: SPLIT_BLOCKED_REASON[r.reason], at } }); return; }
     // ⚠️ 選択の差し替えは **`commit` に載せる**（#750 レビュー）。別に `set` すると、`commit` が
     // 断ったとき（書き出し中）でも**存在しない id が選択に残り**、以後の操作が「見つかりません」で
     // 空振りする（嘘の理由）。`explodeClip` と同じ形。
@@ -846,20 +969,22 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc || updates.length === 0) return;
     const r = setClipBoxes(doc, dimsForOrientation(doc.videoSettings.aspectRatio), updates);
     if (r.ok) commit(set, get, r.doc);
-    else set({ editBlocked: r.reason });
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.preview) } });
   },
   duplicateSelectedClip: () => applyEdit(set, get, (doc, id) => duplicateClip(doc, id)),
 
-  removeSelectedClips: () => get().removeClipsByIds(get().selectedClipIds),
+  removeSelectedClips: (at) => get().removeClipsByIds(get().selectedClipIds, at),
 
-  removeClipsByIds: (clipIds) => {
+  // ⚠️ **渡されなかったら帯**（#869 レビュー 🟡）＝消す入口は4つあり、どれか1つでも渡し忘れると
+  // **押していない欄に返事が出る**。安全側は「必ず見える所」＝帯（欄を閉じていても見える）。
+  removeClipsByIds: (clipIds, at = BLOCK_GLOBAL) => {
     const doc = get().doc;
     if (!doc || clipIds.length === 0) return;
     // **固定した列の部品が混ざっていたら断る**（#701 レビュー）＝`Ctrl+A` で全部選んでから消せてしまうと、
     // 固定が意味を失う。ほかの編集（動かす・複製する）が固定列を断るのと同じ扱い。
     const checked = removeSelectedClipsChecked(doc, clipIds);
     if (!checked.ok) {
-      set({ editBlocked: checked.reason });
+      set({ editBlocked: { reason: checked.reason, at } });
       return;
     }
     // 消した後は選択を空にする（消えたものを選んだままにしない）。
@@ -876,21 +1001,21 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = clearKeyframes(doc, targetId);
     if (r.ok) commit(set, get, r.doc);
-    else set({ editBlocked: r.reason });
+    else set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.selected) } });
   },
 
   setSelectedSubtitleText: (text) => applyEdit(set, get, (d, id) => setSubtitleText(d, id, text)),
   setSelectedSubtitleVoiceLink: (voiceClipId) =>
     applyEdit(set, get, (d, id) => setSubtitleVoiceLink(d, id, voiceClipId)),
 
-  explodeClip: (clipId, template) => {
+  explodeClip: (clipId, template, at = PANEL_ID.selected) => {
     const doc = get().doc;
     if (!doc) return;
     // **対象は確認したその部品**（選択ではなく id で受ける）＝確認を出したまま別の部品を選んでも、
     // 戻せない操作が別の部品に効かない。
     const r = explodeTemplateClip(doc, clipId, template);
     if (!r.ok) {
-      set({ editBlocked: r.reason });
+      set({ editBlocked: { reason: r.reason, at } });
       return;
     }
     // バラした部品をまとめて選ぶ＝続けて動かせる（元の部品はもう無い）。
@@ -912,7 +1037,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         // 移さないと、塞がっていて先の時刻へ置かれたときに**仕上がり確認に何も現れない**（#684 レビュー）。
         commit(set, get, r.doc, { selectedClipIds: [placed.id], playheadSec: placed.startSec });
       } else {
-        set({ editBlocked: r.reason });
+        set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
       }
       return;
     }
@@ -927,7 +1052,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const placeable = placeableVisualTracks(doc);
     // 置ける列が1本も無いときは、理由を出す（押しても何も起きない、を作らない・§2-5）。
     if (placeable.length === 0) {
-      set({ editBlocked: EDIT_BLOCKED.notFound });
+      set({ editBlocked: { reason: EDIT_BLOCKED.notFound, at: blockTargetFor(EDIT_BLOCKED.notFound, PANEL_ID.place) } });
       return;
     }
     // 欄で選んだ列があればそれを使う（表示と結果を割らない）。無い／置けない列なら手前へ落とす
@@ -938,7 +1063,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const startSec = firstFreeStart(doc.clips, track.id, get().playheadSec, VISUAL_CLIP_DURATION_SEC);
     const r = addVisualClip(doc, { ...input, trackId: track.id, startSec });
     if (!r.ok) {
-      set({ editBlocked: r.reason });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.place) } });
       return;
     }
     const placed = r.doc.clips[r.doc.clips.length - 1];
@@ -951,7 +1076,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = addAudioClip(doc, input);
     if (!r.ok) {
-      set({ editBlocked: r.reason });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.audio) } });
       return;
     }
     const before = new Set(doc.clips.map((c) => c.id));
@@ -1010,6 +1135,48 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       await importAssetByPath(get().doc!.projectId, fileName, path));
   },
 
+  ensureClipAnalysis: (clipId, barWidthPx) => {
+    const doc = get().doc;
+    if (!doc) return;
+    const clip = doc.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    // 出どころの決め方は domain に1つ（`clipAnalysisSource`）＝音の部品・読み上げ・映像の
+    // どれを見るかを画面と store で書き分けない。
+    const src = clipAnalysisSource(clip, (id) => doc.assets.find((a) => a.assetId === id));
+    if (!src) return;
+    // ⚠️ **書き出し中は測らない**（レビュー 🟡・ADR-0032 決定22「走行中は入力を固定」）＝
+    // `run`/`run_bytes` は `EXPORT_CHILD` に載らないので、**中止でもアプリ終了でも殺せない**
+    // FFmpeg が焼いている最中に増える（CPU を取り合う）。
+    // ⚠️ **印を付ける前に返す**＝後ろに置くと、書き出しが終わってもその部品だけ
+    // 「もう一度たのまない」規則で**永久に空**のままになる。
+    if (isTimelineExportBusy(get().exportRun.phase)) return;
+    // ⚠️ **一度たのんだら二度たのまない**（`null` も記録）＝帯は再描画のたびに呼ばれるので、
+    // 素通しにすると FFmpeg が何度も起動する。`in` で見る（`null` を「まだ」と読まない）。
+    if (src.key in get().analysisByPath) return;
+    // 走り出したことを先に印す（同じ帯が続けて呼んでも1回で済む）。
+    set((s) => ({ analysisByPath: { ...s.analysisByPath, [src.key]: null } }));
+    const projectId = doc.projectId;
+    const generation = currentAnalysisGeneration();
+    // ⚠️ **同時に走らせる数を絞る**（`ANALYSIS_CONCURRENCY`）＝帯が20本並んでいると
+    // FFmpeg が20本**同時に**立つ（書き出し中でも立つ）。CPU を取り合って、いま焼いている
+    // 動画まで遅くなる。順番に流せば絵は同じで、見え方も「手前から埋まる」だけ。
+    void runAnalysis(async () => {
+      const result: AssetAnalysis = src.kind === ANALYSIS_KIND.waveform
+        ? { peaks: await audioPeaks(projectId, src.relPath, waveformBuckets(barWidthPx), src.fromSec, src.lengthSec) }
+        : { stripUrl: (await videoFilmstrip(projectId, src.relPath, filmstripFrames(barWidthPx), src.fromSec, src.lengthSec)) ?? undefined };
+      // ⚠️ **待っている間に別の動画へ移っていたら書かない**（`runImport` と同じ流儀）＝
+      // 別の文書の同じ場所の素材に、前の文書の波形が付く。
+      const now = get().doc;
+      if (!now || now.projectId !== projectId) return;
+      // ⚠️ **手放した後の着地は捨てる**＝文書を閉じてから戻ってきた結果を書かない
+      // （同じ動画を開き直したときに、前の並べ方のままの絵が残る）。
+      if (generation !== currentAnalysisGeneration()) return;
+      // 何も取れなかったら `null` のまま（もう一度たのまない）。
+      if (!result.peaks?.length && !result.stripUrl) return;
+      set((s) => ({ analysisByPath: { ...s.analysisByPath, [src.key]: result } }));
+    });
+  },
+
   addAssets: async (items) => {
     // ⚠️ **入口で1回だけ断る**（§2-5）＝途中で `isImporting` に弾かれて**黙って落ちる**のを防ぐ
     // （`canStartImport` は取り込み中を**黙って** false にする＝まとめて渡すと数件だけ消える）。
@@ -1063,7 +1230,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = addVoiceClip(doc, input);
     if (!r.ok) {
-      set({ editBlocked: r.reason });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.voice) } });
       return;
     }
     const before = new Set(doc.clips.map((c) => c.id));
@@ -1082,7 +1249,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc || selectedClipIds.length !== 1) return;
     const r = addLinkedSubtitleClip(doc, selectedClipIds[0]);
     if (!r.ok) {
-      set({ editBlocked: r.reason });
+      // 入口は「選んだ部品」欄の**その字幕を置く**ボタン（読み上げを置く欄ではない・実測）。
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.selected) } });
       return;
     }
     const before = new Set(doc.clips.map((c) => c.id));
@@ -1153,7 +1321,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 理由は `commit` の中で消えるので、まとめて渡す（`commit` は毎回 `editBlocked` を空にする）。
       commit(set, get, sized?.ok ? sized.doc : withVoice, {
         audioSrcByKey: { ...get().audioSrcByKey, [`voice:${voicePath}`]: result.audioDataUrl },
-        ...(sized && !sized.ok ? { editBlocked: sized.reason } : {}),
+        ...(sized && !sized.ok ? { editBlocked: { reason: sized.reason, at: blockTargetFor(sized.reason, PANEL_ID.selected) } } : {}),
       }, { outsideGroup: true });
       // 尺を測れなかったときは黙って仮の長さのままにしない（区間から出た声は鳴らない）。
       clearIfMine(result.durationSec > 0 ? {} : { voiceError: VOICE_DURATION_UNKNOWN_MESSAGE });
@@ -1161,7 +1329,12 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       // 画面を離れると、着地したぶんを**誰も書かない**＝開き直すと作った声と合わせた長さが
       // 黙って消える（音声ファイルだけ残る）。取り込み（`runImport`）が同じ穴を同じ形で塞いでいる。
       void get().saveTimelineProject();
-    } catch {
+    } catch (e) {
+      // ⚠️ **合成側が返した文言があればそれを出す**（PR #883 レビュー）＝この境界は「失敗を文字列で
+      // 投げる」慣習（Rust の `invoke` が拒否する形）で、読み方の反映に失敗したときの次の行動
+      //（`READING_DICT_SYNC_FAILED`）もここを通る。捨てると「しばらくしてから、もう一度」＝
+      // 何度やっても同じ理由で失敗する、効かない案内になる（§2-5）。場面形式は `joinVoiceFailure` が同じ形。
+      const failedMessage = typeof e === "string" ? e : VOICE_FAILED_MESSAGE;
       // 失敗も成功と同じく**別の文書の部品を巻き込まない**（id は文書ごとに採番＝同じ id が別文書にもある）。
       const now = get().doc;
       const failed = now?.clips.find((c) => c.id === clipId);
@@ -1178,7 +1351,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
       if (now && now.projectId === doc.projectId && failed && sameInput) {
         // 上と同じ理由＝**作り始める前が「作成済み」なら作れなかったことにしない**（#755-3）。
         setVoiceStatus(set, get, clipId, statusAfterVoiceFailure(statusBefore));
-        set({ voiceError: `${VOICE_FAILED_MESSAGE}${keptVoiceSuffix(statusBefore, failed.voice?.voicePath)}` });
+        set({ voiceError: `${failedMessage}${keptVoiceSuffix(statusBefore, failed.voice?.voicePath)}` });
         void get().saveTimelineProject(); // 印も同じ理由で自分から書く（上の ⚠️）
       }
       clearIfMine();
@@ -1190,7 +1363,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = addTemplateClip(doc, input);
     if (!r.ok) {
-      set({ editBlocked: r.reason });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.templates) } });
       return;
     }
     // 置いた部品をそのまま選ぶ（続けて中身を入れられる）。**id は増えたものを引き当てる**＝
@@ -1211,7 +1384,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (!doc) return;
     const r = duplicateTrack(doc, trackId);
-    if (!r.ok) { set({ editBlocked: r.reason }); return; }
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
     commit(set, get, r.doc);
   },
   removeTrack: (trackId) => {
@@ -1219,7 +1392,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!doc) return;
     const r = removeTrack(doc, trackId);
     if (!r.ok) {
-      set({ editBlocked: r.reason });
+      set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } });
       return;
     }
     // 列と一緒に消えるクリップは選択からも外す（消えたものを選んだままにしない）。
@@ -1230,14 +1403,14 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     const doc = get().doc;
     if (!doc) return;
     const r = moveTrackTo(doc, trackId, toIndex);
-    if (!r.ok) { set({ editBlocked: r.reason }); return; }
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
     commit(set, get, r.doc);
   },
   moveTrackOrder: (trackId, direction) => {
     const doc = get().doc;
     if (!doc) return;
     const r = moveTrackOrder(doc, trackId, direction);
-    if (!r.ok) { set({ editBlocked: r.reason }); return; }
+    if (!r.ok) { set({ editBlocked: { reason: r.reason, at: blockTargetFor(r.reason, PANEL_ID.arrange) } }); return; }
     commit(set, get, r.doc);
   },
   setTrackFlag: (trackId, flag, value) => {
@@ -1462,6 +1635,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
         await clearExportFramesStage();
       } finally {
         useExportLockStore.getState().release(EXPORT_OWNER);
+        // ⚠️ **書き出しが終わったら、待たせていた帯の絵を流す**（#332・PR #876 レビュー 🟡）＝
+        // 順番待ちは書き出し中に取り出しを止めるので、ここで動かさないと**永久に空の帯**が残る
+        //（`ensureClipAnalysis` は既に印を付けているので、次の描画では二度とたのまれない）。
+        pumpAnalysisQueue();
       }
     }
   },
@@ -1535,6 +1712,7 @@ type GetState = () => TimelineState;
  *   非同期の完了（声ができた等）は利用者のひと続きの操作ではないので、まとめの「最初の1回」を
  *   食べてしまうと、打った文字と作った声が**同じ取り消しで一緒に消える**。必ず自分で1つ積む。
  */
+
 /**
  * 素材を取り込み始めてよいか（#712）。**2つの入口で同じ順に見る**（場面形式と同じ並び＝ADR-0026②）。
  * `false` のときは理由を出し終えている（黙って何もしない、を作らない）。
@@ -1550,7 +1728,7 @@ function canStartImport(
 ): boolean {
   if (!get().doc) return false;
   // 書き出しは**始めた時点の文書**を焼くので、増やしても動画に入らない（`commit` と同じ規準・§2-5）。
-  if (isTimelineExportBusy(get().exportRun.phase)) { set({ editBlocked: EDIT_BLOCKED.exporting }); return false; }
+  if (isTimelineExportBusy(get().exportRun.phase)) { set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } }); return false; }
   if (get().isImporting) {
     // 二重に取り込むと同じ番号の素材が2つできる。
     if (opts?.noticeWhenImporting) set({ importError: IMPORT_BUSY_MESSAGE });
@@ -1633,7 +1811,7 @@ function commit(
 ): void {
   // 書き出しは**始めた時点の文書**を焼く。途中の編集は動画に入らないので、黙って受け付けない（§2-5）。
   if (isTimelineExportBusy(get().exportRun.phase)) {
-    set({ editBlocked: EDIT_BLOCKED.exporting });
+    set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
     return;
   }
   const current = get().doc;
@@ -1667,7 +1845,7 @@ function commit(
 /** 書き出し中は取り消し・やり直しも止める（`commit` と同じ理由＝焼く文書は始めた時点のもの）。 */
 function blockedByExport(set: SetState, get: GetState): boolean {
   if (!isTimelineExportBusy(get().exportRun.phase)) return false;
-  set({ editBlocked: EDIT_BLOCKED.exporting });
+  set({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: BLOCK_GLOBAL } });
   return true;
 }
 
@@ -1699,10 +1877,18 @@ function restore(set: SetState, get: GetState, doc: TimelineProject, history: Hi
  * 「選んでいる1つのクリップ」に対する編集を流す。**置けなかったら文書を変えず理由だけ持つ**
  * （§2-5＝画面が「その場所には置けません」を出す）。複数選択中は対象が決まらないので何もしない。
  */
-function applyEdit(set: SetState, get: GetState, run: (doc: TimelineProject, clipId: string) => EditResult): void {
+function applyEdit(
+  set: SetState,
+  get: GetState,
+  run: (doc: TimelineProject, clipId: string) => EditResult,
+  // ⚠️ **既定は「選んだ部品」の欄**（#869）＝`*Selected*` の入口は**すべて**この欄のボタン・
+  // 数値欄から呼ばれる（実測。動かす・端を詰める・箱を変えるも含む）。掴んで動かす経路は
+  // `*ById` の方（相手を id で指す）なので、そちらで掴んだ面を明示する。
+  at: BlockTarget = PANEL_ID.selected,
+): void {
   const { selectedClipIds } = get();
   if (selectedClipIds.length !== 1) return;
-  applyEditTo(set, get, selectedClipIds[0], run);
+  applyEditTo(set, get, selectedClipIds[0], run, at);
 }
 
 /** **相手を id で指す**編集（掴んで動かす経路。選択に依らない＝上と同じ後始末を通す）。 */
@@ -1711,12 +1897,13 @@ function applyEditTo(
   get: GetState,
   clipId: string,
   run: (doc: TimelineProject, clipId: string) => EditResult,
+  at: BlockTarget = PANEL_ID.selected,
 ): void {
   const doc = get().doc;
   if (!doc) return;
   const r = run(doc, clipId);
   if (r.ok) commit(set, get, r.doc);
-  else set({ editBlocked: r.reason });
+  else set({ editBlocked: { reason: r.reason, at } });
 }
 
 /** 読み上げクリップの状態だけを差し替える（履歴に積まない＝作成中/失敗は編集ではない）。 */

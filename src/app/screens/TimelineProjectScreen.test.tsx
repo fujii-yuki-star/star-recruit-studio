@@ -10,7 +10,7 @@ import { CLIP_HANDLE_HIT_W_PX, CLIP_HANDLE_W_PX, CLIP_MENU_W_PX, TimelineProject
 import { PANEL_BODY_CLASS } from "../components/layout/PanelLayoutView";
 import { useTimelineStore } from "../store/timelineStore";
 import { BGM_CATALOG } from "../../domain/bgm/bgmCatalog";
-import { DELETE_LABEL, DUPLICATE_LABEL, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
+import { DELETE_LABEL, DUPLICATE_LABEL, editBlockedMessage, lockedTrackMessage, missingTemplateMessage, clockLabel } from "../uiLabels";
 import { useProjectStore } from "../store/projectStore";
 import { useExportLockStore } from "../store/exportLock";
 import { NARRATION_STATUS, PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from "../../domain/enums";
@@ -1094,7 +1094,7 @@ describe("TimelineProjectScreen: 動き（キーフレーム・#634）", () => {
     // 置く直前に書き出しが始まった＝store が断る経路（ボタンの disabled をすり抜けた場合）。
     useTimelineStore.setState({ exportRun: { phase: "rendering", percent: 10, message: null, cancelling: false } });
     fireEvent.click(screen.getByRole("button", { name: "この位置に置く" }));
-    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_EXPORTING");
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe("TIMELINE_EDIT_EXPORTING");
     expect((screen.getByLabelText("横のずれ（px）") as HTMLInputElement).value).toBe("200");
   });
 
@@ -1642,9 +1642,12 @@ describe("TimelineProjectScreen: 編集の場所を上から圧迫しない（�
     expect(screen.queryByText("時間の流れを自由に組み替えて動画を作ります。")).not.toBeInTheDocument();
   });
 
-  it("置けなかった理由は**編集の下**に出て、恒常の警告より前に来る（返事が画面外へ落ちない）", () => {
-    // **恒常の警告（見た目パターンが見つからない）を出したうえで**置けない操作をする＝
-    // 「返事が警告に押し流されない」を実際に確かめる（警告が無いと順序の確認が空振りする）。
+  /**
+   * 断りは**操作した欄の中**に出す（ADR-0034 決定10・#869）。
+   * ⚠️ 以前は欄グリッドの直下の帯に出しており、**欄がいくつも並ぶ画面でどの操作が断られたのか
+   * 読めなかった**（恒常の警告とも同じ見た目で並んでいた）。
+   */
+  it("置けなかった理由は**操作した欄の中**に出る（帯ではない）", () => {
     open({
       tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
       clips: [
@@ -1655,27 +1658,128 @@ describe("TimelineProjectScreen: 編集の場所を上から圧迫しない（�
     const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "あと" }));
     fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    // 「再生位置へ」は**選んだ部品**の欄のボタン＝返事もその欄の中に出る。
     fireEvent.click(screen.getByText("再生位置へ")); // clip_001（0〜5秒）と重なる＝置けない
     const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes("ずらすか、列を足して重ねて"));
     expect(notice).toBeDefined();
+    // **欄の中**にある（欄グリッドの外＝帯ではない）。
     const layoutArea = container.querySelector(".panel-layout")!;
-    // DOM の並びで**欄の後ろ**にあること＝上に積まれていない。
-    expect(layoutArea.compareDocumentPosition(notice!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // **その場の返事は貼り付けて常に見える**（下へ流すと恒常の警告に押されて画面外に落ちる）。
+    expect(layoutArea.contains(notice!)).toBe(true);
+    // **その場の返事**と分かる見た目（恒常の警告と同じ顔で並べない）。
     expect(notice!.classList.contains("timeline-flash")).toBe(true);
-    // 欄の後ろに並ぶ知らせのうち**先頭**であること（恒常の警告はその後ろ）。
-    // ※ 兄弟セレクタ（`~`）では見られない＝その場の返事は欄と同じ囲いの中、恒常の警告は囲いの外にある。
-    // **欄の中にある知らせは数えない**（欄の中身も notice を使う）。入れ子は「後ろ」とも判定されるため。
-    const afterLayout = [...container.querySelectorAll(".notice-warn")].filter(
-      (el) => !layoutArea.contains(el) && layoutArea.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(afterLayout.length).toBeGreaterThan(1); // 恒常の警告も出ている＝順序の確認が空振りしない
-    expect(afterLayout[0]).toBe(notice);
-    // **貼り付く知らせは欄と同じ囲いの中**＝下の操作の行を覆わない（覆うと戻る導線が押せなくなる）。
-    const zone = container.querySelector(".timeline-flash-zone")!;
-    expect(zone.contains(notice!)).toBe(true);
-    expect(zone.contains(screen.getByText("動画の一覧へ"))).toBe(false);
-    expect(zone.contains(screen.getByRole("button", { name: "取り消す" }))).toBe(false);
+    // 恒常の警告（見た目パターンが見つからない）は今までどおり欄の外に残る＝2つが混ざらない。
+    const outside = [...container.querySelectorAll(".notice-warn")].filter((el) => !layoutArea.contains(el));
+    expect(outside.some((el) => el.textContent?.includes("見た目パターンが見つからない部品が"))).toBe(true);
+    // ⚠️ **帯には重ねて出さない**＝同じ文が2か所に出ると、どちらが今の返事か読めない。
+    expect(outside.some((el) => el.textContent?.includes("ずらすか、列を足して重ねて"))).toBe(false);
+    expect(screen.getAllByRole("alert").filter((el) => el.textContent?.includes("ずらすか、列を足して重ねて"))).toHaveLength(1);
+  });
+
+  /**
+   * ⚠️ **行き先の欄を閉じていたら帯へ倒す**（#869）＝欄の中に出しても見えないので、
+   * 押した結果が**黙って消える**（§2-5）。
+   */
+  it("返す先の欄を閉じているときは帯に出す（黙って消えない）", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual }],
+      clips: [
+        { id: "clip_001", kind: TIMELINE_CLIP_KIND.template, trackId: "track_001", startSec: 0, durationSec: 5, templateId: "tmpl_missing" },
+        { id: "clip_002", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 6, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あと" },
+      ],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "あと" }));
+    fireEvent.change(screen.getByLabelText("再生位置"), { target: { value: "2" } });
+    fireEvent.click(screen.getByText("再生位置へ"));
+    // 「選んだ部品」の欄を閉じる（欄の中に出しても見えなくなる）。
+    fireEvent.click(screen.getByLabelText("選んだ部品の欄の操作"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "この欄を閉じる" }));
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes("ずらすか、列を足して重ねて"));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(false); // 帯（欄の外）に出ている
+  });
+
+  /**
+   * ⚠️ **消す入口は4つある**（#869 レビュー 🟡）＝「選んだ部品」欄のボタン2つ・仕上がり確認の
+   * 右クリック・並びの右クリック。渡し忘れると**押していない欄に返事が出る**。
+   */
+  it("「選んだ部品」欄から消せないときは、その欄の中に理由が出る", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => {
+      useTimelineStore.getState().removeClipsByIds(["clip_001"], "selected");
+    });
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes(editBlockedMessage[EDIT_BLOCKED.lockedSelection]));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(true);
+  });
+
+  /**
+   * ⚠️ **画面全体の話になる理由は、欄を渡されても帯へ倒す**（#869 レビュー 🟡）。
+   * 入口ごとに「書き出し中だけは帯」と書くと、入口が増えたとき片方だけ欄へ押し込まれ、
+   * **同じ状況なのに出る場所が違う**（ADR-0026②）。規則は `blockTargetFor` に1つだけ置いている。
+   */
+  it.each([
+    ["書き出し中", EDIT_BLOCKED.exporting],
+    ["再生中", EDIT_BLOCKED.playing],
+    ["対象が無い", EDIT_BLOCKED.notFound],
+  ])("%s は欄を渡しても帯に出る", (_name, reason) => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => {
+      useTimelineStore.getState().setEditBlocked(reason, "selected"); // 欄を渡す
+    });
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes(editBlockedMessage[reason]));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(false);
+  });
+
+  /** ⚠️ 逆に、**欄の話である理由は欄へ**（規則が何でも帯へ倒していないことを確かめる）。 */
+  it("欄の話である理由は、渡した欄の中に出る", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => {
+      useTimelineStore.getState().setEditBlocked(EDIT_BLOCKED.overlap, "selected");
+    });
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes(editBlockedMessage[EDIT_BLOCKED.overlap]));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(true);
+  });
+
+  /** ⚠️ **渡し忘れは帯へ倒す**＝押していない欄に返事を出さない（安全側＝必ず見える所）。 */
+  it("どこから消したか渡されなければ帯に出る", () => {
+    open({
+      tracks: [{ id: "track_001", kind: TRACK_KIND.visual, locked: true }],
+      clips: [{ id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" }],
+    });
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => {
+      useTimelineStore.getState().removeClipsByIds(["clip_001"]);
+    });
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes(editBlockedMessage[EDIT_BLOCKED.lockedSelection]));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(false);
+  });
+
+  /** ⚠️ 画面全体に効く断り（書き出し中）は今までどおり帯＝欄を閉じていても見える。 */
+  it("画面全体に効く断りは帯に出る", () => {
+    open();
+    const { container } = render(<TimelineProjectScreen onNavigate={vi.fn()} />);
+    act(() => {
+      useTimelineStore.setState({ editBlocked: { reason: EDIT_BLOCKED.exporting, at: "global" } });
+    });
+    const layoutArea = container.querySelector(".panel-layout")!;
+    const notice = screen.getAllByRole("alert").find((el) => el.textContent?.includes(editBlockedMessage[EDIT_BLOCKED.exporting]));
+    expect(notice).toBeDefined();
+    expect(layoutArea.contains(notice!)).toBe(false);
   });
 
   it("見た目パターンが見つからない知らせも編集の下に出る", () => {
@@ -1932,7 +2036,7 @@ describe("TimelineProjectScreen: 選択の作法（レビュー指摘）", () =>
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(1); // 消えない
     // ⚠️ 断る語彙は**画面と同じ**（#752 レビュー）＝「選んだ中に固定列のものが混ざる」という同じ
     // 述語に2つの言い方を持たない（次の行動も「選び直す」で進める）。
-    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
   });
 
   it("選ぶと、前の部品で出た理由は消える（いまの部品の返事に見せない）", () => {
@@ -1941,7 +2045,7 @@ describe("TimelineProjectScreen: 選択の作法（レビュー指摘）", () =>
         { id: "clip_001", kind: TIMELINE_CLIP_KIND.text, trackId: "track_001", startSec: 0, durationSec: 5, x: 0, y: 0, w: 10, h: 10, text: "あ" },
       ],
     });
-    useTimelineStore.setState({ editBlocked: "TIMELINE_EDIT_OVERLAP", voiceError: "声を作れませんでした。" });
+    useTimelineStore.setState({ editBlocked: { reason: "TIMELINE_EDIT_OVERLAP", at: "arrange" }, voiceError: "声を作れませんでした。" });
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "あ" }));
     expect(useTimelineStore.getState().editBlocked).toBeNull();
@@ -3326,7 +3430,7 @@ describe("TimelineProjectScreen: キーと数値で触れる（#721）", () => {
     // ⚠️ **キーには理由を出す**（#752-3）。以前はここで「断り文は出ない」を固定していたが、
     // それはボタンの説明が見えている前提の書き方だった＝**キーを押した人はボタンを指していない**。
     // 分ける `Ctrl+K` は理由を立てるのに消すだけ黙る、という非対称も消える（ADR-0026②）。
-    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
     expect(screen.getByText(/固定を外すか、選び直してください/)).toBeInTheDocument();
     // 理由はボタンの側にも、押す前から出ている（押せないことも一緒に見る）。
     expect(screen.getByRole("button", { name: "削除" })).toBeDisabled();
@@ -4033,7 +4137,7 @@ describe("TimelineProjectScreen: 帯の作法（#701）", () => {
     fireEvent.pointerMove(window, { pointerId: 1, buttons: 1, clientX: 10, clientY: 5 });
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 10, clientY: 5 });
     expect(useTimelineStore.getState().doc!.tracks.map((t) => t.id)).toEqual(["track_001", "track_002"]); // 動かない
-    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED"); // 理由を出す
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe("TIMELINE_EDIT_LOCKED"); // 理由を出す
   });
 
   it("「⋮」を押して動かしても列は並べ替わらない（入れ子の掴み口・#767 レビュー）", () => {
@@ -4645,7 +4749,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     drag(band("あ"), 36 * 4); // 2つ目（5秒〜）に重なる所まで運ぶ
     expect(useTimelineStore.getState().doc!.clips[0].startSec).toBe(0); // 寄せない＝元のまま
-    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.overlap); // 理由は出す
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.overlap); // 理由は出す
     expect(screen.getByRole("alert").textContent).toContain("列を足して"); // 次の行動が読める
   });
 
@@ -4765,7 +4869,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     drag(band("あ"), 36 * 15);
     const after = useTimelineStore.getState().doc!.clips.map((c) => c.startSec);
     expect(after).toEqual([0, 5, 20]);
-    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.overlap);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.overlap);
   });
 
   it("掴んだ直後の `click` で選び直さない（理由が消える・Shift で選択が外れる）", () => {
@@ -4776,7 +4880,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     // なので、そのままだと「捨てる印はキーの `click` には効かせない」（#833-1 レビュー 🟡）に当たって
     // **この経路を通らなくなる**（テストが空振りする）。実機で離した後に来るのは指の `click`。
     fireEvent.click(band("あ"), { shiftKey: true, detail: 1 }); // 離した後に来る click
-    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.overlap); // 消えない
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.overlap); // 消えない
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]); // 外れない
   });
 
@@ -4880,7 +4984,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(useTimelineStore.getState().isPlaying).toBe(false);
     // ⚠️ **キーで断るなら理由を出す**（#752 レビュー）＝`Delete`・`Ctrl+K` は喋るのに `Space` だけ
     // 黙ると、押せない見た目を持たない入口で挙動が割れる。
-    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_PLAY_EXPORTING");
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe("TIMELINE_PLAY_EXPORTING");
     expect(screen.getByText(/終わってから再生できます/)).toBeInTheDocument();
   });
 
@@ -5928,7 +6032,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     render(<TimelineProjectScreen onNavigate={vi.fn()} />);
     act(() => { useTimelineStore.getState().moveClipsBy([{ id: "clip_free", startSec: 5 }, { id: "clip_locked", startSec: 5 }]); });
     expect(useTimelineStore.getState().doc!.clips.every((c) => c.startSec === 0)).toBe(true); // 全か無か
-    expect(useTimelineStore.getState().editBlocked).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe("TIMELINE_EDIT_LOCKED_SELECTION");
   });
 
   it("**動いている部品はまとめて動かすときも混ざらない**（絵が飛ばない・#746 レビュー 🔴）", () => {
@@ -6315,7 +6419,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.getByRole("button", { name: "ここで分ける" })).toBeDisabled();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(2); // 増えない
-    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.splitOutside); // 理由は出す
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.splitOutside); // 理由は出す
   });
 
   // ⚠️ **差し込み口の動画でも「押す前に」塞ぐ**（PR #825 レビュー 🟡）＝事前の判定に見た目パターンを
@@ -6341,7 +6445,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.getByRole("button", { name: "ここで分ける" })).toBeDisabled();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(1); // 増えない
-    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.splitPastSource);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.splitPastSource);
   });
 
   it("差し込み口の動画でも、素材が残っている位置なら分けられる（過剰に塞がない）", () => {
@@ -6371,7 +6475,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     expect(screen.getByRole("button", { name: "ここで分ける" })).toBeDisabled();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(useTimelineStore.getState().doc!.clips).toHaveLength(2);
-    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.playing);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.playing);
     // ⚠️ **右クリックの道も塞ぐ**（#750 レビュー）＝ここだけ素通しだと、走っている再生位置で
     // 分割が確定する。3つの入口が同じ材料を見ていることを、実際にメニューを開いて確かめる。
     fireEvent.contextMenu(container.querySelector(".timeline-clip") as HTMLElement);
@@ -6391,7 +6495,7 @@ describe("TimelineProjectScreen: 帯を掴む（#686）", () => {
     // ⚠️ 断られたのに選択だけ差し替わると、**存在しない id** が残って以後の操作が
     // 「見つかりません」（嘘の理由）で空振りする。
     expect(useTimelineStore.getState().selectedClipIds).toEqual(["clip_001"]);
-    expect(useTimelineStore.getState().editBlocked).toBe(EDIT_BLOCKED.exporting);
+    expect(useTimelineStore.getState().editBlocked?.reason).toBe(EDIT_BLOCKED.exporting);
   });
 
   it("Escape でやめたら元のまま（掴んだ位置に置かない）", () => {
