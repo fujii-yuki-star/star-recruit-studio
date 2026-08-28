@@ -314,7 +314,11 @@ fn add_library_asset(
     let entry = LibraryAsset {
         id: asset_id.clone(),
         file_name,
-        display_name: if display_name.trim().is_empty() { asset_id } else { display_name },
+        display_name: if display_name.trim().is_empty() {
+            asset_id
+        } else {
+            display_name
+        },
         asset_type,
         tags,
     };
@@ -354,7 +358,9 @@ fn copy_library_asset_to_project(
         return Err("素材を取り込めませんでした。もう一度お試しください。".to_string());
     }
     let rel = format!("assets/{file_name}");
-    let dest = crate::assets::project_dir(&app, &project_id)?.join("assets").join(&file_name);
+    let dest = crate::assets::project_dir(&app, &project_id)?
+        .join("assets")
+        .join(&file_name);
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -379,7 +385,13 @@ fn delete_library_asset(app: tauri::AppHandle, asset_id: String) -> Result<(), S
             fs::remove_file(&path).map_err(|e| e.to_string())?;
         }
     }
-    write_library(&app, &list.into_iter().filter(|e| e.id != asset_id).collect::<Vec<_>>())
+    write_library(
+        &app,
+        &list
+            .into_iter()
+            .filter(|e| e.id != asset_id)
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// ライブラリの素材の名前・タグを直す（実体は触らない）。
