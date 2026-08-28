@@ -226,16 +226,21 @@ export function buildPrecheckItems(
   // 既に「字幕の長さ」が出ている**ので、切り詰めは必ずそれと重なる（原因も直し方も同じ）。
   // ⚠️ **項目ごと消さない**＝縦型は枠が 44〜46 字ぶんなので、**45〜60 字は「字幕の長さ」を
   // 素通りして切り詰めだけで拾える**（本物の穴を塞いでいる）。
-  // ⚠️ **消すのは「字幕そのもの」だけ**（PR #877 再レビュー 🟡）＝場面ごと丸ごと飛ばしていたので、
-  // 同じ場面にある**別の文字**（見出し・会社名など）の切り詰めまで握りつぶしていた。
-  // そちらは字幕の長さとは**原因も直し方も別**なので、黙って消してはいけない（§2-5）。
+  // ⚠️ **消すのは「長すぎると既に伝えた字幕」だけ**（PR #877 再レビュー 🟡×2）。
+  // 段階的に絞ってきた＝①場面ごと丸ごと飛ばしていた → ②字幕アイテム全部を外した → ③いまここ。
+  // ②でも足りなかったのは、**自由配置は字幕ボックスを複数置ける**（ADR-0029・併用が推奨）ため＝
+  // 長い方の字幕で場面が「伝えた」になると、**別のボックスの切り詰め**（原因も直し方も別）まで消えていた。
+  // 除外の単位を**アイテムの文言**まで下ろす（長さを超えているものだけ外す）。
   const alreadyTold = new Set(scenes.filter((_, i) => subtitle.nums.includes(i + 1)).map((s) => s.sceneId));
   const truncated = offending((s) => {
     const found = laidOut.find((x) => x.scene.sceneId === s.sceneId);
     if (found == null) return false;
-    // 「字幕の長さ」で既に伝えた場面では、**字幕のアイテムだけ**を外して測り直す。
     // 字幕かどうかは**共有の述語**（`isSubtitleItem`）で見る＝書き出しの「字幕を入れる」OFF と同じ判定（§2-7）。
-    const items = alreadyTold.has(s.sceneId) ? found.items.filter((it) => !isSubtitleItem(it)) : found.items;
+    // 長さの基準も「字幕の長さ」の項目と**同じ関数**（`subtitleMax`）から採る（2か所に数字を書かない）。
+    const max = subtitleMax(s);
+    const items = alreadyTold.has(s.sceneId)
+      ? found.items.filter((it) => !(isSubtitleItem(it) && (it.kind === "text" ? it.text.length : 0) > max))
+      : found.items;
     return truncatedTexts(items).length > 0;
   });
   if (truncated.nums.length > 0) {

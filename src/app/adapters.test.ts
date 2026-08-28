@@ -930,6 +930,27 @@ describe("buildPrecheckItems 書き出す前の安心（#346）", () => {
     expect(find(items, "truncatedText")).toBeDefined(); // 見出しの切れも出る（握りつぶさない）
   });
 
+  /**
+   * ⚠️ **自由配置は字幕ボックスを複数置ける**（ADR-0029・併用が推奨）＝長い方の字幕で場面が
+   * 「伝えた」になっても、**別のボックスの切り詰め**（原因も直し方も別）まで消してはいけない（§2-5）。
+   * 除外の単位は「字幕アイテム全部」ではなく「**長さを超えている文言**」まで下ろす。
+   */
+  it("字幕が2つあり、長いのは片方だけなら、もう片方の切れは出す", () => {
+    const twoBoxes: Template = {
+      ...photoTemplate,
+      layers: [
+        // 長い方（60字超＝「字幕の長さ」が出る）。枠は広いので切り詰まらない。
+        { id: "subA", type: "subtitle", textKey: "subtitle", x: 0, y: 900, w: 1800, h: 200, fontSize: 20, maxLines: 6, zIndex: 0 },
+        // 短いが枠が狭い方（切り詰まる）。長さは超えていないので除外の対象にしない。
+        { id: "subB", type: "subtitle", textKey: "caption", x: 0, y: 100, w: 120, h: 60, fontSize: 40, maxLines: 1, zIndex: 1 },
+      ],
+    } as unknown as Template;
+    const scene = sc({ texts: { subtitle: "あ".repeat(120), caption: "い".repeat(20) } });
+    const items = buildPrecheckItems([scene], [], [twoBoxes]);
+    expect(find(items, "subtitle")?.severity).toBe("action"); // 長い方は「字幕の長さ」で出る
+    expect(find(items, "truncatedText")).toBeDefined(); // 短い方の切れは握りつぶさない
+  });
+
   it("「字幕の長さ」で知らせた場面で、切れているのが字幕だけなら出さない（重複を消す）", () => {
     const subTemplate: Template = {
       ...photoTemplate,
