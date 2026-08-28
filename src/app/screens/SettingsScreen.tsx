@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ScreenId } from "../data/mockData";
 import { PageHead } from "../components/ui";
 import { PlayIcon, StopIcon } from "../components/icons";
+import { BrandKitSection } from "../components/BrandKitSection";
 import { ReadingDictSection } from "../components/ReadingDictSection";
 import { UserFontSection } from "../components/UserFontSection";
 import { ExportLockBanner } from "../components/ExportLockBanner";
@@ -379,6 +380,8 @@ export function SettingsScreen({ onNavigate }: { onNavigate: (screen: ScreenId) 
           )}
         </div>
 
+        {/* 会社の見た目（ブランドキット・ADR-0036・#351）。 */}
+        <BrandKitSection />
         {/* 言葉の読み方（ADR-0037・#350）。ナレーターの声のすぐ下＝声にまつわる設定をひとかたまりにする。 */}
         <ReadingDictSection />
         {/* 持ち込みフォント（ADR-0038・#261）。 */}
