@@ -42,9 +42,20 @@ describe('splitVideoSceneSvg（ADR-0006 下/上分割）', () => {
     expect(r?.aboveSvg).toContain('タイトルです');
   });
 
-  it('常時クレジット（ADR-0003）は上レイヤーのみ＝下には付けない（二重化防止）', () => {
-    const r = splitVideoSceneSvg(layout(), 'slot');
+  it('クレジットは上レイヤーのみ＝下には付けない（二重化防止）', () => {
+    const r = splitVideoSceneSvg(layout(), 'slot', undefined, undefined, undefined, NARRATOR_CREDIT);
     expect(r?.aboveSvg).toContain(NARRATOR_CREDIT);
+    expect(r?.belowSvg).not.toContain(NARRATOR_CREDIT);
+  });
+
+  /**
+   * ⚠️ **渡さなければ描かない**（PR #881 レビュー）。ADR-0003「常時表示」時代の名残で
+   * `NARRATOR_CREDIT` を既定にしていたため、呼ぶ側が ADR-0025 の「非表示」を選んで `undefined` を
+   * 渡しても**ここで復活して焼き込まれて**いた（動画スロットのある場面は必ずこの経路）。
+   */
+  it('クレジットを渡さなければどの層にも描かない（ADR-0025 の「非表示」が効く）', () => {
+    const r = splitVideoSceneSvg(layout(), 'slot');
+    expect(r?.aboveSvg).not.toContain(NARRATOR_CREDIT);
     expect(r?.belowSvg).not.toContain(NARRATOR_CREDIT);
   });
 
@@ -105,7 +116,7 @@ describe('splitVideoSceneSvgMulti（#431 複数動画スロット・zIndex 帯�
   });
 
   it('下層=先頭スロット未満／中間層=スロット間／上層=末尾スロット以上（透過・クレジットは最上のみ）', () => {
-    const r = splitVideoSceneSvgMulti(multiLayout(), ['slotA', 'slotB']);
+    const r = splitVideoSceneSvgMulti(multiLayout(), ['slotA', 'slotB'], undefined, undefined, undefined, NARRATOR_CREDIT);
     // 下層: bg(z0)。中間テキスト(z20)・タイトル(z40) は含まない。
     expect(r?.belowSvg).toContain('fill="#123456"');
     expect(r?.belowSvg).not.toContain('中間テキスト');
@@ -131,6 +142,13 @@ describe('splitVideoSceneSvgMulti（#431 複数動画スロット・zIndex 帯�
     expect(r?.belowSvg).toContain('fill="#123456"'); // z0 下
     expect(r?.aboveSvg).toContain('タイトルです'); // z30 上
     expect(r?.aboveSvg).toContain('同じZ'); // z==slot は上（取りこぼし防止）
+  });
+
+  it('クレジットを渡さなければどの層にも描かない（ADR-0025 の「非表示」が効く）', () => {
+    const r = splitVideoSceneSvgMulti(multiLayout(), ['slotA', 'slotB']);
+    expect(r?.aboveSvg).not.toContain(NARRATOR_CREDIT);
+    expect(r?.midSvgs[0]).not.toContain(NARRATOR_CREDIT);
+    expect(r?.belowSvg).not.toContain(NARRATOR_CREDIT);
   });
 
   it('どれかのスロット id が無ければ null（誤 id/未解決）', () => {

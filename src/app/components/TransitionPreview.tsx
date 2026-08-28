@@ -16,6 +16,7 @@ import { creditForLine, creditForSpeaker } from "../../domain/voice/narratorCred
 import { fontFamilyForId, resolveFontId } from "../../domain/font/fontCatalog";
 import { getVoicevoxSpeaker } from "../../infrastructure/appSettings";
 import { useProjectStore } from "../store/projectStore";
+import { sceneCreditVisibility } from "../../domain/project/sceneCredit";
 import { layerStyles } from "./transitionLayerStyles";
 
 export function TransitionPreview({
@@ -37,6 +38,11 @@ export function TransitionPreview({
   const templateAssetSrcById = useProjectStore((s) => s.templateAssetSrcById);
   const narrationAudioById = useProjectStore((s) => s.narrationAudioById);
   const fontId = useProjectStore((s) => s.meta.videoSettings.fontId);
+  // クレジットの見せ方（ADR-0025・#359）。**下に敷いてある ScenePreview と同じ判定を通す**＝
+  // 通さないと、同じ画面の同じ瞬間に「下（出さない）と上（出す）」が食い違う（PR #881 レビュー）。
+  const creditDisplay = useProjectStore((s) => s.meta.videoSettings.creditDisplay);
+  const projectScenes = useProjectStore((s) => s.scenes);
+  const creditVisible = sceneCreditVisibility(projectScenes, creditDisplay);
   const assetSrc = (id: string | null): string | undefined =>
     id ? (assetSrcById[id] ?? templateAssetSrcById[id]) : undefined;
   const baseCredit = creditForSpeaker(getVoicevoxSpeaker());
@@ -46,11 +52,14 @@ export function TransitionPreview({
   const svgFor = (sc: Scene, tpl: Template, boundaryFrame: BoundaryFrame): string => {
     const applyLineSub = boundaryFrame.subtitleText !== undefined;
     const layoutOpts = applyLineSub ? { subtitleText: boundaryFrame.subtitleText } : undefined;
-    const credit = boundaryFrame.creditLine ? creditForLine(boundaryFrame.creditLine, baseCredit) : baseCredit;
+    const creditText = boundaryFrame.creditLine ? creditForLine(boundaryFrame.creditLine, baseCredit) : baseCredit;
+    // 見本の場面（動画の場面ではない）は index が無い＝従来どおり出す（ScenePreview と同じ規則）。
+    const index = projectScenes.findIndex((s) => s.sceneId === sc.sceneId);
+    const credit = index < 0 || creditVisible[index] ? creditText : undefined;
     return layoutToSvg(layoutScene(sc, tpl, layoutOpts), {
       assetSrc,
       responsive: true,
-      credit,
+      ...(credit != null ? { credit } : {}),
       fontFamily: fontFamilyForId(resolveFontId(sc.fontId, fontId)),
     });
   };

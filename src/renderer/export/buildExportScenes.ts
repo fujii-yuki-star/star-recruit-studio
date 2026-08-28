@@ -13,7 +13,8 @@ import { isSubtitleItem, layoutScene } from '../layout';
 import type { LayoutItem } from '../layout';
 import { layoutToSvg } from '../sceneSvg';
 import { creditForLine, NARRATOR_CREDIT } from '../../domain/voice/narratorCredit';
-import { creditVisibleForScene, type CreditDisplay } from '../../domain/voice/creditDisplay';
+import type { CreditDisplay } from '../../domain/voice/creditDisplay';
+import { sceneCreditVisibility } from '../../domain/project/sceneCredit';
 import { wavDurationSec } from '../../domain/voice/wavDuration';
 import { sliceWav } from '../../domain/voice/wavSlice';
 import { svgToPngDataUrl } from './rasterize';
@@ -234,15 +235,12 @@ export async function buildExportScenes(
   // ⚠️ **見せ方（ADR-0025・#359）は場面ごとに決める**＝静止の場面は1枚の絵なので、途中で消すには
   // その場面だけ毎フレーム描き直すことになる。区間に少しでも重なれば**その場面いっぱい出す**＝
   // ずれる向きを「多め」に固定する（規約で困るのは足りないときだけ＝`13 §4`）。
-  // 場面の開始秒は**表示時間を順に足す**（トランジションの飲み込みは見ない＝多め側で一貫）。
-  const sceneStarts: number[] = [];
-  let acc = 0;
-  for (const sc of scenes) { sceneStarts.push(acc); acc += sc.durationSec; }
-  const totalSec = acc;
-  const creditFor = (index: number): string | undefined =>
-    creditVisibleForScene(opts.creditDisplay, totalSec, sceneStarts[index] ?? 0, scenes[index]?.durationSec ?? 0)
-      ? baseCredit
-      : undefined;
+  //
+  // ⚠️ **判定はプレビューと同じ共有関数**（`sceneCreditVisibility`）＝時間軸の採り方（切り替えの
+  // 重なりを引いた実尺）も含めて1か所にある。見た目が解決できない場面は下で throw する＝ここで
+  // 数える場面と書き出される場面は一致する。
+  const creditVisible = sceneCreditVisibility(scenes, opts.creditDisplay);
+  const creditFor = (index: number): string | undefined => (creditVisible[index] ? baseCredit : undefined);
   const out: ExportSceneData[] = [];
   // 中止要求を各所で確認し、要求時は ExportCancelledError で抜ける（#380・長い準備でも押した中止がすぐ効く）。
   const bail = (): void => {

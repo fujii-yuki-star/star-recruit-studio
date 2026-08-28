@@ -1,7 +1,7 @@
 // クレジットに出す話者の決め方（ADR-0003・ADR-0026②・#631）。
 import { describe, expect, it } from 'vitest';
 import { PROJECT_FORMAT, TIMELINE_CLIP_KIND, TRACK_KIND } from '../enums';
-import { creditSpeakerAt } from './credit';
+import { creditSpeakerAt, creditTextAt } from './credit';
 import type { TimelineClip, TimelineProject } from './types';
 import { TIMELINE_SCHEMA_VERSION } from './types';
 
@@ -97,5 +97,39 @@ describe('creditSpeakerAt', () => {
       tracks: [{ id: 'track_002', kind: TRACK_KIND.audio, hidden: true }],
     });
     expect(creditSpeakerAt(hiddenTrack, 1)).toBeNull();
+  });
+});
+
+/**
+ * ⚠️ **プレビューと書き出しの呼び口を1つにした**（PR #881 レビュー）。前は書き出しだけが
+ * `creditVisibleAt` を通しており、編集画面のプレビューは無条件にクレジットを描いていた。
+ */
+describe('creditTextAt（プレビュー＝書き出しの呼び口）', () => {
+  // 尺 10 秒ぶん（0〜10秒に読み上げが1本）。
+  const d = doc({ clips: [voiceClip('clip_001', { startSec: 0, durationSec: 10 }, 3)] });
+
+  it('「動画には出さない」なら、どの時刻でも文言を返さない', () => {
+    const hidden = doc({ ...d, videoSettings: { ...d.videoSettings, creditDisplay: { mode: 'hidden' } } });
+    expect(creditTextAt(hidden, 0, 'VOICEVOX:ずんだもん')).toBeUndefined();
+    expect(creditTextAt(hidden, 5, 'VOICEVOX:ずんだもん')).toBeUndefined();
+  });
+
+  it('「最初の数秒」なら、その区間の外では返さない', () => {
+    const head = doc({ ...d, videoSettings: { ...d.videoSettings, creditDisplay: { mode: 'head', seconds: 3 } } });
+    expect(creditTextAt(head, 1, 'VOICEVOX:ずんだもん')).toBeDefined();
+    expect(creditTextAt(head, 3, 'VOICEVOX:ずんだもん')).toBeDefined(); // 端は含む
+    expect(creditTextAt(head, 4, 'VOICEVOX:ずんだもん')).toBeUndefined();
+  });
+
+  it('設定していなければ従来どおり返す（既定＝最初と最後）', () => {
+    expect(creditTextAt(d, 0, 'VOICEVOX:ずんだもん')).toBe('VOICEVOX:ずんだもん');
+  });
+
+  it('しゃべっている声のキャラを返す（誰もいなければ受け皿の文言）', () => {
+    const always = doc({ ...d, videoSettings: { ...d.videoSettings, creditDisplay: { mode: 'always' } } });
+    // 話者 3（ずんだもん以外）がしゃべっている時刻は、その話者のクレジット。
+    expect(creditTextAt(always, 1, 'VOICEVOX:ずんだもん')).not.toBe('');
+    // 誰もしゃべっていない時刻でも消さない（受け皿へ落ちる）。
+    expect(creditTextAt(always, 12, 'VOICEVOX:ずんだもん')).toBe('VOICEVOX:ずんだもん');
   });
 });
