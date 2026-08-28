@@ -24,6 +24,23 @@ fn strip_data_url(s: &str) -> &str {
     s
 }
 
+/// 「フォルダの直下に1つ置く名前」として受けてよいか（#260・PR #887 レビュー 🔴）。
+///
+/// ⚠️ **コロンも弾く**＝Windows の**ドライブ相対パス**（`C:evil.txt`）を `PathBuf::join` へ渡すと、
+/// **それまでの中身が丸ごと置き換わる**（prefix はあるが root が無い形の仕様）。
+/// つまり `assets/` の下に置いたつもりが**別のドライブのカレント**に書かれる。
+/// `/`・`\`・`..` だけを見ていると、この形だけがすり抜ける。
+///
+/// ⚠️ **呼ぶ側が正しい名前を作っている、を前提にしない**＝webview から直接 `invoke` されうる
+///（他のコマンドも同じ理由で自前で検査している）。
+pub fn is_safe_single_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains(':')
+        && !name.contains("..")
+}
+
 // ファイル名から区切り・予約文字を除く（空なら "asset"）。
 fn sanitize_file_name(name: &str) -> String {
     let cleaned: String = name
@@ -470,5 +487,33 @@ mod tests {
         assert_eq!(mime_from_path("assets/clip.avi"), "video/x-msvideo");
         assert_eq!(mime_from_path("assets/clip.mkv"), "video/x-matroska");
         assert_eq!(mime_from_path("assets/x.bin"), "application/octet-stream");
+    }
+}
+
+#[cfg(test)]
+mod safe_name_tests {
+    use super::is_safe_single_file_name;
+
+    /// ⚠️ **Windows のドライブ相対パスを弾く**（PR #887 レビュー 🔴）＝`PathBuf::join` へ渡すと
+    /// **それまでの中身が丸ごと置き換わる**（別のドライブのカレントに書かれる）。
+    #[test]
+    fn rejects_drive_relative_path() {
+        assert!(!is_safe_single_file_name("C:evil.txt"));
+        assert!(!is_safe_single_file_name("c:a.png"));
+        assert!(!is_safe_single_file_name("asset:001.png")); // コロンは一律で断る（安全側）
+    }
+
+    #[test]
+    fn rejects_path_pieces() {
+        assert!(!is_safe_single_file_name(""));
+        assert!(!is_safe_single_file_name("a/b.png"));
+        assert!(!is_safe_single_file_name("a\\b.png"));
+        assert!(!is_safe_single_file_name("../x.png"));
+    }
+
+    #[test]
+    fn accepts_plain_names() {
+        assert!(is_safe_single_file_name("asset_001.png"));
+        assert!(is_safe_single_file_name("日本語の名前.mp4"));
     }
 }

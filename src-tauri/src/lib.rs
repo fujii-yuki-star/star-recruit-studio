@@ -220,9 +220,6 @@ fn delete_user_template(app: tauri::AppHandle, template_id: String) -> Result<()
     Ok(())
 }
 
-/// パスの区切り（名前の検査に使う）。
-const SEP: char = '\\';
-
 /// appData/user_assets ディレクトリ（ユーザー素材ライブラリ・ADR-0035・#260）。作成は呼び出し側。
 ///
 /// ⚠️ **テンプレ既定素材（`user_templates/assets`・ADR-0021）とは別に建てる**＝持ち主も寿命も違う。
@@ -353,7 +350,7 @@ fn copy_library_asset_to_project(
     }
     // ⚠️ **保存先の導出は素材の取り込みと同じ関数**（`project_dir`）＝規則を写さない（§2-7）。
     // 名前は「`assets/` の直下に1つ」＝区切りを含む名前は受けない（採番は呼ぶ側＝`asset_NNN`）。
-    if file_name.is_empty() || file_name.contains('/') || file_name.contains(SEP) || file_name.contains("..") {
+    if !crate::assets::is_safe_single_file_name(&file_name) {
         return Err("素材を取り込めませんでした。もう一度お試しください。".to_string());
     }
     let rel = format!("assets/{file_name}");
@@ -408,7 +405,11 @@ fn update_library_asset(
 }
 
 /// `lib_asset_NNN` の形か（`assetLibrary.ts` の `LIBRARY_ASSET_ID_RE` と一致＝パストラバーサル防止も兼ねる）。
-fn is_library_asset_id(id: &str) -> bool {
+///
+/// ⚠️ **同じ規則が2か所にある**（Rust と domain）＝Rust 側はパストラバーサル防止を兼ねるので落とせず、
+/// domain 側は採番に要る。**片方だけ変えると保存できるのに読めない**ので、
+/// `assetLibrary.test.ts` が**同じ入力で同じ答えになる**ことを固定している（`LIBRARY_ASSET_ID_PATTERN`）。
+pub fn is_library_asset_id(id: &str) -> bool {
     let Some(rest) = id.strip_prefix("lib_asset_") else {
         return false;
     };
@@ -482,4 +483,29 @@ pub fn run() {
                 ffmpeg::cancel_running_export();
             }
         });
+}
+
+#[cfg(test)]
+mod library_id_tests {
+    use super::is_library_asset_id;
+
+    /// ⚠️ **domain 側（`LIBRARY_ASSET_ID_RE`）と同じ答えになること**を、同じ入力で固定する
+    /// （PR #887 レビュー 🟡）。入力の一覧は `assetLibrary.ts` の `LIBRARY_ASSET_ID_SAMPLES` と同じ。
+    #[test]
+    fn matches_domain_rule() {
+        let cases: &[(&str, bool)] = &[
+            ("lib_asset_001", true),
+            ("lib_asset_1000", true),
+            ("lib_asset_1", false),
+            ("lib_asset_00a", false),
+            ("xlib_asset_001", false),
+            ("lib_asset_001x", false),
+            ("lib_asset_", false),
+            ("asset_001", false),
+            ("", false),
+        ];
+        for (id, want) in cases {
+            assert_eq!(is_library_asset_id(id), *want, "id={id}");
+        }
+    }
 }

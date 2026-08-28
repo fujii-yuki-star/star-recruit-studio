@@ -6,6 +6,7 @@ import {
   filterLibraryAssets,
   isLibraryAssetId,
   libraryTags,
+  LIBRARY_ASSET_ID_SAMPLES,
   type LibraryAsset,
 } from './assetLibrary';
 import { ASSET_TYPE } from '../enums';
@@ -25,6 +26,30 @@ describe('id の形と採番', () => {
     expect(isLibraryAssetId('lib_asset_1')).toBe(false); // 3桁ゼロ詰め
     expect(isLibraryAssetId('asset_001')).toBe(false);
     expect(isLibraryAssetId(null)).toBe(false);
+  });
+
+  /**
+   * ⚠️ **同じ規則が Rust 側（`is_library_asset_id`）にもある**（PR #887 レビュー 🟡）。
+   * **片方だけ変えると保存できるのに読めない**ので、**同じ入力で同じ答え**になることを両側で固定する
+   *（Rust 側は `library_id_tests::matches_domain_rule`）。ここが変わったら向こうも直す。
+   */
+  it('Rust 側と同じ答えになる入力の一覧（片方だけ変えたら気づける）', () => {
+    const expected: Record<string, boolean> = {
+      lib_asset_001: true,
+      lib_asset_1000: true,
+      lib_asset_1: false,
+      lib_asset_00a: false,
+      xlib_asset_001: false,
+      lib_asset_001x: false,
+      lib_asset_: false,
+      asset_001: false,
+      '': false,
+    };
+    // 一覧が増減したら気づけるよう、件数も固定する。
+    expect(LIBRARY_ASSET_ID_SAMPLES).toHaveLength(Object.keys(expected).length);
+    for (const id of LIBRARY_ASSET_ID_SAMPLES) {
+      expect({ id, ok: isLibraryAssetId(id) }).toEqual({ id, ok: expected[id] });
+    }
   });
 
   /** ⚠️ **消した番号は使い回さない**＝ファイルが残っていた場合に別の素材を指さない。 */
