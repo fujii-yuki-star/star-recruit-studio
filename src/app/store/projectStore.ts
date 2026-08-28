@@ -42,8 +42,8 @@ import {
 } from "../../infrastructure/projectFs";
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { deleteUserFont, importUserFont, listUserFonts, loadUserFonts } from "../../infrastructure/userFontFs";
-import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
-import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
+import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, extractVideoFrame, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
+import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, newFrameAsset, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
 import { probeAndThumbVideo } from "./assetImport";
 import { ASSET_TOO_LARGE_USE_PICKER, assetTooLargeMessage, assetTypeMismatchMessage, clipClampedMessage, importErrorMessage, importPartlyFailedMessage, IMPORT_BUSY_MESSAGE } from "../uiLabels";
@@ -422,6 +422,11 @@ interface ProjectState {
    * 並行に走らせると、2件目以降が `isImporting` ガードに黙って弾かれる（入ったつもりで消える）。
    */
   addAssets: (items: File[] | string[]) => Promise<void>;
+  /**
+   * 動画の**その瞬間**を静止画として切り出し、**普通の写真素材**として足す（#349）。
+   * 成功したら足した素材の id、できなければ `null`（理由は `importError`）。
+   */
+  captureVideoFrame: (videoAssetId: string, atSec: number) => Promise<string | null>;
   clearImportError: () => void;
   /** BGM 取り込みエラー文言を消す（通知を閉じる）。 */
   clearBgmError: () => void;
@@ -1762,6 +1767,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ),
         importError: importErrorMessage(e),
       }));
+    } finally {
+      set({ isImporting: false });
+    }
+  },
+  captureVideoFrame: async (videoAssetId, atSec) => {
+    // 取り込みと同じ門（書き出し中は固定・二重取り込みを避ける）＝同じことをする操作は同じ断り方（ADR-0026②）。
+    if (isExportBusy(get().exportRun.phase)) { set({ importError: EXPORT_BUSY_ASSET_MSG }); return null; }
+    if (get().isImporting) { set({ importError: IMPORT_BUSY_MESSAGE }); return null; }
+    const src = get().assets.find((a) => a.assetId === videoAssetId);
+    const projectId = get().meta.projectId;
+    // ⚠️ **保存前のプロジェクトでは切り出せない**＝元の動画がまだフォルダに無い（§2-5＝次の行動を出す）。
+    if (!src || src.assetType !== ASSET_TYPE.video || !projectId) {
+      set({ importError: "先に動画を取り込んでから、切り出したい時間を選んでください。" });
+      return null;
+    }
+    const { asset, fileName } = newFrameAsset(src.displayName, atSec, get().assets.map((a) => a.assetId));
+    set({ isImporting: true, importError: null });
+    try {
+      const relPath = await extractVideoFrame(projectId, src.filePath, atSec, fileName);
+      // ⚠️ **できてから一覧へ足す**（取り込みの楽観追加と違う）＝切り出しは失敗しうる（尺の外・壊れた動画）ので、
+      // 先に足すと**中身の無い素材**が一瞬見えてから消える。押した結果が出てから増やす。
+      set((s) => ({ assets: [...s.assets, { ...asset, filePath: relPath }], saveStatus: "idle" }));
+      const url = await assetDisplayUrl(projectId, relPath);
+      if (url) set((s) => ({ assetSrcById: { ...s.assetSrcById, [asset.assetId]: url } }));
+      return asset.assetId;
+    } catch (e) {
+      set({ importError: importErrorMessage(e) });
+      return null;
     } finally {
       set({ isImporting: false });
     }
