@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   FONT_CATALOG, DEFAULT_FONT_ID, fontFamilyForId, cssFamilyForId, isKnownFontId, resolveFontId,
-  createUserFontId, isUserFontId, USER_FONT_ID_RE,
+  createUserFontId, isUserFontId, USER_FONT_ID_RE, USER_FONT_ID_SAMPLES,
 } from './fontCatalog';
 
 describe('fontCatalog（同梱フォント選択）', () => {
@@ -33,8 +33,10 @@ describe('fontCatalog（同梱フォント選択）', () => {
       readFileSync(join(process.cwd(), 'docs/yuko_recruit_docs/schemas/project.schema.json'), 'utf8'),
     );
     const re = new RegExp(schema.$defs.FontId.pattern);
-    for (const id of ['user_font_001', 'user_font_1000', 'user_font_1', 'xuser_font_001', 'user_font_00a']) {
-      // 同梱の3つは domain 側では「持ち込み」でないので、そこだけ除いて突き合わせる。
+    // ⚠️ 入力は**Rust 側と同じ一覧**（`USER_FONT_ID_SAMPLES`）を使う＝3か所が同じ答えになることを
+    // 同じ材料で確かめる（α-6 出口監査 🔴5）。同梱の id は schema の `FontId` では通る（enum 側）ので、
+    // ここは**持ち込みの形かどうか**だけを突き合わせる。
+    for (const id of USER_FONT_ID_SAMPLES.filter((x) => !FONT_CATALOG.some((f) => f.id === x))) {
       expect(USER_FONT_ID_RE.test(id)).toBe(re.test(id));
     }
   });

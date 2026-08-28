@@ -42,6 +42,25 @@ export const DEFAULT_FONT_ID: BundledFontId = 'gen-interface-jp';
  */
 export const USER_FONT_ID_RE = /^user_font_[0-9]{3,}$/;
 
+/**
+ * 形の突き合わせに使う入力の一覧（α-6 出口監査 🔴5）。
+ *
+ * ⚠️ **同じ規則が3か所にある**＝`USER_FONT_ID_RE`（domain）・`$defs/FontId` の pattern（schema）・
+ * `is_user_font_id`（Rust・パストラバーサル防止も兼ねる）。**片方だけ変えると保存できるのに読めない**
+ * ので、3つが**同じ入力で同じ答え**になることを両側のテストで固定する（`lib_asset_NNN` と同じ形）。
+ */
+export const USER_FONT_ID_SAMPLES: readonly string[] = [
+  'user_font_001',
+  'user_font_1000',
+  'user_font_1', // 3桁ゼロ詰めでない
+  'user_font_00a', // 数字でない
+  'xuser_font_001', // 前に付いている
+  'user_font_001x', // 後ろに付いている
+  'user_font_', // 番号が無い
+  'gen-interface-jp', // 同梱（持ち込みではない）
+  '', // 空
+];
+
 /** 持ち込みフォントの id か（形だけを見る＝ファイルがあるかは別の話）。 */
 export function isUserFontId(fontId: unknown): fontId is FontId {
   return typeof fontId === 'string' && USER_FONT_ID_RE.test(fontId);
