@@ -43,8 +43,11 @@ export function cssFamilyForId(fontId: string | null | undefined): string {
   return found.cssFamily;
 }
 
-/** 既知の fontId か（検証・移行のフォールバック判定用）。 */
-export function isKnownFontId(fontId: unknown): boolean {
+/**
+ * 既知の fontId か（検証・移行のフォールバック判定用）。
+ * ⚠️ **型を狭める述語にしてある**＝呼ぶ側が `as FontId` を書かずに済む（キャストは検査を素通りさせる）。
+ */
+export function isKnownFontId(fontId: unknown): fontId is FontId {
   return typeof fontId === 'string' && FONT_CATALOG.some((f) => f.id === fontId);
 }
 

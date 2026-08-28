@@ -7,6 +7,7 @@ import { BGM_VOLUME, DEFAULT_CHARACTER_ID, DEFAULT_TARGET_DURATION_SEC, DEFAULT_
 import type { Asset, AssetMetadata, BgmSettings, CompanyInfo, ElementAnimation, GeneralBrief, Keyframe, Narration, Part, Scene, VoiceSettings, Warning } from "../../domain/project/types";
 import { ASSET_TYPE, NARRATION_STATUS, type NarrationStatus, type Orientation, type Purpose, type SceneCategory, type VideoKind } from "../../domain/enums";
 import type { FontId } from "../../domain/font/fontCatalog";
+import { isKnownFontId } from "../../domain/font/fontCatalog";
 import { isExportFinished } from "../../domain/export/exportProgress";
 import type { ExportProgressEvent, ExportRunPhase } from "../../domain/export/exportProgress";
 import type { BundledBgmId } from "../../domain/bgm/bgmCatalog";
@@ -42,6 +43,9 @@ import {
 import type { ProjectSummary } from "../../infrastructure/projectFs";
 import { importAssetFile, importAssetBytes, importAssetByPath, assetDisplayUrl, extractVideoThumbnail, fileToDataUrl, missingAssetFiles, deleteProjectFiles } from "../../infrastructure/assetFs";
 import { assetFromLibrary } from "../../domain/asset/assetLibrary";
+import type { BrandKit } from "../../domain/brand/brandKit";
+import { isNoopBrandApply, planBrandApply } from "../../domain/brand/brandKit";
+import { loadBrandKit, saveBrandKit } from "../../infrastructure/brandKitFs";
 import { copyLibraryAssetToProject, listLibraryAssets } from "../../infrastructure/assetLibraryFs";
 import { changesAssetKind, exceedsInlineAssetLimit, fileExtension, fileNameOf, isListedMaterial, newAssetFrom, UNNAMED_ASSET_NAME } from "../../domain/asset/assetFile";
 import { relinkAsset } from "../../domain/asset/relink";
@@ -399,8 +403,29 @@ interface ProjectState {
    * 空＝全部そろっている（調べていない状態と区別しない＝**無いことを警告に使わない**）。
    */
   missingAssetIds: string[];
+  /**
+   * ブランドキット（ADR-0036・#351）。会社の既定フォント・色・ロゴ。
+   * ⚠️ **動画の中身ではない**（`project.json` には入らない）＝ここに置くのは、
+   * 色を選ぶところなど**あちこちから同じものを見る**ため（渡し歩くと配り忘れる）。
+   */
+  brandKit: BrandKit;
   /** 見つからない素材を調べ直す（#347）。 */
   refreshMissingAssets: () => Promise<void>;
+  /** ブランドキットを読み直す（#351）。 */
+  refreshBrandKit: () => Promise<void>;
+  /** ブランドキットを書き換える（#351）。 */
+  updateBrandKit: (next: BrandKit) => Promise<void>;
+  /**
+   * ブランドキットをいまの動画へ**適用し直す**（#351 決定3）。
+   * ⚠️ **自動では遡及しない**（§2-5）＝この明示操作のときだけ。何がいくつ変わるかは
+   * 押す前に `planBrandApply` で見せる。取り消し（Undo）で戻せる。
+   */
+  applyBrandKit: () => Promise<void>;
+  /**
+   * 新しい動画へブランドキットを焼き込む（#351 決定2＝コピー）。`newBlankProject` から呼ばれる。
+   * ⚠️ **既にある動画には効かない**（そちらは `applyBrandKit` の明示操作だけ）。
+   */
+  applyBrandKitToNew: () => Promise<void>;
   /**
    * 素材を**まとめて**取り込む（#858）。1件ずつ順に `addAsset`/`addAssetByPath` を通す。
    *
@@ -571,6 +596,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isImporting: false,
   importProgress: null,
   missingAssetIds: [],
+  brandKit: {},
   isTemplateMutating: false,
   narrationError: null,
   bgmError: null,
@@ -712,6 +738,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       _generationSeq: s._generationSeq + 1, // in-flight の旧生成を無効化（#402 レビュー）
     }));
   },
+  applyBrandKit: async () => {
+    if (isExportBusy(get().exportRun.phase)) return; // 書き出し中は文書を固定（#570 P1）
+    const kit = get().brandKit;
+    const plan = planBrandApply(kit, {
+      fontId: get().meta.videoSettings.fontId,
+      hasLogoAsset: get().assets.some((a) => a.assetType === ASSET_TYPE.logo),
+    });
+    if (isNoopBrandApply(plan)) return; // 何も変わらないなら履歴を積まない
+    get().pushHistory();
+    // 既知の id だけ入れる（`parseBrandKit` が絞っているが、型でも狭めて `as` を書かない）。
+    if (plan.fontChanges && isKnownFontId(kit.fontId)) {
+      const fontId = kit.fontId;
+      set((st) => ({
+        meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } },
+        saveStatus: "idle",
+      }));
+    }
+    // ⚠️ **ロゴは「足す」だけ**＝既に置いているロゴは利用者が選んだもの（§2-5＝差し替えない）。
+    if (plan.addsLogo && kit.logoLibraryAssetId != null) {
+      await get().importFromLibrary(kit.logoLibraryAssetId);
+    }
+  },
   newBlankProject: () => {
     // 白紙から作る（#393）＝ウィザード/AI を通らず手動で場面を組む。共通リセット（newProject）を流用し、
     // status を "idle" のままにしない（"ready" にする）ことで、各画面マウント時の autoGenerateIfSafe（§2-6）が
@@ -719,6 +767,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (isExportBusy(get().exportRun.phase)) return;
     get().newProject();
     set({ status: "ready" });
+    // ⚠️ **新しい動画には会社の見た目を焼き込む**（ADR-0036 決定2＝コピー）。
+    // フォントは `videoSettings` へ、ロゴは**ライブラリからの取り込みと同じ経路**（`asset_NNN` を採番）。
+    // ⇒ `project.schema` は不変（`lib_asset_NNN` はプロジェクトに現れない）。
+    void get().applyBrandKitToNew();
+  },
+  applyBrandKitToNew: async () => {
+    // ⚠️ **キットは読み直してから使う**＝設定画面で変えた直後でも新しい動画に効く。
+    await get().refreshBrandKit();
+    const kit = get().brandKit;
+    if (isKnownFontId(kit.fontId)) {
+      const fontId = kit.fontId;
+      set((st) => ({ meta: { ...st.meta, videoSettings: { ...st.meta.videoSettings, fontId } } }));
+    }
+    if (kit.logoLibraryAssetId != null) await get().importFromLibrary(kit.logoLibraryAssetId);
   },
   startManualEdit: () => {
     // 生成失敗/中断からの手動作成リカバリ（#393 P1・12 §9.3／15＝失敗時の手動作成は正規リカバリ）。
@@ -1915,6 +1977,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  refreshBrandKit: async () => {
+    set({ brandKit: await loadBrandKit() });
+  },
+  updateBrandKit: async (next) => {
+    set({ brandKit: next });
+    await saveBrandKit(next);
+  },
   refreshMissingAssets: async () => {
     const { meta, assets } = get();
     // ⚠️ **一覧に出るものだけを調べる**（`isListedMaterial`＝§2-7 で規則は1か所）＝音（BGM・読み上げ）は
